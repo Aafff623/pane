@@ -141,6 +141,13 @@ async fn fetch() -> Result<Snapshot, String> {
     let billing: Value = billing_resp.json().await.map_err(|e| format!("billing parse: {e}"))?;
 
     let mut metrics = Vec::new();
+    if let Some(used) = billing
+        .pointer("/config/creditUsagePercent")
+        .and_then(Value::as_f64)
+    {
+        let (resets_at, period_ms) = current_period_window(&billing);
+        metrics.push(Metric::progress("Usage", used, None).with_reset(resets_at, period_ms));
+    }
     collect_billing_metrics(&billing, "", &mut metrics);
     if metrics.is_empty() {
         // Log field names (never values) so unknown shapes are debuggable.
@@ -178,6 +185,27 @@ async fn fetch() -> Result<Snapshot, String> {
     }
 
     Ok(Snapshot::ok(ID, NAME, plan, metrics))
+}
+
+/// The aggregate quota resets at the end of the provider-reported current
+/// period. A missing/invalid start only disables pacing; it does not hide the
+/// explicit reset time.
+fn current_period_window(billing: &Value) -> (Option<i64>, Option<i64>) {
+    let period = billing.pointer("/config/currentPeriod");
+    let parse = |field: &str| {
+        period
+            .and_then(|p| p.get(field))
+            .and_then(Value::as_str)
+            .and_then(|s| DateTime::parse_from_rfc3339(s).ok())
+            .map(|t| t.timestamp_millis())
+    };
+    let start = parse("start");
+    let end = parse("end");
+    let period_ms = match (start, end) {
+        (Some(start), Some(end)) if end > start => Some(end - start),
+        _ => None,
+    };
+    (end, period_ms)
 }
 
 /// Undocumented endpoint — collect anything that looks like a usage percent
