@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+### Changed
+- **OpenCode Go meters say "this PC only"** — Go quotas are counted
+  account-wide on OpenCode's servers, and there is no API to read
+  them; the local meters can't see other devices or other participants
+  on a shared subscription, and now say so instead of "local estimate".
+
 ## 0.4.18 — 2026-07-17
 
 ### Fixed

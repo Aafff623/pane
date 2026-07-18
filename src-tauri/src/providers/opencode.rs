@@ -91,17 +91,17 @@ fn fetch() -> Result<Snapshot, String> {
         Metric::progress(
             "Session",
             session / SESSION_LIMIT * 100.0,
-            Some(format!("${session:.2} of ${SESSION_LIMIT:.0} · local estimate")),
+            Some(format!("${session:.2} of ${SESSION_LIMIT:.0} · this PC only")),
         ),
         Metric::progress(
             "Weekly",
             weekly / WEEKLY_LIMIT * 100.0,
-            Some(format!("${weekly:.2} of ${WEEKLY_LIMIT:.0} · local estimate")),
+            Some(format!("${weekly:.2} of ${WEEKLY_LIMIT:.0} · this PC only")),
         ),
         Metric::progress(
             "Monthly",
             monthly / MONTHLY_LIMIT * 100.0,
-            Some(format!("${monthly:.2} of ${MONTHLY_LIMIT:.0} · local estimate")),
+            Some(format!("${monthly:.2} of ${MONTHLY_LIMIT:.0} · this PC only")),
         ),
     ];
     Ok(Snapshot::ok(ID, NAME, Some("Go".into()), metrics))

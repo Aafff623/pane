@@ -62,8 +62,13 @@ Ground rules that apply to every provider:
 - **Reads:** `%USERPROFILE%\.local\share\opencode\opencode.db` (copied
   before reading) — message costs your own OpenCode history already
   contains.
-- **Calls:** nothing — OpenCode has no public usage API yet; usage is
-  computed locally against documented plan limits.
+- **Calls:** nothing — OpenCode has no public usage API (the gateway
+  exposes only inference routes); usage is computed locally against
+  documented plan limits. **The meters say "this PC only" because they
+  are:** Go quotas are counted account-wide on OpenCode's servers, so
+  usage from your other devices or from other participants on a shared
+  subscription can't appear here. The Console quick-link shows the
+  account-wide truth.
 
 ## GitHub Copilot
 
