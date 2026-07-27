@@ -160,6 +160,7 @@ interface Config {
   pinned: { provider: string; label: string } | null;
   trayProviders: string[];
   pacingAlways: boolean;
+  telemetry: boolean;
   notifyAlmostOut: boolean;
   notifyCuttingClose: boolean;
   notifyWillRunOut: boolean;
@@ -283,6 +284,7 @@ let config: Config = {
   pinned: null,
   trayProviders: [],
   pacingAlways: false,
+  telemetry: true,
   notifyAlmostOut: false,
   notifyCuttingClose: false,
   notifyWillRunOut: false,
@@ -2341,6 +2343,7 @@ async function initSettings(): Promise<void> {
     ["#notify-almost", "notifyAlmostOut"],
     ["#notify-close", "notifyCuttingClose"],
     ["#notify-runout", "notifyWillRunOut"],
+    ["#telemetry", "telemetry"],
   ];
   for (const [selector, key] of notifyToggles) {
     const box = document.querySelector<HTMLInputElement>(selector)!;

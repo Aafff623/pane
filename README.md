@@ -125,10 +125,12 @@ ever guessed for them — a ⚠ on the provider's spend row says the real
 cost runs a little higher than shown.
 
 **5. Staying local.** All of the above happens on your machine. There is
-no account and no usage telemetry — your quotas, spend, and provider data
-never leave your PC. The only thing counted is the update check every few
-hours: anonymous, country-level, no IPs stored — see
-[Privacy](#privacy--security).
+no account, and your quotas, spend, and provider data never leave your
+PC. Pane reports two things about itself, both anonymous: the update
+check (country-level counting, no IPs stored) and an opt-out once-a-day
+statistic (random ID, version, which providers are enabled, provider
+success/failure counts — never amounts or error text) — see
+[Privacy](#privacy--security) for the full contract and the off switch.
 
 ## Providers (17 and counting)
 
@@ -199,9 +201,12 @@ Pane reads credential files. You should not take our word for how it
 treats them — verify it:
 
 - **[docs/privacy.md](docs/privacy.md)** — the complete list of every
-  network call Pane can make. No analytics, no crash reporting, no
-  event tracking; the update check counts anonymous daily installs by
-  country (no IPs stored), and that document explains exactly how.
+  network call Pane can make. No event streams, no session recording,
+  no autocapture; the update check counts anonymous daily installs by
+  country (no IPs stored), and an opt-out daily statistic reports
+  version + enabled providers + refresh success/failure counts under a
+  random ID attached to nothing. That document explains exactly how,
+  field by field.
 - **[docs/providers.md](docs/providers.md)** — per provider: exactly which
   files are read on your PC and exactly which endpoints they're sent to.
 - **[SECURITY.md](SECURITY.md)** — how to report vulnerabilities
