@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.4.24 — 2026-07-27
 
 ### Added
 - **Anonymous usage statistics (opt-out)** — Pane now sends at most two
