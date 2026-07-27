@@ -129,6 +129,7 @@ const CONFIG_KEYS: &[&str] = &[
     "proxy",
     "showTotalSpend",
     "welcomeDismissed",
+    "telemetry",
 ];
 
 #[tauri::command]

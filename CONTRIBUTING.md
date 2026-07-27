@@ -24,14 +24,17 @@ vulnerability reporting).
   that vendor's own API. Every new provider gets a section in
   [docs/providers.md](docs/providers.md) documenting exactly what it
   reads and calls.
-- No telemetry, analytics, or "phone home" code — PRs adding any will be
-  declined regardless of intent. The single, deliberate exception is the
-  update check, which counts anonymous daily installs (country-level, no
-  IPs stored) — documented in full in
-  [docs/privacy.md](docs/privacy.md) ("The update check"). That
-  exception is not a precedent: usage data, quotas, and spend never
-  leave the user's PC, and PRs widening what the update check carries
-  will be declined.
+- No telemetry, analytics SDKs, or "phone home" code — PRs adding any
+  will be declined regardless of intent. Exactly two deliberate,
+  maintainer-shipped exceptions exist, both documented field-by-field in
+  [docs/privacy.md](docs/privacy.md): the update check (anonymous daily
+  install counting, country-level, no IPs stored) and the opt-out daily
+  usage statistic (`src-tauri/src/telemetry.rs` — random install ID,
+  daily rollups, error categories only, hard-stop toggle). Those
+  exceptions are not a precedent: users' quotas, usage amounts, spend,
+  and error text never leave their PC, and PRs widening what either
+  channel carries — or adding any third-party analytics SDK — will be
+  declined.
 - No new dependencies without a stated reason.
 
 ## Building
