@@ -25,9 +25,16 @@ All of this is auditable in the source — links go to the exact code.
   ([`src-tauri/src/providers/`](src-tauri/src/providers/) — one module per
   provider; see [docs/providers.md](docs/providers.md) for the exact files
   read and endpoints called).
-- **Zero telemetry.** There is no analytics SDK, no crash reporter, no
-  "phone home" of any kind. The full list of network calls Pane can make
-  is in [docs/privacy.md](docs/privacy.md).
+- **No analytics SDK, no crash reporter, no event streams.** Pane's
+  entire self-reporting surface is two anonymous channels, both
+  documented field-by-field in [docs/privacy.md](docs/privacy.md): the
+  update check (country-level install counting, no IPs stored) and an
+  opt-out once-a-day usage statistic (random install ID, daily rollups,
+  error categories only — one auditable file,
+  [`src-tauri/src/telemetry.rs`](src-tauri/src/telemetry.rs)). Turning
+  the statistic off is a hard stop and deletes the stored ID. The full
+  list of network calls Pane can make is in
+  [docs/privacy.md](docs/privacy.md).
 - **The local HTTP API is loopback-only and CORS-locked.** It binds
   `127.0.0.1:6736`, serves usage numbers (never credentials), and sends no
   `Access-Control-Allow-Origin` header — so web pages you visit cannot

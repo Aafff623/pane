@@ -89,4 +89,7 @@ Remaining backlog: OpenCode official balance API when it ships,
 long-context pricing tiers.
 
 ## Deliberately not ported
-- Anonymous telemetry — ours stays zero-telemetry.
+- PostHog SDK telemetry — reconsidered 2026-07-27: Pane ships its own
+  minimal, SDK-free, opt-out daily statistic instead
+  (src-tauri/src/telemetry.rs; see docs/privacy.md), keeping the same
+  daily-rollup restraint as upstream without the analytics dependency.
