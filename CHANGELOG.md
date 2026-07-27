@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.4.24 — 2026-07-27
 
 ### Added
 - **Anonymous usage statistics (opt-out)** — Pane now sends at most two
@@ -14,6 +14,8 @@
   counts nothing, writes nothing, and deletes the stored ID. The whole
   implementation is one auditable file (src-tauri/src/telemetry.rs, no
   SDK); docs/privacy.md documents every field.
+
+## 0.4.23 — 2026-07-22
 
 ### Changed
 - **Instant startup for the spend engine** — per-file parse summaries now
