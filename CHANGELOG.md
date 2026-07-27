@@ -1,6 +1,19 @@
 # Changelog
 
-## 0.4.23 — 2026-07-22
+## Unreleased
+
+### Added
+- **Anonymous usage statistics (opt-out)** — Pane now sends at most two
+  events per day: an "alive today" ping (version, enabled providers,
+  starred metrics, appearance settings) and per-provider refresh
+  success/failure counts with error *categories* only — under a random
+  ID derived from nothing, with PostHog person profiles disabled and
+  IP addresses discarded at ingestion. Never sent: usage amounts,
+  spend, model names, keys, paths, or error text. Settings → Privacy →
+  "Share anonymous usage statistics" is a hard stop: turning it off
+  counts nothing, writes nothing, and deletes the stored ID. The whole
+  implementation is one auditable file (src-tauri/src/telemetry.rs, no
+  SDK); docs/privacy.md documents every field.
 
 ### Changed
 - **Instant startup for the spend engine** — per-file parse summaries now

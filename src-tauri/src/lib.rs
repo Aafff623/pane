@@ -3,6 +3,7 @@ mod httpapi;
 mod pricing;
 mod providers;
 mod spend;
+mod telemetry;
 
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -128,6 +129,7 @@ const CONFIG_KEYS: &[&str] = &[
     "proxy",
     "showTotalSpend",
     "welcomeDismissed",
+    "telemetry",
 ];
 
 #[tauri::command]
@@ -553,9 +555,13 @@ async fn fetch_usage(app: tauri::AppHandle) -> Vec<providers::Snapshot> {
         ("codebuff", Box::pin(guarded("codebuff", "Codebuff", providers::codebuff::snapshot()))),
         ("kilo", Box::pin(guarded("kilo", "Kilo", providers::kilo::snapshot()))),
     ];
-    let handles: Vec<_> = futs
+    let futs: Vec<(&str, BoxedSnap)> = futs
         .into_iter()
         .filter(|(id, _)| !disabled.iter().any(|d| d == id))
+        .collect();
+    let enabled_ids: Vec<String> = futs.iter().map(|(id, _)| id.to_string()).collect();
+    let handles: Vec<_> = futs
+        .into_iter()
         .map(|(_, fut)| tauri::async_runtime::spawn(fut))
         .collect();
     let mut all = Vec::with_capacity(handles.len());
@@ -640,6 +646,59 @@ async fn fetch_usage(app: tauri::AppHandle) -> Vec<providers::Snapshot> {
 
     httpapi::publish(&all);
     update_tray(&app, &all, &cfg);
+
+    // Anonymous daily-rollup telemetry (Settings → "Share anonymous usage
+    // statistics"). Fire-and-forget: it must never delay or fail a refresh.
+    {
+        let enabled = cfg.get("telemetry").and_then(Value::as_bool).unwrap_or(true);
+        let starred_metrics: Vec<String> = cfg
+            .pointer("/layout/providers")
+            .and_then(Value::as_object)
+            .map(|provs| {
+                provs
+                    .iter()
+                    .flat_map(|(pid, entry)| {
+                        entry
+                            .get("starred")
+                            .and_then(Value::as_array)
+                            .map(|a| {
+                                a.iter()
+                                    .filter_map(Value::as_str)
+                                    .map(|m| format!("{pid}/{m}"))
+                                    .collect::<Vec<_>>()
+                            })
+                            .unwrap_or_default()
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        let snap = telemetry::ConfigSnapshot {
+            app_version: app.package_info().version.to_string(),
+            enabled_providers: enabled_ids,
+            starred_metrics,
+            appearance: cfg
+                .get("appearance")
+                .and_then(Value::as_str)
+                .unwrap_or("system")
+                .to_string(),
+            density: cfg
+                .get("density")
+                .and_then(Value::as_str)
+                .unwrap_or("regular")
+                .to_string(),
+            refresh_minutes: cfg.get("refreshMinutes").and_then(Value::as_u64).unwrap_or(5),
+        };
+        let outcomes: Vec<telemetry::Outcome> = all
+            .iter()
+            .map(|s| telemetry::Outcome {
+                id: s.id.clone(),
+                status: s.status.clone(),
+                stale: s.stale,
+                error: s.error.clone().or_else(|| s.warning.clone()),
+            })
+            .collect();
+        tauri::async_runtime::spawn(telemetry::record(enabled, snap, outcomes));
+    }
 
     for alert in alerts::evaluate(&all, &cfg) {
         use tauri_plugin_notification::NotificationExt;
