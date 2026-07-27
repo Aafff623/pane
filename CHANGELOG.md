@@ -15,6 +15,8 @@
   implementation is one auditable file (src-tauri/src/telemetry.rs, no
   SDK); docs/privacy.md documents every field.
 
+## 0.4.23 — 2026-07-22
+
 ### Changed
 - **Instant startup for the spend engine** — per-file parse summaries now
   persist across launches (`%APPDATA%\Pane\spend_cache.json`, a few MB at
