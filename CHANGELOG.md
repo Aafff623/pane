@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+- **The telemetry toggle shows its real state** — the "Share anonymous
+  usage statistics" switch rendered as off for installs that had never
+  touched it, while the default-on sender kept reporting. The default is
+  now stated in the config itself, so the switch reads ON unless you
+  actually turned it off (opting out worked correctly all along; only
+  the display was wrong).
+
 ## 0.4.24 — 2026-07-27
 
 ### Added
