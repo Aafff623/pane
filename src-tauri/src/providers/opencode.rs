@@ -11,8 +11,11 @@ const NAME: &str = "OpenCode";
 // spend locally from opencode's own message database — the same data
 // `opencode stats` uses. Swap to the official API once it ships.
 const SESSION_LIMIT: f64 = 12.0; // rolling 5 hours
-const WEEKLY_LIMIT: f64 = 30.0; // rolling 7 days
-const MONTHLY_LIMIT: f64 = 60.0; // per month
+const WEEKLY_LIMIT: f64 = 30.0; // UTC ISO week (Monday start)
+const MONTHLY_LIMIT: f64 = 60.0; // month anchored to earliest-ever Go usage
+
+const SESSION_MS: f64 = 5.0 * 3600e3;
+const WEEK_MS: f64 = 7.0 * 86400e3;
 
 static COPY_COUNTER: AtomicU64 = AtomicU64::new(0);
 
@@ -86,47 +89,159 @@ fn fetch() -> Result<Snapshot, String> {
         ));
     }
 
-    let (session, weekly, monthly) = with_db_copy(sum_windows)?;
+    let w = with_db_copy(|db| {
+        let rows: Vec<(f64, f64)> = read_messages(db)?
+            .into_iter()
+            .filter(|r| r.provider == "opencode-go" && r.cost > 0.0)
+            .map(|r| (r.ts, r.cost))
+            .collect();
+        Ok(go_windows(&rows, chrono::Utc::now().timestamp_millis() as f64))
+    })?;
     let metrics = vec![
         Metric::progress(
             "Session",
-            session / SESSION_LIMIT * 100.0,
-            Some(format!("${session:.2} of ${SESSION_LIMIT:.0} · this PC only")),
-        ),
+            w.session / SESSION_LIMIT * 100.0,
+            Some(format!("${:.2} of ${SESSION_LIMIT:.0} · this PC only", w.session)),
+        )
+        .with_reset(Some(w.session_resets_at), Some(SESSION_MS as i64)),
         Metric::progress(
             "Weekly",
-            weekly / WEEKLY_LIMIT * 100.0,
-            Some(format!("${weekly:.2} of ${WEEKLY_LIMIT:.0} · this PC only")),
-        ),
+            w.weekly / WEEKLY_LIMIT * 100.0,
+            Some(format!("${:.2} of ${WEEKLY_LIMIT:.0} · this PC only", w.weekly)),
+        )
+        .with_reset(Some(w.weekly_resets_at), Some(WEEK_MS as i64)),
         Metric::progress(
             "Monthly",
-            monthly / MONTHLY_LIMIT * 100.0,
-            Some(format!("${monthly:.2} of ${MONTHLY_LIMIT:.0} · this PC only")),
-        ),
+            w.monthly / MONTHLY_LIMIT * 100.0,
+            Some(format!("${:.2} of ${MONTHLY_LIMIT:.0} · this PC only", w.monthly)),
+        )
+        .with_reset(Some(w.monthly_resets_at), Some(w.monthly_period_ms)),
     ];
     Ok(Snapshot::ok(ID, NAME, Some("Go".into()), metrics))
 }
 
-/// Sums the cost of Go-plan assistant messages in the last 5h / 7d / 30d.
-fn sum_windows(db: &Path) -> Result<(f64, f64, f64), String> {
-    let now_ms = chrono::Utc::now().timestamp_millis() as f64;
-    let (mut session, mut weekly, mut monthly) = (0.0, 0.0, 0.0);
-    for row in read_messages(db)? {
-        if row.provider != "opencode-go" || row.cost <= 0.0 {
-            continue;
-        }
-        let (cost, age_ms) = (row.cost, now_ms - row.ts);
-        if age_ms <= 5.0 * 3600e3 {
-            session += cost;
-        }
-        if age_ms <= 7.0 * 86400e3 {
-            weekly += cost;
-        }
-        if age_ms <= 30.0 * 86400e3 {
-            monthly += cost;
-        }
+struct GoWindows {
+    session: f64,
+    session_resets_at: i64,
+    weekly: f64,
+    weekly_resets_at: i64,
+    monthly: f64,
+    monthly_resets_at: i64,
+    monthly_period_ms: i64,
+}
+
+/// Window math ported faithfully from the Mac app's OpenCodeGoWindowMath
+/// (itself ported from the legacy opencode-go plugin): a rolling 5-hour
+/// session whose reset is when the oldest in-window row ages out, a UTC ISO
+/// week (Monday 00:00 start), and a month anchored to the day-of-month and
+/// time-of-day of the earliest-ever local Go usage (calendar month when
+/// there is none). Pure and UTC-based, so it unit-tests deterministically.
+fn go_windows(rows: &[(f64, f64)], now_ms: f64) -> GoWindows {
+    let sum_range = |start: f64, end: f64| -> f64 {
+        let total: f64 =
+            rows.iter().filter(|(ts, _)| *ts >= start && *ts < end).map(|(_, c)| c).sum();
+        // Snap to a hundredth of a cent to shed float-summation noise.
+        (total * 10_000.0).round() / 10_000.0
+    };
+
+    let session_start = now_ms - SESSION_MS;
+    let session = sum_range(session_start, now_ms);
+    let oldest_in_session = rows
+        .iter()
+        .map(|(ts, _)| *ts)
+        .filter(|ts| *ts >= session_start && *ts < now_ms)
+        .fold(f64::INFINITY, f64::min);
+    let session_resets_at =
+        (if oldest_in_session.is_finite() { oldest_in_session } else { now_ms }) + SESSION_MS;
+
+    let week_start = start_of_utc_week(now_ms);
+    let week_end = week_start + WEEK_MS;
+    let weekly = sum_range(week_start, week_end);
+
+    // Monthly cycle anchor: the earliest-ever Go row on this machine.
+    let anchor_ms = rows.iter().map(|(ts, _)| *ts).fold(f64::INFINITY, f64::min);
+    let (month_start, month_end) = anchored_month_bounds(
+        now_ms,
+        if anchor_ms.is_finite() { Some(anchor_ms) } else { None },
+    );
+    let monthly = sum_range(month_start, month_end);
+
+    GoWindows {
+        session,
+        session_resets_at: session_resets_at as i64,
+        weekly,
+        weekly_resets_at: week_end as i64,
+        monthly,
+        monthly_resets_at: month_end as i64,
+        monthly_period_ms: (month_end - month_start) as i64,
     }
-    Ok((session, weekly, monthly))
+}
+
+/// Monday 00:00 UTC of the week containing `now_ms`.
+fn start_of_utc_week(now_ms: f64) -> f64 {
+    use chrono::{Datelike, TimeZone, Utc};
+    let now = Utc.timestamp_millis_opt(now_ms as i64).single().unwrap_or_else(Utc::now);
+    let days_since_monday = now.date_naive().weekday().num_days_from_monday() as i64;
+    let monday = now.date_naive() - chrono::Duration::days(days_since_monday);
+    Utc.from_utc_datetime(&monday.and_hms_opt(0, 0, 0).unwrap()).timestamp_millis() as f64
+}
+
+/// The anchored monthly cycle containing `now_ms`: cycle boundaries fall on
+/// the anchor's day-of-month (clamped to short months) at the anchor's
+/// time-of-day, UTC. With no anchor: the UTC calendar month.
+fn anchored_month_bounds(now_ms: f64, anchor_ms: Option<f64>) -> (f64, f64) {
+    use chrono::{Datelike, TimeZone, Timelike, Utc};
+    let now = Utc.timestamp_millis_opt(now_ms as i64).single().unwrap_or_else(Utc::now);
+    let (mut year, mut month) = (now.year(), now.month());
+
+    let Some(anchor_ms) = anchor_ms else {
+        let start = utc_date(year, month, 1, 0, 0, 0, 0);
+        let (ny, nm) = shift_month(year, month, 1);
+        return (start, utc_date(ny, nm, 1, 0, 0, 0, 0));
+    };
+    let anchor = Utc.timestamp_millis_opt(anchor_ms as i64).single().unwrap_or_else(Utc::now);
+    let anchored_start = |year: i32, month: u32| -> f64 {
+        let day = anchor.day().min(days_in_month(year, month));
+        utc_date(
+            year,
+            month,
+            day,
+            anchor.hour(),
+            anchor.minute(),
+            anchor.second(),
+            anchor.timestamp_subsec_millis(),
+        )
+    };
+
+    let mut start = anchored_start(year, month);
+    // The current month's anchored start can land in the future (anchor
+    // day-of-month later than today) — then the live cycle began last month.
+    if start > now_ms {
+        (year, month) = shift_month(year, month, -1);
+        start = anchored_start(year, month);
+    }
+    let (ny, nm) = shift_month(year, month, 1);
+    (start, anchored_start(ny, nm))
+}
+
+fn shift_month(year: i32, month: u32, delta: i32) -> (i32, u32) {
+    let zero_based = year * 12 + month as i32 - 1 + delta;
+    (zero_based.div_euclid(12), (zero_based.rem_euclid(12) + 1) as u32)
+}
+
+fn days_in_month(year: i32, month: u32) -> u32 {
+    let (ny, nm) = shift_month(year, month, 1);
+    let first = chrono::NaiveDate::from_ymd_opt(year, month, 1).unwrap();
+    let next = chrono::NaiveDate::from_ymd_opt(ny, nm, 1).unwrap();
+    (next - first).num_days() as u32
+}
+
+fn utc_date(year: i32, month: u32, day: u32, h: u32, m: u32, s: u32, ms: u32) -> f64 {
+    use chrono::{TimeZone, Utc};
+    chrono::NaiveDate::from_ymd_opt(year, month, day)
+        .and_then(|d| d.and_hms_milli_opt(h, m, s, ms))
+        .map(|dt| Utc.from_utc_datetime(&dt).timestamp_millis() as f64)
+        .unwrap_or(0.0)
 }
 
 /// (timestamp ms, cost $, tokens, model) of every priced message, any
@@ -196,4 +311,82 @@ fn read_messages(db: &Path) -> Result<Vec<MessageRow>, String> {
         out.push(MessageRow { ts, cost, tokens, provider, model });
     }
     Ok(out)
+}
+
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn ms(iso: &str) -> f64 {
+        chrono::DateTime::parse_from_rfc3339(iso).unwrap().timestamp_millis() as f64
+    }
+
+    #[test]
+    fn session_reset_tracks_the_oldest_in_window_row() {
+        // Two rows inside the rolling 5h window; reset = oldest + 5h.
+        let now = ms("2026-07-28T12:00:00Z");
+        let rows = [(ms("2026-07-28T09:00:00Z"), 2.0), (ms("2026-07-28T11:00:00Z"), 1.0)];
+        let w = go_windows(&rows, now);
+        assert!((w.session - 3.0).abs() < 1e-9);
+        assert_eq!(w.session_resets_at, ms("2026-07-28T14:00:00Z") as i64);
+    }
+
+    #[test]
+    fn empty_session_resets_a_full_window_from_now() {
+        let now = ms("2026-07-28T12:00:00Z");
+        let w = go_windows(&[], now);
+        assert_eq!(w.session, 0.0);
+        assert_eq!(w.session_resets_at, ms("2026-07-28T17:00:00Z") as i64);
+    }
+
+    #[test]
+    fn weekly_is_a_utc_monday_week_not_a_rolling_7d() {
+        // 2026-07-28 is a Tuesday; the week runs Mon Jul 27 -> Mon Aug 3.
+        let now = ms("2026-07-28T12:00:00Z");
+        let rows = [
+            (ms("2026-07-26T23:00:00Z"), 5.0), // Sunday: previous week
+            (ms("2026-07-27T01:00:00Z"), 2.0), // Monday: this week
+        ];
+        let w = go_windows(&rows, now);
+        assert!((w.weekly - 2.0).abs() < 1e-9, "rolling-7d would count 7.0");
+        assert_eq!(w.weekly_resets_at, ms("2026-08-03T00:00:00Z") as i64);
+    }
+
+    #[test]
+    fn monthly_cycle_anchors_to_the_earliest_go_usage() {
+        // First-ever Go usage on the 15th at 08:30 -> cycles run 15th-to-15th.
+        let now = ms("2026-07-28T12:00:00Z");
+        let rows = [
+            (ms("2026-06-15T08:30:00Z"), 1.0), // the anchor itself (old cycle)
+            (ms("2026-07-14T12:00:00Z"), 4.0), // before Jul 15: previous cycle
+            (ms("2026-07-20T12:00:00Z"), 3.0), // current cycle
+        ];
+        let w = go_windows(&rows, now);
+        assert!((w.monthly - 3.0).abs() < 1e-9);
+        assert_eq!(w.monthly_resets_at, ms("2026-08-15T08:30:00Z") as i64);
+    }
+
+    #[test]
+    fn future_anchor_day_rolls_the_cycle_back_a_month() {
+        // Anchor day-of-month (30th) hasn't happened yet in July on the 28th?
+        // It has; use the 30th with "now" on the 28th: cycle began Jun 30.
+        let now = ms("2026-07-28T12:00:00Z");
+        let rows = [(ms("2026-05-30T10:00:00Z"), 1.0)];
+        let w = go_windows(&rows, now);
+        assert_eq!(w.monthly_resets_at, ms("2026-07-30T10:00:00Z") as i64);
+        assert_eq!(
+            w.monthly_period_ms,
+            (ms("2026-07-30T10:00:00Z") - ms("2026-06-30T10:00:00Z")) as i64
+        );
+    }
+
+    #[test]
+    fn anchor_day_31_clamps_in_short_months() {
+        // Anchored to Jan 31; in February the cycle boundary clamps to Feb 28.
+        let now = ms("2026-02-10T12:00:00Z");
+        let rows = [(ms("2026-01-31T09:00:00Z"), 1.0)];
+        let w = go_windows(&rows, now);
+        assert_eq!(w.monthly_resets_at, ms("2026-02-28T09:00:00Z") as i64);
+    }
 }
