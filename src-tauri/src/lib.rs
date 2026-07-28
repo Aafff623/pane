@@ -92,6 +92,11 @@ fn config_with_defaults(mut cfg: Value) -> Value {
     obj.entry("proxy").or_insert(json!({ "enabled": false, "url": "" }));
     obj.entry("showTotalSpend").or_insert(json!(true));
     obj.entry("welcomeDismissed").or_insert(json!(false));
+    // Telemetry defaults ON and must SAY so: without this default the
+    // Settings toggle read `undefined` (rendered off) while the sender's
+    // own default kept transmitting — a switch that displays off while
+    // data flows is the one state a privacy control must never be in.
+    obj.entry("telemetry").or_insert(json!(true));
     cfg
 }
 
