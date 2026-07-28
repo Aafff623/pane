@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.4.25 — 2026-07-28
 
 ### Fixed
 - **The telemetry toggle shows its real state** — the "Share anonymous

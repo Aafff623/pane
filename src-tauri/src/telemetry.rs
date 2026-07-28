@@ -346,12 +346,12 @@ mod tests {
 
     #[test]
     fn raw_error_text_never_appears_in_events() {
-        let secret = "token refresh failed for C:\\Users\\jazii\\.grok\\auth.json";
+        let secret = "token refresh failed for C:\\Users\\alice\\.grok\\auth.json";
         let mut state = State { uuid: "u".into(), ..Default::default() };
         accumulate(&mut state, "2026-07-26", &[outcome("grok", "error", false, Some(secret))]);
         let events = accumulate(&mut state, "2026-07-27", &[]);
         let raw = serde_json::to_string(&events).unwrap();
-        assert!(!raw.contains("jazii"), "raw error text leaked into telemetry");
+        assert!(!raw.contains("alice"), "raw error text leaked into telemetry");
         assert!(raw.contains("errors_auth"), "categorized as auth (expired/credentials)");
     }
 
