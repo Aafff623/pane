@@ -9,6 +9,13 @@
   now stated in the config itself, so the switch reads ON unless you
   actually turned it off (opting out worked correctly all along; only
   the display was wrong).
+- **OpenCode meters use OpenCode's real windows and show resets** — the
+  card summed rolling 7-day and 30-day windows, but OpenCode actually
+  meters a UTC Monday-start week and a monthly cycle anchored to your
+  first-ever Go usage (ported from the Mac app's window math, which
+  ported the official opencode-go plugin). All three meters now carry
+  reset countdowns — the session shows when the oldest in-window spend
+  ages out — so they pace and count down like every other card.
 
 ## 0.4.24 — 2026-07-27
 
