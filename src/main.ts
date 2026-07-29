@@ -1276,11 +1276,14 @@ async function shareCard(id: string): Promise<void> {
     // (cards sit flat on the background there, panels carry the chrome).
     clone.classList.add("snap-card");
     if (id !== "__total__") {
-      const chrome = ".share-btn, .card-caret, .quick-links, .action-row, .tick, .drag-grip";
+      const chrome = ".share-btn, .card-caret, .quick-links, .action-row, .drag-grip";
       const expanded = clone.querySelector(".on-demand") !== null;
+      // The pace tick is visible data (the even-pace marker), so it stays
+      // in the what-you-see expanded copy and goes with the other pace
+      // elements in the compact one.
       clone
         .querySelectorAll(
-          expanded ? chrome : `${chrome}, .metric.trend, [data-spend], .pace-note`
+          expanded ? chrome : `${chrome}, .metric.trend, [data-spend], .pace-note, .tick`
         )
         .forEach((n) => n.remove());
     }
