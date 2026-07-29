@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.4.26 — 2026-07-29
 
 ### Changed
 - **Share cards copy what you see** — the ⧉ copy of an expanded card now
