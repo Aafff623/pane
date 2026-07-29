@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+- **Daily statistics count on the day they belong to** — the once-a-day
+  telemetry gate used the machine's local date while every consumer
+  buckets by UTC day, so an install east of UTC whose app runs at local
+  midnight always landed in the previous UTC day (Pakistan showed "0
+  today" while actively using Pane). The gate is UTC now, matching the
+  dashboard.
+
 ## 0.4.25 — 2026-07-28
 
 ### Fixed

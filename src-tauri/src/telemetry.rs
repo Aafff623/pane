@@ -3,7 +3,7 @@
 //! opt-out). No SDK: events are plain documented POSTs to PostHog's batch
 //! API, so everything that can ever leave the machine is in this one file.
 //!
-//! Exactly two event shapes, at most one of each per provider per local day:
+//! Exactly two event shapes, at most one of each per provider per UTC day:
 //!   - `app_daily_active` — "this install was alive today" + a config
 //!     snapshot (which providers are enabled, which metrics are starred —
 //!     stable IDs only, never free text).
@@ -272,7 +272,12 @@ pub async fn record(enabled: bool, snap: ConfigSnapshot, outcomes: Vec<Outcome>)
         return;
     }
 
-    let today = chrono::Local::now().format("%Y-%m-%d").to_string();
+    // UTC day, not local: event timestamps are UTC and every consumer
+    // (dashboard HogQL, the Redis pipeline) buckets by UTC day. Local-day
+    // gating made a UTC+5 install whose app runs at local midnight fire
+    // its "today" ping at 19:00 UTC — landing in the *previous* UTC day,
+    // so its country read 0 all day on the dashboard.
+    let today = chrono::Utc::now().format("%Y-%m-%d").to_string();
     let mut state = load_state();
 
     let mut batch = accumulate(&mut state, &today, &outcomes);
