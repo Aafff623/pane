@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+### Changed
+- **Share cards copy what you see** — the ⧉ copy of an expanded card now
+  includes everything visible: the usage trend, spend rows, and pace
+  hints. Collapsed cards keep the clean compact composition. Buttons,
+  links, and carets stay out of the image either way.
+
 ### Fixed
 - **Daily statistics count on the day they belong to** — the once-a-day
   telemetry gate used the machine's local date while every consumer

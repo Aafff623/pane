@@ -1267,15 +1267,23 @@ async function shareCard(id: string): Promise<void> {
     clone.style.width = `${W}px`;
     clone.style.boxSizing = "border-box";
 
-    // Shares are the card minus its interactive chrome (trend chart,
-    // spend rows, pace hints, links, carets, grips); .snap-card restores
-    // the card surface the popover no longer draws (cards sit flat on
-    // the background there, panels carry the chrome).
+    // Shares match what's on screen. A collapsed card copies as the
+    // compact composition (meters + resets, no trend/spend/pace). An
+    // expanded card — its On Demand section is open — copies whole:
+    // trend chart, spend rows, and pace hints included. Interactive
+    // chrome (buttons, links, carets, grips) never belongs in an image.
+    // .snap-card restores the card surface the popover no longer draws
+    // (cards sit flat on the background there, panels carry the chrome).
     clone.classList.add("snap-card");
     if (id !== "__total__") {
+      const chrome = ".share-btn, .card-caret, .quick-links, .action-row, .drag-grip";
+      const expanded = clone.querySelector(".on-demand") !== null;
+      // The pace tick is visible data (the even-pace marker), so it stays
+      // in the what-you-see expanded copy and goes with the other pace
+      // elements in the compact one.
       clone
         .querySelectorAll(
-          ".share-btn, .card-caret, .quick-links, .metric.trend, [data-spend], .action-row, .pace-note, .tick, .drag-grip"
+          expanded ? chrome : `${chrome}, .metric.trend, [data-spend], .pace-note, .tick`
         )
         .forEach((n) => n.remove());
     }
