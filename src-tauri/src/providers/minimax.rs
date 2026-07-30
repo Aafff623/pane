@@ -198,9 +198,9 @@ fn agent_db_path() -> Option<std::path::PathBuf> {
     dirs::home_dir().map(|h| h.join(".minimax").join("sqlite.db"))
 }
 
-type FileStamp = (std::time::SystemTime, u64);
+pub(crate) type FileStamp = (std::time::SystemTime, u64);
 
-fn file_stamp(path: &std::path::Path) -> FileStamp {
+pub(crate) fn file_stamp(path: &std::path::Path) -> FileStamp {
     std::fs::metadata(path)
         .map(|m| (m.modified().unwrap_or(std::time::UNIX_EPOCH), m.len()))
         .unwrap_or((std::time::UNIX_EPOCH, 0))
@@ -251,7 +251,7 @@ pub fn collect_usage_events() -> Vec<UsageEvent> {
 
 /// Consistent point-in-time copy via SQLite's backup API (reads through the
 /// WAL with proper locks, retrying briefly while the writer is busy).
-fn snapshot_db(src_path: &std::path::Path, dst_path: &std::path::Path) -> Result<(), String> {
+pub(crate) fn snapshot_db(src_path: &std::path::Path, dst_path: &std::path::Path) -> Result<(), String> {
     let _ = std::fs::remove_file(dst_path);
     let src = rusqlite::Connection::open_with_flags(
         src_path,

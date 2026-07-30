@@ -86,6 +86,127 @@ fn cache() -> &'static Mutex<HashMap<PathBuf, FileEntry>> {
     CACHE.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
+// ---------------------------------------------------------------------------
+// Persistent parse cache. The per-file summaries above are tiny (a few
+// day/model totals per file) but rebuilding them means re-reading every
+// session log ever written — thousands of files, growing forever. Saving
+// the summaries to disk makes a fresh launch re-parse only files that
+// changed since the last run. The cache is only trusted when it was priced
+// under the exact catalog files currently on disk (pricing::catalog_stamp);
+// any mismatch, version bump, or parse error discards it wholesale — a
+// stale-price cache is worse than a slow first scan.
+// ---------------------------------------------------------------------------
+
+const PERSIST_VERSION: u32 = 1;
+
+/// Set when any file was (re)parsed this run — nothing changed, nothing saved.
+static CACHE_DIRTY: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Paths seen by file_days() this collect() run. Entries for paths nobody
+/// scanned anymore (deleted logs, disabled providers) are dropped on save,
+/// so the cache can't grow without bound.
+fn touched() -> &'static Mutex<HashSet<PathBuf>> {
+    static TOUCHED: OnceLock<Mutex<HashSet<PathBuf>>> = OnceLock::new();
+    TOUCHED.get_or_init(|| Mutex::new(HashSet::new()))
+}
+
+#[derive(serde::Serialize, serde::Deserialize)]
+struct PersistEntry {
+    path: PathBuf,
+    /// mtime at full filesystem precision (NTFS is 100ns) — millisecond
+    /// rounding would break the equality check and re-parse everything.
+    mtime_secs: u64,
+    mtime_nanos: u32,
+    size: u64,
+    days: Vec<(i32, String, f64, f64)>,
+    unpriced: Vec<(String, u64)>,
+}
+
+#[derive(serde::Serialize, serde::Deserialize)]
+struct PersistFile {
+    version: u32,
+    pricing_stamp: String,
+    entries: Vec<PersistEntry>,
+}
+
+fn persist_path() -> PathBuf {
+    providers::config_dir().join("spend_cache.json")
+}
+
+/// Loads the persisted cache into the in-memory map, once per app run.
+/// Runs after pricing::ensure_fresh() so the stamp reflects any catalog
+/// download that just happened — in which case it mismatches and the
+/// persisted costs are correctly thrown away.
+fn load_persisted_cache() {
+    static ONCE: OnceLock<()> = OnceLock::new();
+    ONCE.get_or_init(|| {
+        let Ok(raw) = fs::read_to_string(persist_path()) else { return };
+        let Ok(doc) = serde_json::from_str::<PersistFile>(&raw) else { return };
+        if doc.version != PERSIST_VERSION || doc.pricing_stamp != pricing::catalog_stamp() {
+            return;
+        }
+        let gen = pricing::generation();
+        let Ok(mut map) = cache().lock() else { return };
+        for e in doc.entries {
+            let mtime = SystemTime::UNIX_EPOCH
+                + std::time::Duration::new(e.mtime_secs, e.mtime_nanos);
+            let mut data = FileData::default();
+            for (day, model, cost, tokens) in e.days {
+                data.days.insert((day, model), (cost, tokens));
+            }
+            data.unpriced = e.unpriced.into_iter().collect();
+            map.insert(e.path, FileEntry { mtime, size: e.size, gen, data });
+        }
+    });
+}
+
+/// Writes the cache back to disk (atomically, via temp + rename) when this
+/// run parsed anything new. Only entries that are current — touched this
+/// run and priced under the live catalog generation — are persisted.
+fn save_persisted_cache() {
+    let dirty = CACHE_DIRTY.swap(false, std::sync::atomic::Ordering::Relaxed);
+    let path = persist_path();
+    if !dirty && path.exists() {
+        return;
+    }
+    let gen = pricing::generation();
+    let Ok(touched_set) = touched().lock() else { return };
+    let Ok(map) = cache().lock() else { return };
+    let entries: Vec<PersistEntry> = map
+        .iter()
+        .filter(|(p, e)| e.gen == gen && touched_set.contains(*p))
+        .map(|(p, e)| {
+            let d = e
+                .mtime
+                .duration_since(SystemTime::UNIX_EPOCH)
+                .unwrap_or_default();
+            PersistEntry {
+                path: p.clone(),
+                mtime_secs: d.as_secs(),
+                mtime_nanos: d.subsec_nanos(),
+                size: e.size,
+                days: e
+                    .data
+                    .days
+                    .iter()
+                    .map(|((day, model), (cost, tokens))| (*day, model.clone(), *cost, *tokens))
+                    .collect(),
+                unpriced: e.data.unpriced.iter().map(|(m, c)| (m.clone(), *c)).collect(),
+            }
+        })
+        .collect();
+    let doc = PersistFile {
+        version: PERSIST_VERSION,
+        pricing_stamp: pricing::catalog_stamp(),
+        entries,
+    };
+    let Ok(json) = serde_json::to_string(&doc) else { return };
+    let tmp = path.with_extension("json.tmp");
+    if fs::write(&tmp, json).is_ok() {
+        let _ = fs::rename(&tmp, &path);
+    }
+}
+
 fn day_of_utc(ts: DateTime<Utc>) -> i32 {
     ts.with_timezone(&Local).date_naive().num_days_from_ce()
 }
@@ -195,6 +316,10 @@ fn build_spend(id: &'static str, name: &'static str, data: FileData) -> Provider
 }
 
 /// All .jsonl files under `root` modified in the last 31 days.
+/// Symlinks and junctions are followed throughout: `is_dir()` resolves
+/// links when recursing, and the recency check below reads the *target*
+/// file's mtime — a link's own (usually ancient) timestamp must not hide
+/// logs a user relocated to another drive.
 fn recent_jsonl_files(root: &Path, out: &mut Vec<PathBuf>) {
     let Ok(entries) = fs::read_dir(root) else { return };
     let cutoff = SystemTime::now() - Duration::from_secs(31 * 86_400);
@@ -203,7 +328,7 @@ fn recent_jsonl_files(root: &Path, out: &mut Vec<PathBuf>) {
         if path.is_dir() {
             recent_jsonl_files(&path, out);
         } else if path.extension().is_some_and(|e| e == "jsonl") {
-            if let Ok(meta) = entry.metadata() {
+            if let Ok(meta) = fs::metadata(&path) {
                 if meta.modified().map(|m| m >= cutoff).unwrap_or(true) {
                     out.push(path);
                 }
@@ -218,6 +343,9 @@ fn file_days(path: &Path, parse: &mut dyn FnMut(&str, &mut FileData)) -> FileDat
     let mtime = meta.modified().unwrap_or(SystemTime::UNIX_EPOCH);
     let size = meta.len();
 
+    if let Ok(mut t) = touched().lock() {
+        t.insert(path.to_path_buf());
+    }
     let gen = pricing::generation();
     if let Ok(map) = cache().lock() {
         if let Some(entry) = map.get(path) {
@@ -237,6 +365,7 @@ fn file_days(path: &Path, parse: &mut dyn FnMut(&str, &mut FileData)) -> FileDat
     if let Ok(mut map) = cache().lock() {
         map.insert(path.to_path_buf(), FileEntry { mtime, size, gen, data: data.clone() });
     }
+    CACHE_DIRTY.store(true, std::sync::atomic::Ordering::Relaxed);
     data
 }
 
@@ -556,6 +685,65 @@ fn minimax(extra: FileData) -> ProviderSpend {
         }
     }
     build_spend("minimax", "MiniMax", data)
+}
+
+/// Which spend slice a Hermes row belongs to. Hermes (Nous Research's
+/// desktop agent) routes chats through whichever backend the user connected,
+/// so its ledger rows are filed under the provider that actually billed
+/// them; routes Pane has no slice for stay under Hermes's own name.
+fn hermes_bucket(billing_provider: &str) -> (&'static str, &'static str) {
+    let lower = billing_provider.to_lowercase();
+    if lower.contains("minimax") {
+        ("minimax", "MiniMax")
+    } else if lower.contains("openrouter") {
+        ("openrouter", "OpenRouter")
+    } else {
+        ("hermes", "Hermes")
+    }
+}
+
+/// Hermes spend, grouped per target slice. Rows are cumulative per
+/// (session, model, route) — the app updates them in place while a session
+/// runs — so every refresh rebuilds from the full table instead of
+/// accumulating deltas. The whole session lands on its last-active day.
+fn hermes() -> Vec<(&'static str, &'static str, FileData)> {
+    let mut buckets: Vec<(&'static str, &'static str, FileData)> = Vec::new();
+    for ev in providers::hermes::collect_usage_events() {
+        let Some(ts) = DateTime::from_timestamp_millis(ev.ts_ms) else { continue };
+        let tokens = ev.input + ev.output + ev.reasoning + ev.cache_read + ev.cache_write;
+        if tokens <= 0.0 && ev.cost_usd <= 0.0 {
+            continue;
+        }
+        let (id, name) = hermes_bucket(&ev.billing_provider);
+        let data = match buckets.iter_mut().find(|(bid, _, _)| *bid == id) {
+            Some((_, _, data)) => data,
+            None => {
+                buckets.push((id, name, FileData::default()));
+                &mut buckets.last_mut().unwrap().2
+            }
+        };
+        if ev.cost_usd > 0.0 {
+            add_event(data, ts, &ev.model, ev.cost_usd, tokens);
+            continue;
+        }
+        match pricing::lookup(&ev.model) {
+            Some(p) => {
+                let u = pricing::Usage {
+                    input: ev.input,
+                    output: ev.output + ev.reasoning,
+                    cache_read: ev.cache_read,
+                    cache_write_5m: ev.cache_write,
+                    cache_write_1h: 0.0,
+                };
+                // Rows aggregate a whole session's requests, so no single
+                // request can be proven long-context — stay on base rates
+                // (same reasoning as the Cursor CSV scanner).
+                add_event(data, ts, &ev.model, pricing::request_cost(&p, &u, false), tokens);
+            }
+            None => note_unpriced(data, ts, &ev.model, tokens),
+        }
+    }
+    buckets
 }
 
 /// One `token_count` usage object, tolerating the older field spellings
@@ -1231,6 +1419,50 @@ mod tests {
         d.days.values().map(|v| v.0).sum()
     }
 
+    // ---- Persistent cache: serialization roundtrip -----------------------
+
+    #[test]
+    fn persist_file_roundtrips_losslessly() {
+        let doc = PersistFile {
+            version: PERSIST_VERSION,
+            pricing_stamp: "litellm:1:2|modelsdev:3:4|supplement:5:6".into(),
+            entries: vec![PersistEntry {
+                path: PathBuf::from(r"C:\logs\session.jsonl"),
+                mtime_secs: 1_784_600_000,
+                mtime_nanos: 123_456_700, // NTFS 100ns precision must survive
+                size: 4096,
+                days: vec![(739_000, "claude-fable-5".into(), 1.25, 40_000.0)],
+                unpriced: vec![("mystery-model".into(), 3)],
+            }],
+        };
+        let json = serde_json::to_string(&doc).unwrap();
+        let back: PersistFile = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.version, doc.version);
+        assert_eq!(back.pricing_stamp, doc.pricing_stamp);
+        let (a, b) = (&back.entries[0], &doc.entries[0]);
+        assert_eq!(a.path, b.path);
+        assert_eq!((a.mtime_secs, a.mtime_nanos, a.size), (b.mtime_secs, b.mtime_nanos, b.size));
+        assert_eq!(a.days, b.days);
+        assert_eq!(a.unpriced, b.unpriced);
+    }
+
+    #[test]
+    fn corrupt_persist_file_is_rejected_not_panicked() {
+        assert!(serde_json::from_str::<PersistFile>("{not json").is_err());
+        assert!(serde_json::from_str::<PersistFile>(r#"{"version":1}"#).is_err());
+    }
+
+    // ---- Hermes: billing-route buckets -----------------------------------
+
+    #[test]
+    fn hermes_routes_land_in_the_right_slice() {
+        assert_eq!(hermes_bucket("minimax-oauth").0, "minimax");
+        assert_eq!(hermes_bucket("MiniMax").0, "minimax");
+        assert_eq!(hermes_bucket("openrouter").0, "openrouter");
+        assert_eq!(hermes_bucket("nous-api").0, "hermes");
+        assert_eq!(hermes_bucket("").0, "hermes");
+    }
+
     // ---- Codex: child-session replay gate --------------------------------
 
     #[test]
@@ -1569,7 +1801,21 @@ fn split_csv_row(line: &str) -> Vec<String> {
 
 pub fn collect(cursor_csv: Option<String>) -> Vec<ProviderSpend> {
     pricing::ensure_fresh();
-    let (claude_sp, minimax_extra) = claude();
+    load_persisted_cache();
+    if let Ok(mut t) = touched().lock() {
+        t.clear();
+    }
+    let (claude_sp, mut minimax_extra) = claude();
+    // Hermes rows going to an existing slice merge into it (MiniMax via the
+    // extra-data path); the rest become their own spend entries.
+    let mut hermes_rest = Vec::new();
+    for (id, name, data) in hermes() {
+        if id == "minimax" {
+            merge_data(&mut minimax_extra, data);
+        } else {
+            hermes_rest.push(build_spend(id, name, data));
+        }
+    }
     let mut list = vec![
         claude_sp,
         codex(),
@@ -1579,6 +1825,7 @@ pub fn collect(cursor_csv: Option<String>) -> Vec<ProviderSpend> {
         minimax(minimax_extra),
         moonshot(),
     ];
+    list.extend(hermes_rest);
     if let Some(csv) = cursor_csv {
         list.push(cursor_from_csv(&csv));
     }
@@ -1587,5 +1834,6 @@ pub fn collect(cursor_csv: Option<String>) -> Vec<ProviderSpend> {
     if list.iter().any(|sp| sp.unpriced > 0) {
         pricing::note_unpriced();
     }
+    save_persisted_cache();
     list.into_iter().filter(ProviderSpend::has_data).collect()
 }

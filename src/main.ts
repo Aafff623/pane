@@ -96,7 +96,6 @@ const RELOGIN: Record<string, string> = {
   cursor: "open Cursor and sign in again",
   devin: "run `devin` in a terminal and sign in",
   opencode: "run `opencode auth login` in a terminal",
-  kiro: "open Kiro and sign in again",
   antigravity: "open Antigravity and sign in again",
   ollama: "make sure Ollama is running",
 };
@@ -161,6 +160,7 @@ interface Config {
   pinned: { provider: string; label: string } | null;
   trayProviders: string[];
   pacingAlways: boolean;
+  telemetry: boolean;
   notifyAlmostOut: boolean;
   notifyCuttingClose: boolean;
   notifyWillRunOut: boolean;
@@ -197,7 +197,6 @@ const ALL_PROVIDERS: [string, string][] = [
   ["ollama", "Ollama"],
   ["codebuff", "Codebuff"],
   ["kilo", "Kilo"],
-  ["kiro", "Kiro"],
 ];
 
 // Same quick links the Mac app ships (status pages + vendor dashboards).
@@ -242,7 +241,6 @@ const PROVIDER_LINKS: Record<string, { label: string; url: string }[]> = {
   ollama: [{ label: "Library", url: "https://ollama.com/library" }],
   codebuff: [{ label: "Dashboard", url: "https://www.codebuff.com/profile" }],
   kilo: [{ label: "Dashboard", url: "https://app.kilo.ai/" }],
-  kiro: [{ label: "Dashboard", url: "https://kiro.dev/" }],
 };
 
 // Brand palette for the Total Spend ring (Mac parity); unknown providers
@@ -259,6 +257,7 @@ const SPEND_COLORS: Record<string, string> = {
   devin: "#38bdf8",
   cursor: "var(--spend-cursor)", // brand black, theme-flipped in CSS
   moonshot: "#e0b354", // moon gold
+  hermes: "#c2a878", // Nous tan
   __others__: "#8b8b94", // the folded small-spenders wedge
 };
 
@@ -285,6 +284,7 @@ let config: Config = {
   pinned: null,
   trayProviders: [],
   pacingAlways: false,
+  telemetry: true,
   notifyAlmostOut: false,
   notifyCuttingClose: false,
   notifyWillRunOut: false,
@@ -833,10 +833,9 @@ type DonutEntry = {
 const OTHERS_ID = "__others__";
 /// Providers under this many dollars (in the visible window) fold into
 /// one "Others" wedge; hovering it lists who spent what. The bar scales
-/// with the period — $1 barely registers in a day but $10 would swallow
-/// most of a quiet day's ring, while a month works the other way.
+/// with the period — a day's ring earns a slice at $5, a month's at $10.
 function othersFoldUsd(tab: SpendTab): number {
-  return tab === "last30" ? 5 : 1;
+  return tab === "last30" ? 10 : 5;
 }
 
 function donutEntries(tab: SpendTab): DonutEntry[] {
@@ -855,12 +854,13 @@ function donutEntries(tab: SpendTab): DonutEntry[] {
     )
     .sort((a, b) => spendVal(b.w) - spendVal(a.w));
 
-  // Small spenders fold into a single "Others" wedge — but only when
-  // there are at least two of them (a group of one is just a rename) and
-  // at least one named provider remains (an all-Others ring says nothing).
+  // Small spenders fold into a single "Others" wedge — even a lone one,
+  // so under-threshold providers never claim their own legend row. Only
+  // exception: at least one named provider must remain, because an
+  // all-Others ring says nothing.
   const limit = othersFoldUsd(tab);
   const small = all.filter((e) => e.w.cost < limit);
-  if (small.length < 2 || small.length === all.length) return all;
+  if (small.length === 0 || small.length === all.length) return all;
 
   const others: DonutEntry = {
     s: {
@@ -1267,15 +1267,23 @@ async function shareCard(id: string): Promise<void> {
     clone.style.width = `${W}px`;
     clone.style.boxSizing = "border-box";
 
-    // Shares are the card minus its interactive chrome (trend chart,
-    // spend rows, pace hints, links, carets, grips); .snap-card restores
-    // the card surface the popover no longer draws (cards sit flat on
-    // the background there, panels carry the chrome).
+    // Shares match what's on screen. A collapsed card copies as the
+    // compact composition (meters + resets, no trend/spend/pace). An
+    // expanded card — its On Demand section is open — copies whole:
+    // trend chart, spend rows, and pace hints included. Interactive
+    // chrome (buttons, links, carets, grips) never belongs in an image.
+    // .snap-card restores the card surface the popover no longer draws
+    // (cards sit flat on the background there, panels carry the chrome).
     clone.classList.add("snap-card");
     if (id !== "__total__") {
+      const chrome = ".share-btn, .card-caret, .quick-links, .action-row, .drag-grip";
+      const expanded = clone.querySelector(".on-demand") !== null;
+      // The pace tick is visible data (the even-pace marker), so it stays
+      // in the what-you-see expanded copy and goes with the other pace
+      // elements in the compact one.
       clone
         .querySelectorAll(
-          ".share-btn, .card-caret, .quick-links, .metric.trend, [data-spend], .action-row, .pace-note, .tick, .drag-grip"
+          expanded ? chrome : `${chrome}, .metric.trend, [data-spend], .pace-note, .tick`
         )
         .forEach((n) => n.remove());
     }
@@ -2343,6 +2351,7 @@ async function initSettings(): Promise<void> {
     ["#notify-almost", "notifyAlmostOut"],
     ["#notify-close", "notifyCuttingClose"],
     ["#notify-runout", "notifyWillRunOut"],
+    ["#telemetry", "telemetry"],
   ];
   for (const [selector, key] of notifyToggles) {
     const box = document.querySelector<HTMLInputElement>(selector)!;

@@ -141,10 +141,7 @@ async fn fetch() -> Result<Snapshot, String> {
     let billing: Value = billing_resp.json().await.map_err(|e| format!("billing parse: {e}"))?;
 
     let mut metrics = Vec::new();
-    if let Some(used) = billing
-        .pointer("/config/creditUsagePercent")
-        .and_then(Value::as_f64)
-    {
+    if let Some(used) = credit_usage_percent(&billing) {
         let (resets_at, period_ms) = current_period_window(&billing);
         metrics.push(Metric::progress("Usage", used, None).with_reset(resets_at, period_ms));
     }
@@ -185,6 +182,17 @@ async fn fetch() -> Result<Snapshot, String> {
     }
 
     Ok(Snapshot::ok(ID, NAME, plan, metrics))
+}
+
+/// Usage percent for the current billing window. proto3-as-JSON omits
+/// zero-valued fields, so a fresh window reports 0% used by *omitting*
+/// creditUsagePercent entirely — with a currentPeriod present, that absence
+/// is an explicit "nothing used yet", not an unknown response shape.
+fn credit_usage_percent(billing: &Value) -> Option<f64> {
+    billing
+        .pointer("/config/creditUsagePercent")
+        .and_then(Value::as_f64)
+        .or_else(|| billing.pointer("/config/currentPeriod").map(|_| 0.0))
 }
 
 /// The aggregate quota resets at the end of the provider-reported current
@@ -241,5 +249,56 @@ fn collect_billing_metrics(node: &Value, parent_key: &str, metrics: &mut Vec<Met
             }
         }
         _ => {}
+    }
+}
+
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The exact shape xAI returns right after a weekly rollover (captured
+    /// live 2026-07-19): zero usage means creditUsagePercent is omitted.
+    fn rollover_billing() -> Value {
+        serde_json::json!({
+            "config": {
+                "currentPeriod": {
+                    "type": "USAGE_PERIOD_TYPE_WEEKLY",
+                    "start": "2026-07-19T11:17:21.044357+00:00",
+                    "end": "2026-07-26T11:17:21.044357+00:00"
+                },
+                "onDemandCap": { "val": 0 },
+                "onDemandUsed": { "val": 0 },
+                "isUnifiedBillingUser": true,
+                "prepaidBalance": { "val": 0 },
+                "billingPeriodStart": "2026-07-19T11:17:21.044357+00:00",
+                "billingPeriodEnd": "2026-07-26T11:17:21.044357+00:00"
+            }
+        })
+    }
+
+    #[test]
+    fn omitted_percent_with_period_is_zero_usage() {
+        assert_eq!(credit_usage_percent(&rollover_billing()), Some(0.0));
+    }
+
+    #[test]
+    fn explicit_percent_wins() {
+        let mut billing = rollover_billing();
+        billing["config"]["creditUsagePercent"] = Value::from(37.5);
+        assert_eq!(credit_usage_percent(&billing), Some(37.5));
+    }
+
+    #[test]
+    fn no_config_stays_unknown_shape() {
+        assert_eq!(credit_usage_percent(&serde_json::json!({})), None);
+        assert_eq!(credit_usage_percent(&serde_json::json!({ "config": {} })), None);
+    }
+
+    #[test]
+    fn rollover_still_reports_reset_window() {
+        let (resets_at, period_ms) = current_period_window(&rollover_billing());
+        assert!(resets_at.is_some());
+        assert_eq!(period_ms, Some(7 * 24 * 3_600_000));
     }
 }

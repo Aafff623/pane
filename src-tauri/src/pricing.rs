@@ -155,6 +155,32 @@ pub fn generation() -> u64 {
     GENERATION.load(std::sync::atomic::Ordering::Relaxed)
 }
 
+/// Stable fingerprint of the on-disk catalog files. The persistent spend
+/// cache stores costs priced under a specific catalog set; when any catalog
+/// file changes (a refresh rewrote it), the stamp changes and the whole
+/// persisted cache is discarded rather than served with stale prices.
+pub fn catalog_stamp() -> String {
+    SOURCES
+        .iter()
+        .map(|(source, _)| {
+            let path = dir().join(format!("{source}.json"));
+            match std::fs::metadata(&path) {
+                Ok(m) => {
+                    let ms = m
+                        .modified()
+                        .ok()
+                        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                        .map(|d| d.as_millis())
+                        .unwrap_or(0);
+                    format!("{source}:{ms}:{}", m.len())
+                }
+                Err(_) => format!("{source}:absent"),
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("|")
+}
+
 fn dir() -> PathBuf {
     providers::config_dir().join("pricing")
 }
@@ -198,24 +224,38 @@ fn parse_litellm(doc: &Value) -> HashMap<String, Price> {
 }
 
 fn parse_modelsdev(doc: &Value) -> HashMap<String, Price> {
-    let mut out = HashMap::new();
-    let Some(providers) = doc.as_object() else { return out };
+    // models.dev repeats ids across resellers with varying completeness —
+    // the entry documenting the most cache fields wins (ties: first seen),
+    // so a reseller stub with no cache rates can't default a $0.30 cache
+    // hit to the $3.00 input price.
+    let mut out: HashMap<String, (Price, u8)> = HashMap::new();
+    let Some(providers) = doc.as_object() else { return HashMap::new() };
     for provider in providers.values() {
         let Some(models) = provider.get("models").and_then(Value::as_object) else { continue };
         for (id, m) in models {
             let Some(cost) = m.get("cost") else { continue };
             let get = |key: &str| cost.get(key).and_then(Value::as_f64);
             let (Some(input), Some(output)) = (get("input"), get("output")) else { continue };
-            // First provider wins; models.dev repeats ids across resellers.
-            out.entry(id.clone()).or_insert(Price::flat(
+            let score =
+                get("cache_read").is_some() as u8 + get("cache_write").is_some() as u8;
+            let price = Price::flat(
                 input,
                 output,
                 get("cache_read").unwrap_or(input),
                 get("cache_write").unwrap_or(input),
-            ));
+            );
+            match out.entry(id.clone()) {
+                std::collections::hash_map::Entry::Vacant(e) => {
+                    e.insert((price, score));
+                }
+                std::collections::hash_map::Entry::Occupied(mut e) if score > e.get().1 => {
+                    e.insert((price, score));
+                }
+                _ => {}
+            }
         }
     }
-    out
+    out.into_iter().map(|(k, (p, _))| (k, p)).collect()
 }
 
 fn apply_supplement(store: &mut Store, doc: &Value) {
@@ -521,6 +561,22 @@ mod tests {
 
     fn usage(input: f64, output: f64, cache_read: f64, w5m: f64, w1h: f64) -> Usage {
         Usage { input, output, cache_read, cache_write_5m: w5m, cache_write_1h: w1h }
+    }
+
+    #[test]
+    fn modelsdev_prefers_the_most_complete_reseller_entry() {
+        // A stub reseller listing kimi-k3 without cache rates must not
+        // shadow a complete entry (alphabetical order made "aaa" win before,
+        // silently pricing $0.30 cache hits at the $3.00 input rate).
+        let doc = serde_json::json!({
+            "aaa-stub": { "models": { "kimi-k3": { "cost": { "input": 3.0, "output": 15.0 } } } },
+            "moonshotai": { "models": { "kimi-k3": {
+                "cost": { "input": 3.0, "output": 15.0, "cache_read": 0.3, "cache_write": 3.0 }
+            } } },
+        });
+        let map = super::parse_modelsdev(&doc);
+        let p = map.get("kimi-k3").expect("kimi-k3 parsed");
+        assert_eq!((p.input, p.output, p.cache_read, p.cache_write), (3.0, 15.0, 0.3, 3.0));
     }
 
     #[test]

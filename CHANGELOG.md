@@ -1,6 +1,122 @@
 # Changelog
 
-## Unreleased
+## 0.4.26 — 2026-07-29
+
+### Changed
+- **Share cards copy what you see** — the ⧉ copy of an expanded card now
+  includes everything visible: the usage trend, spend rows, and pace
+  hints. Collapsed cards keep the clean compact composition. Buttons,
+  links, and carets stay out of the image either way.
+
+### Fixed
+- **Daily statistics count on the day they belong to** — the once-a-day
+  telemetry gate used the machine's local date while every consumer
+  buckets by UTC day, so an install east of UTC whose app runs at local
+  midnight always landed in the previous UTC day (Pakistan showed "0
+  today" while actively using Pane). The gate is UTC now, matching the
+  dashboard.
+
+## 0.4.25 — 2026-07-28
+
+### Fixed
+- **The telemetry toggle shows its real state** — the "Share anonymous
+  usage statistics" switch rendered as off for installs that had never
+  touched it, while the default-on sender kept reporting. The default is
+  now stated in the config itself, so the switch reads ON unless you
+  actually turned it off (opting out worked correctly all along; only
+  the display was wrong).
+- **OpenCode meters use OpenCode's real windows and show resets** — the
+  card summed rolling 7-day and 30-day windows, but OpenCode actually
+  meters a UTC Monday-start week and a monthly cycle anchored to your
+  first-ever Go usage (ported from the Mac app's window math, which
+  ported the official opencode-go plugin). All three meters now carry
+  reset countdowns — the session shows when the oldest in-window spend
+  ages out — so they pace and count down like every other card.
+
+## 0.4.24 — 2026-07-27
+
+### Added
+- **Anonymous usage statistics (opt-out)** — Pane now sends at most two
+  events per day: an "alive today" ping (version, enabled providers,
+  starred metrics, appearance settings) and per-provider refresh
+  success/failure counts with error *categories* only — under a random
+  ID derived from nothing, with PostHog person profiles disabled and
+  IP addresses discarded at ingestion. Never sent: usage amounts,
+  spend, model names, keys, paths, or error text. Settings → Privacy →
+  "Share anonymous usage statistics" is a hard stop: turning it off
+  counts nothing, writes nothing, and deletes the stored ID. The whole
+  implementation is one auditable file (src-tauri/src/telemetry.rs, no
+  SDK); docs/privacy.md documents every field.
+
+## 0.4.23 — 2026-07-22
+
+### Changed
+- **Instant startup for the spend engine** — per-file parse summaries now
+  persist across launches (`%APPDATA%\Pane\spend_cache.json`, a few MB at
+  most), so a fresh start re-parses only logs that changed instead of
+  re-reading every session file ever written. The cache is discarded
+  whenever the pricing catalogs update, so costs are never served stale.
+
+### Added
+- **Hermes desktop spend** — Pane now reads the local usage ledger of
+  Nous Research's Hermes app (`%LOCALAPPDATA%\hermes\state.db`, this PC
+  only, nothing sent anywhere). Each session is filed under the backend
+  that actually billed it: MiniMax-routed chats merge into the MiniMax
+  spend slice, OpenRouter-routed into OpenRouter, and anything else shows
+  as a Hermes slice.
+
+### Fixed
+- **Symlinked session logs count their real age** — the spend scanner
+  follows symlinks/junctions when walking log directories, but judged a
+  linked file's recency by the link's own timestamp; logs relocated to
+  another drive could silently vanish from the 31-day window. The
+  target file's timestamp decides now.
+- **Kimi K3 cache reads were overpriced ~10×** — models.dev lists the
+  same model under many resellers and Pane took the alphabetically first
+  entry, which for kimi-k3 was a stub with no cache pricing; cache hits
+  then defaulted to the full $3.00 input rate instead of $0.30. The
+  catalog entry with the most complete pricing wins now.
+
+## 0.4.22 — 2026-07-20
+
+### Changed
+- **"Others" wedge folds more aggressively** — providers now fold into
+  the Others slice under $5 on Today/Yesterday (was $1) and under $10 on
+  Last 30 Days (was $5), keeping the ring focused on the big spenders.
+  A lone under-threshold provider folds too (it used to keep its own
+  legend row); the ring only stays unfolded when everyone is small.
+
+## 0.4.21 — 2026-07-19
+
+### Fixed
+- **Grok no longer shows "Outdated" right after its weekly reset** —
+  xAI's billing API omits the usage-percent field entirely while usage
+  is 0%, which Pane misread as a broken response and kept showing last
+  week's 100%-used bar with an ⚠ Outdated tag. A fresh window with no
+  usage now correctly renders as a 0% bar with the new reset countdown.
+
+## 0.4.20 — 2026-07-18
+
+### Fixed
+- **Disabled providers now do nothing at all** — disabling a provider
+  only hid its card; the work still ran invisibly on every refresh
+  (network calls, file reads, and for Kiro: spawning kiro-cli, whose
+  own auto-updater downloaded a fresh ~25 MB installer to %TEMP% each
+  time — gigabytes within days once Amazon shipped an update). Disabled
+  providers are now skipped before anything runs.
+
+### Removed
+- **Kiro support** — the experimental Kiro provider worked by invoking
+  kiro-cli, and a CLI that self-updates on every invocation is a side
+  effect Pane cannot control. Rather than throttle it, the provider is
+  gone entirely; the card disappears and saved layouts clean themselves
+  up.
+
+### Added
+- **Grok usage bar shows its reset countdown** — the aggregate credit
+  meter now carries the billing period's real end time and duration,
+  so it paces and counts down like the other cards. Contributed by
+  @JaminYe — Pane's first outside contribution. 🎉
 
 ### Changed
 - **OpenCode Go meters say "this PC only"** — Go quotas are counted

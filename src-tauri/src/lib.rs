@@ -3,6 +3,7 @@ mod httpapi;
 mod pricing;
 mod providers;
 mod spend;
+mod telemetry;
 
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -91,6 +92,11 @@ fn config_with_defaults(mut cfg: Value) -> Value {
     obj.entry("proxy").or_insert(json!({ "enabled": false, "url": "" }));
     obj.entry("showTotalSpend").or_insert(json!(true));
     obj.entry("welcomeDismissed").or_insert(json!(false));
+    // Telemetry defaults ON and must SAY so: without this default the
+    // Settings toggle read `undefined` (rendered off) while the sender's
+    // own default kept transmitting — a switch that displays off while
+    // data flows is the one state a privacy control must never be in.
+    obj.entry("telemetry").or_insert(json!(true));
     cfg
 }
 
@@ -128,6 +134,7 @@ const CONFIG_KEYS: &[&str] = &[
     "proxy",
     "showTotalSpend",
     "welcomeDismissed",
+    "telemetry",
 ];
 
 #[tauri::command]
@@ -361,7 +368,7 @@ struct StripEntry {
 /// allowlist for update_tray_strip: ids from the frontend are validated
 /// against this before being spliced into tray icon ids, and stale strip
 /// icons are removed for exactly this set.
-const STRIP_PROVIDER_IDS: [&str; 18] = [
+const STRIP_PROVIDER_IDS: [&str; 17] = [
     "claude",
     "codex",
     "cursor",
@@ -379,7 +386,6 @@ const STRIP_PROVIDER_IDS: [&str; 18] = [
     "ollama",
     "codebuff",
     "kilo",
-    "kiro",
 ];
 
 #[tauri::command]
@@ -529,34 +535,46 @@ async fn fetch_usage(app: tauri::AppHandle) -> Vec<providers::Snapshot> {
     // combined state machine on the calling thread's stack — at 28 providers
     // that overflowed the main thread's 1 MB stack and killed the app.
     type BoxedSnap = std::pin::Pin<Box<dyn std::future::Future<Output = providers::Snapshot> + Send>>;
-    let futs: Vec<BoxedSnap> = vec![
-        Box::pin(guarded("claude", "Claude", providers::claude::snapshot())),
-        Box::pin(guarded("codex", "Codex", providers::codex::snapshot())),
-        Box::pin(guarded("cursor", "Cursor", providers::cursor::snapshot())),
-        Box::pin(guarded("opencode", "OpenCode", providers::opencode::snapshot())),
-        Box::pin(guarded("copilot", "Copilot", providers::copilot::snapshot())),
-        Box::pin(guarded("grok", "Grok", providers::grok::snapshot())),
-        Box::pin(guarded("devin", "Devin", providers::devin::snapshot())),
-        Box::pin(guarded("minimax", "MiniMax", providers::minimax::snapshot())),
-        Box::pin(guarded("openrouter", "OpenRouter", providers::openrouter::snapshot())),
-        Box::pin(guarded("zai", "Z.ai", providers::zai::snapshot())),
-        Box::pin(guarded("antigravity", "Antigravity", providers::antigravity::snapshot())),
-        Box::pin(guarded("deepseek", "DeepSeek", providers::deepseek::snapshot())),
-        Box::pin(guarded("moonshot", "Moonshot", providers::moonshot::snapshot())),
-        Box::pin(guarded("elevenlabs", "ElevenLabs", providers::elevenlabs::snapshot())),
-        Box::pin(guarded("ollama", "Ollama", providers::ollama::snapshot())),
-        Box::pin(guarded("codebuff", "Codebuff", providers::codebuff::snapshot())),
-        Box::pin(guarded("kilo", "Kilo", providers::kilo::snapshot())),
-        Box::pin(guarded("kiro", "Kiro", providers::kiro::snapshot())),
+    // Disabled providers are skipped BEFORE anything is spawned — a merely
+    // post-filtered provider still did all its work invisibly: network
+    // calls, file reads, and in Kiro's case spawning a CLI whose own
+    // auto-updater downloaded a fresh installer to %TEMP% on every refresh
+    // (gigabytes within days). Futures are lazy, so building and dropping
+    // a disabled entry here runs none of its code.
+    let futs: Vec<(&str, BoxedSnap)> = vec![
+        ("claude", Box::pin(guarded("claude", "Claude", providers::claude::snapshot()))),
+        ("codex", Box::pin(guarded("codex", "Codex", providers::codex::snapshot()))),
+        ("cursor", Box::pin(guarded("cursor", "Cursor", providers::cursor::snapshot()))),
+        ("opencode", Box::pin(guarded("opencode", "OpenCode", providers::opencode::snapshot()))),
+        ("copilot", Box::pin(guarded("copilot", "Copilot", providers::copilot::snapshot()))),
+        ("grok", Box::pin(guarded("grok", "Grok", providers::grok::snapshot()))),
+        ("devin", Box::pin(guarded("devin", "Devin", providers::devin::snapshot()))),
+        ("minimax", Box::pin(guarded("minimax", "MiniMax", providers::minimax::snapshot()))),
+        ("openrouter", Box::pin(guarded("openrouter", "OpenRouter", providers::openrouter::snapshot()))),
+        ("zai", Box::pin(guarded("zai", "Z.ai", providers::zai::snapshot()))),
+        ("antigravity", Box::pin(guarded("antigravity", "Antigravity", providers::antigravity::snapshot()))),
+        ("deepseek", Box::pin(guarded("deepseek", "DeepSeek", providers::deepseek::snapshot()))),
+        ("moonshot", Box::pin(guarded("moonshot", "Moonshot", providers::moonshot::snapshot()))),
+        ("elevenlabs", Box::pin(guarded("elevenlabs", "ElevenLabs", providers::elevenlabs::snapshot()))),
+        ("ollama", Box::pin(guarded("ollama", "Ollama", providers::ollama::snapshot()))),
+        ("codebuff", Box::pin(guarded("codebuff", "Codebuff", providers::codebuff::snapshot()))),
+        ("kilo", Box::pin(guarded("kilo", "Kilo", providers::kilo::snapshot()))),
     ];
-    let handles: Vec<_> = futs.into_iter().map(tauri::async_runtime::spawn).collect();
+    let futs: Vec<(&str, BoxedSnap)> = futs
+        .into_iter()
+        .filter(|(id, _)| !disabled.iter().any(|d| d == id))
+        .collect();
+    let enabled_ids: Vec<String> = futs.iter().map(|(id, _)| id.to_string()).collect();
+    let handles: Vec<_> = futs
+        .into_iter()
+        .map(|(_, fut)| tauri::async_runtime::spawn(fut))
+        .collect();
     let mut all = Vec::with_capacity(handles.len());
     for h in handles {
         if let Ok(snap) = h.await {
             all.push(snap);
         }
     }
-    all.retain(|s| !disabled.iter().any(|d| *d == s.id));
 
     for s in &all {
         eprintln!(
@@ -633,6 +651,59 @@ async fn fetch_usage(app: tauri::AppHandle) -> Vec<providers::Snapshot> {
 
     httpapi::publish(&all);
     update_tray(&app, &all, &cfg);
+
+    // Anonymous daily-rollup telemetry (Settings → "Share anonymous usage
+    // statistics"). Fire-and-forget: it must never delay or fail a refresh.
+    {
+        let enabled = cfg.get("telemetry").and_then(Value::as_bool).unwrap_or(true);
+        let starred_metrics: Vec<String> = cfg
+            .pointer("/layout/providers")
+            .and_then(Value::as_object)
+            .map(|provs| {
+                provs
+                    .iter()
+                    .flat_map(|(pid, entry)| {
+                        entry
+                            .get("starred")
+                            .and_then(Value::as_array)
+                            .map(|a| {
+                                a.iter()
+                                    .filter_map(Value::as_str)
+                                    .map(|m| format!("{pid}/{m}"))
+                                    .collect::<Vec<_>>()
+                            })
+                            .unwrap_or_default()
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        let snap = telemetry::ConfigSnapshot {
+            app_version: app.package_info().version.to_string(),
+            enabled_providers: enabled_ids,
+            starred_metrics,
+            appearance: cfg
+                .get("appearance")
+                .and_then(Value::as_str)
+                .unwrap_or("system")
+                .to_string(),
+            density: cfg
+                .get("density")
+                .and_then(Value::as_str)
+                .unwrap_or("regular")
+                .to_string(),
+            refresh_minutes: cfg.get("refreshMinutes").and_then(Value::as_u64).unwrap_or(5),
+        };
+        let outcomes: Vec<telemetry::Outcome> = all
+            .iter()
+            .map(|s| telemetry::Outcome {
+                id: s.id.clone(),
+                status: s.status.clone(),
+                stale: s.stale,
+                error: s.error.clone().or_else(|| s.warning.clone()),
+            })
+            .collect();
+        tauri::async_runtime::spawn(telemetry::record(enabled, snap, outcomes));
+    }
 
     for alert in alerts::evaluate(&all, &cfg) {
         use tauri_plugin_notification::NotificationExt;
