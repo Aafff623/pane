@@ -129,7 +129,12 @@ async fn fetch() -> Result<Snapshot, String> {
         .get("https://cli-chat-proxy.grok.com/v1/settings")
         .bearer_auth(&token)
         .send();
-    let (billing_resp, settings_resp) = tokio::join!(billing_req, settings_req);
+    let user_req = http()
+        .get("https://cli-chat-proxy.grok.com/v1/user?include=subscription")
+        .bearer_auth(&token)
+        .send();
+    let (billing_resp, settings_resp, user_resp) =
+        tokio::join!(billing_req, settings_req, user_req);
 
     let billing_resp = billing_resp.map_err(|e| format!("billing request: {e}"))?;
     if billing_resp.status().as_u16() == 401 || billing_resp.status().as_u16() == 403 {
@@ -169,19 +174,55 @@ async fn fetch() -> Result<Snapshot, String> {
         if cap > 0.0 { format!("{cap:.0} cap") } else { "Disabled".to_string() },
     ));
 
-    let mut plan = None;
-    if let Ok(resp) = settings_resp {
-        if resp.status().is_success() {
-            if let Ok(doc) = resp.json::<Value>().await {
-                plan = ["plan", "tier", "subscription", "plan_name"]
-                    .iter()
-                    .find_map(|k| doc.get(*k).and_then(Value::as_str))
-                    .map(str::to_string);
-            }
-        }
-    }
+    let settings = match settings_resp {
+        Ok(resp) if resp.status().is_success() => resp.json::<Value>().await.ok(),
+        _ => None,
+    };
+    let user = match user_resp {
+        Ok(resp) if resp.status().is_success() => resp.json::<Value>().await.ok(),
+        _ => None,
+    };
+
+    let plan = resolve_subscription_plan(settings.as_ref(), user.as_ref());
 
     Ok(Snapshot::ok(ID, NAME, plan, metrics))
+}
+
+fn resolve_subscription_plan(settings: Option<&Value>, user: Option<&Value>) -> Option<String> {
+    settings
+        .and_then(|doc| {
+            doc.get("subscription_tier_display")
+                .or_else(|| doc.get("subscriptionTierDisplay"))
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(str::to_string)
+        })
+        .or_else(|| {
+            user.and_then(|doc| {
+                doc.get("subscriptionTier")
+                    .or_else(|| doc.get("subscription_tier"))
+                    .and_then(Value::as_str)
+                    .and_then(display_from_subscription_code)
+            })
+        })
+}
+
+fn display_from_subscription_code(code: &str) -> Option<String> {
+    let code = code.trim();
+    if code.is_empty() {
+        return None;
+    }
+
+    let normalized = code.to_ascii_lowercase().replace(['_', ' ', '-'], "");
+    match normalized.as_str() {
+        "supergrokpro" | "supergrokheavy" | "heavy" => Some("SuperGrok Heavy".into()),
+        "supergrok" | "supergroklite" | "grokpro" => Some("SuperGrok".into()),
+        "xpremiumplus" | "premiumplus" => Some("X Premium+".into()),
+        "xpremium" | "premium" => Some("X Premium".into()),
+        "free" | "basic" | "none" | "null" | "anonymous" => None,
+        _ => Some(code.into()),
+    }
 }
 
 /// Usage percent for the current billing window. proto3-as-JSON omits
@@ -300,5 +341,52 @@ mod tests {
         let (resets_at, period_ms) = current_period_window(&rollover_billing());
         assert!(resets_at.is_some());
         assert_eq!(period_ms, Some(7 * 24 * 3_600_000));
+    }
+
+    #[test]
+    fn settings_display_name_takes_priority_over_user_tier() {
+        let settings = serde_json::json!({
+            "subscription_tier_display": "SuperGrok Heavy"
+        });
+        let user = serde_json::json!({ "subscriptionTier": "SuperGrok" });
+
+        assert_eq!(
+            resolve_subscription_plan(Some(&settings), Some(&user)).as_deref(),
+            Some("SuperGrok Heavy")
+        );
+    }
+
+    #[test]
+    fn user_tier_is_mapped_when_settings_has_no_display_name() {
+        let settings = serde_json::json!({});
+        let user = serde_json::json!({ "subscriptionTier": "SuperGrokPro" });
+
+        assert_eq!(
+            resolve_subscription_plan(Some(&settings), Some(&user)).as_deref(),
+            Some("SuperGrok Heavy")
+        );
+    }
+
+    #[test]
+    fn free_tier_is_hidden_and_unknown_tier_is_preserved() {
+        let free = serde_json::json!({ "subscriptionTier": "free" });
+        let unknown = serde_json::json!({ "subscriptionTier": "SuperGrokUltra" });
+
+        assert_eq!(resolve_subscription_plan(None, Some(&free)), None);
+        assert_eq!(
+            resolve_subscription_plan(None, Some(&unknown)).as_deref(),
+            Some("SuperGrokUltra")
+        );
+    }
+
+    #[test]
+    fn missing_subscription_fields_returns_no_plan() {
+        let settings = serde_json::json!({});
+        let user = serde_json::json!({});
+
+        assert_eq!(
+            resolve_subscription_plan(Some(&settings), Some(&user)),
+            None
+        );
     }
 }
