@@ -859,10 +859,13 @@ fn codex_priority_multiplier(dated: &str, rate_model: &str) -> f64 {
 /// tokens, not the 200k Anthropic uses.
 fn codex_long_context(dated: &str) -> Option<(f64, f64, f64)> {
     match dated {
-        "gpt-5.4" | "gpt-5.6-terra" => Some((5.0, 22.5, 0.5)),
+        "gpt-5.4" => Some((5.0, 22.5, 0.5)),
         "gpt-5.4-pro" | "gpt-5.5-pro" => Some((60.0, 270.0, 60.0)),
         "gpt-5.5" | "gpt-5.6-sol" => Some((10.0, 45.0, 1.0)),
-        "gpt-5.6-luna" => Some((2.0, 9.0, 0.2)),
+        // 2026-07-31 price cut: terra/luna long-context dropped with the
+        // base rates (terra used to share gpt-5.4's row).
+        "gpt-5.6-terra" => Some((4.0, 18.0, 0.4)),
+        "gpt-5.6-luna" => Some((0.4, 1.8, 0.04)),
         _ => None,
     }
 }

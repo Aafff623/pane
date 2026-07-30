@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+### Fixed
+- **GPT-5.6 Terra and Luna price at OpenAI's new rates** — OpenAI cut
+  both models' prices (Luna is 5× cheaper) and the public price catalogs
+  still carry launch pricing, so spend was overstated. Pane corrects the
+  stale catalog values (a self-retiring override: the moment the
+  catalogs publish updated numbers, live data wins again) and updates
+  the long-context rate table to the new tiers.
+
 ### Changed
 - **Confirmations look like Pane now** — using a Codex reset credit or
   resetting all layouts used to pop the browser's bare "localhost says"
