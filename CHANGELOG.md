@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.4.27 — 2026-07-30
+
+### Added
+- **Grok card shows your subscription plan** — the header now reads
+  "X Premium", "SuperGrok", and friends, resolved from xAI's settings
+  display name with a tier-code fallback (free tiers stay unbadged; a
+  plan lookup failure can never hide usage data). Contributed by
+  @JaminYe — their second Pane contribution. 🎉
+
 ## 0.4.26 — 2026-07-29
 
 ### Changed
