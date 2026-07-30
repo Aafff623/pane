@@ -155,12 +155,22 @@ pub fn generation() -> u64 {
     GENERATION.load(std::sync::atomic::Ordering::Relaxed)
 }
 
-/// Stable fingerprint of the on-disk catalog files. The persistent spend
+/// Bump whenever the baked-in pricing behavior changes (stale-catalog
+/// corrections, builtin fallbacks, long-context tables): the persisted
+/// spend cache holds pre-priced totals, and only the catalog *files* are
+/// fingerprinted below — an app update that reprices the same files would
+/// otherwise leave history at the old dollars until upstream happens to
+/// rewrite a catalog.
+const CORRECTIONS_REV: u32 = 1;
+
+/// Stable fingerprint of the effective pricing inputs: the on-disk catalog
+/// files plus this binary's corrections revision. The persistent spend
 /// cache stores costs priced under a specific catalog set; when any catalog
-/// file changes (a refresh rewrote it), the stamp changes and the whole
-/// persisted cache is discarded rather than served with stale prices.
+/// file changes (a refresh rewrote it) — or an update ships changed baked
+/// pricing — the stamp changes and the whole persisted cache is discarded
+/// rather than served with stale prices.
 pub fn catalog_stamp() -> String {
-    SOURCES
+    let files = SOURCES
         .iter()
         .map(|(source, _)| {
             let path = dir().join(format!("{source}.json"));
@@ -178,7 +188,8 @@ pub fn catalog_stamp() -> String {
             }
         })
         .collect::<Vec<_>>()
-        .join("|")
+        .join("|");
+    format!("{files}|corrections:{CORRECTIONS_REV}")
 }
 
 fn dir() -> PathBuf {
