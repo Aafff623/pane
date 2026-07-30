@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+### Changed
+- **Confirmations look like Pane now** — using a Codex reset credit or
+  resetting all layouts used to pop the browser's bare "localhost says"
+  dialog; both now use an in-app card-styled dialog matching the app
+  (with a red button where the action is destructive). The reset-credit
+  message also notes that refreshed windows can take a couple of
+  minutes to appear.
+
 ## 0.4.27 — 2026-07-30
 
 ### Added
