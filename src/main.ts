@@ -1232,6 +1232,11 @@ async function checkForUpdate(): Promise<void> {
 /// Resolves true on confirm; Esc, the ✕, backdrop clicks, and Cancel all
 /// resolve false. The keydown listener runs in the capture phase and stops
 /// propagation so the app's global Esc (close panels) stays out of it.
+/// Cancels the open appConfirm dialog, if any. The popover hides on focus
+/// loss with the dialog still in the DOM — reopening must not resurface a
+/// stale question, so the reopen routine dismisses it like Esc would.
+let dismissConfirm: (() => void) | null = null;
+
 function appConfirm(opts: {
   title: string;
   message: string;
@@ -1251,10 +1256,12 @@ function appConfirm(opts: {
         </div>
       </div>`;
     const done = (ok: boolean) => {
+      dismissConfirm = null;
       document.removeEventListener("keydown", onKey, true);
       overlay.remove();
       resolve(ok);
     };
+    dismissConfirm = () => done(false);
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
         e.preventDefault();
@@ -2758,10 +2765,11 @@ window.addEventListener("DOMContentLoaded", () => {
   void listen("popover-shown", () => {
     void checkForUpdate();
     // Always reopen on the main page, at the top — leftover Customize/
-    // Settings panels or a stale scroll position from the previous visit
-    // feel like the app is stuck mid-page.
+    // Settings panels, a stale confirm dialog, or a stale scroll position
+    // from the previous visit feel like the app is stuck mid-page.
     setDrawer(false);
     setSettings(false);
+    dismissConfirm?.();
     // Replay any renders skipped while hidden, before the reveal plays.
     if (pendingRender) {
       pendingRender = false;
