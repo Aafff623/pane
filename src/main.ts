@@ -1227,6 +1227,52 @@ async function checkForUpdate(): Promise<void> {
 /// rasterize it at 2x. Whatever the card renders — donut, tabs, trend
 /// bars, future rows — the copied image matches automatically, instead
 /// of a hand-drawn approximation that drifts from the real UI.
+/// In-app replacement for window.confirm: the native dialog renders as a
+/// bare "localhost says" browser popup, which has no place in a glass UI.
+/// Resolves true on confirm; Esc, the ✕, backdrop clicks, and Cancel all
+/// resolve false. The keydown listener runs in the capture phase and stops
+/// propagation so the app's global Esc (close panels) stays out of it.
+function appConfirm(opts: {
+  title: string;
+  message: string;
+  confirmLabel: string;
+  danger?: boolean;
+}): Promise<boolean> {
+  return new Promise((resolve) => {
+    const overlay = document.createElement("div");
+    overlay.id = "confirm-overlay";
+    overlay.innerHTML = `
+      <div id="confirm-box" role="dialog" aria-modal="true">
+        <h3>${escapeHtml(opts.title)}</h3>
+        <p>${escapeHtml(opts.message)}</p>
+        <div id="confirm-actions">
+          <button id="confirm-cancel" type="button">Cancel</button>
+          <button id="confirm-ok" type="button" class="${opts.danger ? "danger" : ""}">${escapeHtml(opts.confirmLabel)}</button>
+        </div>
+      </div>`;
+    const done = (ok: boolean) => {
+      document.removeEventListener("keydown", onKey, true);
+      overlay.remove();
+      resolve(ok);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        e.stopPropagation();
+        done(false);
+      }
+    };
+    overlay.addEventListener("click", (e) => {
+      if (e.target === overlay) done(false);
+    });
+    overlay.querySelector("#confirm-cancel")!.addEventListener("click", () => done(false));
+    overlay.querySelector("#confirm-ok")!.addEventListener("click", () => done(true));
+    document.addEventListener("keydown", onKey, true);
+    document.body.appendChild(overlay);
+    overlay.querySelector<HTMLButtonElement>("#confirm-ok")!.focus();
+  });
+}
+
 async function shareCard(id: string): Promise<void> {
   const status = document.querySelector("#status")!;
   try {
@@ -2101,11 +2147,14 @@ function handleCustomizeClick(target: HTMLElement): boolean {
   }
   const resetAll = target.closest("[data-reset-all]");
   if (resetAll) {
-    if (
-      window.confirm(
-        "Reset all layout customization? Order, stars, and hidden rows go back to defaults, and installed AI tools are re-detected. (Your usage limits are not affected.)",
-      )
-    ) {
+    void appConfirm({
+      title: "Reset all layouts?",
+      message:
+        "Order, stars, and hidden rows go back to defaults, and installed AI tools are re-detected. Your usage limits are not affected.",
+      confirmLabel: "Reset all",
+      danger: true,
+    }).then((ok) => {
+      if (!ok) return;
       // Clearing layout + disabled re-arms the first-launch detection path:
       // the next refresh probes every provider and re-disables only the
       // ones with no credentials on this PC.
@@ -2115,7 +2164,7 @@ function handleCustomizeClick(target: HTMLElement): boolean {
         setDrawer(false);
         void refresh(true).then(() => void updateTrayStrip());
       });
-    }
+    });
     return true;
   }
   const reset = target.closest<HTMLElement>("[data-reset]");
@@ -2618,11 +2667,13 @@ window.addEventListener("DOMContentLoaded", () => {
     const redeem = target.closest<HTMLElement>("[data-redeem]");
     if (redeem) {
       const creditId = redeem.dataset.redeem!;
-      if (
-        window.confirm(
-          "Use one Codex reset credit now?\n\nThis resets your Codex rate-limit windows immediately and cannot be undone.",
-        )
-      ) {
+      void appConfirm({
+        title: "Use a reset credit?",
+        message:
+          "This resets your Codex rate-limit windows immediately and cannot be undone. The refreshed windows can take a couple of minutes to appear.",
+        confirmLabel: "Use credit",
+      }).then((ok) => {
+        if (!ok) return;
         const status = document.querySelector("#status")!;
         status.textContent = "Redeeming reset credit…";
         void invoke<string>("codex_redeem_credit", { creditId })
@@ -2633,7 +2684,7 @@ window.addEventListener("DOMContentLoaded", () => {
           .catch((err) => {
             status.textContent = `Redeem failed: ${err}`;
           });
-      }
+      });
       return;
     }
     const tab = target.closest("[data-tab]");
