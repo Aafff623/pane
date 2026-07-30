@@ -113,7 +113,8 @@ reset window ("Almost out", "Will run out").
 
 **4. Counting the money.** Your CLIs already log every request locally.
 Pane scans those logs (Claude, Codex, Grok, OpenCode, Devin CLI, Cursor
-CSV), prices each request with live per-model rates (LiteLLM /
+CSV, MiniMax CLI, Kimi Code, the Hermes desktop app), prices each
+request with live per-model rates (LiteLLM /
 models.dev, refreshed daily — hourly while unknown models are around, so
 brand-new models price within the hour), and draws the Today /
 Yesterday / 30-day donut with a per-model breakdown. Click the ring to
@@ -141,7 +142,7 @@ success/failure counts — never amounts or error text) — see
 | Cursor | Cursor's local state database + cursor.com API |
 | OpenCode (Go plan) | Local `opencode.db` spend vs documented plan limits* |
 | GitHub Copilot | Copilot editor login or GitHub CLI (Credential Manager) + GitHub API |
-| Grok (Grok CLI) | `%USERPROFILE%\.grok\auth.json` + Grok billing API |
+| Grok (Grok CLI) | `%USERPROFILE%\.grok\auth.json` + Grok billing/subscription APIs |
 | Devin (Devin CLI) | `%APPDATA%\devin\credentials.toml` + GetUserStatus RPC; local CLI session store for spend |
 | MiniMax | API key (Settings, env var, or CLI config) + token-plan API |
 | OpenRouter | API key (Settings) or key stored by OpenCode |
@@ -184,9 +185,10 @@ whatever the community asks for loudest.
   undoes.
 - **Liquid glass UI** — real SDF lens refraction on the auto-hiding
   sidebar and glass bars, magnetic minimap trail, circular day/night wipe.
-- **Share cards** — hover a card, click ⧉, and paste anywhere: a clean
-  composition of the card (interactive chrome stripped, just the
-  numbers), framed with the Pane icon and tagline.
+- **Share cards** — hover a card, click ⧉, and paste anywhere: a
+  collapsed card copies as a clean compact composition, an expanded one
+  copies whole (trend, spend, pace hints — buttons and links stripped),
+  framed with the Pane icon and tagline.
 - **Quick links** — Status / Dashboard shortcuts on every card.
 - **[Local HTTP API](docs/local-http-api.md)** — `GET
   http://127.0.0.1:6736/v1/usage` for scripts, Rainmeter widgets, stream
