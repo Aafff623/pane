@@ -281,6 +281,7 @@ fn apply_supplement(store: &mut Store, doc: &Value) {
             );
         }
     }
+    correct_stale_supplement(&mut store.supplement);
     if let Some(mults) = doc.get("fast_multipliers").and_then(Value::as_object) {
         for (model, v) in mults {
             if let Some(m) = v.as_f64() {
@@ -288,6 +289,26 @@ fn apply_supplement(store: &mut Store, doc: &Value) {
             }
         }
     }
+    // 2026-07-31: OpenAI cut gpt-5.6-terra/-luna prices and both public
+    // catalogs (and the supplement, which outranks them here) still carry
+    // launch pricing. Correct ONLY the exact known-stale values — a
+    // self-retiring override: the moment the supplement publishes any new
+    // number for these models, its data wins again untouched. Remove this
+    // whole function once upstream catches up.
+    fn correct_stale_supplement(supplement: &mut HashMap<String, Price>) {
+        let corrections: [(&str, f64, Price); 2] = [
+            ("gpt-5.6-terra", 2.5, Price::flat(2.0, 12.0, 0.2, 2.5)),
+            ("gpt-5.6-luna", 1.0, Price::flat(0.2, 1.2, 0.02, 0.25)),
+        ];
+        for (model, stale_input, corrected) in corrections {
+            if let Some(p) = supplement.get_mut(model) {
+                if (p.input - stale_input).abs() < 1e-9 {
+                    *p = corrected;
+                }
+            }
+        }
+    }
+
     // The supplement is fetched from a third-party URL, so cap what it can
     // feed us: at most 64 alias rules of at most 256 chars each, compiled
     // with a bounded size. (Rust's regex engine is linear-time by design,
@@ -577,6 +598,30 @@ mod tests {
         let map = super::parse_modelsdev(&doc);
         let p = map.get("kimi-k3").expect("kimi-k3 parsed");
         assert_eq!((p.input, p.output, p.cache_read, p.cache_write), (3.0, 15.0, 0.3, 3.0));
+    }
+
+    #[test]
+    fn stale_gpt56_supplement_prices_are_corrected_until_upstream_updates() {
+        let stale = serde_json::json!({ "pricing": {
+            "gpt-5.6-terra": { "input_per_million": 2.5, "output_per_million": 15.0,
+                               "cache_read_per_million": 0.25, "cache_write_per_million": 3.125 },
+            "gpt-5.6-luna":  { "input_per_million": 1.0, "output_per_million": 6.0,
+                               "cache_read_per_million": 0.1, "cache_write_per_million": 1.25 },
+        }});
+        let mut store = super::Store::default();
+        super::apply_supplement(&mut store, &stale);
+        let terra = store.supplement.get("gpt-5.6-terra").unwrap();
+        assert_eq!((terra.input, terra.output, terra.cache_read), (2.0, 12.0, 0.2));
+        let luna = store.supplement.get("gpt-5.6-luna").unwrap();
+        assert_eq!((luna.input, luna.output, luna.cache_read), (0.2, 1.2, 0.02));
+
+        // Self-retiring: any NEW upstream number passes through untouched.
+        let updated = serde_json::json!({ "pricing": {
+            "gpt-5.6-terra": { "input_per_million": 1.75, "output_per_million": 11.0 },
+        }});
+        super::apply_supplement(&mut store, &updated);
+        let terra = store.supplement.get("gpt-5.6-terra").unwrap();
+        assert_eq!((terra.input, terra.output), (1.75, 11.0));
     }
 
     #[test]
