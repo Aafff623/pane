@@ -24,6 +24,9 @@ import openrouterIcon from "./assets/providers/openrouter.svg?raw";
 import paneLogo from "./assets/pane-logo.png?inline";
 import paneIcon from "./assets/pane-icon.png?inline";
 import zaiIcon from "./assets/providers/zai.svg?raw";
+// The repo's changelog ships inside the bundle, so the "What's new" dialog
+// and the Settings changelog viewer read the exact file releases maintain.
+import changelogRaw from "../CHANGELOG.md?raw";
 
 const PROVIDER_ICONS: Record<string, string> = {
   antigravity: antigravityIcon,
@@ -177,6 +180,7 @@ interface Config {
   proxy: { enabled: boolean; url: string };
   showTotalSpend: boolean;
   welcomeDismissed: boolean;
+  lastSeenVersion: string;
 }
 
 const ALL_PROVIDERS: [string, string][] = [
@@ -304,6 +308,7 @@ let config: Config = {
   proxy: { enabled: false, url: "" },
   showTotalSpend: true,
   welcomeDismissed: false,
+  lastSeenVersion: "",
 };
 let lastFetch = 0;
 let refreshing = false;
@@ -1281,6 +1286,156 @@ function appConfirm(opts: {
     document.body.appendChild(overlay);
     overlay.querySelector<HTMLButtonElement>("#confirm-ok")!.focus();
   });
+}
+
+// ---------------------------------------------------------------------------
+// Changelog — "What's new" after an update + the Settings viewer
+// ---------------------------------------------------------------------------
+
+interface ChangelogSection {
+  version: string;
+  date: string;
+  body: string;
+}
+
+/// CHANGELOG.md split into per-version sections, newest first. The
+/// "Unreleased" section is skipped — a shipped build's own notes carry its
+/// version header (release retitles Unreleased), so users only ever see
+/// released entries.
+function parseChangelog(): ChangelogSection[] {
+  const sections: ChangelogSection[] = [];
+  for (const block of changelogRaw.split(/^## /m).slice(1)) {
+    const nl = block.indexOf("\n");
+    const header = block.slice(0, nl).trim();
+    if (/^unreleased$/i.test(header)) continue;
+    const m = header.match(/^([\d.]+)\s*—\s*(.+)$/);
+    sections.push({
+      version: m ? m[1] : header,
+      date: m ? m[2] : "",
+      body: block.slice(nl + 1).trim(),
+    });
+  }
+  return sections;
+}
+
+/// Markdown-lite for changelog bodies: ### subheads, - bullets (with hanging
+/// continuation lines), plain paragraphs, **bold**, `code`. Bullets and
+/// paragraphs accumulate as raw markdown and are transformed only on flush,
+/// so a bold/code span wrapped across the file's ~70-column lines still
+/// matches. Input is escaped before any markup is applied, so the changelog
+/// can never inject HTML.
+function renderChangelogBody(md: string): string {
+  const inline = (s: string) =>
+    escapeHtml(s)
+      .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
+      .replace(/`([^`]+)`/g, "<code>$1</code>");
+  let html = "";
+  let items: string[] = [];
+  let para = "";
+  const flushItems = () => {
+    if (items.length) html += `<ul>${items.map((i) => `<li>${inline(i)}</li>`).join("")}</ul>`;
+    items = [];
+  };
+  const flushPara = () => {
+    if (para) html += `<p>${inline(para)}</p>`;
+    para = "";
+  };
+  for (const line of md.split("\n")) {
+    if (line.startsWith("### ")) {
+      flushItems();
+      flushPara();
+      html += `<h5>${escapeHtml(line.slice(4).trim())}</h5>`;
+    } else if (line.startsWith("- ")) {
+      flushPara();
+      items.push(line.slice(2));
+    } else if (/^\s+\S/.test(line) && items.length) {
+      items[items.length - 1] += " " + line.trim();
+    } else if (line.trim()) {
+      flushItems();
+      para += (para ? " " : "") + line.trim();
+    } else {
+      flushPara();
+    }
+  }
+  flushItems();
+  flushPara();
+  return html;
+}
+
+/// Same lifecycle as dismissConfirm: the popover reopen routine clears a
+/// stale dialog left behind by hide-on-focus-loss.
+let dismissWhatsNew: (() => void) | null = null;
+
+/// Card-styled scrollable dialog listing changelog sections. Esc, backdrop
+/// clicks (anywhere outside the card), and the Got it button all dismiss.
+function showChangelogDialog(title: string, sections: ChangelogSection[]): void {
+  dismissWhatsNew?.();
+  const overlay = document.createElement("div");
+  overlay.id = "whatsnew-overlay";
+  const list = sections
+    .map(
+      (s) =>
+        `<section><h4>v${escapeHtml(s.version)}${
+          s.date ? `<span>${escapeHtml(s.date)}</span>` : ""
+        }</h4>${renderChangelogBody(s.body)}</section>`,
+    )
+    .join("");
+  overlay.innerHTML = `
+    <div id="whatsnew-box" role="dialog" aria-modal="true">
+      <h3>${escapeHtml(title)}</h3>
+      <div id="whatsnew-body">${list}</div>
+      <div id="whatsnew-actions">
+        <button id="whatsnew-ok" type="button">Got it</button>
+      </div>
+    </div>`;
+  const done = () => {
+    dismissWhatsNew = null;
+    document.removeEventListener("keydown", onKey, true);
+    overlay.remove();
+  };
+  dismissWhatsNew = done;
+  const onKey = (e: KeyboardEvent) => {
+    if (e.key === "Escape") {
+      e.preventDefault();
+      e.stopPropagation();
+      done();
+    }
+  };
+  overlay.addEventListener("click", (e) => {
+    if (e.target === overlay) done();
+  });
+  overlay.querySelector("#whatsnew-ok")!.addEventListener("click", done);
+  document.addEventListener("keydown", onKey, true);
+  document.body.appendChild(overlay);
+}
+
+/// The sections a just-updated install hasn't seen yet (newest first,
+/// capped), or null when there's nothing to announce. Marks the current
+/// version as seen immediately so the dialog can only ever appear once per
+/// version, even if it's dismissed by closing the popover.
+let appVersion = "";
+let pendingWhatsNew: ChangelogSection[] | null = null;
+
+function computeWhatsNew(version: string): ChangelogSection[] | null {
+  const last = config.lastSeenVersion;
+  if (last === version) return null;
+  void patchConfig({ lastSeenVersion: version });
+  const all = parseChangelog();
+  if (!last) {
+    // First run with this feature. An install that already dismissed the
+    // welcome card is an *update* — show the new version's notes. A true
+    // fresh install gets the welcome card instead, not two popups. Guard
+    // the empty case (e.g. a build whose notes are still Unreleased) —
+    // an empty array is truthy and would present a blank dialog.
+    const own = config.welcomeDismissed ? all.filter((s) => s.version === version) : [];
+    return own.length ? own : null;
+  }
+  const out: ChangelogSection[] = [];
+  for (const s of all) {
+    if (s.version === last || out.length >= 5) break;
+    out.push(s);
+  }
+  return out.length ? out : null;
 }
 
 async function shareCard(id: string): Promise<void> {
@@ -2527,6 +2682,7 @@ window.addEventListener("DOMContentLoaded", () => {
     }
   });
   void getVersion().then((v) => {
+    appVersion = v;
     buildText = `v${v} · build ${__BUILD_STAMP__}`;
     renderBuildInfo();
     void checkForUpdate();
@@ -2542,6 +2698,10 @@ window.addEventListener("DOMContentLoaded", () => {
     setSettings(!document.body.classList.contains("settings-open"));
   });
   document.querySelector("#settings-close")!.addEventListener("click", () => setSettings(false));
+  document.querySelector("#changelog-btn")!.addEventListener("click", () => {
+    setSettings(false);
+    showChangelogDialog("Changelog", parseChangelog());
+  });
   document.querySelectorAll<HTMLElement>(".acc-head").forEach((head) => {
     head.addEventListener("click", () => head.parentElement!.classList.toggle("open"));
   });
@@ -2773,6 +2933,12 @@ window.addEventListener("DOMContentLoaded", () => {
     setDrawer(false);
     setSettings(false);
     dismissConfirm?.();
+    dismissWhatsNew?.();
+    // A fresh update's notes present on the first open after launch.
+    if (pendingWhatsNew) {
+      showChangelogDialog(`What's new in v${appVersion}`, pendingWhatsNew);
+      pendingWhatsNew = null;
+    }
     // Replay any renders skipped while hidden, before the reveal plays.
     if (pendingRender) {
       pendingRender = false;
@@ -2787,6 +2953,12 @@ window.addEventListener("DOMContentLoaded", () => {
   void initSettings().then(() => {
     scheduleAutoRefresh();
     void refresh(true);
+    // Queued, not shown: the window is usually still hidden in the tray at
+    // startup — the first popover-shown presents it. Runs after the config
+    // load so lastSeenVersion is the real stored value, not the default.
+    void getVersion().then((v) => {
+      pendingWhatsNew = computeWhatsNew(v);
+    });
   });
 
   // Countdown texts ("Resets in 3h 41m") tick every 30 s — but only for

@@ -1794,15 +1794,23 @@ body.no-glass .cust-dock {
   animation: confirm-fade 0.16s ease;
 }
 
+/* Same liquid-glass material as the What's-new dialog. */
 #confirm-box {
   width: min(88%, 300px);
-  background: var(--card);
-  border: 1px solid var(--border);
-  border-radius: 14px;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.07), rgba(255, 255, 255, 0) 38%),
+    rgba(24, 24, 27, 0.55);
+  backdrop-filter: blur(24px) saturate(1.5) brightness(1.04);
+  -webkit-backdrop-filter: blur(24px) saturate(1.5) brightness(1.04);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 18px;
   padding: 18px 18px 14px;
   box-shadow:
-    0 24px 60px rgb(0 0 0 / 0.45),
-    inset 0 1px 0 rgb(255 255 255 / 0.06);
+    0 24px 60px rgb(0 0 0 / 0.5),
+    inset 0 1px 1.5px rgba(255, 255, 255, 0.35),
+    inset 0 -1px 1px rgba(255, 255, 255, 0.08),
+    inset 1.5px 0 1.5px rgba(255, 255, 255, 0.06),
+    inset -1.5px 0 1.5px rgba(255, 255, 255, 0.06);
   animation: confirm-pop 0.18s cubic-bezier(0.2, 0.8, 0.3, 1);
 }
 
@@ -1878,6 +1886,207 @@ body.no-glass .cust-dock {
 @media (prefers-reduced-motion: reduce) {
   #confirm-overlay,
   #confirm-box {
+    animation: none;
+  }
+}
+
+/* ---------------------------------------------------------------------------
+   What's new / Changelog dialog — confirm-dialog styling, scrollable body
+--------------------------------------------------------------------------- */
+
+#whatsnew-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 90;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgb(0 0 0 / 0.45);
+  backdrop-filter: blur(6px) saturate(1.2);
+  -webkit-backdrop-filter: blur(6px) saturate(1.2);
+  animation: confirm-fade 0.16s ease;
+}
+
+/* Liquid glass — the sidebar/footer/dock recipe, plus a soft top sheen. */
+#whatsnew-box {
+  display: flex;
+  flex-direction: column;
+  width: min(92%, 340px);
+  max-height: 78vh;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.07), rgba(255, 255, 255, 0) 38%),
+    rgba(24, 24, 27, 0.55);
+  backdrop-filter: blur(24px) saturate(1.5) brightness(1.04);
+  -webkit-backdrop-filter: blur(24px) saturate(1.5) brightness(1.04);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 18px;
+  padding: 18px 18px 14px;
+  box-shadow:
+    0 24px 60px rgb(0 0 0 / 0.5),
+    inset 0 1px 1.5px rgba(255, 255, 255, 0.35),
+    inset 0 -1px 1px rgba(255, 255, 255, 0.08),
+    inset 1.5px 0 1.5px rgba(255, 255, 255, 0.06),
+    inset -1.5px 0 1.5px rgba(255, 255, 255, 0.06);
+  animation: confirm-pop 0.18s cubic-bezier(0.2, 0.8, 0.3, 1);
+}
+
+#whatsnew-body::-webkit-scrollbar {
+  width: 5px;
+}
+
+#whatsnew-body::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.16);
+  border-radius: 999px;
+}
+
+#whatsnew-body::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+#whatsnew-box h3 {
+  font-size: 14px;
+  font-weight: 650;
+  margin: 0 0 10px;
+}
+
+#whatsnew-body {
+  overflow-y: auto;
+  min-height: 0;
+  margin: 0 -6px 12px 0;
+  padding-right: 6px;
+}
+
+#whatsnew-body section + section {
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+
+#whatsnew-body h4 {
+  font-size: 13px;
+  font-weight: 650;
+  margin: 0 0 4px;
+}
+
+#whatsnew-body h4 span {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--muted-foreground);
+  margin-left: 8px;
+}
+
+#whatsnew-body h5 {
+  font-size: 11px;
+  font-weight: 650;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted-foreground);
+  margin: 8px 0 4px;
+}
+
+#whatsnew-body ul {
+  margin: 0;
+  padding-left: 16px;
+}
+
+#whatsnew-body li,
+#whatsnew-body p {
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--secondary-foreground);
+  margin: 4px 0;
+}
+
+#whatsnew-body p strong {
+  color: var(--foreground);
+}
+
+#whatsnew-body li strong {
+  color: var(--foreground);
+}
+
+#whatsnew-body code {
+  font-size: 11px;
+  background: var(--accent);
+  border-radius: 4px;
+  padding: 0 4px;
+}
+
+#whatsnew-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
+#whatsnew-actions button {
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  border-radius: 999px;
+  padding: 5px 14px;
+  cursor: pointer;
+  background: var(--primary);
+  border: 1px solid transparent;
+  color: var(--primary-foreground);
+  transition: opacity 0.15s ease, transform 0.1s ease;
+}
+
+#whatsnew-actions button:hover {
+  opacity: 0.85;
+}
+
+#whatsnew-actions button:active {
+  transform: scale(0.95);
+}
+
+/* The Settings entry point: a quiet full-width pill above the footer note. */
+#changelog-btn {
+  display: block;
+  width: 100%;
+  margin-top: 14px;
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  border-radius: 999px;
+  padding: 6px 14px;
+  cursor: pointer;
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--secondary-foreground);
+  transition: background 0.15s ease;
+}
+
+#changelog-btn:hover {
+  background: var(--accent);
+}
+
+/* Light theme: white glass, same as the sidebar's light recipe. */
+:root[data-theme="light"] #whatsnew-box,
+:root[data-theme="light"] #confirm-box {
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.5), rgba(255, 255, 255, 0) 38%),
+    rgba(255, 255, 255, 0.6);
+  border: 1px solid rgba(0, 0, 0, 0.1);
+  box-shadow:
+    0 24px 60px rgb(0 0 0 / 0.3),
+    inset 0 1px 1.5px rgba(255, 255, 255, 0.7);
+}
+
+:root[data-theme="light"] #whatsnew-body::-webkit-scrollbar-thumb {
+  background: rgba(0, 0, 0, 0.18);
+}
+
+/* Glass effects off: flat opaque surfaces, like every other glass layer. */
+body.no-glass #whatsnew-box,
+body.no-glass #confirm-box {
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+  background: var(--card) !important;
+  border-color: var(--border) !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  #whatsnew-overlay,
+  #whatsnew-box {
     animation: none;
   }
 }

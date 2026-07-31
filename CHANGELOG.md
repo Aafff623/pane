@@ -3,6 +3,11 @@
 ## Unreleased
 
 ### Added
+- **"What's new" after every update** — the first time you open Pane on a
+  new version, a card-styled popup shows that version's changelog (click
+  anywhere outside it to dismiss). Settings also gains a **What's new ·
+  Changelog** button that lists every released version. Fresh installs
+  keep the welcome card only — no double popup.
 - **AihubMix provider (#18)** — the OpenAI-compatible multi-model
   gateway gets a full card: usage metered against your account's
   spending limit (key auto-detected from OpenCode, or pasted in
