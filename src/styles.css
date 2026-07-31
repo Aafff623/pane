@@ -1989,11 +1989,16 @@ body.no-glass .cust-dock {
   padding-left: 16px;
 }
 
-#whatsnew-body li {
+#whatsnew-body li,
+#whatsnew-body p {
   font-size: 12px;
   line-height: 1.5;
   color: var(--secondary-foreground);
   margin: 4px 0;
+}
+
+#whatsnew-body p strong {
+  color: var(--foreground);
 }
 
 #whatsnew-body li strong {

@@ -1319,8 +1319,11 @@ function parseChangelog(): ChangelogSection[] {
 }
 
 /// Markdown-lite for changelog bodies: ### subheads, - bullets (with hanging
-/// continuation lines), **bold**, `code`. Input is escaped before any markup
-/// is applied, so the changelog can never inject HTML.
+/// continuation lines), plain paragraphs, **bold**, `code`. Bullets and
+/// paragraphs accumulate as raw markdown and are transformed only on flush,
+/// so a bold/code span wrapped across the file's ~70-column lines still
+/// matches. Input is escaped before any markup is applied, so the changelog
+/// can never inject HTML.
 function renderChangelogBody(md: string): string {
   const inline = (s: string) =>
     escapeHtml(s)
@@ -1328,21 +1331,34 @@ function renderChangelogBody(md: string): string {
       .replace(/`([^`]+)`/g, "<code>$1</code>");
   let html = "";
   let items: string[] = [];
-  const flush = () => {
-    if (items.length) html += `<ul>${items.map((i) => `<li>${i}</li>`).join("")}</ul>`;
+  let para = "";
+  const flushItems = () => {
+    if (items.length) html += `<ul>${items.map((i) => `<li>${inline(i)}</li>`).join("")}</ul>`;
     items = [];
+  };
+  const flushPara = () => {
+    if (para) html += `<p>${inline(para)}</p>`;
+    para = "";
   };
   for (const line of md.split("\n")) {
     if (line.startsWith("### ")) {
-      flush();
+      flushItems();
+      flushPara();
       html += `<h5>${escapeHtml(line.slice(4).trim())}</h5>`;
     } else if (line.startsWith("- ")) {
-      items.push(inline(line.slice(2)));
+      flushPara();
+      items.push(line.slice(2));
     } else if (/^\s+\S/.test(line) && items.length) {
-      items[items.length - 1] += " " + inline(line.trim());
+      items[items.length - 1] += " " + line.trim();
+    } else if (line.trim()) {
+      flushItems();
+      para += (para ? " " : "") + line.trim();
+    } else {
+      flushPara();
     }
   }
-  flush();
+  flushItems();
+  flushPara();
   return html;
 }
 
@@ -1408,8 +1424,11 @@ function computeWhatsNew(version: string): ChangelogSection[] | null {
   if (!last) {
     // First run with this feature. An install that already dismissed the
     // welcome card is an *update* — show the new version's notes. A true
-    // fresh install gets the welcome card instead, not two popups.
-    return config.welcomeDismissed ? all.filter((s) => s.version === version) : null;
+    // fresh install gets the welcome card instead, not two popups. Guard
+    // the empty case (e.g. a build whose notes are still Unreleased) —
+    // an empty array is truthy and would present a blank dialog.
+    const own = config.welcomeDismissed ? all.filter((s) => s.version === version) : [];
+    return own.length ? own : null;
   }
   const out: ChangelogSection[] = [];
   for (const s of all) {
