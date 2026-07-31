@@ -15,11 +15,11 @@ const NAME: &str = "AihubMix";
 const SUBSCRIPTION: &str = "https://aihubmix.com/v1/dashboard/billing/subscription";
 const USAGE: &str = "https://aihubmix.com/v1/dashboard/billing/usage";
 
-/// The `total_usage` field's unit. AihubMix (a new-api-family gateway)
-/// reports the usage total in whole dollars, unlike the classic OpenAI
-/// endpoint which used cents. If a card ever shows spend 100x off, this is
-/// the knob.
-const USAGE_TO_USD: f64 = 1.0;
+/// The `total_usage` field's unit. AihubMix follows the classic OpenAI
+/// dashboard-billing convention: usage is reported in **cents**. Verified
+/// against a live console (total_usage 7.862 → $0.08 shown). If a card ever
+/// shows spend 100x off, this is the knob.
+const USAGE_TO_USD: f64 = 0.01;
 
 fn find_api_key() -> Option<String> {
     stored_api_key(ID, &["AIHUBMIX_API_KEY"])
