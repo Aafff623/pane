@@ -19,6 +19,10 @@
   the long-context rate table to the new tiers.
 
 ### Changed
+- **OpenCode meters drop the "this PC only" tag** — the caveat crowded
+  every row of the card (and its share cards); the local-counting
+  caveat now lives in the docs instead. Also fixed a cosmetic quirk
+  where an idle session could read "$-0.00 of $12".
 - **Confirmations look like Pane now** — using a Codex reset credit or
   resetting all layouts used to pop the browser's bare "localhost says"
   dialog; both now use an in-app card-styled dialog matching the app

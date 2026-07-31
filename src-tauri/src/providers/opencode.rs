@@ -101,19 +101,19 @@ fn fetch() -> Result<Snapshot, String> {
         Metric::progress(
             "Session",
             w.session / SESSION_LIMIT * 100.0,
-            Some(format!("${:.2} of ${SESSION_LIMIT:.0} · this PC only", w.session)),
+            Some(format!("${:.2} of ${SESSION_LIMIT:.0}", w.session)),
         )
         .with_reset(Some(w.session_resets_at), Some(SESSION_MS as i64)),
         Metric::progress(
             "Weekly",
             w.weekly / WEEKLY_LIMIT * 100.0,
-            Some(format!("${:.2} of ${WEEKLY_LIMIT:.0} · this PC only", w.weekly)),
+            Some(format!("${:.2} of ${WEEKLY_LIMIT:.0}", w.weekly)),
         )
         .with_reset(Some(w.weekly_resets_at), Some(WEEK_MS as i64)),
         Metric::progress(
             "Monthly",
             w.monthly / MONTHLY_LIMIT * 100.0,
-            Some(format!("${:.2} of ${MONTHLY_LIMIT:.0} · this PC only", w.monthly)),
+            Some(format!("${:.2} of ${MONTHLY_LIMIT:.0}", w.monthly)),
         )
         .with_reset(Some(w.monthly_resets_at), Some(w.monthly_period_ms)),
     ];
@@ -140,8 +140,9 @@ fn go_windows(rows: &[(f64, f64)], now_ms: f64) -> GoWindows {
     let sum_range = |start: f64, end: f64| -> f64 {
         let total: f64 =
             rows.iter().filter(|(ts, _)| *ts >= start && *ts < end).map(|(_, c)| c).sum();
-        // Snap to a hundredth of a cent to shed float-summation noise.
-        (total * 10_000.0).round() / 10_000.0
+        // Snap to a hundredth of a cent to shed float-summation noise;
+        // max(0.0) also normalizes -0.0, which would render as "$-0.00".
+        ((total * 10_000.0).round() / 10_000.0).max(0.0)
     };
 
     let session_start = now_ms - SESSION_MS;
