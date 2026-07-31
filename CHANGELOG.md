@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.4.28 — 2026-07-31
 
 ### Added
 - **"What's new" after every update** — the first time you open Pane on a
