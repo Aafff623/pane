@@ -56,12 +56,13 @@ async fn fetch() -> Result<Snapshot, String> {
     let sub: Value = sub_resp.json().await.map_err(|e| format!("subscription parse: {e}"))?;
 
     // hard_limit_usd is the account's spending cap; soft_limit is the alert
-    // threshold. Meter against the hard limit — the real ceiling.
-    let limit = sub
-        .get("hard_limit_usd")
-        .or_else(|| sub.get("system_hard_limit_usd"))
-        .and_then(Value::as_f64)
-        .filter(|v| *v > 0.0);
+    // threshold. Meter against the hard limit — the real ceiling. Each
+    // field falls through on missing OR zero (an account with no custom
+    // limit reports hard_limit_usd 0 while the system limit still applies).
+    let limit = ["hard_limit_usd", "system_hard_limit_usd"]
+        .iter()
+        .filter_map(|k| sub.get(*k).and_then(Value::as_f64))
+        .find(|v| *v > 0.0);
 
     // Usage is best-effort: a missing/failed usage call still leaves a
     // valid card showing the limit, rather than erroring the whole card.
