@@ -67,11 +67,10 @@ Ground rules that apply to every provider:
   documented plan limits using OpenCode's real windows: a rolling
   5-hour session (resets as the oldest in-window spend ages out), a UTC
   Monday-start week, and a monthly cycle anchored to your first-ever Go
-  usage. **The meters say "this PC only" because they are:** Go quotas
-  are counted account-wide on OpenCode's servers, so usage from your
-  other devices or from other participants on a shared subscription
-  can't appear here. The Console quick-link shows the account-wide
-  truth.
+  usage. **Note the meters count this PC only:** Go quotas are counted
+  account-wide on OpenCode's servers, so usage from your other devices
+  or from other participants on a shared subscription can't appear
+  here. The Console quick-link shows the account-wide truth.
 
 ## GitHub Copilot
 
