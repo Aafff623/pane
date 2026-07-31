@@ -92,6 +92,9 @@ fn config_with_defaults(mut cfg: Value) -> Value {
     obj.entry("proxy").or_insert(json!({ "enabled": false, "url": "" }));
     obj.entry("showTotalSpend").or_insert(json!(true));
     obj.entry("welcomeDismissed").or_insert(json!(false));
+    // Empty = "never recorded": the frontend uses it to tell a fresh
+    // install (no What's-new popup) from an update (popup with the notes).
+    obj.entry("lastSeenVersion").or_insert(json!(""));
     // Telemetry defaults ON and must SAY so: without this default the
     // Settings toggle read `undefined` (rendered off) while the sender's
     // own default kept transmitting — a switch that displays off while
@@ -134,6 +137,7 @@ const CONFIG_KEYS: &[&str] = &[
     "proxy",
     "showTotalSpend",
     "welcomeDismissed",
+    "lastSeenVersion",
     "telemetry",
 ];
 
