@@ -1,3 +1,4 @@
+pub mod aihubmix;
 pub mod antigravity;
 pub mod claude;
 pub mod codebuff;

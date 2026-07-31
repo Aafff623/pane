@@ -197,6 +197,7 @@ const ALL_PROVIDERS: [string, string][] = [
   ["ollama", "Ollama"],
   ["codebuff", "Codebuff"],
   ["kilo", "Kilo"],
+  ["aihubmix", "AihubMix"],
 ];
 
 // Same quick links the Mac app ships (status pages + vendor dashboards).
@@ -229,6 +230,7 @@ const PROVIDER_LINKS: Record<string, { label: string; url: string }[]> = {
     { label: "API Keys", url: "https://z.ai/manage-apikey/apikey-list" },
   ],
   opencode: [{ label: "Console", url: "https://opencode.ai/console" }],
+  aihubmix: [{ label: "Console", url: "https://console.aihubmix.com/" }],
   deepseek: [
     { label: "Status", url: "https://status.deepseek.com/" },
     { label: "Platform", url: "https://platform.deepseek.com/usage" },
@@ -258,6 +260,7 @@ const SPEND_COLORS: Record<string, string> = {
   cursor: "var(--spend-cursor)", // brand black, theme-flipped in CSS
   moonshot: "#e0b354", // moon gold
   hermes: "#c2a878", // Nous tan
+  aihubmix: "#5eead4", // hub teal
   __others__: "#8b8b94", // the folded small-spenders wedge
 };
 

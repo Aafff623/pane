@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+### Added
+- **AihubMix provider (#18)** — the OpenAI-compatible multi-model
+  gateway gets a full card: usage metered against your account's
+  spending limit (key auto-detected from OpenCode, or pasted in
+  Settings), plus Today / Yesterday / 30-day spend, per-model breakdown,
+  and the Usage Trend from requests routed through OpenCode. AihubMix
+  dollars get their own donut slice, separate from the OpenCode plan.
+
 ### Fixed
 - **GPT-5.6 Terra and Luna price at OpenAI's new rates** — OpenAI cut
   both models' prices (Luna is 5× cheaper) and the public price catalogs

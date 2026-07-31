@@ -184,6 +184,17 @@ Ground rules that apply to every provider:
 - **Calls:** `app.kilo.ai/api/trpc/user.getCreditBlocks,kiloPass.getState`.
 - **Shows:** credit blocks, Kilo Pass window, tier.
 
+## AihubMix
+
+- **Reads:** pasted key (Settings), `AIHUBMIX_API_KEY`, or the `aihubmix`
+  key OpenCode stores in its own `auth.json` (AihubMix is typically used
+  through OpenCode as an OpenAI-compatible gateway).
+- **Calls:** `aihubmix.com/v1/dashboard/billing/subscription` (spending
+  limit) and `/usage` (month-to-date usage).
+- **Shows:** usage metered against your account's spending limit, plan.
+  Requests routed through OpenCode also appear in the Total Spend donut
+  from OpenCode's local log, same as any other OpenCode model.
+
 ---
 
 Provider request formats were researched from two MIT-licensed macOS

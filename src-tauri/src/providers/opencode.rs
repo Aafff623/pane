@@ -244,9 +244,11 @@ fn utc_date(year: i32, month: u32, day: u32, h: u32, m: u32, s: u32, ms: u32) ->
         .unwrap_or(0.0)
 }
 
-/// (timestamp ms, cost $, tokens, model) of every priced message, any
-/// provider — this is money spent through OpenCode, used by Total Spend.
-pub fn collect_cost_events() -> Vec<(f64, f64, f64, String)> {
+/// (timestamp ms, cost $, tokens, model, provider) of every priced
+/// message, any provider — this is money spent through OpenCode, used by
+/// Total Spend. The provider id lets the spend engine split gateway
+/// providers (AihubMix) into their own slice.
+pub fn collect_cost_events() -> Vec<(f64, f64, f64, String, String)> {
     with_db_copy(|db| {
         Ok(read_messages(db)?
             .into_iter()
@@ -254,7 +256,7 @@ pub fn collect_cost_events() -> Vec<(f64, f64, f64, String)> {
             // tokens are usage facts and count at their true $0 price.
             // Rows with neither cost nor tokens (aborted turns) drop.
             .filter(|r| r.cost > 0.0 || r.tokens > 0.0)
-            .map(|r| (r.ts, r.cost, r.tokens, r.model))
+            .map(|r| (r.ts, r.cost, r.tokens, r.model, r.provider))
             .collect())
     })
     .unwrap_or_default()
