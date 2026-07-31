@@ -260,6 +260,7 @@ const SPEND_COLORS: Record<string, string> = {
   cursor: "var(--spend-cursor)", // brand black, theme-flipped in CSS
   moonshot: "#e0b354", // moon gold
   hermes: "#c2a878", // Nous tan
+  aihubmix: "#5eead4", // hub teal
   __others__: "#8b8b94", // the folded small-spenders wedge
 };
 

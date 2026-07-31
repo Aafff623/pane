@@ -1172,14 +1172,24 @@ fn grok() -> ProviderSpend {
 
 /// OpenCode stores real per-message costs in its database — no pricing
 /// table needed.
-fn opencode() -> ProviderSpend {
-    let mut data = FileData::default();
-    for (ts_ms, cost, tokens, model) in providers::opencode::collect_cost_events() {
+/// OpenCode's local log covers every provider routed through it. Gateway
+/// providers with their own Pane card (AihubMix) split into their own
+/// spend slice — their dollars belong to that account, and the split gives
+/// the card its Today/Yesterday/30d rows and Usage Trend; everything else
+/// stays under OpenCode.
+fn opencode() -> (ProviderSpend, ProviderSpend) {
+    let mut oc = FileData::default();
+    let mut aihubmix = FileData::default();
+    for (ts_ms, cost, tokens, model, provider) in providers::opencode::collect_cost_events() {
         if let Some(ts) = DateTime::from_timestamp_millis(ts_ms as i64) {
-            add_event(&mut data, ts, &model, cost, tokens);
+            let target = if provider == "aihubmix" { &mut aihubmix } else { &mut oc };
+            add_event(target, ts, &model, cost, tokens);
         }
     }
-    build_spend("opencode", "OpenCode", data)
+    (
+        build_spend("opencode", "OpenCode", oc),
+        build_spend("aihubmix", "AihubMix", aihubmix),
+    )
 }
 
 /// Devin CLI keeps per-request token metrics in its local sessions.db
@@ -1819,11 +1829,13 @@ pub fn collect(cursor_csv: Option<String>) -> Vec<ProviderSpend> {
             hermes_rest.push(build_spend(id, name, data));
         }
     }
+    let (opencode_sp, aihubmix_sp) = opencode();
     let mut list = vec![
         claude_sp,
         codex(),
         grok(),
-        opencode(),
+        opencode_sp,
+        aihubmix_sp,
         devin(),
         minimax(minimax_extra),
         moonshot(),
