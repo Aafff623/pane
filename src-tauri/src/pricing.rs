@@ -161,7 +161,7 @@ pub fn generation() -> u64 {
 /// fingerprinted below — an app update that reprices the same files would
 /// otherwise leave history at the old dollars until upstream happens to
 /// rewrite a catalog.
-const CORRECTIONS_REV: u32 = 1;
+const CORRECTIONS_REV: u32 = 2; // 2: "-priority" slugs price at base × multiplier
 
 /// Stable fingerprint of the effective pricing inputs: the on-disk catalog
 /// files plus this binary's corrections revision. The persistent spend
@@ -480,6 +480,24 @@ pub fn lookup(model: &str) -> Option<Price> {
     result
 }
 
+/// Every rate in `p` multiplied by `m` — service tiers (fast, priority)
+/// bill at a multiple of the base model's whole rate card.
+fn scaled_price(p: &Price, m: f64) -> Price {
+    let scale = |v: Option<f64>| v.map(|x| x * m);
+    Price {
+        input: p.input * m,
+        output: p.output * m,
+        cache_read: p.cache_read * m,
+        cache_write: p.cache_write * m,
+        input_200k: scale(p.input_200k),
+        output_200k: scale(p.output_200k),
+        cache_read_200k: scale(p.cache_read_200k),
+        cache_write_200k: scale(p.cache_write_200k),
+        cache_write_1h: scale(p.cache_write_1h),
+        cache_write_1h_200k: scale(p.cache_write_1h_200k),
+    }
+}
+
 fn resolve(s: &Store, model: &str, depth: u8) -> Option<Price> {
     // Alias rules come from a third-party URL; a crafted rule set could
     // otherwise bounce a name between an alias and the -max strip below
@@ -522,19 +540,25 @@ fn resolve(s: &Store, model: &str, depth: u8) -> Option<Price> {
             }
         };
         if let Some(p) = resolve(s, base, depth + 1) {
-            let scale = |v: Option<f64>| v.map(|x| x * m);
-            return Some(Price {
-                input: p.input * m,
-                output: p.output * m,
-                cache_read: p.cache_read * m,
-                cache_write: p.cache_write * m,
-                input_200k: scale(p.input_200k),
-                output_200k: scale(p.output_200k),
-                cache_read_200k: scale(p.cache_read_200k),
-                cache_write_200k: scale(p.cache_write_200k),
-                cache_write_1h: scale(p.cache_write_1h),
-                cache_write_1h_200k: scale(p.cache_write_1h_200k),
-            });
+            return Some(scaled_price(&p, m));
+        }
+    }
+    // Priority processing tier: some CLIs (Devin) bake the service tier
+    // into the slug itself ("gpt-5.6-luna-xhigh-priority") instead of
+    // flagging it per turn the way Codex rollouts do. OpenAI bills
+    // priority at a per-model multiplier over the standard rate — keep
+    // this table in sync with spend.rs's codex_priority_multiplier.
+    if let Some(base) = canonical.strip_suffix("-priority") {
+        let mut mkey = base;
+        while let Some(next) = ["-xhigh", "-light", "-low", "-medium", "-high", "-max", "-ultra"]
+            .iter()
+            .find_map(|suf| mkey.strip_suffix(suf))
+        {
+            mkey = next;
+        }
+        let m = if matches!(mkey, "gpt-5.5" | "gpt-5.5-pro") { 2.5 } else { 2.0 };
+        if let Some(p) = resolve(s, base, depth + 1) {
+            return Some(scaled_price(&p, m));
         }
     }
     // LiteLLM fuzzy: provider-prefixed keys like "anthropic/claude-…".
@@ -609,6 +633,25 @@ mod tests {
         let map = super::parse_modelsdev(&doc);
         let p = map.get("kimi-k3").expect("kimi-k3 parsed");
         assert_eq!((p.input, p.output, p.cache_read, p.cache_write), (3.0, 15.0, 0.3, 3.0));
+    }
+
+    #[test]
+    fn priority_slugs_price_at_base_times_priority_multiplier() {
+        let mut store = super::Store::default();
+        store
+            .supplement
+            .insert("gpt-5.6-luna".into(), super::Price::flat(0.2, 1.2, 0.02, 0.25));
+        // Devin logs the service tier inside the slug; effort tokens between
+        // the base and -priority must not break resolution.
+        let p = super::resolve(&store, "gpt-5.6-luna-xhigh-priority", 0).unwrap();
+        assert!((p.input - 0.4).abs() < 1e-9);
+        assert!((p.output - 2.4).abs() < 1e-9);
+        assert!((p.cache_read - 0.04).abs() < 1e-9);
+
+        // gpt-5.5's priority tier is 2.5x, not the default 2x.
+        store.supplement.insert("gpt-5.5".into(), super::Price::flat(10.0, 45.0, 1.0, 1.25));
+        let p55 = super::resolve(&store, "gpt-5.5-priority", 0).unwrap();
+        assert!((p55.input - 25.0).abs() < 1e-9);
     }
 
     #[test]

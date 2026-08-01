@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+- **"-priority" model slugs are priced** — Devin logs OpenAI's priority
+  service tier inside the model name (`gpt-5.6-luna-xhigh-priority`),
+  which no catalog carries, so those requests counted tokens but no
+  dollars. They now bill at the base model's rates times the priority
+  multiplier (2× standard, 2.5× for gpt-5.5), matching how Codex
+  priority turns are already priced.
+
 ## 0.4.28 — 2026-07-31
 
 ### Added
