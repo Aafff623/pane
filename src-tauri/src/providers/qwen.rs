@@ -16,6 +16,7 @@
 
 use super::{http, stored_api_key, Metric, Snapshot};
 use serde_json::Value;
+use std::sync::atomic::{AtomicI64, Ordering};
 
 const ID: &str = "qwen";
 const NAME: &str = "Qwen Code";
@@ -59,9 +60,20 @@ async fn fetch() -> Result<Snapshot, String> {
     }
 }
 
+/// The console currently answers ConsoleNeedLogin to every API-key auth
+/// shape (it wants a browser session, which Pane will never touch). Keep
+/// trying — Alibaba may open key auth someday — but after a failure stand
+/// down for 6 hours so refreshes don't hammer their console.
+static QUOTA_BLOCKED_UNTIL: AtomicI64 = AtomicI64::new(0);
+
 /// The console RPC speaks whichever auth header it happens to accept;
 /// try the common spellings against both regions, first hit wins.
 async fn fetch_quota(key: &str) -> Option<Snapshot> {
+    let now = chrono::Utc::now().timestamp();
+    if now < QUOTA_BLOCKED_UNTIL.load(Ordering::Relaxed) {
+        return None;
+    }
+    QUOTA_BLOCKED_UNTIL.store(now + 6 * 3600, Ordering::Relaxed);
     for console in CONSOLES {
         for header in ["authorization", "x-api-key", "x-dashscope-api-key"] {
             let value = if header == "authorization" { format!("Bearer {key}") } else { key.to_string() };
@@ -78,6 +90,8 @@ async fn fetch_quota(key: &str) -> Option<Snapshot> {
             }
             let Ok(doc) = resp.json::<Value>().await else { continue };
             if let Some(snap) = parse_quota(&doc) {
+                // Working auth: lift the stand-down so quota stays live.
+                QUOTA_BLOCKED_UNTIL.store(0, Ordering::Relaxed);
                 return Some(snap);
             }
         }
@@ -137,6 +151,63 @@ fn parse_quota(doc: &Value) -> Option<Snapshot> {
         .map(str::to_string)
         .or(Some("Coding Plan".into()));
     Some(Snapshot::ok(ID, NAME, plan, metrics))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Live diagnostic (ignored): shows what each console/header attempt
+    /// returns so quota-auth failures can be debugged without ever
+    /// printing the key. Run:
+    ///   cargo test qwen_quota_live_probe -- --ignored --nocapture
+    #[tokio::test]
+    #[ignore]
+    async fn qwen_quota_live_probe() {
+        let Some(key) = find_api_key() else {
+            println!("no key found");
+            return;
+        };
+        for console in CONSOLES {
+            for header in ["authorization", "x-api-key", "x-dashscope-api-key"] {
+                let value =
+                    if header == "authorization" { format!("Bearer {key}") } else { key.clone() };
+                let resp = http()
+                    .post(format!("{console}{RPC_QUERY}"))
+                    .header(header, value)
+                    .header("accept", "application/json")
+                    .json(&serde_json::json!({}))
+                    .send()
+                    .await;
+                match resp {
+                    Ok(r) => {
+                        let status = r.status();
+                        let body = r.text().await.unwrap_or_default();
+                        let trimmed: String = body.chars().take(300).collect();
+                        println!("{console} [{header}] -> {status}: {trimmed}");
+                    }
+                    Err(e) => println!("{console} [{header}] -> error: {e}"),
+                }
+            }
+        }
+        // Does the coding endpoint itself expose quota via response headers?
+        for base in
+            ["https://coding-intl.dashscope.aliyuncs.com/v1", "https://coding.dashscope.aliyuncs.com/v1"]
+        {
+            match http().get(format!("{base}/models")).bearer_auth(&key).send().await {
+                Ok(r) => {
+                    println!("{base}/models -> {}", r.status());
+                    for (name, value) in r.headers() {
+                        let n = name.as_str().to_ascii_lowercase();
+                        if n.contains("limit") || n.contains("quota") || n.contains("remain") || n.contains("usage") {
+                            println!("  header {n}: {:?}", value);
+                        }
+                    }
+                }
+                Err(e) => println!("{base}/models -> error: {e}"),
+            }
+        }
+    }
 }
 
 /// Fallback card from the CLI's own per-request ledger: request and token
