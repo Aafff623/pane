@@ -161,7 +161,7 @@ pub fn generation() -> u64 {
 /// fingerprinted below — an app update that reprices the same files would
 /// otherwise leave history at the old dollars until upstream happens to
 /// rewrite a catalog.
-const CORRECTIONS_REV: u32 = 2; // 2: "-priority" slugs price at base × multiplier
+const CORRECTIONS_REV: u32 = 3; // 3: zero-rate catalog placeholders no longer price at $0.00
 
 /// Stable fingerprint of the effective pricing inputs: the on-disk catalog
 /// files plus this binary's corrections revision. The persistent spend
@@ -512,10 +512,18 @@ fn resolve(s: &Store, model: &str, depth: u8) -> Option<Price> {
         .map(|(_, c)| c.clone())
         .unwrap_or_else(|| model.to_string());
 
-    if let Some(p) = s.supplement.get(&canonical) {
+    // A catalog row with zero input AND output rates is ambiguous: brand-new
+    // slugs often land as 0/0 placeholders (qwen3.8-max), but free-tier and
+    // local models are legitimately 0/0. Resolution order settles it — the
+    // filtered chain below only takes entries with real rates, and 0/0
+    // entries are reconsidered near the end (after the baked table), so a
+    // placeholder loses to real rates anywhere while a model that is 0/0
+    // in every source still prices as genuinely free, never as unpriced.
+    let real = |p: &&Price| p.input > 0.0 || p.output > 0.0;
+    if let Some(p) = s.supplement.get(&canonical).filter(real) {
         return Some(*p);
     }
-    if let Some(p) = s.litellm.get(&canonical) {
+    if let Some(p) = s.litellm.get(&canonical).filter(real) {
         return Some(*p);
     }
     // Fast tier: base price × the supplement's multiplier (default 2). The
@@ -566,12 +574,12 @@ fn resolve(s: &Store, model: &str, depth: u8) -> Option<Price> {
     if let Some(p) = s
         .litellm
         .iter()
-        .find(|(k, _)| k.rsplit('/').next() == Some(canonical.as_str()))
+        .find(|(k, p)| k.rsplit('/').next() == Some(canonical.as_str()) && real(&p))
         .map(|(_, p)| *p)
     {
         return Some(p);
     }
-    if let Some(p) = s.modelsdev.get(&canonical) {
+    if let Some(p) = s.modelsdev.get(&canonical).filter(real) {
         return Some(*p);
     }
     // Vendor-documented rates for models the live catalogs haven't learned
@@ -579,6 +587,26 @@ fn resolve(s: &Store, model: &str, depth: u8) -> Option<Price> {
     // always wins the moment one ships. Keep this list tiny and sourced.
     if let Some(p) = builtin_price(&canonical) {
         return Some(p);
+    }
+    // Zero-rate entries, reconsidered: nothing anywhere carries real rates
+    // for this slug, so a 0/0 catalog row means the model is genuinely
+    // free — take it, keeping free models at $0.00 without an unpriced ⚠.
+    if let Some(p) = s.supplement.get(&canonical) {
+        return Some(*p);
+    }
+    if let Some(p) = s.litellm.get(&canonical) {
+        return Some(*p);
+    }
+    if let Some(p) = s
+        .litellm
+        .iter()
+        .find(|(k, _)| k.rsplit('/').next() == Some(canonical.as_str()))
+        .map(|(_, p)| *p)
+    {
+        return Some(p);
+    }
+    if let Some(p) = s.modelsdev.get(&canonical) {
+        return Some(*p);
     }
     // Slug tails no catalog carries under their own name, billed at the
     // base model's per-token rates: reasoning-effort tiers (they change how
@@ -607,6 +635,10 @@ fn builtin_price(canonical: &str) -> Option<Price> {
         .unwrap_or(canonical);
     match bare {
         "kimi-k3" | "kimi-k3-code" => Some(Price::flat(3.0, 15.0, 0.3, 3.0)),
+        // Alibaba Model Studio, GA'd 2026-08-03 (USD/MTok): input $2,
+        // output $6, implicit cache read $0.25, explicit cache write $2.50.
+        // Public catalogs still carry 0/0 placeholders for these slugs.
+        "qwen3.8-max" | "qwen3.8-max-preview" => Some(Price::flat(2.0, 6.0, 0.25, 2.5)),
         _ => None,
     }
 }
@@ -633,6 +665,28 @@ mod tests {
         let map = super::parse_modelsdev(&doc);
         let p = map.get("kimi-k3").expect("kimi-k3 parsed");
         assert_eq!((p.input, p.output, p.cache_read, p.cache_write), (3.0, 15.0, 0.3, 3.0));
+    }
+
+    #[test]
+    fn zero_rate_catalog_placeholders_are_skipped() {
+        let mut store = super::Store::default();
+        store.litellm.insert("qwen-test".into(), super::Price::flat(0.0, 0.0, 0.0, 0.0));
+        store.modelsdev.insert("qwen-test".into(), super::Price::flat(1.0, 5.0, 0.1, 1.25));
+        // The 0/0 litellm placeholder must not shadow models.dev's real price.
+        let p = super::resolve(&store, "qwen-test", 0).unwrap();
+        assert!((p.input - 1.0).abs() < 1e-9);
+
+        // Zero in EVERY source → the model is genuinely free: price $0.00
+        // (no unpriced ⚠), like ":free" gateway variants and local models.
+        store.modelsdev.insert("qwen-test".into(), super::Price::flat(0.0, 0.0, 0.0, 0.0));
+        let free = super::resolve(&store, "qwen-test", 0).unwrap();
+        assert_eq!((free.input, free.output), (0.0, 0.0));
+
+        // The baked table outranks 0/0 placeholders: a catalog that lists
+        // qwen3.8-max as 0/0 must not shadow Alibaba's documented rates.
+        store.litellm.insert("qwen3.8-max".into(), super::Price::flat(0.0, 0.0, 0.0, 0.0));
+        let baked = super::resolve(&store, "qwen3.8-max", 0).unwrap();
+        assert!((baked.input - 2.0).abs() < 1e-9);
     }
 
     #[test]

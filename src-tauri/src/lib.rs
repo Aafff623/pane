@@ -372,7 +372,7 @@ struct StripEntry {
 /// allowlist for update_tray_strip: ids from the frontend are validated
 /// against this before being spliced into tray icon ids, and stale strip
 /// icons are removed for exactly this set.
-const STRIP_PROVIDER_IDS: [&str; 18] = [
+const STRIP_PROVIDER_IDS: [&str; 19] = [
     "claude",
     "codex",
     "cursor",
@@ -391,6 +391,7 @@ const STRIP_PROVIDER_IDS: [&str; 18] = [
     "codebuff",
     "kilo",
     "aihubmix",
+    "qwen",
 ];
 
 #[tauri::command]
@@ -565,6 +566,7 @@ async fn fetch_usage(app: tauri::AppHandle) -> Vec<providers::Snapshot> {
         ("codebuff", Box::pin(guarded("codebuff", "Codebuff", providers::codebuff::snapshot()))),
         ("kilo", Box::pin(guarded("kilo", "Kilo", providers::kilo::snapshot()))),
         ("aihubmix", Box::pin(guarded("aihubmix", "AihubMix", providers::aihubmix::snapshot()))),
+        ("qwen", Box::pin(guarded("qwen", "Qwen Code", providers::qwen::snapshot()))),
     ];
     let futs: Vec<(&str, BoxedSnap)> = futs
         .into_iter()
@@ -759,6 +761,7 @@ fn set_api_key(provider: String, key: String) -> Result<(), String> {
             | "codebuff"
             | "kilo"
             | "aihubmix"
+            | "qwen"
     ) {
         return Err(format!("unknown provider: {provider}"));
     }

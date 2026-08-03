@@ -133,7 +133,7 @@ statistic (random ID, version, which providers are enabled, provider
 success/failure counts — never amounts or error text) — see
 [Privacy](#privacy--security) for the full contract and the off switch.
 
-## Providers (18 and counting)
+## Providers (19 and counting)
 
 | Provider | How Pane connects |
 |---|---|
@@ -155,6 +155,7 @@ success/failure counts — never amounts or error text) — see
 | Codebuff | `codebuff login` credentials file or API key → credits + weekly limit |
 | Kilo | Kilo CLI login file or API key → credit blocks + Kilo Pass |
 | AihubMix | API key (Settings or auto-detected from OpenCode) → usage vs spending limit |
+| Qwen Code | Coding Plan key (Settings or env) → 5h/weekly/monthly request quotas + local spend |
 
 *OpenCode has no public usage API yet
 ([anomalyco/opencode#10448](https://github.com/anomalyco/opencode/issues/10448));

@@ -202,6 +202,7 @@ const ALL_PROVIDERS: [string, string][] = [
   ["codebuff", "Codebuff"],
   ["kilo", "Kilo"],
   ["aihubmix", "AihubMix"],
+  ["qwen", "Qwen Code"],
 ];
 
 // Same quick links the Mac app ships (status pages + vendor dashboards).
@@ -235,6 +236,9 @@ const PROVIDER_LINKS: Record<string, { label: string; url: string }[]> = {
   ],
   opencode: [{ label: "Console", url: "https://opencode.ai/console" }],
   aihubmix: [{ label: "Console", url: "https://console.aihubmix.com/" }],
+  qwen: [
+    { label: "Coding Plan", url: "https://modelstudio.console.alibabacloud.com/ap-southeast-1/?tab=globalset#/efm/coding_plan" },
+  ],
   deepseek: [
     { label: "Status", url: "https://status.deepseek.com/" },
     { label: "Platform", url: "https://platform.deepseek.com/usage" },
@@ -265,6 +269,7 @@ const SPEND_COLORS: Record<string, string> = {
   moonshot: "#e0b354", // moon gold
   hermes: "#c2a878", // Nous tan
   aihubmix: "#5eead4", // hub teal
+  qwen: "#8b5cf6", // Qwen violet
   __others__: "#8b8b94", // the folded small-spenders wedge
 };
 

@@ -2,7 +2,32 @@
 
 ## Unreleased
 
+### Added
+- **Qwen Code provider (#19)** — Alibaba Model Studio's Coding Plan gets
+  a card: the plan's request-counted 5-hour / weekly / monthly quotas
+  with resets and plan name, read via the Model Studio console's own
+  quota call (key from Settings, `BAILIAN_TOKEN_PLAN_API_KEY`, or
+  `DASHSCOPE_API_KEY`); falls back to local request/token counts when
+  the console won't take the key. Today / Yesterday / 30-day spend, the
+  per-model breakdown, and a donut slice come from the Qwen Code CLI's
+  own per-request ledger.
+- **Claude Code × AihubMix spend lands on the AihubMix card** — sessions
+  run against AihubMix's Anthropic-compatible endpoint log qwen-family
+  models into Claude Code's local history; those rows now re-route to
+  the AihubMix slice (same mechanism as MiniMax-routed sessions)
+  instead of inflating the Claude card.
+
 ### Fixed
+- **Zero-rate catalog placeholders no longer price requests at $0.00** —
+  public catalogs often list brand-new models (e.g. qwen3.8-max) with
+  0/0 placeholder rates, which silently billed every request at zero
+  and could flip a model's spend to $0 after a catalog refresh. Those
+  rows are now skipped: a source with real rates wins, while a model
+  listed 0/0 in every source still prices as genuinely free ($0.00, no
+  warning — ":free" variants and local models keep working).
+  qwen3.8-max (GA'd 2026-08-03, still 0/0 in every public catalog) gets
+  Alibaba's documented rates baked in — $2/$6 per MTok, $0.25 cache
+  reads — consulted only until the live catalogs learn them.
 - **"-priority" model slugs are priced** — Devin logs OpenAI's priority
   service tier inside the model name (`gpt-5.6-luna-xhigh-priority`),
   which no catalog carries, so those requests counted tokens but no

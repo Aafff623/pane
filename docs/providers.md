@@ -192,7 +192,30 @@ Ground rules that apply to every provider:
   limit) and `/usage` (month-to-date usage).
 - **Shows:** usage metered against your account's spending limit, plan.
   Requests routed through OpenCode also appear in the Total Spend donut
-  from OpenCode's local log, same as any other OpenCode model.
+  from OpenCode's local log, same as any other OpenCode model. Claude
+  Code sessions pointed at AihubMix's Anthropic-compatible endpoint
+  (qwen-family models in `~\.claude\projects\` logs, matched
+  case-insensitively) are re-routed here from the Claude card, the same
+  way MiniMax-routed sessions are. Claude Code logs don't record which
+  gateway served a request, so this assumes qwen models reached Claude
+  Code via AihubMix — sessions run through Alibaba's own
+  Anthropic-compatible proxy would land here too.
+
+## Qwen Code (Alibaba Coding Plan)
+
+- **Reads:** pasted key (Settings), `BAILIAN_TOKEN_PLAN_API_KEY` (the env
+  var Qwen Code itself uses), or `DASHSCOPE_API_KEY`; local spend from
+  the CLI's own per-request ledger
+  (`%USERPROFILE%\.qwen\usage\token-usage-YYYY-MM.jsonl`).
+- **Calls:** the Model Studio console's Coding Plan RPC
+  (`modelstudio.console.alibabacloud.com/data/api.json`, China-console
+  fallback) — the same call the Coding Plan page makes; Alibaba publishes
+  no dedicated quota API (approach credited to CodexBar's notes).
+- **Shows:** the plan's three request-counted windows — rolling 5-hour
+  session, weekly, monthly — with resets and plan name. If the console
+  RPC rejects the key, the card falls back to local request/token counts
+  for today and the month. Spend rows and the donut slice come from the
+  local ledger either way.
 
 ---
 

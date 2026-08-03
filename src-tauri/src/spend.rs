@@ -601,22 +601,23 @@ fn claude_line(st: &mut ClaudeFileState, line: &str, data: &mut FileData) {
 /// Move every event whose model starts with `prefix` out of `data` into a
 /// new FileData (unpriced tallies included). Used to re-route usage that a
 /// CLI logged on another vendor's behalf.
+/// Prefix match is case-insensitive: gateways spell the same family both
+/// ways ("qwen3.8-max", "Qwen/Qwen3-235B") and a case miss would leave
+/// rows on the wrong card.
 fn split_models(data: &mut FileData, prefix: &str) -> FileData {
+    let prefix = prefix.to_ascii_lowercase();
+    let matches = |m: &str| m.to_ascii_lowercase().starts_with(&prefix);
     let mut out = FileData::default();
     data.days.retain(|(day, model), v| {
-        if model.starts_with(prefix) {
+        if matches(model) {
             out.days.insert((*day, model.clone()), *v);
             false
         } else {
             true
         }
     });
-    let moved: Vec<String> = data
-        .unpriced
-        .keys()
-        .filter(|m| m.starts_with(prefix))
-        .cloned()
-        .collect();
+    let moved: Vec<String> =
+        data.unpriced.keys().filter(|m| matches(m)).cloned().collect();
     for m in moved {
         if let Some(c) = data.unpriced.remove(&m) {
             out.unpriced.insert(m, c);
@@ -633,7 +634,7 @@ fn split_models(data: &mut FileData, prefix: &str) -> FileData {
 /// (ANTHROPIC_BASE_URL); those sessions log MiniMax models into the same
 /// files. That usage is split out and returned separately — it belongs on
 /// the MiniMax card, not Claude's.
-fn claude() -> (ProviderSpend, FileData) {
+fn claude() -> (ProviderSpend, FileData, FileData) {
     let root = std::env::var("CLAUDE_CONFIG_DIR")
         .map(PathBuf::from)
         .unwrap_or_else(|_| dirs::home_dir().unwrap_or_default().join(".claude"))
@@ -648,7 +649,11 @@ fn claude() -> (ProviderSpend, FileData) {
         merge_data(&mut all, data);
     }
     let minimax = split_models(&mut all, "MiniMax");
-    (build_spend("claude", "Claude", all), minimax)
+    // Qwen-family models in Claude Code logs mean the session ran against
+    // AihubMix's Anthropic-compatible endpoint (the only way qwen slugs
+    // appear there) — those dollars belong on the AihubMix card.
+    let qwen_via_aihubmix = split_models(&mut all, "qwen");
+    (build_spend("claude", "Claude", all), minimax, qwen_via_aihubmix)
 }
 
 /// MiniMax spend: the Agent CLI's local token_usage store (its own cost_usd
@@ -1177,7 +1182,10 @@ fn grok() -> ProviderSpend {
 /// spend slice — their dollars belong to that account, and the split gives
 /// the card its Today/Yesterday/30d rows and Usage Trend; everything else
 /// stays under OpenCode.
-fn opencode() -> (ProviderSpend, ProviderSpend) {
+/// Returns OpenCode's spend plus the AihubMix rows as raw FileData — the
+/// caller merges in AihubMix traffic from other CLIs (Claude Code) before
+/// building the card's spend.
+fn opencode() -> (ProviderSpend, FileData) {
     let mut oc = FileData::default();
     let mut aihubmix = FileData::default();
     for (ts_ms, cost, tokens, model, provider) in providers::opencode::collect_cost_events() {
@@ -1186,10 +1194,7 @@ fn opencode() -> (ProviderSpend, ProviderSpend) {
             add_event(target, ts, &model, cost, tokens);
         }
     }
-    (
-        build_spend("opencode", "OpenCode", oc),
-        build_spend("aihubmix", "AihubMix", aihubmix),
-    )
+    (build_spend("opencode", "OpenCode", oc), aihubmix)
 }
 
 /// Devin CLI keeps per-request token metrics in its local sessions.db
@@ -1299,6 +1304,69 @@ fn moonshot_line(line: &str, data: &mut FileData) {
         }
         None => note_unpriced(data, ts, &model, tokens),
     }
+}
+
+/// One Qwen Code token-usage line → spend event. Each line is one API
+/// request: ISO timestamp, model, and token buckets. `totalTokens` equals
+/// input + output; `thoughtsTokens` are a subset of output (reasoning),
+/// and `cachedTokens` a subset of input.
+fn qwen_line(line: &str, data: &mut FileData) {
+    let Ok(v) = serde_json::from_str::<Value>(line) else { return };
+    let Some(ts) = parse_ts(v.get("timestamp")) else { return };
+    let model = v.get("model").and_then(Value::as_str).unwrap_or("unknown").to_string();
+    let num = |k: &str| v.get(k).and_then(Value::as_f64).unwrap_or(0.0);
+    let cache_read = num("cachedTokens");
+    let raw_input = num("inputTokens");
+    let input = (raw_input - cache_read).max(0.0);
+    let mut output = num("outputTokens");
+    // Real ledgers show the OpenAI shape: totalTokens == input + output,
+    // thoughts a subset of output. Qwen Code's gemini-cli ancestry kept
+    // thoughts OUTSIDE the output count — if a future version reverts to
+    // that shape, total exceeds input + output and thoughts must be added
+    // so reasoning tokens aren't silently dropped.
+    if num("totalTokens") > raw_input + output + 0.5 {
+        output += num("thoughtsTokens");
+    }
+    let tokens = input + cache_read + output;
+    if tokens <= 0.0 {
+        return;
+    }
+    // Catalogs key these as bare slugs ("qwen3.8-max") or provider-prefixed.
+    let price = pricing::lookup(&model).or_else(|| pricing::lookup(&format!("qwen/{model}")));
+    match price {
+        Some(p) => {
+            let usage = pricing::Usage {
+                input,
+                output,
+                cache_read,
+                cache_write_5m: 0.0,
+                cache_write_1h: 0.0,
+            };
+            add_event(data, ts, &model, pricing::request_cost(&p, &usage, true), tokens);
+        }
+        None => note_unpriced(data, ts, &model, tokens),
+    }
+}
+
+/// Qwen Code spend: the CLI's per-request ledger under ~/.qwen/usage —
+/// one token-usage-YYYY-MM.jsonl per month, one line per API request.
+fn qwen() -> ProviderSpend {
+    let root = dirs::home_dir().unwrap_or_default().join(".qwen").join("usage");
+    let mut files = Vec::new();
+    recent_jsonl_files(&root, &mut files);
+    // Only the per-request ledger counts — a future rollup/summary jsonl
+    // in the same tree would double-report the same tokens.
+    files.retain(|p| {
+        p.file_name()
+            .and_then(|n| n.to_str())
+            .is_some_and(|n| n.starts_with("token-usage-"))
+    });
+    let mut all = FileData::default();
+    for file in files {
+        let data = file_days(&file, &mut |line, data| qwen_line(line, data));
+        merge_data(&mut all, data);
+    }
+    build_spend("qwen", "Qwen Code", all)
 }
 
 /// Moonshot spend: Kimi Code CLI sessions under ~/.kimi-code/sessions —
@@ -1730,6 +1798,51 @@ mod tests {
         assert!(data.days.keys().all(|(_, m)| m == "kimi-test-model"));
     }
 
+    /// Live diagnostic (ignored): what each spend source produced from
+    /// this machine's real logs. Run:
+    ///   cargo test spend_live_dump -- --ignored --nocapture
+    #[test]
+    #[ignore]
+    fn spend_live_dump() {
+        for sp in collect(None) {
+            println!(
+                "{}: today ${:.2}/{:.1}M | yesterday ${:.2} | 30d ${:.2} | unpriced {} {:?}",
+                sp.id,
+                sp.today.cost,
+                sp.today.tokens / 1e6,
+                sp.yesterday.cost,
+                sp.last30.cost,
+                sp.unpriced,
+                sp.unpriced_models,
+            );
+        }
+    }
+
+    #[test]
+    fn qwen_lines_count_tokens_with_cache_split() {
+        let mut data = FileData::default();
+        let line = json!({"schemaVersion": 1, "timestamp": "2026-08-03T15:22:19.090Z",
+            "model": "qwen-test-model", "inputTokens": 700.0, "outputTokens": 200.0,
+            "cachedTokens": 300.0, "thoughtsTokens": 50.0, "totalTokens": 900.0})
+        .to_string();
+        qwen_line(&line, &mut data);
+        qwen_line("not json", &mut data);
+        // input(700, of which 300 cached) + output(200); thoughts are a
+        // subset of output and must not double-count.
+        assert_eq!(data.days.values().map(|v| v.1).sum::<f64>(), 900.0);
+        assert_eq!(data.unpriced.get("qwen-test-model"), Some(&1));
+
+        // Gemini-cli ancestry shape: thoughts OUTSIDE output, so
+        // total(950) > input(700) + output(200) — thoughts join output.
+        let mut gem = FileData::default();
+        let line = json!({"schemaVersion": 1, "timestamp": "2026-08-03T15:22:19.090Z",
+            "model": "qwen-test-model", "inputTokens": 700.0, "outputTokens": 200.0,
+            "cachedTokens": 0.0, "thoughtsTokens": 50.0, "totalTokens": 950.0})
+        .to_string();
+        qwen_line(&line, &mut gem);
+        assert_eq!(gem.days.values().map(|v| v.1).sum::<f64>(), 950.0);
+    }
+
     #[test]
     fn split_models_reroutes_minimax_usage() {
         let mut data = FileData::default();
@@ -1818,7 +1931,7 @@ pub fn collect(cursor_csv: Option<String>) -> Vec<ProviderSpend> {
     if let Ok(mut t) = touched().lock() {
         t.clear();
     }
-    let (claude_sp, mut minimax_extra) = claude();
+    let (claude_sp, mut minimax_extra, qwen_via_claude) = claude();
     // Hermes rows going to an existing slice merge into it (MiniMax via the
     // extra-data path); the rest become their own spend entries.
     let mut hermes_rest = Vec::new();
@@ -1829,7 +1942,9 @@ pub fn collect(cursor_csv: Option<String>) -> Vec<ProviderSpend> {
             hermes_rest.push(build_spend(id, name, data));
         }
     }
-    let (opencode_sp, aihubmix_sp) = opencode();
+    let (opencode_sp, mut aihubmix_data) = opencode();
+    merge_data(&mut aihubmix_data, qwen_via_claude);
+    let aihubmix_sp = build_spend("aihubmix", "AihubMix", aihubmix_data);
     let mut list = vec![
         claude_sp,
         codex(),
@@ -1839,6 +1954,7 @@ pub fn collect(cursor_csv: Option<String>) -> Vec<ProviderSpend> {
         devin(),
         minimax(minimax_extra),
         moonshot(),
+        qwen(),
     ];
     list.extend(hermes_rest);
     if let Some(csv) = cursor_csv {
