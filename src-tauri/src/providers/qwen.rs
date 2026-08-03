@@ -89,6 +89,12 @@ async fn fetch_quota(key: &str) -> Option<Snapshot> {
                 .await;
             let Ok(resp) = resp else { continue };
             if !resp.status().is_success() {
+                // 401/403 is the console answering and refusing the key —
+                // as final as ConsoleNeedLogin, so it arms the stand-down.
+                // 5xx and everything else stays transient.
+                if matches!(resp.status().as_u16(), 401 | 403) {
+                    console_refused = true;
+                }
                 continue;
             }
             let Ok(doc) = resp.json::<Value>().await else { continue };
