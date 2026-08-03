@@ -512,11 +512,13 @@ fn resolve(s: &Store, model: &str, depth: u8) -> Option<Price> {
         .map(|(_, c)| c.clone())
         .unwrap_or_else(|| model.to_string());
 
-    // A catalog row with zero input AND output rates is a placeholder for
-    // a model the catalog hasn't priced yet (new slugs often land as 0/0,
-    // e.g. qwen3.8-max) — never a real price. Skipping it lets a source
-    // further down the chain price the model, or leaves it honestly
-    // unpriced (⚠ tokens-only) instead of silently billing $0.00.
+    // A catalog row with zero input AND output rates is ambiguous: brand-new
+    // slugs often land as 0/0 placeholders (qwen3.8-max), but free-tier and
+    // local models are legitimately 0/0. Resolution order settles it — the
+    // filtered chain below only takes entries with real rates, and 0/0
+    // entries are reconsidered near the end (after the baked table), so a
+    // placeholder loses to real rates anywhere while a model that is 0/0
+    // in every source still prices as genuinely free, never as unpriced.
     let real = |p: &&Price| p.input > 0.0 || p.output > 0.0;
     if let Some(p) = s.supplement.get(&canonical).filter(real) {
         return Some(*p);
@@ -586,6 +588,26 @@ fn resolve(s: &Store, model: &str, depth: u8) -> Option<Price> {
     if let Some(p) = builtin_price(&canonical) {
         return Some(p);
     }
+    // Zero-rate entries, reconsidered: nothing anywhere carries real rates
+    // for this slug, so a 0/0 catalog row means the model is genuinely
+    // free — take it, keeping free models at $0.00 without an unpriced ⚠.
+    if let Some(p) = s.supplement.get(&canonical) {
+        return Some(*p);
+    }
+    if let Some(p) = s.litellm.get(&canonical) {
+        return Some(*p);
+    }
+    if let Some(p) = s
+        .litellm
+        .iter()
+        .find(|(k, _)| k.rsplit('/').next() == Some(canonical.as_str()))
+        .map(|(_, p)| *p)
+    {
+        return Some(p);
+    }
+    if let Some(p) = s.modelsdev.get(&canonical) {
+        return Some(*p);
+    }
     // Slug tails no catalog carries under their own name, billed at the
     // base model's per-token rates: reasoning-effort tiers (they change how
     // many tokens burn, not the unit price) and Cursor's Max/Ultra modes
@@ -654,9 +676,17 @@ mod tests {
         let p = super::resolve(&store, "qwen-test", 0).unwrap();
         assert!((p.input - 1.0).abs() < 1e-9);
 
-        // Zero in every source → unpriced (⚠), never a silent $0.00.
+        // Zero in EVERY source → the model is genuinely free: price $0.00
+        // (no unpriced ⚠), like ":free" gateway variants and local models.
         store.modelsdev.insert("qwen-test".into(), super::Price::flat(0.0, 0.0, 0.0, 0.0));
-        assert!(super::resolve(&store, "qwen-test", 0).is_none());
+        let free = super::resolve(&store, "qwen-test", 0).unwrap();
+        assert_eq!((free.input, free.output), (0.0, 0.0));
+
+        // The baked table outranks 0/0 placeholders: a catalog that lists
+        // qwen3.8-max as 0/0 must not shadow Alibaba's documented rates.
+        store.litellm.insert("qwen3.8-max".into(), super::Price::flat(0.0, 0.0, 0.0, 0.0));
+        let baked = super::resolve(&store, "qwen3.8-max", 0).unwrap();
+        assert!((baked.input - 2.0).abs() < 1e-9);
     }
 
     #[test]

@@ -22,8 +22,9 @@
   public catalogs often list brand-new models (e.g. qwen3.8-max) with
   0/0 placeholder rates, which silently billed every request at zero
   and could flip a model's spend to $0 after a catalog refresh. Those
-  rows are now skipped: a source with real rates wins, and a model
-  zeroed everywhere shows as unpriced (⚠ tokens counted) instead.
+  rows are now skipped: a source with real rates wins, while a model
+  listed 0/0 in every source still prices as genuinely free ($0.00, no
+  warning — ":free" variants and local models keep working).
   qwen3.8-max (GA'd 2026-08-03, still 0/0 in every public catalog) gets
   Alibaba's documented rates baked in — $2/$6 per MTok, $0.25 cache
   reads — consulted only until the live catalogs learn them.

@@ -194,8 +194,12 @@ Ground rules that apply to every provider:
   Requests routed through OpenCode also appear in the Total Spend donut
   from OpenCode's local log, same as any other OpenCode model. Claude
   Code sessions pointed at AihubMix's Anthropic-compatible endpoint
-  (qwen-family models in `~\.claude\projects\` logs) are re-routed here
-  from the Claude card, the same way MiniMax-routed sessions are.
+  (qwen-family models in `~\.claude\projects\` logs, matched
+  case-insensitively) are re-routed here from the Claude card, the same
+  way MiniMax-routed sessions are. Claude Code logs don't record which
+  gateway served a request, so this assumes qwen models reached Claude
+  Code via AihubMix — sessions run through Alibaba's own
+  Anthropic-compatible proxy would land here too.
 
 ## Qwen Code (Alibaba Coding Plan)
 

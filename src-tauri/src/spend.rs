@@ -601,22 +601,23 @@ fn claude_line(st: &mut ClaudeFileState, line: &str, data: &mut FileData) {
 /// Move every event whose model starts with `prefix` out of `data` into a
 /// new FileData (unpriced tallies included). Used to re-route usage that a
 /// CLI logged on another vendor's behalf.
+/// Prefix match is case-insensitive: gateways spell the same family both
+/// ways ("qwen3.8-max", "Qwen/Qwen3-235B") and a case miss would leave
+/// rows on the wrong card.
 fn split_models(data: &mut FileData, prefix: &str) -> FileData {
+    let prefix = prefix.to_ascii_lowercase();
+    let matches = |m: &str| m.to_ascii_lowercase().starts_with(&prefix);
     let mut out = FileData::default();
     data.days.retain(|(day, model), v| {
-        if model.starts_with(prefix) {
+        if matches(model) {
             out.days.insert((*day, model.clone()), *v);
             false
         } else {
             true
         }
     });
-    let moved: Vec<String> = data
-        .unpriced
-        .keys()
-        .filter(|m| m.starts_with(prefix))
-        .cloned()
-        .collect();
+    let moved: Vec<String> =
+        data.unpriced.keys().filter(|m| matches(m)).cloned().collect();
     for m in moved {
         if let Some(c) = data.unpriced.remove(&m) {
             out.unpriced.insert(m, c);
@@ -1315,8 +1316,17 @@ fn qwen_line(line: &str, data: &mut FileData) {
     let model = v.get("model").and_then(Value::as_str).unwrap_or("unknown").to_string();
     let num = |k: &str| v.get(k).and_then(Value::as_f64).unwrap_or(0.0);
     let cache_read = num("cachedTokens");
-    let input = (num("inputTokens") - cache_read).max(0.0);
-    let output = num("outputTokens");
+    let raw_input = num("inputTokens");
+    let input = (raw_input - cache_read).max(0.0);
+    let mut output = num("outputTokens");
+    // Real ledgers show the OpenAI shape: totalTokens == input + output,
+    // thoughts a subset of output. Qwen Code's gemini-cli ancestry kept
+    // thoughts OUTSIDE the output count — if a future version reverts to
+    // that shape, total exceeds input + output and thoughts must be added
+    // so reasoning tokens aren't silently dropped.
+    if num("totalTokens") > raw_input + output + 0.5 {
+        output += num("thoughtsTokens");
+    }
     let tokens = input + cache_read + output;
     if tokens <= 0.0 {
         return;
@@ -1344,6 +1354,13 @@ fn qwen() -> ProviderSpend {
     let root = dirs::home_dir().unwrap_or_default().join(".qwen").join("usage");
     let mut files = Vec::new();
     recent_jsonl_files(&root, &mut files);
+    // Only the per-request ledger counts — a future rollup/summary jsonl
+    // in the same tree would double-report the same tokens.
+    files.retain(|p| {
+        p.file_name()
+            .and_then(|n| n.to_str())
+            .is_some_and(|n| n.starts_with("token-usage-"))
+    });
     let mut all = FileData::default();
     for file in files {
         let data = file_days(&file, &mut |line, data| qwen_line(line, data));
@@ -1814,6 +1831,16 @@ mod tests {
         // subset of output and must not double-count.
         assert_eq!(data.days.values().map(|v| v.1).sum::<f64>(), 900.0);
         assert_eq!(data.unpriced.get("qwen-test-model"), Some(&1));
+
+        // Gemini-cli ancestry shape: thoughts OUTSIDE output, so
+        // total(950) > input(700) + output(200) — thoughts join output.
+        let mut gem = FileData::default();
+        let line = json!({"schemaVersion": 1, "timestamp": "2026-08-03T15:22:19.090Z",
+            "model": "qwen-test-model", "inputTokens": 700.0, "outputTokens": 200.0,
+            "cachedTokens": 0.0, "thoughtsTokens": 50.0, "totalTokens": 950.0})
+        .to_string();
+        qwen_line(&line, &mut gem);
+        assert_eq!(gem.days.values().map(|v| v.1).sum::<f64>(), 950.0);
     }
 
     #[test]

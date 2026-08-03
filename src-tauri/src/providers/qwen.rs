@@ -73,7 +73,10 @@ async fn fetch_quota(key: &str) -> Option<Snapshot> {
     if now < QUOTA_BLOCKED_UNTIL.load(Ordering::Relaxed) {
         return None;
     }
-    QUOTA_BLOCKED_UNTIL.store(now + 6 * 3600, Ordering::Relaxed);
+    // Armed only when the console actually ANSWERED and refused (the
+    // ConsoleNeedLogin case) — a DNS failure, timeout, or 5xx must not
+    // silence quota checks for six hours after connectivity returns.
+    let mut console_refused = false;
     for console in CONSOLES {
         for header in ["authorization", "x-api-key", "x-dashscope-api-key"] {
             let value = if header == "authorization" { format!("Bearer {key}") } else { key.to_string() };
@@ -94,7 +97,13 @@ async fn fetch_quota(key: &str) -> Option<Snapshot> {
                 QUOTA_BLOCKED_UNTIL.store(0, Ordering::Relaxed);
                 return Some(snap);
             }
+            // A parsed answer with no quota in it = the console received
+            // the key and declined it.
+            console_refused = true;
         }
+    }
+    if console_refused {
+        QUOTA_BLOCKED_UNTIL.store(now + 6 * 3600, Ordering::Relaxed);
     }
     None
 }
