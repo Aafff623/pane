@@ -221,28 +221,31 @@ fn local_ledger() -> Option<Snapshot> {
         .join(format!("token-usage-{}.jsonl", now.format("%Y-%m")));
     let raw = std::fs::read_to_string(path).ok()?;
     let today = now.format("%Y-%m-%d").to_string();
-    let (mut day_req, mut day_tok, mut mon_req, mut mon_tok) = (0u64, 0f64, 0u64, 0f64);
+    let (mut day_req, mut mon_req) = (0u64, 0u64);
     for line in raw.lines() {
         let Ok(v) = serde_json::from_str::<Value>(line) else { continue };
-        let tokens = v.get("totalTokens").and_then(Value::as_f64).unwrap_or(0.0);
+        if v.get("totalTokens").and_then(Value::as_f64).unwrap_or(0.0) <= 0.0 {
+            continue;
+        }
         mon_req += 1;
-        mon_tok += tokens;
         if v.get("localDate").and_then(Value::as_str) == Some(today.as_str()) {
             day_req += 1;
-            day_tok += tokens;
         }
     }
     if mon_req == 0 {
         return None;
     }
-    let fmt = |req: u64, tok: f64| format!("{req} requests · {:.1}M tokens", tok / 1e6);
+    // The plan bills per REQUEST, so counts are the headline; tokens and
+    // dollars already live in the spend rows. Labels must not collide with
+    // the spend rows ("Today", "Yesterday", "Last 30 Days") — the card
+    // keeps one row per label and the spend row would swallow ours.
     Some(Snapshot::ok(
         ID,
         NAME,
         None,
         vec![
-            Metric::text("Today", fmt(day_req, day_tok)),
-            Metric::text("This month", fmt(mon_req, mon_tok)),
+            Metric::text("Requests today", format!("{day_req}")),
+            Metric::text("Requests this month", format!("{mon_req}")),
         ],
     ))
 }
