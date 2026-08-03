@@ -11,8 +11,22 @@
   the console won't take the key. Today / Yesterday / 30-day spend, the
   per-model breakdown, and a donut slice come from the Qwen Code CLI's
   own per-request ledger.
+- **Claude Code × AihubMix spend lands on the AihubMix card** — sessions
+  run against AihubMix's Anthropic-compatible endpoint log qwen-family
+  models into Claude Code's local history; those rows now re-route to
+  the AihubMix slice (same mechanism as MiniMax-routed sessions)
+  instead of inflating the Claude card.
 
 ### Fixed
+- **Zero-rate catalog placeholders no longer price requests at $0.00** —
+  public catalogs often list brand-new models (e.g. qwen3.8-max) with
+  0/0 placeholder rates, which silently billed every request at zero
+  and could flip a model's spend to $0 after a catalog refresh. Those
+  rows are now skipped: a source with real rates wins, and a model
+  zeroed everywhere shows as unpriced (⚠ tokens counted) instead.
+  qwen3.8-max (GA'd 2026-08-03, still 0/0 in every public catalog) gets
+  Alibaba's documented rates baked in — $2/$6 per MTok, $0.25 cache
+  reads — consulted only until the live catalogs learn them.
 - **"-priority" model slugs are priced** — Devin logs OpenAI's priority
   service tier inside the model name (`gpt-5.6-luna-xhigh-priority`),
   which no catalog carries, so those requests counted tokens but no

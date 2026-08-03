@@ -633,7 +633,7 @@ fn split_models(data: &mut FileData, prefix: &str) -> FileData {
 /// (ANTHROPIC_BASE_URL); those sessions log MiniMax models into the same
 /// files. That usage is split out and returned separately — it belongs on
 /// the MiniMax card, not Claude's.
-fn claude() -> (ProviderSpend, FileData) {
+fn claude() -> (ProviderSpend, FileData, FileData) {
     let root = std::env::var("CLAUDE_CONFIG_DIR")
         .map(PathBuf::from)
         .unwrap_or_else(|_| dirs::home_dir().unwrap_or_default().join(".claude"))
@@ -648,7 +648,11 @@ fn claude() -> (ProviderSpend, FileData) {
         merge_data(&mut all, data);
     }
     let minimax = split_models(&mut all, "MiniMax");
-    (build_spend("claude", "Claude", all), minimax)
+    // Qwen-family models in Claude Code logs mean the session ran against
+    // AihubMix's Anthropic-compatible endpoint (the only way qwen slugs
+    // appear there) — those dollars belong on the AihubMix card.
+    let qwen_via_aihubmix = split_models(&mut all, "qwen");
+    (build_spend("claude", "Claude", all), minimax, qwen_via_aihubmix)
 }
 
 /// MiniMax spend: the Agent CLI's local token_usage store (its own cost_usd
@@ -1177,7 +1181,10 @@ fn grok() -> ProviderSpend {
 /// spend slice — their dollars belong to that account, and the split gives
 /// the card its Today/Yesterday/30d rows and Usage Trend; everything else
 /// stays under OpenCode.
-fn opencode() -> (ProviderSpend, ProviderSpend) {
+/// Returns OpenCode's spend plus the AihubMix rows as raw FileData — the
+/// caller merges in AihubMix traffic from other CLIs (Claude Code) before
+/// building the card's spend.
+fn opencode() -> (ProviderSpend, FileData) {
     let mut oc = FileData::default();
     let mut aihubmix = FileData::default();
     for (ts_ms, cost, tokens, model, provider) in providers::opencode::collect_cost_events() {
@@ -1186,10 +1193,7 @@ fn opencode() -> (ProviderSpend, ProviderSpend) {
             add_event(target, ts, &model, cost, tokens);
         }
     }
-    (
-        build_spend("opencode", "OpenCode", oc),
-        build_spend("aihubmix", "AihubMix", aihubmix),
-    )
+    (build_spend("opencode", "OpenCode", oc), aihubmix)
 }
 
 /// Devin CLI keeps per-request token metrics in its local sessions.db
@@ -1777,6 +1781,26 @@ mod tests {
         assert!(data.days.keys().all(|(_, m)| m == "kimi-test-model"));
     }
 
+    /// Live diagnostic (ignored): what each spend source produced from
+    /// this machine's real logs. Run:
+    ///   cargo test spend_live_dump -- --ignored --nocapture
+    #[test]
+    #[ignore]
+    fn spend_live_dump() {
+        for sp in collect(None) {
+            println!(
+                "{}: today ${:.2}/{:.1}M | yesterday ${:.2} | 30d ${:.2} | unpriced {} {:?}",
+                sp.id,
+                sp.today.cost,
+                sp.today.tokens / 1e6,
+                sp.yesterday.cost,
+                sp.last30.cost,
+                sp.unpriced,
+                sp.unpriced_models,
+            );
+        }
+    }
+
     #[test]
     fn qwen_lines_count_tokens_with_cache_split() {
         let mut data = FileData::default();
@@ -1880,7 +1904,7 @@ pub fn collect(cursor_csv: Option<String>) -> Vec<ProviderSpend> {
     if let Ok(mut t) = touched().lock() {
         t.clear();
     }
-    let (claude_sp, mut minimax_extra) = claude();
+    let (claude_sp, mut minimax_extra, qwen_via_claude) = claude();
     // Hermes rows going to an existing slice merge into it (MiniMax via the
     // extra-data path); the rest become their own spend entries.
     let mut hermes_rest = Vec::new();
@@ -1891,7 +1915,9 @@ pub fn collect(cursor_csv: Option<String>) -> Vec<ProviderSpend> {
             hermes_rest.push(build_spend(id, name, data));
         }
     }
-    let (opencode_sp, aihubmix_sp) = opencode();
+    let (opencode_sp, mut aihubmix_data) = opencode();
+    merge_data(&mut aihubmix_data, qwen_via_claude);
+    let aihubmix_sp = build_spend("aihubmix", "AihubMix", aihubmix_data);
     let mut list = vec![
         claude_sp,
         codex(),

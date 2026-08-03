@@ -192,7 +192,10 @@ Ground rules that apply to every provider:
   limit) and `/usage` (month-to-date usage).
 - **Shows:** usage metered against your account's spending limit, plan.
   Requests routed through OpenCode also appear in the Total Spend donut
-  from OpenCode's local log, same as any other OpenCode model.
+  from OpenCode's local log, same as any other OpenCode model. Claude
+  Code sessions pointed at AihubMix's Anthropic-compatible endpoint
+  (qwen-family models in `~\.claude\projects\` logs) are re-routed here
+  from the Claude card, the same way MiniMax-routed sessions are.
 
 ## Qwen Code (Alibaba Coding Plan)
 
