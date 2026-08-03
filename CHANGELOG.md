@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+### Added
+- **Qwen Code provider (#19)** — Alibaba Model Studio's Coding Plan gets
+  a card: the plan's request-counted 5-hour / weekly / monthly quotas
+  with resets and plan name, read via the Model Studio console's own
+  quota call (key from Settings, `BAILIAN_TOKEN_PLAN_API_KEY`, or
+  `DASHSCOPE_API_KEY`); falls back to local request/token counts when
+  the console won't take the key. Today / Yesterday / 30-day spend, the
+  per-model breakdown, and a donut slice come from the Qwen Code CLI's
+  own per-request ledger.
+
 ### Fixed
 - **"-priority" model slugs are priced** — Devin logs OpenAI's priority
   service tier inside the model name (`gpt-5.6-luna-xhigh-priority`),

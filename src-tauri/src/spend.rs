@@ -1301,6 +1301,53 @@ fn moonshot_line(line: &str, data: &mut FileData) {
     }
 }
 
+/// One Qwen Code token-usage line → spend event. Each line is one API
+/// request: ISO timestamp, model, and token buckets. `totalTokens` equals
+/// input + output; `thoughtsTokens` are a subset of output (reasoning),
+/// and `cachedTokens` a subset of input.
+fn qwen_line(line: &str, data: &mut FileData) {
+    let Ok(v) = serde_json::from_str::<Value>(line) else { return };
+    let Some(ts) = parse_ts(v.get("timestamp")) else { return };
+    let model = v.get("model").and_then(Value::as_str).unwrap_or("unknown").to_string();
+    let num = |k: &str| v.get(k).and_then(Value::as_f64).unwrap_or(0.0);
+    let cache_read = num("cachedTokens");
+    let input = (num("inputTokens") - cache_read).max(0.0);
+    let output = num("outputTokens");
+    let tokens = input + cache_read + output;
+    if tokens <= 0.0 {
+        return;
+    }
+    // Catalogs key these as bare slugs ("qwen3.8-max") or provider-prefixed.
+    let price = pricing::lookup(&model).or_else(|| pricing::lookup(&format!("qwen/{model}")));
+    match price {
+        Some(p) => {
+            let usage = pricing::Usage {
+                input,
+                output,
+                cache_read,
+                cache_write_5m: 0.0,
+                cache_write_1h: 0.0,
+            };
+            add_event(data, ts, &model, pricing::request_cost(&p, &usage, true), tokens);
+        }
+        None => note_unpriced(data, ts, &model, tokens),
+    }
+}
+
+/// Qwen Code spend: the CLI's per-request ledger under ~/.qwen/usage —
+/// one token-usage-YYYY-MM.jsonl per month, one line per API request.
+fn qwen() -> ProviderSpend {
+    let root = dirs::home_dir().unwrap_or_default().join(".qwen").join("usage");
+    let mut files = Vec::new();
+    recent_jsonl_files(&root, &mut files);
+    let mut all = FileData::default();
+    for file in files {
+        let data = file_days(&file, &mut |line, data| qwen_line(line, data));
+        merge_data(&mut all, data);
+    }
+    build_spend("qwen", "Qwen Code", all)
+}
+
 /// Moonshot spend: Kimi Code CLI sessions under ~/.kimi-code/sessions —
 /// each agent's wire.jsonl logs one usage.record per turn.
 fn moonshot() -> ProviderSpend {
@@ -1731,6 +1778,21 @@ mod tests {
     }
 
     #[test]
+    fn qwen_lines_count_tokens_with_cache_split() {
+        let mut data = FileData::default();
+        let line = json!({"schemaVersion": 1, "timestamp": "2026-08-03T15:22:19.090Z",
+            "model": "qwen-test-model", "inputTokens": 700.0, "outputTokens": 200.0,
+            "cachedTokens": 300.0, "thoughtsTokens": 50.0, "totalTokens": 900.0})
+        .to_string();
+        qwen_line(&line, &mut data);
+        qwen_line("not json", &mut data);
+        // input(700, of which 300 cached) + output(200); thoughts are a
+        // subset of output and must not double-count.
+        assert_eq!(data.days.values().map(|v| v.1).sum::<f64>(), 900.0);
+        assert_eq!(data.unpriced.get("qwen-test-model"), Some(&1));
+    }
+
+    #[test]
     fn split_models_reroutes_minimax_usage() {
         let mut data = FileData::default();
         data.days.insert((1000, "claude-fable-5".into()), (5.0, 100.0));
@@ -1839,6 +1901,7 @@ pub fn collect(cursor_csv: Option<String>) -> Vec<ProviderSpend> {
         devin(),
         minimax(minimax_extra),
         moonshot(),
+        qwen(),
     ];
     list.extend(hermes_rest);
     if let Some(csv) = cursor_csv {

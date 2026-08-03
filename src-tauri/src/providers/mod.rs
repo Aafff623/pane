@@ -1,5 +1,6 @@
 pub mod aihubmix;
 pub mod antigravity;
+pub mod qwen;
 pub mod claude;
 pub mod codebuff;
 pub mod codex;

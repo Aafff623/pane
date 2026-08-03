@@ -194,6 +194,22 @@ Ground rules that apply to every provider:
   Requests routed through OpenCode also appear in the Total Spend donut
   from OpenCode's local log, same as any other OpenCode model.
 
+## Qwen Code (Alibaba Coding Plan)
+
+- **Reads:** pasted key (Settings), `BAILIAN_TOKEN_PLAN_API_KEY` (the env
+  var Qwen Code itself uses), or `DASHSCOPE_API_KEY`; local spend from
+  the CLI's own per-request ledger
+  (`%USERPROFILE%\.qwen\usage\token-usage-YYYY-MM.jsonl`).
+- **Calls:** the Model Studio console's Coding Plan RPC
+  (`modelstudio.console.alibabacloud.com/data/api.json`, China-console
+  fallback) — the same call the Coding Plan page makes; Alibaba publishes
+  no dedicated quota API (approach credited to CodexBar's notes).
+- **Shows:** the plan's three request-counted windows — rolling 5-hour
+  session, weekly, monthly — with resets and plan name. If the console
+  RPC rejects the key, the card falls back to local request/token counts
+  for today and the month. Spend rows and the donut slice come from the
+  local ledger either way.
+
 ---
 
 Provider request formats were researched from two MIT-licensed macOS
