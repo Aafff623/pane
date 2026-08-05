@@ -634,7 +634,7 @@ fn split_models(data: &mut FileData, prefix: &str) -> FileData {
 /// (ANTHROPIC_BASE_URL); those sessions log MiniMax models into the same
 /// files. That usage is split out and returned separately — it belongs on
 /// the MiniMax card, not Claude's.
-fn claude() -> (ProviderSpend, FileData, FileData) {
+fn claude(extra: FileData) -> (ProviderSpend, FileData, FileData) {
     let root = std::env::var("CLAUDE_CONFIG_DIR")
         .map(PathBuf::from)
         .unwrap_or_else(|_| dirs::home_dir().unwrap_or_default().join(".claude"))
@@ -648,6 +648,10 @@ fn claude() -> (ProviderSpend, FileData, FileData) {
         let data = file_days(&file, &mut |line, data| claude_line(&mut state, line, data));
         merge_data(&mut all, data);
     }
+    // Usage from other scanners that belongs on this card (pi sessions
+    // driving a Claude account) joins before the splits below, so it gets
+    // the same model-based routing as natively-logged rows.
+    merge_data(&mut all, extra);
     let minimax = split_models(&mut all, "MiniMax");
     // Qwen-family models in Claude Code logs mean the session ran against
     // AihubMix's Anthropic-compatible endpoint (the only way qwen slugs
@@ -1057,7 +1061,7 @@ fn codex_line(st: &mut CodexFileState, line: &str, data: &mut FileData) {
 /// the surrounding turn_context/session_meta lines. Child sessions (subagent
 /// spawns and forks) replay the parent's entire history at spawn — those
 /// lines are skipped via a replay gate (see `codex_line`).
-fn codex() -> ProviderSpend {
+fn codex(extra: FileData) -> ProviderSpend {
     let home = std::env::var("CODEX_HOME")
         .map(PathBuf::from)
         .unwrap_or_else(|_| dirs::home_dir().unwrap_or_default().join(".codex"));
@@ -1086,7 +1090,146 @@ fn codex() -> ProviderSpend {
         let data = file_days(&file, &mut |line, data| codex_line(&mut state, line, data));
         merge_data(&mut all, data);
     }
+    // Pi sessions that drove a Codex account (passed in from the pi scan).
+    merge_data(&mut all, extra);
     build_spend("codex", "Codex", all)
+}
+
+// ---------------------------------------------------------------------------
+// Pi coding agent — folded into the cards of the accounts it drives
+// ---------------------------------------------------------------------------
+
+/// Where pi keeps session logs, mirroring pi's own resolution: an explicit
+/// `PI_CODING_AGENT_SESSION_DIR` wins, else `PI_CODING_AGENT_DIR/sessions`
+/// (config-dir override), else the default `~/.pi/agent/sessions`.
+fn pi_sessions_dir() -> PathBuf {
+    if let Ok(dir) = std::env::var("PI_CODING_AGENT_SESSION_DIR") {
+        let dir = dir.trim();
+        if !dir.is_empty() {
+            return PathBuf::from(dir);
+        }
+    }
+    if let Ok(dir) = std::env::var("PI_CODING_AGENT_DIR") {
+        let dir = dir.trim();
+        if !dir.is_empty() {
+            return PathBuf::from(dir).join("sessions");
+        }
+    }
+    dirs::home_dir().unwrap_or_default().join(".pi").join("agent").join("sessions")
+}
+
+/// The per-file cache stores ONE FileData per path, but a pi file can hold
+/// usage for several destination cards — so models are stored tagged
+/// ("claude␁<model>") and untagged by take_tagged() after the scan.
+const PI_SEP: char = '\u{1}';
+
+/// One pi session-log line → spend event. Only assistant "message" lines
+/// carry usage; pi's `provider` field says whose account it drove
+/// (mirroring upstream OpenUsage's mapping — pi providers with no local
+/// spend source here are skipped). Pi records an authoritative
+/// per-message usage.cost.total like OpenCode: a carried cost > 0 wins,
+/// a $0 cost (subscription usage pi doesn't impute) prices through the
+/// catalog. Duplicate message ids within a file (forked-session replays)
+/// keep the first occurrence.
+fn pi_line(seen: &mut HashSet<String>, line: &str, data: &mut FileData) {
+    if !line.contains("\"usage\"") {
+        return;
+    }
+    let Ok(v) = serde_json::from_str::<Value>(line) else { return };
+    if v.get("type").and_then(Value::as_str) != Some("message") {
+        return;
+    }
+    let Some(ts) = parse_ts(v.get("timestamp")) else { return };
+    let Some(msg) = v.get("message") else { return };
+    if msg.get("role").and_then(Value::as_str) != Some("assistant") {
+        return;
+    }
+    let card = match msg.get("provider").and_then(Value::as_str) {
+        Some("anthropic" | "claude-agent-sdk") => "claude",
+        Some("openai-codex") => "codex",
+        _ => return,
+    };
+    if let Some(id) = v.get("id").and_then(Value::as_str) {
+        if !seen.insert(id.to_string()) {
+            return;
+        }
+    }
+    let Some(usage) = msg.get("usage") else { return };
+    let num = |k: &str| usage.get(k).and_then(Value::as_f64).unwrap_or(0.0);
+    let (input, output, cache_read) = (num("input"), num("output"), num("cacheRead"));
+    let cache_write = num("cacheWrite");
+    let cache_write_1h = num("cacheWrite1h").min(cache_write);
+    let reported = num("totalTokens");
+    let tokens =
+        if reported > 0.0 { reported } else { input + output + cache_read + cache_write };
+    if tokens <= 0.0 {
+        return;
+    }
+    let model = msg
+        .get("model")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|m| !m.is_empty())
+        .unwrap_or("unknown");
+    let tagged = format!("{card}{PI_SEP}{model}");
+    let carried = usage.get("cost").and_then(|c| c.get("total")).and_then(Value::as_f64);
+    if let Some(c) = carried.filter(|c| *c > 0.0) {
+        add_event(data, ts, &tagged, c, tokens);
+        return;
+    }
+    match pricing::lookup(model) {
+        Some(p) => {
+            let u = pricing::Usage {
+                input,
+                output,
+                cache_read,
+                cache_write_5m: (cache_write - cache_write_1h).max(0.0),
+                cache_write_1h,
+            };
+            add_event(data, ts, &tagged, pricing::request_cost(&p, &u, true), tokens);
+        }
+        None => note_unpriced(data, ts, &tagged, tokens),
+    }
+}
+
+/// Extract (and untag) every entry destined for `card` from a tagged scan.
+fn take_tagged(data: &mut FileData, card: &str) -> FileData {
+    let prefix = format!("{card}{PI_SEP}");
+    let mut out = FileData::default();
+    let day_keys: Vec<_> =
+        data.days.keys().filter(|(_, m)| m.starts_with(&prefix)).cloned().collect();
+    for key in day_keys {
+        if let Some(v) = data.days.remove(&key) {
+            out.days.insert((key.0, key.1[prefix.len()..].to_string()), v);
+        }
+    }
+    let unpriced: Vec<String> =
+        data.unpriced.keys().filter(|m| m.starts_with(&prefix)).cloned().collect();
+    for m in unpriced {
+        if let Some(c) = data.unpriced.remove(&m) {
+            out.unpriced.insert(m[prefix.len()..].to_string(), c);
+        }
+    }
+    out
+}
+
+/// Pi is a bring-your-own-account agent, so its usage belongs on the card
+/// of the account it drove rather than a card of its own — a Claude sub
+/// used inside pi lands on the Claude card, Codex likewise (the fold
+/// upstream OpenUsage ships).
+fn pi() -> (FileData, FileData) {
+    let root = pi_sessions_dir();
+    let mut files = Vec::new();
+    recent_jsonl_files(&root, &mut files);
+    let mut all = FileData::default();
+    for file in files {
+        let mut seen = HashSet::new();
+        let data = file_days(&file, &mut |line, data| pi_line(&mut seen, line, data));
+        merge_data(&mut all, data);
+    }
+    let claude = take_tagged(&mut all, "claude");
+    let codex = take_tagged(&mut all, "codex");
+    (claude, codex)
 }
 
 /// Grok CLI appends one global log at ~/.grok/logs/unified.jsonl (or under
@@ -1819,6 +1962,39 @@ mod tests {
     }
 
     #[test]
+    fn pi_lines_fold_into_the_underlying_card() {
+        let mut seen = HashSet::new();
+        let mut data = FileData::default();
+        let carried = json!({"type": "message", "id": "m1", "timestamp": "2026-08-03T10:00:00Z",
+            "message": {"role": "assistant", "provider": "anthropic", "model": "pi-test-model",
+                        "usage": {"input": 400.0, "output": 100.0, "cacheRead": 0.0,
+                                  "cacheWrite": 0.0, "totalTokens": 500.0,
+                                  "cost": {"total": 1.25}}}})
+        .to_string();
+        let zero_cost = json!({"type": "message", "id": "m2", "timestamp": "2026-08-03T10:01:00Z",
+            "message": {"role": "assistant", "provider": "openai-codex", "model": "pi-test-model",
+                        "usage": {"input": 300.0, "output": 200.0, "cacheRead": 0.0,
+                                  "cacheWrite": 0.0, "totalTokens": 500.0,
+                                  "cost": {"total": 0.0}}}})
+        .to_string();
+        let unmapped = carried.replace("\"anthropic\"", "\"nvidia-nim\"");
+        pi_line(&mut seen, &carried, &mut data);
+        pi_line(&mut seen, &carried, &mut data); // duplicate id → dropped
+        pi_line(&mut seen, &zero_cost, &mut data);
+        pi_line(&mut seen, &unmapped, &mut data); // no card here → dropped
+
+        let claude = take_tagged(&mut data, "claude");
+        let codex = take_tagged(&mut data, "codex");
+        assert!(data.days.is_empty() && data.unpriced.is_empty());
+        // Carried cost used directly, once despite the replay.
+        assert_eq!(claude.days.values().map(|v| (v.0, v.1)).collect::<Vec<_>>(), vec![(1.25, 500.0)]);
+        assert!(claude.days.keys().all(|(_, m)| m == "pi-test-model"));
+        // $0 carried cost falls through to pricing; unknown model → honest ⚠.
+        assert_eq!(codex.days.values().map(|v| v.1).sum::<f64>(), 500.0);
+        assert_eq!(codex.unpriced.get("pi-test-model"), Some(&1));
+    }
+
+    #[test]
     fn qwen_lines_count_tokens_with_cache_split() {
         let mut data = FileData::default();
         let line = json!({"schemaVersion": 1, "timestamp": "2026-08-03T15:22:19.090Z",
@@ -1931,7 +2107,8 @@ pub fn collect(cursor_csv: Option<String>) -> Vec<ProviderSpend> {
     if let Ok(mut t) = touched().lock() {
         t.clear();
     }
-    let (claude_sp, mut minimax_extra, qwen_via_claude) = claude();
+    let (pi_claude, pi_codex) = pi();
+    let (claude_sp, mut minimax_extra, qwen_via_claude) = claude(pi_claude);
     // Hermes rows going to an existing slice merge into it (MiniMax via the
     // extra-data path); the rest become their own spend entries.
     let mut hermes_rest = Vec::new();
@@ -1947,7 +2124,7 @@ pub fn collect(cursor_csv: Option<String>) -> Vec<ProviderSpend> {
     let aihubmix_sp = build_spend("aihubmix", "AihubMix", aihubmix_data);
     let mut list = vec![
         claude_sp,
-        codex(),
+        codex(pi_codex),
         grok(),
         opencode_sp,
         aihubmix_sp,
