@@ -113,7 +113,8 @@ reset window ("Almost out", "Will run out").
 
 **4. Counting the money.** Your CLIs already log every request locally.
 Pane scans those logs (Claude, Codex, Grok, OpenCode, Devin CLI, Cursor
-CSV, MiniMax CLI, Kimi Code, the Hermes desktop app), prices each
+CSV, MiniMax CLI, Kimi Code, Qwen Code, the pi coding agent, the Hermes
+desktop app), prices each
 request with live per-model rates (LiteLLM /
 models.dev, refreshed daily — hourly while unknown models are around, so
 brand-new models price within the hour), and draws the Today /
