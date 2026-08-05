@@ -1162,7 +1162,11 @@ fn pi_line(seen: &mut HashSet<String>, line: &str, data: &mut FileData) {
     let reported = num("totalTokens");
     let tokens =
         if reported > 0.0 { reported } else { input + output + cache_read + cache_write };
-    if tokens <= 0.0 {
+    let carried = usage.get("cost").and_then(|c| c.get("total")).and_then(Value::as_f64);
+    // A row earns its place with either signal: dollars pi recorded or
+    // tokens to price — same rule as the minimax/hermes scanners. Only a
+    // row with neither is noise.
+    if tokens <= 0.0 && carried.unwrap_or(0.0) <= 0.0 {
         return;
     }
     let model = msg
@@ -1172,7 +1176,6 @@ fn pi_line(seen: &mut HashSet<String>, line: &str, data: &mut FileData) {
         .filter(|m| !m.is_empty())
         .unwrap_or("unknown");
     let tagged = format!("{card}{PI_SEP}{model}");
-    let carried = usage.get("cost").and_then(|c| c.get("total")).and_then(Value::as_f64);
     if let Some(c) = carried.filter(|c| *c > 0.0) {
         add_event(data, ts, &tagged, c, tokens);
         return;
@@ -1978,16 +1981,22 @@ mod tests {
                                   "cost": {"total": 0.0}}}})
         .to_string();
         let unmapped = carried.replace("\"anthropic\"", "\"nvidia-nim\"");
+        // Cost recorded but no token counters: the dollars still count.
+        let cost_only = json!({"type": "message", "id": "m3", "timestamp": "2026-08-03T10:02:00Z",
+            "message": {"role": "assistant", "provider": "anthropic", "model": "pi-test-model",
+                        "usage": {"cost": {"total": 0.75}}}})
+        .to_string();
         pi_line(&mut seen, &carried, &mut data);
         pi_line(&mut seen, &carried, &mut data); // duplicate id → dropped
         pi_line(&mut seen, &zero_cost, &mut data);
         pi_line(&mut seen, &unmapped, &mut data); // no card here → dropped
+        pi_line(&mut seen, &cost_only, &mut data);
 
         let claude = take_tagged(&mut data, "claude");
         let codex = take_tagged(&mut data, "codex");
         assert!(data.days.is_empty() && data.unpriced.is_empty());
-        // Carried cost used directly, once despite the replay.
-        assert_eq!(claude.days.values().map(|v| (v.0, v.1)).collect::<Vec<_>>(), vec![(1.25, 500.0)]);
+        // Carried costs used directly, replay dropped: 1.25 + 0.75.
+        assert_eq!(claude.days.values().map(|v| (v.0, v.1)).collect::<Vec<_>>(), vec![(2.0, 500.0)]);
         assert!(claude.days.keys().all(|(_, m)| m == "pi-test-model"));
         // $0 carried cost falls through to pricing; unknown model → honest ⚠.
         assert_eq!(codex.days.values().map(|v| v.1).sum::<f64>(), 500.0);
