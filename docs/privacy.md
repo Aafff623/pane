@@ -11,7 +11,7 @@ This is the complete list. Anything not listed here does not happen.
 
 | Destination | When | What is sent |
 |---|---|---|
-| Each provider's own API (Anthropic, OpenAI/ChatGPT, cursor.com, GitHub, x.ai, Devin, MiniMax, OpenRouter, Z.ai, Google, DeepSeek, Moonshot, ElevenLabs, Codebuff, Kilo…) | Every refresh (default 1 min), only for providers you have enabled | That provider's own token/key, exactly as its official tool would send it. Full per-provider detail: [providers.md](providers.md) |
+| Each provider's own API (Anthropic, OpenAI/ChatGPT, cursor.com, GitHub, x.ai, Devin, MiniMax, OpenRouter, Z.ai, Google, DeepSeek, Moonshot, ElevenLabs, Codebuff, Kilo, AihubMix, Alibaba Model Studio…) | Every refresh (default 1 min), only for providers you have enabled | That provider's own token/key, exactly as its official tool would send it. Full per-provider detail: [providers.md](providers.md) |
 | `raw.githubusercontent.com` (LiteLLM), `models.dev`, `robinebers.github.io` | ~Daily | Anonymous GET for public model price tables (no identifying data) |
 | `pane.jazii.dev/api/update` (falls back to `github.com/ItsJazii/pane/releases`) | On launch + every 4 h | Anonymous GET for the update manifest, carrying the app version. See "The update check" below for exactly what this counts. |
 | `us.i.posthog.com` | Once per day (unless switched off) | The two anonymous daily-statistic events described in "Anonymous usage statistics" below — a random ID, version, enabled-provider list, and per-provider success/failure counts. Never usage amounts, spend, keys, or error text. |

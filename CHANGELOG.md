@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.4.29 — 2026-08-05
 
 ### Added
 - **Qwen Code provider (#19)** — Alibaba Model Studio's Coding Plan gets
