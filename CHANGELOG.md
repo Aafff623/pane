@@ -17,6 +17,17 @@
   the AihubMix slice (same mechanism as MiniMax-routed sessions)
   instead of inflating the Claude card.
 
+- **Pi coding agent usage folds into Claude and Codex** — pi is a
+  bring-your-own-account agent, so a Claude or Codex subscription driven
+  through pi never appears in those CLIs' own logs and spend
+  under-reported. Pane now reads pi's session logs
+  (`~\.pi\agent\sessions`) and folds that usage into the account's card:
+  pi's own recorded cost when it carries one, catalog pricing otherwise
+  (ported from OpenUsage 0.7.6).
+
+### Changed
+- **Grok's provider mark updated** — ported upstream's refreshed logo.
+
 ### Fixed
 - **Zero-rate catalog placeholders no longer price requests at $0.00** —
   public catalogs often list brand-new models (e.g. qwen3.8-max) with

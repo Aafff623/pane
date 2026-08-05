@@ -30,7 +30,11 @@ Ground rules that apply to every provider:
   log to read). Advisor work nested in a message's `usage.iterations`
   counts once under the advisor's own model; ordinary iterations stay
   inside the parent totals. Sidechain (subagent) logs that replay the
-  parent's message under a fresh request id are deduplicated.
+  parent's message under a fresh request id are deduplicated. Sessions
+  of the pi coding agent that drove this Claude account
+  (`~\.pi\agent\sessions`, providers `anthropic`/`claude-agent-sdk`)
+  fold into this card's spend — pi's own recorded cost when present,
+  catalog pricing otherwise.
 
 ## Codex (Codex CLI)
 
@@ -46,7 +50,9 @@ Ground rules that apply to every provider:
   tier (recorded per session in the rollout itself, never inferred from
   `config.toml`) price at each model's Codex priority multiplier, and
   supported GPT-5.4/5.5/5.6 requests above 272k prompt tokens use
-  OpenAI's long-context rates for the whole request.
+  OpenAI's long-context rates for the whole request. Pi coding agent
+  sessions that drove this Codex account (provider `openai-codex`) fold
+  into this card's spend the same way they do for Claude.
 
 ## Cursor
 
