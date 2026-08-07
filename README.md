@@ -44,6 +44,16 @@ winget install Pane.Pane
 Pane is in [Microsoft's official winget community repo](https://github.com/microsoft/winget-pkgs/tree/master/manifests/p/Pane/Pane) —
 reviewed, hash-verified, no SmartScreen prompt.
 
+### One-liner (PowerShell)
+
+```powershell
+irm https://pane.jazii.dev/install.ps1 | iex
+```
+
+Downloads the latest release, verifies its SHA-256, installs per-user
+(no admin), and launches Pane. No SmartScreen prompt. Read
+[install.ps1](install.ps1) first if you like — it's one short, commented script.
+
 ### Installer (.exe)
 
 1. Grab **`Pane_x.y.z_x64-setup.exe`** from the
