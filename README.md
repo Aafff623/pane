@@ -35,7 +35,16 @@ broader AI-workflow companion from there.
 Every release binary is built and published by GitHub Actions straight
 from the tagged source — public build logs, verifiable provenance.
 
-### One-liner (PowerShell — recommended)
+### winget (recommended)
+
+```
+winget install Pane.Pane
+```
+
+Pane is in [Microsoft's official winget community repo](https://github.com/microsoft/winget-pkgs/tree/master/manifests/p/Pane/Pane) —
+reviewed, hash-verified, no SmartScreen prompt.
+
+### One-liner (PowerShell)
 
 ```powershell
 irm https://pane.jazii.dev/install.ps1 | iex
@@ -59,17 +68,9 @@ Downloads the latest release, verifies its SHA-256, installs per-user
 
 Silent install (for scripts): `Pane_x.y.z_x64-setup.exe /S`
 
-### winget *(pending review)*
-
-Pane is [submitted to the winget community repo](https://github.com/microsoft/winget-pkgs/pull/399096).
-Once Microsoft's review merges it, this works:
-
-```
-winget install pane
-```
-
-Pane keeps itself current after that either way — every install checks for
-signed updates and offers a one-click restart when a new version ships.
+Whichever way you install, Pane keeps itself current — every install
+checks for signed updates and offers a one-click restart when a new
+version ships.
 
 ### Build from source
 
