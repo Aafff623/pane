@@ -14,6 +14,11 @@ jobs:
     runs-on: windows-latest
     permissions:
       contents: write
+      # The winget dispatch step creates a workflow_dispatch event, which
+      # needs actions: write — a permissions block nulls every unlisted
+      # scope, so without this the dispatch 403s (and continue-on-error
+      # would hide it, silently reproducing the never-publishes bug).
+      actions: write
     steps:
       - uses: actions/checkout@v4
 
