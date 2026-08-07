@@ -199,16 +199,22 @@ async fn fetch() -> Result<Snapshot, String> {
     // seen (a top-up raises it, same mechanism as Moonshot/DeepSeek); a
     // spent balance still reads "$0.00 · 0 credits" — that's information,
     // not noise.
-    if usage.pointer("/credits/unlimited").and_then(Value::as_bool) == Some(true) {
+    // The same serializer that quotes the balance may quote this flag.
+    let unlimited = usage
+        .pointer("/credits/unlimited")
+        .is_some_and(|v| v.as_bool() == Some(true) || v.as_str().map(str::trim) == Some("true"));
+    if unlimited {
         metrics.push(Metric::text("Extra credits", "Unlimited".into()));
     } else if let Some(credits) = credits_balance(&usage) {
         if credits > 0.0 {
             let dollars = credits * 0.04;
-            match super::credit_meter_labeled("codex-extra", "$", dollars, "Extra credits") {
+            let suffix = format!(" · {credits:.0} credits");
+            match super::credit_meter_labeled("codex-extra", "$", dollars, "Extra credits", &suffix)
+            {
                 Some(m) => metrics.push(m),
                 None => metrics.push(Metric::text(
                     "Extra credits",
-                    format!("${dollars:.2} · {credits:.0} credits"),
+                    format!("${dollars:.2}{suffix}"),
                 )),
             }
         } else {

@@ -12,6 +12,9 @@
   it), feeding pace colors and the Almost Out notification like every
   other window — with the dollar and credit count in the caption.
   Devin's Extra balance gets the same meter treatment when funded.
+  Layouts learned a matching rule: progress bars never hide behind
+  Show more and always sit above the Usage Trend, so an upgraded row
+  (or one saved as a text row in an older layout) surfaces properly.
 
 ## 0.4.29 — 2026-08-05
 

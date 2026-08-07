@@ -139,7 +139,7 @@ async fn fetch() -> Result<Snapshot, String> {
         // A funded balance meters like a plan window (against the highest
         // balance seen — a top-up raises it); an empty one stays a plain row.
         let meter = (dollars > 0.0)
-            .then(|| super::credit_meter_labeled("devin-extra", "$", dollars, "Extra balance"))
+            .then(|| super::credit_meter_labeled("devin-extra", "$", dollars, "Extra balance", ""))
             .flatten();
         match meter {
             Some(m) => metrics.push(m),
