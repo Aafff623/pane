@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.4.30 — 2026-08-07
 
 ### Fixed
 - **Bought Codex credits show up now** — the ChatGPT API sends the
