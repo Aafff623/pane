@@ -470,9 +470,33 @@ function ensureLayout(): void {
     // New metrics ship once; spend rows appear when spend data first exists.
     for (const m of s.metrics) {
       if (!L.metricOrder.includes(m.label)) {
-        L.metricOrder.push(m.label);
+        // Progress bars slot in above the Usage Trend (bars first, trend
+        // after, like the Mac cards); everything else appends at the end.
+        const trendAt = L.metricOrder.indexOf(TREND_KEY);
+        if (m.kind === "progress" && trendAt >= 0) {
+          L.metricOrder.splice(trendAt, 0, m.label);
+        } else {
+          L.metricOrder.push(m.label);
+        }
         if (m.kind !== "progress") L.onDemand.push(m.label);
         changed = true;
+      }
+      // A metric that upgraded from text to a progress bar (Extra
+      // credits/balance when funded) must surface like one: bars never
+      // hide behind Show more, and they sit above the Usage Trend.
+      if (m.kind === "progress") {
+        const tucked = L.onDemand.indexOf(m.label);
+        if (tucked >= 0) {
+          L.onDemand.splice(tucked, 1);
+          changed = true;
+        }
+        const at = L.metricOrder.indexOf(m.label);
+        const trendAt = L.metricOrder.indexOf(TREND_KEY);
+        if (at >= 0 && trendAt >= 0 && at > trendAt) {
+          L.metricOrder.splice(at, 1);
+          L.metricOrder.splice(L.metricOrder.indexOf(TREND_KEY), 0, m.label);
+          changed = true;
+        }
       }
     }
     if (spend) {

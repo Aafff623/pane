@@ -1,5 +1,21 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+- **Bought Codex credits show up now** — the ChatGPT API sends the
+  credit balance as a quoted string in some responses, which the parser
+  didn't accept, so buying Extra credits made the row vanish from the
+  card entirely (an empty balance still rendered via a fallback). A
+  funded balance now shows as an **Extra credits** plan-style meter —
+  percent bar against the highest balance Pane has seen (top-ups raise
+  it), feeding pace colors and the Almost Out notification like every
+  other window — with the dollar and credit count in the caption.
+  Devin's Extra balance gets the same meter treatment when funded.
+  Layouts learned a matching rule: progress bars never hide behind
+  Show more and always sit above the Usage Trend, so an upgraded row
+  (or one saved as a text row in an older layout) surfaces properly.
+
 ## 0.4.29 — 2026-08-05
 
 ### Added
