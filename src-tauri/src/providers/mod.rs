@@ -235,6 +235,18 @@ pub fn credential_string(target: &str) -> Option<String> {
 /// keep the story. As a progress row it also feeds the notification rules
 /// ("Almost Out" fires under 10% remaining) like every other meter.
 pub fn credit_meter(provider: &str, sign: &str, balance: f64) -> Option<Metric> {
+    credit_meter_labeled(provider, sign, balance, "Credits used")
+}
+
+/// credit_meter with a caller-chosen row label — purchased-credit pools
+/// (Codex Extra credits, Devin's extra balance) meter identically but
+/// shouldn't all be called "Credits used".
+pub fn credit_meter_labeled(
+    provider: &str,
+    sign: &str,
+    balance: f64,
+    label: &str,
+) -> Option<Metric> {
     if !balance.is_finite() || balance < 0.0 {
         return None;
     }
@@ -263,7 +275,7 @@ pub fn credit_meter(provider: &str, sign: &str, balance: f64) -> Option<Metric> 
     }
     let used = ((1.0 - balance / high) * 100.0).clamp(0.0, 100.0);
     Some(Metric::progress(
-        "Credits used",
+        label,
         used,
         Some(format!("{sign}{balance:.2} of {sign}{high:.2} left")),
     ))

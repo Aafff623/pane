@@ -135,10 +135,16 @@ async fn fetch() -> Result<Snapshot, String> {
         _ => {}
     }
     if let Some(micros) = as_num(plan_status.get("overageBalanceMicros")) {
-        metrics.push(Metric::text(
-            "Extra balance",
-            format!("${:.2}", micros.max(0.0) / 1_000_000.0),
-        ));
+        let dollars = micros.max(0.0) / 1_000_000.0;
+        // A funded balance meters like a plan window (against the highest
+        // balance seen — a top-up raises it); an empty one stays a plain row.
+        let meter = (dollars > 0.0)
+            .then(|| super::credit_meter_labeled("devin-extra", "$", dollars, "Extra balance"))
+            .flatten();
+        match meter {
+            Some(m) => metrics.push(m),
+            None => metrics.push(Metric::text("Extra balance", format!("${dollars:.2}"))),
+        }
     }
 
     if metrics.is_empty() {

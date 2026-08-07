@@ -194,21 +194,26 @@ async fn fetch() -> Result<Snapshot, String> {
         }
     }
 
-    // Extra Usage: pay-as-you-go credit balance ($0.04 per credit). A spent
-    // balance still reads "$0.00 · 0 credits" — that's information, not noise.
-    let credit_balance = usage
-        .pointer("/credits/balance")
-        .and_then(Value::as_f64)
-        .or_else(|| {
-            (usage.pointer("/credits/has_credits").and_then(Value::as_bool) == Some(false))
-                .then_some(0.0)
-        });
-    if let Some(balance) = credit_balance {
-        let credits = balance.floor().max(0.0);
-        metrics.push(Metric::text(
-            "Extra usage",
-            format!("${:.2} · {credits:.0} credits", credits * 0.04),
-        ));
+    // Extra Usage: pay-as-you-go credit balance ($0.04 per credit). A
+    // positive balance gets a plan-style meter against the highest balance
+    // seen (a top-up raises it, same mechanism as Moonshot/DeepSeek); a
+    // spent balance still reads "$0.00 · 0 credits" — that's information,
+    // not noise.
+    if usage.pointer("/credits/unlimited").and_then(Value::as_bool) == Some(true) {
+        metrics.push(Metric::text("Extra credits", "Unlimited".into()));
+    } else if let Some(credits) = credits_balance(&usage) {
+        if credits > 0.0 {
+            let dollars = credits * 0.04;
+            match super::credit_meter_labeled("codex-extra", "$", dollars, "Extra credits") {
+                Some(m) => metrics.push(m),
+                None => metrics.push(Metric::text(
+                    "Extra credits",
+                    format!("${dollars:.2} · {credits:.0} credits"),
+                )),
+            }
+        } else {
+            metrics.push(Metric::text("Extra usage", "$0.00 · 0 credits".into()));
+        }
     }
 
     // Per-credit rows with exact expiry (and a Use button in the UI) from
@@ -254,6 +259,43 @@ async fn fetch() -> Result<Snapshot, String> {
         return Err("usage response had no recognizable rate limits".into());
     }
     Ok(Snapshot::ok(ID, NAME, plan, metrics))
+}
+
+/// The credit balance from the usage body. The API serializes it
+/// inconsistently — a JSON number in some responses, a quoted string in
+/// others (rollout logs show `"balance":"0"`) — so both spellings parse.
+/// A missing balance with `has_credits: false` reads as an explicit zero.
+fn credits_balance(usage: &Value) -> Option<f64> {
+    usage
+        .pointer("/credits/balance")
+        .and_then(|v| v.as_f64().or_else(|| v.as_str().and_then(|s| s.trim().parse().ok())))
+        .map(|b| b.floor().max(0.0))
+        .or_else(|| {
+            (usage.pointer("/credits/has_credits").and_then(Value::as_bool) == Some(false))
+                .then_some(0.0)
+        })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::credits_balance;
+    use serde_json::json;
+
+    #[test]
+    fn credit_balance_parses_number_and_string_spellings() {
+        // String balance (the shape rollout logs show) — the bug that made
+        // a freshly bought balance vanish from the card entirely.
+        let s = json!({"credits": {"has_credits": true, "balance": "2500"}});
+        assert_eq!(credits_balance(&s), Some(2500.0));
+        // Number balance.
+        let n = json!({"credits": {"has_credits": true, "balance": 125.0}});
+        assert_eq!(credits_balance(&n), Some(125.0));
+        // No balance field, explicitly no credits → explicit zero row.
+        let none = json!({"credits": {"has_credits": false}});
+        assert_eq!(credits_balance(&none), Some(0.0));
+        // No credits object at all → no row.
+        assert_eq!(credits_balance(&json!({})), None);
+    }
 }
 
 const CREDITS_URL: &str = "https://chatgpt.com/backend-api/wham/rate-limit-reset-credits";
