@@ -86,3 +86,15 @@ jobs:
             $exe.FullName "$($exe.FullName).sig" latest.json
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # Releases created with GITHUB_TOKEN emit no workflow-triggering
+      # `release` event, so hand the baton to the winget workflow
+      # explicitly (workflow_dispatch is exempt from that rule).
+      # Non-fatal: a failed dispatch must not fail a shipped release.
+      - name: Dispatch winget publish
+        if: startsWith(github.ref, 'refs/tags/')
+        continue-on-error: true
+        shell: pwsh
+        run: gh workflow run winget.yml -f tag=$env:GITHUB_REF_NAME
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
