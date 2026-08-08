@@ -28,10 +28,71 @@ fn as_num(v: Option<&Value>) -> Option<f64> {
     v.as_f64().or_else(|| v.as_str()?.trim().parse().ok())
 }
 
+/// A quota percent that proto3 omitted (zero value) reads as 0% remaining
+/// when its sibling reset timestamp proves the quota exists.
+fn zero_when_omitted(remaining: Option<f64>, reset: Option<f64>) -> Option<f64> {
+    remaining.or_else(|| reset.is_some().then_some(0.0))
+}
+
 pub async fn snapshot() -> Snapshot {
     match fetch().await {
         Ok(s) => s,
         Err(e) => Snapshot::error(ID, NAME, e),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn omitted_quota_percent_with_reset_means_exhausted() {
+        // Exhausted week: percent omitted, reset present → 0% remaining.
+        assert_eq!(zero_when_omitted(None, Some(1_786_262_400.0)), Some(0.0));
+        // Percent present → passes through untouched.
+        assert_eq!(zero_when_omitted(Some(37.0), Some(1.0)), Some(37.0));
+        // Neither field → genuinely no such quota window.
+        assert_eq!(zero_when_omitted(None, None), None);
+    }
+
+    /// Live diagnostic (ignored): prints the raw planStatus so quota
+    /// misreports can be debugged against real account states (never
+    /// prints the key). Run:
+    ///   cargo test devin_status_live_probe -- --ignored --nocapture
+    #[tokio::test]
+    #[ignore]
+    async fn devin_status_live_probe() {
+        let Some(path) = credentials_paths().into_iter().find(|p| p.exists()) else {
+            println!("no credentials.toml");
+            return;
+        };
+        let raw = std::fs::read_to_string(&path).unwrap();
+        let doc: toml::Value = toml::from_str(&raw).unwrap();
+        let api_key = doc.get("windsurf_api_key").and_then(toml::Value::as_str).unwrap();
+        let server = doc
+            .get("api_server_url")
+            .and_then(toml::Value::as_str)
+            .unwrap_or("https://server.codeium.com")
+            .trim_end_matches('/');
+        let resp = http()
+            .post(format!("{server}/exa.seat_management_pb.SeatManagementService/GetUserStatus"))
+            .header("Content-Type", "application/json")
+            .header("Connect-Protocol-Version", "1")
+            .json(&json!({ "metadata": { "apiKey": api_key, "ideName": "devin",
+                "ideVersion": COMPAT_VERSION, "extensionName": "devin",
+                "extensionVersion": COMPAT_VERSION, "locale": "en" } }))
+            .send()
+            .await
+            .unwrap();
+        println!("status: {}", resp.status());
+        let body: Value = resp.json().await.unwrap();
+        println!(
+            "planStatus: {}",
+            serde_json::to_string_pretty(
+                body.pointer("/userStatus/planStatus").unwrap_or(&Value::Null)
+            )
+            .unwrap()
+        );
     }
 }
 
@@ -99,10 +160,17 @@ async fn fetch() -> Result<Snapshot, String> {
         .and_then(Value::as_bool)
         .unwrap_or(false);
 
-    let daily_remaining = as_num(plan_status.get("dailyQuotaRemainingPercent"));
-    let weekly_remaining = as_num(plan_status.get("weeklyQuotaRemainingPercent"));
     let daily_reset = as_num(plan_status.get("dailyQuotaResetAtUnix"));
     let weekly_reset = as_num(plan_status.get("weeklyQuotaResetAtUnix"));
+    // proto3 JSON drops zero-valued fields: an exhausted quota loses its
+    // RemainingPercent entirely while its reset timestamp stays. A missing
+    // percent alongside a present reset therefore means 0% left — not "no
+    // quota" — else a fully spent week rendered as a fresh 0%-used bar
+    // (the same omitted-field trick Grok pulls with creditUsagePercent).
+    let daily_remaining =
+        zero_when_omitted(as_num(plan_status.get("dailyQuotaRemainingPercent")), daily_reset);
+    let weekly_remaining =
+        zero_when_omitted(as_num(plan_status.get("weeklyQuotaRemainingPercent")), weekly_reset);
 
     const DAY: i64 = 86_400_000;
     let to_ms = |unix: Option<f64>| unix.map(|s| (s * 1000.0) as i64);

@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+- **Devin no longer shows a fresh bar when the weekly quota is spent** —
+  Devin's API drops zero-valued fields from its JSON (proto3), so an
+  exhausted week loses its remaining-percent field entirely and Pane
+  misread that as "no weekly quota", falling back to the untouched
+  hidden daily meter: a 0%-used bar at the exact moment you were rate
+  limited. A missing percent next to a present reset timestamp now
+  correctly reads as 0% left — "Limit reached", real countdown — the
+  same class of fix Grok needed for its omitted usage field.
+
 ## 0.4.30 — 2026-08-07
 
 ### Fixed
