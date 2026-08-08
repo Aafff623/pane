@@ -1748,8 +1748,20 @@ body.no-glass .cust-dock {
   border: none;
   padding: 14px 16px 12px;
 }
+/* Light snapshots: in the app's light theme --background and --card are
+   both near-white, which made the share read as a washed grey blob on
+   white. The snapshot flips to the app's real light hierarchy instead —
+   grey frame, white card lifted by a soft shadow, faint inset panel. */
+:root[data-theme="light"] #snap-root {
+  background: #e8eaee;
+}
+:root[data-theme="light"] .snap-card {
+  background: #ffffff;
+  border-color: rgba(0, 0, 0, 0.08);
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.1);
+}
 :root[data-theme="light"] .snap-card .card-panel {
-  background: rgba(0, 0, 0, 0.05);
+  background: rgba(0, 0, 0, 0.045);
 }
 .snap-card .metric {
   margin: 12px 0;
