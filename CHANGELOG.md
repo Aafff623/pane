@@ -7,7 +7,9 @@
   card's ⧉ copy used to drop the Usage Trend and pace hints for a
   "compact composition"; since both are visible on the card, the copy
   read as missing data. Every share now includes everything the card
-  currently renders; only buttons, links, and carets stay out.
+  currently renders; only buttons, links, and carets stay out. Light
+  mode shares also get a real surface hierarchy — grey frame, white
+  card with a soft shadow — instead of the washed grey-on-white blob.
 
 ### Fixed
 - **Devin no longer shows a fresh bar when the weekly quota is spent** —
