@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### Changed
+- **Share cards copy exactly what you see, collapsed too** — a collapsed
+  card's ⧉ copy used to drop the Usage Trend and pace hints for a
+  "compact composition"; since both are visible on the card, the copy
+  read as missing data. Every share now includes everything the card
+  currently renders; only buttons, links, and carets stay out.
+
 ### Fixed
 - **Devin no longer shows a fresh bar when the weekly quota is spent** —
   Devin's API drops zero-valued fields from its JSON (proto3), so an
