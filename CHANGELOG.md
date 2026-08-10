@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.4.31 — 2026-08-08
 
 ### Changed
 - **Share cards copy exactly what you see, collapsed too** — a collapsed
