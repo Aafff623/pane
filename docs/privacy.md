@@ -34,6 +34,10 @@ same disclosed-and-toggleable approach as the Mac app Pane is a port of):
 - **`app_daily_active`** — once per day: "this install was alive today",
   the app version, which providers are enabled, which metrics you
   starred (stable IDs only), appearance/density/refresh settings.
+  Multi-account installs report only the plain provider family
+  ("claude", once) — account-scoped card ids are derived from your
+  account identity and never leave the machine, on any field of either
+  event.
 - **`provider_refresh_daily`** — per provider, summarizing the previous
   day: how many refreshes succeeded, went stale, or failed, with failure
   *categories* only (auth / rate-limit / server / network / other).

@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.4.32 — 2026-08-11
 
 ### Added
 - **Multi-account Codex** — same treatment for Codex: every discovered
