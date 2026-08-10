@@ -1862,6 +1862,10 @@ systemLight.addEventListener("change", () => {
 // ---------------------------------------------------------------------------
 
 function isStarrable(s: Snapshot | undefined, key: string): boolean {
+  // Account-scoped cards (claude@<hash>) can't reach the tray strip — the
+  // Rust side validates ids against a fixed allowlist — so offering the ★
+  // there would be a silent no-op. Default family cards only.
+  if (s && s.id.includes("@")) return false;
   return s?.metrics.some((m) => m.label === key && m.kind === "progress") ?? false;
 }
 

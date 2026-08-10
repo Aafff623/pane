@@ -68,7 +68,13 @@ fn identity_from(doc: &Value) -> Option<(String, Option<String>)> {
 /// rules, and dedup-by-account as the Claude discovery.
 pub fn discover_extra_accounts() -> Vec<CodexAccount> {
     let default = default_home();
-    let mut seen: Vec<String> = dir_identity(&default).map(|(a, _)| a).into_iter().collect();
+    let default_identity = dir_identity(&default);
+    // Same conservative rule as Claude: a default login that can't name
+    // its account voids the dedup guarantee — discover nothing.
+    if default.join("auth.json").exists() && default_identity.is_none() {
+        return Vec::new();
+    }
+    let mut seen: Vec<String> = default_identity.map(|(a, _)| a).into_iter().collect();
 
     let mut out = Vec::new();
     for dir in super::account_scan_roots() {

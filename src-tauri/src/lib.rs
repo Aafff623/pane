@@ -474,6 +474,12 @@ fn fail_state() -> &'static std::sync::Mutex<std::collections::HashMap<String, F
     STATE.get_or_init(Default::default)
 }
 
+/// The provider family of a card id: "claude@ab12cd34" → "claude". The only
+/// spelling allowed to leave the machine in telemetry.
+fn family_of(id: &str) -> String {
+    id.split('@').next().unwrap_or(id).to_string()
+}
+
 // Owned id/name so dynamically discovered account cards (claude@<hash>)
 // can ride the same guard as the static providers under a 'static spawn.
 async fn guarded<F>(id: String, name: String, fut: F) -> providers::Snapshot
@@ -606,10 +612,12 @@ async fn fetch_usage(app: tauri::AppHandle) -> Vec<providers::Snapshot> {
     // Telemetry never learns account-scoped ids — a claude@<hash8> would
     // carry an account-derived hash off the machine. Report families,
     // deduplicated, so a multi-account install looks like "claude" once.
+    // (family_of is applied at EVERY telemetry boundary: enabled ids here,
+    // refresh outcomes, and starred-metric prefixes.)
     let enabled_ids: Vec<String> = {
         let mut fams: Vec<String> = Vec::new();
         for (id, _) in &futs {
-            let fam = id.split('@').next().unwrap_or(id).to_string();
+            let fam = family_of(id);
             if !fams.contains(&fam) {
                 fams.push(fam);
             }
@@ -685,9 +693,22 @@ async fn fetch_usage(app: tauri::AppHandle) -> Vec<providers::Snapshot> {
                 .unwrap_or_else(|| json!({}));
             if stored != current {
                 let mut map = cache.lock().unwrap();
+                let mut removed = false;
                 for fam in ["claude", "codex"] {
-                    if stored.get(fam) != current.get(fam) {
-                        map.remove(fam);
+                    if stored.get(fam) != current.get(fam) && map.remove(fam).is_some() {
+                        removed = true;
+                    }
+                }
+                // Persist the PRUNED cache before the new stamp: if this
+                // refresh finds nothing ok (offline launch) the on-disk
+                // cache would otherwise keep the old account's entry while
+                // the stamp already claims the new one, resurrecting the
+                // wrong numbers next launch. Stamp last, so a failed write
+                // just re-prunes next time.
+                let _ = std::fs::create_dir_all(providers::config_dir());
+                if removed {
+                    if let Ok(serialized) = serde_json::to_string(&*map) {
+                        let _ = std::fs::write(&cache_file, serialized);
                     }
                 }
                 drop(map);
@@ -750,14 +771,26 @@ async fn fetch_usage(app: tauri::AppHandle) -> Vec<providers::Snapshot> {
                             .map(|a| {
                                 a.iter()
                                     .filter_map(Value::as_str)
-                                    .map(|m| format!("{pid}/{m}"))
+                                    // Family prefix only — an account-scoped
+                                    // pid would ship an account-derived hash.
+                                    .map(|m| format!("{}/{m}", family_of(pid)))
                                     .collect::<Vec<_>>()
                             })
                             .unwrap_or_default()
                     })
-                    .collect()
+                    .collect::<Vec<String>>()
             })
             .unwrap_or_default();
+        // Two accounts starring the same metric collapse to one entry.
+        let starred_metrics: Vec<String> = {
+            let mut out: Vec<String> = Vec::new();
+            for m in starred_metrics {
+                if !out.contains(&m) {
+                    out.push(m);
+                }
+            }
+            out
+        };
         let snap = telemetry::ConfigSnapshot {
             app_version: app.package_info().version.to_string(),
             enabled_providers: enabled_ids,
@@ -777,7 +810,10 @@ async fn fetch_usage(app: tauri::AppHandle) -> Vec<providers::Snapshot> {
         let outcomes: Vec<telemetry::Outcome> = all
             .iter()
             .map(|s| telemetry::Outcome {
-                id: s.id.clone(),
+                // Family only: account-scoped ids never leave the machine.
+                // Multiple accounts fold into one family row (accumulate
+                // sums same-key counters).
+                id: family_of(&s.id),
                 status: s.status.clone(),
                 stale: s.stale,
                 error: s.error.clone().or_else(|| s.warning.clone()),

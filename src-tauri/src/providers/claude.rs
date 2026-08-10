@@ -88,7 +88,14 @@ mod tests {
 /// structurally impossible.
 pub fn discover_extra_accounts() -> Vec<ClaudeAccount> {
     let default = default_dir();
-    let mut seen: Vec<String> = dir_identity(&default).map(|(u, _)| u).into_iter().collect();
+    let default_identity = dir_identity(&default);
+    // If the default dir HAS a login but can't name its account, the
+    // duplicate-card guarantee is gone (a candidate holding that same
+    // account would card twice) — discover nothing rather than risk it.
+    if default.join(".credentials.json").exists() && default_identity.is_none() {
+        return Vec::new();
+    }
+    let mut seen: Vec<String> = default_identity.map(|(u, _)| u).into_iter().collect();
 
     let mut out = Vec::new();
     for dir in super::account_scan_roots() {
