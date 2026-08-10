@@ -8,26 +8,130 @@ const CLIENT_ID: &str = "9d1c250a-e61b-44d9-88ed-5944d1962f5e";
 const ID: &str = "claude";
 const NAME: &str = "Claude";
 
-fn creds_path() -> PathBuf {
-    let config_dir = std::env::var("CLAUDE_CONFIG_DIR")
+fn default_dir() -> PathBuf {
+    std::env::var("CLAUDE_CONFIG_DIR")
         .map(PathBuf::from)
-        .unwrap_or_else(|_| dirs::home_dir().unwrap_or_default().join(".claude"));
-    config_dir.join(".credentials.json")
+        .unwrap_or_else(|_| dirs::home_dir().unwrap_or_default().join(".claude"))
+}
+
+/// One discovered Claude login. The account at the default config dir keeps
+/// the bare "claude" id forever (upstream OpenUsage's migration-killing
+/// decision: existing layouts, pins, and API consumers never move); every
+/// extra account mints "claude@<hash8>" from its accountUuid.
+pub struct ClaudeAccount {
+    pub id: String,
+    pub name: String,
+    pub dir: PathBuf,
+}
+
+/// The account identity living in a config dir: (accountUuid, label).
+/// Claude Code keeps `.claude.json` inside a custom CLAUDE_CONFIG_DIR but
+/// as a home-level sibling (`~/.claude.json`) for the default `~/.claude`.
+fn dir_identity(dir: &std::path::Path) -> Option<(String, Option<String>)> {
+    let mut candidates = vec![dir.join(".claude.json")];
+    if let Some(home) = dirs::home_dir() {
+        if dir == home.join(".claude") {
+            candidates.push(home.join(".claude.json"));
+        }
+    }
+    for p in candidates {
+        let Ok(raw) = std::fs::read_to_string(&p) else { continue };
+        let Ok(doc) = serde_json::from_str::<Value>(&raw) else { continue };
+        let Some(acct) = doc.get("oauthAccount") else { continue };
+        let Some(uuid) = acct.get("accountUuid").and_then(Value::as_str) else { continue };
+        let label = acct
+            .get("organizationName")
+            .and_then(Value::as_str)
+            .filter(|s| !s.trim().is_empty())
+            .or_else(|| acct.get("emailAddress").and_then(Value::as_str))
+            .map(str::to_string);
+        return Some((uuid.to_string(), label));
+    }
+    None
+}
+
+/// Extra Claude logins beyond the default config dir: dot-dirs in the home
+/// folder plus dirs under ~/.config that hold a `.credentials.json` with a
+/// claudeAiOauth entry (how a second account is kept via CLAUDE_CONFIG_DIR).
+/// Identity extraction is validation (upstream's rule): a dir that can't
+/// name its account never becomes a card, and a dir naming an already-seen
+/// account is just another source of it — skipped, so duplicate cards are
+/// structurally impossible.
+pub fn discover_extra_accounts() -> Vec<ClaudeAccount> {
+    let Some(home) = dirs::home_dir() else { return Vec::new() };
+    let default = default_dir();
+    let mut seen: Vec<String> = dir_identity(&default).map(|(u, _)| u).into_iter().collect();
+
+    let mut roots: Vec<PathBuf> = Vec::new();
+    if let Ok(entries) = std::fs::read_dir(&home) {
+        for e in entries.flatten() {
+            let p = e.path();
+            let dotted = p
+                .file_name()
+                .and_then(|n| n.to_str())
+                .is_some_and(|n| n.starts_with('.'));
+            if dotted && p.is_dir() {
+                roots.push(p);
+            }
+        }
+    }
+    if let Ok(entries) = std::fs::read_dir(home.join(".config")) {
+        for e in entries.flatten() {
+            let p = e.path();
+            if p.is_dir() {
+                roots.push(p);
+            }
+        }
+    }
+
+    let mut out = Vec::new();
+    for dir in roots {
+        if dir == default {
+            continue;
+        }
+        let has_oauth = std::fs::read_to_string(dir.join(".credentials.json"))
+            .ok()
+            .and_then(|raw| serde_json::from_str::<Value>(&raw).ok())
+            .is_some_and(|doc| doc.get("claudeAiOauth").is_some());
+        if !has_oauth {
+            continue;
+        }
+        let Some((uuid, label)) = dir_identity(&dir) else { continue };
+        if seen.iter().any(|u| u == &uuid) {
+            continue;
+        }
+        seen.push(uuid.clone());
+        let hash8: String = uuid.chars().filter(|c| *c != '-').take(8).collect();
+        let name = match label {
+            Some(l) => format!("Claude — {l}"),
+            None => format!("Claude @{hash8}"),
+        };
+        out.push(ClaudeAccount { id: format!("claude@{hash8}"), name, dir });
+    }
+    out.sort_by(|a, b| a.id.cmp(&b.id));
+    out
 }
 
 pub async fn snapshot() -> Snapshot {
-    match fetch().await {
+    snapshot_at(default_dir(), ID.to_string(), NAME.to_string()).await
+}
+
+/// Snapshot for one account's config dir — the default card and every
+/// discovered extra account run the exact same flow, only the paths and
+/// the card identity differ.
+pub async fn snapshot_at(dir: PathBuf, id: String, name: String) -> Snapshot {
+    match fetch(&dir, &id, &name).await {
         Ok(s) => s,
-        Err(e) => Snapshot::error(ID, NAME, e),
+        Err(e) => Snapshot::error(&id, &name, e),
     }
 }
 
-async fn fetch() -> Result<Snapshot, String> {
-    let path = creds_path();
+async fn fetch(dir: &std::path::Path, id: &str, name: &str) -> Result<Snapshot, String> {
+    let path = dir.join(".credentials.json");
     if !path.exists() {
         return Ok(Snapshot::no_credentials(
-            ID,
-            NAME,
+            id,
+            name,
             "Claude Code sign-in not found. Run `claude` in a terminal and log in.",
         ));
     }
@@ -200,7 +304,7 @@ async fn fetch() -> Result<Snapshot, String> {
     if metrics.is_empty() {
         return Err("usage response had no recognizable limit windows".into());
     }
-    Ok(Snapshot::ok(ID, NAME, plan, metrics))
+    Ok(Snapshot::ok(id, name, plan, metrics))
 }
 
 /// `resets_at` arrives as ISO-8601 or epoch (seconds when < 1e10, else ms).

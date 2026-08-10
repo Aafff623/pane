@@ -474,10 +474,14 @@ fn fail_state() -> &'static std::sync::Mutex<std::collections::HashMap<String, F
     STATE.get_or_init(Default::default)
 }
 
-async fn guarded<F>(id: &str, name: &str, fut: F) -> providers::Snapshot
+// Owned id/name so dynamically discovered account cards (claude@<hash>)
+// can ride the same guard as the static providers under a 'static spawn.
+async fn guarded<F>(id: String, name: String, fut: F) -> providers::Snapshot
 where
     F: std::future::Future<Output = providers::Snapshot>,
 {
+    let id = id.as_str();
+    let name = name.as_str();
     let now = now_ms() as i64;
     let benched = {
         let map = fail_state().lock().unwrap();
@@ -547,32 +551,60 @@ async fn fetch_usage(app: tauri::AppHandle) -> Vec<providers::Snapshot> {
     // auto-updater downloaded a fresh installer to %TEMP% on every refresh
     // (gigabytes within days). Futures are lazy, so building and dropping
     // a disabled entry here runs none of its code.
-    let futs: Vec<(&str, BoxedSnap)> = vec![
-        ("claude", Box::pin(guarded("claude", "Claude", providers::claude::snapshot()))),
-        ("codex", Box::pin(guarded("codex", "Codex", providers::codex::snapshot()))),
-        ("cursor", Box::pin(guarded("cursor", "Cursor", providers::cursor::snapshot()))),
-        ("opencode", Box::pin(guarded("opencode", "OpenCode", providers::opencode::snapshot()))),
-        ("copilot", Box::pin(guarded("copilot", "Copilot", providers::copilot::snapshot()))),
-        ("grok", Box::pin(guarded("grok", "Grok", providers::grok::snapshot()))),
-        ("devin", Box::pin(guarded("devin", "Devin", providers::devin::snapshot()))),
-        ("minimax", Box::pin(guarded("minimax", "MiniMax", providers::minimax::snapshot()))),
-        ("openrouter", Box::pin(guarded("openrouter", "OpenRouter", providers::openrouter::snapshot()))),
-        ("zai", Box::pin(guarded("zai", "Z.ai", providers::zai::snapshot()))),
-        ("antigravity", Box::pin(guarded("antigravity", "Antigravity", providers::antigravity::snapshot()))),
-        ("deepseek", Box::pin(guarded("deepseek", "DeepSeek", providers::deepseek::snapshot()))),
-        ("moonshot", Box::pin(guarded("moonshot", "Moonshot", providers::moonshot::snapshot()))),
-        ("elevenlabs", Box::pin(guarded("elevenlabs", "ElevenLabs", providers::elevenlabs::snapshot()))),
-        ("ollama", Box::pin(guarded("ollama", "Ollama", providers::ollama::snapshot()))),
-        ("codebuff", Box::pin(guarded("codebuff", "Codebuff", providers::codebuff::snapshot()))),
-        ("kilo", Box::pin(guarded("kilo", "Kilo", providers::kilo::snapshot()))),
-        ("aihubmix", Box::pin(guarded("aihubmix", "AihubMix", providers::aihubmix::snapshot()))),
-        ("qwen", Box::pin(guarded("qwen", "Qwen Code", providers::qwen::snapshot()))),
+    let base: Vec<(&str, BoxedSnap)> = vec![
+        ("claude", Box::pin(guarded("claude".into(), "Claude".into(), providers::claude::snapshot()))),
+        ("codex", Box::pin(guarded("codex".into(), "Codex".into(), providers::codex::snapshot()))),
+        ("cursor", Box::pin(guarded("cursor".into(), "Cursor".into(), providers::cursor::snapshot()))),
+        ("opencode", Box::pin(guarded("opencode".into(), "OpenCode".into(), providers::opencode::snapshot()))),
+        ("copilot", Box::pin(guarded("copilot".into(), "Copilot".into(), providers::copilot::snapshot()))),
+        ("grok", Box::pin(guarded("grok".into(), "Grok".into(), providers::grok::snapshot()))),
+        ("devin", Box::pin(guarded("devin".into(), "Devin".into(), providers::devin::snapshot()))),
+        ("minimax", Box::pin(guarded("minimax".into(), "MiniMax".into(), providers::minimax::snapshot()))),
+        ("openrouter", Box::pin(guarded("openrouter".into(), "OpenRouter".into(), providers::openrouter::snapshot()))),
+        ("zai", Box::pin(guarded("zai".into(), "Z.ai".into(), providers::zai::snapshot()))),
+        ("antigravity", Box::pin(guarded("antigravity".into(), "Antigravity".into(), providers::antigravity::snapshot()))),
+        ("deepseek", Box::pin(guarded("deepseek".into(), "DeepSeek".into(), providers::deepseek::snapshot()))),
+        ("moonshot", Box::pin(guarded("moonshot".into(), "Moonshot".into(), providers::moonshot::snapshot()))),
+        ("elevenlabs", Box::pin(guarded("elevenlabs".into(), "ElevenLabs".into(), providers::elevenlabs::snapshot()))),
+        ("ollama", Box::pin(guarded("ollama".into(), "Ollama".into(), providers::ollama::snapshot()))),
+        ("codebuff", Box::pin(guarded("codebuff".into(), "Codebuff".into(), providers::codebuff::snapshot()))),
+        ("kilo", Box::pin(guarded("kilo".into(), "Kilo".into(), providers::kilo::snapshot()))),
+        ("aihubmix", Box::pin(guarded("aihubmix".into(), "AihubMix".into(), providers::aihubmix::snapshot()))),
+        ("qwen", Box::pin(guarded("qwen".into(), "Qwen Code".into(), providers::qwen::snapshot()))),
     ];
-    let futs: Vec<(&str, BoxedSnap)> = futs
+    let mut futs: Vec<(String, BoxedSnap)> =
+        base.into_iter().map(|(id, fut)| (id.to_string(), fut)).collect();
+    // Extra Claude accounts (multi-login machines): each discovered config
+    // dir renders its own card under a claude@<hash8> id, running the same
+    // provider flow scoped to its dir. The default login keeps the bare id.
+    for acct in providers::claude::discover_extra_accounts() {
+        let (id, name, dir) = (acct.id, acct.name, acct.dir);
+        futs.push((
+            id.clone(),
+            Box::pin(guarded(
+                id.clone(),
+                name.clone(),
+                providers::claude::snapshot_at(dir, id, name),
+            )),
+        ));
+    }
+    let futs: Vec<(String, BoxedSnap)> = futs
         .into_iter()
         .filter(|(id, _)| !disabled.iter().any(|d| d == id))
         .collect();
-    let enabled_ids: Vec<String> = futs.iter().map(|(id, _)| id.to_string()).collect();
+    // Telemetry never learns account-scoped ids — a claude@<hash8> would
+    // carry an account-derived hash off the machine. Report families,
+    // deduplicated, so a multi-account install looks like "claude" once.
+    let enabled_ids: Vec<String> = {
+        let mut fams: Vec<String> = Vec::new();
+        for (id, _) in &futs {
+            let fam = id.split('@').next().unwrap_or(id).to_string();
+            if !fams.contains(&fam) {
+                fams.push(fam);
+            }
+        }
+        fams
+    };
     let handles: Vec<_> = futs
         .into_iter()
         .map(|(_, fut)| tauri::async_runtime::spawn(fut))

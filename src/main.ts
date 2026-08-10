@@ -781,9 +781,15 @@ function renderItem(s: Snapshot, spend: ProviderSpend | undefined, key: string):
   return metric ? renderMetric(metric) : "";
 }
 
+/// Account-scoped cards (claude@<hash>) inherit their family's chrome —
+/// icon, quick links — while keeping their own identity everywhere else.
+function providerFamily(id: string): string {
+  return id.split("@")[0];
+}
+
 function renderCard(s: Snapshot): string {
   const plan = s.plan ? `<span class="plan">${escapeHtml(s.plan)}</span>` : "";
-  const icon = PROVIDER_ICONS[s.id] ?? "";
+  const icon = PROVIDER_ICONS[s.id] ?? PROVIDER_ICONS[providerFamily(s.id)] ?? "";
   const muted = s.status === "ok" ? "" : " muted";
 
   let body: string;
@@ -810,7 +816,7 @@ function renderCard(s: Snapshot): string {
   const stale = s.stale
     ? `<span class="stale" title="${escapeHtml(staleHelp(s))}">⚠ Outdated</span>`
     : "";
-  const links = (PROVIDER_LINKS[s.id] ?? [])
+  const links = (PROVIDER_LINKS[s.id] ?? PROVIDER_LINKS[providerFamily(s.id)] ?? [])
     .map((l) => `<button class="quick-link" data-link="${escapeHtml(l.url)}">${escapeHtml(l.label)}</button>`)
     .join("<span class='quick-sep'>·</span>");
   const linksRow = links ? `<div class="quick-links">${links}</div>` : "";
@@ -1867,8 +1873,10 @@ function renderCustomize(): string {
   const order = config.layout?.providerOrder ?? ALL_PROVIDERS.map(([id]) => id);
   const blocks = order
     .map((id) => {
-      const name = ALL_PROVIDERS.find(([pid]) => pid === id)?.[1] ?? id;
       const snapshot = lastSnapshots.find((s) => s.id === id);
+      // Dynamic account cards carry their name in the snapshot
+      // ("Claude — Org"); static providers come from the fixed list.
+      const name = ALL_PROVIDERS.find(([pid]) => pid === id)?.[1] ?? snapshot?.name ?? id;
       const L = providerLayout(id);
       const enabled = !config.disabled.includes(id);
 
@@ -2178,9 +2186,13 @@ async function refresh(force = false): Promise<void> {
       // ids, which rendered ghost rows in Customize. Prune anything the app
       // no longer knows.
       const valid = new Set(ALL_PROVIDERS.map(([id]) => id));
-      const prunedOrder = config.layout.providerOrder.filter((id) => valid.has(id));
-      const staleLayout = Object.keys(config.layout.providers).filter((id) => !valid.has(id));
-      const prunedDisabled = config.disabled.filter((id) => valid.has(id));
+      // Account-scoped ids (claude@<hash>) are valid whenever their family
+      // is — pruning them here would wipe a multi-account user's layout and
+      // disabled choices on every launch.
+      const isValid = (id: string) => valid.has(id) || valid.has(providerFamily(id));
+      const prunedOrder = config.layout.providerOrder.filter(isValid);
+      const staleLayout = Object.keys(config.layout.providers).filter((id) => !isValid(id));
+      const prunedDisabled = config.disabled.filter(isValid);
       if (
         prunedOrder.length !== config.layout.providerOrder.length ||
         staleLayout.length ||

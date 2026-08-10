@@ -1,5 +1,22 @@
 # Changelog
 
+## Unreleased
+
+### Added
+- **Multi-account Claude** — machines with more than one Claude login
+  (say a personal plan in `~\.claude` and an enterprise seat kept in a
+  second config dir via `CLAUDE_CONFIG_DIR`) now get one card per
+  account, each with its own limits, plan, and spend scoped to its own
+  logs. Discovery scans dot-folders in your home directory and
+  `~\.config` for Claude-shaped config dirs and only makes a card when
+  the dir can name its account (from its `.claude.json`); the same
+  account signed in twice stays one card. Extra cards are named from
+  the account's organization or email ("Claude — Acme"); the default
+  login keeps the plain `claude` identity, so existing layouts, stars,
+  and API consumers are untouched. Design follows upstream OpenUsage's
+  account-first model. Telemetry never learns account identities —
+  a multi-account install reports plain "claude" once.
+
 ## 0.4.31 — 2026-08-08
 
 ### Changed
