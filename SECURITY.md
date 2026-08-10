@@ -25,6 +25,14 @@ All of this is auditable in the source — links go to the exact code.
   ([`src-tauri/src/providers/`](src-tauri/src/providers/) — one module per
   provider; see [docs/providers.md](docs/providers.md) for the exact files
   read and endpoints called).
+- **Multi-account discovery widens where credentials are *found*, never
+  where they are *sent*.** To support second logins kept via
+  `CLAUDE_CONFIG_DIR`/`CODEX_HOME`, Pane scans dot-folders in your home
+  directory and `~\.config` for Claude/Codex-shaped credential files —
+  the places those official mechanisms put them. A discovered credential
+  follows the exact same lane rule (its own vendor's API only, token
+  refresh written back beside it), and a file that cannot name its
+  account is never used at all.
 - **No analytics SDK, no crash reporter, no event streams.** Pane's
   entire self-reporting surface is two anonymous channels, both
   documented field-by-field in [docs/privacy.md](docs/privacy.md): the
