@@ -37,17 +37,46 @@ fn dir_identity(dir: &std::path::Path) -> Option<(String, Option<String>)> {
     for p in candidates {
         let Ok(raw) = std::fs::read_to_string(&p) else { continue };
         let Ok(doc) = serde_json::from_str::<Value>(&raw) else { continue };
-        let Some(acct) = doc.get("oauthAccount") else { continue };
-        let Some(uuid) = acct.get("accountUuid").and_then(Value::as_str) else { continue };
-        let label = acct
-            .get("organizationName")
-            .and_then(Value::as_str)
-            .filter(|s| !s.trim().is_empty())
-            .or_else(|| acct.get("emailAddress").and_then(Value::as_str))
-            .map(str::to_string);
-        return Some((uuid.to_string(), label));
+        if let Some(identity) = identity_from(&doc) {
+            return Some(identity);
+        }
     }
     None
+}
+
+/// (accountUuid, label) from a parsed .claude.json — org name first, email
+/// as the fallback label; no uuid, no identity.
+fn identity_from(doc: &Value) -> Option<(String, Option<String>)> {
+    let acct = doc.get("oauthAccount")?;
+    let uuid = acct.get("accountUuid").and_then(Value::as_str)?;
+    let label = acct
+        .get("organizationName")
+        .and_then(Value::as_str)
+        .filter(|s| !s.trim().is_empty())
+        .or_else(|| acct.get("emailAddress").and_then(Value::as_str))
+        .map(str::to_string);
+    Some((uuid.to_string(), label))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::identity_from;
+    use serde_json::json;
+
+    #[test]
+    fn claude_identity_extraction_is_validation() {
+        // Org name wins the label; email is the fallback.
+        let org = json!({"oauthAccount": {"accountUuid": "u-1",
+            "organizationName": "Acme", "emailAddress": "a@b.c"}});
+        assert_eq!(identity_from(&org), Some(("u-1".into(), Some("Acme".into()))));
+        let email_only = json!({"oauthAccount": {"accountUuid": "u-2",
+            "organizationName": "  ", "emailAddress": "a@b.c"}});
+        assert_eq!(identity_from(&email_only), Some(("u-2".into(), Some("a@b.c".into()))));
+        // No uuid → no identity → no card (a dir that can't name its
+        // account never becomes one).
+        assert_eq!(identity_from(&json!({"oauthAccount": {}})), None);
+        assert_eq!(identity_from(&json!({})), None);
+    }
 }
 
 /// Extra Claude logins beyond the default config dir: dot-dirs in the home

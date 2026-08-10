@@ -31,6 +31,13 @@ pub struct CodexAccount {
 fn dir_identity(dir: &std::path::Path) -> Option<(String, Option<String>)> {
     let raw = std::fs::read_to_string(dir.join("auth.json")).ok()?;
     let doc: Value = serde_json::from_str(&raw).ok()?;
+    identity_from(&doc)
+}
+
+/// (account id, email label) from a parsed auth.json: tokens.account_id
+/// first, the id_token's ChatGPT account claim as the fallback; a file
+/// that names neither has no identity and never becomes a card.
+fn identity_from(doc: &Value) -> Option<(String, Option<String>)> {
     let tokens = doc.get("tokens")?;
     let claims = tokens
         .get("id_token")
@@ -366,8 +373,32 @@ fn credits_balance(usage: &Value) -> Option<f64> {
 
 #[cfg(test)]
 mod tests {
-    use super::credits_balance;
+    use super::{credits_balance, identity_from};
+    use base64::Engine;
     use serde_json::json;
+
+    fn fake_id_token(claims: serde_json::Value) -> String {
+        let payload = base64::engine::general_purpose::URL_SAFE_NO_PAD
+            .encode(serde_json::to_vec(&claims).unwrap());
+        format!("x.{payload}.y")
+    }
+
+    #[test]
+    fn codex_identity_extraction_is_validation() {
+        // account_id field wins; email claim labels the card.
+        let direct = json!({"tokens": {"account_id": "acct-1",
+            "id_token": fake_id_token(json!({"email": "e@corp.com"}))}});
+        assert_eq!(identity_from(&direct), Some(("acct-1".into(), Some("e@corp.com".into()))));
+        // Empty account_id falls through to the id_token's ChatGPT claim.
+        let via_claim = json!({"tokens": {"account_id": "",
+            "id_token": fake_id_token(json!({
+                "https://api.openai.com/auth": {"chatgpt_account_id": "acct-2"}}))}});
+        assert_eq!(identity_from(&via_claim), Some(("acct-2".into(), None)));
+        // Neither → no identity → no card.
+        let anonymous = json!({"tokens": {"access_token": "k"}});
+        assert_eq!(identity_from(&anonymous), None);
+        assert_eq!(identity_from(&json!({})), None);
+    }
 
     #[test]
     fn credit_balance_parses_number_and_string_spellings() {
