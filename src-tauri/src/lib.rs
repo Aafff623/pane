@@ -691,39 +691,45 @@ async fn fetch_usage(app: tauri::AppHandle) -> Vec<providers::Snapshot> {
                 .ok()
                 .and_then(|raw| serde_json::from_str(&raw).ok())
                 .unwrap_or_else(|| json!({}));
-            if stored != current {
-                let mut map = cache.lock().unwrap();
-                let mut removed = false;
-                for fam in ["claude", "codex"] {
-                    // Only a KNOWN stored identity differing from a KNOWN
-                    // current one is evidence of an account swap. A missing
-                    // stamp (first launch after updating) or a momentarily
-                    // unreadable identity file must not dump the last-good
-                    // cache — that's the safety net, not a swap.
-                    let swap = match (stored.get(fam), current.get(fam)) {
-                        (Some(s), Some(c)) => !s.is_null() && !c.is_null() && s != c,
-                        _ => false,
-                    };
-                    if swap && map.remove(fam).is_some() {
-                        removed = true;
-                    }
+            let mut map = cache.lock().unwrap();
+            let mut removed = false;
+            let mut to_store = serde_json::Map::new();
+            for fam in ["claude", "codex"] {
+                let cur = current.get(fam).cloned().unwrap_or(Value::Null);
+                let old = stored.get(fam).cloned().unwrap_or(Value::Null);
+                // Only a KNOWN stored identity differing from a KNOWN
+                // current one is evidence of an account swap. A missing
+                // stamp (first launch after updating) or a momentarily
+                // unreadable identity file must not dump the last-good
+                // cache — that's the safety net, not a swap.
+                if !old.is_null() && !cur.is_null() && old != cur && map.remove(fam).is_some() {
+                    removed = true;
                 }
-                // Persist the PRUNED cache before the new stamp: if this
-                // refresh finds nothing ok (offline launch) the on-disk
-                // cache would otherwise keep the old account's entry while
-                // the stamp already claims the new one, resurrecting the
-                // wrong numbers next launch. Stamp last, so a failed write
-                // just re-prunes next time.
-                let _ = std::fs::create_dir_all(providers::config_dir());
-                if removed {
-                    if let Ok(serialized) = serde_json::to_string(&*map) {
-                        let _ = std::fs::write(&cache_file, serialized);
-                    }
+                // And a transient null never OVERWRITES a known identity:
+                // erasing it would make a swap that happens before the next
+                // launch undetectable.
+                to_store.insert(
+                    fam.to_string(),
+                    if cur.is_null() && !old.is_null() { old } else { cur },
+                );
+            }
+            // Persist the PRUNED cache before the new stamp: if this
+            // refresh finds nothing ok (offline launch) the on-disk cache
+            // would otherwise keep the old account's entry while the stamp
+            // already claims the new one, resurrecting the wrong numbers
+            // next launch. Stamp last, so a failed write just re-prunes.
+            let _ = std::fs::create_dir_all(providers::config_dir());
+            if removed {
+                if let Ok(serialized) = serde_json::to_string(&*map) {
+                    let _ = std::fs::write(&cache_file, serialized);
                 }
-                drop(map);
+            }
+            drop(map);
+            let to_store = Value::Object(to_store);
+            if to_store != stored {
                 let _ = std::fs::write(
                     &stamp_file,
-                    serde_json::to_string_pretty(&current).unwrap_or_default(),
+                    serde_json::to_string_pretty(&to_store).unwrap_or_default(),
                 );
             }
         }

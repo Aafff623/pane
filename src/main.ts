@@ -1880,8 +1880,11 @@ function renderCustomize(): string {
       const snapshot = lastSnapshots.find((s) => s.id === id);
       // A retired account card (its login left this machine) keeps its
       // layout for reattachment but must not haunt Customize as a bare
-      // "claude@ab12cd34" block with nothing under it.
-      if (id.includes("@") && !snapshot) return "";
+      // "claude@ab12cd34" block with nothing under it. A card the USER
+      // disabled also has no snapshot (disabled providers are never
+      // fetched) — that one must keep rendering, or its re-enable toggle
+      // vanishes with it and the account is stuck off forever.
+      if (id.includes("@") && !snapshot && !config.disabled.includes(id)) return "";
       // Dynamic account cards carry their name in the snapshot
       // ("Claude — Org"); static providers come from the fixed list.
       const name = ALL_PROVIDERS.find(([pid]) => pid === id)?.[1] ?? snapshot?.name ?? id;
