@@ -169,6 +169,12 @@ whatever the community asks for loudest.
 
 ## Features
 
+- **Multi-account Claude & Codex** 🆕 — running a personal plan AND a
+  work/enterprise seat? Keep the second login in its own folder (via
+  `CLAUDE_CONFIG_DIR` / `CODEX_HOME`) and Pane shows one card per
+  account — each with its own limits, plan, credits, and spend, named
+  by its organization or email ("Claude — Acme"). The same account
+  signed in twice stays one card, and your existing setup is untouched.
 - **Pace projections** — colored bars and "will run out" warnings based on
   your burn rate within each reset window, plus optional Windows toasts.
 - **Local spend** — Today / Yesterday / 30 Days donut with per-model
@@ -189,10 +195,9 @@ whatever the community asks for loudest.
   undoes.
 - **Liquid glass UI** — real SDF lens refraction on the auto-hiding
   sidebar and glass bars, magnetic minimap trail, circular day/night wipe.
-- **Share cards** — hover a card, click ⧉, and paste anywhere: a
-  collapsed card copies as a clean compact composition, an expanded one
-  copies whole (trend, spend, pace hints — buttons and links stripped),
-  framed with the Pane icon and tagline.
+- **Share cards** — hover a card, click ⧉, and paste anywhere: the copy
+  is exactly what the card shows (bars, pace hints, trend — buttons and
+  links stripped), framed with the Pane icon and tagline.
 - **Quick links** — Status / Dashboard shortcuts on every card.
 - **[Local HTTP API](docs/local-http-api.md)** — `GET
   http://127.0.0.1:6736/v1/usage` for scripts, Rainmeter widgets, stream
