@@ -34,14 +34,34 @@ fn dir_identity(dir: &std::path::Path) -> Option<(String, Option<String>)> {
             candidates.push(home.join(".claude.json"));
         }
     }
-    for p in candidates {
-        let Ok(raw) = std::fs::read_to_string(&p) else { continue };
-        let Ok(doc) = serde_json::from_str::<Value>(&raw) else { continue };
-        if let Some(identity) = identity_from(&doc) {
-            return Some(identity);
+    candidates.into_iter().find_map(|p| cached_identity_of(&p))
+}
+
+/// Identity parses memoized by (mtime, size): ~/.claude.json carries far
+/// more than the oauthAccount and grows to multiple MB on active installs,
+/// and identity is consulted several times per refresh cycle (discovery in
+/// the fetch, the cache stamp, and the spend scan).
+fn cached_identity_of(path: &std::path::Path) -> Option<(String, Option<String>)> {
+    use std::collections::HashMap;
+    use std::sync::{Mutex, OnceLock};
+    use std::time::SystemTime;
+    type Entry = (SystemTime, u64, Option<(String, Option<String>)>);
+    static CACHE: OnceLock<Mutex<HashMap<PathBuf, Entry>>> = OnceLock::new();
+
+    let meta = std::fs::metadata(path).ok()?;
+    let (mtime, size) = (meta.modified().ok()?, meta.len());
+    let cache = CACHE.get_or_init(Default::default);
+    if let Some((m, s, v)) = cache.lock().unwrap().get(path) {
+        if *m == mtime && *s == size {
+            return v.clone();
         }
     }
-    None
+    let parsed = std::fs::read_to_string(path)
+        .ok()
+        .and_then(|raw| serde_json::from_str::<Value>(&raw).ok())
+        .and_then(|doc| identity_from(&doc));
+    cache.lock().unwrap().insert(path.to_path_buf(), (mtime, size, parsed.clone()));
+    parsed
 }
 
 /// (accountUuid, label) from a parsed .claude.json — org name first, email

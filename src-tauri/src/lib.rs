@@ -695,7 +695,16 @@ async fn fetch_usage(app: tauri::AppHandle) -> Vec<providers::Snapshot> {
                 let mut map = cache.lock().unwrap();
                 let mut removed = false;
                 for fam in ["claude", "codex"] {
-                    if stored.get(fam) != current.get(fam) && map.remove(fam).is_some() {
+                    // Only a KNOWN stored identity differing from a KNOWN
+                    // current one is evidence of an account swap. A missing
+                    // stamp (first launch after updating) or a momentarily
+                    // unreadable identity file must not dump the last-good
+                    // cache — that's the safety net, not a swap.
+                    let swap = match (stored.get(fam), current.get(fam)) {
+                        (Some(s), Some(c)) => !s.is_null() && !c.is_null() && s != c,
+                        _ => false,
+                    };
+                    if swap && map.remove(fam).is_some() {
                         removed = true;
                     }
                 }
