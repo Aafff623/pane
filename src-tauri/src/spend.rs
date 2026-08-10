@@ -38,8 +38,8 @@ pub struct Window {
 
 #[derive(Serialize, Clone)]
 pub struct ProviderSpend {
-    pub id: &'static str,
-    pub name: &'static str,
+    pub id: String,
+    pub name: String,
     pub today: Window,
     pub yesterday: Window,
     pub last30: Window,
@@ -266,15 +266,15 @@ fn finalize_models(raw: HashMap<String, (f64, f64)>, window_cost: f64) -> Vec<Mo
     named
 }
 
-fn build_spend(id: &'static str, name: &'static str, data: FileData) -> ProviderSpend {
+fn build_spend(id: impl Into<String>, name: impl Into<String>, data: FileData) -> ProviderSpend {
     let today = Local::now().date_naive().num_days_from_ce();
     let mut unpriced_models: Vec<String> = data.unpriced.keys().cloned().collect();
     unpriced_models.sort();
     unpriced_models.truncate(5);
     let days = data.days;
     let mut sp = ProviderSpend {
-        id,
-        name,
+        id: id.into(),
+        name: name.into(),
         today: Window::default(),
         yesterday: Window::default(),
         last30: Window::default(),
@@ -658,6 +658,32 @@ fn claude(extra: FileData) -> (ProviderSpend, FileData, FileData) {
     // appear there) — those dollars belong on the AihubMix card.
     let qwen_via_aihubmix = split_models(&mut all, "qwen");
     (build_spend("claude", "Claude", all), minimax, qwen_via_aihubmix)
+}
+
+/// Spend for each discovered extra Claude account, scanned from that
+/// account's own config dir (each dir keeps its own projects/ logs, so the
+/// scopes never mix). MiniMax/qwen-routed rows split out the same way the
+/// default account's do and are handed back for the caller to merge into
+/// those cards.
+fn claude_extra_accounts() -> (Vec<ProviderSpend>, FileData, FileData) {
+    let mut spends = Vec::new();
+    let mut minimax_extra = FileData::default();
+    let mut qwen_extra = FileData::default();
+    for acct in providers::claude::discover_extra_accounts() {
+        let root = acct.dir.join("projects");
+        let mut files = Vec::new();
+        recent_jsonl_files(&root, &mut files);
+        let mut all = FileData::default();
+        for file in files {
+            let mut state = ClaudeFileState::default();
+            let data = file_days(&file, &mut |line, data| claude_line(&mut state, line, data));
+            merge_data(&mut all, data);
+        }
+        merge_data(&mut minimax_extra, split_models(&mut all, "MiniMax"));
+        merge_data(&mut qwen_extra, split_models(&mut all, "qwen"));
+        spends.push(build_spend(acct.id, acct.name, all));
+    }
+    (spends, minimax_extra, qwen_extra)
 }
 
 /// MiniMax spend: the Agent CLI's local token_usage store (its own cost_usd
@@ -1061,13 +1087,10 @@ fn codex_line(st: &mut CodexFileState, line: &str, data: &mut FileData) {
 /// the surrounding turn_context/session_meta lines. Child sessions (subagent
 /// spawns and forks) replay the parent's entire history at spawn — those
 /// lines are skipped via a replay gate (see `codex_line`).
-fn codex(extra: FileData) -> ProviderSpend {
-    let home = std::env::var("CODEX_HOME")
-        .map(PathBuf::from)
-        .unwrap_or_else(|_| dirs::home_dir().unwrap_or_default().join(".codex"));
-
-    // An archived session is often a byte-for-byte copy of one still in
-    // sessions/ — count each relative path once, sessions/ winning.
+/// Session logs of one Codex home. An archived session is often a
+/// byte-for-byte copy of one still in sessions/ — count each relative path
+/// once, sessions/ winning.
+fn codex_session_files(home: &Path) -> Vec<PathBuf> {
     let sessions_root = home.join("sessions");
     let archived_root = home.join("archived_sessions");
     let mut files = Vec::new();
@@ -1083,16 +1106,39 @@ fn codex(extra: FileData) -> ProviderSpend {
             .map(|rel| !live_rel.contains(rel))
             .unwrap_or(true)
     }));
+    files
+}
 
+fn codex_scan(home: &Path) -> FileData {
     let mut all = FileData::default();
-    for file in files {
+    for file in codex_session_files(home) {
         let mut state = CodexFileState::default();
         let data = file_days(&file, &mut |line, data| codex_line(&mut state, line, data));
         merge_data(&mut all, data);
     }
+    all
+}
+
+fn codex(extra: FileData) -> ProviderSpend {
+    let home = std::env::var("CODEX_HOME")
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| dirs::home_dir().unwrap_or_default().join(".codex"));
+    let mut all = codex_scan(&home);
     // Pi sessions that drove a Codex account (passed in from the pi scan).
     merge_data(&mut all, extra);
     build_spend("codex", "Codex", all)
+}
+
+/// Spend for each discovered extra Codex account, scanned from that
+/// account's own home (each keeps its own sessions/ logs).
+fn codex_extra_accounts() -> Vec<ProviderSpend> {
+    providers::codex::discover_extra_accounts()
+        .into_iter()
+        .map(|acct| {
+            let data = codex_scan(&acct.dir);
+            build_spend(acct.id, acct.name, data)
+        })
+        .collect()
 }
 
 // ---------------------------------------------------------------------------
@@ -2117,7 +2163,12 @@ pub fn collect(cursor_csv: Option<String>) -> Vec<ProviderSpend> {
         t.clear();
     }
     let (pi_claude, pi_codex) = pi();
-    let (claude_sp, mut minimax_extra, qwen_via_claude) = claude(pi_claude);
+    let (claude_sp, mut minimax_extra, mut qwen_via_claude) = claude(pi_claude);
+    // Extra Claude accounts: own spend cards, with their MiniMax/qwen-routed
+    // rows folded into the same destinations as the default account's.
+    let (extra_claude_spends, mm2, qw2) = claude_extra_accounts();
+    merge_data(&mut minimax_extra, mm2);
+    merge_data(&mut qwen_via_claude, qw2);
     // Hermes rows going to an existing slice merge into it (MiniMax via the
     // extra-data path); the rest become their own spend entries.
     let mut hermes_rest = Vec::new();
@@ -2142,6 +2193,8 @@ pub fn collect(cursor_csv: Option<String>) -> Vec<ProviderSpend> {
         moonshot(),
         qwen(),
     ];
+    list.extend(extra_claude_spends);
+    list.extend(codex_extra_accounts());
     list.extend(hermes_rest);
     if let Some(csv) = cursor_csv {
         list.push(cursor_from_csv(&csv));

@@ -474,10 +474,20 @@ fn fail_state() -> &'static std::sync::Mutex<std::collections::HashMap<String, F
     STATE.get_or_init(Default::default)
 }
 
-async fn guarded<F>(id: &str, name: &str, fut: F) -> providers::Snapshot
+/// The provider family of a card id: "claude@ab12cd34" → "claude". The only
+/// spelling allowed to leave the machine in telemetry.
+fn family_of(id: &str) -> String {
+    id.split('@').next().unwrap_or(id).to_string()
+}
+
+// Owned id/name so dynamically discovered account cards (claude@<hash>)
+// can ride the same guard as the static providers under a 'static spawn.
+async fn guarded<F>(id: String, name: String, fut: F) -> providers::Snapshot
 where
     F: std::future::Future<Output = providers::Snapshot>,
 {
+    let id = id.as_str();
+    let name = name.as_str();
     let now = now_ms() as i64;
     let benched = {
         let map = fail_state().lock().unwrap();
@@ -547,32 +557,73 @@ async fn fetch_usage(app: tauri::AppHandle) -> Vec<providers::Snapshot> {
     // auto-updater downloaded a fresh installer to %TEMP% on every refresh
     // (gigabytes within days). Futures are lazy, so building and dropping
     // a disabled entry here runs none of its code.
-    let futs: Vec<(&str, BoxedSnap)> = vec![
-        ("claude", Box::pin(guarded("claude", "Claude", providers::claude::snapshot()))),
-        ("codex", Box::pin(guarded("codex", "Codex", providers::codex::snapshot()))),
-        ("cursor", Box::pin(guarded("cursor", "Cursor", providers::cursor::snapshot()))),
-        ("opencode", Box::pin(guarded("opencode", "OpenCode", providers::opencode::snapshot()))),
-        ("copilot", Box::pin(guarded("copilot", "Copilot", providers::copilot::snapshot()))),
-        ("grok", Box::pin(guarded("grok", "Grok", providers::grok::snapshot()))),
-        ("devin", Box::pin(guarded("devin", "Devin", providers::devin::snapshot()))),
-        ("minimax", Box::pin(guarded("minimax", "MiniMax", providers::minimax::snapshot()))),
-        ("openrouter", Box::pin(guarded("openrouter", "OpenRouter", providers::openrouter::snapshot()))),
-        ("zai", Box::pin(guarded("zai", "Z.ai", providers::zai::snapshot()))),
-        ("antigravity", Box::pin(guarded("antigravity", "Antigravity", providers::antigravity::snapshot()))),
-        ("deepseek", Box::pin(guarded("deepseek", "DeepSeek", providers::deepseek::snapshot()))),
-        ("moonshot", Box::pin(guarded("moonshot", "Moonshot", providers::moonshot::snapshot()))),
-        ("elevenlabs", Box::pin(guarded("elevenlabs", "ElevenLabs", providers::elevenlabs::snapshot()))),
-        ("ollama", Box::pin(guarded("ollama", "Ollama", providers::ollama::snapshot()))),
-        ("codebuff", Box::pin(guarded("codebuff", "Codebuff", providers::codebuff::snapshot()))),
-        ("kilo", Box::pin(guarded("kilo", "Kilo", providers::kilo::snapshot()))),
-        ("aihubmix", Box::pin(guarded("aihubmix", "AihubMix", providers::aihubmix::snapshot()))),
-        ("qwen", Box::pin(guarded("qwen", "Qwen Code", providers::qwen::snapshot()))),
+    let base: Vec<(&str, BoxedSnap)> = vec![
+        ("claude", Box::pin(guarded("claude".into(), "Claude".into(), providers::claude::snapshot()))),
+        ("codex", Box::pin(guarded("codex".into(), "Codex".into(), providers::codex::snapshot()))),
+        ("cursor", Box::pin(guarded("cursor".into(), "Cursor".into(), providers::cursor::snapshot()))),
+        ("opencode", Box::pin(guarded("opencode".into(), "OpenCode".into(), providers::opencode::snapshot()))),
+        ("copilot", Box::pin(guarded("copilot".into(), "Copilot".into(), providers::copilot::snapshot()))),
+        ("grok", Box::pin(guarded("grok".into(), "Grok".into(), providers::grok::snapshot()))),
+        ("devin", Box::pin(guarded("devin".into(), "Devin".into(), providers::devin::snapshot()))),
+        ("minimax", Box::pin(guarded("minimax".into(), "MiniMax".into(), providers::minimax::snapshot()))),
+        ("openrouter", Box::pin(guarded("openrouter".into(), "OpenRouter".into(), providers::openrouter::snapshot()))),
+        ("zai", Box::pin(guarded("zai".into(), "Z.ai".into(), providers::zai::snapshot()))),
+        ("antigravity", Box::pin(guarded("antigravity".into(), "Antigravity".into(), providers::antigravity::snapshot()))),
+        ("deepseek", Box::pin(guarded("deepseek".into(), "DeepSeek".into(), providers::deepseek::snapshot()))),
+        ("moonshot", Box::pin(guarded("moonshot".into(), "Moonshot".into(), providers::moonshot::snapshot()))),
+        ("elevenlabs", Box::pin(guarded("elevenlabs".into(), "ElevenLabs".into(), providers::elevenlabs::snapshot()))),
+        ("ollama", Box::pin(guarded("ollama".into(), "Ollama".into(), providers::ollama::snapshot()))),
+        ("codebuff", Box::pin(guarded("codebuff".into(), "Codebuff".into(), providers::codebuff::snapshot()))),
+        ("kilo", Box::pin(guarded("kilo".into(), "Kilo".into(), providers::kilo::snapshot()))),
+        ("aihubmix", Box::pin(guarded("aihubmix".into(), "AihubMix".into(), providers::aihubmix::snapshot()))),
+        ("qwen", Box::pin(guarded("qwen".into(), "Qwen Code".into(), providers::qwen::snapshot()))),
     ];
-    let futs: Vec<(&str, BoxedSnap)> = futs
+    let mut futs: Vec<(String, BoxedSnap)> =
+        base.into_iter().map(|(id, fut)| (id.to_string(), fut)).collect();
+    // Extra Claude accounts (multi-login machines): each discovered config
+    // dir renders its own card under a claude@<hash8> id, running the same
+    // provider flow scoped to its dir. The default login keeps the bare id.
+    for acct in providers::claude::discover_extra_accounts() {
+        let (id, name, dir) = (acct.id, acct.name, acct.dir);
+        futs.push((
+            id.clone(),
+            Box::pin(guarded(
+                id.clone(),
+                name.clone(),
+                providers::claude::snapshot_at(dir, id, name),
+            )),
+        ));
+    }
+    for acct in providers::codex::discover_extra_accounts() {
+        let (id, name, dir) = (acct.id, acct.name, acct.dir);
+        futs.push((
+            id.clone(),
+            Box::pin(guarded(
+                id.clone(),
+                name.clone(),
+                providers::codex::snapshot_at(dir, id, name),
+            )),
+        ));
+    }
+    let futs: Vec<(String, BoxedSnap)> = futs
         .into_iter()
         .filter(|(id, _)| !disabled.iter().any(|d| d == id))
         .collect();
-    let enabled_ids: Vec<String> = futs.iter().map(|(id, _)| id.to_string()).collect();
+    // Telemetry never learns account-scoped ids — a claude@<hash8> would
+    // carry an account-derived hash off the machine. Report families,
+    // deduplicated, so a multi-account install looks like "claude" once.
+    // (family_of is applied at EVERY telemetry boundary: enabled ids here,
+    // refresh outcomes, and starred-metric prefixes.)
+    let enabled_ids: Vec<String> = {
+        let mut fams: Vec<String> = Vec::new();
+        for (id, _) in &futs {
+            let fam = family_of(id);
+            if !fams.contains(&fam) {
+                fams.push(fam);
+            }
+        }
+        fams
+    };
     let handles: Vec<_> = futs
         .into_iter()
         .map(|(_, fut)| tauri::async_runtime::spawn(fut))
@@ -624,6 +675,49 @@ async fn fetch_usage(app: tauri::AppHandle) -> Vec<providers::Snapshot> {
                 .unwrap_or_default();
             Mutex::new(loaded)
         });
+        // Cache identity stamp (upstream's Phase 1): if a DIFFERENT account
+        // signed into a default home since the cache was written, that
+        // family's cached last-good snapshot belongs to the old account —
+        // drop it instead of painting the wrong account's numbers under the
+        // bare id. Extra-account cards are immune: their ids are derived
+        // from the account identity itself.
+        {
+            let stamp_file = providers::config_dir().join("cache_identities.json");
+            let current = json!({
+                "claude": providers::claude::default_identity(),
+                "codex": providers::codex::default_identity(),
+            });
+            let stored: Value = std::fs::read_to_string(&stamp_file)
+                .ok()
+                .and_then(|raw| serde_json::from_str(&raw).ok())
+                .unwrap_or_else(|| json!({}));
+            if stored != current {
+                let mut map = cache.lock().unwrap();
+                let mut removed = false;
+                for fam in ["claude", "codex"] {
+                    if stored.get(fam) != current.get(fam) && map.remove(fam).is_some() {
+                        removed = true;
+                    }
+                }
+                // Persist the PRUNED cache before the new stamp: if this
+                // refresh finds nothing ok (offline launch) the on-disk
+                // cache would otherwise keep the old account's entry while
+                // the stamp already claims the new one, resurrecting the
+                // wrong numbers next launch. Stamp last, so a failed write
+                // just re-prunes next time.
+                let _ = std::fs::create_dir_all(providers::config_dir());
+                if removed {
+                    if let Ok(serialized) = serde_json::to_string(&*map) {
+                        let _ = std::fs::write(&cache_file, serialized);
+                    }
+                }
+                drop(map);
+                let _ = std::fs::write(
+                    &stamp_file,
+                    serde_json::to_string_pretty(&current).unwrap_or_default(),
+                );
+            }
+        }
         let now_ms = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .map(|d| d.as_millis() as i64)
@@ -677,14 +771,26 @@ async fn fetch_usage(app: tauri::AppHandle) -> Vec<providers::Snapshot> {
                             .map(|a| {
                                 a.iter()
                                     .filter_map(Value::as_str)
-                                    .map(|m| format!("{pid}/{m}"))
+                                    // Family prefix only — an account-scoped
+                                    // pid would ship an account-derived hash.
+                                    .map(|m| format!("{}/{m}", family_of(pid)))
                                     .collect::<Vec<_>>()
                             })
                             .unwrap_or_default()
                     })
-                    .collect()
+                    .collect::<Vec<String>>()
             })
             .unwrap_or_default();
+        // Two accounts starring the same metric collapse to one entry.
+        let starred_metrics: Vec<String> = {
+            let mut out: Vec<String> = Vec::new();
+            for m in starred_metrics {
+                if !out.contains(&m) {
+                    out.push(m);
+                }
+            }
+            out
+        };
         let snap = telemetry::ConfigSnapshot {
             app_version: app.package_info().version.to_string(),
             enabled_providers: enabled_ids,
@@ -704,7 +810,10 @@ async fn fetch_usage(app: tauri::AppHandle) -> Vec<providers::Snapshot> {
         let outcomes: Vec<telemetry::Outcome> = all
             .iter()
             .map(|s| telemetry::Outcome {
-                id: s.id.clone(),
+                // Family only: account-scoped ids never leave the machine.
+                // Multiple accounts fold into one family row (accumulate
+                // sums same-key counters).
+                id: family_of(&s.id),
                 status: s.status.clone(),
                 stale: s.stale,
                 error: s.error.clone().or_else(|| s.warning.clone()),
@@ -839,8 +948,14 @@ fn set_shortcut(app: tauri::AppHandle, shortcut: String) -> Result<(), String> {
 /// Spends one banked Codex rate-limit reset credit. Irreversible — the
 /// frontend shows a confirm dialog before calling this.
 #[tauri::command]
-async fn codex_redeem_credit(credit_id: String) -> Result<String, String> {
-    providers::codex::redeem_credit(&credit_id).await
+async fn codex_redeem_credit(
+    credit_id: String,
+    provider_id: Option<String>,
+) -> Result<String, String> {
+    // provider_id routes multi-account redeems; absent = the default card
+    // (older frontend builds during an update overlap).
+    let pid = provider_id.unwrap_or_else(|| "codex".into());
+    providers::codex::redeem_credit(&pid, &credit_id).await
 }
 
 /// Updater with the app version stamped into the endpoint by us. Tauri's

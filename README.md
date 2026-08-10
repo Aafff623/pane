@@ -139,8 +139,8 @@ success/failure counts — never amounts or error text) — see
 
 | Provider | How Pane connects |
 |---|---|
-| Claude (Claude Code) | `%USERPROFILE%\.claude\.credentials.json` + Anthropic usage API |
-| Codex (Codex CLI) | `%USERPROFILE%\.codex\auth.json` + ChatGPT usage API, incl. reset-credit redemption |
+| Claude (Claude Code) | `%USERPROFILE%\.claude\.credentials.json` + Anthropic usage API; multi-account — every discovered config-dir login gets its own card |
+| Codex (Codex CLI) | `%USERPROFILE%\.codex\auth.json` + ChatGPT usage API, incl. reset-credit redemption; multi-account like Claude |
 | Cursor | Cursor's local state database + cursor.com API |
 | OpenCode (Go plan) | Local `opencode.db` spend vs documented plan limits* |
 | GitHub Copilot | Copilot editor login or GitHub CLI (Credential Manager) + GitHub API |

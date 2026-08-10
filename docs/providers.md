@@ -21,7 +21,13 @@ Ground rules that apply to every provider:
 
 - **Reads:** `%USERPROFILE%\.claude\.credentials.json` (honors
   `CLAUDE_CONFIG_DIR`) — the OAuth token Claude Code saved when you logged
-  in.
+  in. **Multi-account:** dot-folders in your home directory and dirs under
+  `%USERPROFILE%\.config` holding a Claude-shaped `.credentials.json` each
+  become their own card, identified by the `oauthAccount` in that dir's
+  `.claude.json` (a dir that can't name its account is skipped; the same
+  account in two places stays one card). Extra cards are named from the
+  account's organization or email; the default login keeps the plain
+  `claude` id. Each account's spend comes from its own dir's logs.
 - **Calls:** `api.anthropic.com/api/oauth/usage` (usage windows);
   `platform.claude.com/v1/oauth/token` (refresh, written back).
 - **Shows:** Session + Weekly windows, per-model weeklies, Extra Usage
@@ -38,7 +44,13 @@ Ground rules that apply to every provider:
 
 ## Codex (Codex CLI)
 
-- **Reads:** `%USERPROFILE%\.codex\auth.json`.
+- **Reads:** `%USERPROFILE%\.codex\auth.json` (honors `CODEX_HOME`).
+  **Multi-account:** same discovery as Claude — dot-folders and
+  `~\.config` dirs holding a Codex-shaped `auth.json` each become their
+  own card, identified by `tokens.account_id` (or the id_token's ChatGPT
+  account claim) and named by the account email; a dir that can't name
+  its account is skipped. Reset-credit redemption always uses the
+  account whose card offered the credit.
 - **Calls:** `chatgpt.com/backend-api/wham/usage` (limits, Spark windows,
   credits); `.../wham/rate-limit-reset-credits` (reset credits, and
   `/consume` only when you click Use on a credit); OpenAI token refresh.

@@ -283,6 +283,36 @@ pub fn credit_meter_labeled(
     ))
 }
 
+/// Candidate roots where a second account's CLI config dir may live:
+/// dot-folders in the home directory plus dirs under ~/.config — the
+/// places CLAUDE_CONFIG_DIR / CODEX_HOME setups conventionally point.
+/// Shared by every provider family that supports multi-account discovery.
+pub(crate) fn account_scan_roots() -> Vec<std::path::PathBuf> {
+    let Some(home) = dirs::home_dir() else { return Vec::new() };
+    let mut roots = Vec::new();
+    if let Ok(entries) = std::fs::read_dir(&home) {
+        for e in entries.flatten() {
+            let p = e.path();
+            let dotted = p
+                .file_name()
+                .and_then(|n| n.to_str())
+                .is_some_and(|n| n.starts_with('.'));
+            if dotted && p.is_dir() {
+                roots.push(p);
+            }
+        }
+    }
+    if let Ok(entries) = std::fs::read_dir(home.join(".config")) {
+        for e in entries.flatten() {
+            let p = e.path();
+            if p.is_dir() {
+                roots.push(p);
+            }
+        }
+    }
+    roots
+}
+
 /// API key lookup: our saved config file first, then environment variables.
 pub fn stored_api_key(provider: &str, env_vars: &[&str]) -> Option<String> {
     let path = config_dir().join(format!("{provider}.json"));
