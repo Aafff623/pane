@@ -2872,6 +2872,10 @@ window.addEventListener("DOMContentLoaded", () => {
     const redeem = target.closest<HTMLElement>("[data-redeem]");
     if (redeem) {
       const creditId = redeem.dataset.redeem!;
+      // Multi-account: the redeem must ride the account whose card offered
+      // the credit, not the default login's token.
+      const providerId =
+        redeem.closest<HTMLElement>("article.provider")?.dataset.provider ?? "codex";
       void appConfirm({
         title: "Use a reset credit?",
         message:
@@ -2881,7 +2885,7 @@ window.addEventListener("DOMContentLoaded", () => {
         if (!ok) return;
         const status = document.querySelector("#status")!;
         status.textContent = "Redeeming reset credit…";
-        void invoke<string>("codex_redeem_credit", { creditId })
+        void invoke<string>("codex_redeem_credit", { creditId, providerId })
           .then((msg) => {
             status.textContent = msg;
             void refresh(true);

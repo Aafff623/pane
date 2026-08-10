@@ -1087,13 +1087,10 @@ fn codex_line(st: &mut CodexFileState, line: &str, data: &mut FileData) {
 /// the surrounding turn_context/session_meta lines. Child sessions (subagent
 /// spawns and forks) replay the parent's entire history at spawn — those
 /// lines are skipped via a replay gate (see `codex_line`).
-fn codex(extra: FileData) -> ProviderSpend {
-    let home = std::env::var("CODEX_HOME")
-        .map(PathBuf::from)
-        .unwrap_or_else(|_| dirs::home_dir().unwrap_or_default().join(".codex"));
-
-    // An archived session is often a byte-for-byte copy of one still in
-    // sessions/ — count each relative path once, sessions/ winning.
+/// Session logs of one Codex home. An archived session is often a
+/// byte-for-byte copy of one still in sessions/ — count each relative path
+/// once, sessions/ winning.
+fn codex_session_files(home: &Path) -> Vec<PathBuf> {
     let sessions_root = home.join("sessions");
     let archived_root = home.join("archived_sessions");
     let mut files = Vec::new();
@@ -1109,16 +1106,39 @@ fn codex(extra: FileData) -> ProviderSpend {
             .map(|rel| !live_rel.contains(rel))
             .unwrap_or(true)
     }));
+    files
+}
 
+fn codex_scan(home: &Path) -> FileData {
     let mut all = FileData::default();
-    for file in files {
+    for file in codex_session_files(home) {
         let mut state = CodexFileState::default();
         let data = file_days(&file, &mut |line, data| codex_line(&mut state, line, data));
         merge_data(&mut all, data);
     }
+    all
+}
+
+fn codex(extra: FileData) -> ProviderSpend {
+    let home = std::env::var("CODEX_HOME")
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| dirs::home_dir().unwrap_or_default().join(".codex"));
+    let mut all = codex_scan(&home);
     // Pi sessions that drove a Codex account (passed in from the pi scan).
     merge_data(&mut all, extra);
     build_spend("codex", "Codex", all)
+}
+
+/// Spend for each discovered extra Codex account, scanned from that
+/// account's own home (each keeps its own sessions/ logs).
+fn codex_extra_accounts() -> Vec<ProviderSpend> {
+    providers::codex::discover_extra_accounts()
+        .into_iter()
+        .map(|acct| {
+            let data = codex_scan(&acct.dir);
+            build_spend(acct.id, acct.name, data)
+        })
+        .collect()
 }
 
 // ---------------------------------------------------------------------------
@@ -2174,6 +2194,7 @@ pub fn collect(cursor_csv: Option<String>) -> Vec<ProviderSpend> {
         qwen(),
     ];
     list.extend(extra_claude_spends);
+    list.extend(codex_extra_accounts());
     list.extend(hermes_rest);
     if let Some(csv) = cursor_csv {
         list.push(cursor_from_csv(&csv));

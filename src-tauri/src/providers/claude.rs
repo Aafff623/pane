@@ -58,34 +58,11 @@ fn dir_identity(dir: &std::path::Path) -> Option<(String, Option<String>)> {
 /// account is just another source of it — skipped, so duplicate cards are
 /// structurally impossible.
 pub fn discover_extra_accounts() -> Vec<ClaudeAccount> {
-    let Some(home) = dirs::home_dir() else { return Vec::new() };
     let default = default_dir();
     let mut seen: Vec<String> = dir_identity(&default).map(|(u, _)| u).into_iter().collect();
 
-    let mut roots: Vec<PathBuf> = Vec::new();
-    if let Ok(entries) = std::fs::read_dir(&home) {
-        for e in entries.flatten() {
-            let p = e.path();
-            let dotted = p
-                .file_name()
-                .and_then(|n| n.to_str())
-                .is_some_and(|n| n.starts_with('.'));
-            if dotted && p.is_dir() {
-                roots.push(p);
-            }
-        }
-    }
-    if let Ok(entries) = std::fs::read_dir(home.join(".config")) {
-        for e in entries.flatten() {
-            let p = e.path();
-            if p.is_dir() {
-                roots.push(p);
-            }
-        }
-    }
-
     let mut out = Vec::new();
-    for dir in roots {
+    for dir in super::account_scan_roots() {
         if dir == default {
             continue;
         }
@@ -110,6 +87,13 @@ pub fn discover_extra_accounts() -> Vec<ClaudeAccount> {
     }
     out.sort_by(|a, b| a.id.cmp(&b.id));
     out
+}
+
+/// The default login's account identity, for the snapshot-cache stamp: a
+/// different account signing into the default dir between launches must
+/// not be served the previous account's cached card.
+pub fn default_identity() -> Option<String> {
+    dir_identity(&default_dir()).map(|(uuid, _)| uuid)
 }
 
 pub async fn snapshot() -> Snapshot {

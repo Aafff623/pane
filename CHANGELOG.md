@@ -3,6 +3,16 @@
 ## Unreleased
 
 ### Added
+- **Multi-account Codex** — same treatment for Codex: every discovered
+  `CODEX_HOME`-style login (identified by its ChatGPT account id, named
+  by the account email) gets its own card with its own limits, credits,
+  and spend from its own session logs. Reset-credit redemption routes
+  to the account whose card offered the credit, and each card's Extra
+  credits meter keeps its own high-water baseline. A cache identity
+  stamp also guards both families' default cards: if a different
+  account signs into the default folder between launches, the old
+  account's cached numbers are dropped instead of shown under the new
+  login.
 - **Multi-account Claude** — machines with more than one Claude login
   (say a personal plan in `~\.claude` and an enterprise seat kept in a
   second config dir via `CLAUDE_CONFIG_DIR`) now get one card per

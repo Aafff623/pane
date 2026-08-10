@@ -9,11 +9,84 @@ const CLIENT_ID: &str = "app_EMoamEEZ73f0CkXaXp7hrann";
 const ID: &str = "codex";
 const NAME: &str = "Codex";
 
-fn auth_path() -> PathBuf {
-    let home = std::env::var("CODEX_HOME")
+fn default_home() -> PathBuf {
+    std::env::var("CODEX_HOME")
         .map(PathBuf::from)
-        .unwrap_or_else(|_| dirs::home_dir().unwrap_or_default().join(".codex"));
-    home.join("auth.json")
+        .unwrap_or_else(|_| dirs::home_dir().unwrap_or_default().join(".codex"))
+}
+
+/// One discovered Codex login. Mirrors the Claude account model (and
+/// upstream OpenUsage's Phase 5a design): the default CODEX_HOME keeps the
+/// bare "codex" id; extras mint "codex@<hash8>" from the account id.
+pub struct CodexAccount {
+    pub id: String,
+    pub name: String,
+    pub dir: PathBuf,
+}
+
+/// The account identity in a Codex home, under upstream's strict rule: a
+/// credential file that can't name its account (tokens.account_id, else
+/// the id_token's ChatGPT account claim) never becomes a card. The email
+/// claim doubles as the card label.
+fn dir_identity(dir: &std::path::Path) -> Option<(String, Option<String>)> {
+    let raw = std::fs::read_to_string(dir.join("auth.json")).ok()?;
+    let doc: Value = serde_json::from_str(&raw).ok()?;
+    let tokens = doc.get("tokens")?;
+    let claims = tokens
+        .get("id_token")
+        .and_then(Value::as_str)
+        .and_then(jwt_claims);
+    let account_id = tokens
+        .get("account_id")
+        .and_then(Value::as_str)
+        .map(str::to_string)
+        .filter(|s| !s.is_empty())
+        .or_else(|| {
+            claims
+                .as_ref()?
+                .pointer("/https:~1~1api.openai.com~1auth/chatgpt_account_id")
+                .and_then(Value::as_str)
+                .map(str::to_string)
+        })?;
+    let email = claims
+        .as_ref()
+        .and_then(|c| c.get("email"))
+        .and_then(Value::as_str)
+        .filter(|s| !s.trim().is_empty())
+        .map(str::to_string);
+    Some((account_id, email))
+}
+
+/// Extra Codex logins beyond the default home — same scan roots, identity
+/// rules, and dedup-by-account as the Claude discovery.
+pub fn discover_extra_accounts() -> Vec<CodexAccount> {
+    let default = default_home();
+    let mut seen: Vec<String> = dir_identity(&default).map(|(a, _)| a).into_iter().collect();
+
+    let mut out = Vec::new();
+    for dir in super::account_scan_roots() {
+        if dir == default {
+            continue;
+        }
+        let Some((account_id, email)) = dir_identity(&dir) else { continue };
+        if seen.iter().any(|a| a == &account_id) {
+            continue;
+        }
+        seen.push(account_id.clone());
+        let hash8: String = account_id.chars().filter(|c| *c != '-').take(8).collect();
+        let name = match email {
+            Some(e) => format!("Codex — {e}"),
+            None => format!("Codex @{hash8}"),
+        };
+        out.push(CodexAccount { id: format!("codex@{hash8}"), name, dir });
+    }
+    out.sort_by(|a, b| a.id.cmp(&b.id));
+    out
+}
+
+/// The default login's account identity, for the snapshot-cache stamp.
+pub fn default_identity() -> Option<String> {
+    dir_identity(&default_home()).map(|(a, _)| a)
 }
 
 /// Access tokens are JWTs: three base64 chunks separated by dots. The middle
@@ -27,9 +100,15 @@ fn jwt_claims(token: &str) -> Option<Value> {
 }
 
 pub async fn snapshot() -> Snapshot {
-    match fetch().await {
+    snapshot_at(default_home(), ID.to_string(), NAME.to_string()).await
+}
+
+/// Snapshot for one account's Codex home — the default card and every
+/// discovered extra account run the same flow scoped to their dir.
+pub async fn snapshot_at(dir: PathBuf, id: String, name: String) -> Snapshot {
+    match fetch(&dir, &id, &name).await {
         Ok(s) => s,
-        Err(e) => Snapshot::error(ID, NAME, e),
+        Err(e) => Snapshot::error(&id, &name, e),
     }
 }
 
@@ -41,8 +120,8 @@ struct Access {
 
 /// Loads (and if needed refreshes + writes back) the Codex OAuth access
 /// token. Shared by the usage fetch and the reset-credit redeem command.
-async fn load_access() -> Result<Access, String> {
-    let path = auth_path();
+async fn load_access(dir: &std::path::Path) -> Result<Access, String> {
+    let path = dir.join("auth.json");
     let raw = std::fs::read_to_string(&path).map_err(|e| format!("read auth.json: {e}"))?;
     let mut doc: Value = serde_json::from_str(&raw).map_err(|e| format!("parse auth.json: {e}"))?;
     let tokens = doc
@@ -138,15 +217,15 @@ async fn load_access() -> Result<Access, String> {
     Ok(Access { token: access, account_id, plan })
 }
 
-async fn fetch() -> Result<Snapshot, String> {
-    if !auth_path().exists() {
+async fn fetch(dir: &std::path::Path, id: &str, name: &str) -> Result<Snapshot, String> {
+    if !dir.join("auth.json").exists() {
         return Ok(Snapshot::no_credentials(
-            ID,
-            NAME,
+            id,
+            name,
             "Codex sign-in not found. Run `codex login` in a terminal.",
         ));
     }
-    let auth = load_access().await?;
+    let auth = load_access(dir).await?;
     let (access, account_id) = (auth.token, auth.account_id);
     let mut plan = auth.plan;
 
@@ -209,7 +288,10 @@ async fn fetch() -> Result<Snapshot, String> {
         if credits > 0.0 {
             let dollars = credits * 0.04;
             let suffix = format!(" · {credits:.0} credits");
-            match super::credit_meter_labeled("codex-extra", "$", dollars, "Extra credits", &suffix)
+            // High-water baseline keyed per CARD, not per family — two
+            // accounts' balances must never share one baseline.
+            let meter_key = format!("{id}-extra");
+            match super::credit_meter_labeled(&meter_key, "$", dollars, "Extra credits", &suffix)
             {
                 Some(m) => metrics.push(m),
                 None => metrics.push(Metric::text(
@@ -264,7 +346,7 @@ async fn fetch() -> Result<Snapshot, String> {
     if metrics.is_empty() {
         return Err("usage response had no recognizable rate limits".into());
     }
-    Ok(Snapshot::ok(ID, NAME, plan, metrics))
+    Ok(Snapshot::ok(id, name, plan, metrics))
 }
 
 /// The credit balance from the usage body. The API serializes it
@@ -360,8 +442,20 @@ async fn fetch_reset_credits(access: &str, account_id: &str) -> Option<Vec<(Stri
 
 /// Consumes one banked reset credit — irreversible; the UI confirms first.
 /// POST /consume with a fresh idempotency key; the windows reset server-side.
-pub async fn redeem_credit(credit_id: &str) -> Result<String, String> {
-    let auth = load_access().await?;
+pub async fn redeem_credit(provider_id: &str, credit_id: &str) -> Result<String, String> {
+    // Route the redeem to the account whose card offered the credit — an
+    // extra account's Use button must spend ITS credit, not the default
+    // login's (upstream's CodexResetClaimRouter, in one lookup).
+    let dir = if provider_id == ID {
+        default_home()
+    } else {
+        discover_extra_accounts()
+            .into_iter()
+            .find(|a| a.id == provider_id)
+            .map(|a| a.dir)
+            .ok_or_else(|| format!("unknown Codex account: {provider_id}"))?
+    };
+    let auth = load_access(&dir).await?;
     let redeem_request_id = format!(
         "openusage-{}-{}",
         Utc::now().timestamp_millis(),

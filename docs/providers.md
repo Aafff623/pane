@@ -44,7 +44,13 @@ Ground rules that apply to every provider:
 
 ## Codex (Codex CLI)
 
-- **Reads:** `%USERPROFILE%\.codex\auth.json`.
+- **Reads:** `%USERPROFILE%\.codex\auth.json` (honors `CODEX_HOME`).
+  **Multi-account:** same discovery as Claude — dot-folders and
+  `~\.config` dirs holding a Codex-shaped `auth.json` each become their
+  own card, identified by `tokens.account_id` (or the id_token's ChatGPT
+  account claim) and named by the account email; a dir that can't name
+  its account is skipped. Reset-credit redemption always uses the
+  account whose card offered the credit.
 - **Calls:** `chatgpt.com/backend-api/wham/usage` (limits, Spark windows,
   credits); `.../wham/rate-limit-reset-credits` (reset credits, and
   `/consume` only when you click Use on a credit); OpenAI token refresh.

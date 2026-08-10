@@ -588,6 +588,17 @@ async fn fetch_usage(app: tauri::AppHandle) -> Vec<providers::Snapshot> {
             )),
         ));
     }
+    for acct in providers::codex::discover_extra_accounts() {
+        let (id, name, dir) = (acct.id, acct.name, acct.dir);
+        futs.push((
+            id.clone(),
+            Box::pin(guarded(
+                id.clone(),
+                name.clone(),
+                providers::codex::snapshot_at(dir, id, name),
+            )),
+        ));
+    }
     let futs: Vec<(String, BoxedSnap)> = futs
         .into_iter()
         .filter(|(id, _)| !disabled.iter().any(|d| d == id))
@@ -656,6 +667,36 @@ async fn fetch_usage(app: tauri::AppHandle) -> Vec<providers::Snapshot> {
                 .unwrap_or_default();
             Mutex::new(loaded)
         });
+        // Cache identity stamp (upstream's Phase 1): if a DIFFERENT account
+        // signed into a default home since the cache was written, that
+        // family's cached last-good snapshot belongs to the old account —
+        // drop it instead of painting the wrong account's numbers under the
+        // bare id. Extra-account cards are immune: their ids are derived
+        // from the account identity itself.
+        {
+            let stamp_file = providers::config_dir().join("cache_identities.json");
+            let current = json!({
+                "claude": providers::claude::default_identity(),
+                "codex": providers::codex::default_identity(),
+            });
+            let stored: Value = std::fs::read_to_string(&stamp_file)
+                .ok()
+                .and_then(|raw| serde_json::from_str(&raw).ok())
+                .unwrap_or_else(|| json!({}));
+            if stored != current {
+                let mut map = cache.lock().unwrap();
+                for fam in ["claude", "codex"] {
+                    if stored.get(fam) != current.get(fam) {
+                        map.remove(fam);
+                    }
+                }
+                drop(map);
+                let _ = std::fs::write(
+                    &stamp_file,
+                    serde_json::to_string_pretty(&current).unwrap_or_default(),
+                );
+            }
+        }
         let now_ms = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .map(|d| d.as_millis() as i64)
@@ -871,8 +912,14 @@ fn set_shortcut(app: tauri::AppHandle, shortcut: String) -> Result<(), String> {
 /// Spends one banked Codex rate-limit reset credit. Irreversible — the
 /// frontend shows a confirm dialog before calling this.
 #[tauri::command]
-async fn codex_redeem_credit(credit_id: String) -> Result<String, String> {
-    providers::codex::redeem_credit(&credit_id).await
+async fn codex_redeem_credit(
+    credit_id: String,
+    provider_id: Option<String>,
+) -> Result<String, String> {
+    // provider_id routes multi-account redeems; absent = the default card
+    // (older frontend builds during an update overlap).
+    let pid = provider_id.unwrap_or_else(|| "codex".into());
+    providers::codex::redeem_credit(&pid, &credit_id).await
 }
 
 /// Updater with the app version stamped into the endpoint by us. Tauri's
