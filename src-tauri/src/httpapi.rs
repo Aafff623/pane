@@ -66,6 +66,15 @@ fn iso8601(epoch_ms: i64) -> String {
         .unwrap_or_default()
 }
 
+/// Only loopback spellings may appear in the Host header. A missing header
+/// is allowed (HTTP/1.0 scripts); a rebound hostname is not.
+fn host_ok(host: Option<&str>) -> bool {
+    let Some(host) = host else { return true };
+    let host = host.trim().to_ascii_lowercase();
+    let bare = host.strip_suffix(":6736").unwrap_or(&host);
+    matches!(bare, "127.0.0.1" | "localhost" | "[::1]")
+}
+
 fn route(method: &tiny_http::Method, url: &str) -> (u16, String) {
     let path = url.split('?').next().unwrap_or(url);
     match method {
@@ -110,7 +119,20 @@ pub fn start() {
         };
         eprintln!("[pane] local API: http://127.0.0.1:6736/v1/usage");
         for request in server.incoming_requests() {
-            let (status, body) = route(request.method(), request.url());
+            // DNS-rebinding guard: a page can point its own hostname at
+            // 127.0.0.1, making this server "same-origin" in the victim's
+            // browser — CORS never applies then. Legitimate local clients
+            // address us by loopback names only; anything else is refused.
+            let host = request
+                .headers()
+                .iter()
+                .find(|h| h.field.equiv("Host"))
+                .map(|h| h.value.as_str().to_string());
+            let (status, body) = if host_ok(host.as_deref()) {
+                route(request.method(), request.url())
+            } else {
+                (403, json!({"error": "forbidden_host"}).to_string())
+            };
             let mut response = tiny_http::Response::from_string(body).with_status_code(status);
             // Deliberately NO Access-Control-Allow-Origin header: with
             // permissive CORS, any website the user visits could silently
@@ -126,4 +148,24 @@ pub fn start() {
             let _ = request.respond(response);
         }
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::host_ok;
+
+    #[test]
+    fn host_header_must_be_loopback() {
+        // Loopback spellings, with and without the port.
+        for good in ["127.0.0.1:6736", "127.0.0.1", "localhost:6736", "LOCALHOST", "[::1]:6736"] {
+            assert!(host_ok(Some(good)), "{good} should be allowed");
+        }
+        // Absent header (HTTP/1.0 scripts) stays allowed.
+        assert!(host_ok(None));
+        // A rebound hostname resolving to 127.0.0.1 is refused — this is
+        // the DNS-rebinding case CORS can't catch.
+        for bad in ["evil.example:6736", "evil.example", "127.0.0.1.evil.example:6736", "localhost.evil.example"] {
+            assert!(!host_ok(Some(bad)), "{bad} should be refused");
+        }
+    }
 }

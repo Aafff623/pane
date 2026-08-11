@@ -16,6 +16,16 @@
   github.com; the MiniMax CLI fallback reads exactly
   `provider.minimax.options.apiKey` from `~/.minimax/config.yaml`
   instead of the first `apiKey:` line anywhere in the file.
+- **Disabled Cursor makes no requests** — the spend scan's Cursor CSV
+  export (an authenticated network call) now honors the provider
+  toggle, matching how usage refresh already skips disabled providers.
+- **Local API rejects non-loopback Host headers** — the read-only
+  usage API on 127.0.0.1:6736 now refuses requests whose Host header
+  isn't a loopback spelling, closing the DNS-rebinding read that CORS
+  alone can't prevent.
+- **Release workflows pin actions to commit SHAs** — third-party
+  GitHub Actions in the signed release and winget pipelines are pinned
+  to exact commits instead of movable tags.
 
 ## 0.4.32 — 2026-08-11
 
