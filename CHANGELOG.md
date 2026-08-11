@@ -26,6 +26,13 @@
 - **Release workflows pin actions to commit SHAs** — third-party
   GitHub Actions in the signed release and winget pipelines are pinned
   to exact commits instead of movable tags.
+- **Pricing catalogs download under a hard size cap** — the three
+  third-party pricing feeds are read in bounded chunks (32 MB cap), so
+  a compromised feed can no longer exhaust memory or disk. This also
+  makes SECURITY.md's existing "inputs are size-capped" claim true.
+- **README offers a look-before-you-run install path** — alongside the
+  one-liner, a two-step download-inspect-run variant and a pointer to
+  winget for anyone who prefers not to pipe scripts into PowerShell.
 
 ## 0.4.32 — 2026-08-11
 

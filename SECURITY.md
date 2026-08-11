@@ -87,7 +87,9 @@ All of this is auditable in the source — links go to the exact code.
   (an attacker who can replace the installer can replace the manifest,
   and the script itself, too). The cryptographic guarantee is the
   auto-updater's minisign verification once installed; the first install
-  ultimately trusts GitHub.
+  ultimately trusts GitHub. Anyone who'd rather not pipe a script into
+  PowerShell at all can use winget or download-and-read first — the
+  README shows both.
 - Model prices (LiteLLM, models.dev, the OpenUsage supplement) are
   fetched without signatures — tampered pricing data could at worst show
   wrong *display* dollars. Inputs are size-capped and never touch

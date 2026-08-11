@@ -122,6 +122,11 @@ const SOURCES: [(&str, &str); 3] = [
 ];
 const REFRESH_MS: i64 = 24 * 3600 * 1000;
 const RETRY_MS: i64 = 30 * 60 * 1000;
+/// The catalogs are third-party feeds; a compromised one must not be able
+/// to fill memory (and then the disk cache) with an arbitrarily large
+/// response. Largest legitimate source today is LiteLLM at ~3 MB — 32 MB
+/// leaves room to grow while still bounding the damage.
+const MAX_CATALOG_BYTES: usize = 32 * 1024 * 1024;
 
 #[derive(Default)]
 struct Store {
@@ -415,7 +420,7 @@ pub fn ensure_fresh() {
             if !etag.is_empty() {
                 req = req.header("If-None-Match", etag.clone());
             }
-            let resp = req.send().await.map_err(|e| e.to_string())?;
+            let mut resp = req.send().await.map_err(|e| e.to_string())?;
             let status = resp.status().as_u16();
             if status == 304 {
                 return Ok((304u16, String::new(), String::new()));
@@ -429,7 +434,20 @@ pub fn ensure_fresh() {
                 .and_then(|v| v.to_str().ok())
                 .unwrap_or("")
                 .to_string();
-            let body = resp.text().await.map_err(|e| e.to_string())?;
+            // Read with a hard byte cap instead of resp.text() — the
+            // declared Content-Length check alone wouldn't bound a
+            // chunked/lying response.
+            if resp.content_length().is_some_and(|l| l as usize > MAX_CATALOG_BYTES) {
+                return Err("catalog larger than the size cap".into());
+            }
+            let mut bytes: Vec<u8> = Vec::new();
+            while let Some(chunk) = resp.chunk().await.map_err(|e| e.to_string())? {
+                if bytes.len() + chunk.len() > MAX_CATALOG_BYTES {
+                    return Err("catalog larger than the size cap".into());
+                }
+                bytes.extend_from_slice(&chunk);
+            }
+            let body = String::from_utf8(bytes).map_err(|e| e.to_string())?;
             Ok((status, body, new_etag))
         });
 
