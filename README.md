@@ -51,8 +51,19 @@ irm https://pane.jazii.dev/install.ps1 | iex
 ```
 
 Downloads the latest release, verifies its SHA-256, installs per-user
-(no admin), and launches Pane. No SmartScreen prompt. Read
-[install.ps1](install.ps1) first if you like — it's one short, commented script.
+(no admin), and launches Pane. No SmartScreen prompt.
+
+Piping a script straight into PowerShell runs whatever the server sends
+at that moment. Prefer to look first? Same script, two steps:
+
+```powershell
+iwr https://pane.jazii.dev/install.ps1 -OutFile install.ps1
+# read install.ps1 — one short, commented script — then:
+powershell -ExecutionPolicy Bypass -File .\install.ps1
+```
+
+(Or skip the script question entirely: `winget install Pane.Pane` above
+is hash-verified by Microsoft's pipeline.)
 
 ### Installer (.exe)
 
