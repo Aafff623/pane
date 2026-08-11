@@ -39,6 +39,15 @@ Wire format (compatible with the macOS OpenUsage API):
   read your usage), Pane sends no CORS headers — so browsers block web
   pages from reading this API. PowerShell, curl, Rainmeter, and native
   apps are unaffected; CORS only constrains browsers.
+- **Loopback Host headers only.** Requests whose `Host` header isn't a
+  loopback spelling (`127.0.0.1`, `localhost`, or `[::1]`, with or
+  without `:6736`) get `403 {"error": "forbidden_host"}`. This blocks
+  DNS rebinding — a malicious page pointing its own hostname at
+  127.0.0.1 to sidestep the browser's cross-origin rules. Plain
+  scripts are unaffected (curl and PowerShell send a loopback Host
+  automatically; a missing Host header is also fine), but if you call
+  the API through a hosts-file alias or a proxy that rewrites Host,
+  use one of the loopback spellings instead.
 - **No authentication.** Any program running as your Windows user can
   read this API — that is what makes zero-config widgets and scripts
   possible, and it is a deliberate trade-off. What such a program gets is
