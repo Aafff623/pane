@@ -6,6 +6,9 @@ const ID: &str = "copilot";
 const NAME: &str = "Copilot";
 
 /// GitHub tokens can come from Copilot's editor config or the GitHub CLI.
+/// Every source is scoped to github.com: this snapshot only ever talks to
+/// api.github.com, so a token owned by any other host (a GitHub Enterprise
+/// login sharing the same file) must never be selected.
 fn find_token() -> Option<String> {
     let mut candidates: Vec<PathBuf> = Vec::new();
     if let Ok(local) = std::env::var("LOCALAPPDATA") {
@@ -18,13 +21,8 @@ fn find_token() -> Option<String> {
     }
     for path in candidates {
         let Ok(raw) = std::fs::read_to_string(&path) else { continue };
-        let Ok(doc) = serde_json::from_str::<Value>(&raw) else { continue };
-        if let Some(map) = doc.as_object() {
-            for entry in map.values() {
-                if let Some(tok) = entry.get("oauth_token").and_then(Value::as_str) {
-                    return Some(tok.to_string());
-                }
-            }
+        if let Some(tok) = copilot_json_token(&raw) {
+            return Some(tok);
         }
     }
     // GitHub CLI. Older versions kept oauth_token in hosts.yml; modern gh
@@ -34,27 +32,8 @@ fn find_token() -> Option<String> {
     if let Ok(appdata) = std::env::var("APPDATA") {
         let hosts = PathBuf::from(appdata).join("GitHub CLI").join("hosts.yml");
         if let Ok(raw) = std::fs::read_to_string(&hosts) {
-            let mut in_users = false;
-            for line in raw.lines() {
-                let trimmed = line.trim();
-                if let Some(tok) = trimmed.strip_prefix("oauth_token:") {
-                    let tok = tok.trim();
-                    if !tok.is_empty() {
-                        return Some(tok.to_string());
-                    }
-                }
-                // Collect usernames under a "users:" block for the
-                // Credential Manager lookup below.
-                if trimmed == "users:" {
-                    in_users = true;
-                } else if in_users {
-                    let indent = line.len() - line.trim_start().len();
-                    if indent >= 8 && trimmed.ends_with(':') {
-                        usernames.push(trimmed.trim_end_matches(':').to_string());
-                    } else if indent <= 4 && !trimmed.is_empty() {
-                        in_users = false;
-                    }
-                }
+            if let Some(tok) = hosts_yml_token(&raw, &mut usernames) {
+                return Some(tok);
             }
         }
     }
@@ -67,6 +46,63 @@ fn find_token() -> Option<String> {
             let token = token.trim().to_string();
             if !token.is_empty() {
                 return Some(token);
+            }
+        }
+    }
+    None
+}
+
+/// The github.com entry's oauth_token from a Copilot apps.json/hosts.json.
+/// apps.json keys carry a client-id suffix ("github.com:Iv1.…"); hosts.json
+/// keys are bare hostnames. Entries under any other host are ignored.
+fn copilot_json_token(raw: &str) -> Option<String> {
+    let doc = serde_json::from_str::<Value>(raw).ok()?;
+    for (host, entry) in doc.as_object()? {
+        if host != "github.com" && !host.starts_with("github.com:") {
+            continue;
+        }
+        if let Some(tok) = entry.get("oauth_token").and_then(Value::as_str) {
+            if !tok.is_empty() {
+                return Some(tok.to_string());
+            }
+        }
+    }
+    None
+}
+
+/// The github.com section's oauth_token from the gh CLI's hosts.yml, plus
+/// its usernames for the Credential Manager lookup. Lines under any other
+/// top-level host section are skipped entirely.
+fn hosts_yml_token(raw: &str, usernames: &mut Vec<String>) -> Option<String> {
+    let mut in_github = false;
+    let mut in_users = false;
+    for line in raw.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() || trimmed.starts_with('#') {
+            continue;
+        }
+        let indent = line.len() - line.trim_start().len();
+        if indent == 0 {
+            in_github = trimmed == "github.com:";
+            in_users = false;
+            continue;
+        }
+        if !in_github {
+            continue;
+        }
+        if let Some(tok) = trimmed.strip_prefix("oauth_token:") {
+            let tok = tok.trim();
+            if !tok.is_empty() {
+                return Some(tok.to_string());
+            }
+        }
+        if trimmed == "users:" {
+            in_users = true;
+        } else if in_users {
+            if indent >= 8 && trimmed.ends_with(':') {
+                usernames.push(trimmed.trim_end_matches(':').to_string());
+            } else if indent <= 4 {
+                in_users = false;
             }
         }
     }
@@ -133,6 +169,46 @@ async fn fetch() -> Result<Snapshot, String> {
 
 #[cfg(test)]
 mod tests {
+    use super::{copilot_json_token, hosts_yml_token};
+
+    #[test]
+    fn copilot_json_is_host_scoped() {
+        // An enterprise entry listed first must not win over github.com.
+        let raw = r#"{
+            "github.enterprise.example:Iv1.aaa": {"oauth_token": "enterprise-secret"},
+            "github.com:Iv1.bbb": {"oauth_token": "dotcom-secret"}
+        }"#;
+        assert_eq!(copilot_json_token(raw), Some("dotcom-secret".into()));
+        // hosts.json style: bare hostname keys.
+        let raw = r#"{"ghe.internal": {"oauth_token": "x"}, "github.com": {"oauth_token": "y"}}"#;
+        assert_eq!(copilot_json_token(raw), Some("y".into()));
+        // Enterprise-only file yields nothing rather than the wrong token.
+        let raw = r#"{"ghe.internal:Iv1.ccc": {"oauth_token": "enterprise-secret"}}"#;
+        assert_eq!(copilot_json_token(raw), None);
+        // A hostname merely *containing* github.com must not match.
+        let raw = r#"{"github.com.evil.example": {"oauth_token": "z"}}"#;
+        assert_eq!(copilot_json_token(raw), None);
+    }
+
+    #[test]
+    fn hosts_yml_is_host_scoped() {
+        let raw = "github.enterprise.example:\n    oauth_token: enterprise-secret\n    user: boss\ngithub.com:\n    oauth_token: dotcom-secret\n    user: me\n";
+        let mut users = Vec::new();
+        assert_eq!(hosts_yml_token(raw, &mut users), Some("dotcom-secret".into()));
+
+        // Enterprise-only file: no token, no usernames.
+        let raw = "github.enterprise.example:\n    users:\n        boss:\n            oauth_token: enterprise-secret\n";
+        let mut users = Vec::new();
+        assert_eq!(hosts_yml_token(raw, &mut users), None);
+        assert!(users.is_empty());
+
+        // Modern gh layout: usernames collected from github.com only.
+        let raw = "ghe.internal:\n    users:\n        boss:\ngithub.com:\n    users:\n        me:\n        alt:\n    git_protocol: https\n";
+        let mut users = Vec::new();
+        assert_eq!(hosts_yml_token(raw, &mut users), None);
+        assert_eq!(users, vec!["me".to_string(), "alt".to_string()]);
+    }
+
     /// Live probe with this machine's real GitHub login — run manually via
     /// `cargo test --lib copilot -- --ignored --nocapture`. Prints statuses
     /// and counts only, never token values.

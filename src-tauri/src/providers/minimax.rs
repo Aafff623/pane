@@ -23,18 +23,43 @@ fn find_api_key() -> Option<String> {
     if let Some(key) = super::stored_api_key(ID, &["MINIMAX_API_KEY"]) {
         return Some(key);
     }
-    // MiniMax Agent CLI config: provider.minimax.options.apiKey. A two-space
-    // YAML file we only need one scalar out of, so a line scan is enough.
     let path = dirs::home_dir()?.join(".minimax").join("config.yaml");
     let raw = std::fs::read_to_string(path).ok()?;
+    cli_config_key(&raw)
+}
+
+/// The MiniMax Agent CLI key at exactly provider.minimax.options.apiKey —
+/// an indent-tracked walk of the mapping path (still no YAML dependency).
+/// Matching any `apiKey:` line in the file would let a same-named key that
+/// belongs to a DIFFERENT provider in a shared config be sent to MiniMax's
+/// endpoints.
+fn cli_config_key(raw: &str) -> Option<String> {
+    let mut stack: Vec<(usize, String)> = Vec::new();
     for line in raw.lines() {
-        if let Some(v) = line.trim().strip_prefix("apiKey:") {
-            let v = v.trim().trim_matches('"').trim_matches('\'');
+        let trimmed = line.trim();
+        if trimmed.is_empty() || trimmed.starts_with('#') {
+            continue;
+        }
+        let indent = line.len() - line.trim_start().len();
+        while stack.last().is_some_and(|(i, _)| *i >= indent) {
+            stack.pop();
+        }
+        let Some((key, value)) = trimmed.split_once(':') else { continue };
+        let (key, value) = (key.trim(), value.trim());
+        if value.is_empty() {
+            stack.push((indent, key.to_string()));
+            continue;
+        }
+        if key == "apiKey"
+            && stack.iter().map(|(_, k)| k.as_str()).eq(["provider", "minimax", "options"])
+        {
+            let v = value.trim_matches('"').trim_matches('\'');
             // Real MiniMax keys are long; fresh CLI installs carry a short
             // "sk-…" placeholder that would only produce a confusing error.
             if v.len() > 20 {
                 return Some(v.to_string());
             }
+            return None;
         }
     }
     None
@@ -295,6 +320,27 @@ fn read_usage_events(db: &std::path::Path) -> Result<Vec<UsageEvent>, String> {
 
 #[cfg(test)]
 mod tests {
+    use super::cli_config_key;
+
+    #[test]
+    fn cli_key_requires_the_minimax_path() {
+        // Another provider's key listed first must not be picked up.
+        let raw = "provider:\n  another_service:\n    options:\n      apiKey: another-provider-secret-over-20-chars\n  minimax:\n    options:\n      apiKey: actual-minimax-secret-over-20-chars\n";
+        assert_eq!(cli_config_key(raw), Some("actual-minimax-secret-over-20-chars".into()));
+
+        // A file with only the foreign provider yields nothing.
+        let raw = "provider:\n  another_service:\n    options:\n      apiKey: another-provider-secret-over-20-chars\n";
+        assert_eq!(cli_config_key(raw), None);
+
+        // The real location still works, quotes stripped.
+        let raw = "provider:\n  minimax:\n    options:\n      apiKey: \"real-minimax-secret-over-20-chars\"\n";
+        assert_eq!(cli_config_key(raw), Some("real-minimax-secret-over-20-chars".into()));
+
+        // Short placeholder keys are still rejected.
+        let raw = "provider:\n  minimax:\n    options:\n      apiKey: sk-short\n";
+        assert_eq!(cli_config_key(raw), None);
+    }
+
     /// Live probe with this machine's real key — run manually via
     /// `cargo test --lib minimax -- --ignored --nocapture`. Prints statuses
     /// and numbers only, never the key.

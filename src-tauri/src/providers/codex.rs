@@ -29,9 +29,24 @@ pub struct CodexAccount {
 /// the id_token's ChatGPT account claim) never becomes a card. The email
 /// claim doubles as the card label.
 fn dir_identity(dir: &std::path::Path) -> Option<(String, Option<String>)> {
+    identity_from(&read_auth(dir)?)
+}
+
+fn read_auth(dir: &std::path::Path) -> Option<Value> {
     let raw = std::fs::read_to_string(dir.join("auth.json")).ok()?;
-    let doc: Value = serde_json::from_str(&raw).ok()?;
-    identity_from(&doc)
+    serde_json::from_str(&raw).ok()
+}
+
+/// Proof a discovered auth.json actually belongs to OpenAI: its id_token
+/// carries OpenAI's own claim namespace. `auth.json` + `tokens.account_id`
+/// is not an OpenAI-specific shape — broad scanning could otherwise
+/// misclassify another tool's credential file as a Codex login and send
+/// its tokens to OpenAI endpoints (refresh could even write back into it).
+fn openai_provenance(doc: &Value) -> bool {
+    doc.pointer("/tokens/id_token")
+        .and_then(Value::as_str)
+        .and_then(jwt_claims)
+        .is_some_and(|c| c.get("https://api.openai.com/auth").is_some())
 }
 
 /// (account id, email label) from a parsed auth.json: tokens.account_id
@@ -81,7 +96,14 @@ pub fn discover_extra_accounts() -> Vec<CodexAccount> {
         if dir == default {
             continue;
         }
-        let Some((account_id, email)) = dir_identity(&dir) else { continue };
+        // The default home is user-designated; broadly scanned dirs must
+        // additionally PROVE they're OpenAI's before their tokens can enter
+        // the Codex request path.
+        let Some(doc) = read_auth(&dir) else { continue };
+        if !openai_provenance(&doc) {
+            continue;
+        }
+        let Some((account_id, email)) = identity_from(&doc) else { continue };
         if seen.iter().any(|a| a == &account_id) {
             continue;
         }
@@ -379,7 +401,7 @@ fn credits_balance(usage: &Value) -> Option<f64> {
 
 #[cfg(test)]
 mod tests {
-    use super::{credits_balance, identity_from};
+    use super::{credits_balance, identity_from, openai_provenance};
     use base64::Engine;
     use serde_json::json;
 
@@ -387,6 +409,25 @@ mod tests {
         let payload = base64::engine::general_purpose::URL_SAFE_NO_PAD
             .encode(serde_json::to_vec(&claims).unwrap());
         format!("x.{payload}.y")
+    }
+
+    #[test]
+    fn provenance_requires_openais_claim_namespace() {
+        // A foreign auth.json with the right field SHAPE but no OpenAI
+        // claim — the misclassification case — must not pass.
+        let foreign = json!({"tokens": {"account_id": "some-other-account",
+            "access_token": "foreign-access", "refresh_token": "foreign-refresh"}});
+        assert!(!openai_provenance(&foreign));
+        // Even with a JWT id_token, foreign claims don't count.
+        let foreign_jwt = json!({"tokens": {"account_id": "acct",
+            "id_token": fake_id_token(json!({"iss": "https://example.com"}))}});
+        assert!(!openai_provenance(&foreign_jwt));
+        // A real Codex login carries OpenAI's claim namespace.
+        let real = json!({"tokens": {"account_id": "acct",
+            "id_token": fake_id_token(json!({
+                "https://api.openai.com/auth": {"chatgpt_account_id": "acct"}}))}});
+        assert!(openai_provenance(&real));
+        assert!(!openai_provenance(&json!({})));
     }
 
     #[test]
