@@ -857,8 +857,18 @@ async fn fetch_spend() -> Vec<spend::ProviderSpend> {
     eprintln!("[pane] spend: scan starting");
     let started = std::time::Instant::now();
     // Cursor's CSV export needs the async client; fetch it here and hand it
-    // to the blocking scan.
-    let cursor_csv = providers::cursor::fetch_usage_csv().await;
+    // to the blocking scan. Unlike every other spend source it's an
+    // authenticated NETWORK call, so it honors the disabled toggle the same
+    // way fetch_usage does — a switched-off Cursor makes no requests.
+    let cursor_disabled = config_with_defaults(load_config())
+        .get("disabled")
+        .and_then(Value::as_array)
+        .is_some_and(|a| a.iter().any(|v| v.as_str() == Some("cursor")));
+    let cursor_csv = if cursor_disabled {
+        None
+    } else {
+        providers::cursor::fetch_usage_csv().await
+    };
     let result = tauri::async_runtime::spawn_blocking(move || spend::collect(cursor_csv))
         .await
         .unwrap_or_default();
