@@ -100,8 +100,9 @@ manifest first.
 `http://127.0.0.1:6736/v1/usage` exists so your own scripts and widgets
 can read your usage. It is loopback-only (nothing on your network can
 reach it), serves usage numbers only (never credentials or keys), and
-sends **no CORS headers** — so websites you visit cannot read it through
-your browser. Details: [local-http-api.md](local-http-api.md).
+sends **no CORS headers**, and refuses non-loopback `Host` headers — so
+websites you visit cannot read it through your browser, not even via
+DNS rebinding. Details: [local-http-api.md](local-http-api.md).
 
 ## Verifying all of this
 

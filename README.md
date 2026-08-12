@@ -212,8 +212,9 @@ whatever the community asks for loudest.
 - **Quick links** — Status / Dashboard shortcuts on every card.
 - **[Local HTTP API](docs/local-http-api.md)** — `GET
   http://127.0.0.1:6736/v1/usage` for scripts, Rainmeter widgets, stream
-  overlays; same wire format as the Mac app, but with no CORS headers so
-  web pages can't read it through your browser.
+  overlays; same wire format as the Mac app, but with no CORS headers
+  and a loopback-only Host check so web pages can't read it through
+  your browser (not even via DNS rebinding).
 - **Appearance** — System / Light / Dark, compact density, global shortcut
   (e.g. `Ctrl+Shift+U`), optional outbound proxy.
 
@@ -240,7 +241,8 @@ treats them — verify it:
 The short version: tokens are sent only to their own vendor's API over
 HTTPS; pasted keys live in `%APPDATA%\Pane`, readable only by your
 Windows user; spend accounting parses your local logs locally; the HTTP
-API is loopback-only with no CORS; updates are signature-verified.
+API is loopback-only with no CORS and a Host check; updates are
+signature-verified.
 
 ## Settings (gear icon)
 

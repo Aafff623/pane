@@ -46,10 +46,13 @@ Ground rules that apply to every provider:
 
 - **Reads:** `%USERPROFILE%\.codex\auth.json` (honors `CODEX_HOME`).
   **Multi-account:** same discovery as Claude — dot-folders and
-  `~\.config` dirs holding a Codex-shaped `auth.json` each become their
-  own card, identified by `tokens.account_id` (or the id_token's ChatGPT
-  account claim) and named by the account email; a dir that can't name
-  its account is skipped. Reset-credit redemption always uses the
+  `~\.config` dirs each become their own card, but only when their
+  `auth.json` *proves* it's an OpenAI login (its `id_token` carries
+  OpenAI's own claim namespace) — another app's credential file that
+  merely looks similar is never picked up. Cards are identified by
+  `tokens.account_id` (or the id_token's ChatGPT account claim) and
+  named by the account email; a dir that can't name its account is
+  skipped. Reset-credit redemption always uses the
   account whose card offered the credit.
 - **Calls:** `chatgpt.com/backend-api/wham/usage` (limits, Spark windows,
   credits); `.../wham/rate-limit-reset-credits` (reset credits, and
@@ -93,7 +96,9 @@ Ground rules that apply to every provider:
 ## GitHub Copilot
 
 - **Reads:** gh CLI / Copilot tokens from Windows Credential Manager
-  (`gh:github.com:<user>`) or legacy `hosts.yml` files.
+  (`gh:github.com:<user>`) or legacy `hosts.yml` files — in every source,
+  only the `github.com` entry; a GitHub Enterprise token sharing the
+  file is never selected (this card only ever talks to api.github.com).
 - **Calls:** `api.github.com/copilot_internal/user`.
 - **Shows:** credits/quota and plan.
 
@@ -122,7 +127,9 @@ Ground rules that apply to every provider:
 ## MiniMax
 
 - **Reads:** pasted key (Settings), `MINIMAX_API_KEY`, or
-  `%USERPROFILE%\.minimax\config.yaml`; local spend from
+  `%USERPROFILE%\.minimax\config.yaml` (exactly
+  `provider.minimax.options.apiKey` — a same-named key under another
+  provider's section is never used); local spend from
   `%USERPROFILE%\.minimax\sqlite.db` (the Agent CLI's per-turn
   token_usage table, snapshotted via SQLite's backup API — never
   modified) and from Claude Code sessions that ran against MiniMax's

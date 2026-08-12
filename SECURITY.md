@@ -31,8 +31,11 @@ All of this is auditable in the source — links go to the exact code.
   directory and `~\.config` for Claude/Codex-shaped credential files —
   the places those official mechanisms put them. A discovered credential
   follows the exact same lane rule (its own vendor's API only, token
-  refresh written back beside it), and a file that cannot name its
-  account is never used at all.
+  refresh written back beside it), a file that cannot name its account
+  is never used at all, and a broadly-discovered Codex candidate must
+  additionally *prove* it's an OpenAI login (OpenAI's own claim
+  namespace in its `id_token`) before any request — a look-alike
+  credential file from another app never enters the lane.
 - **No analytics SDK, no crash reporter, no event streams.** Pane's
   entire self-reporting surface is two anonymous channels, both
   documented field-by-field in [docs/privacy.md](docs/privacy.md): the
@@ -43,10 +46,12 @@ All of this is auditable in the source — links go to the exact code.
   the statistic off is a hard stop and deletes the stored ID. The full
   list of network calls Pane can make is in
   [docs/privacy.md](docs/privacy.md).
-- **The local HTTP API is loopback-only and CORS-locked.** It binds
-  `127.0.0.1:6736`, serves usage numbers (never credentials), and sends no
-  `Access-Control-Allow-Origin` header — so web pages you visit cannot
-  read it from a browser ([`src-tauri/src/httpapi.rs`](src-tauri/src/httpapi.rs)).
+- **The local HTTP API is loopback-only, CORS-locked, and Host-checked.**
+  It binds `127.0.0.1:6736`, serves usage numbers (never credentials),
+  sends no `Access-Control-Allow-Origin` header, and refuses requests
+  whose `Host` header isn't a loopback spelling — so web pages you visit
+  cannot read it from a browser, not even via DNS rebinding
+  ([`src-tauri/src/httpapi.rs`](src-tauri/src/httpapi.rs)).
 - **Updates are cryptographically verified.** The auto-updater accepts
   only releases signed by the project's minisign key — passphrase-protected,
   master copy held offline; the public key is baked into the app. The
