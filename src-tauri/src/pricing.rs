@@ -402,20 +402,16 @@ pub fn ensure_fresh() {
     // which discards the whole persisted spend cache and re-parses every
     // session log (gigabytes on long-lived installs). With autostart, the
     // daily refresh was landing exactly at Windows login — the one moment
-    // the disk is already saturated. Serve yesterday's catalogs for the
-    // first stretch and refresh once the boot storm has passed; prices
-    // are at most a day + grace stale. First run (no catalogs on disk)
-    // still downloads immediately — no prices at all is worse.
-    {
-        static FIRST_CALL: OnceLock<std::time::Instant> = OnceLock::new();
-        const BOOT_GRACE: std::time::Duration = std::time::Duration::from_secs(10 * 60);
-        let first = *FIRST_CALL.get_or_init(std::time::Instant::now);
-        let all_on_disk =
-            SOURCES.iter().all(|(source, _)| dir().join(format!("{source}.json")).exists());
-        if all_on_disk && first.elapsed() < BOOT_GRACE {
-            return;
-        }
-    }
+    // the disk is already saturated. Serve yesterday's copy of any catalog
+    // already on disk and refresh once the boot storm has passed; prices
+    // are at most a day + grace stale. Gated per source: a catalog with no
+    // file yet (first run, or a feed this machine can never reach) still
+    // fetches immediately — no prices at all is worse, and one dead feed
+    // must not disable the deferral for the others.
+    static FIRST_CALL: OnceLock<std::time::Instant> = OnceLock::new();
+    const BOOT_GRACE: std::time::Duration = std::time::Duration::from_secs(10 * 60);
+    let in_grace =
+        FIRST_CALL.get_or_init(std::time::Instant::now).elapsed() < BOOT_GRACE;
 
     let mut state = load_state();
     let now = now_ms();
@@ -430,6 +426,9 @@ pub fn ensure_fresh() {
         let failed_at = entry.get("failedAt").and_then(Value::as_i64).unwrap_or(0);
         let due = now - fetched_at > refresh_ms && now - failed_at > RETRY_MS;
         if !due {
+            continue;
+        }
+        if in_grace && dir().join(format!("{source}.json")).exists() {
             continue;
         }
         let etag = entry.get("etag").and_then(Value::as_str).unwrap_or("").to_string();
