@@ -668,6 +668,7 @@ fn builtin_price(canonical: &str) -> Option<Price> {
     let bare = canonical
         .strip_prefix("moonshot/")
         .or_else(|| canonical.strip_prefix("moonshot-ai/"))
+        .or_else(|| canonical.strip_prefix("xai/"))
         .unwrap_or(canonical);
     match bare {
         "kimi-k3" | "kimi-k3-code" => Some(Price::flat(3.0, 15.0, 0.3, 3.0)),
@@ -675,6 +676,21 @@ fn builtin_price(canonical: &str) -> Option<Price> {
         // output $6, implicit cache read $0.25, explicit cache write $2.50.
         // Public catalogs still carry 0/0 placeholders for these slugs.
         "qwen3.8-max" | "qwen3.8-max-preview" => Some(Price::flat(2.0, 6.0, 0.25, 2.5)),
+        // Grok 4.6, released 2026-08-12 — docs.x.ai/docs/pricing (USD/MTok):
+        // $2 in / $0.50 cached / $6 out; prompts ≥200k bill $4 / $1 / $12
+        // for the WHOLE request (xAI's long-context rule matches
+        // request_cost's tiering, and Grok spend passes the default 200k
+        // threshold). xAI bills no separate cache-write rate — writes are
+        // plain input. The announced 2x "-fast" variant needs no entry:
+        // the -fast resolution path applies the default 2x multiplier to
+        // this rate card. Public catalogs don't carry 4.6 yet.
+        "grok-4.6" | "grok-4-6" => Some(Price {
+            input_200k: Some(4.0),
+            output_200k: Some(12.0),
+            cache_read_200k: Some(1.0),
+            cache_write_200k: Some(4.0),
+            ..Price::flat(2.0, 6.0, 0.5, 2.0)
+        }),
         _ => None,
     }
 }
@@ -766,6 +782,29 @@ mod tests {
         super::apply_supplement(&mut store, &updated);
         let terra = store.supplement.get("gpt-5.6-terra").unwrap();
         assert_eq!((terra.input, terra.output), (1.75, 11.0));
+    }
+
+    #[test]
+    fn grok_46_builtin_prices_with_long_context_tier() {
+        // Vendor rates (docs.x.ai/docs/pricing): $2/$0.50/$6, doubling for
+        // ≥200k prompts — resolvable in every spelling before the public
+        // catalogs learn the model. Empty store = builtin only.
+        let store = super::Store::default();
+        for slug in ["grok-4.6", "grok-4-6", "xai/grok-4.6", "grok-4.6-high"] {
+            let p = super::resolve(&store, slug, 0)
+                .unwrap_or_else(|| panic!("{slug} did not price"));
+            assert_eq!((p.input, p.output, p.cache_read, p.cache_write), (2.0, 6.0, 0.5, 2.0), "{slug}");
+            assert_eq!(
+                (p.input_200k, p.output_200k, p.cache_read_200k),
+                (Some(4.0), Some(12.0), Some(1.0)),
+                "{slug}"
+            );
+        }
+        // The fast variant is "twice the price" (launch post): the -fast
+        // path scales the whole rate card, long-context tier included.
+        let fast = super::resolve(&store, "grok-4.6-fast", 0).unwrap();
+        assert_eq!((fast.input, fast.output, fast.cache_read), (4.0, 12.0, 1.0));
+        assert_eq!(fast.input_200k, Some(8.0));
     }
 
     #[test]

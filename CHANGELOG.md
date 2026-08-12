@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+- **Grok 4.6 prices from day one** — xAI's launch-day rates
+  ($2 in / $0.50 cached / $6 out per MTok, doubling for ≥200k-token
+  prompts; the fast variant at 2x) are baked in until the public
+  catalogs learn the model, so spend from Grok 4.6 sessions shows
+  dollars instead of the unpriced ⚠.
+
 ## 0.4.33 — 2026-08-12
 
 ### Fixed
