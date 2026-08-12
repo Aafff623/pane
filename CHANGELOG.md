@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.4.33 — 2026-08-12
 
 ### Fixed
 - **Launch shows your numbers instantly** — the window now paints the
