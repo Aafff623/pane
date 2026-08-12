@@ -2,9 +2,26 @@
 
 ## Unreleased
 
+### Fixed
+- **Launch shows your numbers instantly** — the window now paints the
+  previous run's snapshots from disk (marked Outdated) the moment it
+  opens, then swaps in live data as it arrives. Before, the first paint
+  waited for the slowest provider's full network round — at boot, with
+  Wi-Fi still connecting, that was 30-40 seconds of "Refreshing…".
+- **The daily pricing refresh no longer lands at login** — a catalog
+  update discards the spend cache and re-reads every session log
+  (gigabytes on long-lived installs), and with autostart that landed
+  exactly when Windows was busiest. Catalog downloads now wait out the
+  first 10 minutes after launch; a first run with no catalogs on disk
+  still fetches immediately.
+- **Dead networks fail fast** — provider requests now give up on
+  connecting after 5 seconds instead of riding the full 20-second
+  request timeout, so a boot-time refresh with no network settles in
+  seconds.
+
 ### Security
 - **Credential provenance hardening** (from an external security
-  report — thank you): credential discovery now proves a token belongs
+  report): credential discovery now proves a token belongs
   to the provider it will be sent to, instead of accepting the first
   field-shape match. Extra Codex accounts found by the multi-account
   scan must carry OpenAI's own claim namespace in their `id_token`

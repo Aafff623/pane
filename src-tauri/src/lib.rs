@@ -850,6 +850,76 @@ async fn fetch_usage(app: tauri::AppHandle) -> Vec<providers::Snapshot> {
     all
 }
 
+/// The previous run's last-good snapshots, straight from the disk cache —
+/// the instant first paint at launch. Cards show numbers in milliseconds
+/// instead of a blank "Refreshing…" while the slowest provider answers
+/// (at boot, with the network still coming up, that wait ran 30-40 s).
+/// Everything is marked stale; the first live fetch replaces it.
+#[tauri::command]
+fn cached_usage() -> Vec<providers::Snapshot> {
+    #[derive(serde::Deserialize)]
+    struct CachedSnap {
+        at: i64,
+        snap: providers::Snapshot,
+    }
+    const MAX_STALE_MS: i64 = 24 * 60 * 60 * 1000;
+    let Ok(raw) = std::fs::read_to_string(providers::config_dir().join("last_snapshots.json"))
+    else {
+        return Vec::new();
+    };
+    let Ok(map) = serde_json::from_str::<std::collections::HashMap<String, CachedSnap>>(&raw)
+    else {
+        return Vec::new();
+    };
+
+    let cfg = config_with_defaults(load_config());
+    let disabled: Vec<String> = cfg
+        .get("disabled")
+        .and_then(Value::as_array)
+        .map(|a| a.iter().filter_map(Value::as_str).map(str::to_string).collect())
+        .unwrap_or_default();
+
+    // Same account-swap rule as the live path: if a different account
+    // signed into a default home since the cache was written, that
+    // family's bare-id entry belongs to the old account — never paint it,
+    // not even for the seconds until the live fetch lands.
+    let stored: Value = std::fs::read_to_string(providers::config_dir().join("cache_identities.json"))
+        .ok()
+        .and_then(|raw| serde_json::from_str(&raw).ok())
+        .unwrap_or_else(|| json!({}));
+    let swapped: Vec<&str> = [
+        ("claude", providers::claude::default_identity()),
+        ("codex", providers::codex::default_identity()),
+    ]
+    .into_iter()
+    .filter(|(fam, current)| {
+        let old = stored.get(fam).cloned().unwrap_or(Value::Null);
+        matches!((current, &old), (Some(cur), Value::String(o)) if cur != o)
+    })
+    .map(|(fam, _)| fam)
+    .collect();
+
+    let now_ms = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_millis() as i64)
+        .unwrap_or(0);
+    let mut out: Vec<providers::Snapshot> = map
+        .into_iter()
+        .filter(|(id, c)| {
+            now_ms - c.at <= MAX_STALE_MS
+                && !disabled.iter().any(|d| d == id)
+                && !swapped.iter().any(|f| f == id)
+        })
+        .map(|(_, c)| {
+            let mut s = c.snap;
+            s.stale = true;
+            s
+        })
+        .collect();
+    out.sort_by(|a, b| a.id.cmp(&b.id));
+    out
+}
+
 /// Computes local spend (Today / Yesterday / Last 30 Days) from the CLIs'
 /// own session logs. Heavy file IO, so it runs on a blocking thread.
 #[tauri::command]
@@ -1150,6 +1220,7 @@ pub fn run() {
         .plugin(tauri_plugin_process::init())
         .invoke_handler(tauri::generate_handler![
             fetch_usage,
+            cached_usage,
             fetch_spend,
             set_api_key,
             get_config,

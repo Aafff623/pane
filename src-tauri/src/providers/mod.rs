@@ -152,7 +152,12 @@ fn proxy_url() -> Option<&'static str> {
 pub fn http() -> reqwest::Client {
     let mut builder = reqwest::Client::builder()
         .user_agent("Pane-Windows/0.3")
-        .timeout(std::time::Duration::from_secs(20));
+        .timeout(std::time::Duration::from_secs(20))
+        // At boot the network is often still coming up; without a connect
+        // cap every request rides the full 20 s, and the UI's first paint
+        // waits on the slowest provider chain. Failing to connect in 5 s
+        // is a dead network — fail fast, serve the cached snapshot.
+        .connect_timeout(std::time::Duration::from_secs(5));
     if let Some(url) = proxy_url() {
         if let Ok(proxy) = reqwest::Proxy::all(url) {
             let proxy = proxy.no_proxy(reqwest::NoProxy::from_string("localhost,127.0.0.1,::1"));

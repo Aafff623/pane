@@ -2148,6 +2148,26 @@ function renderIfVisible(): void {
   populatePinnedOptions();
 }
 
+/// First paint from the previous run's snapshots (disk cache): numbers on
+/// screen in milliseconds instead of a blank "Refreshing…" while the
+/// slowest provider answers — at boot that wait ran 30-40 seconds. Cards
+/// arrive marked stale ("Outdated") and the live fetch replaces them.
+async function paintCachedSnapshots(): Promise<void> {
+  // Only when a saved layout exists: on a true first run there is no cache
+  // anyway, and refresh()'s first-launch detection must see the live list.
+  if (config.layout === null) return;
+  try {
+    const cached = await invoke<Snapshot[]>("cached_usage");
+    // The live fetch may have already landed — never paint over it.
+    if (!cached.length || lastSnapshots.length) return;
+    lastSnapshots = cached;
+    ensureLayout();
+    renderIfVisible();
+  } catch {
+    // No cache readable — the live fetch paints, as before.
+  }
+}
+
 async function refresh(force = false): Promise<void> {
   if (refreshing) return;
   if (!force && Date.now() - lastFetch < STALE_MS) return;
@@ -3002,6 +3022,7 @@ window.addEventListener("DOMContentLoaded", () => {
   });
   void initSettings().then(() => {
     scheduleAutoRefresh();
+    void paintCachedSnapshots();
     void refresh(true);
     // Queued, not shown: the window is usually still hidden in the tray at
     // startup — the first popover-shown presents it. Runs after the config
