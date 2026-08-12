@@ -398,6 +398,25 @@ pub fn ensure_fresh() {
         }
     }
 
+    // Boot grace: a successful catalog download changes catalog_stamp(),
+    // which discards the whole persisted spend cache and re-parses every
+    // session log (gigabytes on long-lived installs). With autostart, the
+    // daily refresh was landing exactly at Windows login — the one moment
+    // the disk is already saturated. Serve yesterday's catalogs for the
+    // first stretch and refresh once the boot storm has passed; prices
+    // are at most a day + grace stale. First run (no catalogs on disk)
+    // still downloads immediately — no prices at all is worse.
+    {
+        static FIRST_CALL: OnceLock<std::time::Instant> = OnceLock::new();
+        const BOOT_GRACE: std::time::Duration = std::time::Duration::from_secs(10 * 60);
+        let first = *FIRST_CALL.get_or_init(std::time::Instant::now);
+        let all_on_disk =
+            SOURCES.iter().all(|(source, _)| dir().join(format!("{source}.json")).exists());
+        if all_on_disk && first.elapsed() < BOOT_GRACE {
+            return;
+        }
+    }
+
     let mut state = load_state();
     let now = now_ms();
     let refresh_ms = if UNPRICED_HINT.load(std::sync::atomic::Ordering::Relaxed) {
