@@ -160,17 +160,27 @@ fn parse_official(doc: &Value) -> Option<Vec<Metric>> {
         ("monthly", "Monthly", None),
     ] {
         let Some(w) = usage.get(field) else { continue };
-        let Some(percent) = w.get("percent").and_then(Value::as_f64) else { continue };
-        // Guard the empirically-captured contract: the server sends
-        // integer 0-100 USED percentages (it floors server-side; the
-        // shape already changed once between the upstream PR and deploy).
-        // A fractional 0-1 encoding or an out-of-range value means the
-        // shape changed again — fail the whole parse (→ labeled local
-        // fallback) instead of rendering silently wrong meters.
-        if !(0.0..=100.0).contains(&percent) || (percent > 0.0 && percent < 1.0) {
-            return None;
-        }
-        let used = percent;
+        // "rate-limited" IS the answer (100%), independent of the percent
+        // field — a blocked window must never vanish from the card just
+        // because the server omitted or lagged its percent.
+        let rate_limited = w.get("status").and_then(Value::as_str) == Some("rate-limited");
+        let percent = w.get("percent").and_then(Value::as_f64);
+        let used = if rate_limited {
+            100.0
+        } else {
+            let Some(percent) = percent else { continue };
+            // Guard the empirically-captured contract: the server sends
+            // integer 0-100 USED percentages (it floors server-side; the
+            // shape already changed once between the upstream PR and
+            // deploy). A fractional 0-1 encoding or an out-of-range value
+            // means the shape changed again — fail the whole parse (→
+            // labeled local fallback) instead of rendering silently wrong
+            // meters.
+            if !(0.0..=100.0).contains(&percent) || (percent > 0.0 && percent < 1.0) {
+                return None;
+            }
+            percent
+        };
         let resets_at = w
             .get("resetsAt")
             .and_then(Value::as_str)
@@ -476,6 +486,13 @@ mod tests {
         }});
         let m = parse_official(&limited).expect("parses");
         assert_eq!(m.len(), 1);
+        assert_eq!(m[0].used_percent, Some(100.0));
+        // rate-limited stays a full meter even if the server omits (or
+        // lags) the percent — the status alone is the answer.
+        let no_percent = serde_json::json!({ "usage": {
+            "rolling": { "status": "rate-limited", "resetsAt": "2026-08-13T15:33:33Z" },
+        }});
+        let m = parse_official(&no_percent).expect("parses");
         assert_eq!(m[0].used_percent, Some(100.0));
         assert!(parse_official(&serde_json::json!({"error": "nope"})).is_none());
 
