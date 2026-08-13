@@ -96,14 +96,18 @@ async fn fetch() -> Result<Snapshot, String> {
     };
 
     // Account-wide truth first; the local windows only when it fails
-    // (offline, revoked key, or a gateway hiccup).
+    // (offline, revoked key, or a gateway hiccup). The fallback names its
+    // narrower scope in the plan label — the card must never silently
+    // flip between account-wide and this-PC-only numbers looking the same.
     match fetch_official(&key).await {
-        Ok(metrics) => return Ok(Snapshot::ok(ID, NAME, Some("Go".into()), metrics)),
+        Ok(metrics) => Ok(Snapshot::ok(ID, NAME, Some("Go".into()), metrics)),
         Err(e) => {
             eprintln!("[pane] opencode: usage API failed ({e}) — using local windows");
+            let mut snap = local_windows_snapshot()?;
+            snap.plan = Some("Go — this PC only".into());
+            Ok(snap)
         }
     }
-    local_windows_snapshot()
 }
 
 /// GET /zen/go/v1/usage with the Go key. The response is served by
@@ -132,9 +136,13 @@ fn parse_official(doc: &Value) -> Option<Vec<Metric>> {
     let usage = doc.get("usage")?;
     let mut metrics = Vec::new();
     for (field, label, period_ms) in [
-        ("rolling", "Session", SESSION_MS as i64),
-        ("weekly", "Weekly", WEEK_MS as i64),
-        ("monthly", "Monthly", 30 * 86_400_000_i64),
+        ("rolling", "Session", Some(SESSION_MS as i64)),
+        ("weekly", "Weekly", Some(WEEK_MS as i64)),
+        // Monthly cycles run 28-31 days anchored to the subscription
+        // date — a fixed period would skew the pace projection (and go
+        // NEGATIVE-fraction right after a 31-day cycle starts), so the
+        // real length is derived from the server's own reset boundary.
+        ("monthly", "Monthly", None),
     ] {
         let Some(w) = usage.get(field) else { continue };
         let Some(percent) = w.get("percent").and_then(Value::as_f64) else { continue };
@@ -146,9 +154,32 @@ fn parse_official(doc: &Value) -> Option<Vec<Metric>> {
             .and_then(Value::as_str)
             .and_then(|s| chrono::DateTime::parse_from_rfc3339(s).ok())
             .map(|d| d.timestamp_millis());
-        metrics.push(Metric::progress(label, used, None).with_reset(resets_at, Some(period_ms)));
+        let period_ms = period_ms.or_else(|| resets_at.map(month_period_ending));
+        metrics.push(Metric::progress(label, used, None).with_reset(resets_at, period_ms));
     }
     (!metrics.is_empty()).then_some(metrics)
+}
+
+/// Length of the anchored monthly cycle that ENDS at the server's
+/// resetsAt: one month back on the same day-of-month (clamped to short
+/// months) at the same time-of-day — the true 28-31-day window.
+fn month_period_ending(resets_ms: i64) -> i64 {
+    use chrono::{Datelike, TimeZone, Timelike, Utc};
+    let Some(end) = Utc.timestamp_millis_opt(resets_ms).single() else {
+        return 30 * 86_400_000;
+    };
+    let (py, pm) = shift_month(end.year(), end.month(), -1);
+    let day = end.day().min(days_in_month(py, pm));
+    let start = utc_date(
+        py,
+        pm,
+        day,
+        end.hour(),
+        end.minute(),
+        end.second(),
+        end.timestamp_subsec_millis(),
+    );
+    ((resets_ms as f64 - start) as i64).max(1)
 }
 
 /// Fallback: the pre-API local computation from opencode.db — this PC's
@@ -405,6 +436,16 @@ mod tests {
         assert_eq!((m[1].label.as_str(), m[1].used_percent), ("Weekly", Some(6.0)));
         assert_eq!(m[1].resets_at, Some(ms("2026-08-17T00:00:00.302Z") as i64));
         assert_eq!((m[2].label.as_str(), m[2].used_percent), ("Monthly", Some(3.0)));
+        // Monthly period is the REAL cycle length ending at the server's
+        // reset (Aug 5 → Sep 5 = 31 days), never a fixed 30 days — a fixed
+        // window skewed the pace projection (Devin's find).
+        assert_eq!(m[2].period_ms, Some(31 * 86_400_000_i64));
+        // Clamped short-month edge: a reset on Mar 31 looks back to
+        // Feb 28 in a non-leap year.
+        let mar31 = chrono::DateTime::parse_from_rfc3339("2026-03-31T10:00:00Z")
+            .unwrap()
+            .timestamp_millis();
+        assert_eq!(month_period_ending(mar31), 31 * 86_400_000_i64);
 
         // Rate-limited windows render as full; a missing window is skipped
         // without sinking the card; junk yields None (→ local fallback).
