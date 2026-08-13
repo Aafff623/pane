@@ -166,7 +166,7 @@ pub fn generation() -> u64 {
 /// fingerprinted below — an app update that reprices the same files would
 /// otherwise leave history at the old dollars until upstream happens to
 /// rewrite a catalog.
-const CORRECTIONS_REV: u32 = 3; // 3: zero-rate catalog placeholders no longer price at $0.00
+const CORRECTIONS_REV: u32 = 4; // 4: grok-4.6 builtin launch pricing
 
 /// Stable fingerprint of the effective pricing inputs: the on-disk catalog
 /// files plus this binary's corrections revision. The persistent spend
@@ -669,6 +669,11 @@ fn builtin_price(canonical: &str) -> Option<Price> {
         .strip_prefix("moonshot/")
         .or_else(|| canonical.strip_prefix("moonshot-ai/"))
         .or_else(|| canonical.strip_prefix("xai/"))
+        // Cursor's CSV brands third-party slugs ("cursor-grok-4.6-xhigh");
+        // the supplement's alias rules normally translate these, but a
+        // launch-day model needs the baked rates before the supplement
+        // learns the new slug.
+        .or_else(|| canonical.strip_prefix("cursor-"))
         .unwrap_or(canonical);
     match bare {
         "kimi-k3" | "kimi-k3-code" => Some(Price::flat(3.0, 15.0, 0.3, 3.0)),
@@ -790,7 +795,11 @@ mod tests {
         // ≥200k prompts — resolvable in every spelling before the public
         // catalogs learn the model. Empty store = builtin only.
         let store = super::Store::default();
-        for slug in ["grok-4.6", "grok-4-6", "xai/grok-4.6", "grok-4.6-high"] {
+        // cursor-grok-4.6-xhigh is the exact slug Cursor's CSV logged on
+        // launch day — 20.6M real tokens showed $0.00 until it resolved.
+        for slug in
+            ["grok-4.6", "grok-4-6", "xai/grok-4.6", "grok-4.6-high", "cursor-grok-4.6-xhigh"]
+        {
             let p = super::resolve(&store, slug, 0)
                 .unwrap_or_else(|| panic!("{slug} did not price"));
             assert_eq!((p.input, p.output, p.cache_read, p.cache_write), (2.0, 6.0, 0.5, 2.0), "{slug}");

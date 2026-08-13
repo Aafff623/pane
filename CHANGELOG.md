@@ -7,7 +7,8 @@
   ($2 in / $0.50 cached / $6 out per MTok, doubling for ≥200k-token
   prompts; the fast variant at 2x) are baked in until the public
   catalogs learn the model, so spend from Grok 4.6 sessions shows
-  dollars instead of the unpriced ⚠.
+  dollars instead of the unpriced ⚠ — including Cursor sessions, whose
+  usage export brands the model `cursor-grok-4.6-xhigh`.
 
 ## 0.4.33 — 2026-08-12
 

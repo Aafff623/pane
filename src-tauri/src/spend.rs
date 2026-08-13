@@ -413,7 +413,18 @@ fn codex_price(model: &str) -> (f64, f64, f64) {
 
 fn grok_price(model: &str) -> (f64, f64) {
     let m = model.to_lowercase();
-    if m.contains("code") || m.contains("fast") {
+    // Grok 4.6's "fast" is a 2x PREMIUM speed tier (launch post: "twice
+    // the price"), the opposite of the older grok-4-fast/grok-code-fast
+    // line where "fast" meant a smaller, cheaper model — 4.6 slugs must
+    // never fall into that cheap branch. (Normally unreachable: the
+    // baked-in catalog entry resolves 4.6 before this backstop.)
+    if m.contains("4.6") || m.contains("4-6") {
+        if m.contains("fast") {
+            (4.0, 12.0)
+        } else {
+            (2.0, 6.0)
+        }
+    } else if m.contains("code") || m.contains("fast") {
         (0.2, 1.5)
     } else {
         (3.0, 15.0)
