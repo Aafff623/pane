@@ -397,6 +397,26 @@ async fn fetch() -> Result<Snapshot, String> {
     });
     let used_cents = used_cents_opt.unwrap_or(0.0);
 
+    // The per-bucket bars mirror Cursor's own Plan & Usage page — "Cursor
+    // Models" (the auto bucket: Composer, Cursor Grok, …) and "Other
+    // Models" — and render for EVERY account shape that reports them,
+    // team included (they always did; a restructure briefly scoped them
+    // to non-team accounts and Devin caught the regression).
+    let auto_pct = num(plan_usage.get("autoPercentUsed"));
+    let api_pct = num(plan_usage.get("apiPercentUsed"));
+    if let Some(auto) = auto_pct {
+        metrics.push(
+            Metric::progress("Cursor Models", auto.clamp(0.0, 100.0), None)
+                .with_reset(resets_at, Some(period_ms)),
+        );
+    }
+    if let Some(api) = api_pct {
+        metrics.push(
+            Metric::progress("Other Models", api.clamp(0.0, 100.0), None)
+                .with_reset(resets_at, Some(period_ms)),
+        );
+    }
+
     if is_team {
         // Team-shaped accounts sometimes omit the plan limit (or report
         // zero, which would divide to NaN); the legacy request endpoint
@@ -413,32 +433,16 @@ async fn fetch() -> Result<Snapshot, String> {
             )
             .with_reset(resets_at, Some(period_ms)),
         );
-    } else if plan_usage.get("autoPercentUsed").is_some()
-        || plan_usage.get("apiPercentUsed").is_some()
-    {
-        // Bucket-era plans: mirror Cursor's own Plan & Usage page, which
-        // shows exactly two bars — "Cursor Models" (the auto bucket:
-        // Composer, Cursor Grok, …) and "Other Models" — and NO total
-        // bar. There is no honest total percent on these plans: the $20
+    } else if auto_pct.is_some() || api_pct.is_some() {
+        // Bucket-era personal plans: Cursor's page shows the two bars and
+        // NO total bar. There is no honest total percent here: the $20
         // "limit" is only the Other-Models/API floor, totalPercentUsed
         // measures against included+bonus pools (~$345 live), and the
         // API's own displayMessage does spend/$20 math — three Cursor
         // numbers that all contradict the dashboard. Dollars spent stay
         // visible as a text row; only the misleading percent is gone.
-        if let Some(auto) = num(plan_usage.get("autoPercentUsed")) {
-            metrics.push(
-                Metric::progress("Cursor Models", auto.clamp(0.0, 100.0), None)
-                    .with_reset(resets_at, Some(period_ms)),
-            );
-        }
-        if let Some(api) = num(plan_usage.get("apiPercentUsed")) {
-            metrics.push(
-                Metric::progress("Other Models", api.clamp(0.0, 100.0), None)
-                    .with_reset(resets_at, Some(period_ms)),
-            );
-        }
-        // The cycle reset stays visible on the two bars above; the text
-        // row's with_reset rides along for local-API consumers only.
+        // The cycle reset stays visible on the bars above; the text row's
+        // with_reset rides along for local-API consumers only.
         if let Some(u) = used_cents_opt {
             metrics.push(
                 Metric::text("Total usage", format!("{} this cycle", dollars(u)))

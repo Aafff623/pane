@@ -14,9 +14,12 @@
   is honest there: Cursor itself reports three contradictory total
   numbers). Pre-bucket accounts keep the classic included bar, computed
   as spend ÷ plan limit when Cursor reports spend (the API's own percent
-  otherwise — never a fabricated one). Saved layouts migrate the renamed
-  rows automatically: stars, pins, hidden flags, and order carry over
-  from "Auto usage" / "API usage" to the new labels.
+  otherwise — never a fabricated one). Team accounts keep their bucket
+  bars alongside the dollar Total meter. Saved layouts migrate
+  automatically: stars, pins, hidden flags, and order carry over from
+  "Auto usage" / "API usage" to the new labels, and a star or tray pin
+  on a Total row that became text repoints to Cursor Models instead of
+  silently vanishing from the tray.
 
 ## 0.4.34 — 2026-08-13
 

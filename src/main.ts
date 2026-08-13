@@ -473,8 +473,28 @@ function ensureLayout(): void {
       }
     }
   }
+  // On bucket-era accounts "Total usage" became a text row — the tray
+  // strip and pinned tray number only accept progress metrics, so a
+  // star/pin on it would silently vanish. Repoint both to the nearest
+  // equivalent meter, "Cursor Models" (only when the live snapshot
+  // confirms the row is text; pre-bucket accounts keep their bar).
+  const cursorSnap = lastSnapshots.find((s) => providerFamily(s.id) === "cursor");
+  const totalIsText =
+    cursorSnap?.metrics.find((m) => m.label === "Total usage")?.kind === "text";
+  if (totalIsText) {
+    for (const [pid, L] of Object.entries(layout.providers)) {
+      if (providerFamily(pid) !== "cursor") continue;
+      const at = L.starred.indexOf("Total usage");
+      if (at >= 0) {
+        if (L.starred.includes("Cursor Models")) L.starred.splice(at, 1);
+        else L.starred[at] = "Cursor Models";
+        changed = true;
+      }
+    }
+  }
   if (config.pinned && providerFamily(config.pinned.provider) === "cursor") {
-    const to = CURSOR_RENAMES[config.pinned.label];
+    const renamed = CURSOR_RENAMES[config.pinned.label];
+    const to = renamed ?? (totalIsText && config.pinned.label === "Total usage" ? "Cursor Models" : null);
     if (to) {
       config.pinned = { ...config.pinned, label: to };
       void patchConfig({ pinned: config.pinned }).catch(() => {});
