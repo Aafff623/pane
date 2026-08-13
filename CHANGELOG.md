@@ -9,6 +9,12 @@
   catalogs learn the model, so spend from Grok 4.6 sessions shows
   dollars instead of the unpriced ⚠ — including Cursor sessions, whose
   usage export brands the model `cursor-grok-4.6-xhigh`.
+- **DeepSeek V4 spend prices from day one** — AihubMix's rate cards for
+  `deepseek-v4-pro` ($0.464 in / $0.928 out / $0.004 cache read per
+  MTok) and `deepseek-v4-flash` ($0.154 / $0.308 / $0.003) are baked in
+  until public catalogs learn the family, dated snapshots like
+  `-0813` included, so Hermes sessions on these models show dollars
+  instead of the unpriced ⚠.
 
 ## 0.4.33 — 2026-08-12
 

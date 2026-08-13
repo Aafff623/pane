@@ -166,7 +166,7 @@ pub fn generation() -> u64 {
 /// fingerprinted below — an app update that reprices the same files would
 /// otherwise leave history at the old dollars until upstream happens to
 /// rewrite a catalog.
-const CORRECTIONS_REV: u32 = 4; // 4: grok-4.6 builtin launch pricing
+const CORRECTIONS_REV: u32 = 5; // 5: deepseek-v4 pro/flash builtin prices
 
 /// Stable fingerprint of the effective pricing inputs: the on-disk catalog
 /// files plus this binary's corrections revision. The persistent spend
@@ -669,8 +669,30 @@ fn builtin_price(canonical: &str) -> Option<Price> {
         .strip_prefix("moonshot/")
         .or_else(|| canonical.strip_prefix("moonshot-ai/"))
         .or_else(|| canonical.strip_prefix("xai/"))
+        .or_else(|| canonical.strip_prefix("deepseek/"))
         .unwrap_or(canonical);
+    // DeepSeek ships dated snapshots ("deepseek-v4-pro-0813"); price them as
+    // the base model so a new date doesn't silently go unpriced. Scoped to
+    // deepseek- slugs whose trailing dash-segment is all digits (≥4), so
+    // "deepseek-v4" or version-bearing names elsewhere never lose a tail.
+    let bare = match bare.strip_suffix(|c: char| c.is_ascii_digit()) {
+        Some(_) if bare.starts_with("deepseek-") => bare.rsplit_once('-').map_or(bare, |(h, t)| {
+            if t.chars().all(|c| c.is_ascii_digit()) && t.len() >= 4 { h } else { bare }
+        }),
+        _ => bare,
+    };
     match bare {
+        // AihubMix DeepSeek V4 family — the gateway's OWN rate cards
+        // (aihubmix.com/model/deepseek-v4-pro-0813 and /deepseek-v4-flash
+        // headline pricing, NOT the cheaper Baidu/Tencent provider rows on
+        // the same pages): pro $0.464/$0.928 with $0.004 cache read (yes,
+        // ~1/116 of input — the page really says $0.004), flash
+        // $0.154/$0.308 with $0.003 cache read. No cache-write rate is
+        // published, so writes bill at the input rate. Hermes logs these
+        // bare ("deepseek-v4-flash", "deepseek-v4-pro-0813" — verified
+        // against a real state.db); public catalogs don't carry them yet.
+        "deepseek-v4-pro" => Some(Price::flat(0.464, 0.928, 0.004, 0.464)),
+        "deepseek-v4-flash" => Some(Price::flat(0.154, 0.308, 0.003, 0.154)),
         "kimi-k3" | "kimi-k3-code" => Some(Price::flat(3.0, 15.0, 0.3, 3.0)),
         // Alibaba Model Studio, GA'd 2026-08-03 (USD/MTok): input $2,
         // output $6, implicit cache read $0.25, explicit cache write $2.50.
@@ -787,6 +809,29 @@ mod tests {
         super::apply_supplement(&mut store, &updated);
         let terra = store.supplement.get("gpt-5.6-terra").unwrap();
         assert_eq!((terra.input, terra.output), (1.75, 11.0));
+    }
+
+    #[test]
+    fn deepseek_v4_builtins_price_including_dated_snapshots() {
+        let store = super::Store::default();
+        // Real Hermes slugs: bare flash, dated pro snapshot, and the
+        // deepseek/-prefixed catalog spelling.
+        for slug in ["deepseek-v4-pro", "deepseek-v4-pro-0813", "deepseek/deepseek-v4-pro-0813"] {
+            let p = super::resolve(&store, slug, 0).unwrap_or_else(|| panic!("{slug} unpriced"));
+            assert!((p.input - 0.464).abs() < 1e-9, "{slug}");
+            assert!((p.output - 0.928).abs() < 1e-9, "{slug}");
+            // AihubMix really does list $0.004/M cache read for pro —
+            // ~1/116 of input is the vendor's number, not a typo.
+            assert!((p.cache_read - 0.004).abs() < 1e-9, "{slug}");
+        }
+        for slug in ["deepseek-v4-flash", "deepseek-v4-flash-0731"] {
+            let p = super::resolve(&store, slug, 0).unwrap_or_else(|| panic!("{slug} unpriced"));
+            assert!((p.input - 0.154).abs() < 1e-9, "{slug}");
+            assert!((p.cache_read - 0.003).abs() < 1e-9, "{slug}");
+        }
+        // The trimmer never eats non-date tails or other families.
+        assert!(super::resolve(&store, "deepseek-v4", 0).is_none());
+        assert!(super::resolve(&store, "deepseek-v3.2", 0).is_none());
     }
 
     #[test]
