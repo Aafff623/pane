@@ -15,7 +15,8 @@
   respected either way.
 - **Hide tray numbers while screen sharing** — optional Privacy setting
   (off by default). During Presentation Settings, exclusive fullscreen,
-  or remote control, starred tray percentages hide; the Pane icon stays.
+  or remote control, the main tray percentage and starred strip numbers
+  hide; the Pane icon stays.
 - **Reset all settings** — Settings → Advanced restores every preference
   to its default and re-detects installed tools. API keys and usage
   history stay.

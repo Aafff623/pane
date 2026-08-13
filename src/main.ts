@@ -2785,6 +2785,7 @@ async function resetAllSettings(): Promise<void> {
     hideUsageWhileSharing: false,
   });
   syncSettingsControls();
+  scheduleAutoRefresh();
   applyAppearance();
   applyGlass();
   applyReduceMotion();
