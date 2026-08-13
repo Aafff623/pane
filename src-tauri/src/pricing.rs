@@ -669,11 +669,6 @@ fn builtin_price(canonical: &str) -> Option<Price> {
         .strip_prefix("moonshot/")
         .or_else(|| canonical.strip_prefix("moonshot-ai/"))
         .or_else(|| canonical.strip_prefix("xai/"))
-        // Cursor's CSV brands third-party slugs ("cursor-grok-4.6-xhigh");
-        // the supplement's alias rules normally translate these, but a
-        // launch-day model needs the baked rates before the supplement
-        // learns the new slug.
-        .or_else(|| canonical.strip_prefix("cursor-"))
         .unwrap_or(canonical);
     match bare {
         "kimi-k3" | "kimi-k3-code" => Some(Price::flat(3.0, 15.0, 0.3, 3.0)),
@@ -689,7 +684,12 @@ fn builtin_price(canonical: &str) -> Option<Price> {
         // plain input. The announced 2x "-fast" variant needs no entry:
         // the -fast resolution path applies the default 2x multiplier to
         // this rate card. Public catalogs don't carry 4.6 yet.
-        "grok-4.6" | "grok-4-6" => Some(Price {
+        // The cursor- spellings are Cursor's CSV branding for the same
+        // vendor-billed model ("cursor-grok-4.6-xhigh" on launch day) —
+        // matched EXPLICITLY rather than via a generic cursor- prefix
+        // strip, so other cursor-branded slugs (which Cursor may bill at
+        // its own rates) can never silently price off this baked table.
+        "grok-4.6" | "grok-4-6" | "cursor-grok-4.6" | "cursor-grok-4-6" => Some(Price {
             input_200k: Some(4.0),
             output_200k: Some(12.0),
             cache_read_200k: Some(1.0),
