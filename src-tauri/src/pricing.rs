@@ -166,7 +166,11 @@ pub fn generation() -> u64 {
 /// fingerprinted below — an app update that reprices the same files would
 /// otherwise leave history at the old dollars until upstream happens to
 /// rewrite a catalog.
-const CORRECTIONS_REV: u32 = 5; // 5: deepseek-v4 pro/flash builtin prices
+const CORRECTIONS_REV: u32 = 6; // 6: ingest the live supplement's 100+ alias rules
+/// The live OpenUsage supplement is ~105 alias rules (Daybreak, Cursor
+/// Router prose names, GPT-5.3–5.6 effort slugs). 64 silently dropped
+/// everything after `gpt-5.2`. Per-rule caps below still bound memory.
+const MAX_ALIAS_RULES: usize = 256;
 
 /// Stable fingerprint of the effective pricing inputs: the on-disk catalog
 /// files plus this binary's corrections revision. The persistent spend
@@ -326,12 +330,12 @@ fn apply_supplement(store: &mut Store, doc: &Value) {
     }
 
     // The supplement is fetched from a third-party URL, so cap what it can
-    // feed us: at most 64 alias rules of at most 256 chars each, compiled
+    // feed us: at most MAX_ALIAS_RULES of at most 256 chars each, compiled
     // with a bounded size. (Rust's regex engine is linear-time by design,
     // so ReDoS-style backtracking blowups aren't possible; the caps bound
     // memory and compile cost.)
     if let Some(rules) = doc.get("alias_rules").and_then(Value::as_array) {
-        for rule in rules.iter().take(64) {
+        for rule in rules.iter().take(MAX_ALIAS_RULES) {
             let (Some(pattern), Some(canonical)) = (
                 rule.get("pattern").and_then(Value::as_str),
                 rule.get("canonical").and_then(Value::as_str),
@@ -933,6 +937,27 @@ mod tests {
         let mut p = p;
         p.cache_write_1h = Some(9.0);
         assert!((request_cost(&p, &u, true) - 9.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn supplement_keeps_more_than_64_alias_rules() {
+        // The live feed is past 100 rules; a 64-cap dropped Daybreak and
+        // every Cursor Router "Auto Balanced" prose name.
+        let mut rules = Vec::new();
+        for i in 0..70 {
+            rules.push(serde_json::json!({
+                "pattern": format!("^dummy-{i}$"),
+                "canonical": "auto"
+            }));
+        }
+        rules.push(serde_json::json!({
+            "pattern": "^(?:gpt-)?daybreak-blue-latest$",
+            "canonical": "gpt-5.6-sol"
+        }));
+        let mut store = super::Store::default();
+        super::apply_supplement(&mut store, &serde_json::json!({ "alias_rules": rules }));
+        assert_eq!(store.alias_rules.len(), 71);
+        assert!(store.alias_rules.iter().any(|(_, c)| c == "gpt-5.6-sol"));
     }
 
     /// Live probe: fetches the three catalogs and resolves a few real slugs.

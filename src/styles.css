@@ -1316,6 +1316,14 @@ footer {
   }
 }
 
+body.reduce-anim *,
+body.reduce-anim *::before,
+body.reduce-anim *::after {
+  animation-duration: 0.01ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0.01ms !important;
+}
+
 /* -------------------------------------------------------- customize drawer */
 
 #drawer {
@@ -2069,6 +2077,25 @@ body.no-glass .cust-dock {
 
 #changelog-btn:hover {
   background: var(--accent);
+}
+
+#reset-all-settings {
+  display: block;
+  width: 100%;
+  margin-top: 4px;
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  border-radius: 999px;
+  padding: 6px 14px;
+  cursor: pointer;
+  background: transparent;
+  border: 1px solid color-mix(in srgb, var(--destructive, #ef4444) 55%, var(--border));
+  color: var(--destructive, #ef4444);
+}
+
+#reset-all-settings:hover {
+  background: color-mix(in srgb, var(--destructive, #ef4444) 12%, transparent);
 }
 
 /* Light theme: white glass, same as the sidebar's light recipe. */

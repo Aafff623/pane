@@ -6,7 +6,8 @@ mod spend;
 mod telemetry;
 
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::{Mutex, OnceLock};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde_json::{json, Value};
@@ -100,6 +101,8 @@ fn config_with_defaults(mut cfg: Value) -> Value {
     // own default kept transmitting — a switch that displays off while
     // data flows is the one state a privacy control must never be in.
     obj.entry("telemetry").or_insert(json!(true));
+    obj.entry("reduceAnimations").or_insert(json!(false));
+    obj.entry("hideUsageWhileSharing").or_insert(json!(false));
     cfg
 }
 
@@ -139,6 +142,8 @@ const CONFIG_KEYS: &[&str] = &[
     "welcomeDismissed",
     "lastSeenVersion",
     "telemetry",
+    "reduceAnimations",
+    "hideUsageWhileSharing",
 ];
 
 #[tauri::command]
@@ -165,6 +170,7 @@ fn set_config(patch: Value) -> Result<Value, String> {
     std::fs::write(&tmp, serde_json::to_string_pretty(&cfg).unwrap_or_default())
         .map_err(|e| format!("write config: {e}"))?;
     std::fs::rename(&tmp, &path).map_err(|e| format!("replace config: {e}"))?;
+    HIDE_WANT.store(hide_usage_flag(&cfg), Ordering::Relaxed);
     Ok(cfg)
 }
 
@@ -317,10 +323,6 @@ fn pick_tray_metrics<'a>(
 }
 
 fn update_tray(app: &tauri::AppHandle, snapshots: &[providers::Snapshot], cfg: &Value) {
-    let Some(tray) = app.tray_by_id("tray") else {
-        return;
-    };
-
     let mut tooltip = String::from("Pane");
     for s in snapshots.iter().filter(|s| s.status == "ok").take(6) {
         if let Some(m) = s.metrics.iter().find(|m| m.kind == "progress") {
@@ -328,7 +330,6 @@ fn update_tray(app: &tauri::AppHandle, snapshots: &[providers::Snapshot], cfg: &
             tooltip.push_str(&format!("\n{} {}: {left:.0}% left", s.name, m.label));
         }
     }
-    let _ = tray.set_tooltip(Some(&tooltip));
 
     // When the Mac-style tray strip is active it carries the numbers, so the
     // main icon stays the app logo (the strip icons are per-provider).
@@ -336,19 +337,35 @@ fn update_tray(app: &tauri::AppHandle, snapshots: &[providers::Snapshot], cfg: &
         .get("trayProviders")
         .and_then(Value::as_array)
         .is_some_and(|a| !a.is_empty());
+    let lefts: Vec<u32> = if strip_active {
+        Vec::new()
+    } else {
+        pick_tray_metrics(snapshots, cfg.get("pinned").unwrap_or(&Value::Null))
+            .iter()
+            .map(|m| (100.0 - m.used_percent.unwrap_or(0.0)).clamp(0.0, 100.0).round() as u32)
+            .collect()
+    };
+    if let Ok(mut slot) = last_main_tray().lock() {
+        slot.lefts = lefts.clone();
+        slot.tooltip = tooltip.clone();
+    }
+
+    if HIDE_STRIP.load(Ordering::Relaxed) {
+        set_main_tray_logo(app);
+        return;
+    }
+
+    let Some(tray) = app.tray_by_id("tray") else {
+        return;
+    };
+    let _ = tray.set_tooltip(Some(&tooltip));
     if strip_active {
         if let Some(default) = app.default_window_icon() {
             let _ = tray.set_icon(Some(default.clone()));
         }
         return;
     }
-
-    let metrics = pick_tray_metrics(snapshots, cfg.get("pinned").unwrap_or(&Value::Null));
-    if !metrics.is_empty() {
-        let lefts: Vec<u32> = metrics
-            .iter()
-            .map(|m| (100.0 - m.used_percent.unwrap_or(0.0)).clamp(0.0, 100.0).round() as u32)
-            .collect();
+    if !lefts.is_empty() {
         let icon = tauri::image::Image::new_owned(draw_tray_numbers(&lefts), 32, 32);
         let _ = tray.set_icon(Some(icon));
     }
@@ -360,7 +377,131 @@ fn update_tray(app: &tauri::AppHandle, snapshots: &[providers::Snapshot], cfg: &
 // webview already has the icons) and sends the pixels here.
 // ---------------------------------------------------------------------------
 
-#[derive(serde::Deserialize)]
+/// Hide starred tray numbers while a screen share / presentation is on
+/// (Settings → Privacy, off by default — Mac parity with OpenUsage #1013).
+static HIDE_WANT: AtomicBool = AtomicBool::new(false);
+static HIDE_STRIP: AtomicBool = AtomicBool::new(false);
+
+struct LastMainTray {
+    lefts: Vec<u32>,
+    tooltip: String,
+}
+
+fn last_main_tray() -> &'static Mutex<LastMainTray> {
+    static S: OnceLock<Mutex<LastMainTray>> = OnceLock::new();
+    S.get_or_init(|| {
+        Mutex::new(LastMainTray {
+            lefts: Vec::new(),
+            tooltip: String::from("Pane"),
+        })
+    })
+}
+
+fn last_strip() -> &'static Mutex<Vec<StripEntry>> {
+    static S: OnceLock<Mutex<Vec<StripEntry>>> = OnceLock::new();
+    S.get_or_init(|| Mutex::new(Vec::new()))
+}
+
+fn hide_usage_flag(cfg: &Value) -> bool {
+    cfg.get("hideUsageWhileSharing").and_then(Value::as_bool) == Some(true)
+}
+
+fn set_main_tray_logo(app: &tauri::AppHandle) {
+    let Some(tray) = app.tray_by_id("tray") else {
+        return;
+    };
+    if let Some(default) = app.default_window_icon() {
+        let _ = tray.set_icon(Some(default.clone()));
+    }
+    let _ = tray.set_tooltip(Some("Pane"));
+}
+
+fn paint_cached_main_tray(app: &tauri::AppHandle) {
+    if HIDE_STRIP.load(Ordering::Relaxed) {
+        set_main_tray_logo(app);
+        return;
+    }
+    let cached = last_main_tray()
+        .lock()
+        .map(|g| (g.lefts.clone(), g.tooltip.clone()))
+        .unwrap_or_else(|_| (Vec::new(), String::from("Pane")));
+    let Some(tray) = app.tray_by_id("tray") else {
+        return;
+    };
+    let _ = tray.set_tooltip(Some(&cached.1));
+    if cached.0.is_empty() {
+        if let Some(default) = app.default_window_icon() {
+            let _ = tray.set_icon(Some(default.clone()));
+        }
+        return;
+    }
+    let icon = tauri::image::Image::new_owned(draw_tray_numbers(&cached.0), 32, 32);
+    let _ = tray.set_icon(Some(icon));
+}
+
+fn screen_is_being_shared() -> bool {
+    #[cfg(windows)]
+    {
+        use windows::Win32::UI::Shell::{
+            SHQueryUserNotificationState, QUNS_PRESENTATION_MODE, QUNS_RUNNING_D3D_FULL_SCREEN,
+        };
+        use windows::Win32::UI::WindowsAndMessaging::{GetSystemMetrics, SM_REMOTECONTROL};
+
+        // Someone is remotely controlling this session (Quick Assist, etc.).
+        if unsafe { GetSystemMetrics(SM_REMOTECONTROL) } != 0 {
+            return true;
+        }
+        if let Ok(state) = unsafe { SHQueryUserNotificationState() } {
+            // Presentation Settings / exclusive fullscreen — the closest
+            // public Windows equivalent of macOS's screen-watcher flag.
+            // QUNS_BUSY is skipped: a fullscreen YouTube tab would hide
+            // numbers all evening.
+            if state == QUNS_PRESENTATION_MODE || state == QUNS_RUNNING_D3D_FULL_SCREEN {
+                return true;
+            }
+        }
+        false
+    }
+    #[cfg(not(windows))]
+    {
+        false
+    }
+}
+
+fn spawn_share_watcher(app: tauri::AppHandle) {
+    HIDE_WANT.store(
+        hide_usage_flag(&config_with_defaults(load_config())),
+        Ordering::Relaxed,
+    );
+    tauri::async_runtime::spawn(async move {
+        let mut was_hidden = false;
+        loop {
+            tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+            let hide = HIDE_WANT.load(Ordering::Relaxed) && screen_is_being_shared();
+            HIDE_STRIP.store(hide, Ordering::Relaxed);
+            if hide == was_hidden {
+                continue;
+            }
+            was_hidden = hide;
+            let cached = last_strip()
+                .lock()
+                .map(|g| g.clone())
+                .unwrap_or_default();
+            if hide {
+                let _ = apply_tray_strip(app.clone(), cached, true);
+                let handle = app.clone();
+                let _ = app.run_on_main_thread(move || set_main_tray_logo(&handle));
+            } else {
+                let _ = apply_tray_strip(app.clone(), cached, false);
+                let handle = app.clone();
+                let _ = app.run_on_main_thread(move || paint_cached_main_tray(&handle));
+                let _ = app.emit("tray-strip-restore", ());
+            }
+        }
+    });
+}
+
+#[derive(Clone, serde::Deserialize)]
 struct StripEntry {
     id: String,
     logo: Vec<u8>, // 32x32 RGBA
@@ -396,6 +537,17 @@ const STRIP_PROVIDER_IDS: [&str; 19] = [
 
 #[tauri::command]
 fn update_tray_strip(app: tauri::AppHandle, entries: Vec<StripEntry>) -> Result<(), String> {
+    if let Ok(mut slot) = last_strip().lock() {
+        *slot = entries.clone();
+    }
+    apply_tray_strip(app, entries, HIDE_STRIP.load(Ordering::Relaxed))
+}
+
+fn apply_tray_strip(
+    app: tauri::AppHandle,
+    entries: Vec<StripEntry>,
+    hide_numbers: bool,
+) -> Result<(), String> {
     let handle = app.clone();
     app.run_on_main_thread(move || {
         // Remove strip icons for providers no longer selected.
@@ -417,14 +569,31 @@ fn update_tray_strip(app: tauri::AppHandle, entries: Vec<StripEntry>) -> Result<
             let logo_id = format!("strip-logo-{}", entry.id);
             let num_id = format!("strip-num-{}", entry.id);
             let logo_icon = tauri::image::Image::new_owned(entry.logo.clone(), 32, 32);
-            let num_icon =
-                tauri::image::Image::new_owned(draw_tray_numbers(&entry.values), 32, 32);
+            let num_icon = tauri::image::Image::new_owned(
+                if hide_numbers {
+                    vec![0u8; 32 * 32 * 4]
+                } else {
+                    draw_tray_numbers(&entry.values)
+                },
+                32,
+                32,
+            );
+            let tooltip = if hide_numbers {
+                entry
+                    .tooltip
+                    .split('\n')
+                    .next()
+                    .unwrap_or("Pane")
+                    .to_string()
+            } else {
+                entry.tooltip.clone()
+            };
 
             if let Some(tray) = handle.tray_by_id(&num_id) {
                 let _ = tray.set_icon(Some(num_icon));
-                let _ = tray.set_tooltip(Some(&entry.tooltip));
+                let _ = tray.set_tooltip(Some(&tooltip));
                 if let Some(logo_tray) = handle.tray_by_id(&logo_id) {
-                    let _ = logo_tray.set_tooltip(Some(&entry.tooltip));
+                    let _ = logo_tray.set_tooltip(Some(&tooltip));
                 }
                 continue;
             }
@@ -435,7 +604,7 @@ fn update_tray_strip(app: tauri::AppHandle, entries: Vec<StripEntry>) -> Result<
             for (tray_id, icon) in [(num_id, num_icon), (logo_id, logo_icon)] {
                 let _ = TrayIconBuilder::with_id(tray_id)
                     .icon(icon)
-                    .tooltip(&entry.tooltip)
+                    .tooltip(&tooltip)
                     .show_menu_on_left_click(false)
                     .on_tray_icon_event(|tray, event| {
                         if let TrayIconEvent::Click {
@@ -1237,6 +1406,7 @@ pub fn run() {
         ])
         .setup(|app| {
             spawn_update_checker(app.handle());
+            spawn_share_watcher(app.handle().clone());
             let quit = MenuItem::with_id(app, "quit", "Quit Pane", true, None::<&str>)?;
             let menu = Menu::with_items(app, &[&quit])?;
 
