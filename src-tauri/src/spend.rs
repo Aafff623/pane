@@ -97,7 +97,7 @@ fn cache() -> &'static Mutex<HashMap<PathBuf, FileEntry>> {
 // stale-price cache is worse than a slow first scan.
 // ---------------------------------------------------------------------------
 
-const PERSIST_VERSION: u32 = 1;
+const PERSIST_VERSION: u32 = 2;
 
 /// Set when any file was (re)parsed this run — nothing changed, nothing saved.
 static CACHE_DIRTY: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
@@ -1045,14 +1045,21 @@ fn codex_line(st: &mut CodexFileState, line: &str, data: &mut FileData) {
     // `-fast` slug resolves through its unscaled base rates and the Codex
     // multiplier applies exactly once. A fast-only third-party slug with no
     // base entry keeps its already-scaled rate, no second multiplier.
-    let (rate_model, alias_fast) = match model.strip_suffix("-fast") {
-        Some(base) if !base.is_empty() => (base.to_string(), true),
-        _ => (model.clone(), false),
+    // Auto-review keeps its own name in the breakdown; only the dollar math
+    // uses the dated GPT fallback (Mac parity with OpenUsage #1085).
+    let rate_source = if model.eq_ignore_ascii_case("codex-auto-review") {
+        auto_review_fallback(ts)
+    } else {
+        model.clone()
     };
-    let lower = model.to_lowercase();
+    let (rate_model, alias_fast) = match rate_source.strip_suffix("-fast") {
+        Some(base) if !base.is_empty() => (base.to_string(), true),
+        _ => (rate_source.clone(), false),
+    };
+    let lower = rate_source.to_lowercase();
     let base_price = pricing::lookup(&rate_model);
     let price = base_price
-        .or_else(|| if alias_fast { pricing::lookup(&model) } else { None })
+        .or_else(|| if alias_fast { pricing::lookup(&rate_source) } else { None })
         .or_else(|| {
             // The static gpt-5 table only for recognizably Codex-family
             // models; anything else is excluded.
@@ -1092,6 +1099,40 @@ fn codex_line(st: &mut CodexFileState, line: &str, data: &mut FileData) {
         cache_write_1h: 0.0,
     };
     add_event(data, ts, &model, pricing::request_cost_at(&p, &u, threshold) * mult, tokens);
+}
+
+/// `codex-auto-review` release timeline (newest first), from ccusage's
+/// embedded snapshot: a line dated on/after a release prices as that model.
+fn auto_review_fallback_date(date: &str) -> &'static str {
+    if date.len() != 10
+        || !date.as_bytes().iter().enumerate().all(|(i, b)| {
+            if i == 4 || i == 7 {
+                *b == b'-'
+            } else {
+                b.is_ascii_digit()
+            }
+        })
+    {
+        return "gpt-5";
+    }
+    const FALLBACKS: &[(&str, &str)] = &[
+        ("2026-04-23", "gpt-5.5"),
+        ("2026-03-05", "gpt-5.4"),
+        ("2026-02-05", "gpt-5.3-codex"),
+        ("2025-12-11", "gpt-5.2-codex"),
+        ("2025-11-13", "gpt-5.1-codex"),
+        ("2025-09-15", "gpt-5-codex"),
+        ("2025-08-07", "gpt-5"),
+    ];
+    FALLBACKS
+        .iter()
+        .find(|(released, _)| date >= *released)
+        .map(|(_, model)| *model)
+        .unwrap_or("gpt-5")
+}
+
+fn auto_review_fallback(ts: DateTime<Utc>) -> String {
+    auto_review_fallback_date(&ts.format("%Y-%m-%d").to_string()).to_string()
 }
 
 /// Codex rollout files log a token_count event per turn; the model rides in
@@ -1830,6 +1871,30 @@ mod tests {
             token_count_line("2026-07-10T10:00:01Z", Some((1_000.0, 100.0)), (1_000.0, 100.0)),
         ];
         assert_eq!(tokens_sum(&codex_run(&lines)), 1_100.0);
+    }
+
+    #[test]
+    fn auto_review_fallback_follows_ccusage_timeline() {
+        assert_eq!(auto_review_fallback_date("2026-08-13"), "gpt-5.5");
+        assert_eq!(auto_review_fallback_date("2026-04-23"), "gpt-5.5");
+        assert_eq!(auto_review_fallback_date("2026-04-22"), "gpt-5.4");
+        assert_eq!(auto_review_fallback_date("2025-08-01"), "gpt-5");
+        assert_eq!(auto_review_fallback_date("nope"), "gpt-5");
+    }
+
+    #[test]
+    fn codex_auto_review_keeps_its_name_in_the_breakdown() {
+        let lines = vec![
+            json!({"timestamp": "2026-08-13T10:00:00Z", "type": "turn_context",
+                   "payload": {"model": "codex-auto-review"}})
+            .to_string(),
+            token_count_line("2026-08-13T10:00:01Z", Some((1_000.0, 100.0)), (1_000.0, 100.0)),
+        ];
+        let data = codex_run(&lines);
+        let models: Vec<&str> = data.days.keys().map(|(_, m)| m.as_str()).collect();
+        assert_eq!(models, vec!["codex-auto-review"]);
+        assert!(cost_sum(&data) > 0.0);
+        assert!(data.unpriced.is_empty());
     }
 
     #[test]

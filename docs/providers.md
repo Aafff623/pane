@@ -65,9 +65,13 @@ Ground rules that apply to every provider:
   tier (recorded per session in the rollout itself, never inferred from
   `config.toml`) price at each model's Codex priority multiplier, and
   supported GPT-5.4/5.5/5.6 requests above 272k prompt tokens use
-  OpenAI's long-context rates for the whole request. Pi coding agent
-  sessions that drove this Codex account (provider `openai-codex`) fold
-  into this card's spend the same way they do for Claude.
+  OpenAI's long-context rates for the whole request. Auto-review usage
+  keeps the name `codex-auto-review` in the model breakdown; dollars use
+  the dated GPT fallback for that day (gpt-5.5 from April 2026 onward).
+  Daybreak Blue (`gpt-daybreak-blue-latest`) prices as GPT-5.6 Sol.
+  Pi coding agent sessions that drove this Codex account (provider
+  `openai-codex`) fold into this card's spend the same way they do for
+  Claude.
 
 ## Cursor
 
