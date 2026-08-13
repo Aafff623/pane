@@ -3,13 +3,17 @@
 ## Unreleased
 
 ### Fixed
-- **Cursor's Total usage bar matches its own caption** — Cursor's API
-  now reports `totalPercentUsed` against included *plus free bonus*
-  pools (a ~$345 denominator on live accounts), so the bar sat at 0%
-  while the caption said "$2.37 of $20.00 included". The bar now shows
-  the included-pool percent (spend ÷ plan limit, matching Cursor's own
-  dashboard message); the API's field remains the fallback when no
-  limit is reported.
+- **The Cursor card mirrors Cursor's Plan & Usage page** — Cursor's new
+  bucket-era plans show two bars ("Cursor Models" and "Other Models")
+  and no total bar, but Pane's Total usage meter trusted the API's
+  `totalPercentUsed`, which now measures against included *plus free
+  bonus* pools (~$345 on live accounts) — so the bar sat at 0% while
+  the caption said "$2.37 of $20.00 included". Bucket-era cards now
+  show the same two bars as the dashboard, with the exact percentages
+  Cursor shows, plus dollars spent this cycle as a text row (no percent
+  is honest there: Cursor itself reports three contradictory total
+  numbers). Pre-bucket accounts keep the classic included bar, computed
+  as spend ÷ plan limit so it always matches its own caption.
 
 ## 0.4.34 — 2026-08-13
 

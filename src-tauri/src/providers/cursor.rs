@@ -404,14 +404,38 @@ async fn fetch() -> Result<Snapshot, String> {
             )
             .with_reset(resets_at, Some(period_ms)),
         );
+    } else if plan_usage.get("autoPercentUsed").is_some()
+        || plan_usage.get("apiPercentUsed").is_some()
+    {
+        // Bucket-era plans: mirror Cursor's own Plan & Usage page, which
+        // shows exactly two bars — "Cursor Models" (the auto bucket:
+        // Composer, Cursor Grok, …) and "Other Models" — and NO total
+        // bar. There is no honest total percent on these plans: the $20
+        // "limit" is only the Other-Models/API floor, totalPercentUsed
+        // measures against included+bonus pools (~$345 live), and the
+        // API's own displayMessage does spend/$20 math — three Cursor
+        // numbers that all contradict the dashboard. Dollars spent stay
+        // visible as a text row; only the misleading percent is gone.
+        if let Some(auto) = num(plan_usage.get("autoPercentUsed")) {
+            metrics.push(
+                Metric::progress("Cursor Models", auto.clamp(0.0, 100.0), None)
+                    .with_reset(resets_at, Some(period_ms)),
+            );
+        }
+        if let Some(api) = num(plan_usage.get("apiPercentUsed")) {
+            metrics.push(
+                Metric::progress("Other Models", api.clamp(0.0, 100.0), None)
+                    .with_reset(resets_at, Some(period_ms)),
+            );
+        }
+        metrics.push(
+            Metric::text("Total usage", format!("{} this cycle", dollars(used_cents)))
+                .with_reset(resets_at, Some(period_ms)),
+        );
     } else {
-        // Cursor's totalPercentUsed measures spend against included PLUS
-        // free bonus pools (live probe 2026-08-13: $2.37 of the $20 plan
-        // reported 0.69% — a ~$345 denominator — while Cursor's own
-        // displayMessage said "12% of your included usage"). The bar must
-        // agree with its own "$X of $Y included" caption, so compute the
-        // included-pool percent ourselves; the API field is only the
-        // fallback when no limit is reported.
+        // Pre-bucket accounts: the classic included-pool bar. Computed
+        // spend/limit (matching the caption); the API's totalPercentUsed
+        // only when no limit is reported.
         let pct = match limit {
             Some(l) if l > 0.0 => used_cents / l * 100.0,
             _ => total_pct.unwrap_or(0.0),
@@ -419,19 +443,6 @@ async fn fetch() -> Result<Snapshot, String> {
         let detail = limit.map(|l| format!("{} of {} included", dollars(used_cents), dollars(l)));
         metrics.push(
             Metric::progress("Total usage", pct.clamp(0.0, 100.0), detail)
-                .with_reset(resets_at, Some(period_ms)),
-        );
-    }
-
-    if let Some(auto) = num(plan_usage.get("autoPercentUsed")) {
-        metrics.push(
-            Metric::progress("Auto usage", auto.clamp(0.0, 100.0), None)
-                .with_reset(resets_at, Some(period_ms)),
-        );
-    }
-    if let Some(api) = num(plan_usage.get("apiPercentUsed")) {
-        metrics.push(
-            Metric::progress("API usage", api.clamp(0.0, 100.0), None)
                 .with_reset(resets_at, Some(period_ms)),
         );
     }
