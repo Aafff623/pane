@@ -384,9 +384,38 @@ async fn fetch() -> Result<Snapshot, String> {
         || spend_type.as_deref() == Some("team")
         || pooled_limit > 0.0;
 
-    let used_cents = num(plan_usage.get("totalSpend"))
-        .or_else(|| limit.map(|l| l - num(plan_usage.get("remaining")).unwrap_or(0.0)))
-        .unwrap_or(0.0);
+    // Spend is only KNOWN when Cursor actually reports it: totalSpend,
+    // else limit-remaining when BOTH exist. Defaulting a missing
+    // `remaining` to 0 made used == limit — a 100% bar, "Limit reached",
+    // and run-out notifications for an account whose planUsage carries
+    // only the limit (Devin's find on the untestable pre-bucket path).
+    let used_cents_opt = num(plan_usage.get("totalSpend")).or_else(|| {
+        match (limit, num(plan_usage.get("remaining"))) {
+            (Some(l), Some(r)) => Some((l - r).max(0.0)),
+            _ => None,
+        }
+    });
+    let used_cents = used_cents_opt.unwrap_or(0.0);
+
+    // The per-bucket bars mirror Cursor's own Plan & Usage page — "Cursor
+    // Models" (the auto bucket: Composer, Cursor Grok, …) and "Other
+    // Models" — and render for EVERY account shape that reports them,
+    // team included (they always did; a restructure briefly scoped them
+    // to non-team accounts and Devin caught the regression).
+    let auto_pct = num(plan_usage.get("autoPercentUsed"));
+    let api_pct = num(plan_usage.get("apiPercentUsed"));
+    if let Some(auto) = auto_pct {
+        metrics.push(
+            Metric::progress("Cursor Models", auto.clamp(0.0, 100.0), None)
+                .with_reset(resets_at, Some(period_ms)),
+        );
+    }
+    if let Some(api) = api_pct {
+        metrics.push(
+            Metric::progress("Other Models", api.clamp(0.0, 100.0), None)
+                .with_reset(resets_at, Some(period_ms)),
+        );
+    }
 
     if is_team {
         // Team-shaped accounts sometimes omit the plan limit (or report
@@ -404,27 +433,37 @@ async fn fetch() -> Result<Snapshot, String> {
             )
             .with_reset(resets_at, Some(period_ms)),
         );
+    } else if auto_pct.is_some() || api_pct.is_some() {
+        // Bucket-era personal plans: Cursor's page shows the two bars and
+        // NO total bar. There is no honest total percent here: the $20
+        // "limit" is only the Other-Models/API floor, totalPercentUsed
+        // measures against included+bonus pools (~$345 live), and the
+        // API's own displayMessage does spend/$20 math — three Cursor
+        // numbers that all contradict the dashboard. Dollars spent stay
+        // visible as a text row; only the misleading percent is gone.
+        // The cycle reset stays visible on the bars above; the text row's
+        // with_reset rides along for local-API consumers only.
+        if let Some(u) = used_cents_opt {
+            metrics.push(
+                Metric::text("Total usage", format!("{} this cycle", dollars(u)))
+                    .with_reset(resets_at, Some(period_ms)),
+            );
+        }
     } else {
-        let pct = total_pct.unwrap_or_else(|| match limit {
-            Some(l) if l > 0.0 => used_cents / l * 100.0,
-            _ => 0.0,
-        });
-        let detail = limit.map(|l| format!("{} of {} included", dollars(used_cents), dollars(l)));
+        // Pre-bucket accounts: the classic included-pool bar — computed
+        // spend/limit so the bar always matches its own caption, but ONLY
+        // when spend is actually reported; otherwise fall back to the
+        // API's own percent rather than fabricating one.
+        let pct = match (used_cents_opt, limit) {
+            (Some(u), Some(l)) if l > 0.0 => u / l * 100.0,
+            _ => total_pct.unwrap_or(0.0),
+        };
+        let detail = match (used_cents_opt, limit) {
+            (Some(u), Some(l)) => Some(format!("{} of {} included", dollars(u), dollars(l))),
+            _ => None,
+        };
         metrics.push(
             Metric::progress("Total usage", pct.clamp(0.0, 100.0), detail)
-                .with_reset(resets_at, Some(period_ms)),
-        );
-    }
-
-    if let Some(auto) = num(plan_usage.get("autoPercentUsed")) {
-        metrics.push(
-            Metric::progress("Auto usage", auto.clamp(0.0, 100.0), None)
-                .with_reset(resets_at, Some(period_ms)),
-        );
-    }
-    if let Some(api) = num(plan_usage.get("apiPercentUsed")) {
-        metrics.push(
-            Metric::progress("API usage", api.clamp(0.0, 100.0), None)
                 .with_reset(resets_at, Some(period_ms)),
         );
     }

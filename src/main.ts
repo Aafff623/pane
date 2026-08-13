@@ -457,6 +457,55 @@ function ensureLayout(): void {
     changed = true;
   }
 
+  // One-time label migration (Cursor bucket-era rename, 0.4.35): "Auto
+  // usage" → "Cursor Models", "API usage" → "Other Models". Stars, pins,
+  // hidden/on-demand flags and row order carry over — without this, a
+  // starred/pinned old row silently loses its setting and the stale label
+  // rots in metricOrder forever (no rename migration existed before).
+  const CURSOR_RENAMES: Record<string, string> = {
+    "Auto usage": "Cursor Models",
+    "API usage": "Other Models",
+  };
+  for (const [pid, L] of Object.entries(layout.providers)) {
+    if (providerFamily(pid) !== "cursor") continue;
+    for (const list of [L.metricOrder, L.hidden, L.starred, L.onDemand]) {
+      for (const [oldLabel, newLabel] of Object.entries(CURSOR_RENAMES)) {
+        const at = list.indexOf(oldLabel);
+        if (at < 0) continue;
+        if (list.includes(newLabel)) list.splice(at, 1);
+        else list[at] = newLabel;
+        changed = true;
+      }
+    }
+  }
+  // On bucket-era accounts "Total usage" became a text row — the tray
+  // strip and pinned tray number only accept progress metrics, so a
+  // star/pin on it would silently vanish. Repoint both to the nearest
+  // equivalent meter, "Cursor Models" (only when the live snapshot
+  // confirms the row is text; pre-bucket accounts keep their bar).
+  const cursorSnap = lastSnapshots.find((s) => providerFamily(s.id) === "cursor");
+  const totalIsText =
+    cursorSnap?.metrics.find((m) => m.label === "Total usage")?.kind === "text";
+  if (totalIsText) {
+    for (const [pid, L] of Object.entries(layout.providers)) {
+      if (providerFamily(pid) !== "cursor") continue;
+      const at = L.starred.indexOf("Total usage");
+      if (at >= 0) {
+        if (L.starred.includes("Cursor Models")) L.starred.splice(at, 1);
+        else L.starred[at] = "Cursor Models";
+        changed = true;
+      }
+    }
+  }
+  if (config.pinned && providerFamily(config.pinned.provider) === "cursor") {
+    const renamed = CURSOR_RENAMES[config.pinned.label];
+    const to = renamed ?? (totalIsText && config.pinned.label === "Total usage" ? "Cursor Models" : null);
+    if (to) {
+      config.pinned = { ...config.pinned, label: to };
+      void patchConfig({ pinned: config.pinned }).catch(() => {});
+    }
+  }
+
   for (const s of lastSnapshots) {
     if (!layout.providerOrder.includes(s.id)) {
       layout.providerOrder.push(s.id);

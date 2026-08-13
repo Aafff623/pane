@@ -21,6 +21,25 @@
   to its default and re-detects installed tools. API keys and usage
   history stay.
 
+### Fixed
+- **The Cursor card mirrors Cursor's Plan & Usage page** — Cursor's new
+  bucket-era plans show two bars ("Cursor Models" and "Other Models")
+  and no total bar, but Pane's Total usage meter trusted the API's
+  `totalPercentUsed`, which now measures against included *plus free
+  bonus* pools (~$345 on live accounts) — so the bar sat at 0% while
+  the caption said "$2.37 of $20.00 included". Bucket-era cards now
+  show the same two bars as the dashboard, with the exact percentages
+  Cursor shows, plus dollars spent this cycle as a text row (no percent
+  is honest there: Cursor itself reports three contradictory total
+  numbers). Pre-bucket accounts keep the classic included bar, computed
+  as spend ÷ plan limit when Cursor reports spend (the API's own percent
+  otherwise — never a fabricated one). Team accounts keep their bucket
+  bars alongside the dollar Total meter. Saved layouts migrate
+  automatically: stars, pins, hidden flags, and order carry over from
+  "Auto usage" / "API usage" to the new labels, and a star or tray pin
+  on a Total row that became text repoints to Cursor Models instead of
+  silently vanishing from the tray.
+
 ## 0.4.34 — 2026-08-13
 
 ### Added
