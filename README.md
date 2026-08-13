@@ -153,7 +153,7 @@ success/failure counts — never amounts or error text) — see
 | Claude (Claude Code) | `%USERPROFILE%\.claude\.credentials.json` + Anthropic usage API; multi-account — every discovered config-dir login gets its own card |
 | Codex (Codex CLI) | `%USERPROFILE%\.codex\auth.json` + ChatGPT usage API, incl. reset-credit redemption; multi-account like Claude |
 | Cursor | Cursor's local state database + cursor.com API |
-| OpenCode (Go plan) | Local `opencode.db` spend vs documented plan limits* |
+| OpenCode (Go plan) | Official account-wide usage API (Go key from `auth.json`); local `opencode.db` for spend* |
 | GitHub Copilot | Copilot editor login or GitHub CLI (Credential Manager) + GitHub API |
 | Grok (Grok CLI) | `%USERPROFILE%\.grok\auth.json` + Grok billing/subscription APIs |
 | Devin (Devin CLI) | `%APPDATA%\devin\credentials.toml` + GetUserStatus RPC; local CLI session store for spend |
@@ -170,10 +170,13 @@ success/failure counts — never amounts or error text) — see
 | AihubMix | API key (Settings or auto-detected from OpenCode) → usage vs spending limit |
 | Qwen Code | Coding Plan key (Settings or env) → 5h/weekly/monthly request quotas + local spend |
 
-*OpenCode has no public usage API yet
-([anomalyco/opencode#10448](https://github.com/anomalyco/opencode/issues/10448));
-usage is computed locally from this machine's OpenCode history, the same
-data `opencode stats` uses.
+*OpenCode's meters use the official usage API that shipped in
+[anomalyco/opencode#16513](https://github.com/anomalyco/opencode/pull/16513)
+— the same account-wide numbers as the Zen dashboard, so usage from your
+other devices (or other people on a shared subscription) finally counts.
+If the API is unreachable, Pane falls back to computing this machine's
+usage locally from `opencode.db`, the same data `opencode stats` uses;
+dollar spend figures are always local.
 
 More on the way: IDE-database providers (Windsurf, JetBrains AI…) and
 whatever the community asks for loudest.

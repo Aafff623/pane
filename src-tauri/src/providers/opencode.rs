@@ -6,10 +6,16 @@ use std::sync::atomic::{AtomicU64, Ordering};
 const ID: &str = "opencode";
 const NAME: &str = "OpenCode";
 
-// OpenCode Go plan limits from https://opencode.ai/docs/go/ (dollars).
-// There is no public usage API yet (anomalyco/opencode#10448), so we compute
-// spend locally from opencode's own message database — the same data
-// `opencode stats` uses. Swap to the official API once it ships.
+// Primary source: the official account-wide usage API that shipped in
+// anomalyco/opencode#16513 (2026-08-11) — GET /zen/go/v1/usage with the Go
+// key returns per-window percentages and resets counted on OpenCode's
+// servers, so other devices and shared-subscription participants finally
+// show up. The local computation below survives as the FALLBACK when the
+// API is unreachable, and its plan limits still label the local path.
+const USAGE_URL: &str = "https://opencode.ai/zen/go/v1/usage";
+
+// OpenCode Go plan limits from https://opencode.ai/docs/go/ (dollars) —
+// fallback path only.
 const SESSION_LIMIT: f64 = 12.0; // rolling 5 hours
 const WEEKLY_LIMIT: f64 = 30.0; // UTC ISO week (Monday start)
 const MONTHLY_LIMIT: f64 = 60.0; // month anchored to earliest-ever Go usage
@@ -66,13 +72,13 @@ fn with_db_copy<T>(f: impl FnOnce(&Path) -> Result<T, String>) -> Result<T, Stri
 }
 
 pub async fn snapshot() -> Snapshot {
-    match fetch() {
+    match fetch().await {
         Ok(s) => s,
         Err(e) => Snapshot::error(ID, NAME, e),
     }
 }
 
-fn fetch() -> Result<Snapshot, String> {
+async fn fetch() -> Result<Snapshot, String> {
     let auth_path = data_dir().join("auth.json");
     if !auth_path.exists() {
         return Ok(Snapshot::no_credentials(
@@ -81,14 +87,73 @@ fn fetch() -> Result<Snapshot, String> {
             "OpenCode sign-in not found. Run `opencode` and log in.",
         ));
     }
-    if auth_entry_key("opencode-go").is_none() {
+    let Some(key) = auth_entry_key("opencode-go") else {
         return Ok(Snapshot::no_credentials(
             ID,
             NAME,
             "No OpenCode Go subscription found in auth.json.",
         ));
-    }
+    };
 
+    // Account-wide truth first; the local windows only when it fails
+    // (offline, revoked key, or a gateway hiccup).
+    match fetch_official(&key).await {
+        Ok(metrics) => return Ok(Snapshot::ok(ID, NAME, Some("Go".into()), metrics)),
+        Err(e) => {
+            eprintln!("[pane] opencode: usage API failed ({e}) — using local windows");
+        }
+    }
+    local_windows_snapshot()
+}
+
+/// GET /zen/go/v1/usage with the Go key. The response is served by
+/// OpenCode's console — the same numbers the Zen dashboard shows.
+async fn fetch_official(key: &str) -> Result<Vec<Metric>, String> {
+    let resp = super::http()
+        .get(USAGE_URL)
+        .bearer_auth(key)
+        .header("Accept", "application/json")
+        .send()
+        .await
+        .map_err(|e| format!("usage request: {e}"))?;
+    if !resp.status().is_success() {
+        return Err(format!("usage endpoint: HTTP {}", resp.status()));
+    }
+    let doc: Value = resp.json().await.map_err(|e| format!("usage parse: {e}"))?;
+    parse_official(&doc).ok_or_else(|| "no recognizable usage windows in response".into())
+}
+
+/// Live wire shape (verified against the deployed endpoint, which differs
+/// from the merged PR's draft): { "usage": { "rolling"|"weekly"|"monthly":
+/// { "status": "ok"|"rate-limited", "percent": int, "resetsAt": RFC3339 } } }.
+/// Percentages and resets are the server's own; a window the response
+/// doesn't carry is simply skipped rather than failing the card.
+fn parse_official(doc: &Value) -> Option<Vec<Metric>> {
+    let usage = doc.get("usage")?;
+    let mut metrics = Vec::new();
+    for (field, label, period_ms) in [
+        ("rolling", "Session", SESSION_MS as i64),
+        ("weekly", "Weekly", WEEK_MS as i64),
+        ("monthly", "Monthly", 30 * 86_400_000_i64),
+    ] {
+        let Some(w) = usage.get(field) else { continue };
+        let Some(percent) = w.get("percent").and_then(Value::as_f64) else { continue };
+        // "rate-limited" arrives with percent already at 100; clamp guards
+        // both directions anyway.
+        let used = percent.clamp(0.0, 100.0);
+        let resets_at = w
+            .get("resetsAt")
+            .and_then(Value::as_str)
+            .and_then(|s| chrono::DateTime::parse_from_rfc3339(s).ok())
+            .map(|d| d.timestamp_millis());
+        metrics.push(Metric::progress(label, used, None).with_reset(resets_at, Some(period_ms)));
+    }
+    (!metrics.is_empty()).then_some(metrics)
+}
+
+/// Fallback: the pre-API local computation from opencode.db — this PC's
+/// rows only, so shared subscriptions under-count here.
+fn local_windows_snapshot() -> Result<Snapshot, String> {
     let w = with_db_copy(|db| {
         let rows: Vec<(f64, f64)> = read_messages(db)?
             .into_iter()
@@ -323,6 +388,33 @@ mod tests {
 
     fn ms(iso: &str) -> f64 {
         chrono::DateTime::parse_from_rfc3339(iso).unwrap().timestamp_millis() as f64
+    }
+
+    #[test]
+    fn official_usage_parses_the_live_wire_shape() {
+        // Captured verbatim from the deployed endpoint (2026-08-13) — note
+        // it does NOT match the merged PR's draft shape.
+        let doc = serde_json::json!({ "usage": {
+            "rolling": { "status": "ok", "percent": 0, "resetsAt": "2026-08-13T15:33:33.302Z" },
+            "weekly":  { "status": "ok", "percent": 6, "resetsAt": "2026-08-17T00:00:00.302Z" },
+            "monthly": { "status": "ok", "percent": 3, "resetsAt": "2026-09-05T08:48:51.302Z" },
+        }});
+        let m = parse_official(&doc).expect("parses");
+        assert_eq!(m.len(), 3);
+        assert_eq!((m[0].label.as_str(), m[0].used_percent), ("Session", Some(0.0)));
+        assert_eq!((m[1].label.as_str(), m[1].used_percent), ("Weekly", Some(6.0)));
+        assert_eq!(m[1].resets_at, Some(ms("2026-08-17T00:00:00.302Z") as i64));
+        assert_eq!((m[2].label.as_str(), m[2].used_percent), ("Monthly", Some(3.0)));
+
+        // Rate-limited windows render as full; a missing window is skipped
+        // without sinking the card; junk yields None (→ local fallback).
+        let limited = serde_json::json!({ "usage": {
+            "rolling": { "status": "rate-limited", "percent": 100, "resetsAt": "2026-08-13T15:33:33Z" },
+        }});
+        let m = parse_official(&limited).expect("parses");
+        assert_eq!(m.len(), 1);
+        assert_eq!(m[0].used_percent, Some(100.0));
+        assert!(parse_official(&serde_json::json!({"error": "nope"})).is_none());
     }
 
     #[test]
