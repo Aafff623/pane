@@ -99,11 +99,26 @@ async fn fetch() -> Result<Snapshot, String> {
     // (offline, revoked key, or a gateway hiccup). The fallback names its
     // narrower scope in the plan label — the card must never silently
     // flip between account-wide and this-PC-only numbers looking the same.
+    static FALLBACK_ACTIVE: std::sync::atomic::AtomicBool =
+        std::sync::atomic::AtomicBool::new(false);
     match fetch_official(&key).await {
-        Ok(metrics) => Ok(Snapshot::ok(ID, NAME, Some("Go".into()), metrics)),
+        Ok(metrics) => {
+            FALLBACK_ACTIVE.store(false, std::sync::atomic::Ordering::Relaxed);
+            Ok(Snapshot::ok(ID, NAME, Some("Go".into()), metrics))
+        }
         Err(e) => {
-            eprintln!("[pane] opencode: usage API failed ({e}) — using local windows");
-            let mut snap = local_windows_snapshot()?;
+            // Log the TRANSITION into fallback, not every refresh — an
+            // offline machine would otherwise print this once a minute
+            // for the app's lifetime.
+            if !FALLBACK_ACTIVE.swap(true, std::sync::atomic::Ordering::Relaxed) {
+                eprintln!("[pane] opencode: usage API failed ({e}) — using local windows");
+            }
+            // If the fallback ALSO fails (fresh device with no local
+            // history), the card must carry both causes — surfacing only
+            // "opencode.db not found" would send someone troubleshooting
+            // an offline/revoked-key card after the wrong problem.
+            let mut snap = local_windows_snapshot()
+                .map_err(|db| format!("usage API failed ({e}); local fallback: {db}"))?;
             snap.plan = Some("Go — this PC only".into());
             Ok(snap)
         }
@@ -146,9 +161,16 @@ fn parse_official(doc: &Value) -> Option<Vec<Metric>> {
     ] {
         let Some(w) = usage.get(field) else { continue };
         let Some(percent) = w.get("percent").and_then(Value::as_f64) else { continue };
-        // "rate-limited" arrives with percent already at 100; clamp guards
-        // both directions anyway.
-        let used = percent.clamp(0.0, 100.0);
+        // Guard the empirically-captured contract: the server sends
+        // integer 0-100 USED percentages (it floors server-side; the
+        // shape already changed once between the upstream PR and deploy).
+        // A fractional 0-1 encoding or an out-of-range value means the
+        // shape changed again — fail the whole parse (→ labeled local
+        // fallback) instead of rendering silently wrong meters.
+        if !(0.0..=100.0).contains(&percent) || (percent > 0.0 && percent < 1.0) {
+            return None;
+        }
+        let used = percent;
         let resets_at = w
             .get("resetsAt")
             .and_then(Value::as_str)
@@ -456,6 +478,17 @@ mod tests {
         assert_eq!(m.len(), 1);
         assert_eq!(m[0].used_percent, Some(100.0));
         assert!(parse_official(&serde_json::json!({"error": "nope"})).is_none());
+
+        // Contract guards: a fractional (0-1) or out-of-range percent
+        // means the wire shape changed — the parse must fail loudly (→
+        // labeled local fallback), never render wrong meters. Zero and
+        // exact integers stay valid.
+        for bad in [0.06, 150.0, -3.0] {
+            let doc = serde_json::json!({ "usage": {
+                "weekly": { "status": "ok", "percent": bad, "resetsAt": "2026-08-17T00:00:00Z" },
+            }});
+            assert!(parse_official(&doc).is_none(), "percent {bad} must reject");
+        }
     }
 
     #[test]
