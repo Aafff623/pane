@@ -85,8 +85,10 @@ wave ends with a shipped, installed build.
 - [x] GitHub release, auto-updater, winget submission (in review).
 
 All waves shipped 2026-07-07 as v0.2.0; public launch followed as v0.4.0.
-Remaining backlog: OpenCode official balance API when it ships,
-long-context pricing tiers.
+Remaining backlog: OpenCode official *balance* API when it ships
+(anomalyco/opencode#10448 — the account-wide *usage* API landed in Pane
+0.4.34; balance would add dollar amounts to the account-wide view).
+Long-context pricing tiers shipped in 0.4.9.
 
 ## Deliberately not ported
 - PostHog SDK telemetry — reconsidered 2026-07-27: Pane ships its own
