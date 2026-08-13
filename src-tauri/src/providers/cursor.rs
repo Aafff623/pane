@@ -405,10 +405,17 @@ async fn fetch() -> Result<Snapshot, String> {
             .with_reset(resets_at, Some(period_ms)),
         );
     } else {
-        let pct = total_pct.unwrap_or_else(|| match limit {
+        // Cursor's totalPercentUsed measures spend against included PLUS
+        // free bonus pools (live probe 2026-08-13: $2.37 of the $20 plan
+        // reported 0.69% — a ~$345 denominator — while Cursor's own
+        // displayMessage said "12% of your included usage"). The bar must
+        // agree with its own "$X of $Y included" caption, so compute the
+        // included-pool percent ourselves; the API field is only the
+        // fallback when no limit is reported.
+        let pct = match limit {
             Some(l) if l > 0.0 => used_cents / l * 100.0,
-            _ => 0.0,
-        });
+            _ => total_pct.unwrap_or(0.0),
+        };
         let detail = limit.map(|l| format!("{} of {} included", dollars(used_cents), dollars(l)));
         metrics.push(
             Metric::progress("Total usage", pct.clamp(0.0, 100.0), detail)

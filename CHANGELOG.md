@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+- **Cursor's Total usage bar matches its own caption** — Cursor's API
+  now reports `totalPercentUsed` against included *plus free bonus*
+  pools (a ~$345 denominator on live accounts), so the bar sat at 0%
+  while the caption said "$2.37 of $20.00 included". The bar now shows
+  the included-pool percent (spend ÷ plan limit, matching Cursor's own
+  dashboard message); the API's field remains the fallback when no
+  limit is reported.
+
 ## 0.4.34 — 2026-08-13
 
 ### Added
