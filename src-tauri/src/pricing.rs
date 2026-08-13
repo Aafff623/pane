@@ -624,6 +624,22 @@ fn resolve(s: &Store, model: &str, depth: u8) -> Option<Price> {
     if let Some(p) = builtin_price(&canonical) {
         return Some(p);
     }
+    // DeepSeek ships dated snapshots ("deepseek-v4-pro-0813"): when no
+    // source knows the dated form, retry the base slug through the WHOLE
+    // chain — a catalog that has learned the base model must outrank the
+    // baked table for dated spellings too, or the table would never
+    // self-retire for them. Scoped to deepseek slugs with an all-digit
+    // ≥4-char tail so version-bearing names never lose a real tail.
+    if let Some((head, tail)) = canonical.rsplit_once('-') {
+        if canonical.starts_with("deepseek")
+            && tail.len() >= 4
+            && tail.chars().all(|c| c.is_ascii_digit())
+        {
+            if let Some(p) = resolve(s, head, depth + 1) {
+                return Some(p);
+            }
+        }
+    }
     // Zero-rate entries, reconsidered: nothing anywhere carries real rates
     // for this slug, so a 0/0 catalog row means the model is genuinely
     // free — take it, keeping free models at $0.00 without an unpriced ⚠.
@@ -671,16 +687,6 @@ fn builtin_price(canonical: &str) -> Option<Price> {
         .or_else(|| canonical.strip_prefix("xai/"))
         .or_else(|| canonical.strip_prefix("deepseek/"))
         .unwrap_or(canonical);
-    // DeepSeek ships dated snapshots ("deepseek-v4-pro-0813"); price them as
-    // the base model so a new date doesn't silently go unpriced. Scoped to
-    // deepseek- slugs whose trailing dash-segment is all digits (≥4), so
-    // "deepseek-v4" or version-bearing names elsewhere never lose a tail.
-    let bare = match bare.strip_suffix(|c: char| c.is_ascii_digit()) {
-        Some(_) if bare.starts_with("deepseek-") => bare.rsplit_once('-').map_or(bare, |(h, t)| {
-            if t.chars().all(|c| c.is_ascii_digit()) && t.len() >= 4 { h } else { bare }
-        }),
-        _ => bare,
-    };
     match bare {
         // AihubMix DeepSeek V4 family — the gateway's OWN rate cards
         // (aihubmix.com/model/deepseek-v4-pro-0813 and /deepseek-v4-flash
@@ -691,6 +697,8 @@ fn builtin_price(canonical: &str) -> Option<Price> {
         // published, so writes bill at the input rate. Hermes logs these
         // bare ("deepseek-v4-flash", "deepseek-v4-pro-0813" — verified
         // against a real state.db); public catalogs don't carry them yet.
+        // Dated snapshots reach these arms via resolve()'s date-trim
+        // retry, so a catalog that learns the base slug outranks them.
         "deepseek-v4-pro" => Some(Price::flat(0.464, 0.928, 0.004, 0.464)),
         "deepseek-v4-flash" => Some(Price::flat(0.154, 0.308, 0.003, 0.154)),
         "kimi-k3" | "kimi-k3-code" => Some(Price::flat(3.0, 15.0, 0.3, 3.0)),
@@ -832,6 +840,16 @@ mod tests {
         // The trimmer never eats non-date tails or other families.
         assert!(super::resolve(&store, "deepseek-v4", 0).is_none());
         assert!(super::resolve(&store, "deepseek-v3.2", 0).is_none());
+
+        // Self-retirement holds for dated spellings too: once any catalog
+        // learns the BASE slug, dated snapshots follow the catalog, not
+        // the baked table (Devin's find — the trim must run in resolve,
+        // where the retry passes through every source, not in builtin).
+        let mut store = super::Store::default();
+        store.litellm.insert("deepseek-v4-pro".into(), super::Price::flat(0.5, 1.0, 0.05, 0.5));
+        let p = super::resolve(&store, "deepseek-v4-pro-0813", 0).unwrap();
+        assert!((p.input - 0.5).abs() < 1e-9);
+        assert!((p.cache_read - 0.05).abs() < 1e-9);
     }
 
     #[test]
