@@ -6,10 +6,16 @@ use std::sync::atomic::{AtomicU64, Ordering};
 const ID: &str = "opencode";
 const NAME: &str = "OpenCode";
 
-// OpenCode Go plan limits from https://opencode.ai/docs/go/ (dollars).
-// There is no public usage API yet (anomalyco/opencode#10448), so we compute
-// spend locally from opencode's own message database — the same data
-// `opencode stats` uses. Swap to the official API once it ships.
+// Primary source: the official account-wide usage API that shipped in
+// anomalyco/opencode#16513 (2026-08-11) — GET /zen/go/v1/usage with the Go
+// key returns per-window percentages and resets counted on OpenCode's
+// servers, so other devices and shared-subscription participants finally
+// show up. The local computation below survives as the FALLBACK when the
+// API is unreachable, and its plan limits still label the local path.
+const USAGE_URL: &str = "https://opencode.ai/zen/go/v1/usage";
+
+// OpenCode Go plan limits from https://opencode.ai/docs/go/ (dollars) —
+// fallback path only.
 const SESSION_LIMIT: f64 = 12.0; // rolling 5 hours
 const WEEKLY_LIMIT: f64 = 30.0; // UTC ISO week (Monday start)
 const MONTHLY_LIMIT: f64 = 60.0; // month anchored to earliest-ever Go usage
@@ -66,13 +72,13 @@ fn with_db_copy<T>(f: impl FnOnce(&Path) -> Result<T, String>) -> Result<T, Stri
 }
 
 pub async fn snapshot() -> Snapshot {
-    match fetch() {
+    match fetch().await {
         Ok(s) => s,
         Err(e) => Snapshot::error(ID, NAME, e),
     }
 }
 
-fn fetch() -> Result<Snapshot, String> {
+async fn fetch() -> Result<Snapshot, String> {
     let auth_path = data_dir().join("auth.json");
     if !auth_path.exists() {
         return Ok(Snapshot::no_credentials(
@@ -81,14 +87,136 @@ fn fetch() -> Result<Snapshot, String> {
             "OpenCode sign-in not found. Run `opencode` and log in.",
         ));
     }
-    if auth_entry_key("opencode-go").is_none() {
+    let Some(key) = auth_entry_key("opencode-go") else {
         return Ok(Snapshot::no_credentials(
             ID,
             NAME,
             "No OpenCode Go subscription found in auth.json.",
         ));
-    }
+    };
 
+    // Account-wide truth first; the local windows only when it fails
+    // (offline, revoked key, or a gateway hiccup). The fallback names its
+    // narrower scope in the plan label — the card must never silently
+    // flip between account-wide and this-PC-only numbers looking the same.
+    static FALLBACK_ACTIVE: std::sync::atomic::AtomicBool =
+        std::sync::atomic::AtomicBool::new(false);
+    match fetch_official(&key).await {
+        Ok(metrics) => {
+            FALLBACK_ACTIVE.store(false, std::sync::atomic::Ordering::Relaxed);
+            Ok(Snapshot::ok(ID, NAME, Some("Go".into()), metrics))
+        }
+        Err(e) => {
+            // Log the TRANSITION into fallback, not every refresh — an
+            // offline machine would otherwise print this once a minute
+            // for the app's lifetime.
+            if !FALLBACK_ACTIVE.swap(true, std::sync::atomic::Ordering::Relaxed) {
+                eprintln!("[pane] opencode: usage API failed ({e}) — using local windows");
+            }
+            // If the fallback ALSO fails (fresh device with no local
+            // history), the card must carry both causes — surfacing only
+            // "opencode.db not found" would send someone troubleshooting
+            // an offline/revoked-key card after the wrong problem.
+            let mut snap = local_windows_snapshot()
+                .map_err(|db| format!("usage API failed ({e}); local fallback: {db}"))?;
+            snap.plan = Some("Go — this PC only".into());
+            Ok(snap)
+        }
+    }
+}
+
+/// GET /zen/go/v1/usage with the Go key. The response is served by
+/// OpenCode's console — the same numbers the Zen dashboard shows.
+async fn fetch_official(key: &str) -> Result<Vec<Metric>, String> {
+    let resp = super::http()
+        .get(USAGE_URL)
+        .bearer_auth(key)
+        .header("Accept", "application/json")
+        .send()
+        .await
+        .map_err(|e| format!("usage request: {e}"))?;
+    if !resp.status().is_success() {
+        return Err(format!("usage endpoint: HTTP {}", resp.status()));
+    }
+    let doc: Value = resp.json().await.map_err(|e| format!("usage parse: {e}"))?;
+    parse_official(&doc).ok_or_else(|| "no recognizable usage windows in response".into())
+}
+
+/// Live wire shape (verified against the deployed endpoint, which differs
+/// from the merged PR's draft): { "usage": { "rolling"|"weekly"|"monthly":
+/// { "status": "ok"|"rate-limited", "percent": int, "resetsAt": RFC3339 } } }.
+/// Percentages and resets are the server's own; a window the response
+/// doesn't carry is simply skipped rather than failing the card.
+fn parse_official(doc: &Value) -> Option<Vec<Metric>> {
+    let usage = doc.get("usage")?;
+    let mut metrics = Vec::new();
+    for (field, label, period_ms) in [
+        ("rolling", "Session", Some(SESSION_MS as i64)),
+        ("weekly", "Weekly", Some(WEEK_MS as i64)),
+        // Monthly cycles run 28-31 days anchored to the subscription
+        // date — a fixed period would skew the pace projection (and go
+        // NEGATIVE-fraction right after a 31-day cycle starts), so the
+        // real length is derived from the server's own reset boundary.
+        ("monthly", "Monthly", None),
+    ] {
+        let Some(w) = usage.get(field) else { continue };
+        // "rate-limited" IS the answer (100%), independent of the percent
+        // field — a blocked window must never vanish from the card just
+        // because the server omitted or lagged its percent.
+        let rate_limited = w.get("status").and_then(Value::as_str) == Some("rate-limited");
+        let percent = w.get("percent").and_then(Value::as_f64);
+        let used = if rate_limited {
+            100.0
+        } else {
+            let Some(percent) = percent else { continue };
+            // Guard the empirically-captured contract: the server sends
+            // integer 0-100 USED percentages (it floors server-side; the
+            // shape already changed once between the upstream PR and
+            // deploy). A fractional 0-1 encoding or an out-of-range value
+            // means the shape changed again — fail the whole parse (→
+            // labeled local fallback) instead of rendering silently wrong
+            // meters.
+            if !(0.0..=100.0).contains(&percent) || (percent > 0.0 && percent < 1.0) {
+                return None;
+            }
+            percent
+        };
+        let resets_at = w
+            .get("resetsAt")
+            .and_then(Value::as_str)
+            .and_then(|s| chrono::DateTime::parse_from_rfc3339(s).ok())
+            .map(|d| d.timestamp_millis());
+        let period_ms = period_ms.or_else(|| resets_at.map(month_period_ending));
+        metrics.push(Metric::progress(label, used, None).with_reset(resets_at, period_ms));
+    }
+    (!metrics.is_empty()).then_some(metrics)
+}
+
+/// Length of the anchored monthly cycle that ENDS at the server's
+/// resetsAt: one month back on the same day-of-month (clamped to short
+/// months) at the same time-of-day — the true 28-31-day window.
+fn month_period_ending(resets_ms: i64) -> i64 {
+    use chrono::{Datelike, TimeZone, Timelike, Utc};
+    let Some(end) = Utc.timestamp_millis_opt(resets_ms).single() else {
+        return 30 * 86_400_000;
+    };
+    let (py, pm) = shift_month(end.year(), end.month(), -1);
+    let day = end.day().min(days_in_month(py, pm));
+    let start = utc_date(
+        py,
+        pm,
+        day,
+        end.hour(),
+        end.minute(),
+        end.second(),
+        end.timestamp_subsec_millis(),
+    );
+    ((resets_ms as f64 - start) as i64).max(1)
+}
+
+/// Fallback: the pre-API local computation from opencode.db — this PC's
+/// rows only, so shared subscriptions under-count here.
+fn local_windows_snapshot() -> Result<Snapshot, String> {
     let w = with_db_copy(|db| {
         let rows: Vec<(f64, f64)> = read_messages(db)?
             .into_iter()
@@ -323,6 +451,61 @@ mod tests {
 
     fn ms(iso: &str) -> f64 {
         chrono::DateTime::parse_from_rfc3339(iso).unwrap().timestamp_millis() as f64
+    }
+
+    #[test]
+    fn official_usage_parses_the_live_wire_shape() {
+        // Captured verbatim from the deployed endpoint (2026-08-13) — note
+        // it does NOT match the merged PR's draft shape.
+        let doc = serde_json::json!({ "usage": {
+            "rolling": { "status": "ok", "percent": 0, "resetsAt": "2026-08-13T15:33:33.302Z" },
+            "weekly":  { "status": "ok", "percent": 6, "resetsAt": "2026-08-17T00:00:00.302Z" },
+            "monthly": { "status": "ok", "percent": 3, "resetsAt": "2026-09-05T08:48:51.302Z" },
+        }});
+        let m = parse_official(&doc).expect("parses");
+        assert_eq!(m.len(), 3);
+        assert_eq!((m[0].label.as_str(), m[0].used_percent), ("Session", Some(0.0)));
+        assert_eq!((m[1].label.as_str(), m[1].used_percent), ("Weekly", Some(6.0)));
+        assert_eq!(m[1].resets_at, Some(ms("2026-08-17T00:00:00.302Z") as i64));
+        assert_eq!((m[2].label.as_str(), m[2].used_percent), ("Monthly", Some(3.0)));
+        // Monthly period is the REAL cycle length ending at the server's
+        // reset (Aug 5 → Sep 5 = 31 days), never a fixed 30 days — a fixed
+        // window skewed the pace projection (Devin's find).
+        assert_eq!(m[2].period_ms, Some(31 * 86_400_000_i64));
+        // Clamped short-month edge: a reset on Mar 31 looks back to
+        // Feb 28 in a non-leap year.
+        let mar31 = chrono::DateTime::parse_from_rfc3339("2026-03-31T10:00:00Z")
+            .unwrap()
+            .timestamp_millis();
+        assert_eq!(month_period_ending(mar31), 31 * 86_400_000_i64);
+
+        // Rate-limited windows render as full; a missing window is skipped
+        // without sinking the card; junk yields None (→ local fallback).
+        let limited = serde_json::json!({ "usage": {
+            "rolling": { "status": "rate-limited", "percent": 100, "resetsAt": "2026-08-13T15:33:33Z" },
+        }});
+        let m = parse_official(&limited).expect("parses");
+        assert_eq!(m.len(), 1);
+        assert_eq!(m[0].used_percent, Some(100.0));
+        // rate-limited stays a full meter even if the server omits (or
+        // lags) the percent — the status alone is the answer.
+        let no_percent = serde_json::json!({ "usage": {
+            "rolling": { "status": "rate-limited", "resetsAt": "2026-08-13T15:33:33Z" },
+        }});
+        let m = parse_official(&no_percent).expect("parses");
+        assert_eq!(m[0].used_percent, Some(100.0));
+        assert!(parse_official(&serde_json::json!({"error": "nope"})).is_none());
+
+        // Contract guards: a fractional (0-1) or out-of-range percent
+        // means the wire shape changed — the parse must fail loudly (→
+        // labeled local fallback), never render wrong meters. Zero and
+        // exact integers stay valid.
+        for bad in [0.06, 150.0, -3.0] {
+            let doc = serde_json::json!({ "usage": {
+                "weekly": { "status": "ok", "percent": bad, "resetsAt": "2026-08-17T00:00:00Z" },
+            }});
+            assert!(parse_official(&doc).is_none(), "percent {bad} must reject");
+        }
     }
 
     #[test]

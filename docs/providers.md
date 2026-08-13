@@ -80,18 +80,20 @@ Ground rules that apply to every provider:
 
 ## OpenCode (Go plan)
 
-- **Reads:** `%USERPROFILE%\.local\share\opencode\opencode.db` (copied
-  before reading) — message costs your own OpenCode history already
+- **Reads:** the Go key from
+  `%USERPROFILE%\.local\share\opencode\auth.json`;
+  `%USERPROFILE%\.local\share\opencode\opencode.db` (copied before
+  reading) for spend — message costs your own OpenCode history already
   contains.
-- **Calls:** nothing — OpenCode has no public usage API (the gateway
-  exposes only inference routes); usage is computed locally against
-  documented plan limits using OpenCode's real windows: a rolling
-  5-hour session (resets as the oldest in-window spend ages out), a UTC
-  Monday-start week, and a monthly cycle anchored to your first-ever Go
-  usage. **Note the meters count this PC only:** Go quotas are counted
-  account-wide on OpenCode's servers, so usage from your other devices
-  or from other participants on a shared subscription can't appear
-  here. The Console quick-link shows the account-wide truth.
+- **Calls:** `opencode.ai/zen/go/v1/usage` (the official account-wide
+  usage API, shipped in anomalyco/opencode#16513) — Session / Weekly /
+  Monthly percentages and resets counted on OpenCode's servers, the
+  same numbers the Zen dashboard shows, so usage from your other
+  devices and shared-subscription participants is included. If the API
+  is unreachable, meters fall back to the old local computation from
+  `opencode.db` (rolling 5-hour session, UTC Monday-start week, monthly
+  cycle anchored to your first-ever Go usage) — the fallback counts
+  this PC only. Dollar spend rows are always computed locally.
 
 ## GitHub Copilot
 

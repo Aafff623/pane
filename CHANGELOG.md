@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+### Added
+- **OpenCode meters are account-wide now** — OpenCode shipped the
+  official usage API we'd been waiting on
+  ([anomalyco/opencode#16513](https://github.com/anomalyco/opencode/pull/16513)),
+  and the card now reads Session / Weekly / Monthly percentages and
+  resets straight from OpenCode's servers: the same numbers as the Zen
+  dashboard, including your other devices and anyone sharing the
+  subscription. The old this-PC-only computation from `opencode.db`
+  remains as the offline fallback, and dollar spend stays local.
+
 ### Fixed
 - **Grok 4.6 prices from day one** — xAI's launch-day rates
   ($2 in / $0.50 cached / $6 out per MTok, doubling for ≥200k-token
