@@ -1,5 +1,25 @@
 # Changelog
 
+## Unreleased
+
+### Added
+- **Daybreak Blue and Cursor Router spend names price correctly** — Pane
+  now loads the full OpenUsage pricing-alias list (it used to keep only
+  the first 64 rules, which dropped Daybreak, GPT-5.3–5.6 effort slugs,
+  and Cursor Router labels like "Opus 5 (Auto Balanced)").
+- **Codex auto-review stays its own row** — reviewer traffic still shows
+  as `codex-auto-review` in the model breakdown; the dollars use that
+  day's GPT rate (gpt-5.5 from April 2026 onward), matching the Mac app.
+- **Reduce animations** — Settings toggle skips card entrance motion and
+  the day/night wipe. Windows' own Animation effects setting is still
+  respected either way.
+- **Hide tray numbers while screen sharing** — optional Privacy setting
+  (off by default). During Presentation Settings, exclusive fullscreen,
+  or remote control, starred tray percentages hide; the Pane icon stays.
+- **Reset all settings** — Settings → Advanced restores every preference
+  to its default and re-detects installed tools. API keys and usage
+  history stay.
+
 ## 0.4.34 — 2026-08-13
 
 ### Added

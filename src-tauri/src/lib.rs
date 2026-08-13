@@ -6,7 +6,7 @@ mod spend;
 mod telemetry;
 
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde_json::{json, Value};
@@ -100,6 +100,8 @@ fn config_with_defaults(mut cfg: Value) -> Value {
     // own default kept transmitting — a switch that displays off while
     // data flows is the one state a privacy control must never be in.
     obj.entry("telemetry").or_insert(json!(true));
+    obj.entry("reduceAnimations").or_insert(json!(false));
+    obj.entry("hideUsageWhileSharing").or_insert(json!(false));
     cfg
 }
 
@@ -139,6 +141,8 @@ const CONFIG_KEYS: &[&str] = &[
     "welcomeDismissed",
     "lastSeenVersion",
     "telemetry",
+    "reduceAnimations",
+    "hideUsageWhileSharing",
 ];
 
 #[tauri::command]
@@ -360,6 +364,63 @@ fn update_tray(app: &tauri::AppHandle, snapshots: &[providers::Snapshot], cfg: &
 // webview already has the icons) and sends the pixels here.
 // ---------------------------------------------------------------------------
 
+/// Hide starred tray numbers while a screen share / presentation is on
+/// (Settings → Privacy, off by default — Mac parity with OpenUsage #1013).
+static HIDE_STRIP: AtomicBool = AtomicBool::new(false);
+
+fn screen_is_being_shared() -> bool {
+    #[cfg(windows)]
+    {
+        use windows::Win32::UI::Shell::{
+            SHQueryUserNotificationState, QUNS_PRESENTATION_MODE, QUNS_RUNNING_D3D_FULL_SCREEN,
+        };
+        use windows::Win32::UI::WindowsAndMessaging::{GetSystemMetrics, SM_REMOTECONTROL};
+
+        // Someone is remotely controlling this session (Quick Assist, etc.).
+        if unsafe { GetSystemMetrics(SM_REMOTECONTROL) } != 0 {
+            return true;
+        }
+        if let Ok(state) = unsafe { SHQueryUserNotificationState() } {
+            // Presentation Settings / exclusive fullscreen — the closest
+            // public Windows equivalent of macOS's screen-watcher flag.
+            // QUNS_BUSY is skipped: a fullscreen YouTube tab would hide
+            // numbers all evening.
+            if state == QUNS_PRESENTATION_MODE || state == QUNS_RUNNING_D3D_FULL_SCREEN {
+                return true;
+            }
+        }
+        false
+    }
+    #[cfg(not(windows))]
+    {
+        false
+    }
+}
+
+fn spawn_share_watcher(app: tauri::AppHandle) {
+    tauri::async_runtime::spawn(async move {
+        let mut was_hidden = false;
+        loop {
+            tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+            let enabled = config_with_defaults(load_config())
+                .get("hideUsageWhileSharing")
+                .and_then(Value::as_bool)
+                == Some(true);
+            let hide = enabled && screen_is_being_shared();
+            HIDE_STRIP.store(hide, Ordering::Relaxed);
+            if hide == was_hidden {
+                continue;
+            }
+            was_hidden = hide;
+            if hide {
+                let _ = update_tray_strip(app.clone(), Vec::new());
+            } else {
+                let _ = app.emit("tray-strip-restore", ());
+            }
+        }
+    });
+}
+
 #[derive(serde::Deserialize)]
 struct StripEntry {
     id: String,
@@ -396,6 +457,11 @@ const STRIP_PROVIDER_IDS: [&str; 19] = [
 
 #[tauri::command]
 fn update_tray_strip(app: tauri::AppHandle, entries: Vec<StripEntry>) -> Result<(), String> {
+    let entries = if HIDE_STRIP.load(Ordering::Relaxed) {
+        Vec::new()
+    } else {
+        entries
+    };
     let handle = app.clone();
     app.run_on_main_thread(move || {
         // Remove strip icons for providers no longer selected.
@@ -1237,6 +1303,7 @@ pub fn run() {
         ])
         .setup(|app| {
             spawn_update_checker(app.handle());
+            spawn_share_watcher(app.handle().clone());
             let quit = MenuItem::with_id(app, "quit", "Quit Pane", true, None::<&str>)?;
             let menu = Menu::with_items(app, &[&quit])?;
 

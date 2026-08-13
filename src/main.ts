@@ -181,6 +181,8 @@ interface Config {
   showTotalSpend: boolean;
   welcomeDismissed: boolean;
   lastSeenVersion: string;
+  reduceAnimations: boolean;
+  hideUsageWhileSharing: boolean;
 }
 
 const ALL_PROVIDERS: [string, string][] = [
@@ -314,6 +316,8 @@ let config: Config = {
   showTotalSpend: true,
   welcomeDismissed: false,
   lastSeenVersion: "",
+  reduceAnimations: false,
+  hideUsageWhileSharing: false,
 };
 let lastFetch = 0;
 let refreshing = false;
@@ -329,6 +333,7 @@ let animateExpandId: string | null = null;
 /// One pass of entrance animations (cards slide in, bars fill) — played when
 /// the popover opens or the first data lands, never on background re-renders.
 function playReveal(): void {
+  if (reduceMotion()) return;
   const el = document.querySelector<HTMLElement>("#providers");
   if (!el) return;
   el.classList.remove("reveal");
@@ -1659,6 +1664,17 @@ function applyGlass(): void {
   if (config.glassEffects !== false && !lensReady) initLiquidLens();
 }
 
+function reduceMotion(): boolean {
+  return (
+    config.reduceAnimations === true ||
+    window.matchMedia("(prefers-reduced-motion: reduce)").matches
+  );
+}
+
+function applyReduceMotion(): void {
+  document.body.classList.toggle("reduce-anim", config.reduceAnimations === true);
+}
+
 let lensReady = false;
 
 function initLiquidLens(): void {
@@ -1830,7 +1846,7 @@ function toggleTheme(e: Event): void {
   );
 
   const doc = document as Document & { startViewTransition?: (cb: () => void) => { ready: Promise<void> } };
-  if (doc.startViewTransition) {
+  if (!reduceMotion() && doc.startViewTransition) {
     const transition = doc.startViewTransition(apply);
     transition.ready
       .then(() => {
@@ -2674,6 +2690,19 @@ async function initSettings(): Promise<void> {
   });
   applyGlass();
 
+  const reduceAnim = document.querySelector<HTMLInputElement>("#reduce-anim")!;
+  reduceAnim.checked = config.reduceAnimations === true;
+  reduceAnim.addEventListener("change", () => {
+    void patchConfig({ reduceAnimations: reduceAnim.checked }).then(applyReduceMotion);
+  });
+  applyReduceMotion();
+
+  const hideShare = document.querySelector<HTMLInputElement>("#hide-while-sharing")!;
+  hideShare.checked = config.hideUsageWhileSharing === true;
+  hideShare.addEventListener("change", () => {
+    void patchConfig({ hideUsageWhileSharing: hideShare.checked }).then(() => void updateTrayStrip());
+  });
+
   const shortcut = document.querySelector<HTMLInputElement>("#shortcut")!;
   shortcut.value = config.shortcut;
   shortcut.addEventListener("change", async () => {
@@ -2701,6 +2730,100 @@ async function initSettings(): Promise<void> {
   proxyEnabled.addEventListener("change", saveProxy);
   proxyUrl.addEventListener("change", saveProxy);
 
+  populatePinnedOptions();
+
+  document.querySelector("#reset-all-settings")!.addEventListener("click", () => {
+    void resetAllSettings();
+  });
+}
+
+/// Restore every preference to the same defaults a fresh install gets.
+/// API keys, lastSeenVersion, and welcomeDismissed stay (keys are not
+/// "settings"; What's-new shouldn't pop again).
+async function resetAllSettings(): Promise<void> {
+  const ok = await appConfirm({
+    title: "Reset all settings?",
+    message:
+      "Theme, density, notifications, shortcut, proxy, pacing, tray stars, and card layouts go back to defaults. Installed tools are re-detected. API keys and usage history stay. A proxy change still needs a restart.",
+    confirmLabel: "Reset all",
+    danger: true,
+  });
+  if (!ok) return;
+  try {
+    await invoke("set_autostart", { enabled: true });
+  } catch {
+    // Dev builds skip autostart; the preference is still saved below.
+  }
+  try {
+    await invoke("set_shortcut", { shortcut: "" });
+  } catch {
+    // Invalid leftover shortcut shouldn't block the rest of the reset.
+  }
+  await patchConfig({
+    refreshMinutes: 1,
+    disabled: [],
+    pinned: null,
+    trayProviders: [],
+    pacingAlways: true,
+    telemetry: true,
+    notifyAlmostOut: true,
+    notifyCuttingClose: true,
+    notifyWillRunOut: true,
+    spendTab: "today",
+    spendMetric: "cost",
+    showUsed: false,
+    resetExact: false,
+    timeFormat: "auto",
+    layout: null,
+    appearance: "dark",
+    density: "compact",
+    glassEffects: true,
+    shortcut: "",
+    proxy: { enabled: false, url: "" },
+    showTotalSpend: true,
+    reduceAnimations: false,
+    hideUsageWhileSharing: false,
+  });
+  syncSettingsControls();
+  applyAppearance();
+  applyGlass();
+  applyReduceMotion();
+  document.body.classList.remove("settings-open");
+  document.querySelector("#settings-btn")?.classList.remove("active");
+  void refresh(true).then(() => void updateTrayStrip());
+}
+
+function syncSettingsControls(): void {
+  const setNum = (sel: string, v: string) => {
+    const el = document.querySelector<HTMLInputElement>(sel);
+    if (el) el.value = v;
+  };
+  const setCheck = (sel: string, v: boolean) => {
+    const el = document.querySelector<HTMLInputElement>(sel);
+    if (el) el.checked = v;
+  };
+  const setSelect = (sel: string, v: string) => {
+    const el = document.querySelector<HTMLSelectElement>(sel);
+    if (el) el.value = v;
+  };
+  setNum("#interval", String(config.refreshMinutes));
+  setCheck("#pacing", config.pacingAlways);
+  setSelect("#timeformat", config.timeFormat);
+  setCheck("#notify-almost", config.notifyAlmostOut);
+  setCheck("#notify-close", config.notifyCuttingClose);
+  setCheck("#notify-runout", config.notifyWillRunOut);
+  setCheck("#telemetry", config.telemetry);
+  setCheck("#hide-while-sharing", config.hideUsageWhileSharing === true);
+  setCheck("#show-total-spend", config.showTotalSpend);
+  setSelect("#appearance", config.appearance);
+  setCheck("#density", config.density === "compact");
+  setCheck("#glass", config.glassEffects !== false);
+  setCheck("#reduce-anim", config.reduceAnimations === true);
+  setNum("#shortcut", config.shortcut);
+  setCheck("#proxy-enabled", config.proxy?.enabled ?? false);
+  setNum("#proxy-url", config.proxy?.url ?? "");
+  const autostart = document.querySelector<HTMLInputElement>("#autostart");
+  if (autostart) autostart.checked = true;
   populatePinnedOptions();
 }
 
@@ -2986,13 +3109,17 @@ window.addEventListener("DOMContentLoaded", () => {
     const tick = (e.target as HTMLElement).closest<HTMLElement>("[data-trail]");
     if (!tick) return;
     const card = trailCards()[Number(tick.dataset.trail)];
-    card?.scrollIntoView({ behavior: "smooth", block: "start" });
+    card?.scrollIntoView({ behavior: reduceMotion() ? "auto" : "smooth", block: "start" });
   });
 
   // The 4-hourly background checker feeds the same footer button.
   void listen<string>("update-available", (e) => {
     updateVersion = e.payload;
     renderBuildInfo();
+  });
+
+  void listen("tray-strip-restore", () => {
+    void updateTrayStrip();
   });
 
   void listen("popover-shown", () => {

@@ -150,6 +150,9 @@
             <label class="toggle" title="Turn off on slower PCs — replaces the glass refraction with a simple solid look"><input id="glass" type="checkbox" /> Liquid glass effects</label>
           </div>
           <div class="setting-row">
+            <label class="toggle" title="Skip card entrance motion and the day/night wipe. Windows' own 'Animation effects' setting is still respected."><input id="reduce-anim" type="checkbox" /> Reduce animations</label>
+          </div>
+          <div class="setting-row">
             <label class="toggle"><input id="show-total-spend" type="checkbox" /> Show Total Spend card</label>
           </div>
           <div class="setting-row">
@@ -188,6 +191,9 @@
           </p>
           <div class="setting-row">
             <label class="toggle"><input id="telemetry" type="checkbox" /> Share anonymous usage statistics</label>
+          </div>
+          <div class="setting-row">
+            <label class="toggle" title="While a meeting share, Presentation Settings, or remote control is on, starred tray percentages hide. The Pane icon stays. Off by default."><input id="hide-while-sharing" type="checkbox" /> Hide tray numbers while screen sharing</label>
           </div>
         </div></div>
       </div>
@@ -265,6 +271,20 @@
             <input id="key-qwen" type="password" placeholder="sk-sp-… (auto-detected from env)" />
             <button data-save="qwen">Save</button>
           </div>
+        </div></div>
+      </div>
+
+      <div class="acc-group">
+        <button class="acc-head">Advanced <span class="chev">&#8964;</span></button>
+        <div class="acc-body"><div class="acc-inner">
+          <p class="settings-note">
+            Restores every preference to its default and re-detects installed
+            tools. API keys and your usage history stay. Proxy changes still
+            need a restart.
+          </p>
+          <button id="reset-all-settings" type="button" class="danger-btn">
+            Reset all settings
+          </button>
         </div></div>
       </div>
 
