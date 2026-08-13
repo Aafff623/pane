@@ -483,16 +483,16 @@ fn spawn_share_watcher(app: tauri::AppHandle) {
                 continue;
             }
             was_hidden = hide;
+            let cached = last_strip()
+                .lock()
+                .map(|g| g.clone())
+                .unwrap_or_default();
             if hide {
-                let _ = update_tray_strip(app.clone(), Vec::new());
+                let _ = apply_tray_strip(app.clone(), cached, true);
                 let handle = app.clone();
                 let _ = app.run_on_main_thread(move || set_main_tray_logo(&handle));
             } else {
-                let cached = last_strip()
-                    .lock()
-                    .map(|g| g.clone())
-                    .unwrap_or_default();
-                let _ = update_tray_strip(app.clone(), cached);
+                let _ = apply_tray_strip(app.clone(), cached, false);
                 let handle = app.clone();
                 let _ = app.run_on_main_thread(move || paint_cached_main_tray(&handle));
                 let _ = app.emit("tray-strip-restore", ());
@@ -537,16 +537,17 @@ const STRIP_PROVIDER_IDS: [&str; 19] = [
 
 #[tauri::command]
 fn update_tray_strip(app: tauri::AppHandle, entries: Vec<StripEntry>) -> Result<(), String> {
-    if !HIDE_STRIP.load(Ordering::Relaxed) {
-        if let Ok(mut slot) = last_strip().lock() {
-            *slot = entries.clone();
-        }
+    if let Ok(mut slot) = last_strip().lock() {
+        *slot = entries.clone();
     }
-    let entries = if HIDE_STRIP.load(Ordering::Relaxed) {
-        Vec::new()
-    } else {
-        entries
-    };
+    apply_tray_strip(app, entries, HIDE_STRIP.load(Ordering::Relaxed))
+}
+
+fn apply_tray_strip(
+    app: tauri::AppHandle,
+    entries: Vec<StripEntry>,
+    hide_numbers: bool,
+) -> Result<(), String> {
     let handle = app.clone();
     app.run_on_main_thread(move || {
         // Remove strip icons for providers no longer selected.
@@ -568,14 +569,31 @@ fn update_tray_strip(app: tauri::AppHandle, entries: Vec<StripEntry>) -> Result<
             let logo_id = format!("strip-logo-{}", entry.id);
             let num_id = format!("strip-num-{}", entry.id);
             let logo_icon = tauri::image::Image::new_owned(entry.logo.clone(), 32, 32);
-            let num_icon =
-                tauri::image::Image::new_owned(draw_tray_numbers(&entry.values), 32, 32);
+            let num_icon = tauri::image::Image::new_owned(
+                if hide_numbers {
+                    vec![0u8; 32 * 32 * 4]
+                } else {
+                    draw_tray_numbers(&entry.values)
+                },
+                32,
+                32,
+            );
+            let tooltip = if hide_numbers {
+                entry
+                    .tooltip
+                    .split('\n')
+                    .next()
+                    .unwrap_or("Pane")
+                    .to_string()
+            } else {
+                entry.tooltip.clone()
+            };
 
             if let Some(tray) = handle.tray_by_id(&num_id) {
                 let _ = tray.set_icon(Some(num_icon));
-                let _ = tray.set_tooltip(Some(&entry.tooltip));
+                let _ = tray.set_tooltip(Some(&tooltip));
                 if let Some(logo_tray) = handle.tray_by_id(&logo_id) {
-                    let _ = logo_tray.set_tooltip(Some(&entry.tooltip));
+                    let _ = logo_tray.set_tooltip(Some(&tooltip));
                 }
                 continue;
             }
@@ -586,7 +604,7 @@ fn update_tray_strip(app: tauri::AppHandle, entries: Vec<StripEntry>) -> Result<
             for (tray_id, icon) in [(num_id, num_icon), (logo_id, logo_icon)] {
                 let _ = TrayIconBuilder::with_id(tray_id)
                     .icon(icon)
-                    .tooltip(&entry.tooltip)
+                    .tooltip(&tooltip)
                     .show_menu_on_left_click(false)
                     .on_tray_icon_event(|tray, event| {
                         if let TrayIconEvent::Click {

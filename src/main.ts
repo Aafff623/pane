@@ -2784,6 +2784,7 @@ async function resetAllSettings(): Promise<void> {
     reduceAnimations: false,
     hideUsageWhileSharing: false,
   });
+  spendTab = "today";
   syncSettingsControls();
   scheduleAutoRefresh();
   applyAppearance();
