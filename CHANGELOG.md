@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.4.34 — 2026-08-13
 
 ### Added
 - **OpenCode meters are account-wide now** — OpenCode shipped the
