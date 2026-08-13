@@ -384,9 +384,18 @@ async fn fetch() -> Result<Snapshot, String> {
         || spend_type.as_deref() == Some("team")
         || pooled_limit > 0.0;
 
-    let used_cents = num(plan_usage.get("totalSpend"))
-        .or_else(|| limit.map(|l| l - num(plan_usage.get("remaining")).unwrap_or(0.0)))
-        .unwrap_or(0.0);
+    // Spend is only KNOWN when Cursor actually reports it: totalSpend,
+    // else limit-remaining when BOTH exist. Defaulting a missing
+    // `remaining` to 0 made used == limit — a 100% bar, "Limit reached",
+    // and run-out notifications for an account whose planUsage carries
+    // only the limit (Devin's find on the untestable pre-bucket path).
+    let used_cents_opt = num(plan_usage.get("totalSpend")).or_else(|| {
+        match (limit, num(plan_usage.get("remaining"))) {
+            (Some(l), Some(r)) => Some((l - r).max(0.0)),
+            _ => None,
+        }
+    });
+    let used_cents = used_cents_opt.unwrap_or(0.0);
 
     if is_team {
         // Team-shaped accounts sometimes omit the plan limit (or report
@@ -428,19 +437,27 @@ async fn fetch() -> Result<Snapshot, String> {
                     .with_reset(resets_at, Some(period_ms)),
             );
         }
-        metrics.push(
-            Metric::text("Total usage", format!("{} this cycle", dollars(used_cents)))
-                .with_reset(resets_at, Some(period_ms)),
-        );
+        // The cycle reset stays visible on the two bars above; the text
+        // row's with_reset rides along for local-API consumers only.
+        if let Some(u) = used_cents_opt {
+            metrics.push(
+                Metric::text("Total usage", format!("{} this cycle", dollars(u)))
+                    .with_reset(resets_at, Some(period_ms)),
+            );
+        }
     } else {
-        // Pre-bucket accounts: the classic included-pool bar. Computed
-        // spend/limit (matching the caption); the API's totalPercentUsed
-        // only when no limit is reported.
-        let pct = match limit {
-            Some(l) if l > 0.0 => used_cents / l * 100.0,
+        // Pre-bucket accounts: the classic included-pool bar — computed
+        // spend/limit so the bar always matches its own caption, but ONLY
+        // when spend is actually reported; otherwise fall back to the
+        // API's own percent rather than fabricating one.
+        let pct = match (used_cents_opt, limit) {
+            (Some(u), Some(l)) if l > 0.0 => u / l * 100.0,
             _ => total_pct.unwrap_or(0.0),
         };
-        let detail = limit.map(|l| format!("{} of {} included", dollars(used_cents), dollars(l)));
+        let detail = match (used_cents_opt, limit) {
+            (Some(u), Some(l)) => Some(format!("{} of {} included", dollars(u), dollars(l))),
+            _ => None,
+        };
         metrics.push(
             Metric::progress("Total usage", pct.clamp(0.0, 100.0), detail)
                 .with_reset(resets_at, Some(period_ms)),

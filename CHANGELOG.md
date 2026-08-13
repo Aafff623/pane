@@ -13,7 +13,10 @@
   Cursor shows, plus dollars spent this cycle as a text row (no percent
   is honest there: Cursor itself reports three contradictory total
   numbers). Pre-bucket accounts keep the classic included bar, computed
-  as spend ÷ plan limit so it always matches its own caption.
+  as spend ÷ plan limit when Cursor reports spend (the API's own percent
+  otherwise — never a fabricated one). Saved layouts migrate the renamed
+  rows automatically: stars, pins, hidden flags, and order carry over
+  from "Auto usage" / "API usage" to the new labels.
 
 ## 0.4.34 — 2026-08-13
 

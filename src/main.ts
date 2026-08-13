@@ -452,6 +452,35 @@ function ensureLayout(): void {
     changed = true;
   }
 
+  // One-time label migration (Cursor bucket-era rename, 0.4.35): "Auto
+  // usage" → "Cursor Models", "API usage" → "Other Models". Stars, pins,
+  // hidden/on-demand flags and row order carry over — without this, a
+  // starred/pinned old row silently loses its setting and the stale label
+  // rots in metricOrder forever (no rename migration existed before).
+  const CURSOR_RENAMES: Record<string, string> = {
+    "Auto usage": "Cursor Models",
+    "API usage": "Other Models",
+  };
+  for (const [pid, L] of Object.entries(layout.providers)) {
+    if (providerFamily(pid) !== "cursor") continue;
+    for (const list of [L.metricOrder, L.hidden, L.starred, L.onDemand]) {
+      for (const [oldLabel, newLabel] of Object.entries(CURSOR_RENAMES)) {
+        const at = list.indexOf(oldLabel);
+        if (at < 0) continue;
+        if (list.includes(newLabel)) list.splice(at, 1);
+        else list[at] = newLabel;
+        changed = true;
+      }
+    }
+  }
+  if (config.pinned && providerFamily(config.pinned.provider) === "cursor") {
+    const to = CURSOR_RENAMES[config.pinned.label];
+    if (to) {
+      config.pinned = { ...config.pinned, label: to };
+      void patchConfig({ pinned: config.pinned }).catch(() => {});
+    }
+  }
+
   for (const s of lastSnapshots) {
     if (!layout.providerOrder.includes(s.id)) {
       layout.providerOrder.push(s.id);
