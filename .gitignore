@@ -34,3 +34,6 @@ pane.md
 *.njsproj
 *.sln
 *.sw?
+
+# Per-chair agent config (Cursor rules) — local like pane.md
+.cursor/

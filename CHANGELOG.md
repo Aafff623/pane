@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.4.35 — 2026-08-13
 
 ### Added
 - **Daybreak Blue and Cursor Router spend names price correctly** — Pane
