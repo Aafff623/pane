@@ -166,7 +166,7 @@ pub fn generation() -> u64 {
 /// fingerprinted below — an app update that reprices the same files would
 /// otherwise leave history at the old dollars until upstream happens to
 /// rewrite a catalog.
-const CORRECTIONS_REV: u32 = 6; // 6: ingest the live supplement's 100+ alias rules
+const CORRECTIONS_REV: u32 = 7; // 7: GLM-5.3 AihubMix preview rates + last-segment dated DeepSeek
 /// The live OpenUsage supplement is ~105 alias rules (Daybreak, Cursor
 /// Router prose names, GPT-5.3–5.6 effort slugs). 64 silently dropped
 /// everything after `gpt-5.2`. Per-rule caps below still bound memory.
@@ -634,8 +634,12 @@ fn resolve(s: &Store, model: &str, depth: u8) -> Option<Price> {
     // baked table for dated spellings too, or the table would never
     // self-retire for them. Scoped to deepseek slugs with an all-digit
     // ≥4-char tail so version-bearing names never lose a real tail.
-    if let Some((head, tail)) = canonical.rsplit_once('-') {
-        if canonical.starts_with("deepseek")
+    // Last path segment so gateway prefixes (Fireworks, AihubMix, …)
+    // still date-trim: Hermes logs
+    // `accounts/fireworks/models/deepseek-v4-pro-0813`.
+    let slug = canonical.rsplit('/').next().unwrap_or(canonical.as_str());
+    if let Some((head, tail)) = slug.rsplit_once('-') {
+        if slug.starts_with("deepseek")
             && tail.len() >= 4
             && tail.chars().all(|c| c.is_ascii_digit())
         {
@@ -685,12 +689,11 @@ fn resolve(s: &Store, model: &str, depth: u8) -> Option<Price> {
 /// (the supplement priced k2.7 and k2.7-code identically); "moonshot/" and
 /// "moonshot-ai/" prefixed spellings match how the CLIs log it.
 fn builtin_price(canonical: &str) -> Option<Price> {
-    let bare = canonical
-        .strip_prefix("moonshot/")
-        .or_else(|| canonical.strip_prefix("moonshot-ai/"))
-        .or_else(|| canonical.strip_prefix("xai/"))
-        .or_else(|| canonical.strip_prefix("deepseek/"))
-        .unwrap_or(canonical);
+    // Gateways prefix the vendor slug (`xai/grok-4.6`, `deepseek/…`,
+    // `accounts/fireworks/models/deepseek-v4-pro`). Peel to the last
+    // path segment so one arm covers every spelling; catalogs still
+    // outrank this table because resolve() consults them first.
+    let bare = canonical.rsplit('/').next().unwrap_or(canonical);
     match bare {
         // AihubMix DeepSeek V4 family — the gateway's OWN rate cards
         // (aihubmix.com/model/deepseek-v4-pro-0813 and /deepseek-v4-flash
@@ -705,6 +708,14 @@ fn builtin_price(canonical: &str) -> Option<Price> {
         // retry, so a catalog that learns the base slug outranks them.
         "deepseek-v4-pro" => Some(Price::flat(0.464, 0.928, 0.004, 0.464)),
         "deepseek-v4-flash" => Some(Price::flat(0.154, 0.308, 0.003, 0.154)),
+        // AihubMix GLM-5.3 preview (aihubmix.com/model/coding-glm-5.3):
+        // $0.060 in / $0.220 out per MTok. No cache rate is published, so
+        // reads/writes bill at the input rate. Only this gateway SKU is
+        // baked — the generic vendor name `glm-5.3` is left unpriced so
+        // Z.ai / OpenRouter / other scanners don't inherit the discount.
+        // Hermes still prices its AihubMix `glm-5.3` rows by looking up
+        // this SKU (see providers::hermes::price_lookup_slug).
+        "coding-glm-5.3" => Some(Price::flat(0.06, 0.22, 0.06, 0.06)),
         "kimi-k3" | "kimi-k3-code" => Some(Price::flat(3.0, 15.0, 0.3, 3.0)),
         // Alibaba Model Studio, GA'd 2026-08-03 (USD/MTok): input $2,
         // output $6, implicit cache read $0.25, explicit cache write $2.50.
@@ -828,7 +839,12 @@ mod tests {
         let store = super::Store::default();
         // Real Hermes slugs: bare flash, dated pro snapshot, and the
         // deepseek/-prefixed catalog spelling.
-        for slug in ["deepseek-v4-pro", "deepseek-v4-pro-0813", "deepseek/deepseek-v4-pro-0813"] {
+        for slug in [
+            "deepseek-v4-pro",
+            "deepseek-v4-pro-0813",
+            "deepseek/deepseek-v4-pro-0813",
+            "accounts/fireworks/models/deepseek-v4-pro-0813",
+        ] {
             let p = super::resolve(&store, slug, 0).unwrap_or_else(|| panic!("{slug} unpriced"));
             assert!((p.input - 0.464).abs() < 1e-9, "{slug}");
             assert!((p.output - 0.928).abs() < 1e-9, "{slug}");
@@ -854,6 +870,30 @@ mod tests {
         let p = super::resolve(&store, "deepseek-v4-pro-0813", 0).unwrap();
         assert!((p.input - 0.5).abs() < 1e-9);
         assert!((p.cache_read - 0.05).abs() < 1e-9);
+        let p = super::resolve(&store, "accounts/fireworks/models/deepseek-v4-pro-0813", 0).unwrap();
+        assert!((p.input - 0.5).abs() < 1e-9);
+    }
+
+    #[test]
+    fn glm_53_aihubmix_preview_prices() {
+        let store = super::Store::default();
+        for slug in ["coding-glm-5.3", "aihubmix/coding-glm-5.3"] {
+            let p = super::resolve(&store, slug, 0).unwrap_or_else(|| panic!("{slug} unpriced"));
+            assert!((p.input - 0.06).abs() < 1e-9, "{slug}");
+            assert!((p.output - 0.22).abs() < 1e-9, "{slug}");
+            // No cache rate on the vendor page — unpublished → input rate.
+            assert!((p.cache_read - 0.06).abs() < 1e-9, "{slug}");
+        }
+        // Generic vendor name (and gateway prefixes that peel to it) stay
+        // unpriced until a catalog learns an official rate.
+        assert!(super::resolve(&store, "glm-5.3", 0).is_none());
+        assert!(super::resolve(&store, "z-ai/glm-5.3", 0).is_none());
+        // A catalog that learns the official commercial slug outranks the
+        // preview card (self-retirement).
+        let mut store = super::Store::default();
+        store.litellm.insert("glm-5.3".into(), super::Price::flat(1.0, 3.0, 0.25, 1.0));
+        let p = super::resolve(&store, "glm-5.3", 0).unwrap();
+        assert!((p.input - 1.0).abs() < 1e-9);
     }
 
     #[test]
