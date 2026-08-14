@@ -196,7 +196,8 @@ Ground rules that apply to every provider:
   Yesterday / Last 30 Days spend (with a per-model breakdown on hover)
   sit behind Show more, same as other cards.
   MiniMax-routed sessions still join the MiniMax spend slice, OpenRouter-
-  routed join OpenRouter; AihubMix and custom OpenAI-compatible URLs
+  routed join OpenRouter (including a custom URL pointed at those hosts);
+  AihubMix and other custom OpenAI-compatible URLs
   (including a custom URL that points at aihubmix.com) stay on this card.
 
 ## Ollama

@@ -734,18 +734,11 @@ fn minimax(extra: FileData) -> ProviderSpend {
 }
 
 /// Which spend slice a Hermes row belongs to. MiniMax- and OpenRouter-routed
-/// sessions join those providers' slices (they already have cards). Every
-/// other route — AihubMix, a custom OpenAI-compatible URL, Nous API — stays
-/// on the Hermes card.
-fn hermes_bucket(billing_provider: &str) -> (&'static str, &'static str) {
-    let lower = billing_provider.to_lowercase();
-    if lower.contains("minimax") {
-        ("minimax", "MiniMax")
-    } else if lower.contains("openrouter") {
-        ("openrouter", "OpenRouter")
-    } else {
-        ("hermes", "Hermes")
-    }
+/// sessions join those providers' slices (they already have cards), including
+/// a custom URL pointed at those hosts. Every other route — AihubMix, a
+/// custom OpenAI-compatible URL, Nous API — stays on the Hermes card.
+fn hermes_bucket(billing_provider: &str, billing_base_url: &str) -> (&'static str, &'static str) {
+    providers::hermes::spend_slice(billing_provider, billing_base_url)
 }
 
 /// Hermes spend, grouped per target slice. Rows are cumulative per
@@ -760,7 +753,7 @@ fn hermes() -> Vec<(&'static str, &'static str, FileData)> {
         if tokens <= 0.0 && ev.cost_usd <= 0.0 {
             continue;
         }
-        let (id, name) = hermes_bucket(&ev.billing_provider);
+        let (id, name) = hermes_bucket(&ev.billing_provider, &ev.billing_base_url);
         let data = match buckets.iter_mut().find(|(bid, _, _)| *bid == id) {
             Some((_, _, data)) => data,
             None => {
@@ -772,7 +765,11 @@ fn hermes() -> Vec<(&'static str, &'static str, FileData)> {
             add_event(data, ts, &ev.model, ev.cost_usd, tokens);
             continue;
         }
-        match pricing::lookup(&ev.model) {
+        match pricing::lookup(&providers::hermes::price_lookup_slug(
+            &ev.model,
+            &ev.billing_provider,
+            &ev.billing_base_url,
+        )) {
             Some(p) => {
                 let u = pricing::Usage {
                     input: ev.input,
@@ -1781,13 +1778,18 @@ mod tests {
 
     #[test]
     fn hermes_routes_land_in_the_right_slice() {
-        assert_eq!(hermes_bucket("minimax-oauth").0, "minimax");
-        assert_eq!(hermes_bucket("MiniMax").0, "minimax");
-        assert_eq!(hermes_bucket("openrouter").0, "openrouter");
-        assert_eq!(hermes_bucket("nous-api").0, "hermes");
-        assert_eq!(hermes_bucket("aihubmix").0, "hermes");
-        assert_eq!(hermes_bucket("custom").0, "hermes");
-        assert_eq!(hermes_bucket("").0, "hermes");
+        assert_eq!(hermes_bucket("minimax-oauth", "").0, "minimax");
+        assert_eq!(hermes_bucket("MiniMax", "").0, "minimax");
+        assert_eq!(hermes_bucket("openrouter", "").0, "openrouter");
+        assert_eq!(hermes_bucket("nous-api", "").0, "hermes");
+        assert_eq!(hermes_bucket("aihubmix", "").0, "hermes");
+        assert_eq!(hermes_bucket("custom", "").0, "hermes");
+        assert_eq!(hermes_bucket("custom", "https://aihubmix.com/v1").0, "hermes");
+        assert_eq!(
+            hermes_bucket("custom", "https://api.minimax.io/v1").0,
+            "minimax"
+        );
+        assert_eq!(hermes_bucket("", "").0, "hermes");
     }
 
     // ---- Codex: child-session replay gate --------------------------------

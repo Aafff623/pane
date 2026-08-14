@@ -710,12 +710,12 @@ fn builtin_price(canonical: &str) -> Option<Price> {
         "deepseek-v4-flash" => Some(Price::flat(0.154, 0.308, 0.003, 0.154)),
         // AihubMix GLM-5.3 preview (aihubmix.com/model/coding-glm-5.3):
         // $0.060 in / $0.220 out per MTok. No cache rate is published, so
-        // reads/writes bill at the input rate. Official commercial glm-5.3
-        // has no public rate card yet (the /model/glm-5.3 page 404s);
-        // Hermes logs both `coding-glm-5.3` and `glm-5.3` against the same
-        // aihubmix.com/v1 gateway, so they share this preview card until a
-        // catalog learns a real entry.
-        "coding-glm-5.3" | "glm-5.3" => Some(Price::flat(0.06, 0.22, 0.06, 0.06)),
+        // reads/writes bill at the input rate. Only this gateway SKU is
+        // baked — the generic vendor name `glm-5.3` is left unpriced so
+        // Z.ai / OpenRouter / other scanners don't inherit the discount.
+        // Hermes still prices its AihubMix `glm-5.3` rows by looking up
+        // this SKU (see providers::hermes::price_lookup_slug).
+        "coding-glm-5.3" => Some(Price::flat(0.06, 0.22, 0.06, 0.06)),
         "kimi-k3" | "kimi-k3-code" => Some(Price::flat(3.0, 15.0, 0.3, 3.0)),
         // Alibaba Model Studio, GA'd 2026-08-03 (USD/MTok): input $2,
         // output $6, implicit cache read $0.25, explicit cache write $2.50.
@@ -877,13 +877,17 @@ mod tests {
     #[test]
     fn glm_53_aihubmix_preview_prices() {
         let store = super::Store::default();
-        for slug in ["coding-glm-5.3", "glm-5.3", "aihubmix/coding-glm-5.3"] {
+        for slug in ["coding-glm-5.3", "aihubmix/coding-glm-5.3"] {
             let p = super::resolve(&store, slug, 0).unwrap_or_else(|| panic!("{slug} unpriced"));
             assert!((p.input - 0.06).abs() < 1e-9, "{slug}");
             assert!((p.output - 0.22).abs() < 1e-9, "{slug}");
             // No cache rate on the vendor page — unpublished → input rate.
             assert!((p.cache_read - 0.06).abs() < 1e-9, "{slug}");
         }
+        // Generic vendor name (and gateway prefixes that peel to it) stay
+        // unpriced until a catalog learns an official rate.
+        assert!(super::resolve(&store, "glm-5.3", 0).is_none());
+        assert!(super::resolve(&store, "z-ai/glm-5.3", 0).is_none());
         // A catalog that learns the official commercial slug outranks the
         // preview card (self-retirement).
         let mut store = super::Store::default();

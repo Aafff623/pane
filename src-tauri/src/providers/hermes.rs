@@ -120,11 +120,15 @@ fn display_model(model: &str) -> &str {
         .unwrap_or(model)
 }
 
+fn route_blob(provider: &str, base_url: &str) -> String {
+    format!("{} {}", provider, base_url).to_lowercase()
+}
+
 /// Human name for the backend that billed the row. A `custom` OpenAI-
 /// compatible URL that points at a known gateway still shows that gateway
 /// (Hermes labels AihubMix as `custom` when you paste the URL yourself).
 fn route_label(provider: &str, base_url: &str) -> String {
-    let blob = format!("{} {}", provider, base_url).to_lowercase();
+    let blob = route_blob(provider, base_url);
     if blob.contains("aihubmix") {
         "AihubMix".into()
     } else if blob.contains("minimax") {
@@ -137,6 +141,31 @@ fn route_label(provider: &str, base_url: &str) -> String {
         "Custom API".into()
     } else {
         provider.to_string()
+    }
+}
+
+/// Which spend slice a Hermes row belongs to. MiniMax / OpenRouter —
+/// including a custom URL pointed at those hosts — join those cards.
+/// AihubMix (named or custom URL) stays on Hermes.
+pub fn spend_slice(provider: &str, base_url: &str) -> (&'static str, &'static str) {
+    let blob = route_blob(provider, base_url);
+    if blob.contains("minimax") {
+        ("minimax", "MiniMax")
+    } else if blob.contains("openrouter") {
+        ("openrouter", "OpenRouter")
+    } else {
+        ("hermes", "Hermes")
+    }
+}
+
+/// Catalog key for this Hermes row. Bare `glm-5.3` is unpriced globally
+/// (other vendors' rates aren't AihubMix's preview); when this row went
+/// through AihubMix, look up the gateway SKU instead.
+pub fn price_lookup_slug(model: &str, provider: &str, base_url: &str) -> String {
+    if display_model(model) == "glm-5.3" && route_blob(provider, base_url).contains("aihubmix") {
+        "coding-glm-5.3".into()
+    } else {
+        model.into()
     }
 }
 
@@ -309,6 +338,44 @@ mod tests {
         assert_eq!(route_label("aihubmix", ""), "AihubMix");
         assert_eq!(route_label("minimax-oauth", ""), "MiniMax");
         assert_eq!(route_label("nous-api", ""), "Nous API");
+    }
+
+    #[test]
+    fn spend_slice_follows_custom_minimax_and_openrouter_urls() {
+        assert_eq!(spend_slice("minimax-oauth", "").0, "minimax");
+        assert_eq!(spend_slice("openrouter", "").0, "openrouter");
+        assert_eq!(spend_slice("aihubmix", "").0, "hermes");
+        assert_eq!(spend_slice("custom", "https://aihubmix.com/v1").0, "hermes");
+        assert_eq!(
+            spend_slice("custom", "https://api.minimax.io/v1").0,
+            "minimax"
+        );
+        assert_eq!(
+            spend_slice("custom", "https://openrouter.ai/api/v1").0,
+            "openrouter"
+        );
+        assert_eq!(spend_slice("custom", "https://example.com/v1").0, "hermes");
+        assert_eq!(spend_slice("nous-api", "").0, "hermes");
+        assert_eq!(spend_slice("", "").0, "hermes");
+    }
+
+    #[test]
+    fn aihubmix_glm53_looks_up_the_gateway_sku() {
+        assert_eq!(
+            price_lookup_slug("glm-5.3", "aihubmix", ""),
+            "coding-glm-5.3"
+        );
+        assert_eq!(
+            price_lookup_slug("glm-5.3", "custom", "https://aihubmix.com/v1"),
+            "coding-glm-5.3"
+        );
+        // Other routes keep the generic name (unpriced until a catalog
+        // learns it) so Z.ai / OpenRouter dollars aren't guessed.
+        assert_eq!(price_lookup_slug("glm-5.3", "nous-api", ""), "glm-5.3");
+        assert_eq!(
+            price_lookup_slug("coding-glm-5.3", "aihubmix", ""),
+            "coding-glm-5.3"
+        );
     }
 
     #[test]

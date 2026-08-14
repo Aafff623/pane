@@ -9,14 +9,16 @@
   (per-model breakdown on hover) sit behind Show more. MiniMax- and
   OpenRouter-routed sessions still join those slices; AihubMix
   (including a custom URL pointed at aihubmix.com) stays on the Hermes
-  card. No network calls — Pane reads the local ledger at
+  card; a custom URL pointed at MiniMax or OpenRouter joins those slices.
+  No network calls — Pane reads the local ledger at
   `%LOCALAPPDATA%\hermes\state.db`.
 - **GLM-5.3 spend prices from day one** — AihubMix's preview rate card
   for `coding-glm-5.3` ($0.060 in / $0.220 out per MTok; unpublished
   cache bills at the input rate) is baked in until public catalogs learn
-  the model. Hermes logs both `coding-glm-5.3` and `glm-5.3` against the
-  same gateway, so both spellings price. Gateway-prefixed DeepSeek V4
-  slugs (`accounts/fireworks/models/deepseek-v4-pro-0813`) also resolve.
+  the model. Hermes AihubMix rows logged as `glm-5.3` use that SKU;
+  the generic name stays unpriced for other vendors. Gateway-prefixed
+  DeepSeek V4 slugs (`accounts/fireworks/models/deepseek-v4-pro-0813`)
+  also resolve.
 
 ## 0.4.35 — 2026-08-13
 
