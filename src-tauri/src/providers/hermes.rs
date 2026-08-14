@@ -13,9 +13,14 @@
 
 use super::minimax::{file_stamp, snapshot_db, FileStamp};
 use super::{Metric, Snapshot};
+use std::sync::atomic::{AtomicU64, Ordering};
 
 const ID: &str = "hermes";
 const NAME: &str = "Hermes";
+
+/// Concurrent card refresh + spend scan each copy the ledger; a per-call
+/// counter keeps their temp files from colliding (same pattern as OpenCode).
+static COPY_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 #[derive(Clone)]
 pub struct HermesUsage {
@@ -158,7 +163,8 @@ pub fn collect_usage_events() -> Vec<HermesUsage> {
         }
     }
 
-    let tmp_base = std::env::temp_dir().join(format!("pane-hermes-{}", std::process::id()));
+    let n = COPY_COUNTER.fetch_add(1, Ordering::Relaxed);
+    let tmp_base = std::env::temp_dir().join(format!("pane-hermes-{}-{n}", std::process::id()));
     let tmp_db = tmp_base.with_extension("db");
     let events = snapshot_db(&db_path, &tmp_db).and_then(|()| read_usage_events(&tmp_db));
     for suffix in ["db", "db-wal", "db-shm"] {
@@ -182,16 +188,30 @@ pub fn collect_usage_events() -> Vec<HermesUsage> {
 
 fn read_usage_events(db: &std::path::Path) -> Result<Vec<HermesUsage>, String> {
     let conn = rusqlite::Connection::open(db).map_err(|e| format!("open db copy: {e}"))?;
+    // Optional columns (session_id, billing_base_url) were added as Hermes
+    // grew; a ledger from an older build must still yield tokens/cost.
+    let cols = table_columns(&conn)?;
+    let session_expr = if cols.iter().any(|c| c == "session_id") {
+        "COALESCE(session_id, '')"
+    } else {
+        "''"
+    };
+    let url_expr = if cols.iter().any(|c| c == "billing_base_url") {
+        "COALESCE(billing_base_url, '')"
+    } else {
+        "''"
+    };
     // last_seen/first_seen are epoch seconds as REAL; costs may be NULL.
+    let sql = format!(
+        "SELECT last_seen, model, billing_provider,
+                input_tokens, output_tokens, reasoning_tokens,
+                cache_read_tokens, cache_write_tokens,
+                COALESCE(actual_cost_usd, 0.0), COALESCE(estimated_cost_usd, 0.0),
+                {session_expr}, {url_expr}
+         FROM session_model_usage"
+    );
     let mut stmt = conn
-        .prepare(
-            "SELECT last_seen, model, billing_provider,
-                    input_tokens, output_tokens, reasoning_tokens,
-                    cache_read_tokens, cache_write_tokens,
-                    COALESCE(actual_cost_usd, 0.0), COALESCE(estimated_cost_usd, 0.0),
-                    COALESCE(session_id, ''), COALESCE(billing_base_url, '')
-             FROM session_model_usage",
-        )
+        .prepare(&sql)
         .map_err(|e| format!("query session_model_usage: {e}"))?;
     let rows = stmt
         .query_map([], |row| {
@@ -212,6 +232,16 @@ fn read_usage_events(db: &std::path::Path) -> Result<Vec<HermesUsage>, String> {
             })
         })
         .map_err(|e| format!("read session_model_usage: {e}"))?;
+    Ok(rows.flatten().collect())
+}
+
+fn table_columns(conn: &rusqlite::Connection) -> Result<Vec<String>, String> {
+    let mut stmt = conn
+        .prepare("PRAGMA table_info(session_model_usage)")
+        .map_err(|e| format!("pragma table_info: {e}"))?;
+    let rows = stmt
+        .query_map([], |row| row.get::<_, String>(1))
+        .map_err(|e| format!("pragma table_info rows: {e}"))?;
     Ok(rows.flatten().collect())
 }
 
@@ -288,5 +318,32 @@ mod tests {
             display_model("accounts/fireworks/models/deepseek-v4-pro-0813"),
             "deepseek-v4-pro-0813"
         );
+    }
+
+    #[test]
+    fn older_ledger_without_optional_columns_still_reads_tokens() {
+        let path =
+            std::env::temp_dir().join(format!("pane-hermes-narrow-test-{}.db", std::process::id()));
+        let _ = std::fs::remove_file(&path);
+        let conn = rusqlite::Connection::open(&path).unwrap();
+        conn.execute_batch(
+            "CREATE TABLE session_model_usage (
+                last_seen REAL, model TEXT, billing_provider TEXT,
+                input_tokens REAL, output_tokens REAL, reasoning_tokens REAL,
+                cache_read_tokens REAL, cache_write_tokens REAL,
+                actual_cost_usd REAL, estimated_cost_usd REAL
+             );
+             INSERT INTO session_model_usage VALUES
+                (1.0, 'glm-5.3', 'aihubmix', 10, 5, 0, 0, 0, 0, 0);",
+        )
+        .unwrap();
+        drop(conn);
+        let events = read_usage_events(&path).expect("narrow schema should still parse");
+        let _ = std::fs::remove_file(&path);
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].model, "glm-5.3");
+        assert_eq!(events[0].input, 10.0);
+        assert!(events[0].session_id.is_empty());
+        assert!(events[0].billing_base_url.is_empty());
     }
 }

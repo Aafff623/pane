@@ -502,22 +502,6 @@ function ensureLayout(): void {
       }
     }
   }
-  // Hermes's first local build left Today / Yesterday / Last 30 Days on
-  // the card face. Tuck them behind Show more like every other card;
-  // Last used / Via / Sessions stay visible.
-  const hermesL = layout.providers.hermes;
-  if (hermesL) {
-    for (const [label] of SPEND_KEYS) {
-      if (
-        hermesL.metricOrder.includes(label) &&
-        !hermesL.onDemand.includes(label) &&
-        !hermesL.hidden.includes(label)
-      ) {
-        hermesL.onDemand.push(label);
-        changed = true;
-      }
-    }
-  }
 
   if (config.pinned && providerFamily(config.pinned.provider) === "cursor") {
     const renamed = CURSOR_RENAMES[config.pinned.label];
