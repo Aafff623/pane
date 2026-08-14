@@ -733,10 +733,10 @@ fn minimax(extra: FileData) -> ProviderSpend {
     build_spend("minimax", "MiniMax", data)
 }
 
-/// Which spend slice a Hermes row belongs to. Hermes (Nous Research's
-/// desktop agent) routes chats through whichever backend the user connected,
-/// so its ledger rows are filed under the provider that actually billed
-/// them; routes Pane has no slice for stay under Hermes's own name.
+/// Which spend slice a Hermes row belongs to. MiniMax- and OpenRouter-routed
+/// sessions join those providers' slices (they already have cards). Every
+/// other route — AihubMix, a custom OpenAI-compatible URL, Nous API — stays
+/// on the Hermes card.
 fn hermes_bucket(billing_provider: &str) -> (&'static str, &'static str) {
     let lower = billing_provider.to_lowercase();
     if lower.contains("minimax") {
@@ -1785,6 +1785,8 @@ mod tests {
         assert_eq!(hermes_bucket("MiniMax").0, "minimax");
         assert_eq!(hermes_bucket("openrouter").0, "openrouter");
         assert_eq!(hermes_bucket("nous-api").0, "hermes");
+        assert_eq!(hermes_bucket("aihubmix").0, "hermes");
+        assert_eq!(hermes_bucket("custom").0, "hermes");
         assert_eq!(hermes_bucket("").0, "hermes");
     }
 

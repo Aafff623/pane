@@ -183,16 +183,21 @@ Ground rules that apply to every provider:
   notification); Moonshot adds Today / Yesterday / 30-day spend, model
   breakdown, and the usage trend from Kimi Code sessions.
 
-## Hermes (spend only — no card)
+## Hermes (Nous Research desktop)
 
 - **Reads:** the Hermes desktop app's local ledger
   (`%LOCALAPPDATA%\hermes\state.db`, `session_model_usage` table — model,
   billing route, token buckets, and the app's own cost per session).
-- **Calls:** nothing. This is a purely local spend source.
-- **Shows:** each session's tokens/cost in the Total Spend donut under
-  the backend that billed it — MiniMax-routed sessions join the MiniMax
-  slice, OpenRouter-routed join OpenRouter, anything else appears as a
-  Hermes slice.
+  Detected when that file exists; no API key.
+- **Calls:** nothing. This is a purely local source — Hermes records
+  ZERO cost itself, so dollars are priced from Pane's shared catalog.
+- **Shows:** a card with last-used model, which backend billed it
+  (AihubMix, MiniMax, a custom URL, …), and session count. Today /
+  Yesterday / Last 30 Days spend (with a per-model breakdown on hover)
+  sit behind Show more, same as other cards.
+  MiniMax-routed sessions still join the MiniMax spend slice, OpenRouter-
+  routed join OpenRouter; AihubMix and custom OpenAI-compatible URLs
+  (including a custom URL that points at aihubmix.com) stay on this card.
 
 ## Ollama
 

@@ -14,6 +14,7 @@ import copilotIcon from "./assets/providers/copilot.svg?raw";
 import cursorIcon from "./assets/providers/cursor.svg?raw";
 import devinIcon from "./assets/providers/devin.svg?raw";
 import grokIcon from "./assets/providers/grok.svg?raw";
+import hermesIcon from "./assets/providers/hermes.svg?raw";
 import minimaxIcon from "./assets/providers/minimax.svg?raw";
 import opencodeIcon from "./assets/providers/opencode.svg?raw";
 import openrouterIcon from "./assets/providers/openrouter.svg?raw";
@@ -36,6 +37,7 @@ const PROVIDER_ICONS: Record<string, string> = {
   cursor: cursorIcon,
   devin: devinIcon,
   grok: grokIcon,
+  hermes: hermesIcon,
   minimax: minimaxIcon,
   opencode: opencodeIcon,
   openrouter: openrouterIcon,
@@ -101,6 +103,7 @@ const RELOGIN: Record<string, string> = {
   opencode: "run `opencode auth login` in a terminal",
   antigravity: "open Antigravity and sign in again",
   ollama: "make sure Ollama is running",
+  hermes: "open the Hermes desktop app once so it writes its local ledger",
 };
 
 /// The ⚠ Outdated tooltip: what went wrong, what fixes it, and the
@@ -205,6 +208,7 @@ const ALL_PROVIDERS: [string, string][] = [
   ["kilo", "Kilo"],
   ["aihubmix", "AihubMix"],
   ["qwen", "Qwen Code"],
+  ["hermes", "Hermes"],
 ];
 
 // Same quick links the Mac app ships (status pages + vendor dashboards).
@@ -253,6 +257,7 @@ const PROVIDER_LINKS: Record<string, { label: string; url: string }[]> = {
   ollama: [{ label: "Library", url: "https://ollama.com/library" }],
   codebuff: [{ label: "Dashboard", url: "https://www.codebuff.com/profile" }],
   kilo: [{ label: "Dashboard", url: "https://app.kilo.ai/" }],
+  hermes: [{ label: "Site", url: "https://hermes-agent.com/" }],
 };
 
 // Brand palette for the Total Spend ring (Mac parity); unknown providers
@@ -497,6 +502,23 @@ function ensureLayout(): void {
       }
     }
   }
+  // Hermes's first local build left Today / Yesterday / Last 30 Days on
+  // the card face. Tuck them behind Show more like every other card;
+  // Last used / Via / Sessions stay visible.
+  const hermesL = layout.providers.hermes;
+  if (hermesL) {
+    for (const [label] of SPEND_KEYS) {
+      if (
+        hermesL.metricOrder.includes(label) &&
+        !hermesL.onDemand.includes(label) &&
+        !hermesL.hidden.includes(label)
+      ) {
+        hermesL.onDemand.push(label);
+        changed = true;
+      }
+    }
+  }
+
   if (config.pinned && providerFamily(config.pinned.provider) === "cursor") {
     const renamed = CURSOR_RENAMES[config.pinned.label];
     const to = renamed ?? (totalIsText && config.pinned.label === "Total usage" ? "Cursor Models" : null);
@@ -2317,6 +2339,7 @@ async function refresh(force = false): Promise<void> {
   const spend = await spendPromise;
   spendLoaded = true;
   if (spend) lastSpend = spend;
+  if (lastSnapshots.length) ensureLayout();
   if (!customizeOpen && lastSnapshots.length) renderIfVisible();
   refreshing = false;
 }

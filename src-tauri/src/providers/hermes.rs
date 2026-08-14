@@ -1,20 +1,29 @@
-//! Hermes desktop (Nous Research) — spend source only, no provider card.
+//! Hermes desktop (Nous Research) — local ledger card + spend source.
 //!
 //! Hermes keeps a local ledger at %LOCALAPPDATA%\hermes\state.db: the
 //! `session_model_usage` table has one row per (session, model, billing
 //! route) with cumulative token buckets, the app's own cost fields, and
 //! first/last-seen stamps. Hermes can route the same chat through several
-//! backends (MiniMax OAuth, OpenRouter, …), so each row carries the
-//! billing provider — the spend scanner uses it to file tokens under the
-//! provider that actually served them.
+//! backends (MiniMax OAuth, OpenRouter, AihubMix, a custom OpenAI-compatible
+//! URL, …). The spend scanner files MiniMax/OpenRouter rows under those
+//! slices; everything else — including AihubMix, whether Hermes labeled
+//! it `aihubmix` or `custom` pointed at aihubmix.com — stays on the
+//! Hermes card. Hermes records ZERO cost itself, so dollars come from
+//! the shared pricing catalog.
 
 use super::minimax::{file_stamp, snapshot_db, FileStamp};
+use super::{Metric, Snapshot};
+
+const ID: &str = "hermes";
+const NAME: &str = "Hermes";
 
 #[derive(Clone)]
 pub struct HermesUsage {
     pub ts_ms: i64,
     pub model: String,
     pub billing_provider: String,
+    pub billing_base_url: String,
+    pub session_id: String,
     pub input: f64,
     pub output: f64,
     pub reasoning: f64,
@@ -29,13 +38,112 @@ fn state_db_path() -> Option<std::path::PathBuf> {
     dirs::data_local_dir().map(|d| d.join("hermes").join("state.db"))
 }
 
+pub async fn snapshot() -> Snapshot {
+    fetch()
+}
+
+fn fetch() -> Snapshot {
+    let Some(db_path) = state_db_path() else {
+        return Snapshot::no_credentials(
+            ID,
+            NAME,
+            "Install the Hermes desktop app (Nous Research) — Pane reads its local ledger.",
+        );
+    };
+    if !db_path.exists() {
+        return Snapshot::no_credentials(
+            ID,
+            NAME,
+            "Install the Hermes desktop app (Nous Research) — Pane reads its local ledger.",
+        );
+    }
+    let events = collect_usage_events();
+    Snapshot::ok(
+        ID,
+        NAME,
+        Some("Desktop".into()),
+        metrics_from_events(&events),
+    )
+}
+
+/// Card face: last model, which backend billed it, how many sessions.
+/// Dollar totals live on the spend rows (Today / Yesterday / Last 30 Days)
+/// so these labels must not collide with those names.
+fn metrics_from_events(events: &[HermesUsage]) -> Vec<Metric> {
+    let mut metrics = Vec::new();
+    let last = events.iter().max_by_key(|e| e.ts_ms);
+    match last {
+        Some(ev) if !ev.model.is_empty() => {
+            metrics.push(Metric::text(
+                "Last used",
+                display_model(&ev.model).to_string(),
+            ));
+            metrics.push(Metric::text(
+                "Via",
+                route_label(&ev.billing_provider, &ev.billing_base_url),
+            ));
+        }
+        _ => metrics.push(Metric::text("Last used", "None yet".into())),
+    }
+    let sessions = unique_sessions(events);
+    if sessions > 0 {
+        metrics.push(Metric::text("Sessions", sessions.to_string()));
+    }
+    metrics
+}
+
+fn unique_sessions(events: &[HermesUsage]) -> usize {
+    let mut seen = std::collections::HashSet::new();
+    for e in events {
+        if !e.session_id.is_empty() {
+            seen.insert(e.session_id.as_str());
+        }
+    }
+    if seen.is_empty() {
+        events.len()
+    } else {
+        seen.len()
+    }
+}
+
+/// Last path segment so gateway-prefixed slugs stay readable on the card.
+fn display_model(model: &str) -> &str {
+    model
+        .rsplit('/')
+        .next()
+        .filter(|s| !s.is_empty())
+        .unwrap_or(model)
+}
+
+/// Human name for the backend that billed the row. A `custom` OpenAI-
+/// compatible URL that points at a known gateway still shows that gateway
+/// (Hermes labels AihubMix as `custom` when you paste the URL yourself).
+fn route_label(provider: &str, base_url: &str) -> String {
+    let blob = format!("{} {}", provider, base_url).to_lowercase();
+    if blob.contains("aihubmix") {
+        "AihubMix".into()
+    } else if blob.contains("minimax") {
+        "MiniMax".into()
+    } else if blob.contains("openrouter") {
+        "OpenRouter".into()
+    } else if blob.contains("nous") {
+        "Nous API".into()
+    } else if provider.is_empty() || provider.eq_ignore_ascii_case("custom") {
+        "Custom API".into()
+    } else {
+        provider.to_string()
+    }
+}
+
 /// Per-session-per-model usage from Hermes's local store. Cached on the
 /// (db, WAL) stamps; a busy/locked db serves the last good events.
 pub fn collect_usage_events() -> Vec<HermesUsage> {
     use std::sync::Mutex;
     static CACHE: Mutex<Option<(FileStamp, FileStamp, Vec<HermesUsage>)>> = Mutex::new(None);
 
-    let Some(db_path) = state_db_path() else { return Vec::new() };
+    let Some(db_path) = state_db_path() else {
+        return Vec::new();
+    };
     if !db_path.exists() {
         return Vec::new();
     }
@@ -80,7 +188,8 @@ fn read_usage_events(db: &std::path::Path) -> Result<Vec<HermesUsage>, String> {
             "SELECT last_seen, model, billing_provider,
                     input_tokens, output_tokens, reasoning_tokens,
                     cache_read_tokens, cache_write_tokens,
-                    COALESCE(actual_cost_usd, 0.0), COALESCE(estimated_cost_usd, 0.0)
+                    COALESCE(actual_cost_usd, 0.0), COALESCE(estimated_cost_usd, 0.0),
+                    COALESCE(session_id, ''), COALESCE(billing_base_url, '')
              FROM session_model_usage",
         )
         .map_err(|e| format!("query session_model_usage: {e}"))?;
@@ -98,8 +207,86 @@ fn read_usage_events(db: &std::path::Path) -> Result<Vec<HermesUsage>, String> {
                 cache_read: row.get::<_, f64>(6).unwrap_or(0.0),
                 cache_write: row.get::<_, f64>(7).unwrap_or(0.0),
                 cost_usd: if actual > 0.0 { actual } else { estimated },
+                session_id: row.get::<_, String>(10).unwrap_or_default(),
+                billing_base_url: row.get::<_, String>(11).unwrap_or_default(),
             })
         })
         .map_err(|e| format!("read session_model_usage: {e}"))?;
     Ok(rows.flatten().collect())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn ev(ts: i64, model: &str, provider: &str, url: &str, session: &str) -> HermesUsage {
+        HermesUsage {
+            ts_ms: ts,
+            model: model.into(),
+            billing_provider: provider.into(),
+            billing_base_url: url.into(),
+            session_id: session.into(),
+            input: 1.0,
+            output: 1.0,
+            reasoning: 0.0,
+            cache_read: 0.0,
+            cache_write: 0.0,
+            cost_usd: 0.0,
+        }
+    }
+
+    #[test]
+    fn empty_ledger_still_has_a_last_used_row() {
+        let m = metrics_from_events(&[]);
+        assert_eq!(m[0].label, "Last used");
+        assert_eq!(m[0].value.as_deref(), Some("None yet"));
+        assert_eq!(m.len(), 1);
+    }
+
+    #[test]
+    fn card_shows_latest_model_gateway_and_session_count() {
+        let events = [
+            ev(1, "glm-5.3", "aihubmix", "https://aihubmix.com/v1", "s1"),
+            ev(
+                9,
+                "accounts/fireworks/models/deepseek-v4-pro-0813",
+                "custom",
+                "https://aihubmix.com/v1/",
+                "s2",
+            ),
+            ev(
+                5,
+                "coding-glm-5.3",
+                "custom",
+                "https://aihubmix.com/v1",
+                "s1",
+            ),
+        ];
+        let m = metrics_from_events(&events);
+        assert_eq!(m[0].value.as_deref(), Some("deepseek-v4-pro-0813"));
+        assert_eq!(m[1].label, "Via");
+        assert_eq!(m[1].value.as_deref(), Some("AihubMix"));
+        assert_eq!(m[2].label, "Sessions");
+        assert_eq!(m[2].value.as_deref(), Some("2"));
+    }
+
+    #[test]
+    fn custom_url_without_a_known_host_stays_custom() {
+        assert_eq!(
+            route_label("custom", "https://example.com/v1"),
+            "Custom API"
+        );
+        assert_eq!(route_label("aihubmix", ""), "AihubMix");
+        assert_eq!(route_label("minimax-oauth", ""), "MiniMax");
+        assert_eq!(route_label("nous-api", ""), "Nous API");
+    }
+
+    #[test]
+    fn display_model_peels_gateway_prefixes() {
+        assert_eq!(display_model("coding-glm-5.3"), "coding-glm-5.3");
+        assert_eq!(
+            display_model("accounts/fireworks/models/deepseek-v4-pro-0813"),
+            "deepseek-v4-pro-0813"
+        );
+    }
 }
