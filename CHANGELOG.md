@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.4.36 — 2026-08-14
+
 ### Added
 - **Hermes desktop card** — Nous Research's Hermes app now has a provider
   card like the others: last model used, which backend billed it, and
