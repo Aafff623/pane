@@ -44,6 +44,27 @@ pub fn auth_entry_key(entry: &str) -> Option<String> {
         .map(str::to_string)
 }
 
+/// Pane's own scratch directory for database copies. It lives under the
+/// per-user config dir instead of the machine-wide temp dir, so another local
+/// user can neither read the copy nor pre-plant a symlink at its path.
+fn scratch_dir() -> Result<PathBuf, String> {
+    let dir = super::config_dir().join("tmp");
+    std::fs::create_dir_all(&dir).map_err(|e| format!("create scratch dir: {e}"))?;
+    Ok(dir)
+}
+
+/// Copies `src` to `dst`, refusing to write when `dst` already exists so an
+/// existing file or symlink is never followed or truncated.
+fn copy_new(src: &Path, dst: &Path) -> std::io::Result<()> {
+    let mut from = std::fs::File::open(src)?;
+    let mut to = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(dst)?;
+    std::io::copy(&mut from, &mut to)?;
+    Ok(())
+}
+
 /// Runs `f` against a private copy of opencode.db (plus its write-ahead-log
 /// files) so we never touch the live copy a running OpenCode holds open.
 /// The unique counter keeps concurrent readers (usage + spend) apart.
@@ -53,13 +74,18 @@ fn with_db_copy<T>(f: impl FnOnce(&Path) -> Result<T, String>) -> Result<T, Stri
         return Err("opencode.db not found — has OpenCode been used on this PC?".into());
     }
     let n = COPY_COUNTER.fetch_add(1, Ordering::Relaxed);
-    let tmp_base = std::env::temp_dir().join(format!("openusage-oc-{}-{n}", std::process::id()));
+    let stamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or_default();
+    let tmp_base =
+        scratch_dir()?.join(format!("openusage-oc-{}-{n}-{stamp:x}", std::process::id()));
     let tmp_db = tmp_base.with_extension("db");
-    std::fs::copy(&db_path, &tmp_db).map_err(|e| format!("copy opencode.db: {e}"))?;
+    copy_new(&db_path, &tmp_db).map_err(|e| format!("copy opencode.db: {e}"))?;
     for suffix in ["db-wal", "db-shm"] {
         let side = db_path.with_extension(suffix);
         if side.exists() {
-            let _ = std::fs::copy(&side, tmp_base.with_extension(suffix));
+            let _ = copy_new(&side, &tmp_base.with_extension(suffix));
         }
     }
 
