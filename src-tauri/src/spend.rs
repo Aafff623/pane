@@ -315,22 +315,54 @@ fn build_spend(id: impl Into<String>, name: impl Into<String>, data: FileData) -
     sp
 }
 
+/// How deep below a scan root directories are visited. Session logs nest a
+/// handful of levels at most; the cap keeps a pathological tree from turning
+/// the walk into an unbounded crawl.
+const MAX_SCAN_DEPTH: usize = 16;
+
+/// Upper bound on directories inspected per scan root, so a link into a huge
+/// tree (or `/`) can't stall the refresh thread.
+const MAX_SCAN_DIRS: usize = 20_000;
+
 /// All .jsonl files under `root` modified in the last 31 days.
-/// Symlinks and junctions are followed throughout: `is_dir()` resolves
-/// links when recursing, and the recency check below reads the *target*
-/// file's mtime — a link's own (usually ancient) timestamp must not hide
-/// logs a user relocated to another drive.
+/// Symlinks and junctions are followed throughout: directories are resolved
+/// through links when recursing, and the recency check below reads the
+/// *target* file's mtime — a link's own (usually ancient) timestamp must not
+/// hide logs a user relocated to another drive.
+///
+/// Because links are followed, the walk is iterative and bounded: it stops at
+/// `MAX_SCAN_DEPTH` levels, visits at most `MAX_SCAN_DIRS` directories, and
+/// skips canonical paths already seen, so a link cycle can't spin forever.
 fn recent_jsonl_files(root: &Path, out: &mut Vec<PathBuf>) {
-    let Ok(entries) = fs::read_dir(root) else { return };
     let cutoff = SystemTime::now() - Duration::from_secs(31 * 86_400);
-    for entry in entries.flatten() {
-        let path = entry.path();
-        if path.is_dir() {
-            recent_jsonl_files(&path, out);
-        } else if path.extension().is_some_and(|e| e == "jsonl") {
-            if let Ok(meta) = fs::metadata(&path) {
-                if meta.modified().map(|m| m >= cutoff).unwrap_or(true) {
-                    out.push(path);
+    let mut seen: HashSet<PathBuf> = HashSet::new();
+    let mut stack: Vec<(PathBuf, usize)> = Vec::new();
+    let mut dirs_visited = 0usize;
+
+    seen.insert(fs::canonicalize(root).unwrap_or_else(|_| root.to_path_buf()));
+    stack.push((root.to_path_buf(), 0));
+
+    while let Some((dir, depth)) = stack.pop() {
+        dirs_visited += 1;
+        if dirs_visited > MAX_SCAN_DIRS {
+            return;
+        }
+        let Ok(entries) = fs::read_dir(&dir) else { continue };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                if depth + 1 > MAX_SCAN_DEPTH {
+                    continue;
+                }
+                let canonical = fs::canonicalize(&path).unwrap_or_else(|_| path.clone());
+                if seen.insert(canonical) {
+                    stack.push((path, depth + 1));
+                }
+            } else if path.extension().is_some_and(|e| e == "jsonl") {
+                if let Ok(meta) = fs::metadata(&path) {
+                    if meta.modified().map(|m| m >= cutoff).unwrap_or(true) {
+                        out.push(path);
+                    }
                 }
             }
         }
@@ -1739,6 +1771,29 @@ mod tests {
 
     fn cost_sum(d: &FileData) -> f64 {
         d.days.values().map(|v| v.0).sum()
+    }
+
+    // ---- Log scan: bounded walk ------------------------------------------
+
+    #[test]
+    fn scan_stops_at_the_depth_cap() {
+        let base = std::env::temp_dir()
+            .join(format!("pane-scan-depth-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&base);
+        let mut deep = base.clone();
+        for i in 0..MAX_SCAN_DEPTH + 4 {
+            deep = deep.join(format!("d{i}"));
+        }
+        fs::create_dir_all(&deep).unwrap();
+        fs::write(base.join("top.jsonl"), "{}").unwrap();
+        fs::write(deep.join("too-deep.jsonl"), "{}").unwrap();
+
+        let mut out = Vec::new();
+        recent_jsonl_files(&base, &mut out);
+        let _ = fs::remove_dir_all(&base);
+
+        assert!(out.iter().any(|p| p.ends_with("top.jsonl")));
+        assert!(!out.iter().any(|p| p.ends_with("too-deep.jsonl")));
     }
 
     // ---- Persistent cache: serialization roundtrip -----------------------
