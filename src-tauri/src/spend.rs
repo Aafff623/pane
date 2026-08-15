@@ -335,6 +335,10 @@ const MAX_SCAN_DIRS: usize = 20_000;
 /// skips canonical paths already seen, so a link cycle can't spin forever.
 fn recent_jsonl_files(root: &Path, out: &mut Vec<PathBuf>) {
     let cutoff = SystemTime::now() - Duration::from_secs(31 * 86_400);
+    // Canonical paths of link targets already entered. Cycles and aliases can
+    // only form through links, so plain directories skip the canonicalize —
+    // on Windows it opens a real handle per directory (plus an antivirus
+    // round-trip), which made every refresh crawl on big log trees.
     let mut seen: HashSet<PathBuf> = HashSet::new();
     let mut stack: Vec<(PathBuf, usize)> = Vec::new();
     let mut dirs_visited = 0usize;
@@ -354,19 +358,38 @@ fn recent_jsonl_files(root: &Path, out: &mut Vec<PathBuf>) {
         let Ok(entries) = fs::read_dir(&dir) else { continue };
         for entry in entries.flatten() {
             let path = entry.path();
-            if path.is_dir() {
+            // The listing itself carries the entry type (free on Windows —
+            // no extra stat). Symlinks/junctions report as symlink here, not
+            // as their target type.
+            let Ok(ftype) = entry.file_type() else { continue };
+            if ftype.is_dir() {
                 if depth + 1 > MAX_SCAN_DEPTH {
                     continue;
                 }
-                let canonical = fs::canonicalize(&path).unwrap_or_else(|_| path.clone());
-                if seen.insert(canonical) {
-                    stack.push((path, depth + 1));
+                stack.push((path, depth + 1));
+            } else if ftype.is_symlink() {
+                // Links still resolve (relocated logs must be found), but
+                // only they pay for canonicalize and the seen-set gate.
+                let Ok(meta) = fs::metadata(&path) else { continue };
+                if meta.is_dir() {
+                    if depth + 1 > MAX_SCAN_DEPTH {
+                        continue;
+                    }
+                    let canonical = fs::canonicalize(&path).unwrap_or_else(|_| path.clone());
+                    if seen.insert(canonical) {
+                        stack.push((path, depth + 1));
+                    }
+                } else if path.extension().is_some_and(|e| e == "jsonl")
+                    && meta.modified().map(|m| m >= cutoff).unwrap_or(true)
+                {
+                    // Target metadata, so a link's own ancient mtime can't
+                    // hide a recently written log.
+                    out.push(path);
                 }
             } else if path.extension().is_some_and(|e| e == "jsonl") {
-                if let Ok(meta) = fs::metadata(&path) {
-                    if meta.modified().map(|m| m >= cutoff).unwrap_or(true) {
-                        out.push(path);
-                    }
+                let Ok(meta) = entry.metadata() else { continue };
+                if meta.modified().map(|m| m >= cutoff).unwrap_or(true) {
+                    out.push(path);
                 }
             }
         }

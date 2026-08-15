@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+### Fixed
+- **Refreshes are fast again — sorry 0.4.37 made Pane laggy and slow.**
+  That release's bounded log walk resolved every directory it visited to
+  its canonical path, and on Windows that opens a real handle per
+  directory (with an antivirus round-trip on each), so opening Pane
+  crawled and "Scanning session logs…" could sit for over a minute on
+  every refresh. Sorry for the inconvenience. Only symlinks and
+  junctions pay that cost now — they're the only way a scan cycle can
+  form — and regular files and folders are typed straight from the
+  directory listing with no extra system calls. The 0.4.37 protections
+  (depth cap, directory budget, cycle detection, link-target
+  timestamps) all still hold.
+
 ## 0.4.37 — 2026-08-15
 
 ### Security
