@@ -46,10 +46,16 @@ pub fn auth_entry_key(entry: &str) -> Option<String> {
 
 /// Pane's own scratch directory for database copies. It lives under the
 /// per-user config dir instead of the machine-wide temp dir, so another local
-/// user can neither read the copy nor pre-plant a symlink at its path.
+/// user cannot pre-plant a symlink at its path; on unix the dir is also
+/// clamped to 0o700 so the copy stays unreadable to other accounts.
 fn scratch_dir() -> Result<PathBuf, String> {
     let dir = super::config_dir().join("tmp");
     std::fs::create_dir_all(&dir).map_err(|e| format!("create scratch dir: {e}"))?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700));
+    }
     sweep_stale(&dir);
     Ok(dir)
 }
@@ -84,7 +90,11 @@ fn copy_new(src: &Path, dst: &Path) -> std::io::Result<()> {
         .write(true)
         .create_new(true)
         .open(dst)?;
-    std::io::copy(&mut from, &mut to)?;
+    if let Err(e) = std::io::copy(&mut from, &mut to) {
+        drop(to);
+        let _ = std::fs::remove_file(dst);
+        return Err(e);
+    }
     Ok(())
 }
 
