@@ -50,7 +50,30 @@ pub fn auth_entry_key(entry: &str) -> Option<String> {
 fn scratch_dir() -> Result<PathBuf, String> {
     let dir = super::config_dir().join("tmp");
     std::fs::create_dir_all(&dir).map_err(|e| format!("create scratch dir: {e}"))?;
+    sweep_stale(&dir);
     Ok(dir)
+}
+
+/// Deletes copies a crashed or killed run left behind, so nothing accumulates
+/// in the config dir now that names are never reused. An hour is far longer
+/// than any query, so a live copy is never pulled out from under a reader.
+fn sweep_stale(dir: &Path) {
+    const MAX_AGE: std::time::Duration = std::time::Duration::from_secs(3600);
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        if !entry.file_name().to_string_lossy().starts_with("openusage-oc-") {
+            continue;
+        }
+        let stale = entry
+            .metadata()
+            .and_then(|m| m.modified())
+            .is_ok_and(|t| t.elapsed().is_ok_and(|age| age > MAX_AGE));
+        if stale {
+            let _ = std::fs::remove_file(entry.path());
+        }
+    }
 }
 
 /// Copies `src` to `dst`, refusing to write when `dst` already exists so an
