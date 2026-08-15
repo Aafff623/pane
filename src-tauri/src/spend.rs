@@ -335,9 +335,18 @@ const MAX_SCAN_DIRS: usize = 20_000;
 /// skips canonical paths already seen, so a link cycle can't spin forever.
 fn recent_jsonl_files(root: &Path, out: &mut Vec<PathBuf>) {
     let cutoff = SystemTime::now() - Duration::from_secs(31 * 86_400);
+    // Canonical paths of link targets already entered. Cycles and aliases can
+    // only form through links, so plain directories skip the canonicalize —
+    // on Windows it opens a real handle per directory (plus an antivirus
+    // round-trip), which made every refresh crawl on big log trees.
     let mut seen: HashSet<PathBuf> = HashSet::new();
     let mut stack: Vec<(PathBuf, usize)> = Vec::new();
     let mut dirs_visited = 0usize;
+    // Set when any link is traversed: a link can alias a subtree that is
+    // also reached directly, so only then do the collected files need a
+    // canonical-identity dedup (below). Link-free trees pay nothing.
+    let mut followed_link = false;
+    let first_new = out.len();
 
     seen.insert(fs::canonicalize(root).unwrap_or_else(|_| root.to_path_buf()));
     stack.push((root.to_path_buf(), 0));
@@ -354,20 +363,56 @@ fn recent_jsonl_files(root: &Path, out: &mut Vec<PathBuf>) {
         let Ok(entries) = fs::read_dir(&dir) else { continue };
         for entry in entries.flatten() {
             let path = entry.path();
-            if path.is_dir() {
+            // The listing itself carries the entry type (free on Windows —
+            // no extra stat). Symlinks/junctions report as symlink here, not
+            // as their target type.
+            let Ok(ftype) = entry.file_type() else { continue };
+            if ftype.is_dir() {
                 if depth + 1 > MAX_SCAN_DEPTH {
                     continue;
                 }
-                let canonical = fs::canonicalize(&path).unwrap_or_else(|_| path.clone());
-                if seen.insert(canonical) {
-                    stack.push((path, depth + 1));
+                stack.push((path, depth + 1));
+            } else if ftype.is_symlink() {
+                // Links still resolve (relocated logs must be found), but
+                // only they pay for canonicalize and the seen-set gate.
+                let Ok(meta) = fs::metadata(&path) else { continue };
+                if meta.is_dir() {
+                    if depth + 1 > MAX_SCAN_DEPTH {
+                        continue;
+                    }
+                    let canonical = fs::canonicalize(&path).unwrap_or_else(|_| path.clone());
+                    if seen.insert(canonical) {
+                        followed_link = true;
+                        stack.push((path, depth + 1));
+                    }
+                } else if path.extension().is_some_and(|e| e == "jsonl")
+                    && meta.modified().map(|m| m >= cutoff).unwrap_or(true)
+                {
+                    // Target metadata, so a link's own ancient mtime can't
+                    // hide a recently written log.
+                    followed_link = true;
+                    out.push(path);
                 }
             } else if path.extension().is_some_and(|e| e == "jsonl") {
-                if let Ok(meta) = fs::metadata(&path) {
-                    if meta.modified().map(|m| m >= cutoff).unwrap_or(true) {
-                        out.push(path);
-                    }
+                let Ok(meta) = entry.metadata() else { continue };
+                if meta.modified().map(|m| m >= cutoff).unwrap_or(true) {
+                    out.push(path);
                 }
+            }
+        }
+    }
+
+    // A traversed link may alias a subtree that was also walked directly
+    // (either order), which would list — and count — the same log twice
+    // under two spellings. Dedup by canonical identity, keeping the first
+    // spelling so codex's sessions/-relative dedup keeps working.
+    if followed_link {
+        let tail: Vec<PathBuf> = out.split_off(first_new);
+        let mut identities: HashSet<PathBuf> = HashSet::new();
+        for path in tail {
+            let id = fs::canonicalize(&path).unwrap_or_else(|_| path.clone());
+            if identities.insert(id) {
+                out.push(path);
             }
         }
     }
@@ -1798,6 +1843,37 @@ mod tests {
 
         assert!(out.iter().any(|p| p.ends_with("top.jsonl")));
         assert!(!out.iter().any(|p| p.ends_with("too-deep.jsonl")));
+    }
+
+    /// A junction is followed (std reports NTFS mount points as symlinks),
+    /// and a subtree reachable both directly and through the junction still
+    /// counts each log exactly once.
+    #[test]
+    #[cfg(windows)]
+    fn junction_alias_counts_each_log_once() {
+        let base = std::env::temp_dir()
+            .join(format!("pane-scan-junction-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&base);
+        let real = base.join("real");
+        fs::create_dir_all(&real).unwrap();
+        fs::write(real.join("session.jsonl"), "{}").unwrap();
+        let link = base.join("alias");
+        let status = std::process::Command::new("cmd")
+            .args(["/C", "mklink", "/J"])
+            .arg(&link)
+            .arg(&real)
+            .status();
+        if !status.map(|s| s.success()).unwrap_or(false) {
+            let _ = fs::remove_dir_all(&base);
+            return; // mklink unavailable in this environment — skip
+        }
+
+        let mut out = Vec::new();
+        recent_jsonl_files(&base, &mut out);
+        let _ = fs::remove_dir_all(&base);
+
+        let hits = out.iter().filter(|p| p.ends_with("session.jsonl")).count();
+        assert_eq!(hits, 1, "aliased log counted {hits} times: {out:?}");
     }
 
     // ---- Persistent cache: serialization roundtrip -----------------------
