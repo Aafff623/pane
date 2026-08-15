@@ -345,6 +345,10 @@ fn recent_jsonl_files(root: &Path, out: &mut Vec<PathBuf>) {
     while let Some((dir, depth)) = stack.pop() {
         dirs_visited += 1;
         if dirs_visited > MAX_SCAN_DIRS {
+            eprintln!(
+                "[pane] spend: scan of {} stopped after {MAX_SCAN_DIRS} directories — results may be partial",
+                root.display()
+            );
             return;
         }
         let Ok(entries) = fs::read_dir(&dir) else { continue };
