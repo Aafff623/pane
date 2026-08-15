@@ -1165,16 +1165,57 @@ fn open_link(app: tauri::AppHandle, url: String) -> Result<(), String> {
         .map_err(|e| format!("open link: {e}"))
 }
 
+/// A share card is a few hundred KB of PNG at 2x scale; 8 MB of base64
+/// (6 MB decoded) leaves generous headroom while bounding what any code
+/// running in the WebView can hand us.
+const MAX_SHARE_PNG_BASE64: usize = 8 * 1024 * 1024;
+/// Raw RGBA is 4 bytes per pixel, so 16 M pixels caps the expansion at
+/// 64 MB. Real cards are ~1200x2400 (≈3 M pixels).
+const MAX_SHARE_PNG_PIXELS: u64 = 16_000_000;
+
+/// Reads width/height out of a PNG's IHDR chunk, which is always the first
+/// chunk right after the 8-byte signature. Checking the declared dimensions
+/// *before* handing the bytes to a decoder is what keeps a decompression
+/// bomb (tiny file, billions of pixels) from being expanded at all.
+fn png_dimensions(bytes: &[u8]) -> Result<(u32, u32), String> {
+    const SIG: [u8; 8] = [0x89, b'P', b'N', b'G', 0x0d, 0x0a, 0x1a, 0x0a];
+    if bytes.len() < 24 || bytes[..8] != SIG || &bytes[12..16] != b"IHDR" {
+        return Err("not a PNG".into());
+    }
+    let w = u32::from_be_bytes([bytes[16], bytes[17], bytes[18], bytes[19]]);
+    let h = u32::from_be_bytes([bytes[20], bytes[21], bytes[22], bytes[23]]);
+    if w == 0 || h == 0 {
+        return Err("empty image".into());
+    }
+    Ok((w, h))
+}
+
 /// Puts a share-card PNG (rendered by the frontend on a canvas) onto the
 /// Windows clipboard as a real image.
+///
+/// Every command is callable by whatever JavaScript runs in the WebView, so
+/// the encoded size and the declared pixel count are both bounded before any
+/// decoding happens — otherwise a crafted PNG could force a multi-gigabyte
+/// RGBA allocation and take the tray process down.
 #[tauri::command]
 fn copy_share_image(png_base64: String) -> Result<(), String> {
     use base64::Engine;
+    let png_base64 = png_base64.trim();
+    if png_base64.len() > MAX_SHARE_PNG_BASE64 {
+        return Err("share image too large".into());
+    }
     let bytes = base64::engine::general_purpose::STANDARD
-        .decode(png_base64.trim())
+        .decode(png_base64)
         .map_err(|e| format!("decode png: {e}"))?;
+    let (dw, dh) = png_dimensions(&bytes)?;
+    if u64::from(dw) * u64::from(dh) > MAX_SHARE_PNG_PIXELS {
+        return Err("share image too large".into());
+    }
     let img = tauri::image::Image::from_bytes(&bytes).map_err(|e| format!("parse png: {e}"))?;
     let (w, h) = (img.width() as usize, img.height() as usize);
+    if w != dw as usize || h != dh as usize {
+        return Err("share image dimensions mismatch".into());
+    }
     let rgba = img.rgba().to_vec();
     let mut clipboard = arboard::Clipboard::new().map_err(|e| format!("clipboard: {e}"))?;
     clipboard
