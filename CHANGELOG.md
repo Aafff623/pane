@@ -2,6 +2,27 @@
 
 ## Unreleased
 
+## 0.4.37 — 2026-08-15
+
+### Security
+- **Local log scan can't be turned into a crash or a hang** — the
+  recursive `.jsonl` sweep every spend scanner shares followed symlinks
+  and junctions with no depth limit and no visited set, so a link cycle
+  under a scanned log root (roots come from the CLIs' own `*_CONFIG_DIR`
+  / `*_HOME` variables) grew the call stack until the process aborted,
+  and a link pointing at a huge tree turned a project folder into a
+  drive-wide crawl. The walk is now iterative and bounded: 16 levels
+  deep, 20,000 directories per root (logged when it stops there), and
+  already-seen canonical directories are skipped. Relocated logs behind
+  a link are still found.
+- **Share-card decode is bounded** — copying a share card now caps the
+  base64 payload and the PNG's declared pixel count before decoding, so
+  a decompression-bomb image can't force a multi-gigabyte allocation.
+- **OpenCode's database copy is private** — the scratch copy Pane makes
+  of `opencode.db` now lands in a per-user directory with restricted
+  permissions, partial copies are discarded, and scratch files left by a
+  crashed run are swept.
+
 ## 0.4.36 — 2026-08-14
 
 ### Added
