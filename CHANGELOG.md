@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.4.38 — 2026-08-15
+
 ### Fixed
 - **Refreshes are fast again — sorry 0.4.37 made Pane laggy and slow.**
   That release's bounded log walk resolved every directory it visited to
