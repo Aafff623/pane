@@ -94,6 +94,14 @@ pub fn evaluate(snapshots: &[Snapshot], cfg: &Value) -> Vec<Alert> {
 
     for snapshot in snapshots.iter().filter(|s| s.status == "ok") {
         for metric in snapshot.metrics.iter().filter(|m| m.kind == "progress") {
+            // Restored Kimi API rows are last-known, not live — don't
+            // fire Almost Out off a wallet timeout.
+            if snapshot.id == "kimi"
+                && snapshot.warning.is_some()
+                && matches!(metric.label.as_str(), "API" | "Credits used")
+            {
+                continue;
+            }
             let Some(used) = metric.used_percent else { continue };
             let key = format!("{}:{}", snapshot.id, metric.label);
             let entry = map.entry(key).or_default();

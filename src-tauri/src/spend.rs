@@ -1692,8 +1692,10 @@ fn qwen() -> ProviderSpend {
 }
 
 /// Kimi Code spend: CLI sessions under ~/.kimi-code/sessions — each
-/// agent's wire.jsonl logs one usage.record per turn. Lives on the plan
-/// card (not Moonshot PAYG).
+/// agent's wire.jsonl logs one usage.record per turn. Files on the plan
+/// card when that login exists; otherwise they stay on Moonshot so
+/// API-only installs (and leftover logs with no `kimi login`) don't lose
+/// the dollars to a disabled no-credentials Kimi card.
 fn kimi() -> ProviderSpend {
     let root = providers::kimi::code_home().join("sessions");
     let mut files = Vec::new();
@@ -1703,7 +1705,16 @@ fn kimi() -> ProviderSpend {
         let data = file_days(&file, &mut |line, data| kimi_line(line, data));
         merge_data(&mut all, data);
     }
-    build_spend("kimi", "Kimi Code", all)
+    let (id, name) = kimi_spend_target(providers::kimi::has_login());
+    build_spend(id, name, all)
+}
+
+fn kimi_spend_target(has_login: bool) -> (&'static str, &'static str) {
+    if has_login {
+        ("kimi", "Kimi Code")
+    } else {
+        ("moonshot", "Moonshot")
+    }
 }
 
 /// Cursor spend from the dashboard's usage-events CSV export (fetched by the
@@ -2201,6 +2212,12 @@ mod tests {
         assert_eq!(data.days.values().map(|v| v.1).sum::<f64>(), 1_000.0);
         assert_eq!(data.unpriced.get("kimi-test-model"), Some(&1));
         assert!(data.days.keys().all(|(_, m)| m == "kimi-test-model"));
+    }
+
+    #[test]
+    fn kimi_spend_stays_on_moonshot_without_login() {
+        assert_eq!(kimi_spend_target(true), ("kimi", "Kimi Code"));
+        assert_eq!(kimi_spend_target(false), ("moonshot", "Moonshot"));
     }
 
     /// Live diagnostic (ignored): what each spend source produced from

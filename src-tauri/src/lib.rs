@@ -17,6 +17,12 @@ use tauri::{
     Emitter, Manager, WindowEvent,
 };
 
+/// Last-good snapshots older than this are too misleading to show or to
+/// use as a stand-in for a live Moonshot card.
+const SNAPSHOT_CACHE_MS: i64 = 24 * 60 * 60 * 1000;
+/// One failed cycle isn't "Outdated": vendors hiccup routinely.
+const STALE_GRACE_MS: i64 = 3 * 60 * 1000;
+
 // ---------------------------------------------------------------------------
 // App settings, stored at %APPDATA%\Pane\config.json
 // ---------------------------------------------------------------------------
@@ -707,8 +713,8 @@ where
 }
 
 /// Last-good Kimi snapshot on disk. Used to skip the leftover Moonshot
-/// fetch only when that card has actually painted — a credentials file
-/// alone must not hide the wallet.
+/// fetch only when that card has actually painted *recently* — a
+/// credentials file, or a day-old cache entry, must not hide the wallet.
 fn cached_kimi_ok() -> bool {
     let path = providers::config_dir().join("last_snapshots.json");
     let Ok(raw) = std::fs::read_to_string(path) else {
@@ -717,7 +723,25 @@ fn cached_kimi_ok() -> bool {
     let Ok(doc) = serde_json::from_str::<Value>(&raw) else {
         return false;
     };
-    doc.pointer("/kimi/snap/status").and_then(Value::as_str) == Some("ok")
+    let now_ms = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_millis() as i64)
+        .unwrap_or(0);
+    cached_kimi_ok_from(&doc, now_ms)
+}
+
+fn cached_kimi_ok_from(doc: &Value, now_ms: i64) -> bool {
+    if doc.pointer("/kimi/snap/status").and_then(Value::as_str) != Some("ok") {
+        return false;
+    }
+    let at = doc.pointer("/kimi/at").and_then(Value::as_i64).unwrap_or(0);
+    at > 0 && now_ms.saturating_sub(at) <= SNAPSHOT_CACHE_MS
+}
+
+fn fold_moonshot_into_kimi(all: &mut Vec<providers::Snapshot>) {
+    if all.iter().any(|s| s.id == "kimi" && s.status == "ok") {
+        all.retain(|s| s.id != "moonshot");
+    }
 }
 
 fn is_kimi_wallet_label(label: &str) -> bool {
@@ -877,12 +901,6 @@ async fn fetch_usage(app: tauri::AppHandle) -> Vec<providers::Snapshot> {
             at: i64,
             snap: providers::Snapshot,
         }
-        const MAX_STALE_MS: i64 = 24 * 60 * 60 * 1000;
-        // One failed cycle isn't "Outdated": vendors hiccup routinely, and
-        // at short refresh intervals the tag was flashing on every blip.
-        // Data younger than the grace window serves silently; the tag (and
-        // the error on hover) appears once staleness is real.
-        const STALE_GRACE_MS: i64 = 3 * 60 * 1000;
 
         static LAST_OK: OnceLock<Mutex<HashMap<String, CachedSnap>>> = OnceLock::new();
         let cache_file = providers::config_dir().join("last_snapshots.json");
@@ -961,18 +979,31 @@ async fn fetch_usage(app: tauri::AppHandle) -> Vec<providers::Snapshot> {
                 // Plan bars can succeed while the folded Moonshot wallet
                 // call fails; keep last-known API/Balance rows so Almost
                 // Out and the tray pin don't blink off for one timeout.
+                // Do not re-cache the patched snapshot — that would reset
+                // `at` and keep serving the same balance forever.
+                let mut skip_cache = false;
                 if s.id == "kimi" && s.status == "ok" && s.warning.is_some() {
                     if let Some(previous) = map.get("kimi") {
-                        restore_kimi_wallet_rows(s, &previous.snap);
+                        let age = now_ms - previous.at;
+                        if age <= SNAPSHOT_CACHE_MS {
+                            let n = s.metrics.len();
+                            restore_kimi_wallet_rows(s, &previous.snap);
+                            if s.metrics.len() > n {
+                                skip_cache = true;
+                                if age > STALE_GRACE_MS {
+                                    s.stale = true;
+                                }
+                            }
+                        }
                     }
                 }
-                if s.status == "ok" {
+                if s.status == "ok" && !skip_cache {
                     map.insert(s.id.clone(), CachedSnap { at: now_ms, snap: s.clone() });
                     dirty = true;
                 } else if s.status == "error" {
                     if let Some(previous) = map.get(&s.id) {
                         let age = now_ms - previous.at;
-                        if age <= MAX_STALE_MS {
+                        if age <= SNAPSHOT_CACHE_MS {
                             let warning = s.error.clone();
                             *s = previous.snap.clone();
                             if age > STALE_GRACE_MS {
@@ -994,9 +1025,7 @@ async fn fetch_usage(app: tauri::AppHandle) -> Vec<providers::Snapshot> {
 
     // One Kimi card: Session / Weekly / API. Hide the leftover Moonshot
     // wallet card whenever the plan card is actually showing.
-    if all.iter().any(|s| s.id == "kimi" && s.status == "ok") {
-        all.retain(|s| s.id != "moonshot");
-    }
+    fold_moonshot_into_kimi(&mut all);
 
     httpapi::publish(&all);
     update_tray(&app, &all, &cfg);
@@ -1094,7 +1123,7 @@ fn cached_usage() -> Vec<providers::Snapshot> {
         at: i64,
         snap: providers::Snapshot,
     }
-    const MAX_STALE_MS: i64 = 24 * 60 * 60 * 1000;
+    const MAX_STALE_MS: i64 = SNAPSHOT_CACHE_MS;
     let Ok(raw) = std::fs::read_to_string(providers::config_dir().join("last_snapshots.json"))
     else {
         return Vec::new();
@@ -1148,6 +1177,7 @@ fn cached_usage() -> Vec<providers::Snapshot> {
             s
         })
         .collect();
+    fold_moonshot_into_kimi(&mut out);
     out.sort_by(|a, b| a.id.cmp(&b.id));
     out
 }
@@ -1590,8 +1620,9 @@ pub fn run() {
 
 #[cfg(test)]
 mod tests {
-    use super::{is_kimi_wallet_label, restore_kimi_wallet_rows};
+    use super::{cached_kimi_ok_from, is_kimi_wallet_label, restore_kimi_wallet_rows, SNAPSHOT_CACHE_MS};
     use crate::providers::{Metric, Snapshot};
+    use serde_json::json;
 
     #[test]
     fn kimi_wallet_labels() {
@@ -1645,5 +1676,17 @@ mod tests {
         restore_kimi_wallet_rows(&mut current, &previous);
         let api = current.metrics.iter().find(|m| m.label == "API").unwrap();
         assert!((api.used_percent.unwrap() - 1.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn cached_kimi_ok_ignores_stale_or_missing_entries() {
+        let now = 1_800_000_000_000i64;
+        let fresh = json!({"kimi": {"at": now - 60_000, "snap": {"status": "ok"}}});
+        assert!(cached_kimi_ok_from(&fresh, now));
+        let old = json!({"kimi": {"at": now - SNAPSHOT_CACHE_MS - 1, "snap": {"status": "ok"}}});
+        assert!(!cached_kimi_ok_from(&old, now));
+        let err = json!({"kimi": {"at": now, "snap": {"status": "error"}}});
+        assert!(!cached_kimi_ok_from(&err, now));
+        assert!(!cached_kimi_ok_from(&json!({}), now));
     }
 }

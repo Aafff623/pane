@@ -2270,6 +2270,13 @@ function renderIfVisible(): void {
   populatePinnedOptions();
 }
 
+function hideFoldedMoonshot(snapshots: Snapshot[]): Snapshot[] {
+  if (snapshots.some((s) => s.id === "kimi" && s.status === "ok")) {
+    return snapshots.filter((s) => s.id !== "moonshot");
+  }
+  return snapshots;
+}
+
 /// First paint from the previous run's snapshots (disk cache): numbers on
 /// screen in milliseconds instead of a blank "Refreshing…" while the
 /// slowest provider answers — at boot that wait ran 30-40 seconds. Cards
@@ -2279,7 +2286,7 @@ async function paintCachedSnapshots(): Promise<void> {
   // anyway, and refresh()'s first-launch detection must see the live list.
   if (config.layout === null) return;
   try {
-    const cached = await invoke<Snapshot[]>("cached_usage");
+    const cached = hideFoldedMoonshot(await invoke<Snapshot[]>("cached_usage"));
     // The live fetch may have already landed — never paint over it.
     if (!cached.length || lastSnapshots.length) return;
     lastSnapshots = cached;
@@ -2356,12 +2363,7 @@ async function refresh(force = false): Promise<void> {
         await patchConfig({ layout: config.layout, disabled: prunedDisabled }).catch(() => {});
       }
     }
-    // One Kimi card (Session / Weekly / API). Hide the leftover Moonshot
-    // wallet at render time only — don't write it into Disabled, or the
-    // card would stay gone after Kimi Code is disconnected.
-    if (snapshots.some((s) => s.id === "kimi" && s.status === "ok")) {
-      snapshots = snapshots.filter((s) => s.id !== "moonshot");
-    }
+    snapshots = hideFoldedMoonshot(snapshots);
     const firstData = lastSnapshots.length === 0;
     lastFetch = Date.now();
     lastSnapshots = snapshots;
