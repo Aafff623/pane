@@ -13,7 +13,8 @@
   Switching Moonshot off in Customize still stops the wallet fetch — no
   API bar and no Moonshot network calls. If the Kimi card itself is
   off, session spend stays on Moonshot so the dollars don't vanish. A
-  starred Moonshot "Credits used" pin moves to the Kimi API bar.
+  starred Moonshot "Credits used" pin moves to the Kimi API bar only
+  when that bar is actually on the card.
 
 ## 0.4.38 — 2026-08-15
 

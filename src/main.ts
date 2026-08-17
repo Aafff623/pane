@@ -523,8 +523,12 @@ function ensureLayout(): void {
   }
 
   // Kimi Code folds the Moonshot wallet onto the plan card. Stars and the
-  // tray pin on "Credits used" would otherwise vanish with that card.
-  const kimiLive = lastSnapshots.some((s) => s.id === "kimi" && s.status === "ok");
+  // tray pin on "Credits used" would otherwise vanish with that card —
+  // but only migrate when the API bar is actually on that card, or we
+  // plant a phantom star and the tray number goes blank.
+  const kimiLive = lastSnapshots.some(
+    (s) => s.id === "kimi" && s.status === "ok" && s.metrics.some((m) => m.label === "API"),
+  );
   if (kimiLive) {
     const moonL = layout.providers.moonshot;
     const starAt = moonL?.starred.indexOf("Credits used") ?? -1;
