@@ -2271,7 +2271,12 @@ function renderIfVisible(): void {
 }
 
 function hideFoldedMoonshot(snapshots: Snapshot[]): Snapshot[] {
-  if (snapshots.some((s) => s.id === "kimi" && s.status === "ok")) {
+  const kimi = snapshots.find((s) => s.id === "kimi" && s.status === "ok");
+  if (!kimi) return snapshots;
+  const wallet = (s: Snapshot) =>
+    s.metrics.some((m) => ["API", "Credits used", "Balance", "Vouchers", "Cash"].includes(m.label));
+  const moon = snapshots.find((s) => s.id === "moonshot");
+  if (wallet(kimi) || !moon || moon.metrics.length === 0) {
     return snapshots.filter((s) => s.id !== "moonshot");
   }
   return snapshots;

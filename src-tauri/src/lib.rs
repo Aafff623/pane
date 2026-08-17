@@ -739,7 +739,17 @@ fn cached_kimi_ok_from(doc: &Value, now_ms: i64) -> bool {
 }
 
 fn fold_moonshot_into_kimi(all: &mut Vec<providers::Snapshot>) {
-    if all.iter().any(|s| s.id == "kimi" && s.status == "ok") {
+    let Some(kimi) = all.iter().find(|s| s.id == "kimi" && s.status == "ok") else {
+        return;
+    };
+    // Don't throw away a freshly fetched wallet just because the plan
+    // card loaded. Fold only when Kimi already carries those rows, or
+    // when Moonshot has nothing to show (plan-only / no_credentials).
+    let kimi_has_wallet = kimi.metrics.iter().any(|m| is_kimi_wallet_label(&m.label));
+    let moonshot_has_rows = all
+        .iter()
+        .any(|s| s.id == "moonshot" && !s.metrics.is_empty());
+    if kimi_has_wallet || !moonshot_has_rows {
         all.retain(|s| s.id != "moonshot");
     }
 }
@@ -1620,7 +1630,10 @@ pub fn run() {
 
 #[cfg(test)]
 mod tests {
-    use super::{cached_kimi_ok_from, is_kimi_wallet_label, restore_kimi_wallet_rows, SNAPSHOT_CACHE_MS};
+    use super::{
+        cached_kimi_ok_from, fold_moonshot_into_kimi, is_kimi_wallet_label, restore_kimi_wallet_rows,
+        SNAPSHOT_CACHE_MS,
+    };
     use crate::providers::{Metric, Snapshot};
     use serde_json::json;
 
@@ -1688,5 +1701,60 @@ mod tests {
         let err = json!({"kimi": {"at": now, "snap": {"status": "error"}}});
         assert!(!cached_kimi_ok_from(&err, now));
         assert!(!cached_kimi_ok_from(&json!({}), now));
+    }
+
+    #[test]
+    fn fold_keeps_moonshot_when_kimi_has_no_wallet() {
+        let mut all = vec![
+            Snapshot::ok(
+                "kimi",
+                "Kimi Code",
+                None,
+                vec![Metric::progress("Session", 0.0, None)],
+            ),
+            Snapshot::ok(
+                "moonshot",
+                "Moonshot",
+                None,
+                vec![Metric::progress("Credits used", 24.0, None)],
+            ),
+        ];
+        fold_moonshot_into_kimi(&mut all);
+        assert!(all.iter().any(|s| s.id == "moonshot"));
+    }
+
+    #[test]
+    fn fold_hides_moonshot_when_kimi_has_wallet_or_moonshot_is_empty() {
+        let mut with_api = vec![
+            Snapshot::ok(
+                "kimi",
+                "Kimi Code",
+                None,
+                vec![
+                    Metric::progress("Session", 0.0, None),
+                    Metric::progress("API", 24.0, None),
+                ],
+            ),
+            Snapshot::ok(
+                "moonshot",
+                "Moonshot",
+                None,
+                vec![Metric::progress("Credits used", 24.0, None)],
+            ),
+        ];
+        fold_moonshot_into_kimi(&mut with_api);
+        assert!(!with_api.iter().any(|s| s.id == "moonshot"));
+
+        let mut empty_moon = vec![
+            Snapshot::ok(
+                "kimi",
+                "Kimi Code",
+                None,
+                vec![Metric::progress("Session", 0.0, None)],
+            ),
+            Snapshot::no_credentials("moonshot", "Moonshot", "paste a key"),
+        ];
+        fold_moonshot_into_kimi(&mut empty_moon);
+        assert!(!empty_moon.iter().any(|s| s.id == "moonshot"));
     }
 }
