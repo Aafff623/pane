@@ -513,11 +513,43 @@ function ensureLayout(): void {
     }
   }
 
-  if (config.pinned && providerFamily(config.pinned.provider) === "cursor") {
+    if (config.pinned && providerFamily(config.pinned.provider) === "cursor") {
     const renamed = CURSOR_RENAMES[config.pinned.label];
     const to = renamed ?? (totalIsText && config.pinned.label === "Total usage" ? "Cursor Models" : null);
     if (to) {
       config.pinned = { ...config.pinned, label: to };
+      void patchConfig({ pinned: config.pinned }).catch(() => {});
+    }
+  }
+
+  // Kimi Code folds the Moonshot wallet onto the plan card. Stars and the
+  // tray pin on "Credits used" would otherwise vanish with that card.
+  const kimiLive = lastSnapshots.some((s) => s.id === "kimi" && s.status === "ok");
+  if (kimiLive) {
+    const moonL = layout.providers.moonshot;
+    const starAt = moonL?.starred.indexOf("Credits used") ?? -1;
+    if (starAt >= 0 && moonL) {
+      moonL.starred.splice(starAt, 1);
+      let kimiL = layout.providers.kimi;
+      if (!kimiL) {
+        kimiL = defaultProviderLayout(
+          lastSnapshots.find((s) => s.id === "kimi"),
+          lastSpend.find((sp) => sp.id === "kimi"),
+          false,
+        );
+        layout.providers.kimi = kimiL;
+      }
+      if (!kimiL.starred.includes("API")) {
+        if (kimiL.starred.length >= 2) kimiL.starred.pop();
+        kimiL.starred.push("API");
+      }
+      changed = true;
+    }
+    if (
+      config.pinned?.provider === "moonshot" &&
+      (config.pinned.label === "Credits used" || config.pinned.label === "API")
+    ) {
+      config.pinned = { provider: "kimi", label: "API" };
       void patchConfig({ pinned: config.pinned }).catch(() => {});
     }
   }
@@ -1967,6 +1999,14 @@ function renderCustomize(): string {
       // fetched) — that one must keep rendering, or its re-enable toggle
       // vanishes with it and the account is stuck off forever.
       if (id.includes("@") && !snapshot && !config.disabled.includes(id)) return "";
+      // Folded into the Kimi Code card while that plan is connected —
+      // keep Moonshot in saved layout, just don't show a ghost toggle.
+      if (
+        id === "moonshot" &&
+        lastSnapshots.some((s) => s.id === "kimi" && s.status === "ok")
+      ) {
+        return "";
+      }
       // Dynamic account cards carry their name in the snapshot
       // ("Claude — Org"); static providers come from the fixed list.
       const name = ALL_PROVIDERS.find(([pid]) => pid === id)?.[1] ?? snapshot?.name ?? id;
@@ -2316,14 +2356,11 @@ async function refresh(force = false): Promise<void> {
         await patchConfig({ layout: config.layout, disabled: prunedDisabled }).catch(() => {});
       }
     }
-    // One Kimi card (Session / Weekly / API). Fold the leftover Moonshot
-    // wallet away in Customize so it isn't enabled-but-invisible.
-    if (
-      snapshots.some((s) => s.id === "kimi" && s.status === "ok") &&
-      !config.disabled.includes("moonshot")
-    ) {
+    // One Kimi card (Session / Weekly / API). Hide the leftover Moonshot
+    // wallet at render time only — don't write it into Disabled, or the
+    // card would stay gone after Kimi Code is disconnected.
+    if (snapshots.some((s) => s.id === "kimi" && s.status === "ok")) {
       snapshots = snapshots.filter((s) => s.id !== "moonshot");
-      await patchConfig({ disabled: [...config.disabled, "moonshot"] }).catch(() => {});
     }
     const firstData = lastSnapshots.length === 0;
     lastFetch = Date.now();

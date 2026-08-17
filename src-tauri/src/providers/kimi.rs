@@ -103,7 +103,7 @@ async fn fetch() -> Result<Snapshot, String> {
     let (usages, api) = if super::moonshot::has_api_key() {
         tokio::join!(fetch_usages(&access), super::moonshot::api_rows())
     } else {
-        (fetch_usages(&access).await, Vec::new())
+        (fetch_usages(&access).await, Ok(Vec::new()))
     };
     let mut snap = match usages {
         Ok(doc) => parse_snapshot(&doc)?,
@@ -122,7 +122,14 @@ async fn fetch() -> Result<Snapshot, String> {
         }
         Err(UsagesError::Other(e)) => return Err(e),
     };
-    snap.metrics.extend(api);
+    match api {
+        Ok(rows) => snap.metrics.extend(rows),
+        Err(_) => {
+            snap.warning = Some(
+                "Moonshot API wallet couldn't refresh — retrying next cycle".into(),
+            );
+        }
+    }
     Ok(snap)
 }
 

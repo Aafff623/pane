@@ -706,6 +706,37 @@ where
     snap
 }
 
+/// Last-good Kimi snapshot on disk. Used to skip the leftover Moonshot
+/// fetch only when that card has actually painted — a credentials file
+/// alone must not hide the wallet.
+fn cached_kimi_ok() -> bool {
+    let path = providers::config_dir().join("last_snapshots.json");
+    let Ok(raw) = std::fs::read_to_string(path) else {
+        return false;
+    };
+    let Ok(doc) = serde_json::from_str::<Value>(&raw) else {
+        return false;
+    };
+    doc.pointer("/kimi/snap/status").and_then(Value::as_str) == Some("ok")
+}
+
+fn is_kimi_wallet_label(label: &str) -> bool {
+    matches!(label, "API" | "Credits used" | "Balance" | "Vouchers" | "Cash")
+}
+
+fn restore_kimi_wallet_rows(current: &mut providers::Snapshot, previous: &providers::Snapshot) {
+    if current.metrics.iter().any(|m| m.label == "API") {
+        return;
+    }
+    for m in &previous.metrics {
+        if is_kimi_wallet_label(&m.label)
+            && !current.metrics.iter().any(|x| x.label == m.label)
+        {
+            current.metrics.push(m.clone());
+        }
+    }
+}
+
 /// Called by the UI. Refreshes every enabled provider at the same time and
 /// returns whatever each one found — data, "not signed in", or an error.
 #[tauri::command]
@@ -751,12 +782,19 @@ async fn fetch_usage(app: tauri::AppHandle) -> Vec<providers::Snapshot> {
         ("hermes", Box::pin(guarded("hermes".into(), "Hermes".into(), providers::hermes::snapshot()))),
         ("kimi", Box::pin(guarded("kimi".into(), "Kimi Code".into(), providers::kimi::snapshot()))),
     ];
+    // Skip the leftover Moonshot fetch only when the last Kimi card
+    // actually painted — a credentials file alone is not enough (expired
+    // login / network blip would otherwise hide the wallet with nothing
+    // to fall back to). The post-fetch retain still drops it whenever
+    // this cycle's Kimi snapshot is ok.
+    let kimi_card_live = cached_kimi_ok();
     let mut futs: Vec<(String, BoxedSnap)> = base
         .into_iter()
         .filter(|(id, _)| {
             *id != "moonshot"
                 || !providers::kimi::has_login()
                 || disabled.iter().any(|d| d == "kimi")
+                || !kimi_card_live
         })
         .map(|(id, fut)| (id.to_string(), fut))
         .collect();
@@ -920,6 +958,14 @@ async fn fetch_usage(app: tauri::AppHandle) -> Vec<providers::Snapshot> {
         if let Ok(mut map) = cache.lock() {
             let mut dirty = false;
             for s in all.iter_mut() {
+                // Plan bars can succeed while the folded Moonshot wallet
+                // call fails; keep last-known API/Balance rows so Almost
+                // Out and the tray pin don't blink off for one timeout.
+                if s.id == "kimi" && s.status == "ok" && s.warning.is_some() {
+                    if let Some(previous) = map.get("kimi") {
+                        restore_kimi_wallet_rows(s, &previous.snap);
+                    }
+                }
                 if s.status == "ok" {
                     map.insert(s.id.clone(), CachedSnap { at: now_ms, snap: s.clone() });
                     dirty = true;
@@ -1540,4 +1586,64 @@ pub fn run() {
         })
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{is_kimi_wallet_label, restore_kimi_wallet_rows};
+    use crate::providers::{Metric, Snapshot};
+
+    #[test]
+    fn kimi_wallet_labels() {
+        assert!(is_kimi_wallet_label("API"));
+        assert!(is_kimi_wallet_label("Balance"));
+        assert!(!is_kimi_wallet_label("Session"));
+        assert!(!is_kimi_wallet_label("Weekly"));
+    }
+
+    #[test]
+    fn restore_wallet_rows_when_api_missing() {
+        let mut current = Snapshot::ok(
+            "kimi",
+            "Kimi Code",
+            None,
+            vec![Metric::progress("Session", 0.0, None)],
+        );
+        current.warning = Some("Moonshot API wallet couldn't refresh".into());
+        let previous = Snapshot::ok(
+            "kimi",
+            "Kimi Code",
+            None,
+            vec![
+                Metric::progress("Session", 10.0, None),
+                Metric::progress("API", 24.0, None),
+                Metric::text("Balance", "$152.00".into()),
+            ],
+        );
+        restore_kimi_wallet_rows(&mut current, &previous);
+        let labels: Vec<_> = current.metrics.iter().map(|m| m.label.as_str()).collect();
+        assert_eq!(labels, ["Session", "API", "Balance"]);
+    }
+
+    #[test]
+    fn restore_wallet_rows_skips_when_api_present() {
+        let mut current = Snapshot::ok(
+            "kimi",
+            "Kimi Code",
+            None,
+            vec![
+                Metric::progress("Session", 0.0, None),
+                Metric::progress("API", 1.0, None),
+            ],
+        );
+        let previous = Snapshot::ok(
+            "kimi",
+            "Kimi Code",
+            None,
+            vec![Metric::progress("API", 99.0, None)],
+        );
+        restore_kimi_wallet_rows(&mut current, &previous);
+        let api = current.metrics.iter().find(|m| m.label == "API").unwrap();
+        assert!((api.used_percent.unwrap() - 1.0).abs() < 0.01);
+    }
 }

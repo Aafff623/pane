@@ -8,8 +8,9 @@
   wallet key is saved, an **API** bar (same high-water credits meter)
   joins them; plan-only installs stay at two bars. Local session spend
   that used to sit on the Moonshot card lives here. The leftover
-  Moonshot card hides while Kimi Code is connected; it still appears
-  for API-only installs.
+  Moonshot card hides while Kimi Code is connected (and comes back if
+  that login goes away); it still appears for API-only installs. A
+  starred Moonshot "Credits used" pin moves to the Kimi API bar.
 
 ## 0.4.38 — 2026-08-15
 

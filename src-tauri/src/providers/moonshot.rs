@@ -25,16 +25,14 @@ pub fn has_api_key() -> bool {
     stored_api_key("moonshot", &["MOONSHOT_API_KEY", "KIMI_API_KEY"]).is_some()
 }
 
-/// Wallet rows for the Kimi Code card (Session / Weekly / API). Empty when
-/// no key is saved — the plan bars still stand on their own.
-pub async fn api_rows() -> Vec<Metric> {
+/// Wallet rows for the Kimi Code card (Session / Weekly / API). Empty `Ok`
+/// when no key is saved — the plan bars still stand on their own. `Err`
+/// is a failed balance call the caller can warn on without failing the plan.
+pub async fn api_rows() -> Result<Vec<Metric>, String> {
     if !has_api_key() {
-        return Vec::new();
+        return Ok(Vec::new());
     }
-    match fetch_balance(true).await {
-        Ok(rows) => rows,
-        Err(_) => Vec::new(),
-    }
+    fetch_balance(true).await
 }
 
 async fn fetch() -> Result<Snapshot, String> {
