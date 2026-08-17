@@ -15,6 +15,7 @@ import cursorIcon from "./assets/providers/cursor.svg?raw";
 import devinIcon from "./assets/providers/devin.svg?raw";
 import grokIcon from "./assets/providers/grok.svg?raw";
 import hermesIcon from "./assets/providers/hermes.svg?raw";
+import kimiIcon from "./assets/providers/kimi.svg?raw";
 import minimaxIcon from "./assets/providers/minimax.svg?raw";
 import opencodeIcon from "./assets/providers/opencode.svg?raw";
 import openrouterIcon from "./assets/providers/openrouter.svg?raw";
@@ -38,6 +39,7 @@ const PROVIDER_ICONS: Record<string, string> = {
   devin: devinIcon,
   grok: grokIcon,
   hermes: hermesIcon,
+  kimi: kimiIcon,
   minimax: minimaxIcon,
   opencode: opencodeIcon,
   openrouter: openrouterIcon,
@@ -104,6 +106,7 @@ const RELOGIN: Record<string, string> = {
   antigravity: "open Antigravity and sign in again",
   ollama: "make sure Ollama is running",
   hermes: "open the Hermes desktop app once so it writes its local ledger",
+  kimi: "run `kimi login` in a terminal",
 };
 
 /// The ⚠ Outdated tooltip: what went wrong, what fixes it, and the
@@ -209,6 +212,7 @@ const ALL_PROVIDERS: [string, string][] = [
   ["aihubmix", "AihubMix"],
   ["qwen", "Qwen Code"],
   ["hermes", "Hermes"],
+  ["kimi", "Kimi Code"],
 ];
 
 // Same quick links the Mac app ships (status pages + vendor dashboards).
@@ -258,6 +262,11 @@ const PROVIDER_LINKS: Record<string, { label: string; url: string }[]> = {
   codebuff: [{ label: "Dashboard", url: "https://www.codebuff.com/profile" }],
   kilo: [{ label: "Dashboard", url: "https://app.kilo.ai/" }],
   hermes: [{ label: "Site", url: "https://hermes-agent.com/" }],
+  kimi: [
+    { label: "Console", url: "https://www.kimi.com/code/console" },
+    { label: "Quota", url: "https://www.kimi.com/membership/subscription?tab=quota" },
+    { label: "API", url: "https://platform.moonshot.ai/console" },
+  ],
 };
 
 // Brand palette for the Total Spend ring (Mac parity); unknown providers
@@ -274,6 +283,7 @@ const SPEND_COLORS: Record<string, string> = {
   devin: "#38bdf8",
   cursor: "var(--spend-cursor)", // brand black, theme-flipped in CSS
   moonshot: "#e0b354", // moon gold
+  kimi: "#ff8a4c", // Kimi Code peach
   hermes: "#c2a878", // Nous tan
   aihubmix: "#5eead4", // hub teal
   qwen: "#8b5cf6", // Qwen violet
@@ -877,6 +887,7 @@ function renderCard(s: Snapshot): string {
     ? `<span class="stale" title="${escapeHtml(staleHelp(s))}">⚠ Outdated</span>`
     : "";
   const links = (PROVIDER_LINKS[s.id] ?? PROVIDER_LINKS[providerFamily(s.id)] ?? [])
+    .filter((l) => l.label !== "API" || s.metrics.some((m) => m.label === "API"))
     .map((l) => `<button class="quick-link" data-link="${escapeHtml(l.url)}">${escapeHtml(l.label)}</button>`)
     .join("<span class='quick-sep'>·</span>");
   const linksRow = links ? `<div class="quick-links">${links}</div>` : "";
@@ -2304,6 +2315,15 @@ async function refresh(force = false): Promise<void> {
         for (const id of staleLayout) delete config.layout.providers[id];
         await patchConfig({ layout: config.layout, disabled: prunedDisabled }).catch(() => {});
       }
+    }
+    // One Kimi card (Session / Weekly / API). Fold the leftover Moonshot
+    // wallet away in Customize so it isn't enabled-but-invisible.
+    if (
+      snapshots.some((s) => s.id === "kimi" && s.status === "ok") &&
+      !config.disabled.includes("moonshot")
+    ) {
+      snapshots = snapshots.filter((s) => s.id !== "moonshot");
+      await patchConfig({ disabled: [...config.disabled, "moonshot"] }).catch(() => {});
     }
     const firstData = lastSnapshots.length === 0;
     lastFetch = Date.now();

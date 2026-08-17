@@ -513,7 +513,7 @@ struct StripEntry {
 /// allowlist for update_tray_strip: ids from the frontend are validated
 /// against this before being spliced into tray icon ids, and stale strip
 /// icons are removed for exactly this set.
-const STRIP_PROVIDER_IDS: [&str; 20] = [
+const STRIP_PROVIDER_IDS: [&str; 21] = [
     "claude",
     "codex",
     "cursor",
@@ -534,6 +534,7 @@ const STRIP_PROVIDER_IDS: [&str; 20] = [
     "aihubmix",
     "qwen",
     "hermes",
+    "kimi",
 ];
 
 #[tauri::command]
@@ -748,9 +749,17 @@ async fn fetch_usage(app: tauri::AppHandle) -> Vec<providers::Snapshot> {
         ("aihubmix", Box::pin(guarded("aihubmix".into(), "AihubMix".into(), providers::aihubmix::snapshot()))),
         ("qwen", Box::pin(guarded("qwen".into(), "Qwen Code".into(), providers::qwen::snapshot()))),
         ("hermes", Box::pin(guarded("hermes".into(), "Hermes".into(), providers::hermes::snapshot()))),
+        ("kimi", Box::pin(guarded("kimi".into(), "Kimi Code".into(), providers::kimi::snapshot()))),
     ];
-    let mut futs: Vec<(String, BoxedSnap)> =
-        base.into_iter().map(|(id, fut)| (id.to_string(), fut)).collect();
+    let mut futs: Vec<(String, BoxedSnap)> = base
+        .into_iter()
+        .filter(|(id, _)| {
+            *id != "moonshot"
+                || !providers::kimi::has_login()
+                || disabled.iter().any(|d| d == "kimi")
+        })
+        .map(|(id, fut)| (id.to_string(), fut))
+        .collect();
     // Extra Claude accounts (multi-login machines): each discovered config
     // dir renders its own card under a claude@<hash8> id, running the same
     // provider flow scoped to its dir. The default login keeps the bare id.
@@ -935,6 +944,12 @@ async fn fetch_usage(app: tauri::AppHandle) -> Vec<providers::Snapshot> {
                 }
             }
         }
+    }
+
+    // One Kimi card: Session / Weekly / API. Hide the leftover Moonshot
+    // wallet card whenever the plan card is actually showing.
+    if all.iter().any(|s| s.id == "kimi" && s.status == "ok") {
+        all.retain(|s| s.id != "moonshot");
     }
 
     httpapi::publish(&all);

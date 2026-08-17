@@ -1585,7 +1585,7 @@ fn devin_model(raw: &str) -> String {
 /// One Kimi Code CLI wire.jsonl line → spend event. usage.record rows are
 /// self-contained: model, token buckets, epoch-ms time. Only the "turn"
 /// scope counts — other scopes would double-report the same tokens.
-fn moonshot_line(line: &str, data: &mut FileData) {
+fn kimi_line(line: &str, data: &mut FileData) {
     if !line.contains("\"usage.record\"") {
         return;
     }
@@ -1691,21 +1691,19 @@ fn qwen() -> ProviderSpend {
     build_spend("qwen", "Qwen Code", all)
 }
 
-/// Moonshot spend: Kimi Code CLI sessions under ~/.kimi-code/sessions —
-/// each agent's wire.jsonl logs one usage.record per turn.
-fn moonshot() -> ProviderSpend {
-    let root = dirs::home_dir()
-        .unwrap_or_default()
-        .join(".kimi-code")
-        .join("sessions");
+/// Kimi Code spend: CLI sessions under ~/.kimi-code/sessions — each
+/// agent's wire.jsonl logs one usage.record per turn. Lives on the plan
+/// card (not Moonshot PAYG).
+fn kimi() -> ProviderSpend {
+    let root = providers::kimi::code_home().join("sessions");
     let mut files = Vec::new();
     recent_jsonl_files(&root, &mut files);
     let mut all = FileData::default();
     for file in files {
-        let data = file_days(&file, &mut |line, data| moonshot_line(line, data));
+        let data = file_days(&file, &mut |line, data| kimi_line(line, data));
         merge_data(&mut all, data);
     }
-    build_spend("moonshot", "Moonshot", all)
+    build_spend("kimi", "Kimi Code", all)
 }
 
 /// Cursor spend from the dashboard's usage-events CSV export (fetched by the
@@ -2189,7 +2187,7 @@ mod tests {
     }
 
     #[test]
-    fn moonshot_counts_turn_records_only() {
+    fn kimi_counts_turn_records_only() {
         let mut data = FileData::default();
         let turn = json!({"type": "usage.record", "model": "moonshot-ai/kimi-test-model",
             "usage": {"inputOther": 400.0, "output": 200.0, "inputCacheRead": 300.0,
@@ -2197,8 +2195,8 @@ mod tests {
             "usageScope": "turn", "time": 1784208630652i64})
         .to_string();
         let session_scope = turn.replace("\"turn\"", "\"session\"");
-        moonshot_line(&turn, &mut data);
-        moonshot_line(&session_scope, &mut data);
+        kimi_line(&turn, &mut data);
+        kimi_line(&session_scope, &mut data);
         // One event; unknown model → tokens counted, dollars honest zero.
         assert_eq!(data.days.values().map(|v| v.1).sum::<f64>(), 1_000.0);
         assert_eq!(data.unpriced.get("kimi-test-model"), Some(&1));
@@ -2405,7 +2403,7 @@ pub fn collect(cursor_csv: Option<String>) -> Vec<ProviderSpend> {
         aihubmix_sp,
         devin(),
         minimax(minimax_extra),
-        moonshot(),
+        kimi(),
         qwen(),
     ];
     list.extend(extra_claude_spends);

@@ -12,6 +12,7 @@ pub mod elevenlabs;
 pub mod grok;
 pub mod hermes;
 pub mod kilo;
+pub mod kimi;
 pub mod minimax;
 pub mod moonshot;
 pub mod ollama;
@@ -165,6 +166,39 @@ pub fn http() -> reqwest::Client {
         }
     }
     builder.build().expect("failed to build http client")
+}
+
+/// JSON bodies from vendor APIs are tiny (quota + token responses). Cap
+/// before parse so a huge payload can't stall a refresh or blow RAM —
+/// same idea as the share-card decode bound.
+pub(crate) async fn json_body(
+    resp: reqwest::Response,
+    max_bytes: usize,
+    what: &str,
+) -> Result<serde_json::Value, String> {
+    if resp.content_length().is_some_and(|n| n > max_bytes as u64) {
+        return Err(format!("{what}: response too large"));
+    }
+    let bytes = resp.bytes().await.map_err(|e| format!("{what}: {e}"))?;
+    if bytes.len() > max_bytes {
+        return Err(format!("{what}: response too large"));
+    }
+    serde_json::from_slice(&bytes).map_err(|e| format!("{what} parse: {e}"))
+}
+
+pub(crate) fn read_small_text(
+    path: &std::path::Path,
+    max_bytes: u64,
+    what: &str,
+) -> Result<String, String> {
+    let meta = std::fs::symlink_metadata(path).map_err(|e| format!("read {what}: {e}"))?;
+    if meta.file_type().is_symlink() || !meta.is_file() {
+        return Err(format!("{what} is not a regular file"));
+    }
+    if meta.len() > max_bytes {
+        return Err(format!("{what} is unexpectedly large — not reading it"));
+    }
+    std::fs::read_to_string(path).map_err(|e| format!("read {what}: {e}"))
 }
 
 /// Where Pane keeps its own settings, e.g. saved API keys:
