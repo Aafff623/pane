@@ -352,6 +352,22 @@ pub(crate) fn account_scan_roots() -> Vec<std::path::PathBuf> {
     roots
 }
 
+/// True when Customize has this provider switched off. Disabled providers
+/// must not make network calls — including a folded-in wallet fetch that
+/// lives on another card (Kimi Code's Moonshot API bar).
+pub fn provider_disabled(id: &str) -> bool {
+    let Ok(raw) = std::fs::read_to_string(config_dir().join("config.json")) else {
+        return false;
+    };
+    let Ok(cfg) = serde_json::from_str::<serde_json::Value>(raw.trim_start_matches('\u{feff}'))
+    else {
+        return false;
+    };
+    cfg.get("disabled")
+        .and_then(serde_json::Value::as_array)
+        .is_some_and(|a| a.iter().any(|v| v.as_str() == Some(id)))
+}
+
 /// API key lookup: our saved config file first, then environment variables.
 pub fn stored_api_key(provider: &str, env_vars: &[&str]) -> Option<String> {
     let path = config_dir().join(format!("{provider}.json"));

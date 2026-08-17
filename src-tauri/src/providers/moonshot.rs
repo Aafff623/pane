@@ -25,11 +25,22 @@ pub fn has_api_key() -> bool {
     stored_api_key("moonshot", &["MOONSHOT_API_KEY", "KIMI_API_KEY"]).is_some()
 }
 
+/// Wallet fetch is allowed only with a saved key *and* Moonshot switched
+/// on. A disabled Moonshot must not be contacted via the folded Kimi card.
+pub fn wallet_wanted() -> bool {
+    wallet_wanted_from(has_api_key(), super::provider_disabled("moonshot"))
+}
+
+fn wallet_wanted_from(has_key: bool, moonshot_disabled: bool) -> bool {
+    has_key && !moonshot_disabled
+}
+
 /// Wallet rows for the Kimi Code card (Session / Weekly / API). Empty `Ok`
-/// when no key is saved — the plan bars still stand on their own. `Err`
-/// is a failed balance call the caller can warn on without failing the plan.
+/// when no key is saved or Moonshot is off — the plan bars still stand on
+/// their own. `Err` is a failed balance call the caller can warn on
+/// without failing the plan.
 pub async fn api_rows() -> Result<Vec<Metric>, String> {
-    if !has_api_key() {
+    if !wallet_wanted() {
         return Ok(Vec::new());
     }
     fetch_balance(true).await
@@ -167,5 +178,13 @@ mod tests {
             rows.iter().map(|m| m.label.as_str()).collect::<Vec<_>>(),
             ["Balance", "Cash"]
         );
+    }
+
+    #[test]
+    fn wallet_stays_off_when_moonshot_is_disabled() {
+        assert!(wallet_wanted_from(true, false));
+        assert!(!wallet_wanted_from(true, true));
+        assert!(!wallet_wanted_from(false, false));
+        assert!(!wallet_wanted_from(false, true));
     }
 }

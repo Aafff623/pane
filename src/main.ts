@@ -1999,14 +1999,10 @@ function renderCustomize(): string {
       // fetched) — that one must keep rendering, or its re-enable toggle
       // vanishes with it and the account is stuck off forever.
       if (id.includes("@") && !snapshot && !config.disabled.includes(id)) return "";
-      // Folded into the Kimi Code card while that plan is connected —
-      // keep Moonshot in saved layout, just don't show a ghost toggle.
-      if (
-        id === "moonshot" &&
-        lastSnapshots.some((s) => s.id === "kimi" && s.status === "ok")
-      ) {
-        return "";
-      }
+      // Moonshot's leftover *card* is folded into Kimi on the dashboard,
+      // but this toggle still owns the wallet: off means no Moonshot HTTP
+      // and no API bar on the Kimi card. Hide it and there's no way to
+      // stop those calls.
       // Dynamic account cards carry their name in the snapshot
       // ("Claude — Org"); static providers come from the fixed list.
       const name = ALL_PROVIDERS.find(([pid]) => pid === id)?.[1] ?? snapshot?.name ?? id;

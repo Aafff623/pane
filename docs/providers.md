@@ -199,6 +199,9 @@ Ground rules that apply to every provider:
   Show more on that bar. Local spend from
   `~\.kimi-code\sessions\**\wire.jsonl` (one usage.record per turn).
   The separate Moonshot card is hidden while this card is connected.
+  Switching Moonshot off in Customize still skips the wallet fetch (no
+  API bar, no `api.moonshot.ai|cn` call). If the Kimi card is off,
+  local session spend stays on Moonshot.
 
 ## Hermes (Nous Research desktop)
 

@@ -98,9 +98,9 @@ async fn fetch() -> Result<Snapshot, String> {
         ));
     };
     let access = load_access(&path, false).await?;
-    // No Moonshot key → Session + Weekly only; don't even start a wallet
-    // fetch, so plan-only installs never grow a blank API row.
-    let (usages, api) = if super::moonshot::has_api_key() {
+    // No Moonshot key, or Moonshot switched off → Session + Weekly only.
+    // Disabled Moonshot must not be contacted through this folded card.
+    let (usages, api) = if super::moonshot::wallet_wanted() {
         tokio::join!(fetch_usages(&access), super::moonshot::api_rows())
     } else {
         (fetch_usages(&access).await, Ok(Vec::new()))
