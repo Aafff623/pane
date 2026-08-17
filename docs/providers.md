@@ -170,18 +170,38 @@ Ground rules that apply to every provider:
 ## DeepSeek / Moonshot / ElevenLabs / Venice-class key providers
 
 - **Reads:** pasted key or env var only (`DEEPSEEK_API_KEY`,
-  `MOONSHOT_API_KEY`/`KIMI_API_KEY`, `ELEVENLABS_API_KEY`). Moonshot
-  additionally reads local spend from the Kimi Code CLI's session logs
-  (`%USERPROFILE%\.kimi-code\sessions\**\wire.jsonl` — one usage.record
-  per turn with model and token buckets).
+  `MOONSHOT_API_KEY`/`KIMI_API_KEY`, `ELEVENLABS_API_KEY`).
 - **Calls:** `api.deepseek.com/user/balance`;
   `api.moonshot.ai|cn/v1/users/me/balance`;
   `api.elevenlabs.io/v1/user/subscription`.
 - **Shows:** balances / character quota with reset pacing; Moonshot and
   DeepSeek add a "Credits used" percent bar metered against the highest
   balance Pane has seen locally (top-ups raise it; feeds the Almost Out
-  notification); Moonshot adds Today / Yesterday / 30-day spend, model
-  breakdown, and the usage trend from Kimi Code sessions.
+  notification).
+
+## Kimi Code
+
+- **Reads:** `%USERPROFILE%\.kimi-code\credentials\kimi-code.json` (honors
+  `KIMI_CODE_HOME`; falls back to `~\.kimi\credentials\kimi-code.json`).
+  That is the official CLI's OAuth login — Pane never asks you to paste
+  the plan token. Refresh tokens rotate on use and are written back
+  beside the CLI's file (`*.pane-bak` first), same as Claude/Codex.
+- **Calls:** `api.kimi.com/coding/v1/usages` (Session + Weekly request
+  windows); `auth.kimi.com/api/oauth/token` (refresh); and, when a
+  Moonshot/Kimi API key is saved, `api.moonshot.ai|cn/v1/users/me/balance`
+  for the API bar. This is the Kimi Code *subscription* plus the
+  pay-as-you-go wallet on the same card.
+- **Shows:** Session (5-hour) and Weekly bars with reset pacing, plan
+  name (Andante / Moderato / Allegretto when the weekly quota matches).
+  The **API** bar (credits used vs the highest balance Pane has seen)
+  only appears when a Moonshot/Kimi API key is saved — plan-only
+  installs never get a third quota row. Balance/Vouchers sit behind
+  Show more on that bar. Local spend from
+  `~\.kimi-code\sessions\**\wire.jsonl` (one usage.record per turn).
+  The separate Moonshot card is hidden while this card is connected.
+  Switching Moonshot off in Customize still skips the wallet fetch (no
+  API bar, no `api.moonshot.ai|cn` call). If the Kimi card is off,
+  local session spend stays on Moonshot.
 
 ## Hermes (Nous Research desktop)
 

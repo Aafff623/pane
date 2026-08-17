@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+### Added
+- **Kimi Code plan card** — one card like OpenCode: Session and Weekly
+  request bars from the official Kimi Code CLI login. If a Moonshot
+  wallet key is saved, an **API** bar (same high-water credits meter)
+  joins them; plan-only installs stay at two bars. Local session spend
+  that used to sit on the Moonshot card lives here. The leftover
+  Moonshot card hides while Kimi Code is connected (and comes back if
+  that login goes away); it still appears for API-only installs. If the
+  Kimi card loads without a wallet bar, a successful Moonshot fetch is
+  kept so the balance doesn't vanish for one cycle.
+  Switching Moonshot off in Customize still stops the wallet fetch — no
+  API bar and no Moonshot network calls. If the Kimi card itself is
+  off, session spend stays on Moonshot so the dollars don't vanish. A
+  starred Moonshot "Credits used" pin moves to the Kimi API bar only
+  when that bar is actually on the card.
+
 ## 0.4.38 — 2026-08-15
 
 ### Fixed

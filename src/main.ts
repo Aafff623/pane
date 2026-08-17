@@ -15,6 +15,7 @@ import cursorIcon from "./assets/providers/cursor.svg?raw";
 import devinIcon from "./assets/providers/devin.svg?raw";
 import grokIcon from "./assets/providers/grok.svg?raw";
 import hermesIcon from "./assets/providers/hermes.svg?raw";
+import kimiIcon from "./assets/providers/kimi.svg?raw";
 import minimaxIcon from "./assets/providers/minimax.svg?raw";
 import opencodeIcon from "./assets/providers/opencode.svg?raw";
 import openrouterIcon from "./assets/providers/openrouter.svg?raw";
@@ -38,6 +39,7 @@ const PROVIDER_ICONS: Record<string, string> = {
   devin: devinIcon,
   grok: grokIcon,
   hermes: hermesIcon,
+  kimi: kimiIcon,
   minimax: minimaxIcon,
   opencode: opencodeIcon,
   openrouter: openrouterIcon,
@@ -104,6 +106,7 @@ const RELOGIN: Record<string, string> = {
   antigravity: "open Antigravity and sign in again",
   ollama: "make sure Ollama is running",
   hermes: "open the Hermes desktop app once so it writes its local ledger",
+  kimi: "run `kimi login` in a terminal",
 };
 
 /// The ⚠ Outdated tooltip: what went wrong, what fixes it, and the
@@ -209,6 +212,7 @@ const ALL_PROVIDERS: [string, string][] = [
   ["aihubmix", "AihubMix"],
   ["qwen", "Qwen Code"],
   ["hermes", "Hermes"],
+  ["kimi", "Kimi Code"],
 ];
 
 // Same quick links the Mac app ships (status pages + vendor dashboards).
@@ -258,6 +262,11 @@ const PROVIDER_LINKS: Record<string, { label: string; url: string }[]> = {
   codebuff: [{ label: "Dashboard", url: "https://www.codebuff.com/profile" }],
   kilo: [{ label: "Dashboard", url: "https://app.kilo.ai/" }],
   hermes: [{ label: "Site", url: "https://hermes-agent.com/" }],
+  kimi: [
+    { label: "Console", url: "https://www.kimi.com/code/console" },
+    { label: "Quota", url: "https://www.kimi.com/membership/subscription?tab=quota" },
+    { label: "API", url: "https://platform.moonshot.ai/console" },
+  ],
 };
 
 // Brand palette for the Total Spend ring (Mac parity); unknown providers
@@ -274,6 +283,7 @@ const SPEND_COLORS: Record<string, string> = {
   devin: "#38bdf8",
   cursor: "var(--spend-cursor)", // brand black, theme-flipped in CSS
   moonshot: "#e0b354", // moon gold
+  kimi: "#ff8a4c", // Kimi Code peach
   hermes: "#c2a878", // Nous tan
   aihubmix: "#5eead4", // hub teal
   qwen: "#8b5cf6", // Qwen violet
@@ -503,11 +513,47 @@ function ensureLayout(): void {
     }
   }
 
-  if (config.pinned && providerFamily(config.pinned.provider) === "cursor") {
+    if (config.pinned && providerFamily(config.pinned.provider) === "cursor") {
     const renamed = CURSOR_RENAMES[config.pinned.label];
     const to = renamed ?? (totalIsText && config.pinned.label === "Total usage" ? "Cursor Models" : null);
     if (to) {
       config.pinned = { ...config.pinned, label: to };
+      void patchConfig({ pinned: config.pinned }).catch(() => {});
+    }
+  }
+
+  // Kimi Code folds the Moonshot wallet onto the plan card. Stars and the
+  // tray pin on "Credits used" would otherwise vanish with that card —
+  // but only migrate when the API bar is actually on that card, or we
+  // plant a phantom star and the tray number goes blank.
+  const kimiLive = lastSnapshots.some(
+    (s) => s.id === "kimi" && s.status === "ok" && s.metrics.some((m) => m.label === "API"),
+  );
+  if (kimiLive) {
+    const moonL = layout.providers.moonshot;
+    const starAt = moonL?.starred.indexOf("Credits used") ?? -1;
+    if (starAt >= 0 && moonL) {
+      moonL.starred.splice(starAt, 1);
+      let kimiL = layout.providers.kimi;
+      if (!kimiL) {
+        kimiL = defaultProviderLayout(
+          lastSnapshots.find((s) => s.id === "kimi"),
+          lastSpend.find((sp) => sp.id === "kimi"),
+          false,
+        );
+        layout.providers.kimi = kimiL;
+      }
+      if (!kimiL.starred.includes("API")) {
+        if (kimiL.starred.length >= 2) kimiL.starred.pop();
+        kimiL.starred.push("API");
+      }
+      changed = true;
+    }
+    if (
+      config.pinned?.provider === "moonshot" &&
+      (config.pinned.label === "Credits used" || config.pinned.label === "API")
+    ) {
+      config.pinned = { provider: "kimi", label: "API" };
       void patchConfig({ pinned: config.pinned }).catch(() => {});
     }
   }
@@ -877,6 +923,7 @@ function renderCard(s: Snapshot): string {
     ? `<span class="stale" title="${escapeHtml(staleHelp(s))}">⚠ Outdated</span>`
     : "";
   const links = (PROVIDER_LINKS[s.id] ?? PROVIDER_LINKS[providerFamily(s.id)] ?? [])
+    .filter((l) => l.label !== "API" || s.metrics.some((m) => m.label === "API"))
     .map((l) => `<button class="quick-link" data-link="${escapeHtml(l.url)}">${escapeHtml(l.label)}</button>`)
     .join("<span class='quick-sep'>·</span>");
   const linksRow = links ? `<div class="quick-links">${links}</div>` : "";
@@ -1956,6 +2003,10 @@ function renderCustomize(): string {
       // fetched) — that one must keep rendering, or its re-enable toggle
       // vanishes with it and the account is stuck off forever.
       if (id.includes("@") && !snapshot && !config.disabled.includes(id)) return "";
+      // Moonshot's leftover *card* is folded into Kimi on the dashboard,
+      // but this toggle still owns the wallet: off means no Moonshot HTTP
+      // and no API bar on the Kimi card. Hide it and there's no way to
+      // stop those calls.
       // Dynamic account cards carry their name in the snapshot
       // ("Claude — Org"); static providers come from the fixed list.
       const name = ALL_PROVIDERS.find(([pid]) => pid === id)?.[1] ?? snapshot?.name ?? id;
@@ -2219,6 +2270,18 @@ function renderIfVisible(): void {
   populatePinnedOptions();
 }
 
+function hideFoldedMoonshot(snapshots: Snapshot[]): Snapshot[] {
+  const kimi = snapshots.find((s) => s.id === "kimi" && s.status === "ok");
+  if (!kimi) return snapshots;
+  const wallet = (s: Snapshot) =>
+    s.metrics.some((m) => ["API", "Credits used", "Balance", "Vouchers", "Cash"].includes(m.label));
+  const moon = snapshots.find((s) => s.id === "moonshot");
+  if (wallet(kimi) || !moon || moon.metrics.length === 0) {
+    return snapshots.filter((s) => s.id !== "moonshot");
+  }
+  return snapshots;
+}
+
 /// First paint from the previous run's snapshots (disk cache): numbers on
 /// screen in milliseconds instead of a blank "Refreshing…" while the
 /// slowest provider answers — at boot that wait ran 30-40 seconds. Cards
@@ -2228,7 +2291,7 @@ async function paintCachedSnapshots(): Promise<void> {
   // anyway, and refresh()'s first-launch detection must see the live list.
   if (config.layout === null) return;
   try {
-    const cached = await invoke<Snapshot[]>("cached_usage");
+    const cached = hideFoldedMoonshot(await invoke<Snapshot[]>("cached_usage"));
     // The live fetch may have already landed — never paint over it.
     if (!cached.length || lastSnapshots.length) return;
     lastSnapshots = cached;
@@ -2305,6 +2368,7 @@ async function refresh(force = false): Promise<void> {
         await patchConfig({ layout: config.layout, disabled: prunedDisabled }).catch(() => {});
       }
     }
+    snapshots = hideFoldedMoonshot(snapshots);
     const firstData = lastSnapshots.length === 0;
     lastFetch = Date.now();
     lastSnapshots = snapshots;
