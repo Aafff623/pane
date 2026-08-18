@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.4.39 — 2026-08-19
 
 ### Added
 - **Kimi Code plan card** — one card like OpenCode: Session and Weekly

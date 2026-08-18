@@ -193,8 +193,13 @@ Ground rules that apply to every provider:
   pay-as-you-go wallet on the same card.
 - **Shows:** Session (5-hour) and Weekly bars with reset pacing, plan
   name (Andante / Moderato / Allegretto when the weekly quota matches).
-  The **API** bar (credits used vs the highest balance Pane has seen)
-  only appears when a Moonshot/Kimi API key is saved — plan-only
+  Those two windows are the same clocks as Kimi's website "5-hour Code"
+  and "7-day Code" rows; the coding usage API currently reports remaining
+  as whole percents (`limit`/`remaining` of 100), so usage under 1% can
+  still show as 0% in Pane. The website's **Total usage** bar is a
+  separate monthly membership credit pool (Kimi chat + Code) and is not
+  on this card. The **API** bar (credits used vs the highest balance Pane
+  has seen) only appears when a Moonshot/Kimi API key is saved — plan-only
   installs never get a third quota row. Balance/Vouchers sit behind
   Show more on that bar. Local spend from
   `~\.kimi-code\sessions\**\wire.jsonl` (one usage.record per turn).

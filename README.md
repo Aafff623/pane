@@ -8,7 +8,7 @@ One click on the tray icon answers the questions every AI power user keeps
 asking: *How much of my Claude session is left? When does my Codex weekly
 reset? What did today actually cost me?*
 
-**[pane.jazii.dev](https://pane.jazii.dev)** · [Install](#install) · [How it works](#how-it-works) · [Providers](#providers-17-and-counting) · [Features](#features) · [Privacy](#privacy--security) · [Credits](#credits)
+**[pane.jazii.dev](https://pane.jazii.dev)** · [Install](#install) · [How it works](#how-it-works) · [Providers](#providers-21-and-counting) · [Features](#features) · [Privacy](#privacy--security) · [Credits](#credits)
 
 <img src="docs/promo.png" width="760" alt="Pane — track all your AI subscription limits in one tray app: Total Spend donut with per-provider slices, usage cards with pace bars" />
 
@@ -146,7 +146,7 @@ statistic (random ID, version, which providers are enabled, provider
 success/failure counts — never amounts or error text) — see
 [Privacy](#privacy--security) for the full contract and the off switch.
 
-## Providers (20 and counting)
+## Providers (21 and counting)
 
 | Provider | How Pane connects |
 |---|---|
