@@ -202,7 +202,12 @@ Ground rules that apply to every provider:
   has seen) only appears when a Moonshot/Kimi API key is saved — plan-only
   installs never get a third quota row. Balance/Vouchers sit behind
   Show more on that bar. Local spend from
-  `~\.kimi-code\sessions\**\wire.jsonl` (one usage.record per turn).
+  `~\.kimi-code\sessions\**\wire.jsonl` (one usage.record per turn),
+  priced at Moonshot's published API rates (K3 $3/$15/$0.30 cache;
+  K2.7 Code $0.95/$4/$0.19, HighSpeed 2×; K2.6 $0.95/$4/$0.16;
+  K2.5 $0.60/$3/$0.10; V1 8k/32k/128k at $0.20/$2, $1/$3, $2/$5).
+  Plan logs name K3 `k3` / `kimi-code/k3` and K2.7 Code `kimi-for-coding`;
+  those map to the same cards as `kimi-k3` and `kimi-k2.7-code`.
   The separate Moonshot card is hidden while this card is connected.
   Switching Moonshot off in Customize still skips the wallet fetch (no
   API bar, no `api.moonshot.ai|cn` call). If the Kimi card is off,

@@ -1,5 +1,19 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+- **Kimi Code plan usage now has dollar amounts** — the official CLI logs
+  plan K3 as `kimi-code/k3` (and K2.7 Code as `kimi-for-coding`), which
+  missed the rate table, so Today could show a million tokens at $0.00.
+  Every current Moonshot model now uses the published API card
+  (K3 $3 / $15 / $0.30 cache; K2.7 Code $0.95 / $4 / $0.19; HighSpeed
+  is 2×; K2.6 $0.95 / $4 / $0.16; K2.5 $0.60 / $3 / $0.10; V1 8k/32k/128k
+  at $0.20/$2, $1/$3, $2/$5). Reseller catalog rows no longer override
+  those first-party rates. Codex OAuth (`kimi-oauth/k3`) and prefixed
+  API spellings share the same table. Discontinued K2 / kimi-latest
+  names still come from the public catalogs.
+
 ## 0.4.39 — 2026-08-19
 
 ### Added

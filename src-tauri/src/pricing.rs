@@ -166,7 +166,7 @@ pub fn generation() -> u64 {
 /// fingerprinted below — an app update that reprices the same files would
 /// otherwise leave history at the old dollars until upstream happens to
 /// rewrite a catalog.
-const CORRECTIONS_REV: u32 = 7; // 7: GLM-5.3 AihubMix preview rates + last-segment dated DeepSeek
+const CORRECTIONS_REV: u32 = 8; // 8: Moonshot first-party Kimi rates (plan slugs + K3/K2.7/K2.6/K2.5/V1)
 /// The live OpenUsage supplement is ~105 alias rules (Daybreak, Cursor
 /// Router prose names, GPT-5.3–5.6 effort slugs). 64 silently dropped
 /// everything after `gpt-5.2`. Per-rule caps below still bound memory.
@@ -563,6 +563,24 @@ fn resolve(s: &Store, model: &str, depth: u8) -> Option<Price> {
     if let Some(p) = s.supplement.get(&canonical).filter(real) {
         return Some(*p);
     }
+    // Moonshot bills Pane's Kimi Code / API logs on its own card. LiteLLM
+    // and models.dev mix reseller markups and stubs that drop cache-hit
+    // rates, so first-party Kimi slugs take the published Moonshot table
+    // before those catalogs. Other baked models (DeepSeek, Grok, Qwen)
+    // still sit after catalogs so they self-retire.
+    if let Some(p) = kimi_vendor_price(&canonical) {
+        return Some(p);
+    }
+    // Kimi HighSpeed is a published 2× serving tier, not a distinct model.
+    // Only peel known Kimi bases so an unrelated `-highspeed` slug cannot
+    // inherit a 2× multiplier.
+    if let Some(base) = canonical.strip_suffix("-highspeed") {
+        if kimi_vendor_price(base).is_some() {
+            if let Some(p) = resolve(s, base, depth + 1) {
+                return Some(scaled_price(&p, 2.0));
+            }
+        }
+    }
     if let Some(p) = s.litellm.get(&canonical).filter(real) {
         return Some(*p);
     }
@@ -683,16 +701,53 @@ fn resolve(s: &Store, model: &str, depth: u8) -> Option<Price> {
     None
 }
 
-/// Kimi K3 — platform.kimi.ai/docs/pricing/chat-k3 (USD/MTok): input $3,
-/// cache hit $0.30, output $15; no published cache-write rate, so writes
-/// bill at the input rate. The `-code` spelling follows the K2.7 pattern
-/// (the supplement priced k2.7 and k2.7-code identically); "moonshot/" and
-/// "moonshot-ai/" prefixed spellings match how the CLIs log it.
+/// First-party Moonshot / Kimi rates from platform.kimi.ai (USD/MTok).
+/// Last-segment match so CLI plan logs (`kimi-code/k3`), API prefixes
+/// (`moonshot-ai/kimi-k3`), and Codex OAuth (`kimi-oauth/k3`) share one
+/// table. Cache writes unpublished → input rate.
+fn kimi_vendor_price(canonical: &str) -> Option<Price> {
+    let bare = canonical.rsplit('/').next().unwrap_or(canonical);
+    match bare {
+        // platform.kimi.ai/docs/pricing/chat-k3 — k3-256k is the same API
+        // rate card (the 2× figure on the membership page is plan *quota*,
+        // not dollars).
+        "k3" | "k3-256k" | "kimi-k3" | "kimi-k3-code" => Some(Price::flat(3.0, 15.0, 0.3, 3.0)),
+        // platform.kimi.ai/docs/pricing/chat-k27-code — Kimi Code's
+        // `kimi-for-coding` id is this model. HighSpeed is published at 2×.
+        // `kimi-k2p7*` is Fireworks' spelling of the same SKU.
+        "kimi-for-coding" | "kimi-k2.7-code" | "kimi-k2.7" | "k2.7-code"
+        | "kimi-k2p7-code" | "kimi-k2p7" => Some(Price::flat(0.95, 4.0, 0.19, 0.95)),
+        "kimi-for-coding-highspeed" | "kimi-k2.7-code-highspeed" | "k2.7-code-highspeed"
+        | "kimi-k2p7-code-highspeed" => Some(Price::flat(1.90, 8.0, 0.38, 1.90)),
+        // platform.kimi.ai/docs/pricing/chat-k26
+        "kimi-k2.6" | "kimi-k2p6" | "k2.6" => Some(Price::flat(0.95, 4.0, 0.16, 0.95)),
+        // platform.kimi.ai/docs/pricing/chat-k25
+        "kimi-k2.5" | "kimi-k2p5" | "k2.5" => Some(Price::flat(0.60, 3.0, 0.10, 0.60)),
+        // platform.kimi.ai/docs/pricing/chat-v1 — no cache-hit column;
+        // unpublished cache bills at the input rate. Vision SKUs share
+        // the same dollar card as the matching context size.
+        "moonshot-v1-8k" | "moonshot-v1-8k-vision-preview" | "moonshot-v1-8k-0430" => {
+            Some(Price::flat(0.20, 2.0, 0.20, 0.20))
+        }
+        "moonshot-v1-32k" | "moonshot-v1-32k-vision-preview" | "moonshot-v1-32k-0430" => {
+            Some(Price::flat(1.0, 3.0, 1.0, 1.0))
+        }
+        "moonshot-v1-128k" | "moonshot-v1-128k-vision-preview" | "moonshot-v1-128k-0430" => {
+            Some(Price::flat(2.0, 5.0, 2.0, 2.0))
+        }
+        _ => None,
+    }
+}
+
 fn builtin_price(canonical: &str) -> Option<Price> {
     // Gateways prefix the vendor slug (`xai/grok-4.6`, `deepseek/…`,
     // `accounts/fireworks/models/deepseek-v4-pro`). Peel to the last
     // path segment so one arm covers every spelling; catalogs still
-    // outrank this table because resolve() consults them first.
+    // outrank this table (except Kimi — see kimi_vendor_price) because
+    // resolve() consults them first.
+    if let Some(p) = kimi_vendor_price(canonical) {
+        return Some(p);
+    }
     let bare = canonical.rsplit('/').next().unwrap_or(canonical);
     match bare {
         // AihubMix DeepSeek V4 family — the gateway's OWN rate cards
@@ -716,7 +771,6 @@ fn builtin_price(canonical: &str) -> Option<Price> {
         // Hermes still prices its AihubMix `glm-5.3` rows by looking up
         // this SKU (see providers::hermes::price_lookup_slug).
         "coding-glm-5.3" => Some(Price::flat(0.06, 0.22, 0.06, 0.06)),
-        "kimi-k3" | "kimi-k3-code" => Some(Price::flat(3.0, 15.0, 0.3, 3.0)),
         // Alibaba Model Studio, GA'd 2026-08-03 (USD/MTok): input $2,
         // output $6, implicit cache read $0.25, explicit cache write $2.50.
         // Public catalogs still carry 0/0 placeholders for these slugs.
@@ -930,14 +984,70 @@ mod tests {
         for slug in [
             "kimi-k3",                    // Cursor / Devin bare
             "kimi-k3-code",               // Kimi Code CLI variant
+            "k3",                         // Kimi Code plan id (`kimi-code/k3`)
+            "k3-256k",                    // 256k K3 SKU, same API rates
             "moonshot/kimi-k3",           // catalog-style prefix
             "moonshot-ai/kimi-k3-code",   // Kimi CLI's own prefix
+            "kimi-code/k3",               // plan login, last-segment peel
+            "kimi-oauth/k3",              // Codex OAuth log
             "kimi-k3-high",               // effort tier → peels to base
             "kimi-k3-max",                // mode → peels to base
         ] {
             let p = super::lookup(slug).unwrap_or_else(|| panic!("{slug} did not price"));
             assert_eq!((p.input, p.output, p.cache_read), (3.0, 15.0, 0.3), "{slug}");
         }
+    }
+
+    #[test]
+    fn kimi_k27_code_and_highspeed_plan_spellings() {
+        // platform.kimi.ai/docs/pricing/chat-k27-code
+        for slug in [
+            "kimi-k2.7-code",
+            "kimi-for-coding",
+            "kimi-code/kimi-for-coding",
+        ] {
+            let p = super::lookup(slug).unwrap_or_else(|| panic!("{slug} did not price"));
+            assert_eq!((p.input, p.output, p.cache_read), (0.95, 4.0, 0.19), "{slug}");
+        }
+        for slug in [
+            "kimi-k2.7-code-highspeed",
+            "kimi-for-coding-highspeed",
+            "kimi-code/kimi-for-coding-highspeed",
+        ] {
+            let p = super::lookup(slug).unwrap_or_else(|| panic!("{slug} did not price"));
+            assert_eq!((p.input, p.output, p.cache_read), (1.90, 8.0, 0.38), "{slug}");
+        }
+    }
+
+    #[test]
+    fn kimi_k26_k25_and_v1_use_published_rates() {
+        for slug in ["kimi-k2.6", "moonshot-ai/kimi-k2.6", "kimi-k2p6"] {
+            let p = super::lookup(slug).unwrap_or_else(|| panic!("{slug} did not price"));
+            assert_eq!((p.input, p.output, p.cache_read), (0.95, 4.0, 0.16), "{slug}");
+        }
+        for slug in ["kimi-k2.5", "moonshot-ai/kimi-k2.5", "kimi-code/k2.5"] {
+            let p = super::lookup(slug).unwrap_or_else(|| panic!("{slug} did not price"));
+            assert_eq!((p.input, p.output, p.cache_read), (0.60, 3.0, 0.10), "{slug}");
+        }
+        for (slug, want) in [
+            ("moonshot-v1-8k", (0.20, 2.0, 0.20)),
+            ("moonshot-v1-8k-vision-preview", (0.20, 2.0, 0.20)),
+            ("moonshot-v1-32k", (1.0, 3.0, 1.0)),
+            ("moonshot-v1-128k", (2.0, 5.0, 2.0)),
+            ("moonshot-ai/moonshot-v1-128k-vision-preview", (2.0, 5.0, 2.0)),
+        ] {
+            let p = super::lookup(slug).unwrap_or_else(|| panic!("{slug} did not price"));
+            assert_eq!((p.input, p.output, p.cache_read), want, "{slug}");
+        }
+    }
+
+    #[test]
+    fn kimi_vendor_beats_reseller_catalog_stubs() {
+        let mut store = super::Store::default();
+        store.litellm.insert("kimi-k2.5".into(), Price::flat(0.60, 3.0, 0.60, 0.60));
+        store.modelsdev.insert("kimi-k2.5".into(), Price::flat(0.50, 2.80, 0.125, 0.625));
+        let p = super::resolve(&store, "kimi-k2.5", 0).unwrap();
+        assert_eq!((p.input, p.output, p.cache_read), (0.60, 3.0, 0.10));
     }
 
     #[test]

@@ -1598,8 +1598,12 @@ fn kimi_line(line: &str, data: &mut FileData) {
     }
     let Some(ts) = parse_ts(v.get("time")) else { return };
     let model_raw = v.get("model").and_then(Value::as_str).unwrap_or("unknown");
-    let model = model_raw
-        .strip_prefix("moonshot-ai/")
+    // CLI plan logs `kimi-code/k3`; API logs `moonshot-ai/kimi-k3`; Codex
+    // OAuth logs `kimi-oauth/k3`. Peel those vendor prefixes so one rate
+    // table covers every spelling.
+    let model = ["moonshot-ai/", "kimi-code/", "kimi-oauth/"]
+        .iter()
+        .find_map(|p| model_raw.strip_prefix(p))
         .unwrap_or(model_raw)
         .to_string();
     let u = v.get("usage").cloned().unwrap_or(Value::Null);
@@ -2215,6 +2219,36 @@ mod tests {
         assert_eq!(data.days.values().map(|v| v.1).sum::<f64>(), 1_000.0);
         assert_eq!(data.unpriced.get("kimi-test-model"), Some(&1));
         assert!(data.days.keys().all(|(_, m)| m == "kimi-test-model"));
+    }
+
+    #[test]
+    fn kimi_plan_k3_slug_uses_published_rates() {
+        let mut data = FileData::default();
+        let turn = json!({"type": "usage.record", "model": "kimi-code/k3",
+            "usage": {"inputOther": 1000.0, "output": 1000.0, "inputCacheRead": 0.0,
+                      "inputCacheCreation": 0.0},
+            "usageScope": "turn", "time": 1784208630652i64})
+        .to_string();
+        kimi_line(&turn, &mut data);
+        assert!(data.unpriced.is_empty(), "plan k3 should price: {:?}", data.unpriced);
+        assert!(data.days.keys().all(|(_, m)| m == "k3"));
+        let cost: f64 = data.days.values().map(|v| v.0).sum();
+        let expect = (1000.0 * 3.0 + 1000.0 * 15.0) / 1e6;
+        assert!((cost - expect).abs() < 1e-9, "cost {cost} != {expect}");
+    }
+
+    #[test]
+    fn kimi_k25_cache_hits_use_published_rate() {
+        let mut data = FileData::default();
+        let turn = json!({"type": "usage.record", "model": "moonshot-ai/kimi-k2.5",
+            "usage": {"inputOther": 0.0, "output": 0.0, "inputCacheRead": 1_000_000.0,
+                      "inputCacheCreation": 0.0},
+            "usageScope": "turn", "time": 1784208630652i64})
+        .to_string();
+        kimi_line(&turn, &mut data);
+        assert!(data.unpriced.is_empty(), "k2.5 should price: {:?}", data.unpriced);
+        let cost: f64 = data.days.values().map(|v| v.0).sum();
+        assert!((cost - 0.10).abs() < 1e-9, "cost {cost} != 0.10");
     }
 
     #[test]
