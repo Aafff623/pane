@@ -705,9 +705,15 @@ fn resolve(s: &Store, model: &str, depth: u8) -> Option<Price> {
 /// Last-segment match so CLI plan logs (`kimi-code/k3`), API prefixes
 /// (`moonshot-ai/kimi-k3`), and Codex OAuth (`kimi-oauth/k3`) share one
 /// table. Cache writes unpublished → input rate.
+///
+/// Generic tails (`k3`, `k2.5`) only match when the slug is bare or under
+/// a Kimi/Moonshot prefix — `openrouter/k3` must not steal this card
+/// ahead of that provider's catalog row. Tails that already say `kimi-`
+/// / `moonshot-` (Fireworks `kimi-k2p7-code`) match under any prefix.
 fn kimi_vendor_price(canonical: &str) -> Option<Price> {
-    let bare = canonical.rsplit('/').next().unwrap_or(canonical);
-    match bare {
+    let bare = kimi_vendor_tail(canonical)?.to_ascii_lowercase();
+    match bare.as_str() {
+
         // platform.kimi.ai/docs/pricing/chat-k3 — k3-256k is the same API
         // rate card (the 2× figure on the membership page is plan *quota*,
         // not dollars).
@@ -736,6 +742,27 @@ fn kimi_vendor_price(canonical: &str) -> Option<Price> {
             Some(Price::flat(2.0, 5.0, 2.0, 2.0))
         }
         _ => None,
+    }
+}
+
+fn kimi_vendor_tail(canonical: &str) -> Option<&str> {
+    let lower = canonical.to_ascii_lowercase();
+    let tail = lower.rsplit('/').next().unwrap_or(lower.as_str());
+    let named = tail.starts_with("kimi") || tail.starts_with("moonshot");
+    let known_prefix = [
+        "moonshot-ai/",
+        "moonshotai/",
+        "kimi-code/",
+        "kimi-oauth/",
+        "moonshot/",
+        "kimi/",
+    ]
+    .iter()
+    .any(|p| lower.starts_with(p));
+    if named || known_prefix || !canonical.contains('/') {
+        canonical.rsplit('/').next()
+    } else {
+        None
     }
 }
 
@@ -1048,6 +1075,20 @@ mod tests {
         store.modelsdev.insert("kimi-k2.5".into(), Price::flat(0.50, 2.80, 0.125, 0.625));
         let p = super::resolve(&store, "kimi-k2.5", 0).unwrap();
         assert_eq!((p.input, p.output, p.cache_read), (0.60, 3.0, 0.10));
+    }
+
+    #[test]
+    fn kimi_vendor_ignores_foreign_prefix_on_short_tails() {
+        // Generic tails under another vendor must not steal Moonshot rates.
+        assert!(super::kimi_vendor_price("openrouter/k3").is_none());
+        assert!(super::kimi_vendor_price("acme/k2.5").is_none());
+        assert!(super::kimi_vendor_price("groq/k2.7-code").is_none());
+        // Bare plan ids and Kimi/Moonshot prefixes still match.
+        assert!(super::kimi_vendor_price("k3").is_some());
+        assert!(super::kimi_vendor_price("kimi-code/k3").is_some());
+        assert!(super::kimi_vendor_price("Kimi-OAuth/K3").is_some());
+        // A tail that already says kimi- is unambiguous even under Fireworks.
+        assert!(super::kimi_vendor_price("accounts/fireworks/models/kimi-k2p7-code").is_some());
     }
 
     #[test]
