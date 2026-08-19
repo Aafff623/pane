@@ -876,11 +876,12 @@ fn split_models(data: &mut FileData, prefix: &str) -> FileData {
 /// other CLIs merge with the Kimi CLI's own spellings ("kimi-oauth/k3" and
 /// "k3" are the same model on the same bill).
 fn strip_kimi_prefix(model: &str) -> String {
-    ["moonshot-ai/", "kimi-code/", "kimi-oauth/", "moonshot/"]
+    let lower = model.to_ascii_lowercase();
+    ["moonshot-ai/", "moonshotai/", "kimi-code/", "kimi-oauth/", "moonshot/"]
         .iter()
-        .find_map(|p| model.strip_prefix(p))
-        .unwrap_or(model)
-        .to_string()
+        .find(|p| lower.starts_with(**p))
+        .map(|p| model[p.len()..].to_string())
+        .unwrap_or_else(|| model.to_string())
 }
 
 /// Kimi/Moonshot models logged by another CLI — Codex driven through a
@@ -1158,8 +1159,14 @@ fn codex_dated_base(model: &str) -> String {
 
 /// Codex priority/fast service-tier multipliers are provider-specific and
 /// intentionally not Cursor's `-fast` supplement multipliers. Unknown models
-/// use the supplement's multiplier when one exists, else 2x.
+/// use the supplement's multiplier when one exists, else 2x. Kimi/Moonshot
+/// slugs billed through a Codex router are not OpenAI-tiered — leave them
+/// at 1× so they merge with the Kimi CLI's own (unmultiplied) rows.
 fn codex_priority_multiplier(dated: &str, rate_model: &str) -> f64 {
+    let lower = rate_model.to_ascii_lowercase();
+    if lower.contains("kimi") || lower.contains("moonshot") {
+        return 1.0;
+    }
     match dated {
         "gpt-5.5" | "gpt-5.5-pro" => 2.5,
         "gpt-5.4" | "gpt-5.4-pro" | "gpt-5.6-sol" | "gpt-5.6-terra" | "gpt-5.6-luna" => 2.0,
@@ -2410,6 +2417,25 @@ mod tests {
     }
 
     #[test]
+    fn codex_fast_tier_does_not_double_kimi_oauth() {
+        let turn = json!({"timestamp": "2026-07-10T10:00:00Z", "type": "turn_context",
+                          "payload": {"model": "kimi-oauth/k3"}})
+        .to_string();
+        let usage = token_count_line("2026-07-10T10:00:01Z", Some((1_000.0, 100.0)), (1_000.0, 100.0));
+        let standard = codex_run(&[turn.clone(), usage.clone()]);
+        let fast = codex_run(&[
+            turn,
+            json!({"timestamp": "2026-07-10T10:00:00Z", "type": "event_msg",
+                   "payload": {"type": "thread_settings_applied",
+                               "thread_settings": {"service_tier": "fast"}}})
+            .to_string(),
+            usage,
+        ]);
+        assert!(cost_sum(&standard) > 0.0);
+        assert!((cost_sum(&fast) - cost_sum(&standard)).abs() < 1e-9);
+    }
+
+    #[test]
     fn codex_dated_base_strips_snapshot_stamps() {
         assert_eq!(codex_dated_base("gpt-5.6-sol-2026-06-01"), "gpt-5.6-sol");
         assert_eq!(codex_dated_base("gpt-5.6-sol-20260601"), "gpt-5.6-sol");
@@ -2591,6 +2617,8 @@ mod tests {
         assert_eq!(strip_kimi_prefix("moonshot-ai/kimi-k3"), "kimi-k3");
         assert_eq!(strip_kimi_prefix("moonshot/kimi-k2.5"), "kimi-k2.5");
         assert_eq!(strip_kimi_prefix("kimi-k3"), "kimi-k3");
+        assert_eq!(strip_kimi_prefix("Kimi-OAuth/K3"), "K3");
+        assert_eq!(strip_kimi_prefix("moonshotai/kimi-k2"), "kimi-k2");
     }
 
     #[test]
