@@ -71,7 +71,8 @@ Ground rules that apply to every provider:
   Daybreak Blue (`gpt-daybreak-blue-latest`) prices as GPT-5.6 Sol.
   Pi coding agent sessions that drove this Codex account (provider
   `openai-codex`) fold into this card's spend the same way they do for
-  Claude.
+  Claude. Turns logged as `kimi-oauth/…` or `moonshot-ai/…` (a router
+  pointed at the Kimi plan) move to the Kimi Code card instead.
 
 ## Cursor
 
@@ -208,6 +209,9 @@ Ground rules that apply to every provider:
   K2.5 $0.60/$3/$0.10; V1 8k/32k/128k at $0.20/$2, $1/$3, $2/$5).
   Plan logs name K3 `k3` / `kimi-code/k3` and K2.7 Code `kimi-for-coding`;
   those map to the same cards as `kimi-k3` and `kimi-k2.7-code`.
+  Codex (and Claude) sessions that log `kimi-oauth/…` or `moonshot-ai/…`
+  via a router move those spend rows here, prefix peeled, so they do not
+  stay on the Codex/Claude card.
   The separate Moonshot card is hidden while this card is connected.
   Switching Moonshot off in Customize still skips the wallet fetch (no
   API bar, no `api.moonshot.ai|cn` call). If the Kimi card is off,

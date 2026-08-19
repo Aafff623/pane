@@ -839,6 +839,39 @@ fn split_models(data: &mut FileData, prefix: &str) -> FileData {
     out
 }
 
+/// Peel the vendor prefixes Kimi usage arrives under, so rows routed from
+/// other CLIs merge with the Kimi CLI's own spellings ("kimi-oauth/k3" and
+/// "k3" are the same model on the same bill).
+fn strip_kimi_prefix(model: &str) -> String {
+    ["moonshot-ai/", "kimi-code/", "kimi-oauth/", "moonshot/"]
+        .iter()
+        .find_map(|p| model.strip_prefix(p))
+        .unwrap_or(model)
+        .to_string()
+}
+
+/// Kimi/Moonshot models logged by another CLI — Codex driven through a
+/// router against the Kimi OAuth plan ("kimi-oauth/k3"), or a session
+/// pointed at Moonshot's API ("moonshot-ai/kimi-k3"). Moonshot bills those
+/// turns, not the CLI's own subscription, so the rows move to the
+/// Kimi/Moonshot card with their vendor prefixes peeled.
+fn split_kimi_routed(all: &mut FileData) -> FileData {
+    let mut moved = FileData::default();
+    for prefix in ["kimi", "moonshot"] {
+        merge_data(&mut moved, split_models(all, prefix));
+    }
+    let mut out = FileData::default();
+    for ((day, model), (cost, tokens)) in moved.days {
+        let entry = out.days.entry((day, strip_kimi_prefix(&model))).or_insert((0.0, 0.0));
+        entry.0 += cost;
+        entry.1 += tokens;
+    }
+    for (model, count) in moved.unpriced {
+        *out.unpriced.entry(strip_kimi_prefix(&model)).or_insert(0) += count;
+    }
+    out
+}
+
 /// Claude Code writes one JSONL per session under ~/.claude/projects. Each
 /// assistant line carries usage token counts and usually a precomputed
 /// costUSD, which we prefer over our own pricing table.
@@ -847,7 +880,7 @@ fn split_models(data: &mut FileData, prefix: &str) -> FileData {
 /// (ANTHROPIC_BASE_URL); those sessions log MiniMax models into the same
 /// files. That usage is split out and returned separately — it belongs on
 /// the MiniMax card, not Claude's.
-fn claude(extra: FileData) -> (ProviderSpend, FileData, FileData) {
+fn claude(extra: FileData) -> (ProviderSpend, FileData, FileData, FileData) {
     let root = std::env::var("CLAUDE_CONFIG_DIR")
         .map(PathBuf::from)
         .unwrap_or_else(|_| dirs::home_dir().unwrap_or_default().join(".claude"))
@@ -870,7 +903,10 @@ fn claude(extra: FileData) -> (ProviderSpend, FileData, FileData) {
     // AihubMix's Anthropic-compatible endpoint (the only way qwen slugs
     // appear there) — those dollars belong on the AihubMix card.
     let qwen_via_aihubmix = split_models(&mut all, "qwen");
-    (build_spend("claude", "Claude", all), minimax, qwen_via_aihubmix)
+    // Kimi slugs likewise mean Moonshot billed the session (Anthropic-
+    // compatible endpoint or a router) — Kimi's card owns those dollars.
+    let kimi_routed = split_kimi_routed(&mut all);
+    (build_spend("claude", "Claude", all), minimax, qwen_via_aihubmix, kimi_routed)
 }
 
 /// Spend for each discovered extra Claude account, scanned from that
@@ -878,10 +914,11 @@ fn claude(extra: FileData) -> (ProviderSpend, FileData, FileData) {
 /// scopes never mix). MiniMax/qwen-routed rows split out the same way the
 /// default account's do and are handed back for the caller to merge into
 /// those cards.
-fn claude_extra_accounts() -> (Vec<ProviderSpend>, FileData, FileData) {
+fn claude_extra_accounts() -> (Vec<ProviderSpend>, FileData, FileData, FileData) {
     let mut spends = Vec::new();
     let mut minimax_extra = FileData::default();
     let mut qwen_extra = FileData::default();
+    let mut kimi_extra = FileData::default();
     for acct in providers::claude::discover_extra_accounts() {
         let root = acct.dir.join("projects");
         let mut files = Vec::new();
@@ -894,9 +931,10 @@ fn claude_extra_accounts() -> (Vec<ProviderSpend>, FileData, FileData) {
         }
         merge_data(&mut minimax_extra, split_models(&mut all, "MiniMax"));
         merge_data(&mut qwen_extra, split_models(&mut all, "qwen"));
+        merge_data(&mut kimi_extra, split_kimi_routed(&mut all));
         spends.push(build_spend(acct.id, acct.name, all));
     }
-    (spends, minimax_extra, qwen_extra)
+    (spends, minimax_extra, qwen_extra, kimi_extra)
 }
 
 /// MiniMax spend: the Agent CLI's local token_usage store (its own cost_usd
@@ -1370,26 +1408,32 @@ fn codex_scan(home: &Path) -> FileData {
     all
 }
 
-fn codex(extra: FileData) -> ProviderSpend {
+fn codex(extra: FileData) -> (ProviderSpend, FileData) {
     let home = std::env::var("CODEX_HOME")
         .map(PathBuf::from)
         .unwrap_or_else(|_| dirs::home_dir().unwrap_or_default().join(".codex"));
     let mut all = codex_scan(&home);
     // Pi sessions that drove a Codex account (passed in from the pi scan).
     merge_data(&mut all, extra);
-    build_spend("codex", "Codex", all)
+    // Kimi OAuth / Moonshot turns routed through Codex (codex-router logs
+    // them as "kimi-oauth/k3" etc.) bill the Kimi plan, not the ChatGPT
+    // subscription — hand them to the Kimi card.
+    let kimi_routed = split_kimi_routed(&mut all);
+    (build_spend("codex", "Codex", all), kimi_routed)
 }
 
 /// Spend for each discovered extra Codex account, scanned from that
-/// account's own home (each keeps its own sessions/ logs).
-fn codex_extra_accounts() -> Vec<ProviderSpend> {
-    providers::codex::discover_extra_accounts()
-        .into_iter()
-        .map(|acct| {
-            let data = codex_scan(&acct.dir);
-            build_spend(acct.id, acct.name, data)
-        })
-        .collect()
+/// account's own home (each keeps its own sessions/ logs). Kimi-routed
+/// rows split out the same way the default account's do.
+fn codex_extra_accounts() -> (Vec<ProviderSpend>, FileData) {
+    let mut spends = Vec::new();
+    let mut kimi_extra = FileData::default();
+    for acct in providers::codex::discover_extra_accounts() {
+        let mut data = codex_scan(&acct.dir);
+        merge_data(&mut kimi_extra, split_kimi_routed(&mut data));
+        spends.push(build_spend(acct.id, acct.name, data));
+    }
+    (spends, kimi_extra)
 }
 
 // ---------------------------------------------------------------------------
@@ -1821,7 +1865,7 @@ fn qwen() -> ProviderSpend {
 /// card when that login exists *and* the card is on; otherwise they stay
 /// on Moonshot so API-only installs (and leftover logs, or a Kimi card
 /// still sitting in Disabled after `kimi login`) don't lose the dollars.
-fn kimi() -> ProviderSpend {
+fn kimi(extra: FileData) -> ProviderSpend {
     let root = providers::kimi::code_home().join("sessions");
     let mut files = Vec::new();
     recent_jsonl_files(&root, &mut files);
@@ -1830,6 +1874,9 @@ fn kimi() -> ProviderSpend {
         let data = file_days(&file, &mut |line, data| kimi_line(line, data));
         merge_data(&mut all, data);
     }
+    // Kimi/Moonshot-billed turns other CLIs logged (Codex through a
+    // router, Claude Code on Moonshot's endpoint) join the same card.
+    merge_data(&mut all, extra);
     let (id, name) = kimi_spend_target(
         providers::kimi::has_login(),
         providers::provider_disabled("kimi"),
@@ -2457,6 +2504,39 @@ mod tests {
         assert!((cost - 0.10).abs() < 1e-9, "cost {cost} != 0.10");
     }
 
+    /// Codex sessions driven through a router against the Kimi plan log
+    /// "kimi-oauth/k3" turns — those bill Moonshot, not the ChatGPT sub,
+    /// so they move off the Codex card with the vendor prefix peeled.
+    #[test]
+    fn codex_kimi_oauth_rows_move_to_the_kimi_card() {
+        let lines = vec![
+            json!({"timestamp": "2026-08-18T10:00:00Z", "type": "turn_context",
+                   "payload": {"model": "gpt-5.6-sol"}})
+            .to_string(),
+            token_count_line("2026-08-18T10:00:01Z", Some((1_000.0, 100.0)), (1_000.0, 100.0)),
+            json!({"timestamp": "2026-08-18T10:01:00Z", "type": "turn_context",
+                   "payload": {"model": "kimi-oauth/k3"}})
+            .to_string(),
+            token_count_line("2026-08-18T10:01:01Z", Some((2_000.0, 200.0)), (3_000.0, 300.0)),
+        ];
+        let mut all = codex_run(&lines);
+        let moved = split_kimi_routed(&mut all);
+        // The GPT turn stays on Codex; the Kimi turn moves, prefix peeled.
+        assert!(all.days.keys().all(|(_, m)| m == "gpt-5.6-sol"));
+        assert_eq!(tokens_sum(&all), 1_100.0);
+        assert!(moved.days.keys().all(|(_, m)| m == "k3"), "{:?}", moved.days.keys());
+        assert_eq!(tokens_sum(&moved), 2_200.0);
+    }
+
+    #[test]
+    fn strip_kimi_prefix_covers_every_spelling() {
+        assert_eq!(strip_kimi_prefix("kimi-oauth/k3"), "k3");
+        assert_eq!(strip_kimi_prefix("kimi-code/k3"), "k3");
+        assert_eq!(strip_kimi_prefix("moonshot-ai/kimi-k3"), "kimi-k3");
+        assert_eq!(strip_kimi_prefix("moonshot/kimi-k2.5"), "kimi-k2.5");
+        assert_eq!(strip_kimi_prefix("kimi-k3"), "kimi-k3");
+    }
+
     #[test]
     fn kimi_spend_stays_on_moonshot_without_login() {
         assert_eq!(kimi_spend_target(true, false), ("kimi", "Kimi Code"));
@@ -2638,12 +2718,14 @@ pub fn collect(cursor_csv: Option<String>) -> Vec<ProviderSpend> {
         t.clear();
     }
     let (pi_claude, pi_codex) = pi();
-    let (claude_sp, mut minimax_extra, mut qwen_via_claude) = claude(pi_claude);
-    // Extra Claude accounts: own spend cards, with their MiniMax/qwen-routed
-    // rows folded into the same destinations as the default account's.
-    let (extra_claude_spends, mm2, qw2) = claude_extra_accounts();
+    let (claude_sp, mut minimax_extra, mut qwen_via_claude, mut kimi_routed) =
+        claude(pi_claude);
+    // Extra Claude accounts: own spend cards, with their MiniMax/qwen/Kimi-
+    // routed rows folded into the same destinations as the default account's.
+    let (extra_claude_spends, mm2, qw2, km2) = claude_extra_accounts();
     merge_data(&mut minimax_extra, mm2);
     merge_data(&mut qwen_via_claude, qw2);
+    merge_data(&mut kimi_routed, km2);
     // Hermes rows going to an existing slice merge into it (MiniMax via the
     // extra-data path); the rest become their own spend entries.
     let mut hermes_rest = Vec::new();
@@ -2657,19 +2739,23 @@ pub fn collect(cursor_csv: Option<String>) -> Vec<ProviderSpend> {
     let (opencode_sp, mut aihubmix_data) = opencode();
     merge_data(&mut aihubmix_data, qwen_via_claude);
     let aihubmix_sp = build_spend("aihubmix", "AihubMix", aihubmix_data);
+    let (codex_sp, kimi_via_codex) = codex(pi_codex);
+    merge_data(&mut kimi_routed, kimi_via_codex);
+    let (extra_codex_spends, kimi_via_extra_codex) = codex_extra_accounts();
+    merge_data(&mut kimi_routed, kimi_via_extra_codex);
     let mut list = vec![
         claude_sp,
-        codex(pi_codex),
+        codex_sp,
         grok(),
         opencode_sp,
         aihubmix_sp,
         devin(),
         minimax(minimax_extra),
-        kimi(),
+        kimi(kimi_routed),
         qwen(),
     ];
     list.extend(extra_claude_spends);
-    list.extend(codex_extra_accounts());
+    list.extend(extra_codex_spends);
     list.extend(hermes_rest);
     if let Some(csv) = cursor_csv {
         list.push(cursor_from_csv(&csv));

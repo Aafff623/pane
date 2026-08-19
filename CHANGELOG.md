@@ -11,6 +11,11 @@
   refresh only re-reads files whose prices actually moved. A baked-pricing
   code change still discards the cache. One last full scan migrates to
   the new format.
+- **Kimi usage routed through Codex (or Claude) lands on the Kimi card.**
+  Sessions that log `kimi-oauth/k3` or `moonshot-ai/…` via a router used
+  to keep those dollars on Codex. They move to Kimi Code (or Moonshot
+  when there's no Kimi login), with the vendor prefix peeled so they
+  merge with the CLI's own logs.
 - **Kimi Code plan usage now has dollar amounts** — the official CLI logs
   plan K3 as `kimi-code/k3` (and K2.7 Code as `kimi-for-coding`), which
   missed the rate table, so Today could show a million tokens at $0.00.
