@@ -343,6 +343,10 @@ let refreshing = false;
 // API key races the auto-refresh timer). Dropping it would leave the new
 // state unfetched and the status line stuck on the save message.
 let refreshQueued = false;
+// A key saved while the first refresh is still in flight. First-run (and
+// "new provider") auto-disable keys off that fetch's no_credentials list,
+// which can predate the save and park the provider we just turned on.
+const recentlyKeyed = new Set<string>();
 let refreshTimer: number | undefined;
 let lastSnapshots: Snapshot[] = [];
 let lastSpend: ProviderSpend[] = [];
@@ -2319,6 +2323,7 @@ async function refresh(force = false): Promise<void> {
   }
   if (!force && Date.now() - lastFetch < STALE_MS) return;
   refreshing = true;
+  await unparkRecentlyKeyed();
 
   const status = document.querySelector("#status")!;
   status.textContent = "Refreshing…";
@@ -2336,11 +2341,17 @@ async function refresh(force = false): Promise<void> {
       // in Customize (a fresh PC with zero AI tools sees just those two).
       const starters = new Set(["claude", "codex"]);
       const noCreds = snapshots
-        .filter((s) => s.status === "no_credentials" && !starters.has(s.id))
+        .filter(
+          (s) =>
+            s.status === "no_credentials" &&
+            !starters.has(s.id) &&
+            !recentlyKeyed.has(s.id)
+        )
         .map((s) => s.id);
       if (noCreds.length) {
         snapshots = snapshots.filter((s) => !noCreds.includes(s.id));
         await patchConfig({ disabled: noCreds }).catch(() => {});
+        await unparkRecentlyKeyed();
       }
     } else if (config.layout) {
       // App updates ship new providers; ones this PC has no credentials for
@@ -2349,7 +2360,11 @@ async function refresh(force = false): Promise<void> {
       const known = config.layout.providers;
       const fresh = snapshots
         .filter(
-          (s) => s.status === "no_credentials" && !(s.id in known) && !config.disabled.includes(s.id)
+          (s) =>
+            s.status === "no_credentials" &&
+            !(s.id in known) &&
+            !config.disabled.includes(s.id) &&
+            !recentlyKeyed.has(s.id)
         )
         .map((s) => s.id);
       if (fresh.length) {
@@ -2358,6 +2373,7 @@ async function refresh(force = false): Promise<void> {
           disabled: [...config.disabled, ...fresh],
           layout: config.layout,
         }).catch(() => {});
+        await unparkRecentlyKeyed();
       }
 
       // Updates also RETIRE providers; saved layouts keep referencing their
@@ -2382,6 +2398,9 @@ async function refresh(force = false): Promise<void> {
       }
     }
     snapshots = hideFoldedMoonshot(snapshots);
+    for (const s of snapshots) {
+      if (s.status !== "no_credentials") recentlyKeyed.delete(s.id);
+    }
     const firstData = lastSnapshots.length === 0;
     lastFetch = Date.now();
     lastSnapshots = snapshots;
@@ -2718,11 +2737,21 @@ function setupCustomizeDnD(providersEl: HTMLElement): void {
 // Settings pane
 // ---------------------------------------------------------------------------
 
+async function unparkRecentlyKeyed(): Promise<void> {
+  if (![...recentlyKeyed].some((id) => config.disabled.includes(id))) return;
+  await patchConfig({
+    disabled: config.disabled.filter((id) => !recentlyKeyed.has(id)),
+  }).catch(() => {});
+}
+
 async function saveApiKey(provider: string): Promise<void> {
   const input = document.querySelector<HTMLInputElement>(`#key-${provider}`)!;
   const status = document.querySelector("#status")!;
   try {
     const key = input.value;
+    // Mark before any await so an in-flight first-run pass cannot park
+    // this provider after our save returns.
+    if (key.trim()) recentlyKeyed.add(provider);
     await invoke("set_api_key", { provider, key });
     input.value = "";
     // Pasting a key says "show me this provider" — pull it out of Disabled.
