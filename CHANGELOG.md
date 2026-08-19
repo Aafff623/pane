@@ -3,6 +3,14 @@
 ## Unreleased
 
 ### Fixed
+- **Refreshing catalogs no longer re-reads every session log.** The spend
+  cache used to throw itself away whenever LiteLLM / models.dev /
+  the supplement file changed on disk (that happens daily, and hourly
+  while any model is unpriced), then re-parse hundreds of MB of jsonl.
+  Each cached file now records the pricing questions it asked; a catalog
+  refresh only re-reads files whose prices actually moved. A baked-pricing
+  code change still discards the cache. One last full scan migrates to
+  the new format.
 - **Kimi Code plan usage now has dollar amounts** — the official CLI logs
   plan K3 as `kimi-code/k3` (and K2.7 Code as `kimi-for-coding`), which
   missed the rate table, so Today could show a million tokens at $0.00.

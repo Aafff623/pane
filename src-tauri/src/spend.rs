@@ -75,10 +75,87 @@ struct FileData {
 struct FileEntry {
     mtime: SystemTime,
     size: u64,
-    /// Pricing-catalog generation the file was priced under — a catalog
-    /// refresh re-prices even files that haven't changed on disk.
+    /// Pricing-catalog generation the file was priced under. A catalog
+    /// refresh bumps the generation; the entry is then kept only if its
+    /// recorded price probes still replay identically (see `PriceProbe`).
     gen: u64,
+    probes: Vec<PriceProbe>,
     data: FileData,
+}
+
+/// One pricing question a file's parse asked, together with the answer it
+/// got. Replaying the questions under a newer catalog proves whether the
+/// file's cached dollars are still exact — if every probe answers the same,
+/// re-parsing the file would reproduce the same numbers, so the cached
+/// summary stays valid without re-reading a byte. This is what keeps the
+/// daily catalog refresh from discarding the whole cache and re-reading
+/// hundreds of MB of session logs whose prices didn't actually change.
+/// Unique pricing questions stored per file. A log that named thousands
+/// of distinct models must not grow the persist file without bound —
+/// overflowing this cap forces a re-parse on the next catalog change.
+const MAX_PROBES_PER_FILE: usize = 64;
+
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+enum PriceProbe {
+    /// `pricing::lookup(key)` returned `price`.
+    Lookup { key: String, price: Option<pricing::Price> },
+    /// `pricing::fast_multiplier(key)` returned `mult`.
+    FastMult { key: String, mult: f64 },
+    /// The file asked more unique questions than `MAX_PROBES_PER_FILE`.
+    /// Any catalog change must re-parse it — a truncated list cannot
+    /// vouch for prices we didn't record.
+    Overflow,
+}
+
+impl PriceProbe {
+    fn still_valid(&self) -> bool {
+        match self {
+            PriceProbe::Lookup { key, price } => pricing::lookup(key) == *price,
+            PriceProbe::FastMult { key, mult } => pricing::fast_multiplier(key) == *mult,
+            PriceProbe::Overflow => false,
+        }
+    }
+}
+
+thread_local! {
+    /// Probe recorder, active only while `file_days` runs a parse. Parsers
+    /// route pricing calls through `probe_lookup`/`probe_fast_multiplier`
+    /// so each file's entry remembers exactly which prices it depended on.
+    static PROBES: std::cell::RefCell<Option<Vec<PriceProbe>>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+fn record_probe(probe: PriceProbe) {
+    PROBES.with(|p| {
+        if let Some(list) = p.borrow_mut().as_mut() {
+            if list.iter().any(|q| matches!(q, PriceProbe::Overflow) || q == &probe) {
+                return;
+            }
+            if list.len() >= MAX_PROBES_PER_FILE {
+                list.push(PriceProbe::Overflow);
+                return;
+            }
+            list.push(probe);
+        }
+    });
+}
+
+/// `pricing::lookup` with the question/answer recorded for cache
+/// revalidation. Every parser that runs under `file_days` must use this
+/// (and `probe_fast_multiplier`) instead of calling pricing directly —
+/// an unrecorded call would make the cached entry look valid after that
+/// price changed.
+fn probe_lookup(model: &str) -> Option<pricing::Price> {
+    let price = pricing::lookup(model);
+    record_probe(PriceProbe::Lookup { key: model.to_string(), price });
+    price
+}
+
+/// `pricing::fast_multiplier`, recorded — see `probe_lookup`.
+fn probe_fast_multiplier(model: &str) -> f64 {
+    let mult = pricing::fast_multiplier(model);
+    record_probe(PriceProbe::FastMult { key: model.to_string(), mult });
+    mult
 }
 
 fn cache() -> &'static Mutex<HashMap<PathBuf, FileEntry>> {
@@ -91,13 +168,19 @@ fn cache() -> &'static Mutex<HashMap<PathBuf, FileEntry>> {
 // day/model totals per file) but rebuilding them means re-reading every
 // session log ever written — thousands of files, growing forever. Saving
 // the summaries to disk makes a fresh launch re-parse only files that
-// changed since the last run. The cache is only trusted when it was priced
-// under the exact catalog files currently on disk (pricing::catalog_stamp);
-// any mismatch, version bump, or parse error discards it wholesale — a
-// stale-price cache is worse than a slow first scan.
+// changed since the last run.
+//
+// Trust rules: a version or corrections-revision mismatch (the pricing
+// *code* changed) or a parse error discards the cache wholesale. A catalog
+// *file* change (pricing::catalog_stamp moved — this happens on every
+// daily/hourly refresh) instead replays each entry's recorded price probes:
+// entries whose prices still answer the same stay, only files whose prices
+// actually moved re-parse. A stale-price cache is worse than a slow first
+// scan — but re-reading gigabytes because a catalog mtime ticked is what
+// froze the app on "Scanning session logs…" every day.
 // ---------------------------------------------------------------------------
 
-const PERSIST_VERSION: u32 = 2;
+const PERSIST_VERSION: u32 = 3;
 
 /// Set when any file was (re)parsed this run — nothing changed, nothing saved.
 static CACHE_DIRTY: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
@@ -120,12 +203,22 @@ struct PersistEntry {
     size: u64,
     days: Vec<(i32, String, f64, f64)>,
     unpriced: Vec<(String, u64)>,
+    /// Pricing questions this file's parse asked (see `PriceProbe`).
+    /// Older caches without the field deserialize as empty — safe, because
+    /// they can only load through the exact-stamp fast path.
+    #[serde(default)]
+    probes: Vec<PriceProbe>,
 }
 
 #[derive(serde::Serialize, serde::Deserialize)]
 struct PersistFile {
     version: u32,
     pricing_stamp: String,
+    /// Baked-pricing revision the entries were priced under. Probes only
+    /// witness catalog lookups — a changed corrections revision means the
+    /// pricing *code* changed, which probes can't vouch for.
+    #[serde(default)]
+    corrections: u32,
     entries: Vec<PersistEntry>,
 }
 
@@ -135,19 +228,30 @@ fn persist_path() -> PathBuf {
 
 /// Loads the persisted cache into the in-memory map, once per app run.
 /// Runs after pricing::ensure_fresh() so the stamp reflects any catalog
-/// download that just happened — in which case it mismatches and the
-/// persisted costs are correctly thrown away.
+/// download that just happened. An exact stamp match loads everything; a
+/// stamp mismatch (a catalog file changed) replays each entry's price
+/// probes and keeps the entries whose prices didn't move — only a version
+/// or corrections-revision change discards the cache wholesale.
 fn load_persisted_cache() {
     static ONCE: OnceLock<()> = OnceLock::new();
     ONCE.get_or_init(|| {
         let Ok(raw) = fs::read_to_string(persist_path()) else { return };
         let Ok(doc) = serde_json::from_str::<PersistFile>(&raw) else { return };
-        if doc.version != PERSIST_VERSION || doc.pricing_stamp != pricing::catalog_stamp() {
+        if doc.version != PERSIST_VERSION || doc.corrections != pricing::corrections_rev() {
             return;
+        }
+        let stamp_matches = doc.pricing_stamp == pricing::catalog_stamp();
+        if !stamp_matches {
+            // Kept entries get re-persisted under the fresh stamp even if
+            // no file re-parses this run.
+            CACHE_DIRTY.store(true, std::sync::atomic::Ordering::Relaxed);
         }
         let gen = pricing::generation();
         let Ok(mut map) = cache().lock() else { return };
         for e in doc.entries {
+            if !stamp_matches && !e.probes.iter().all(PriceProbe::still_valid) {
+                continue; // a price this file used changed — re-parse it
+            }
             let mtime = SystemTime::UNIX_EPOCH
                 + std::time::Duration::new(e.mtime_secs, e.mtime_nanos);
             let mut data = FileData::default();
@@ -155,7 +259,7 @@ fn load_persisted_cache() {
                 data.days.insert((day, model), (cost, tokens));
             }
             data.unpriced = e.unpriced.into_iter().collect();
-            map.insert(e.path, FileEntry { mtime, size: e.size, gen, data });
+            map.insert(e.path, FileEntry { mtime, size: e.size, gen, probes: e.probes, data });
         }
     });
 }
@@ -192,12 +296,14 @@ fn save_persisted_cache() {
                     .map(|((day, model), (cost, tokens))| (*day, model.clone(), *cost, *tokens))
                     .collect(),
                 unpriced: e.data.unpriced.iter().map(|(m, c)| (m.clone(), *c)).collect(),
+                probes: e.probes.clone(),
             }
         })
         .collect();
     let doc = PersistFile {
         version: PERSIST_VERSION,
         pricing_stamp: pricing::catalog_stamp(),
+        corrections: pricing::corrections_rev(),
         entries,
     };
     let Ok(json) = serde_json::to_string(&doc) else { return };
@@ -428,23 +534,38 @@ fn file_days(path: &Path, parse: &mut dyn FnMut(&str, &mut FileData)) -> FileDat
         t.insert(path.to_path_buf());
     }
     let gen = pricing::generation();
-    if let Ok(map) = cache().lock() {
-        if let Some(entry) = map.get(path) {
-            if entry.mtime == mtime && entry.size == size && entry.gen == gen {
-                return entry.data.clone();
+    if let Ok(mut map) = cache().lock() {
+        if let Some(entry) = map.get_mut(path) {
+            if entry.mtime == mtime && entry.size == size {
+                if entry.gen == gen {
+                    return entry.data.clone();
+                }
+                // A catalog refreshed mid-run (generation bump). The file
+                // itself is unchanged — keep its summary if every price it
+                // used still answers the same, instead of re-reading it.
+                if entry.probes.iter().all(PriceProbe::still_valid) {
+                    entry.gen = gen;
+                    CACHE_DIRTY.store(true, std::sync::atomic::Ordering::Relaxed);
+                    return entry.data.clone();
+                }
             }
         }
     }
 
     let mut data = FileData::default();
+    PROBES.with(|p| *p.borrow_mut() = Some(Vec::new()));
     if let Ok(file) = fs::File::open(path) {
         for line in BufReader::new(file).lines().map_while(Result::ok) {
             parse(&line, &mut data);
         }
     }
+    let probes = PROBES.with(|p| p.borrow_mut().take()).unwrap_or_default();
 
     if let Ok(mut map) = cache().lock() {
-        map.insert(path.to_path_buf(), FileEntry { mtime, size, gen, data: data.clone() });
+        map.insert(
+            path.to_path_buf(),
+            FileEntry { mtime, size, gen, probes, data: data.clone() },
+        );
     }
     CACHE_DIRTY.store(true, std::sync::atomic::Ordering::Relaxed);
     data
@@ -571,7 +692,7 @@ fn claude_tokens(u: &Value) -> Option<ClaudeTokens> {
 /// (excluded, never a guessed $0). Fast-flagged requests scale by the
 /// supplement's multiplier.
 fn claude_cost(model: &str, t: &ClaudeTokens) -> Option<f64> {
-    let price = pricing::lookup(model).or_else(|| {
+    let price = probe_lookup(model).or_else(|| {
         claude_price(model).map(|(i, o, cr, cw)| pricing::Price::flat(i, o, cr, cw))
     })?;
     let u = pricing::Usage {
@@ -581,7 +702,7 @@ fn claude_cost(model: &str, t: &ClaudeTokens) -> Option<f64> {
         cache_write_5m: t.w5m,
         cache_write_1h: t.w1h,
     };
-    let mult = if t.fast { pricing::fast_multiplier(model) } else { 1.0 };
+    let mult = if t.fast { probe_fast_multiplier(model) } else { 1.0 };
     Some(pricing::request_cost(&price, &u, true) * mult)
 }
 
@@ -972,7 +1093,7 @@ fn codex_priority_multiplier(dated: &str, rate_model: &str) -> f64 {
         "gpt-5.5" | "gpt-5.5-pro" => 2.5,
         "gpt-5.4" | "gpt-5.4-pro" | "gpt-5.6-sol" | "gpt-5.6-terra" | "gpt-5.6-luna" => 2.0,
         _ => {
-            let m = pricing::fast_multiplier(rate_model);
+            let m = probe_fast_multiplier(rate_model);
             if m == 1.0 { 2.0 } else { m }
         }
     }
@@ -1135,9 +1256,9 @@ fn codex_line(st: &mut CodexFileState, line: &str, data: &mut FileData) {
         _ => (rate_source.clone(), false),
     };
     let lower = rate_source.to_lowercase();
-    let base_price = pricing::lookup(&rate_model);
+    let base_price = probe_lookup(&rate_model);
     let price = base_price
-        .or_else(|| if alias_fast { pricing::lookup(&rate_source) } else { None })
+        .or_else(|| if alias_fast { probe_lookup(&rate_source) } else { None })
         .or_else(|| {
             // The static gpt-5 table only for recognizably Codex-family
             // models; anything else is excluded.
@@ -1356,7 +1477,7 @@ fn pi_line(seen: &mut HashSet<String>, line: &str, data: &mut FileData) {
         add_event(data, ts, &tagged, c, tokens);
         return;
     }
-    match pricing::lookup(model) {
+    match probe_lookup(model) {
         Some(p) => {
             let u = pricing::Usage {
                 input,
@@ -1471,7 +1592,7 @@ fn grok() -> ProviderSpend {
             // Static backstop only for recognizably Grok-family models
             // (catalog down); it has no cache rate, so cached tokens are
             // conservatively priced as fresh input there.
-            let price = pricing::lookup(&model).or_else(|| {
+            let price = probe_lookup(&model).or_else(|| {
                 if model.to_lowercase().contains("grok") {
                     let (i, o) = grok_price(&model);
                     Some(pricing::Price::flat(i, o, i, i))
@@ -1616,7 +1737,7 @@ fn kimi_line(line: &str, data: &mut FileData) {
     }
     // Catalogs key Kimi models as "moonshot/<slug>"; try the bare slug
     // first (alias/fuzzy chain), then the prefixed spelling.
-    let price = pricing::lookup(&model).or_else(|| pricing::lookup(&format!("moonshot/{model}")));
+    let price = probe_lookup(&model).or_else(|| probe_lookup(&format!("moonshot/{model}")));
     match price {
         Some(p) => {
             let usage = pricing::Usage {
@@ -1658,7 +1779,7 @@ fn qwen_line(line: &str, data: &mut FileData) {
         return;
     }
     // Catalogs key these as bare slugs ("qwen3.8-max") or provider-prefixed.
-    let price = pricing::lookup(&model).or_else(|| pricing::lookup(&format!("qwen/{model}")));
+    let price = probe_lookup(&model).or_else(|| probe_lookup(&format!("qwen/{model}")));
     match price {
         Some(p) => {
             let usage = pricing::Usage {
@@ -1899,6 +2020,7 @@ mod tests {
         let doc = PersistFile {
             version: PERSIST_VERSION,
             pricing_stamp: "litellm:1:2|modelsdev:3:4|supplement:5:6".into(),
+            corrections: 8,
             entries: vec![PersistEntry {
                 path: PathBuf::from(r"C:\logs\session.jsonl"),
                 mtime_secs: 1_784_600_000,
@@ -1906,17 +2028,101 @@ mod tests {
                 size: 4096,
                 days: vec![(739_000, "claude-fable-5".into(), 1.25, 40_000.0)],
                 unpriced: vec![("mystery-model".into(), 3)],
+                probes: vec![
+                    PriceProbe::Lookup {
+                        key: "claude-fable-5".into(),
+                        price: Some(pricing::Price::flat(3.0, 15.0, 0.3, 3.75)),
+                    },
+                    PriceProbe::Lookup { key: "mystery-model".into(), price: None },
+                    PriceProbe::FastMult { key: "claude-fable-5".into(), mult: 2.0 },
+                ],
             }],
         };
         let json = serde_json::to_string(&doc).unwrap();
         let back: PersistFile = serde_json::from_str(&json).unwrap();
         assert_eq!(back.version, doc.version);
         assert_eq!(back.pricing_stamp, doc.pricing_stamp);
+        assert_eq!(back.corrections, doc.corrections);
         let (a, b) = (&back.entries[0], &doc.entries[0]);
         assert_eq!(a.path, b.path);
         assert_eq!((a.mtime_secs, a.mtime_nanos, a.size), (b.mtime_secs, b.mtime_nanos, b.size));
         assert_eq!(a.days, b.days);
         assert_eq!(a.unpriced, b.unpriced);
+        assert_eq!(a.probes, b.probes);
+    }
+
+    /// A v2 cache (no probes/corrections fields) must not load as v3 —
+    /// its entries carry no probes, so a stamp mismatch could never
+    /// revalidate them and stale prices would look valid forever.
+    #[test]
+    fn old_cache_versions_are_discarded() {
+        let v2 = r#"{"version":2,"pricing_stamp":"x","entries":[]}"#;
+        let doc: PersistFile = serde_json::from_str(v2).unwrap();
+        assert_ne!(doc.version, PERSIST_VERSION);
+    }
+
+    // ---- Price probes: catalog-refresh revalidation ------------------------
+
+    /// Probes replay against the live catalog: an unknown model recorded as
+    /// None still answers None (valid); pretending it had a price fails
+    /// validation (that file would re-parse).
+    #[test]
+    fn price_probes_replay_against_the_catalog() {
+        let absent = PriceProbe::Lookup {
+            key: "pane-test-model-that-cannot-exist".into(),
+            price: None,
+        };
+        assert!(absent.still_valid());
+        let phantom = PriceProbe::Lookup {
+            key: "pane-test-model-that-cannot-exist".into(),
+            price: Some(pricing::Price::flat(1.0, 2.0, 0.1, 1.0)),
+        };
+        assert!(!phantom.still_valid());
+        // fast_multiplier returns 1.0 for models the supplement doesn't
+        // publish a multiplier for.
+        let mult = PriceProbe::FastMult {
+            key: "pane-test-model-that-cannot-exist".into(),
+            mult: 1.0,
+        };
+        assert!(mult.still_valid());
+        let wrong_mult = PriceProbe::FastMult {
+            key: "pane-test-model-that-cannot-exist".into(),
+            mult: 3.5,
+        };
+        assert!(!wrong_mult.still_valid());
+    }
+
+    /// file_days records the pricing questions a parse asked, so the entry
+    /// can be revalidated after a catalog refresh without re-reading it.
+    #[test]
+    fn file_days_records_price_probes() {
+        let dir = std::env::temp_dir().join(format!("pane-probe-{}", std::process::id()));
+        let _ = fs::create_dir_all(&dir);
+        let path = dir.join("probe-test.jsonl");
+        let line = json!({"type": "usage.record", "model": "kimi-code/k3",
+            "usage": {"inputOther": 1000.0, "output": 1000.0},
+            "usageScope": "turn", "time": 1784208630652i64})
+        .to_string();
+        fs::write(&path, line).unwrap();
+
+        let data = file_days(&path, &mut |line, data| kimi_line(line, data));
+        assert!(!data.days.is_empty());
+        let probes = cache()
+            .lock()
+            .unwrap()
+            .get(&path)
+            .map(|e| e.probes.clone())
+            .unwrap_or_default();
+        let _ = fs::remove_file(&path);
+        assert!(
+            probes
+                .iter()
+                .any(|p| matches!(p, PriceProbe::Lookup { key, .. } if key == "k3")),
+            "expected a k3 lookup probe, got {} probes",
+            probes.len()
+        );
+        // Everything just recorded replays valid against the same catalog.
+        assert!(probes.iter().all(PriceProbe::still_valid));
     }
 
     #[test]

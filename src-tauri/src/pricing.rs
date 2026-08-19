@@ -22,7 +22,7 @@ use serde_json::{json, Value};
 
 use crate::providers;
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct Price {
     pub input: f64,
     pub output: f64,
@@ -167,6 +167,14 @@ pub fn generation() -> u64 {
 /// otherwise leave history at the old dollars until upstream happens to
 /// rewrite a catalog.
 const CORRECTIONS_REV: u32 = 8; // 8: Moonshot first-party Kimi rates (plan slugs + K3/K2.7/K2.6/K2.5/V1)
+
+/// The corrections revision on its own — the spend cache treats a changed
+/// revision as a hard discard (the *code* that prices changed), while a
+/// changed catalog file only re-prices files whose recorded price probes
+/// no longer replay identically.
+pub fn corrections_rev() -> u32 {
+    CORRECTIONS_REV
+}
 /// The live OpenUsage supplement is ~105 alias rules (Daybreak, Cursor
 /// Router prose names, GPT-5.3–5.6 effort slugs). 64 silently dropped
 /// everything after `gpt-5.2`. Per-rule caps below still bound memory.
@@ -174,10 +182,11 @@ const MAX_ALIAS_RULES: usize = 256;
 
 /// Stable fingerprint of the effective pricing inputs: the on-disk catalog
 /// files plus this binary's corrections revision. The persistent spend
-/// cache stores costs priced under a specific catalog set; when any catalog
-/// file changes (a refresh rewrote it) — or an update ships changed baked
-/// pricing — the stamp changes and the whole persisted cache is discarded
-/// rather than served with stale prices.
+/// cache stores costs priced under a specific catalog set; when the stamp
+/// changes (a refresh rewrote a catalog, or an update shipped changed baked
+/// pricing) the cache revalidates each file's recorded price probes and
+/// re-parses only the files whose prices actually moved — never serving
+/// stale dollars, never re-reading gigabytes because a catalog mtime ticked.
 pub fn catalog_stamp() -> String {
     let files = SOURCES
         .iter()
