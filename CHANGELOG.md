@@ -10,7 +10,8 @@
   Each cached file now records the pricing questions it asked; a catalog
   refresh only re-reads files whose prices actually moved. A baked-pricing
   code change still discards the cache. One last full scan migrates to
-  the new format.
+  the new format. Probe keys stored in that cache are length-capped so a
+  huge model string cannot inflate the on-disk file.
 - **Kimi Code plan usage now has dollar amounts** — the official CLI logs
   plan K3 as `kimi-code/k3` (and K2.7 Code as `kimi-for-coding`), which
   missed the rate table, so Today could show a million tokens at $0.00.
