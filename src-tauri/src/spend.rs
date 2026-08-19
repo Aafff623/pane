@@ -94,6 +94,9 @@ struct FileEntry {
 /// of distinct models must not grow the persist file without bound —
 /// overflowing this cap forces a re-parse on the next catalog change.
 const MAX_PROBES_PER_FILE: usize = 64;
+/// Same bound as catalog canonicals. A log with a huge model string must
+/// not inflate spend_cache.json; overflow forces a re-parse instead.
+const MAX_PROBE_KEY: usize = 128;
 
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 enum PriceProbe {
@@ -101,9 +104,9 @@ enum PriceProbe {
     Lookup { key: String, price: Option<pricing::Price> },
     /// `pricing::fast_multiplier(key)` returned `mult`.
     FastMult { key: String, mult: f64 },
-    /// The file asked more unique questions than `MAX_PROBES_PER_FILE`.
-    /// Any catalog change must re-parse it — a truncated list cannot
-    /// vouch for prices we didn't record.
+    /// The file asked more unique questions than `MAX_PROBES_PER_FILE`,
+    /// or a model string longer than `MAX_PROBE_KEY`. A truncated list
+    /// cannot vouch for prices we didn't record.
     Overflow,
 }
 
@@ -159,15 +162,23 @@ fn record_probe(probe: PriceProbe) {
 /// price changed.
 fn probe_lookup(model: &str) -> Option<pricing::Price> {
     let price = pricing::lookup(model);
-    record_probe(PriceProbe::Lookup { key: model.to_string(), price });
+    record_model_probe(model, |key| PriceProbe::Lookup { key, price });
     price
 }
 
 /// `pricing::fast_multiplier`, recorded — see `probe_lookup`.
 fn probe_fast_multiplier(model: &str) -> f64 {
     let mult = pricing::fast_multiplier(model);
-    record_probe(PriceProbe::FastMult { key: model.to_string(), mult });
+    record_model_probe(model, |key| PriceProbe::FastMult { key, mult });
     mult
+}
+
+fn record_model_probe(model: &str, make: impl FnOnce(String) -> PriceProbe) {
+    if model.len() > MAX_PROBE_KEY {
+        record_probe(PriceProbe::Overflow);
+    } else {
+        record_probe(make(model.to_string()));
+    }
 }
 
 fn cache() -> &'static Mutex<HashMap<PathBuf, FileEntry>> {
@@ -182,17 +193,19 @@ fn cache() -> &'static Mutex<HashMap<PathBuf, FileEntry>> {
 // the summaries to disk makes a fresh launch re-parse only files that
 // changed since the last run.
 //
-// Trust rules: a version or corrections-revision mismatch (the pricing
-// *code* changed) or a parse error discards the cache wholesale. A catalog
-// *file* change (pricing::catalog_stamp moved — this happens on every
-// daily/hourly refresh) instead replays each entry's recorded price probes:
-// entries whose prices still answer the same stay, only files whose prices
-// actually moved re-parse. A stale-price cache is worse than a slow first
-// scan — but re-reading gigabytes because a catalog mtime ticked is what
-// froze the app on "Scanning session logs…" every day.
+// Trust rules: a PERSIST_VERSION mismatch (cache format *or* a parser
+// change — `claude_line` / `codex_line` / `pi_line` / …) or a
+// corrections-revision mismatch (the pricing *code* changed) discards
+// the cache wholesale. A catalog *file* change (pricing::catalog_stamp
+// moved — this happens on every daily/hourly refresh) instead replays
+// each entry's recorded price probes: entries whose prices still answer
+// the same stay, only files whose prices actually moved re-parse. A
+// stale-price cache is worse than a slow first scan — but re-reading
+// gigabytes because a catalog mtime ticked is what froze the app on
+// "Scanning session logs…" every day.
 // ---------------------------------------------------------------------------
 
-const PERSIST_VERSION: u32 = 3;
+const PERSIST_VERSION: u32 = 3; // bump on cache format *or* parser-logic changes
 
 /// Set when any file was (re)parsed this run — nothing changed, nothing saved.
 static CACHE_DIRTY: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
