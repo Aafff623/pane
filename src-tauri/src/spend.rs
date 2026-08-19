@@ -1928,7 +1928,7 @@ fn kimi_spend_target(has_login: bool, kimi_disabled: bool) -> (&'static str, &'s
     if has_login && !kimi_disabled {
         ("kimi", "Kimi Code")
     } else {
-        ("moonshot", "Moonshot")
+        ("moonshot", "Kimi API")
     }
 }
 
@@ -2624,9 +2624,9 @@ mod tests {
     #[test]
     fn kimi_spend_stays_on_moonshot_without_login() {
         assert_eq!(kimi_spend_target(true, false), ("kimi", "Kimi Code"));
-        assert_eq!(kimi_spend_target(false, false), ("moonshot", "Moonshot"));
-        assert_eq!(kimi_spend_target(true, true), ("moonshot", "Moonshot"));
-        assert_eq!(kimi_spend_target(false, true), ("moonshot", "Moonshot"));
+        assert_eq!(kimi_spend_target(false, false), ("moonshot", "Kimi API"));
+        assert_eq!(kimi_spend_target(true, true), ("moonshot", "Kimi API"));
+        assert_eq!(kimi_spend_target(false, true), ("moonshot", "Kimi API"));
     }
 
     /// Live diagnostic (ignored): what each spend source produced from

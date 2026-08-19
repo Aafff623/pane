@@ -806,7 +806,7 @@ async fn fetch_usage(app: tauri::AppHandle) -> Vec<providers::Snapshot> {
         ("zai", Box::pin(guarded("zai".into(), "Z.ai".into(), providers::zai::snapshot()))),
         ("antigravity", Box::pin(guarded("antigravity".into(), "Antigravity".into(), providers::antigravity::snapshot()))),
         ("deepseek", Box::pin(guarded("deepseek".into(), "DeepSeek".into(), providers::deepseek::snapshot()))),
-        ("moonshot", Box::pin(guarded("moonshot".into(), "Moonshot".into(), providers::moonshot::snapshot()))),
+        ("moonshot", Box::pin(guarded("moonshot".into(), "Kimi API".into(), providers::moonshot::snapshot()))),
         ("elevenlabs", Box::pin(guarded("elevenlabs".into(), "ElevenLabs".into(), providers::elevenlabs::snapshot()))),
         ("ollama", Box::pin(guarded("ollama".into(), "Ollama".into(), providers::ollama::snapshot()))),
         ("codebuff", Box::pin(guarded("codebuff".into(), "Codebuff".into(), providers::codebuff::snapshot()))),
@@ -1714,7 +1714,7 @@ mod tests {
             ),
             Snapshot::ok(
                 "moonshot",
-                "Moonshot",
+                "Kimi API",
                 None,
                 vec![Metric::progress("Credits used", 24.0, None)],
             ),
@@ -1737,7 +1737,7 @@ mod tests {
             ),
             Snapshot::ok(
                 "moonshot",
-                "Moonshot",
+                "Kimi API",
                 None,
                 vec![Metric::progress("Credits used", 24.0, None)],
             ),
@@ -1752,7 +1752,7 @@ mod tests {
                 None,
                 vec![Metric::progress("Session", 0.0, None)],
             ),
-            Snapshot::no_credentials("moonshot", "Moonshot", "paste a key"),
+            Snapshot::no_credentials("moonshot", "Kimi API", "paste a key"),
         ];
         fold_moonshot_into_kimi(&mut empty_moon);
         assert!(!empty_moon.iter().any(|s| s.id == "moonshot"));
