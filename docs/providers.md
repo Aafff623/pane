@@ -168,14 +168,16 @@ Ground rules that apply to every provider:
   Google's own token refresh.
 - **Shows:** Gemini + Claude pool windows, plan.
 
-## DeepSeek / Moonshot / ElevenLabs / Venice-class key providers
+## DeepSeek / Kimi API / ElevenLabs / Venice-class key providers
 
 - **Reads:** pasted key or env var only (`DEEPSEEK_API_KEY`,
   `MOONSHOT_API_KEY`/`KIMI_API_KEY`, `ELEVENLABS_API_KEY`).
+  The Customize toggle and Settings field are labeled **Kimi API**;
+  the internal id is still `moonshot`.
 - **Calls:** `api.deepseek.com/user/balance`;
   `api.moonshot.ai|cn/v1/users/me/balance`;
   `api.elevenlabs.io/v1/user/subscription`.
-- **Shows:** balances / character quota with reset pacing; Moonshot and
+- **Shows:** balances / character quota with reset pacing; Kimi API and
   DeepSeek add a "Credits used" percent bar metered against the highest
   balance Pane has seen locally (top-ups raise it; feeds the Almost Out
   notification).
@@ -212,10 +214,10 @@ Ground rules that apply to every provider:
   Codex (and Claude) sessions that log `kimi-oauth/…` or `moonshot-ai/…`
   via a router move those spend rows here, prefix peeled, so they do not
   stay on the Codex/Claude card.
-  The separate Moonshot card is hidden while this card is connected.
-  Switching Moonshot off in Customize still skips the wallet fetch (no
-  API bar, no `api.moonshot.ai|cn` call). If the Kimi card is off,
-  local session spend stays on Moonshot.
+  The leftover Kimi API (Moonshot) card is hidden while this card is
+  connected. Switching **Kimi API** off in Customize still skips the
+  wallet fetch (no API bar, no `api.moonshot.ai|cn` call). If the Kimi
+  card is off, local session spend stays on moonshot.
 
 ## Hermes (Nous Research desktop)
 

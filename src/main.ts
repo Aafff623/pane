@@ -204,7 +204,10 @@ const ALL_PROVIDERS: [string, string][] = [
   ["zai", "Z.ai"],
   ["antigravity", "Antigravity"],
   ["deepseek", "DeepSeek"],
-  ["moonshot", "Moonshot"],
+  // Internal id stays "moonshot" (config/layout/telemetry compatibility);
+  // the toggle reads "Kimi API" because that's what it gates: the API bar
+  // on the Kimi card (or the standalone wallet card without a CLI login).
+  ["moonshot", "Kimi API"],
   ["elevenlabs", "ElevenLabs"],
   ["ollama", "Ollama"],
   ["codebuff", "Codebuff"],
@@ -2003,10 +2006,10 @@ function renderCustomize(): string {
       // fetched) — that one must keep rendering, or its re-enable toggle
       // vanishes with it and the account is stuck off forever.
       if (id.includes("@") && !snapshot && !config.disabled.includes(id)) return "";
-      // Moonshot's leftover *card* is folded into Kimi on the dashboard,
-      // but this toggle still owns the wallet: off means no Moonshot HTTP
-      // and no API bar on the Kimi card. Hide it and there's no way to
-      // stop those calls.
+      // The leftover Moonshot *card* folds into Kimi Code on the dashboard.
+      // This toggle (labeled "Kimi API") still owns the wallet: off means
+      // no Moonshot HTTP and no API bar on the Kimi card. Hide it and
+      // there's no way to stop those calls.
       // Dynamic account cards carry their name in the snapshot
       // ("Claude — Org"); static providers come from the fixed list.
       const name = ALL_PROVIDERS.find(([pid]) => pid === id)?.[1] ?? snapshot?.name ?? id;
