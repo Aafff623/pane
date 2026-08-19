@@ -80,8 +80,14 @@ Ground rules that apply to every provider:
   (`%APPDATA%\Cursor\User\globalStorage\state.vscdb` — copied before
   reading, never modified).
 - **Calls:** `cursor.com` / `api2.cursor.sh` usage APIs; the dashboard's
-  usage-events CSV export (for spend).
-- **Shows:** credits, usage meters, plan; per-day spend.
+  usage-events CSV export (for spend). `GetCreditGrantsBalance` cents
+  fields may be strings or numbers.
+- **Shows:** Cursor Models / Other Models bars; a **Credits** progress
+  row when the account has promo grants (`totalCents` vs remaining);
+  a **Bonus** text row behind Show more when `planUsage.bonusSpend` is
+  reported — free provider-sponsored usage, with the pool estimate
+  (derived from `totalPercentUsed`) as context when it is sane; Total
+  usage text on bucket-era personal plans; per-day spend.
 
 ## OpenCode (Go plan)
 

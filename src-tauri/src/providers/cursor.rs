@@ -237,6 +237,65 @@ fn dollars(cents: f64) -> String {
     }
 }
 
+/// Promo / grant balance from `GetCreditGrantsBalance`. Live shape
+/// (2026-08): `{hasCreditGrants, creditBalanceCents, totalCents,
+/// usedCents}` with cents as strings or numbers. Returns None when
+/// there is nothing to show — never a 0% bar for a missing pool.
+fn credit_grants_metric(grants: &Value) -> Option<Metric> {
+    let has = grants.get("hasCreditGrants").and_then(Value::as_bool);
+    let total = num(grants.get("totalCents")).unwrap_or(0.0);
+    let used = num(grants.get("usedCents")).unwrap_or(0.0);
+    let remaining = num(grants.get("creditBalanceCents"))
+        .unwrap_or_else(|| (total - used).max(0.0));
+    if has == Some(false) && total <= 0.0 && remaining <= 0.0 {
+        return None;
+    }
+    if total > 0.0 {
+        let pct = ((total - remaining) / total * 100.0).clamp(0.0, 100.0);
+        Some(Metric::progress(
+            "Credits",
+            pct,
+            Some(format!("{} left of {}", dollars(remaining), dollars(total))),
+        ))
+    } else if remaining > 0.0 {
+        Some(Metric::text("Credits", dollars(remaining)))
+    } else {
+        if has == Some(true) {
+            eprintln!(
+                "[pane] cursor credit grants: hasCreditGrants but no totalCents/creditBalanceCents"
+            );
+        }
+        None
+    }
+}
+
+/// Cursor's sponsored / gifted bonus pool (`planUsage.bonusSpend`) — free
+/// usage model providers cover beyond the plan, not money the user owes.
+/// Shown as a text row (tucked behind Show more like other balances), not
+/// a bar: the RPC never names the pool size, so the ceiling would have to
+/// be derived from `totalPercentUsed` (`totalSpend / pct - includedSpend`)
+/// — Cursor's percent fields have contradicted each other before (the
+/// bucket-era 0% bug, `remainingBonus:false` against a 36% total), so the
+/// derived number rides along as context when it's sane, never as a meter.
+fn bonus_metric(plan_usage: &Value, total_pct: Option<f64>) -> Option<Metric> {
+    let bonus_spend = num(plan_usage.get("bonusSpend")).filter(|v| *v > 0.0)?;
+    let included = num(plan_usage.get("includedSpend")).unwrap_or(0.0);
+    let bonus_pool = match (num(plan_usage.get("totalSpend")), total_pct) {
+        (Some(spent), Some(pct)) if pct >= 1.0 && spent > 0.0 => {
+            (spent / pct * 100.0 - included).max(0.0)
+        }
+        _ => 0.0,
+    };
+    Some(if bonus_pool >= bonus_spend && bonus_pool > 0.0 {
+        Metric::text(
+            "Bonus",
+            format!("{} of {} used", dollars(bonus_spend), dollars(bonus_pool)),
+        )
+    } else {
+        Metric::text("Bonus", format!("{} used", dollars(bonus_spend)))
+    })
+}
+
 fn title_case(s: &str) -> String {
     s.split_whitespace()
         .map(|w| {
@@ -363,16 +422,18 @@ async fn fetch() -> Result<Snapshot, String> {
 
     let mut metrics = Vec::new();
 
-    // Unexpired credit grants + any negative Stripe balance = money that
-    // gets burned before the plan pool does.
-    if let Ok(Some(grants)) = credit_grants {
-        let has = grants.get("hasCreditGrants").and_then(Value::as_bool) == Some(true);
-        let total = if has { num(grants.get("totalCents")).unwrap_or(0.0) } else { 0.0 };
-        let used = if has { num(grants.get("usedCents")).unwrap_or(0.0) } else { 0.0 };
-        if total > 0.0 {
-            let remaining = (total - used).max(0.0);
-            metrics.push(Metric::text("Credits", dollars(remaining)));
+    // Unexpired credit grants — money that gets burned before the plan
+    // pool does. Cursor reports the pool size (`totalCents`) so this is
+    // a real used/total bar like Codex Extra credits, not a high-water
+    // guess. Cents often arrive as strings; `num()` accepts both.
+    match credit_grants {
+        Ok(Some(grants)) => {
+            if let Some(row) = credit_grants_metric(&grants) {
+                metrics.push(row);
+            }
         }
+        Ok(None) => {}
+        Err(e) => eprintln!("[pane] cursor credit grants: {e}"),
     }
 
     let spend_limit = usage.get("spendLimitUsage").filter(|v| v.is_object());
@@ -415,6 +476,10 @@ async fn fetch() -> Result<Snapshot, String> {
             Metric::progress("Other Models", api.clamp(0.0, 100.0), None)
                 .with_reset(resets_at, Some(period_ms)),
         );
+    }
+
+    if let Some(row) = bonus_metric(plan_usage, total_pct) {
+        metrics.push(row);
     }
 
     if is_team {
@@ -556,3 +621,86 @@ async fn legacy_fetch(token: &str) -> Result<Snapshot, String> {
     }
     Ok(Snapshot::ok(ID, NAME, plan, metrics))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn credit_grants_string_cents_become_a_bar() {
+        let grants = json!({
+            "hasCreditGrants": true,
+            "creditBalanceCents": "228",
+            "totalCents": "2500",
+            "usedCents": "2272"
+        });
+        let m = credit_grants_metric(&grants).expect("row");
+        assert_eq!(m.kind, "progress");
+        assert_eq!(m.label, "Credits");
+        assert!((m.used_percent.unwrap() - 90.88).abs() < 0.02);
+        assert_eq!(m.detail.as_deref(), Some("$2.28 left of $25.00"));
+    }
+
+    #[test]
+    fn credit_grants_numeric_cents_also_parse() {
+        let grants = json!({
+            "hasCreditGrants": true,
+            "totalCents": 20000,
+            "usedCents": 0,
+            "creditBalanceCents": 20000
+        });
+        let m = credit_grants_metric(&grants).expect("row");
+        assert_eq!(m.used_percent, Some(0.0));
+        assert_eq!(m.detail.as_deref(), Some("$200 left of $200"));
+    }
+
+    #[test]
+    fn credit_grants_absent_or_empty_hide() {
+        assert!(credit_grants_metric(&json!({"hasCreditGrants": false})).is_none());
+        assert!(credit_grants_metric(&json!({})).is_none());
+        assert!(credit_grants_metric(&json!({"hasCreditGrants": true})).is_none());
+    }
+
+    #[test]
+    fn credit_grants_balance_only_is_text() {
+        let grants = json!({
+            "hasCreditGrants": true,
+            "creditBalanceCents": "1500"
+        });
+        let m = credit_grants_metric(&grants).expect("row");
+        assert_eq!(m.kind, "text");
+        assert_eq!(m.value.as_deref(), Some("$15.00"));
+    }
+
+    #[test]
+    fn bonus_is_a_text_row_with_pool_context() {
+        // Live 2026-08 shape: $122.51 spent, 35.51% of included+bonus,
+        // $20 included, $102.51 bonus spend → bonus pool ≈ $325.
+        let plan = json!({
+            "totalSpend": 12251,
+            "includedSpend": 2000,
+            "bonusSpend": 10251,
+        });
+        let m = bonus_metric(&plan, Some(35.51014492753623)).expect("row");
+        assert_eq!(m.kind, "text");
+        assert_eq!(m.label, "Bonus");
+        // dollars() rounds ≥$100 to whole dollars: 10251¢ → $103, pool $325.
+        assert_eq!(m.value.as_deref(), Some("$103 of $325 used"));
+    }
+
+    #[test]
+    fn bonus_tiny_percent_drops_the_derived_pool() {
+        let plan = json!({ "bonusSpend": 500, "totalSpend": 500, "includedSpend": 0 });
+        let m = bonus_metric(&plan, Some(0.2)).expect("row");
+        assert_eq!(m.kind, "text");
+        assert_eq!(m.value.as_deref(), Some("$5.00 used"));
+    }
+
+    #[test]
+    fn bonus_zero_hides() {
+        assert!(bonus_metric(&json!({"bonusSpend": 0}), Some(10.0)).is_none());
+        assert!(bonus_metric(&json!({}), Some(10.0)).is_none());
+    }
+}
+

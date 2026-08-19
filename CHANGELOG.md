@@ -20,6 +20,12 @@
   to keep those dollars on Codex. They move to Kimi Code (or Moonshot
   when there's no Kimi login), with the vendor prefix peeled so they
   merge with the CLI's own logs.
+- **Cursor promo credits and bonus usage show up.** Credit grants
+  (`GetCreditGrantsBalance`) are a used/total progress bar like Codex
+  Extra credits, and Cursor's sponsored bonus usage (`bonusSpend`) is a
+  text row behind Show more — free usage model providers cover, shown
+  as context rather than a meter. Cents-as-strings parse; a failed
+  grants call logs instead of going silent.
 - **Kimi Code plan usage now has dollar amounts** — the official CLI logs
   plan K3 as `kimi-code/k3` (and K2.7 Code as `kimi-for-coding`), which
   missed the rate table, so Today could show a million tokens at $0.00.

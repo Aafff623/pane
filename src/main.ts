@@ -529,6 +529,36 @@ function ensureLayout(): void {
     }
   }
 
+  // "Bonus" briefly rendered as a bar and is now a text row (free
+  // provider-sponsored usage — context, not a meter). Layouts saved in
+  // that window placed it always-visible; tuck it behind Show more like
+  // the other balance rows, and drop any star/pin on it (the tray strip
+  // and pinned tray number only accept progress metrics).
+  const bonusIsText =
+    cursorSnap?.metrics.find((m) => m.label === "Bonus")?.kind === "text";
+  if (bonusIsText) {
+    for (const [pid, L] of Object.entries(layout.providers)) {
+      if (providerFamily(pid) !== "cursor") continue;
+      if (L.metricOrder.includes("Bonus") && !L.onDemand.includes("Bonus")) {
+        L.onDemand.push("Bonus");
+        changed = true;
+      }
+      const starAt = L.starred.indexOf("Bonus");
+      if (starAt >= 0) {
+        L.starred.splice(starAt, 1);
+        changed = true;
+      }
+    }
+    if (
+      config.pinned &&
+      providerFamily(config.pinned.provider) === "cursor" &&
+      config.pinned.label === "Bonus"
+    ) {
+      config.pinned = null;
+      void patchConfig({ pinned: null }).catch(() => {});
+    }
+  }
+
   // Kimi Code folds the Moonshot wallet onto the plan card. Stars and the
   // tray pin on "Credits used" would otherwise vanish with that card —
   // but only migrate when the API bar is actually on that card, or we
