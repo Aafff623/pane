@@ -180,6 +180,10 @@ const CORRECTIONS_REV: u32 = 8; // 8: Moonshot first-party Kimi rates (plan slug
 /// cannot vouch for that code. A forgotten bump used to get papered over
 /// within a day by catalog-stamp churn; it now leaves stale dollars until
 /// the next bump.
+///
+/// Parser-logic changes (`claude_line`, `codex_line`, `pi_line`, token
+/// field spellings, dedup rules) bump `PERSIST_VERSION` in spend.rs
+/// instead — probes cannot see those either.
 pub fn corrections_rev() -> u32 {
     CORRECTIONS_REV
 }
