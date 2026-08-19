@@ -346,7 +346,10 @@ let refreshQueued = false;
 // A key saved while the first refresh is still in flight. First-run (and
 // "new provider") auto-disable keys off that fetch's no_credentials list,
 // which can predate the save and park the provider we just turned on.
-const recentlyKeyed = new Set<string>();
+// Value is the refresh generation that was in flight (or last completed)
+// at save time — the exemption lasts through that pass plus one more.
+const recentlyKeyed = new Map<string, number>();
+let refreshGeneration = 0;
 let refreshTimer: number | undefined;
 let lastSnapshots: Snapshot[] = [];
 let lastSpend: ProviderSpend[] = [];
@@ -2323,6 +2326,7 @@ async function refresh(force = false): Promise<void> {
   }
   if (!force && Date.now() - lastFetch < STALE_MS) return;
   refreshing = true;
+  const myGen = ++refreshGeneration;
   await unparkRecentlyKeyed();
 
   const status = document.querySelector("#status")!;
@@ -2400,6 +2404,12 @@ async function refresh(force = false): Promise<void> {
     snapshots = hideFoldedMoonshot(snapshots);
     for (const s of snapshots) {
       if (s.status !== "no_credentials") recentlyKeyed.delete(s.id);
+    }
+    // Drop exemptions from saves that happened before this refresh started
+    // (a failed save is removed in the catch; a cleared key is removed on
+    // empty paste). One follow-up fetch is enough to pick the new key up.
+    for (const [id, gen] of [...recentlyKeyed]) {
+      if (gen < myGen) recentlyKeyed.delete(id);
     }
     const firstData = lastSnapshots.length === 0;
     lastFetch = Date.now();
@@ -2615,6 +2625,9 @@ function withPendingToggles(base: string[]): string[] {
     if (t.enable) s.delete(t.id);
     else s.add(t.id);
   }
+  // A just-saved key wins over a Customize disable still in the queue —
+  // the save is "show me this provider".
+  for (const id of recentlyKeyed.keys()) s.delete(id);
   return [...s];
 }
 
@@ -2738,7 +2751,7 @@ function setupCustomizeDnD(providersEl: HTMLElement): void {
 // ---------------------------------------------------------------------------
 
 async function unparkRecentlyKeyed(): Promise<void> {
-  if (![...recentlyKeyed].some((id) => config.disabled.includes(id))) return;
+  if (!config.disabled.some((id) => recentlyKeyed.has(id))) return;
   await patchConfig({
     disabled: config.disabled.filter((id) => !recentlyKeyed.has(id)),
   }).catch(() => {});
@@ -2749,9 +2762,13 @@ async function saveApiKey(provider: string): Promise<void> {
   const status = document.querySelector("#status")!;
   try {
     const key = input.value;
-    // Mark before any await so an in-flight first-run pass cannot park
-    // this provider after our save returns.
-    if (key.trim()) recentlyKeyed.add(provider);
+    if (!key.trim()) {
+      recentlyKeyed.delete(provider);
+    } else {
+      // Mark before any await so an in-flight first-run pass cannot park
+      // this provider after our save returns.
+      recentlyKeyed.set(provider, refreshGeneration);
+    }
     await invoke("set_api_key", { provider, key });
     input.value = "";
     // Pasting a key says "show me this provider" — pull it out of Disabled.
@@ -2766,6 +2783,7 @@ async function saveApiKey(provider: string): Promise<void> {
     status.textContent = `${provider} key saved`;
     await refresh(true);
   } catch (err) {
+    recentlyKeyed.delete(provider);
     status.textContent = `Could not save key: ${err}`;
   }
 }
