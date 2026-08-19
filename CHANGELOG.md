@@ -11,6 +11,10 @@
   refresh only re-reads files whose prices actually moved. A baked-pricing
   code change still discards the cache. One last full scan migrates to
   the new format.
+- **Pasting an API key actually shows that provider.** Saving a key now
+  turns the provider on if Customize had it off (first-run parks
+  keyless providers there), and a save no longer races an in-flight
+  refresh into a stuck "key saved" status with no fetch.
 - **Kimi usage routed through Codex (or Claude) lands on the Kimi card.**
   Sessions that log `kimi-oauth/k3` or `moonshot-ai/…` via a router used
   to keep those dollars on Codex. They move to Kimi Code (or Moonshot

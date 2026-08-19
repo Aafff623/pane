@@ -180,7 +180,8 @@ Ground rules that apply to every provider:
 - **Shows:** balances / character quota with reset pacing; Kimi API and
   DeepSeek add a "Credits used" percent bar metered against the highest
   balance Pane has seen locally (top-ups raise it; feeds the Almost Out
-  notification).
+  notification). Saving a key in Settings turns that provider on if
+  Customize had it off.
 
 ## Kimi Code
 

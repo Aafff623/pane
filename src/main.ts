@@ -339,6 +339,10 @@ let config: Config = {
 };
 let lastFetch = 0;
 let refreshing = false;
+// A forced refresh requested while one was already in flight (saving an
+// API key races the auto-refresh timer). Dropping it would leave the new
+// state unfetched and the status line stuck on the save message.
+let refreshQueued = false;
 let refreshTimer: number | undefined;
 let lastSnapshots: Snapshot[] = [];
 let lastSpend: ProviderSpend[] = [];
@@ -2306,7 +2310,13 @@ async function paintCachedSnapshots(): Promise<void> {
 }
 
 async function refresh(force = false): Promise<void> {
-  if (refreshing) return;
+  if (refreshing) {
+    // Remember a forced request instead of dropping it: the in-flight
+    // fetch may have started before whatever prompted this one (a saved
+    // key, a toggle), so one more pass runs when it finishes.
+    if (force) refreshQueued = true;
+    return;
+  }
   if (!force && Date.now() - lastFetch < STALE_MS) return;
   refreshing = true;
 
@@ -2393,6 +2403,10 @@ async function refresh(force = false): Promise<void> {
   if (lastSnapshots.length) ensureLayout();
   if (!customizeOpen && lastSnapshots.length) renderIfVisible();
   refreshing = false;
+  if (refreshQueued) {
+    refreshQueued = false;
+    void refresh(true);
+  }
 }
 
 function scheduleAutoRefresh(): void {
@@ -2708,8 +2722,18 @@ async function saveApiKey(provider: string): Promise<void> {
   const input = document.querySelector<HTMLInputElement>(`#key-${provider}`)!;
   const status = document.querySelector("#status")!;
   try {
-    await invoke("set_api_key", { provider, key: input.value });
+    const key = input.value;
+    await invoke("set_api_key", { provider, key });
     input.value = "";
+    // Pasting a key says "show me this provider" — pull it out of Disabled.
+    // First-run auto-disable parks keyless providers there, and a key saved
+    // against a still-disabled toggle would otherwise never produce a bar
+    // no matter how often Refresh is clicked.
+    if (key.trim() && config.disabled.includes(provider)) {
+      await patchConfig({
+        disabled: config.disabled.filter((id) => id !== provider),
+      }).catch(() => {});
+    }
     status.textContent = `${provider} key saved`;
     await refresh(true);
   } catch (err) {
