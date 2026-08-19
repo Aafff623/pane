@@ -28,7 +28,10 @@
   Extra credits, and Cursor's sponsored bonus usage (`bonusSpend`) is a
   text row behind Show more — free usage model providers cover, shown
   as context rather than a meter. Cents-as-strings parse; a failed
-  grants call logs instead of going silent.
+  grants call logs instead of going silent. An expired grant
+  (`hasCreditGrants: false`) stays hidden even if leftover totals are
+  still on the payload. Tucking Bonus behind Show more runs once so a
+  later Customize drag is not undone every refresh.
 - **Kimi Code plan usage now has dollar amounts** — the official CLI logs
   plan K3 as `kimi-code/k3` (and K2.7 Code as `kimi-for-coding`), which
   missed the rate table, so Today could show a million tokens at $0.00.

@@ -247,7 +247,17 @@ fn credit_grants_metric(grants: &Value) -> Option<Metric> {
     let used = num(grants.get("usedCents")).unwrap_or(0.0);
     let remaining = num(grants.get("creditBalanceCents"))
         .unwrap_or_else(|| (total - used).max(0.0));
-    if has == Some(false) && total <= 0.0 && remaining <= 0.0 {
+    // Explicit false wins even if leftover totals are still on the payload
+    // (expired grant). A 100% bar from that would also trip Almost Out.
+    if has == Some(false) {
+        return None;
+    }
+    if total <= 0.0 && remaining <= 0.0 {
+        if has == Some(true) {
+            eprintln!(
+                "[pane] cursor credit grants: hasCreditGrants but no totalCents/creditBalanceCents"
+            );
+        }
         return None;
     }
     if total > 0.0 {
@@ -257,15 +267,8 @@ fn credit_grants_metric(grants: &Value) -> Option<Metric> {
             pct,
             Some(format!("{} left of {}", dollars(remaining), dollars(total))),
         ))
-    } else if remaining > 0.0 {
-        Some(Metric::text("Credits", dollars(remaining)))
     } else {
-        if has == Some(true) {
-            eprintln!(
-                "[pane] cursor credit grants: hasCreditGrants but no totalCents/creditBalanceCents"
-            );
-        }
-        None
+        Some(Metric::text("Credits", dollars(remaining)))
     }
 }
 
@@ -660,6 +663,23 @@ mod tests {
         assert!(credit_grants_metric(&json!({"hasCreditGrants": false})).is_none());
         assert!(credit_grants_metric(&json!({})).is_none());
         assert!(credit_grants_metric(&json!({"hasCreditGrants": true})).is_none());
+    }
+
+    #[test]
+    fn credit_grants_false_hides_even_with_leftover_totals() {
+        let grants = json!({
+            "hasCreditGrants": false,
+            "totalCents": "2500",
+            "usedCents": "2500",
+            "creditBalanceCents": "0"
+        });
+        assert!(credit_grants_metric(&grants).is_none());
+        let leftover = json!({
+            "hasCreditGrants": false,
+            "totalCents": 20000,
+            "creditBalanceCents": 228
+        });
+        assert!(credit_grants_metric(&leftover).is_none());
     }
 
     #[test]

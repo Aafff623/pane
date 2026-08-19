@@ -156,6 +156,9 @@ interface ProviderLayout {
   hidden: string[];
   starred: string[];
   expanded: boolean;
+  // One-shot: Bonus used to be a bar (always-visible). After the demotion
+  // to a text row we tuck it once; later drags out of Show more stick.
+  tuckedBonus?: boolean;
 }
 
 interface Layout {
@@ -535,16 +538,19 @@ function ensureLayout(): void {
 
   // "Bonus" briefly rendered as a bar and is now a text row (free
   // provider-sponsored usage — context, not a meter). Layouts saved in
-  // that window placed it always-visible; tuck it behind Show more like
-  // the other balance rows, and drop any star/pin on it (the tray strip
-  // and pinned tray number only accept progress metrics).
+  // that window placed it always-visible; tuck it behind Show more once,
+  // then leave later Customize drags alone. Stars/pins on it still drop
+  // every pass — the tray strip only accepts progress metrics.
   const bonusIsText =
     cursorSnap?.metrics.find((m) => m.label === "Bonus")?.kind === "text";
   if (bonusIsText) {
     for (const [pid, L] of Object.entries(layout.providers)) {
       if (providerFamily(pid) !== "cursor") continue;
-      if (L.metricOrder.includes("Bonus") && !L.onDemand.includes("Bonus")) {
-        L.onDemand.push("Bonus");
+      if (!L.tuckedBonus) {
+        if (L.metricOrder.includes("Bonus") && !L.onDemand.includes("Bonus")) {
+          L.onDemand.push("Bonus");
+        }
+        L.tuckedBonus = true;
         changed = true;
       }
       const starAt = L.starred.indexOf("Bonus");
