@@ -14,7 +14,10 @@
 - **Pasting an API key actually shows that provider.** Saving a key now
   turns the provider on if Customize had it off (first-run parks
   keyless providers there), and a save no longer races an in-flight
-  refresh into a stuck "key saved" status with no fetch.
+  refresh into a stuck "key saved" status with no fetch. A key pasted
+  during that first refresh is also kept out of the auto-disable list,
+  so the just-saved provider is not parked because the in-flight fetch
+  still said it had no credentials.
 - **Kimi usage routed through Codex (or Claude) lands on the Kimi card.**
   Sessions that log `kimi-oauth/k3` or `moonshot-ai/…` via a router used
   to keep those dollars on Codex. They move to Kimi Code (or Moonshot
@@ -38,10 +41,11 @@
   names still come from the public catalogs.
 
 ### Changed
-- Customize toggle and Settings key field labeled **Kimi API** (was
-  Moonshot). The internal id is still `moonshot` so existing layouts
-  and telemetry keep working. The toggle still gates the wallet fetch
-  and the API bar on the Kimi Code card.
+- Customize toggle, Settings key field, leftover dashboard card, and
+  spend card labeled **Kimi API** (was Moonshot). The internal id is
+  still `moonshot` so existing layouts and telemetry keep working. The
+  toggle still gates the wallet fetch and the API bar on the Kimi Code
+  card.
 
 ## 0.4.39 — 2026-08-19
 

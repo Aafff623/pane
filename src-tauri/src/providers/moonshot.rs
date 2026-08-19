@@ -3,7 +3,7 @@ use serde_json::Value;
 use std::time::Duration;
 
 const ID: &str = "moonshot";
-const NAME: &str = "Moonshot";
+const NAME: &str = "Kimi API";
 const MAX_BALANCE_BYTES: usize = 64 * 1024;
 
 // Global platform first, mainland China second — same key shape either way.
@@ -51,7 +51,7 @@ async fn fetch() -> Result<Snapshot, String> {
         return Ok(Snapshot::no_credentials(
             ID,
             NAME,
-            "Paste a Moonshot (Kimi) API key in Settings (gear icon).",
+            "Paste a Kimi API key in Settings (gear icon).",
         ));
     }
     let rows = fetch_balance(false).await?;
