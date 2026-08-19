@@ -10,7 +10,8 @@
   Each cached file now records the pricing questions it asked; a catalog
   refresh only re-reads files whose prices actually moved. A baked-pricing
   code change still discards the cache. One last full scan migrates to
-  the new format.
+  the new format. Probe keys stored in that cache are length-capped so a
+  huge model string cannot inflate the on-disk file.
 - **Pasting an API key actually shows that provider.** Saving a key now
   turns the provider on if Customize had it off (first-run parks
   keyless providers there), and a save no longer races an in-flight
