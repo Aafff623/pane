@@ -117,6 +117,18 @@ impl PriceProbe {
     }
 }
 
+/// Whether a cached file's dollars are still exact under the live catalog.
+/// An empty probe list means the parse never asked the catalog (carried
+/// costUSD) — keep it only if it actually produced events. Empty probes
+/// plus empty data is the failed-open artifact, which must not survive
+/// a catalog refresh or it hides that session forever.
+fn probes_still_vouch(probes: &[PriceProbe], data: &FileData) -> bool {
+    if probes.is_empty() {
+        return !data.days.is_empty() || !data.unpriced.is_empty();
+    }
+    probes.iter().all(PriceProbe::still_valid)
+}
+
 thread_local! {
     /// Probe recorder, active only while `file_days` runs a parse. Parsers
     /// route pricing calls through `probe_lookup`/`probe_fast_multiplier`
@@ -249,16 +261,16 @@ fn load_persisted_cache() {
         let gen = pricing::generation();
         let Ok(mut map) = cache().lock() else { return };
         for e in doc.entries {
-            if !stamp_matches && !e.probes.iter().all(PriceProbe::still_valid) {
-                continue; // a price this file used changed — re-parse it
-            }
-            let mtime = SystemTime::UNIX_EPOCH
-                + std::time::Duration::new(e.mtime_secs, e.mtime_nanos);
             let mut data = FileData::default();
             for (day, model, cost, tokens) in e.days {
                 data.days.insert((day, model), (cost, tokens));
             }
             data.unpriced = e.unpriced.into_iter().collect();
+            if !stamp_matches && !probes_still_vouch(&e.probes, &data) {
+                continue; // a price this file used changed — re-parse it
+            }
+            let mtime = SystemTime::UNIX_EPOCH
+                + std::time::Duration::new(e.mtime_secs, e.mtime_nanos);
             map.insert(e.path, FileEntry { mtime, size: e.size, gen, probes: e.probes, data });
         }
     });
@@ -543,7 +555,7 @@ fn file_days(path: &Path, parse: &mut dyn FnMut(&str, &mut FileData)) -> FileDat
                 // A catalog refreshed mid-run (generation bump). The file
                 // itself is unchanged — keep its summary if every price it
                 // used still answers the same, instead of re-reading it.
-                if entry.probes.iter().all(PriceProbe::still_valid) {
+                if probes_still_vouch(&entry.probes, &entry.data) {
                     entry.gen = gen;
                     CACHE_DIRTY.store(true, std::sync::atomic::Ordering::Relaxed);
                     return entry.data.clone();
@@ -554,12 +566,33 @@ fn file_days(path: &Path, parse: &mut dyn FnMut(&str, &mut FileData)) -> FileDat
 
     let mut data = FileData::default();
     PROBES.with(|p| *p.borrow_mut() = Some(Vec::new()));
-    if let Ok(file) = fs::File::open(path) {
-        for line in BufReader::new(file).lines().map_while(Result::ok) {
-            parse(&line, &mut data);
+    let file = match fs::File::open(path) {
+        Ok(f) => f,
+        Err(_) => {
+            // Exists (metadata succeeded) but unreadable this pass — antivirus
+            // lock, permissions blip. Do not cache an empty result: empty
+            // probes would vouch on the next catalog refresh and the session
+            // would vanish for good.
+            PROBES.with(|p| {
+                p.borrow_mut().take();
+            });
+            return FileData::default();
+        }
+    };
+    let mut read_ok = true;
+    for line in BufReader::new(file).lines() {
+        match line {
+            Ok(line) => parse(&line, &mut data),
+            Err(_) => {
+                read_ok = false;
+                break;
+            }
         }
     }
     let probes = PROBES.with(|p| p.borrow_mut().take()).unwrap_or_default();
+    if !read_ok {
+        return data;
+    }
 
     if let Ok(mut map) = cache().lock() {
         map.insert(
@@ -843,11 +876,12 @@ fn split_models(data: &mut FileData, prefix: &str) -> FileData {
 /// other CLIs merge with the Kimi CLI's own spellings ("kimi-oauth/k3" and
 /// "k3" are the same model on the same bill).
 fn strip_kimi_prefix(model: &str) -> String {
-    ["moonshot-ai/", "kimi-code/", "kimi-oauth/", "moonshot/"]
+    let lower = model.to_ascii_lowercase();
+    ["moonshot-ai/", "moonshotai/", "kimi-code/", "kimi-oauth/", "moonshot/"]
         .iter()
-        .find_map(|p| model.strip_prefix(p))
-        .unwrap_or(model)
-        .to_string()
+        .find(|p| lower.starts_with(**p))
+        .map(|p| model[p.len()..].to_string())
+        .unwrap_or_else(|| model.to_string())
 }
 
 /// Kimi/Moonshot models logged by another CLI — Codex driven through a
@@ -1125,8 +1159,14 @@ fn codex_dated_base(model: &str) -> String {
 
 /// Codex priority/fast service-tier multipliers are provider-specific and
 /// intentionally not Cursor's `-fast` supplement multipliers. Unknown models
-/// use the supplement's multiplier when one exists, else 2x.
+/// use the supplement's multiplier when one exists, else 2x. Kimi/Moonshot
+/// slugs billed through a Codex router are not OpenAI-tiered — leave them
+/// at 1× so they merge with the Kimi CLI's own (unmultiplied) rows.
 fn codex_priority_multiplier(dated: &str, rate_model: &str) -> f64 {
+    let lower = rate_model.to_ascii_lowercase();
+    if lower.contains("kimi") || lower.contains("moonshot") {
+        return 1.0;
+    }
     match dated {
         "gpt-5.5" | "gpt-5.5-pro" => 2.5,
         "gpt-5.4" | "gpt-5.4-pro" | "gpt-5.6-sol" | "gpt-5.6-terra" | "gpt-5.6-luna" => 2.0,
@@ -1888,7 +1928,7 @@ fn kimi_spend_target(has_login: bool, kimi_disabled: bool) -> (&'static str, &'s
     if has_login && !kimi_disabled {
         ("kimi", "Kimi Code")
     } else {
-        ("moonshot", "Moonshot")
+        ("moonshot", "Kimi API")
     }
 }
 
@@ -2173,6 +2213,29 @@ mod tests {
     }
 
     #[test]
+    fn empty_probes_do_not_vouch_for_an_empty_parse() {
+        // Failed-open artifact: no events, no questions — must re-parse.
+        assert!(!probes_still_vouch(&[], &FileData::default()));
+        // A parse that carried its own dollars never asked the catalog.
+        let mut data = FileData::default();
+        data.days.insert((1, "k3".into()), (1.0, 1000.0));
+        assert!(probes_still_vouch(&[], &data));
+    }
+
+    #[test]
+    fn file_days_does_not_cache_an_unreadable_path() {
+        // A directory has metadata but cannot be read as a file — the
+        // previous insert-on-open-failure path would cache empty spend.
+        let dir = std::env::temp_dir().join(format!("pane-unreadable-{}", std::process::id()));
+        let _ = fs::create_dir_all(&dir);
+        let data = file_days(&dir, &mut |_, _| {});
+        assert!(data.days.is_empty());
+        let cached = cache().lock().unwrap().contains_key(&dir);
+        let _ = fs::remove_dir_all(&dir);
+        assert!(!cached, "unreadable path must not become a cache entry");
+    }
+
+    #[test]
     fn corrupt_persist_file_is_rejected_not_panicked() {
         assert!(serde_json::from_str::<PersistFile>("{not json").is_err());
         assert!(serde_json::from_str::<PersistFile>(r#"{"version":1}"#).is_err());
@@ -2351,6 +2414,25 @@ mod tests {
         // catalog resolved the base rates.
         assert!(cost_sum(&standard) > 0.0);
         assert!((cost_sum(&fast) / cost_sum(&standard) - 2.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn codex_fast_tier_does_not_double_kimi_oauth() {
+        let turn = json!({"timestamp": "2026-07-10T10:00:00Z", "type": "turn_context",
+                          "payload": {"model": "kimi-oauth/k3"}})
+        .to_string();
+        let usage = token_count_line("2026-07-10T10:00:01Z", Some((1_000.0, 100.0)), (1_000.0, 100.0));
+        let standard = codex_run(&[turn.clone(), usage.clone()]);
+        let fast = codex_run(&[
+            turn,
+            json!({"timestamp": "2026-07-10T10:00:00Z", "type": "event_msg",
+                   "payload": {"type": "thread_settings_applied",
+                               "thread_settings": {"service_tier": "fast"}}})
+            .to_string(),
+            usage,
+        ]);
+        assert!(cost_sum(&standard) > 0.0);
+        assert!((cost_sum(&fast) - cost_sum(&standard)).abs() < 1e-9);
     }
 
     #[test]
@@ -2535,14 +2617,16 @@ mod tests {
         assert_eq!(strip_kimi_prefix("moonshot-ai/kimi-k3"), "kimi-k3");
         assert_eq!(strip_kimi_prefix("moonshot/kimi-k2.5"), "kimi-k2.5");
         assert_eq!(strip_kimi_prefix("kimi-k3"), "kimi-k3");
+        assert_eq!(strip_kimi_prefix("Kimi-OAuth/K3"), "K3");
+        assert_eq!(strip_kimi_prefix("moonshotai/kimi-k2"), "kimi-k2");
     }
 
     #[test]
     fn kimi_spend_stays_on_moonshot_without_login() {
         assert_eq!(kimi_spend_target(true, false), ("kimi", "Kimi Code"));
-        assert_eq!(kimi_spend_target(false, false), ("moonshot", "Moonshot"));
-        assert_eq!(kimi_spend_target(true, true), ("moonshot", "Moonshot"));
-        assert_eq!(kimi_spend_target(false, true), ("moonshot", "Moonshot"));
+        assert_eq!(kimi_spend_target(false, false), ("moonshot", "Kimi API"));
+        assert_eq!(kimi_spend_target(true, true), ("moonshot", "Kimi API"));
+        assert_eq!(kimi_spend_target(false, true), ("moonshot", "Kimi API"));
     }
 
     /// Live diagnostic (ignored): what each spend source produced from

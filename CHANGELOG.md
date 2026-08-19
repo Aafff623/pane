@@ -32,10 +32,11 @@
   names still come from the public catalogs.
 
 ### Changed
-- Customize toggle and Settings key field labeled **Kimi API** (was
-  Moonshot). The internal id is still `moonshot` so existing layouts
-  and telemetry keep working. The toggle still gates the wallet fetch
-  and the API bar on the Kimi Code card.
+- Customize toggle, Settings key field, leftover dashboard card, and
+  spend card labeled **Kimi API** (was Moonshot). The internal id is
+  still `moonshot` so existing layouts and telemetry keep working. The
+  toggle still gates the wallet fetch and the API bar on the Kimi Code
+  card.
 
 ## 0.4.39 — 2026-08-19
 
