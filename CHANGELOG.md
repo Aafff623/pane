@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.4.40 — 2026-08-20
 
 ### Fixed
 - **Refreshing catalogs no longer re-reads every session log.** The spend
