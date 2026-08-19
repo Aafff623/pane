@@ -156,6 +156,9 @@ interface ProviderLayout {
   hidden: string[];
   starred: string[];
   expanded: boolean;
+  // One-shot: Bonus used to be a bar (always-visible). After the demotion
+  // to a text row we tuck it once; later drags out of Show more stick.
+  tuckedBonus?: boolean;
 }
 
 interface Layout {
@@ -339,6 +342,17 @@ let config: Config = {
 };
 let lastFetch = 0;
 let refreshing = false;
+// A forced refresh requested while one was already in flight (saving an
+// API key races the auto-refresh timer). Dropping it would leave the new
+// state unfetched and the status line stuck on the save message.
+let refreshQueued = false;
+// A key saved while the first refresh is still in flight. First-run (and
+// "new provider") auto-disable keys off that fetch's no_credentials list,
+// which can predate the save and park the provider we just turned on.
+// Value is the refresh generation that was in flight (or last completed)
+// at save time — the exemption lasts through that pass plus one more.
+const recentlyKeyed = new Map<string, number>();
+let refreshGeneration = 0;
 let refreshTimer: number | undefined;
 let lastSnapshots: Snapshot[] = [];
 let lastSpend: ProviderSpend[] = [];
@@ -522,6 +536,39 @@ function ensureLayout(): void {
     if (to) {
       config.pinned = { ...config.pinned, label: to };
       void patchConfig({ pinned: config.pinned }).catch(() => {});
+    }
+  }
+
+  // "Bonus" briefly rendered as a bar and is now a text row (free
+  // provider-sponsored usage — context, not a meter). Layouts saved in
+  // that window placed it always-visible; tuck it behind Show more once,
+  // then leave later Customize drags alone. Stars/pins on it still drop
+  // every pass — the tray strip only accepts progress metrics.
+  const bonusIsText =
+    cursorSnap?.metrics.find((m) => m.label === "Bonus")?.kind === "text";
+  if (bonusIsText) {
+    for (const [pid, L] of Object.entries(layout.providers)) {
+      if (providerFamily(pid) !== "cursor") continue;
+      if (!L.tuckedBonus) {
+        if (L.metricOrder.includes("Bonus") && !L.onDemand.includes("Bonus")) {
+          L.onDemand.push("Bonus");
+        }
+        L.tuckedBonus = true;
+        changed = true;
+      }
+      const starAt = L.starred.indexOf("Bonus");
+      if (starAt >= 0) {
+        L.starred.splice(starAt, 1);
+        changed = true;
+      }
+    }
+    if (
+      config.pinned &&
+      providerFamily(config.pinned.provider) === "cursor" &&
+      config.pinned.label === "Bonus"
+    ) {
+      config.pinned = null;
+      void patchConfig({ pinned: null }).catch(() => {});
     }
   }
 
@@ -2306,9 +2353,17 @@ async function paintCachedSnapshots(): Promise<void> {
 }
 
 async function refresh(force = false): Promise<void> {
-  if (refreshing) return;
+  if (refreshing) {
+    // Remember a forced request instead of dropping it: the in-flight
+    // fetch may have started before whatever prompted this one (a saved
+    // key, a toggle), so one more pass runs when it finishes.
+    if (force) refreshQueued = true;
+    return;
+  }
   if (!force && Date.now() - lastFetch < STALE_MS) return;
   refreshing = true;
+  const myGen = ++refreshGeneration;
+  await unparkRecentlyKeyed();
 
   const status = document.querySelector("#status")!;
   status.textContent = "Refreshing…";
@@ -2326,11 +2381,17 @@ async function refresh(force = false): Promise<void> {
       // in Customize (a fresh PC with zero AI tools sees just those two).
       const starters = new Set(["claude", "codex"]);
       const noCreds = snapshots
-        .filter((s) => s.status === "no_credentials" && !starters.has(s.id))
+        .filter(
+          (s) =>
+            s.status === "no_credentials" &&
+            !starters.has(s.id) &&
+            !recentlyKeyed.has(s.id)
+        )
         .map((s) => s.id);
       if (noCreds.length) {
         snapshots = snapshots.filter((s) => !noCreds.includes(s.id));
         await patchConfig({ disabled: noCreds }).catch(() => {});
+        await unparkRecentlyKeyed();
       }
     } else if (config.layout) {
       // App updates ship new providers; ones this PC has no credentials for
@@ -2339,7 +2400,11 @@ async function refresh(force = false): Promise<void> {
       const known = config.layout.providers;
       const fresh = snapshots
         .filter(
-          (s) => s.status === "no_credentials" && !(s.id in known) && !config.disabled.includes(s.id)
+          (s) =>
+            s.status === "no_credentials" &&
+            !(s.id in known) &&
+            !config.disabled.includes(s.id) &&
+            !recentlyKeyed.has(s.id)
         )
         .map((s) => s.id);
       if (fresh.length) {
@@ -2348,6 +2413,7 @@ async function refresh(force = false): Promise<void> {
           disabled: [...config.disabled, ...fresh],
           layout: config.layout,
         }).catch(() => {});
+        await unparkRecentlyKeyed();
       }
 
       // Updates also RETIRE providers; saved layouts keep referencing their
@@ -2372,6 +2438,15 @@ async function refresh(force = false): Promise<void> {
       }
     }
     snapshots = hideFoldedMoonshot(snapshots);
+    for (const s of snapshots) {
+      if (s.status !== "no_credentials") recentlyKeyed.delete(s.id);
+    }
+    // Drop exemptions from saves that happened before this refresh started
+    // (a failed save is removed in the catch; a cleared key is removed on
+    // empty paste). One follow-up fetch is enough to pick the new key up.
+    for (const [id, gen] of [...recentlyKeyed]) {
+      if (gen < myGen) recentlyKeyed.delete(id);
+    }
     const firstData = lastSnapshots.length === 0;
     lastFetch = Date.now();
     lastSnapshots = snapshots;
@@ -2393,6 +2468,10 @@ async function refresh(force = false): Promise<void> {
   if (lastSnapshots.length) ensureLayout();
   if (!customizeOpen && lastSnapshots.length) renderIfVisible();
   refreshing = false;
+  if (refreshQueued) {
+    refreshQueued = false;
+    void refresh(true);
+  }
 }
 
 function scheduleAutoRefresh(): void {
@@ -2582,6 +2661,9 @@ function withPendingToggles(base: string[]): string[] {
     if (t.enable) s.delete(t.id);
     else s.add(t.id);
   }
+  // A just-saved key wins over a Customize disable still in the queue —
+  // the save is "show me this provider".
+  for (const id of recentlyKeyed.keys()) s.delete(id);
   return [...s];
 }
 
@@ -2704,15 +2786,40 @@ function setupCustomizeDnD(providersEl: HTMLElement): void {
 // Settings pane
 // ---------------------------------------------------------------------------
 
+async function unparkRecentlyKeyed(): Promise<void> {
+  if (!config.disabled.some((id) => recentlyKeyed.has(id))) return;
+  await patchConfig({
+    disabled: config.disabled.filter((id) => !recentlyKeyed.has(id)),
+  }).catch(() => {});
+}
+
 async function saveApiKey(provider: string): Promise<void> {
   const input = document.querySelector<HTMLInputElement>(`#key-${provider}`)!;
   const status = document.querySelector("#status")!;
   try {
-    await invoke("set_api_key", { provider, key: input.value });
+    const key = input.value;
+    if (!key.trim()) {
+      recentlyKeyed.delete(provider);
+    } else {
+      // Mark before any await so an in-flight first-run pass cannot park
+      // this provider after our save returns.
+      recentlyKeyed.set(provider, refreshGeneration);
+    }
+    await invoke("set_api_key", { provider, key });
     input.value = "";
+    // Pasting a key says "show me this provider" — pull it out of Disabled.
+    // First-run auto-disable parks keyless providers there, and a key saved
+    // against a still-disabled toggle would otherwise never produce a bar
+    // no matter how often Refresh is clicked.
+    if (key.trim() && config.disabled.includes(provider)) {
+      await patchConfig({
+        disabled: config.disabled.filter((id) => id !== provider),
+      }).catch(() => {});
+    }
     status.textContent = `${provider} key saved`;
     await refresh(true);
   } catch (err) {
+    recentlyKeyed.delete(provider);
     status.textContent = `Could not save key: ${err}`;
   }
 }

@@ -12,11 +12,29 @@
   code change still discards the cache. One last full scan migrates to
   the new format. Probe keys stored in that cache are length-capped so a
   huge model string cannot inflate the on-disk file.
+- **Pasting an API key actually shows that provider.** Saving a key now
+  turns the provider on if Customize had it off (first-run parks
+  keyless providers there), and a save no longer races an in-flight
+  refresh into a stuck "key saved" status with no fetch. A key pasted
+  during that first refresh is also kept out of the auto-disable list,
+  so the just-saved provider is not parked because the in-flight fetch
+  still said it had no credentials. A failed save or a cleared key drops
+  that exemption immediately, so Customize can turn the provider back
+  off.
 - **Kimi usage routed through Codex (or Claude) lands on the Kimi card.**
   Sessions that log `kimi-oauth/k3` or `moonshot-ai/…` via a router used
   to keep those dollars on Codex. They move to Kimi Code (or Moonshot
   when there's no Kimi login), with the vendor prefix peeled so they
   merge with the CLI's own logs.
+- **Cursor promo credits and bonus usage show up.** Credit grants
+  (`GetCreditGrantsBalance`) are a used/total progress bar like Codex
+  Extra credits, and Cursor's sponsored bonus usage (`bonusSpend`) is a
+  text row behind Show more — free usage model providers cover, shown
+  as context rather than a meter. Cents-as-strings parse; a failed
+  grants call logs instead of going silent. An expired grant
+  (`hasCreditGrants: false`) stays hidden even if leftover totals are
+  still on the payload. Tucking Bonus behind Show more runs once so a
+  later Customize drag is not undone every refresh.
 - **Kimi Code plan usage now has dollar amounts** — the official CLI logs
   plan K3 as `kimi-code/k3` (and K2.7 Code as `kimi-for-coding`), which
   missed the rate table, so Today could show a million tokens at $0.00.
