@@ -172,6 +172,14 @@ const CORRECTIONS_REV: u32 = 8; // 8: Moonshot first-party Kimi rates (plan slug
 /// revision as a hard discard (the *code* that prices changed), while a
 /// changed catalog file only re-prices files whose recorded price probes
 /// no longer replay identically.
+///
+/// Bump this whenever baked rates *or* spend.rs's own pricing tables change
+/// (`claude_price`, `codex_price`, `grok_price`, `codex_long_context`,
+/// `codex_priority_multiplier` hardcoded arms, `codex_no_cache_discount`,
+/// `request_cost` thresholds). Probes only witness catalog lookups — they
+/// cannot vouch for that code. A forgotten bump used to get papered over
+/// within a day by catalog-stamp churn; it now leaves stale dollars until
+/// the next bump.
 pub fn corrections_rev() -> u32 {
     CORRECTIONS_REV
 }

@@ -117,6 +117,18 @@ impl PriceProbe {
     }
 }
 
+/// Whether a cached file's dollars are still exact under the live catalog.
+/// An empty probe list means the parse never asked the catalog (carried
+/// costUSD) — keep it only if it actually produced events. Empty probes
+/// plus empty data is the failed-open artifact, which must not survive
+/// a catalog refresh or it hides that session forever.
+fn probes_still_vouch(probes: &[PriceProbe], data: &FileData) -> bool {
+    if probes.is_empty() {
+        return !data.days.is_empty() || !data.unpriced.is_empty();
+    }
+    probes.iter().all(PriceProbe::still_valid)
+}
+
 thread_local! {
     /// Probe recorder, active only while `file_days` runs a parse. Parsers
     /// route pricing calls through `probe_lookup`/`probe_fast_multiplier`
@@ -249,16 +261,16 @@ fn load_persisted_cache() {
         let gen = pricing::generation();
         let Ok(mut map) = cache().lock() else { return };
         for e in doc.entries {
-            if !stamp_matches && !e.probes.iter().all(PriceProbe::still_valid) {
-                continue; // a price this file used changed — re-parse it
-            }
-            let mtime = SystemTime::UNIX_EPOCH
-                + std::time::Duration::new(e.mtime_secs, e.mtime_nanos);
             let mut data = FileData::default();
             for (day, model, cost, tokens) in e.days {
                 data.days.insert((day, model), (cost, tokens));
             }
             data.unpriced = e.unpriced.into_iter().collect();
+            if !stamp_matches && !probes_still_vouch(&e.probes, &data) {
+                continue; // a price this file used changed — re-parse it
+            }
+            let mtime = SystemTime::UNIX_EPOCH
+                + std::time::Duration::new(e.mtime_secs, e.mtime_nanos);
             map.insert(e.path, FileEntry { mtime, size: e.size, gen, probes: e.probes, data });
         }
     });
@@ -543,7 +555,7 @@ fn file_days(path: &Path, parse: &mut dyn FnMut(&str, &mut FileData)) -> FileDat
                 // A catalog refreshed mid-run (generation bump). The file
                 // itself is unchanged — keep its summary if every price it
                 // used still answers the same, instead of re-reading it.
-                if entry.probes.iter().all(PriceProbe::still_valid) {
+                if probes_still_vouch(&entry.probes, &entry.data) {
                     entry.gen = gen;
                     CACHE_DIRTY.store(true, std::sync::atomic::Ordering::Relaxed);
                     return entry.data.clone();
@@ -554,12 +566,33 @@ fn file_days(path: &Path, parse: &mut dyn FnMut(&str, &mut FileData)) -> FileDat
 
     let mut data = FileData::default();
     PROBES.with(|p| *p.borrow_mut() = Some(Vec::new()));
-    if let Ok(file) = fs::File::open(path) {
-        for line in BufReader::new(file).lines().map_while(Result::ok) {
-            parse(&line, &mut data);
+    let file = match fs::File::open(path) {
+        Ok(f) => f,
+        Err(_) => {
+            // Exists (metadata succeeded) but unreadable this pass — antivirus
+            // lock, permissions blip. Do not cache an empty result: empty
+            // probes would vouch on the next catalog refresh and the session
+            // would vanish for good.
+            PROBES.with(|p| {
+                p.borrow_mut().take();
+            });
+            return FileData::default();
+        }
+    };
+    let mut read_ok = true;
+    for line in BufReader::new(file).lines() {
+        match line {
+            Ok(line) => parse(&line, &mut data),
+            Err(_) => {
+                read_ok = false;
+                break;
+            }
         }
     }
     let probes = PROBES.with(|p| p.borrow_mut().take()).unwrap_or_default();
+    if !read_ok {
+        return data;
+    }
 
     if let Ok(mut map) = cache().lock() {
         map.insert(
@@ -2123,6 +2156,29 @@ mod tests {
         );
         // Everything just recorded replays valid against the same catalog.
         assert!(probes.iter().all(PriceProbe::still_valid));
+    }
+
+    #[test]
+    fn empty_probes_do_not_vouch_for_an_empty_parse() {
+        // Failed-open artifact: no events, no questions — must re-parse.
+        assert!(!probes_still_vouch(&[], &FileData::default()));
+        // A parse that carried its own dollars never asked the catalog.
+        let mut data = FileData::default();
+        data.days.insert((1, "k3".into()), (1.0, 1000.0));
+        assert!(probes_still_vouch(&[], &data));
+    }
+
+    #[test]
+    fn file_days_does_not_cache_an_unreadable_path() {
+        // A directory has metadata but cannot be read as a file — the
+        // previous insert-on-open-failure path would cache empty spend.
+        let dir = std::env::temp_dir().join(format!("pane-unreadable-{}", std::process::id()));
+        let _ = fs::create_dir_all(&dir);
+        let data = file_days(&dir, &mut |_, _| {});
+        assert!(data.days.is_empty());
+        let cached = cache().lock().unwrap().contains_key(&dir);
+        let _ = fs::remove_dir_all(&dir);
+        assert!(!cached, "unreadable path must not become a cache entry");
     }
 
     #[test]
