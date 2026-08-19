@@ -75,10 +75,110 @@ struct FileData {
 struct FileEntry {
     mtime: SystemTime,
     size: u64,
-    /// Pricing-catalog generation the file was priced under — a catalog
-    /// refresh re-prices even files that haven't changed on disk.
+    /// Pricing-catalog generation the file was priced under. A catalog
+    /// refresh bumps the generation; the entry is then kept only if its
+    /// recorded price probes still replay identically (see `PriceProbe`).
     gen: u64,
+    probes: Vec<PriceProbe>,
     data: FileData,
+}
+
+/// One pricing question a file's parse asked, together with the answer it
+/// got. Replaying the questions under a newer catalog proves whether the
+/// file's cached dollars are still exact — if every probe answers the same,
+/// re-parsing the file would reproduce the same numbers, so the cached
+/// summary stays valid without re-reading a byte. This is what keeps the
+/// daily catalog refresh from discarding the whole cache and re-reading
+/// hundreds of MB of session logs whose prices didn't actually change.
+/// Unique pricing questions stored per file. A log that named thousands
+/// of distinct models must not grow the persist file without bound —
+/// overflowing this cap forces a re-parse on the next catalog change.
+const MAX_PROBES_PER_FILE: usize = 64;
+/// Same bound as catalog canonicals. A log with a huge model string must
+/// not inflate spend_cache.json; overflow forces a re-parse instead.
+const MAX_PROBE_KEY: usize = 128;
+
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+enum PriceProbe {
+    /// `pricing::lookup(key)` returned `price`.
+    Lookup { key: String, price: Option<pricing::Price> },
+    /// `pricing::fast_multiplier(key)` returned `mult`.
+    FastMult { key: String, mult: f64 },
+    /// The file asked more unique questions than `MAX_PROBES_PER_FILE`,
+    /// or a model string longer than `MAX_PROBE_KEY`. A truncated list
+    /// cannot vouch for prices we didn't record.
+    Overflow,
+}
+
+impl PriceProbe {
+    fn still_valid(&self) -> bool {
+        match self {
+            PriceProbe::Lookup { key, price } => pricing::lookup(key) == *price,
+            PriceProbe::FastMult { key, mult } => pricing::fast_multiplier(key) == *mult,
+            PriceProbe::Overflow => false,
+        }
+    }
+}
+
+/// Whether a cached file's dollars are still exact under the live catalog.
+/// An empty probe list means the parse never asked the catalog (carried
+/// costUSD) — keep it only if it actually produced events. Empty probes
+/// plus empty data is the failed-open artifact, which must not survive
+/// a catalog refresh or it hides that session forever.
+fn probes_still_vouch(probes: &[PriceProbe], data: &FileData) -> bool {
+    if probes.is_empty() {
+        return !data.days.is_empty() || !data.unpriced.is_empty();
+    }
+    probes.iter().all(PriceProbe::still_valid)
+}
+
+thread_local! {
+    /// Probe recorder, active only while `file_days` runs a parse. Parsers
+    /// route pricing calls through `probe_lookup`/`probe_fast_multiplier`
+    /// so each file's entry remembers exactly which prices it depended on.
+    static PROBES: std::cell::RefCell<Option<Vec<PriceProbe>>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+fn record_probe(probe: PriceProbe) {
+    PROBES.with(|p| {
+        if let Some(list) = p.borrow_mut().as_mut() {
+            if list.iter().any(|q| matches!(q, PriceProbe::Overflow) || q == &probe) {
+                return;
+            }
+            if list.len() >= MAX_PROBES_PER_FILE {
+                list.push(PriceProbe::Overflow);
+                return;
+            }
+            list.push(probe);
+        }
+    });
+}
+
+/// `pricing::lookup` with the question/answer recorded for cache
+/// revalidation. Every parser that runs under `file_days` must use this
+/// (and `probe_fast_multiplier`) instead of calling pricing directly —
+/// an unrecorded call would make the cached entry look valid after that
+/// price changed.
+fn probe_lookup(model: &str) -> Option<pricing::Price> {
+    let price = pricing::lookup(model);
+    record_model_probe(model, |key| PriceProbe::Lookup { key, price });
+    price
+}
+
+/// `pricing::fast_multiplier`, recorded — see `probe_lookup`.
+fn probe_fast_multiplier(model: &str) -> f64 {
+    let mult = pricing::fast_multiplier(model);
+    record_model_probe(model, |key| PriceProbe::FastMult { key, mult });
+    mult
+}
+
+fn record_model_probe(model: &str, make: impl FnOnce(String) -> PriceProbe) {
+    if model.len() > MAX_PROBE_KEY {
+        record_probe(PriceProbe::Overflow);
+    } else {
+        record_probe(make(model.to_string()));
+    }
 }
 
 fn cache() -> &'static Mutex<HashMap<PathBuf, FileEntry>> {
@@ -91,13 +191,21 @@ fn cache() -> &'static Mutex<HashMap<PathBuf, FileEntry>> {
 // day/model totals per file) but rebuilding them means re-reading every
 // session log ever written — thousands of files, growing forever. Saving
 // the summaries to disk makes a fresh launch re-parse only files that
-// changed since the last run. The cache is only trusted when it was priced
-// under the exact catalog files currently on disk (pricing::catalog_stamp);
-// any mismatch, version bump, or parse error discards it wholesale — a
-// stale-price cache is worse than a slow first scan.
+// changed since the last run.
+//
+// Trust rules: a PERSIST_VERSION mismatch (cache format *or* a parser
+// change — `claude_line` / `codex_line` / `pi_line` / …) or a
+// corrections-revision mismatch (the pricing *code* changed) discards
+// the cache wholesale. A catalog *file* change (pricing::catalog_stamp
+// moved — this happens on every daily/hourly refresh) instead replays
+// each entry's recorded price probes: entries whose prices still answer
+// the same stay, only files whose prices actually moved re-parse. A
+// stale-price cache is worse than a slow first scan — but re-reading
+// gigabytes because a catalog mtime ticked is what froze the app on
+// "Scanning session logs…" every day.
 // ---------------------------------------------------------------------------
 
-const PERSIST_VERSION: u32 = 2;
+const PERSIST_VERSION: u32 = 3; // bump on cache format *or* parser-logic changes
 
 /// Set when any file was (re)parsed this run — nothing changed, nothing saved.
 static CACHE_DIRTY: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
@@ -120,12 +228,22 @@ struct PersistEntry {
     size: u64,
     days: Vec<(i32, String, f64, f64)>,
     unpriced: Vec<(String, u64)>,
+    /// Pricing questions this file's parse asked (see `PriceProbe`).
+    /// Older caches without the field deserialize as empty — safe, because
+    /// they can only load through the exact-stamp fast path.
+    #[serde(default)]
+    probes: Vec<PriceProbe>,
 }
 
 #[derive(serde::Serialize, serde::Deserialize)]
 struct PersistFile {
     version: u32,
     pricing_stamp: String,
+    /// Baked-pricing revision the entries were priced under. Probes only
+    /// witness catalog lookups — a changed corrections revision means the
+    /// pricing *code* changed, which probes can't vouch for.
+    #[serde(default)]
+    corrections: u32,
     entries: Vec<PersistEntry>,
 }
 
@@ -135,27 +253,38 @@ fn persist_path() -> PathBuf {
 
 /// Loads the persisted cache into the in-memory map, once per app run.
 /// Runs after pricing::ensure_fresh() so the stamp reflects any catalog
-/// download that just happened — in which case it mismatches and the
-/// persisted costs are correctly thrown away.
+/// download that just happened. An exact stamp match loads everything; a
+/// stamp mismatch (a catalog file changed) replays each entry's price
+/// probes and keeps the entries whose prices didn't move — only a version
+/// or corrections-revision change discards the cache wholesale.
 fn load_persisted_cache() {
     static ONCE: OnceLock<()> = OnceLock::new();
     ONCE.get_or_init(|| {
         let Ok(raw) = fs::read_to_string(persist_path()) else { return };
         let Ok(doc) = serde_json::from_str::<PersistFile>(&raw) else { return };
-        if doc.version != PERSIST_VERSION || doc.pricing_stamp != pricing::catalog_stamp() {
+        if doc.version != PERSIST_VERSION || doc.corrections != pricing::corrections_rev() {
             return;
+        }
+        let stamp_matches = doc.pricing_stamp == pricing::catalog_stamp();
+        if !stamp_matches {
+            // Kept entries get re-persisted under the fresh stamp even if
+            // no file re-parses this run.
+            CACHE_DIRTY.store(true, std::sync::atomic::Ordering::Relaxed);
         }
         let gen = pricing::generation();
         let Ok(mut map) = cache().lock() else { return };
         for e in doc.entries {
-            let mtime = SystemTime::UNIX_EPOCH
-                + std::time::Duration::new(e.mtime_secs, e.mtime_nanos);
             let mut data = FileData::default();
             for (day, model, cost, tokens) in e.days {
                 data.days.insert((day, model), (cost, tokens));
             }
             data.unpriced = e.unpriced.into_iter().collect();
-            map.insert(e.path, FileEntry { mtime, size: e.size, gen, data });
+            if !stamp_matches && !probes_still_vouch(&e.probes, &data) {
+                continue; // a price this file used changed — re-parse it
+            }
+            let mtime = SystemTime::UNIX_EPOCH
+                + std::time::Duration::new(e.mtime_secs, e.mtime_nanos);
+            map.insert(e.path, FileEntry { mtime, size: e.size, gen, probes: e.probes, data });
         }
     });
 }
@@ -192,12 +321,14 @@ fn save_persisted_cache() {
                     .map(|((day, model), (cost, tokens))| (*day, model.clone(), *cost, *tokens))
                     .collect(),
                 unpriced: e.data.unpriced.iter().map(|(m, c)| (m.clone(), *c)).collect(),
+                probes: e.probes.clone(),
             }
         })
         .collect();
     let doc = PersistFile {
         version: PERSIST_VERSION,
         pricing_stamp: pricing::catalog_stamp(),
+        corrections: pricing::corrections_rev(),
         entries,
     };
     let Ok(json) = serde_json::to_string(&doc) else { return };
@@ -428,23 +559,59 @@ fn file_days(path: &Path, parse: &mut dyn FnMut(&str, &mut FileData)) -> FileDat
         t.insert(path.to_path_buf());
     }
     let gen = pricing::generation();
-    if let Ok(map) = cache().lock() {
-        if let Some(entry) = map.get(path) {
-            if entry.mtime == mtime && entry.size == size && entry.gen == gen {
-                return entry.data.clone();
+    if let Ok(mut map) = cache().lock() {
+        if let Some(entry) = map.get_mut(path) {
+            if entry.mtime == mtime && entry.size == size {
+                if entry.gen == gen {
+                    return entry.data.clone();
+                }
+                // A catalog refreshed mid-run (generation bump). The file
+                // itself is unchanged — keep its summary if every price it
+                // used still answers the same, instead of re-reading it.
+                if probes_still_vouch(&entry.probes, &entry.data) {
+                    entry.gen = gen;
+                    CACHE_DIRTY.store(true, std::sync::atomic::Ordering::Relaxed);
+                    return entry.data.clone();
+                }
             }
         }
     }
 
     let mut data = FileData::default();
-    if let Ok(file) = fs::File::open(path) {
-        for line in BufReader::new(file).lines().map_while(Result::ok) {
-            parse(&line, &mut data);
+    PROBES.with(|p| *p.borrow_mut() = Some(Vec::new()));
+    let file = match fs::File::open(path) {
+        Ok(f) => f,
+        Err(_) => {
+            // Exists (metadata succeeded) but unreadable this pass — antivirus
+            // lock, permissions blip. Do not cache an empty result: empty
+            // probes would vouch on the next catalog refresh and the session
+            // would vanish for good.
+            PROBES.with(|p| {
+                p.borrow_mut().take();
+            });
+            return FileData::default();
         }
+    };
+    let mut read_ok = true;
+    for line in BufReader::new(file).lines() {
+        match line {
+            Ok(line) => parse(&line, &mut data),
+            Err(_) => {
+                read_ok = false;
+                break;
+            }
+        }
+    }
+    let probes = PROBES.with(|p| p.borrow_mut().take()).unwrap_or_default();
+    if !read_ok {
+        return data;
     }
 
     if let Ok(mut map) = cache().lock() {
-        map.insert(path.to_path_buf(), FileEntry { mtime, size, gen, data: data.clone() });
+        map.insert(
+            path.to_path_buf(),
+            FileEntry { mtime, size, gen, probes, data: data.clone() },
+        );
     }
     CACHE_DIRTY.store(true, std::sync::atomic::Ordering::Relaxed);
     data
@@ -571,7 +738,7 @@ fn claude_tokens(u: &Value) -> Option<ClaudeTokens> {
 /// (excluded, never a guessed $0). Fast-flagged requests scale by the
 /// supplement's multiplier.
 fn claude_cost(model: &str, t: &ClaudeTokens) -> Option<f64> {
-    let price = pricing::lookup(model).or_else(|| {
+    let price = probe_lookup(model).or_else(|| {
         claude_price(model).map(|(i, o, cr, cw)| pricing::Price::flat(i, o, cr, cw))
     })?;
     let u = pricing::Usage {
@@ -581,7 +748,7 @@ fn claude_cost(model: &str, t: &ClaudeTokens) -> Option<f64> {
         cache_write_5m: t.w5m,
         cache_write_1h: t.w1h,
     };
-    let mult = if t.fast { pricing::fast_multiplier(model) } else { 1.0 };
+    let mult = if t.fast { probe_fast_multiplier(model) } else { 1.0 };
     Some(pricing::request_cost(&price, &u, true) * mult)
 }
 
@@ -718,6 +885,40 @@ fn split_models(data: &mut FileData, prefix: &str) -> FileData {
     out
 }
 
+/// Peel the vendor prefixes Kimi usage arrives under, so rows routed from
+/// other CLIs merge with the Kimi CLI's own spellings ("kimi-oauth/k3" and
+/// "k3" are the same model on the same bill).
+fn strip_kimi_prefix(model: &str) -> String {
+    let lower = model.to_ascii_lowercase();
+    ["moonshot-ai/", "moonshotai/", "kimi-code/", "kimi-oauth/", "moonshot/"]
+        .iter()
+        .find(|p| lower.starts_with(**p))
+        .map(|p| model[p.len()..].to_string())
+        .unwrap_or_else(|| model.to_string())
+}
+
+/// Kimi/Moonshot models logged by another CLI — Codex driven through a
+/// router against the Kimi OAuth plan ("kimi-oauth/k3"), or a session
+/// pointed at Moonshot's API ("moonshot-ai/kimi-k3"). Moonshot bills those
+/// turns, not the CLI's own subscription, so the rows move to the
+/// Kimi/Moonshot card with their vendor prefixes peeled.
+fn split_kimi_routed(all: &mut FileData) -> FileData {
+    let mut moved = FileData::default();
+    for prefix in ["kimi", "moonshot"] {
+        merge_data(&mut moved, split_models(all, prefix));
+    }
+    let mut out = FileData::default();
+    for ((day, model), (cost, tokens)) in moved.days {
+        let entry = out.days.entry((day, strip_kimi_prefix(&model))).or_insert((0.0, 0.0));
+        entry.0 += cost;
+        entry.1 += tokens;
+    }
+    for (model, count) in moved.unpriced {
+        *out.unpriced.entry(strip_kimi_prefix(&model)).or_insert(0) += count;
+    }
+    out
+}
+
 /// Claude Code writes one JSONL per session under ~/.claude/projects. Each
 /// assistant line carries usage token counts and usually a precomputed
 /// costUSD, which we prefer over our own pricing table.
@@ -726,7 +927,7 @@ fn split_models(data: &mut FileData, prefix: &str) -> FileData {
 /// (ANTHROPIC_BASE_URL); those sessions log MiniMax models into the same
 /// files. That usage is split out and returned separately — it belongs on
 /// the MiniMax card, not Claude's.
-fn claude(extra: FileData) -> (ProviderSpend, FileData, FileData) {
+fn claude(extra: FileData) -> (ProviderSpend, FileData, FileData, FileData) {
     let root = std::env::var("CLAUDE_CONFIG_DIR")
         .map(PathBuf::from)
         .unwrap_or_else(|_| dirs::home_dir().unwrap_or_default().join(".claude"))
@@ -749,7 +950,10 @@ fn claude(extra: FileData) -> (ProviderSpend, FileData, FileData) {
     // AihubMix's Anthropic-compatible endpoint (the only way qwen slugs
     // appear there) — those dollars belong on the AihubMix card.
     let qwen_via_aihubmix = split_models(&mut all, "qwen");
-    (build_spend("claude", "Claude", all), minimax, qwen_via_aihubmix)
+    // Kimi slugs likewise mean Moonshot billed the session (Anthropic-
+    // compatible endpoint or a router) — Kimi's card owns those dollars.
+    let kimi_routed = split_kimi_routed(&mut all);
+    (build_spend("claude", "Claude", all), minimax, qwen_via_aihubmix, kimi_routed)
 }
 
 /// Spend for each discovered extra Claude account, scanned from that
@@ -757,10 +961,11 @@ fn claude(extra: FileData) -> (ProviderSpend, FileData, FileData) {
 /// scopes never mix). MiniMax/qwen-routed rows split out the same way the
 /// default account's do and are handed back for the caller to merge into
 /// those cards.
-fn claude_extra_accounts() -> (Vec<ProviderSpend>, FileData, FileData) {
+fn claude_extra_accounts() -> (Vec<ProviderSpend>, FileData, FileData, FileData) {
     let mut spends = Vec::new();
     let mut minimax_extra = FileData::default();
     let mut qwen_extra = FileData::default();
+    let mut kimi_extra = FileData::default();
     for acct in providers::claude::discover_extra_accounts() {
         let root = acct.dir.join("projects");
         let mut files = Vec::new();
@@ -773,9 +978,10 @@ fn claude_extra_accounts() -> (Vec<ProviderSpend>, FileData, FileData) {
         }
         merge_data(&mut minimax_extra, split_models(&mut all, "MiniMax"));
         merge_data(&mut qwen_extra, split_models(&mut all, "qwen"));
+        merge_data(&mut kimi_extra, split_kimi_routed(&mut all));
         spends.push(build_spend(acct.id, acct.name, all));
     }
-    (spends, minimax_extra, qwen_extra)
+    (spends, minimax_extra, qwen_extra, kimi_extra)
 }
 
 /// MiniMax spend: the Agent CLI's local token_usage store (its own cost_usd
@@ -966,13 +1172,19 @@ fn codex_dated_base(model: &str) -> String {
 
 /// Codex priority/fast service-tier multipliers are provider-specific and
 /// intentionally not Cursor's `-fast` supplement multipliers. Unknown models
-/// use the supplement's multiplier when one exists, else 2x.
+/// use the supplement's multiplier when one exists, else 2x. Kimi/Moonshot
+/// slugs billed through a Codex router are not OpenAI-tiered — leave them
+/// at 1× so they merge with the Kimi CLI's own (unmultiplied) rows.
 fn codex_priority_multiplier(dated: &str, rate_model: &str) -> f64 {
+    let lower = rate_model.to_ascii_lowercase();
+    if lower.contains("kimi") || lower.contains("moonshot") {
+        return 1.0;
+    }
     match dated {
         "gpt-5.5" | "gpt-5.5-pro" => 2.5,
         "gpt-5.4" | "gpt-5.4-pro" | "gpt-5.6-sol" | "gpt-5.6-terra" | "gpt-5.6-luna" => 2.0,
         _ => {
-            let m = pricing::fast_multiplier(rate_model);
+            let m = probe_fast_multiplier(rate_model);
             if m == 1.0 { 2.0 } else { m }
         }
     }
@@ -1135,9 +1347,9 @@ fn codex_line(st: &mut CodexFileState, line: &str, data: &mut FileData) {
         _ => (rate_source.clone(), false),
     };
     let lower = rate_source.to_lowercase();
-    let base_price = pricing::lookup(&rate_model);
+    let base_price = probe_lookup(&rate_model);
     let price = base_price
-        .or_else(|| if alias_fast { pricing::lookup(&rate_source) } else { None })
+        .or_else(|| if alias_fast { probe_lookup(&rate_source) } else { None })
         .or_else(|| {
             // The static gpt-5 table only for recognizably Codex-family
             // models; anything else is excluded.
@@ -1249,26 +1461,32 @@ fn codex_scan(home: &Path) -> FileData {
     all
 }
 
-fn codex(extra: FileData) -> ProviderSpend {
+fn codex(extra: FileData) -> (ProviderSpend, FileData) {
     let home = std::env::var("CODEX_HOME")
         .map(PathBuf::from)
         .unwrap_or_else(|_| dirs::home_dir().unwrap_or_default().join(".codex"));
     let mut all = codex_scan(&home);
     // Pi sessions that drove a Codex account (passed in from the pi scan).
     merge_data(&mut all, extra);
-    build_spend("codex", "Codex", all)
+    // Kimi OAuth / Moonshot turns routed through Codex (codex-router logs
+    // them as "kimi-oauth/k3" etc.) bill the Kimi plan, not the ChatGPT
+    // subscription — hand them to the Kimi card.
+    let kimi_routed = split_kimi_routed(&mut all);
+    (build_spend("codex", "Codex", all), kimi_routed)
 }
 
 /// Spend for each discovered extra Codex account, scanned from that
-/// account's own home (each keeps its own sessions/ logs).
-fn codex_extra_accounts() -> Vec<ProviderSpend> {
-    providers::codex::discover_extra_accounts()
-        .into_iter()
-        .map(|acct| {
-            let data = codex_scan(&acct.dir);
-            build_spend(acct.id, acct.name, data)
-        })
-        .collect()
+/// account's own home (each keeps its own sessions/ logs). Kimi-routed
+/// rows split out the same way the default account's do.
+fn codex_extra_accounts() -> (Vec<ProviderSpend>, FileData) {
+    let mut spends = Vec::new();
+    let mut kimi_extra = FileData::default();
+    for acct in providers::codex::discover_extra_accounts() {
+        let mut data = codex_scan(&acct.dir);
+        merge_data(&mut kimi_extra, split_kimi_routed(&mut data));
+        spends.push(build_spend(acct.id, acct.name, data));
+    }
+    (spends, kimi_extra)
 }
 
 // ---------------------------------------------------------------------------
@@ -1356,7 +1574,7 @@ fn pi_line(seen: &mut HashSet<String>, line: &str, data: &mut FileData) {
         add_event(data, ts, &tagged, c, tokens);
         return;
     }
-    match pricing::lookup(model) {
+    match probe_lookup(model) {
         Some(p) => {
             let u = pricing::Usage {
                 input,
@@ -1471,7 +1689,7 @@ fn grok() -> ProviderSpend {
             // Static backstop only for recognizably Grok-family models
             // (catalog down); it has no cache rate, so cached tokens are
             // conservatively priced as fresh input there.
-            let price = pricing::lookup(&model).or_else(|| {
+            let price = probe_lookup(&model).or_else(|| {
                 if model.to_lowercase().contains("grok") {
                     let (i, o) = grok_price(&model);
                     Some(pricing::Price::flat(i, o, i, i))
@@ -1598,8 +1816,12 @@ fn kimi_line(line: &str, data: &mut FileData) {
     }
     let Some(ts) = parse_ts(v.get("time")) else { return };
     let model_raw = v.get("model").and_then(Value::as_str).unwrap_or("unknown");
-    let model = model_raw
-        .strip_prefix("moonshot-ai/")
+    // CLI plan logs `kimi-code/k3`; API logs `moonshot-ai/kimi-k3`; Codex
+    // OAuth logs `kimi-oauth/k3`. Peel those vendor prefixes so one rate
+    // table covers every spelling.
+    let model = ["moonshot-ai/", "kimi-code/", "kimi-oauth/"]
+        .iter()
+        .find_map(|p| model_raw.strip_prefix(p))
         .unwrap_or(model_raw)
         .to_string();
     let u = v.get("usage").cloned().unwrap_or(Value::Null);
@@ -1612,7 +1834,7 @@ fn kimi_line(line: &str, data: &mut FileData) {
     }
     // Catalogs key Kimi models as "moonshot/<slug>"; try the bare slug
     // first (alias/fuzzy chain), then the prefixed spelling.
-    let price = pricing::lookup(&model).or_else(|| pricing::lookup(&format!("moonshot/{model}")));
+    let price = probe_lookup(&model).or_else(|| probe_lookup(&format!("moonshot/{model}")));
     match price {
         Some(p) => {
             let usage = pricing::Usage {
@@ -1654,7 +1876,7 @@ fn qwen_line(line: &str, data: &mut FileData) {
         return;
     }
     // Catalogs key these as bare slugs ("qwen3.8-max") or provider-prefixed.
-    let price = pricing::lookup(&model).or_else(|| pricing::lookup(&format!("qwen/{model}")));
+    let price = probe_lookup(&model).or_else(|| probe_lookup(&format!("qwen/{model}")));
     match price {
         Some(p) => {
             let usage = pricing::Usage {
@@ -1696,7 +1918,7 @@ fn qwen() -> ProviderSpend {
 /// card when that login exists *and* the card is on; otherwise they stay
 /// on Moonshot so API-only installs (and leftover logs, or a Kimi card
 /// still sitting in Disabled after `kimi login`) don't lose the dollars.
-fn kimi() -> ProviderSpend {
+fn kimi(extra: FileData) -> ProviderSpend {
     let root = providers::kimi::code_home().join("sessions");
     let mut files = Vec::new();
     recent_jsonl_files(&root, &mut files);
@@ -1705,6 +1927,9 @@ fn kimi() -> ProviderSpend {
         let data = file_days(&file, &mut |line, data| kimi_line(line, data));
         merge_data(&mut all, data);
     }
+    // Kimi/Moonshot-billed turns other CLIs logged (Codex through a
+    // router, Claude Code on Moonshot's endpoint) join the same card.
+    merge_data(&mut all, extra);
     let (id, name) = kimi_spend_target(
         providers::kimi::has_login(),
         providers::provider_disabled("kimi"),
@@ -1716,7 +1941,7 @@ fn kimi_spend_target(has_login: bool, kimi_disabled: bool) -> (&'static str, &'s
     if has_login && !kimi_disabled {
         ("kimi", "Kimi Code")
     } else {
-        ("moonshot", "Moonshot")
+        ("moonshot", "Kimi API")
     }
 }
 
@@ -1895,6 +2120,7 @@ mod tests {
         let doc = PersistFile {
             version: PERSIST_VERSION,
             pricing_stamp: "litellm:1:2|modelsdev:3:4|supplement:5:6".into(),
+            corrections: 8,
             entries: vec![PersistEntry {
                 path: PathBuf::from(r"C:\logs\session.jsonl"),
                 mtime_secs: 1_784_600_000,
@@ -1902,17 +2128,124 @@ mod tests {
                 size: 4096,
                 days: vec![(739_000, "claude-fable-5".into(), 1.25, 40_000.0)],
                 unpriced: vec![("mystery-model".into(), 3)],
+                probes: vec![
+                    PriceProbe::Lookup {
+                        key: "claude-fable-5".into(),
+                        price: Some(pricing::Price::flat(3.0, 15.0, 0.3, 3.75)),
+                    },
+                    PriceProbe::Lookup { key: "mystery-model".into(), price: None },
+                    PriceProbe::FastMult { key: "claude-fable-5".into(), mult: 2.0 },
+                ],
             }],
         };
         let json = serde_json::to_string(&doc).unwrap();
         let back: PersistFile = serde_json::from_str(&json).unwrap();
         assert_eq!(back.version, doc.version);
         assert_eq!(back.pricing_stamp, doc.pricing_stamp);
+        assert_eq!(back.corrections, doc.corrections);
         let (a, b) = (&back.entries[0], &doc.entries[0]);
         assert_eq!(a.path, b.path);
         assert_eq!((a.mtime_secs, a.mtime_nanos, a.size), (b.mtime_secs, b.mtime_nanos, b.size));
         assert_eq!(a.days, b.days);
         assert_eq!(a.unpriced, b.unpriced);
+        assert_eq!(a.probes, b.probes);
+    }
+
+    /// A v2 cache (no probes/corrections fields) must not load as v3 —
+    /// its entries carry no probes, so a stamp mismatch could never
+    /// revalidate them and stale prices would look valid forever.
+    #[test]
+    fn old_cache_versions_are_discarded() {
+        let v2 = r#"{"version":2,"pricing_stamp":"x","entries":[]}"#;
+        let doc: PersistFile = serde_json::from_str(v2).unwrap();
+        assert_ne!(doc.version, PERSIST_VERSION);
+    }
+
+    // ---- Price probes: catalog-refresh revalidation ------------------------
+
+    /// Probes replay against the live catalog: an unknown model recorded as
+    /// None still answers None (valid); pretending it had a price fails
+    /// validation (that file would re-parse).
+    #[test]
+    fn price_probes_replay_against_the_catalog() {
+        let absent = PriceProbe::Lookup {
+            key: "pane-test-model-that-cannot-exist".into(),
+            price: None,
+        };
+        assert!(absent.still_valid());
+        let phantom = PriceProbe::Lookup {
+            key: "pane-test-model-that-cannot-exist".into(),
+            price: Some(pricing::Price::flat(1.0, 2.0, 0.1, 1.0)),
+        };
+        assert!(!phantom.still_valid());
+        // fast_multiplier returns 1.0 for models the supplement doesn't
+        // publish a multiplier for.
+        let mult = PriceProbe::FastMult {
+            key: "pane-test-model-that-cannot-exist".into(),
+            mult: 1.0,
+        };
+        assert!(mult.still_valid());
+        let wrong_mult = PriceProbe::FastMult {
+            key: "pane-test-model-that-cannot-exist".into(),
+            mult: 3.5,
+        };
+        assert!(!wrong_mult.still_valid());
+    }
+
+    /// file_days records the pricing questions a parse asked, so the entry
+    /// can be revalidated after a catalog refresh without re-reading it.
+    #[test]
+    fn file_days_records_price_probes() {
+        let dir = std::env::temp_dir().join(format!("pane-probe-{}", std::process::id()));
+        let _ = fs::create_dir_all(&dir);
+        let path = dir.join("probe-test.jsonl");
+        let line = json!({"type": "usage.record", "model": "kimi-code/k3",
+            "usage": {"inputOther": 1000.0, "output": 1000.0},
+            "usageScope": "turn", "time": 1784208630652i64})
+        .to_string();
+        fs::write(&path, line).unwrap();
+
+        let data = file_days(&path, &mut |line, data| kimi_line(line, data));
+        assert!(!data.days.is_empty());
+        let probes = cache()
+            .lock()
+            .unwrap()
+            .get(&path)
+            .map(|e| e.probes.clone())
+            .unwrap_or_default();
+        let _ = fs::remove_file(&path);
+        assert!(
+            probes
+                .iter()
+                .any(|p| matches!(p, PriceProbe::Lookup { key, .. } if key == "k3")),
+            "expected a k3 lookup probe, got {} probes",
+            probes.len()
+        );
+        // Everything just recorded replays valid against the same catalog.
+        assert!(probes.iter().all(PriceProbe::still_valid));
+    }
+
+    #[test]
+    fn empty_probes_do_not_vouch_for_an_empty_parse() {
+        // Failed-open artifact: no events, no questions — must re-parse.
+        assert!(!probes_still_vouch(&[], &FileData::default()));
+        // A parse that carried its own dollars never asked the catalog.
+        let mut data = FileData::default();
+        data.days.insert((1, "k3".into()), (1.0, 1000.0));
+        assert!(probes_still_vouch(&[], &data));
+    }
+
+    #[test]
+    fn file_days_does_not_cache_an_unreadable_path() {
+        // A directory has metadata but cannot be read as a file — the
+        // previous insert-on-open-failure path would cache empty spend.
+        let dir = std::env::temp_dir().join(format!("pane-unreadable-{}", std::process::id()));
+        let _ = fs::create_dir_all(&dir);
+        let data = file_days(&dir, &mut |_, _| {});
+        assert!(data.days.is_empty());
+        let cached = cache().lock().unwrap().contains_key(&dir);
+        let _ = fs::remove_dir_all(&dir);
+        assert!(!cached, "unreadable path must not become a cache entry");
     }
 
     #[test]
@@ -2097,6 +2430,25 @@ mod tests {
     }
 
     #[test]
+    fn codex_fast_tier_does_not_double_kimi_oauth() {
+        let turn = json!({"timestamp": "2026-07-10T10:00:00Z", "type": "turn_context",
+                          "payload": {"model": "kimi-oauth/k3"}})
+        .to_string();
+        let usage = token_count_line("2026-07-10T10:00:01Z", Some((1_000.0, 100.0)), (1_000.0, 100.0));
+        let standard = codex_run(&[turn.clone(), usage.clone()]);
+        let fast = codex_run(&[
+            turn,
+            json!({"timestamp": "2026-07-10T10:00:00Z", "type": "event_msg",
+                   "payload": {"type": "thread_settings_applied",
+                               "thread_settings": {"service_tier": "fast"}}})
+            .to_string(),
+            usage,
+        ]);
+        assert!(cost_sum(&standard) > 0.0);
+        assert!((cost_sum(&fast) - cost_sum(&standard)).abs() < 1e-9);
+    }
+
+    #[test]
     fn codex_dated_base_strips_snapshot_stamps() {
         assert_eq!(codex_dated_base("gpt-5.6-sol-2026-06-01"), "gpt-5.6-sol");
         assert_eq!(codex_dated_base("gpt-5.6-sol-20260601"), "gpt-5.6-sol");
@@ -2218,11 +2570,76 @@ mod tests {
     }
 
     #[test]
+    fn kimi_plan_k3_slug_uses_published_rates() {
+        let mut data = FileData::default();
+        let turn = json!({"type": "usage.record", "model": "kimi-code/k3",
+            "usage": {"inputOther": 1000.0, "output": 1000.0, "inputCacheRead": 0.0,
+                      "inputCacheCreation": 0.0},
+            "usageScope": "turn", "time": 1784208630652i64})
+        .to_string();
+        kimi_line(&turn, &mut data);
+        assert!(data.unpriced.is_empty(), "plan k3 should price: {:?}", data.unpriced);
+        assert!(data.days.keys().all(|(_, m)| m == "k3"));
+        let cost: f64 = data.days.values().map(|v| v.0).sum();
+        let expect = (1000.0 * 3.0 + 1000.0 * 15.0) / 1e6;
+        assert!((cost - expect).abs() < 1e-9, "cost {cost} != {expect}");
+    }
+
+    #[test]
+    fn kimi_k25_cache_hits_use_published_rate() {
+        let mut data = FileData::default();
+        let turn = json!({"type": "usage.record", "model": "moonshot-ai/kimi-k2.5",
+            "usage": {"inputOther": 0.0, "output": 0.0, "inputCacheRead": 1_000_000.0,
+                      "inputCacheCreation": 0.0},
+            "usageScope": "turn", "time": 1784208630652i64})
+        .to_string();
+        kimi_line(&turn, &mut data);
+        assert!(data.unpriced.is_empty(), "k2.5 should price: {:?}", data.unpriced);
+        let cost: f64 = data.days.values().map(|v| v.0).sum();
+        assert!((cost - 0.10).abs() < 1e-9, "cost {cost} != 0.10");
+    }
+
+    /// Codex sessions driven through a router against the Kimi plan log
+    /// "kimi-oauth/k3" turns — those bill Moonshot, not the ChatGPT sub,
+    /// so they move off the Codex card with the vendor prefix peeled.
+    #[test]
+    fn codex_kimi_oauth_rows_move_to_the_kimi_card() {
+        let lines = vec![
+            json!({"timestamp": "2026-08-18T10:00:00Z", "type": "turn_context",
+                   "payload": {"model": "gpt-5.6-sol"}})
+            .to_string(),
+            token_count_line("2026-08-18T10:00:01Z", Some((1_000.0, 100.0)), (1_000.0, 100.0)),
+            json!({"timestamp": "2026-08-18T10:01:00Z", "type": "turn_context",
+                   "payload": {"model": "kimi-oauth/k3"}})
+            .to_string(),
+            token_count_line("2026-08-18T10:01:01Z", Some((2_000.0, 200.0)), (3_000.0, 300.0)),
+        ];
+        let mut all = codex_run(&lines);
+        let moved = split_kimi_routed(&mut all);
+        // The GPT turn stays on Codex; the Kimi turn moves, prefix peeled.
+        assert!(all.days.keys().all(|(_, m)| m == "gpt-5.6-sol"));
+        assert_eq!(tokens_sum(&all), 1_100.0);
+        assert!(moved.days.keys().all(|(_, m)| m == "k3"), "{:?}", moved.days.keys());
+        assert_eq!(tokens_sum(&moved), 2_200.0);
+    }
+
+    #[test]
+    fn strip_kimi_prefix_covers_every_spelling() {
+        assert_eq!(strip_kimi_prefix("kimi-oauth/k3"), "k3");
+        assert_eq!(strip_kimi_prefix("kimi-code/k3"), "k3");
+        assert_eq!(strip_kimi_prefix("moonshot-ai/kimi-k3"), "kimi-k3");
+        assert_eq!(strip_kimi_prefix("moonshot/kimi-k2.5"), "kimi-k2.5");
+        assert_eq!(strip_kimi_prefix("kimi-k3"), "kimi-k3");
+        assert_eq!(strip_kimi_prefix("Kimi-OAuth/K3"), "K3");
+        assert_eq!(strip_kimi_prefix("moonshotai/kimi-k2"), "kimi-k2");
+    }
+
+    #[test]
     fn kimi_spend_stays_on_moonshot_without_login() {
         assert_eq!(kimi_spend_target(true, false), ("kimi", "Kimi Code"));
-        assert_eq!(kimi_spend_target(false, false), ("moonshot", "Moonshot"));
-        assert_eq!(kimi_spend_target(true, true), ("moonshot", "Moonshot"));
-        assert_eq!(kimi_spend_target(false, true), ("moonshot", "Moonshot"));
+        assert_eq!(kimi_spend_target(false, false), ("moonshot", "Kimi API"));
+        assert_eq!(kimi_spend_target(true, true), ("moonshot", "Kimi API"));
+        assert_eq!(kimi_spend_target(false, true), ("moonshot", "Kimi API"));
     }
 
     /// Live diagnostic (ignored): what each spend source produced from
@@ -2398,12 +2815,14 @@ pub fn collect(cursor_csv: Option<String>) -> Vec<ProviderSpend> {
         t.clear();
     }
     let (pi_claude, pi_codex) = pi();
-    let (claude_sp, mut minimax_extra, mut qwen_via_claude) = claude(pi_claude);
-    // Extra Claude accounts: own spend cards, with their MiniMax/qwen-routed
-    // rows folded into the same destinations as the default account's.
-    let (extra_claude_spends, mm2, qw2) = claude_extra_accounts();
+    let (claude_sp, mut minimax_extra, mut qwen_via_claude, mut kimi_routed) =
+        claude(pi_claude);
+    // Extra Claude accounts: own spend cards, with their MiniMax/qwen/Kimi-
+    // routed rows folded into the same destinations as the default account's.
+    let (extra_claude_spends, mm2, qw2, km2) = claude_extra_accounts();
     merge_data(&mut minimax_extra, mm2);
     merge_data(&mut qwen_via_claude, qw2);
+    merge_data(&mut kimi_routed, km2);
     // Hermes rows going to an existing slice merge into it (MiniMax via the
     // extra-data path); the rest become their own spend entries.
     let mut hermes_rest = Vec::new();
@@ -2417,19 +2836,23 @@ pub fn collect(cursor_csv: Option<String>) -> Vec<ProviderSpend> {
     let (opencode_sp, mut aihubmix_data) = opencode();
     merge_data(&mut aihubmix_data, qwen_via_claude);
     let aihubmix_sp = build_spend("aihubmix", "AihubMix", aihubmix_data);
+    let (codex_sp, kimi_via_codex) = codex(pi_codex);
+    merge_data(&mut kimi_routed, kimi_via_codex);
+    let (extra_codex_spends, kimi_via_extra_codex) = codex_extra_accounts();
+    merge_data(&mut kimi_routed, kimi_via_extra_codex);
     let mut list = vec![
         claude_sp,
-        codex(pi_codex),
+        codex_sp,
         grok(),
         opencode_sp,
         aihubmix_sp,
         devin(),
         minimax(minimax_extra),
-        kimi(),
+        kimi(kimi_routed),
         qwen(),
     ];
     list.extend(extra_claude_spends);
-    list.extend(codex_extra_accounts());
+    list.extend(extra_codex_spends);
     list.extend(hermes_rest);
     if let Some(csv) = cursor_csv {
         list.push(cursor_from_csv(&csv));

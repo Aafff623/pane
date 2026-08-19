@@ -1,5 +1,40 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+- **Refreshing catalogs no longer re-reads every session log.** The spend
+  cache used to throw itself away whenever LiteLLM / models.dev /
+  the supplement file changed on disk (that happens daily, and hourly
+  while any model is unpriced), then re-parse hundreds of MB of jsonl.
+  Each cached file now records the pricing questions it asked; a catalog
+  refresh only re-reads files whose prices actually moved. A baked-pricing
+  code change still discards the cache. One last full scan migrates to
+  the new format. Probe keys stored in that cache are length-capped so a
+  huge model string cannot inflate the on-disk file.
+- **Kimi usage routed through Codex (or Claude) lands on the Kimi card.**
+  Sessions that log `kimi-oauth/k3` or `moonshot-ai/…` via a router used
+  to keep those dollars on Codex. They move to Kimi Code (or Moonshot
+  when there's no Kimi login), with the vendor prefix peeled so they
+  merge with the CLI's own logs.
+- **Kimi Code plan usage now has dollar amounts** — the official CLI logs
+  plan K3 as `kimi-code/k3` (and K2.7 Code as `kimi-for-coding`), which
+  missed the rate table, so Today could show a million tokens at $0.00.
+  Every current Moonshot model now uses the published API card
+  (K3 $3 / $15 / $0.30 cache; K2.7 Code $0.95 / $4 / $0.19; HighSpeed
+  is 2×; K2.6 $0.95 / $4 / $0.16; K2.5 $0.60 / $3 / $0.10; V1 8k/32k/128k
+  at $0.20/$2, $1/$3, $2/$5). Reseller catalog rows no longer override
+  those first-party rates. Codex OAuth (`kimi-oauth/k3`) and prefixed
+  API spellings share the same table. Discontinued K2 / kimi-latest
+  names still come from the public catalogs.
+
+### Changed
+- Customize toggle, Settings key field, leftover dashboard card, and
+  spend card labeled **Kimi API** (was Moonshot). The internal id is
+  still `moonshot` so existing layouts and telemetry keep working. The
+  toggle still gates the wallet fetch and the API bar on the Kimi Code
+  card.
+
 ## 0.4.39 — 2026-08-19
 
 ### Added
