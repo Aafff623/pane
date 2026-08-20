@@ -343,6 +343,9 @@ fn plan_from_doc(doc: &Value, weekly_limit: Option<f64>) -> Option<String> {
         return Some(level);
     }
     match weekly_limit.map(|n| n.round() as i64) {
+        // Last resort when the API omits membership.level. These are the
+        // old request-count caps; current responses usually send percent
+        // (limit 100) plus a LEVEL_* code instead.
         Some(1024) => Some("Andante".into()),
         Some(2048) => Some("Moderato".into()),
         Some(7168) => Some("Allegretto".into()),
@@ -350,13 +353,23 @@ fn plan_from_doc(doc: &Value, weekly_limit: Option<f64>) -> Option<String> {
     }
 }
 
+/// Display names match https://www.kimi.ai/membership/pricing
+/// (Moderato / Allegretto / Allegro / Vivace). `LEVEL_*` codes shifted
+/// when Allegro and Vivace launched (issue #156): INTERMEDIATE used to
+/// print as Moderato. Older codes (Adagio / Andante) are mapped if the
+/// API still sends them.
 fn map_membership_level(raw: &str) -> Option<String> {
     let upper = raw.trim().to_ascii_uppercase();
     let key = upper.strip_prefix("LEVEL_").unwrap_or(&upper);
     Some(match key {
-        "ANDANTE" | "BASIC" | "BEGINNER" | "INTRO" => "Andante".into(),
-        "MODERATO" | "INTERMEDIATE" => "Moderato".into(),
-        "ALLEGROTTO" | "ADVANCED" | "PROFESSIONAL" | "PRO" => "Allegretto".into(),
+        "FREE" | "ADAGIO" | "BASIC" => "Adagio".into(),
+        "ANDANTE" | "BEGINNER" | "INTRO" => "Andante".into(),
+        "MODERATO" | "STANDARD" => "Moderato".into(),
+        "INTERMEDIATE" | "ALLEGRETTO" | "ALLEGROTTO" | "PROFESSIONAL" | "PRO" => {
+            "Allegretto".into()
+        }
+        "ADVANCED" | "ALLEGRO" => "Allegro".into(),
+        "PREMIUM" | "VIVACE" => "Vivace".into(),
         other if other.is_empty() => return None,
         other => title_case(other),
     })
@@ -462,7 +475,7 @@ mod tests {
         let snap = parse_snapshot(&doc).expect("parse");
         assert_eq!(snap.id, "kimi");
         assert_eq!(snap.name, "Kimi Code");
-        assert_eq!(snap.plan.as_deref(), Some("Moderato"));
+        assert_eq!(snap.plan.as_deref(), Some("Allegretto"));
         assert_eq!(labels(&snap.metrics), ["Session", "Weekly"]);
         let session = &snap.metrics[0];
         assert!((session.used_percent.unwrap() - 69.5).abs() < 0.01);
@@ -493,8 +506,33 @@ mod tests {
     fn weekly_limit_names_the_tier() {
         let andante = json!({"usage": {"limit": 1024, "used": 10, "remaining": 1014}});
         assert_eq!(parse_snapshot(&andante).unwrap().plan.as_deref(), Some("Andante"));
-        let allegro = json!({"usage": {"limit": "7168", "used": "0", "remaining": "7168"}});
-        assert_eq!(parse_snapshot(&allegro).unwrap().plan.as_deref(), Some("Allegretto"));
+        let mid = json!({"usage": {"limit": 2048, "used": 0, "remaining": 2048}});
+        assert_eq!(parse_snapshot(&mid).unwrap().plan.as_deref(), Some("Moderato"));
+        let high = json!({"usage": {"limit": "7168", "used": "0", "remaining": "7168"}});
+        assert_eq!(parse_snapshot(&high).unwrap().plan.as_deref(), Some("Allegretto"));
+    }
+
+    #[test]
+    fn membership_level_matches_kimi_page_names() {
+        let cases = [
+            ("LEVEL_FREE", "Adagio"),
+            ("LEVEL_BASIC", "Adagio"),
+            ("ADAGIO", "Adagio"),
+            ("LEVEL_ANDANTE", "Andante"),
+            ("LEVEL_STANDARD", "Moderato"),
+            ("LEVEL_MODERATO", "Moderato"),
+            ("LEVEL_INTERMEDIATE", "Allegretto"),
+            ("ALLEGRETTO", "Allegretto"),
+            ("ALLEGROTTO", "Allegretto"),
+            ("LEVEL_ADVANCED", "Allegro"),
+            ("LEVEL_ALLEGRO", "Allegro"),
+            ("LEVEL_PREMIUM", "Vivace"),
+            ("VIVACE", "Vivace"),
+            ("PRO", "Allegretto"),
+        ];
+        for (raw, name) in cases {
+            assert_eq!(map_membership_level(raw).as_deref(), Some(name), "{raw}");
+        }
     }
 
     #[test]

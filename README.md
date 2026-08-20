@@ -163,7 +163,7 @@ success/failure counts — never amounts or error text) — see
 | Antigravity | Local language server, or Google Cloud Code API via Credential Manager |
 | DeepSeek | API key (Settings) → balance |
 | Moonshot (Kimi API) | API key (Settings) → balance (global + CN endpoints) |
-| Kimi Code | Official CLI login (`kimi login`) → Session + Weekly plan bars; Moonshot API key → API wallet bar; local session spend |
+| Kimi Code | Official CLI login (`kimi login`) → Session + Weekly plan bars and membership name (Moderato / Allegretto / Allegro / Vivace); Moonshot API key → API wallet bar; local session spend |
 | ElevenLabs | API key (Settings) → character quota with reset pacing |
 | Ollama | Local server on :11434 — installed + loaded models, no key |
 | Codebuff | `codebuff login` credentials file or API key → credits + weekly limit |

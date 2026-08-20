@@ -201,8 +201,22 @@ Ground rules that apply to every provider:
   Moonshot/Kimi API key is saved, `api.moonshot.ai|cn/v1/users/me/balance`
   for the API bar. This is the Kimi Code *subscription* plus the
   pay-as-you-go wallet on the same card.
-- **Shows:** Session (5-hour) and Weekly bars with reset pacing, plan
-  name (Andante / Moderato / Allegretto when the weekly quota matches).
+- **Shows:** Session (5-hour) and Weekly bars with reset pacing, plus the
+  membership plan name from `user.membership.level`. Names match
+  [kimi.ai/membership/pricing](https://www.kimi.ai/membership/pricing):
+  Moderato ($19), Allegretto ($39), Allegro ($99), Vivace ($199).
+
+  | API `user.membership.level` | Card name |
+  |---|---|
+  | `LEVEL_STANDARD` / `LEVEL_MODERATO` | Moderato |
+  | `LEVEL_INTERMEDIATE` | Allegretto |
+  | `LEVEL_ADVANCED` | Allegro |
+  | `LEVEL_PREMIUM` | Vivace |
+
+  Older codes still map if the API sends them (`LEVEL_FREE` /
+  `LEVEL_BASIC` → Adagio, `LEVEL_ANDANTE` → Andante). Weekly request
+  caps 1024 / 2048 / 7168 are a fallback only, when the API omits the
+  level.
   Those two windows are the same clocks as Kimi's website "5-hour Code"
   and "7-day Code" rows; the coding usage API currently reports remaining
   as whole percents (`limit`/`remaining` of 100), so usage under 1% can
