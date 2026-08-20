@@ -221,6 +221,10 @@ const ALL_PROVIDERS: [string, string][] = [
   ["kimi", "Kimi Code"],
 ];
 
+function providerDisplayName(id: string): string {
+  return ALL_PROVIDERS.find(([pid]) => pid === id)?.[1] ?? id;
+}
+
 // Same quick links the Mac app ships (status pages + vendor dashboards).
 const PROVIDER_LINKS: Record<string, { label: string; url: string }[]> = {
   claude: [
@@ -2352,25 +2356,36 @@ async function paintCachedSnapshots(): Promise<void> {
   }
 }
 
+function setRefreshLock(on: boolean): void {
+  refreshing = on;
+  document.body.classList.toggle("refreshing", on);
+  document.querySelector("#refresh")?.setAttribute("aria-busy", on ? "true" : "false");
+}
+
 async function refresh(force = false): Promise<void> {
   if (refreshing) {
     // Remember a forced request instead of dropping it: the in-flight
     // fetch may have started before whatever prompted this one (a saved
     // key, a toggle), so one more pass runs when it finishes.
-    if (force) refreshQueued = true;
+    if (force) {
+      refreshQueued = true;
+      // The save message (or a stale "Updated") would otherwise sit on
+      // the footer until the in-flight fetch ends, and Refresh looks dead.
+      document.querySelector("#status")!.textContent = "Refreshing…";
+    }
     return;
   }
   if (!force && Date.now() - lastFetch < STALE_MS) return;
-  refreshing = true;
+  setRefreshLock(true);
   const myGen = ++refreshGeneration;
-  await unparkRecentlyKeyed();
-
   const status = document.querySelector("#status")!;
   status.textContent = "Refreshing…";
   // The spend scan re-reads every session log on a cold start and can take
-  // tens of seconds — it must never hold up the usage cards' first paint.
+  // tens of seconds — it must never hold up the usage cards' first paint,
+  // or the Refresh button (the lock used to stay on until spend finished).
   const spendPromise = invoke<ProviderSpend[]>("fetch_spend").catch(() => null);
   try {
+    await unparkRecentlyKeyed();
     let snapshots = await invoke<Snapshot[]>("fetch_usage");
     // First launch ever (no layout yet): start with only the providers that
     // actually have credentials on this PC, like the Mac app's first-run
@@ -2461,17 +2476,20 @@ async function refresh(force = false): Promise<void> {
     status.textContent = `Updated ${time}`;
   } catch (err) {
     status.textContent = `Refresh failed: ${err}`;
+  } finally {
+    setRefreshLock(false);
+    if (refreshQueued) {
+      refreshQueued = false;
+      void refresh(true);
+    }
   }
   const spend = await spendPromise;
   spendLoaded = true;
-  if (spend) lastSpend = spend;
+  // A newer refresh may have started (and even finished) while this scan
+  // was still walking logs — don't paint stale dollars over it.
+  if (spend && myGen === refreshGeneration) lastSpend = spend;
   if (lastSnapshots.length) ensureLayout();
   if (!customizeOpen && lastSnapshots.length) renderIfVisible();
-  refreshing = false;
-  if (refreshQueued) {
-    refreshQueued = false;
-    void refresh(true);
-  }
 }
 
 function scheduleAutoRefresh(): void {
@@ -2816,7 +2834,8 @@ async function saveApiKey(provider: string): Promise<void> {
         disabled: config.disabled.filter((id) => id !== provider),
       }).catch(() => {});
     }
-    status.textContent = `${provider} key saved`;
+    const name = providerDisplayName(provider);
+    status.textContent = `${name} key saved`;
     await refresh(true);
   } catch (err) {
     recentlyKeyed.delete(provider);

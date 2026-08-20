@@ -109,7 +109,14 @@ body {
   top: 0;
   bottom: 0;
   width: 10px;
-  z-index: 30;
+  /* Above Settings/Customize (50) and the footer (55) so Refresh stays
+     clickable while a panel is open or the status line is long. */
+  z-index: 65;
+}
+
+#side-zone:hover,
+#side-zone:focus-within {
+  width: 42px;
 }
 
 /* Liquid glass, same recipe as jazii.dev's floating dock. */
@@ -226,7 +233,8 @@ body {
 #settings-btn:hover,
 #customize-btn:hover,
 #customize-btn.active,
-#theme-btn:hover {
+#theme-btn:hover,
+body.refreshing #refresh {
   background: var(--accent);
   color: var(--foreground);
 }
