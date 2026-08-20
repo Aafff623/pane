@@ -357,6 +357,7 @@ let refreshQueued = false;
 // at save time — the exemption lasts through that pass plus one more.
 const recentlyKeyed = new Map<string, number>();
 let refreshGeneration = 0;
+let lastAppliedSpendGen = 0;
 let refreshTimer: number | undefined;
 let lastSnapshots: Snapshot[] = [];
 let lastSpend: ProviderSpend[] = [];
@@ -2485,9 +2486,13 @@ async function refresh(force = false): Promise<void> {
   }
   const spend = await spendPromise;
   spendLoaded = true;
-  // A newer refresh may have started (and even finished) while this scan
-  // was still walking logs — don't paint stale dollars over it.
-  if (spend && myGen === refreshGeneration) lastSpend = spend;
+  // Overlapping scans are allowed now that Refresh unlocks before spend
+  // finishes. Keep the newest successful result — a later failed scan
+  // (null) must not discard dollars an older pass already computed.
+  if (spend && myGen >= lastAppliedSpendGen) {
+    lastSpend = spend;
+    lastAppliedSpendGen = myGen;
+  }
   if (lastSnapshots.length) ensureLayout();
   if (!customizeOpen && lastSnapshots.length) renderIfVisible();
 }
