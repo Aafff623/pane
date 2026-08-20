@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+- **Refresh responds while usage is updating.** The button used to stay
+  locked until the slow spend scan finished (tens of seconds on a cold
+  start), so clicks looked dead and a just-saved **Kimi API** key left
+  "moonshot key saved" stuck on the footer. Usage unlocks Refresh as soon
+  as the cards update; a click (or key save) during a fetch shows
+  Refreshing… immediately; and the sidebar sits above Settings so Refresh
+  still works with the panel open.
+
 ## 0.4.41 — 2026-08-20
 
 ### Fixed
