@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.4.41 — 2026-08-20
+
+### Fixed
+- **Kimi Code plan name matches the membership page** — current paid
+  names on [kimi.ai](https://www.kimi.ai/membership/pricing) are
+  Moderato, Allegretto, Allegro, and Vivace. Pane still printed the old
+  three-name table, so `LEVEL_INTERMEDIATE` showed as Moderato
+  (issue #156; it is Allegretto) and `LEVEL_ADVANCED` showed as
+  Allegretto (it is Allegro). `LEVEL_PREMIUM` is Vivace.
+
 ## 0.4.40 — 2026-08-20
 
 ### Fixed
