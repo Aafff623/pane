@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### Added
+- **Chinese in Settings → Language.** Auto follows the PC language;
+  English and 中文 are explicit. Cards, Settings, Customize, tray
+  tooltips, and quota toasts switch as soon as you pick one. Provider
+  names, plan names, and the changelog stay English. Vendor "connect me"
+  error hints stay English for now.
+
 ### Fixed
 - **Refresh responds while usage is updating.** The button used to stay
   locked until the slow spend scan finished (tens of seconds on a cold

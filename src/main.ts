@@ -1,6 +1,18 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getVersion } from "@tauri-apps/api/app";
+import {
+  applyStaticI18n,
+  displayLinkLabel,
+  displayMetricDetail,
+  displayMetricLabel,
+  localeTag,
+  normalizeLocalePref,
+  resolveLocale,
+  setActiveLocale,
+  t,
+  type LocalePref,
+} from "./i18n";
 
 // Injected by vite.config.ts at build time, e.g. "0707.1432".
 declare const __BUILD_STAMP__: string;
@@ -95,18 +107,18 @@ interface ProviderSpend {
 }
 
 /// How to get each provider signed in again, for the ⚠ Outdated tooltip.
-const RELOGIN: Record<string, string> = {
-  claude: "run `claude` in a terminal and sign in",
-  codex: "run `codex login` in a terminal",
-  grok: "run `grok` in a terminal and sign in",
-  copilot: "run `gh auth login` in a terminal",
-  cursor: "open Cursor and sign in again",
-  devin: "run `devin` in a terminal and sign in",
-  opencode: "run `opencode auth login` in a terminal",
-  antigravity: "open Antigravity and sign in again",
-  ollama: "make sure Ollama is running",
-  hermes: "open the Hermes desktop app once so it writes its local ledger",
-  kimi: "run `kimi login` in a terminal",
+const RELOGIN_KEYS: Record<string, string> = {
+  claude: "stale.relogin.claude",
+  codex: "stale.relogin.codex",
+  grok: "stale.relogin.grok",
+  copilot: "stale.relogin.copilot",
+  cursor: "stale.relogin.cursor",
+  devin: "stale.relogin.devin",
+  opencode: "stale.relogin.opencode",
+  antigravity: "stale.relogin.antigravity",
+  ollama: "stale.relogin.ollama",
+  hermes: "stale.relogin.hermes",
+  kimi: "stale.relogin.kimi",
 };
 
 /// The ⚠ Outdated tooltip: what went wrong, what fixes it, and the
@@ -114,24 +126,23 @@ const RELOGIN: Record<string, string> = {
 /// classified into sign-in / rate-limit / vendor-outage / connection
 /// buckets so the fix is concrete instead of a bare HTTP code.
 function staleHelp(s: Snapshot): string {
-  const w = (s.warning ?? "The last refresh failed").replace(/[.\s]+$/, "");
+  const w = (s.warning ?? t("stale.lastFailed")).replace(/[.\s]+$/, "");
   const lw = w.toLowerCase();
-  const relogin =
-    RELOGIN[s.id] ?? "add the API key again in Settings (or sign in with the tool once)";
-  let fix = "Pane keeps retrying automatically — nothing to do unless this persists.";
+  const relogin = RELOGIN_KEYS[s.id] ? t(RELOGIN_KEYS[s.id]) : t("stale.reloginDefault");
+  let fix = t("stale.fixRetry");
   if (/run `|open the/.test(lw)) {
     // The provider's own message already says what to do.
-    fix = "Pane recovers automatically once that's done.";
+    fix = t("stale.fixDone");
   } else if (/http 40[13]|invalid_grant|expired|no refresh token|sign[- ]?in|log ?in|credentials/.test(lw)) {
-    fix = `Fix: ${relogin} — Pane picks it up on the next refresh.`;
+    fix = t("stale.fixRelogin", { how: relogin });
   } else if (/http 429|rate limit/.test(lw)) {
-    fix = "The vendor is rate-limiting; Pane waits exactly as long as it asked, then retries by itself.";
+    fix = t("stale.fix429");
   } else if (/http 5\d\d/.test(lw)) {
-    fix = "The vendor's API is having trouble; Pane retries automatically until it recovers.";
+    fix = t("stale.fix5xx");
   } else if (/error sending request|timed? ?out|connect|network|dns|proxy/.test(lw)) {
-    fix = "Pane couldn't reach the vendor — check your internet connection (or the proxy in Settings).";
+    fix = t("stale.fixNet");
   }
-  return `${w}.\n${fix}\nShowing the last good data meanwhile.`;
+  return `${w}.\n${fix}\n${t("stale.tail")}`;
 }
 
 /// ⚠ shown when some events have no known model price — their tokens are
@@ -140,9 +151,7 @@ function unpricedWarn(sp: ProviderSpend | undefined): string {
   if (!sp || sp.unpriced <= 0) return "";
   const models = sp.unpriced_models.join(", ") || "unknown models";
   return `<span class="stale" title="${escapeHtml(
-    `${sp.unpriced} requests ran on models with no public pricing (${models}). ` +
-      `Their tokens are included, but they can't be turned into dollars — ` +
-      `so the real cost is a little higher than shown.`,
+    t("unpriced.tip", { n: sp.unpriced, models }),
   )}">⚠</span>`;
 }
 
@@ -192,6 +201,7 @@ interface Config {
   lastSeenVersion: string;
   reduceAnimations: boolean;
   hideUsageWhileSharing: boolean;
+  locale: LocalePref;
 }
 
 const ALL_PROVIDERS: [string, string][] = [
@@ -343,6 +353,7 @@ let config: Config = {
   lastSeenVersion: "",
   reduceAnimations: false,
   hideUsageWhileSharing: false,
+  locale: "auto",
 };
 let lastFetch = 0;
 let refreshing = false;
@@ -418,9 +429,9 @@ function fmtDuration(ms: number): string {
   const days = Math.floor(mins / 1440);
   const hours = Math.floor((mins % 1440) / 60);
   const rem = mins % 60;
-  if (days > 0) return `${days}d ${hours}h`;
-  if (hours > 0) return `${hours}h ${String(rem).padStart(2, "0")}m`;
-  return `${rem}m`;
+  if (days > 0) return t("time.daysHours", { d: days, h: hours });
+  if (hours > 0) return t("time.hoursMins", { h: hours, m: String(rem).padStart(2, "0") });
+  return t("time.mins", { m: rem });
 }
 
 // "today at 6:38 PM" / "tomorrow at 18:38" / "Sat, Jul 11 at 9:00 AM",
@@ -430,12 +441,14 @@ function fmtExact(ts: number): string {
   const now = new Date();
   const hour12 =
     config.timeFormat === "12" ? true : config.timeFormat === "24" ? false : undefined;
-  const time = d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit", hour12 });
+  const tag = localeTag();
+  const time = d.toLocaleTimeString(tag, { hour: "numeric", minute: "2-digit", hour12 });
   const dayStart = (x: Date) => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime();
   const diffDays = Math.round((dayStart(d) - dayStart(now)) / 86400000);
-  if (diffDays === 0) return `today at ${time}`;
-  if (diffDays === 1) return `tomorrow at ${time}`;
-  return `${d.toLocaleDateString([], { weekday: "short", month: "short", day: "numeric" })} at ${time}`;
+  if (diffDays === 0) return t("time.today", { time });
+  if (diffDays === 1) return t("time.tomorrow", { time });
+  const date = d.toLocaleDateString(tag, { weekday: "short", month: "short", day: "numeric" });
+  return t("time.dateAt", { date, time });
 }
 
 async function patchConfig(patch: Partial<Config>): Promise<void> {
@@ -744,12 +757,12 @@ function computePace(m: Metric): Pace {
   const none: Pace = { cls: "", note: "", noteClass: "", title: "", tick: null };
 
   if (left < 0.5) {
-    return { cls: "low", note: "🔥 Limit reached", noteClass: "danger", title: "Limit reached", tick: null };
+    return { cls: "low", note: t("pace.limitReached"), noteClass: "danger", title: t("pace.limitReachedTitle"), tick: null };
   }
 
   const byLevel = (): Pace => {
-    if (left <= 10) return { ...none, cls: "low", title: `${Math.round(left)}% left` };
-    if (used >= 80) return { ...none, cls: "warn", title: `${Math.round(used)}% used` };
+    if (left <= 10) return { ...none, cls: "low", title: t("card.pctLeft", { n: Math.round(left) }) };
+    if (used >= 80) return { ...none, cls: "warn", title: t("card.pctUsed", { n: Math.round(used) }) };
     return none;
   };
   if (!m.resets_at || !m.period_ms) return byLevel();
@@ -772,28 +785,28 @@ function computePace(m: Metric): Pace {
     const runOutAt = now + (left * elapsedMs) / used;
     if (runOutAt < m.resets_at - 60000) {
       const when = config.resetExact
-        ? `Limit ${fmtExact(runOutAt)}`
-        : `Limit in ${fmtDuration(runOutAt - now)}`;
-      return { cls: "low", note: `🔥 ${when}`, noteClass: "danger", title: `~${over}% over limit at reset`, tick };
+        ? t("pace.limitAt", { when: fmtExact(runOutAt) })
+        : t("pace.limitIn", { time: fmtDuration(runOutAt - now) });
+      return { cls: "low", note: `🔥 ${when}`, noteClass: "danger", title: t("pace.overReset", { n: over }), tick };
     }
-    return { cls: "low", note: "🔥", noteClass: "danger", title: "~100% used at reset", tick };
+    return { cls: "low", note: "🔥", noteClass: "danger", title: t("pace.fullReset"), tick };
   }
 
   const spare = Math.max(1, Math.round(100 - projected));
   if (projected >= 90) {
     return {
       cls: "warn",
-      note: `~${spare}% spare`,
+      note: t("pace.spare", { n: spare }),
       noteClass: "warn",
-      title: `~${Math.round(projected)}% used at reset`,
+      title: t("pace.usedReset", { n: Math.round(projected) }),
       tick,
     };
   }
   return {
     cls: "",
-    note: config.pacingAlways ? `~${spare}% left at reset` : "",
+    note: config.pacingAlways ? t("pace.leftReset", { n: spare }) : "",
     noteClass: "",
-    title: `~${spare}% left at reset`,
+    title: t("pace.leftReset", { n: spare }),
     tick: config.pacingAlways ? tick : null,
   };
 }
@@ -814,8 +827,8 @@ function renderMetric(m: Metric): string {
     const note = pace.note
       ? `<span class="pace-note ${pace.noteClass}" title="${escapeHtml(pace.title)}">${escapeHtml(pace.note)}</span>`
       : "";
-    const headline = config.showUsed ? `${Math.round(used)}% used` : `${left}% left`;
-    const headlineAlt = config.showUsed ? `${left}% left` : `${Math.round(used)}% used`;
+    const headline = config.showUsed ? t("card.pctUsed", { n: Math.round(used) }) : t("card.pctLeft", { n: left });
+    const headlineAlt = config.showUsed ? t("card.pctLeft", { n: left }) : t("card.pctUsed", { n: Math.round(used) });
 
     let resetHtml = "";
     if (m.resets_at !== null && m.resets_at > Date.now()) {
@@ -831,20 +844,20 @@ function renderMetric(m: Metric): string {
         notStarted = m.resets_at - Date.now() >= m.period_ms - grace;
       }
       if (notStarted) {
-        resetHtml = `<span title="Sessions start after you send your first message.">Not started</span>`;
+        resetHtml = `<span title="${escapeHtml(t("card.notStartedTip"))}">${escapeHtml(t("card.notStarted"))}</span>`;
       } else {
         const remain = m.resets_at - Date.now();
-        const countdown = remain < 60_000 ? "Resets soon" : `Resets in ${fmtDuration(remain)}`;
-        const exact = `Resets ${fmtExact(m.resets_at)}`;
+        const countdown = remain < 60_000 ? t("card.resetsSoon") : t("card.resetsIn", { time: fmtDuration(remain) });
+        const exact = t("card.resetsAt", { when: fmtExact(m.resets_at) });
         const [text, alt] = config.resetExact ? [exact, countdown] : [countdown, exact];
         resetHtml = `<span class="clickable" data-flip="reset" title="${escapeHtml(alt)}">${escapeHtml(text)}</span>`;
       }
     }
-    const detailHtml = [m.detail ? escapeHtml(m.detail) : "", resetHtml].filter(Boolean).join(" · ");
+    const detailHtml = [m.detail ? escapeHtml(displayMetricDetail(m.detail)) : "", resetHtml].filter(Boolean).join(" · ");
     return `
       <div class="metric">
         <div class="metric-head">
-          <span class="metric-label">${escapeHtml(m.label)}</span>
+          <span class="metric-label">${escapeHtml(displayMetricLabel(m.label))}</span>
           ${note}
         </div>
         <div class="bar" title="${escapeHtml(pace.title)}">
@@ -863,25 +876,25 @@ function renderMetric(m: Metric): string {
   if (m.kind === "action" && m.detail) {
     const expiry =
       m.resets_at !== null
-        ? `Expires ${fmtExact(m.resets_at)}`
-        : (m.value ?? "Available");
+        ? t("card.expires", { when: fmtExact(m.resets_at) })
+        : displayMetricDetail(m.value ?? t("card.available"));
     const soon =
       m.resets_at !== null && m.resets_at - Date.now() < 86_400_000
-        ? `<span class="warn-dot" title="${escapeHtml(`This credit expires in ${fmtDuration(Math.max(0, m.resets_at - Date.now()))} — use it or lose it.`)}">●</span> `
+        ? `<span class="warn-dot" title="${escapeHtml(t("card.creditDying", { time: fmtDuration(Math.max(0, m.resets_at - Date.now())) }))}">●</span> `
         : "";
     return `
       <div class="metric-text action-row">
-        <span>${soon}${escapeHtml(m.label)}</span>
+        <span>${soon}${escapeHtml(displayMetricLabel(m.label))}</span>
         <span class="action-right">
           <span class="detail">${escapeHtml(expiry)}</span>
-          <button class="redeem-btn" data-redeem="${escapeHtml(m.detail)}" title="Spend this credit to reset your Codex rate limits now">Use</button>
+          <button class="redeem-btn" data-redeem="${escapeHtml(m.detail)}" title="${escapeHtml(t("card.useTip"))}">${escapeHtml(t("card.use"))}</button>
         </span>
       </div>`;
   }
   return `
     <div class="metric-text">
-      <span>${escapeHtml(m.label)}</span>
-      <span class="detail">${escapeHtml(m.value ?? "")}</span>
+      <span>${escapeHtml(displayMetricLabel(m.label))}</span>
+      <span class="detail">${escapeHtml(displayMetricDetail(m.value ?? ""))}</span>
     </div>`;
 }
 
@@ -891,7 +904,7 @@ function renderTrend(spend: ProviderSpend): string {
   const peakIdx = spend.trend.indexOf(max);
   const dayMs = 86_400_000;
   const dateOf = (i: number) =>
-    new Date(Date.now() - (29 - i) * dayMs).toLocaleDateString([], { month: "short", day: "numeric" });
+    new Date(Date.now() - (29 - i) * dayMs).toLocaleDateString(localeTag(), { month: "short", day: "numeric" });
   // Each day is a group: the visible bar plus a full-height invisible hit
   // area so thin bars are easy to hover; [data-trend] drives the tooltip.
   const bars = spend.trend
@@ -903,10 +916,15 @@ function renderTrend(spend: ProviderSpend): string {
       </g>`;
     })
     .join("");
-  const title = `Last 30 days (${dateOf(0)} – ${dateOf(29)}) · peak ${fmtTokens(max)} tokens on ${dateOf(peakIdx)} · from local logs`;
+  const title = t("spend.trendTip", {
+    from: dateOf(0),
+    to: dateOf(29),
+    tokens: fmtTokens(max),
+    peak: dateOf(peakIdx),
+  });
   return `
     <div class="metric trend">
-      <span class="metric-label" title="${escapeHtml(title)}">Usage Trend</span>
+      <span class="metric-label" title="${escapeHtml(title)}">${escapeHtml(t("spend.trend"))}</span>
       <svg class="trend-chart" viewBox="0 0 297 32" preserveAspectRatio="none">${bars}</svg>
     </div>`;
 }
@@ -919,15 +937,16 @@ function renderSpendRow(
   sp?: ProviderSpend,
 ): string {
   // Cursor's CSV aggregates requests, so its dollars are honest estimates.
-  const est = providerId === "cursor" ? " · estimated" : "";
   const text =
     w.tokens > 0 || w.cost > 0.005
-      ? `${fmtMoney(w.cost)} · ${fmtTokens(w.tokens)} tokens${est}`
-      : "No data";
+      ? providerId === "cursor"
+        ? t("card.tokensEst", { cost: fmtMoney(w.cost), n: fmtTokens(w.tokens) })
+        : t("card.tokensPlain", { cost: fmtMoney(w.cost), n: fmtTokens(w.tokens) })
+      : t("card.noData");
   const warn = key === "last30" ? unpricedWarn(sp) : "";
   return `
     <div class="metric-text spend-row" data-spend="${providerId}|${key}">
-      <span>${label} ${warn}</span>
+      <span>${escapeHtml(displayMetricLabel(label))} ${warn}</span>
       <span class="detail">${text}</span>
     </div>`;
 }
@@ -967,29 +986,29 @@ function renderCard(s: Snapshot): string {
     if (onDemandHtml.trim()) {
       const anim = L.expanded && animateExpandId === s.id ? " anim" : "";
       caret = `
-        <button class="card-caret" data-caret="${s.id}" title="${L.expanded ? "Show less" : "Show more"}">${L.expanded ? "⌃" : "⌄"}</button>
+        <button class="card-caret" data-caret="${s.id}" title="${L.expanded ? t("card.showLess") : t("card.showMore")}">${L.expanded ? "⌃" : "⌄"}</button>
         ${L.expanded ? `<div class="on-demand${anim}">${onDemandHtml}</div>` : ""}`;
     }
   } else {
-    body = `<p class="placeholder">${escapeHtml(s.error ?? "Not connected")}</p>`;
+    body = `<p class="placeholder">${escapeHtml(s.error ?? t("card.notConnected"))}</p>`;
   }
 
   const stale = s.stale
-    ? `<span class="stale" title="${escapeHtml(staleHelp(s))}">⚠ Outdated</span>`
+    ? `<span class="stale" title="${escapeHtml(staleHelp(s))}">${escapeHtml(t("card.outdated"))}</span>`
     : "";
   const links = (PROVIDER_LINKS[s.id] ?? PROVIDER_LINKS[providerFamily(s.id)] ?? [])
     .filter((l) => l.label !== "API" || s.metrics.some((m) => m.label === "API"))
-    .map((l) => `<button class="quick-link" data-link="${escapeHtml(l.url)}">${escapeHtml(l.label)}</button>`)
+    .map((l) => `<button class="quick-link" data-link="${escapeHtml(l.url)}">${escapeHtml(displayLinkLabel(l.label))}</button>`)
     .join("<span class='quick-sep'>·</span>");
   const linksRow = links ? `<div class="quick-links">${links}</div>` : "";
   const share =
     s.status === "ok"
-      ? `<button class="share-btn" data-share="${s.id}" title="Copy card as image">⧉</button>`
+      ? `<button class="share-btn" data-share="${s.id}" title="${escapeHtml(t("card.share"))}">⧉</button>`
       : "";
   return `
     <article class="provider${muted}" data-provider="${s.id}">
       <div class="provider-head">
-        <span class="drag-grip" title="Drag to reorder">⠿</span>
+        <span class="drag-grip" title="${escapeHtml(t("card.drag"))}">⠿</span>
         <span class="provider-name">${escapeHtml(s.name)}</span>
         ${plan}
         ${stale}
@@ -1070,7 +1089,7 @@ function donutEntries(tab: SpendTab): DonutEntry[] {
   const others: DonutEntry = {
     s: {
       id: OTHERS_ID,
-      name: "Others",
+      name: t("spend.others"),
     } as ProviderSpend,
     w: {
       cost: small.reduce((sum, e) => sum + e.w.cost, 0),
@@ -1108,11 +1127,11 @@ function spendCenter(entries: DonutEntry[]): { primary: string; sub: string; exa
     return { primary: fmtRate(rate), sub: "$/MTok", exact: `${fmtRate(rate)}/MTok average` };
   }
   if (config.spendMetric === "tokens") {
-    const t = entries.reduce((s, e) => s + e.w.tokens, 0);
-    return { primary: fmtTokens(t), sub: "tokens", exact: `${fmtTokens(t)} tokens` };
+    const tokens = entries.reduce((s, e) => s + e.w.tokens, 0);
+    return { primary: fmtTokens(tokens), sub: t("spend.centerTokens"), exact: t("card.tokens", { n: fmtTokens(tokens) }) };
   }
   const c = entries.reduce((s, e) => s + e.w.cost, 0);
-  return { primary: fmtMoney(c), sub: "dollars", exact: `$${c.toFixed(2)}` };
+  return { primary: fmtMoney(c), sub: t("spend.metric.cost"), exact: `$${c.toFixed(2)}` };
 }
 
 /// The metric a click (or right-click, reversed) moves to next — the Mac
@@ -1123,7 +1142,7 @@ function nextSpendMetric(back: boolean): "cost" | "tokens" | "mtok" {
   return order[(i + (back ? order.length - 1 : 1)) % order.length];
 }
 
-const METRIC_NAMES = { cost: "dollars", mtok: "cost per MTok", tokens: "tokens" } as const;
+const METRIC_NAMES = { cost: "spend.metric.cost", mtok: "spend.metric.mtok", tokens: "spend.metric.tokens" } as const;
 
 function fmtSpendVal(w: SpendWindow): string {
   if (config.spendMetric === "tokens") return fmtTokens(w.tokens);
@@ -1210,7 +1229,7 @@ function donutPop(g: { a0: number; a1: number }): { tx: string; ty: string } {
 function othersBreakdown(e: DonutEntry): string {
   if (!e.parts) return "";
   return (
-    `Under $${e.foldLimit ?? 1} each:\n` +
+    `${t("spend.underEach", { limit: e.foldLimit ?? 1 })}\n` +
     e.parts.map((p) => `${p.name}  ${fmtSpendVal(p.w)}`).join("\n")
   );
 }
@@ -1289,7 +1308,10 @@ function switchSpendTab(tab: SpendTab): void {
   });
   const wrap = card.querySelector<HTMLElement>(".donut-wrap");
   if (wrap) {
-    wrap.title = `${center.exact} — computed locally from session logs. Click to show ${METRIC_NAMES[nextSpendMetric(false)]}.`;
+    wrap.title = t("spend.clickTip", {
+      exact: center.exact,
+      next: t(`spend.metric.${nextSpendMetric(false)}`),
+    });
   }
 }
 
@@ -1299,13 +1321,11 @@ function renderTotalSpend(): string {
   if (lastSpend.length === 0) {
     // Quiet state instead of a missing card — on a fresh PC the donut only
     // appears after a CLI (Claude Code, Codex, Grok…) has logged some usage.
-    const note = spendLoaded
-      ? "No spend data yet — appears once Claude Code, Codex, or another CLI logs some usage on this PC."
-      : "Scanning session logs…";
+    const note = spendLoaded ? t("spend.emptyFirst") : t("spend.scanning");
     return `
       <article class="provider total-spend">
         <div class="provider-head">
-          <span class="provider-name">Total Spend</span>
+          <span class="provider-name">${escapeHtml(t("spend.title"))}</span>
         </div>
         <div class="card-panel"><p class="placeholder" style="margin:4px 0">${note}</p></div>
       </article>`;
@@ -1330,7 +1350,10 @@ function renderTotalSpend(): string {
     `<button class="tab${spendTab === id ? " active" : ""}" data-tab="${id}">${label}</button>`;
 
   const center = spendCenter(entries);
-  const exact = `${center.exact} — computed locally from session logs. Click to show ${METRIC_NAMES[nextSpendMetric(false)]}.`;
+  const exact = t("spend.clickTip", {
+    exact: center.exact,
+    next: t(METRIC_NAMES[nextSpendMetric(false)]),
+  });
   // An empty window still draws the ring — a zeroed track with $0.00 in the
   // center — so the card doesn't collapse to bare text between periods.
   const body = entries.length
@@ -1344,27 +1367,27 @@ function renderTotalSpend(): string {
         <div class="legend">${legend}</div>
       </div>`
     : `
-      <div class="donut-wrap donut-empty" title="No spend recorded in this period.">
+      <div class="donut-wrap donut-empty" title="${escapeHtml(t("spend.emptyPeriodTip"))}">
         <svg width="96" height="96" viewBox="0 0 96 96">
           <path class="seg donut-zero" data-full="1" fill-rule="evenodd" d="${sectorPath(0, TAU)}"/>
           <text class="donut-total" x="48" y="50" text-anchor="middle" font-size="14" font-weight="600">${center.primary}</text>
           <text class="donut-sub" x="48" y="62" text-anchor="middle" font-size="8">${center.sub}</text>
         </svg>
-        <div class="legend"><p class="placeholder" style="margin:0">No spend in this period.</p></div>
+        <div class="legend"><p class="placeholder" style="margin:0">${escapeHtml(t("spend.emptyPeriod"))}</p></div>
       </div>`;
 
   const contributors = lastSpend.map((s) => s.name).join(", ");
   return `
     <article class="provider total-spend">
       <div class="provider-head">
-        <span class="provider-name">Total Spend</span>
-        <span class="info" title="Fed by: ${escapeHtml(contributors)}. All figures are local estimates from each tool's own logs.">&#9432;</span>
+        <span class="provider-name">${escapeHtml(t("spend.title"))}</span>
+        <span class="info" title="${escapeHtml(t("spend.info", { names: contributors }))}">&#9432;</span>
         <span class="spacer"></span>
-        <button class="share-btn" data-share="__total__" title="Copy card as image">⧉</button>
+        <button class="share-btn" data-share="__total__" title="${escapeHtml(t("card.share"))}">⧉</button>
       </div>
       <div class="card-panel">
         <div class="tabs">
-          ${tab("today", "Today")}${tab("yesterday", "Yesterday")}${tab("last30", "30 Days")}
+          ${tab("today", t("spend.today"))}${tab("yesterday", t("spend.yesterday"))}${tab("last30", t("spend.days30"))}
         </div>
         ${body}
       </div>
@@ -1385,24 +1408,25 @@ function renderBuildInfo(): void {
   if (!el) return;
   if (updateVersion) {
     if (document.querySelector("#update-btn")) return;
+    const version = updateVersion;
     const btn = document.createElement("button");
     btn.id = "update-btn";
-    btn.textContent = `⬆ Update to v${updateVersion}`;
+    btn.textContent = t("update.to", { version });
     btn.addEventListener("click", () => {
-      btn.textContent = "Installing…";
+      btn.textContent = t("update.installing");
       btn.disabled = true;
       // On success the app restarts, so only the failure path matters:
       // re-enable the button and surface the reason.
       invoke("install_update").catch((err) => {
-        btn.textContent = `⬆ Update to v${updateVersion} — retry`;
+        btn.textContent = t("update.retry", { version });
         btn.disabled = false;
         const status = document.querySelector("#status");
-        if (status) status.textContent = `Update failed: ${err}`;
+        if (status) status.textContent = t("footer.updateFailed", { err: String(err) });
       });
     });
     el.replaceChildren(btn);
   } else {
-    el.textContent = checkingUpdate ? "Checking for updates…" : buildText;
+    el.textContent = checkingUpdate ? t("update.check") : buildText;
   }
 }
 
@@ -1456,7 +1480,7 @@ function appConfirm(opts: {
         <h3>${escapeHtml(opts.title)}</h3>
         <p>${escapeHtml(opts.message)}</p>
         <div id="confirm-actions">
-          <button id="confirm-cancel" type="button">Cancel</button>
+          <button id="confirm-cancel" type="button">${escapeHtml(t("dialog.cancel"))}</button>
           <button id="confirm-ok" type="button" class="${opts.danger ? "danger" : ""}">${escapeHtml(opts.confirmLabel)}</button>
         </div>
       </div>`;
@@ -1582,7 +1606,7 @@ function showChangelogDialog(title: string, sections: ChangelogSection[]): void 
       <h3>${escapeHtml(title)}</h3>
       <div id="whatsnew-body">${list}</div>
       <div id="whatsnew-actions">
-        <button id="whatsnew-ok" type="button">Got it</button>
+        <button id="whatsnew-ok" type="button">${escapeHtml(t("dialog.gotIt"))}</button>
       </div>
     </div>`;
   const done = () => {
@@ -1725,7 +1749,7 @@ async function shareCard(id: string): Promise<void> {
       // literal "]]>" inside CSS would end the section early, so split it.
       `<style><![CDATA[${css.split("]]>").join("]]]]><![CDATA[>")}]]></style>` +
       new XMLSerializer().serializeToString(clone) +
-      `<div id="snap-foot"><img src="${paneIcon}" alt="" /><span>Monitor Your AI Subscriptions with Pane</span></div>` +
+      `<div id="snap-foot"><img src="${paneIcon}" alt="" /><span>${escapeHtml(t("share.tagline"))}</span></div>` +
       `</div></foreignObject></svg>`;
 
     const img = new Image();
@@ -1741,9 +1765,9 @@ async function shareCard(id: string): Promise<void> {
     const dataUrl = canvas.toDataURL("image/png");
     const pngBase64 = dataUrl.slice(dataUrl.indexOf(",") + 1);
     await invoke("copy_share_image", { pngBase64 });
-    status.textContent = "Copied to clipboard";
+    status.textContent = t("footer.copied");
   } catch (err) {
-    status.textContent = `Share failed: ${err}`;
+    status.textContent = t("footer.shareFailed", { err: String(err) });
   }
 }
 
@@ -2074,10 +2098,10 @@ function renderCustomize(): string {
         const visible = !L.hidden.includes(key);
         return `
           <div class="cust-row" draggable="true" data-cust-row="${id}|${escapeHtml(key)}">
-            <span class="grip" title="Drag to reorder">⠿</span>
+            <span class="grip" title="${escapeHtml(t("customize.dragRows"))}">⠿</span>
             <label class="toggle mini"><input type="checkbox" data-visible="${id}|${escapeHtml(key)}"${visible ? " checked" : ""} /></label>
-            <span class="cust-label">${escapeHtml(key)}</span>
-            ${starrable ? `<button class="star${starred ? " on" : ""}" data-star="${id}|${escapeHtml(key)}" title="Star for tray strip (max 2)">★</button>` : ""}
+            <span class="cust-label">${escapeHtml(displayMetricLabel(key))}</span>
+            ${starrable ? `<button class="star${starred ? " on" : ""}" data-star="${id}|${escapeHtml(key)}" title="${escapeHtml(t("customize.star"))}">★</button>` : ""}
           </div>`;
       };
 
@@ -2085,22 +2109,22 @@ function renderCustomize(): string {
       const onDemand = L.metricOrder.filter((k) => L.onDemand.includes(k));
       const rows = L.metricOrder.length
         ? `${always.map(row).join("")}
-           <div class="cust-divider" data-divider="${id}">On Demand — behind the card's caret</div>
+           <div class="cust-divider" data-divider="${id}">${escapeHtml(t("customize.onDemand"))}</div>
            ${onDemand.map(row).join("")}`
-        : `<p class="placeholder">No data yet — refresh with this provider enabled first.</p>`;
+        : `<p class="placeholder">${escapeHtml(t("customize.noData"))}</p>`;
 
       const open = custExpanded.has(id);
       return `
         <article class="provider customize-block${enabled ? "" : " muted"}${open ? " open" : ""}" data-cust-provider="${id}" draggable="true">
           <div class="provider-head">
-            <span class="grip" title="Drag to reorder providers">⠿</span>
-            <button class="cust-expand" data-cust-expand="${id}" title="${open ? "Collapse" : "Expand"}">
+            <span class="grip" title="${escapeHtml(t("customize.dragProviders"))}">⠿</span>
+            <button class="cust-expand" data-cust-expand="${id}" title="${open ? t("customize.collapse") : t("customize.expand")}">
               <span class="provider-name">${escapeHtml(name)}</span>
               <span class="chev">⌄</span>
             </button>
             <span class="spacer"></span>
-            <button class="mini-btn" data-reset="${id}" title="Restore this card's default layout — does not touch your usage limits">Reset layout</button>
-            <label class="toggle mini" title="Enable provider"><input type="checkbox" data-enable="${id}"${enabled ? " checked" : ""} /></label>
+            <button class="mini-btn" data-reset="${id}" title="${escapeHtml(t("customize.resetLayoutTip"))}">${escapeHtml(t("customize.resetLayout"))}</button>
+            <label class="toggle mini" title="${escapeHtml(t("customize.enable"))}"><input type="checkbox" data-enable="${id}"${enabled ? " checked" : ""} /></label>
           </div>
           <div class="acc-body"><div class="acc-inner cust-rows">${rows}</div></div>
         </article>`;
@@ -2110,9 +2134,9 @@ function renderCustomize(): string {
   const starCount = Object.values(config.layout?.providers ?? {}).reduce((n, l) => n + l.starred.length, 0);
   return `
     <div class="customize-bar glass-bar">
-      <button class="dock-btn" data-customize-close>← Done</button>
-      <span class="detail">${starCount} starred · drag ⠿ to reorder</span>
-      <button class="dock-btn danger" data-reset-all title="Restore all cards' default layouts — does not touch your usage limits">↺ Reset all</button>
+      <button class="dock-btn" data-customize-close>${escapeHtml(t("customize.done"))}</button>
+      <span class="detail">${escapeHtml(t("customize.starred", { n: starCount }))}</span>
+      <button class="dock-btn danger" data-reset-all title="${escapeHtml(t("customize.resetAllTip"))}">${escapeHtml(t("customize.resetAll"))}</button>
     </div>
     ${blocks}`;
 }
@@ -2126,15 +2150,14 @@ function renderWelcome(): string {
   return `
     <article class="provider welcome-card">
       <div class="provider-head">
-        <span class="provider-name">Welcome 👋</span>
+        <span class="provider-name">${escapeHtml(t("welcome.title"))}</span>
         <span class="spacer"></span>
-        <button class="share-btn welcome-close" data-welcome-close title="Dismiss">✕</button>
+        <button class="share-btn welcome-close" data-welcome-close title="${escapeHtml(t("welcome.dismiss"))}">✕</button>
       </div>
       <p class="placeholder" style="margin:2px 0 8px">
-        You're set up with the AI tools found on this PC. Arrange cards, star
-        tray metrics, and hide rows in Customize.
+        ${escapeHtml(t("welcome.body"))}
       </p>
-      <button class="mini-btn" data-welcome-customize>Open Customize</button>
+      <button class="mini-btn" data-welcome-customize>${escapeHtml(t("welcome.open"))}</button>
     </article>`;
 }
 
@@ -2258,16 +2281,16 @@ function showTrendTip(el: HTMLElement): void {
   const tokens = spend.trend[i] ?? 0;
   const total = spend.trend.reduce((a, b) => a + b, 0);
   const share = total > 0 ? (tokens / total) * 100 : 0;
-  const date = new Date(Date.now() - (29 - i) * 86_400_000).toLocaleDateString([], {
+  const date = new Date(Date.now() - (29 - i) * 86_400_000).toLocaleDateString(localeTag(), {
     weekday: "short",
     month: "short",
     day: "numeric",
   });
   tip.innerHTML = `
     <div class="tip-line"><span class="tip-name">${escapeHtml(date)}</span><span>${
-      tokens > 0 ? `${fmtTokens(tokens)} tokens` : "No usage"
+      tokens > 0 ? escapeHtml(t("card.tokens", { n: fmtTokens(tokens) })) : escapeHtml(t("spend.noUsage"))
     }</span></div>
-    ${tokens > 0 ? `<div class="tip-line detail"><span>${share < 1 ? "<1" : share.toFixed(0)}% of the last 30 days</span></div>` : ""}`;
+    ${tokens > 0 ? `<div class="tip-line detail"><span>${escapeHtml(t("spend.of30", { n: share < 1 ? "<1" : share.toFixed(0) }))}</span></div>` : ""}`;
 
   const rect = el.getBoundingClientRect();
   tip.hidden = false;
@@ -2284,7 +2307,7 @@ function showModelTip(row: HTMLElement): void {
   if (!w) return;
 
   if (!w.models.length) {
-    tip.innerHTML = `<p class="placeholder">No model data for this period.</p>`;
+    tip.innerHTML = `<p class="placeholder">${escapeHtml(t("spend.noModelData"))}</p>`;
   } else {
     tip.innerHTML = w.models
       .map((m) => {
@@ -2292,7 +2315,7 @@ function showModelTip(row: HTMLElement): void {
         return `
           <div class="tip-model">
             <div class="tip-line"><span class="tip-name">${escapeHtml(m.model)}</span><span>${fmtMoney(m.cost)}</span></div>
-            <div class="tip-line detail"><span>${share.toFixed(0)}%</span><span>${fmtTokens(m.tokens)} tokens</span></div>
+            <div class="tip-line detail"><span>${share.toFixed(0)}%</span><span>${escapeHtml(t("card.tokens", { n: fmtTokens(m.tokens) }))}</span></div>
             <div class="tip-bar"><div style="width:${Math.max(2, share)}%"></div></div>
           </div>`;
       })
@@ -2372,7 +2395,7 @@ async function refresh(force = false): Promise<void> {
       refreshQueued = true;
       // The save message (or a stale "Updated") would otherwise sit on
       // the footer until the in-flight fetch ends, and Refresh looks dead.
-      document.querySelector("#status")!.textContent = "Refreshing…";
+      document.querySelector("#status")!.textContent = t("footer.refreshing");
     }
     return;
   }
@@ -2380,7 +2403,7 @@ async function refresh(force = false): Promise<void> {
   setRefreshLock(true);
   const myGen = ++refreshGeneration;
   const status = document.querySelector("#status")!;
-  status.textContent = "Refreshing…";
+  status.textContent = t("footer.refreshing");
   // The spend scan re-reads every session log on a cold start and can take
   // tens of seconds — it must never hold up the usage cards' first paint,
   // or the Refresh button (the lock used to stay on until spend finished).
@@ -2473,10 +2496,10 @@ async function refresh(force = false): Promise<void> {
     renderIfVisible();
     if (firstData && !customizeOpen && !document.hidden) playReveal();
     void updateTrayStrip();
-    const time = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-    status.textContent = `Updated ${time}`;
+    const time = new Date().toLocaleTimeString(localeTag(), { hour: "2-digit", minute: "2-digit" });
+    status.textContent = t("footer.updated", { time });
   } catch (err) {
-    status.textContent = `Refresh failed: ${err}`;
+    status.textContent = t("footer.refreshFailed", { err: String(err) });
   } finally {
     setRefreshLock(false);
     if (refreshQueued) {
@@ -2561,7 +2584,12 @@ async function updateTrayStrip(): Promise<void> {
     if (!logo) continue;
     const values = starredMetrics.map((m) => Math.round(100 - clampPercent(m.used_percent ?? 0)));
     const tooltip = `${snap.name}\n${starredMetrics
-      .map((m) => `${m.label}: ${Math.round(100 - clampPercent(m.used_percent ?? 0))}% left`)
+      .map((m) =>
+        t("tray.left", {
+          label: displayMetricLabel(m.label),
+          n: Math.round(100 - clampPercent(m.used_percent ?? 0)),
+        }),
+      )
       .join("\n")}`;
     entries.push({ id, logo, values, tooltip });
   }
@@ -2620,10 +2648,9 @@ function handleCustomizeClick(target: HTMLElement): boolean {
   const resetAll = target.closest("[data-reset-all]");
   if (resetAll) {
     void appConfirm({
-      title: "Reset all layouts?",
-      message:
-        "Order, stars, and hidden rows go back to defaults, and installed AI tools are re-detected. Your usage limits are not affected.",
-      confirmLabel: "Reset all",
+      title: t("customize.resetTitle"),
+      message: t("customize.resetBody"),
+      confirmLabel: t("customize.resetConfirm"),
       danger: true,
     }).then((ok) => {
       if (!ok) return;
@@ -2657,7 +2684,7 @@ function handleCustomizeClick(target: HTMLElement): boolean {
     if (L.starred.includes(key)) {
       L.starred = L.starred.filter((k) => k !== key);
     } else if (L.starred.length >= 2) {
-      document.querySelector("#status")!.textContent = "Up to 2 stars per provider";
+      document.querySelector("#status")!.textContent = t("footer.twoStars");
       return true;
     } else {
       L.starred.push(key);
@@ -2840,30 +2867,60 @@ async function saveApiKey(provider: string): Promise<void> {
       }).catch(() => {});
     }
     const name = providerDisplayName(provider);
-    status.textContent = `${name} key saved`;
+    status.textContent = t("footer.keySaved", { name });
     await refresh(true);
   } catch (err) {
     recentlyKeyed.delete(provider);
-    status.textContent = `Could not save key: ${err}`;
+    status.textContent = t("footer.keySaveFailed", { err: String(err) });
   }
 }
 
 function populatePinnedOptions(): void {
   const select = document.querySelector<HTMLSelectElement>("#pinned")!;
   const current = config.pinned ? `${config.pinned.provider}::${config.pinned.label}` : "";
-  select.replaceChildren(new Option("Auto (first live metric)", ""));
+  select.replaceChildren(new Option(t("settings.pinAuto"), ""));
   for (const s of lastSnapshots) {
     if (s.status !== "ok") continue;
     for (const m of s.metrics) {
       if (m.kind !== "progress") continue;
       const value = `${s.id}::${m.label}`;
-      select.add(new Option(`${s.name} — ${m.label}`, value, false, value === current));
+      select.add(
+        new Option(
+          t("settings.pinOption", { name: s.name, label: displayMetricLabel(m.label) }),
+          value,
+          false,
+          value === current,
+        ),
+      );
     }
   }
 }
 
+function applyLocale(): void {
+  config.locale = normalizeLocalePref(config.locale);
+  setActiveLocale(resolveLocale(config.locale));
+  applyStaticI18n();
+  const status = document.querySelector("#status");
+  if (status) {
+    if (lastSnapshots.length) {
+      const time = new Date().toLocaleTimeString(localeTag(), {
+        hour: "2-digit",
+        minute: "2-digit",
+      });
+      status.textContent = t("footer.updated", { time });
+    } else {
+      status.textContent = t("footer.starting");
+    }
+  }
+  if (lastSnapshots.length) renderIfVisible();
+  populatePinnedOptions();
+  renderBuildInfo();
+}
+
 async function initSettings(): Promise<void> {
   config = await invoke<Config>("get_config");
+  config.locale = normalizeLocalePref(config.locale);
+  applyLocale();
   if (["today", "yesterday", "last30"].includes(config.spendTab)) {
     spendTab = config.spendTab;
   }
@@ -2880,7 +2937,7 @@ async function initSettings(): Promise<void> {
   autostart.checked = await invoke<boolean>("get_autostart");
   autostart.addEventListener("change", () => {
     void invoke("set_autostart", { enabled: autostart.checked }).catch((err) => {
-      document.querySelector("#status")!.textContent = `Autostart failed: ${err}`;
+      document.querySelector("#status")!.textContent = t("footer.autostartFailed", { err: String(err) });
       autostart.checked = !autostart.checked;
     });
   });
@@ -2895,6 +2952,16 @@ async function initSettings(): Promise<void> {
   timeFormat.value = config.timeFormat;
   timeFormat.addEventListener("change", () => {
     void patchConfig({ timeFormat: timeFormat.value as Config["timeFormat"] }).then(renderAll);
+  });
+
+  const localeSel = document.querySelector<HTMLSelectElement>("#locale")!;
+  localeSel.value = config.locale;
+  localeSel.addEventListener("change", () => {
+    const next = normalizeLocalePref(localeSel.value);
+    void patchConfig({ locale: next }).then(() => {
+      applyLocale();
+      void updateTrayStrip();
+    });
   });
 
   const notifyToggles: [string, keyof Config][] = [
@@ -2964,7 +3031,7 @@ async function initSettings(): Promise<void> {
     try {
       await invoke("set_shortcut", { shortcut: shortcut.value });
       await patchConfig({ shortcut: shortcut.value });
-      status.textContent = shortcut.value.trim() ? "Shortcut saved" : "Shortcut cleared";
+      status.textContent = shortcut.value.trim() ? t("footer.shortcutSaved") : t("footer.shortcutCleared");
     } catch (err) {
       status.textContent = `${err}`;
     }
@@ -2977,7 +3044,7 @@ async function initSettings(): Promise<void> {
   const saveProxy = () => {
     void patchConfig({ proxy: { enabled: proxyEnabled.checked, url: proxyUrl.value.trim() } }).then(
       () => {
-        document.querySelector("#status")!.textContent = "Proxy saved — takes effect after restart";
+        document.querySelector("#status")!.textContent = t("footer.proxySaved");
       },
     );
   };
@@ -2996,10 +3063,9 @@ async function initSettings(): Promise<void> {
 /// "settings"; What's-new shouldn't pop again).
 async function resetAllSettings(): Promise<void> {
   const ok = await appConfirm({
-    title: "Reset all settings?",
-    message:
-      "Theme, density, notifications, shortcut, proxy, pacing, tray stars, and card layouts go back to defaults. Installed tools are re-detected. API keys and usage history stay. A proxy change still needs a restart.",
-    confirmLabel: "Reset all",
+    title: t("settings.resetTitle"),
+    message: t("settings.resetBody"),
+    confirmLabel: t("settings.resetConfirm"),
     danger: true,
   });
   if (!ok) return;
@@ -3037,8 +3103,10 @@ async function resetAllSettings(): Promise<void> {
     showTotalSpend: true,
     reduceAnimations: false,
     hideUsageWhileSharing: false,
+    locale: "auto",
   });
   spendTab = "today";
+  applyLocale();
   syncSettingsControls();
   scheduleAutoRefresh();
   applyAppearance();
@@ -3065,6 +3133,7 @@ function syncSettingsControls(): void {
   setNum("#interval", String(config.refreshMinutes));
   setCheck("#pacing", config.pacingAlways);
   setSelect("#timeformat", config.timeFormat);
+  setSelect("#locale", config.locale);
   setCheck("#notify-almost", config.notifyAlmostOut);
   setCheck("#notify-close", config.notifyCuttingClose);
   setCheck("#notify-runout", config.notifyWillRunOut);
@@ -3145,7 +3214,7 @@ window.addEventListener("DOMContentLoaded", () => {
   document.querySelector("#settings-close")!.addEventListener("click", () => setSettings(false));
   document.querySelector("#changelog-btn")!.addEventListener("click", () => {
     setSettings(false);
-    showChangelogDialog("Changelog", parseChangelog());
+    showChangelogDialog(t("dialog.changelog"), parseChangelog());
   });
   document.querySelectorAll<HTMLElement>(".acc-head").forEach((head) => {
     head.addEventListener("click", () => head.parentElement!.classList.toggle("open"));
@@ -3253,7 +3322,7 @@ window.addEventListener("DOMContentLoaded", () => {
     const link = target.closest<HTMLElement>("[data-link]");
     if (link) {
       void invoke("open_link", { url: link.dataset.link }).catch((err) => {
-        document.querySelector("#status")!.textContent = `Could not open link: ${err}`;
+        document.querySelector("#status")!.textContent = t("footer.openLinkFailed", { err: String(err) });
       });
       return;
     }
@@ -3287,21 +3356,20 @@ window.addEventListener("DOMContentLoaded", () => {
       const providerId =
         redeem.closest<HTMLElement>("article.provider")?.dataset.provider ?? "codex";
       void appConfirm({
-        title: "Use a reset credit?",
-        message:
-          "This resets your Codex rate-limit windows immediately and cannot be undone. The refreshed windows can take a couple of minutes to appear.",
-        confirmLabel: "Use credit",
+        title: t("redeem.title"),
+        message: t("redeem.body"),
+        confirmLabel: t("redeem.confirm"),
       }).then((ok) => {
         if (!ok) return;
         const status = document.querySelector("#status")!;
-        status.textContent = "Redeeming reset credit…";
+        status.textContent = t("footer.redeeming");
         void invoke<string>("codex_redeem_credit", { creditId, providerId })
           .then((msg) => {
             status.textContent = msg;
             void refresh(true);
           })
           .catch((err) => {
-            status.textContent = `Redeem failed: ${err}`;
+            status.textContent = t("footer.redeemFailed", { err: String(err) });
           });
       });
       return;
@@ -3389,7 +3457,7 @@ window.addEventListener("DOMContentLoaded", () => {
     dismissWhatsNew?.();
     // A fresh update's notes present on the first open after launch.
     if (pendingWhatsNew) {
-      showChangelogDialog(`What's new in v${appVersion}`, pendingWhatsNew);
+      showChangelogDialog(t("dialog.whatsNew", { version: appVersion }), pendingWhatsNew);
       pendingWhatsNew = null;
     }
     // Replay any renders skipped while hidden, before the reveal plays.

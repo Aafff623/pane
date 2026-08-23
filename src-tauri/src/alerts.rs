@@ -120,22 +120,40 @@ pub fn evaluate(snapshots: &[Snapshot], cfg: &Value) -> Vec<Alert> {
             entry.seen = true;
 
             if !baseline {
-                let name = format!("{} {}", snapshot.name, metric.label);
+                let shown = crate::i18n::metric_label(cfg, &metric.label);
+                let name = format!("{} {}", snapshot.name, shown);
+                let zh = crate::i18n::is_zh(cfg);
                 if want_runout && run_out_now && !entry.run_out {
                     alerts.push(Alert {
-                        title: "Will Run Out".into(),
-                        body: format!("{name} is on pace to hit its limit before the reset."),
+                        title: if zh { "将会用完".into() } else { "Will Run Out".into() },
+                        body: if zh {
+                            format!("{name} 按当前速度会在重置前用完。")
+                        } else {
+                            format!("{name} is on pace to hit its limit before the reset.")
+                        },
                     });
                 } else if want_close && close_now && !entry.close {
                     alerts.push(Alert {
-                        title: "Cutting It Close".into(),
-                        body: format!("{name} is on pace to finish with only ~{spare:.0}% spare."),
+                        title: if zh {
+                            "余量紧张".into()
+                        } else {
+                            "Cutting It Close".into()
+                        },
+                        body: if zh {
+                            format!("{name} 按当前速度重置时大约只剩 {spare:.0}%。")
+                        } else {
+                            format!("{name} is on pace to finish with only ~{spare:.0}% spare.")
+                        },
                     });
                 }
                 if want_almost && almost_now && !entry.almost_out {
                     alerts.push(Alert {
-                        title: "Almost Out".into(),
-                        body: format!("{name} is under 10% remaining ({left:.0}% left)."),
+                        title: if zh { "即将用完".into() } else { "Almost Out".into() },
+                        body: if zh {
+                            format!("{name} 剩余不足 10%（还剩 {left:.0}%）。")
+                        } else {
+                            format!("{name} is under 10% remaining ({left:.0}% left).")
+                        },
                     });
                 }
             }

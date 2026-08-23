@@ -87,128 +87,136 @@
       <div id="side-zone">
         <aside class="sidebar">
           <span id="app-logo" class="app-logo" title="Pane"></span>
-          <nav id="trail" aria-label="Card navigation"></nav>
+          <nav id="trail" aria-label="Card navigation" data-i18n-aria="sidebar.cards"></nav>
           <div class="sidebar-buttons">
-            <button id="theme-btn" title="Light / dark mode">&#9728;</button>
-            <button id="refresh" title="Refresh now">&#10227;</button>
-            <button id="customize-btn" title="Customize">&#9776;</button>
-            <button id="settings-btn" title="Settings">&#9881;</button>
+            <button id="theme-btn" title="Light / dark mode" data-i18n-title="sidebar.theme">&#9728;</button>
+            <button id="refresh" title="Refresh now" data-i18n-title="sidebar.refresh">&#10227;</button>
+            <button id="customize-btn" title="Customize" data-i18n-title="sidebar.customize">&#9776;</button>
+            <button id="settings-btn" title="Settings" data-i18n-title="sidebar.settings">&#9881;</button>
           </div>
         </aside>
       </div>
     </main>
 
     <!-- Customize: full-window panel sliding in from the left. -->
-    <aside id="drawer" aria-label="Customize">
+    <aside id="drawer" aria-label="Customize" data-i18n-aria="sidebar.customize">
       <div id="drawer-body"></div>
     </aside>
 
     <!-- Settings: full-window panel sliding in from the right. -->
-    <aside id="settings" aria-label="Settings">
+    <aside id="settings" aria-label="Settings" data-i18n-aria="settings.title">
       <div class="panel-head glass-bar">
-        <button class="mini-btn" id="settings-close">&#8592; Done</button>
-        <span class="panel-title">Settings</span>
+        <button class="mini-btn" id="settings-close" data-i18n="settings.done">&#8592; Done</button>
+        <span class="panel-title" data-i18n="settings.title">Settings</span>
       </div>
 
       <div class="acc-group open">
-        <button class="acc-head">General <span class="chev">&#8964;</span></button>
+        <button class="acc-head"><span data-i18n="settings.general">General</span> <span class="chev">&#8964;</span></button>
         <div class="acc-body"><div class="acc-inner">
           <div class="setting-row">
-            <label for="interval">Refresh every</label>
-            <input id="interval" type="number" min="1" max="120" value="5" /> <span class="unit">min</span>
+            <label for="locale" data-i18n="settings.language">Language</label>
+            <select id="locale">
+              <option value="auto" data-i18n="settings.langAuto">Auto</option>
+              <option value="en" data-i18n="settings.langEn">English</option>
+              <option value="zh" data-i18n="settings.langZh">中文</option>
+            </select>
           </div>
           <div class="setting-row">
-            <label class="toggle"><input id="autostart" type="checkbox" /> Start with Windows</label>
+            <label for="interval" data-i18n="settings.refreshEvery">Refresh every</label>
+            <input id="interval" type="number" min="1" max="120" value="5" /> <span class="unit" data-i18n="settings.min">min</span>
           </div>
           <div class="setting-row">
-            <label class="toggle"><input id="pacing" type="checkbox" /> Always show pacing</label>
+            <label class="toggle"><input id="autostart" type="checkbox" /> <span data-i18n="settings.startWithWindows">Start with Windows</span></label>
           </div>
           <div class="setting-row">
-            <label for="pinned">Tray icon shows</label>
+            <label class="toggle"><input id="pacing" type="checkbox" /> <span data-i18n="settings.pacing">Always show pacing</span></label>
+          </div>
+          <div class="setting-row">
+            <label for="pinned" data-i18n="settings.trayShows">Tray icon shows</label>
             <select id="pinned"></select>
           </div>
           <div class="setting-row">
-            <label for="timeformat">Time format</label>
+            <label for="timeformat" data-i18n="settings.timeFormat">Time format</label>
             <select id="timeformat">
-              <option value="auto">Auto</option>
-              <option value="12">12-hour</option>
-              <option value="24">24-hour</option>
+              <option value="auto" data-i18n="settings.timeAuto">Auto</option>
+              <option value="12" data-i18n="settings.time12">12-hour</option>
+              <option value="24" data-i18n="settings.time24">24-hour</option>
             </select>
           </div>
           <div class="setting-row">
-            <label for="appearance">Appearance</label>
+            <label for="appearance" data-i18n="settings.appearance">Appearance</label>
             <select id="appearance">
-              <option value="system">System</option>
-              <option value="light">Light</option>
-              <option value="dark">Dark</option>
+              <option value="system" data-i18n="settings.appearSystem">System</option>
+              <option value="light" data-i18n="settings.appearLight">Light</option>
+              <option value="dark" data-i18n="settings.appearDark">Dark</option>
             </select>
           </div>
           <div class="setting-row">
-            <label class="toggle"><input id="density" type="checkbox" /> Compact layout</label>
+            <label class="toggle"><input id="density" type="checkbox" /> <span data-i18n="settings.compact">Compact layout</span></label>
           </div>
           <div class="setting-row">
-            <label class="toggle" title="Turn off on slower PCs — replaces the glass refraction with a simple solid look"><input id="glass" type="checkbox" /> Liquid glass effects</label>
+            <label class="toggle" title="Turn off on slower PCs — replaces the glass refraction with a simple solid look" data-i18n-title="settings.glassTip"><input id="glass" type="checkbox" /> <span data-i18n="settings.glass">Liquid glass effects</span></label>
           </div>
           <div class="setting-row">
-            <label class="toggle" title="Skip card entrance motion and the day/night wipe. Windows' own 'Animation effects' setting is still respected."><input id="reduce-anim" type="checkbox" /> Reduce animations</label>
+            <label class="toggle" title="Skip card entrance motion and the day/night wipe. Windows' own 'Animation effects' setting is still respected." data-i18n-title="settings.reduceAnimTip"><input id="reduce-anim" type="checkbox" /> <span data-i18n="settings.reduceAnim">Reduce animations</span></label>
           </div>
           <div class="setting-row">
-            <label class="toggle"><input id="show-total-spend" type="checkbox" /> Show Total Spend card</label>
+            <label class="toggle"><input id="show-total-spend" type="checkbox" /> <span data-i18n="settings.showSpend">Show Total Spend card</span></label>
           </div>
           <div class="setting-row">
-            <label for="shortcut">Global shortcut</label>
-            <input id="shortcut" type="text" placeholder="e.g. Ctrl+Shift+U" spellcheck="false" />
+            <label for="shortcut" data-i18n="settings.shortcut">Global shortcut</label>
+            <input id="shortcut" type="text" placeholder="e.g. Ctrl+Shift+U" data-i18n-placeholder="settings.shortcutPh" spellcheck="false" />
           </div>
         </div></div>
       </div>
 
       <div class="acc-group">
-        <button class="acc-head">Notifications <span class="chev">&#8964;</span></button>
+        <button class="acc-head"><span data-i18n="settings.notifications">Notifications</span> <span class="chev">&#8964;</span></button>
         <div class="acc-body"><div class="acc-inner">
-          <p class="settings-note">
+          <p class="settings-note" data-i18n="settings.notifyNote">
             Windows toasts when a quota worsens — once per metric per reset period.
           </p>
           <div class="setting-row">
-            <label class="toggle"><input id="notify-almost" type="checkbox" /> Almost out (&lt;10% left)</label>
+            <label class="toggle"><input id="notify-almost" type="checkbox" /> <span data-i18n="settings.notifyAlmost">Almost out (&lt;10% left)</span></label>
           </div>
           <div class="setting-row">
-            <label class="toggle"><input id="notify-close" type="checkbox" /> Cutting it close</label>
+            <label class="toggle"><input id="notify-close" type="checkbox" /> <span data-i18n="settings.notifyClose">Cutting it close</span></label>
           </div>
           <div class="setting-row">
-            <label class="toggle"><input id="notify-runout" type="checkbox" /> Will run out</label>
+            <label class="toggle"><input id="notify-runout" type="checkbox" /> <span data-i18n="settings.notifyRunout">Will run out</span></label>
           </div>
         </div></div>
       </div>
 
       <div class="acc-group">
-        <button class="acc-head">Privacy <span class="chev">&#8964;</span></button>
+        <button class="acc-head"><span data-i18n="settings.privacy">Privacy</span> <span class="chev">&#8964;</span></button>
         <div class="acc-body"><div class="acc-inner">
-          <p class="settings-note">
+          <p class="settings-note" data-i18n="settings.privacyNote">
             One anonymous "alive today" ping and per-provider success/failure
             counts, once a day, under a random ID attached to nothing. No
             usage amounts, no spend, no IPs stored. Full details in
             docs/privacy.md.
           </p>
           <div class="setting-row">
-            <label class="toggle"><input id="telemetry" type="checkbox" /> Share anonymous usage statistics</label>
+            <label class="toggle"><input id="telemetry" type="checkbox" /> <span data-i18n="settings.telemetry">Share anonymous usage statistics</span></label>
           </div>
           <div class="setting-row">
-            <label class="toggle" title="During Presentation Settings, exclusive fullscreen, or remote control, tray percentages hide. The Pane icon and starred provider logos stay. A Teams/Zoom window share is not detected. Off by default."><input id="hide-while-sharing" type="checkbox" /> Hide tray numbers while screen sharing</label>
+            <label class="toggle" title="During Presentation Settings, exclusive fullscreen, or remote control, tray percentages hide. The Pane icon and starred provider logos stay. A Teams/Zoom window share is not detected. Off by default." data-i18n-title="settings.hideSharingTip"><input id="hide-while-sharing" type="checkbox" /> <span data-i18n="settings.hideSharing">Hide tray numbers while screen sharing</span></label>
           </div>
         </div></div>
       </div>
 
       <div class="acc-group">
-        <button class="acc-head">Network <span class="chev">&#8964;</span></button>
+        <button class="acc-head"><span data-i18n="settings.network">Network</span> <span class="chev">&#8964;</span></button>
         <div class="acc-body"><div class="acc-inner">
           <div class="setting-row">
-            <label class="toggle"><input id="proxy-enabled" type="checkbox" /> Use proxy</label>
+            <label class="toggle"><input id="proxy-enabled" type="checkbox" /> <span data-i18n="settings.useProxy">Use proxy</span></label>
           </div>
           <div class="setting-row">
-            <label for="proxy-url">Proxy URL</label>
+            <label for="proxy-url" data-i18n="settings.proxyUrl">Proxy URL</label>
             <input id="proxy-url" type="text" placeholder="socks5://host:1080" spellcheck="false" />
           </div>
-          <p class="settings-note">
+          <p class="settings-note" data-i18n="settings.networkNote">
             Applies after the app restarts. Local usage API always runs at
             http://127.0.0.1:6736/v1/usage
           </p>
@@ -216,85 +224,85 @@
       </div>
 
       <div class="acc-group">
-        <button class="acc-head">API keys <span class="chev">&#8964;</span></button>
+        <button class="acc-head"><span data-i18n="settings.apiKeys">API keys</span> <span class="chev">&#8964;</span></button>
         <div class="acc-body"><div class="acc-inner">
-          <p class="settings-note">
+          <p class="settings-note" data-i18n="settings.apiKeysNote">
             Stored only on this PC (%APPDATA%\Pane). Leave empty and save to remove.
           </p>
           <div class="key-row">
             <label for="key-openrouter">OpenRouter</label>
             <input id="key-openrouter" type="password" placeholder="sk-or-v1-…" />
-            <button data-save="openrouter">Save</button>
+            <button data-save="openrouter" data-i18n="settings.save">Save</button>
           </div>
           <div class="key-row">
             <label for="key-zai">Z.ai</label>
-            <input id="key-zai" type="password" placeholder="API key" />
-            <button data-save="zai">Save</button>
+            <input id="key-zai" type="password" placeholder="API key" data-i18n-placeholder="settings.keyPlaceholder" />
+            <button data-save="zai" data-i18n="settings.save">Save</button>
           </div>
           <div class="key-row">
             <label for="key-minimax">MiniMax</label>
-            <input id="key-minimax" type="password" placeholder="API key (auto-detected from CLI)" />
-            <button data-save="minimax">Save</button>
+            <input id="key-minimax" type="password" placeholder="API key (auto-detected from CLI)" data-i18n-placeholder="settings.keyPhMinimax" />
+            <button data-save="minimax" data-i18n="settings.save">Save</button>
           </div>
           <div class="key-row">
             <label for="key-deepseek">DeepSeek</label>
             <input id="key-deepseek" type="password" placeholder="sk-…" />
-            <button data-save="deepseek">Save</button>
+            <button data-save="deepseek" data-i18n="settings.save">Save</button>
           </div>
           <div class="key-row">
             <label for="key-moonshot">Kimi API</label>
-            <input id="key-moonshot" type="password" placeholder="sk-… (platform.kimi.ai key)" />
-            <button data-save="moonshot">Save</button>
+            <input id="key-moonshot" type="password" placeholder="sk-… (platform.kimi.ai key)" data-i18n-placeholder="settings.keyPhMoonshot" />
+            <button data-save="moonshot" data-i18n="settings.save">Save</button>
           </div>
           <div class="key-row">
             <label for="key-elevenlabs">ElevenLabs</label>
-            <input id="key-elevenlabs" type="password" placeholder="API key" />
-            <button data-save="elevenlabs">Save</button>
+            <input id="key-elevenlabs" type="password" placeholder="API key" data-i18n-placeholder="settings.keyPlaceholder" />
+            <button data-save="elevenlabs" data-i18n="settings.save">Save</button>
           </div>
           <div class="key-row">
             <label for="key-codebuff">Codebuff</label>
-            <input id="key-codebuff" type="password" placeholder="API key (auto-detected from CLI)" />
-            <button data-save="codebuff">Save</button>
+            <input id="key-codebuff" type="password" placeholder="API key (auto-detected from CLI)" data-i18n-placeholder="settings.keyPhCodebuff" />
+            <button data-save="codebuff" data-i18n="settings.save">Save</button>
           </div>
           <div class="key-row">
             <label for="key-kilo">Kilo</label>
-            <input id="key-kilo" type="password" placeholder="API key (auto-detected from CLI)" />
-            <button data-save="kilo">Save</button>
+            <input id="key-kilo" type="password" placeholder="API key (auto-detected from CLI)" data-i18n-placeholder="settings.keyPhKilo" />
+            <button data-save="kilo" data-i18n="settings.save">Save</button>
           </div>
           <div class="key-row">
             <label for="key-aihubmix">AihubMix</label>
-            <input id="key-aihubmix" type="password" placeholder="sk-… (auto-detected from OpenCode)" />
-            <button data-save="aihubmix">Save</button>
+            <input id="key-aihubmix" type="password" placeholder="sk-… (auto-detected from OpenCode)" data-i18n-placeholder="settings.keyPhAihubmix" />
+            <button data-save="aihubmix" data-i18n="settings.save">Save</button>
           </div>
           <div class="key-row">
             <label for="key-qwen">Qwen Code</label>
-            <input id="key-qwen" type="password" placeholder="sk-sp-… (auto-detected from env)" />
-            <button data-save="qwen">Save</button>
+            <input id="key-qwen" type="password" placeholder="sk-sp-… (auto-detected from env)" data-i18n-placeholder="settings.keyPhQwen" />
+            <button data-save="qwen" data-i18n="settings.save">Save</button>
           </div>
         </div></div>
       </div>
 
       <div class="acc-group">
-        <button class="acc-head">Advanced <span class="chev">&#8964;</span></button>
+        <button class="acc-head"><span data-i18n="settings.advanced">Advanced</span> <span class="chev">&#8964;</span></button>
         <div class="acc-body"><div class="acc-inner">
-          <p class="settings-note">
+          <p class="settings-note" data-i18n="settings.advancedNote">
             Restores every preference to its default and re-detects installed
             tools. API keys and your usage history stay. Proxy changes still
             need a restart.
           </p>
-          <button id="reset-all-settings" type="button" class="danger-btn">
+          <button id="reset-all-settings" type="button" class="danger-btn" data-i18n="settings.resetAll">
             Reset all settings
           </button>
         </div></div>
       </div>
 
-      <button id="changelog-btn" type="button">
+      <button id="changelog-btn" type="button" data-i18n="settings.changelog">
         What&#8217;s new &#183; Changelog
       </button>
 
-      <p class="settings-note" style="margin-top: 12px">
+      <p class="settings-note" style="margin-top: 12px" data-i18n="settings.customizeHint">
         Providers, row order, and tray-strip stars live in
-        <strong>Customize</strong> (&#9776; in the sidebar). Star up to 2
+        Customize (&#9776; in the sidebar). Star up to 2
         metrics per provider there to show them as tray icons.
       </p>
     </aside>
