@@ -115,6 +115,15 @@ fn config_with_defaults(mut cfg: Value) -> Value {
 }
 
 #[tauri::command]
+fn system_ui_locale() -> &'static str {
+    if i18n::system_locale_is_zh() {
+        "zh"
+    } else {
+        "en"
+    }
+}
+
+#[tauri::command]
 fn get_config() -> Value {
     config_with_defaults(load_config())
 }
@@ -1575,6 +1584,7 @@ pub fn run() {
             set_api_key,
             get_config,
             set_config,
+            system_ui_locale,
             get_autostart,
             set_autostart,
             update_tray_strip,

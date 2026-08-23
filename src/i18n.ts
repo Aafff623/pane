@@ -644,14 +644,20 @@ const METRIC_KEYS: Record<string, string> = {
 };
 
 let active: Locale = "en";
+/// Filled from Rust `system_ui_locale` so Auto matches tray/toasts.
+let systemLocale: Locale | null = null;
 
 export function detectSystemLocale(): Locale {
   return (navigator.language || "").toLowerCase().startsWith("zh") ? "zh" : "en";
 }
 
+export function setSystemLocale(locale: Locale): void {
+  systemLocale = locale;
+}
+
 export function resolveLocale(pref: string | undefined): Locale {
   if (pref === "zh" || pref === "en") return pref;
-  return detectSystemLocale();
+  return systemLocale ?? detectSystemLocale();
 }
 
 export function normalizeLocalePref(raw: unknown): LocalePref {

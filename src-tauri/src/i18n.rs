@@ -79,15 +79,17 @@ pub fn pct_left(cfg: &Value, name: &str, label: &str, left: f64) -> String {
     }
 }
 
-fn system_locale_is_zh() -> bool {
-    use windows::Win32::Globalization::GetUserDefaultLocaleName;
-    let mut buf = [0u16; 85];
-    let n = unsafe { GetUserDefaultLocaleName(&mut buf) };
-    if n <= 1 {
-        return false;
-    }
-    let s = String::from_utf16_lossy(&buf[..(n as usize - 1)]);
-    s.to_ascii_lowercase().starts_with("zh")
+/// Primary language 0x04 = Chinese (zh-CN, zh-TW, zh-HK, …).
+fn langid_is_zh(langid: u16) -> bool {
+    const LANG_CHINESE: u16 = 0x04;
+    langid & 0x03FF == LANG_CHINESE
+}
+
+/// Windows *display* language, not the regional-format locale.
+/// Same source the popover asks for via `system_ui_locale`.
+pub fn system_locale_is_zh() -> bool {
+    use windows::Win32::Globalization::GetUserDefaultUILanguage;
+    langid_is_zh(unsafe { GetUserDefaultUILanguage() })
 }
 
 #[cfg(test)]
@@ -107,5 +109,14 @@ mod tests {
         assert_eq!(metric_label(&zh, "Session"), "会话");
         assert_eq!(metric_label(&zh, "Sonnet weekly"), "Sonnet 每周");
         assert_eq!(metric_label(&json!({"locale": "en"}), "Session"), "Session");
+    }
+
+    #[test]
+    fn chinese_langids_match() {
+        assert!(langid_is_zh(0x0804)); // zh-CN
+        assert!(langid_is_zh(0x0404)); // zh-TW
+        assert!(langid_is_zh(0x0C04)); // zh-HK
+        assert!(!langid_is_zh(0x0409)); // en-US
+        assert!(!langid_is_zh(0x0411)); // ja
     }
 }

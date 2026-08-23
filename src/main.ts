@@ -10,6 +10,7 @@ import {
   normalizeLocalePref,
   resolveLocale,
   setActiveLocale,
+  setSystemLocale,
   t,
   type LocalePref,
 } from "./i18n";
@@ -2922,6 +2923,12 @@ function applyLocale(): void {
 async function initSettings(): Promise<void> {
   config = await invoke<Config>("get_config");
   config.locale = normalizeLocalePref(config.locale);
+  try {
+    const sys = await invoke<string>("system_ui_locale");
+    setSystemLocale(sys === "zh" ? "zh" : "en");
+  } catch {
+    // Dev / missing command — fall back to navigator.language.
+  }
   applyLocale();
   if (["today", "yesterday", "last30"].includes(config.spendTab)) {
     spendTab = config.spendTab;
