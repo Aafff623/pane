@@ -1,5 +1,6 @@
 mod alerts;
 mod httpapi;
+mod i18n;
 mod pricing;
 mod providers;
 mod spend;
@@ -109,7 +110,17 @@ fn config_with_defaults(mut cfg: Value) -> Value {
     obj.entry("telemetry").or_insert(json!(true));
     obj.entry("reduceAnimations").or_insert(json!(false));
     obj.entry("hideUsageWhileSharing").or_insert(json!(false));
+    obj.entry("locale").or_insert(json!("auto"));
     cfg
+}
+
+#[tauri::command]
+fn system_ui_locale() -> &'static str {
+    if i18n::system_locale_is_zh() {
+        "zh"
+    } else {
+        "en"
+    }
 }
 
 #[tauri::command]
@@ -150,15 +161,20 @@ const CONFIG_KEYS: &[&str] = &[
     "telemetry",
     "reduceAnimations",
     "hideUsageWhileSharing",
+    "locale",
 ];
 
-#[tauri::command]
-fn set_config(patch: Value) -> Result<Value, String> {
+fn set_config_inner(patch: Value) -> Result<Value, String> {
     let mut cfg = config_with_defaults(load_config());
     if let (Some(target), Some(source)) = (cfg.as_object_mut(), patch.as_object()) {
         for (k, v) in source {
             if CONFIG_KEYS.contains(&k.as_str()) {
-                target.insert(k.clone(), v.clone());
+                if k == "locale" {
+                    let ok = matches!(v.as_str(), Some("auto" | "en" | "zh"));
+                    target.insert(k.clone(), if ok { v.clone() } else { json!("auto") });
+                } else {
+                    target.insert(k.clone(), v.clone());
+                }
             } else {
                 eprintln!("[pane] set_config: ignoring unknown key '{k}'");
             }
@@ -180,6 +196,35 @@ fn set_config(patch: Value) -> Result<Value, String> {
     Ok(cfg)
 }
 
+#[tauri::command]
+fn set_config(app: tauri::AppHandle, patch: Value) -> Result<Value, String> {
+    let cfg = set_config_inner(patch)?;
+    apply_tray_locale(&app, &cfg);
+    Ok(cfg)
+}
+
+fn apply_tray_locale(app: &tauri::AppHandle, cfg: &Value) {
+    let next = i18n::resolved_locale(cfg);
+    static LAST: Mutex<Option<&'static str>> = Mutex::new(None);
+    let Ok(mut last) = LAST.lock() else {
+        return;
+    };
+    if *last == Some(next) {
+        return;
+    }
+    *last = Some(next);
+    drop(last);
+    let Ok(quit) = MenuItem::with_id(app, "quit", i18n::quit_label(cfg), true, None::<&str>) else {
+        return;
+    };
+    let Ok(menu) = Menu::with_items(app, &[&quit]) else {
+        return;
+    };
+    if let Some(tray) = app.tray_by_id("tray") {
+        let _ = tray.set_menu(Some(menu));
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Start with Windows
 // ---------------------------------------------------------------------------
@@ -194,7 +239,7 @@ fn get_autostart(app: tauri::AppHandle) -> bool {
 fn set_autostart(app: tauri::AppHandle, enabled: bool) -> Result<(), String> {
     use tauri_plugin_autostart::ManagerExt;
     // Remember the choice so startup knows whether to re-assert it.
-    let _ = set_config(json!({ "autostart": enabled }));
+    let _ = set_config_inner(json!({ "autostart": enabled }));
     let manager = app.autolaunch();
     if enabled {
         manager.enable().map_err(|e| e.to_string())
@@ -333,7 +378,8 @@ fn update_tray(app: &tauri::AppHandle, snapshots: &[providers::Snapshot], cfg: &
     for s in snapshots.iter().filter(|s| s.status == "ok").take(6) {
         if let Some(m) = s.metrics.iter().find(|m| m.kind == "progress") {
             let left = (100.0 - m.used_percent.unwrap_or(0.0)).clamp(0.0, 100.0).round();
-            tooltip.push_str(&format!("\n{} {}: {left:.0}% left", s.name, m.label));
+            tooltip.push('\n');
+            tooltip.push_str(&i18n::pct_left(cfg, &s.name, &m.label, left));
         }
     }
 
@@ -1538,6 +1584,7 @@ pub fn run() {
             set_api_key,
             get_config,
             set_config,
+            system_ui_locale,
             get_autostart,
             set_autostart,
             update_tray_strip,
@@ -1551,7 +1598,13 @@ pub fn run() {
         .setup(|app| {
             spawn_update_checker(app.handle());
             spawn_share_watcher(app.handle().clone());
-            let quit = MenuItem::with_id(app, "quit", "Quit Pane", true, None::<&str>)?;
+            let quit = MenuItem::with_id(
+                app,
+                "quit",
+                i18n::quit_label(&config_with_defaults(load_config())),
+                true,
+                None::<&str>,
+            )?;
             let menu = Menu::with_items(app, &[&quit])?;
 
             TrayIconBuilder::with_id("tray")
