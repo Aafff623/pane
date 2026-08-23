@@ -9,6 +9,8 @@ type Dict = Record<string, string>;
 
 const en: Dict = {
   "sidebar.theme": "Light / dark mode",
+  "sidebar.themeToDark": "Switch to dark mode",
+  "sidebar.themeToLight": "Switch to light mode",
   "sidebar.refresh": "Refresh now",
   "sidebar.customize": "Customize",
   "sidebar.settings": "Settings",
@@ -312,6 +314,8 @@ const en: Dict = {
 
 const zh: Dict = {
   "sidebar.theme": "浅色 / 深色模式",
+  "sidebar.themeToDark": "切换到深色模式",
+  "sidebar.themeToLight": "切换到浅色模式",
   "sidebar.refresh": "立即刷新",
   "sidebar.customize": "自定义",
   "sidebar.settings": "设置",

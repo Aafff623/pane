@@ -195,6 +195,16 @@ fn set_config(app: tauri::AppHandle, patch: Value) -> Result<Value, String> {
 }
 
 fn apply_tray_locale(app: &tauri::AppHandle, cfg: &Value) {
+    let next = i18n::resolved_locale(cfg);
+    static LAST: Mutex<Option<&'static str>> = Mutex::new(None);
+    let Ok(mut last) = LAST.lock() else {
+        return;
+    };
+    if *last == Some(next) {
+        return;
+    }
+    *last = Some(next);
+    drop(last);
     let Ok(quit) = MenuItem::with_id(app, "quit", i18n::quit_label(cfg), true, None::<&str>) else {
         return;
     };

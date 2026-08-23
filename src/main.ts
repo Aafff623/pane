@@ -2001,7 +2001,8 @@ function applyAppearance(): void {
   const btn = document.querySelector<HTMLElement>("#theme-btn");
   if (btn) {
     btn.textContent = mode === "light" ? "☾" : "☀";
-    btn.title = mode === "light" ? "Switch to dark mode" : "Switch to light mode";
+    btn.title = mode === "light" ? t("sidebar.themeToDark") : t("sidebar.themeToLight");
+    delete btn.dataset.tip;
   }
 }
 
@@ -2900,6 +2901,7 @@ function applyLocale(): void {
   config.locale = normalizeLocalePref(config.locale);
   setActiveLocale(resolveLocale(config.locale));
   applyStaticI18n();
+  applyAppearance();
   const status = document.querySelector("#status");
   if (status) {
     if (lastSnapshots.length) {
