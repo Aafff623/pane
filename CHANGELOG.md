@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.4.42 — 2026-08-23
 
 ### Added
 - **Chinese in Settings → Language.** Auto follows the PC language;
