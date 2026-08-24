@@ -254,7 +254,10 @@ const PROVIDER_LINKS: Record<string, { label: string; url: string }[]> = {
     { label: "Status", url: "https://www.githubstatus.com/" },
     { label: "Dashboard", url: "https://github.com/settings/billing" },
   ],
-  grok: [{ label: "Usage", url: "https://grok.com/?_s=usage" }],
+  grok: [
+    { label: "Status", url: "https://status.x.ai" },
+    { label: "Usage", url: "https://grok.com/?_s=usage" },
+  ],
   devin: [{ label: "Dashboard", url: "https://app.devin.ai/settings/plans" }],
   minimax: [{ label: "Platform", url: "https://platform.minimax.io/" }],
   openrouter: [
