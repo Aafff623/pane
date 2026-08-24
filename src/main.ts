@@ -881,8 +881,8 @@ function renderMetric(m: Metric): string {
         : displayMetricDetail(m.value ?? t("card.available"));
     const remaining = m.resets_at === null ? null : m.resets_at - Date.now();
     const soon =
-      remaining !== null && remaining < 86_400_000
-        ? `<span class="warn-dot" title="${escapeHtml(t("card.creditDying", { time: fmtDuration(Math.max(0, remaining)) }))}">●</span> `
+      remaining !== null && remaining > 0 && remaining < 86_400_000
+        ? `<span class="warn-dot" title="${escapeHtml(t("card.creditDying", { time: fmtDuration(remaining) }))}">●</span> `
         : "";
     const useBtn = m.detail
       ? `<button class="redeem-btn" data-redeem="${escapeHtml(m.detail)}" title="${escapeHtml(t("card.useTip"))}">${escapeHtml(t("card.use"))}</button>`
