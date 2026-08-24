@@ -119,13 +119,14 @@ Ground rules that apply to every provider:
 
 - **Reads:** `%USERPROFILE%\.grok\auth.json`.
 - **Calls:** `cli-chat-proxy.grok.com/v1/billing`,
-  `/v1/settings`, and `/v1/user?include=subscription`; `auth.x.ai`
-  token refresh (written back).
+  `/v1/settings`, and `/v1/user?include=subscription`;
+  `grok.com/prod_mc_billing.ConsumerUiSvc/GetRemainingResets`;
+  `auth.x.ai` token refresh (written back).
 - **Plan:** prefers `subscription_tier_display` from settings, then maps
   `subscriptionTier` from the user endpoint. Plan lookup failures do not
   hide otherwise valid usage data.
-- **Shows:** subscription plan, weekly pool, pay-as-you-go cap badge;
-  local spend from `~\.grok\logs\`.
+- **Shows:** subscription plan, weekly pool, pay-as-you-go cap badge,
+  remaining reset credits; local spend from `~\.grok\logs\`.
 
 ## Devin (Devin CLI)
 
