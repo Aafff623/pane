@@ -38,6 +38,7 @@ dirs = "6"
 rusqlite = { version = "0.32", features = ["bundled", "backup"] }
 toml = "0.8"
 regex = "1"
+prost = "0.13" # Grok GetRemainingResets protobuf codec
 webview2-com = "0.38"
 windows-core = "0.61"
 windows = { version = "0.61", features = ["Win32_Foundation", "Win32_Globalization", "Win32_Security_Credentials", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging"] }
