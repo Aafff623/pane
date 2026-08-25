@@ -241,6 +241,8 @@ const en: Dict = {
   "metric.bonus": "Bonus",
   "metric.extraUsage": "Extra usage",
   "metric.extraCredits": "Extra credits",
+  "metric.resetCredit": "Reset credit",
+  "metric.resetCreditNumbered": "Reset credit {n}",
   "metric.resetCredits": "Reset credits",
   "metric.extraBalance": "Extra balance",
   "metric.kiloPass": "Kilo Pass",
@@ -539,6 +541,8 @@ const zh: Dict = {
   "metric.bonus": "赠送",
   "metric.extraUsage": "额外用量",
   "metric.extraCredits": "额外额度",
+  "metric.resetCredit": "重置额度",
+  "metric.resetCreditNumbered": "重置额度 {n}",
   "metric.resetCredits": "重置额度",
   "metric.extraBalance": "额外余额",
   "metric.kiloPass": "Kilo Pass",
@@ -694,6 +698,12 @@ export function t(key: string, vars?: Record<string, string | number>): string {
 export function displayMetricLabel(label: string): string {
   const key = METRIC_KEYS[label];
   if (key) return t(key);
+  const resetCredit = label.match(/^Reset credit(?: (\d+))?$/);
+  if (resetCredit) {
+    return resetCredit[1]
+      ? t("metric.resetCreditNumbered", { n: resetCredit[1] })
+      : t("metric.resetCredit");
+  }
   if (label.endsWith(" weekly")) {
     return t("metric.modelWeekly", { model: label.slice(0, -7) });
   }
@@ -734,6 +744,7 @@ export function displayMetricDetail(text: string): string {
   if (m) return t("detail.countOfUsed", { a: m[1], b: m[2] });
   m = text.match(new RegExp(`^(${num}) of (${num}) left$`, "i"));
   if (m) return t("detail.countOfLeft", { a: m[1], b: m[2] });
+  if (/^available$/i.test(text.trim())) return t("card.available");
   if (/^unlimited$/i.test(text.trim())) return t("detail.unlimited");
   return text;
 }

@@ -276,7 +276,10 @@ const PROVIDER_LINKS: Record<string, { label: string; url: string }[]> = {
     { label: "Status", url: "https://www.githubstatus.com/" },
     { label: "Dashboard", url: "https://github.com/settings/billing" },
   ],
-  grok: [{ label: "Usage", url: "https://grok.com/?_s=usage" }],
+  grok: [
+    { label: "Status", url: "https://status.x.ai" },
+    { label: "Usage", url: "https://grok.com/?_s=usage" },
+  ],
   devin: [{ label: "Dashboard", url: "https://app.devin.ai/settings/plans" }],
   minimax: [{ label: "Platform", url: "https://platform.minimax.io/" }],
   openrouter: [
@@ -938,24 +941,28 @@ function renderMetric(m: Metric): string {
         </div>
       </div>`;
   }
-  // Actionable row (Codex reset credits): exact expiry + a Use button that
-  // spends the credit after a confirm. A credit dying within 24h gets an
+  // Action row (reset credits): exact expiry, plus a Use button only when
+  // the metric carries redeem detail. A credit dying within 24h gets an
   // amber dot so it isn't wasted.
-  if (m.kind === "action" && m.detail) {
+  if (m.kind === "action") {
     const expiry =
       m.resets_at !== null
         ? t("card.expires", { when: fmtExact(m.resets_at) })
         : displayMetricDetail(m.value ?? t("card.available"));
+    const remaining = m.resets_at === null ? null : m.resets_at - Date.now();
     const soon =
-      m.resets_at !== null && m.resets_at - Date.now() < 86_400_000
-        ? `<span class="warn-dot" title="${escapeHtml(t("card.creditDying", { time: fmtDuration(Math.max(0, m.resets_at - Date.now())) }))}">●</span> `
+      remaining !== null && remaining > 0 && remaining < 86_400_000
+        ? `<span class="warn-dot" title="${escapeHtml(t("card.creditDying", { time: fmtDuration(remaining) }))}">●</span> `
         : "";
+    const useBtn = m.detail
+      ? `<button class="redeem-btn" data-redeem="${escapeHtml(m.detail)}" title="${escapeHtml(t("card.useTip"))}">${escapeHtml(t("card.use"))}</button>`
+      : "";
     return `
       <div class="metric-text action-row">
         <span>${soon}${escapeHtml(displayMetricLabel(m.label))}</span>
         <span class="action-right">
           <span class="detail">${escapeHtml(expiry)}</span>
-          <button class="redeem-btn" data-redeem="${escapeHtml(m.detail)}" title="${escapeHtml(t("card.useTip"))}">${escapeHtml(t("card.use"))}</button>
+          ${useBtn}
         </span>
       </div>`;
   }
