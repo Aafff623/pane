@@ -505,13 +505,27 @@ function fmtExact(ts: number): string {
 let configSaveQueue: Promise<void> = Promise.resolve();
 let configSaveError: string | null = null;
 
+function applyConfigEcho(sent: Config, echoed: Config): void {
+  // Keep newer in-memory fields. Only take server canonicalization for
+  // keys that still match the snapshot this save actually wrote.
+  const current = config as unknown as Record<string, unknown>;
+  const from = sent as unknown as Record<string, unknown>;
+  const echo = echoed as unknown as Record<string, unknown>;
+  for (const key of Object.keys(echo)) {
+    if (JSON.stringify(current[key]) === JSON.stringify(from[key])) {
+      current[key] = echo[key];
+    }
+  }
+}
+
 async function patchConfig(patch: Partial<Config>): Promise<void> {
   Object.assign(config, patch);
   // Send a full current snapshot. If an earlier serialized write failed,
   // the next save retries that still-live in-memory state as well.
-  const payload = JSON.parse(JSON.stringify(config)) as Partial<Config>;
+  const payload = JSON.parse(JSON.stringify(config)) as Config;
   const save = configSaveQueue.then(async () => {
-    await invoke<Config>("set_config", { patch: payload });
+    const echoed = await invoke<Config>("set_config", { patch: payload });
+    applyConfigEcho(payload, echoed);
     configSaveError = null;
   });
   configSaveQueue = save.catch(() => {});

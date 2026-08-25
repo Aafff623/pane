@@ -923,8 +923,10 @@ fn restore_last_success_after_error(
     }
     let warning = current.error.clone();
     *current = previous.clone();
-    current.stale = true;
-    current.warning = warning;
+    if age_ms > STALE_GRACE_MS {
+        current.stale = true;
+        current.warning = warning;
+    }
     true
 }
 
@@ -1793,6 +1795,7 @@ mod tests {
         cached_kimi_ok_from, commit_strip_state_after_apply, fold_moonshot_into_kimi,
         is_kimi_wallet_label, restore_kimi_wallet_rows, restore_last_success_after_error,
         strip_entry_application_order, strip_reset_ids, StripEntry, SNAPSHOT_CACHE_MS,
+        STALE_GRACE_MS,
     };
     use crate::providers::{Metric, Snapshot};
     use serde_json::json;
@@ -1921,7 +1924,7 @@ mod tests {
     }
 
     #[test]
-    fn recent_error_fallback_is_immediately_marked_stale() {
+    fn recent_error_fallback_within_grace_is_not_marked_stale() {
         let previous = Snapshot::ok(
             "codex",
             "Codex",
@@ -1931,6 +1934,27 @@ mod tests {
         let mut current = Snapshot::error("codex", "Codex", "timeout".into());
 
         assert!(restore_last_success_after_error(&mut current, &previous, 1_000));
+        assert_eq!(current.status, "ok");
+        assert!(!current.stale);
+        assert_eq!(current.warning, None);
+        assert_eq!(current.metrics[0].used_percent, Some(25.0));
+    }
+
+    #[test]
+    fn recent_error_fallback_after_grace_is_marked_stale() {
+        let previous = Snapshot::ok(
+            "codex",
+            "Codex",
+            None,
+            vec![Metric::progress("Weekly", 25.0, None)],
+        );
+        let mut current = Snapshot::error("codex", "Codex", "timeout".into());
+
+        assert!(restore_last_success_after_error(
+            &mut current,
+            &previous,
+            STALE_GRACE_MS + 1,
+        ));
         assert_eq!(current.status, "ok");
         assert!(current.stale);
         assert_eq!(current.warning.as_deref(), Some("timeout"));
