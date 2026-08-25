@@ -578,7 +578,12 @@ async fn update_tray_strip(app: tauri::AppHandle, entries: Vec<StripEntry>) -> R
     )
     .await;
     if result.is_err() {
-        let _ = clear_tray_strip_icons(app, &previous, &entries).await;
+        if clear_tray_strip_icons(app, &previous, &entries).await.is_ok() {
+            if let Ok(mut slot) = last_strip().lock() {
+                slot.clear();
+            }
+        }
+        return result;
     }
     let Ok(mut slot) = last_strip().lock() else {
         return result;
@@ -1943,18 +1948,18 @@ mod tests {
     }
 
     #[test]
-    fn failed_tray_strip_apply_keeps_the_last_applied_state_for_retry() {
+    fn failed_tray_strip_clear_invalidates_cache_so_retry_rebuilds() {
         let previous = vec![strip_entry("claude", 50), strip_entry("codex", 60)];
-        let next = vec![strip_entry("codex", 60), strip_entry("claude", 50)];
+        let same_order = previous.clone();
+        let reordered = vec![strip_entry("codex", 60), strip_entry("claude", 50)];
         let mut cached = previous.clone();
 
         let result: Result<(), String> = Err("native tray update failed".into());
-        assert!(commit_strip_state_after_apply(&mut cached, &next, result).is_err());
-        assert_eq!(
-            strip_reset_ids(&cached, &next),
-            vec!["claude", "codex"],
-            "an identical retry must still rebuild the changed order"
-        );
+        assert!(commit_strip_state_after_apply(&mut cached, &same_order, result).is_err());
+        cached.clear();
+
+        assert!(!strip_reset_ids(&cached, &same_order).is_empty());
+        assert!(!strip_reset_ids(&cached, &reordered).is_empty());
     }
 
     #[test]
