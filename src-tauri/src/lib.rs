@@ -5,6 +5,7 @@ mod pricing;
 mod providers;
 mod spend;
 mod telemetry;
+mod tray_projection;
 
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -343,83 +344,48 @@ fn draw_tray_numbers(values: &[u32]) -> Vec<u8> {
     rgba
 }
 
-/// Picks up to two metrics for the tray icon (like the Mac's stacked pair):
-/// the pinned provider's pinned metric first, then its next progress metric.
-fn pick_tray_metrics<'a>(
-    snapshots: &'a [providers::Snapshot],
-    pinned: &Value,
-) -> Vec<&'a providers::Metric> {
-    let pinned_provider = pinned.get("provider").and_then(Value::as_str);
-    let pinned_label = pinned.get("label").and_then(Value::as_str);
-
-    let provider = snapshots
-        .iter()
-        .find(|s| s.status == "ok" && Some(s.id.as_str()) == pinned_provider)
-        .or_else(|| {
-            snapshots
-                .iter()
-                .find(|s| s.status == "ok" && s.metrics.iter().any(|m| m.kind == "progress"))
-        });
-    let Some(provider) = provider else { return Vec::new() };
-
-    let mut metrics: Vec<&providers::Metric> =
-        provider.metrics.iter().filter(|m| m.kind == "progress").collect();
-    if let Some(label) = pinned_label {
-        if let Some(pos) = metrics.iter().position(|m| m.label == label) {
-            metrics.rotate_left(pos);
-        }
-    }
-    metrics.truncate(2);
-    metrics
-}
-
-fn update_tray(app: &tauri::AppHandle, snapshots: &[providers::Snapshot], cfg: &Value) {
-    let mut tooltip = String::from("Pane");
-    for s in snapshots.iter().filter(|s| s.status == "ok").take(6) {
-        if let Some(m) = s.metrics.iter().find(|m| m.kind == "progress") {
-            let left = (100.0 - m.used_percent.unwrap_or(0.0)).clamp(0.0, 100.0).round();
-            tooltip.push('\n');
-            tooltip.push_str(&i18n::pct_left(cfg, &s.name, &m.label, left));
-        }
-    }
-
-    // When the Mac-style tray strip is active it carries the numbers, so the
-    // main icon stays the app logo (the strip icons are per-provider).
-    let strip_active = cfg
-        .get("trayProviders")
-        .and_then(Value::as_array)
-        .is_some_and(|a| !a.is_empty());
-    let lefts: Vec<u32> = if strip_active {
-        Vec::new()
-    } else {
-        pick_tray_metrics(snapshots, cfg.get("pinned").unwrap_or(&Value::Null))
-            .iter()
-            .map(|m| (100.0 - m.used_percent.unwrap_or(0.0)).clamp(0.0, 100.0).round() as u32)
-            .collect()
-    };
+fn apply_main_tray_projection(
+    app: &tauri::AppHandle,
+    projection: &tray_projection::MainTrayProjection,
+) -> Result<(), String> {
     if let Ok(mut slot) = last_main_tray().lock() {
-        slot.lefts = lefts.clone();
-        slot.tooltip = tooltip.clone();
+        slot.lefts = projection.remaining_percentages.clone();
+        slot.tooltip = projection.tooltip.clone();
     }
 
+    let tray = app
+        .tray_by_id("tray")
+        .ok_or_else(|| "main tray icon is unavailable".to_string())?;
     if HIDE_STRIP.load(Ordering::Relaxed) {
-        set_main_tray_logo(app);
-        return;
+        let default = app
+            .default_window_icon()
+            .ok_or_else(|| "default Pane icon is unavailable".to_string())?;
+        tray.set_icon(Some(default.clone()))
+            .map_err(|error| format!("set hidden main tray icon: {error}"))?;
+        tray.set_tooltip(Some("Pane"))
+            .map_err(|error| format!("set hidden main tray tooltip: {error}"))?;
+        return Ok(());
     }
 
-    let Some(tray) = app.tray_by_id("tray") else {
-        return;
-    };
-    let _ = tray.set_tooltip(Some(&tooltip));
-    if strip_active {
-        if let Some(default) = app.default_window_icon() {
-            let _ = tray.set_icon(Some(default.clone()));
+    tray.set_tooltip(Some(&projection.tooltip))
+        .map_err(|error| format!("set main tray tooltip: {error}"))?;
+    match projection.icon_mode {
+        tray_projection::MainTrayIconMode::Logo => {
+            let default = app
+                .default_window_icon()
+                .ok_or_else(|| "default Pane icon is unavailable".to_string())?;
+            tray.set_icon(Some(default.clone()))
+                .map_err(|error| format!("set main tray logo: {error}"))
         }
-        return;
-    }
-    if !lefts.is_empty() {
-        let icon = tauri::image::Image::new_owned(draw_tray_numbers(&lefts), 32, 32);
-        let _ = tray.set_icon(Some(icon));
+        tray_projection::MainTrayIconMode::Numbers => {
+            let icon = tauri::image::Image::new_owned(
+                draw_tray_numbers(&projection.remaining_percentages),
+                32,
+                32,
+            );
+            tray.set_icon(Some(icon))
+                .map_err(|error| format!("set main tray numbers: {error}"))
+        }
     }
 }
 
@@ -452,6 +418,11 @@ fn last_main_tray() -> &'static Mutex<LastMainTray> {
 fn last_strip() -> &'static Mutex<Vec<StripEntry>> {
     static S: OnceLock<Mutex<Vec<StripEntry>>> = OnceLock::new();
     S.get_or_init(|| Mutex::new(Vec::new()))
+}
+
+fn tray_strip_apply_lock() -> &'static tauri::async_runtime::Mutex<()> {
+    static LOCK: OnceLock<tauri::async_runtime::Mutex<()>> = OnceLock::new();
+    LOCK.get_or_init(|| tauri::async_runtime::Mutex::new(()))
 }
 
 fn hide_usage_flag(cfg: &Value) -> bool {
@@ -535,16 +506,17 @@ fn spawn_share_watcher(app: tauri::AppHandle) {
                 continue;
             }
             was_hidden = hide;
-            let cached = last_strip()
-                .lock()
-                .map(|g| g.clone())
-                .unwrap_or_default();
+            let _guard = tray_strip_apply_lock().lock().await;
+            let cached = last_strip().lock().map(|g| g.clone()).unwrap_or_default();
+            if let Err(error) = apply_tray_strip(app.clone(), cached, hide, Vec::new(), false).await
+            {
+                let action = if hide { "hide" } else { "restore" };
+                eprintln!("[pane] {action} tray strip: {error}");
+            }
             if hide {
-                let _ = apply_tray_strip(app.clone(), cached, true);
                 let handle = app.clone();
                 let _ = app.run_on_main_thread(move || set_main_tray_logo(&handle));
             } else {
-                let _ = apply_tray_strip(app.clone(), cached, false);
                 let handle = app.clone();
                 let _ = app.run_on_main_thread(move || paint_cached_main_tray(&handle));
                 let _ = app.emit("tray-strip-restore", ());
@@ -561,10 +533,10 @@ struct StripEntry {
     tooltip: String,
 }
 
-/// Every provider id that may appear in the tray strip. Doubles as the
-/// allowlist for update_tray_strip: ids from the frontend are validated
-/// against this before being spliced into tray icon ids, and stale strip
-/// icons are removed for exactly this set.
+/// Every provider family that may appear in the tray strip. Frontend
+/// strip ids are validated against this before becoming tray icon ids,
+/// including `family@account` cards. Stale family-level strip icons are
+/// removed for exactly this set.
 const STRIP_PROVIDER_IDS: [&str; 21] = [
     "claude",
     "codex",
@@ -589,93 +561,217 @@ const STRIP_PROVIDER_IDS: [&str; 21] = [
     "kimi",
 ];
 
-#[tauri::command]
-fn update_tray_strip(app: tauri::AppHandle, entries: Vec<StripEntry>) -> Result<(), String> {
-    if let Ok(mut slot) = last_strip().lock() {
-        *slot = entries.clone();
-    }
-    apply_tray_strip(app, entries, HIDE_STRIP.load(Ordering::Relaxed))
+async fn update_tray_strip(app: tauri::AppHandle, entries: Vec<StripEntry>) -> Result<(), String> {
+    validate_strip_entries(&entries)?;
+    let _guard = tray_strip_apply_lock().lock().await;
+    let reset_ids = last_strip()
+        .lock()
+        .map(|slot| strip_reset_ids(&slot, &entries))
+        .unwrap_or_default();
+    let rebuild_order = !reset_ids.is_empty();
+    let result = apply_tray_strip(
+        app,
+        entries.clone(),
+        HIDE_STRIP.load(Ordering::Relaxed),
+        reset_ids,
+        rebuild_order,
+    )
+    .await;
+    let Ok(mut slot) = last_strip().lock() else {
+        return result;
+    };
+    commit_strip_state_after_apply(&mut slot, &entries, result)
 }
 
-fn apply_tray_strip(
+fn commit_strip_state_after_apply(
+    current: &mut Vec<StripEntry>,
+    next: &[StripEntry],
+    result: Result<(), String>,
+) -> Result<(), String> {
+    result?;
+    *current = next.to_vec();
+    Ok(())
+}
+
+#[tauri::command]
+async fn sync_tray_surfaces(
+    app: tauri::AppHandle,
+    snapshots: Vec<providers::Snapshot>,
+    projection: tray_projection::TrayProjectionConfig,
+    entries: Vec<StripEntry>,
+) -> Result<(), String> {
+    let main = tray_projection::project_main_tray(&snapshots, &projection, !entries.is_empty());
+    let main_result = apply_main_tray_projection(&app, &main);
+    let strip_result = update_tray_strip(app, entries).await;
+    match (main_result, strip_result) {
+        (Ok(()), Ok(())) => Ok(()),
+        (Err(error), Ok(())) | (Ok(()), Err(error)) => Err(error),
+        (Err(main_error), Err(strip_error)) => Err(format!("{main_error}; {strip_error}")),
+    }
+}
+
+fn validate_strip_entries(entries: &[StripEntry]) -> Result<(), String> {
+    if entries.len() > 4 {
+        return Err("tray strip accepts at most 4 providers".into());
+    }
+    for (index, entry) in entries.iter().enumerate() {
+        if !strip_provider_id_is_allowed(&entry.id) {
+            return Err(format!("invalid tray strip provider id: {}", entry.id));
+        }
+        if entries[..index].iter().any(|seen| seen.id == entry.id) {
+            return Err(format!("duplicate tray strip provider id: {}", entry.id));
+        }
+        if entry.logo.len() != 32 * 32 * 4 {
+            return Err(format!("invalid tray strip logo for {}", entry.id));
+        }
+        if entry.values.is_empty() || entry.values.len() > 2 {
+            return Err(format!("invalid tray strip values for {}", entry.id));
+        }
+    }
+    Ok(())
+}
+
+fn strip_provider_id_is_allowed(id: &str) -> bool {
+    match id.split_once('@') {
+        None => STRIP_PROVIDER_IDS.contains(&id),
+        Some((family, account)) => {
+            STRIP_PROVIDER_IDS.contains(&family)
+                && !account.is_empty()
+                && account
+                    .chars()
+                    .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_'))
+        }
+    }
+}
+
+fn strip_tray_key(id: &str) -> String {
+    id.replace('@', "--")
+}
+
+fn strip_reset_ids(previous: &[StripEntry], next: &[StripEntry]) -> Vec<String> {
+    let same_order = previous.len() == next.len()
+        && previous.iter().zip(next).all(|(old, new)| old.id == new.id);
+    if same_order {
+        return Vec::new();
+    }
+
+    let mut ids = Vec::new();
+    for entry in previous.iter().chain(next) {
+        if !ids.contains(&entry.id) {
+            ids.push(entry.id.clone());
+        }
+    }
+    ids
+}
+
+fn strip_entry_application_order(entries: &[StripEntry], rebuild_order: bool) -> Vec<&StripEntry> {
+    let mut ordered: Vec<&StripEntry> = entries.iter().collect();
+    if rebuild_order {
+        // Windows inserts each new tray icon to the left. Rebuild Provider
+        // pairs from right to left so their visible order matches providerOrder.
+        ordered.reverse();
+    }
+    ordered
+}
+
+async fn apply_tray_strip(
     app: tauri::AppHandle,
     entries: Vec<StripEntry>,
     hide_numbers: bool,
+    reset_ids: Vec<String>,
+    rebuild_order: bool,
 ) -> Result<(), String> {
     let handle = app.clone();
+    let (sender, mut receiver) = tauri::async_runtime::channel(1);
     app.run_on_main_thread(move || {
-        // Remove strip icons for providers no longer selected.
-        for id in STRIP_PROVIDER_IDS {
-            if !entries.iter().any(|e| e.id == id) {
-                let _ = handle.remove_tray_by_id(&format!("strip-logo-{id}"));
-                let _ = handle.remove_tray_by_id(&format!("strip-num-{id}"));
-            }
-        }
-
-        for entry in &entries {
-            // Only known provider ids may reach the tray icon namespace.
-            if !STRIP_PROVIDER_IDS.contains(&entry.id.as_str()) {
-                continue;
-            }
-            if entry.logo.len() != 32 * 32 * 4 {
-                continue;
-            }
-            let logo_id = format!("strip-logo-{}", entry.id);
-            let num_id = format!("strip-num-{}", entry.id);
-            let logo_icon = tauri::image::Image::new_owned(entry.logo.clone(), 32, 32);
-            let num_icon = tauri::image::Image::new_owned(
-                if hide_numbers {
-                    vec![0u8; 32 * 32 * 4]
-                } else {
-                    draw_tray_numbers(&entry.values)
-                },
-                32,
-                32,
-            );
-            let tooltip = if hide_numbers {
-                entry
-                    .tooltip
-                    .split('\n')
-                    .next()
-                    .unwrap_or("Pane")
-                    .to_string()
-            } else {
-                entry.tooltip.clone()
-            };
-
-            if let Some(tray) = handle.tray_by_id(&num_id) {
-                let _ = tray.set_icon(Some(num_icon));
-                let _ = tray.set_tooltip(Some(&tooltip));
-                if let Some(logo_tray) = handle.tray_by_id(&logo_id) {
-                    let _ = logo_tray.set_tooltip(Some(&tooltip));
+        let result = (|| -> Result<(), String> {
+            // Removal returns None when an icon is already absent; that is
+            // the desired end state rather than an update failure.
+            for id in STRIP_PROVIDER_IDS {
+                if !entries.iter().any(|entry| entry.id == id) {
+                    handle.remove_tray_by_id(&format!("strip-logo-{id}"));
+                    handle.remove_tray_by_id(&format!("strip-num-{id}"));
                 }
-                continue;
+            }
+            for id in &reset_ids {
+                let key = strip_tray_key(id);
+                handle.remove_tray_by_id(&format!("strip-logo-{key}"));
+                handle.remove_tray_by_id(&format!("strip-num-{key}"));
             }
 
-            // New pair — numbers first: Windows inserts each new tray icon
-            // to the LEFT of the previous one, so creating numbers → logo
-            // lands as "logo | numbers" left-to-right, like the Mac strip.
-            for (tray_id, icon) in [(num_id, num_icon), (logo_id, logo_icon)] {
-                let _ = TrayIconBuilder::with_id(tray_id)
-                    .icon(icon)
-                    .tooltip(&tooltip)
-                    .show_menu_on_left_click(false)
-                    .on_tray_icon_event(|tray, event| {
-                        if let TrayIconEvent::Click {
-                            button: MouseButton::Left,
-                            button_state: MouseButtonState::Up,
-                            position,
-                            ..
-                        } = event
-                        {
-                            toggle_popover(tray.app_handle(), position);
-                        }
-                    })
-                    .build(&handle);
+            for entry in strip_entry_application_order(&entries, rebuild_order) {
+                let tray_key = strip_tray_key(&entry.id);
+                let logo_id = format!("strip-logo-{tray_key}");
+                let num_id = format!("strip-num-{tray_key}");
+                let logo_icon = tauri::image::Image::new_owned(entry.logo.clone(), 32, 32);
+                let num_icon = tauri::image::Image::new_owned(
+                    if hide_numbers {
+                        vec![0u8; 32 * 32 * 4]
+                    } else {
+                        draw_tray_numbers(&entry.values)
+                    },
+                    32,
+                    32,
+                );
+                let tooltip = if hide_numbers {
+                    entry
+                        .tooltip
+                        .split('\n')
+                        .next()
+                        .unwrap_or("Pane")
+                        .to_string()
+                } else {
+                    entry.tooltip.clone()
+                };
+
+                let new_trays = if let Some(tray) = handle.tray_by_id(&num_id) {
+                    tray.set_icon(Some(num_icon))
+                        .map_err(|error| format!("set {} strip numbers: {error}", entry.id))?;
+                    tray.set_tooltip(Some(&tooltip))
+                        .map_err(|error| format!("set {} strip tooltip: {error}", entry.id))?;
+                    if let Some(logo_tray) = handle.tray_by_id(&logo_id) {
+                        logo_tray.set_tooltip(Some(&tooltip)).map_err(|error| {
+                            format!("set {} strip logo tooltip: {error}", entry.id)
+                        })?;
+                        Vec::new()
+                    } else {
+                        vec![(logo_id, logo_icon)]
+                    }
+                } else {
+                    vec![(num_id, num_icon), (logo_id, logo_icon)]
+                };
+
+                // New pairs are numbers first: Windows inserts each new tray
+                // icon to the left, yielding "logo | numbers" on screen.
+                for (tray_id, icon) in new_trays {
+                    TrayIconBuilder::with_id(tray_id)
+                        .icon(icon)
+                        .tooltip(&tooltip)
+                        .show_menu_on_left_click(false)
+                        .on_tray_icon_event(|tray, event| {
+                            if let TrayIconEvent::Click {
+                                button: MouseButton::Left,
+                                button_state: MouseButtonState::Up,
+                                position,
+                                ..
+                            } = event
+                            {
+                                toggle_popover(tray.app_handle(), position);
+                            }
+                        })
+                        .build(&handle)
+                        .map_err(|error| format!("build {} strip icon: {error}", entry.id))?;
+                }
             }
-        }
+            Ok(())
+        })();
+        let _ = sender.blocking_send(result);
     })
-    .map_err(|e| e.to_string())
+    .map_err(|error| error.to_string())?;
+    receiver
+        .recv()
+        .await
+        .ok_or_else(|| "tray strip update ended before reporting a result".to_string())?
 }
 
 // ---------------------------------------------------------------------------
@@ -817,16 +913,35 @@ fn restore_kimi_wallet_rows(current: &mut providers::Snapshot, previous: &provid
     }
 }
 
+fn restore_last_success_after_error(
+    current: &mut providers::Snapshot,
+    previous: &providers::Snapshot,
+    age_ms: i64,
+) -> bool {
+    if current.status != "error" || age_ms > SNAPSHOT_CACHE_MS {
+        return false;
+    }
+    let warning = current.error.clone();
+    *current = previous.clone();
+    current.stale = true;
+    current.warning = warning;
+    true
+}
+
 /// Called by the UI. Refreshes every enabled provider at the same time and
 /// returns whatever each one found — data, "not signed in", or an error.
 #[tauri::command]
-async fn fetch_usage(app: tauri::AppHandle) -> Vec<providers::Snapshot> {
+async fn fetch_usage(
+    app: tauri::AppHandle,
+    disabled: Option<Vec<String>>,
+) -> Vec<providers::Snapshot> {
     let cfg = config_with_defaults(load_config());
-    let disabled: Vec<String> = cfg
-        .get("disabled")
-        .and_then(Value::as_array)
-        .map(|a| a.iter().filter_map(Value::as_str).map(str::to_string).collect())
-        .unwrap_or_default();
+    let disabled = disabled.unwrap_or_else(|| {
+        cfg.get("disabled")
+            .and_then(Value::as_array)
+            .map(|a| a.iter().filter_map(Value::as_str).map(str::to_string).collect())
+            .unwrap_or_default()
+    });
 
     // Each provider future is boxed onto the heap and spawned as its own
     // task. A single tokio::join! over 28 inlined futures builds one huge
@@ -1059,14 +1174,7 @@ async fn fetch_usage(app: tauri::AppHandle) -> Vec<providers::Snapshot> {
                 } else if s.status == "error" {
                     if let Some(previous) = map.get(&s.id) {
                         let age = now_ms - previous.at;
-                        if age <= SNAPSHOT_CACHE_MS {
-                            let warning = s.error.clone();
-                            *s = previous.snap.clone();
-                            if age > STALE_GRACE_MS {
-                                s.stale = true;
-                                s.warning = warning;
-                            }
-                        }
+                        restore_last_success_after_error(s, &previous.snap, age);
                     }
                 }
             }
@@ -1084,8 +1192,6 @@ async fn fetch_usage(app: tauri::AppHandle) -> Vec<providers::Snapshot> {
     fold_moonshot_into_kimi(&mut all);
 
     httpapi::publish(&all);
-    update_tray(&app, &all, &cfg);
-
     // Anonymous daily-rollup telemetry (Settings → "Share anonymous usage
     // statistics"). Fire-and-forget: it must never delay or fail a refresh.
     {
@@ -1587,7 +1693,7 @@ pub fn run() {
             system_ui_locale,
             get_autostart,
             set_autostart,
-            update_tray_strip,
+            sync_tray_surfaces,
             open_link,
             copy_share_image,
             set_shortcut,
@@ -1684,11 +1790,21 @@ pub fn run() {
 #[cfg(test)]
 mod tests {
     use super::{
-        cached_kimi_ok_from, fold_moonshot_into_kimi, is_kimi_wallet_label, restore_kimi_wallet_rows,
-        SNAPSHOT_CACHE_MS,
+        cached_kimi_ok_from, commit_strip_state_after_apply, fold_moonshot_into_kimi,
+        is_kimi_wallet_label, restore_kimi_wallet_rows, restore_last_success_after_error,
+        strip_entry_application_order, strip_reset_ids, StripEntry, SNAPSHOT_CACHE_MS,
     };
     use crate::providers::{Metric, Snapshot};
     use serde_json::json;
+
+    fn strip_entry(id: &str, value: u32) -> StripEntry {
+        StripEntry {
+            id: id.into(),
+            logo: vec![0; 32 * 32 * 4],
+            values: vec![value],
+            tooltip: id.into(),
+        }
+    }
 
     #[test]
     fn kimi_wallet_labels() {
@@ -1754,6 +1870,90 @@ mod tests {
         let err = json!({"kimi": {"at": now, "snap": {"status": "error"}}});
         assert!(!cached_kimi_ok_from(&err, now));
         assert!(!cached_kimi_ok_from(&json!({}), now));
+    }
+
+    #[test]
+    fn tray_strip_order_change_rebuilds_all_pairs_right_to_left() {
+        let previous = vec![strip_entry("claude", 50), strip_entry("codex", 60)];
+        let next = vec![strip_entry("codex", 60), strip_entry("claude", 50)];
+
+        let reset_ids = strip_reset_ids(&previous, &next);
+        let application_ids: Vec<&str> = strip_entry_application_order(&next, true)
+            .into_iter()
+            .map(|entry| entry.id.as_str())
+            .collect();
+
+        assert_eq!(reset_ids, vec!["claude", "codex"]);
+        assert_eq!(application_ids, vec!["claude", "codex"]);
+    }
+
+    #[test]
+    fn tray_strip_value_change_keeps_existing_pairs() {
+        let previous = vec![strip_entry("claude", 50), strip_entry("codex", 60)];
+        let next = vec![strip_entry("claude", 40), strip_entry("codex", 30)];
+
+        assert!(strip_reset_ids(&previous, &next).is_empty());
+    }
+
+    #[test]
+    fn failed_tray_strip_apply_keeps_the_last_applied_state_for_retry() {
+        let previous = vec![strip_entry("claude", 50), strip_entry("codex", 60)];
+        let next = vec![strip_entry("codex", 60), strip_entry("claude", 50)];
+        let mut cached = previous.clone();
+
+        let result: Result<(), String> = Err("native tray update failed".into());
+        assert!(commit_strip_state_after_apply(&mut cached, &next, result).is_err());
+        assert_eq!(
+            strip_reset_ids(&cached, &next),
+            vec!["claude", "codex"],
+            "an identical retry must still rebuild the changed order"
+        );
+    }
+
+    #[test]
+    fn successful_tray_strip_apply_commits_the_new_state() {
+        let previous = vec![strip_entry("claude", 50), strip_entry("codex", 60)];
+        let next = vec![strip_entry("codex", 60), strip_entry("claude", 50)];
+        let mut cached = previous;
+
+        assert!(commit_strip_state_after_apply(&mut cached, &next, Ok(())).is_ok());
+        assert!(strip_reset_ids(&cached, &next).is_empty());
+    }
+
+    #[test]
+    fn recent_error_fallback_is_immediately_marked_stale() {
+        let previous = Snapshot::ok(
+            "codex",
+            "Codex",
+            None,
+            vec![Metric::progress("Weekly", 25.0, None)],
+        );
+        let mut current = Snapshot::error("codex", "Codex", "timeout".into());
+
+        assert!(restore_last_success_after_error(&mut current, &previous, 1_000));
+        assert_eq!(current.status, "ok");
+        assert!(current.stale);
+        assert_eq!(current.warning.as_deref(), Some("timeout"));
+        assert_eq!(current.metrics[0].used_percent, Some(25.0));
+    }
+
+    #[test]
+    fn expired_error_fallback_is_not_restored() {
+        let previous = Snapshot::ok(
+            "codex",
+            "Codex",
+            None,
+            vec![Metric::progress("Weekly", 25.0, None)],
+        );
+        let mut current = Snapshot::error("codex", "Codex", "timeout".into());
+
+        assert!(!restore_last_success_after_error(
+            &mut current,
+            &previous,
+            SNAPSHOT_CACHE_MS + 1,
+        ));
+        assert_eq!(current.status, "error");
+        assert!(!current.stale);
     }
 
     #[test]
