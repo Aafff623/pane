@@ -206,6 +206,40 @@ interface Config {
   locale: LocalePref;
 }
 
+const FRONTEND_CONFIG_KEYS = [
+  "refreshMinutes",
+  "disabled",
+  "pinned",
+  "trayProviders",
+  "pacingAlways",
+  "telemetry",
+  "notifyAlmostOut",
+  "notifyCuttingClose",
+  "notifyWillRunOut",
+  "spendTab",
+  "spendMetric",
+  "showUsed",
+  "resetExact",
+  "timeFormat",
+  "layout",
+  "appearance",
+  "density",
+  "glassEffects",
+  "shortcut",
+  "proxy",
+  "showTotalSpend",
+  "welcomeDismissed",
+  "lastSeenVersion",
+  "reduceAnimations",
+  "hideUsageWhileSharing",
+  "locale",
+] as const satisfies readonly (keyof Config)[];
+type _AssertAllConfigKeys = Exclude<keyof Config, (typeof FRONTEND_CONFIG_KEYS)[number]> extends never
+  ? true
+  : Exclude<keyof Config, (typeof FRONTEND_CONFIG_KEYS)[number]>;
+const _assertAllConfigKeys: _AssertAllConfigKeys = true;
+void _assertAllConfigKeys;
+
 interface TrayProjectionProvider {
   metricOrder: string[];
   hidden: string[];
@@ -505,13 +539,21 @@ function fmtExact(ts: number): string {
 let configSaveQueue: Promise<void> = Promise.resolve();
 let configSaveError: string | null = null;
 
+function snapshotConfig(): Config {
+  const payload = {} as Record<string, unknown>;
+  for (const key of FRONTEND_CONFIG_KEYS) {
+    payload[key] = config[key];
+  }
+  return JSON.parse(JSON.stringify(payload)) as Config;
+}
+
 function applyConfigEcho(sent: Config, echoed: Config): void {
   // Keep newer in-memory fields. Only take server canonicalization for
-  // keys that still match the snapshot this save actually wrote.
+  // frontend keys that still match the snapshot this save actually wrote.
   const current = config as unknown as Record<string, unknown>;
   const from = sent as unknown as Record<string, unknown>;
   const echo = echoed as unknown as Record<string, unknown>;
-  for (const key of Object.keys(echo)) {
+  for (const key of FRONTEND_CONFIG_KEYS) {
     if (JSON.stringify(current[key]) === JSON.stringify(from[key])) {
       current[key] = echo[key];
     }
@@ -522,7 +564,7 @@ async function patchConfig(patch: Partial<Config>): Promise<void> {
   Object.assign(config, patch);
   // Send a full current snapshot. If an earlier serialized write failed,
   // the next save retries that still-live in-memory state as well.
-  const payload = JSON.parse(JSON.stringify(config)) as Config;
+  const payload = snapshotConfig();
   const save = configSaveQueue.then(async () => {
     const echoed = await invoke<Config>("set_config", { patch: payload });
     applyConfigEcho(payload, echoed);
