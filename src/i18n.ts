@@ -33,6 +33,8 @@ const en: Dict = {
   "footer.twoStars": "Up to 2 stars per provider",
   "footer.redeeming": "Redeeming reset credit…",
   "footer.redeemFailed": "Redeem failed: {err}",
+  "footer.configSaveFailed": "Settings were not saved and may be lost after restart: {err}",
+  "footer.traySyncFailed": "Tray display could not update; it will retry: {err}",
 
   "update.check": "Checking for updates…",
   "update.to": "⬆ Update to v{version}",
@@ -340,6 +342,8 @@ const zh: Dict = {
   "footer.twoStars": "每个服务最多加星 2 项",
   "footer.redeeming": "正在兑换重置额度…",
   "footer.redeemFailed": "兑换失败：{err}",
+  "footer.configSaveFailed": "配置未保存，重启后可能丢失：{err}",
+  "footer.traySyncFailed": "托盘显示更新失败，将自动重试：{err}",
 
   "update.check": "正在检查更新…",
   "update.to": "⬆ 更新到 v{version}",

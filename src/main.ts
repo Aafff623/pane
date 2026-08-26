@@ -12,6 +12,7 @@ import {
   setActiveLocale,
   setSystemLocale,
   t,
+  type Locale,
   type LocalePref,
 } from "./i18n";
 
@@ -205,6 +206,61 @@ interface Config {
   locale: LocalePref;
 }
 
+const FRONTEND_CONFIG_KEYS = [
+  "refreshMinutes",
+  "disabled",
+  "pinned",
+  "trayProviders",
+  "pacingAlways",
+  "telemetry",
+  "notifyAlmostOut",
+  "notifyCuttingClose",
+  "notifyWillRunOut",
+  "spendTab",
+  "spendMetric",
+  "showUsed",
+  "resetExact",
+  "timeFormat",
+  "layout",
+  "appearance",
+  "density",
+  "glassEffects",
+  "shortcut",
+  "proxy",
+  "showTotalSpend",
+  "welcomeDismissed",
+  "lastSeenVersion",
+  "reduceAnimations",
+  "hideUsageWhileSharing",
+  "locale",
+] as const satisfies readonly (keyof Config)[];
+type _AssertAllConfigKeys = Exclude<keyof Config, (typeof FRONTEND_CONFIG_KEYS)[number]> extends never
+  ? true
+  : Exclude<keyof Config, (typeof FRONTEND_CONFIG_KEYS)[number]>;
+const _assertAllConfigKeys: _AssertAllConfigKeys = true;
+void _assertAllConfigKeys;
+
+interface TrayProjectionProvider {
+  metricOrder: string[];
+  hidden: string[];
+  starred: string[];
+}
+
+interface TrayProjectionConfig {
+  disabled: string[];
+  providerOrder: string[];
+  providers: Record<string, TrayProjectionProvider>;
+  pinned: Config["pinned"];
+  locale: Locale;
+}
+
+interface TrayStripEntry {
+  id: string;
+  logo: number[];
+  values: number[];
+  tooltip: string;
+}
+
 const ALL_PROVIDERS: [string, string][] = [
   ["claude", "Claude"],
   ["codex", "Codex"],
@@ -365,13 +421,34 @@ let refreshing = false;
 // API key races the auto-refresh timer). Dropping it would leave the new
 // state unfetched and the status line stuck on the save message.
 let refreshQueued = false;
+let refreshQueuedUsageOnly = true;
 // A key saved while the first refresh is still in flight. First-run (and
 // "new provider") auto-disable keys off that fetch's no_credentials list,
 // which can predate the save and park the provider we just turned on.
 // Value is the refresh generation that was in flight (or last completed)
 // at save time — the exemption lasts through that pass plus one more.
 const recentlyKeyed = new Map<string, number>();
+// Newly enabled providers stay out of every Tray projection until their
+// required forced usage attempt has completed. Value is the enable
+// generation that must finish before this id may appear.
+const pendingProviderEnables = new Map<string, number>();
+let providerEnableGeneration = 0;
+
+function markProviderEnablePending(id: string): number {
+  const generation = ++providerEnableGeneration;
+  pendingProviderEnables.set(id, generation);
+  return generation;
+}
+
+function finishProviderEnable(id: string, generation: number): void {
+  if (pendingProviderEnables.get(id) !== generation) return;
+  pendingProviderEnables.delete(id);
+  requestTraySync();
+}
+
 let refreshGeneration = 0;
+let completedRefreshGeneration = 0;
+const refreshAttemptWaiters: Array<{ generation: number; resolve: () => void }> = [];
 let lastAppliedSpendGen = 0;
 let refreshTimer: number | undefined;
 let lastSnapshots: Snapshot[] = [];
@@ -416,6 +493,10 @@ function clampPercent(value: number): number {
   return Math.min(100, Math.max(0, value));
 }
 
+function remainingPercent(metric: Metric): number {
+  return Math.round(100 - clampPercent(metric.used_percent ?? 0));
+}
+
 function fmtMoney(v: number): string {
   if (v >= 1000) return `$${(v / 1000).toFixed(1)}K`;
   return `$${v.toFixed(2)}`;
@@ -455,8 +536,49 @@ function fmtExact(ts: number): string {
   return t("time.dateAt", { date, time });
 }
 
+let configSaveQueue: Promise<void> = Promise.resolve();
+let configSaveError: string | null = null;
+
+function snapshotConfig(): Config {
+  const payload = {} as Record<string, unknown>;
+  for (const key of FRONTEND_CONFIG_KEYS) {
+    payload[key] = config[key];
+  }
+  return JSON.parse(JSON.stringify(payload)) as Config;
+}
+
+function applyConfigEcho(sent: Config, echoed: Config): void {
+  // Keep newer in-memory fields. Only take server canonicalization for
+  // frontend keys that still match the snapshot this save actually wrote.
+  const current = config as unknown as Record<string, unknown>;
+  const from = sent as unknown as Record<string, unknown>;
+  const echo = echoed as unknown as Record<string, unknown>;
+  for (const key of FRONTEND_CONFIG_KEYS) {
+    if (JSON.stringify(current[key]) === JSON.stringify(from[key])) {
+      current[key] = echo[key];
+    }
+  }
+}
+
 async function patchConfig(patch: Partial<Config>): Promise<void> {
-  config = await invoke<Config>("set_config", { patch });
+  Object.assign(config, patch);
+  // Send a full current snapshot. If an earlier serialized write failed,
+  // the next save retries that still-live in-memory state as well.
+  const payload = snapshotConfig();
+  const save = configSaveQueue.then(async () => {
+    const echoed = await invoke<Config>("set_config", { patch: payload });
+    applyConfigEcho(payload, echoed);
+    configSaveError = null;
+  });
+  configSaveQueue = save.catch(() => {});
+  try {
+    await save;
+  } catch (err) {
+    configSaveError = String(err);
+    const status = document.querySelector("#status");
+    if (status) status.textContent = t("footer.configSaveFailed", { err: configSaveError });
+    throw err;
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -731,7 +853,7 @@ function providerLayout(id: string): ProviderLayout {
   );
 }
 
-function saveLayout(): void {
+function saveLayout(syncTray = true): void {
   if (!config.layout) return;
   // Undo history: remember the state we're moving away from.
   const next = JSON.stringify(config.layout);
@@ -741,6 +863,7 @@ function saveLayout(): void {
   }
   lastLayoutSnapshot = next;
   void patchConfig({ layout: config.layout });
+  if (syncTray) requestTraySync();
 }
 
 // ---------------------------------------------------------------------------
@@ -1971,7 +2094,7 @@ function undoLayout(): void {
   lastLayoutSnapshot = prev;
   void patchConfig({ layout: config.layout });
   renderAll();
-  void updateTrayStrip();
+  requestTraySync();
   document.querySelector("#status")!.textContent = "Layout change undone";
 }
 
@@ -2068,10 +2191,6 @@ systemLight.addEventListener("change", () => {
 // ---------------------------------------------------------------------------
 
 function isStarrable(s: Snapshot | undefined, key: string): boolean {
-  // Account-scoped cards (claude@<hash>) can't reach the tray strip — the
-  // Rust side validates ids against a fixed allowlist — so offering the ★
-  // there would be a silent no-op. Default family cards only.
-  if (s && s.id.includes("@")) return false;
   return s?.metrics.some((m) => m.label === key && m.kind === "progress") ?? false;
 }
 
@@ -2384,6 +2503,7 @@ async function paintCachedSnapshots(): Promise<void> {
     lastSnapshots = cached;
     ensureLayout();
     renderIfVisible();
+    requestTraySync();
   } catch {
     // No cache readable — the live fetch paints, as before.
   }
@@ -2395,12 +2515,31 @@ function setRefreshLock(on: boolean): void {
   document.querySelector("#refresh")?.setAttribute("aria-busy", on ? "true" : "false");
 }
 
-async function refresh(force = false): Promise<void> {
+function completeRefreshAttempt(generation: number): void {
+  completedRefreshGeneration = Math.max(completedRefreshGeneration, generation);
+  for (let index = refreshAttemptWaiters.length - 1; index >= 0; index -= 1) {
+    if (refreshAttemptWaiters[index].generation <= completedRefreshGeneration) {
+      refreshAttemptWaiters.splice(index, 1)[0].resolve();
+    }
+  }
+}
+
+async function forceUsageRefreshAttempt(usageOnly = true): Promise<void> {
+  const generation = refreshGeneration + 1;
+  const completed = new Promise<void>((resolve) => {
+    refreshAttemptWaiters.push({ generation, resolve });
+  });
+  void refresh(true, usageOnly);
+  await completed;
+}
+
+async function refresh(force = false, usageOnly = false): Promise<void> {
   if (refreshing) {
     // Remember a forced request instead of dropping it: the in-flight
     // fetch may have started before whatever prompted this one (a saved
     // key, a toggle), so one more pass runs when it finishes.
     if (force) {
+      refreshQueuedUsageOnly = refreshQueued ? refreshQueuedUsageOnly && usageOnly : usageOnly;
       refreshQueued = true;
       // The save message (or a stale "Updated") would otherwise sit on
       // the footer until the in-flight fetch ends, and Refresh looks dead.
@@ -2416,10 +2555,12 @@ async function refresh(force = false): Promise<void> {
   // The spend scan re-reads every session log on a cold start and can take
   // tens of seconds — it must never hold up the usage cards' first paint,
   // or the Refresh button (the lock used to stay on until spend finished).
-  const spendPromise = invoke<ProviderSpend[]>("fetch_spend").catch(() => null);
+  const spendPromise = usageOnly
+    ? Promise.resolve<ProviderSpend[] | null>(null)
+    : invoke<ProviderSpend[]>("fetch_spend").catch(() => null);
   try {
     await unparkRecentlyKeyed();
-    let snapshots = await invoke<Snapshot[]>("fetch_usage");
+    let snapshots = await invoke<Snapshot[]>("fetch_usage", { disabled: [...config.disabled] });
     // First launch ever (no layout yet): start with only the providers that
     // actually have credentials on this PC, like the Mac app's first-run
     // detection. The rest stay available in Customize.
@@ -2504,19 +2645,27 @@ async function refresh(force = false): Promise<void> {
     }
     renderIfVisible();
     if (firstData && !customizeOpen && !document.hidden) playReveal();
-    void updateTrayStrip();
+    requestTraySync();
     const time = new Date().toLocaleTimeString(localeTag(), { hour: "2-digit", minute: "2-digit" });
-    status.textContent = t("footer.updated", { time });
+    status.textContent = configSaveError
+      ? t("footer.configSaveFailed", { err: configSaveError })
+      : t("footer.updated", { time });
   } catch (err) {
-    status.textContent = t("footer.refreshFailed", { err: String(err) });
+    status.textContent = configSaveError
+      ? t("footer.configSaveFailed", { err: configSaveError })
+      : t("footer.refreshFailed", { err: String(err) });
   } finally {
     setRefreshLock(false);
+    completeRefreshAttempt(myGen);
     if (refreshQueued) {
       refreshQueued = false;
-      void refresh(true);
+      const queuedUsageOnly = refreshQueuedUsageOnly;
+      refreshQueuedUsageOnly = true;
+      void refresh(true, queuedUsageOnly);
     }
   }
   const spend = await spendPromise;
+  if (usageOnly) return;
   spendLoaded = true;
   // Overlapping scans are allowed now that Refresh unlocks before spend
   // finishes. Keep the newest successful result — a later failed scan
@@ -2530,9 +2679,9 @@ async function refresh(force = false): Promise<void> {
 }
 
 function scheduleAutoRefresh(): void {
-  if (refreshTimer !== undefined) clearInterval(refreshTimer);
+  if (refreshTimer !== undefined) window.clearInterval(refreshTimer);
   const minutes = Math.max(1, config.refreshMinutes || 5);
-  refreshTimer = setInterval(() => void refresh(), minutes * 60 * 1000);
+  refreshTimer = window.setInterval(() => void refresh(), minutes * 60 * 1000);
 }
 
 const logoPixels = new Map<string, number[]>();
@@ -2572,40 +2721,121 @@ async function rasterizeLogo(id: string): Promise<number[] | null> {
   }
 }
 
-/// The tray strip now follows the stars: any provider with starred metrics
-/// gets a [logo][numbers] pair, in customize order (max 4 providers).
-async function updateTrayStrip(): Promise<void> {
-  const entries = [];
-  const order = config.layout?.providerOrder ?? [];
-  for (const id of order) {
+interface TraySyncState {
+  snapshots: Snapshot[];
+  projection: TrayProjectionConfig;
+}
+
+let pendingTraySync: TraySyncState | null = null;
+let traySyncRunning = false;
+let traySyncFailureShown = false;
+let traySyncFailureText = "";
+
+function captureTraySyncState(): TraySyncState {
+  const providerOrder = [...(config.layout?.providerOrder ?? [])];
+  const providers: Record<string, TrayProjectionProvider> = {};
+  for (const id of providerOrder) {
+    const layout = providerLayout(id);
+    providers[id] = {
+      metricOrder: [...layout.metricOrder],
+      hidden: [...layout.hidden],
+      starred: [...layout.starred],
+    };
+  }
+  return {
+    snapshots: lastSnapshots.map((snapshot) => ({
+      ...snapshot,
+      metrics: snapshot.metrics.map((metric) => ({ ...metric })),
+    })),
+    projection: {
+      disabled: [...new Set([...config.disabled, ...pendingProviderEnables.keys()])],
+      providerOrder,
+      providers,
+      pinned: config.pinned ? { ...config.pinned } : null,
+      locale: resolveLocale(config.locale),
+    },
+  };
+}
+
+async function buildTrayStripEntries(state: TraySyncState): Promise<TrayStripEntry[]> {
+  const entries: TrayStripEntry[] = [];
+  for (const id of state.projection.providerOrder) {
     if (entries.length >= 4) break;
-    if (config.disabled.includes(id)) continue; // no tray icons for disabled providers
-    const L = providerLayout(id);
-    if (!L.starred.length) continue;
-    const snap = lastSnapshots.find((s) => s.id === id && s.status === "ok");
-    if (!snap) continue;
-    const starredMetrics = L.starred
-      .map((label) => snap.metrics.find((m) => m.label === label && m.kind === "progress"))
-      .filter((m): m is Metric => Boolean(m))
+    if (state.projection.disabled.includes(id)) continue;
+    const layout = state.projection.providers[id];
+    if (!layout?.starred.length) continue;
+    const snapshot = state.snapshots.find((candidate) => candidate.id === id && candidate.status === "ok");
+    if (!snapshot) continue;
+    const starredMetrics = layout.starred
+      .filter((label) => !layout.hidden.includes(label))
+      .map((label) =>
+        snapshot.metrics.find((metric) => metric.label === label && metric.kind === "progress"),
+      )
+      .filter((metric): metric is Metric => Boolean(metric))
       .slice(0, 2);
     if (!starredMetrics.length) continue;
-    const logo = await rasterizeLogo(id);
+    const logo = await rasterizeLogo(providerFamily(id));
     if (!logo) continue;
-    const values = starredMetrics.map((m) => Math.round(100 - clampPercent(m.used_percent ?? 0)));
-    const tooltip = `${snap.name}\n${starredMetrics
-      .map((m) =>
+    const values = starredMetrics.map(remainingPercent);
+    const name = snapshot.stale ? `⚠ ${snapshot.name}` : snapshot.name;
+    const tooltip = `${name}\n${starredMetrics
+      .map((metric) =>
         t("tray.left", {
-          label: displayMetricLabel(m.label),
-          n: Math.round(100 - clampPercent(m.used_percent ?? 0)),
+          label: displayMetricLabel(metric.label),
+          n: remainingPercent(metric),
         }),
       )
       .join("\n")}`;
     entries.push({ id, logo, values, tooltip });
   }
+  return entries;
+}
+
+function requestTraySync(): void {
+  pendingTraySync = captureTraySyncState();
+  if (!traySyncRunning) void drainTraySyncQueue();
+}
+
+async function drainTraySyncQueue(): Promise<void> {
+  if (traySyncRunning) return;
+  traySyncRunning = true;
   try {
-    await invoke("update_tray_strip", { entries });
-  } catch {
-    // Tray strip is cosmetic — never let it break a refresh.
+    while (pendingTraySync) {
+      const state = pendingTraySync;
+      pendingTraySync = null;
+      const entries = await buildTrayStripEntries(state);
+      // Rasterizing a logo may yield while the user changes configuration.
+      // Skip this stale generation before it reaches either native surface.
+      if (pendingTraySync) continue;
+      try {
+        await invoke("sync_tray_surfaces", {
+          snapshots: state.snapshots,
+          projection: state.projection,
+          entries,
+        });
+        if (traySyncFailureShown) {
+          const status = document.querySelector("#status");
+          if (status && status.textContent === traySyncFailureText) {
+            status.textContent = configSaveError
+              ? t("footer.configSaveFailed", { err: configSaveError })
+              : "";
+          }
+        }
+        traySyncFailureShown = false;
+        traySyncFailureText = "";
+      } catch (err) {
+        if (!traySyncFailureShown) {
+          const status = document.querySelector("#status");
+          const message = t("footer.traySyncFailed", { err: String(err) });
+          if (status) status.textContent = message;
+          traySyncFailureShown = true;
+          traySyncFailureText = message;
+        }
+      }
+    }
+  } finally {
+    traySyncRunning = false;
+    if (pendingTraySync) void drainTraySyncQueue();
   }
 }
 
@@ -2668,9 +2898,9 @@ function handleCustomizeClick(target: HTMLElement): boolean {
       // ones with no credentials on this PC.
       config.layout = null;
       config.disabled = [];
-      void patchConfig({ layout: null, disabled: [] }).then(() => {
+      void patchConfig({ layout: null, disabled: [] }).catch(() => {}).then(() => {
         setDrawer(false);
-        void refresh(true).then(() => void updateTrayStrip());
+        void forceUsageRefreshAttempt(false).then(requestTraySync);
       });
     });
     return true;
@@ -2683,7 +2913,6 @@ function handleCustomizeClick(target: HTMLElement): boolean {
     config.layout.providers[id] = defaultProviderLayout(snapshot, spend, false);
     saveLayout();
     renderAll();
-    void updateTrayStrip();
     return true;
   }
   const star = target.closest<HTMLElement>("[data-star]");
@@ -2700,7 +2929,6 @@ function handleCustomizeClick(target: HTMLElement): boolean {
     }
     saveLayout();
     renderAll();
-    void updateTrayStrip();
     return true;
   }
   return false;
@@ -2730,9 +2958,12 @@ function handleCustomizeChange(target: HTMLInputElement): void {
   if (target.dataset.enable !== undefined) {
     const id = target.dataset.enable;
     const enable = target.checked;
+    const enableGeneration = enable ? markProviderEnablePending(id) : null;
+    if (!enable) pendingProviderEnables.delete(id);
     pendingToggles.push({ id, enable });
     config.disabled = withPendingToggles(config.disabled); // optimistic
     renderAll(); // disabled cards vanish from the dashboard immediately
+    if (!enable) requestTraySync();
     disabledSaveQueue = disabledSaveQueue.then(async () => {
       // Fresh base at save time: includes server truth plus anything
       // refresh() changed while earlier saves were in flight.
@@ -2743,11 +2974,16 @@ function handleCustomizeChange(target: HTMLInputElement): void {
         // keep going — the delta stays applied locally
       }
       pendingToggles.shift(); // this task's toggle is now persisted
-      // patchConfig replaced config with the server echo; merge any newer
-      // still-pending toggles back on top of it.
+      // Merge any newer still-pending toggles back on top of the saved state.
       config.disabled = withPendingToggles(config.disabled);
-      // Only an enable needs fresh data; a disable is purely local.
-      if (enable) await refresh(true).catch(() => {});
+      // Only an unmatched enable generation still needs a usage attempt.
+      if (
+        enableGeneration !== null &&
+        pendingProviderEnables.get(id) === enableGeneration
+      ) {
+        await forceUsageRefreshAttempt();
+        finishProviderEnable(id, enableGeneration);
+      }
     });
     return;
   }
@@ -2830,7 +3066,6 @@ function setupCustomizeDnD(providersEl: HTMLElement): void {
         config.layout.providerOrder = order;
         saveLayout();
         renderAll();
-        void updateTrayStrip();
       }
     }
     dragPayload = null;
@@ -2855,6 +3090,7 @@ async function unparkRecentlyKeyed(): Promise<void> {
 async function saveApiKey(provider: string): Promise<void> {
   const input = document.querySelector<HTMLInputElement>(`#key-${provider}`)!;
   const status = document.querySelector("#status")!;
+  let enableGeneration: number | undefined;
   try {
     const key = input.value;
     if (!key.trim()) {
@@ -2863,6 +3099,9 @@ async function saveApiKey(provider: string): Promise<void> {
       // Mark before any await so an in-flight first-run pass cannot park
       // this provider after our save returns.
       recentlyKeyed.set(provider, refreshGeneration);
+      if (config.disabled.includes(provider)) {
+        enableGeneration = markProviderEnablePending(provider);
+      }
     }
     await invoke("set_api_key", { provider, key });
     input.value = "";
@@ -2877,9 +3116,13 @@ async function saveApiKey(provider: string): Promise<void> {
     }
     const name = providerDisplayName(provider);
     status.textContent = t("footer.keySaved", { name });
-    await refresh(true);
+    await forceUsageRefreshAttempt();
+    if (enableGeneration !== undefined) finishProviderEnable(provider, enableGeneration);
+    else requestTraySync();
   } catch (err) {
     recentlyKeyed.delete(provider);
+    if (enableGeneration !== undefined) finishProviderEnable(provider, enableGeneration);
+    else requestTraySync();
     status.textContent = t("footer.keySaveFailed", { err: String(err) });
   }
 }
@@ -2974,10 +3217,9 @@ async function initSettings(): Promise<void> {
   localeSel.value = config.locale;
   localeSel.addEventListener("change", () => {
     const next = normalizeLocalePref(localeSel.value);
-    void patchConfig({ locale: next }).then(() => {
-      applyLocale();
-      void updateTrayStrip();
-    });
+    void patchConfig({ locale: next }).catch(() => {});
+    applyLocale();
+    requestTraySync();
   });
 
   const notifyToggles: [string, keyof Config][] = [
@@ -2998,7 +3240,8 @@ async function initSettings(): Promise<void> {
   pinned.addEventListener("change", () => {
     const [provider, label] = pinned.value.split("::");
     const value = provider && label ? { provider, label } : null;
-    void patchConfig({ pinned: value }).then(() => refresh(true));
+    void patchConfig({ pinned: value }).catch(() => {});
+    requestTraySync();
   });
 
   const showSpend = document.querySelector<HTMLInputElement>("#show-total-spend")!;
@@ -3037,7 +3280,8 @@ async function initSettings(): Promise<void> {
   const hideShare = document.querySelector<HTMLInputElement>("#hide-while-sharing")!;
   hideShare.checked = config.hideUsageWhileSharing === true;
   hideShare.addEventListener("change", () => {
-    void patchConfig({ hideUsageWhileSharing: hideShare.checked }).then(() => void updateTrayStrip());
+    void patchConfig({ hideUsageWhileSharing: hideShare.checked }).catch(() => {});
+    requestTraySync();
   });
 
   const shortcut = document.querySelector<HTMLInputElement>("#shortcut")!;
@@ -3120,7 +3364,7 @@ async function resetAllSettings(): Promise<void> {
     reduceAnimations: false,
     hideUsageWhileSharing: false,
     locale: "auto",
-  });
+  }).catch(() => {});
   spendTab = "today";
   applyLocale();
   syncSettingsControls();
@@ -3130,7 +3374,7 @@ async function resetAllSettings(): Promise<void> {
   applyReduceMotion();
   document.body.classList.remove("settings-open");
   document.querySelector("#settings-btn")?.classList.remove("active");
-  void refresh(true).then(() => void updateTrayStrip());
+  void forceUsageRefreshAttempt(false).then(requestTraySync);
 }
 
 function syncSettingsControls(): void {
@@ -3324,6 +3568,7 @@ window.addEventListener("DOMContentLoaded", () => {
     const L = config.layout!;
     L.providerOrder = [...domIds, ...L.providerOrder.filter((id) => !domIds.includes(id))];
     void patchConfig({ layout: L });
+    requestTraySync();
     updateTrailActive();
   };
   providersEl.addEventListener("drop", (e) => {
@@ -3400,7 +3645,7 @@ window.addEventListener("DOMContentLoaded", () => {
       const id = caret.dataset.caret!;
       const L = providerLayout(id);
       L.expanded = !L.expanded;
-      saveLayout();
+      saveLayout(false);
       animateExpandId = L.expanded ? id : null;
       renderAll();
       animateExpandId = null;
@@ -3459,7 +3704,7 @@ window.addEventListener("DOMContentLoaded", () => {
   });
 
   void listen("tray-strip-restore", () => {
-    void updateTrayStrip();
+    requestTraySync();
   });
 
   void listen("popover-shown", () => {
@@ -3485,6 +3730,7 @@ window.addEventListener("DOMContentLoaded", () => {
     providersEl.scrollTop = 0;
     updateTrailActive();
     if (lastSnapshots.length && !customizeOpen) playReveal();
+    requestTraySync();
     void refresh();
   });
   void initSettings().then(() => {
