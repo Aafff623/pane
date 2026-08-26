@@ -1,6 +1,6 @@
 # Roadmap — full Mac parity (and beyond)
 
-**Status (v0.4.42, 2026-08-23): every wave below is shipped, and the
+**Status (v0.4.43, 2026-08-26): every wave below is shipped, and the
 post-launch releases keep going.** Pane has full feature parity with the
 macOS original plus 21 providers, signed auto-updates published by CI,
 Codex reset-credit redemption, update-check-on-open with a one-click
