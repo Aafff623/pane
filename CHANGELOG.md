@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.4.43 — 2026-08-26
+
+### Added
+- **Grok reset credits** show on the card as read-only rows (no Use
+  button). A **Status** link opens [status.x.ai](https://status.x.ai)
+  next to Usage.
+
+### Fixed
+- **Tray follows Customize.** Hide, disable, star, pin, and card order
+  now drive the tray icon and tooltip. A newly enabled provider stays
+  off the tray until a refresh finishes. If a save or tray update fails,
+  the footer says so instead of staying quiet.
+
 ## 0.4.42 — 2026-08-23
 
 ### Added
