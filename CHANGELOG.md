@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+- **Customize keeps progress bars where you put them.** Dragging a
+  meter like Codex Extra credits into Show more used to look like it
+  saved, then the next usage refresh yanked it back above Usage Trend.
+  That "bars stay visible" rule now only places a row the first time
+  it appears. A later refresh no longer undoes the drag (issue #166).
+
 ## 0.4.43 — 2026-08-26
 
 ### Added
