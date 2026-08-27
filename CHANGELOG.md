@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.4.44 — 2026-08-27
 
 ### Fixed
 - **Customize keeps progress bars where you put them.** Dragging a
