@@ -830,8 +830,6 @@ fn builtin_price(canonical: &str) -> Option<Price> {
         // output $6, implicit cache read $0.25, explicit cache write $2.50.
         // Public catalogs still carry 0/0 placeholders for these slugs.
         "qwen3.8-max" | "qwen3.8-max-preview" => Some(Price::flat(2.0, 6.0, 0.25, 2.5)),
-        "qwen3.8-flash" | "qwen3.8-flash-next" => Some(Price::flat(0.16, 0.47, 0.016, 0.2)),
-        "hy4-preview" => Some(Price::flat(0.834, 2.501, 0.042, 0.834)),
         // Grok 4.6, released 2026-08-12 — docs.x.ai/docs/pricing (USD/MTok):
         // $2 in / $0.50 cached / $6 out; prompts ≥200k bill $4 / $1 / $12
         // for the WHOLE request (xAI's long-context rule matches
@@ -1008,15 +1006,15 @@ mod tests {
     }
 
     #[test]
-    fn hy4_and_qwen38_flash_launch_prices() {
+    fn aihubmix_hy4_and_qwen38_flash_launch_prices_stay_scoped() {
         let store = super::Store::default();
-        for slug in ["hy4-preview", "tencent/hy4-preview"] {
-            let p = super::resolve(&store, slug, 0).unwrap_or_else(|| panic!("{slug} unpriced"));
-            assert_eq!((p.input, p.output, p.cache_read), (0.834, 2.501, 0.042));
-        }
-        for slug in ["qwen3.8-flash", "qwen/qwen3.8-flash"] {
-            let p = super::resolve(&store, slug, 0).unwrap_or_else(|| panic!("{slug} unpriced"));
-            assert_eq!((p.input, p.output, p.cache_read, p.cache_write), (0.16, 0.47, 0.016, 0.2));
+        for slug in [
+            "hy4-preview",
+            "tencent/hy4-preview",
+            "qwen3.8-flash",
+            "qwen/qwen3.8-flash",
+        ] {
+            assert!(super::resolve(&store, slug, 0).is_none(), "{slug}");
         }
 
         let hy4 = super::resolve(&store, "aihubmix/hy4-preview", 0).unwrap();
