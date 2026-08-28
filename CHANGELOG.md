@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+### Added
+- **Russian in Settings → Language.** Same surfaces as Chinese: cards,
+  Settings, Customize, tray tooltips, and quota toasts. Auto follows the
+  PC display language (Chinese or Russian). Provider names, plan names,
+  and the changelog stay English.
+
 ### Fixed
 - **Hermes recognizes HY4 Preview and Qwen3.8 Flash spend.** New-model
   sessions routed through AihubMix now use that gateway's live prices,
