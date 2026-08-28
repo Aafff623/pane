@@ -58,6 +58,7 @@ fn zh_metric(label: &str) -> String {
         "Requests this month" => "本月请求".into(),
         "Requests this cycle" => "本周期请求".into(),
         "Last used" => "上次使用".into(),
+        "Recent models" => "最近使用的模型".into(),
         "Via" => "经由".into(),
         "Sessions" => "会话数".into(),
         other if other.starts_with("Reset credit ") => {

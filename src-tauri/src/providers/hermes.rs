@@ -29,6 +29,7 @@ pub struct HermesUsage {
     pub billing_provider: String,
     pub billing_base_url: String,
     pub session_id: String,
+    pub task: String,
     pub input: f64,
     pub output: f64,
     pub reasoning: f64,
@@ -71,30 +72,53 @@ fn fetch() -> Snapshot {
     )
 }
 
-/// Card face: last model, which backend billed it, how many sessions.
+/// Card face: recent user-selected models, their backends, and session count.
 /// Dollar totals live on the spend rows (Today / Yesterday / Last 30 Days)
 /// so these labels must not collide with those names.
 fn metrics_from_events(events: &[HermesUsage]) -> Vec<Metric> {
     let mut metrics = Vec::new();
-    let last = events.iter().max_by_key(|e| e.ts_ms);
-    match last {
-        Some(ev) if !ev.model.is_empty() => {
-            metrics.push(Metric::text(
-                "Last used",
-                display_model(&ev.model).to_string(),
-            ));
-            metrics.push(Metric::text(
-                "Via",
-                route_label(&ev.billing_provider, &ev.billing_base_url),
-            ));
-        }
-        _ => metrics.push(Metric::text("Last used", "None yet".into())),
+    let recent = recent_models(events);
+    if recent.is_empty() {
+        metrics.push(Metric::text("Recent models", "None yet".into()));
+    } else {
+        metrics.push(Metric::text(
+            "Recent models",
+            recent
+                .iter()
+                .map(|ev| display_model(&ev.model))
+                .collect::<Vec<_>>()
+                .join(" + "),
+        ));
+        let mut seen = std::collections::HashSet::new();
+        let routes = recent
+            .iter()
+            .map(|ev| route_label(&ev.billing_provider, &ev.billing_base_url))
+            .filter(|route| seen.insert(route.clone()))
+            .collect::<Vec<_>>()
+            .join(" + ");
+        metrics.push(Metric::text("Via", routes));
     }
     let sessions = unique_sessions(events);
     if sessions > 0 {
         metrics.push(Metric::text("Sessions", sessions.to_string()));
     }
     metrics
+}
+
+fn recent_models(events: &[HermesUsage]) -> Vec<&HermesUsage> {
+    let mut recent = events
+        .iter()
+        .filter(|ev| ev.task.is_empty() && !ev.model.is_empty())
+        .collect::<Vec<_>>();
+    recent.sort_by_key(|ev| std::cmp::Reverse(ev.ts_ms));
+    let Some(latest) = recent.first().map(|ev| ev.ts_ms) else { return recent };
+    let cutoff = latest.saturating_sub(24 * 60 * 60 * 1000);
+    let mut seen = std::collections::HashSet::new();
+    recent.retain(|ev| {
+        ev.ts_ms >= cutoff && seen.insert(display_model(&ev.model).to_ascii_lowercase())
+    });
+    recent.truncate(2);
+    recent
 }
 
 fn unique_sessions(events: &[HermesUsage]) -> usize {
@@ -158,15 +182,19 @@ pub fn spend_slice(provider: &str, base_url: &str) -> (&'static str, &'static st
     }
 }
 
-/// Catalog key for this Hermes row. Bare `glm-5.3` is unpriced globally
-/// (other vendors' rates aren't AihubMix's preview); when this row went
-/// through AihubMix, look up the gateway SKU instead.
+/// Catalog key for this Hermes row. AihubMix prices can differ from the
+/// model vendor or another gateway, so verified AihubMix rows use scoped
+/// keys that cannot leak those rates onto other routes.
 pub fn price_lookup_slug(model: &str, provider: &str, base_url: &str) -> String {
-    if display_model(model) == "glm-5.3" && route_blob(provider, base_url).contains("aihubmix") {
-        "coding-glm-5.3".into()
-    } else {
-        model.into()
+    if route_blob(provider, base_url).contains("aihubmix") {
+        return match display_model(model) {
+            "glm-5.3" => "coding-glm-5.3".into(),
+            "hy4-preview" => "aihubmix/hy4-preview".into(),
+            "qwen3.8-flash" => "aihubmix/qwen3.8-flash".into(),
+            _ => model.into(),
+        };
     }
+    model.into()
 }
 
 /// Per-session-per-model usage from Hermes's local store. Cached on the
@@ -217,8 +245,8 @@ pub fn collect_usage_events() -> Vec<HermesUsage> {
 
 fn read_usage_events(db: &std::path::Path) -> Result<Vec<HermesUsage>, String> {
     let conn = rusqlite::Connection::open(db).map_err(|e| format!("open db copy: {e}"))?;
-    // Optional columns (session_id, billing_base_url) were added as Hermes
-    // grew; a ledger from an older build must still yield tokens/cost.
+    // Optional columns (session_id, billing_base_url, task) were added as
+    // Hermes grew; an older ledger must still yield tokens and cost.
     let cols = table_columns(&conn)?;
     let session_expr = if cols.iter().any(|c| c == "session_id") {
         "COALESCE(session_id, '')"
@@ -230,13 +258,18 @@ fn read_usage_events(db: &std::path::Path) -> Result<Vec<HermesUsage>, String> {
     } else {
         "''"
     };
+    let task_expr = if cols.iter().any(|c| c == "task") {
+        "COALESCE(task, '')"
+    } else {
+        "''"
+    };
     // last_seen/first_seen are epoch seconds as REAL; costs may be NULL.
     let sql = format!(
         "SELECT last_seen, model, billing_provider,
                 input_tokens, output_tokens, reasoning_tokens,
                 cache_read_tokens, cache_write_tokens,
                 COALESCE(actual_cost_usd, 0.0), COALESCE(estimated_cost_usd, 0.0),
-                {session_expr}, {url_expr}
+                {session_expr}, {url_expr}, {task_expr}
          FROM session_model_usage"
     );
     let mut stmt = conn
@@ -258,6 +291,7 @@ fn read_usage_events(db: &std::path::Path) -> Result<Vec<HermesUsage>, String> {
                 cost_usd: if actual > 0.0 { actual } else { estimated },
                 session_id: row.get::<_, String>(10).unwrap_or_default(),
                 billing_base_url: row.get::<_, String>(11).unwrap_or_default(),
+                task: row.get::<_, String>(12).unwrap_or_default(),
             })
         })
         .map_err(|e| format!("read session_model_usage: {e}"))?;
@@ -285,6 +319,7 @@ mod tests {
             billing_provider: provider.into(),
             billing_base_url: url.into(),
             session_id: session.into(),
+            task: String::new(),
             input: 1.0,
             output: 1.0,
             reasoning: 0.0,
@@ -295,38 +330,42 @@ mod tests {
     }
 
     #[test]
-    fn empty_ledger_still_has_a_last_used_row() {
+    fn empty_ledger_still_has_a_recent_models_row() {
         let m = metrics_from_events(&[]);
-        assert_eq!(m[0].label, "Last used");
+        assert_eq!(m[0].label, "Recent models");
         assert_eq!(m[0].value.as_deref(), Some("None yet"));
         assert_eq!(m.len(), 1);
     }
 
     #[test]
-    fn card_shows_latest_model_gateway_and_session_count() {
+    fn card_shows_recent_user_models_gateway_and_session_count() {
+        let mut internal = ev(101_000_000, "glm-5", "", "", "s1");
+        internal.task = "title_generation".into();
         let events = [
-            ev(1, "glm-5.3", "aihubmix", "https://aihubmix.com/v1", "s1"),
+            ev(1, "glm-5.3", "aihubmix", "https://aihubmix.com/v1", "s3"),
             ev(
-                9,
-                "accounts/fireworks/models/deepseek-v4-pro-0813",
+                100_000_000,
+                "qwen3.8-flash",
                 "custom",
                 "https://aihubmix.com/v1/",
-                "s2",
-            ),
-            ev(
-                5,
-                "coding-glm-5.3",
-                "custom",
-                "https://aihubmix.com/v1",
                 "s1",
             ),
+            ev(
+                99_000_000,
+                "hy4-preview",
+                "aihubmix",
+                "https://aihubmix.com/v1",
+                "s2",
+            ),
+            internal,
         ];
         let m = metrics_from_events(&events);
-        assert_eq!(m[0].value.as_deref(), Some("deepseek-v4-pro-0813"));
+        assert_eq!(m[0].label, "Recent models");
+        assert_eq!(m[0].value.as_deref(), Some("qwen3.8-flash + hy4-preview"));
         assert_eq!(m[1].label, "Via");
         assert_eq!(m[1].value.as_deref(), Some("AihubMix"));
         assert_eq!(m[2].label, "Sessions");
-        assert_eq!(m[2].value.as_deref(), Some("2"));
+        assert_eq!(m[2].value.as_deref(), Some("3"));
     }
 
     #[test]
@@ -379,6 +418,26 @@ mod tests {
     }
 
     #[test]
+    fn aihubmix_launch_models_use_gateway_specific_skus() {
+        assert_eq!(
+            price_lookup_slug("hy4-preview", "aihubmix", "https://aihubmix.com/v1"),
+            "aihubmix/hy4-preview"
+        );
+        assert_eq!(
+            price_lookup_slug("qwen3.8-flash", "custom", "https://aihubmix.com/v1"),
+            "aihubmix/qwen3.8-flash"
+        );
+        assert_eq!(
+            price_lookup_slug("tencent/hy4-preview", "openrouter", ""),
+            "tencent/hy4-preview"
+        );
+        assert_eq!(
+            price_lookup_slug("qwen3.8-flash", "custom", "https://example.com/v1"),
+            "qwen3.8-flash"
+        );
+    }
+
+    #[test]
     fn display_model_peels_gateway_prefixes() {
         assert_eq!(display_model("coding-glm-5.3"), "coding-glm-5.3");
         assert_eq!(
@@ -412,5 +471,6 @@ mod tests {
         assert_eq!(events[0].input, 10.0);
         assert!(events[0].session_id.is_empty());
         assert!(events[0].billing_base_url.is_empty());
+        assert!(events[0].task.is_empty());
     }
 }

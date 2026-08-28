@@ -654,6 +654,21 @@ function ensureLayout(): void {
       }
     }
   }
+  const hermesHasRecentModels = lastSnapshots.some(
+    (s) => providerFamily(s.id) === "hermes" && s.metrics.some((m) => m.label === "Recent models"),
+  );
+  if (hermesHasRecentModels) {
+    for (const [pid, L] of Object.entries(layout.providers)) {
+      if (providerFamily(pid) !== "hermes") continue;
+      for (const list of [L.metricOrder, L.hidden, L.starred, L.onDemand]) {
+        const at = list.indexOf("Last used");
+        if (at < 0) continue;
+        if (list.includes("Recent models")) list.splice(at, 1);
+        else list[at] = "Recent models";
+        changed = true;
+      }
+    }
+  }
   // On bucket-era accounts "Total usage" became a text row — the tray
   // strip and pinned tray number only accept progress metrics, so a
   // star/pin on it would silently vanish. Repoint both to the nearest

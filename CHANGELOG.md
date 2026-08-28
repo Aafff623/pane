@@ -8,6 +8,13 @@
   PC display language (Chinese or Russian). Provider names, plan names,
   and the changelog stay English.
 
+### Fixed
+- **Hermes recognizes HY4 Preview and Qwen3.8 Flash spend.** New-model
+  sessions routed through AihubMix now use that gateway's live prices,
+  so their tokens no longer collapse into a misleading `$0.00` Other row.
+  The card lists the two most recent user models and leaves Hermes's small
+  title-generation and approval calls out of that summary.
+
 ## 0.4.44 — 2026-08-27
 
 ### Fixed
