@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+### Added
+- **Russian in Settings → Language.** Same surfaces as Chinese: cards,
+  Settings, Customize, tray tooltips, and quota toasts. Auto follows the
+  PC display language (Chinese or Russian). Provider names, plan names,
+  and the changelog stay English.
+
 ## 0.4.43 — 2026-08-26
 
 ### Added

@@ -231,18 +231,15 @@ fn format_provider_line(
         return name;
     };
     let mut line = crate::i18n::pct_left(locale, &name, &first.label, percent_left(first));
-    let separator = if crate::i18n::is_zh(locale) {
-        "，"
-    } else {
-        ", "
-    };
+    let resolved = crate::i18n::resolved_locale(locale);
+    let separator = if resolved == "zh" { "，" } else { ", " };
     for metric in metrics {
         let fragment = {
             let label = crate::i18n::metric_label(locale, &metric.label);
-            if crate::i18n::is_zh(locale) {
-                format!("{label}: 剩余 {:.0}%", percent_left(metric))
-            } else {
-                format!("{label}: {:.0}% left", percent_left(metric))
+            match resolved {
+                "zh" => format!("{label}: 剩余 {:.0}%", percent_left(metric)),
+                "ru" => format!("{label}: осталось {:.0}%", percent_left(metric)),
+                _ => format!("{label}: {:.0}% left", percent_left(metric)),
             }
         };
         line.push_str(separator);
@@ -568,15 +565,27 @@ mod tests {
 
     #[test]
     fn locale_changes_text_without_changing_selection() {
-        let snapshots = vec![snapshot("codex", "Codex", vec![progress("Weekly", 23.0)])];
+        let snapshots = vec![snapshot(
+            "codex",
+            "Codex",
+            vec![progress("Weekly", 23.0), progress("Session", 10.0)],
+        )];
         let en = project_main_tray(&snapshots, &config(&["codex"]), false);
         let mut zh_config = config(&["codex"]);
         zh_config.locale = "zh".into();
+        let mut ru_config = config(&["codex"]);
+        ru_config.locale = "ru".into();
 
         let zh = project_main_tray(&snapshots, &zh_config, false);
+        let ru = project_main_tray(&snapshots, &ru_config, false);
 
         assert_eq!(en.remaining_percentages, zh.remaining_percentages);
-        assert_eq!(zh.tooltip, "Pane\nCodex 每周: 剩余 77%");
+        assert_eq!(en.remaining_percentages, ru.remaining_percentages);
+        assert_eq!(zh.tooltip, "Pane\nCodex 每周: 剩余 77%，会话: 剩余 90%");
+        assert_eq!(
+            ru.tooltip,
+            "Pane\nCodex За неделю: осталось 77%, Сессия: осталось 90%"
+        );
     }
 
     #[test]

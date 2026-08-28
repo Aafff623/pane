@@ -1,9 +1,9 @@
-// Frontend locale: Settings stores auto / en / zh. Metric row labels from
+// Frontend locale: Settings stores auto / en / zh / ru. Metric row labels from
 // Rust stay English in config.layout (stars, pins, Customize keys); only
 // the painted text switches.
 
-export type LocalePref = "auto" | "en" | "zh";
-export type Locale = "en" | "zh";
+export type LocalePref = "auto" | "en" | "zh" | "ru";
+export type Locale = "en" | "zh" | "ru";
 
 type Dict = Record<string, string>;
 
@@ -48,6 +48,7 @@ const en: Dict = {
   "settings.langAuto": "Auto",
   "settings.langEn": "English",
   "settings.langZh": "中文",
+  "settings.langRu": "Русский",
   "settings.refreshEvery": "Refresh every",
   "settings.min": "min",
   "settings.startWithWindows": "Start with Windows",
@@ -357,6 +358,7 @@ const zh: Dict = {
   "settings.langAuto": "自动",
   "settings.langEn": "English",
   "settings.langZh": "中文",
+  "settings.langRu": "Русский",
   "settings.refreshEvery": "刷新间隔",
   "settings.min": "分钟",
   "settings.startWithWindows": "开机启动",
@@ -614,6 +616,316 @@ const zh: Dict = {
   "detail.countOfUsed": "已用 {a} / {b}",
 };
 
+const ru: Dict = {
+  "sidebar.theme": "Светлая / тёмная тема",
+  "sidebar.themeToDark": "Переключить на тёмную тему",
+  "sidebar.themeToLight": "Переключить на светлую тему",
+  "sidebar.refresh": "Обновить сейчас",
+  "sidebar.customize": "Настройка",
+  "sidebar.settings": "Настройки",
+  "sidebar.cards": "Навигация по карточкам",
+
+  "footer.starting": "Запуск…",
+  "footer.refreshing": "Обновление…",
+  "footer.updated": "Обновлено {time}",
+  "footer.refreshFailed": "Ошибка обновления: {err}",
+  "footer.keySaved": "Ключ {name} сохранён",
+  "footer.keySaveFailed": "Не удалось сохранить ключ: {err}",
+  "footer.shortcutSaved": "Ярлык сохранён",
+  "footer.shortcutCleared": "Ярлык сброшен",
+  "footer.proxySaved": "Прокси сохранён — заработает после перезапуска",
+  "footer.autostartFailed": "Автозапуск не удался: {err}",
+  "footer.copied": "Скопировано в буфер",
+  "footer.shareFailed": "Не удалось поделиться: {err}",
+  "footer.updateFailed": "Ошибка обновления: {err}",
+  "footer.openLinkFailed": "Не удалось открыть ссылку: {err}",
+  "footer.twoStars": "Не больше 2 звёзд на сервис",
+  "footer.redeeming": "Применяем сброс лимита…",
+  "footer.redeemFailed": "Не удалось применить сброс: {err}",
+  "footer.configSaveFailed": "Настройки не сохранены и могут быть утеряны после перезапуска: {err}",
+  "footer.traySyncFailed": "Не удалось обновить значок в трее; будет повторная попытка: {err}",
+
+  "update.check": "Проверка обновлений…",
+  "update.to": "⬆ Обновить до v{version}",
+  "update.installing": "Установка…",
+  "update.retry": "⬆ Обновить до v{version} — повторить",
+
+  "settings.done": "← Готово",
+  "settings.title": "Настройки",
+  "settings.general": "Общие",
+  "settings.language": "Язык",
+  "settings.langAuto": "Авто",
+  "settings.langEn": "English",
+  "settings.langZh": "中文",
+  "settings.langRu": "Русский",
+  "settings.refreshEvery": "Обновлять каждые",
+  "settings.min": "мин",
+  "settings.startWithWindows": "Запускать с Windows",
+  "settings.pacing": "Всегда показывать темп",
+  "settings.trayShows": "Значок в трее показывает",
+  "settings.pinAuto": "Авто (первый живой показатель)",
+  "settings.pinOption": "{name} — {label}",
+  "settings.timeFormat": "Формат времени",
+  "settings.timeAuto": "Авто",
+  "settings.time12": "12 часов",
+  "settings.time24": "24 часа",
+  "settings.appearance": "Оформление",
+  "settings.appearSystem": "Как в системе",
+  "settings.appearLight": "Светлая",
+  "settings.appearDark": "Тёмная",
+  "settings.compact": "Компактный вид",
+  "settings.glass": "Эффект жидкого стекла",
+  "settings.glassTip":
+    "На слабых ПК лучше выключить — вместо стекла будет простой фон",
+  "settings.reduceAnim": "Меньше анимации",
+  "settings.reduceAnimTip":
+    "Пропустить появление карточек и переход день/ночь. Настройка Windows «Эффекты анимации» всё равно учитывается.",
+  "settings.showSpend": "Показывать карточку общих трат",
+  "settings.shortcut": "Глобальная горячая клавиша",
+  "settings.shortcutPh": "например Ctrl+Shift+U",
+
+  "settings.notifications": "Уведомления",
+  "settings.notifyNote":
+    "Всплывающие уведомления Windows, когда квота ухудшается — один раз на показатель за период сброса.",
+  "settings.notifyAlmost": "Почти кончилось (осталось <10%)",
+  "settings.notifyClose": "Запас на исходе",
+  "settings.notifyRunout": "Кончится до сброса",
+
+  "settings.privacy": "Конфиденциальность",
+  "settings.privacyNote":
+    'Один анонимный сигнал «сегодня жив» и счётчики успеха/сбоя по сервисам, раз в день, под случайным ID без привязки. Без объёмов, трат и IP. Подробности в docs/privacy.md.',
+  "settings.telemetry": "Делиться анонимной статистикой",
+  "settings.hideSharing": "Скрывать цифры в трее при демонстрации экрана",
+  "settings.hideSharingTip":
+    "В режиме презентации, полноэкранном режиме или удалённом управлении проценты в трее скрываются. Значок Pane и логотипы со звёздами остаются. Демонстрация окна в Teams/Zoom не определяется. По умолчанию выключено.",
+
+  "settings.network": "Сеть",
+  "settings.useProxy": "Использовать прокси",
+  "settings.proxyUrl": "Адрес прокси",
+  "settings.networkNote":
+    "Применяется после перезапуска. Локальный API всегда на http://127.0.0.1:6736/v1/usage",
+
+  "settings.apiKeys": "Ключи API",
+  "settings.apiKeysNote":
+    "Хранятся только на этом ПК (%APPDATA%\\Pane). Оставьте пустым и сохраните, чтобы удалить.",
+  "settings.save": "Сохранить",
+  "settings.keyPlaceholder": "Ключ API",
+  "settings.keyPhMinimax": "Ключ API (можно взять из CLI)",
+  "settings.keyPhMoonshot": "sk-… (ключ platform.kimi.ai)",
+  "settings.keyPhCodebuff": "Ключ API (можно взять из CLI)",
+  "settings.keyPhKilo": "Ключ API (можно взять из CLI)",
+  "settings.keyPhAihubmix": "sk-… (можно взять из OpenCode)",
+  "settings.keyPhQwen": "sk-sp-… (можно взять из переменных среды)",
+
+  "settings.advanced": "Дополнительно",
+  "settings.advancedNote":
+    "Вернёт все настройки к значениям по умолчанию и заново найдёт установленные инструменты. Ключи API и история использования останутся. Смена прокси по-прежнему требует перезапуска.",
+  "settings.resetAll": "Сбросить все настройки",
+  "settings.changelog": "Что нового · Журнал изменений",
+  "settings.customizeHint":
+    "Сервисы, порядок строк и звёзды трея — в «Настройка» (☰ в боковой панели). Там можно отметить до 2 показателей на сервис — они появятся значками в трее.",
+
+  "settings.resetTitle": "Сбросить все настройки?",
+  "settings.resetBody":
+    "Тема, плотность, уведомления, ярлык, прокси, темп, звёзды трея и раскладки карточек вернутся к значениям по умолчанию. Установленные инструменты будут найдены заново. Ключи API и история использования останутся. Смена прокси по-прежнему требует перезапуска.",
+  "settings.resetConfirm": "Сбросить всё",
+
+  "dialog.cancel": "Отмена",
+  "dialog.gotIt": "Понятно",
+  "dialog.changelog": "Журнал изменений",
+  "dialog.whatsNew": "Что нового в v{version}",
+
+  "card.notConnected": "Не подключено",
+  "card.outdated": "⚠ Данные устарели",
+  "card.showMore": "Ещё",
+  "card.showLess": "Свернуть",
+  "card.share": "Скопировать карточку как изображение",
+  "card.drag": "Перетащите, чтобы изменить порядок",
+  "card.notStarted": "Ещё не началось",
+  "card.notStartedTip": "Окно начнётся после первого сообщения.",
+  "card.resetsSoon": "Скоро сброс",
+  "card.resetsIn": "Сброс через {time}",
+  "card.resetsAt": "Сброс {when}",
+  "card.expires": "Истекает {when}",
+  "card.available": "Доступно",
+  "card.use": "Использовать",
+  "card.useTip": "Потратить этот кредит, чтобы сразу сбросить лимиты Codex",
+  "card.creditDying": "Этот кредит истечёт через {time} — используйте или пропадёт.",
+  "card.pctUsed": "Использовано {n}%",
+  "card.pctLeft": "Осталось {n}%",
+  "card.noData": "Нет данных",
+  "card.tokens": "{n} tokens",
+  "card.tokensEst": "{cost} · {n} tokens · оценка",
+  "card.tokensPlain": "{cost} · {n} tokens",
+
+  "pace.limitReached": "🔥 Лимит исчерпан",
+  "pace.limitReachedTitle": "Лимит исчерпан",
+  "pace.limitAt": "Лимит {when}",
+  "pace.limitIn": "Лимит через {time}",
+  "pace.overReset": "~{n}% сверх лимита к сбросу",
+  "pace.fullReset": "~100% к сбросу",
+  "pace.spare": "запас ~{n}%",
+  "pace.usedReset": "~{n}% будет использовано к сбросу",
+  "pace.leftReset": "~{n}% останется к сбросу",
+
+  "time.today": "сегодня в {time}",
+  "time.tomorrow": "завтра в {time}",
+  "time.dateAt": "{date} в {time}",
+  "time.daysHours": "{d}д {h}ч",
+  "time.hoursMins": "{h}ч {m}м",
+  "time.mins": "{m}м",
+
+  "stale.lastFailed": "Последнее обновление не удалось",
+  "stale.reloginDefault":
+    "снова вставьте ключ API в Настройках (или войдите в инструмент один раз)",
+  "stale.fixRetry": "Pane сам повторяет попытки — ничего делать не нужно, пока это не затянется.",
+  "stale.fixDone": "Pane восстановится сам, как только это будет сделано.",
+  "stale.fixRelogin": "Что сделать: {how} — Pane подхватит это при следующем обновлении.",
+  "stale.fix429":
+    "Сервис ограничивает частоту запросов; Pane ждёт ровно столько, сколько просили, и повторяет сам.",
+  "stale.fix5xx":
+    "У сервиса сбой API; Pane повторяет попытки, пока тот не восстановится.",
+  "stale.fixNet":
+    "Pane не достучался до сервиса — проверьте интернет (или прокси в Настройках).",
+  "stale.tail": "Пока показываем последние хорошие данные.",
+  "stale.relogin.claude": "запустите `claude` в терминале и войдите",
+  "stale.relogin.codex": "запустите `codex login` в терминале",
+  "stale.relogin.grok": "запустите `grok` в терминале и войдите",
+  "stale.relogin.copilot": "запустите `gh auth login` в терминале",
+  "stale.relogin.cursor": "откройте Cursor и войдите снова",
+  "stale.relogin.devin": "запустите `devin` в терминале и войдите",
+  "stale.relogin.opencode": "запустите `opencode auth login` в терминале",
+  "stale.relogin.antigravity": "откройте Antigravity и войдите снова",
+  "stale.relogin.ollama": "убедитесь, что Ollama запущена",
+  "stale.relogin.hermes":
+    "откройте приложение Hermes один раз, чтобы оно записало локальный журнал",
+  "stale.relogin.kimi": "запустите `kimi login` в терминале",
+
+  "unpriced.tip":
+    "{n} запросов шли на модели без публичных цен ({models}). Токены учтены, но в доллары их не перевести — реальная стоимость чуть выше, чем на экране.",
+
+  "spend.title": "Всего потрачено",
+  "spend.scanning": "Сканирование журналов сессий…",
+  "spend.emptyFirst":
+    "Пока нет данных о тратах — появятся, когда Claude Code, Codex или другой CLI запишет использование на этом ПК.",
+  "spend.emptyPeriod": "За этот период трат нет.",
+  "spend.emptyPeriodTip": "За этот период траты не записаны.",
+  "spend.info":
+    "Источники: {names}. Все цифры — локальные оценки по журналам самих инструментов.",
+  "spend.clickTip":
+    "{exact} — посчитано локально по журналам сессий. Нажмите, чтобы показать {next}.",
+  "spend.today": "Сегодня",
+  "spend.yesterday": "Вчера",
+  "spend.days30": "30 дней",
+  "spend.last30": "Последние 30 дней",
+  "spend.trend": "Динамика",
+  "spend.trendTip":
+    "Последние 30 дней ({from} – {to}) · пик {tokens} tokens {peak} · из локальных журналов",
+  "spend.others": "Другие",
+  "spend.underEach": "Каждый меньше ${limit}:",
+  "spend.metric.cost": "доллары",
+  "spend.metric.mtok": "стоимость за млн токенов",
+  "spend.metric.tokens": "tokens",
+  "spend.centerTokens": "tokens",
+  "spend.noUsage": "Нет использования",
+  "spend.of30": "{n}% за последние 30 дней",
+  "spend.noModelData": "За этот период нет разбивки по моделям.",
+
+  "metric.session": "Сессия",
+  "metric.weekly": "За неделю",
+  "metric.monthly": "За месяц",
+  "metric.daily": "За день",
+  "metric.usage": "Использование",
+  "metric.credits": "Кредиты",
+  "metric.creditsUsed": "Использовано кредитов",
+  "metric.api": "API",
+  "metric.balance": "Баланс",
+  "metric.vouchers": "Ваучеры",
+  "metric.cash": "Наличные",
+  "metric.limit": "Лимит",
+  "metric.used": "Использовано",
+  "metric.onDemand": "По факту",
+  "metric.cursorModels": "Модели Cursor",
+  "metric.otherModels": "Другие модели",
+  "metric.totalUsage": "Всего",
+  "metric.bonus": "Бонус",
+  "metric.extraUsage": "Дополнительно",
+  "metric.extraCredits": "Доп. кредиты",
+  "metric.resetCredit": "Сброс лимита",
+  "metric.resetCreditNumbered": "Сброс лимита {n}",
+  "metric.resetCredits": "Сброс лимита",
+  "metric.extraBalance": "Доп. баланс",
+  "metric.kiloPass": "Kilo Pass",
+  "metric.reqToday": "Запросы сегодня",
+  "metric.reqMonth": "Запросы в этом месяце",
+  "metric.reqCycle": "Запросы за цикл",
+  "metric.lastUsed": "Последнее использование",
+  "metric.via": "Через",
+  "metric.sessions": "Сессии",
+  "metric.modelWeekly": "{model} за неделю",
+
+  "link.Status": "Статус",
+  "link.Dashboard": "Панель",
+  "link.Usage": "Использование",
+  "link.Credits": "Кредиты",
+  "link.Platform": "Платформа",
+  "link.Activity": "Активность",
+  "link.API Keys": "Ключи API",
+  "link.Console": "Консоль",
+  "link.Coding Plan": "Тариф для кода",
+  "link.Library": "Библиотека",
+  "link.Site": "Сайт",
+  "link.Quota": "Квота",
+  "link.API": "API",
+
+  "welcome.title": "Добро пожаловать 👋",
+  "welcome.body":
+    "Настроены инструменты ИИ, найденные на этом ПК. Карточки, звёзды трея и скрытые строки — в «Настройка».",
+  "welcome.open": "Открыть настройку",
+  "welcome.dismiss": "Закрыть",
+
+  "customize.done": "← Готово",
+  "customize.starred": "Отмечено {n} · перетащите ⠿, чтобы изменить порядок",
+  "customize.resetAll": "↺ Сбросить всё",
+  "customize.resetAllTip":
+    "Вернуть раскладки всех карточек по умолчанию — лимиты использования не трогает",
+  "customize.resetLayout": "Сбросить раскладку",
+  "customize.resetLayoutTip":
+    "Вернуть раскладку этой карточки по умолчанию — лимиты использования не трогает",
+  "customize.enable": "Включить сервис",
+  "customize.expand": "Развернуть",
+  "customize.collapse": "Свернуть",
+  "customize.dragRows": "Перетащите, чтобы изменить порядок",
+  "customize.dragProviders": "Перетащите, чтобы изменить порядок сервисов",
+  "customize.star": "Звезда в трее (не больше 2)",
+  "customize.onDemand": "Ещё — за стрелкой на карточке",
+  "customize.noData": "Пока нет данных — сначала включите этот сервис и обновите.",
+  "customize.resetTitle": "Сбросить все раскладки?",
+  "customize.resetBody":
+    "Порядок, звёзды и скрытые строки вернутся к значениям по умолчанию, установленные инструменты ИИ будут найдены заново. Лимиты использования не изменятся.",
+  "customize.resetConfirm": "Сбросить всё",
+
+  "redeem.title": "Использовать сброс лимита?",
+  "redeem.body":
+    "Это сразу сбросит окна лимитов Codex и отменить нельзя. Обновлённые окна могут появиться через пару минут.",
+  "redeem.confirm": "Использовать",
+
+  "share.tagline": "Следите за подписками ИИ с Pane",
+  "tray.left": "{label}: осталось {n}%",
+
+  "detail.unlimited": "Без лимита",
+  "detail.moneyOfLeft": "{a} / {b} осталось",
+  "detail.moneyOfLeftCredits": "{a} / {b} осталось · {n} кредитов",
+  "detail.moneyLeftOf": "{a} / {b} осталось",
+  "detail.moneyOfUsed": "Использовано {a} / {b}",
+  "detail.moneyOfLimit": "{a} / {b} лимит",
+  "detail.moneyOf": "{a} / {b}",
+  "detail.moneyCredits": "{a} · {n} кредитов",
+  "detail.countCreditsUsed": "Использовано {a} / {b} кредитов",
+  "detail.countOfLeft": "{a} / {b} осталось",
+  "detail.countOfUsed": "Использовано {a} / {b}",
+};
+
 const METRIC_KEYS: Record<string, string> = {
   Session: "metric.session",
   Weekly: "metric.weekly",
@@ -656,7 +968,10 @@ let active: Locale = "en";
 let systemLocale: Locale | null = null;
 
 export function detectSystemLocale(): Locale {
-  return (navigator.language || "").toLowerCase().startsWith("zh") ? "zh" : "en";
+  const lang = (navigator.language || "").toLowerCase();
+  if (lang.startsWith("zh")) return "zh";
+  if (lang.startsWith("ru")) return "ru";
+  return "en";
 }
 
 export function setSystemLocale(locale: Locale): void {
@@ -664,12 +979,12 @@ export function setSystemLocale(locale: Locale): void {
 }
 
 export function resolveLocale(pref: string | undefined): Locale {
-  if (pref === "zh" || pref === "en") return pref;
+  if (pref === "zh" || pref === "en" || pref === "ru") return pref;
   return systemLocale ?? detectSystemLocale();
 }
 
 export function normalizeLocalePref(raw: unknown): LocalePref {
-  return raw === "en" || raw === "zh" || raw === "auto" ? raw : "auto";
+  return raw === "en" || raw === "zh" || raw === "ru" || raw === "auto" ? raw : "auto";
 }
 
 export function setActiveLocale(locale: Locale): void {
@@ -681,11 +996,13 @@ export function getLocale(): Locale {
 }
 
 export function localeTag(): string {
-  return active === "zh" ? "zh-CN" : "en-US";
+  if (active === "zh") return "zh-CN";
+  if (active === "ru") return "ru-RU";
+  return "en-US";
 }
 
 export function t(key: string, vars?: Record<string, string | number>): string {
-  const dict = active === "zh" ? zh : en;
+  const dict = active === "zh" ? zh : active === "ru" ? ru : en;
   let s = dict[key] ?? en[key] ?? key;
   if (vars) {
     for (const [k, v] of Object.entries(vars)) {
@@ -719,7 +1036,7 @@ export function displayLinkLabel(label: string): string {
 /// Rust still emits English captions ("$21.80 of $79.56 left · 545 credits").
 /// Translate the known shapes at paint time so layout keys stay English.
 export function displayMetricDetail(text: string): string {
-  if (getLocale() !== "zh" || !text) return text;
+  if (getLocale() === "en" || !text) return text;
   const money = "\\$[\\d,]+(?:\\.\\d+)?K?";
   const num = "[\\d,]+(?:\\.\\d+)?";
   let m = text.match(new RegExp(`^(${money}) of (${money}) left(?: · (\\d+) credits)?$`, "i"));
@@ -750,7 +1067,7 @@ export function displayMetricDetail(text: string): string {
 }
 
 export function applyStaticI18n(): void {
-  document.documentElement.lang = active === "zh" ? "zh-CN" : "en";
+  document.documentElement.lang = localeTag();
   document.querySelectorAll<HTMLElement>("[data-i18n]").forEach((el) => {
     const key = el.dataset.i18n;
     if (key) el.textContent = t(key);
