@@ -781,23 +781,11 @@ function ensureLayout(): void {
         if (m.kind !== "progress") L.onDemand.push(m.label);
         changed = true;
       }
-      // A metric that upgraded from text to a progress bar (Extra
-      // credits/balance when funded) must surface like one: bars never
-      // hide behind Show more, and they sit above the Usage Trend.
-      if (m.kind === "progress") {
-        const tucked = L.onDemand.indexOf(m.label);
-        if (tucked >= 0) {
-          L.onDemand.splice(tucked, 1);
-          changed = true;
-        }
-        const at = L.metricOrder.indexOf(m.label);
-        const trendAt = L.metricOrder.indexOf(TREND_KEY);
-        if (at >= 0 && trendAt >= 0 && at > trendAt) {
-          L.metricOrder.splice(at, 1);
-          L.metricOrder.splice(L.metricOrder.indexOf(TREND_KEY), 0, m.label);
-          changed = true;
-        }
-      }
+      // Do not yank an existing progress row out of Show more or shuffle
+      // it above Usage Trend on later refreshes. Extra credits flips
+      // text↔progress with balance; a Customize drag would otherwise
+      // bounce back on the next snapshot (issue #166). New rows still
+      // land always-visible above the trend via the first-seen branch.
     }
     if (spend) {
       if (!L.metricOrder.includes(TREND_KEY)) {
