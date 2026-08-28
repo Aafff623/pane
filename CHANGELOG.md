@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.4.45 — 2026-08-29
 
 ### Added
 - **Russian in Settings → Language.** Same surfaces as Chinese: cards,
