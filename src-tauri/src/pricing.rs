@@ -166,7 +166,7 @@ pub fn generation() -> u64 {
 /// fingerprinted below — an app update that reprices the same files would
 /// otherwise leave history at the old dollars until upstream happens to
 /// rewrite a catalog.
-const CORRECTIONS_REV: u32 = 8; // 8: Moonshot first-party Kimi rates (plan slugs + K3/K2.7/K2.6/K2.5/V1)
+const CORRECTIONS_REV: u32 = 9; // 9: AihubMix HY4 Preview and Qwen3.8 Flash launch pricing
 
 /// The corrections revision on its own — the spend cache treats a changed
 /// revision as a hard discard (the *code* that prices changed), while a
@@ -796,6 +796,13 @@ fn builtin_price(canonical: &str) -> Option<Price> {
     if let Some(p) = kimi_vendor_price(canonical) {
         return Some(p);
     }
+    match canonical {
+        "aihubmix/hy4-preview" => return Some(Price::flat(0.845, 2.535, 0.04225, 0.845)),
+        "aihubmix/qwen3.8-flash" => {
+            return Some(Price::flat(0.1126, 0.380025, 0.014075, 0.175937));
+        }
+        _ => {}
+    }
     let bare = canonical.rsplit('/').next().unwrap_or(canonical);
     match bare {
         // AihubMix DeepSeek V4 family — the gateway's OWN rate cards
@@ -823,6 +830,8 @@ fn builtin_price(canonical: &str) -> Option<Price> {
         // output $6, implicit cache read $0.25, explicit cache write $2.50.
         // Public catalogs still carry 0/0 placeholders for these slugs.
         "qwen3.8-max" | "qwen3.8-max-preview" => Some(Price::flat(2.0, 6.0, 0.25, 2.5)),
+        "qwen3.8-flash" | "qwen3.8-flash-next" => Some(Price::flat(0.16, 0.47, 0.016, 0.2)),
+        "hy4-preview" => Some(Price::flat(0.834, 2.501, 0.042, 0.834)),
         // Grok 4.6, released 2026-08-12 — docs.x.ai/docs/pricing (USD/MTok):
         // $2 in / $0.50 cached / $6 out; prompts ≥200k bill $4 / $1 / $12
         // for the WHOLE request (xAI's long-context rule matches
@@ -996,6 +1005,27 @@ mod tests {
         store.litellm.insert("glm-5.3".into(), super::Price::flat(1.0, 3.0, 0.25, 1.0));
         let p = super::resolve(&store, "glm-5.3", 0).unwrap();
         assert!((p.input - 1.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn hy4_and_qwen38_flash_launch_prices() {
+        let store = super::Store::default();
+        for slug in ["hy4-preview", "tencent/hy4-preview"] {
+            let p = super::resolve(&store, slug, 0).unwrap_or_else(|| panic!("{slug} unpriced"));
+            assert_eq!((p.input, p.output, p.cache_read), (0.834, 2.501, 0.042));
+        }
+        for slug in ["qwen3.8-flash", "qwen/qwen3.8-flash"] {
+            let p = super::resolve(&store, slug, 0).unwrap_or_else(|| panic!("{slug} unpriced"));
+            assert_eq!((p.input, p.output, p.cache_read, p.cache_write), (0.16, 0.47, 0.016, 0.2));
+        }
+
+        let hy4 = super::resolve(&store, "aihubmix/hy4-preview", 0).unwrap();
+        assert_eq!((hy4.input, hy4.output, hy4.cache_read), (0.845, 2.535, 0.04225));
+        let qwen = super::resolve(&store, "aihubmix/qwen3.8-flash", 0).unwrap();
+        assert_eq!(
+            (qwen.input, qwen.output, qwen.cache_read, qwen.cache_write),
+            (0.1126, 0.380025, 0.014075, 0.175937)
+        );
     }
 
     #[test]

@@ -2120,7 +2120,7 @@ mod tests {
         let doc = PersistFile {
             version: PERSIST_VERSION,
             pricing_stamp: "litellm:1:2|modelsdev:3:4|supplement:5:6".into(),
-            corrections: 8,
+            corrections: pricing::corrections_rev(),
             entries: vec![PersistEntry {
                 path: PathBuf::from(r"C:\logs\session.jsonl"),
                 mtime_secs: 1_784_600_000,
