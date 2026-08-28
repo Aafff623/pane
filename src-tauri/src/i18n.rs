@@ -100,6 +100,7 @@ fn ru_metric(label: &str) -> String {
         "Requests this month" => "Запросы в этом месяце".into(),
         "Requests this cycle" => "Запросы за цикл".into(),
         "Last used" => "Последнее использование".into(),
+        "Recent models" => "Недавние модели".into(),
         "Via" => "Через".into(),
         "Sessions" => "Сессии".into(),
         other if other.starts_with("Reset credit ") => {
@@ -175,6 +176,7 @@ mod tests {
         assert_eq!(metric_label(&ru, "Sonnet weekly"), "Sonnet за неделю");
         assert_eq!(metric_label(&ru, "Reset credit"), "Сброс лимита");
         assert_eq!(metric_label(&ru, "Reset credit 2"), "Сброс лимита 2");
+        assert_eq!(metric_label(&ru, "Recent models"), "Недавние модели");
         assert_eq!(quit_label(&ru), "Выйти из Pane");
     }
 

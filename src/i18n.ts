@@ -860,6 +860,7 @@ const ru: Dict = {
   "metric.reqMonth": "Запросы в этом месяце",
   "metric.reqCycle": "Запросы за цикл",
   "metric.lastUsed": "Последнее использование",
+  "metric.recentModels": "Недавние модели",
   "metric.via": "Через",
   "metric.sessions": "Сессии",
   "metric.modelWeekly": "{model} за неделю",
