@@ -117,11 +117,7 @@ fn config_with_defaults(mut cfg: Value) -> Value {
 
 #[tauri::command]
 fn system_ui_locale() -> &'static str {
-    if i18n::system_locale_is_zh() {
-        "zh"
-    } else {
-        "en"
-    }
+    i18n::system_ui_locale()
 }
 
 #[tauri::command]
@@ -171,7 +167,7 @@ fn set_config_inner(patch: Value) -> Result<Value, String> {
         for (k, v) in source {
             if CONFIG_KEYS.contains(&k.as_str()) {
                 if k == "locale" {
-                    let ok = matches!(v.as_str(), Some("auto" | "en" | "zh"));
+                    let ok = matches!(v.as_str(), Some("auto" | "en" | "zh" | "ru"));
                     target.insert(k.clone(), if ok { v.clone() } else { json!("auto") });
                 } else {
                     target.insert(k.clone(), v.clone());

@@ -3163,7 +3163,7 @@ async function initSettings(): Promise<void> {
   config.locale = normalizeLocalePref(config.locale);
   try {
     const sys = await invoke<string>("system_ui_locale");
-    setSystemLocale(sys === "zh" ? "zh" : "en");
+    setSystemLocale(sys === "zh" || sys === "ru" ? sys : "en");
   } catch {
     // Dev / missing command — fall back to navigator.language.
   }
