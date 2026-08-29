@@ -143,7 +143,10 @@ mod tests {
 
     #[test]
     fn accepts_structural_payload_regardless_of_branding_or_unit() {
-        assert_eq!(fingerprint_payload(&ok_payload()).unwrap(), DisplayUnit::Usd);
+        assert_eq!(
+            fingerprint_payload(&ok_payload()).unwrap(),
+            DisplayUnit::Usd
+        );
         assert_eq!(
             fingerprint_payload(&json!({
                 "success": true,
@@ -385,7 +388,7 @@ mod tests {
         let err = tauri::async_runtime::block_on(probe("http://example.com")).unwrap_err();
         assert_eq!(
             err,
-            "plain HTTP is only allowed for localhost or local network hosts"
+            "plain HTTP is only allowed for private, loopback, or link-local IP addresses"
         );
     }
 

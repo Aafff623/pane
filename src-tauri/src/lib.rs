@@ -8,7 +8,7 @@ mod telemetry;
 mod tray_projection;
 
 use std::collections::{HashMap, HashSet};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Mutex, OnceLock};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -30,8 +30,8 @@ const STALE_GRACE_MS: i64 = 3 * 60 * 1000;
 // App settings, stored at %APPDATA%\Pane\config.json
 // ---------------------------------------------------------------------------
 
-fn config_path() -> PathBuf {
-    providers::config_dir().join("config.json")
+fn config_path_in(dir: &Path) -> PathBuf {
+    dir.join("config.json")
 }
 
 /// A parse failure here once silently reset all settings to defaults, so
@@ -61,7 +61,11 @@ fn parse_config_file(path: &PathBuf) -> Result<Value, String> {
 }
 
 fn load_config() -> Value {
-    let path = config_path();
+    load_config_from(&providers::config_dir())
+}
+
+fn load_config_from(dir: &Path) -> Value {
+    let path = config_path_in(dir);
     if !path.exists() {
         return json!({});
     }
@@ -69,7 +73,7 @@ fn load_config() -> Value {
         Ok(cfg) => cfg,
         Err(e) => {
             note_config_error(&format!("config.json unreadable ({e}) — trying backup"));
-            let backup = providers::config_dir().join("config.json.bak");
+            let backup = dir.join("config.json.bak");
             match parse_config_file(&backup) {
                 Ok(cfg) => cfg,
                 Err(e2) => {
@@ -171,8 +175,10 @@ const CONFIG_KEYS: &[&str] = &[
     "locale",
 ];
 
-fn set_config_inner(patch: Value) -> Result<Value, String> {
-    let mut cfg = config_with_defaults(load_config());
+static CONFIG_WRITE: Mutex<()> = Mutex::new(());
+static CONFIG_TMP_SEQ: AtomicU64 = AtomicU64::new(0);
+
+fn apply_config_patch(cfg: &mut Value, patch: &Value) {
     if let (Some(target), Some(source)) = (cfg.as_object_mut(), patch.as_object()) {
         for (k, v) in source {
             if CONFIG_KEYS.contains(&k.as_str()) {
@@ -187,18 +193,43 @@ fn set_config_inner(patch: Value) -> Result<Value, String> {
             }
         }
     }
-    let dir = providers::config_dir();
-    std::fs::create_dir_all(&dir).map_err(|e| format!("create config dir: {e}"))?;
-    let path = config_path();
+}
+
+fn persist_config_in(dir: &Path, cfg: &Value) -> Result<(), String> {
+    std::fs::create_dir_all(dir).map_err(|e| format!("create config dir: {e}"))?;
+    let path = config_path_in(dir);
     // Keep the last good copy, then write atomically (temp file + rename) so
     // a crash or kill mid-write can never leave a truncated config behind.
     if path.exists() {
         let _ = std::fs::copy(&path, dir.join("config.json.bak"));
     }
-    let tmp = dir.join("config.json.tmp");
-    std::fs::write(&tmp, serde_json::to_string_pretty(&cfg).unwrap_or_default())
-        .map_err(|e| format!("write config: {e}"))?;
-    std::fs::rename(&tmp, &path).map_err(|e| format!("replace config: {e}"))?;
+    let tmp = dir.join(format!(
+        "config.{}.{}.tmp",
+        std::process::id(),
+        CONFIG_TMP_SEQ.fetch_add(1, Ordering::Relaxed)
+    ));
+    let raw = serde_json::to_string_pretty(cfg).unwrap_or_default();
+    if let Err(e) = std::fs::write(&tmp, raw) {
+        let _ = std::fs::remove_file(&tmp);
+        return Err(format!("write config: {e}"));
+    }
+    if let Err(e) = std::fs::rename(&tmp, &path) {
+        let _ = std::fs::remove_file(&tmp);
+        return Err(format!("replace config: {e}"));
+    }
+    Ok(())
+}
+
+fn set_config_in(dir: &Path, patch: Value) -> Result<Value, String> {
+    let _guard = CONFIG_WRITE.lock().unwrap_or_else(|e| e.into_inner());
+    let mut cfg = config_with_defaults(load_config_from(dir));
+    apply_config_patch(&mut cfg, &patch);
+    persist_config_in(dir, &cfg)?;
+    Ok(cfg)
+}
+
+fn set_config_inner(patch: Value) -> Result<Value, String> {
+    let cfg = set_config_in(&providers::config_dir(), patch)?;
     HIDE_WANT.store(hide_usage_flag(&cfg), Ordering::Relaxed);
     Ok(cfg)
 }
@@ -1002,30 +1033,6 @@ impl Drop for OneNewApiMutationGuard {
     }
 }
 
-fn create_onenewapi_key_consistently<Create, Enable, Rollback>(
-    create: Create,
-    enable: Enable,
-    rollback: Rollback,
-) -> Result<providers::onenewapi::CreatedKey, String>
-where
-    Create: FnOnce() -> Result<providers::onenewapi::CreatedKey, String>,
-    Enable: FnOnce(&str) -> Result<(), String>,
-    Rollback: FnOnce(&providers::onenewapi::CreatedKey) -> Result<(), String>,
-{
-    let created = create()?;
-    if created.first_key {
-        if let Err(enable_error) = enable(&created.key_id) {
-            return match rollback(&created) {
-                Ok(()) => Err(enable_error),
-                Err(rollback_error) => Err(format!(
-                    "{enable_error}; rollback saved key failed: {rollback_error}"
-                )),
-            };
-        }
-    }
-    Ok(created)
-}
-
 /// Strip deleted One/New API *key cards* from config. Never removes family
 /// id `onenewapi` just because keys went away. Returns only changed keys.
 fn purge_onenewapi_from_config(cfg: &mut Value, snapshot_ids: &[String]) -> Value {
@@ -1086,22 +1093,32 @@ fn purge_onenewapi_from_config(cfg: &mut Value, snapshot_ids: &[String]) -> Valu
     Value::Object(patch)
 }
 
-fn purge_onenewapi_cards(key_ids: &[String]) -> Result<(), String> {
-    if key_ids.is_empty() {
-        return Ok(());
-    }
-    forget_onenewapi_key_ids(key_ids.iter().cloned())?;
-    let snapshot_ids = onenewapi_snapshot_ids(key_ids);
+fn persist_onenewapi_config_purge(snapshot_ids: &[String]) -> Result<(), String> {
     // Tests must not rewrite the developer's real config.json.
     if cfg!(test) {
         return Ok(());
     }
     let mut cfg = config_with_defaults(load_config());
-    let patch = purge_onenewapi_from_config(&mut cfg, &snapshot_ids);
+    let patch = purge_onenewapi_from_config(&mut cfg, snapshot_ids);
     if patch.as_object().is_some_and(|o| !o.is_empty()) {
         set_config_inner(patch)?;
     }
     Ok(())
+}
+
+fn purge_onenewapi_cards(key_ids: &[String]) -> Result<(), String> {
+    purge_onenewapi_cards_with(key_ids, persist_onenewapi_config_purge)
+}
+
+fn purge_onenewapi_cards_with(
+    key_ids: &[String],
+    persist_config: impl FnOnce(&[String]) -> Result<(), String>,
+) -> Result<(), String> {
+    if key_ids.is_empty() {
+        return Ok(());
+    }
+    persist_config(&onenewapi_snapshot_ids(key_ids))?;
+    forget_onenewapi_key_ids(key_ids.iter().cloned())
 }
 
 fn onenewapi_after_site_save(
@@ -2108,18 +2125,6 @@ fn onenewapi_apply_zero_to_one_enable(disabled: &mut Vec<Value>, key_id: &str) {
     });
 }
 
-fn onenewapi_enable_first_key(key_id: &str) -> Result<(), String> {
-    let cfg = config_with_defaults(load_config());
-    let mut disabled = cfg
-        .get("disabled")
-        .and_then(Value::as_array)
-        .cloned()
-        .unwrap_or_default();
-    onenewapi_apply_zero_to_one_enable(&mut disabled, key_id);
-    set_config_inner(json!({ "disabled": disabled }))?;
-    Ok(())
-}
-
 #[tauri::command]
 fn onenewapi_create_key(
     site_id: String,
@@ -2127,14 +2132,7 @@ fn onenewapi_create_key(
     api_key: String,
 ) -> Result<providers::onenewapi::CreatedKey, String> {
     let _mutation = OneNewApiMutationGuard::begin(Vec::new());
-    let rollback_site_id = site_id.clone();
-    create_onenewapi_key_consistently(
-        || providers::onenewapi::create_key(site_id, label, api_key),
-        onenewapi_enable_first_key,
-        |created| {
-            providers::onenewapi::delete_key(rollback_site_id, created.key_id.clone()).map(|_| ())
-        },
-    )
+    providers::onenewapi::create_key(site_id, label, api_key)
 }
 
 #[tauri::command]
@@ -2571,12 +2569,13 @@ pub fn run() {
 mod tests {
     use super::{
         cached_kimi_ok_from, cached_onenewapi_id_is_configured, card_is_disabled,
-        commit_strip_state_after_apply, create_onenewapi_key_consistently, fail_state,
+        commit_strip_state_after_apply, fail_state, load_config_from, set_config_in,
         fold_moonshot_into_kimi, forget_onenewapi_key_ids, forget_provider_snapshot,
         is_kimi_wallet_label, last_ok, onenewapi_after_site_save,
         onenewapi_apply_zero_to_one_enable, onenewapi_snapshot_generations, persist_last_ok_at,
-        purge_onenewapi_cards, purge_onenewapi_from_config, rename_cached_snapshot,
-        rename_cached_snapshot_in, restore_kimi_wallet_rows, restore_last_success_after_error,
+        purge_onenewapi_cards, purge_onenewapi_cards_with, purge_onenewapi_from_config,
+        rename_cached_snapshot, rename_cached_snapshot_in, restore_kimi_wallet_rows,
+        restore_last_success_after_error,
         retain_current_onenewapi_results, strip_entry_application_order, strip_icon_ids_to_clear,
         strip_is_active, strip_reset_ids, CachedSnap, FailState, OneNewApiMutationGuard,
         StripEntry, SNAPSHOT_CACHE_MS, STALE_GRACE_MS,
@@ -2884,27 +2883,55 @@ mod tests {
         assert!(disabled.is_empty());
     }
 
+    struct TempConfig {
+        dir: std::path::PathBuf,
+    }
+
+    impl TempConfig {
+        fn new() -> Self {
+            let stamp = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0);
+            let dir = std::env::temp_dir().join(format!(
+                "pane-config-{}-{stamp}",
+                std::process::id()
+            ));
+            std::fs::create_dir_all(&dir).unwrap();
+            Self { dir }
+        }
+    }
+
+    impl Drop for TempConfig {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.dir);
+        }
+    }
+
     #[test]
-    fn onenewapi_first_key_enable_failure_rolls_back_saved_key() {
-        let rolled_back = std::cell::Cell::new(false);
-        let created = crate::providers::onenewapi::CreatedKey {
-            site: onenewapi_site("site-a", "Panel", "https://panel.example.com", &[]),
-            key_id: "key-a".into(),
-            first_key: true,
-        };
-        let result = create_onenewapi_key_consistently(
-            || Ok(created),
-            |_| Err("config locked".into()),
-            |_| {
-                rolled_back.set(true);
-                Ok(())
-            },
-        );
-        assert!(result.is_err());
-        assert!(
-            rolled_back.get(),
-            "saved key must be rolled back after enable fails"
-        );
+    fn concurrent_config_patches_keep_both_updates() {
+        let tmp = TempConfig::new();
+        std::fs::write(tmp.dir.join("config.json"), "{}").unwrap();
+        for round in 0..8 {
+            std::fs::write(tmp.dir.join("config.json"), "{}").unwrap();
+            let dir_a = tmp.dir.clone();
+            let dir_b = tmp.dir.clone();
+            let t1 = std::thread::spawn(move || set_config_in(&dir_a, json!({ "disabled": ["claude"] })));
+            let t2 = std::thread::spawn(move || set_config_in(&dir_b, json!({ "locale": "zh" })));
+            t1.join()
+                .expect("disabled patch thread")
+                .unwrap_or_else(|e| panic!("round {round} disabled patch: {e}"));
+            t2.join()
+                .expect("locale patch thread")
+                .unwrap_or_else(|e| panic!("round {round} locale patch: {e}"));
+            let cfg = load_config_from(&tmp.dir);
+            assert_eq!(
+                cfg["disabled"],
+                json!(["claude"]),
+                "round {round} lost disabled patch"
+            );
+            assert_eq!(cfg["locale"], json!("zh"), "round {round} lost locale patch");
+        }
     }
 
     #[test]
@@ -3344,6 +3371,42 @@ mod tests {
         assert!(alerts::has_state_for_test("onenewapi@ticket07-other:Usage"));
         alerts::forget_snapshot("onenewapi@ticket07-keep");
         alerts::forget_snapshot("onenewapi@ticket07-other");
+    }
+
+    #[test]
+    fn purge_onenewapi_cards_config_save_failure_keeps_snapshots_and_alerts() {
+        let _keep = seed_onenewapi_cache("ticket07-keep-cfg", "Panel · Keep");
+        let _drop = seed_onenewapi_cache("ticket07-drop-cfg", "Panel · Drop");
+        alerts::insert_state_for_test("onenewapi@ticket07-drop-cfg:Usage");
+        alerts::insert_state_for_test("onenewapi@ticket07-keep-cfg:Usage");
+        let result = purge_onenewapi_cards_with(&["ticket07-drop-cfg".into()], |_| {
+            Err("config locked".into())
+        });
+        assert_eq!(result.unwrap_err(), "config locked");
+        assert!(last_ok()
+            .lock()
+            .unwrap()
+            .contains_key("onenewapi@ticket07-drop-cfg"));
+        assert!(fail_state()
+            .lock()
+            .unwrap()
+            .contains_key("onenewapi@ticket07-drop-cfg"));
+        assert!(last_ok()
+            .lock()
+            .unwrap()
+            .contains_key("onenewapi@ticket07-keep-cfg"));
+        assert!(fail_state()
+            .lock()
+            .unwrap()
+            .contains_key("onenewapi@ticket07-keep-cfg"));
+        assert!(alerts::has_state_for_test(
+            "onenewapi@ticket07-drop-cfg:Usage"
+        ));
+        assert!(alerts::has_state_for_test(
+            "onenewapi@ticket07-keep-cfg:Usage"
+        ));
+        alerts::forget_snapshot("onenewapi@ticket07-drop-cfg");
+        alerts::forget_snapshot("onenewapi@ticket07-keep-cfg");
     }
 
     #[test]

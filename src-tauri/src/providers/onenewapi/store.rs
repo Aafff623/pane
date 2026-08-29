@@ -29,7 +29,10 @@ pub(crate) struct SiteRecord {
 
 impl SiteRecord {
     pub fn quota_display(&self) -> DisplayUnit {
-        DisplayUnit::from_store(self.display_unit.as_deref(), self.currency_symbol.as_deref())
+        DisplayUnit::from_store(
+            self.display_unit.as_deref(),
+            self.currency_symbol.as_deref(),
+        )
     }
 
     fn set_display_unit(&mut self, display: DisplayUnit) {
@@ -75,6 +78,9 @@ pub fn load(path: &Path) -> Result<StoreFile, String> {
             sites: Vec::new(),
         });
     }
+    if path.is_file() {
+        let _ = restrict_owner_only(path);
+    }
     let raw = super::super::read_small_text(path, 1_048_576, "onenewapi.json")?;
     let raw = raw.trim_start_matches('\u{feff}');
     let doc: StoreFile =
@@ -106,37 +112,232 @@ fn atomic_write(path: &Path, contents: &str) -> Result<(), String> {
         "onenewapi.{}.tmp",
         super::ids::new_id().unwrap_or_else(|_| "tmp".into())
     ));
-    std::fs::write(&tmp, contents).map_err(|e| format!("write onenewapi.json: {e}"))?;
-    let replaced = if path.exists() {
-        replace_existing(&tmp, path)
-    } else {
-        std::fs::rename(&tmp, path)
-    };
-    if let Err(e) = replaced {
+    let result = write_private_then_replace(path, &tmp, contents);
+    if result.is_err() {
         let _ = std::fs::remove_file(&tmp);
-        return Err(format!("replace onenewapi.json: {e}"));
+    }
+    result
+}
+
+fn write_private_then_replace(path: &Path, tmp: &Path, contents: &str) -> Result<(), String> {
+    create_empty(tmp)?;
+    restrict_owner_only(tmp)?;
+    std::fs::write(tmp, contents).map_err(|e| format!("write onenewapi.json: {e}"))?;
+    if path.exists() {
+        replace_existing(tmp, path).map_err(|e| format!("replace onenewapi.json: {e}"))?;
+    } else {
+        std::fs::rename(tmp, path).map_err(|e| format!("replace onenewapi.json: {e}"))?;
+    }
+    restrict_owner_only(path)
+}
+
+fn create_empty(path: &Path) -> Result<(), String> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        drop(
+            std::fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .mode(0o600)
+                .open(path)
+                .map_err(|e| format!("write onenewapi.json: {e}"))?,
+        );
+        Ok(())
+    }
+    #[cfg(not(unix))]
+    {
+        drop(std::fs::File::create_new(path).map_err(|e| format!("write onenewapi.json: {e}"))?);
+        Ok(())
+    }
+}
+
+fn restrict_owner_only(path: &Path) -> Result<(), String> {
+    #[cfg(windows)]
+    {
+        let sid = current_user_sid()?;
+        set_protected_dacl(path, &format!("D:P(A;;FA;;;SY)(A;;FA;;;{sid})"))
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))
+            .map_err(|e| format!("restrict onenewapi.json: {e}"))
+    }
+    #[cfg(not(any(unix, windows)))]
+    {
+        let _ = path;
+        Ok(())
+    }
+}
+
+#[cfg(windows)]
+fn current_user_sid() -> Result<String, String> {
+    static SID: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    if let Some(s) = SID.get() {
+        return Ok(s.clone());
+    }
+    let s = query_current_user_sid()?;
+    Ok(SID.get_or_init(|| s).clone())
+}
+
+#[cfg(windows)]
+struct LocalAlloc(*mut core::ffi::c_void);
+
+#[cfg(windows)]
+impl Drop for LocalAlloc {
+    fn drop(&mut self) {
+        if !self.0.is_null() {
+            use windows::Win32::Foundation::{LocalFree, HLOCAL};
+            unsafe {
+                let _ = LocalFree(Some(HLOCAL(self.0)));
+            }
+        }
+    }
+}
+
+#[cfg(windows)]
+fn query_current_user_sid() -> Result<String, String> {
+    use windows::core::PWSTR;
+    use windows::Win32::Foundation::{CloseHandle, HANDLE};
+    use windows::Win32::Security::Authorization::ConvertSidToStringSidW;
+    use windows::Win32::Security::{GetTokenInformation, TokenUser, TOKEN_QUERY, TOKEN_USER};
+    use windows::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
+
+    unsafe {
+        let mut token = HANDLE::default();
+        OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &mut token)
+            .map_err(|e| format!("restrict onenewapi.json: {e}"))?;
+        let mut needed = 0u32;
+        let _ = GetTokenInformation(token, TokenUser, None, 0, &mut needed);
+        let mut buf = vec![0u8; needed as usize];
+        let info = GetTokenInformation(
+            token,
+            TokenUser,
+            Some(buf.as_mut_ptr().cast()),
+            needed,
+            &mut needed,
+        );
+        let _ = CloseHandle(token);
+        info.map_err(|e| format!("restrict onenewapi.json: {e}"))?;
+        let user = &*(buf.as_ptr() as *const TOKEN_USER);
+        let mut sid = PWSTR::null();
+        ConvertSidToStringSidW(user.User.Sid, &mut sid)
+            .map_err(|e| format!("restrict onenewapi.json: {e}"))?;
+        let _free = LocalAlloc(sid.0.cast());
+        sid.to_string()
+            .map_err(|e| format!("restrict onenewapi.json: {e}"))
+    }
+}
+
+#[cfg(windows)]
+fn set_protected_dacl(path: &Path, sddl: &str) -> Result<(), String> {
+    use windows::core::PCWSTR;
+    use windows::Win32::Foundation::ERROR_SUCCESS;
+    use windows::Win32::Security::Authorization::{
+        ConvertStringSecurityDescriptorToSecurityDescriptorW, SetNamedSecurityInfoW,
+        SDDL_REVISION_1, SE_FILE_OBJECT,
+    };
+    use windows::Win32::Security::{
+        GetSecurityDescriptorDacl, ACL, DACL_SECURITY_INFORMATION,
+        PROTECTED_DACL_SECURITY_INFORMATION, PSECURITY_DESCRIPTOR,
+    };
+
+    let path_w = path_wide(path);
+    let sddl_w: Vec<u16> = sddl.encode_utf16().chain(std::iter::once(0)).collect();
+    let mut sd = PSECURITY_DESCRIPTOR::default();
+    unsafe {
+        ConvertStringSecurityDescriptorToSecurityDescriptorW(
+            PCWSTR(sddl_w.as_ptr()),
+            SDDL_REVISION_1,
+            &mut sd,
+            None,
+        )
+        .map_err(|e| format!("restrict onenewapi.json: {e}"))?;
+        let _free = LocalAlloc(sd.0);
+        let mut present = windows::core::BOOL::default();
+        let mut defaulted = windows::core::BOOL::default();
+        let mut dacl: *mut ACL = std::ptr::null_mut();
+        GetSecurityDescriptorDacl(sd, &mut present, &mut dacl, &mut defaulted)
+            .map_err(|e| format!("restrict onenewapi.json: {e}"))?;
+        if !present.as_bool() || dacl.is_null() {
+            return Err("restrict onenewapi.json: missing DACL".into());
+        }
+        let err = SetNamedSecurityInfoW(
+            PCWSTR(path_w.as_ptr()),
+            SE_FILE_OBJECT,
+            DACL_SECURITY_INFORMATION | PROTECTED_DACL_SECURITY_INFORMATION,
+            None,
+            None,
+            Some(dacl),
+            None,
+        );
+        if err != ERROR_SUCCESS {
+            return Err(format!("restrict onenewapi.json: {err:?}"));
+        }
     }
     Ok(())
 }
 
 #[cfg(windows)]
-fn replace_existing(replacement: &Path, destination: &Path) -> std::io::Result<()> {
+fn path_wide(path: &Path) -> Vec<u16> {
     use std::os::windows::ffi::OsStrExt;
+    path.as_os_str()
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect()
+}
+
+#[cfg(all(windows, test))]
+fn dacl_sddl(path: &Path) -> Result<String, String> {
+    use windows::core::{PCWSTR, PWSTR};
+    use windows::Win32::Foundation::ERROR_SUCCESS;
+    use windows::Win32::Security::Authorization::{
+        ConvertSecurityDescriptorToStringSecurityDescriptorW, GetNamedSecurityInfoW,
+        SDDL_REVISION_1, SE_FILE_OBJECT,
+    };
+    use windows::Win32::Security::{DACL_SECURITY_INFORMATION, PSECURITY_DESCRIPTOR};
+
+    let path_w = path_wide(path);
+    let mut sd = PSECURITY_DESCRIPTOR::default();
+    unsafe {
+        let err = GetNamedSecurityInfoW(
+            PCWSTR(path_w.as_ptr()),
+            SE_FILE_OBJECT,
+            DACL_SECURITY_INFORMATION,
+            None,
+            None,
+            None,
+            None,
+            &mut sd,
+        );
+        if err != ERROR_SUCCESS {
+            return Err(format!("read DACL: {err:?}"));
+        }
+        let _free_sd = LocalAlloc(sd.0);
+        let mut sddl = PWSTR::null();
+        ConvertSecurityDescriptorToStringSecurityDescriptorW(
+            sd,
+            SDDL_REVISION_1,
+            DACL_SECURITY_INFORMATION,
+            &mut sddl,
+            None,
+        )
+        .map_err(|e| format!("read DACL: {e}"))?;
+        let _free_sddl = LocalAlloc(sddl.0.cast());
+        sddl.to_string().map_err(|e| format!("read DACL: {e}"))
+    }
+}
+
+#[cfg(windows)]
+fn replace_existing(replacement: &Path, destination: &Path) -> std::io::Result<()> {
     use windows::core::PCWSTR;
     use windows::Win32::Storage::FileSystem::{
         MoveFileExW, MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH,
     };
 
-    let destination: Vec<u16> = destination
-        .as_os_str()
-        .encode_wide()
-        .chain(std::iter::once(0))
-        .collect();
-    let replacement: Vec<u16> = replacement
-        .as_os_str()
-        .encode_wide()
-        .chain(std::iter::once(0))
-        .collect();
+    let destination = path_wide(destination);
+    let replacement = path_wide(replacement);
     unsafe {
         MoveFileExW(
             PCWSTR(replacement.as_ptr()),
@@ -407,7 +608,7 @@ mod tests {
     use crate::providers::onenewapi::url::normalize_base_url;
     use serde_json::json;
     use std::fs;
-    use std::path::PathBuf;
+    use std::path::{Path, PathBuf};
     use std::time::{SystemTime, UNIX_EPOCH};
 
     struct TempStore {
@@ -451,7 +652,13 @@ mod tests {
     #[test]
     fn save_then_load_round_trip() {
         let tmp = TempStore::new();
-        let created = insert_site(&tmp.path, "Panel", &https("one.example.com"), DisplayUnit::Usd).unwrap();
+        let created = insert_site(
+            &tmp.path,
+            "Panel",
+            &https("one.example.com"),
+            DisplayUnit::Usd,
+        )
+        .unwrap();
         let CreateSiteResult::Created { site } = created else {
             panic!("expected created");
         };
@@ -486,6 +693,134 @@ mod tests {
             .filter(|e| e.file_name().to_string_lossy().ends_with(".tmp"))
             .collect();
         assert!(leftovers.is_empty());
+        assert!(is_owner_only(&tmp.path), "{}", owner_only_debug(&tmp.path));
+    }
+
+    #[test]
+    fn atomic_write_does_not_inherit_permissive_parent() {
+        let tmp = TempStore::new();
+        make_inheritable_world_readable(&tmp.dir);
+        let control = tmp.dir.join("control.txt");
+        fs::write(&control, "x").unwrap();
+        assert!(
+            !is_owner_only(&control),
+            "parent should leak to ordinary files: {}",
+            owner_only_debug(&control)
+        );
+        insert_site(&tmp.path, "A", &https("acl.example.com"), DisplayUnit::Usd).unwrap();
+        assert!(is_owner_only(&tmp.path), "{}", owner_only_debug(&tmp.path));
+        insert_site(&tmp.path, "B", &https("acl2.example.com"), DisplayUnit::Usd).unwrap();
+        assert!(is_owner_only(&tmp.path), "{}", owner_only_debug(&tmp.path));
+        let leftovers: Vec<_> = fs::read_dir(&tmp.dir)
+            .unwrap()
+            .flatten()
+            .filter(|e| e.file_name().to_string_lossy().ends_with(".tmp"))
+            .collect();
+        assert!(leftovers.is_empty());
+    }
+
+    #[test]
+    fn load_tightens_existing_world_readable_file() {
+        let tmp = TempStore::new();
+        let raw = json!({ "version": 1, "sites": [] }).to_string();
+        fs::write(&tmp.path, &raw).unwrap();
+        make_world_readable_file(&tmp.path);
+        assert!(
+            !is_owner_only(&tmp.path),
+            "precondition: {}",
+            owner_only_debug(&tmp.path)
+        );
+        let doc = load(&tmp.path).unwrap();
+        assert!(doc.sites.is_empty());
+        assert_eq!(fs::read_to_string(&tmp.path).unwrap(), raw);
+        assert!(is_owner_only(&tmp.path), "{}", owner_only_debug(&tmp.path));
+    }
+
+    fn is_owner_only(path: &Path) -> bool {
+        #[cfg(windows)]
+        {
+            let Ok(sddl) = super::dacl_sddl(path) else {
+                return false;
+            };
+            let Ok(sid) = super::current_user_sid() else {
+                return false;
+            };
+            sddl.contains("D:P")
+                && sddl.contains(&sid)
+                && sddl.contains(";SY)")
+                && !sddl.contains(";WD)")
+                && !sddl.contains(";BU)")
+                && !sddl.contains(";AU)")
+        }
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::metadata(path).unwrap().permissions().mode() & 0o777 == 0o600
+        }
+        #[cfg(not(any(unix, windows)))]
+        {
+            let _ = path;
+            true
+        }
+    }
+
+    fn owner_only_debug(path: &Path) -> String {
+        #[cfg(windows)]
+        {
+            super::dacl_sddl(path).unwrap_or_else(|e| e)
+        }
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            format!(
+                "{:o}",
+                fs::metadata(path).unwrap().permissions().mode() & 0o777
+            )
+        }
+        #[cfg(not(any(unix, windows)))]
+        {
+            let _ = path;
+            "n/a".into()
+        }
+    }
+
+    fn make_inheritable_world_readable(dir: &Path) {
+        #[cfg(windows)]
+        {
+            let sid = super::current_user_sid().unwrap();
+            super::set_protected_dacl(
+                dir,
+                &format!("D:P(A;OICI;FA;;;WD)(A;OICI;FA;;;SY)(A;OICI;FA;;;{sid})"),
+            )
+            .unwrap();
+        }
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(dir, fs::Permissions::from_mode(0o777)).unwrap();
+        }
+        #[cfg(not(any(unix, windows)))]
+        {
+            let _ = dir;
+        }
+    }
+
+    fn make_world_readable_file(path: &Path) {
+        #[cfg(windows)]
+        {
+            let sid = super::current_user_sid().unwrap();
+            super::set_protected_dacl(path, &format!("D:P(A;;FA;;;WD)(A;;FA;;;SY)(A;;FA;;;{sid})"))
+                .unwrap();
+        }
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(path, fs::Permissions::from_mode(0o644)).unwrap();
+        }
+        #[cfg(not(any(unix, windows)))]
+        {
+            let _ = path;
+        }
     }
 
     #[test]
@@ -494,7 +829,8 @@ mod tests {
         fs::write(&tmp.path, "{not json").unwrap();
         assert!(load(&tmp.path).is_err());
         let garbage = fs::read_to_string(&tmp.path).unwrap();
-        let err = insert_site(&tmp.path, "X", &https("x.example.com"), DisplayUnit::Usd).unwrap_err();
+        let err =
+            insert_site(&tmp.path, "X", &https("x.example.com"), DisplayUnit::Usd).unwrap_err();
         assert!(!err.is_empty());
         assert_eq!(fs::read_to_string(&tmp.path).unwrap(), garbage);
         let empty = StoreFile {
@@ -517,7 +853,13 @@ mod tests {
     #[test]
     fn unique_origin_and_duplicate_returns_existing_id() {
         let tmp = TempStore::new();
-        let first = insert_site(&tmp.path, "One", &https("dup.example.com"), DisplayUnit::Usd).unwrap();
+        let first = insert_site(
+            &tmp.path,
+            "One",
+            &https("dup.example.com"),
+            DisplayUnit::Usd,
+        )
+        .unwrap();
         let CreateSiteResult::Created { site } = first else {
             panic!("expected created");
         };
@@ -586,7 +928,13 @@ mod tests {
     #[test]
     fn blank_name_falls_back_to_hostname() {
         let tmp = TempStore::new();
-        let created = insert_site(&tmp.path, "  ", &https("panel.example.com"), DisplayUnit::Usd).unwrap();
+        let created = insert_site(
+            &tmp.path,
+            "  ",
+            &https("panel.example.com"),
+            DisplayUnit::Usd,
+        )
+        .unwrap();
         let CreateSiteResult::Created { site } = created else {
             panic!("expected created");
         };
@@ -596,15 +944,27 @@ mod tests {
     #[test]
     fn empty_site_crud() {
         let tmp = TempStore::new();
-        let created = insert_site(&tmp.path, "Alpha", &https("alpha.example.com"), DisplayUnit::Usd).unwrap();
+        let created = insert_site(
+            &tmp.path,
+            "Alpha",
+            &https("alpha.example.com"),
+            DisplayUnit::Usd,
+        )
+        .unwrap();
         let CreateSiteResult::Created { site } = created else {
             panic!("expected created");
         };
         let renamed = update_site(&tmp.path, &site.id, Some("Beta".into()), None, None).unwrap();
         assert_eq!(renamed.name, "Beta");
         assert_eq!(renamed.base_url, "https://alpha.example.com");
-        let moved =
-            update_site(&tmp.path, &site.id, None, Some(https("beta.example.com")), None).unwrap();
+        let moved = update_site(
+            &tmp.path,
+            &site.id,
+            None,
+            Some(https("beta.example.com")),
+            None,
+        )
+        .unwrap();
         assert_eq!(moved.id, site.id);
         assert_eq!(moved.name, "Beta");
         assert_eq!(moved.base_url, "https://beta.example.com");
@@ -644,7 +1004,14 @@ mod tests {
         let k2 = create_key(&tmp.path, &site.id, "Two", "sk-2").unwrap();
         let other = created_site(&tmp, "Other", "other.example.com");
         let other_key = create_key(&tmp.path, &other.id, "One", "sk-other").unwrap();
-        let moved = update_site(&tmp.path, &site.id, None, Some(https("new.example.com")), None).unwrap();
+        let moved = update_site(
+            &tmp.path,
+            &site.id,
+            None,
+            Some(https("new.example.com")),
+            None,
+        )
+        .unwrap();
         assert_eq!(moved.id, site.id);
         assert_eq!(moved.name, "Panel");
         assert_eq!(moved.base_url, "https://new.example.com");

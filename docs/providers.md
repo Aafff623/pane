@@ -9,7 +9,8 @@ code.
 Ground rules that apply to every provider:
 
 - A credential is only ever sent to **its own vendor's API**, over HTTPS
-  (One/New API sites may use `http://` only on the local network).
+  (One/New API sites may use `http://` only with private, loopback, or
+  link-local IP addresses).
 - If no credential is found, the provider shows a "connect me" hint (new
   installs auto-disable everything undetected except Claude and Codex).
 - Expired OAuth tokens are refreshed against the vendor's own token
@@ -302,7 +303,9 @@ Ground rules that apply to every provider:
 - **Reads:** nested `%APPDATA%\Pane\onenewapi.json` (versioned
   `{ version, sites: [{ id, name, baseUrl, displayUnit, keys }] }`) — **not**
   `config.json`, and not the single-key `set_api_key` Settings list.
-  Settings manages a hierarchy of sites and keys; pasted secrets never
+  Written atomically and stored owner-only (Windows protected DACL /
+  Unix `0600`), not inherited from a permissive parent. Settings
+  manages a hierarchy of sites and keys; pasted secrets never
   come back out of the UI after save.
 - **Discovery:** `GET {origin}/api/status` with no API key, no redirects,
   and a bounded JSON body — only when creating a site or changing its
@@ -317,9 +320,9 @@ Ground rules that apply to every provider:
   `Authorization: Bearer <that key>` and **no date query parameters**.
   Do not call `/api/usage/token` or `/api/log/token`.
 - **HTTP:** `https://` for any valid host. Plain `http://` is limited to
-  `localhost`, `*.local`, IPv4 private/loopback/link-local addresses, and
-  IPv6 loopback/unique-local/link-local addresses. Ordinary hostnames are
-  not resolved to infer whether they are local.
+  IPv4 private/loopback/link-local addresses and IPv6
+  loopback/unique-local/link-local addresses. Every HTTP hostname,
+  including `localhost` and `*.local`, is rejected without DNS resolution.
 - **Shows:** one dashboard/tray card per key, id `onenewapi@<key-id>`,
   titled `<site name> · <key label>`. Usage `{used} of {limit}` using the
   site's display unit from `/api/status` (`USD` → `$`, `CNY` → `¥`,

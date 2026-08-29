@@ -90,7 +90,9 @@ manifest first.
 - **Credentials**: read from the files the official CLIs already maintain
   (see [providers.md](providers.md)); pasted API keys live in
   `%APPDATA%\Pane\<provider>.json`. One/New API sites and keys use a
-  nested `%APPDATA%\Pane\onenewapi.json`; Settings lists names, URLs, and
+  nested `%APPDATA%\Pane\onenewapi.json`, written owner-only (Windows
+  protected DACL / Unix `0600`) so a permissive Pane directory cannot
+  expose the secrets; Settings lists names, URLs, and
   key labels only — never secrets or fragments. Sent only to their own
   vendor (or the user-configured One/New API origin). Status fingerprint
   (`GET /api/status`, no key) is structural only; billing is
@@ -101,7 +103,7 @@ manifest first.
   Pane does not call native token usage/log APIs to compensate. AihubMix
   stays a separate built-in provider; One/New API values are not folded
   into Total Spend. `https://` is allowed for any valid host; `http://` is
-  limited to localhost and local-network addresses/names.
+  limited to private, loopback, or link-local IPv4/IPv6 address literals.
 - **Refreshed OAuth tokens**: written back to the CLIs' own credential
   files so your tools stay signed in — same behavior as the CLIs
   themselves.

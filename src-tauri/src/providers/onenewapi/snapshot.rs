@@ -28,9 +28,13 @@ async fn billing_get(
     client: &reqwest::Client,
     url: &str,
     api_key: &str,
-) -> Result<reqwest::Response, reqwest::Error> {
+    what: &str,
+) -> Result<(reqwest::StatusCode, Result<serde_json::Value, String>), reqwest::Error> {
     let _permit = billing_sema().acquire().await.expect("billing semaphore");
-    client.get(url).bearer_auth(api_key).send().await
+    let resp = client.get(url).bearer_auth(api_key).send().await?;
+    let status = resp.status();
+    let json = json_body(resp, MAX_BILLING_BYTES, what).await;
+    Ok((status, json))
 }
 
 pub struct KeyCard {
@@ -86,26 +90,21 @@ async fn fetch_key(
     let sub_url = format!("{origin}/v1/dashboard/billing/subscription");
     let usage_url = format!("{origin}/v1/dashboard/billing/usage");
     let (sub_resp, usage_resp) = tokio::join!(
-        billing_get(client, &sub_url, &card.api_key),
-        billing_get(client, &usage_url, &card.api_key),
+        billing_get(client, &sub_url, &card.api_key, "subscription"),
+        billing_get(client, &usage_url, &card.api_key, "usage"),
     );
 
-    let sub_resp = sub_resp.map_err(|_| "subscription transport".to_string())?;
-    let status = sub_resp.status();
+    let (status, sub_json) = sub_resp.map_err(|_| "subscription transport".to_string())?;
     if status.as_u16() == 401 {
         return Err("key may be invalid, expired, disabled, or out of quota".into());
     }
     if !status.is_success() {
         return Err(format!("subscription HTTP {status}"));
     }
-    let sub = json_body(sub_resp, MAX_BILLING_BYTES, "subscription")
-        .await
-        .map_err(|e| billing_error_category("subscription", &e))?;
+    let sub = sub_json.map_err(|e| billing_error_category("subscription", &e))?;
 
     let usage = match usage_resp {
-        Ok(resp) if resp.status().is_success() => {
-            json_body(resp, MAX_BILLING_BYTES, "usage").await.ok()
-        }
+        Ok((status, json)) if status.is_success() => json.ok(),
         _ => None,
     };
 
@@ -148,11 +147,12 @@ mod tests {
     use crate::providers::onenewapi::CreateSiteResult;
     use serde_json::json;
     use std::fs;
-    use std::io::ErrorKind;
+    use std::io::{ErrorKind, Read, Write};
+    use std::net::{TcpListener, TcpStream};
     use std::path::PathBuf;
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::Arc;
-    use std::time::{Duration, SystemTime, UNIX_EPOCH};
+    use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
     struct TempStore {
         dir: PathBuf,
@@ -352,7 +352,7 @@ mod tests {
         assert_eq!(snap.status, "error");
         assert_eq!(
             snap.error.as_deref(),
-            Some("plain HTTP is only allowed for localhost or local network hosts")
+            Some("plain HTTP is only allowed for private, loopback, or link-local IP addresses")
         );
     }
 
@@ -568,6 +568,57 @@ mod tests {
     }
 
     #[test]
+    fn billing_in_flight_cap_holds_through_chunked_body() {
+        let in_flight = Arc::new(AtomicUsize::new(0));
+        let max_in_flight = Arc::new(AtomicUsize::new(0));
+        let n_keys = 9;
+        let n_requests = n_keys * 2;
+        let (origin, join) = spawn_chunked_slow_billing_server(
+            n_requests,
+            Duration::from_millis(200),
+            Arc::clone(&in_flight),
+            Arc::clone(&max_in_flight),
+        );
+        let cards: Vec<KeyCard> = (0..n_keys)
+            .map(|i| {
+                card_at(
+                    &origin,
+                    &format!("onenewapi@chunk{i:02}"),
+                    &format!("Panel · Key {i}"),
+                    &format!("sk-{i}"),
+                )
+            })
+            .collect();
+        let snaps = tauri::async_runtime::block_on(async {
+            let handles: Vec<_> = cards
+                .into_iter()
+                .map(|card| tauri::async_runtime::spawn(snapshot_key(card)))
+                .collect();
+            let mut out = Vec::new();
+            for h in handles {
+                out.push(h.await.expect("snapshot join"));
+            }
+            out
+        });
+        join.join().unwrap();
+        let max = max_in_flight.load(Ordering::SeqCst);
+        assert!(
+            max <= 8,
+            "in-flight billing GETs peaked at {max} during chunked bodies, cap is 8"
+        );
+        assert_eq!(snaps.len(), n_keys);
+        assert!(
+            snaps.iter().all(|s| s.status == "ok"),
+            "{:?}",
+            snaps
+                .iter()
+                .map(|s| (s.id.as_str(), s.status.as_str(), s.error.as_deref()))
+                .collect::<Vec<_>>()
+        );
+        assert_eq!(in_flight.load(Ordering::SeqCst), 0);
+    }
+
+    #[test]
     fn snapshot_cny_card_formats_yen() {
         let sub = sub_body();
         let usage = usage_body();
@@ -677,5 +728,114 @@ mod tests {
             }
         });
         (origin, join)
+    }
+
+    fn spawn_chunked_slow_billing_server(
+        n: usize,
+        delay: Duration,
+        in_flight: Arc<AtomicUsize>,
+        max_in_flight: Arc<AtomicUsize>,
+    ) -> (String, std::thread::JoinHandle<()>) {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let origin = format!("http://127.0.0.1:{}", addr.port());
+        listener.set_nonblocking(true).unwrap();
+        let sub = sub_body();
+        let usage = usage_body();
+        let join = std::thread::spawn(move || {
+            let mut joins = Vec::with_capacity(n);
+            let deadline = Instant::now() + Duration::from_secs(15);
+            while joins.len() < n {
+                match listener.accept() {
+                    Ok((stream, _)) => {
+                        let _ = stream.set_nonblocking(false);
+                        let in_flight = Arc::clone(&in_flight);
+                        let max_in_flight = Arc::clone(&max_in_flight);
+                        let sub = sub.clone();
+                        let usage = usage.clone();
+                        joins.push(std::thread::spawn(move || {
+                            serve_chunked_billing(
+                                stream,
+                                delay,
+                                &sub,
+                                &usage,
+                                &in_flight,
+                                &max_in_flight,
+                            );
+                        }));
+                    }
+                    Err(e)
+                        if e.kind() == ErrorKind::WouldBlock
+                            || e.kind() == ErrorKind::TimedOut
+                            || e.kind() == ErrorKind::Interrupted =>
+                    {
+                        if Instant::now() > deadline {
+                            break;
+                        }
+                        std::thread::sleep(Duration::from_millis(5));
+                    }
+                    Err(_) => break,
+                }
+            }
+            for j in joins {
+                let _ = j.join();
+            }
+        });
+        (origin, join)
+    }
+
+    fn serve_chunked_billing(
+        mut stream: TcpStream,
+        delay: Duration,
+        sub: &str,
+        usage: &str,
+        in_flight: &AtomicUsize,
+        max_in_flight: &AtomicUsize,
+    ) {
+        let _ = stream.set_nodelay(true);
+        let req = match read_http_head(&mut stream) {
+            Ok(req) => req,
+            Err(_) => return,
+        };
+        let now = in_flight.fetch_add(1, Ordering::SeqCst) + 1;
+        max_in_flight.fetch_max(now, Ordering::SeqCst);
+        let body = if req.contains("/v1/dashboard/billing/subscription") {
+            sub
+        } else {
+            usage
+        };
+        let headers = concat!(
+            "HTTP/1.1 200 OK\r\n",
+            "Content-Type: application/json\r\n",
+            "Transfer-Encoding: chunked\r\n",
+            "Connection: close\r\n",
+            "\r\n",
+        );
+        if stream.write_all(headers.as_bytes()).is_err() || stream.flush().is_err() {
+            in_flight.fetch_sub(1, Ordering::SeqCst);
+            return;
+        }
+        std::thread::sleep(delay);
+        let chunk = format!("{:x}\r\n{body}\r\n0\r\n\r\n", body.len());
+        let _ = stream.write_all(chunk.as_bytes());
+        let _ = stream.flush();
+        in_flight.fetch_sub(1, Ordering::SeqCst);
+    }
+
+    fn read_http_head(stream: &mut TcpStream) -> std::io::Result<String> {
+        stream.set_read_timeout(Some(Duration::from_secs(5)))?;
+        let mut buf = Vec::new();
+        let mut tmp = [0u8; 512];
+        loop {
+            let n = stream.read(&mut tmp)?;
+            if n == 0 {
+                break;
+            }
+            buf.extend_from_slice(&tmp[..n]);
+            if buf.windows(4).any(|w| w == b"\r\n\r\n") || buf.len() > 16 * 1024 {
+                break;
+            }
+        }
+        Ok(String::from_utf8_lossy(&buf).into_owned())
     }
 }

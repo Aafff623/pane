@@ -8,17 +8,12 @@ pub struct NormalizedUrl {
     pub http_plaintext: bool,
 }
 
-fn is_local_http_host(hostname: &str) -> bool {
+fn is_local_http_ip(hostname: &str) -> bool {
     let host = hostname
         .strip_prefix('[')
         .and_then(|value| value.strip_suffix(']'))
         .unwrap_or(hostname);
 
-    if host == "localhost"
-        || (host.ends_with(".local") && host.len() > ".local".len())
-    {
-        return true;
-    }
     if let Ok(ip) = host.parse::<Ipv4Addr>() {
         return ip.is_private() || ip.is_loopback() || ip.is_link_local();
     }
@@ -59,8 +54,10 @@ pub fn normalize_base_url(raw: &str) -> Result<NormalizedUrl, String> {
     if hostname.is_empty() {
         return Err("URL is missing a host".into());
     }
-    if url.scheme() == "http" && !is_local_http_host(&hostname) {
-        return Err("plain HTTP is only allowed for localhost or local network hosts".into());
+    if url.scheme() == "http" && !is_local_http_ip(&hostname) {
+        return Err(
+            "plain HTTP is only allowed for private, loopback, or link-local IP addresses".into(),
+        );
     }
     let origin = match url.port() {
         Some(port) => format!("{}://{}:{port}", url.scheme(), hostname),
@@ -161,15 +158,18 @@ mod tests {
         err("http://172.15.0.1");
         err("http://172.32.0.1");
         err("http://[2001:db8::1]");
+        err("http://0.0.0.0");
+        err("http://[::]");
+        err("http://localhost");
+        err("http://gateway.local");
+        err("http://panel.local");
         err("http://panel.corp");
         err("http://panel.local.evil");
         err("http://localhost.evil");
     }
 
     #[test]
-    fn allows_localhost_loopback_private_and_local_http() {
-        ok("http://localhost", "http://localhost", "localhost", true);
-        ok("http://LOCALHOST/v1", "http://localhost", "localhost", true);
+    fn allows_loopback_private_and_link_local_http_ips() {
         ok("http://127.0.0.1", "http://127.0.0.1", "127.0.0.1", true);
         ok(
             "http://127.255.255.254",
@@ -206,18 +206,6 @@ mod tests {
             true,
         );
         ok("http://[fe80::1]", "http://[fe80::1]", "[fe80::1]", true);
-        ok(
-            "http://gateway.local",
-            "http://gateway.local",
-            "gateway.local",
-            true,
-        );
-        ok(
-            "http://PANEL.LOCAL/v1/",
-            "http://panel.local",
-            "panel.local",
-            true,
-        );
     }
 
     #[test]
