@@ -5,7 +5,7 @@ can read it.
 
 ```
 GET http://127.0.0.1:6736/v1/usage          # all enabled providers
-GET http://127.0.0.1:6736/v1/usage/:id      # one provider (e.g. /claude)
+GET http://127.0.0.1:6736/v1/usage/:id      # one provider (e.g. /claude, /onenewapi@<key-id>)
 ```
 
 Wire format (compatible with the macOS OpenUsage API):
@@ -33,7 +33,9 @@ Wire format (compatible with the macOS OpenUsage API):
 - **Loopback only.** Binds `127.0.0.1` — nothing on your network can
   reach it.
 - **Usage numbers only.** Snapshots of what the dashboard shows — never
-  credentials, tokens, or keys.
+  credentials, tokens, or keys. One/New API entries use the full snapshot
+  id (`onenewapi@<key-id>`) as `providerId` and the card title as
+  `displayName`; dashboard URL, origin, site id, and secrets are omitted.
 - **No CORS headers.** Unlike the macOS app (which sends
   `Access-Control-Allow-Origin: *` and documents that any web page can
   read your usage), Pane sends no CORS headers — so browsers block web

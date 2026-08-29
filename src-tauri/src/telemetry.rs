@@ -96,9 +96,19 @@ fn new_uuid() -> String {
     bytes[6] = (bytes[6] & 0x0f) | 0x40;
     bytes[8] = (bytes[8] & 0x3f) | 0x80;
     let h = |r: std::ops::Range<usize>| {
-        bytes[r].iter().map(|b| format!("{b:02x}")).collect::<String>()
+        bytes[r]
+            .iter()
+            .map(|b| format!("{b:02x}"))
+            .collect::<String>()
     };
-    format!("{}-{}-{}-{}-{}", h(0..4), h(4..6), h(6..8), h(8..10), h(10..16))
+    format!(
+        "{}-{}-{}-{}-{}",
+        h(0..4),
+        h(4..6),
+        h(6..8),
+        h(8..10),
+        h(10..16)
+    )
 }
 
 fn getrandom_fill(buf: &mut [u8]) {
@@ -175,6 +185,59 @@ fn categorize(error: &str) -> &'static str {
         "network"
     } else {
         "other"
+    }
+}
+
+/// One/New API key cards share family id `onenewapi`. Collapse them to a
+/// single outcome per refresh (`error > stale > ok`) so three keys do not
+/// triple `ok_count`. Claude extra-account rows are left alone.
+pub(crate) fn collapse_onenewapi_outcomes(outcomes: Vec<Outcome>) -> Vec<Outcome> {
+    let mut collapsed: Option<Outcome> = None;
+    let mut insert_at: Option<usize> = None;
+    let mut out = Vec::with_capacity(outcomes.len());
+    for o in outcomes {
+        if is_onenewapi_id(&o.id) {
+            if insert_at.is_none() {
+                insert_at = Some(out.len());
+            }
+            collapsed = Some(worse_onenewapi(collapsed.take(), o));
+        } else {
+            out.push(o);
+        }
+    }
+    if let (Some(mut one), Some(at)) = (collapsed, insert_at) {
+        one.id = "onenewapi".into();
+        out.insert(at, one);
+    }
+    out
+}
+
+fn is_onenewapi_id(id: &str) -> bool {
+    id == "onenewapi" || id.starts_with("onenewapi@")
+}
+
+/// Severity `error > stale > ok` (`no_credentials` is weakest). Equal rank
+/// keeps the earlier outcome.
+fn worse_onenewapi(acc: Option<Outcome>, next: Outcome) -> Outcome {
+    let Some(acc) = acc else {
+        return next;
+    };
+    if onenewapi_rank(&next) > onenewapi_rank(&acc) {
+        next
+    } else {
+        acc
+    }
+}
+
+fn onenewapi_rank(o: &Outcome) -> u8 {
+    if o.status != "ok" && o.status != "no_credentials" {
+        3
+    } else if o.stale {
+        2
+    } else if o.status == "ok" {
+        1
+    } else {
+        0
     }
 }
 
@@ -320,22 +383,44 @@ mod tests {
 
     #[test]
     fn same_day_ticks_accumulate_without_emitting() {
-        let mut state = State { uuid: "u".into(), ..Default::default() };
-        let events = accumulate(&mut state, "2026-07-26", &[outcome("claude", "ok", false, None)]);
+        let mut state = State {
+            uuid: "u".into(),
+            ..Default::default()
+        };
+        let events = accumulate(
+            &mut state,
+            "2026-07-26",
+            &[outcome("claude", "ok", false, None)],
+        );
         assert!(events.is_empty());
-        let events = accumulate(&mut state, "2026-07-26", &[outcome("claude", "ok", false, None)]);
+        let events = accumulate(
+            &mut state,
+            "2026-07-26",
+            &[outcome("claude", "ok", false, None)],
+        );
         assert!(events.is_empty());
         assert_eq!(state.providers["claude"].ok, 2);
     }
 
     #[test]
     fn day_rollover_emits_one_event_per_provider_and_resets() {
-        let mut state = State { uuid: "u".into(), ..Default::default() };
-        accumulate(&mut state, "2026-07-26", &[
-            outcome("claude", "ok", false, None),
-            outcome("grok", "error", false, Some("billing endpoint: HTTP 500")),
-        ]);
-        let events = accumulate(&mut state, "2026-07-27", &[outcome("claude", "ok", false, None)]);
+        let mut state = State {
+            uuid: "u".into(),
+            ..Default::default()
+        };
+        accumulate(
+            &mut state,
+            "2026-07-26",
+            &[
+                outcome("claude", "ok", false, None),
+                outcome("grok", "error", false, Some("billing endpoint: HTTP 500")),
+            ],
+        );
+        let events = accumulate(
+            &mut state,
+            "2026-07-27",
+            &[outcome("claude", "ok", false, None)],
+        );
         assert_eq!(events.len(), 2);
         let grok = events
             .iter()
@@ -352,25 +437,52 @@ mod tests {
     #[test]
     fn raw_error_text_never_appears_in_events() {
         let secret = "token refresh failed for C:\\Users\\alice\\.grok\\auth.json";
-        let mut state = State { uuid: "u".into(), ..Default::default() };
-        accumulate(&mut state, "2026-07-26", &[outcome("grok", "error", false, Some(secret))]);
+        let mut state = State {
+            uuid: "u".into(),
+            ..Default::default()
+        };
+        accumulate(
+            &mut state,
+            "2026-07-26",
+            &[outcome("grok", "error", false, Some(secret))],
+        );
         let events = accumulate(&mut state, "2026-07-27", &[]);
         let raw = serde_json::to_string(&events).unwrap();
-        assert!(!raw.contains("alice"), "raw error text leaked into telemetry");
-        assert!(raw.contains("errors_auth"), "categorized as auth (expired/credentials)");
+        assert!(
+            !raw.contains("alice"),
+            "raw error text leaked into telemetry"
+        );
+        assert!(
+            raw.contains("errors_auth"),
+            "categorized as auth (expired/credentials)"
+        );
     }
 
     #[test]
     fn no_credentials_is_not_a_failure() {
-        let mut state = State { uuid: "u".into(), ..Default::default() };
-        accumulate(&mut state, "2026-07-26", &[outcome("minimax", "no_credentials", false, None)]);
+        let mut state = State {
+            uuid: "u".into(),
+            ..Default::default()
+        };
+        accumulate(
+            &mut state,
+            "2026-07-26",
+            &[outcome("minimax", "no_credentials", false, None)],
+        );
         assert!(state.providers.is_empty());
     }
 
     #[test]
     fn stale_counts_as_stale_not_error() {
-        let mut state = State { uuid: "u".into(), ..Default::default() };
-        accumulate(&mut state, "2026-07-26", &[outcome("claude", "ok", true, None)]);
+        let mut state = State {
+            uuid: "u".into(),
+            ..Default::default()
+        };
+        accumulate(
+            &mut state,
+            "2026-07-26",
+            &[outcome("claude", "ok", true, None)],
+        );
         assert_eq!(state.providers["claude"].stale, 1);
         assert_eq!(state.providers["claude"].error, 0);
     }
@@ -385,7 +497,10 @@ mod tests {
             density: "regular".into(),
             refresh_minutes: 5,
         };
-        let mut state = State { uuid: "u".into(), ..Default::default() };
+        let mut state = State {
+            uuid: "u".into(),
+            ..Default::default()
+        };
         let ev = daily_active(&state, "2026-07-26", &snap).expect("first tick fires");
         assert_eq!(ev["properties"]["$process_person_profile"], false);
         assert_eq!(ev["properties"]["enabled_provider_count"], 1);
@@ -400,7 +515,145 @@ mod tests {
         assert_eq!(categorize("Grok token expired — run the Grok CLI"), "auth");
         assert_eq!(categorize("HTTP 429 too many requests"), "rate_limit");
         assert_eq!(categorize("quota endpoint: HTTP 503"), "server");
-        assert_eq!(categorize("error sending request: connection reset"), "network");
+        assert_eq!(
+            categorize("error sending request: connection reset"),
+            "network"
+        );
         assert_eq!(categorize("unexpected billing response shape"), "other");
+    }
+
+    fn ids_of(outcomes: &[Outcome]) -> Vec<&str> {
+        outcomes.iter().map(|o| o.id.as_str()).collect()
+    }
+
+    #[test]
+    fn onenewapi_three_ok_keys_collapse_to_one_ok() {
+        let collapsed = collapse_onenewapi_outcomes(vec![
+            outcome("onenewapi@k1", "ok", false, None),
+            outcome("onenewapi@k2", "ok", false, None),
+            outcome("onenewapi@k3", "ok", false, None),
+        ]);
+        assert_eq!(ids_of(&collapsed), ["onenewapi"]);
+        assert_eq!(collapsed[0].status, "ok");
+        assert!(!collapsed[0].stale);
+
+        let mut state = State {
+            uuid: "u".into(),
+            ..Default::default()
+        };
+        accumulate(&mut state, "2026-07-26", &collapsed);
+        assert_eq!(state.providers["onenewapi"].ok, 1);
+        assert_eq!(state.providers.len(), 1);
+    }
+
+    #[test]
+    fn onenewapi_error_beats_ok() {
+        let collapsed = collapse_onenewapi_outcomes(vec![
+            outcome("onenewapi@k1", "ok", false, None),
+            outcome(
+                "onenewapi@k2",
+                "error",
+                false,
+                Some("subscription HTTP 500"),
+            ),
+            outcome("onenewapi", "ok", false, None),
+        ]);
+        assert_eq!(collapsed.len(), 1);
+        assert_eq!(collapsed[0].id, "onenewapi");
+        assert_eq!(collapsed[0].status, "error");
+        assert!(!collapsed[0].stale);
+    }
+
+    #[test]
+    fn onenewapi_stale_beats_ok() {
+        let collapsed = collapse_onenewapi_outcomes(vec![
+            outcome("onenewapi@k1", "ok", false, None),
+            outcome("onenewapi@k2", "ok", true, None),
+        ]);
+        assert_eq!(collapsed.len(), 1);
+        assert_eq!(collapsed[0].id, "onenewapi");
+        assert_eq!(collapsed[0].status, "ok");
+        assert!(collapsed[0].stale);
+    }
+
+    #[test]
+    fn onenewapi_error_beats_stale() {
+        let collapsed = collapse_onenewapi_outcomes(vec![
+            outcome("onenewapi@k1", "ok", true, None),
+            outcome(
+                "onenewapi@k2",
+                "error",
+                false,
+                Some("subscription transport"),
+            ),
+        ]);
+        assert_eq!(collapsed[0].status, "error");
+        assert!(!collapsed[0].stale);
+    }
+
+    #[test]
+    fn collapse_does_not_merge_claude_accounts() {
+        let collapsed = collapse_onenewapi_outcomes(vec![
+            outcome("claude@aaaa", "ok", false, None),
+            outcome("claude@bbbb", "ok", false, None),
+            outcome("onenewapi@k1", "ok", false, None),
+            outcome("onenewapi@k2", "ok", false, None),
+            outcome("grok", "ok", false, None),
+        ]);
+        assert_eq!(
+            ids_of(&collapsed),
+            ["claude@aaaa", "claude@bbbb", "onenewapi", "grok"]
+        );
+        assert_eq!(collapsed.iter().filter(|o| o.id == "onenewapi").count(), 1);
+        assert_eq!(
+            collapsed
+                .iter()
+                .filter(|o| o.id.starts_with("claude"))
+                .count(),
+            2
+        );
+    }
+
+    #[test]
+    fn collapsed_events_never_contain_site_key_ids_labels_origins_or_counts() {
+        let key_id = "keyidabcdefghijkAAA";
+        let site_id = "siteidXYZ987654321";
+        let label = "Panel · Prod Key";
+        let origin = "https://panel.example.com";
+        let collapsed = collapse_onenewapi_outcomes(vec![
+            outcome(&format!("onenewapi@{key_id}"), "ok", false, None),
+            outcome(
+                &format!("onenewapi@{site_id}"),
+                "error",
+                false,
+                Some("subscription HTTP 401"),
+            ),
+        ]);
+        assert_eq!(collapsed.len(), 1);
+        assert_eq!(collapsed[0].id, "onenewapi");
+        assert!(!collapsed[0].id.contains('@'));
+
+        let mut state = State {
+            uuid: "u".into(),
+            ..Default::default()
+        };
+        accumulate(&mut state, "2026-07-26", &collapsed);
+        let events = accumulate(&mut state, "2026-07-27", &[]);
+        let raw = serde_json::to_string(&events).unwrap();
+        for leak in [
+            key_id,
+            site_id,
+            label,
+            origin,
+            "onenewapi@",
+            "3 keys",
+            "key_count",
+        ] {
+            assert!(!raw.contains(leak), "telemetry leaked {leak}: {raw}");
+        }
+        assert_eq!(events[0]["properties"]["provider"], "onenewapi");
+        assert_eq!(events[0]["properties"]["error_count"], 1);
+        assert!(events[0]["properties"].get("ok_count").is_some());
+        assert_ne!(events[0]["properties"]["ok_count"], 2);
     }
 }

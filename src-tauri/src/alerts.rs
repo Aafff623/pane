@@ -175,3 +175,46 @@ pub fn evaluate(snapshots: &[Snapshot], cfg: &Value) -> Vec<Alert> {
     }
     alerts
 }
+
+/// Drop every metric keyed as `{snapshot_id}:…`. Prefix is `id + ':'` so
+/// `onenewapi@abc` does not also wipe `onenewapi@abcd`.
+pub fn forget_snapshot(id: &str) {
+    let prefix = format!("{id}:");
+    let Ok(mut map) = states().lock() else {
+        return;
+    };
+    map.retain(|k, _| !k.starts_with(&prefix));
+}
+
+#[cfg(test)]
+pub fn insert_state_for_test(key: &str) {
+    let Ok(mut map) = states().lock() else {
+        return;
+    };
+    map.insert(key.to_string(), MetricState::default());
+}
+
+#[cfg(test)]
+pub fn has_state_for_test(key: &str) -> bool {
+    states()
+        .lock()
+        .map(|map| map.contains_key(key))
+        .unwrap_or(false)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn forget_snapshot_drops_that_id_only() {
+        insert_state_for_test("onenewapi@ticket07-abc:Usage");
+        insert_state_for_test("onenewapi@ticket07-abc:Expiry");
+        insert_state_for_test("onenewapi@ticket07-abcd:Usage");
+        forget_snapshot("onenewapi@ticket07-abc");
+        assert!(!has_state_for_test("onenewapi@ticket07-abc:Usage"));
+        assert!(!has_state_for_test("onenewapi@ticket07-abc:Expiry"));
+        assert!(has_state_for_test("onenewapi@ticket07-abcd:Usage"));
+        forget_snapshot("onenewapi@ticket07-abcd");
+    }
+}

@@ -12,6 +12,7 @@ This is the complete list. Anything not listed here does not happen.
 | Destination | When | What is sent |
 |---|---|---|
 | Each provider's own API (Anthropic, OpenAI/ChatGPT, cursor.com, GitHub, x.ai, opencode.ai, Devin, MiniMax, OpenRouter, Z.ai, Google, DeepSeek, Moonshot, Kimi Code, ElevenLabs, Codebuff, Kilo, AihubMix, Alibaba Model Studio…) | Every refresh (default 1 min), only for providers you have enabled | That provider's own token/key, exactly as its official tool would send it. Full per-provider detail: [providers.md](providers.md) |
+| User-configured One/New API origins | Status probe when saving/changing a site; billing on every refresh for enabled keys | `/api/status` with no key. Subscription + usage send that site's key as Bearer, **only to that origin** — never to Pane servers. |
 | `raw.githubusercontent.com` (LiteLLM), `models.dev`, `robinebers.github.io` | ~Daily | Anonymous GET for public model price tables (no identifying data) |
 | `pane.jazii.dev/api/update` (falls back to `github.com/ItsJazii/pane/releases`) | On launch + every 4 h | Anonymous GET for the update manifest, carrying the app version. See "The update check" below for exactly what this counts. |
 | `us.i.posthog.com` | Once per day (unless switched off) | The two anonymous daily-statistic events described in "Anonymous usage statistics" below — a random ID, version, enabled-provider list, and per-provider success/failure counts. Never usage amounts, spend, keys, or error text. |
@@ -43,6 +44,9 @@ same disclosed-and-toggleable approach as the Mac app Pane is a port of):
   *categories* only (auth / rate-limit / server / network / other).
   The raw error text never leaves your machine — it can contain paths
   or account details, so only the category enum is sent.
+  One/New API (`onenewapi`) is reported as that family id at most once
+  per refresh. Site ids, key ids, configured counts, labels, and origins
+  never leave the machine.
 
 The identity attached to these events is a **random UUID** generated on
 your machine — derived from nothing (not your hardware, not your IP, not
@@ -85,7 +89,18 @@ manifest first.
 
 - **Credentials**: read from the files the official CLIs already maintain
   (see [providers.md](providers.md)); pasted API keys live in
-  `%APPDATA%\Pane\<provider>.json`. Sent only to their own vendor.
+  `%APPDATA%\Pane\<provider>.json`. One/New API sites and keys use a
+  nested `%APPDATA%\Pane\onenewapi.json`; Settings lists names, URLs, and
+  key labels only — never secrets or fragments. Sent only to their own
+  vendor (or the user-configured One/New API origin). Status fingerprint
+  (`GET /api/status`, no key) is structural only; billing is
+  `/v1/dashboard/billing/subscription` and `/usage` (cents → dollars;
+  sentinel `100000000` = unlimited). Some panels return the same
+  user-level quota for every key; OneAPI with
+  `DisplayTokenStatEnabled=false` can be account-level or inaccurate —
+  Pane does not call native token usage/log APIs to compensate. AihubMix
+  stays a separate built-in provider; One/New API values are not folded
+  into Total Spend. `http://` is allowed for any host.
 - **Refreshed OAuth tokens**: written back to the CLIs' own credential
   files so your tools stay signed in — same behavior as the CLIs
   themselves.
@@ -102,7 +117,9 @@ can read your usage. It is loopback-only (nothing on your network can
 reach it), serves usage numbers only (never credentials or keys), and
 sends **no CORS headers**, and refuses non-loopback `Host` headers — so
 websites you visit cannot read it through your browser, not even via
-DNS rebinding. Details: [local-http-api.md](local-http-api.md).
+DNS rebinding. One/New API key cards are addressable by full snapshot
+id (`onenewapi@<key-id>`) and omit dashboard URL, origin, and secrets.
+Details: [local-http-api.md](local-http-api.md).
 
 ## Verifying all of this
 

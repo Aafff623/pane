@@ -461,6 +461,208 @@ select:focus-visible {
   background: #3f3f46;
 }
 
+.ona-site {
+  background: var(--background);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 8px 10px;
+  margin-bottom: 8px;
+}
+
+.ona-site-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.ona-site-head .mini-btn {
+  flex: none;
+}
+
+.ona-site-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1;
+  min-width: 0;
+  background: none;
+  border: none;
+  padding: 2px 4px;
+  cursor: pointer;
+  font-family: inherit;
+  color: var(--foreground);
+  border-radius: 6px;
+}
+
+.ona-site-toggle:hover {
+  background: var(--accent);
+}
+
+.ona-site-name {
+  font-size: 12.5px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ona-site-toggle .chev {
+  color: var(--muted-foreground);
+  line-height: 0.4;
+  font-size: 13px;
+  flex: none;
+  transition: transform 0.24s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.ona-site.open .ona-site-toggle .chev {
+  transform: rotate(180deg) translateY(-4px);
+}
+
+.ona-site .acc-body {
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows 0.26s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.ona-site.open .acc-body {
+  grid-template-rows: 1fr;
+}
+
+.ona-site .acc-inner {
+  overflow: hidden;
+  min-height: 0;
+  padding: 0;
+}
+
+.ona-site.open .acc-inner {
+  padding-top: 8px;
+}
+
+.ona-site-url {
+  margin: 0 0 6px;
+  font-size: 11px;
+  color: var(--muted-foreground);
+  word-break: break-all;
+}
+
+.ona-keys {
+  list-style: none;
+  margin: 0 0 8px;
+  padding: 0;
+}
+
+.ona-key {
+  margin-bottom: 6px;
+}
+
+.ona-key-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.ona-key-label {
+  flex: 1;
+  min-width: 0;
+  font-size: 12px;
+  color: var(--secondary-foreground);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ona-key-has {
+  flex: none;
+  font-size: 11px;
+  color: var(--muted-foreground);
+}
+
+.ona-key .mini-btn {
+  flex: none;
+}
+
+.ona-keys-empty {
+  margin: 0 0 8px;
+  font-size: 11px;
+  color: var(--muted-foreground);
+}
+
+.ona-key-hint {
+  margin: 0;
+}
+
+.ona-site .mini-btn.danger {
+  color: var(--destructive);
+}
+
+.ona-add,
+.ona-edit,
+.ona-key-add,
+.ona-key-edit {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+.ona-add-row,
+.ona-edit-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.ona-add input[type="text"],
+.ona-add input[type="password"],
+.ona-edit input[type="text"],
+.ona-key-add input[type="text"],
+.ona-key-add input[type="password"],
+.ona-key-edit input[type="text"],
+.ona-key-edit input[type="password"] {
+  flex: 1;
+  min-width: 0;
+  background: transparent;
+  border: 1px solid var(--input);
+  border-radius: 7px;
+  color: var(--foreground);
+  font-size: 12px;
+  font-family: inherit;
+  padding: 5px 9px;
+  transition: border-color 0.15s, box-shadow 0.15s;
+  outline: none;
+}
+
+.ona-add input[type="text"]:focus-visible,
+.ona-edit input[type="text"]:focus-visible,
+.ona-key-add input[type="text"]:focus-visible,
+.ona-key-add input[type="password"]:focus-visible,
+.ona-key-edit input[type="text"]:focus-visible,
+.ona-key-edit input[type="password"]:focus-visible {
+  border-color: #52525b;
+  box-shadow: 0 0 0 3px rgb(212 212 216 / 0.12);
+}
+
+.ona-add button,
+.ona-edit-actions button,
+.ona-key-add button {
+  background: var(--muted);
+  border: none;
+  border-radius: 7px;
+  color: var(--foreground);
+  font-size: 11.5px;
+  font-family: inherit;
+  font-weight: 500;
+  padding: 6px 12px;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.ona-add button:hover,
+.ona-edit-actions button:hover,
+.ona-key-add button:hover {
+  background: #3f3f46;
+}
+
 /* ---------------------------------------------------------------- cards */
 
 .content {
@@ -1382,7 +1584,9 @@ body.drawer-open #drawer {
   background: #a1a1aa;
 }
 
-:root[data-theme="light"] .key-row button:hover {
+:root[data-theme="light"] .key-row button:hover,
+:root[data-theme="light"] .ona-add button:hover,
+:root[data-theme="light"] .ona-edit-actions button:hover {
   background: #e4e4e7;
 }
 

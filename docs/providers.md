@@ -8,7 +8,8 @@ code.
 
 Ground rules that apply to every provider:
 
-- A credential is only ever sent to **its own vendor's API**, over HTTPS.
+- A credential is only ever sent to **its own vendor's API**, over HTTPS
+  (One/New API sites may use `http://`).
 - If no credential is found, the provider shows a "connect me" hint (new
   installs auto-disable everything undetected except Claude and Codex).
 - Expired OAuth tokens are refreshed against the vendor's own token
@@ -295,6 +296,51 @@ Ground rules that apply to every provider:
   gateway served a request, so this assumes qwen models reached Claude
   Code via AihubMix — sessions run through Alibaba's own
   Anthropic-compatible proxy would land here too.
+
+## One/New API
+
+- **Reads:** nested `%APPDATA%\Pane\onenewapi.json` (versioned
+  `{ version, sites: [{ id, name, baseUrl, keys }] }`) — **not**
+  `config.json`, and not the single-key `set_api_key` Settings list.
+  Settings manages a hierarchy of sites and keys; pasted secrets never
+  come back out of the UI after save.
+- **Discovery:** `GET {origin}/api/status` with no API key, no redirects,
+  and a bounded JSON body — only when creating a site or changing its
+  base URL. Accepts branding-agnostic OneAPI / NewAPI payloads whose
+  `success` is `true` and whose `data.version` or `data.system_name` is
+  a non-empty string. Display unit (`USD` / `CNY` / tokens) is not
+  required. Custom branding text is not required. HTTP 404 or a
+  structural mismatch is shown as not a compatible OneAPI / NewAPI
+  panel, not as a raw HTTP status.
+- **Calls (per enabled key):** `GET {origin}/v1/dashboard/billing/subscription`
+  and `GET {origin}/v1/dashboard/billing/usage` with
+  `Authorization: Bearer <that key>` and **no date query parameters**.
+  Do not call `/api/usage/token` or `/api/log/token`.
+- **HTTP:** `https://` or `http://` for any valid host.
+- **Shows:** one dashboard/tray card per key, id `onenewapi@<key-id>`,
+  titled `<site name> · <key label>`. Usage `$used of $limit` (USD-mode
+  `total_usage` is cents → dollars via `/ 100`) plus an Expiry row when
+  `access_until` is a positive timestamp. Empty sites produce no card
+  and spawn no billing requests. Sentinel `>= 100000000` on
+  `hard_limit_usd` / `system_hard_limit_usd` means unlimited: the card
+  shows Used (including `$0.00` when usage is missing) instead of a
+  fake percent bar.
+- **AihubMix** stays its own family; an `aihubmix.com` origin may also
+  be added here as a manual site — both cards can coexist and are not
+  folded into Total Spend.
+- **Shared quota:** some panels return the same user-level numbers for
+  every key of one account. Pane shows each key's response independently
+  and does not sum or dedupe equal values.
+- **Accuracy:** OneAPI's `DisplayTokenStatEnabled=false` can hide
+  token-level stats so the panel reports user-level quota instead; treat
+  the card as what that credential observed. Pane does not call native
+  `/api/usage/token` or `/api/log/token` to compensate.
+- **Telemetry:** family `onenewapi` at most once per refresh. Site ids,
+  key ids, origins, labels, and configured key counts never leave the
+  machine.
+- **Local HTTP:** each key is `GET /v1/usage/onenewapi@<key-id>`. The
+  JSON is `providerId`, `displayName`, `plan`, `lines`, `fetchedAt` —
+  no dashboard URL, origin, or secrets.
 
 ## Qwen Code (Alibaba Coding Plan)
 
