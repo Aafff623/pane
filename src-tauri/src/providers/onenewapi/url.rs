@@ -1,10 +1,31 @@
 use reqwest::Url;
+use std::net::{Ipv4Addr, Ipv6Addr};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NormalizedUrl {
     pub origin: String,
     pub hostname: String,
     pub http_plaintext: bool,
+}
+
+fn is_local_http_host(hostname: &str) -> bool {
+    let host = hostname
+        .strip_prefix('[')
+        .and_then(|value| value.strip_suffix(']'))
+        .unwrap_or(hostname);
+
+    if host == "localhost"
+        || (host.ends_with(".local") && host.len() > ".local".len())
+    {
+        return true;
+    }
+    if let Ok(ip) = host.parse::<Ipv4Addr>() {
+        return ip.is_private() || ip.is_loopback() || ip.is_link_local();
+    }
+    if let Ok(ip) = host.parse::<Ipv6Addr>() {
+        return ip.is_loopback() || ip.is_unique_local() || ip.is_unicast_link_local();
+    }
+    false
 }
 
 /// Trim, reject userinfo/query/fragment/non-root paths, and canonicalize to
@@ -37,6 +58,9 @@ pub fn normalize_base_url(raw: &str) -> Result<NormalizedUrl, String> {
         .to_string();
     if hostname.is_empty() {
         return Err("URL is missing a host".into());
+    }
+    if url.scheme() == "http" && !is_local_http_host(&hostname) {
+        return Err("plain HTTP is only allowed for localhost or local network hosts".into());
     }
     let origin = match url.port() {
         Some(port) => format!("{}://{}:{port}", url.scheme(), hostname),
@@ -124,22 +148,7 @@ mod tests {
     }
 
     #[test]
-    fn allows_public_http_and_https() {
-        ok(
-            "http://example.com",
-            "http://example.com",
-            "example.com",
-            true,
-        );
-        ok("http://8.8.8.8", "http://8.8.8.8", "8.8.8.8", true);
-        ok("http://172.15.0.1", "http://172.15.0.1", "172.15.0.1", true);
-        ok("http://172.32.0.1", "http://172.32.0.1", "172.32.0.1", true);
-        ok(
-            "http://[2001:db8::1]",
-            "http://[2001:db8::1]",
-            "[2001:db8::1]",
-            true,
-        );
+    fn allows_public_https_but_rejects_public_http() {
         ok(
             "https://example.com",
             "https://example.com",
@@ -147,6 +156,14 @@ mod tests {
             false,
         );
         ok("https://8.8.8.8", "https://8.8.8.8", "8.8.8.8", false);
+        err("http://example.com");
+        err("http://8.8.8.8");
+        err("http://172.15.0.1");
+        err("http://172.32.0.1");
+        err("http://[2001:db8::1]");
+        err("http://panel.corp");
+        err("http://panel.local.evil");
+        err("http://localhost.evil");
     }
 
     #[test]
@@ -154,6 +171,12 @@ mod tests {
         ok("http://localhost", "http://localhost", "localhost", true);
         ok("http://LOCALHOST/v1", "http://localhost", "localhost", true);
         ok("http://127.0.0.1", "http://127.0.0.1", "127.0.0.1", true);
+        ok(
+            "http://127.255.255.254",
+            "http://127.255.255.254",
+            "127.255.255.254",
+            true,
+        );
         ok("http://[::1]/v1/", "http://[::1]", "[::1]", true);
         ok("http://10.1.2.3", "http://10.1.2.3", "10.1.2.3", true);
         ok("http://172.16.0.1", "http://172.16.0.1", "172.16.0.1", true);

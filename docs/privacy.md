@@ -12,7 +12,7 @@ This is the complete list. Anything not listed here does not happen.
 | Destination | When | What is sent |
 |---|---|---|
 | Each provider's own API (Anthropic, OpenAI/ChatGPT, cursor.com, GitHub, x.ai, opencode.ai, Devin, MiniMax, OpenRouter, Z.ai, Google, DeepSeek, Moonshot, Kimi Code, ElevenLabs, Codebuff, Kilo, AihubMix, Alibaba Model Studio…) | Every refresh (default 1 min), only for providers you have enabled | That provider's own token/key, exactly as its official tool would send it. Full per-provider detail: [providers.md](providers.md) |
-| User-configured One/New API origins | Status probe when saving/changing a site; billing on every refresh for enabled keys | `/api/status` with no key. Subscription + usage send that site's key as Bearer, **only to that origin** — never to Pane servers. |
+| User-configured One/New API origins | Status probe when saving/changing a site, plus one unauthenticated backfill if a stored site has no display unit; billing on every refresh for enabled keys | `/api/status` with no key. Subscription + usage send that site's key as Bearer, **only to that origin** — never to Pane servers. |
 | `raw.githubusercontent.com` (LiteLLM), `models.dev`, `robinebers.github.io` | ~Daily | Anonymous GET for public model price tables (no identifying data) |
 | `pane.jazii.dev/api/update` (falls back to `github.com/ItsJazii/pane/releases`) | On launch + every 4 h | Anonymous GET for the update manifest, carrying the app version. See "The update check" below for exactly what this counts. |
 | `us.i.posthog.com` | Once per day (unless switched off) | The two anonymous daily-statistic events described in "Anonymous usage statistics" below — a random ID, version, enabled-provider list, and per-provider success/failure counts. Never usage amounts, spend, keys, or error text. |
@@ -100,7 +100,8 @@ manifest first.
   `DisplayTokenStatEnabled=false` can be account-level or inaccurate —
   Pane does not call native token usage/log APIs to compensate. AihubMix
   stays a separate built-in provider; One/New API values are not folded
-  into Total Spend. `http://` is allowed for any host.
+  into Total Spend. `https://` is allowed for any valid host; `http://` is
+  limited to localhost and local-network addresses/names.
 - **Refreshed OAuth tokens**: written back to the CLIs' own credential
   files so your tools stay signed in — same behavior as the CLIs
   themselves.

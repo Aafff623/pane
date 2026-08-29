@@ -9,7 +9,7 @@ code.
 Ground rules that apply to every provider:
 
 - A credential is only ever sent to **its own vendor's API**, over HTTPS
-  (One/New API sites may use `http://`).
+  (One/New API sites may use `http://` only on the local network).
 - If no credential is found, the provider shows a "connect me" hint (new
   installs auto-disable everything undetected except Claude and Codex).
 - Expired OAuth tokens are refreshed against the vendor's own token
@@ -300,7 +300,7 @@ Ground rules that apply to every provider:
 ## One/New API
 
 - **Reads:** nested `%APPDATA%\Pane\onenewapi.json` (versioned
-  `{ version, sites: [{ id, name, baseUrl, keys }] }`) — **not**
+  `{ version, sites: [{ id, name, baseUrl, displayUnit, keys }] }`) — **not**
   `config.json`, and not the single-key `set_api_key` Settings list.
   Settings manages a hierarchy of sites and keys; pasted secrets never
   come back out of the UI after save.
@@ -316,15 +316,23 @@ Ground rules that apply to every provider:
   and `GET {origin}/v1/dashboard/billing/usage` with
   `Authorization: Bearer <that key>` and **no date query parameters**.
   Do not call `/api/usage/token` or `/api/log/token`.
-- **HTTP:** `https://` or `http://` for any valid host.
+- **HTTP:** `https://` for any valid host. Plain `http://` is limited to
+  `localhost`, `*.local`, IPv4 private/loopback/link-local addresses, and
+  IPv6 loopback/unique-local/link-local addresses. Ordinary hostnames are
+  not resolved to infer whether they are local.
 - **Shows:** one dashboard/tray card per key, id `onenewapi@<key-id>`,
-  titled `<site name> · <key label>`. Usage `$used of $limit` (USD-mode
-  `total_usage` is cents → dollars via `/ 100`) plus an Expiry row when
-  `access_until` is a positive timestamp. Empty sites produce no card
-  and spawn no billing requests. Sentinel `>= 100000000` on
-  `hard_limit_usd` / `system_hard_limit_usd` means unlimited: the card
-  shows Used (including `$0.00` when usage is missing) instead of a
-  fake percent bar.
+  titled `<site name> · <key label>`. Usage `{used} of {limit}` using the
+  site's display unit from `/api/status` (`USD` → `$`, `CNY` → `¥`,
+  tokens as integer counts, OneAPI `display_in_currency: false` as
+  tokens). `total_usage` is always cents-style (`/ 100`) in every mode,
+  matching NewAPI/OneAPI's OpenAI-compatible billing handlers. Plus an
+  Expiry row when `access_until` is a positive timestamp. Empty sites
+  produce no card and spawn no billing requests. Sentinel `>= 100000000`
+  on `hard_limit_usd` / `system_hard_limit_usd` means unlimited: the
+  card shows Used (including `$0.00` / `¥0.00` / `0` when usage is
+  missing) instead of a fake percent bar. Display unit is stored on the
+  site at fingerprint time; existing sites missing it get one
+  unauthenticated status backfill.
 - **AihubMix** stays its own family; an `aihubmix.com` origin may also
   be added here as a manual site — both cards can coexist and are not
   folded into Total Spend.

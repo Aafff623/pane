@@ -2,9 +2,52 @@ use serde_json::Value;
 
 const MAX_STATUS_BYTES: usize = 64 * 1024;
 
+/// Site-level quota display unit from `/api/status`. Billing numbers stay in
+/// the OpenAI cents convention for every unit; this only chooses formatting.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DisplayUnit {
+    Usd,
+    Cny,
+    Tokens,
+    Custom(String),
+}
+
+impl DisplayUnit {
+    pub fn to_store(&self) -> (Option<String>, Option<String>) {
+        match self {
+            Self::Usd => (Some("usd".into()), None),
+            Self::Cny => (Some("cny".into()), None),
+            Self::Tokens => (Some("tokens".into()), None),
+            Self::Custom(sym) => {
+                let symbol = if sym.trim().is_empty() {
+                    "¤".to_string()
+                } else {
+                    sym.clone()
+                };
+                (Some("custom".into()), Some(symbol))
+            }
+        }
+    }
+
+    pub fn from_store(unit: Option<&str>, symbol: Option<&str>) -> Self {
+        match unit.map(str::trim) {
+            Some("cny") => Self::Cny,
+            Some("tokens") => Self::Tokens,
+            Some("custom") => {
+                let symbol = symbol
+                    .map(str::trim)
+                    .filter(|s| !s.is_empty())
+                    .unwrap_or("¤");
+                Self::Custom(symbol.to_string())
+            }
+            _ => Self::Usd,
+        }
+    }
+}
+
 /// Structural OneAPI / NewAPI check. Does not require branding text or a
-/// particular quota display unit.
-pub fn fingerprint_payload(v: &Value) -> Result<(), String> {
+/// particular quota display unit. On success, parse the unit for formatting.
+pub fn fingerprint_payload(v: &Value) -> Result<DisplayUnit, String> {
     if v.get("success") != Some(&Value::Bool(true)) {
         return Err("status fingerprint mismatch".into());
     }
@@ -22,10 +65,39 @@ pub fn fingerprint_payload(v: &Value) -> Result<(), String> {
     if !named {
         return Err("status fingerprint mismatch".into());
     }
-    Ok(())
+    Ok(parse_display_unit(data))
 }
 
-pub async fn probe(origin: &str) -> Result<(), String> {
+pub fn parse_display_unit(data: &Value) -> DisplayUnit {
+    let ty = data
+        .get("quota_display_type")
+        .and_then(Value::as_str)
+        .map(|s| s.trim().to_ascii_uppercase());
+    match ty.as_deref() {
+        Some("CNY") => DisplayUnit::Cny,
+        Some("TOKENS") => DisplayUnit::Tokens,
+        Some("CUSTOM") => {
+            let symbol = data
+                .get("custom_currency_symbol")
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .unwrap_or("¤");
+            DisplayUnit::Custom(symbol.to_string())
+        }
+        Some("USD") => DisplayUnit::Usd,
+        _ => {
+            if data.get("display_in_currency") == Some(&Value::Bool(false)) {
+                DisplayUnit::Tokens
+            } else {
+                DisplayUnit::Usd
+            }
+        }
+    }
+}
+
+pub async fn probe(origin: &str) -> Result<DisplayUnit, String> {
+    let origin = super::url::normalize_base_url(origin)?.origin;
     let url = format!("{origin}/api/status");
     let resp = super::super::http_no_redirect()
         .get(&url)
@@ -53,7 +125,7 @@ pub async fn probe(origin: &str) -> Result<(), String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{fingerprint_payload, probe};
+    use super::{fingerprint_payload, parse_display_unit, probe, DisplayUnit};
     use serde_json::{json, Value};
     use std::io::ErrorKind;
     use std::time::Duration;
@@ -71,63 +143,115 @@ mod tests {
 
     #[test]
     fn accepts_structural_payload_regardless_of_branding_or_unit() {
-        fingerprint_payload(&ok_payload()).unwrap();
-        fingerprint_payload(&json!({
-            "success": true,
-            "data": {
-                "version": "1.0",
-                "system_name": "Totally Custom Panel",
-                "quota_display_type": "usd"
-            }
-        }))
-        .unwrap();
-        fingerprint_payload(&json!({
-            "success": true,
-            "data": {
-                "system_name": "One API",
-                "display_in_currency": true
-            }
-        }))
-        .unwrap();
-        fingerprint_payload(&json!({
-            "success": true,
-            "data": {
-                "version": "build",
-                "quota_display_type": "USD",
-                "display_in_currency": false
-            }
-        }))
-        .unwrap();
-        fingerprint_payload(&json!({
-            "success": true,
-            "data": {"version": "1"}
-        }))
-        .unwrap();
-        fingerprint_payload(&json!({
-            "success": true,
-            "data": {"version": "1", "quota_display_type": "CNY"}
-        }))
-        .unwrap();
-        fingerprint_payload(&json!({
-            "success": true,
-            "data": {"version": "1", "quota_display_type": "TOKENS"}
-        }))
-        .unwrap();
-        fingerprint_payload(&json!({
-            "success": true,
-            "data": {"version": "1", "display_in_currency": false}
-        }))
-        .unwrap();
-        fingerprint_payload(&json!({
-            "success": true,
-            "data": {
-                "version": "",
-                "system_name": "国创Token运营平台",
-                "quota_display_type": "CNY",
-                "display_in_currency": true
-            }
-        }))
-        .unwrap();
+        assert_eq!(fingerprint_payload(&ok_payload()).unwrap(), DisplayUnit::Usd);
+        assert_eq!(
+            fingerprint_payload(&json!({
+                "success": true,
+                "data": {
+                    "version": "1.0",
+                    "system_name": "Totally Custom Panel",
+                    "quota_display_type": "usd"
+                }
+            }))
+            .unwrap(),
+            DisplayUnit::Usd
+        );
+        assert_eq!(
+            fingerprint_payload(&json!({
+                "success": true,
+                "data": {
+                    "system_name": "One API",
+                    "display_in_currency": true
+                }
+            }))
+            .unwrap(),
+            DisplayUnit::Usd
+        );
+        assert_eq!(
+            fingerprint_payload(&json!({
+                "success": true,
+                "data": {
+                    "version": "build",
+                    "quota_display_type": "USD",
+                    "display_in_currency": false
+                }
+            }))
+            .unwrap(),
+            DisplayUnit::Usd
+        );
+        assert_eq!(
+            fingerprint_payload(&json!({
+                "success": true,
+                "data": {"version": "1"}
+            }))
+            .unwrap(),
+            DisplayUnit::Usd
+        );
+        assert_eq!(
+            fingerprint_payload(&json!({
+                "success": true,
+                "data": {"version": "1", "quota_display_type": "CNY"}
+            }))
+            .unwrap(),
+            DisplayUnit::Cny
+        );
+        assert_eq!(
+            fingerprint_payload(&json!({
+                "success": true,
+                "data": {"version": "1", "quota_display_type": "TOKENS"}
+            }))
+            .unwrap(),
+            DisplayUnit::Tokens
+        );
+        assert_eq!(
+            fingerprint_payload(&json!({
+                "success": true,
+                "data": {"version": "1", "display_in_currency": false}
+            }))
+            .unwrap(),
+            DisplayUnit::Tokens
+        );
+        assert_eq!(
+            fingerprint_payload(&json!({
+                "success": true,
+                "data": {
+                    "version": "",
+                    "system_name": "国创Token运营平台",
+                    "quota_display_type": "CNY",
+                    "display_in_currency": true
+                }
+            }))
+            .unwrap(),
+            DisplayUnit::Cny
+        );
+    }
+
+    #[test]
+    fn parse_display_unit_priority_and_fallbacks() {
+        assert_eq!(
+            parse_display_unit(&json!({"quota_display_type": "cny", "display_in_currency": true})),
+            DisplayUnit::Cny
+        );
+        assert_eq!(
+            parse_display_unit(&json!({"display_in_currency": false})),
+            DisplayUnit::Tokens
+        );
+        assert_eq!(
+            parse_display_unit(&json!({"display_in_currency": true})),
+            DisplayUnit::Usd
+        );
+        assert_eq!(parse_display_unit(&json!({})), DisplayUnit::Usd);
+        assert_eq!(
+            parse_display_unit(&json!({
+                "quota_display_type": "CUSTOM",
+                "custom_currency_symbol": "€"
+            })),
+            DisplayUnit::Custom("€".into())
+        );
+        assert_eq!(
+            parse_display_unit(&json!({"quota_display_type": "CUSTOM"})),
+            DisplayUnit::Custom("¤".into())
+        );
     }
 
     #[test]
@@ -257,6 +381,15 @@ mod tests {
     }
 
     #[test]
+    fn probe_rejects_public_http_before_transport() {
+        let err = tauri::async_runtime::block_on(probe("http://example.com")).unwrap_err();
+        assert_eq!(
+            err,
+            "plain HTTP is only allowed for localhost or local network hosts"
+        );
+    }
+
+    #[test]
     fn probe_accepts_cny_live_body() {
         let body = json!({
             "success": true,
@@ -266,7 +399,8 @@ mod tests {
         let (origin, join) = spawn_status_server(1, move |_origin, _req| {
             tiny_http::Response::from_string(body.clone()).with_status_code(200)
         });
-        tauri::async_runtime::block_on(probe(&origin)).unwrap();
+        let unit = tauri::async_runtime::block_on(probe(&origin)).unwrap();
+        assert_eq!(unit, DisplayUnit::Cny);
         let _ = join.join();
     }
 }

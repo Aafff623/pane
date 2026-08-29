@@ -1,11 +1,16 @@
 use super::super::Metric;
+use super::fingerprint::DisplayUnit;
 use serde_json::Value;
 
 const USAGE_TO_USD: f64 = 0.01;
 const UNLIMITED_SENTINEL: f64 = 100_000_000.0;
 const MAX_JS_DATE_MS: i64 = 8_640_000_000_000_000;
 
-pub fn metrics_from(sub: &Value, usage: Option<&Value>) -> Result<Vec<Metric>, String> {
+pub fn metrics_from(
+    sub: &Value,
+    usage: Option<&Value>,
+    unit: &DisplayUnit,
+) -> Result<Vec<Metric>, String> {
     let limit = parse_limit(sub);
     let used = usage.and_then(parse_used);
     let mut metrics = Vec::new();
@@ -15,17 +20,17 @@ pub fn metrics_from(sub: &Value, usage: Option<&Value>) -> Result<Vec<Metric>, S
             metrics.push(Metric::progress(
                 "Usage",
                 pct,
-                Some(format!("${used:.2} of ${limit:.2}")),
+                Some(format_pair(unit, used, limit)),
             ));
         }
         (Some(limit), None) => {
-            metrics.push(Metric::text("Limit", format!("${limit:.2}")));
+            metrics.push(Metric::text("Limit", format_amount(unit, limit)));
         }
         (None, Some(used)) => {
-            metrics.push(Metric::text("Used", format!("${used:.2}")));
+            metrics.push(Metric::text("Used", format_amount(unit, used)));
         }
         (None, None) if subscription_is_unlimited(sub) => {
-            metrics.push(Metric::text("Used", "$0.00".into()));
+            metrics.push(Metric::text("Used", format_amount(unit, 0.0)));
         }
         (None, None) => return Err("no billing data in response".into()),
     }
@@ -33,6 +38,26 @@ pub fn metrics_from(sub: &Value, usage: Option<&Value>) -> Result<Vec<Metric>, S
         metrics.push(expiry_metric(ms));
     }
     Ok(metrics)
+}
+
+fn format_amount(unit: &DisplayUnit, n: f64) -> String {
+    match unit {
+        DisplayUnit::Usd => format!("${n:.2}"),
+        DisplayUnit::Cny => format!("¥{n:.2}"),
+        DisplayUnit::Tokens => format!("{n:.0}"),
+        DisplayUnit::Custom(sym) => format!("{sym}{n:.2}"),
+    }
+}
+
+fn format_pair(unit: &DisplayUnit, used: f64, limit: f64) -> String {
+    match unit {
+        DisplayUnit::Tokens => format!("{:.0} of {:.0}", used, limit),
+        _ => format!(
+            "{} of {}",
+            format_amount(unit, used),
+            format_amount(unit, limit)
+        ),
+    }
 }
 
 fn parse_limit(sub: &Value) -> Option<f64> {
@@ -104,8 +129,13 @@ fn expiry_metric(resets_at: i64) -> Metric {
 #[cfg(test)]
 mod tests {
     use super::super::super::Metric;
+    use super::super::fingerprint::DisplayUnit;
     use super::metrics_from;
     use serde_json::{json, Value};
+
+    fn usd_metrics(sub: &Value, usage: Option<&Value>) -> Result<Vec<Metric>, String> {
+        metrics_from(sub, usage, &DisplayUnit::Usd)
+    }
 
     fn captured_sub() -> Value {
         json!({
@@ -141,7 +171,7 @@ mod tests {
 
     #[test]
     fn captured_example_usage_and_expiry() {
-        let metrics = metrics_from(&captured_sub(), Some(&captured_usage())).unwrap();
+        let metrics = usd_metrics(&captured_sub(), Some(&captured_usage())).unwrap();
         assert_eq!(metrics.len(), 2);
 
         let usage = by_label(&metrics, "Usage");
@@ -168,7 +198,7 @@ mod tests {
             "hard_limit_usd": 0,
             "system_hard_limit_usd": 50.5
         });
-        let metrics = metrics_from(&sub, None).unwrap();
+        let metrics = usd_metrics(&sub, None).unwrap();
         let limit = by_label(&metrics, "Limit");
         assert_eq!(limit.kind, "text");
         assert_eq!(limit.value.as_deref(), Some("$50.50"));
@@ -182,7 +212,7 @@ mod tests {
             "system_hard_limit_usd": 99
         });
         let usage = json!({"total_usage": 0});
-        let metrics = metrics_from(&sub, Some(&usage)).unwrap();
+        let metrics = usd_metrics(&sub, Some(&usage)).unwrap();
         let usage = by_label(&metrics, "Usage");
         assert_eq!(usage.detail.as_deref(), Some("$0.00 of $10.00"));
     }
@@ -193,7 +223,7 @@ mod tests {
             "hard_limit_usd": 100000000,
             "system_hard_limit_usd": 12.5
         });
-        let metrics = metrics_from(&sub, None).unwrap();
+        let metrics = usd_metrics(&sub, None).unwrap();
         assert_eq!(by_label(&metrics, "Limit").value.as_deref(), Some("$12.50"));
 
         let both_sentinel = json!({
@@ -201,15 +231,15 @@ mod tests {
             "system_hard_limit_usd": 100000000
         });
         let usage = json!({"total_usage": 250});
-        let metrics = metrics_from(&both_sentinel, Some(&usage)).unwrap();
+        let metrics = usd_metrics(&both_sentinel, Some(&usage)).unwrap();
         assert_eq!(metrics.len(), 1);
         assert_eq!(by_label(&metrics, "Used").value.as_deref(), Some("$2.50"));
 
         let above_sentinel = json!({"hard_limit_usd": 500_000_000.0});
-        let metrics = metrics_from(&above_sentinel, Some(&usage)).unwrap();
+        let metrics = usd_metrics(&above_sentinel, Some(&usage)).unwrap();
         assert_eq!(by_label(&metrics, "Used").value.as_deref(), Some("$2.50"));
 
-        let unlimited_no_usage = metrics_from(&both_sentinel, None).unwrap();
+        let unlimited_no_usage = usd_metrics(&both_sentinel, None).unwrap();
         assert_eq!(
             by_label(&unlimited_no_usage, "Used").value.as_deref(),
             Some("$0.00")
@@ -218,24 +248,24 @@ mod tests {
 
     #[test]
     fn used_only_and_limit_only_and_neither() {
-        let used_only = metrics_from(&json!({}), Some(&json!({"total_usage": 1234}))).unwrap();
+        let used_only = usd_metrics(&json!({}), Some(&json!({"total_usage": 1234}))).unwrap();
         assert_eq!(
             by_label(&used_only, "Used").value.as_deref(),
             Some("$12.34")
         );
 
-        let limit_only = metrics_from(&json!({"hard_limit_usd": 9}), None).unwrap();
+        let limit_only = usd_metrics(&json!({"hard_limit_usd": 9}), None).unwrap();
         assert_eq!(
             by_label(&limit_only, "Limit").value.as_deref(),
             Some("$9.00")
         );
 
         assert_eq!(
-            expect_err(metrics_from(&json!({}), None)),
+            expect_err(usd_metrics(&json!({}), None)),
             "no billing data in response"
         );
         assert_eq!(
-            expect_err(metrics_from(
+            expect_err(usd_metrics(
                 &json!({"soft_limit_usd": 100}),
                 Some(&json!({}))
             )),
@@ -252,7 +282,7 @@ mod tests {
         });
         let usage = json!({"total_usage": -1});
         assert_eq!(
-            expect_err(metrics_from(&sub, Some(&usage))),
+            expect_err(usd_metrics(&sub, Some(&usage))),
             "no billing data in response"
         );
 
@@ -262,7 +292,7 @@ mod tests {
         });
         let usage = json!({"total_usage": "10"});
         assert_eq!(
-            expect_err(metrics_from(&sub, Some(&usage))),
+            expect_err(usd_metrics(&sub, Some(&usage))),
             "no billing data in response"
         );
     }
@@ -271,13 +301,13 @@ mod tests {
     fn percent_is_clamped() {
         let sub = json!({"hard_limit_usd": 1});
         let over = json!({"total_usage": 50_000});
-        let pct = by_label(&metrics_from(&sub, Some(&over)).unwrap(), "Usage")
+        let pct = by_label(&usd_metrics(&sub, Some(&over)).unwrap(), "Usage")
             .used_percent
             .unwrap();
         assert_eq!(pct, 100.0);
 
         let zero = json!({"total_usage": 0});
-        let pct = by_label(&metrics_from(&sub, Some(&zero)).unwrap(), "Usage")
+        let pct = by_label(&usd_metrics(&sub, Some(&zero)).unwrap(), "Usage")
             .used_percent
             .unwrap();
         assert_eq!(pct, 0.0);
@@ -286,7 +316,7 @@ mod tests {
     #[test]
     fn expiry_omitted_when_missing_invalid_or_overflowing() {
         let sub = json!({"hard_limit_usd": 1});
-        let metrics = metrics_from(&sub, None).unwrap();
+        let metrics = usd_metrics(&sub, None).unwrap();
         assert!(metrics.iter().all(|m| m.label != "Expiry"));
 
         for until in [
@@ -299,7 +329,7 @@ mod tests {
             json!(i64::MAX),
         ] {
             let sub = json!({"hard_limit_usd": 1, "access_until": until});
-            let metrics = metrics_from(&sub, None).unwrap();
+            let metrics = usd_metrics(&sub, None).unwrap();
             assert!(
                 metrics.iter().all(|m| m.label != "Expiry"),
                 "expiry should be omitted for {sub}"
@@ -309,13 +339,64 @@ mod tests {
 
     #[test]
     fn usage_never_inherits_access_until() {
-        let metrics = metrics_from(&captured_sub(), Some(&captured_usage())).unwrap();
+        let metrics = usd_metrics(&captured_sub(), Some(&captured_usage())).unwrap();
         let usage = by_label(&metrics, "Usage");
         assert_eq!(usage.resets_at, None);
         assert_eq!(usage.period_ms, None);
         assert_eq!(
             by_label(&metrics, "Expiry").resets_at,
             Some(1_790_479_748_000)
+        );
+    }
+
+    #[test]
+    fn cny_keeps_cents_math_and_yen_symbol() {
+        let metrics =
+            metrics_from(&captured_sub(), Some(&captured_usage()), &DisplayUnit::Cny).unwrap();
+        let usage = by_label(&metrics, "Usage");
+        let pct = usage.used_percent.unwrap();
+        assert!((pct - 48.63).abs() < 0.01, "percent {pct} should be ~48.63");
+        assert_eq!(usage.detail.as_deref(), Some("¥592.18 of ¥1217.82"));
+    }
+
+    #[test]
+    fn tokens_keep_cents_math_without_dollar_label() {
+        let sub = json!({"hard_limit_usd": 1_000_000});
+        let usage = json!({"total_usage": 25_000_000});
+        let metrics = metrics_from(&sub, Some(&usage), &DisplayUnit::Tokens).unwrap();
+        let usage = by_label(&metrics, "Usage");
+        assert_eq!(usage.detail.as_deref(), Some("250000 of 1000000"));
+        assert_ne!(usage.detail.as_deref(), Some("$250000.00 of $1000000.00"));
+        let pct = usage.used_percent.unwrap();
+        assert!((pct - 25.0).abs() < 0.01, "percent {pct}");
+    }
+
+    #[test]
+    fn tokens_used_only_and_unlimited_zero_are_integers() {
+        let used_only =
+            metrics_from(&json!({}), Some(&json!({"total_usage": 1234})), &DisplayUnit::Tokens)
+                .unwrap();
+        assert_eq!(by_label(&used_only, "Used").value.as_deref(), Some("12"));
+
+        let unlimited = json!({
+            "hard_limit_usd": 100000000,
+            "system_hard_limit_usd": 100000000
+        });
+        let zero = metrics_from(&unlimited, None, &DisplayUnit::Tokens).unwrap();
+        assert_eq!(by_label(&zero, "Used").value.as_deref(), Some("0"));
+    }
+
+    #[test]
+    fn custom_symbol_formats_currency_amounts() {
+        let metrics = metrics_from(
+            &captured_sub(),
+            Some(&captured_usage()),
+            &DisplayUnit::Custom("€".into()),
+        )
+        .unwrap();
+        assert_eq!(
+            by_label(&metrics, "Usage").detail.as_deref(),
+            Some("€592.18 of €1217.82")
         );
     }
 }

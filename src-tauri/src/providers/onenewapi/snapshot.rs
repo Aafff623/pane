@@ -1,5 +1,6 @@
 use super::super::{http_no_redirect, json_body, Snapshot};
 use super::billing;
+use super::fingerprint::DisplayUnit;
 use super::store;
 use std::collections::HashMap;
 use std::path::Path;
@@ -37,6 +38,7 @@ pub struct KeyCard {
     pub name: String,
     pub origin: String,
     pub api_key: String,
+    pub display: DisplayUnit,
 }
 
 pub fn key_cards_at(path: &Path) -> Result<Vec<KeyCard>, String> {
@@ -53,6 +55,7 @@ pub fn key_cards_at(path: &Path) -> Result<Vec<KeyCard>, String> {
                     name: format!("{} · {}", site.name, key.label),
                     origin: site.base_url.clone(),
                     api_key: key.api_key.clone(),
+                    display: site.quota_display(),
                 })
         })
         .collect())
@@ -79,8 +82,9 @@ async fn fetch_key(
     client: &reqwest::Client,
     card: &KeyCard,
 ) -> Result<Vec<super::super::Metric>, String> {
-    let sub_url = format!("{}/v1/dashboard/billing/subscription", card.origin);
-    let usage_url = format!("{}/v1/dashboard/billing/usage", card.origin);
+    let origin = super::url::normalize_base_url(&card.origin)?.origin;
+    let sub_url = format!("{origin}/v1/dashboard/billing/subscription");
+    let usage_url = format!("{origin}/v1/dashboard/billing/usage");
     let (sub_resp, usage_resp) = tokio::join!(
         billing_get(client, &sub_url, &card.api_key),
         billing_get(client, &usage_url, &card.api_key),
@@ -105,7 +109,24 @@ async fn fetch_key(
         _ => None,
     };
 
-    billing::metrics_from(&sub, usage.as_ref())
+    billing::metrics_from(&sub, usage.as_ref(), &card.display)
+}
+
+pub async fn backfill_missing_display_units(path: &Path) {
+    let Ok(doc) = store::load(path) else {
+        return;
+    };
+    let missing: Vec<(String, String)> = doc
+        .sites
+        .iter()
+        .filter(|site| site.display_unit.is_none())
+        .map(|site| (site.id.clone(), site.base_url.clone()))
+        .collect();
+    for (id, origin) in missing {
+        if let Ok(unit) = super::fingerprint::probe(&origin).await {
+            let _ = super::set_display_unit_at(path, &id, unit);
+        }
+    }
 }
 
 fn billing_error_category(what: &str, err: &str) -> String {
@@ -118,7 +139,10 @@ fn billing_error_category(what: &str, err: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{key_cards_at, refresh_clients, snapshot_key, KeyCard};
+    use super::{
+        backfill_missing_display_units, key_cards_at, refresh_clients, snapshot_key, DisplayUnit,
+        KeyCard,
+    };
     use crate::providers::onenewapi::store;
     use crate::providers::onenewapi::url::normalize_base_url;
     use crate::providers::onenewapi::CreateSiteResult;
@@ -219,11 +243,16 @@ mod tests {
     }
 
     fn card(origin: &str, key: &str) -> KeyCard {
+        card_with_display(origin, key, DisplayUnit::Usd)
+    }
+
+    fn card_with_display(origin: &str, key: &str, display: DisplayUnit) -> KeyCard {
         KeyCard {
             id: "onenewapi@keyidabcdefghijkAAA".into(),
             name: "Panel · Key 1".into(),
             origin: origin.into(),
             api_key: key.into(),
+            display,
         }
     }
 
@@ -250,7 +279,7 @@ mod tests {
         let tmp = TempStore::new();
         let url = normalize_base_url("https://panel.example.com").unwrap();
         let CreateSiteResult::Created { site } =
-            store::insert_site(&tmp.path, "Panel", &url).unwrap()
+            store::insert_site(&tmp.path, "Panel", &url, DisplayUnit::Usd).unwrap()
         else {
             panic!("expected created");
         };
@@ -262,6 +291,7 @@ mod tests {
         assert_eq!(cards[0].name, "Panel · Key 1");
         assert_eq!(cards[0].origin, "https://panel.example.com");
         assert_eq!(cards[0].api_key, "sk-one");
+        assert_eq!(cards[0].display, DisplayUnit::Usd);
         let second = store::create_key(&tmp.path, &site.id, "Prod", "sk-two").unwrap();
         let cards = key_cards_at(&tmp.path).unwrap();
         assert_eq!(cards.len(), 2);
@@ -311,6 +341,19 @@ mod tests {
             .iter()
             .all(|c| c.authorization.as_deref() == Some("Bearer sk-live-quota")));
         assert!(!snap.error.clone().unwrap_or_default().contains(key));
+    }
+
+    #[test]
+    fn public_http_is_rejected_before_bearer_request() {
+        let snap = tauri::async_runtime::block_on(snapshot_key(card(
+            "http://example.com",
+            "sk-must-not-send",
+        )));
+        assert_eq!(snap.status, "error");
+        assert_eq!(
+            snap.error.as_deref(),
+            Some("plain HTTP is only allowed for localhost or local network hosts")
+        );
     }
 
     #[test]
@@ -392,6 +435,7 @@ mod tests {
             name: name.into(),
             origin: origin.into(),
             api_key: key.into(),
+            display: DisplayUnit::Usd,
         }
     }
 
@@ -521,6 +565,74 @@ mod tests {
                 .collect::<Vec<_>>()
         );
         assert_eq!(in_flight.load(Ordering::SeqCst), 0);
+    }
+
+    #[test]
+    fn snapshot_cny_card_formats_yen() {
+        let sub = sub_body();
+        let usage = usage_body();
+        let (origin, join) =
+            spawn_billing_server(2, move |origin, req| ok_billing(origin, req, &sub, &usage));
+        let snap = tauri::async_runtime::block_on(snapshot_key(card_with_display(
+            &origin,
+            "sk-cny",
+            DisplayUnit::Cny,
+        )));
+        let _ = join.join();
+        assert_eq!(snap.status, "ok");
+        let usage = snap.metrics.iter().find(|m| m.label == "Usage").unwrap();
+        assert_eq!(usage.detail.as_deref(), Some("¥592.18 of ¥1217.82"));
+    }
+
+    #[test]
+    fn backfill_persists_missing_unit_then_skips_status() {
+        let tmp = TempStore::new();
+        let status_hits = Arc::new(AtomicUsize::new(0));
+        let hits = Arc::clone(&status_hits);
+        let body = json!({
+            "success": true,
+            "data": {"version": "1", "quota_display_type": "CNY"}
+        })
+        .to_string();
+        let (origin, join) = spawn_billing_server(1, move |_origin, req| {
+            if path_of(req) == "/api/status" {
+                hits.fetch_add(1, Ordering::SeqCst);
+                return tiny_http::Response::from_string(body.clone()).with_status_code(200);
+            }
+            tiny_http::Response::from_string("nope").with_status_code(404)
+        });
+        fs::write(
+            &tmp.path,
+            json!({
+                "version": 1,
+                "sites": [{
+                    "id": "siteidabcdefghijkAAA",
+                    "name": "Panel",
+                    "baseUrl": origin,
+                    "nextKeyOrdinal": 2,
+                    "keys": [{
+                        "id": "keyidabcdefghijkAAA",
+                        "label": "Key 1",
+                        "apiKey": "sk-one"
+                    }]
+                }]
+            })
+            .to_string(),
+        )
+        .unwrap();
+        let cards = key_cards_at(&tmp.path).unwrap();
+        assert_eq!(cards[0].display, DisplayUnit::Usd);
+        tauri::async_runtime::block_on(backfill_missing_display_units(&tmp.path));
+        let cards = key_cards_at(&tmp.path).unwrap();
+        assert_eq!(cards[0].display, DisplayUnit::Cny);
+        tauri::async_runtime::block_on(backfill_missing_display_units(&tmp.path));
+        let captured = join.join().unwrap();
+        assert_eq!(status_hits.load(Ordering::SeqCst), 1);
+        assert_eq!(captured.len(), 1);
+        assert_eq!(captured[0].url, "/api/status");
+        assert_eq!(captured[0].authorization, None);
+        let loaded = store::load(&tmp.path).unwrap();
+        assert_eq!(loaded.sites[0].quota_display(), DisplayUnit::Cny);
     }
 
     fn spawn_slow_billing_server(

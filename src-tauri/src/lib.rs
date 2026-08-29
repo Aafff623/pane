@@ -1026,18 +1026,6 @@ where
     Ok(created)
 }
 
-fn delete_onenewapi_consistently<T, Cleanup, Delete>(
-    cleanup: Cleanup,
-    delete: Delete,
-) -> Result<T, String>
-where
-    Cleanup: FnOnce() -> Result<(), String>,
-    Delete: FnOnce() -> Result<T, String>,
-{
-    cleanup()?;
-    delete()
-}
-
 /// Strip deleted One/New API *key cards* from config. Never removes family
 /// id `onenewapi` just because keys went away. Returns only changed keys.
 fn purge_onenewapi_from_config(cfg: &mut Value, snapshot_ids: &[String]) -> Value {
@@ -1119,28 +1107,42 @@ fn purge_onenewapi_cards(key_ids: &[String]) -> Result<(), String> {
 fn onenewapi_after_site_save(
     previous: &providers::onenewapi::SiteDto,
     site: &providers::onenewapi::SiteDto,
-) {
+) -> Result<(), String> {
     if site.base_url != previous.base_url {
-        return;
+        return Ok(());
     }
     if site.name != previous.name {
         for key in &site.keys {
             rename_cached_snapshot(
                 &format!("onenewapi@{}", key.id),
                 format!("{} · {}", site.name, key.label),
-            );
+            )?;
         }
     }
+    Ok(())
 }
 
-fn rename_cached_snapshot(id: &str, new_name: String) {
+fn rename_cached_snapshot(id: &str, new_name: String) -> Result<(), String> {
     let mut map = last_ok().lock().unwrap();
-    if let Some(entry) = map.get_mut(id) {
+    rename_cached_snapshot_in(&mut map, id, new_name, persist_last_ok)
+}
+
+fn rename_cached_snapshot_in<Persist>(
+    map: &mut HashMap<String, CachedSnap>,
+    id: &str,
+    new_name: String,
+    persist: Persist,
+) -> Result<(), String>
+where
+    Persist: FnOnce(&HashMap<String, CachedSnap>) -> Result<(), String>,
+{
+    let mut next = map.clone();
+    if let Some(entry) = next.get_mut(id) {
         entry.snap.name = new_name;
-        if let Err(error) = persist_last_ok(&map) {
-            eprintln!("[pane] snapshot cache rename: {error}");
-        }
+        persist(&next)?;
+        *map = next;
     }
+    Ok(())
 }
 
 /// The provider family of a card id: "claude@ab12cd34" → "claude". The only
@@ -1542,7 +1544,7 @@ async fn fetch_usage(
     let onenewapi_generation_before = onenewapi_mutation_generation();
     let onenewapi_active_before = ONENEWAPI_ACTIVE_MUTATIONS.load(Ordering::Acquire);
     if !disabled.iter().any(|d| d == "onenewapi") {
-        if let Ok(cards) = providers::onenewapi::key_cards() {
+        if let Ok(cards) = providers::onenewapi::prepare_key_cards().await {
             expected_onenewapi_generations =
                 onenewapi_snapshot_generations(cards.iter().map(|card| card.id.clone()));
             let onenewapi_generation_after = onenewapi_mutation_generation();
@@ -2060,32 +2062,30 @@ async fn onenewapi_update_site(
     let url_changed = normalized_base_url
         .as_deref()
         .is_some_and(|candidate| candidate != previous.base_url);
-    let verified_base_url = if url_changed {
+    let (verified_base_url, display) = if url_changed {
         let raw = base_url
             .as_ref()
             .ok_or_else(|| "site URL is required".to_string())?;
-        Some(
-            providers::onenewapi::probe_site(raw.clone())
-                .await?
-                .base_url,
-        )
+        let (dto, display) = providers::onenewapi::probe_site_display(raw.clone()).await?;
+        (Some(dto.base_url), Some(display))
     } else {
-        normalized_base_url
+        (normalized_base_url, None)
     };
-    let affected_snapshot_ids = onenewapi_snapshot_ids(
-        &previous
-            .keys
-            .iter()
-            .map(|key| key.id.clone())
-            .collect::<Vec<_>>(),
-    );
+    let key_ids = previous
+        .keys
+        .iter()
+        .map(|key| key.id.clone())
+        .collect::<Vec<_>>();
+    let affected_snapshot_ids = onenewapi_snapshot_ids(&key_ids);
     let _mutation = OneNewApiMutationGuard::begin(affected_snapshot_ids);
-    if url_changed {
-        forget_onenewapi_key_ids(previous.keys.iter().map(|key| key.id.clone()))?;
-    }
-    let site = providers::onenewapi::update_site_after_probe(id, name, verified_base_url)?;
-    onenewapi_after_site_save(&previous, &site);
-    Ok(site)
+    providers::onenewapi::update_site_consistently(id, name, verified_base_url, display, |site| {
+        if url_changed {
+            forget_onenewapi_key_ids(key_ids)?;
+            Ok(())
+        } else {
+            onenewapi_after_site_save(&previous, site)
+        }
+    })
 }
 
 #[tauri::command]
@@ -2096,10 +2096,7 @@ fn onenewapi_delete_site(id: String) -> Result<(), String> {
         .map(|s| s.keys.into_iter().map(|k| k.id).collect::<Vec<_>>())
         .ok_or_else(|| "site not found".to_string())?;
     let _mutation = OneNewApiMutationGuard::begin(onenewapi_snapshot_ids(&key_ids));
-    delete_onenewapi_consistently(
-        || purge_onenewapi_cards(&key_ids),
-        || providers::onenewapi::delete_site(id),
-    )
+    providers::onenewapi::delete_site_consistently(id, || purge_onenewapi_cards(&key_ids))
 }
 
 fn onenewapi_apply_zero_to_one_enable(disabled: &mut Vec<Value>, key_id: &str) {
@@ -2154,16 +2151,16 @@ fn onenewapi_update_key(
     let label_changed = label.is_some();
     let snap_id = format!("onenewapi@{key_id}");
     let _mutation = OneNewApiMutationGuard::begin(vec![snap_id.clone()]);
-    if rotated {
-        forget_provider_snapshot(&snap_id)?;
-    }
-    let site = providers::onenewapi::update_key(site_id, key_id.clone(), label, api_key)?;
-    if !rotated && label_changed {
-        if let Some(key) = site.keys.iter().find(|k| k.id == key_id) {
-            rename_cached_snapshot(&snap_id, format!("{} · {}", site.name, key.label));
+    providers::onenewapi::update_key_consistently(site_id, key_id.clone(), label, api_key, |site| {
+        if rotated {
+            forget_provider_snapshot(&snap_id)?;
+        } else if label_changed {
+            if let Some(key) = site.keys.iter().find(|k| k.id == key_id) {
+                rename_cached_snapshot(&snap_id, format!("{} · {}", site.name, key.label))?;
+            }
         }
-    }
-    Ok(site)
+        Ok(())
+    })
 }
 
 #[tauri::command]
@@ -2173,10 +2170,9 @@ fn onenewapi_delete_key(
 ) -> Result<providers::onenewapi::SiteDto, String> {
     let _mutation = OneNewApiMutationGuard::begin(vec![format!("onenewapi@{key_id}")]);
     let cleanup_key_id = key_id.clone();
-    delete_onenewapi_consistently(
-        || purge_onenewapi_cards(&[cleanup_key_id]),
-        || providers::onenewapi::delete_key(site_id, key_id),
-    )
+    providers::onenewapi::delete_key_consistently(site_id, key_id, || {
+        purge_onenewapi_cards(&[cleanup_key_id])
+    })
 }
 
 /// Opens a provider quick link in the default browser. Only plain web URLs —
@@ -2575,16 +2571,15 @@ pub fn run() {
 mod tests {
     use super::{
         cached_kimi_ok_from, cached_onenewapi_id_is_configured, card_is_disabled,
-        commit_strip_state_after_apply, create_onenewapi_key_consistently,
-        delete_onenewapi_consistently, fail_state, fold_moonshot_into_kimi,
-        forget_onenewapi_key_ids, forget_provider_snapshot, is_kimi_wallet_label, last_ok,
-        onenewapi_after_site_save, onenewapi_apply_zero_to_one_enable,
-        onenewapi_snapshot_generations, persist_last_ok_at, purge_onenewapi_cards,
-        purge_onenewapi_from_config, rename_cached_snapshot, restore_kimi_wallet_rows,
-        restore_last_success_after_error, retain_current_onenewapi_results,
-        strip_entry_application_order, strip_icon_ids_to_clear, strip_is_active, strip_reset_ids,
-        CachedSnap, FailState, OneNewApiMutationGuard, StripEntry, SNAPSHOT_CACHE_MS,
-        STALE_GRACE_MS,
+        commit_strip_state_after_apply, create_onenewapi_key_consistently, fail_state,
+        fold_moonshot_into_kimi, forget_onenewapi_key_ids, forget_provider_snapshot,
+        is_kimi_wallet_label, last_ok, onenewapi_after_site_save,
+        onenewapi_apply_zero_to_one_enable, onenewapi_snapshot_generations, persist_last_ok_at,
+        purge_onenewapi_cards, purge_onenewapi_from_config, rename_cached_snapshot,
+        rename_cached_snapshot_in, restore_kimi_wallet_rows, restore_last_success_after_error,
+        retain_current_onenewapi_results, strip_entry_application_order, strip_icon_ids_to_clear,
+        strip_is_active, strip_reset_ids, CachedSnap, FailState, OneNewApiMutationGuard,
+        StripEntry, SNAPSHOT_CACHE_MS, STALE_GRACE_MS,
     };
     use crate::alerts;
     use crate::providers::{Metric, Snapshot};
@@ -2913,23 +2908,6 @@ mod tests {
     }
 
     #[test]
-    fn onenewapi_delete_cleanup_failure_keeps_primary_record_for_retry() {
-        let deleted = std::cell::Cell::new(false);
-        let result = delete_onenewapi_consistently(
-            || Err("config locked".into()),
-            || {
-                deleted.set(true);
-                Ok(())
-            },
-        );
-        assert!(result.is_err());
-        assert!(
-            !deleted.get(),
-            "primary record must remain when cleanup fails"
-        );
-    }
-
-    #[test]
     fn onenewapi_snapshot_cache_write_failure_is_reported() {
         let root =
             std::env::temp_dir().join(format!("pane-onenewapi-cache-fail-{}", std::process::id()));
@@ -3040,7 +3018,7 @@ mod tests {
                 ),
             },
         );
-        rename_cached_snapshot(id, "Panel · New".into());
+        rename_cached_snapshot(id, "Panel · New".into()).unwrap();
         let map = last_ok().lock().unwrap();
         let entry = map.get(id).unwrap();
         assert_eq!(entry.snap.name, "Panel · New");
@@ -3054,6 +3032,23 @@ mod tests {
             fail_state().lock().unwrap().get(id).unwrap().note,
             "benched"
         );
+    }
+
+    #[test]
+    fn onenewapi_cached_rename_write_failure_keeps_old_name() {
+        let id = "onenewapi@ticket03-rename-fail";
+        let mut map = HashMap::from([(
+            id.to_string(),
+            CachedSnap {
+                at: 42,
+                snap: Snapshot::ok(id, "Panel · Old", None, vec![]),
+            },
+        )]);
+        let result = rename_cached_snapshot_in(&mut map, id, "Panel · New".into(), |_| {
+            Err("snapshot cache locked".into())
+        });
+        assert_eq!(result.unwrap_err(), "snapshot cache locked");
+        assert_eq!(map.get(id).unwrap().snap.name, "Panel · Old");
     }
 
     fn seed_onenewapi_cache(key_id: &str, name: &str) -> SnapCacheGuard {
@@ -3142,7 +3137,7 @@ mod tests {
             &[("site-a1", "One"), ("site-a2", "Two")],
         );
         forget_onenewapi_key_ids(updated.keys.iter().map(|key| key.id.clone())).unwrap();
-        onenewapi_after_site_save(&previous, &updated);
+        onenewapi_after_site_save(&previous, &updated).unwrap();
         assert!(!last_ok().lock().unwrap().contains_key("onenewapi@site-a1"));
         assert!(!last_ok().lock().unwrap().contains_key("onenewapi@site-a2"));
         assert!(!fail_state()
@@ -3172,7 +3167,7 @@ mod tests {
             "http://127.0.0.1:1",
             &[("site-n1", "One"), ("site-n2", "Two")],
         );
-        onenewapi_after_site_save(&previous, &updated);
+        onenewapi_after_site_save(&previous, &updated).unwrap();
         let map = last_ok().lock().unwrap();
         assert_eq!(map.get("onenewapi@site-n1").unwrap().snap.name, "New · One");
         assert_eq!(map.get("onenewapi@site-n2").unwrap().snap.name, "New · Two");

@@ -7,6 +7,7 @@ mod url;
 
 use serde::Serialize;
 use std::path::{Path, PathBuf};
+use std::sync::{Mutex, MutexGuard, OnceLock};
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub struct SiteDto {
@@ -43,22 +44,70 @@ fn store_path() -> PathBuf {
     super::config_dir().join("onenewapi.json")
 }
 
+fn store_mutation_lock() -> &'static Mutex<()> {
+    static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+    LOCK.get_or_init(|| Mutex::new(()))
+}
+
+fn lock_store_mutation() -> Result<MutexGuard<'static, ()>, String> {
+    store_mutation_lock()
+        .lock()
+        .map_err(|_| "onenewapi store mutation lock is poisoned".to_string())
+}
+
+/// Serializes a primary store write with its derived-state cleanup. Cleanup
+/// runs only after the atomic store write succeeds; if cleanup fails, the
+/// complete credential document is restored before the error is returned.
+/// The cleanup closure must not re-enter this module's store interface.
+fn coordinate_store_mutation_at<T, Mutate, Cleanup>(
+    path: &Path,
+    mutate: Mutate,
+    cleanup: Cleanup,
+) -> Result<T, String>
+where
+    Mutate: FnOnce(&Path) -> Result<T, String>,
+    Cleanup: FnOnce(&T) -> Result<(), String>,
+{
+    let _lock = lock_store_mutation()?;
+    let checkpoint = store::load(path)?;
+    let result = mutate(path)?;
+    if let Err(cleanup_error) = cleanup(&result) {
+        return match store::save(path, &checkpoint) {
+            Ok(()) => Err(cleanup_error),
+            Err(rollback_error) => Err(format!(
+                "{cleanup_error}; rollback onenewapi.json failed: {rollback_error}"
+            )),
+        };
+    }
+    Ok(result)
+}
+
 pub fn list_sites() -> Result<Vec<SiteDto>, String> {
+    let _lock = lock_store_mutation()?;
     store::list_sites(&store_path())
 }
 
 pub async fn probe_site(base_url: String) -> Result<ProbeDto, String> {
+    Ok(probe_site_url(&base_url).await?.0)
+}
+
+pub(crate) async fn probe_site_display(
+    base_url: String,
+) -> Result<(ProbeDto, fingerprint::DisplayUnit), String> {
     probe_site_url(&base_url).await
 }
 
-async fn probe_site_url(base_url: &str) -> Result<ProbeDto, String> {
+async fn probe_site_url(base_url: &str) -> Result<(ProbeDto, fingerprint::DisplayUnit), String> {
     let normalized = url::normalize_base_url(base_url)?;
-    fingerprint::probe(&normalized.origin).await?;
-    Ok(ProbeDto {
-        base_url: normalized.origin,
-        hostname: normalized.hostname,
-        http_plaintext: normalized.http_plaintext,
-    })
+    let display = fingerprint::probe(&normalized.origin).await?;
+    Ok((
+        ProbeDto {
+            base_url: normalized.origin,
+            hostname: normalized.hostname,
+            http_plaintext: normalized.http_plaintext,
+        },
+        display,
+    ))
 }
 
 pub async fn create_site(name: String, base_url: String) -> Result<CreateSiteResult, String> {
@@ -81,8 +130,9 @@ pub async fn create_site_at(
             site_id: site.id.clone(),
         });
     }
-    fingerprint::probe(&normalized.origin).await?;
-    store::insert_site(path, &name, &normalized)
+    let display = fingerprint::probe(&normalized.origin).await?;
+    let _lock = lock_store_mutation()?;
+    store::insert_site(path, &name, &normalized, display)
 }
 
 pub async fn update_site(
@@ -97,19 +147,27 @@ pub(crate) fn normalize_site_url(base_url: &str) -> Result<String, String> {
     Ok(url::normalize_base_url(base_url)?.origin)
 }
 
-/// Commits a site edit after the caller has fingerprinted a changed origin.
-/// Keeping this separate lets the app clear derived caches after validation
-/// but before the credential document changes.
-pub(crate) fn update_site_after_probe(
+/// Commits a site edit after the caller has fingerprinted a changed origin,
+/// then applies its derived-state cleanup before exposing success.
+pub(crate) fn update_site_consistently<Cleanup>(
     id: String,
     name: Option<String>,
     base_url: Option<String>,
-) -> Result<SiteDto, String> {
+    display: Option<fingerprint::DisplayUnit>,
+    cleanup: Cleanup,
+) -> Result<SiteDto, String>
+where
+    Cleanup: FnOnce(&SiteDto) -> Result<(), String>,
+{
     let normalized = base_url
         .as_deref()
         .map(url::normalize_base_url)
         .transpose()?;
-    store::update_site(&store_path(), &id, name, normalized)
+    coordinate_store_mutation_at(
+        &store_path(),
+        |path| store::update_site(path, &id, name, normalized, display),
+        cleanup,
+    )
 }
 
 pub async fn update_site_at(
@@ -124,23 +182,36 @@ pub async fn update_site_at(
         .iter()
         .find(|s| s.id == id)
         .ok_or_else(|| "site not found".to_string())?;
-    let new_url = match base_url {
+    let (new_url, display) = match base_url {
         Some(raw) => {
             let normalized = url::normalize_base_url(&raw)?;
             if normalized.origin != site.base_url {
-                fingerprint::probe(&normalized.origin).await?;
-                Some(normalized)
+                let display = fingerprint::probe(&normalized.origin).await?;
+                (Some(normalized), Some(display))
             } else {
-                None
+                (None, None)
             }
         }
-        None => None,
+        None => (None, None),
     };
-    store::update_site(path, id, name, new_url)
+    let _lock = lock_store_mutation()?;
+    store::update_site(path, id, name, new_url, display)
 }
 
 pub fn delete_site(id: String) -> Result<(), String> {
+    let _lock = lock_store_mutation()?;
     store::delete_site(&store_path(), &id)
+}
+
+pub(crate) fn delete_site_consistently<Cleanup>(id: String, cleanup: Cleanup) -> Result<(), String>
+where
+    Cleanup: FnOnce() -> Result<(), String>,
+{
+    coordinate_store_mutation_at(
+        &store_path(),
+        |path| store::delete_site(path, &id),
+        |_| cleanup(),
+    )
 }
 
 #[derive(Debug, Serialize)]
@@ -151,6 +222,7 @@ pub struct CreatedKey {
 }
 
 pub fn create_key(site_id: String, label: String, api_key: String) -> Result<CreatedKey, String> {
+    let _lock = lock_store_mutation()?;
     store::create_key(&store_path(), &site_id, &label, &api_key)
 }
 
@@ -160,22 +232,74 @@ pub fn update_key(
     label: Option<String>,
     api_key: Option<String>,
 ) -> Result<SiteDto, String> {
+    let _lock = lock_store_mutation()?;
     store::update_key(&store_path(), &site_id, &key_id, label, api_key)
 }
 
+pub(crate) fn update_key_consistently<Cleanup>(
+    site_id: String,
+    key_id: String,
+    label: Option<String>,
+    api_key: Option<String>,
+    cleanup: Cleanup,
+) -> Result<SiteDto, String>
+where
+    Cleanup: FnOnce(&SiteDto) -> Result<(), String>,
+{
+    coordinate_store_mutation_at(
+        &store_path(),
+        |path| store::update_key(path, &site_id, &key_id, label, api_key),
+        cleanup,
+    )
+}
+
 pub fn delete_key(site_id: String, key_id: String) -> Result<SiteDto, String> {
+    let _lock = lock_store_mutation()?;
     store::delete_key(&store_path(), &site_id, &key_id)
+}
+
+pub(crate) fn delete_key_consistently<Cleanup>(
+    site_id: String,
+    key_id: String,
+    cleanup: Cleanup,
+) -> Result<SiteDto, String>
+where
+    Cleanup: FnOnce() -> Result<(), String>,
+{
+    coordinate_store_mutation_at(
+        &store_path(),
+        |path| store::delete_key(path, &site_id, &key_id),
+        |_| cleanup(),
+    )
 }
 
 #[allow(dead_code)]
 pub fn configured_key_count() -> usize {
+    let Ok(_lock) = lock_store_mutation() else {
+        return 0;
+    };
     store::configured_key_count_at(&store_path())
 }
 
 pub use snapshot::{refresh_clients, snapshot_key_with_client, KeyCard};
 
 pub fn key_cards() -> Result<Vec<KeyCard>, String> {
+    let _lock = lock_store_mutation()?;
     snapshot::key_cards_at(&store_path())
+}
+
+pub async fn prepare_key_cards() -> Result<Vec<KeyCard>, String> {
+    snapshot::backfill_missing_display_units(&store_path()).await;
+    key_cards()
+}
+
+fn set_display_unit_at(
+    path: &Path,
+    id: &str,
+    display: fingerprint::DisplayUnit,
+) -> Result<(), String> {
+    let _lock = lock_store_mutation()?;
+    store::set_display_unit(path, id, display)
 }
 
 #[cfg(test)]
@@ -291,14 +415,42 @@ mod tests {
         let auths = join.join().unwrap();
         assert_eq!(auths, vec![None]);
         assert_eq!(store::list_sites(&tmp.path).unwrap().len(), 1);
+        assert_eq!(
+            store::load(&tmp.path).unwrap().sites[0].quota_display(),
+            fingerprint::DisplayUnit::Usd
+        );
+    }
+
+    #[test]
+    fn create_site_persists_cny_display_unit() {
+        let tmp = TempStore::new();
+        let body = json!({
+            "success": true,
+            "data": {"version": "1", "quota_display_type": "CNY"}
+        })
+        .to_string();
+        let (origin, join) = spawn_status_server(1, 200, body);
+        let created =
+            tauri::async_runtime::block_on(create_site_at(&tmp.path, "Panel".into(), origin))
+                .unwrap();
+        let CreateSiteResult::Created { site } = created else {
+            panic!("expected created");
+        };
+        let _ = join.join();
+        assert_eq!(
+            store::load(&tmp.path).unwrap().sites[0].quota_display(),
+            fingerprint::DisplayUnit::Cny
+        );
+        assert_eq!(site.name, "Panel");
     }
 
     #[test]
     fn probe_site_returns_plaintext_flag_without_saving() {
         let tmp = TempStore::new();
         let (origin, join) = spawn_ok_server(1);
-        let dto = tauri::async_runtime::block_on(probe_site_url(&origin)).unwrap();
+        let (dto, display) = tauri::async_runtime::block_on(probe_site_url(&origin)).unwrap();
         assert_eq!(dto.base_url, origin);
+        assert_eq!(display, fingerprint::DisplayUnit::Usd);
         assert_eq!(dto.hostname, "127.0.0.1");
         assert!(dto.http_plaintext);
         assert!(!tmp.path.exists());
@@ -348,6 +500,7 @@ mod tests {
             &tmp.path,
             "Other",
             &url::normalize_base_url("https://other.example.com").unwrap(),
+            fingerprint::DisplayUnit::Usd,
         )
         .unwrap();
         let CreateSiteResult::Created { site: other_site } = other else {
@@ -427,6 +580,213 @@ mod tests {
         assert_eq!(updated.base_url, origin);
         let auths = join.join().unwrap();
         assert_eq!(auths.len(), 1);
+    }
+
+    fn seed_site_with_key(tmp: &TempStore) -> (SiteDto, CreatedKey) {
+        let normalized = url::normalize_base_url("https://panel.example.com").unwrap();
+        let created = store::insert_site(
+            &tmp.path,
+            "Panel",
+            &normalized,
+            fingerprint::DisplayUnit::Usd,
+        )
+        .unwrap();
+        let CreateSiteResult::Created { site } = created else {
+            panic!("expected created site");
+        };
+        let key = store::create_key(&tmp.path, &site.id, "Primary", "sk-primary").unwrap();
+        (site, key)
+    }
+
+    #[derive(Clone, Debug, PartialEq, Eq)]
+    struct DerivedStateFixture {
+        cache: Vec<&'static str>,
+        failure_state: Vec<&'static str>,
+        alerts: Vec<&'static str>,
+        disabled: Vec<&'static str>,
+        layout: Vec<&'static str>,
+        pinned: Option<&'static str>,
+        tray: Vec<&'static str>,
+    }
+
+    impl DerivedStateFixture {
+        fn seeded() -> Self {
+            Self {
+                cache: vec!["onenewapi@primary"],
+                failure_state: vec!["onenewapi@primary"],
+                alerts: vec!["onenewapi@primary:Usage"],
+                disabled: vec!["onenewapi@primary"],
+                layout: vec!["onenewapi@primary"],
+                pinned: Some("onenewapi@primary"),
+                tray: vec!["onenewapi@primary"],
+            }
+        }
+
+        fn clear(&mut self) {
+            self.cache.clear();
+            self.failure_state.clear();
+            self.alerts.clear();
+            self.disabled.clear();
+            self.layout.clear();
+            self.pinned = None;
+            self.tray.clear();
+        }
+    }
+
+    fn assert_store_failure_kept_derived_state<T>(
+        result: Result<T, String>,
+        derived: &std::cell::RefCell<DerivedStateFixture>,
+        before: &DerivedStateFixture,
+    ) {
+        assert!(result.is_err());
+        assert_eq!(
+            &*derived.borrow(),
+            before,
+            "failed store mutation must not run derived cleanup"
+        );
+    }
+
+    #[test]
+    fn update_site_store_failure_skips_cleanup() {
+        let tmp = TempStore::new();
+        let _ = seed_site_with_key(&tmp);
+        let derived = std::cell::RefCell::new(DerivedStateFixture::seeded());
+        let before = derived.borrow().clone();
+        let result = coordinate_store_mutation_at(
+            &tmp.path,
+            |path| store::update_site(path, "missing-site", Some("New".into()), None, None),
+            |_| {
+                derived.borrow_mut().clear();
+                Ok(())
+            },
+        );
+        assert_store_failure_kept_derived_state(result, &derived, &before);
+    }
+
+    #[test]
+    fn update_key_store_failure_skips_cleanup() {
+        let tmp = TempStore::new();
+        let (site, _) = seed_site_with_key(&tmp);
+        let derived = std::cell::RefCell::new(DerivedStateFixture::seeded());
+        let before = derived.borrow().clone();
+        let result = coordinate_store_mutation_at(
+            &tmp.path,
+            |path| {
+                store::update_key(
+                    path,
+                    &site.id,
+                    "missing-key",
+                    Some("New".into()),
+                    Some("sk-new".into()),
+                )
+            },
+            |_| {
+                derived.borrow_mut().clear();
+                Ok(())
+            },
+        );
+        assert_store_failure_kept_derived_state(result, &derived, &before);
+    }
+
+    #[test]
+    fn delete_site_store_failure_skips_cleanup() {
+        let tmp = TempStore::new();
+        let _ = seed_site_with_key(&tmp);
+        let derived = std::cell::RefCell::new(DerivedStateFixture::seeded());
+        let before = derived.borrow().clone();
+        let result = coordinate_store_mutation_at(
+            &tmp.path,
+            |path| store::delete_site(path, "missing-site"),
+            |_| {
+                derived.borrow_mut().clear();
+                Ok(())
+            },
+        );
+        assert_store_failure_kept_derived_state(result, &derived, &before);
+    }
+
+    #[test]
+    fn delete_key_store_failure_skips_cleanup() {
+        let tmp = TempStore::new();
+        let (site, _) = seed_site_with_key(&tmp);
+        let derived = std::cell::RefCell::new(DerivedStateFixture::seeded());
+        let before = derived.borrow().clone();
+        let result = coordinate_store_mutation_at(
+            &tmp.path,
+            |path| store::delete_key(path, &site.id, "missing-key"),
+            |_| {
+                derived.borrow_mut().clear();
+                Ok(())
+            },
+        );
+        assert_store_failure_kept_derived_state(result, &derived, &before);
+    }
+
+    #[test]
+    fn successful_store_mutation_cleans_before_returning() {
+        let tmp = TempStore::new();
+        let (site, key) = seed_site_with_key(&tmp);
+        let cleaned = std::cell::Cell::new(false);
+        let updated = coordinate_store_mutation_at(
+            &tmp.path,
+            |path| store::update_key(path, &site.id, &key.key_id, Some("Renamed".into()), None),
+            |saved| {
+                assert_eq!(
+                    saved
+                        .keys
+                        .iter()
+                        .find(|item| item.id == key.key_id)
+                        .unwrap()
+                        .label,
+                    "Renamed"
+                );
+                cleaned.set(true);
+                Ok(())
+            },
+        )
+        .unwrap();
+        assert!(cleaned.get());
+        assert_eq!(
+            updated
+                .keys
+                .iter()
+                .find(|item| item.id == key.key_id)
+                .unwrap()
+                .label,
+            "Renamed"
+        );
+    }
+
+    #[test]
+    fn cleanup_failure_restores_primary_store() {
+        let tmp = TempStore::new();
+        let (site, _) = seed_site_with_key(&tmp);
+        let before = fs::read_to_string(&tmp.path).unwrap();
+        let result = coordinate_store_mutation_at(
+            &tmp.path,
+            |path| store::delete_site(path, &site.id),
+            |_| Err("config locked".into()),
+        );
+        assert_eq!(result.unwrap_err(), "config locked");
+        assert_eq!(fs::read_to_string(&tmp.path).unwrap(), before);
+    }
+
+    #[test]
+    fn cleanup_and_rollback_failures_are_both_reported() {
+        let tmp = TempStore::new();
+        let (site, _) = seed_site_with_key(&tmp);
+        let result = coordinate_store_mutation_at(
+            &tmp.path,
+            |path| store::delete_site(path, &site.id),
+            |_| {
+                fs::remove_file(&tmp.path).unwrap();
+                fs::create_dir(&tmp.path).unwrap();
+                Err("config locked".into())
+            },
+        );
+        let error = result.unwrap_err();
+        assert!(error.contains("config locked"), "{error}");
+        assert!(error.contains("rollback onenewapi.json failed"), "{error}");
     }
 
     #[test]

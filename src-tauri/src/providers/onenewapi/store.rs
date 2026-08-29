@@ -1,3 +1,4 @@
+use super::fingerprint::DisplayUnit;
 use super::ids::new_id_avoiding;
 use super::url::NormalizedUrl;
 use super::{CreateSiteResult, KeyDto, SiteDto};
@@ -19,7 +20,23 @@ pub(crate) struct SiteRecord {
     pub name: String,
     pub base_url: String,
     pub next_key_ordinal: u32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub display_unit: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub currency_symbol: Option<String>,
     pub keys: Vec<KeyRecord>,
+}
+
+impl SiteRecord {
+    pub fn quota_display(&self) -> DisplayUnit {
+        DisplayUnit::from_store(self.display_unit.as_deref(), self.currency_symbol.as_deref())
+    }
+
+    fn set_display_unit(&mut self, display: DisplayUnit) {
+        let (unit, symbol) = display.to_store();
+        self.display_unit = unit;
+        self.currency_symbol = symbol;
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -163,6 +180,7 @@ pub fn insert_site(
     path: &Path,
     name: &str,
     normalized: &NormalizedUrl,
+    display: DisplayUnit,
 ) -> Result<CreateSiteResult, String> {
     let mut doc = load(path)?;
     if let Some(existing) = doc.sites.iter().find(|s| s.base_url == normalized.origin) {
@@ -171,11 +189,14 @@ pub fn insert_site(
         });
     }
     let id = new_id_avoiding(&occupied_ids(&doc))?;
+    let (display_unit, currency_symbol) = display.to_store();
     let site = SiteRecord {
         id,
         name: display_name(name, &normalized.hostname),
         base_url: normalized.origin.clone(),
         next_key_ordinal: 1,
+        display_unit,
+        currency_symbol,
         keys: Vec::new(),
     };
     let dto = site.to_dto();
@@ -189,6 +210,7 @@ pub fn update_site(
     id: &str,
     name: Option<String>,
     new_url: Option<NormalizedUrl>,
+    display: Option<DisplayUnit>,
 ) -> Result<SiteDto, String> {
     let mut doc = load(path)?;
     if let Some(ref n) = new_url {
@@ -210,6 +232,9 @@ pub fn update_site(
         if let Some(ref name) = name {
             site.name = display_name(name, &n.hostname);
         }
+        if let Some(display) = display {
+            site.set_display_unit(display);
+        }
     } else if let Some(ref name) = name {
         let hostname = reqwest::Url::parse(&site.base_url)
             .ok()
@@ -220,6 +245,17 @@ pub fn update_site(
     let dto = site.to_dto();
     save(path, &doc)?;
     Ok(dto)
+}
+
+pub fn set_display_unit(path: &Path, id: &str, display: DisplayUnit) -> Result<(), String> {
+    let mut doc = load(path)?;
+    let site = doc
+        .sites
+        .iter_mut()
+        .find(|s| s.id == id)
+        .ok_or_else(|| "site not found".to_string())?;
+    site.set_display_unit(display);
+    save(path, &doc)
 }
 
 pub fn delete_site(path: &Path, id: &str) -> Result<(), String> {
@@ -415,7 +451,7 @@ mod tests {
     #[test]
     fn save_then_load_round_trip() {
         let tmp = TempStore::new();
-        let created = insert_site(&tmp.path, "Panel", &https("one.example.com")).unwrap();
+        let created = insert_site(&tmp.path, "Panel", &https("one.example.com"), DisplayUnit::Usd).unwrap();
         let CreateSiteResult::Created { site } = created else {
             panic!("expected created");
         };
@@ -427,17 +463,19 @@ mod tests {
         assert_eq!(loaded.sites.len(), 1);
         assert_eq!(loaded.sites[0].next_key_ordinal, 1);
         assert_eq!(loaded.sites[0].keys.len(), 0);
+        assert_eq!(loaded.sites[0].quota_display(), DisplayUnit::Usd);
         let raw = fs::read_to_string(&tmp.path).unwrap();
         assert!(raw.contains("\"baseUrl\""));
         assert!(raw.contains("\"nextKeyOrdinal\""));
+        assert!(raw.contains("\"displayUnit\""));
         assert!(!raw.contains("\"base_url\""));
     }
 
     #[test]
     fn atomic_write_replaces_existing() {
         let tmp = TempStore::new();
-        insert_site(&tmp.path, "A", &https("a.example.com")).unwrap();
-        insert_site(&tmp.path, "B", &https("b.example.com")).unwrap();
+        insert_site(&tmp.path, "A", &https("a.example.com"), DisplayUnit::Usd).unwrap();
+        insert_site(&tmp.path, "B", &https("b.example.com"), DisplayUnit::Usd).unwrap();
         let listed = list_sites(&tmp.path).unwrap();
         assert_eq!(listed.len(), 2);
         assert_eq!(listed[0].name, "A");
@@ -456,7 +494,7 @@ mod tests {
         fs::write(&tmp.path, "{not json").unwrap();
         assert!(load(&tmp.path).is_err());
         let garbage = fs::read_to_string(&tmp.path).unwrap();
-        let err = insert_site(&tmp.path, "X", &https("x.example.com")).unwrap_err();
+        let err = insert_site(&tmp.path, "X", &https("x.example.com"), DisplayUnit::Usd).unwrap_err();
         assert!(!err.is_empty());
         assert_eq!(fs::read_to_string(&tmp.path).unwrap(), garbage);
         let empty = StoreFile {
@@ -472,14 +510,14 @@ mod tests {
         let tmp = TempStore::new();
         fs::create_dir(&tmp.path).unwrap();
         assert!(load(&tmp.path).is_err());
-        assert!(insert_site(&tmp.path, "X", &https("x.example.com")).is_err());
+        assert!(insert_site(&tmp.path, "X", &https("x.example.com"), DisplayUnit::Usd).is_err());
         assert!(tmp.path.is_dir());
     }
 
     #[test]
     fn unique_origin_and_duplicate_returns_existing_id() {
         let tmp = TempStore::new();
-        let first = insert_site(&tmp.path, "One", &https("dup.example.com")).unwrap();
+        let first = insert_site(&tmp.path, "One", &https("dup.example.com"), DisplayUnit::Usd).unwrap();
         let CreateSiteResult::Created { site } = first else {
             panic!("expected created");
         };
@@ -487,6 +525,7 @@ mod tests {
             &tmp.path,
             "Other",
             &normalize_base_url("https://dup.example.com/v1/").unwrap(),
+            DisplayUnit::Usd,
         )
         .unwrap();
         match again {
@@ -497,9 +536,57 @@ mod tests {
     }
 
     #[test]
+    fn missing_display_unit_defaults_to_usd_and_name_edit_keeps_it() {
+        let tmp = TempStore::new();
+        fs::write(
+            &tmp.path,
+            json!({
+                "version": 1,
+                "sites": [{
+                    "id": "siteidabcdefghijkAAA",
+                    "name": "Panel",
+                    "baseUrl": "https://cny.example.com",
+                    "nextKeyOrdinal": 1,
+                    "keys": []
+                }]
+            })
+            .to_string(),
+        )
+        .unwrap();
+        let loaded = load(&tmp.path).unwrap();
+        assert_eq!(loaded.sites[0].display_unit, None);
+        assert_eq!(loaded.sites[0].quota_display(), DisplayUnit::Usd);
+        set_display_unit(&tmp.path, "siteidabcdefghijkAAA", DisplayUnit::Cny).unwrap();
+        let loaded = load(&tmp.path).unwrap();
+        assert_eq!(loaded.sites[0].quota_display(), DisplayUnit::Cny);
+        update_site(
+            &tmp.path,
+            "siteidabcdefghijkAAA",
+            Some("Renamed".into()),
+            None,
+            None,
+        )
+        .unwrap();
+        let loaded = load(&tmp.path).unwrap();
+        assert_eq!(loaded.sites[0].name, "Renamed");
+        assert_eq!(loaded.sites[0].quota_display(), DisplayUnit::Cny);
+        update_site(
+            &tmp.path,
+            "siteidabcdefghijkAAA",
+            None,
+            Some(https("tokens.example.com")),
+            Some(DisplayUnit::Tokens),
+        )
+        .unwrap();
+        let loaded = load(&tmp.path).unwrap();
+        assert_eq!(loaded.sites[0].base_url, "https://tokens.example.com");
+        assert_eq!(loaded.sites[0].quota_display(), DisplayUnit::Tokens);
+    }
+
+    #[test]
     fn blank_name_falls_back_to_hostname() {
         let tmp = TempStore::new();
-        let created = insert_site(&tmp.path, "  ", &https("panel.example.com")).unwrap();
+        let created = insert_site(&tmp.path, "  ", &https("panel.example.com"), DisplayUnit::Usd).unwrap();
         let CreateSiteResult::Created { site } = created else {
             panic!("expected created");
         };
@@ -509,15 +596,15 @@ mod tests {
     #[test]
     fn empty_site_crud() {
         let tmp = TempStore::new();
-        let created = insert_site(&tmp.path, "Alpha", &https("alpha.example.com")).unwrap();
+        let created = insert_site(&tmp.path, "Alpha", &https("alpha.example.com"), DisplayUnit::Usd).unwrap();
         let CreateSiteResult::Created { site } = created else {
             panic!("expected created");
         };
-        let renamed = update_site(&tmp.path, &site.id, Some("Beta".into()), None).unwrap();
+        let renamed = update_site(&tmp.path, &site.id, Some("Beta".into()), None, None).unwrap();
         assert_eq!(renamed.name, "Beta");
         assert_eq!(renamed.base_url, "https://alpha.example.com");
         let moved =
-            update_site(&tmp.path, &site.id, None, Some(https("beta.example.com"))).unwrap();
+            update_site(&tmp.path, &site.id, None, Some(https("beta.example.com")), None).unwrap();
         assert_eq!(moved.id, site.id);
         assert_eq!(moved.name, "Beta");
         assert_eq!(moved.base_url, "https://beta.example.com");
@@ -533,7 +620,7 @@ mod tests {
         let k2 = create_key(&tmp.path, &site.id, "Two", "sk-2").unwrap();
         let other = created_site(&tmp, "Other", "other.example.com");
         let other_key = create_key(&tmp.path, &other.id, "One", "sk-other").unwrap();
-        let renamed = update_site(&tmp.path, &site.id, Some("Beta".into()), None).unwrap();
+        let renamed = update_site(&tmp.path, &site.id, Some("Beta".into()), None, None).unwrap();
         assert_eq!(renamed.id, site.id);
         assert_eq!(renamed.name, "Beta");
         assert_eq!(renamed.base_url, "https://alpha.example.com");
@@ -557,7 +644,7 @@ mod tests {
         let k2 = create_key(&tmp.path, &site.id, "Two", "sk-2").unwrap();
         let other = created_site(&tmp, "Other", "other.example.com");
         let other_key = create_key(&tmp.path, &other.id, "One", "sk-other").unwrap();
-        let moved = update_site(&tmp.path, &site.id, None, Some(https("new.example.com"))).unwrap();
+        let moved = update_site(&tmp.path, &site.id, None, Some(https("new.example.com")), None).unwrap();
         assert_eq!(moved.id, site.id);
         assert_eq!(moved.name, "Panel");
         assert_eq!(moved.base_url, "https://new.example.com");
@@ -641,7 +728,7 @@ mod tests {
     }
 
     fn created_site(tmp: &TempStore, name: &str, host: &str) -> SiteDto {
-        match insert_site(&tmp.path, name, &https(host)).unwrap() {
+        match insert_site(&tmp.path, name, &https(host), DisplayUnit::Usd).unwrap() {
             CreateSiteResult::Created { site } => site,
             CreateSiteResult::Duplicate { .. } => panic!("expected created"),
         }
