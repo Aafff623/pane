@@ -1178,19 +1178,28 @@ fn onenewapi_after_site_save(
         return Ok(());
     }
     if site.name != previous.name {
-        for key in &site.keys {
-            rename_cached_snapshot(
-                &format!("onenewapi@{}", key.id),
-                format!("{} · {}", site.name, key.label),
-            )?;
-        }
+        let renames: Vec<(String, String)> = site
+            .keys
+            .iter()
+            .map(|key| {
+                (
+                    format!("onenewapi@{}", key.id),
+                    format!("{} · {}", site.name, key.label),
+                )
+            })
+            .collect();
+        rename_cached_snapshots(&renames)?;
     }
     Ok(())
 }
 
 fn rename_cached_snapshot(id: &str, new_name: String) -> Result<(), String> {
+    rename_cached_snapshots(&[(id.to_string(), new_name)])
+}
+
+fn rename_cached_snapshots(renames: &[(String, String)]) -> Result<(), String> {
     let mut map = last_ok().lock().unwrap();
-    rename_cached_snapshot_in(&mut map, id, new_name, persist_last_ok)
+    rename_cached_snapshots_in(&mut map, renames, persist_last_ok)
 }
 
 fn rename_cached_snapshot_in<Persist>(
@@ -1202,9 +1211,28 @@ fn rename_cached_snapshot_in<Persist>(
 where
     Persist: FnOnce(&HashMap<String, CachedSnap>) -> Result<(), String>,
 {
+    rename_cached_snapshots_in(map, &[(id.to_string(), new_name)], persist)
+}
+
+fn rename_cached_snapshots_in<Persist>(
+    map: &mut HashMap<String, CachedSnap>,
+    renames: &[(String, String)],
+    persist: Persist,
+) -> Result<(), String>
+where
+    Persist: FnOnce(&HashMap<String, CachedSnap>) -> Result<(), String>,
+{
     let mut next = map.clone();
-    if let Some(entry) = next.get_mut(id) {
-        entry.snap.name = new_name;
+    let mut changed = false;
+    for (id, new_name) in renames {
+        if let Some(entry) = next.get_mut(id) {
+            if entry.snap.name != *new_name {
+                entry.snap.name = new_name.clone();
+                changed = true;
+            }
+        }
+    }
+    if changed {
         persist(&next)?;
         *map = next;
     }
@@ -2624,7 +2652,8 @@ mod tests {
         onenewapi_apply_zero_to_one_enable, onenewapi_snapshot_generations, persist_last_ok_at,
         onenewapi_purge_restore_patch, purge_onenewapi_cards, purge_onenewapi_cards_coordinated,
         purge_onenewapi_cards_with, purge_onenewapi_from_config,
-        rename_cached_snapshot, rename_cached_snapshot_in, restore_kimi_wallet_rows,
+        rename_cached_snapshot, rename_cached_snapshot_in, rename_cached_snapshots_in,
+        restore_kimi_wallet_rows,
         restore_last_success_after_error,
         retain_current_onenewapi_results, strip_entry_application_order, strip_icon_ids_to_clear,
         strip_is_active, strip_reset_ids, CachedSnap, FailState, OneNewApiMutationGuard,
@@ -3126,6 +3155,41 @@ mod tests {
         });
         assert_eq!(result.unwrap_err(), "snapshot cache locked");
         assert_eq!(map.get(id).unwrap().snap.name, "Panel · Old");
+    }
+
+    #[test]
+    fn onenewapi_multi_key_rename_write_failure_keeps_all_old_names() {
+        let a = "onenewapi@ticket06-rename-a";
+        let b = "onenewapi@ticket06-rename-b";
+        let mut map = HashMap::from([
+            (
+                a.to_string(),
+                CachedSnap {
+                    at: 1,
+                    snap: Snapshot::ok(a, "Old · One", None, vec![]),
+                },
+            ),
+            (
+                b.to_string(),
+                CachedSnap {
+                    at: 2,
+                    snap: Snapshot::ok(b, "Old · Two", None, vec![]),
+                },
+            ),
+        ]);
+        let result = rename_cached_snapshots_in(
+            &mut map,
+            &[
+                (a.to_string(), "New · One".into()),
+                (b.to_string(), "New · Two".into()),
+            ],
+            |_| Err("snapshot cache locked".into()),
+        );
+        assert_eq!(result.unwrap_err(), "snapshot cache locked");
+        assert_eq!(map.get(a).unwrap().snap.name, "Old · One");
+        assert_eq!(map.get(b).unwrap().snap.name, "Old · Two");
+        assert_eq!(map.get(a).unwrap().at, 1);
+        assert_eq!(map.get(b).unwrap().at, 2);
     }
 
     fn seed_onenewapi_cache(key_id: &str, name: &str) -> SnapCacheGuard {

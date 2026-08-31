@@ -289,7 +289,7 @@ pub fn key_cards() -> Result<Vec<KeyCard>, String> {
 }
 
 pub async fn prepare_key_cards() -> Result<Vec<KeyCard>, String> {
-    snapshot::backfill_missing_display_units(&store_path()).await;
+    snapshot::schedule_backfill_missing_display_units(store_path());
     key_cards()
 }
 

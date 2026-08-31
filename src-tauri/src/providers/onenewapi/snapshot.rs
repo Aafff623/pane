@@ -2,9 +2,9 @@ use super::super::{http_no_redirect, json_body, Snapshot};
 use super::billing;
 use super::fingerprint::DisplayUnit;
 use super::store;
-use std::collections::HashMap;
-use std::path::Path;
-use std::sync::OnceLock;
+use std::collections::{HashMap, HashSet};
+use std::path::{Path, PathBuf};
+use std::sync::{Mutex, OnceLock};
 
 const MAX_BILLING_BYTES: usize = 64 * 1024;
 const MAX_IN_FLIGHT: usize = 8;
@@ -116,20 +116,36 @@ async fn fetch_key(
     billing::metrics_from(&sub, usage.as_ref(), &card.display)
 }
 
+fn backfill_claimed() -> &'static Mutex<HashSet<(String, String)>> {
+    static CLAIMED: OnceLock<Mutex<HashSet<(String, String)>>> = OnceLock::new();
+    CLAIMED.get_or_init(Default::default)
+}
+
+/// One unauthenticated status backfill per stored site, off the refresh path.
+pub fn schedule_backfill_missing_display_units(path: PathBuf) {
+    tauri::async_runtime::spawn(async move {
+        backfill_missing_display_units(&path).await;
+    });
+}
+
 pub async fn backfill_missing_display_units(path: &Path) {
     let Ok(doc) = store::load(path) else {
         return;
     };
-    let missing: Vec<(String, String)> = doc
-        .sites
-        .iter()
-        .filter(|site| site.display_unit.is_none())
-        .map(|site| (site.id.clone(), site.base_url.clone()))
-        .collect();
+    let missing: Vec<(String, String)> = {
+        let mut claimed = backfill_claimed().lock().unwrap();
+        doc.sites
+            .iter()
+            .filter(|site| site.display_unit.is_none())
+            .filter(|site| claimed.insert((site.id.clone(), site.base_url.clone())))
+            .map(|site| (site.id.clone(), site.base_url.clone()))
+            .collect()
+    };
     for (id, origin) in missing {
-        if let Ok(unit) = super::fingerprint::probe(&origin).await {
-            let _ = super::set_display_unit_at(path, &id, &origin, unit);
-        }
+        let unit = super::fingerprint::probe(&origin)
+            .await
+            .unwrap_or(DisplayUnit::Usd);
+        let _ = super::set_display_unit_at(path, &id, &origin, unit);
     }
 }
 
@@ -144,8 +160,8 @@ fn billing_error_category(what: &str, err: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        backfill_missing_display_units, key_cards_at, refresh_clients, snapshot_key, DisplayUnit,
-        KeyCard,
+        backfill_missing_display_units, key_cards_at, refresh_clients,
+        schedule_backfill_missing_display_units, snapshot_key, DisplayUnit, KeyCard,
     };
     use crate::providers::onenewapi::store;
     use crate::providers::onenewapi::url::normalize_base_url;
@@ -792,6 +808,115 @@ mod tests {
         let loaded = store::load(&tmp.path).unwrap();
         assert_eq!(loaded.sites[0].base_url, "https://tokens.example.com");
         assert_eq!(loaded.sites[0].quota_display(), DisplayUnit::Tokens);
+    }
+
+    #[test]
+    fn backfill_failed_probe_persists_usd_and_does_not_retry() {
+        let tmp = TempStore::new();
+        let status_hits = Arc::new(AtomicUsize::new(0));
+        let hits = Arc::clone(&status_hits);
+        let (origin, join) = spawn_billing_server(1, move |_origin, req| {
+            if path_of(req) == "/api/status" {
+                hits.fetch_add(1, Ordering::SeqCst);
+                return tiny_http::Response::from_string("down").with_status_code(500);
+            }
+            tiny_http::Response::from_string("nope").with_status_code(404)
+        });
+        fs::write(
+            &tmp.path,
+            json!({
+                "version": 1,
+                "sites": [{
+                    "id": "siteidbackfillfail01A",
+                    "name": "Panel",
+                    "baseUrl": origin,
+                    "nextKeyOrdinal": 1,
+                    "keys": []
+                }]
+            })
+            .to_string(),
+        )
+        .unwrap();
+        tauri::async_runtime::block_on(backfill_missing_display_units(&tmp.path));
+        tauri::async_runtime::block_on(backfill_missing_display_units(&tmp.path));
+        let captured = join.join().unwrap();
+        assert_eq!(status_hits.load(Ordering::SeqCst), 1);
+        assert_eq!(captured.len(), 1);
+        let loaded = store::load(&tmp.path).unwrap();
+        assert_eq!(loaded.sites[0].display_unit.as_deref(), Some("usd"));
+        assert_eq!(loaded.sites[0].quota_display(), DisplayUnit::Usd);
+    }
+
+    #[test]
+    fn scheduled_backfill_does_not_block_key_cards() {
+        let tmp = TempStore::new();
+        let release = Arc::new(AtomicBool::new(false));
+        let status_hits = Arc::new(AtomicUsize::new(0));
+        let hits = Arc::clone(&status_hits);
+        let gate = Arc::clone(&release);
+        let body = json!({
+            "success": true,
+            "data": {"version": "1", "quota_display_type": "CNY"}
+        })
+        .to_string();
+        let (origin, join) = spawn_billing_server(1, move |_origin, req| {
+            if path_of(req) == "/api/status" {
+                hits.fetch_add(1, Ordering::SeqCst);
+                let deadline = Instant::now() + Duration::from_secs(5);
+                while !gate.load(Ordering::SeqCst) {
+                    if Instant::now() > deadline {
+                        break;
+                    }
+                    std::thread::sleep(Duration::from_millis(10));
+                }
+                return tiny_http::Response::from_string(body.clone()).with_status_code(200);
+            }
+            tiny_http::Response::from_string("nope").with_status_code(404)
+        });
+        fs::write(
+            &tmp.path,
+            json!({
+                "version": 1,
+                "sites": [{
+                    "id": "siteidschedbackfillAA",
+                    "name": "Panel",
+                    "baseUrl": origin,
+                    "nextKeyOrdinal": 2,
+                    "keys": [{
+                        "id": "keyidschedbackfillAA",
+                        "label": "Key 1",
+                        "apiKey": "sk-one"
+                    }]
+                }]
+            })
+            .to_string(),
+        )
+        .unwrap();
+        let started = Instant::now();
+        schedule_backfill_missing_display_units(tmp.path.clone());
+        let cards = key_cards_at(&tmp.path).unwrap();
+        assert!(
+            started.elapsed() < Duration::from_millis(500),
+            "key card prepare waited on status backfill: {:?}",
+            started.elapsed()
+        );
+        assert_eq!(cards[0].display, DisplayUnit::Usd);
+        let deadline = Instant::now() + Duration::from_secs(3);
+        while status_hits.load(Ordering::SeqCst) == 0 {
+            assert!(Instant::now() < deadline, "status probe never arrived");
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        release.store(true, Ordering::SeqCst);
+        let deadline = Instant::now() + Duration::from_secs(3);
+        loop {
+            let loaded = store::load(&tmp.path).unwrap();
+            if loaded.sites[0].quota_display() == DisplayUnit::Cny {
+                break;
+            }
+            assert!(Instant::now() < deadline, "background backfill never persisted");
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        let _ = join.join();
     }
 
     fn spawn_slow_billing_server(
