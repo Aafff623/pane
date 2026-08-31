@@ -104,8 +104,13 @@ async fn fetch_key(
     let sub = sub_json.map_err(|e| billing_error_category("subscription", &e))?;
 
     let usage = match usage_resp {
-        Ok((status, json)) if status.is_success() => json.ok(),
-        _ => None,
+        Ok((status, json)) if status.is_success() => match json {
+            Ok(body) => Some(body),
+            Err(e) => return Err(billing_error_category("usage", &e)),
+        },
+        Ok((status, _)) if status.as_u16() == 404 => None,
+        Ok((status, _)) => return Err(format!("usage HTTP {status}")),
+        Err(_) => return Err("usage transport".to_string()),
     };
 
     billing::metrics_from(&sub, usage.as_ref(), &card.display)
@@ -123,7 +128,7 @@ pub async fn backfill_missing_display_units(path: &Path) {
         .collect();
     for (id, origin) in missing {
         if let Ok(unit) = super::fingerprint::probe(&origin).await {
-            let _ = super::set_display_unit_at(path, &id, unit);
+            let _ = super::set_display_unit_at(path, &id, &origin, unit);
         }
     }
 }
@@ -150,7 +155,7 @@ mod tests {
     use std::io::{ErrorKind, Read, Write};
     use std::net::{TcpListener, TcpStream};
     use std::path::PathBuf;
-    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
     use std::sync::Arc;
     use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
@@ -412,7 +417,25 @@ mod tests {
     }
 
     #[test]
-    fn usage_http_failure_keeps_limit() {
+    fn usage_404_keeps_limit() {
+        let sub = json!({"hard_limit_usd": 40}).to_string();
+        let (origin, join) = spawn_billing_server(2, move |_origin, req| match path_of(req) {
+            "/v1/dashboard/billing/subscription" => {
+                tiny_http::Response::from_string(sub.clone()).with_status_code(200)
+            }
+            _ => tiny_http::Response::from_string("missing").with_status_code(404),
+        });
+        let snap = tauri::async_runtime::block_on(snapshot_key(card(&origin, "sk-ok")));
+        let _ = join.join();
+        assert_eq!(snap.status, "ok");
+        assert_eq!(snap.plan, None);
+        let limit = snap.metrics.iter().find(|m| m.label == "Limit").unwrap();
+        assert_eq!(limit.value.as_deref(), Some("$40.00"));
+        assert!(snap.metrics.iter().all(|m| m.label != "Usage"));
+    }
+
+    #[test]
+    fn usage_http_failure_is_snapshot_error() {
         let sub = json!({"hard_limit_usd": 40}).to_string();
         let (origin, join) = spawn_billing_server(2, move |_origin, req| match path_of(req) {
             "/v1/dashboard/billing/subscription" => {
@@ -422,10 +445,29 @@ mod tests {
         });
         let snap = tauri::async_runtime::block_on(snapshot_key(card(&origin, "sk-ok")));
         let _ = join.join();
-        assert_eq!(snap.status, "ok");
-        assert_eq!(snap.plan, None);
-        let limit = snap.metrics.iter().find(|m| m.label == "Limit").unwrap();
-        assert_eq!(limit.value.as_deref(), Some("$40.00"));
+        assert_eq!(snap.status, "error");
+        assert!(
+            snap.error.as_deref().unwrap_or("").contains("usage HTTP"),
+            "{:?}",
+            snap.error
+        );
+        assert!(snap.metrics.iter().all(|m| m.label != "Limit"));
+        assert!(snap.metrics.iter().all(|m| m.label != "Usage"));
+    }
+
+    #[test]
+    fn usage_parse_failure_is_snapshot_error() {
+        let sub = json!({"hard_limit_usd": 40}).to_string();
+        let (origin, join) = spawn_billing_server(2, move |_origin, req| match path_of(req) {
+            "/v1/dashboard/billing/subscription" => {
+                tiny_http::Response::from_string(sub.clone()).with_status_code(200)
+            }
+            _ => tiny_http::Response::from_string("{not json").with_status_code(200),
+        });
+        let snap = tauri::async_runtime::block_on(snapshot_key(card(&origin, "sk-ok")));
+        let _ = join.join();
+        assert_eq!(snap.status, "error");
+        assert_eq!(snap.error.as_deref(), Some("usage parse"));
         assert!(snap.metrics.iter().all(|m| m.label != "Usage"));
     }
 
@@ -684,6 +726,72 @@ mod tests {
         assert_eq!(captured[0].authorization, None);
         let loaded = store::load(&tmp.path).unwrap();
         assert_eq!(loaded.sites[0].quota_display(), DisplayUnit::Cny);
+    }
+
+    #[test]
+    fn backfill_skips_write_after_origin_change() {
+        let tmp = TempStore::new();
+        let release = Arc::new(AtomicBool::new(false));
+        let status_hits = Arc::new(AtomicUsize::new(0));
+        let hits = Arc::clone(&status_hits);
+        let gate = Arc::clone(&release);
+        let body = json!({
+            "success": true,
+            "data": {"version": "1", "quota_display_type": "CNY"}
+        })
+        .to_string();
+        let (origin, join) = spawn_billing_server(1, move |_origin, req| {
+            if path_of(req) == "/api/status" {
+                hits.fetch_add(1, Ordering::SeqCst);
+                let deadline = Instant::now() + Duration::from_secs(5);
+                while !gate.load(Ordering::SeqCst) {
+                    if Instant::now() > deadline {
+                        break;
+                    }
+                    std::thread::sleep(Duration::from_millis(10));
+                }
+                return tiny_http::Response::from_string(body.clone()).with_status_code(200);
+            }
+            tiny_http::Response::from_string("nope").with_status_code(404)
+        });
+        fs::write(
+            &tmp.path,
+            json!({
+                "version": 1,
+                "sites": [{
+                    "id": "siteidabcdefghijkAAA",
+                    "name": "Panel",
+                    "baseUrl": origin,
+                    "nextKeyOrdinal": 1,
+                    "keys": []
+                }]
+            })
+            .to_string(),
+        )
+        .unwrap();
+        let path = tmp.path.clone();
+        let backfill = std::thread::spawn(move || {
+            tauri::async_runtime::block_on(backfill_missing_display_units(&path));
+        });
+        let deadline = Instant::now() + Duration::from_secs(3);
+        while status_hits.load(Ordering::SeqCst) == 0 {
+            assert!(Instant::now() < deadline, "status probe never arrived");
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        store::update_site(
+            &tmp.path,
+            "siteidabcdefghijkAAA",
+            None,
+            Some(normalize_base_url("https://tokens.example.com").unwrap()),
+            Some(DisplayUnit::Tokens),
+        )
+        .unwrap();
+        release.store(true, Ordering::SeqCst);
+        backfill.join().unwrap();
+        let _ = join.join();
+        let loaded = store::load(&tmp.path).unwrap();
+        assert_eq!(loaded.sites[0].base_url, "https://tokens.example.com");
+        assert_eq!(loaded.sites[0].quota_display(), DisplayUnit::Tokens);
     }
 
     fn spawn_slow_billing_server(

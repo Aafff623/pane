@@ -459,6 +459,26 @@ pub fn set_display_unit(path: &Path, id: &str, display: DisplayUnit) -> Result<(
     save(path, &doc)
 }
 
+/// Backfill write: no-op unless this site is still at `origin` and still
+/// missing a display unit. Returns whether the file was written.
+pub fn set_display_unit_if_still_missing_at_origin(
+    path: &Path,
+    id: &str,
+    origin: &str,
+    display: DisplayUnit,
+) -> Result<bool, String> {
+    let mut doc = load(path)?;
+    let Some(site) = doc.sites.iter_mut().find(|s| s.id == id) else {
+        return Ok(false);
+    };
+    if site.base_url != origin || site.display_unit.is_some() {
+        return Ok(false);
+    }
+    site.set_display_unit(display);
+    save(path, &doc)?;
+    Ok(true)
+}
+
 pub fn delete_site(path: &Path, id: &str) -> Result<(), String> {
     let mut doc = load(path)?;
     let before = doc.sites.len();
@@ -923,6 +943,73 @@ mod tests {
         let loaded = load(&tmp.path).unwrap();
         assert_eq!(loaded.sites[0].base_url, "https://tokens.example.com");
         assert_eq!(loaded.sites[0].quota_display(), DisplayUnit::Tokens);
+    }
+
+    #[test]
+    fn display_unit_cas_skips_changed_origin_or_existing_unit() {
+        let tmp = TempStore::new();
+        fs::write(
+            &tmp.path,
+            json!({
+                "version": 1,
+                "sites": [{
+                    "id": "siteidabcdefghijkAAA",
+                    "name": "Panel",
+                    "baseUrl": "https://old.example.com",
+                    "nextKeyOrdinal": 1,
+                    "keys": []
+                }]
+            })
+            .to_string(),
+        )
+        .unwrap();
+        assert!(set_display_unit_if_still_missing_at_origin(
+            &tmp.path,
+            "siteidabcdefghijkAAA",
+            "https://old.example.com",
+            DisplayUnit::Cny,
+        )
+        .unwrap());
+        assert_eq!(
+            load(&tmp.path).unwrap().sites[0].quota_display(),
+            DisplayUnit::Cny
+        );
+        assert!(!set_display_unit_if_still_missing_at_origin(
+            &tmp.path,
+            "siteidabcdefghijkAAA",
+            "https://old.example.com",
+            DisplayUnit::Usd,
+        )
+        .unwrap());
+        assert_eq!(
+            load(&tmp.path).unwrap().sites[0].quota_display(),
+            DisplayUnit::Cny
+        );
+        update_site(
+            &tmp.path,
+            "siteidabcdefghijkAAA",
+            None,
+            Some(https("new.example.com")),
+            Some(DisplayUnit::Tokens),
+        )
+        .unwrap();
+        assert!(!set_display_unit_if_still_missing_at_origin(
+            &tmp.path,
+            "siteidabcdefghijkAAA",
+            "https://old.example.com",
+            DisplayUnit::Cny,
+        )
+        .unwrap());
+        let loaded = load(&tmp.path).unwrap();
+        assert_eq!(loaded.sites[0].base_url, "https://new.example.com");
+        assert_eq!(loaded.sites[0].quota_display(), DisplayUnit::Tokens);
+        assert!(!set_display_unit_if_still_missing_at_origin(
+            &tmp.path,
+            "missing-site",
+            "https://new.example.com",
+            DisplayUnit::Usd,
+        )
+        .unwrap());
     }
 
     #[test]

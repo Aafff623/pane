@@ -296,10 +296,11 @@ pub async fn prepare_key_cards() -> Result<Vec<KeyCard>, String> {
 fn set_display_unit_at(
     path: &Path,
     id: &str,
+    origin: &str,
     display: fingerprint::DisplayUnit,
-) -> Result<(), String> {
+) -> Result<bool, String> {
     let _lock = lock_store_mutation()?;
-    store::set_display_unit(path, id, display)
+    store::set_display_unit_if_still_missing_at_origin(path, id, origin, display)
 }
 
 #[cfg(test)]

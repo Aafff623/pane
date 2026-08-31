@@ -1093,32 +1093,81 @@ fn purge_onenewapi_from_config(cfg: &mut Value, snapshot_ids: &[String]) -> Valu
     Value::Object(patch)
 }
 
-fn persist_onenewapi_config_purge(snapshot_ids: &[String]) -> Result<(), String> {
+fn onenewapi_purge_restore_patch(original: &Value, purge_patch: &Value) -> Value {
+    let mut restore = serde_json::Map::new();
+    if let Some(obj) = purge_patch.as_object() {
+        for key in obj.keys() {
+            restore.insert(key.clone(), original.get(key).cloned().unwrap_or(Value::Null));
+        }
+    }
+    Value::Object(restore)
+}
+
+fn persist_onenewapi_config_purge(snapshot_ids: &[String]) -> Result<Value, String> {
     // Tests must not rewrite the developer's real config.json.
     if cfg!(test) {
-        return Ok(());
+        return Ok(json!({}));
     }
     let mut cfg = config_with_defaults(load_config());
+    let original = cfg.clone();
     let patch = purge_onenewapi_from_config(&mut cfg, snapshot_ids);
+    let restore = onenewapi_purge_restore_patch(&original, &patch);
     if patch.as_object().is_some_and(|o| !o.is_empty()) {
         set_config_inner(patch)?;
     }
-    Ok(())
+    Ok(restore)
+}
+
+fn restore_onenewapi_config_purge(restore: Value) -> Result<(), String> {
+    if restore.as_object().map(|o| o.is_empty()).unwrap_or(true) {
+        return Ok(());
+    }
+    if cfg!(test) {
+        return Ok(());
+    }
+    set_config_inner(restore).map(|_| ())
 }
 
 fn purge_onenewapi_cards(key_ids: &[String]) -> Result<(), String> {
-    purge_onenewapi_cards_with(key_ids, persist_onenewapi_config_purge)
+    purge_onenewapi_cards_coordinated(
+        key_ids,
+        persist_onenewapi_config_purge,
+        |ids| forget_onenewapi_key_ids(ids.iter().cloned()),
+        restore_onenewapi_config_purge,
+    )
 }
 
 fn purge_onenewapi_cards_with(
     key_ids: &[String],
     persist_config: impl FnOnce(&[String]) -> Result<(), String>,
 ) -> Result<(), String> {
+    purge_onenewapi_cards_coordinated(
+        key_ids,
+        |ids| persist_config(ids).map(|()| json!({})),
+        |ids| forget_onenewapi_key_ids(ids.iter().cloned()),
+        |_| Ok(()),
+    )
+}
+
+fn purge_onenewapi_cards_coordinated(
+    key_ids: &[String],
+    persist_config: impl FnOnce(&[String]) -> Result<Value, String>,
+    forget: impl FnOnce(&[String]) -> Result<(), String>,
+    restore_config: impl FnOnce(Value) -> Result<(), String>,
+) -> Result<(), String> {
     if key_ids.is_empty() {
         return Ok(());
     }
-    persist_config(&onenewapi_snapshot_ids(key_ids))?;
-    forget_onenewapi_key_ids(key_ids.iter().cloned())
+    let restore = persist_config(&onenewapi_snapshot_ids(key_ids))?;
+    if let Err(error) = forget(key_ids) {
+        return match restore_config(restore) {
+            Ok(()) => Err(error),
+            Err(restore_error) => Err(format!(
+                "{error}; restore card settings failed: {restore_error}"
+            )),
+        };
+    }
+    Ok(())
 }
 
 fn onenewapi_after_site_save(
@@ -2573,7 +2622,8 @@ mod tests {
         fold_moonshot_into_kimi, forget_onenewapi_key_ids, forget_provider_snapshot,
         is_kimi_wallet_label, last_ok, onenewapi_after_site_save,
         onenewapi_apply_zero_to_one_enable, onenewapi_snapshot_generations, persist_last_ok_at,
-        purge_onenewapi_cards, purge_onenewapi_cards_with, purge_onenewapi_from_config,
+        onenewapi_purge_restore_patch, purge_onenewapi_cards, purge_onenewapi_cards_coordinated,
+        purge_onenewapi_cards_with, purge_onenewapi_from_config,
         rename_cached_snapshot, rename_cached_snapshot_in, restore_kimi_wallet_rows,
         restore_last_success_after_error,
         retain_current_onenewapi_results, strip_entry_application_order, strip_icon_ids_to_clear,
@@ -3407,6 +3457,56 @@ mod tests {
         ));
         alerts::forget_snapshot("onenewapi@ticket07-drop-cfg");
         alerts::forget_snapshot("onenewapi@ticket07-keep-cfg");
+    }
+
+    #[test]
+    fn purge_restores_card_settings_when_cache_cleanup_fails() {
+        let cfg = std::cell::RefCell::new(json!({
+            "disabled": ["onenewapi@drop", "aihubmix"],
+            "layout": {
+                "providerOrder": ["onenewapi@drop", "aihubmix"],
+                "providers": {
+                    "onenewapi@drop": {"starred": ["Usage"]},
+                    "aihubmix": {"starred": ["Usage"]}
+                }
+            },
+            "pinned": {"provider": "onenewapi@drop", "metric": "Usage"},
+            "trayProviders": ["onenewapi@drop", "aihubmix"]
+        }));
+        let original = cfg.borrow().clone();
+        let _keep = seed_onenewapi_cache("keep", "Panel · Keep");
+        let _drop = seed_onenewapi_cache("drop", "Panel · Drop");
+        alerts::insert_state_for_test("onenewapi@drop:Usage");
+        alerts::insert_state_for_test("onenewapi@keep:Usage");
+        let result = purge_onenewapi_cards_coordinated(
+            &["drop".into()],
+            |ids| {
+                let mut cfg = cfg.borrow_mut();
+                let before = cfg.clone();
+                let patch = purge_onenewapi_from_config(&mut cfg, ids);
+                assert!(!patch.as_object().unwrap().is_empty());
+                assert_ne!(*cfg, before);
+                Ok(onenewapi_purge_restore_patch(&before, &patch))
+            },
+            |_| Err("cache locked".into()),
+            |restore| {
+                let mut cfg = cfg.borrow_mut();
+                if let Some(obj) = restore.as_object() {
+                    for (k, v) in obj {
+                        cfg[k.clone()] = v.clone();
+                    }
+                }
+                Ok(())
+            },
+        );
+        assert_eq!(result.unwrap_err(), "cache locked");
+        assert_eq!(*cfg.borrow(), original);
+        assert!(last_ok().lock().unwrap().contains_key("onenewapi@drop"));
+        assert!(last_ok().lock().unwrap().contains_key("onenewapi@keep"));
+        assert!(alerts::has_state_for_test("onenewapi@drop:Usage"));
+        assert!(alerts::has_state_for_test("onenewapi@keep:Usage"));
+        alerts::forget_snapshot("onenewapi@drop");
+        alerts::forget_snapshot("onenewapi@keep");
     }
 
     #[test]
