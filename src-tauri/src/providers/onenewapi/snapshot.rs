@@ -142,9 +142,9 @@ pub async fn backfill_missing_display_units(path: &Path) {
             .collect()
     };
     for (id, origin) in missing {
-        let unit = super::fingerprint::probe(&origin)
-            .await
-            .unwrap_or(DisplayUnit::Usd);
+        let Ok(unit) = super::fingerprint::probe(&origin).await else {
+            continue;
+        };
         let _ = super::set_display_unit_at(path, &id, &origin, unit);
     }
 }
@@ -811,7 +811,7 @@ mod tests {
     }
 
     #[test]
-    fn backfill_failed_probe_persists_usd_and_does_not_retry() {
+    fn backfill_failed_probe_leaves_unit_unset_and_does_not_retry() {
         let tmp = TempStore::new();
         let status_hits = Arc::new(AtomicUsize::new(0));
         let hits = Arc::clone(&status_hits);
@@ -843,8 +843,7 @@ mod tests {
         assert_eq!(status_hits.load(Ordering::SeqCst), 1);
         assert_eq!(captured.len(), 1);
         let loaded = store::load(&tmp.path).unwrap();
-        assert_eq!(loaded.sites[0].display_unit.as_deref(), Some("usd"));
-        assert_eq!(loaded.sites[0].quota_display(), DisplayUnit::Usd);
+        assert_eq!(loaded.sites[0].display_unit, None);
     }
 
     #[test]
