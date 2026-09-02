@@ -343,13 +343,18 @@ async fn fetch() -> Result<Snapshot, String> {
     // via the same dashboard RPCs Cursor's web dashboard calls.
     // A transient failure of the new API must not strand legacy-plan
     // users whose data lives behind the old endpoint — try that before
-    // giving up (keeping the original error if both paths fail).
+    // giving up. But on bucket-era accounts the old endpoint still
+    // answers, with `numRequests: 0` and no cap: an "ok" card holding only
+    // "Requests this cycle 0" would replace the real bars until the next
+    // successful call (no last-good restore, since the status is ok). So
+    // only a legacy answer with a real request quota counts; otherwise the
+    // original error surfaces and guarded() keeps the last good card.
     let mut usage = match connect_post("GetCurrentPeriodUsage", &token).await {
         Ok(u) => u,
         Err(e) => {
             return match legacy_fetch(&token).await {
-                Ok(s) => Ok(s),
-                Err(_) => Err(e),
+                Ok(s) if legacy_has_real_quota(&s) => Ok(s),
+                _ => Err(e),
             };
         }
     };
@@ -563,6 +568,20 @@ async fn fetch() -> Result<Snapshot, String> {
     Ok(Snapshot::ok(ID, NAME, plan, metrics))
 }
 
+/// A legacy answer is worth showing when it carries a request cap (a
+/// progress bar) or at least a non-zero count. A lone "Requests this
+/// cycle 0" is what the old endpoint hands bucket-era accounts — noise.
+fn legacy_has_real_quota(snap: &Snapshot) -> bool {
+    snap.metrics.iter().any(|m| {
+        m.kind == "progress"
+            || m
+                .value
+                .as_deref()
+                .and_then(|v| v.trim().parse::<f64>().ok())
+                .is_some_and(|n| n > 0.0)
+    })
+}
+
 /// Pre-2025 request-quota accounts: the old REST endpoint with the web
 /// session cookie, counting requests instead of dollars.
 async fn legacy_fetch(token: &str) -> Result<Snapshot, String> {
@@ -656,6 +675,33 @@ mod tests {
         let m = credit_grants_metric(&grants).expect("row");
         assert_eq!(m.used_percent, Some(0.0));
         assert_eq!(m.detail.as_deref(), Some("$200 left of $200"));
+    }
+
+    #[test]
+    fn legacy_zero_requests_without_cap_is_not_a_real_quota() {
+        let noise = Snapshot::ok(
+            ID,
+            NAME,
+            None,
+            vec![Metric::text("Requests this cycle", "0".into())],
+        );
+        assert!(!legacy_has_real_quota(&noise));
+        let counted = Snapshot::ok(
+            ID,
+            NAME,
+            None,
+            vec![Metric::text("Requests this cycle", "37".into())],
+        );
+        assert!(legacy_has_real_quota(&counted));
+        let capped = Snapshot::ok(
+            ID,
+            NAME,
+            None,
+            vec![Metric::progress("Requests", 12.0, Some("60 / 500 this cycle".into()))],
+        );
+        assert!(legacy_has_real_quota(&capped));
+        let empty = Snapshot::ok(ID, NAME, None, vec![]);
+        assert!(!legacy_has_real_quota(&empty));
     }
 
     #[test]

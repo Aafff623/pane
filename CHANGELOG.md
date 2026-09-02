@@ -10,6 +10,15 @@
   when both exist. The Z.ai field is now labeled **Z.ai / GLM** — a GLM
   Coding Plan key already worked there (issue #173).
 
+### Fixed
+- **Cursor card no longer blanks to "Requests this cycle 0".** When
+  Cursor's usage API hiccupped for one refresh, Pane fell back to the
+  old request-count endpoint, which on current plans answers with an
+  empty count, and that empty card replaced your bars until the next
+  good refresh. That fallback now only counts when it carries a real
+  request quota; otherwise Pane keeps the last good card (Outdated only
+  after three minutes of failed refreshes).
+
 ## 0.4.45 — 2026-08-29
 
 ### Added
