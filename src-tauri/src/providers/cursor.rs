@@ -348,13 +348,15 @@ async fn fetch() -> Result<Snapshot, String> {
     // "Requests this cycle 0" would replace the real bars until the next
     // successful call (no last-good restore, since the status is ok). So
     // only a legacy answer with a real request quota counts; otherwise the
-    // original error surfaces and guarded() keeps the last good card.
+    // original error surfaces and the last-good cache keeps the bars.
+    // Outdated only after the three-minute stale grace — one failed
+    // refresh still looks like the previous card, unmarked.
     let mut usage = match connect_post("GetCurrentPeriodUsage", &token).await {
         Ok(u) => u,
         Err(e) => {
             return match legacy_fetch(&token).await {
-                Ok(s) if legacy_has_real_quota(&s) => Ok(s),
-                _ => Err(e),
+                Ok(s) => Ok(s),
+                Err(_) => Err(e),
             };
         }
     };
@@ -568,20 +570,6 @@ async fn fetch() -> Result<Snapshot, String> {
     Ok(Snapshot::ok(ID, NAME, plan, metrics))
 }
 
-/// A legacy answer is worth showing when it carries a request cap (a
-/// progress bar) or at least a non-zero count. A lone "Requests this
-/// cycle 0" is what the old endpoint hands bucket-era accounts — noise.
-fn legacy_has_real_quota(snap: &Snapshot) -> bool {
-    snap.metrics.iter().any(|m| {
-        m.kind == "progress"
-            || m
-                .value
-                .as_deref()
-                .and_then(|v| v.trim().parse::<f64>().ok())
-                .is_some_and(|n| n > 0.0)
-    })
-}
-
 /// Pre-2025 request-quota accounts: the old REST endpoint with the web
 /// session cookie, counting requests instead of dollars.
 async fn legacy_fetch(token: &str) -> Result<Snapshot, String> {
@@ -622,6 +610,12 @@ async fn legacy_fetch(token: &str) -> Result<Snapshot, String> {
         }
     }
 
+    legacy_snapshot(&usage, plan)
+}
+
+/// A request cap, or a non-zero count. Capless `numRequests: 0` is the
+/// empty answer bucket-era accounts get from the old endpoint — not a card.
+fn legacy_snapshot(usage: &Value, plan: Option<String>) -> Result<Snapshot, String> {
     let mut metrics = Vec::new();
     if let Some(gpt4) = usage.get("gpt-4") {
         let used = gpt4.get("numRequests").and_then(Value::as_f64).unwrap_or(0.0);
@@ -633,9 +627,6 @@ async fn legacy_fetch(token: &str) -> Result<Snapshot, String> {
                     Some(format!("{used:.0} / {max:.0} this cycle")),
                 ));
             }
-            // No cap and nothing counted is what the old endpoint hands
-            // bucket-era accounts — not a quota, so not a card (upstream
-            // OpenUsage drops it the same way).
             _ if used > 0.0 => {
                 metrics.push(Metric::text("Requests this cycle", format!("{used:.0}")));
             }
@@ -683,29 +674,17 @@ mod tests {
 
     #[test]
     fn legacy_zero_requests_without_cap_is_not_a_real_quota() {
-        let noise = Snapshot::ok(
-            ID,
-            NAME,
-            None,
-            vec![Metric::text("Requests this cycle", "0".into())],
-        );
-        assert!(!legacy_has_real_quota(&noise));
-        let counted = Snapshot::ok(
-            ID,
-            NAME,
-            None,
-            vec![Metric::text("Requests this cycle", "37".into())],
-        );
-        assert!(legacy_has_real_quota(&counted));
-        let capped = Snapshot::ok(
-            ID,
-            NAME,
-            None,
-            vec![Metric::progress("Requests", 12.0, Some("60 / 500 this cycle".into()))],
-        );
-        assert!(legacy_has_real_quota(&capped));
-        let empty = Snapshot::ok(ID, NAME, None, vec![]);
-        assert!(!legacy_has_real_quota(&empty));
+        let noise = json!({ "gpt-4": { "numRequests": 0, "maxRequestUsage": null } });
+        assert!(legacy_snapshot(&noise, None).is_err());
+        let counted = json!({ "gpt-4": { "numRequests": 37 } });
+        let snap = legacy_snapshot(&counted, None).expect("count");
+        assert_eq!(snap.metrics[0].kind, "text");
+        assert_eq!(snap.metrics[0].value.as_deref(), Some("37"));
+        let capped = json!({ "gpt-4": { "numRequests": 60, "maxRequestUsage": 500 } });
+        let snap = legacy_snapshot(&capped, None).expect("cap");
+        assert_eq!(snap.metrics[0].kind, "progress");
+        assert_eq!(snap.metrics[0].detail.as_deref(), Some("60 / 500 this cycle"));
+        assert!(legacy_snapshot(&json!({}), None).is_err());
     }
 
     #[test]
