@@ -633,9 +633,13 @@ async fn legacy_fetch(token: &str) -> Result<Snapshot, String> {
                     Some(format!("{used:.0} / {max:.0} this cycle")),
                 ));
             }
-            _ => {
+            // No cap and nothing counted is what the old endpoint hands
+            // bucket-era accounts — not a quota, so not a card (upstream
+            // OpenUsage drops it the same way).
+            _ if used > 0.0 => {
                 metrics.push(Metric::text("Requests this cycle", format!("{used:.0}")));
             }
+            _ => {}
         }
     }
     if metrics.is_empty() {
