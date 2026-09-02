@@ -1603,7 +1603,7 @@ async fn fetch_usage(
         .into_iter()
         .filter(|(id, _)| {
             *id != "moonshot"
-                || !providers::kimi::has_login()
+                || !providers::kimi::has_credentials()
                 || disabled.iter().any(|d| d == "kimi")
                 || !kimi_card_live
         })
@@ -2101,6 +2101,7 @@ fn set_api_key(provider: String, key: String) -> Result<(), String> {
             | "minimax"
             | "deepseek"
             | "moonshot"
+            | "kimi"
             | "elevenlabs"
             | "codebuff"
             | "kilo"

@@ -162,9 +162,11 @@ Ground rules that apply to every provider:
 - **Calls:** `openrouter.ai/api/v1/credits` and `/key`.
 - **Shows:** balance, credits meter, key limit.
 
-## Z.ai
+## Z.ai (GLM Coding Plan)
 
-- **Reads:** pasted key, env var, or the Z.ai CLI's key file.
+- **Reads:** pasted key (Settings → **Z.ai / GLM**), `ZAI_API_KEY` /
+  `GLM_API_KEY`, or the Z.ai CLI's key file. A GLM Coding Plan key from
+  `open.bigmodel.cn` works here too — no CLI login needed.
 - **Calls:** `api.z.ai` quota + subscription endpoints.
 - **Shows:** Session/Weekly, monthly Web Searches quota, plan.
 
@@ -196,11 +198,16 @@ Ground rules that apply to every provider:
 
 - **Reads:** `%USERPROFILE%\.kimi-code\credentials\kimi-code.json` (honors
   `KIMI_CODE_HOME`; falls back to `~\.kimi\credentials\kimi-code.json`).
-  That is the official CLI's OAuth login — Pane never asks you to paste
-  the plan token. Refresh tokens rotate on use and are written back
-  beside the CLI's file (`*.pane-bak` first), same as Claude/Codex.
+  That is the official CLI's OAuth login. Refresh tokens rotate on use
+  and are written back beside the CLI's file (`*.pane-bak` first), same
+  as Claude/Codex. **No CLI?** Paste your Kimi For Coding plan key in
+  Settings → API keys → **Kimi Code** (stored in `%APPDATA%\Pane\kimi.json`,
+  no env var is read). The login is used when both exist; the key is the
+  fallback (issue #173). This is the plan key, not the platform.kimi.ai
+  wallet key — that one goes in the **Kimi API** field.
 - **Calls:** `api.kimi.com/coding/v1/usages` (Session + Weekly request
-  windows); `auth.kimi.com/api/oauth/token` (refresh); and, when a
+  windows, sent the OAuth token or the pasted plan key as Bearer);
+  `auth.kimi.com/api/oauth/token` (refresh, login only); and, when a
   Moonshot/Kimi API key is saved, `api.moonshot.ai|cn/v1/users/me/balance`
   for the API bar. This is the Kimi Code *subscription* plus the
   pay-as-you-go wallet on the same card.

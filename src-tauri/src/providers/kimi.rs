@@ -7,8 +7,13 @@
 //! (`%USERPROFILE%\.kimi-code\credentials\kimi-code.json`). Tokens refresh
 //! against auth.kimi.com and are written back beside the CLI's file so the
 //! CLI stays signed in — same write-back as Claude/Codex.
+//!
+//! Without a CLI login, a Kimi For Coding plan key pasted in Settings
+//! (`%APPDATA%\Pane\kimi.json`) is sent as Bearer to the same endpoint —
+//! what cc-switch and the plan's Anthropic-compatible endpoint accept
+//! (issue #173). Login wins when both exist; the key is a fallback only.
 
-use super::{http, Metric, Snapshot};
+use super::{http, stored_api_key, Metric, Snapshot};
 use chrono::{DateTime, Utc};
 use serde_json::Value;
 use std::path::{Path, PathBuf};
@@ -35,6 +40,23 @@ pub async fn snapshot() -> Snapshot {
 
 pub fn has_login() -> bool {
     cred_path().is_some()
+}
+
+/// Pasted plan key. Settings only — no env var, because the key normally
+/// travels as `ANTHROPIC_AUTH_TOKEN` for a router, and reading that would
+/// grab whatever vendor the router currently points at.
+fn plan_key() -> Option<String> {
+    stored_api_key("kimi", &[])
+}
+
+pub fn has_plan_key() -> bool {
+    plan_key().is_some()
+}
+
+/// Anything that can produce the plan card: CLI login or pasted plan key.
+/// Spend routing and the Moonshot fold key off this, not `has_login`.
+pub fn has_credentials() -> bool {
+    has_login() || has_plan_key()
 }
 
 /// Official CLI home. `KIMI_CODE_HOME` is honored only when it is an
@@ -90,38 +112,26 @@ fn cred_path() -> Option<PathBuf> {
 }
 
 async fn fetch() -> Result<Snapshot, String> {
-    let Some(path) = cred_path() else {
+    let path = cred_path();
+    let key = plan_key();
+    if path.is_none() && key.is_none() {
         return Ok(Snapshot::no_credentials(
             ID,
             NAME,
-            "Kimi Code sign-in not found. Run `kimi login` in a terminal.",
+            "Kimi Code sign-in not found. Run `kimi login` in a terminal, or paste your Kimi For Coding key in Settings (gear icon).",
         ));
-    };
-    let access = load_access(&path, false).await?;
+    }
     // No Moonshot key, or Moonshot switched off → Session + Weekly only.
     // Disabled Moonshot must not be contacted through this folded card.
     let (usages, api) = if super::moonshot::wallet_wanted() {
-        tokio::join!(fetch_usages(&access), super::moonshot::api_rows())
+        tokio::join!(
+            load_usages(path.as_deref(), key.as_deref()),
+            super::moonshot::api_rows()
+        )
     } else {
-        (fetch_usages(&access).await, Ok(Vec::new()))
+        (load_usages(path.as_deref(), key.as_deref()).await, Ok(Vec::new()))
     };
-    let mut snap = match usages {
-        Ok(doc) => parse_snapshot(&doc)?,
-        Err(UsagesError::Unauthorized) => {
-            let access = load_access(&path, true).await?;
-            match fetch_usages(&access).await {
-                Ok(doc) => parse_snapshot(&doc)?,
-                Err(UsagesError::Unauthorized) => {
-                    return Err(
-                        "Kimi Code sign-in was rotated — run `kimi login` in a terminal once and Pane recovers automatically"
-                            .into(),
-                    );
-                }
-                Err(UsagesError::Other(e)) => return Err(e),
-            }
-        }
-        Err(UsagesError::Other(e)) => return Err(e),
-    };
+    let mut snap = parse_snapshot(&usages?)?;
     match api {
         Ok(rows) => snap.metrics.extend(rows),
         Err(_) => {
@@ -136,6 +146,48 @@ async fn fetch() -> Result<Snapshot, String> {
 enum UsagesError {
     Unauthorized,
     Other(String),
+}
+
+/// CLI login first (with the refresh-and-retry dance); the pasted plan key
+/// only when there is no login or the login path failed. When both fail,
+/// the login error is the one shown — `kimi login` is the actionable fix.
+async fn load_usages(cred: Option<&Path>, plan_key: Option<&str>) -> Result<Value, String> {
+    let login_err = match cred {
+        Some(path) => match usages_via_login(path).await {
+            Ok(doc) => return Ok(doc),
+            Err(e) => Some(e),
+        },
+        None => None,
+    };
+    let Some(key) = plan_key else {
+        return Err(login_err.unwrap_or_else(|| "no Kimi Code credentials".into()));
+    };
+    match fetch_usages(key).await {
+        Ok(doc) => Ok(doc),
+        Err(UsagesError::Unauthorized) => Err(login_err.unwrap_or_else(|| {
+            "Kimi For Coding key was rejected — check it in Settings (gear icon)".into()
+        })),
+        Err(UsagesError::Other(e)) => Err(login_err.unwrap_or(e)),
+    }
+}
+
+async fn usages_via_login(path: &Path) -> Result<Value, String> {
+    let access = load_access(path, false).await?;
+    match fetch_usages(&access).await {
+        Ok(doc) => Ok(doc),
+        Err(UsagesError::Unauthorized) => {
+            let access = load_access(path, true).await?;
+            match fetch_usages(&access).await {
+                Ok(doc) => Ok(doc),
+                Err(UsagesError::Unauthorized) => Err(
+                    "Kimi Code sign-in was rotated — run `kimi login` in a terminal once and Pane recovers automatically"
+                        .into(),
+                ),
+                Err(UsagesError::Other(e)) => Err(e),
+            }
+        }
+        Err(UsagesError::Other(e)) => Err(e),
+    }
 }
 
 async fn fetch_usages(access: &str) -> Result<Value, UsagesError> {
