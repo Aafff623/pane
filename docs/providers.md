@@ -81,9 +81,14 @@ Ground rules that apply to every provider:
 - **Reads:** Cursor's local state database
   (`%APPDATA%\Cursor\User\globalStorage\state.vscdb` — copied before
   reading, never modified).
-- **Calls:** `cursor.com` / `api2.cursor.sh` usage APIs; the dashboard's
+- **Calls:** `api2.cursor.sh` Connect RPCs (`GetCurrentPeriodUsage`,
+  `GetPlanInfo`, `GetCreditGrantsBalance`); the dashboard's
   usage-events CSV export (for spend). `GetCreditGrantsBalance` cents
-  fields may be strings or numbers.
+  fields may be strings or numbers. When the RPC host is unreachable or
+  hides `planUsage` (Enterprise/team), `cursor.com/api/usage-summary`
+  (web session cookie) supplies the same plan figures; the pre-2025
+  request-count endpoint `cursor.com/api/usage` is the last resort and
+  only counts when it reports a real quota.
 - **Shows:** Cursor Models / Other Models bars; a **Credits** progress
   row when the account has promo grants (`totalCents` vs remaining);
   a **Bonus** text row behind Show more when `planUsage.bonusSpend` is
