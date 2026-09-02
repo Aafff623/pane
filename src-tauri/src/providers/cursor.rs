@@ -343,7 +343,14 @@ async fn fetch() -> Result<Snapshot, String> {
     // via the same dashboard RPCs Cursor's web dashboard calls.
     // A transient failure of the new API must not strand legacy-plan
     // users whose data lives behind the old endpoint — try that before
-    // giving up (keeping the original error if both paths fail).
+    // giving up. But on bucket-era accounts the old endpoint still
+    // answers, with `numRequests: 0` and no cap: an "ok" card holding only
+    // "Requests this cycle 0" would replace the real bars until the next
+    // successful call (no last-good restore, since the status is ok). So
+    // only a legacy answer with a real request quota counts; otherwise the
+    // original error surfaces and the last-good cache keeps the bars.
+    // Outdated only after the three-minute stale grace — one failed
+    // refresh still looks like the previous card, unmarked.
     let mut usage = match connect_post("GetCurrentPeriodUsage", &token).await {
         Ok(u) => u,
         Err(e) => {
@@ -603,6 +610,12 @@ async fn legacy_fetch(token: &str) -> Result<Snapshot, String> {
         }
     }
 
+    legacy_snapshot(&usage, plan)
+}
+
+/// A request cap, or a non-zero count. Capless `numRequests: 0` is the
+/// empty answer bucket-era accounts get from the old endpoint — not a card.
+fn legacy_snapshot(usage: &Value, plan: Option<String>) -> Result<Snapshot, String> {
     let mut metrics = Vec::new();
     if let Some(gpt4) = usage.get("gpt-4") {
         let used = gpt4.get("numRequests").and_then(Value::as_f64).unwrap_or(0.0);
@@ -614,9 +627,10 @@ async fn legacy_fetch(token: &str) -> Result<Snapshot, String> {
                     Some(format!("{used:.0} / {max:.0} this cycle")),
                 ));
             }
-            _ => {
+            _ if used > 0.0 => {
                 metrics.push(Metric::text("Requests this cycle", format!("{used:.0}")));
             }
+            _ => {}
         }
     }
     if metrics.is_empty() {
@@ -656,6 +670,21 @@ mod tests {
         let m = credit_grants_metric(&grants).expect("row");
         assert_eq!(m.used_percent, Some(0.0));
         assert_eq!(m.detail.as_deref(), Some("$200 left of $200"));
+    }
+
+    #[test]
+    fn legacy_zero_requests_without_cap_is_not_a_real_quota() {
+        let noise = json!({ "gpt-4": { "numRequests": 0, "maxRequestUsage": null } });
+        assert!(legacy_snapshot(&noise, None).is_err());
+        let counted = json!({ "gpt-4": { "numRequests": 37 } });
+        let snap = legacy_snapshot(&counted, None).expect("count");
+        assert_eq!(snap.metrics[0].kind, "text");
+        assert_eq!(snap.metrics[0].value.as_deref(), Some("37"));
+        let capped = json!({ "gpt-4": { "numRequests": 60, "maxRequestUsage": 500 } });
+        let snap = legacy_snapshot(&capped, None).expect("cap");
+        assert_eq!(snap.metrics[0].kind, "progress");
+        assert_eq!(snap.metrics[0].detail.as_deref(), Some("60 / 500 this cycle"));
+        assert!(legacy_snapshot(&json!({}), None).is_err());
     }
 
     #[test]
