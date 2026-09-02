@@ -1,8 +1,11 @@
 # Changelog
 
-## Unreleased
+## 0.4.46 — 2026-09-02
 
 ### Added
+- **One/New API sites.** Settings has a new **One/New API sites**
+  section: add as many One API / New API hosts as you want, each with
+  its own keys. Each key gets its own quota card (PR #172).
 - **Kimi Code without the CLI.** Settings → API keys has a new **Kimi
   Code** field for your Kimi For Coding plan key. With no `kimi login` on
   the PC, Pane sends that key to the same usage endpoint the CLI uses and
