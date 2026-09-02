@@ -191,6 +191,9 @@ pub fn price_lookup_slug(model: &str, provider: &str, base_url: &str) -> String 
             "glm-5.3" => "coding-glm-5.3".into(),
             "hy4-preview" => "aihubmix/hy4-preview".into(),
             "qwen3.8-flash" => "aihubmix/qwen3.8-flash".into(),
+            "qwen3.8-max-0902" | "qwen3.8-max-2026-09-02" => {
+                "aihubmix/qwen3.8-max-2026-09-02".into()
+            }
             _ => model.into(),
         };
     }
@@ -434,6 +437,22 @@ mod tests {
         assert_eq!(
             price_lookup_slug("qwen3.8-flash", "custom", "https://example.com/v1"),
             "qwen3.8-flash"
+        );
+        assert_eq!(
+            price_lookup_slug("qwen3.8-max-0902", "custom", "https://aihubmix.com/v1/"),
+            "aihubmix/qwen3.8-max-2026-09-02"
+        );
+        assert_eq!(
+            price_lookup_slug(
+                "qwen3.8-max-2026-09-02",
+                "custom",
+                "https://aihubmix.com/v1"
+            ),
+            "aihubmix/qwen3.8-max-2026-09-02"
+        );
+        assert_eq!(
+            price_lookup_slug("qwen3.8-max-0902", "nous-api", ""),
+            "qwen3.8-max-0902"
         );
     }
 
