@@ -152,6 +152,18 @@ pub fn default_identity() -> Option<String> {
     dir_identity(&default_dir()).map(|(uuid, _)| uuid)
 }
 
+/// Pure local probe for the Customize gear panel (existence only, no
+/// network): which Claude Code sign-in this machine already has.
+pub fn local_credential_hint() -> Option<String> {
+    if default_dir().join(".credentials.json").exists() {
+        return Some("Claude Code sign-in (default profile)".into());
+    }
+    if !discover_extra_accounts().is_empty() {
+        return Some("Claude Code sign-in (extra config dir)".into());
+    }
+    None
+}
+
 pub async fn snapshot() -> Snapshot {
     snapshot_at(default_dir(), ID.to_string(), NAME.to_string()).await
 }

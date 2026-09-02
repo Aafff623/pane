@@ -99,7 +99,10 @@ Ground rules that apply to every provider:
 ## OpenCode (Go plan)
 
 - **Reads:** the Go key from
-  `%USERPROFILE%\.local\share\opencode\auth.json`;
+  `%USERPROFILE%\.local\share\opencode\auth.json`, or a Go key pasted in
+  Settings (`OPENCODE_GO_API_KEY` works too) for machines without the
+  OpenCode editor installed; the auth.json entry stays preferred when
+  both exist.
   `%USERPROFILE%\.local\share\opencode\opencode.db` (copied before
   reading) for spend — message costs your own OpenCode history already
   contains.
@@ -173,7 +176,13 @@ Ground rules that apply to every provider:
   `GLM_API_KEY`, or the Z.ai CLI's key file. A GLM Coding Plan key from
   `open.bigmodel.cn` works here too — no CLI login needed.
 - **Calls:** `api.z.ai` quota + subscription endpoints.
-- **Shows:** Session/Weekly, monthly Web Searches quota, plan.
+- **Shows:** Session (5-hour rolling window) + Weekly plan quotas with
+  reset times, monthly Web Searches quota, plan. The two token windows
+  arrive as look-alike `TOKENS_LIMIT` rows told apart by their `unit`
+  field; an idle session window reports no reset — it only starts
+  counting on first use, so it shows as "not started". Older
+  subscriptions report a single token window and show just the Session
+  row.
 
 ## Antigravity
 
@@ -203,12 +212,14 @@ Ground rules that apply to every provider:
 
 - **Reads:** `%USERPROFILE%\.kimi-code\credentials\kimi-code.json` (honors
   `KIMI_CODE_HOME`; falls back to `~\.kimi\credentials\kimi-code.json`).
-  That is the official CLI's OAuth login. Refresh tokens rotate on use
-  and are written back beside the CLI's file (`*.pane-bak` first), same
-  as Claude/Codex. **No CLI?** Paste your Kimi For Coding plan key in
+  That is the official CLI's OAuth login. Refresh tokens rotate on use and
+  are written back beside the CLI's file (`*.pane-bak` first), same as
+  Claude/Codex. **No CLI?** Paste your Kimi For Coding plan key in
   Settings → API keys → **Kimi Code** (stored in `%APPDATA%\Pane\kimi.json`,
-  no env var is read). The login is used when both exist; the key is the
-  fallback (issue #173). This is the plan key, not the platform.kimi.ai
+  no env var is read). The login stays preferred when both exist; the key
+  is the fallback, and it also takes over automatically when a CLI login
+  has been rotated (dead refresh token) so the card recovers without a
+  manual `kimi login`. This is the plan key, not the platform.kimi.ai
   wallet key — that one goes in the **Kimi API** field.
 - **Calls:** `api.kimi.com/coding/v1/usages` (Session + Weekly request
   windows, sent the OAuth token or the pasted plan key as Bearer);
@@ -217,7 +228,9 @@ Ground rules that apply to every provider:
   for the API bar. This is the Kimi Code *subscription* plus the
   pay-as-you-go wallet on the same card.
 - **Shows:** Session (5-hour) and Weekly bars with reset pacing, plus the
-  membership plan name from `user.membership.level`. Names match
+  membership plan name from `user.membership.level` (falls back to plain
+  "Kimi Coding" when the API omits the level, as happens on the API-key
+  path). Names match
   [kimi.ai/membership/pricing](https://www.kimi.ai/membership/pricing):
   Moderato ($19), Allegretto ($39), Allegro ($99), Vivace ($199).
 
@@ -364,6 +377,48 @@ Ground rules that apply to every provider:
 - **Local HTTP:** each key is `GET /v1/usage/onenewapi@<key-id>`. The
   JSON is `providerId`, `displayName`, `plan`, `lines`, `fetchedAt` —
   no dashboard URL, origin, or secrets.
+
+## StepFun
+
+- **Reads:** pasted key (Settings) or `STEPFUN_API_KEY`.
+- **Calls:** `api.stepfun.com/v1/accounts` (`api.stepfun.ai` as the
+  fallback host) with the Bearer key.
+- **Shows:** CNY balance, with the cash/voucher split as text rows when
+  the account reports it. Adds a "Credits used" percent bar metered
+  against the highest balance Pane has seen locally (top-ups raise it;
+  feeds the Almost Out notification).
+
+## SiliconFlow
+
+- **Reads:** pasted key (Settings) or `SILICONFLOW_API_KEY`.
+- **Calls:** `api.siliconflow.cn/v1/user/info` (`api.siliconflow.com` as
+  the fallback host) with the Bearer key.
+- **Shows:** CNY balance (`data.totalBalance`), with the top-up-only
+  portion (`chargeBalance`) as a text row. Same "Credits used" bar as
+  StepFun.
+
+## Novita AI
+
+- **Reads:** pasted key (Settings) or `NOVITA_API_KEY`.
+- **Calls:** `api.novita.ai/v3/user/balance` with the Bearer key.
+- **Shows:** USD balance — the API reports `availableBalance` in units
+  of 0.0001 USD, so Pane divides by 10000 before displaying. Same
+  "Credits used" bar as StepFun.
+
+## Custom Balance (relaybalance)
+
+- **Reads:** a base URL and API key pasted together in Settings
+  (Custom balance section), stored in
+  `%APPDATA%\Pane\relaybalance.json` as `{"apiKey", "baseUrl"}`.
+- **Calls:** `{base}/v1/dashboard/billing/subscription` and `/usage`
+  (the form without `/v1` is tried as a fallback — relays exist in both
+  flavors) with the Bearer key. Works with any relay/gateway that
+  exposes the OpenAI dashboard-billing endpoints (DMXAPI, PackyCode,
+  Micu, CrazyRouter, SudoCode.chat, XycAi, E-FlowCode, CherryIN,
+  AICodeWith, …).
+- **Shows:** usage metered against the account's `hard_limit_usd`
+  spending cap, plus the remaining balance (`total_usage` is reported
+  in cents and divided by 100, same convention as AihubMix).
 
 ## Qwen Code (Alibaba Coding Plan)
 

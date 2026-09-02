@@ -4,7 +4,12 @@
 //!
 //! Quota comes from GET api.kimi.com/coding/v1/usages, authenticated with
 //! the official Kimi Code CLI's OAuth login
-//! (`%USERPROFILE%\.kimi-code\credentials\kimi-code.json`). Tokens refresh
+//! (`%USERPROFILE%\.kimi-code\credentials\kimi-code.json`) or, when no CLI
+//! login exists, a Kimi Coding API key pasted in Settings (env:
+//! KIMI_CODING_API_KEY) — the endpoint accepts both. A saved key also
+//! takes over when the CLI login dies (rotated refresh token), so the
+//! card recovers without waiting for a terminal `kimi login`. OAuth
+//! tokens refresh
 //! against auth.kimi.com and are written back beside the CLI's file so the
 //! CLI stays signed in — same write-back as Claude/Codex.
 //!
@@ -21,6 +26,9 @@ use std::time::Duration;
 
 const ID: &str = "kimi";
 const NAME: &str = "Kimi Code";
+
+/// Shown when the CLI login is beyond refresh and no API key is saved.
+const ROTATED_HINT: &str = "Kimi Code sign-in was rotated — run `kimi login` in a terminal once and Pane recovers automatically";
 /// Public OAuth client id the official CLI (and OpenUsage) uses.
 const CLIENT_ID: &str = "17e5f671-d194-4dfb-9706-5516cb48c098";
 const USAGES_URL: &str = "https://api.kimi.com/coding/v1/usages";
@@ -33,6 +41,15 @@ const MAX_TOKEN_BYTES: usize = 16 * 1024;
 
 pub async fn snapshot() -> Snapshot {
     match fetch().await {
+        Ok(s) => s,
+        Err(e) => Snapshot::error(ID, NAME, e),
+    }
+}
+
+/// Live test of a pasted Kimi Coding API key, without saving it
+/// (Customize "Test"). The same usages path a saved key rides.
+pub async fn snapshot_with_key(key: &str) -> Snapshot {
+    match fetch_api_key(key).await {
         Ok(s) => s,
         Err(e) => Snapshot::error(ID, NAME, e),
     }
@@ -57,6 +74,12 @@ pub fn has_plan_key() -> bool {
 /// Spend routing and the Moonshot fold key off this, not `has_login`.
 pub fn has_credentials() -> bool {
     has_login() || has_plan_key()
+}
+
+/// Pure local probe for the Customize gear panel (no network): the Kimi
+/// Code CLI's OAuth credential file exists on this machine.
+pub fn local_credential_hint() -> Option<String> {
+    cred_path().map(|_| "Kimi Code CLI OAuth sign-in".to_string())
 }
 
 /// Official CLI home. `KIMI_CODE_HOME` is honored only when it is an
@@ -111,36 +134,132 @@ fn cred_path() -> Option<PathBuf> {
         .find(|p| is_regular_file(p))
 }
 
+/// Which credential feeds this refresh: the CLI's OAuth login when its
+/// file exists, otherwise a Kimi Coding API key from Settings/env. OAuth
+/// stays first so existing sign-ins behave exactly as before.
+enum Credential {
+    OAuth(PathBuf),
+    ApiKey(String),
+}
+
+fn pick_credential(cred: Option<PathBuf>, key: Option<String>) -> Option<Credential> {
+    if let Some(path) = cred {
+        return Some(Credential::OAuth(path));
+    }
+    key.map(Credential::ApiKey)
+}
+
+/// Why the CLI's OAuth login produced no snapshot. `Rotated` means both
+/// the stored token and a forced refresh were rejected — the login stays
+/// dead until the next `kimi login`; anything else is transient and the
+/// next refresh cycle retries it.
+enum OAuthFailure {
+    Rotated,
+    Other(String),
+}
+
+fn classify_oauth_error(e: String) -> OAuthFailure {
+    if e == ROTATED_HINT {
+        OAuthFailure::Rotated
+    } else {
+        OAuthFailure::Other(e)
+    }
+}
+
+/// After a dead OAuth login the saved key takes over; without one the
+/// original sign-in guidance stands.
+fn rotated_fallback(key: Option<String>) -> Result<String, String> {
+    key.ok_or_else(|| ROTATED_HINT.to_string())
+}
+
 async fn fetch() -> Result<Snapshot, String> {
-    let path = cred_path();
     let key = plan_key();
-    if path.is_none() && key.is_none() {
+    let credential = pick_credential(cred_path(), key.clone());
+    let Some(credential) = credential else {
         return Ok(Snapshot::no_credentials(
             ID,
             NAME,
             "Kimi Code sign-in not found. Run `kimi login` in a terminal, or paste your Kimi For Coding key in Settings (gear icon).",
         ));
-    }
-    // No Moonshot key, or Moonshot switched off → Session + Weekly only.
-    // Disabled Moonshot must not be contacted through this folded card.
-    let (usages, api) = if super::moonshot::wallet_wanted() {
-        tokio::join!(
-            load_usages(path.as_deref(), key.as_deref()),
-            super::moonshot::api_rows()
-        )
-    } else {
-        (load_usages(path.as_deref(), key.as_deref()).await, Ok(Vec::new()))
     };
-    let mut snap = parse_snapshot(&usages?)?;
+    match credential {
+        Credential::ApiKey(key) => fetch_api_key(&key).await,
+        Credential::OAuth(path) => match fetch_oauth(&path).await {
+            Ok(snap) => Ok(snap),
+            // The CLI login died (rotated refresh token): a pasted key
+            // takes over instead of blanking the card until `kimi login`.
+            Err(OAuthFailure::Rotated) => match rotated_fallback(key) {
+                Ok(key) => fetch_api_key(&key).await,
+                Err(e) => Err(e),
+            },
+            Err(OAuthFailure::Other(e)) => Err(e),
+        },
+    }
+}
+
+/// Pasted-key path: the same usages endpoint accepts an API key directly.
+/// Unlike OAuth there is no refresh token, so a 401 is final.
+async fn fetch_api_key(key: &str) -> Result<Snapshot, String> {
+    let (usages, api) = fetch_usages_and_wallet(key).await;
+    let mut snap = match usages {
+        Ok(doc) => parse_snapshot(&doc)?,
+        Err(e) => return Err(key_usages_error(e)),
+    };
+    merge_wallet_rows(&mut snap, api);
+    Ok(snap)
+}
+
+/// A rejected pasted key is a deterministic failure — unlike the OAuth
+/// path there is no refresh token to retry with.
+fn key_usages_error(e: UsagesError) -> String {
+    match e {
+        UsagesError::Unauthorized => {
+            "Kimi Coding API key was rejected — check it in Settings".into()
+        }
+        UsagesError::Other(e) => e,
+    }
+}
+
+async fn fetch_oauth(path: &Path) -> Result<Snapshot, OAuthFailure> {
+    let access = load_access(path, false).await.map_err(classify_oauth_error)?;
+    let (usages, api) = fetch_usages_and_wallet(&access).await;
+    let mut snap = match usages {
+        Ok(doc) => parse_snapshot(&doc).map_err(OAuthFailure::Other)?,
+        Err(UsagesError::Unauthorized) => {
+            let access = load_access(path, true).await.map_err(classify_oauth_error)?;
+            match fetch_usages(&access).await {
+                Ok(doc) => parse_snapshot(&doc).map_err(OAuthFailure::Other)?,
+                Err(UsagesError::Unauthorized) => return Err(OAuthFailure::Rotated),
+                Err(UsagesError::Other(e)) => return Err(OAuthFailure::Other(e)),
+            }
+        }
+        Err(UsagesError::Other(e)) => return Err(OAuthFailure::Other(e)),
+    };
+    merge_wallet_rows(&mut snap, api);
+    Ok(snap)
+}
+
+/// Plan usages plus, when wanted, the Moonshot wallet rows in parallel.
+/// No Moonshot key, or Moonshot switched off → Session + Weekly only.
+/// Disabled Moonshot must not be contacted through this folded card.
+async fn fetch_usages_and_wallet(
+    access: &str,
+) -> (Result<Value, UsagesError>, Result<Vec<Metric>, String>) {
+    if super::moonshot::wallet_wanted() {
+        tokio::join!(fetch_usages(access), super::moonshot::api_rows())
+    } else {
+        (fetch_usages(access).await, Ok(Vec::new()))
+    }
+}
+
+fn merge_wallet_rows(snap: &mut Snapshot, api: Result<Vec<Metric>, String>) {
     match api {
         Ok(rows) => snap.metrics.extend(rows),
         Err(_) => {
-            snap.warning = Some(
-                "Moonshot API wallet couldn't refresh — retrying next cycle".into(),
-            );
+            snap.warning =
+                Some("Moonshot API wallet couldn't refresh — retrying next cycle".into());
         }
     }
-    Ok(snap)
 }
 
 enum UsagesError {
@@ -268,10 +387,7 @@ async fn load_access(path: &Path, force: bool) -> Result<String, String> {
         let status = resp.status();
         let body = bounded_text(resp, MAX_TOKEN_BYTES).await;
         if status.as_u16() == 401 || status.as_u16() == 403 || body.contains("invalid_grant") {
-            return Err(
-                "Kimi Code sign-in was rotated — run `kimi login` in a terminal once and Pane recovers automatically"
-                    .into(),
-            );
+            return Err(ROTATED_HINT.into());
         }
         return Err(format!("token refresh failed: HTTP {status}"));
     }
@@ -350,7 +466,10 @@ fn parse_snapshot(doc: &Value) -> Result<Snapshot, String> {
     if metrics.is_empty() {
         return Err("usage response had no recognizable limit windows".into());
     }
-    Ok(Snapshot::ok(ID, NAME, plan_from_doc(doc, weekly_limit), metrics))
+    // The API-key path doesn't always carry user.membership.level — name
+    // the product rather than leaving the plan blank.
+    let plan = plan_from_doc(doc, weekly_limit).or_else(|| Some("Kimi Coding".into()));
+    Ok(Snapshot::ok(ID, NAME, plan, metrics))
 }
 
 fn progress_from(label: &str, node: &Value, period_ms: i64) -> Option<Metric> {
@@ -551,7 +670,8 @@ mod tests {
         assert_eq!(labels(&snap.metrics), ["Session", "Weekly"]);
         assert!((snap.metrics[0].used_percent.unwrap() - 15.0).abs() < 0.01);
         assert!((snap.metrics[1].used_percent.unwrap() - 26.0).abs() < 0.01);
-        assert_eq!(snap.plan.as_deref(), None);
+        // No membership.level in the payload → product-name fallback.
+        assert_eq!(snap.plan.as_deref(), Some("Kimi Coding"));
     }
 
     #[test]
@@ -603,6 +723,51 @@ mod tests {
     #[test]
     fn empty_body_is_an_error() {
         assert!(parse_snapshot(&json!({})).is_err());
+    }
+
+    #[test]
+    fn credential_picker_prefers_oauth_then_key() {
+        let path = PathBuf::from(r"C:\Users\me\.kimi-code\credentials\kimi-code.json");
+        // Both present → the CLI's OAuth login wins (existing behavior).
+        match pick_credential(Some(path.clone()), Some("sk-key".into())) {
+            Some(Credential::OAuth(p)) => assert_eq!(p, path),
+            _ => panic!("OAuth must win when the CLI login exists"),
+        }
+        // No CLI login → the pasted/env key is the fallback.
+        match pick_credential(None, Some("sk-key".into())) {
+            Some(Credential::ApiKey(k)) => assert_eq!(k, "sk-key"),
+            _ => panic!("API key must be used when no CLI login exists"),
+        }
+        assert!(pick_credential(None, None).is_none());
+    }
+
+    #[test]
+    fn key_path_unauthorized_is_a_deterministic_rejection() {
+        let msg = key_usages_error(UsagesError::Unauthorized);
+        assert!(msg.contains("rejected"), "{msg}");
+        // Network/HTTP failures pass through untouched.
+        assert_eq!(key_usages_error(UsagesError::Other("boom".into())), "boom");
+    }
+
+    #[test]
+    fn rotated_oauth_falls_back_to_saved_key() {
+        // Dead CLI login + pasted key → the key takes over.
+        assert_eq!(
+            rotated_fallback(Some("sk-key".into())),
+            Ok("sk-key".to_string())
+        );
+        // Dead CLI login and no key → the original sign-in guidance.
+        assert_eq!(rotated_fallback(None), Err(ROTATED_HINT.to_string()));
+        // Only the rotated hint classifies as terminal; network errors
+        // stay transient and retry next cycle.
+        assert!(matches!(
+            classify_oauth_error(ROTATED_HINT.to_string()),
+            OAuthFailure::Rotated
+        ));
+        assert!(matches!(
+            classify_oauth_error("usage request: network down".into()),
+            OAuthFailure::Other(_)
+        ));
     }
 
     #[test]

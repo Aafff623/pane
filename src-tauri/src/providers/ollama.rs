@@ -5,6 +5,13 @@ const ID: &str = "ollama";
 const NAME: &str = "Ollama";
 const BASE: &str = "http://127.0.0.1:11434";
 
+/// No credential source at all — Ollama is a local service; whether it is
+/// running is only knowable by asking it (a network call this probe must
+/// not make).
+pub fn local_credential_hint() -> Option<String> {
+    None
+}
+
 pub async fn snapshot() -> Snapshot {
     match fetch().await {
         Ok(s) => s,

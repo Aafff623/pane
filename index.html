@@ -87,10 +87,12 @@
       <div id="side-zone">
         <aside class="sidebar">
           <span id="app-logo" class="app-logo" title="Pane"></span>
-          <nav id="trail" aria-label="Card navigation" data-i18n-aria="sidebar.cards"></nav>
-          <div class="sidebar-buttons">
+          <div class="sidebar-buttons top">
             <button id="theme-btn" title="Light / dark mode" data-i18n-title="sidebar.theme">&#9728;</button>
             <button id="refresh" title="Refresh now" data-i18n-title="sidebar.refresh">&#10227;</button>
+          </div>
+          <nav id="trail" aria-label="Card navigation" data-i18n-aria="sidebar.cards"></nav>
+          <div class="sidebar-buttons bottom">
             <button id="customize-btn" title="Customize" data-i18n-title="sidebar.customize">&#9776;</button>
             <button id="settings-btn" title="Settings" data-i18n-title="sidebar.settings">&#9881;</button>
           </div>
@@ -225,6 +227,25 @@
       </div>
 
       <div class="acc-group">
+        <button class="acc-head"><span data-i18n="settings.relayBalance">Custom balance</span> <span class="chev">&#8964;</span></button>
+        <div class="acc-body"><div class="acc-inner">
+          <p class="settings-note" data-i18n="settings.relayBalanceNote">
+            For relay/gateway sites that expose the OpenAI billing endpoints
+            (/dashboard/billing/subscription + /usage). Save stores both fields.
+          </p>
+          <div class="setting-row">
+            <label for="baseurl-relaybalance" data-i18n="settings.relayBaseUrl">Base URL</label>
+            <input id="baseurl-relaybalance" type="text" placeholder="https://api.example.com" spellcheck="false" />
+          </div>
+          <div class="key-row">
+            <label for="key-relaybalance" data-i18n="settings.relayApiKey">API key</label>
+            <input id="key-relaybalance" type="password" placeholder="sk-…" />
+            <button data-save="relaybalance" data-i18n="settings.save">Save</button>
+          </div>
+        </div></div>
+      </div>
+
+      <div class="acc-group">
         <button class="acc-head"><span data-i18n="settings.apiKeys">API keys</span> <span class="chev">&#8964;</span></button>
         <div class="acc-body"><div class="acc-inner">
           <p class="settings-note" data-i18n="settings.apiKeysNote">
@@ -284,6 +305,31 @@
             <label for="key-qwen">Qwen Code</label>
             <input id="key-qwen" type="password" placeholder="sk-sp-… (auto-detected from env)" data-i18n-placeholder="settings.keyPhQwen" />
             <button data-save="qwen" data-i18n="settings.save">Save</button>
+          </div>
+          <div class="key-row">
+            <label for="key-kimi">Kimi Code</label>
+            <input id="key-kimi" type="password" placeholder="API key (or sign in with kimi login)" data-i18n-placeholder="settings.keyPhKimi" />
+            <button data-save="kimi" data-i18n="settings.save">Save</button>
+          </div>
+          <div class="key-row">
+            <label for="key-opencode">OpenCode</label>
+            <input id="key-opencode" type="password" placeholder="Go key (auto-detected from auth.json)" data-i18n-placeholder="settings.keyPhOpencode" />
+            <button data-save="opencode" data-i18n="settings.save">Save</button>
+          </div>
+          <div class="key-row">
+            <label for="key-stepfun">StepFun</label>
+            <input id="key-stepfun" type="password" placeholder="API key (platform.stepfun.com)" data-i18n-placeholder="settings.keyPhStepfun" />
+            <button data-save="stepfun" data-i18n="settings.save">Save</button>
+          </div>
+          <div class="key-row">
+            <label for="key-siliconflow">SiliconFlow</label>
+            <input id="key-siliconflow" type="password" placeholder="sk-… (siliconflow.cn)" data-i18n-placeholder="settings.keyPhSiliconflow" />
+            <button data-save="siliconflow" data-i18n="settings.save">Save</button>
+          </div>
+          <div class="key-row">
+            <label for="key-novita">Novita AI</label>
+            <input id="key-novita" type="password" placeholder="API key (novita.ai)" data-i18n-placeholder="settings.keyPhNovita" />
+            <button data-save="novita" data-i18n="settings.save">Save</button>
           </div>
         </div></div>
       </div>

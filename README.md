@@ -11,7 +11,7 @@ reset? What did today actually cost me?*
 Pane is the [OpenUsage](https://www.openusage.ai/) port for Windows: a free
 AI plan tracker for Claude, Codex, Cursor, Copilot, Kimi, Grok, and 15 more.
 
-**[pane.jazii.dev](https://pane.jazii.dev)** · [Guides](https://pane.jazii.dev/guides) · [Install](#install) · [How it works](#how-it-works) · [Providers](#providers-21-and-counting) · [Features](#features) · [Privacy](#privacy--security) · [Credits](#credits)
+**[pane.jazii.dev](https://pane.jazii.dev)** · [Guides](https://pane.jazii.dev/guides) · [Install](#install) · [How it works](#how-it-works) · [Providers](#providers-24-and-counting) · [Features](#features) · [Privacy](#privacy--security) · [Credits](#credits)
 
 <img src="docs/promo.png" width="760" alt="Pane — track all your AI subscription limits in one tray app: Total Spend donut with per-provider slices, usage cards with pace bars" />
 
@@ -149,14 +149,14 @@ statistic (random ID, version, which providers are enabled, provider
 success/failure counts — never amounts or error text) — see
 [Privacy](#privacy--security) for the full contract and the off switch.
 
-## Providers (21 and counting)
+## Providers (25 and counting)
 
 | Provider | How Pane connects |
 |---|---|
 | Claude (Claude Code) | `%USERPROFILE%\.claude\.credentials.json` + Anthropic usage API; multi-account — every discovered config-dir login gets its own card |
 | Codex (Codex CLI) | `%USERPROFILE%\.codex\auth.json` + ChatGPT usage API, incl. reset-credit redemption; multi-account like Claude |
 | Cursor | Cursor's local state database + cursor.com API |
-| OpenCode (Go plan) | Official account-wide usage API (Go key from `auth.json`); local `opencode.db` for spend* |
+| OpenCode (Go plan) | Official account-wide usage API (Go key from `auth.json`, or pasted in Settings); local `opencode.db` for spend* |
 | GitHub Copilot | Copilot editor login or GitHub CLI (Credential Manager) + GitHub API |
 | Grok (Grok CLI) | `%USERPROFILE%\.grok\auth.json` + Grok billing/subscription APIs |
 | Devin (Devin CLI) | `%APPDATA%\devin\credentials.toml` + GetUserStatus RPC; local CLI session store for spend |
@@ -166,7 +166,7 @@ success/failure counts — never amounts or error text) — see
 | Antigravity | Local language server, or Google Cloud Code API via Credential Manager |
 | DeepSeek | API key (Settings) → balance |
 | Moonshot (Kimi API) | API key (Settings) → balance (global + CN endpoints) |
-| Kimi Code | Official CLI login (`kimi login`) → Session + Weekly plan bars and membership name (Moderato / Allegretto / Allegro / Vivace); Moonshot API key → API wallet bar; local session spend |
+| Kimi Code | Official CLI login (`kimi login`) or Kimi Coding API key (Settings) → Session + Weekly plan bars and membership name (Moderato / Allegretto / Allegro / Vivace); Moonshot API key → API wallet bar; local session spend |
 | ElevenLabs | API key (Settings) → character quota with reset pacing |
 | Ollama | Local server on :11434 — installed + loaded models, no key |
 | Codebuff | `codebuff login` credentials file or API key → credits + weekly limit |
@@ -174,6 +174,10 @@ success/failure counts — never amounts or error text) — see
 | AihubMix | API key (Settings or auto-detected from OpenCode) → usage vs spending limit |
 | Qwen Code | Coding Plan key (Settings or env) → 5h/weekly/monthly request quotas + local spend |
 | Hermes | Local ledger `%LOCALAPPDATA%\hermes\state.db` — last model, route, and catalog-priced spend |
+| StepFun | API key (Settings or `STEPFUN_API_KEY`) → CNY balance (global + .ai hosts) |
+| SiliconFlow | API key (Settings or `SILICONFLOW_API_KEY`) → CNY balance (.cn + .com hosts) |
+| Novita AI | API key (Settings or `NOVITA_API_KEY`) → USD balance |
+| Custom Balance | Base URL + API key (Settings) → OpenAI-compatible billing (`/dashboard/billing/subscription` + `/usage`) at any relay that exposes it |
 
 *OpenCode's meters use the official usage API that shipped in
 [anomalyco/opencode#16513](https://github.com/anomalyco/opencode/pull/16513)

@@ -22,18 +22,25 @@ declare const __BUILD_STAMP__: string;
 // Official provider marks from the MIT-licensed macOS OpenUsage, rendered
 // inline so CSS can recolor them like template icons.
 import antigravityIcon from "./assets/providers/antigravity.svg?raw";
+import aihubmixIcon from "./assets/providers/aihubmix.svg?raw";
 import claudeIcon from "./assets/providers/claude.svg?raw";
 import codexIcon from "./assets/providers/codex.svg?raw";
 import copilotIcon from "./assets/providers/copilot.svg?raw";
 import cursorIcon from "./assets/providers/cursor.svg?raw";
+import deepseekIcon from "./assets/providers/deepseek.svg?raw";
 import devinIcon from "./assets/providers/devin.svg?raw";
 import grokIcon from "./assets/providers/grok.svg?raw";
 import hermesIcon from "./assets/providers/hermes.svg?raw";
 import kimiIcon from "./assets/providers/kimi.svg?raw";
 import minimaxIcon from "./assets/providers/minimax.svg?raw";
+import novitaIcon from "./assets/providers/novita.svg?raw";
+import ollamaIcon from "./assets/providers/ollama.svg?raw";
 import onenewapiIcon from "./assets/providers/onenewapi.svg?raw";
 import opencodeIcon from "./assets/providers/opencode.svg?raw";
 import openrouterIcon from "./assets/providers/openrouter.svg?raw";
+import qwenIcon from "./assets/providers/qwen.svg?raw";
+import siliconflowIcon from "./assets/providers/siliconflow.svg?raw";
+import stepfunIcon from "./assets/providers/stepfun.svg?raw";
 // Inlined as data URIs (not URLs) so the share-card SVG snapshot can
 // embed them — rasterized SVG images can't load external resources.
 // The bare ring suits the sidebar; the footer uses the full rounded
@@ -47,20 +54,34 @@ import changelogRaw from "../CHANGELOG.md?raw";
 
 const PROVIDER_ICONS: Record<string, string> = {
   antigravity: antigravityIcon,
+  aihubmix: aihubmixIcon,
   claude: claudeIcon,
   codex: codexIcon,
   copilot: copilotIcon,
   cursor: cursorIcon,
+  deepseek: deepseekIcon,
   devin: devinIcon,
   grok: grokIcon,
   hermes: hermesIcon,
   kimi: kimiIcon,
   minimax: minimaxIcon,
+  novita: novitaIcon,
+  ollama: ollamaIcon,
   onenewapi: onenewapiIcon,
   opencode: opencodeIcon,
   openrouter: openrouterIcon,
+  qwen: qwenIcon,
+  siliconflow: siliconflowIcon,
+  stepfun: stepfunIcon,
   zai: zaiIcon,
 };
+
+// Trail icons render each vendor's own mark (brand colors kept), so a few
+// need per-icon care: copilot's glyph is authored white and must follow the
+// theme color like the card icons do; minimax/novita paint solid black and
+// disappear on the dark sidebar — they invert there.
+const TRAIL_RECOLOR_ICONS = new Set(["copilot"]);
+const TRAIL_INVERT_DARK_ICONS = new Set(["minimax", "novita"]);
 
 // ---------------------------------------------------------------------------
 // Types
@@ -290,6 +311,10 @@ const ALL_PROVIDERS: [string, string][] = [
   ["qwen", "Qwen Code"],
   ["hermes", "Hermes"],
   ["kimi", "Kimi Code"],
+  ["stepfun", "StepFun"],
+  ["siliconflow", "SiliconFlow"],
+  ["novita", "Novita AI"],
+  ["relaybalance", "Custom Balance"],
 ];
 
 function providerDisplayName(id: string): string {
@@ -676,6 +701,20 @@ function ensureLayout(): void {
     changed = true;
   }
 
+  // A duplicated id in providerOrder renders the same provider as two
+  // Customize rows and two dashboard cards — older builds could persist
+  // one via an interrupted drag-reorder. First occurrence wins.
+  const seenOrder = new Set<string>();
+  const dedupedOrder = layout.providerOrder.filter((id) => {
+    if (seenOrder.has(id)) return false;
+    seenOrder.add(id);
+    return true;
+  });
+  if (dedupedOrder.length !== layout.providerOrder.length) {
+    layout.providerOrder = dedupedOrder;
+    changed = true;
+  }
+
   for (const [id] of ALL_PROVIDERS) {
     if (!layout.providerOrder.includes(id)) {
       layout.providerOrder.push(id);
@@ -1031,7 +1070,13 @@ function renderMetric(m: Metric): string {
     const headlineAlt = config.showUsed ? t("card.pctLeft", { n: left }) : t("card.pctUsed", { n: Math.round(used) });
 
     let resetHtml = "";
-    if (m.resets_at !== null && m.resets_at > Date.now()) {
+    if (m.resets_at === null && m.period_ms !== null && m.period_ms <= 6 * 3_600_000 && used <= 1) {
+      // GLM-style rolling session windows expose NO reset timestamp while
+      // idle — the clock only starts on the first request after the last
+      // window closed. An untouched ≤6h window with nothing to count down
+      // to is "not started", not "missing data".
+      resetHtml = `<span title="${escapeHtml(t("card.notStartedTip"))}">${escapeHtml(t("card.notStarted"))}</span>`;
+    } else if (m.resets_at !== null && m.resets_at > Date.now()) {
       // A rolling session window (≤6h period) that is still full-length
       // hasn't begun — its clock starts on the first message, so a
       // countdown would lie. Codex floors percentages and reports 1% on an
@@ -2286,10 +2331,586 @@ function isStarrable(s: Snapshot | undefined, key: string): boolean {
 // Session-only — collapsing again on reopen keeps the list scannable.
 const custExpanded = new Set<string>();
 
+// Which provider's inline config panel is open (one at a time) and the
+// live search text — session-only, like custExpanded.
+let custConfigOpen: string | null = null;
+let custSearchQuery = "";
+
+// Which provider's read-only credential-info panel ("?" button) is open.
+// One panel at a time, and opening one side closes the other.
+let custInfoOpen: string | null = null;
+
+// "Stored key / env key / local sign-in" answers from get_credential_status,
+// cached so a background re-render of the drawer doesn't blank the panels.
+interface CredStatus {
+  storedKey: boolean;
+  envKey: boolean;
+  localCli: string | null;
+  // Account label of Pane's own OAuth login (codex/grok), null when none.
+  oauth: string | null;
+}
+const credStatusCache = new Map<string, CredStatus>();
+
+function fetchCredStatus(id: string): void {
+  if (credStatusCache.has(id)) return;
+  refreshCredStatus(id);
+}
+
+/// Fresh probe of get_credential_status, then every open panel slot for
+/// this provider is repainted in place ("?" status line, gear chips, the
+/// saved-credential list) — a re-render would also pick the cache up.
+function refreshCredStatus(id: string): void {
+  void invoke<CredStatus>("get_credential_status", { provider: id })
+    .then((status) => {
+      credStatusCache.set(id, status);
+      paintCredStatus(id);
+    })
+    .catch(() => {
+      credStatusCache.set(id, { storedKey: false, envKey: false, localCli: null, oauth: null });
+      paintCredStatus(id);
+    });
+}
+
+function paintCredStatus(id: string): void {
+  const sel = (attr: string) =>
+    document.querySelector<HTMLElement>(`#drawer-body [${attr}="${CSS.escape(id)}"]`);
+  const line = sel("data-cred-status");
+  if (line) line.innerHTML = credStatusLine(id);
+  const chips = sel("data-cred-chips");
+  if (chips) chips.innerHTML = credChipsHtml(id);
+  const accounts = sel("data-cred-accounts");
+  if (accounts) accounts.innerHTML = credAccountsHtml(id);
+  paintOAuth(id);
+}
+
+// Providers whose credential is a plain API key saved through set_api_key.
+// The rest sign in through their own CLI or desktop login instead.
+const KEY_PROVIDERS = new Set([
+  "openrouter",
+  "zai",
+  "minimax",
+  "deepseek",
+  "moonshot",
+  "elevenlabs",
+  "codebuff",
+  "kilo",
+  "aihubmix",
+  "qwen",
+  "kimi",
+  "opencode",
+  "stepfun",
+  "siliconflow",
+  "novita",
+  "relaybalance",
+]);
+
+/// Credential facts for the Customize "?" panel — how each provider gets
+/// its quota read and which sign-in methods exist. Every entry was checked
+/// against the matching src-tauri/src/providers/*.rs source (docstring +
+/// key lookup); `auto` is an i18n key because the facts render in the UI
+/// language. Methods: paste = an API key field works, oauth = the vendor's
+/// OAuth flow, local = its own CLI/desktop sign-in.
+type CredMethod = "paste" | "oauth" | "local";
+const PROVIDER_CRED_INFO: Record<string, { auto: string; methods: CredMethod[] }> = {
+  claude: { auto: "customize.cred.claude", methods: ["local"] },
+  codex: { auto: "customize.cred.codex", methods: ["local", "oauth"] },
+  cursor: { auto: "customize.cred.cursor", methods: ["local"] },
+  opencode: { auto: "customize.cred.opencode", methods: ["paste", "local"] },
+  copilot: { auto: "customize.cred.copilot", methods: ["local"] },
+  grok: { auto: "customize.cred.grok", methods: ["local", "oauth"] },
+  devin: { auto: "customize.cred.devin", methods: ["local"] },
+  minimax: { auto: "customize.cred.minimax", methods: ["paste", "local"] },
+  openrouter: { auto: "customize.cred.openrouter", methods: ["paste", "local"] },
+  zai: { auto: "customize.cred.zai", methods: ["paste", "local"] },
+  antigravity: { auto: "customize.cred.antigravity", methods: ["local"] },
+  deepseek: { auto: "customize.cred.deepseek", methods: ["paste"] },
+  moonshot: { auto: "customize.cred.moonshot", methods: ["paste"] },
+  elevenlabs: { auto: "customize.cred.elevenlabs", methods: ["paste"] },
+  ollama: { auto: "customize.cred.ollama", methods: [] },
+  codebuff: { auto: "customize.cred.codebuff", methods: ["paste", "local"] },
+  kilo: { auto: "customize.cred.kilo", methods: ["paste", "local"] },
+  aihubmix: { auto: "customize.cred.aihubmix", methods: ["paste", "local"] },
+  qwen: { auto: "customize.cred.qwen", methods: ["paste"] },
+  hermes: { auto: "customize.cred.hermes", methods: [] },
+  kimi: { auto: "customize.cred.kimi", methods: ["oauth", "paste"] },
+  stepfun: { auto: "customize.cred.stepfun", methods: ["paste"] },
+  siliconflow: { auto: "customize.cred.siliconflow", methods: ["paste"] },
+  novita: { auto: "customize.cred.novita", methods: ["paste"] },
+  relaybalance: { auto: "customize.cred.relaybalance", methods: ["paste"] },
+};
+
+/// The "?" panel's read-only fact sheet: what gets read automatically,
+/// which sign-in methods exist, and the live stored/env key status.
+function renderCustInfo(id: string): string {
+  const info = PROVIDER_CRED_INFO[providerFamily(id)];
+  const auto = info ? escapeHtml(t(info.auto)) : "";
+  const methods = info
+    ? info.methods.map((m) => escapeHtml(t(`customize.credMethod.${m}`))).join(" · ")
+    : "";
+  const methodLine =
+    info && info.methods.length
+      ? methods
+      : `<span class="dim">${escapeHtml(t("customize.credMethodNone"))}</span>`;
+  return `<div class="cust-config cust-info">
+      <p><span class="cust-info-label">${escapeHtml(t("customize.credAutoLabel"))}</span>${auto}</p>
+      <p><span class="cust-info-label">${escapeHtml(t("customize.credMethodsLabel"))}</span>${methodLine}</p>
+      <p><span class="cust-info-label">${escapeHtml(t("customize.credStatusLabel"))}</span><span class="dim" data-cred-status="${escapeHtml(id)}">${escapeHtml(t("customize.credStatusLoading"))}</span></p>
+    </div>`;
+}
+
+/// One status line ("?" panel): saved key, env var, local sign-in, in
+/// that order.
+function credStatusLine(id: string): string {
+  const status = credStatusCache.get(id);
+  if (!status) return escapeHtml(t("customize.credStatusLoading"));
+  const parts: string[] = [];
+  parts.push(
+    status.storedKey
+      ? escapeHtml(t("customize.credStored"))
+      : escapeHtml(t("customize.credNotStored")),
+  );
+  if (status.envKey) parts.push(escapeHtml(t("customize.credEnv")));
+  if (status.localCli) parts.push(escapeHtml(status.localCli));
+  return parts.join(" · ");
+}
+
+/// The gear panel's live status chips: one green chip per credential
+/// source found on this machine, or a single grey "not configured" chip.
+function credChipsHtml(id: string): string {
+  const status = credStatusCache.get(id);
+  if (!status) return `<span class="dim">${escapeHtml(t("customize.credStatusLoading"))}</span>`;
+  const chips: string[] = [];
+  if (status.storedKey)
+    chips.push(`<span class="cred-chip ok">${escapeHtml(t("customize.chipStoredKey"))}</span>`);
+  if (status.envKey)
+    chips.push(`<span class="cred-chip ok">${escapeHtml(t("customize.chipEnvKey"))}</span>`);
+  if (status.localCli)
+    chips.push(
+      `<span class="cred-chip ok">${escapeHtml(t("customize.chipLocal", { x: status.localCli }))}</span>`,
+    );
+  // Pane's own browser sign-in (codex/grok) — the family row carries it;
+  // extra CLI account cards don't own the OAuth credential.
+  if (status.oauth && providerFamily(id) === id)
+    chips.push(
+      `<span class="cred-chip ok">${escapeHtml(t("customize.chipOAuth", { x: status.oauth }))}</span>`,
+    );
+  if (!chips.length)
+    chips.push(`<span class="cred-chip none">${escapeHtml(t("customize.chipNone"))}</span>`);
+  return chips.join("");
+}
+
+/// Phase 2.3 — the credentials Pane itself has saved for this provider,
+/// label + source, display only (deletion arrives with Phase 3's
+/// multi-account work). Storage holds a single key per provider today, so
+/// this is at most one row.
+function credAccountsHtml(id: string): string {
+  const status = credStatusCache.get(id);
+  if (!status?.storedKey) return "";
+  return `<li><span class="cust-label">API key</span><span class="dim">${escapeHtml(t("customize.credSourcePane"))}</span></li>`;
+}
+
+// ---------------------------------------------------------------------------
+// Pane's own OAuth (device code) login — codex/grok, one account each.
+// ---------------------------------------------------------------------------
+
+// Providers with a browser sign-in owned by Pane itself (Phase 3.1). The
+// backend stores tokens under %APPDATA%\Pane\oauth\<provider>.json.
+const OAUTH_PROVIDERS = new Set(["codex", "grok"]);
+
+// ---------------------------------------------------------------------------
+// Extra API-key accounts (Phase 3.2) — deepseek/stepfun/siliconflow/novita/
+// relaybalance. The gear panel's single-key field stays the family's main
+// card; each entry below adds a <provider>@<n> card on the dashboard.
+// ---------------------------------------------------------------------------
+
+const MULTI_ACCOUNT_PROVIDERS = new Set([
+  "deepseek",
+  "stepfun",
+  "siliconflow",
+  "novita",
+  "relaybalance",
+]);
+
+/// One account_list row: the masked key ("sk-…abcd") is all that comes
+/// back — the full key never leaves the backend.
+interface AccountEntry {
+  label: string;
+  hasKey: boolean;
+  maskedKey: string;
+  baseUrl?: string | null;
+}
+
+// Cached account lists so a drawer re-render doesn't blank the panels,
+// same trade-off as credStatusCache.
+const accountsCache = new Map<string, AccountEntry[]>();
+
+// Whether the "Add account" mini-form is unfolded on the open panel.
+let acctFormOpen = false;
+
+function fetchAccounts(family: string): void {
+  if (accountsCache.has(family)) return;
+  refreshAccounts(family);
+}
+
+function refreshAccounts(family: string): void {
+  void invoke<AccountEntry[]>("account_list", { provider: family })
+    .then((list) => {
+      accountsCache.set(family, list);
+      paintAccounts(family);
+    })
+    .catch(() => {
+      accountsCache.set(family, []);
+      paintAccounts(family);
+    });
+}
+
+function paintAccounts(family: string): void {
+  const el = document.querySelector<HTMLElement>(
+    `#drawer-body [data-accounts-block="${CSS.escape(family)}"]`,
+  );
+  if (el) el.innerHTML = accountsBlockInner(family);
+}
+
+function accountLabelAt(list: AccountEntry[], index: number): string {
+  const entry = list[index];
+  return entry?.label || t("customize.acctDefaultName", { n: index + 1 });
+}
+
+/// The gear panel's account section (multi-account key providers, family
+/// row only): saved accounts with per-item delete, plus the collapsible
+/// "Add account" form whose Test reuses the test_api_key flow.
+function accountsBlockInner(family: string): string {
+  const list = accountsCache.get(family);
+  let rows: string;
+  if (!list) {
+    rows = `<p class="dim">${escapeHtml(t("customize.credStatusLoading"))}</p>`;
+  } else if (!list.length) {
+    rows = `<p class="dim">${escapeHtml(t("customize.acctNone"))}</p>`;
+  } else {
+    rows = `<ul class="acct-list">${list
+      .map(
+        (a, i) => `
+        <li class="acct-item">
+          <span class="acct-label">${escapeHtml(accountLabelAt(list, i))}</span>
+          <span class="dim">${escapeHtml(a.maskedKey)}</span>
+          <button class="mini-btn acct-del" data-acct-del="${family}|${i}" title="${escapeHtml(t("customize.acctDelete"))}">✕</button>
+        </li>`,
+      )
+      .join("")}</ul>`;
+  }
+  const baseUrlInput =
+    family === "relaybalance"
+      ? `<input type="text" data-acct-baseurl="${family}" placeholder="https://api.example.com" spellcheck="false" />`
+      : "";
+  const form = acctFormOpen
+    ? `<div class="acct-form">
+        <input type="text" data-acct-label="${family}" placeholder="${escapeHtml(t("customize.acctLabelPh"))}" spellcheck="false" />
+        ${baseUrlInput}
+        <input type="password" data-acct-key="${family}" placeholder="${escapeHtml(t("settings.keyPlaceholder"))}" />
+        <button class="mini-btn" data-acct-test="${family}">${escapeHtml(t("customize.test"))}</button>
+        <button class="mini-btn" data-acct-add="${family}" disabled title="${escapeHtml(t("customize.saveAfterTest"))}">${escapeHtml(t("customize.acctAddBtn"))}</button>
+        <span class="cust-test-result" data-acct-result="${family}"></span>
+      </div>`
+    : "";
+  return `${rows}
+    <button class="mini-btn" data-acct-toggle="${family}">${escapeHtml(acctFormOpen ? t("customize.acctClose") : t("customize.acctAdd"))}</button>
+    ${form}`;
+}
+
+/// The section only renders on the family's own row — a deepseek@1 card
+/// has no accounts of its own.
+function renderAccountsBlock(id: string): string {
+  if (!MULTI_ACCOUNT_PROVIDERS.has(id) || providerFamily(id) !== id) return "";
+  return `<div class="cust-accounts-mgmt" data-accounts-block="${escapeHtml(id)}">${accountsBlockInner(id)}</div>`;
+}
+
+/// "Test" inside the Add-account form: the same probe the main key field
+/// uses, but it unlocks the form's Add button instead of Save.
+async function runAccountKeyTest(family: string): Promise<void> {
+  const block = document.querySelector<HTMLElement>(
+    `#drawer-body [data-accounts-block="${CSS.escape(family)}"]`,
+  );
+  const keyInp = block?.querySelector<HTMLInputElement>("[data-acct-key]");
+  const result = block?.querySelector<HTMLElement>("[data-acct-result]");
+  const addBtn = block?.querySelector<HTMLButtonElement>("[data-acct-add]");
+  if (!keyInp || !result) return;
+  const show = (text: string, ok: boolean | null) => {
+    result.textContent = text;
+    result.classList.toggle("ok", ok === true);
+    result.classList.toggle("err", ok === false);
+  };
+  const key = keyInp.value.trim();
+  if (!key) {
+    show(t("customize.testEmpty"), false);
+    if (addBtn) addBtn.disabled = true; // an account without a key is meaningless
+    return;
+  }
+  show(t("customize.testing"), null);
+  try {
+    const baseUrl =
+      block?.querySelector<HTMLInputElement>("[data-acct-baseurl]")?.value.trim() ?? "";
+    const r = await invoke<{ ok: boolean; metrics: number; message: string }>("test_api_key", {
+      provider: family,
+      key,
+      baseUrl: baseUrl || null,
+    });
+    if (r.ok) {
+      show(t("customize.testOk", { n: r.metrics }), true);
+      if (addBtn) addBtn.disabled = false;
+    } else {
+      show(`${t("customize.testFailed")}: ${r.message}`, false);
+    }
+  } catch (err) {
+    show(`${t("customize.testFailed")}: ${String(err)}`, false);
+  }
+}
+
+/// Appends the tested account; the new <provider>@<n> card appears on the
+/// follow-up refresh, like a saved main key does.
+async function doAccountAdd(family: string): Promise<void> {
+  const block = document.querySelector<HTMLElement>(
+    `#drawer-body [data-accounts-block="${CSS.escape(family)}"]`,
+  );
+  const keyInp = block?.querySelector<HTMLInputElement>("[data-acct-key]");
+  if (!keyInp?.value.trim()) return;
+  const status = document.querySelector("#status")!;
+  try {
+    await invoke("account_add", {
+      provider: family,
+      label: block?.querySelector<HTMLInputElement>("[data-acct-label]")?.value.trim() ?? "",
+      apiKey: keyInp.value.trim(),
+      baseUrl:
+        block?.querySelector<HTMLInputElement>("[data-acct-baseurl]")?.value.trim() || null,
+    });
+    acctFormOpen = false;
+    refreshAccounts(family);
+    status.textContent = t("customize.acctAdded", { name: providerDisplayName(family) });
+    void forceUsageRefreshAttempt(false).then(requestTraySync);
+  } catch (err) {
+    status.textContent = t("customize.acctAddFailed", { err: String(err) });
+  }
+}
+
+/// Deletes an account after a confirm; its card vanishes on the refresh
+/// this triggers (fetch_usage simply stops spawning it).
+async function doAccountRemove(family: string, index: number): Promise<void> {
+  const label = accountLabelAt(accountsCache.get(family) ?? [], index);
+  const ok = await appConfirm({
+    title: t("customize.acctDelTitle"),
+    message: t("customize.acctDelBody", { label }),
+    confirmLabel: t("customize.acctDelConfirm"),
+    danger: true,
+  });
+  if (!ok) return;
+  const status = document.querySelector("#status")!;
+  try {
+    await invoke("account_remove", { provider: family, index });
+    refreshAccounts(family);
+    status.textContent = t("customize.acctRemoved");
+    void forceUsageRefreshAttempt(false).then(requestTraySync);
+  } catch (err) {
+    status.textContent = t("customize.acctRemoveFailed", { err: String(err) });
+  }
+}
+
+/// A login flow between "Sign in with browser" and completion/cancel.
+/// Lives outside the DOM so a drawer re-render doesn't lose the code.
+interface OAuthFlowState {
+  deviceAuthId: string;
+  userCode: string;
+  error: string | null;
+  timer?: number;
+}
+const oauthFlow = new Map<string, OAuthFlowState>();
+
+function stopOauthFlow(family: string): void {
+  const flow = oauthFlow.get(family);
+  if (flow?.timer !== undefined) window.clearInterval(flow.timer);
+}
+
+function paintOAuth(id: string): void {
+  const el = document.querySelector<HTMLElement>(
+    `#drawer-body [data-oauth-block="${CSS.escape(id)}"]`,
+  );
+  if (el) el.innerHTML = oauthBlockInner(id);
+}
+
+function oauthBlockInner(id: string): string {
+  const flow = oauthFlow.get(id);
+  const status = credStatusCache.get(id);
+  if (flow?.error) {
+    return `<p class="cust-test-result err">${escapeHtml(t("customize.oauth.failed", { err: flow.error }))}</p>
+      <div class="cust-actions">
+        <button class="mini-btn" data-oauth-login="${id}">${escapeHtml(t("customize.oauth.login"))}</button>
+      </div>`;
+  }
+  if (flow) {
+    return `<p class="dim">${escapeHtml(t("customize.oauth.code"))}</p>
+      <p class="oauth-code">${escapeHtml(flow.userCode)}</p>
+      <p class="dim">${escapeHtml(t("customize.oauth.waiting"))}</p>
+      <div class="cust-actions">
+        <button class="mini-btn" data-oauth-cancel="${id}">${escapeHtml(t("customize.oauth.cancel"))}</button>
+      </div>`;
+  }
+  // With a CLI sign-in present, the button offers the alternative.
+  const loginLabel = status?.localCli
+    ? t("customize.oauth.loginAlt")
+    : t("customize.oauth.login");
+  const logoutBtn = status?.oauth
+    ? `<button class="mini-btn" data-oauth-logout="${id}">${escapeHtml(t("customize.oauth.logout"))}</button>`
+    : "";
+  return `<div class="cust-actions">
+      <button class="mini-btn" data-oauth-login="${id}">${escapeHtml(loginLabel)}</button>
+      ${logoutBtn}
+    </div>`;
+}
+
+/// The gear panel's OAuth section (codex/grok only, and only on the
+/// family row — extra CLI account cards don't own Pane's OAuth login).
+function renderOAuthBlock(id: string): string {
+  if (!OAUTH_PROVIDERS.has(id) || providerFamily(id) !== id) return "";
+  return `<div class="cust-oauth" data-oauth-block="${escapeHtml(id)}">${oauthBlockInner(id)}</div>`;
+}
+
+/// "Sign in with browser": start the device-code flow, open the
+/// verification page (through the same open_link gate as quick links),
+/// show the user code for verification, and poll until done.
+async function startOauthLogin(family: string): Promise<void> {
+  stopOauthFlow(family);
+  let started: { device_auth_id: string; user_code: string; verify_url: string };
+  try {
+    started = await invoke("oauth_start", { provider: family });
+  } catch (err) {
+    oauthFlow.set(family, { deviceAuthId: "", userCode: "", error: String(err) });
+    paintOAuth(family);
+    return;
+  }
+  void invoke("open_link", { url: started.verify_url }).catch((err) => {
+    const status = document.querySelector("#status");
+    if (status) status.textContent = t("footer.openLinkFailed", { err: String(err) });
+  });
+  const flow: OAuthFlowState = {
+    deviceAuthId: started.device_auth_id,
+    userCode: started.user_code,
+    error: null,
+  };
+  oauthFlow.set(family, flow);
+  paintOAuth(family);
+  flow.timer = window.setInterval(() => void pollOauth(family), 3000);
+  void pollOauth(family);
+}
+
+/// One poll tick. The backend paces itself against the server-asked
+/// interval, so a fixed 3s timer here is safe.
+async function pollOauth(family: string): Promise<void> {
+  const flow = oauthFlow.get(family);
+  if (!flow || !flow.deviceAuthId) return;
+  let r: { done: boolean; label: string | null; error: string | null };
+  try {
+    r = await invoke("oauth_poll", { provider: family, deviceAuthId: flow.deviceAuthId });
+  } catch (err) {
+    flow.error = String(err);
+    flow.deviceAuthId = "";
+    stopOauthFlow(family);
+    paintOAuth(family);
+    return;
+  }
+  if (!r.done && !r.error) return; // still waiting for the user
+  stopOauthFlow(family);
+  if (r.error) {
+    flow.error = r.error;
+    flow.deviceAuthId = "";
+    paintOAuth(family);
+    return;
+  }
+  oauthFlow.delete(family);
+  credStatusCache.delete(family);
+  refreshCredStatus(family); // chips pick up the OAuth account label
+  paintOAuth(family);
+  void forceUsageRefreshAttempt(false).then(requestTraySync);
+}
+
+async function doOauthLogout(family: string): Promise<void> {
+  try {
+    await invoke("oauth_logout", { provider: family });
+  } catch (err) {
+    const status = document.querySelector("#status");
+    if (status) status.textContent = t("customize.oauth.failed", { err: String(err) });
+  }
+  credStatusCache.delete(family);
+  refreshCredStatus(family);
+  paintOAuth(family);
+  void forceUsageRefreshAttempt(false).then(requestTraySync);
+}
+
+/// The gear panel's status section: the one-line fact of what this
+/// provider reads on its own, the live detection chips, and the
+/// credentials saved in Pane.
+function renderCustStatus(id: string): string {
+  const info = PROVIDER_CRED_INFO[providerFamily(id)];
+  const auto = info ? escapeHtml(t(info.auto)) : "";
+  return `<div class="cust-status">
+      <p class="cust-status-fact"><span class="cust-info-label">${escapeHtml(t("customize.credAutoLabel"))}</span>${auto}</p>
+      <p class="cust-chips" data-cred-chips="${escapeHtml(id)}">${credChipsHtml(id)}</p>
+      <ul class="cust-accounts" data-cred-accounts="${escapeHtml(id)}">${credAccountsHtml(id)}</ul>
+    </div>`;
+}
+
+/// Inline config panel behind a provider's ⚙ button: a status section
+/// (what the provider reads on its own + live credential chips + the
+/// credentials Pane has saved) above an action section. Key-based
+/// providers get an API-key field (Custom Balance also its base URL), a
+/// "Test" button that validates the pasted key without saving it, and
+/// Save — disabled until a test passes (an empty field stays savable:
+/// that path clears the stored key). The rest sign in through their own
+/// CLI or desktop login, so their action section is that provider's
+/// login hint. The "?" button on the row stays: it shows the static
+/// facts, this panel the live detection.
+function renderCustConfig(id: string): string {
+  const status = renderCustStatus(id);
+  if (!KEY_PROVIDERS.has(id)) {
+    // An account card (deepseek@1) manages nothing itself — its account
+    // lives on the family row's account section.
+    const fam = providerFamily(id);
+    if (id !== fam && MULTI_ACCOUNT_PROVIDERS.has(fam)) {
+      const famName = ALL_PROVIDERS.find(([pid]) => pid === fam)?.[1] ?? fam;
+      return `<div class="cust-config"><p class="settings-note">${escapeHtml(t("customize.acctCardHint", { name: famName }))}</p></div>`;
+    }
+    const hintKey = `customize.loginHint.${providerFamily(id)}`;
+    const hint = t(hintKey) !== hintKey ? t(hintKey) : t("customize.cliLoginHint");
+    return `<div class="cust-config">${status}${renderOAuthBlock(id)}<p class="settings-note">${escapeHtml(hint)}</p></div>`;
+  }
+  // Reuse the Settings key placeholders (settings.keyPhXxx) where defined.
+  const phKey = `settings.keyPh${id[0].toUpperCase()}${id.slice(1)}`;
+  const ph = t(phKey) !== phKey ? t(phKey) : t("settings.keyPlaceholder");
+  const baseUrl =
+    id === "relaybalance"
+      ? `<input type="text" data-cust-baseurl="${id}" placeholder="https://api.example.com" spellcheck="false" />`
+      : "";
+  return `<div class="cust-config">
+      ${status}
+      <div class="cust-actions">
+        ${baseUrl}
+        <input type="password" data-cust-key="${id}" placeholder="${escapeHtml(ph)}" />
+        <button class="mini-btn" data-cust-test="${id}">${escapeHtml(t("customize.test"))}</button>
+        <button class="mini-btn" data-cust-save="${id}" title="${escapeHtml(t("customize.saveAfterTest"))}">${escapeHtml(t("settings.save"))}</button>
+        <span class="cust-test-result" data-cust-result="${id}"></span>
+      </div>
+      ${renderAccountsBlock(id)}
+    </div>`;
+}
+
 function renderCustomize(): string {
-  const order = config.layout?.providerOrder ?? ALL_PROVIDERS.map(([id]) => id);
-  const blocks = order
-    .map((id) => {
+  // A-Z by English display name, locale-independent. Card order is owned by
+  // dragging cards on the main view; the drawer is for enabling,
+  // configuring and per-row management, so a stable sorted list reads best.
+  const nameOf = (id: string): string =>
+    ALL_PROVIDERS.find(([pid]) => pid === id)?.[1] ??
+    lastSnapshots.find((s) => s.id === id)?.name ??
+    id;
+  const query = custSearchQuery.trim().toLowerCase();
+  const ids = [...(config.layout?.providerOrder ?? ALL_PROVIDERS.map(([id]) => id))]
+    .filter((id) => {
       const snapshot = lastSnapshots.find((s) => s.id === id);
       // A retired account card (its login left this machine) keeps its
       // layout for reattachment but must not haunt Customize as a bare
@@ -2301,20 +2922,35 @@ function renderCustomize(): string {
       // configured ones still render (name from sites) so per-key toggles
       // survive. Deleted keys with no snapshot and not in disabled skip.
       if (id.includes("@") && !snapshot && !config.disabled.includes(id) && !onaFindConfiguredKey(id)) {
-        return "";
+        return false;
       }
       // Deleted One/New API keys must not linger as `onenewapi@…` ghosts,
       // even when they are still in `disabled` (Claude-style re-enable
       // does not apply — the site is gone).
       if (onaSitesLoaded && isOnaKeyCardId(id) && !onaFindConfiguredKey(id)) {
-        return "";
+        return false;
       }
       // Family master lives in Settings once any key exists. Keep the
       // empty family row only so Customize can still discover the family
       // before the first key.
       if (id === ONA_FAMILY && onaTotalKeys() > 0) {
-        return "";
+        return false;
       }
+      return !(id.includes("@") && !snapshot && !config.disabled.includes(id));
+    })
+    .sort((a, b) => nameOf(a).localeCompare(nameOf(b), "en"));
+  // A-Z index strip: only the letters that actually have a provider.
+  const letters = [
+    ...new Set(
+      ids.map((id) => {
+        const n = nameOf(id);
+        return /^[a-z]/i.test(n) ? n[0].toUpperCase() : "#";
+      }),
+    ),
+  ];
+  const blocks = ids
+    .map((id) => {
+      const snapshot = lastSnapshots.find((s) => s.id === id);
       // The leftover Moonshot *card* folds into Kimi Code on the dashboard.
       // This toggle (labeled "Kimi API") still owns the wallet: off means
       // no Moonshot HTTP and no API bar on the Kimi card. Hide it and
@@ -2351,18 +2987,23 @@ function renderCustomize(): string {
         : `<p class="placeholder">${escapeHtml(t("customize.noData"))}</p>`;
 
       const open = custExpanded.has(id);
+      const letter = /^[a-z]/i.test(name) ? name[0].toUpperCase() : "#";
+      const filteredOut = query !== "" && !name.toLowerCase().includes(query);
       return `
-        <article class="provider customize-block${enabled ? "" : " muted"}${open ? " open" : ""}" data-cust-provider="${id}" draggable="true">
+        <article class="provider customize-block${enabled ? "" : " muted"}${open ? " open" : ""}" data-cust-provider="${id}" data-letter="${letter}" data-name="${escapeHtml(name.toLowerCase())}"${filteredOut ? " hidden" : ""}>
           <div class="provider-head">
-            <span class="grip" title="${escapeHtml(t("customize.dragProviders"))}">⠿</span>
             <button class="cust-expand" data-cust-expand="${id}" title="${open ? t("customize.collapse") : t("customize.expand")}">
               <span class="provider-name">${escapeHtml(name)}</span>
               <span class="chev">⌄</span>
             </button>
             <span class="spacer"></span>
+            <button class="mini-btn cust-info-btn${custInfoOpen === id ? " on" : ""}" data-info="${id}" title="${escapeHtml(t("customize.credInfo"))}">?</button>
+            <button class="mini-btn cust-config-btn${custConfigOpen === id ? " on" : ""}" data-config="${id}" title="${escapeHtml(t("customize.configure"))}">⚙</button>
             <button class="mini-btn" data-reset="${id}" title="${escapeHtml(t("customize.resetLayoutTip"))}">${escapeHtml(t("customize.resetLayout"))}</button>
             <label class="toggle mini" title="${escapeHtml(t("customize.enable"))}"><input type="checkbox" data-enable="${id}"${enabled ? " checked" : ""} /></label>
           </div>
+          ${custConfigOpen === id ? renderCustConfig(id) : ""}
+          ${custInfoOpen === id ? renderCustInfo(id) : ""}
           <div class="acc-body"><div class="acc-inner cust-rows">${rows}</div></div>
         </article>`;
     })
@@ -2375,6 +3016,12 @@ function renderCustomize(): string {
       <span class="detail">${escapeHtml(t("customize.starred", { n: starCount }))}</span>
       <button class="dock-btn danger" data-reset-all title="${escapeHtml(t("customize.resetAllTip"))}">${escapeHtml(t("customize.resetAll"))}</button>
     </div>
+    <div class="cust-search-wrap">
+      <input id="cust-search" type="text" value="${escapeHtml(custSearchQuery)}" placeholder="${escapeHtml(t("customize.search"))}" spellcheck="false" />
+    </div>
+    <nav class="cust-az${query ? " hidden" : ""}">${letters
+      .map((l) => `<button data-az="${l}">${l}</button>`)
+      .join("")}</nav>
     ${blocks}`;
 }
 
@@ -2408,7 +3055,28 @@ function renderAll(): void {
 
 function renderDrawerBody(): void {
   const body = document.querySelector<HTMLElement>("#drawer-body");
-  if (body) body.innerHTML = renderCustomize();
+  if (!body) return;
+  // A background refresh re-renders the drawer even mid-typing; hand the
+  // search box its focus and caret back afterwards.
+  const search = document.activeElement as HTMLInputElement | null;
+  const caret = search?.id === "cust-search" ? search.selectionStart : null;
+  body.innerHTML = renderCustomize();
+  if (caret !== null) {
+    const input = body.querySelector<HTMLInputElement>("#cust-search");
+    input?.focus();
+    input?.setSelectionRange(caret, caret);
+  }
+}
+
+/// Live search filter: hides non-matching provider blocks in place (no
+/// re-render, so the box keeps focus) and parks the A-Z strip meanwhile.
+function applyCustomizeFilter(query: string): void {
+  custSearchQuery = query;
+  const q = query.trim().toLowerCase();
+  document.querySelectorAll<HTMLElement>("#drawer-body .customize-block").forEach((el) => {
+    el.hidden = q !== "" && !(el.dataset.name ?? "").includes(q);
+  });
+  document.querySelector<HTMLElement>("#drawer-body .cust-az")?.classList.toggle("hidden", q !== "");
 }
 
 /// Customize lives in a drawer that slides in from the left edge.
@@ -2444,12 +3112,24 @@ function rebuildTrail(): void {
   trail.innerHTML = cards
     .map((card, i) => {
       const name = card.querySelector(".provider-name")?.textContent ?? `Card ${i + 1}`;
+      const family = card.dataset.provider ? providerFamily(card.dataset.provider) : "";
+      const icon = PROVIDER_ICONS[family];
+      if (icon) {
+        const extra = [
+          TRAIL_RECOLOR_ICONS.has(family) ? " trail-recolor" : "",
+          TRAIL_INVERT_DARK_ICONS.has(family) ? " trail-invert-dark" : "",
+        ].join("");
+        return `<button class="trail-tick trail-icon${extra}" data-trail="${i}" title="${escapeHtml(name)}">${icon}</button>`;
+      }
       return `<button class="trail-tick" data-trail="${i}" title="${escapeHtml(name)}"></button>`;
     })
     .join("");
   // Minimap feel: tick width follows the card's height, like Codex's rail.
+  // Icon ticks keep a fixed square box instead — the mark itself is the
+  // height signal.
   const ticks = trail.querySelectorAll<HTMLElement>(".trail-tick");
   ticks.forEach((tick, i) => {
+    if (tick.classList.contains("trail-icon")) return;
     const h = cards[i]?.offsetHeight ?? 80;
     tick.style.width = `${Math.max(7, Math.min(16, Math.round(5 + h / 45)))}px`;
   });
@@ -2458,6 +3138,8 @@ function rebuildTrail(): void {
 
 /// Codex-style magnetic rail: ticks near the cursor stretch and brighten
 /// with a smooth falloff; everything settles back when the mouse leaves.
+/// Icon ticks scale uniformly (the mark grows) instead of stretching and
+/// skip the background wash, which would paint over the artwork.
 function setupTrailFisheye(): void {
   const sidebar = document.querySelector<HTMLElement>(".sidebar")!;
   let raf = 0;
@@ -2479,6 +3161,10 @@ function setupTrailFisheye(): void {
         const d = Math.abs(y - (r.top + r.height / 2));
         const g = Math.exp(-(d * d) / (2 * 26 * 26)); // gaussian falloff, σ≈26px
         const active = tick.classList.contains("active");
+        if (tick.classList.contains("trail-icon")) {
+          tick.style.transform = `scale(${(1 + 0.5 * g).toFixed(3)})`;
+          return;
+        }
         tick.style.transform = `scaleX(${(1 + 0.9 * g).toFixed(3)})`;
         const mix = Math.round(Math.max(g * 85, active ? 100 : 12));
         tick.style.background = `color-mix(in srgb, var(--foreground) ${mix}%, var(--border))`;
@@ -2958,10 +3644,11 @@ async function drainTraySyncQueue(): Promise<void> {
 // Customize interactions
 // ---------------------------------------------------------------------------
 
+// Only metric rows drag inside the drawer now — provider order belongs to
+// the card drag on the main view.
 interface DragPayload {
-  t: "row" | "provider";
   id: string;
-  key?: string;
+  key: string;
 }
 
 let dragPayload: DragPayload | null = null;
@@ -2992,6 +3679,115 @@ function handleCustomizeClick(target: HTMLElement): boolean {
     }
     // Toggle in place so the accordion animates instead of re-rendering.
     expand.closest(".customize-block")?.classList.toggle("open", custExpanded.has(id));
+    return true;
+  }
+  const cfgBtn = target.closest<HTMLElement>("[data-config]");
+  if (cfgBtn) {
+    const id = cfgBtn.dataset.config!;
+    custConfigOpen = custConfigOpen === id ? null : id;
+    custInfoOpen = null; // one panel at a time per row
+    acctFormOpen = false; // a fresh panel starts with the form folded
+    renderDrawerBody();
+    if (custConfigOpen) {
+      fetchCredStatus(id); // the status section's live chips
+      fetchAccounts(id); // the account section's saved list
+      const block = document.querySelector<HTMLElement>(
+        `#drawer-body [data-cust-provider="${CSS.escape(custConfigOpen)}"]`,
+      );
+      block?.querySelector<HTMLInputElement>("[data-cust-key]")?.focus();
+      // Custom Balance: pre-fill the relay base URL saved with its key.
+      const baseInp = block?.querySelector<HTMLInputElement>("[data-cust-baseurl]");
+      if (baseInp) {
+        void invoke<string | null>("get_base_url", { provider: custConfigOpen })
+          .then((v) => {
+            baseInp.value = v ?? "";
+          })
+          .catch(() => {});
+      }
+    }
+    return true;
+  }
+  const infoBtn = target.closest<HTMLElement>("[data-info]");
+  if (infoBtn) {
+    const id = infoBtn.dataset.info!;
+    custInfoOpen = custInfoOpen === id ? null : id;
+    custConfigOpen = null; // one panel at a time per row
+    renderDrawerBody();
+    if (custInfoOpen) fetchCredStatus(id);
+    return true;
+  }
+  const custTest = target.closest<HTMLElement>("[data-cust-test]");
+  if (custTest) {
+    void runCustKeyTest(custTest.dataset.custTest!);
+    return true;
+  }
+  const oauthLogin = target.closest<HTMLElement>("[data-oauth-login]");
+  if (oauthLogin) {
+    void startOauthLogin(oauthLogin.dataset.oauthLogin!);
+    return true;
+  }
+  const oauthLogout = target.closest<HTMLElement>("[data-oauth-logout]");
+  if (oauthLogout) {
+    void doOauthLogout(oauthLogout.dataset.oauthLogout!);
+    return true;
+  }
+  const oauthCancel = target.closest<HTMLElement>("[data-oauth-cancel]");
+  if (oauthCancel) {
+    const family = oauthCancel.dataset.oauthCancel!;
+    stopOauthFlow(family);
+    oauthFlow.delete(family);
+    paintOAuth(family);
+    return true;
+  }
+  const acctToggle = target.closest<HTMLElement>("[data-acct-toggle]");
+  if (acctToggle) {
+    const family = acctToggle.dataset.acctToggle!;
+    acctFormOpen = !acctFormOpen;
+    paintAccounts(family); // repaint the section, not the whole drawer
+    if (acctFormOpen) {
+      document
+        .querySelector<HTMLElement>(
+          `#drawer-body [data-accounts-block="${CSS.escape(family)}"] [data-acct-label]`,
+        )
+        ?.focus();
+    }
+    return true;
+  }
+  const acctTest = target.closest<HTMLElement>("[data-acct-test]");
+  if (acctTest) {
+    void runAccountKeyTest(acctTest.dataset.acctTest!);
+    return true;
+  }
+  const acctAdd = target.closest<HTMLElement>("[data-acct-add]");
+  if (acctAdd) {
+    void doAccountAdd(acctAdd.dataset.acctAdd!);
+    return true;
+  }
+  const acctDel = target.closest<HTMLElement>("[data-acct-del]");
+  if (acctDel) {
+    const [family, idxStr] = acctDel.dataset.acctDel!.split("|");
+    const index = Number(idxStr);
+    if (family && Number.isInteger(index)) void doAccountRemove(family, index);
+    return true;
+  }
+  const custSave = target.closest<HTMLElement>("[data-cust-save]");
+  if (custSave) {
+    const id = custSave.dataset.custSave!;
+    const panel = custSave.closest(".cust-config");
+    const keyInp = panel?.querySelector<HTMLInputElement>("[data-cust-key]");
+    if (keyInp) {
+      void saveApiKey(id, {
+        key: keyInp,
+        baseUrl: panel?.querySelector<HTMLInputElement>("[data-cust-baseurl]") ?? null,
+      });
+    }
+    return true;
+  }
+  const az = target.closest<HTMLElement>("[data-az]");
+  if (az) {
+    document
+      .querySelector<HTMLElement>(`#drawer-body [data-letter="${az.dataset.az}"]:not([hidden])`)
+      ?.scrollIntoView({ behavior: "smooth", block: "start" });
     return true;
   }
   const closeBtn = target.closest("[data-customize-close]");
@@ -3047,6 +3843,76 @@ function handleCustomizeClick(target: HTMLElement): boolean {
     return true;
   }
   return false;
+}
+
+/// "Test connection" behind the ⚙ panel: validates the pasted key through
+/// test_api_key (a live probe that never writes anything) and only a
+/// passing test enables Save. The result line shows the metric count on
+/// success or the backend's error verbatim on failure.
+async function runCustKeyTest(id: string): Promise<void> {
+  const panel = document.querySelector<HTMLElement>(
+    `#drawer-body [data-cust-provider="${CSS.escape(id)}"] .cust-config`,
+  );
+  const keyInp = panel?.querySelector<HTMLInputElement>("[data-cust-key]");
+  const result = panel?.querySelector<HTMLElement>("[data-cust-result]");
+  const saveBtn = panel?.querySelector<HTMLButtonElement>("[data-cust-save]");
+  if (!keyInp || !result) return;
+  const show = (text: string, ok: boolean | null) => {
+    result.textContent = text;
+    result.classList.toggle("ok", ok === true);
+    result.classList.toggle("err", ok === false);
+  };
+  const key = keyInp.value.trim();
+  if (!key) {
+    show(t("customize.testEmpty"), false);
+    if (saveBtn) saveBtn.disabled = false; // empty = clear the stored key
+    return;
+  }
+  show(t("customize.testing"), null);
+  try {
+    const baseUrl =
+      panel?.querySelector<HTMLInputElement>("[data-cust-baseurl]")?.value.trim() ?? "";
+    const r = await invoke<{ ok: boolean; metrics: number; message: string }>("test_api_key", {
+      provider: id,
+      key,
+      baseUrl: baseUrl || null,
+    });
+    if (r.ok) {
+      show(t("customize.testOk", { n: r.metrics }), true);
+      if (saveBtn) saveBtn.disabled = false;
+    } else {
+      show(`${t("customize.testFailed")}: ${r.message}`, false);
+    }
+  } catch (err) {
+    show(`${t("customize.testFailed")}: ${String(err)}`, false);
+  }
+}
+
+/// Any edit to the key/base-URL inputs invalidates the previous test:
+/// Save re-locks (an empty field stays unlocked — it clears the key).
+function resetCustTestState(panel: HTMLElement | null): void {
+  if (!panel) return;
+  const keyInp = panel.querySelector<HTMLInputElement>("[data-cust-key]");
+  const saveBtn = panel.querySelector<HTMLButtonElement>("[data-cust-save]");
+  const result = panel.querySelector<HTMLElement>("[data-cust-result]");
+  if (saveBtn) saveBtn.disabled = keyInp?.value.trim() ? true : false;
+  if (result) {
+    result.textContent = "";
+    result.classList.remove("ok", "err");
+  }
+}
+
+/// Any edit to the account form's inputs invalidates its passing test:
+/// Add re-locks until the new values are tested again.
+function resetAcctTestState(form: HTMLElement | null): void {
+  if (!form) return;
+  const addBtn = form.querySelector<HTMLButtonElement>("[data-acct-add]");
+  const result = form.querySelector<HTMLElement>("[data-acct-result]");
+  if (addBtn) addBtn.disabled = true;
+  if (result) {
+    result.textContent = "";
+    result.classList.remove("ok", "err");
+  }
 }
 
 // Rapid toggles used to race: each one snapshotted config.disabled before
@@ -3135,15 +4001,9 @@ function setupCustomizeDnD(providersEl: HTMLElement): void {
     const row = (e.target as HTMLElement).closest<HTMLElement>("[data-cust-row]");
     if (row) {
       const [id, key] = row.dataset.custRow!.split("|");
-      dragPayload = { t: "row", id, key };
+      dragPayload = { id, key };
       setDragGhost(e as DragEvent, row);
       e.stopPropagation();
-      return;
-    }
-    const block = (e.target as HTMLElement).closest<HTMLElement>("[data-cust-provider]");
-    if (block) {
-      dragPayload = { t: "provider", id: block.dataset.custProvider! };
-      setDragGhost(e as DragEvent, block);
     }
   });
 
@@ -3162,29 +4022,17 @@ function setupCustomizeDnD(providersEl: HTMLElement): void {
     e.preventDefault();
     const target = e.target as HTMLElement;
 
-    if (dragPayload.t === "row") {
-      const L = providerLayout(dragPayload.id);
-      const divider = target.closest<HTMLElement>("[data-divider]");
-      const row = target.closest<HTMLElement>("[data-cust-row]");
-      if (divider && divider.dataset.divider === dragPayload.id) {
-        moveRow(L, dragPayload.key!, DIVIDER);
-      } else if (row) {
-        const [tid, tkey] = row.dataset.custRow!.split("|");
-        if (tid === dragPayload.id && tkey !== dragPayload.key) moveRow(L, dragPayload.key!, tkey);
-      }
-      saveLayout();
-      renderAll();
-    } else if (config.layout) {
-      const block = target.closest<HTMLElement>("[data-cust-provider]");
-      if (block && block.dataset.custProvider !== dragPayload.id) {
-        const order = config.layout.providerOrder.filter((p) => p !== dragPayload!.id);
-        const at = order.indexOf(block.dataset.custProvider!);
-        order.splice(at < 0 ? order.length : at, 0, dragPayload.id);
-        config.layout.providerOrder = order;
-        saveLayout();
-        renderAll();
-      }
+    const L = providerLayout(dragPayload.id);
+    const divider = target.closest<HTMLElement>("[data-divider]");
+    const row = target.closest<HTMLElement>("[data-cust-row]");
+    if (divider && divider.dataset.divider === dragPayload.id) {
+      moveRow(L, dragPayload.key, DIVIDER);
+    } else if (row) {
+      const [tid, tkey] = row.dataset.custRow!.split("|");
+      if (tid === dragPayload.id && tkey !== dragPayload.key) moveRow(L, dragPayload.key, tkey);
     }
+    saveLayout();
+    renderAll();
     dragPayload = null;
     // renderAll() replaces the dragged node, so dragend may never bubble
     // back up — clean the ghost here too.
@@ -3860,8 +4708,13 @@ async function unparkRecentlyKeyed(): Promise<void> {
   }).catch(() => {});
 }
 
-async function saveApiKey(provider: string): Promise<void> {
-  const input = document.querySelector<HTMLInputElement>(`#key-${provider}`)!;
+// Settings rows pass nothing and are found by their #key-/#baseurl- ids;
+// the Customize gear panel passes its own inputs explicitly.
+async function saveApiKey(
+  provider: string,
+  fields?: { key: HTMLInputElement; baseUrl?: HTMLInputElement | null },
+): Promise<void> {
+  const input = fields?.key ?? document.querySelector<HTMLInputElement>(`#key-${provider}`)!;
   const status = document.querySelector("#status")!;
   let enableGeneration: number | undefined;
   try {
@@ -3876,8 +4729,17 @@ async function saveApiKey(provider: string): Promise<void> {
         enableGeneration = markProviderEnablePending(provider);
       }
     }
-    await invoke("set_api_key", { provider, key });
+    // Providers with a user-chosen endpoint (relaybalance) carry a base
+    // URL input next to the key field; Save persists both together.
+    const baseUrlInput = fields
+      ? (fields.baseUrl ?? null)
+      : document.querySelector<HTMLInputElement>(`#baseurl-${provider}`);
+    const baseUrl = baseUrlInput?.value.trim() || null;
+    await invoke("set_api_key", { provider, key, baseUrl });
     input.value = "";
+    // The gear panel's chips + saved-credential list reflect the new key.
+    credStatusCache.delete(provider);
+    refreshCredStatus(provider);
     // Pasting a key says "show me this provider" — pull it out of Disabled.
     // First-run auto-disable parks keyless providers there, and a key saved
     // against a still-disabled toggle would otherwise never produce a bar
@@ -4085,6 +4947,15 @@ async function initSettings(): Promise<void> {
   proxyEnabled.addEventListener("change", saveProxy);
   proxyUrl.addEventListener("change", saveProxy);
 
+  // Custom Balance: pre-fill the relay base URL saved with its key.
+  const relayBase = document.querySelector<HTMLInputElement>("#baseurl-relaybalance");
+  if (relayBase) {
+    relayBase.value =
+      (await invoke<string | null>("get_base_url", { provider: "relaybalance" }).catch(
+        () => null,
+      )) ?? "";
+  }
+
   populatePinnedOptions();
 
   document.querySelector("#reset-all-settings")!.addEventListener("click", () => {
@@ -4266,6 +5137,15 @@ window.addEventListener("DOMContentLoaded", () => {
   });
   drawerBody.addEventListener("change", (e) => {
     handleCustomizeChange(e.target as HTMLInputElement);
+  });
+  drawerBody.addEventListener("input", (e) => {
+    const el = e.target as HTMLInputElement;
+    if (el.id === "cust-search") applyCustomizeFilter(el.value);
+    else if (el.matches("[data-cust-key], [data-cust-baseurl]")) {
+      resetCustTestState(el.closest(".cust-config"));
+    } else if (el.matches("[data-acct-key], [data-acct-baseurl], [data-acct-label]")) {
+      resetAcctTestState(el.closest(".acct-form"));
+    }
   });
   setupCustomizeDnD(drawerBody);
   document.querySelectorAll<HTMLButtonElement>("[data-save]").forEach((btn) => {

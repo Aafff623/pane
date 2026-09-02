@@ -14,11 +14,15 @@ pub mod kilo;
 pub mod kimi;
 pub mod minimax;
 pub mod moonshot;
+pub mod novita;
 pub mod ollama;
 pub mod onenewapi;
 pub mod opencode;
 pub mod openrouter;
 pub mod qwen;
+pub mod relaybalance;
+pub mod siliconflow;
+pub mod stepfun;
 pub mod zai;
 
 use serde::{Deserialize, Serialize};
@@ -427,4 +431,30 @@ pub fn stored_api_key(provider: &str, env_vars: &[&str]) -> Option<String> {
         }
     }
     None
+}
+
+/// Pure file probe (no env fallback): the apiKey saved in
+/// %APPDATA%\Pane\<provider>.json, if any. Used by get_credential_status
+/// to report "stored key" separately from the env-var fallback.
+pub fn stored_key_file(provider: &str) -> Option<String> {
+    let path = config_dir().join(format!("{provider}.json"));
+    let raw = std::fs::read_to_string(&path).ok()?;
+    let doc = serde_json::from_str::<serde_json::Value>(&raw).ok()?;
+    let key = doc.get("apiKey")?.as_str()?.trim().to_string();
+    if key.is_empty() { None } else { Some(key) }
+}
+
+/// Companion to `stored_api_key` for providers whose saved blob also carries
+/// a custom endpoint: reads the `baseUrl` field of the same
+/// %APPDATA%\Pane\<provider>.json. No env fallback — a URL typed into
+/// Settings is the only source.
+pub fn stored_base_url(provider: &str) -> Option<String> {
+    let path = config_dir().join(format!("{provider}.json"));
+    let raw = std::fs::read_to_string(&path).ok()?;
+    let doc = serde_json::from_str::<serde_json::Value>(&raw).ok()?;
+    let url = doc.get("baseUrl")?.as_str()?.trim();
+    if url.is_empty() {
+        return None;
+    }
+    Some(url.to_string())
 }

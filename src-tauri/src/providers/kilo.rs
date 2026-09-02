@@ -18,6 +18,12 @@ fn cli_token() -> Option<String> {
     doc.pointer("/kilo/access").and_then(Value::as_str).map(str::to_string)
 }
 
+/// Pure local probe for the Customize gear panel (no network): the Kilo
+/// CLI's auth.json carries a session token.
+pub fn local_credential_hint() -> Option<String> {
+    cli_token().map(|_| "Kilo CLI sign-in (~/.local/share/kilo/auth.json)".to_string())
+}
+
 /// tRPC batch responses wrap each result as result.data.json (with variants).
 fn unwrap_trpc(v: &Value) -> Option<&Value> {
     v.pointer("/result/data/json")
@@ -39,6 +45,14 @@ fn parse_reset_ms(v: Option<&Value>) -> Option<i64> {
     }
 }
 
+/// Live test of a user-pasted key, without saving it (Customize "Test").
+pub async fn snapshot_with_key(key: &str) -> Snapshot {
+    match fetch_with_key(key).await {
+        Ok(s) => s,
+        Err(e) => Snapshot::error(ID, NAME, e),
+    }
+}
+
 async fn fetch() -> Result<Snapshot, String> {
     let key = stored_api_key("kilo", &["KILO_API_KEY"]).or_else(cli_token);
     let Some(key) = key else {
@@ -48,7 +62,10 @@ async fn fetch() -> Result<Snapshot, String> {
             "Sign in with the Kilo CLI or paste an API key in Settings (gear icon).",
         ));
     };
+    fetch_with_key(&key).await
+}
 
+async fn fetch_with_key(key: &str) -> Result<Snapshot, String> {
     let input = urlencoding_min("{\"0\":{\"json\":null},\"1\":{\"json\":null}}");
     let url = format!(
         "https://app.kilo.ai/api/trpc/user.getCreditBlocks,kiloPass.getState?batch=1&input={input}"

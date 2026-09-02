@@ -22,6 +22,12 @@ fn cli_token() -> Option<String> {
         .map(str::to_string)
 }
 
+/// Pure local probe for the Customize gear panel (no network): the
+/// codebuff CLI's credentials file carries a token.
+pub fn local_credential_hint() -> Option<String> {
+    cli_token().map(|_| "codebuff CLI sign-in (~/.config/manicode/credentials.json)".to_string())
+}
+
 fn parse_reset_ms(v: Option<&Value>) -> Option<i64> {
     match v? {
         Value::String(s) => chrono::DateTime::parse_from_rfc3339(s)
@@ -36,6 +42,14 @@ fn parse_reset_ms(v: Option<&Value>) -> Option<i64> {
     }
 }
 
+/// Live test of a user-pasted key, without saving it (Customize "Test").
+pub async fn snapshot_with_key(key: &str) -> Snapshot {
+    match fetch_with_key(key).await {
+        Ok(s) => s,
+        Err(e) => Snapshot::error(ID, NAME, e),
+    }
+}
+
 async fn fetch() -> Result<Snapshot, String> {
     let key = stored_api_key("codebuff", &["CODEBUFF_API_KEY"]).or_else(cli_token);
     let Some(key) = key else {
@@ -45,7 +59,10 @@ async fn fetch() -> Result<Snapshot, String> {
             "Sign in with `codebuff login` or paste an API key in Settings (gear icon).",
         ));
     };
+    fetch_with_key(&key).await
+}
 
+async fn fetch_with_key(key: &str) -> Result<Snapshot, String> {
     let usage_req = http()
         .post("https://www.codebuff.com/api/v1/usage")
         .bearer_auth(&key)

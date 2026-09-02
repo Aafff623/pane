@@ -28,6 +28,14 @@ fn find_api_key() -> Option<String> {
     cli_config_key(&raw)
 }
 
+/// Pure local probe for the Customize gear panel (no network): the MiniMax
+/// Agent CLI's config.yaml actually carries a usable key.
+pub fn local_credential_hint() -> Option<String> {
+    let path = dirs::home_dir()?.join(".minimax").join("config.yaml");
+    let raw = std::fs::read_to_string(path).ok()?;
+    cli_config_key(&raw).map(|_| "MiniMax Agent CLI config (~/.minimax/config.yaml)".to_string())
+}
+
 /// The MiniMax Agent CLI key at exactly provider.minimax.options.apiKey —
 /// an indent-tracked walk of the mapping path (still no YAML dependency).
 /// Matching any `apiKey:` line in the file would let a same-named key that
@@ -72,6 +80,14 @@ pub async fn snapshot() -> Snapshot {
     }
 }
 
+/// Live test of a user-pasted key, without saving it (Customize "Test").
+pub async fn snapshot_with_key(key: &str) -> Snapshot {
+    match fetch_with_key(key).await {
+        Ok(s) => s,
+        Err(e) => Snapshot::error(ID, NAME, e),
+    }
+}
+
 async fn fetch() -> Result<Snapshot, String> {
     let Some(key) = find_api_key() else {
         return Ok(Snapshot::no_credentials(
@@ -80,7 +96,10 @@ async fn fetch() -> Result<Snapshot, String> {
             "No MiniMax key found (Settings, MINIMAX_API_KEY, or the MiniMax CLI).",
         ));
     };
+    fetch_with_key(&key).await
+}
 
+async fn fetch_with_key(key: &str) -> Result<Snapshot, String> {
     let mut last_error = String::from("quota endpoint unreachable");
     for endpoint in ENDPOINTS {
         let resp = match super::http()

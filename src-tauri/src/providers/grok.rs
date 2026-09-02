@@ -17,6 +17,14 @@ fn auth_path() -> PathBuf {
     dirs::home_dir().unwrap_or_default().join(".grok").join("auth.json")
 }
 
+/// Pure local probe for the Customize gear panel (no network): the Grok
+/// CLI's auth.json exists on this machine.
+pub fn local_credential_hint() -> Option<String> {
+    auth_path()
+        .exists()
+        .then(|| "Grok CLI sign-in (~/.grok/auth.json)".to_string())
+}
+
 pub async fn snapshot() -> Snapshot {
     match fetch().await {
         Ok(s) => s,
@@ -24,16 +32,11 @@ pub async fn snapshot() -> Snapshot {
     }
 }
 
-async fn fetch() -> Result<Snapshot, String> {
-    let path = auth_path();
-    if !path.exists() {
-        return Ok(Snapshot::no_credentials(
-            ID,
-            NAME,
-            "Grok CLI sign-in not found (~\\.grok\\auth.json).",
-        ));
-    }
-    let raw = std::fs::read_to_string(&path).map_err(|e| format!("read auth.json: {e}"))?;
+/// Reads the Grok CLI's auth.json and returns a usable access token,
+/// refreshing (and writing the rotated pair back to the CLI's own file)
+/// when the stored one has expired.
+async fn cli_access_token(path: &std::path::Path) -> Result<String, String> {
+    let raw = std::fs::read_to_string(path).map_err(|e| format!("read auth.json: {e}"))?;
     let mut doc: Value = serde_json::from_str(&raw).map_err(|e| format!("parse auth.json: {e}"))?;
 
     // auth.json maps "<issuer>::<account-uuid>" to the account entry.
@@ -120,18 +123,43 @@ async fn fetch() -> Result<Snapshot, String> {
             e["expires_at"] = Value::from((Utc::now() + Duration::seconds(expires_in)).to_rfc3339());
             // Keep a copy of the CLI's own file before touching it, so a bad
             // write can never cost the user their login.
-            let _ = std::fs::copy(&path, path.with_extension("json.pane-bak"));
+            let _ = std::fs::copy(path, path.with_extension("json.pane-bak"));
             let tmp = path.with_extension("json.tmp");
             std::fs::write(&tmp, serde_json::to_string_pretty(&doc).unwrap_or(raw))
-                .and_then(|_| std::fs::rename(&tmp, &path))
+                .and_then(|_| std::fs::rename(&tmp, path))
                 .map_err(|e| format!("write refreshed auth.json: {e}"))?;
         }
     }
+
+    Ok(token)
+}
+
+async fn fetch() -> Result<Snapshot, String> {
+    let path = auth_path();
+    // Credential order: the Grok CLI's own auth.json first, then Pane's
+    // own OAuth login from the gear panel (%APPDATA%\Pane\oauth\grok.json
+    // — refreshed and written back there, the CLI's file untouched).
+    let token = if path.exists() {
+        cli_access_token(&path).await?
+    } else {
+        match crate::oauth::valid_tokens(ID).await {
+            Ok(Some(t)) => t.access_token,
+            Ok(None) => {
+                return Ok(Snapshot::no_credentials(
+                    ID,
+                    NAME,
+                    "Grok CLI sign-in not found (~\\.grok\\auth.json).",
+                ));
+            }
+            Err(e) => return Err(e),
+        }
+    };
 
     let billing_req = http()
         .get("https://cli-chat-proxy.grok.com/v1/billing?format=credits")
         .bearer_auth(&token)
         .send();
+
     let settings_req = http()
         .get("https://cli-chat-proxy.grok.com/v1/settings")
         .bearer_auth(&token)

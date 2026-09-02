@@ -4,8 +4,22 @@ use serde_json::Value;
 const ID: &str = "elevenlabs";
 const NAME: &str = "ElevenLabs";
 
+/// No local credential source — a Settings key or ELEVENLABS_API_KEY /
+/// XI_API_KEY only (both reported separately by get_credential_status).
+pub fn local_credential_hint() -> Option<String> {
+    None
+}
+
 pub async fn snapshot() -> Snapshot {
     match fetch().await {
+        Ok(s) => s,
+        Err(e) => Snapshot::error(ID, NAME, e),
+    }
+}
+
+/// Live test of a user-pasted key, without saving it (Customize "Test").
+pub async fn snapshot_with_key(key: &str) -> Snapshot {
+    match fetch_with_key(key).await {
         Ok(s) => s,
         Err(e) => Snapshot::error(ID, NAME, e),
     }
@@ -19,10 +33,13 @@ async fn fetch() -> Result<Snapshot, String> {
             "Paste an ElevenLabs API key in Settings (gear icon).",
         ));
     };
+    fetch_with_key(&key).await
+}
 
+async fn fetch_with_key(key: &str) -> Result<Snapshot, String> {
     let resp = http()
         .get("https://api.elevenlabs.io/v1/user/subscription")
-        .header("xi-api-key", &key)
+        .header("xi-api-key", key)
         .send()
         .await
         .map_err(|e| format!("subscription request: {e}"))?;

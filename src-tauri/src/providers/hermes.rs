@@ -22,6 +22,12 @@ const NAME: &str = "Hermes";
 /// counter keeps their temp files from colliding (same pattern as OpenCode).
 static COPY_COUNTER: AtomicU64 = AtomicU64::new(0);
 
+/// No credential source — Pane reads Hermes' local ledger, which carries
+/// usage rows rather than a sign-in.
+pub fn local_credential_hint() -> Option<String> {
+    None
+}
+
 #[derive(Clone)]
 pub struct HermesUsage {
     pub ts_ms: i64,

@@ -1,6 +1,8 @@
+mod accounts;
 mod alerts;
 mod httpapi;
 mod i18n;
+mod oauth;
 mod pricing;
 mod providers;
 mod spend;
@@ -573,7 +575,7 @@ struct StripEntry {
 /// strip ids are validated against this before becoming tray icon ids,
 /// including `family@account` cards. Stale family-level strip icons are
 /// removed for exactly this set.
-const STRIP_PROVIDER_IDS: [&str; 22] = [
+const STRIP_PROVIDER_IDS: [&str; 26] = [
     "claude",
     "codex",
     "cursor",
@@ -596,6 +598,10 @@ const STRIP_PROVIDER_IDS: [&str; 22] = [
     "hermes",
     "kimi",
     "onenewapi",
+    "stepfun",
+    "siliconflow",
+    "novita",
+    "relaybalance",
 ];
 
 async fn update_tray_strip(app: tauri::AppHandle, entries: Vec<StripEntry>) -> Result<(), String> {
@@ -1391,6 +1397,43 @@ fn restore_last_success_after_error(
     true
 }
 
+/// One extra account's snapshot, fetched through the same snapshot_with_key
+/// flow a pasted key uses (what test_api_key probes), then re-stamped with
+/// the account card's `<provider>@<n>` id and display name — the provider
+/// functions hardcode their family's id/name. Lives here rather than in
+/// accounts.rs because it dispatches into provider modules the parse-tests
+/// harness (which compiles accounts.rs) doesn't mirror.
+async fn account_snapshot(
+    family: String,
+    id: String,
+    name: String,
+    key: String,
+    base_url: Option<String>,
+) -> providers::Snapshot {
+    let mut snap = match family.as_str() {
+        "deepseek" => providers::deepseek::snapshot_with_key(&key).await,
+        "stepfun" => providers::stepfun::snapshot_with_key(&key).await,
+        "siliconflow" => providers::siliconflow::snapshot_with_key(&key).await,
+        "novita" => providers::novita::snapshot_with_key(&key).await,
+        "relaybalance" => match base_url.as_deref().map(str::trim).filter(|u| !u.is_empty()) {
+            Some(url) => providers::relaybalance::snapshot_with_key(&key, url).await,
+            None => providers::Snapshot::error(
+                &id,
+                &name,
+                "this account has no base URL — remove and re-add it".into(),
+            ),
+        },
+        other => providers::Snapshot::error(
+            &id,
+            &name,
+            format!("unknown multi-account provider: {other}"),
+        ),
+    };
+    snap.id = id;
+    snap.name = name;
+    snap
+}
+
 /// Called by the UI. Refreshes every enabled provider at the same time and
 /// returns whatever each one found — data, "not signed in", or an error.
 #[tauri::command]
@@ -1424,174 +1467,31 @@ async fn fetch_usage(
     // (gigabytes within days). Futures are lazy, so building and dropping
     // a disabled entry here runs none of its code.
     let base: Vec<(&str, BoxedSnap)> = vec![
-        (
-            "claude",
-            Box::pin(guarded(
-                "claude".into(),
-                "Claude".into(),
-                providers::claude::snapshot(),
-            )),
-        ),
-        (
-            "codex",
-            Box::pin(guarded(
-                "codex".into(),
-                "Codex".into(),
-                providers::codex::snapshot(),
-            )),
-        ),
-        (
-            "cursor",
-            Box::pin(guarded(
-                "cursor".into(),
-                "Cursor".into(),
-                providers::cursor::snapshot(),
-            )),
-        ),
-        (
-            "opencode",
-            Box::pin(guarded(
-                "opencode".into(),
-                "OpenCode".into(),
-                providers::opencode::snapshot(),
-            )),
-        ),
-        (
-            "copilot",
-            Box::pin(guarded(
-                "copilot".into(),
-                "Copilot".into(),
-                providers::copilot::snapshot(),
-            )),
-        ),
-        (
-            "grok",
-            Box::pin(guarded(
-                "grok".into(),
-                "Grok".into(),
-                providers::grok::snapshot(),
-            )),
-        ),
-        (
-            "devin",
-            Box::pin(guarded(
-                "devin".into(),
-                "Devin".into(),
-                providers::devin::snapshot(),
-            )),
-        ),
-        (
-            "minimax",
-            Box::pin(guarded(
-                "minimax".into(),
-                "MiniMax".into(),
-                providers::minimax::snapshot(),
-            )),
-        ),
-        (
-            "openrouter",
-            Box::pin(guarded(
-                "openrouter".into(),
-                "OpenRouter".into(),
-                providers::openrouter::snapshot(),
-            )),
-        ),
-        (
-            "zai",
-            Box::pin(guarded(
-                "zai".into(),
-                "Z.ai".into(),
-                providers::zai::snapshot(),
-            )),
-        ),
-        (
-            "antigravity",
-            Box::pin(guarded(
-                "antigravity".into(),
-                "Antigravity".into(),
-                providers::antigravity::snapshot(),
-            )),
-        ),
-        (
-            "deepseek",
-            Box::pin(guarded(
-                "deepseek".into(),
-                "DeepSeek".into(),
-                providers::deepseek::snapshot(),
-            )),
-        ),
-        (
-            "moonshot",
-            Box::pin(guarded(
-                "moonshot".into(),
-                "Kimi API".into(),
-                providers::moonshot::snapshot(),
-            )),
-        ),
-        (
-            "elevenlabs",
-            Box::pin(guarded(
-                "elevenlabs".into(),
-                "ElevenLabs".into(),
-                providers::elevenlabs::snapshot(),
-            )),
-        ),
-        (
-            "ollama",
-            Box::pin(guarded(
-                "ollama".into(),
-                "Ollama".into(),
-                providers::ollama::snapshot(),
-            )),
-        ),
-        (
-            "codebuff",
-            Box::pin(guarded(
-                "codebuff".into(),
-                "Codebuff".into(),
-                providers::codebuff::snapshot(),
-            )),
-        ),
-        (
-            "kilo",
-            Box::pin(guarded(
-                "kilo".into(),
-                "Kilo".into(),
-                providers::kilo::snapshot(),
-            )),
-        ),
-        (
-            "aihubmix",
-            Box::pin(guarded(
-                "aihubmix".into(),
-                "AihubMix".into(),
-                providers::aihubmix::snapshot(),
-            )),
-        ),
-        (
-            "qwen",
-            Box::pin(guarded(
-                "qwen".into(),
-                "Qwen Code".into(),
-                providers::qwen::snapshot(),
-            )),
-        ),
-        (
-            "hermes",
-            Box::pin(guarded(
-                "hermes".into(),
-                "Hermes".into(),
-                providers::hermes::snapshot(),
-            )),
-        ),
-        (
-            "kimi",
-            Box::pin(guarded(
-                "kimi".into(),
-                "Kimi Code".into(),
-                providers::kimi::snapshot(),
-            )),
-        ),
+        ("claude", Box::pin(guarded("claude".into(), "Claude".into(), providers::claude::snapshot()))),
+        ("codex", Box::pin(guarded("codex".into(), "Codex".into(), providers::codex::snapshot()))),
+        ("cursor", Box::pin(guarded("cursor".into(), "Cursor".into(), providers::cursor::snapshot()))),
+        ("opencode", Box::pin(guarded("opencode".into(), "OpenCode".into(), providers::opencode::snapshot()))),
+        ("copilot", Box::pin(guarded("copilot".into(), "Copilot".into(), providers::copilot::snapshot()))),
+        ("grok", Box::pin(guarded("grok".into(), "Grok".into(), providers::grok::snapshot()))),
+        ("devin", Box::pin(guarded("devin".into(), "Devin".into(), providers::devin::snapshot()))),
+        ("minimax", Box::pin(guarded("minimax".into(), "MiniMax".into(), providers::minimax::snapshot()))),
+        ("openrouter", Box::pin(guarded("openrouter".into(), "OpenRouter".into(), providers::openrouter::snapshot()))),
+        ("zai", Box::pin(guarded("zai".into(), "Z.ai".into(), providers::zai::snapshot()))),
+        ("antigravity", Box::pin(guarded("antigravity".into(), "Antigravity".into(), providers::antigravity::snapshot()))),
+        ("deepseek", Box::pin(guarded("deepseek".into(), "DeepSeek".into(), providers::deepseek::snapshot()))),
+        ("moonshot", Box::pin(guarded("moonshot".into(), "Kimi API".into(), providers::moonshot::snapshot()))),
+        ("elevenlabs", Box::pin(guarded("elevenlabs".into(), "ElevenLabs".into(), providers::elevenlabs::snapshot()))),
+        ("ollama", Box::pin(guarded("ollama".into(), "Ollama".into(), providers::ollama::snapshot()))),
+        ("codebuff", Box::pin(guarded("codebuff".into(), "Codebuff".into(), providers::codebuff::snapshot()))),
+        ("kilo", Box::pin(guarded("kilo".into(), "Kilo".into(), providers::kilo::snapshot()))),
+        ("aihubmix", Box::pin(guarded("aihubmix".into(), "AihubMix".into(), providers::aihubmix::snapshot()))),
+        ("qwen", Box::pin(guarded("qwen".into(), "Qwen Code".into(), providers::qwen::snapshot()))),
+        ("hermes", Box::pin(guarded("hermes".into(), "Hermes".into(), providers::hermes::snapshot()))),
+        ("kimi", Box::pin(guarded("kimi".into(), "Kimi Code".into(), providers::kimi::snapshot()))),
+        ("stepfun", Box::pin(guarded("stepfun".into(), "StepFun".into(), providers::stepfun::snapshot()))),
+        ("siliconflow", Box::pin(guarded("siliconflow".into(), "SiliconFlow".into(), providers::siliconflow::snapshot()))),
+        ("novita", Box::pin(guarded("novita".into(), "Novita AI".into(), providers::novita::snapshot()))),
+        ("relaybalance", Box::pin(guarded("relaybalance".into(), "Custom Balance".into(), providers::relaybalance::snapshot()))),
     ];
     // Skip the leftover Moonshot fetch only when the last Kimi card
     // actually painted — a credentials file alone is not enough (expired
@@ -1666,6 +1566,37 @@ async fn fetch_usage(
             } else {
                 expected_onenewapi_generations.clear();
             }
+        }
+    }
+    // Extra API-key accounts (Phase 3.2): each entry in
+    // accounts/<provider>.json renders its own <provider>@<n> card running
+    // the same snapshot_with_key flow a pasted key uses. The bare-id main
+    // card above keeps its stored-key logic untouched, so a user with one
+    // key and no accounts file sees exactly the old behavior.
+    let locale = i18n::resolved_locale(&cfg);
+    for family in accounts::ACCOUNT_PROVIDERS {
+        for (i, acct) in accounts::load_accounts(family).into_iter().enumerate() {
+            let n = i + 1;
+            let id = accounts::card_id(family, n);
+            let name = format!(
+                "{} — {}",
+                accounts::family_display_name(family),
+                accounts::display_label(&acct.label, n, locale)
+            );
+            futs.push((
+                id.clone(),
+                Box::pin(guarded(
+                    id.clone(),
+                    name.clone(),
+                    account_snapshot(
+                        family.to_string(),
+                        id.clone(),
+                        name.clone(),
+                        acct.api_key,
+                        acct.base_url,
+                    ),
+                )),
+            ));
         }
     }
     let futs: Vec<(String, BoxedSnap)> = futs
@@ -2091,9 +2022,10 @@ async fn fetch_spend() -> Vec<spend::ProviderSpend> {
 }
 
 /// Saves (or clears, when `key` is empty) a user-pasted API key to
-/// %APPDATA%\Pane\<provider>.json.
+/// %APPDATA%\Pane\<provider>.json. Providers with a user-chosen endpoint
+/// (relaybalance) pass `base_url` too, stored alongside as `baseUrl`.
 #[tauri::command]
-fn set_api_key(provider: String, key: String) -> Result<(), String> {
+fn set_api_key(provider: String, key: String, base_url: Option<String>) -> Result<(), String> {
     if !matches!(
         provider.as_str(),
         "openrouter"
@@ -2107,6 +2039,12 @@ fn set_api_key(provider: String, key: String) -> Result<(), String> {
             | "kilo"
             | "aihubmix"
             | "qwen"
+            | "kimi"
+            | "opencode"
+            | "stepfun"
+            | "siliconflow"
+            | "novita"
+            | "relaybalance"
     ) {
         return Err(format!("unknown provider: {provider}"));
     }
@@ -2118,8 +2056,252 @@ fn set_api_key(provider: String, key: String) -> Result<(), String> {
         let _ = std::fs::remove_file(&path);
         return Ok(());
     }
-    std::fs::write(&path, serde_json::json!({ "apiKey": key }).to_string())
-        .map_err(|e| format!("write key file: {e}"))
+    let mut doc = serde_json::json!({ "apiKey": key });
+    if let Some(url) = base_url.as_deref().map(str::trim).filter(|u| !u.is_empty()) {
+        if !(url.starts_with("https://") || url.starts_with("http://")) {
+            return Err("base URL must start with https:// or http://".into());
+        }
+        doc["baseUrl"] = serde_json::Value::from(url);
+    }
+    std::fs::write(&path, doc.to_string()).map_err(|e| format!("write key file: {e}"))
+}
+
+/// The base URL saved alongside a provider's API key (relaybalance's
+/// user-chosen relay host), so Settings can pre-fill its input.
+#[tauri::command]
+fn get_base_url(provider: String) -> Option<String> {
+    match provider.as_str() {
+        "relaybalance" => providers::stored_base_url("relaybalance"),
+        _ => None,
+    }
+}
+
+/// Outcome of a live test_api_key probe, shown in the Customize ⚙ panel:
+/// the metric count on success, the backend's error verbatim on failure.
+#[derive(serde::Serialize)]
+struct TestResult {
+    ok: bool,
+    metrics: usize,
+    message: String,
+}
+
+/// Live test of a pasted API key against its provider (Customize "Test
+/// connection"). Pure probe — nothing is written, the key never touches
+/// disk. Custom Balance additionally needs the relay's base URL; testing
+/// always uses the pasted values, never the stored ones.
+#[tauri::command]
+async fn test_api_key(
+    provider: String,
+    key: String,
+    base_url: Option<String>,
+) -> Result<TestResult, String> {
+    let key = key.trim();
+    if key.is_empty() {
+        return Err("API key is empty".into());
+    }
+    let snap = match provider.as_str() {
+        "openrouter" => providers::openrouter::snapshot_with_key(key).await,
+        "zai" => providers::zai::snapshot_with_key(key).await,
+        "minimax" => providers::minimax::snapshot_with_key(key).await,
+        "deepseek" => providers::deepseek::snapshot_with_key(key).await,
+        "moonshot" => providers::moonshot::snapshot_with_key(key).await,
+        "elevenlabs" => providers::elevenlabs::snapshot_with_key(key).await,
+        "codebuff" => providers::codebuff::snapshot_with_key(key).await,
+        "kilo" => providers::kilo::snapshot_with_key(key).await,
+        "aihubmix" => providers::aihubmix::snapshot_with_key(key).await,
+        "qwen" => providers::qwen::snapshot_with_key(key).await,
+        "kimi" => providers::kimi::snapshot_with_key(key).await,
+        "opencode" => providers::opencode::snapshot_with_key(key).await,
+        "stepfun" => providers::stepfun::snapshot_with_key(key).await,
+        "siliconflow" => providers::siliconflow::snapshot_with_key(key).await,
+        "novita" => providers::novita::snapshot_with_key(key).await,
+        "relaybalance" => {
+            let url = base_url
+                .as_deref()
+                .map(str::trim)
+                .filter(|u| !u.is_empty())
+                .ok_or_else(|| "a base URL is required for Custom Balance".to_string())?;
+            providers::relaybalance::snapshot_with_key(key, url).await
+        }
+        _ => return Err(format!("unknown provider: {provider}")),
+    };
+    Ok(TestResult {
+        ok: snap.status == "ok",
+        metrics: snap.metrics.len(),
+        message: snap.error.unwrap_or_default(),
+    })
+}
+
+/// Appends one extra API-key account (Customize ⚙ → "Add account") to
+/// %APPDATA%\Pane\accounts\<provider>.json. The key has already passed a
+/// test_api_key probe on the frontend; nothing here touches the network.
+#[tauri::command]
+fn account_add(
+    provider: String,
+    label: String,
+    api_key: String,
+    base_url: Option<String>,
+) -> Result<(), String> {
+    if !accounts::provider_takes_accounts(&provider) {
+        return Err(format!("unknown multi-account provider: {provider}"));
+    }
+    let key = api_key.trim();
+    if key.is_empty() {
+        return Err("API key is empty".into());
+    }
+    let base_url = base_url
+        .as_deref()
+        .map(str::trim)
+        .filter(|u| !u.is_empty())
+        .map(str::to_string);
+    if let Some(url) = &base_url {
+        if !(url.starts_with("https://") || url.starts_with("http://")) {
+            return Err("base URL must start with https:// or http://".into());
+        }
+    }
+    if provider == "relaybalance" && base_url.is_none() {
+        return Err("a base URL is required for Custom Balance".into());
+    }
+    let mut entries = accounts::load_accounts(&provider);
+    entries.push(accounts::AccountEntry {
+        label: label.trim().to_string(),
+        api_key: key.to_string(),
+        base_url,
+    });
+    accounts::save_accounts(&provider, &entries)
+}
+
+/// Removes the account at `index` — its position in the accounts file,
+/// 0-based, the same order account_list reports. The account's
+/// <provider>@<n> card disappears on the next fetch.
+#[tauri::command]
+fn account_remove(provider: String, index: usize) -> Result<(), String> {
+    if !accounts::provider_takes_accounts(&provider) {
+        return Err(format!("unknown multi-account provider: {provider}"));
+    }
+    let mut entries = accounts::load_accounts(&provider);
+    if index >= entries.len() {
+        return Err(format!("no account #{index} for {provider}"));
+    }
+    entries.remove(index);
+    accounts::save_accounts(&provider, &entries)
+}
+
+/// The saved extra accounts of a provider, for the gear panel's account
+/// list. The key never leaves whole — only mask_key's "sk-…abcd" tail.
+#[tauri::command]
+fn account_list(provider: String) -> Result<Vec<Value>, String> {
+    if !accounts::provider_takes_accounts(&provider) {
+        return Err(format!("unknown multi-account provider: {provider}"));
+    }
+    Ok(accounts::load_accounts(&provider)
+        .into_iter()
+        .map(|a| {
+            json!({
+                "label": a.label,
+                "hasKey": !a.api_key.trim().is_empty(),
+                "maskedKey": accounts::mask_key(&a.api_key),
+                "baseUrl": a.base_url,
+            })
+        })
+        .collect())
+}
+
+/// Known env-var fallbacks per provider, for get_credential_status. The
+/// saved-file probe is providers::stored_key_file; local-CLI detection is
+/// each provider's own local_credential_hint (dispatched just below).
+fn provider_env_vars(provider: &str) -> &'static [&'static str] {
+    match provider {
+        "openrouter" => &["OPENROUTER_API_KEY"],
+        "zai" => &["ZAI_API_KEY", "GLM_API_KEY"],
+        "minimax" => &["MINIMAX_API_KEY"],
+        "deepseek" => &["DEEPSEEK_API_KEY"],
+        "moonshot" => &["MOONSHOT_API_KEY", "KIMI_API_KEY"],
+        "elevenlabs" => &["ELEVENLABS_API_KEY", "XI_API_KEY"],
+        "codebuff" => &["CODEBUFF_API_KEY"],
+        "kilo" => &["KILO_API_KEY"],
+        "aihubmix" => &["AIHUBMIX_API_KEY"],
+        "qwen" => &["BAILIAN_TOKEN_PLAN_API_KEY", "DASHSCOPE_API_KEY"],
+        "kimi" => &["KIMI_CODING_API_KEY"],
+        "opencode" => &["OPENCODE_GO_API_KEY"],
+        "stepfun" => &["STEPFUN_API_KEY"],
+        "siliconflow" => &["SILICONFLOW_API_KEY"],
+        "novita" => &["NOVITA_API_KEY"],
+        _ => &[],
+    }
+}
+
+/// Credential probe for the Customize "?" and gear panels: is a key saved
+/// in %APPDATA%\Pane\<provider>.json, is one of the provider's env vars
+/// set, and which local CLI/desktop sign-in exists (a human-readable
+/// description from the provider's local_credential_hint, null when none).
+/// Account cards ("claude@ab12cd34") report their family's status — the
+/// family owns every credential source.
+#[tauri::command]
+fn get_credential_status(provider: String) -> Value {
+    let family = provider.split('@').next().unwrap_or(&provider);
+    let stored_key = providers::stored_key_file(family).is_some();
+    let env_key = provider_env_vars(family)
+        .iter()
+        .any(|var| std::env::var(var).is_ok_and(|v| !v.trim().is_empty()));
+    let local_cli = match family {
+        "claude" => providers::claude::local_credential_hint(),
+        "codex" => providers::codex::local_credential_hint(),
+        "cursor" => providers::cursor::local_credential_hint(),
+        "opencode" => providers::opencode::local_credential_hint(),
+        "copilot" => providers::copilot::local_credential_hint(),
+        "grok" => providers::grok::local_credential_hint(),
+        "devin" => providers::devin::local_credential_hint(),
+        "minimax" => providers::minimax::local_credential_hint(),
+        "openrouter" => providers::openrouter::local_credential_hint(),
+        "zai" => providers::zai::local_credential_hint(),
+        "antigravity" => providers::antigravity::local_credential_hint(),
+        "deepseek" => providers::deepseek::local_credential_hint(),
+        "moonshot" => providers::moonshot::local_credential_hint(),
+        "elevenlabs" => providers::elevenlabs::local_credential_hint(),
+        "ollama" => providers::ollama::local_credential_hint(),
+        "codebuff" => providers::codebuff::local_credential_hint(),
+        "kilo" => providers::kilo::local_credential_hint(),
+        "aihubmix" => providers::aihubmix::local_credential_hint(),
+        "qwen" => providers::qwen::local_credential_hint(),
+        "hermes" => providers::hermes::local_credential_hint(),
+        "kimi" => providers::kimi::local_credential_hint(),
+        "stepfun" => providers::stepfun::local_credential_hint(),
+        "siliconflow" => providers::siliconflow::local_credential_hint(),
+        "novita" => providers::novita::local_credential_hint(),
+        "relaybalance" => providers::relaybalance::local_credential_hint(),
+        _ => None,
+    };
+    // Pane's own OAuth login (the gear panel's "Sign in with browser") is
+    // a credential source separate from the CLI's sign-in; report its
+    // account label so the status chips can show it.
+    let oauth_label = match family {
+        "codex" | "grok" => oauth::label(family),
+        _ => None,
+    };
+    json!({ "storedKey": stored_key, "envKey": env_key, "localCli": local_cli, "oauth": oauth_label })
+}
+
+/// Starts Pane's own OAuth device-code login (Codex / Grok). Returns the
+/// user code + verification URL for the panel to show and open; the
+/// frontend then polls oauth_poll.
+#[tauri::command]
+async fn oauth_start(provider: String) -> Result<oauth::StartResponse, String> {
+    oauth::start(&provider).await
+}
+
+/// One poll tick of a pending device-code login. Not an Err while the
+/// user is still authorizing — the `done`/`error` fields carry the state.
+#[tauri::command]
+async fn oauth_poll(provider: String, device_auth_id: String) -> oauth::PollResponse {
+    oauth::poll(&provider, &device_auth_id).await
+}
+
+/// Deletes Pane's own OAuth credential file for the provider. The CLI's
+/// sign-in is untouched.
+#[tauri::command]
+fn oauth_logout(provider: String) -> Result<(), String> {
+    oauth::logout(&provider)
 }
 
 #[tauri::command]
@@ -2536,6 +2718,8 @@ pub fn run() {
             cached_usage,
             fetch_spend,
             set_api_key,
+            fetch_spend,
+            set_api_key,
             onenewapi_list_sites,
             onenewapi_probe_site,
             onenewapi_create_site,
@@ -2544,6 +2728,15 @@ pub fn run() {
             onenewapi_create_key,
             onenewapi_update_key,
             onenewapi_delete_key,
+            get_base_url,
+            test_api_key,
+            account_add,
+            account_remove,
+            account_list,
+            get_credential_status,
+            oauth_start,
+            oauth_poll,
+            oauth_logout,
             get_config,
             set_config,
             system_ui_locale,

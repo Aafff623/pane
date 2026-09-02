@@ -124,6 +124,18 @@ pub fn default_identity() -> Option<String> {
     dir_identity(&default_home()).map(|(a, _)| a)
 }
 
+/// Pure local probe for the Customize gear panel (existence only, no
+/// network): which Codex CLI sign-in this machine already has.
+pub fn local_credential_hint() -> Option<String> {
+    if default_home().join("auth.json").exists() {
+        return Some("Codex CLI sign-in".into());
+    }
+    if !discover_extra_accounts().is_empty() {
+        return Some("Codex CLI sign-in (extra CODEX_HOME)".into());
+    }
+    None
+}
+
 /// Access tokens are JWTs: three base64 chunks separated by dots. The middle
 /// chunk is a JSON object with the expiry time and plan info.
 fn jwt_claims(token: &str) -> Option<Value> {
@@ -151,6 +163,29 @@ struct Access {
     token: String,
     account_id: String,
     plan: Option<String>,
+}
+
+/// Credential resolution for the default Codex card: the CLI's own
+/// sign-in first, then Pane's own OAuth login from the gear panel
+/// (%APPDATA%\Pane\oauth\codex.json — refreshed and written back there,
+/// the CLI's files untouched). Extra accounts are always CLI homes.
+async fn default_card_access(dir: &std::path::Path) -> Result<Option<Access>, String> {
+    if dir.join("auth.json").exists() {
+        return load_access(dir).await.map(Some);
+    }
+    match crate::oauth::valid_tokens(ID).await {
+        Ok(Some(t)) => Ok(Some(Access {
+            token: t.access_token,
+            account_id: t.account_id.unwrap_or_default(),
+            plan: t.id_token.as_deref().and_then(jwt_claims).and_then(|c| {
+                c.pointer("/https:~1~1api.openai.com~1auth/chatgpt_plan_type")
+                    .and_then(Value::as_str)
+                    .map(str::to_string)
+            }),
+        })),
+        Ok(None) => Ok(None),
+        Err(e) => Err(e),
+    }
 }
 
 /// Loads (and if needed refreshes + writes back) the Codex OAuth access
@@ -253,14 +288,30 @@ async fn load_access(dir: &std::path::Path) -> Result<Access, String> {
 }
 
 async fn fetch(dir: &std::path::Path, id: &str, name: &str) -> Result<Snapshot, String> {
-    if !dir.join("auth.json").exists() {
-        return Ok(Snapshot::no_credentials(
-            id,
-            name,
-            "Codex sign-in not found. Run `codex login` in a terminal.",
-        ));
-    }
-    let auth = load_access(dir).await?;
+    // The Pane OAuth fallback is the DEFAULT card's only — an extra
+    // account whose auth.json vanished must not silently show the OAuth
+    // account's numbers.
+    let auth = if id == ID {
+        match default_card_access(dir).await? {
+            Some(a) => a,
+            None => {
+                return Ok(Snapshot::no_credentials(
+                    id,
+                    name,
+                    "Codex sign-in not found. Run `codex login` in a terminal, or sign in from the gear panel.",
+                ));
+            }
+        }
+    } else {
+        if !dir.join("auth.json").exists() {
+            return Ok(Snapshot::no_credentials(
+                id,
+                name,
+                "Codex sign-in not found. Run `codex login` in a terminal, or sign in from the gear panel.",
+            ));
+        }
+        load_access(dir).await?
+    };
     let (access, account_id) = (auth.token, auth.account_id);
     let mut plan = auth.plan;
 
@@ -533,7 +584,13 @@ pub async fn redeem_credit(provider_id: &str, credit_id: &str) -> Result<String,
             .map(|a| a.dir)
             .ok_or_else(|| format!("unknown Codex account: {provider_id}"))?
     };
-    let auth = load_access(&dir).await?;
+    let auth = if provider_id == ID {
+        default_card_access(&dir)
+            .await?
+            .ok_or("Codex sign-in not found")?
+    } else {
+        load_access(&dir).await?
+    };
     let redeem_request_id = format!(
         "openusage-{}-{}",
         Utc::now().timestamp_millis(),

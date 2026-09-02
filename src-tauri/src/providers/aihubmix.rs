@@ -26,8 +26,23 @@ fn find_api_key() -> Option<String> {
         .or_else(|| super::opencode::auth_entry_key("aihubmix"))
 }
 
+/// Pure local probe for the Customize gear panel (no network): the
+/// AihubMix key stored in OpenCode's auth.json.
+pub fn local_credential_hint() -> Option<String> {
+    super::opencode::auth_entry_key("aihubmix")
+        .map(|_| "AihubMix key in OpenCode's auth.json".to_string())
+}
+
 pub async fn snapshot() -> Snapshot {
     match fetch().await {
+        Ok(s) => s,
+        Err(e) => Snapshot::error(ID, NAME, e),
+    }
+}
+
+/// Live test of a user-pasted key, without saving it (Customize "Test").
+pub async fn snapshot_with_key(key: &str) -> Snapshot {
+    match fetch_with_key(key).await {
         Ok(s) => s,
         Err(e) => Snapshot::error(ID, NAME, e),
     }
@@ -41,9 +56,12 @@ async fn fetch() -> Result<Snapshot, String> {
             "Paste an AihubMix API key in Settings (or sign in to AihubMix via OpenCode).",
         ));
     };
+    fetch_with_key(&key).await
+}
 
-    let sub_req = http().get(SUBSCRIPTION).bearer_auth(&key).send();
-    let usage_req = http().get(USAGE).bearer_auth(&key).send();
+async fn fetch_with_key(key: &str) -> Result<Snapshot, String> {
+    let sub_req = http().get(SUBSCRIPTION).bearer_auth(key).send();
+    let usage_req = http().get(USAGE).bearer_auth(key).send();
     let (sub_resp, usage_resp) = tokio::join!(sub_req, usage_req);
 
     let sub_resp = sub_resp.map_err(|e| format!("subscription request: {e}"))?;

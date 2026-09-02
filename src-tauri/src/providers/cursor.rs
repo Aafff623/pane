@@ -15,6 +15,12 @@ fn state_db_path() -> Option<PathBuf> {
     p.exists().then_some(p)
 }
 
+/// Pure local probe for the Customize gear panel (no network): the Cursor
+/// editor's state database exists on this machine.
+pub fn local_credential_hint() -> Option<String> {
+    state_db_path().map(|_| "Cursor editor local sign-in".to_string())
+}
+
 fn read_pair(conn: &rusqlite::Connection) -> Result<(Option<String>, Option<String>), rusqlite::Error> {
     let get = |key: &str| -> Result<Option<String>, rusqlite::Error> {
         match conn.query_row("SELECT value FROM ItemTable WHERE key = ?1", [key], |r| {

@@ -33,10 +33,27 @@ fn find_api_key() -> Option<String> {
     stored_api_key(ID, &["BAILIAN_TOKEN_PLAN_API_KEY", "DASHSCOPE_API_KEY"])
 }
 
+/// No local credential source — the CLI's ledger carries usage, not a key;
+/// Settings key and env vars are reported separately by
+/// get_credential_status.
+pub fn local_credential_hint() -> Option<String> {
+    None
+}
+
 pub async fn snapshot() -> Snapshot {
     match fetch().await {
         Ok(s) => s,
         Err(e) => Snapshot::error(ID, NAME, e),
+    }
+}
+
+/// Live test of a user-pasted key, without saving it (Customize "Test").
+/// Tests the key against the console RPC only — the local-ledger fallback
+/// says nothing about the key, so it never runs here.
+pub async fn snapshot_with_key(key: &str) -> Snapshot {
+    match fetch_quota(key).await {
+        Some(snap) => snap,
+        None => Snapshot::error(ID, NAME, "quota endpoint unreachable".into()),
     }
 }
 

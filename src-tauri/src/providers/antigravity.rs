@@ -24,6 +24,14 @@ const GOOGLE_CLIENT_ID: &str =
     "1071006060591-tmhssin2h21lcre235vtolojh4g403ep.apps.googleusercontent.com";
 const GOOGLE_CLIENT_SECRET: &str = "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";
 
+/// Pure local probe for the Customize gear panel (no process scan, no
+/// network): the OAuth token Antigravity keeps in Windows Credential
+/// Manager is present.
+pub fn local_credential_hint() -> Option<String> {
+    super::credential_string("gemini:antigravity")
+        .map(|_| "Antigravity sign-in (Windows Credential Manager)".to_string())
+}
+
 pub async fn snapshot() -> Snapshot {
     // Process discovery + netstat are blocking child-process calls.
     let servers = tauri::async_runtime::spawn_blocking(discover_language_servers)

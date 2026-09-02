@@ -12,6 +12,12 @@ const ENDPOINTS: [&str; 2] = [
     "https://api.moonshot.cn/v1/users/me/balance",
 ];
 
+/// No local credential source — a Settings key or MOONSHOT_API_KEY /
+/// KIMI_API_KEY only (both reported separately by get_credential_status).
+pub fn local_credential_hint() -> Option<String> {
+    None
+}
+
 pub async fn snapshot() -> Snapshot {
     match fetch().await {
         Ok(s) => s,
@@ -46,6 +52,16 @@ pub async fn api_rows() -> Result<Vec<Metric>, String> {
     fetch_balance(true).await
 }
 
+/// Live test of a user-pasted key, without saving it (Customize "Test").
+/// Always renders as the standalone wallet card — the test panel only
+/// counts metrics.
+pub async fn snapshot_with_key(key: &str) -> Snapshot {
+    match fetch_balance_with_key(key, false).await {
+        Ok(rows) => Snapshot::ok(ID, NAME, Some("Pay as you go".into()), rows),
+        Err(e) => Snapshot::error(ID, NAME, e),
+    }
+}
+
 async fn fetch() -> Result<Snapshot, String> {
     if stored_api_key("moonshot", &["MOONSHOT_API_KEY", "KIMI_API_KEY"]).is_none() {
         return Ok(Snapshot::no_credentials(
@@ -62,7 +78,10 @@ async fn fetch_balance(api_label: bool) -> Result<Vec<Metric>, String> {
     let Some(key) = stored_api_key("moonshot", &["MOONSHOT_API_KEY", "KIMI_API_KEY"]) else {
         return Err("no key".into());
     };
+    fetch_balance_with_key(&key, api_label).await
+}
 
+async fn fetch_balance_with_key(key: &str, api_label: bool) -> Result<Vec<Metric>, String> {
     let mut last_err = String::from("no endpoint reachable");
     for url in ENDPOINTS {
         let resp = match http()

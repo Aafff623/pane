@@ -52,6 +52,32 @@ fn find_token() -> Option<String> {
     None
 }
 
+/// Pure local probe for the Customize gear panel (existence only, no
+/// parsing, no network): the same sources find_token reads.
+pub fn local_credential_hint() -> Option<String> {
+    let mut candidates: Vec<PathBuf> = Vec::new();
+    if let Ok(local) = std::env::var("LOCALAPPDATA") {
+        candidates.push(PathBuf::from(&local).join("github-copilot").join("apps.json"));
+        candidates.push(PathBuf::from(&local).join("github-copilot").join("hosts.json"));
+    }
+    if let Some(home) = dirs::home_dir() {
+        candidates.push(home.join(".config").join("github-copilot").join("apps.json"));
+        candidates.push(home.join(".config").join("github-copilot").join("hosts.json"));
+    }
+    if candidates.iter().any(|p| p.exists()) {
+        return Some("GitHub Copilot sign-in (editor config)".into());
+    }
+    if let Ok(appdata) = std::env::var("APPDATA") {
+        if PathBuf::from(appdata).join("GitHub CLI").join("hosts.yml").exists() {
+            return Some("GitHub CLI sign-in (gh)".into());
+        }
+    }
+    if super::credential_string("gh:github.com").is_some() {
+        return Some("GitHub CLI sign-in (Credential Manager)".into());
+    }
+    None
+}
+
 /// The github.com entry's oauth_token from a Copilot apps.json/hosts.json.
 /// apps.json keys carry a client-id suffix ("github.com:Iv1.…"); hosts.json
 /// keys are bare hostnames. Entries under any other host are ignored.

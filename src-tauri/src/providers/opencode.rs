@@ -1,3 +1,8 @@
+//! OpenCode (Go plan) — account-wide usage from the official API plus
+//! local spend from opencode.db. Key sources: the OpenCode editor's
+//! auth.json (`opencode-go` entry), a Go key pasted in Settings, or
+//! OPENCODE_GO_API_KEY.
+
 use super::{Metric, Snapshot};
 use serde_json::Value;
 use std::path::{Path, PathBuf};
@@ -42,6 +47,12 @@ pub fn auth_entry_key(entry: &str) -> Option<String> {
         .get("key")
         .and_then(Value::as_str)
         .map(str::to_string)
+}
+
+/// Pure local probe for the Customize gear panel (no network): the Go key
+/// stored in OpenCode's own auth.json.
+pub fn local_credential_hint() -> Option<String> {
+    auth_entry_key("opencode-go").map(|_| "Go key in OpenCode's auth.json".to_string())
 }
 
 /// Pane's own scratch directory for database copies. It lives under the
@@ -137,20 +148,27 @@ pub async fn snapshot() -> Snapshot {
     }
 }
 
-async fn fetch() -> Result<Snapshot, String> {
-    let auth_path = data_dir().join("auth.json");
-    if !auth_path.exists() {
-        return Ok(Snapshot::no_credentials(
-            ID,
-            NAME,
-            "OpenCode sign-in not found. Run `opencode` and log in.",
-        ));
+/// Live test of a pasted Go key, without saving it (Customize "Test").
+/// Tests the official usage API only — the local opencode.db fallback
+/// says nothing about the key, so it never runs here.
+pub async fn snapshot_with_key(key: &str) -> Snapshot {
+    match fetch_official(key).await {
+        Ok(metrics) => Snapshot::ok(ID, NAME, Some("Go".into()), metrics),
+        Err(e) => Snapshot::error(ID, NAME, e),
     }
-    let Some(key) = auth_entry_key("opencode-go") else {
+}
+
+async fn fetch() -> Result<Snapshot, String> {
+    // auth.json first (existing installs keep working untouched), then a
+    // key pasted in Settings / OPENCODE_GO_API_KEY for people who never
+    // installed the OpenCode editor.
+    let Some(key) = auth_entry_key("opencode-go")
+        .or_else(|| super::stored_api_key(ID, &["OPENCODE_GO_API_KEY"]))
+    else {
         return Ok(Snapshot::no_credentials(
             ID,
             NAME,
-            "No OpenCode Go subscription found in auth.json.",
+            "No OpenCode Go key found. Run `opencode` and log in, or paste a Go key in Settings (gear icon).",
         ));
     };
 

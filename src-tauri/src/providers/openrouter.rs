@@ -11,23 +11,38 @@ pub async fn snapshot() -> Snapshot {
     }
 }
 
+/// Live test of a user-pasted key, without saving it (Customize "Test").
+pub async fn snapshot_with_key(key: &str) -> Snapshot {
+    match fetch_with_key(key, "the pasted key").await {
+        Ok(s) => s,
+        Err(e) => Snapshot::error(ID, NAME, e),
+    }
+}
+
+/// Pure local probe for the Customize gear panel (no network): the
+/// OpenRouter key stored in OpenCode's auth.json.
+pub fn local_credential_hint() -> Option<String> {
+    super::opencode::auth_entry_key("openrouter")
+        .map(|_| "OpenRouter key in OpenCode's auth.json".to_string())
+}
+
 async fn fetch() -> Result<Snapshot, String> {
     // Saved key or env var first, then the key OpenCode stores if the user
     // connected OpenRouter there.
-    let (key, source) = match stored_api_key("openrouter", &["OPENROUTER_API_KEY"]) {
-        Some(key) => (key, "your saved key"),
+    match stored_api_key("openrouter", &["OPENROUTER_API_KEY"]) {
+        Some(key) => fetch_with_key(&key, "your saved key").await,
         None => match super::opencode::auth_entry_key("openrouter") {
-            Some(key) => (key, "the key found in OpenCode's auth.json"),
-            None => {
-                return Ok(Snapshot::no_credentials(
-                    ID,
-                    NAME,
-                    "Paste an OpenRouter API key in Settings (gear icon).",
-                ));
-            }
+            Some(key) => fetch_with_key(&key, "the key found in OpenCode's auth.json").await,
+            None => Ok(Snapshot::no_credentials(
+                ID,
+                NAME,
+                "Paste an OpenRouter API key in Settings (gear icon).",
+            )),
         },
-    };
+    }
+}
 
+async fn fetch_with_key(key: &str, source: &str) -> Result<Snapshot, String> {
     let credits_req = http()
         .get("https://openrouter.ai/api/v1/credits")
         .bearer_auth(&key)

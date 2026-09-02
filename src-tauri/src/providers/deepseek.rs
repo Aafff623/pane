@@ -4,8 +4,22 @@ use serde_json::Value;
 const ID: &str = "deepseek";
 const NAME: &str = "DeepSeek";
 
+/// No local credential source — a Settings key or DEEPSEEK_API_KEY only
+/// (both reported separately by get_credential_status).
+pub fn local_credential_hint() -> Option<String> {
+    None
+}
+
 pub async fn snapshot() -> Snapshot {
     match fetch().await {
+        Ok(s) => s,
+        Err(e) => Snapshot::error(ID, NAME, e),
+    }
+}
+
+/// Live test of a user-pasted key, without saving it (Customize "Test").
+pub async fn snapshot_with_key(key: &str) -> Snapshot {
+    match fetch_with_key(key).await {
         Ok(s) => s,
         Err(e) => Snapshot::error(ID, NAME, e),
     }
@@ -19,7 +33,10 @@ async fn fetch() -> Result<Snapshot, String> {
             "Paste a DeepSeek API key in Settings (gear icon).",
         ));
     };
+    fetch_with_key(&key).await
+}
 
+async fn fetch_with_key(key: &str) -> Result<Snapshot, String> {
     let resp = http()
         .get("https://api.deepseek.com/user/balance")
         .bearer_auth(&key)

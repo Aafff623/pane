@@ -184,6 +184,12 @@ body {
   gap: 2px;
 }
 
+/* Theme + Refresh sit above the trail, right under the logo ring;
+   Customize + Settings stay at the bottom. */
+.sidebar-buttons.top {
+  margin-top: 10px;
+}
+
 .app-logo,
 .provider-icon {
   display: inline-flex;
@@ -696,12 +702,46 @@ select:focus-visible {
   transition: transform 0.09s linear, background 0.12s ease;
 }
 
-:root[data-theme="light"] .trail-tick {
+:root[data-theme="light"] .trail-tick:not(.trail-icon) {
   background: #d4d4d8;
 }
 
 .trail-tick.active {
   background: var(--foreground);
+}
+
+/* Provider-mark trail ticks: the vendor's own artwork at a fixed size,
+   dimmed until active. currentColor marks follow the theme; brand-colored
+   marks keep their palette (cc-switch style). */
+.trail-tick.trail-icon {
+  width: auto;
+  height: auto;
+  background: none;
+  border-radius: 4px;
+  padding: 1px;
+  color: var(--foreground);
+  opacity: 0.45;
+  transform-origin: center;
+}
+
+.trail-icon svg {
+  width: 16px;
+  height: 16px;
+  display: block;
+}
+
+.trail-icon.active {
+  opacity: 1;
+}
+
+/* Glyphs authored for tinting (copilot's white mark) follow the theme. */
+.trail-icon.trail-recolor svg path {
+  fill: currentColor;
+}
+
+/* Solid-black marks vanish on the dark sidebar — flip them there. */
+:root:not([data-theme="light"]) .trail-icon.trail-invert-dark svg {
+  filter: invert(1);
 }
 
 #providers {
@@ -1140,6 +1180,15 @@ select:focus-visible {
   background: #3f3f46;
 }
 
+.mini-btn:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.mini-btn:disabled:hover {
+  background: var(--muted);
+}
+
 .mini-btn.danger:hover {
   background: #7f1d1d;
 }
@@ -1246,6 +1295,361 @@ select:focus-visible {
 
 .customize-block .provider-head {
   margin-bottom: 8px;
+}
+
+/* A-Z letter jumps land below the pinned bar + search box. */
+.customize-block {
+  scroll-margin-top: 96px;
+}
+
+/* The ⚙ button marks the row whose config panel is open. */
+.cust-config-btn {
+  padding: 5px 7px;
+}
+
+.cust-config-btn.on,
+.cust-info-btn.on {
+  background: var(--accent);
+  box-shadow: inset 0 0 0 1px var(--border);
+}
+
+/* Inline per-provider config: key field (+ base URL for Custom Balance)
+   and Save, or a one-line hint for CLI/desktop-login services. */
+.cust-config {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: -2px 0 8px;
+  padding: 7px 8px;
+  border: 1px dashed var(--border);
+  border-radius: 8px;
+}
+
+.cust-config input {
+  flex: 1;
+  min-width: 110px;
+  background: transparent;
+  border: 1px solid var(--input);
+  border-radius: 7px;
+  color: var(--foreground);
+  font-size: 12px;
+  font-family: inherit;
+  padding: 5px 9px;
+  transition: border-color 0.15s, box-shadow 0.15s;
+  outline: none;
+}
+
+.cust-config input:focus-visible {
+  border-color: #52525b;
+  box-shadow: 0 0 0 3px rgb(212 212 216 / 0.12);
+}
+
+.cust-config .settings-note {
+  flex: 1;
+  margin: 0;
+}
+
+/* Gear panel status section: the auto-read fact, live credential chips,
+   and the saved-credential list (Phase 2.3, display only). */
+.cust-status {
+  flex-basis: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding-bottom: 2px;
+}
+
+.cust-status p {
+  margin: 0;
+  font-size: 12px;
+}
+
+.cust-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  align-items: center;
+}
+
+.cred-chip {
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  color: var(--muted-foreground);
+}
+
+.cred-chip.ok {
+  color: #22c55e;
+  border-color: rgb(34 197 94 / 0.4);
+  background: rgb(34 197 94 / 0.08);
+}
+
+:root[data-theme="light"] .cred-chip.ok {
+  color: #16a34a;
+}
+
+.cred-chip.none {
+  border-style: dashed;
+}
+
+.cust-accounts {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: 12px;
+}
+
+.cust-accounts:empty {
+  display: none;
+}
+
+.cust-accounts li {
+  display: flex;
+  gap: 6px;
+  align-items: baseline;
+}
+
+.cust-accounts .dim {
+  color: var(--muted-foreground);
+}
+
+/* The gear panel's action section: key/base-URL inputs + test/save get
+   their own row below the status section. */
+.cust-actions {
+  flex-basis: 100%;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+/* "Test connection" outcome line inside the ⚙ panel. */
+.cust-test-result {
+  flex-basis: 100%;
+  font-size: 11.5px;
+  color: var(--muted-foreground);
+}
+
+.cust-test-result.ok {
+  color: #22c55e;
+}
+
+.cust-test-result.err {
+  color: #f87171;
+  overflow-wrap: anywhere;
+}
+
+:root[data-theme="light"] .cust-test-result.ok {
+  color: #16a34a;
+}
+
+:root[data-theme="light"] .cust-test-result.err {
+  color: #dc2626;
+}
+
+/* The gear panel's OAuth section (codex/grok): the device user-code gets
+   a prominent monospace line so it can be checked against the browser
+   page at a glance. */
+.cust-oauth {
+  flex-basis: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+}
+
+.cust-oauth p {
+  margin: 0;
+}
+
+.oauth-code {
+  font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
+  font-size: 16px;
+  font-weight: 600;
+  letter-spacing: 2px;
+}
+
+/* The gear panel's extra-account section (Phase 3.2): saved accounts
+   ("label · sk-…abcd · ✕") above the collapsible Add-account form. */
+.cust-accounts-mgmt {
+  flex-basis: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+}
+
+.acct-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  width: 100%;
+}
+
+.acct-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+}
+
+.acct-item .acct-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.acct-del {
+  padding: 2px 6px;
+  opacity: 0.7;
+}
+
+.acct-del:hover {
+  opacity: 1;
+  color: #f87171;
+}
+
+.acct-form {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  width: 100%;
+  padding: 6px;
+  border: 1px dashed var(--border);
+  border-radius: 8px;
+}
+
+.acct-form input {
+  flex: 1;
+  min-width: 110px;
+  background: transparent;
+  border: 1px solid var(--input);
+  border-radius: 7px;
+  color: var(--foreground);
+  font-size: 12px;
+  font-family: inherit;
+  padding: 5px 9px;
+  transition: border-color 0.15s, box-shadow 0.15s;
+  outline: none;
+}
+
+.acct-form input:focus-visible {
+  border-color: #52525b;
+  box-shadow: 0 0 0 3px rgb(212 212 216 / 0.12);
+}
+
+.acct-form .cust-test-result {
+  flex-basis: 100%;
+}
+
+/* "?" credential-info panel: the same dashed box, as label/text rows. */
+.cust-info {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 4px;
+}
+
+.cust-info p {
+  margin: 0;
+  font-size: 12px;
+}
+
+.cust-info-label {
+  display: inline-block;
+  min-width: 96px;
+  color: var(--muted-foreground);
+}
+
+.cust-info .dim {
+  color: var(--muted-foreground);
+}
+
+/* Search box pinned just under the Customize glass bar. */
+.cust-search-wrap {
+  position: sticky;
+  top: 40px;
+  z-index: 40;
+  padding: 4px 0 8px;
+  background: rgba(9, 9, 11, 0.4);
+  backdrop-filter: var(--bar-filter);
+  -webkit-backdrop-filter: var(--bar-filter);
+}
+
+:root[data-theme="light"] .cust-search-wrap {
+  background: rgba(255, 255, 255, 0.55);
+}
+
+#cust-search {
+  width: 100%;
+  background: transparent;
+  border: 1px solid var(--input);
+  border-radius: 7px;
+  color: var(--foreground);
+  font-size: 12px;
+  font-family: inherit;
+  padding: 5px 9px;
+  transition: border-color 0.15s, box-shadow 0.15s;
+  outline: none;
+}
+
+#cust-search:focus-visible {
+  border-color: #52525b;
+  box-shadow: 0 0 0 3px rgb(212 212 216 / 0.12);
+}
+
+/* Address-book A-Z strip on the drawer's left edge. Only letters that
+   have a provider are rendered, so every shown letter is live. */
+.cust-az {
+  position: fixed;
+  left: 4px;
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 55;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1px;
+  padding: 5px 3px;
+  border-radius: 8px;
+  background: rgba(24, 24, 27, 0.55);
+  backdrop-filter: var(--bar-filter);
+  -webkit-backdrop-filter: var(--bar-filter);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+:root[data-theme="light"] .cust-az {
+  background: rgba(255, 255, 255, 0.6);
+  border-color: rgba(0, 0, 0, 0.08);
+}
+
+.cust-az.hidden {
+  display: none;
+}
+
+.cust-az button {
+  background: none;
+  border: none;
+  padding: 0;
+  width: 14px;
+  height: 13px;
+  font-size: 9px;
+  line-height: 13px;
+  font-weight: 600;
+  color: var(--foreground);
+  cursor: pointer;
+  border-radius: 4px;
+}
+
+.cust-az button:hover {
+  background: var(--accent);
 }
 
 .trend-chart {
@@ -1544,7 +1948,8 @@ body.reduce-anim *::after {
   transform: translateX(-103%);
   transition: transform 0.28s cubic-bezier(0.16, 1, 0.3, 1);
   overflow-y: auto;
-  padding: 12px 14px;
+  /* Left padding clears the A-Z index strip hugging the edge. */
+  padding: 12px 14px 12px 26px;
   scrollbar-width: none;
 }
 
@@ -1937,6 +2342,8 @@ body.party .trail-tick.active {
 body.no-glass .sidebar,
 body.no-glass .main-col footer,
 body.no-glass .glass-bar,
+body.no-glass .cust-search-wrap,
+body.no-glass .cust-az,
 body.no-glass .cust-dock {
   backdrop-filter: none !important;
   -webkit-backdrop-filter: none !important;
@@ -1944,6 +2351,8 @@ body.no-glass .cust-dock {
 body.no-glass .sidebar,
 body.no-glass .main-col footer,
 body.no-glass .glass-bar,
+body.no-glass .cust-search-wrap,
+body.no-glass .cust-az,
 body.no-glass .cust-dock {
   background: var(--background) !important;
 }

@@ -22,6 +22,15 @@ fn credentials_paths() -> Vec<PathBuf> {
     paths
 }
 
+/// Pure local probe for the Customize gear panel (no network): a Devin CLI
+/// credentials.toml exists at any of the known locations.
+pub fn local_credential_hint() -> Option<String> {
+    credentials_paths()
+        .iter()
+        .any(|p| p.exists())
+        .then(|| "Devin CLI sign-in (credentials.toml)".to_string())
+}
+
 /// Devin sends some numbers as JSON strings ("5000000") — accept both.
 fn as_num(v: Option<&Value>) -> Option<f64> {
     let v = v?;
