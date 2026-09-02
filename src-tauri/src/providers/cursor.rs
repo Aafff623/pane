@@ -629,16 +629,12 @@ async fn summary_fetch(token: &str) -> Result<Snapshot, String> {
 fn summary_snapshot(doc: &Value) -> Option<Snapshot> {
     let individual = doc.get("individualUsage").filter(|v| v.is_object());
     let team = doc.get("teamUsage").filter(|v| v.is_object());
+    // A disabled individual plan is "no personal meter", not "no card".
+    // Enterprise reports that placeholder next to a real team pool.
     let plan_usage = individual
         .and_then(|i| i.get("plan"))
-        .filter(|v| v.is_object());
-    if plan_usage
-        .and_then(|p| p.get("enabled"))
-        .and_then(Value::as_bool)
-        == Some(false)
-    {
-        return None;
-    }
+        .filter(|v| v.is_object())
+        .filter(|p| p.get("enabled").and_then(Value::as_bool) != Some(false));
 
     const MONTH_MS: i64 = 30 * 24 * 3_600_000;
     let cycle_start = iso_ms(doc.get("billingCycleStart"));
@@ -982,10 +978,33 @@ mod tests {
             summary_snapshot(&json!({ "individualUsage": { "plan": { "enabled": false } } }))
                 .is_none()
         );
-        // Only a spend figure, no percentages or limit ΓåÆ nothing to draw a bar from.
+        // Only a spend figure, no percentages or limit — nothing to draw a bar from.
         assert!(
             summary_snapshot(&json!({ "individualUsage": { "plan": { "used": 12 } } })).is_none()
         );
+    }
+
+    #[test]
+    fn summary_disabled_individual_plan_still_uses_team() {
+        let doc = json!({
+            "membershipType": "enterprise",
+            "limitType": "team",
+            "individualUsage": {
+                "plan": { "enabled": false, "autoPercentUsed": 10.0 }
+            },
+            "teamUsage": {
+                "pooled": { "enabled": true, "used": 50000, "limit": 200000, "remaining": 150000 }
+            }
+        });
+        let snap = summary_snapshot(&doc).expect("team card");
+        let total = snap
+            .metrics
+            .iter()
+            .find(|m| m.label == "Total usage")
+            .expect("pool bar");
+        assert_eq!(total.kind, "progress");
+        assert_eq!(total.detail.as_deref(), Some("$500 / $2000 this cycle"));
+        assert!(snap.metrics.iter().all(|m| m.label != "Cursor Models"));
     }
 
     #[test]
