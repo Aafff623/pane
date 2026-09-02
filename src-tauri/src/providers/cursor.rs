@@ -688,7 +688,10 @@ fn summary_snapshot(doc: &Value) -> Option<Snapshot> {
     // pool bar (individual, else pooled), bucket-era personal plans a text
     // row (Cursor's page shows no total bar), pre-bucket plans the classic
     // included-pool bar.
-    let pooled = team.and_then(|t| t.get("pooled")).filter(|v| v.is_object());
+    let pooled = team
+        .and_then(|t| t.get("pooled"))
+        .filter(|v| v.is_object())
+        .filter(|p| p.get("enabled").and_then(Value::as_bool) != Some(false));
     let pooled_limit = pooled
         .and_then(|p| num(p.get("limit")))
         .filter(|l| *l > 0.0);
@@ -1005,6 +1008,23 @@ mod tests {
         assert_eq!(total.kind, "progress");
         assert_eq!(total.detail.as_deref(), Some("$500 / $2000 this cycle"));
         assert!(snap.metrics.iter().all(|m| m.label != "Cursor Models"));
+    }
+
+    #[test]
+    fn summary_disabled_team_pool_is_not_a_card() {
+        let doc = json!({
+            "membershipType": "enterprise",
+            "limitType": "team",
+            "individualUsage": {
+                "plan": { "enabled": false }
+            },
+            "teamUsage": {
+                "pooled": {
+                    "enabled": false, "used": 50000, "limit": 200000, "remaining": 150000
+                }
+            }
+        });
+        assert!(summary_snapshot(&doc).is_none());
     }
 
     #[test]
