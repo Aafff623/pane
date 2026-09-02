@@ -31,6 +31,7 @@ import grokIcon from "./assets/providers/grok.svg?raw";
 import hermesIcon from "./assets/providers/hermes.svg?raw";
 import kimiIcon from "./assets/providers/kimi.svg?raw";
 import minimaxIcon from "./assets/providers/minimax.svg?raw";
+import onenewapiIcon from "./assets/providers/onenewapi.svg?raw";
 import opencodeIcon from "./assets/providers/opencode.svg?raw";
 import openrouterIcon from "./assets/providers/openrouter.svg?raw";
 // Inlined as data URIs (not URLs) so the share-card SVG snapshot can
@@ -55,6 +56,7 @@ const PROVIDER_ICONS: Record<string, string> = {
   hermes: hermesIcon,
   kimi: kimiIcon,
   minimax: minimaxIcon,
+  onenewapi: onenewapiIcon,
   opencode: opencodeIcon,
   openrouter: openrouterIcon,
   zai: zaiIcon,
@@ -83,6 +85,7 @@ interface Snapshot {
   metrics: Metric[];
   stale: boolean;
   warning: string | null;
+  dashboard_url?: string | null;
 }
 
 interface ModelSpend {
@@ -283,6 +286,7 @@ const ALL_PROVIDERS: [string, string][] = [
   ["codebuff", "Codebuff"],
   ["kilo", "Kilo"],
   ["aihubmix", "AihubMix"],
+  ["onenewapi", "One/New API"],
   ["qwen", "Qwen Code"],
   ["hermes", "Hermes"],
   ["kimi", "Kimi Code"],
@@ -591,7 +595,8 @@ function defaultProviderLayout(s: Snapshot | undefined, spend: ProviderSpend | u
   for (const m of s?.metrics ?? []) {
     if (order.includes(m.label)) continue; // one row per label
     order.push(m.label);
-    if (m.kind !== "progress") onDemand.push(m.label); // balances etc. tuck away
+    // Used stays on the card: unlimited One/New API keys have no bar.
+    if (m.kind !== "progress" && m.label !== "Used") onDemand.push(m.label);
   }
   // Balance-only providers (Moonshot, DeepSeek…) have no progress rows at
   // all — tucking everything would leave an empty card with a floating
@@ -608,6 +613,44 @@ function defaultProviderLayout(s: Snapshot | undefined, spend: ProviderSpend | u
     ? (s?.metrics ?? []).filter((m) => m.kind === "progress").slice(0, 2).map((m) => m.label)
     : [];
   return { metricOrder: order, onDemand, hidden: [], starred, expanded: false };
+}
+
+const ONA_QUOTA_LABELS = ["Usage", "Used", "Limit"] as const;
+
+function liveOnaQuotaLabel(s: Snapshot): string | undefined {
+  return s.metrics.find((m) => (ONA_QUOTA_LABELS as readonly string[]).includes(m.label))?.label;
+}
+
+/// One/New API emits one quota row: Usage (limited bar), Used (unlimited),
+/// or Limit. Switching unlimited↔limited must replace that slot so the
+/// card never shows both 用量 and 已用.
+function migrateOnaQuotaLayout(s: Snapshot, L: ProviderLayout): boolean {
+  if (providerFamily(s.id) !== "onenewapi") return false;
+  const live = liveOnaQuotaLabel(s);
+  if (!live) return false;
+  let swapped = false;
+  for (const old of ONA_QUOTA_LABELS) {
+    if (old === live) continue;
+    for (const list of [L.metricOrder, L.hidden, L.starred, L.onDemand]) {
+      const at = list.indexOf(old);
+      if (at < 0) continue;
+      if (list.includes(live)) list.splice(at, 1);
+      else list[at] = live;
+      swapped = true;
+    }
+  }
+  if (!swapped) return false;
+  // The replacement inherits the old row's slot; unlimited Used and the
+  // limited bar should land on the card, not behind Show more.
+  if (live === "Usage" || live === "Used") {
+    const at = L.onDemand.indexOf(live);
+    if (at >= 0) L.onDemand.splice(at, 1);
+  }
+  if (live !== "Usage") {
+    const starAt = L.starred.indexOf(live);
+    if (starAt >= 0) L.starred.splice(starAt, 1);
+  }
+  return true;
 }
 
 function rankSnapshot(s: Snapshot): number {
@@ -632,6 +675,16 @@ function ensureLayout(): void {
     layout = { providerOrder: orderedIds, providers: {} };
     changed = true;
   }
+
+  for (const [id] of ALL_PROVIDERS) {
+    if (!layout.providerOrder.includes(id)) {
+      layout.providerOrder.push(id);
+      changed = true;
+    }
+  }
+  // Configured One/New API keys keep an independent layout slot even
+  // when the family is off (no snapshot). Append only — never regroup.
+  if (foldOnaKeysIntoLayout(layout)) changed = true;
 
   // One-time label migration (Cursor bucket-era rename, 0.4.35): "Auto
   // usage" → "Cursor Models", "API usage" → "Other Models". Stars, pins,
@@ -782,6 +835,23 @@ function ensureLayout(): void {
       changed = true;
       continue;
     }
+    if (migrateOnaQuotaLayout(s, L)) changed = true;
+    const liveQuota = liveOnaQuotaLabel(s);
+    if (
+      providerFamily(s.id) === "onenewapi" &&
+      config.pinned?.provider === s.id &&
+      (ONA_QUOTA_LABELS as readonly string[]).includes(config.pinned.label)
+    ) {
+      if (liveQuota === "Usage") {
+        if (config.pinned.label !== "Usage") {
+          config.pinned = { provider: s.id, label: "Usage" };
+          void patchConfig({ pinned: config.pinned }).catch(() => {});
+        }
+      } else {
+        config.pinned = null;
+        void patchConfig({ pinned: null }).catch(() => {});
+      }
+    }
     // New metrics ship once; spend rows appear when spend data first exists.
     for (const m of s.metrics) {
       if (!L.metricOrder.includes(m.label)) {
@@ -793,7 +863,7 @@ function ensureLayout(): void {
         } else {
           L.metricOrder.push(m.label);
         }
-        if (m.kind !== "progress") L.onDemand.push(m.label);
+        if (m.kind !== "progress" && m.label !== "Used") L.onDemand.push(m.label);
         changed = true;
       }
       // Do not yank an existing progress row out of Show more or shuffle
@@ -1101,6 +1171,14 @@ function providerFamily(id: string): string {
   return id.split("@")[0];
 }
 
+/// One/New API is two-level: family id `onenewapi` hides every key card.
+/// Claude/Codex extra accounts stay independent of the bare family id.
+function isCardDisabled(id: string, disabled: string[] = config.disabled): boolean {
+  if (disabled.includes(id)) return true;
+  const fam = providerFamily(id);
+  return fam === "onenewapi" && disabled.includes("onenewapi");
+}
+
 function renderCard(s: Snapshot): string {
   const plan = s.plan ? `<span class="plan">${escapeHtml(s.plan)}</span>` : "";
   const icon = PROVIDER_ICONS[s.id] ?? PROVIDER_ICONS[providerFamily(s.id)] ?? "";
@@ -1130,7 +1208,14 @@ function renderCard(s: Snapshot): string {
   const stale = s.stale
     ? `<span class="stale" title="${escapeHtml(staleHelp(s))}">${escapeHtml(t("card.outdated"))}</span>`
     : "";
-  const links = (PROVIDER_LINKS[s.id] ?? PROVIDER_LINKS[providerFamily(s.id)] ?? [])
+  const family = providerFamily(s.id);
+  const dashUrl = (s.dashboard_url ?? "").trim();
+  const dashOk = /^https?:\/\//i.test(dashUrl);
+  const staticLinks = PROVIDER_LINKS[s.id] ?? PROVIDER_LINKS[family] ?? [];
+  const linkItems = dashOk
+    ? [{ label: "Dashboard", url: dashUrl }, ...staticLinks.filter((l) => l.label !== "Dashboard")]
+    : staticLinks;
+  const links = linkItems
     .filter((l) => l.label !== "API" || s.metrics.some((m) => m.label === "API"))
     .map((l) => `<button class="quick-link" data-link="${escapeHtml(l.url)}">${escapeHtml(displayLinkLabel(l.label))}</button>`)
     .join("<span class='quick-sep'>·</span>");
@@ -1161,7 +1246,7 @@ function renderCard(s: Snapshot): string {
 function orderedSnapshots(): Snapshot[] {
   const order = config.layout?.providerOrder ?? [];
   // Disabled providers disappear immediately — not on the next fetch.
-  return lastSnapshots.filter((s) => !config.disabled.includes(s.id)).sort((a, b) => {
+  return lastSnapshots.filter((s) => !isCardDisabled(s.id)).sort((a, b) => {
     const ia = order.indexOf(a.id);
     const ib = order.indexOf(b.id);
     if (ia !== -1 && ib !== -1) return ia - ib;
@@ -1198,7 +1283,7 @@ function othersFoldUsd(tab: SpendTab): number {
 
 function donutEntries(tab: SpendTab): DonutEntry[] {
   const all: DonutEntry[] = lastSpend
-    .filter((s) => !config.disabled.includes(s.id)) // disabled = gone everywhere
+    .filter((s) => !isCardDisabled(s.id)) // disabled = gone everywhere
     .map((s) => ({ s, w: s[tab] }))
     // Membership, order, and wedge share all follow the active metric so
     // the legend ranking always matches the ring (cost keeps a half-cent
@@ -2212,15 +2297,36 @@ function renderCustomize(): string {
       // disabled also has no snapshot (disabled providers are never
       // fetched) — that one must keep rendering, or its re-enable toggle
       // vanishes with it and the account is stuck off forever.
-      if (id.includes("@") && !snapshot && !config.disabled.includes(id)) return "";
+      // One/New API keys with the family off have no snapshot either;
+      // configured ones still render (name from sites) so per-key toggles
+      // survive. Deleted keys with no snapshot and not in disabled skip.
+      if (id.includes("@") && !snapshot && !config.disabled.includes(id) && !onaFindConfiguredKey(id)) {
+        return "";
+      }
+      // Deleted One/New API keys must not linger as `onenewapi@…` ghosts,
+      // even when they are still in `disabled` (Claude-style re-enable
+      // does not apply — the site is gone).
+      if (onaSitesLoaded && isOnaKeyCardId(id) && !onaFindConfiguredKey(id)) {
+        return "";
+      }
+      // Family master lives in Settings once any key exists. Keep the
+      // empty family row only so Customize can still discover the family
+      // before the first key.
+      if (id === ONA_FAMILY && onaTotalKeys() > 0) {
+        return "";
+      }
       // The leftover Moonshot *card* folds into Kimi Code on the dashboard.
       // This toggle (labeled "Kimi API") still owns the wallet: off means
       // no Moonshot HTTP and no API bar on the Kimi card. Hide it and
       // there's no way to stop those calls.
       // Dynamic account cards carry their name in the snapshot
       // ("Claude — Org"); static providers come from the fixed list.
-      const name = ALL_PROVIDERS.find(([pid]) => pid === id)?.[1] ?? snapshot?.name ?? id;
+      const name =
+        ALL_PROVIDERS.find(([pid]) => pid === id)?.[1] ?? snapshot?.name ?? onaCardName(id) ?? id;
       const L = providerLayout(id);
+      // Per-row checkbox is exact-id only: family `onenewapi` stays its
+      // own toggle, and key cards keep independent enable state while
+      // the family is off.
       const enabled = !config.disabled.includes(id);
 
       const row = (key: string) => {
@@ -2308,7 +2414,11 @@ function renderDrawerBody(): void {
 /// Customize lives in a drawer that slides in from the left edge.
 function setDrawer(open: boolean): void {
   customizeOpen = open;
-  if (open) renderDrawerBody();
+  if (open) {
+    renderDrawerBody();
+    // Local JSON list — cheap, and required if Customize opens before Settings.
+    void loadOneNewApiSites();
+  }
   document.body.classList.toggle("drawer-open", open);
   document.querySelector("#customize-btn")?.classList.toggle("active", open);
 }
@@ -2746,10 +2856,12 @@ function captureTraySyncState(): TraySyncState {
     };
   }
   return {
-    snapshots: lastSnapshots.map((snapshot) => ({
-      ...snapshot,
-      metrics: snapshot.metrics.map((metric) => ({ ...metric })),
-    })),
+    snapshots: lastSnapshots
+      .filter((snapshot) => !isCardDisabled(snapshot.id))
+      .map((snapshot) => ({
+        ...snapshot,
+        metrics: snapshot.metrics.map((metric) => ({ ...metric })),
+      })),
     projection: {
       disabled: [...new Set([...config.disabled, ...pendingProviderEnables.keys()])],
       providerOrder,
@@ -2764,7 +2876,7 @@ async function buildTrayStripEntries(state: TraySyncState): Promise<TrayStripEnt
   const entries: TrayStripEntry[] = [];
   for (const id of state.projection.providerOrder) {
     if (entries.length >= 4) break;
-    if (state.projection.disabled.includes(id)) continue;
+    if (isCardDisabled(id, state.projection.disabled)) continue;
     const layout = state.projection.providers[id];
     if (!layout?.starred.length) continue;
     const snapshot = state.snapshots.find((candidate) => candidate.id === id && candidate.status === "ok");
@@ -2966,6 +3078,7 @@ function handleCustomizeChange(target: HTMLInputElement): void {
     pendingToggles.push({ id, enable });
     config.disabled = withPendingToggles(config.disabled); // optimistic
     renderAll(); // disabled cards vanish from the dashboard immediately
+    if (id === ONA_FAMILY) syncOneNewApiFamilyToggle();
     if (!enable) requestTraySync();
     disabledSaveQueue = disabledSaveQueue.then(async () => {
       // Fresh base at save time: includes server truth plus anything
@@ -2979,6 +3092,7 @@ function handleCustomizeChange(target: HTMLInputElement): void {
       pendingToggles.shift(); // this task's toggle is now persisted
       // Merge any newer still-pending toggles back on top of the saved state.
       config.disabled = withPendingToggles(config.disabled);
+      if (id === ONA_FAMILY) syncOneNewApiFamilyToggle();
       // Only an unmatched enable generation still needs a usage attempt.
       if (
         enableGeneration !== null &&
@@ -3083,6 +3197,662 @@ function setupCustomizeDnD(providersEl: HTMLElement): void {
 // Settings pane
 // ---------------------------------------------------------------------------
 
+interface OneNewApiKeyDto {
+  id: string;
+  label: string;
+  has_api_key: boolean;
+}
+
+interface OneNewApiSiteDto {
+  id: string;
+  name: string;
+  base_url: string;
+  keys: OneNewApiKeyDto[];
+}
+
+interface OneNewApiCreatedKeyDto {
+  site: OneNewApiSiteDto;
+  key_id: string;
+  first_key: boolean;
+}
+
+type OneNewApiCreateSiteResult =
+  | { status: "created"; site: OneNewApiSiteDto }
+  | { status: "duplicate"; site_id: string };
+
+const ONA_FAMILY = "onenewapi";
+
+let onaSites: OneNewApiSiteDto[] = [];
+let onaSitesLoaded = false;
+const onaExpanded = new Set<string>();
+let onaEditingId: string | null = null;
+let onaEditingKeyId: string | null = null;
+let onaBusy = false;
+
+function isOnaKeyCardId(id: string): boolean {
+  return providerFamily(id) === ONA_FAMILY && id !== ONA_FAMILY;
+}
+
+function onaSnapshotId(keyId: string): string {
+  return `${ONA_FAMILY}@${keyId}`;
+}
+
+function onaFindConfiguredKey(
+  snapshotId: string,
+): { site: OneNewApiSiteDto; key: OneNewApiKeyDto } | undefined {
+  if (providerFamily(snapshotId) !== ONA_FAMILY) return undefined;
+  const keyId = snapshotId.slice(ONA_FAMILY.length + 1);
+  if (!keyId) return undefined;
+  for (const site of onaSites) {
+    const key = site.keys.find((k) => k.id === keyId);
+    if (key) return { site, key };
+  }
+  return undefined;
+}
+
+function onaCardName(snapshotId: string): string | undefined {
+  const found = onaFindConfiguredKey(snapshotId);
+  return found ? `${found.site.name} · ${found.key.label}` : undefined;
+}
+
+function syncOneNewApiFamilyToggle(): void {
+  const el = document.querySelector<HTMLInputElement>("#ona-family-enabled");
+  if (el) el.checked = !config.disabled.includes(ONA_FAMILY);
+}
+
+function foldOnaKeysIntoLayout(layout: Layout | null = config.layout): boolean {
+  if (!layout) return false;
+  let changed = false;
+  for (const site of onaSites) {
+    for (const key of site.keys) {
+      const id = onaSnapshotId(key.id);
+      if (!layout.providerOrder.includes(id)) {
+        layout.providerOrder.push(id);
+        changed = true;
+      }
+    }
+  }
+  return changed;
+}
+
+function configuredOnaSnapshotIds(): Set<string> {
+  const keep = new Set<string>();
+  for (const site of onaSites) {
+    for (const key of site.keys) keep.add(onaSnapshotId(key.id));
+  }
+  return keep;
+}
+
+/// Drop layout/disabled/pin/cache for keys that are no longer in onaSites.
+/// Only call after a successful list — an empty failed load would wipe live cards.
+function pruneGoneOnaKeys(): boolean {
+  const keep = configuredOnaSnapshotIds();
+  let changed = false;
+  const beforeSnaps = lastSnapshots.length;
+  lastSnapshots = lastSnapshots.filter((s) => !isOnaKeyCardId(s.id) || keep.has(s.id));
+  if (lastSnapshots.length !== beforeSnaps) changed = true;
+
+  const layout = config.layout;
+  if (layout) {
+    const nextOrder = layout.providerOrder.filter((id) => !isOnaKeyCardId(id) || keep.has(id));
+    if (nextOrder.length !== layout.providerOrder.length) {
+      layout.providerOrder = nextOrder;
+      changed = true;
+    }
+    for (const id of Object.keys(layout.providers)) {
+      if (isOnaKeyCardId(id) && !keep.has(id)) {
+        delete layout.providers[id];
+        changed = true;
+      }
+    }
+  }
+
+  const nextDisabled = config.disabled.filter((id) => !isOnaKeyCardId(id) || keep.has(id));
+  if (nextDisabled.length !== config.disabled.length) {
+    config.disabled = nextDisabled;
+    changed = true;
+  }
+
+  if (config.pinned && isOnaKeyCardId(config.pinned.provider) && !keep.has(config.pinned.provider)) {
+    config.pinned = null;
+    changed = true;
+  }
+  return changed;
+}
+
+function onaTotalKeys(sites: OneNewApiSiteDto[] = onaSites): number {
+  return sites.reduce((n, site) => n + site.keys.length, 0);
+}
+
+function applyOneNewApiSite(site: OneNewApiSiteDto): void {
+  const i = onaSites.findIndex((s) => s.id === site.id);
+  if (i >= 0) onaSites[i] = site;
+  else onaSites.push(site);
+}
+
+function paintOneNewApiCardNames(site: OneNewApiSiteDto): void {
+  for (const key of site.keys) {
+    const id = onaSnapshotId(key.id);
+    const name = `${site.name} · ${key.label}`;
+    const snap = lastSnapshots.find((s) => s.id === id);
+    if (snap) snap.name = name;
+  }
+  renderIfVisible();
+  requestTraySync();
+}
+
+/// Match Pane's origin canonicalization enough to skip a fake migrate
+/// confirm when the user only added `/` or `/v1`.
+function oneNewApiOriginKey(raw: string): string | null {
+  try {
+    const url = new URL(raw.trim());
+    if (
+      !["http:", "https:"].includes(url.protocol) ||
+      url.username ||
+      url.password ||
+      url.search ||
+      url.hash ||
+      !["/", "/v1", "/v1/"].includes(url.pathname)
+    ) {
+      return null;
+    }
+    return url.origin.toLowerCase();
+  } catch {
+    return null;
+  }
+}
+
+function setOneNewApiStatus(key: string, vars?: Record<string, string | number>): void {
+  const el = document.querySelector("#status");
+  if (el) el.textContent = t(key, vars);
+}
+
+function isOnaFingerprintMismatch(err: unknown): boolean {
+  const raw = String(err);
+  return raw.includes("status fingerprint mismatch") || /status endpoint:\s*HTTP 404\b/i.test(raw);
+}
+
+function setOneNewApiCaughtError(err: unknown, probe = false): void {
+  if (isOnaFingerprintMismatch(err)) {
+    setOneNewApiStatus("footer.onenewapiNotCompatible");
+    return;
+  }
+  setOneNewApiStatus(probe ? "footer.onenewapiProbeFailed" : "footer.onenewapiFailed", {
+    err: String(err),
+  });
+}
+
+function renderOneNewApiKey(site: OneNewApiSiteDto, key: OneNewApiKeyDto): string {
+  if (onaEditingKeyId === key.id) {
+    return `<li class="ona-key">
+      <form class="ona-key-edit" data-ona-edit-key-form="${escapeHtml(site.id)}" data-ona-key="${escapeHtml(key.id)}" autocomplete="off">
+        <input type="text" spellcheck="false" data-ona-key-label value="${escapeHtml(key.label)}" placeholder="${escapeHtml(t("settings.onenewapiKeyLabelPh"))}" />
+        <input type="password" data-ona-key-secret value="" placeholder="${escapeHtml(t("settings.onenewapiKeySecretPh"))}" autocomplete="new-password" />
+        <p class="settings-note ona-key-hint">${escapeHtml(t("settings.onenewapiKeyKeepHint"))}</p>
+        <div class="ona-edit-actions">
+          <button type="submit">${escapeHtml(t("settings.onenewapiSaveKey"))}</button>
+          <button type="button" data-ona-cancel-key>${escapeHtml(t("dialog.cancel"))}</button>
+        </div>
+      </form>
+    </li>`;
+  }
+  const present = key.has_api_key
+    ? `<span class="ona-key-has" title="${escapeHtml(t("footer.onenewapiKeySaved"))}">✓</span>`
+    : "";
+  return `<li class="ona-key">
+    <div class="ona-key-row">
+      <span class="ona-key-label">${escapeHtml(key.label)}</span>
+      ${present}
+      <button type="button" class="mini-btn" data-ona-edit-key="${escapeHtml(key.id)}">${escapeHtml(t("settings.onenewapiEdit"))}</button>
+      <button type="button" class="mini-btn danger" data-ona-delete-key="${escapeHtml(key.id)}">${escapeHtml(t("settings.onenewapiDeleteKey"))}</button>
+    </div>
+  </li>`;
+}
+
+function renderOneNewApiSite(site: OneNewApiSiteDto): string {
+  const open = onaExpanded.has(site.id) || site.keys.length === 0;
+  const editing = onaEditingId === site.id;
+  const keysHtml = site.keys.length
+    ? `<ul class="ona-keys">${site.keys.map((k) => renderOneNewApiKey(site, k)).join("")}</ul>`
+    : `<p class="ona-keys-empty">${escapeHtml(t("settings.onenewapiNoKeys"))}</p>`;
+  const head = editing
+    ? `<form class="ona-edit" data-ona-edit-form="${escapeHtml(site.id)}">
+        <input type="text" spellcheck="false" data-ona-edit-name value="${escapeHtml(site.name)}" placeholder="${escapeHtml(t("settings.onenewapiNamePh"))}" />
+        <input type="text" spellcheck="false" data-ona-edit-url value="${escapeHtml(site.base_url)}" placeholder="${escapeHtml(t("settings.onenewapiUrlPh"))}" />
+        <div class="ona-edit-actions">
+          <button type="submit">${escapeHtml(t("settings.save"))}</button>
+          <button type="button" data-ona-cancel>${escapeHtml(t("dialog.cancel"))}</button>
+        </div>
+      </form>`
+    : `<p class="ona-site-url">${escapeHtml(site.base_url)}</p>`;
+  const addKey = `<form class="ona-key-add" data-ona-add-key="${escapeHtml(site.id)}" autocomplete="off">
+        <input type="text" spellcheck="false" data-ona-add-label placeholder="${escapeHtml(t("settings.onenewapiKeyLabelPh"))}" />
+        <div class="ona-add-row">
+          <input type="password" data-ona-add-secret placeholder="${escapeHtml(t("settings.onenewapiKeySecretPh"))}" autocomplete="new-password" />
+          <button type="submit">${escapeHtml(t("settings.onenewapiAddKey"))}</button>
+        </div>
+      </form>`;
+  return `
+    <article class="ona-site${open ? " open" : ""}" data-ona-site="${escapeHtml(site.id)}">
+      <div class="ona-site-head">
+        <button type="button" class="ona-site-toggle" data-ona-toggle="${escapeHtml(site.id)}">
+          <span class="ona-site-name">${escapeHtml(site.name)}</span>
+          <span class="chev">⌄</span>
+        </button>
+        <button type="button" class="mini-btn" data-ona-edit="${escapeHtml(site.id)}">${escapeHtml(t("settings.onenewapiEdit"))}</button>
+        <button type="button" class="mini-btn danger" data-ona-delete="${escapeHtml(site.id)}">${escapeHtml(t("settings.onenewapiDelete"))}</button>
+      </div>
+      <div class="acc-body"><div class="acc-inner">${head}${keysHtml}${addKey}</div></div>
+    </article>`;
+}
+
+function renderOneNewApiSettings(): void {
+  const host = document.querySelector("#onenewapi-sites");
+  if (!host) return;
+  host.innerHTML = onaSites.map(renderOneNewApiSite).join("");
+  syncOneNewApiFamilyToggle();
+}
+
+function focusOneNewApiSite(id: string): void {
+  onaExpanded.add(id);
+  document.querySelector("#onenewapi-sites")?.closest(".acc-group")?.classList.add("open");
+  renderOneNewApiSettings();
+  requestAnimationFrame(() => {
+    document.querySelector(`[data-ona-site="${CSS.escape(id)}"]`)?.scrollIntoView({
+      block: "nearest",
+      behavior: "smooth",
+    });
+  });
+}
+
+async function loadOneNewApiSites(opts?: { focusId?: string }): Promise<void> {
+  try {
+    onaSites = await invoke<OneNewApiSiteDto[]>("onenewapi_list_sites");
+    onaSitesLoaded = true;
+  } catch (err) {
+    onaSites = [];
+    setOneNewApiStatus("footer.onenewapiFailed", { err: String(err) });
+    if (opts?.focusId) {
+      focusOneNewApiSite(opts.focusId);
+    } else {
+      renderOneNewApiSettings();
+    }
+    if (customizeOpen) renderDrawerBody();
+    return;
+  }
+  const folded = foldOnaKeysIntoLayout();
+  const pruned = pruneGoneOnaKeys();
+  if ((folded || pruned) && config.layout) {
+    void patchConfig({
+      layout: config.layout,
+      disabled: config.disabled,
+      pinned: config.pinned,
+    }).catch(() => {});
+  }
+  for (const site of onaSites) {
+    if (site.keys.length === 0) onaExpanded.add(site.id);
+  }
+  if (opts?.focusId) {
+    focusOneNewApiSite(opts.focusId);
+  } else {
+    renderOneNewApiSettings();
+  }
+  if (customizeOpen) renderDrawerBody();
+}
+
+async function createOneNewApiSite(): Promise<void> {
+  if (onaBusy) return;
+  const nameInput = document.querySelector<HTMLInputElement>("#ona-add-name");
+  const urlInput = document.querySelector<HTMLInputElement>("#ona-add-url");
+  const secretInput = document.querySelector<HTMLInputElement>("#ona-add-secret");
+  const name = nameInput?.value.trim() ?? "";
+  const baseUrl = urlInput?.value.trim() ?? "";
+  const apiKey = secretInput?.value ?? "";
+  if (!baseUrl) {
+    setOneNewApiStatus("settings.onenewapiUrlRequired");
+    urlInput?.focus();
+    return;
+  }
+  onaBusy = true;
+  try {
+    const result = await invoke<OneNewApiCreateSiteResult>("onenewapi_create_site", {
+      name,
+      baseUrl,
+    });
+    const siteId = result.status === "duplicate" ? result.site_id : result.site.id;
+    if (nameInput) nameInput.value = "";
+    if (urlInput) urlInput.value = "";
+    if (result.status === "duplicate" && !apiKey.trim()) {
+      if (secretInput) secretInput.value = "";
+      setOneNewApiStatus("footer.onenewapiDuplicate");
+      await loadOneNewApiSites(siteId ? { focusId: siteId } : undefined);
+      return;
+    }
+    if (apiKey.trim() && siteId) {
+      const wasZeroKeys = onaTotalKeys() === 0;
+      const keyResult = await invoke<OneNewApiCreatedKeyDto>("onenewapi_create_key", {
+        siteId,
+        label: "",
+        apiKey,
+      });
+      if (secretInput) secretInput.value = "";
+      applyOneNewApiSite(keyResult.site);
+      setOneNewApiStatus("footer.onenewapiKeySaved");
+      await enableNewOneNewApiKey(keyResult.key_id, wasZeroKeys);
+      await loadOneNewApiSites(siteId ? { focusId: siteId } : undefined);
+      return;
+    }
+    if (secretInput) secretInput.value = "";
+    setOneNewApiStatus("footer.onenewapiSaved");
+    await loadOneNewApiSites(siteId ? { focusId: siteId } : undefined);
+  } catch (err) {
+    setOneNewApiCaughtError(err);
+  } finally {
+    onaBusy = false;
+  }
+}
+
+async function saveOneNewApiSite(id: string): Promise<void> {
+  if (onaBusy) return;
+  const block = document.querySelector(`[data-ona-site="${CSS.escape(id)}"]`);
+  const name = block?.querySelector<HTMLInputElement>("[data-ona-edit-name]")?.value.trim() ?? "";
+  const baseUrl = block?.querySelector<HTMLInputElement>("[data-ona-edit-url]")?.value.trim() ?? "";
+  const current = onaSites.find((s) => s.id === id);
+  if (!current) return;
+  if (!baseUrl) {
+    setOneNewApiStatus("settings.onenewapiUrlRequired");
+    return;
+  }
+  const candidateOrigin = oneNewApiOriginKey(baseUrl);
+  if (!candidateOrigin) {
+    setOneNewApiStatus("footer.onenewapiProbeFailed", { err: "invalid URL" });
+    return;
+  }
+  const urlChanged = candidateOrigin !== oneNewApiOriginKey(current.base_url);
+  onaBusy = true;
+  try {
+    if (urlChanged) {
+      try {
+        await invoke("onenewapi_probe_site", { baseUrl });
+      } catch (err) {
+        setOneNewApiCaughtError(err, true);
+        return;
+      }
+      const ok = await appConfirm({
+        title: t("settings.onenewapiMigrateTitle"),
+        message: t("settings.onenewapiMigrateBody", { n: current.keys.length }),
+        confirmLabel: t("settings.onenewapiMigrateConfirm"),
+        danger: true,
+      });
+      if (!ok) return;
+    }
+    const patch = { id, name, baseUrl };
+    await invoke("onenewapi_update_site", patch);
+    onaEditingId = null;
+    onaExpanded.add(id);
+    setOneNewApiStatus("footer.onenewapiSaved");
+    await loadOneNewApiSites();
+    if (urlChanged) await forceUsageRefreshAttempt();
+    else {
+      const site = onaSites.find((s) => s.id === id);
+      if (site) paintOneNewApiCardNames(site);
+    }
+  } catch (err) {
+    setOneNewApiCaughtError(err);
+  } finally {
+    onaBusy = false;
+  }
+}
+
+async function deleteOneNewApiSite(id: string): Promise<void> {
+  if (onaBusy) return;
+  const site = onaSites.find((s) => s.id === id);
+  if (!site) return;
+  const ok = await appConfirm({
+    title: t("settings.onenewapiDeleteTitle"),
+    message: t("settings.onenewapiDeleteBody", { n: site.keys.length }),
+    confirmLabel: t("settings.onenewapiDeleteConfirm"),
+    danger: true,
+  });
+  if (!ok) return;
+  onaBusy = true;
+  try {
+    await invoke("onenewapi_delete_site", { id });
+    onaExpanded.delete(id);
+    if (onaEditingId === id) onaEditingId = null;
+    if (site.keys.some((k) => k.id === onaEditingKeyId)) onaEditingKeyId = null;
+    setOneNewApiStatus("footer.onenewapiDeleted");
+    await loadOneNewApiSites();
+    await forceUsageRefreshAttempt();
+    requestTraySync();
+  } catch (err) {
+    setOneNewApiStatus("footer.onenewapiFailed", { err: String(err) });
+  } finally {
+    onaBusy = false;
+  }
+}
+
+async function enableNewOneNewApiKey(keyId: string, wasZeroKeys: boolean): Promise<void> {
+  const snapshotId = keyId ? onaSnapshotId(keyId) : "";
+  // Mark before patch/refresh so first-run auto-disable cannot park them.
+  if (snapshotId) recentlyKeyed.set(snapshotId, refreshGeneration);
+  if (wasZeroKeys) recentlyKeyed.set(ONA_FAMILY, refreshGeneration);
+
+  const pending: Array<{ id: string; gen: number }> = [];
+  if (wasZeroKeys) {
+    if (snapshotId) pending.push({ id: snapshotId, gen: markProviderEnablePending(snapshotId) });
+    pending.push({ id: ONA_FAMILY, gen: markProviderEnablePending(ONA_FAMILY) });
+  } else if (snapshotId && config.disabled.includes(snapshotId)) {
+    pending.push({ id: snapshotId, gen: markProviderEnablePending(snapshotId) });
+  }
+
+  const remove = new Set<string>();
+  if (snapshotId) remove.add(snapshotId);
+  if (wasZeroKeys) remove.add(ONA_FAMILY);
+  if (remove.size && config.disabled.some((id) => remove.has(id))) {
+    await patchConfig({
+      disabled: config.disabled.filter((id) => !remove.has(id)),
+    }).catch(() => {});
+  }
+  await forceUsageRefreshAttempt();
+  if (pending.length) {
+    for (const p of pending) finishProviderEnable(p.id, p.gen);
+  } else {
+    requestTraySync();
+  }
+}
+
+async function createOneNewApiKey(siteId: string): Promise<void> {
+  if (onaBusy) return;
+  const block = document.querySelector(`[data-ona-site="${CSS.escape(siteId)}"]`);
+  const labelInput = block?.querySelector<HTMLInputElement>("[data-ona-add-label]");
+  const secretInput = block?.querySelector<HTMLInputElement>("[data-ona-add-secret]");
+  const label = labelInput?.value.trim() ?? "";
+  const apiKey = secretInput?.value ?? "";
+  if (!apiKey.trim()) {
+    secretInput?.focus();
+    return;
+  }
+  const wasZeroKeys = onaTotalKeys() === 0;
+  onaBusy = true;
+  try {
+    const created = await invoke<OneNewApiCreatedKeyDto>("onenewapi_create_key", {
+      siteId,
+      label,
+      apiKey,
+    });
+    if (secretInput) secretInput.value = "";
+    if (labelInput) labelInput.value = "";
+    applyOneNewApiSite(created.site);
+    onaEditingKeyId = null;
+    onaExpanded.add(siteId);
+    setOneNewApiStatus("footer.onenewapiKeySaved");
+    await enableNewOneNewApiKey(created.key_id, wasZeroKeys);
+    await loadOneNewApiSites();
+  } catch (err) {
+    setOneNewApiStatus("footer.onenewapiFailed", { err: String(err) });
+  } finally {
+    onaBusy = false;
+  }
+}
+
+async function saveOneNewApiKey(siteId: string, keyId: string): Promise<void> {
+  if (onaBusy) return;
+  const form = document.querySelector(
+    `[data-ona-edit-key-form="${CSS.escape(siteId)}"][data-ona-key="${CSS.escape(keyId)}"]`,
+  );
+  const label = form?.querySelector<HTMLInputElement>("[data-ona-key-label]")?.value.trim() ?? "";
+  const apiKey = form?.querySelector<HTMLInputElement>("[data-ona-key-secret]")?.value ?? "";
+  onaBusy = true;
+  try {
+    const patch: { siteId: string; keyId: string; label: string; apiKey?: string } = {
+      siteId,
+      keyId,
+      label,
+    };
+    if (apiKey.trim()) patch.apiKey = apiKey;
+    const site = await invoke<OneNewApiSiteDto>("onenewapi_update_key", patch);
+    const secret = form?.querySelector<HTMLInputElement>("[data-ona-key-secret]");
+    if (secret) secret.value = "";
+    applyOneNewApiSite(site);
+    onaEditingKeyId = null;
+    onaExpanded.add(siteId);
+    setOneNewApiStatus("footer.onenewapiKeySaved");
+    await loadOneNewApiSites();
+    await forceUsageRefreshAttempt();
+    requestTraySync();
+  } catch (err) {
+    setOneNewApiStatus("footer.onenewapiFailed", { err: String(err) });
+  } finally {
+    onaBusy = false;
+  }
+}
+
+async function deleteOneNewApiKey(siteId: string, keyId: string): Promise<void> {
+  if (onaBusy) return;
+  onaBusy = true;
+  try {
+    const site = await invoke<OneNewApiSiteDto>("onenewapi_delete_key", { siteId, keyId });
+    applyOneNewApiSite(site);
+    if (onaEditingKeyId === keyId) onaEditingKeyId = null;
+    onaExpanded.add(siteId);
+    await loadOneNewApiSites();
+    await forceUsageRefreshAttempt();
+    requestTraySync();
+  } catch (err) {
+    setOneNewApiStatus("footer.onenewapiFailed", { err: String(err) });
+  } finally {
+    onaBusy = false;
+  }
+}
+
+function handleOneNewApiClick(target: HTMLElement): void {
+  const toggle = target.closest<HTMLElement>("[data-ona-toggle]");
+  if (toggle) {
+    const id = toggle.dataset.onaToggle!;
+    if (onaExpanded.has(id)) {
+      onaExpanded.delete(id);
+      if (onaEditingId === id) onaEditingId = null;
+      const site = onaSites.find((s) => s.id === id);
+      if (site?.keys.some((k) => k.id === onaEditingKeyId)) onaEditingKeyId = null;
+    } else {
+      onaExpanded.add(id);
+    }
+    renderOneNewApiSettings();
+    return;
+  }
+  const editKey = target.closest<HTMLElement>("[data-ona-edit-key]");
+  if (editKey) {
+    const keyId = editKey.dataset.onaEditKey!;
+    if (onaEditingKeyId === keyId) return;
+    onaEditingKeyId = keyId;
+    const siteId = editKey.closest<HTMLElement>("[data-ona-site]")?.dataset.onaSite;
+    if (siteId) onaExpanded.add(siteId);
+    renderOneNewApiSettings();
+    requestAnimationFrame(() => {
+      document
+        .querySelector<HTMLInputElement>(`[data-ona-key="${CSS.escape(keyId)}"] [data-ona-key-label]`)
+        ?.focus();
+    });
+    return;
+  }
+  const edit = target.closest<HTMLElement>("[data-ona-edit]");
+  if (edit) {
+    const id = edit.dataset.onaEdit!;
+    if (onaEditingId === id) return;
+    onaEditingId = id;
+    onaExpanded.add(id);
+    renderOneNewApiSettings();
+    requestAnimationFrame(() => {
+      document
+        .querySelector<HTMLInputElement>(`[data-ona-site="${CSS.escape(id)}"] [data-ona-edit-name]`)
+        ?.focus();
+    });
+    return;
+  }
+  const cancelKey = target.closest<HTMLElement>("[data-ona-cancel-key]");
+  if (cancelKey) {
+    onaEditingKeyId = null;
+    renderOneNewApiSettings();
+    return;
+  }
+  const cancel = target.closest<HTMLElement>("[data-ona-cancel]");
+  if (cancel) {
+    onaEditingId = null;
+    renderOneNewApiSettings();
+  }
+}
+
+function initOneNewApiSettings(): void {
+  const addForm = document.querySelector<HTMLFormElement>("#onenewapi-add");
+  addForm?.addEventListener("submit", (e) => {
+    e.preventDefault();
+    void createOneNewApiSite();
+  });
+  document.querySelector<HTMLInputElement>("#ona-family-enabled")?.addEventListener("change", (e) => {
+    const input = e.currentTarget as HTMLInputElement;
+    input.dataset.enable = ONA_FAMILY;
+    handleCustomizeChange(input);
+  });
+  const host = document.querySelector("#onenewapi-sites");
+  host?.addEventListener("click", (e) => {
+    const target = e.target as HTMLElement;
+    const delKey = target.closest<HTMLElement>("[data-ona-delete-key]");
+    if (delKey) {
+      e.preventDefault();
+      const siteId = delKey.closest<HTMLElement>("[data-ona-site]")?.dataset.onaSite;
+      if (siteId) void deleteOneNewApiKey(siteId, delKey.dataset.onaDeleteKey!);
+      return;
+    }
+    const del = target.closest<HTMLElement>("[data-ona-delete]");
+    if (del) {
+      e.preventDefault();
+      void deleteOneNewApiSite(del.dataset.onaDelete!);
+      return;
+    }
+    handleOneNewApiClick(target);
+  });
+  host?.addEventListener("submit", (e) => {
+    const target = e.target as HTMLElement;
+    const addKey = target.closest<HTMLElement>("[data-ona-add-key]");
+    if (addKey) {
+      e.preventDefault();
+      void createOneNewApiKey(addKey.dataset.onaAddKey!);
+      return;
+    }
+    const editKey = target.closest<HTMLElement>("[data-ona-edit-key-form]");
+    if (editKey) {
+      e.preventDefault();
+      void saveOneNewApiKey(editKey.dataset.onaEditKeyForm!, editKey.dataset.onaKey!);
+      return;
+    }
+    const form = target.closest<HTMLElement>("[data-ona-edit-form]");
+    if (!form) return;
+    e.preventDefault();
+    void saveOneNewApiSite(form.dataset.onaEditForm!);
+  });
+}
+
 async function unparkRecentlyKeyed(): Promise<void> {
   if (!config.disabled.some((id) => recentlyKeyed.has(id))) return;
   await patchConfig({
@@ -3135,7 +3905,7 @@ function populatePinnedOptions(): void {
   const current = config.pinned ? `${config.pinned.provider}::${config.pinned.label}` : "";
   select.replaceChildren(new Option(t("settings.pinAuto"), ""));
   for (const s of lastSnapshots) {
-    if (s.status !== "ok") continue;
+    if (isCardDisabled(s.id) || s.status !== "ok") continue;
     for (const m of s.metrics) {
       if (m.kind !== "progress") continue;
       const value = `${s.id}::${m.label}`;
@@ -3155,6 +3925,7 @@ function applyLocale(): void {
   config.locale = normalizeLocalePref(config.locale);
   setActiveLocale(resolveLocale(config.locale));
   applyStaticI18n();
+  renderOneNewApiSettings();
   applyAppearance();
   const status = document.querySelector("#status");
   if (status) {
@@ -3319,6 +4090,8 @@ async function initSettings(): Promise<void> {
   document.querySelector("#reset-all-settings")!.addEventListener("click", () => {
     void resetAllSettings();
   });
+
+  initOneNewApiSettings();
 }
 
 /// Restore every preference to the same defaults a fresh install gets.
@@ -3469,6 +4242,7 @@ window.addEventListener("DOMContentLoaded", () => {
   const setSettings = (open: boolean) => {
     document.body.classList.toggle("settings-open", open);
     document.querySelector("#settings-btn")?.classList.toggle("active", open);
+    if (open) void loadOneNewApiSites();
   };
   document.querySelector("#settings-btn")!.addEventListener("click", () => {
     setDrawer(false);

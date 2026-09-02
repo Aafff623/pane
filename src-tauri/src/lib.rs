@@ -7,7 +7,8 @@ mod spend;
 mod telemetry;
 mod tray_projection;
 
-use std::path::PathBuf;
+use std::collections::{HashMap, HashSet};
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Mutex, OnceLock};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -29,17 +30,25 @@ const STALE_GRACE_MS: i64 = 3 * 60 * 1000;
 // App settings, stored at %APPDATA%\Pane\config.json
 // ---------------------------------------------------------------------------
 
-fn config_path() -> PathBuf {
-    providers::config_dir().join("config.json")
+fn config_path_in(dir: &Path) -> PathBuf {
+    dir.join("config.json")
 }
 
 /// A parse failure here once silently reset all settings to defaults, so
 /// failures are now logged durably and the last good copy is used instead.
 fn note_config_error(context: &str) {
-    let line = format!("{} {}\r\n", chrono::Local::now().format("%Y-%m-%d %H:%M:%S"), context);
+    let line = format!(
+        "{} {}\r\n",
+        chrono::Local::now().format("%Y-%m-%d %H:%M:%S"),
+        context
+    );
     let path = providers::config_dir().join("config-error.log");
     use std::io::Write;
-    if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(path) {
+    if let Ok(mut f) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(path)
+    {
         let _ = f.write_all(line.as_bytes());
     }
     eprintln!("[pane] {context}");
@@ -52,7 +61,11 @@ fn parse_config_file(path: &PathBuf) -> Result<Value, String> {
 }
 
 fn load_config() -> Value {
-    let path = config_path();
+    load_config_from(&providers::config_dir())
+}
+
+fn load_config_from(dir: &Path) -> Value {
+    let path = config_path_in(dir);
     if !path.exists() {
         return json!({});
     }
@@ -60,7 +73,7 @@ fn load_config() -> Value {
         Ok(cfg) => cfg,
         Err(e) => {
             note_config_error(&format!("config.json unreadable ({e}) — trying backup"));
-            let backup = providers::config_dir().join("config.json.bak");
+            let backup = dir.join("config.json.bak");
             match parse_config_file(&backup) {
                 Ok(cfg) => cfg,
                 Err(e2) => {
@@ -98,7 +111,8 @@ fn config_with_defaults(mut cfg: Value) -> Value {
     obj.entry("density").or_insert(json!("compact"));
     obj.entry("glassEffects").or_insert(json!(true));
     obj.entry("shortcut").or_insert(json!(""));
-    obj.entry("proxy").or_insert(json!({ "enabled": false, "url": "" }));
+    obj.entry("proxy")
+        .or_insert(json!({ "enabled": false, "url": "" }));
     obj.entry("showTotalSpend").or_insert(json!(true));
     obj.entry("welcomeDismissed").or_insert(json!(false));
     // Empty = "never recorded": the frontend uses it to tell a fresh
@@ -161,8 +175,10 @@ const CONFIG_KEYS: &[&str] = &[
     "locale",
 ];
 
-fn set_config_inner(patch: Value) -> Result<Value, String> {
-    let mut cfg = config_with_defaults(load_config());
+static CONFIG_WRITE: Mutex<()> = Mutex::new(());
+static CONFIG_TMP_SEQ: AtomicU64 = AtomicU64::new(0);
+
+fn apply_config_patch(cfg: &mut Value, patch: &Value) {
     if let (Some(target), Some(source)) = (cfg.as_object_mut(), patch.as_object()) {
         for (k, v) in source {
             if CONFIG_KEYS.contains(&k.as_str()) {
@@ -177,18 +193,43 @@ fn set_config_inner(patch: Value) -> Result<Value, String> {
             }
         }
     }
-    let dir = providers::config_dir();
-    std::fs::create_dir_all(&dir).map_err(|e| format!("create config dir: {e}"))?;
-    let path = config_path();
+}
+
+fn persist_config_in(dir: &Path, cfg: &Value) -> Result<(), String> {
+    std::fs::create_dir_all(dir).map_err(|e| format!("create config dir: {e}"))?;
+    let path = config_path_in(dir);
     // Keep the last good copy, then write atomically (temp file + rename) so
     // a crash or kill mid-write can never leave a truncated config behind.
     if path.exists() {
         let _ = std::fs::copy(&path, dir.join("config.json.bak"));
     }
-    let tmp = dir.join("config.json.tmp");
-    std::fs::write(&tmp, serde_json::to_string_pretty(&cfg).unwrap_or_default())
-        .map_err(|e| format!("write config: {e}"))?;
-    std::fs::rename(&tmp, &path).map_err(|e| format!("replace config: {e}"))?;
+    let tmp = dir.join(format!(
+        "config.{}.{}.tmp",
+        std::process::id(),
+        CONFIG_TMP_SEQ.fetch_add(1, Ordering::Relaxed)
+    ));
+    let raw = serde_json::to_string_pretty(cfg).unwrap_or_default();
+    if let Err(e) = std::fs::write(&tmp, raw) {
+        let _ = std::fs::remove_file(&tmp);
+        return Err(format!("write config: {e}"));
+    }
+    if let Err(e) = std::fs::rename(&tmp, &path) {
+        let _ = std::fs::remove_file(&tmp);
+        return Err(format!("replace config: {e}"));
+    }
+    Ok(())
+}
+
+fn set_config_in(dir: &Path, patch: Value) -> Result<Value, String> {
+    let _guard = CONFIG_WRITE.lock().unwrap_or_else(|e| e.into_inner());
+    let mut cfg = config_with_defaults(load_config_from(dir));
+    apply_config_patch(&mut cfg, &patch);
+    persist_config_in(dir, &cfg)?;
+    Ok(cfg)
+}
+
+fn set_config_inner(patch: Value) -> Result<Value, String> {
+    let cfg = set_config_in(&providers::config_dir(), patch)?;
     HIDE_WANT.store(hide_usage_flag(&cfg), Ordering::Relaxed);
     Ok(cfg)
 }
@@ -532,7 +573,7 @@ struct StripEntry {
 /// strip ids are validated against this before becoming tray icon ids,
 /// including `family@account` cards. Stale family-level strip icons are
 /// removed for exactly this set.
-const STRIP_PROVIDER_IDS: [&str; 21] = [
+const STRIP_PROVIDER_IDS: [&str; 22] = [
     "claude",
     "codex",
     "cursor",
@@ -554,6 +595,7 @@ const STRIP_PROVIDER_IDS: [&str; 21] = [
     "qwen",
     "hermes",
     "kimi",
+    "onenewapi",
 ];
 
 async fn update_tray_strip(app: tauri::AppHandle, entries: Vec<StripEntry>) -> Result<(), String> {
@@ -574,7 +616,10 @@ async fn update_tray_strip(app: tauri::AppHandle, entries: Vec<StripEntry>) -> R
     )
     .await;
     if result.is_err() {
-        if clear_tray_strip_icons(app, &previous, &entries).await.is_ok() {
+        if clear_tray_strip_icons(app, &previous, &entries)
+            .await
+            .is_ok()
+        {
             if let Ok(mut slot) = last_strip().lock() {
                 slot.clear();
             }
@@ -602,7 +647,10 @@ fn strip_is_active(strip_ok: bool, entries: &[StripEntry]) -> bool {
 }
 
 fn strip_icon_ids_to_clear(known: &[StripEntry], attempted: &[StripEntry]) -> Vec<String> {
-    let mut ids: Vec<String> = STRIP_PROVIDER_IDS.iter().map(|id| (*id).to_string()).collect();
+    let mut ids: Vec<String> = STRIP_PROVIDER_IDS
+        .iter()
+        .map(|id| (*id).to_string())
+        .collect();
     for entry in known.iter().chain(attempted) {
         if !ids.iter().any(|seen| seen == &entry.id) {
             ids.push(entry.id.clone());
@@ -831,17 +879,379 @@ struct FailState {
     note: String,
 }
 
-fn fail_state() -> &'static std::sync::Mutex<std::collections::HashMap<String, FailState>> {
-    static STATE: std::sync::OnceLock<
-        std::sync::Mutex<std::collections::HashMap<String, FailState>>,
-    > = std::sync::OnceLock::new();
+fn fail_state() -> &'static Mutex<HashMap<String, FailState>> {
+    static STATE: OnceLock<Mutex<HashMap<String, FailState>>> = OnceLock::new();
     STATE.get_or_init(Default::default)
+}
+
+#[derive(serde::Serialize, serde::Deserialize, Clone)]
+struct CachedSnap {
+    at: i64,
+    snap: providers::Snapshot,
+}
+
+fn last_ok() -> &'static Mutex<HashMap<String, CachedSnap>> {
+    static LAST_OK: OnceLock<Mutex<HashMap<String, CachedSnap>>> = OnceLock::new();
+    LAST_OK.get_or_init(|| {
+        let cache_file = providers::config_dir().join("last_snapshots.json");
+        let loaded = std::fs::read_to_string(&cache_file)
+            .ok()
+            .and_then(|raw| serde_json::from_str(&raw).ok())
+            .unwrap_or_default();
+        Mutex::new(loaded)
+    })
+}
+
+fn persist_last_ok_at(
+    path: &std::path::Path,
+    map: &HashMap<String, CachedSnap>,
+) -> Result<(), String> {
+    let serialized =
+        serde_json::to_string(map).map_err(|e| format!("serialize snapshot cache: {e}"))?;
+    let parent = path
+        .parent()
+        .ok_or_else(|| "snapshot cache path has no parent".to_string())?;
+    std::fs::create_dir_all(parent).map_err(|e| format!("create snapshot cache dir: {e}"))?;
+    std::fs::write(path, serialized).map_err(|e| format!("write snapshot cache: {e}"))
+}
+
+fn persist_last_ok(map: &HashMap<String, CachedSnap>) -> Result<(), String> {
+    if cfg!(test) {
+        return Ok(());
+    }
+    let cache_file = providers::config_dir().join("last_snapshots.json");
+    persist_last_ok_at(&cache_file, map)
+}
+
+fn forget_provider_snapshots(ids: &[String]) -> Result<(), String> {
+    let mut map = last_ok().lock().unwrap();
+    let mut next = map.clone();
+    let mut changed = false;
+    for id in ids {
+        changed |= next.remove(id).is_some();
+    }
+    if changed {
+        persist_last_ok(&next)?;
+        *map = next;
+    }
+    drop(map);
+    let mut failures = fail_state().lock().unwrap();
+    for id in ids {
+        failures.remove(id);
+        alerts::forget_snapshot(id);
+    }
+    Ok(())
+}
+
+fn forget_provider_snapshot(id: &str) -> Result<(), String> {
+    forget_provider_snapshots(&[id.to_string()])
+}
+
+fn forget_onenewapi_key_ids(key_ids: impl IntoIterator<Item = String>) -> Result<(), String> {
+    let snapshot_ids: Vec<String> = key_ids
+        .into_iter()
+        .map(|key_id| format!("onenewapi@{key_id}"))
+        .collect();
+    forget_provider_snapshots(&snapshot_ids)
+}
+
+fn onenewapi_snapshot_ids(key_ids: &[String]) -> Vec<String> {
+    key_ids.iter().map(|id| format!("onenewapi@{id}")).collect()
+}
+
+fn cached_onenewapi_id_is_configured(id: &str, configured: &HashSet<String>) -> bool {
+    family_of(id) != "onenewapi" || configured.contains(id)
+}
+
+fn retain_current_onenewapi_results(
+    all: &mut Vec<providers::Snapshot>,
+    expected: &HashMap<String, u64>,
+    current: &HashMap<String, u64>,
+) -> Vec<String> {
+    let stale: Vec<String> = all
+        .iter()
+        .filter(|snapshot| {
+            family_of(&snapshot.id) == "onenewapi"
+                && expected.get(&snapshot.id) != current.get(&snapshot.id)
+        })
+        .map(|snapshot| snapshot.id.clone())
+        .collect();
+    let stale_set: HashSet<&str> = stale.iter().map(String::as_str).collect();
+    all.retain(|snapshot| !stale_set.contains(snapshot.id.as_str()));
+    stale
+}
+
+static ONENEWAPI_MUTATION_GENERATION: AtomicU64 = AtomicU64::new(0);
+static ONENEWAPI_ACTIVE_MUTATIONS: AtomicU64 = AtomicU64::new(0);
+static ONENEWAPI_SNAPSHOT_GENERATIONS: OnceLock<Mutex<HashMap<String, u64>>> = OnceLock::new();
+
+fn onenewapi_mutation_generation() -> u64 {
+    ONENEWAPI_MUTATION_GENERATION.load(Ordering::Acquire)
+}
+
+fn onenewapi_snapshot_generations(ids: impl IntoIterator<Item = String>) -> HashMap<String, u64> {
+    let generations = ONENEWAPI_SNAPSHOT_GENERATIONS
+        .get_or_init(Default::default)
+        .lock()
+        .unwrap();
+    ids.into_iter()
+        .map(|id| {
+            let generation = generations.get(&id).copied().unwrap_or(0);
+            (id, generation)
+        })
+        .collect()
+}
+
+fn bump_onenewapi_snapshot_generations(ids: &[String]) {
+    let mut generations = ONENEWAPI_SNAPSHOT_GENERATIONS
+        .get_or_init(Default::default)
+        .lock()
+        .unwrap();
+    for id in ids {
+        *generations.entry(id.clone()).or_default() += 1;
+    }
+}
+
+struct OneNewApiMutationGuard {
+    snapshot_ids: Vec<String>,
+}
+
+impl OneNewApiMutationGuard {
+    fn begin(snapshot_ids: Vec<String>) -> Self {
+        ONENEWAPI_ACTIVE_MUTATIONS.fetch_add(1, Ordering::AcqRel);
+        bump_onenewapi_snapshot_generations(&snapshot_ids);
+        ONENEWAPI_MUTATION_GENERATION.fetch_add(1, Ordering::AcqRel);
+        Self { snapshot_ids }
+    }
+}
+
+impl Drop for OneNewApiMutationGuard {
+    fn drop(&mut self) {
+        bump_onenewapi_snapshot_generations(&self.snapshot_ids);
+        ONENEWAPI_MUTATION_GENERATION.fetch_add(1, Ordering::AcqRel);
+        ONENEWAPI_ACTIVE_MUTATIONS.fetch_sub(1, Ordering::AcqRel);
+    }
+}
+
+/// Strip deleted One/New API *key cards* from config. Never removes family
+/// id `onenewapi` just because keys went away. Returns only changed keys.
+fn purge_onenewapi_from_config(cfg: &mut Value, snapshot_ids: &[String]) -> Value {
+    if snapshot_ids.is_empty() {
+        return json!({});
+    }
+    let drop: HashSet<&str> = snapshot_ids.iter().map(String::as_str).collect();
+    let mut patch = serde_json::Map::new();
+
+    if let Some(arr) = cfg.get_mut("disabled").and_then(Value::as_array_mut) {
+        let before = arr.len();
+        arr.retain(|v| v.as_str().map(|s| !drop.contains(s)).unwrap_or(true));
+        if arr.len() != before {
+            patch.insert("disabled".into(), Value::Array(arr.clone()));
+        }
+    }
+
+    let mut layout_changed = false;
+    if let Some(layout) = cfg.get_mut("layout").and_then(Value::as_object_mut) {
+        if let Some(order) = layout
+            .get_mut("providerOrder")
+            .and_then(Value::as_array_mut)
+        {
+            let before = order.len();
+            order.retain(|v| v.as_str().map(|s| !drop.contains(s)).unwrap_or(true));
+            layout_changed |= order.len() != before;
+        }
+        if let Some(providers) = layout.get_mut("providers").and_then(Value::as_object_mut) {
+            for id in snapshot_ids {
+                layout_changed |= providers.remove(id).is_some();
+            }
+        }
+    }
+    if layout_changed {
+        if let Some(layout) = cfg.get("layout") {
+            patch.insert("layout".into(), layout.clone());
+        }
+    }
+
+    let pinned_hit = cfg
+        .get("pinned")
+        .and_then(|p| p.get("provider"))
+        .and_then(Value::as_str)
+        .is_some_and(|p| drop.contains(p));
+    if pinned_hit {
+        cfg["pinned"] = Value::Null;
+        patch.insert("pinned".into(), Value::Null);
+    }
+
+    if let Some(arr) = cfg.get_mut("trayProviders").and_then(Value::as_array_mut) {
+        let before = arr.len();
+        arr.retain(|v| v.as_str().map(|s| !drop.contains(s)).unwrap_or(true));
+        if arr.len() != before {
+            patch.insert("trayProviders".into(), Value::Array(arr.clone()));
+        }
+    }
+
+    Value::Object(patch)
+}
+
+fn onenewapi_purge_restore_patch(original: &Value, purge_patch: &Value) -> Value {
+    let mut restore = serde_json::Map::new();
+    if let Some(obj) = purge_patch.as_object() {
+        for key in obj.keys() {
+            restore.insert(key.clone(), original.get(key).cloned().unwrap_or(Value::Null));
+        }
+    }
+    Value::Object(restore)
+}
+
+fn persist_onenewapi_config_purge(snapshot_ids: &[String]) -> Result<Value, String> {
+    // Tests must not rewrite the developer's real config.json.
+    if cfg!(test) {
+        return Ok(json!({}));
+    }
+    let mut cfg = config_with_defaults(load_config());
+    let original = cfg.clone();
+    let patch = purge_onenewapi_from_config(&mut cfg, snapshot_ids);
+    let restore = onenewapi_purge_restore_patch(&original, &patch);
+    if patch.as_object().is_some_and(|o| !o.is_empty()) {
+        set_config_inner(patch)?;
+    }
+    Ok(restore)
+}
+
+fn restore_onenewapi_config_purge(restore: Value) -> Result<(), String> {
+    if restore.as_object().map(|o| o.is_empty()).unwrap_or(true) {
+        return Ok(());
+    }
+    if cfg!(test) {
+        return Ok(());
+    }
+    set_config_inner(restore).map(|_| ())
+}
+
+fn purge_onenewapi_cards(key_ids: &[String]) -> Result<(), String> {
+    purge_onenewapi_cards_coordinated(
+        key_ids,
+        persist_onenewapi_config_purge,
+        |ids| forget_onenewapi_key_ids(ids.iter().cloned()),
+        restore_onenewapi_config_purge,
+    )
+}
+
+fn purge_onenewapi_cards_with(
+    key_ids: &[String],
+    persist_config: impl FnOnce(&[String]) -> Result<(), String>,
+) -> Result<(), String> {
+    purge_onenewapi_cards_coordinated(
+        key_ids,
+        |ids| persist_config(ids).map(|()| json!({})),
+        |ids| forget_onenewapi_key_ids(ids.iter().cloned()),
+        |_| Ok(()),
+    )
+}
+
+fn purge_onenewapi_cards_coordinated(
+    key_ids: &[String],
+    persist_config: impl FnOnce(&[String]) -> Result<Value, String>,
+    forget: impl FnOnce(&[String]) -> Result<(), String>,
+    restore_config: impl FnOnce(Value) -> Result<(), String>,
+) -> Result<(), String> {
+    if key_ids.is_empty() {
+        return Ok(());
+    }
+    let restore = persist_config(&onenewapi_snapshot_ids(key_ids))?;
+    if let Err(error) = forget(key_ids) {
+        return match restore_config(restore) {
+            Ok(()) => Err(error),
+            Err(restore_error) => Err(format!(
+                "{error}; restore card settings failed: {restore_error}"
+            )),
+        };
+    }
+    Ok(())
+}
+
+fn onenewapi_after_site_save(
+    previous: &providers::onenewapi::SiteDto,
+    site: &providers::onenewapi::SiteDto,
+) -> Result<(), String> {
+    if site.base_url != previous.base_url {
+        return Ok(());
+    }
+    if site.name != previous.name {
+        let renames: Vec<(String, String)> = site
+            .keys
+            .iter()
+            .map(|key| {
+                (
+                    format!("onenewapi@{}", key.id),
+                    format!("{} · {}", site.name, key.label),
+                )
+            })
+            .collect();
+        rename_cached_snapshots(&renames)?;
+    }
+    Ok(())
+}
+
+fn rename_cached_snapshot(id: &str, new_name: String) -> Result<(), String> {
+    rename_cached_snapshots(&[(id.to_string(), new_name)])
+}
+
+fn rename_cached_snapshots(renames: &[(String, String)]) -> Result<(), String> {
+    let mut map = last_ok().lock().unwrap();
+    rename_cached_snapshots_in(&mut map, renames, persist_last_ok)
+}
+
+fn rename_cached_snapshot_in<Persist>(
+    map: &mut HashMap<String, CachedSnap>,
+    id: &str,
+    new_name: String,
+    persist: Persist,
+) -> Result<(), String>
+where
+    Persist: FnOnce(&HashMap<String, CachedSnap>) -> Result<(), String>,
+{
+    rename_cached_snapshots_in(map, &[(id.to_string(), new_name)], persist)
+}
+
+fn rename_cached_snapshots_in<Persist>(
+    map: &mut HashMap<String, CachedSnap>,
+    renames: &[(String, String)],
+    persist: Persist,
+) -> Result<(), String>
+where
+    Persist: FnOnce(&HashMap<String, CachedSnap>) -> Result<(), String>,
+{
+    let mut next = map.clone();
+    let mut changed = false;
+    for (id, new_name) in renames {
+        if let Some(entry) = next.get_mut(id) {
+            if entry.snap.name != *new_name {
+                entry.snap.name = new_name.clone();
+                changed = true;
+            }
+        }
+    }
+    if changed {
+        persist(&next)?;
+        *map = next;
+    }
+    Ok(())
 }
 
 /// The provider family of a card id: "claude@ab12cd34" → "claude". The only
 /// spelling allowed to leave the machine in telemetry.
 fn family_of(id: &str) -> String {
     id.split('@').next().unwrap_or(id).to_string()
+}
+
+/// One/New API is two-level: family id `onenewapi` disables every key card.
+/// Claude/Codex extra accounts stay independent of the bare family id.
+fn card_is_disabled(id: &str, disabled: &[String]) -> bool {
+    if disabled.iter().any(|d| d == id) {
+        return true;
+    }
+    family_of(id) == "onenewapi" && disabled.iter().any(|d| d == "onenewapi")
 }
 
 // Owned id/name so dynamically discovered account cards (claude@<hash>)
@@ -855,7 +1265,9 @@ where
     let now = now_ms() as i64;
     let benched = {
         let map = fail_state().lock().unwrap();
-        map.get(id).filter(|f| now < f.until_ms).map(|f| f.note.clone())
+        map.get(id)
+            .filter(|f| now < f.until_ms)
+            .map(|f| f.note.clone())
     };
     if let Some(note) = benched {
         return providers::Snapshot::error(id, name, note);
@@ -885,7 +1297,10 @@ where
             FailState {
                 until_ms: now + bench_ms,
                 note: if let Some(ms) = retry_after_ms {
-                    format!("rate limited — the vendor asked to wait ~{}m", (ms / 60_000).max(1))
+                    format!(
+                        "rate limited — the vendor asked to wait ~{}m",
+                        (ms / 60_000).max(1)
+                    )
                 } else if rate_limited {
                     format!("rate limited — cooling down for a few minutes ({err})")
                 } else {
@@ -942,7 +1357,10 @@ fn fold_moonshot_into_kimi(all: &mut Vec<providers::Snapshot>) {
 }
 
 fn is_kimi_wallet_label(label: &str) -> bool {
-    matches!(label, "API" | "Credits used" | "Balance" | "Vouchers" | "Cash")
+    matches!(
+        label,
+        "API" | "Credits used" | "Balance" | "Vouchers" | "Cash"
+    )
 }
 
 fn restore_kimi_wallet_rows(current: &mut providers::Snapshot, previous: &providers::Snapshot) {
@@ -950,9 +1368,7 @@ fn restore_kimi_wallet_rows(current: &mut providers::Snapshot, previous: &provid
         return;
     }
     for m in &previous.metrics {
-        if is_kimi_wallet_label(&m.label)
-            && !current.metrics.iter().any(|x| x.label == m.label)
-        {
+        if is_kimi_wallet_label(&m.label) && !current.metrics.iter().any(|x| x.label == m.label) {
             current.metrics.push(m.clone());
         }
     }
@@ -986,7 +1402,12 @@ async fn fetch_usage(
     let disabled = disabled.unwrap_or_else(|| {
         cfg.get("disabled")
             .and_then(Value::as_array)
-            .map(|a| a.iter().filter_map(Value::as_str).map(str::to_string).collect())
+            .map(|a| {
+                a.iter()
+                    .filter_map(Value::as_str)
+                    .map(str::to_string)
+                    .collect()
+            })
             .unwrap_or_default()
     });
 
@@ -994,7 +1415,8 @@ async fn fetch_usage(
     // task. A single tokio::join! over 28 inlined futures builds one huge
     // combined state machine on the calling thread's stack — at 28 providers
     // that overflowed the main thread's 1 MB stack and killed the app.
-    type BoxedSnap = std::pin::Pin<Box<dyn std::future::Future<Output = providers::Snapshot> + Send>>;
+    type BoxedSnap =
+        std::pin::Pin<Box<dyn std::future::Future<Output = providers::Snapshot> + Send>>;
     // Disabled providers are skipped BEFORE anything is spawned — a merely
     // post-filtered provider still did all its work invisibly: network
     // calls, file reads, and in Kiro's case spawning a CLI whose own
@@ -1002,27 +1424,174 @@ async fn fetch_usage(
     // (gigabytes within days). Futures are lazy, so building and dropping
     // a disabled entry here runs none of its code.
     let base: Vec<(&str, BoxedSnap)> = vec![
-        ("claude", Box::pin(guarded("claude".into(), "Claude".into(), providers::claude::snapshot()))),
-        ("codex", Box::pin(guarded("codex".into(), "Codex".into(), providers::codex::snapshot()))),
-        ("cursor", Box::pin(guarded("cursor".into(), "Cursor".into(), providers::cursor::snapshot()))),
-        ("opencode", Box::pin(guarded("opencode".into(), "OpenCode".into(), providers::opencode::snapshot()))),
-        ("copilot", Box::pin(guarded("copilot".into(), "Copilot".into(), providers::copilot::snapshot()))),
-        ("grok", Box::pin(guarded("grok".into(), "Grok".into(), providers::grok::snapshot()))),
-        ("devin", Box::pin(guarded("devin".into(), "Devin".into(), providers::devin::snapshot()))),
-        ("minimax", Box::pin(guarded("minimax".into(), "MiniMax".into(), providers::minimax::snapshot()))),
-        ("openrouter", Box::pin(guarded("openrouter".into(), "OpenRouter".into(), providers::openrouter::snapshot()))),
-        ("zai", Box::pin(guarded("zai".into(), "Z.ai".into(), providers::zai::snapshot()))),
-        ("antigravity", Box::pin(guarded("antigravity".into(), "Antigravity".into(), providers::antigravity::snapshot()))),
-        ("deepseek", Box::pin(guarded("deepseek".into(), "DeepSeek".into(), providers::deepseek::snapshot()))),
-        ("moonshot", Box::pin(guarded("moonshot".into(), "Kimi API".into(), providers::moonshot::snapshot()))),
-        ("elevenlabs", Box::pin(guarded("elevenlabs".into(), "ElevenLabs".into(), providers::elevenlabs::snapshot()))),
-        ("ollama", Box::pin(guarded("ollama".into(), "Ollama".into(), providers::ollama::snapshot()))),
-        ("codebuff", Box::pin(guarded("codebuff".into(), "Codebuff".into(), providers::codebuff::snapshot()))),
-        ("kilo", Box::pin(guarded("kilo".into(), "Kilo".into(), providers::kilo::snapshot()))),
-        ("aihubmix", Box::pin(guarded("aihubmix".into(), "AihubMix".into(), providers::aihubmix::snapshot()))),
-        ("qwen", Box::pin(guarded("qwen".into(), "Qwen Code".into(), providers::qwen::snapshot()))),
-        ("hermes", Box::pin(guarded("hermes".into(), "Hermes".into(), providers::hermes::snapshot()))),
-        ("kimi", Box::pin(guarded("kimi".into(), "Kimi Code".into(), providers::kimi::snapshot()))),
+        (
+            "claude",
+            Box::pin(guarded(
+                "claude".into(),
+                "Claude".into(),
+                providers::claude::snapshot(),
+            )),
+        ),
+        (
+            "codex",
+            Box::pin(guarded(
+                "codex".into(),
+                "Codex".into(),
+                providers::codex::snapshot(),
+            )),
+        ),
+        (
+            "cursor",
+            Box::pin(guarded(
+                "cursor".into(),
+                "Cursor".into(),
+                providers::cursor::snapshot(),
+            )),
+        ),
+        (
+            "opencode",
+            Box::pin(guarded(
+                "opencode".into(),
+                "OpenCode".into(),
+                providers::opencode::snapshot(),
+            )),
+        ),
+        (
+            "copilot",
+            Box::pin(guarded(
+                "copilot".into(),
+                "Copilot".into(),
+                providers::copilot::snapshot(),
+            )),
+        ),
+        (
+            "grok",
+            Box::pin(guarded(
+                "grok".into(),
+                "Grok".into(),
+                providers::grok::snapshot(),
+            )),
+        ),
+        (
+            "devin",
+            Box::pin(guarded(
+                "devin".into(),
+                "Devin".into(),
+                providers::devin::snapshot(),
+            )),
+        ),
+        (
+            "minimax",
+            Box::pin(guarded(
+                "minimax".into(),
+                "MiniMax".into(),
+                providers::minimax::snapshot(),
+            )),
+        ),
+        (
+            "openrouter",
+            Box::pin(guarded(
+                "openrouter".into(),
+                "OpenRouter".into(),
+                providers::openrouter::snapshot(),
+            )),
+        ),
+        (
+            "zai",
+            Box::pin(guarded(
+                "zai".into(),
+                "Z.ai".into(),
+                providers::zai::snapshot(),
+            )),
+        ),
+        (
+            "antigravity",
+            Box::pin(guarded(
+                "antigravity".into(),
+                "Antigravity".into(),
+                providers::antigravity::snapshot(),
+            )),
+        ),
+        (
+            "deepseek",
+            Box::pin(guarded(
+                "deepseek".into(),
+                "DeepSeek".into(),
+                providers::deepseek::snapshot(),
+            )),
+        ),
+        (
+            "moonshot",
+            Box::pin(guarded(
+                "moonshot".into(),
+                "Kimi API".into(),
+                providers::moonshot::snapshot(),
+            )),
+        ),
+        (
+            "elevenlabs",
+            Box::pin(guarded(
+                "elevenlabs".into(),
+                "ElevenLabs".into(),
+                providers::elevenlabs::snapshot(),
+            )),
+        ),
+        (
+            "ollama",
+            Box::pin(guarded(
+                "ollama".into(),
+                "Ollama".into(),
+                providers::ollama::snapshot(),
+            )),
+        ),
+        (
+            "codebuff",
+            Box::pin(guarded(
+                "codebuff".into(),
+                "Codebuff".into(),
+                providers::codebuff::snapshot(),
+            )),
+        ),
+        (
+            "kilo",
+            Box::pin(guarded(
+                "kilo".into(),
+                "Kilo".into(),
+                providers::kilo::snapshot(),
+            )),
+        ),
+        (
+            "aihubmix",
+            Box::pin(guarded(
+                "aihubmix".into(),
+                "AihubMix".into(),
+                providers::aihubmix::snapshot(),
+            )),
+        ),
+        (
+            "qwen",
+            Box::pin(guarded(
+                "qwen".into(),
+                "Qwen Code".into(),
+                providers::qwen::snapshot(),
+            )),
+        ),
+        (
+            "hermes",
+            Box::pin(guarded(
+                "hermes".into(),
+                "Hermes".into(),
+                providers::hermes::snapshot(),
+            )),
+        ),
+        (
+            "kimi",
+            Box::pin(guarded(
+                "kimi".into(),
+                "Kimi Code".into(),
+                providers::kimi::snapshot(),
+            )),
+        ),
     ];
     // Skip the leftover Moonshot fetch only when the last Kimi card
     // actually painted — a credentials file alone is not enough (expired
@@ -1065,16 +1634,50 @@ async fn fetch_usage(
             )),
         ));
     }
+    let mut expected_onenewapi_generations = HashMap::new();
+    let onenewapi_generation_before = onenewapi_mutation_generation();
+    let onenewapi_active_before = ONENEWAPI_ACTIVE_MUTATIONS.load(Ordering::Acquire);
+    if !disabled.iter().any(|d| d == "onenewapi") {
+        if let Ok(cards) = providers::onenewapi::prepare_key_cards().await {
+            expected_onenewapi_generations =
+                onenewapi_snapshot_generations(cards.iter().map(|card| card.id.clone()));
+            let onenewapi_generation_after = onenewapi_mutation_generation();
+            let onenewapi_active_after = ONENEWAPI_ACTIVE_MUTATIONS.load(Ordering::Acquire);
+            let stable = onenewapi_active_before == 0
+                && onenewapi_active_after == 0
+                && onenewapi_generation_before == onenewapi_generation_after;
+            if stable {
+                let clients = providers::onenewapi::refresh_clients(&cards);
+                for card in cards {
+                    let client = clients
+                        .get(&card.origin)
+                        .cloned()
+                        .unwrap_or_else(providers::http_no_redirect);
+                    let (id, name) = (card.id.clone(), card.name.clone());
+                    futs.push((
+                        id.clone(),
+                        Box::pin(guarded(
+                            id,
+                            name,
+                            providers::onenewapi::snapshot_key_with_client(client, card),
+                        )),
+                    ));
+                }
+            } else {
+                expected_onenewapi_generations.clear();
+            }
+        }
+    }
     let futs: Vec<(String, BoxedSnap)> = futs
         .into_iter()
-        .filter(|(id, _)| !disabled.iter().any(|d| d == id))
+        .filter(|(id, _)| !card_is_disabled(id, &disabled))
         .collect();
     // Telemetry never learns account-scoped ids — a claude@<hash8> would
     // carry an account-derived hash off the machine. Report families,
     // deduplicated, so a multi-account install looks like "claude" once.
     // (family_of is applied at EVERY telemetry boundary: enabled ids here,
     // refresh outcomes, and starred-metric prefixes.)
-    let enabled_ids: Vec<String> = {
+    let mut enabled_ids: Vec<String> = {
         let mut fams: Vec<String> = Vec::new();
         for (id, _) in &futs {
             let fam = family_of(id);
@@ -1094,14 +1697,44 @@ async fn fetch_usage(
             all.push(snap);
         }
     }
+    let current_onenewapi_generations = onenewapi_snapshot_generations(
+        all.iter()
+            .filter(|snapshot| family_of(&snapshot.id) == "onenewapi")
+            .map(|snapshot| snapshot.id.clone()),
+    );
+    let stale_onenewapi_ids = retain_current_onenewapi_results(
+        &mut all,
+        &expected_onenewapi_generations,
+        &current_onenewapi_generations,
+    );
+    if !stale_onenewapi_ids.is_empty() {
+        if !all
+            .iter()
+            .any(|snapshot| family_of(&snapshot.id) == "onenewapi")
+        {
+            enabled_ids.retain(|id| id != "onenewapi");
+        }
+        let mut failures = fail_state().lock().unwrap();
+        for id in stale_onenewapi_ids {
+            failures.remove(&id);
+        }
+    }
 
     for s in &all {
+        let log_id = if family_of(&s.id) == "onenewapi" {
+            "onenewapi"
+        } else {
+            s.id.as_str()
+        };
         eprintln!(
             "[pane] {}: {} ({} metrics){}",
-            s.id,
+            log_id,
             s.status,
             s.metrics.len(),
-            s.error.as_deref().map(|e| format!(" — {e}")).unwrap_or_default()
+            s.error
+                .as_deref()
+                .map(|e| format!(" — {e}"))
+                .unwrap_or_default()
         );
     }
 
@@ -1111,24 +1744,7 @@ async fn fetch_usage(
     // cache is persisted to disk so it survives app restarts; entries older
     // than a day are too misleading to show and get skipped.
     {
-        use std::collections::HashMap;
-        use std::sync::{Mutex, OnceLock};
-
-        #[derive(serde::Serialize, serde::Deserialize, Clone)]
-        struct CachedSnap {
-            at: i64,
-            snap: providers::Snapshot,
-        }
-
-        static LAST_OK: OnceLock<Mutex<HashMap<String, CachedSnap>>> = OnceLock::new();
-        let cache_file = providers::config_dir().join("last_snapshots.json");
-        let cache = LAST_OK.get_or_init(|| {
-            let loaded: HashMap<String, CachedSnap> = std::fs::read_to_string(&cache_file)
-                .ok()
-                .and_then(|raw| serde_json::from_str(&raw).ok())
-                .unwrap_or_default();
-            Mutex::new(loaded)
-        });
+        let cache = last_ok();
         // Cache identity stamp (upstream's Phase 1): if a DIFFERENT account
         // signed into a default home since the cache was written, that
         // family's cached last-good snapshot belongs to the old account —
@@ -1164,7 +1780,11 @@ async fn fetch_usage(
                 // launch undetectable.
                 to_store.insert(
                     fam.to_string(),
-                    if cur.is_null() && !old.is_null() { old } else { cur },
+                    if cur.is_null() && !old.is_null() {
+                        old
+                    } else {
+                        cur
+                    },
                 );
             }
             // Persist the PRUNED cache before the new stamp: if this
@@ -1172,15 +1792,10 @@ async fn fetch_usage(
             // would otherwise keep the old account's entry while the stamp
             // already claims the new one, resurrecting the wrong numbers
             // next launch. Stamp last, so a failed write just re-prunes.
-            let _ = std::fs::create_dir_all(providers::config_dir());
-            if removed {
-                if let Ok(serialized) = serde_json::to_string(&*map) {
-                    let _ = std::fs::write(&cache_file, serialized);
-                }
-            }
+            let cache_persisted = !removed || persist_last_ok(&map).is_ok();
             drop(map);
             let to_store = Value::Object(to_store);
-            if to_store != stored {
+            if cache_persisted && to_store != stored {
                 let _ = std::fs::write(
                     &stamp_file,
                     serde_json::to_string_pretty(&to_store).unwrap_or_default(),
@@ -1194,6 +1809,12 @@ async fn fetch_usage(
         if let Ok(mut map) = cache.lock() {
             let mut dirty = false;
             for s in all.iter_mut() {
+                if family_of(&s.id) == "onenewapi" {
+                    let current = onenewapi_snapshot_generations([s.id.clone()]);
+                    if expected_onenewapi_generations.get(&s.id) != current.get(&s.id) {
+                        continue;
+                    }
+                }
                 // Plan bars can succeed while the folded Moonshot wallet
                 // call fails; keep last-known API/Balance rows so Almost
                 // Out and the tray pin don't blink off for one timeout.
@@ -1216,7 +1837,13 @@ async fn fetch_usage(
                     }
                 }
                 if s.status == "ok" && !skip_cache {
-                    map.insert(s.id.clone(), CachedSnap { at: now_ms, snap: s.clone() });
+                    map.insert(
+                        s.id.clone(),
+                        CachedSnap {
+                            at: now_ms,
+                            snap: s.clone(),
+                        },
+                    );
                     dirty = true;
                 } else if s.status == "error" {
                     if let Some(previous) = map.get(&s.id) {
@@ -1226,11 +1853,36 @@ async fn fetch_usage(
                 }
             }
             if dirty {
-                if let Ok(serialized) = serde_json::to_string(&*map) {
-                    let _ = std::fs::create_dir_all(providers::config_dir());
-                    let _ = std::fs::write(&cache_file, serialized);
+                if let Err(error) = persist_last_ok(&map) {
+                    eprintln!("[pane] snapshot cache refresh: {error}");
                 }
             }
+        }
+    }
+
+    // A mutation can begin after the first post-request check. Recheck after
+    // the cache critical section so an old result is neither published nor
+    // included in alerts/telemetry while its replacement is being saved.
+    let current_onenewapi_generations = onenewapi_snapshot_generations(
+        all.iter()
+            .filter(|snapshot| family_of(&snapshot.id) == "onenewapi")
+            .map(|snapshot| snapshot.id.clone()),
+    );
+    let stale_onenewapi_ids = retain_current_onenewapi_results(
+        &mut all,
+        &expected_onenewapi_generations,
+        &current_onenewapi_generations,
+    );
+    if !stale_onenewapi_ids.is_empty() {
+        if !all
+            .iter()
+            .any(|snapshot| family_of(&snapshot.id) == "onenewapi")
+        {
+            enabled_ids.retain(|id| id != "onenewapi");
+        }
+        let mut failures = fail_state().lock().unwrap();
+        for id in stale_onenewapi_ids {
+            failures.remove(&id);
         }
     }
 
@@ -1242,7 +1894,10 @@ async fn fetch_usage(
     // Anonymous daily-rollup telemetry (Settings → "Share anonymous usage
     // statistics"). Fire-and-forget: it must never delay or fail a refresh.
     {
-        let enabled = cfg.get("telemetry").and_then(Value::as_bool).unwrap_or(true);
+        let enabled = cfg
+            .get("telemetry")
+            .and_then(Value::as_bool)
+            .unwrap_or(true);
         let starred_metrics: Vec<String> = cfg
             .pointer("/layout/providers")
             .and_then(Value::as_object)
@@ -1290,7 +1945,10 @@ async fn fetch_usage(
                 .and_then(Value::as_str)
                 .unwrap_or("regular")
                 .to_string(),
-            refresh_minutes: cfg.get("refreshMinutes").and_then(Value::as_u64).unwrap_or(5),
+            refresh_minutes: cfg
+                .get("refreshMinutes")
+                .and_then(Value::as_u64)
+                .unwrap_or(5),
         };
         let outcomes: Vec<telemetry::Outcome> = all
             .iter()
@@ -1304,6 +1962,7 @@ async fn fetch_usage(
                 error: s.error.clone().or_else(|| s.warning.clone()),
             })
             .collect();
+        let outcomes = telemetry::collapse_onenewapi_outcomes(outcomes);
         tauri::async_runtime::spawn(telemetry::record(enabled, snap, outcomes));
     }
 
@@ -1346,17 +2005,26 @@ fn cached_usage() -> Vec<providers::Snapshot> {
     let disabled: Vec<String> = cfg
         .get("disabled")
         .and_then(Value::as_array)
-        .map(|a| a.iter().filter_map(Value::as_str).map(str::to_string).collect())
+        .map(|a| {
+            a.iter()
+                .filter_map(Value::as_str)
+                .map(str::to_string)
+                .collect()
+        })
+        .unwrap_or_default();
+    let configured_onenewapi: HashSet<String> = providers::onenewapi::key_cards()
+        .map(|cards| cards.into_iter().map(|card| card.id).collect())
         .unwrap_or_default();
 
     // Same account-swap rule as the live path: if a different account
     // signed into a default home since the cache was written, that
     // family's bare-id entry belongs to the old account — never paint it,
     // not even for the seconds until the live fetch lands.
-    let stored: Value = std::fs::read_to_string(providers::config_dir().join("cache_identities.json"))
-        .ok()
-        .and_then(|raw| serde_json::from_str(&raw).ok())
-        .unwrap_or_else(|| json!({}));
+    let stored: Value =
+        std::fs::read_to_string(providers::config_dir().join("cache_identities.json"))
+            .ok()
+            .and_then(|raw| serde_json::from_str(&raw).ok())
+            .unwrap_or_else(|| json!({}));
     let swapped: Vec<&str> = [
         ("claude", providers::claude::default_identity()),
         ("codex", providers::codex::default_identity()),
@@ -1377,7 +2045,8 @@ fn cached_usage() -> Vec<providers::Snapshot> {
         .into_iter()
         .filter(|(id, c)| {
             now_ms - c.at <= MAX_STALE_MS
-                && !disabled.iter().any(|d| d == id)
+                && !card_is_disabled(id, &disabled)
+                && cached_onenewapi_id_is_configured(id, &configured_onenewapi)
                 && !swapped.iter().any(|f| f == id)
         })
         .map(|(_, c)| {
@@ -1452,6 +2121,135 @@ fn set_api_key(provider: String, key: String) -> Result<(), String> {
         .map_err(|e| format!("write key file: {e}"))
 }
 
+#[tauri::command]
+fn onenewapi_list_sites() -> Result<Vec<providers::onenewapi::SiteDto>, String> {
+    providers::onenewapi::list_sites()
+}
+
+#[tauri::command]
+async fn onenewapi_probe_site(base_url: String) -> Result<providers::onenewapi::ProbeDto, String> {
+    providers::onenewapi::probe_site(base_url).await
+}
+
+#[tauri::command]
+async fn onenewapi_create_site(
+    name: String,
+    base_url: String,
+) -> Result<providers::onenewapi::CreateSiteResult, String> {
+    providers::onenewapi::create_site(name, base_url).await
+}
+
+#[tauri::command]
+async fn onenewapi_update_site(
+    id: String,
+    name: Option<String>,
+    base_url: Option<String>,
+) -> Result<providers::onenewapi::SiteDto, String> {
+    let previous = providers::onenewapi::list_sites()?
+        .into_iter()
+        .find(|s| s.id == id)
+        .ok_or_else(|| "site not found".to_string())?;
+    let normalized_base_url = base_url
+        .as_deref()
+        .map(providers::onenewapi::normalize_site_url)
+        .transpose()?;
+    let url_changed = normalized_base_url
+        .as_deref()
+        .is_some_and(|candidate| candidate != previous.base_url);
+    let (verified_base_url, display) = if url_changed {
+        let raw = base_url
+            .as_ref()
+            .ok_or_else(|| "site URL is required".to_string())?;
+        let (dto, display) = providers::onenewapi::probe_site_display(raw.clone()).await?;
+        (Some(dto.base_url), Some(display))
+    } else {
+        (normalized_base_url, None)
+    };
+    let key_ids = previous
+        .keys
+        .iter()
+        .map(|key| key.id.clone())
+        .collect::<Vec<_>>();
+    let affected_snapshot_ids = onenewapi_snapshot_ids(&key_ids);
+    let _mutation = OneNewApiMutationGuard::begin(affected_snapshot_ids);
+    providers::onenewapi::update_site_consistently(id, name, verified_base_url, display, |site| {
+        if url_changed {
+            forget_onenewapi_key_ids(key_ids)?;
+            Ok(())
+        } else {
+            onenewapi_after_site_save(&previous, site)
+        }
+    })
+}
+
+#[tauri::command]
+fn onenewapi_delete_site(id: String) -> Result<(), String> {
+    let key_ids = providers::onenewapi::list_sites()?
+        .into_iter()
+        .find(|s| s.id == id)
+        .map(|s| s.keys.into_iter().map(|k| k.id).collect::<Vec<_>>())
+        .ok_or_else(|| "site not found".to_string())?;
+    let _mutation = OneNewApiMutationGuard::begin(onenewapi_snapshot_ids(&key_ids));
+    providers::onenewapi::delete_site_consistently(id, || purge_onenewapi_cards(&key_ids))
+}
+
+fn onenewapi_apply_zero_to_one_enable(disabled: &mut Vec<Value>, key_id: &str) {
+    let snap_id = format!("onenewapi@{key_id}");
+    disabled.retain(|v| match v.as_str() {
+        Some("onenewapi") => false,
+        Some(id) if id == snap_id => false,
+        _ => true,
+    });
+}
+
+#[tauri::command]
+fn onenewapi_create_key(
+    site_id: String,
+    label: String,
+    api_key: String,
+) -> Result<providers::onenewapi::CreatedKey, String> {
+    let _mutation = OneNewApiMutationGuard::begin(Vec::new());
+    providers::onenewapi::create_key(site_id, label, api_key)
+}
+
+#[tauri::command]
+fn onenewapi_update_key(
+    site_id: String,
+    key_id: String,
+    label: Option<String>,
+    api_key: Option<String>,
+) -> Result<providers::onenewapi::SiteDto, String> {
+    let rotated = api_key
+        .as_deref()
+        .map(str::trim)
+        .is_some_and(|s| !s.is_empty());
+    let label_changed = label.is_some();
+    let snap_id = format!("onenewapi@{key_id}");
+    let _mutation = OneNewApiMutationGuard::begin(vec![snap_id.clone()]);
+    providers::onenewapi::update_key_consistently(site_id, key_id.clone(), label, api_key, |site| {
+        if rotated {
+            forget_provider_snapshot(&snap_id)?;
+        } else if label_changed {
+            if let Some(key) = site.keys.iter().find(|k| k.id == key_id) {
+                rename_cached_snapshot(&snap_id, format!("{} · {}", site.name, key.label))?;
+            }
+        }
+        Ok(())
+    })
+}
+
+#[tauri::command]
+fn onenewapi_delete_key(
+    site_id: String,
+    key_id: String,
+) -> Result<providers::onenewapi::SiteDto, String> {
+    let _mutation = OneNewApiMutationGuard::begin(vec![format!("onenewapi@{key_id}")]);
+    let cleanup_key_id = key_id.clone();
+    providers::onenewapi::delete_key_consistently(site_id, key_id, || {
+        purge_onenewapi_cards(&[cleanup_key_id])
+    })
+}
+
 /// Opens a provider quick link in the default browser. Only plain web URLs —
 /// nothing that could launch a program.
 #[tauri::command]
@@ -1519,7 +2317,11 @@ fn copy_share_image(png_base64: String) -> Result<(), String> {
     let rgba = img.rgba().to_vec();
     let mut clipboard = arboard::Clipboard::new().map_err(|e| format!("clipboard: {e}"))?;
     clipboard
-        .set_image(arboard::ImageData { width: w, height: h, bytes: rgba.into() })
+        .set_image(arboard::ImageData {
+            width: w,
+            height: h,
+            bytes: rgba.into(),
+        })
         .map_err(|e| format!("copy image: {e}"))
 }
 
@@ -1570,9 +2372,7 @@ async fn codex_redeem_credit(
 /// substituted in query strings, so 0.4.17 installs literally reported
 /// "?v={{current_version}}" — the version is now formatted in Rust.
 /// GitHub stays as the automatic fallback; the pubkey comes from config.
-fn build_updater(
-    app: &tauri::AppHandle,
-) -> Result<tauri_plugin_updater::Updater, String> {
+fn build_updater(app: &tauri::AppHandle) -> Result<tauri_plugin_updater::Updater, String> {
     use tauri_plugin_updater::UpdaterExt;
     let version = app.package_info().version.to_string();
     let endpoints = vec![
@@ -1735,6 +2535,14 @@ pub fn run() {
             cached_usage,
             fetch_spend,
             set_api_key,
+            onenewapi_list_sites,
+            onenewapi_probe_site,
+            onenewapi_create_site,
+            onenewapi_update_site,
+            onenewapi_delete_site,
+            onenewapi_create_key,
+            onenewapi_update_key,
+            onenewapi_delete_key,
             get_config,
             set_config,
             system_ui_locale,
@@ -1837,13 +2645,24 @@ pub fn run() {
 #[cfg(test)]
 mod tests {
     use super::{
-        cached_kimi_ok_from, commit_strip_state_after_apply, fold_moonshot_into_kimi,
-        is_kimi_wallet_label, restore_kimi_wallet_rows, restore_last_success_after_error,
-        strip_entry_application_order, strip_icon_ids_to_clear, strip_is_active, strip_reset_ids,
+        cached_kimi_ok_from, cached_onenewapi_id_is_configured, card_is_disabled,
+        commit_strip_state_after_apply, fail_state, load_config_from, set_config_in,
+        fold_moonshot_into_kimi, forget_onenewapi_key_ids, forget_provider_snapshot,
+        is_kimi_wallet_label, last_ok, onenewapi_after_site_save,
+        onenewapi_apply_zero_to_one_enable, onenewapi_snapshot_generations, persist_last_ok_at,
+        onenewapi_purge_restore_patch, purge_onenewapi_cards, purge_onenewapi_cards_coordinated,
+        purge_onenewapi_cards_with, purge_onenewapi_from_config,
+        rename_cached_snapshot, rename_cached_snapshot_in, rename_cached_snapshots_in,
+        restore_kimi_wallet_rows,
+        restore_last_success_after_error,
+        retain_current_onenewapi_results, strip_entry_application_order, strip_icon_ids_to_clear,
+        strip_is_active, strip_reset_ids, CachedSnap, FailState, OneNewApiMutationGuard,
         StripEntry, SNAPSHOT_CACHE_MS, STALE_GRACE_MS,
     };
+    use crate::alerts;
     use crate::providers::{Metric, Snapshot};
-    use serde_json::json;
+    use serde_json::{json, Value};
+    use std::collections::{HashMap, HashSet};
 
     fn strip_entry(id: &str, value: u32) -> StripEntry {
         StripEntry {
@@ -2004,7 +2823,11 @@ mod tests {
         );
         let mut current = Snapshot::error("codex", "Codex", "timeout".into());
 
-        assert!(restore_last_success_after_error(&mut current, &previous, 1_000));
+        assert!(restore_last_success_after_error(
+            &mut current,
+            &previous,
+            1_000
+        ));
         assert_eq!(current.status, "ok");
         assert!(!current.stale);
         assert_eq!(current.warning, None);
@@ -2104,5 +2927,676 @@ mod tests {
         ];
         fold_moonshot_into_kimi(&mut empty_moon);
         assert!(!empty_moon.iter().any(|s| s.id == "moonshot"));
+    }
+
+    #[test]
+    fn card_is_disabled_onenewapi_family_gates_keys_not_claude() {
+        let family = vec!["onenewapi".into()];
+        assert!(card_is_disabled("onenewapi@abc", &family));
+        assert!(card_is_disabled("onenewapi", &family));
+        assert!(!card_is_disabled("claude@home", &family));
+        let one_key = vec!["onenewapi@abc".into()];
+        assert!(card_is_disabled("onenewapi@abc", &one_key));
+        assert!(!card_is_disabled("onenewapi@def", &one_key));
+        let claude = vec!["claude".into()];
+        assert!(card_is_disabled("claude", &claude));
+        assert!(!card_is_disabled("claude@home", &claude));
+    }
+
+    #[test]
+    fn onenewapi_zero_to_one_auto_enable_clears_family_and_new_key() {
+        let mut disabled = vec![
+            json!("onenewapi"),
+            json!("onenewapi@abc"),
+            json!("onenewapi@other"),
+            json!("claude"),
+        ];
+        onenewapi_apply_zero_to_one_enable(&mut disabled, "abc");
+        assert_eq!(disabled, vec![json!("onenewapi@other"), json!("claude")]);
+    }
+
+    #[test]
+    fn onenewapi_zero_to_one_does_not_add_the_new_key_to_disabled() {
+        let mut disabled: Vec<Value> = vec![];
+        onenewapi_apply_zero_to_one_enable(&mut disabled, "abc");
+        assert!(disabled.is_empty());
+    }
+
+    struct TempConfig {
+        dir: std::path::PathBuf,
+    }
+
+    impl TempConfig {
+        fn new() -> Self {
+            let stamp = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0);
+            let dir = std::env::temp_dir().join(format!(
+                "pane-config-{}-{stamp}",
+                std::process::id()
+            ));
+            std::fs::create_dir_all(&dir).unwrap();
+            Self { dir }
+        }
+    }
+
+    impl Drop for TempConfig {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.dir);
+        }
+    }
+
+    #[test]
+    fn concurrent_config_patches_keep_both_updates() {
+        let tmp = TempConfig::new();
+        std::fs::write(tmp.dir.join("config.json"), "{}").unwrap();
+        for round in 0..8 {
+            std::fs::write(tmp.dir.join("config.json"), "{}").unwrap();
+            let dir_a = tmp.dir.clone();
+            let dir_b = tmp.dir.clone();
+            let t1 = std::thread::spawn(move || set_config_in(&dir_a, json!({ "disabled": ["claude"] })));
+            let t2 = std::thread::spawn(move || set_config_in(&dir_b, json!({ "locale": "zh" })));
+            t1.join()
+                .expect("disabled patch thread")
+                .unwrap_or_else(|e| panic!("round {round} disabled patch: {e}"));
+            t2.join()
+                .expect("locale patch thread")
+                .unwrap_or_else(|e| panic!("round {round} locale patch: {e}"));
+            let cfg = load_config_from(&tmp.dir);
+            assert_eq!(
+                cfg["disabled"],
+                json!(["claude"]),
+                "round {round} lost disabled patch"
+            );
+            assert_eq!(cfg["locale"], json!("zh"), "round {round} lost locale patch");
+        }
+    }
+
+    #[test]
+    fn onenewapi_snapshot_cache_write_failure_is_reported() {
+        let root =
+            std::env::temp_dir().join(format!("pane-onenewapi-cache-fail-{}", std::process::id()));
+        let _ = std::fs::remove_file(&root);
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::write(&root, "not a directory").unwrap();
+        let result = persist_last_ok_at(&root.join("last_snapshots.json"), &HashMap::new());
+        let _ = std::fs::remove_file(&root);
+        assert!(
+            result.is_err(),
+            "cache persistence errors must reach deletion cleanup"
+        );
+    }
+
+    #[test]
+    fn onenewapi_cached_cards_require_a_configured_key() {
+        let configured = HashSet::from(["onenewapi@keep".to_string()]);
+        assert!(cached_onenewapi_id_is_configured(
+            "onenewapi@keep",
+            &configured
+        ));
+        assert!(!cached_onenewapi_id_is_configured(
+            "onenewapi@deleted",
+            &configured
+        ));
+        assert!(cached_onenewapi_id_is_configured("claude", &configured));
+    }
+
+    #[test]
+    fn onenewapi_stale_refresh_results_are_discarded() {
+        let expected = onenewapi_snapshot_generations(["onenewapi@old".into()]);
+        let mutation = OneNewApiMutationGuard::begin(vec!["onenewapi@old".into()]);
+        drop(mutation);
+        let current = onenewapi_snapshot_generations(["onenewapi@old".into()]);
+        let mut snapshots = vec![
+            Snapshot::ok("onenewapi@old", "Old · Key 1", None, vec![]),
+            Snapshot::ok("claude", "Claude", None, vec![]),
+        ];
+        let stale = retain_current_onenewapi_results(&mut snapshots, &expected, &current);
+        assert_eq!(stale, ["onenewapi@old"]);
+        assert_eq!(snapshots.len(), 1);
+        assert_eq!(snapshots[0].id, "claude");
+    }
+
+    struct SnapCacheGuard(String);
+
+    impl SnapCacheGuard {
+        fn new(id: &str) -> Self {
+            Self(id.to_string())
+        }
+    }
+
+    impl Drop for SnapCacheGuard {
+        fn drop(&mut self) {
+            fail_state().lock().unwrap().remove(&self.0);
+            last_ok().lock().unwrap().remove(&self.0);
+        }
+    }
+
+    #[test]
+    fn forget_provider_snapshot_clears_fail_state_and_last_ok() {
+        let id = "onenewapi@ticket03-forget";
+        let _guard = SnapCacheGuard::new(id);
+        fail_state().lock().unwrap().insert(
+            id.to_string(),
+            FailState {
+                until_ms: i64::MAX,
+                note: "benched".into(),
+            },
+        );
+        last_ok().lock().unwrap().insert(
+            id.to_string(),
+            CachedSnap {
+                at: 1,
+                snap: Snapshot::ok(
+                    id,
+                    "Panel · Old",
+                    None,
+                    vec![Metric::text("Limit", "$10.00".into())],
+                ),
+            },
+        );
+        forget_provider_snapshot(id).unwrap();
+        assert!(!fail_state().lock().unwrap().contains_key(id));
+        assert!(!last_ok().lock().unwrap().contains_key(id));
+    }
+
+    #[test]
+    fn rename_cached_snapshot_updates_name_only() {
+        let id = "onenewapi@ticket03-rename";
+        let _guard = SnapCacheGuard::new(id);
+        fail_state().lock().unwrap().insert(
+            id.to_string(),
+            FailState {
+                until_ms: i64::MAX,
+                note: "benched".into(),
+            },
+        );
+        last_ok().lock().unwrap().insert(
+            id.to_string(),
+            CachedSnap {
+                at: 42,
+                snap: Snapshot::ok(
+                    id,
+                    "Panel · Old",
+                    None,
+                    vec![Metric::text("Limit", "$10.00".into())],
+                ),
+            },
+        );
+        rename_cached_snapshot(id, "Panel · New".into()).unwrap();
+        let map = last_ok().lock().unwrap();
+        let entry = map.get(id).unwrap();
+        assert_eq!(entry.snap.name, "Panel · New");
+        assert_eq!(entry.at, 42);
+        assert_eq!(entry.snap.status, "ok");
+        assert_eq!(entry.snap.metrics.len(), 1);
+        assert_eq!(entry.snap.metrics[0].label, "Limit");
+        assert_eq!(entry.snap.metrics[0].value.as_deref(), Some("$10.00"));
+        drop(map);
+        assert_eq!(
+            fail_state().lock().unwrap().get(id).unwrap().note,
+            "benched"
+        );
+    }
+
+    #[test]
+    fn onenewapi_cached_rename_write_failure_keeps_old_name() {
+        let id = "onenewapi@ticket03-rename-fail";
+        let mut map = HashMap::from([(
+            id.to_string(),
+            CachedSnap {
+                at: 42,
+                snap: Snapshot::ok(id, "Panel · Old", None, vec![]),
+            },
+        )]);
+        let result = rename_cached_snapshot_in(&mut map, id, "Panel · New".into(), |_| {
+            Err("snapshot cache locked".into())
+        });
+        assert_eq!(result.unwrap_err(), "snapshot cache locked");
+        assert_eq!(map.get(id).unwrap().snap.name, "Panel · Old");
+    }
+
+    #[test]
+    fn onenewapi_multi_key_rename_write_failure_keeps_all_old_names() {
+        let a = "onenewapi@ticket06-rename-a";
+        let b = "onenewapi@ticket06-rename-b";
+        let mut map = HashMap::from([
+            (
+                a.to_string(),
+                CachedSnap {
+                    at: 1,
+                    snap: Snapshot::ok(a, "Old · One", None, vec![]),
+                },
+            ),
+            (
+                b.to_string(),
+                CachedSnap {
+                    at: 2,
+                    snap: Snapshot::ok(b, "Old · Two", None, vec![]),
+                },
+            ),
+        ]);
+        let result = rename_cached_snapshots_in(
+            &mut map,
+            &[
+                (a.to_string(), "New · One".into()),
+                (b.to_string(), "New · Two".into()),
+            ],
+            |_| Err("snapshot cache locked".into()),
+        );
+        assert_eq!(result.unwrap_err(), "snapshot cache locked");
+        assert_eq!(map.get(a).unwrap().snap.name, "Old · One");
+        assert_eq!(map.get(b).unwrap().snap.name, "Old · Two");
+        assert_eq!(map.get(a).unwrap().at, 1);
+        assert_eq!(map.get(b).unwrap().at, 2);
+    }
+
+    fn seed_onenewapi_cache(key_id: &str, name: &str) -> SnapCacheGuard {
+        let id = format!("onenewapi@{key_id}");
+        fail_state().lock().unwrap().insert(
+            id.clone(),
+            FailState {
+                until_ms: i64::MAX,
+                note: "benched".into(),
+            },
+        );
+        last_ok().lock().unwrap().insert(
+            id.clone(),
+            CachedSnap {
+                at: 42,
+                snap: Snapshot::ok(
+                    &id,
+                    name,
+                    None,
+                    vec![Metric::text("Limit", "$10.00".into())],
+                ),
+            },
+        );
+        SnapCacheGuard::new(&id)
+    }
+
+    fn onenewapi_site(
+        id: &str,
+        name: &str,
+        base_url: &str,
+        keys: &[(&str, &str)],
+    ) -> crate::providers::onenewapi::SiteDto {
+        crate::providers::onenewapi::SiteDto {
+            id: id.into(),
+            name: name.into(),
+            base_url: base_url.into(),
+            keys: keys
+                .iter()
+                .map(|(kid, label)| crate::providers::onenewapi::KeyDto {
+                    id: (*kid).into(),
+                    label: (*label).into(),
+                    has_api_key: true,
+                })
+                .collect(),
+        }
+    }
+
+    #[test]
+    fn forget_onenewapi_key_ids_clears_listed_keys_only() {
+        let _a = seed_onenewapi_cache("keep-a", "Panel · A");
+        let _b = seed_onenewapi_cache("drop-b", "Panel · B");
+        let _c = seed_onenewapi_cache("drop-c", "Panel · C");
+        forget_onenewapi_key_ids(["drop-b".into(), "drop-c".into()]).unwrap();
+        assert!(last_ok().lock().unwrap().contains_key("onenewapi@keep-a"));
+        assert!(fail_state()
+            .lock()
+            .unwrap()
+            .contains_key("onenewapi@keep-a"));
+        assert!(!last_ok().lock().unwrap().contains_key("onenewapi@drop-b"));
+        assert!(!fail_state()
+            .lock()
+            .unwrap()
+            .contains_key("onenewapi@drop-b"));
+        assert!(!last_ok().lock().unwrap().contains_key("onenewapi@drop-c"));
+        assert!(!fail_state()
+            .lock()
+            .unwrap()
+            .contains_key("onenewapi@drop-c"));
+    }
+
+    #[test]
+    fn onenewapi_url_change_forgets_that_sites_keys() {
+        let _a = seed_onenewapi_cache("site-a1", "Panel · One");
+        let _b = seed_onenewapi_cache("site-a2", "Panel · Two");
+        let _other = seed_onenewapi_cache("other-1", "Other · One");
+        let previous = onenewapi_site(
+            "site-a",
+            "Panel",
+            "http://127.0.0.1:1",
+            &[("site-a1", "One"), ("site-a2", "Two")],
+        );
+        let updated = onenewapi_site(
+            "site-a",
+            "Panel",
+            "http://127.0.0.1:2",
+            &[("site-a1", "One"), ("site-a2", "Two")],
+        );
+        forget_onenewapi_key_ids(updated.keys.iter().map(|key| key.id.clone())).unwrap();
+        onenewapi_after_site_save(&previous, &updated).unwrap();
+        assert!(!last_ok().lock().unwrap().contains_key("onenewapi@site-a1"));
+        assert!(!last_ok().lock().unwrap().contains_key("onenewapi@site-a2"));
+        assert!(!fail_state()
+            .lock()
+            .unwrap()
+            .contains_key("onenewapi@site-a1"));
+        assert!(last_ok().lock().unwrap().contains_key("onenewapi@other-1"));
+        assert!(fail_state()
+            .lock()
+            .unwrap()
+            .contains_key("onenewapi@other-1"));
+    }
+
+    #[test]
+    fn onenewapi_name_change_renames_child_cache_without_clearing() {
+        let _a = seed_onenewapi_cache("site-n1", "Old · One");
+        let _b = seed_onenewapi_cache("site-n2", "Old · Two");
+        let previous = onenewapi_site(
+            "site-n",
+            "Old",
+            "http://127.0.0.1:1",
+            &[("site-n1", "One"), ("site-n2", "Two")],
+        );
+        let updated = onenewapi_site(
+            "site-n",
+            "New",
+            "http://127.0.0.1:1",
+            &[("site-n1", "One"), ("site-n2", "Two")],
+        );
+        onenewapi_after_site_save(&previous, &updated).unwrap();
+        let map = last_ok().lock().unwrap();
+        assert_eq!(map.get("onenewapi@site-n1").unwrap().snap.name, "New · One");
+        assert_eq!(map.get("onenewapi@site-n2").unwrap().snap.name, "New · Two");
+        assert_eq!(map.get("onenewapi@site-n1").unwrap().at, 42);
+        assert_eq!(map.get("onenewapi@site-n1").unwrap().snap.metrics.len(), 1);
+        drop(map);
+        assert_eq!(
+            fail_state()
+                .lock()
+                .unwrap()
+                .get("onenewapi@site-n1")
+                .unwrap()
+                .note,
+            "benched"
+        );
+    }
+
+    fn sample_card_layout() -> Value {
+        json!({
+            "metricOrder": ["Usage"],
+            "onDemand": [],
+            "hidden": [],
+            "starred": ["Usage"],
+            "expanded": false
+        })
+    }
+
+    #[test]
+    fn purge_onenewapi_from_config_drops_only_those_snapshot_ids() {
+        let mut cfg = json!({
+            "disabled": ["onenewapi", "onenewapi@drop", "onenewapi@keep", "aihubmix"],
+            "layout": {
+                "providerOrder": [
+                    "aihubmix",
+                    "onenewapi",
+                    "onenewapi@drop",
+                    "onenewapi@keep",
+                    "onenewapi@other"
+                ],
+                "providers": {
+                    "aihubmix": sample_card_layout(),
+                    "onenewapi": sample_card_layout(),
+                    "onenewapi@drop": sample_card_layout(),
+                    "onenewapi@keep": sample_card_layout(),
+                    "onenewapi@other": sample_card_layout()
+                }
+            },
+            "pinned": {"provider": "onenewapi@drop", "label": "Usage"},
+            "trayProviders": ["onenewapi@drop", "aihubmix", "onenewapi@keep"]
+        });
+        let patch = purge_onenewapi_from_config(&mut cfg, &["onenewapi@drop".into()]);
+        assert_eq!(
+            cfg["disabled"],
+            json!(["onenewapi", "onenewapi@keep", "aihubmix"])
+        );
+        assert_eq!(
+            cfg["layout"]["providerOrder"],
+            json!(["aihubmix", "onenewapi", "onenewapi@keep", "onenewapi@other"])
+        );
+        assert!(cfg["layout"]["providers"].get("onenewapi@drop").is_none());
+        assert!(cfg["layout"]["providers"].get("onenewapi@keep").is_some());
+        assert!(cfg["layout"]["providers"].get("onenewapi@other").is_some());
+        assert!(cfg["layout"]["providers"].get("aihubmix").is_some());
+        assert!(cfg["layout"]["providers"].get("onenewapi").is_some());
+        assert_eq!(cfg["pinned"], Value::Null);
+        assert_eq!(cfg["trayProviders"], json!(["aihubmix", "onenewapi@keep"]));
+        assert!(patch.get("disabled").is_some());
+        assert!(patch.get("layout").is_some());
+        assert_eq!(patch["pinned"], Value::Null);
+        assert!(patch.get("trayProviders").is_some());
+    }
+
+    #[test]
+    fn purge_onenewapi_from_config_keeps_family_disabled_and_unrelated_pin() {
+        let mut cfg = json!({
+            "disabled": ["onenewapi", "onenewapi@drop"],
+            "layout": {
+                "providerOrder": ["aihubmix", "onenewapi", "onenewapi@drop"],
+                "providers": {
+                    "aihubmix": sample_card_layout(),
+                    "onenewapi@drop": sample_card_layout()
+                }
+            },
+            "pinned": {"provider": "aihubmix", "label": "Usage"},
+            "trayProviders": ["aihubmix"]
+        });
+        let patch = purge_onenewapi_from_config(&mut cfg, &["onenewapi@drop".into()]);
+        assert_eq!(cfg["disabled"], json!(["onenewapi"]));
+        assert_eq!(
+            cfg["pinned"],
+            json!({"provider": "aihubmix", "label": "Usage"})
+        );
+        assert_eq!(cfg["trayProviders"], json!(["aihubmix"]));
+        assert_eq!(
+            cfg["layout"]["providerOrder"],
+            json!(["aihubmix", "onenewapi"])
+        );
+        assert!(patch.get("pinned").is_none());
+        assert!(patch.get("trayProviders").is_none());
+    }
+
+    #[test]
+    fn purge_onenewapi_from_config_drops_all_site_keys_keeps_other_sites() {
+        let mut cfg = json!({
+            "disabled": ["onenewapi@a1", "onenewapi@a2", "onenewapi@b1", "aihubmix"],
+            "layout": {
+                "providerOrder": [
+                    "aihubmix",
+                    "onenewapi@a1",
+                    "onenewapi@a2",
+                    "onenewapi@b1"
+                ],
+                "providers": {
+                    "aihubmix": sample_card_layout(),
+                    "onenewapi@a1": sample_card_layout(),
+                    "onenewapi@a2": sample_card_layout(),
+                    "onenewapi@b1": sample_card_layout()
+                }
+            },
+            "pinned": {"provider": "onenewapi@a2", "label": "Usage"},
+            "trayProviders": ["onenewapi@a1", "onenewapi@b1", "aihubmix"]
+        });
+        let patch =
+            purge_onenewapi_from_config(&mut cfg, &["onenewapi@a1".into(), "onenewapi@a2".into()]);
+        assert_eq!(cfg["disabled"], json!(["onenewapi@b1", "aihubmix"]));
+        assert_eq!(
+            cfg["layout"]["providerOrder"],
+            json!(["aihubmix", "onenewapi@b1"])
+        );
+        assert!(cfg["layout"]["providers"].get("onenewapi@a1").is_none());
+        assert!(cfg["layout"]["providers"].get("onenewapi@a2").is_none());
+        assert!(cfg["layout"]["providers"].get("onenewapi@b1").is_some());
+        assert!(cfg["layout"]["providers"].get("aihubmix").is_some());
+        assert_eq!(cfg["pinned"], Value::Null);
+        assert_eq!(cfg["trayProviders"], json!(["onenewapi@b1", "aihubmix"]));
+        assert!(patch.get("disabled").is_some());
+    }
+
+    #[test]
+    fn purge_onenewapi_cards_drops_one_key_cache_and_alerts() {
+        let _keep = seed_onenewapi_cache("ticket07-keep", "Panel · Keep");
+        let _drop = seed_onenewapi_cache("ticket07-drop", "Panel · Drop");
+        let _other = seed_onenewapi_cache("ticket07-other", "Other · One");
+        alerts::insert_state_for_test("onenewapi@ticket07-drop:Usage");
+        alerts::insert_state_for_test("onenewapi@ticket07-keep:Usage");
+        alerts::insert_state_for_test("onenewapi@ticket07-other:Usage");
+        purge_onenewapi_cards(&["ticket07-drop".into()]).unwrap();
+        assert!(last_ok()
+            .lock()
+            .unwrap()
+            .contains_key("onenewapi@ticket07-keep"));
+        assert!(fail_state()
+            .lock()
+            .unwrap()
+            .contains_key("onenewapi@ticket07-keep"));
+        assert!(!last_ok()
+            .lock()
+            .unwrap()
+            .contains_key("onenewapi@ticket07-drop"));
+        assert!(!fail_state()
+            .lock()
+            .unwrap()
+            .contains_key("onenewapi@ticket07-drop"));
+        assert!(last_ok()
+            .lock()
+            .unwrap()
+            .contains_key("onenewapi@ticket07-other"));
+        assert!(fail_state()
+            .lock()
+            .unwrap()
+            .contains_key("onenewapi@ticket07-other"));
+        assert!(!alerts::has_state_for_test("onenewapi@ticket07-drop:Usage"));
+        assert!(alerts::has_state_for_test("onenewapi@ticket07-keep:Usage"));
+        assert!(alerts::has_state_for_test("onenewapi@ticket07-other:Usage"));
+        alerts::forget_snapshot("onenewapi@ticket07-keep");
+        alerts::forget_snapshot("onenewapi@ticket07-other");
+    }
+
+    #[test]
+    fn purge_onenewapi_cards_config_save_failure_keeps_snapshots_and_alerts() {
+        let _keep = seed_onenewapi_cache("ticket07-keep-cfg", "Panel · Keep");
+        let _drop = seed_onenewapi_cache("ticket07-drop-cfg", "Panel · Drop");
+        alerts::insert_state_for_test("onenewapi@ticket07-drop-cfg:Usage");
+        alerts::insert_state_for_test("onenewapi@ticket07-keep-cfg:Usage");
+        let result = purge_onenewapi_cards_with(&["ticket07-drop-cfg".into()], |_| {
+            Err("config locked".into())
+        });
+        assert_eq!(result.unwrap_err(), "config locked");
+        assert!(last_ok()
+            .lock()
+            .unwrap()
+            .contains_key("onenewapi@ticket07-drop-cfg"));
+        assert!(fail_state()
+            .lock()
+            .unwrap()
+            .contains_key("onenewapi@ticket07-drop-cfg"));
+        assert!(last_ok()
+            .lock()
+            .unwrap()
+            .contains_key("onenewapi@ticket07-keep-cfg"));
+        assert!(fail_state()
+            .lock()
+            .unwrap()
+            .contains_key("onenewapi@ticket07-keep-cfg"));
+        assert!(alerts::has_state_for_test(
+            "onenewapi@ticket07-drop-cfg:Usage"
+        ));
+        assert!(alerts::has_state_for_test(
+            "onenewapi@ticket07-keep-cfg:Usage"
+        ));
+        alerts::forget_snapshot("onenewapi@ticket07-drop-cfg");
+        alerts::forget_snapshot("onenewapi@ticket07-keep-cfg");
+    }
+
+    #[test]
+    fn purge_restores_card_settings_when_cache_cleanup_fails() {
+        let cfg = std::cell::RefCell::new(json!({
+            "disabled": ["onenewapi@drop", "aihubmix"],
+            "layout": {
+                "providerOrder": ["onenewapi@drop", "aihubmix"],
+                "providers": {
+                    "onenewapi@drop": {"starred": ["Usage"]},
+                    "aihubmix": {"starred": ["Usage"]}
+                }
+            },
+            "pinned": {"provider": "onenewapi@drop", "metric": "Usage"},
+            "trayProviders": ["onenewapi@drop", "aihubmix"]
+        }));
+        let original = cfg.borrow().clone();
+        let _keep = seed_onenewapi_cache("keep", "Panel · Keep");
+        let _drop = seed_onenewapi_cache("drop", "Panel · Drop");
+        alerts::insert_state_for_test("onenewapi@drop:Usage");
+        alerts::insert_state_for_test("onenewapi@keep:Usage");
+        let result = purge_onenewapi_cards_coordinated(
+            &["drop".into()],
+            |ids| {
+                let mut cfg = cfg.borrow_mut();
+                let before = cfg.clone();
+                let patch = purge_onenewapi_from_config(&mut cfg, ids);
+                assert!(!patch.as_object().unwrap().is_empty());
+                assert_ne!(*cfg, before);
+                Ok(onenewapi_purge_restore_patch(&before, &patch))
+            },
+            |_| Err("cache locked".into()),
+            |restore| {
+                let mut cfg = cfg.borrow_mut();
+                if let Some(obj) = restore.as_object() {
+                    for (k, v) in obj {
+                        cfg[k.clone()] = v.clone();
+                    }
+                }
+                Ok(())
+            },
+        );
+        assert_eq!(result.unwrap_err(), "cache locked");
+        assert_eq!(*cfg.borrow(), original);
+        assert!(last_ok().lock().unwrap().contains_key("onenewapi@drop"));
+        assert!(last_ok().lock().unwrap().contains_key("onenewapi@keep"));
+        assert!(alerts::has_state_for_test("onenewapi@drop:Usage"));
+        assert!(alerts::has_state_for_test("onenewapi@keep:Usage"));
+        alerts::forget_snapshot("onenewapi@drop");
+        alerts::forget_snapshot("onenewapi@keep");
+    }
+
+    #[test]
+    fn purge_onenewapi_cards_drops_all_site_child_cache() {
+        let _a1 = seed_onenewapi_cache("ticket07-a1", "Panel · One");
+        let _a2 = seed_onenewapi_cache("ticket07-a2", "Panel · Two");
+        let _b1 = seed_onenewapi_cache("ticket07-b1", "Other · One");
+        alerts::insert_state_for_test("onenewapi@ticket07-a1:Usage");
+        alerts::insert_state_for_test("onenewapi@ticket07-a2:Usage");
+        alerts::insert_state_for_test("onenewapi@ticket07-b1:Usage");
+        purge_onenewapi_cards(&["ticket07-a1".into(), "ticket07-a2".into()]).unwrap();
+        assert!(!last_ok()
+            .lock()
+            .unwrap()
+            .contains_key("onenewapi@ticket07-a1"));
+        assert!(!last_ok()
+            .lock()
+            .unwrap()
+            .contains_key("onenewapi@ticket07-a2"));
+        assert!(last_ok()
+            .lock()
+            .unwrap()
+            .contains_key("onenewapi@ticket07-b1"));
+        assert!(!alerts::has_state_for_test("onenewapi@ticket07-a1:Usage"));
+        assert!(!alerts::has_state_for_test("onenewapi@ticket07-a2:Usage"));
+        assert!(alerts::has_state_for_test("onenewapi@ticket07-b1:Usage"));
+        alerts::forget_snapshot("onenewapi@ticket07-b1");
     }
 }

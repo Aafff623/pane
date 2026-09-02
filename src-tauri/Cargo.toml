@@ -31,7 +31,7 @@ serde_json = "1"
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "socks"] }
 tiny_http = "0.12"
 arboard = "3"
-tokio = { version = "1", features = ["macros", "process", "time"] }
+tokio = { version = "1", features = ["macros", "process", "sync", "time"] }
 chrono = "0.4"
 base64 = "0.22"
 dirs = "6"
@@ -41,5 +41,4 @@ regex = "1"
 prost = "0.13" # Grok GetRemainingResets protobuf codec
 webview2-com = "0.38"
 windows-core = "0.61"
-windows = { version = "0.61", features = ["Win32_Foundation", "Win32_Globalization", "Win32_Security_Credentials", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging"] }
-
+windows = { version = "0.61", features = ["Win32_Foundation", "Win32_Globalization", "Win32_Security_Authorization", "Win32_Security_Credentials", "Win32_Storage_FileSystem", "Win32_System_Threading", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging"] }

@@ -39,6 +39,16 @@ pub(crate) struct MainTrayProjection {
     pub tooltip: String,
 }
 
+/// One/New API is two-level: family id `onenewapi` hides every key card.
+/// Claude/Codex extra accounts stay independent of the bare family id.
+fn projection_disabled(id: &str, disabled: &[String]) -> bool {
+    if disabled.iter().any(|d| d == id) {
+        return true;
+    }
+    let family = id.split('@').next().unwrap_or(id);
+    family == "onenewapi" && disabled.iter().any(|d| d == "onenewapi")
+}
+
 pub(crate) fn project_main_tray(
     snapshots: &[providers::Snapshot],
     config: &TrayProjectionConfig,
@@ -47,7 +57,7 @@ pub(crate) fn project_main_tray(
     let visible: Vec<&providers::Snapshot> = config
         .provider_order
         .iter()
-        .filter(|provider_id| !config.disabled.contains(provider_id))
+        .filter(|provider_id| !projection_disabled(provider_id, &config.disabled))
         .filter_map(|provider_id| {
             snapshots
                 .iter()
@@ -607,11 +617,7 @@ mod tests {
             snapshot("claude", "Claude", vec![Metric::text("Plan", "Pro".into())]),
         ];
 
-        let result = project_main_tray(
-            &snapshots,
-            &config(&["codex", "grok", "claude"]),
-            false,
-        );
+        let result = project_main_tray(&snapshots, &config(&["codex", "grok", "claude"]), false);
 
         assert_eq!(result.icon_mode, MainTrayIconMode::Logo);
         assert!(result.remaining_percentages.is_empty());
@@ -726,6 +732,86 @@ mod tests {
 
         assert!(result.tooltip.contains("\nClaude Home Weekly: 80% left"));
         assert!(result.tooltip.contains("\n⚠ Claude Work Weekly: 70% left"));
+    }
+
+    #[test]
+    fn onenewapi_family_disable_excludes_every_key_card() {
+        let snapshots = vec![
+            snapshot(
+                "onenewapi@k1",
+                "Site · Key 1",
+                vec![progress("Usage", 20.0)],
+            ),
+            snapshot(
+                "onenewapi@k2",
+                "Site · Key 2",
+                vec![progress("Usage", 40.0)],
+            ),
+        ];
+        let mut cfg = config(&["onenewapi@k1", "onenewapi@k2"]);
+        cfg.disabled.push("onenewapi".into());
+
+        let result = project_main_tray(&snapshots, &cfg, false);
+
+        assert_eq!(result.icon_mode, MainTrayIconMode::Logo);
+        assert!(result.remaining_percentages.is_empty());
+        assert_eq!(result.tooltip, "Pane");
+        assert_eq!(cfg.provider_order, vec!["onenewapi@k1", "onenewapi@k2"]);
+    }
+
+    #[test]
+    fn onenewapi_per_key_disable_leaves_the_other_key_in_saved_order() {
+        let snapshots = vec![
+            snapshot(
+                "onenewapi@k1",
+                "Site · Key 1",
+                vec![progress("Usage", 20.0)],
+            ),
+            snapshot("codex", "Codex", vec![progress("Session", 10.0)]),
+            snapshot(
+                "onenewapi@k2",
+                "Site · Key 2",
+                vec![progress("Usage", 40.0)],
+            ),
+        ];
+        let mut cfg = config(&["onenewapi@k2", "codex", "onenewapi@k1"]);
+        cfg.disabled.push("onenewapi@k1".into());
+
+        let result = project_main_tray(&snapshots, &cfg, false);
+
+        assert_eq!(result.remaining_percentages, vec![60]);
+        assert_eq!(
+            result.tooltip,
+            "Pane\nSite · Key 2 Usage: 60% left\nCodex Session: 90% left"
+        );
+        assert_eq!(
+            cfg.provider_order,
+            vec!["onenewapi@k2", "codex", "onenewapi@k1"]
+        );
+    }
+
+    #[test]
+    fn claude_family_disable_does_not_exclude_account_cards() {
+        let snapshots = vec![
+            snapshot(
+                "claude@home",
+                "Claude Home",
+                vec![progress("Session", 25.0)],
+            ),
+            snapshot(
+                "claude@work",
+                "Claude Work",
+                vec![progress("Session", 60.0)],
+            ),
+        ];
+        let mut cfg = config(&["claude@home", "claude@work"]);
+        cfg.disabled.push("claude".into());
+
+        let result = project_main_tray(&snapshots, &cfg, false);
+
+        assert_eq!(result.remaining_percentages, vec![75]);
+        assert!(result.tooltip.contains("Claude Home Session: 75% left"));
+        assert!(result.tooltip.contains("Claude Work Session: 40% left"));
     }
 
     #[test]

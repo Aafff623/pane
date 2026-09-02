@@ -17,13 +17,16 @@ fn latest() -> &'static Mutex<Value> {
 /// Called after each usage fetch with the enabled providers' snapshots.
 pub fn publish(snapshots: &[Snapshot]) {
     let fetched_at = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
-    let arr: Vec<Value> = snapshots.iter().map(|s| provider_json(s, &fetched_at)).collect();
+    let arr: Vec<Value> = snapshots
+        .iter()
+        .map(|s| provider_json(s, &fetched_at))
+        .collect();
     if let Ok(mut v) = latest().lock() {
         *v = Value::Array(arr);
     }
 }
 
-fn provider_json(s: &Snapshot, fetched_at: &str) -> Value {
+pub(crate) fn provider_json(s: &Snapshot, fetched_at: &str) -> Value {
     let lines: Vec<Value> = s
         .metrics
         .iter()
@@ -90,9 +93,8 @@ fn route(method: &tiny_http::Method, url: &str) -> (u16, String) {
                     Ok(v) => v
                         .as_array()
                         .and_then(|a| {
-                            a.iter().find(|p| {
-                                p.get("providerId").and_then(Value::as_str) == Some(id)
-                            })
+                            a.iter()
+                                .find(|p| p.get("providerId").and_then(Value::as_str) == Some(id))
                         })
                         .map(|p| (200, p.to_string()))
                         .unwrap_or((404, json!({"error": "provider_not_found"}).to_string())),
@@ -152,19 +154,88 @@ pub fn start() {
 
 #[cfg(test)]
 mod tests {
-    use super::host_ok;
+    use super::{host_ok, provider_json, publish, route};
+    use crate::providers::{Metric, Snapshot};
+
+    fn onenewapi_snap() -> Snapshot {
+        let mut snap = Snapshot::ok(
+            "onenewapi@abc",
+            "Site · Key 1",
+            None,
+            vec![Metric::progress(
+                "Usage",
+                48.63,
+                Some("$592.18 of $1217.82".into()),
+            )],
+        );
+        snap.dashboard_url = Some("https://panel.example.com".into());
+        snap
+    }
+
+    #[test]
+    fn onenewapi_json_omits_origin_dashboard_and_secrets() {
+        let snap = onenewapi_snap();
+        let json = provider_json(&snap, "2026-07-26T00:00:00Z");
+        assert_eq!(json["providerId"], "onenewapi@abc");
+        assert_eq!(json["displayName"], "Site · Key 1");
+        assert!(json.get("dashboardUrl").is_none());
+        assert!(json.get("dashboard_url").is_none());
+        assert!(json.get("baseUrl").is_none());
+        assert!(json.get("origin").is_none());
+        let raw = json.to_string();
+        for leak in [
+            "https://panel.example.com",
+            "panel.example.com",
+            "dashboard",
+            "sk-",
+            "apiKey",
+            "api_key",
+        ] {
+            assert!(
+                !raw.to_ascii_lowercase()
+                    .contains(&leak.to_ascii_lowercase()),
+                "local HTTP leaked {leak}: {raw}"
+            );
+        }
+    }
+
+    #[test]
+    fn get_by_id_uses_full_snapshot_id() {
+        publish(&[onenewapi_snap()]);
+        let (status, body) = route(&tiny_http::Method::Get, "/v1/usage/onenewapi@abc");
+        assert_eq!(status, 200);
+        let v: serde_json::Value = serde_json::from_str(&body).unwrap();
+        assert_eq!(v["providerId"], "onenewapi@abc");
+        assert_eq!(v["displayName"], "Site · Key 1");
+        assert!(!body.contains("https://panel.example.com"));
+        assert!(!body.to_ascii_lowercase().contains("dashboard"));
+
+        let (missing, _) = route(&tiny_http::Method::Get, "/v1/usage/onenewapi");
+        assert_eq!(missing, 404);
+    }
 
     #[test]
     fn host_header_must_be_loopback() {
         // Loopback spellings, with and without the port.
-        for good in ["127.0.0.1:6736", "127.0.0.1", "localhost:6736", "LOCALHOST", "[::1]:6736"] {
+        for good in [
+            "127.0.0.1:6736",
+            "127.0.0.1",
+            "localhost:6736",
+            "LOCALHOST",
+            "[::1]:6736",
+        ] {
             assert!(host_ok(Some(good)), "{good} should be allowed");
         }
         // Absent header (HTTP/1.0 scripts) stays allowed.
         assert!(host_ok(None));
         // A rebound hostname resolving to 127.0.0.1 is refused — this is
         // the DNS-rebinding case CORS can't catch.
-        for bad in ["evil.example:6736", "evil.example", "127.0.0.1.evil.example:6736", "localhost.evil.example"] {
+        for bad in [
+            "evil.example:6736",
+            "evil.example",
+            "127.0.0.1.evil.example:6736",
+            "localhost.evil.example",
+        ] {
             assert!(!host_ok(Some(bad)), "{bad} should be refused");
         }
     }

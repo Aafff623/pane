@@ -1,6 +1,5 @@
 pub mod aihubmix;
 pub mod antigravity;
-pub mod qwen;
 pub mod claude;
 pub mod codebuff;
 pub mod codex;
@@ -16,8 +15,10 @@ pub mod kimi;
 pub mod minimax;
 pub mod moonshot;
 pub mod ollama;
+pub mod onenewapi;
 pub mod opencode;
 pub mod openrouter;
+pub mod qwen;
 pub mod zai;
 
 use serde::{Deserialize, Serialize};
@@ -83,6 +84,8 @@ pub struct Snapshot {
     pub metrics: Vec<Metric>,
     pub stale: bool,
     pub warning: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dashboard_url: Option<String>,
 }
 
 impl Snapshot {
@@ -96,6 +99,7 @@ impl Snapshot {
             metrics,
             stale: false,
             warning: None,
+            dashboard_url: None,
         }
     }
 
@@ -109,6 +113,7 @@ impl Snapshot {
             metrics: vec![],
             stale: false,
             warning: None,
+            dashboard_url: None,
         }
     }
 
@@ -122,6 +127,7 @@ impl Snapshot {
             metrics: vec![],
             stale: false,
             warning: None,
+            dashboard_url: None,
         }
     }
 }
@@ -137,11 +143,17 @@ fn proxy_url() -> Option<&'static str> {
                 .ok()
                 .and_then(|raw| serde_json::from_str(raw.trim_start_matches('\u{feff}')).ok())?;
             let proxy = cfg.get("proxy")?;
-            if !proxy.get("enabled").and_then(serde_json::Value::as_bool).unwrap_or(false) {
+            if !proxy
+                .get("enabled")
+                .and_then(serde_json::Value::as_bool)
+                .unwrap_or(false)
+            {
                 return None;
             }
             let url = proxy.get("url")?.as_str()?.trim().to_string();
-            let valid = ["http://", "https://", "socks5://"].iter().any(|s| url.starts_with(s));
+            let valid = ["http://", "https://", "socks5://"]
+                .iter()
+                .any(|s| url.starts_with(s));
             if url.is_empty() || !valid {
                 return None;
             }
@@ -150,7 +162,7 @@ fn proxy_url() -> Option<&'static str> {
         .as_deref()
 }
 
-pub fn http() -> reqwest::Client {
+fn http_builder() -> reqwest::ClientBuilder {
     let mut builder = reqwest::Client::builder()
         .user_agent("Pane-Windows/0.3")
         .timeout(std::time::Duration::from_secs(20))
@@ -165,7 +177,20 @@ pub fn http() -> reqwest::Client {
             builder = builder.proxy(proxy);
         }
     }
-    builder.build().expect("failed to build http client")
+    builder
+}
+
+pub fn http() -> reqwest::Client {
+    http_builder().build().expect("failed to build http client")
+}
+
+/// Same client as [`http`] but never follows redirects. One/New API status
+/// and billing calls must not be bounced onto another origin.
+pub fn http_no_redirect() -> reqwest::Client {
+    http_builder()
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+        .expect("failed to build http client")
 }
 
 /// JSON bodies from vendor APIs are tiny (quota + token responses). Cap
@@ -238,8 +263,9 @@ pub fn read_windows_credential(target: &str) -> Option<Vec<u8>> {
             return None;
         }
         let cred = &*pcred;
-        let blob = std::slice::from_raw_parts(cred.CredentialBlob, cred.CredentialBlobSize as usize)
-            .to_vec();
+        let blob =
+            std::slice::from_raw_parts(cred.CredentialBlob, cred.CredentialBlobSize as usize)
+                .to_vec();
         CredFree(pcred as *mut std::ffi::c_void);
         Some(blob)
     }
@@ -251,8 +277,10 @@ pub fn credential_string(target: &str) -> Option<String> {
     let blob = read_windows_credential(target)?;
     let text = String::from_utf8(blob.clone()).ok().or_else(|| {
         if blob.len() % 2 == 0 {
-            let utf16: Vec<u16> =
-                blob.chunks_exact(2).map(|c| u16::from_le_bytes([c[0], c[1]])).collect();
+            let utf16: Vec<u16> = blob
+                .chunks_exact(2)
+                .map(|c| u16::from_le_bytes([c[0], c[1]]))
+                .collect();
             String::from_utf16(&utf16).ok()
         } else {
             None
@@ -261,7 +289,9 @@ pub fn credential_string(target: &str) -> Option<String> {
     let text = text.trim().trim_matches('\0').to_string();
     if let Some(b64) = text.strip_prefix("go-keyring-base64:") {
         use base64::Engine;
-        let decoded = base64::engine::general_purpose::STANDARD.decode(b64.trim()).ok()?;
+        let decoded = base64::engine::general_purpose::STANDARD
+            .decode(b64.trim())
+            .ok()?;
         return String::from_utf8(decoded).ok();
     }
     Some(text)
@@ -302,7 +332,10 @@ pub fn credit_meter_labeled(
         .and_then(|raw| serde_json::from_str(&raw).ok())
         .filter(serde_json::Value::is_object)
         .unwrap_or_else(|| serde_json::json!({}));
-    let high = doc.get(provider).and_then(serde_json::Value::as_f64).unwrap_or(0.0);
+    let high = doc
+        .get(provider)
+        .and_then(serde_json::Value::as_f64)
+        .unwrap_or(0.0);
     if balance > high {
         doc[provider] = serde_json::Value::from(balance);
         let _ = std::fs::write(
@@ -318,7 +351,9 @@ pub fn credit_meter_labeled(
     Some(Metric::progress(
         label,
         used,
-        Some(format!("{sign}{balance:.2} of {sign}{high:.2} left{caption_suffix}")),
+        Some(format!(
+            "{sign}{balance:.2} of {sign}{high:.2} left{caption_suffix}"
+        )),
     ))
 }
 
@@ -327,7 +362,9 @@ pub fn credit_meter_labeled(
 /// places CLAUDE_CONFIG_DIR / CODEX_HOME setups conventionally point.
 /// Shared by every provider family that supports multi-account discovery.
 pub(crate) fn account_scan_roots() -> Vec<std::path::PathBuf> {
-    let Some(home) = dirs::home_dir() else { return Vec::new() };
+    let Some(home) = dirs::home_dir() else {
+        return Vec::new();
+    };
     let mut roots = Vec::new();
     if let Ok(entries) = std::fs::read_dir(&home) {
         for e in entries.flatten() {
@@ -391,4 +428,3 @@ pub fn stored_api_key(provider: &str, env_vars: &[&str]) -> Option<String> {
     }
     None
 }
-
