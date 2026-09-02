@@ -351,9 +351,18 @@ async fn fetch() -> Result<Snapshot, String> {
     // original error surfaces and the last-good cache keeps the bars.
     // Outdated only after the three-minute stale grace — one failed
     // refresh still looks like the previous card, unmarked.
+    //
+    // api2.cursor.sh is a different host from cursor.com, and on some
+    // networks its TLS handshake times out for minutes while cursor.com
+    // keeps answering. The dashboard's REST usage-summary carries the same
+    // plan figures (what upstream OpenUsage reads for Enterprise), so it
+    // is tried first: the card stays live rather than stale.
     let mut usage = match connect_post("GetCurrentPeriodUsage", &token).await {
         Ok(u) => u,
         Err(e) => {
+            if let Ok(s) = summary_fetch(&token).await {
+                return Ok(s);
+            }
             return match legacy_fetch(&token).await {
                 Ok(s) => Ok(s),
                 Err(_) => Err(e),
@@ -381,7 +390,12 @@ async fn fetch() -> Result<Snapshot, String> {
     // Legacy request-quota accounts (and team/enterprise plans that hide
     // dollar pools) still answer the old REST endpoint. Use the effective
     // token — the stored one may be the stale token we just replaced.
+    // usage-summary goes first: Enterprise/team accounts that hide
+    // planUsage from the RPC still report percentages there.
     if !enabled || plan_usage.is_none() || (limit.is_none() && total_pct.is_none()) {
+        if let Ok(s) = summary_fetch(&token).await {
+            return Ok(s);
+        }
         return legacy_fetch(&token).await;
     }
     let plan_usage = plan_usage.unwrap();
@@ -570,14 +584,205 @@ async fn fetch() -> Result<Snapshot, String> {
     Ok(Snapshot::ok(ID, NAME, plan, metrics))
 }
 
+/// Cursor's web session cookie is "<user_id>::<jwt>"; the user id is the
+/// part of the JWT `sub` claim after the "auth0|" prefix.
+fn session_cookie(token: &str) -> Option<(String, String)> {
+    let sub = jwt_sub(token)?;
+    let user_id = sub.split('|').next_back().unwrap_or(&sub).to_string();
+    let cookie = format!("WorkosCursorSessionToken={user_id}%3A%3A{token}");
+    Some((user_id, cookie))
+}
+
+fn iso_ms(v: Option<&Value>) -> Option<i64> {
+    let s = v?.as_str()?;
+    chrono::DateTime::parse_from_rfc3339(s)
+        .ok()
+        .map(|d| d.timestamp_millis())
+}
+
+/// The dashboard's REST usage report ΓÇö the plan figures the Connect RPC
+/// carries, served from cursor.com instead of api2.cursor.sh. Live shape
+/// (Ultra, 2026-09): `individualUsage.plan.{used,limit,remaining,
+/// autoPercentUsed,apiPercentUsed,totalPercentUsed}`,
+/// `individualUsage.onDemand.{enabled,used,limit,remaining}`,
+/// `membershipType`, `limitType`, ISO `billingCycleStart/End`. Enterprise
+/// accounts add `teamUsage.{pooled,onDemand}`. Credits and bonus rows live
+/// only behind the RPC, so this card is the plan bars alone.
+async fn summary_fetch(token: &str) -> Result<Snapshot, String> {
+    let (_, cookie) = session_cookie(token).ok_or("could not decode Cursor session token")?;
+    let resp = http()
+        .get("https://cursor.com/api/usage-summary")
+        .header("Cookie", &cookie)
+        .send()
+        .await
+        .map_err(|e| format!("usage-summary request: {e}"))?;
+    if !resp.status().is_success() {
+        return Err(format!("usage-summary: HTTP {}", resp.status()));
+    }
+    let doc: Value = resp
+        .json()
+        .await
+        .map_err(|e| format!("usage-summary parse: {e}"))?;
+    summary_snapshot(&doc).ok_or_else(|| "usage-summary had no plan figures".into())
+}
+
+fn summary_snapshot(doc: &Value) -> Option<Snapshot> {
+    let individual = doc.get("individualUsage").filter(|v| v.is_object());
+    let team = doc.get("teamUsage").filter(|v| v.is_object());
+    // A disabled individual plan is "no personal meter", not "no card".
+    // Enterprise reports that placeholder next to a real team pool.
+    let plan_usage = individual
+        .and_then(|i| i.get("plan"))
+        .filter(|v| v.is_object())
+        .filter(|p| p.get("enabled").and_then(Value::as_bool) != Some(false));
+
+    const MONTH_MS: i64 = 30 * 24 * 3_600_000;
+    let cycle_start = iso_ms(doc.get("billingCycleStart"));
+    let cycle_end = iso_ms(doc.get("billingCycleEnd"));
+    let (resets_at, period_ms) = match (cycle_start, cycle_end) {
+        (Some(s), Some(e)) if e > s => (Some(e), e - s),
+        (_, Some(e)) => (Some(e), MONTH_MS),
+        _ => (None, MONTH_MS),
+    };
+
+    let plan = doc
+        .get("membershipType")
+        .and_then(Value::as_str)
+        .map(title_case)
+        .filter(|p| !p.is_empty());
+    let limit_type = doc
+        .get("limitType")
+        .and_then(Value::as_str)
+        .map(str::to_lowercase);
+    let is_team = limit_type.as_deref() == Some("team")
+        || plan.as_deref().map(|p| p.eq_ignore_ascii_case("team")) == Some(true);
+
+    let auto_pct = plan_usage.and_then(|p| num(p.get("autoPercentUsed")));
+    let api_pct = plan_usage.and_then(|p| num(p.get("apiPercentUsed")));
+    let total_pct = plan_usage.and_then(|p| num(p.get("totalPercentUsed")));
+    let limit = plan_usage
+        .and_then(|p| num(p.get("limit")))
+        .filter(|l| *l > 0.0);
+    let used_cents_opt = plan_usage.and_then(|p| {
+        num(p.get("used")).or_else(|| match (limit, num(p.get("remaining"))) {
+            (Some(l), Some(r)) => Some((l - r).max(0.0)),
+            _ => None,
+        })
+    });
+
+    let mut metrics = Vec::new();
+    if let Some(auto) = auto_pct {
+        metrics.push(
+            Metric::progress("Cursor Models", auto.clamp(0.0, 100.0), None)
+                .with_reset(resets_at, Some(period_ms)),
+        );
+    }
+    if let Some(api) = api_pct {
+        metrics.push(
+            Metric::progress("Other Models", api.clamp(0.0, 100.0), None)
+                .with_reset(resets_at, Some(period_ms)),
+        );
+    }
+
+    // Same total-row rules as the RPC path: team accounts get the dollar
+    // pool bar (individual, else pooled), bucket-era personal plans a text
+    // row (Cursor's page shows no total bar), pre-bucket plans the classic
+    // included-pool bar.
+    let pooled = team
+        .and_then(|t| t.get("pooled"))
+        .filter(|v| v.is_object())
+        .filter(|p| p.get("enabled").and_then(Value::as_bool) != Some(false));
+    let pooled_limit = pooled
+        .and_then(|p| num(p.get("limit")))
+        .filter(|l| *l > 0.0);
+    if is_team || pooled_limit.is_some() {
+        // No individual limit and no pooled cap is the live Enterprise
+        // shape: keep Cursor Models / Other Models / On-demand and skip
+        // the Total usage dollar bar instead of discarding the card.
+        let dollar_pool = match (used_cents_opt, limit) {
+            (Some(u), Some(l)) => Some((u, l)),
+            _ => match (pooled_limit, pooled) {
+                (Some(l), Some(p)) => {
+                    let used = num(p.get("used"))
+                        .filter(|u| *u > 0.0)
+                        .or_else(|| num(p.get("remaining")).map(|r| (l - r).max(0.0)))
+                        .unwrap_or(0.0);
+                    Some((used, l))
+                }
+                _ => None,
+            },
+        };
+        if let Some((used, cap)) = dollar_pool {
+            metrics.push(
+                Metric::progress(
+                    "Total usage",
+                    (used / cap * 100.0).clamp(0.0, 100.0),
+                    Some(format!("{} / {} this cycle", dollars(used), dollars(cap))),
+                )
+                .with_reset(resets_at, Some(period_ms)),
+            );
+        }
+    } else if auto_pct.is_some() || api_pct.is_some() {
+        if let Some(u) = used_cents_opt {
+            metrics.push(
+                Metric::text("Total usage", format!("{} this cycle", dollars(u)))
+                    .with_reset(resets_at, Some(period_ms)),
+            );
+        }
+    } else {
+        let pct = match (used_cents_opt, limit) {
+            (Some(u), Some(l)) => u / l * 100.0,
+            _ => total_pct?,
+        };
+        let detail = match (used_cents_opt, limit) {
+            (Some(u), Some(l)) => Some(format!("{} of {} included", dollars(u), dollars(l))),
+            _ => None,
+        };
+        metrics.push(
+            Metric::progress("Total usage", pct.clamp(0.0, 100.0), detail)
+                .with_reset(resets_at, Some(period_ms)),
+        );
+    }
+
+    // The headline On-demand card is user-scoped; the team aggregate only
+    // when Cursor omits the individual bucket (placeholder buckets come
+    // with `enabled: false` or no limit and must not block the fallback).
+    let od = [individual, team]
+        .into_iter()
+        .flatten()
+        .filter_map(|scope| scope.get("onDemand").filter(|v| v.is_object()))
+        .find(|b| {
+            b.get("enabled").and_then(Value::as_bool) != Some(false)
+                && (num(b.get("limit")).is_some_and(|l| l > 0.0)
+                    || num(b.get("used")).is_some_and(|u| u > 0.0))
+        });
+    if let Some(b) = od {
+        let od_limit = num(b.get("limit")).unwrap_or(0.0);
+        let od_spent = num(b.get("used"))
+            .filter(|u| *u > 0.0)
+            .or_else(|| num(b.get("remaining")).map(|r| (od_limit - r).max(0.0)))
+            .unwrap_or(0.0);
+        if od_limit > 0.0 {
+            metrics.push(Metric::progress(
+                "On-demand",
+                (od_spent / od_limit * 100.0).clamp(0.0, 100.0),
+                Some(format!("{} / {}", dollars(od_spent), dollars(od_limit))),
+            ));
+        } else if od_spent > 0.0 {
+            metrics.push(Metric::text("On-demand", dollars(od_spent)));
+        }
+    }
+
+    if metrics.iter().all(|m| m.kind != "progress") {
+        return None;
+    }
+    Some(Snapshot::ok(ID, NAME, plan, metrics))
+}
+
 /// Pre-2025 request-quota accounts: the old REST endpoint with the web
 /// session cookie, counting requests instead of dollars.
 async fn legacy_fetch(token: &str) -> Result<Snapshot, String> {
-    // Cursor's web session cookie is "<user_id>::<jwt>"; the user id is the
-    // part of the JWT `sub` claim after the "auth0|" prefix.
-    let sub = jwt_sub(token).ok_or("could not decode Cursor session token")?;
-    let user_id = sub.split('|').next_back().unwrap_or(&sub).to_string();
-    let cookie = format!("WorkosCursorSessionToken={user_id}%3A%3A{token}");
+    let (user_id, cookie) = session_cookie(token).ok_or("could not decode Cursor session token")?;
 
     let usage_req = http()
         .get(format!("https://cursor.com/api/usage?user={user_id}"))
@@ -670,6 +875,156 @@ mod tests {
         let m = credit_grants_metric(&grants).expect("row");
         assert_eq!(m.used_percent, Some(0.0));
         assert_eq!(m.detail.as_deref(), Some("$200 left of $200"));
+    }
+
+    #[test]
+    fn summary_ultra_shape_builds_the_bucket_card() {
+        // Live 2026-09 Ultra response, identifiers omitted.
+        let doc = json!({
+            "billingCycleStart": "2026-08-20T15:30:39.000Z",
+            "billingCycleEnd": "2026-09-20T15:30:39.000Z",
+            "membershipType": "ultra",
+            "limitType": "user",
+            "individualUsage": {
+                "plan": {
+                    "enabled": true, "used": 33090, "limit": 40000, "remaining": 6910,
+                    "autoPercentUsed": 3.497, "apiPercentUsed": 45.196, "totalPercentUsed": 9.454
+                },
+                "onDemand": { "enabled": false, "used": 0, "limit": null, "remaining": null }
+            },
+            "teamUsage": {}
+        });
+        let snap = summary_snapshot(&doc).expect("card");
+        assert_eq!(snap.plan.as_deref(), Some("Ultra"));
+        let labels: Vec<_> = snap
+            .metrics
+            .iter()
+            .map(|m| (m.kind.as_str(), m.label.as_str()))
+            .collect();
+        assert_eq!(
+            labels,
+            [
+                ("progress", "Cursor Models"),
+                ("progress", "Other Models"),
+                ("text", "Total usage")
+            ]
+        );
+        assert_eq!(snap.metrics[2].value.as_deref(), Some("$331 this cycle"));
+        assert_eq!(snap.metrics[0].resets_at, Some(1789918239000));
+        assert_eq!(snap.metrics[0].period_ms, Some(31 * 24 * 3_600_000));
+    }
+
+    #[test]
+    fn summary_team_pool_and_individual_on_demand() {
+        let doc = json!({
+            "membershipType": "enterprise",
+            "limitType": "team",
+            "individualUsage": {
+                "plan": { "autoPercentUsed": 10.0, "apiPercentUsed": 20.0 },
+                "onDemand": { "enabled": true, "used": 1500, "limit": 5000, "remaining": 3500 }
+            },
+            "teamUsage": {
+                "pooled": { "enabled": true, "used": 0, "limit": 200000, "remaining": 150000 },
+                "onDemand": { "enabled": true, "used": 99999, "limit": 1000000 }
+            }
+        });
+        let snap = summary_snapshot(&doc).expect("card");
+        let total = snap
+            .metrics
+            .iter()
+            .find(|m| m.label == "Total usage")
+            .expect("pool bar");
+        assert_eq!(total.kind, "progress");
+        assert_eq!(total.detail.as_deref(), Some("$500 / $2000 this cycle"));
+        assert_eq!(total.used_percent, Some(25.0));
+        let od = snap
+            .metrics
+            .iter()
+            .find(|m| m.label == "On-demand")
+            .expect("on-demand");
+        assert_eq!(od.detail.as_deref(), Some("$15.00 / $50.00"));
+    }
+
+    #[test]
+    fn summary_team_without_pool_keeps_percentages() {
+        // Live Enterprise shape from upstream research: limitType=team,
+        // Auto/API percents + individual on-demand, no pooled cap.
+        let doc = json!({
+            "membershipType": "enterprise",
+            "limitType": "team",
+            "individualUsage": {
+                "plan": { "autoPercentUsed": 10.0, "apiPercentUsed": 20.0 },
+                "onDemand": { "enabled": true, "used": 1500, "limit": 5000, "remaining": 3500 }
+            },
+            "teamUsage": {}
+        });
+        let snap = summary_snapshot(&doc).expect("card");
+        let labels: Vec<_> = snap
+            .metrics
+            .iter()
+            .map(|m| (m.kind.as_str(), m.label.as_str()))
+            .collect();
+        assert_eq!(
+            labels,
+            [
+                ("progress", "Cursor Models"),
+                ("progress", "Other Models"),
+                ("progress", "On-demand")
+            ]
+        );
+    }
+
+    #[test]
+    fn summary_without_figures_is_no_card() {
+        assert!(summary_snapshot(&json!({})).is_none());
+        assert!(
+            summary_snapshot(&json!({ "individualUsage": { "plan": { "enabled": false } } }))
+                .is_none()
+        );
+        // Only a spend figure, no percentages or limit — nothing to draw a bar from.
+        assert!(
+            summary_snapshot(&json!({ "individualUsage": { "plan": { "used": 12 } } })).is_none()
+        );
+    }
+
+    #[test]
+    fn summary_disabled_individual_plan_still_uses_team() {
+        let doc = json!({
+            "membershipType": "enterprise",
+            "limitType": "team",
+            "individualUsage": {
+                "plan": { "enabled": false, "autoPercentUsed": 10.0 }
+            },
+            "teamUsage": {
+                "pooled": { "enabled": true, "used": 50000, "limit": 200000, "remaining": 150000 }
+            }
+        });
+        let snap = summary_snapshot(&doc).expect("team card");
+        let total = snap
+            .metrics
+            .iter()
+            .find(|m| m.label == "Total usage")
+            .expect("pool bar");
+        assert_eq!(total.kind, "progress");
+        assert_eq!(total.detail.as_deref(), Some("$500 / $2000 this cycle"));
+        assert!(snap.metrics.iter().all(|m| m.label != "Cursor Models"));
+    }
+
+    #[test]
+    fn summary_disabled_team_pool_is_not_a_card() {
+        let doc = json!({
+            "membershipType": "enterprise",
+            "limitType": "team",
+            "individualUsage": {
+                "plan": { "enabled": false }
+            },
+            "teamUsage": {
+                "pooled": {
+                    "enabled": false, "used": 50000, "limit": 200000, "remaining": 150000
+                }
+            }
+        });
+        assert!(summary_snapshot(&doc).is_none());
     }
 
     #[test]

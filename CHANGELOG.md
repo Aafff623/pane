@@ -18,6 +18,15 @@
   good refresh. That fallback now only counts when it carries a real
   request quota; otherwise Pane keeps the last good card (Outdated only
   after three minutes of failed refreshes).
+- **Cursor bars stay live when `api2.cursor.sh` is unreachable.** On
+  some networks that host's TLS handshake times out for minutes while
+  `cursor.com` keeps answering. Pane now reads the dashboard's
+  `usage-summary` report in that case — same Cursor Models / Other
+  Models / Total usage / On-demand figures, from the host that works —
+  instead of showing a stale card. Also covers Enterprise/team accounts
+  that hide plan usage from the RPC (what OpenUsage on Mac does),
+  including the live shape that has percentages and on-demand but no
+  pooled dollar cap. Credits and Bonus rows still need the primary API.
 
 ## 0.4.45 — 2026-08-29
 
