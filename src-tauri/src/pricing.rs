@@ -166,7 +166,7 @@ pub fn generation() -> u64 {
 /// fingerprinted below — an app update that reprices the same files would
 /// otherwise leave history at the old dollars until upstream happens to
 /// rewrite a catalog.
-const CORRECTIONS_REV: u32 = 9; // 9: AihubMix HY4 Preview and Qwen3.8 Flash launch pricing
+const CORRECTIONS_REV: u32 = 10; // 10: AihubMix Qwen3.8-Max-0902 snapshot pricing
 
 /// The corrections revision on its own — the spend cache treats a changed
 /// revision as a hard discard (the *code* that prices changed), while a
@@ -801,6 +801,14 @@ fn builtin_price(canonical: &str) -> Option<Price> {
         "aihubmix/qwen3.8-flash" => {
             return Some(Price::flat(0.1126, 0.380025, 0.014075, 0.175937));
         }
+        // AihubMix Qwen3.8-Max-0902 (aihubmix.com/model/qwen3.8-max-2026-09-02):
+        // $1.69 in / $5.07 out / $0.169 cache read / $2.1125 cache write.
+        // Same headline card as their live `qwen3.8-max` page; this SKU is
+        // the dated snapshot Hermes logs. Scoped so Alibaba's $2/$6
+        // `qwen3.8-max` arm is untouched.
+        "aihubmix/qwen3.8-max-2026-09-02" => {
+            return Some(Price::flat(1.69, 5.07, 0.169, 2.1125));
+        }
         _ => {}
     }
     let bare = canonical.rsplit('/').next().unwrap_or(canonical);
@@ -1024,6 +1032,30 @@ mod tests {
             (qwen.input, qwen.output, qwen.cache_read, qwen.cache_write),
             (0.1126, 0.380025, 0.014075, 0.175937)
         );
+    }
+
+    #[test]
+    fn aihubmix_qwen38_max_0902_uses_gateway_card() {
+        let store = super::Store::default();
+        let p = super::resolve(&store, "aihubmix/qwen3.8-max-2026-09-02", 0).unwrap();
+        assert_eq!(
+            (p.input, p.output, p.cache_read, p.cache_write),
+            (1.69, 5.07, 0.169, 2.1125)
+        );
+        // Bare / other-gateway spellings stay off this discount card.
+        assert!(super::resolve(&store, "qwen3.8-max-0902", 0).is_none());
+        assert!(super::resolve(&store, "qwen3.8-max-2026-09-02", 0).is_none());
+        // Alibaba's GA card is unchanged.
+        let max = super::resolve(&store, "qwen3.8-max", 0).unwrap();
+        assert_eq!((max.input, max.output), (2.0, 6.0));
+        // A catalog row for the snapshot self-retires the bake.
+        let mut store = super::Store::default();
+        store.litellm.insert(
+            "aihubmix/qwen3.8-max-2026-09-02".into(),
+            super::Price::flat(9.0, 9.0, 0.9, 9.0),
+        );
+        let p = super::resolve(&store, "aihubmix/qwen3.8-max-2026-09-02", 0).unwrap();
+        assert_eq!((p.input, p.output), (9.0, 9.0));
     }
 
     #[test]

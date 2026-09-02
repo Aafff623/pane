@@ -27,6 +27,10 @@
   that hide plan usage from the RPC (what OpenUsage on Mac does),
   including the live shape that has percentages and on-demand but no
   pooled dollar cap. Credits and Bonus rows still need the primary API.
+- **Hermes prices Qwen3.8-Max-0902 through AihubMix.** The snapshot
+  logs as `qwen3.8-max-0902` / `qwen3.8-max-2026-09-02`, which missed
+  the rate table, so Today showed tokens at $0.00. Those AihubMix rows
+  now use the gateway card ($1.69 / $5.07, cache $0.169 / $2.1125).
 
 ## 0.4.45 — 2026-08-29
 
