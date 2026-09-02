@@ -1915,9 +1915,10 @@ fn qwen() -> ProviderSpend {
 
 /// Kimi Code spend: CLI sessions under ~/.kimi-code/sessions — each
 /// agent's wire.jsonl logs one usage.record per turn. Files on the plan
-/// card when that login exists *and* the card is on; otherwise they stay
-/// on Moonshot so API-only installs (and leftover logs, or a Kimi card
-/// still sitting in Disabled after `kimi login`) don't lose the dollars.
+/// card when a login or pasted plan key exists *and* the card is on;
+/// otherwise they stay on Moonshot so API-only installs (and leftover
+/// logs, or a Kimi card still sitting in Disabled after `kimi login`)
+/// don't lose the dollars.
 fn kimi(extra: FileData) -> ProviderSpend {
     let root = providers::kimi::code_home().join("sessions");
     let mut files = Vec::new();
@@ -1931,7 +1932,7 @@ fn kimi(extra: FileData) -> ProviderSpend {
     // router, Claude Code on Moonshot's endpoint) join the same card.
     merge_data(&mut all, extra);
     let (id, name) = kimi_spend_target(
-        providers::kimi::has_login(),
+        providers::kimi::has_credentials(),
         providers::provider_disabled("kimi"),
     );
     build_spend(id, name, all)

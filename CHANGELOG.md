@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+### Added
+- **Kimi Code without the CLI.** Settings → API keys has a new **Kimi
+  Code** field for your Kimi For Coding plan key. With no `kimi login` on
+  the PC, Pane sends that key to the same usage endpoint the CLI uses and
+  shows Session / Weekly bars and reset times. A CLI login still wins
+  when both exist. The Z.ai field is now labeled **Z.ai / GLM** — a GLM
+  Coding Plan key already worked there (issue #173).
+
 ## 0.4.45 — 2026-08-29
 
 ### Added
