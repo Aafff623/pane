@@ -76,7 +76,7 @@ All of this is auditable in the source — links go to the exact code.
 
 - The installer is **not yet Authenticode-signed**, so SmartScreen warns
   on first run. Updates are minisign-verified regardless. A code-signing
-  certificate is planned. (The `irm pane.jazii.dev/install.ps1 | iex`
+  certificate is planned. (The `irm https://trypane.xyz/install.ps1 | iex`
   install path and winget don't trigger SmartScreen.)
 - Release binaries are built by GitHub Actions from the pushed tag —
   see [.github/workflows/release.yml](.github/workflows/release.yml);

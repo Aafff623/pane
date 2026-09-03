@@ -11,7 +11,7 @@ reset? What did today actually cost me?*
 Pane is the [OpenUsage](https://www.openusage.ai/) port for Windows: a free
 AI plan tracker for Claude, Codex, Cursor, Copilot, Kimi, Grok, and 15 more.
 
-**[pane.jazii.dev](https://pane.jazii.dev)** · [Guides](https://pane.jazii.dev/guides) · [Install](#install) · [How it works](#how-it-works) · [Providers](#providers-21-and-counting) · [Features](#features) · [Privacy](#privacy--security) · [Credits](#credits)
+**[trypane.xyz](https://trypane.xyz)** · [Guides](https://trypane.xyz/guides) · [Install](#install) · [How it works](#how-it-works) · [Providers](#providers-21-and-counting) · [Features](#features) · [Privacy](#privacy--security) · [Credits](#credits)
 
 <img src="docs/promo.png" width="760" alt="Pane — track all your AI subscription limits in one tray app: Total Spend donut with per-provider slices, usage cards with pace bars" />
 
@@ -50,7 +50,7 @@ reviewed, hash-verified, no SmartScreen prompt.
 ### One-liner (PowerShell)
 
 ```powershell
-irm https://pane.jazii.dev/install.ps1 | iex
+irm https://trypane.xyz/install.ps1 | iex
 ```
 
 Downloads the latest release, verifies its SHA-256, installs per-user
@@ -60,7 +60,7 @@ Piping a script straight into PowerShell runs whatever the server sends
 at that moment. Prefer to look first? Same script, two steps:
 
 ```powershell
-iwr https://pane.jazii.dev/install.ps1 -OutFile install.ps1
+iwr https://trypane.xyz/install.ps1 -OutFile install.ps1
 # read install.ps1 — one short, commented script — then:
 powershell -ExecutionPolicy Bypass -File .\install.ps1
 ```

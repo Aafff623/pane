@@ -2377,7 +2377,7 @@ fn build_updater(app: &tauri::AppHandle) -> Result<tauri_plugin_updater::Updater
     use tauri_plugin_updater::UpdaterExt;
     let version = app.package_info().version.to_string();
     let endpoints = vec![
-        format!("https://pane.jazii.dev/api/update?v={version}")
+        format!("https://trypane.xyz/api/update?v={version}")
             .parse()
             .map_err(|e| format!("endpoint parse: {e}"))?,
         "https://github.com/ItsJazii/pane/releases/latest/download/latest.json"
