@@ -33,7 +33,7 @@
   "plugins": {
     "updater": {
       "endpoints": [
-        "https://pane.jazii.dev/api/update?v={{current_version}}",
+        "https://trypane.xyz/api/update?v={{current_version}}",
         "https://github.com/ItsJazii/pane/releases/latest/download/latest.json"
       ],
       "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDhDRUI5RUYzRkVBMzlCQ0QKUldUTm02UCs4NTdyalB4dHhyci8wb2dzb1FUQzJpaCt1VWc5dDJCaGpoWlNMTlNlWTF3Z0F4NEEK"
