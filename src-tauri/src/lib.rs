@@ -2373,17 +2373,20 @@ async fn codex_redeem_credit(
 /// substituted in query strings, so 0.4.17 installs literally reported
 /// "?v={{current_version}}" — the version is now formatted in Rust.
 /// GitHub stays as the automatic fallback; the pubkey comes from config.
+fn updater_endpoint_strings(version: &str) -> [String; 2] {
+    [
+        format!("https://trypane.xyz/api/update?v={version}"),
+        "https://github.com/ItsJazii/pane/releases/latest/download/latest.json".into(),
+    ]
+}
+
 fn build_updater(app: &tauri::AppHandle) -> Result<tauri_plugin_updater::Updater, String> {
     use tauri_plugin_updater::UpdaterExt;
     let version = app.package_info().version.to_string();
-    let endpoints = vec![
-        format!("https://trypane.xyz/api/update?v={version}")
-            .parse()
-            .map_err(|e| format!("endpoint parse: {e}"))?,
-        "https://github.com/ItsJazii/pane/releases/latest/download/latest.json"
-            .parse()
-            .map_err(|e| format!("endpoint parse: {e}"))?,
-    ];
+    let endpoints = updater_endpoint_strings(&version)
+        .into_iter()
+        .map(|endpoint| endpoint.parse().map_err(|e| format!("endpoint parse: {e}")))
+        .collect::<Result<Vec<_>, _>>()?;
     app.updater_builder()
         .endpoints(endpoints)
         .map_err(|e| e.to_string())?
@@ -2657,8 +2660,8 @@ mod tests {
         restore_kimi_wallet_rows,
         restore_last_success_after_error,
         retain_current_onenewapi_results, strip_entry_application_order, strip_icon_ids_to_clear,
-        strip_is_active, strip_reset_ids, CachedSnap, FailState, OneNewApiMutationGuard,
-        StripEntry, SNAPSHOT_CACHE_MS, STALE_GRACE_MS,
+        strip_is_active, strip_reset_ids, updater_endpoint_strings, CachedSnap, FailState,
+        OneNewApiMutationGuard, StripEntry, SNAPSHOT_CACHE_MS, STALE_GRACE_MS,
     };
     use crate::alerts;
     use crate::providers::{Metric, Snapshot};
@@ -2672,6 +2675,17 @@ mod tests {
             values: vec![value],
             tooltip: id.into(),
         }
+    }
+
+    #[test]
+    fn updater_prefers_trypane_then_github() {
+        assert_eq!(
+            updater_endpoint_strings("0.4.46"),
+            [
+                "https://trypane.xyz/api/update?v=0.4.46".to_string(),
+                "https://github.com/ItsJazii/pane/releases/latest/download/latest.json".to_string(),
+            ]
+        );
     }
 
     #[test]
