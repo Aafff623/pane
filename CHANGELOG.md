@@ -5,7 +5,7 @@
 ### Changed
 - **Pane's website moved to trypane.xyz.** Public links and install
   commands use the new domain. Existing `pane.jazii.dev` updater clients
-  and the private dashboard remain supported through a compatibility alias.
+  and dashboard links remain supported through a permanent domain redirect.
 
 ## 0.4.46 — 2026-09-02
 
