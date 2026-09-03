@@ -2,16 +2,16 @@
 
 **Status (v0.4.46, 2026-09-02): every wave below is shipped, and the
 post-launch releases keep going.** Pane has full feature parity with the
-macOS original plus 21 providers, signed auto-updates published by CI,
-Codex reset-credit redemption, update-check-on-open with a one-click
-footer button, live model pricing that re-prices within the hour when
-new models appear, modern Cursor plan support, and a Mac-parity design
-pass (inset card composition, wedge spend donut with dollars ⇄ tokens,
-in-popover drag reorder, curated share cards). What comes next is
-demand-driven — open an issue for the provider or feature you're
-missing. Candidates on deck: Windsurf and JetBrains AI providers,
-long-context pricing tiers, a Re-detect Tools button, tray "Bars" icon
-style, code signing.
+macOS original plus 22 providers, multi-site One/New API key management,
+Kimi Code plan keys without a CLI login, resilient modern Cursor plan
+fallbacks, English/Chinese/Russian UI, signed CI updates, live model
+pricing, and a Mac-parity design pass (inset cards, wedge spend donut,
+in-popover drag reorder, curated share cards). The primary site is now
+`trypane.xyz`; app-side updater migration is on main for the next release.
+What comes next is demand-driven — open an issue for the provider or
+feature you're missing. Candidates on deck: Windsurf and JetBrains AI
+providers, a Re-detect Tools button, tray "Bars" icon style, and code
+signing.
 
 ---
 
