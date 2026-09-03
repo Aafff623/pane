@@ -71,6 +71,8 @@ All of this is auditable in the source — links go to the exact code.
   the original to `*.pane-bak` — a bad write can never cost you a login.
 - **API keys you paste** are stored in `%APPDATA%\Pane` on your PC,
   readable only by your Windows user, and sent only to their own vendor.
+  One/New API sites and keys use a nested owner-only store; Settings returns
+  labels and origins after save, never secret values or fragments.
 
 ## Known limitations (honesty section)
 

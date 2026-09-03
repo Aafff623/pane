@@ -9,9 +9,9 @@ asking: *How much of my Claude session is left? When does my Codex weekly
 reset? What did today actually cost me?*
 
 Pane is the [OpenUsage](https://www.openusage.ai/) port for Windows: a free
-AI plan tracker for Claude, Codex, Cursor, Copilot, Kimi, Grok, and 15 more.
+AI plan tracker for Claude, Codex, Cursor, Copilot, Kimi, Grok, and 16 more.
 
-**[trypane.xyz](https://trypane.xyz)** · [Guides](https://trypane.xyz/guides) · [Install](#install) · [How it works](#how-it-works) · [Providers](#providers-21-and-counting) · [Features](#features) · [Privacy](#privacy--security) · [Credits](#credits)
+**[trypane.xyz](https://trypane.xyz)** · [Guides](https://trypane.xyz/guides) · [Install](#install) · [How it works](#how-it-works) · [Providers](#providers-22-and-counting) · [Features](#features) · [Privacy](#privacy--security) · [Credits](#credits)
 
 <img src="docs/promo.png" width="760" alt="Pane — track all your AI subscription limits in one tray app: Total Spend donut with per-provider slices, usage cards with pace bars" />
 
@@ -149,13 +149,13 @@ statistic (random ID, version, which providers are enabled, provider
 success/failure counts — never amounts or error text) — see
 [Privacy](#privacy--security) for the full contract and the off switch.
 
-## Providers (21 and counting)
+## Providers (22 and counting)
 
 | Provider | How Pane connects |
 |---|---|
 | Claude (Claude Code) | `%USERPROFILE%\.claude\.credentials.json` + Anthropic usage API; multi-account — every discovered config-dir login gets its own card |
 | Codex (Codex CLI) | `%USERPROFILE%\.codex\auth.json` + ChatGPT usage API, incl. reset-credit redemption; multi-account like Claude |
-| Cursor | Cursor's local state database + cursor.com API |
+| Cursor | Cursor's local state database + modern usage RPC; `cursor.com/api/usage-summary` keeps plan bars live when the RPC host is unreachable |
 | OpenCode (Go plan) | Official account-wide usage API (Go key from `auth.json`); local `opencode.db` for spend* |
 | GitHub Copilot | Copilot editor login or GitHub CLI (Credential Manager) + GitHub API |
 | Grok (Grok CLI) | `%USERPROFILE%\.grok\auth.json` + Grok billing/subscription APIs |
@@ -165,15 +165,16 @@ success/failure counts — never amounts or error text) — see
 | Z.ai | API key (Settings), CLI key file, or env var |
 | Antigravity | Local language server, or Google Cloud Code API via Credential Manager |
 | DeepSeek | API key (Settings) → balance |
-| Moonshot (Kimi API) | API key (Settings) → balance (global + CN endpoints) |
-| Kimi Code | Official CLI login (`kimi login`) → Session + Weekly plan bars and membership name (Moderato / Allegretto / Allegro / Vivace); Moonshot API key → API wallet bar; local session spend |
+| Kimi API | Platform API key (Settings) → wallet balance and credits-used meter (global + CN endpoints) |
+| Kimi Code | Official CLI login (`kimi login`) or pasted Kimi For Coding plan key → Session + Weekly bars and membership name (Moderato / Allegretto / Allegro / Vivace); optional Kimi API wallet bar; local session spend |
 | ElevenLabs | API key (Settings) → character quota with reset pacing |
 | Ollama | Local server on :11434 — installed + loaded models, no key |
 | Codebuff | `codebuff login` credentials file or API key → credits + weekly limit |
 | Kilo | Kilo CLI login file or API key → credit blocks + Kilo Pass |
 | AihubMix | API key (Settings or auto-detected from OpenCode) → usage vs spending limit |
+| One/New API | Add multiple compatible sites and keys in Settings; one quota card per key, with owner-only local secret storage |
 | Qwen Code | Coding Plan key (Settings or env) → 5h/weekly/monthly request quotas + local spend |
-| Hermes | Local ledger `%LOCALAPPDATA%\hermes\state.db` — last model, route, and catalog-priced spend |
+| Hermes | Local ledger `%LOCALAPPDATA%\hermes\state.db` → two recent user models, routes, and catalog-priced spend, including scoped AihubMix launch-model rates |
 
 *OpenCode's meters use the official usage API that shipped in
 [anomalyco/opencode#16513](https://github.com/anomalyco/opencode/pull/16513)
@@ -188,12 +189,18 @@ whatever the community asks for loudest.
 
 ## Features
 
-- **Multi-account Claude & Codex** 🆕 — running a personal plan AND a
+- **Multi-account Claude & Codex** — running a personal plan AND a
   work/enterprise seat? Keep the second login in its own folder (via
   `CLAUDE_CONFIG_DIR` / `CODEX_HOME`) and Pane shows one card per
   account — each with its own limits, plan, credits, and spend, named
   by its organization or email ("Claude — Acme"). The same account
   signed in twice stays one card, and your existing setup is untouched.
+- **One/New API sites** — add multiple compatible sites and multiple keys
+  per site in Settings. Every key gets its own quota card; secrets remain
+  owner-only on this PC and are sent only to the configured origin.
+- **English, Chinese, and Russian** — choose a language explicitly or let
+  Auto follow the Windows display language across the popover, tray, and
+  quota notifications.
 - **Pace projections** — colored bars and "will run out" warnings based on
   your burn rate within each reset window, plus optional Windows toasts.
 - **Local spend** — Today / Yesterday / 30 Days donut with per-model
@@ -254,9 +261,10 @@ signature-verified.
 
 ## Settings (gear icon)
 
-Refresh interval · Start with Windows · tray metric picker · appearance &
-compact density · time format · global shortcut · notification toggles ·
-outbound proxy · API keys.
+Language (Auto / English / 中文 / Русский) · refresh interval · Start with
+Windows · tray metric picker · appearance and compact density · time format ·
+global shortcut · notification toggles · outbound proxy · provider API keys ·
+One/New API site and key management.
 
 ## Credits
 
