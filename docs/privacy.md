@@ -1,9 +1,9 @@
 # Privacy
 
 Pane is built on one rule: **your data is nobody's business, including
-ours.** There is no Pane server and no account. The only thing Pane ever
-reports about itself is a minimal, anonymous, opt-out daily statistic —
-described in full below, with the off switch.
+ours.** There is no Pane account, and no Pane backend receives your quotas,
+spend, keys, or provider data. The Pane-hosted update endpoint and the
+minimal, anonymous, opt-out daily statistic are described in full below.
 
 ## Every network call Pane can make
 
@@ -64,11 +64,11 @@ auditable file: [`src-tauri/src/telemetry.rs`](../src-tauri/src/telemetry.rs)
 ## The update check
 
 Pane has to ask *somewhere* "is there a newer version?" — that request
-existed from day one. New builds ask `trypane.xyz` first, retain the
-legacy `pane.jazii.dev` endpoint for existing installs through a permanent
-redirect, and use GitHub as the final automatic fallback. Every endpoint
-serves the same manifest, and every update is still signature-verified
-against the key baked into the app. The server counts, per day: **how many
+existed from day one. New builds ask `trypane.xyz` first and use GitHub as
+the automatic fallback. Old builds that still call `pane.jazii.dev` are
+handled by a permanent redirect to `trypane.xyz`. Every endpoint serves
+the same manifest, and every update is still signature-verified against
+the key baked into the app. The server counts, per day: **how many
 distinct installs checked in, from which country, on which version.** That's
 the entire list. Concretely:
 
