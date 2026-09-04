@@ -8,7 +8,7 @@
 :root {
   --background: #09090b;
   --foreground: #fafafa;
-  --card: #18181b;
+  --card: rgba(24, 24, 27, 0.55);
   --border: #27272a;
   --input: #27272a;
   --muted: #27272a;
@@ -35,7 +35,7 @@
 :root[data-theme="light"] {
   --background: #ffffff;
   --foreground: #09090b;
-  --card: #fafafa;
+  --card: rgba(250, 250, 250, 0.75);
   --border: #e4e4e7;
   --input: #e4e4e7;
   --muted: #f4f4f5;
@@ -119,7 +119,8 @@ body {
   width: 42px;
 }
 
-/* Liquid glass, same recipe as jazii.dev's floating dock. */
+/* Solid provider rail: the icons should read as real marks, not artwork
+   seen through a translucent glass layer. */
 .sidebar {
   position: absolute;
   left: 0;
@@ -132,42 +133,32 @@ body {
   /* Bottom padding clears the glass footer (z 55, ~34px tall) that floats
      over the sidebar's lower edge — otherwise ⚙ sits under it, unclickable. */
   padding: 12px 0 42px;
-  background: rgba(24, 24, 27, 0.4);
-  backdrop-filter: blur(20px) saturate(1.4) brightness(1.02);
-  -webkit-backdrop-filter: blur(20px) saturate(1.4) brightness(1.02);
+  background: var(--card);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
   border-right: 1px solid rgba(255, 255, 255, 0.08);
-  box-shadow:
-    inset 0 1px 1.5px rgba(255, 255, 255, 0.4),
-    inset 0 -1px 1px rgba(255, 255, 255, 0.12),
-    inset 1.5px 0 1.5px rgba(255, 255, 255, 0.1),
-    inset -1.5px 0 1.5px rgba(255, 255, 255, 0.1);
+  box-shadow: 2px 0 12px rgba(0, 0, 0, 0.18);
   transform: translateX(calc(-100% + 4px));
   transition: transform 0.24s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.24s ease;
 }
 
 :root[data-theme="light"] .sidebar {
-  background: rgba(255, 255, 255, 0.55);
+  background: var(--card);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
   border-right: 1px solid rgba(0, 0, 0, 0.08);
-  box-shadow: inset 0 1px 1.5px rgba(255, 255, 255, 0.6);
+  box-shadow: 2px 0 12px rgba(0, 0, 0, 0.08);
 }
 
 #side-zone:hover .sidebar,
 .sidebar:focus-within {
   transform: none;
-  box-shadow:
-    8px 0 32px -8px rgba(0, 0, 0, 0.4),
-    inset 0 1px 1.5px rgba(255, 255, 255, 0.4),
-    inset 0 -1px 1px rgba(255, 255, 255, 0.12),
-    inset 1.5px 0 1.5px rgba(255, 255, 255, 0.1),
-    inset -1.5px 0 1.5px rgba(255, 255, 255, 0.1);
+  box-shadow: 8px 0 32px -8px rgba(0, 0, 0, 0.4);
 }
 
 :root[data-theme="light"] #side-zone:hover .sidebar,
 :root[data-theme="light"] .sidebar:focus-within {
-  box-shadow:
-    8px 0 32px -8px rgba(0, 0, 0, 0.12),
-    inset 0 1px 1.5px rgba(255, 255, 255, 0.6),
-    inset 0 -0.5px 1px rgba(255, 255, 255, 0.2);
+  box-shadow: 8px 0 32px -8px rgba(0, 0, 0, 0.12);
 }
 
 .main-col {
@@ -206,9 +197,8 @@ body {
   height: 100%;
 }
 
-/* Recolor the marks like macOS template icons: one tint, ours. */
-.app-logo svg path,
-.provider-icon svg path {
+/* Recolor the Pane app-logo like macOS template icons: one tint, ours. */
+.app-logo svg path {
   fill: currentColor;
 }
 
@@ -677,71 +667,121 @@ select:focus-visible {
   min-height: 0;
 }
 
-/* Navigation trail: a Codex-style minimap rail. Tick widths follow card
-   heights; ticks near the cursor stretch and brighten (fisheye applied by
-   JS via inline transform/background). Click a tick to jump. */
+/* Navigation trail: a refined provider avatar rail (Cockpit/cc-switch style).
+   Icons are centered, comfortable 28x28 avatar buttons with authentic colors,
+   smooth hover elevation, and active status indicators. */
 #trail {
   margin: auto 0;
   display: flex;
   flex-direction: column;
-  align-items: flex-start;
-  gap: 6px;
-  padding: 6px 0 6px 12px;
-  align-self: stretch;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  padding: 8px 0;
+  width: 100%;
 }
 
 .trail-tick {
-  width: 12px;
-  height: 2.5px;
-  border-radius: 999px;
-  background: #3f3f46;
   border: none;
+  background: none;
   padding: 0;
   cursor: pointer;
-  transform-origin: left center;
-  transition: transform 0.09s linear, background 0.12s ease;
+  outline: none;
+  transition: transform 0.12s ease, background 0.15s ease, opacity 0.15s ease;
+}
+
+.trail-tick:not(.trail-icon) {
+  width: 14px;
+  height: 3px;
+  border-radius: 999px;
+  background: #3f3f46;
+  margin: 2px auto;
+  transform-origin: center;
 }
 
 :root[data-theme="light"] .trail-tick:not(.trail-icon) {
   background: #d4d4d8;
 }
 
-.trail-tick.active {
+.trail-tick:not(.trail-icon).active {
   background: var(--foreground);
 }
 
-/* Provider-mark trail ticks: the vendor's own artwork at a fixed size,
-   dimmed until active. currentColor marks follow the theme; brand-colored
-   marks keep their palette (cc-switch style). */
+/* Provider-mark trail ticks: centered avatar box with authentic artwork */
 .trail-tick.trail-icon {
-  width: auto;
-  height: auto;
-  background: none;
-  border-radius: 4px;
-  padding: 1px;
+  position: relative;
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+  background: transparent;
   color: var(--foreground);
-  opacity: 0.45;
+  opacity: 0.84;
   transform-origin: center;
 }
 
+.trail-icon-inner {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  pointer-events: none;
+}
+
 .trail-icon svg {
-  width: 16px;
-  height: 16px;
+  width: 18px;
+  height: 18px;
   display: block;
 }
 
-.trail-icon.active {
+.trail-tick.trail-icon:hover {
   opacity: 1;
+  background: rgba(255, 255, 255, 0.09);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.2);
 }
 
-/* Glyphs authored for tinting (copilot's white mark) follow the theme. */
-.trail-icon.trail-recolor svg path {
-  fill: currentColor;
+:root[data-theme="light"] .trail-tick.trail-icon:hover {
+  background: rgba(0, 0, 0, 0.06);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.05);
 }
 
-/* Solid-black marks vanish on the dark sidebar — flip them there. */
-:root:not([data-theme="light"]) .trail-icon.trail-invert-dark svg {
-  filter: invert(1);
+.trail-tick.trail-icon.active {
+  opacity: 1;
+  background: rgba(255, 255, 255, 0.14);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.2), 0 2px 8px rgba(0, 0, 0, 0.25);
+}
+
+:root[data-theme="light"] .trail-tick.trail-icon.active {
+  background: rgba(0, 0, 0, 0.08);
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.15), 0 2px 6px rgba(0, 0, 0, 0.06);
+}
+
+/* Corner indicator badge for provider health (green/red) */
+.trail-badge {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  pointer-events: none;
+}
+
+.trail-badge.red {
+  background: #ef4444;
+  box-shadow: 0 0 4px #ef4444;
+}
+
+.trail-badge.green {
+  background: #22c55e;
+  box-shadow: 0 0 4px #22c55e;
+}
+
+.trail-badge.gray {
+  background: #71717a;
 }
 
 #providers {
@@ -749,10 +789,10 @@ select:focus-visible {
   min-width: 0;
   position: relative;
   overflow-y: auto;
-  padding: 10px 12px 44px;
+  padding: 14px 14px 48px;
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 20px;
   scrollbar-width: none;
 }
 
@@ -760,13 +800,12 @@ select:focus-visible {
   display: none;
 }
 
-/* Cards: header floats on the background, the metrics live in an inset
-   panel below it (the Mac popover composition). Customize keeps the old
-   solid-card look via .customize-block overrides further down. */
+/* Cards: generous breathing room between providers;
+   header is cleanly anchored to the metrics panel below. */
 .provider {
   background: transparent;
   border: none;
-  padding: 7px 3px 3px;
+  padding: 4px 2px 2px;
 }
 
 .card-panel {
@@ -830,9 +869,48 @@ select:focus-visible {
   margin-bottom: 9px;
 }
 
+/* Folded cards tuck the head margin (no card-panel under it) and add a
+   dash so they don't look glued to the next card — without a card-panel
+   the user has no visual seam between "collapsed summary" and the next
+   provider's name. */
+article.provider.is-folded .provider-head {
+  margin-bottom: 8px;
+}
+
+article.provider.is-folded {
+  padding: 12px 14px;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12);
+  transition: border-color 0.18s ease, box-shadow 0.18s ease;
+}
+
+article.provider.is-folded:hover {
+  border-color: #3f3f46;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
+}
+
+:root[data-theme="light"] article.provider.is-folded {
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+}
+
+:root[data-theme="light"] article.provider.is-folded:hover {
+  border-color: #d4d4d8;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.07);
+}
+
 .provider-name {
   font-weight: 600;
   letter-spacing: -0.01em;
+}
+
+.provider-count {
+  color: var(--secondary-foreground);
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0;
+  white-space: nowrap;
 }
 
 .stale {
@@ -869,20 +947,6 @@ select:focus-visible {
 .metric-label {
   font-size: 12px;
   font-weight: 600;
-}
-
-.pace-note {
-  font-size: 11px;
-  color: var(--muted-foreground);
-  white-space: nowrap;
-}
-
-.pace-note.warn {
-  color: #eab308;
-}
-
-.pace-note.danger {
-  color: var(--destructive);
 }
 
 .detail {
@@ -1001,18 +1065,6 @@ select:focus-visible {
 
 .fill.low {
   background: var(--destructive);
-}
-
-/* Even-pace marker: where usage would sit if burned evenly across the window. */
-.tick {
-  position: absolute;
-  top: -2px;
-  width: 2px;
-  height: 10px;
-  border-radius: 1px;
-  background: var(--foreground);
-  opacity: 0.55;
-  transform: translateX(-1px);
 }
 
 .metric-foot {
@@ -1326,6 +1378,63 @@ select:focus-visible {
   border-radius: 8px;
 }
 
+/* Form-style gear panels (DSH/cockpit conventions): stacked fields —
+   label above a full-width input, help text under it, actions last. */
+.cust-form {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: rgb(255 255 255 / 0.02);
+}
+
+.cust-form .form-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.cust-form .form-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--foreground);
+}
+
+.cust-form .form-input {
+  width: 100%;
+  box-sizing: border-box;
+  background: rgb(0 0 0 / 0.25);
+  border: 1px solid var(--input);
+  border-radius: 8px;
+  color: var(--foreground);
+  font-size: 12.5px;
+  font-family: inherit;
+  padding: 8px 12px;
+  transition: border-color 0.15s, box-shadow 0.15s;
+  outline: none;
+}
+
+.cust-form .form-input:focus-visible {
+  border-color: #52525b;
+  box-shadow: 0 0 0 3px rgb(212 212 216 / 0.1);
+}
+
+.cust-form .form-help {
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--muted-foreground);
+}
+
+.cust-form .form-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding-top: 2px;
+}
+
 .cust-config input {
   flex: 1;
   min-width: 110px;
@@ -1365,6 +1474,183 @@ select:focus-visible {
   font-size: 12px;
 }
 
+/* Account child rows under a multi-account family row in Customize:
+   [label] [masked key] ... [★] [?] [⚙]. */
+.cust-account-children {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: -2px 0 8px;
+  padding: 0 0 0 10px;
+}
+
+.cust-account-child {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  font-size: 12px;
+  padding: 4px 8px;
+  border-radius: 7px;
+}
+
+.cust-account-child .cust-config {
+  flex-basis: 100%;
+}
+
+/* The account ⚙ panel is a small form (note name / key mask /
+   connectivity / actions), not a horizontal action row — stack it. */
+.cust-config.account-config {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 8px;
+  margin: 6px 0 2px;
+}
+
+/* Cursor add-account dialog: three import tabs (cockpit parity). */
+.cursor-add-tabs {
+  display: flex;
+  gap: 4px;
+  margin: 10px 0 12px;
+}
+
+.cursor-tab {
+  font: inherit;
+  font-size: 12px;
+  padding: 4px 12px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--muted-foreground);
+  cursor: pointer;
+}
+
+.cursor-tab.on {
+  color: var(--foreground);
+  border-color: var(--primary);
+  background: rgb(212 212 216 / 0.08);
+}
+
+.cursor-tab-body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.cursor-json-input {
+  box-sizing: border-box;
+  width: 100%;
+  background: rgb(0 0 0 / 0.25);
+  border: 1px solid var(--input);
+  border-radius: 8px;
+  color: var(--foreground);
+  font-size: 12px;
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  padding: 8px 12px;
+  resize: vertical;
+  outline: none;
+}
+
+.cust-config.account-config .account-field input {
+  width: 100%;
+}
+
+.cust-config.account-config .cust-status-fact {
+  margin: 0;
+  font-size: 12px;
+  display: flex;
+  gap: 6px;
+}
+
+.cust-config.account-config .cust-actions {
+  margin: 0;
+}
+
+.cust-account-child:hover {
+  background: rgb(255 255 255 / 0.04);
+}
+
+.cust-account-child .acct-child-label {
+  font-weight: 600;
+}
+
+.cust-account-child .acct-child-key {
+  color: var(--muted-foreground);
+}
+
+.cust-account-child .acct-child-star {
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  font-size: 13px;
+  padding: 2px 5px;
+  color: var(--secondary-foreground);
+}
+
+.cust-account-child .acct-child-star.on {
+  color: #eab308;
+}
+
+/* Dashboard account tabs: the per-account switcher inside a merged card.
+   One card per family; tabs show the account labels only. */
+.card-account-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin: -2px 0 8px;
+}
+
+.card-account-tab {
+  font: inherit;
+  font-size: 11px;
+  padding: 3px 9px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--muted-foreground);
+  cursor: pointer;
+}
+
+.card-account-tab.on {
+  color: var(--foreground);
+  border-color: var(--primary);
+  background: rgb(212 212 216 / 0.08);
+}
+
+/* Health dot after the account label: red = a window maxed out (waiting
+   for reset), green = room left everywhere, gray = no data yet. */
+.acct-dot {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  margin-right: 6px;
+  vertical-align: 1px;
+}
+
+.acct-dot.red {
+  background: #ef4444;
+}
+
+.acct-dot.green {
+  background: #22c55e;
+}
+
+.acct-dot.gray {
+  background: #71717a;
+}
+
+/* The "?" fact sheet: an ordered list of read methods (not a config). */
+.cust-info-methods {
+  flex-basis: 100%;
+  margin: 10px 0 0;
+  padding-left: 22px;
+  font-size: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
 .cust-chips {
   display: flex;
   flex-wrap: wrap;
@@ -1392,6 +1678,148 @@ select:focus-visible {
 
 .cred-chip.none {
   border-style: dashed;
+}
+
+/* Subscription tier badge (Free / Pro / Pro+ / Ultra / Team…): a neutral
+   filled pill — the tier is a fact, not a health signal. */
+.cred-chip.tier {
+  color: var(--foreground);
+  border-color: rgb(212 212 216 / 0.35);
+  background: rgb(212 212 216 / 0.1);
+  font-weight: 600;
+}
+
+/* Pool group headers inside an expanded card (Antigravity Gemini/Claude,
+   Cursor Auto/API): a small uppercase divider above the first row. */
+.pool-head {
+  flex-basis: 100%;
+  margin: 6px 0 2px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+  color: var(--muted-foreground);
+}
+
+/* Per-card refresh button (head, next to the share button). */
+.card-refresh {
+  border: none;
+  background: transparent;
+  color: var(--muted-foreground);
+  font: inherit;
+  font-size: 13px;
+  padding: 2px 5px;
+  cursor: pointer;
+}
+
+.card-refresh:hover {
+  color: var(--foreground);
+}
+
+.card-refresh.spinning {
+  animation: refresh-spin 0.8s linear infinite;
+  pointer-events: none;
+}
+
+@keyframes refresh-spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+/* Provider-card fold: the chevron that toggles between collapsed and
+   expanded for the whole family. A folded card hides its metric rows
+   and shows a single line under the provider name with the overall health
+   dot and the highlighted nearest-reset countdown. */
+.card-fold-toggle {
+  border: none;
+  background: transparent;
+  color: var(--muted-foreground);
+  font: inherit;
+  font-size: 12px;
+  padding: 2px 5px;
+  cursor: pointer;
+}
+
+.card-fold-toggle:hover {
+  color: var(--foreground);
+}
+
+/* Folded state: prominent pill badge under provider name showing
+   family health dot, label, and highlighted reset countdown timer. */
+.fold-row {
+  display: flex;
+  align-items: center;
+  margin-top: 2px;
+}
+
+.fold-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 6px 12px;
+  border-radius: 8px;
+  font-size: 12px;
+  line-height: 1.3;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.fold-badge.warn {
+  background: rgba(234, 179, 8, 0.12);
+  border: 1px solid rgba(234, 179, 8, 0.28);
+  color: #e4e4e7;
+}
+
+:root[data-theme="light"] .fold-badge.warn {
+  background: rgba(234, 179, 8, 0.15);
+  border-color: rgba(202, 138, 4, 0.35);
+  color: #713f12;
+}
+
+.fold-badge.normal {
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.10);
+  color: var(--muted-foreground);
+}
+
+:root[data-theme="light"] .fold-badge.normal {
+  background: rgba(0, 0, 0, 0.04);
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  color: var(--muted-foreground);
+}
+
+.fold-label {
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.fold-badge.warn .fold-label {
+  color: #fef08a;
+}
+
+:root[data-theme="light"] .fold-badge.warn .fold-label {
+  color: #854d0e;
+}
+
+.fold-timer {
+  font-weight: 700;
+  font-size: 12.5px;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.02em;
+}
+
+.fold-badge.warn .fold-timer {
+  color: #facc15;
+}
+
+:root[data-theme="light"] .fold-badge.warn .fold-timer {
+  color: #a16207;
+}
+
+.fold-badge.normal .fold-timer {
+  color: var(--foreground);
 }
 
 .cust-accounts {
@@ -1471,65 +1899,83 @@ select:focus-visible {
   letter-spacing: 2px;
 }
 
-/* The gear panel's extra-account section (Phase 3.2): saved accounts
-   ("label · sk-…abcd · ✕") above the collapsible Add-account form. */
-.cust-accounts-mgmt {
-  flex-basis: 100%;
+
+#account-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
   display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 6px;
+  align-items: center;
+  justify-content: center;
+  padding: 12px;
+  background: rgb(0 0 0 / 0.52);
+  animation: account-dialog-fade 0.16s ease;
 }
 
-.acct-list {
+.account-dialog {
+  width: min(92vw, 380px);
+  max-height: calc(100vh - 24px);
+  overflow-y: auto;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 16px;
+  box-shadow: 0 24px 60px rgb(0 0 0 / 0.5);
+  animation: account-dialog-pop 0.18s cubic-bezier(0.2, 0.8, 0.3, 1);
+}
+
+.account-dialog-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.account-dialog-head h3 {
+  flex: 1;
   margin: 0;
-  padding: 0;
-  list-style: none;
+  font-size: 15px;
+  font-weight: 650;
+}
+
+.account-dialog-close {
+  border: none;
+  background: transparent;
+  color: var(--muted-foreground);
+  font: inherit;
+  font-size: 16px;
+  line-height: 1;
+  padding: 3px 5px;
+  cursor: pointer;
+}
+
+.account-dialog-close:hover {
+  color: var(--foreground);
+}
+
+.account-dialog-help {
+  margin: 6px 0 14px;
+  color: var(--muted-foreground);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.account-dialog-form {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.account-field {
   display: flex;
   flex-direction: column;
   gap: 4px;
-  width: 100%;
-}
-
-.acct-item {
-  display: flex;
-  align-items: center;
-  gap: 8px;
+  color: var(--secondary-foreground);
   font-size: 12px;
 }
 
-.acct-item .acct-label {
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.acct-del {
-  padding: 2px 6px;
-  opacity: 0.7;
-}
-
-.acct-del:hover {
-  opacity: 1;
-  color: #f87171;
-}
-
-.acct-form {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 6px;
+.account-field input {
+  box-sizing: border-box;
   width: 100%;
-  padding: 6px;
-  border: 1px dashed var(--border);
-  border-radius: 8px;
-}
-
-.acct-form input {
-  flex: 1;
-  min-width: 110px;
   background: transparent;
   border: 1px solid var(--input);
   border-radius: 7px;
@@ -1541,13 +1987,58 @@ select:focus-visible {
   outline: none;
 }
 
-.acct-form input:focus-visible {
+.account-field input:focus-visible {
   border-color: #52525b;
   box-shadow: 0 0 0 3px rgb(212 212 216 / 0.12);
 }
 
-.acct-form .cust-test-result {
-  flex-basis: 100%;
+.account-dialog-test-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  min-height: 28px;
+}
+
+.account-dialog-test-row .cust-test-result {
+  flex: 1;
+  flex-basis: auto;
+}
+
+.account-dialog-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding-top: 4px;
+  border-top: 1px solid var(--border);
+}
+
+.account-dialog-cancel {
+  background: transparent;
+  border: 1px solid var(--border);
+}
+
+.account-dialog-save {
+  background: var(--primary);
+  color: var(--primary-foreground);
+}
+
+@keyframes account-dialog-fade {
+  from { opacity: 0; }
+}
+
+@keyframes account-dialog-pop {
+  from {
+    opacity: 0;
+    transform: scale(0.96) translateY(5px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  #account-overlay,
+  .account-dialog {
+    animation: none;
+  }
 }
 
 /* "?" credential-info panel: the same dashed box, as label/text rows. */
@@ -1570,39 +2061,6 @@ select:focus-visible {
 
 .cust-info .dim {
   color: var(--muted-foreground);
-}
-
-/* Search box pinned just under the Customize glass bar. */
-.cust-search-wrap {
-  position: sticky;
-  top: 40px;
-  z-index: 40;
-  padding: 4px 0 8px;
-  background: rgba(9, 9, 11, 0.4);
-  backdrop-filter: var(--bar-filter);
-  -webkit-backdrop-filter: var(--bar-filter);
-}
-
-:root[data-theme="light"] .cust-search-wrap {
-  background: rgba(255, 255, 255, 0.55);
-}
-
-#cust-search {
-  width: 100%;
-  background: transparent;
-  border: 1px solid var(--input);
-  border-radius: 7px;
-  color: var(--foreground);
-  font-size: 12px;
-  font-family: inherit;
-  padding: 5px 9px;
-  transition: border-color 0.15s, box-shadow 0.15s;
-  outline: none;
-}
-
-#cust-search:focus-visible {
-  border-color: #52525b;
-  box-shadow: 0 0 0 3px rgb(212 212 216 / 0.12);
 }
 
 /* Address-book A-Z strip on the drawer's left edge. Only letters that
@@ -2342,7 +2800,6 @@ body.party .trail-tick.active {
 body.no-glass .sidebar,
 body.no-glass .main-col footer,
 body.no-glass .glass-bar,
-body.no-glass .cust-search-wrap,
 body.no-glass .cust-az,
 body.no-glass .cust-dock {
   backdrop-filter: none !important;
@@ -2351,7 +2808,6 @@ body.no-glass .cust-dock {
 body.no-glass .sidebar,
 body.no-glass .main-col footer,
 body.no-glass .glass-bar,
-body.no-glass .cust-search-wrap,
 body.no-glass .cust-az,
 body.no-glass .cust-dock {
   background: var(--background) !important;

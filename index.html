@@ -132,9 +132,6 @@
             <label class="toggle"><input id="autostart" type="checkbox" /> <span data-i18n="settings.startWithWindows">Start with Windows</span></label>
           </div>
           <div class="setting-row">
-            <label class="toggle"><input id="pacing" type="checkbox" /> <span data-i18n="settings.pacing">Always show pacing</span></label>
-          </div>
-          <div class="setting-row">
             <label for="pinned" data-i18n="settings.trayShows">Tray icon shows</label>
             <select id="pinned"></select>
           </div>
@@ -206,6 +203,9 @@
           <div class="setting-row">
             <label class="toggle" title="During Presentation Settings, exclusive fullscreen, or remote control, tray percentages hide. The Pane icon and starred provider logos stay. A Teams/Zoom window share is not detected. Off by default." data-i18n-title="settings.hideSharingTip"><input id="hide-while-sharing" type="checkbox" /> <span data-i18n="settings.hideSharing">Hide tray numbers while screen sharing</span></label>
           </div>
+          <div class="setting-row">
+            <label class="toggle" title="Show the Usage Trend bar on provider cards that log token usage. Off by default — enable this to see quota history on cards that record it." data-i18n-title="settings.showTrendTip"><input id="show-trend" type="checkbox" /> <span data-i18n="settings.showTrend">Show usage trend on cards</span></label>
+          </div>
         </div></div>
       </div>
 
@@ -223,114 +223,6 @@
             Applies after the app restarts. Local usage API always runs at
             http://127.0.0.1:6736/v1/usage
           </p>
-        </div></div>
-      </div>
-
-      <div class="acc-group">
-        <button class="acc-head"><span data-i18n="settings.relayBalance">Custom balance</span> <span class="chev">&#8964;</span></button>
-        <div class="acc-body"><div class="acc-inner">
-          <p class="settings-note" data-i18n="settings.relayBalanceNote">
-            For relay/gateway sites that expose the OpenAI billing endpoints
-            (/dashboard/billing/subscription + /usage). Save stores both fields.
-          </p>
-          <div class="setting-row">
-            <label for="baseurl-relaybalance" data-i18n="settings.relayBaseUrl">Base URL</label>
-            <input id="baseurl-relaybalance" type="text" placeholder="https://api.example.com" spellcheck="false" />
-          </div>
-          <div class="key-row">
-            <label for="key-relaybalance" data-i18n="settings.relayApiKey">API key</label>
-            <input id="key-relaybalance" type="password" placeholder="sk-…" />
-            <button data-save="relaybalance" data-i18n="settings.save">Save</button>
-          </div>
-        </div></div>
-      </div>
-
-      <div class="acc-group">
-        <button class="acc-head"><span data-i18n="settings.apiKeys">API keys</span> <span class="chev">&#8964;</span></button>
-        <div class="acc-body"><div class="acc-inner">
-          <p class="settings-note" data-i18n="settings.apiKeysNote">
-            Stored only on this PC (%APPDATA%\Pane). Leave empty and save to remove.
-          </p>
-          <div class="key-row">
-            <label for="key-openrouter">OpenRouter</label>
-            <input id="key-openrouter" type="password" placeholder="sk-or-v1-…" />
-            <button data-save="openrouter" data-i18n="settings.save">Save</button>
-          </div>
-          <div class="key-row">
-            <label for="key-zai">Z.ai / GLM</label>
-            <input id="key-zai" type="password" placeholder="API key" data-i18n-placeholder="settings.keyPlaceholder" />
-            <button data-save="zai" data-i18n="settings.save">Save</button>
-          </div>
-          <div class="key-row">
-            <label for="key-minimax">MiniMax</label>
-            <input id="key-minimax" type="password" placeholder="API key (auto-detected from CLI)" data-i18n-placeholder="settings.keyPhMinimax" />
-            <button data-save="minimax" data-i18n="settings.save">Save</button>
-          </div>
-          <div class="key-row">
-            <label for="key-deepseek">DeepSeek</label>
-            <input id="key-deepseek" type="password" placeholder="sk-…" />
-            <button data-save="deepseek" data-i18n="settings.save">Save</button>
-          </div>
-          <div class="key-row">
-            <label for="key-kimi">Kimi Code</label>
-            <input id="key-kimi" type="password" placeholder="Kimi For Coding plan key (if you don't use kimi login)" data-i18n-placeholder="settings.keyPhKimi" />
-            <button data-save="kimi" data-i18n="settings.save">Save</button>
-          </div>
-          <div class="key-row">
-            <label for="key-moonshot">Kimi API</label>
-            <input id="key-moonshot" type="password" placeholder="sk-… (platform.kimi.ai key)" data-i18n-placeholder="settings.keyPhMoonshot" />
-            <button data-save="moonshot" data-i18n="settings.save">Save</button>
-          </div>
-          <div class="key-row">
-            <label for="key-elevenlabs">ElevenLabs</label>
-            <input id="key-elevenlabs" type="password" placeholder="API key" data-i18n-placeholder="settings.keyPlaceholder" />
-            <button data-save="elevenlabs" data-i18n="settings.save">Save</button>
-          </div>
-          <div class="key-row">
-            <label for="key-codebuff">Codebuff</label>
-            <input id="key-codebuff" type="password" placeholder="API key (auto-detected from CLI)" data-i18n-placeholder="settings.keyPhCodebuff" />
-            <button data-save="codebuff" data-i18n="settings.save">Save</button>
-          </div>
-          <div class="key-row">
-            <label for="key-kilo">Kilo</label>
-            <input id="key-kilo" type="password" placeholder="API key (auto-detected from CLI)" data-i18n-placeholder="settings.keyPhKilo" />
-            <button data-save="kilo" data-i18n="settings.save">Save</button>
-          </div>
-          <div class="key-row">
-            <label for="key-aihubmix">AihubMix</label>
-            <input id="key-aihubmix" type="password" placeholder="sk-… (auto-detected from OpenCode)" data-i18n-placeholder="settings.keyPhAihubmix" />
-            <button data-save="aihubmix" data-i18n="settings.save">Save</button>
-          </div>
-          <div class="key-row">
-            <label for="key-qwen">Qwen Code</label>
-            <input id="key-qwen" type="password" placeholder="sk-sp-… (auto-detected from env)" data-i18n-placeholder="settings.keyPhQwen" />
-            <button data-save="qwen" data-i18n="settings.save">Save</button>
-          </div>
-          <div class="key-row">
-            <label for="key-kimi">Kimi Code</label>
-            <input id="key-kimi" type="password" placeholder="API key (or sign in with kimi login)" data-i18n-placeholder="settings.keyPhKimi" />
-            <button data-save="kimi" data-i18n="settings.save">Save</button>
-          </div>
-          <div class="key-row">
-            <label for="key-opencode">OpenCode</label>
-            <input id="key-opencode" type="password" placeholder="Go key (auto-detected from auth.json)" data-i18n-placeholder="settings.keyPhOpencode" />
-            <button data-save="opencode" data-i18n="settings.save">Save</button>
-          </div>
-          <div class="key-row">
-            <label for="key-stepfun">StepFun</label>
-            <input id="key-stepfun" type="password" placeholder="API key (platform.stepfun.com)" data-i18n-placeholder="settings.keyPhStepfun" />
-            <button data-save="stepfun" data-i18n="settings.save">Save</button>
-          </div>
-          <div class="key-row">
-            <label for="key-siliconflow">SiliconFlow</label>
-            <input id="key-siliconflow" type="password" placeholder="sk-… (siliconflow.cn)" data-i18n-placeholder="settings.keyPhSiliconflow" />
-            <button data-save="siliconflow" data-i18n="settings.save">Save</button>
-          </div>
-          <div class="key-row">
-            <label for="key-novita">Novita AI</label>
-            <input id="key-novita" type="password" placeholder="API key (novita.ai)" data-i18n-placeholder="settings.keyPhNovita" />
-            <button data-save="novita" data-i18n="settings.save">Save</button>
-          </div>
         </div></div>
       </div>
 

@@ -2,6 +2,13 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getVersion } from "@tauri-apps/api/app";
 import {
+  providerCatalog,
+  providerFamily,
+  supportsApiKey,
+  supportsExtraAccounts,
+} from "./providerCatalog";
+import { providerVisual } from "./providerVisuals";
+import {
   applyStaticI18n,
   displayLinkLabel,
   displayMetricDetail,
@@ -19,69 +26,15 @@ import {
 // Injected by vite.config.ts at build time, e.g. "0707.1432".
 declare const __BUILD_STAMP__: string;
 
-// Official provider marks from the MIT-licensed macOS OpenUsage, rendered
-// inline so CSS can recolor them like template icons.
-import antigravityIcon from "./assets/providers/antigravity.svg?raw";
-import aihubmixIcon from "./assets/providers/aihubmix.svg?raw";
-import claudeIcon from "./assets/providers/claude.svg?raw";
-import codexIcon from "./assets/providers/codex.svg?raw";
-import copilotIcon from "./assets/providers/copilot.svg?raw";
-import cursorIcon from "./assets/providers/cursor.svg?raw";
-import deepseekIcon from "./assets/providers/deepseek.svg?raw";
-import devinIcon from "./assets/providers/devin.svg?raw";
-import grokIcon from "./assets/providers/grok.svg?raw";
-import hermesIcon from "./assets/providers/hermes.svg?raw";
-import kimiIcon from "./assets/providers/kimi.svg?raw";
-import minimaxIcon from "./assets/providers/minimax.svg?raw";
-import novitaIcon from "./assets/providers/novita.svg?raw";
-import ollamaIcon from "./assets/providers/ollama.svg?raw";
-import onenewapiIcon from "./assets/providers/onenewapi.svg?raw";
-import opencodeIcon from "./assets/providers/opencode.svg?raw";
-import openrouterIcon from "./assets/providers/openrouter.svg?raw";
-import qwenIcon from "./assets/providers/qwen.svg?raw";
-import siliconflowIcon from "./assets/providers/siliconflow.svg?raw";
-import stepfunIcon from "./assets/providers/stepfun.svg?raw";
 // Inlined as data URIs (not URLs) so the share-card SVG snapshot can
 // embed them — rasterized SVG images can't load external resources.
 // The bare ring suits the sidebar; the footer uses the full rounded
 // app icon, which stays legible at tiny sizes.
 import paneLogo from "./assets/pane-logo.png?inline";
 import paneIcon from "./assets/pane-icon.png?inline";
-import zaiIcon from "./assets/providers/zai.svg?raw";
 // The repo's changelog ships inside the bundle, so the "What's new" dialog
 // and the Settings changelog viewer read the exact file releases maintain.
 import changelogRaw from "../CHANGELOG.md?raw";
-
-const PROVIDER_ICONS: Record<string, string> = {
-  antigravity: antigravityIcon,
-  aihubmix: aihubmixIcon,
-  claude: claudeIcon,
-  codex: codexIcon,
-  copilot: copilotIcon,
-  cursor: cursorIcon,
-  deepseek: deepseekIcon,
-  devin: devinIcon,
-  grok: grokIcon,
-  hermes: hermesIcon,
-  kimi: kimiIcon,
-  minimax: minimaxIcon,
-  novita: novitaIcon,
-  ollama: ollamaIcon,
-  onenewapi: onenewapiIcon,
-  opencode: opencodeIcon,
-  openrouter: openrouterIcon,
-  qwen: qwenIcon,
-  siliconflow: siliconflowIcon,
-  stepfun: stepfunIcon,
-  zai: zaiIcon,
-};
-
-// Trail icons render each vendor's own mark (brand colors kept), so a few
-// need per-icon care: copilot's glyph is authored white and must follow the
-// theme color like the card icons do; minimax/novita paint solid black and
-// disappear on the dark sidebar — they invert there.
-const TRAIL_RECOLOR_ICONS = new Set(["copilot"]);
-const TRAIL_INVERT_DARK_ICONS = new Set(["minimax", "novita"]);
 
 // ---------------------------------------------------------------------------
 // Types
@@ -194,6 +147,11 @@ interface ProviderLayout {
   // One-shot: Bonus used to be a bar (always-visible). After the demotion
   // to a text row we tuck it once; later drags out of Show more stick.
   tuckedBonus?: boolean;
+  // Card fold: the family owns the decision (every account maxed → auto),
+  // and the user can override the family default. undefined = follow the
+  // family auto state. Stored at the FAMILY id so all sibling cards in a
+  // multi-account family share one fold state.
+  collapsed?: boolean;
 }
 
 interface Layout {
@@ -206,7 +164,6 @@ interface Config {
   disabled: string[];
   pinned: { provider: string; label: string } | null;
   trayProviders: string[];
-  pacingAlways: boolean;
   telemetry: boolean;
   notifyAlmostOut: boolean;
   notifyCuttingClose: boolean;
@@ -214,6 +171,7 @@ interface Config {
   spendTab: SpendTab;
   spendMetric: "cost" | "tokens" | "mtok";
   showUsed: boolean;
+  showTrend: boolean;
   resetExact: boolean;
   timeFormat: "auto" | "12" | "24";
   layout: Layout | null;
@@ -235,7 +193,6 @@ const FRONTEND_CONFIG_KEYS = [
   "disabled",
   "pinned",
   "trayProviders",
-  "pacingAlways",
   "telemetry",
   "notifyAlmostOut",
   "notifyCuttingClose",
@@ -243,6 +200,7 @@ const FRONTEND_CONFIG_KEYS = [
   "spendTab",
   "spendMetric",
   "showUsed",
+  "showTrend",
   "resetExact",
   "timeFormat",
   "layout",
@@ -285,37 +243,9 @@ interface TrayStripEntry {
   tooltip: string;
 }
 
-const ALL_PROVIDERS: [string, string][] = [
-  ["claude", "Claude"],
-  ["codex", "Codex"],
-  ["cursor", "Cursor"],
-  ["opencode", "OpenCode"],
-  ["copilot", "Copilot"],
-  ["grok", "Grok"],
-  ["devin", "Devin"],
-  ["minimax", "MiniMax"],
-  ["openrouter", "OpenRouter"],
-  ["zai", "Z.ai"],
-  ["antigravity", "Antigravity"],
-  ["deepseek", "DeepSeek"],
-  // Internal id stays "moonshot" (config/layout/telemetry compatibility);
-  // the toggle reads "Kimi API" because that's what it gates: the API bar
-  // on the Kimi card (or the standalone wallet card without a CLI login).
-  ["moonshot", "Kimi API"],
-  ["elevenlabs", "ElevenLabs"],
-  ["ollama", "Ollama"],
-  ["codebuff", "Codebuff"],
-  ["kilo", "Kilo"],
-  ["aihubmix", "AihubMix"],
-  ["onenewapi", "One/New API"],
-  ["qwen", "Qwen Code"],
-  ["hermes", "Hermes"],
-  ["kimi", "Kimi Code"],
-  ["stepfun", "StepFun"],
-  ["siliconflow", "SiliconFlow"],
-  ["novita", "Novita AI"],
-  ["relaybalance", "Custom Balance"],
-];
+const ALL_PROVIDERS: [string, string][] = providerCatalog.map(
+  ({ familyId, displayName }) => [familyId, displayName],
+);
 
 function providerDisplayName(id: string): string {
   return ALL_PROVIDERS.find(([pid]) => pid === id)?.[1] ?? id;
@@ -371,12 +301,40 @@ const PROVIDER_LINKS: Record<string, { label: string; url: string }[]> = {
   codebuff: [{ label: "Dashboard", url: "https://www.codebuff.com/profile" }],
   kilo: [{ label: "Dashboard", url: "https://app.kilo.ai/" }],
   hermes: [{ label: "Site", url: "https://hermes-agent.com/" }],
+  stepfun: [{ label: "Platform", url: "https://platform.stepfun.com/" }],
+  siliconflow: [{ label: "Dashboard", url: "https://cloud.siliconflow.cn/" }],
+  novita: [{ label: "Dashboard", url: "https://novita.ai/" }],
+  relaybalance: [],
   kimi: [
     { label: "Console", url: "https://www.kimi.com/code/console" },
     { label: "Quota", url: "https://www.kimi.com/membership/subscription?tab=quota" },
     { label: "API", url: "https://platform.moonshot.ai/console" },
   ],
 };
+
+/// The "Get API key" page for each key provider, for the gear panel and
+/// account dialog. CC-Switch's `apiKeyUrl` per preset — the vendor's own
+/// key-management page, never a proxy or a mirror.
+const API_KEY_URLS: Record<string, string> = {
+  deepseek: "https://platform.deepseek.com/api_keys",
+  stepfun: "https://platform.stepfun.com/api-keys",
+  siliconflow: "https://cloud.siliconflow.cn/account/ak",
+  novita: "https://novita.ai/settings/account#api-key",
+  zai: "https://z.ai/manage-apikey/apikey-list",
+  minimax: "https://platform.minimax.io/user-center/basic-information/interface-key",
+  openrouter: "https://openrouter.ai/settings/keys",
+  moonshot: "https://platform.moonshot.ai/console/api-keys",
+  aihubmix: "https://console.aihubmix.com/settings",
+  qwen: "https://modelstudio.console.alibabacloud.com/ap-southeast-1/?tab=globalset#/efm/coding_plan_apikey",
+  elevenlabs: "https://elevenlabs.io/app/settings/keys",
+  codebuff: "https://www.codebuff.com/profile",
+  kilo: "https://app.kilo.ai/settings/keys",
+  opencode: "https://opencode.ai/console/keys",
+};
+
+function getApiKeyLink(family: string): string | undefined {
+  return API_KEY_URLS[providerFamily(family)];
+}
 
 // Brand palette for the Total Spend ring (Mac parity); unknown providers
 // get a stable hue derived from their id.
@@ -421,7 +379,6 @@ let config: Config = {
   disabled: [],
   pinned: null,
   trayProviders: [],
-  pacingAlways: false,
   telemetry: true,
   notifyAlmostOut: false,
   notifyCuttingClose: false,
@@ -429,6 +386,7 @@ let config: Config = {
   spendTab: "today",
   spendMetric: "cost",
   showUsed: false,
+  showTrend: false,
   resetExact: false,
   timeFormat: "auto",
   layout: null,
@@ -483,6 +441,28 @@ let refreshTimer: number | undefined;
 let lastSnapshots: Snapshot[] = [];
 let lastSpend: ProviderSpend[] = [];
 let spendLoaded = false;
+/// Sampled quota history per card id (backend usage_history.json). Cards
+/// with local CLI logs trend from spend; every other card falls back to
+/// these daily "worst used percent" samples.
+let lastQuotaTrend: Record<string, number[]> = {};
+
+/// The account tab currently shown inside a multi-account family card.
+/// Keyed by family id; the value is the account card id (kimi@<fp>) or the
+/// family id itself (the default/main account). Session-only — reopening
+/// defaults back to the main account.
+const activeAccountFor = new Map<string, string>();
+
+type TrendSource = { id: string; trend: number[]; quota: boolean };
+
+/// The trend data for one card: local-log spend when the id has one, else
+/// the backend's sampled quota history (API-key accounts, relay keys).
+function trendSourceFor(id: string): TrendSource | undefined {
+  const local = lastSpend.find((sp) => sp.id === id);
+  if (local) return { id, trend: local.trend, quota: false };
+  const sampled = lastQuotaTrend[id];
+  if (sampled?.some((v) => v > 0)) return { id, trend: sampled, quota: true };
+  return undefined;
+}
 let spendTab: SpendTab = "today";
 let customizeOpen = false;
 let revealTimer = 0;
@@ -614,7 +594,12 @@ async function patchConfig(patch: Partial<Config>): Promise<void> {
 // Layout: defaults, repair, persistence
 // ---------------------------------------------------------------------------
 
-function defaultProviderLayout(s: Snapshot | undefined, spend: ProviderSpend | undefined, migrateStar: boolean): ProviderLayout {
+function defaultProviderLayout(
+  s: Snapshot | undefined,
+  spend: ProviderSpend | undefined,
+  hasTrend: boolean,
+  migrateStar: boolean,
+): ProviderLayout {
   const order: string[] = [];
   const onDemand: string[] = [];
   for (const m of s?.metrics ?? []) {
@@ -627,12 +612,22 @@ function defaultProviderLayout(s: Snapshot | undefined, spend: ProviderSpend | u
   // all — tucking everything would leave an empty card with a floating
   // caret, so their text rows stay visible.
   if (order.length > 0 && onDemand.length === order.length) onDemand.length = 0;
-  if (spend) {
-    order.push(TREND_KEY); // trend stays always-visible, like the Mac
+  if (spend && config.showTrend) {
+    order.push(TREND_KEY); // trend stays always-visible when opted in, like Mac
     for (const [label] of SPEND_KEYS) {
       order.push(label);
       onDemand.push(label);
     }
+  } else if (spend) {
+    // Spend source present but trend opt-in is off: surface the spend
+    // breakdown without the bar.
+    for (const [label] of SPEND_KEYS) {
+      order.push(label);
+      onDemand.push(label);
+    }
+  } else if (hasTrend && config.showTrend) {
+    // Quota-history trend (no local logs): the bars only, no spend rows.
+    order.push(TREND_KEY);
   }
   const starred = migrateStar
     ? (s?.metrics ?? []).filter((m) => m.kind === "progress").slice(0, 2).map((m) => m.label)
@@ -712,6 +707,29 @@ function ensureLayout(): void {
   });
   if (dedupedOrder.length !== layout.providerOrder.length) {
     layout.providerOrder = dedupedOrder;
+    changed = true;
+  }
+
+  // Positional API-key account ids are not recoverable identities. Remove
+  // their old projections before stable fingerprint ids are appended below.
+  const withoutLegacyAccounts = layout.providerOrder.filter(
+    (id) => !isLegacyExtraAccountId(id),
+  );
+  if (withoutLegacyAccounts.length !== layout.providerOrder.length) {
+    layout.providerOrder = withoutLegacyAccounts;
+    changed = true;
+  }
+  for (const id of Object.keys(layout.providers)) {
+    if (isLegacyExtraAccountId(id)) {
+      delete layout.providers[id];
+      changed = true;
+    }
+  }
+  const disabledWithoutLegacyAccounts = config.disabled.filter(
+    (id) => !isLegacyExtraAccountId(id),
+  );
+  if (disabledWithoutLegacyAccounts.length !== config.disabled.length) {
+    config.disabled = disabledWithoutLegacyAccounts;
     changed = true;
   }
 
@@ -840,6 +858,7 @@ function ensureLayout(): void {
         kimiL = defaultProviderLayout(
           lastSnapshots.find((s) => s.id === "kimi"),
           lastSpend.find((sp) => sp.id === "kimi"),
+          Boolean(trendSourceFor("kimi")),
           false,
         );
         layout.providers.kimi = kimiL;
@@ -869,7 +888,7 @@ function ensureLayout(): void {
     if (!L) {
       // One-time migration: providers picked in the old tray-strip setting
       // become starred so the strip carries over.
-      L = defaultProviderLayout(s, spend, config.trayProviders.includes(s.id));
+      L = defaultProviderLayout(s, spend, Boolean(trendSourceFor(s.id)), config.trayProviders.includes(s.id));
       layout.providers[s.id] = L;
       changed = true;
       continue;
@@ -923,6 +942,12 @@ function ensureLayout(): void {
           changed = true;
         }
       }
+    } else if (trendSourceFor(s.id)) {
+      // Quota-history trend (API-key accounts): bars only, no spend rows.
+      if (!L.metricOrder.includes(TREND_KEY)) {
+        L.metricOrder.push(TREND_KEY);
+        changed = true;
+      }
     }
     // Repair layouts saved while a provider emitted duplicate labels (old
     // Grok billing bug): the label landed in metricOrder twice and the
@@ -950,7 +975,7 @@ function ensureLayout(): void {
   }
 
   config.layout = layout;
-  if (changed) void patchConfig({ layout });
+  if (changed) void patchConfig({ layout, disabled: config.disabled });
 }
 
 function providerLayout(id: string): ProviderLayout {
@@ -962,6 +987,19 @@ function providerLayout(id: string): ProviderLayout {
       starred: [],
       expanded: false,
     }
+  );
+}
+
+// Before stable account ids, API-key families used positional ids
+// such as `deepseek@1`. They cannot be safely mapped back after an account
+// was deleted or reordered, so discard them instead of attaching old layout
+// or disabled state to a different key.
+function isLegacyExtraAccountId(id: string): boolean {
+  const at = id.indexOf("@");
+  return (
+    at > 0 &&
+    supportsExtraAccounts(providerFamily(id)) &&
+    /^\d+$/.test(id.slice(at + 1))
   );
 }
 
@@ -978,77 +1016,6 @@ function saveLayout(syncTray = true): void {
   if (syncTray) requestTraySync();
 }
 
-// ---------------------------------------------------------------------------
-// Pace engine (unchanged from Wave 1/4)
-// ---------------------------------------------------------------------------
-
-interface Pace {
-  cls: string;
-  note: string;
-  noteClass: string;
-  title: string;
-  tick: number | null;
-}
-
-function computePace(m: Metric): Pace {
-  const used = clampPercent(m.used_percent ?? 0);
-  const left = 100 - used;
-  const none: Pace = { cls: "", note: "", noteClass: "", title: "", tick: null };
-
-  if (left < 0.5) {
-    return { cls: "low", note: t("pace.limitReached"), noteClass: "danger", title: t("pace.limitReachedTitle"), tick: null };
-  }
-
-  const byLevel = (): Pace => {
-    if (left <= 10) return { ...none, cls: "low", title: t("card.pctLeft", { n: Math.round(left) }) };
-    if (used >= 80) return { ...none, cls: "warn", title: t("card.pctUsed", { n: Math.round(used) }) };
-    return none;
-  };
-  if (!m.resets_at || !m.period_ms) return byLevel();
-
-  const now = Date.now();
-  const remainMs = Math.max(0, m.resets_at - now);
-  const elapsedMs = m.period_ms - remainMs;
-  const frac = elapsedMs / m.period_ms;
-  if (frac < 0.05 || elapsedMs < 5 * 60000) return byLevel();
-  // Near-empty windows stay calm: a floored 1% reading right at the
-  // projection gate can land exactly on the limit and flash red (Mac
-  // keeps the same 5% safeguard).
-  if (used < 5) return byLevel();
-
-  const projected = used / frac;
-  const tick = clampPercent(frac * 100);
-
-  if (projected >= 100) {
-    const over = Math.round(projected - 100);
-    const runOutAt = now + (left * elapsedMs) / used;
-    if (runOutAt < m.resets_at - 60000) {
-      const when = config.resetExact
-        ? t("pace.limitAt", { when: fmtExact(runOutAt) })
-        : t("pace.limitIn", { time: fmtDuration(runOutAt - now) });
-      return { cls: "low", note: `🔥 ${when}`, noteClass: "danger", title: t("pace.overReset", { n: over }), tick };
-    }
-    return { cls: "low", note: "🔥", noteClass: "danger", title: t("pace.fullReset"), tick };
-  }
-
-  const spare = Math.max(1, Math.round(100 - projected));
-  if (projected >= 90) {
-    return {
-      cls: "warn",
-      note: t("pace.spare", { n: spare }),
-      noteClass: "warn",
-      title: t("pace.usedReset", { n: Math.round(projected) }),
-      tick,
-    };
-  }
-  return {
-    cls: "",
-    note: config.pacingAlways ? t("pace.leftReset", { n: spare }) : "",
-    noteClass: "",
-    title: t("pace.leftReset", { n: spare }),
-    tick: config.pacingAlways ? tick : null,
-  };
-}
 
 // ---------------------------------------------------------------------------
 // Dashboard rendering
@@ -1058,14 +1025,10 @@ function renderMetric(m: Metric): string {
   if (m.kind === "progress" && m.used_percent !== null) {
     const used = clampPercent(m.used_percent);
     const left = Math.round(100 - used);
-    const pace = computePace(m);
-    const tick =
-      pace.tick !== null && pace.tick > 1 && pace.tick < 99
-        ? `<span class="tick" style="left:${pace.tick}%"></span>`
-        : "";
-    const note = pace.note
-      ? `<span class="pace-note ${pace.noteClass}" title="${escapeHtml(pace.title)}">${escapeHtml(pace.note)}</span>`
-      : "";
+    // Usage-tier coloring (user spec, uniform for every provider):
+    // 0-60% used → blue, 60-75% → amber, 75-100% → red. The bar's width
+    // already IS the used percent, so the thresholds compare `used`.
+    const level = used >= 75 ? "low" : used >= 60 ? "warn" : "";
     const headline = config.showUsed ? t("card.pctUsed", { n: Math.round(used) }) : t("card.pctLeft", { n: left });
     const headlineAlt = config.showUsed ? t("card.pctLeft", { n: left }) : t("card.pctUsed", { n: Math.round(used) });
 
@@ -1103,11 +1066,9 @@ function renderMetric(m: Metric): string {
       <div class="metric">
         <div class="metric-head">
           <span class="metric-label">${escapeHtml(displayMetricLabel(m.label))}</span>
-          ${note}
         </div>
-        <div class="bar" title="${escapeHtml(pace.title)}">
-          <div class="fill ${pace.cls}" style="width:${used}%"></div>
-          ${tick}
+        <div class="bar">
+          <div class="fill ${level}" style="width:${used}%"></div>
         </div>
         <div class="metric-foot">
           <span class="left-val clickable" data-flip="usage" title="${escapeHtml(headlineAlt)}">${headline}</span>
@@ -1147,30 +1108,32 @@ function renderMetric(m: Metric): string {
     </div>`;
 }
 
-function renderTrend(spend: ProviderSpend): string {
-  if (!spend.trend.some((v) => v > 0)) return "";
-  const max = Math.max(...spend.trend);
-  const peakIdx = spend.trend.indexOf(max);
+function renderTrend(source: TrendSource): string {
+  if (!source.trend.some((v) => v > 0)) return "";
+  const max = Math.max(...source.trend);
+  const peakIdx = source.trend.indexOf(max);
   const dayMs = 86_400_000;
   const dateOf = (i: number) =>
     new Date(Date.now() - (29 - i) * dayMs).toLocaleDateString(localeTag(), { month: "short", day: "numeric" });
   // Each day is a group: the visible bar plus a full-height invisible hit
   // area so thin bars are easy to hover; [data-trend] drives the tooltip.
-  const bars = spend.trend
+  const bars = source.trend
     .map((v, i) => {
       const h = v > 0 ? Math.max(2, (v / max) * 30) : 1;
       return `<g class="trend-day">
         <rect class="${v > 0 ? "trend-bar" : "trend-zero"}" x="${i * 10}" y="${32 - h}" width="7" height="${h}" rx="1.5"/>
-        <rect class="trend-hit" data-trend="${spend.id}|${i}" x="${i * 10 - 1.5}" y="0" width="10" height="32" fill="transparent"/>
+        <rect class="trend-hit" data-trend="${source.id}|${i}" x="${i * 10 - 1.5}" y="0" width="10" height="32" fill="transparent"/>
       </g>`;
     })
     .join("");
-  const title = t("spend.trendTip", {
-    from: dateOf(0),
-    to: dateOf(29),
-    tokens: fmtTokens(max),
-    peak: dateOf(peakIdx),
-  });
+  const title = source.quota
+    ? t("spend.quotaTrendTip", { from: dateOf(0), to: dateOf(29) })
+    : t("spend.trendTip", {
+        from: dateOf(0),
+        to: dateOf(29),
+        tokens: fmtTokens(max),
+        peak: dateOf(peakIdx),
+      });
   return `
     <div class="metric trend">
       <span class="metric-label" title="${escapeHtml(title)}">${escapeHtml(t("spend.trend"))}</span>
@@ -1202,18 +1165,15 @@ function renderSpendRow(
 
 /// One card row addressed by its layout key.
 function renderItem(s: Snapshot, spend: ProviderSpend | undefined, key: string): string {
-  if (key === TREND_KEY) return spend ? renderTrend(spend) : "";
+  if (key === TREND_KEY) {
+    const trend = trendSourceFor(s.id);
+    return trend ? renderTrend(trend) : "";
+  }
   const spendKey = SPEND_KEYS.find(([label]) => label === key);
   if (spendKey)
     return spend ? renderSpendRow(s.id, spendKey[0], spendKey[1], spend[spendKey[1]], spend) : "";
   const metric = s.metrics.find((m) => m.label === key);
   return metric ? renderMetric(metric) : "";
-}
-
-/// Account-scoped cards (claude@<hash>) inherit their family's chrome —
-/// icon, quick links — while keeping their own identity everywhere else.
-function providerFamily(id: string): string {
-  return id.split("@")[0];
 }
 
 /// One/New API is two-level: family id `onenewapi` hides every key card.
@@ -1224,22 +1184,191 @@ function isCardDisabled(id: string, disabled: string[] = config.disabled): boole
   return fam === "onenewapi" && disabled.includes("onenewapi");
 }
 
+/// Families whose extra accounts are PARALLEL cards (Antigravity captured
+/// slots, Cursor imported logins) — the bare family card stays the local
+/// login and never merges into tabs. Every other multi-account family
+/// renders ONE merged card with account tabs.
+function isParallelAccountFamily(family: string): boolean {
+  return family === "antigravity" || family === "cursor";
+}
+
+/// The "maxed out" threshold for the account-tab health dot.
+const MAXED_PCT = 99.5;
+
+function maxProgressUsed(s: Snapshot): number {
+  return s.metrics.reduce(
+    (best, m) =>
+      m.kind === "progress" && m.used_percent !== null
+        ? Math.max(best, m.used_percent)
+        : best,
+    0,
+  );
+}
+
+/// Health dot for an account tab: red = some window (session or weekly)
+/// is maxed out — the account is waiting for a reset; green = room left
+/// everywhere; gray = no successful fetch yet.
+function accountHealthDot(id: string): "red" | "green" | "gray" {
+  const snap = lastSnapshots.find((s) => s.id === id);
+  if (!snap || snap.status !== "ok") return "gray";
+  return maxProgressUsed(snap) >= MAXED_PCT ? "red" : "green";
+}
+
+// ── Card fold (grouped by provider family) ─────────────────────────────────────
+
+/// Returns true when this family is a fold candidate:
+///
+///   - The family has at least one multi-account capable account (kimi, deepseek,
+///     stepfun, siliconflow, novita, relaybalance — all via the same snapshot
+///     query, so their account list is always consistent), OR is a parallel
+///     family (antigravity / cursor) that has multiple independent cards.
+///
+///   - AND every card in the family is maxed out (all progress windows exhausted).
+///
+/// When the user has manually overridden the fold state via the toggle, the
+/// stored preference (layout.providers[family].collapsed) takes priority.
+function isFamilyFoldCandidate(family: string): boolean {
+  if (!supportsExtraAccounts(family) && !isParallelAccountFamily(family)) return false;
+  const cards = lastSnapshots.filter(
+    (s) => providerFamily(s.id) === family && !isCardDisabled(s.id),
+  );
+  if (cards.length === 0) return false;
+  return cards.every((s) => maxProgressUsed(s) >= MAXED_PCT);
+}
+
+/// True when the family should render in the collapsed single-line state.
+/// Respects the user's manual override (layout.providers[family].collapsed):
+///   - undefined  → follow auto-detection (isFamilyFoldCandidate)
+///   - true       → always collapsed
+///   - false      → always expanded
+function isFamilyCollapsed(family: string): boolean {
+  const layout = providerLayout(family);
+  if (layout.collapsed !== undefined) return layout.collapsed;
+  return isFamilyFoldCandidate(family);
+}
+
+/// When collapsed, the card shows the nearest reset across all accounts in the
+/// family. Returns the remaining seconds (0 if already reset or no quota windows).
+function nearestResetSeconds(family: string): number {
+  const cards = lastSnapshots.filter(
+    (s) => providerFamily(s.id) === family && !isCardDisabled(s.id),
+  );
+  let nearest = Infinity;
+  for (const s of cards) {
+    for (const m of s.metrics) {
+      if (m.kind !== "progress" || m.resets_at === null) continue;
+      const secs = Math.max(0, m.resets_at - Date.now()) / 1000;
+      if (secs < nearest) nearest = secs;
+    }
+  }
+  return nearest === Infinity ? 0 : nearest;
+}
+
+/// Combines the overall family health dot: green if all accounts green, red if
+/// all are red, gray otherwise.  When collapsed we only show the overall dot
+/// instead of per-account tabs.
+function familyHealthDot(family: string): "red" | "green" | "gray" {
+  const cards = lastSnapshots.filter(
+    (s) => providerFamily(s.id) === family && !isCardDisabled(s.id),
+  );
+  if (cards.length === 0) return "gray";
+  const dots = cards.map((s) => accountHealthDot(s.id));
+  if (dots.every((d) => d === "green")) return "green";
+  if (dots.every((d) => d === "red")) return "red";
+  return "gray";
+}
+
+// Quota pools: which independent meter group a metric label belongs to.
+// Antigravity meters Gemini and Claude separately; Cursor separates its
+// Auto bucket from the API bucket. Single-pool providers return one pool
+// and the card renders no group headers.
+const METRIC_POOLS: Record<string, Record<string, string>> = {
+  antigravity: {
+    Session: "Gemini",
+    Weekly: "Gemini",
+    Claude: "Claude",
+    "Claude Weekly": "Claude",
+  },
+  cursor: {
+    "Cursor Models": "Auto",
+    "Other Models": "API",
+  },
+};
+
+function metricPool(family: string, label: string): string | undefined {
+  return METRIC_POOLS[family]?.[label];
+}
+
 function renderCard(s: Snapshot): string {
-  const plan = s.plan ? `<span class="plan">${escapeHtml(s.plan)}</span>` : "";
-  const icon = PROVIDER_ICONS[s.id] ?? PROVIDER_ICONS[providerFamily(s.id)] ?? "";
-  const muted = s.status === "ok" ? "" : " muted";
+  const family = providerFamily(s.id);
+  // Multi-account families render ONE dashboard card per family (the bare
+  // family id), with the account tabs under the head. The card body shows
+  // the selected account's snapshot; s (the family card) is the anchor.
+  let shown = s;
+  let accountCount = "";
+  let accountTabs = "";
+  if (s.id === family && supportsExtraAccounts(family) && !isParallelAccountFamily(family)) {
+    const accountIds = lastSnapshots
+      .filter((snap) => providerFamily(snap.id) === family && !isCardDisabled(snap.id))
+      .map((snap) => snap.id);
+    if (accountIds.length > 1) {
+      const active = activeAccountFor.get(family) ?? s.id;
+      const activeSnap = lastSnapshots.find(
+        (snap) => snap.id === active && !isCardDisabled(snap.id),
+      );
+      if (activeSnap) shown = activeSnap;
+      else activeAccountFor.set(family, s.id);
+	      accountCount = `<span class="provider-count">×${accountIds.length}</span>`;
+      accountTabs = `<div class="card-account-tabs">${accountIds
+        .map((id) => {
+          const label = id === s.id
+            ? (accountsCache.get(family)?.[0]?.label || t("customize.acctDefaultShort"))
+            : labelForAccount(id, accountsCache.get(family) ?? []);
+          const on = id === shown.id;
+          const dot = accountHealthDot(id);
+          const dotTitle =
+            dot === "red"
+              ? t("customize.acctDotRed")
+              : dot === "green"
+                ? t("customize.acctDotGreen")
+                : t("customize.acctDotGray");
+          return `<button class="card-account-tab${on ? " on" : ""}" data-card-account="${family}|${escapeHtml(id)}" title="${escapeHtml(dotTitle)}"><span class="acct-dot ${dot}"></span>${escapeHtml(label)}</button>`;
+        })
+        .join("")}</div>`;
+    }
+  }
+  const plan = shown.plan ? `<span class="plan">${escapeHtml(shown.plan)}</span>` : "";
+  const icon = providerVisual(shown.id, shown.dashboard_url ?? undefined)?.iconSvg ?? "";
+  const muted = shown.status === "ok" ? "" : " muted";
 
   let body: string;
   let caret = "";
-  if (s.status === "ok") {
+  if (shown.status === "ok") {
     const L = providerLayout(s.id);
-    const spend = lastSpend.find((sp) => sp.id === s.id);
+    const spend = lastSpend.find((sp) => sp.id === shown.id);
     const visible = L.metricOrder.filter((k) => !L.hidden.includes(k));
     const always = visible.filter((k) => !L.onDemand.includes(k));
     const onDemand = visible.filter((k) => L.onDemand.includes(k));
-
-    body = always.map((k) => renderItem(s, spend, k)).join("");
-    const onDemandHtml = onDemand.map((k) => renderItem(s, spend, k)).join("");
+    // Pool-grouped metric rows. A pool header is inserted when the card's
+    // metrics span 2+ distinct pools (Antigravity Gemini vs Claude, Cursor
+    // Auto vs API).
+    const withPools = always.map((k) => ({
+      key: k,
+      html: renderItem(shown, spend, k),
+      pool: metricPool(family, k),
+    }));
+    let lastPool: string | undefined;
+    body = withPools
+      .map((row) => {
+        const header =
+          row.pool && row.pool !== lastPool && withPools.some((r) => r.pool && r.pool !== row.pool)
+            ? `<div class="pool-head">${escapeHtml(row.pool)}</div>`
+            : "";
+        lastPool = row.pool;
+        return header + row.html;
+      })
+      .join("");
+    const onDemandHtml = onDemand.map((k) => renderItem(shown, spend, k)).join("");
     if (onDemandHtml.trim()) {
       const anim = L.expanded && animateExpandId === s.id ? " anim" : "";
       caret = `
@@ -1247,56 +1376,121 @@ function renderCard(s: Snapshot): string {
         ${L.expanded ? `<div class="on-demand${anim}">${onDemandHtml}</div>` : ""}`;
     }
   } else {
-    body = `<p class="placeholder">${escapeHtml(s.error ?? t("card.notConnected"))}</p>`;
+    body = `<p class="placeholder">${escapeHtml(shown.error ?? t("card.notConnected"))}</p>`;
   }
 
-  const stale = s.stale
-    ? `<span class="stale" title="${escapeHtml(staleHelp(s))}">${escapeHtml(t("card.outdated"))}</span>`
+  const stale = shown.stale
+    ? `<span class="stale" title="${escapeHtml(staleHelp(shown))}">${escapeHtml(t("card.outdated"))}</span>`
     : "";
-  const family = providerFamily(s.id);
-  const dashUrl = (s.dashboard_url ?? "").trim();
+  const dashUrl = (shown.dashboard_url ?? "").trim();
   const dashOk = /^https?:\/\//i.test(dashUrl);
-  const staticLinks = PROVIDER_LINKS[s.id] ?? PROVIDER_LINKS[family] ?? [];
+  const staticLinks = PROVIDER_LINKS[shown.id] ?? PROVIDER_LINKS[family] ?? [];
   const linkItems = dashOk
     ? [{ label: "Dashboard", url: dashUrl }, ...staticLinks.filter((l) => l.label !== "Dashboard")]
     : staticLinks;
   const links = linkItems
-    .filter((l) => l.label !== "API" || s.metrics.some((m) => m.label === "API"))
+    .filter((l) => l.label !== "API" || shown.metrics.some((m) => m.label === "API"))
     .map((l) => `<button class="quick-link" data-link="${escapeHtml(l.url)}">${escapeHtml(displayLinkLabel(l.label))}</button>`)
     .join("<span class='quick-sep'>·</span>");
   const linksRow = links ? `<div class="quick-links">${links}</div>` : "";
-  const share =
-    s.status === "ok"
-      ? `<button class="share-btn" data-share="${s.id}" title="${escapeHtml(t("card.share"))}">⧉</button>`
+  // Folded state: replace the card body with a single-line summary (one
+  // row per quota window showing TIME-elapsed + the nearest reset countdown).
+  // The card head stays so the user can still read the provider name, plan,
+  // and family state. The chevron toggles between collapsed/expanded and
+  // remembers the choice per family.
+  const familyCollapsed = isFamilyCollapsed(family);
+  const foldChevron = familyCollapsed
+    ? `<button class="card-fold-toggle" data-card-fold="${escapeHtml(family)}" title="${escapeHtml(t("card.expand"))}">⌄</button>`
+    : `<button class="card-fold-toggle" data-card-fold="${escapeHtml(family)}" title="${escapeHtml(t("card.collapse"))}">⌃</button>`;
+  const finalBody = familyCollapsed ? "" : body;
+  // Hide per-account tabs and the ×N badge when folded — the family health
+  // dot and reset countdown already summarise the whole family.
+  const finalAccountTabs = familyCollapsed ? "" : accountTabs;
+  const finalAccountCount = familyCollapsed ? "" : accountCount;
+  const refreshBtn =
+    shown.status === "ok" || shown.status === "error"
+      ? `<button class="card-refresh" data-card-refresh="${shown.id}" title="${escapeHtml(t("card.refresh"))}">⟳</button>`
       : "";
+  const share =
+    shown.status === "ok"
+      ? `<button class="share-btn" data-share="${shown.id}" title="${escapeHtml(t("card.share"))}">⧉</button>`
+      : "";
+  // Folded state: visually prominent reset countdown badge with health status
+  // and generous breathing room instead of a cramped raw text sliver.
+  let foldLine = "";
+  if (familyCollapsed) {
+    const dot = familyHealthDot(family);
+    const dotTitle =
+      dot === "red"
+        ? t("customize.acctDotRed")
+        : dot === "green"
+          ? t("customize.acctDotGreen")
+          : t("customize.acctDotGray");
+    const resetSecs = nearestResetSeconds(family);
+    const isMaxed = isFamilyFoldCandidate(family) || dot === "red";
+    if (resetSecs > 0) {
+      const label = isMaxed ? t("card.familyAllMaxed") : t("card.foldedResetsIn");
+      const badgeTone = isMaxed ? "warn" : "normal";
+      foldLine = `
+        <div class="fold-row">
+          <div class="fold-badge ${badgeTone}">
+            <span class="acct-dot ${dot}" title="${escapeHtml(dotTitle)}"></span>
+            <span class="fold-label">${escapeHtml(label)}</span>
+            <span class="fold-timer">${escapeHtml(fmtDuration(resetSecs * 1000))}</span>
+          </div>
+        </div>`;
+    } else {
+      const label = isMaxed ? t("card.familyAllMaxedPending") : t("card.familyReady");
+      foldLine = `
+        <div class="fold-row">
+          <div class="fold-badge normal">
+            <span class="acct-dot ${dot}" title="${escapeHtml(dotTitle)}"></span>
+            <span class="fold-label">${escapeHtml(label)}</span>
+          </div>
+        </div>`;
+    }
+  }
   return `
-    <article class="provider${muted}" data-provider="${s.id}">
+    <article class="provider${muted} ${familyCollapsed ? "is-folded" : ""}" data-provider="${s.id}" data-origin="${escapeHtml(shown.dashboard_url ?? "")}">
       <div class="provider-head">
         <span class="drag-grip" title="${escapeHtml(t("card.drag"))}">⠿</span>
         <span class="provider-name">${escapeHtml(s.name)}</span>
+        ${finalAccountCount}
         ${plan}
         ${stale}
         <span class="spacer"></span>
+        ${foldChevron}
+        ${refreshBtn}
         ${share}
         <span class="provider-icon">${icon}</span>
       </div>
-      <div class="card-panel">
-        ${body}
+      ${familyCollapsed ? foldLine : `<div class="card-panel">
+        ${finalAccountTabs}
+        ${finalBody}
         ${linksRow}
         ${caret}
-      </div>
-    </article>`;
+      </div>`}`;
 }
 
 function orderedSnapshots(): Snapshot[] {
   const order = config.layout?.providerOrder ?? [];
-  // Disabled providers disappear immediately — not on the next fetch.
-  return lastSnapshots.filter((s) => !isCardDisabled(s.id)).sort((a, b) => {
-    const ia = order.indexOf(a.id);
-    const ib = order.indexOf(b.id);
-    if (ia !== -1 && ib !== -1) return ia - ib;
-    return rankSnapshot(a) - rankSnapshot(b);
-  });
+  // Multi-account families render ONE card on the dashboard (the family id);
+  // the per-account cards (kimi@<fp>) surface as account tabs inside that
+  // card. Antigravity is the exception: its bare card is the logged-in
+  // account and the slots are independent captured accounts — they stay
+  // as separate cards (multi-account parallel monitoring, not a switcher).
+  return lastSnapshots
+    .filter((s) => {
+      const fam = providerFamily(s.id);
+      if (s.id !== fam && supportsExtraAccounts(fam) && !isParallelAccountFamily(fam)) return false;
+      return !isCardDisabled(s.id);
+    })
+    .sort((a, b) => {
+      const ia = order.indexOf(a.id);
+      const ib = order.indexOf(b.id);
+      if (ia !== -1 && ib !== -1) return ia - ib;
+      return rankSnapshot(a) - rankSnapshot(b);
+    });
 }
 
 // The ring is built from annular wedges (like the Mac's SectorMark chart):
@@ -1964,11 +2158,11 @@ async function shareCard(id: string): Promise<void> {
     clone.style.boxSizing = "border-box";
 
     // Shares are strictly what's on screen: everything the card currently
-    // renders — bars, pace hints, the trend, and the On Demand section
+    // renders — bars, quota bars, the trend, and the On Demand section
     // when it's open — copies as-is. Only interactive chrome (buttons,
     // links, carets, grips) never belongs in an image. (The old "compact
     // composition" for collapsed cards is retired: it dropped the visible
-    // trend and pace hints, which read as missing data in the copy.)
+    // trend and quota bars, which read as missing data in the copy.)
     // .snap-card restores the card surface the popover no longer draws
     // (cards sit flat on the background there, panels carry the chrome).
     clone.classList.add("snap-card");
@@ -2126,7 +2320,8 @@ function initLiquidLens(): void {
   if (config.glassEffects === false || lensReady) return;
   lensReady = true;
   const surfaces: [string, string, HTMLElement | null][] = [
-    ["lens-side", "lens-map-side", document.querySelector(".sidebar")],
+    // The provider rail is intentionally solid; keep the lens only on the
+    // footer surface where the glass treatment remains useful.
     ["lens-footer", "lens-map-footer", document.querySelector(".main-col footer")],
   ];
   for (const [filterId, imgId, el] of surfaces) {
@@ -2331,10 +2526,9 @@ function isStarrable(s: Snapshot | undefined, key: string): boolean {
 // Session-only — collapsing again on reopen keeps the list scannable.
 const custExpanded = new Set<string>();
 
-// Which provider's inline config panel is open (one at a time) and the
-// live search text — session-only, like custExpanded.
+// Which provider's inline config panel is open (one at a time).
+// Session-only, like custExpanded.
 let custConfigOpen: string | null = null;
-let custSearchQuery = "";
 
 // Which provider's read-only credential-info panel ("?" button) is open.
 // One panel at a time, and opening one side closes the other.
@@ -2348,6 +2542,11 @@ interface CredStatus {
   localCli: string | null;
   // Account label of Pane's own OAuth login (codex/grok), null when none.
   oauth: string | null;
+  // Kimi only: the source selected by the backend's refresh precedence.
+  activeSource?: "api_key" | "oauth" | null;
+  // Subscription/membership badge for local sign-ins (Cursor reads its
+  // own local state DB; cockpit badges accounts the same way).
+  membership?: string | null;
 }
 const credStatusCache = new Map<string, CredStatus>();
 
@@ -2366,7 +2565,13 @@ function refreshCredStatus(id: string): void {
       paintCredStatus(id);
     })
     .catch(() => {
-      credStatusCache.set(id, { storedKey: false, envKey: false, localCli: null, oauth: null });
+      credStatusCache.set(id, {
+        storedKey: false,
+        envKey: false,
+        localCli: null,
+        oauth: null,
+        activeSource: null,
+      });
       paintCredStatus(id);
     });
 }
@@ -2385,24 +2590,11 @@ function paintCredStatus(id: string): void {
 
 // Providers whose credential is a plain API key saved through set_api_key.
 // The rest sign in through their own CLI or desktop login instead.
-const KEY_PROVIDERS = new Set([
-  "openrouter",
-  "zai",
-  "minimax",
-  "deepseek",
-  "moonshot",
-  "elevenlabs",
-  "codebuff",
-  "kilo",
-  "aihubmix",
-  "qwen",
-  "kimi",
-  "opencode",
-  "stepfun",
-  "siliconflow",
-  "novita",
-  "relaybalance",
-]);
+const KEY_PROVIDERS = new Set(
+  providerCatalog
+    .filter((definition) => supportsApiKey(definition.familyId))
+    .map((definition) => definition.familyId),
+);
 
 /// Credential facts for the Customize "?" panel — how each provider gets
 /// its quota read and which sign-in methods exist. Every entry was checked
@@ -2416,7 +2608,7 @@ const PROVIDER_CRED_INFO: Record<string, { auto: string; methods: CredMethod[] }
   codex: { auto: "customize.cred.codex", methods: ["local", "oauth"] },
   cursor: { auto: "customize.cred.cursor", methods: ["local"] },
   opencode: { auto: "customize.cred.opencode", methods: ["paste", "local"] },
-  copilot: { auto: "customize.cred.copilot", methods: ["local"] },
+  copilot: { auto: "customize.cred.copilot", methods: ["local", "oauth"] },
   grok: { auto: "customize.cred.grok", methods: ["local", "oauth"] },
   devin: { auto: "customize.cred.devin", methods: ["local"] },
   minimax: { auto: "customize.cred.minimax", methods: ["paste", "local"] },
@@ -2432,37 +2624,65 @@ const PROVIDER_CRED_INFO: Record<string, { auto: string; methods: CredMethod[] }
   aihubmix: { auto: "customize.cred.aihubmix", methods: ["paste", "local"] },
   qwen: { auto: "customize.cred.qwen", methods: ["paste"] },
   hermes: { auto: "customize.cred.hermes", methods: [] },
-  kimi: { auto: "customize.cred.kimi", methods: ["oauth", "paste"] },
+  kimi: { auto: "customize.cred.kimi", methods: ["paste", "oauth"] },
   stepfun: { auto: "customize.cred.stepfun", methods: ["paste"] },
   siliconflow: { auto: "customize.cred.siliconflow", methods: ["paste"] },
   novita: { auto: "customize.cred.novita", methods: ["paste"] },
   relaybalance: { auto: "customize.cred.relaybalance", methods: ["paste"] },
 };
 
-/// The "?" panel's read-only fact sheet: what gets read automatically,
-/// which sign-in methods exist, and the live stored/env key status.
+/// The "?" panel's read-only fact sheet: an ordered list of how this
+/// provider can be read (local config file, API key, OAuth callback), not
+/// a config surface — all actions live in the ⚙ panel.
 function renderCustInfo(id: string): string {
   const info = PROVIDER_CRED_INFO[providerFamily(id)];
   const auto = info ? escapeHtml(t(info.auto)) : "";
   const methods = info
-    ? info.methods.map((m) => escapeHtml(t(`customize.credMethod.${m}`))).join(" · ")
-    : "";
-  const methodLine =
-    info && info.methods.length
-      ? methods
-      : `<span class="dim">${escapeHtml(t("customize.credMethodNone"))}</span>`;
+    ? info.methods
+        .map((m) => `<li>${escapeHtml(t(`customize.credMethod.${m}`))}</li>`)
+        .join("")
+    : `<li class="dim">${escapeHtml(t("customize.credMethodNone"))}</li>`;
   return `<div class="cust-config cust-info">
       <p><span class="cust-info-label">${escapeHtml(t("customize.credAutoLabel"))}</span>${auto}</p>
-      <p><span class="cust-info-label">${escapeHtml(t("customize.credMethodsLabel"))}</span>${methodLine}</p>
+      <ol class="cust-info-methods">
+        ${methods}
+      </ol>
       <p><span class="cust-info-label">${escapeHtml(t("customize.credStatusLabel"))}</span><span class="dim" data-cred-status="${escapeHtml(id)}">${escapeHtml(t("customize.credStatusLoading"))}</span></p>
     </div>`;
 }
 
-/// One status line ("?" panel): saved key, env var, local sign-in, in
-/// that order.
+/// Kimi's active credential source: the backend's stated precedence, or
+/// the same fallback order when it hasn't stated one. Shared by the "?"
+/// status line and the ⚙ chips so the two can never drift apart.
+function kimiActiveSource(status: CredStatus): "api_key" | "oauth" | null {
+  return (
+    status.activeSource ??
+    (status.storedKey || status.envKey ? "api_key" : status.localCli ? "oauth" : null)
+  );
+}
+
+/// One status line ("?" panel): for Kimi, show only the credential source
+/// selected by the backend. Other providers retain their source inventory.
+/// The subscription/membership tier, when known, is appended — that is the
+/// "当前状态" the user asked for: source + tier, not just "已保存".
 function credStatusLine(id: string): string {
   const status = credStatusCache.get(id);
   if (!status) return escapeHtml(t("customize.credStatusLoading"));
+  const membership = status.membership
+    ? ` · <span class="cred-chip tier">${escapeHtml(status.membership)}</span>`
+    : "";
+  if (providerFamily(id) === "kimi") {
+    const source = kimiActiveSource(status);
+    if (source === "api_key") {
+      return escapeHtml(
+        t(status.storedKey ? "customize.credStored" : "customize.credKimiEnv"),
+      ) + membership;
+    }
+    if (source === "oauth" && status.localCli) {
+      return escapeHtml(t("customize.chipKimiOAuth", { x: status.localCli })) + membership;
+    }
+    return escapeHtml(t("customize.credNotStored")) + membership;
+  }
   const parts: string[] = [];
   parts.push(
     status.storedKey
@@ -2471,14 +2691,27 @@ function credStatusLine(id: string): string {
   );
   if (status.envKey) parts.push(escapeHtml(t("customize.credEnv")));
   if (status.localCli) parts.push(escapeHtml(status.localCli));
-  return parts.join(" · ");
+  return parts.join(" · ") + membership;
 }
 
-/// The gear panel's live status chips: one green chip per credential
-/// source found on this machine, or a single grey "not configured" chip.
+/// The gear panel's live status chips: one green chip for Kimi's active
+/// credential source, or the existing source inventory for other providers.
 function credChipsHtml(id: string): string {
   const status = credStatusCache.get(id);
   if (!status) return `<span class="dim">${escapeHtml(t("customize.credStatusLoading"))}</span>`;
+  if (providerFamily(id) === "kimi") {
+    const source = kimiActiveSource(status);
+    if (source === "api_key" && status.storedKey) {
+      return `<span class="cred-chip ok">${escapeHtml(t("customize.chipStoredKey"))}</span>`;
+    }
+    if (source === "api_key" && status.envKey) {
+      return `<span class="cred-chip ok">${escapeHtml(t("customize.chipKimiEnvKey"))}</span>`;
+    }
+    if (source === "oauth" && status.localCli) {
+      return `<span class="cred-chip ok">${escapeHtml(t("customize.chipKimiOAuth", { x: status.localCli }))}</span>`;
+    }
+    return `<span class="cred-chip none">${escapeHtml(t("customize.chipNone"))}</span>`;
+  }
   const chips: string[] = [];
   if (status.storedKey)
     chips.push(`<span class="cred-chip ok">${escapeHtml(t("customize.chipStoredKey"))}</span>`);
@@ -2488,6 +2721,11 @@ function credChipsHtml(id: string): string {
     chips.push(
       `<span class="cred-chip ok">${escapeHtml(t("customize.chipLocal", { x: status.localCli }))}</span>`,
     );
+  // Subscription/membership badge for local sign-ins: Free vs Pro vs
+  // Ultra. The quota card may not be live (e.g. Free accounts), so the
+  // tier is reported independently of usage data.
+  if (status.membership)
+    chips.push(`<span class="cred-chip tier">${escapeHtml(status.membership)}</span>`);
   // Pane's own browser sign-in (codex/grok) — the family row carries it;
   // extra CLI account cards don't own the OAuth credential.
   if (status.oauth && providerFamily(id) === id)
@@ -2515,27 +2753,21 @@ function credAccountsHtml(id: string): string {
 
 // Providers with a browser sign-in owned by Pane itself (Phase 3.1). The
 // backend stores tokens under %APPDATA%\Pane\oauth\<provider>.json.
-const OAUTH_PROVIDERS = new Set(["codex", "grok"]);
+const OAUTH_PROVIDERS = new Set(["codex", "grok", "copilot"]);
 
 // ---------------------------------------------------------------------------
-// Extra API-key accounts (Phase 3.2) — deepseek/stepfun/siliconflow/novita/
-// relaybalance. The gear panel's single-key field stays the family's main
-// card; each entry below adds a <provider>@<n> card on the dashboard.
+// Extra API-key accounts (Phase 3.2) — deepseek/kimi/stepfun/siliconflow/
+// novita/relaybalance. The gear panel's single-key field stays the family's main
+// card; each entry below adds a stable <provider>@<fingerprint> card on the
+// dashboard.
 // ---------------------------------------------------------------------------
-
-const MULTI_ACCOUNT_PROVIDERS = new Set([
-  "deepseek",
-  "stepfun",
-  "siliconflow",
-  "novita",
-  "relaybalance",
-]);
 
 /// One account_list row: the masked key ("sk-…abcd") is all that comes
 /// back — the full key never leaves the backend.
 interface AccountEntry {
+  id?: string;
   label: string;
-  hasKey: boolean;
+  email?: string;
   maskedKey: string;
   baseUrl?: string | null;
 }
@@ -2544,8 +2776,26 @@ interface AccountEntry {
 // same trade-off as credStatusCache.
 const accountsCache = new Map<string, AccountEntry[]>();
 
-// Whether the "Add account" mini-form is unfolded on the open panel.
-let acctFormOpen = false;
+// The account editor is a real modal, not an inline expansion inside the
+// provider row. Keep one dismissal hook so opening another provider or
+// closing Customize cannot leave a stale editor behind.
+let dismissAccountDialog: (() => void) | null = null;
+
+// A live probe must only unlock the exact input value it tested. A request
+// can finish after the user edits the form (or after a newer probe), so keep
+// a small generation ledger instead of trusting promise completion order.
+const testGenerations = new Map<string, number>();
+
+function bumpTestGeneration(scope: "cust" | "acct", id: string): number {
+  const key = `${scope}:${id}`;
+  const next = (testGenerations.get(key) ?? 0) + 1;
+  testGenerations.set(key, next);
+  return next;
+}
+
+function isCurrentTestGeneration(scope: "cust" | "acct", id: string, generation: number): boolean {
+  return testGenerations.get(`${scope}:${id}`) === generation;
+}
 
 function fetchAccounts(family: string): void {
   if (accountsCache.has(family)) return;
@@ -2556,95 +2806,368 @@ function refreshAccounts(family: string): void {
   void invoke<AccountEntry[]>("account_list", { provider: family })
     .then((list) => {
       accountsCache.set(family, list);
-      paintAccounts(family);
+      const layoutChanged = reconcileAccountLayout(family, list);
+      // The list feeds both the Customize child rows and the dashboard's
+      // merged-card tabs, so both surfaces need the fresh labels.
+      if (customizeOpen) renderDrawerBody();
+      else if (layoutChanged || lastSnapshots.length) renderIfVisible();
     })
     .catch(() => {
       accountsCache.set(family, []);
-      paintAccounts(family);
+      if (customizeOpen) renderDrawerBody();
     });
 }
 
-function paintAccounts(family: string): void {
-  const el = document.querySelector<HTMLElement>(
-    `#drawer-body [data-accounts-block="${CSS.escape(family)}"]`,
-  );
-  if (el) el.innerHTML = accountsBlockInner(family);
+/// Returns the display label for an account id. Priority:
+/// 1. saved label (user-set name)
+/// 2. email (for imported accounts with a known email)
+/// 3. fingerprint suffix (id after the @)
+/// 4. bare id as last resort
+function labelForAccount(id: string, list: AccountEntry[]): string {
+  const entry = list.find((e) => e.id === id);
+  if (entry?.label) return entry.label;
+  if (entry?.email) return entry.email;
+  return id.split("@")[1]?.slice(0, 8) ?? id;
 }
 
-function accountLabelAt(list: AccountEntry[], index: number): string {
-  const entry = list[index];
-  return entry?.label || t("customize.acctDefaultName", { n: index + 1 });
+/// Cursor add-account dialog: three tabs mirroring cockpit's import paths —
+/// OAuth browser login (PKCE deep link), token/refresh paste, and JSON
+/// import (cockpit-compatible field aliases).
+function openCursorAccountDialog(): void {
+  dismissAccountDialog?.();
+  const overlay = document.createElement("div");
+  overlay.id = "account-overlay";
+  overlay.innerHTML = `
+    <section class="account-dialog" role="dialog" aria-modal="true" aria-labelledby="cursor-account-title">
+      <div class="account-dialog-head">
+        <h3 id="cursor-account-title">${escapeHtml(t("customize.cursorAddTitle"))}</h3>
+        <button class="account-dialog-close" data-acct-close type="button" aria-label="${escapeHtml(t("dialog.cancel"))}">✕</button>
+      </div>
+      <div class="cursor-add-tabs">
+        <button class="cursor-tab on" data-cursor-tab="oauth">${escapeHtml(t("customize.cursorTabOAuth"))}</button>
+        <button class="cursor-tab" data-cursor-tab="token">${escapeHtml(t("customize.cursorTabToken"))}</button>
+        <button class="cursor-tab" data-cursor-tab="json">${escapeHtml(t("customize.cursorTabJson"))}</button>
+      </div>
+      <div class="cursor-tab-body" data-cursor-tab-body="oauth">
+        <p class="account-dialog-help">${escapeHtml(t("customize.cursorOAuthHelp"))}</p>
+        <button class="mini-btn" data-cursor-oauth-start>${escapeHtml(t("customize.cursorOAuthStart"))}</button>
+        <span class="cust-test-result" data-cursor-oauth-result></span>
+      </div>
+      <div class="cursor-tab-body" data-cursor-tab-body="token" hidden>
+        <label class="account-field">
+          <span>${escapeHtml(t("customize.cursorTokenLabel"))}</span>
+          <input type="password" data-cursor-token autocomplete="new-password" spellcheck="false" />
+        </label>
+        <label class="account-field">
+          <span>${escapeHtml(t("customize.cursorRefreshLabel"))}</span>
+          <input type="password" data-cursor-refresh autocomplete="new-password" spellcheck="false" />
+        </label>
+        <label class="account-field">
+          <span>${escapeHtml(t("customize.acctNoteLabel"))}</span>
+          <input type="text" data-cursor-token-label autocomplete="off" spellcheck="false" />
+        </label>
+        <button class="mini-btn" data-cursor-token-import>${escapeHtml(t("customize.cursorTokenImport"))}</button>
+        <span class="cust-test-result" data-cursor-token-result></span>
+      </div>
+      <div class="cursor-tab-body" data-cursor-tab-body="json" hidden>
+        <p class="account-dialog-help">${escapeHtml(t("customize.cursorJsonHelp"))}</p>
+        <textarea class="cursor-json-input" data-cursor-json rows="8" spellcheck="false"></textarea>
+        <button class="mini-btn" data-cursor-json-import>${escapeHtml(t("customize.cursorJsonImport"))}</button>
+        <span class="cust-test-result" data-cursor-json-result></span>
+      </div>
+    </section>`;
+
+  let closed = false;
+  let activeLoginId: string | null = null;
+  const done = () => {
+    if (closed) return;
+    closed = true;
+    stopOauthPoll();
+    document.removeEventListener("keydown", onKey, true);
+    overlay.remove();
+    if (dismissAccountDialog === done) dismissAccountDialog = null;
+  };
+  const onKey = (event: KeyboardEvent) => {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      event.stopPropagation();
+      done();
+    }
+  };
+  dismissAccountDialog = done;
+  document.addEventListener("keydown", onKey, true);
+  document.body.appendChild(overlay);
+
+  // Shared success tail for all three import paths: refresh the account
+  // list, close the dialog, force a quota refresh.
+  const finishImport = () => {
+    refreshAccounts("cursor");
+    window.setTimeout(() => {
+      done();
+      void forceUsageRefreshAttempt(false).then(requestTraySync);
+    }, 900);
+  };
+
+  // Tab switching.
+  overlay.querySelectorAll<HTMLElement>("[data-cursor-tab]").forEach((tab) => {
+    tab.addEventListener("click", () => {
+      const name = tab.dataset.cursorTab!;
+      overlay.querySelectorAll(".cursor-tab").forEach((t) => t.classList.toggle("on", t === tab));
+      overlay.querySelectorAll<HTMLElement>("[data-cursor-tab-body]").forEach((body) => {
+        body.hidden = body.dataset.cursorTabBody !== name;
+      });
+    });
+  });
+
+  // OAuth flow: start → open browser → poll (one backend tick per call)
+  // until done. Closing the dialog cancels the pending backend session.
+  let pollTimer: number | undefined;
+  const stopOauthPoll = () => {
+    if (pollTimer !== undefined) window.clearInterval(pollTimer);
+    pollTimer = undefined;
+    if (activeLoginId) {
+      void invoke("cursor_oauth_cancel", { loginId: activeLoginId }).catch(() => {});
+      activeLoginId = null;
+    }
+  };
+  const oauthResult = overlay.querySelector<HTMLElement>("[data-cursor-oauth-result]")!;
+  const oauthStart = overlay.querySelector<HTMLElement>("[data-cursor-oauth-start]")!;
+  oauthStart.addEventListener("click", () => {
+    oauthStart.setAttribute("disabled", "");
+    oauthResult.textContent = t("customize.cursorOAuthStarting");
+    oauthResult.classList.remove("ok", "err");
+    void invoke<{ loginId: string; verificationUri: string }>("cursor_oauth_start", {})
+      .then(async (started) => {
+        activeLoginId = started.loginId;
+        void invoke("open_link", { url: started.verificationUri }).catch(() => {});
+        oauthResult.textContent = t("customize.cursorOAuthWaiting");
+        stopOauthPoll();
+        pollTimer = window.setInterval(async () => {
+          try {
+            const poll = await invoke<{
+              done: boolean;
+              error: string | null;
+              account: { email: string } | null;
+            }>("cursor_oauth_poll", { loginId: started.loginId });
+            if (!poll.done && !poll.error) return;
+            stopOauthPoll();
+            activeLoginId = null;
+            if (poll.error) {
+              oauthResult.textContent = `${t("customize.testFailed")}: ${poll.error}`;
+              oauthResult.classList.add("err");
+              oauthStart.removeAttribute("disabled");
+            } else {
+              oauthResult.textContent = t("customize.cursorOAuthDone", {
+                email: poll.account?.email || "",
+              });
+              oauthResult.classList.add("ok");
+              finishImport();
+            }
+          } catch (err) {
+            stopOauthPoll();
+            oauthResult.textContent = `${t("customize.testFailed")}: ${String(err)}`;
+            oauthResult.classList.add("err");
+            oauthStart.removeAttribute("disabled");
+          }
+        }, 2000);
+      })
+      .catch((err) => {
+        oauthResult.textContent = `${t("customize.testFailed")}: ${String(err)}`;
+        oauthResult.classList.add("err");
+        oauthStart.removeAttribute("disabled");
+      });
+  });
+
+  // Token import.
+  overlay.querySelector<HTMLElement>("[data-cursor-token-import]")?.addEventListener("click", () => {
+    const access = overlay.querySelector<HTMLInputElement>("[data-cursor-token]")!.value.trim();
+    if (!access) return;
+    const refresh = overlay.querySelector<HTMLInputElement>("[data-cursor-refresh]")!.value.trim();
+    const label = overlay.querySelector<HTMLInputElement>("[data-cursor-token-label]")!.value.trim();
+    const result = overlay.querySelector<HTMLElement>("[data-cursor-token-result]")!;
+    void appConfirm({
+      title: t("customize.cursorTabToken"),
+      message: t("customize.cursorTokenConfirm"),
+      confirmLabel: t("customize.cursorTokenImport"),
+    }).then((ok) => {
+      if (!ok) return;
+      void invoke<number>("cursor_import", {
+        jsonContent: JSON.stringify({
+          access_token: access,
+          refresh_token: refresh || undefined,
+          name: label || undefined,
+        }),
+      })
+        .then(() => {
+          result.textContent = t("customize.cursorImportDone");
+          result.classList.add("ok");
+          finishImport();
+        })
+        .catch((err) => {
+          result.textContent = `${t("customize.testFailed")}: ${String(err)}`;
+          result.classList.add("err");
+        });
+    });
+  });
+
+  // JSON import.
+  overlay.querySelector<HTMLElement>("[data-cursor-json-import]")?.addEventListener("click", () => {
+    const text = overlay.querySelector<HTMLTextAreaElement>("[data-cursor-json]")!.value;
+    const result = overlay.querySelector<HTMLElement>("[data-cursor-json-result]")!;
+    void appConfirm({
+      title: t("customize.cursorTabJson"),
+      message: t("customize.cursorTokenConfirm"),
+      confirmLabel: t("customize.cursorJsonImport"),
+    }).then((ok) => {
+      if (!ok) return;
+      void invoke<number>("cursor_import", { jsonContent: text })
+        .then((n) => {
+          result.textContent = t("customize.cursorImportCount", { n });
+          result.classList.add("ok");
+          finishImport();
+        })
+        .catch((err) => {
+          result.textContent = `${t("customize.testFailed")}: ${String(err)}`;
+          result.classList.add("err");
+        });
+    });
+  });
+
+  // Backdrop / close click.
+  overlay.addEventListener("click", (event) => {
+    if (event.target === overlay || (event.target as HTMLElement).closest("[data-acct-close]")) {
+      done();
+    }
+  });
 }
 
-/// The gear panel's account section (multi-account key providers, family
-/// row only): saved accounts with per-item delete, plus the collapsible
-/// "Add account" form whose Test reuses the test_api_key flow.
-function accountsBlockInner(family: string): string {
-  const list = accountsCache.get(family);
-  let rows: string;
-  if (!list) {
-    rows = `<p class="dim">${escapeHtml(t("customize.credStatusLoading"))}</p>`;
-  } else if (!list.length) {
-    rows = `<p class="dim">${escapeHtml(t("customize.acctNone"))}</p>`;
-  } else {
-    rows = `<ul class="acct-list">${list
-      .map(
-        (a, i) => `
-        <li class="acct-item">
-          <span class="acct-label">${escapeHtml(accountLabelAt(list, i))}</span>
-          <span class="dim">${escapeHtml(a.maskedKey)}</span>
-          <button class="mini-btn acct-del" data-acct-del="${family}|${i}" title="${escapeHtml(t("customize.acctDelete"))}">✕</button>
-        </li>`,
-      )
-      .join("")}</ul>`;
-  }
-  const baseUrlInput =
-    family === "relaybalance"
-      ? `<input type="text" data-acct-baseurl="${family}" placeholder="https://api.example.com" spellcheck="false" />`
-      : "";
-  const form = acctFormOpen
-    ? `<div class="acct-form">
-        <input type="text" data-acct-label="${family}" placeholder="${escapeHtml(t("customize.acctLabelPh"))}" spellcheck="false" />
-        ${baseUrlInput}
-        <input type="password" data-acct-key="${family}" placeholder="${escapeHtml(t("settings.keyPlaceholder"))}" />
-        <button class="mini-btn" data-acct-test="${family}">${escapeHtml(t("customize.test"))}</button>
-        <button class="mini-btn" data-acct-add="${family}" disabled title="${escapeHtml(t("customize.saveAfterTest"))}">${escapeHtml(t("customize.acctAddBtn"))}</button>
-        <span class="cust-test-result" data-acct-result="${family}"></span>
-      </div>`
-    : "";
-  return `${rows}
-    <button class="mini-btn" data-acct-toggle="${family}">${escapeHtml(acctFormOpen ? t("customize.acctClose") : t("customize.acctAdd"))}</button>
-    ${form}`;
+function openAccountDialog(family: string): void {
+  dismissAccountDialog?.();
+  const overlay = document.createElement("div");
+  overlay.id = "account-overlay";
+  overlay.innerHTML = `
+    <section class="account-dialog" data-account-dialog="${escapeHtml(family)}" role="dialog" aria-modal="true" aria-labelledby="account-dialog-title">
+      <div class="account-dialog-head">
+        <h3 id="account-dialog-title">${escapeHtml(t("customize.acctDialogTitle", { name: providerDisplayName(family) }))}</h3>
+        <button class="account-dialog-close" data-acct-close type="button" aria-label="${escapeHtml(t("dialog.cancel"))}">✕</button>
+      </div>
+      <p class="account-dialog-help">${escapeHtml(t("customize.acctDialogHelp"))}</p>
+      ${
+        getApiKeyLink(family)
+          ? `<p class="account-dialog-getkey"><button class="mini-btn" data-acct-getkey="${escapeHtml(getApiKeyLink(family)!)}" type="button">${escapeHtml(t("customize.getApiKey"))}</button></p>`
+          : ""
+      }
+      <div class="account-dialog-form">
+        <label class="account-field">
+          <span>${escapeHtml(t("customize.acctKeyLabel"))}</span>
+          <input type="password" data-acct-key="${escapeHtml(family)}" placeholder="${escapeHtml(t("settings.keyPlaceholder"))}" autocomplete="new-password" spellcheck="false" />
+        </label>
+        <label class="account-field">
+          <span>${escapeHtml(t("customize.acctNoteLabel"))}</span>
+          <input type="text" data-acct-label="${escapeHtml(family)}" placeholder="${escapeHtml(t("customize.acctLabelPh"))}" autocomplete="off" spellcheck="false" required />
+        </label>
+        ${
+          family === "relaybalance"
+            ? `<label class="account-field">
+          <span>${escapeHtml(t("settings.relayBaseUrl"))}</span>
+          <input type="text" data-acct-baseurl="${escapeHtml(family)}" placeholder="https://api.example.com" spellcheck="false" />
+        </label>`
+            : ""
+        }
+        <div class="account-dialog-test-row">
+          <button class="mini-btn" data-acct-test="${escapeHtml(family)}" type="button" disabled>${escapeHtml(t("customize.test"))}</button>
+          <span class="cust-test-result" data-acct-result="${escapeHtml(family)}"></span>
+        </div>
+        <div class="account-dialog-footer">
+          <button class="mini-btn account-dialog-cancel" data-acct-close type="button">${escapeHtml(t("dialog.cancel"))}</button>
+          <button class="mini-btn account-dialog-save" data-acct-add="${escapeHtml(family)}" type="button" disabled title="${escapeHtml(t("customize.saveAfterTest"))}">${escapeHtml(t("customize.acctSaveBtn"))}</button>
+        </div>
+      </div>
+    </section>`;
+
+  let closed = false;
+  const done = () => {
+    if (closed) return;
+    closed = true;
+    document.removeEventListener("keydown", onKey, true);
+    overlay.remove();
+    if (dismissAccountDialog === done) dismissAccountDialog = null;
+  };
+  const onKey = (event: KeyboardEvent) => {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      event.stopPropagation();
+      done();
+    }
+  };
+  overlay.addEventListener("click", (event) => {
+    const target = event.target as HTMLElement;
+    if (event.target === overlay || target.closest("[data-acct-close]")) {
+      done();
+      return;
+    }
+    const getKey = target.closest<HTMLElement>("[data-acct-getkey]");
+    if (getKey) {
+      void invoke("open_link", { url: getKey.dataset.acctGetkey }).catch((err) => {
+        const status = document.querySelector("#status");
+        if (status) status.textContent = t("footer.openLinkFailed", { err: String(err) });
+      });
+      return;
+    }
+    if (target.closest("[data-acct-test]")) {
+      void runAccountKeyTest(family);
+      return;
+    }
+    if (target.closest("[data-acct-add]")) void doAccountAdd(family);
+  });
+  overlay.addEventListener("input", (event) => {
+    const target = event.target as HTMLInputElement;
+    if (target.matches("[data-acct-key], [data-acct-baseurl], [data-acct-label]")) {
+      resetAcctTestState(overlay.querySelector<HTMLElement>(".account-dialog-form"));
+    }
+  });
+  dismissAccountDialog = done;
+  document.addEventListener("keydown", onKey, true);
+  document.body.appendChild(overlay);
+  const form = overlay.querySelector<HTMLElement>(".account-dialog-form");
+  resetAcctTestState(form);
+  overlay.querySelector<HTMLInputElement>("[data-acct-key]")?.focus();
 }
 
-/// The section only renders on the family's own row — a deepseek@1 card
-/// has no accounts of its own.
-function renderAccountsBlock(id: string): string {
-  if (!MULTI_ACCOUNT_PROVIDERS.has(id) || providerFamily(id) !== id) return "";
-  return `<div class="cust-accounts-mgmt" data-accounts-block="${escapeHtml(id)}">${accountsBlockInner(id)}</div>`;
-}
-
-/// "Test" inside the Add-account form: the same probe the main key field
-/// uses, but it unlocks the form's Add button instead of Save.
+/// "Test" inside the Add-account dialog: the same probe the main key field
+/// uses, but it unlocks the dialog's Save button instead of saving anything.
 async function runAccountKeyTest(family: string): Promise<void> {
   const block = document.querySelector<HTMLElement>(
-    `#drawer-body [data-accounts-block="${CSS.escape(family)}"]`,
+    `#account-overlay [data-account-dialog="${CSS.escape(family)}"]`,
   );
   const keyInp = block?.querySelector<HTMLInputElement>("[data-acct-key]");
+  const labelInp = block?.querySelector<HTMLInputElement>("[data-acct-label]");
+  const testBtn = block?.querySelector<HTMLButtonElement>("[data-acct-test]");
   const result = block?.querySelector<HTMLElement>("[data-acct-result]");
   const addBtn = block?.querySelector<HTMLButtonElement>("[data-acct-add]");
-  if (!keyInp || !result) return;
+  if (!keyInp || !labelInp || !result) return;
+  const generation = bumpTestGeneration("acct", family);
   const show = (text: string, ok: boolean | null) => {
     result.textContent = text;
     result.classList.toggle("ok", ok === true);
     result.classList.toggle("err", ok === false);
   };
   const key = keyInp.value.trim();
+  const label = labelInp.value.trim();
   if (!key) {
     show(t("customize.testEmpty"), false);
-    if (addBtn) addBtn.disabled = true; // an account without a key is meaningless
+    if (testBtn) testBtn.disabled = true;
+    if (addBtn) addBtn.disabled = true;
     return;
   }
+  if (!label) {
+    show(t("customize.acctLabelRequired"), false);
+    if (testBtn) testBtn.disabled = true;
+    if (addBtn) addBtn.disabled = true;
+    return;
+  }
+  if (testBtn) testBtn.disabled = true;
+  if (addBtn) addBtn.disabled = true;
   show(t("customize.testing"), null);
   try {
     const baseUrl =
@@ -2654,6 +3177,8 @@ async function runAccountKeyTest(family: string): Promise<void> {
       key,
       baseUrl: baseUrl || null,
     });
+    if (!isCurrentTestGeneration("acct", family, generation)) return;
+    if (testBtn) testBtn.disabled = false;
     if (r.ok) {
       show(t("customize.testOk", { n: r.metrics }), true);
       if (addBtn) addBtn.disabled = false;
@@ -2661,40 +3186,80 @@ async function runAccountKeyTest(family: string): Promise<void> {
       show(`${t("customize.testFailed")}: ${r.message}`, false);
     }
   } catch (err) {
+    if (!isCurrentTestGeneration("acct", family, generation)) return;
+    if (testBtn) testBtn.disabled = false;
     show(`${t("customize.testFailed")}: ${String(err)}`, false);
   }
 }
 
-/// Appends the tested account; the new <provider>@<n> card appears on the
+/// Remove saved layout/disabled entries for accounts that no longer exist.
+/// The backend returns stable non-secret card ids, including disabled rows;
+/// that lets this cleanup distinguish a deleted account from one temporarily
+/// missing a live snapshot.
+function reconcileAccountLayout(family: string, list: AccountEntry[]): boolean {
+  if (!config.layout) return false;
+  const active = new Set(list.map((entry) => entry.id).filter((id): id is string => Boolean(id)));
+  const isFamilyAccount = (id: string): boolean =>
+    id.includes("@") && providerFamily(id) === family;
+  let changed = false;
+  const order = config.layout.providerOrder.filter((id) => !isFamilyAccount(id) || active.has(id));
+  if (order.length !== config.layout.providerOrder.length) {
+    config.layout.providerOrder = order;
+    changed = true;
+  }
+  for (const id of Object.keys(config.layout.providers)) {
+    if (isFamilyAccount(id) && !active.has(id)) {
+      delete config.layout.providers[id];
+      changed = true;
+    }
+  }
+  const disabled = config.disabled.filter((id) => !isFamilyAccount(id) || active.has(id));
+  if (disabled.length !== config.disabled.length) {
+    config.disabled = disabled;
+    changed = true;
+  }
+  if (changed) void patchConfig({ layout: config.layout, disabled: config.disabled }).catch(() => {});
+  return changed;
+}
+
+/// Appends the tested account; the new stable <provider>@<fingerprint> card appears on the
 /// follow-up refresh, like a saved main key does.
 async function doAccountAdd(family: string): Promise<void> {
   const block = document.querySelector<HTMLElement>(
-    `#drawer-body [data-accounts-block="${CSS.escape(family)}"]`,
+    `#account-overlay [data-account-dialog="${CSS.escape(family)}"]`,
   );
   const keyInp = block?.querySelector<HTMLInputElement>("[data-acct-key]");
-  if (!keyInp?.value.trim()) return;
+  const labelInp = block?.querySelector<HTMLInputElement>("[data-acct-label]");
+  if (!keyInp?.value.trim() || !labelInp?.value.trim()) return;
   const status = document.querySelector("#status")!;
+  const result = block?.querySelector<HTMLElement>("[data-acct-result]");
   try {
     await invoke("account_add", {
       provider: family,
-      label: block?.querySelector<HTMLInputElement>("[data-acct-label]")?.value.trim() ?? "",
+      label: labelInp.value.trim(),
       apiKey: keyInp.value.trim(),
       baseUrl:
         block?.querySelector<HTMLInputElement>("[data-acct-baseurl]")?.value.trim() || null,
     });
-    acctFormOpen = false;
     refreshAccounts(family);
     status.textContent = t("customize.acctAdded", { name: providerDisplayName(family) });
+    dismissAccountDialog?.();
     void forceUsageRefreshAttempt(false).then(requestTraySync);
   } catch (err) {
     status.textContent = t("customize.acctAddFailed", { err: String(err) });
+    if (result) {
+      result.textContent = `${t("customize.testFailed")}: ${String(err)}`;
+      result.classList.remove("ok");
+      result.classList.add("err");
+    }
   }
 }
 
 /// Deletes an account after a confirm; its card vanishes on the refresh
 /// this triggers (fetch_usage simply stops spawning it).
 async function doAccountRemove(family: string, index: number): Promise<void> {
-  const label = accountLabelAt(accountsCache.get(family) ?? [], index);
+  const list = accountsCache.get(family) ?? [];
+  const label = list[index]?.label || t("customize.acctDefaultName", { n: index + 1 });
   const ok = await appConfirm({
     title: t("customize.acctDelTitle"),
     message: t("customize.acctDelBody", { label }),
@@ -2710,6 +3275,56 @@ async function doAccountRemove(family: string, index: number): Promise<void> {
     void forceUsageRefreshAttempt(false).then(requestTraySync);
   } catch (err) {
     status.textContent = t("customize.acctRemoveFailed", { err: String(err) });
+  }
+}
+
+/// Makes the account at `index` the default: it moves to position 0 in the
+/// accounts file and publishes under the bare family id on the next fetch.
+/// Its old <provider>@<fingerprint> card folds away into the main card.
+async function doAccountSetDefault(family: string, index: number): Promise<void> {
+  const status = document.querySelector("#status")!;
+  try {
+    await invoke("account_set_default", { provider: family, index });
+    refreshAccounts(family);
+    status.textContent = t("customize.acctDefaultSet", { name: providerDisplayName(family) });
+    void forceUsageRefreshAttempt(false).then(requestTraySync);
+  } catch (err) {
+    status.textContent = t("customize.acctDefaultFailed", { err: String(err) });
+  }
+}
+
+/// Saves an edited note name. Labels are display-only, so no cache or
+/// layout churn — but the account card's title carries the label, so a
+/// non-default card needs the follow-up fetch to retitle.
+async function doAccountRename(family: string, index: number, label: string): Promise<void> {
+  const status = document.querySelector("#status")!;
+  try {
+    await invoke("account_rename", { provider: family, index, label });
+    refreshAccounts(family);
+    status.textContent = t("customize.acctRenamed");
+    void forceUsageRefreshAttempt(false).then(requestTraySync);
+  } catch (err) {
+    status.textContent = t("customize.acctRenameFailed", { err: String(err) });
+  }
+}
+
+/// Captures the Antigravity IDE's current Google login into a monitored
+/// slot (label can be edited afterwards in the slot's ⚙ panel).
+async function doAntigravityCapture(family: string): Promise<void> {
+  const ok = await appConfirm({
+    title: t("customize.agCapture"),
+    message: t("customize.agCaptureConfirm"),
+    confirmLabel: t("customize.agCapture"),
+  });
+  if (!ok) return;
+  const status = document.querySelector("#status")!;
+  try {
+    await invoke("antigravity_capture_account", { label: "" });
+    refreshAccounts(family);
+    status.textContent = t("customize.agCaptured");
+    void forceUsageRefreshAttempt(false).then(requestTraySync);
+  } catch (err) {
+    status.textContent = t("customize.agCaptureFailed", { err: String(err) });
   }
 }
 
@@ -2862,42 +3477,178 @@ function renderCustStatus(id: string): string {
 /// providers get an API-key field (Custom Balance also its base URL), a
 /// "Test" button that validates the pasted key without saving it, and
 /// Save — disabled until a test passes (an empty field stays savable:
-/// that path clears the stored key). The rest sign in through their own
-/// CLI or desktop login, so their action section is that provider's
-/// login hint. The "?" button on the row stays: it shows the static
-/// facts, this panel the live detection.
+/// that path clears the stored key).
+///
+/// Multi-account providers (deepseek/kimi/stepfun/siliconflow/novita/
+/// relaybalance) are account-modeled: every key lives in the accounts
+/// list, so the action section is just "Add account" + the account list +
+/// a "Get API key" link — the standalone key field would be a second,
+/// confusing save path for the same identity (phase 2, user report).
+/// The rest sign in through their own CLI or desktop login, so their
+/// action section is that provider's login hint. The "?" button on the row
+/// stays: it shows the static facts, this panel the live detection.
 function renderCustConfig(id: string): string {
   const status = renderCustStatus(id);
+  const fam = providerFamily(id);
+  // The extra-account section only renders on the family's own row.
+  const isFamilyRow = id === fam;
+  // Multi-account family row: the account model owns every key. The old
+  // paste-key path (gear input + Test + Save) is gone — add via dialog.
+  // Checked BEFORE the KEY_PROVIDERS gate so non-key families like
+  // Antigravity (captured OAuth slots) land here too.
+  if (supportsExtraAccounts(id) && isFamilyRow) {
+    const getKey = getApiKeyLink(id);
+    const linkLink = getKey
+      ? `<button class="mini-btn cust-get-key" data-link="${escapeHtml(getKey)}">${escapeHtml(t("customize.getApiKey"))}</button>`
+      : "";
+    // Antigravity slots are captured OAuth snapshots; Cursor accounts are
+    // imported via OAuth login / token / JSON — neither uses the pasted-key
+    // dialog.
+    let primary: string;
+    if (id === "antigravity") {
+      primary = `<button class="mini-btn cust-account-toggle" data-ag-capture="${id}">${escapeHtml(t("customize.agCapture"))}</button>`;
+    } else if (id === "cursor") {
+      primary = `<button class="mini-btn cust-account-toggle" data-cursor-account="${id}">${escapeHtml(t("customize.acctAdd"))}</button>`;
+    } else {
+      primary = `<button class="mini-btn cust-account-toggle" data-acct-toggle="${id}">${escapeHtml(t("customize.acctAdd"))}</button>`;
+    }
+    // The account list itself lives as child rows under the family row;
+    // this panel is only the connection method + the add/get-key actions.
+    return `<div class="cust-config cust-form">
+        <div class="form-field">
+          <span class="form-label">${escapeHtml(t("customize.connLabel"))}</span>
+          <div data-cred-chips="${escapeHtml(id)}">${credChipsHtml(id)}</div>
+        </div>
+        <div class="form-actions">
+          ${primary}
+          ${linkLink}
+        </div>
+      </div>`;
+  }
   if (!KEY_PROVIDERS.has(id)) {
-    // An account card (deepseek@1) manages nothing itself — its account
-    // lives on the family row's account section.
-    const fam = providerFamily(id);
-    if (id !== fam && MULTI_ACCOUNT_PROVIDERS.has(fam)) {
-      const famName = ALL_PROVIDERS.find(([pid]) => pid === fam)?.[1] ?? fam;
-      return `<div class="cust-config"><p class="settings-note">${escapeHtml(t("customize.acctCardHint", { name: famName }))}</p></div>`;
+    // An account card (deepseek@<fingerprint>) gets its own small config
+    // panel: the masked key, the live snapshot status (connectivity as of
+    // the last fetch), and delete.
+    if (id !== fam && supportsExtraAccounts(fam)) {
+      return renderAccountConfig(id);
     }
     const hintKey = `customize.loginHint.${providerFamily(id)}`;
     const hint = t(hintKey) !== hintKey ? t(hintKey) : t("customize.cliLoginHint");
     return `<div class="cust-config">${status}${renderOAuthBlock(id)}<p class="settings-note">${escapeHtml(hint)}</p></div>`;
   }
-  // Reuse the Settings key placeholders (settings.keyPhXxx) where defined.
+  // Single-key providers: one stacked API-key form (DSH/cockpit style).
   const phKey = `settings.keyPh${id[0].toUpperCase()}${id.slice(1)}`;
   const ph = t(phKey) !== phKey ? t(phKey) : t("settings.keyPlaceholder");
-  const baseUrl =
+  const baseUrlField =
     id === "relaybalance"
-      ? `<input type="text" data-cust-baseurl="${id}" placeholder="https://api.example.com" spellcheck="false" />`
+      ? `<div class="form-field">
+          <span class="form-label">${escapeHtml(t("settings.relayBaseUrl"))}</span>
+          <input class="form-input" type="text" data-cust-baseurl="${id}" placeholder="https://api.example.com" spellcheck="false" />
+          <div class="form-help">${escapeHtml(t("customize.relayBaseUrlHelp"))}</div>
+        </div>`
       : "";
-  return `<div class="cust-config">
-      ${status}
-      <div class="cust-actions">
-        ${baseUrl}
-        <input type="password" data-cust-key="${id}" placeholder="${escapeHtml(ph)}" />
+  return `<div class="cust-config cust-form">
+      <div class="form-field">
+        <span class="form-label">${escapeHtml(t("customize.acctKeyLabel"))}</span>
+        <input class="form-input" type="password" data-cust-key="${id}" placeholder="${escapeHtml(ph)}" autocomplete="new-password" spellcheck="false" />
+        <div class="form-help">${escapeHtml(t("customize.formKeyHelp"))}</div>
+      </div>
+      ${baseUrlField}
+      <div class="form-actions">
         <button class="mini-btn" data-cust-test="${id}">${escapeHtml(t("customize.test"))}</button>
         <button class="mini-btn" data-cust-save="${id}" title="${escapeHtml(t("customize.saveAfterTest"))}">${escapeHtml(t("settings.save"))}</button>
         <span class="cust-test-result" data-cust-result="${id}"></span>
       </div>
-      ${renderAccountsBlock(id)}
     </div>`;
+}
+
+/// The ⚙ panel for one account row: an editable note name (saved through
+/// account_rename), the masked key, the account's live connectivity as of
+/// the last fetch, and delete. The key itself never leaves the backend.
+function renderAccountConfig(id: string): string {
+  const fam = providerFamily(id);
+  const list = accountsCache.get(fam) ?? [];
+  const index = list.findIndex((a) => a.id === id);
+  if (index < 0) {
+    return `<div class="cust-config"><p class="dim">${escapeHtml(t("customize.credStatusLoading"))}</p></div>`;
+  }
+  const entry = list[index];
+  // The default account publishes under the bare family id, so that's
+  // where its live snapshot lives. Antigravity/Cursor accounts are
+  // independent cards (the family card is the logged-in account), so
+  // their own id IS the card.
+  const snapId = isParallelAccountFamily(fam) ? id : index === 0 ? fam : id;
+  const snap = lastSnapshots.find((s) => s.id === snapId);
+  const statusText = snap
+    ? snap.status === "ok"
+      ? escapeHtml(t("customize.connOk"))
+      : snap.status === "no_credentials"
+        ? escapeHtml(t("customize.connNoCred"))
+        : escapeHtml(t("customize.connError", { err: snap.error ?? "" }))
+    : escapeHtml(t("customize.connUnknown"));
+  const stale = snap?.stale
+    ? `<span class="stale" title="${escapeHtml(staleHelp(snap))}">${escapeHtml(t("card.outdated"))}</span>`
+    : "";
+  return `<div class="cust-config cust-form account-config">
+      <div class="form-field">
+        <span class="form-label">${escapeHtml(t("customize.acctNoteLabel"))}</span>
+        <input class="form-input" type="text" data-acct-label-edit="${escapeHtml(fam)}|${index}" value="${escapeHtml(entry.label)}" autocomplete="off" spellcheck="false" />
+      </div>
+      <div class="form-field">
+        <span class="form-label">${escapeHtml(t("customize.acctKeyLabel"))}</span>
+        <div class="form-help">${escapeHtml(entry.maskedKey)} · ${escapeHtml(t("customize.acctKeyLocalOnly"))}</div>
+      </div>
+      <div class="form-field">
+        <span class="form-label">${escapeHtml(t("customize.connLabel"))}</span>
+        <div class="form-help">${statusText}${stale}</div>
+      </div>
+      <div class="form-actions">
+        <button class="mini-btn" data-acct-rename="${escapeHtml(fam)}|${index}">${escapeHtml(t("settings.save"))}</button>
+        <button class="mini-btn danger" data-acct-del="${escapeHtml(fam)}|${index}" title="${escapeHtml(t("customize.acctDelete"))}">${escapeHtml(t("customize.acctDelete"))}</button>
+      </div>
+    </div>`;
+}
+
+/// The account child rows hanging under a multi-account family row in
+/// Customize: [label] [★ default star] [spacer] [?] [⚙]. The ? and ⚙ act
+/// like the family row's but scoped to that account (cred status + the
+/// account's own API-key panel). The default account (index 0) shows a
+/// filled star; the others a hollow one that makes it default on click.
+function accountChildRows(family: string): string {
+  const list = accountsCache.get(family);
+  if (!list) {
+    fetchAccounts(family);
+    return `<p class="dim cust-account-loading">${escapeHtml(t("customize.credStatusLoading"))}</p>`;
+  }
+  if (!list.length) return "";
+  // Pin (置顶) controls exist only with 2+ accounts — a single account has
+  // nothing to order against. Applies to EVERY multi-account family.
+  const showPin = list.length >= 2;
+  return `<div class="cust-account-children" data-accounts-children="${escapeHtml(family)}">${list
+    .map((a, i) => {
+      const acctId = a.id ?? "";
+      const label = labelForAccount(acctId, list);
+      // Antigravity slots and Cursor imported accounts are parallel
+      // accounts — no default/star concept (the bare family card is always
+      // the locally logged-in account).
+      const star =
+        !showPin || isParallelAccountFamily(family)
+          ? ""
+          : i === 0
+            ? `<button class="star on acct-child-star" data-acct-setdef="${family}|${i}" title="${escapeHtml(t("customize.acctDefault"))}">★</button>`
+            : `<button class="star acct-child-star" data-acct-setdef="${family}|${i}" title="${escapeHtml(t("customize.acctMakeDefault"))}">☆</button>`;
+      return `<div class="cust-account-child" data-acct-child="${escapeHtml(family)}|${i}">
+        <span class="acct-child-label">${escapeHtml(label)}</span>
+        <span class="dim acct-child-key">${escapeHtml(a.maskedKey)}</span>
+        <span class="spacer"></span>
+        ${star}
+        <button class="mini-btn" data-info="${escapeHtml(acctId) || escapeHtml(family)}" title="${escapeHtml(t("customize.credInfo"))}">?</button>
+        <button class="mini-btn" data-config="${escapeHtml(acctId)}" title="${escapeHtml(t("customize.configure"))}">⚙</button>
+        ${custInfoOpen === acctId ? renderCustInfo(acctId) : ""}
+        ${custConfigOpen === acctId ? renderAccountConfig(acctId) : ""}
+      </div>`;
+    })
+    .join("")}</div>`;
 }
 
 function renderCustomize(): string {
@@ -2908,10 +3659,18 @@ function renderCustomize(): string {
     ALL_PROVIDERS.find(([pid]) => pid === id)?.[1] ??
     lastSnapshots.find((s) => s.id === id)?.name ??
     id;
-  const query = custSearchQuery.trim().toLowerCase();
   const ids = [...(config.layout?.providerOrder ?? ALL_PROVIDERS.map(([id]) => id))]
     .filter((id) => {
       const snapshot = lastSnapshots.find((s) => s.id === id);
+      // Multi-account API-key families render their account rows as
+      // children of the family row in Customize, so the account cards
+      // themselves (kimi@<fp>) must not appear as independent rows.
+      const fam = providerFamily(id);
+      if (id !== fam && supportsExtraAccounts(fam)) {
+        // Antigravity slot cards (antigravity@<fp>) also hang under the
+        // family row as child rows — same treatment.
+        return false;
+      }
       // A retired account card (its login left this machine) keeps its
       // layout for reattachment but must not haunt Customize as a bare
       // "claude@ab12cd34" block with nothing under it. A card the USER
@@ -2988,9 +3747,12 @@ function renderCustomize(): string {
 
       const open = custExpanded.has(id);
       const letter = /^[a-z]/i.test(name) ? name[0].toUpperCase() : "#";
-      const filteredOut = query !== "" && !name.toLowerCase().includes(query);
+      const accountRows =
+        id === providerFamily(id) && supportsExtraAccounts(id)
+          ? accountChildRows(id)
+          : "";
       return `
-        <article class="provider customize-block${enabled ? "" : " muted"}${open ? " open" : ""}" data-cust-provider="${id}" data-letter="${letter}" data-name="${escapeHtml(name.toLowerCase())}"${filteredOut ? " hidden" : ""}>
+        <article class="provider customize-block${enabled ? "" : " muted"}${open ? " open" : ""}" data-cust-provider="${id}" data-letter="${letter}" data-name="${escapeHtml(name.toLowerCase())}">
           <div class="provider-head">
             <button class="cust-expand" data-cust-expand="${id}" title="${open ? t("customize.collapse") : t("customize.expand")}">
               <span class="provider-name">${escapeHtml(name)}</span>
@@ -3002,6 +3764,7 @@ function renderCustomize(): string {
             <button class="mini-btn" data-reset="${id}" title="${escapeHtml(t("customize.resetLayoutTip"))}">${escapeHtml(t("customize.resetLayout"))}</button>
             <label class="toggle mini" title="${escapeHtml(t("customize.enable"))}"><input type="checkbox" data-enable="${id}"${enabled ? " checked" : ""} /></label>
           </div>
+          ${accountRows}
           ${custConfigOpen === id ? renderCustConfig(id) : ""}
           ${custInfoOpen === id ? renderCustInfo(id) : ""}
           <div class="acc-body"><div class="acc-inner cust-rows">${rows}</div></div>
@@ -3016,10 +3779,7 @@ function renderCustomize(): string {
       <span class="detail">${escapeHtml(t("customize.starred", { n: starCount }))}</span>
       <button class="dock-btn danger" data-reset-all title="${escapeHtml(t("customize.resetAllTip"))}">${escapeHtml(t("customize.resetAll"))}</button>
     </div>
-    <div class="cust-search-wrap">
-      <input id="cust-search" type="text" value="${escapeHtml(custSearchQuery)}" placeholder="${escapeHtml(t("customize.search"))}" spellcheck="false" />
-    </div>
-    <nav class="cust-az${query ? " hidden" : ""}">${letters
+    <nav class="cust-az">${letters
       .map((l) => `<button data-az="${l}">${l}</button>`)
       .join("")}</nav>
     ${blocks}`;
@@ -3056,33 +3816,16 @@ function renderAll(): void {
 function renderDrawerBody(): void {
   const body = document.querySelector<HTMLElement>("#drawer-body");
   if (!body) return;
-  // A background refresh re-renders the drawer even mid-typing; hand the
-  // search box its focus and caret back afterwards.
-  const search = document.activeElement as HTMLInputElement | null;
-  const caret = search?.id === "cust-search" ? search.selectionStart : null;
   body.innerHTML = renderCustomize();
-  if (caret !== null) {
-    const input = body.querySelector<HTMLInputElement>("#cust-search");
-    input?.focus();
-    input?.setSelectionRange(caret, caret);
-  }
 }
 
-/// Live search filter: hides non-matching provider blocks in place (no
-/// re-render, so the box keeps focus) and parks the A-Z strip meanwhile.
-function applyCustomizeFilter(query: string): void {
-  custSearchQuery = query;
-  const q = query.trim().toLowerCase();
-  document.querySelectorAll<HTMLElement>("#drawer-body .customize-block").forEach((el) => {
-    el.hidden = q !== "" && !(el.dataset.name ?? "").includes(q);
-  });
-  document.querySelector<HTMLElement>("#drawer-body .cust-az")?.classList.toggle("hidden", q !== "");
-}
+// ---------------------------------------------------------------------------
+// Render root
+// ---------------------------------------------------------------------------
 
-/// Customize lives in a drawer that slides in from the left edge.
 function setDrawer(open: boolean): void {
   customizeOpen = open;
-  if (open) {
+  if (!open) dismissAccountDialog?.();  if (open) {
     renderDrawerBody();
     // Local JSON list — cheap, and required if Customize opens before Settings.
     void loadOneNewApiSites();
@@ -3103,7 +3846,7 @@ function trailCards(): HTMLElement[] {
 function rebuildTrail(): void {
   const trail = document.querySelector<HTMLElement>("#trail")!;
   const cards = trailCards();
-  if (cards.length < 2) {
+  if (!cards.length) {
     trail.innerHTML = "";
     trail.hidden = true;
     return;
@@ -3112,14 +3855,19 @@ function rebuildTrail(): void {
   trail.innerHTML = cards
     .map((card, i) => {
       const name = card.querySelector(".provider-name")?.textContent ?? `Card ${i + 1}`;
-      const family = card.dataset.provider ? providerFamily(card.dataset.provider) : "";
-      const icon = PROVIDER_ICONS[family];
+      const id = card.dataset.provider ?? "";
+      const family = id ? providerFamily(id) : "";
+      const origin = card.dataset.origin || undefined;
+      const visual = providerVisual(id || family, origin);
+      const icon = visual?.iconSvg;
+      const dot = family ? familyHealthDot(family) : "";
+      const dotHtml = dot ? `<span class="trail-badge ${dot}"></span>` : "";
       if (icon) {
         const extra = [
-          TRAIL_RECOLOR_ICONS.has(family) ? " trail-recolor" : "",
-          TRAIL_INVERT_DARK_ICONS.has(family) ? " trail-invert-dark" : "",
+          visual?.recolorOnTray ? " trail-recolor" : "",
+          visual?.invertOnDarkTray ? " trail-invert-dark" : "",
         ].join("");
-        return `<button class="trail-tick trail-icon${extra}" data-trail="${i}" title="${escapeHtml(name)}">${icon}</button>`;
+        return `<button class="trail-tick trail-icon${extra}" data-trail="${i}" title="${escapeHtml(name)}"><span class="trail-icon-inner">${icon}</span>${dotHtml}</button>`;
       }
       return `<button class="trail-tick" data-trail="${i}" title="${escapeHtml(name)}"></button>`;
     })
@@ -3197,27 +3945,40 @@ function updateTrailActive(): void {
 // Spend row model tooltip
 // ---------------------------------------------------------------------------
 
-/// Tooltip for one Usage Trend bar: date, tokens used, share of 30 days.
+/// Tooltip for one Usage Trend bar: date + the day's value — tokens for
+/// local-log spends, sampled used-percent for quota history.
 function showTrendTip(el: HTMLElement): void {
   const tip = document.querySelector<HTMLElement>("#model-tip")!;
   const [id, idxStr] = (el.dataset.trend ?? "").split("|");
   const spend = lastSpend.find((s) => s.id === id);
+  const sampled = spend ? undefined : lastQuotaTrend[id];
+  if (!spend && !sampled) return;
   const i = Number(idxStr);
-  if (!spend || Number.isNaN(i)) return;
-
-  const tokens = spend.trend[i] ?? 0;
-  const total = spend.trend.reduce((a, b) => a + b, 0);
-  const share = total > 0 ? (tokens / total) * 100 : 0;
+  if (Number.isNaN(i)) return;
   const date = new Date(Date.now() - (29 - i) * 86_400_000).toLocaleDateString(localeTag(), {
     weekday: "short",
     month: "short",
     day: "numeric",
   });
-  tip.innerHTML = `
+
+  let lines: string;
+  if (spend) {
+    const tokens = spend.trend[i] ?? 0;
+    const total = spend.trend.reduce((a, b) => a + b, 0);
+    const share = total > 0 ? (tokens / total) * 100 : 0;
+    lines = `
     <div class="tip-line"><span class="tip-name">${escapeHtml(date)}</span><span>${
       tokens > 0 ? escapeHtml(t("card.tokens", { n: fmtTokens(tokens) })) : escapeHtml(t("spend.noUsage"))
     }</span></div>
     ${tokens > 0 ? `<div class="tip-line detail"><span>${escapeHtml(t("spend.of30", { n: share < 1 ? "<1" : share.toFixed(0) }))}</span></div>` : ""}`;
+  } else {
+    const pct = sampled?.[i] ?? 0;
+    lines = `
+    <div class="tip-line"><span class="tip-name">${escapeHtml(date)}</span><span>${
+      pct > 0 ? escapeHtml(t("spend.quotaBarTip", { n: Math.round(pct) })) : escapeHtml(t("spend.noUsage"))
+    }</span></div>`;
+  }
+  tip.innerHTML = lines;
 
   const rect = el.getBoundingClientRect();
   tip.hidden = false;
@@ -3357,6 +4118,11 @@ async function refresh(force = false, usageOnly = false): Promise<void> {
   const spendPromise = usageOnly
     ? Promise.resolve<ProviderSpend[] | null>(null)
     : invoke<ProviderSpend[]>("fetch_spend").catch(() => null);
+  // The sampled quota history is one tiny JSON read — fetch it even for
+  // usage-only refreshes so account cards keep their trend bars fresh.
+  const quotaTrendPromise = invoke<Record<string, number[]>>("fetch_usage_history").catch(
+    () => null,
+  );
   try {
     await unparkRecentlyKeyed();
     let snapshots = await invoke<Snapshot[]>("fetch_usage", { disabled: [...config.disabled] });
@@ -3464,6 +4230,16 @@ async function refresh(force = false, usageOnly = false): Promise<void> {
     }
   }
   const spend = await spendPromise;
+  const quotaTrend = await quotaTrendPromise;
+  if (quotaTrend) {
+    lastQuotaTrend = quotaTrend;
+    // A usage-only refresh rendered before the history landed; account
+    // cards gaining their first trend need the layout patched + repainted.
+    if (usageOnly && lastSnapshots.length) {
+      ensureLayout();
+      if (!customizeOpen) renderIfVisible();
+    }
+  }
   if (usageOnly) return;
   spendLoaded = true;
   // Overlapping scans are allowed now that Refresh unlocks before spend
@@ -3474,13 +4250,24 @@ async function refresh(force = false, usageOnly = false): Promise<void> {
     lastAppliedSpendGen = myGen;
   }
   if (lastSnapshots.length) ensureLayout();
+  // The merged account tabs on the dashboard need the account labels; load
+  // the lists now (cached after the first pass).
+  for (const def of providerCatalog) {
+    if (def.supportsExtraAccounts) fetchAccounts(def.familyId);
+  }
   if (!customizeOpen && lastSnapshots.length) renderIfVisible();
 }
 
 function scheduleAutoRefresh(): void {
   if (refreshTimer !== undefined) window.clearInterval(refreshTimer);
   const minutes = Math.max(1, config.refreshMinutes || 5);
-  refreshTimer = window.setInterval(() => void refresh(), minutes * 60 * 1000);
+  refreshTimer = window.setInterval(() => {
+    // A hidden WebView2 throttles intervals to a halt; the Rust-side
+    // refresh loop owns fetching then and pushes "usage-updated". This
+    // timer only covers the visible window.
+    if (document.hidden) return;
+    void refresh();
+  }, minutes * 60 * 1000);
 }
 
 const logoPixels = new Map<string, number[]>();
@@ -3488,7 +4275,7 @@ const logoPixels = new Map<string, number[]>();
 async function rasterizeLogo(id: string): Promise<number[] | null> {
   const cached = logoPixels.get(id);
   if (cached) return cached;
-  const svg = PROVIDER_ICONS[id];
+  const svg = providerVisual(id)?.iconSvg;
   if (!svg) return null;
 
   const white = svg
@@ -3669,6 +4456,14 @@ function moveRow(L: ProviderLayout, key: string, target: string): void {
 }
 
 function handleCustomizeClick(target: HTMLElement): boolean {
+  const link = target.closest<HTMLElement>("[data-link]");
+  if (link) {
+    void invoke("open_link", { url: link.dataset.link }).catch((err) => {
+      const status = document.querySelector("#status");
+      if (status) status.textContent = t("footer.openLinkFailed", { err: String(err) });
+    });
+    return true;
+  }
   const expand = target.closest<HTMLElement>("[data-cust-expand]");
   if (expand) {
     const id = expand.dataset.custExpand!;
@@ -3686,11 +4481,11 @@ function handleCustomizeClick(target: HTMLElement): boolean {
     const id = cfgBtn.dataset.config!;
     custConfigOpen = custConfigOpen === id ? null : id;
     custInfoOpen = null; // one panel at a time per row
-    acctFormOpen = false; // a fresh panel starts with the form folded
+    dismissAccountDialog?.();
     renderDrawerBody();
     if (custConfigOpen) {
       fetchCredStatus(id); // the status section's live chips
-      fetchAccounts(id); // the account section's saved list
+      fetchAccounts(providerFamily(id)); // the account section's saved list
       const block = document.querySelector<HTMLElement>(
         `#drawer-body [data-cust-provider="${CSS.escape(custConfigOpen)}"]`,
       );
@@ -3741,26 +4536,7 @@ function handleCustomizeClick(target: HTMLElement): boolean {
   }
   const acctToggle = target.closest<HTMLElement>("[data-acct-toggle]");
   if (acctToggle) {
-    const family = acctToggle.dataset.acctToggle!;
-    acctFormOpen = !acctFormOpen;
-    paintAccounts(family); // repaint the section, not the whole drawer
-    if (acctFormOpen) {
-      document
-        .querySelector<HTMLElement>(
-          `#drawer-body [data-accounts-block="${CSS.escape(family)}"] [data-acct-label]`,
-        )
-        ?.focus();
-    }
-    return true;
-  }
-  const acctTest = target.closest<HTMLElement>("[data-acct-test]");
-  if (acctTest) {
-    void runAccountKeyTest(acctTest.dataset.acctTest!);
-    return true;
-  }
-  const acctAdd = target.closest<HTMLElement>("[data-acct-add]");
-  if (acctAdd) {
-    void doAccountAdd(acctAdd.dataset.acctAdd!);
+    openAccountDialog(acctToggle.dataset.acctToggle!);
     return true;
   }
   const acctDel = target.closest<HTMLElement>("[data-acct-del]");
@@ -3768,6 +4544,35 @@ function handleCustomizeClick(target: HTMLElement): boolean {
     const [family, idxStr] = acctDel.dataset.acctDel!.split("|");
     const index = Number(idxStr);
     if (family && Number.isInteger(index)) void doAccountRemove(family, index);
+    return true;
+  }
+  const acctSetdef = target.closest<HTMLElement>("[data-acct-setdef]");
+  if (acctSetdef) {
+    const [family, idxStr] = acctSetdef.dataset.acctSetdef!.split("|");
+    const index = Number(idxStr);
+    if (family && Number.isInteger(index)) void doAccountSetDefault(family, index);
+    return true;
+  }
+  const acctRename = target.closest<HTMLElement>("[data-acct-rename]");
+  if (acctRename) {
+    const [family, idxStr] = acctRename.dataset.acctRename!.split("|");
+    const index = Number(idxStr);
+    const input = acctRename
+      .closest(".cust-config")
+      ?.querySelector<HTMLInputElement>("[data-acct-label-edit]");
+    if (family && Number.isInteger(index) && input) {
+      void doAccountRename(family, index, input.value);
+    }
+    return true;
+  }
+  const agCapture = target.closest<HTMLElement>("[data-ag-capture]");
+  if (agCapture) {
+    void doAntigravityCapture(agCapture.dataset.agCapture!);
+    return true;
+  }
+  const cursorAccount = target.closest<HTMLElement>("[data-cursor-account]");
+  if (cursorAccount) {
+    openCursorAccountDialog();
     return true;
   }
   const custSave = target.closest<HTMLElement>("[data-cust-save]");
@@ -3821,7 +4626,12 @@ function handleCustomizeClick(target: HTMLElement): boolean {
     const id = reset.dataset.reset!;
     const snapshot = lastSnapshots.find((s) => s.id === id);
     const spend = lastSpend.find((sp) => sp.id === id);
-    config.layout.providers[id] = defaultProviderLayout(snapshot, spend, false);
+    config.layout.providers[id] = defaultProviderLayout(
+      snapshot,
+      spend,
+      Boolean(trendSourceFor(id)),
+      false,
+    );
     saveLayout();
     renderAll();
     return true;
@@ -3857,6 +4667,7 @@ async function runCustKeyTest(id: string): Promise<void> {
   const result = panel?.querySelector<HTMLElement>("[data-cust-result]");
   const saveBtn = panel?.querySelector<HTMLButtonElement>("[data-cust-save]");
   if (!keyInp || !result) return;
+  const generation = bumpTestGeneration("cust", id);
   const show = (text: string, ok: boolean | null) => {
     result.textContent = text;
     result.classList.toggle("ok", ok === true);
@@ -3868,6 +4679,7 @@ async function runCustKeyTest(id: string): Promise<void> {
     if (saveBtn) saveBtn.disabled = false; // empty = clear the stored key
     return;
   }
+  if (saveBtn) saveBtn.disabled = true;
   show(t("customize.testing"), null);
   try {
     const baseUrl =
@@ -3877,6 +4689,7 @@ async function runCustKeyTest(id: string): Promise<void> {
       key,
       baseUrl: baseUrl || null,
     });
+    if (!isCurrentTestGeneration("cust", id, generation)) return;
     if (r.ok) {
       show(t("customize.testOk", { n: r.metrics }), true);
       if (saveBtn) saveBtn.disabled = false;
@@ -3884,6 +4697,7 @@ async function runCustKeyTest(id: string): Promise<void> {
       show(`${t("customize.testFailed")}: ${r.message}`, false);
     }
   } catch (err) {
+    if (!isCurrentTestGeneration("cust", id, generation)) return;
     show(`${t("customize.testFailed")}: ${String(err)}`, false);
   }
 }
@@ -3895,6 +4709,8 @@ function resetCustTestState(panel: HTMLElement | null): void {
   const keyInp = panel.querySelector<HTMLInputElement>("[data-cust-key]");
   const saveBtn = panel.querySelector<HTMLButtonElement>("[data-cust-save]");
   const result = panel.querySelector<HTMLElement>("[data-cust-result]");
+  const id = keyInp?.dataset.custKey;
+  if (id) bumpTestGeneration("cust", id);
   if (saveBtn) saveBtn.disabled = keyInp?.value.trim() ? true : false;
   if (result) {
     result.textContent = "";
@@ -3902,12 +4718,23 @@ function resetCustTestState(panel: HTMLElement | null): void {
   }
 }
 
-/// Any edit to the account form's inputs invalidates its passing test:
-/// Add re-locks until the new values are tested again.
+function syncAccountTestButton(form: HTMLElement | null): void {
+  if (!form) return;
+  const key = form.querySelector<HTMLInputElement>("[data-acct-key]")?.value.trim();
+  const label = form.querySelector<HTMLInputElement>("[data-acct-label]")?.value.trim();
+  const testBtn = form.querySelector<HTMLButtonElement>("[data-acct-test]");
+  if (testBtn) testBtn.disabled = !(key && label);
+}
+
+/// Any edit to the account dialog's inputs invalidates its passing test:
+/// Save re-locks until the new values are tested again.
 function resetAcctTestState(form: HTMLElement | null): void {
   if (!form) return;
   const addBtn = form.querySelector<HTMLButtonElement>("[data-acct-add]");
   const result = form.querySelector<HTMLElement>("[data-acct-result]");
+  const family = form.querySelector<HTMLInputElement>("[data-acct-key]")?.dataset.acctKey;
+  if (family) bumpTestGeneration("acct", family);
+  syncAccountTestButton(form);
   if (addBtn) addBtn.disabled = true;
   if (result) {
     result.textContent = "";
@@ -4055,6 +4882,8 @@ interface OneNewApiSiteDto {
   id: string;
   name: string;
   base_url: string;
+  has_access_token: boolean;
+  user_id: string;
   keys: OneNewApiKeyDto[];
 }
 
@@ -4267,12 +5096,22 @@ function renderOneNewApiSite(site: OneNewApiSiteDto): string {
     ? `<form class="ona-edit" data-ona-edit-form="${escapeHtml(site.id)}">
         <input type="text" spellcheck="false" data-ona-edit-name value="${escapeHtml(site.name)}" placeholder="${escapeHtml(t("settings.onenewapiNamePh"))}" />
         <input type="text" spellcheck="false" data-ona-edit-url value="${escapeHtml(site.base_url)}" placeholder="${escapeHtml(t("settings.onenewapiUrlPh"))}" />
+        <div class="ona-add-row">
+          <input type="password" data-ona-edit-token value="" placeholder="${escapeHtml(site.has_access_token ? t("settings.onenewapiTokenSavedPh") : t("settings.onenewapiTokenPh"))}" autocomplete="new-password" />
+          <button type="button" class="mini-btn" data-ona-clear-token="${escapeHtml(site.id)}">${escapeHtml(t("settings.onenewapiTokenClear"))}</button>
+        </div>
+        <input type="text" spellcheck="false" data-ona-edit-uid value="${escapeHtml(site.user_id)}" placeholder="${escapeHtml(t("settings.onenewapiUidPh"))}" />
+        <p class="settings-note ona-key-hint">${escapeHtml(t("settings.onenewapiTokenHint"))}</p>
         <div class="ona-edit-actions">
           <button type="submit">${escapeHtml(t("settings.save"))}</button>
           <button type="button" data-ona-cancel>${escapeHtml(t("dialog.cancel"))}</button>
         </div>
       </form>`
-    : `<p class="ona-site-url">${escapeHtml(site.base_url)}</p>`;
+    : `<p class="ona-site-url">${escapeHtml(site.base_url)}${
+        site.has_access_token
+          ? `<span class="ona-key-has" title="${escapeHtml(t("footer.onenewapiTokenSaved"))}">✓</span>`
+          : ""
+      }</p>`;
   const addKey = `<form class="ona-key-add" data-ona-add-key="${escapeHtml(site.id)}" autocomplete="off">
         <input type="text" spellcheck="false" data-ona-add-label placeholder="${escapeHtml(t("settings.onenewapiKeyLabelPh"))}" />
         <div class="ona-add-row">
@@ -4436,17 +5275,63 @@ async function saveOneNewApiSite(id: string): Promise<void> {
     }
     const patch = { id, name, baseUrl };
     await invoke("onenewapi_update_site", patch);
+    const tokenInput = block?.querySelector<HTMLInputElement>("[data-ona-edit-token]");
+    const uidInput = block?.querySelector<HTMLInputElement>("[data-ona-edit-uid]");
+    const accessToken = tokenInput?.value ?? "";
+    const userId = uidInput?.value ?? "";
+    let authChanged = false;
+    if (accessToken.trim()) {
+      try {
+        await invoke("onenewapi_set_site_access_token", {
+          siteId: id,
+          accessToken,
+          userId: userId.trim(),
+        });
+        if (tokenInput) tokenInput.value = "";
+        authChanged = true;
+      } catch (err) {
+        // The site edit itself already applied; reload so a retry doesn't
+        // re-confirm the (done) URL migration, and keep the token typed in.
+        setOneNewApiCaughtError(err);
+        onaExpanded.add(id);
+        await loadOneNewApiSites();
+        return;
+      }
+    } else if (userId.trim() !== (onaSites.find((s) => s.id === id)?.user_id ?? "")) {
+      try {
+        await invoke("onenewapi_set_site_access_token", { siteId: id, userId: userId.trim() });
+        authChanged = true;
+      } catch (err) {
+        setOneNewApiCaughtError(err);
+      }
+    }
     onaEditingId = null;
     onaExpanded.add(id);
-    setOneNewApiStatus("footer.onenewapiSaved");
+    setOneNewApiStatus(authChanged ? "footer.onenewapiTokenSaved" : "footer.onenewapiSaved");
     await loadOneNewApiSites();
-    if (urlChanged) await forceUsageRefreshAttempt();
+    if (urlChanged || authChanged) await forceUsageRefreshAttempt();
     else {
       const site = onaSites.find((s) => s.id === id);
       if (site) paintOneNewApiCardNames(site);
     }
   } catch (err) {
     setOneNewApiCaughtError(err);
+  } finally {
+    onaBusy = false;
+  }
+}
+
+async function clearOneNewApiToken(siteId: string): Promise<void> {
+  if (onaBusy) return;
+  onaBusy = true;
+  try {
+    await invoke("onenewapi_set_site_access_token", { siteId, accessToken: "", userId: null });
+    setOneNewApiStatus("footer.onenewapiTokenCleared");
+    await loadOneNewApiSites();
+    await forceUsageRefreshAttempt();
+    requestTraySync();
+  } catch (err) {
+    setOneNewApiStatus("footer.onenewapiFailed", { err: String(err) });
   } finally {
     onaBusy = false;
   }
@@ -4665,6 +5550,12 @@ function initOneNewApiSettings(): void {
   const host = document.querySelector("#onenewapi-sites");
   host?.addEventListener("click", (e) => {
     const target = e.target as HTMLElement;
+    const clearToken = target.closest<HTMLElement>("[data-ona-clear-token]");
+    if (clearToken) {
+      e.preventDefault();
+      void clearOneNewApiToken(clearToken.dataset.onaClearToken!);
+      return;
+    }
     const delKey = target.closest<HTMLElement>("[data-ona-delete-key]");
     if (delKey) {
       e.preventDefault();
@@ -4708,13 +5599,13 @@ async function unparkRecentlyKeyed(): Promise<void> {
   }).catch(() => {});
 }
 
-// Settings rows pass nothing and are found by their #key-/#baseurl- ids;
-// the Customize gear panel passes its own inputs explicitly.
+// Settings rows are gone (their key fields moved into each provider's
+// Customize gear panel); the only caller passes its own inputs explicitly.
 async function saveApiKey(
   provider: string,
-  fields?: { key: HTMLInputElement; baseUrl?: HTMLInputElement | null },
+  fields: { key: HTMLInputElement; baseUrl?: HTMLInputElement | null },
 ): Promise<void> {
-  const input = fields?.key ?? document.querySelector<HTMLInputElement>(`#key-${provider}`)!;
+  const input = fields.key;
   const status = document.querySelector("#status")!;
   let enableGeneration: number | undefined;
   try {
@@ -4731,10 +5622,7 @@ async function saveApiKey(
     }
     // Providers with a user-chosen endpoint (relaybalance) carry a base
     // URL input next to the key field; Save persists both together.
-    const baseUrlInput = fields
-      ? (fields.baseUrl ?? null)
-      : document.querySelector<HTMLInputElement>(`#baseurl-${provider}`);
-    const baseUrl = baseUrlInput?.value.trim() || null;
+    const baseUrl = fields.baseUrl?.value.trim() || null;
     await invoke("set_api_key", { provider, key, baseUrl });
     input.value = "";
     // The gear panel's chips + saved-credential list reflect the new key.
@@ -4837,12 +5725,6 @@ async function initSettings(): Promise<void> {
     });
   });
 
-  const pacing = document.querySelector<HTMLInputElement>("#pacing")!;
-  pacing.checked = config.pacingAlways;
-  pacing.addEventListener("change", () => {
-    void patchConfig({ pacingAlways: pacing.checked }).then(renderAll);
-  });
-
   const timeFormat = document.querySelector<HTMLSelectElement>("#timeformat")!;
   timeFormat.value = config.timeFormat;
   timeFormat.addEventListener("change", () => {
@@ -4920,6 +5802,12 @@ async function initSettings(): Promise<void> {
     requestTraySync();
   });
 
+  const showTrendEl = document.querySelector<HTMLInputElement>("#show-trend")!;
+  showTrendEl.checked = config.showTrend === true;
+  showTrendEl.addEventListener("change", () => {
+    void patchConfig({ showTrend: showTrendEl.checked }).then(renderAll);
+  });
+
   const shortcut = document.querySelector<HTMLInputElement>("#shortcut")!;
   shortcut.value = config.shortcut;
   shortcut.addEventListener("change", async () => {
@@ -4946,15 +5834,6 @@ async function initSettings(): Promise<void> {
   };
   proxyEnabled.addEventListener("change", saveProxy);
   proxyUrl.addEventListener("change", saveProxy);
-
-  // Custom Balance: pre-fill the relay base URL saved with its key.
-  const relayBase = document.querySelector<HTMLInputElement>("#baseurl-relaybalance");
-  if (relayBase) {
-    relayBase.value =
-      (await invoke<string | null>("get_base_url", { provider: "relaybalance" }).catch(
-        () => null,
-      )) ?? "";
-  }
 
   populatePinnedOptions();
 
@@ -4991,7 +5870,6 @@ async function resetAllSettings(): Promise<void> {
     disabled: [],
     pinned: null,
     trayProviders: [],
-    pacingAlways: true,
     telemetry: true,
     notifyAlmostOut: true,
     notifyCuttingClose: true,
@@ -4999,6 +5877,7 @@ async function resetAllSettings(): Promise<void> {
     spendTab: "today",
     spendMetric: "cost",
     showUsed: false,
+    showTrend: false,
     resetExact: false,
     timeFormat: "auto",
     layout: null,
@@ -5038,7 +5917,6 @@ function syncSettingsControls(): void {
     if (el) el.value = v;
   };
   setNum("#interval", String(config.refreshMinutes));
-  setCheck("#pacing", config.pacingAlways);
   setSelect("#timeformat", config.timeFormat);
   setSelect("#locale", config.locale);
   setCheck("#notify-almost", config.notifyAlmostOut);
@@ -5046,6 +5924,7 @@ function syncSettingsControls(): void {
   setCheck("#notify-runout", config.notifyWillRunOut);
   setCheck("#telemetry", config.telemetry);
   setCheck("#hide-while-sharing", config.hideUsageWhileSharing === true);
+  setCheck("#show-trend", config.showTrend === true);
   setCheck("#show-total-spend", config.showTotalSpend);
   setSelect("#appearance", config.appearance);
   setCheck("#density", config.density === "compact");
@@ -5140,17 +6019,11 @@ window.addEventListener("DOMContentLoaded", () => {
   });
   drawerBody.addEventListener("input", (e) => {
     const el = e.target as HTMLInputElement;
-    if (el.id === "cust-search") applyCustomizeFilter(el.value);
-    else if (el.matches("[data-cust-key], [data-cust-baseurl]")) {
+    if (el.matches("[data-cust-key], [data-cust-baseurl]")) {
       resetCustTestState(el.closest(".cust-config"));
-    } else if (el.matches("[data-acct-key], [data-acct-baseurl], [data-acct-label]")) {
-      resetAcctTestState(el.closest(".acct-form"));
     }
   });
   setupCustomizeDnD(drawerBody);
-  document.querySelectorAll<HTMLButtonElement>("[data-save]").forEach((btn) => {
-    btn.addEventListener("click", () => void saveApiKey(btn.dataset.save!));
-  });
 
   const providersEl = document.querySelector<HTMLElement>("#providers")!;
   // The donut center toggles what the card meters: dollars ⇄ raw tokens.
@@ -5249,6 +6122,47 @@ window.addEventListener("DOMContentLoaded", () => {
       void shareCard(shareBtn.dataset.share!);
       return;
     }
+    const acctTab = target.closest<HTMLElement>("[data-card-account]");
+    if (acctTab) {
+      const [family, acctId] = acctTab.dataset.cardAccount!.split("|");
+      activeAccountFor.set(family, acctId);
+      renderAll();
+      return;
+    }
+    const cardRefresh = target.closest<HTMLElement>("[data-card-refresh]");
+    if (cardRefresh) {
+      const id = cardRefresh.dataset.cardRefresh!;
+      const btn = cardRefresh;
+      if (btn.classList.contains("spinning")) return;
+      btn.classList.add("spinning");
+      void invoke<Snapshot>("refresh_provider", { providerId: id })
+        .then((snap) => {
+          const idx = lastSnapshots.findIndex((s) => s.id === id);
+          if (idx >= 0) lastSnapshots[idx] = snap;
+          else lastSnapshots.push(snap);
+          renderAll();
+        })
+        .catch(() => {
+          // On failure the button just stops spinning; the card keeps
+          // showing its last-known values (or stale badge if cached).
+        })
+        .finally(() => {
+          btn.classList.remove("spinning");
+        });
+      return;
+    }
+    const cardFold = target.closest<HTMLElement>("[data-card-fold]");
+    if (cardFold) {
+      // data-card-fold holds the FAMILY id — every card in the family
+      // toggles together so the user sees one coherent state.
+      const family = cardFold.dataset.cardFold!;
+      const L = providerLayout(family);
+      const auto = isFamilyFoldCandidate(family);
+      L.collapsed = !(L.collapsed ?? auto);
+      saveLayout(false);
+      renderAll();
+      return;
+    }
     if (target.closest(".donut-wrap")) {
       toggleSpendMetric();
       return;
@@ -5302,7 +6216,7 @@ window.addEventListener("DOMContentLoaded", () => {
       const id = caret.dataset.caret!;
       const L = providerLayout(id);
       L.expanded = !L.expanded;
-      saveLayout(false);
+      saveLayout(true);
       animateExpandId = L.expanded ? id : null;
       renderAll();
       animateExpandId = null;
@@ -5364,6 +6278,24 @@ window.addEventListener("DOMContentLoaded", () => {
     requestTraySync();
   });
 
+  // The backend's background loop refreshes even while this window is
+  // hidden (where setInterval is throttled dead). Adopt its results;
+  // rendering still defers to the next open via renderIfVisible().
+  void listen<Snapshot[]>("usage-updated", (e) => {
+    if (refreshing || !Array.isArray(e.payload)) return;
+    lastFetch = Date.now();
+    lastSnapshots = hideFoldedMoonshot(e.payload);
+    ensureLayout();
+    renderIfVisible();
+    requestTraySync();
+  });
+
+  // Back from hidden: pull the backend's latest right away instead of
+  // waiting out the rest of the refresh interval.
+  document.addEventListener("visibilitychange", () => {
+    if (!document.hidden) void refresh(true);
+  });
+
   void listen("popover-shown", () => {
     void checkForUpdate();
     // Always reopen on the main page, at the top — leftover Customize/
@@ -5385,6 +6317,7 @@ window.addEventListener("DOMContentLoaded", () => {
       populatePinnedOptions();
     }
     providersEl.scrollTop = 0;
+    rebuildTrail();
     updateTrailActive();
     if (lastSnapshots.length && !customizeOpen) playReveal();
     requestTraySync();
