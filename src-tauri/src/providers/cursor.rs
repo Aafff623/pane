@@ -21,6 +21,56 @@ pub fn local_credential_hint() -> Option<String> {
     state_db_path().map(|_| "Cursor editor local sign-in".to_string())
 }
 
+/// Pure local probe: the Cursor membership/subscription the editor itself
+/// recorded (Stripe membership type + status from state.vscdb), so the
+/// gear panel can badge "Free" vs "Pro" without a network call. Reads a
+/// temporary copy, same dance as the token read.
+pub fn local_membership() -> Option<String> {
+    let Some(db_path) = state_db_path() else { return None };
+    let tmp = std::env::temp_dir().join(format!("openusage-cursor-membership-{}.vscdb", std::process::id()));
+    let read = |conn: &rusqlite::Connection| -> rusqlite::Result<(Option<String>, Option<String>)> {
+        let get = |key: &str| -> rusqlite::Result<Option<String>> {
+            match conn.query_row("SELECT value FROM ItemTable WHERE key = ?1", [key], |r| {
+                r.get::<_, String>(0)
+            }) {
+                Ok(v) => Ok(Some(v)),
+                Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+                Err(e) => Err(e),
+            }
+        };
+        Ok((get("cursorAuth/stripeMembershipType")?, get("cursorAuth/stripeSubscriptionStatus")?))
+    };
+    let pair = match std::fs::copy(&db_path, &tmp) {
+        Ok(_) => {
+            let out = rusqlite::Connection::open_with_flags(&tmp, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
+                .and_then(|conn| read(&conn))
+                .ok();
+            let _ = std::fs::remove_file(&tmp);
+            out
+        }
+        Err(_) => None,
+    };
+    let (membership, status) = pair?;
+    let membership = membership.map(|v| unquote(&v)).filter(|v| !v.is_empty());
+    let status = status.map(|v| unquote(&v)).filter(|v| !v.is_empty() && !v.eq_ignore_ascii_case("active"));
+    // Normalize the same way cockpit does (types/cursor.ts): student→pro,
+    // business/team→enterprise; the badge shows Free / Pro / Pro+ / Ultra.
+    let badge = membership.map(|m| match m.to_ascii_lowercase().as_str() {
+        "free" | "free_trial" => "Free".to_string(),
+        "pro" | "pro_student" | "pro_trial" => "Pro".to_string(),
+        "pro_plus" => "Pro+".to_string(),
+        "ultra" => "Ultra".to_string(),
+        "business" | "team" | "enterprise" => "Team/Enterprise".to_string(),
+        other => title_case(other),
+    });
+    match (badge, status) {
+        (Some(m), Some(s)) => Some(format!("{m} · {}", title_case(&s))),
+        (Some(m), None) => Some(m),
+        (None, Some(s)) => Some(title_case(&s)),
+        (None, None) => None,
+    }
+}
+
 fn read_pair(conn: &rusqlite::Connection) -> Result<(Option<String>, Option<String>), rusqlite::Error> {
     let get = |key: &str| -> Result<Option<String>, rusqlite::Error> {
         match conn.query_row("SELECT value FROM ItemTable WHERE key = ?1", [key], |r| {
@@ -318,6 +368,14 @@ fn title_case(s: &str) -> String {
         .join(" ")
 }
 
+/// Overwrites a fallback snapshot's identity (summary/legacy return the
+/// bare family id) so a multi-account card keeps its own id.
+fn rename_snapshot(mut snap: Snapshot, id: &str, name: &str) -> Snapshot {
+    snap.id = id.to_string();
+    snap.name = name.to_string();
+    snap
+}
+
 async fn fetch() -> Result<Snapshot, String> {
     let (access_raw, refresh_raw) = read_state_values()?;
     let Some(token_raw) = access_raw else {
@@ -336,13 +394,49 @@ async fn fetch() -> Result<Snapshot, String> {
         ));
     }
     let refresh = refresh_raw.map(|r| unquote(&r)).filter(|r| !r.is_empty());
+    fetch_with_token(stored, refresh, ID, NAME, None).await
+}
 
+/// Quota snapshot for one imported/multi-account Cursor login: the same
+/// dashboard RPCs, driven by the account's own token pair instead of the
+/// local editor's. `membership` is the account's own tier badge (from the
+/// import/OAuth payload) — the local editor's membership never applies to
+/// an imported account.
+pub async fn snapshot_with_token_as(
+    access_token: &str,
+    refresh_token: Option<&str>,
+    card_id: &str,
+    card_name: &str,
+    membership: Option<&str>,
+) -> Snapshot {
+    match fetch_with_token(
+        access_token.to_string(),
+        refresh_token.map(str::to_string),
+        card_id,
+        card_name,
+        membership.map(str::to_string),
+    )
+    .await
+    {
+        Ok(s) => s,
+        Err(e) => Snapshot::error(card_id, card_name, e),
+    }
+}
+
+async fn fetch_with_token(
+    stored: String,
+    refresh: Option<String>,
+    card_id: &str,
+    card_name: &str,
+    account_membership: Option<String>,
+) -> Result<Snapshot, String> {
     // Prefer a token we refreshed ourselves this run; the stored one may
     // be stale if Cursor hasn't been opened in a while.
     let mut token = refreshed_token()
         .lock()
         .ok()
         .and_then(|t| t.clone())
+        .filter(|_| card_id == ID)
         .unwrap_or_else(|| stored.clone());
 
     // Current-generation usage: percent of the plan's included usage,
@@ -367,10 +461,10 @@ async fn fetch() -> Result<Snapshot, String> {
         Ok(u) => u,
         Err(e) => {
             if let Ok(s) = summary_fetch(&token).await {
-                return Ok(s);
+                return Ok(rename_snapshot(s, card_id, card_name));
             }
             return match legacy_fetch(&token).await {
-                Ok(s) => Ok(s),
+                Ok(s) => Ok(rename_snapshot(s, card_id, card_name)),
                 Err(_) => Err(e),
             };
         }
@@ -400,9 +494,9 @@ async fn fetch() -> Result<Snapshot, String> {
     // planUsage from the RPC still report percentages there.
     if !enabled || plan_usage.is_none() || (limit.is_none() && total_pct.is_none()) {
         if let Ok(s) = summary_fetch(&token).await {
-            return Ok(s);
+            return Ok(rename_snapshot(s, card_id, card_name));
         }
-        return legacy_fetch(&token).await;
+        return legacy_fetch(&token).await.map(|s| rename_snapshot(s, card_id, card_name));
     }
     let plan_usage = plan_usage.unwrap();
 
@@ -439,6 +533,25 @@ async fn fetch() -> Result<Snapshot, String> {
             }
         }
     }
+    // The editor's own local record of the membership is the ground truth
+    // for the badge and, on Free accounts, for dropping the fake "spend
+    // limit" pool Cursor's API reports (a Free plan has no dollar quota —
+    // $50 in planUsage is a display artifact the dashboard never shows).
+    // Membership ground truth: the local editor's DB only describes the
+    // LOCALLY logged-in account — an imported account carries its own
+    // badge from the import/OAuth payload and must not read the local one.
+    let membership = if card_id == ID {
+        local_membership()
+    } else {
+        account_membership.clone()
+    };
+    if plan.is_none() {
+        plan = membership.clone();
+    }
+    let free_account = membership
+        .as_deref()
+        .map(|m| m.to_ascii_lowercase().starts_with("free"))
+        .unwrap_or(false);
 
     // Billing cycle bounds (epoch ms) drive the pace projection.
     let cycle_start = num(usage.get("billingCycleStart"));
@@ -492,24 +605,26 @@ async fn fetch() -> Result<Snapshot, String> {
     // Models" (the auto bucket: Composer, Cursor Grok, …) and "Other
     // Models" — and render for EVERY account shape that reports them,
     // team included (they always did; a restructure briefly scoped them
-    // to non-team accounts and Devin caught the regression).
+    // to non-team accounts and Devin caught the regression). Free
+    // accounts skip them: Free has no model buckets, only slow requests.
     let auto_pct = num(plan_usage.get("autoPercentUsed"));
     let api_pct = num(plan_usage.get("apiPercentUsed"));
-    if let Some(auto) = auto_pct {
-        metrics.push(
-            Metric::progress("Cursor Models", auto.clamp(0.0, 100.0), None)
-                .with_reset(resets_at, Some(period_ms)),
-        );
-    }
-    if let Some(api) = api_pct {
-        metrics.push(
-            Metric::progress("Other Models", api.clamp(0.0, 100.0), None)
-                .with_reset(resets_at, Some(period_ms)),
-        );
-    }
-
-    if let Some(row) = bonus_metric(plan_usage, total_pct) {
-        metrics.push(row);
+    if !free_account {
+        if let Some(auto) = auto_pct {
+            metrics.push(
+                Metric::progress("Cursor Models", auto.clamp(0.0, 100.0), None)
+                    .with_reset(resets_at, Some(period_ms)),
+            );
+        }
+        if let Some(api) = api_pct {
+            metrics.push(
+                Metric::progress("Other Models", api.clamp(0.0, 100.0), None)
+                    .with_reset(resets_at, Some(period_ms)),
+            );
+        }
+        if let Some(row) = bonus_metric(plan_usage, total_pct) {
+            metrics.push(row);
+        }
     }
 
     if is_team {
@@ -518,7 +633,11 @@ async fn fetch() -> Result<Snapshot, String> {
         // is what still describes them (same fallback upstream uses).
         let limit_cents = match limit {
             Some(l) if l > 0.0 => l,
-            _ => return legacy_fetch(&token).await,
+            _ => {
+                return legacy_fetch(&token)
+                    .await
+                    .map(|s| rename_snapshot(s, card_id, card_name))
+            }
         };
         metrics.push(
             Metric::progress(
@@ -549,18 +668,22 @@ async fn fetch() -> Result<Snapshot, String> {
         // spend/limit so the bar always matches its own caption, but ONLY
         // when spend is actually reported; otherwise fall back to the
         // API's own percent rather than fabricating one.
-        let pct = match (used_cents_opt, limit) {
-            (Some(u), Some(l)) if l > 0.0 => u / l * 100.0,
-            _ => total_pct.unwrap_or(0.0),
-        };
-        let detail = match (used_cents_opt, limit) {
-            (Some(u), Some(l)) => Some(format!("{} of {} included", dollars(u), dollars(l))),
-            _ => None,
-        };
-        metrics.push(
-            Metric::progress("Total usage", pct.clamp(0.0, 100.0), detail)
-                .with_reset(resets_at, Some(period_ms)),
-        );
+        // Free accounts: skip the bar entirely — planUsage's "limit" is a
+        // display artifact on Free, where there is no dollar quota at all.
+        if !free_account {
+            let pct = match (used_cents_opt, limit) {
+                (Some(u), Some(l)) if l > 0.0 => u / l * 100.0,
+                _ => total_pct.unwrap_or(0.0),
+            };
+            let detail = match (used_cents_opt, limit) {
+                (Some(u), Some(l)) => Some(format!("{} of {} included", dollars(u), dollars(l))),
+                _ => None,
+            };
+            metrics.push(
+                Metric::progress("Total usage", pct.clamp(0.0, 100.0), detail)
+                    .with_reset(resets_at, Some(period_ms)),
+            );
+        }
     }
 
     if let Some(s) = spend_limit {
@@ -587,7 +710,7 @@ async fn fetch() -> Result<Snapshot, String> {
         }
     }
 
-    Ok(Snapshot::ok(ID, NAME, plan, metrics))
+    Ok(Snapshot::ok(card_id, card_name, plan, metrics))
 }
 
 /// Cursor's web session cookie is "<user_id>::<jwt>"; the user id is the

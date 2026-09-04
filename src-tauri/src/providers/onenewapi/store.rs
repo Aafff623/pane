@@ -1,4 +1,4 @@
-use super::fingerprint::DisplayUnit;
+use super::fingerprint::{DisplayUnit, SiteFingerprint};
 use super::ids::new_id_avoiding;
 use super::url::NormalizedUrl;
 use super::{CreateSiteResult, KeyDto, SiteDto};
@@ -24,6 +24,19 @@ pub(crate) struct SiteRecord {
     pub display_unit: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub currency_symbol: Option<String>,
+    /// Raw-quota → display-value scale from the probe (`/api/status`).
+    /// Absent in older files; consumers fall back to new-api defaults.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub per_unit: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rate: Option<f64>,
+    /// Optional NewAPI dashboard access token (个人设置 → 系统访问令牌)
+    /// plus the matching numeric user id (rc builds demand it as the
+    /// `New-Api-User` header). Empty means not configured.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub access_token: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub user_id: String,
     pub keys: Vec<KeyRecord>,
 }
 
@@ -39,6 +52,24 @@ impl SiteRecord {
         let (unit, symbol) = display.to_store();
         self.display_unit = unit;
         self.currency_symbol = symbol;
+    }
+
+    fn set_fingerprint(&mut self, fp: &SiteFingerprint) {
+        self.set_display_unit(fp.unit.clone());
+        self.per_unit = Some(fp.per_unit);
+        self.rate = Some(fp.rate);
+    }
+
+    /// (quota per display unit, USD-multiplier) with new-api defaults for
+    /// files written before the scale was captured.
+    pub fn quota_scale(&self) -> (f64, f64) {
+        let per_unit = self.per_unit.filter(|n| n.is_finite() && *n > 0.0);
+        let rate = self.rate.filter(|n| n.is_finite() && *n >= 0.0);
+        (per_unit.unwrap_or(500_000.0), rate.unwrap_or(1.0))
+    }
+
+    pub fn has_access_token(&self) -> bool {
+        !self.access_token.is_empty()
     }
 }
 
@@ -56,6 +87,10 @@ impl SiteRecord {
             id: self.id.clone(),
             name: self.name.clone(),
             base_url: self.base_url.clone(),
+            has_access_token: self.has_access_token(),
+            // The dashboard user id is not a credential (it rides along on
+            // every dashboard request anyway), so the UI can pre-fill it.
+            user_id: self.user_id.clone(),
             keys: self.keys.iter().map(KeyRecord::to_dto).collect(),
         }
     }
@@ -381,7 +416,7 @@ pub fn insert_site(
     path: &Path,
     name: &str,
     normalized: &NormalizedUrl,
-    display: DisplayUnit,
+    fingerprint: SiteFingerprint,
 ) -> Result<CreateSiteResult, String> {
     let mut doc = load(path)?;
     if let Some(existing) = doc.sites.iter().find(|s| s.base_url == normalized.origin) {
@@ -390,7 +425,9 @@ pub fn insert_site(
         });
     }
     let id = new_id_avoiding(&occupied_ids(&doc))?;
-    let (display_unit, currency_symbol) = display.to_store();
+    let (display_unit, currency_symbol) = fingerprint.unit.to_store();
+    let per_unit = Some(fingerprint.per_unit);
+    let rate = Some(fingerprint.rate);
     let site = SiteRecord {
         id,
         name: display_name(name, &normalized.hostname),
@@ -398,6 +435,10 @@ pub fn insert_site(
         next_key_ordinal: 1,
         display_unit,
         currency_symbol,
+        per_unit,
+        rate,
+        access_token: String::new(),
+        user_id: String::new(),
         keys: Vec::new(),
     };
     let dto = site.to_dto();
@@ -411,7 +452,7 @@ pub fn update_site(
     id: &str,
     name: Option<String>,
     new_url: Option<NormalizedUrl>,
-    display: Option<DisplayUnit>,
+    fingerprint: Option<SiteFingerprint>,
 ) -> Result<SiteDto, String> {
     let mut doc = load(path)?;
     if let Some(ref n) = new_url {
@@ -433,8 +474,8 @@ pub fn update_site(
         if let Some(ref name) = name {
             site.name = display_name(name, &n.hostname);
         }
-        if let Some(display) = display {
-            site.set_display_unit(display);
+        if let Some(fp) = fingerprint {
+            site.set_fingerprint(&fp);
         }
     } else if let Some(ref name) = name {
         let hostname = reqwest::Url::parse(&site.base_url)
@@ -448,35 +489,52 @@ pub fn update_site(
     Ok(dto)
 }
 
-pub fn set_display_unit(path: &Path, id: &str, display: DisplayUnit) -> Result<(), String> {
+/// Backfill write: no-op unless this site is still at `origin` and still
+/// missing a display unit or a quota scale (pre-scale sites must keep
+/// receiving the scale once the panel exposes it). Returns whether the file
+/// was written.
+pub fn set_fingerprint_if_still_missing_at_origin(
+    path: &Path,
+    id: &str,
+    origin: &str,
+    fingerprint: SiteFingerprint,
+) -> Result<bool, String> {
+    let mut doc = load(path)?;
+    let Some(site) = doc.sites.iter_mut().find(|s| s.id == id) else {
+        return Ok(false);
+    };
+    if site.base_url != origin || (site.display_unit.is_some() && site.per_unit.is_some()) {
+        return Ok(false);
+    }
+    site.set_fingerprint(&fingerprint);
+    save(path, &doc)?;
+    Ok(true)
+}
+
+/// Saves (or clears, with an empty string) the site's NewAPI dashboard
+/// access token / matching user id used for the subscription endpoint.
+/// `None` keeps the stored value untouched.
+pub fn set_site_auth(
+    path: &Path,
+    id: &str,
+    access_token: Option<&str>,
+    user_id: Option<&str>,
+) -> Result<SiteDto, String> {
     let mut doc = load(path)?;
     let site = doc
         .sites
         .iter_mut()
         .find(|s| s.id == id)
         .ok_or_else(|| "site not found".to_string())?;
-    site.set_display_unit(display);
-    save(path, &doc)
-}
-
-/// Backfill write: no-op unless this site is still at `origin` and still
-/// missing a display unit. Returns whether the file was written.
-pub fn set_display_unit_if_still_missing_at_origin(
-    path: &Path,
-    id: &str,
-    origin: &str,
-    display: DisplayUnit,
-) -> Result<bool, String> {
-    let mut doc = load(path)?;
-    let Some(site) = doc.sites.iter_mut().find(|s| s.id == id) else {
-        return Ok(false);
-    };
-    if site.base_url != origin || site.display_unit.is_some() {
-        return Ok(false);
+    if let Some(token) = access_token {
+        site.access_token = token.trim().to_string();
     }
-    site.set_display_unit(display);
+    if let Some(user_id) = user_id {
+        site.user_id = user_id.trim().to_string();
+    }
+    let dto = site.to_dto();
     save(path, &doc)?;
-    Ok(true)
+    Ok(dto)
 }
 
 pub fn delete_site(path: &Path, id: &str) -> Result<(), String> {
@@ -660,6 +718,10 @@ mod tests {
         normalize_base_url(&format!("https://{host}")).unwrap()
     }
 
+    fn fp(unit: DisplayUnit) -> SiteFingerprint {
+        SiteFingerprint::from(unit)
+    }
+
     #[test]
     fn missing_file_is_empty_sites() {
         let tmp = TempStore::new();
@@ -676,7 +738,7 @@ mod tests {
             &tmp.path,
             "Panel",
             &https("one.example.com"),
-            DisplayUnit::Usd,
+            fp(DisplayUnit::Usd),
         )
         .unwrap();
         let CreateSiteResult::Created { site } = created else {
@@ -701,8 +763,8 @@ mod tests {
     #[test]
     fn atomic_write_replaces_existing() {
         let tmp = TempStore::new();
-        insert_site(&tmp.path, "A", &https("a.example.com"), DisplayUnit::Usd).unwrap();
-        insert_site(&tmp.path, "B", &https("b.example.com"), DisplayUnit::Usd).unwrap();
+        insert_site(&tmp.path, "A", &https("a.example.com"), fp(DisplayUnit::Usd)).unwrap();
+        insert_site(&tmp.path, "B", &https("b.example.com"), fp(DisplayUnit::Usd)).unwrap();
         let listed = list_sites(&tmp.path).unwrap();
         assert_eq!(listed.len(), 2);
         assert_eq!(listed[0].name, "A");
@@ -727,9 +789,9 @@ mod tests {
             "parent should leak to ordinary files: {}",
             owner_only_debug(&control)
         );
-        insert_site(&tmp.path, "A", &https("acl.example.com"), DisplayUnit::Usd).unwrap();
+        insert_site(&tmp.path, "A", &https("acl.example.com"), fp(DisplayUnit::Usd)).unwrap();
         assert!(is_owner_only(&tmp.path), "{}", owner_only_debug(&tmp.path));
-        insert_site(&tmp.path, "B", &https("acl2.example.com"), DisplayUnit::Usd).unwrap();
+        insert_site(&tmp.path, "B", &https("acl2.example.com"), fp(DisplayUnit::Usd)).unwrap();
         assert!(is_owner_only(&tmp.path), "{}", owner_only_debug(&tmp.path));
         let leftovers: Vec<_> = fs::read_dir(&tmp.dir)
             .unwrap()
@@ -850,7 +912,7 @@ mod tests {
         assert!(load(&tmp.path).is_err());
         let garbage = fs::read_to_string(&tmp.path).unwrap();
         let err =
-            insert_site(&tmp.path, "X", &https("x.example.com"), DisplayUnit::Usd).unwrap_err();
+            insert_site(&tmp.path, "X", &https("x.example.com"), fp(DisplayUnit::Usd)).unwrap_err();
         assert!(!err.is_empty());
         assert_eq!(fs::read_to_string(&tmp.path).unwrap(), garbage);
         let empty = StoreFile {
@@ -866,7 +928,7 @@ mod tests {
         let tmp = TempStore::new();
         fs::create_dir(&tmp.path).unwrap();
         assert!(load(&tmp.path).is_err());
-        assert!(insert_site(&tmp.path, "X", &https("x.example.com"), DisplayUnit::Usd).is_err());
+        assert!(insert_site(&tmp.path, "X", &https("x.example.com"), fp(DisplayUnit::Usd)).is_err());
         assert!(tmp.path.is_dir());
     }
 
@@ -877,7 +939,7 @@ mod tests {
             &tmp.path,
             "One",
             &https("dup.example.com"),
-            DisplayUnit::Usd,
+            fp(DisplayUnit::Usd),
         )
         .unwrap();
         let CreateSiteResult::Created { site } = first else {
@@ -887,7 +949,7 @@ mod tests {
             &tmp.path,
             "Other",
             &normalize_base_url("https://dup.example.com/v1/").unwrap(),
-            DisplayUnit::Usd,
+            fp(DisplayUnit::Usd),
         )
         .unwrap();
         match again {
@@ -918,7 +980,13 @@ mod tests {
         let loaded = load(&tmp.path).unwrap();
         assert_eq!(loaded.sites[0].display_unit, None);
         assert_eq!(loaded.sites[0].quota_display(), DisplayUnit::Usd);
-        set_display_unit(&tmp.path, "siteidabcdefghijkAAA", DisplayUnit::Cny).unwrap();
+        assert!(set_fingerprint_if_still_missing_at_origin(
+            &tmp.path,
+            "siteidabcdefghijkAAA",
+            "https://cny.example.com",
+            fp(DisplayUnit::Cny),
+        )
+        .unwrap());
         let loaded = load(&tmp.path).unwrap();
         assert_eq!(loaded.sites[0].quota_display(), DisplayUnit::Cny);
         update_site(
@@ -937,7 +1005,7 @@ mod tests {
             "siteidabcdefghijkAAA",
             None,
             Some(https("tokens.example.com")),
-            Some(DisplayUnit::Tokens),
+            Some(fp(DisplayUnit::Tokens)),
         )
         .unwrap();
         let loaded = load(&tmp.path).unwrap();
@@ -963,22 +1031,22 @@ mod tests {
             .to_string(),
         )
         .unwrap();
-        assert!(set_display_unit_if_still_missing_at_origin(
+        assert!(set_fingerprint_if_still_missing_at_origin(
             &tmp.path,
             "siteidabcdefghijkAAA",
             "https://old.example.com",
-            DisplayUnit::Cny,
+            fp(DisplayUnit::Cny),
         )
         .unwrap());
         assert_eq!(
             load(&tmp.path).unwrap().sites[0].quota_display(),
             DisplayUnit::Cny
         );
-        assert!(!set_display_unit_if_still_missing_at_origin(
+        assert!(!set_fingerprint_if_still_missing_at_origin(
             &tmp.path,
             "siteidabcdefghijkAAA",
             "https://old.example.com",
-            DisplayUnit::Usd,
+            fp(DisplayUnit::Usd),
         )
         .unwrap());
         assert_eq!(
@@ -990,24 +1058,157 @@ mod tests {
             "siteidabcdefghijkAAA",
             None,
             Some(https("new.example.com")),
-            Some(DisplayUnit::Tokens),
+            Some(fp(DisplayUnit::Tokens)),
         )
         .unwrap();
-        assert!(!set_display_unit_if_still_missing_at_origin(
+        assert!(!set_fingerprint_if_still_missing_at_origin(
             &tmp.path,
             "siteidabcdefghijkAAA",
             "https://old.example.com",
-            DisplayUnit::Cny,
+            fp(DisplayUnit::Cny),
         )
         .unwrap());
         let loaded = load(&tmp.path).unwrap();
         assert_eq!(loaded.sites[0].base_url, "https://new.example.com");
         assert_eq!(loaded.sites[0].quota_display(), DisplayUnit::Tokens);
-        assert!(!set_display_unit_if_still_missing_at_origin(
+        assert!(!set_fingerprint_if_still_missing_at_origin(
             &tmp.path,
             "missing-site",
             "https://new.example.com",
-            DisplayUnit::Usd,
+            fp(DisplayUnit::Usd),
+        )
+        .unwrap());
+    }
+
+    #[test]
+    fn access_token_roundtrip_clear_and_scale_defaults() {
+        let tmp = TempStore::new();
+        let created = insert_site(
+            &tmp.path,
+            "Panel",
+            &https("sub.example.com"),
+            fp(DisplayUnit::Usd),
+        )
+        .unwrap();
+        let CreateSiteResult::Created { site } = created else {
+            panic!("expected created");
+        };
+        assert!(!site.has_access_token);
+        assert_eq!(site.user_id, "");
+        let loaded = load(&tmp.path).unwrap();
+        assert_eq!(loaded.sites[0].quota_scale(), (500_000.0, 1.0));
+        assert!(!loaded.sites[0].has_access_token());
+
+        let updated = set_site_auth(
+            &tmp.path,
+            &site.id,
+            Some("  at-123  "),
+            Some(" 42 "),
+        )
+        .unwrap();
+        assert!(updated.has_access_token);
+        assert_eq!(updated.user_id, "42");
+        let loaded = load(&tmp.path).unwrap();
+        assert_eq!(loaded.sites[0].access_token, "at-123");
+        assert_eq!(loaded.sites[0].user_id, "42");
+
+        // None keeps, Some("") clears — token and id move independently.
+        let kept = set_site_auth(&tmp.path, &site.id, None, Some("")).unwrap();
+        assert!(kept.has_access_token);
+        assert_eq!(kept.user_id, "");
+        let cleared = set_site_auth(&tmp.path, &site.id, Some(""), None).unwrap();
+        assert!(!cleared.has_access_token);
+        assert_eq!(cleared.user_id, "");
+        assert!(set_site_auth(&tmp.path, "missing-site", Some("x"), None).is_err());
+    }
+
+    #[test]
+    fn legacy_file_without_scale_and_token_uses_defaults() {
+        let tmp = TempStore::new();
+        fs::write(
+            &tmp.path,
+            json!({
+                "version": 1,
+                "sites": [{
+                    "id": "siteidabcdefghijkAAA",
+                    "name": "Panel",
+                    "baseUrl": "https://old.example.com",
+                    "nextKeyOrdinal": 1,
+                    "keys": []
+                }]
+            })
+            .to_string(),
+        )
+        .unwrap();
+        let loaded = load(&tmp.path).unwrap();
+        assert_eq!(loaded.sites[0].quota_scale(), (500_000.0, 1.0));
+        assert!(!loaded.sites[0].has_access_token());
+        let dto = loaded.sites[0].to_dto();
+        assert!(!dto.has_access_token);
+        // A CNY site that stored a rate keeps it across the round trip.
+        fs::write(
+            &tmp.path,
+            json!({
+                "version": 1,
+                "sites": [{
+                    "id": "siteidabcdefghijkAAB",
+                    "name": "CNY",
+                    "baseUrl": "https://cny.example.com",
+                    "nextKeyOrdinal": 1,
+                    "displayUnit": "cny",
+                    "perUnit": 600_000.0,
+                    "rate": 7.25,
+                    "accessToken": "at-secret",
+                    "userId": "7",
+                    "keys": []
+                }]
+            })
+            .to_string(),
+        )
+        .unwrap();
+        let loaded = load(&tmp.path).unwrap();
+        assert_eq!(loaded.sites[0].quota_scale(), (600_000.0, 7.25));
+        assert!(loaded.sites[0].has_access_token());
+        assert_eq!(loaded.sites[0].user_id, "7");
+    }
+
+    #[test]
+    fn backfill_adds_missing_scale_to_legacy_unit_only_site() {
+        let tmp = TempStore::new();
+        fs::write(
+            &tmp.path,
+            json!({
+                "version": 1,
+                "sites": [{
+                    "id": "siteidabcdefghijkAAA",
+                    "name": "CNY",
+                    "baseUrl": "https://cny.example.com",
+                    "nextKeyOrdinal": 1,
+                    "displayUnit": "cny",
+                    "keys": []
+                }]
+            })
+            .to_string(),
+        )
+        .unwrap();
+        // The site has a display unit but no scale: the CAS write must still
+        // apply so pre-scale files receive the subscription conversion data.
+        assert!(set_fingerprint_if_still_missing_at_origin(
+            &tmp.path,
+            "siteidabcdefghijkAAA",
+            "https://cny.example.com",
+            fp(DisplayUnit::Cny),
+        )
+        .unwrap());
+        let loaded = load(&tmp.path).unwrap();
+        assert_eq!(loaded.sites[0].quota_display(), DisplayUnit::Cny);
+        assert_eq!(loaded.sites[0].quota_scale(), (500_000.0, 1.0));
+        // Now that both are present, the same-origin write is skipped again.
+        assert!(!set_fingerprint_if_still_missing_at_origin(
+            &tmp.path,
+            "siteidabcdefghijkAAA",
+            "https://cny.example.com",
+            fp(DisplayUnit::Usd),
         )
         .unwrap());
     }
@@ -1019,7 +1220,7 @@ mod tests {
             &tmp.path,
             "  ",
             &https("panel.example.com"),
-            DisplayUnit::Usd,
+            fp(DisplayUnit::Usd),
         )
         .unwrap();
         let CreateSiteResult::Created { site } = created else {
@@ -1035,7 +1236,7 @@ mod tests {
             &tmp.path,
             "Alpha",
             &https("alpha.example.com"),
-            DisplayUnit::Usd,
+            fp(DisplayUnit::Usd),
         )
         .unwrap();
         let CreateSiteResult::Created { site } = created else {
@@ -1182,7 +1383,7 @@ mod tests {
     }
 
     fn created_site(tmp: &TempStore, name: &str, host: &str) -> SiteDto {
-        match insert_site(&tmp.path, name, &https(host), DisplayUnit::Usd).unwrap() {
+        match insert_site(&tmp.path, name, &https(host), fp(DisplayUnit::Usd)).unwrap() {
             CreateSiteResult::Created { site } => site,
             CreateSiteResult::Duplicate { .. } => panic!("expected created"),
         }

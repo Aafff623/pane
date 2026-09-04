@@ -14,6 +14,12 @@ pub struct SiteDto {
     pub id: String,
     pub name: String,
     pub base_url: String,
+    /// Whether a NewAPI dashboard access token is saved (value never leaves
+    /// the store).
+    pub has_access_token: bool,
+    /// The dashboard user id paired with the access token (`New-Api-User`
+    /// header). Not a credential — exposed so the UI can pre-fill it.
+    pub user_id: String,
     pub keys: Vec<KeyDto>,
 }
 
@@ -93,11 +99,11 @@ pub async fn probe_site(base_url: String) -> Result<ProbeDto, String> {
 
 pub(crate) async fn probe_site_display(
     base_url: String,
-) -> Result<(ProbeDto, fingerprint::DisplayUnit), String> {
+) -> Result<(ProbeDto, fingerprint::SiteFingerprint), String> {
     probe_site_url(&base_url).await
 }
 
-async fn probe_site_url(base_url: &str) -> Result<(ProbeDto, fingerprint::DisplayUnit), String> {
+async fn probe_site_url(base_url: &str) -> Result<(ProbeDto, fingerprint::SiteFingerprint), String> {
     let normalized = url::normalize_base_url(base_url)?;
     let display = fingerprint::probe(&normalized.origin).await?;
     Ok((
@@ -135,6 +141,7 @@ pub async fn create_site_at(
     store::insert_site(path, &name, &normalized, display)
 }
 
+#[allow(dead_code)]
 pub async fn update_site(
     id: String,
     name: Option<String>,
@@ -153,7 +160,7 @@ pub(crate) fn update_site_consistently<Cleanup>(
     id: String,
     name: Option<String>,
     base_url: Option<String>,
-    display: Option<fingerprint::DisplayUnit>,
+    fingerprint: Option<fingerprint::SiteFingerprint>,
     cleanup: Cleanup,
 ) -> Result<SiteDto, String>
 where
@@ -165,11 +172,12 @@ where
         .transpose()?;
     coordinate_store_mutation_at(
         &store_path(),
-        |path| store::update_site(path, &id, name, normalized, display),
+        |path| store::update_site(path, &id, name, normalized, fingerprint),
         cleanup,
     )
 }
 
+#[allow(dead_code)]
 pub async fn update_site_at(
     path: &Path,
     id: &str,
@@ -182,12 +190,12 @@ pub async fn update_site_at(
         .iter()
         .find(|s| s.id == id)
         .ok_or_else(|| "site not found".to_string())?;
-    let (new_url, display) = match base_url {
+    let (new_url, fp) = match base_url {
         Some(raw) => {
             let normalized = url::normalize_base_url(&raw)?;
             if normalized.origin != site.base_url {
-                let display = fingerprint::probe(&normalized.origin).await?;
-                (Some(normalized), Some(display))
+                let fp = fingerprint::probe(&normalized.origin).await?;
+                (Some(normalized), Some(fp))
             } else {
                 (None, None)
             }
@@ -195,9 +203,10 @@ pub async fn update_site_at(
         None => (None, None),
     };
     let _lock = lock_store_mutation()?;
-    store::update_site(path, id, name, new_url, display)
+    store::update_site(path, id, name, new_url, fp)
 }
 
+#[allow(dead_code)]
 pub fn delete_site(id: String) -> Result<(), String> {
     let _lock = lock_store_mutation()?;
     store::delete_site(&store_path(), &id)
@@ -226,6 +235,7 @@ pub fn create_key(site_id: String, label: String, api_key: String) -> Result<Cre
     store::create_key(&store_path(), &site_id, &label, &api_key)
 }
 
+#[allow(dead_code)]
 pub fn update_key(
     site_id: String,
     key_id: String,
@@ -253,6 +263,7 @@ where
     )
 }
 
+#[allow(dead_code)]
 pub fn delete_key(site_id: String, key_id: String) -> Result<SiteDto, String> {
     let _lock = lock_store_mutation()?;
     store::delete_key(&store_path(), &site_id, &key_id)
@@ -293,14 +304,34 @@ pub async fn prepare_key_cards() -> Result<Vec<KeyCard>, String> {
     key_cards()
 }
 
-fn set_display_unit_at(
+fn set_fingerprint_at(
     path: &Path,
     id: &str,
     origin: &str,
-    display: fingerprint::DisplayUnit,
+    fingerprint: fingerprint::SiteFingerprint,
 ) -> Result<bool, String> {
     let _lock = lock_store_mutation()?;
-    store::set_display_unit_if_still_missing_at_origin(path, id, origin, display)
+    store::set_fingerprint_if_still_missing_at_origin(path, id, origin, fingerprint)
+}
+
+/// Saves (or clears) the site's NewAPI dashboard access token / user id
+/// pair that enables the subscription display. `None` keeps a value.
+pub fn set_site_access_token(
+    site_id: String,
+    access_token: Option<String>,
+    user_id: Option<String>,
+) -> Result<SiteDto, String> {
+    set_site_access_token_at(&store_path(), &site_id, access_token, user_id)
+}
+
+fn set_site_access_token_at(
+    path: &Path,
+    site_id: &str,
+    access_token: Option<String>,
+    user_id: Option<String>,
+) -> Result<SiteDto, String> {
+    let _lock = lock_store_mutation()?;
+    store::set_site_auth(path, site_id, access_token.as_deref(), user_id.as_deref())
 }
 
 #[cfg(test)]
@@ -449,9 +480,12 @@ mod tests {
     fn probe_site_returns_plaintext_flag_without_saving() {
         let tmp = TempStore::new();
         let (origin, join) = spawn_ok_server(1);
-        let (dto, display) = tauri::async_runtime::block_on(probe_site_url(&origin)).unwrap();
+        let (dto, fp) = tauri::async_runtime::block_on(probe_site_url(&origin)).unwrap();
         assert_eq!(dto.base_url, origin);
-        assert_eq!(display, fingerprint::DisplayUnit::Usd);
+        assert_eq!(
+            fp,
+            fingerprint::SiteFingerprint::from(fingerprint::DisplayUnit::Usd)
+        );
         assert_eq!(dto.hostname, "127.0.0.1");
         assert!(dto.http_plaintext);
         assert!(!tmp.path.exists());
@@ -501,7 +535,7 @@ mod tests {
             &tmp.path,
             "Other",
             &url::normalize_base_url("https://other.example.com").unwrap(),
-            fingerprint::DisplayUnit::Usd,
+            fingerprint::SiteFingerprint::from(fingerprint::DisplayUnit::Usd),
         )
         .unwrap();
         let CreateSiteResult::Created { site: other_site } = other else {
@@ -583,13 +617,54 @@ mod tests {
         assert_eq!(auths.len(), 1);
     }
 
+    #[test]
+    fn set_site_access_token_saves_trims_and_clears() {
+        let tmp = TempStore::new();
+        let (origin, join) = spawn_ok_server(1);
+        let created =
+            tauri::async_runtime::block_on(create_site_at(&tmp.path, "Panel".into(), origin))
+                .unwrap();
+        let CreateSiteResult::Created { site } = created else {
+            panic!("expected created");
+        };
+        let _ = join.join();
+        assert!(!site.has_access_token);
+        assert_eq!(site.user_id, "");
+
+        let saved =
+            super::set_site_access_token_at(&tmp.path, &site.id, Some("  at-7 ".into()), None)
+                .unwrap();
+        assert!(saved.has_access_token);
+        let listed = store::load(&tmp.path).unwrap();
+        assert_eq!(listed.sites[0].access_token, "at-7");
+
+        let paired = super::set_site_access_token_at(
+            &tmp.path,
+            &site.id,
+            None,
+            Some(" 42 ".into()),
+        )
+        .unwrap();
+        assert!(paired.has_access_token);
+        assert_eq!(paired.user_id, "42");
+
+        let cleared = super::set_site_access_token_at(&tmp.path, &site.id, Some("".into()), None)
+            .unwrap();
+        assert!(!cleared.has_access_token);
+        assert_eq!(cleared.user_id, "42");
+        assert!(
+            super::set_site_access_token_at(&tmp.path, "missing", Some("x".into()), None)
+                .is_err()
+        );
+    }
+
     fn seed_site_with_key(tmp: &TempStore) -> (SiteDto, CreatedKey) {
         let normalized = url::normalize_base_url("https://panel.example.com").unwrap();
         let created = store::insert_site(
             &tmp.path,
             "Panel",
             &normalized,
-            fingerprint::DisplayUnit::Usd,
+            fingerprint::SiteFingerprint::from(fingerprint::DisplayUnit::Usd),
         )
         .unwrap();
         let CreateSiteResult::Created { site } = created else {
@@ -797,6 +872,8 @@ mod tests {
                 id: "abc".into(),
                 name: "N".into(),
                 base_url: "https://n.example".into(),
+                has_access_token: false,
+                user_id: String::new(),
                 keys: vec![],
             },
         })

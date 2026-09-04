@@ -1,11 +1,11 @@
 //! Pane's own OAuth sign-in (device code flow), one account per provider.
 //!
-//! Scope: Codex (OpenAI) and Grok (xAI) — the two providers whose device
-//! code endpoints are proven (same public client ids the CLIs themselves
-//! use). Tokens live in %APPDATA%\Pane\oauth\<provider>.json and nowhere
-//! else: never in the repo, never in logs, and the CLI's own credential
-//! files are never written from here (refresh writes back to Pane's file
-//! only).
+//! Scope: Codex (OpenAI), Grok (xAI), and Copilot (GitHub) — the three
+//! providers whose device code endpoints are proven (same public client ids
+//! the CLIs themselves use). Tokens live in %APPDATA%\Pane\oauth\<provider>.json
+//! and nowhere else: never in the repo, never in logs, and the CLI's own
+//! credential files are never written from here (refresh writes back to
+//! Pane's file only).
 //!
 //! Flow per provider:
 //! 1. `start` asks the vendor for a device code and returns the user code
@@ -15,6 +15,9 @@
 //! 3. On authorization the tokens are exchanged and written to disk.
 //! 4. Providers call `valid_tokens`, which refreshes an expiring access
 //!    token with the stored refresh token and saves the rotated pair.
+//!    Copilot is special: the GitHub OAuth token is what's stored, and
+//!    `copilot_bearer` exchanges it for a short-lived Copilot token at
+//!    query time (GitHub does not issue long-lived Copilot tokens).
 
 use base64::Engine;
 use chrono::{DateTime, Utc};
@@ -43,6 +46,18 @@ const XAI_ISSUER: &str = "https://auth.x.ai";
 const XAI_DISCOVERY_URL: &str = "https://auth.x.ai/.well-known/openid-configuration";
 const XAI_CLIENT_ID: &str = "b1a00492-073a-47ea-816f-4c329264a828";
 const XAI_SCOPE: &str = "openid profile email offline_access grok-cli:access api:access";
+
+// --- Copilot (GitHub) — the same public client the GitHub Copilot
+// extension uses; device flow only, no local redirect ---
+const GITHUB_CLIENT_ID: &str = "Iv1.b507a08c87ecfe98";
+const GITHUB_DEVICE_CODE_URL: &str = "https://github.com/login/device/code";
+const GITHUB_TOKEN_URL: &str = "https://github.com/login/oauth/access_token";
+const GITHUB_VERIFY_URL: &str = "https://github.com/login/device";
+const GITHUB_SCOPE: &str = "read:user";
+// An Api-style Copilot token would come from this endpoint, requested per
+// query; it's not needed for the usage card (which reads copilot_internal/user
+// with the GitHub token), so no exchange happens in this module.
+
 
 /// Auth requests fail fast — the shared client timeout is tuned for
 /// streaming model responses, far too long for a stuck network here.
@@ -125,11 +140,11 @@ static PENDING: LazyLock<Mutex<HashMap<String, PendingFlow>>> =
 /// xAI endpoints resolved from the discovery document, fetched once.
 static XAI_ENDPOINTS: Mutex<Option<(String, String)>> = Mutex::new(None);
 
-/// Only these two providers have a device-code flow this phase. Also the
+/// Only these three providers have a device-code flow this phase. Also the
 /// path-safety gate: the provider id becomes a file name.
 fn check_provider(provider: &str) -> Result<(), String> {
     match provider {
-        "codex" | "grok" => Ok(()),
+        "codex" | "grok" | "copilot" => Ok(()),
         _ => Err(format!("OAuth sign-in is not available for {provider}")),
     }
 }
@@ -328,8 +343,56 @@ pub async fn start(provider: &str) -> Result<StartResponse, String> {
     check_provider(provider)?;
     match provider {
         "codex" => start_codex().await,
+        "copilot" => start_copilot().await,
         _ => start_xai().await,
     }
+}
+
+async fn start_copilot() -> Result<StartResponse, String> {
+    let resp = http()
+        .post(GITHUB_DEVICE_CODE_URL)
+        .timeout(HTTP_TIMEOUT)
+        .form(&[("client_id", GITHUB_CLIENT_ID), ("scope", GITHUB_SCOPE)])
+        .send()
+        .await
+        .map_err(|e| format!("device code request: {e}"))?;
+    let status = resp.status();
+    let doc = read_json(resp, "device code").await?;
+    if !status.is_success() {
+        return Err(format!(
+            "device code request: HTTP {status}{}",
+            error_code(&doc).map(|c| format!(" ({c})")).unwrap_or_default()
+        ));
+    }
+    let device_code = doc
+        .get("device_code")
+        .and_then(Value::as_str)
+        .ok_or("device code response missing device_code")?
+        .to_string();
+    let user_code = doc
+        .get("user_code")
+        .and_then(Value::as_str)
+        .ok_or("device code response missing user_code")?
+        .to_string();
+    let expires_in = doc.get("expires_in").and_then(Value::as_u64).unwrap_or(900);
+    let interval = parse_interval(doc.get("interval"));
+    register_pending(
+        device_code.clone(),
+        PendingFlow {
+            provider: "copilot".into(),
+            user_code: user_code.clone(),
+            token_endpoint: String::new(),
+            expires_at_ms: now_ms() + expires_in as i64 * 1000,
+            interval_secs: interval,
+            next_poll_at_ms: 0,
+        },
+    );
+    Ok(StartResponse {
+        device_auth_id: device_code,
+        user_code,
+        verify_url: GITHUB_VERIFY_URL.into(),
+        expires_in,
+    })
 }
 
 async fn start_codex() -> Result<StartResponse, String> {
@@ -481,6 +544,7 @@ pub async fn poll(provider: &str, device_auth_id: &str) -> PollResponse {
     }
     match provider {
         "codex" => poll_codex(device_auth_id, &flow).await,
+        "copilot" => poll_copilot(device_auth_id, &flow).await,
         _ => poll_xai(device_auth_id, &flow).await,
     }
 }
@@ -606,6 +670,128 @@ async fn poll_xai(device_auth_id: &str, flow: &PendingFlow) -> PollResponse {
         }
         Err(e) => PollResponse::failure(e),
     }
+}
+
+async fn poll_copilot(device_auth_id: &str, _flow: &PendingFlow) -> PollResponse {
+    let resp = match http()
+        .post(GITHUB_TOKEN_URL)
+        .timeout(HTTP_TIMEOUT)
+        .form(&[
+            ("client_id", GITHUB_CLIENT_ID),
+            ("device_code", device_auth_id),
+            ("grant_type", "urn:ietf:params:oauth:grant-type:device_code"),
+        ])
+        .send()
+        .await
+    {
+        Ok(r) => r,
+        Err(e) => return PollResponse::failure(format!("poll request: {e}")),
+    };
+    let status = resp.status().as_u16();
+    let doc = match read_json(resp, "poll").await {
+        Ok(d) => d,
+        Err(e) => return PollResponse::failure(e),
+    };
+    if let Some(code) = error_code(&doc) {
+        return match code {
+            "authorization_pending" => PollResponse::pending(),
+            "slow_down" => {
+                // Back off an extra 5s per slow_down, like the RFC asks.
+                if let Some(f) = PENDING.lock().unwrap().get_mut(device_auth_id) {
+                    f.interval_secs = (f.interval_secs + 5).min(MAX_POLL_INTERVAL_SECS);
+                    f.next_poll_at_ms = now_ms() + f.interval_secs as i64 * 1000;
+                }
+                PollResponse::pending()
+            }
+            "access_denied" => {
+                PENDING.lock().unwrap().remove(device_auth_id);
+                PollResponse::failure("sign-in was declined".into())
+            }
+            "expired_token" => {
+                PENDING.lock().unwrap().remove(device_auth_id);
+                PollResponse::failure("the sign-in code expired — start again".into())
+            }
+            _ => PollResponse::failure(format!("poll request: HTTP {status} ({code})")),
+        };
+    }
+    if status != 200 {
+        return PollResponse::failure(format!("poll request: HTTP {status}"));
+    }
+    // GitHub returns the OAuth token directly (no refresh_token for device
+    // flows with this client). Store it as refresh_token: copilot_bearer
+    // exchanges it for a fresh Copilot token at query time. The access
+    // token slot holds the same GitHub token with a far-future expiry.
+    let github_token = match doc
+        .get("access_token")
+        .and_then(Value::as_str)
+        .filter(|s| !s.is_empty())
+    {
+        Some(tok) => tok.to_string(),
+        None => return PollResponse::failure("token response missing access_token".into()),
+    };
+    // Fetch the GitHub login for the account label.
+    let label = fetch_copilot_label(&github_token).await;
+    let tokens = StoredTokens {
+        access_token: github_token.clone(),
+        refresh_token: github_token.clone(),
+        // GitHub OAuth tokens are long-lived (no server-expiry reported);
+        // 365 days is a safe refresh cadence, and refresh just re-stores.
+        expires_at: expires_at_rfc3339(Some(365 * 24 * 3600)),
+        label,
+        account_id: None,
+        id_token: None,
+    };
+    if let Err(e) = save("copilot", &tokens) {
+        return PollResponse::failure(e);
+    }
+    PENDING.lock().unwrap().remove(device_auth_id);
+    PollResponse::success(tokens.label.clone())
+}
+
+/// The GitHub login behind an OAuth token, for the account chip label.
+async fn fetch_copilot_label(github_token: &str) -> Option<String> {
+    let resp = http()
+        .get("https://api.github.com/user")
+        .header("Authorization", format!("token {github_token}"))
+        .header("Accept", "application/vnd.github+json")
+        .header("X-GitHub-Api-Version", "2025-04-01")
+        .timeout(HTTP_TIMEOUT)
+        .send()
+        .await
+        .ok()?;
+    if !resp.status().is_success() {
+        return None;
+    }
+    let user: Value = read_json(resp, "github user").await.ok()?;
+    user.get("login")
+        .and_then(Value::as_str)
+        .filter(|s| !s.is_empty())
+        .map(str::to_string)
+        .or_else(|| {
+            user.get("name")
+                .and_then(Value::as_str)
+                .filter(|s| !s.is_empty())
+                .map(str::to_string)
+        })
+}
+
+/// A usable GitHub OAuth token for copilot.rs: the stored GitHub token.
+/// GitHub device-flow tokens are long-lived and don't rotate, so no
+/// refresh round-trip is needed — `valid_tokens` is not used because the
+/// access/refresh slots both hold the same GitHub token.
+pub fn github_oauth_token() -> Result<Option<String>, String> {
+    let Some(stored) = load("copilot") else {
+        return Ok(None);
+    };
+    let token = if !stored.refresh_token.is_empty() {
+        &stored.refresh_token
+    } else {
+        &stored.access_token
+    };
+    if token.is_empty() {
+        return Err(RELOGIN_HINT.into());
+    }
+    Ok(Some(token.to_string()))
 }
 
 /// Shared tail of both polls: a successful token response becomes the

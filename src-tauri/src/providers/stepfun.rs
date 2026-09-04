@@ -30,9 +30,15 @@ pub async fn snapshot() -> Snapshot {
 
 /// Live test of a user-pasted key, without saving it (Customize "Test").
 pub async fn snapshot_with_key(key: &str) -> Snapshot {
-    match fetch_with_key(key).await {
+    snapshot_with_key_as(key, ID, NAME).await
+}
+
+/// Fetches a key while preserving the identity of the account card that owns
+/// it. The family wrapper above keeps the original public behavior.
+pub async fn snapshot_with_key_as(key: &str, card_id: &str, card_name: &str) -> Snapshot {
+    match fetch_with_key(key, card_id, card_name).await {
         Ok(s) => s,
-        Err(e) => Snapshot::error(ID, NAME, e),
+        Err(e) => Snapshot::error(card_id, card_name, e),
     }
 }
 
@@ -44,13 +50,13 @@ async fn fetch() -> Result<Snapshot, String> {
             "Paste a StepFun API key in Settings (gear icon).",
         ));
     };
-    fetch_with_key(&key).await
+    fetch_with_key(&key, ID, NAME).await
 }
 
-async fn fetch_with_key(key: &str) -> Result<Snapshot, String> {
+async fn fetch_with_key(key: &str, card_id: &str, card_name: &str) -> Result<Snapshot, String> {
     let mut last_error = String::from("balance endpoint unreachable");
     for endpoint in ENDPOINTS {
-        let resp = match http().get(endpoint).bearer_auth(&key).send().await {
+        let resp = match http().get(endpoint).bearer_auth(key).send().await {
             Ok(r) => r,
             Err(e) => {
                 last_error = format!("balance request: {e}");
@@ -78,14 +84,14 @@ async fn fetch_with_key(key: &str) -> Result<Snapshot, String> {
         let mut metrics = Vec::new();
         // Usage line + low-credit notifications, metered against the
         // highest balance seen (top-ups raise it).
-        if let Some(meter) = super::credit_meter(ID, "¥", balance) {
+        if let Some(meter) = super::credit_meter(card_id, "¥", balance) {
             metrics.push(meter);
         }
         metrics.push(Metric::text("Balance", format!("¥{balance:.2}")));
         metrics.append(&mut extra);
         return Ok(Snapshot::ok(
-            ID,
-            NAME,
+            card_id,
+            card_name,
             Some("Pay as you go".into()),
             metrics,
         ));
@@ -113,6 +119,11 @@ fn json_f64(v: Option<&Value>) -> Option<f64> {
         Value::String(s) => s.trim().parse().ok(),
         _ => None,
     }
+}
+
+#[cfg(test)]
+fn snapshot_error_for_card(message: &str, card_id: &str, card_name: &str) -> Snapshot {
+    Snapshot::error(card_id, card_name, message.into())
 }
 
 #[cfg(test)]
@@ -152,5 +163,12 @@ mod tests {
     fn missing_balance_is_rejected() {
         assert!(parse_balance(&json!({})).is_none());
         assert!(parse_balance(&json!({ "total_cash_balance": 1.0 })).is_none());
+    }
+
+    #[test]
+    fn named_error_keeps_account_identity() {
+        let snap = snapshot_error_for_card("network", "stepfun@2", "StepFun — Work");
+        assert_eq!(snap.id, "stepfun@2");
+        assert_eq!(snap.name, "StepFun — Work");
     }
 }

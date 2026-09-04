@@ -30,8 +30,24 @@ async fn billing_get(
     api_key: &str,
     what: &str,
 ) -> Result<(reqwest::StatusCode, Result<serde_json::Value, String>), reqwest::Error> {
+    dashboard_get(client, url, api_key, None, what).await
+}
+
+/// GET with a bearer credential; dashboard endpoints on rc builds also
+/// demand the matching `New-Api-User` header alongside the access token.
+async fn dashboard_get(
+    client: &reqwest::Client,
+    url: &str,
+    bearer: &str,
+    user_id: Option<&str>,
+    what: &str,
+) -> Result<(reqwest::StatusCode, Result<serde_json::Value, String>), reqwest::Error> {
     let _permit = billing_sema().acquire().await.expect("billing semaphore");
-    let resp = client.get(url).bearer_auth(api_key).send().await?;
+    let mut request = client.get(url).bearer_auth(bearer);
+    if let Some(uid) = user_id {
+        request = request.header("New-Api-User", uid);
+    }
+    let resp = request.send().await?;
     let status = resp.status();
     let json = json_body(resp, MAX_BILLING_BYTES, what).await;
     Ok((status, json))
@@ -43,6 +59,15 @@ pub struct KeyCard {
     pub origin: String,
     pub api_key: String,
     pub display: DisplayUnit,
+    /// Raw-quota → display-value scale for the subscription endpoint.
+    pub per_unit: f64,
+    pub rate: f64,
+    /// Site's NewAPI dashboard access token; `None` = subscription display
+    /// off, billing only.
+    pub access_token: Option<String>,
+    /// Dashboard user id paired with the token (`New-Api-User` header on
+    /// rc builds).
+    pub user_id: Option<String>,
 }
 
 pub fn key_cards_at(path: &Path) -> Result<Vec<KeyCard>, String> {
@@ -51,15 +76,24 @@ pub fn key_cards_at(path: &Path) -> Result<Vec<KeyCard>, String> {
         .sites
         .iter()
         .flat_map(|site| {
+            let (per_unit, rate) = site.quota_scale();
+            let access_token = site
+                .has_access_token()
+                .then(|| site.access_token.clone());
+            let user_id = (!site.user_id.is_empty()).then(|| site.user_id.clone());
             site.keys
                 .iter()
                 .filter(|k| !k.api_key.is_empty())
-                .map(|key| KeyCard {
+                .map(move |key| KeyCard {
                     id: format!("onenewapi@{}", key.id),
                     name: format!("{} · {}", site.name, key.label),
                     origin: site.base_url.clone(),
                     api_key: key.api_key.clone(),
                     display: site.quota_display(),
+                    per_unit,
+                    rate,
+                    access_token: access_token.clone(),
+                    user_id: user_id.clone(),
                 })
         })
         .collect())
@@ -72,7 +106,10 @@ pub async fn snapshot_key(card: KeyCard) -> Snapshot {
 
 pub async fn snapshot_key_with_client(client: reqwest::Client, card: KeyCard) -> Snapshot {
     match fetch_key(&client, &card).await {
-        Ok(metrics) => with_dashboard(Snapshot::ok(&card.id, &card.name, None, metrics), &card),
+        Ok(usage) => with_dashboard(
+            Snapshot::ok(&card.id, &card.name, usage.plan, usage.metrics),
+            &card,
+        ),
         Err(e) => with_dashboard(Snapshot::error(&card.id, &card.name, e), &card),
     }
 }
@@ -82,11 +119,52 @@ fn with_dashboard(mut snap: Snapshot, card: &KeyCard) -> Snapshot {
     snap
 }
 
+/// One key card's numbers: optional plan tag (subscription mode) + metrics.
+struct KeyUsage {
+    plan: Option<String>,
+    metrics: Vec<super::super::Metric>,
+}
+
 async fn fetch_key(
     client: &reqwest::Client,
     card: &KeyCard,
-) -> Result<Vec<super::super::Metric>, String> {
+) -> Result<KeyUsage, String> {
     let origin = super::url::normalize_base_url(&card.origin)?.origin;
+
+    // Subscription display first: a configured dashboard access token turns
+    // the card into the NewAPI subscription plan (daily-reset allowance,
+    // next-reset countdown, expiry). Anything that fails to produce an
+    // active subscription — missing endpoint, rejected token, parse —
+    // degrades silently to the wallet billing display below.
+    if let Some(token) = card.access_token.as_deref().filter(|t| !t.trim().is_empty()) {
+        let url = format!("{origin}/api/subscription/self");
+        let fetched = dashboard_get(
+            client,
+            &url,
+            token,
+            card.user_id.as_deref(),
+            "subscription",
+        )
+        .await;
+        if let Ok((status, body)) = fetched {
+            if status.is_success() {
+                if let Ok(value) = body {
+                    if let Some(view) = billing::subscription_view(
+                        &value,
+                        &card.display,
+                        card.per_unit,
+                        card.rate,
+                    ) {
+                        return Ok(KeyUsage {
+                            plan: Some(view.plan_label),
+                            metrics: view.metrics,
+                        });
+                    }
+                }
+            }
+        }
+    }
+
     let sub_url = format!("{origin}/v1/dashboard/billing/subscription");
     let usage_url = format!("{origin}/v1/dashboard/billing/usage");
     let (sub_resp, usage_resp) = tokio::join!(
@@ -113,7 +191,11 @@ async fn fetch_key(
         Err(_) => return Err("usage transport".to_string()),
     };
 
-    billing::metrics_from(&sub, usage.as_ref(), &card.display)
+    let metrics = billing::metrics_from(&sub, usage.as_ref(), &card.display)?;
+    Ok(KeyUsage {
+        plan: None,
+        metrics,
+    })
 }
 
 fn backfill_claimed() -> &'static Mutex<HashSet<(String, String)>> {
@@ -136,16 +218,16 @@ pub async fn backfill_missing_display_units(path: &Path) {
         let mut claimed = backfill_claimed().lock().unwrap();
         doc.sites
             .iter()
-            .filter(|site| site.display_unit.is_none())
+            .filter(|site| site.display_unit.is_none() || site.per_unit.is_none())
             .filter(|site| claimed.insert((site.id.clone(), site.base_url.clone())))
             .map(|site| (site.id.clone(), site.base_url.clone()))
             .collect()
     };
     for (id, origin) in missing {
-        let Ok(unit) = super::fingerprint::probe(&origin).await else {
+        let Ok(fp) = super::fingerprint::probe(&origin).await else {
             continue;
         };
-        let _ = super::set_display_unit_at(path, &id, &origin, unit);
+        let _ = super::set_fingerprint_at(path, &id, &origin, fp);
     }
 }
 
@@ -163,6 +245,7 @@ mod tests {
         backfill_missing_display_units, key_cards_at, refresh_clients,
         schedule_backfill_missing_display_units, snapshot_key, DisplayUnit, KeyCard,
     };
+    use crate::providers::onenewapi::fingerprint::SiteFingerprint;
     use crate::providers::onenewapi::store;
     use crate::providers::onenewapi::url::normalize_base_url;
     use crate::providers::onenewapi::CreateSiteResult;
@@ -205,6 +288,7 @@ mod tests {
     struct Captured {
         url: String,
         authorization: Option<String>,
+        new_api_user: Option<String>,
     }
 
     fn authorization(req: &tiny_http::Request) -> Option<String> {
@@ -212,6 +296,21 @@ mod tests {
             .iter()
             .find(|h| h.field.equiv("Authorization"))
             .map(|h| h.value.as_str().to_string())
+    }
+
+    fn new_api_user(req: &tiny_http::Request) -> Option<String> {
+        req.headers()
+            .iter()
+            .find(|h| h.field.equiv("New-Api-User"))
+            .map(|h| h.value.as_str().to_string())
+    }
+
+    fn capture(req: &tiny_http::Request) -> Captured {
+        Captured {
+            url: req.url().to_string(),
+            authorization: authorization(req),
+            new_api_user: new_api_user(req),
+        }
     }
 
     fn spawn_billing_server(
@@ -229,10 +328,7 @@ mod tests {
             for _ in 0..n {
                 match server.recv_timeout(Duration::from_secs(3)) {
                     Ok(Some(req)) => {
-                        out.push(Captured {
-                            url: req.url().to_string(),
-                            authorization: authorization(&req),
-                        });
+                        out.push(capture(&req));
                         let resp = respond(&origin_for_handler, &req);
                         let _ = req.respond(resp);
                     }
@@ -268,12 +364,28 @@ mod tests {
     }
 
     fn card_with_display(origin: &str, key: &str, display: DisplayUnit) -> KeyCard {
+        card_full(origin, key, display, 500_000.0, 1.0, None, None)
+    }
+
+    fn card_full(
+        origin: &str,
+        key: &str,
+        display: DisplayUnit,
+        per_unit: f64,
+        rate: f64,
+        access_token: Option<&str>,
+        user_id: Option<&str>,
+    ) -> KeyCard {
         KeyCard {
             id: "onenewapi@keyidabcdefghijkAAA".into(),
             name: "Panel · Key 1".into(),
             origin: origin.into(),
             api_key: key.into(),
             display,
+            per_unit,
+            rate,
+            access_token: access_token.map(str::to_string),
+            user_id: user_id.map(str::to_string),
         }
     }
 
@@ -300,7 +412,7 @@ mod tests {
         let tmp = TempStore::new();
         let url = normalize_base_url("https://panel.example.com").unwrap();
         let CreateSiteResult::Created { site } =
-            store::insert_site(&tmp.path, "Panel", &url, DisplayUnit::Usd).unwrap()
+            store::insert_site(&tmp.path, "Panel", &url, SiteFingerprint::from(DisplayUnit::Usd)).unwrap()
         else {
             panic!("expected created");
         };
@@ -362,6 +474,184 @@ mod tests {
             .iter()
             .all(|c| c.authorization.as_deref() == Some("Bearer sk-live-quota")));
         assert!(!snap.error.clone().unwrap_or_default().contains(key));
+    }
+
+    // --- subscription display (site access token) --------------------------
+
+    fn subscription_body() -> String {
+        json!({
+            "success": true,
+            "message": "",
+            "data": {
+                "billing_preference": "subscription_first",
+                "subscriptions": [{
+                    "subscription": {
+                        "id": 239,
+                        "amount_total": 1_000_000_000i64,
+                        "amount_used": 279_000_000i64,
+                        "end_time": 1_791_164_506,
+                        "next_reset_time": 1_791_155_200,
+                        "status": "active"
+                    }
+                }],
+                "all_subscriptions": []
+            }
+        })
+        .to_string()
+    }
+
+    #[test]
+    fn access_token_serves_subscription_and_skips_billing() {
+        let body = subscription_body();
+        let (origin, join) = spawn_billing_server(1, move |_origin, req| match path_of(req) {
+            "/api/subscription/self" => {
+                tiny_http::Response::from_string(body.clone()).with_status_code(200)
+            }
+            _ => tiny_http::Response::from_string("must not be hit").with_status_code(500),
+        });
+        let snap = tauri::async_runtime::block_on(snapshot_key(card_full(
+            &origin,
+            "sk-live-quota",
+            DisplayUnit::Usd,
+            500_000.0,
+            1.0,
+            Some("at-token"),
+            Some("42"),
+        )));
+        let captured = join.join().unwrap();
+        assert_eq!(snap.status, "ok");
+        assert_eq!(snap.plan.as_deref(), Some("Subscription #239"));
+        let usage = snap.metrics.iter().find(|m| m.label == "Usage").unwrap();
+        assert_eq!(usage.kind, "progress");
+        // $558 used of $2 000 → 27.9% used, the card headline reads "72.1% left".
+        assert!((usage.used_percent.unwrap() - 27.9).abs() < 1e-9);
+        assert_eq!(usage.detail.as_deref(), Some("$558.00 of $2000.00"));
+        assert_eq!(usage.resets_at, Some(1_791_155_200_000));
+        assert_eq!(usage.period_ms, Some(24 * 60 * 60 * 1000));
+        let expiry = snap.metrics.iter().find(|m| m.label == "Expiry").unwrap();
+        assert_eq!(expiry.resets_at, Some(1_791_164_506_000));
+
+        assert_eq!(captured.len(), 1);
+        assert_eq!(captured[0].url, "/api/subscription/self");
+        // The dashboard token is sent alone; the sk- key never leaks there.
+        assert_eq!(
+            captured[0].authorization.as_deref(),
+            Some("Bearer at-token")
+        );
+        // rc builds require the matching New-Api-User header.
+        assert_eq!(captured[0].new_api_user.as_deref(), Some("42"));
+        assert_eq!(snap.dashboard_url.as_deref(), Some(origin.as_str()));
+    }
+
+    #[test]
+    fn rejected_access_token_falls_back_to_billing() {
+        let sub = sub_body();
+        let usage = usage_body();
+        let (origin, join) = spawn_billing_server(3, move |_origin, req| {
+            match path_of(req) {
+                "/api/subscription/self" => {
+                    tiny_http::Response::from_string("denied").with_status_code(401)
+                }
+                "/v1/dashboard/billing/subscription" => {
+                    tiny_http::Response::from_string(sub.clone()).with_status_code(200)
+                }
+                _ => tiny_http::Response::from_string(usage.clone()).with_status_code(200),
+            }
+        });
+        let snap = tauri::async_runtime::block_on(snapshot_key(card_full(
+            &origin,
+            "sk-live-quota",
+            DisplayUnit::Usd,
+            500_000.0,
+            1.0,
+            Some("at-bad"),
+            None,
+        )));
+        let captured = join.join().unwrap();
+        assert_eq!(snap.status, "ok");
+        assert_eq!(snap.plan, None);
+        let usage = snap.metrics.iter().find(|m| m.label == "Usage").unwrap();
+        assert_eq!(usage.detail.as_deref(), Some("$592.18 of $1217.82"));
+        assert_eq!(
+            captured[0].authorization.as_deref(),
+            Some("Bearer at-bad")
+        );
+        assert!(captured[1..]
+            .iter()
+            .all(|c| c.authorization.as_deref() == Some("Bearer sk-live-quota")));
+    }
+
+    #[test]
+    fn subscription_without_active_plan_falls_back_to_billing() {
+        let body = json!({
+            "success": true,
+            "data": {"subscriptions": [], "all_subscriptions": []}
+        })
+        .to_string();
+        let sub = sub_body();
+        let usage = usage_body();
+        let (origin, join) = spawn_billing_server(3, move |_origin, req| match path_of(req) {
+            "/api/subscription/self" => {
+                tiny_http::Response::from_string(body.clone()).with_status_code(200)
+            }
+            "/v1/dashboard/billing/subscription" => {
+                tiny_http::Response::from_string(sub.clone()).with_status_code(200)
+            }
+            _ => tiny_http::Response::from_string(usage.clone()).with_status_code(200),
+        });
+        let snap = tauri::async_runtime::block_on(snapshot_key(card_full(
+            &origin,
+            "sk-live-quota",
+            DisplayUnit::Usd,
+            500_000.0,
+            1.0,
+            Some("at-token"),
+            None,
+        )));
+        let _ = join.join();
+        assert_eq!(snap.status, "ok");
+        assert_eq!(snap.plan, None);
+        let usage = snap.metrics.iter().find(|m| m.label == "Usage").unwrap();
+        assert_eq!(usage.detail.as_deref(), Some("$592.18 of $1217.82"));
+    }
+
+    #[test]
+    fn key_cards_carry_site_scale_and_token() {
+        let tmp = TempStore::new();
+        let url = normalize_base_url("https://panel.example.com").unwrap();
+        let CreateSiteResult::Created { site } =
+            store::insert_site(&tmp.path, "Panel", &url, SiteFingerprint {
+                unit: DisplayUnit::Cny,
+                per_unit: 600_000.0,
+                rate: 7.25,
+            })
+            .unwrap()
+        else {
+            panic!("expected created");
+        };
+        store::create_key(&tmp.path, &site.id, "", "sk-one").unwrap();
+        let cards = key_cards_at(&tmp.path).unwrap();
+        assert_eq!(cards.len(), 1);
+        assert_eq!(cards[0].display, DisplayUnit::Cny);
+        assert_eq!(cards[0].per_unit, 600_000.0);
+        assert_eq!(cards[0].rate, 7.25);
+        assert_eq!(cards[0].access_token, None);
+        assert_eq!(cards[0].user_id, None);
+
+        store::set_site_auth(
+            &tmp.path,
+            &site.id,
+            Some("at-9"),
+            Some("42"),
+        )
+        .unwrap();
+        let cards = key_cards_at(&tmp.path).unwrap();
+        assert_eq!(cards[0].access_token.as_deref(), Some("at-9"));
+        assert_eq!(cards[0].user_id.as_deref(), Some("42"));
+        store::set_site_auth(&tmp.path, &site.id, Some(""), Some("")).unwrap();
+        let cards = key_cards_at(&tmp.path).unwrap();
+        assert_eq!(cards[0].access_token, None);
+        assert_eq!(cards[0].user_id, None);
     }
 
     #[test]
@@ -494,6 +784,10 @@ mod tests {
             origin: origin.into(),
             api_key: key.into(),
             display: DisplayUnit::Usd,
+            per_unit: 500_000.0,
+            rate: 1.0,
+            access_token: None,
+            user_id: None,
         }
     }
 
@@ -799,7 +1093,7 @@ mod tests {
             "siteidabcdefghijkAAA",
             None,
             Some(normalize_base_url("https://tokens.example.com").unwrap()),
-            Some(DisplayUnit::Tokens),
+            Some(SiteFingerprint::from(DisplayUnit::Tokens)),
         )
         .unwrap();
         release.store(true, Ordering::SeqCst);

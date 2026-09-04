@@ -55,19 +55,39 @@ pub async fn snapshot_with_key(key: &str) -> Snapshot {
     }
 }
 
+/// Live API-key query for one extra account. Kimi's Moonshot wallet is a
+/// single global credential source, so account cards include only the Kimi
+/// Coding plan rows and keep their own identity.
+pub async fn snapshot_with_key_as(key: &str, card_id: &str, card_name: &str) -> Snapshot {
+    match fetch_api_key_without_wallet(key).await {
+        Ok(snap) => with_card_identity(snap, card_id, card_name),
+        Err(error) => Snapshot::error(card_id, card_name, error),
+    }
+}
+
 pub fn has_login() -> bool {
     cred_path().is_some()
 }
 
-/// Pasted plan key. Settings only — no env var, because the key normally
-/// travels as `ANTHROPIC_AUTH_TOKEN` for a router, and reading that would
-/// grab whatever vendor the router currently points at.
+/// Kimi Coding plan key from Pane Settings or its provider-specific env var.
+/// Do not read `ANTHROPIC_AUTH_TOKEN`: that is commonly shared with a router
+/// and would grab whichever vendor the router currently points at.
 fn plan_key() -> Option<String> {
-    stored_api_key("kimi", &[])
+    stored_api_key("kimi", &["KIMI_CODING_API_KEY"])
 }
 
 pub fn has_plan_key() -> bool {
     plan_key().is_some()
+}
+
+pub fn preferred_source(has_key: bool, has_oauth: bool) -> Option<&'static str> {
+    if has_key {
+        Some("api_key")
+    } else if has_oauth {
+        Some("oauth")
+    } else {
+        None
+    }
 }
 
 /// Anything that can produce the plan card: CLI login or pasted plan key.
@@ -134,19 +154,19 @@ fn cred_path() -> Option<PathBuf> {
         .find(|p| is_regular_file(p))
 }
 
-/// Which credential feeds this refresh: the CLI's OAuth login when its
-/// file exists, otherwise a Kimi Coding API key from Settings/env. OAuth
-/// stays first so existing sign-ins behave exactly as before.
+/// Which credential feeds this refresh: an explicitly configured Kimi
+/// Coding API key first, otherwise the CLI's OAuth credential. This prevents
+/// an old OAuth file from silently taking over a user-supplied key.
 enum Credential {
-    OAuth(PathBuf),
     ApiKey(String),
+    OAuth(PathBuf),
 }
 
 fn pick_credential(cred: Option<PathBuf>, key: Option<String>) -> Option<Credential> {
-    if let Some(path) = cred {
-        return Some(Credential::OAuth(path));
+    if let Some(key) = key {
+        return Some(Credential::ApiKey(key));
     }
-    key.map(Credential::ApiKey)
+    cred.map(Credential::OAuth)
 }
 
 /// Why the CLI's OAuth login produced no snapshot. `Rotated` means both
@@ -200,13 +220,33 @@ async fn fetch() -> Result<Snapshot, String> {
 /// Pasted-key path: the same usages endpoint accepts an API key directly.
 /// Unlike OAuth there is no refresh token, so a 401 is final.
 async fn fetch_api_key(key: &str) -> Result<Snapshot, String> {
-    let (usages, api) = fetch_usages_and_wallet(key).await;
+    fetch_api_key_internal(key, true).await
+}
+
+async fn fetch_api_key_without_wallet(key: &str) -> Result<Snapshot, String> {
+    fetch_api_key_internal(key, false).await
+}
+
+async fn fetch_api_key_internal(key: &str, include_wallet: bool) -> Result<Snapshot, String> {
+    let (usages, api) = if include_wallet {
+        fetch_usages_and_wallet(key).await
+    } else {
+        (fetch_usages(key).await, Ok(Vec::new()))
+    };
     let mut snap = match usages {
         Ok(doc) => parse_snapshot(&doc)?,
         Err(e) => return Err(key_usages_error(e)),
     };
-    merge_wallet_rows(&mut snap, api);
+    if include_wallet {
+        merge_wallet_rows(&mut snap, api);
+    }
     Ok(snap)
+}
+
+fn with_card_identity(mut snap: Snapshot, card_id: &str, card_name: &str) -> Snapshot {
+    snap.id = card_id.to_string();
+    snap.name = card_name.to_string();
+    snap
 }
 
 /// A rejected pasted key is a deterministic failure — unlike the OAuth
@@ -267,47 +307,6 @@ enum UsagesError {
     Other(String),
 }
 
-/// CLI login first (with the refresh-and-retry dance); the pasted plan key
-/// only when there is no login or the login path failed. When both fail,
-/// the login error is the one shown — `kimi login` is the actionable fix.
-async fn load_usages(cred: Option<&Path>, plan_key: Option<&str>) -> Result<Value, String> {
-    let login_err = match cred {
-        Some(path) => match usages_via_login(path).await {
-            Ok(doc) => return Ok(doc),
-            Err(e) => Some(e),
-        },
-        None => None,
-    };
-    let Some(key) = plan_key else {
-        return Err(login_err.unwrap_or_else(|| "no Kimi Code credentials".into()));
-    };
-    match fetch_usages(key).await {
-        Ok(doc) => Ok(doc),
-        Err(UsagesError::Unauthorized) => Err(login_err.unwrap_or_else(|| {
-            "Kimi For Coding key was rejected — check it in Settings (gear icon)".into()
-        })),
-        Err(UsagesError::Other(e)) => Err(login_err.unwrap_or(e)),
-    }
-}
-
-async fn usages_via_login(path: &Path) -> Result<Value, String> {
-    let access = load_access(path, false).await?;
-    match fetch_usages(&access).await {
-        Ok(doc) => Ok(doc),
-        Err(UsagesError::Unauthorized) => {
-            let access = load_access(path, true).await?;
-            match fetch_usages(&access).await {
-                Ok(doc) => Ok(doc),
-                Err(UsagesError::Unauthorized) => Err(
-                    "Kimi Code sign-in was rotated — run `kimi login` in a terminal once and Pane recovers automatically"
-                        .into(),
-                ),
-                Err(UsagesError::Other(e)) => Err(e),
-            }
-        }
-        Err(UsagesError::Other(e)) => Err(e),
-    }
-}
 
 async fn fetch_usages(access: &str) -> Result<Value, UsagesError> {
     let resp = http()
@@ -726,19 +725,43 @@ mod tests {
     }
 
     #[test]
-    fn credential_picker_prefers_oauth_then_key() {
+    fn credential_picker_prefers_api_key_then_oauth() {
         let path = PathBuf::from(r"C:\Users\me\.kimi-code\credentials\kimi-code.json");
-        // Both present → the CLI's OAuth login wins (existing behavior).
+        // Both present → the explicitly configured API key is the active source.
         match pick_credential(Some(path.clone()), Some("sk-key".into())) {
-            Some(Credential::OAuth(p)) => assert_eq!(p, path),
-            _ => panic!("OAuth must win when the CLI login exists"),
+            Some(Credential::ApiKey(key)) => assert_eq!(key, "sk-key"),
+            _ => panic!("API key must win when both sources exist"),
         }
-        // No CLI login → the pasted/env key is the fallback.
+        // No CLI login → the API key remains the active source.
         match pick_credential(None, Some("sk-key".into())) {
             Some(Credential::ApiKey(k)) => assert_eq!(k, "sk-key"),
-            _ => panic!("API key must be used when no CLI login exists"),
+            _ => panic!("API key must be used when no OAuth credential exists"),
+        }
+        // No API key → a local OAuth credential is still supported.
+        match pick_credential(Some(path.clone()), None) {
+            Some(Credential::OAuth(p)) => assert_eq!(p, path),
+            _ => panic!("OAuth must be used when no API key exists"),
         }
         assert!(pick_credential(None, None).is_none());
+    }
+
+    #[test]
+    fn status_source_reports_only_the_active_kimi_credential() {
+        assert_eq!(preferred_source(true, true), Some("api_key"));
+        assert_eq!(preferred_source(true, false), Some("api_key"));
+        assert_eq!(preferred_source(false, true), Some("oauth"));
+        assert_eq!(preferred_source(false, false), None);
+    }
+
+    #[test]
+    fn named_api_key_snapshot_uses_the_account_identity() {
+        let snap = with_card_identity(
+            Snapshot::ok(ID, NAME, None, vec![]),
+            "kimi@account-two",
+            "Kimi Code — Account Two",
+        );
+        assert_eq!(snap.id, "kimi@account-two");
+        assert_eq!(snap.name, "Kimi Code — Account Two");
     }
 
     #[test]

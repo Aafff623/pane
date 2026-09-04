@@ -273,10 +273,10 @@ enum CloudResult {
     NoCredentials,
 }
 
-struct StoredToken {
-    access_token: String,
-    refresh_token: Option<String>,
-    expires_at_ms: Option<i64>,
+pub struct StoredToken {
+    pub access_token: String,
+    pub refresh_token: Option<String>,
+    pub expires_at_ms: Option<i64>,
 }
 
 /// Antigravity stores its Google OAuth token via go-keyring:
@@ -293,6 +293,20 @@ fn load_stored_token() -> Option<StoredToken> {
         .and_then(|s| chrono::DateTime::parse_from_rfc3339(s).ok())
         .map(|d| d.timestamp_millis());
     Some(StoredToken { access_token: access, refresh_token: refresh, expires_at_ms })
+}
+
+/// Read-only wrapper for lib.rs's slot-capture command: the IDE's current
+/// OAuth bundle. Secrets never leave this crate's calling boundary — the
+/// slot store persists them, the frontend only ever sees masked ids.
+pub fn load_stored_token_pub() -> Option<StoredToken> {
+    load_stored_token()
+}
+
+/// The refresh token of the account currently logged into the IDE, if any.
+/// Slots whose refresh token matches this one ARE the logged-in account —
+/// the bare family card already shows them, so no slot card is spawned.
+pub fn current_refresh_token() -> Option<String> {
+    load_stored_token()?.refresh_token.filter(|t| !t.trim().is_empty())
 }
 
 fn cached_token_path() -> std::path::PathBuf {
@@ -471,6 +485,47 @@ fn parse_iso_ms(v: Option<&Value>) -> Option<i64> {
     v.and_then(Value::as_str)
         .and_then(|s| chrono::DateTime::parse_from_rfc3339(s).ok())
         .map(|d| d.timestamp_millis())
+}
+
+/// Quota snapshot for one captured credential slot (an account that is NOT
+/// currently logged into the IDE). Refreshes the slot's own refresh token
+/// and queries Cloud Code directly — the IDE's language-server channel is
+/// per-definition unavailable for a logged-out account.
+pub async fn snapshot_for_slot(
+    refresh_token: &str,
+    card_id: &str,
+    card_name: &str,
+) -> Snapshot {
+    let access = match refresh_google_token(refresh_token).await {
+        Refresh::Refreshed(token, _) => {
+            // Deliberately NOT save_cached_refresh here — that file is the
+            // logged-in account's cache; slot tokens must not evict it.
+            token
+        }
+        Refresh::AuthFailed => {
+            return Snapshot::error(
+                card_id,
+                card_name,
+                "Google 授权已失效 — 在 Antigravity 重新登录后重新捕获该账号".into(),
+            );
+        }
+        Refresh::Unavailable => {
+            return Snapshot::error(card_id, card_name, "usage request failed (network)".into());
+        }
+    };
+    match cloud_snapshot(&access).await {
+        Ok(Some(mut snap)) => {
+            snap.id = card_id.to_string();
+            snap.name = card_name.to_string();
+            snap
+        }
+        Ok(None) => Snapshot::error(card_id, card_name, "usage temporarily unavailable".into()),
+        Err(_) => Snapshot::error(
+            card_id,
+            card_name,
+            "Google 授权已失效 — 在 Antigravity 重新登录后重新捕获该账号".into(),
+        ),
+    }
 }
 
 fn parse_quota_buckets(doc: &Value) -> Vec<Metric> {

@@ -34,6 +34,7 @@ arboard = "3"
 tokio = { version = "1", features = ["macros", "process", "sync", "time"] }
 chrono = "0.4"
 base64 = "0.22"
+sha2 = "0.10"
 dirs = "6"
 rusqlite = { version = "0.32", features = ["bundled", "backup"] }
 toml = "0.8"

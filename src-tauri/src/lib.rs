@@ -1,13 +1,18 @@
 mod accounts;
+mod antigravity_accounts;
+mod cursor_accounts;
+mod cursor_oauth;
 mod alerts;
 mod httpapi;
 mod i18n;
 mod oauth;
 mod pricing;
 mod providers;
+pub(crate) mod provider_catalog;
 mod spend;
 mod telemetry;
 mod tray_projection;
+mod usage_history;
 
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -21,6 +26,7 @@ use tauri::{
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
     Emitter, Manager, WindowEvent,
 };
+use provider_catalog::family_of;
 
 /// Last-good snapshots older than this are too misleading to show or to
 /// use as a stand-in for a live Moonshot card.
@@ -92,14 +98,13 @@ fn config_with_defaults(mut cfg: Value) -> Value {
         cfg = json!({});
     }
     let obj = cfg.as_object_mut().unwrap();
-    // Out-of-the-box experience: 1-min refresh, pacing always visible,
-    // all three quota alerts on, dark + compact. (Autostart defaults on
-    // in setup; tray icon defaults to Auto via pinned = null.)
+    // Out-of-the-box experience: 1-min refresh, all three quota alerts on,
+    // dark + compact. (Autostart defaults on in setup; tray icon defaults
+    // to Auto via pinned = null.)
     obj.entry("refreshMinutes").or_insert(json!(1));
     obj.entry("disabled").or_insert(json!([]));
     obj.entry("pinned").or_insert(Value::Null);
     obj.entry("trayProviders").or_insert(json!([]));
-    obj.entry("pacingAlways").or_insert(json!(true));
     obj.entry("notifyAlmostOut").or_insert(json!(true));
     obj.entry("notifyCuttingClose").or_insert(json!(true));
     obj.entry("notifyWillRunOut").or_insert(json!(true));
@@ -112,7 +117,7 @@ fn config_with_defaults(mut cfg: Value) -> Value {
     obj.entry("appearance").or_insert(json!("dark"));
     obj.entry("density").or_insert(json!("compact"));
     obj.entry("glassEffects").or_insert(json!(true));
-    obj.entry("shortcut").or_insert(json!(""));
+    obj.entry("shortcut").or_insert(json!("Alt+2"));
     obj.entry("proxy")
         .or_insert(json!({ "enabled": false, "url": "" }));
     obj.entry("showTotalSpend").or_insert(json!(true));
@@ -127,6 +132,7 @@ fn config_with_defaults(mut cfg: Value) -> Value {
     obj.entry("telemetry").or_insert(json!(true));
     obj.entry("reduceAnimations").or_insert(json!(false));
     obj.entry("hideUsageWhileSharing").or_insert(json!(false));
+    obj.entry("showTrend").or_insert(json!(false));
     obj.entry("locale").or_insert(json!("auto"));
     cfg
 }
@@ -153,7 +159,6 @@ const CONFIG_KEYS: &[&str] = &[
     "disabled",
     "pinned",
     "trayProviders",
-    "pacingAlways",
     "notifyAlmostOut",
     "notifyCuttingClose",
     "notifyWillRunOut",
@@ -174,6 +179,7 @@ const CONFIG_KEYS: &[&str] = &[
     "telemetry",
     "reduceAnimations",
     "hideUsageWhileSharing",
+    "showTrend",
     "locale",
 ];
 
@@ -908,6 +914,30 @@ fn last_ok() -> &'static Mutex<HashMap<String, CachedSnap>> {
     })
 }
 
+/// The plan (subscription tier) of the last good snapshot for a family —
+/// Codex reports team, Copilot reports Pro (Student), Antigravity reports
+/// Google AI Pro, Grok reports X Premium/SuperGrok. Reads the in-memory
+/// cache when warm, else the persisted last_snapshots.json.
+fn cached_plan_for(family: &str) -> Option<String> {
+    if let Ok(map) = last_ok().lock() {
+        if let Some(entry) = map.get(family) {
+            if entry.snap.status == "ok" {
+                if let Some(plan) = &entry.snap.plan {
+                    return Some(plan.clone());
+                }
+            }
+        }
+    }
+    let path = providers::config_dir().join("last_snapshots.json");
+    let raw = std::fs::read_to_string(path).ok()?;
+    let doc: serde_json::Value = serde_json::from_str(&raw).ok()?;
+    doc.get(family)?
+        .get("snap")?
+        .get("plan")?
+        .as_str()
+        .map(str::to_string)
+}
+
 fn persist_last_ok_at(
     path: &std::path::Path,
     map: &HashMap<String, CachedSnap>,
@@ -967,6 +997,45 @@ fn onenewapi_snapshot_ids(key_ids: &[String]) -> Vec<String> {
 
 fn cached_onenewapi_id_is_configured(id: &str, configured: &HashSet<String>) -> bool {
     family_of(id) != "onenewapi" || configured.contains(id)
+}
+
+fn is_extra_account_card_id(id: &str) -> bool {
+    id.split_once('@')
+        .is_some_and(|(family, fingerprint)| {
+            !fingerprint.is_empty() && provider_catalog::supports_extra_accounts(family)
+        })
+}
+
+fn configured_extra_account_ids() -> HashSet<String> {
+    let mut ids: HashSet<String> = provider_catalog::provider_definitions()
+        .iter()
+        .filter(|definition| definition.supports_extra_accounts)
+        .flat_map(|definition| {
+            accounts::load_accounts(definition.family_id)
+                .into_iter()
+                .map(move |account| {
+                    accounts::card_id_for_account(definition.family_id, &account)
+                })
+        })
+        .collect();
+    // Antigravity slots and Cursor imported accounts use their own
+    // fingerprint domains — without these the cached first paint would
+    // filter their cards out until the live fetch lands.
+    ids.extend(
+        antigravity_accounts::load_slots()
+            .iter()
+            .map(antigravity_accounts::card_id_for_slot),
+    );
+    ids.extend(
+        cursor_accounts::load_accounts()
+            .iter()
+            .map(cursor_accounts::card_id_for_account),
+    );
+    ids
+}
+
+fn cached_extra_account_id_is_configured(id: &str, configured: &HashSet<String>) -> bool {
+    !is_extra_account_card_id(id) || configured.contains(id)
 }
 
 fn retain_current_onenewapi_results(
@@ -1143,6 +1212,7 @@ fn purge_onenewapi_cards(key_ids: &[String]) -> Result<(), String> {
     )
 }
 
+#[cfg_attr(not(test), allow(dead_code))]
 fn purge_onenewapi_cards_with(
     key_ids: &[String],
     persist_config: impl FnOnce(&[String]) -> Result<(), String>,
@@ -1208,6 +1278,7 @@ fn rename_cached_snapshots(renames: &[(String, String)]) -> Result<(), String> {
     rename_cached_snapshots_in(&mut map, renames, persist_last_ok)
 }
 
+#[cfg_attr(not(test), allow(dead_code))]
 fn rename_cached_snapshot_in<Persist>(
     map: &mut HashMap<String, CachedSnap>,
     id: &str,
@@ -1245,12 +1316,6 @@ where
     Ok(())
 }
 
-/// The provider family of a card id: "claude@ab12cd34" → "claude". The only
-/// spelling allowed to leave the machine in telemetry.
-fn family_of(id: &str) -> String {
-    id.split('@').next().unwrap_or(id).to_string()
-}
-
 /// One/New API is two-level: family id `onenewapi` disables every key card.
 /// Claude/Codex extra accounts stay independent of the bare family id.
 fn card_is_disabled(id: &str, disabled: &[String]) -> bool {
@@ -1264,7 +1329,7 @@ fn card_is_disabled(id: &str, disabled: &[String]) -> bool {
 // can ride the same guard as the static providers under a 'static spawn.
 async fn guarded<F>(id: String, name: String, fut: F) -> providers::Snapshot
 where
-    F: std::future::Future<Output = providers::Snapshot>,
+    F: std::future::Future<Output = providers::Snapshot> + Send + 'static,
 {
     let id = id.as_str();
     let name = name.as_str();
@@ -1398,11 +1463,10 @@ fn restore_last_success_after_error(
 }
 
 /// One extra account's snapshot, fetched through the same snapshot_with_key
-/// flow a pasted key uses (what test_api_key probes), then re-stamped with
-/// the account card's `<provider>@<n>` id and display name — the provider
-/// functions hardcode their family's id/name. Lives here rather than in
-/// accounts.rs because it dispatches into provider modules the parse-tests
-/// harness (which compiles accounts.rs) doesn't mirror.
+/// flow a pasted key uses (what test_api_key probes), with the account card's
+/// own id and display name passed into the provider adapter. Lives here
+/// rather than in accounts.rs because it dispatches into provider modules the
+/// parse-tests harness (which compiles accounts.rs) doesn't mirror.
 async fn account_snapshot(
     family: String,
     id: String,
@@ -1410,13 +1474,16 @@ async fn account_snapshot(
     key: String,
     base_url: Option<String>,
 ) -> providers::Snapshot {
-    let mut snap = match family.as_str() {
-        "deepseek" => providers::deepseek::snapshot_with_key(&key).await,
-        "stepfun" => providers::stepfun::snapshot_with_key(&key).await,
-        "siliconflow" => providers::siliconflow::snapshot_with_key(&key).await,
-        "novita" => providers::novita::snapshot_with_key(&key).await,
+    match family.as_str() {
+        "deepseek" => providers::deepseek::snapshot_with_key_as(&key, &id, &name).await,
+        "kimi" => providers::kimi::snapshot_with_key_as(&key, &id, &name).await,
+        "stepfun" => providers::stepfun::snapshot_with_key_as(&key, &id, &name).await,
+        "siliconflow" => providers::siliconflow::snapshot_with_key_as(&key, &id, &name).await,
+        "novita" => providers::novita::snapshot_with_key_as(&key, &id, &name).await,
         "relaybalance" => match base_url.as_deref().map(str::trim).filter(|u| !u.is_empty()) {
-            Some(url) => providers::relaybalance::snapshot_with_key(&key, url).await,
+            Some(url) => {
+                providers::relaybalance::snapshot_with_key_at(&key, url, &id, &name).await
+            }
             None => providers::Snapshot::error(
                 &id,
                 &name,
@@ -1428,31 +1495,219 @@ async fn account_snapshot(
             &name,
             format!("unknown multi-account provider: {other}"),
         ),
+    }
+}
+
+/// Default-account model migration, run once per family at fetch. A main
+/// key saved through the old gear field imports as the FIRST (default)
+/// account; after the import the old `<provider>.json` file is REMOVED so
+/// deleting the account actually deletes the key (no zombie that re-imports
+/// on the next fetch). When that same key was already added as an account —
+/// identical fingerprint — nothing is written, and the stored file is
+/// removed too: the account card IS that key now.
+fn accounts_with_imported_main_key(family: &str) -> Vec<accounts::AccountEntry> {
+    let mut list = accounts::load_accounts(family);
+    let base_url = if family == "relaybalance" {
+        providers::stored_base_url(family)
+    } else {
+        None
     };
-    snap.id = id;
-    snap.name = name;
-    snap
+    if let Some(key) = providers::stored_key_file(family) {
+        let entry = accounts::AccountEntry {
+            label: String::new(),
+            api_key: key,
+            base_url,
+        };
+        let id = accounts::card_id_for_account(family, &entry);
+        let already_present = list.iter().any(|a| accounts::card_id_for_account(family, a) == id);
+        if !already_present {
+            list.insert(0, entry);
+        }
+        // One-shot: drop the migrated source. If the import errored, keep
+        // the file so the next fetch retries.
+        let saved = accounts::save_accounts(family, &list).is_ok();
+        if saved {
+            providers::remove_stored_key_file(family);
+        }
+    }
+    list
 }
 
 /// Called by the UI. Refreshes every enabled provider at the same time and
 /// returns whatever each one found — data, "not signed in", or an error.
+/// The disabled argument is accepted for compatibility but ignored:
+/// config.json is the single source of truth, so the background refresh
+/// loop and the UI can never disagree about who is enabled.
 #[tauri::command]
 async fn fetch_usage(
     app: tauri::AppHandle,
     disabled: Option<Vec<String>>,
 ) -> Vec<providers::Snapshot> {
+    let _ = disabled;
+    run_usage_fetch(&app).await
+}
+
+/// Refreshes ONE provider card on demand (the ⟳ button in the card head).
+/// Dispatches to the same snapshot function the full refresh cycle uses,
+/// but skips alert checking, telemetry, and the snapshot cache — those
+/// belong to the global cycle. The returned snapshot is merged into the
+/// frontend's `lastSnapshots` by the caller.
+#[tauri::command]
+async fn refresh_provider(provider_id: String) -> Result<providers::Snapshot, String> {
+    let family = family_of(&provider_id);
     let cfg = config_with_defaults(load_config());
-    let disabled = disabled.unwrap_or_else(|| {
-        cfg.get("disabled")
-            .and_then(Value::as_array)
-            .map(|a| {
-                a.iter()
-                    .filter_map(Value::as_str)
-                    .map(str::to_string)
-                    .collect()
-            })
-            .unwrap_or_default()
-    });
+    if cfg
+        .get("disabled")
+        .and_then(Value::as_array)
+        .is_some_and(|a| a.iter().any(|v| v.as_str() == Some(family.as_str())))
+        && family_of(&provider_id) != "onenewapi"
+    {
+        return Err(format!("{family} is disabled"));
+    }
+
+    // Bare family id → the native provider path.
+    if provider_id == family {
+        return Ok(match family.as_str() {
+            "claude" => providers::claude::snapshot().await,
+            "codex" => providers::codex::snapshot().await,
+            "cursor" => providers::cursor::snapshot().await,
+            "opencode" => providers::opencode::snapshot().await,
+            "copilot" => providers::copilot::snapshot().await,
+            "grok" => providers::grok::snapshot().await,
+            "devin" => providers::devin::snapshot().await,
+            "minimax" => providers::minimax::snapshot().await,
+            "openrouter" => providers::openrouter::snapshot().await,
+            "zai" => providers::zai::snapshot().await,
+            "antigravity" => providers::antigravity::snapshot().await,
+            "deepseek" => providers::deepseek::snapshot().await,
+            "moonshot" => providers::moonshot::snapshot().await,
+            "elevenlabs" => providers::elevenlabs::snapshot().await,
+            "ollama" => providers::ollama::snapshot().await,
+            "codebuff" => providers::codebuff::snapshot().await,
+            "kilo" => providers::kilo::snapshot().await,
+            "aihubmix" => providers::aihubmix::snapshot().await,
+            "qwen" => providers::qwen::snapshot().await,
+            "hermes" => providers::hermes::snapshot().await,
+            "kimi" => providers::kimi::snapshot().await,
+            "stepfun" => providers::stepfun::snapshot().await,
+            "siliconflow" => providers::siliconflow::snapshot().await,
+            "novita" => providers::novita::snapshot().await,
+            "relaybalance" => providers::relaybalance::snapshot().await,
+            _ => return Err(format!("no single-provider refresh for {family}")),
+        });
+    }
+
+    // Antigravity credential slots.
+    if family == "antigravity" {
+        let slot = antigravity_accounts::load_slots()
+            .into_iter()
+            .find(|s| antigravity_accounts::card_id_for_slot(s) == provider_id)
+            .ok_or_else(|| format!("no antigravity slot {provider_id}"))?;
+        let name = if slot.label.trim().is_empty() {
+            "Antigravity — captured".to_string()
+        } else {
+            format!("Antigravity — {}", slot.label.trim())
+        };
+        return Ok(
+            providers::antigravity::snapshot_for_slot(&slot.refresh_token, &provider_id, &name)
+                .await,
+        );
+    }
+
+    // Cursor imported accounts.
+    if family == "cursor" {
+        let account = cursor_accounts::load_accounts()
+            .into_iter()
+            .find(|a| cursor_accounts::card_id_for_account(a) == provider_id)
+            .ok_or_else(|| format!("no cursor account {provider_id}"))?;
+        let name = if account.label.trim().is_empty() {
+            format!("Cursor — {}", account.email)
+        } else {
+            format!("Cursor — {}", account.label.trim())
+        };
+        return Ok(
+            providers::cursor::snapshot_with_token_as(
+                &account.access_token,
+                account.refresh_token.as_deref(),
+                &provider_id,
+                &name,
+                account.membership.as_deref(),
+            )
+            .await,
+        );
+    }
+
+    // Claude / Codex extra accounts.
+    if family == "claude" {
+        let account = providers::claude::discover_extra_accounts()
+            .into_iter()
+            .find(|a| a.id == provider_id)
+            .ok_or_else(|| format!("no claude account {provider_id}"))?;
+        return Ok(
+            providers::claude::snapshot_at(account.dir, provider_id.clone(), account.name).await,
+        );
+    }
+    if family == "codex" {
+        let account = providers::codex::discover_extra_accounts()
+            .into_iter()
+            .find(|a| a.id == provider_id)
+            .ok_or_else(|| format!("no codex account {provider_id}"))?;
+        return Ok(
+            providers::codex::snapshot_at(account.dir, provider_id.clone(), account.name).await,
+        );
+    }
+
+    // API-key multi-account families (kimi@fp, deepseek@fp, …).
+    if accounts::provider_takes_accounts(&family) {
+        let locale = i18n::resolved_locale(&config_with_defaults(load_config()));
+        let accounts = accounts::load_accounts(&family);
+        let index = accounts
+            .iter()
+            .position(|a| accounts::card_id_for_account(&family, a) == provider_id)
+            .ok_or_else(|| format!("no {family} account {provider_id}"))?;
+        let acct = &accounts[index];
+        let name = format!(
+            "{} — {}",
+            accounts::family_display_name(&family),
+            accounts::display_label(&acct.label, index + 1, locale)
+        );
+        return Ok(account_snapshot(
+            family.clone(),
+            provider_id.clone(),
+            name,
+            acct.api_key.clone(),
+            acct.base_url.clone(),
+        )
+        .await);
+    }
+
+    Err(format!("no single-provider refresh for {provider_id}"))
+}
+
+/// Only one usage refresh runs at a time: the background loop and a manual
+/// Refresh press would otherwise race the same provider endpoints and the
+/// snapshot cache.
+fn usage_fetch_lock() -> &'static tauri::async_runtime::Mutex<()> {
+    static LOCK: OnceLock<tauri::async_runtime::Mutex<()>> = OnceLock::new();
+    LOCK.get_or_init(|| tauri::async_runtime::Mutex::new(()))
+}
+
+/// The full refresh with no webview involved. The tray popover spends most
+/// of its life hidden, where WebView2 throttles the frontend's setInterval
+/// to a halt — so the auto-refresh loop in setup() drives this directly.
+async fn run_usage_fetch(app: &tauri::AppHandle) -> Vec<providers::Snapshot> {
+    let _guard = usage_fetch_lock().lock().await;
+    let cfg = config_with_defaults(load_config());
+    let disabled: Vec<String> = cfg
+        .get("disabled")
+        .and_then(Value::as_array)
+        .map(|a| {
+            a.iter()
+                .filter_map(Value::as_str)
+                .map(str::to_string)
+                .collect()
+        })
+        .unwrap_or_default();
 
     // Each provider future is boxed onto the heap and spawned as its own
     // task. A single tokio::join! over 28 inlined futures builds one huge
@@ -1499,13 +1754,32 @@ async fn fetch_usage(
     // to fall back to). The post-fetch retain still drops it whenever
     // this cycle's Kimi snapshot is ok.
     let kimi_card_live = cached_kimi_ok();
+    // Default-account model (ccSwitch's accounts + default_account_id):
+    // for multi-account families the accounts list owns every key. When it
+    // is non-empty the family's own fetch (stored main key, CLI OAuth
+    // fallback) is skipped and accounts[0] publishes under the bare family
+    // id — the main card IS the default account, so one key can never show
+    // twice.
+    let mut extra_accounts: Vec<(&str, Vec<accounts::AccountEntry>)> = Vec::new();
+    for definition in provider_catalog::provider_definitions()
+        .iter()
+        .filter(|definition| definition.supports_extra_accounts)
+    {
+        let list = accounts_with_imported_main_key(definition.family_id);
+        if !list.is_empty() {
+            extra_accounts.push((definition.family_id, list));
+        }
+    }
+    let multi_account_families: HashSet<&str> =
+        extra_accounts.iter().map(|(family, _)| *family).collect();
     let mut futs: Vec<(String, BoxedSnap)> = base
         .into_iter()
         .filter(|(id, _)| {
-            *id != "moonshot"
+            (*id != "moonshot"
                 || !providers::kimi::has_credentials()
                 || disabled.iter().any(|d| d == "kimi")
-                || !kimi_card_live
+                || !kimi_card_live)
+                && !multi_account_families.contains(*id)
         })
         .map(|(id, fut)| (id.to_string(), fut))
         .collect();
@@ -1568,21 +1842,28 @@ async fn fetch_usage(
             }
         }
     }
-    // Extra API-key accounts (Phase 3.2): each entry in
-    // accounts/<provider>.json renders its own <provider>@<n> card running
-    // the same snapshot_with_key flow a pasted key uses. The bare-id main
-    // card above keeps its stored-key logic untouched, so a user with one
-    // key and no accounts file sees exactly the old behavior.
+    // Extra API-key accounts: index 0 (the default account) publishes
+    // under the bare family id — it IS the main card. The rest render
+    // their own stable <provider>@<fingerprint> cards running the same
+    // snapshot_with_key flow a pasted key uses.
     let locale = i18n::resolved_locale(&cfg);
-    for family in accounts::ACCOUNT_PROVIDERS {
-        for (i, acct) in accounts::load_accounts(family).into_iter().enumerate() {
-            let n = i + 1;
-            let id = accounts::card_id(family, n);
-            let name = format!(
-                "{} — {}",
-                accounts::family_display_name(family),
-                accounts::display_label(&acct.label, n, locale)
-            );
+    for (family, list) in &extra_accounts {
+        for (i, acct) in list.iter().enumerate() {
+            let (id, name) = if i == 0 {
+                (
+                    family.to_string(),
+                    accounts::family_display_name(family),
+                )
+            } else {
+                (
+                    accounts::card_id_for_account(family, acct),
+                    format!(
+                        "{} — {}",
+                        accounts::family_display_name(family),
+                        accounts::display_label(&acct.label, i + 1, locale)
+                    ),
+                )
+            };
             futs.push((
                 id.clone(),
                 Box::pin(guarded(
@@ -1592,19 +1873,90 @@ async fn fetch_usage(
                         family.to_string(),
                         id.clone(),
                         name.clone(),
-                        acct.api_key,
-                        acct.base_url,
+                        acct.api_key.clone(),
+                        acct.base_url.clone(),
                     ),
                 )),
             ));
         }
     }
+    // Antigravity credential slots: captured Google accounts that are NOT
+    // logged into the IDE. Each refreshes with its own refresh token and
+    // queries Cloud Code directly, so slots work while the IDE is closed.
+    // The bare antigravity card above stays the logged-in account — a slot
+    // whose refresh token matches the current login IS that account, so it
+    // spawns no card (same layout as Kimi: one card per account, never a
+    // duplicate of the main card).
+    let current_ag_refresh = providers::antigravity::current_refresh_token();
+    let ag_slots = antigravity_accounts::load_slots();
+    for slot in &ag_slots {
+        if current_ag_refresh
+            .as_deref()
+            .is_some_and(|current| current == slot.refresh_token.trim())
+        {
+            continue;
+        }
+        let refresh = slot.refresh_token.clone();
+        let id = antigravity_accounts::card_id_for_slot(slot);
+        let name = if slot.label.trim().is_empty() {
+            "Antigravity — captured".to_string()
+        } else {
+            format!("Antigravity — {}", slot.label.trim())
+        };
+        // The future must own its inputs: refresh/id/name are local here.
+        let future = {
+            let refresh = refresh.clone();
+            let id = id.clone();
+            let name = name.clone();
+            async move { providers::antigravity::snapshot_for_slot(&refresh, &id, &name).await }
+        };
+        futs.push((
+            id.clone(),
+            Box::pin(guarded(id.clone(), name.clone(), future)),
+        ));
+    }
+    // Cursor imported accounts: each queries with its own token pair.
+    // The bare cursor card above stays the locally logged-in account.
+    for acct in cursor_accounts::load_accounts() {
+        let id = cursor_accounts::card_id_for_account(&acct);
+        let label = if acct.label.trim().is_empty() {
+            acct.email.clone()
+        } else {
+            acct.label.trim().to_string()
+        };
+        let name = if label.is_empty() {
+            "Cursor — imported".to_string()
+        } else {
+            format!("Cursor — {label}")
+        };
+        let future = {
+            let access = acct.access_token.clone();
+            let refresh = acct.refresh_token.clone();
+            let membership = acct.membership.clone();
+            let id = id.clone();
+            let name = name.clone();
+            async move {
+                providers::cursor::snapshot_with_token_as(
+                    &access,
+                    refresh.as_deref(),
+                    &id,
+                    &name,
+                    membership.as_deref(),
+                )
+                .await
+            }
+        };
+        futs.push((
+            id.clone(),
+            Box::pin(guarded(id.clone(), name.clone(), future)),
+        ));
+    }
     let futs: Vec<(String, BoxedSnap)> = futs
         .into_iter()
         .filter(|(id, _)| !card_is_disabled(id, &disabled))
         .collect();
-    // Telemetry never learns account-scoped ids — a claude@<hash8> would
-    // carry an account-derived hash off the machine. Report families,
+    // Telemetry never learns account-scoped ids — an API-key fingerprint
+    // must never leave the machine. Report families,
     // deduplicated, so a multi-account install looks like "claude" once.
     // (family_of is applied at EVERY telemetry boundary: enabled ids here,
     // refresh outcomes, and starred-metric prefixes.)
@@ -1739,6 +2091,7 @@ async fn fetch_usage(
             .unwrap_or(0);
         if let Ok(mut map) = cache.lock() {
             let mut dirty = false;
+            let mut history_samples: Vec<(String, f64)> = Vec::new();
             for s in all.iter_mut() {
                 if family_of(&s.id) == "onenewapi" {
                     let current = onenewapi_snapshot_generations([s.id.clone()]);
@@ -1775,6 +2128,9 @@ async fn fetch_usage(
                             snap: s.clone(),
                         },
                     );
+                    if let Some(used) = usage_history::worst_used_percent(&s.metrics) {
+                        history_samples.push((s.id.clone(), used));
+                    }
                     dirty = true;
                 } else if s.status == "error" {
                     if let Some(previous) = map.get(&s.id) {
@@ -1787,6 +2143,7 @@ async fn fetch_usage(
                 if let Err(error) = persist_last_ok(&map) {
                     eprintln!("[pane] snapshot cache refresh: {error}");
                 }
+                usage_history::record_samples(&history_samples);
             }
         }
     }
@@ -1910,6 +2267,55 @@ async fn fetch_usage(
     all
 }
 
+/// Builds the tray projection config from config.json — the same data the
+/// frontend passes to sync_tray_surfaces, so the background loop can keep
+/// the main tray numbers fresh while the window is hidden.
+fn tray_projection_config_from(cfg: &Value) -> Option<tray_projection::TrayProjectionConfig> {
+    let layout = cfg.get("layout").cloned().unwrap_or(Value::Null);
+    serde_json::from_value(json!({
+        "disabled": cfg.get("disabled").cloned().unwrap_or_else(|| json!([])),
+        "providerOrder": layout.get("providerOrder").cloned().unwrap_or_else(|| json!([])),
+        "providers": layout.get("providers").cloned().unwrap_or_else(|| json!({})),
+        "pinned": cfg.get("pinned").cloned().unwrap_or(Value::Null),
+        "locale": i18n::resolved_locale(cfg),
+    }))
+    .ok()
+}
+
+fn refresh_minutes_from(cfg: &Value) -> u64 {
+    cfg.get("refreshMinutes")
+        .and_then(Value::as_u64)
+        .unwrap_or(5)
+        .max(1)
+}
+
+/// Auto-refresh that does not depend on the webview: sleeps refreshMinutes
+/// (re-read every cycle, so a Settings change applies without a restart),
+/// fetches, updates the main tray numbers, then emits "usage-updated" so
+/// an open window can adopt the fresh snapshots.
+fn spawn_auto_refresh(app: tauri::AppHandle) {
+    tauri::async_runtime::spawn(async move {
+        loop {
+            let minutes = refresh_minutes_from(&config_with_defaults(load_config()));
+            tokio::time::sleep(std::time::Duration::from_secs(minutes * 60)).await;
+            let snapshots = run_usage_fetch(&app).await;
+            // The tray strip's provider logos are rasterized by the webview,
+            // so the background loop only refreshes the main tray icon and
+            // treats the last applied strip as the strip state.
+            let cfg = config_with_defaults(load_config());
+            if let Some(projection_cfg) = tray_projection_config_from(&cfg) {
+                let strip_active = last_strip().lock().map(|s| !s.is_empty()).unwrap_or(false);
+                let projection =
+                    tray_projection::project_main_tray(&snapshots, &projection_cfg, strip_active);
+                if let Err(error) = apply_main_tray_projection(&app, &projection) {
+                    eprintln!("[pane] background tray sync: {error}");
+                }
+            }
+            let _ = app.emit("usage-updated", snapshots);
+        }
+    });
+}
+
 /// The previous run's last-good snapshots, straight from the disk cache —
 /// the instant first paint at launch. Cards show numbers in milliseconds
 /// instead of a blank "Refreshing…" while the slowest provider answers
@@ -1946,6 +2352,7 @@ fn cached_usage() -> Vec<providers::Snapshot> {
     let configured_onenewapi: HashSet<String> = providers::onenewapi::key_cards()
         .map(|cards| cards.into_iter().map(|card| card.id).collect())
         .unwrap_or_default();
+    let configured_extra_accounts = configured_extra_account_ids();
 
     // Same account-swap rule as the live path: if a different account
     // signed into a default home since the cache was written, that
@@ -1978,6 +2385,7 @@ fn cached_usage() -> Vec<providers::Snapshot> {
             now_ms - c.at <= MAX_STALE_MS
                 && !card_is_disabled(id, &disabled)
                 && cached_onenewapi_id_is_configured(id, &configured_onenewapi)
+                && cached_extra_account_id_is_configured(id, &configured_extra_accounts)
                 && !swapped.iter().any(|f| f == id)
         })
         .map(|(_, c)| {
@@ -2021,31 +2429,19 @@ async fn fetch_spend() -> Vec<spend::ProviderSpend> {
     result
 }
 
+/// Sampled quota history per card id — the trend fallback for cards with no
+/// local CLI logs (API-key accounts, relay keys). Cheap: one small file.
+#[tauri::command]
+fn fetch_usage_history() -> std::collections::BTreeMap<String, Vec<f64>> {
+    usage_history::trend_map()
+}
+
 /// Saves (or clears, when `key` is empty) a user-pasted API key to
 /// %APPDATA%\Pane\<provider>.json. Providers with a user-chosen endpoint
 /// (relaybalance) pass `base_url` too, stored alongside as `baseUrl`.
 #[tauri::command]
 fn set_api_key(provider: String, key: String, base_url: Option<String>) -> Result<(), String> {
-    if !matches!(
-        provider.as_str(),
-        "openrouter"
-            | "zai"
-            | "minimax"
-            | "deepseek"
-            | "moonshot"
-            | "kimi"
-            | "elevenlabs"
-            | "codebuff"
-            | "kilo"
-            | "aihubmix"
-            | "qwen"
-            | "kimi"
-            | "opencode"
-            | "stepfun"
-            | "siliconflow"
-            | "novita"
-            | "relaybalance"
-    ) {
+    if !provider_catalog::supports_api_key(&provider) {
         return Err(format!("unknown provider: {provider}"));
     }
     let dir = providers::config_dir();
@@ -2058,9 +2454,10 @@ fn set_api_key(provider: String, key: String, base_url: Option<String>) -> Resul
     }
     let mut doc = serde_json::json!({ "apiKey": key });
     if let Some(url) = base_url.as_deref().map(str::trim).filter(|u| !u.is_empty()) {
-        if !(url.starts_with("https://") || url.starts_with("http://")) {
-            return Err("base URL must start with https:// or http://".into());
+        if provider != "relaybalance" {
+            return Err("base URL is only supported for Custom Balance".into());
         }
+        providers::relaybalance::validate_base_url(url)?;
         doc["baseUrl"] = serde_json::Value::from(url);
     }
     std::fs::write(&path, doc.to_string()).map_err(|e| format!("write key file: {e}"))
@@ -2132,6 +2529,42 @@ async fn test_api_key(
     })
 }
 
+/// Captures the IDE's current Google OAuth bundle (Windows Credential
+/// Manager `gemini:antigravity`) into a named Antigravity slot so its
+/// quota keeps being monitored after the user logs into another account.
+#[tauri::command]
+fn antigravity_capture_account(label: String) -> Result<(), String> {
+    // Snapshot the IDE's current Google OAuth bundle into a slot.
+    let token = providers::antigravity::load_stored_token_pub()
+        .ok_or_else(|| "Antigravity 未登录 — 先在 IDE 里登录要捕获的账号".to_string())?;
+    if token.refresh_token.as_deref().unwrap_or_default().trim().is_empty() {
+        return Err("凭据管理器里的 token 没有 refresh_token，无法捕获".into());
+    }
+    let mut slots = antigravity_accounts::load_slots();
+    let candidate = antigravity_accounts::AgSlot {
+        label: label.trim().to_string(),
+        refresh_token: token.refresh_token.unwrap_or_default(),
+        access_token: token.access_token,
+        expires_at: token
+            .expires_at_ms
+            .map(|ms| chrono::DateTime::from_timestamp_millis(ms).map(|d| d.to_rfc3339()))
+            .flatten(),
+        captured_at: std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs() as i64)
+            .unwrap_or(0),
+    };
+    let candidate_id = antigravity_accounts::card_id_for_slot(&candidate);
+    if slots
+        .iter()
+        .any(|s| antigravity_accounts::card_id_for_slot(s) == candidate_id)
+    {
+        return Err("该 Google 账号已捕获过".into());
+    }
+    slots.push(candidate);
+    antigravity_accounts::save_slots(&slots)
+}
+
 /// Appends one extra API-key account (Customize ⚙ → "Add account") to
 /// %APPDATA%\Pane\accounts\<provider>.json. The key has already passed a
 /// test_api_key probe on the frontend; nothing here touches the network.
@@ -2155,27 +2588,53 @@ fn account_add(
         .filter(|u| !u.is_empty())
         .map(str::to_string);
     if let Some(url) = &base_url {
-        if !(url.starts_with("https://") || url.starts_with("http://")) {
-            return Err("base URL must start with https:// or http://".into());
+        if provider == "relaybalance" {
+            providers::relaybalance::validate_base_url(url)?;
+        } else {
+            return Err("base URL is only supported for Custom Balance".into());
         }
     }
     if provider == "relaybalance" && base_url.is_none() {
         return Err("a base URL is required for Custom Balance".into());
     }
     let mut entries = accounts::load_accounts(&provider);
-    entries.push(accounts::AccountEntry {
+    let candidate = accounts::AccountEntry {
         label: label.trim().to_string(),
         api_key: key.to_string(),
         base_url,
-    });
+    };
+    let candidate_id = accounts::card_id_for_account(&provider, &candidate);
+    if entries
+        .iter()
+        .any(|entry| accounts::card_id_for_account(&provider, entry) == candidate_id)
+    {
+        return Err("this API key and relay URL are already added".into());
+    }
+    entries.push(candidate);
     accounts::save_accounts(&provider, &entries)
 }
 
 /// Removes the account at `index` — its position in the accounts file,
 /// 0-based, the same order account_list reports. The account's
-/// <provider>@<n> card disappears on the next fetch.
+/// <provider>@<fingerprint> card disappears on the next fetch.
 #[tauri::command]
 fn account_remove(provider: String, index: usize) -> Result<(), String> {
+    if provider == "antigravity" {
+        let mut slots = antigravity_accounts::load_slots();
+        if index >= slots.len() {
+            return Err(format!("no antigravity slot #{index}"));
+        }
+        slots.remove(index);
+        return antigravity_accounts::save_slots(&slots);
+    }
+    if provider == "cursor" {
+        let mut accounts = cursor_accounts::load_accounts();
+        if index >= accounts.len() {
+            return Err(format!("no cursor account #{index}"));
+        }
+        accounts.remove(index);
+        return cursor_accounts::save_accounts(&accounts);
+    }
     if !accounts::provider_takes_accounts(&provider) {
         return Err(format!("unknown multi-account provider: {provider}"));
     }
@@ -2183,7 +2642,72 @@ fn account_remove(provider: String, index: usize) -> Result<(), String> {
     if index >= entries.len() {
         return Err(format!("no account #{index} for {provider}"));
     }
+    // Removing index 0 promotes the next account to the bare family id —
+    // clear that id's cache so the promoted account doesn't inherit the
+    // deleted one's numbers on a failed fetch.
+    let removed_default = index == 0;
     entries.remove(index);
+    accounts::save_accounts(&provider, &entries)?;
+    if removed_default {
+        let _ = forget_provider_snapshot(&provider);
+    }
+    Ok(())
+}
+
+/// Makes the account at `index` the default: it moves to position 0 and
+/// publishes under the bare family id on the next fetch (its old
+/// <provider>@<fingerprint> card folds away into the main card).
+#[tauri::command]
+fn account_set_default(provider: String, index: usize) -> Result<(), String> {
+    if provider == "antigravity" || provider == "cursor" {
+        return Err("该服务的账号是平行卡片，没有置顶概念".into());
+    }
+    if !accounts::provider_takes_accounts(&provider) {
+        return Err(format!("unknown multi-account provider: {provider}"));
+    }
+    let mut entries = accounts::load_accounts(&provider);
+    if index >= entries.len() {
+        return Err(format!("no account #{index} for {provider}"));
+    }
+    let entry = entries.remove(index);
+    entries.insert(0, entry);
+    accounts::save_accounts(&provider, &entries)?;
+    // The bare id's meaning changes with the default account; the old
+    // account's last-good cache must not bleed onto the new one's card
+    // if the next fetch fails.
+    let _ = forget_provider_snapshot(&provider);
+    Ok(())
+}
+
+/// Renames the account at `index`. The label is display-only (the stable
+/// fingerprint id never changes), so caches and layouts survive a rename;
+/// the account card's title picks the new label up on the next fetch.
+#[tauri::command]
+fn account_rename(provider: String, index: usize, label: String) -> Result<(), String> {
+    if provider == "antigravity" {
+        let mut slots = antigravity_accounts::load_slots();
+        if index >= slots.len() {
+            return Err(format!("no antigravity slot #{index}"));
+        }
+        slots[index].label = label.trim().to_string();
+        return antigravity_accounts::save_slots(&slots);
+    }
+    if provider == "cursor" {
+        let mut accounts = cursor_accounts::load_accounts();
+        if index >= accounts.len() {
+            return Err(format!("no cursor account #{index}"));
+        }
+        accounts[index].label = label.trim().to_string();
+        return cursor_accounts::save_accounts(&accounts);
+    }
+    if !accounts::provider_takes_accounts(&provider) {
+        return Err(format!("unknown multi-account provider: {provider}"));
+    }
+    let mut entries = accounts::load_accounts(&provider);
+    if index >= entries.len() {
+        return Err(format!("no account #{index} for {provider}"));
+    }
+    entries[index].label = label.trim().to_string();
     accounts::save_accounts(&provider, &entries)
 }
 
@@ -2191,6 +2715,36 @@ fn account_remove(provider: String, index: usize) -> Result<(), String> {
 /// list. The key never leaves whole — only mask_key's "sk-…abcd" tail.
 #[tauri::command]
 fn account_list(provider: String) -> Result<Vec<Value>, String> {
+    if provider == "antigravity" {
+        // Antigravity has no API-key accounts file; its "accounts" are the
+        // captured Google credential slots.
+        return Ok(antigravity_accounts::load_slots()
+            .iter()
+            .map(|slot| {
+                json!({
+                    "id": antigravity_accounts::card_id_for_slot(slot),
+                    "label": slot.label,
+                    "maskedKey": antigravity_accounts::mask_token(&slot.refresh_token),
+                    "baseUrl": null,
+                })
+            })
+            .collect());
+    }
+    if provider == "cursor" {
+        // Cursor accounts are imported token pairs / OAuth logins.
+        return Ok(cursor_accounts::load_accounts()
+            .iter()
+            .map(|acct| {
+                json!({
+                    "id": cursor_accounts::card_id_for_account(acct),
+                    "label": acct.label,
+                    "email": acct.email,
+                    "maskedKey": cursor_accounts::mask_token(&acct.access_token),
+                    "baseUrl": null,
+                })
+            })
+            .collect());
+    }
     if !accounts::provider_takes_accounts(&provider) {
         return Err(format!("unknown multi-account provider: {provider}"));
     }
@@ -2198,8 +2752,8 @@ fn account_list(provider: String) -> Result<Vec<Value>, String> {
         .into_iter()
         .map(|a| {
             json!({
+                "id": accounts::card_id_for_account(&provider, &a),
                 "label": a.label,
-                "hasKey": !a.api_key.trim().is_empty(),
                 "maskedKey": accounts::mask_key(&a.api_key),
                 "baseUrl": a.base_url,
             })
@@ -2239,12 +2793,19 @@ fn provider_env_vars(provider: &str) -> &'static [&'static str] {
 /// family owns every credential source.
 #[tauri::command]
 fn get_credential_status(provider: String) -> Value {
-    let family = provider.split('@').next().unwrap_or(&provider);
-    let stored_key = providers::stored_key_file(family).is_some();
-    let env_key = provider_env_vars(family)
+    let family = family_of(&provider);
+    // Multi-account families: the account list is the key store now (the
+    // old <provider>.json main key file was imported and removed), so
+    // "stored key" means "the accounts list has at least one entry".
+    let stored_key = if accounts::provider_takes_accounts(&family) {
+        !accounts::load_accounts(&family).is_empty()
+    } else {
+        providers::stored_key_file(&family).is_some()
+    };
+    let env_key = provider_env_vars(&family)
         .iter()
         .any(|var| std::env::var(var).is_ok_and(|v| !v.trim().is_empty()));
-    let local_cli = match family {
+    let mut local_cli = match family.as_str() {
         "claude" => providers::claude::local_credential_hint(),
         "codex" => providers::codex::local_credential_hint(),
         "cursor" => providers::cursor::local_credential_hint(),
@@ -2272,14 +2833,36 @@ fn get_credential_status(provider: String) -> Value {
         "relaybalance" => providers::relaybalance::local_credential_hint(),
         _ => None,
     };
+    // Subscription/membership badge: Cursor reads it straight from the
+    // editor's local state DB (same source cockpit badges accounts with);
+    // other providers surface their plan on the quota card itself.
+    let membership = match family.as_str() {
+        "cursor" => providers::cursor::local_membership(),
+        // Every other provider: the plan of the last good snapshot — Codex
+        // reports team, Copilot reports Pro (Student), Antigravity reports
+        // Google AI Pro, Grok reports X Premium/SuperGrok — so the tier is
+        // visible even before the quota card paints.
+        _ => cached_plan_for(&family),
+    };
+    // Kimi can expose an old CLI OAuth file even when the card is actually
+    // using the API key supplied to Pane. Report only the source selected by
+    // the same precedence used by the refresh path.
+    let active_source = if family == "kimi" {
+        providers::kimi::preferred_source(stored_key || env_key, local_cli.is_some())
+    } else {
+        None
+    };
+    if family == "kimi" && active_source == Some("api_key") {
+        local_cli = None;
+    }
     // Pane's own OAuth login (the gear panel's "Sign in with browser") is
     // a credential source separate from the CLI's sign-in; report its
     // account label so the status chips can show it.
-    let oauth_label = match family {
-        "codex" | "grok" => oauth::label(family),
+    let oauth_label = match family.as_str() {
+        "codex" | "grok" | "copilot" => oauth::label(&family),
         _ => None,
     };
-    json!({ "storedKey": stored_key, "envKey": env_key, "localCli": local_cli, "oauth": oauth_label })
+    json!({ "storedKey": stored_key, "envKey": env_key, "localCli": local_cli, "oauth": oauth_label, "activeSource": active_source, "membership": membership })
 }
 
 /// Starts Pane's own OAuth device-code login (Codex / Grok). Returns the
@@ -2288,6 +2871,47 @@ fn get_credential_status(provider: String) -> Value {
 #[tauri::command]
 async fn oauth_start(provider: String) -> Result<oauth::StartResponse, String> {
     oauth::start(&provider).await
+}
+
+/// Starts a Cursor PKCE browser login (cockpit-style deep link + poll).
+#[tauri::command]
+fn cursor_oauth_start() -> Result<cursor_oauth::CursorOAuthStart, String> {
+    cursor_oauth::start_login()
+}
+
+/// One poll tick of a pending Cursor login. `done` carries the imported
+/// account once the browser login completes; error on terminal failure.
+/// On success the account is deduped by token fingerprint and persisted —
+/// this is the ONLY place an OAuth login becomes a stored account.
+#[tauri::command]
+async fn cursor_oauth_poll(login_id: String) -> cursor_oauth::CursorOAuthPoll {
+    let mut poll = cursor_oauth::poll_login(&login_id).await;
+    if let Some(account) = poll.account.take() {
+        let id = cursor_accounts::card_id_for_account(&account);
+        let mut accounts = cursor_accounts::load_accounts();
+        if accounts.iter().any(|a| cursor_accounts::card_id_for_account(a) == id) {
+            poll.error = Some("该 Cursor 账号已存在".into());
+        } else {
+            accounts.push(account);
+            if let Err(error) = cursor_accounts::save_accounts(&accounts) {
+                poll.error = Some(error);
+            }
+        }
+    }
+    poll
+}
+
+/// Cancels a pending Cursor login.
+#[tauri::command]
+fn cursor_oauth_cancel(login_id: Option<String>) {
+    cursor_oauth::cancel_login(login_id.as_deref());
+}
+
+/// Imports Cursor accounts from a cockpit-compatible JSON (single object,
+/// array, or {accounts:[...]}); fields accept camelCase/snake aliases.
+#[tauri::command]
+fn cursor_import(json_content: String) -> Result<usize, String> {
+    cursor_accounts::import_from_json(&json_content).map(|accounts| accounts.len())
 }
 
 /// One poll tick of a pending device-code login. Not an Err while the
@@ -2376,6 +3000,22 @@ fn onenewapi_delete_site(id: String) -> Result<(), String> {
     providers::onenewapi::delete_site_consistently(id, || purge_onenewapi_cards(&key_ids))
 }
 
+#[tauri::command]
+fn onenewapi_set_site_access_token(
+    site_id: String,
+    access_token: Option<String>,
+    user_id: Option<String>,
+) -> Result<providers::onenewapi::SiteDto, String> {
+    let key_ids = providers::onenewapi::list_sites()?
+        .into_iter()
+        .find(|s| s.id == site_id)
+        .map(|s| s.keys.into_iter().map(|k| k.id).collect::<Vec<_>>())
+        .unwrap_or_default();
+    let _mutation = OneNewApiMutationGuard::begin(onenewapi_snapshot_ids(&key_ids));
+    providers::onenewapi::set_site_access_token(site_id, access_token, user_id)
+}
+
+#[cfg_attr(not(test), allow(dead_code))]
 fn onenewapi_apply_zero_to_one_enable(disabled: &mut Vec<Value>, key_id: &str) {
     let snap_id = format!("onenewapi@{key_id}");
     disabled.retain(|v| match v.as_str() {
@@ -2523,10 +3163,7 @@ fn register_shortcut(app: &tauri::AppHandle, accel: &str) -> Result<(), String> 
         .map_err(|_| format!("could not parse shortcut \"{accel}\""))?;
     gs.on_shortcut(shortcut, |app, _shortcut, event| {
         if event.state() == ShortcutState::Pressed {
-            let pos = app
-                .cursor_position()
-                .unwrap_or(tauri::PhysicalPosition::new(1200.0, 700.0));
-            toggle_popover(app, pos);
+            toggle_popover_centered(app);
         }
     })
     .map_err(|e| format!("register shortcut: {e}"))
@@ -2589,9 +3226,8 @@ async fn install_update(app: tauri::AppHandle) -> Result<(), String> {
         // The update the button promised is gone (yanked release, CDN
         // hiccup). Succeeding silently would strand the frontend in its
         // "Installing…" state — fail so the button can recover.
-        None => return Err("update no longer available — try again shortly".into()),
+        None => Err("update no longer available — try again shortly".into()),
     }
-    Ok(())
 }
 
 /// Popover-open update check: the footer asks on every tray click and
@@ -2693,16 +3329,60 @@ fn toggle_popover(app: &tauri::AppHandle, click: tauri::PhysicalPosition<f64>) {
     let _ = window.emit("popover-shown", ());
 }
 
+/// Popover entry point with no anchor: show centered on the primary monitor.
+/// Used by the global shortcut and by the second-instance signal (no click
+/// position available). Centering avoids the popover drifting toward the
+/// taskbar / off-screen edges.
+fn toggle_popover_centered(app: &tauri::AppHandle) {
+    let Some(window) = app.get_webview_window("main") else {
+        return;
+    };
+
+    if window.is_visible().unwrap_or(false) {
+        let _ = window.hide();
+        set_webview_memory_level(&window, true);
+        return;
+    }
+
+    if now_ms().saturating_sub(LAST_AUTO_HIDE_MS.load(Ordering::Relaxed)) < 300 {
+        return;
+    }
+
+    set_webview_memory_level(&window, false);
+
+    let size = window
+        .outer_size()
+        .unwrap_or(tauri::PhysicalSize::new(380, 600));
+    // Primary monitor = the one whose work-area origin is closest to (0, 0).
+    // On a single-monitor setup this is just that monitor. With multiples
+    // we still want the popover on the screen where the user is reading
+    // (the taskbar monitor), which is the one most apps consider "primary".
+    let monitor = window
+        .current_monitor()
+        .ok()
+        .flatten()
+        .or_else(|| window.primary_monitor().ok().flatten());
+    if let Some(m) = monitor {
+        let mon_pos = m.position();
+        let mon_size = m.size();
+        let x = mon_pos.x as f64
+            + ((mon_size.width as f64 - size.width as f64) / 2.0).max(0.0);
+        let y = mon_pos.y as f64
+            + ((mon_size.height as f64 - size.height as f64) / 2.0).max(0.0);
+        let _ = window.set_position(tauri::PhysicalPosition::new(x, y));
+    }
+    let _ = window.show();
+    let _ = window.set_focus();
+    let _ = window.emit("popover-shown", ());
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         // Second launches just poke the existing instance's popover open
         // instead of spawning a duplicate tray icon (Mac parity).
         .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
-            let pos = app
-                .cursor_position()
-                .unwrap_or(tauri::PhysicalPosition::new(1200.0, 700.0));
-            toggle_popover(app, pos);
+            toggle_popover_centered(app);
         }))
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_autostart::init(
@@ -2715,15 +3395,21 @@ pub fn run() {
         .plugin(tauri_plugin_process::init())
         .invoke_handler(tauri::generate_handler![
             fetch_usage,
+            refresh_provider,
             cached_usage,
             fetch_spend,
-            set_api_key,
-            fetch_spend,
+            fetch_usage_history,
+            antigravity_capture_account,
+            cursor_oauth_start,
+            cursor_oauth_poll,
+            cursor_oauth_cancel,
+            cursor_import,
             set_api_key,
             onenewapi_list_sites,
             onenewapi_probe_site,
             onenewapi_create_site,
             onenewapi_update_site,
+            onenewapi_set_site_access_token,
             onenewapi_delete_site,
             onenewapi_create_key,
             onenewapi_update_key,
@@ -2732,6 +3418,8 @@ pub fn run() {
             test_api_key,
             account_add,
             account_remove,
+            account_rename,
+            account_set_default,
             account_list,
             get_credential_status,
             oauth_start,
@@ -2753,6 +3441,7 @@ pub fn run() {
         .setup(|app| {
             spawn_update_checker(app.handle());
             spawn_share_watcher(app.handle().clone());
+            spawn_auto_refresh(app.handle().clone());
             let quit = MenuItem::with_id(
                 app,
                 "quit",
@@ -2839,7 +3528,8 @@ pub fn run() {
 #[cfg(test)]
 mod tests {
     use super::{
-        cached_kimi_ok_from, cached_onenewapi_id_is_configured, card_is_disabled,
+        cached_extra_account_id_is_configured, cached_kimi_ok_from,
+        cached_onenewapi_id_is_configured, card_is_disabled,
         commit_strip_state_after_apply, fail_state, load_config_from, set_config_in,
         fold_moonshot_into_kimi, forget_onenewapi_key_ids, forget_provider_snapshot,
         is_kimi_wallet_label, last_ok, onenewapi_after_site_save,
@@ -2847,7 +3537,7 @@ mod tests {
         onenewapi_purge_restore_patch, purge_onenewapi_cards, purge_onenewapi_cards_coordinated,
         purge_onenewapi_cards_with, purge_onenewapi_from_config,
         rename_cached_snapshot, rename_cached_snapshot_in, rename_cached_snapshots_in,
-        restore_kimi_wallet_rows,
+        refresh_minutes_from, restore_kimi_wallet_rows,
         restore_last_success_after_error,
         retain_current_onenewapi_results, strip_entry_application_order, strip_icon_ids_to_clear,
         strip_is_active, strip_reset_ids, CachedSnap, FailState, OneNewApiMutationGuard,
@@ -2931,6 +3621,14 @@ mod tests {
         let err = json!({"kimi": {"at": now, "snap": {"status": "error"}}});
         assert!(!cached_kimi_ok_from(&err, now));
         assert!(!cached_kimi_ok_from(&json!({}), now));
+    }
+
+    #[test]
+    fn refresh_interval_is_re_read_and_clamped_to_one_minute() {
+        assert_eq!(refresh_minutes_from(&json!({"refreshMinutes": 7})), 7);
+        assert_eq!(refresh_minutes_from(&json!({"refreshMinutes": 0})), 1);
+        assert_eq!(refresh_minutes_from(&json!({"refreshMinutes": "7"})), 5);
+        assert_eq!(refresh_minutes_from(&json!({})), 5);
     }
 
     #[test]
@@ -3135,6 +3833,20 @@ mod tests {
         let claude = vec!["claude".into()];
         assert!(card_is_disabled("claude", &claude));
         assert!(!card_is_disabled("claude@home", &claude));
+    }
+
+    #[test]
+    fn cached_extra_account_cards_must_still_exist_in_the_account_store() {
+        let current = crate::accounts::AccountEntry {
+            label: "work".into(),
+            api_key: "sk-current".into(),
+            base_url: None,
+        };
+        let id = crate::accounts::card_id_for_account("deepseek", &current);
+        let configured = [id.clone()].into_iter().collect();
+        assert!(cached_extra_account_id_is_configured(&id, &configured));
+        assert!(!cached_extra_account_id_is_configured("deepseek@deleted", &configured));
+        assert!(cached_extra_account_id_is_configured("claude@home", &configured));
     }
 
     #[test]
@@ -3420,6 +4132,8 @@ mod tests {
             id: id.into(),
             name: name.into(),
             base_url: base_url.into(),
+            has_access_token: false,
+            user_id: String::new(),
             keys: keys
                 .iter()
                 .map(|(kid, label)| crate::providers::onenewapi::KeyDto {

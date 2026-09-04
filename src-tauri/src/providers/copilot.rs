@@ -143,12 +143,24 @@ pub async fn snapshot() -> Snapshot {
 }
 
 async fn fetch() -> Result<Snapshot, String> {
-    let Some(token) = find_token() else {
-        return Ok(Snapshot::no_credentials(
-            ID,
-            NAME,
-            "No GitHub sign-in found (Copilot in an editor, or `gh auth login`).",
-        ));
+    // Pane's own OAuth login (oauth.rs) takes precedence over the editor's
+    // or the CLI's — the user explicitly signed in here, and "Is there a
+    // local login?" must not shadow it. The stored GitHub OAuth token is
+    // what `copilot_internal/user` accepts (the Copilot token is only for
+    // the `copilot_internal/v2/token` endpoints).
+    let token = match crate::oauth::github_oauth_token() {
+        Ok(Some(tok)) => tok,
+        Ok(None) => {
+            let Some(token) = find_token() else {
+                return Ok(Snapshot::no_credentials(
+                    ID,
+                    NAME,
+                    "No GitHub sign-in found (Copilot in an editor, or `gh auth login`).",
+                ));
+            };
+            token
+        }
+        Err(e) => return Err(e),
     };
 
     let resp = http()

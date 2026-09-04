@@ -1,6 +1,8 @@
-//! Extra API-key accounts for the pure-key balance providers (Phase 3.2):
-//! deepseek, stepfun, siliconflow, novita, relaybalance. Each entry in
-//! %APPDATA%\Pane\accounts\<provider>.json renders its own <provider>@<n>
+//! Extra API-key accounts for providers that support multiple key identities
+//! (Phase 3.2):
+//! deepseek, kimi, stepfun, siliconflow, novita, relaybalance. Each entry in
+//! %APPDATA%\Pane\accounts\<provider>.json renders its own stable
+//! <provider>@<fingerprint> card
 //! card next to the family's main card, so one user can watch several
 //! wallets at once.
 //!
@@ -10,11 +12,6 @@
 
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
-
-/// The providers that accept extra accounts. Everything else — OAuth
-/// families, CLI logins — has exactly one identity per machine.
-pub const ACCOUNT_PROVIDERS: [&str; 5] =
-    ["deepseek", "stepfun", "siliconflow", "novita", "relaybalance"];
 
 /// One row of accounts/<provider>.json. `label` may be empty (the UI shows
 /// a localized "Account N"); `base_url` is only meaningful for
@@ -79,19 +76,58 @@ pub fn save_accounts(provider: &str, entries: &[AccountEntry]) -> Result<(), Str
 }
 
 pub fn provider_takes_accounts(provider: &str) -> bool {
-    ACCOUNT_PROVIDERS.contains(&provider)
+    crate::provider_catalog::supports_extra_accounts(provider)
 }
 
-/// The card id of account #n (1-based): "deepseek@1". Mirrors the
-/// claude@<hash> precedent — a family-scoped id the dashboard, layout and
-/// disabled list can key on while telemetry folds it back via family_of.
+/// Legacy positional card id retained only for old parse-test coverage. New
+/// runtime cards use `card_id_for_account`; using #n as an identity lets a
+/// delete/reorder operation attach an old cache or layout to another key.
+#[allow(dead_code)]
 pub fn card_id(provider: &str, n: usize) -> String {
     format!("{provider}@{n}")
 }
 
-/// Inverse of card_id: the (family, n) behind an account-scoped card id.
-/// Bare ids and junk after the @ parse as None. (Tested in the parse-tests
-/// harness; the runtime only formats ids, never parses them.)
+// FNV-1a is used only to derive a stable local card identity. It is not a
+// credential-hiding primitive, and the resulting fingerprint never crosses
+// the telemetry boundary. Two lanes make accidental collisions vanishingly
+// unlikely without adding a new hashing dependency to this small module.
+fn fnv1a(bytes: &[u8], mut hash: u64) -> u64 {
+    for byte in bytes {
+        hash ^= u64::from(*byte);
+        hash = hash.wrapping_mul(0x1000_0000_01b3);
+    }
+    hash
+}
+
+/// Stable instance id for an API-key account. Labels intentionally do not
+/// participate: renaming an account must not discard its cache or layout.
+/// Custom Balance includes its normalized base URL because the same key at
+/// two relay hosts represents two different quota sources.
+pub fn card_id_for_account(provider: &str, account: &AccountEntry) -> String {
+    let mut material = account.api_key.trim().as_bytes().to_vec();
+    material.push(0);
+    if provider == "relaybalance" {
+        material.extend_from_slice(
+            account
+                .base_url
+                .as_deref()
+                .map(str::trim)
+                .map(|url| url.trim_end_matches('/'))
+                .unwrap_or("")
+                .as_bytes(),
+        );
+    }
+    let left = fnv1a(&material, 0xcbf2_9ce4_8422_2325);
+    let mut second = b"pane-account-id-v1\0".to_vec();
+    second.extend_from_slice(&material);
+    let right = fnv1a(&second, 0x8422_2325_cbf2_9ce4);
+    format!("{provider}@{left:016x}{right:016x}")
+}
+
+/// Inverse of the legacy positional `card_id`: the (family, n) behind an
+/// account-scoped card id. Stable fingerprint ids are deliberately opaque
+/// and are not parsed. (Tested in the parse-tests harness; the runtime only
+/// formats ids, never parses them.)
 #[allow(dead_code)]
 pub fn parse_card_id(id: &str) -> Option<(&str, usize)> {
     let (family, n) = id.split_once('@')?;
@@ -125,14 +161,9 @@ pub fn mask_key(key: &str) -> String {
 /// Display name for the family, used to prefix account card names the way
 /// claude's extra accounts read "Claude — Org".
 pub fn family_display_name(provider: &str) -> String {
-    match provider {
-        "deepseek" => "DeepSeek".into(),
-        "stepfun" => "StepFun".into(),
-        "siliconflow" => "SiliconFlow".into(),
-        "novita" => "Novita AI".into(),
-        "relaybalance" => "Custom Balance".into(),
-        _ => provider.to_string(),
-    }
+    crate::provider_catalog::provider_definition(provider)
+        .map(|definition| definition.display_name.to_string())
+        .unwrap_or_else(|| provider.to_string())
 }
 
 /// The label an account with an empty stored label shows: "账号 N" for a
@@ -228,6 +259,58 @@ mod tests {
     }
 
     #[test]
+    fn account_card_id_is_stable_across_labels_and_positions() {
+        let work = AccountEntry {
+            label: "work".into(),
+            api_key: "sk-account-one".into(),
+            base_url: None,
+        };
+        let renamed = AccountEntry {
+            label: "personal".into(),
+            ..work.clone()
+        };
+        assert_eq!(
+            card_id_for_account("deepseek", &work),
+            card_id_for_account("deepseek", &renamed)
+        );
+        assert_ne!(
+            card_id_for_account(
+                "deepseek",
+                &AccountEntry {
+                    api_key: "sk-account-two".into(),
+                    ..work.clone()
+                }
+            ),
+            card_id_for_account("deepseek", &work)
+        );
+    }
+
+    #[test]
+    fn relay_card_id_includes_the_normalized_base_url() {
+        let first = AccountEntry {
+            label: String::new(),
+            api_key: "sk-relay".into(),
+            base_url: Some("https://relay.example.com/".into()),
+        };
+        let same_host = AccountEntry {
+            base_url: Some(" https://relay.example.com ".into()),
+            ..first.clone()
+        };
+        let other_host = AccountEntry {
+            base_url: Some("https://other.example.com".into()),
+            ..first.clone()
+        };
+        assert_eq!(
+            card_id_for_account("relaybalance", &first),
+            card_id_for_account("relaybalance", &same_host)
+        );
+        assert_ne!(
+            card_id_for_account("relaybalance", &first),
+            card_id_for_account("relaybalance", &other_host)
+        );
+    }
+
+    #[test]
     fn masking_shows_head_and_last_four() {
         assert_eq!(mask_key("sk-1234567890abcd"), "sk-…abcd");
         assert_eq!(mask_key("shortkey"), "…tkey");
@@ -245,11 +328,23 @@ mod tests {
     }
 
     #[test]
-    fn only_the_five_key_providers_take_accounts() {
-        for p in ACCOUNT_PROVIDERS {
+    fn the_six_key_providers_take_accounts() {
+        for p in [
+            "deepseek",
+            "kimi",
+            "stepfun",
+            "siliconflow",
+            "novita",
+            "relaybalance",
+        ] {
             assert!(provider_takes_accounts(p));
         }
         assert!(!provider_takes_accounts("claude"));
-        assert!(!provider_takes_accounts("kimi"));
+    }
+
+    #[test]
+    fn family_display_name_comes_from_catalog() {
+        assert_eq!(family_display_name("relaybalance"), "Custom Balance");
+        assert_eq!(family_display_name("future-provider"), "future-provider");
     }
 }

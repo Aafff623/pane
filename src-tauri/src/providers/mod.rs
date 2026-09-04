@@ -458,3 +458,12 @@ pub fn stored_base_url(provider: &str) -> Option<String> {
     }
     Some(url.to_string())
 }
+
+/// Drops %APPDATA%\Pane\<provider>.json — used by the default-account
+/// migration after the key is imported into accounts/<provider>.json, so
+/// deleting the imported account actually deletes the key (no zombie file
+/// that would re-import it on the next fetch).
+pub fn remove_stored_key_file(provider: &str) {
+    let path = config_dir().join(format!("{provider}.json"));
+    let _ = std::fs::remove_file(path);
+}

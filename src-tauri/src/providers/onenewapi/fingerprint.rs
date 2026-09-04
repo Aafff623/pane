@@ -2,6 +2,31 @@ use serde_json::Value;
 
 const MAX_STATUS_BYTES: usize = 64 * 1024;
 
+/// new-api's default quota-per-display-unit (quota = raw internal units).
+const DEFAULT_QUOTA_PER_UNIT: f64 = 500_000.0;
+
+/// Site-level quota display unit from `/api/status`, plus the raw-quota →
+/// display-value scale the subscription endpoint needs (billing endpoints
+/// convert server-side; `/api/subscription/self` reports raw quota).
+#[derive(Debug, Clone, PartialEq)]
+pub struct SiteFingerprint {
+    pub unit: DisplayUnit,
+    pub per_unit: f64,
+    /// Multiplier applied to the USD-equivalent value (CNY and custom
+    /// currency sites; USD/TOKENS stay 1.0).
+    pub rate: f64,
+}
+
+impl From<DisplayUnit> for SiteFingerprint {
+    fn from(unit: DisplayUnit) -> Self {
+        Self {
+            unit,
+            per_unit: DEFAULT_QUOTA_PER_UNIT,
+            rate: 1.0,
+        }
+    }
+}
+
 /// Site-level quota display unit from `/api/status`. Billing numbers stay in
 /// the OpenAI cents convention for every unit; this only chooses formatting.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -46,8 +71,8 @@ impl DisplayUnit {
 }
 
 /// Structural OneAPI / NewAPI check. Does not require branding text or a
-/// particular quota display unit. On success, parse the unit for formatting.
-pub fn fingerprint_payload(v: &Value) -> Result<DisplayUnit, String> {
+/// particular quota display unit. On success, parse the unit and quota scale.
+pub fn fingerprint_payload(v: &Value) -> Result<SiteFingerprint, String> {
     if v.get("success") != Some(&Value::Bool(true)) {
         return Err("status fingerprint mismatch".into());
     }
@@ -65,7 +90,24 @@ pub fn fingerprint_payload(v: &Value) -> Result<DisplayUnit, String> {
     if !named {
         return Err("status fingerprint mismatch".into());
     }
-    Ok(parse_display_unit(data))
+    let unit = parse_display_unit(data);
+    let positive = |key: &str| {
+        data.get(key)
+            .and_then(Value::as_f64)
+            .filter(|n| n.is_finite() && *n > 0.0)
+    };
+    let per_unit = positive("quota_per_unit").unwrap_or(DEFAULT_QUOTA_PER_UNIT);
+    let rate = match unit {
+        DisplayUnit::Cny => positive("usd_exchange_rate"),
+        DisplayUnit::Custom(_) => positive("custom_currency_exchange_rate"),
+        _ => None,
+    }
+    .unwrap_or(1.0);
+    Ok(SiteFingerprint {
+        unit,
+        per_unit,
+        rate,
+    })
 }
 
 pub fn parse_display_unit(data: &Value) -> DisplayUnit {
@@ -96,7 +138,7 @@ pub fn parse_display_unit(data: &Value) -> DisplayUnit {
     }
 }
 
-pub async fn probe(origin: &str) -> Result<DisplayUnit, String> {
+pub async fn probe(origin: &str) -> Result<SiteFingerprint, String> {
     let origin = super::url::normalize_base_url(origin)?.origin;
     let url = format!("{origin}/api/status");
     let resp = super::super::http_no_redirect()
@@ -125,10 +167,14 @@ pub async fn probe(origin: &str) -> Result<DisplayUnit, String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{fingerprint_payload, parse_display_unit, probe, DisplayUnit};
+    use super::{fingerprint_payload, parse_display_unit, probe, DisplayUnit, SiteFingerprint};
     use serde_json::{json, Value};
     use std::io::ErrorKind;
     use std::time::Duration;
+
+    fn unit_of(v: &Value) -> DisplayUnit {
+        fingerprint_payload(v).unwrap().unit
+    }
 
     fn ok_payload() -> Value {
         json!({
@@ -143,79 +189,69 @@ mod tests {
 
     #[test]
     fn accepts_structural_payload_regardless_of_branding_or_unit() {
+        assert_eq!(unit_of(&ok_payload()), DisplayUnit::Usd);
         assert_eq!(
-            fingerprint_payload(&ok_payload()).unwrap(),
-            DisplayUnit::Usd
-        );
-        assert_eq!(
-            fingerprint_payload(&json!({
+            unit_of(&json!({
                 "success": true,
                 "data": {
                     "version": "1.0",
                     "system_name": "Totally Custom Panel",
                     "quota_display_type": "usd"
                 }
-            }))
-            .unwrap(),
+            })),
             DisplayUnit::Usd
         );
         assert_eq!(
-            fingerprint_payload(&json!({
+            unit_of(&json!({
                 "success": true,
                 "data": {
                     "system_name": "One API",
                     "display_in_currency": true
                 }
-            }))
-            .unwrap(),
+            })),
             DisplayUnit::Usd
         );
         assert_eq!(
-            fingerprint_payload(&json!({
+            unit_of(&json!({
                 "success": true,
                 "data": {
                     "version": "build",
                     "quota_display_type": "USD",
                     "display_in_currency": false
                 }
-            }))
-            .unwrap(),
+            })),
             DisplayUnit::Usd
         );
         assert_eq!(
-            fingerprint_payload(&json!({
+            unit_of(&json!({
                 "success": true,
                 "data": {"version": "1"}
-            }))
-            .unwrap(),
+            })),
             DisplayUnit::Usd
         );
         assert_eq!(
-            fingerprint_payload(&json!({
+            unit_of(&json!({
                 "success": true,
                 "data": {"version": "1", "quota_display_type": "CNY"}
-            }))
-            .unwrap(),
+            })),
             DisplayUnit::Cny
         );
         assert_eq!(
-            fingerprint_payload(&json!({
+            unit_of(&json!({
                 "success": true,
                 "data": {"version": "1", "quota_display_type": "TOKENS"}
-            }))
-            .unwrap(),
+            })),
             DisplayUnit::Tokens
         );
         assert_eq!(
-            fingerprint_payload(&json!({
+            unit_of(&json!({
                 "success": true,
                 "data": {"version": "1", "display_in_currency": false}
-            }))
-            .unwrap(),
+            })),
             DisplayUnit::Tokens
         );
         assert_eq!(
-            fingerprint_payload(&json!({
+            unit_of(&json!({
                 "success": true,
                 "data": {
                     "version": "",
@@ -223,10 +259,71 @@ mod tests {
                     "quota_display_type": "CNY",
                     "display_in_currency": true
                 }
-            }))
-            .unwrap(),
+            })),
             DisplayUnit::Cny
         );
+    }
+
+    #[test]
+    fn quota_scale_defaults_then_parses_per_display_unit() {
+        // Missing fields fall back to new-api defaults.
+        let plain = fingerprint_payload(&ok_payload()).unwrap();
+        assert_eq!(
+            plain,
+            SiteFingerprint {
+                unit: DisplayUnit::Usd,
+                per_unit: 500_000.0,
+                rate: 1.0
+            }
+        );
+
+        let cny = fingerprint_payload(&json!({
+            "success": true,
+            "data": {
+                "version": "1",
+                "quota_display_type": "CNY",
+                "quota_per_unit": 600_000,
+                "usd_exchange_rate": 7.25
+            }
+        }))
+        .unwrap();
+        assert_eq!(
+            cny,
+            SiteFingerprint {
+                unit: DisplayUnit::Cny,
+                per_unit: 600_000.0,
+                rate: 7.25
+            }
+        );
+
+        // CNY without an exposed rate keeps 1.0 rather than guessing.
+        let cny_bare = fingerprint_payload(&json!({
+            "success": true,
+            "data": {"version": "1", "quota_display_type": "CNY"}
+        }))
+        .unwrap();
+        assert_eq!(cny_bare.rate, 1.0);
+
+        let custom = fingerprint_payload(&json!({
+            "success": true,
+            "data": {
+                "version": "1",
+                "quota_display_type": "CUSTOM",
+                "custom_currency_symbol": "€",
+                "custom_currency_exchange_rate": 0.9
+            }
+        }))
+        .unwrap();
+        assert_eq!(custom.rate, 0.9);
+
+        // Non-positive or non-numeric scale fields fall back too.
+        let bad = fingerprint_payload(&json!({
+            "success": true,
+            "data": {"version": "1", "quota_per_unit": 0, "usd_exchange_rate": "x"}
+        }))
+        .unwrap();
+        assert_eq!(bad.per_unit, 500_000.0);
+        assert_eq!(bad.rate, 1.0);
     }
 
     #[test]
@@ -332,7 +429,8 @@ mod tests {
         let (origin, join) = spawn_status_server(1, move |_origin, _req| {
             tiny_http::Response::from_string(body.clone()).with_status_code(200)
         });
-        tauri::async_runtime::block_on(probe(&origin)).unwrap();
+        let fp = tauri::async_runtime::block_on(probe(&origin)).unwrap();
+        assert_eq!(fp.unit, DisplayUnit::Usd);
         let captured = join.join().unwrap();
         assert_eq!(captured.len(), 1);
         assert_eq!(captured[0].url, "/api/status");
@@ -402,8 +500,8 @@ mod tests {
         let (origin, join) = spawn_status_server(1, move |_origin, _req| {
             tiny_http::Response::from_string(body.clone()).with_status_code(200)
         });
-        let unit = tauri::async_runtime::block_on(probe(&origin)).unwrap();
-        assert_eq!(unit, DisplayUnit::Cny);
+        let fp = tauri::async_runtime::block_on(probe(&origin)).unwrap();
+        assert_eq!(fp.unit, DisplayUnit::Cny);
         let _ = join.join();
     }
 }
