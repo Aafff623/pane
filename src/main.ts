@@ -446,11 +446,31 @@ let spendLoaded = false;
 /// these daily "worst used percent" samples.
 let lastQuotaTrend: Record<string, number[]> = {};
 
-/// The account tab currently shown inside a multi-account family card.
-/// Keyed by family id; the value is the account card id (kimi@<fp>) or the
-/// family id itself (the default/main account). Session-only — reopening
-/// defaults back to the main account.
-const activeAccountFor = new Map<string, string>();
+/// Tracks manual account-tab selections made by the user in the current view.
+/// Cleared on popover reopening or account mutations.
+const userSelectedAccountFor = new Map<string, string>();
+
+/// Determines which account snapshot to display on the provider's home card.
+/// When a multi-account provider's default account is exhausted / maxed out (red dot),
+/// the card automatically prioritizes displaying an account with available quota (green dot).
+/// The underlying default account setting remains intact; the home card simply defaults to
+/// presenting the healthy account first. Users can still manually click any account tab.
+function resolveDisplayedAccount(family: string, defaultId: string, accountIds: string[]): string {
+  const manual = userSelectedAccountFor.get(family);
+  if (manual && accountIds.includes(manual)) {
+    return manual;
+  }
+  // If the default account is healthy (not red), show default account
+  if (accountHealthDot(defaultId) !== "red") {
+    return defaultId;
+  }
+  // If default account is exhausted (red), prioritize an account with remaining quota (green)
+  const greenAccount = accountIds.find((id) => accountHealthDot(id) === "green");
+  if (greenAccount) {
+    return greenAccount;
+  }
+  return defaultId;
+}
 
 type TrendSource = { id: string; trend: number[]; quota: boolean };
 
@@ -1264,16 +1284,15 @@ function nearestResetSeconds(family: string): number {
   return nearest === Infinity ? 0 : nearest;
 }
 
-/// Combines the overall family health dot: green if all accounts green, red if
-/// all are red, gray otherwise.  When collapsed we only show the overall dot
-/// instead of per-account tabs.
+/// Combines the overall family health dot: green if any account is green (quota available),
+/// red if all are red, gray otherwise.
 function familyHealthDot(family: string): "red" | "green" | "gray" {
   const cards = lastSnapshots.filter(
     (s) => providerFamily(s.id) === family && !isCardDisabled(s.id),
   );
   if (cards.length === 0) return "gray";
   const dots = cards.map((s) => accountHealthDot(s.id));
-  if (dots.every((d) => d === "green")) return "green";
+  if (dots.some((d) => d === "green")) return "green";
   if (dots.every((d) => d === "red")) return "red";
   return "gray";
 }
@@ -1312,13 +1331,12 @@ function renderCard(s: Snapshot): string {
       .filter((snap) => providerFamily(snap.id) === family && !isCardDisabled(snap.id))
       .map((snap) => snap.id);
     if (accountIds.length > 1) {
-      const active = activeAccountFor.get(family) ?? s.id;
+      const active = resolveDisplayedAccount(family, s.id, accountIds);
       const activeSnap = lastSnapshots.find(
         (snap) => snap.id === active && !isCardDisabled(snap.id),
       );
       if (activeSnap) shown = activeSnap;
-      else activeAccountFor.set(family, s.id);
-	      accountCount = `<span class="provider-count">×${accountIds.length}</span>`;
+      accountCount = `<span class="provider-count">×${accountIds.length}</span>`;
       accountTabs = `<div class="card-account-tabs">${accountIds
         .map((id) => {
           const label = id === s.id
@@ -3270,6 +3288,7 @@ async function doAccountRemove(family: string, index: number): Promise<void> {
   const status = document.querySelector("#status")!;
   try {
     await invoke("account_remove", { provider: family, index });
+    userSelectedAccountFor.delete(family);
     refreshAccounts(family);
     status.textContent = t("customize.acctRemoved");
     void forceUsageRefreshAttempt(false).then(requestTraySync);
@@ -3285,6 +3304,7 @@ async function doAccountSetDefault(family: string, index: number): Promise<void>
   const status = document.querySelector("#status")!;
   try {
     await invoke("account_set_default", { provider: family, index });
+    userSelectedAccountFor.delete(family);
     refreshAccounts(family);
     status.textContent = t("customize.acctDefaultSet", { name: providerDisplayName(family) });
     void forceUsageRefreshAttempt(false).then(requestTraySync);
@@ -3860,7 +3880,7 @@ function rebuildTrail(): void {
       const origin = card.dataset.origin || undefined;
       const visual = providerVisual(id || family, origin);
       const icon = visual?.iconSvg;
-      const dot = family ? familyHealthDot(family) : "";
+      const dot = isParallelAccountFamily(family) ? accountHealthDot(id) : (family ? familyHealthDot(family) : "");
       const dotHtml = dot ? `<span class="trail-badge ${dot}"></span>` : "";
       if (icon) {
         const extra = [
@@ -6125,7 +6145,7 @@ window.addEventListener("DOMContentLoaded", () => {
     const acctTab = target.closest<HTMLElement>("[data-card-account]");
     if (acctTab) {
       const [family, acctId] = acctTab.dataset.cardAccount!.split("|");
-      activeAccountFor.set(family, acctId);
+      userSelectedAccountFor.set(family, acctId);
       renderAll();
       return;
     }
@@ -6305,6 +6325,7 @@ window.addEventListener("DOMContentLoaded", () => {
     setSettings(false);
     dismissConfirm?.();
     dismissWhatsNew?.();
+    userSelectedAccountFor.clear();
     // A fresh update's notes present on the first open after launch.
     if (pendingWhatsNew) {
       showChangelogDialog(t("dialog.whatsNew", { version: appVersion }), pendingWhatsNew);
@@ -6315,6 +6336,8 @@ window.addEventListener("DOMContentLoaded", () => {
       pendingRender = false;
       renderAll();
       populatePinnedOptions();
+    } else if (lastSnapshots.length) {
+      renderAll();
     }
     providersEl.scrollTop = 0;
     rebuildTrail();

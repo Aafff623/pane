@@ -679,6 +679,13 @@ select:focus-visible {
   gap: 7px;
   padding: 8px 0;
   width: 100%;
+  max-height: calc(100vh - 170px);
+  overflow-y: auto;
+  scrollbar-width: none;
+}
+
+#trail::-webkit-scrollbar {
+  display: none;
 }
 
 .trail-tick {
@@ -901,8 +908,15 @@ article.provider.is-folded:hover {
 }
 
 .provider-name {
-  font-weight: 600;
-  letter-spacing: -0.01em;
+  font-size: 16px;
+  font-weight: 650;
+  letter-spacing: -0.015em;
+  line-height: 1.25;
+  white-space: nowrap;
+}
+
+:root[data-density="compact"] .provider-name {
+  font-size: 15px;
 }
 
 .provider-count {
