@@ -61,11 +61,11 @@ Provider 没有 trait，是约定式：每个 provider 文件暴露 `pub async f
 
 现状：`kimi.rs` 的 `fetch()` :92 只在 `cred_path()` 找到 CLI OAuth 凭据文件时才工作，否则 `no_credentials("Kimi Code sign-in not found. Run kimi login…")`。`fetch_usages(access)` :141 对 `GET api.kimi.com/coding/v1/usages` 做 Bearer 认证；ccSwitch 已验证**同一端点直接接受 API key**（返回同样的 `limits[]`（5h 窗口）+ `usage`（周限）结构）。
 
-改动（OAuth 优先、key 兜底，现有用户零影响）：
+改动（API key 优先、无 key 时使用 OAuth，现有 OAuth 用户仍兼容）：
 
-1. `fetch()` 里 `cred_path()` 为 `None` 时，先尝试 `stored_api_key(ID, &["KIMI_CODING_API_KEY"])`：有 key 就直接 `fetch_usages(&key)` 走既有解析（`parse_snapshot`），跳过 `load_access`/刷新/写回整条 OAuth 路径；没有才返回 `no_credentials`，提示语改为两种途径都提（"Run `kimi login` or paste a Kimi Coding API key in Settings"）。
+1. `fetch()` 先尝试 `stored_api_key(ID, &["KIMI_CODING_API_KEY"])`：有 key 就直接走既有解析（`parse_snapshot`），跳过 `load_access`/刷新/写回整条 OAuth 路径；没有 key 才读取 CLI OAuth；两者都没有才返回 `no_credentials`。
 
-   **实施后修正（实机调试发现）**：仅"凭据文件缺失"时回落不够——用户机器上 CLI 凭据存在但已失效（refresh 被拒），OAuth 报错后 key 永远轮不到。已加第二级回落：OAuth 彻底失效（rotated）且存有 key 时，key 直接接管（`OAuthFailure::Rotated` 分类 + `rotated_fallback`）。
+   **实施后修正（实机调试发现）**：Kimi 的凭据来源按实际接入方式区分——Pane 中存在 Kimi Coding API key 时直接使用 API key；没有 API key 时才读取 CLI OAuth。OAuth 失效回落仍保留在兼容路径中，但状态面板只显示当前生效来源，不把 OAuth 文件存在误报为当前登录方式。
 2. key 路径的 401 → `Snapshot::error`（key 无效，确定性的；不要走 OAuth 的刷新重试逻辑）。
 3. `parse_snapshot` 里 `user.membership.level` 可能缺失（key 路径未验证有该字段）——plan 回落为 `"Kimi Coding"`。
 4. 环境变量只用 `KIMI_CODING_API_KEY`：**不要**加 `KIMI_API_KEY`（那是 moonshot.rs 的钱包 key，两个平台不同）。
@@ -160,12 +160,21 @@ ccSwitch 全部 78 个预设逐一核实过（读源码 + 无凭据探测，401 
 
 结论：名单短不是因为漏了，是因为剩下的**真的查不了**。若日后发现新的可查询厂商，按 §3 的配方随时可加。
 
-## 11. 实施与验证记录（2026-09-02）
+## 11. 实施与验证记录（截至 2026-09-03）
 
-已全部实施（PR1 任务 1–5+8，PR2 任务 7），工作区未提交。验证：
+实现已覆盖 PR1（任务 1–5、8）和 PR2（通用 billing、多账号实例化、后台刷新修复、图标 registry）；工作区仍未提交。当前完整设计和证据以以下文档为准：
 
-- parse-tests harness（gnu 工具链，直接编译真实 provider 源文件）：**32 passed / 0 failed**；
-- `npm run build`（tsc + vite）通过；`cargo check`（gnu）全工程编译通过（仅存量 `install_update` 一个无关警告）；
-- 完整 `cargo test` 本机跑不了：MSVC 工具链缺失，且 gnu 工具链在链接整个 app 的 cdylib 时撞上 mingw ld 的导出序数上限（`export ordinal too large: 167232`，16 万符号，环境限制非代码问题）；`cargo check --tests`（gnu）全 crate 含测试代码编译通过，换机需补跑完整套件；
-- **GLM 老 Lite 套餐实测**（真实 key 调 `api.z.ai/api/monitor/usage/quota/limit`）：响应只有 1 条 `TOKENS_LIMIT`（`unit:3`，5h 窗口，与 ccSwitch 记录一致）+ 1 条 `TIME_LIMIT`（unit:5，月度搜索）；窗口计时中 `nextResetTime` 存在 → 卡片显示倒计时；打满（100%）→ 倒计时；闲置（无 nextResetTime）→ "尚未开始"（前端新分支）。
-- relaybalance 未做真 key 联调（无中转站凭据）。
+- `docs/plans/pane-provider-quota-design.md`：family / instance / adapter / projection 设计，以及 OAuth 与 API Key 的边界；
+- `docs/superpowers/plans/2026-09-03-pane-provider-quota-architecture.md`：逐阶段实施记录，只有原生 GUI 验收 Step 3 仍未勾选；
+- `docs/plans/pane-provider-quota-verification.md`：当前验收矩阵、14 家覆盖映射、风险和运行时证据。
+
+最新验证：
+
+- parse-tests harness（GNU 工具链，直接编译真实 provider 源文件）：**66 passed / 0 failed**；
+- `npm run build`（tsc + vite）通过；GNU `cargo check`、`cargo check --tests` 和非严格 Clippy 均通过；
+- Rust/TypeScript provider catalog：26/26 family、16 个 API Key 能力位和 5 个额外 API Key family 一致；
+- 额外 Key 使用稳定的 `family@<fingerprint>` 实例 ID，独立查询、缓存、余额 baseline、布局和托盘投影；Custom Balance 的 Base URL 经过 HTTPS / 本地 HTTP 安全校验；
+- GNU Tauri 开发实例已成功启动，`pane.exe` 响应正常，`GET http://127.0.0.1:6736/v1/usage` 返回 200，6 个 provider 快照完成，退出后进程与 1420/6736 端口均释放；
+- 完整 `cargo test` 的 app 测试二进制仍因本机 GNU/Windows 启动环境返回 `STATUS_ENTRYPOINT_NOT_FOUND`，不是断言失败；默认 MSVC 仍缺少 `link.exe`；
+- relaybalance 尚未使用真实中转站凭据联调，ZenMux 仍是独立可选扩展；
+- 原生 Tauri 窗口、托盘点击、隐藏窗口两个刷新周期仍需具备 `sky` Trusted RPC 的桌面环境补验，不能用普通 Chrome 页面替代。

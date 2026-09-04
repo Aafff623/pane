@@ -9,8 +9,8 @@ code.
 Ground rules that apply to every provider:
 
 - A credential is only ever sent to **its own vendor's API**, over HTTPS
-  (One/New API sites may use `http://` only with private, loopback, or
-  link-local IP addresses).
+  (One/New API sites and Custom Balance relays may use `http://` only with
+  private, loopback, or link-local IP addresses).
 - If no credential is found, the provider shows a "connect me" hint (new
   installs auto-disable everything undetected except Claude and Codex).
 - Expired OAuth tokens are refreshed against the vendor's own token

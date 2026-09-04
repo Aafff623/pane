@@ -20,6 +20,9 @@ src-tauri/gen
 .tmp/
 build-latest.log
 
+# Local handoff / research / secrets workspace (see temp/README.md)
+temp/
+
 # Session tooling
 .claude/
 pane.md

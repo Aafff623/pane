@@ -25,7 +25,7 @@
   - **默认自动读取**：该 provider 无需配置就会探测的本地凭据（来自各 `src-tauri/src/providers/*.rs` 顶部 docstring 的事实，逐个核实后写成常量表 `PROVIDER_CRED_INFO` 放 main.ts）；
   - **支持的方式**：粘贴 API key / OAuth / 仅本地登录（三选多）；
   - **当前状态**：已存 key 与否（`stored_api_key` 有无——需要 §1.5 的新命令）；本地凭据文件是否存在（同命令返回）。
-- 事实表初稿（实施时逐个对 docstring 校正）：claude=读 Claude Code 登录（支持多账号目录）；codex=读 Codex CLI 登录；cursor=本地 Cursor 配置；opencode=读 `auth.json` 的 opencode-go + 可贴 key；copilot=gh/Copilot 登录；grok=`~/.grok/auth.json`；devin=`%APPDATA%\devin\credentials.toml`；minimax=Settings key/env/CLI config；openrouter=Settings key 或 OpenCode auth.json；zai=Settings key/env/Z.ai CLI；antigravity=本地 language server / Credential Manager；deepseek=Settings key；moonshot=Settings key/env；elevenlabs=Settings key；ollama=本地服务无凭据；codebuff=codebuff 登录文件或 key；kilo=Kilo CLI 登录或 key；aihubmix=Settings key 或 OpenCode；qwen=Settings key/env；hermes=本地 ledger 无凭据；kimi=CLI OAuth 优先 + KIMI_CODING_API_KEY/Settings key；stepfun/siliconflow/novita/relaybalance=纯 Settings key（relaybalance 另需 base URL）。
+- 事实表初稿（实施时逐个对 docstring 校正）：claude=读 Claude Code 登录（支持多账号目录）；codex=读 Codex CLI 登录；cursor=本地 Cursor 配置；opencode=读 `auth.json` 的 opencode-go + 可贴 key；copilot=gh/Copilot 登录；grok=`~/.grok/auth.json`；devin=`%APPDATA%\devin\credentials.toml`；minimax=Settings key/env/CLI config；openrouter=Settings key 或 OpenCode auth.json；zai=Settings key/env/Z.ai CLI；antigravity=本地 language server / Credential Manager；deepseek=Settings key；moonshot=Settings key/env；elevenlabs=Settings key；ollama=本地服务无凭据；codebuff=codebuff 登录文件或 key；kilo=Kilo CLI 登录或 key；aihubmix=Settings key 或 OpenCode；qwen=Settings key/env；hermes=本地 ledger 无凭据；kimi=优先使用 KIMI_CODING_API_KEY/Settings key，没有 API key 时才用 CLI OAuth；stepfun/siliconflow/novita/relaybalance=纯 Settings key（relaybalance 另需 base URL）。
 
 ### 1.4 新 provider 图标资产
 
@@ -71,7 +71,7 @@
 - 存储：`%APPDATA%\Pane\accounts\<provider>.json` = `[{ "label": "...", "apiKey": "..." }]`（label 默认 "账号 N"）。
 - 后端：`fetch_usage` 对配置了多账号的 provider，为每个账号 spawn `<provider>@<n>` 卡（复用 `snapshot_with_key`；完全复刻 claude 多账号 `claude@<hash8>` 的先例，lib.rs:1050 附近）。单账号保持现有 `<provider>.json` 行为不变（零迁移）。
 - 前端：齿轮面板加「添加账号」→ label + key + 测试 + 保存；账号列表每项带删除；`<provider>@n` 卡在主页正常渲染、可拖拽排序。
-- 范围：先覆盖纯 key 余额类（deepseek/stepfun/siliconflow/novita/relaybalance），OAuth 账号多开后续再说。
+- 范围：先覆盖 API key 余额类（deepseek/kimi/stepfun/siliconflow/novita/relaybalance），OAuth 账号多开后续再说。
 
 ## 4. 每期验收清单
 

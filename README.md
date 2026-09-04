@@ -99,6 +99,11 @@ npm run tauri dev     # run with hot reload
 npm run tauri build   # installer lands in src-tauri/target/release/bundle
 ```
 
+For fast local development on Windows (building frontend + static server on 1420 + launching Pane):
+```powershell
+.\scripts\dev-pane.cmd
+```
+
 ## How it works
 
 Pane is a small Tauri v2 app: a Rust core doing the data work, a vanilla
@@ -217,7 +222,9 @@ whatever the community asks for loudest.
   rows, and tuck rarely-needed ones behind an "On Demand" caret. Ctrl+Z
   undoes.
 - **Liquid glass UI** — real SDF lens refraction on the auto-hiding
-  sidebar and glass bars, magnetic minimap trail, circular day/night wipe.
+  sidebar and glass bars, magnetic minimap trail with authentic brand avatars and health indicator dots, circular day/night wipe.
+- **Card Breathing Room & Folded Badges** — spacious card layout with generous breathing room; folded cards highlight nearest reset countdowns with status-toned pills and glow indicators.
+- **Multi-account Switching** — seamless multi-account management across DeepSeek, StepFun, SiliconFlow, Novita, Kimi, Antigravity, Cursor, and One/New API with instant card account tabs.
 - **Share cards** — hover a card, click ⧉, and paste anywhere: the copy
   is exactly what the card shows (bars, pace hints, trend — buttons and
   links stripped), framed with the Pane icon and tagline.
