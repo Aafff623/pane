@@ -405,8 +405,9 @@ fn apply_main_tray_projection(
         tray.set_tooltip(Some("Pane"))
             .map_err(|error| format!("set hidden main tray tooltip: {error}"))?;
     } else {
-        tray.set_tooltip(Some(&projection.tooltip))
-            .map_err(|error| format!("set main tray tooltip: {error}"))?;
+        if let Err(_) = tray.set_tooltip(Some(&projection.tooltip)) {
+            let _ = tray.set_tooltip(Some("Pane"));
+        }
         match projection.icon_mode {
             tray_projection::MainTrayIconMode::Logo => {
                 let default = app
