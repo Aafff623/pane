@@ -22,6 +22,7 @@ set "REPO=%CD%"
 popd
 
 if exist "D:\Tools\mingw64\bin" set "PATH=D:\Tools\mingw64\bin;%PATH%"
+if exist "%USERPROFILE%\.cargo\bin" set "PATH=%USERPROFILE%\.cargo\bin;%PATH%"
 set "PATH=%REPO%\src-tauri\target\debug;%REPO%\src-tauri\target\debug\deps;%PATH%"
 
 echo [dev-pane] repo: %REPO%
@@ -72,17 +73,19 @@ if not errorlevel 1 (
 ) else (
   start /B "pane-dev-1420" python -m http.server 1420 --bind 127.0.0.1 --directory "%REPO%\dist"
 )
-timeout /t 2 /nobreak >nul
-netstat -ano | findstr ":1420 " | findstr LISTENING >nul
-if errorlevel 1 (
-  echo [dev-pane] failed to bind 1420
-  exit /b 1
+for /L %%i in (1,1,10) do (
+  netstat -ano | findstr ":1420 " | findstr LISTENING >nul
+  if not errorlevel 1 goto bound1420
+  ping -n 2 127.0.0.1 >nul
 )
+echo [dev-pane] failed to bind 1420
+exit /b 1
+:bound1420
 
 REM 3. Build + launch the Pane binary.
 echo [dev-pane] cargo build
 pushd "%REPO%\src-tauri"
-cargo build %CARGO_FLAGS% 2>nul
+cargo +stable-x86_64-pc-windows-gnu build %CARGO_FLAGS%
 if errorlevel 1 (
   echo [dev-pane] cargo build failed
   popd
