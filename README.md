@@ -99,10 +99,10 @@ npm run tauri dev     # run with hot reload
 npm run tauri build   # installer lands in src-tauri/target/release/bundle
 ```
 
-For fast local development on Windows (building frontend + static server on 1420 + launching Pane):
-```powershell
-.\scripts\dev-pane.cmd
-```
+For fast local development on Windows, follow the canonical startup guide:
+[`docs/dev-startup.md`](docs/dev-startup.md) — it covers the two-process
+setup (Vite on `:1420` + `pane.exe` on `:6736`), WebView2 cache handling,
+and the interactive-desktop launch requirement.
 
 ## How it works
 
