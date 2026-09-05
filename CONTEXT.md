@@ -41,10 +41,22 @@ anything unverified lives under `待确认` at the bottom.
   Identity = `refresh_token`. File: `antigravity-accounts.json`.
 - **CursorAccount** — Cursor OAuth account. Identity = `access_token`.
   File: `cursor-accounts.json`.
-- **Key card (One/New API)** — one site+key pair in `onenewapi.json`
-  (version 1). Subscription numbers come from `/api/subscription/self`
-  (access token + `New-Api-User` header) with silent fallback to the
-  OpenAI-compatible billing endpoints.
+- **Relay site (One/New API)** — one site entry in `onenewapi.json`
+  (version 1): `name`, `base_url`, optional dashboard **access token** +
+  `New-Api-User` id, and N relay keys (`sk-…`). Sites are ACCOUNTS of the
+  `onenewapi` family (`supports_extra_accounts = true` since 2026-09-05):
+  the dashboard renders ONE merged card with a tab per site key; the site
+  manager lives in the Customize drawer as the family row's account
+  section (moved out of Settings). Card ids: `onenewapi@<key_id>`, or
+  `onenewapi@<site_id>` for token-only sites (access token + user id but
+  no relay key — display is the subscription endpoint only, billing
+  fallback impossible without a key). Subscription numbers come from
+  `/api/subscription/self` (access token + `New-Api-User` header) with
+  silent fallback to the OpenAI-compatible billing endpoints. The bare
+  `onenewapi` card on the dashboard is synthesized at render time
+  (borrows the first healthy account's snapshot; never in
+  `last_snapshots`), and the family layout entry is seeded once from the
+  first configured key's layout.
 - **Spend** — `ProviderSpend` (today / yesterday / last30 windows + 30-day
   trend) scanned from local CLI session logs (`spend.rs`), priced via
   LiteLLM / models.dev catalogs (`pricing.rs`, daily refresh, hourly while
@@ -145,3 +157,9 @@ anything unverified lives under `待确认` at the bottom.
 - 2026-09-05 — governance assets (`AGENTS.md`, `CLAUDE.md`, `CONTEXT.md`,
   `docs/dev-startup.md`, `temp/` contract files) are tracked in Git; the
   one-off `run_test.cmd` launcher moved to `temp/scripts/` (local-only).
+- 2026-09-05 — One/New API sites are accounts (merged card + tabs, site
+  manager in Customize). Agent launch rule learned the hard way: pane.exe
+  must be started with stdout/stderr redirected to a FILE — a transient
+  agent shell pipe breaks when the shell exits and the next `println!`
+  panics, killing the refresh task (symptom: footer stuck "Refreshing…",
+  every card ⚠数据过时, `/v1/usage` returns `[]`).

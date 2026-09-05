@@ -35,7 +35,7 @@ export const providerCatalog: readonly ProviderDefinition[] = [
   { familyId: "codebuff", displayName: "Codebuff", queryKind: "nativeSnapshot", supportsApiKey: true, supportsExtraAccounts: false, supportsOAuth: false, iconKey: "codebuff" },
   { familyId: "kilo", displayName: "Kilo", queryKind: "nativeBalance", supportsApiKey: true, supportsExtraAccounts: false, supportsOAuth: false, iconKey: "kilo" },
   { familyId: "aihubmix", displayName: "AihubMix", queryKind: "nativeBalance", supportsApiKey: true, supportsExtraAccounts: false, supportsOAuth: false, iconKey: "aihubmix" },
-  { familyId: "onenewapi", displayName: "One/New API", queryKind: "composite", supportsApiKey: false, supportsExtraAccounts: false, supportsOAuth: false, iconKey: "onenewapi" },
+  { familyId: "onenewapi", displayName: "One/New API", queryKind: "composite", supportsApiKey: false, supportsExtraAccounts: true, supportsOAuth: false, iconKey: "onenewapi" },
   { familyId: "qwen", displayName: "Qwen Code", queryKind: "composite", supportsApiKey: true, supportsExtraAccounts: false, supportsOAuth: false, iconKey: "qwen" },
   { familyId: "hermes", displayName: "Hermes", queryKind: "localOnly", supportsApiKey: false, supportsExtraAccounts: false, supportsOAuth: false, iconKey: "hermes" },
   { familyId: "kimi", displayName: "Kimi Code", queryKind: "composite", supportsApiKey: true, supportsExtraAccounts: true, supportsOAuth: false, iconKey: "kimi" },
