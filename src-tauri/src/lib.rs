@@ -3377,6 +3377,17 @@ fn toggle_popover_centered(app: &tauri::AppHandle) {
     let _ = window.emit("popover-shown", ());
 }
 
+/// Hide the popover from the webview (Esc key): mirrors the tray toggle's
+/// hide branch so the webview drops to low memory while parked in the tray.
+#[tauri::command]
+fn hide_popover(app: tauri::AppHandle) {
+    let Some(window) = app.get_webview_window("main") else {
+        return;
+    };
+    let _ = window.hide();
+    set_webview_memory_level(&window, true);
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -3435,6 +3446,7 @@ pub fn run() {
             open_link,
             copy_share_image,
             set_shortcut,
+            hide_popover,
             codex_redeem_credit,
             install_update,
             check_update
