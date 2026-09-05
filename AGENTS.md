@@ -74,7 +74,7 @@ Verified domain facts, vocabulary, and hard constraints → [`CONTEXT.md`](CONTE
 ## Authoritative vs local-only files
 
 - **Canonical startup guide**: `docs/dev-startup.md`. This file only summarizes it.
-- **README.md** is upstream-facing copy inherited from ItsJazii/pane; its Features/Providers text can lag this fork — trust `src/main.ts` + `src-tauri/src/provider_catalog.rs` over README.
+- **README.md** Features/Providers copy can lag the code — trust `src/main.ts` + `src-tauri/src/provider_catalog.rs` over README.
 - **Local-only, never commit**: the `crate-type = ["rlib"]` line in `src-tauri/Cargo.toml` (rule 5 above), `.codegraph/` (auto-syncs at turn end — don't hand-sync), `.agents/mcp.json`, and everything under `temp/` except its `README.md` / `AGENTS.md`.
 - **Resolved (2026-09-05)**: `AGENTS.md`, `docs/dev-startup.md` and the governance assets (`CLAUDE.md`, `CONTEXT.md`, `temp/` contract files) are tracked in Git; the one-off `run_test.cmd` launcher moved to `temp/scripts/` (local-only).
 

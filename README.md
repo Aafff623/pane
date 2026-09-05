@@ -71,7 +71,7 @@ is hash-verified by Microsoft's pipeline.)
 ### Installer (.exe)
 
 1. Grab **`Pane_x.y.z_x64-setup.exe`** from the
-   [latest release](https://github.com/ItsJazii/pane/releases/latest).
+   [latest release](https://github.com/Aafff623/pane/releases/latest).
 2. Run it. Pane installs per-user to `%LOCALAPPDATA%\Pane` — no admin
    rights needed.
 3. Look for the Pane icon in the system tray (next to the clock). Click it.
@@ -92,7 +92,7 @@ Prerequisites: Node.js 20+, Rust (stable-msvc), Visual Studio C++ Build
 Tools, WebView2 (bundled with Windows 11).
 
 ```
-git clone https://github.com/ItsJazii/pane
+git clone https://github.com/Aafff623/pane
 cd pane
 npm install
 npm run tauri dev     # run with hot reload

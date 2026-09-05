@@ -9,7 +9,7 @@ and how to reach us when something looks wrong.
 **Please do not open a public issue for security problems.**
 
 Use GitHub's private vulnerability reporting: go to the
-[Security tab](https://github.com/ItsJazii/pane/security) → *Report a
+[Security tab](https://github.com/Aafff623/pane/security) → *Report a
 vulnerability*. You'll get a response as fast as humanly possible for a
 small open-source project — usually within a couple of days.
 
@@ -104,5 +104,5 @@ All of this is auditable in the source — links go to the exact code.
 
 ## Supported versions
 
-Only the [latest release](https://github.com/ItsJazii/pane/releases/latest)
+Only the [latest release](https://github.com/Aafff623/pane/releases/latest)
 is supported. The auto-updater keeps installs current.

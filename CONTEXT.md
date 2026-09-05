@@ -9,9 +9,10 @@ anything unverified lives under `待确认` at the bottom.
   per-vendor quotas with reset windows, local CLI spend, tray projections,
   optional toasts. Vanilla TypeScript + Vite frontend, Rust backend, no
   Electron, one process plus WebView2.
-- Git layout: `upstream` = official `ItsJazii/pane`; `origin` = `Aafff623/pane`
-  (this fork). A single branch `main` exists locally and on origin; feature
-  work happens on `codex/<feature>` branches.
+- Git layout: single remote `origin` = `Aafff623/pane` — an independent
+  project (detached from any upstream, 2026-09-06). A single branch `main`
+  exists locally and on origin; feature work happens on `codex/<feature>`
+  branches.
 - Version 0.4.46 (`package.json` + `src-tauri/tauri.conf.json`), identifier
   `com.jazii.pane`, productName `Pane`.
 - Privacy boundary (asserted by tests in the code): tokens go only to their
@@ -111,8 +112,8 @@ anything unverified lives under `待确认` at the bottom.
   card-internal pace predictions are removed from the UI (the alerts.rs
   notification projection stays);
   merged card + account tabs is the approved multi-account pattern.
-- `README.md` Features/Providers copy is upstream-inherited and can lag this
-  fork — code is the source of truth.
+- `README.md` Features/Providers copy can lag the code — code is the source
+  of truth.
 - The user personally does UI acceptance; agents deliver build/test evidence
   plus an acceptance checklist.
 - Do not suggest MiniMax to the user (removed from their environment; the

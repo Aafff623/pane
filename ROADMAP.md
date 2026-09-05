@@ -94,4 +94,5 @@ Long-context pricing tiers shipped in 0.4.9.
 - PostHog SDK telemetry — reconsidered 2026-07-27: Pane ships its own
   minimal, SDK-free, opt-out daily statistic instead
   (src-tauri/src/telemetry.rs; see docs/privacy.md), keeping the same
-  daily-rollup restraint as upstream without the analytics dependency.
+  daily-rollup restraint as the macOS original (OpenUsage) without the
+  analytics dependency.
