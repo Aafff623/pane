@@ -179,7 +179,9 @@ const PROVIDER_DEFINITIONS: &[ProviderDefinition] = &[
         display_name: "One/New API",
         query_kind: QueryKind::Composite,
         supports_api_key: false,
-        supports_extra_accounts: false,
+        // Relay sites are accounts: one merged family card with a tab per
+        // site key (or per token-only site), like the Kimi account model.
+        supports_extra_accounts: true,
         icon_key: "onenewapi",
     },
     ProviderDefinition {
@@ -279,11 +281,13 @@ mod tests {
 
     #[test]
     fn catalog_marks_the_multi_account_families() {
-        // The six API-key families plus Antigravity's captured OAuth slots.
+        // The six API-key families, Antigravity's captured OAuth slots,
+        // and the One/New API relay sites (site = account).
         let expected = [
             "cursor",
             "antigravity",
             "deepseek",
+            "onenewapi",
             "kimi",
             "stepfun",
             "siliconflow",

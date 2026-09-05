@@ -994,6 +994,21 @@ function ensureLayout(): void {
     }
   }
 
+  // One/New API merged card: the family layout now owns the card's rows,
+  // but the metric config historically lived on each per-key entry. Seed
+  // the family entry from the first configured key's layout — once; after
+  // that the user customizes the merged card directly.
+  const onaFamily = layout.providers[ONA_FAMILY];
+  if (!onaFamily || onaFamily.metricOrder.length === 0) {
+    const seedId = Object.keys(layout.providers).find(
+      (id) => isOnaKeyCardId(id) && layout.providers[id].metricOrder.length > 0,
+    );
+    if (seedId) {
+      layout.providers[ONA_FAMILY] = { ...layout.providers[seedId] };
+      changed = true;
+    }
+  }
+
   config.layout = layout;
   if (changed) void patchConfig({ layout, disabled: config.disabled });
 }
@@ -1331,7 +1346,13 @@ function renderCard(s: Snapshot): string {
       .filter((snap) => providerFamily(snap.id) === family && !isCardDisabled(snap.id))
       .map((snap) => snap.id);
     if (accountIds.length > 1) {
-      const active = resolveDisplayedAccount(family, s.id, accountIds);
+      // Families whose bare card IS an account (kimi) default to it; One/New
+      // API has no bare snapshot at all, so the default tab is the first
+      // healthy account — otherwise the computed tabs would never light up.
+      const defaultId = lastSnapshots.some((snap) => snap.id === s.id)
+        ? s.id
+        : (accountIds.find((a) => accountHealthDot(a) === "green") ?? accountIds[0]);
+      const active = resolveDisplayedAccount(family, defaultId, accountIds);
       const activeSnap = lastSnapshots.find(
         (snap) => snap.id === active && !isCardDisabled(snap.id),
       );
@@ -1353,6 +1374,25 @@ function renderCard(s: Snapshot): string {
           return `<button class="card-account-tab${on ? " on" : ""}" data-card-account="${family}|${escapeHtml(id)}" title="${escapeHtml(dotTitle)}"><span class="acct-dot ${dot}"></span>${escapeHtml(label)}</button>`;
         })
         .join("")}</div>`;
+    }
+    // The synthesized One/New API family card carries the family id but no
+    // real snapshot backs it — display the first healthy account directly
+    // (same rule the anchor used) so tabs, trends and refresh all hit the
+    // real account snapshot. Families with a real bare card are untouched.
+    if (
+      shown.id === family &&
+      !lastSnapshots.some((snap) => snap.id === family)
+    ) {
+      const accountIds = lastSnapshots
+        .filter((snap) => providerFamily(snap.id) === family && !isCardDisabled(snap.id))
+        .map((snap) => snap.id);
+      const target =
+        accountIds.find((a) => accountHealthDot(a) === "green") ?? accountIds[0];
+      const borrowed =
+        target !== undefined
+          ? lastSnapshots.find((snap) => snap.id === target && !isCardDisabled(snap.id))
+          : undefined;
+      if (borrowed) shown = borrowed;
     }
   }
   const plan = shown.plan ? `<span class="plan">${escapeHtml(shown.plan)}</span>` : "";
@@ -1498,7 +1538,11 @@ function orderedSnapshots(): Snapshot[] {
   // card. Antigravity is the exception: its bare card is the logged-in
   // account and the slots are independent captured accounts — they stay
   // as separate cards (multi-account parallel monitoring, not a switcher).
-  return lastSnapshots
+  // One/New API has no bare snapshot of its own (every card is a site
+  // account), so the family card is synthesized: it borrows the first
+  // healthy account's data for the default display, tabs switch for real.
+  const snaps = withOnaFamilyAnchor(lastSnapshots);
+  return snaps
     .filter((s) => {
       const fam = providerFamily(s.id);
       if (s.id !== fam && supportsExtraAccounts(fam) && !isParallelAccountFamily(fam)) return false;
@@ -1510,6 +1554,21 @@ function orderedSnapshots(): Snapshot[] {
       if (ia !== -1 && ib !== -1) return ia - ib;
       return rankSnapshot(a) - rankSnapshot(b);
     });
+}
+
+/// Views `snapshots` as if a bare `onenewapi` family card existed: when any
+/// site-account card does, clone the first healthy one (else the first) under
+/// the family id. The clone is render-only — it never enters lastSnapshots,
+/// so the site cards keep their real ids for tabs, trends, and refresh.
+function withOnaFamilyAnchor(snapshots: Snapshot[]): Snapshot[] {
+  if (!snapshots.some((s) => isOnaKeyCardId(s.id))) return snapshots;
+  if (snapshots.some((s) => s.id === ONA_FAMILY)) return snapshots;
+  const accounts = snapshots.filter((s) => isOnaKeyCardId(s.id));
+  const healthy = accounts.find((s) => s.status === "ok" && accountHealthDot(s.id) === "green");
+  const anchor = { ...(healthy ?? accounts[0]) };
+  anchor.id = ONA_FAMILY;
+  anchor.name = providerDisplayName(ONA_FAMILY);
+  return [...snapshots, anchor];
 }
 
 // The ring is built from annular wedges (like the Mac's SectorMark chart):
@@ -3518,6 +3577,17 @@ function renderCustConfig(id: string): string {
   // Checked BEFORE the KEY_PROVIDERS gate so non-key families like
   // Antigravity (captured OAuth slots) land here too.
   if (supportsExtraAccounts(id) && isFamilyRow) {
+    // One/New API manages its sites in the family row's own account section
+    // (onaFamilySection) — no generic add-account dialog here.
+    if (id === ONA_FAMILY) {
+      return `<div class="cust-config cust-form">
+        <div class="form-field">
+          <span class="form-label">${escapeHtml(t("customize.connLabel"))}</span>
+          <div data-cred-chips="${escapeHtml(id)}">${credChipsHtml(id)}</div>
+        </div>
+        <p class="settings-note">${escapeHtml(t("customize.onaAccountsHint"))}</p>
+      </div>`;
+    }
     const getKey = getApiKeyLink(id);
     const linkLink = getKey
       ? `<button class="mini-btn cust-get-key" data-link="${escapeHtml(getKey)}">${escapeHtml(t("customize.getApiKey"))}</button>`
@@ -3710,12 +3780,6 @@ function renderCustomize(): string {
       if (onaSitesLoaded && isOnaKeyCardId(id) && !onaFindConfiguredKey(id)) {
         return false;
       }
-      // Family master lives in Settings once any key exists. Keep the
-      // empty family row only so Customize can still discover the family
-      // before the first key.
-      if (id === ONA_FAMILY && onaTotalKeys() > 0) {
-        return false;
-      }
       return !(id.includes("@") && !snapshot && !config.disabled.includes(id));
     })
     .sort((a, b) => nameOf(a).localeCompare(nameOf(b), "en"));
@@ -3770,7 +3834,9 @@ function renderCustomize(): string {
       const letter = /^[a-z]/i.test(name) ? name[0].toUpperCase() : "#";
       const accountRows =
         id === providerFamily(id) && supportsExtraAccounts(id)
-          ? accountChildRows(id)
+          ? id === ONA_FAMILY
+            ? onaFamilySection()
+            : accountChildRows(id)
           : "";
       return `
         <article class="provider customize-block${enabled ? "" : " muted"}${open ? " open" : ""}" data-cust-provider="${id}" data-letter="${letter}" data-name="${escapeHtml(name.toLowerCase())}">
@@ -4477,6 +4543,26 @@ function moveRow(L: ProviderLayout, key: string, target: string): void {
 }
 
 function handleCustomizeClick(target: HTMLElement): boolean {
+  // One/New API site manager (relocated from Settings): expand/edit/delete
+  // actions live inside the family row's account section.
+  const onaHandled = handleOneNewApiClick(target);
+  if (onaHandled) return true;
+  const clearToken = target.closest<HTMLElement>("[data-ona-clear-token]");
+  if (clearToken) {
+    void clearOneNewApiToken(clearToken.dataset.onaClearToken!);
+    return true;
+  }
+  const delKey = target.closest<HTMLElement>("[data-ona-delete-key]");
+  if (delKey) {
+    const siteId = delKey.closest<HTMLElement>("[data-ona-site]")?.dataset.onaSite;
+    if (siteId) void deleteOneNewApiKey(siteId, delKey.dataset.onaDeleteKey!);
+    return true;
+  }
+  const del = target.closest<HTMLElement>("[data-ona-delete]");
+  if (del) {
+    void deleteOneNewApiSite(del.dataset.onaDelete!);
+    return true;
+  }
   const link = target.closest<HTMLElement>("[data-link]");
   if (link) {
     void invoke("open_link", { url: link.dataset.link }).catch((err) => {
@@ -4792,7 +4878,6 @@ function handleCustomizeChange(target: HTMLInputElement): void {
     pendingToggles.push({ id, enable });
     config.disabled = withPendingToggles(config.disabled); // optimistic
     renderAll(); // disabled cards vanish from the dashboard immediately
-    if (id === ONA_FAMILY) syncOneNewApiFamilyToggle();
     if (!enable) requestTraySync();
     disabledSaveQueue = disabledSaveQueue.then(async () => {
       // Fresh base at save time: includes server truth plus anything
@@ -4806,7 +4891,6 @@ function handleCustomizeChange(target: HTMLInputElement): void {
       pendingToggles.shift(); // this task's toggle is now persisted
       // Merge any newer still-pending toggles back on top of the saved state.
       config.disabled = withPendingToggles(config.disabled);
-      if (id === ONA_FAMILY) syncOneNewApiFamilyToggle();
       // Only an unmatched enable generation still needs a usage attempt.
       if (
         enableGeneration !== null &&
@@ -4951,11 +5035,6 @@ function onaFindConfiguredKey(
 function onaCardName(snapshotId: string): string | undefined {
   const found = onaFindConfiguredKey(snapshotId);
   return found ? `${found.site.name} · ${found.key.label}` : undefined;
-}
-
-function syncOneNewApiFamilyToggle(): void {
-  const el = document.querySelector<HTMLInputElement>("#ona-family-enabled");
-  if (el) el.checked = !config.disabled.includes(ONA_FAMILY);
 }
 
 function foldOnaKeysIntoLayout(layout: Layout | null = config.layout): boolean {
@@ -5154,16 +5233,41 @@ function renderOneNewApiSite(site: OneNewApiSiteDto): string {
     </article>`;
 }
 
+/// One/New API family row children in Customize: the site manager that used
+/// to live in Settings, now the family's account list — one row per relay
+/// site (the account) with its access token and relay keys, plus the
+/// add-site form. Rendered inline from the cached onaSites so drawer
+/// re-renders never blank it.
+function onaFamilySection(): string {
+  if (!onaSitesLoaded) {
+    void loadOneNewApiSites();
+    return `<p class="dim cust-account-loading">${escapeHtml(t("customize.credStatusLoading"))}</p>`;
+  }
+  return `<div class="cust-account-children" data-accounts-children="${escapeHtml(ONA_FAMILY)}"><div id="onenewapi-sites">${onaSites.map(renderOneNewApiSite).join("")}</div></div>
+    <form id="onenewapi-add" class="ona-add" autocomplete="off">
+      <input id="ona-add-name" type="text" spellcheck="false" placeholder="${escapeHtml(t("settings.onenewapiNamePh"))}" />
+      <input id="ona-add-url" type="text" spellcheck="false" placeholder="${escapeHtml(t("settings.onenewapiUrlPh"))}" />
+      <div class="ona-add-row">
+        <input id="ona-add-secret" type="password" placeholder="${escapeHtml(t("settings.onenewapiKeySecretPh"))}" autocomplete="new-password" />
+        <button type="submit">${escapeHtml(t("settings.onenewapiAdd"))}</button>
+      </div>
+    </form>`;
+}
+
 function renderOneNewApiSettings(): void {
+  // The sites live inside the Customize drawer now; a drawer rebuild
+  // re-renders them inline, so only a standalone host needs a manual fill.
+  if (customizeOpen) {
+    renderDrawerBody();
+    return;
+  }
   const host = document.querySelector("#onenewapi-sites");
-  if (!host) return;
-  host.innerHTML = onaSites.map(renderOneNewApiSite).join("");
-  syncOneNewApiFamilyToggle();
+  if (host) host.innerHTML = onaSites.map(renderOneNewApiSite).join("");
 }
 
 function focusOneNewApiSite(id: string): void {
   onaExpanded.add(id);
-  document.querySelector("#onenewapi-sites")?.closest(".acc-group")?.classList.add("open");
+  custExpanded.add(ONA_FAMILY);
   renderOneNewApiSettings();
   requestAnimationFrame(() => {
     document.querySelector(`[data-ona-site="${CSS.escape(id)}"]`)?.scrollIntoView({
@@ -5179,13 +5283,15 @@ async function loadOneNewApiSites(opts?: { focusId?: string }): Promise<void> {
     onaSitesLoaded = true;
   } catch (err) {
     onaSites = [];
+    // Mark loaded even on failure — the render-triggered fetch must not
+    // retry on every drawer repaint (the error already hit the footer).
+    onaSitesLoaded = true;
     setOneNewApiStatus("footer.onenewapiFailed", { err: String(err) });
     if (opts?.focusId) {
       focusOneNewApiSite(opts.focusId);
     } else {
       renderOneNewApiSettings();
     }
-    if (customizeOpen) renderDrawerBody();
     return;
   }
   const folded = foldOnaKeysIntoLayout();
@@ -5205,7 +5311,6 @@ async function loadOneNewApiSites(opts?: { focusId?: string }): Promise<void> {
   } else {
     renderOneNewApiSettings();
   }
-  if (customizeOpen) renderDrawerBody();
 }
 
 async function createOneNewApiSite(): Promise<void> {
@@ -5500,7 +5605,7 @@ async function deleteOneNewApiKey(siteId: string, keyId: string): Promise<void> 
   }
 }
 
-function handleOneNewApiClick(target: HTMLElement): void {
+function handleOneNewApiClick(target: HTMLElement): boolean {
   const toggle = target.closest<HTMLElement>("[data-ona-toggle]");
   if (toggle) {
     const id = toggle.dataset.onaToggle!;
@@ -5513,12 +5618,12 @@ function handleOneNewApiClick(target: HTMLElement): void {
       onaExpanded.add(id);
     }
     renderOneNewApiSettings();
-    return;
+    return true;
   }
   const editKey = target.closest<HTMLElement>("[data-ona-edit-key]");
   if (editKey) {
     const keyId = editKey.dataset.onaEditKey!;
-    if (onaEditingKeyId === keyId) return;
+    if (onaEditingKeyId === keyId) return true;
     onaEditingKeyId = keyId;
     const siteId = editKey.closest<HTMLElement>("[data-ona-site]")?.dataset.onaSite;
     if (siteId) onaExpanded.add(siteId);
@@ -5528,12 +5633,12 @@ function handleOneNewApiClick(target: HTMLElement): void {
         .querySelector<HTMLInputElement>(`[data-ona-key="${CSS.escape(keyId)}"] [data-ona-key-label]`)
         ?.focus();
     });
-    return;
+    return true;
   }
   const edit = target.closest<HTMLElement>("[data-ona-edit]");
   if (edit) {
     const id = edit.dataset.onaEdit!;
-    if (onaEditingId === id) return;
+    if (onaEditingId === id) return true;
     onaEditingId = id;
     onaExpanded.add(id);
     renderOneNewApiSettings();
@@ -5542,75 +5647,21 @@ function handleOneNewApiClick(target: HTMLElement): void {
         .querySelector<HTMLInputElement>(`[data-ona-site="${CSS.escape(id)}"] [data-ona-edit-name]`)
         ?.focus();
     });
-    return;
+    return true;
   }
   const cancelKey = target.closest<HTMLElement>("[data-ona-cancel-key]");
   if (cancelKey) {
     onaEditingKeyId = null;
     renderOneNewApiSettings();
-    return;
+    return true;
   }
   const cancel = target.closest<HTMLElement>("[data-ona-cancel]");
   if (cancel) {
     onaEditingId = null;
     renderOneNewApiSettings();
+    return true;
   }
-}
-
-function initOneNewApiSettings(): void {
-  const addForm = document.querySelector<HTMLFormElement>("#onenewapi-add");
-  addForm?.addEventListener("submit", (e) => {
-    e.preventDefault();
-    void createOneNewApiSite();
-  });
-  document.querySelector<HTMLInputElement>("#ona-family-enabled")?.addEventListener("change", (e) => {
-    const input = e.currentTarget as HTMLInputElement;
-    input.dataset.enable = ONA_FAMILY;
-    handleCustomizeChange(input);
-  });
-  const host = document.querySelector("#onenewapi-sites");
-  host?.addEventListener("click", (e) => {
-    const target = e.target as HTMLElement;
-    const clearToken = target.closest<HTMLElement>("[data-ona-clear-token]");
-    if (clearToken) {
-      e.preventDefault();
-      void clearOneNewApiToken(clearToken.dataset.onaClearToken!);
-      return;
-    }
-    const delKey = target.closest<HTMLElement>("[data-ona-delete-key]");
-    if (delKey) {
-      e.preventDefault();
-      const siteId = delKey.closest<HTMLElement>("[data-ona-site]")?.dataset.onaSite;
-      if (siteId) void deleteOneNewApiKey(siteId, delKey.dataset.onaDeleteKey!);
-      return;
-    }
-    const del = target.closest<HTMLElement>("[data-ona-delete]");
-    if (del) {
-      e.preventDefault();
-      void deleteOneNewApiSite(del.dataset.onaDelete!);
-      return;
-    }
-    handleOneNewApiClick(target);
-  });
-  host?.addEventListener("submit", (e) => {
-    const target = e.target as HTMLElement;
-    const addKey = target.closest<HTMLElement>("[data-ona-add-key]");
-    if (addKey) {
-      e.preventDefault();
-      void createOneNewApiKey(addKey.dataset.onaAddKey!);
-      return;
-    }
-    const editKey = target.closest<HTMLElement>("[data-ona-edit-key-form]");
-    if (editKey) {
-      e.preventDefault();
-      void saveOneNewApiKey(editKey.dataset.onaEditKeyForm!, editKey.dataset.onaKey!);
-      return;
-    }
-    const form = target.closest<HTMLElement>("[data-ona-edit-form]");
-    if (!form) return;
-    e.preventDefault();
-    void saveOneNewApiSite(form.dataset.onaEditForm!);
-  });
+  return false;
 }
 
 async function unparkRecentlyKeyed(): Promise<void> {
@@ -5862,7 +5913,6 @@ async function initSettings(): Promise<void> {
     void resetAllSettings();
   });
 
-  initOneNewApiSettings();
 }
 
 /// Restore every preference to the same defaults a fresh install gets.
@@ -6021,7 +6071,6 @@ window.addEventListener("DOMContentLoaded", () => {
   const setSettings = (open: boolean) => {
     document.body.classList.toggle("settings-open", open);
     document.querySelector("#settings-btn")?.classList.toggle("active", open);
-    if (open) void loadOneNewApiSites();
   };
   document.querySelector("#settings-btn")!.addEventListener("click", () => {
     setDrawer(false);
@@ -6042,6 +6091,32 @@ window.addEventListener("DOMContentLoaded", () => {
   const drawerBody = document.querySelector<HTMLElement>("#drawer-body")!;
   drawerBody.addEventListener("click", (e) => {
     handleCustomizeClick(e.target as HTMLElement);
+  });
+  // One/New API site manager forms (add-site / edit-site / relay keys) —
+  // submit delegation, since the drawer body re-renders innerHTML.
+  drawerBody.addEventListener("submit", (e) => {
+    const target = e.target as HTMLElement;
+    if (target.id === "onenewapi-add") {
+      e.preventDefault();
+      void createOneNewApiSite();
+      return;
+    }
+    const addKey = target.closest<HTMLElement>("[data-ona-add-key]");
+    if (addKey) {
+      e.preventDefault();
+      void createOneNewApiKey(addKey.dataset.onaAddKey!);
+      return;
+    }
+    const editKey = target.closest<HTMLElement>("[data-ona-edit-key-form]");
+    if (editKey) {
+      e.preventDefault();
+      void saveOneNewApiKey(editKey.dataset.onaEditKeyForm!, editKey.dataset.onaKey!);
+      return;
+    }
+    const form = target.closest<HTMLElement>("[data-ona-edit-form]");
+    if (!form) return;
+    e.preventDefault();
+    void saveOneNewApiSite(form.dataset.onaEditForm!);
   });
   drawerBody.addEventListener("change", (e) => {
     handleCustomizeChange(e.target as HTMLInputElement);

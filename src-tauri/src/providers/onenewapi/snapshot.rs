@@ -53,6 +53,7 @@ async fn dashboard_get(
     Ok((status, json))
 }
 
+#[derive(Clone)]
 pub struct KeyCard {
     pub id: String,
     pub name: String,
@@ -81,7 +82,26 @@ pub fn key_cards_at(path: &Path) -> Result<Vec<KeyCard>, String> {
                 .has_access_token()
                 .then(|| site.access_token.clone());
             let user_id = (!site.user_id.is_empty()).then(|| site.user_id.clone());
-            site.keys
+            // Token-only site: a dashboard access token with no relay key
+            // still owns a card — the subscription endpoint is the whole
+            // display, no billing fallback possible.
+            let token_only = access_token
+                .clone()
+                .filter(|_| site.keys.iter().all(|k| k.api_key.is_empty()))
+                .zip(user_id.clone())
+                .map(|_| KeyCard {
+                    id: format!("onenewapi@{}", site.id),
+                    name: site.name.clone(),
+                    origin: site.base_url.clone(),
+                    api_key: String::new(),
+                    display: site.quota_display(),
+                    per_unit,
+                    rate,
+                    access_token: access_token.clone(),
+                    user_id: user_id.clone(),
+                });
+            let key_cards = site
+                .keys
                 .iter()
                 .filter(|k| !k.api_key.is_empty())
                 .map(move |key| KeyCard {
@@ -94,7 +114,8 @@ pub fn key_cards_at(path: &Path) -> Result<Vec<KeyCard>, String> {
                     rate,
                     access_token: access_token.clone(),
                     user_id: user_id.clone(),
-                })
+                });
+            token_only.into_iter().chain(key_cards)
         })
         .collect())
 }
@@ -163,6 +184,12 @@ async fn fetch_key(
                 }
             }
         }
+    }
+
+    // Token-only card: no relay key to fall back on — the subscription
+    // attempt above was the whole query.
+    if card.api_key.is_empty() {
+        return Err("subscription unavailable or access token rejected".into());
     }
 
     let sub_url = format!("{origin}/v1/dashboard/billing/subscription");

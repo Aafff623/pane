@@ -1032,6 +1032,9 @@ fn configured_extra_account_ids() -> HashSet<String> {
             .iter()
             .map(cursor_accounts::card_id_for_account),
     );
+    // One/New API relay sites are accounts too — their card ids come from
+    // the site store (one per key, plus token-only sites), not accounts.rs.
+    ids.extend(providers::onenewapi::key_card_ids());
     ids
 }
 
@@ -1656,6 +1659,24 @@ async fn refresh_provider(provider_id: String) -> Result<providers::Snapshot, St
         return Ok(
             providers::codex::snapshot_at(account.dir, provider_id.clone(), account.name).await,
         );
+    }
+
+    // One/New API relay accounts: cards come from the site store, keyed by
+    // relay key id (or site id for token-only sites). The bare family id
+    // resolves to the first card — the merged card's default tab.
+    if family == "onenewapi" {
+        let cards = providers::onenewapi::key_cards()?;
+        let card = cards
+            .iter()
+            .find(|card| card.id == provider_id)
+            .or_else(|| cards.first())
+            .ok_or_else(|| "no One/New API sites configured".to_string())?;
+        let client = providers::http_no_redirect();
+        return Ok(providers::onenewapi::snapshot_key_with_client(
+            client,
+            card.clone(),
+        )
+        .await);
     }
 
     // API-key multi-account families (kimi@fp, deepseek@fp, …).
@@ -2716,6 +2737,46 @@ fn account_rename(provider: String, index: usize, label: String) -> Result<(), S
 /// list. The key never leaves whole — only mask_key's "sk-…abcd" tail.
 #[tauri::command]
 fn account_list(provider: String) -> Result<Vec<Value>, String> {
+    if provider == "onenewapi" {
+        // Relay sites are the accounts: one entry per site key, or a single
+        // token-only entry when the site carries just a dashboard access
+        // token. Ids mirror onenewapi::key_cards_at exactly, and store
+        // order is the merged card's tab order.
+        let sites = providers::onenewapi::list_sites().unwrap_or_default();
+        return Ok(sites
+            .iter()
+            .flat_map(|site| {
+                let live_keys: Vec<_> = site.keys.iter().filter(|k| k.has_api_key).collect();
+                if !live_keys.is_empty() {
+                    let single = live_keys.len() == 1;
+                    return live_keys
+                        .into_iter()
+                        .map(move |key| {
+                            json!({
+                                "id": format!("onenewapi@{}", key.id),
+                                "label": if single {
+                                    site.name.clone()
+                                } else {
+                                    format!("{} · {}", site.name, key.label)
+                                },
+                                "maskedKey": "sk-…",
+                                "baseUrl": site.base_url,
+                            })
+                        })
+                        .collect::<Vec<Value>>()
+                }
+                if site.has_access_token && !site.user_id.is_empty() {
+                    return vec![json!({
+                        "id": format!("onenewapi@{}", site.id),
+                        "label": site.name,
+                        "maskedKey": "access token",
+                        "baseUrl": site.base_url,
+                    })];
+                }
+                Vec::new()
+            })
+            .collect());
+    }
     if provider == "antigravity" {
         // Antigravity has no API-key accounts file; its "accounts" are the
         // captured Google credential slots.

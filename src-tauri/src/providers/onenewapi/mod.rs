@@ -299,6 +299,17 @@ pub fn key_cards() -> Result<Vec<KeyCard>, String> {
     snapshot::key_cards_at(&store_path())
 }
 
+/// Card ids the current store would produce — the account ids for
+/// `account_list` and the cached-paint allowlist. Store order is the
+/// account order (first entry = the merged card's default tab).
+pub fn key_card_ids() -> Vec<String> {
+    // The mutation lock keeps this consistent with a concurrent key delete.
+    match key_cards() {
+        Ok(cards) => cards.into_iter().map(|card| card.id).collect(),
+        Err(_) => Vec::new(),
+    }
+}
+
 pub async fn prepare_key_cards() -> Result<Vec<KeyCard>, String> {
     snapshot::schedule_backfill_missing_display_units(store_path());
     key_cards()
