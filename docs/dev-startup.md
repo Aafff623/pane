@@ -138,6 +138,7 @@ Invoke-RestMethod http://127.0.0.1:6736/v1/usage | Select-Object -ExpandProperty
 | Mistake | Fix |
 |---------|-----|
 | Launching `pane.exe` with `Start-Process` or `&` | Use `CreateProcess` with `lpDesktop = "WinSta0\Default"` — without it the window opens on the non-interactive station (invisible) |
+| Launching `pane.exe` with stdout/stderr attached to a transient agent shell | Redirect to a file (`temp/scripts/launch-pane.ps1` wraps with `cmd /c ... >> pane-dev.log`) — when the agent shell exits the pipe breaks and the next `println!` **panics, killing the refresh task**: footer stuck "Refreshing…", every card stays ⚠数据过时, `/v1/usage` returns `[]` |
 | Serving dist/ with `python -m http.server` | Use `pnpm dev`; Python skips cache headers and WebView2 caches forever |
 | Not killing old pane before re-launching | Old pane intercepts the second launch via single-instance plugin and just *toggles the window* — no fresh binary loaded |
 | Rebuilding Rust for CSS/TS changes | Not needed; `pnpm build` + Vite reload is sufficient |

@@ -47,3 +47,5 @@ pane.md
 
 # Per-chair agent config (Cursor rules) — local like pane.md
 .cursor/
+
+.playwright-mcp/
