@@ -1487,7 +1487,8 @@ function renderCard(s: Snapshot): string {
         ${finalBody}
         ${linksRow}
         ${caret}
-      </div>`}`;
+      </div>`}
+    </article>`;
 }
 
 function orderedSnapshots(): Snapshot[] {
@@ -5990,10 +5991,18 @@ window.addEventListener("DOMContentLoaded", () => {
       e.preventDefault();
       undoLayout();
     }
-    // Esc backs out of Customize/Settings (Mac parity).
+    // Esc backs out of Customize/Settings (Mac parity); with nothing open
+    // it hides the popover, like clicking empty space.
     if (e.key === "Escape") {
-      setDrawer(false);
-      setSettings(false);
+      // IME: Esc cancels an in-flight composition (candidate window) — it
+      // must not double as "close the panel" / "hide the window".
+      if (e.isComposing || e.keyCode === 229) return;
+      if (customizeOpen || document.body.classList.contains("settings-open")) {
+        setDrawer(false);
+        setSettings(false);
+        return;
+      }
+      void invoke("hide_popover").catch(() => {});
     }
     // Ctrl+R refreshes data — and must NOT reload the webview.
     if (e.ctrlKey && e.key.toLowerCase() === "r") {
