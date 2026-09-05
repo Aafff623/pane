@@ -119,8 +119,10 @@ body {
   width: 42px;
 }
 
-/* Solid provider rail: the icons should read as real marks, not artwork
-   seen through a translucent glass layer. */
+/* Floating rail: with glass on, --card is translucent and the rail overlays
+   page content (cards, customize list) — blur whatever slides underneath so
+   overlapped text/icons never collide with the rail's own marks (which stay
+   crisp). body.no-glass forces an opaque, blur-free rail instead. */
 .sidebar {
   position: absolute;
   left: 0;
@@ -134,8 +136,8 @@ body {
      over the sidebar's lower edge — otherwise ⚙ sits under it, unclickable. */
   padding: 12px 0 42px;
   background: var(--card);
-  backdrop-filter: none;
-  -webkit-backdrop-filter: none;
+  backdrop-filter: blur(20px) saturate(1.4);
+  -webkit-backdrop-filter: blur(20px) saturate(1.4);
   border-right: 1px solid rgba(255, 255, 255, 0.08);
   box-shadow: 2px 0 12px rgba(0, 0, 0, 0.18);
   transform: translateX(calc(-100% + 4px));
@@ -144,8 +146,8 @@ body {
 
 :root[data-theme="light"] .sidebar {
   background: var(--card);
-  backdrop-filter: none;
-  -webkit-backdrop-filter: none;
+  backdrop-filter: blur(20px) saturate(1.4);
+  -webkit-backdrop-filter: blur(20px) saturate(1.4);
   border-right: 1px solid rgba(0, 0, 0, 0.08);
   box-shadow: 2px 0 12px rgba(0, 0, 0, 0.08);
 }
@@ -159,6 +161,27 @@ body {
 :root[data-theme="light"] #side-zone:hover .sidebar,
 :root[data-theme="light"] .sidebar:focus-within {
   box-shadow: 8px 0 32px -8px rgba(0, 0, 0, 0.12);
+}
+
+/* Frosted feather: a masked backdrop-blur strip bleeding past the rail's
+   right edge — full strength at the border, fading to none — so page
+   content sliding underneath never meets a hard glass edge. */
+.sidebar::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 100%;
+  width: 36px;
+  pointer-events: none;
+  backdrop-filter: blur(20px) saturate(1.4);
+  -webkit-backdrop-filter: blur(20px) saturate(1.4);
+  -webkit-mask-image: linear-gradient(to right, #000, transparent);
+  mask-image: linear-gradient(to right, #000, transparent);
+}
+
+body.no-glass .sidebar::after {
+  content: none;
 }
 
 .main-col {
