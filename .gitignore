@@ -20,8 +20,15 @@ src-tauri/gen
 .tmp/
 build-latest.log
 
-# Local handoff / research / secrets workspace (see temp/README.md)
-temp/
+# Local handoff / research / secrets workspace (see temp/README.md);
+# the workspace contract files stay tracked
+temp/*
+!temp/README.md
+!temp/AGENTS.md
+
+# Local-only agent config (project MCP) and code index
+.agents/mcp.json
+.codegraph/
 
 # Session tooling
 .claude/
