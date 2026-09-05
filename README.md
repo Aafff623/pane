@@ -9,9 +9,9 @@ asking: *How much of my Claude session is left? When does my Codex weekly
 reset? What did today actually cost me?*
 
 Pane is the [OpenUsage](https://www.openusage.ai/) port for Windows: a free
-AI plan tracker for Claude, Codex, Cursor, Copilot, Kimi, Grok, and 15 more.
+AI plan tracker for Claude, Codex, Cursor, Copilot, Kimi, Grok, and 16 more.
 
-**[pane.jazii.dev](https://pane.jazii.dev)** · [Guides](https://pane.jazii.dev/guides) · [Install](#install) · [How it works](#how-it-works) · [Providers](#providers-24-and-counting) · [Features](#features) · [Privacy](#privacy--security) · [Credits](#credits)
+**[trypane.xyz](https://trypane.xyz)** · [Guides](https://trypane.xyz/guides) · [Install](#install) · [How it works](#how-it-works) · [Providers](#providers-25-and-counting) · [Features](#features) · [Privacy](#privacy--security) · [Credits](#credits)
 
 <img src="docs/promo.png" width="760" alt="Pane — track all your AI subscription limits in one tray app: Total Spend donut with per-provider slices, usage cards with pace bars" />
 
@@ -50,7 +50,7 @@ reviewed, hash-verified, no SmartScreen prompt.
 ### One-liner (PowerShell)
 
 ```powershell
-irm https://pane.jazii.dev/install.ps1 | iex
+irm https://trypane.xyz/install.ps1 | iex
 ```
 
 Downloads the latest release, verifies its SHA-256, installs per-user
@@ -60,7 +60,7 @@ Piping a script straight into PowerShell runs whatever the server sends
 at that moment. Prefer to look first? Same script, two steps:
 
 ```powershell
-iwr https://pane.jazii.dev/install.ps1 -OutFile install.ps1
+iwr https://trypane.xyz/install.ps1 -OutFile install.ps1
 # read install.ps1 — one short, commented script — then:
 powershell -ExecutionPolicy Bypass -File .\install.ps1
 ```
@@ -177,7 +177,9 @@ success/failure counts — never amounts or error text) — see
 | Codebuff | `codebuff login` credentials file or API key → credits + weekly limit |
 | Kilo | Kilo CLI login file or API key → credit blocks + Kilo Pass |
 | AihubMix | API key (Settings or auto-detected from OpenCode) → usage vs spending limit |
+| One/New API | Add multiple compatible sites and keys in Settings; one quota card per key, with owner-only local secret storage |
 | Qwen Code | Coding Plan key (Settings or env) → 5h/weekly/monthly request quotas + local spend |
+| Hermes | Local ledger `%LOCALAPPDATA%\hermes\state.db` → two recent user models, routes, and catalog-priced spend, including scoped AihubMix launch-model rates |
 | Hermes | Local ledger `%LOCALAPPDATA%\hermes\state.db` — last model, route, and catalog-priced spend |
 | StepFun | API key (Settings or `STEPFUN_API_KEY`) → CNY balance (global + .ai hosts) |
 | SiliconFlow | API key (Settings or `SILICONFLOW_API_KEY`) → CNY balance (.cn + .com hosts) |
@@ -197,12 +199,18 @@ whatever the community asks for loudest.
 
 ## Features
 
-- **Multi-account Claude & Codex** 🆕 — running a personal plan AND a
+- **Multi-account Claude & Codex** — running a personal plan AND a
   work/enterprise seat? Keep the second login in its own folder (via
   `CLAUDE_CONFIG_DIR` / `CODEX_HOME`) and Pane shows one card per
   account — each with its own limits, plan, credits, and spend, named
   by its organization or email ("Claude — Acme"). The same account
   signed in twice stays one card, and your existing setup is untouched.
+- **One/New API sites** — add multiple compatible sites and multiple keys
+  per site in Settings. Every key gets its own quota card; secrets remain
+  owner-only on this PC and are sent only to the configured origin.
+- **English, Chinese, and Russian** — choose a language explicitly or let
+  Auto follow the Windows display language across the popover, tray, and
+  quota notifications.
 - **Pace projections** — colored bars and "will run out" warnings based on
   your burn rate within each reset window, plus optional Windows toasts.
 - **Local spend** — Today / Yesterday / 30 Days donut with per-model
@@ -265,9 +273,10 @@ signature-verified.
 
 ## Settings (gear icon)
 
-Refresh interval · Start with Windows · tray metric picker · appearance &
-compact density · time format · global shortcut · notification toggles ·
-outbound proxy · API keys.
+Language (Auto / English / 中文 / Русский) · refresh interval · Start with
+Windows · tray metric picker · appearance and compact density · time format ·
+global shortcut · notification toggles · outbound proxy · provider API keys ·
+One/New API site and key management.
 
 ## Credits
 

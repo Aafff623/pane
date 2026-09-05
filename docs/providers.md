@@ -276,14 +276,17 @@ Ground rules that apply to every provider:
   Detected when that file exists; no API key.
 - **Calls:** nothing. This is a purely local source — Hermes records
   ZERO cost itself, so dollars are priced from Pane's shared catalog.
-- **Shows:** a card with last-used model, which backend billed it
-  (AihubMix, MiniMax, a custom URL, …), and session count. Today /
-  Yesterday / Last 30 Days spend (with a per-model breakdown on hover)
-  sit behind Show more, same as other cards.
-  MiniMax-routed sessions still join the MiniMax spend slice, OpenRouter-
-  routed join OpenRouter (including a custom URL pointed at those hosts);
-  AihubMix and other custom OpenAI-compatible URLs
-  (including a custom URL that points at aihubmix.com) stay on this card.
+- **Shows:** a card with the two most recent user-selected models, their
+  billing backends (AihubMix, MiniMax, a custom URL, …), and session count.
+  Hermes's internal title/approval tasks still count toward real usage but
+  do not replace that model summary. Today / Yesterday / Last 30 Days spend
+  (with a per-model breakdown on hover) sits behind Show more.
+  MiniMax-routed sessions join the MiniMax spend slice; OpenRouter-routed
+  sessions join OpenRouter (including custom URLs pointed at those hosts).
+  AihubMix and other custom OpenAI-compatible URLs stay on Hermes. Scoped
+  AihubMix pricing covers HY4 Preview, Qwen3.8 Flash, and the dated
+  Qwen3.8-Max-0902 spellings without leaking those gateway rates to other
+  routes.
 
 ## Ollama
 

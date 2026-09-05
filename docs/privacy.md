@@ -1,9 +1,9 @@
 # Privacy
 
 Pane is built on one rule: **your data is nobody's business, including
-ours.** There is no Pane server and no account. The only thing Pane ever
-reports about itself is a minimal, anonymous, opt-out daily statistic —
-described in full below, with the off switch.
+ours.** There is no Pane account, and no Pane backend receives your quotas,
+spend, keys, or provider data. The Pane-hosted update endpoint and the
+minimal, anonymous, opt-out daily statistic are described in full below.
 
 ## Every network call Pane can make
 
@@ -15,7 +15,7 @@ This is the complete list. Anything not listed here does not happen.
 | User-configured Custom Balance relay origins | Every refresh, only when Custom Balance is enabled | Subscription + usage requests send that account's API key as Bearer to the configured relay origin only; public origins must use HTTPS, and plaintext HTTP is limited to private, loopback, or link-local IP literals. The origin and key are never sent to Pane servers. |
 | User-configured One/New API origins | Status probe when saving/changing a site, plus one unauthenticated backfill if a stored site has no display unit; billing on every refresh for enabled keys | `/api/status` with no key. Subscription + usage send that site's key as Bearer, **only to that origin** — never to Pane servers. |
 | `raw.githubusercontent.com` (LiteLLM), `models.dev`, `robinebers.github.io` | ~Daily | Anonymous GET for public model price tables (no identifying data) |
-| `pane.jazii.dev/api/update` (falls back to `github.com/ItsJazii/pane/releases`) | On launch + every 4 h | Anonymous GET for the update manifest, carrying the app version. See "The update check" below for exactly what this counts. |
+| `trypane.xyz/api/update` (the legacy `pane.jazii.dev/api/update` redirects there; GitHub Releases is the final fallback) | On launch + every 4 h | Anonymous GET for the update manifest, carrying the app version. See "The update check" below for exactly what this counts. |
 | `us.i.posthog.com` | Once per day (unless switched off) | The two anonymous daily-statistic events described in "Anonymous usage statistics" below — a random ID, version, enabled-provider list, and per-provider success/failure counts. Never usage amounts, spend, keys, or error text. |
 | `127.0.0.1:11434` (your own PC) | Every refresh, if Ollama is enabled | Local-only query of your Ollama server |
 
@@ -65,12 +65,13 @@ auditable file: [`src-tauri/src/telemetry.rs`](../src-tauri/src/telemetry.rs)
 ## The update check
 
 Pane has to ask *somewhere* "is there a newer version?" — that request
-existed from day one. As of 0.4.17 it goes to `pane.jazii.dev` (which
-serves the same signed manifest; GitHub remains the automatic fallback,
-and every update is still signature-verified against the key baked into
-the app). The server counts, per day: **how many distinct installs
-checked in, from which country, on which version.** That's the entire
-list. Concretely:
+existed from day one. New builds ask `trypane.xyz` first and use GitHub as
+the automatic fallback. Old builds that still call `pane.jazii.dev` are
+handled by a permanent redirect to `trypane.xyz`. Every endpoint serves
+the same manifest, and every update is still signature-verified against
+the key baked into the app. The server counts, per day: **how many
+distinct installs checked in, from which country, on which version.** That's
+the entire list. Concretely:
 
 - **No IP addresses are stored.** Uniqueness comes from a salted one-way
   hash folded into a [HyperLogLog](https://en.wikipedia.org/wiki/HyperLogLog)

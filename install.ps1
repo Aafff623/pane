@@ -1,6 +1,6 @@
 # Pane quick installer
 #
-#   irm https://pane.jazii.dev/install.ps1 | iex
+#   irm https://trypane.xyz/install.ps1 | iex
 #
 # Downloads the latest signed release from GitHub, installs per-user
 # (no admin), and launches Pane. Works on Windows PowerShell 5.1 and pwsh.
