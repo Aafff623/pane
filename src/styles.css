@@ -196,12 +196,19 @@ body.no-glass .sidebar::after {
   display: flex;
   flex-direction: column;
   gap: 2px;
+  flex-shrink: 0;
 }
 
 /* Theme + Refresh sit above the trail, right under the logo ring;
    Customize + Settings stay at the bottom. */
 .sidebar-buttons.top {
   margin-top: 10px;
+  flex-shrink: 0;
+}
+
+.sidebar-buttons.bottom {
+  margin-top: auto;
+  flex-shrink: 0;
 }
 
 .app-logo,
@@ -691,24 +698,88 @@ select:focus-visible {
 }
 
 /* Navigation trail: a refined provider avatar rail (Cockpit/cc-switch style).
-   Icons are centered, comfortable 28x28 avatar buttons with authentic colors,
-   smooth hover elevation, and active status indicators. */
-#trail {
-  margin: auto 0;
+   Icons dynamically scale down as providers increase, with a minimum size threshold
+   and mouse-wheel scrolling plus ellipsis indicators for overflow. */
+#trail-wrap {
+  flex: 1;
+  min-height: 0;
+  width: 100%;
   display: flex;
   flex-direction: column;
   align-items: center;
-  justify-content: center;
-  gap: 7px;
-  padding: 8px 0;
+  position: relative;
+  margin: 6px 0;
+  overflow: hidden;
+}
+
+#trail {
+  --trail-icon-size: 28px;
+  --trail-inner-size: 18px;
+  --trail-gap: 6px;
+  --trail-dot-size: 5px;
   width: 100%;
-  max-height: calc(100vh - 170px);
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--trail-gap);
+  padding: 4px 0;
   overflow-y: auto;
   scrollbar-width: none;
+  margin: auto 0;
+}
+
+#trail.is-overflowing {
+  margin: 0;
+  justify-content: flex-start;
 }
 
 #trail::-webkit-scrollbar {
   display: none;
+}
+
+.trail-more {
+  border: none;
+  background: transparent;
+  width: var(--trail-icon-size, 28px);
+  height: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  padding: 0;
+  color: var(--muted-foreground);
+  opacity: 0.65;
+  transition: opacity 0.15s ease, color 0.15s ease, transform 0.15s ease;
+  flex-shrink: 0;
+  outline: none;
+  user-select: none;
+}
+
+.trail-more:hover {
+  opacity: 1;
+  color: var(--foreground);
+  transform: scale(1.15);
+}
+
+.trail-more:active {
+  transform: scale(0.95);
+}
+
+.trail-more.top {
+  margin-bottom: 2px;
+}
+
+.trail-more.bottom {
+  margin-top: 2px;
+}
+
+.trail-dots {
+  font-size: 11px;
+  letter-spacing: 2px;
+  line-height: 1;
+  margin-left: 2px;
 }
 
 .trail-tick {
@@ -718,6 +789,7 @@ select:focus-visible {
   cursor: pointer;
   outline: none;
   transition: transform 0.12s ease, background 0.15s ease, opacity 0.15s ease;
+  flex-shrink: 0;
 }
 
 .trail-tick:not(.trail-icon) {
@@ -740,8 +812,8 @@ select:focus-visible {
 /* Provider-mark trail ticks: centered avatar box with authentic artwork */
 .trail-tick.trail-icon {
   position: relative;
-  width: 28px;
-  height: 28px;
+  width: var(--trail-icon-size, 28px);
+  height: var(--trail-icon-size, 28px);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -756,14 +828,14 @@ select:focus-visible {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 18px;
-  height: 18px;
+  width: var(--trail-inner-size, 18px);
+  height: var(--trail-inner-size, 18px);
   pointer-events: none;
 }
 
 .trail-icon svg {
-  width: 18px;
-  height: 18px;
+  width: var(--trail-inner-size, 18px);
+  height: var(--trail-inner-size, 18px);
   display: block;
 }
 
@@ -794,8 +866,8 @@ select:focus-visible {
   position: absolute;
   top: 2px;
   right: 2px;
-  width: 5px;
-  height: 5px;
+  width: var(--trail-dot-size, 5px);
+  height: var(--trail-dot-size, 5px);
   border-radius: 50%;
   pointer-events: none;
 }
@@ -3242,4 +3314,275 @@ body.no-glass #confirm-box {
   #whatsnew-box {
     animation: none;
   }
+}
+
+/* ---------------------------------------------------------------------------
+   5-Hour Quota & Status Overview Module
+---------------------------------------------------------------------------- */
+
+.five-hour-overview {
+  margin-bottom: 8px;
+}
+
+.five-hour-overview .provider-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.five-hour-overview .overview-clock-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--chart-blue, #3b82f6);
+  flex-shrink: 0;
+}
+
+.five-hour-overview .provider-name {
+  white-space: nowrap !important;
+  flex-shrink: 0 !important;
+  font-weight: 600;
+  font-size: 13px;
+  letter-spacing: -0.01em;
+}
+
+.five-hour-overview .overview-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1;
+  white-space: nowrap !important;
+  flex-shrink: 0 !important;
+  user-select: none;
+}
+
+.five-hour-overview .overview-chip.is-warn {
+  color: #f87171;
+}
+
+:root[data-theme="light"] .five-hour-overview .overview-chip.is-warn {
+  color: #dc2626;
+}
+
+.five-hour-overview .overview-chip.is-ok {
+  color: #34d399;
+}
+
+:root[data-theme="light"] .five-hour-overview .overview-chip.is-ok {
+  color: #059669;
+}
+
+.five-hour-overview .overview-chip-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.five-hour-overview .overview-chip-dot.red {
+  background: #ef4444;
+  box-shadow: 0 0 4px rgba(239, 68, 68, 0.8);
+}
+
+.five-hour-overview .overview-chip-dot.green {
+  background: #10b981;
+  box-shadow: 0 0 3px rgba(16, 185, 129, 0.6);
+}
+
+.five-hour-overview .overview-panel {
+  padding: 8px 10px 10px;
+}
+
+.five-hour-overview .overview-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(76px, 1fr));
+  gap: 6px;
+}
+
+.overview-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 6px 3px 5px;
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  cursor: pointer;
+  user-select: none;
+  transition: transform 0.15s ease, background 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.overview-item:hover {
+  transform: translateY(-1px);
+  background: rgba(255, 255, 255, 0.06);
+  border-color: #3f3f46;
+}
+
+.overview-item.tone-maxed {
+  border-color: rgba(239, 68, 68, 0.45);
+  background: rgba(239, 68, 68, 0.06);
+}
+
+.overview-item.tone-maxed:hover {
+  border-color: rgba(239, 68, 68, 0.7);
+  background: rgba(239, 68, 68, 0.1);
+}
+
+.overview-item.tone-warn {
+  border-color: rgba(245, 158, 11, 0.35);
+}
+
+.overview-item.tone-error {
+  border-color: rgba(239, 68, 68, 0.5);
+  background: rgba(239, 68, 68, 0.05);
+}
+
+.overview-item-head {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  width: 100%;
+  margin-bottom: 2px;
+}
+
+.overview-item-icon {
+  width: 14px;
+  height: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.overview-item-icon svg {
+  width: 13px;
+  height: 13px;
+}
+
+.overview-item-icon .icon-fallback {
+  font-size: 9px;
+  font-weight: 700;
+  color: var(--muted-foreground);
+}
+
+.overview-item-name {
+  font-size: 10.5px;
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 44px;
+}
+
+.overview-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.overview-dot.green {
+  background: #10b981;
+}
+
+.overview-dot.red {
+  background: #ef4444;
+  box-shadow: 0 0 4px rgba(239, 68, 68, 0.8);
+}
+
+.overview-dot.gray {
+  background: #71717a;
+}
+
+.overview-ring-wrap {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin: 1px 0;
+}
+
+.overview-ring {
+  overflow: visible;
+}
+
+.overview-ring .ring-track {
+  stroke: var(--border);
+}
+
+.overview-ring .ring-progress {
+  transition: stroke-dashoffset 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.overview-ring .ring-progress.is-maxed {
+  filter: drop-shadow(0 0 2.5px rgba(239, 68, 68, 0.6));
+}
+
+.overview-ring .ring-text {
+  font-size: 10px;
+  font-weight: 600;
+  fill: var(--foreground);
+}
+
+.overview-ring .ring-text.is-maxed {
+  font-size: 9.5px;
+  font-weight: 700;
+  fill: #ef4444;
+}
+
+.overview-ring .ring-text.is-non5h {
+  font-size: 12px;
+  fill: var(--muted-foreground);
+}
+
+.overview-ring .ring-text.is-error {
+  font-size: 11px;
+  font-weight: 700;
+  fill: #ef4444;
+}
+
+.overview-item-foot {
+  margin-top: 2px;
+  font-size: 9px;
+  color: var(--muted-foreground);
+  text-align: center;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 68px;
+}
+
+.overview-item-meta.meta-maxed {
+  color: #ef4444;
+  font-weight: 600;
+}
+
+/* Card highlight flash when jumped from overview */
+article.provider.card-highlight {
+  animation: card-glow 1.2s ease;
+}
+
+@keyframes card-glow {
+  0% {
+    box-shadow: 0 0 0 2px #3b82f6, 0 0 16px rgba(59, 130, 246, 0.4);
+  }
+  100% {
+    box-shadow: none;
+  }
+}
+
+:root[data-density="compact"] .overview-panel {
+  padding: 6px 8px 8px;
+}
+
+:root[data-density="compact"] .overview-grid {
+  grid-template-columns: repeat(auto-fill, minmax(68px, 1fr));
+  gap: 5px;
+}
+
+:root[data-density="compact"] .overview-item {
+  padding: 4px 2px 3px;
 }

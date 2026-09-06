@@ -91,7 +91,15 @@
             <button id="theme-btn" title="Light / dark mode" data-i18n-title="sidebar.theme">&#9728;</button>
             <button id="refresh" title="Refresh now" data-i18n-title="sidebar.refresh">&#10227;</button>
           </div>
-          <nav id="trail" aria-label="Card navigation" data-i18n-aria="sidebar.cards"></nav>
+          <div id="trail-wrap">
+            <button id="trail-more-top" class="trail-more top" title="向上滚动" hidden aria-label="Scroll up">
+              <span class="trail-dots">•••</span>
+            </button>
+            <nav id="trail" aria-label="Card navigation" data-i18n-aria="sidebar.cards"></nav>
+            <button id="trail-more-bottom" class="trail-more bottom" title="向下滚动" hidden aria-label="Scroll down">
+              <span class="trail-dots">•••</span>
+            </button>
+          </div>
           <div class="sidebar-buttons bottom">
             <button id="customize-btn" title="Customize" data-i18n-title="sidebar.customize">&#9776;</button>
             <button id="settings-btn" title="Settings" data-i18n-title="sidebar.settings">&#9881;</button>

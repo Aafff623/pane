@@ -157,6 +157,7 @@ interface ProviderLayout {
 interface Layout {
   providerOrder: string[];
   providers: Record<string, ProviderLayout>;
+  overviewCollapsed?: boolean;
 }
 
 interface Config {
@@ -1009,6 +1010,25 @@ function ensureLayout(): void {
     }
   }
 
+  // Repair legacy autoCollapsed artifact and stale collapsed: false entries that block auto-folding
+  for (const [pid, L] of Object.entries(layout.providers)) {
+    if ("autoCollapsed" in L) {
+      delete (L as any).autoCollapsed;
+      if (L.collapsed === false) {
+        delete L.collapsed;
+      }
+      changed = true;
+    }
+    if (L.collapsed === false && isCardFoldCandidate(pid)) {
+      delete L.collapsed;
+      changed = true;
+    }
+    if (L.collapsed === true && !isCardFoldCandidate(pid)) {
+      delete L.collapsed;
+      changed = true;
+    }
+  }
+
   config.layout = layout;
   if (changed) void patchConfig({ layout, disabled: config.disabled });
 }
@@ -1230,10 +1250,20 @@ function isParallelAccountFamily(family: string): boolean {
 /// The "maxed out" threshold for the account-tab health dot.
 const MAXED_PCT = 99.5;
 
+/// Determines whether a progress metric represents a core AI coding / model usage quota
+/// (Session, Weekly, Monthly, Credits, Usage) rather than an auxiliary tool quota (such
+/// as Web Searches). Auxiliary limits must not trigger full provider card exhaustion.
+function isCoreQuotaMetric(m: Metric): boolean {
+  if (m.kind !== "progress") return false;
+  const label = m.label.toLowerCase();
+  if (label.includes("search")) return false;
+  return true;
+}
+
 function maxProgressUsed(s: Snapshot): number {
   return s.metrics.reduce(
     (best, m) =>
-      m.kind === "progress" && m.used_percent !== null
+      isCoreQuotaMetric(m) && m.used_percent !== null
         ? Math.max(best, m.used_percent)
         : best,
     0,
@@ -1249,49 +1279,93 @@ function accountHealthDot(id: string): "red" | "green" | "gray" {
   return maxProgressUsed(snap) >= MAXED_PCT ? "red" : "green";
 }
 
-// ── Card fold (grouped by provider family) ─────────────────────────────────────
+// ── Card fold (grouped by provider family or per-card) ─────────────────────────
 
-/// Returns true when this family is a fold candidate:
-///
-///   - The family has at least one multi-account capable account (kimi, deepseek,
-///     stepfun, siliconflow, novita, relaybalance — all via the same snapshot
-///     query, so their account list is always consistent), OR is a parallel
-///     family (antigravity / cursor) that has multiple independent cards.
-///
-///   - AND every card in the family is maxed out (all progress windows exhausted).
-///
-/// When the user has manually overridden the fold state via the toggle, the
-/// stored preference (layout.providers[family].collapsed) takes priority.
-function isFamilyFoldCandidate(family: string): boolean {
-  if (!supportsExtraAccounts(family) && !isParallelAccountFamily(family)) return false;
-  const cards = lastSnapshots.filter(
-    (s) => providerFamily(s.id) === family && !isCardDisabled(s.id),
-  );
-  if (cards.length === 0) return false;
-  return cards.every((s) => maxProgressUsed(s) >= MAXED_PCT);
+/// Returns true when a snapshot has reached its quota limit (any progress
+/// metric has used_percent >= MAXED_PCT or plan indicates credit exhaustion).
+function isSnapshotMaxed(s: Snapshot): boolean {
+  if (s.status !== "ok") return false;
+  if (maxProgressUsed(s) >= MAXED_PCT) return true;
+  if (s.plan && /out of credit/i.test(s.plan)) return true;
+  return false;
 }
 
-/// True when the family should render in the collapsed single-line state.
-/// Respects the user's manual override (layout.providers[family].collapsed):
-///   - undefined  → follow auto-detection (isFamilyFoldCandidate)
+/// Returns true when this card should be automatically collapsed:
+///
+///   - For merged multi-account families (kimi, onenewapi), all valid active
+///     accounts must be maxed out (all quota exhausted).
+///
+///   - For standalone providers (zai, claude, codex, copilot, grok, devin, etc.)
+///     and parallel-account cards (antigravity slots, cursor imported logins),
+///     the card collapses when its own quota is exhausted.
+function isCardFoldCandidate(cardId: string): boolean {
+  const family = providerFamily(cardId);
+  const snap = lastSnapshots.find((s) => s.id === cardId);
+  if (!snap || snap.status !== "ok" || isCardDisabled(cardId)) return false;
+
+  // Merged multi-account family card (kimi, onenewapi)
+  if (cardId === family && supportsExtraAccounts(family) && !isParallelAccountFamily(family)) {
+    const activeAccountIds = lastSnapshots
+      .filter((s) => {
+        if (providerFamily(s.id) !== family || isCardDisabled(s.id)) return false;
+        // Exclude deleted accounts if accountsCache is populated for this family
+        if (s.id.includes("@") && accountsCache.has(family)) {
+          return accountsCache.get(family)?.some((entry) => entry.id === s.id);
+        }
+        return true;
+      })
+      .map((s) => s.id);
+
+    if (activeAccountIds.length === 0) return isSnapshotMaxed(snap);
+    return activeAccountIds.every((id) => {
+      const s = lastSnapshots.find((x) => x.id === id);
+      return s ? isSnapshotMaxed(s) : false;
+    });
+  }
+
+  // Standalone provider card or parallel account card
+  return isSnapshotMaxed(snap);
+}
+
+/// True when the card should render in the collapsed single-line state.
+/// Respects the user's manual override (layout.providers[cardId].collapsed):
+///   - undefined  → follow auto-detection (isCardFoldCandidate)
 ///   - true       → always collapsed
 ///   - false      → always expanded
-function isFamilyCollapsed(family: string): boolean {
-  const layout = providerLayout(family);
+function isCardCollapsed(cardId: string): boolean {
+  const layout = providerLayout(cardId);
   if (layout.collapsed !== undefined) return layout.collapsed;
-  return isFamilyFoldCandidate(family);
+  return isCardFoldCandidate(cardId);
 }
 
-/// When collapsed, the card shows the nearest reset across all accounts in the
-/// family. Returns the remaining seconds (0 if already reset or no quota windows).
-function nearestResetSeconds(family: string): number {
-  const cards = lastSnapshots.filter(
-    (s) => providerFamily(s.id) === family && !isCardDisabled(s.id),
-  );
+/// When collapsed, returns the nearest reset across relevant snapshots for
+/// this card. Prioritizes the reset countdown of metrics that are actually
+/// maxed out (so a 0% session window does not hide a weekly exhaustion).
+function nearestResetSeconds(cardId: string): number {
+  const family = providerFamily(cardId);
+  const isMerged =
+    cardId === family && supportsExtraAccounts(family) && !isParallelAccountFamily(family);
+  const cards = isMerged
+    ? lastSnapshots.filter((s) => {
+        if (providerFamily(s.id) !== family || isCardDisabled(s.id)) return false;
+        if (s.id.includes("@") && accountsCache.has(family)) {
+          return accountsCache.get(family)?.some((entry) => entry.id === s.id);
+        }
+        return true;
+      })
+    : lastSnapshots.filter((s) => s.id === cardId);
+
   let nearest = Infinity;
   for (const s of cards) {
-    for (const m of s.metrics) {
-      if (m.kind !== "progress" || m.resets_at === null) continue;
+    const maxed = s.metrics.filter(
+      (m) => isCoreQuotaMetric(m) && m.resets_at !== null && (m.used_percent ?? 0) >= MAXED_PCT,
+    );
+    const pool =
+      maxed.length > 0
+        ? maxed
+        : s.metrics.filter((m) => isCoreQuotaMetric(m) && m.resets_at !== null);
+    for (const m of pool) {
+      if (m.resets_at === null) continue;
       const secs = Math.max(0, m.resets_at - Date.now()) / 1000;
       if (secs < nearest) nearest = secs;
     }
@@ -1302,14 +1376,26 @@ function nearestResetSeconds(family: string): number {
 /// Combines the overall family health dot: green if any account is green (quota available),
 /// red if all are red, gray otherwise.
 function familyHealthDot(family: string): "red" | "green" | "gray" {
-  const cards = lastSnapshots.filter(
-    (s) => providerFamily(s.id) === family && !isCardDisabled(s.id),
-  );
+  const cards = lastSnapshots.filter((s) => {
+    if (providerFamily(s.id) !== family || isCardDisabled(s.id)) return false;
+    if (s.id.includes("@") && accountsCache.has(family)) {
+      return accountsCache.get(family)?.some((entry) => entry.id === s.id);
+    }
+    return true;
+  });
   if (cards.length === 0) return "gray";
   const dots = cards.map((s) => accountHealthDot(s.id));
   if (dots.some((d) => d === "green")) return "green";
   if (dots.every((d) => d === "red")) return "red";
   return "gray";
+}
+
+function cardHealthDot(cardId: string): "red" | "green" | "gray" {
+  const family = providerFamily(cardId);
+  if (cardId === family && supportsExtraAccounts(family) && !isParallelAccountFamily(family)) {
+    return familyHealthDot(family);
+  }
+  return accountHealthDot(cardId);
 }
 
 // Quota pools: which independent meter group a metric label belongs to.
@@ -1456,15 +1542,15 @@ function renderCard(s: Snapshot): string {
   // The card head stays so the user can still read the provider name, plan,
   // and family state. The chevron toggles between collapsed/expanded and
   // remembers the choice per family.
-  const familyCollapsed = isFamilyCollapsed(family);
-  const foldChevron = familyCollapsed
-    ? `<button class="card-fold-toggle" data-card-fold="${escapeHtml(family)}" title="${escapeHtml(t("card.expand"))}">⌄</button>`
-    : `<button class="card-fold-toggle" data-card-fold="${escapeHtml(family)}" title="${escapeHtml(t("card.collapse"))}">⌃</button>`;
-  const finalBody = familyCollapsed ? "" : body;
+  const cardCollapsed = isCardCollapsed(s.id);
+  const foldChevron = cardCollapsed
+    ? `<button class="card-fold-toggle" data-card-fold="${escapeHtml(s.id)}" title="${escapeHtml(t("card.expand"))}">⌄</button>`
+    : `<button class="card-fold-toggle" data-card-fold="${escapeHtml(s.id)}" title="${escapeHtml(t("card.collapse"))}">⌃</button>`;
+  const finalBody = cardCollapsed ? "" : body;
   // Hide per-account tabs and the ×N badge when folded — the family health
   // dot and reset countdown already summarise the whole family.
-  const finalAccountTabs = familyCollapsed ? "" : accountTabs;
-  const finalAccountCount = familyCollapsed ? "" : accountCount;
+  const finalAccountTabs = cardCollapsed ? "" : accountTabs;
+  const finalAccountCount = cardCollapsed ? "" : accountCount;
   const refreshBtn =
     shown.status === "ok" || shown.status === "error"
       ? `<button class="card-refresh" data-card-refresh="${shown.id}" title="${escapeHtml(t("card.refresh"))}">⟳</button>`
@@ -1476,16 +1562,16 @@ function renderCard(s: Snapshot): string {
   // Folded state: visually prominent reset countdown badge with health status
   // and generous breathing room instead of a cramped raw text sliver.
   let foldLine = "";
-  if (familyCollapsed) {
-    const dot = familyHealthDot(family);
+  if (cardCollapsed) {
+    const dot = cardHealthDot(s.id);
     const dotTitle =
       dot === "red"
         ? t("customize.acctDotRed")
         : dot === "green"
           ? t("customize.acctDotGreen")
           : t("customize.acctDotGray");
-    const resetSecs = nearestResetSeconds(family);
-    const isMaxed = isFamilyFoldCandidate(family) || dot === "red";
+    const resetSecs = nearestResetSeconds(s.id);
+    const isMaxed = isCardFoldCandidate(s.id) || dot === "red";
     if (resetSecs > 0) {
       const label = isMaxed ? t("card.familyAllMaxed") : t("card.foldedResetsIn");
       const badgeTone = isMaxed ? "warn" : "normal";
@@ -1509,7 +1595,7 @@ function renderCard(s: Snapshot): string {
     }
   }
   return `
-    <article class="provider${muted} ${familyCollapsed ? "is-folded" : ""}" data-provider="${s.id}" data-origin="${escapeHtml(shown.dashboard_url ?? "")}">
+    <article class="provider${muted} ${cardCollapsed ? "is-folded" : ""}" data-provider="${s.id}" data-origin="${escapeHtml(shown.dashboard_url ?? "")}">
       <div class="provider-head">
         <span class="drag-grip" title="${escapeHtml(t("card.drag"))}">⠿</span>
         <span class="provider-name">${escapeHtml(s.name)}</span>
@@ -1522,7 +1608,7 @@ function renderCard(s: Snapshot): string {
         ${share}
         <span class="provider-icon">${icon}</span>
       </div>
-      ${familyCollapsed ? foldLine : `<div class="card-panel">
+      ${cardCollapsed ? foldLine : `<div class="card-panel">
         ${finalAccountTabs}
         ${finalBody}
         ${linksRow}
@@ -1927,6 +2013,283 @@ function renderTotalSpend(): string {
         </div>
         ${body}
       </div>
+    </article>`;
+}
+
+// ---------------------------------------------------------------------------
+// 5-Hour Quota & Status Overview module
+// Displays availability status and real-time 5h quota (circular SVG progress)
+// for all providers visible on the homepage. Maxed (100%) renders in red.
+// ---------------------------------------------------------------------------
+
+interface FiveHourQuota {
+  has5h: boolean;
+  usedPercent: number;
+  resetsAt: number | null;
+  metricLabel: string;
+  isMaxed: boolean;
+  status: "ok" | "maxed" | "error" | "no_5h";
+}
+
+function extractFiveHourQuota(s: Snapshot, cardIsMaxed = false, cardId = ""): FiveHourQuota {
+  if (s.status !== "ok") {
+    return {
+      has5h: false,
+      usedPercent: 0,
+      resetsAt: null,
+      metricLabel: "",
+      isMaxed: false,
+      status: "error",
+    };
+  }
+
+  // 5-hour window tolerance: ~18,000,000 ms (14.4M to 21.6M)
+  const is5hPeriod = (p: number | null) =>
+    p !== null && p >= 14_400_000 && p <= 21_600_000;
+
+  const is5hLabel = (label: string) =>
+    /session|5-?hour|5h/i.test(label) && !/week|month|day|year/i.test(label);
+
+  const candidates = (s.metrics || []).filter(
+    (m) =>
+      isCoreQuotaMetric(m) &&
+      m.used_percent !== null &&
+      (is5hPeriod(m.period_ms) || is5hLabel(m.label)) &&
+      !/week|month|year/i.test(m.label),
+  );
+
+  const isMaxed = cardIsMaxed || isSnapshotMaxed(s);
+
+  if (isMaxed) {
+    const resetSecs = cardId ? nearestResetSeconds(cardId) : 0;
+    const resetsAt = resetSecs > 0 ? Date.now() + resetSecs * 1000 : null;
+    return {
+      has5h: candidates.length > 0,
+      usedPercent: 100,
+      resetsAt,
+      metricLabel: candidates[0]?.label ?? "Maxed",
+      isMaxed: true,
+      status: "maxed",
+    };
+  }
+
+  if (candidates.length > 0) {
+    const best = candidates.reduce((prev, curr) =>
+      (curr.used_percent ?? 0) > (prev.used_percent ?? 0) ? curr : prev,
+    );
+    const rawUsed = best.used_percent ?? 0;
+    const usedPercent = Math.min(100, Math.max(0, rawUsed));
+    return {
+      has5h: true,
+      usedPercent,
+      resetsAt: best.resets_at,
+      metricLabel: best.label,
+      isMaxed: false,
+      status: "ok",
+    };
+  }
+
+  return {
+    has5h: false,
+    usedPercent: 0,
+    resetsAt: null,
+    metricLabel: "",
+    isMaxed: false,
+    status: "no_5h",
+  };
+}
+
+function isOverviewCollapsed(): boolean {
+  return config.layout?.overviewCollapsed ?? false;
+}
+
+function renderFiveHourOverview(): string {
+  const visibleSnaps = orderedSnapshots();
+  if (visibleSnaps.length === 0) return "";
+
+  const isFolded = isOverviewCollapsed();
+
+  const items = visibleSnaps.map((s) => {
+    const family = providerFamily(s.id);
+    let shown = s;
+    if (s.id === family && supportsExtraAccounts(family) && !isParallelAccountFamily(family)) {
+      const accountIds = lastSnapshots
+        .filter((snap) => providerFamily(snap.id) === family && !isCardDisabled(snap.id))
+        .map((snap) => snap.id);
+      if (accountIds.length > 1) {
+        const defaultId = lastSnapshots.some((snap) => snap.id === s.id)
+          ? s.id
+          : (accountIds.find((a) => accountHealthDot(a) === "green") ?? accountIds[0]);
+        const active = resolveDisplayedAccount(family, defaultId, accountIds);
+        const activeSnap = lastSnapshots.find(
+          (snap) => snap.id === active && !isCardDisabled(snap.id),
+        );
+        if (activeSnap) shown = activeSnap;
+      }
+    }
+    const cardIsMaxed = isCardFoldCandidate(s.id);
+    const quota = extractFiveHourQuota(shown, cardIsMaxed, s.id);
+    return { cardSnap: s, shownSnap: shown, quota };
+  });
+
+  const totalCount = items.length;
+  const maxedCount = items.filter((it) => it.quota.isMaxed).length;
+  const errorCount = items.filter((it) => it.quota.status === "error").length;
+  const availableCount = totalCount - maxedCount - errorCount;
+
+  const itemsHtml = items
+    .map(({ cardSnap, shownSnap, quota }) => {
+      const id = cardSnap.id;
+      const family = providerFamily(id);
+      const origin = shownSnap.dashboard_url ?? undefined;
+      const visual = providerVisual(id || family, origin);
+      const icon = visual?.iconSvg ?? `<span class="icon-fallback">${escapeHtml(cardSnap.name.slice(0, 2))}</span>`;
+      const displayName = cardSnap.name;
+
+      const r = 16;
+      const cx = 22;
+      const cy = 22;
+      const circumference = 100.53; // 2 * Math.PI * 16
+
+      let strokeColor = "var(--border)";
+      let progressCircle = "";
+      let ringLabel = "—";
+      let textClass = "";
+      let itemTone = "normal";
+      let statusDot = "green";
+      let tooltipDesc = "";
+
+      if (quota.status === "error") {
+        itemTone = "error";
+        statusDot = "red";
+        ringLabel = "!";
+        textClass = "is-error";
+        progressCircle = `<circle class="ring-progress is-error" cx="${cx}" cy="${cy}" r="${r}" stroke="#ef4444" stroke-width="3.2" fill="none" />`;
+        tooltipDesc = `${displayName}: 离线或读取失败`;
+      } else if (quota.isMaxed) {
+        itemTone = "maxed";
+        statusDot = "red";
+        strokeColor = "#ef4444";
+        ringLabel = "100%";
+        textClass = "is-maxed";
+        tooltipDesc = `${displayName}: ${t("overview.maxedTip")}`;
+        if (quota.resetsAt) {
+          const remSecs = Math.max(0, quota.resetsAt - Date.now()) / 1000;
+          tooltipDesc += ` · ${t("overview.resetsIn", { time: fmtDuration(remSecs * 1000) })}`;
+        }
+        progressCircle = `<circle class="ring-progress is-maxed" cx="${cx}" cy="${cy}" r="${r}"
+          stroke="${strokeColor}" stroke-width="3.2" fill="none"
+          stroke-linecap="round"
+          stroke-dasharray="${circumference.toFixed(2)}"
+          stroke-dashoffset="0"
+          transform="rotate(-90 ${cx} ${cy})" />`;
+      } else if (quota.has5h) {
+        const pct = Math.round(quota.usedPercent);
+        const dashoffset = circumference * (1 - pct / 100);
+
+        if (pct >= 80) {
+          itemTone = "warn";
+          statusDot = "green";
+          strokeColor = "#f59e0b";
+          ringLabel = `${pct}%`;
+          tooltipDesc = `${displayName}: 5h ${pct}%`;
+          if (quota.resetsAt) {
+            const remSecs = Math.max(0, quota.resetsAt - Date.now()) / 1000;
+            tooltipDesc += ` · ${t("overview.resetsIn", { time: fmtDuration(remSecs * 1000) })}`;
+          } else {
+            tooltipDesc += ` · ${t("card.notStarted")}`;
+          }
+        } else {
+          itemTone = "normal";
+          statusDot = "green";
+          strokeColor = "#10b981";
+          ringLabel = `${pct}%`;
+          tooltipDesc = `${displayName}: 5h ${pct}%`;
+          if (quota.resetsAt) {
+            const remSecs = Math.max(0, quota.resetsAt - Date.now()) / 1000;
+            tooltipDesc += ` · ${t("overview.resetsIn", { time: fmtDuration(remSecs * 1000) })}`;
+          } else {
+            tooltipDesc += ` · ${t("card.notStarted")}`;
+          }
+        }
+
+        progressCircle = `<circle class="ring-progress ${itemTone}" cx="${cx}" cy="${cy}" r="${r}"
+          stroke="${strokeColor}" stroke-width="3.2" fill="none"
+          stroke-linecap="round"
+          stroke-dasharray="${circumference.toFixed(2)}"
+          stroke-dashoffset="${dashoffset.toFixed(2)}"
+          transform="rotate(-90 ${cx} ${cy})" />`;
+      } else {
+        statusDot = "green";
+        ringLabel = "—";
+        textClass = "is-non5h";
+        tooltipDesc = `${displayName}: ${t("overview.non5hTip")}`;
+      }
+
+      const fullTooltip = `${tooltipDesc} · ${t("overview.jumpTip", { name: displayName })}`;
+
+      return `
+        <div class="overview-item tone-${itemTone}" data-jump-provider="${escapeHtml(id)}" title="${escapeHtml(fullTooltip)}">
+          <div class="overview-item-head">
+            <span class="overview-item-icon">${icon}</span>
+            <span class="overview-item-name">${escapeHtml(displayName)}</span>
+            <span class="overview-dot ${statusDot}"></span>
+          </div>
+          <div class="overview-ring-wrap">
+            <svg width="44" height="44" viewBox="0 0 44 44" class="overview-ring">
+              <circle class="ring-track" cx="${cx}" cy="${cy}" r="${r}" stroke="var(--border)" stroke-width="3.2" fill="none" opacity="0.4" />
+              ${progressCircle}
+              <text class="ring-text ${textClass}" x="${cx}" y="${cy + 4}" text-anchor="middle">${ringLabel}</text>
+            </svg>
+          </div>
+          <div class="overview-item-foot">
+            <span class="overview-item-meta ${quota.isMaxed ? 'meta-maxed' : ''}">
+              ${quota.isMaxed
+                ? (quota.resetsAt
+                    ? escapeHtml(fmtDuration(Math.max(0, quota.resetsAt - Date.now())))
+                    : escapeHtml(t("overview.maxedBadge", { n: "" }).trim()))
+                : quota.has5h
+                  ? (quota.resetsAt
+                      ? escapeHtml(fmtDuration(Math.max(0, quota.resetsAt - Date.now())))
+                      : escapeHtml(t("card.notStarted")))
+                  : escapeHtml(t("overview.non5h"))}
+            </span>
+          </div>
+        </div>`;
+    })
+    .join("");
+
+  const foldChevron = isFolded
+    ? `<button class="card-fold-toggle" data-overview-fold title="${escapeHtml(t("card.expand"))}">⌄</button>`
+    : `<button class="card-fold-toggle" data-overview-fold title="${escapeHtml(t("card.collapse"))}">⌃</button>`;
+
+  // Availability badge: two independent symbols — green shows the available
+  // count, red shows the maxed count. No combined "7/8" pill.
+  const badgeHtml = `
+        <span class="overview-chip is-ok" title="${escapeHtml(t("overview.badge", { avail: availableCount, total: totalCount }))}">
+          <span class="overview-chip-dot green"></span>
+          <span class="overview-chip-text">${availableCount} ${escapeHtml(t("overview.availShort"))}</span>
+        </span>${maxedCount > 0 ? `
+        <span class="overview-chip is-warn" title="${escapeHtml(t("overview.maxedBadge", { n: maxedCount }))}">
+          <span class="overview-chip-dot red"></span>
+          <span class="overview-chip-text">${maxedCount} ${escapeHtml(t("overview.maxedShort"))}</span>
+        </span>` : ""}`;
+
+  return `
+    <article class="provider five-hour-overview ${isFolded ? "is-folded" : ""}" data-provider="__overview__">
+      <div class="provider-head">
+        <span class="overview-clock-icon" title="${escapeHtml(t("overview.title"))}">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="10"></circle>
+            <polyline points="12 6 12 12 16 14"></polyline>
+          </svg>
+        </span>
+        <span class="provider-name">${escapeHtml(t("overview.title"))}</span>
+        ${badgeHtml}
+        <span class="spacer"></span>
+        ${foldChevron}
+      </div>
+      ${isFolded ? "" : `<div class="card-panel overview-panel"><div class="overview-grid">${itemsHtml}</div></div>`}
     </article>`;
 }
 
@@ -3296,6 +3659,11 @@ function reconcileAccountLayout(family: string, list: AccountEntry[]): boolean {
     config.disabled = disabled;
     changed = true;
   }
+  const prevSnapLen = lastSnapshots.length;
+  lastSnapshots = lastSnapshots.filter((snap) => !isFamilyAccount(snap.id) || active.has(snap.id));
+  if (lastSnapshots.length !== prevSnapLen) {
+    changed = true;
+  }
   if (changed) void patchConfig({ layout: config.layout, disabled: config.disabled }).catch(() => {});
   return changed;
 }
@@ -3895,7 +4263,10 @@ function renderWelcome(): string {
 function renderAll(): void {
   const el = document.querySelector("#providers")!;
   el.innerHTML =
-    renderWelcome() + renderTotalSpend() + orderedSnapshots().map(renderCard).join("");
+    renderWelcome() +
+    renderTotalSpend() +
+    renderFiveHourOverview() +
+    orderedSnapshots().map(renderCard).join("");
   if (customizeOpen) renderDrawerBody();
   rebuildTrail();
 }
@@ -3943,6 +4314,9 @@ function rebuildTrail(): void {
     .map((card, i) => {
       const name = card.querySelector(".provider-name")?.textContent ?? `Card ${i + 1}`;
       const id = card.dataset.provider ?? "";
+      if (id === "__overview__") {
+        return `<button class="trail-tick trail-icon" data-trail="${i}" title="${escapeHtml(name)}"><span class="trail-icon-inner"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><circle cx="12" cy="12" r="9"/><polyline points="12 7 12 12 15 15"/></svg></span></button>`;
+      }
       const family = id ? providerFamily(id) : "";
       const origin = card.dataset.origin || undefined;
       const visual = providerVisual(id || family, origin);
@@ -3969,6 +4343,101 @@ function rebuildTrail(): void {
     tick.style.width = `${Math.max(7, Math.min(16, Math.round(5 + h / 45)))}px`;
   });
   updateTrailActive();
+  updateTrailLayout();
+}
+
+function updateTrailLayout(): void {
+  const trail = document.querySelector<HTMLElement>("#trail");
+  const wrap = document.querySelector<HTMLElement>("#trail-wrap");
+  if (!trail || !wrap) return;
+
+  const count = trail.querySelectorAll<HTMLElement>(".trail-tick").length;
+  if (!count) return;
+
+  // Measure available vertical space in #trail-wrap
+  const availH = wrap.clientHeight || 360;
+
+  const MAX_SIZE = 28;
+  const MIN_SIZE = 20;
+  const MAX_GAP = 6;
+  const MIN_GAP = 3;
+
+  let size = MAX_SIZE;
+  let gap = MAX_GAP;
+
+  const totalAtMax = count * MAX_SIZE + (count - 1) * MAX_GAP;
+  if (totalAtMax > availH) {
+    // Proportional downscaling with a hard bottom limit to avoid excessive shrinking
+    const effectiveUnits = count + (count - 1) * 0.2;
+    const computedSize = Math.floor(availH / effectiveUnits);
+    size = Math.max(MIN_SIZE, Math.min(MAX_SIZE, computedSize));
+    gap = Math.max(MIN_GAP, Math.min(MAX_GAP, Math.round(size * 0.2)));
+  }
+
+  const innerSize = Math.max(13, Math.min(18, Math.round(size * 0.64)));
+  const dotSize = size <= 22 ? 4 : 5;
+
+  trail.style.setProperty("--trail-icon-size", `${size}px`);
+  trail.style.setProperty("--trail-inner-size", `${innerSize}px`);
+  trail.style.setProperty("--trail-gap", `${gap}px`);
+  trail.style.setProperty("--trail-dot-size", `${dotSize}px`);
+
+  updateTrailScrollIndicators();
+}
+
+function updateTrailScrollIndicators(): void {
+  const trail = document.querySelector<HTMLElement>("#trail");
+  const moreTop = document.querySelector<HTMLElement>("#trail-more-top");
+  const moreBottom = document.querySelector<HTMLElement>("#trail-more-bottom");
+  if (!trail || !moreTop || !moreBottom) return;
+
+  const isOverflowing = trail.scrollHeight > trail.clientHeight + 2;
+  if (!isOverflowing) {
+    moreTop.hidden = true;
+    moreBottom.hidden = true;
+    trail.classList.remove("is-overflowing");
+    return;
+  }
+
+  trail.classList.add("is-overflowing");
+  moreTop.hidden = trail.scrollTop <= 4;
+  moreBottom.hidden = trail.scrollTop + trail.clientHeight >= trail.scrollHeight - 4;
+}
+
+function setupTrailScroll(): void {
+  const trail = document.querySelector<HTMLElement>("#trail");
+  const sidebar = document.querySelector<HTMLElement>(".sidebar");
+  const moreTop = document.querySelector<HTMLElement>("#trail-more-top");
+  const moreBottom = document.querySelector<HTMLElement>("#trail-more-bottom");
+
+  if (trail) {
+    trail.addEventListener("scroll", updateTrailScrollIndicators, { passive: true });
+  }
+
+  if (sidebar && trail) {
+    sidebar.addEventListener(
+      "wheel",
+      (e) => {
+        if (trail.scrollHeight > trail.clientHeight) {
+          trail.scrollTop += e.deltaY;
+          e.preventDefault();
+        }
+      },
+      { passive: false },
+    );
+  }
+
+  moreTop?.addEventListener("click", () => {
+    trail?.scrollBy({ top: -50, behavior: "smooth" });
+  });
+
+  moreBottom?.addEventListener("click", () => {
+    trail?.scrollBy({ top: 50, behavior: "smooth" });
+  });
+
+  window.addEventListener("resize", () => {
+    updateTrailLayout();
+  });
 }
 
 /// Codex-style magnetic rail: ticks near the cursor stretch and brighten
@@ -3997,7 +4466,7 @@ function setupTrailFisheye(): void {
         const g = Math.exp(-(d * d) / (2 * 26 * 26)); // gaussian falloff, σ≈26px
         const active = tick.classList.contains("active");
         if (tick.classList.contains("trail-icon")) {
-          tick.style.transform = `scale(${(1 + 0.5 * g).toFixed(3)})`;
+          tick.style.transform = `scale(${(1 + 0.4 * g).toFixed(3)})`;
           return;
         }
         tick.style.transform = `scaleX(${(1 + 0.9 * g).toFixed(3)})`;
@@ -4023,9 +4492,15 @@ function updateTrailActive(): void {
   if (providersEl.scrollTop + providersEl.clientHeight >= providersEl.scrollHeight - 4) {
     active = cards.length - 1;
   }
+  const trail = document.querySelector<HTMLElement>("#trail");
   document.querySelectorAll<HTMLElement>("#trail .trail-tick").forEach((tick, i) => {
-    tick.classList.toggle("active", i === active);
+    const isAct = i === active;
+    tick.classList.toggle("active", isAct);
+    if (isAct && trail && trail.scrollHeight > trail.clientHeight) {
+      tick.scrollIntoView({ block: "nearest", behavior: "smooth" });
+    }
   });
+  updateTrailScrollIndicators();
 }
 
 // ---------------------------------------------------------------------------
@@ -6031,6 +6506,7 @@ window.addEventListener("DOMContentLoaded", () => {
   });
   document.querySelector("#theme-btn")!.addEventListener("click", toggleTheme);
   setupTrailFisheye();
+  setupTrailScroll();
   setupTooltips();
   // No lens init here: applyGlass() (via initSettings, after the saved
   // config arrives) owns it — a fixed timer raced the config load and
@@ -6257,14 +6733,34 @@ window.addEventListener("DOMContentLoaded", () => {
     }
     const cardFold = target.closest<HTMLElement>("[data-card-fold]");
     if (cardFold) {
-      // data-card-fold holds the FAMILY id — every card in the family
-      // toggles together so the user sees one coherent state.
-      const family = cardFold.dataset.cardFold!;
-      const L = providerLayout(family);
-      const auto = isFamilyFoldCandidate(family);
+      const id = cardFold.dataset.cardFold!;
+      const L = providerLayout(id);
+      const auto = isCardFoldCandidate(id);
       L.collapsed = !(L.collapsed ?? auto);
       saveLayout(false);
       renderAll();
+      return;
+    }
+    const ovFold = target.closest<HTMLElement>("[data-overview-fold]");
+    if (ovFold) {
+      if (config.layout) {
+        config.layout.overviewCollapsed = !isOverviewCollapsed();
+        saveLayout(false);
+        renderAll();
+      }
+      return;
+    }
+    const jump = target.closest<HTMLElement>("[data-jump-provider]");
+    if (jump) {
+      const pid = jump.dataset.jumpProvider;
+      if (pid) {
+        const card = document.querySelector<HTMLElement>(`article[data-provider="${CSS.escape(pid)}"]`);
+        if (card) {
+          card.scrollIntoView({ behavior: "smooth", block: "start" });
+          card.classList.add("card-highlight");
+          setTimeout(() => card.classList.remove("card-highlight"), 1200);
+        }
+      }
       return;
     }
     if (target.closest(".donut-wrap")) {
