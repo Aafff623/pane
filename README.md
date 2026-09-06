@@ -2,26 +2,42 @@
 
 # Pane
 
-**All your AI plans and subscriptions, in one Windows tray.**
+**Track every AI quota, reset, and local CLI dollar amount without leaving Windows.**
 
 One click on the tray icon answers the questions every AI power user keeps
 asking: *How much of my Claude session is left? When does my Codex weekly
 reset? What did today actually cost me?*
 
-Pane is a free AI plan tracker for Windows — Claude, Codex, Cursor, Copilot,
-Kimi, Grok, and 20 more — built from scratch as an independent rebuild of
-the macOS original, [OpenUsage](https://www.openusage.ai/).
+Pane is a free Windows tray companion for Claude, Codex, Cursor, Copilot,
+Kimi, Grok, and 20+ more AI providers. It is an independent, from-scratch
+Windows rebuild inspired by [OpenUsage](https://www.openusage.ai/).
+
+<p>
+  <img src="https://img.shields.io/badge/Windows-11%2B-0b1220?style=flat&logo=windows&logoColor=white" alt="Windows 11 or later">
+  <img src="https://img.shields.io/badge/Tauri-v2-0b1220?style=flat&logo=tauri&logoColor=FFC131" alt="Tauri v2">
+  <img src="https://img.shields.io/badge/Data-local%20first-0b1220?style=flat&labelColor=172033&color=2563eb" alt="Local-first data handling">
+  <img src="https://img.shields.io/badge/Providers-26%2B-0b1220?style=flat&labelColor=172033&color=dc2626" alt="More than 26 providers">
+</p>
 
 **[trypane.xyz](https://trypane.xyz)** · [Guides](https://trypane.xyz/guides) · [Install](#install) · [How it works](#how-it-works) · [Providers](#providers-26-and-counting) · [Features](#features) · [Privacy](#privacy--security) · [Credits](#credits)
 
-<!-- Banner slot: reserved for the redesigned README banner (SVG layout +
-     fresh 0.4.48 screenshots). docs/promo.png below is a stand-in until
-     that asset ships. -->
-<img src="docs/promo.png" width="760" alt="Pane — track all your AI subscription limits in one tray app: Total Spend donut with per-provider slices, usage cards with usage bars and reset countdowns" />
+<img src="docs/readme-pane.png" width="100%" alt="Pane: a dark Windows AI telemetry board showing a 5-hour pace alert, a stable Codex quota, and a local-only provider monitor" />
 
 </div>
 
 ---
+
+## At a glance
+
+| Need | Pane shows it in the tray |
+| --- | --- |
+| Avoid a limit wall | 5-hour and weekly windows, reset countdowns, pace alerts |
+| Understand the bill | Today, yesterday, and 30-day local CLI spend, with token fallback when a public price is unavailable |
+| Keep accounts private | Tokens stay in the Windows user profile and are sent only to the selected provider; the local API is loopback-only |
+
+<p align="center">
+  <img src="docs/promo.png" width="860" alt="Pane interface proof: local spend donut, per-provider quota cards, usage bars, and reset countdowns" />
+</p>
 
 ## Why Pane
 

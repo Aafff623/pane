@@ -13,7 +13,7 @@ anything unverified lives under `待确认` at the bottom.
   project (detached from any upstream, 2026-09-06). A single branch `main`
   exists locally and on origin; feature work happens on `codex/<feature>`
   branches.
-- Version 0.4.46 (`package.json` + `src-tauri/tauri.conf.json`), identifier
+- Version 0.4.48 (`package.json` + `src-tauri/tauri.conf.json`), identifier
   `com.jazii.pane`, productName `Pane`.
 - Privacy boundary (asserted by tests in the code): tokens go only to their
   own vendor's API; pasted keys live in `%APPDATA%\Pane`; the 6736 HTTP API is
@@ -145,6 +145,17 @@ anything unverified lives under `待确认` at the bottom.
   `usage_history.rs` + frontend trend fallback.
 - `docs/plans/` and `docs/superpowers/plans/` — quota architecture,
   api-key quota providers, Antigravity multi-account, UI overhaul phases.
+
+## README assets
+
+- `docs/readme-pane.png` is the published 1200 × 380 README hero. It is a
+  flattened PNG: typography and telemetry layout are deterministic, while the
+  isolated character/card material is composited into the final image. Keep
+  README copy and commands in Markdown; do not replace the hero with an SVG
+  that depends on an external raster layer.
+- `docs/promo.png` remains the interface proof directly below the hero. It is
+  a product screenshot, not a replacement for the project promise in the
+  first screen.
 
 ## 待确认
 
