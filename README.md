@@ -2,18 +2,22 @@
 
 # Pane
 
-**Pane tracker: all your AI plans and subscriptions in one Windows tray.**
+**All your AI plans and subscriptions, in one Windows tray.**
 
 One click on the tray icon answers the questions every AI power user keeps
 asking: *How much of my Claude session is left? When does my Codex weekly
 reset? What did today actually cost me?*
 
-Pane is the [OpenUsage](https://www.openusage.ai/) port for Windows: a free
-AI plan tracker for Claude, Codex, Cursor, Copilot, Kimi, Grok, and 16 more.
+Pane is a free AI plan tracker for Windows — Claude, Codex, Cursor, Copilot,
+Kimi, Grok, and 20 more — built from scratch as an independent rebuild of
+the macOS original, [OpenUsage](https://www.openusage.ai/).
 
-**[trypane.xyz](https://trypane.xyz)** · [Guides](https://trypane.xyz/guides) · [Install](#install) · [How it works](#how-it-works) · [Providers](#providers-25-and-counting) · [Features](#features) · [Privacy](#privacy--security) · [Credits](#credits)
+**[trypane.xyz](https://trypane.xyz)** · [Guides](https://trypane.xyz/guides) · [Install](#install) · [How it works](#how-it-works) · [Providers](#providers-26-and-counting) · [Features](#features) · [Privacy](#privacy--security) · [Credits](#credits)
 
-<img src="docs/promo.png" width="760" alt="Pane — track all your AI subscription limits in one tray app: Total Spend donut with per-provider slices, usage cards with pace bars" />
+<!-- Banner slot: reserved for the redesigned README banner (SVG layout +
+     fresh 0.4.48 screenshots). docs/promo.png below is a stand-in until
+     that asset ships. -->
+<img src="docs/promo.png" width="760" alt="Pane — track all your AI subscription limits in one tray app: Total Spend donut with per-provider slices, usage cards with usage bars and reset countdowns" />
 
 </div>
 
@@ -28,8 +32,8 @@ counts in its own units, and resets on its own schedule. The only time you
 find out you're running low is when you hit the wall mid-task.
 
 Pane puts all of them in one place, in your system tray, refreshed every few
-minutes, with pace warnings *before* you hit the wall. It started as a
-Windows rebuild of the excellent [OpenUsage for macOS](https://github.com/robinebers/openusage)
+minutes, with warnings *before* you hit the wall. It started as a Windows
+rebuild of the excellent [OpenUsage for macOS](https://github.com/robinebers/openusage)
 by [Robin Ebers](https://github.com/robinebers) and is growing into a
 broader AI-workflow companion from there.
 
@@ -82,9 +86,11 @@ is hash-verified by Microsoft's pipeline.)
 
 Silent install (for scripts): `Pane_x.y.z_x64-setup.exe /S`
 
-Whichever way you install, Pane keeps itself current — every install
-checks for signed updates and offers a one-click restart when a new
-version ships.
+Whichever way you install, Pane checks for updates on launch and every
+4 hours in the background, and flags a new release on the footer version
+stamp. One-click in-app install lands together with Pane's own signing key
+(on the roadmap) — until then, new versions are one click away on the
+[releases page](https://github.com/Aafff623/pane/releases/latest).
 
 ### Build from source
 
@@ -108,7 +114,7 @@ and the interactive-desktop launch requirement.
 
 Pane is a small Tauri v2 app: a Rust core doing the data work, a vanilla
 TypeScript UI doing the glass. No Electron, no background services — one
-~10 MB process idling around 90 MB of RAM.
+small process idling in the tray.
 
 **1. Finding your accounts.** The official CLIs and editors you already use
 keep their login tokens in well-known per-user locations — Claude Code
@@ -126,35 +132,33 @@ back, which keeps your CLIs signed in too. Failing providers get benched
 briefly and their last good data is shown with an "Outdated" tag instead of
 a blank card.
 
-**3. Pacing the burn.** Every metric with a reset window gets a projection:
-if you keep burning at this rate, will you make it to the reset? Bars turn
-amber/red as the math worsens and optional Windows toasts fire once per
-reset window ("Almost out", "Will run out").
+**3. Projecting the reset.** Bars color by how much you've used (blue to
+amber to red), and a background projection of your burn rate fires optional
+Windows toasts once per reset window — "Almost out", "Will run out" — so
+you hear about the wall before you hit it.
 
 **4. Counting the money.** Your CLIs already log every request locally.
 Pane scans those logs (Claude, Codex, Grok, OpenCode, Devin CLI, Cursor
 CSV, MiniMax CLI, Kimi Code, Qwen Code, the pi coding agent, the Hermes
-desktop app), prices each
-request with live per-model rates (LiteLLM /
+desktop app), prices each request with live per-model rates (LiteLLM /
 models.dev, refreshed daily — hourly while unknown models are around, so
 brand-new models price within the hour), and draws the Today /
 Yesterday / 30-day donut with a per-model breakdown. Click the ring to
 flip between dollars and tokens. On a flat-rate plan this shows what
 your usage *would* cost at API prices — the best ad for your
-subscription you'll ever see. Requests on models with no public
-pricing keep their measured tokens in the counts, but no dollars are
-ever guessed for them — a ⚠ on the provider's spend row says the real
-cost runs a little higher than shown.
+subscription you'll ever see. Models with no public pricing keep their
+measured tokens but no guessed dollars — a ⚠ on the provider's spend row
+says the real cost runs a little higher than shown.
 
-**5. Staying local.** All of the above happens on your machine. There is
-no account, and your quotas, spend, and provider data never leave your
-PC. Pane reports two things about itself, both anonymous: the update
-check (country-level counting, no IPs stored) and an opt-out once-a-day
-statistic (random ID, version, which providers are enabled, provider
-success/failure counts — never amounts or error text) — see
-[Privacy](#privacy--security) for the full contract and the off switch.
+**5. Staying local.** All of the above happens on your machine — no
+account, and your quotas, spend, and provider data never leave your PC.
+Pane reports two anonymous things about itself: the update check
+(country-level counting, no IPs stored) and an opt-out once-a-day
+statistic (random ID, version, enabled providers, success/failure counts —
+never amounts or error text). The full contract and the off switch are
+under [Privacy](#privacy--security).
 
-## Providers (25 and counting)
+## Providers (26 and counting)
 
 | Provider | How Pane connects |
 |---|---|
@@ -177,10 +181,9 @@ success/failure counts — never amounts or error text) — see
 | Codebuff | `codebuff login` credentials file or API key → credits + weekly limit |
 | Kilo | Kilo CLI login file or API key → credit blocks + Kilo Pass |
 | AihubMix | API key (Settings or auto-detected from OpenCode) → usage vs spending limit |
-| One/New API | Add multiple compatible sites and keys in Settings; one quota card per key, with owner-only local secret storage |
+| One/New API | Add multiple compatible sites and keys in Settings; one quota tab per key on a merged card, with owner-only local secret storage |
 | Qwen Code | Coding Plan key (Settings or env) → 5h/weekly/monthly request quotas + local spend |
 | Hermes | Local ledger `%LOCALAPPDATA%\hermes\state.db` → two recent user models, routes, and catalog-priced spend, including scoped AihubMix launch-model rates |
-| Hermes | Local ledger `%LOCALAPPDATA%\hermes\state.db` — last model, route, and catalog-priced spend |
 | StepFun | API key (Settings or `STEPFUN_API_KEY`) → CNY balance (global + .ai hosts) |
 | SiliconFlow | API key (Settings or `SILICONFLOW_API_KEY`) → CNY balance (.cn + .com hosts) |
 | Novita AI | API key (Settings or `NOVITA_API_KEY`) → USD balance |
@@ -199,45 +202,57 @@ whatever the community asks for loudest.
 
 ## Features
 
+**Tracking**
+
 - **5-hour overview** — every provider with a 5-hour rolling window in one
   pinned section: status dot and reset countdown per provider, plus a
   green "N available" / red "N maxed" symbol tally in the header.
-- **Multi-account Claude & Codex** — running a personal plan AND a
-  work/enterprise seat? Keep the second login in its own folder (via
-  `CLAUDE_CONFIG_DIR` / `CODEX_HOME`) and Pane shows one card per
-  account — each with its own limits, plan, credits, and spend, named
-  by its organization or email ("Claude — Acme"). The same account
-  signed in twice stays one card, and your existing setup is untouched.
-- **One/New API sites** — add multiple compatible sites and multiple keys
-  per site in Settings. Every key gets its own quota card; secrets remain
-  owner-only on this PC and are sent only to the configured origin.
-- **English, Chinese, and Russian** — choose a language explicitly or let
-  Auto follow the Windows display language across the popover, tray, and
-  quota notifications.
-- **Pace projections** — colored bars and "will run out" warnings based on
-  your burn rate within each reset window, plus optional Windows toasts.
-- **Local spend** — Today / Yesterday / 30 Days donut with per-model
+- **Codex reset credits** — see each banked credit's exact expiry and
+  redeem it with one click.
+
+**Spend**
+
+- **Local spend donut** — Today / Yesterday / 30 Days with a per-model
   breakdown and a 30-day trend, priced with live model rates. Hover a
   slice and it pops out with its legend row; click the ring to flip
   dollars ⇄ tokens.
-- **Codex reset credits** — see each banked credit's exact expiry and
-  redeem it with one click.
-- **Signed auto-updates** — Pane checks for updates every time you open
-  it (and every 4 hours in the background); when a release is out, the
-  footer version stamp becomes an Update button — one click downloads,
-  verifies the signature, and restarts.
+- **Burn-rate alerts** — bars color by used-% (blue → amber → red), and
+  optional Windows toasts fire once per reset window ("Almost out",
+  "Will run out") when your burn rate says you won't make it.
+
+**Accounts**
+
+- **Multi-account Claude & Codex** — running a personal plan AND a
+  work/enterprise seat? Keep the second login in its own folder (via
+  `CLAUDE_CONFIG_DIR` / `CODEX_HOME`) and Pane shows one card per
+  account — its own limits, plan, credits, and spend, named by its
+  organization or email ("Claude — Acme"). The same account signed in
+  twice stays one card, and your existing setup is untouched.
+- **Account tabs for key providers** — DeepSeek, StepFun, SiliconFlow,
+  Novita, Kimi, Antigravity, Cursor, and Custom Balance keep multiple
+  logins as tabs on one card.
+- **One/New API sites** — add multiple compatible sites and multiple keys
+  per site in Settings; every key gets its own quota tab on the merged
+  card; secrets remain owner-only on this PC and are sent only to the
+  configured origin.
+
+**Interface & control**
+
+- **English, Chinese, and Russian** — choose a language explicitly or let
+  Auto follow the Windows display language across the popover, tray, and
+  quota notifications.
 - **Live tray numbers** — star up to two metrics per provider and they
   render as logo + percentage pairs directly in the tray.
 - **Customize** — drag any card by its grip right in the popover to
   reorder, or open the Customize screen (☰) to reorder metrics, hide
-  rows, and tuck rarely-needed ones behind an "On Demand" caret. Ctrl+Z
-  undoes.
+  rows, and tuck rarely-needed ones behind an "On Demand" caret; folded
+  cards surface their nearest reset countdown as a status-toned pill.
+  Ctrl+Z undoes.
 - **Liquid glass UI** — real SDF lens refraction on the auto-hiding
-  sidebar and glass bars, magnetic minimap trail with authentic brand avatars and health indicator dots, circular day/night wipe.
-- **Card Breathing Room & Folded Badges** — spacious card layout with generous breathing room; folded cards highlight nearest reset countdowns with status-toned pills and glow indicators.
-- **Multi-account Switching** — seamless multi-account management across DeepSeek, StepFun, SiliconFlow, Novita, Kimi, Antigravity, Cursor, and One/New API with instant card account tabs.
+  sidebar and glass bars, magnetic minimap trail with authentic brand
+  avatars and health indicator dots, circular day/night wipe.
 - **Share cards** — hover a card, click ⧉, and paste anywhere: the copy
-  is exactly what the card shows (bars, pace hints, trend — buttons and
+  is exactly what the card shows (bars, reset hints, trend — buttons and
   links stripped), framed with the Pane icon and tagline.
 - **Quick links** — Status / Dashboard shortcuts on every card.
 - **[Local HTTP API](docs/local-http-api.md)** — `GET
@@ -245,8 +260,13 @@ whatever the community asks for loudest.
   overlays; same wire format as the Mac app, but with no CORS headers
   and a loopback-only Host check so web pages can't read it through
   your browser (not even via DNS rebinding).
-- **Appearance** — System / Light / Dark, compact density, global shortcut
-  (e.g. `Ctrl+Shift+U`), optional outbound proxy.
+- **Update checks** — Pane checks on launch and every 4 hours in the
+  background; when a release is out, the footer version stamp becomes an
+  Update button. One-click in-app install lands together with Pane's own
+  signing key (on the roadmap) — until then, grab new versions from the
+  [releases page](https://github.com/Aafff623/pane/releases/latest).
+- **Appearance** — System / Light / Dark, compact density, time format,
+  global shortcut (e.g. `Ctrl+Shift+U`), optional outbound proxy.
 
 ## Privacy & security
 
@@ -271,8 +291,8 @@ treats them — verify it:
 The short version: tokens are sent only to their own vendor's API over
 HTTPS; pasted keys live in `%APPDATA%\Pane`, readable only by your
 Windows user; spend accounting parses your local logs locally; the HTTP
-API is loopback-only with no CORS and a Host check; updates are
-signature-verified.
+API is loopback-only with no CORS and a Host check; update downloads come
+only from Pane's official release feed.
 
 ## Settings (gear icon)
 
@@ -280,6 +300,14 @@ Language (Auto / English / 中文 / Русский) · refresh interval · Start
 Windows · tray metric picker · appearance and compact density · time format ·
 global shortcut · notification toggles · outbound proxy · provider API keys ·
 One/New API site and key management.
+
+## Contributing
+
+Found a wrong number, a broken provider, or a missing one?
+[Issues](https://github.com/Aafff623/pane/issues) are the fastest way in —
+[CONTRIBUTING.md](CONTRIBUTING.md) has the ground rules. The
+[roadmap](ROADMAP.md) shows what's shipping next, and
+[CHANGELOG.md](CHANGELOG.md) records every release.
 
 ## Credits
 
