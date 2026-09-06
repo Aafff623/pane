@@ -39,11 +39,13 @@ jobs:
       - name: Install frontend deps
         run: npm ci
 
-      - name: Build (signed)
-        run: npm run tauri build
-        env:
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+      # This repo has no minisign private key (the updater pubkey embedded
+      # in tauri.conf.json belongs to the original upstream), so updater
+      # artifacts cannot be signed here — building with them enabled fails
+      # at the signing step. Ship plain installers + a sha256 manifest
+      # until this repo gets its own keypair and endpoints.
+      - name: Build
+        run: npm run tauri build -- --config '{"bundle":{"createUpdaterArtifacts":false}}'
 
       - name: Generate latest.json (with sha256 — install.ps1 requires it)
         shell: pwsh
@@ -59,16 +61,18 @@ jobs:
             exit 1
           }
           $exe = Get-ChildItem src-tauri/target/release/bundle/nsis/*-setup.exe | Select-Object -First 1
-          $sig = (Get-Content "$($exe.FullName).sig" -Raw).Trim()
+          # No signing key in this repo: the signature field stays empty
+          # (sha256 below is what install.ps1 actually consumes).
+          $sig = ""
           $hash = (Get-FileHash $exe.FullName -Algorithm SHA256).Hash.ToLower()
           $manifest = @{
             version  = $ver
-            notes    = "https://github.com/ItsJazii/pane/blob/main/CHANGELOG.md"
+            notes    = "https://github.com/Aafff623/pane/blob/main/CHANGELOG.md"
             pub_date = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
             sha256   = $hash
             platforms = @{ "windows-x86_64" = @{
               signature = $sig
-              url = "https://github.com/ItsJazii/pane/releases/download/$tag/$($exe.Name)"
+              url = "https://github.com/Aafff623/pane/releases/download/$tag/$($exe.Name)"
             } }
           } | ConvertTo-Json -Depth 4
           [System.IO.File]::WriteAllText("latest.json", $manifest, (New-Object System.Text.UTF8Encoding($false)))
@@ -81,7 +85,6 @@ jobs:
           name: pane-installer
           path: |
             src-tauri/target/release/bundle/nsis/*-setup.exe
-            src-tauri/target/release/bundle/nsis/*-setup.exe.sig
             latest.json
 
       - name: Create GitHub release
@@ -92,7 +95,7 @@ jobs:
           gh release create $env:GITHUB_REF_NAME `
             --title "Pane $($env:GITHUB_REF_NAME.TrimStart('v'))" `
             --generate-notes `
-            $exe.FullName "$($exe.FullName).sig" latest.json
+            $exe.FullName latest.json
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
