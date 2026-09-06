@@ -199,6 +199,9 @@ whatever the community asks for loudest.
 
 ## Features
 
+- **5-hour overview** — every provider with a 5-hour rolling window in one
+  pinned section: status dot and reset countdown per provider, plus a
+  green "N available" / red "N maxed" symbol tally in the header.
 - **Multi-account Claude & Codex** — running a personal plan AND a
   work/enterprise seat? Keep the second login in its own folder (via
   `CLAUDE_CONFIG_DIR` / `CODEX_HOME`) and Pane shows one card per

@@ -42,6 +42,12 @@ anything unverified lives under `待确认` at the bottom.
   Identity = `refresh_token`. File: `antigravity-accounts.json`.
 - **CursorAccount** — Cursor OAuth account. Identity = `access_token`.
   File: `cursor-accounts.json`.
+- **5-hour overview** — pinned dashboard section aggregating every provider
+  that has a 5-hour rolling window: per-provider status dot + reset
+  countdown ring, header badge = two independent symbols (`● N 可用`
+  green, `● N 满额` red, shown only when non-zero). **maxed (满额)** = the
+  5h window at 100%; providers without a 5h window render as `按量/长期`
+  (non-5h) and don't count into the availability tally.
 - **Relay site (One/New API)** — one site entry in `onenewapi.json`
   (version 1): `name`, `base_url`, optional dashboard **access token** +
   `New-Api-User` id, and N relay keys (`sk-…`). Sites are ACCOUNTS of the
@@ -164,3 +170,7 @@ anything unverified lives under `待确认` at the bottom.
   agent shell pipe breaks when the shell exits and the next `println!`
   panics, killing the refresh task (symptom: footer stuck "Refreshing…",
   every card ⚠数据过时, `/v1/usage` returns `[]`).
+- 2026-09-06 — Overview availability badge style is FINAL: two independent
+  symbols (green dot + available count, red dot + maxed count), never a
+  combined "7/8"-style solid capsule. User-mandated after rejecting the
+  first rendering that shipped in the initial 0.4.48 build.
