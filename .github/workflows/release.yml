@@ -44,8 +44,14 @@ jobs:
       # artifacts cannot be signed here — building with them enabled fails
       # at the signing step. Ship plain installers + a sha256 manifest
       # until this repo gets its own keypair and endpoints.
+      # Write the override to a file and pass its path: inline JSON on the
+      # command line loses its double quotes through npm run on Windows
+      # ("{bundle:...}" fails JSON parsing).
       - name: Build
-        run: npm run tauri build -- --config '{"bundle":{"createUpdaterArtifacts":false}}'
+        shell: pwsh
+        run: |
+          '{"bundle":{"createUpdaterArtifacts":false}}' | Out-File -Encoding utf8 build-config.json
+          npm run tauri build -- --config build-config.json
 
       - name: Generate latest.json (with sha256 — install.ps1 requires it)
         shell: pwsh
