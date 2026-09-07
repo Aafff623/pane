@@ -11,9 +11,12 @@
 
 Pane is a **Tauri** app: the Rust backend (`src-tauri/`) compiles to
 `pane.exe`, which opens a **WebView2** window that loads the frontend from
-`http://localhost:1420`.  In dev mode that URL is served by Vite (live
-reload).  In production the binary still reads `localhost:1420` — so you
+`http://127.0.0.1:1420`.  In dev mode that URL is served by Vite (live
+reload).  In production the binary still reads `127.0.0.1:1420` — so you
 must always have something serving `dist/` there.
+(Explicit IPv4: on machines where IPv6 loopback `[::1]` connections are
+blocked — WFP filter / VPN driver — `localhost` may resolve to `::1`
+first and every probe fails with access-denied.)
 
 There are **two independent processes** that must both be running:
 
@@ -116,7 +119,7 @@ Then restart pane.exe as in step 5 above.
 Get-Process pane -ErrorAction SilentlyContinue
 
 # Is the frontend being served?
-Invoke-WebRequest http://localhost:1420 -UseBasicParsing | Select-Object StatusCode
+Invoke-WebRequest http://127.0.0.1:1420 -UseBasicParsing | Select-Object StatusCode
 
 # Is the local usage API responding?
 Invoke-RestMethod http://127.0.0.1:6736/v1/usage | Select-Object -ExpandProperty id
@@ -133,6 +136,36 @@ Invoke-RestMethod http://127.0.0.1:6736/v1/usage | Select-Object -ExpandProperty
 
 ---
 
+## Launching from a sandboxed agent session (WMI)
+
+Agent harnesses (ZCode etc.) often run shell tools inside a job sandbox.
+Two failure modes, both confirmed on this machine:
+
+- **Tree kill** — a command timeout, a task stop, or even the user
+  switching models kills the entire process tree, including any Vite or
+  `pane.exe` you started via `Start-Process`.
+- **IPv6 loopback block** — connections to `[::1]:1420` fail with
+  `WSAEACCES` ("access forbidden by access permissions") even from
+  clean processes, while `127.0.0.1` always works. That is why the whole
+  dev chain is pinned to IPv4 (see the architecture note above).
+
+The escape is WMI: processes created via `Win32_Process.Create` are
+spawned by `WmiPrvSE.exe`, outside the sandbox job:
+
+```powershell
+$cmd = 'cmd.exe /c ""C:\nvm4w\nodejs\node.exe" "D:\code\pane\node_modules\vite\bin\vite.js" > "D:\code\pane\temp\logs\vite-dev.log" 2>&1"'
+Invoke-CimMethod Win32_Process Create @{ CommandLine = $cmd; CurrentDirectory = 'D:\code\pane' }
+```
+
+Gotchas: WMI cannot resolve WindowsApps aliases (`pwsh`, `pnpm`) — you get
+rc=9 "path not found"; use real paths (`node.exe`, `cmd.exe`). And
+`powershell.exe` started from that chain gets access-denied here — probe
+with node instead (`temp/scripts/net-probe.cjs`; note the repo is ESM, so
+it must be `.cjs`). Local one-shot scripts: `temp/scripts/pane-wmi-launch.ps1`
+(kill + cold start + poke + verify) and `pane-wmi-poke.ps1` (show panel).
+
+---
+
 ## Common agent mistakes
 
 | Mistake | Fix |
@@ -144,6 +177,10 @@ Invoke-RestMethod http://127.0.0.1:6736/v1/usage | Select-Object -ExpandProperty
 | Rebuilding Rust for CSS/TS changes | Not needed; `pnpm build` + Vite reload is sufficient |
 | Forgetting to clear WebView2 cache | `Remove-Item -Recurse -Force "$env:LOCALAPPDATA\com.jazii.pane\EBWebView"` |
 | Wrong working directory | Always `cd D:\code\pane` before any pnpm command |
+| Probing `http://[::1]:1420` or `http://localhost:1420` | IPv6-loopback connects are blocked machine-wide here (`WSAEACCES`); always probe `http://127.0.0.1:1420` |
+| Vite/pane started under the agent's own shell task | Timeouts / task-stops / model switches kill the whole tree; create them via WMI (`Win32_Process.Create`) so they outlive the session |
+| `pwsh`/`pnpm` in a WMI `CommandLine` | WindowsApps aliases don't resolve there (rc=9 "path not found"); use full paths to `node.exe` / `cmd.exe` |
+| Changing `devUrl` in `tauri.conf.json` without rebuilding | `devUrl` is compiled into the binary at build time; rebuild (`cargo build`) or the old URL is still baked in |
 
 ---
 

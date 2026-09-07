@@ -121,10 +121,36 @@ npm run tauri dev     # run with hot reload
 npm run tauri build   # installer lands in src-tauri/target/release/bundle
 ```
 
-For fast local development on Windows, follow the canonical startup guide:
-[`docs/dev-startup.md`](docs/dev-startup.md) — it covers the two-process
-setup (Vite on `:1420` + `pane.exe` on `:6736`), WebView2 cache handling,
-and the interactive-desktop launch requirement.
+**Fast local dev loop (Windows).** Iterate on the UI against the debug
+binary without the full Tauri toolchain — four steps, in order:
+
+```powershell
+pnpm build             # 1. type gate + fresh dist/
+pnpm dev               # 2. Vite on 127.0.0.1:1420 — leave it running
+# 3. launch src-tauri/target/debug/pane.exe via CreateProcess with
+#    lpDesktop = "WinSta0\Default"; plain Start-Process lands on a
+#    non-interactive station and the window is created but invisible
+# 4. start the exe once more — the running instance pops the panel
+#    (the window starts hidden in the tray; a single tray-icon click
+#    or Alt+2 shows it too — double-click is a known bug, use single)
+```
+
+Three rules that keep this loop alive:
+
+1. **Two processes, both required** — Vite on `127.0.0.1:1420` serving the
+   UI, `pane.exe` on `127.0.0.1:6736` as the Rust backend. Neither works
+   alone.
+2. **Loopback is IPv4 on purpose** — `devUrl` is `http://127.0.0.1:1420`.
+   Some Windows setups deny IPv6-loopback (`[::1]`) connections outright
+   and `localhost` may resolve to `::1` first, so always use `127.0.0.1`
+   for serving and probing.
+3. **Changing `devUrl` requires a Rust rebuild** — it is compiled into the
+   binary, not read at runtime.
+
+Stale UI after an edit? Clear `%LOCALAPPDATA%\com.jazii.pane\EBWebView` —
+WebView2 caches aggressively. The full guide (cache handling, launching
+from sandboxed agents via WMI, troubleshooting) lives in
+[`docs/dev-startup.md`](docs/dev-startup.md).
 
 ## How it works
 
