@@ -3317,21 +3317,21 @@ body.no-glass #confirm-box {
 }
 
 /* ---------------------------------------------------------------------------
-   5-Hour Quota & Status Overview Module
+   Quota & Status Overview Module
 ---------------------------------------------------------------------------- */
 
-.five-hour-overview {
+.quota-overview {
   margin-bottom: 8px;
 }
 
-.five-hour-overview .provider-head {
+.quota-overview .provider-head {
   display: flex;
   align-items: center;
   gap: 8px;
   min-width: 0;
 }
 
-.five-hour-overview .overview-clock-icon {
+.quota-overview .overview-title-icon {
   display: flex;
   align-items: center;
   justify-content: center;
@@ -3339,7 +3339,7 @@ body.no-glass #confirm-box {
   flex-shrink: 0;
 }
 
-.five-hour-overview .provider-name {
+.quota-overview .provider-name {
   white-space: nowrap !important;
   flex-shrink: 0 !important;
   font-weight: 600;
@@ -3347,7 +3347,7 @@ body.no-glass #confirm-box {
   letter-spacing: -0.01em;
 }
 
-.five-hour-overview .overview-chip {
+.quota-overview .overview-chip {
   display: inline-flex;
   align-items: center;
   gap: 4px;
@@ -3359,44 +3359,44 @@ body.no-glass #confirm-box {
   user-select: none;
 }
 
-.five-hour-overview .overview-chip.is-warn {
+.quota-overview .overview-chip.is-warn {
   color: #f87171;
 }
 
-:root[data-theme="light"] .five-hour-overview .overview-chip.is-warn {
+:root[data-theme="light"] .quota-overview .overview-chip.is-warn {
   color: #dc2626;
 }
 
-.five-hour-overview .overview-chip.is-ok {
+.quota-overview .overview-chip.is-ok {
   color: #34d399;
 }
 
-:root[data-theme="light"] .five-hour-overview .overview-chip.is-ok {
+:root[data-theme="light"] .quota-overview .overview-chip.is-ok {
   color: #059669;
 }
 
-.five-hour-overview .overview-chip-dot {
+.quota-overview .overview-chip-dot {
   width: 5px;
   height: 5px;
   border-radius: 50%;
   flex-shrink: 0;
 }
 
-.five-hour-overview .overview-chip-dot.red {
+.quota-overview .overview-chip-dot.red {
   background: #ef4444;
   box-shadow: 0 0 4px rgba(239, 68, 68, 0.8);
 }
 
-.five-hour-overview .overview-chip-dot.green {
+.quota-overview .overview-chip-dot.green {
   background: #10b981;
   box-shadow: 0 0 3px rgba(16, 185, 129, 0.6);
 }
 
-.five-hour-overview .overview-panel {
+.quota-overview .overview-panel {
   padding: 8px 10px 10px;
 }
 
-.five-hour-overview .overview-grid {
+.quota-overview .overview-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(76px, 1fr));
   gap: 6px;
@@ -3533,7 +3533,7 @@ body.no-glass #confirm-box {
   fill: #ef4444;
 }
 
-.overview-ring .ring-text.is-non5h {
+.overview-ring .ring-text.is-nodata {
   font-size: 12px;
   fill: var(--muted-foreground);
 }

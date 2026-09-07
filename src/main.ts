@@ -2017,24 +2017,38 @@ function renderTotalSpend(): string {
 }
 
 // ---------------------------------------------------------------------------
-// 5-Hour Quota & Status Overview module
-// Displays availability status and real-time 5h quota (circular SVG progress)
-// for all providers visible on the homepage. Maxed (100%) renders in red.
+// Quota & Status Overview module
+// Displays availability status and each provider's most binding quota
+// (circular SVG progress): the 5-hour session window when one is reported,
+// otherwise the shortest-period usage percent (daily / weekly / monthly).
+// Maxed (100%) renders in red.
 // ---------------------------------------------------------------------------
 
-interface FiveHourQuota {
-  has5h: boolean;
+type QuotaWindow = "5h" | "day" | "week" | "month" | "generic";
+
+const windowLabelKey: Record<QuotaWindow, string> = {
+  "5h": "overview.win5h",
+  day: "overview.winDay",
+  week: "overview.winWeek",
+  month: "overview.winMonth",
+  generic: "overview.winGeneric",
+};
+
+interface OverviewQuota {
+  // Period the shown percent belongs to; null = the snapshot carries no
+  // usable percentage at all (ring renders as "—").
+  window: QuotaWindow | null;
   usedPercent: number;
   resetsAt: number | null;
   metricLabel: string;
   isMaxed: boolean;
-  status: "ok" | "maxed" | "error" | "no_5h";
+  status: "ok" | "maxed" | "error" | "no_data";
 }
 
-function extractFiveHourQuota(s: Snapshot, cardIsMaxed = false, cardId = ""): FiveHourQuota {
+function extractOverviewQuota(s: Snapshot, cardIsMaxed = false, cardId = ""): OverviewQuota {
   if (s.status !== "ok") {
     return {
-      has5h: false,
+      window: null,
       usedPercent: 0,
       resetsAt: null,
       metricLabel: "",
@@ -2050,37 +2064,68 @@ function extractFiveHourQuota(s: Snapshot, cardIsMaxed = false, cardId = ""): Fi
   const is5hLabel = (label: string) =>
     /session|5-?hour|5h/i.test(label) && !/week|month|day|year/i.test(label);
 
-  const candidates = (s.metrics || []).filter(
+  const percents = (s.metrics || []).filter(
+    (m) => isCoreQuotaMetric(m) && m.used_percent !== null,
+  );
+  // Session-window metrics win: they are the most binding quota a provider
+  // reports. Week/month labels stay excluded even when a metric happens to
+  // carry a short period.
+  const sessionPercents = percents.filter(
     (m) =>
-      isCoreQuotaMetric(m) &&
-      m.used_percent !== null &&
-      (is5hPeriod(m.period_ms) || is5hLabel(m.label)) &&
-      !/week|month|year/i.test(m.label),
+      (is5hPeriod(m.period_ms) || is5hLabel(m.label)) && !/week|month|year/i.test(m.label),
   );
 
+  const pickBest = (list: Metric[]): Metric =>
+    list.reduce((prev, curr) =>
+      (curr.used_percent ?? 0) > (prev.used_percent ?? 0) ? curr : prev,
+    );
+
+  const windowOf = (m: Metric): QuotaWindow => {
+    if (is5hPeriod(m.period_ms) || is5hLabel(m.label)) return "5h";
+    const label = m.label.toLowerCase();
+    if ((m.period_ms !== null && m.period_ms <= 36 * 3_600_000) || /day|daily|today/.test(label)) {
+      return "day";
+    }
+    if ((m.period_ms !== null && m.period_ms <= 8 * 24 * 3_600_000) || /week/.test(label)) {
+      return "week";
+    }
+    if (m.period_ms !== null || /month|cycle/.test(label)) return "month";
+    return "generic";
+  };
+
   const isMaxed = cardIsMaxed || isSnapshotMaxed(s);
+
+  let best: Metric | null = null;
+  if (sessionPercents.length > 0) {
+    best = pickBest(sessionPercents);
+  } else if (percents.length > 0) {
+    // Shortest period first (untimed metrics last); ties broken by the higher
+    // usage so Cursor-style sibling bars collapse into one ring.
+    const shortest = percents.reduce((prev, curr) =>
+      (curr.period_ms ?? Infinity) < (prev.period_ms ?? Infinity) ? curr : prev,
+    );
+    best = pickBest(
+      percents.filter((m) => (m.period_ms ?? Infinity) === (shortest.period_ms ?? Infinity)),
+    );
+  }
 
   if (isMaxed) {
     const resetSecs = cardId ? nearestResetSeconds(cardId) : 0;
     const resetsAt = resetSecs > 0 ? Date.now() + resetSecs * 1000 : null;
     return {
-      has5h: candidates.length > 0,
+      window: best ? windowOf(best) : null,
       usedPercent: 100,
       resetsAt,
-      metricLabel: candidates[0]?.label ?? "Maxed",
+      metricLabel: best?.label ?? "Maxed",
       isMaxed: true,
       status: "maxed",
     };
   }
 
-  if (candidates.length > 0) {
-    const best = candidates.reduce((prev, curr) =>
-      (curr.used_percent ?? 0) > (prev.used_percent ?? 0) ? curr : prev,
-    );
-    const rawUsed = best.used_percent ?? 0;
-    const usedPercent = Math.min(100, Math.max(0, rawUsed));
+  if (best) {
+    const usedPercent = Math.min(100, Math.max(0, best.used_percent ?? 0));
     return {
-      has5h: true,
+      window: windowOf(best),
       usedPercent,
       resetsAt: best.resets_at,
       metricLabel: best.label,
@@ -2090,12 +2135,12 @@ function extractFiveHourQuota(s: Snapshot, cardIsMaxed = false, cardId = ""): Fi
   }
 
   return {
-    has5h: false,
+    window: null,
     usedPercent: 0,
     resetsAt: null,
     metricLabel: "",
     isMaxed: false,
-    status: "no_5h",
+    status: "no_data",
   };
 }
 
@@ -2103,7 +2148,7 @@ function isOverviewCollapsed(): boolean {
   return config.layout?.overviewCollapsed ?? false;
 }
 
-function renderFiveHourOverview(): string {
+function renderQuotaOverview(): string {
   const visibleSnaps = orderedSnapshots();
   if (visibleSnaps.length === 0) return "";
 
@@ -2128,7 +2173,7 @@ function renderFiveHourOverview(): string {
       }
     }
     const cardIsMaxed = isCardFoldCandidate(s.id);
-    const quota = extractFiveHourQuota(shown, cardIsMaxed, s.id);
+    const quota = extractOverviewQuota(shown, cardIsMaxed, s.id);
     return { cardSnap: s, shownSnap: shown, quota };
   });
 
@@ -2183,7 +2228,7 @@ function renderFiveHourOverview(): string {
           stroke-dasharray="${circumference.toFixed(2)}"
           stroke-dashoffset="0"
           transform="rotate(-90 ${cx} ${cy})" />`;
-      } else if (quota.has5h) {
+      } else if (quota.window !== null) {
         const pct = Math.round(quota.usedPercent);
         const dashoffset = circumference * (1 - pct / 100);
 
@@ -2192,7 +2237,7 @@ function renderFiveHourOverview(): string {
           statusDot = "green";
           strokeColor = "#f59e0b";
           ringLabel = `${pct}%`;
-          tooltipDesc = `${displayName}: 5h ${pct}%`;
+          tooltipDesc = `${displayName}: ${t(windowLabelKey[quota.window])} ${pct}%`;
           if (quota.resetsAt) {
             const remSecs = Math.max(0, quota.resetsAt - Date.now()) / 1000;
             tooltipDesc += ` · ${t("overview.resetsIn", { time: fmtDuration(remSecs * 1000) })}`;
@@ -2204,7 +2249,7 @@ function renderFiveHourOverview(): string {
           statusDot = "green";
           strokeColor = "#10b981";
           ringLabel = `${pct}%`;
-          tooltipDesc = `${displayName}: 5h ${pct}%`;
+          tooltipDesc = `${displayName}: ${t(windowLabelKey[quota.window])} ${pct}%`;
           if (quota.resetsAt) {
             const remSecs = Math.max(0, quota.resetsAt - Date.now()) / 1000;
             tooltipDesc += ` · ${t("overview.resetsIn", { time: fmtDuration(remSecs * 1000) })}`;
@@ -2222,8 +2267,8 @@ function renderFiveHourOverview(): string {
       } else {
         statusDot = "green";
         ringLabel = "—";
-        textClass = "is-non5h";
-        tooltipDesc = `${displayName}: ${t("overview.non5hTip")}`;
+        textClass = "is-nodata";
+        tooltipDesc = `${displayName}: ${t("overview.noData")}`;
       }
 
       const fullTooltip = `${tooltipDesc} · ${t("overview.jumpTip", { name: displayName })}`;
@@ -2248,11 +2293,13 @@ function renderFiveHourOverview(): string {
                 ? (quota.resetsAt
                     ? escapeHtml(fmtDuration(Math.max(0, quota.resetsAt - Date.now())))
                     : escapeHtml(t("overview.maxedBadge", { n: "" }).trim()))
-                : quota.has5h
+                : quota.window !== null
                   ? (quota.resetsAt
                       ? escapeHtml(fmtDuration(Math.max(0, quota.resetsAt - Date.now())))
-                      : escapeHtml(t("card.notStarted")))
-                  : escapeHtml(t("overview.non5h"))}
+                      : quota.window === "5h"
+                        ? escapeHtml(t("card.notStarted"))
+                        : escapeHtml(t(windowLabelKey[quota.window])))
+                  : escapeHtml(t("overview.noData"))}
             </span>
           </div>
         </div>`;
@@ -2276,12 +2323,12 @@ function renderFiveHourOverview(): string {
         </span>` : ""}`;
 
   return `
-    <article class="provider five-hour-overview ${isFolded ? "is-folded" : ""}" data-provider="__overview__">
+    <article class="provider quota-overview ${isFolded ? "is-folded" : ""}" data-provider="__overview__">
       <div class="provider-head">
-        <span class="overview-clock-icon" title="${escapeHtml(t("overview.title"))}">
+        <span class="overview-title-icon" title="${escapeHtml(t("overview.title"))}">
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
-            <circle cx="12" cy="12" r="10"></circle>
-            <polyline points="12 6 12 12 16 14"></polyline>
+            <path d="m12 14 4-4"></path>
+            <path d="M3.34 19a10 10 0 1 1 17.32 0"></path>
           </svg>
         </span>
         <span class="provider-name">${escapeHtml(t("overview.title"))}</span>
@@ -4265,7 +4312,7 @@ function renderAll(): void {
   el.innerHTML =
     renderWelcome() +
     renderTotalSpend() +
-    renderFiveHourOverview() +
+    renderQuotaOverview() +
     orderedSnapshots().map(renderCard).join("");
   if (customizeOpen) renderDrawerBody();
   rebuildTrail();
