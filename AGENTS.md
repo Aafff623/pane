@@ -67,6 +67,7 @@ Then re-run the launch step.
 | Multi-account stores (card ids are `family@<fnv1a>`) | `src-tauri/src/accounts.rs`, `antigravity_accounts.rs`, `cursor_accounts.rs` |
 | One/New API relay subsystem | `src-tauri/src/providers/onenewapi/` |
 | Local HTTP API `127.0.0.1:6736/v1/usage` (secret-redacting, tested) | `src-tauri/src/httpapi.rs` |
+| Provider/parsing test harness (compiles the real sources via `#[path]`) | `parse-tests/` |
 | Runtime data — never commit anything from here | `%APPDATA%\Pane\` (config.json, accounts/, onenewapi.json, last_snapshots.json, usage_history.json, telemetry.json …) |
 
 Verified domain facts, vocabulary, and hard constraints → [`CONTEXT.md`](CONTEXT.md).
@@ -82,13 +83,13 @@ Verified domain facts, vocabulary, and hard constraints → [`CONTEXT.md`](CONTE
 
 1. Frontend: `pnpm build` must pass (tsc + vite).
 2. Rust: `cargo +stable-x86_64-pc-windows-gnu check` (fast) or `build`, mingw64 PATH prepended as above.
-3. Provider/parsing unit tests run through the scratch harness — the full Tauri app cannot link on this machine (no MSVC):
-   ```powershell
-   cd src-tauri\target\parse-tests
-   $env:PATH = "D:\Tools\mingw64\bin;$env:PATH"
-   cargo test
-   ```
-   The harness compiles the real `src-tauri/src` files via `#[path]` plus a `tauri-stub` crate.
+3. Provider/parsing unit tests run through the `parse-tests` harness — the full Tauri app cannot link on this machine (no MSVC), and a GNU-linked test exe dies at startup with `STATUS_ENTRYPOINT_NOT_FOUND`:
+ ```powershell
+ cd parse-tests
+ $env:PATH = "D:\Tools\mingw64\bin;$env:PATH"
+ cargo +stable-x86_64-pc-windows-gnu test
+ ```
+ The harness compiles the real `src-tauri/src` files via `#[path]` plus a `tauri-stub` crate (223 tests as of 2026-09-08). It used to live under `src-tauri/target/parse-tests`, where `cargo clean` eventually ate it; it is tracked at the repo root now.
 4. **UI acceptance is done by the user personally.** Agents deliver build/test evidence plus a short acceptance checklist — never claim "done and verified" from code reading alone.
 5. Non-trivial changes get a code-review pass plus a redundancy/simplifier scan before delivery, then re-test.
 

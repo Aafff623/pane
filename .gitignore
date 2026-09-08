@@ -15,6 +15,7 @@ dist-ssr
 # Rust build output
 src-tauri/target
 src-tauri/gen
+parse-tests/target
 
 # Local build scratch (TMP redirected here — C: is tight)
 .tmp/

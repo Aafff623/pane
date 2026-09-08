@@ -1,0 +1,37 @@
+# Provider/parsing test harness.
+#
+# The full Tauri binary cannot be linked with the GNU toolchain (the
+# resulting test exe dies at startup with STATUS_ENTRYPOINT_NOT_FOUND), so
+# provider behavior is asserted here instead: this crate compiles the REAL
+# files under src-tauri/src via #[path] against a tiny tauri stub, which
+# keeps the assertions honest while linking a plain rlib.
+#
+# It lives in the repo (not under src-tauri/target/) so `cargo clean` and CI
+# checkouts both keep it.
+[package]
+name = "parse-tests"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+tauri = { path = "tauri-stub" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "socks"] }
+tokio = { version = "1", features = ["macros", "process", "rt-multi-thread", "sync", "time"] }
+chrono = "0.4"
+base64 = "0.22"
+sha2 = "0.10"
+dirs = "6"
+rusqlite = { version = "0.32", features = ["bundled", "backup"] }
+toml = "0.8"
+regex = "1"
+prost = "0.13"
+tiny_http = "0.12" # mock relay servers in the One/New API tests
+
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.61", features = ["Win32_Foundation", "Win32_Globalization", "Win32_Security_Authorization", "Win32_Security_Credentials", "Win32_Storage_FileSystem", "Win32_System_Threading", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging"] }

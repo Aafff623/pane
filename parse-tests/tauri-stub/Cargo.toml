@@ -1,0 +1,11 @@
+[package]
+name = "tauri"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+tokio = { version = "1", features = ["rt", "rt-multi-thread", "time"] }
