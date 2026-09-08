@@ -628,25 +628,42 @@ async fn fetch_with_token(
     }
 
     if is_team {
-        // Team-shaped accounts sometimes omit the plan limit (or report
-        // zero, which would divide to NaN); the legacy request endpoint
-        // is what still describes them (same fallback upstream uses).
-        let limit_cents = match limit {
-            Some(l) if l > 0.0 => l,
-            _ => {
-                return legacy_fetch(&token)
-                    .await
-                    .map(|s| rename_snapshot(s, card_id, card_name))
+        // On a bucket-era seat `limit` is the Other-Models/API dollar
+        // floor, NOT the account's pool: spend past it still comes out of
+        // the included+bonus pool the Bonus row reports. Metering against
+        // it pinned Total usage at a clamped 100% — a red "maxed" ring on
+        // an account with most of its quota left (observed live at
+        // $110 spent, $1230 pool). The bucket bars above are the honest
+        // meter there, so the dollars drop to a text row, exactly like the
+        // personal branch below.
+        if auto_pct.is_some() || api_pct.is_some() {
+            if let Some(u) = used_cents_opt {
+                metrics.push(
+                    Metric::text("Total usage", format!("{} this cycle", dollars(u)))
+                        .with_reset(resets_at, Some(period_ms)),
+                );
             }
-        };
-        metrics.push(
-            Metric::progress(
-                "Total usage",
-                (used_cents / limit_cents * 100.0).clamp(0.0, 100.0),
-                Some(format!("{} / {} this cycle", dollars(used_cents), dollars(limit_cents))),
-            )
-            .with_reset(resets_at, Some(period_ms)),
-        );
+        } else {
+            // Team-shaped accounts sometimes omit the plan limit (or report
+            // zero, which would divide to NaN); the legacy request endpoint
+            // is what still describes them (same fallback upstream uses).
+            let limit_cents = match limit {
+                Some(l) if l > 0.0 => l,
+                _ => {
+                    return legacy_fetch(&token)
+                        .await
+                        .map(|s| rename_snapshot(s, card_id, card_name))
+                }
+            };
+            metrics.push(
+                Metric::progress(
+                    "Total usage",
+                    (used_cents / limit_cents * 100.0).clamp(0.0, 100.0),
+                    Some(format!("{} / {} this cycle", dollars(used_cents), dollars(limit_cents))),
+                )
+                .with_reset(resets_at, Some(period_ms)),
+            );
+        }
     } else if auto_pct.is_some() || api_pct.is_some() {
         // Bucket-era personal plans: Cursor's page shows the two bars and
         // NO total bar. There is no honest total percent here: the $20
@@ -828,8 +845,14 @@ fn summary_snapshot(doc: &Value) -> Option<Snapshot> {
         // No individual limit and no pooled cap is the live Enterprise
         // shape: keep Cursor Models / Other Models / On-demand and skip
         // the Total usage dollar bar instead of discarding the card.
+        let bucketed = auto_pct.is_some() || api_pct.is_some();
         let dollar_pool = match (used_cents_opt, limit) {
-            (Some(u), Some(l)) => Some((u, l)),
+            // Same trap as the RPC path: alongside the bucket bars,
+            // `limit` is the API floor rather than the seat's pool, and
+            // dividing by it clamps Total usage to a permanent 100%. The
+            // pooled cap below is a real team-wide ceiling, so it still
+            // meters honestly.
+            (Some(u), Some(l)) if !bucketed => Some((u, l)),
             _ => match (pooled_limit, pooled) {
                 (Some(l), Some(p)) => {
                     let used = num(p.get("used"))
@@ -850,6 +873,13 @@ fn summary_snapshot(doc: &Value) -> Option<Snapshot> {
                 )
                 .with_reset(resets_at, Some(period_ms)),
             );
+        } else if bucketed {
+            if let Some(u) = used_cents_opt {
+                metrics.push(
+                    Metric::text("Total usage", format!("{} this cycle", dollars(u)))
+                        .with_reset(resets_at, Some(period_ms)),
+                );
+            }
         }
     } else if auto_pct.is_some() || api_pct.is_some() {
         if let Some(u) = used_cents_opt {
@@ -1100,6 +1130,40 @@ mod tests {
                 ("progress", "Other Models"),
                 ("progress", "On-demand")
             ]
+        );
+    }
+
+    #[test]
+    fn summary_team_seat_spend_past_the_api_floor_is_not_a_maxed_bar() {
+        // Live Team/Enterprise seat: $110 spent against a $20 `limit` that
+        // is only the Other-Models floor — the overflow is paid out of the
+        // included+bonus pool. Dividing by it clamped Total usage to 100%,
+        // which painted the whole card (and its overview ring) "maxed"
+        // while Cursor Models had barely been touched.
+        let doc = json!({
+            "membershipType": "enterprise",
+            "limitType": "team",
+            "individualUsage": {
+                "plan": {
+                    "autoPercentUsed": 0.16,
+                    "apiPercentUsed": 64.41,
+                    "used": 11000,
+                    "limit": 2000
+                }
+            },
+            "teamUsage": {}
+        });
+        let snap = summary_snapshot(&doc).expect("card");
+        let total = snap
+            .metrics
+            .iter()
+            .find(|m| m.label == "Total usage")
+            .expect("total row");
+        assert_eq!(total.kind, "text");
+        assert_eq!(total.value.as_deref(), Some("$110 this cycle"));
+        assert!(
+            snap.metrics.iter().all(|m| m.used_percent.unwrap_or(0.0) < 100.0),
+            "no bar may read maxed while the buckets still have room"
         );
     }
 
