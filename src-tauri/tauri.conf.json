@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "Pane",
-  "version": "0.4.48",
+  "version": "0.4.49",
   "identifier": "com.jazii.pane",
   "build": {
     "beforeDevCommand": "npm run dev",
@@ -23,7 +23,8 @@
         "alwaysOnTop": true,
         "skipTaskbar": true,
         "visible": false,
-        "shadow": true
+        "shadow": true,
+        "backgroundColor": "#09090b"
       }
     ],
     "security": {
@@ -46,7 +47,7 @@
     "publisher": "Pane",
     "copyright": "© 2026 Pane contributors (MIT)",
     "shortDescription": "AI usage limits in your system tray",
-    "longDescription": "Pane shows how much of your session and weekly limits each AI tool has left, directly from the Windows system tray.",
+    "longDescription": "Pane shows how much of your session and weekly limits each AI tool has left, from the system tray. Windows is the supported desktop; macOS and Linux builds are preview.",
     "windows": {
       "nsis": {
         "installerIcon": "icons/icon.ico"

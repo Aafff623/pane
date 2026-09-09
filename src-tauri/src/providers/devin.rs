@@ -10,14 +10,14 @@ const COMPAT_VERSION: &str = "1.108.2";
 
 fn credentials_paths() -> Vec<PathBuf> {
     let mut paths = Vec::new();
-    if let Ok(appdata) = std::env::var("APPDATA") {
-        paths.push(PathBuf::from(appdata).join("devin").join("credentials.toml"));
+    if let Some(cfg) = crate::platform::config_home() {
+        paths.push(cfg.join("devin").join("credentials.toml"));
+    }
+    if let Some(local) = crate::platform::data_local_home() {
+        paths.push(local.join("devin").join("credentials.toml"));
     }
     if let Some(home) = dirs::home_dir() {
         paths.push(home.join(".local").join("share").join("devin").join("credentials.toml"));
-    }
-    if let Ok(local) = std::env::var("LOCALAPPDATA") {
-        paths.push(PathBuf::from(local).join("devin").join("credentials.toml"));
     }
     paths
 }
@@ -245,8 +245,7 @@ pub struct UsageEvent {
 }
 
 fn sessions_db_path() -> Option<PathBuf> {
-    let appdata = std::env::var("APPDATA").ok()?;
-    Some(PathBuf::from(appdata).join("devin").join("cli").join("sessions.db"))
+    crate::platform::config_home().map(|d| d.join("devin").join("cli").join("sessions.db"))
 }
 
 /// (mtime, size) of one file; a fixed sentinel when it doesn't exist.

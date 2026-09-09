@@ -123,30 +123,10 @@ pub fn pct_left(cfg: &Value, name: &str, label: &str, left: f64) -> String {
     }
 }
 
-/// Primary language 0x04 = Chinese (zh-CN, zh-TW, zh-HK, …).
-fn langid_is_zh(langid: u16) -> bool {
-    const LANG_CHINESE: u16 = 0x04;
-    langid & 0x03FF == LANG_CHINESE
-}
-
-/// Primary language 0x19 = Russian (ru-RU, ru-MD, …).
-fn langid_is_ru(langid: u16) -> bool {
-    const LANG_RUSSIAN: u16 = 0x19;
-    langid & 0x03FF == LANG_RUSSIAN
-}
-
-/// Windows *display* language, not the regional-format locale.
-/// Same source the popover asks for via `system_ui_locale`.
+/// The OS *display* language, not the regional-format locale. Same source
+/// the popover asks for via the `system_ui_locale` command.
 pub fn system_ui_locale() -> &'static str {
-    use windows::Win32::Globalization::GetUserDefaultUILanguage;
-    let langid = unsafe { GetUserDefaultUILanguage() };
-    if langid_is_zh(langid) {
-        "zh"
-    } else if langid_is_ru(langid) {
-        "ru"
-    } else {
-        "en"
-    }
+    crate::platform::system_ui_language()
 }
 
 #[cfg(test)]
@@ -179,22 +159,5 @@ mod tests {
         assert_eq!(metric_label(&ru, "Reset credit 2"), "Сброс лимита 2");
         assert_eq!(metric_label(&ru, "Recent models"), "Недавние модели");
         assert_eq!(quit_label(&ru), "Выйти из Pane");
-    }
-
-    #[test]
-    fn chinese_langids_match() {
-        assert!(langid_is_zh(0x0804)); // zh-CN
-        assert!(langid_is_zh(0x0404)); // zh-TW
-        assert!(langid_is_zh(0x0C04)); // zh-HK
-        assert!(!langid_is_zh(0x0409)); // en-US
-        assert!(!langid_is_zh(0x0411)); // ja
-        assert!(!langid_is_zh(0x0419)); // ru-RU
-    }
-
-    #[test]
-    fn russian_langids_match() {
-        assert!(langid_is_ru(0x0419)); // ru-RU
-        assert!(!langid_is_ru(0x0409)); // en-US
-        assert!(!langid_is_ru(0x0804)); // zh-CN
     }
 }

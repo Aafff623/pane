@@ -1,6 +1,6 @@
 [package]
 name = "pane"
-version = "0.4.48"
+version = "0.4.49"
 description = "AI subscription usage in the Windows tray"
 authors = ["jazii"]
 edition = "2021"
@@ -13,6 +13,12 @@ edition = "2021"
 # This seems to be only an issue on Windows, see https://github.com/rust-lang/cargo/issues/8519
 name = "pane_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
+
+[features]
+default = []
+# Used only by parse-tests so it can compile platform/windows.rs against
+# the Tauri stub without pulling WebView2 COM.
+harness = []
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
@@ -40,6 +46,11 @@ rusqlite = { version = "0.32", features = ["bundled", "backup"] }
 toml = "0.8"
 regex = "1"
 prost = "0.13" # Grok GetRemainingResets protobuf codec
+
+# Win32 is reached only through src/platform/windows.rs. Keeping these
+# target-scoped is what lets the crate compile at all on Linux and macOS —
+# an unconditional `windows` dependency fails to build off-Windows.
+[target.'cfg(windows)'.dependencies]
 webview2-com = "0.38"
 windows-core = "0.61"
-windows = { version = "0.61", features = ["Win32_Foundation", "Win32_Globalization", "Win32_Security_Authorization", "Win32_Security_Credentials", "Win32_Storage_FileSystem", "Win32_System_Threading", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging"] }
+windows = { version = "0.61", features = ["Win32_Foundation", "Win32_Globalization", "Win32_Graphics_Dwm", "Win32_Security_Authorization", "Win32_Security_Credentials", "Win32_Storage_FileSystem", "Win32_System_Threading", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging"] }

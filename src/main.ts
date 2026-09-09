@@ -1113,7 +1113,7 @@ function renderMetric(m: Metric): string {
         const countdown = remain < 60_000 ? t("card.resetsSoon") : t("card.resetsIn", { time: fmtDuration(remain) });
         const exact = t("card.resetsAt", { when: fmtExact(m.resets_at) });
         const [text, alt] = config.resetExact ? [exact, countdown] : [countdown, exact];
-        resetHtml = `<span class="clickable" data-flip="reset" title="${escapeHtml(alt)}">${escapeHtml(text)}</span>`;
+        resetHtml = `<span class="clickable" data-flip="reset" data-reset-at="${m.resets_at}" title="${escapeHtml(alt)}">${escapeHtml(text)}</span>`;
       }
     }
     const detailHtml = [m.detail ? escapeHtml(displayMetricDetail(m.detail)) : "", resetHtml].filter(Boolean).join(" · ");
@@ -1257,6 +1257,9 @@ function isCoreQuotaMetric(m: Metric): boolean {
   if (m.kind !== "progress") return false;
   const label = m.label.toLowerCase();
   if (label.includes("search")) return false;
+  // On-demand is a paid overflow pool, not the plan quota. A spent
+  // overflow must not paint the whole card (or its overview ring) red.
+  if (label.includes("on-demand")) return false;
   return true;
 }
 
@@ -1276,18 +1279,36 @@ function maxProgressUsed(s: Snapshot): number {
 function accountHealthDot(id: string): "red" | "green" | "gray" {
   const snap = lastSnapshots.find((s) => s.id === id);
   if (!snap || snap.status !== "ok") return "gray";
-  return maxProgressUsed(snap) >= MAXED_PCT ? "red" : "green";
+  return isSnapshotMaxed(snap) ? "red" : "green";
 }
 
 // ── Card fold (grouped by provider family or per-card) ─────────────────────────
 
-/// Returns true when a snapshot has reached its quota limit (any progress
-/// metric has used_percent >= MAXED_PCT or plan indicates credit exhaustion).
+/// Returns true when a snapshot has reached its quota limit.
+///
+/// Independent pools (Cursor Auto vs API, Antigravity Gemini vs Claude)
+/// are maxed only when every *present* pool is exhausted — one full bar
+/// must not paint the whole card red while another pool still has room.
+/// Nested windows on a single pool (Session + Weekly) still max the card
+/// when any of them hits the ceiling: that account is waiting on a reset.
 function isSnapshotMaxed(s: Snapshot): boolean {
   if (s.status !== "ok") return false;
-  if (maxProgressUsed(s) >= MAXED_PCT) return true;
   if (s.plan && /out of credit/i.test(s.plan)) return true;
-  return false;
+  const family = providerFamily(s.id);
+  const pools = METRIC_POOLS[family];
+  if (pools) {
+    const present = new Set<string>();
+    const maxed = new Set<string>();
+    for (const m of s.metrics) {
+      if (!isCoreQuotaMetric(m) || m.used_percent === null) continue;
+      const pool = pools[m.label];
+      if (!pool) continue;
+      present.add(pool);
+      if (m.used_percent >= MAXED_PCT) maxed.add(pool);
+    }
+    if (present.size > 0) return [...present].every((p) => maxed.has(p));
+  }
+  return maxProgressUsed(s) >= MAXED_PCT;
 }
 
 /// Returns true when this card should be automatically collapsed:
@@ -1414,6 +1435,98 @@ const METRIC_POOLS: Record<string, Record<string, string>> = {
     "Other Models": "API",
   },
 };
+
+/// When a family has independent pools, the overview ring follows this
+/// label instead of the most-used sibling. Cursor's Auto bucket is the
+/// plan people actually work in; the API bucket can sit at 100% without
+/// meaning the seat is done.
+const OVERVIEW_PRIMARY_LABEL: Record<string, string> = {
+  cursor: "Cursor Models",
+};
+
+/// Hover on a 5h ring should not repeat that same window. These families
+/// have no useful weekly sibling (Copilot is monthly; Z.ai's 5h *is* the
+/// story the user wants in the tip), so the tip stays on the ring window.
+const OVERVIEW_HOVER_KEEP_RING = new Set(["copilot", "zai"]);
+
+const is5hPeriod = (p: number | null) =>
+  p !== null && p >= 14_400_000 && p <= 21_600_000;
+
+const is5hLabel = (label: string) =>
+  /session|5-?hour|5h/i.test(label) && !/week|month|day|year/i.test(label);
+
+function metricWindow(m: Metric): QuotaWindow {
+  if (is5hPeriod(m.period_ms) || is5hLabel(m.label)) return "5h";
+  const label = m.label.toLowerCase();
+  if ((m.period_ms !== null && m.period_ms <= 36 * 3_600_000) || /day|daily|today/.test(label)) {
+    return "day";
+  }
+  if ((m.period_ms !== null && m.period_ms <= 8 * 24 * 3_600_000) || /week/.test(label)) {
+    return "week";
+  }
+  if (m.period_ms !== null || /month|cycle/.test(label)) return "month";
+  return "generic";
+}
+
+function formatHoverReset(m: Metric): string {
+  if (m.resets_at !== null && m.resets_at > Date.now()) {
+    return t("overview.resetsIn", { time: fmtDuration(m.resets_at - Date.now()) });
+  }
+  if (metricWindow(m) === "5h") return t("card.notStarted");
+  return "";
+}
+
+function formatHoverMetric(m: Metric, label = displayMetricLabel(m.label)): string {
+  const pct = Math.round(m.used_percent ?? 0);
+  const reset = formatHoverReset(m);
+  return reset ? `${label} ${pct}% · ${reset}` : `${label} ${pct}%`;
+}
+
+/// Tip next to the ring: weekly for ordinary 5h cards, the ring window
+/// for Copilot/Z.ai, every independent pool for Cursor/Antigravity.
+function overviewHoverTip(s: Snapshot, quota: OverviewQuota, displayName: string): string {
+  if (quota.status === "error") return `${displayName}: ${t("overview.offline")}`;
+  if (quota.status === "no_data") return `${displayName}: ${t("overview.noData")}`;
+
+  const family = providerFamily(s.id);
+  const core = (s.metrics || []).filter((m) => isCoreQuotaMetric(m) && m.used_percent !== null);
+  const pools = METRIC_POOLS[family];
+
+  if (pools) {
+    const names = [...new Set(Object.values(pools))];
+    const parts: string[] = [];
+    for (const pool of names) {
+      const ms = core.filter((m) => pools[m.label] === pool);
+      if (!ms.length) continue;
+      const primaryLabel = Object.keys(pools).find((k) => pools[k] === pool) ?? pool;
+      const session = ms.find((m) => metricWindow(m) === "5h") ?? ms[0];
+      const weekly = ms.find((m) => metricWindow(m) === "week" && m !== session);
+      const head = formatHoverMetric(session, displayMetricLabel(primaryLabel));
+      parts.push(weekly ? `${head} · ${formatHoverMetric(weekly, t("overview.winWeek"))}` : head);
+    }
+    if (parts.length) return `${displayName}: ${parts.join(" · ")}`;
+  }
+
+  if (!OVERVIEW_HOVER_KEEP_RING.has(family) && quota.window === "5h") {
+    const weeklies = core.filter((m) => metricWindow(m) === "week");
+    if (weeklies.length === 1) {
+      return `${displayName}: ${formatHoverMetric(weeklies[0], t("overview.winWeek"))}`;
+    }
+    if (weeklies.length > 1) {
+      return `${displayName}: ${weeklies.map((m) => formatHoverMetric(m)).join(" · ")}`;
+    }
+  }
+
+  const win = quota.window ? t(windowLabelKey[quota.window]) : t("overview.winGeneric");
+  const pct = Math.round(quota.usedPercent);
+  if (quota.resetsAt && quota.resetsAt > Date.now()) {
+    return `${displayName}: ${win} ${pct}% · ${t("overview.resetsIn", { time: fmtDuration(quota.resetsAt - Date.now()) })}`;
+  }
+  if (quota.window === "5h") {
+    return `${displayName}: ${win} ${pct}% · ${t("card.notStarted")}`;
+  }
+  return `${displayName}: ${win} ${pct}%`;
+}
 
 function metricPool(family: string, label: string): string | undefined {
   return METRIC_POOLS[family]?.[label];
@@ -1580,7 +1693,7 @@ function renderCard(s: Snapshot): string {
           <div class="fold-badge ${badgeTone}">
             <span class="acct-dot ${dot}" title="${escapeHtml(dotTitle)}"></span>
             <span class="fold-label">${escapeHtml(label)}</span>
-            <span class="fold-timer">${escapeHtml(fmtDuration(resetSecs * 1000))}</span>
+            <span class="fold-timer" data-reset-at="${Date.now() + resetSecs * 1000}">${escapeHtml(fmtDuration(resetSecs * 1000))}</span>
           </div>
         </div>`;
     } else {
@@ -2057,13 +2170,6 @@ function extractOverviewQuota(s: Snapshot, cardIsMaxed = false, cardId = ""): Ov
     };
   }
 
-  // 5-hour window tolerance: ~18,000,000 ms (14.4M to 21.6M)
-  const is5hPeriod = (p: number | null) =>
-    p !== null && p >= 14_400_000 && p <= 21_600_000;
-
-  const is5hLabel = (label: string) =>
-    /session|5-?hour|5h/i.test(label) && !/week|month|day|year/i.test(label);
-
   const percents = (s.metrics || []).filter(
     (m) => isCoreQuotaMetric(m) && m.used_percent !== null,
   );
@@ -2080,57 +2186,46 @@ function extractOverviewQuota(s: Snapshot, cardIsMaxed = false, cardId = ""): Ov
       (curr.used_percent ?? 0) > (prev.used_percent ?? 0) ? curr : prev,
     );
 
-  const windowOf = (m: Metric): QuotaWindow => {
-    if (is5hPeriod(m.period_ms) || is5hLabel(m.label)) return "5h";
-    const label = m.label.toLowerCase();
-    if ((m.period_ms !== null && m.period_ms <= 36 * 3_600_000) || /day|daily|today/.test(label)) {
-      return "day";
+  const pickOverview = (list: Metric[]): Metric => {
+    const primary = OVERVIEW_PRIMARY_LABEL[providerFamily(s.id)];
+    if (primary) {
+      const preferred = list.find((m) => m.label === primary);
+      if (preferred) return preferred;
     }
-    if ((m.period_ms !== null && m.period_ms <= 8 * 24 * 3_600_000) || /week/.test(label)) {
-      return "week";
-    }
-    if (m.period_ms !== null || /month|cycle/.test(label)) return "month";
-    return "generic";
+    return pickBest(list);
   };
-
-  const isMaxed = cardIsMaxed || isSnapshotMaxed(s);
 
   let best: Metric | null = null;
   if (sessionPercents.length > 0) {
-    best = pickBest(sessionPercents);
+    best = pickOverview(sessionPercents);
   } else if (percents.length > 0) {
-    // Shortest period first (untimed metrics last); ties broken by the higher
-    // usage so Cursor-style sibling bars collapse into one ring.
+    // Shortest period first (untimed metrics last). Independent sibling
+    // bars (Cursor Auto vs API) do not collapse to the fuller one — the
+    // family's primary pool wins when it is in the shortlist.
     const shortest = percents.reduce((prev, curr) =>
       (curr.period_ms ?? Infinity) < (prev.period_ms ?? Infinity) ? curr : prev,
     );
-    best = pickBest(
+    best = pickOverview(
       percents.filter((m) => (m.period_ms ?? Infinity) === (shortest.period_ms ?? Infinity)),
     );
   }
 
-  if (isMaxed) {
-    const resetSecs = cardId ? nearestResetSeconds(cardId) : 0;
-    const resetsAt = resetSecs > 0 ? Date.now() + resetSecs * 1000 : null;
-    return {
-      window: best ? windowOf(best) : null,
-      usedPercent: 100,
-      resetsAt,
-      metricLabel: best?.label ?? "Maxed",
-      isMaxed: true,
-      status: "maxed",
-    };
-  }
-
   if (best) {
     const usedPercent = Math.min(100, Math.max(0, best.used_percent ?? 0));
+    // The ring follows the metric it displays — a sibling pool at 100%
+    // must not force this one to a red 100. Fold state (`cardIsMaxed`)
+    // only fills in a reset time when the shown bar itself is spent.
+    const isMaxed = usedPercent >= MAXED_PCT || (!!s.plan && /out of credit/i.test(s.plan));
+    const resetSecs = cardIsMaxed && cardId ? nearestResetSeconds(cardId) : 0;
+    const resetsAt =
+      best.resets_at ?? (resetSecs > 0 ? Date.now() + resetSecs * 1000 : null);
     return {
-      window: windowOf(best),
+      window: metricWindow(best),
       usedPercent,
-      resetsAt: best.resets_at,
+      resetsAt,
       metricLabel: best.label,
-      isMaxed: false,
-      status: "ok",
+      isMaxed,
+      status: isMaxed ? "maxed" : "ok",
     };
   }
 
@@ -2202,26 +2297,18 @@ function renderQuotaOverview(): string {
       let textClass = "";
       let itemTone = "normal";
       let statusDot = "green";
-      let tooltipDesc = "";
-
       if (quota.status === "error") {
         itemTone = "error";
         statusDot = "red";
         ringLabel = "!";
         textClass = "is-error";
         progressCircle = `<circle class="ring-progress is-error" cx="${cx}" cy="${cy}" r="${r}" stroke="#ef4444" stroke-width="3.2" fill="none" />`;
-        tooltipDesc = `${displayName}: 离线或读取失败`;
       } else if (quota.isMaxed) {
         itemTone = "maxed";
         statusDot = "red";
         strokeColor = "#ef4444";
         ringLabel = "100%";
         textClass = "is-maxed";
-        tooltipDesc = `${displayName}: ${t("overview.maxedTip")}`;
-        if (quota.resetsAt) {
-          const remSecs = Math.max(0, quota.resetsAt - Date.now()) / 1000;
-          tooltipDesc += ` · ${t("overview.resetsIn", { time: fmtDuration(remSecs * 1000) })}`;
-        }
         progressCircle = `<circle class="ring-progress is-maxed" cx="${cx}" cy="${cy}" r="${r}"
           stroke="${strokeColor}" stroke-width="3.2" fill="none"
           stroke-linecap="round"
@@ -2237,25 +2324,11 @@ function renderQuotaOverview(): string {
           statusDot = "green";
           strokeColor = "#f59e0b";
           ringLabel = `${pct}%`;
-          tooltipDesc = `${displayName}: ${t(windowLabelKey[quota.window])} ${pct}%`;
-          if (quota.resetsAt) {
-            const remSecs = Math.max(0, quota.resetsAt - Date.now()) / 1000;
-            tooltipDesc += ` · ${t("overview.resetsIn", { time: fmtDuration(remSecs * 1000) })}`;
-          } else {
-            tooltipDesc += ` · ${t("card.notStarted")}`;
-          }
         } else {
           itemTone = "normal";
           statusDot = "green";
           strokeColor = "#10b981";
           ringLabel = `${pct}%`;
-          tooltipDesc = `${displayName}: ${t(windowLabelKey[quota.window])} ${pct}%`;
-          if (quota.resetsAt) {
-            const remSecs = Math.max(0, quota.resetsAt - Date.now()) / 1000;
-            tooltipDesc += ` · ${t("overview.resetsIn", { time: fmtDuration(remSecs * 1000) })}`;
-          } else {
-            tooltipDesc += ` · ${t("card.notStarted")}`;
-          }
         }
 
         progressCircle = `<circle class="ring-progress ${itemTone}" cx="${cx}" cy="${cy}" r="${r}"
@@ -2268,10 +2341,9 @@ function renderQuotaOverview(): string {
         statusDot = "green";
         ringLabel = "—";
         textClass = "is-nodata";
-        tooltipDesc = `${displayName}: ${t("overview.noData")}`;
       }
 
-      const fullTooltip = `${tooltipDesc} · ${t("overview.jumpTip", { name: displayName })}`;
+      const fullTooltip = overviewHoverTip(shownSnap, quota, displayName);
 
       return `
         <div class="overview-item tone-${itemTone}" data-jump-provider="${escapeHtml(id)}" title="${escapeHtml(fullTooltip)}">
@@ -2288,7 +2360,7 @@ function renderQuotaOverview(): string {
             </svg>
           </div>
           <div class="overview-item-foot">
-            <span class="overview-item-meta ${quota.isMaxed ? 'meta-maxed' : ''}">
+            <span class="overview-item-meta ${quota.isMaxed ? 'meta-maxed' : ''}"${quota.resetsAt ? ` data-reset-at="${quota.resetsAt}"` : ""}>
               ${quota.isMaxed
                 ? (quota.resetsAt
                     ? escapeHtml(fmtDuration(Math.max(0, quota.resetsAt - Date.now())))
@@ -4641,8 +4713,54 @@ function renderIfVisible(): void {
     return;
   }
   pendingRender = false;
-  renderAll();
-  populatePinnedOptions();
+  scheduleRender();
+}
+
+/// One refresh can ask to paint several times (usage, history, spend,
+/// each extra-account list). Coalesce those onto the next frame so the
+/// tree is built once.
+let renderFrame = 0;
+function scheduleRender(): void {
+  if (renderFrame) return;
+  renderFrame = requestAnimationFrame(() => {
+    renderFrame = 0;
+    if (document.hidden) {
+      pendingRender = true;
+      return;
+    }
+    renderAll();
+    populatePinnedOptions();
+  });
+}
+
+/// 30s tick: rewrite countdown text in place. A full `renderAll` would
+/// throw away the whole tree (scroll, hover, focus) just to change
+/// "Resets in 3h 41m" → "3h 40m".
+function tickCountdowns(): void {
+  if (document.hidden) {
+    pendingRender = true;
+    return;
+  }
+  if (customizeOpen || !lastSnapshots.length) return;
+  const now = Date.now();
+  let expired = false;
+  document.querySelectorAll<HTMLElement>("[data-reset-at]").forEach((el) => {
+    const at = Number(el.dataset.resetAt);
+    if (!Number.isFinite(at)) return;
+    const remain = at - now;
+    if (remain <= 0) {
+      expired = true;
+      return;
+    }
+    if (el.dataset.flip === "reset") {
+      if (config.resetExact) return;
+      el.textContent = remain < 60_000 ? t("card.resetsSoon") : t("card.resetsIn", { time: fmtDuration(remain) });
+      return;
+    }
+    el.textContent = fmtDuration(remain);
+  });
+  // A window that just closed needs a real refresh — bars and tones change.
+  if (expired) renderIfVisible();
 }
 
 function hideFoldedMoonshot(snapshots: Snapshot[]): Snapshot[] {
@@ -6988,6 +7106,6 @@ window.addEventListener("DOMContentLoaded", () => {
   // Countdown texts ("Resets in 3h 41m") tick every 30 s — but only for
   // eyes that can see them; hidden ticks fold into the deferred render.
   setInterval(() => {
-    if (lastSnapshots.length && !customizeOpen) renderIfVisible();
+    if (lastSnapshots.length && !customizeOpen) tickCountdowns();
   }, 30_000);
 });

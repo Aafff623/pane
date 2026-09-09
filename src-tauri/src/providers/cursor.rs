@@ -6,8 +6,8 @@ const ID: &str = "cursor";
 const NAME: &str = "Cursor";
 
 fn state_db_path() -> Option<PathBuf> {
-    let appdata = std::env::var("APPDATA").ok()?;
-    let p = PathBuf::from(appdata)
+    let cfg = crate::platform::config_home()?;
+    let p = cfg
         .join("Cursor")
         .join("User")
         .join("globalStorage")
@@ -84,19 +84,58 @@ fn read_pair(conn: &rusqlite::Connection) -> Result<(Option<String>, Option<Stri
     Ok((get("cursorAuth/accessToken")?, get("cursorAuth/refreshToken")?))
 }
 
+/// (mtime, size) of the editor DB. Used so a refresh that sees the same
+/// file does not open SQLite at all — we only need two token strings.
+fn state_stamp(path: &std::path::Path) -> (std::time::SystemTime, u64) {
+    std::fs::metadata(path)
+        .map(|m| (m.modified().unwrap_or(std::time::UNIX_EPOCH), m.len()))
+        .unwrap_or((std::time::UNIX_EPOCH, 0))
+}
+
 /// Cursor stores its session token in a small SQLite database. The running
-/// Cursor app may hold a lock on it, so we read from a temporary copy —
-/// retried a few times because the copy loses to Cursor's own writes now
-/// and then, and finally via a lock-free immutable open of the original.
+/// editor may hold a write lock, so the first attempt is a lock-free
+/// `immutable=1` open of the real file (two key lookups, no copy). A
+/// full-file copy is the fallback only — the live DB is ~90 MB on a
+/// heavy machine and copying it every refresh is the cost we are avoiding.
 fn read_state_values() -> Result<(Option<String>, Option<String>), String> {
     let Some(db_path) = state_db_path() else {
         return Ok((None, None));
     };
-    let tmp = std::env::temp_dir().join(format!("openusage-cursor-{}.vscdb", std::process::id()));
 
+    type Pair = (Option<String>, Option<String>);
+    type Stamp = (std::time::SystemTime, u64);
+    static CACHE: std::sync::Mutex<Option<(Stamp, Pair)>> = std::sync::Mutex::new(None);
+    let stamp = state_stamp(&db_path);
+    if let Ok(guard) = CACHE.lock() {
+        if let Some((cached, pair)) = guard.as_ref() {
+            if *cached == stamp {
+                return Ok(pair.clone());
+            }
+        }
+    }
+
+    let pair = read_state_values_fresh(&db_path)?;
+    if let Ok(mut guard) = CACHE.lock() {
+        *guard = Some((stamp, pair.clone()));
+    }
+    Ok(pair)
+}
+
+fn read_state_values_fresh(db_path: &std::path::Path) -> Result<(Option<String>, Option<String>), String> {
+    let uri = format!("file:{}?immutable=1", db_path.to_string_lossy().replace('\\', "/"));
+    if let Ok(pair) = rusqlite::Connection::open_with_flags(
+        &uri,
+        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_URI,
+    )
+    .and_then(|conn| read_pair(&conn))
+    {
+        return Ok(pair);
+    }
+
+    let tmp = std::env::temp_dir().join(format!("pane-cursor-{}.vscdb", std::process::id()));
     let mut copy_err = String::new();
     for attempt in 0..3 {
-        match std::fs::copy(&db_path, &tmp) {
+        match std::fs::copy(db_path, &tmp) {
             Ok(_) => {
                 let result = rusqlite::Connection::open_with_flags(
                     &tmp,
@@ -114,19 +153,7 @@ fn read_state_values() -> Result<(Option<String>, Option<String>), String> {
             }
         }
     }
-
-    // Copy kept losing to Cursor's lock: open the real file read-only and
-    // immutable (SQLite promises not to write, so no lock is taken).
-    let uri = format!("file:{}?immutable=1", db_path.to_string_lossy().replace('\\', "/"));
-    match rusqlite::Connection::open_with_flags(
-        &uri,
-        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_URI,
-    )
-    .and_then(|conn| read_pair(&conn))
-    {
-        Ok(pair) => Ok(pair),
-        Err(e) => Err(format!("copy state.vscdb: {copy_err}; immutable open: {e}")),
-    }
+    Err(format!("copy state.vscdb: {copy_err}"))
 }
 
 /// Values in ItemTable are sometimes stored as JSON strings ("\"abc\"").
@@ -377,7 +404,9 @@ fn rename_snapshot(mut snap: Snapshot, id: &str, name: &str) -> Snapshot {
 }
 
 async fn fetch() -> Result<Snapshot, String> {
-    let (access_raw, refresh_raw) = read_state_values()?;
+    let (access_raw, refresh_raw) = tauri::async_runtime::spawn_blocking(read_state_values)
+        .await
+        .map_err(|e| format!("read state.vscdb: {e}"))??;
     let Some(token_raw) = access_raw else {
         return Ok(Snapshot::no_credentials(
             ID,
@@ -705,8 +734,7 @@ async fn fetch_with_token(
 
     if let Some(s) = spend_limit {
         let od_limit = num(s.get("individualLimit")).or(num(s.get("pooledLimit"))).unwrap_or(0.0);
-        let od_remaining =
-            num(s.get("individualRemaining")).or(num(s.get("pooledRemaining"))).unwrap_or(0.0);
+        let od_remaining = num(s.get("individualRemaining")).or(num(s.get("pooledRemaining")));
         let od_spent = [
             num(s.get("individualUsed")),
             num(s.get("pooledUsed")),
@@ -715,7 +743,8 @@ async fn fetch_with_token(
         .into_iter()
         .flatten()
         .find(|v| *v > 0.0)
-        .unwrap_or_else(|| (od_limit - od_remaining).max(0.0));
+        .or_else(|| od_remaining.map(|r| (od_limit - r).max(0.0)))
+        .unwrap_or(0.0);
         if od_limit > 0.0 {
             metrics.push(Metric::progress(
                 "On-demand",

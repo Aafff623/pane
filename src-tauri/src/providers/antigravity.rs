@@ -29,7 +29,7 @@ const GOOGLE_CLIENT_SECRET: &str = "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";
 /// Manager is present.
 pub fn local_credential_hint() -> Option<String> {
     super::credential_string("gemini:antigravity")
-        .map(|_| "Antigravity sign-in (Windows Credential Manager)".to_string())
+        .map(|_| "Antigravity sign-in (OS credential store)".to_string())
 }
 
 pub async fn snapshot() -> Snapshot {
@@ -68,14 +68,17 @@ pub async fn snapshot() -> Snapshot {
 
 fn installed() -> bool {
     let mut candidates = Vec::new();
-    if let Ok(appdata) = std::env::var("APPDATA") {
-        candidates.push(std::path::PathBuf::from(appdata).join("Antigravity"));
+    if let Some(cfg) = crate::platform::config_home() {
+        candidates.push(cfg.join("Antigravity"));
     }
-    if let Ok(local) = std::env::var("LOCALAPPDATA") {
-        candidates.push(std::path::PathBuf::from(local).join("Programs").join("Antigravity"));
+    if let Some(local) = crate::platform::data_local_home() {
+        candidates.push(local.join("Programs").join("Antigravity"));
+        candidates.push(local.join("Antigravity"));
     }
     if let Some(home) = dirs::home_dir() {
         candidates.push(home.join(".antigravity"));
+        candidates.push(home.join("Applications").join("Antigravity.app"));
+        candidates.push(std::path::PathBuf::from("/Applications/Antigravity.app"));
     }
     candidates.iter().any(|p| p.exists())
 }
@@ -88,18 +91,6 @@ struct LanguageServer {
     ports: Vec<u16>,
     extension_port: Option<u16>,
     csrf_token: String,
-}
-
-/// Runs a console command without flashing a window.
-fn run_hidden(program: &str, args: &[&str]) -> Option<String> {
-    use std::os::windows::process::CommandExt;
-    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-    let out = std::process::Command::new(program)
-        .args(args)
-        .creation_flags(CREATE_NO_WINDOW)
-        .output()
-        .ok()?;
-    Some(String::from_utf8_lossy(&out.stdout).into_owned())
 }
 
 /// `--flag value` or `--flag=value` from a whitespace-tokenized command line.
@@ -116,33 +107,16 @@ fn flag_value(tokens: &[&str], flag: &str) -> Option<String> {
 }
 
 fn discover_language_servers() -> Vec<LanguageServer> {
-    let script = "Get-CimInstance Win32_Process | Where-Object { $_.Name -match '^(language_server|agy)' } | Select-Object ProcessId, Name, CommandLine | ConvertTo-Json -Compress";
-    let raw = match run_hidden("powershell", &["-NoProfile", "-NonInteractive", "-Command", script])
-    {
-        Some(r) if !r.trim().is_empty() => r,
-        _ => return Vec::new(),
-    };
-    let parsed: Value = match serde_json::from_str(raw.trim()) {
-        Ok(v) => v,
-        Err(_) => return Vec::new(),
-    };
-    let procs: Vec<Value> = match parsed {
-        Value::Array(a) => a,
-        obj @ Value::Object(_) => vec![obj],
-        _ => Vec::new(),
-    };
-
-    // netstat once, shared across processes: pid -> listening loopback ports.
-    let netstat = run_hidden("netstat", &["-ano", "-p", "TCP"]).unwrap_or_default();
+    let procs = crate::platform::list_processes(&["language_server", "agy"]);
+    if procs.is_empty() {
+        return Vec::new();
+    }
+    // One port scan for the whole pass — the tool call is the expensive part.
+    let ports_by_pid = crate::platform::listening_loopback_ports();
 
     let mut found = Vec::new();
     for p in procs {
-        let cmdline = p.get("CommandLine").and_then(Value::as_str).unwrap_or("");
-        let pid = p.get("ProcessId").and_then(Value::as_u64).unwrap_or(0) as u32;
-        if cmdline.is_empty() || pid == 0 {
-            continue;
-        }
-        let tokens: Vec<&str> = cmdline.split_whitespace().collect();
+        let tokens: Vec<&str> = p.command_line.split_whitespace().collect();
 
         // Only Antigravity's own language server — Windsurf ships the same
         // binary with a different --ide_name.
@@ -162,19 +136,7 @@ fn discover_language_servers() -> Vec<LanguageServer> {
         let extension_port = flag_value(&tokens, "--extension_server_port")
             .and_then(|v| v.parse::<u16>().ok());
 
-        let mut ports: Vec<u16> = netstat
-            .lines()
-            .filter(|line| line.contains("LISTENING") && line.trim().ends_with(&pid.to_string()))
-            .filter_map(|line| {
-                let local = line.split_whitespace().nth(1)?;
-                let (addr, port) = local.rsplit_once(':')?;
-                if addr == "127.0.0.1" || addr == "0.0.0.0" {
-                    port.parse::<u16>().ok()
-                } else {
-                    None
-                }
-            })
-            .collect();
+        let mut ports = ports_by_pid.get(&p.pid).cloned().unwrap_or_default();
         ports.sort_unstable();
         ports.dedup();
 

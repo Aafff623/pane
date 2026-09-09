@@ -3,6 +3,9 @@
 //! the app ships, so an assertion that passes here is an assertion about
 //! production code.
 
+#[path = "../../src-tauri/src/platform/mod.rs"]
+pub mod platform;
+
 #[path = "../../src-tauri/src/oauth.rs"]
 pub mod oauth;
 

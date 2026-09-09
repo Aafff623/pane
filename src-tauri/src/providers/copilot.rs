@@ -11,9 +11,9 @@ const NAME: &str = "Copilot";
 /// login sharing the same file) must never be selected.
 fn find_token() -> Option<String> {
     let mut candidates: Vec<PathBuf> = Vec::new();
-    if let Ok(local) = std::env::var("LOCALAPPDATA") {
-        candidates.push(PathBuf::from(&local).join("github-copilot").join("apps.json"));
-        candidates.push(PathBuf::from(&local).join("github-copilot").join("hosts.json"));
+    if let Some(local) = crate::platform::data_local_home() {
+        candidates.push(local.join("github-copilot").join("apps.json"));
+        candidates.push(local.join("github-copilot").join("hosts.json"));
     }
     if let Some(home) = dirs::home_dir() {
         candidates.push(home.join(".config").join("github-copilot").join("apps.json"));
@@ -26,11 +26,9 @@ fn find_token() -> Option<String> {
         }
     }
     // GitHub CLI. Older versions kept oauth_token in hosts.yml; modern gh
-    // (which the new Copilot CLI piggybacks on) stores it in Windows
-    // Credential Manager under gh:github.com[:username].
+    // stores it in the OS credential store under gh:github.com[:username].
     let mut usernames: Vec<String> = Vec::new();
-    if let Ok(appdata) = std::env::var("APPDATA") {
-        let hosts = PathBuf::from(appdata).join("GitHub CLI").join("hosts.yml");
+    for hosts in crate::platform::github_cli_hosts() {
         if let Ok(raw) = std::fs::read_to_string(&hosts) {
             if let Some(tok) = hosts_yml_token(&raw, &mut usernames) {
                 return Some(tok);
@@ -56,9 +54,9 @@ fn find_token() -> Option<String> {
 /// parsing, no network): the same sources find_token reads.
 pub fn local_credential_hint() -> Option<String> {
     let mut candidates: Vec<PathBuf> = Vec::new();
-    if let Ok(local) = std::env::var("LOCALAPPDATA") {
-        candidates.push(PathBuf::from(&local).join("github-copilot").join("apps.json"));
-        candidates.push(PathBuf::from(&local).join("github-copilot").join("hosts.json"));
+    if let Some(local) = crate::platform::data_local_home() {
+        candidates.push(local.join("github-copilot").join("apps.json"));
+        candidates.push(local.join("github-copilot").join("hosts.json"));
     }
     if let Some(home) = dirs::home_dir() {
         candidates.push(home.join(".config").join("github-copilot").join("apps.json"));
@@ -67,13 +65,11 @@ pub fn local_credential_hint() -> Option<String> {
     if candidates.iter().any(|p| p.exists()) {
         return Some("GitHub Copilot sign-in (editor config)".into());
     }
-    if let Ok(appdata) = std::env::var("APPDATA") {
-        if PathBuf::from(appdata).join("GitHub CLI").join("hosts.yml").exists() {
-            return Some("GitHub CLI sign-in (gh)".into());
-        }
+    if crate::platform::github_cli_hosts().iter().any(|p| p.exists()) {
+        return Some("GitHub CLI sign-in (gh)".into());
     }
     if super::credential_string("gh:github.com").is_some() {
-        return Some("GitHub CLI sign-in (Credential Manager)".into());
+        return Some("GitHub CLI sign-in (OS credential store)".into());
     }
     None
 }

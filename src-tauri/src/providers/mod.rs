@@ -185,16 +185,24 @@ fn http_builder() -> reqwest::ClientBuilder {
 }
 
 pub fn http() -> reqwest::Client {
-    http_builder().build().expect("failed to build http client")
+    static CLIENT: std::sync::OnceLock<reqwest::Client> = std::sync::OnceLock::new();
+    CLIENT
+        .get_or_init(|| http_builder().build().expect("failed to build http client"))
+        .clone()
 }
 
 /// Same client as [`http`] but never follows redirects. One/New API status
 /// and billing calls must not be bounced onto another origin.
 pub fn http_no_redirect() -> reqwest::Client {
-    http_builder()
-        .redirect(reqwest::redirect::Policy::none())
-        .build()
-        .expect("failed to build http client")
+    static CLIENT: std::sync::OnceLock<reqwest::Client> = std::sync::OnceLock::new();
+    CLIENT
+        .get_or_init(|| {
+            http_builder()
+                .redirect(reqwest::redirect::Policy::none())
+                .build()
+                .expect("failed to build http client")
+        })
+        .clone()
 }
 
 /// JSON bodies from vendor APIs are tiny (quota + token responses). Cap
@@ -254,51 +262,12 @@ pub fn config_dir() -> PathBuf {
     .clone()
 }
 
-/// Reads a generic credential's blob from Windows Credential Manager.
-pub fn read_windows_credential(target: &str) -> Option<Vec<u8>> {
-    use windows::core::PCWSTR;
-    use windows::Win32::Security::Credentials::{
-        CredFree, CredReadW, CREDENTIALW, CRED_TYPE_GENERIC,
-    };
-    let wide: Vec<u16> = target.encode_utf16().chain(std::iter::once(0)).collect();
-    let mut pcred: *mut CREDENTIALW = std::ptr::null_mut();
-    unsafe {
-        if CredReadW(PCWSTR(wide.as_ptr()), CRED_TYPE_GENERIC, None, &mut pcred).is_err() {
-            return None;
-        }
-        let cred = &*pcred;
-        let blob =
-            std::slice::from_raw_parts(cred.CredentialBlob, cred.CredentialBlobSize as usize)
-                .to_vec();
-        CredFree(pcred as *mut std::ffi::c_void);
-        Some(blob)
-    }
-}
-
-/// Credential blob → text: UTF-8 or UTF-16 LE, unwrapping go-keyring's
-/// `go-keyring-base64:` prefix (used by Go CLIs like gh and Antigravity).
+/// A secret out of the OS credential store — Windows Credential Manager,
+/// the macOS keychain, or the freedesktop Secret Service. `target` is the
+/// service name Go's keyring library writes under, which is what the CLIs
+/// Pane reads (gh, Antigravity) use on every platform.
 pub fn credential_string(target: &str) -> Option<String> {
-    let blob = read_windows_credential(target)?;
-    let text = String::from_utf8(blob.clone()).ok().or_else(|| {
-        if blob.len() % 2 == 0 {
-            let utf16: Vec<u16> = blob
-                .chunks_exact(2)
-                .map(|c| u16::from_le_bytes([c[0], c[1]]))
-                .collect();
-            String::from_utf16(&utf16).ok()
-        } else {
-            None
-        }
-    })?;
-    let text = text.trim().trim_matches('\0').to_string();
-    if let Some(b64) = text.strip_prefix("go-keyring-base64:") {
-        use base64::Engine;
-        let decoded = base64::engine::general_purpose::STANDARD
-            .decode(b64.trim())
-            .ok()?;
-        return String::from_utf8(decoded).ok();
-    }
-    Some(text)
+    crate::platform::secret(target)
 }
 
 /// Percent-used meter for pay-as-you-go balances. These APIs report only

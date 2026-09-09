@@ -17,6 +17,12 @@ publish = false
 [lib]
 path = "src/lib.rs"
 
+[features]
+default = ["harness"]
+# Skips the WebView2 COM call in platform/windows.rs so this crate can
+# compile the real platform sources against the Tauri stub.
+harness = []
+
 [dependencies]
 tauri = { path = "tauri-stub" }
 serde = { version = "1", features = ["derive"] }

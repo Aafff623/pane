@@ -6,6 +6,7 @@ mod alerts;
 mod httpapi;
 mod i18n;
 mod oauth;
+mod platform;
 mod pricing;
 mod providers;
 pub(crate) mod provider_catalog;
@@ -13,6 +14,8 @@ mod spend;
 mod telemetry;
 mod tray_projection;
 mod usage_history;
+
+use platform::{hide_window_border, screen_is_being_shared, set_webview_memory_level};
 
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -505,35 +508,6 @@ fn paint_cached_main_tray(app: &tauri::AppHandle) {
     }
     let icon = tauri::image::Image::new_owned(draw_tray_numbers(&cached.0), 32, 32);
     let _ = tray.set_icon(Some(icon));
-}
-
-fn screen_is_being_shared() -> bool {
-    #[cfg(windows)]
-    {
-        use windows::Win32::UI::Shell::{
-            SHQueryUserNotificationState, QUNS_PRESENTATION_MODE, QUNS_RUNNING_D3D_FULL_SCREEN,
-        };
-        use windows::Win32::UI::WindowsAndMessaging::{GetSystemMetrics, SM_REMOTECONTROL};
-
-        // Someone is remotely controlling this session (Quick Assist, etc.).
-        if unsafe { GetSystemMetrics(SM_REMOTECONTROL) } != 0 {
-            return true;
-        }
-        if let Ok(state) = unsafe { SHQueryUserNotificationState() } {
-            // Presentation Settings / exclusive fullscreen — the closest
-            // public Windows equivalent of macOS's screen-watcher flag.
-            // QUNS_BUSY is skipped: a fullscreen YouTube tab would hide
-            // numbers all evening.
-            if state == QUNS_PRESENTATION_MODE || state == QUNS_RUNNING_D3D_FULL_SCREEN {
-                return true;
-            }
-        }
-        false
-    }
-    #[cfg(not(windows))]
-    {
-        false
-    }
 }
 
 fn spawn_share_watcher(app: tauri::AppHandle) {
@@ -1366,7 +1340,15 @@ where
                     .ok()
             })
             .map(|s| (s * 1000).min(3_600_000));
-        let bench_ms = retry_after_ms.unwrap_or(if rate_limited { 300_000 } else { 60_000 });
+        // A 60s bench expires before the next auto-refresh (default 5 min)
+        // and the failing provider gets hammered every cycle. Hold at least
+        // one interval so the skip actually happens.
+        let interval_ms = (refresh_minutes_from(&load_config()) as i64).saturating_mul(60_000);
+        let bench_ms = retry_after_ms.unwrap_or(if rate_limited {
+            interval_ms.max(300_000)
+        } else {
+            interval_ms.max(60_000)
+        });
         map.insert(
             id.to_string(),
             FailState {
@@ -3346,24 +3328,6 @@ fn now_ms() -> u64 {
         .unwrap_or(0)
 }
 
-/// Tells WebView2 to release memory while the popover is hidden and return
-/// to normal when it shows. Tauri doesn't expose wry's setter for this, so
-/// we make the same COM calls wry does (SetMemoryUsageTargetLevel).
-fn set_webview_memory_level(window: &tauri::WebviewWindow, low: bool) {
-    let _ = window.with_webview(move |webview| unsafe {
-        use webview2_com::Microsoft::Web::WebView2::Win32::{
-            ICoreWebView2_19, COREWEBVIEW2_MEMORY_USAGE_TARGET_LEVEL,
-        };
-        use windows_core::Interface;
-        if let Ok(core) = webview.controller().CoreWebView2() {
-            if let Ok(wv19) = core.cast::<ICoreWebView2_19>() {
-                let level = COREWEBVIEW2_MEMORY_USAGE_TARGET_LEVEL(if low { 1 } else { 0 });
-                let _ = wv19.SetMemoryUsageTargetLevel(level);
-            }
-        }
-    });
-}
-
 fn toggle_popover(app: &tauri::AppHandle, click: tauri::PhysicalPosition<f64>) {
     let Some(window) = app.get_webview_window("main") else {
         return;
@@ -3391,6 +3355,7 @@ fn toggle_popover(app: &tauri::AppHandle, click: tauri::PhysicalPosition<f64>) {
     let _ = window.set_position(tauri::PhysicalPosition::new(x, y));
     let _ = window.show();
     let _ = window.set_focus();
+    hide_window_border(&window);
     let _ = window.emit("popover-shown", ());
 }
 
@@ -3438,6 +3403,7 @@ fn toggle_popover_centered(app: &tauri::AppHandle) {
     }
     let _ = window.show();
     let _ = window.set_focus();
+    hide_window_border(&window);
     let _ = window.emit("popover-shown", ());
 }
 
@@ -3555,6 +3521,7 @@ pub fn run() {
             // mode too; it flips to normal the first time it is shown.
             if let Some(wv) = app.get_webview_window("main") {
                 set_webview_memory_level(&wv, true);
+                hide_window_border(&wv);
             }
 
             httpapi::start();
