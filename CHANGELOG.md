@@ -1,11 +1,73 @@
 # Changelog
 
-## Unreleased
+## 0.4.49 — 2026-09-09
+
+### Added
+- **Cross-platform OS seam.** Host-only work (credential store, UI
+  language, process/port discovery, screen-share detection, WebView memory
+  hint, config/data paths) now lives in `src-tauri/src/platform/`. Windows
+  keeps Credential Manager / Win32; macOS and Linux use Keychain and
+  Secret Service. Tagged releases build Windows NSIS, macOS dmg, and
+  Linux AppImage/deb. Windows remains the supported tray experience;
+  the other two are the first published binaries, not a finished desktop
+  port.
+
+### Fixed
+- **Cursor Team Total usage no longer clamps to 100%.** Spend past the
+  API dollar floor is shown as text, not a maxed bar. The Quota Overview
+  ring follows the Auto pool (`Cursor Models`), not the API pool.
+- **Independent quota pools.** Cursor Auto/API and Antigravity
+  Gemini/Claude only mark a card maxed when every present pool is
+  exhausted. Missing `remaining` no longer becomes a fake 0.
+- **Overview hover.** Ordinary 5-hour rings tip the weekly window;
+  Copilot/Z.ai keep the ring window; Cursor/Antigravity list each pool.
+  The "click to jump" line is gone.
+
+### Changed
+- HTTP clients are reused (`OnceLock`). Cursor `state.vscdb` prefers an
+  immutable open over copying the whole DB. The 30-second tick updates
+  countdown text only. A failed provider is benched for at least one
+  refresh interval.
+
+## 0.4.48 — 2026-09-07
+
+### Added
+- **Quota Overview with per-window rings.** Generalized from the initial
+  5-hour overview to pick the most binding quota per provider (5h session
+  metrics first, otherwise shortest-period usage percent such as
+  daily/weekly/monthly), bringing One/New API daily plans and Cursor/Copilot
+  monthly plans into the overview rings with reset countdowns.
+- **Independent availability symbols.** Quota Overview header displays two
+  independent status symbols (`● N available` green, `● N maxed` red),
+  shown only when non-zero.
+- **Independent project detachment (ADR 0001).** Detached from the upstream
+  fork network to evolve autonomously under Aafff623/pane; updater fallback
+  repointed to Aafff623/pane releases.
+
+### Changed
+- **Dev loop pinned to IPv4 loopback.** Vite host and Tauri `devUrl` locked
+  to `127.0.0.1:1420` to eliminate Windows machine-wide IPv6 loopback
+  access-denied issues. Documented canonical WMI/CreateProcess startup flow.
+
+## 0.4.47 — 2026-09-05
+
+### Added
+- **One/New API sites as accounts.** Relay sites become first-class accounts:
+  the dashboard renders a single merged card with a tab per configured key.
+  Site management moved from Settings into the Customize drawer under the
+  family row. Supports token-only sites reading `/api/subscription/self`.
+- **Multi-account expansion.** Antigravity Google OAuth slots captured from
+  Windows Credential Manager; Cursor PKCE multi-account tokens.
+- **Governance assets.** Tracked canonical `docs/dev-startup.md`, `CONTEXT.md`,
+  `AGENTS.md`, and `CLAUDE.md` to prevent agent configuration drift.
 
 ### Changed
 - **Pane's website moved to trypane.xyz.** Public links and install
   commands use the new domain. Existing `pane.jazii.dev` updater clients
   and dashboard links remain supported through a permanent domain redirect.
+- **UI polish and breathing room.** Folded cards surface nearest reset
+  countdown as a status-toned pill; frosted glass sidebar with feathered edge;
+  authentic brand SVGs.
 
 ## 0.4.46 — 2026-09-02
 

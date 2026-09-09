@@ -61,6 +61,7 @@ Then re-run the launch step.
 | Frontend UI — rendering, refresh loop, settings (single file, ~5k lines) | `src/main.ts` |
 | Provider catalog (frontend mirror of the Rust one) | `src/providerCatalog.ts` |
 | Brand icons / colors | `src/providerVisuals.ts` |
+| OS seam (secrets, locale, processes, paths, WebView hint) | `src-tauri/src/platform/` |
 | All Tauri commands, snapshot cache, account-swap guards | `src-tauri/src/lib.rs` |
 | Local CLI-log spend scanner + model pricing | `src-tauri/src/spend.rs`, `src-tauri/src/pricing.rs` |
 | OAuth — device-code (codex/copilot/xai) · PKCE (Cursor) | `src-tauri/src/oauth.rs`, `src-tauri/src/cursor_oauth.rs` |
@@ -89,7 +90,7 @@ Verified domain facts, vocabulary, and hard constraints → [`CONTEXT.md`](CONTE
  $env:PATH = "D:\Tools\mingw64\bin;$env:PATH"
  cargo +stable-x86_64-pc-windows-gnu test
  ```
- The harness compiles the real `src-tauri/src` files via `#[path]` plus a `tauri-stub` crate (223 tests as of 2026-09-08). It used to live under `src-tauri/target/parse-tests`, where `cargo clean` eventually ate it; it is tracked at the repo root now.
+ The harness compiles the real `src-tauri/src` files via `#[path]` plus a `tauri-stub` crate (230 tests as of 2026-09-09). It used to live under `src-tauri/target/parse-tests`, where `cargo clean` eventually ate it; it is tracked at the repo root now.
 4. **UI acceptance is done by the user personally.** Agents deliver build/test evidence plus a short acceptance checklist — never claim "done and verified" from code reading alone.
 5. Non-trivial changes get a code-review pass plus a redundancy/simplifier scan before delivery, then re-test.
 

@@ -13,7 +13,8 @@ Kimi, Grok, and 20+ more AI providers. It is an independent, from-scratch
 Windows rebuild inspired by [OpenUsage](https://www.openusage.ai/).
 
 <p>
-  <img src="https://img.shields.io/badge/Windows-11%2B-0b1220?style=flat&logo=windows&logoColor=white" alt="Windows 11 or later">
+  <img src="https://img.shields.io/badge/Windows-supported-0b1220?style=flat&logo=windows&logoColor=white" alt="Windows is the supported desktop">
+  <img src="https://img.shields.io/badge/macOS%20%2F%20Linux-preview-0b1220?style=flat" alt="macOS and Linux preview binaries">
   <img src="https://img.shields.io/badge/Tauri-v2-0b1220?style=flat&logo=tauri&logoColor=FFC131" alt="Tauri v2">
   <img src="https://img.shields.io/badge/Data-local%20first-0b1220?style=flat&labelColor=172033&color=2563eb" alt="Local-first data handling">
   <img src="https://img.shields.io/badge/Providers-26%2B-0b1220?style=flat&labelColor=172033&color=dc2626" alt="More than 26 providers">
@@ -101,6 +102,13 @@ is hash-verified by Microsoft's pipeline.)
 > signing is on the roadmap.
 
 Silent install (for scripts): `Pane_x.y.z_x64-setup.exe /S`
+
+### macOS / Linux (preview)
+
+The same tag also attaches a macOS `.dmg` (Apple Silicon runner) and
+Linux `.AppImage` / `.deb`. Tray placement, autostart wording, and
+menubar / AppIndicator behavior are still the Windows popover. Treat
+those builds as the first published binaries, not a finished port.
 
 Whichever way you install, Pane checks for updates on launch and every
 4 hours in the background, and flags a new release on the footer version
@@ -246,9 +254,11 @@ whatever the community asks for loudest.
 
 **Tracking**
 
-- **5-hour overview** — every provider with a 5-hour rolling window in one
-  pinned section: status dot and reset countdown per provider, plus a
-  green "N available" / red "N maxed" symbol tally in the header.
+- **Quota Overview** — every active provider with rolling reset quotas in
+  one pinned section: picks the most binding quota per provider (5h session
+  metrics first, or daily/weekly/monthly plans), with a status dot and reset
+  countdown ring per provider, plus an independent green "N available" /
+  red "N maxed" symbol tally in the header.
 - **Codex reset credits** — see each banked credit's exact expiry and
   redeem it with one click.
 

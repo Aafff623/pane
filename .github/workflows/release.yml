@@ -1,7 +1,9 @@
-# Release pipeline: pushing a v* tag builds the installer on GitHub's own
-# runners from that exact source — public logs prove the binary matches
-# the code. Manual runs (workflow_dispatch) build and upload artifacts
-# without creating a release, for dry-run verification.
+# Pushing a v* tag builds installers on GitHub runners from that exact
+# source. Manual runs (workflow_dispatch) upload artifacts without creating
+# a release, for dry-run verification.
+#
+# Matrix: Windows NSIS (supported), macOS dmg and Linux AppImage/deb
+# (first published binaries — tray UX is still Windows-shaped).
 name: Release
 
 on:
@@ -11,18 +13,22 @@ on:
 
 jobs:
   build:
-    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            bundles: nsis
+            artifact: windows
+          - os: macos-latest
+            bundles: dmg
+            artifact: macos
+          - os: ubuntu-22.04
+            bundles: appimage,deb
+            artifact: linux
+    runs-on: ${{ matrix.os }}
     permissions:
-      contents: write
-      # The winget dispatch step creates a workflow_dispatch event, which
-      # needs actions: write — a permissions block nulls every unlisted
-      # scope, so without this the dispatch 403s (and continue-on-error
-      # would hide it, silently reproducing the never-publishes bug).
-      actions: write
-    # Third-party actions are pinned to commit SHAs: a moving tag like @v4
-    # lets whoever controls that repo swap in new code that runs inside
-    # this signing pipeline. The trailing comment names the tag the SHA
-    # was taken from; bump by updating both together.
+      contents: read
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
@@ -36,83 +42,134 @@ jobs:
         with:
           workspaces: src-tauri
 
+      - name: Install Linux WebKit
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev patchelf
+
       - name: Install frontend deps
         run: npm ci
 
       # This repo has no minisign private key (the updater pubkey embedded
       # in tauri.conf.json belongs to the original upstream), so updater
-      # artifacts cannot be signed here — building with them enabled fails
-      # at the signing step. Ship plain installers + a sha256 manifest
-      # until this repo gets its own keypair and endpoints.
-      # Write the override to a file and pass its path: inline JSON on the
-      # command line loses its double quotes through npm run on Windows
-      # ("{bundle:...}" fails JSON parsing).
+      # artifacts cannot be signed here. Write the override to a file:
+      # inline JSON on Windows npm loses its double quotes.
+      - name: Write unsigned-bundle override
+        shell: bash
+        run: printf '%s\n' '{"bundle":{"createUpdaterArtifacts":false}}' > build-config.json
+
       - name: Build
-        shell: pwsh
-        run: |
-          '{"bundle":{"createUpdaterArtifacts":false}}' | Out-File -Encoding utf8 build-config.json
-          npm run tauri build -- --config build-config.json
+        run: npm run tauri build -- --config build-config.json --bundles ${{ matrix.bundles }}
 
-      - name: Generate latest.json (with sha256 — install.ps1 requires it)
-        shell: pwsh
+      - name: Stage artifacts
+        shell: bash
         run: |
-          $ver = (Get-Content src-tauri/tauri.conf.json -Raw | ConvertFrom-Json).version
-          # The release is created under the git tag, so the download URL
-          # must use the tag too. A tag that disagrees with the config
-          # version is always a mistake — fail loudly instead of shipping
-          # an updater manifest that would 404.
-          $tag = if ($env:GITHUB_REF -like 'refs/tags/*') { $env:GITHUB_REF_NAME } else { "v$ver" }
-          if ($tag -ne "v$ver") {
-            Write-Error "Tag '$tag' does not match tauri.conf.json version 'v$ver' — bump the version before tagging."
+          mkdir -p dist-artifacts
+          find src-tauri/target/release/bundle -type f \( \
+            -name '*-setup.exe' -o -name '*.dmg' -o -name '*.AppImage' -o -name '*.deb' \
+          \) -exec cp {} dist-artifacts/ \;
+          ls -la dist-artifacts
+          test -n "$(ls -A dist-artifacts)"
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: pane-${{ matrix.artifact }}
+          path: dist-artifacts/*
+
+  release:
+    needs: build
+    if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      actions: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Download all build artifacts
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: Generate latest.json
+        shell: bash
+        run: |
+          set -euo pipefail
+          ver=$(python3 -c "import json; print(json.load(open('src-tauri/tauri.conf.json'))['version'])")
+          tag="${GITHUB_REF_NAME:-}"
+          if [[ "${GITHUB_REF:-}" != refs/tags/* ]]; then
+            tag="v$ver"
+          fi
+          if [[ "$tag" != "v$ver" ]]; then
+            echo "Tag '$tag' does not match tauri.conf.json version 'v$ver' — bump the version before tagging." >&2
             exit 1
-          }
-          $exe = Get-ChildItem src-tauri/target/release/bundle/nsis/*-setup.exe | Select-Object -First 1
-          # No signing key in this repo: the signature field stays empty
-          # (sha256 below is what install.ps1 actually consumes).
-          $sig = ""
-          $hash = (Get-FileHash $exe.FullName -Algorithm SHA256).Hash.ToLower()
-          $manifest = @{
-            version  = $ver
-            notes    = "https://github.com/Aafff623/pane/blob/main/CHANGELOG.md"
-            pub_date = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
-            sha256   = $hash
-            platforms = @{ "windows-x86_64" = @{
-              signature = $sig
-              url = "https://github.com/Aafff623/pane/releases/download/$tag/$($exe.Name)"
-            } }
-          } | ConvertTo-Json -Depth 4
-          [System.IO.File]::WriteAllText("latest.json", $manifest, (New-Object System.Text.UTF8Encoding($false)))
-          Get-Content latest.json
+          fi
 
-      - name: Upload artifacts (dry run only)
+          win=$(find artifacts -name '*-setup.exe' -print -quit)
+          mac=$(find artifacts -name '*.dmg' -print -quit)
+          appimage=$(find artifacts -name '*.AppImage' -print -quit)
+          deb=$(find artifacts -name '*.deb' -print -quit)
+          if [[ -z "$win" ]]; then
+            echo "Windows NSIS installer missing; refusing to publish." >&2
+            exit 1
+          fi
+
+          sha256() { sha256sum "$1" | awk '{print $1}'; }
+          win_hash=$(sha256 "$win")
+          notes="https://github.com/Aafff623/pane/blob/main/CHANGELOG.md"
+          pub_date=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+          python3 - "$ver" "$tag" "$notes" "$pub_date" "$win" "$win_hash" "${mac:-}" "${appimage:-}" <<'PY'
+          import json, os, sys
+          ver, tag, notes, pub_date, win, win_hash, mac, appimage = sys.argv[1:]
+          base = f"https://github.com/Aafff623/pane/releases/download/{tag}"
+          platforms = {
+              "windows-x86_64": {"signature": "", "url": f"{base}/{os.path.basename(win)}"}
+          }
+          if mac:
+              platforms["darwin-aarch64"] = {"signature": "", "url": f"{base}/{os.path.basename(mac)}"}
+          if appimage:
+              platforms["linux-x86_64"] = {"signature": "", "url": f"{base}/{os.path.basename(appimage)}"}
+          manifest = {
+              "version": ver,
+              "notes": notes,
+              "pub_date": pub_date,
+              "sha256": win_hash,
+              "platforms": platforms,
+          }
+          with open("latest.json", "w", encoding="utf-8") as f:
+              json.dump(manifest, f, indent=2)
+              f.write("\n")
+          print(open("latest.json", encoding="utf-8").read())
+          PY
+          ls -la artifacts latest.json
+
+      - name: Upload dry-run artifacts
         if: github.event_name == 'workflow_dispatch'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: pane-installer
+          name: pane-release-bundle
           path: |
-            src-tauri/target/release/bundle/nsis/*-setup.exe
+            artifacts/*
             latest.json
 
       - name: Create GitHub release
         if: startsWith(github.ref, 'refs/tags/')
-        shell: pwsh
-        run: |
-          $exe = Get-ChildItem src-tauri/target/release/bundle/nsis/*-setup.exe | Select-Object -First 1
-          gh release create $env:GITHUB_REF_NAME `
-            --title "Pane $($env:GITHUB_REF_NAME.TrimStart('v'))" `
-            --generate-notes `
-            $exe.FullName latest.json
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          shopt -s nullglob
+          files=(artifacts/* latest.json)
+          gh release create "$GITHUB_REF_NAME" \
+            --title "Pane ${GITHUB_REF_NAME#v}" \
+            --generate-notes \
+            "${files[@]}"
 
-      # Releases created with GITHUB_TOKEN emit no workflow-triggering
-      # `release` event, so hand the baton to the winget workflow
-      # explicitly (workflow_dispatch is exempt from that rule).
-      # Non-fatal: a failed dispatch must not fail a shipped release.
       - name: Dispatch winget publish
         if: startsWith(github.ref, 'refs/tags/')
         continue-on-error: true
-        shell: pwsh
-        run: gh workflow run winget.yml -f tag=$env:GITHUB_REF_NAME
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh workflow run winget.yml -f tag=$GITHUB_REF_NAME

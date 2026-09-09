@@ -5,15 +5,19 @@ anything unverified lives under `待确认` at the bottom.
 
 ## Purpose and boundaries
 
-- Windows tray app (Tauri v2) that tracks AI coding plans and subscriptions:
-  per-vendor quotas with reset windows, local CLI spend, tray projections,
-  optional toasts. Vanilla TypeScript + Vite frontend, Rust backend, no
-  Electron, one process plus WebView2.
+- Windows-primary tray app (Tauri v2) that tracks AI coding plans and
+  subscriptions: per-vendor quotas with reset windows, local CLI spend,
+  tray projections, optional toasts. Vanilla TypeScript + Vite frontend,
+  Rust backend, no Electron, one process plus the host WebView. Tagged
+  releases also publish macOS dmg and Linux AppImage/deb from the same
+  repo (`platform/` seam). Those two are first published binaries — tray
+  placement, autostart copy, and menubar/AppIndicator are still
+  Windows-shaped.
 - Git layout: single remote `origin` = `Aafff623/pane` — an independent
   project (detached from any upstream, 2026-09-06). A single branch `main`
   exists locally and on origin; feature work happens on `codex/<feature>`
   branches.
-- Version 0.4.48 (`package.json` + `src-tauri/tauri.conf.json`), identifier
+- Version 0.4.49 (`package.json` + `src-tauri/tauri.conf.json`), identifier
   `com.jazii.pane`, productName `Pane`.
 - Privacy boundary (asserted by tests in the code): tokens go only to their
   own vendor's API; pasted keys live in `%APPDATA%\Pane`; the 6736 HTTP API is
@@ -42,12 +46,17 @@ anything unverified lives under `待确认` at the bottom.
   Identity = `refresh_token`. File: `antigravity-accounts.json`.
 - **CursorAccount** — Cursor OAuth account. Identity = `access_token`.
   File: `cursor-accounts.json`.
-- **5-hour overview** — pinned dashboard section aggregating every provider
-  that has a 5-hour rolling window: per-provider status dot + reset
-  countdown ring, header badge = two independent symbols (`● N 可用`
-  green, `● N 满额` red, shown only when non-zero). **maxed (满额)** = the
-  5h window at 100%; providers without a 5h window render as `按量/长期`
-  (non-5h) and don't count into the availability tally.
+- **Quota Overview (配额总览)** — pinned dashboard section aggregating every
+  provider that has a rolling reset window (generalized from the initial 5-hour
+  overview in commit `5d03a82`): picks the most binding quota per provider (5h
+  session metrics first, otherwise the shortest-period usage percent such as
+  daily/weekly/monthly), rendering per-provider status dot + reset countdown ring;
+  header badge = two independent symbols (`● N 可用` green, `● N 满额` red, shown
+  only when non-zero). **maxed (满额)** = the active window at 100%; providers
+  without a time window render as `按量/长期` (non-quota) and don't count into
+  the availability tally. Independent pools (Cursor Auto vs API, Antigravity
+  Gemini vs Claude) are maxed only when every *present* pool is exhausted.
+  Cursor's overview ring follows `Cursor Models` (Auto), not the API pool.
 - **Relay site (One/New API)** — one site entry in `onenewapi.json`
   (version 1): `name`, `base_url`, optional dashboard **access token** +
   `New-Api-User` id, and N relay keys (`sk-…`). Sites are ACCOUNTS of the
@@ -105,8 +114,7 @@ anything unverified lives under `待确认` at the bottom.
   `cargo +stable-x86_64-pc-windows-gnu`. The full Tauri binary cannot link
   locally (167k-export cdylib DLL) — hence the local
   `crate-type = ["rlib"]` edit in `src-tauri/Cargo.toml`, which **must never
-  be committed**, and the `src-tauri/target/parse-tests/` harness for unit
-  tests.
+  be committed**, and the repo-root `parse-tests/` harness for unit tests.
 - Dev runtime needs both processes: Vite `:1420` + `pane.exe` `:6736`. Never
   serve the frontend with Python `http.server` (permanent WebView2 cache
   locks). Launch `pane.exe` via `CreateProcess(lpDesktop="WinSta0\Default")` —
@@ -140,6 +148,9 @@ anything unverified lives under `待确认` at the bottom.
 
 ## Durable decisions
 
+- `docs/adr/0002-platform-seam.md` — OS capabilities go through
+  `src-tauri/src/platform/`; Windows stays the supported tray, Linux/macOS
+  are first published binaries.
 - `docs/plans/pane-account-model-v2.md` — account model v2 (trend for every
   card, credential accounts, OAuth expansion). Phase 1 landed as
   `usage_history.rs` + frontend trend fallback.
@@ -185,3 +196,15 @@ anything unverified lives under `待确认` at the bottom.
   symbols (green dot + available count, red dot + maxed count), never a
   combined "7/8"-style solid capsule. User-mandated after rejecting the
   first rendering that shipped in the initial 0.4.48 build.
+- 2026-09-07 — Overview generalized from 5-hour session windows to Quota Overview
+  with per-window rings: prioritizes 5h session windows, falls back to shortest
+  period percent (daily/weekly/monthly) so One/New API daily plans and Cursor/Copilot
+  monthly plans get rings too.
+- 2026-09-08 — Cursor Team `Total usage` must not meter spend against the
+  API dollar floor (`planUsage.limit` ≈ $20). When bucket rows exist, Total
+  is text. Commit `fef014a`.
+- 2026-09-09 — OS capabilities go through `src-tauri/src/platform/`
+  (ADR 0002). Windows 11 may still draw a light focus stroke on the
+  frameless popover; left as-is after a DWM `COLOR_NONE` attempt did not
+  remove it. Hover on a 5h overview ring shows the weekly sibling, not
+  the same 5h line; Copilot/Z.ai keep the ring window.
