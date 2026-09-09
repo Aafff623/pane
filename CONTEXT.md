@@ -112,9 +112,8 @@ anything unverified lives under `待确认` at the bottom.
 - This machine builds with the **GNU toolchain only** (no MSVC): prepend
   `D:\Tools\mingw64\bin` to PATH and use
   `cargo +stable-x86_64-pc-windows-gnu`. The full Tauri binary cannot link
-  locally (167k-export cdylib DLL) — hence the local
-  `crate-type = ["rlib"]` edit in `src-tauri/Cargo.toml`, which **must never
-  be committed**, and the repo-root `parse-tests/` harness for unit tests.
+  locally as a `cdylib` (167k-export DLL). The committed crate-type is
+  `["rlib"]` (desktop only). Unit tests run from repo-root `parse-tests/`.
 - Dev runtime needs both processes: Vite `:1420` + `pane.exe` `:6736`. Never
   serve the frontend with Python `http.server` (permanent WebView2 cache
   locks). Launch `pane.exe` via `CreateProcess(lpDesktop="WinSta0\Default")` —

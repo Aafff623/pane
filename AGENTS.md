@@ -36,8 +36,10 @@ pnpm dev
    station (invisible to user).
 4. **Clear `%LOCALAPPDATA%\com.jazii.pane\EBWebView`** whenever you see
    stale UI. WebView2 caches assets aggressively.
-5. **Do not commit `crate-type = ["rlib"]`** in `src-tauri/Cargo.toml` —
-   that is a local MinGW workaround only.
+5. **`src-tauri/Cargo.toml` crate-type stays `["rlib"]`.** This is a
+   desktop-only crate (no mobile JNI). `cdylib`/`staticlib` made GNU and
+   the macOS/Linux lib targets try to link `advapi32`. Do not add them
+   back.
 
 ## Port reference
 
@@ -77,7 +79,7 @@ Verified domain facts, vocabulary, and hard constraints → [`CONTEXT.md`](CONTE
 
 - **Canonical startup guide**: `docs/dev-startup.md`. This file only summarizes it.
 - **README.md** Features/Providers copy can lag the code — trust `src/main.ts` + `src-tauri/src/provider_catalog.rs` over README.
-- **Local-only, never commit**: the `crate-type = ["rlib"]` line in `src-tauri/Cargo.toml` (rule 5 above), `.codegraph/` (auto-syncs at turn end — don't hand-sync), `.agents/mcp.json`, and everything under `temp/` except its `README.md` / `AGENTS.md`.
+- **Local-only, never commit**: `.codegraph/` (auto-syncs at turn end — don't hand-sync), `.agents/mcp.json`, and everything under `temp/` except its `README.md` / `AGENTS.md`.
 - **Resolved (2026-09-05)**: `AGENTS.md`, `docs/dev-startup.md` and the governance assets (`CLAUDE.md`, `CONTEXT.md`, `temp/` contract files) are tracked in Git; the one-off `run_test.cmd` launcher moved to `temp/scripts/` (local-only).
 
 ## Validation & delivery

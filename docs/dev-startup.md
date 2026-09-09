@@ -106,9 +106,9 @@ cargo +stable-x86_64-pc-windows-gnu build
 
 Then restart pane.exe as in step 5 above.
 
-> ⚠️ **Local Cargo.toml — DO NOT COMMIT**
-> `src-tauri/Cargo.toml` has `crate-type = ["rlib"]` on this machine
-> (MinGW cannot link the 167k-export DLL).  Never stage that line.
+> The committed crate-type is `["rlib"]` (desktop only). Do not add
+> `cdylib`/`staticlib` back — they pull Windows link libs into the
+> macOS/Linux build.
 
 ---
 

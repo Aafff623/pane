@@ -7,10 +7,11 @@
   language, process/port discovery, screen-share detection, WebView memory
   hint, config/data paths) now lives in `src-tauri/src/platform/`. Windows
   keeps Credential Manager / Win32; macOS and Linux use Keychain and
-  Secret Service. Tagged releases build Windows NSIS, macOS dmg, and
-  Linux AppImage/deb. Windows remains the supported tray experience;
-  the other two are the first published binaries, not a finished desktop
-  port.
+  Secret Service. The lib crate-type is `rlib` only — `cdylib` pulled
+  Windows `advapi32`/`bcrypt` into the macOS/Linux link. Tagged releases
+  build Windows NSIS, macOS dmg, and Linux AppImage/deb. Windows remains
+  the supported tray experience; the other two are the first published
+  binaries, not a finished desktop port.
 
 ### Fixed
 - **Cursor Team Total usage no longer clamps to 100%.** Spend past the
