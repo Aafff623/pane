@@ -48,15 +48,20 @@ anything unverified lives under `待确认` at the bottom.
   File: `cursor-accounts.json`.
 - **Quota Overview (配额总览)** — pinned dashboard section aggregating every
   provider that has a rolling reset window (generalized from the initial 5-hour
-  overview in commit `5d03a82`): picks the most binding quota per provider (5h
-  session metrics first, otherwise the shortest-period usage percent such as
-  daily/weekly/monthly), rendering per-provider status dot + reset countdown ring;
-  header badge = two independent symbols (`● N 可用` green, `● N 满额` red, shown
-  only when non-zero). **maxed (满额)** = the active window at 100%; providers
+  overview in commit `5d03a82`). Header badge = two independent symbols
+  (`● N 可用` green, `● N 满额` red, shown only when non-zero), plus a
+  `5h` / `Weekly` capsule. Default / 5h tab picks the most binding quota
+  (5h session first, otherwise shortest-period percent such as
+  daily/weekly/monthly). Weekly tab switches ordinary families to a week
+  meter when one exists; Z.ai, One/New API, and Copilot keep the default
+  binding.   Click a ring to scroll to that card; hover still shows the
+  other window. One ring per family — Antigravity/Cursor extra
+  accounts stay as separate cards below, but do not get a second
+  overview tile. **maxed (满额)** = the shown window at 100%; providers
   without a time window render as `按量/长期` (non-quota) and don't count into
   the availability tally. Independent pools (Cursor Auto vs API, Antigravity
   Gemini vs Claude) are maxed only when every *present* pool is exhausted.
-  Cursor's overview ring follows `Cursor Models` (Auto), not the API pool.
+  Cursor's 5h-tab ring follows `Cursor Models` (Auto), not the API pool.
 - **Relay site (One/New API)** — one site entry in `onenewapi.json`
   (version 1): `name`, `base_url`, optional dashboard **access token** +
   `New-Api-User` id, and N relay keys (`sk-…`). Sites are ACCOUNTS of the
@@ -206,4 +211,14 @@ anything unverified lives under `待确认` at the bottom.
   (ADR 0002). Windows 11 may still draw a light focus stroke on the
   frameless popover; left as-is after a DWM `COLOR_NONE` attempt did not
   remove it. Hover on a 5h overview ring shows the weekly sibling, not
-  the same 5h line; Copilot/Z.ai keep the ring window.
+  the same 5h line; Copilot/Z.ai keep the ring window. Quota Overview
+  header has a 5h / Weekly capsule: ordinary rings follow the tab;
+  Z.ai / One/New API / Copilot keep their original binding.
+- 2026-09-10 — Refresh semantics: the background loop fetches FIRST then
+  sleeps (a live pass runs at launch), and on a total outage (no live-ok
+  snapshot) it clears ordinary-error benches and retries every 15 s, at
+  most 5 times. Only explicit user clicks (Refresh button, Ctrl+R, the
+  overview ⟳) clear ordinary benches via `fetch_usage(clearBenches)`;
+  timer/refocus passes stay bench-respecting. 429/rate-limit cooldowns
+  survive every path (FailState.rate_limited). The per-card ⟳ command
+  (`refresh_provider`) bypasses benches entirely by design.

@@ -275,6 +275,9 @@ const en: Dict = {
   "spend.metric.tokens": "tokens",
 
   "overview.title": "Quota Overview",
+  "overview.tab5h": "5h",
+  "overview.tabWeek": "Weekly",
+  "overview.refresh": "Refresh all",
   "overview.badge": "{avail}/{total} Available",
   "overview.availShort": "available",
   "overview.maxedBadge": "{n} Maxed Out",
@@ -784,6 +787,9 @@ const zh: Dict = {
   "spend.metric.tokens": "tokens",
 
   "overview.title": "额度总览",
+  "overview.tab5h": "5 小时",
+  "overview.tabWeek": "每周",
+  "overview.refresh": "一键刷新",
   "overview.badge": "{avail}/{total} 服务可用",
   "overview.availShort": "可用",
   "overview.maxedBadge": "{n} 个已满额",
@@ -1252,6 +1258,9 @@ const ru: Dict = {
   "spend.metric.tokens": "tokens",
 
   "overview.title": "Обзор квот",
+  "overview.tab5h": "5ч",
+  "overview.tabWeek": "нед.",
+  "overview.refresh": "Обновить всё",
   "overview.badge": "{avail}/{total} доступно",
   "overview.availShort": "доступно",
   "overview.maxedBadge": "{n} исчерпано",

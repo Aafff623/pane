@@ -3359,6 +3359,22 @@ body.no-glass #confirm-box {
   user-select: none;
 }
 
+.quota-overview .overview-tabs {
+  display: inline-flex;
+  flex: none;
+  gap: 2px;
+  margin: 0;
+  padding: 2px;
+  border-radius: 8px;
+}
+
+.quota-overview .overview-tabs .tab {
+  flex: none;
+  padding: 3px 7px;
+  font-size: 10.5px;
+  border-radius: 6px;
+}
+
 .quota-overview .overview-chip.is-warn {
   color: #f87171;
 }

@@ -135,6 +135,7 @@ function unpricedWarn(sp: ProviderSpend | undefined): string {
 }
 
 type SpendTab = "today" | "yesterday" | "last30";
+type OverviewTab = "5h" | "week";
 
 // Per-provider layout: which rows show, their order, which are tucked
 // behind the caret ("On Demand"), and which are starred for the tray strip.
@@ -170,6 +171,7 @@ interface Config {
   notifyCuttingClose: boolean;
   notifyWillRunOut: boolean;
   spendTab: SpendTab;
+  overviewTab: OverviewTab;
   spendMetric: "cost" | "tokens" | "mtok";
   showUsed: boolean;
   showTrend: boolean;
@@ -199,6 +201,7 @@ const FRONTEND_CONFIG_KEYS = [
   "notifyCuttingClose",
   "notifyWillRunOut",
   "spendTab",
+  "overviewTab",
   "spendMetric",
   "showUsed",
   "showTrend",
@@ -385,6 +388,7 @@ let config: Config = {
   notifyCuttingClose: false,
   notifyWillRunOut: false,
   spendTab: "today",
+  overviewTab: "5h",
   spendMetric: "cost",
   showUsed: false,
   showTrend: false,
@@ -485,6 +489,7 @@ function trendSourceFor(id: string): TrendSource | undefined {
   return undefined;
 }
 let spendTab: SpendTab = "today";
+let overviewTab: OverviewTab = "5h";
 let customizeOpen = false;
 let revealTimer = 0;
 let animateExpandId: string | null = null;
@@ -1449,6 +1454,11 @@ const OVERVIEW_PRIMARY_LABEL: Record<string, string> = {
 /// story the user wants in the tip), so the tip stays on the ring window.
 const OVERVIEW_HOVER_KEEP_RING = new Set(["copilot", "zai"]);
 
+/// Week capsule leaves these families on the default binding (5h first,
+/// otherwise shortest period). Z.ai and One/New API keep their own
+/// windows; Copilot has no weekly meter so the week tab would go empty.
+const OVERVIEW_KEEP_BINDING = new Set(["copilot", "zai", "onenewapi"]);
+
 const is5hPeriod = (p: number | null) =>
   p !== null && p >= 14_400_000 && p <= 21_600_000;
 
@@ -1514,6 +1524,18 @@ function overviewHoverTip(s: Snapshot, quota: OverviewQuota, displayName: string
     }
     if (weeklies.length > 1) {
       return `${displayName}: ${weeklies.map((m) => formatHoverMetric(m)).join(" · ")}`;
+    }
+  }
+
+  // Week-tab rings already show the weekly percent — tip the 5h sibling
+  // so the hover still surfaces the other window.
+  if (!OVERVIEW_HOVER_KEEP_RING.has(family) && quota.window === "week") {
+    const sessions = core.filter((m) => metricWindow(m) === "5h");
+    if (sessions.length === 1) {
+      return `${displayName}: ${formatHoverMetric(sessions[0], t("overview.win5h"))}`;
+    }
+    if (sessions.length > 1) {
+      return `${displayName}: ${sessions.map((m) => formatHoverMetric(m)).join(" · ")}`;
     }
   }
 
@@ -1755,6 +1777,44 @@ function orderedSnapshots(): Snapshot[] {
     });
 }
 
+/// Overview is one ring per family. Parallel extra cards stay on the
+/// dashboard, but repeating the same truncated name in the grid looks
+/// like a duplicate (two "Antig..." tiles).
+function overviewSnapshots(): Snapshot[] {
+  const seen = new Set<string>();
+  const out: Snapshot[] = [];
+  for (const s of orderedSnapshots()) {
+    const fam = providerFamily(s.id);
+    if (seen.has(fam)) continue;
+    seen.add(fam);
+    out.push(s);
+  }
+  return out;
+}
+
+/// Among a parallel family's cards, show the most binding quota so a
+/// spent slot is not hidden behind an unused login.
+function pickOverviewShown(card: Snapshot): Snapshot {
+  const family = providerFamily(card.id);
+  if (!isParallelAccountFamily(family)) return card;
+  const siblings = lastSnapshots.filter(
+    (snap) => providerFamily(snap.id) === family && !isCardDisabled(snap.id),
+  );
+  if (siblings.length <= 1) return card;
+  let best = card;
+  let bestScore = -1;
+  for (const sib of siblings) {
+    const q = extractOverviewQuota(sib, isCardFoldCandidate(sib.id), sib.id);
+    if (q.status === "error" || q.status === "no_data") continue;
+    const score = q.isMaxed ? 101 : q.usedPercent;
+    if (score > bestScore) {
+      best = sib;
+      bestScore = score;
+    }
+  }
+  return best;
+}
+
 /// Views `snapshots` as if a bare `onenewapi` family card existed: when any
 /// site-account card does, clone the first healthy one (else the first) under
 /// the family id. The clone is render-only — it never enters lastSnapshots,
@@ -1982,6 +2042,13 @@ function legendHtml(entries: DonutEntry[]): string {
     .join("");
 }
 
+function switchOverviewTab(tab: OverviewTab): void {
+  if (overviewTab === tab) return;
+  overviewTab = tab;
+  void patchConfig({ overviewTab: tab });
+  renderIfVisible();
+}
+
 /// Tab switch morphs the existing arcs in place (identity-keyed per
 /// provider, CSS-transitioned) instead of rebuilding the card.
 function switchSpendTab(tab: SpendTab): void {
@@ -2132,9 +2199,10 @@ function renderTotalSpend(): string {
 // ---------------------------------------------------------------------------
 // Quota & Status Overview module
 // Displays availability status and each provider's most binding quota
-// (circular SVG progress): the 5-hour session window when one is reported,
-// otherwise the shortest-period usage percent (daily / weekly / monthly).
-// Maxed (100%) renders in red.
+// (circular SVG progress). Default / "5h" tab: session window when one
+// is reported, otherwise the shortest-period usage percent. "Week" tab:
+// weekly meters for ordinary families; Z.ai / One/New API / Copilot keep
+// the default binding. Maxed (100%) renders in red.
 // ---------------------------------------------------------------------------
 
 type QuotaWindow = "5h" | "day" | "week" | "month" | "generic";
@@ -2195,8 +2263,14 @@ function extractOverviewQuota(s: Snapshot, cardIsMaxed = false, cardId = ""): Ov
     return pickBest(list);
   };
 
+  const family = providerFamily(s.id);
+  const preferWeek = overviewTab === "week" && !OVERVIEW_KEEP_BINDING.has(family);
+  const weekPercents = percents.filter((m) => metricWindow(m) === "week");
+
   let best: Metric | null = null;
-  if (sessionPercents.length > 0) {
+  if (preferWeek && weekPercents.length > 0) {
+    best = pickOverview(weekPercents);
+  } else if (sessionPercents.length > 0) {
     best = pickOverview(sessionPercents);
   } else if (percents.length > 0) {
     // Shortest period first (untimed metrics last). Independent sibling
@@ -2244,14 +2318,14 @@ function isOverviewCollapsed(): boolean {
 }
 
 function renderQuotaOverview(): string {
-  const visibleSnaps = orderedSnapshots();
+  const visibleSnaps = overviewSnapshots();
   if (visibleSnaps.length === 0) return "";
 
   const isFolded = isOverviewCollapsed();
 
   const items = visibleSnaps.map((s) => {
     const family = providerFamily(s.id);
-    let shown = s;
+    let shown = pickOverviewShown(s);
     if (s.id === family && supportsExtraAccounts(family) && !isParallelAccountFamily(family)) {
       const accountIds = lastSnapshots
         .filter((snap) => providerFamily(snap.id) === family && !isCardDisabled(snap.id))
@@ -2277,14 +2351,14 @@ function renderQuotaOverview(): string {
   const errorCount = items.filter((it) => it.quota.status === "error").length;
   const availableCount = totalCount - maxedCount - errorCount;
 
-  const itemsHtml = items
+    const itemsHtml = items
     .map(({ cardSnap, shownSnap, quota }) => {
-      const id = cardSnap.id;
-      const family = providerFamily(id);
+      const family = providerFamily(cardSnap.id);
+      const jumpId = isParallelAccountFamily(family) ? shownSnap.id : cardSnap.id;
       const origin = shownSnap.dashboard_url ?? undefined;
-      const visual = providerVisual(id || family, origin);
+      const visual = providerVisual(jumpId || family, origin);
       const icon = visual?.iconSvg ?? `<span class="icon-fallback">${escapeHtml(cardSnap.name.slice(0, 2))}</span>`;
-      const displayName = cardSnap.name;
+      const displayName = providerDisplayName(family) || cardSnap.name;
 
       const r = 16;
       const cx = 22;
@@ -2346,7 +2420,7 @@ function renderQuotaOverview(): string {
       const fullTooltip = overviewHoverTip(shownSnap, quota, displayName);
 
       return `
-        <div class="overview-item tone-${itemTone}" data-jump-provider="${escapeHtml(id)}" title="${escapeHtml(fullTooltip)}">
+        <div class="overview-item tone-${itemTone}" data-jump-provider="${escapeHtml(jumpId)}" title="${escapeHtml(fullTooltip)}">
           <div class="overview-item-head">
             <span class="overview-item-icon">${icon}</span>
             <span class="overview-item-name">${escapeHtml(displayName)}</span>
@@ -2405,7 +2479,12 @@ function renderQuotaOverview(): string {
         </span>
         <span class="provider-name">${escapeHtml(t("overview.title"))}</span>
         ${badgeHtml}
+        <div class="tabs overview-tabs">
+          <button type="button" class="tab${overviewTab === "5h" ? " active" : ""}" data-overview-tab="5h">${escapeHtml(t("overview.tab5h"))}</button>
+          <button type="button" class="tab${overviewTab === "week" ? " active" : ""}" data-overview-tab="week">${escapeHtml(t("overview.tabWeek"))}</button>
+        </div>
         <span class="spacer"></span>
+        <button type="button" class="card-refresh overview-refresh" data-overview-refresh title="${escapeHtml(t("overview.refresh"))}">⟳</button>
         ${foldChevron}
       </div>
       ${isFolded ? "" : `<div class="card-panel overview-panel"><div class="overview-grid">${itemsHtml}</div></div>`}
@@ -4820,7 +4899,11 @@ async function forceUsageRefreshAttempt(usageOnly = true): Promise<void> {
   await completed;
 }
 
-async function refresh(force = false, usageOnly = false): Promise<void> {
+async function refresh(
+  force = false,
+  usageOnly = false,
+  interactive = false,
+): Promise<void> {
   if (refreshing) {
     // Remember a forced request instead of dropping it: the in-flight
     // fetch may have started before whatever prompted this one (a saved
@@ -4852,7 +4935,12 @@ async function refresh(force = false, usageOnly = false): Promise<void> {
   );
   try {
     await unparkRecentlyKeyed();
-    let snapshots = await invoke<Snapshot[]>("fetch_usage", { disabled: [...config.disabled] });
+    let snapshots = await invoke<Snapshot[]>("fetch_usage", {
+      disabled: [...config.disabled],
+      // Only explicit clicks (Refresh button, Ctrl+R, overview ⟳) may
+      // clear ordinary-error benches; timer/refocus passes stay polite.
+      clearBenches: interactive,
+    });
     // First launch ever (no layout yet): start with only the providers that
     // actually have credentials on this PC, like the Mac app's first-run
     // detection. The rest stay available in Customize.
@@ -6419,6 +6507,9 @@ async function initSettings(): Promise<void> {
   if (["today", "yesterday", "last30"].includes(config.spendTab)) {
     spendTab = config.spendTab;
   }
+  if (config.overviewTab === "5h" || config.overviewTab === "week") {
+    overviewTab = config.overviewTab;
+  }
 
   const interval = document.querySelector<HTMLInputElement>("#interval")!;
   interval.value = String(config.refreshMinutes);
@@ -6586,6 +6677,7 @@ async function resetAllSettings(): Promise<void> {
     notifyCuttingClose: true,
     notifyWillRunOut: true,
     spendTab: "today",
+    overviewTab: "5h",
     spendMetric: "cost",
     showUsed: false,
     showTrend: false,
@@ -6603,6 +6695,7 @@ async function resetAllSettings(): Promise<void> {
     locale: "auto",
   }).catch(() => {});
   spendTab = "today";
+  overviewTab = "5h";
   applyLocale();
   syncSettingsControls();
   scheduleAutoRefresh();
@@ -6698,7 +6791,7 @@ window.addEventListener("DOMContentLoaded", () => {
     // Ctrl+R refreshes data — and must NOT reload the webview.
     if (e.ctrlKey && e.key.toLowerCase() === "r") {
       e.preventDefault();
-      void refresh(true);
+      void refresh(true, false, true);
     }
   });
   void getVersion().then((v) => {
@@ -6707,7 +6800,7 @@ window.addEventListener("DOMContentLoaded", () => {
     renderBuildInfo();
     void checkForUpdate();
   });
-  document.querySelector("#refresh")!.addEventListener("click", () => void refresh(true));
+  document.querySelector("#refresh")!.addEventListener("click", () => void refresh(true, false, true));
 
   const setSettings = (open: boolean) => {
     document.body.classList.toggle("settings-open", open);
@@ -6912,6 +7005,21 @@ window.addEventListener("DOMContentLoaded", () => {
         config.layout.overviewCollapsed = !isOverviewCollapsed();
         saveLayout(false);
         renderAll();
+      }
+      return;
+    }
+    const ovTab = target.closest<HTMLElement>("[data-overview-tab]");
+    if (ovTab) {
+      const next = ovTab.dataset.overviewTab;
+      if (next === "5h" || next === "week") switchOverviewTab(next);
+      return;
+    }
+    const ovRefresh = target.closest<HTMLElement>("[data-overview-refresh]");
+    if (ovRefresh) {
+      const btn = ovRefresh;
+      if (!btn.classList.contains("spinning")) {
+        btn.classList.add("spinning");
+        void refresh(true, false, true).finally(() => btn.classList.remove("spinning"));
       }
       return;
     }
