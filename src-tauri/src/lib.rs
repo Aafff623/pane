@@ -863,9 +863,25 @@ async fn apply_tray_strip(
 /// A provider that just failed gets benched briefly instead of being
 /// re-probed on every refresh: 60s for ordinary errors, 5 minutes for rate
 /// limits (hammering a 429 makes it worse — learned that the hard way).
+/// `rate_limited` benches survive a user-forced refresh; ordinary ones
+/// must not stand between the user's click and a real fetch.
 struct FailState {
     until_ms: i64,
     note: String,
+    rate_limited: bool,
+}
+
+/// Drops ordinary-error benches, keeping rate-limit cooldowns. Used when
+/// the user explicitly refreshes and when the background loop retries a
+/// total outage: a bench from our own failed pass must not swallow them.
+fn clear_soft_benches() {
+    retain_rate_limited_benches(&mut fail_state().lock().unwrap());
+}
+
+/// Pure core of [`clear_soft_benches`] so tests exercise the policy on a
+/// local map instead of mutating the shared static mid-parallel-suite.
+fn retain_rate_limited_benches(map: &mut HashMap<String, FailState>) {
+    map.retain(|_, f| f.rate_limited);
 }
 
 fn fail_state() -> &'static Mutex<HashMap<String, FailState>> {
@@ -1355,6 +1371,7 @@ where
             id.to_string(),
             FailState {
                 until_ms: now + bench_ms,
+                rate_limited,
                 note: if let Some(ms) = retry_after_ms {
                     format!(
                         "rate limited — the vendor asked to wait ~{}m",
@@ -1530,8 +1547,16 @@ fn accounts_with_imported_main_key(family: &str) -> Vec<accounts::AccountEntry> 
 async fn fetch_usage(
     app: tauri::AppHandle,
     disabled: Option<Vec<String>>,
+    clear_benches: Option<bool>,
 ) -> Vec<providers::Snapshot> {
     let _ = disabled;
+    // Only an explicit user click (Refresh button, Ctrl+R, the overview ⟳)
+    // may knock again on ordinary-error benches; timer and refocus passes
+    // stay bench-respecting so a failing provider isn't re-probed on every
+    // focus. 429 cooldowns survive either way.
+    if clear_benches.unwrap_or(false) {
+        clear_soft_benches();
+    }
     run_usage_fetch(&app).await
 }
 
@@ -2295,15 +2320,16 @@ fn refresh_minutes_from(cfg: &Value) -> u64 {
         .max(1)
 }
 
-/// Auto-refresh that does not depend on the webview: sleeps refreshMinutes
-/// (re-read every cycle, so a Settings change applies without a restart),
-/// fetches, updates the main tray numbers, then emits "usage-updated" so
-/// an open window can adopt the fresh snapshots.
+/// Auto-refresh that does not depend on the webview: fetches first (an
+/// immediate live pass at launch — the webview's startup refresh dies with
+/// the network at boot), then sleeps refreshMinutes (re-read every cycle,
+/// so a Settings change applies without a restart), updates the main tray
+/// numbers, and emits "usage-updated" so an open window can adopt the
+/// fresh snapshots.
 fn spawn_auto_refresh(app: tauri::AppHandle) {
     tauri::async_runtime::spawn(async move {
+        let mut outage_retries = 0u32;
         loop {
-            let minutes = refresh_minutes_from(&config_with_defaults(load_config()));
-            tokio::time::sleep(std::time::Duration::from_secs(minutes * 60)).await;
             let snapshots = run_usage_fetch(&app).await;
             // The tray strip's provider logos are rasterized by the webview,
             // so the background loop only refreshes the main tray icon and
@@ -2317,7 +2343,24 @@ fn spawn_auto_refresh(app: tauri::AppHandle) {
                     eprintln!("[pane] background tray sync: {error}");
                 }
             }
-            let _ = app.emit("usage-updated", snapshots);
+            let _ = app.emit("usage-updated", &snapshots);
+
+            // Nothing came back live (boot with the network still coming up,
+            // Wi-Fi down, …): the failed pass just benched every provider,
+            // so retry soon instead of idling a full interval. Bounded, and
+            // rate-limit cooldowns survive so a 429 is never hammered.
+            let got_live = snapshots
+                .iter()
+                .any(|s| s.status == "ok" && !s.stale);
+            let minutes = refresh_minutes_from(&cfg);
+            if !snapshots.is_empty() && !got_live && outage_retries < 5 {
+                outage_retries += 1;
+                clear_soft_benches();
+                tokio::time::sleep(std::time::Duration::from_secs(15)).await;
+            } else {
+                outage_retries = 0;
+                tokio::time::sleep(std::time::Duration::from_secs(minutes * 60)).await;
+            }
         }
     });
 }
@@ -4045,6 +4088,7 @@ mod tests {
             FailState {
                 until_ms: i64::MAX,
                 note: "benched".into(),
+                rate_limited: false,
             },
         );
         last_ok().lock().unwrap().insert(
@@ -4065,6 +4109,30 @@ mod tests {
     }
 
     #[test]
+    fn clear_soft_benches_keeps_only_rate_limits() {
+        let mut map = HashMap::new();
+        map.insert(
+            "claude@bench-soft".to_string(),
+            FailState {
+                until_ms: i64::MAX,
+                note: "connection refused".into(),
+                rate_limited: false,
+            },
+        );
+        map.insert(
+            "codex@bench-hard".to_string(),
+            FailState {
+                until_ms: i64::MAX,
+                note: "rate limited — cooling down".into(),
+                rate_limited: true,
+            },
+        );
+        retain_rate_limited_benches(&mut map);
+        assert!(!map.contains_key("claude@bench-soft"), "ordinary bench must drop");
+        assert!(map.contains_key("codex@bench-hard"), "429 bench must survive");
+    }
+
+    #[test]
     fn rename_cached_snapshot_updates_name_only() {
         let id = "onenewapi@ticket03-rename";
         let _guard = SnapCacheGuard::new(id);
@@ -4073,6 +4141,7 @@ mod tests {
             FailState {
                 until_ms: i64::MAX,
                 note: "benched".into(),
+                rate_limited: false,
             },
         );
         last_ok().lock().unwrap().insert(
@@ -4162,6 +4231,7 @@ mod tests {
             FailState {
                 until_ms: i64::MAX,
                 note: "benched".into(),
+                rate_limited: false,
             },
         );
         last_ok().lock().unwrap().insert(

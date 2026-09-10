@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.4.50 — 2026-09-10
+
+### Added
+- **Quota Overview 5h / Weekly capsule.** Header switch next to the
+  availability chips. Ordinary provider rings follow the selected window;
+  Z.ai, One/New API, and Copilot keep their original binding. Hover still
+  shows the other window; click still jumps to the card.
+- **Overview one-click refresh.** A ⟳ button in the Quota Overview header
+  (next to the fold chevron) forces a full refresh with the same spin
+  feedback as the per-card buttons.
+
+### Fixed
+- **Launch no longer sits on "Outdated" until every card is refreshed by
+  hand.** The background loop now fetches first and sleeps after, so a
+  live pass runs at launch instead of one interval in; when nothing comes
+  back live (boot with the network still coming up) it clears the
+  ordinary-error benches and retries every 15 s, up to five times. Manual
+  refreshes clear ordinary-error benches too — a failed pass must not
+  turn the Refresh button into a no-op; 429 cooldowns still hold.
+
 ## 0.4.49 — 2026-09-09
 
 ### Added
