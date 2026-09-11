@@ -2046,6 +2046,19 @@ function legendHtml(entries: DonutEntry[]): string {
     .join("");
 }
 
+/// True while focus sits in something the user types into (form field,
+/// inline editor) — bare-Shift board switching must not hijack their
+/// capitals or the IME's own Shift handling.
+function isTypingTarget(el: Element | null): boolean {
+  return (
+    el instanceof HTMLElement &&
+    (el.tagName === "INPUT" ||
+      el.tagName === "TEXTAREA" ||
+      el.tagName === "SELECT" ||
+      el.isContentEditable)
+  );
+}
+
 function switchOverviewTab(tab: OverviewTab): void {
   if (overviewTab === tab) return;
   overviewTab = tab;
@@ -6777,6 +6790,21 @@ window.addEventListener("DOMContentLoaded", () => {
   // built the maps even for users who turned glass off.
   window.addEventListener("keydown", (e) => {
     konamiListen(e);
+    // Bare Shift flips the Quota Overview between its 5-hour and weekly
+    // boards — the chord that follows the global popover shortcut (Alt+2
+    // shows the popover, Shift then toggles the board). Skip while typing
+    // (capital letters and IME's own Shift handling must not switch tabs),
+    // key autorepeat, and any chord that merely starts with Shift.
+    if (
+      e.key === "Shift" &&
+      !e.repeat &&
+      !e.ctrlKey &&
+      !e.altKey &&
+      !e.metaKey &&
+      !isTypingTarget(document.activeElement)
+    ) {
+      switchOverviewTab(overviewTab === "5h" ? "week" : "5h");
+    }
     if (e.ctrlKey && e.key.toLowerCase() === "z" && customizeOpen) {
       e.preventDefault();
       undoLayout();
