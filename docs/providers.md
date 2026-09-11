@@ -439,6 +439,38 @@ Ground rules that apply to every provider:
   for today and the month. Spend rows and the donut slice come from the
   local ledger either way.
 
+## Qoder CN
+
+- **Reads:** `%APPDATA%\com.qodercn.app.stable\auth.v1.dat` — the Qoder CN
+  desktop app's sign-in, a Chromium `os_crypt` v10 blob (AES-256-GCM)
+  whose key is DPAPI-wrapped in the sibling `Local State`
+  (`os_crypt.encrypted_key`). Read-only: Pane never refreshes or writes
+  the token, so it cannot sign the IDE out.
+- **Calls:** `openapi.qoder.com.cn` (the CN OpenAPI — the global
+  `openapi.qoder.sh` rejects CN tokens): `GET /api/v2/user/plan`,
+  `GET /api/v2/quota/usage`, both with the session token as Bearer.
+- **Shows:** plan tier (e.g. Pro) and the credit pool
+  (`userQuota` total/used with its expiry), plus one row per active
+  dedicated package (e.g. Qwen-only credits) with its own expiry. When
+  the token expires (about a month), open Qoder CN once — its own refresh
+  rewrites `auth.v1.dat` and Pane picks it up on the next cycle.
+
+## Trae CN
+
+- **Reads:** `%APPDATA%\Trae CN\User\globalStorage\storage.json`, key
+  `iCubeAuthInfo://icube.cloudide` — the Trae CN IDE's sign-in blob,
+  encrypted with ByteCrypto (AES-128-CBC; the per-value random key ships
+  inside the blob). Read-only on purpose: Trae rotates the refresh token
+  while running, and racing that rotation would sign the IDE out.
+- **Calls:** the host stored beside the token (CN: `https://api.trae.cn`):
+  `POST /trae/api/v2/pay/ide_user_ent_usage` and
+  `POST /trae/api/v2/pay/ide_user_pay_status`, both with the
+  `Cloud-IDE-JWT` authorization header — the same calls the IDE's own
+  credits page makes.
+- **Shows:** the aggregated credits meter (`usage_summary`
+  consumed/total across every credit pack, with the pack count) and the
+  account tier (Free/Pro). Expired token → open Trae CN once and refresh.
+
 ---
 
 Provider request formats were researched from two MIT-licensed macOS

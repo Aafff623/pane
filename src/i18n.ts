@@ -245,6 +245,8 @@ const en: Dict = {
   "stale.relogin.hermes":
     "open the Hermes desktop app once so it writes its local ledger",
   "stale.relogin.kimi": "run `kimi login` in a terminal",
+  "stale.relogin.qodercn": "open Qoder CN and sign in again",
+  "stale.relogin.traecn": "open Trae CN once so it refreshes its sign-in",
 
   "unpriced.tip":
     "{n} requests ran on models with no public pricing ({models}). Their tokens are included, but they can't be turned into dollars — so the real cost is a little higher than shown.",
@@ -469,6 +471,8 @@ const en: Dict = {
   "customize.loginHint.antigravity": "Start Antigravity once and sign in.",
   "customize.loginHint.ollama": "Start the local Ollama service (the app, or `ollama serve`).",
   "customize.loginHint.hermes": "Use the Hermes desktop app — Pane reads its local ledger.",
+  "customize.loginHint.qodercn": "Start Qoder CN and sign in once — Pane reads its sign-in.",
+  "customize.loginHint.traecn": "Start Trae CN and sign in once — Pane reads its sign-in.",
   "customize.test": "Test",
   "customize.testing": "Testing…",
   "customize.testOk": "OK — {n} metrics",
@@ -505,6 +509,8 @@ const en: Dict = {
   "customize.cred.siliconflow": "Nothing on its own — paste a key (or set SILICONFLOW_API_KEY)",
   "customize.cred.novita": "Nothing on its own — paste a key (or set NOVITA_API_KEY)",
   "customize.cred.relaybalance": "Nothing on its own — paste the relay's base URL and key",
+  "customize.cred.qodercn": "The Qoder CN app's encrypted sign-in (auth.v1.dat)",
+  "customize.cred.traecn": "The Trae CN app's sign-in (storage.json)",
 
   "redeem.title": "Use a reset credit?",
   "redeem.body":
@@ -759,6 +765,8 @@ const zh: Dict = {
   "stale.relogin.ollama": "确认 Ollama 正在运行",
   "stale.relogin.hermes": "打开一次 Hermes 桌面应用，让它写本地账本",
   "stale.relogin.kimi": "在终端运行 `kimi login`",
+  "stale.relogin.qodercn": "打开 Qoder CN 并重新登录",
+  "stale.relogin.traecn": "打开一次 Trae CN 让它刷新登录态",
 
   "unpriced.tip":
     "有 {n} 次请求用了没有公开定价的模型（{models}）。tokens 已计入，但无法换成美元 — 所以真实花费会比显示的略高。",
@@ -978,6 +986,8 @@ const zh: Dict = {
   "customize.loginHint.antigravity": "启动 Antigravity 并登录一次。",
   "customize.loginHint.ollama": "启动本机 Ollama 服务（桌面应用或 `ollama serve`）。",
   "customize.loginHint.hermes": "使用 Hermes 桌面端 — Pane 读取它的本地账本。",
+  "customize.loginHint.qodercn": "启动 Qoder CN 并登录一次 — Pane 自动读取。",
+  "customize.loginHint.traecn": "启动 Trae CN 并登录一次 — Pane 自动读取。",
   "customize.test": "测试连接",
   "customize.testing": "测试中…",
   "customize.testOk": "成功 — {n} 项数据",
@@ -1009,6 +1019,8 @@ const zh: Dict = {
   "customize.cred.siliconflow": "不会自动读取 — 请粘贴 key（或设置 SILICONFLOW_API_KEY）",
   "customize.cred.novita": "不会自动读取 — 请粘贴 key（或设置 NOVITA_API_KEY）",
   "customize.cred.relaybalance": "不会自动读取 — 请粘贴中转站的 base URL 和 key",
+  "customize.cred.qodercn": "Qoder CN 桌面版的加密登录文件（auth.v1.dat）",
+  "customize.cred.traecn": "Trae CN 桌面版的登录信息（storage.json）",
 
   "redeem.title": "使用一张重置额度？",
   "redeem.body":
@@ -1228,6 +1240,8 @@ const ru: Dict = {
   "stale.relogin.hermes":
     "откройте приложение Hermes один раз, чтобы оно записало локальный журнал",
   "stale.relogin.kimi": "запустите `kimi login` в терминале",
+  "stale.relogin.qodercn": "откройте Qoder CN и войдите снова",
+  "stale.relogin.traecn": "запустите Trae CN один раз, чтобы обновить вход",
 
   "unpriced.tip":
     "{n} запросов шли на модели без публичных цен ({models}). Токены учтены, но в доллары их не перевести — реальная стоимость чуть выше, чем на экране.",
@@ -1451,6 +1465,8 @@ const ru: Dict = {
   "customize.loginHint.antigravity": "Запустите Antigravity и войдите.",
   "customize.loginHint.ollama": "Запустите локальный сервис Ollama (приложение или `ollama serve`).",
   "customize.loginHint.hermes": "Используйте Hermes desktop — Pane читает его локальный журнал.",
+  "customize.loginHint.qodercn": "Запустите Qoder CN и войдите — Pane прочитает сам.",
+  "customize.loginHint.traecn": "Запустите Trae CN и войдите — Pane прочитает сам.",
   "customize.test": "Проверить",
   "customize.testing": "Проверяем…",
   "customize.testOk": "Готово — показателей: {n}",
@@ -1486,6 +1502,8 @@ const ru: Dict = {
   "customize.cred.siliconflow": "Сам ничего не читает — вставьте ключ (или задайте SILICONFLOW_API_KEY)",
   "customize.cred.novita": "Сам ничего не читает — вставьте ключ (или задайте NOVITA_API_KEY)",
   "customize.cred.relaybalance": "Сам ничего не читает — вставьте base URL и ключ релея",
+  "customize.cred.qodercn": "Зашифрованный вход приложения Qoder CN (auth.v1.dat)",
+  "customize.cred.traecn": "Вход приложения Trae CN (storage.json)",
 
   "redeem.title": "Использовать сброс лимита?",
   "redeem.body":

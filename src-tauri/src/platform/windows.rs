@@ -26,6 +26,39 @@ pub fn secret_blob(target: &str) -> Option<Vec<u8>> {
     }
 }
 
+/// Windows DPAPI per-user decryption (`CryptUnprotectData`). Chromium's
+/// `os_crypt` (and therefore Qoder CN's `auth.v1.dat` master key) hands out
+/// blobs encrypted this way under the current user.
+pub fn dpapi_unprotect(blob: &[u8]) -> Option<Vec<u8>> {
+    use windows::Win32::Security::Cryptography::CryptUnprotectData;
+    use windows::Win32::Foundation::{LocalFree, HLOCAL};
+    use windows::Win32::Security::Cryptography::CRYPT_INTEGER_BLOB;
+    let mut in_blob = CRYPT_INTEGER_BLOB {
+        cbData: blob.len() as u32,
+        pbData: blob.as_ptr() as *mut u8,
+    };
+    let mut out_blob = CRYPT_INTEGER_BLOB::default();
+    unsafe {
+        if CryptUnprotectData(
+            &mut in_blob,
+            None,
+            None,
+            None,
+            None,
+            0, // no UI prompt — batch decryption must stay silent
+            &mut out_blob,
+        )
+        .is_err()
+        {
+            return None;
+        }
+        let plain =
+            std::slice::from_raw_parts(out_blob.pbData, out_blob.cbData as usize).to_vec();
+        LocalFree(Some(HLOCAL(out_blob.pbData as *mut _)));
+        Some(plain)
+    }
+}
+
 /// Primary language 0x04 = Chinese (zh-CN, zh-TW, zh-HK, …).
 fn langid_is_zh(langid: u16) -> bool {
     const LANG_CHINESE: u16 = 0x04;

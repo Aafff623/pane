@@ -558,7 +558,7 @@ struct StripEntry {
 /// strip ids are validated against this before becoming tray icon ids,
 /// including `family@account` cards. Stale family-level strip icons are
 /// removed for exactly this set.
-const STRIP_PROVIDER_IDS: [&str; 26] = [
+const STRIP_PROVIDER_IDS: [&str; 28] = [
     "claude",
     "codex",
     "cursor",
@@ -585,6 +585,8 @@ const STRIP_PROVIDER_IDS: [&str; 26] = [
     "siliconflow",
     "novita",
     "relaybalance",
+    "qodercn",
+    "traecn",
 ];
 
 async fn update_tray_strip(app: tauri::AppHandle, entries: Vec<StripEntry>) -> Result<(), String> {
@@ -1606,6 +1608,8 @@ async fn refresh_provider(provider_id: String) -> Result<providers::Snapshot, St
             "siliconflow" => providers::siliconflow::snapshot().await,
             "novita" => providers::novita::snapshot().await,
             "relaybalance" => providers::relaybalance::snapshot().await,
+            "qodercn" => providers::qodercn::snapshot().await,
+            "traecn" => providers::traecn::snapshot().await,
             _ => return Err(format!("no single-provider refresh for {family}")),
         });
     }
@@ -1778,6 +1782,8 @@ async fn run_usage_fetch(app: &tauri::AppHandle) -> Vec<providers::Snapshot> {
         ("siliconflow", Box::pin(guarded("siliconflow".into(), "SiliconFlow".into(), providers::siliconflow::snapshot()))),
         ("novita", Box::pin(guarded("novita".into(), "Novita AI".into(), providers::novita::snapshot()))),
         ("relaybalance", Box::pin(guarded("relaybalance".into(), "Custom Balance".into(), providers::relaybalance::snapshot()))),
+        ("qodercn", Box::pin(guarded("qodercn".into(), "Qoder CN".into(), providers::qodercn::snapshot()))),
+        ("traecn", Box::pin(guarded("traecn".into(), "Trae CN".into(), providers::traecn::snapshot()))),
     ];
     // Skip the leftover Moonshot fetch only when the last Kimi card
     // actually painted — a credentials file alone is not enough (expired
@@ -2920,6 +2926,8 @@ fn get_credential_status(provider: String) -> Value {
         "siliconflow" => providers::siliconflow::local_credential_hint(),
         "novita" => providers::novita::local_credential_hint(),
         "relaybalance" => providers::relaybalance::local_credential_hint(),
+        "qodercn" => providers::qodercn::local_credential_hint(),
+        "traecn" => providers::traecn::local_credential_hint(),
         _ => None,
     };
     // Subscription/membership badge: Cursor reads it straight from the

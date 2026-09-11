@@ -98,6 +98,8 @@ const RELOGIN_KEYS: Record<string, string> = {
   ollama: "stale.relogin.ollama",
   hermes: "stale.relogin.hermes",
   kimi: "stale.relogin.kimi",
+  qodercn: "stale.relogin.qodercn",
+  traecn: "stale.relogin.traecn",
 };
 
 /// The ⚠ Outdated tooltip: what went wrong, what fixes it, and the
@@ -358,6 +360,8 @@ const SPEND_COLORS: Record<string, string> = {
   hermes: "#c2a878", // Nous tan
   aihubmix: "#5eead4", // hub teal
   qwen: "#8b5cf6", // Qwen violet
+  qodercn: "#7c5cfc", // Qoder brand violet
+  traecn: "#4d6bfe", // Trae brand blue
   __others__: "#8b8b94", // the folded small-spenders wedge
 };
 
@@ -3268,6 +3272,8 @@ const PROVIDER_CRED_INFO: Record<string, { auto: string; methods: CredMethod[] }
   siliconflow: { auto: "customize.cred.siliconflow", methods: ["paste"] },
   novita: { auto: "customize.cred.novita", methods: ["paste"] },
   relaybalance: { auto: "customize.cred.relaybalance", methods: ["paste"] },
+  qodercn: { auto: "customize.cred.qodercn", methods: ["local"] },
+  traecn: { auto: "customize.cred.traecn", methods: ["local"] },
 };
 
 /// The "?" panel's read-only fact sheet: an ordered list of how this

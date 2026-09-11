@@ -19,10 +19,12 @@ pub mod ollama;
 pub mod onenewapi;
 pub mod opencode;
 pub mod openrouter;
+pub mod qodercn;
 pub mod qwen;
 pub mod relaybalance;
 pub mod siliconflow;
 pub mod stepfun;
+pub mod traecn;
 pub mod zai;
 
 use serde::{Deserialize, Serialize};
@@ -228,6 +230,19 @@ pub(crate) fn read_small_text(
     max_bytes: u64,
     what: &str,
 ) -> Result<String, String> {
+    read_small_bytes(path, max_bytes, what).and_then(|bytes| {
+        String::from_utf8(bytes).map_err(|_| format!("read {what}: not valid UTF-8 text"))
+    })
+}
+
+/// Binary twin of [`read_small_text`] for credential blobs that are not
+/// text at all (Qoder CN's os_crypt auth.v1.dat) — same symlink and size
+/// guards, raw bytes back.
+pub(crate) fn read_small_bytes(
+    path: &std::path::Path,
+    max_bytes: u64,
+    what: &str,
+) -> Result<Vec<u8>, String> {
     let meta = std::fs::symlink_metadata(path).map_err(|e| format!("read {what}: {e}"))?;
     if meta.file_type().is_symlink() || !meta.is_file() {
         return Err(format!("{what} is not a regular file"));
@@ -235,7 +250,7 @@ pub(crate) fn read_small_text(
     if meta.len() > max_bytes {
         return Err(format!("{what} is unexpectedly large — not reading it"));
     }
-    std::fs::read_to_string(path).map_err(|e| format!("read {what}: {e}"))
+    std::fs::read(path).map_err(|e| format!("read {what}: {e}"))
 }
 
 /// Where Pane keeps its own settings, e.g. saved API keys:

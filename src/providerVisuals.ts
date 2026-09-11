@@ -16,6 +16,8 @@ import onenewapiIcon from "./assets/providers/onenewapi.svg?raw";
 import opencodeIcon from "./assets/providers/opencode.svg?raw";
 import openrouterIcon from "./assets/providers/openrouter.svg?raw";
 import qwenIcon from "./assets/providers/qwen.svg?raw";
+import qodercnIcon from "./assets/providers/qodercn.svg?raw";
+import traecnIcon from "./assets/providers/traecn.svg?raw";
 import sharkaiIcon from "./assets/providers/sharkai.svg?raw";
 import siliconflowIcon from "./assets/providers/siliconflow.svg?raw";
 import stepfunIcon from "./assets/providers/stepfun.svg?raw";
@@ -53,6 +55,8 @@ const VISUALS: Readonly<Record<string, ProviderVisual>> = {
   siliconflow: { iconKey: "siliconflow", iconSvg: siliconflowIcon },
   stepfun: { iconKey: "stepfun", iconSvg: stepfunIcon },
   zai: { iconKey: "zai", iconSvg: zaiIcon },
+  qodercn: { iconKey: "qodercn", iconSvg: qodercnIcon },
+  traecn: { iconKey: "traecn", iconSvg: traecnIcon },
 };
 
 /// Known One/New API hosts that ship their own colorful mark.  Keyed by hostname

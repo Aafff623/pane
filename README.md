@@ -17,7 +17,7 @@ Windows rebuild inspired by [OpenUsage](https://www.openusage.ai/).
   <img src="https://img.shields.io/badge/macOS%20%2F%20Linux-preview-0b1220?style=flat" alt="macOS and Linux preview binaries">
   <img src="https://img.shields.io/badge/Tauri-v2-0b1220?style=flat&logo=tauri&logoColor=FFC131" alt="Tauri v2">
   <img src="https://img.shields.io/badge/Data-local%20first-0b1220?style=flat&labelColor=172033&color=2563eb" alt="Local-first data handling">
-  <img src="https://img.shields.io/badge/Providers-26%2B-0b1220?style=flat&labelColor=172033&color=dc2626" alt="More than 26 providers">
+  <img src="https://img.shields.io/badge/Providers-28%2B-0b1220?style=flat&labelColor=172033&color=dc2626" alt="More than 28 providers">
 </p>
 
 **[trypane.xyz](https://trypane.xyz)** · [Guides](https://trypane.xyz/guides) · [Install](#install) · [How it works](#how-it-works) · [Providers](#providers-26-and-counting) · [Features](#features) · [Privacy](#privacy--security) · [Credits](#credits)
@@ -208,7 +208,7 @@ statistic (random ID, version, enabled providers, success/failure counts —
 never amounts or error text). The full contract and the off switch are
 under [Privacy](#privacy--security).
 
-## Providers (26 and counting)
+## Providers (28 and counting)
 
 | Provider | How Pane connects |
 |---|---|
@@ -238,6 +238,8 @@ under [Privacy](#privacy--security).
 | SiliconFlow | API key (Settings or `SILICONFLOW_API_KEY`) → CNY balance (.cn + .com hosts) |
 | Novita AI | API key (Settings or `NOVITA_API_KEY`) → USD balance |
 | Custom Balance | Base URL + API key (Settings) → OpenAI-compatible billing (`/dashboard/billing/subscription` + `/usage`) at any relay that exposes it |
+| Qoder CN | Qoder CN desktop app's encrypted sign-in (`auth.v1.dat`) → CN OpenAPI plan tier + credit pools with dedicated model packages |
+| Trae CN | Trae CN desktop app's sign-in (`storage.json`) → credits meter aggregated across every credit pack + account tier |
 
 *OpenCode's meters use the official usage API that shipped in
 [anomalyco/opencode#16513](https://github.com/anomalyco/opencode/pull/16513)

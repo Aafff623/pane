@@ -240,6 +240,22 @@ const PROVIDER_DEFINITIONS: &[ProviderDefinition] = &[
         supports_extra_accounts: true,
         icon_key: "relaybalance",
     },
+    ProviderDefinition {
+        family_id: "qodercn",
+        display_name: "Qoder CN",
+        query_kind: QueryKind::NativeSnapshot,
+        supports_api_key: false,
+        supports_extra_accounts: false,
+        icon_key: "qodercn",
+    },
+    ProviderDefinition {
+        family_id: "traecn",
+        display_name: "Trae CN",
+        query_kind: QueryKind::NativeSnapshot,
+        supports_api_key: false,
+        supports_extra_accounts: false,
+        icon_key: "traecn",
+    },
 ];
 
 pub fn provider_definitions() -> &'static [ProviderDefinition] {

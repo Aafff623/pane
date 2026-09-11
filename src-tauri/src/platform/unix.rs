@@ -9,6 +9,12 @@ use std::collections::BTreeMap;
 
 use super::{language_tag_to_locale, run_hidden, ProcessInfo};
 
+/// No DPAPI off Windows — Chromium-derived apps there encrypt their
+/// `os_crypt` keys with an OS keyring/agent instead, which Pane does not read.
+pub fn dpapi_unprotect(_blob: &[u8]) -> Option<Vec<u8>> {
+    None
+}
+
 /// macOS keychain. `security(1)` is part of the base system, so this needs
 /// no extra crate or entitlement — the same generic-password item Go's
 /// keyring library (and therefore gh and Antigravity) writes.

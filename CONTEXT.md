@@ -28,7 +28,7 @@ anything unverified lives under `待确认` at the bottom.
 ## Domain vocabulary
 
 - **family** — one provider identity shared by all its cards: `claude`,
-  `codex`, `cursor`, `kimi`, `onenewapi`, … 26 families in
+  `codex`, `cursor`, `kimi`, `onenewapi`, … 28 families in
   `src-tauri/src/provider_catalog.rs`, mirrored in `src/providerCatalog.ts`
   (keep both in sync).
 - **card** — one UI card. Id is either the bare family id (`claude`) or an

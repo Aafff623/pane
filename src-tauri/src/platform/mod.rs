@@ -36,6 +36,13 @@ pub fn secret(target: &str) -> Option<String> {
     decode_secret(&imp::secret_blob(target)?)
 }
 
+/// Windows DPAPI per-user decryption (`CryptUnprotectData`), as used by
+/// Chromium's `os_crypt` master key inside `Local State`. Non-Windows
+/// platforms have no DPAPI — `None` and the caller falls through.
+pub fn dpapi_unprotect(blob: &[u8]) -> Option<Vec<u8>> {
+    imp::dpapi_unprotect(blob)
+}
+
 /// Credential blob → text: UTF-8 or UTF-16 LE, unwrapping go-keyring's
 /// `go-keyring-base64:` prefix (used by Go CLIs like gh and Antigravity).
 fn decode_secret(blob: &[u8]) -> Option<String> {
