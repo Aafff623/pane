@@ -2153,17 +2153,18 @@ function othersBreakdown(e: DonutEntry): string {
   );
 }
 
-function legendHtml(entries: DonutEntry[]): string {
-  return entries
-    .map(
-      (e) => `
+function legendRowHtml(e: DonutEntry): string {
+  return `
         <div class="legend-row" data-pid="${e.s.id}"${e.parts ? ` title="${escapeHtml(othersBreakdown(e))}"` : ""}>
           <span class="dot" style="background:${spendColor(e.s.id)}"></span>
           <span class="legend-name">${escapeHtml(e.s.name)}</span>
           <span class="legend-val">${fmtSpendVal(e.w)}</span>
-        </div>`,
-    )
-    .join("");
+        </div>`;
+}
+
+/// Zeroed window so a column's summed totals can ride fmtSpendVal.
+function emptyWindow(): SpendWindow {
+  return { cost: 0, tokens: 0, models: [] };
 }
 
 /// True while focus sits in something the user types into (form field,
@@ -2240,8 +2241,8 @@ function switchSpendTab(tab: SpendTab): void {
   const totalEl = card.querySelector(".donut-total");
   const center = spendCenter(entries);
   if (totalEl) totalEl.textContent = center.primary;
-  const legend = card.querySelector(".legend");
-  if (legend) legend.innerHTML = legendHtml(entries);
+  // The three period columns carry their own (period-static) rows; only
+  // the wedge <title> breakdowns and the active column highlight change.
   card.querySelectorAll(".tab").forEach((t) => {
     t.classList.toggle("active", t.getAttribute("data-tab") === tab);
   });
@@ -2283,10 +2284,27 @@ function renderTotalSpend(): string {
     })
     .join("");
 
-  const legend = legendHtml(entries);
-
-  const tab = (id: SpendTab, label: string) =>
-    `<button class="tab${spendTab === id ? " active" : ""}" data-tab="${id}">${label}</button>`;
+  /// One period column: header (switches the donut), the window total in
+  /// the active metric, and every provider that spent in it. Columns
+  /// reuse the legend-row styles so wedge hover keeps lighting them up.
+  const spendCol = (id: SpendTab, label: string) => {
+    const colEntries = donutEntries(id);
+    const totals = colEntries.reduce(
+      (acc, e) => ({ cost: acc.cost + e.w.cost, tokens: acc.tokens + e.w.tokens }),
+      { cost: 0, tokens: 0 },
+    );
+    const shown = colEntries.slice(0, 9);
+    const overflow = colEntries.length - shown.length;
+    return `
+      <div class="spend-col">
+        <button class="tab col-head${spendTab === id ? " active" : ""}" data-tab="${id}">${label}</button>
+        <div class="col-total">${fmtSpendVal({ ...emptyWindow(), ...totals, models: [] })}</div>
+        <div class="legend">
+          ${shown.map((e) => legendRowHtml(e)).join("")}
+          ${overflow > 0 ? `<div class="legend-row more">+${overflow}</div>` : ""}
+        </div>
+      </div>`;
+  };
 
   const center = spendCenter(entries);
   const exact = t("spend.clickTip", {
@@ -2303,7 +2321,11 @@ function renderTotalSpend(): string {
           <text class="donut-total" x="48" y="50" text-anchor="middle" font-size="14" font-weight="600">${center.primary}</text>
           <text class="donut-sub" x="48" y="62" text-anchor="middle" font-size="8">${center.sub}</text>
         </svg>
-        <div class="legend">${legend}</div>
+        <div class="spend-cols">
+          ${spendCol("today", t("spend.today"))}
+          ${spendCol("yesterday", t("spend.yesterday"))}
+          ${spendCol("last30", t("spend.days30"))}
+        </div>
       </div>`
     : `
       <div class="donut-wrap donut-empty" title="${escapeHtml(t("spend.emptyPeriodTip"))}">
@@ -2312,7 +2334,11 @@ function renderTotalSpend(): string {
           <text class="donut-total" x="48" y="50" text-anchor="middle" font-size="14" font-weight="600">${center.primary}</text>
           <text class="donut-sub" x="48" y="62" text-anchor="middle" font-size="8">${center.sub}</text>
         </svg>
-        <div class="legend"><p class="placeholder" style="margin:0">${escapeHtml(t("spend.emptyPeriod"))}</p></div>
+        <div class="spend-cols">
+          ${spendCol("today", t("spend.today"))}
+          ${spendCol("yesterday", t("spend.yesterday"))}
+          ${spendCol("last30", t("spend.days30"))}
+        </div>
       </div>`;
 
   const contributors = lastSpend.map((s) => s.name).join(", ");
@@ -2325,9 +2351,6 @@ function renderTotalSpend(): string {
         <button class="share-btn" data-share="__total__" title="${escapeHtml(t("card.share"))}">⧉</button>
       </div>
       <div class="card-panel">
-        <div class="tabs">
-          ${tab("today", t("spend.today"))}${tab("yesterday", t("spend.yesterday"))}${tab("last30", t("spend.days30"))}
-        </div>
         ${body}
       </div>
     </article>`;
