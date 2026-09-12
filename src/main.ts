@@ -155,12 +155,27 @@ interface ProviderLayout {
   // family auto state. Stored at the FAMILY id so all sibling cards in a
   // multi-account family share one fold state.
   collapsed?: boolean;
+  // Which card group this card belongs to (CardGroup.id). Empty/missing =
+  // ungrouped. Account cards follow their family (the group lives on the
+  // family's layout entry only).
+  group?: string;
 }
 
 interface Layout {
   providerOrder: string[];
   providers: Record<string, ProviderLayout>;
   overviewCollapsed?: boolean;
+  // Card groups: user-named buckets a card can be tagged with ("常用",
+  // "不常用", …). Cards without a tag render ungrouped (always visible);
+  // groups with zero cards vanish from the UI until reused. Stored here
+  // so groups ride the same save/restore/migration path as card order.
+  groups?: CardGroup[];
+}
+
+interface CardGroup {
+  id: string;
+  name: string;
+  collapsed?: boolean;
 }
 
 interface Config {
@@ -1054,6 +1069,89 @@ function providerLayout(id: string): ProviderLayout {
   );
 }
 
+// ── Card groups ─────────────────────────────────────────────────────────────
+// User-named buckets ("常用", "不常用", …) a card is tagged with via its ⚙
+// panel. The dashboard renders one section per group; the Quota Overview
+// filters to the selected group with pills beside the 5h/week tabs.
+
+let activeOverviewGroup = ""; // "" = all groups
+
+function cardGroups(): CardGroup[] {
+  return config.layout?.groups ?? [];
+}
+
+function cardGroup(id: string): CardGroup | undefined {
+  return cardGroups().find((g) => g.id === id);
+}
+
+/// A card's group id: its own layout entry, falling back to the family's
+/// (account cards share the family's tag). Only meaningful for families
+/// that show their own card — One/New API synthesizes one family card, so
+/// tagging any site tags the family entry.
+function cardGroupId(cardId: string): string {
+  const fam = providerFamily(cardId);
+  return providerLayout(fam).group ?? "";
+}
+
+function setCardGroup(cardId: string, groupId: string): void {
+  const fam = providerFamily(cardId);
+  const layout = config.layout ?? { providerOrder: [], providers: {} };
+  if (!layout.providers[fam]) {
+    layout.providers[fam] = {
+      metricOrder: [],
+      onDemand: [],
+      hidden: [],
+      starred: [],
+      expanded: false,
+    };
+  }
+  if (groupId) layout.providers[fam].group = groupId;
+  else delete layout.providers[fam].group;
+  void patchConfig({ layout });
+  renderAll();
+}
+
+/// Groups that actually have at least one card — empty groups don't render.
+function usedCardGroups(): CardGroup[] {
+  const used = new Set(
+    orderedSnapshots().map((s) => cardGroupId(s.id)).filter(Boolean),
+  );
+  return cardGroups().filter((g) => used.has(g.id));
+}
+
+/// Generate a fresh group id ("g1", "g2", …) that isn't taken yet.
+function newGroupId(): string {
+  let n = cardGroups().length + 1;
+  while (cardGroups().some((g) => g.id === `g${n}`)) n += 1;
+  return `g${n}`;
+}
+
+function upsertCardGroup(id: string, name: string): void {
+  // First group ever (layout null, or groups never written): the ?? fallback
+  // is a throwaway array — create the real lists before pushing, or the
+  // group definition is silently lost while card tags still persist.
+  config.layout ??= { providerOrder: [], providers: {} };
+  config.layout.groups ??= [];
+  const groups = config.layout.groups;
+  const existing = groups.find((g) => g.id === id);
+  if (existing) existing.name = name;
+  else groups.push({ id, name });
+  void patchConfig({ layout: config.layout });
+}
+
+function deleteCardGroup(id: string): void {
+  const layout = config.layout;
+  if (!layout) return;
+  layout.groups = (layout.groups ?? []).filter((g) => g.id !== id);
+  // Untag every card that pointed at the deleted group.
+  for (const entry of Object.values(layout.providers)) {
+    if (entry.group === id) delete entry.group;
+  }
+  if (activeOverviewGroup === id) activeOverviewGroup = "";
+  void patchConfig({ layout });
+  renderAll();
+}
+
 // Before stable account ids, API-key families used positional ids
 // such as `deepseek@1`. They cannot be safely mapped back after an account
 // was deleted or reordered, so discard them instead of attaching old layout
@@ -1791,7 +1889,8 @@ function orderedSnapshots(): Snapshot[] {
 
 /// Overview is one ring per family. Parallel extra cards stay on the
 /// dashboard, but repeating the same truncated name in the grid looks
-/// like a duplicate (two "Antig..." tiles).
+/// like a duplicate (two "Antig..." tiles). The card-group pills beside
+/// the 5h/week tabs filter the grid to one group; "" = every family.
 function overviewSnapshots(): Snapshot[] {
   const seen = new Set<string>();
   const out: Snapshot[] = [];
@@ -1799,6 +1898,7 @@ function overviewSnapshots(): Snapshot[] {
     const fam = providerFamily(s.id);
     if (seen.has(fam)) continue;
     seen.add(fam);
+    if (activeOverviewGroup && cardGroupId(s.id) !== activeOverviewGroup) continue;
     out.push(s);
   }
   return out;
@@ -2342,6 +2442,22 @@ function isOverviewCollapsed(): boolean {
   return config.layout?.overviewCollapsed ?? false;
 }
 
+/// Group pills beside the 5h/week tabs: "All" plus one pill per used
+/// group. Hidden entirely until the user has created at least one group —
+/// zero new chrome on the default install.
+function overviewGroupPillsHtml(): string {
+  const groups = usedCardGroups();
+  if (groups.length === 0) return "";
+  const pills = [
+    `<button type="button" class="tab${activeOverviewGroup === "" ? " active" : ""}" data-overview-group="">${escapeHtml(t("overview.groupAll"))}</button>`,
+    ...groups.map(
+      (g) =>
+        `<button type="button" class="tab${activeOverviewGroup === g.id ? " active" : ""}" data-overview-group="${escapeHtml(g.id)}">${escapeHtml(g.name)}</button>`,
+    ),
+  ].join("");
+  return `<div class="tabs overview-tabs overview-group-tabs">${pills}</div>`;
+}
+
 function renderQuotaOverview(): string {
   const visibleSnaps = overviewSnapshots();
   if (visibleSnaps.length === 0) return "";
@@ -2508,6 +2624,7 @@ function renderQuotaOverview(): string {
           <button type="button" class="tab${overviewTab === "5h" ? " active" : ""}" data-overview-tab="5h">${escapeHtml(t("overview.tab5h"))}</button>
           <button type="button" class="tab${overviewTab === "week" ? " active" : ""}" data-overview-tab="week">${escapeHtml(t("overview.tabWeek"))}</button>
         </div>
+        ${overviewGroupPillsHtml()}
         <span class="spacer"></span>
         <button type="button" class="card-refresh overview-refresh" data-overview-refresh title="${escapeHtml(t("overview.refresh"))}">⟳</button>
         ${foldChevron}
@@ -2628,6 +2745,60 @@ function appConfirm(opts: {
     document.addEventListener("keydown", onKey, true);
     document.body.appendChild(overlay);
     overlay.querySelector<HTMLButtonElement>("#confirm-ok")!.focus();
+  });
+}
+
+/// In-app replacement for window.prompt (unavailable in Tauri's WebView):
+/// same overlay as appConfirm plus one text input. Resolves the trimmed
+/// name, or null on cancel/Esc/backdrop.
+function appPrompt(opts: {
+  title: string;
+  placeholder?: string;
+  initial?: string;
+  confirmLabel: string;
+}): Promise<string | null> {
+  return new Promise((resolve) => {
+    const overlay = document.createElement("div");
+    overlay.id = "confirm-overlay";
+    overlay.innerHTML = `
+      <div id="confirm-box" role="dialog" aria-modal="true">
+        <h3>${escapeHtml(opts.title)}</h3>
+        <input id="prompt-input" class="form-input" type="text" spellcheck="false" />
+        <div id="confirm-actions">
+          <button id="confirm-cancel" type="button">${escapeHtml(t("dialog.cancel"))}</button>
+          <button id="confirm-ok" type="button">${escapeHtml(opts.confirmLabel)}</button>
+        </div>
+      </div>`;
+    const input = overlay.querySelector<HTMLInputElement>("#prompt-input")!;
+    input.value = opts.initial ?? "";
+    input.placeholder = opts.placeholder ?? "";
+    const done = (ok: boolean) => {
+      dismissConfirm = null;
+      document.removeEventListener("keydown", onKey, true);
+      overlay.remove();
+      resolve(ok ? input.value.trim() || null : null);
+    };
+    dismissConfirm = () => done(false);
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        e.stopPropagation();
+        done(false);
+      } else if (e.key === "Enter") {
+        e.preventDefault();
+        done(true);
+      }
+    };
+    overlay.addEventListener("click", (e) => {
+      if (e.target === overlay) done(false);
+    });
+    overlay.querySelector("#confirm-cancel")!.addEventListener("click", () => done(false));
+    overlay.querySelector("#confirm-ok")!.addEventListener("click", () => done(true));
+    input.addEventListener("keydown", onKey);
+    document.addEventListener("keydown", onKey, true);
+    document.body.appendChild(overlay);
+    input.focus();
+    input.select();
   });
 }
 
@@ -4160,6 +4331,36 @@ function renderCustStatus(id: string): string {
 /// The rest sign in through their own CLI or desktop login, so their
 /// action section is that provider's login hint. The "?" button on the row
 /// stays: it shows the static facts, this panel the live detection.
+/// The ⚙ panel's group-tag section: a select of existing groups plus a
+/// "new group…" option that prompts for a name; existing groups can be
+/// renamed/deleted inline. Rendered for every family card regardless of
+/// credential kind — grouping is orthogonal to how the card connects.
+function groupPickerHtml(id: string): string {
+  const current = cardGroupId(id);
+  const groups = cardGroups();
+  const options = [
+    `<option value=""${current === "" ? " selected" : ""}>${escapeHtml(t("customize.groupNone"))}</option>`,
+    ...groups.map(
+      (g) =>
+        `<option value="${escapeHtml(g.id)}"${current === g.id ? " selected" : ""}>${escapeHtml(g.name)}</option>`,
+    ),
+    `<option value="__new__">${escapeHtml(t("customize.groupNew"))}…</option>`,
+  ].join("");
+  const manage =
+    current === ""
+      ? ""
+      : `<button class="mini-btn" data-group-rename="${escapeHtml(current)}" title="${escapeHtml(t("customize.groupRenameTip"))}">${escapeHtml(t("customize.groupRename"))}</button>
+         <button class="mini-btn danger" data-group-delete="${escapeHtml(current)}" title="${escapeHtml(t("customize.groupDeleteTip"))}">${escapeHtml(t("customize.groupDelete"))}</button>`;
+  return `<div class="form-field">
+      <span class="form-label">${escapeHtml(t("customize.groupLabel"))}</span>
+      <div class="form-actions">
+        <select class="form-input" data-group-select="${escapeHtml(id)}">${options}</select>
+        ${manage}
+      </div>
+      <div class="form-help">${escapeHtml(t("customize.groupHelp"))}</div>
+    </div>`;
+}
+
 function renderCustConfig(id: string): string {
   const status = renderCustStatus(id);
   const fam = providerFamily(id);
@@ -4179,6 +4380,7 @@ function renderCustConfig(id: string): string {
           <div data-cred-chips="${escapeHtml(id)}">${credChipsHtml(id)}</div>
         </div>
         <p class="settings-note">${escapeHtml(t("customize.onaAccountsHint"))}</p>
+        ${groupPickerHtml(id)}
       </div>`;
     }
     const getKey = getApiKeyLink(id);
@@ -4207,6 +4409,7 @@ function renderCustConfig(id: string): string {
           ${primary}
           ${linkLink}
         </div>
+        ${groupPickerHtml(id)}
       </div>`;
   }
   if (!KEY_PROVIDERS.has(id)) {
@@ -4218,7 +4421,7 @@ function renderCustConfig(id: string): string {
     }
     const hintKey = `customize.loginHint.${providerFamily(id)}`;
     const hint = t(hintKey) !== hintKey ? t(hintKey) : t("customize.cliLoginHint");
-    return `<div class="cust-config">${status}${renderOAuthBlock(id)}<p class="settings-note">${escapeHtml(hint)}</p></div>`;
+    return `<div class="cust-config">${groupPickerHtml(id)}${status}${renderOAuthBlock(id)}<p class="settings-note">${escapeHtml(hint)}</p></div>`;
   }
   // Single-key providers: one stacked API-key form (DSH/cockpit style).
   const phKey = `settings.keyPh${id[0].toUpperCase()}${id.slice(1)}`;
@@ -4243,6 +4446,7 @@ function renderCustConfig(id: string): string {
         <button class="mini-btn" data-cust-save="${id}" title="${escapeHtml(t("customize.saveAfterTest"))}">${escapeHtml(t("settings.save"))}</button>
         <span class="cust-test-result" data-cust-result="${id}"></span>
       </div>
+      ${groupPickerHtml(id)}
     </div>`;
 }
 
@@ -4485,13 +4689,57 @@ function renderWelcome(): string {
     </article>`;
 }
 
+/// Cards laid out by group: ungrouped cards first (flat), then one section
+/// per used group in the groups' own order. Within a section the normal
+/// providerOrder sort applies. Sections are folded by the group's own
+/// collapsed flag.
+function renderGroupedCards(): string {
+  const snaps = orderedSnapshots();
+  const groups = usedCardGroups();
+  if (groups.length === 0) return snaps.map(renderCard).join("");
+  const usedIds = new Set(groups.map((g) => g.id));
+  const byGroup = new Map<string, Snapshot[]>();
+  const flat: Snapshot[] = [];
+  for (const s of snaps) {
+    const gid = cardGroupId(s.id);
+    // Live-group members bucket by id; ungrouped cards and stale tags
+    // (group deleted but the card still points at it) render flat.
+    if (!gid || !usedIds.has(gid)) {
+      flat.push(s);
+      continue;
+    }
+    const list = byGroup.get(gid) ?? [];
+    list.push(s);
+    byGroup.set(gid, list);
+  }
+  const sections: string[] = flat.map(renderCard);
+  for (const g of groups) {
+    const members = byGroup.get(g.id) ?? [];
+    if (members.length === 0) continue;
+    const chevron = g.collapsed ? "›" : "⌄";
+    sections.push(
+      `<div class="card-group-head" data-group-toggle="${escapeHtml(g.id)}" role="button" tabindex="0">
+        <span class="card-group-chevron">${chevron}</span>
+        <span class="card-group-name">${escapeHtml(g.name)}</span>
+        <span class="card-group-count">${members.length}</span>
+      </div>`,
+    );
+    for (const s of members) {
+      sections.push(
+        g.collapsed ? `<div class="card-group-fold" hidden>${renderCard(s)}</div>` : renderCard(s),
+      );
+    }
+  }
+  return sections.join("");
+}
+
 function renderAll(): void {
   const el = document.querySelector("#providers")!;
   el.innerHTML =
     renderWelcome() +
     renderTotalSpend() +
     renderQuotaOverview() +
-    orderedSnapshots().map(renderCard).join("");
+    renderGroupedCards();
   if (customizeOpen) renderDrawerBody();
   rebuildTrail();
 }
@@ -5297,7 +5545,7 @@ function moveRow(L: ProviderLayout, key: string, target: string): void {
   L.onDemand = seq.slice(dividerIdx + 1).filter((k) => k !== DIVIDER);
 }
 
-function handleCustomizeClick(target: HTMLElement): boolean {
+async function handleCustomizeClick(target: HTMLElement): Promise<boolean> {
   // One/New API site manager (relocated from Settings): expand/edit/delete
   // actions live inside the family row's account section.
   const onaHandled = handleOneNewApiClick(target);
@@ -5324,6 +5572,40 @@ function handleCustomizeClick(target: HTMLElement): boolean {
       const status = document.querySelector("#status");
       if (status) status.textContent = t("footer.openLinkFailed", { err: String(err) });
     });
+    return true;
+  }
+  const groupRename = target.closest<HTMLElement>("[data-group-rename]");
+  if (groupRename) {
+    const gid = groupRename.dataset.groupRename!;
+    const g = cardGroup(gid);
+    if (g) {
+      const name = await appPrompt({
+        title: t("customize.groupRenamePrompt"),
+        initial: g.name,
+        confirmLabel: t("dialog.ok"),
+      });
+      if (name && name !== g.name) {
+        upsertCardGroup(gid, name);
+        renderAll(); // the name shows on dashboard banners + overview pills too
+      }
+    }
+    return true;
+  }
+  const groupDelete = target.closest<HTMLElement>("[data-group-delete]");
+  if (groupDelete) {
+    const gid = groupDelete.dataset.groupDelete!;
+    const g = cardGroup(gid);
+    if (
+      g &&
+      (await appConfirm({
+        title: t("customize.groupDelete"),
+        message: t("customize.groupDeleteConfirm", { name: g.name }),
+        confirmLabel: t("customize.groupDelete"),
+        danger: true,
+      }))
+    ) {
+      deleteCardGroup(gid); // its renderAll also refreshes the drawer body
+    }
     return true;
   }
   const expand = target.closest<HTMLElement>("[data-cust-expand]");
@@ -5624,7 +5906,7 @@ function withPendingToggles(base: string[]): string[] {
   return [...s];
 }
 
-function handleCustomizeChange(target: HTMLInputElement): void {
+async function handleCustomizeChange(target: HTMLInputElement): Promise<void> {
   if (target.dataset.enable !== undefined) {
     const id = target.dataset.enable;
     const enable = target.checked;
@@ -5663,6 +5945,27 @@ function handleCustomizeChange(target: HTMLInputElement): void {
     if (target.checked) L.hidden = L.hidden.filter((k) => k !== key);
     else if (!L.hidden.includes(key)) L.hidden.push(key);
     saveLayout();
+  }
+  if (target.dataset.groupSelect !== undefined) {
+    const id = target.dataset.groupSelect;
+    const choice = target.value;
+    if (choice === "__new__") {
+      // Re-render so the select snaps back to the card's real group while
+      // the name dialog is open.
+      renderDrawerBody();
+      const name = await appPrompt({
+        title: t("customize.groupNewPrompt"),
+        placeholder: t("customize.groupNew"),
+        confirmLabel: t("dialog.ok"),
+      });
+      if (name) {
+        const gid = newGroupId();
+        upsertCardGroup(gid, name);
+        setCardGroup(id, gid);
+      }
+      return;
+    }
+    setCardGroup(id, choice); // its renderAll also refreshes the drawer body
   }
 }
 
@@ -6884,7 +7187,7 @@ window.addEventListener("DOMContentLoaded", () => {
   });
   const drawerBody = document.querySelector<HTMLElement>("#drawer-body")!;
   drawerBody.addEventListener("click", (e) => {
-    handleCustomizeClick(e.target as HTMLElement);
+    void handleCustomizeClick(e.target as HTMLElement);
   });
   // One/New API site manager forms (add-site / edit-site / relay keys) —
   // submit delegation, since the drawer body re-renders innerHTML.
@@ -6913,7 +7216,7 @@ window.addEventListener("DOMContentLoaded", () => {
     void saveOneNewApiSite(form.dataset.onaEditForm!);
   });
   drawerBody.addEventListener("change", (e) => {
-    handleCustomizeChange(e.target as HTMLInputElement);
+    void handleCustomizeChange(e.target as HTMLInputElement);
   });
   drawerBody.addEventListener("input", (e) => {
     const el = e.target as HTMLInputElement;
@@ -6924,6 +7227,15 @@ window.addEventListener("DOMContentLoaded", () => {
   setupCustomizeDnD(drawerBody);
 
   const providersEl = document.querySelector<HTMLElement>("#providers")!;
+  // Group banners are focusable (role="button") — Enter/Space folds them
+  // like a click would.
+  providersEl.addEventListener("keydown", (e) => {
+    if (e.key !== "Enter" && e.key !== " ") return;
+    const banner = (e.target as HTMLElement).closest<HTMLElement>("[data-group-toggle]");
+    if (!banner) return;
+    e.preventDefault();
+    banner.click();
+  });
   // The donut center toggles what the card meters: dollars ⇄ raw tokens.
   // Left or right click both work; the choice persists.
   const toggleSpendMetric = (back = false) => {
@@ -7072,6 +7384,22 @@ window.addEventListener("DOMContentLoaded", () => {
     if (ovTab) {
       const next = ovTab.dataset.overviewTab;
       if (next === "5h" || next === "week") switchOverviewTab(next);
+      return;
+    }
+    const ovGroup = target.closest<HTMLElement>("[data-overview-group]");
+    if (ovGroup) {
+      activeOverviewGroup = ovGroup.dataset.overviewGroup ?? "";
+      renderAll();
+      return;
+    }
+    const groupToggle = target.closest<HTMLElement>("[data-group-toggle]");
+    if (groupToggle) {
+      const g = cardGroup(groupToggle.dataset.groupToggle!);
+      if (g) {
+        g.collapsed = !g.collapsed;
+        void patchConfig({ layout: config.layout });
+        renderAll();
+      }
       return;
     }
     const ovRefresh = target.closest<HTMLElement>("[data-overview-refresh]");

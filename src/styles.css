@@ -3602,3 +3602,39 @@ article.provider.card-highlight {
 :root[data-density="compact"] .overview-item {
   padding: 4px 2px 3px;
 }
+
+/* ── Card groups ──────────────────────────────────────────────────────────── */
+
+.quota-overview .overview-group-tabs {
+  margin-left: 4px;
+}
+
+.card-group-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 10px 2px 2px;
+  padding: 3px 8px;
+  border-radius: 8px;
+  background: color-mix(in oklab, var(--foreground) 5%, transparent);
+  color: var(--muted-foreground);
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  user-select: none;
+}
+
+.card-group-head:hover {
+  color: var(--foreground);
+}
+
+.card-group-chevron {
+  font-size: 12px;
+  line-height: 1;
+}
+
+.card-group-count {
+  margin-left: auto;
+  font-weight: 400;
+  opacity: 0.7;
+}
