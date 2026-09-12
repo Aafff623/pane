@@ -240,6 +240,8 @@ under [Privacy](#privacy--security).
 | Custom Balance | Base URL + API key (Settings) → OpenAI-compatible billing (`/dashboard/billing/subscription` + `/usage`) at any relay that exposes it |
 | Qoder CN | Qoder CN desktop app's encrypted sign-in (`auth.v1.dat`) → CN OpenAPI plan tier + credit pools with dedicated model packages |
 | Trae CN | Trae CN desktop app's sign-in (`storage.json`) → credits meter aggregated across every credit pack + account tier |
+| Command Code | Command Code API key (Settings, `COMMAND_CODE_API_KEY`, or the CLI's `auth.json`) → 5h / weekly / monthly credit windows + extra credits; multiple GOAT subscriptions side by side |
+| Doubao | Doubao desktop sign-in cookies (read while Doubao is quit, cached ~30 days) → 5h / 7-day windows, subscription renewal, quota-reset-card balance |
 
 *OpenCode's meters use the official usage API that shipped in
 [anomalyco/opencode#16513](https://github.com/anomalyco/opencode/pull/16513)

@@ -222,3 +222,23 @@ anything unverified lives under `待确认` at the bottom.
   timer/refocus passes stay bench-respecting. 429/rate-limit cooldowns
   survive every path (FailState.rate_limited). The per-card ⟳ command
   (`refresh_provider`) bypasses benches entirely by design.
+- 2026-09-12 — Provider additions and spend-panel facts (branch
+  `codex/qoder-trae-providers`): Command Code GOAT queries the CLI's own
+  undocumented `/alpha/billing/{credits,subscriptions}` (Bearer key;
+  `credits.monthlyCredits` is the amount LEFT, an idle 5h window reports
+  `resetAt: 0`, planId caps the monthly percent — unmapped plans degrade
+  to a dollar line). Kimi For Coding's monthly cap is not in the usages
+  endpoint: every refresh rides a parallel `max_tokens=1` probe and only
+  a rejection naming "monthly" pins a maxed Monthly row (reset parsed
+  from the error text). Doubao is a web-session provider: its Cookies
+  SQLite `v10` blobs are AES-256-GCM with the Local State os_crypt key
+  and the GCM plaintext carries a 32-byte random header before the value
+  (DPAPI direct unwrap fails); Doubao locks the DB while running, so the
+  header is cached in `%APPDATA%\Pane\doubao_cookies.json` and re-extracted
+  whenever Doubao is quit. The spend panel additionally scans ZCode's
+  `~/.zcode/cli/rollout/model-io-*.jsonl` (usage nested at
+  `response.usage`, camelCase). Subscription providers expose only
+  window percentages server-side — no per-model token data exists there;
+  the donut's token views list every provider (the Others fold is
+  dollar-only), rendered as three side-by-side period columns. Commit
+  `e7c3ec7` / `43a4707` / `25ebb85` / `5757818` / `1a83dec` / `e74af16`.
