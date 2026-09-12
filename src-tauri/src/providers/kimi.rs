@@ -32,6 +32,10 @@ const ROTATED_HINT: &str = "Kimi Code sign-in was rotated — run `kimi login` i
 /// Public OAuth client id the official CLI (and OpenUsage) uses.
 const CLIENT_ID: &str = "17e5f671-d194-4dfb-9706-5516cb48c098";
 const USAGES_URL: &str = "https://api.kimi.com/coding/v1/usages";
+const MESSAGES_URL: &str = "https://api.kimi.com/coding/v1/messages";
+/// Model used only for the monthly-limit probe — any plan model answers the
+/// same quota error, and max_tokens=1 keeps the probe at ~9 tokens.
+const PROBE_MODEL: &str = "k3";
 const TOKEN_URL: &str = "https://auth.kimi.com/api/oauth/token";
 const HOUR_MS: i64 = 3_600_000;
 const DAY_MS: i64 = 86_400_000;
@@ -228,15 +232,14 @@ async fn fetch_api_key_without_wallet(key: &str) -> Result<Snapshot, String> {
 }
 
 async fn fetch_api_key_internal(key: &str, include_wallet: bool) -> Result<Snapshot, String> {
-    let (usages, api) = if include_wallet {
-        fetch_usages_and_wallet(key).await
-    } else {
-        (fetch_usages(key).await, Ok(Vec::new()))
-    };
+    let (usages, api, monthly) = fetch_usages_wallet_monthly(key, include_wallet).await;
     let mut snap = match usages {
         Ok(doc) => parse_snapshot(&doc)?,
         Err(e) => return Err(key_usages_error(e)),
     };
+    if let Some(row) = monthly {
+        snap.metrics.push(row);
+    }
     if include_wallet {
         merge_wallet_rows(&mut snap, api);
     }
@@ -262,33 +265,56 @@ fn key_usages_error(e: UsagesError) -> String {
 
 async fn fetch_oauth(path: &Path) -> Result<Snapshot, OAuthFailure> {
     let access = load_access(path, false).await.map_err(classify_oauth_error)?;
-    let (usages, api) = fetch_usages_and_wallet(&access).await;
+    let (usages, api, monthly) = fetch_usages_wallet_monthly(&access, true).await;
     let mut snap = match usages {
         Ok(doc) => parse_snapshot(&doc).map_err(OAuthFailure::Other)?,
         Err(UsagesError::Unauthorized) => {
             let access = load_access(path, true).await.map_err(classify_oauth_error)?;
-            match fetch_usages(&access).await {
+            let (usages, api, monthly) = fetch_usages_wallet_monthly(&access, true).await;
+            let mut snap = match usages {
                 Ok(doc) => parse_snapshot(&doc).map_err(OAuthFailure::Other)?,
                 Err(UsagesError::Unauthorized) => return Err(OAuthFailure::Rotated),
                 Err(UsagesError::Other(e)) => return Err(OAuthFailure::Other(e)),
+            };
+            if let Some(row) = monthly {
+                snap.metrics.push(row);
             }
+            merge_wallet_rows(&mut snap, api);
+            return Ok(snap);
         }
         Err(UsagesError::Other(e)) => return Err(OAuthFailure::Other(e)),
     };
+    if let Some(row) = monthly {
+        snap.metrics.push(row);
+    }
     merge_wallet_rows(&mut snap, api);
     Ok(snap)
 }
 
 /// Plan usages plus, when wanted, the Moonshot wallet rows in parallel.
-/// No Moonshot key, or Moonshot switched off → Session + Weekly only.
-/// Disabled Moonshot must not be contacted through this folded card.
-async fn fetch_usages_and_wallet(
+/// The monthly-limit probe rides the same parallel batch — the usages
+/// endpoint never reports the monthly cap, it only surfaces as an error
+/// when a real request hits it. No Moonshot key, or Moonshot switched
+/// off → Session + Weekly (+ Monthly) only. Disabled Moonshot must not be
+/// contacted through this folded card.
+async fn fetch_usages_wallet_monthly(
     access: &str,
-) -> (Result<Value, UsagesError>, Result<Vec<Metric>, String>) {
-    if super::moonshot::wallet_wanted() {
-        tokio::join!(fetch_usages(access), super::moonshot::api_rows())
+    include_wallet: bool,
+) -> (
+    Result<Value, UsagesError>,
+    Result<Vec<Metric>, String>,
+    Option<Metric>,
+) {
+    if include_wallet && super::moonshot::wallet_wanted() {
+        let (usages, api, monthly) = tokio::join!(
+            fetch_usages(access),
+            super::moonshot::api_rows(),
+            monthly_limit_row(access),
+        );
+        (usages, api, monthly)
     } else {
-        (fetch_usages(access).await, Ok(Vec::new()))
+        let (usages, monthly) = tokio::join!(fetch_usages(access), monthly_limit_row(access));
+        (usages, Ok(Vec::new()), monthly)
     }
 }
 
@@ -327,6 +353,148 @@ async fn fetch_usages(access: &str) -> Result<Value, UsagesError> {
     super::json_body(resp, MAX_USAGES_BYTES, "usage")
         .await
         .map_err(UsagesError::Other)
+}
+
+const MONTH_MS: i64 = 30 * DAY_MS;
+const MAX_PROBE_BODY_BYTES: usize = 8 * 1024;
+
+/// One max_tokens=1 completion to surface the monthly cap, which the
+/// usages endpoint never reports. Returns the full "Monthly" row only
+/// when the rejection text names the monthly limit — a plain 429
+/// (per-minute rate limit) is not a monthly wall. Any transport failure
+/// simply yields None: a probe hiccup must never blank the card.
+async fn monthly_limit_row(access: &str) -> Option<Metric> {
+    let resp = http()
+        .post(MESSAGES_URL)
+        .bearer_auth(access)
+        .header("Content-Type", "application/json")
+        .header("anthropic-version", "2023-06-01")
+        .timeout(Duration::from_secs(12))
+        .json(&serde_json::json!({
+            "model": PROBE_MODEL,
+            "max_tokens": 1,
+            "messages": [{"role": "user", "content": "hi"}]
+        }))
+        .send()
+        .await
+        .ok()?;
+    let status = resp.status().as_u16();
+    if status < 400 {
+        return None; // monthly allowance is fine
+    }
+    let body = bounded_text(resp, MAX_PROBE_BODY_BYTES).await;
+    monthly_row_from_error(&body, Utc::now().timestamp_millis())
+}
+
+/// Pure classifier for the probe response body. Only text naming the
+/// monthly limit becomes a meter; the reset instant is extracted from the
+/// message when the error carries one (formats seen in the wild: ISO-8601,
+/// "YYYY-MM-DD HH:MM", "Resets in N days/hours/minutes").
+fn monthly_row_from_error(body: &str, now_ms: i64) -> Option<Metric> {
+    let lower = body.to_lowercase();
+    // CN accounts (REGION_CN) can get the rejection in Chinese — "月额度"
+    // is the monthly wall just as much as "monthly".
+    if !lower.contains("monthly") && !body.contains('月') {
+        return None;
+    }
+    let message = serde_json::from_str::<Value>(body)
+        .ok()
+        .and_then(|doc| doc.pointer("/error/message").and_then(Value::as_str).map(str::to_string))
+        .unwrap_or_else(|| body.to_string());
+    let resets_at = extract_reset_ms(&message, now_ms);
+    let detail = match resets_at {
+        Some(ms) => {
+            let mins = (ms - now_ms).max(0) / 60_000;
+            let human = if mins >= 1440 {
+                format!("{}d {}h", mins / 1440, (mins % 1440) / 60)
+            } else if mins >= 60 {
+                format!("{}h {}m", mins / 60, mins % 60)
+            } else {
+                format!("{mins}m")
+            };
+            format!("Monthly limit reached · resets in {human}")
+        }
+        None => "Monthly limit reached".to_string(),
+    };
+    Some(
+        Metric::progress("Monthly", 100.0, Some(detail))
+            .with_reset(resets_at, Some(MONTH_MS)),
+    )
+}
+
+/// Best-effort reset extraction from free-form error text. Tries, in
+/// order: an ISO-8601 instant, a "YYYY-MM-DD HH:MM" stamp (read as UTC),
+/// and a relative "in N days/hours/minutes". None of the formats is a
+/// documented contract — the endpoint's own quota data never carries the
+/// monthly row.
+fn extract_reset_ms(text: &str, now_ms: i64) -> Option<i64> {
+    let mut rest = text;
+    while let Some(pos) = rest.find("20") {
+        let candidate = &rest[pos..];
+        // Date-shaped prefix: 2026-10-01…
+        if candidate.len() >= 10
+            && candidate.as_bytes()[4] == b'-'
+            && candidate.as_bytes()[7] == b'-'
+            && candidate[..10]
+                .bytes()
+                .all(|b| b.is_ascii_digit() || b == b'-')
+        {
+            // The datetime token runs until the first character a stamp
+            // can't contain.
+            let token: String = candidate
+                .chars()
+                .take_while(|c| {
+                    c.is_ascii_digit() || matches!(c, '-' | 'T' | 't' | ':' | '.' | '+' | 'Z' | 'z' | ' ')
+                })
+                .collect();
+            if let Some(ms) = parse_datetime_token(&token) {
+                return Some(ms);
+            }
+        }
+        rest = &rest[pos + 2..];
+    }
+    // Relative form: "… in 5 days" / "in 3 hours" / "in 30 minutes".
+    let lower = text.to_lowercase();
+    if let Some(idx) = lower.find(" in ") {
+        let tail = lower[idx + 4..].trim_start();
+        let num: String = tail.chars().take_while(|c| c.is_ascii_digit()).collect();
+        if let Ok(n) = num.parse::<i64>() {
+            for (word, mult) in [("day", 1440i64), ("hour", 60), ("minute", 1)] {
+                if tail[num.len()..].trim_start().starts_with(word) {
+                    return Some(now_ms + n * mult * 60_000);
+                }
+            }
+        }
+    }
+    None
+}
+
+/// One datetime stamp in any of the shapes free-form quota errors use:
+/// full ISO-8601 with zone, zone-less ("2026-10-01T12:34:56" → UTC),
+/// minute-precision ("2026-10-01T12:34" / "2026-10-01 12:34" → UTC).
+fn parse_datetime_token(raw: &str) -> Option<i64> {
+    let t = raw.trim().trim_end_matches(['.', ',', ';']);
+    if t.len() < 16 {
+        return None;
+    }
+    let normalized = if t.as_bytes()[10] == b' ' {
+        format!("{}T{}", &t[..10], &t[11..])
+    } else {
+        t.to_string()
+    };
+    if let Some(ms) = parse_iso_ms(&normalized) {
+        return Some(ms);
+    }
+    let has_zone = normalized[10..].contains(['+', '-'])
+        || normalized.ends_with(['Z', 'z']);
+    if normalized.len() == 16 {
+        // Minute precision, missing seconds: 2026-10-01T12:34.
+        return parse_iso_ms(&format!("{normalized}:00Z"));
+    }
+    if !has_zone {
+        return parse_iso_ms(&format!("{normalized}Z"));
+    }
+    None
 }
 
 /// Load a usable access token, refreshing when expired (or when `force`).
@@ -850,5 +1018,87 @@ mod tests {
         let _ = std::fs::remove_file(&path);
         let _ = std::fs::remove_dir(&dir);
         assert!(err.contains("large"), "{err}");
+    }
+
+    const NOW: i64 = 1_789_300_000_000; // fixed "now" for reset math
+
+    #[test]
+    fn monthly_error_body_becomes_a_full_meter() {
+        let body = r#"{"error":{"message":"You have reached your monthly usage limit for Kimi Coding. Your quota resets at 2026-10-01T00:00:00Z.","type":"insufficient_quota_error"}}"#;
+        let row = monthly_row_from_error(body, NOW).expect("monthly row");
+        assert_eq!(row.label, "Monthly");
+        assert_eq!(row.used_percent, Some(100.0));
+        assert_eq!(row.resets_at, parse_iso_ms("2026-10-01T00:00:00Z"));
+        assert_eq!(row.period_ms, Some(MONTH_MS));
+        let detail = row.detail.unwrap();
+        assert!(detail.contains("Monthly limit reached"), "{detail}");
+        assert!(detail.contains("resets in"), "{detail}");
+    }
+
+    #[test]
+    fn rpm_rate_limit_without_monthly_is_not_a_monthly_wall() {
+        // The 429 seen in kimi-cli issue #901 — per-minute throttling.
+        let body = r#"{"error":{"message":"We're receiving too many requests at the moment. Please wait a moment and try again.","type":"rate_limit_reached_error"}}"#;
+        assert!(monthly_row_from_error(body, NOW).is_none());
+    }
+
+    #[test]
+    fn monthly_with_space_datetime_is_read_as_utc() {
+        let body = "Monthly limit exhausted. Resets 2026-10-02 08:30.";
+        let row = monthly_row_from_error(body, NOW).expect("row");
+        let expected = parse_iso_ms("2026-10-02T08:30:00Z").unwrap();
+        assert_eq!(row.resets_at, Some(expected));
+    }
+
+    #[test]
+    fn monthly_with_relative_reset_uses_now() {
+        let body = "You've hit your monthly limit. Resets in 5 days.";
+        let row = monthly_row_from_error(body, NOW).expect("row");
+        assert_eq!(row.resets_at, Some(NOW + 5 * 1440 * 60_000));
+        let hours = "Monthly cap reached — try again in 3 hours";
+        let row = monthly_row_from_error(hours, NOW).expect("row");
+        assert_eq!(row.resets_at, Some(NOW + 3 * 60 * 60_000));
+    }
+
+    #[test]
+    fn monthly_without_parseable_reset_still_marks_full() {
+        let body = r#"{"error":{"message":"Monthly usage cap reached for your plan."}}"#;
+        let row = monthly_row_from_error(body, NOW).expect("row");
+        assert_eq!(row.used_percent, Some(100.0));
+        assert_eq!(row.resets_at, None);
+        assert_eq!(row.detail.as_deref(), Some("Monthly limit reached"));
+    }
+
+    #[test]
+    fn chinese_monthly_rejection_is_matched_too() {
+        let body = r#"{"error":{"message":"您的月额度已到达上限，将于 2026-10-01 00:00 重置。"}}"#;
+        let row = monthly_row_from_error(body, NOW).expect("chinese monthly row");
+        assert_eq!(row.label, "Monthly");
+        assert_eq!(row.used_percent, Some(100.0));
+        assert_eq!(row.resets_at, parse_iso_ms("2026-10-01T00:00:00Z"));
+    }
+
+    #[test]
+    fn chinese_non_monthly_error_is_not_a_monthly_wall() {
+        // A generic Chinese failure that never names the monthly quota.
+        let body = r#"{"error":{"message":"服务器繁忙，请稍后重试。"}}"#;
+        assert!(monthly_row_from_error(body, NOW).is_none());
+    }
+
+    #[test]
+    fn zoneless_and_minute_precision_stamps_parse() {
+        let now = NOW;
+        assert_eq!(
+            extract_reset_ms("quota resets at 2026-10-01T12:34:56 and counting", now),
+            parse_iso_ms("2026-10-01T12:34:56Z")
+        );
+        assert_eq!(
+            extract_reset_ms("resets 2026-10-01T12:34 exactly", now),
+            parse_iso_ms("2026-10-01T12:34:00Z")
+        );
+        assert_eq!(
+            extract_reset_ms("2026-10-01T12:34:56+08:00 is the moment", now),
+            parse_iso_ms("2026-10-01T12:34:56+08:00")
+        );
     }
 }
