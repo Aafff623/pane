@@ -1490,6 +1490,82 @@ fn codex_extra_accounts() -> (Vec<ProviderSpend>, FileData) {
 }
 
 // ---------------------------------------------------------------------------
+// ZCode CLI — its own model I/O rollout log
+// ---------------------------------------------------------------------------
+
+/// ZCode keeps one `model-io-<session>.jsonl` per session under
+/// `~/.zcode/cli/rollout`, one line per model request: camelCase usage
+/// (`inputTokens`/`outputTokens`/`cacheReadTokens`/`cacheWriteTokens`)
+/// plus the model id and completion timestamp. Lines also carry the full
+/// request/response bodies, so the substring gate skips non-usage work.
+fn zcode() -> ProviderSpend {
+    let root = dirs::home_dir()
+        .unwrap_or_default()
+        .join(".zcode")
+        .join("cli")
+        .join("rollout");
+    let mut files = Vec::new();
+    recent_jsonl_files(&root, &mut files);
+    let mut all = FileData::default();
+    for file in files {
+        if !file
+            .file_name()
+            .and_then(|n| n.to_str())
+            .is_some_and(|n| n.starts_with("model-io-"))
+        {
+            continue;
+        }
+        let data = file_days(&file, &mut |line, data| zcode_line(line, data));
+        merge_data(&mut all, data);
+    }
+    build_spend("zcode", "ZCode", all)
+}
+
+/// One model request = one event, tokens counted like the other scanners
+/// (input + output + all cache traffic). `requestId` dedup is unnecessary —
+/// each request is written once to exactly one rollout file.
+fn zcode_line(line: &str, data: &mut FileData) {
+    if !line.contains("\"usage\"") || !line.contains("\"modelId\"") {
+        return;
+    }
+    let Ok(v) = serde_json::from_str::<Value>(line) else { return };
+    // Usage rides inside the response object, not at the top level.
+    let Some(usage) = v.pointer("/response/usage") else { return };
+    let Some(ts) = parse_ts(v.get("completedAt")).or_else(|| parse_ts(v.get("startedAt"))) else {
+        return;
+    };
+    let model = v
+        .pointer("/model/modelId")
+        .and_then(Value::as_str)
+        .unwrap_or("zcode");
+    let input = usage.get("inputTokens").and_then(Value::as_f64).unwrap_or(0.0);
+    let output = usage.get("outputTokens").and_then(Value::as_f64).unwrap_or(0.0);
+    let cache_read = usage.get("cacheReadTokens").and_then(Value::as_f64).unwrap_or(0.0);
+    let cache_write = usage.get("cacheWriteTokens").and_then(Value::as_f64).unwrap_or(0.0);
+    let total = input + output + cache_read + cache_write;
+    if total <= 0.0 {
+        return;
+    }
+    let cost = probe_lookup(model).map(|price| {
+        pricing::request_cost(
+            &price,
+            &pricing::Usage {
+                input,
+                output,
+                cache_read,
+                cache_write_5m: cache_write,
+                cache_write_1h: 0.0,
+            },
+            true,
+        )
+    });
+    match cost {
+        Some(c) => add_event(data, ts, model, c, total),
+        None => note_unpriced(data, ts, model, total),
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Pi coding agent — folded into the cards of the accounts it drives
 // ---------------------------------------------------------------------------
 
@@ -2851,6 +2927,7 @@ pub fn collect(cursor_csv: Option<String>) -> Vec<ProviderSpend> {
         minimax(minimax_extra),
         kimi(kimi_routed),
         qwen(),
+        zcode(),
     ];
     list.extend(extra_claude_spends);
     list.extend(extra_codex_spends);
