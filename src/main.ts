@@ -1996,7 +1996,11 @@ function donutEntries(tab: SpendTab): DonutEntry[] {
   // Small spenders fold into a single "Others" wedge — even a lone one,
   // so under-threshold providers never claim their own legend row. Only
   // exception: at least one named provider must remain, because an
-  // all-Others ring says nothing.
+  // all-Others ring says nothing. The dollar threshold only applies to
+  // the dollar view: in the token views every provider with tokens earns
+  // its own row (a cheap model can move millions of tokens under $10,
+  // and hiding it would defeat the whole point of the view).
+  if (config.spendMetric !== "cost") return all;
   const limit = othersFoldUsd(tab);
   const small = all.filter((e) => e.w.cost < limit);
   if (small.length === 0 || small.length === all.length) return all;
