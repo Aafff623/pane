@@ -193,6 +193,12 @@ fn parse_snapshot(plan: Option<&Value>, usage: &Value) -> Result<Snapshot, Strin
                     .and_then(Value::as_str)
             })
             .unwrap_or("Dedicated credits");
+        // The main pool owns the plain "Credits" label everywhere in the
+        // UI (pools, layout order, overview primary) — a vendor-authored
+        // package title must not shadow it.
+        if label == "Credits" {
+            continue;
+        }
         let reset = json_f64(package.get("expiresAt")).map(epoch_ms);
         metrics.push(credit_row(label, p_used, p_total).with_reset(reset, None));
     }
@@ -372,6 +378,25 @@ mod tests {
         });
         let snap = parse_snapshot(None, &usage).expect("parse");
         assert_eq!(snap.metrics[1].label, "Dedicated credits");
+    }
+
+    #[test]
+    fn package_titled_credits_cannot_shadow_the_main_pool() {
+        let usage = json!({
+            "userQuota": {"total": 100.0, "used": 0.0},
+            "dedicatedResourcePackages": [{
+                "total": 50.0, "used": 10.0, "available": true,
+                "displayLabels": [
+                    {"dimension": "title", "value": "credits",
+                     "valueI18n": {"en-US": "Credits"}}
+                ]
+            }]
+        });
+        let snap = parse_snapshot(None, &usage).expect("parse");
+        // The package row is dropped rather than colliding with the main
+        // pool's label (pool/maxed/layout engines are label-keyed).
+        assert_eq!(snap.metrics.len(), 1);
+        assert_eq!(snap.metrics[0].label, "Credits");
     }
 
     #[test]

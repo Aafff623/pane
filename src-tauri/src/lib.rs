@@ -2238,7 +2238,17 @@ async fn run_usage_fetch(app: &tauri::AppHandle) -> Vec<providers::Snapshot> {
                                     .filter_map(Value::as_str)
                                     // Family prefix only — an account-scoped
                                     // pid would ship an account-derived hash.
-                                    .map(|m| format!("{}/{m}", family_of(pid)))
+                                    // Qoder CN package rows carry vendor
+                                    // free text as their label; the telemetry
+                                    // contract is stable IDs only, so they
+                                    // fold into one bucket.
+                                    .map(|m| {
+                                        if family_of(pid) == "qodercn" && m != "Credits" {
+                                            "qodercn/<package>".to_string()
+                                        } else {
+                                            format!("{}/{m}", family_of(pid))
+                                        }
+                                    })
                                     .collect::<Vec<_>>()
                             })
                             .unwrap_or_default()

@@ -52,6 +52,11 @@ pub fn dpapi_unprotect(blob: &[u8]) -> Option<Vec<u8>> {
         {
             return None;
         }
+        // A zero-length success leaves pbData NULL — from_raw_parts
+        // requires a valid pointer even for len 0.
+        if out_blob.pbData.is_null() {
+            return Some(Vec::new());
+        }
         let plain =
             std::slice::from_raw_parts(out_blob.pbData, out_blob.cbData as usize).to_vec();
         LocalFree(Some(HLOCAL(out_blob.pbData as *mut _)));

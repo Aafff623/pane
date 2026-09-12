@@ -1443,6 +1443,13 @@ const METRIC_POOLS: Record<string, Record<string, string>> = {
     "Cursor Models": "Auto",
     "Other Models": "API",
   },
+  // Qoder CN's dedicated model packages (Qwen-only credits, …) are side
+  // pools: only the main "Credits" pool decides whether the seat is done.
+  // Labels outside this map are ignored by the maxed check, so a spent
+  // package can't fold the card while the main pool still has room.
+  qodercn: {
+    Credits: "credits",
+  },
 };
 
 /// When a family has independent pools, the overview ring follows this
@@ -1451,6 +1458,7 @@ const METRIC_POOLS: Record<string, Record<string, string>> = {
 /// meaning the seat is done.
 const OVERVIEW_PRIMARY_LABEL: Record<string, string> = {
   cursor: "Cursor Models",
+  qodercn: "Credits",
 };
 
 /// Hover on a 5h ring should not repeat that same window. These families
@@ -6788,22 +6796,26 @@ window.addEventListener("DOMContentLoaded", () => {
   // No lens init here: applyGlass() (via initSettings, after the saved
   // config arrives) owns it — a fixed timer raced the config load and
   // built the maps even for users who turned glass off.
+  // Bare Shift flips the Quota Overview between its 5-hour and weekly
+  // boards — the chord that follows the global popover shortcut (Alt+2
+  // shows the popover, Shift then toggles the board). The switch commits
+  // on Shift *keyup* and only when no other key went down in between:
+  // Shift pressed first (Shift+Tab, Shift then Ctrl+Z) is a chord, not a
+  // toggle. Typing targets are skipped (capitals / IME Shift handling),
+  // and Customize layout editing keeps its own keyboard world.
+  let shiftAlone = false;
   window.addEventListener("keydown", (e) => {
     konamiListen(e);
-    // Bare Shift flips the Quota Overview between its 5-hour and weekly
-    // boards — the chord that follows the global popover shortcut (Alt+2
-    // shows the popover, Shift then toggles the board). Skip while typing
-    // (capital letters and IME's own Shift handling must not switch tabs),
-    // key autorepeat, and any chord that merely starts with Shift.
-    if (
-      e.key === "Shift" &&
-      !e.repeat &&
-      !e.ctrlKey &&
-      !e.altKey &&
-      !e.metaKey &&
-      !isTypingTarget(document.activeElement)
-    ) {
-      switchOverviewTab(overviewTab === "5h" ? "week" : "5h");
+    if (e.key === "Shift") {
+      shiftAlone =
+        !e.repeat &&
+        !e.ctrlKey &&
+        !e.altKey &&
+        !e.metaKey &&
+        !customizeOpen &&
+        !isTypingTarget(document.activeElement);
+    } else {
+      shiftAlone = false;
     }
     if (e.ctrlKey && e.key.toLowerCase() === "z" && customizeOpen) {
       e.preventDefault();
@@ -6827,6 +6839,20 @@ window.addEventListener("DOMContentLoaded", () => {
       e.preventDefault();
       void refresh(true, false, true);
     }
+  });
+  window.addEventListener("keyup", (e) => {
+    // Commit the bare-Shift board toggle here (see the keydown handler):
+    // by keyup time we know no second key joined the chord.
+    if (e.key === "Shift" && shiftAlone) {
+      shiftAlone = false;
+      switchOverviewTab(overviewTab === "5h" ? "week" : "5h");
+    }
+  });
+  // The popover hides on focus loss — a Shift held across that moment
+  // never sees keyup, so its pending state must not survive to the next
+  // show.
+  window.addEventListener("blur", () => {
+    shiftAlone = false;
   });
   void getVersion().then((v) => {
     appVersion = v;
