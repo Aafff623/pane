@@ -1848,6 +1848,7 @@ function renderCard(s: Snapshot): string {
         ${plan}
         ${stale}
         <span class="spacer"></span>
+        <button class="mini-btn card-group-btn" data-card-group-menu="${escapeHtml(s.id)}" title="${escapeHtml(t("customize.groupLabel"))}">⚙</button>
         ${foldChevron}
         ${refreshBtn}
         ${share}
@@ -2800,6 +2801,71 @@ function appPrompt(opts: {
     input.focus();
     input.select();
   });
+}
+
+/// The dashboard card's group menu — the main-page tagging entry. Lists
+/// every group (✓ on the card's current one), "Ungrouped", and
+/// "New group…". Tagging lives on the family, so a parallel-account card
+/// moves its whole family. Opens from the card-head ⚙ and right-click.
+function openGroupMenu(cardId: string, anchor: HTMLElement): void {
+  document.querySelector(".group-menu-overlay")?.remove();
+  const current = cardGroupId(cardId);
+  const groups = cardGroups();
+  const item = (gid: string, label: string, checked = false) =>
+    `<button class="group-menu-item${checked ? " on" : ""}" data-group-pick="${escapeHtml(gid)}">
+       <span class="group-menu-check">${checked ? "✓" : ""}</span>${escapeHtml(label)}
+     </button>`;
+  const overlay = document.createElement("div");
+  overlay.className = "group-menu-overlay";
+  overlay.innerHTML = `
+    <div class="group-menu" role="menu">
+      <div class="group-menu-title">${escapeHtml(t("customize.groupLabel"))}</div>
+      ${item("", t("customize.groupNone"), current === "")}
+      ${groups.map((g) => item(g.id, g.name, current === g.id)).join("")}
+      <div class="group-menu-sep"></div>
+      ${item("__new__", `${t("customize.groupNew")}…`)}
+    </div>`;
+  const close = () => overlay.remove();
+  overlay.addEventListener("click", (e) => {
+    if (e.target === overlay) {
+      close();
+      return;
+    }
+    const pick = (e.target as HTMLElement).closest<HTMLElement>("[data-group-pick]");
+    if (!pick) return;
+    const choice = pick.dataset.groupPick!;
+    close();
+    if (choice === "__new__") {
+      void appPrompt({
+        title: t("customize.groupNewPrompt"),
+        placeholder: t("customize.groupNew"),
+        confirmLabel: t("dialog.ok"),
+      }).then((name) => {
+        if (!name) return;
+        const gid = newGroupId();
+        upsertCardGroup(gid, name);
+        setCardGroup(cardId, gid);
+      });
+    } else {
+      setCardGroup(cardId, choice);
+    }
+  });
+  const onKey = (e: KeyboardEvent) => {
+    if (e.key === "Escape") {
+      e.stopPropagation();
+      close();
+      document.removeEventListener("keydown", onKey, true);
+    }
+  };
+  document.addEventListener("keydown", onKey, true);
+  document.body.appendChild(overlay);
+  // Anchor under the button, right-aligned, clamped into the viewport.
+  const menu = overlay.querySelector<HTMLElement>(".group-menu")!;
+  const rect = anchor.getBoundingClientRect();
+  const mw = menu.offsetWidth;
+  const x = Math.max(8, Math.min(rect.right - mw, window.innerWidth - mw - 8));
+  menu.style.left = `${x}px`;
+  menu.style.top = `${Math.min(rect.bottom + 4, window.innerHeight - menu.offsetHeight - 8)}px`;
 }
 
 // ---------------------------------------------------------------------------
@@ -7247,6 +7313,13 @@ window.addEventListener("DOMContentLoaded", () => {
     if ((e.target as Element).closest?.(".donut-wrap")) {
       e.preventDefault();
       toggleSpendMetric(true); // right-click cycles backward
+      return;
+    }
+    // Right-click on a card = the group menu, same as the head's ⚙.
+    const card = (e.target as Element).closest?.<HTMLElement>("article[data-provider]");
+    if (card && card.dataset.provider && card.dataset.provider !== "__overview__") {
+      e.preventDefault();
+      openGroupMenu(card.dataset.provider, card);
     }
   });
 
@@ -7330,6 +7403,11 @@ window.addEventListener("DOMContentLoaded", () => {
     const shareBtn = target.closest<HTMLElement>("[data-share]");
     if (shareBtn) {
       void shareCard(shareBtn.dataset.share!);
+      return;
+    }
+    const groupBtn = target.closest<HTMLElement>("[data-card-group-menu]");
+    if (groupBtn) {
+      openGroupMenu(groupBtn.dataset.cardGroupMenu!, groupBtn);
       return;
     }
     const acctTab = target.closest<HTMLElement>("[data-card-account]");

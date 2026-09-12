@@ -3638,3 +3638,80 @@ article.provider.card-highlight {
   font-weight: 400;
   opacity: 0.7;
 }
+
+/* Main-page group entry: head ⚙ appears on hover, menu anchored under it. */
+
+.provider-head .card-group-btn {
+  opacity: 0;
+  transition: opacity 0.12s;
+}
+
+.provider:hover .provider-head .card-group-btn,
+.provider-head .card-group-btn:focus-visible {
+  opacity: 1;
+}
+
+.group-menu-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 90;
+}
+
+.group-menu {
+  position: fixed;
+  min-width: 150px;
+  max-width: 220px;
+  padding: 4px;
+  border-radius: 10px;
+  /* Same glass recipe as #confirm-box - a flat --card fill would let the
+     card text underneath bleed through the menu. */
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.07), rgba(255, 255, 255, 0) 38%),
+    rgba(24, 24, 27, 0.55);
+  backdrop-filter: blur(24px) saturate(1.5) brightness(1.04);
+  -webkit-backdrop-filter: blur(24px) saturate(1.5) brightness(1.04);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  box-shadow: 0 8px 24px rgb(0 0 0 / 0.4);
+}
+
+.group-menu-title {
+  padding: 4px 8px 2px;
+  font-size: 10px;
+  color: var(--muted-foreground);
+}
+
+.group-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 5px 8px;
+  border: none;
+  border-radius: 6px;
+  background: none;
+  color: var(--foreground);
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+  font-family: inherit;
+}
+
+.group-menu-item:hover {
+  background: color-mix(in oklab, var(--foreground) 8%, transparent);
+}
+
+.group-menu-item.on {
+  font-weight: 600;
+}
+
+.group-menu-check {
+  width: 12px;
+  flex: none;
+  font-size: 11px;
+}
+
+.group-menu-sep {
+  height: 1px;
+  margin: 4px 6px;
+  background: var(--border);
+}
