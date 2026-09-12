@@ -1119,6 +1119,13 @@ function usedCardGroups(): CardGroup[] {
   return cardGroups().filter((g) => used.has(g.id));
 }
 
+/// The group the overview opens on: the topmost group in the list (the
+/// first one the user created — for this user, "常用"). "All" only shows
+/// mid-session if they pick it; every popover open snaps back here.
+function defaultOverviewGroupId(): string {
+  return usedCardGroups()[0]?.id ?? "";
+}
+
 /// Generate a fresh group id ("g1", "g2", …) that isn't taken yet.
 function newGroupId(): string {
   let n = cardGroups().length + 1;
@@ -7647,6 +7654,9 @@ window.addEventListener("DOMContentLoaded", () => {
     dismissConfirm?.();
     dismissWhatsNew?.();
     userSelectedAccountFor.clear();
+    // The overview reopens on the default (topmost) group — the user
+    // asked for "常用 first, every time", not a remembered last tab.
+    activeOverviewGroup = defaultOverviewGroupId();
     // A fresh update's notes present on the first open after launch.
     if (pendingWhatsNew) {
       showChangelogDialog(t("dialog.whatsNew", { version: appVersion }), pendingWhatsNew);
