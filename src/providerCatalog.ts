@@ -46,6 +46,7 @@ export const providerCatalog: readonly ProviderDefinition[] = [
   { familyId: "qodercn", displayName: "Qoder CN", queryKind: "nativeSnapshot", supportsApiKey: false, supportsExtraAccounts: false, supportsOAuth: false, iconKey: "qodercn" },
   { familyId: "traecn", displayName: "Trae CN", queryKind: "nativeSnapshot", supportsApiKey: false, supportsExtraAccounts: false, supportsOAuth: false, iconKey: "traecn" },
   { familyId: "commandcode", displayName: "Command Code", queryKind: "nativeCodingPlan", supportsApiKey: true, supportsExtraAccounts: true, supportsOAuth: false, iconKey: "commandcode" },
+  { familyId: "doubao", displayName: "Doubao", queryKind: "nativeCodingPlan", supportsApiKey: false, supportsExtraAccounts: false, supportsOAuth: false, iconKey: "doubao" },
 ];
 
 export function providerFamily(id: string): string {

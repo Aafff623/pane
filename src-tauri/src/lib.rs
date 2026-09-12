@@ -558,7 +558,7 @@ struct StripEntry {
 /// strip ids are validated against this before becoming tray icon ids,
 /// including `family@account` cards. Stale family-level strip icons are
 /// removed for exactly this set.
-const STRIP_PROVIDER_IDS: [&str; 29] = [
+const STRIP_PROVIDER_IDS: [&str; 30] = [
     "claude",
     "codex",
     "cursor",
@@ -588,6 +588,7 @@ const STRIP_PROVIDER_IDS: [&str; 29] = [
     "qodercn",
     "traecn",
     "commandcode",
+    "doubao",
 ];
 
 async fn update_tray_strip(app: tauri::AppHandle, entries: Vec<StripEntry>) -> Result<(), String> {
@@ -1615,6 +1616,7 @@ async fn refresh_provider(provider_id: String) -> Result<providers::Snapshot, St
             "qodercn" => providers::qodercn::snapshot().await,
             "traecn" => providers::traecn::snapshot().await,
             "commandcode" => providers::commandcode::snapshot().await,
+            "doubao" => providers::doubao::snapshot().await,
             _ => return Err(format!("no single-provider refresh for {family}")),
         });
     }
@@ -1790,6 +1792,7 @@ async fn run_usage_fetch(app: &tauri::AppHandle) -> Vec<providers::Snapshot> {
         ("qodercn", Box::pin(guarded("qodercn".into(), "Qoder CN".into(), providers::qodercn::snapshot()))),
         ("traecn", Box::pin(guarded("traecn".into(), "Trae CN".into(), providers::traecn::snapshot()))),
         ("commandcode", Box::pin(guarded("commandcode".into(), "Command Code".into(), providers::commandcode::snapshot()))),
+        ("doubao", Box::pin(guarded("doubao".into(), "Doubao".into(), providers::doubao::snapshot()))),
     ];
     // Skip the leftover Moonshot fetch only when the last Kimi card
     // actually painted — a credentials file alone is not enough (expired
@@ -2947,6 +2950,7 @@ fn get_credential_status(provider: String) -> Value {
         "qodercn" => providers::qodercn::local_credential_hint(),
         "traecn" => providers::traecn::local_credential_hint(),
         "commandcode" => providers::commandcode::local_credential_hint(),
+        "doubao" => providers::doubao::local_credential_hint(),
         _ => None,
     };
     // Subscription/membership badge: Cursor reads it straight from the

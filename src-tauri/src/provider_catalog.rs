@@ -265,6 +265,16 @@ const PROVIDER_DEFINITIONS: &[ProviderDefinition] = &[
         supports_extra_accounts: true,
         icon_key: "commandcode",
     },
+    ProviderDefinition {
+        family_id: "doubao",
+        display_name: "Doubao",
+        query_kind: QueryKind::NativeCodingPlan,
+        // Web-session provider: sign-in cookies from the desktop app, no
+        // API key exists.
+        supports_api_key: false,
+        supports_extra_accounts: false,
+        icon_key: "doubao",
+    },
 ];
 
 pub fn provider_definitions() -> &'static [ProviderDefinition] {

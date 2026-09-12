@@ -7,6 +7,7 @@ import copilotIcon from "./assets/providers/copilot.svg?raw";
 import cursorIcon from "./assets/providers/cursor.svg?raw";
 import deepseekIcon from "./assets/providers/deepseek.svg?raw";
 import devinIcon from "./assets/providers/devin.svg?raw";
+import doubaoIcon from "./assets/providers/doubao.svg?raw";
 import grokIcon from "./assets/providers/grok.svg?raw";
 import hermesIcon from "./assets/providers/hermes.svg?raw";
 import kimiIcon from "./assets/providers/kimi.svg?raw";
@@ -59,6 +60,7 @@ const VISUALS: Readonly<Record<string, ProviderVisual>> = {
   qodercn: { iconKey: "qodercn", iconSvg: qodercnIcon },
   traecn: { iconKey: "traecn", iconSvg: traecnIcon },
   commandcode: { iconKey: "commandcode", iconSvg: commandcodeIcon, invertOnDarkTray: true },
+  doubao: { iconKey: "doubao", iconSvg: doubaoIcon, invertOnDarkTray: true },
 };
 
 /// Known One/New API hosts that ship their own colorful mark.  Keyed by hostname
