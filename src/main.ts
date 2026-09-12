@@ -2443,9 +2443,11 @@ function isOverviewCollapsed(): boolean {
   return config.layout?.overviewCollapsed ?? false;
 }
 
-/// Group pills beside the 5h/week tabs: "All" plus one pill per used
-/// group. Hidden entirely until the user has created at least one group —
-/// zero new chrome on the default install.
+/// Group pills as their own row under the overview head (same tab look as
+/// 5h/weekly). They lived in the head row first, but title + badge +
+/// 5h/weekly + refresh + chevron already fill the 380px popover — the
+/// group pills got clipped off the right edge. Hidden until the user has
+/// created at least one group, and while the overview is folded.
 function overviewGroupPillsHtml(): string {
   const groups = usedCardGroups();
   if (groups.length === 0) return "";
@@ -2456,7 +2458,7 @@ function overviewGroupPillsHtml(): string {
         `<button type="button" class="tab${activeOverviewGroup === g.id ? " active" : ""}" data-overview-group="${escapeHtml(g.id)}">${escapeHtml(g.name)}</button>`,
     ),
   ].join("");
-  return `<div class="tabs overview-tabs overview-group-tabs">${pills}</div>`;
+  return `<div class="tabs overview-group-bar">${pills}</div>`;
 }
 
 function renderQuotaOverview(): string {
@@ -2625,11 +2627,11 @@ function renderQuotaOverview(): string {
           <button type="button" class="tab${overviewTab === "5h" ? " active" : ""}" data-overview-tab="5h">${escapeHtml(t("overview.tab5h"))}</button>
           <button type="button" class="tab${overviewTab === "week" ? " active" : ""}" data-overview-tab="week">${escapeHtml(t("overview.tabWeek"))}</button>
         </div>
-        ${overviewGroupPillsHtml()}
         <span class="spacer"></span>
         <button type="button" class="card-refresh overview-refresh" data-overview-refresh title="${escapeHtml(t("overview.refresh"))}">⟳</button>
         ${foldChevron}
       </div>
+      ${!isFolded ? overviewGroupPillsHtml() : ""}
       ${isFolded ? "" : `<div class="card-panel overview-panel"><div class="overview-grid">${itemsHtml}</div></div>`}
     </article>`;
 }

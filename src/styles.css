@@ -3605,8 +3605,21 @@ article.provider.card-highlight {
 
 /* ── Card groups ──────────────────────────────────────────────────────────── */
 
-.quota-overview .overview-group-tabs {
-  margin-left: 4px;
+.quota-overview .overview-group-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px;
+  width: 100%;
+  margin: 0;
+  padding: 2px 12px 8px;
+  border-radius: 8px;
+}
+
+.quota-overview .overview-group-bar .tab {
+  flex: none;
+  padding: 3px 9px;
+  font-size: 10.5px;
+  border-radius: 6px;
 }
 
 .card-group-head {
