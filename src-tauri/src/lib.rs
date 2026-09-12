@@ -558,7 +558,7 @@ struct StripEntry {
 /// strip ids are validated against this before becoming tray icon ids,
 /// including `family@account` cards. Stale family-level strip icons are
 /// removed for exactly this set.
-const STRIP_PROVIDER_IDS: [&str; 28] = [
+const STRIP_PROVIDER_IDS: [&str; 29] = [
     "claude",
     "codex",
     "cursor",
@@ -587,6 +587,7 @@ const STRIP_PROVIDER_IDS: [&str; 28] = [
     "relaybalance",
     "qodercn",
     "traecn",
+    "commandcode",
 ];
 
 async fn update_tray_strip(app: tauri::AppHandle, entries: Vec<StripEntry>) -> Result<(), String> {
@@ -1483,6 +1484,9 @@ async fn account_snapshot(
 ) -> providers::Snapshot {
     match family.as_str() {
         "deepseek" => providers::deepseek::snapshot_with_key_as(&key, &id, &name).await,
+        "commandcode" => {
+            providers::commandcode::snapshot_with_key_as(&key, &id, &name).await
+        }
         "kimi" => providers::kimi::snapshot_with_key_as(&key, &id, &name).await,
         "stepfun" => providers::stepfun::snapshot_with_key_as(&key, &id, &name).await,
         "siliconflow" => providers::siliconflow::snapshot_with_key_as(&key, &id, &name).await,
@@ -1610,6 +1614,7 @@ async fn refresh_provider(provider_id: String) -> Result<providers::Snapshot, St
             "relaybalance" => providers::relaybalance::snapshot().await,
             "qodercn" => providers::qodercn::snapshot().await,
             "traecn" => providers::traecn::snapshot().await,
+            "commandcode" => providers::commandcode::snapshot().await,
             _ => return Err(format!("no single-provider refresh for {family}")),
         });
     }
@@ -1784,6 +1789,7 @@ async fn run_usage_fetch(app: &tauri::AppHandle) -> Vec<providers::Snapshot> {
         ("relaybalance", Box::pin(guarded("relaybalance".into(), "Custom Balance".into(), providers::relaybalance::snapshot()))),
         ("qodercn", Box::pin(guarded("qodercn".into(), "Qoder CN".into(), providers::qodercn::snapshot()))),
         ("traecn", Box::pin(guarded("traecn".into(), "Trae CN".into(), providers::traecn::snapshot()))),
+        ("commandcode", Box::pin(guarded("commandcode".into(), "Command Code".into(), providers::commandcode::snapshot()))),
     ];
     // Skip the leftover Moonshot fetch only when the last Kimi card
     // actually painted — a credentials file alone is not enough (expired
@@ -2564,6 +2570,7 @@ async fn test_api_key(
     let snap = match provider.as_str() {
         "openrouter" => providers::openrouter::snapshot_with_key(key).await,
         "zai" => providers::zai::snapshot_with_key(key).await,
+        "commandcode" => providers::commandcode::snapshot_with_key(key).await,
         "minimax" => providers::minimax::snapshot_with_key(key).await,
         "deepseek" => providers::deepseek::snapshot_with_key(key).await,
         "moonshot" => providers::moonshot::snapshot_with_key(key).await,
@@ -2873,6 +2880,7 @@ fn provider_env_vars(provider: &str) -> &'static [&'static str] {
     match provider {
         "openrouter" => &["OPENROUTER_API_KEY"],
         "zai" => &["ZAI_API_KEY", "GLM_API_KEY"],
+        "commandcode" => &["COMMAND_CODE_API_KEY"],
         "minimax" => &["MINIMAX_API_KEY"],
         "deepseek" => &["DEEPSEEK_API_KEY"],
         "moonshot" => &["MOONSHOT_API_KEY", "KIMI_API_KEY"],
@@ -2938,6 +2946,7 @@ fn get_credential_status(provider: String) -> Value {
         "relaybalance" => providers::relaybalance::local_credential_hint(),
         "qodercn" => providers::qodercn::local_credential_hint(),
         "traecn" => providers::traecn::local_credential_hint(),
+        "commandcode" => providers::commandcode::local_credential_hint(),
         _ => None,
     };
     // Subscription/membership badge: Cursor reads it straight from the

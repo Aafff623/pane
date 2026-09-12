@@ -256,6 +256,15 @@ const PROVIDER_DEFINITIONS: &[ProviderDefinition] = &[
         supports_extra_accounts: false,
         icon_key: "traecn",
     },
+    ProviderDefinition {
+        family_id: "commandcode",
+        display_name: "Command Code",
+        query_kind: QueryKind::NativeCodingPlan,
+        supports_api_key: true,
+        // Several GOAT subscriptions side by side (commandcode@fp cards).
+        supports_extra_accounts: true,
+        icon_key: "commandcode",
+    },
 ];
 
 pub fn provider_definitions() -> &'static [ProviderDefinition] {

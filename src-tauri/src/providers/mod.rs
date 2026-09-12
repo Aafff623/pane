@@ -3,6 +3,7 @@ pub mod antigravity;
 pub mod claude;
 pub mod codebuff;
 pub mod codex;
+pub mod commandcode;
 pub mod copilot;
 pub mod cursor;
 pub mod deepseek;
