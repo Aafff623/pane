@@ -1,6 +1,7 @@
 pub mod aihubmix;
 pub mod antigravity;
 pub mod claude;
+pub mod clawsgo;
 pub mod codebuff;
 pub mod codex;
 pub mod commandcode;

@@ -275,6 +275,16 @@ const PROVIDER_DEFINITIONS: &[ProviderDefinition] = &[
         supports_extra_accounts: false,
         icon_key: "doubao",
     },
+    ProviderDefinition {
+        family_id: "clawsgo",
+        display_name: "ClawsGO",
+        query_kind: QueryKind::NativeCodingPlan,
+        // Web-session token from the browser's localStorage — pasted as
+        // the "API key".
+        supports_api_key: true,
+        supports_extra_accounts: false,
+        icon_key: "clawsgo",
+    },
 ];
 
 pub fn provider_definitions() -> &'static [ProviderDefinition] {

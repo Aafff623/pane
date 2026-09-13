@@ -1,6 +1,7 @@
 import antigravityIcon from "./assets/providers/antigravity.svg?raw";
 import aihubmixIcon from "./assets/providers/aihubmix.svg?raw";
 import claudeIcon from "./assets/providers/claude.svg?raw";
+import clawsgoIcon from "./assets/providers/clawsgo.svg?raw";
 import codexIcon from "./assets/providers/codex.svg?raw";
 import commandcodeIcon from "./assets/providers/commandcode.svg?raw";
 import copilotIcon from "./assets/providers/copilot.svg?raw";
@@ -61,6 +62,7 @@ const VISUALS: Readonly<Record<string, ProviderVisual>> = {
   traecn: { iconKey: "traecn", iconSvg: traecnIcon },
   commandcode: { iconKey: "commandcode", iconSvg: commandcodeIcon, invertOnDarkTray: true },
   doubao: { iconKey: "doubao", iconSvg: doubaoIcon, invertOnDarkTray: true },
+  clawsgo: { iconKey: "clawsgo", iconSvg: clawsgoIcon, invertOnDarkTray: true },
 };
 
 /// Known One/New API hosts that ship their own colorful mark.  Keyed by hostname
