@@ -242,3 +242,11 @@ anything unverified lives under `待确认` at the bottom.
   the donut's token views list every provider (the Others fold is
   dollar-only), rendered as three side-by-side period columns. Commit
   `e7c3ec7` / `43a4707` / `25ebb85` / `5757818` / `1a83dec` / `e74af16`.
+- 2026-09-13 — ClawsGO Science provider (commit `d113e48`): RPC over HTTP,
+  `POST https://api.clawsgo.ai/api/<method>` with body `{"data":{...}}` and
+  the web app's Bearer `clawsgo_token` (browser localStorage, pasted into
+  Settings; rotates via `set-auth-token`). Credits are milli-units
+  (3,000/$1); cycle credits lapse at planEndAt, `balanceMilli` is the
+  whole remaining pool. getTeams discovers teamId; getSubscription +
+  getUsageStats feed the card. 0.4.51 shipped earlier today; the reset-card
+  expiry (`e987f8e`) and ClawsGO ride 0.4.52.

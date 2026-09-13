@@ -242,6 +242,7 @@ under [Privacy](#privacy--security).
 | Trae CN | Trae CN desktop app's sign-in (`storage.json`) → credits meter aggregated across every credit pack + account tier |
 | Command Code | Command Code API key (Settings, `COMMAND_CODE_API_KEY`, or the CLI's `auth.json`) → 5h / weekly / monthly credit windows + extra credits; multiple GOAT subscriptions side by side |
 | Doubao | Doubao desktop sign-in cookies (read while Doubao is quit, cached ~30 days) → 5h / 7-day windows, subscription renewal, quota-reset-card balance |
+| ClawsGO | ClawsGO token from the browser (`localStorage.clawsgo_token`) → monthly credit meter, remaining balance, 30-day requests + tokens |
 
 *OpenCode's meters use the official usage API that shipped in
 [anomalyco/opencode#16513](https://github.com/anomalyco/opencode/pull/16513)
