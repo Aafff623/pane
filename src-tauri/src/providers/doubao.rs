@@ -347,15 +347,22 @@ fn metrics_from_docs(
     }
 
     // Quota reset cards: bypass a drained window on the desktop app.
-    if let Some(count) = cards
-        .and_then(|c| c.pointer("/data/available_count"))
-        .and_then(Value::as_i64)
-    {
+    // Surface the earliest expiry — a card past it doesn't come back, so
+    // a bare count would overstate what's usable.
+    if let Some(data) = cards.and_then(|c| c.get("data")) {
+        let count = data.get("available_count").and_then(Value::as_i64).unwrap_or(0);
         if count > 0 {
-            metrics.push(Metric::text(
-                "Reset cards",
-                format!("{count} available · used in the Doubao app"),
-            ));
+            let expiry = data
+                .get("earliest_expire_time")
+                .and_then(Value::as_i64)
+                .filter(|ms| *ms > 0)
+                .and_then(|ms| chrono::DateTime::from_timestamp(ms / 1000, 0))
+                .map(|t| t.format("%Y-%m-%d").to_string());
+            let value = match expiry {
+                Some(d) => format!("{count} available · earliest expires {d}"),
+                None => format!("{count} available"),
+            };
+            metrics.push(Metric::text("Reset cards", value));
         }
     }
 
@@ -426,10 +433,14 @@ mod tests {
 
         let cards = json!({"data": {"available_count": 7,
             "available_count_by_card_key": {"pc_quota_reset_card": 6, "quota_reset_card": 1},
+            "earliest_expire_time": 1790866212579i64,
             "has_available_card": true}, "code": 0});
         let with = metrics_from_docs(&quota_doc(), Some(&cards)).unwrap().1;
         assert_eq!(labels(&with), ["Session", "Weekly", "Subscription", "Reset cards"]);
-        assert_eq!(with[3].value.as_deref(), Some("7 available · used in the Doubao app"));
+        assert_eq!(
+            with[3].value.as_deref(),
+            Some("7 available · earliest expires 2026-10-01")
+        );
     }
 
     #[test]
