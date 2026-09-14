@@ -242,7 +242,7 @@ const PROVIDER_DEFINITIONS: &[ProviderDefinition] = &[
     },
     ProviderDefinition {
         family_id: "linkso",
-        display_name: "Linkso",
+        display_name: "GLM V1 Pro",
         query_kind: QueryKind::NativeBalance,
         supports_api_key: true,
         supports_extra_accounts: true,

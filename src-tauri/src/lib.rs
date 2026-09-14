@@ -1801,7 +1801,7 @@ async fn run_usage_fetch(app: &tauri::AppHandle) -> Vec<providers::Snapshot> {
         ("siliconflow", Box::pin(guarded("siliconflow".into(), "SiliconFlow".into(), providers::siliconflow::snapshot()))),
         ("novita", Box::pin(guarded("novita".into(), "Novita AI".into(), providers::novita::snapshot()))),
         ("relaybalance", Box::pin(guarded("relaybalance".into(), "Custom Balance".into(), providers::relaybalance::snapshot()))),
-        ("linkso", Box::pin(guarded("linkso".into(), "Linkso".into(), providers::linkso::snapshot()))),
+        ("linkso", Box::pin(guarded("linkso".into(), "GLM V1 Pro".into(), providers::linkso::snapshot()))),
         ("qodercn", Box::pin(guarded("qodercn".into(), "Qoder CN".into(), providers::qodercn::snapshot()))),
         ("traecn", Box::pin(guarded("traecn".into(), "Trae CN".into(), providers::traecn::snapshot()))),
         ("commandcode", Box::pin(guarded("commandcode".into(), "Command Code".into(), providers::commandcode::snapshot()))),
@@ -2625,7 +2625,7 @@ async fn test_api_key(
                 .as_deref()
                 .map(str::trim)
                 .filter(|u| !u.is_empty())
-                .ok_or_else(|| "a base URL is required for Linkso".to_string())?;
+                .ok_or_else(|| "a base URL is required for GLM V1 Pro".to_string())?;
             providers::linkso::snapshot_with_key(key, url).await
         }
         _ => return Err(format!("unknown provider: {provider}")),

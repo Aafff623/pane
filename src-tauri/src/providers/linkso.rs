@@ -20,7 +20,7 @@ use super::{http, json_body, stored_api_key, stored_base_url, Metric, Snapshot};
 use serde_json::Value;
 
 const ID: &str = "linkso";
-const NAME: &str = "Linkso";
+const NAME: &str = "GLM V1 Pro";
 const MAX_BODY_BYTES: usize = 64 * 1024;
 const SESSION_MS: i64 = 5 * 3_600_000;
 /// The search quota resets on a ~30-day rolling anchor, not a calendar

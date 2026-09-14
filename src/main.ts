@@ -4267,10 +4267,25 @@ async function doAccountAdd(family: string): Promise<void> {
       baseUrl:
         block?.querySelector<HTMLInputElement>("[data-acct-baseurl]")?.value.trim() || null,
     });
+    // An added account says "show me this provider" — pull the family out
+    // of Disabled exactly like pasting a key does, or first-run parking
+    // keeps hiding the account card that was just created.
+    recentlyKeyed.set(family, refreshGeneration);
+    const enableGeneration = config.disabled.includes(family)
+      ? markProviderEnablePending(family)
+      : null;
+    if (enableGeneration !== null) {
+      await patchConfig({
+        disabled: config.disabled.filter((id) => id !== family),
+      }).catch(() => {});
+    }
     refreshAccounts(family);
     status.textContent = t("customize.acctAdded", { name: providerDisplayName(family) });
     dismissAccountDialog?.();
-    void forceUsageRefreshAttempt(false).then(requestTraySync);
+    void forceUsageRefreshAttempt(false).then(() => {
+      if (enableGeneration !== null) finishProviderEnable(family, enableGeneration);
+      requestTraySync();
+    });
   } catch (err) {
     status.textContent = t("customize.acctAddFailed", { err: String(err) });
     if (result) {
