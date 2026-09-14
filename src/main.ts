@@ -1492,8 +1492,12 @@ function nearestResetSeconds(cardId: string): number {
 
   let nearest = Infinity;
   for (const s of cards) {
+    // Any maxed row counts as maxed even without a reset instant — a row
+    // that is maxed but carries no reset (e.g. a monthly cap whose error
+    // names no date) must NOT fall back to a healthy row's countdown,
+    // which read as "the maxed window resets in 4h" when it doesn't.
     const maxed = s.metrics.filter(
-      (m) => isCoreQuotaMetric(m) && m.resets_at !== null && (m.used_percent ?? 0) >= MAXED_PCT,
+      (m) => isCoreQuotaMetric(m) && (m.used_percent ?? 0) >= MAXED_PCT,
     );
     const pool =
       maxed.length > 0
@@ -1506,6 +1510,34 @@ function nearestResetSeconds(cardId: string): number {
     }
   }
   return nearest === Infinity ? 0 : nearest;
+}
+
+/// When the card is maxed, name the maxed row (e.g. "Monthly") if only
+/// some rows are maxed; returns null when every core row is maxed (the
+/// family-wide "all maxed" copy fits) or when the maxing is account-level
+/// (red dot from a sibling account). Mirrors nearestResetSeconds' card set
+/// so merged families see every account's rows.
+function maxedRowLabel(cardId: string): string | null {
+  const family = providerFamily(cardId);
+  const isMerged =
+    cardId === family && supportsExtraAccounts(family) && !isParallelAccountFamily(family);
+  const cards = isMerged
+    ? lastSnapshots.filter((s) => {
+        if (providerFamily(s.id) !== family || isCardDisabled(s.id)) return false;
+        if (s.id.includes("@") && accountsCache.has(family)) {
+          return accountsCache.get(family)?.some((entry) => entry.id === s.id);
+        }
+        return true;
+      })
+    : lastSnapshots.filter((s) => s.id === cardId);
+
+  const rows = cards.flatMap((s) =>
+    s.metrics.filter((m) => isCoreQuotaMetric(m) && m.used_percent !== null),
+  );
+  if (rows.length === 0) return null;
+  const maxed = rows.filter((m) => (m.used_percent ?? 0) >= MAXED_PCT);
+  if (maxed.length === 0 || maxed.length === rows.length) return null;
+  return displayMetricLabel(maxed[0].label);
 }
 
 /// Combines the overall family health dot: green if any account is green (quota available),
@@ -1824,8 +1856,13 @@ function renderCard(s: Snapshot): string {
           : t("customize.acctDotGray");
     const resetSecs = nearestResetSeconds(s.id);
     const isMaxed = isCardFoldCandidate(s.id) || dot === "red";
+    const maxedLabel = isMaxed ? maxedRowLabel(s.id) : null;
     if (resetSecs > 0) {
-      const label = isMaxed ? t("card.familyAllMaxed") : t("card.foldedResetsIn");
+      const label = isMaxed
+        ? maxedLabel
+          ? t("card.rowMaxedResetsIn", { label: maxedLabel })
+          : t("card.familyAllMaxed")
+        : t("card.foldedResetsIn");
       const badgeTone = isMaxed ? "warn" : "normal";
       foldLine = `
         <div class="fold-row">
@@ -1836,7 +1873,11 @@ function renderCard(s: Snapshot): string {
           </div>
         </div>`;
     } else {
-      const label = isMaxed ? t("card.familyAllMaxedPending") : t("card.familyReady");
+      const label = isMaxed
+        ? maxedLabel
+          ? t("card.rowMaxedPending", { label: maxedLabel })
+          : t("card.familyAllMaxedPending")
+        : t("card.familyReady");
       foldLine = `
         <div class="fold-row">
           <div class="fold-badge normal">
@@ -2625,7 +2666,13 @@ function renderQuotaOverview(): string {
         textClass = "is-nodata";
       }
 
-      const fullTooltip = overviewHoverTip(shownSnap, quota, displayName);      return `
+      // Any maxed core row (e.g. a maxed monthly cap) means the provider
+      // is walled off even when the ring's own window looks healthy —
+      // flag the dot so the tile doesn't read as available.
+      if (isSnapshotMaxed(shownSnap)) statusDot = "red";
+
+      const fullTooltip = overviewHoverTip(shownSnap, quota, displayName);
+      return `
         <div class="overview-item tone-${itemTone}" data-jump-provider="${escapeHtml(jumpId)}" title="${escapeHtml(fullTooltip)} · ${escapeHtml(t("overview.groupHint"))}">
           <div class="overview-item-head">
             <span class="overview-item-icon">${icon}</span>
