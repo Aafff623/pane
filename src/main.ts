@@ -2595,10 +2595,8 @@ function renderQuotaOverview(): string {
         textClass = "is-nodata";
       }
 
-      const fullTooltip = overviewHoverTip(shownSnap, quota, displayName);
-
-      return `
-        <div class="overview-item tone-${itemTone}" data-jump-provider="${escapeHtml(jumpId)}" title="${escapeHtml(fullTooltip)}">
+      const fullTooltip = overviewHoverTip(shownSnap, quota, displayName);      return `
+        <div class="overview-item tone-${itemTone}" data-jump-provider="${escapeHtml(jumpId)}" title="${escapeHtml(fullTooltip)} · ${escapeHtml(t("overview.groupHint"))}">
           <div class="overview-item-head">
             <span class="overview-item-icon">${icon}</span>
             <span class="overview-item-name">${escapeHtml(displayName)}</span>
@@ -7349,6 +7347,16 @@ window.addEventListener("DOMContentLoaded", () => {
     if ((e.target as Element).closest?.(".donut-wrap")) {
       e.preventDefault();
       toggleSpendMetric(true); // right-click cycles backward
+      return;
+    }
+    // Right-click an overview cell = the same group menu the card's ⚙
+    // opens, so re-grouping never needs scrolling to the cards below.
+    const ovCell = (e.target as Element).closest?.<HTMLElement>(
+      ".overview-item[data-jump-provider]",
+    );
+    if (ovCell?.dataset.jumpProvider) {
+      e.preventDefault();
+      openGroupMenu(ovCell.dataset.jumpProvider, ovCell);
       return;
     }
     // Right-click on a card = the group menu, same as the head's ⚙.
