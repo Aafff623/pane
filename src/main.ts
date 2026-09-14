@@ -326,6 +326,7 @@ const PROVIDER_LINKS: Record<string, { label: string; url: string }[]> = {
   siliconflow: [{ label: "Dashboard", url: "https://cloud.siliconflow.cn/" }],
   novita: [{ label: "Dashboard", url: "https://novita.ai/" }],
   relaybalance: [],
+  linkso: [],
   kimi: [
     { label: "Console", url: "https://www.kimi.com/code/console" },
     { label: "Quota", url: "https://www.kimi.com/membership/subscription?tab=quota" },
@@ -3641,6 +3642,7 @@ const PROVIDER_CRED_INFO: Record<string, { auto: string; methods: CredMethod[] }
   siliconflow: { auto: "customize.cred.siliconflow", methods: ["paste"] },
   novita: { auto: "customize.cred.novita", methods: ["paste"] },
   relaybalance: { auto: "customize.cred.relaybalance", methods: ["paste"] },
+  linkso: { auto: "customize.cred.linkso", methods: ["paste"] },
   qodercn: { auto: "customize.cred.qodercn", methods: ["local"] },
   traecn: { auto: "customize.cred.traecn", methods: ["local"] },
 };
@@ -3769,9 +3771,14 @@ function credAccountsHtml(id: string): string {
 // backend stores tokens under %APPDATA%\Pane\oauth\<provider>.json.
 const OAUTH_PROVIDERS = new Set(["codex", "grok", "copilot"]);
 
+// Relay families whose saved credential also carries a user-chosen base
+// URL (relaybalance, linkso) — their gear panel and account dialog show
+// the extra URL field.
+const RELAY_BASE_URL_FAMILIES = new Set(["relaybalance", "linkso"]);
+
 // ---------------------------------------------------------------------------
 // Extra API-key accounts (Phase 3.2) — deepseek/kimi/stepfun/siliconflow/
-// novita/relaybalance. The gear panel's single-key field stays the family's main
+// novita/relaybalance/linkso. The gear panel's single-key field stays the family's main
 // card; each entry below adds a stable <provider>@<fingerprint> card on the
 // dashboard.
 // ---------------------------------------------------------------------------
@@ -4081,7 +4088,7 @@ function openAccountDialog(family: string): void {
           <input type="text" data-acct-label="${escapeHtml(family)}" placeholder="${escapeHtml(t("customize.acctLabelPh"))}" autocomplete="off" spellcheck="false" required />
         </label>
         ${
-          family === "relaybalance"
+          RELAY_BASE_URL_FAMILIES.has(family)
             ? `<label class="account-field">
           <span>${escapeHtml(t("settings.relayBaseUrl"))}</span>
           <input type="text" data-acct-baseurl="${escapeHtml(family)}" placeholder="https://api.example.com" spellcheck="false" />
@@ -4495,13 +4502,13 @@ function renderCustStatus(id: string): string {
 /// Inline config panel behind a provider's ⚙ button: a status section
 /// (what the provider reads on its own + live credential chips + the
 /// credentials Pane has saved) above an action section. Key-based
-/// providers get an API-key field (Custom Balance also its base URL), a
-/// "Test" button that validates the pasted key without saving it, and
+/// providers get an API-key field (Custom Balance and Linkso also their base
+/// URL), a "Test" button that validates the pasted key without saving it, and
 /// Save — disabled until a test passes (an empty field stays savable:
 /// that path clears the stored key).
 ///
 /// Multi-account providers (deepseek/kimi/stepfun/siliconflow/novita/
-/// relaybalance) are account-modeled: every key lives in the accounts
+/// relaybalance/linkso) are account-modeled: every key lives in the accounts
 /// list, so the action section is just "Add account" + the account list +
 /// a "Get API key" link — the standalone key field would be a second,
 /// confusing save path for the same identity (phase 2, user report).
@@ -4604,7 +4611,7 @@ function renderCustConfig(id: string): string {
   const phKey = `settings.keyPh${id[0].toUpperCase()}${id.slice(1)}`;
   const ph = t(phKey) !== phKey ? t(phKey) : t("settings.keyPlaceholder");
   const baseUrlField =
-    id === "relaybalance"
+    RELAY_BASE_URL_FAMILIES.has(id)
       ? `<div class="form-field">
           <span class="form-label">${escapeHtml(t("settings.relayBaseUrl"))}</span>
           <input class="form-input" type="text" data-cust-baseurl="${id}" placeholder="https://api.example.com" spellcheck="false" />
@@ -5811,7 +5818,7 @@ async function handleCustomizeClick(target: HTMLElement): Promise<boolean> {
         `#drawer-body [data-cust-provider="${CSS.escape(custConfigOpen)}"]`,
       );
       block?.querySelector<HTMLInputElement>("[data-cust-key]")?.focus();
-      // Custom Balance: pre-fill the relay base URL saved with its key.
+      // Custom Balance / Linkso: pre-fill the relay base URL saved with the key.
       const baseInp = block?.querySelector<HTMLInputElement>("[data-cust-baseurl]");
       if (baseInp) {
         void invoke<string | null>("get_base_url", { provider: custConfigOpen })
@@ -6927,8 +6934,8 @@ async function saveApiKey(
         enableGeneration = markProviderEnablePending(provider);
       }
     }
-    // Providers with a user-chosen endpoint (relaybalance) carry a base
-    // URL input next to the key field; Save persists both together.
+    // Providers with a user-chosen endpoint (relaybalance, linkso) carry a
+    // base URL input next to the key field; Save persists both together.
     const baseUrl = fields.baseUrl?.value.trim() || null;
     await invoke("set_api_key", { provider, key, baseUrl });
     input.value = "";

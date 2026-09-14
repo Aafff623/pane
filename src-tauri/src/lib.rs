@@ -558,7 +558,7 @@ struct StripEntry {
 /// strip ids are validated against this before becoming tray icon ids,
 /// including `family@account` cards. Stale family-level strip icons are
 /// removed for exactly this set.
-const STRIP_PROVIDER_IDS: [&str; 31] = [
+const STRIP_PROVIDER_IDS: [&str; 32] = [
     "claude",
     "codex",
     "cursor",
@@ -585,6 +585,7 @@ const STRIP_PROVIDER_IDS: [&str; 31] = [
     "siliconflow",
     "novita",
     "relaybalance",
+    "linkso",
     "qodercn",
     "traecn",
     "commandcode",
@@ -1503,6 +1504,14 @@ async fn account_snapshot(
                 "this account has no base URL — remove and re-add it".into(),
             ),
         },
+        "linkso" => match base_url.as_deref().map(str::trim).filter(|u| !u.is_empty()) {
+            Some(url) => providers::linkso::snapshot_with_key_at(&key, url, &id, &name).await,
+            None => providers::Snapshot::error(
+                &id,
+                &name,
+                "this account has no base URL — remove and re-add it".into(),
+            ),
+        },
         other => providers::Snapshot::error(
             &id,
             &name,
@@ -1520,7 +1529,7 @@ async fn account_snapshot(
 /// removed too: the account card IS that key now.
 fn accounts_with_imported_main_key(family: &str) -> Vec<accounts::AccountEntry> {
     let mut list = accounts::load_accounts(family);
-    let base_url = if family == "relaybalance" {
+    let base_url = if provider_catalog::takes_base_url(family) {
         providers::stored_base_url(family)
     } else {
         None
@@ -1614,6 +1623,7 @@ async fn refresh_provider(provider_id: String) -> Result<providers::Snapshot, St
             "siliconflow" => providers::siliconflow::snapshot().await,
             "novita" => providers::novita::snapshot().await,
             "relaybalance" => providers::relaybalance::snapshot().await,
+            "linkso" => providers::linkso::snapshot().await,
             "qodercn" => providers::qodercn::snapshot().await,
             "traecn" => providers::traecn::snapshot().await,
             "commandcode" => providers::commandcode::snapshot().await,
@@ -1791,6 +1801,7 @@ async fn run_usage_fetch(app: &tauri::AppHandle) -> Vec<providers::Snapshot> {
         ("siliconflow", Box::pin(guarded("siliconflow".into(), "SiliconFlow".into(), providers::siliconflow::snapshot()))),
         ("novita", Box::pin(guarded("novita".into(), "Novita AI".into(), providers::novita::snapshot()))),
         ("relaybalance", Box::pin(guarded("relaybalance".into(), "Custom Balance".into(), providers::relaybalance::snapshot()))),
+        ("linkso", Box::pin(guarded("linkso".into(), "Linkso".into(), providers::linkso::snapshot()))),
         ("qodercn", Box::pin(guarded("qodercn".into(), "Qoder CN".into(), providers::qodercn::snapshot()))),
         ("traecn", Box::pin(guarded("traecn".into(), "Trae CN".into(), providers::traecn::snapshot()))),
         ("commandcode", Box::pin(guarded("commandcode".into(), "Command Code".into(), providers::commandcode::snapshot()))),
@@ -2513,9 +2524,18 @@ fn fetch_usage_history() -> std::collections::BTreeMap<String, Vec<f64>> {
     usage_history::trend_map()
 }
 
+/// Validates a relay base URL for a provider that takes one; the rejection
+/// message names the provider's own card, never the other relay family.
+fn validate_relay_base_url(provider: &str, url: &str) -> Result<(), String> {
+    let name = provider_catalog::provider_definition(provider)
+        .map(|definition| definition.display_name)
+        .unwrap_or("relay");
+    providers::relaybalance::validate_base_url_for(name, url)
+}
+
 /// Saves (or clears, when `key` is empty) a user-pasted API key to
 /// %APPDATA%\Pane\<provider>.json. Providers with a user-chosen endpoint
-/// (relaybalance) pass `base_url` too, stored alongside as `baseUrl`.
+/// (relaybalance, linkso) pass `base_url` too, stored alongside as `baseUrl`.
 #[tauri::command]
 fn set_api_key(provider: String, key: String, base_url: Option<String>) -> Result<(), String> {
     if !provider_catalog::supports_api_key(&provider) {
@@ -2531,22 +2551,23 @@ fn set_api_key(provider: String, key: String, base_url: Option<String>) -> Resul
     }
     let mut doc = serde_json::json!({ "apiKey": key });
     if let Some(url) = base_url.as_deref().map(str::trim).filter(|u| !u.is_empty()) {
-        if provider != "relaybalance" {
-            return Err("base URL is only supported for Custom Balance".into());
+        if !provider_catalog::takes_base_url(&provider) {
+            return Err("this provider does not take a base URL".into());
         }
-        providers::relaybalance::validate_base_url(url)?;
+        validate_relay_base_url(&provider, url)?;
         doc["baseUrl"] = serde_json::Value::from(url);
     }
     std::fs::write(&path, doc.to_string()).map_err(|e| format!("write key file: {e}"))
 }
 
-/// The base URL saved alongside a provider's API key (relaybalance's
-/// user-chosen relay host), so Settings can pre-fill its input.
+/// The base URL saved alongside a provider's API key (Custom Balance's and
+/// Linkso's user-chosen relay host), so Settings can pre-fill its input.
 #[tauri::command]
 fn get_base_url(provider: String) -> Option<String> {
-    match provider.as_str() {
-        "relaybalance" => providers::stored_base_url("relaybalance"),
-        _ => None,
+    if provider_catalog::takes_base_url(&provider) {
+        providers::stored_base_url(&provider)
+    } else {
+        None
     }
 }
 
@@ -2561,8 +2582,8 @@ struct TestResult {
 
 /// Live test of a pasted API key against its provider (Customize "Test
 /// connection"). Pure probe — nothing is written, the key never touches
-/// disk. Custom Balance additionally needs the relay's base URL; testing
-/// always uses the pasted values, never the stored ones.
+/// disk. Custom Balance and Linkso additionally need the relay's base URL;
+/// testing always uses the pasted values, never the stored ones.
 #[tauri::command]
 async fn test_api_key(
     provider: String,
@@ -2598,6 +2619,14 @@ async fn test_api_key(
                 .filter(|u| !u.is_empty())
                 .ok_or_else(|| "a base URL is required for Custom Balance".to_string())?;
             providers::relaybalance::snapshot_with_key(key, url).await
+        }
+        "linkso" => {
+            let url = base_url
+                .as_deref()
+                .map(str::trim)
+                .filter(|u| !u.is_empty())
+                .ok_or_else(|| "a base URL is required for Linkso".to_string())?;
+            providers::linkso::snapshot_with_key(key, url).await
         }
         _ => return Err(format!("unknown provider: {provider}")),
     };
@@ -2667,14 +2696,14 @@ fn account_add(
         .filter(|u| !u.is_empty())
         .map(str::to_string);
     if let Some(url) = &base_url {
-        if provider == "relaybalance" {
-            providers::relaybalance::validate_base_url(url)?;
+        if provider_catalog::takes_base_url(&provider) {
+            validate_relay_base_url(&provider, url)?;
         } else {
-            return Err("base URL is only supported for Custom Balance".into());
+            return Err("this provider does not take a base URL".into());
         }
     }
-    if provider == "relaybalance" && base_url.is_none() {
-        return Err("a base URL is required for Custom Balance".into());
+    if provider_catalog::takes_base_url(&provider) && base_url.is_none() {
+        return Err("a base URL is required for this provider".into());
     }
     let mut entries = accounts::load_accounts(&provider);
     let candidate = accounts::AccountEntry {

@@ -42,25 +42,33 @@ fn is_local_http_ip(hostname: &str) -> bool {
 /// private, loopback, and link-local IP literals so a key cannot be sent over
 /// the network in clear text by accident.
 pub fn validate_base_url(raw: &str) -> Result<(), String> {
+    validate_base_url_for("Custom Balance", raw)
+}
+
+/// The same rule for every relay-URL family; `name` is the provider the
+/// user typed the URL for, so rejection messages point at the right card.
+pub fn validate_base_url_for(name: &str, raw: &str) -> Result<(), String> {
     let raw = raw.trim();
     if raw.is_empty() {
-        return Err("a base URL is required for Custom Balance".into());
+        return Err(format!("a base URL is required for {name}"));
     }
-    let url = Url::parse(raw).map_err(|_| "invalid Custom Balance base URL".to_string())?;
+    let url = Url::parse(raw).map_err(|_| format!("invalid {name} base URL"))?;
     if url.scheme() != "http" && url.scheme() != "https" {
-        return Err("Custom Balance URL must use http:// or https://".into());
+        return Err(format!("{name} URL must use http:// or https://"));
     }
     if !url.username().is_empty() || url.password().is_some() {
-        return Err("Custom Balance URL must not include a username or password".into());
+        return Err(format!(
+            "{name} URL must not include a username or password"
+        ));
     }
     if url.query().is_some() || url.fragment().is_some() {
-        return Err("Custom Balance URL must not include a query or fragment".into());
+        return Err(format!("{name} URL must not include a query or fragment"));
     }
     let hostname = url
         .host_str()
-        .ok_or_else(|| "Custom Balance URL is missing a host".to_string())?;
+        .ok_or_else(|| format!("{name} URL is missing a host"))?;
     if hostname.is_empty() {
-        return Err("Custom Balance URL is missing a host".into());
+        return Err(format!("{name} URL is missing a host"));
     }
     if url.scheme() == "http" && !is_local_http_ip(hostname) {
         return Err(

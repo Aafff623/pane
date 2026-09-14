@@ -241,6 +241,14 @@ const PROVIDER_DEFINITIONS: &[ProviderDefinition] = &[
         icon_key: "relaybalance",
     },
     ProviderDefinition {
+        family_id: "linkso",
+        display_name: "Linkso",
+        query_kind: QueryKind::NativeBalance,
+        supports_api_key: true,
+        supports_extra_accounts: true,
+        icon_key: "linkso",
+    },
+    ProviderDefinition {
         family_id: "qodercn",
         display_name: "Qoder CN",
         query_kind: QueryKind::NativeSnapshot,
@@ -305,6 +313,13 @@ pub fn supports_api_key(family_id: &str) -> bool {
     provider_definition(family_id).is_some_and(|definition| definition.supports_api_key)
 }
 
+/// Families whose saved credential also carries a user-chosen relay base
+/// URL (stored alongside the key, hashed into account card ids). Shared by
+/// lib.rs's save paths and accounts.rs so the two can't drift apart.
+pub fn takes_base_url(family_id: &str) -> bool {
+    matches!(family_id, "relaybalance" | "linkso")
+}
+
 /// Returns the family part of a card id. Account fingerprints and One/New API
 /// key ids use the same separator.
 pub fn family_of(id: &str) -> String {
@@ -321,7 +336,7 @@ pub fn query_kind_for_instance(id: &str) -> Option<QueryKind> {
 mod tests {
     use super::{
         family_of, provider_definition, provider_definitions, query_kind_for_instance,
-        supports_extra_accounts, QueryKind,
+        supports_extra_accounts, takes_base_url, QueryKind,
     };
 
     #[test]
@@ -338,6 +353,7 @@ mod tests {
             "siliconflow",
             "novita",
             "relaybalance",
+            "linkso",
         ];
         let actual: Vec<&str> = provider_definitions()
             .iter()
@@ -352,6 +368,13 @@ mod tests {
             );
         }
         assert!(!supports_extra_accounts("claude"));
+    }
+
+    #[test]
+    fn relay_base_url_families_are_flagged() {
+        assert!(takes_base_url("relaybalance"));
+        assert!(takes_base_url("linkso"));
+        assert!(!takes_base_url("deepseek"));
     }
 
     #[test]
@@ -373,6 +396,7 @@ mod tests {
             "siliconflow",
             "novita",
             "relaybalance",
+            "linkso",
         ];
         let actual: Vec<&str> = provider_definitions()
             .iter()
@@ -403,6 +427,7 @@ mod tests {
             ("opencode", QueryKind::Composite),
             ("novita", QueryKind::NativeBalance),
             ("relaybalance", QueryKind::NativeBalance),
+            ("linkso", QueryKind::NativeBalance),
         ];
         for (family, query_kind) in expected {
             let definition = provider_definition(family)

@@ -15,6 +15,7 @@ pub mod grok;
 pub mod hermes;
 pub mod kilo;
 pub mod kimi;
+pub mod linkso;
 pub mod minimax;
 pub mod moonshot;
 pub mod novita;

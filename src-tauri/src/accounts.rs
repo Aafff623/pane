@@ -101,12 +101,12 @@ fn fnv1a(bytes: &[u8], mut hash: u64) -> u64 {
 
 /// Stable instance id for an API-key account. Labels intentionally do not
 /// participate: renaming an account must not discard its cache or layout.
-/// Custom Balance includes its normalized base URL because the same key at
-/// two relay hosts represents two different quota sources.
+/// Custom Balance and Linkso include their normalized base URL because the
+/// same key at two relay hosts represents two different quota sources.
 pub fn card_id_for_account(provider: &str, account: &AccountEntry) -> String {
     let mut material = account.api_key.trim().as_bytes().to_vec();
     material.push(0);
-    if provider == "relaybalance" {
+    if crate::provider_catalog::takes_base_url(provider) {
         material.extend_from_slice(
             account
                 .base_url
