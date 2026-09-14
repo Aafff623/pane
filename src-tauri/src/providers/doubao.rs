@@ -32,6 +32,8 @@ const CARDS_URL: &str = "https://www.doubao.com/alice/commerce/marketing/card/ba
 const HOUR_MS: i64 = 3_600_000;
 const DAY_MS: i64 = 86_400_000;
 const MAX_LOCAL_STATE_BYTES: u64 = 256 * 1024;
+/// The cached cookie header (one JSON blob of all doubao cookies joined).
+const MAX_CACHE_BYTES: u64 = 64 * 1024;
 const MAX_QUOTA_BYTES: usize = 256 * 1024;
 const MAX_CARD_BYTES: usize = 32 * 1024;
 /// GCM plaintext = 32 random bytes + the real cookie value (live-verified
@@ -69,9 +71,11 @@ fn cookie_cache_path() -> PathBuf {
 }
 
 /// Active cookie header: the cached one first, then a fresh extraction
-/// (which also refreshes the cache).
+/// (which also refreshes the cache). Callers drop the cache via
+/// [`invalidate_cookie_cache`] when the server rejects the session, so a
+/// dead login can never pin the card.
 fn cookie_header() -> Option<String> {
-    if let Ok(raw) = std::fs::read_to_string(cookie_cache_path()) {
+    if let Ok(raw) = read_small_text(&cookie_cache_path(), MAX_CACHE_BYTES, "cookie cache") {
         if let Ok(doc) = serde_json::from_str::<Value>(raw.trim_start_matches('\u{feff}')) {
             if let Some(cookie) = doc.get("cookie").and_then(Value::as_str) {
                 if cookie.contains("sessionid=") {
@@ -92,6 +96,23 @@ fn cookie_header() -> Option<String> {
     Some(header)
 }
 
+/// Forget the cached session — the next refresh re-extracts from Doubao's
+/// Cookies (which requires Doubao to be quit) instead of replaying the
+/// rejected header forever.
+pub fn invalidate_cookie_cache() {
+    let _ = std::fs::remove_file(cookie_cache_path());
+}
+
+/// Deletes the snapshot on every exit path unless disarmed — a half-read
+/// Cookies copy (every site's encrypted cookies) must not linger in
+/// Pane's config dir just because a later step failed.
+struct SnapshotGuard(PathBuf);
+impl Drop for SnapshotGuard {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.0);
+    }
+}
+
 /// Reads Doubao's Cookies DB (only possible while Doubao is fully quit),
 /// decrypts every doubao.com cookie and joins them into one header.
 /// Same-host duplicates prefer the bare `.doubao.com` entry (site-wide).
@@ -99,6 +120,7 @@ fn extract_cookie_header() -> Option<String> {
     let src = cookies_path()?;
     let dst = config_dir().join("doubao_cookies_snapshot.db");
     std::fs::create_dir_all(config_dir()).ok()?;
+    let _guard = SnapshotGuard(dst.clone());
     // Devin's locked-DB pattern: try the backup API first (works when the
     // writer allows readers); fall back to a plain copy.
     let snapshot_ok = (|| -> Result<(), String> {
@@ -142,7 +164,6 @@ fn extract_cookie_header() -> Option<String> {
         .ok()?
         .flatten()
         .collect();
-    let _ = std::fs::remove_file(&dst);
 
     let mut jar: Vec<(bool, String, String)> = Vec::new(); // (site-wide, name, value)
     for (host, name, blob) in rows {
@@ -241,6 +262,7 @@ async fn fetch_with_cookie(cookie: &str) -> Result<Snapshot, String> {
 
     let quota_resp = quota_resp?;
     if quota_resp.status().as_u16() == 401 || quota_resp.status().as_u16() == 403 {
+        invalidate_cookie_cache();
         return Err(
             "Doubao session was rejected — sign in to doubao.com or the desktop app, quit it, and refresh"
                 .into(),
@@ -251,6 +273,7 @@ async fn fetch_with_cookie(cookie: &str) -> Result<Snapshot, String> {
     }
     let quota: Value = json_body(quota_resp, MAX_QUOTA_BYTES, "quota").await?;
     if quota.get("code").and_then(Value::as_i64).unwrap_or(0) != 0 {
+        invalidate_cookie_cache();
         return Err(
             "Doubao session was rejected — sign in to doubao.com or the desktop app, quit it, and refresh"
                 .into(),
@@ -340,7 +363,7 @@ fn metrics_from_docs(
         if end > 0 {
             let day = end / 1000;
             let date = chrono::DateTime::from_timestamp(day, 0)
-                .map(|t| t.format("%Y-%m-%d").to_string())
+                .map(|t| t.with_timezone(&chrono::Local).format("%Y-%m-%d").to_string())
                 .unwrap_or_default();
             metrics.push(Metric::text("Subscription", format!("renews {date}")).with_reset(Some(end), Some(30 * DAY_MS)));
         }
@@ -357,7 +380,7 @@ fn metrics_from_docs(
                 .and_then(Value::as_i64)
                 .filter(|ms| *ms > 0)
                 .and_then(|ms| chrono::DateTime::from_timestamp(ms / 1000, 0))
-                .map(|t| t.format("%Y-%m-%d").to_string());
+                .map(|t| t.with_timezone(&chrono::Local).format("%Y-%m-%d").to_string());
             let value = match expiry {
                 Some(d) => format!("{count} available · earliest expires {d}"),
                 None => format!("{count} available"),
@@ -437,10 +460,10 @@ mod tests {
             "has_available_card": true}, "code": 0});
         let with = metrics_from_docs(&quota_doc(), Some(&cards)).unwrap().1;
         assert_eq!(labels(&with), ["Session", "Weekly", "Subscription", "Reset cards"]);
-        assert_eq!(
-            with[3].value.as_deref(),
-            Some("7 available · earliest expires 2026-10-01")
-        );
+        // Date renders in the machine's local zone; keep the assertion
+        // loose so it holds under any TZ the harness runs in.
+        let value = with[3].value.as_deref().unwrap();
+        assert!(value.starts_with("7 available · earliest expires 2026-10-0"), "{value}");
     }
 
     #[test]
@@ -460,9 +483,10 @@ mod tests {
 
     #[test]
     fn cookie_peel_sanity_bar() {
-        // Real cookie values are printable text — accepted.
+        // Real cookie values are printable text — accepted. (Synthetic
+        // samples only — never paste a live token here.)
         assert!(looks_like_text("session-token-value"));
-        assert!(looks_like_text("HMhZcH1Y6btk9rUPo2utrcN8M5Ety2gAIcYgtlzo9eOQ"));
+        assert!(looks_like_text("aBc123XyZ_-synthetic-sample-value-000111"));
         // Binary junk (wrong key / wrong header length) — rejected.
         assert!(!looks_like_text("\u{1}\u{2}\u{3}"));
         assert!(!looks_like_text("ab\u{0}\u{1}\u{2}\u{3}cd"));

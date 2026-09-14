@@ -2136,6 +2136,74 @@ mod tests {
         d.days.values().map(|v| v.0).sum()
     }
 
+    // ---- ZCode rollout lines ---------------------------------------------
+
+    /// Shape captured live from ~/.zcode/cli/rollout (usage nested in the
+    /// response object, camelCase fields, request/response bodies elided).
+    fn zcode_line_sample() -> String {
+        json!({
+            "completedAt": "2026-09-12T07:31:30.924Z",
+            "durationMs": 16346,
+            "requestId": "6da6ebd0-7104-4559-aa24-ec62866f8520",
+            "attempt": 1,
+            "model": {"modelId": "GLM-5.3-Flash", "providerId": "abc", "role": "main", "variant": "max"},
+            "request": {"body": {"model": "GLM-5.3-Flash", "max_tokens": 128000}},
+            "response": {
+                "finishReason": "stop",
+                "usage": {"inputTokens": 326901, "outputTokens": 286,
+                          "totalTokens": 327187, "cacheReadTokens": 326528, "cacheWriteTokens": 0}
+            }
+        })
+        .to_string()
+    }
+
+    #[test]
+    fn zcode_usage_rides_inside_the_response() {
+        let mut data = FileData::default();
+        zcode_line(&zcode_line_sample(), &mut data);
+        // input + output + cache_read + cache_write — the top level
+        // carries no usage, so this passing proves the nested path.
+        assert_eq!(tokens_sum(&data), 326901.0 + 286.0 + 326528.0 + 0.0);
+        assert_eq!(data.days.len(), 1);
+        // Whether the model prices is the catalog's business; tokens are
+        // the fact under test either way.
+    }
+
+    #[test]
+    fn zcode_falls_back_to_started_at_without_completed() {
+        let mut v: Value = serde_json::from_str(&zcode_line_sample()).unwrap();
+        v.as_object_mut().unwrap().remove("completedAt");
+        v["startedAt"] = json!("2026-09-11T23:00:00.000Z");
+        let mut data = FileData::default();
+        zcode_line(&v.to_string(), &mut data);
+        assert_eq!(tokens_sum(&data), 653715.0);
+    }
+
+    #[test]
+    fn zcode_free_channel_without_usage_is_skipped() {
+        // A request that never got usage (e.g. free channel) must not
+        // count as a zero event.
+        let mut v: Value = serde_json::from_str(&zcode_line_sample()).unwrap();
+        v["response"]
+            .as_object_mut()
+            .unwrap()
+            .remove("usage");
+        let mut data = FileData::default();
+        zcode_line(&v.to_string(), &mut data);
+        assert_eq!(tokens_sum(&data), 0.0);
+        assert!(data.days.is_empty());
+    }
+
+    #[test]
+    fn zcode_zero_usage_is_skipped() {
+        let mut v: Value = serde_json::from_str(&zcode_line_sample()).unwrap();
+        v["response"]["usage"] = json!({"inputTokens": 0, "outputTokens": 0,
+            "cacheReadTokens": 0, "cacheWriteTokens": 0});
+        let mut data = FileData::default();
+        zcode_line(&v.to_string(), &mut data);
+        assert!(data.days.is_empty());
+    }
+
     // ---- Log scan: bounded walk ------------------------------------------
 
     #[test]

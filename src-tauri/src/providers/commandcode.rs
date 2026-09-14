@@ -31,7 +31,7 @@ fn find_key() -> Option<String> {
     // of any documented contract, so any short string field that looks
     // like the key (user_… / token blob) is accepted.
     let path = dirs::home_dir()?.join(".commandcode").join("auth.json");
-    let raw = std::fs::read_to_string(path).ok()?;
+    let raw = super::read_small_text(&path, 64 * 1024, "auth.json").ok()?;
     let doc: Value = serde_json::from_str(&raw).ok()?;
     for field in ["apiKey", "api_key", "token", "key"] {
         if let Some(key) = doc.get(field).and_then(Value::as_str) {

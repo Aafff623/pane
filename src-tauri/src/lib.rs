@@ -3654,6 +3654,7 @@ pub fn run() {
 #[cfg(test)]
 mod tests {
     use super::{
+        retain_rate_limited_benches,
         cached_extra_account_id_is_configured, cached_kimi_ok_from,
         cached_onenewapi_id_is_configured, card_is_disabled,
         commit_strip_state_after_apply, fail_state, load_config_from, set_config_in,
