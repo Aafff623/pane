@@ -34,7 +34,11 @@ const CLIENT_ID: &str = "17e5f671-d194-4dfb-9706-5516cb48c098";
 const USAGES_URL: &str = "https://api.kimi.com/coding/v1/usages";
 const MESSAGES_URL: &str = "https://api.kimi.com/coding/v1/messages";
 /// Model used only for the monthly-limit probe — any plan model answers the
-/// same quota error, and max_tokens=1 keeps the probe at ~9 tokens.
+/// same quota error. max_tokens must stay at 2+: the server skips the
+/// quota pre-check entirely for max_tokens=1 requests (live-verified
+/// 2026-09-14 — a maxed account still answers those with 200), while 2
+/// triggers the real check. The actual cost is unchanged: "hi" stops
+/// after one or two output tokens regardless of the cap.
 const PROBE_MODEL: &str = "k3";
 const TOKEN_URL: &str = "https://auth.kimi.com/api/oauth/token";
 const HOUR_MS: i64 = 3_600_000;
@@ -358,11 +362,11 @@ async fn fetch_usages(access: &str) -> Result<Value, UsagesError> {
 const MONTH_MS: i64 = 30 * DAY_MS;
 const MAX_PROBE_BODY_BYTES: usize = 8 * 1024;
 
-/// One max_tokens=1 completion to surface the monthly cap, which the
-/// usages endpoint never reports. Returns the full "Monthly" row only
-/// when the rejection text names the monthly limit — a plain 429
-/// (per-minute rate limit) is not a monthly wall. Any transport failure
-/// simply yields None: a probe hiccup must never blank the card.
+/// One tiny completion to surface the monthly cap, which the usages
+/// endpoint never reports. Returns the full "Monthly" row only when the
+/// rejection text names the monthly limit — a plain 429 (per-minute rate
+/// limit) is not a monthly wall. Any transport failure simply yields
+/// None: a probe hiccup must never blank the card.
 async fn monthly_limit_row(access: &str) -> Option<Metric> {
     let resp = http()
         .post(MESSAGES_URL)
@@ -372,7 +376,7 @@ async fn monthly_limit_row(access: &str) -> Option<Metric> {
         .timeout(Duration::from_secs(12))
         .json(&serde_json::json!({
             "model": PROBE_MODEL,
-            "max_tokens": 1,
+            "max_tokens": 8,
             "messages": [{"role": "user", "content": "hi"}]
         }))
         .send()
