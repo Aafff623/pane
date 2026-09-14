@@ -1073,9 +1073,7 @@ function providerLayout(id: string): ProviderLayout {
 // ── Card groups ─────────────────────────────────────────────────────────────
 // User-named buckets ("常用", "不常用", …) a card is tagged with via its ⚙
 // panel. The dashboard renders one section per group; the Quota Overview
-// filters to the selected group with pills beside the 5h/week tabs.
-
-let activeOverviewGroup = ""; // "" = all groups
+// nests them as sub-headers inside the 可用/不可用 status sections.
 
 function cardGroups(): CardGroup[] {
   return config.layout?.groups ?? [];
@@ -1120,13 +1118,6 @@ function usedCardGroups(): CardGroup[] {
   return cardGroups().filter((g) => used.has(g.id));
 }
 
-/// The group the overview opens on: the topmost group in the list (the
-/// first one the user created — for this user, "常用"). "All" only shows
-/// mid-session if they pick it; every popover open snaps back here.
-function defaultOverviewGroupId(): string {
-  return usedCardGroups()[0]?.id ?? "";
-}
-
 /// Generate a fresh group id ("g1", "g2", …) that isn't taken yet.
 function newGroupId(): string {
   let n = cardGroups().length + 1;
@@ -1155,7 +1146,6 @@ function deleteCardGroup(id: string): void {
   for (const entry of Object.values(layout.providers)) {
     if (entry.group === id) delete entry.group;
   }
-  if (activeOverviewGroup === id) activeOverviewGroup = "";
   void patchConfig({ layout });
   renderAll();
 }
@@ -1939,8 +1929,7 @@ function orderedSnapshots(): Snapshot[] {
 
 /// Overview is one ring per family. Parallel extra cards stay on the
 /// dashboard, but repeating the same truncated name in the grid looks
-/// like a duplicate (two "Antig..." tiles). The card-group pills beside
-/// the 5h/week tabs filter the grid to one group; "" = every family.
+/// like a duplicate (two "Antig..." tiles).
 function overviewSnapshots(): Snapshot[] {
   const seen = new Set<string>();
   const out: Snapshot[] = [];
@@ -1948,7 +1937,6 @@ function overviewSnapshots(): Snapshot[] {
     const fam = providerFamily(s.id);
     if (seen.has(fam)) continue;
     seen.add(fam);
-    if (activeOverviewGroup && cardGroupId(s.id) !== activeOverviewGroup) continue;
     out.push(s);
   }
   return out;
@@ -2549,22 +2537,49 @@ function isOverviewCollapsed(): boolean {
   return config.layout?.overviewCollapsed ?? false;
 }
 
-/// Group pills as their own row under the overview head (same tab look as
-/// 5h/weekly). They lived in the head row first, but title + badge +
-/// 5h/weekly + refresh + chevron already fill the 380px popover — the
-/// group pills got clipped off the right edge. Hidden until the user has
-/// created at least one group, and while the overview is folded.
-function overviewGroupPillsHtml(): string {
+interface OverviewItem {
+  cardSnap: Snapshot;
+  shownSnap: Snapshot;
+  quota: OverviewQuota;
+}
+
+/// A status section (可用 / 不可用) in the overview panel: one H1-style
+/// header, then untagged cards flat, then one H2-style sub-header per card
+/// group — the same bucketing the dashboard uses. Cards drift between the
+/// two sections on their own as quotas max out and recover; the group tag
+/// itself never has to change.
+function overviewSectionHtml(
+  title: string,
+  tone: "ok" | "down",
+  items: OverviewItem[],
+  render: (it: OverviewItem) => string,
+): string {
   const groups = usedCardGroups();
-  if (groups.length === 0) return "";
-  const pills = [
-    `<button type="button" class="tab${activeOverviewGroup === "" ? " active" : ""}" data-overview-group="">${escapeHtml(t("overview.groupAll"))}</button>`,
-    ...groups.map(
-      (g) =>
-        `<button type="button" class="tab${activeOverviewGroup === g.id ? " active" : ""}" data-overview-group="${escapeHtml(g.id)}">${escapeHtml(g.name)}</button>`,
-    ),
-  ].join("");
-  return `<div class="tabs overview-group-bar">${pills}</div>`;
+  const usedIds = new Set(groups.map((g) => g.id));
+  const byGroup = new Map<string, OverviewItem[]>();
+  const flat: OverviewItem[] = [];
+  for (const it of items) {
+    // Stale tags (group deleted, card still points at it) render flat.
+    const gid = cardGroupId(it.cardSnap.id);
+    if (!gid || !usedIds.has(gid)) flat.push(it);
+    else byGroup.set(gid, [...(byGroup.get(gid) ?? []), it]);
+  }
+  const grid = (list: OverviewItem[]) =>
+    `<div class="overview-grid">${list.map(render).join("")}</div>`;
+  let html = `<div class="overview-section-head tone-${tone}">
+      <span class="overview-section-title">${escapeHtml(title)}</span>
+      <span class="overview-section-count">${items.length}</span>
+    </div>`;
+  if (flat.length > 0) html += grid(flat);
+  for (const g of groups) {
+    const members = byGroup.get(g.id) ?? [];
+    if (members.length === 0) continue;
+    html += `<div class="overview-subgroup-head">
+        <span class="overview-subgroup-name">${escapeHtml(g.name)}</span>
+        <span class="overview-subgroup-count">${members.length}</span>
+      </div>${grid(members)}`;
+  }
+  return html;
 }
 
 function renderQuotaOverview(): string {
@@ -2573,7 +2588,7 @@ function renderQuotaOverview(): string {
 
   const isFolded = isOverviewCollapsed();
 
-  const items = visibleSnaps.map((s) => {
+  const items: OverviewItem[] = visibleSnaps.map((s) => {
     const family = providerFamily(s.id);
     let shown = pickOverviewShown(s);
     if (s.id === family && supportsExtraAccounts(family) && !isParallelAccountFamily(family)) {
@@ -2601,8 +2616,14 @@ function renderQuotaOverview(): string {
   const errorCount = items.filter((it) => it.quota.status === "error").length;
   const availableCount = totalCount - maxedCount - errorCount;
 
-    const itemsHtml = items
-    .map(({ cardSnap, shownSnap, quota }) => {
+  // Section split mirrors the head badges exactly: 可用 = neither maxed nor
+  // error; 不可用 = maxed (ring at 100%) plus error (unknown ≠ usable).
+  // An empty section renders nothing — all-good and all-down states just
+  // show the single section that has cards.
+  const downItems = items.filter((it) => it.quota.isMaxed || it.quota.status === "error");
+  const upItems = items.filter((it) => !(it.quota.isMaxed || it.quota.status === "error"));
+
+  const itemHtml = ({ cardSnap, shownSnap, quota }: OverviewItem): string => {
       const family = providerFamily(cardSnap.id);
       const jumpId = isParallelAccountFamily(family) ? shownSnap.id : cardSnap.id;
       const origin = shownSnap.dashboard_url ?? undefined;
@@ -2703,8 +2724,7 @@ function renderQuotaOverview(): string {
             </span>
           </div>
         </div>`;
-    })
-    .join("");
+  };
 
   const foldChevron = isFolded
     ? `<button class="card-fold-toggle" data-overview-fold title="${escapeHtml(t("card.expand"))}">⌄</button>`
@@ -2741,8 +2761,12 @@ function renderQuotaOverview(): string {
         <button type="button" class="card-refresh overview-refresh" data-overview-refresh title="${escapeHtml(t("overview.refresh"))}">⟳</button>
         ${foldChevron}
       </div>
-      ${!isFolded ? overviewGroupPillsHtml() : ""}
-      ${isFolded ? "" : `<div class="card-panel overview-panel"><div class="overview-grid">${itemsHtml}</div></div>`}
+      ${isFolded
+        ? ""
+        : `<div class="card-panel overview-panel">${[
+            upItems.length > 0 ? overviewSectionHtml(t("overview.sectionAvailable"), "ok", upItems, itemHtml) : "",
+            downItems.length > 0 ? overviewSectionHtml(t("overview.sectionUnavailable"), "down", downItems, itemHtml) : "",
+          ].join("")}</div>`}
     </article>`;
 }
 
@@ -7607,12 +7631,6 @@ window.addEventListener("DOMContentLoaded", () => {
       if (next === "5h" || next === "week") switchOverviewTab(next);
       return;
     }
-    const ovGroup = target.closest<HTMLElement>("[data-overview-group]");
-    if (ovGroup) {
-      activeOverviewGroup = ovGroup.dataset.overviewGroup ?? "";
-      renderAll();
-      return;
-    }
     const groupToggle = target.closest<HTMLElement>("[data-group-toggle]");
     if (groupToggle) {
       const g = cardGroup(groupToggle.dataset.groupToggle!);
@@ -7788,9 +7806,6 @@ window.addEventListener("DOMContentLoaded", () => {
     dismissConfirm?.();
     dismissWhatsNew?.();
     userSelectedAccountFor.clear();
-    // The overview reopens on the default (topmost) group — the user
-    // asked for "常用 first, every time", not a remembered last tab.
-    activeOverviewGroup = defaultOverviewGroupId();
     // A fresh update's notes present on the first open after launch.
     if (pendingWhatsNew) {
       showChangelogDialog(t("dialog.whatsNew", { version: appVersion }), pendingWhatsNew);

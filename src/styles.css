@@ -3656,21 +3656,62 @@ article.provider.card-highlight {
 
 /* ── Card groups ──────────────────────────────────────────────────────────── */
 
-.quota-overview .overview-group-bar {
+/* Overview status sections: H1 = 可用/不可用 (auto, by quota state),
+   H2 = the card's own group tag. Counts right-align like group heads. */
+
+.overview-section-head {
   display: flex;
-  flex-wrap: wrap;
-  gap: 2px;
-  width: 100%;
-  margin: 0;
-  padding: 2px 12px 8px;
-  border-radius: 8px;
+  align-items: center;
+  gap: 6px;
+  margin: 10px 2px 5px;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--foreground);
+  user-select: none;
 }
 
-.quota-overview .overview-group-bar .tab {
+.overview-panel > .overview-section-head:first-child {
+  margin-top: 2px;
+}
+
+.overview-section-head::before {
+  content: "";
   flex: none;
-  padding: 3px 9px;
+  width: 3px;
+  height: 12px;
+  border-radius: 2px;
+  background: #10b981;
+}
+
+.overview-section-head.tone-down {
+  color: #ef4444;
+}
+
+.overview-section-head.tone-down::before {
+  background: #ef4444;
+}
+
+.overview-section-count {
+  margin-left: auto;
+  font-weight: 400;
+  opacity: 0.7;
+}
+
+.overview-subgroup-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 8px 2px 4px;
   font-size: 10.5px;
-  border-radius: 6px;
+  font-weight: 600;
+  color: var(--muted-foreground);
+  user-select: none;
+}
+
+.overview-subgroup-count {
+  margin-left: auto;
+  font-weight: 400;
+  opacity: 0.7;
 }
 
 .card-group-head {
