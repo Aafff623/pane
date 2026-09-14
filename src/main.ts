@@ -2190,8 +2190,16 @@ function switchOverviewTab(tab: OverviewTab): void {
 /// Tab switch morphs the existing arcs in place (identity-keyed per
 /// provider, CSS-transitioned) instead of rebuilding the card.
 function switchSpendTab(tab: SpendTab): void {
+  const prev = spendTab;
   spendTab = tab;
   void patchConfig({ spendTab });
+  // The left column shows today or yesterday — when the switch changes
+  // which one it displays, the rows must rebuild, not morph.
+  const leftOf = (t: SpendTab) => (t === "yesterday" ? "yesterday" : "today");
+  if (leftOf(prev) !== leftOf(tab)) {
+    renderAll();
+    return;
+  }
   const card = document.querySelector<HTMLElement>(".total-spend");
   const paths = card ? Array.from(card.querySelectorAll<SVGPathElement>("path.seg")) : [];
   const entries = donutEntries(tab);
@@ -2306,6 +2314,30 @@ function renderTotalSpend(): string {
       </div>`;
   };
 
+  /// The left column shows today or yesterday — whichever is selected
+  /// (last30 keeps the ring on the right column while the left falls back
+  /// to today).
+  const leftTab: SpendTab = spendTab === "yesterday" ? "yesterday" : "today";
+  const leftEntries = donutEntries(leftTab);
+  const leftTotals = leftEntries.reduce(
+    (acc, e) => ({ cost: acc.cost + e.w.cost, tokens: acc.tokens + e.w.tokens }),
+    { cost: 0, tokens: 0 },
+  );
+  const leftShown = leftEntries.slice(0, 10);
+  const leftOverflow = leftEntries.length - leftShown.length;
+  const leftColHtml = `
+      <div class="spend-col">
+        <div class="col-head-row">
+          <button class="tab col-head${spendTab === "today" ? " active" : ""}" data-tab="today">${t("spend.today")}</button>
+          <button class="tab col-head${spendTab === "yesterday" ? " active" : ""}" data-tab="yesterday">${t("spend.yesterday")}</button>
+        </div>
+        <div class="col-total">${fmtSpendVal({ ...emptyWindow(), ...leftTotals, models: [] })}</div>
+        <div class="legend">
+          ${leftShown.map((e) => legendRowHtml(e)).join("")}
+          ${leftOverflow > 0 ? `<div class="legend-row more">+${leftOverflow}</div>` : ""}
+        </div>
+      </div>`;
+
   const center = spendCenter(entries);
   const exact = t("spend.clickTip", {
     exact: center.exact,
@@ -2322,8 +2354,7 @@ function renderTotalSpend(): string {
           <text class="donut-sub" x="48" y="62" text-anchor="middle" font-size="8">${center.sub}</text>
         </svg>
         <div class="spend-cols">
-          ${spendCol("today", t("spend.today"))}
-          ${spendCol("yesterday", t("spend.yesterday"))}
+          ${leftColHtml}
           ${spendCol("last30", t("spend.days30"))}
         </div>
       </div>`
@@ -2335,8 +2366,7 @@ function renderTotalSpend(): string {
           <text class="donut-sub" x="48" y="62" text-anchor="middle" font-size="8">${center.sub}</text>
         </svg>
         <div class="spend-cols">
-          ${spendCol("today", t("spend.today"))}
-          ${spendCol("yesterday", t("spend.yesterday"))}
+          ${leftColHtml}
           ${spendCol("last30", t("spend.days30"))}
         </div>
       </div>`;

@@ -1263,26 +1263,26 @@ article.provider.is-folded:hover {
 .legend-row {
   display: flex;
   align-items: center;
-  gap: 4px;
-  font-size: 9.5px;
-  line-height: 1.35;
+  gap: 5px;
+  font-size: 11px;
+  line-height: 1.4;
 }
 
 .dot {
-  width: 6px;
-  height: 6px;
+  width: 7px;
+  height: 7px;
   border-radius: 50%;
   flex: none;
 }
 
-/* Three period columns beside the donut: today / yesterday / last 30
-   days stay visible at once; the active one drives the ring. */
+/* Two period columns beside the donut: today|yesterday (switchable) and
+   last 30 days; the active header drives the ring. */
 .spend-cols {
   flex: 1;
   min-width: 0;
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 8px;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 12px;
   align-self: stretch;
 }
 
@@ -1293,14 +1293,19 @@ article.provider.is-folded:hover {
   gap: 2px;
 }
 
+.spend-col .col-head-row {
+  display: flex;
+  gap: 4px;
+}
+
 .spend-col .col-head {
-  font-size: 10px;
-  padding: 2px 4px;
+  font-size: 10.5px;
+  padding: 2px 6px;
   margin: 0 0 1px;
 }
 
 .spend-col .col-total {
-  font-size: 10.5px;
+  font-size: 11.5px;
   font-weight: 600;
   padding: 0 4px 2px;
   border-bottom: 1px solid var(--border);
