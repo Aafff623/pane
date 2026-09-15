@@ -82,8 +82,9 @@
         </footer>
       </div>
 
-      <!-- Auto-hiding sidebar: a 4px sliver until the cursor reaches the
-           left edge, then it slides out over the cards. -->
+      <!-- Auto-hiding sidebars: a 4px sliver on each edge until the cursor
+           reaches it, then the rail slides out over the cards. Left rail:
+           app controls. Right rail: the provider icon trail. -->
       <div id="side-zone">
         <aside class="sidebar">
           <span id="app-logo" class="app-logo" title="Pane"></span>
@@ -91,6 +92,15 @@
             <button id="theme-btn" title="Light / dark mode" data-i18n-title="sidebar.theme">&#9728;</button>
             <button id="refresh" title="Refresh now" data-i18n-title="sidebar.refresh">&#10227;</button>
           </div>
+          <div class="sidebar-buttons bottom">
+            <button id="customize-btn" title="Customize" data-i18n-title="sidebar.customize">&#9776;</button>
+            <button id="settings-btn" title="Settings" data-i18n-title="sidebar.settings">&#9881;</button>
+          </div>
+        </aside>
+      </div>
+
+      <div id="side-zone-right">
+        <aside class="sidebar sidebar-right">
           <div id="trail-wrap">
             <button id="trail-more-top" class="trail-more top" title="向上滚动" hidden aria-label="Scroll up">
               <span class="trail-dots">•••</span>
@@ -99,10 +109,6 @@
             <button id="trail-more-bottom" class="trail-more bottom" title="向下滚动" hidden aria-label="Scroll down">
               <span class="trail-dots">•••</span>
             </button>
-          </div>
-          <div class="sidebar-buttons bottom">
-            <button id="customize-btn" title="Customize" data-i18n-title="sidebar.customize">&#9776;</button>
-            <button id="settings-btn" title="Settings" data-i18n-title="sidebar.settings">&#9881;</button>
           </div>
         </aside>
       </div>

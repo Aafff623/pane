@@ -100,8 +100,10 @@ body {
 }
 
 /* ---------------------------------------------------------------- sidebar */
-/* Auto-hiding: a 4px sliver lives on the left edge; moving the cursor to
-   the edge slides the full sidebar out over the cards. */
+/* Auto-hiding rails on BOTH edges: a 4px sliver lives on each edge; moving
+   the cursor to an edge slides that rail out over the cards. Left rail:
+   app controls (theme / refresh / customize / settings). Right rail: the
+   provider icon trail. */
 
 #side-zone {
   position: fixed;
@@ -114,8 +116,19 @@ body {
   z-index: 65;
 }
 
+#side-zone-right {
+  position: fixed;
+  right: 0;
+  top: 0;
+  bottom: 0;
+  width: 10px;
+  z-index: 65;
+}
+
 #side-zone:hover,
-#side-zone:focus-within {
+#side-zone:focus-within,
+#side-zone-right:hover,
+#side-zone-right:focus-within {
   width: 42px;
 }
 
@@ -161,6 +174,42 @@ body {
 :root[data-theme="light"] #side-zone:hover .sidebar,
 :root[data-theme="light"] .sidebar:focus-within {
   box-shadow: 8px 0 32px -8px rgba(0, 0, 0, 0.12);
+}
+
+/* Right rail mirrors the left: slides in from the right edge, feather
+   and shadows flipped. The provider trail lives here at full rail
+   height, so 12+ providers no longer squeeze between the app buttons. */
+.sidebar-right {
+  left: auto;
+  right: 0;
+  border-right: none;
+  border-left: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow: -2px 0 12px rgba(0, 0, 0, 0.18);
+  transform: translateX(calc(100% - 4px));
+}
+
+#side-zone-right:hover .sidebar-right,
+.sidebar-right:focus-within {
+  transform: none;
+  box-shadow: -8px 0 32px -8px rgba(0, 0, 0, 0.4);
+}
+
+/* Frosted feather bleeds inward (to the left of the rail). */
+.sidebar-right::after {
+  left: auto;
+  right: 100%;
+  -webkit-mask-image: linear-gradient(to left, #000, transparent);
+  mask-image: linear-gradient(to left, #000, transparent);
+}
+
+:root[data-theme="light"] .sidebar-right {
+  border-left: 1px solid rgba(0, 0, 0, 0.08);
+  box-shadow: -2px 0 12px rgba(0, 0, 0, 0.08);
+}
+
+:root[data-theme="light"] #side-zone-right:hover .sidebar-right,
+:root[data-theme="light"] .sidebar-right:focus-within {
+  box-shadow: -8px 0 32px -8px rgba(0, 0, 0, 0.12);
 }
 
 /* Frosted feather: a masked backdrop-blur strip bleeding past the rail's
@@ -2633,6 +2682,11 @@ body.drawer-open #drawer {
 :root[data-theme="light"] #side-zone:hover .sidebar,
 :root[data-theme="light"] .sidebar:focus-within {
   box-shadow: 6px 0 24px rgba(0, 0, 0, 0.12);
+}
+
+:root[data-theme="light"] #side-zone-right:hover .sidebar-right,
+:root[data-theme="light"] .sidebar-right:focus-within {
+  box-shadow: -6px 0 24px rgba(0, 0, 0, 0.12);
 }
 
 :root[data-theme="light"] .skeleton-line {

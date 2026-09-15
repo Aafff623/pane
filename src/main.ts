@@ -5216,7 +5216,7 @@ function updateTrailScrollIndicators(): void {
 
 function setupTrailScroll(): void {
   const trail = document.querySelector<HTMLElement>("#trail");
-  const sidebar = document.querySelector<HTMLElement>(".sidebar");
+  const sidebar = document.querySelector<HTMLElement>(".sidebar-right");
   const moreTop = document.querySelector<HTMLElement>("#trail-more-top");
   const moreBottom = document.querySelector<HTMLElement>("#trail-more-bottom");
 
@@ -5255,7 +5255,7 @@ function setupTrailScroll(): void {
 /// Icon ticks scale uniformly (the mark grows) instead of stretching and
 /// skip the background wash, which would paint over the artwork.
 function setupTrailFisheye(): void {
-  const sidebar = document.querySelector<HTMLElement>(".sidebar")!;
+  const sidebar = document.querySelector<HTMLElement>(".sidebar-right")!;
   let raf = 0;
 
   const reset = () => {
