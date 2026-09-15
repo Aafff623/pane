@@ -1,5 +1,43 @@
 # Changelog
 
+## 0.4.60 — 2026-09-15
+
+### Added
+- **Peak-hours status indicators.** The five providers with time-of-day
+  billing (Z.ai, GLM V1 Pro relays, Command Code GOAT, Qoder CN, Trae
+  CN) show a yellow status dot while their peak window is active —
+  but only when they are otherwise available; red (maxed/error) and
+  gray keep their meaning. Windows are Beijing time, rules verified
+  against official docs: Z.ai/GLM Mon–Fri 14:00–18:00, GOAT
+  Mon–Fri 09:00–12:00 & 14:00–18:00 (DeepSeek-routed models only),
+  Qoder CN & Trae CN daily 08:00–22:00 (weekend daytime included).
+- **Overview peak chip + section.** The Quota Overview badge row gains
+  an always-rendered yellow `N peak` chip (three disjoint counts:
+  available = off-peak, peak = in-peak available, maxed), and the
+  sectioned board splits the available set into 可用 / 高峰 / 不可用 —
+  the peak section header renders even when empty, so the dimension
+  stays visible off-peak. Hovering a peak tile appends the family's
+  multiplier rule (what standard rate costs vs the off-peak discount).
+- **Soonest-reset keyboard toggle.** With the panel open, bare `T`
+  flips the Quota Overview to the soonest-reset list and back — same
+  guards as the bare-Shift 5h/Weekly board toggle (no typing targets,
+  no Customize, no chords); a collapsed overview unfolds and scrolls
+  into view first.
+
+### Changed
+- **Dual auto-hiding sidebars.** The provider icon trail moved from
+  the left rail to a mirrored right rail (4 px sliver, slides out from
+  the right edge, same glass/feather/fisheye treatment). The left rail
+  keeps only the app controls: logo, theme, refresh, Customize,
+  Settings — and the trail now uses the full rail height, so a dozen
+  providers no longer shrink or scroll as early.
+
+### Fixed
+- Right-rail cascade polish: light-theme stray border, focus shadow
+  direction, glass feather specificity, duplicate light rules; trail
+  badges follow the peak tint; folded cards no longer show two peak
+  markers.
+
 ## 0.4.50 — 2026-09-10
 
 ### Added

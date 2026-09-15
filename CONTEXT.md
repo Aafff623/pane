@@ -48,9 +48,14 @@ anything unverified lives under `待确认` at the bottom.
   File: `cursor-accounts.json`.
 - **Quota Overview (配额总览)** — pinned dashboard section aggregating every
   provider that has a rolling reset window (generalized from the initial 5-hour
-  overview in commit `5d03a82`). Header badge = two independent symbols
-  (`● N 可用` green, `● N 满额` red, shown only when non-zero), plus a
-  `5h` / `Weekly` capsule. Default / 5h tab picks the most binding quota
+  overview in commit `5d03a82`). Header badge = three disjoint chips
+  (`● N 可用` green = off-peak available, `● N 满额` red shown only when
+  non-zero, `● N 高峰` yellow = available AND inside the family's peak
+  window, always rendered even at 0), plus a `5h` / `Weekly` capsule.
+  The sectioned board splits the available set into 可用 / 高峰 / 不可用
+  (peak section header always renders, even empty); the availability
+  chips count the same predicates, so chips, dots and sections can never
+  disagree. Default / 5h tab picks the most binding quota
   (5h session first, otherwise shortest-period percent such as
   daily/weekly/monthly). Weekly tab switches ordinary families to a week
   meter when one exists; Z.ai, One/New API, and Copilot keep the default
@@ -62,6 +67,19 @@ anything unverified lives under `待确认` at the bottom.
   the availability tally. Independent pools (Cursor Auto vs API, Antigravity
   Gemini vs Claude) are maxed only when every *present* pool is exhausted.
   Cursor's 5h-tab ring follows `Cursor Models` (Auto), not the API pool.
+- **Peak hours (高峰)** — time-of-day billing windows for 5 families,
+  rules table + Beijing-time (UTC+8) checker in `src/peakHours.ts`
+  (verified against official docs 2026-09-15): zai/linkso Mon–Fri
+  14:00–18:00; commandcode Mon–Fri 09:00–12:00 & 14:00–18:00 (only
+  DeepSeek-routed models; weekends never peak); qodercn & traecn daily
+  08:00–22:00 (weekend daytime IS peak — both use a "daily" wording, no
+  weekday/weekend split). A yellow status dot (.acct-dot/.overview-dot/
+  .peak-dot/.trail-badge variants) appears ONLY when the family would
+  otherwise read green; red (maxed/error) and gray never turn yellow.
+  The overview tile tooltip appends the per-family multiplier rule
+  (i18n `peak.rule.*`). Provider edges: doubao/kimi have NO time-of-day
+  billing (rolling windows only); GLM/DeepSeek-official weekends are
+  all off-peak while Qoder/Trae keep daytime standard rate.
 - **Relay site (One/New API)** — one site entry in `onenewapi.json`
   (version 1): `name`, `base_url`, optional dashboard **access token** +
   `New-Api-User` id, and N relay keys (`sk-…`). Sites are ACCOUNTS of the

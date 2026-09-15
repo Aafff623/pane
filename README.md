@@ -306,8 +306,18 @@ whatever the community asks for loudest.
   cards surface their nearest reset countdown as a status-toned pill.
   Ctrl+Z undoes.
 - **Liquid glass UI** — real SDF lens refraction on the auto-hiding
-  sidebar and glass bars, magnetic minimap trail with authentic brand
-  avatars and health indicator dots, circular day/night wipe.
+  edge rails (app controls on the left, the provider icon trail on the
+  right) and glass bars, magnetic fisheye on the trail with authentic
+  brand avatars and health indicator dots, circular day/night wipe.
+- **Peak-hours awareness** — providers with time-of-day billing
+  (Z.ai / GLM-plan relays, Command Code GOAT, Qoder CN, Trae CN) turn
+  their status dot yellow while their peak window is active, and the
+  Quota Overview splits into Available / Peak / Unavailable with an
+  always-on peak counter. Hovering a peak tile explains the multiplier
+  rule and how much cheaper off-peak runs are.
+- **Keyboard** — `Alt+2` (configurable) toggles the panel; with the
+  panel open, bare `Shift` flips the overview 5h/Weekly board and bare
+  `T` flips it to the soonest-reset list; `Ctrl+R` refreshes.
 - **Share cards** — hover a card, click ⧉, and paste anywhere: the copy
   is exactly what the card shows (bars, reset hints, trend — buttons and
   links stripped), framed with the Pane icon and tagline.
