@@ -203,8 +203,17 @@ body {
 }
 
 :root[data-theme="light"] .sidebar-right {
+  /* Must also kill the border-right the light .sidebar rule pins on —
+     it outranks plain .sidebar-right by specificity. */
+  border-right: none;
   border-left: 1px solid rgba(0, 0, 0, 0.08);
   box-shadow: -2px 0 12px rgba(0, 0, 0, 0.08);
+}
+
+/* Focus-within unhides the rail with the generic .sidebar rule, whose
+   shadow points right (+x); the right rail's copy must point left. */
+.sidebar-right:focus-within {
+  box-shadow: -8px 0 32px -8px rgba(0, 0, 0, 0.4);
 }
 
 :root[data-theme="light"] #side-zone-right:hover .sidebar-right,
@@ -2682,6 +2691,11 @@ body.drawer-open #drawer {
 :root[data-theme="light"] #side-zone:hover .sidebar,
 :root[data-theme="light"] .sidebar:focus-within {
   box-shadow: 6px 0 24px rgba(0, 0, 0, 0.12);
+}
+
+:root[data-theme="light"] #side-zone-right:hover .sidebar-right,
+:root[data-theme="light"] .sidebar-right:focus-within {
+  box-shadow: -6px 0 24px rgba(0, 0, 0, 0.12);
 }
 
 :root[data-theme="light"] #side-zone-right:hover .sidebar-right,
