@@ -1780,8 +1780,9 @@ function renderCard(s: Snapshot): string {
   // Peak-hours marker on the head: expanded standalone cards carry no
   // health dot, so the yellow peak state needs its own spot (next to the
   // plan badge). Same predicate as the dot tint: available AND in peak.
+  // Folded cards already tint their fold-row dot yellow — no double mark.
   const peakBadge =
-    cardHealthDot(s.id) === "green" && isProviderInPeak(family)
+    !isCardCollapsed(s.id) && cardHealthDot(s.id) === "green" && isProviderInPeak(family)
       ? `<span class="peak-dot" title="${escapeHtml(`${t("peak.now")} ${t(PEAK_RULES[family].tipKey)}`)}"></span>`
       : "";
   const icon = providerVisual(shown.id, shown.dashboard_url ?? undefined)?.iconSvg ?? "";
@@ -5131,7 +5132,9 @@ function rebuildTrail(): void {
       const origin = card.dataset.origin || undefined;
       const visual = providerVisual(id || family, origin);
       const icon = visual?.iconSvg;
-      const dot = isParallelAccountFamily(family) ? accountHealthDot(id) : (family ? familyHealthDot(family) : "");
+      const dot = isParallelAccountFamily(family)
+        ? peakTintedDot(family, accountHealthDot(id))
+        : (family ? peakTintedDot(family, familyHealthDot(family)) : "");
       const dotHtml = dot ? `<span class="trail-badge ${dot}"></span>` : "";
       if (icon) {
         const extra = [

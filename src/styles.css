@@ -188,14 +188,15 @@ body {
   transform: translateX(calc(100% - 4px));
 }
 
-#side-zone-right:hover .sidebar-right,
-.sidebar-right:focus-within {
+#side-zone-right:hover .sidebar-right {
   transform: none;
   box-shadow: -8px 0 32px -8px rgba(0, 0, 0, 0.4);
 }
 
-/* Frosted feather bleeds inward (to the left of the rail). */
-.sidebar-right::after {
+/* Frosted feather bleeds inward (to the left of the rail). Extra class
+   beats the base .sidebar::after below by specificity — same source-order
+   trick would silently lose to it. */
+.sidebar.sidebar-right::after {
   left: auto;
   right: 100%;
   -webkit-mask-image: linear-gradient(to left, #000, transparent);
@@ -938,6 +939,12 @@ select:focus-visible {
 .trail-badge.green {
   background: #22c55e;
   box-shadow: 0 0 4px #22c55e;
+}
+
+/* Same peak-hours meaning as the yellow dots elsewhere. */
+.trail-badge.yellow {
+  background: #eab308;
+  box-shadow: 0 0 4px #eab308;
 }
 
 .trail-badge.gray {
@@ -2691,11 +2698,6 @@ body.drawer-open #drawer {
 :root[data-theme="light"] #side-zone:hover .sidebar,
 :root[data-theme="light"] .sidebar:focus-within {
   box-shadow: 6px 0 24px rgba(0, 0, 0, 0.12);
-}
-
-:root[data-theme="light"] #side-zone-right:hover .sidebar-right,
-:root[data-theme="light"] .sidebar-right:focus-within {
-  box-shadow: -6px 0 24px rgba(0, 0, 0, 0.12);
 }
 
 :root[data-theme="light"] #side-zone-right:hover .sidebar-right,
