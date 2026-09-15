@@ -7482,6 +7482,35 @@ window.addEventListener("DOMContentLoaded", () => {
       e.preventDefault();
       void refresh(true, false, true);
     }
+    // Bare T flips the Quota Overview to its soonest-reset (expiring)
+    // list — the follow-up key after the global popover shortcut (Alt+2
+    // shows the popover, T then shows what runs out soonest; pressing T
+    // again goes back to the sectioned board). Same guards as the
+    // bare-Shift board toggle: plain key only, no typing targets, no
+    // Customize. A collapsed overview is unfolded and scrolled into view
+    // so the list is actually on screen.
+    if (
+      e.key.toLowerCase() === "t" &&
+      !e.shiftKey &&
+      !e.ctrlKey &&
+      !e.altKey &&
+      !e.metaKey &&
+      !e.repeat &&
+      !e.isComposing &&
+      e.keyCode !== 229 &&
+      !customizeOpen &&
+      !isTypingTarget(document.activeElement)
+    ) {
+      overviewExpiringOpen = !overviewExpiringOpen;
+      if (config.layout && isOverviewCollapsed()) {
+        config.layout.overviewCollapsed = false;
+        saveLayout(false);
+      }
+      renderAll();
+      document
+        .querySelector<HTMLElement>(".quota-overview")
+        ?.scrollIntoView({ block: "nearest" });
+    }
   });
   window.addEventListener("keyup", (e) => {
     // Commit the bare-Shift board toggle here (see the keydown handler):
