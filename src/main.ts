@@ -2612,16 +2612,20 @@ function renderQuotaOverview(): string {
   });
 
   const totalCount = items.length;
-  const maxedCount = items.filter((it) => it.quota.isMaxed).length;
   const errorCount = items.filter((it) => it.quota.status === "error").length;
-  const availableCount = totalCount - maxedCount - errorCount;
 
-  // Section split mirrors the head badges exactly: 可用 = neither maxed nor
-  // error; 不可用 = maxed (ring at 100%) plus error (unknown ≠ usable).
-  // An empty section renders nothing — all-good and all-down states just
-  // show the single section that has cards.
-  const downItems = items.filter((it) => it.quota.isMaxed || it.quota.status === "error");
-  const upItems = items.filter((it) => !(it.quota.isMaxed || it.quota.status === "error"));
+  // Section split mirrors the red dot exactly: a card is 不可用 when ANY
+  // core quota row is exhausted (isSnapshotMaxed — the ring's own window
+  // may still read a healthy 0%, e.g. Kimi monthly-capped while its 5h
+  // window is fresh) or the snapshot errored. 可用 = everything else.
+  // Badges count the same predicates, so chips, dots and sections can
+  // never disagree. An empty section renders nothing.
+  const isDown = (it: OverviewItem) =>
+    it.quota.status === "error" || isSnapshotMaxed(it.shownSnap);
+  const downItems = items.filter(isDown);
+  const upItems = items.filter((it) => !isDown(it));
+  const maxedCount = totalCount - errorCount - upItems.length;
+  const availableCount = upItems.length;
 
   const itemHtml = ({ cardSnap, shownSnap, quota }: OverviewItem): string => {
       const family = providerFamily(cardSnap.id);
