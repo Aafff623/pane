@@ -2639,12 +2639,20 @@ function renderQuotaOverview(): string {
   const maxedCount = totalCount - errorCount - upItems.length;
   const availableCount = upItems.length;
 
-  // "Soonest reset" view: every provider with a known reset instant for
-  // the selected window, soonest first — the act-soon reminder list.
-  // Maxed cards sit at their reset too (that IS when they come back).
-  const expiringItems = items
+  // "Soonest reset" view: EVERY non-error provider gets a row. Timed ones
+  // lead, soonest at the top; providers without a reset instant (not
+  // started, generic meters, walls carrying no reset date) follow as a
+  // muted tail — walled cards first there, since they are blocked right
+  // now and the row says so instead of inventing a countdown.
+  const timedItems = items
     .filter((it) => it.quota.status !== "error" && it.quota.resetsAt !== null)
     .sort((a, b) => (a.quota.resetsAt ?? 0) - (b.quota.resetsAt ?? 0));
+  const pendingItems = items
+    .filter((it) => it.quota.status !== "error" && it.quota.resetsAt === null)
+    .sort(
+      (a, b) =>
+        Number(isSnapshotMaxed(b.shownSnap)) - Number(isSnapshotMaxed(a.shownSnap)),
+    );
 
   const itemHtml = ({ cardSnap, shownSnap, quota }: OverviewItem): string => {
       const family = providerFamily(cardSnap.id);
@@ -2767,26 +2775,48 @@ function renderQuotaOverview(): string {
 
   // Reset-sorted reminder rows. Window label rides each quota; remaining
   // under an hour reads red so the top of the list is the "act now" part.
-  const expiringRows = expiringItems
-    .map(({ cardSnap, shownSnap, quota }) => {
-      const family = providerFamily(cardSnap.id);
-      const jumpId = isParallelAccountFamily(family) ? shownSnap.id : cardSnap.id;
-      const origin = shownSnap.dashboard_url ?? undefined;
-      const visual = providerVisual(jumpId || family, origin);
-      const icon = visual?.iconSvg ?? `<span class="icon-fallback">${escapeHtml(cardSnap.name.slice(0, 2))}</span>`;
-      const displayName = providerDisplayName(family) || cardSnap.name;
-      const remainMs = Math.max(0, (quota.resetsAt ?? 0) - Date.now());
-      const urgent = remainMs < 60 * 60_000;
-      const win = quota.window === null ? "" : escapeHtml(t(windowLabelKey[quota.window]));
-      return `
-        <div class="expiring-row${urgent ? " urgent" : ""}" data-jump-provider="${escapeHtml(jumpId)}">
+  const expiringRow = (
+    { cardSnap, shownSnap, quota }: OverviewItem,
+    remainText: string,
+    rowClass: string,
+  ): string => {
+    const family = providerFamily(cardSnap.id);
+    const jumpId = isParallelAccountFamily(family) ? shownSnap.id : cardSnap.id;
+    const origin = shownSnap.dashboard_url ?? undefined;
+    const visual = providerVisual(jumpId || family, origin);
+    const icon = visual?.iconSvg ?? `<span class="icon-fallback">${escapeHtml(cardSnap.name.slice(0, 2))}</span>`;
+    const displayName = providerDisplayName(family) || cardSnap.name;
+    const win = quota.window === null ? "" : escapeHtml(t(windowLabelKey[quota.window]));
+    return `
+        <div class="expiring-row${rowClass}" data-jump-provider="${escapeHtml(jumpId)}">
           <span class="expiring-icon">${icon}</span>
           <span class="expiring-name">${escapeHtml(displayName)}</span>
           ${win ? `<span class="expiring-win">${win}</span>` : ""}
-          <span class="expiring-remain">${escapeHtml(fmtDuration(remainMs))}</span>
+          <span class="expiring-remain">${remainText}</span>
         </div>`;
-    })
-    .join("");
+  };
+  const expiringRows =
+    timedItems
+      .map((it) => {
+        const remainMs = Math.max(0, (it.quota.resetsAt ?? 0) - Date.now());
+        return expiringRow(
+          it,
+          escapeHtml(fmtDuration(remainMs)),
+          remainMs < 60 * 60_000 ? " urgent" : "",
+        );
+      })
+      .join("") +
+    pendingItems
+      .map((it) => {
+        if (isSnapshotMaxed(it.shownSnap)) {
+          return expiringRow(it, escapeHtml(t("overview.pendingReset")), " urgent");
+        }
+        if (it.quota.window === "5h") {
+          return expiringRow(it, escapeHtml(t("card.notStarted")), " muted");
+        }
+        return expiringRow(it, escapeHtml(t("overview.noReset")), " muted");
+      })
+      .join("");
   const expiringView = !isFolded && overviewExpiringOpen
     ? `<div class="card-panel overview-expiring-panel">
         ${expiringRows || `<div class="expiring-empty">${escapeHtml(t("overview.expiringEmpty"))}</div>`}

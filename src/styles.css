@@ -3502,6 +3502,11 @@ body.no-glass #confirm-box {
   color: #ef4444;
 }
 
+.expiring-row.muted .expiring-remain {
+  color: var(--muted-foreground);
+  font-weight: 400;
+}
+
 .expiring-empty {
   padding: 10px 6px;
   font-size: 11px;
