@@ -7,6 +7,7 @@ import {
   supportsApiKey,
   supportsExtraAccounts,
 } from "./providerCatalog";
+import { PEAK_RULES, isProviderInPeak } from "./peakHours";
 import { providerVisual } from "./providerVisuals";
 import {
   applyStaticI18n,
@@ -1560,6 +1561,26 @@ function cardHealthDot(cardId: string): "red" | "green" | "gray" {
   return accountHealthDot(cardId);
 }
 
+/// Peak-hours tint: a provider currently inside its peak window shows a
+/// yellow dot instead of green — but only while it is actually available
+/// (green). Red (maxed / error) and gray keep their own meaning.
+function peakTintedDot(
+  family: string,
+  dot: "red" | "green" | "gray",
+): "red" | "green" | "gray" | "yellow" {
+  return dot === "green" && isProviderInPeak(family) ? "yellow" : dot;
+}
+
+function healthDotTitle(dot: "red" | "green" | "gray" | "yellow"): string {
+  return dot === "red"
+    ? t("customize.acctDotRed")
+    : dot === "yellow"
+      ? t("customize.acctDotYellow")
+      : dot === "green"
+        ? t("customize.acctDotGreen")
+        : t("customize.acctDotGray");
+}
+
 // Quota pools: which independent meter group a metric label belongs to.
 // Antigravity meters Gemini and Claude separately; Cursor separates its
 // Auto bucket from the API bucket. Single-pool providers return one pool
@@ -1729,13 +1750,8 @@ function renderCard(s: Snapshot): string {
             ? (accountsCache.get(family)?.[0]?.label || t("customize.acctDefaultShort"))
             : labelForAccount(id, accountsCache.get(family) ?? []);
           const on = id === shown.id;
-          const dot = accountHealthDot(id);
-          const dotTitle =
-            dot === "red"
-              ? t("customize.acctDotRed")
-              : dot === "green"
-                ? t("customize.acctDotGreen")
-                : t("customize.acctDotGray");
+          const dot = peakTintedDot(family, accountHealthDot(id));
+          const dotTitle = healthDotTitle(dot);
           return `<button class="card-account-tab${on ? " on" : ""}" data-card-account="${family}|${escapeHtml(id)}" title="${escapeHtml(dotTitle)}"><span class="acct-dot ${dot}"></span>${escapeHtml(label)}</button>`;
         })
         .join("")}</div>`;
@@ -1761,6 +1777,13 @@ function renderCard(s: Snapshot): string {
     }
   }
   const plan = shown.plan ? `<span class="plan">${escapeHtml(shown.plan)}</span>` : "";
+  // Peak-hours marker on the head: expanded standalone cards carry no
+  // health dot, so the yellow peak state needs its own spot (next to the
+  // plan badge). Same predicate as the dot tint: available AND in peak.
+  const peakBadge =
+    cardHealthDot(s.id) === "green" && isProviderInPeak(family)
+      ? `<span class="peak-dot" title="${escapeHtml(`${t("peak.now")} ${t(PEAK_RULES[family].tipKey)}`)}"></span>`
+      : "";
   const icon = providerVisual(shown.id, shown.dashboard_url ?? undefined)?.iconSvg ?? "";
   const muted = shown.status === "ok" ? "" : " muted";
 
@@ -1842,13 +1865,8 @@ function renderCard(s: Snapshot): string {
   // and generous breathing room instead of a cramped raw text sliver.
   let foldLine = "";
   if (cardCollapsed) {
-    const dot = cardHealthDot(s.id);
-    const dotTitle =
-      dot === "red"
-        ? t("customize.acctDotRed")
-        : dot === "green"
-          ? t("customize.acctDotGreen")
-          : t("customize.acctDotGray");
+    const dot = peakTintedDot(family, cardHealthDot(s.id));
+    const dotTitle = healthDotTitle(dot);
     const resetSecs = nearestResetSeconds(s.id);
     const isMaxed = isCardFoldCandidate(s.id) || dot === "red";
     const maxedLabel = isMaxed ? maxedRowLabel(s.id) : null;
@@ -1889,6 +1907,7 @@ function renderCard(s: Snapshot): string {
         <span class="provider-name">${escapeHtml(s.name)}</span>
         ${finalAccountCount}
         ${plan}
+        ${peakBadge}
         ${stale}
         <span class="spacer"></span>
         <button class="mini-btn card-group-btn" data-card-group-menu="${escapeHtml(s.id)}" title="${escapeHtml(t("customize.groupLabel"))}">⚙</button>
@@ -2724,7 +2743,18 @@ function renderQuotaOverview(): string {
       // flag the dot so the tile doesn't read as available.
       if (isSnapshotMaxed(shownSnap)) statusDot = "red";
 
-      const fullTooltip = overviewHoverTip(shownSnap, quota, displayName);
+      // Peak-hours tint: available (green) tiles inside the provider's
+      // peak window read yellow; red (maxed / error) stays red.
+      if (statusDot === "green" && isProviderInPeak(family)) statusDot = "yellow";
+
+      // The user asked for the multiplier rule on hover: the peak window,
+      // what it costs now, and how much cheaper the off-peak hours are.
+      const peakRule = PEAK_RULES[family];
+      let fullTooltip = overviewHoverTip(shownSnap, quota, displayName);
+      if (peakRule) {
+        const peakPrefix = isProviderInPeak(family) ? `${t("peak.now")} ` : "";
+        fullTooltip += ` · ${peakPrefix}${t(peakRule.tipKey)}`;
+      }
       return `
         <div class="overview-item tone-${itemTone}" data-jump-provider="${escapeHtml(jumpId)}" title="${escapeHtml(fullTooltip)} · ${escapeHtml(t("overview.groupHint"))}">
           <div class="overview-item-head">

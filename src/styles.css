@@ -1796,8 +1796,25 @@ article.provider.is-folded:hover {
   background: #22c55e;
 }
 
+/* Yellow = available AND inside the provider's peak window (standard
+   rate; off-peak is cheaper — see the hover tip). */
+.acct-dot.yellow {
+  background: #eab308;
+}
+
 .acct-dot.gray {
   background: #71717a;
+}
+
+/* Peak-hours marker on the card head: expanded cards carry no health
+   dot, so the yellow peak state gets its own spot next to the plan. */
+.peak-dot {
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #eab308;
+  box-shadow: 0 0 4px rgb(234 179 8 / 0.55);
 }
 
 /* The "?" fact sheet: an ordered list of read methods (not a config). */
@@ -3658,6 +3675,11 @@ body.no-glass #confirm-box {
 
 .overview-dot.green {
   background: #10b981;
+}
+
+/* Yellow = available AND inside the provider's peak window. */
+.overview-dot.yellow {
+  background: #eab308;
 }
 
 .overview-dot.red {

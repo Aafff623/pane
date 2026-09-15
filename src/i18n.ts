@@ -435,7 +435,19 @@ const en: Dict = {
   "customize.acctDefaultShort": "Default",
   "customize.acctDotRed": "A quota window is maxed — waiting for the reset",
   "customize.acctDotGreen": "Quota available",
+  "customize.acctDotYellow": "Available · in peak hours (standard rate)",
   "customize.acctDotGray": "No data yet",
+  "peak.now": "Peak hours now:",
+  "peak.rule.zai":
+    "GLM Coding Plan: Mon–Fri 14:00–18:00 bills 1×; all other hours (weekends included) bill half credits (0.5×) — shift heavy runs off-peak.",
+  "peak.rule.linkso":
+    "Follows GLM peak rules: Mon–Fri 14:00–18:00 bills 1×; all other hours (weekends included) bill 0.5× — the shared pool drains half as fast off-peak.",
+  "peak.rule.commandcode":
+    "GOAT's own windows are rolling and clock-free; only DeepSeek-routed models have peak hours: Mon–Fri 09:00–12:00 & 14:00–18:00 bill 1×, other times and weekends bill 0.5×.",
+  "peak.rule.qodercn":
+    "Daily 08:00–22:00 is peak (1×); 22:00–08:00 off-peak (weekends/holidays included) bills 0.04–0.2× by model — night runs are far cheaper.",
+  "peak.rule.traecn":
+    "Daily 08:00–22:00 is busy (1×); 22:00–08:00 idle bills 0.08–0.36× by model — night runs are far cheaper.",
   "customize.acctDialogTitle": "Add {name} account",
   "customize.acctDialogHelp": "Enter the API key and note name, test the connection, then save the account.",
   "customize.acctKeyLabel": "API key",
@@ -972,7 +984,19 @@ const zh: Dict = {
   "customize.acctDefaultShort": "置顶",
   "customize.acctDotRed": "额度窗口已打满——等待重置",
   "customize.acctDotGreen": "额度正常",
+  "customize.acctDotYellow": "状态可用 · 处于高峰期（按标准倍率计费）",
   "customize.acctDotGray": "暂无数据",
+  "peak.now": "当前处于高峰期：",
+  "peak.rule.zai":
+    "GLM Coding Plan：工作日 14:00–18:00 按 1× 计费；其余时段（含周末）仅 0.5×，重活建议错峰跑。",
+  "peak.rule.linkso":
+    "沿用 GLM 高峰规则：工作日 14:00–18:00 按 1× 计费；其余时段（含周末）仅 0.5×，共享池低峰消耗减半。",
+  "peak.rule.commandcode":
+    "GOAT 自身额度按滚动窗口计、不受时段影响；仅 DeepSeek 系模型分时：工作日 09:00–12:00、14:00–18:00 高峰按 1×，其余时段及周末全天 0.5×。",
+  "peak.rule.qodercn":
+    "每日 08:00–22:00 为高峰（1×）；22:00–08:00 低峰（含周末节假日）按模型 0.04–0.2× 计费，夜间跑任务便宜得多。",
+  "peak.rule.traecn":
+    "每日 08:00–22:00 为繁忙时段（1×）；22:00–08:00 闲时按模型 0.08–0.36× 计费，夜间跑任务便宜得多。",
   "customize.acctDialogTitle": "添加 {name} 账号",
   "customize.acctDialogHelp": "先填写 API key 和备注名，测试连接通过后再保存账号。",
   "customize.acctKeyLabel": "API key",
@@ -1473,7 +1497,19 @@ const ru: Dict = {
   "customize.acctDefaultShort": "Закреплён",
   "customize.acctDotRed": "Окно квоты исчерпано — ожидание сброса",
   "customize.acctDotGreen": "Квота доступна",
+  "customize.acctDotYellow": "Доступно · часы пик (стандартный тариф)",
   "customize.acctDotGray": "Пока нет данных",
+  "peak.now": "Сейчас час пик:",
+  "peak.rule.zai":
+    "GLM Coding Plan: пик пн–пт 14:00–18:00 — 1×; в остальное время (включая выходные) — 0,5×, тяжёлые задачи лучше выносить на вне-пик.",
+  "peak.rule.linkso":
+    "Действуют пиковые правила GLM: пик пн–пт 14:00–18:00 — 1×; в остальное время (включая выходные) — 0,5×, общий пул вне-пик расходится вдвое медленнее.",
+  "peak.rule.commandcode":
+    "Окна GOAT скользящие и не зависят от часов; только модели DeepSeek имеют часы пик: пн–пт 09:00–12:00 и 14:00–18:00 — 1×, остальное время и выходные — 0,5×.",
+  "peak.rule.qodercn":
+    "Ежедневно 08:00–22:00 — пик (1×); 22:00–08:00 — вне пик (включая выходные и праздники) — 0,04–0,2× по модели, ночью намного дешевле.",
+  "peak.rule.traecn":
+    "Ежедневно 08:00–22:00 — часы пик (1×); 22:00–08:00 — вне пик — 0,08–0,36× по модели, ночью намного дешевле.",
   "customize.acctDialogTitle": "Добавить аккаунт {name}",
   "customize.acctDialogHelp": "Введите API-ключ и метку, проверьте соединение, затем сохраните аккаунт.",
   "customize.acctKeyLabel": "API-ключ",
