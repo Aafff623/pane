@@ -3410,6 +3410,105 @@ body.no-glass #confirm-box {
   user-select: none;
 }
 
+/* Head space is tight (380px popover): the 可用/满额 chips stack vertically
+   in a narrow column so tabs stay left and the ⏱/⟳ buttons keep the right
+   edge, per the layout the user signed off on. */
+.overview-badges {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  flex: none;
+}
+
+.overview-badges .overview-chip {
+  font-size: 9.5px;
+  gap: 3px;
+  padding: 1px 0;
+}
+
+.overview-badges .overview-chip-dot {
+  width: 5px;
+  height: 5px;
+}
+
+/* ⏱ soonest-reset toggle — same look as ⟳, highlighted while the list
+   view is open. */
+.quota-overview .overview-expiring.on {
+  color: var(--primary, #10b981);
+  background: color-mix(in oklab, #10b981 12%, transparent);
+}
+
+.overview-expiring-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 6px 8px 8px;
+}
+
+.expiring-row {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 4px 7px;
+  border-radius: 8px;
+  font-size: 11px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.expiring-row:hover {
+  background: color-mix(in oklab, var(--foreground) 6%, transparent);
+}
+
+.expiring-row .expiring-icon {
+  display: inline-flex;
+  width: 14px;
+  height: 14px;
+  flex: none;
+}
+
+.expiring-row .expiring-icon svg,
+.expiring-row .expiring-icon .icon-fallback {
+  width: 14px;
+  height: 14px;
+  font-size: 8px;
+}
+
+.expiring-row .expiring-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.expiring-row .expiring-win {
+  flex: none;
+  font-size: 9px;
+  opacity: 0.65;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 0 4px;
+  line-height: 1.5;
+}
+
+.expiring-row .expiring-remain {
+  margin-left: auto;
+  flex: none;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.expiring-row.urgent .expiring-remain {
+  color: #ef4444;
+}
+
+.expiring-empty {
+  padding: 10px 6px;
+  font-size: 11px;
+  color: var(--muted-foreground);
+  text-align: center;
+}
+
 .quota-overview .overview-tabs {
   display: inline-flex;
   flex: none;

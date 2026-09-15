@@ -510,6 +510,10 @@ function trendSourceFor(id: string): TrendSource | undefined {
 }
 let spendTab: SpendTab = "today";
 let overviewTab: OverviewTab = "5h";
+/// Header toggle (right side, beside ⟳): when on, the overview body is a
+/// single reset-time-sorted list instead of the 可用/不可用 sections —
+/// the "act soon" view. Follows the 5h/week tab like the sections do.
+let overviewExpiringOpen = false;
 let customizeOpen = false;
 let revealTimer = 0;
 let animateExpandId: string | null = null;
@@ -2608,6 +2612,14 @@ function renderQuotaOverview(): string {
     }
     const cardIsMaxed = isCardFoldCandidate(s.id);
     const quota = extractOverviewQuota(shown, cardIsMaxed, s.id);
+    // A card walled by a row the ring isn't showing (Kimi monthly-capped
+    // while its 5h window is fresh) must not advertise the healthy
+    // window's reset in the soonest-reset list — the reset that matters
+    // is the wall's. No wall reset parseable → no known reset at all.
+    if (isSnapshotMaxed(shown)) {
+      const wallSecs = nearestResetSeconds(s.id);
+      quota.resetsAt = wallSecs > 0 ? Date.now() + wallSecs * 1000 : null;
+    }
     return { cardSnap: s, shownSnap: shown, quota };
   });
 
@@ -2626,6 +2638,13 @@ function renderQuotaOverview(): string {
   const upItems = items.filter((it) => !isDown(it));
   const maxedCount = totalCount - errorCount - upItems.length;
   const availableCount = upItems.length;
+
+  // "Soonest reset" view: every provider with a known reset instant for
+  // the selected window, soonest first — the act-soon reminder list.
+  // Maxed cards sit at their reset too (that IS when they come back).
+  const expiringItems = items
+    .filter((it) => it.quota.status !== "error" && it.quota.resetsAt !== null)
+    .sort((a, b) => (a.quota.resetsAt ?? 0) - (b.quota.resetsAt ?? 0));
 
   const itemHtml = ({ cardSnap, shownSnap, quota }: OverviewItem): string => {
       const family = providerFamily(cardSnap.id);
@@ -2746,6 +2765,40 @@ function renderQuotaOverview(): string {
           <span class="overview-chip-text">${maxedCount} ${escapeHtml(t("overview.maxedShort"))}</span>
         </span>` : ""}`;
 
+  // Reset-sorted reminder rows. Window label rides each quota; remaining
+  // under an hour reads red so the top of the list is the "act now" part.
+  const expiringRows = expiringItems
+    .map(({ cardSnap, shownSnap, quota }) => {
+      const family = providerFamily(cardSnap.id);
+      const jumpId = isParallelAccountFamily(family) ? shownSnap.id : cardSnap.id;
+      const origin = shownSnap.dashboard_url ?? undefined;
+      const visual = providerVisual(jumpId || family, origin);
+      const icon = visual?.iconSvg ?? `<span class="icon-fallback">${escapeHtml(cardSnap.name.slice(0, 2))}</span>`;
+      const displayName = providerDisplayName(family) || cardSnap.name;
+      const remainMs = Math.max(0, (quota.resetsAt ?? 0) - Date.now());
+      const urgent = remainMs < 60 * 60_000;
+      const win = quota.window === null ? "" : escapeHtml(t(windowLabelKey[quota.window]));
+      return `
+        <div class="expiring-row${urgent ? " urgent" : ""}" data-jump-provider="${escapeHtml(jumpId)}">
+          <span class="expiring-icon">${icon}</span>
+          <span class="expiring-name">${escapeHtml(displayName)}</span>
+          ${win ? `<span class="expiring-win">${win}</span>` : ""}
+          <span class="expiring-remain">${escapeHtml(fmtDuration(remainMs))}</span>
+        </div>`;
+    })
+    .join("");
+  const expiringView = !isFolded && overviewExpiringOpen
+    ? `<div class="card-panel overview-expiring-panel">
+        ${expiringRows || `<div class="expiring-empty">${escapeHtml(t("overview.expiringEmpty"))}</div>`}
+      </div>`
+    : "";
+  const sectionsView = !isFolded && !overviewExpiringOpen
+    ? `<div class="card-panel overview-panel">${[
+        upItems.length > 0 ? overviewSectionHtml(t("overview.sectionAvailable"), "ok", upItems, itemHtml) : "",
+        downItems.length > 0 ? overviewSectionHtml(t("overview.sectionUnavailable"), "down", downItems, itemHtml) : "",
+      ].join("")}</div>`
+    : "";
+
   return `
     <article class="provider quota-overview ${isFolded ? "is-folded" : ""}" data-provider="__overview__">
       <div class="provider-head">
@@ -2756,21 +2809,18 @@ function renderQuotaOverview(): string {
           </svg>
         </span>
         <span class="provider-name">${escapeHtml(t("overview.title"))}</span>
-        ${badgeHtml}
+        <span class="overview-badges">${badgeHtml}</span>
         <div class="tabs overview-tabs">
           <button type="button" class="tab${overviewTab === "5h" ? " active" : ""}" data-overview-tab="5h">${escapeHtml(t("overview.tab5h"))}</button>
           <button type="button" class="tab${overviewTab === "week" ? " active" : ""}" data-overview-tab="week">${escapeHtml(t("overview.tabWeek"))}</button>
         </div>
         <span class="spacer"></span>
+        <button type="button" class="card-refresh overview-expiring${overviewExpiringOpen ? " on" : ""}" data-overview-expiring title="${escapeHtml(t("overview.expiring"))}">⏱</button>
         <button type="button" class="card-refresh overview-refresh" data-overview-refresh title="${escapeHtml(t("overview.refresh"))}">⟳</button>
         ${foldChevron}
       </div>
-      ${isFolded
-        ? ""
-        : `<div class="card-panel overview-panel">${[
-            upItems.length > 0 ? overviewSectionHtml(t("overview.sectionAvailable"), "ok", upItems, itemHtml) : "",
-            downItems.length > 0 ? overviewSectionHtml(t("overview.sectionUnavailable"), "down", downItems, itemHtml) : "",
-          ].join("")}</div>`}
+      ${expiringView}
+      ${sectionsView}
     </article>`;
 }
 
@@ -7633,6 +7683,12 @@ window.addEventListener("DOMContentLoaded", () => {
     if (ovTab) {
       const next = ovTab.dataset.overviewTab;
       if (next === "5h" || next === "week") switchOverviewTab(next);
+      return;
+    }
+    const ovExpiring = target.closest<HTMLElement>("[data-overview-expiring]");
+    if (ovExpiring) {
+      overviewExpiringOpen = !overviewExpiringOpen;
+      renderAll();
       return;
     }
     const groupToggle = target.closest<HTMLElement>("[data-group-toggle]");
