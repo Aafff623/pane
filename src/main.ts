@@ -2567,14 +2567,14 @@ interface OverviewItem {
   quota: OverviewQuota;
 }
 
-/// A status section (可用 / 不可用) in the overview panel: one H1-style
+/// A status section (可用 / 高峰 / 不可用) in the overview panel: one H1-style
 /// header, then untagged cards flat, then one H2-style sub-header per card
-/// group — the same bucketing the dashboard uses. Cards drift between the
-/// two sections on their own as quotas max out and recover; the group tag
+/// group — the same bucketing the dashboard uses. Cards drift between
+/// sections on their own as quotas max out and recover; the group tag
 /// itself never has to change.
 function overviewSectionHtml(
   title: string,
-  tone: "ok" | "down",
+  tone: "ok" | "down" | "peak",
   items: OverviewItem[],
   render: (it: OverviewItem) => string,
 ): string {
@@ -2657,7 +2657,16 @@ function renderQuotaOverview(): string {
   const downItems = items.filter(isDown);
   const upItems = items.filter((it) => !isDown(it));
   const maxedCount = totalCount - errorCount - upItems.length;
-  const availableCount = upItems.length;
+
+  // Peak split lives INSIDE the available set — same predicate that
+  // yellows the tile dot, so chips, dots and sections never disagree.
+  // 可用 counts only the off-peak tiles; in-peak available tiles belong
+  // to the yellow 高峰 chip / section. Both always render (a 0 tells the
+  // user the dimension exists even off-peak).
+  const inPeak = (it: OverviewItem) => isProviderInPeak(providerFamily(it.cardSnap.id));
+  const peakItems = upItems.filter(inPeak);
+  const plainUpItems = upItems.filter((it) => !inPeak(it));
+  const availableCount = plainUpItems.length;
 
   // "Soonest reset" view: EVERY non-error provider gets a row. Timed ones
   // lead, soonest at the top; providers without a reset instant (not
@@ -2792,8 +2801,9 @@ function renderQuotaOverview(): string {
     ? `<button class="card-fold-toggle" data-overview-fold title="${escapeHtml(t("card.expand"))}">⌄</button>`
     : `<button class="card-fold-toggle" data-overview-fold title="${escapeHtml(t("card.collapse"))}">⌃</button>`;
 
-  // Availability badge: two independent symbols — green shows the available
-  // count, red shows the maxed count. No combined "7/8" pill.
+  // Availability badges: three disjoint symbols — green shows the
+  // off-peak available count, red the maxed count, yellow the in-peak
+  // available count (always rendered, 0 included).
   const badgeHtml = `
         <span class="overview-chip is-ok" title="${escapeHtml(t("overview.badge", { avail: availableCount, total: totalCount }))}">
           <span class="overview-chip-dot green"></span>
@@ -2802,7 +2812,11 @@ function renderQuotaOverview(): string {
         <span class="overview-chip is-warn" title="${escapeHtml(t("overview.maxedBadge", { n: maxedCount }))}">
           <span class="overview-chip-dot red"></span>
           <span class="overview-chip-text">${maxedCount} ${escapeHtml(t("overview.maxedShort"))}</span>
-        </span>` : ""}`;
+        </span>` : ""}
+        <span class="overview-chip is-peak" title="${escapeHtml(t("overview.peakBadge", { n: peakItems.length }))}">
+          <span class="overview-chip-dot yellow"></span>
+          <span class="overview-chip-text">${peakItems.length} ${escapeHtml(t("overview.peakShort"))}</span>
+        </span>`;
 
   // Reset-sorted reminder rows. Window label rides each quota; remaining
   // under an hour reads red so the top of the list is the "act now" part.
@@ -2855,7 +2869,10 @@ function renderQuotaOverview(): string {
     : "";
   const sectionsView = !isFolded && !overviewExpiringOpen
     ? `<div class="card-panel overview-panel">${[
-        upItems.length > 0 ? overviewSectionHtml(t("overview.sectionAvailable"), "ok", upItems, itemHtml) : "",
+        plainUpItems.length > 0 ? overviewSectionHtml(t("overview.sectionAvailable"), "ok", plainUpItems, itemHtml) : "",
+        // Peak section always renders (header + count even at 0) — it is
+        // the in-peak slice of the available set, pulled out below 可用.
+        overviewSectionHtml(t("overview.sectionPeak"), "peak", peakItems, itemHtml),
         downItems.length > 0 ? overviewSectionHtml(t("overview.sectionUnavailable"), "down", downItems, itemHtml) : "",
       ].join("")}</div>`
     : "";

@@ -3633,6 +3633,14 @@ body.no-glass #confirm-box {
   color: #059669;
 }
 
+.quota-overview .overview-chip.is-peak {
+  color: #eab308;
+}
+
+:root[data-theme="light"] .quota-overview .overview-chip.is-peak {
+  color: #ca8a04;
+}
+
 .quota-overview .overview-chip-dot {
   width: 5px;
   height: 5px;
@@ -3648,6 +3656,11 @@ body.no-glass #confirm-box {
 .quota-overview .overview-chip-dot.green {
   background: #10b981;
   box-shadow: 0 0 3px rgba(16, 185, 129, 0.6);
+}
+
+.quota-overview .overview-chip-dot.yellow {
+  background: #eab308;
+  box-shadow: 0 0 4px rgba(234, 179, 8, 0.7);
 }
 
 .quota-overview .overview-panel {
@@ -3885,6 +3898,19 @@ article.provider.card-highlight {
 
 .overview-section-head.tone-down::before {
   background: #ef4444;
+}
+
+/* In-peak slice of the available set (same yellow as the dots/chips). */
+.overview-section-head.tone-peak {
+  color: #eab308;
+}
+
+.overview-section-head.tone-peak::before {
+  background: #eab308;
+}
+
+:root[data-theme="light"] .overview-section-head.tone-peak {
+  color: #ca8a04;
 }
 
 .overview-section-count {
