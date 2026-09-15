@@ -19,9 +19,11 @@
 //! (issue #173). Login wins when both exist; the key is a fallback only.
 
 use super::{http, stored_api_key, Metric, Snapshot};
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, Local, Utc};
 use serde_json::Value;
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::sync::{Mutex, OnceLock};
 use std::time::Duration;
 
 const ID: &str = "kimi";
@@ -362,12 +364,87 @@ async fn fetch_usages(access: &str) -> Result<Value, UsagesError> {
 const MONTH_MS: i64 = 30 * DAY_MS;
 const MAX_PROBE_BODY_BYTES: usize = 8 * 1024;
 
+/// While the monthly wall stands, one probe every 30 minutes is enough —
+/// the answer only changes at the reset, and each probe burns plan tokens.
+/// Healthy accounts keep probing on every refresh so a fresh wall is
+/// caught within one cycle. "While the PC is on and Pane runs" is
+/// implicit: probes only happen inside Pane's refresh loop.
+const WALLED_REPROBE_MS: i64 = 30 * 60_000;
+/// Probe audit trail cap (%APPDATA%\Pane\kimi_probe_log.json).
+const PROBE_LOG_MAX: usize = 200;
+
+/// Last probe outcome for one credential (keyed by the access token, since
+/// OAuth tokens rotate and extra accounts each carry their own key).
+#[derive(Clone)]
+struct ProbeMemo {
+    probed_at_ms: i64,
+    /// Some(row) = the monthly wall stands (cached meter); None = the
+    /// account answered, no monthly cap in the way.
+    monthly: Option<Metric>,
+}
+
+fn probe_memos() -> &'static Mutex<HashMap<String, ProbeMemo>> {
+    static MEMOS: OnceLock<Mutex<HashMap<String, ProbeMemo>>> = OnceLock::new();
+    MEMOS.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+/// The three ways a probe can land. "inconclusive" (rate-limited, server
+/// error, transport hiccup) caches nothing — the next refresh probes again
+/// rather than trusting a failure.
+#[derive(Clone, Copy)]
+enum ProbeOutcome {
+    Ok,
+    Monthly,
+    Inconclusive,
+}
+
+fn probe_log_path() -> PathBuf {
+    super::config_dir().join("kimi_probe_log.json")
+}
+
+fn note_probe(now_ms: i64, outcome: ProbeOutcome) {
+    let result = match outcome {
+        ProbeOutcome::Ok => "ok",
+        ProbeOutcome::Monthly => "monthly",
+        ProbeOutcome::Inconclusive => "inconclusive",
+    };
+    let local = DateTime::from_timestamp_millis(now_ms)
+        .map(|t| t.with_timezone(&Local).format("%Y-%m-%d %H:%M:%S").to_string());
+    // A corrupt or half-written log restarts fresh rather than silently
+    // disabling the audit trail forever; the write itself is atomic
+    // (tmp + rename) so a crash can't leave a truncated file behind.
+    let mut log = serde_json::from_str::<Vec<Value>>(
+        &std::fs::read_to_string(probe_log_path()).unwrap_or_else(|_| "[]".into()),
+    )
+    .unwrap_or_default();
+    log.push(serde_json::json!({"at": now_ms, "local": local, "result": result}));
+    let excess = log.len().saturating_sub(PROBE_LOG_MAX);
+    log.drain(0..excess);
+    if let Ok(raw) = serde_json::to_string(&log) {
+        let path = probe_log_path();
+        let tmp = path.with_extension("json.tmp");
+        if std::fs::write(&tmp, raw).is_ok() {
+            let _ = std::fs::rename(&tmp, &path);
+        }
+    }
+}
+
 /// One tiny completion to surface the monthly cap, which the usages
 /// endpoint never reports. Returns the full "Monthly" row only when the
 /// rejection text names the monthly limit — a plain 429 (per-minute rate
-/// limit) is not a monthly wall. Any transport failure simply yields
-/// None: a probe hiccup must never blank the card.
+/// limit) is not a monthly wall, and neither is any other failure: those
+/// yield None and leave the memo untouched. A confirmed wall is re-probed
+/// at most every 30 minutes (cached row in between, so the card stays red
+/// with a live countdown); the moment a probe gets through, the row
+/// disappears and the card drifts back to the available section on its
+/// own. Every real attempt is timestamped in kimi_probe_log.json.
 async fn monthly_limit_row(access: &str) -> Option<Metric> {
+    let now_ms = Utc::now().timestamp_millis();
+    if let Some(memo) = probe_memos().lock().unwrap().get(access) {
+        if memo.monthly.is_some() && now_ms - memo.probed_at_ms < WALLED_REPROBE_MS {
+            return cached_monthly_row(memo);
+        }
+    }
     let resp = http()
         .post(MESSAGES_URL)
         .bearer_auth(access)
@@ -380,14 +457,54 @@ async fn monthly_limit_row(access: &str) -> Option<Metric> {
             "messages": [{"role": "user", "content": "hi"}]
         }))
         .send()
-        .await
-        .ok()?;
+        .await;
+    let resp = match resp {
+        Ok(r) => r,
+        Err(_) => {
+            note_probe(now_ms, ProbeOutcome::Inconclusive);
+            return None;
+        }
+    };
     let status = resp.status().as_u16();
     if status < 400 {
-        return None; // monthly allowance is fine
+        // Monthly allowance is fine — forget any stale wall for this key.
+        probe_memos()
+            .lock()
+            .unwrap()
+            .insert(access.to_string(), ProbeMemo { probed_at_ms: now_ms, monthly: None });
+        note_probe(now_ms, ProbeOutcome::Ok);
+        return None;
     }
     let body = bounded_text(resp, MAX_PROBE_BODY_BYTES).await;
-    monthly_row_from_error(&body, Utc::now().timestamp_millis())
+    let monthly = monthly_row_from_error(&body, now_ms);
+    let outcome = if monthly.is_some() {
+        ProbeOutcome::Monthly
+    } else {
+        ProbeOutcome::Inconclusive
+    };
+    note_probe(now_ms, outcome);
+    if monthly.is_some() {
+        probe_memos()
+            .lock()
+            .unwrap()
+            .insert(access.to_string(), ProbeMemo { probed_at_ms: now_ms, monthly: monthly.clone() });
+    }
+    monthly
+}
+
+/// The cached wall between re-probes, annotated with when the next check
+/// is due so the 30-minute rhythm is visible on the card itself.
+fn cached_monthly_row(memo: &ProbeMemo) -> Option<Metric> {
+    let mut row = memo.monthly.clone()?;
+    let next = DateTime::from_timestamp_millis(memo.probed_at_ms + WALLED_REPROBE_MS)
+        .map(|t| t.with_timezone(&Local).format("%H:%M").to_string());
+    if let Some(next) = next {
+        row.detail = Some(match row.detail {
+            Some(d) => format!("{d} · next check {next}"),
+            None => format!("next check {next}"),
+        });
+    }
+    Some(row)
 }
 
 /// Pure classifier for the probe response body. Only text naming the
