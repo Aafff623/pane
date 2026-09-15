@@ -5690,6 +5690,9 @@ async function rasterizeLogo(id: string): Promise<number[] | null> {
     canvas.width = 32;
     canvas.height = 32;
     const ctx = canvas.getContext("2d")!;
+    // Raster-embedded logos have no fill/stroke to whiten; the filter turns
+    // any draw into a white silhouette (a no-op for already-white vectors).
+    ctx.filter = "brightness(0) invert(1)";
     const scale = 28 / Math.max(img.width || 28, img.height || 28);
     const w = (img.width || 28) * scale;
     const h = (img.height || 28) * scale;

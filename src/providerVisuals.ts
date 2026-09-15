@@ -47,6 +47,7 @@ const VISUALS: Readonly<Record<string, ProviderVisual>> = {
   grok: { iconKey: "grok", iconSvg: grokIcon },
   hermes: { iconKey: "hermes", iconSvg: hermesIcon },
   kimi: { iconKey: "kimi", iconSvg: kimiIcon },
+  linkso: { iconKey: "linkso", iconSvg: zaiIcon },
   minimax: { iconKey: "minimax", iconSvg: minimaxIcon },
   novita: { iconKey: "novita", iconSvg: novitaIcon, invertOnDarkTray: true },
   ollama: { iconKey: "ollama", iconSvg: ollamaIcon },
@@ -61,7 +62,7 @@ const VISUALS: Readonly<Record<string, ProviderVisual>> = {
   qodercn: { iconKey: "qodercn", iconSvg: qodercnIcon },
   traecn: { iconKey: "traecn", iconSvg: traecnIcon },
   commandcode: { iconKey: "commandcode", iconSvg: commandcodeIcon, invertOnDarkTray: true },
-  doubao: { iconKey: "doubao", iconSvg: doubaoIcon, invertOnDarkTray: true },
+  doubao: { iconKey: "doubao", iconSvg: doubaoIcon },
   clawsgo: { iconKey: "clawsgo", iconSvg: clawsgoIcon, invertOnDarkTray: true },
 };
 
