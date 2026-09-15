@@ -448,9 +448,9 @@ const en: Dict = {
   "peak.rule.commandcode":
     "GOAT's own windows are rolling and clock-free; only DeepSeek-routed models have peak hours: Mon–Fri 09:00–12:00 & 14:00–18:00 bill 1×, other times and weekends bill 0.5×.",
   "peak.rule.qodercn":
-    "Daily 08:00–22:00 is peak (1×); 22:00–08:00 off-peak (weekends/holidays included) bills 0.04–0.2× by model — night runs are far cheaper.",
+    "Daily 08:00–22:00 is regular time (standard rate); 22:00–08:00 off-peak (weekends included) bills Qwen models at 0.04–0.2× — night runs are far cheaper. GLM-5.2 is 0.6× around the clock.",
   "peak.rule.traecn":
-    "Daily 08:00–22:00 is busy (1×); 22:00–08:00 idle bills 0.08–0.36× by model — night runs are far cheaper.",
+    "Daily 08:00–22:00 is busy time (standard rate); 22:00–08:00 idle bills most models at half or less (0.03–0.39×, by model and membership) — night runs are far cheaper.",
   "customize.acctDialogTitle": "Add {name} account",
   "customize.acctDialogHelp": "Enter the API key and note name, test the connection, then save the account.",
   "customize.acctKeyLabel": "API key",
@@ -1000,9 +1000,9 @@ const zh: Dict = {
   "peak.rule.commandcode":
     "GOAT 自身额度按滚动窗口计、不受时段影响；仅 DeepSeek 系模型分时：工作日 09:00–12:00、14:00–18:00 高峰按 1×，其余时段及周末全天 0.5×。",
   "peak.rule.qodercn":
-    "每日 08:00–22:00 为高峰（1×）；22:00–08:00 低峰（含周末节假日）按模型 0.04–0.2× 计费，夜间跑任务便宜得多。",
+    "每日 08:00–22:00 为常规时段（标准倍率）；22:00–08:00 低峰（含周末）Qwen 系模型按 0.04–0.2× 计费，夜间跑任务便宜得多。GLM-5.2 全天 0.6×。",
   "peak.rule.traecn":
-    "每日 08:00–22:00 为繁忙时段（1×）；22:00–08:00 闲时按模型 0.08–0.36× 计费，夜间跑任务便宜得多。",
+    "每日 08:00–22:00 为繁忙时段（标准倍率）；22:00–08:00 闲时多数模型半价或更低（0.03–0.39×，按模型与会员身份），夜间跑任务便宜得多。",
   "customize.acctDialogTitle": "添加 {name} 账号",
   "customize.acctDialogHelp": "先填写 API key 和备注名，测试连接通过后再保存账号。",
   "customize.acctKeyLabel": "API key",
@@ -1516,9 +1516,9 @@ const ru: Dict = {
   "peak.rule.commandcode":
     "Окна GOAT скользящие и не зависят от часов; только модели DeepSeek имеют часы пик: пн–пт 09:00–12:00 и 14:00–18:00 — 1×, остальное время и выходные — 0,5×.",
   "peak.rule.qodercn":
-    "Ежедневно 08:00–22:00 — пик (1×); 22:00–08:00 — вне пик (включая выходные и праздники) — 0,04–0,2× по модели, ночью намного дешевле.",
+    "Ежедневно 08:00–22:00 — обычное время (стандартный тариф); 22:00–08:00 — вне пик (включая выходные) модели Qwen — 0,04–0,2×, ночью намного дешевле. GLM-5.2 — 0,6× круглосуточно.",
   "peak.rule.traecn":
-    "Ежедневно 08:00–22:00 — часы пик (1×); 22:00–08:00 — вне пик — 0,08–0,36× по модели, ночью намного дешевле.",
+    "Ежедневно 08:00–22:00 — часы пик (стандартный тариф); 22:00–08:00 — вне пик большинство моделей за полцены или ниже (0,03–0,39×, по модели и подписке), ночью намного дешевле.",
   "customize.acctDialogTitle": "Добавить аккаунт {name}",
   "customize.acctDialogHelp": "Введите API-ключ и метку, проверьте соединение, затем сохраните аккаунт.",
   "customize.acctKeyLabel": "API-ключ",
