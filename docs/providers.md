@@ -227,10 +227,24 @@ Ground rules that apply to every provider:
   Moonshot/Kimi API key is saved, `api.moonshot.ai|cn/v1/users/me/balance`
   for the API bar. This is the Kimi Code *subscription* plus the
   pay-as-you-go wallet on the same card.
+- **Monthly-cap probe:** the usages endpoint never reports the plan's
+  monthly limit, so every refresh also sends one `max_tokens=8`
+  completion (`api.kimi.com/coding/v1/messages`, model `k3` — ~9
+  tokens). `max_tokens` must stay at 2+: the server skips the quota
+  pre-check entirely for `max_tokens=1` requests (live-verified).
+  When the rejection names the monthly limit (English "monthly", or any
+  "月" for CN accounts), the card grows a maxed Monthly row; the reset
+  instant is parsed from the error text (ISO-8601, `YYYY-MM-DD HH:MM`,
+  or a relative "in N days/hours/minutes"). While the wall stands the
+  real probe re-runs at most every 30 minutes (the cached red row shows
+  the next check time on the card). Rate limits, auth failures, and
+  network hiccups are never mistaken for the monthly wall, and a probe
+  failure never blanks the card.
 - **Shows:** Session (5-hour) and Weekly bars with reset pacing, plus the
   membership plan name from `user.membership.level` (falls back to plain
   "Kimi Coding" when the API omits the level, as happens on the API-key
-  path). Names match
+  path). A maxed monthly limit pins a red 100% Monthly row and folds the
+  card until the parsed reset instant. Names match
   [kimi.ai/membership/pricing](https://www.kimi.ai/membership/pricing):
   Moderato ($19), Allegretto ($39), Allegro ($99), Vivace ($199).
 
