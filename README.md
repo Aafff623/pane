@@ -332,8 +332,10 @@ whatever the community asks for loudest.
   Update button. One-click in-app install lands together with Pane's own
   signing key (on the roadmap) — until then, grab new versions from the
   [releases page](https://github.com/Aafff623/pane/releases/latest).
-- **Appearance** — System / Light / Dark, compact density, time format,
-  global shortcut (e.g. `Ctrl+Shift+U`), optional outbound proxy.
+- **Appearance** — System / Light / Dark, compact density, custom UI
+  font (Settings → Font lists every font installed on the system,
+  searchable and previewed in its own face), time format, global
+  shortcut (e.g. `Ctrl+Shift+U`), optional outbound proxy.
 
 ## Privacy & security
 

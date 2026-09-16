@@ -106,6 +106,23 @@ anything unverified lives under `待确认` at the bottom.
   logs (`usage_history.rs`).
 - **Tray strip** — up to 4 starred metric entries rendered in the tray;
   main-tray projection in `tray_projection.rs`.
+- **Kimi monthly anchor** — Kimi's membership-wide monthly limit is never
+  reported by the usage API; it only surfaces as failed inference. The
+  wall refreshes on the **27th** (owner member-dashboard screenshot,
+  2026-09-16; date precision only, modeled at local midnight) —
+  `MONTHLY_RESET_DAY` in `providers/kimi.rs`. Probe states: healthy =
+  one tiny probe per refresh (the only wall-discovery channel), walled
+  with anchor in the future = zero probes (cached monthly row with
+  countdown), anchor passed = 30-min re-probe rhythm until quota
+  returns. A pane restart clears the memo and forces a fresh probe.
+- **uiFont** — custom UI font family in `config.json` (`""` = stock
+  stack). Enumerated by `fonts.rs` via font-kit (DirectWrite; localized
+  names like 微软雅黑 appear as separate families), validated on write
+  (trim, ≤100 chars), applied by `applyUiFont()` in `src/main.ts`
+  prepending the family to the stock stack so missing glyphs fall back.
+  The Settings dropdown is a body-level fixed menu (the settings
+  accordion clips absolutely-positioned children), each option rendered
+  in its own face.
 
 ## Important relationships
 

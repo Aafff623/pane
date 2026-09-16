@@ -1,5 +1,28 @@
 # Changelog
 
+## 0.4.61 — 2026-09-16
+
+### Added
+- **Custom UI font picker.** Settings → General → Font lists every font
+  family installed on the system (DirectWrite enumeration, localized
+  names included — 微软雅黑 and Microsoft YaHei UI both resolve). The
+  dropdown renders each option in its own face, filters as you type,
+  supports arrow/Enter/Esc, marks the active family, and follows the
+  light/dark theme. A picked family replaces only the head of the stock
+  stack (missing glyphs still fall back); clearing the field restores
+  the default. Persisted as `uiFont` in config.json and re-applied
+  before first paint on launch.
+- **Kimi monthly quota anchor.** Kimi's membership-wide monthly limit
+  never appears in the usage API — it surfaces only as failed
+  inference requests. The refresh day (the 27th) is now measured from
+  the member dashboard instead of being probed for: while walled, the
+  panel classifies Kimi as unavailable with a "refreshes on the 27th"
+  countdown, the waiting probe sleeps entirely (zero requests until
+  the anchor passes, then the 30-min rhythm confirms recovery), and
+  healthy rounds still probe once per refresh to catch a new wall
+  early. Restarting pane forces a fresh probe (e.g. after buying
+  Extra Usage ahead of the anchor).
+
 ## 0.4.60 — 2026-09-15
 
 ### Added
