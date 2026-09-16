@@ -51,6 +51,9 @@ rusqlite = { version = "0.32", features = ["bundled", "backup"] }
 toml = "0.8"
 regex = "1"
 prost = "0.13" # Grok GetRemainingResets protobuf codec
+# Settings font picker: enumerate installed family names (DirectWrite on
+# Windows). Cross-platform, so it stays out of the windows-only block.
+font-kit = "0.14"
 
 # Win32 is reached only through src/platform/windows.rs. Keeping these
 # target-scoped is what lets the crate compile at all on Linux and macOS —

@@ -25,7 +25,9 @@
   --spend-cursor: #ececef;
   --radius: 10px;
 
-  font-family: "Segoe UI Variable", "Segoe UI", system-ui, sans-serif;
+  /* Stock stack — main.ts applyUiFont() prepends the same list after a
+     custom --app-font; keep the two in sync. */
+  font-family: var(--app-font, "Segoe UI Variable", "Segoe UI", system-ui, sans-serif);
   font-size: 14px;
   color-scheme: dark;
 }
@@ -465,6 +467,70 @@ select:focus-visible {
   flex: 1;
   min-width: 0;
   background: var(--background);
+}
+
+/* Custom font picker (Settings → Font). The native datalist popup renders
+   in WebView2's default white and can't be themed or per-option styled, so
+   the menu is a body-level fixed layer positioned under the input. */
+#ui-font {
+  flex: 1;
+  min-width: 0;
+  background: var(--background);
+  border: 1px solid var(--input);
+  border-radius: 7px;
+  color: var(--foreground);
+  font-size: 12px;
+  padding: 5px 9px;
+  transition: border-color 0.15s, box-shadow 0.15s;
+  outline: none;
+}
+
+#ui-font:focus-visible {
+  border-color: #52525b;
+  box-shadow: 0 0 0 3px rgb(212 212 216 / 0.12);
+}
+
+.font-menu {
+  position: fixed;
+  /* Above Settings/Customize (50). */
+  z-index: 70;
+  max-height: 240px;
+  overflow-y: auto;
+  background: var(--background);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: 0 10px 30px rgb(0 0 0 / 0.35);
+  padding: 4px;
+}
+
+.font-option {
+  position: relative;
+  padding: 6px 26px 6px 9px;
+  border-radius: 6px;
+  font-size: 13px;
+  color: var(--foreground);
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.font-option:hover,
+.font-option.focused {
+  background: var(--accent);
+}
+
+.font-option.selected::after {
+  content: "\2713";
+  position: absolute;
+  right: 9px;
+  color: var(--muted-foreground);
+}
+
+.font-empty {
+  padding: 8px 9px;
+  font-size: 12px;
+  color: var(--muted-foreground);
 }
 
 .unit {

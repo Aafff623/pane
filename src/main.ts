@@ -198,6 +198,7 @@ interface Config {
   layout: Layout | null;
   appearance: "system" | "light" | "dark";
   density: "regular" | "compact";
+  uiFont: string;
   glassEffects: boolean;
   shortcut: string;
   proxy: { enabled: boolean; url: string };
@@ -228,6 +229,7 @@ const FRONTEND_CONFIG_KEYS = [
   "layout",
   "appearance",
   "density",
+  "uiFont",
   "glassEffects",
   "shortcut",
   "proxy",
@@ -418,6 +420,7 @@ let config: Config = {
   layout: null,
   appearance: "system",
   density: "regular",
+  uiFont: "",
   glassEffects: true,
   shortcut: "",
   proxy: { enabled: false, url: "" },
@@ -3632,6 +3635,127 @@ function applyAppearance(): void {
     btn.title = mode === "light" ? t("sidebar.themeToDark") : t("sidebar.themeToLight");
     delete btn.dataset.tip;
   }
+  applyUiFont();
+}
+
+/// Settings font picker: a custom family replaces only the head of the
+/// stock stack (kept in sync with the var() fallback in styles.css :root),
+/// so missing glyphs still fall back. Cleared = stock font. String() guards
+/// against a hand-edited config.json carrying a non-string uiFont.
+function applyUiFont(): void {
+  const root = document.documentElement;
+  const font = String(config.uiFont ?? "").trim();
+  if (!font) {
+    root.style.removeProperty("--app-font");
+    return;
+  }
+  const safe = font.replace(/[\\"]/g, "\\$&");
+  root.style.setProperty(
+    "--app-font",
+    `"${safe}", "Segoe UI Variable", "Segoe UI", system-ui, sans-serif`,
+  );
+}
+
+/// Settings font picker internals. The menu is a body-level fixed layer (the
+/// accordion clips absolutely-positioned children) styled with theme vars;
+/// each option renders its own name in its own font.
+let systemFontFamilies: string[] | null = null; // null until loaded; reset on failure = retry next open
+let fontMenu: HTMLDivElement | null = null;
+let fontMenuList: string[] = [];
+let fontMenuFocused = -1;
+
+/// Quote a family name for use inside a CSS "..." string.
+function cssFontName(name: string): string {
+  return name.replace(/[\\"]/g, "\\$&");
+}
+
+function fontStack(name: string): string {
+  return `"${cssFontName(name)}", "Segoe UI Variable", "Segoe UI", system-ui, sans-serif`;
+}
+
+async function ensureSystemFonts(): Promise<void> {
+  if (systemFontFamilies) return;
+  try {
+    systemFontFamilies = await invoke<string[]>("list_system_fonts");
+  } catch {
+    // Leave null so the next focus retries the enumeration.
+  }
+}
+
+function closeFontMenu(): void {
+  fontMenu?.remove();
+  fontMenu = null;
+  fontMenuFocused = -1;
+  document.removeEventListener("pointerdown", onFontMenuOutside);
+  // Discard typed-but-unapplied text so the field always mirrors config.
+  const input = document.querySelector<HTMLInputElement>("#ui-font");
+  if (input && String(config.uiFont ?? "") !== input.value) {
+    input.value = String(config.uiFont ?? "");
+    input.style.fontFamily = config.uiFont ? fontStack(config.uiFont) : "";
+  }
+}
+
+function onFontMenuOutside(e: PointerEvent): void {
+  const target = e.target as Node;
+  const input = document.querySelector<HTMLInputElement>("#ui-font");
+  if (fontMenu && !fontMenu.contains(target) && target !== input) closeFontMenu();
+}
+
+function renderFontOptions(filter: string): void {
+  const menu = fontMenu;
+  if (!menu) return;
+  const all = systemFontFamilies ?? [];
+  const q = filter.trim().toLowerCase();
+  fontMenuList = q ? all.filter((f) => f.toLowerCase().includes(q)) : all;
+  const current = String(config.uiFont ?? "").trim().toLowerCase();
+  fontMenuFocused = fontMenuList.length ? 0 : -1;
+  menu.textContent = "";
+  if (!fontMenuList.length) {
+    const empty = document.createElement("div");
+    empty.className = "font-empty";
+    empty.textContent = t("settings.fontNone");
+    menu.appendChild(empty);
+    return;
+  }
+  fontMenuList.forEach((name, i) => {
+    const opt = document.createElement("div");
+    opt.className =
+      `font-option${name.toLowerCase() === current ? " selected" : ""}` +
+      `${i === fontMenuFocused ? " focused" : ""}`;
+    opt.textContent = name;
+    opt.style.fontFamily = fontStack(name);
+    menu.appendChild(opt);
+  });
+}
+
+function openFontMenu(): void {
+  closeFontMenu();
+  const input = document.querySelector<HTMLInputElement>("#ui-font");
+  if (!input) return;
+  const menu = document.createElement("div");
+  menu.className = "font-menu";
+  menu.addEventListener("click", (e) => {
+    const opt = (e.target as HTMLElement).closest<HTMLElement>(".font-option");
+    if (opt?.textContent) selectFont(opt.textContent);
+  });
+  document.body.appendChild(menu);
+  fontMenu = menu;
+  const rect = input.getBoundingClientRect();
+  menu.style.left = `${rect.left}px`;
+  menu.style.top = `${rect.bottom + 4}px`;
+  menu.style.width = `${Math.max(rect.width, 220)}px`;
+  void ensureSystemFonts().then(() => renderFontOptions(input.value));
+  document.addEventListener("pointerdown", onFontMenuOutside);
+}
+
+function selectFont(name: string): void {
+  const input = document.querySelector<HTMLInputElement>("#ui-font");
+  if (input) {
+    input.value = name;
+    input.style.fontFamily = name ? fontStack(name) : "";
+  }
+  closeFontMenu();
+  void patchConfig({ uiFont: name }).then(applyAppearance);
 }
 
 /// Day/night toggle with the circular wipe from jazii.dev: the new theme
@@ -7266,6 +7390,37 @@ async function initSettings(): Promise<void> {
   appearance.value = config.appearance;
   appearance.addEventListener("change", () => {
     void patchConfig({ appearance: appearance.value as Config["appearance"] }).then(applyAppearance);
+  });
+
+  const uiFont = document.querySelector<HTMLInputElement>("#ui-font")!;
+  uiFont.value = config.uiFont ?? "";
+  if (config.uiFont) uiFont.style.fontFamily = fontStack(config.uiFont);
+  uiFont.addEventListener("focus", () => {
+    if (!fontMenu) openFontMenu();
+  });
+  uiFont.addEventListener("click", () => {
+    if (!fontMenu) openFontMenu();
+  });
+  uiFont.addEventListener("input", () => {
+    if (fontMenu) renderFontOptions(uiFont.value);
+  });
+  uiFont.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && fontMenu) {
+      closeFontMenu();
+      return;
+    }
+    if (!fontMenu) return;
+    if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+      e.preventDefault();
+      if (!fontMenuList.length) return;
+      const delta = e.key === "ArrowDown" ? 1 : -1;
+      fontMenuFocused = (fontMenuFocused + delta + fontMenuList.length) % fontMenuList.length;
+      renderFontOptions(uiFont.value);
+      fontMenu?.children[fontMenuFocused]?.scrollIntoView({ block: "nearest" });
+    } else if (e.key === "Enter" && fontMenuList[fontMenuFocused]) {
+      e.preventDefault();
+      selectFont(fontMenuList[fontMenuFocused]);
+    }
   });
 
   const density = document.querySelector<HTMLInputElement>("#density")!;

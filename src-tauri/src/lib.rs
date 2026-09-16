@@ -2,6 +2,7 @@ mod accounts;
 mod antigravity_accounts;
 mod cursor_accounts;
 mod cursor_oauth;
+mod fonts;
 mod alerts;
 mod httpapi;
 mod i18n;
@@ -120,6 +121,8 @@ fn config_with_defaults(mut cfg: Value) -> Value {
     obj.entry("layout").or_insert(Value::Null);
     obj.entry("appearance").or_insert(json!("dark"));
     obj.entry("density").or_insert(json!("compact"));
+    // Empty = stock UI font stack; a family name replaces only the head of it.
+    obj.entry("uiFont").or_insert(json!(""));
     obj.entry("glassEffects").or_insert(json!(true));
     obj.entry("shortcut").or_insert(json!("Alt+2"));
     obj.entry("proxy")
@@ -175,6 +178,7 @@ const CONFIG_KEYS: &[&str] = &[
     "layout",
     "appearance",
     "density",
+    "uiFont",
     "glassEffects",
     "shortcut",
     "proxy",
@@ -198,6 +202,12 @@ fn apply_config_patch(cfg: &mut Value, patch: &Value) {
                 if k == "locale" {
                     let ok = matches!(v.as_str(), Some("auto" | "en" | "zh" | "ru"));
                     target.insert(k.clone(), if ok { v.clone() } else { json!("auto") });
+                } else if k == "uiFont" {
+                    // A font family name at most — trim and cap so a stray
+                    // paste can't bloat config.json.
+                    let name = v.as_str().map(str::trim).unwrap_or("");
+                    let ok = name.chars().count() <= 100;
+                    target.insert(k.clone(), json!(if ok { name } else { "" }));
                 } else {
                     target.insert(k.clone(), v.clone());
                 }
@@ -252,6 +262,11 @@ fn set_config(app: tauri::AppHandle, patch: Value) -> Result<Value, String> {
     let cfg = set_config_inner(patch)?;
     apply_tray_locale(&app, &cfg);
     Ok(cfg)
+}
+
+#[tauri::command]
+fn list_system_fonts() -> Vec<String> {
+    fonts::system_font_families()
 }
 
 fn apply_tray_locale(app: &tauri::AppHandle, cfg: &Value) {
@@ -3581,6 +3596,7 @@ pub fn run() {
             get_config,
             set_config,
             system_ui_locale,
+            list_system_fonts,
             get_autostart,
             set_autostart,
             sync_tray_surfaces,
