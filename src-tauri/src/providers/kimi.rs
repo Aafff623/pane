@@ -19,7 +19,7 @@
 //! (issue #173). Login wins when both exist; the key is a fallback only.
 
 use super::{http, stored_api_key, Metric, Snapshot};
-use chrono::{DateTime, Local, Utc};
+use chrono::{DateTime, Datelike, Local, TimeZone, Utc};
 use serde_json::Value;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -364,6 +364,26 @@ async fn fetch_usages(access: &str) -> Result<Value, UsagesError> {
 const MONTH_MS: i64 = 30 * DAY_MS;
 const MAX_PROBE_BODY_BYTES: usize = 8 * 1024;
 
+/// Day of month the Kimi membership quota refreshes. Measured from the
+/// owner's member dashboard screenshot (2026-09-16): "2026·08·27 后重置",
+/// cross-checked by "有效期至 2027·04·27". Date precision only — the
+/// dashboard shows no time of day — so the instant is modeled as local
+/// midnight; if the real refresh lands later that day, probes resume at
+/// midnight and fall back to the 30-minute rhythm until the wall lifts.
+const MONTHLY_RESET_DAY: u32 = 27;
+
+/// The reset instant this wall is waiting on: local midnight of
+/// MONTHLY_RESET_DAY, this month, while it is still in the future. Once
+/// the day passes, the anchor is spent — None sends probing back to the
+/// 30-minute rhythm until the quota actually returns.
+fn upcoming_monthly_reset_ms(now_ms: i64) -> Option<i64> {
+    let now_local = DateTime::from_timestamp_millis(now_ms)?.with_timezone(&Local);
+    let this_reset = Local
+        .with_ymd_and_hms(now_local.year(), now_local.month(), MONTHLY_RESET_DAY, 0, 0, 0)
+        .single()?;
+    (now_local < this_reset).then_some(this_reset.timestamp_millis())
+}
+
 /// While the monthly wall stands, one probe every 30 minutes is enough —
 /// the answer only changes at the reset, and each probe burns plan tokens.
 /// Healthy accounts keep probing on every refresh so a fresh wall is
@@ -381,6 +401,10 @@ struct ProbeMemo {
     /// Some(row) = the monthly wall stands (cached meter); None = the
     /// account answered, no monthly cap in the way.
     monthly: Option<Metric>,
+    /// While waiting on the known monthly anchor (MONTHLY_RESET_DAY) this
+    /// carries the reset instant and probes stay silent until it passes;
+    /// None = unknown or already past — legacy 30-minute re-probing.
+    resets_at: Option<i64>,
 }
 
 fn probe_memos() -> &'static Mutex<HashMap<String, ProbeMemo>> {
@@ -433,16 +457,26 @@ fn note_probe(now_ms: i64, outcome: ProbeOutcome) {
 /// endpoint never reports. Returns the full "Monthly" row only when the
 /// rejection text names the monthly limit — a plain 429 (per-minute rate
 /// limit) is not a monthly wall, and neither is any other failure: those
-/// yield None and leave the memo untouched. A confirmed wall is re-probed
-/// at most every 30 minutes (cached row in between, so the card stays red
-/// with a live countdown); the moment a probe gets through, the row
-/// disappears and the card drifts back to the available section on its
-/// own. Every real attempt is timestamped in kimi_probe_log.json.
+/// yield None and leave the memo untouched.
+///
+/// While a confirmed wall stands, probes go quiet: with the known anchor
+/// (MONTHLY_RESET_DAY, from the member dashboard) the quota can only come
+/// back at the reset instant, so no traffic is spent until then and the
+/// cached row shows the reset date. After the instant passes (or when the
+/// anchor is unknown) the row is re-checked at most every 30 minutes so an
+/// early lift — a purchased Extra Usage pack, a plan change — is caught
+/// within half an hour. Healthy accounts keep probing on every refresh so
+/// a fresh wall is caught within one cycle. Every real attempt is
+/// timestamped in kimi_probe_log.json.
 async fn monthly_limit_row(access: &str) -> Option<Metric> {
     let now_ms = Utc::now().timestamp_millis();
     if let Some(memo) = probe_memos().lock().unwrap().get(access) {
-        if memo.monthly.is_some() && now_ms - memo.probed_at_ms < WALLED_REPROBE_MS {
-            return cached_monthly_row(memo);
+        if memo.monthly.is_some() {
+            let waiting_on_anchor =
+                memo.resets_at.is_some_and(|resets_at| now_ms < resets_at);
+            if waiting_on_anchor || now_ms - memo.probed_at_ms < WALLED_REPROBE_MS {
+                return cached_monthly_row(memo);
+            }
         }
     }
     let resp = http()
@@ -471,7 +505,7 @@ async fn monthly_limit_row(access: &str) -> Option<Metric> {
         probe_memos()
             .lock()
             .unwrap()
-            .insert(access.to_string(), ProbeMemo { probed_at_ms: now_ms, monthly: None });
+            .insert(access.to_string(), ProbeMemo { probed_at_ms: now_ms, monthly: None, resets_at: None });
         note_probe(now_ms, ProbeOutcome::Ok);
         return None;
     }
@@ -487,22 +521,40 @@ async fn monthly_limit_row(access: &str) -> Option<Metric> {
         probe_memos()
             .lock()
             .unwrap()
-            .insert(access.to_string(), ProbeMemo { probed_at_ms: now_ms, monthly: monthly.clone() });
+            .insert(access.to_string(), ProbeMemo {
+                probed_at_ms: now_ms,
+                monthly: monthly.clone(),
+                resets_at: upcoming_monthly_reset_ms(now_ms),
+            });
     }
     monthly
 }
 
-/// The cached wall between re-probes, annotated with when the next check
-/// is due so the 30-minute rhythm is visible on the card itself.
+/// The cached wall between re-probes. With the anchor armed the row shows
+/// the measured reset date (the instant is modeled as local midnight — the
+/// dashboard only proves the day of month); without it, when the next
+/// probe is due. The structured `resets_at` lets the UI render its own
+/// countdown either way.
 fn cached_monthly_row(memo: &ProbeMemo) -> Option<Metric> {
     let mut row = memo.monthly.clone()?;
-    let next = DateTime::from_timestamp_millis(memo.probed_at_ms + WALLED_REPROBE_MS)
-        .map(|t| t.with_timezone(&Local).format("%H:%M").to_string());
-    if let Some(next) = next {
-        row.detail = Some(match row.detail {
-            Some(d) => format!("{d} · next check {next}"),
-            None => format!("next check {next}"),
-        });
+    match memo.resets_at {
+        Some(resets_at) => {
+            row.detail = Some(match row.detail {
+                Some(d) => format!("{d} · refreshes on the 27th (member dashboard)"),
+                None => "refreshes on the 27th (member dashboard)".to_string(),
+            });
+            row = row.with_reset(Some(resets_at), Some(MONTH_MS));
+        }
+        None => {
+            let next = DateTime::from_timestamp_millis(memo.probed_at_ms + WALLED_REPROBE_MS)
+                .map(|t| t.with_timezone(&Local).format("%H:%M").to_string());
+            if let Some(next) = next {
+                row.detail = Some(match row.detail {
+                    Some(d) => format!("{d} · next check {next}"),
+                    None => format!("next check {next}"),
+                });
+            }
+        }
     }
     Some(row)
 }
