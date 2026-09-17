@@ -135,19 +135,118 @@ fn parse_snapshot(plan: Option<&str>, usage: &Value) -> Result<Snapshot, String>
         return Err("usage_summary has no credit totals".into());
     };
 
-    let packs = usage
+    // The merged row stays the card's primary budget (ring, overview,
+    // layout key) and carries no reset date — it sums packs with different
+    // expiries, so any single date would misread. The per-pack rows below
+    // own the expiry detail.
+    let pct = if total > 0.0 { (consumed / total * 100.0).clamp(0.0, 100.0) } else { 0.0 };
+    let mut metrics = vec![Metric::progress("Credits", pct, Some(format!("{consumed:.2} of {total:.0} credits used")))];
+    metrics.extend(pack_rows(usage));
+    Ok(Snapshot::ok(ID, NAME, plan.map(str::to_string), metrics))
+}
+
+/// Trae stacks several hard-expiry credit packs (loyalty perk, monthly
+/// login bonus, daily check-ins…). The API reports per-pack usage only on
+/// the pack it is currently draining, so the pack being spent renders as a
+/// progress row while untouched ones become text rows with amount and
+/// expiry. Packs merge only when BOTH the display name and the credit
+/// scope match — Trae's own dashboard splits 通用积分 (usable on
+/// TraeCode + TraeWork) from Work 专属积分 (TraeWork only), and the API
+/// carries that as `available_endpoint` (0 general / 1 Work-only; both
+/// loyalty packs share one display_desc, so name alone would fuse two
+/// different budgets). Entries without a numeric credits_limit (e.g. the
+/// "免费" pack, which is a feature-flags blob, not credits) are skipped.
+fn pack_rows(usage: &Value) -> Vec<Metric> {
+    struct Group {
+        desc: String,
+        work_only: bool,
+        limit: f64,
+        used: Option<f64>,
+        end_ms: Option<i64>,
+    }
+    let mut groups: Vec<Group> = Vec::new();
+    for pack in usage
         .get("user_entitlement_pack_list")
         .and_then(Value::as_array)
-        .map(|a| a.len())
-        .unwrap_or(0);
-    let mut detail = format!("{consumed:.2} of {total:.0} credits used");
-    if packs > 1 {
-        detail.push_str(&format!(" · {packs} packs"));
+        .into_iter()
+        .flatten()
+    {
+        let Some(limit) = json_f64(pack.pointer("/entitlement_base_info/quota/credits_limit")) else {
+            continue;
+        };
+        let desc = pack
+            .get("display_desc")
+            .and_then(Value::as_str)
+            .filter(|s| !s.is_empty())
+            .unwrap_or("Credit pack");
+        let work_only = pack
+            .pointer("/entitlement_base_info/available_endpoint")
+            .and_then(Value::as_i64)
+            .map(|v| v == 1)
+            .unwrap_or(false);
+        let used = json_f64(pack.pointer("/usage/credits_amount"));
+        let end = json_f64(pack.get("end_time"))
+            .or_else(|| json_f64(pack.pointer("/entitlement_base_info/end_time")))
+            .map(epoch_ms);
+        match groups
+            .iter_mut()
+            .find(|g| g.desc == desc && g.work_only == work_only)
+        {
+            Some(g) => {
+                g.limit += limit;
+                if let Some(u) = used {
+                    g.used = Some(g.used.unwrap_or(0.0) + u);
+                }
+                if let Some(e) = end {
+                    g.end_ms = Some(g.end_ms.map_or(e, |prev| prev.min(e)));
+                }
+            }
+            None => groups.push(Group { desc: desc.to_string(), work_only, limit, used, end_ms: end }),
+        }
     }
+    // Soonest-expiring first — that is the row to act on.
+    groups.sort_by_key(|g| g.end_ms.unwrap_or(i64::MAX));
+    groups
+        .into_iter()
+        .map(|g| {
+            // "(Work)" marks the TraeWork-only scope. Stripping " credits"
+            // keeps the label short — text rows render label and value in
+            // narrow columns, and a long label wraps both.
+            let mut label = pack_label(&g.desc);
+            if g.work_only {
+                label = label.replace(" credits", "");
+                label.push_str(" (Work)");
+            }
+            let reset = g.end_ms.filter(|ms| *ms > 0);
+            match g.used {
+                Some(used) if g.limit > 0.0 => {
+                    let pct = (used / g.limit * 100.0).clamp(0.0, 100.0);
+                    Metric::progress(&label, pct, Some(format!("{used:.2} of {:.0} credits used", g.limit)))
+                        .with_reset(reset, None)
+                }
+                _ => {
+                    let expires = reset
+                        .and_then(|ms| chrono::DateTime::from_timestamp(ms / 1000, 0))
+                        .map(|t| t.with_timezone(&chrono::Local).format(" · expires %Y-%m-%d").to_string())
+                        .unwrap_or_default();
+                    Metric::text(&label, format!("{:.0} credits{expires}", g.limit))
+                        .with_reset(reset, None)
+                }
+            }
+        })
+        .collect()
+}
 
-    let pct = if total > 0.0 { (consumed / total * 100.0).clamp(0.0, 100.0) } else { 0.0 };
-    let metrics = vec![Metric::progress("Credits", pct, Some(detail))];
-    Ok(Snapshot::ok(ID, NAME, plan.map(str::to_string), metrics))
+/// Vendor pack names are Chinese-only; keep Pane's metric labels English
+/// for the packs seen in the wild and fall back to the raw desc for new
+/// ones (better a Chinese label than a dropped pack).
+fn pack_label(desc: &str) -> String {
+    match desc {
+        "老用户福利" => "Loyalty credits".into(),
+        "每月登录赠送" => "Monthly bonus".into(),
+        "签到奖励" => "Check-in credits".into(),
+        other => other.to_string(),
+    }
 }
 
 // ---- ByteCrypto -------------------------------------------------------------
@@ -260,6 +359,15 @@ fn json_f64(v: Option<&Value>) -> Option<f64> {
     }
 }
 
+/// Trae sends epoch seconds in `end_time`; tolerate millis.
+fn epoch_ms(n: f64) -> i64 {
+    if n.abs() >= 1e12 {
+        n as i64
+    } else {
+        (n * 1000.0) as i64
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -337,33 +445,109 @@ mod tests {
 
     #[test]
     fn parses_the_real_usage_shape() {
+        // Trimmed mirror of a real 6-pack account: the two loyalty packs
+        // share a display_desc but differ in scope (general vs Work-only).
         let usage = json!({
             "is_credits_billing": true,
             "usage_summary": {
-                "consumed_amount": 84.02,
-                "total_amount": 4800,
-                "consumption_ratio": 0.017504166666666664
+                "consumed_amount": 134.52,
+                "total_amount": 4800
             },
             "user_entitlement_pack_list": [
-                {"display_desc": "老用户福利", "group_name": "用户福利",
-                 "entitlement_base_info": {"quota": {"credits_limit": 2000}, "end_time": 1791716393}},
-                {"display_desc": "新用户积分", "group_name": "新用户",
-                 "entitlement_base_info": {"quota": {"credits_limit": 800}, "end_time": 1791716393}}
+                {"display_desc": "老用户福利", "end_time": 1791716393,
+                 "entitlement_base_info": {"available_endpoint": 0, "end_time": 1791716393,
+                                           "quota": {"credits_limit": 2000}}},
+                {"display_desc": "老用户福利", "end_time": 1791716393,
+                 "entitlement_base_info": {"available_endpoint": 1, "end_time": 1791716393,
+                                           "quota": {"credits_limit": 2000}}},
+                {"display_desc": "免费", "end_time": 1790783999,
+                 "entitlement_base_info": {"available_endpoint": 0,
+                                           "quota": {"enable_solo_agent": true}}},
+                {"display_desc": "每月登录赠送", "end_time": 1790783999,
+                 "usage": {"credits_amount": 134.5168},
+                 "entitlement_base_info": {"available_endpoint": 0, "end_time": 1790783999,
+                                           "quota": {"credits_limit": 500}}},
+                {"display_desc": "签到奖励", "end_time": 1791716463,
+                 "entitlement_base_info": {"available_endpoint": 0, "end_time": 1791716463,
+                                           "quota": {"credits_limit": 150}}},
+                {"display_desc": "签到奖励", "end_time": 1791778277,
+                 "entitlement_base_info": {"available_endpoint": 0, "end_time": 1791778277,
+                                           "quota": {"credits_limit": 150}}}
             ]
         });
         let snap = parse_snapshot(Some("Free"), &usage).expect("parse");
         assert_eq!(snap.id, "traecn");
         assert_eq!(snap.name, "Trae CN");
         assert_eq!(snap.plan.as_deref(), Some("Free"));
-        assert_eq!(snap.metrics.len(), 1);
-        let row = &snap.metrics[0];
-        assert_eq!(row.label, "Credits");
-        assert!((row.used_percent.unwrap() - (84.02 / 4800.0 * 100.0)).abs() < 0.001);
-        assert_eq!(row.detail.as_deref(), Some("84.02 of 4800 credits used · 2 packs"));
+        // Credits + Monthly bonus + 2× loyalty scopes + merged check-ins.
+        // The "免费" feature-flag pack is gone.
+        let labels: Vec<&str> = snap.metrics.iter().map(|m| m.label.as_str()).collect();
+        assert_eq!(
+            labels,
+            ["Credits", "Monthly bonus", "Loyalty credits", "Loyalty (Work)", "Check-in credits"]
+        );
+        // Merged budget row: no reset date (it sums packs with different
+        // expiries), no pack count once packs get their own rows.
+        let merged = &snap.metrics[0];
+        assert!((merged.used_percent.unwrap() - (134.52 / 4800.0 * 100.0)).abs() < 0.001);
+        assert_eq!(merged.detail.as_deref(), Some("134.52 of 4800 credits used"));
+        assert_eq!(merged.resets_at, None);
+        // The pack currently being drained renders as a progress row with
+        // a countdown; soonest-expiring rows come first.
+        let monthly = &snap.metrics[1];
+        assert!((monthly.used_percent.unwrap() - (134.5168 / 500.0 * 100.0)).abs() < 0.001);
+        assert_eq!(monthly.resets_at, Some(1_790_783_999_000));
+        assert_eq!(monthly.detail.as_deref(), Some("134.52 of 500 credits used"));
+        let loyalty = &snap.metrics[2];
+        assert_eq!(loyalty.value.as_deref(), Some("2000 credits · expires 2026-10-11"));
+        let work = &snap.metrics[3];
+        assert_eq!(work.value.as_deref(), Some("2000 credits · expires 2026-10-11"));
+        // Check-ins merged across entries, earliest end kept.
+        let checkin = &snap.metrics[4];
+        assert_eq!(checkin.value.as_deref(), Some("300 credits · expires 2026-10-11"));
+        assert_eq!(checkin.resets_at, Some(1_791_716_463_000));
     }
 
     #[test]
-    fn single_pack_detail_has_no_pack_suffix() {
+    fn packs_without_endpoint_field_still_merge() {
+        let usage = json!({
+            "usage_summary": {"consumed_amount": 84.02, "total_amount": 4800},
+            "user_entitlement_pack_list": [
+                {"display_desc": "老用户福利",
+                 "entitlement_base_info": {"quota": {"credits_limit": 2000}, "end_time": 1791716393}},
+                {"display_desc": "老用户福利",
+                 "entitlement_base_info": {"quota": {"credits_limit": 800}, "end_time": 1791716393}}
+            ]
+        });
+        let snap = parse_snapshot(Some("Free"), &usage).expect("parse");
+        assert_eq!(snap.metrics.len(), 2);
+        assert_eq!(snap.metrics[1].label, "Loyalty credits");
+        assert!(snap.metrics[1].value.as_deref().unwrap().starts_with("2800 credits · expires 2026-10-"));
+    }
+
+    #[test]
+    fn feature_flag_pack_skipped_and_millis_end_kept() {
+        let usage = json!({
+            "usage_summary": {"consumed_amount": 0.0, "total_amount": 650},
+            "user_entitlement_pack_list": [
+                // "免费" carries solo-agent feature flags, not credits.
+                {"display_desc": "免费", "end_time": 1790783999,
+                 "entitlement_base_info": {"quota": {"enable_solo_agent": true}}},
+                // Millis end_time must pass through unscaled.
+                {"display_desc": "签到奖励", "end_time": 1_791_716_463_000i64,
+                 "entitlement_base_info": {"quota": {"credits_limit": 150}}}
+            ]
+        });
+        let snap = parse_snapshot(None, &usage).expect("parse");
+        assert_eq!(snap.metrics.len(), 2);
+        let checkin = &snap.metrics[1];
+        assert_eq!(checkin.label, "Check-in credits");
+        assert_eq!(checkin.resets_at, Some(1_791_716_463_000));
+        assert!(checkin.value.as_deref().unwrap().starts_with("150 credits · expires 2026-"));
+    }
+
+    #[test]
+    fn pack_without_end_has_no_expiry_suffix() {
         let usage = json!({
             "usage_summary": {"consumed_amount": 0.0, "total_amount": 500},
             "user_entitlement_pack_list": [
@@ -371,11 +555,20 @@ mod tests {
             ]
         });
         let snap = parse_snapshot(None, &usage).expect("parse");
-        assert_eq!(snap.plan, None);
-        assert_eq!(
-            snap.metrics[0].detail.as_deref(),
-            Some("0.00 of 500 credits used")
-        );
+        assert_eq!(snap.metrics.len(), 2);
+        assert_eq!(snap.metrics[1].label, "x");
+        assert_eq!(snap.metrics[1].value.as_deref(), Some("500 credits"));
+        assert_eq!(snap.metrics[1].resets_at, None);
+    }
+
+    #[test]
+    fn no_pack_list_is_just_the_merged_row() {
+        let usage = json!({
+            "usage_summary": {"consumed_amount": 1.0, "total_amount": 100.0}
+        });
+        let snap = parse_snapshot(None, &usage).expect("parse");
+        assert_eq!(snap.metrics.len(), 1);
+        assert_eq!(snap.metrics[0].label, "Credits");
     }
 
     #[test]
