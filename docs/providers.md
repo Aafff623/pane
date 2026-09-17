@@ -481,9 +481,17 @@ Ground rules that apply to every provider:
   `POST /trae/api/v2/pay/ide_user_pay_status`, both with the
   `Cloud-IDE-JWT` authorization header — the same calls the IDE's own
   credits page makes.
-- **Shows:** the aggregated credits meter (`usage_summary`
-  consumed/total across every credit pack, with the pack count) and the
-  account tier (Free/Pro). Expired token → open Trae CN once and refresh.
+- **Shows:** one row per credit pack plus the account tier (Free/Pro).
+  The summed "Credits" row (`usage_summary` consumed/total) stays reset-
+  free — packs expire on different days. Each pack renders separately,
+  merged only with same-name same-scope siblings: the pack currently
+  being drained (the only one carrying `usage.credits_amount`) is a
+  progress row with a countdown; untouched packs are text rows
+  "N credits · expires YYYY-MM-DD", soonest expiry first. Scope mirrors
+  the official dashboard via `available_endpoint` (0 = general
+  TraeCode/TraeWork credits, 1 = TraeWork-only, suffixed "(Work)").
+  Feature-flag-only packs (e.g. 免费, no `credits_limit`) are skipped.
+  Expired token → open Trae CN once and refresh.
 
 ---
 

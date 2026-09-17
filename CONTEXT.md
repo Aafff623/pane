@@ -39,6 +39,18 @@ anything unverified lives under `待确认` at the bottom.
   warning, dashboard_url}`.
 - **Metric** — `kind: "progress"` carries `used_percent` / `resets_at` /
   `period_ms`; `kind: "text"` rows are informational.
+- **Trae CN credit packs** — `user_entitlement_pack_list` stacks several
+  hard-expiry packs (verified 2026-09-17): `usage.credits_amount` exists
+  ONLY on the pack currently being drained (others `{}`), so only that
+  one can render as a progress row; `end_time` is epoch seconds.
+  `entitlement_base_info.available_endpoint` 0/1 = general
+  (TraeCode+TraeWork) vs TraeWork-only scope — same-name packs can
+  differ in scope, so pack rows merge by display_desc+scope and Work
+  rows get a " (Work)" label suffix. The summed "Credits" row carries
+  NO resets_at (mixed expiries; a single date would misread) —
+  expiry-as-reset on a merged row stays the convention only for
+  single-expiry sums (Doubao earliest-expiry, Codex per-credit rows).
+  The 免费 pack is feature flags (no `credits_limit`), not credits.
 - **AccountEntry** — generic api-key account (`label`, `apiKey`, optional
   `baseUrl` for relaybalance), stored in `accounts/<family>.json`.
 - **AgSlot** — Antigravity captured Google OAuth bundle (the IDE keeps one

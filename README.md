@@ -239,7 +239,7 @@ under [Privacy](#privacy--security).
 | Novita AI | API key (Settings or `NOVITA_API_KEY`) → USD balance |
 | Custom Balance | Base URL + API key (Settings) → OpenAI-compatible billing (`/dashboard/billing/subscription` + `/usage`) at any relay that exposes it |
 | Qoder CN | Qoder CN desktop app's encrypted sign-in (`auth.v1.dat`) → CN OpenAPI plan tier + credit pools with dedicated model packages |
-| Trae CN | Trae CN desktop app's sign-in (`storage.json`) → credits meter aggregated across every credit pack + account tier |
+| Trae CN | Trae CN desktop app's sign-in (`storage.json`) → one row per credit pack (scope-split general vs Work-only, each with its own expiry; the pack being drained as a progress bar) + account tier |
 | Command Code | Command Code API key (Settings, `COMMAND_CODE_API_KEY`, or the CLI's `auth.json`) → 5h / weekly / monthly credit windows + extra credits; multiple GOAT subscriptions side by side |
 | Doubao | Doubao desktop sign-in cookies (read while Doubao is quit, cached ~30 days) → 5h / 7-day windows, subscription renewal, quota-reset-card balance |
 | ClawsGO | ClawsGO token from the browser (`localStorage.clawsgo_token`) → monthly credit meter, remaining balance, 30-day requests + tokens |
@@ -302,7 +302,9 @@ whatever the community asks for loudest.
   render as logo + percentage pairs directly in the tray.
 - **Customize** — drag any card by its grip right in the popover to
   reorder, or open the Customize screen (☰) to reorder metrics, hide
-  rows, and tuck rarely-needed ones behind an "On Demand" caret; folded
+  rows, and tuck rarely-needed ones behind an "On Demand" caret; every
+  row head shows the provider's brand mark (or a "?" placeholder),
+  blocks sit in the same card-group sections as the dashboard, and folded
   cards surface their nearest reset countdown as a status-toned pill.
   Ctrl+Z undoes.
 - **Liquid glass UI** — real SDF lens refraction on the auto-hiding
