@@ -521,7 +521,7 @@ select:focus-visible {
 }
 
 .font-option.selected::after {
-  content: "\2713";
+  content: "✓";
   position: absolute;
   right: 9px;
   color: var(--muted-foreground);
@@ -838,16 +838,20 @@ select:focus-visible {
 }
 
 #trail {
-  --trail-icon-size: 28px;
-  --trail-inner-size: 18px;
-  --trail-gap: 6px;
-  --trail-dot-size: 5px;
+  --trail-icon-size: 22px;
+  --trail-inner-size: 14px;
+  --trail-gap: 5px;
+  --trail-dot-size: 4px;
   width: 100%;
   flex: 1;
   min-height: 0;
   display: flex;
   flex-direction: column;
   align-items: center;
+  /* Center the tick stack vertically while it still fits; .is-overflowing
+     below flips to flex-start the moment it scrolls. `margin: auto 0` on a
+     flex:1 child is inert — this is what actually centers it. */
+  justify-content: center;
   gap: var(--trail-gap);
   padding: 4px 0;
   overflow-y: auto;
@@ -867,7 +871,7 @@ select:focus-visible {
 .trail-more {
   border: none;
   background: transparent;
-  width: var(--trail-icon-size, 28px);
+  width: var(--trail-icon-size, 22px);
   height: 14px;
   display: flex;
   align-items: center;
@@ -937,8 +941,8 @@ select:focus-visible {
 /* Provider-mark trail ticks: centered avatar box with authentic artwork */
 .trail-tick.trail-icon {
   position: relative;
-  width: var(--trail-icon-size, 28px);
-  height: var(--trail-icon-size, 28px);
+  width: var(--trail-icon-size, 22px);
+  height: var(--trail-icon-size, 22px);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -953,14 +957,14 @@ select:focus-visible {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: var(--trail-inner-size, 18px);
-  height: var(--trail-inner-size, 18px);
+  width: var(--trail-inner-size, 14px);
+  height: var(--trail-inner-size, 14px);
   pointer-events: none;
 }
 
 .trail-icon svg {
-  width: var(--trail-inner-size, 18px);
-  height: var(--trail-inner-size, 18px);
+  width: var(--trail-inner-size, 14px);
+  height: var(--trail-inner-size, 14px);
   display: block;
 }
 
@@ -1185,8 +1189,12 @@ article.provider.is-folded:hover {
 }
 
 .metric-label {
+  display: block;
   font-size: 12px;
   font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .detail {
@@ -1311,14 +1319,46 @@ article.provider.is-folded:hover {
   display: flex;
   justify-content: space-between;
   align-items: baseline;
+  gap: 8px;
   margin-top: 4px;
+}
+
+/* Card rows never fold to a second line: the left value keeps its width,
+   the right side shrinks with an ellipsis; hover shows the full text via
+   the row's title attribute. */
+.metric-foot .left-val {
+  flex: none;
+  white-space: nowrap;
+}
+
+.metric-foot .detail {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: right;
 }
 
 .metric-text {
   display: flex;
   justify-content: space-between;
+  gap: 8px;
   font-size: 12px;
   padding: 3px 0;
+}
+
+.metric-text > span:first-child {
+  flex: none;
+  white-space: nowrap;
+}
+
+.metric-text .detail,
+.metric-text .action-right {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: right;
 }
 
 .placeholder {
@@ -2995,6 +3035,51 @@ body.party .trail-tick.active {
   transform: rotate(180deg) translateY(-4px);
 }
 
+/* Brand mark in a Customize row head: the same SVG the dashboard cards
+   use; families without an SVG get a two-letter fallback tile. */
+.cust-head-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  flex: none;
+}
+
+.cust-head-icon svg {
+  width: 16px;
+  height: 16px;
+}
+
+.cust-head-icon .icon-fallback {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--muted-foreground);
+}
+
+/* Group section head inside Customize — mirrors the dashboard's card
+   groups but is a plain label (no folding; the drawer's own per-provider
+   accordions already handle collapse). */
+.cust-group-head {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  margin: 14px 2px 4px;
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted-foreground);
+}
+
+.cust-group-name {
+  font-weight: 700;
+}
+
+.cust-group-count {
+  font-size: 10px;
+  opacity: 0.8;
+}
+
 .customize-block .acc-body {
   display: grid;
   grid-template-rows: 0fr;
@@ -3531,7 +3616,7 @@ body.no-glass #confirm-box {
 .quota-overview .provider-head {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
   min-width: 0;
 }
 
@@ -3678,9 +3763,16 @@ body.no-glass #confirm-box {
 
 .quota-overview .overview-tabs .tab {
   flex: none;
-  padding: 3px 7px;
-  font-size: 10.5px;
+  padding: 2px 6px;
+  font-size: 10px;
   border-radius: 6px;
+}
+
+/* The head's ⏱/⟳ shrink a notch too — the ? next to the 高峰 chip needs
+   the room and the pair still reads at a glance. */
+.quota-overview .card-refresh {
+  font-size: 12px;
+  padding: 1px 4px;
 }
 
 .quota-overview .overview-chip.is-warn {
@@ -3727,6 +3819,103 @@ body.no-glass #confirm-box {
 .quota-overview .overview-chip-dot.yellow {
   background: #eab308;
   box-shadow: 0 0 4px rgba(234, 179, 8, 0.7);
+}
+
+/* 高峰 chip + its "?" explainer: kept on one row so the button hugs the
+   yellow text without widening the stacked badge column. */
+.overview-peak-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+
+.overview-peak-help {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 12px;
+  height: 12px;
+  padding: 0;
+  border: 1px solid color-mix(in oklab, #eab308 45%, transparent);
+  border-radius: 50%;
+  background: none;
+  color: #eab308;
+  font-size: 8.5px;
+  font-weight: 700;
+  line-height: 1;
+  cursor: pointer;
+  flex: none;
+}
+
+.overview-peak-help:hover {
+  background: color-mix(in oklab, #eab308 18%, transparent);
+}
+
+:root[data-theme="light"] .overview-peak-help {
+  color: #ca8a04;
+  border-color: color-mix(in oklab, #ca8a04 45%, transparent);
+}
+
+/* The 高峰 explainer popup: one row per provider — mark, name, window,
+   and an 高峰中 tag while the window is active. Two class names to outrank
+   the later single-class .group-menu width rule. */
+.group-menu.peak-help {
+  min-width: 190px;
+  max-width: 290px;
+}
+
+.peak-help-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  border-radius: 6px;
+}
+
+.peak-help-icon {
+  display: inline-flex;
+  width: 13px;
+  height: 13px;
+  flex: none;
+}
+
+.peak-help-icon svg {
+  width: 13px;
+  height: 13px;
+  display: block;
+}
+
+.peak-help-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: 11.5px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.peak-help-window {
+  flex: none;
+  font-size: 10px;
+  color: var(--muted-foreground);
+  font-variant-numeric: tabular-nums;
+}
+
+.peak-help-now {
+  flex: none;
+  font-size: 9px;
+  font-weight: 600;
+  color: #eab308;
+}
+
+:root[data-theme="light"] .peak-help-now {
+  color: #ca8a04;
+}
+
+.peak-help-empty {
+  padding: 6px 8px 8px;
+  font-size: 11px;
+  color: var(--muted-foreground);
 }
 
 .quota-overview .overview-panel {

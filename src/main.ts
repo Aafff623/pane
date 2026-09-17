@@ -7,7 +7,7 @@ import {
   supportsApiKey,
   supportsExtraAccounts,
 } from "./providerCatalog";
-import { PEAK_RULES, isProviderInPeak } from "./peakHours";
+import { PEAK_RULES, isProviderInPeak, type PeakRule } from "./peakHours";
 import { providerVisual } from "./providerVisuals";
 import {
   applyStaticI18n,
@@ -160,6 +160,11 @@ interface ProviderLayout {
   // ungrouped. Account cards follow their family (the group lives on the
   // family's layout entry only).
   group?: string;
+  // User note replacing the card's display name everywhere it renders
+  // (card head, overview tiles, trail hover). Empty/missing = original
+  // catalog name. Stored per CARD id, so parallel-account cards each keep
+  // their own note.
+  note?: string;
 }
 
 interface Layout {
@@ -188,6 +193,7 @@ interface Config {
   notifyAlmostOut: boolean;
   notifyCuttingClose: boolean;
   notifyWillRunOut: boolean;
+  notifyResetSoon: boolean;
   spendTab: SpendTab;
   overviewTab: OverviewTab;
   spendMetric: "cost" | "tokens" | "mtok";
@@ -219,6 +225,7 @@ const FRONTEND_CONFIG_KEYS = [
   "notifyAlmostOut",
   "notifyCuttingClose",
   "notifyWillRunOut",
+  "notifyResetSoon",
   "spendTab",
   "overviewTab",
   "spendMetric",
@@ -410,6 +417,7 @@ let config: Config = {
   notifyAlmostOut: false,
   notifyCuttingClose: false,
   notifyWillRunOut: false,
+  notifyResetSoon: false,
   spendTab: "today",
   overviewTab: "5h",
   spendMetric: "cost",
@@ -932,6 +940,27 @@ function ensureLayout(): void {
     }
   }
 
+  // The Work-scope Trae loyalty row first shipped as "Loyalty credits
+  // (Work)", which wraps the text-row label column. Rename the saved key
+  // in place and slot it beside its general sibling.
+  const traecnL = layout.providers.traecn;
+  if (traecnL?.metricOrder.includes("Loyalty credits (Work)")) {
+    const rename = (list: string[], from: string, to: string) => {
+      const at = list.indexOf(from);
+      if (at >= 0) list[at] = to;
+    };
+    for (const list of [traecnL.metricOrder, traecnL.onDemand, traecnL.hidden, traecnL.starred]) {
+      rename(list, "Loyalty credits (Work)", "Loyalty (Work)");
+    }
+    const generalAt = traecnL.metricOrder.indexOf("Loyalty credits");
+    const workAt = traecnL.metricOrder.indexOf("Loyalty (Work)");
+    if (generalAt >= 0 && workAt >= 0) {
+      traecnL.metricOrder.splice(workAt, 1);
+      traecnL.metricOrder.splice(traecnL.metricOrder.indexOf("Loyalty credits") + 1, 0, "Loyalty (Work)");
+    }
+    changed = true;
+  }
+
   for (const s of lastSnapshots) {
     if (!layout.providerOrder.includes(s.id)) {
       layout.providerOrder.push(s.id);
@@ -975,7 +1004,12 @@ function ensureLayout(): void {
         } else {
           L.metricOrder.push(m.label);
         }
-        if (m.kind !== "progress" && m.label !== "Used") L.onDemand.push(m.label);
+        // Trae CN's pack rows are the card's point — the split the user
+        // wants to see — so its text rows ship always-visible instead of
+        // behind the Show-more caret (progress bars never tuck anyway).
+        if (m.kind !== "progress" && m.label !== "Used" && providerFamily(s.id) !== "traecn") {
+          L.onDemand.push(m.label);
+        }
         changed = true;
       }
       // Do not yank an existing progress row out of Show more or shuffle
@@ -983,6 +1017,17 @@ function ensureLayout(): void {
       // text↔progress with balance; a Customize drag would otherwise
       // bounce back on the next snapshot (issue #166). New rows still
       // land always-visible above the trend via the first-seen branch.
+    }
+    // Same exemption for traecn layouts saved before the rule existed —
+    // the first-seen tuck had already buried the pack rows. Runs every
+    // refresh, so a pack row dragged back into on-demand pops out again;
+    // revisit if tucking Trae packs ever needs to stick.
+    if (providerFamily(s.id) === "traecn") {
+      const packs = new Set(s.metrics.filter((m) => m.kind !== "progress").map((m) => m.label));
+      if (L.onDemand.some((k) => packs.has(k))) {
+        L.onDemand = L.onDemand.filter((k) => !packs.has(k));
+        changed = true;
+      }
     }
     if (spend) {
       if (!L.metricOrder.includes(TREND_KEY)) {
@@ -1118,6 +1163,34 @@ function setCardGroup(cardId: string, groupId: string): void {
   renderAll();
 }
 
+/// The card's user note (custom display name). Unlike the group tag, notes
+/// live on the exact card id — parallel-account siblings stay independent.
+function cardNote(cardId: string): string {
+  return (config.layout?.providers[cardId]?.note ?? "").trim();
+}
+
+/// Display name for a card: its note when set, otherwise the fallback.
+function notedName(cardId: string, fallback: string): string {
+  return cardNote(cardId) || fallback;
+}
+
+function setCardNote(cardId: string, note: string): void {
+  config.layout ??= { providerOrder: [], providers: {} };
+  if (!config.layout.providers[cardId]) {
+    config.layout.providers[cardId] = {
+      metricOrder: [],
+      onDemand: [],
+      hidden: [],
+      starred: [],
+      expanded: false,
+    };
+  }
+  if (note) config.layout.providers[cardId].note = note;
+  else delete config.layout.providers[cardId].note;
+  void patchConfig({ layout: config.layout });
+  renderAll();
+}
+
 /// Groups that actually have at least one card — empty groups don't render.
 function usedCardGroups(): CardGroup[] {
   const used = new Set(
@@ -1201,11 +1274,13 @@ function renderMetric(m: Metric): string {
     const headlineAlt = config.showUsed ? t("card.pctLeft", { n: left }) : t("card.pctUsed", { n: Math.round(used) });
 
     let resetHtml = "";
+    let resetPlain = "";
     if (m.resets_at === null && m.period_ms !== null && m.period_ms <= 6 * 3_600_000 && used <= 1) {
       // GLM-style rolling session windows expose NO reset timestamp while
       // idle — the clock only starts on the first request after the last
       // window closed. An untouched ≤6h window with nothing to count down
       // to is "not started", not "missing data".
+      resetPlain = t("card.notStarted");
       resetHtml = `<span title="${escapeHtml(t("card.notStartedTip"))}">${escapeHtml(t("card.notStarted"))}</span>`;
     } else if (m.resets_at !== null && m.resets_at > Date.now()) {
       // A rolling session window (≤6h period) that is still full-length
@@ -1220,16 +1295,24 @@ function renderMetric(m: Metric): string {
         notStarted = m.resets_at - Date.now() >= m.period_ms - grace;
       }
       if (notStarted) {
+        resetPlain = t("card.notStarted");
         resetHtml = `<span title="${escapeHtml(t("card.notStartedTip"))}">${escapeHtml(t("card.notStarted"))}</span>`;
       } else {
         const remain = m.resets_at - Date.now();
         const countdown = remain < 60_000 ? t("card.resetsSoon") : t("card.resetsIn", { time: fmtDuration(remain) });
         const exact = t("card.resetsAt", { when: fmtExact(m.resets_at) });
         const [text, alt] = config.resetExact ? [exact, countdown] : [countdown, exact];
+        resetPlain = text;
         resetHtml = `<span class="clickable" data-flip="reset" data-reset-at="${m.resets_at}" title="${escapeHtml(alt)}">${escapeHtml(text)}</span>`;
       }
     }
-    const detailHtml = [m.detail ? escapeHtml(displayMetricDetail(m.detail)) : "", resetHtml].filter(Boolean).join(" · ");
+    // Countdown leads the foot: on a narrow card the detail side shrinks
+    // with an ellipsis from the end, so the time-sensitive part must come
+    // first — the used figure is already backed by the percentage on the
+    // left. The full foot text rides on the title for hover.
+    const detailText = m.detail ? displayMetricDetail(m.detail) : "";
+    const detailHtml = [resetHtml, detailText ? escapeHtml(detailText) : ""].filter(Boolean).join(" · ");
+    const footTitle = [resetPlain, detailText].filter(Boolean).join(" · ");
     return `
       <div class="metric">
         <div class="metric-head">
@@ -1240,7 +1323,7 @@ function renderMetric(m: Metric): string {
         </div>
         <div class="metric-foot">
           <span class="left-val clickable" data-flip="usage" title="${escapeHtml(headlineAlt)}">${headline}</span>
-          <span class="detail">${detailHtml}</span>
+          <span class="detail" title="${escapeHtml(footTitle)}">${detailHtml}</span>
         </div>
       </div>`;
   }
@@ -1264,15 +1347,16 @@ function renderMetric(m: Metric): string {
       <div class="metric-text action-row">
         <span>${soon}${escapeHtml(displayMetricLabel(m.label))}</span>
         <span class="action-right">
-          <span class="detail">${escapeHtml(expiry)}</span>
+          <span class="detail" title="${escapeHtml(expiry)}">${escapeHtml(expiry)}</span>
           ${useBtn}
         </span>
       </div>`;
   }
+  const textValue = displayMetricDetail(m.value ?? "");
   return `
     <div class="metric-text">
       <span>${escapeHtml(displayMetricLabel(m.label))}</span>
-      <span class="detail">${escapeHtml(displayMetricDetail(m.value ?? ""))}</span>
+      <span class="detail" title="${escapeHtml(textValue)}">${escapeHtml(textValue)}</span>
     </div>`;
 }
 
@@ -1606,6 +1690,13 @@ const METRIC_POOLS: Record<string, Record<string, string>> = {
   qodercn: {
     Credits: "credits",
   },
+  // Trae CN's credit packs (loyalty/monthly/check-in) are side pools for
+  // the same reason: the merged "Credits" row is the seat's real budget,
+  // and a drained bonus pack must not fold the card while loyalty
+  // credits remain.
+  traecn: {
+    Credits: "credits",
+  },
 };
 
 /// When a family has independent pools, the overview ring follows this
@@ -1615,6 +1706,7 @@ const METRIC_POOLS: Record<string, Record<string, string>> = {
 const OVERVIEW_PRIMARY_LABEL: Record<string, string> = {
   cursor: "Cursor Models",
   qodercn: "Credits",
+  traecn: "Credits",
 };
 
 /// Hover on a 5h ring should not repeat that same window. These families
@@ -1908,7 +2000,7 @@ function renderCard(s: Snapshot): string {
     <article class="provider${muted} ${cardCollapsed ? "is-folded" : ""}" data-provider="${s.id}" data-origin="${escapeHtml(shown.dashboard_url ?? "")}">
       <div class="provider-head">
         <span class="drag-grip" title="${escapeHtml(t("card.drag"))}">⠿</span>
-        <span class="provider-name">${escapeHtml(s.name)}</span>
+        <span class="provider-name">${escapeHtml(notedName(s.id, s.name))}</span>
         ${finalAccountCount}
         ${plan}
         ${peakBadge}
@@ -2692,7 +2784,7 @@ function renderQuotaOverview(): string {
       const origin = shownSnap.dashboard_url ?? undefined;
       const visual = providerVisual(jumpId || family, origin);
       const icon = visual?.iconSvg ?? `<span class="icon-fallback">${escapeHtml(cardSnap.name.slice(0, 2))}</span>`;
-      const displayName = providerDisplayName(family) || cardSnap.name;
+      const displayName = notedName(jumpId, providerDisplayName(family) || cardSnap.name);
 
       const r = 16;
       const cx = 22;
@@ -2816,9 +2908,12 @@ function renderQuotaOverview(): string {
           <span class="overview-chip-dot red"></span>
           <span class="overview-chip-text">${maxedCount} ${escapeHtml(t("overview.maxedShort"))}</span>
         </span>` : ""}
-        <span class="overview-chip is-peak" title="${escapeHtml(t("overview.peakBadge", { n: peakItems.length }))}">
-          <span class="overview-chip-dot yellow"></span>
-          <span class="overview-chip-text">${peakItems.length} ${escapeHtml(t("overview.peakShort"))}</span>
+        <span class="overview-peak-row">
+          <span class="overview-chip is-peak" title="${escapeHtml(t("overview.peakBadge", { n: peakItems.length }))}">
+            <span class="overview-chip-dot yellow"></span>
+            <span class="overview-chip-text">${peakItems.length} ${escapeHtml(t("overview.peakShort"))}</span>
+          </span>
+          <button type="button" class="overview-peak-help" data-overview-peak-help title="${escapeHtml(t("peak.helpTitle"))}">?</button>
         </span>`;
 
   // Reset-sorted reminder rows. Window label rides each quota; remaining
@@ -2833,7 +2928,7 @@ function renderQuotaOverview(): string {
     const origin = shownSnap.dashboard_url ?? undefined;
     const visual = providerVisual(jumpId || family, origin);
     const icon = visual?.iconSvg ?? `<span class="icon-fallback">${escapeHtml(cardSnap.name.slice(0, 2))}</span>`;
-    const displayName = providerDisplayName(family) || cardSnap.name;
+    const displayName = notedName(jumpId, providerDisplayName(family) || cardSnap.name);
     const win = quota.window === null ? "" : escapeHtml(t(windowLabelKey[quota.window]));
     return `
         <div class="expiring-row${rowClass}" data-jump-provider="${escapeHtml(jumpId)}">
@@ -3028,6 +3123,9 @@ function appPrompt(opts: {
   placeholder?: string;
   initial?: string;
   confirmLabel: string;
+  /// Confirm with an empty field resolves "" instead of null — needed to
+  /// clear a value (e.g. a note falling back to the original name).
+  allowEmpty?: boolean;
 }): Promise<string | null> {
   return new Promise((resolve) => {
     const overlay = document.createElement("div");
@@ -3048,7 +3146,7 @@ function appPrompt(opts: {
       dismissConfirm = null;
       document.removeEventListener("keydown", onKey, true);
       overlay.remove();
-      resolve(ok ? input.value.trim() || null : null);
+      resolve(ok ? (input.value.trim() || (opts.allowEmpty ? "" : null)) : null);
     };
     dismissConfirm = () => done(false);
     const onKey = (e: KeyboardEvent) => {
@@ -3078,6 +3176,7 @@ function appPrompt(opts: {
 /// every group (✓ on the card's current one), "Ungrouped", and
 /// "New group…". Tagging lives on the family, so a parallel-account card
 /// moves its whole family. Opens from the card-head ⚙ and right-click.
+/// The note (custom display name) rides along: the note itself is per card.
 function openGroupMenu(cardId: string, anchor: HTMLElement): void {
   document.querySelector(".group-menu-overlay")?.remove();
   const current = cardGroupId(cardId);
@@ -3086,6 +3185,7 @@ function openGroupMenu(cardId: string, anchor: HTMLElement): void {
     `<button class="group-menu-item${checked ? " on" : ""}" data-group-pick="${escapeHtml(gid)}">
        <span class="group-menu-check">${checked ? "✓" : ""}</span>${escapeHtml(label)}
      </button>`;
+  const fallbackName = providerDisplayName(providerFamily(cardId)) || cardId;
   const overlay = document.createElement("div");
   overlay.className = "group-menu-overlay";
   overlay.innerHTML = `
@@ -3095,11 +3195,30 @@ function openGroupMenu(cardId: string, anchor: HTMLElement): void {
       ${groups.map((g) => item(g.id, g.name, current === g.id)).join("")}
       <div class="group-menu-sep"></div>
       ${item("__new__", `${t("customize.groupNew")}…`)}
+      <div class="group-menu-sep"></div>
+      <button class="group-menu-item" data-card-note="${escapeHtml(cardId)}">
+        <span class="group-menu-check">✎</span>${escapeHtml(t("customize.noteMenu"))}
+      </button>
     </div>`;
   const close = () => overlay.remove();
   overlay.addEventListener("click", (e) => {
     if (e.target === overlay) {
       close();
+      return;
+    }
+    const noteBtn = (e.target as HTMLElement).closest<HTMLElement>("[data-card-note]");
+    if (noteBtn) {
+      close();
+      void appPrompt({
+        title: t("customize.notePrompt", { name: fallbackName }),
+        placeholder: t("customize.notePh"),
+        initial: cardNote(cardId),
+        confirmLabel: t("settings.save"),
+        allowEmpty: true,
+      }).then((note) => {
+        if (note === null) return;
+        setCardNote(cardId, note);
+      });
       return;
     }
     const pick = (e.target as HTMLElement).closest<HTMLElement>("[data-group-pick]");
@@ -3137,6 +3256,78 @@ function openGroupMenu(cardId: string, anchor: HTMLElement): void {
   const x = Math.max(8, Math.min(rect.right - mw, window.innerWidth - mw - 8));
   menu.style.left = `${x}px`;
   menu.style.top = `${Math.min(rect.bottom + 4, window.innerHeight - menu.offsetHeight - 8)}px`;
+}
+
+/// "HH:MM" from minutes past midnight.
+function peakClock(min: number): string {
+  return `${String(Math.floor(min / 60)).padStart(2, "0")}:${String(min % 60).padStart(2, "0")}`;
+}
+
+/// Human window text for a peak rule: "Weekdays 14:00–18:00",
+/// "Weekdays 09:00–12:00 & 14:00–18:00", "Daily 08:00–22:00".
+function peakWindowText(rule: PeakRule): string {
+  const days = rule.windows.every((w) => w.days.length === 7)
+    ? t("peak.daily")
+    : t("peak.weekdays");
+  return `${days} ${rule.windows.map((w) => `${peakClock(w.fromMin)}–${peakClock(w.toMin)}`).join(" & ")}`;
+}
+
+/// The ? beside the 高峰 chip: a popup listing every ENABLED provider that
+/// has peak-hour billing, its window, and whether it is in peak right now.
+/// Purely informational — closes on outside click / Escape.
+function openPeakHelp(anchor: HTMLElement): void {
+  document.querySelector(".group-menu-overlay")?.remove();
+  const seen = new Set<string>();
+  const rows = orderedSnapshots()
+    .map((s) => providerFamily(s.id))
+    .filter((fam) => {
+      if (!PEAK_RULES[fam] || seen.has(fam)) return false;
+      seen.add(fam);
+      return true;
+    })
+    .map((fam) => {
+      const visual = providerVisual(fam);
+      const icon = visual?.iconSvg ?? "";
+      const name = notedName(fam, providerDisplayName(fam));
+      const inPeak = isProviderInPeak(fam);
+      return `
+      <div class="peak-help-row${inPeak ? " in-peak" : ""}">
+        <span class="peak-help-icon">${icon}</span>
+        <span class="peak-help-name">${escapeHtml(name)}</span>
+        <span class="peak-help-window">${escapeHtml(peakWindowText(PEAK_RULES[fam]))}</span>
+        ${inPeak ? `<span class="peak-help-now">${escapeHtml(t("peak.nowTag"))}</span>` : ""}
+      </div>`;
+    })
+    .join("");
+  const overlay = document.createElement("div");
+  overlay.className = "group-menu-overlay";
+  overlay.innerHTML = `
+    <div class="group-menu peak-help" role="dialog">
+      <div class="group-menu-title">${escapeHtml(t("peak.helpTitle"))}</div>
+      ${rows || `<div class="peak-help-empty">${escapeHtml(t("peak.helpEmpty"))}</div>`}
+    </div>`;
+  const close = () => {
+    overlay.remove();
+    document.removeEventListener("keydown", onKey, true);
+  };
+  overlay.addEventListener("click", (e) => {
+    if (e.target === overlay || !(e.target as HTMLElement).closest(".peak-help")) close();
+  });
+  const onKey = (e: KeyboardEvent) => {
+    if (e.key === "Escape") {
+      e.stopPropagation();
+      close();
+    }
+  };
+  document.addEventListener("keydown", onKey, true);
+  document.body.appendChild(overlay);
+  // Anchor under the ? button, clamped into the viewport.
+  const menu = overlay.querySelector<HTMLElement>(".peak-help")!;
+  const rect = anchor.getBoundingClientRect();
+  const mw = menu.offsetWidth;
+  const x = Math.max(8, Math.min(rect.left + rect.width / 2 - mw / 2, window.innerWidth - mw - 8));
+  menu.style.left = `${x}px`;
+  menu.style.top = `${Math.min(rect.bottom + 6, window.innerHeight - menu.offsetHeight - 8)}px`;
 }
 
 // ---------------------------------------------------------------------------
@@ -5114,10 +5305,19 @@ function renderCustomize(): string {
             ? onaFamilySection()
             : accountChildRows(id)
           : "";
-      return `
+      // Same brand mark the dashboard/trail use (One/New API site cards
+      // resolve their per-host icon through the snapshot origin);
+      // families without an SVG get a "?" placeholder — the user supplies
+      // real icons as SVG files later.
+      const visual = providerVisual(id, snapshot?.dashboard_url ?? undefined);
+      const icon = visual?.iconSvg ?? `<span class="icon-fallback">?</span>`;
+      return {
+        id,
+        html: `
         <article class="provider customize-block${enabled ? "" : " muted"}${open ? " open" : ""}" data-cust-provider="${id}" data-letter="${letter}" data-name="${escapeHtml(name.toLowerCase())}">
           <div class="provider-head">
             <button class="cust-expand" data-cust-expand="${id}" title="${open ? t("customize.collapse") : t("customize.expand")}">
+              <span class="cust-head-icon" aria-hidden="true">${icon}</span>
               <span class="provider-name">${escapeHtml(name)}</span>
               <span class="chev">⌄</span>
             </button>
@@ -5131,9 +5331,34 @@ function renderCustomize(): string {
           ${custConfigOpen === id ? renderCustConfig(id) : ""}
           ${custInfoOpen === id ? renderCustInfo(id) : ""}
           <div class="acc-body"><div class="acc-inner cust-rows">${rows}</div></div>
-        </article>`;
-    })
-    .join("");
+        </article>`,
+      };
+    });
+
+  // Sections mirror the dashboard's grouping: ungrouped blocks first
+  // (flat, no header), then one labeled section per card group in the
+  // user's own order; stale tags (group deleted, card still points at
+  // it) render flat. A–Z order holds within each section.
+  const groupDefs = cardGroups();
+  const liveGroups = new Set(groupDefs.map((g) => g.id));
+  const flatHtml: string[] = [];
+  const byGroup = new Map<string, string[]>();
+  for (const block of blocks) {
+    const gid = cardGroupId(block.id);
+    if (!gid || !liveGroups.has(gid)) {
+      flatHtml.push(block.html);
+      continue;
+    }
+    const list = byGroup.get(gid) ?? [];
+    list.push(block.html);
+    byGroup.set(gid, list);
+  }
+  let blocksHtml = flatHtml.join("");
+  for (const g of groupDefs) {
+    const members = byGroup.get(g.id);
+    if (!members?.length) continue;
+    blocksHtml += `<div class="cust-group-head"><span class="cust-group-name">${escapeHtml(g.name)}</span><span class="cust-group-count">${members.length}</span></div>${members.join("")}`;
+  }
 
   const starCount = Object.values(config.layout?.providers ?? {}).reduce((n, l) => n + l.starred.length, 0);
   return `
@@ -5145,7 +5370,7 @@ function renderCustomize(): string {
     <nav class="cust-az">${letters
       .map((l) => `<button data-az="${l}">${l}</button>`)
       .join("")}</nav>
-    ${blocks}`;
+    ${blocksHtml}`;
 }
 
 // ---------------------------------------------------------------------------
@@ -5245,55 +5470,103 @@ function setDrawer(open: boolean): void {
 }
 
 // ---------------------------------------------------------------------------
-// Navigation trail: a slim rail of ticks — one per card — that shows where
-// you are in the scroll and jumps to a card on click.
+// Navigation trail: a slim rail of ticks — one per provider mark — that shows
+// where you are in the scroll and jumps to a card on click. Cards sharing the
+// same mark (parallel accounts, extra relay keys) collapse into one tick.
 // ---------------------------------------------------------------------------
 
 function trailCards(): HTMLElement[] {
   return Array.from(document.querySelectorAll<HTMLElement>("#providers > article"));
 }
 
+/// One trail tick per visual identity; `indices` lists every card the tick
+/// stands for (DOM order) and clicking cycles through them.
+type TrailEntry = { key: string; indices: number[]; names: string[]; cursor: number };
+let trailEntries: TrailEntry[] = [];
+// Click-cycle position per visual key, kept across rebuilds so a background
+// refresh doesn't snap a merged tick back to its first card.
+const trailCursorMemory = new Map<string, number>();
+
+const DOT_SEVERITY: Record<string, number> = { gray: 0, green: 1, yellow: 2, red: 3 };
+
 function rebuildTrail(): void {
   const trail = document.querySelector<HTMLElement>("#trail")!;
   const cards = trailCards();
+  trailEntries = [];
   if (!cards.length) {
     trail.innerHTML = "";
     trail.hidden = true;
     return;
   }
   trail.hidden = false;
-  trail.innerHTML = cards
-    .map((card, i) => {
-      const name = card.querySelector(".provider-name")?.textContent ?? `Card ${i + 1}`;
+  const byKey = new Map<string, TrailEntry>();
+  cards.forEach((card, i) => {
+    const id = card.dataset.provider ?? "";
+    const family = id ? providerFamily(id) : "";
+    const visual = id === "__overview__" ? undefined : providerVisual(id || family, card.dataset.origin || undefined);
+    const key =
+      id === "__overview__"
+        ? "__overview__"
+        : visual
+          ? `icon:${visual.iconKey}`
+          : `family:${family || `#${i}`}`;
+    let entry = byKey.get(key);
+    if (!entry) {
+      entry = { key, indices: [], names: [], cursor: trailCursorMemory.get(key) ?? 0 };
+      byKey.set(key, entry);
+      trailEntries.push(entry);
+    }
+    entry.indices.push(i);
+    entry.names.push(card.querySelector(".provider-name")?.textContent ?? `Card ${i + 1}`);
+  });
+  trail.innerHTML = trailEntries
+    .map((entry, j) => {
+      const card = cards[entry.indices[0]];
       const id = card.dataset.provider ?? "";
-      if (id === "__overview__") {
-        return `<button class="trail-tick trail-icon" data-trail="${i}" title="${escapeHtml(name)}"><span class="trail-icon-inner"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><circle cx="12" cy="12" r="9"/><polyline points="12 7 12 12 15 15"/></svg></span></button>`;
-      }
       const family = id ? providerFamily(id) : "";
-      const origin = card.dataset.origin || undefined;
-      const visual = providerVisual(id || family, origin);
+      const title = escapeHtml(
+        entry.names.length > 1 ? `${entry.names[0]} (+${entry.names.length - 1})` : entry.names[0],
+      );
+      if (entry.key === "__overview__") {
+        return `<button class="trail-tick trail-icon" data-trail="${j}" title="${title}"><span class="trail-icon-inner"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><circle cx="12" cy="12" r="9"/><polyline points="12 7 12 12 15 15"/></svg></span></button>`;
+      }
+      const visual = providerVisual(id || family, card.dataset.origin || undefined);
       const icon = visual?.iconSvg;
-      const dot = isParallelAccountFamily(family)
-        ? peakTintedDot(family, accountHealthDot(id))
-        : (family ? peakTintedDot(family, familyHealthDot(family)) : "");
+      let dot = "";
+      if (icon) {
+        // A merged tick shows the worst health across the cards it stands for.
+        dot = entry.indices
+          .map((idx) => {
+            const cid = cards[idx].dataset.provider ?? "";
+            const fam = cid ? providerFamily(cid) : "";
+            return isParallelAccountFamily(fam)
+              ? peakTintedDot(fam, accountHealthDot(cid))
+              : (fam ? peakTintedDot(fam, familyHealthDot(fam)) : "");
+          })
+          .reduce(
+            (worst, d) => ((DOT_SEVERITY[d] ?? -1) > (DOT_SEVERITY[worst] ?? -1) ? d : worst),
+            "",
+          );
+      }
       const dotHtml = dot ? `<span class="trail-badge ${dot}"></span>` : "";
       if (icon) {
         const extra = [
           visual?.recolorOnTray ? " trail-recolor" : "",
           visual?.invertOnDarkTray ? " trail-invert-dark" : "",
         ].join("");
-        return `<button class="trail-tick trail-icon${extra}" data-trail="${i}" title="${escapeHtml(name)}"><span class="trail-icon-inner">${icon}</span>${dotHtml}</button>`;
+        return `<button class="trail-tick trail-icon${extra}" data-trail="${j}" title="${title}"><span class="trail-icon-inner">${icon}</span>${dotHtml}</button>`;
       }
-      return `<button class="trail-tick" data-trail="${i}" title="${escapeHtml(name)}"></button>`;
+      return `<button class="trail-tick" data-trail="${j}" title="${title}"></button>`;
     })
     .join("");
   // Minimap feel: tick width follows the card's height, like Codex's rail.
   // Icon ticks keep a fixed square box instead — the mark itself is the
   // height signal.
   const ticks = trail.querySelectorAll<HTMLElement>(".trail-tick");
-  ticks.forEach((tick, i) => {
-    if (tick.classList.contains("trail-icon")) return;
-    const h = cards[i]?.offsetHeight ?? 80;
+  trailEntries.forEach((entry, j) => {
+    const tick = ticks[j];
+    if (!tick || tick.classList.contains("trail-icon")) return;
+    const h = Math.max(...entry.indices.map((idx) => cards[idx]?.offsetHeight ?? 80));
     tick.style.width = `${Math.max(7, Math.min(16, Math.round(5 + h / 45)))}px`;
   });
   updateTrailActive();
@@ -5311,25 +5584,29 @@ function updateTrailLayout(): void {
   // Measure available vertical space in #trail-wrap
   const availH = wrap.clientHeight || 360;
 
-  const MAX_SIZE = 28;
-  const MIN_SIZE = 20;
-  const MAX_GAP = 6;
-  const MIN_GAP = 3;
+  const MAX_SIZE = 22;
+  const MIN_SIZE = 12;
+  const MIN_GAP = 2;
+  const MAX_GAP = 14;
+  // Fill the rail with evenly scaled spacing: the icon size shrinks
+  // proportionally as the count grows, then the leftover vertical slack is
+  // handed to the gaps — bounded, so a sparse rail never spreads edge to
+  // edge. What the cap cannot absorb stays as a small even margin around
+  // the centered stack. Scrolling remains the overflow valve.
+  const FILL = 0.94;
 
-  let size = MAX_SIZE;
-  let gap = MAX_GAP;
+  const effectiveUnits = count + (count - 1) * 0.22;
+  const fitSize = Math.floor((availH * FILL) / effectiveUnits);
+  const size = Math.max(MIN_SIZE, Math.min(MAX_SIZE, fitSize));
+  const gapFit = Math.max(MIN_GAP, Math.min(6, Math.round(size * 0.22)));
+  const slack = availH * FILL - count * size;
+  const gap = Math.max(
+    gapFit,
+    Math.min(MAX_GAP, Math.floor(slack / Math.max(1, count - 1))),
+  );
 
-  const totalAtMax = count * MAX_SIZE + (count - 1) * MAX_GAP;
-  if (totalAtMax > availH) {
-    // Proportional downscaling with a hard bottom limit to avoid excessive shrinking
-    const effectiveUnits = count + (count - 1) * 0.2;
-    const computedSize = Math.floor(availH / effectiveUnits);
-    size = Math.max(MIN_SIZE, Math.min(MAX_SIZE, computedSize));
-    gap = Math.max(MIN_GAP, Math.min(MAX_GAP, Math.round(size * 0.2)));
-  }
-
-  const innerSize = Math.max(13, Math.min(18, Math.round(size * 0.64)));
-  const dotSize = size <= 22 ? 4 : 5;
+  const innerSize = Math.max(9, Math.min(14, Math.round(size * 0.64)));
+  const dotSize = size <= 16 ? 3 : 4;
 
   trail.style.setProperty("--trail-icon-size", `${size}px`);
   trail.style.setProperty("--trail-inner-size", `${innerSize}px`);
@@ -5447,8 +5724,10 @@ function updateTrailActive(): void {
     active = cards.length - 1;
   }
   const trail = document.querySelector<HTMLElement>("#trail");
-  document.querySelectorAll<HTMLElement>("#trail .trail-tick").forEach((tick, i) => {
-    const isAct = i === active;
+  const ticks = document.querySelectorAll<HTMLElement>("#trail .trail-tick");
+  const activeEntry = trailEntries.findIndex((entry) => entry.indices.includes(active));
+  ticks.forEach((tick, j) => {
+    const isAct = j === activeEntry;
     tick.classList.toggle("active", isAct);
     if (isAct && trail && trail.scrollHeight > trail.clientHeight) {
       tick.scrollIntoView({ block: "nearest", behavior: "smooth" });
@@ -7361,6 +7640,7 @@ async function initSettings(): Promise<void> {
     ["#notify-almost", "notifyAlmostOut"],
     ["#notify-close", "notifyCuttingClose"],
     ["#notify-runout", "notifyWillRunOut"],
+    ["#notify-resetsoon", "notifyResetSoon"],
     ["#telemetry", "telemetry"],
   ];
   for (const [selector, key] of notifyToggles) {
@@ -7421,6 +7701,9 @@ async function initSettings(): Promise<void> {
       e.preventDefault();
       selectFont(fontMenuList[fontMenuFocused]);
     }
+  });
+  uiFont.addEventListener("change", () => {
+    void patchConfig({ uiFont: uiFont.value.trim() }).then(applyAppearance);
   });
 
   const density = document.querySelector<HTMLInputElement>("#density")!;
@@ -7521,6 +7804,7 @@ async function resetAllSettings(): Promise<void> {
     notifyAlmostOut: true,
     notifyCuttingClose: true,
     notifyWillRunOut: true,
+    notifyResetSoon: true,
     spendTab: "today",
     overviewTab: "5h",
     spendMetric: "cost",
@@ -7571,6 +7855,7 @@ function syncSettingsControls(): void {
   setCheck("#notify-almost", config.notifyAlmostOut);
   setCheck("#notify-close", config.notifyCuttingClose);
   setCheck("#notify-runout", config.notifyWillRunOut);
+  setCheck("#notify-resetsoon", config.notifyResetSoon === true);
   setCheck("#telemetry", config.telemetry);
   setCheck("#hide-while-sharing", config.hideUsageWhileSharing === true);
   setCheck("#show-trend", config.showTrend === true);
@@ -7870,7 +8155,8 @@ window.addEventListener("DOMContentLoaded", () => {
     L.providerOrder = [...domIds, ...L.providerOrder.filter((id) => !domIds.includes(id))];
     void patchConfig({ layout: L });
     requestTraySync();
-    updateTrailActive();
+    // DOM order changed — rebuild so merged-tick card indices stay truthful.
+    rebuildTrail();
   };
   providersEl.addEventListener("drop", (e) => {
     e.preventDefault();
@@ -7956,6 +8242,11 @@ window.addEventListener("DOMContentLoaded", () => {
     if (ovExpiring) {
       overviewExpiringOpen = !overviewExpiringOpen;
       renderAll();
+      return;
+    }
+    const peakHelp = target.closest<HTMLElement>("[data-overview-peak-help]");
+    if (peakHelp) {
+      openPeakHelp(peakHelp);
       return;
     }
     const groupToggle = target.closest<HTMLElement>("[data-group-toggle]");
@@ -8091,8 +8382,14 @@ window.addEventListener("DOMContentLoaded", () => {
   document.querySelector("#trail")!.addEventListener("click", (e) => {
     const tick = (e.target as HTMLElement).closest<HTMLElement>("[data-trail]");
     if (!tick) return;
-    const card = trailCards()[Number(tick.dataset.trail)];
-    card?.scrollIntoView({ behavior: reduceMotion() ? "auto" : "smooth", block: "start" });
+    const entry = trailEntries[Number(tick.dataset.trail)];
+    if (!entry) return;
+    // One tick can stand for several accounts of the same provider — every
+    // click advances to the next card in the group, wrapping around.
+    const idx = entry.indices[entry.cursor % entry.indices.length];
+    entry.cursor = (entry.cursor + 1) % entry.indices.length;
+    trailCursorMemory.set(entry.key, entry.cursor);
+    trailCards()[idx]?.scrollIntoView({ behavior: reduceMotion() ? "auto" : "smooth", block: "start" });
   });
 
   // The 4-hourly background checker feeds the same footer button.

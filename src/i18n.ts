@@ -91,6 +91,7 @@ const en: Dict = {
   "settings.notifyAlmost": "Almost out (<10% left)",
   "settings.notifyClose": "Cutting it close",
   "settings.notifyRunout": "Will run out",
+  "settings.notifyResetSoon": "5-hour window resetting soon",
 
   "settings.privacy": "Privacy",
   "settings.privacyNote":
@@ -445,6 +446,14 @@ const en: Dict = {
   "customize.acctDotYellow": "Available · in peak hours (standard rate)",
   "customize.acctDotGray": "No data yet",
   "peak.now": "Peak hours now:",
+  "peak.weekdays": "Mon–Fri",
+  "peak.daily": "Daily",
+  "peak.nowTag": "in peak",
+  "peak.helpTitle": "Peak-hour windows",
+  "peak.helpEmpty": "No enabled providers bill by peak hours.",
+  "customize.noteMenu": "Display name…",
+  "customize.notePrompt": "Display name for {name}",
+  "customize.notePh": "Empty = original name",
   "peak.rule.zai":
     "GLM Coding Plan: Mon–Fri 14:00–18:00 bills 1×; all other hours (weekends included) bill half credits (0.5×) — shift heavy runs off-peak.",
   "peak.rule.linkso":
@@ -656,6 +665,7 @@ const zh: Dict = {
   "settings.notifyAlmost": "即将用完（剩余不足 10%）",
   "settings.notifyClose": "余量紧张",
   "settings.notifyRunout": "将会用完",
+  "settings.notifyResetSoon": "5 小时窗口即将重置",
 
   "settings.privacy": "隐私",
   "settings.privacyNote":
@@ -1001,6 +1011,14 @@ const zh: Dict = {
   "customize.acctDotYellow": "状态可用 · 处于高峰期（按标准倍率计费）",
   "customize.acctDotGray": "暂无数据",
   "peak.now": "当前处于高峰期：",
+  "peak.weekdays": "工作日",
+  "peak.daily": "每天",
+  "peak.nowTag": "高峰中",
+  "peak.helpTitle": "高峰时段对照",
+  "peak.helpEmpty": "启用的 provider 中没有分时计费的。",
+  "customize.noteMenu": "备注名称…",
+  "customize.notePrompt": "{name} 的备注名称",
+  "customize.notePh": "留空恢复原名",
   "peak.rule.zai":
     "GLM Coding Plan：工作日 14:00–18:00 按 1× 计费；其余时段（含周末）仅 0.5×，重活建议错峰跑。",
   "peak.rule.linkso":
@@ -1202,6 +1220,7 @@ const ru: Dict = {
   "settings.notifyAlmost": "Почти кончилось (осталось <10%)",
   "settings.notifyClose": "Запас на исходе",
   "settings.notifyRunout": "Кончится до сброса",
+  "settings.notifyResetSoon": "5-часовое окно скоро обновится",
 
   "settings.privacy": "Конфиденциальность",
   "settings.privacyNote":
@@ -1521,6 +1540,14 @@ const ru: Dict = {
   "customize.acctDotYellow": "Доступно · часы пик (стандартный тариф)",
   "customize.acctDotGray": "Пока нет данных",
   "peak.now": "Сейчас час пик:",
+  "peak.weekdays": "Пн–Пт",
+  "peak.daily": "ежедневно",
+  "peak.nowTag": "в пик",
+  "peak.helpTitle": "Часы пик",
+  "peak.helpEmpty": "Среди активных провайдеров нет тарификации по часам пик.",
+  "customize.noteMenu": "Отображаемое имя…",
+  "customize.notePrompt": "Отображаемое имя для {name}",
+  "customize.notePh": "Пусто = исходное имя",
   "peak.rule.zai":
     "GLM Coding Plan: пик пн–пт 14:00–18:00 — 1×; в остальное время (включая выходные) — 0,5×, тяжёлые задачи лучше выносить на вне-пик.",
   "peak.rule.linkso":
