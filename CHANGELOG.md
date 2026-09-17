@@ -1,5 +1,30 @@
 # Changelog
 
+## 0.4.62 — 2026-09-17
+
+### Added
+- **Trae CN per-pack credit breakdown.** The card no longer collapses
+  all credit packs into one summed bar: each pack gets its own row —
+  the pack currently being drained as a progress bar with a countdown,
+  untouched ones as "N credits · expires YYYY-MM-DD" rows, soonest
+  expiry first. Packs split by scope like the official dashboard
+  (general vs TraeWork-only, suffixed "(Work)"); same-named packs
+  merge; feature-flag-only packs are skipped. The summed Credits row
+  carries no reset date (packs expire on different days).
+- **"5-hour window resetting soon" alert.** A rolling window with an
+  hour or less remaining announces itself once per period, also right
+  after launch. Default on; toggle in Settings.
+- **Customize drawer brand icons.** Every provider row head shows the
+  same mark as its dashboard card; providers without an icon show a
+  "?" placeholder. The drawer also mirrors the dashboard's card-group
+  sections (group name + count headers, A–Z within).
+- **Card rows never fold.** Metric feet, text, action and spend rows
+  are single-line: the right side ellipsizes instead of wrapping,
+  countdowns lead the detail (truncation can only drop the usage
+  figure, never the time), and hovering shows the full text.
+- **Real Trae CN logo** (green frame + diamond eyes) replaces the
+  placeholder glyph everywhere.
+
 ## 0.4.61 — 2026-09-16
 
 ### Added
