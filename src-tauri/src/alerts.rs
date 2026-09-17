@@ -21,6 +21,7 @@ struct MetricState {
     almost_out: bool,
     close: bool,
     run_out: bool,
+    reset_soon: bool,
 }
 
 fn states() -> &'static Mutex<HashMap<String, MetricState>> {
@@ -85,7 +86,8 @@ pub fn evaluate(snapshots: &[Snapshot], cfg: &Value) -> Vec<Alert> {
     let want_almost = want("notifyAlmostOut");
     let want_close = want("notifyCuttingClose");
     let want_runout = want("notifyWillRunOut");
-    if !(want_almost || want_close || want_runout) {
+    let want_reset_soon = want("notifyResetSoon");
+    if !(want_almost || want_close || want_runout || want_reset_soon) {
         return Vec::new();
     }
 
@@ -116,8 +118,46 @@ pub fn evaluate(snapshots: &[Snapshot], cfg: &Value) -> Vec<Alert> {
             let almost_now = left < 10.0;
             let close_now = v == Verdict::Close;
             let run_out_now = v == Verdict::RunOut;
+
+            // "Reset soon": a 5-hour rolling window with an hour or less to
+            // go. Fires once per period and — unlike the pace alerts — also
+            // on the first reading after launch: the countdown is
+            // time-critical, and staying silent at launch would swallow
+            // exactly the case the alert exists for.
+            const FIVE_HOUR_MIN: i64 = 4 * 3_600_000;
+            const FIVE_HOUR_MAX: i64 = 6 * 3_600_000;
+            let reset_soon_now = match (metric.resets_at, metric.period_ms) {
+                (Some(resets_at), Some(period)) if (FIVE_HOUR_MIN..=FIVE_HOUR_MAX).contains(&period) => {
+                    let remain = resets_at - chrono::Utc::now().timestamp_millis();
+                    remain > 0 && remain <= 60 * 60_000
+                }
+                _ => false,
+            };
+            let reset_soon_announce = want_reset_soon && reset_soon_now && !entry.reset_soon;
+
             let baseline = !entry.seen;
             entry.seen = true;
+
+            if reset_soon_announce {
+                let mins = metric
+                    .resets_at
+                    .map(|r| ((r - chrono::Utc::now().timestamp_millis()).max(0) / 60_000) as u64)
+                    .unwrap_or(60);
+                let name = snapshot.name.clone();
+                let loc = crate::i18n::resolved_locale(cfg);
+                alerts.push(Alert {
+                    title: match loc {
+                        "zh" => "5 小时窗口即将重置".into(),
+                        "ru" => "5-часовое окно скоро обновится".into(),
+                        _ => "5-hour window resetting soon".into(),
+                    },
+                    body: match loc {
+                        "zh" => format!("{name} 的 5 小时窗口还剩 {mins} 分钟，到期后额度刷新。"),
+                        "ru" => format!("5-часовое окно «{name}» обновится через {mins} мин."),
+                        _ => format!("{name}'s 5-hour window resets in {mins} min — quota refreshes then."),
+                    },
+                });
+            }
 
             if !baseline {
                 let shown = crate::i18n::metric_label(cfg, &metric.label);
@@ -171,6 +211,7 @@ pub fn evaluate(snapshots: &[Snapshot], cfg: &Value) -> Vec<Alert> {
             entry.almost_out = almost_now;
             entry.close = close_now;
             entry.run_out = run_out_now;
+            entry.reset_soon = reset_soon_now;
         }
     }
     alerts
@@ -205,6 +246,73 @@ pub fn has_state_for_test(key: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::providers::Metric;
+
+    const FIVE_H: i64 = 18_000_000;
+
+    /// A 5-hour-window snapshot whose reset lands `remain_ms` from now.
+    fn snap_5h(id: &str, remain_ms: i64) -> Snapshot {
+        let now = chrono::Utc::now().timestamp_millis();
+        Snapshot::ok(
+            id,
+            "Test",
+            None,
+            vec![Metric::progress("Session", 10.0, None)
+                .with_reset(Some(now + remain_ms), Some(FIVE_H))],
+        )
+    }
+
+    fn reset_soon_cfg() -> Value {
+        serde_json::json!({ "locale": "en", "notifyResetSoon": true })
+    }
+
+    #[test]
+    fn reset_soon_fires_on_first_reading() {
+        // Unlike the pace alerts this one is not baseline-silent: the last
+        // hour of a window is time-critical whatever moment it is noticed.
+        let alerts = evaluate(&[snap_5h("t-rs-first", 30 * 60_000)], &reset_soon_cfg());
+        assert_eq!(alerts.len(), 1, "{alerts:?}", alerts = alerts.len());
+        assert_eq!(alerts[0].title, "5-hour window resetting soon");
+        assert!(alerts[0].body.contains("Test"), "{}", alerts[0].body);
+        assert!(alerts[0].body.contains("resets in"), "{}", alerts[0].body);
+    }
+
+    #[test]
+    fn reset_soon_silent_far_from_reset() {
+        assert!(evaluate(&[snap_5h("t-rs-far", 2 * 3_600_000)], &reset_soon_cfg()).is_empty());
+    }
+
+    #[test]
+    fn reset_soon_only_for_five_hour_windows() {
+        let now = chrono::Utc::now().timestamp_millis();
+        let daily = Snapshot::ok(
+            "t-rs-daily",
+            "Test",
+            None,
+            vec![Metric::progress("Daily", 10.0, None)
+                .with_reset(Some(now + 30 * 60_000), Some(24 * 3_600_000))],
+        );
+        assert!(evaluate(&[daily], &reset_soon_cfg()).is_empty());
+    }
+
+    #[test]
+    fn reset_soon_fires_once_and_rearms_next_period() {
+        let cfg = reset_soon_cfg();
+        // Last hour of the window: announces.
+        assert_eq!(evaluate(&[snap_5h("t-rs-cycle", 30 * 60_000)], &cfg).len(), 1);
+        // Same window a few minutes later: silent.
+        assert!(evaluate(&[snap_5h("t-rs-cycle", 25 * 60_000)], &cfg).is_empty());
+        // New period, far from its reset: silent, slate cleared.
+        assert!(evaluate(&[snap_5h("t-rs-cycle", 5 * 3_600_000)], &cfg).is_empty());
+        // That period's own last hour announces again.
+        assert_eq!(evaluate(&[snap_5h("t-rs-cycle", 50 * 60_000)], &cfg).len(), 1);
+    }
+
+    #[test]
+    fn reset_soon_respects_toggle() {
+        let cfg = serde_json::json!({ "locale": "en" });
+        assert!(evaluate(&[snap_5h("t-rs-off", 30 * 60_000)], &cfg).is_empty());
+    }
 
     #[test]
     fn forget_snapshot_drops_that_id_only() {
