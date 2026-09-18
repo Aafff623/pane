@@ -194,6 +194,19 @@ anything unverified lives under `待确认` at the bottom.
 - `:1420` refuses to bind → stale Vite/node process; kill the port owner.
 - One/New API probe: a wrong access token still returns **HTTP 200 with
   `success:false`** — never treat 200 alone as success.
+- Window "can't be summoned" (Alt+2 / tray click / relaunch all no-op) →
+  a **minimized window still reports `is_visible() == true`** (Win+D
+  iconifies without clearing WS_VISIBLE), so every toggle routed to the
+  hide branch and the popover was unreachable. Since 2026-09-18
+  `toggle_popover*` treats iconic as hidden and calls `unminimize()`
+  before `show()`; the blur auto-hide also ignores a focus loss <500 ms
+  after gain (system focus yank, not a user click-away). Diagnostic
+  fingerprint: `IsIconic=True` + `GetWindowRect ≈ (-21333,-21333)`.
+- pane's `6736` HTTP API dead right after a restart → the new instance
+  **silently fails to bind** while the old socket sits in TIME_WAIT (it
+  still prints the URL). Wait for the port to be free before relaunching;
+  `temp/scripts/restart-pane-dev.ps1` does kill → port-wait → launch →
+  probe → summon in one shot.
 - MinGW-linked full app fails at process start → expected on this machine;
   use the parse-tests harness instead of fighting the linker.
 

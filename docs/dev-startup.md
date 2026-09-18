@@ -170,6 +170,10 @@ it must be `.cjs`). Local one-shot scripts: `temp/scripts/pane-wmi-launch.ps1`
 
 | Mistake | Fix |
 |---------|-----|
+| Restarting pane exe during the dev loop | Use `temp/scripts/restart-pane-dev.ps1` — kill → wait 6736 free → launch → API probe → summon + zombie check, one shot |
+| Killing pane then instantly relaunching | The new instance's HTTP server **silently fails** to bind `6736` while the old socket sits in TIME_WAIT (it still prints the URL). Wait for the port to be free before relaunching, then verify `/v1/usage` |
+| Rust rebuild fails with `os error 5` / `os error 32` on `pane.exe` | The running exe is locked — `Stop-Process -Name pane` first, then `cargo build` |
+| Window "can't be summoned" (Alt+2 / tray click do nothing) | Pre-2026-09-18 bug: a minimized window still reports `is_visible()==true`, so every toggle went to the *hide* branch — fixed in `toggle_popover*` (iconic counts as hidden + `unminimize()` before show). If you must recreate it: launch the exe again (single-instance toggle) restores a zombie-minimized window |
 | Launching `pane.exe` with `Start-Process` or `&` | Use `CreateProcess` with `lpDesktop = "WinSta0\Default"` — without it the window opens on the non-interactive station (invisible) |
 | Launching `pane.exe` with stdout/stderr attached to a transient agent shell | Redirect to a file (`temp/scripts/launch-pane.ps1` wraps with `cmd /c ... >> pane-dev.log`) — when the agent shell exits the pipe breaks and the next `println!` **panics, killing the refresh task**: footer stuck "Refreshing…", every card stays ⚠数据过时, `/v1/usage` returns `[]` |
 | Serving dist/ with `python -m http.server` | Use `pnpm dev`; Python skips cache headers and WebView2 caches forever |

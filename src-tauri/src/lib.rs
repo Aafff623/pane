@@ -3448,6 +3448,8 @@ fn spawn_update_checker(app: &tauri::AppHandle) {
 // closed. We remember when the last auto-hide happened and ignore tray
 // clicks that arrive right after it.
 static LAST_AUTO_HIDE_MS: AtomicU64 = AtomicU64::new(0);
+/// When the "main" window last GAINED focus (ms epoch).
+static LAST_FOCUS_GAINED_MS: AtomicU64 = AtomicU64::new(0);
 
 fn now_ms() -> u64 {
     SystemTime::now()
@@ -3461,7 +3463,12 @@ fn toggle_popover(app: &tauri::AppHandle, click: tauri::PhysicalPosition<f64>) {
         return;
     };
 
-    if window.is_visible().unwrap_or(false) {
+    // A minimized window still reports is_visible() == true: Win+D / "show
+    // desktop" iconifies without clearing WS_VISIBLE, so the naive check
+    // would keep routing every toggle into the hide branch and the popover
+    // could never be summoned again. Treat iconic as hidden.
+    let minimized = window.is_minimized().unwrap_or(false);
+    if window.is_visible().unwrap_or(false) && !minimized {
         let _ = window.hide();
         set_webview_memory_level(&window, true);
         return;
@@ -3481,6 +3488,9 @@ fn toggle_popover(app: &tauri::AppHandle, click: tauri::PhysicalPosition<f64>) {
     let x = (click.x - f64::from(size.width)).max(0.0);
     let y = (click.y - f64::from(size.height) - 8.0).max(0.0);
     let _ = window.set_position(tauri::PhysicalPosition::new(x, y));
+    // show() alone leaves an iconic window iconic (SW_SHOW does not restore),
+    // so the restore must be explicit before focusing.
+    let _ = window.unminimize();
     let _ = window.show();
     let _ = window.set_focus();
     hide_window_border(&window);
@@ -3496,7 +3506,11 @@ fn toggle_popover_centered(app: &tauri::AppHandle) {
         return;
     };
 
-    if window.is_visible().unwrap_or(false) {
+    // Same iconic-as-hidden rule as toggle_popover: a Win+D-minimized
+    // popover still counts as "visible" to is_visible(), which deadlocked
+    // the Alt+2 / second-launch toggle in the hide branch forever.
+    let minimized = window.is_minimized().unwrap_or(false);
+    if window.is_visible().unwrap_or(false) && !minimized {
         let _ = window.hide();
         set_webview_memory_level(&window, true);
         return;
@@ -3529,6 +3543,7 @@ fn toggle_popover_centered(app: &tauri::AppHandle) {
             + ((mon_size.height as f64 - size.height as f64) / 2.0).max(0.0);
         let _ = window.set_position(tauri::PhysicalPosition::new(x, y));
     }
+    let _ = window.unminimize();
     let _ = window.show();
     let _ = window.set_focus();
     hide_window_border(&window);
@@ -3684,7 +3699,22 @@ pub fn run() {
         })
         .on_window_event(|window, event| {
             if window.label() == "main" {
-                if let WindowEvent::Focused(false) = event {
+                if let WindowEvent::Focused(gained) = event {
+                    if *gained {
+                        LAST_FOCUS_GAINED_MS.store(now_ms(), Ordering::Relaxed);
+                        return;
+                    }
+                    // When the pane process has no foreground rights (e.g.
+                    // launched by an agent/automation), Windows grants the
+                    // freshly shown window focus for a few milliseconds and
+                    // immediately yanks it back. That gain→yank roundtrip is
+                    // not "the user clicked away" — hiding on it is what made
+                    // the popover impossible to summon. A real click-away
+                    // happens after focus was held for a noticeable time.
+                    let gained_at = LAST_FOCUS_GAINED_MS.load(Ordering::Relaxed);
+                    if now_ms().saturating_sub(gained_at) < 500 {
+                        return;
+                    }
                     if window.hide().is_ok() {
                         LAST_AUTO_HIDE_MS.store(now_ms(), Ordering::Relaxed);
                         if let Some(wv) = window.app_handle().get_webview_window("main") {
