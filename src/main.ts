@@ -7942,6 +7942,13 @@ window.addEventListener("DOMContentLoaded", () => {
       e.preventDefault();
       void refresh(true, false, true);
     }
+    // Ctrl+S toggles Settings — same semantics as the ⚙ button (and must
+    // NOT trigger the webview "save page" dialog).
+    if (e.ctrlKey && e.key.toLowerCase() === "s") {
+      e.preventDefault();
+      setDrawer(false);
+      setSettings(!document.body.classList.contains("settings-open"));
+    }
     // Bare T flips the Quota Overview to its soonest-reset (expiring)
     // list — the follow-up key after the global popover shortcut (Alt+2
     // shows the popover, T then shows what runs out soonest; pressing T

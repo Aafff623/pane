@@ -319,7 +319,8 @@ whatever the community asks for loudest.
   rule and how much cheaper off-peak runs are.
 - **Keyboard** — `Alt+2` (configurable) toggles the panel; with the
   panel open, bare `Shift` flips the overview 5h/Weekly board and bare
-  `T` flips it to the soonest-reset list; `Ctrl+R` refreshes.
+  `T` flips it to the soonest-reset list; `Ctrl+S` toggles Settings;
+  `Ctrl+R` refreshes.
 - **Share cards** — hover a card, click ⧉, and paste anywhere: the copy
   is exactly what the card shows (bars, reset hints, trend — buttons and
   links stripped), framed with the Pane icon and tagline.
