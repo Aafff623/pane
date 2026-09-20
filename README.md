@@ -1,5 +1,7 @@
 <div align="center">
 
+<img src="docs/readme/hero.jpg" width="100%" alt="Pane banner: the wordmark with the tagline Every AI quota. One tray., beside real Pane dashboard screenshots — a local spend donut and per-provider quota cards with reset countdowns" />
+
 # Pane
 
 **Track every AI quota, reset, and local CLI dollar amount without leaving Windows.**
@@ -9,18 +11,20 @@ asking: *How much of my Claude session is left? When does my Codex weekly
 reset? What did today actually cost me?*
 
 Pane is a free Windows tray companion for Claude, Codex, Cursor, Copilot,
-Kimi, Grok, and 20+ more AI providers. It is an independent, from-scratch
+Kimi, Grok, and 25+ more AI providers. It is an independent, from-scratch
 Windows rebuild inspired by [OpenUsage](https://www.openusage.ai/).
 
 <p>
+  <a href="https://github.com/Aafff623/pane/releases/latest"><img src="https://img.shields.io/github/v/release/Aafff623/pane?style=flat&label=Release&color=2563eb&labelColor=172033" alt="Latest release"></a>
   <img src="https://img.shields.io/badge/Windows-supported-0b1220?style=flat&logo=windows&logoColor=white" alt="Windows is the supported desktop">
   <img src="https://img.shields.io/badge/macOS%20%2F%20Linux-preview-0b1220?style=flat" alt="macOS and Linux preview binaries">
-  <img src="https://img.shields.io/badge/Tauri-v2-0b1220?style=flat&logo=tauri&logoColor=FFC131" alt="Tauri v2">
   <img src="https://img.shields.io/badge/Data-local%20first-0b1220?style=flat&labelColor=172033&color=2563eb" alt="Local-first data handling">
-  <img src="https://img.shields.io/badge/Providers-28%2B-0b1220?style=flat&labelColor=172033&color=dc2626" alt="More than 28 providers">
+  <img src="https://img.shields.io/badge/Providers-31%2B-0b1220?style=flat&labelColor=172033&color=dc2626" alt="31 or more providers">
+  <img src="https://img.shields.io/badge/Tauri-v2-0b1220?style=flat&logo=tauri&logoColor=FFC131" alt="Tauri v2">
+  <img src="https://img.shields.io/github/license/Aafff623/pane?style=flat&labelColor=172033" alt="MIT license">
 </p>
 
-**[trypane.xyz](https://trypane.xyz)** · [Guides](https://trypane.xyz/guides) · [Install](#install) · [How it works](#how-it-works) · [Providers](#providers-26-and-counting) · [Features](#features) · [Privacy](#privacy--security) · [Credits](#credits)
+**[trypane.xyz](https://trypane.xyz)** · [Guides](https://trypane.xyz/guides) · [Install](#install) · [How it works](#how-it-works) · [Providers](#providers-31-and-counting) · [Features](#features) · [Local API](docs/local-http-api.md) · [Privacy](#privacy--security) · [Credits](#credits)
 
 <img src="docs/readme-pane.png" width="100%" alt="Pane: a dark Windows AI telemetry board showing a 5-hour pace alert, a stable Codex quota, and a local-only provider monitor" />
 
@@ -110,13 +114,12 @@ Linux `.AppImage` / `.deb`. Tray placement, autostart wording, and
 menubar / AppIndicator behavior are still the Windows popover. Treat
 those builds as the first published binaries, not a finished port.
 
-Whichever way you install, Pane checks for updates on launch and every
-4 hours in the background, and flags a new release on the footer version
-stamp. One-click in-app install lands together with Pane's own signing key
-(on the roadmap) — until then, new versions are one click away on the
-[releases page](https://github.com/Aafff623/pane/releases/latest).
+New versions land on the [releases page](https://github.com/Aafff623/pane/releases/latest) —
+Pane checks on launch and every 4 hours, and turns the footer version
+stamp into an Update button when one is out.
 
-### Build from source
+<details>
+<summary><strong>Build from source (and the fast local dev loop)</strong></summary>
 
 Prerequisites: Node.js 20+, Rust (stable-msvc), Visual Studio C++ Build
 Tools, WebView2 (bundled with Windows 11).
@@ -160,11 +163,17 @@ WebView2 caches aggressively. The full guide (cache handling, launching
 from sandboxed agents via WMI, troubleshooting) lives in
 [`docs/dev-startup.md`](docs/dev-startup.md).
 
+</details>
+
 ## How it works
 
 Pane is a small Tauri v2 app: a Rust core doing the data work, a vanilla
 TypeScript UI doing the glass. No Electron, no background services — one
 small process idling in the tray.
+
+<p align="center">
+  <img src="docs/readme/how-it-works.jpg" width="100%" alt="How Pane works in five steps: find your accounts, ask each vendor, project the reset, count the money, and stay local" />
+</p>
 
 **1. Finding your accounts.** The official CLIs and editors you already use
 keep their login tokens in well-known per-user locations — Claude Code
@@ -208,7 +217,7 @@ statistic (random ID, version, enabled providers, success/failure counts —
 never amounts or error text). The full contract and the off switch are
 under [Privacy](#privacy--security).
 
-## Providers (28 and counting)
+## Providers (31 and counting)
 
 | Provider | How Pane connects |
 |---|---|
@@ -244,7 +253,7 @@ under [Privacy](#privacy--security).
 | Doubao | Doubao desktop sign-in cookies (read while Doubao is quit, cached ~30 days) → 5h / 7-day windows, subscription renewal, quota-reset-card balance |
 | ClawsGO | ClawsGO token from the browser (`localStorage.clawsgo_token`) → monthly credit meter, remaining balance, 30-day requests + tokens |
 
-*OpenCode's meters use the official usage API that shipped in
+\* OpenCode's meters use the official usage API that shipped in
 [anomalyco/opencode#16513](https://github.com/anomalyco/opencode/pull/16513)
 — the same account-wide numbers as the Zen dashboard, so usage from your
 other devices (or other people on a shared subscription) finally counts.
@@ -266,6 +275,12 @@ whatever the community asks for loudest.
   red "N maxed" symbol tally in the header.
 - **Codex reset credits** — see each banked credit's exact expiry and
   redeem it with one click.
+- **Peak-hours awareness** — providers with time-of-day billing
+  (Z.ai / GLM-plan relays, Command Code GOAT, Qoder CN, Trae CN) turn
+  their status dot yellow while their peak window is active, and the
+  Quota Overview splits into Available / Peak / Unavailable with an
+  always-on peak counter. Hovering a peak tile explains the multiplier
+  rule and how much cheaper off-peak runs are.
 
 **Spend**
 
@@ -311,25 +326,24 @@ whatever the community asks for loudest.
   edge rails (app controls on the left, the provider icon trail on the
   right) and glass bars, magnetic fisheye on the trail with authentic
   brand avatars and health indicator dots, circular day/night wipe.
-- **Peak-hours awareness** — providers with time-of-day billing
-  (Z.ai / GLM-plan relays, Command Code GOAT, Qoder CN, Trae CN) turn
-  their status dot yellow while their peak window is active, and the
-  Quota Overview splits into Available / Peak / Unavailable with an
-  always-on peak counter. Hovering a peak tile explains the multiplier
-  rule and how much cheaper off-peak runs are.
-- **Keyboard** — `Alt+2` (configurable) toggles the panel; with the
-  panel open, bare `Shift` flips the overview 5h/Weekly board and bare
-  `T` flips it to the soonest-reset list; `Ctrl+S` toggles Settings;
-  `Ctrl+R` refreshes.
 - **Share cards** — hover a card, click ⧉, and paste anywhere: the copy
   is exactly what the card shows (bars, reset hints, trend — buttons and
   links stripped), framed with the Pane icon and tagline.
 - **Quick links** — Status / Dashboard shortcuts on every card.
-- **[Local HTTP API](docs/local-http-api.md)** — `GET
-  http://127.0.0.1:6736/v1/usage` for scripts, Rainmeter widgets, stream
-  overlays; same wire format as the Mac app, but with no CORS headers
-  and a loopback-only Host check so web pages can't read it through
-  your browser (not even via DNS rebinding).
+- **Keyboard** — `Alt+2` (configurable) toggles the panel; with the
+  panel open, bare `Shift` flips the overview 5h/Weekly board and bare
+  `T` flips it to the soonest-reset list; `Ctrl+S` toggles Settings;
+  `Ctrl+R` refreshes.
+- **[Local HTTP API](docs/local-http-api.md)** — one loopback endpoint
+  for scripts, Rainmeter widgets, stream overlays:
+
+  ```bash
+  curl -s http://127.0.0.1:6736/v1/usage
+  ```
+
+  Same wire format as the Mac app, but with no CORS headers and a
+  loopback-only Host check so web pages can't read it through your
+  browser (not even via DNS rebinding).
 - **Update checks** — Pane checks on launch and every 4 hours in the
   background; when a release is out, the footer version stamp becomes an
   Update button. One-click in-app install lands together with Pane's own
