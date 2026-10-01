@@ -260,6 +260,7 @@ const en: Dict = {
     "{n} requests ran on models with no public pricing ({models}). Their tokens are included, but they can't be turned into dollars — so the real cost is a little higher than shown.",
 
   "spend.title": "Total Spend",
+  "spend.metricLabel": "Spend metric",
   "spend.scanning": "Scanning session logs…",
   "spend.emptyFirst":
     "No spend data yet — appears once Claude Code, Codex, or another CLI logs some usage on this PC.",
@@ -274,6 +275,8 @@ const en: Dict = {
   "spend.days30": "30 Days",
   "spend.last30": "Last 30 Days",
   "spend.trend": "Usage Trend",
+  "spend.tokenTrend": "Token Trend",
+  "spend.quotaTrend": "Quota Trend",
   "spend.trendTip":
     "Last 30 days ({from} – {to}) · peak {tokens} tokens on {peak} · from local logs",
   "spend.quotaTrendTip": "Quota drain over the last 30 days ({from} – {to}) · the highest used-percent recorded each day",
@@ -481,6 +484,9 @@ const en: Dict = {
   "customize.acctDelBody": "The “{label}” card disappears on the next refresh.",
   "customize.acctDelConfirm": "Remove",
   "customize.acctDelete": "Remove account",
+  "customize.acctArchive": "Archive",
+  "customize.acctArchiveBody": "Archive “{label}” and keep its historical usage data?",
+  "customize.acctArchived": "Account archived; historical usage was kept",
   "customize.acctDefault": "Pinned account",
   "customize.acctMakeDefault": "Pin this account to the top",
   "customize.acctDefaultSet": "{name} pinned account changed",
@@ -555,6 +561,11 @@ const en: Dict = {
   "customize.cred.kimi":
     "A Kimi Coding API key saved in Pane or provided by its environment variable is used first; Kimi Code CLI OAuth is used only when no API key is available",
   "customize.cred.stepfun": "Nothing on its own — paste a key (or set STEPFUN_API_KEY)",
+  "customize.cred.stepfunPlan": "Independent Step Plan session — paste the StepFun session token",
+  "customize.stepfunPlanLogin": "Open StepFun login",
+  "customize.stepfunPlanLoginHelp": "Sign in on the official StepFun page, then paste the session token here. Pane never receives your password.",
+  "customize.stepfunPlanTokenLabel": "Step Plan session token",
+  "customize.stepfunPlanTokenPh": "Paste the session token",
   "customize.cred.siliconflow": "Nothing on its own — paste a key (or set SILICONFLOW_API_KEY)",
   "customize.cred.novita": "Nothing on its own — paste a key (or set NOVITA_API_KEY)",
   "customize.cred.relaybalance": "Nothing on its own — paste the relay's base URL and key",
@@ -830,6 +841,7 @@ const zh: Dict = {
     "有 {n} 次请求用了没有公开定价的模型（{models}）。tokens 已计入，但无法换成美元 — 所以真实花费会比显示的略高。",
 
   "spend.title": "总花费",
+  "spend.metricLabel": "统计口径",
   "spend.scanning": "正在扫描会话日志…",
   "spend.emptyFirst":
     "还没有花费数据 — 等这台电脑上的 Claude Code、Codex 或其他 CLI 记下用量后就会出现。",
@@ -842,6 +854,8 @@ const zh: Dict = {
   "spend.days30": "30 天",
   "spend.last30": "最近 30 天",
   "spend.trend": "用量趋势",
+  "spend.tokenTrend": "Token 趋势",
+  "spend.quotaTrend": "额度趋势",
   "spend.trendTip":
     "最近 30 天（{from} – {to}）· 峰值 {tokens} tokens，在 {peak} · 来自本地日志",
   "spend.quotaTrendTip": "最近 30 天（{from} – {to}）的额度消耗水位 · 取每天记录到的最高已用百分比",
@@ -1046,6 +1060,9 @@ const zh: Dict = {
   "customize.acctDelBody": "「{label}」卡片将在下次刷新时消失。",
   "customize.acctDelConfirm": "删除",
   "customize.acctDelete": "删除账号",
+  "customize.acctArchive": "归档账号",
+  "customize.acctArchiveBody": "归档「{label}」并保留历史用量记录？",
+  "customize.acctArchived": "账号已归档，历史用量已保留",
   "customize.acctDefault": "置顶账号",
   "customize.acctMakeDefault": "将此账号置顶",
   "customize.acctDefaultSet": "{name} 的置顶账号已切换",
@@ -1115,6 +1132,11 @@ const zh: Dict = {
   "customize.cred.hermes": "读取 Hermes 桌面端的本地账本 — 无需任何凭据",
   "customize.cred.kimi": "优先使用 Pane 中保存或环境变量中的 Kimi Coding API key；没有 API key 时才使用 Kimi Code CLI OAuth",
   "customize.cred.stepfun": "不会自动读取 — 请粘贴 key（或设置 STEPFUN_API_KEY）",
+  "customize.cred.stepfunPlan": "独立的 Step Plan 会话 — 请粘贴 StepFun 会话令牌",
+  "customize.stepfunPlanLogin": "打开 StepFun 登录",
+  "customize.stepfunPlanLoginHelp": "先在 StepFun 官方页面完成登录，再把会话令牌粘贴到这里。Pane 不会接收你的密码。",
+  "customize.stepfunPlanTokenLabel": "Step Plan 会话令牌",
+  "customize.stepfunPlanTokenPh": "粘贴会话令牌",
   "customize.cred.siliconflow": "不会自动读取 — 请粘贴 key（或设置 SILICONFLOW_API_KEY）",
   "customize.cred.novita": "不会自动读取 — 请粘贴 key（或设置 NOVITA_API_KEY）",
   "customize.cred.relaybalance": "不会自动读取 — 请粘贴中转站的 base URL 和 key",
@@ -1355,6 +1377,7 @@ const ru: Dict = {
     "{n} запросов шли на модели без публичных цен ({models}). Токены учтены, но в доллары их не перевести — реальная стоимость чуть выше, чем на экране.",
 
   "spend.title": "Всего потрачено",
+  "spend.metricLabel": "Метрика расходов",
   "spend.scanning": "Сканирование журналов сессий…",
   "spend.emptyFirst":
     "Пока нет данных о тратах — появятся, когда Claude Code, Codex или другой CLI запишет использование на этом ПК.",
@@ -1369,6 +1392,8 @@ const ru: Dict = {
   "spend.days30": "30 дней",
   "spend.last30": "Последние 30 дней",
   "spend.trend": "Динамика",
+  "spend.tokenTrend": "Динамика токенов",
+  "spend.quotaTrend": "Динамика квоты",
   "spend.trendTip":
     "Последние 30 дней ({from} – {to}) · пик {tokens} tokens {peak} · из локальных журналов",
   "spend.quotaTrendTip": "Расход квоты за последние 30 дней ({from} – {to}) · максимальный записанный процент использования за день",
@@ -1575,6 +1600,9 @@ const ru: Dict = {
   "customize.acctDelBody": "Карточка «{label}» исчезнет при следующем обновлении.",
   "customize.acctDelConfirm": "Удалить",
   "customize.acctDelete": "Удалить аккаунт",
+  "customize.acctArchive": "Архивировать",
+  "customize.acctArchiveBody": "Архивировать «{label}» и сохранить историю использования?",
+  "customize.acctArchived": "Аккаунт архивирован, история сохранена",
   "customize.acctDefault": "Закреплённый аккаунт",
   "customize.acctMakeDefault": "Закрепить этот аккаунт",
   "customize.acctDefaultSet": "Закреплённый аккаунт {name} изменён",
@@ -1648,6 +1676,11 @@ const ru: Dict = {
   "customize.cred.kimi":
     "Сначала используется сохранённый в Pane или переданный через переменную окружения Kimi Coding API-ключ; OAuth Kimi Code CLI используется только без API-ключа",
   "customize.cred.stepfun": "Сам ничего не читает — вставьте ключ (или задайте STEPFUN_API_KEY)",
+  "customize.cred.stepfunPlan": "Отдельная сессия Step Plan — вставьте токен сессии StepFun",
+  "customize.stepfunPlanLogin": "Открыть вход StepFun",
+  "customize.stepfunPlanLoginHelp": "Войдите на официальной странице StepFun, затем вставьте токен сессии. Pane не получает пароль.",
+  "customize.stepfunPlanTokenLabel": "Токен сессии Step Plan",
+  "customize.stepfunPlanTokenPh": "Вставьте токен сессии",
   "customize.cred.siliconflow": "Сам ничего не читает — вставьте ключ (или задайте SILICONFLOW_API_KEY)",
   "customize.cred.novita": "Сам ничего не читает — вставьте ключ (или задайте NOVITA_API_KEY)",
   "customize.cred.relaybalance": "Сам ничего не читает — вставьте base URL и ключ релея",

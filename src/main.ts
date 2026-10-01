@@ -1388,7 +1388,7 @@ function renderTrend(source: TrendSource): string {
       });
   return `
     <div class="metric trend">
-      <span class="metric-label" title="${escapeHtml(title)}">${escapeHtml(t("spend.trend"))}</span>
+      <span class="metric-label" title="${escapeHtml(title)}">${escapeHtml(t(source.quota ? "spend.quotaTrend" : "spend.tokenTrend"))}</span>
       <svg class="trend-chart" viewBox="0 0 297 32" preserveAspectRatio="none">${bars}</svg>
     </div>`;
 }
@@ -2527,6 +2527,9 @@ function renderTotalSpend(): string {
         <span class="provider-name">${escapeHtml(t("spend.title"))}</span>
         <span class="info" title="${escapeHtml(t("spend.info", { names: contributors }))}">&#9432;</span>
         <span class="spacer"></span>
+        <div class="spend-metric-tabs" role="group" aria-label="${escapeHtml(t("spend.metricLabel"))}">
+          ${(["cost", "tokens"] as const).map((metric) => `<button class="tab spend-metric-tab${config.spendMetric === metric ? " active" : ""}" data-spend-metric="${metric}">${escapeHtml(t(METRIC_NAMES[metric]))}</button>`).join("")}
+        </div>
         <button class="share-btn" data-share="__total__" title="${escapeHtml(t("card.share"))}">⧉</button>
       </div>
       <div class="card-panel">
@@ -4110,6 +4113,7 @@ const PROVIDER_CRED_INFO: Record<string, { auto: string; methods: CredMethod[] }
   hermes: { auto: "customize.cred.hermes", methods: [] },
   kimi: { auto: "customize.cred.kimi", methods: ["paste", "oauth"] },
   stepfun: { auto: "customize.cred.stepfun", methods: ["paste"] },
+  "stepfun-plan": { auto: "customize.cred.stepfunPlan", methods: ["paste"] },
   siliconflow: { auto: "customize.cred.siliconflow", methods: ["paste"] },
   novita: { auto: "customize.cred.novita", methods: ["paste"] },
   relaybalance: { auto: "customize.cred.relaybalance", methods: ["paste"] },
@@ -4791,6 +4795,27 @@ async function doAccountRemove(family: string, index: number): Promise<void> {
   }
 }
 
+async function doAccountArchive(family: string, index: number): Promise<void> {
+  const list = accountsCache.get(family) ?? [];
+  const label = list[index]?.label || t("customize.acctDefaultName", { n: index + 1 });
+  const ok = await appConfirm({
+    title: t("customize.acctArchive"),
+    message: t("customize.acctArchiveBody", { label }),
+    confirmLabel: t("customize.acctArchive"),
+    danger: false,
+  });
+  if (!ok) return;
+  try {
+    await invoke("account_archive", { provider: family, index });
+    userSelectedAccountFor.delete(family);
+    refreshAccounts(family);
+    document.querySelector("#status")!.textContent = t("customize.acctArchived");
+    void forceUsageRefreshAttempt(false).then(requestTraySync);
+  } catch (err) {
+    document.querySelector("#status")!.textContent = t("customize.acctAddFailed", { err: String(err) });
+  }
+}
+
 /// Makes the account at `index` the default: it moves to position 0 in the
 /// accounts file and publishes under the bare family id on the next fetch.
 /// Its old <provider>@<fingerprint> card folds away into the main card.
@@ -5082,6 +5107,26 @@ function renderCustConfig(id: string): string {
         ${groupPickerHtml(id)}
       </div>`;
   }
+  if (id === "stepfun-plan") {
+    return `<div class="cust-config cust-form">
+      ${status}
+      <div class="form-actions">
+        <button class="mini-btn" data-stepfun-login="https://platform.stepfun.com/account-overview">${escapeHtml(t("customize.stepfunPlanLogin"))}</button>
+      </div>
+      <p class="settings-note">${escapeHtml(t("customize.stepfunPlanLoginHelp"))}</p>
+      <div class="form-field">
+        <span class="form-label">${escapeHtml(t("customize.stepfunPlanTokenLabel"))}</span>
+        <input class="form-input" type="password" data-cust-key="${id}" placeholder="${escapeHtml(t("customize.stepfunPlanTokenPh"))}" autocomplete="new-password" spellcheck="false" />
+        <div class="form-help">${escapeHtml(t("customize.formKeyHelp"))}</div>
+      </div>
+      <div class="form-actions">
+        <button class="mini-btn" data-cust-test="${id}">${escapeHtml(t("customize.test"))}</button>
+        <button class="mini-btn" data-cust-save="${id}" title="${escapeHtml(t("customize.saveAfterTest"))}">${escapeHtml(t("settings.save"))}</button>
+        <span class="cust-test-result" data-cust-result="${id}"></span>
+      </div>
+      ${groupPickerHtml(id)}
+    </div>`;
+  }
   if (!KEY_PROVIDERS.has(id)) {
     // An account card (deepseek@<fingerprint>) gets its own small config
     // panel: the masked key, the live snapshot status (connectivity as of
@@ -5162,6 +5207,7 @@ function renderAccountConfig(id: string): string {
       </div>
       <div class="form-actions">
         <button class="mini-btn" data-acct-rename="${escapeHtml(fam)}|${index}">${escapeHtml(t("settings.save"))}</button>
+        <button class="mini-btn" data-acct-archive="${escapeHtml(fam)}|${index}" title="${escapeHtml(t("customize.acctArchive"))}">${escapeHtml(t("customize.acctArchive"))}</button>
         <button class="mini-btn danger" data-acct-del="${escapeHtml(fam)}|${index}" title="${escapeHtml(t("customize.acctDelete"))}">${escapeHtml(t("customize.acctDelete"))}</button>
       </div>
     </div>`;
@@ -6423,6 +6469,14 @@ async function handleCustomizeClick(target: HTMLElement): Promise<boolean> {
     void runCustKeyTest(custTest.dataset.custTest!);
     return true;
   }
+  const stepfunLogin = target.closest<HTMLElement>("[data-stepfun-login]");
+  if (stepfunLogin) {
+    void invoke("open_link", { url: stepfunLogin.dataset.stepfunLogin! }).catch((err) => {
+      const status = document.querySelector("#status");
+      if (status) status.textContent = t("footer.openLinkFailed", { err: String(err) });
+    });
+    return true;
+  }
   const oauthLogin = target.closest<HTMLElement>("[data-oauth-login]");
   if (oauthLogin) {
     void startOauthLogin(oauthLogin.dataset.oauthLogin!);
@@ -6451,6 +6505,13 @@ async function handleCustomizeClick(target: HTMLElement): Promise<boolean> {
     const [family, idxStr] = acctDel.dataset.acctDel!.split("|");
     const index = Number(idxStr);
     if (family && Number.isInteger(index)) void doAccountRemove(family, index);
+    return true;
+  }
+  const acctArchive = target.closest<HTMLElement>("[data-acct-archive]");
+  if (acctArchive) {
+    const [family, idxStr] = acctArchive.dataset.acctArchive!.split("|");
+    const index = Number(idxStr);
+    if (family && Number.isInteger(index)) void doAccountArchive(family, index);
     return true;
   }
   const acctSetdef = target.closest<HTMLElement>("[data-acct-setdef]");
@@ -8079,6 +8140,15 @@ window.addEventListener("DOMContentLoaded", () => {
     void patchConfig({ spendMetric: config.spendMetric });
     renderAll();
   };
+  providersEl.addEventListener("click", (e) => {
+    const button = (e.target as Element).closest<HTMLElement>("[data-spend-metric]");
+    if (!button) return;
+    const metric = button.dataset.spendMetric;
+    if (metric !== "cost" && metric !== "tokens") return;
+    config.spendMetric = metric;
+    void patchConfig({ spendMetric: metric });
+    renderAll();
+  });
   providersEl.addEventListener("contextmenu", (e) => {
     if ((e.target as Element).closest?.(".donut-wrap")) {
       e.preventDefault();

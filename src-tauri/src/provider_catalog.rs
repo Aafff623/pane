@@ -217,6 +217,14 @@ const PROVIDER_DEFINITIONS: &[ProviderDefinition] = &[
         icon_key: "stepfun",
     },
     ProviderDefinition {
+        family_id: "stepfun-plan",
+        display_name: "StepFun Step Plan",
+        query_kind: QueryKind::NativeCodingPlan,
+        supports_api_key: true,
+        supports_extra_accounts: false,
+        icon_key: "stepfun",
+    },
+    ProviderDefinition {
         family_id: "siliconflow",
         display_name: "SiliconFlow",
         query_kind: QueryKind::NativeBalance,
@@ -393,6 +401,7 @@ mod tests {
             "qwen",
             "kimi",
             "stepfun",
+            "stepfun-plan",
             "siliconflow",
             "novita",
             "relaybalance",
@@ -423,6 +432,7 @@ mod tests {
         let expected = [
             ("kimi", QueryKind::Composite),
             ("stepfun", QueryKind::NativeBalance),
+            ("stepfun-plan", QueryKind::NativeCodingPlan),
             ("siliconflow", QueryKind::NativeBalance),
             ("opencode", QueryKind::Composite),
             ("novita", QueryKind::NativeBalance),

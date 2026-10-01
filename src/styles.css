@@ -1509,6 +1509,31 @@ article.provider.is-folded:hover {
   font-weight: 500;
 }
 
+.spend-metric-tabs {
+  display: inline-flex;
+  gap: 2px;
+  padding: 2px;
+  border-radius: 8px;
+  background: var(--muted);
+  flex: none;
+}
+
+.spend-metric-tab {
+  flex: none;
+  font-size: 10px;
+  padding: 3px 7px;
+  margin: 0;
+}
+
+.total-spend .provider-head {
+  flex-wrap: wrap;
+}
+
+.total-spend .donut-total {
+  font-size: 12px;
+  letter-spacing: -0.02em;
+}
+
 .info {
   font-size: 12px;
   color: var(--muted-foreground);
@@ -1557,6 +1582,8 @@ article.provider.is-folded:hover {
   font-family: inherit;
   padding: 5px 10px;
   cursor: pointer;
+  white-space: nowrap;
+  flex: none;
 }
 
 .mini-btn:hover {
@@ -1678,6 +1705,29 @@ article.provider.is-folded:hover {
 
 .customize-block .provider-head {
   margin-bottom: 8px;
+}
+
+/* The customize drawer is narrow. Let only the provider name absorb width. */
+.customize-block .provider-head {
+  min-width: 0;
+  gap: 6px;
+}
+.customize-block .cust-expand {
+  min-width: 0;
+  flex: 1 1 auto;
+}
+.customize-block .cust-expand .provider-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.customize-block .provider-head > .spacer {
+  flex: 0 1 8px;
+}
+.customize-block .cust-config-btn,
+.customize-block .cust-info-btn {
+  padding-inline: 8px;
 }
 
 /* A-Z letter jumps land below the pinned bar + search box. */

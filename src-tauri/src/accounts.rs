@@ -26,6 +26,14 @@ pub struct AccountEntry {
     pub base_url: Option<String>,
 }
 
+#[derive(Serialize, Deserialize, Clone, PartialEq, Debug)]
+pub struct ArchivedAccount {
+    pub provider: String,
+    pub card_id: String,
+    pub label: String,
+    pub archived_at: i64,
+}
+
 fn accounts_dir(base: &std::path::Path) -> PathBuf {
     base.join("accounts")
 }
@@ -73,6 +81,25 @@ pub fn load_accounts(provider: &str) -> Vec<AccountEntry> {
 
 pub fn save_accounts(provider: &str, entries: &[AccountEntry]) -> Result<(), String> {
     save_accounts_to(&crate::providers::config_dir(), provider, entries)
+}
+
+fn archive_file(base: &std::path::Path) -> PathBuf {
+    base.join("archived_accounts.json")
+}
+
+pub fn load_archived_from(base: &std::path::Path) -> Vec<ArchivedAccount> {
+    let raw = std::fs::read_to_string(archive_file(base)).unwrap_or_default();
+    serde_json::from_str(raw.trim_start_matches('\u{feff}')).unwrap_or_default()
+}
+
+pub fn archive_account(account: ArchivedAccount) -> Result<(), String> {
+    let base = crate::providers::config_dir();
+    let mut list = load_archived_from(&base);
+    if !list.iter().any(|a| a.card_id == account.card_id) {
+        list.push(account);
+    }
+    std::fs::write(archive_file(&base), serde_json::to_string_pretty(&list).unwrap_or_default())
+        .map_err(|e| format!("write archived accounts: {e}"))
 }
 
 pub fn provider_takes_accounts(provider: &str) -> bool {

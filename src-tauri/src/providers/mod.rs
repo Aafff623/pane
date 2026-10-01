@@ -28,6 +28,7 @@ pub mod qwen;
 pub mod relaybalance;
 pub mod siliconflow;
 pub mod stepfun;
+pub mod stepfun_plan;
 pub mod traecn;
 pub mod zai;
 

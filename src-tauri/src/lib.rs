@@ -575,7 +575,7 @@ struct StripEntry {
 /// strip ids are validated against this before becoming tray icon ids,
 /// including `family@account` cards. Stale family-level strip icons are
 /// removed for exactly this set.
-const STRIP_PROVIDER_IDS: [&str; 32] = [
+const STRIP_PROVIDER_IDS: [&str; 33] = [
     "claude",
     "codex",
     "cursor",
@@ -599,6 +599,7 @@ const STRIP_PROVIDER_IDS: [&str; 32] = [
     "kimi",
     "onenewapi",
     "stepfun",
+    "stepfun-plan",
     "siliconflow",
     "novita",
     "relaybalance",
@@ -1815,6 +1816,7 @@ async fn run_usage_fetch(app: &tauri::AppHandle) -> Vec<providers::Snapshot> {
         ("hermes", Box::pin(guarded("hermes".into(), "Hermes".into(), providers::hermes::snapshot()))),
         ("kimi", Box::pin(guarded("kimi".into(), "Kimi Code".into(), providers::kimi::snapshot()))),
         ("stepfun", Box::pin(guarded("stepfun".into(), "StepFun".into(), providers::stepfun::snapshot()))),
+        ("stepfun-plan", Box::pin(guarded("stepfun-plan".into(), "StepFun Step Plan".into(), providers::stepfun_plan::snapshot()))),
         ("siliconflow", Box::pin(guarded("siliconflow".into(), "SiliconFlow".into(), providers::siliconflow::snapshot()))),
         ("novita", Box::pin(guarded("novita".into(), "Novita AI".into(), providers::novita::snapshot()))),
         ("relaybalance", Box::pin(guarded("relaybalance".into(), "Custom Balance".into(), providers::relaybalance::snapshot()))),
@@ -2627,6 +2629,7 @@ async fn test_api_key(
         "kimi" => providers::kimi::snapshot_with_key(key).await,
         "opencode" => providers::opencode::snapshot_with_key(key).await,
         "stepfun" => providers::stepfun::snapshot_with_key(key).await,
+        "stepfun-plan" => providers::stepfun_plan::snapshot_with_key(key).await,
         "siliconflow" => providers::siliconflow::snapshot_with_key(key).await,
         "novita" => providers::novita::snapshot_with_key(key).await,
         "relaybalance" => {
@@ -2774,6 +2777,32 @@ fn account_remove(provider: String, index: usize) -> Result<(), String> {
     entries.remove(index);
     accounts::save_accounts(&provider, &entries)?;
     if removed_default {
+        let _ = forget_provider_snapshot(&provider);
+    }
+    Ok(())
+}
+
+/// Archives an account before removing it from the active cards. The stable
+/// card id is retained so usage_history.json remains attached to this identity.
+#[tauri::command]
+fn account_archive(provider: String, index: usize) -> Result<(), String> {
+    if !accounts::provider_takes_accounts(&provider) {
+        return Err(format!("unknown multi-account provider: {provider}"));
+    }
+    let mut entries = accounts::load_accounts(&provider);
+    if index >= entries.len() {
+        return Err(format!("no account #{index} for {provider}"));
+    }
+    let entry = entries.remove(index);
+    let card_id = accounts::card_id_for_account(&provider, &entry);
+    accounts::archive_account(accounts::ArchivedAccount {
+        provider: provider.clone(),
+        card_id,
+        label: entry.label,
+        archived_at: chrono::Utc::now().timestamp_millis(),
+    })?;
+    accounts::save_accounts(&provider, &entries)?;
+    if index == 0 {
         let _ = forget_provider_snapshot(&provider);
     }
     Ok(())
@@ -2946,6 +2975,7 @@ fn provider_env_vars(provider: &str) -> &'static [&'static str] {
         "kimi" => &["KIMI_CODING_API_KEY"],
         "opencode" => &["OPENCODE_GO_API_KEY"],
         "stepfun" => &["STEPFUN_API_KEY"],
+        "stepfun-plan" => &[],
         "siliconflow" => &["SILICONFLOW_API_KEY"],
         "novita" => &["NOVITA_API_KEY"],
         _ => &[],
@@ -2995,6 +3025,7 @@ fn get_credential_status(provider: String) -> Value {
         "hermes" => providers::hermes::local_credential_hint(),
         "kimi" => providers::kimi::local_credential_hint(),
         "stepfun" => providers::stepfun::local_credential_hint(),
+        "stepfun-plan" => providers::stepfun_plan::local_credential_hint(),
         "siliconflow" => providers::siliconflow::local_credential_hint(),
         "novita" => providers::novita::local_credential_hint(),
         "relaybalance" => providers::relaybalance::local_credential_hint(),
@@ -3603,6 +3634,7 @@ pub fn run() {
             test_api_key,
             account_add,
             account_remove,
+            account_archive,
             account_rename,
             account_set_default,
             account_list,
