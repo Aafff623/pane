@@ -82,6 +82,7 @@ interface ProviderSpend {
   yesterday: SpendWindow;
   last30: SpendWindow;
   trend: number[];
+  trend_cost: number[];
   unpriced: number;
   unpriced_models: string[];
 }
@@ -509,15 +510,16 @@ function resolveDisplayedAccount(family: string, defaultId: string, accountIds: 
   return defaultId;
 }
 
-type TrendSource = { id: string; trend: (number | null)[]; quota: boolean };
+type TrendSource = { id: string; trend: (number | null)[]; quota: boolean; fmt: (v: number) => string };
 
 /// The trend data for one card: local-log spend when the id has one, else
 /// the backend's sampled quota history (API-key accounts, relay keys).
 function trendSourceFor(id: string): TrendSource | undefined {
   const local = lastSpend.find((sp) => sp.id === id);
-  if (local) return { id, trend: local.trend, quota: false };
+  const metricCost = config.spendMetric === "cost";
+  if (local) return { id, trend: metricCost ? local.trend_cost : local.trend, quota: false, fmt: metricCost ? fmtMoney : fmtTokens };
   const sampled = lastQuotaTrend[id];
-  if (sampled?.some((v) => v != null && v > 0)) return { id, trend: sampled, quota: true };
+  if (sampled?.some((v) => v != null && v > 0)) return { id, trend: sampled, quota: true, fmt: fmtTokens };
   return undefined;
 }
 let spendTab: SpendTab = "today";
@@ -1383,12 +1385,12 @@ function renderTrend(source: TrendSource): string {
     : t("spend.trendTip", {
         from: dateOf(0),
         to: dateOf(29),
-        tokens: fmtTokens(max),
+        tokens: source.fmt(max),
         peak: dateOf(peakIdx),
       });
   return `
     <div class="metric trend">
-      <span class="metric-label" title="${escapeHtml(title)}">${escapeHtml(t(source.quota ? "spend.quotaTrend" : "spend.tokenTrend"))}</span>
+      <span class="metric-label" title="${escapeHtml(title)}">${escapeHtml(t(source.quota ? "spend.quotaTrend" : config.spendMetric === "cost" ? "spend.costTrend" : "spend.tokenTrend"))}</span>
       <svg class="trend-chart" viewBox="0 0 297 32" preserveAspectRatio="none">${bars}</svg>
     </div>`;
 }
@@ -5799,9 +5801,9 @@ function updateTrailActive(): void {
 // Spend row model tooltip
 // ---------------------------------------------------------------------------
 
-/// Tooltip for one Usage Trend bar: date + the day's value — tokens for
-/// local-log spends, sampled used-percent for quota history, "no data"
-/// for unsampled days.
+/// Tooltip for one Usage Trend bar: date + the day's value — dollars or
+/// tokens for local-log spends (follows the metric toggle), sampled
+/// used-percent for quota history, "no data" for unsampled days.
 function showTrendTip(el: HTMLElement): void {
   const tip = document.querySelector<HTMLElement>("#model-tip")!;
   const [id, idxStr] = (el.dataset.trend ?? "").split("|");
@@ -5818,14 +5820,16 @@ function showTrendTip(el: HTMLElement): void {
 
   let lines: string;
   if (spend) {
-    const tokens = spend.trend[i] ?? 0;
-    const total = spend.trend.reduce((a, b) => a + b, 0);
-    const share = total > 0 ? (tokens / total) * 100 : 0;
+    const metricCost = config.spendMetric === "cost";
+    const series = metricCost ? spend.trend_cost : spend.trend;
+    const dayVal = series[i] ?? 0;
+    const total = series.reduce((a, b) => a + b, 0);
+    const share = total > 0 ? (dayVal / total) * 100 : 0;
     lines = `
     <div class="tip-line"><span class="tip-name">${escapeHtml(date)}</span><span>${
-      tokens > 0 ? escapeHtml(t("card.tokens", { n: fmtTokens(tokens) })) : escapeHtml(t("spend.noUsage"))
+      dayVal > 0 ? escapeHtml(metricCost ? fmtMoney(dayVal) : t("card.tokens", { n: fmtTokens(dayVal) })) : escapeHtml(t("spend.noUsage"))
     }</span></div>
-    ${tokens > 0 ? `<div class="tip-line detail"><span>${escapeHtml(t("spend.of30", { n: share < 1 ? "<1" : share.toFixed(0) }))}</span></div>` : ""}`;
+    ${dayVal > 0 ? `<div class="tip-line detail"><span>${escapeHtml(t("spend.of30", { n: share < 1 ? "<1" : share.toFixed(0) }))}</span></div>` : ""}`;
   } else {
     const pct = sampled?.[i];
     lines = `

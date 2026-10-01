@@ -45,6 +45,8 @@ pub struct ProviderSpend {
     pub last30: Window,
     /// Tokens per day, oldest first — trend[29] is today.
     pub trend: Vec<f64>,
+    /// Dollars per day, same axis as `trend` — trend_cost[29] is today.
+    pub trend_cost: Vec<f64>,
     /// Events whose model no catalog prices. Their measured tokens still
     /// count in token totals/trend, but no dollars are guessed for them
     /// (a deliberate softening of the Mac's exclude-everything semantics:
@@ -410,6 +412,7 @@ fn build_spend(id: impl Into<String>, name: impl Into<String>, data: FileData) -
         yesterday: Window::default(),
         last30: Window::default(),
         trend: vec![0.0; TREND_DAYS],
+        trend_cost: vec![0.0; TREND_DAYS],
         unpriced: data.unpriced.values().sum(),
         unpriced_models,
     };
@@ -435,6 +438,7 @@ fn build_spend(id: impl Into<String>, name: impl Into<String>, data: FileData) -
             let idx = (day - (today - TREND_DAYS as i32 + 1)) as usize;
             if idx < TREND_DAYS {
                 sp.trend[idx] += tokens;
+                sp.trend_cost[idx] += cost;
             }
         }
     }

@@ -276,6 +276,7 @@ const en: Dict = {
   "spend.last30": "Last 30 Days",
   "spend.trend": "Usage Trend",
   "spend.tokenTrend": "Token Trend",
+  "spend.costTrend": "Spend Trend",
   "spend.quotaTrend": "Quota Trend",
   "spend.trendTip":
     "Last 30 days ({from} – {to}) · peak {tokens} tokens on {peak} · from local logs",
@@ -856,6 +857,7 @@ const zh: Dict = {
   "spend.last30": "最近 30 天",
   "spend.trend": "用量趋势",
   "spend.tokenTrend": "Token 趋势",
+  "spend.costTrend": "花费趋势",
   "spend.quotaTrend": "额度趋势",
   "spend.trendTip":
     "最近 30 天（{from} – {to}）· 峰值 {tokens} tokens，在 {peak} · 来自本地日志",
@@ -1395,6 +1397,7 @@ const ru: Dict = {
   "spend.last30": "Последние 30 дней",
   "spend.trend": "Динамика",
   "spend.tokenTrend": "Динамика токенов",
+  "spend.costTrend": "Расход по дням",
   "spend.quotaTrend": "Динамика квоты",
   "spend.trendTip":
     "Последние 30 дней ({from} – {to}) · пик {tokens} tokens {peak} · из локальных журналов",
