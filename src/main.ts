@@ -2202,6 +2202,12 @@ function spendCenter(entries: DonutEntry[]): { primary: string; sub: string; exa
   return { primary: fmtMoney(c), sub: t("spend.metric.cost"), exact: `$${c.toFixed(2)}` };
 }
 
+/// Shrink the ring's center number when it outgrows the hole: base size
+/// fits ≤maxChars, longer strings scale down linearly (floor 8).
+function fitFontSize(text: string, base: number, maxChars: number): number {
+  return text.length <= maxChars ? base : Math.max(8, Math.floor((base * maxChars) / text.length));
+}
+
 /// The metric a click (or right-click, reversed) moves to next — the Mac
 /// menu's order: Cost, Cost/MTok, Tokens.
 function nextSpendMetric(back: boolean): "cost" | "tokens" | "mtok" {
@@ -2444,6 +2450,13 @@ function renderTotalSpend(): string {
   /// One period column: header (switches the donut), the window total in
   /// the active metric, and every provider that spent in it. Columns
   /// reuse the legend-row styles so wedge hover keeps lighting them up.
+  /// Long totals shrink one step so wide numbers (e.g. "$1,234.56 · 12.3M")
+  /// don't blow out the fixed-width column.
+  const colTotalHtml = (w: SpendWindow) => {
+    const s = fmtSpendVal(w);
+    return `<div class="col-total${s.length > 10 ? " long" : ""}" title="${escapeHtml(s)}">${escapeHtml(s)}</div>`;
+  };
+
   const spendCol = (id: SpendTab, label: string) => {
     const colEntries = donutEntries(id);
     const totals = colEntries.reduce(
@@ -2455,7 +2468,7 @@ function renderTotalSpend(): string {
     return `
       <div class="spend-col">
         <button class="tab col-head${spendTab === id ? " active" : ""}" data-tab="${id}">${label}</button>
-        <div class="col-total">${fmtSpendVal({ ...emptyWindow(), ...totals, models: [] })}</div>
+        ${colTotalHtml({ ...emptyWindow(), ...totals, models: [] })}
         <div class="legend">
           ${shown.map((e) => legendRowHtml(e)).join("")}
           ${overflow > 0 ? `<div class="legend-row more">+${overflow}</div>` : ""}
@@ -2480,7 +2493,7 @@ function renderTotalSpend(): string {
           <button class="tab col-head${spendTab === "today" ? " active" : ""}" data-tab="today">${t("spend.today")}</button>
           <button class="tab col-head${spendTab === "yesterday" ? " active" : ""}" data-tab="yesterday">${t("spend.yesterday")}</button>
         </div>
-        <div class="col-total">${fmtSpendVal({ ...emptyWindow(), ...leftTotals, models: [] })}</div>
+        ${colTotalHtml({ ...emptyWindow(), ...leftTotals, models: [] })}
         <div class="legend">
           ${leftShown.map((e) => legendRowHtml(e)).join("")}
           ${leftOverflow > 0 ? `<div class="legend-row more">+${leftOverflow}</div>` : ""}
@@ -2499,8 +2512,8 @@ function renderTotalSpend(): string {
       <div class="donut-wrap" title="${escapeHtml(exact)}">
         <svg width="96" height="96" viewBox="0 0 96 96">
           ${segments}
-          <text class="donut-total" x="48" y="50" text-anchor="middle" font-size="14" font-weight="600">${center.primary}</text>
-          <text class="donut-sub" x="48" y="62" text-anchor="middle" font-size="8">${center.sub}</text>
+          <text class="donut-total" x="48" y="50" text-anchor="middle" font-size="${fitFontSize(center.primary, 14, 7)}" font-weight="600">${center.primary}</text>
+          <text class="donut-sub" x="48" y="62" text-anchor="middle" font-size="${fitFontSize(center.sub, 8, 12)}">${center.sub}</text>
         </svg>
         <div class="spend-cols">
           ${leftColHtml}
@@ -2511,8 +2524,8 @@ function renderTotalSpend(): string {
       <div class="donut-wrap donut-empty" title="${escapeHtml(t("spend.emptyPeriodTip"))}">
         <svg width="96" height="96" viewBox="0 0 96 96">
           <path class="seg donut-zero" data-full="1" fill-rule="evenodd" d="${sectorPath(0, TAU)}"/>
-          <text class="donut-total" x="48" y="50" text-anchor="middle" font-size="14" font-weight="600">${center.primary}</text>
-          <text class="donut-sub" x="48" y="62" text-anchor="middle" font-size="8">${center.sub}</text>
+          <text class="donut-total" x="48" y="50" text-anchor="middle" font-size="${fitFontSize(center.primary, 14, 7)}" font-weight="600">${center.primary}</text>
+          <text class="donut-sub" x="48" y="62" text-anchor="middle" font-size="${fitFontSize(center.sub, 8, 12)}">${center.sub}</text>
         </svg>
         <div class="spend-cols">
           ${leftColHtml}

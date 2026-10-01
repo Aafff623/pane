@@ -1475,6 +1475,10 @@ article.provider.is-folded:hover {
   margin: 0 0 1px;
 }
 
+.spend-col .col-total.long {
+  font-size: 10px;
+}
+
 .spend-col .col-total {
   font-size: 11.5px;
   font-weight: 600;
