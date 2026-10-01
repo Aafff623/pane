@@ -481,7 +481,7 @@ let spendLoaded = false;
 /// Sampled quota history per card id (backend usage_history.json). Cards
 /// with local CLI logs trend from spend; every other card falls back to
 /// these daily "worst used percent" samples.
-let lastQuotaTrend: Record<string, number[]> = {};
+let lastQuotaTrend: Record<string, (number | null)[]> = {};
 
 /// Tracks manual account-tab selections made by the user in the current view.
 /// Cleared on popover reopening or account mutations.
@@ -509,7 +509,7 @@ function resolveDisplayedAccount(family: string, defaultId: string, accountIds: 
   return defaultId;
 }
 
-type TrendSource = { id: string; trend: number[]; quota: boolean };
+type TrendSource = { id: string; trend: (number | null)[]; quota: boolean };
 
 /// The trend data for one card: local-log spend when the id has one, else
 /// the backend's sampled quota history (API-key accounts, relay keys).
@@ -517,7 +517,7 @@ function trendSourceFor(id: string): TrendSource | undefined {
   const local = lastSpend.find((sp) => sp.id === id);
   if (local) return { id, trend: local.trend, quota: false };
   const sampled = lastQuotaTrend[id];
-  if (sampled?.some((v) => v > 0)) return { id, trend: sampled, quota: true };
+  if (sampled?.some((v) => v != null && v > 0)) return { id, trend: sampled, quota: true };
   return undefined;
 }
 let spendTab: SpendTab = "today";
@@ -1361,8 +1361,8 @@ function renderMetric(m: Metric): string {
 }
 
 function renderTrend(source: TrendSource): string {
-  if (!source.trend.some((v) => v > 0)) return "";
-  const max = Math.max(...source.trend);
+  if (!source.trend.some((v) => v != null && v > 0)) return "";
+  const max = Math.max(...source.trend.map((v) => v ?? 0));
   const peakIdx = source.trend.indexOf(max);
   const dayMs = 86_400_000;
   const dateOf = (i: number) =>
@@ -1371,9 +1371,9 @@ function renderTrend(source: TrendSource): string {
   // area so thin bars are easy to hover; [data-trend] drives the tooltip.
   const bars = source.trend
     .map((v, i) => {
-      const h = v > 0 ? Math.max(2, (v / max) * 30) : 1;
+      const h = v != null && v > 0 ? Math.max(2, (v / max) * 30) : 1;
       return `<g class="trend-day">
-        <rect class="${v > 0 ? "trend-bar" : "trend-zero"}" x="${i * 10}" y="${32 - h}" width="7" height="${h}" rx="1.5"/>
+        <rect class="${v == null ? "trend-nodata" : v > 0 ? "trend-bar" : "trend-zero"}" x="${i * 10}" y="${32 - h}" width="7" height="${h}" rx="1.5"/>
         <rect class="trend-hit" data-trend="${source.id}|${i}" x="${i * 10 - 1.5}" y="0" width="10" height="32" fill="transparent"/>
       </g>`;
     })
@@ -5800,7 +5800,8 @@ function updateTrailActive(): void {
 // ---------------------------------------------------------------------------
 
 /// Tooltip for one Usage Trend bar: date + the day's value — tokens for
-/// local-log spends, sampled used-percent for quota history.
+/// local-log spends, sampled used-percent for quota history, "no data"
+/// for unsampled days.
 function showTrendTip(el: HTMLElement): void {
   const tip = document.querySelector<HTMLElement>("#model-tip")!;
   const [id, idxStr] = (el.dataset.trend ?? "").split("|");
@@ -5826,10 +5827,10 @@ function showTrendTip(el: HTMLElement): void {
     }</span></div>
     ${tokens > 0 ? `<div class="tip-line detail"><span>${escapeHtml(t("spend.of30", { n: share < 1 ? "<1" : share.toFixed(0) }))}</span></div>` : ""}`;
   } else {
-    const pct = sampled?.[i] ?? 0;
+    const pct = sampled?.[i];
     lines = `
     <div class="tip-line"><span class="tip-name">${escapeHtml(date)}</span><span>${
-      pct > 0 ? escapeHtml(t("spend.quotaBarTip", { n: Math.round(pct) })) : escapeHtml(t("spend.noUsage"))
+      pct == null ? escapeHtml(t("spend.noDataDay")) : pct > 0 ? escapeHtml(t("spend.quotaBarTip", { n: Math.round(pct) })) : escapeHtml(t("spend.noUsage"))
     }</span></div>`;
   }
   tip.innerHTML = lines;
@@ -6024,7 +6025,7 @@ async function refresh(
     : invoke<ProviderSpend[]>("fetch_spend").catch(() => null);
   // The sampled quota history is one tiny JSON read — fetch it even for
   // usage-only refreshes so account cards keep their trend bars fresh.
-  const quotaTrendPromise = invoke<Record<string, number[]>>("fetch_usage_history").catch(
+  const quotaTrendPromise = invoke<Record<string, (number | null)[]>>("fetch_usage_history").catch(
     () => null,
   );
   try {

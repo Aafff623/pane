@@ -329,6 +329,7 @@ const en: Dict = {
   "overview.offline": "Offline or failed to load",
   "spend.centerTokens": "tokens",
   "spend.noUsage": "No usage",
+  "spend.noDataDay": "No data",
   "spend.of30": "{n}% of the last 30 days",
   "spend.noModelData": "No model data for this period.",
 
@@ -908,6 +909,7 @@ const zh: Dict = {
   "overview.offline": "离线或读取失败",
   "spend.centerTokens": "tokens",
   "spend.noUsage": "无用量",
+  "spend.noDataDay": "无数据",
   "spend.of30": "占最近 30 天的 {n}%",
   "spend.noModelData": "这段时间没有按模型拆分的数据。",
 
@@ -1446,6 +1448,7 @@ const ru: Dict = {
   "overview.offline": "Офлайн или не удалось загрузить",
   "spend.centerTokens": "tokens",
   "spend.noUsage": "Нет использования",
+  "spend.noDataDay": "Нет данных",
   "spend.of30": "{n}% за последние 30 дней",
   "spend.noModelData": "За этот период нет разбивки по моделям.",
 

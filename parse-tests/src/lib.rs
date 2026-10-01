@@ -17,3 +17,6 @@ pub mod oauth;
 
 #[path = "../../src-tauri/src/providers/mod.rs"]
 pub mod providers;
+
+#[path = "../../src-tauri/src/usage_history.rs"]
+pub mod usage_history;

@@ -2840,6 +2840,11 @@ body.drawer-open #drawer {
   fill: var(--chart-blue);
 }
 
+.trend-nodata {
+  fill: var(--muted);
+  opacity: 0.25;
+}
+
 .trend-zero {
   fill: var(--muted);
 }

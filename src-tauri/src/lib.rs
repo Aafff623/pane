@@ -2539,7 +2539,7 @@ async fn fetch_spend() -> Vec<spend::ProviderSpend> {
 /// Sampled quota history per card id — the trend fallback for cards with no
 /// local CLI logs (API-key accounts, relay keys). Cheap: one small file.
 #[tauri::command]
-fn fetch_usage_history() -> std::collections::BTreeMap<String, Vec<f64>> {
+fn fetch_usage_history() -> std::collections::BTreeMap<String, Vec<Option<f64>>> {
     usage_history::trend_map()
 }
 

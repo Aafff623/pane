@@ -108,14 +108,14 @@ fn parse_day(day: &str) -> Option<NaiveDate> {
 }
 
 /// The 30-value trend for one card, oldest first, today last. Days without
-/// a sample read 0 — the same "nothing recorded" the token trends show.
+/// a sample read None — "no data" is distinct from a sampled 0.
 fn trend_for(
     entries: &BTreeMap<String, Vec<DaySample>>,
     id: &str,
     today: &str,
-) -> Vec<f64> {
+) -> Vec<Option<f64>> {
     let Some(today) = parse_day(today) else {
-        return vec![0.0; TREND_DAYS];
+        return vec![None; TREND_DAYS];
     };
     let samples = entries.get(id);
     (0..TREND_DAYS as i64)
@@ -126,7 +126,6 @@ fn trend_for(
             samples
                 .and_then(|list| list.iter().find(|s| s.day == day))
                 .map(|s| s.used)
-                .unwrap_or(0.0)
         })
         .collect()
 }
@@ -168,7 +167,7 @@ pub fn record_samples(samples: &[(String, f64)]) {
 }
 
 /// card id → 30-day trend, for the frontend's trend fallback.
-pub fn trend_map() -> BTreeMap<String, Vec<f64>> {
+pub fn trend_map() -> BTreeMap<String, Vec<Option<f64>>> {
     let today = today_string();
     let file = store().lock().unwrap();
     file.entries
@@ -226,15 +225,15 @@ mod tests {
     }
 
     #[test]
-    fn trend_spans_thirty_days_ending_today_with_gaps_as_zero() {
+    fn trend_spans_thirty_days_ending_today_with_gaps_as_none() {
         let mut entries = BTreeMap::new();
         record_sample(&mut entries, "a", "2026-09-03", 55.0); // today
         record_sample(&mut entries, "a", "2026-08-05", 42.0); // 29 days back
         let trend = trend_for(&entries, "a", "2026-09-03");
         assert_eq!(trend.len(), 30);
-        assert_eq!(trend[0], 42.0);
-        assert_eq!(trend[1], 0.0);
-        assert_eq!(trend[29], 55.0);
-        assert!(trend_for(&entries, "missing", "2026-09-03").iter().all(|v| *v == 0.0));
+        assert_eq!(trend[0], Some(42.0));
+        assert_eq!(trend[1], None);
+        assert_eq!(trend[29], Some(55.0));
+        assert!(trend_for(&entries, "missing", "2026-09-03").iter().all(|v| v.is_none()));
     }
 }
