@@ -26,3 +26,6 @@ pub mod spend;
 
 #[path = "../../src-tauri/src/usage_history.rs"]
 pub mod usage_history;
+
+#[path = "../../src-tauri/src/spend_history.rs"]
+pub mod spend_history;

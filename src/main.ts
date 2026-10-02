@@ -87,6 +87,14 @@ interface ProviderSpend {
   unpriced_models: string[];
 }
 
+interface HistorySpend {
+  id: string;
+  cost: number;
+  tokens: number;
+  active_days: number;
+  models: ModelSpend[];
+}
+
 /// How to get each provider signed in again, for the ⚠ Outdated tooltip.
 const RELOGIN_KEYS: Record<string, string> = {
   claude: "stale.relogin.claude",
@@ -139,6 +147,7 @@ function unpricedWarn(sp: ProviderSpend | undefined): string {
 }
 
 type SpendTab = "today" | "yesterday" | "last30";
+type RangeTab = "d7" | "d30" | "all";
 type OverviewTab = "5h" | "week";
 
 // Per-provider layout: which rows show, their order, which are tucked
@@ -478,6 +487,7 @@ let lastAppliedSpendGen = 0;
 let refreshTimer: number | undefined;
 let lastSnapshots: Snapshot[] = [];
 let lastSpend: ProviderSpend[] = [];
+let lastSpendHistory: { d7: HistorySpend[]; all: HistorySpend[] } = { d7: [], all: [] };
 let spendLoaded = false;
 /// Sampled quota history per card id (backend usage_history.json). Cards
 /// with local CLI logs trend from spend; every other card falls back to
@@ -523,6 +533,8 @@ function trendSourceFor(id: string): TrendSource | undefined {
   return undefined;
 }
 let spendTab: SpendTab = "today";
+let rangeTab: RangeTab = "d30";
+let rangeSelected = false;
 let overviewTab: OverviewTab = "5h";
 /// Header toggle (right side, beside ⟳): when on, the overview body is a
 /// single reset-time-sorted list instead of the 可用/不可用 sections —
@@ -2113,6 +2125,7 @@ const DONUT_MIN = 0.07; // slimmest visible sliver (~2.6px mid-ring)
 type DonutEntry = {
   s: ProviderSpend;
   w: SpendWindow;
+  activeDays?: number;
   /// Present on the synthetic "Others" entry: the folded-in providers,
   /// largest first, for the hover breakdown.
   parts?: { name: string; w: SpendWindow }[];
@@ -2128,10 +2141,34 @@ function othersFoldUsd(tab: SpendTab): number {
   return tab === "last30" ? 10 : 5;
 }
 
-function donutEntries(tab: SpendTab): DonutEntry[] {
-  const all: DonutEntry[] = lastSpend
-    .filter((s) => !isCardDisabled(s.id)) // disabled = gone everywhere
-    .map((s) => ({ s, w: s[tab] }))
+function providerNameForSpend(id: string): string {
+  return lastSpend.find((s) => s.id === id)?.name || providerDisplayName(providerFamily(id)) || id;
+}
+
+function historyEntries(range: Exclude<RangeTab, "d30">): DonutEntry[] {
+  const rows = range === "d7" ? lastSpendHistory.d7 : lastSpendHistory.all;
+  const base = rows
+    .filter((row) => !isCardDisabled(row.id))
+    .map((row) => ({
+      s: {
+        id: row.id,
+        name: providerNameForSpend(row.id),
+        today: emptyWindow(),
+        yesterday: emptyWindow(),
+        last30: { cost: row.cost, tokens: row.tokens, models: row.models },
+        trend: [],
+        trend_cost: [],
+        unpriced: 0,
+        unpriced_models: [],
+      } as ProviderSpend,
+      w: { cost: row.cost, tokens: row.tokens, models: row.models },
+      activeDays: range === "all" ? row.active_days : undefined,
+    }));
+  return foldDonutEntries(base, "last30");
+}
+
+function foldDonutEntries(all: DonutEntry[], tab: SpendTab): DonutEntry[] {
+  const visible = all
     // Membership, order, and wedge share all follow the active metric so
     // the legend ranking always matches the ring (cost keeps a half-cent
     // noise floor).
@@ -2151,10 +2188,10 @@ function donutEntries(tab: SpendTab): DonutEntry[] {
   // the dollar view: in the token views every provider with tokens earns
   // its own row (a cheap model can move millions of tokens under $10,
   // and hiding it would defeat the whole point of the view).
-  if (config.spendMetric !== "cost") return all;
+  if (config.spendMetric !== "cost") return visible;
   const limit = othersFoldUsd(tab);
-  const small = all.filter((e) => e.w.cost < limit);
-  if (small.length === 0 || small.length === all.length) return all;
+  const small = visible.filter((e) => e.w.cost < limit);
+  if (small.length === 0 || small.length === visible.length) return visible;
 
   const others: DonutEntry = {
     s: {
@@ -2169,9 +2206,20 @@ function donutEntries(tab: SpendTab): DonutEntry[] {
     parts: small.map((e) => ({ name: e.s.name, w: e.w })),
     foldLimit: limit,
   };
-  return [...all.filter((e) => e.w.cost >= limit), others].sort(
+  return [...visible.filter((e) => e.w.cost >= limit), others].sort(
     (a, b) => spendVal(b.w) - spendVal(a.w),
   );
+}
+
+function donutEntries(tab: SpendTab): DonutEntry[] {
+  const all: DonutEntry[] = lastSpend
+    .filter((s) => !isCardDisabled(s.id)) // disabled = gone everywhere
+    .map((s) => ({ s, w: s[tab] }));
+  return foldDonutEntries(all, tab);
+}
+
+function donutEntriesForRange(range: RangeTab): DonutEntry[] {
+  return range === "d30" ? donutEntries("last30") : historyEntries(range);
 }
 
 /// The donut meters dollars or raw tokens — a click on the ring toggles.
@@ -2311,10 +2359,11 @@ function othersBreakdown(e: DonutEntry): string {
 }
 
 function legendRowHtml(e: DonutEntry): string {
+  const detail = e.activeDays === undefined ? "" : ` <span class="legend-detail">${escapeHtml(t("spend.activeDays", { n: e.activeDays }))}</span>`;
   return `
         <div class="legend-row" data-pid="${e.s.id}"${e.parts ? ` title="${escapeHtml(othersBreakdown(e))}"` : ""}>
           <span class="dot" style="background:${spendColor(e.s.id)}"></span>
-          <span class="legend-name">${escapeHtml(e.s.name)}</span>
+          <span class="legend-name" title="${escapeHtml(e.s.name)}">${escapeHtml(e.s.name)}${detail}</span>
           <span class="legend-val">${fmtSpendVal(e.w)}</span>
         </div>`;
 }
@@ -2347,83 +2396,15 @@ function switchOverviewTab(tab: OverviewTab): void {
 /// Tab switch morphs the existing arcs in place (identity-keyed per
 /// provider, CSS-transitioned) instead of rebuilding the card.
 function switchSpendTab(tab: SpendTab): void {
-  const prev = spendTab;
   spendTab = tab;
+  rangeSelected = tab === "last30";
   void patchConfig({ spendTab });
-  // The left column shows today or yesterday — when the switch changes
-  // which one it displays, the rows must rebuild, not morph.
-  const leftOf = (t: SpendTab) => (t === "yesterday" ? "yesterday" : "today");
-  if (leftOf(prev) !== leftOf(tab)) {
-    renderAll();
-    return;
-  }
-  const card = document.querySelector<HTMLElement>(".total-spend");
-  const paths = card ? Array.from(card.querySelectorAll<SVGPathElement>("path.seg")) : [];
-  const entries = donutEntries(tab);
-  const { geo } = donutGeometry(entries);
-  // Wedge paths share one command structure so CSS can tween `d`; a
-  // full-circle annulus doesn't, so single-spender states rebuild instead.
-  const morphable =
-    card &&
-    paths.length > 0 &&
-    geo.size >= 2 &&
-    paths.every((p) => !p.dataset.full) &&
-    [...geo.keys()].every((id) => paths.some((p) => p.dataset.pid === id));
-  if (!morphable) {
-    renderAll();
-    return;
-  }
-  const entryById = new Map(entries.map((en) => [en.s.id, en]));
-  for (const p of paths) {
-    const g = geo.get(p.dataset.pid ?? "");
-    if (g) {
-      const pop = donutPop(g);
-      p.style.opacity = "1";
-      p.style.setProperty("d", `path("${sectorPath(g.a0, g.a1)}")`);
-      p.style.setProperty("--tx", pop.tx);
-      p.style.setProperty("--ty", pop.ty);
-    } else {
-      p.style.opacity = "0";
-    }
-    // The Others wedge bakes its breakdown into an SVG <title>; the legend
-    // rebuilds below but this child wouldn't, so sync it to the new period
-    // (and drop it from any wedge that no longer carries a breakdown).
-    const en = entryById.get(p.dataset.pid ?? "");
-    const text = en?.parts ? othersBreakdown(en) : "";
-    const t = p.querySelector("title");
-    if (text) {
-      if (t) {
-        t.textContent = text;
-      } else {
-        const nt = document.createElementNS("http://www.w3.org/2000/svg", "title");
-        nt.textContent = text;
-        p.appendChild(nt);
-      }
-    } else if (t) {
-      t.remove();
-    }
-  }
-  const totalEl = card.querySelector(".donut-total");
-  const center = spendCenter(entries);
-  if (totalEl) totalEl.textContent = center.primary;
-  // The three period columns carry their own (period-static) rows; only
-  // the wedge <title> breakdowns and the active column highlight change.
-  card.querySelectorAll(".tab").forEach((t) => {
-    t.classList.toggle("active", t.getAttribute("data-tab") === tab);
-  });
-  const wrap = card.querySelector<HTMLElement>(".donut-wrap");
-  if (wrap) {
-    wrap.title = t("spend.clickTip", {
-      exact: center.exact,
-      next: t(`spend.metric.${nextSpendMetric(false)}`),
-    });
-  }
+  renderAll();
 }
-
 function renderTotalSpend(): string {
   if (!config.showTotalSpend) return "";
-  const entries = donutEntries(spendTab);
-  if (lastSpend.length === 0) {
+  const entries = rangeSelected ? donutEntriesForRange(rangeTab) : donutEntries(spendTab);
+  if (lastSpend.length === 0 && lastSpendHistory.d7.length === 0 && lastSpendHistory.all.length === 0) {
     // Quiet state instead of a missing card — on a fresh PC the donut only
     // appears after a CLI (Claude Code, Codex, Grok…) has logged some usage.
     const note = spendLoaded ? t("spend.emptyFirst") : t("spend.scanning");
@@ -2459,17 +2440,23 @@ function renderTotalSpend(): string {
     return `<div class="col-total${s.length > 10 ? " long" : ""}" title="${escapeHtml(s)}">${escapeHtml(s)}</div>`;
   };
 
-  const spendCol = (id: SpendTab, label: string) => {
-    const colEntries = donutEntries(id);
+  const rangeCol = () => {
+    const colEntries = donutEntriesForRange(rangeTab);
     const totals = colEntries.reduce(
       (acc, e) => ({ cost: acc.cost + e.w.cost, tokens: acc.tokens + e.w.tokens }),
       { cost: 0, tokens: 0 },
     );
     const shown = colEntries.slice(0, 9);
     const overflow = colEntries.length - shown.length;
+    const rangeButton = (id: RangeTab, label: string) =>
+      `<button class="tab col-head${rangeSelected && rangeTab === id ? " active" : ""}" data-range-tab="${id}">${label}</button>`;
     return `
-      <div class="spend-col">
-        <button class="tab col-head${spendTab === id ? " active" : ""}" data-tab="${id}">${label}</button>
+      <div class="spend-col spend-range-col">
+        <div class="col-head-row">
+          ${rangeButton("d7", t("spend.days7"))}
+          ${rangeButton("d30", t("spend.days30"))}
+          ${rangeButton("all", t("spend.rangeAll"))}
+        </div>
         ${colTotalHtml({ ...emptyWindow(), ...totals, models: [] })}
         <div class="legend">
           ${shown.map((e) => legendRowHtml(e)).join("")}
@@ -2519,7 +2506,7 @@ function renderTotalSpend(): string {
         </svg>
         <div class="spend-cols">
           ${leftColHtml}
-          ${spendCol("last30", t("spend.days30"))}
+          ${rangeCol()}
         </div>
       </div>`
     : `
@@ -2531,7 +2518,7 @@ function renderTotalSpend(): string {
         </svg>
         <div class="spend-cols">
           ${leftColHtml}
-          ${spendCol("last30", t("spend.days30"))}
+          ${rangeCol()}
         </div>
       </div>`;
 
@@ -6027,6 +6014,14 @@ async function refresh(
   const spendPromise = usageOnly
     ? Promise.resolve<ProviderSpend[] | null>(null)
     : invoke<ProviderSpend[]>("fetch_spend").catch(() => null);
+  const spendHistoryPromise = usageOnly
+    ? Promise.resolve<{ d7: HistorySpend[]; all: HistorySpend[] } | null>(null)
+    : spendPromise.then(() =>
+        Promise.all([
+          invoke<HistorySpend[]>("fetch_spend_history", { rangeDays: 7 }).catch(() => []),
+          invoke<HistorySpend[]>("fetch_spend_history", { rangeDays: null }).catch(() => []),
+        ]).then(([d7, all]) => ({ d7, all })),
+      );
   // The sampled quota history is one tiny JSON read — fetch it even for
   // usage-only refreshes so account cards keep their trend bars fresh.
   const quotaTrendPromise = invoke<Record<string, (number | null)[]>>("fetch_usage_history").catch(
@@ -6144,6 +6139,7 @@ async function refresh(
     }
   }
   const spend = await spendPromise;
+  const spendHistory = await spendHistoryPromise;
   const quotaTrend = await quotaTrendPromise;
   if (quotaTrend) {
     lastQuotaTrend = quotaTrend;
@@ -6155,6 +6151,9 @@ async function refresh(
     }
   }
   if (usageOnly) return;
+  if (spendHistory && myGen >= lastAppliedSpendGen) {
+    lastSpendHistory = spendHistory;
+  }
   spendLoaded = true;
   // Overlapping scans are allowed now that Refresh unlocks before spend
   // finishes. Keep the newest successful result — a later failed scan
@@ -7678,6 +7677,7 @@ async function initSettings(): Promise<void> {
   applyLocale();
   if (["today", "yesterday", "last30"].includes(config.spendTab)) {
     spendTab = config.spendTab;
+    rangeSelected = spendTab === "last30";
   }
   if (config.overviewTab === "5h" || config.overviewTab === "week") {
     overviewTab = config.overviewTab;
@@ -7903,6 +7903,8 @@ async function resetAllSettings(): Promise<void> {
     locale: "auto",
   }).catch(() => {});
   spendTab = "today";
+  rangeSelected = false;
+  rangeTab = "d30";
   overviewTab = "5h";
   applyLocale();
   syncSettingsControls();
@@ -8377,6 +8379,21 @@ window.addEventListener("DOMContentLoaded", () => {
       return;
     }
     if (target.closest(".donut-wrap")) {
+      const range = target.closest<HTMLElement>("[data-range-tab]");
+      if (range) {
+        const next = range.dataset.rangeTab;
+        if (next === "d7" || next === "d30" || next === "all") {
+          rangeTab = next;
+          rangeSelected = true;
+          renderAll();
+        }
+        return;
+      }
+      const period = target.closest<HTMLElement>("[data-tab]");
+      if (period) {
+        switchSpendTab(period.dataset.tab as SpendTab);
+        return;
+      }
       toggleSpendMetric();
       return;
     }
@@ -8422,6 +8439,16 @@ window.addEventListener("DOMContentLoaded", () => {
     const tab = target.closest("[data-tab]");
     if (tab) {
       switchSpendTab(tab.getAttribute("data-tab") as SpendTab);
+      return;
+    }
+    const range = target.closest<HTMLElement>("[data-range-tab]");
+    if (range) {
+      const next = range.dataset.rangeTab;
+      if (next === "d7" || next === "d30" || next === "all") {
+        rangeTab = next;
+        rangeSelected = true;
+        renderAll();
+      }
       return;
     }
     const caret = target.closest<HTMLElement>("[data-caret]");

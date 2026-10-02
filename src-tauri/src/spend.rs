@@ -38,6 +38,9 @@ pub struct Window {
 
 #[derive(Serialize, Clone)]
 pub struct ProviderSpend {
+    /// Internal daily facts, moved into the rollup response after collection.
+    #[serde(skip)]
+    days: DayMap,
     pub id: String,
     pub name: String,
     pub today: Window,
@@ -63,7 +66,14 @@ impl ProviderSpend {
 }
 
 /// (local calendar day, model) → (cost, tokens). Day = days since CE.
-type DayMap = HashMap<(i32, String), (f64, f64)>;
+pub type DayMap = HashMap<(i32, String), (f64, f64)>;
+
+#[derive(Clone)]
+pub struct ProviderDays {
+    pub id: String,
+    pub name: String,
+    pub days: DayMap,
+}
 
 /// Everything one file contributes: priced per-day totals plus the tally of
 /// unpriced (excluded) events per model name. Cached as a unit so exclusion
@@ -400,14 +410,17 @@ fn finalize_models(raw: HashMap<String, (f64, f64)>, window_cost: f64) -> Vec<Mo
 }
 
 fn build_spend(id: impl Into<String>, name: impl Into<String>, data: FileData) -> ProviderSpend {
+    let id = id.into();
+    let name = name.into();
     let today = Local::now().date_naive().num_days_from_ce();
     let mut unpriced_models: Vec<String> = data.unpriced.keys().cloned().collect();
     unpriced_models.sort();
     unpriced_models.truncate(5);
     let days = data.days;
     let mut sp = ProviderSpend {
-        id: id.into(),
-        name: name.into(),
+        days: days.clone(),
+        id,
+        name,
         today: Window::default(),
         yesterday: Window::default(),
         last30: Window::default(),
@@ -2958,7 +2971,12 @@ fn split_csv_row(line: &str) -> Vec<String> {
 }
 
 pub fn collect(cursor_csv: Option<String>) -> Vec<ProviderSpend> {
+    collect_daily(cursor_csv).0
+}
+
+pub fn collect_daily(cursor_csv: Option<String>) -> (Vec<ProviderSpend>, Vec<ProviderDays>) {
     pricing::ensure_fresh();
+
     load_persisted_cache();
     if let Ok(mut t) = touched().lock() {
         t.clear();
@@ -3013,5 +3031,6 @@ pub fn collect(cursor_csv: Option<String>) -> Vec<ProviderSpend> {
         pricing::note_unpriced();
     }
     save_persisted_cache();
-    list.into_iter().filter(ProviderSpend::has_data).collect()
+    let daily = list.iter_mut().map(|sp| ProviderDays { id: sp.id.clone(), name: sp.name.clone(), days: std::mem::take(&mut sp.days) }).collect();
+    (list.into_iter().filter(ProviderSpend::has_data).collect(), daily)
 }

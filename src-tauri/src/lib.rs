@@ -15,6 +15,7 @@ mod spend;
 mod telemetry;
 mod tray_projection;
 mod usage_history;
+mod spend_history;
 
 use platform::{hide_window_border, screen_is_being_shared, set_webview_memory_level};
 
@@ -2525,9 +2526,13 @@ async fn fetch_spend() -> Vec<spend::ProviderSpend> {
     } else {
         providers::cursor::fetch_usage_csv().await
     };
-    let result = tauri::async_runtime::spawn_blocking(move || spend::collect(cursor_csv))
+    let result = tauri::async_runtime::spawn_blocking(move || spend::collect_daily(cursor_csv))
         .await
         .unwrap_or_default();
+    if let Err(err) = spend_history::merge_daily(&result.1) {
+        eprintln!("[pane] spend history: {err}");
+    }
+    let result = result.0;
     eprintln!(
         "[pane] spend: {} providers in {:?}",
         result.len(),
@@ -2541,6 +2546,12 @@ async fn fetch_spend() -> Vec<spend::ProviderSpend> {
 #[tauri::command]
 fn fetch_usage_history() -> std::collections::BTreeMap<String, Vec<Option<f64>>> {
     usage_history::trend_map()
+}
+
+/// Long-range spend from permanent daily rollups. `None` means all retained history.
+#[tauri::command]
+fn fetch_spend_history(range_days: Option<u32>) -> Result<Vec<spend_history::RangeSpend>, String> {
+    spend_history::range_spend(range_days)
 }
 
 /// Validates a relay base URL for a provider that takes one; the rejection
@@ -3615,6 +3626,7 @@ pub fn run() {
             cached_usage,
             fetch_spend,
             fetch_usage_history,
+            fetch_spend_history,
             antigravity_capture_account,
             cursor_oauth_start,
             cursor_oauth_poll,

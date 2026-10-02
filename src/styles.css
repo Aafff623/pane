@@ -1469,6 +1469,10 @@ article.provider.is-folded:hover {
   gap: 4px;
 }
 
+.spend-range-col .col-head-row { gap: 1px; }
+.spend-range-col .col-head { padding-inline: 3px; white-space: nowrap; }
+.legend-detail { display: block; font-size: 9px; color: var(--muted-foreground); }
+
 .spend-col .col-head {
   font-size: 10.5px;
   padding: 2px 6px;
