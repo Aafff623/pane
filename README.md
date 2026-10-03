@@ -196,10 +196,10 @@ amber to red), and a background projection of your burn rate fires optional
 Windows toasts once per reset window — "Almost out", "Will run out" — so
 you hear about the wall before you hit it.
 
-**4. Counting the money.** Your CLIs already log every request locally.
+**4. Counting token consumption.** Pane reads the usage records your tools persist locally.
 Pane scans those logs (Claude, Codex, Grok, OpenCode, Devin CLI, Cursor
 CSV, MiniMax CLI, Kimi Code, Qwen Code, the pi coding agent, the Hermes
-desktop app), prices each request with live per-model rates (LiteLLM /
+desktop app), plus ZCode's SQLite ledger and Antigravity's IDE/CLI conversation databases. It prices requests with live per-model rates (LiteLLM /
 models.dev, refreshed daily — hourly while unknown models are around, so
 brand-new models price within the hour), and draws the Today /
 Yesterday / 30-day donut with a per-model breakdown. Click the ring to
@@ -207,7 +207,10 @@ flip between dollars and tokens. On a flat-rate plan this shows what
 your usage *would* cost at API prices — the best ad for your
 subscription you'll ever see. Models with no public pricing keep their
 measured tokens but no guessed dollars — a ⚠ on the provider's spend row
-says the real cost runs a little higher than shown.
+says some measured usage has no known dollar price. The supported sources,
+deduplication rules, and coverage limits are documented in
+[Token spend coverage](docs/token-spend-coverage.md). Local records can be incomplete;
+subscription percentages are never converted into guessed token counts.
 
 **5. Staying local.** All of the above happens on your machine — no
 account, and your quotas, spend, and provider data never leave your PC.

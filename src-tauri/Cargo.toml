@@ -1,6 +1,6 @@
 [package]
 name = "pane"
-version = "0.4.62"
+version = "0.4.63"
 description = "AI subscription usage in the Windows tray"
 authors = ["jazii"]
 edition = "2021"

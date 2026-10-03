@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.4.63 — 2026-10-04
+
+### Added
+- Token usage source inventory for local JSONL, SQLite, Antigravity protobuf,
+  and Cursor CSV collectors, with detection status and documented coverage limits.
+- ZCode SQLite and Antigravity conversation usage collectors; measured tokens
+  remain counted when a model has no known price.
+- Key vault and multi-key MCP quota aggregation for Bocha, Tavily, Firecrawl,
+  and Brave Search; additional subscription providers and account routing.
+
+### Changed
+- Quota overview groups cards by labels without available/unavailable sections.
+- Status counts share one baseline; folded spend and overview spacing is tighter.
+- Qoder CN aggregates credit packages; Step Plan authentication includes its device JWT.
+
+
 ## 0.4.62 — 2026-09-17
 
 ### Added
