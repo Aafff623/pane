@@ -14,6 +14,8 @@ export interface ProviderDefinition {
   /** Pane's own device-flow OAuth sign-in (gear panel "Sign in with browser"). */
   supportsOAuth: boolean;
   iconKey: string;
+  /** Dashboard category. Absent = coding agent (the historical default). */
+  category?: "coding" | "productivity" | "mcp";
 }
 
 export const providerCatalog: readonly ProviderDefinition[] = [
@@ -41,6 +43,7 @@ export const providerCatalog: readonly ProviderDefinition[] = [
   { familyId: "kimi", displayName: "Kimi Code", queryKind: "composite", supportsApiKey: true, supportsExtraAccounts: true, supportsOAuth: false, iconKey: "kimi" },
   { familyId: "stepfun", displayName: "StepFun", queryKind: "nativeBalance", supportsApiKey: true, supportsExtraAccounts: true, supportsOAuth: false, iconKey: "stepfun" },
   { familyId: "stepfun-plan", displayName: "StepFun Step Plan", queryKind: "nativeCodingPlan", supportsApiKey: true, supportsExtraAccounts: false, supportsOAuth: false, iconKey: "stepfun" },
+  { familyId: "shandianshuo", displayName: "闪电说", queryKind: "nativeCodingPlan", supportsApiKey: false, supportsExtraAccounts: false, supportsOAuth: false, iconKey: "shandianshuo", category: "productivity" },
   { familyId: "siliconflow", displayName: "SiliconFlow", queryKind: "nativeBalance", supportsApiKey: true, supportsExtraAccounts: true, supportsOAuth: false, iconKey: "siliconflow" },
   { familyId: "novita", displayName: "Novita AI", queryKind: "nativeBalance", supportsApiKey: true, supportsExtraAccounts: true, supportsOAuth: false, iconKey: "novita" },
   { familyId: "relaybalance", displayName: "Custom Balance", queryKind: "nativeBalance", supportsApiKey: true, supportsExtraAccounts: true, supportsOAuth: false, iconKey: "relaybalance" },
@@ -50,6 +53,12 @@ export const providerCatalog: readonly ProviderDefinition[] = [
   { familyId: "commandcode", displayName: "Command Code", queryKind: "nativeCodingPlan", supportsApiKey: true, supportsExtraAccounts: true, supportsOAuth: false, iconKey: "commandcode" },
   { familyId: "doubao", displayName: "Doubao", queryKind: "nativeCodingPlan", supportsApiKey: false, supportsExtraAccounts: false, supportsOAuth: false, iconKey: "doubao" },
   { familyId: "clawsgo", displayName: "ClawsGO", queryKind: "nativeCodingPlan", supportsApiKey: true, supportsExtraAccounts: false, supportsOAuth: false, iconKey: "clawsgo" },
+  { familyId: "bocha", displayName: "BochaAI", queryKind: "nativeBalance", supportsApiKey: false, supportsExtraAccounts: false, supportsOAuth: false, iconKey: "bocha", category: "mcp" },
+  { familyId: "tavily", displayName: "Tavily", queryKind: "nativeBalance", supportsApiKey: false, supportsExtraAccounts: false, supportsOAuth: false, iconKey: "tavily", category: "mcp" },
+  { familyId: "firecrawl", displayName: "Firecrawl", queryKind: "nativeBalance", supportsApiKey: false, supportsExtraAccounts: false, supportsOAuth: false, iconKey: "firecrawl", category: "mcp" },
+  { familyId: "clinepass", displayName: "ClinePass", queryKind: "nativeCodingPlan", supportsApiKey: true, supportsExtraAccounts: false, supportsOAuth: false, iconKey: "clinepass" },
+  { familyId: "sensenova", displayName: "SenseNova", queryKind: "nativeCodingPlan", supportsApiKey: false, supportsExtraAccounts: false, supportsOAuth: false, iconKey: "sensenova" },
+  { familyId: "apigoto", displayName: "APIGOTO", queryKind: "nativeCodingPlan", supportsApiKey: true, supportsExtraAccounts: false, supportsOAuth: false, iconKey: "apigoto" },
 ];
 
 export function providerFamily(id: string): string {
@@ -58,6 +67,12 @@ export function providerFamily(id: string): string {
 
 export function providerDefinition(familyId: string): ProviderDefinition | undefined {
   return providerCatalog.find((definition) => definition.familyId === familyId);
+}
+
+export type ProviderCategory = "coding" | "productivity" | "mcp";
+
+export function providerCategory(familyId: string): ProviderCategory {
+  return providerDefinition(familyId)?.category ?? "coding";
 }
 
 export function supportsApiKey(familyId: string): boolean {

@@ -576,7 +576,7 @@ struct StripEntry {
 /// strip ids are validated against this before becoming tray icon ids,
 /// including `family@account` cards. Stale family-level strip icons are
 /// removed for exactly this set.
-const STRIP_PROVIDER_IDS: [&str; 33] = [
+const STRIP_PROVIDER_IDS: [&str; 40] = [
     "claude",
     "codex",
     "cursor",
@@ -610,6 +610,13 @@ const STRIP_PROVIDER_IDS: [&str; 33] = [
     "commandcode",
     "doubao",
     "clawsgo",
+    "shandianshuo",
+    "bocha",
+    "tavily",
+    "firecrawl",
+    "clinepass",
+    "sensenova",
+    "apigoto",
 ];
 
 async fn update_tray_strip(app: tauri::AppHandle, entries: Vec<StripEntry>) -> Result<(), String> {
@@ -1648,6 +1655,13 @@ async fn refresh_provider(provider_id: String) -> Result<providers::Snapshot, St
             "commandcode" => providers::commandcode::snapshot().await,
             "doubao" => providers::doubao::snapshot().await,
             "clawsgo" => providers::clawsgo::snapshot().await,
+            "shandianshuo" => providers::shandianshuo::snapshot().await,
+            "bocha" => providers::searchquota::bocha_snapshot().await,
+            "tavily" => providers::searchquota::tavily_snapshot().await,
+            "firecrawl" => providers::searchquota::firecrawl_snapshot().await,
+            "clinepass" => providers::clinepass::snapshot().await,
+            "sensenova" => providers::sensenova::snapshot().await,
+            "apigoto" => providers::apigoto::snapshot().await,
             _ => return Err(format!("no single-provider refresh for {family}")),
         });
     }
@@ -1827,6 +1841,13 @@ async fn run_usage_fetch(app: &tauri::AppHandle) -> Vec<providers::Snapshot> {
         ("commandcode", Box::pin(guarded("commandcode".into(), "Command Code".into(), providers::commandcode::snapshot()))),
         ("doubao", Box::pin(guarded("doubao".into(), "Doubao".into(), providers::doubao::snapshot()))),
         ("clawsgo", Box::pin(guarded("clawsgo".into(), "ClawsGO".into(), providers::clawsgo::snapshot()))),
+        ("shandianshuo", Box::pin(guarded("shandianshuo".into(), "闪电说".into(), providers::shandianshuo::snapshot()))),
+        ("bocha", Box::pin(guarded("bocha".into(), "BochaAI".into(), providers::searchquota::bocha_snapshot()))),
+        ("tavily", Box::pin(guarded("tavily".into(), "Tavily".into(), providers::searchquota::tavily_snapshot()))),
+        ("firecrawl", Box::pin(guarded("firecrawl".into(), "Firecrawl".into(), providers::searchquota::firecrawl_snapshot()))),
+        ("clinepass", Box::pin(guarded("clinepass".into(), "ClinePass".into(), providers::clinepass::snapshot()))),
+        ("sensenova", Box::pin(guarded("sensenova".into(), "SenseNova".into(), providers::sensenova::snapshot()))),
+        ("apigoto", Box::pin(guarded("apigoto".into(), "APIGOTO".into(), providers::apigoto::snapshot()))),
     ];
     // Skip the leftover Moonshot fetch only when the last Kimi card
     // actually painted — a credentials file alone is not enough (expired
@@ -2641,6 +2662,9 @@ async fn test_api_key(
         "opencode" => providers::opencode::snapshot_with_key(key).await,
         "stepfun" => providers::stepfun::snapshot_with_key(key).await,
         "stepfun-plan" => providers::stepfun_plan::snapshot_with_key(key).await,
+        "clinepass" => providers::clinepass::snapshot_with_key(key).await,
+        "sensenova" => providers::sensenova::snapshot_with_key(key).await,
+        "apigoto" => providers::apigoto::snapshot_with_key(key).await,
         "siliconflow" => providers::siliconflow::snapshot_with_key(key).await,
         "novita" => providers::novita::snapshot_with_key(key).await,
         "relaybalance" => {
@@ -2999,6 +3023,11 @@ fn provider_env_vars(provider: &str) -> &'static [&'static str] {
         "opencode" => &["OPENCODE_GO_API_KEY"],
         "stepfun" => &["STEPFUN_API_KEY"],
         "stepfun-plan" => &[],
+        "bocha" => &["BOCHA_API_KEY"],
+        "tavily" => &["TAVILY_API_KEY"],
+        "clinepass" => &["CLINE_API_KEY"],
+        "apigoto" => &["APIGOTO_API_KEY"],
+        "firecrawl" => &["FIRECRAWL_API_KEY", "FIRECRAWL_FIRECRAWL_API_KEY"],
         "siliconflow" => &["SILICONFLOW_API_KEY"],
         "novita" => &["NOVITA_API_KEY"],
         _ => &[],
@@ -3049,6 +3078,10 @@ fn get_credential_status(provider: String) -> Value {
         "kimi" => providers::kimi::local_credential_hint(),
         "stepfun" => providers::stepfun::local_credential_hint(),
         "stepfun-plan" => providers::stepfun_plan::local_credential_hint(),
+        "clinepass" => providers::clinepass::local_credential_hint(),
+        "sensenova" => providers::sensenova::local_credential_hint(),
+        "apigoto" => providers::apigoto::local_credential_hint(),
+        "shandianshuo" => providers::shandianshuo::local_credential_hint(),
         "siliconflow" => providers::siliconflow::local_credential_hint(),
         "novita" => providers::novita::local_credential_hint(),
         "relaybalance" => providers::relaybalance::local_credential_hint(),

@@ -12,6 +12,17 @@ pub enum QueryKind {
     LocalOnly,
 }
 
+/// Dashboard grouping: coding agents are the historical default; anything
+/// that is not an AI coding tool (voice assistants, document/MCP/search
+/// utilities) lands in Productivity, and quota-metered MCP/search services
+/// land in Mcp. Keep in sync with `src/providerCatalog.ts`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ProviderCategory {
+    Coding,
+    Productivity,
+    Mcp,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ProviderDefinition {
     pub family_id: &'static str,
@@ -20,6 +31,7 @@ pub struct ProviderDefinition {
     pub supports_api_key: bool,
     pub supports_extra_accounts: bool,
     pub icon_key: &'static str,
+    pub category: ProviderCategory,
 }
 
 // Keep this list in the same stable order as the dashboard's provider list.
@@ -32,6 +44,7 @@ const PROVIDER_DEFINITIONS: &[ProviderDefinition] = &[
         supports_api_key: false,
         supports_extra_accounts: false,
         icon_key: "claude",
+        category: ProviderCategory::Coding,
     },
     ProviderDefinition {
         family_id: "codex",
@@ -40,6 +53,7 @@ const PROVIDER_DEFINITIONS: &[ProviderDefinition] = &[
         supports_api_key: false,
         supports_extra_accounts: false,
         icon_key: "codex",
+        category: ProviderCategory::Coding,
     },
     ProviderDefinition {
         family_id: "cursor",
@@ -50,6 +64,7 @@ const PROVIDER_DEFINITIONS: &[ProviderDefinition] = &[
         // store lives in cursor-accounts.json), same multi-account UI.
         supports_extra_accounts: true,
         icon_key: "cursor",
+        category: ProviderCategory::Coding,
     },
     ProviderDefinition {
         family_id: "opencode",
@@ -58,6 +73,7 @@ const PROVIDER_DEFINITIONS: &[ProviderDefinition] = &[
         supports_api_key: true,
         supports_extra_accounts: false,
         icon_key: "opencode",
+        category: ProviderCategory::Coding,
     },
     ProviderDefinition {
         family_id: "copilot",
@@ -66,6 +82,7 @@ const PROVIDER_DEFINITIONS: &[ProviderDefinition] = &[
         supports_api_key: false,
         supports_extra_accounts: false,
         icon_key: "copilot",
+        category: ProviderCategory::Coding,
     },
     ProviderDefinition {
         family_id: "grok",
@@ -74,6 +91,7 @@ const PROVIDER_DEFINITIONS: &[ProviderDefinition] = &[
         supports_api_key: false,
         supports_extra_accounts: false,
         icon_key: "grok",
+        category: ProviderCategory::Coding,
     },
     ProviderDefinition {
         family_id: "devin",
@@ -82,6 +100,7 @@ const PROVIDER_DEFINITIONS: &[ProviderDefinition] = &[
         supports_api_key: false,
         supports_extra_accounts: false,
         icon_key: "devin",
+        category: ProviderCategory::Coding,
     },
     ProviderDefinition {
         family_id: "minimax",
@@ -90,6 +109,7 @@ const PROVIDER_DEFINITIONS: &[ProviderDefinition] = &[
         supports_api_key: true,
         supports_extra_accounts: false,
         icon_key: "minimax",
+        category: ProviderCategory::Coding,
     },
     ProviderDefinition {
         family_id: "openrouter",
@@ -98,6 +118,7 @@ const PROVIDER_DEFINITIONS: &[ProviderDefinition] = &[
         supports_api_key: true,
         supports_extra_accounts: false,
         icon_key: "openrouter",
+        category: ProviderCategory::Coding,
     },
     ProviderDefinition {
         family_id: "zai",
@@ -106,6 +127,7 @@ const PROVIDER_DEFINITIONS: &[ProviderDefinition] = &[
         supports_api_key: true,
         supports_extra_accounts: false,
         icon_key: "zai",
+        category: ProviderCategory::Coding,
     },
     ProviderDefinition {
         family_id: "antigravity",
@@ -117,6 +139,7 @@ const PROVIDER_DEFINITIONS: &[ProviderDefinition] = &[
         // the multi-account UI contract is the same.
         supports_extra_accounts: true,
         icon_key: "antigravity",
+        category: ProviderCategory::Coding,
     },
     ProviderDefinition {
         family_id: "deepseek",
@@ -125,6 +148,7 @@ const PROVIDER_DEFINITIONS: &[ProviderDefinition] = &[
         supports_api_key: true,
         supports_extra_accounts: true,
         icon_key: "deepseek",
+        category: ProviderCategory::Coding,
     },
     ProviderDefinition {
         family_id: "moonshot",
@@ -133,6 +157,7 @@ const PROVIDER_DEFINITIONS: &[ProviderDefinition] = &[
         supports_api_key: true,
         supports_extra_accounts: false,
         icon_key: "kimi",
+        category: ProviderCategory::Coding,
     },
     ProviderDefinition {
         family_id: "elevenlabs",
@@ -141,6 +166,7 @@ const PROVIDER_DEFINITIONS: &[ProviderDefinition] = &[
         supports_api_key: true,
         supports_extra_accounts: false,
         icon_key: "elevenlabs",
+        category: ProviderCategory::Coding,
     },
     ProviderDefinition {
         family_id: "ollama",
@@ -149,6 +175,7 @@ const PROVIDER_DEFINITIONS: &[ProviderDefinition] = &[
         supports_api_key: false,
         supports_extra_accounts: false,
         icon_key: "ollama",
+        category: ProviderCategory::Coding,
     },
     ProviderDefinition {
         family_id: "codebuff",
@@ -157,6 +184,7 @@ const PROVIDER_DEFINITIONS: &[ProviderDefinition] = &[
         supports_api_key: true,
         supports_extra_accounts: false,
         icon_key: "codebuff",
+        category: ProviderCategory::Coding,
     },
     ProviderDefinition {
         family_id: "kilo",
@@ -165,6 +193,7 @@ const PROVIDER_DEFINITIONS: &[ProviderDefinition] = &[
         supports_api_key: true,
         supports_extra_accounts: false,
         icon_key: "kilo",
+        category: ProviderCategory::Coding,
     },
     ProviderDefinition {
         family_id: "aihubmix",
@@ -173,6 +202,7 @@ const PROVIDER_DEFINITIONS: &[ProviderDefinition] = &[
         supports_api_key: true,
         supports_extra_accounts: false,
         icon_key: "aihubmix",
+        category: ProviderCategory::Coding,
     },
     ProviderDefinition {
         family_id: "onenewapi",
@@ -183,6 +213,7 @@ const PROVIDER_DEFINITIONS: &[ProviderDefinition] = &[
         // site key (or per token-only site), like the Kimi account model.
         supports_extra_accounts: true,
         icon_key: "onenewapi",
+        category: ProviderCategory::Coding,
     },
     ProviderDefinition {
         family_id: "qwen",
@@ -191,6 +222,7 @@ const PROVIDER_DEFINITIONS: &[ProviderDefinition] = &[
         supports_api_key: true,
         supports_extra_accounts: false,
         icon_key: "qwen",
+        category: ProviderCategory::Coding,
     },
     ProviderDefinition {
         family_id: "hermes",
@@ -199,6 +231,7 @@ const PROVIDER_DEFINITIONS: &[ProviderDefinition] = &[
         supports_api_key: false,
         supports_extra_accounts: false,
         icon_key: "hermes",
+        category: ProviderCategory::Coding,
     },
     ProviderDefinition {
         family_id: "kimi",
@@ -207,6 +240,7 @@ const PROVIDER_DEFINITIONS: &[ProviderDefinition] = &[
         supports_api_key: true,
         supports_extra_accounts: true,
         icon_key: "kimi",
+        category: ProviderCategory::Coding,
     },
     ProviderDefinition {
         family_id: "stepfun",
@@ -215,6 +249,7 @@ const PROVIDER_DEFINITIONS: &[ProviderDefinition] = &[
         supports_api_key: true,
         supports_extra_accounts: true,
         icon_key: "stepfun",
+        category: ProviderCategory::Coding,
     },
     ProviderDefinition {
         family_id: "stepfun-plan",
@@ -223,6 +258,16 @@ const PROVIDER_DEFINITIONS: &[ProviderDefinition] = &[
         supports_api_key: true,
         supports_extra_accounts: false,
         icon_key: "stepfun",
+        category: ProviderCategory::Coding,
+    },
+    ProviderDefinition {
+        family_id: "shandianshuo",
+        display_name: "闪电说",
+        query_kind: QueryKind::NativeCodingPlan,
+        supports_api_key: false,
+        supports_extra_accounts: false,
+        icon_key: "shandianshuo",
+        category: ProviderCategory::Productivity,
     },
     ProviderDefinition {
         family_id: "siliconflow",
@@ -231,6 +276,7 @@ const PROVIDER_DEFINITIONS: &[ProviderDefinition] = &[
         supports_api_key: true,
         supports_extra_accounts: true,
         icon_key: "siliconflow",
+        category: ProviderCategory::Coding,
     },
     ProviderDefinition {
         family_id: "novita",
@@ -239,6 +285,7 @@ const PROVIDER_DEFINITIONS: &[ProviderDefinition] = &[
         supports_api_key: true,
         supports_extra_accounts: true,
         icon_key: "novita",
+        category: ProviderCategory::Coding,
     },
     ProviderDefinition {
         family_id: "relaybalance",
@@ -247,6 +294,7 @@ const PROVIDER_DEFINITIONS: &[ProviderDefinition] = &[
         supports_api_key: true,
         supports_extra_accounts: true,
         icon_key: "relaybalance",
+        category: ProviderCategory::Coding,
     },
     ProviderDefinition {
         family_id: "linkso",
@@ -255,6 +303,7 @@ const PROVIDER_DEFINITIONS: &[ProviderDefinition] = &[
         supports_api_key: true,
         supports_extra_accounts: true,
         icon_key: "linkso",
+        category: ProviderCategory::Coding,
     },
     ProviderDefinition {
         family_id: "qodercn",
@@ -263,6 +312,7 @@ const PROVIDER_DEFINITIONS: &[ProviderDefinition] = &[
         supports_api_key: false,
         supports_extra_accounts: false,
         icon_key: "qodercn",
+        category: ProviderCategory::Coding,
     },
     ProviderDefinition {
         family_id: "traecn",
@@ -271,6 +321,7 @@ const PROVIDER_DEFINITIONS: &[ProviderDefinition] = &[
         supports_api_key: false,
         supports_extra_accounts: false,
         icon_key: "traecn",
+        category: ProviderCategory::Coding,
     },
     ProviderDefinition {
         family_id: "commandcode",
@@ -280,6 +331,7 @@ const PROVIDER_DEFINITIONS: &[ProviderDefinition] = &[
         // Several GOAT subscriptions side by side (commandcode@fp cards).
         supports_extra_accounts: true,
         icon_key: "commandcode",
+        category: ProviderCategory::Coding,
     },
     ProviderDefinition {
         family_id: "doubao",
@@ -290,6 +342,7 @@ const PROVIDER_DEFINITIONS: &[ProviderDefinition] = &[
         supports_api_key: false,
         supports_extra_accounts: false,
         icon_key: "doubao",
+        category: ProviderCategory::Coding,
     },
     ProviderDefinition {
         family_id: "clawsgo",
@@ -300,6 +353,61 @@ const PROVIDER_DEFINITIONS: &[ProviderDefinition] = &[
         supports_api_key: true,
         supports_extra_accounts: false,
         icon_key: "clawsgo",
+        category: ProviderCategory::Coding,
+    },
+    ProviderDefinition {
+        family_id: "bocha",
+        display_name: "BochaAI",
+        query_kind: QueryKind::NativeBalance,
+        supports_api_key: false,
+        supports_extra_accounts: false,
+        icon_key: "bocha",
+        category: ProviderCategory::Mcp,
+    },
+    ProviderDefinition {
+        family_id: "tavily",
+        display_name: "Tavily",
+        query_kind: QueryKind::NativeBalance,
+        supports_api_key: false,
+        supports_extra_accounts: false,
+        icon_key: "tavily",
+        category: ProviderCategory::Mcp,
+    },
+    ProviderDefinition {
+        family_id: "firecrawl",
+        display_name: "Firecrawl",
+        query_kind: QueryKind::NativeBalance,
+        supports_api_key: false,
+        supports_extra_accounts: false,
+        icon_key: "firecrawl",
+        category: ProviderCategory::Mcp,
+    },
+    ProviderDefinition {
+        family_id: "clinepass",
+        display_name: "ClinePass",
+        query_kind: QueryKind::NativeCodingPlan,
+        supports_api_key: true,
+        supports_extra_accounts: false,
+        icon_key: "clinepass",
+        category: ProviderCategory::Coding,
+    },
+    ProviderDefinition {
+        family_id: "sensenova",
+        display_name: "SenseNova",
+        query_kind: QueryKind::NativeCodingPlan,
+        supports_api_key: false,
+        supports_extra_accounts: false,
+        icon_key: "sensenova",
+        category: ProviderCategory::Coding,
+    },
+    ProviderDefinition {
+        family_id: "apigoto",
+        display_name: "APIGOTO",
+        query_kind: QueryKind::NativeCodingPlan,
+        supports_api_key: true,
+        supports_extra_accounts: false,
+        icon_key: "apigoto",
+        category: ProviderCategory::Coding,
     },
 ];
 
