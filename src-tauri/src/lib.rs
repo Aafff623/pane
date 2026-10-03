@@ -2804,6 +2804,12 @@ fn account_archive(provider: String, index: usize) -> Result<(), String> {
     if index >= entries.len() {
         return Err(format!("no account #{index} for {provider}"));
     }
+    if index == 0 {
+        if let Some(entry) = entries.first() {
+            let stable = accounts::card_id_for_account(&provider, entry);
+            usage_history::migrate_card_id(&provider, &stable);
+        }
+    }
     let entry = entries.remove(index);
     let card_id = accounts::card_id_for_account(&provider, &entry);
     accounts::archive_account(accounts::ArchivedAccount {
@@ -2833,6 +2839,12 @@ fn account_set_default(provider: String, index: usize) -> Result<(), String> {
     let mut entries = accounts::load_accounts(&provider);
     if index >= entries.len() {
         return Err(format!("no account #{index} for {provider}"));
+    }
+    if index > 0 {
+        let old_default = accounts::card_id_for_account(&provider, &entries[0]);
+        usage_history::migrate_card_id(&provider, &old_default);
+        let promoted = accounts::card_id_for_account(&provider, &entries[index]);
+        usage_history::migrate_card_id(&promoted, &provider);
     }
     let entry = entries.remove(index);
     entries.insert(0, entry);

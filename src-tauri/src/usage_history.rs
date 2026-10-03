@@ -176,6 +176,24 @@ pub fn trend_map() -> BTreeMap<String, Vec<Option<f64>>> {
         .collect()
 }
 
+/// Move history when a multi-account family changes the identity published by
+/// its bare card. Existing samples are merged instead of overwritten.
+pub fn migrate_card_id(from: &str, to: &str) {
+    if from == to { return; }
+    let file = &mut *store().lock().unwrap();
+    let Some(mut samples) = file.entries.remove(from) else { return; };
+    let target = file.entries.entry(to.to_string()).or_default();
+    for sample in samples.drain(..) {
+        if let Some(existing) = target.iter_mut().find(|item| item.day == sample.day) {
+            existing.used = existing.used.max(sample.used);
+        } else {
+            target.push(sample);
+        }
+    }
+    target.sort_by(|a, b| a.day.cmp(&b.day));
+    persist(file);
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

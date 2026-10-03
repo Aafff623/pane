@@ -1516,6 +1516,16 @@ fn codex_extra_accounts() -> (Vec<ProviderSpend>, FileData) {
 /// plus the model id and completion timestamp. Lines also carry the full
 /// request/response bodies, so the substring gate skips non-usage work.
 fn zcode() -> ProviderSpend {
+    // The shared SQLite (the exact table ZCode's Settings → Usage page
+    // reads) is authoritative: one row per model call with started_at and
+    // the four billing buckets. The rollout jsonl dir only ever catches a
+    // handful of CLI sessions, so it contributes exclusively days older
+    // than the db's earliest row (the db prunes at 30 days) — a day the db
+    // still covers is never mixed with jsonl, so no call counts twice.
+    let (db_data, db_min_day) = zcode_db_data();
+    let mut all = db_data;
+    let min_day = db_min_day.unwrap_or(i32::MAX);
+
     let root = dirs::home_dir()
         .unwrap_or_default()
         .join(".zcode")
@@ -1523,7 +1533,7 @@ fn zcode() -> ProviderSpend {
         .join("rollout");
     let mut files = Vec::new();
     recent_jsonl_files(&root, &mut files);
-    let mut all = FileData::default();
+    let mut legacy = FileData::default();
     for file in files {
         if !file
             .file_name()
@@ -1533,9 +1543,119 @@ fn zcode() -> ProviderSpend {
             continue;
         }
         let data = file_days(&file, &mut |line, data| zcode_line(line, data));
-        merge_data(&mut all, data);
+        merge_data(&mut legacy, data);
+    }
+    for ((day, model), (cost, tokens)) in legacy.days {
+        if day >= min_day {
+            continue; // the db already owns every day it still keeps
+        }
+        let entry = all.days.entry((day, model)).or_insert((0.0, 0.0));
+        entry.0 += cost;
+        entry.1 += tokens;
     }
     build_spend("zcode", "ZCode", all)
+}
+
+/// ZCode db parse, cached on (db, wal) stamps — the wal grows with every
+/// live call, so its stamp is what invalidates. A locked/busy db (CLI
+/// mid-write) serves the last good parse instead of dropping the slice.
+/// Returns the day-map plus the earliest local day the db still holds, so
+/// jsonl history older than the retention window can be layered on.
+fn zcode_db_data() -> (FileData, Option<i32>) {
+    use std::sync::Mutex;
+    static CACHE: Mutex<Option<((SystemTime, u64), (SystemTime, u64), FileData, Option<i32>)>> =
+        Mutex::new(None);
+
+    let Some(db_path) = dirs::home_dir().map(|h| h.join(".zcode").join("cli").join("db").join("db.sqlite"))
+    else {
+        return (FileData::default(), None);
+    };
+    if !db_path.exists() {
+        return (FileData::default(), None);
+    }
+    let db_stamp = stamp_of(&db_path);
+    let wal_stamp = stamp_of(&db_path.with_extension("sqlite-wal"));
+    if let Ok(guard) = CACHE.lock() {
+        if let Some((d, w, data, min_day)) = guard.as_ref() {
+            if *d == db_stamp && *w == wal_stamp {
+                return (data.clone(), *min_day);
+            }
+        }
+    }
+
+    let Some((data, min_day)) = (|| {
+        let conn = rusqlite::Connection::open_with_flags(
+            &db_path,
+            rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
+        )
+        .ok()?;
+        let cutoff_ms = (Local::now() - chrono::Duration::days(32)).timestamp_millis();
+        let mut stmt = conn
+            .prepare(
+                "SELECT started_at, model_id, input_tokens, output_tokens,
+                        cache_creation_input_tokens, cache_read_input_tokens
+                 FROM model_usage WHERE started_at >= ?",
+            )
+            .ok()?;
+        let mut rows = stmt.query([cutoff_ms]).ok()?;
+        let mut data = FileData::default();
+        let mut min_day: Option<i32> = None;
+        while let Ok(Some(row)) = rows.next() {
+            let Ok(ts_ms) = row.get::<_, i64>(0) else { break };
+            let Ok(model) = row.get::<_, String>(1) else { break };
+            let (Ok(input), Ok(output), Ok(cache_write), Ok(cache_read)) = (
+                row.get::<_, f64>(2),
+                row.get::<_, f64>(3),
+                row.get::<_, f64>(4),
+                row.get::<_, f64>(5),
+            ) else {
+                break;
+            };
+            // ZCode's own totals (computed_total_tokens / the Settings
+            // page) are these four buckets — reasoning stays excluded to
+            // match the tool's arithmetic, not double it.
+            let tokens = input + output + cache_write + cache_read;
+            let Some(ts) = DateTime::from_timestamp_millis(ts_ms) else { continue };
+            let day = day_of_utc(ts);
+            min_day = Some(min_day.map_or(day, |d: i32| d.min(day)));
+            if tokens <= 0.0 {
+                continue;
+            }
+            match probe_lookup(&model) {
+                Some(p) => {
+                    let u = pricing::Usage {
+                        input,
+                        output,
+                        cache_read,
+                        cache_write_5m: cache_write,
+                        cache_write_1h: 0.0,
+                    };
+                    add_event(&mut data, ts, &model, pricing::request_cost(&p, &u, true), tokens);
+                }
+                None => note_unpriced(&mut data, ts, &model, tokens),
+            }
+        }
+        Some((data, min_day))
+    })() else {
+        // Unreadable this pass — serve the last good parse when one exists.
+        if let Ok(mut guard) = CACHE.lock() {
+            if let Some((_, _, data, min_day)) = guard.as_ref() {
+                return (data.clone(), *min_day);
+            }
+        }
+        return (FileData::default(), None);
+    };
+
+    if let Ok(mut guard) = CACHE.lock() {
+        *guard = Some((db_stamp, wal_stamp, data.clone(), min_day));
+    }
+    (data, min_day)
+}
+
+fn stamp_of(path: &Path) -> (SystemTime, u64) {
+    fs::metadata(path)
+        .map(|m| (m.modified().unwrap_or(SystemTime::UNIX_EPOCH), m.len()))
+        .unwrap_or((SystemTime::UNIX_EPOCH, 0))
 }
 
 /// One model request = one event, tokens counted like the other scanners
@@ -2947,6 +3067,110 @@ mod tests {
             );
         }
     }
+
+    // ---- Antigravity protobuf ---------------------------------------------
+
+    /// Encodes a protobuf message: `fields` are (field#, payload bytes)
+    /// rendered as length-delimited entries, like the shapes the decoder
+    /// consumes.
+    fn pb_msg(fields: &[(u32, Vec<u8>)]) -> Vec<u8> {
+        let mut out = Vec::new();
+        for (f, payload) in fields {
+            let tag = (f << 3) | 2;
+            let mut tag_v = Vec::new();
+            let mut t = tag;
+            loop {
+                let mut b = (t & 0x7f) as u8;
+                t >>= 7;
+                if t != 0 {
+                    b |= 0x80;
+                }
+                tag_v.push(b);
+                if t == 0 {
+                    break;
+                }
+            }
+            out.extend_from_slice(&tag_v);
+            let mut len_v = Vec::new();
+            let mut l = payload.len();
+            loop {
+                let mut b = (l & 0x7f) as u8;
+                l >>= 7;
+                if l != 0 {
+                    b |= 0x80;
+                }
+                len_v.push(b);
+                if l == 0 {
+                    break;
+                }
+            }
+            out.extend_from_slice(&len_v);
+            out.extend_from_slice(payload);
+        }
+        out
+    }
+
+    fn pb_varint_field(field: u32, value: u64) -> Vec<u8> {
+        let mut out = vec![((field << 3) | 0) as u8];
+        let mut v = value;
+        loop {
+            let mut b = (v & 0x7f) as u8;
+            v >>= 7;
+            if v != 0 {
+                b |= 0x80;
+            }
+            out.push(b);
+            if v == 0 {
+                break;
+            }
+        }
+        out
+    }
+
+    fn antigravity_blob(input: u64, output: u64, thoughts: u64, model: &str) -> Vec<u8> {
+        let usage = [
+            pb_varint_field(1, input),
+            pb_varint_field(2, output),
+            pb_varint_field(3, thoughts),
+        ]
+        .concat();
+        let info = pb_msg(&[(4, usage), (19, model.as_bytes().to_vec())]);
+        pb_msg(&[(1, info)])
+    }
+
+    #[test]
+    fn antigravity_decodes_usage_and_model() {
+        let blob = antigravity_blob(1318, 5368, 161, "gemini-3.8-flash");
+        let call = decode_antigravity_call(&blob).expect("call decodes");
+        assert_eq!(call.input, 1318);
+        assert_eq!(call.output, 5368);
+        assert_eq!(call.reasoning, 161);
+        assert_eq!(call.model, "gemini-3.8-flash");
+    }
+
+    #[test]
+    fn antigravity_drops_rows_without_model_or_usage() {
+        // No model string (field 19) — not a model call.
+        let usage = pb_msg(&[]);
+        let info = pb_msg(&[(4, usage)]);
+        assert!(decode_antigravity_call(&pb_msg(&[(1, info)])).is_none());
+        // No usage block (field 4) — nothing to count.
+        let info = pb_msg(&[(19, b"gemini-3.8-flash".to_vec())]);
+        assert!(decode_antigravity_call(&pb_msg(&[(1, info)])).is_none());
+        // No top-level envelope at all — garbage in, None out.
+        assert!(decode_antigravity_call(&[0xff, 0xff, 0xff]).is_none());
+    }
+
+    #[test]
+    fn antigravity_dotnet_datetimes() {
+        let d = parse_dotnet_datetime("2026-10-02 08:45:22.3529055+00:00").expect("real ts");
+        assert_eq!(d.to_rfc3339().starts_with("2026-10-02T08:45:22"), true);
+        // Non-zero offset converts through to UTC.
+        assert!(parse_dotnet_datetime("2026-10-01 23:30:00+08:00").is_some());
+        // .NET "never" sentinel and junk map to None.
+        assert!(parse_dotnet_datetime("0001-01-01 00:00:00+00:00").is_none());
+        assert!(parse_dotnet_datetime("not a date").is_none());
+    }
 }
 
 /// Minimal CSV field splitter with quoted-field support.
@@ -2968,6 +3192,286 @@ fn split_csv_row(line: &str) -> Vec<String> {
     }
     out.push(field);
     out
+}
+
+// ── Antigravity ─────────────────────────────────────────────────────────────
+
+/// One protobuf wire-format value as needed by the Antigravity decoder.
+enum PbField<'a> {
+    Varint(u64),
+    Len(&'a [u8]),
+}
+
+fn pb_varint(buf: &[u8], mut i: usize) -> Option<(u64, usize)> {
+    let mut v: u64 = 0;
+    let mut shift = 0;
+    while shift < 64 {
+        let b = *buf.get(i)?;
+        i += 1;
+        v |= ((b & 0x7f) as u64) << shift;
+        if b & 0x80 == 0 {
+            return Some((v, i));
+        }
+        shift += 7;
+    }
+    None
+}
+
+/// Top-level fields of a protobuf buffer; stops at the first malformed
+/// byte (the caller treats that as "no more fields").
+fn pb_fields(buf: &[u8]) -> Vec<(u32, PbField<'_>)> {
+    let mut out = Vec::new();
+    let mut i = 0usize;
+    while i < buf.len() {
+        let Some((tag, next)) = pb_varint(buf, i) else { break };
+        i = next;
+        let field = (tag >> 3) as u32;
+        match (tag & 7) as u8 {
+            0 => {
+                let Some((v, next)) = pb_varint(buf, i) else { break };
+                i = next;
+                out.push((field, PbField::Varint(v)));
+            }
+            2 => {
+                let Some((len, next)) = pb_varint(buf, i) else { break };
+                let len = len as usize;
+                if len > buf.len() - next {
+                    break;
+                }
+                out.push((field, PbField::Len(&buf[next..next + len])));
+                i = next + len;
+            }
+            5 => {
+                if i + 4 > buf.len() {
+                    break;
+                }
+                i += 4;
+            }
+            1 => {
+                if i + 8 > buf.len() {
+                    break;
+                }
+                i += 8;
+            }
+            _ => break,
+        }
+    }
+    out
+}
+
+/// A `gen_metadata` blob decodes to `field 1 = LLMGenerationInfo
+/// { 4 = UsageMetadata { 1 input, 2 output, 3 thoughts }, 19 = model }` —
+/// per-call independent values (no cumulative deltas needed; 1/2/3 are the
+/// Prompt/Completion/Reasoning numbers the IDE itself displays). The format
+/// is undocumented: any missing field drops the row rather than guessing.
+struct AntigravityCall {
+    input: u64,
+    output: u64,
+    reasoning: u64,
+    model: String,
+}
+
+fn decode_antigravity_call(blob: &[u8]) -> Option<AntigravityCall> {
+    let (_, PbField::Len(info)) = pb_fields(blob).into_iter().find(|(f, _)| *f == 1)? else {
+        return None;
+    };
+    let fields = pb_fields(info);
+    let (_, PbField::Len(usage)) = fields.iter().find(|(f, _)| *f == 4)? else {
+        return None;
+    };
+    let (_, PbField::Len(model)) = fields.iter().find(|(f, _)| *f == 19)? else {
+        return None;
+    };
+    let model = std::str::from_utf8(model).ok()?;
+    if model.is_empty() {
+        return None;
+    }
+    let mut call = AntigravityCall { input: 0, output: 0, reasoning: 0, model: model.to_string() };
+    for (f, v) in pb_fields(usage) {
+        let PbField::Varint(v) = v else { continue };
+        match f {
+            1 => call.input = v,
+            2 => call.output = v,
+            3 => call.reasoning = v,
+            _ => {}
+        }
+    }
+    Some(call)
+}
+
+/// Antigravity's summaries store .NET datetimes like
+/// `2026-10-02 08:45:22.3529055+00:00`. The `0001-01-01` sentinel (and
+/// anything implausibly old) maps to None.
+fn parse_dotnet_datetime(s: &str) -> Option<DateTime<Utc>> {
+    let d = DateTime::parse_from_str(s.trim(), "%Y-%m-%d %H:%M:%S%.f%:z").ok()?;
+    (d.year() >= 2020).then(|| d.with_timezone(&Utc))
+}
+
+/// conversation_id → last-modified instant. The summaries DB sits NEXT TO
+/// the per-conversation stores (`<base>/conversation_summaries.db`, one
+/// level above `<base>/conversations/`).
+fn antigravity_summary_days(conv_dir: &Path) -> HashMap<String, DateTime<Utc>> {
+    let mut map = HashMap::new();
+    let summaries = conv_dir.parent().unwrap_or(conv_dir).join("conversation_summaries.db");
+    let Ok(conn) = rusqlite::Connection::open_with_flags(
+        summaries,
+        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
+    ) else {
+        return map;
+    };
+    let Ok(mut stmt) = conn
+        .prepare("SELECT conversation_id, last_modified_time FROM conversation_summaries")
+    else {
+        return map;
+    };
+    let Ok(mut rows) = stmt.query([]) else {
+        return map;
+    };
+    while let Ok(Some(row)) = rows.next() {
+        let (Ok(id), Ok(ts)) = (row.get::<_, String>(0), row.get::<_, String>(1)) else {
+            continue;
+        };
+        if let Some(d) = parse_dotnet_datetime(&ts) {
+            map.insert(id, d);
+        }
+    }
+    map
+}
+
+/// Cached whole-file parse for non-line sources (Antigravity's SQLite
+/// conversation stores): the same (mtime, size, pricing-generation)
+/// contract as `file_days`. `parse` returning None means "could not read
+/// this pass" (locked db, antivirus) — nothing is cached, matching the
+/// unreadable-file rule of `file_days`.
+fn cached_parse(path: &Path, parse: impl FnOnce() -> Option<FileData>) -> FileData {
+    let Ok(meta) = fs::metadata(path) else { return FileData::default() };
+    let mtime = meta.modified().unwrap_or(SystemTime::UNIX_EPOCH);
+    let size = meta.len();
+    if let Ok(mut t) = touched().lock() {
+        t.insert(path.to_path_buf());
+    }
+    let gen = pricing::generation();
+    if let Ok(mut map) = cache().lock() {
+        if let Some(entry) = map.get_mut(path) {
+            if entry.mtime == mtime && entry.size == size {
+                if entry.gen == gen {
+                    return entry.data.clone();
+                }
+                if probes_still_vouch(&entry.probes, &entry.data) {
+                    entry.gen = gen;
+                    CACHE_DIRTY.store(true, std::sync::atomic::Ordering::Relaxed);
+                    return entry.data.clone();
+                }
+            }
+        }
+    }
+    PROBES.with(|p| *p.borrow_mut() = Some(Vec::new()));
+    let data = match parse() {
+        Some(d) => d,
+        None => {
+            PROBES.with(|p| {
+                p.borrow_mut().take();
+            });
+            return FileData::default();
+        }
+    };
+    let probes = PROBES.with(|p| p.borrow_mut().take()).unwrap_or_default();
+    if let Ok(mut map) = cache().lock() {
+        map.insert(
+            path.to_path_buf(),
+            FileEntry { mtime, size, gen, probes, data: data.clone() },
+        );
+    }
+    CACHE_DIRTY.store(true, std::sync::atomic::Ordering::Relaxed);
+    data
+}
+
+/// Antigravity (Google's agentic IDE + its CLI) token usage, read from the
+/// per-conversation SQLite stores under `~/.gemini/antigravity{,-cli}/
+/// conversations/`. Each `gen_metadata` row is one model call; blobs carry
+/// no timestamps, so a conversation attributes to the day its summaries
+/// row was last modified (a multi-day conversation lands on its final
+/// day — a documented smear for the usage view). Its subscription models
+/// are usually absent from the pricing catalog: tokens always count,
+/// dollars stay 0 with the ⚠ marker.
+fn antigravity() -> ProviderSpend {
+    let mut data = FileData::default();
+    let Some(home) = dirs::home_dir() else {
+        return build_spend("antigravity", "Antigravity", data);
+    };
+    let cutoff = SystemTime::now() - std::time::Duration::from_secs(31 * 86_400);
+    for base in ["antigravity", "antigravity-cli"] {
+        let conv_dir = home.join(".gemini").join(base).join("conversations");
+        let Ok(entries) = fs::read_dir(&conv_dir) else { continue };
+        let days = antigravity_summary_days(&conv_dir);
+        let mut files: Vec<PathBuf> = entries.flatten().map(|e| e.path()).collect();
+        files.sort();
+        for db in files {
+            let name = db.file_name().and_then(|n| n.to_str()).unwrap_or("");
+            if !name.ends_with(".db") {
+                continue; // skips the -wal/-shm sidecars (they end .db-wal/.db-shm)
+            }
+            let Ok(meta) = fs::metadata(&db) else { continue };
+            if meta.modified().unwrap_or(SystemTime::UNIX_EPOCH) < cutoff {
+                continue;
+            }
+            let conv_id = db.file_stem().unwrap_or_default().to_string_lossy().into_owned();
+            let anchor = days
+                .get(&conv_id)
+                .copied()
+                .or_else(|| {
+                    fs::metadata(&db)
+                        .and_then(|m| m.modified())
+                        .ok()
+                        .and_then(|t| t.duration_since(SystemTime::UNIX_EPOCH).ok())
+                        .and_then(|d| DateTime::from_timestamp_millis(d.as_millis() as i64))
+                })
+                .unwrap_or_else(Utc::now);
+            let file_data = cached_parse(&db, || {
+                let conn = rusqlite::Connection::open_with_flags(
+                    &db,
+                    rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
+                )
+                .ok()?;
+                let mut stmt = conn.prepare("SELECT data FROM gen_metadata ORDER BY idx").ok()?;
+                let mut rows = stmt.query([]).ok()?;
+                let mut d = FileData::default();
+                while let Ok(Some(row)) = rows.next() {
+                    let Ok(blob) = row.get::<_, Vec<u8>>(0) else { break };
+                    let Some(call) = decode_antigravity_call(&blob) else { continue };
+                    let tokens = (call.input + call.output + call.reasoning) as f64;
+                    if tokens <= 0.0 {
+                        continue;
+                    }
+                    // probe_lookup (not bare pricing::lookup): the question
+                    // must be recorded so a catalog refresh re-prices an
+                    // unchanged conversation db via probes_still_vouch.
+                    match probe_lookup(&call.model) {
+                        Some(p) => {
+                            let u = pricing::Usage {
+                                input: call.input as f64,
+                                output: (call.output + call.reasoning) as f64,
+                                cache_read: 0.0,
+                                cache_write_5m: 0.0,
+                                cache_write_1h: 0.0,
+                            };
+                            add_event(
+                                &mut d,
+                                anchor,
+                                &call.model,
+                                pricing::request_cost(&p, &u, true),
+                                tokens,
+                            );
+                        }
+                        None => note_unpriced(&mut d, anchor, &call.model, tokens),
+                    }
+                }
+                Some(d)
+            });
+            merge_data(&mut data, file_data);
+        }
+    }
+    build_spend("antigravity", "Antigravity", data)
 }
 
 pub fn collect(cursor_csv: Option<String>) -> Vec<ProviderSpend> {
@@ -3018,6 +3522,7 @@ pub fn collect_daily(cursor_csv: Option<String>) -> (Vec<ProviderSpend>, Vec<Pro
         kimi(kimi_routed),
         qwen(),
         zcode(),
+        antigravity(),
     ];
     list.extend(extra_claude_spends);
     list.extend(extra_codex_spends);
