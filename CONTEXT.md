@@ -310,3 +310,32 @@ anything unverified lives under `待确认` at the bottom.
   whole remaining pool. getTeams discovers teamId; getSubscription +
   getUsageStats feed the card. 0.4.51 shipped earlier today; the reset-card
   expiry (`e987f8e`) and ClawsGO ride 0.4.52.
+
+## Provider credential semantics (2026-10-03, three handoff providers)
+
+- **ClinePass** (`clinepass`): sk_ key, no expiry, no session. `GET
+  api.cline.bot/api/v1/users/me/plan/usage-limits` → three rolling windows
+  (five_hour/weekly/monthly). `percentUsed` is a 0-100 percent read
+  directly (CodexBar's official plugin clamps 0..100 without scaling —
+  verified against its source); `resetsAt` is RFC3339-with-nanos and is
+  ABSENT while a window has zero usage, and is dropped when already in
+  the past (rolled anchor — no fake countdowns).
+- **SenseNova** (`sensenova`): quota is console-session only (sk- keys get
+  401 auth_type_disabled). `GET platform.sensenova.cn/lite/console/v1/
+  tokenplan/pool-usage`; string decimals, unix-second resets, pools keyed
+  by `pool_type` (default|dedicated), never by localized name. Renewal is
+  the documented ladder in providers/sensenova.rs: L0 local JWT exp
+  precheck → L1 refresh_token (public client `nova`, single-flight +
+  atomic temp-file persist + 30s/5m/30m backoff, invalid_grant drops the
+  token) → L2 paste-tokens bootstrap (webview silent SSO re-auth deferred
+  until its interception is runtime-verified — rationale: three unverified
+  chain points, shipping blind violated the delivery bar) → L3 stale
+  snapshot with warning. 429 (TPM/RPM) never enters the ladder.
+- **APIGOTO** (`apigoto`): sk key, official read-only `GET api.apigoto.com/
+  v1/usage`. `is_active` covers key+user, NOT subscription liveness; a
+  lapsed subscription still returns 200 with `subscription` gone and
+  mode=payg — the parser must show an expired state, never a fresh 0%
+  card. No window reset instant exists by design (anchor-rolling); the
+  surfaced reset is `subscription.expires_at` (the metric's own death).
+  Error mapping trusts numeric `code` (documented stability contract),
+  never message text.
