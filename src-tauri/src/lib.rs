@@ -3,6 +3,7 @@ mod antigravity_accounts;
 mod cursor_accounts;
 mod cursor_oauth;
 mod fonts;
+mod keyvault;
 mod alerts;
 mod httpapi;
 mod i18n;
@@ -1581,6 +1582,33 @@ fn accounts_with_imported_main_key(family: &str) -> Vec<accounts::AccountEntry> 
     list
 }
 
+// ── Key vault commands: thin wrappers over keyvault.rs's plain API. ────────
+
+#[tauri::command]
+fn keyvault_list() -> Vec<keyvault::VaultRow> {
+    keyvault::list()
+}
+
+#[tauri::command]
+fn keyvault_add(
+    service: String,
+    label: String,
+    key: String,
+    note: String,
+) -> Result<Vec<keyvault::VaultRow>, String> {
+    keyvault::add(&service, &label, &key, &note)
+}
+
+#[tauri::command]
+fn keyvault_remove(id: String) -> Result<Vec<keyvault::VaultRow>, String> {
+    keyvault::remove(&id)
+}
+
+#[tauri::command]
+fn keyvault_copy(id: String) -> Result<String, String> {
+    keyvault::copy(&id)
+}
+
 /// Called by the UI. Refreshes every enabled provider at the same time and
 /// returns whatever each one found — data, "not signed in", or an error.
 /// The disabled argument is accepted for compatibility but ignored:
@@ -3121,7 +3149,8 @@ fn get_credential_status(provider: String) -> Value {
         "codex" | "grok" | "copilot" => oauth::label(&family),
         _ => None,
     };
-    json!({ "storedKey": stored_key, "envKey": env_key, "localCli": local_cli, "oauth": oauth_label, "activeSource": active_source, "membership": membership })
+    let masked_key = providers::stored_key_file(&family).map(|key| accounts::mask_key(&key));
+    json!({ "storedKey": stored_key, "maskedKey": masked_key, "envKey": env_key, "localCli": local_cli, "oauth": oauth_label, "activeSource": active_source, "membership": membership })
 }
 
 /// Starts Pane's own OAuth device-code login (Codex / Grok). Returns the
@@ -3666,6 +3695,10 @@ pub fn run() {
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
         .invoke_handler(tauri::generate_handler![
+            keyvault_list,
+            keyvault_add,
+            keyvault_remove,
+            keyvault_copy,
             fetch_usage,
             refresh_provider,
             cached_usage,
