@@ -339,3 +339,28 @@ anything unverified lives under `待确认` at the bottom.
   surfaced reset is `subscription.expires_at` (the metric's own death).
   Error mapping trusts numeric `code` (documented stability contract),
   never message text.
+
+## Search/MCP quota system (2026-10-03, searchquota + keyvault unification)
+
+- **Key resolution**: the vault (`keyvault.json`) is the PRIMARY key source
+  for bocha/tavily/firecrawl/brave — entries carry the user label shown on
+  per-key rows; legacy sources (env, tavily-keys.json, ZCode MCP config)
+  stay as deduped fallbacks. `keyvault_add/remove` calls
+  `searchquota::invalidate_service` so the next tick refetches with the new
+  key set (no 45-min cache stall).
+- **Multi-key = multi-pool**: every provider sums pools for the headline
+  metric (the overview ring) and lists one row per key with the vault label
+  (or a masked tail for legacy keys). Firecrawl's headline reset is the
+  EARLIEST billing_period_end across keys.
+- **Brave has no quota endpoint** — the only signal is rate-limit headers
+  on real search responses (`X-RateLimit-Remaining: "0, 1994"` = monthly
+  slot last). One real query is spent per probe, cached 12h per key
+  (~2/day ≈ 3% of the free 2000/month). Reset = now + X-RateLimit-Reset.
+- **Keenable: no quota surface at all** (probed /v1/usage|quota|account|me
+  → 404; real search responses carry no quota headers/fields; only signal
+  is 429 retryAfter) — console-only, not implementable.
+- **Exa**: official `GET api.exa.ai` team-management usage endpoint exists
+  (total_cost_usd etc.); no key on this machine — wire when one lands in
+  the vault.
+- **Tavily `/usage` carries NO period dates** — never fabricate a reset;
+  plan (Researcher = 1000 credits/month) is surfaced as the plan label.

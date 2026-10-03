@@ -209,6 +209,23 @@ pub fn copy(id: &str) -> Result<String, String> {
         .ok_or_else(|| "no such key".to_string())
 }
 
+/// (label, key) pairs for one service, in stored order — the read side for
+/// quota providers. Multiple keys of the same service stay independent
+/// pools; the label is the user-facing name shown on per-key rows.
+pub fn keys_for_service(service: &str) -> Vec<(String, String)> {
+    load()
+        .into_iter()
+        .filter(|e| e.service.eq_ignore_ascii_case(service))
+        .map(|e| (e.label, e.key))
+        .collect()
+}
+
+/// Which service an entry id belongs to (needed before removal, so cache
+/// invalidation knows which provider to refetch).
+pub fn service_of(id: &str) -> Option<String> {
+    load().into_iter().find(|e| e.id == id).map(|e| e.service)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

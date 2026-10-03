@@ -409,6 +409,15 @@ const PROVIDER_DEFINITIONS: &[ProviderDefinition] = &[
         icon_key: "apigoto",
         category: ProviderCategory::Coding,
     },
+    ProviderDefinition {
+        family_id: "brave",
+        display_name: "Brave Search",
+        query_kind: QueryKind::NativeBalance,
+        supports_api_key: false,
+        supports_extra_accounts: false,
+        icon_key: "brave",
+        category: ProviderCategory::Mcp,
+    },
 ];
 
 pub fn provider_definitions() -> &'static [ProviderDefinition] {

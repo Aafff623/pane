@@ -25,6 +25,10 @@ import sharkaiIcon from "./assets/providers/sharkai.svg?raw";
 import siliconflowIcon from "./assets/providers/siliconflow.svg?raw";
 import stepfunIcon from "./assets/providers/stepfun.svg?raw";
 import zaiIcon from "./assets/providers/zai.svg?raw";
+import bochaIcon from "./assets/providers/bocha.svg?raw";
+import tavilyIcon from "./assets/providers/tavily.svg?raw";
+import firecrawlIcon from "./assets/providers/firecrawl.svg?raw";
+import braveIcon from "./assets/providers/brave.svg?raw";
 import lightningIcon from "./assets/icons/lightning-bold.svg?raw";
 import { providerDefinition, providerFamily } from "./providerCatalog";
 
@@ -66,6 +70,10 @@ const VISUALS: Readonly<Record<string, ProviderVisual>> = {
   doubao: { iconKey: "doubao", iconSvg: doubaoIcon },
   clawsgo: { iconKey: "clawsgo", iconSvg: clawsgoIcon, invertOnDarkTray: true },
   shandianshuo: { iconKey: "shandianshuo", iconSvg: lightningIcon },
+  bocha: { iconKey: "bocha", iconSvg: bochaIcon },
+  tavily: { iconKey: "tavily", iconSvg: tavilyIcon },
+  firecrawl: { iconKey: "firecrawl", iconSvg: firecrawlIcon },
+  brave: { iconKey: "brave", iconSvg: braveIcon },
 };
 
 /// Known One/New API hosts that ship their own colorful mark.  Keyed by hostname

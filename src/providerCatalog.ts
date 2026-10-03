@@ -56,6 +56,7 @@ export const providerCatalog: readonly ProviderDefinition[] = [
   { familyId: "bocha", displayName: "BochaAI", queryKind: "nativeBalance", supportsApiKey: false, supportsExtraAccounts: false, supportsOAuth: false, iconKey: "bocha", category: "mcp" },
   { familyId: "tavily", displayName: "Tavily", queryKind: "nativeBalance", supportsApiKey: false, supportsExtraAccounts: false, supportsOAuth: false, iconKey: "tavily", category: "mcp" },
   { familyId: "firecrawl", displayName: "Firecrawl", queryKind: "nativeBalance", supportsApiKey: false, supportsExtraAccounts: false, supportsOAuth: false, iconKey: "firecrawl", category: "mcp" },
+  { familyId: "brave", displayName: "Brave Search", queryKind: "nativeBalance", supportsApiKey: false, supportsExtraAccounts: false, supportsOAuth: false, iconKey: "brave", category: "mcp" },
   { familyId: "clinepass", displayName: "ClinePass", queryKind: "nativeCodingPlan", supportsApiKey: true, supportsExtraAccounts: false, supportsOAuth: false, iconKey: "clinepass" },
   { familyId: "sensenova", displayName: "SenseNova", queryKind: "nativeCodingPlan", supportsApiKey: false, supportsExtraAccounts: false, supportsOAuth: false, iconKey: "sensenova" },
   { familyId: "apigoto", displayName: "APIGOTO", queryKind: "nativeCodingPlan", supportsApiKey: true, supportsExtraAccounts: false, supportsOAuth: false, iconKey: "apigoto" },

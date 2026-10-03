@@ -589,7 +589,7 @@ struct StripEntry {
 /// strip ids are validated against this before becoming tray icon ids,
 /// including `family@account` cards. Stale family-level strip icons are
 /// removed for exactly this set.
-const STRIP_PROVIDER_IDS: [&str; 40] = [
+const STRIP_PROVIDER_IDS: [&str; 41] = [
     "claude",
     "codex",
     "cursor",
@@ -630,6 +630,7 @@ const STRIP_PROVIDER_IDS: [&str; 40] = [
     "clinepass",
     "sensenova",
     "apigoto",
+    "brave",
 ];
 
 async fn update_tray_strip(app: tauri::AppHandle, entries: Vec<StripEntry>) -> Result<(), String> {
@@ -1608,12 +1609,23 @@ fn keyvault_add(
     key: String,
     note: String,
 ) -> Result<Vec<keyvault::VaultRow>, String> {
-    keyvault::add(&service, &label, &key, &note)
+    let rows = keyvault::add(&service, &label, &key, &note)?;
+    // The vault is the primary key source for the search/MCP quota
+    // providers — drop their cached snapshots so the next tick picks the
+    // new key set up instead of serving the old pool for 45 more minutes.
+    providers::searchquota::invalidate_service(service.trim());
+    Ok(rows)
 }
 
 #[tauri::command]
 fn keyvault_remove(id: String) -> Result<Vec<keyvault::VaultRow>, String> {
-    keyvault::remove(&id)
+    // Which service the id belongs to must be read BEFORE removal.
+    let service = keyvault::service_of(&id);
+    let rows = keyvault::remove(&id)?;
+    if let Some(service) = service {
+        providers::searchquota::invalidate_service(&service);
+    }
+    Ok(rows)
 }
 
 #[tauri::command]
@@ -1699,6 +1711,7 @@ async fn refresh_provider(provider_id: String) -> Result<providers::Snapshot, St
             "bocha" => providers::searchquota::bocha_snapshot().await,
             "tavily" => providers::searchquota::tavily_snapshot().await,
             "firecrawl" => providers::searchquota::firecrawl_snapshot().await,
+            "brave" => providers::searchquota::brave_snapshot().await,
             "clinepass" => providers::clinepass::snapshot().await,
             "sensenova" => providers::sensenova::snapshot().await,
             "apigoto" => providers::apigoto::snapshot().await,
@@ -1885,6 +1898,7 @@ async fn run_usage_fetch(app: &tauri::AppHandle) -> Vec<providers::Snapshot> {
         ("bocha", Box::pin(guarded("bocha".into(), "BochaAI".into(), providers::searchquota::bocha_snapshot()))),
         ("tavily", Box::pin(guarded("tavily".into(), "Tavily".into(), providers::searchquota::tavily_snapshot()))),
         ("firecrawl", Box::pin(guarded("firecrawl".into(), "Firecrawl".into(), providers::searchquota::firecrawl_snapshot()))),
+        ("brave", Box::pin(guarded("brave".into(), "Brave Search".into(), providers::searchquota::brave_snapshot()))),
         ("clinepass", Box::pin(guarded("clinepass".into(), "ClinePass".into(), providers::clinepass::snapshot()))),
         ("sensenova", Box::pin(guarded("sensenova".into(), "SenseNova".into(), providers::sensenova::snapshot()))),
         ("apigoto", Box::pin(guarded("apigoto".into(), "APIGOTO".into(), providers::apigoto::snapshot()))),
@@ -3068,6 +3082,7 @@ fn provider_env_vars(provider: &str) -> &'static [&'static str] {
         "clinepass" => &["CLINE_API_KEY"],
         "apigoto" => &["APIGOTO_API_KEY"],
         "firecrawl" => &["FIRECRAWL_API_KEY", "FIRECRAWL_FIRECRAWL_API_KEY"],
+        "brave" => &["BRAVE_API_KEY", "BRAVE_SEARCH_API_KEY"],
         "siliconflow" => &["SILICONFLOW_API_KEY"],
         "novita" => &["NOVITA_API_KEY"],
         _ => &[],
@@ -3122,6 +3137,13 @@ fn get_credential_status(provider: String) -> Value {
         "sensenova" => providers::sensenova::local_credential_hint(),
         "apigoto" => providers::apigoto::local_credential_hint(),
         "shandianshuo" => providers::shandianshuo::local_credential_hint(),
+        "bocha" => providers::searchquota::local_credential_hint("bocha", &["BOCHA_API_KEY"]),
+        "tavily" => providers::searchquota::local_credential_hint("tavily", &["TAVILY_API_KEY"]),
+        "firecrawl" => providers::searchquota::local_credential_hint(
+            "firecrawl",
+            &["FIRECRAWL_API_KEY", "FIRECRAWL_FIRECRAWL_API_KEY"],
+        ),
+        "brave" => providers::searchquota::local_credential_hint("brave", &["BRAVE_API_KEY", "BRAVE_SEARCH_API_KEY"]),
         "siliconflow" => providers::siliconflow::local_credential_hint(),
         "novita" => providers::novita::local_credential_hint(),
         "relaybalance" => providers::relaybalance::local_credential_hint(),
