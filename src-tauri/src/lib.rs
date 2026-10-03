@@ -118,7 +118,12 @@ fn config_with_defaults(mut cfg: Value) -> Value {
     obj.entry("notifyResetSoon").or_insert(json!(true));
     obj.entry("spendTab").or_insert(json!("today"));
     obj.entry("overviewTab").or_insert(json!("5h"));
+    obj.entry("overviewCategory").or_insert(json!("coding"));
+    obj.entry("categoryOverrides").or_insert(json!({}));
     obj.entry("spendMetric").or_insert(json!("cost"));
+    obj.entry("spendGrouping").or_insert(json!("tool"));
+    obj.entry("spendHeadRange").or_insert(json!("today"));
+    obj.entry("overviewStyle").or_insert(json!("rings"));
     obj.entry("showUsed").or_insert(json!(false));
     obj.entry("resetExact").or_insert(json!(false));
     obj.entry("timeFormat").or_insert(json!("auto"));
@@ -129,6 +134,7 @@ fn config_with_defaults(mut cfg: Value) -> Value {
     obj.entry("uiFont").or_insert(json!(""));
     obj.entry("glassEffects").or_insert(json!(true));
     obj.entry("shortcut").or_insert(json!("Alt+2"));
+    obj.entry("categoryShortcut").or_insert(json!("Shift+1"));
     obj.entry("proxy")
         .or_insert(json!({ "enabled": false, "url": "" }));
     obj.entry("showTotalSpend").or_insert(json!(true));
@@ -174,8 +180,13 @@ const CONFIG_KEYS: &[&str] = &[
     "notifyCuttingClose",
     "notifyWillRunOut",
     "spendMetric",
+    "spendGrouping",
+    "spendHeadRange",
+    "overviewStyle",
     "spendTab",
     "overviewTab",
+    "overviewCategory",
+    "categoryOverrides",
     "showUsed",
     "resetExact",
     "timeFormat",
@@ -185,6 +196,7 @@ const CONFIG_KEYS: &[&str] = &[
     "uiFont",
     "glassEffects",
     "shortcut",
+    "categoryShortcut",
     "proxy",
     "showTotalSpend",
     "welcomeDismissed",

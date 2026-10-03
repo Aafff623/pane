@@ -181,10 +181,35 @@
           <div class="setting-row">
             <label class="toggle"><input id="show-total-spend" type="checkbox" /> <span data-i18n="settings.showSpend">Show Total Spend card</span></label>
           </div>
-          <div class="setting-row">
-            <label for="shortcut" data-i18n="settings.shortcut">Global shortcut</label>
-            <input id="shortcut" type="text" placeholder="e.g. Ctrl+Shift+U" data-i18n-placeholder="settings.shortcutPh" spellcheck="false" />
+        </div></div>
+      </div>
+
+      <div class="acc-group">
+        <button class="acc-head"><span data-i18n="settings.keyvault">API key vault</span> <span class="chev">&#8964;</span></button>
+        <div class="acc-body"><div class="acc-inner">
+          <div id="keyvault-rows"></div>
+          <div class="setting-row kv-add-row">
+            <input id="kv-service" type="text" data-i18n-placeholder="settings.kvService" placeholder="Service (e.g. tavily)" spellcheck="false" />
+            <input id="kv-key" type="password" data-i18n-placeholder="settings.kvKey" placeholder="API key" spellcheck="false" autocomplete="off" />
+            <button class="mini-btn" id="kv-add-btn" data-i18n="settings.kvAdd">Add</button>
           </div>
+          <p class="kv-hint" data-i18n="settings.kvHint">Keys live in Pane's data directory (keyvault.json) — local projects can read them from there.</p>
+        </div></div>
+      </div>
+
+      <div class="acc-group">
+        <button class="acc-head"><span data-i18n="settings.shortcutManage">快捷键管理</span> <span class="chev">&#8964;</span></button>
+        <div class="acc-body"><div class="acc-inner">
+          <p class="settings-note" data-i18n="settings.shortcutManageHint">唤醒快捷键可以全局使用；其他快捷键只在 Pane 面板已唤醒并获得焦点时生效。</p>
+          <div class="setting-row">
+            <label for="shortcut" data-i18n="settings.wakeShortcut">快速唤醒</label>
+            <input id="shortcut" type="text" placeholder="e.g. Alt+2" data-i18n-placeholder="settings.wakeShortcutPh" spellcheck="false" />
+          </div>
+          <div class="setting-row">
+            <label for="category-shortcut" data-i18n="settings.categoryShortcut">切换分类</label>
+            <input id="category-shortcut" type="text" placeholder="e.g. Shift+1" data-i18n-placeholder="settings.categoryShortcutPh" spellcheck="false" autocomplete="off" />
+          </div>
+          <p class="settings-note" data-i18n="settings.shortcutCaptureHint">点击输入框后直接按下组合键即可设置。</p>
         </div></div>
       </div>
 

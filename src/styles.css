@@ -438,6 +438,94 @@ body.settings-open #settings {
   color: var(--secondary-foreground);
 }
 
+.kv-add-row {
+  align-items: stretch;
+}
+
+.kv-add-row input {
+  min-width: 0;
+  flex: 1 1 0;
+  background: var(--background);
+  border: 1px solid var(--input);
+  border-radius: 7px;
+  color: var(--foreground);
+  font-size: 12px;
+  font-family: inherit;
+  padding: 5px 9px;
+  outline: none;
+}
+
+.kv-add-row input:focus-visible {
+  border-color: #52525b;
+  box-shadow: 0 0 0 3px rgb(212 212 216 / 0.12);
+}
+
+#keyvault-rows {
+  display: grid;
+  gap: 6px;
+  margin: 2px 0 9px;
+}
+
+.kv-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+  padding: 7px 8px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--background);
+}
+
+.kv-info,
+.kv-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.kv-info {
+  flex-wrap: wrap;
+}
+
+.kv-service-badge {
+  padding: 2px 5px;
+  border-radius: 4px;
+  background: var(--muted);
+  color: var(--secondary-foreground);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+}
+
+.kv-label {
+  color: var(--foreground);
+  font-size: 11px;
+}
+
+.kv-masked {
+  color: var(--muted-foreground);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.kv-actions .mini-btn {
+  padding: 4px 7px;
+  font-size: 10.5px;
+}
+
+.kv-hint,
+.kv-empty,
+.kv-error {
+  margin: 0 0 8px;
+}
+
+.kv-error {
+  color: var(--destructive);
+}
+
 input[type="number"],
 input[type="password"],
 select {
@@ -1419,8 +1507,27 @@ article.provider.is-folded:hover {
 .donut-wrap {
   display: flex;
   align-items: center;
-  gap: 16px;
+  gap: 10px;
   margin-top: 10px;
+}
+
+/* Narrow viewports (small widget on high-DPI displays): a 96px ring plus
+   two legend columns cannot fit side by side — names ellipsize to a few
+   characters. Stack the ring above the columns so every legend row gets
+   half the full card width. */
+@media (max-width: 440px) {
+  .donut-wrap {
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  .donut-wrap > svg {
+    margin: 0 auto;
+  }
+
+  .spend-cols {
+    width: 100%;
+  }
 }
 
 .legend {
@@ -1434,9 +1541,24 @@ article.provider.is-folded:hover {
 .legend-row {
   display: flex;
   align-items: center;
-  gap: 5px;
-  font-size: 11px;
+  gap: 4px;
+  font-size: 10.5px;
   line-height: 1.4;
+}
+
+/* Brand mark leading a legend row (falls back to the color dot for
+   providers without an icon). */
+.legend-ico {
+  display: inline-flex;
+  width: 13px;
+  height: 13px;
+  flex: none;
+  color: var(--foreground);
+}
+
+.legend-ico svg {
+  width: 100%;
+  height: 100%;
 }
 
 .dot {
@@ -1453,7 +1575,7 @@ article.provider.is-folded:hover {
   min-width: 0;
   display: grid;
   grid-template-columns: repeat(2, 1fr);
-  gap: 12px;
+  gap: 16px;
   align-self: stretch;
 }
 
@@ -1467,6 +1589,14 @@ article.provider.is-folded:hover {
 .spend-col .col-head-row {
   display: flex;
   gap: 4px;
+}
+
+.ui-icon {
+  display: inline-block;
+  width: 1em;
+  height: 1em;
+  flex: 0 0 auto;
+  vertical-align: -0.12em;
 }
 
 .spend-range-col .col-head-row { gap: 1px; }
@@ -1484,7 +1614,7 @@ article.provider.is-folded:hover {
 }
 
 .spend-col .col-total {
-  font-size: 11.5px;
+  font-size: 11px;
   font-weight: 600;
   padding: 0 4px 2px;
   border-bottom: 1px solid var(--border);
@@ -1505,6 +1635,8 @@ article.provider.is-folded:hover {
 }
 
 .legend-name {
+  flex: 1;
+  min-width: 0;
   color: var(--secondary-foreground);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1515,6 +1647,67 @@ article.provider.is-folded:hover {
   margin-left: auto;
   color: var(--foreground);
   font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Spend hover detail card (donut wedge / legend row): brand icon + full
+   name + both exact metrics; "Others" lists its folded providers. */
+.spend-pop {
+  position: fixed;
+  z-index: 95;
+  min-width: 130px;
+  max-width: 240px;
+  padding: 7px 9px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: color-mix(in oklab, var(--card) 94%, transparent);
+  box-shadow: 0 8px 24px rgb(0 0 0 / 0.4);
+  pointer-events: none;
+  font-size: 10.5px;
+}
+
+.spend-pop-head {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-weight: 600;
+}
+
+.spend-pop-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.spend-pop-val {
+  margin-top: 2px;
+  color: var(--muted-foreground);
+  font-variant-numeric: tabular-nums;
+}
+
+.spend-pop-row {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin-top: 3px;
+}
+
+.spend-pop-row .spend-pop-name {
+  flex: 1;
+  font-weight: 400;
+  color: var(--secondary-foreground);
+}
+
+.spend-pop-row .spend-pop-val {
+  margin: 0;
+  color: var(--secondary-foreground);
+}
+
+.spend-pop-sep {
+  height: 1px;
+  background: var(--border);
+  margin: 5px 0 2px;
 }
 
 .spend-metric-tabs {
@@ -1524,6 +1717,243 @@ article.provider.is-folded:hover {
   border-radius: 8px;
   background: var(--muted);
   flex: none;
+}
+
+/* By-tool / by-model grouping switch, sits left of the metric tabs. */
+.spend-group-tabs {
+  display: inline-flex;
+  gap: 2px;
+  padding: 2px;
+  border-radius: 8px;
+  background: var(--muted);
+  flex: none;
+}
+
+.spend-group-tab {
+  flex: none;
+  font-size: 10px;
+  padding: 3px 7px;
+  margin: 0;
+}
+
+/* Header token chip: lightning + window total, always visible (the folded
+   card still answers "how much have I burned"). */
+.spend-head-value {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: 8px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: color-mix(in oklab, var(--foreground) 7%, transparent);
+  color: var(--secondary-foreground);
+  font-size: 10.5px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.spend-head-value .ui-icon {
+  width: 11px;
+  height: 11px;
+  color: var(--muted-foreground);
+}
+
+/* Today / Week / Month switch for the header chip, left of the share
+   button. */
+.spend-head-range-tabs {
+  display: inline-flex;
+  gap: 2px;
+  padding: 2px;
+  border-radius: 8px;
+  background: var(--muted);
+  flex: none;
+}
+
+.spend-head-range-tab {
+  flex: none;
+  font-size: 10px;
+  padding: 3px 7px;
+  margin: 0;
+}
+
+/* Overview style switch (rings / bars), sits with the other head buttons. */
+.overview-style-tabs {
+  display: inline-flex;
+  gap: 2px;
+  padding: 2px;
+  border-radius: 8px;
+  background: var(--muted);
+  flex: none;
+}
+
+.overview-style-tabs .tab {
+  flex: none;
+  font-size: 10px;
+  padding: 2px 6px;
+  border-radius: 6px;
+}
+
+.overview-style-tabs .ui-icon {
+  width: 12px;
+  height: 12px;
+  display: block;
+}
+
+/* The used/total line under ring tiles (MCP/search cards: "0 / 1000"). */
+.overview-item-sub {
+  margin-top: -6px;
+  font-size: 9px;
+  color: var(--muted-foreground);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+
+/* Bar layout: two dense columns of two-line rows. Must outrank the ring
+   grid's `.quota-overview .overview-grid` auto-fill rule (same intent,
+   later in the file) — hence the .quota-overview prefix. */
+.quota-overview .overview-grid.ovbars {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  column-gap: 0;
+  row-gap: 5px;
+}
+
+.overview-bar-item {
+  padding: 5px 7px;
+  border-radius: 7px;
+  min-width: 0;
+  cursor: pointer;
+}
+
+/* The overview's bar mode is always a two-column ledger. Keep a visible
+   divider between the columns and let each row use the full half-card width. */
+.quota-overview .overview-grid.ovbars > .overview-bar-item:nth-child(odd) {
+  border-right: 1px solid var(--border);
+  border-radius: 7px 0 0 7px;
+  padding-right: 12px;
+}
+
+.quota-overview .overview-grid.ovbars > .overview-bar-item:nth-child(even) {
+  border-radius: 0 7px 7px 0;
+  padding-left: 12px;
+}
+
+.overview-bar-item:hover {
+  background: color-mix(in oklab, var(--foreground) 6%, transparent);
+}
+
+.overview-bar-item .ovbar-line1 {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+}
+
+.overview-bar-item .overview-item-icon {
+  width: 15px;
+  height: 15px;
+  flex: none;
+  display: inline-flex;
+  color: var(--foreground);
+}
+
+.overview-bar-item .overview-item-icon svg {
+  width: 100%;
+  height: 100%;
+}
+
+.overview-bar-item .overview-item-name {
+  flex: 1;
+  min-width: 0;
+  font-size: 10.5px;
+  color: var(--secondary-foreground);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.overview-bar-item .overview-item-name.is-note {
+  font-size: 9px;
+  letter-spacing: -0.02em;
+}
+
+.overview-bar-item .overview-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex: none;
+}
+
+.overview-bar-item .overview-dot.red {
+  background: #ef4444;
+}
+
+.overview-bar-item .overview-dot.yellow {
+  background: #f59e0b;
+}
+
+.overview-bar-item .overview-dot.green {
+  background: #10b981;
+}
+
+.overview-bar-item .ovbar-pct {
+  flex: none;
+  font-size: 10.5px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--foreground);
+}
+
+.overview-bar-item .ovbar-pct.is-maxed,
+.overview-bar-item .ovbar-pct.is-error {
+  color: #ef4444;
+}
+
+.overview-bar-item .ovbar-line2 {
+  display: grid;
+  gap: 4px;
+  margin-top: 4px;
+}
+
+.overview-bar-item .ovbar {
+  width: 100%;
+  height: 4px;
+  border-radius: 2px;
+  background: color-mix(in oklab, var(--foreground) 14%, transparent);
+  overflow: hidden;
+}
+
+.overview-bar-item .ovbar-fill {
+  display: block;
+  height: 100%;
+  border-radius: 2px;
+  background: #10b981;
+}
+
+.overview-bar-item .ovbar-fill.tone-warn {
+  background: #f59e0b;
+}
+
+.overview-bar-item .ovbar-fill.tone-maxed,
+.overview-bar-item .ovbar-fill.tone-error {
+  background: #ef4444;
+}
+
+/* Errors have no known percentage: tint the track without inventing usage. */
+.overview-bar-item.tone-error .ovbar {
+  background: color-mix(in oklab, #ef4444 30%, transparent);
+}
+
+.overview-bar-item .ovbar-meta {
+  width: 100%;
+  max-width: none;
+  font-size: 9px;
+  color: var(--muted-foreground);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .spend-metric-tab {
@@ -3212,6 +3642,198 @@ body.party .trail-tick.active {
   white-space: nowrap;
 }
 
+/* Customize is a task surface: the header explains the mode, the alphabet
+   filter stays in one compact row, and secondary actions use equal icon
+   slots so provider names retain the space users need to scan them. */
+.customize-bar {
+  min-height: 58px;
+  padding: 9px 10px 10px;
+}
+
+.customize-heading {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-width: 0;
+}
+
+.customize-heading-copy {
+  display: block;
+  min-width: 0;
+}
+
+.customize-heading-copy strong {
+  font-size: 13px;
+  line-height: 1.15;
+  letter-spacing: -0.01em;
+  white-space: nowrap;
+  display: block;
+}
+
+.customize-summary {
+  margin-left: auto;
+  color: var(--muted-foreground);
+  font-size: 10px;
+  white-space: nowrap;
+}
+
+@media (max-width: 520px) {
+  .customize-summary {
+    display: none;
+  }
+
+  .customize-heading-copy strong {
+    font-size: 12px;
+  }
+
+  .customize-bar {
+    gap: 4px;
+    padding-inline: 6px;
+  }
+
+  .customize-bar .dock-btn.danger {
+    padding-inline: 7px;
+  }
+}
+
+.icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 30px;
+  padding: 0;
+}
+
+.cust-az {
+  position: sticky;
+  top: 78px;
+  z-index: 8;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px;
+  padding: 7px 4px;
+  margin: 0 0 8px;
+  border-bottom: 1px solid var(--border);
+  background: color-mix(in srgb, var(--background) 88%, transparent);
+  backdrop-filter: blur(12px);
+}
+
+.cust-az button {
+  min-width: 22px;
+  height: 22px;
+  padding: 0 5px;
+  border: 0;
+  border-radius: 6px;
+  color: var(--muted-foreground);
+  background: transparent;
+  font: 600 10px/22px inherit;
+  cursor: pointer;
+}
+
+.cust-az button:hover,
+.cust-az button:focus-visible {
+  color: var(--foreground);
+  background: var(--accent);
+  outline: none;
+}
+
+.customize-block .cust-config-btn,
+.customize-block .cust-info-btn,
+.customize-block .reset-layout-btn {
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.cust-credential-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 11px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: color-mix(in srgb, var(--muted) 45%, transparent);
+}
+
+.cust-credential-main {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.cust-credential-main strong {
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cust-credential-main span,
+.cust-credential-meta {
+  color: var(--muted-foreground);
+  font-size: 10px;
+}
+
+.cust-credential-meta {
+  display: flex;
+  gap: 4px;
+  margin-left: auto;
+  white-space: nowrap;
+}
+
+.customize-block .provider-head {
+  gap: 4px;
+}
+
+.customize-block .cust-expand {
+  gap: 5px;
+}
+
+.customize-block .cust-expand .provider-name {
+  font-size: 14px;
+  text-overflow: clip;
+}
+
+/* Keep the original address-book navigation: it is a fast spatial index on
+   the left edge, so it must not consume a full content row. */
+.cust-az {
+  position: fixed;
+  left: 4px;
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 55;
+  display: flex;
+  flex-direction: column;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 1px;
+  width: auto;
+  padding: 5px 3px;
+  margin: 0;
+  border-bottom: 0;
+  border-radius: 8px;
+  background: rgba(24, 24, 27, 0.55);
+}
+
+.cust-az button {
+  min-width: 0;
+  width: 14px;
+  height: 13px;
+  padding: 0;
+  border-radius: 4px;
+  font-size: 9px;
+  line-height: 13px;
+}
+
+#drawer {
+  padding-top: 76px;
+}
+
 .panel-head.glass-bar .panel-title {
   flex: 1;
   text-align: center;
@@ -3722,6 +4344,19 @@ body.no-glass #confirm-box {
   flex: none;
 }
 
+.overview-badges-tools {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex: none;
+}
+
+.overview-group-manage {
+  width: 23px;
+  height: 23px;
+  padding: 4px;
+}
+
 .overview-badges .overview-chip {
   font-size: 9.5px;
   gap: 3px;
@@ -3829,6 +4464,37 @@ body.no-glass #confirm-box {
   padding: 2px 6px;
   font-size: 10px;
   border-radius: 6px;
+}
+
+/* Switch row under the overview head: category segments left, window
+   segments right. Two switch groups never share the head row — that
+   ballooned into giant wrapped buttons on narrow windows. */
+.quota-overview .overview-switch-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 2px 10px 6px;
+}
+
+.quota-overview .overview-cat-tabs {
+  display: inline-flex;
+  flex: none;
+  gap: 2px;
+  margin: 0;
+  padding: 2px;
+  border-radius: 8px;
+}
+
+.quota-overview .overview-cat-tabs .tab {
+  flex: none;
+  white-space: nowrap;
+  padding: 2px 8px;
+  font-size: 10px;
+  border-radius: 6px;
+}
+
+.quota-overview .overview-switch-row .overview-tabs {
+  margin-left: auto;
 }
 
 /* The head's ⏱/⟳ shrink a notch too — the ? next to the 高峰 chip needs
@@ -4177,6 +4843,13 @@ article.provider.card-highlight {
   gap: 5px;
 }
 
+/* Compact density must not undo the bar view's two-column contract. */
+:root[data-density="compact"] .quota-overview .overview-grid.ovbars {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  column-gap: 0;
+  row-gap: 5px;
+}
+
 :root[data-density="compact"] .overview-item {
   padding: 4px 2px 3px;
 }
@@ -4218,18 +4891,6 @@ article.provider.card-highlight {
   background: #ef4444;
 }
 
-/* In-peak slice of the available set (same yellow as the dots/chips). */
-.overview-section-head.tone-peak {
-  color: #eab308;
-}
-
-.overview-section-head.tone-peak::before {
-  background: #eab308;
-}
-
-:root[data-theme="light"] .overview-section-head.tone-peak {
-  color: #ca8a04;
-}
 
 .overview-section-count {
   margin-left: auto;
@@ -4283,6 +4944,59 @@ article.provider.card-highlight {
   font-weight: 400;
   opacity: 0.7;
 }
+
+/* Raised ✕ on a group section head: deletes the group (cards ungroup).
+   Always visible — discoverability beats quietness for a destructive
+   control the user explicitly asked for. */
+.card-group-remove {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 18px;
+  height: 18px;
+  margin-left: 4px;
+  padding: 0;
+  border: 1px solid color-mix(in oklab, var(--foreground) 20%, transparent);
+  border-radius: 50%;
+  background: color-mix(in oklab, var(--foreground) 8%, transparent);
+  box-shadow: 0 1px 2px rgb(0 0 0 / 0.35);
+  color: var(--muted-foreground);
+  cursor: pointer;
+}
+
+.card-group-remove .ui-icon {
+  width: 9px;
+  height: 9px;
+}
+
+.card-group-remove:hover {
+  color: #f87171;
+  border-color: color-mix(in oklab, #f87171 45%, transparent);
+  background: color-mix(in oklab, #f87171 12%, transparent);
+}
+
+/* Top-level dashboard category sections (Coding Agent / productivity).
+   Static label — stronger than a group head, no fold, no pointer. */
+.category-head {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  margin: 14px 2px 4px;
+  padding: 0 8px;
+  color: var(--muted-foreground);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  user-select: none;
+}
+
+.category-count {
+  font-size: 11px;
+  font-weight: 400;
+  opacity: 0.7;
+}
+
 
 /* Main-page group entry: head ⚙ appears on hover, menu anchored under it. */
 
@@ -4345,6 +5059,10 @@ article.provider.card-highlight {
   background: color-mix(in oklab, var(--foreground) 8%, transparent);
 }
 
+.group-menu-item.danger {
+  color: var(--destructive);
+}
+
 .group-menu-item.on {
   font-weight: 600;
 }
@@ -4359,4 +5077,163 @@ article.provider.card-highlight {
   height: 1px;
   margin: 4px 6px;
   background: var(--border);
+}
+
+.group-menu.overview-move-menu {
+  min-width: 126px;
+  max-width: 172px;
+  padding: 3px;
+  border-radius: 8px;
+  max-height: calc(100vh - 16px);
+  overflow-y: auto;
+}
+
+.overview-move-menu .group-menu-title {
+  padding: 3px 6px;
+  font-size: 9px;
+  line-height: 1.2;
+}
+
+.overview-move-menu .group-menu-item {
+  padding: 3px 6px;
+  gap: 4px;
+  font-size: 10px;
+  line-height: 1.3;
+  min-height: 0;
+  border-radius: 4px;
+}
+
+.overview-move-menu .group-menu-check {
+  width: 10px;
+  font-size: 9px;
+}
+
+.overview-move-menu .group-menu-sep {
+  margin: 3px 5px;
+}
+
+.overview-item,
+.overview-bar-item {
+  position: relative;
+}
+
+.overview-move-btn {
+  position: absolute;
+  right: 2px;
+  bottom: 2px;
+  width: 18px;
+  height: 18px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--muted-foreground);
+  background: var(--card);
+  cursor: pointer;
+  opacity: 0.5;
+}
+
+.overview-move-btn svg { width: 12px; height: 12px; }
+.overview-move-btn:hover,
+.overview-move-btn:focus-visible { opacity: 1; color: var(--foreground); }
+.overview-bar-item .ovbar-meta { padding-right: 20px; box-sizing: border-box; }
+.overview-item .overview-item-foot { padding-right: 15px; box-sizing: border-box; }
+.overview-drag-source { opacity: 0.35; }
+.overview-drag-active { user-select: none; cursor: grabbing; }
+
+.overview-drag-ghost {
+  position: fixed;
+  z-index: 105;
+  pointer-events: none;
+  background: var(--card);
+  box-shadow: 0 8px 24px rgb(0 0 0 / 0.45);
+  outline: 1px solid #10b981;
+  transform: scale(1.04);
+}
+
+.overview-drop-dock {
+  position: fixed;
+  top: 8px;
+  left: 8px;
+  right: 8px;
+  z-index: 100;
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--card);
+  box-shadow: 0 5px 20px rgb(0 0 0 / 0.4);
+  max-height: 35vh;
+  overflow-y: auto;
+}
+
+.overview-drop-title { color: var(--muted-foreground); font-size: 10px; margin-bottom: 5px; }
+.overview-drop-options { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 5px; }
+.overview-drop-options > div { padding: 6px 8px; border: 1px solid var(--border); border-radius: 6px; font-size: 11px; }
+.overview-drop-hot { outline: 2px solid #10b981; background: color-mix(in oklab, #10b981 18%, transparent) !important; }
+
+.group-manage-panel {
+  top: 72px;
+  right: 18px;
+  min-width: 270px;
+  max-width: 340px;
+  padding: 7px;
+}
+
+.group-manage-hint {
+  padding: 2px 8px 7px;
+  color: var(--muted-foreground);
+  font-size: 10px;
+  line-height: 1.35;
+}
+
+.group-manage-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.group-manage-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 6px;
+  border-radius: 6px;
+  background: color-mix(in oklab, var(--foreground) 4%, transparent);
+}
+
+.group-manage-row:not(.is-builtin) {
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
+.group-manage-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+}
+
+.group-manage-kind,
+.group-manage-count,
+.group-manage-empty {
+  color: var(--muted-foreground);
+  font-size: 10px;
+}
+
+.group-manage-actions {
+  display: inline-flex;
+  gap: 2px;
+}
+
+.group-manage-actions .group-menu-item {
+  width: auto;
+  padding: 3px 5px;
+  font-size: 10px;
+}
+
+.group-manage-add {
+  justify-content: center;
 }

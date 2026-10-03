@@ -3,12 +3,14 @@ import { listen } from "@tauri-apps/api/event";
 import { getVersion } from "@tauri-apps/api/app";
 import {
   providerCatalog,
+  providerCategory,
   providerFamily,
   supportsApiKey,
   supportsExtraAccounts,
 } from "./providerCatalog";
 import { PEAK_RULES, isProviderInPeak, type PeakRule } from "./peakHours";
 import { providerVisual } from "./providerVisuals";
+import { uiIcon } from "./uiIcons";
 import {
   applyStaticI18n,
   displayLinkLabel,
@@ -148,7 +150,10 @@ function unpricedWarn(sp: ProviderSpend | undefined): string {
 
 type SpendTab = "today" | "yesterday" | "last30";
 type RangeTab = "d7" | "d30" | "all";
-type OverviewTab = "5h" | "week";
+const OVERVIEW_TABS = ["5h", "week", "month"] as const;
+type OverviewTab = (typeof OVERVIEW_TABS)[number];
+const OVERVIEW_CATEGORIES = ["coding", "productivity", "mcp"] as const;
+type OverviewCategory = (typeof OVERVIEW_CATEGORIES)[number];
 
 // Per-provider layout: which rows show, their order, which are tucked
 // behind the caret ("On Demand"), and which are starred for the tray strip.
@@ -181,6 +186,9 @@ interface Layout {
   providerOrder: string[];
   providers: Record<string, ProviderLayout>;
   overviewCollapsed?: boolean;
+  /// Total-spend card folded: mirrors overviewCollapsed, remembered so a
+  /// restart reopens the card exactly where the user left it.
+  spendCollapsed?: boolean;
   // Card groups: user-named buckets a card can be tagged with ("常用",
   // "不常用", …). Cards without a tag render ungrouped (always visible);
   // groups with zero cards vanish from the UI until reused. Stored here
@@ -206,7 +214,12 @@ interface Config {
   notifyResetSoon: boolean;
   spendTab: SpendTab;
   overviewTab: OverviewTab;
+  overviewCategory: OverviewCategory;
+  overviewStyle: "rings" | "bars";
+  categoryOverrides: Record<string, OverviewCategory>;
   spendMetric: "cost" | "tokens" | "mtok";
+  spendGrouping: "tool" | "model";
+  spendHeadRange: "today" | "week" | "month";
   showUsed: boolean;
   showTrend: boolean;
   resetExact: boolean;
@@ -217,6 +230,7 @@ interface Config {
   uiFont: string;
   glassEffects: boolean;
   shortcut: string;
+  categoryShortcut: string;
   proxy: { enabled: boolean; url: string };
   showTotalSpend: boolean;
   welcomeDismissed: boolean;
@@ -238,7 +252,12 @@ const FRONTEND_CONFIG_KEYS = [
   "notifyResetSoon",
   "spendTab",
   "overviewTab",
+  "overviewCategory",
+  "overviewStyle",
+  "categoryOverrides",
   "spendMetric",
+  "spendGrouping",
+  "spendHeadRange",
   "showUsed",
   "showTrend",
   "resetExact",
@@ -249,6 +268,7 @@ const FRONTEND_CONFIG_KEYS = [
   "uiFont",
   "glassEffects",
   "shortcut",
+  "categoryShortcut",
   "proxy",
   "showTotalSpend",
   "welcomeDismissed",
@@ -430,7 +450,12 @@ let config: Config = {
   notifyResetSoon: false,
   spendTab: "today",
   overviewTab: "5h",
+  overviewCategory: "coding",
+  overviewStyle: "rings",
+  categoryOverrides: {},
   spendMetric: "cost",
+  spendGrouping: "tool",
+  spendHeadRange: "today",
   showUsed: false,
   showTrend: false,
   resetExact: false,
@@ -441,6 +466,7 @@ let config: Config = {
   uiFont: "",
   glassEffects: true,
   shortcut: "",
+  categoryShortcut: "Shift+1",
   proxy: { enabled: false, url: "" },
   showTotalSpend: true,
   welcomeDismissed: false,
@@ -501,23 +527,24 @@ const userSelectedAccountFor = new Map<string, string>();
 /// Determines which account snapshot to display on the provider's home card.
 /// When a multi-account provider's default account is exhausted / maxed out (red dot),
 /// the card automatically prioritizes displaying an account with available quota (green dot).
-/// The underlying default account setting remains intact; the home card simply defaults to
-/// presenting the healthy account first. Users can still manually click any account tab.
+/// Failed, exhausted and stale accounts yield to a healthy sibling. This routes
+/// dashboard display without reordering saved credentials or changing other tools.
 function resolveDisplayedAccount(family: string, defaultId: string, accountIds: string[]): string {
+  const available = accountIds.filter((id) => {
+    const snap = lastSnapshots.find((s) => s.id === id);
+    return snap?.status === "ok" && !isSnapshotMaxed(snap) && accountHealthDot(id) === "green";
+  });
+  // Fresh successful queries win over cached readings whose latest query failed.
+  const fresh = available.filter((id) => !lastSnapshots.find((s) => s.id === id)?.stale);
+  const candidates = fresh.length ? fresh : available;
   const manual = userSelectedAccountFor.get(family);
-  if (manual && accountIds.includes(manual)) {
+  if (manual && candidates.includes(manual)) {
     return manual;
   }
-  // If the default account is healthy (not red), show default account
-  if (accountHealthDot(defaultId) !== "red") {
-    return defaultId;
-  }
-  // If default account is exhausted (red), prioritize an account with remaining quota (green)
-  const greenAccount = accountIds.find((id) => accountHealthDot(id) === "green");
-  if (greenAccount) {
-    return greenAccount;
-  }
-  return defaultId;
+  if (candidates.includes(defaultId)) return defaultId;
+  if (candidates.length) return candidates[0];
+  // All accounts blocked: preserve the selected account so its reason is visible.
+  return manual && accountIds.includes(manual) ? manual : accountIds.includes(defaultId) ? defaultId : accountIds[0] ?? defaultId;
 }
 
 type TrendSource = { id: string; trend: (number | null)[]; quota: boolean; fmt: (v: number) => string };
@@ -536,6 +563,7 @@ let spendTab: SpendTab = "today";
 let rangeTab: RangeTab = "d30";
 let rangeSelected = false;
 let overviewTab: OverviewTab = "5h";
+let overviewCategory: OverviewCategory = "coding";
 /// Header toggle (right side, beside ⟳): when on, the overview body is a
 /// single reset-time-sorted list instead of the 可用/不可用 sections —
 /// the "act soon" view. Follows the 5h/week tab like the sections do.
@@ -1177,6 +1205,24 @@ function setCardGroup(cardId: string, groupId: string): void {
   renderAll();
 }
 
+/// Category a family renders under: the user's per-family override wins
+/// over the catalog default. Right-click menu → 分类 moves a family
+/// between Coding Agent / productivity without touching the catalog.
+function effectiveCategory(family: string): OverviewCategory {
+  return config.categoryOverrides?.[family] ?? providerCategory(family);
+}
+
+/// Clicking the family's effective category clears the override (back to
+/// the catalog default); clicking the other one sets it.
+function setFamilyCategory(family: string, category: OverviewCategory): void {
+  if (effectiveCategory(family) === category) return;
+  const next = { ...(config.categoryOverrides ?? {}) };
+  if (providerCategory(family) === category) delete next[family];
+  else next[family] = category;
+  void patchConfig({ categoryOverrides: next });
+  renderAll();
+}
+
 /// The card's user note (custom display name). Unlike the group tag, notes
 /// live on the exact card id — parallel-account siblings stay independent.
 function cardNote(cardId: string): string {
@@ -1202,6 +1248,16 @@ function setCardNote(cardId: string, note: string): void {
   if (note) config.layout.providers[cardId].note = note;
   else delete config.layout.providers[cardId].note;
   void patchConfig({ layout: config.layout });
+  renderAll();
+}
+
+/// Hides a provider card from the dashboard while keeping its credentials and
+/// layout available in Customize for a later re-enable.
+function removeProviderCard(cardId: string): void {
+  const family = providerFamily(cardId);
+  const target = isParallelAccountFamily(family) ? cardId : family;
+  if (!config.disabled.includes(target)) config.disabled = [...config.disabled, target];
+  void patchConfig({ disabled: config.disabled });
   renderAll();
 }
 
@@ -1233,16 +1289,34 @@ function upsertCardGroup(id: string, name: string): void {
   void patchConfig({ layout: config.layout });
 }
 
-function deleteCardGroup(id: string): void {
-  const layout = config.layout;
-  if (!layout) return;
-  layout.groups = (layout.groups ?? []).filter((g) => g.id !== id);
-  // Untag every card that pointed at the deleted group.
-  for (const entry of Object.values(layout.providers)) {
-    if (entry.group === id) delete entry.group;
+function cardGroupMemberCount(id: string): number {
+  const members = new Set<string>();
+  for (const snap of orderedSnapshots()) {
+    if (cardGroupId(snap.id) === id) members.add(snap.id);
   }
+  for (const [providerId, entry] of Object.entries(config.layout?.providers ?? {})) {
+    if (entry.group === id) members.add(providerId);
+  }
+  return members.size;
+}
+
+function pruneEmptyCardGroups(): boolean {
+  const groups = config.layout?.groups;
+  if (!groups?.length) return false;
+  const kept = groups.filter((g) => cardGroupMemberCount(g.id) > 0);
+  if (kept.length === groups.length) return false;
+  config.layout!.groups = kept;
+  void patchConfig({ layout: config.layout });
+  return true;
+}
+
+function deleteCardGroup(id: string): boolean {
+  const layout = config.layout;
+  if (!layout || cardGroupMemberCount(id) > 0) return false;
+  layout.groups = (layout.groups ?? []).filter((g) => g.id !== id);
   void patchConfig({ layout });
   renderAll();
+  return true;
 }
 
 // Before stable account ids, API-key families used positional ids
@@ -1397,7 +1471,7 @@ function renderTrend(source: TrendSource): string {
     : t("spend.trendTip", {
         from: dateOf(0),
         to: dateOf(29),
-        tokens: source.fmt(max),
+        value: source.fmt(max),
         peak: dateOf(peakIdx),
       });
   return `
@@ -1490,6 +1564,7 @@ function maxProgressUsed(s: Snapshot): number {
 function accountHealthDot(id: string): "red" | "green" | "gray" {
   const snap = lastSnapshots.find((s) => s.id === id);
   if (!snap || snap.status !== "ok") return "gray";
+  if (!snap.metrics.length) return "gray";
   return isSnapshotMaxed(snap) ? "red" : "green";
 }
 
@@ -1928,7 +2003,7 @@ function renderCard(s: Snapshot): string {
     if (onDemandHtml.trim()) {
       const anim = L.expanded && animateExpandId === s.id ? " anim" : "";
       caret = `
-        <button class="card-caret" data-caret="${s.id}" title="${L.expanded ? t("card.showLess") : t("card.showMore")}">${L.expanded ? "⌃" : "⌄"}</button>
+        <button class="card-caret" data-caret="${s.id}" title="${L.expanded ? t("card.showLess") : t("card.showMore")}">${uiIcon(L.expanded ? "caretUp" : "caretDown")}</button>
         ${L.expanded ? `<div class="on-demand${anim}">${onDemandHtml}</div>` : ""}`;
     }
   } else {
@@ -1956,8 +2031,8 @@ function renderCard(s: Snapshot): string {
   // remembers the choice per family.
   const cardCollapsed = isCardCollapsed(s.id);
   const foldChevron = cardCollapsed
-    ? `<button class="card-fold-toggle" data-card-fold="${escapeHtml(s.id)}" title="${escapeHtml(t("card.expand"))}">⌄</button>`
-    : `<button class="card-fold-toggle" data-card-fold="${escapeHtml(s.id)}" title="${escapeHtml(t("card.collapse"))}">⌃</button>`;
+    ? `<button class="card-fold-toggle" data-card-fold="${escapeHtml(s.id)}" title="${escapeHtml(t("card.expand"))}">${uiIcon("caretDown")}</button>`
+    : `<button class="card-fold-toggle" data-card-fold="${escapeHtml(s.id)}" title="${escapeHtml(t("card.collapse"))}">${uiIcon("caretUp")}</button>`;
   const finalBody = cardCollapsed ? "" : body;
   // Hide per-account tabs and the ×N badge when folded — the family health
   // dot and reset countdown already summarise the whole family.
@@ -1965,11 +2040,11 @@ function renderCard(s: Snapshot): string {
   const finalAccountCount = cardCollapsed ? "" : accountCount;
   const refreshBtn =
     shown.status === "ok" || shown.status === "error"
-      ? `<button class="card-refresh" data-card-refresh="${shown.id}" title="${escapeHtml(t("card.refresh"))}">⟳</button>`
+      ? `<button class="card-refresh" data-card-refresh="${shown.id}" title="${escapeHtml(t("card.refresh"))}">${uiIcon("arrowsClockwise")}</button>`
       : "";
   const share =
     shown.status === "ok"
-      ? `<button class="share-btn" data-share="${shown.id}" title="${escapeHtml(t("card.share"))}">⧉</button>`
+      ? `<button class="share-btn" data-share="${shown.id}" title="${escapeHtml(t("card.share"))}">${uiIcon("shareNetwork")}</button>`
       : "";
   // Folded state: visually prominent reset countdown badge with health status
   // and generous breathing room instead of a cramped raw text sliver.
@@ -2020,7 +2095,7 @@ function renderCard(s: Snapshot): string {
         ${peakBadge}
         ${stale}
         <span class="spacer"></span>
-        <button class="mini-btn card-group-btn" data-card-group-menu="${escapeHtml(s.id)}" title="${escapeHtml(t("customize.groupLabel"))}">⚙</button>
+        <button class="mini-btn card-group-btn" data-card-group-menu="${escapeHtml(s.id)}" title="${escapeHtml(t("customize.cardSettings"))}">${uiIcon("gear")}</button>
         ${foldChevron}
         ${refreshBtn}
         ${share}
@@ -2075,27 +2150,18 @@ function overviewSnapshots(): Snapshot[] {
   return out;
 }
 
-/// Among a parallel family's cards, show the most binding quota so a
-/// spent slot is not hidden behind an unused login.
+/// One overview tile per family follows an available account, even when the
+/// stored default failed or a parallel sibling has exhausted its quota.
 function pickOverviewShown(card: Snapshot): Snapshot {
   const family = providerFamily(card.id);
-  if (!isParallelAccountFamily(family)) return card;
   const siblings = lastSnapshots.filter(
-    (snap) => providerFamily(snap.id) === family && !isCardDisabled(snap.id),
+    (snap) => providerFamily(snap.id) === family && !isCardDisabled(snap.id) &&
+      (!snap.id.includes("@") || !accountsCache.has(family) ||
+        accountsCache.get(family)?.some((account) => account.id === snap.id)),
   );
   if (siblings.length <= 1) return card;
-  let best = card;
-  let bestScore = -1;
-  for (const sib of siblings) {
-    const q = extractOverviewQuota(sib, isCardFoldCandidate(sib.id), sib.id);
-    if (q.status === "error" || q.status === "no_data") continue;
-    const score = q.isMaxed ? 101 : q.usedPercent;
-    if (score > bestScore) {
-      best = sib;
-      bestScore = score;
-    }
-  }
-  return best;
+  const selected = resolveDisplayedAccount(family, card.id, siblings.map((s) => s.id));
+  return siblings.find((s) => s.id === selected) ?? card;
 }
 
 /// Views `snapshots` as if a bare `onenewapi` family card existed: when any
@@ -2128,9 +2194,7 @@ type DonutEntry = {
   activeDays?: number;
   /// Present on the synthetic "Others" entry: the folded-in providers,
   /// largest first, for the hover breakdown.
-  parts?: { name: string; w: SpendWindow }[];
-  /// The dollar bar the parts fell under (period-specific).
-  foldLimit?: number;
+  parts?: { id: string; name: string; w: SpendWindow }[];
 };
 
 const OTHERS_ID = "__others__";
@@ -2203,8 +2267,7 @@ function foldDonutEntries(all: DonutEntry[], tab: SpendTab): DonutEntry[] {
       tokens: small.reduce((sum, e) => sum + e.w.tokens, 0),
       models: [],
     },
-    parts: small.map((e) => ({ name: e.s.name, w: e.w })),
-    foldLimit: limit,
+    parts: small.map((e) => ({ id: e.s.id, name: e.s.name, w: e.w })),
   };
   return [...visible.filter((e) => e.w.cost >= limit), others].sort(
     (a, b) => spendVal(b.w) - spendVal(a.w),
@@ -2220,6 +2283,78 @@ function donutEntries(tab: SpendTab): DonutEntry[] {
 
 function donutEntriesForRange(range: RangeTab): DonutEntry[] {
   return range === "d30" ? donutEntries("last30") : historyEntries(range);
+}
+
+/// Model-name normalization for the by-model spend view: strips relay
+/// route prefixes ("api2/glm-5.3", "Command-Code-Goat/deepseek/…" → the
+/// last path segment) and case-folds, so one model reached through
+/// different tools/relays merges into a single slice.
+function normalizeModelKey(model: string): string {
+  let m = model.trim();
+  const slash = m.lastIndexOf("/");
+  if (slash !== -1) m = m.slice(slash + 1);
+  return m.toLowerCase();
+}
+
+type ModelAgg = {
+  name: string;
+  w: SpendWindow;
+  parts: { id: string; name: string; w: SpendWindow }[];
+};
+
+/// Merge per-tool model rows into per-model entries. `parts` carries the
+/// per-tool breakdown so the hover card can show who burned what.
+function aggregateModels(rows: { id: string; name: string; models: ModelSpend[] }[]): Map<string, ModelAgg> {
+  const acc = new Map<string, ModelAgg>();
+  for (const row of rows) {
+    for (const m of row.models) {
+      if (m.cost <= 0 && m.tokens <= 0) continue;
+      const key = normalizeModelKey(m.model);
+      let agg = acc.get(key);
+      if (!agg) {
+        agg = { name: m.model, w: { cost: 0, tokens: 0, models: [] }, parts: [] };
+        acc.set(key, agg);
+      }
+      agg.w.cost += m.cost;
+      agg.w.tokens += m.tokens;
+      let part = agg.parts.find((p) => p.id === row.id);
+      if (!part) {
+        part = { id: row.id, name: row.name, w: { cost: 0, tokens: 0, models: [] } };
+        agg.parts.push(part);
+      }
+      part.w.cost += m.cost;
+      part.w.tokens += m.tokens;
+    }
+  }
+  return acc;
+}
+
+function entriesFromModelAgg(acc: Map<string, ModelAgg>, tab: SpendTab): DonutEntry[] {
+  const base: DonutEntry[] = [...acc.entries()].map(([key, v]) => ({
+    s: { id: key, name: v.name } as ProviderSpend,
+    w: v.w,
+    parts: v.parts,
+  }));
+  return foldDonutEntries(base, tab);
+}
+
+/// By-model slices for the live windows (today/yesterday/last30).
+function modelDonutEntries(tab: SpendTab): DonutEntry[] {
+  const rows = lastSpend
+    .filter((s) => !isCardDisabled(s.id))
+    .map((s) => ({ id: s.id, name: s.name, models: s[tab].models }));
+  return entriesFromModelAgg(aggregateModels(rows), tab);
+}
+
+function modelHistoryEntries(range: Exclude<RangeTab, "d30">): DonutEntry[] {
+  const rows = (range === "d7" ? lastSpendHistory.d7 : lastSpendHistory.all)
+    .filter((row) => !isCardDisabled(row.id))
+    .map((row) => ({ id: row.id, name: providerNameForSpend(row.id), models: row.models }));
+  return entriesFromModelAgg(aggregateModels(rows), "last30");
+}
+
+function modelEntriesForRange(range: RangeTab): DonutEntry[] {
+  return range === "d30" ? modelDonutEntries("last30") : modelHistoryEntries(range);
 }
 
 /// The donut meters dollars or raw tokens — a click on the ring toggles.
@@ -2260,9 +2395,9 @@ function fitFontSize(text: string, base: number, maxChars: number): number {
 
 /// The metric a click (or right-click, reversed) moves to next — the Mac
 /// menu's order: Cost, Cost/MTok, Tokens.
-function nextSpendMetric(back: boolean): "cost" | "tokens" | "mtok" {
-  const order: ("cost" | "tokens" | "mtok")[] = ["cost", "mtok", "tokens"];
-  const i = order.indexOf(config.spendMetric);
+function nextSpendMetric(back: boolean): "cost" | "tokens" {
+  const order: ("cost" | "tokens")[] = ["cost", "tokens"];
+  const i = order.indexOf(config.spendMetric as "cost" | "tokens");
   return order[(i + (back ? order.length - 1 : 1)) % order.length];
 }
 
@@ -2349,23 +2484,70 @@ function donutPop(g: { a0: number; a1: number }): { tx: string; ty: string } {
   return { tx: `${(2.5 * Math.sin(mid)).toFixed(2)}px`, ty: `${(-2.5 * Math.cos(mid)).toFixed(2)}px` };
 }
 
-/// Hover text for the "Others" wedge/row: who's inside and what each spent.
-function othersBreakdown(e: DonutEntry): string {
-  if (!e.parts) return "";
-  return (
-    `${t("spend.underEach", { limit: e.foldLimit ?? 1 })}\n` +
-    e.parts.map((p) => `${p.name}  ${fmtSpendVal(p.w)}`).join("\n")
-  );
-}
-
 function legendRowHtml(e: DonutEntry): string {
   const detail = e.activeDays === undefined ? "" : ` <span class="legend-detail">${escapeHtml(t("spend.activeDays", { n: e.activeDays }))}</span>`;
+  const icon = providerVisual(e.s.id)?.iconSvg;
+  const lead = icon
+    ? `<span class="legend-ico">${icon}</span>`
+    : `<span class="dot" style="background:${spendColor(e.s.id)}"></span>`;
   return `
-        <div class="legend-row" data-pid="${e.s.id}"${e.parts ? ` title="${escapeHtml(othersBreakdown(e))}"` : ""}>
-          <span class="dot" style="background:${spendColor(e.s.id)}"></span>
-          <span class="legend-name" title="${escapeHtml(e.s.name)}">${escapeHtml(e.s.name)}${detail}</span>
+        <div class="legend-row" data-pid="${e.s.id}">
+          ${lead}
+          <span class="legend-name">${escapeHtml(e.s.name)}${detail}</span>
           <span class="legend-val">${fmtSpendVal(e.w)}</span>
         </div>`;
+}
+
+/// Hover detail for donut wedges and legend rows: brand icon + full name +
+/// both exact metrics. Native <title> can't render icons, so the popup is
+/// drawn; "Others" additionally lists its folded-in providers with icons.
+let spendPopEl: HTMLDivElement | null = null;
+
+function hideSpendPop(): void {
+  spendPopEl?.remove();
+  spendPopEl = null;
+}
+
+function showSpendPop(anchor: HTMLElement): void {
+  const pid = anchor.dataset.pid ?? "";
+  const byModel = config.spendGrouping === "model";
+  const live = byModel ? modelDonutEntries(spendTab) : donutEntries(spendTab);
+  const ranged = byModel ? modelEntriesForRange(rangeTab) : donutEntriesForRange(rangeTab);
+  const altTab = spendTab === "today" ? "yesterday" : "today";
+  const alt = byModel ? modelDonutEntries(altTab) : donutEntries(altTab);
+  const entry =
+    live.find((e) => e.s.id === pid) ??
+    ranged.find((e) => e.s.id === pid) ??
+    alt.find((e) => e.s.id === pid);
+  hideSpendPop();
+  if (!entry) return;
+  const lead = (id: string, colorId = id) => {
+    const icon = providerVisual(id)?.iconSvg;
+    return icon
+      ? `<span class="legend-ico">${icon}</span>`
+      : `<span class="dot" style="background:${spendColor(colorId)}"></span>`;
+  };
+  const parts = (entry.parts ?? [])
+    .map(
+      (p) =>
+        `<div class="spend-pop-row">${lead(p.id)}<span class="spend-pop-name">${escapeHtml(p.name)}</span><span class="spend-pop-val">${escapeHtml(fmtSpendVal(p.w))}</span></div>`,
+    )
+    .join("");
+  const el = document.createElement("div");
+  el.className = "spend-pop";
+  el.innerHTML = `
+    <div class="spend-pop-head">${lead(entry.s.id)}<span class="spend-pop-name">${escapeHtml(entry.s.name)}</span></div>
+    <div class="spend-pop-val">${escapeHtml(fmtMoney(entry.w.cost))} · ${escapeHtml(fmtTokens(entry.w.tokens))}</div>
+    ${parts ? `<div class="spend-pop-sep"></div>${parts}` : ""}`;
+  document.body.appendChild(el);
+  spendPopEl = el;
+  const r = anchor.getBoundingClientRect();
+  let x = r.left + r.width / 2 - el.offsetWidth / 2;
+  x = Math.max(6, Math.min(x, window.innerWidth - el.offsetWidth - 6));
+  let y = r.top - el.offsetHeight - 6;
+  if (y < 6) y = r.bottom + 6;
+  el.style.left = `${x}px`;
+  el.style.top = `${y}px`;
 }
 
 /// Zeroed window so a column's summed totals can ride fmtSpendVal.
@@ -2393,6 +2575,13 @@ function switchOverviewTab(tab: OverviewTab): void {
   renderIfVisible();
 }
 
+function switchOverviewCategory(category: OverviewCategory): void {
+  if (overviewCategory === category) return;
+  overviewCategory = category;
+  void patchConfig({ overviewCategory: category });
+  renderIfVisible();
+}
+
 /// Tab switch morphs the existing arcs in place (identity-keyed per
 /// provider, CSS-transitioned) instead of rebuilding the card.
 function switchSpendTab(tab: SpendTab): void {
@@ -2401,19 +2590,48 @@ function switchSpendTab(tab: SpendTab): void {
   void patchConfig({ spendTab });
   renderAll();
 }
+
+type SpendHeadRange = "today" | "week" | "month";
+
+/// Token total for the header chip, off the per-provider 30-day trend
+/// arrays (trend[29] = today). Windows are calendar-based: today, this
+/// week since Monday, this month since the 1st (trend depth caps the
+/// month window at 30 days — only the 31st undercounts by day one).
+function spendHeadTokens(range: SpendHeadRange): number {
+  const now = new Date();
+  const weekday = (now.getDay() + 6) % 7; // Monday = 0
+  const take = range === "today" ? 0 : range === "week" ? weekday : now.getDate() - 1;
+  const days = Math.min(take + 1, 30);
+  return lastSpend
+    .filter((s) => !isCardDisabled(s.id))
+    .reduce((sum, s) => sum + s.trend.slice(30 - days).reduce((a, b) => a + (b || 0), 0), 0);
+}
+
 function renderTotalSpend(): string {
   if (!config.showTotalSpend) return "";
-  const entries = rangeSelected ? donutEntriesForRange(rangeTab) : donutEntries(spendTab);
+  const isFolded = isSpendFolded();
+  /// Grouping-aware entry sources: by tool (default) or by model, where
+  /// the same model through different tools merges into one slice.
+  const groupedEntries = (tab: SpendTab): DonutEntry[] =>
+    config.spendGrouping === "model" ? modelDonutEntries(tab) : donutEntries(tab);
+  const groupedEntriesForRange = (range: RangeTab): DonutEntry[] =>
+    config.spendGrouping === "model" ? modelEntriesForRange(range) : donutEntriesForRange(range);
+  const foldChevron = isFolded
+    ? `<button class="card-fold-toggle" data-spend-fold title="${escapeHtml(t("card.expand"))}">${uiIcon("caretDown")}</button>`
+    : `<button class="card-fold-toggle" data-spend-fold title="${escapeHtml(t("card.collapse"))}">${uiIcon("caretUp")}</button>`;
+  const entries = rangeSelected ? groupedEntriesForRange(rangeTab) : groupedEntries(spendTab);
   if (lastSpend.length === 0 && lastSpendHistory.d7.length === 0 && lastSpendHistory.all.length === 0) {
     // Quiet state instead of a missing card — on a fresh PC the donut only
     // appears after a CLI (Claude Code, Codex, Grok…) has logged some usage.
     const note = spendLoaded ? t("spend.emptyFirst") : t("spend.scanning");
     return `
-      <article class="provider total-spend">
+      <article class="provider total-spend${isFolded ? " is-folded" : ""}">
         <div class="provider-head">
           <span class="provider-name">${escapeHtml(t("spend.title"))}</span>
+          <span class="spacer"></span>
+          ${foldChevron}
         </div>
-        <div class="card-panel"><p class="placeholder" style="margin:4px 0">${note}</p></div>
+        ${isFolded ? "" : `<div class="card-panel"><p class="placeholder" style="margin:4px 0">${note}</p></div>`}
       </article>`;
   }
 
@@ -2424,9 +2642,8 @@ function renderTotalSpend(): string {
       const g = geo.get(e.s.id)!;
       const pop = donutPop(g);
       const full = g.a1 - g.a0 >= TAU - 0.0001 ? ` data-full="1"` : "";
-      const hint = e.parts ? `<title>${escapeHtml(othersBreakdown(e))}</title>` : "";
       return `<path class="seg" data-pid="${e.s.id}"${full} fill-rule="evenodd"
-        d="${sectorPath(g.a0, g.a1)}" style="fill:${spendColor(e.s.id)};--tx:${pop.tx};--ty:${pop.ty}">${hint}</path>`;
+        d="${sectorPath(g.a0, g.a1)}" style="fill:${spendColor(e.s.id)};--tx:${pop.tx};--ty:${pop.ty}"></path>`;
     })
     .join("");
 
@@ -2441,7 +2658,7 @@ function renderTotalSpend(): string {
   };
 
   const rangeCol = () => {
-    const colEntries = donutEntriesForRange(rangeTab);
+    const colEntries = groupedEntriesForRange(rangeTab);
     const totals = colEntries.reduce(
       (acc, e) => ({ cost: acc.cost + e.w.cost, tokens: acc.tokens + e.w.tokens }),
       { cost: 0, tokens: 0 },
@@ -2469,7 +2686,7 @@ function renderTotalSpend(): string {
   /// (last30 keeps the ring on the right column while the left falls back
   /// to today).
   const leftTab: SpendTab = spendTab === "yesterday" ? "yesterday" : "today";
-  const leftEntries = donutEntries(leftTab);
+  const leftEntries = groupedEntries(leftTab);
   const leftTotals = leftEntries.reduce(
     (acc, e) => ({ cost: acc.cost + e.w.cost, tokens: acc.tokens + e.w.tokens }),
     { cost: 0, tokens: 0 },
@@ -2524,19 +2741,29 @@ function renderTotalSpend(): string {
 
   const contributors = lastSpend.map((s) => s.name).join(", ");
   return `
-    <article class="provider total-spend">
+    <article class="provider total-spend${isFolded ? " is-folded" : ""}">
       <div class="provider-head">
         <span class="provider-name">${escapeHtml(t("spend.title"))}</span>
-        <span class="info" title="${escapeHtml(t("spend.info", { names: contributors }))}">&#9432;</span>
+        <span class="spend-head-value" title="${escapeHtml(t("spend.headTokens", { range: t(`spend.hr.${config.spendHeadRange}`) }))}">${uiIcon("lightning")}${escapeHtml(fmtTokens(spendHeadTokens(config.spendHeadRange)))}</span>
+        ${isFolded ? "" : `<span class="info" title="${escapeHtml(t("spend.info", { names: contributors }))}">${uiIcon("info")}</span>`}
         <span class="spacer"></span>
+        ${isFolded ? "" : `
+        <div class="tabs spend-group-tabs" role="group" aria-label="${escapeHtml(t("spend.groupLabel"))}">
+          <button class="tab spend-group-tab${config.spendGrouping === "tool" ? " active" : ""}" data-spend-group="tool">${escapeHtml(t("spend.byTool"))}</button>
+          <button class="tab spend-group-tab${config.spendGrouping === "model" ? " active" : ""}" data-spend-group="model">${escapeHtml(t("spend.byModel"))}</button>
+        </div>
         <div class="spend-metric-tabs" role="group" aria-label="${escapeHtml(t("spend.metricLabel"))}">
           ${(["cost", "tokens"] as const).map((metric) => `<button class="tab spend-metric-tab${config.spendMetric === metric ? " active" : ""}" data-spend-metric="${metric}">${escapeHtml(t(METRIC_NAMES[metric]))}</button>`).join("")}
+        </div>`}
+        <div class="tabs spend-head-range-tabs" role="group" aria-label="${escapeHtml(t("spend.headRangeLabel"))}">
+          ${(["today", "week", "month"] as const).map((r) => `<button class="tab spend-head-range-tab${config.spendHeadRange === r ? " active" : ""}" data-spend-head-range="${r}">${escapeHtml(t(`spend.hr.${r}`))}</button>`).join("")}
         </div>
-        <button class="share-btn" data-share="__total__" title="${escapeHtml(t("card.share"))}">⧉</button>
+        <button class="share-btn" data-share="__total__" title="${escapeHtml(t("card.share"))}">${uiIcon("shareNetwork")}</button>
+        ${foldChevron}
       </div>
-      <div class="card-panel">
+      ${isFolded ? "" : `<div class="card-panel">
         ${body}
-      </div>
+      </div>`}
     </article>`;
 }
 
@@ -2546,7 +2773,8 @@ function renderTotalSpend(): string {
 // (circular SVG progress). Default / "5h" tab: session window when one
 // is reported, otherwise the shortest-period usage percent. "Week" tab:
 // weekly meters for ordinary families; Z.ai / One/New API / Copilot keep
-// the default binding. Maxed (100%) renders in red.
+// the default binding. "Month" selects a reported monthly meter, falling
+// back to the default binding when absent. Maxed (100%) renders in red.
 // ---------------------------------------------------------------------------
 
 type QuotaWindow = "5h" | "day" | "week" | "month" | "generic";
@@ -2566,8 +2794,14 @@ interface OverviewQuota {
   usedPercent: number;
   resetsAt: number | null;
   metricLabel: string;
+  // The shown metric's own "x / y" line, surfaced on overview tiles so a
+  // bare 0% still reads with its total (MCP/search cards).
+  metricDetail: string | null;
+  // Text-metric value ("¥0.00 …" balance rows): tiles render this instead
+  // of "no usage data" when the snapshot has no percent metric.
+  valueText: string | null;
   isMaxed: boolean;
-  status: "ok" | "maxed" | "error" | "no_data";
+  status: "ok" | "maxed" | "error" | "no_data" | "text";
 }
 
 function extractOverviewQuota(s: Snapshot, cardIsMaxed = false, cardId = ""): OverviewQuota {
@@ -2577,6 +2811,8 @@ function extractOverviewQuota(s: Snapshot, cardIsMaxed = false, cardId = ""): Ov
       usedPercent: 0,
       resetsAt: null,
       metricLabel: "",
+      metricDetail: null,
+      valueText: null,
       isMaxed: false,
       status: "error",
     };
@@ -2610,9 +2846,12 @@ function extractOverviewQuota(s: Snapshot, cardIsMaxed = false, cardId = ""): Ov
   const family = providerFamily(s.id);
   const preferWeek = overviewTab === "week" && !OVERVIEW_KEEP_BINDING.has(family);
   const weekPercents = percents.filter((m) => metricWindow(m) === "week");
+  const monthPercents = percents.filter((m) => metricWindow(m) === "month");
 
   let best: Metric | null = null;
-  if (preferWeek && weekPercents.length > 0) {
+  if (overviewTab === "month" && monthPercents.length > 0) {
+    best = pickOverview(monthPercents);
+  } else if (preferWeek && weekPercents.length > 0) {
     best = pickOverview(weekPercents);
   } else if (sessionPercents.length > 0) {
     best = pickOverview(sessionPercents);
@@ -2642,8 +2881,28 @@ function extractOverviewQuota(s: Snapshot, cardIsMaxed = false, cardId = ""): Ov
       usedPercent,
       resetsAt,
       metricLabel: best.label,
+      metricDetail: best.detail ?? null,
+      valueText: null,
       isMaxed,
       status: isMaxed ? "maxed" : "ok",
+    };
+  }
+
+  // No percent metric, but a text row ("¥12.34" balances, MCP notes)?
+  // Surface its value so tiles read real content instead of 无用量数据.
+  const textMetric = (s.metrics || []).find(
+    (m) => m.kind === "text" && (m.value ?? m.detail),
+  );
+  if (textMetric) {
+    return {
+      window: null,
+      usedPercent: 0,
+      resetsAt: null,
+      metricLabel: textMetric.label,
+      metricDetail: textMetric.detail ?? null,
+      valueText: textMetric.value ?? textMetric.detail ?? null,
+      isMaxed: false,
+      status: "text",
     };
   }
 
@@ -2652,13 +2911,25 @@ function extractOverviewQuota(s: Snapshot, cardIsMaxed = false, cardId = ""): Ov
     usedPercent: 0,
     resetsAt: null,
     metricLabel: "",
+    metricDetail: null,
+    valueText: null,
     isMaxed: false,
     status: "no_data",
   };
 }
 
+function overviewFailureLabel(s: Snapshot): string {
+  if (s.status === "no_credentials") return t("overview.needsCredentials");
+  if (/expired|cookie|sign in|log in|unauthori[sz]ed|401|403/i.test(s.error ?? "")) return t("overview.needsLogin");
+  return t("overview.queryFailed");
+}
+
 function isOverviewCollapsed(): boolean {
   return config.layout?.overviewCollapsed ?? false;
+}
+
+function isSpendFolded(): boolean {
+  return config.layout?.spendCollapsed ?? false;
 }
 
 interface OverviewItem {
@@ -2674,7 +2945,7 @@ interface OverviewItem {
 /// itself never has to change.
 function overviewSectionHtml(
   title: string,
-  tone: "ok" | "down" | "peak",
+  tone: "ok" | "down",
   items: OverviewItem[],
   render: (it: OverviewItem) => string,
 ): string {
@@ -2689,7 +2960,7 @@ function overviewSectionHtml(
     else byGroup.set(gid, [...(byGroup.get(gid) ?? []), it]);
   }
   const grid = (list: OverviewItem[]) =>
-    `<div class="overview-grid">${list.map(render).join("")}</div>`;
+    `<div class="overview-grid${config.overviewStyle === "bars" ? " ovbars" : ""}">${list.map(render).join("")}</div>`;
   let html = `<div class="overview-section-head tone-${tone}">
       <span class="overview-section-title">${escapeHtml(title)}</span>
       <span class="overview-section-count">${items.length}</span>
@@ -2698,7 +2969,7 @@ function overviewSectionHtml(
   for (const g of groups) {
     const members = byGroup.get(g.id) ?? [];
     if (members.length === 0) continue;
-    html += `<div class="overview-subgroup-head">
+      html += `<div class="overview-subgroup-head" data-overview-drop-group="${escapeHtml(g.id)}">
         <span class="overview-subgroup-name">${escapeHtml(g.name)}</span>
         <span class="overview-subgroup-count">${members.length}</span>
       </div>${grid(members)}`;
@@ -2709,27 +2980,17 @@ function overviewSectionHtml(
 function renderQuotaOverview(): string {
   const visibleSnaps = overviewSnapshots();
   if (visibleSnaps.length === 0) return "";
+  // Category scope: rings, sections, badges and the expiring list all
+  // follow the active top-level category. The article still renders when
+  // the active category has no cards, so the switch stays reachable.
+  const scopedSnaps = visibleSnaps.filter(
+    (s) => effectiveCategory(providerFamily(s.id)) === overviewCategory,
+  );
 
   const isFolded = isOverviewCollapsed();
 
-  const items: OverviewItem[] = visibleSnaps.map((s) => {
-    const family = providerFamily(s.id);
-    let shown = pickOverviewShown(s);
-    if (s.id === family && supportsExtraAccounts(family) && !isParallelAccountFamily(family)) {
-      const accountIds = lastSnapshots
-        .filter((snap) => providerFamily(snap.id) === family && !isCardDisabled(snap.id))
-        .map((snap) => snap.id);
-      if (accountIds.length > 1) {
-        const defaultId = lastSnapshots.some((snap) => snap.id === s.id)
-          ? s.id
-          : (accountIds.find((a) => accountHealthDot(a) === "green") ?? accountIds[0]);
-        const active = resolveDisplayedAccount(family, defaultId, accountIds);
-        const activeSnap = lastSnapshots.find(
-          (snap) => snap.id === active && !isCardDisabled(snap.id),
-        );
-        if (activeSnap) shown = activeSnap;
-      }
-    }
+  const items: OverviewItem[] = scopedSnaps.map((s) => {
+    const shown = pickOverviewShown(s);
     const cardIsMaxed = isCardFoldCandidate(s.id);
     const quota = extractOverviewQuota(shown, cardIsMaxed, s.id);
     // A card walled by a row the ring isn't showing (Kimi monthly-capped
@@ -2758,15 +3019,14 @@ function renderQuotaOverview(): string {
   const upItems = items.filter((it) => !isDown(it));
   const maxedCount = totalCount - errorCount - upItems.length;
 
-  // Peak split lives INSIDE the available set — same predicate that
-  // yellows the tile dot, so chips, dots and sections never disagree.
-  // 可用 counts only the off-peak tiles; in-peak available tiles belong
-  // to the yellow 高峰 chip / section. Both always render (a 0 tells the
-  // user the dimension exists even off-peak).
+  // Peak tint lives INSIDE the available set — same predicate that
+  // yellows the tile dot, so the chip, the dots and the section never
+  // disagree. 可用 counts every up tile (in-peak included); the yellow
+  // 高峰 chip counts the in-peak subset. Both always render (a 0 tells
+  // the user the dimension exists even off-peak).
   const inPeak = (it: OverviewItem) => isProviderInPeak(providerFamily(it.cardSnap.id));
   const peakItems = upItems.filter(inPeak);
-  const plainUpItems = upItems.filter((it) => !inPeak(it));
-  const availableCount = plainUpItems.length;
+  const availableCount = upItems.length;
 
   // "Soonest reset" view: EVERY non-error provider gets a row. Timed ones
   // lead, soonest at the top; providers without a reset instant (not
@@ -2867,6 +3127,7 @@ function renderQuotaOverview(): string {
       }
       return `
         <div class="overview-item tone-${itemTone}" data-jump-provider="${escapeHtml(jumpId)}" title="${escapeHtml(fullTooltip)} · ${escapeHtml(t("overview.groupHint"))}">
+          <button type="button" class="overview-move-btn" data-overview-move="${escapeHtml(jumpId)}" title="${escapeHtml(t("overview.moveGroup"))}" aria-label="${escapeHtml(t("overview.moveGroup"))}">${uiIcon("rows")}</button>
           <div class="overview-item-head">
             <span class="overview-item-icon">${icon}</span>
             <span class="overview-item-name">${escapeHtml(displayName)}</span>
@@ -2881,7 +3142,7 @@ function renderQuotaOverview(): string {
           </div>
           <div class="overview-item-foot">
             <span class="overview-item-meta ${quota.isMaxed ? 'meta-maxed' : ''}"${quota.resetsAt ? ` data-reset-at="${quota.resetsAt}"` : ""}>
-              ${quota.isMaxed
+              ${quota.status === "error" ? escapeHtml(overviewFailureLabel(shownSnap)) : quota.isMaxed
                 ? (quota.resetsAt
                     ? escapeHtml(fmtDuration(Math.max(0, quota.resetsAt - Date.now())))
                     : escapeHtml(t("overview.maxedBadge", { n: "" }).trim()))
@@ -2897,9 +3158,83 @@ function renderQuotaOverview(): string {
         </div>`;
   };
 
+  /// Compact two-line bar alternative to the ring tiles: slimmer rows in a
+  /// two-column grid — line 1 = icon/name/percent, line 2 = thin bar plus
+  /// the reset countdown or the relevant window state.
+  const barItemHtml = ({ cardSnap, shownSnap, quota }: OverviewItem): string => {
+    const family = providerFamily(cardSnap.id);
+    const jumpId = isParallelAccountFamily(family) ? shownSnap.id : cardSnap.id;
+    const origin = shownSnap.dashboard_url ?? undefined;
+    const visual = providerVisual(jumpId || family, origin);
+    const icon = visual?.iconSvg ?? `<span class="icon-fallback">${escapeHtml(cardSnap.name.slice(0, 2))}</span>`;
+    const displayName = notedName(jumpId, providerDisplayName(family) || cardSnap.name);
+    const nameClass = cardNote(jumpId) ? " is-note" : "";
+
+    let itemTone = "normal";
+    let pct: number | null = null;
+    let pctClass = "";
+    if (quota.status === "error") {
+      itemTone = "error";
+      pctClass = "is-error";
+    } else if (quota.isMaxed) {
+      itemTone = "maxed";
+      pct = 100;
+      pctClass = "is-maxed";
+    } else if (quota.window !== null) {
+      pct = Math.round(quota.usedPercent);
+      if (pct >= 80) itemTone = "warn";
+    }
+
+    const meta = quota.status === "error"
+      ? overviewFailureLabel(shownSnap)
+      : quota.resetsAt
+        ? fmtDuration(Math.max(0, quota.resetsAt - Date.now()))
+        : quota.window === "5h"
+          ? t("card.notStarted")
+          : quota.window !== null
+            ? t(windowLabelKey[quota.window])
+            : t("overview.noData");
+
+    let statusDot = "green";
+    if (quota.status === "error" || quota.isMaxed) statusDot = "red";
+    if (statusDot === "green" && isSnapshotMaxed(shownSnap)) statusDot = "red";
+    if (statusDot === "green" && isProviderInPeak(family)) statusDot = "yellow";
+
+    let fullTooltip = overviewHoverTip(shownSnap, quota, displayName);
+    const peakRule = PEAK_RULES[family];
+    if (peakRule) {
+      const peakPrefix = isProviderInPeak(family) ? `${t("peak.now")} ` : "";
+      fullTooltip += ` · ${peakPrefix}${t(peakRule.tipKey)}`;
+    }
+
+    return `
+      <div class="overview-bar-item tone-${itemTone}" data-jump-provider="${escapeHtml(jumpId)}" title="${escapeHtml(fullTooltip)} · ${escapeHtml(t("overview.groupHint"))}">
+        <button type="button" class="overview-move-btn" data-overview-move="${escapeHtml(jumpId)}" title="${escapeHtml(t("overview.moveGroup"))}" aria-label="${escapeHtml(t("overview.moveGroup"))}">${uiIcon("rows")}</button>
+        <div class="ovbar-line1">
+          <span class="overview-item-icon">${icon}</span>
+          <span class="overview-item-name${nameClass}">${escapeHtml(displayName)}</span>
+          <span class="overview-dot ${statusDot}"></span>
+          <span class="ovbar-pct ${pctClass}">${pct === null ? "—" : `${pct}%`}</span>
+        </div>
+        <div class="ovbar-line2">
+          <span class="ovbar"><span class="ovbar-fill tone-${itemTone}" style="width:${pct ?? 0}%"></span></span>
+          <span class="ovbar-meta">${escapeHtml(meta || t("overview.noData"))}</span>
+        </div>
+      </div>`;
+  };
+
+  const barsView = config.overviewStyle === "bars";
+  const overviewRender = barsView ? barItemHtml : itemHtml;
+
   const foldChevron = isFolded
-    ? `<button class="card-fold-toggle" data-overview-fold title="${escapeHtml(t("card.expand"))}">⌄</button>`
-    : `<button class="card-fold-toggle" data-overview-fold title="${escapeHtml(t("card.collapse"))}">⌃</button>`;
+    ? `<button class="card-fold-toggle" data-overview-fold title="${escapeHtml(t("card.expand"))}">${uiIcon("caretDown")}</button>`
+    : `<button class="card-fold-toggle" data-overview-fold title="${escapeHtml(t("card.collapse"))}">${uiIcon("caretUp")}</button>`;
+
+  const styleTabs = `
+        <div class="tabs overview-style-tabs" role="group" aria-label="${escapeHtml(t("overview.styleLabel"))}">
+          <button type="button" class="tab${config.overviewStyle === "rings" ? " active" : ""}" data-overview-style="rings" title="${escapeHtml(t("overview.styleRings"))}">${uiIcon("circleNotch")}</button>
+          <button type="button" class="tab${config.overviewStyle === "bars" ? " active" : ""}" data-overview-style="bars" title="${escapeHtml(t("overview.styleBars"))}">${uiIcon("rows")}</button>
+        </div>`;
 
   // Availability badges: three disjoint symbols — green shows the
   // off-peak available count, red the maxed count, yellow the in-peak
@@ -2918,7 +3253,7 @@ function renderQuotaOverview(): string {
             <span class="overview-chip-dot yellow"></span>
             <span class="overview-chip-text">${peakItems.length} ${escapeHtml(t("overview.peakShort"))}</span>
           </span>
-          <button type="button" class="overview-peak-help" data-overview-peak-help title="${escapeHtml(t("peak.helpTitle"))}">?</button>
+          <button type="button" class="overview-peak-help" data-overview-peak-help title="${escapeHtml(t("peak.helpTitle"))}">${uiIcon("question")}</button>
         </span>`;
 
   // Reset-sorted reminder rows. Window label rides each quota; remaining
@@ -2972,11 +3307,11 @@ function renderQuotaOverview(): string {
     : "";
   const sectionsView = !isFolded && !overviewExpiringOpen
     ? `<div class="card-panel overview-panel">${[
-        plainUpItems.length > 0 ? overviewSectionHtml(t("overview.sectionAvailable"), "ok", plainUpItems, itemHtml) : "",
-        // Peak section always renders (header + count even at 0) — it is
-        // the in-peak slice of the available set, pulled out below 可用.
-        overviewSectionHtml(t("overview.sectionPeak"), "peak", peakItems, itemHtml),
-        downItems.length > 0 ? overviewSectionHtml(t("overview.sectionUnavailable"), "down", downItems, itemHtml) : "",
+        // One 可用 section — in-peak tiles live inside it, marked by
+        // their yellow dots (plus the header's N-peak chip and hover
+        // tips). A separate peak section only stretched the scroll.
+        upItems.length > 0 ? overviewSectionHtml(t("overview.sectionAvailable"), "ok", upItems, overviewRender) : "",
+        downItems.length > 0 ? overviewSectionHtml(t("overview.sectionUnavailable"), "down", downItems, overviewRender) : "",
       ].join("")}</div>`
     : "";
 
@@ -2990,16 +3325,30 @@ function renderQuotaOverview(): string {
           </svg>
         </span>
         <span class="provider-name">${escapeHtml(t("overview.title"))}</span>
-        <span class="overview-badges">${badgeHtml}</span>
+        <span class="overview-badges-tools">
+          <span class="overview-badges">${badgeHtml}</span>
+          <button type="button" class="card-refresh overview-group-manage" data-overview-group-manage title="${escapeHtml(t("overview.groupManage"))}">${uiIcon("gear")}</button>
+        </span>
+        <span class="spacer"></span>
+        ${styleTabs}
+        <button type="button" class="card-refresh overview-expiring${overviewExpiringOpen ? " on" : ""}" data-overview-expiring title="${escapeHtml(t("overview.expiring"))}">⏱</button>
+        <button type="button" class="card-refresh overview-refresh" data-overview-refresh title="${escapeHtml(t("overview.refresh"))}">${uiIcon("arrowsClockwise")}</button>
+        ${foldChevron}
+      </div>
+      ${isFolded ? "" : `<div class="overview-switch-row">
+        <div class="tabs overview-cat-tabs">
+          ${OVERVIEW_CATEGORIES.map(
+            (c) =>
+              `<button type="button" class="tab${overviewCategory === c ? " active" : ""}" data-overview-cat="${c}">${escapeHtml(t(`category.${c}`))}</button>`,
+          ).join("")}
+        </div>
+        ${overviewCategory === "coding" ? `
         <div class="tabs overview-tabs">
           <button type="button" class="tab${overviewTab === "5h" ? " active" : ""}" data-overview-tab="5h">${escapeHtml(t("overview.tab5h"))}</button>
           <button type="button" class="tab${overviewTab === "week" ? " active" : ""}" data-overview-tab="week">${escapeHtml(t("overview.tabWeek"))}</button>
-        </div>
-        <span class="spacer"></span>
-        <button type="button" class="card-refresh overview-expiring${overviewExpiringOpen ? " on" : ""}" data-overview-expiring title="${escapeHtml(t("overview.expiring"))}">⏱</button>
-        <button type="button" class="card-refresh overview-refresh" data-overview-refresh title="${escapeHtml(t("overview.refresh"))}">⟳</button>
-        ${foldChevron}
-      </div>
+          <button type="button" class="tab${overviewTab === "month" ? " active" : ""}" data-overview-tab="month">${escapeHtml(t("overview.tabMonth"))}</button>
+        </div>` : ""}
+      </div>`}
       ${expiringView}
       ${sectionsView}
     </article>`;
@@ -3182,33 +3531,301 @@ function appPrompt(opts: {
 /// "New group…". Tagging lives on the family, so a parallel-account card
 /// moves its whole family. Opens from the card-head ⚙ and right-click.
 /// The note (custom display name) rides along: the note itself is per card.
-function openGroupMenu(cardId: string, anchor: HTMLElement): void {
+function openGroupManagementPanel(): void {
+  document.querySelector<HTMLElement>(".group-menu-overlay")?.remove();
+  const builtins = [
+    ...OVERVIEW_CATEGORIES.map((id) => ({ id, name: t(`category.${id}`), kind: t("overview.groupBuiltin") })),
+    { id: "available", name: t("overview.sectionAvailable"), kind: t("overview.groupBuiltin") },
+    { id: "unavailable", name: t("overview.sectionUnavailable"), kind: t("overview.groupBuiltin") },
+  ];
+  const overlay = document.createElement("div");
+  overlay.className = "group-menu-overlay";
+  overlay.innerHTML = `<div class="group-menu group-manage-panel" role="dialog" aria-label="${escapeHtml(t("overview.groupManageTitle"))}">
+    <div class="group-menu-title">${escapeHtml(t("overview.groupManageTitle"))}</div>
+    <div class="group-manage-hint">${escapeHtml(t("overview.groupManageHint"))}</div>
+    <div class="group-manage-list">
+      ${builtins.map((g) => `<div class="group-manage-row is-builtin"><span class="group-manage-name">${escapeHtml(g.name)}</span><span class="group-manage-kind">${escapeHtml(g.kind)}</span></div>`).join("")}
+      ${cardGroups().map((g) => `<div class="group-manage-row"><span class="group-manage-name">${escapeHtml(g.name)}</span><span class="group-manage-count">${cardGroupMemberCount(g.id)}</span><span class="group-manage-actions"><button type="button" class="group-menu-item" data-group-manage-rename="${escapeHtml(g.id)}">${escapeHtml(t("overview.groupRename"))}</button><button type="button" class="group-menu-item danger" data-group-manage-delete="${escapeHtml(g.id)}">${escapeHtml(t("overview.groupDelete"))}</button></span></div>`).join("")}
+      ${cardGroups().length === 0 ? `<div class="group-manage-empty">${escapeHtml(t("overview.groupEmpty"))}</div>` : ""}
+    </div>
+    <div class="group-menu-sep"></div>
+    <button type="button" class="group-menu-item group-manage-add" data-group-manage-add>＋ ${escapeHtml(t("overview.groupNew"))}</button>
+  </div>`;
+  document.body.appendChild(overlay);
+  const close = () => {
+    overlay.remove();
+    document.removeEventListener("keydown", onKey);
+  };
+  const onKey = (event: KeyboardEvent) => { if (event.key === "Escape") close(); };
+  document.addEventListener("keydown", onKey);
+  overlay.addEventListener("click", async (event) => {
+    if (event.target === overlay) { close(); return; }
+    const target = event.target as HTMLElement;
+    if (target.closest("[data-group-manage-add]")) {
+      const name = await appPrompt({ title: t("overview.groupCreatePrompt"), confirmLabel: t("dialog.ok") });
+      if (name?.trim()) { upsertCardGroup(newGroupId(), name.trim()); renderAll(); openGroupManagementPanel(); }
+      return;
+    }
+    const rename = target.closest<HTMLElement>("[data-group-manage-rename]");
+    if (rename) {
+      const g = cardGroup(rename.dataset.groupManageRename!);
+      if (!g) return;
+      const name = await appPrompt({ title: t("customize.groupRenamePrompt"), initial: g.name, confirmLabel: t("dialog.ok") });
+      if (name?.trim() && name.trim() !== g.name) { upsertCardGroup(g.id, name.trim()); renderAll(); openGroupManagementPanel(); }
+      return;
+    }
+    const del = target.closest<HTMLElement>("[data-group-manage-delete]");
+    if (del) {
+      const g = cardGroup(del.dataset.groupManageDelete!);
+      if (!g) return;
+      const count = cardGroupMemberCount(g.id);
+      if (count > 0) {
+        await appConfirm({ title: t("overview.groupDeleteBlockedTitle"), message: t("overview.groupDeleteBlockedBody", { name: g.name, n: count }), confirmLabel: t("dialog.ok") });
+        return;
+      }
+      if (await appConfirm({ title: t("customize.groupDelete"), message: t("customize.groupDeleteConfirm", { name: g.name }), confirmLabel: t("customize.groupDelete"), danger: true })) {
+        deleteCardGroup(g.id); renderAll(); openGroupManagementPanel();
+      }
+    }
+  });
+}
+
+function shortcutKeyToken(event: KeyboardEvent): string {
+  if (/^Digit[0-9]$/.test(event.code)) return event.code.slice(5);
+  if (/^Numpad[0-9]$/.test(event.code)) return event.code.slice(6);
+  if (/^Key[A-Z]$/.test(event.code)) return event.code.slice(3);
+  if (/^F[0-9]{1,2}$/.test(event.code)) return event.code;
+  return event.key.length === 1 ? event.key.toUpperCase() : event.key;
+}
+
+function shortcutMatches(event: KeyboardEvent, shortcut: string): boolean {
+  const parts = shortcut.split("+").map((part) => part.trim()).filter(Boolean);
+  if (!parts.length) return false;
+  const key = parts[parts.length - 1].toUpperCase();
+  const modifiers = new Set(parts.slice(0, -1).map((part) => part.toLowerCase()));
+  const expected = {
+    ctrl: modifiers.has("ctrl"),
+    alt: modifiers.has("alt"),
+    shift: modifiers.has("shift"),
+    meta: modifiers.has("meta") || modifiers.has("cmd"),
+  };
+  return expected.ctrl === event.ctrlKey && expected.alt === event.altKey &&
+    expected.shift === event.shiftKey && expected.meta === event.metaKey &&
+    shortcutKeyToken(event).toUpperCase() === key;
+}
+
+function isDashboardActive(): boolean {
+  return document.hasFocus() && document.visibilityState === "visible";
+}
+
+function cycleOverviewCategory(): void {
+  const index = OVERVIEW_CATEGORIES.indexOf(overviewCategory);
+  const next = OVERVIEW_CATEGORIES[(index + 1) % OVERVIEW_CATEGORIES.length];
+  switchOverviewCategory(next);
+}
+
+function formatCapturedShortcut(event: KeyboardEvent): string | null {
+  if (event.key === "Control" || event.key === "Alt" || event.key === "Shift" || event.key === "Meta") return null;
+  const parts: string[] = [];
+  if (event.ctrlKey) parts.push("Ctrl");
+  if (event.altKey) parts.push("Alt");
+  if (event.shiftKey) parts.push("Shift");
+  if (event.metaKey) parts.push("Meta");
+  parts.push(shortcutKeyToken(event));
+  return parts.join("+");
+}
+
+function setupOverviewGroupDrag(root: HTMLElement): void {
+  let pending: { id: string; pointerId: number; x: number; y: number; tile: HTMLElement } | null = null;
+  let timer = 0;
+  let ghost: HTMLElement | null = null;
+  let dock: HTMLElement | null = null;
+  let hot: HTMLElement | null = null;
+  let suppressClickUntil = 0;
+  const clear = () => {
+    window.clearTimeout(timer);
+    if (ghost) suppressClickUntil = performance.now() + 400;
+    pending?.tile.classList.remove("overview-drag-source");
+    ghost?.remove();
+    dock?.remove();
+    hot?.classList.remove("overview-drop-hot");
+    pending = null;
+    ghost = dock = hot = null;
+    document.body.classList.remove("overview-drag-active");
+  };
+  const moveGhost = (x: number, y: number) => {
+    if (!ghost) return;
+    ghost.style.left = `${Math.max(0, Math.min(x + 12, window.innerWidth - ghost.offsetWidth))}px`;
+    ghost.style.top = `${Math.max(0, Math.min(y + 12, window.innerHeight - ghost.offsetHeight))}px`;
+  };
+  const targetAt = (x: number, y: number) => document.elementFromPoint(x, y)?.closest<HTMLElement>(
+    "[data-overview-cat], [data-overview-drop-group]",
+  ) ?? null;
+  root.addEventListener("pointerdown", (event) => {
+    if (event.button !== 0 || event.isPrimary === false || (event.target as Element).closest("button")) return;
+    const tile = (event.target as Element).closest<HTMLElement>(
+      ".overview-item[data-jump-provider], .overview-bar-item[data-jump-provider]",
+    );
+    if (!tile?.dataset.jumpProvider) return;
+    clear();
+    pending = { id: tile.dataset.jumpProvider, pointerId: event.pointerId, x: event.clientX, y: event.clientY, tile };
+    timer = window.setTimeout(() => {
+      if (!pending || !tile.isConnected) { clear(); return; }
+      ghost = tile.cloneNode(true) as HTMLElement;
+      ghost.classList.add("overview-drag-ghost");
+      ghost.removeAttribute("data-jump-provider");
+      ghost.querySelector(".overview-move-btn")?.remove();
+      ghost.style.width = `${tile.getBoundingClientRect().width}px`;
+      document.body.appendChild(ghost);
+      tile.classList.add("overview-drag-source");
+      document.body.classList.add("overview-drag-active");
+      dock = document.createElement("div");
+      dock.className = "overview-drop-dock";
+      dock.innerHTML = `<div class="overview-drop-title">${escapeHtml(t("overview.dragMoveHint"))}</div>
+        <div class="overview-drop-options">${OVERVIEW_CATEGORIES.map((category) => `<div data-overview-cat="${category}">${escapeHtml(t(`category.${category}`))}</div>`).join("")}</div>
+        <div class="overview-drop-options"><div data-overview-drop-group="">${escapeHtml(t("customize.groupNone"))}</div>${cardGroups().map((group) => `<div data-overview-drop-group="${escapeHtml(group.id)}">${escapeHtml(group.name)}</div>`).join("")}</div>`;
+      document.body.appendChild(dock);
+      moveGhost(pending.x, pending.y);
+    }, 450);
+  });
+  window.addEventListener("pointermove", (event) => {
+    if (!pending || pending.pointerId !== event.pointerId) return;
+    if (!ghost) {
+      if (Math.hypot(event.clientX - pending.x, event.clientY - pending.y) > 8) clear();
+      return;
+    }
+    event.preventDefault();
+    moveGhost(event.clientX, event.clientY);
+    hot?.classList.remove("overview-drop-hot");
+    hot = targetAt(event.clientX, event.clientY);
+    hot?.classList.add("overview-drop-hot");
+  }, { passive: false });
+  window.addEventListener("pointerup", (event) => {
+    if (!pending || pending.pointerId !== event.pointerId) return;
+    const id = pending.id;
+    const target = ghost ? targetAt(event.clientX, event.clientY) : null;
+    const category = target?.dataset.overviewCat;
+    const group = target?.dataset.overviewDropGroup;
+    clear();
+    if (category && (OVERVIEW_CATEGORIES as readonly string[]).includes(category)) {
+      setFamilyCategory(providerFamily(id), category as OverviewCategory);
+    } else if (group !== undefined) {
+      setCardGroup(id, group);
+    }
+  });
+  window.addEventListener("pointercancel", clear);
+  window.addEventListener("blur", clear);
+  root.addEventListener("contextmenu", clear);
+  window.addEventListener("keydown", (event) => {
+    if (event.key === "Escape" && ghost) {
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      clear();
+    }
+  }, true);
+  root.addEventListener("click", (event) => {
+    if (performance.now() < suppressClickUntil) {
+      event.preventDefault();
+      event.stopImmediatePropagation();
+    }
+  }, true);
+}
+
+function overviewMenuSide(tile: HTMLElement): "left" | "middle" | "right" {
+  const rect = tile.getBoundingClientRect();
+  const grid = tile.closest<HTMLElement>(".overview-grid");
+  if (grid?.firstElementChild) {
+    const firstTop = grid.firstElementChild.getBoundingClientRect().top;
+    const columns = Array.from(grid.children)
+      .map((child) => child.getBoundingClientRect())
+      .filter((child) => Math.abs(child.top - firstTop) < 3)
+      .sort((a, b) => a.left - b.left);
+    if (columns.length > 1) {
+      const center = (rect.left + rect.right) / 2;
+      let index = 0;
+      columns.forEach((column, i) => {
+        if (Math.abs((column.left + column.right) / 2 - center) <
+            Math.abs((columns[index].left + columns[index].right) / 2 - center)) index = i;
+      });
+      if (index === 0) return "left";
+      if (index === columns.length - 1) return "right";
+      return "middle";
+    }
+  }
+  const parentRect = (grid ?? tile.parentElement)?.getBoundingClientRect();
+  const fraction = parentRect?.width ? ((rect.left + rect.right) / 2 - parentRect.left) / parentRect.width : 0.5;
+  return fraction < 1 / 3 ? "left" : fraction > 2 / 3 ? "right" : "middle";
+}
+
+function groupMenuPosition(rect: DOMRect, width: number, height: number, side: "left" | "middle" | "right", viewportWidth: number, viewportHeight: number): { x: number; y: number } {
+  const desiredX = side === "left" ? rect.right + 4 : side === "right" ? rect.left - width - 4 : (rect.left + rect.right - width) / 2;
+  return {
+    x: Math.max(8, Math.min(desiredX, viewportWidth - width - 8)),
+    y: Math.max(8, Math.min(rect.bottom + 4, viewportHeight - height - 8)),
+  };
+}
+
+function openGroupMenu(cardId: string, anchor: HTMLElement, includeGrouping = true): void {
   document.querySelector(".group-menu-overlay")?.remove();
   const current = cardGroupId(cardId);
   const groups = cardGroups();
+  const fam = providerFamily(cardId);
+  const curCat = effectiveCategory(fam);
   const item = (gid: string, label: string, checked = false) =>
     `<button class="group-menu-item${checked ? " on" : ""}" data-group-pick="${escapeHtml(gid)}">
        <span class="group-menu-check">${checked ? "✓" : ""}</span>${escapeHtml(label)}
      </button>`;
-  const fallbackName = providerDisplayName(providerFamily(cardId)) || cardId;
-  const overlay = document.createElement("div");
-  overlay.className = "group-menu-overlay";
-  overlay.innerHTML = `
-    <div class="group-menu" role="menu">
-      <div class="group-menu-title">${escapeHtml(t("customize.groupLabel"))}</div>
+  const catItem = (cat: OverviewCategory) =>
+    `<button class="group-menu-item${curCat === cat ? " on" : ""}" data-category-pick="${cat}">
+       <span class="group-menu-check">${curCat === cat ? "✓" : ""}</span>${escapeHtml(
+         t(`category.${cat}`),
+       )}
+     </button>`;
+  const fallbackName = providerDisplayName(fam) || cardId;
+  const groupingHtml = includeGrouping
+    ? `${OVERVIEW_CATEGORIES.map((c) => catItem(c)).join("")}
+      <div class="group-menu-sep"></div>
       ${item("", t("customize.groupNone"), current === "")}
       ${groups.map((g) => item(g.id, g.name, current === g.id)).join("")}
       <div class="group-menu-sep"></div>
-      ${item("__new__", `${t("customize.groupNew")}…`)}
+      ${item("__new__", `${t("customize.groupNew")}…`)}`
+    : "";
+  const overlay = document.createElement("div");
+  overlay.className = "group-menu-overlay";
+  overlay.innerHTML = `
+    <div class="group-menu${includeGrouping ? " overview-move-menu" : ""}" role="menu">
+      <div class="group-menu-title">${escapeHtml(t(includeGrouping ? "overview.moveGroup" : "customize.cardSettings"))}</div>
+      ${groupingHtml}
       <div class="group-menu-sep"></div>
       <button class="group-menu-item" data-card-note="${escapeHtml(cardId)}">
         <span class="group-menu-check">✎</span>${escapeHtml(t("customize.noteMenu"))}
       </button>
+      ${includeGrouping ? "" : `<div class="group-menu-sep"></div>
+      <button class="group-menu-item danger" data-card-remove="${escapeHtml(cardId)}">
+        <span class="group-menu-check">×</span>${escapeHtml(t("customize.providerDelete"))}
+      </button>`}
     </div>`;
-  const close = () => overlay.remove();
+  const close = () => {
+    overlay.remove();
+    document.removeEventListener("keydown", onKey, true);
+  };
   overlay.addEventListener("click", (e) => {
     if (e.target === overlay) {
       close();
+      return;
+    }
+    const removeBtn = (e.target as HTMLElement).closest<HTMLElement>("[data-card-remove]");
+    if (removeBtn) {
+      close();
+      const name = notedName(cardId, providerDisplayName(fam) || cardId);
+      void appConfirm({
+        title: t("customize.providerDeleteTitle"),
+        message: t("customize.providerDeleteConfirm", { name }),
+        confirmLabel: t("customize.providerDelete"),
+        danger: true,
+      }).then((ok) => {
+        if (ok) removeProviderCard(cardId);
+      });
       return;
     }
     const noteBtn = (e.target as HTMLElement).closest<HTMLElement>("[data-card-note]");
@@ -3226,7 +3843,17 @@ function openGroupMenu(cardId: string, anchor: HTMLElement): void {
       });
       return;
     }
-    const pick = (e.target as HTMLElement).closest<HTMLElement>("[data-group-pick]");
+    const catBtn = includeGrouping
+      ? (e.target as HTMLElement).closest<HTMLElement>("[data-category-pick]")
+      : null;
+    if (catBtn) {
+      close();
+      setFamilyCategory(fam, catBtn.dataset.categoryPick as OverviewCategory);
+      return;
+    }
+    const pick = includeGrouping
+      ? (e.target as HTMLElement).closest<HTMLElement>("[data-group-pick]")
+      : null;
     if (!pick) return;
     const choice = pick.dataset.groupPick!;
     close();
@@ -3254,13 +3881,18 @@ function openGroupMenu(cardId: string, anchor: HTMLElement): void {
   };
   document.addEventListener("keydown", onKey, true);
   document.body.appendChild(overlay);
-  // Anchor under the button, right-aligned, clamped into the viewport.
+  // Overview buttons use their whole tile as the anchor, matching right-click.
   const menu = overlay.querySelector<HTMLElement>(".group-menu")!;
-  const rect = anchor.getBoundingClientRect();
-  const mw = menu.offsetWidth;
-  const x = Math.max(8, Math.min(rect.right - mw, window.innerWidth - mw - 8));
-  menu.style.left = `${x}px`;
-  menu.style.top = `${Math.min(rect.bottom + 4, window.innerHeight - menu.offsetHeight - 8)}px`;
+  const tile = includeGrouping ? anchor.closest<HTMLElement>(".overview-item, .overview-bar-item, .expiring-row") : null;
+  const rect = (tile ?? anchor).getBoundingClientRect();
+  if (tile) {
+    const { x, y } = groupMenuPosition(rect, menu.offsetWidth, menu.offsetHeight, overviewMenuSide(tile), window.innerWidth, window.innerHeight);
+    menu.style.left = `${x}px`;
+    menu.style.top = `${y}px`;
+  } else {
+    menu.style.left = `${Math.max(8, Math.min(rect.right - menu.offsetWidth, window.innerWidth - menu.offsetWidth - 8))}px`;
+    menu.style.top = `${Math.max(8, Math.min(rect.bottom + 4, window.innerHeight - menu.offsetHeight - 8))}px`;
+  }
 }
 
 /// "HH:MM" from minutes past midnight.
@@ -4018,6 +4650,10 @@ const custExpanded = new Set<string>();
 // Which provider's inline config panel is open (one at a time).
 // Session-only, like custExpanded.
 let custConfigOpen: string | null = null;
+// Single-key providers show the saved credential as a compact account row.
+// The input form is an explicit add/edit action, so opening settings never
+// drops the user into a blank form over an existing credential.
+const custKeyEditing = new Set<string>();
 
 // Which provider's read-only credential-info panel ("?" button) is open.
 // One panel at a time, and opening one side closes the other.
@@ -4027,6 +4663,7 @@ let custInfoOpen: string | null = null;
 // cached so a background re-render of the drawer doesn't blank the panels.
 interface CredStatus {
   storedKey: boolean;
+  maskedKey?: string | null;
   envKey: boolean;
   localCli: string | null;
   // Account label of Pane's own OAuth login (codex/grok), null when none.
@@ -4052,6 +4689,7 @@ function refreshCredStatus(id: string): void {
     .then((status) => {
       credStatusCache.set(id, status);
       paintCredStatus(id);
+      if (custConfigOpen === id && !custKeyEditing.has(id)) renderDrawerBody();
     })
     .catch(() => {
       credStatusCache.set(id, {
@@ -4062,6 +4700,7 @@ function refreshCredStatus(id: string): void {
         activeSource: null,
       });
       paintCredStatus(id);
+      if (custConfigOpen === id && !custKeyEditing.has(id)) renderDrawerBody();
     });
 }
 
@@ -4116,12 +4755,16 @@ const PROVIDER_CRED_INFO: Record<string, { auto: string; methods: CredMethod[] }
   kimi: { auto: "customize.cred.kimi", methods: ["paste", "oauth"] },
   stepfun: { auto: "customize.cred.stepfun", methods: ["paste"] },
   "stepfun-plan": { auto: "customize.cred.stepfunPlan", methods: ["paste"] },
+  clinepass: { auto: "customize.cred.clinepass", methods: ["paste"] },
+  sensenova: { auto: "customize.cred.sensenova", methods: ["paste"] },
+  apigoto: { auto: "customize.cred.apigoto", methods: ["paste"] },
   siliconflow: { auto: "customize.cred.siliconflow", methods: ["paste"] },
   novita: { auto: "customize.cred.novita", methods: ["paste"] },
   relaybalance: { auto: "customize.cred.relaybalance", methods: ["paste"] },
   linkso: { auto: "customize.cred.linkso", methods: ["paste"] },
   qodercn: { auto: "customize.cred.qodercn", methods: ["local"] },
   traecn: { auto: "customize.cred.traecn", methods: ["local"] },
+  shandianshuo: { auto: "customize.cred.shandianshuo", methods: ["local"] },
 };
 
 /// The "?" panel's read-only fact sheet: an ordered list of how this
@@ -4339,7 +4982,7 @@ function openCursorAccountDialog(): void {
     <section class="account-dialog" role="dialog" aria-modal="true" aria-labelledby="cursor-account-title">
       <div class="account-dialog-head">
         <h3 id="cursor-account-title">${escapeHtml(t("customize.cursorAddTitle"))}</h3>
-        <button class="account-dialog-close" data-acct-close type="button" aria-label="${escapeHtml(t("dialog.cancel"))}">✕</button>
+        <button class="account-dialog-close" data-acct-close type="button" aria-label="${escapeHtml(t("dialog.cancel"))}">${uiIcon("x")}</button>
       </div>
       <div class="cursor-add-tabs">
         <button class="cursor-tab on" data-cursor-tab="oauth">${escapeHtml(t("customize.cursorTabOAuth"))}</button>
@@ -4547,7 +5190,7 @@ function openAccountDialog(family: string): void {
     <section class="account-dialog" data-account-dialog="${escapeHtml(family)}" role="dialog" aria-modal="true" aria-labelledby="account-dialog-title">
       <div class="account-dialog-head">
         <h3 id="account-dialog-title">${escapeHtml(t("customize.acctDialogTitle", { name: providerDisplayName(family) }))}</h3>
-        <button class="account-dialog-close" data-acct-close type="button" aria-label="${escapeHtml(t("dialog.cancel"))}">✕</button>
+        <button class="account-dialog-close" data-acct-close type="button" aria-label="${escapeHtml(t("dialog.cancel"))}">${uiIcon("x")}</button>
       </div>
       <p class="account-dialog-help">${escapeHtml(t("customize.acctDialogHelp"))}</p>
       ${
@@ -5058,6 +5701,35 @@ function groupPickerHtml(id: string): string {
     </div>`;
 }
 
+function renderCompactKeySummary(id: string): string {
+  const status = credStatusCache.get(id);
+  const label = cardNote(id) || providerDisplayName(providerFamily(id));
+  const key = status?.maskedKey || (status?.storedKey ? "API key" : t("customize.noCredential"));
+  return `<div class="cust-credential-bar">
+      <div class="cust-credential-main">
+        <strong>${escapeHtml(label)}</strong>
+        <span>${escapeHtml(key)}</span>
+      </div>
+      <div class="cust-credential-meta">${credChipsHtml(id)}</div>
+      <button class="mini-btn" data-cust-edit="${escapeHtml(id)}">${escapeHtml(t(status?.storedKey ? "customize.editCredential" : "customize.addCredential"))}</button>
+    </div>`;
+}
+
+function custNoteField(id: string): string {
+  return `<div class="form-field cust-note-field">
+      <span class="form-label">${escapeHtml(t("customize.noteLabel"))}</span>
+      <input class="form-input" type="text" data-cust-note="${escapeHtml(id)}" value="${escapeHtml(cardNote(id))}" placeholder="${escapeHtml(t("customize.notePh"))}" maxlength="48" />
+      <div class="form-help">${escapeHtml(t("customize.noteHelp"))}</div>
+    </div>`;
+}
+
+function custApplyHtml(id: string): string {
+  return `<div class="form-actions cust-apply-actions">
+      <button class="mini-btn primary" data-cust-apply="${escapeHtml(id)}">${escapeHtml(t("customize.saveRefresh"))}</button>
+      <span class="cust-test-result" data-cust-apply-result="${escapeHtml(id)}"></span>
+    </div>`;
+}
+
 function renderCustConfig(id: string): string {
   const status = renderCustStatus(id);
   const fam = providerFamily(id);
@@ -5077,6 +5749,8 @@ function renderCustConfig(id: string): string {
           <div data-cred-chips="${escapeHtml(id)}">${credChipsHtml(id)}</div>
         </div>
         <p class="settings-note">${escapeHtml(t("customize.onaAccountsHint"))}</p>
+        ${custNoteField(id)}
+        ${custApplyHtml(id)}
         ${groupPickerHtml(id)}
       </div>`;
     }
@@ -5106,6 +5780,8 @@ function renderCustConfig(id: string): string {
           ${primary}
           ${linkLink}
         </div>
+        ${custNoteField(id)}
+        ${custApplyHtml(id)}
         ${groupPickerHtml(id)}
       </div>`;
   }
@@ -5126,6 +5802,8 @@ function renderCustConfig(id: string): string {
         <button class="mini-btn" data-cust-save="${id}" title="${escapeHtml(t("customize.saveAfterTest"))}">${escapeHtml(t("settings.save"))}</button>
         <span class="cust-test-result" data-cust-result="${id}"></span>
       </div>
+      ${custNoteField(id)}
+      ${custApplyHtml(id)}
       ${groupPickerHtml(id)}
     </div>`;
   }
@@ -5138,7 +5816,7 @@ function renderCustConfig(id: string): string {
     }
     const hintKey = `customize.loginHint.${providerFamily(id)}`;
     const hint = t(hintKey) !== hintKey ? t(hintKey) : t("customize.cliLoginHint");
-    return `<div class="cust-config">${groupPickerHtml(id)}${status}${renderOAuthBlock(id)}<p class="settings-note">${escapeHtml(hint)}</p></div>`;
+    return `<div class="cust-config">${status}${renderOAuthBlock(id)}<p class="settings-note">${escapeHtml(hint)}</p>${custNoteField(id)}${custApplyHtml(id)}${groupPickerHtml(id)}</div>`;
   }
   // Single-key providers: one stacked API-key form (DSH/cockpit style).
   const phKey = `settings.keyPh${id[0].toUpperCase()}${id.slice(1)}`;
@@ -5151,7 +5829,17 @@ function renderCustConfig(id: string): string {
           <div class="form-help">${escapeHtml(t("customize.relayBaseUrlHelp"))}</div>
         </div>`
       : "";
+  if (!custKeyEditing.has(id)) {
+    return `<div class="cust-config cust-form">
+      ${renderCompactKeySummary(id)}
+      ${custNoteField(id)}
+      ${custApplyHtml(id)}
+      ${groupPickerHtml(id)}
+    </div>`;
+  }
   return `<div class="cust-config cust-form">
+      ${status}
+      ${custNoteField(id)}
       <div class="form-field">
         <span class="form-label">${escapeHtml(t("customize.acctKeyLabel"))}</span>
         <input class="form-input" type="password" data-cust-key="${id}" placeholder="${escapeHtml(ph)}" autocomplete="new-password" spellcheck="false" />
@@ -5163,6 +5851,7 @@ function renderCustConfig(id: string): string {
         <button class="mini-btn" data-cust-save="${id}" title="${escapeHtml(t("customize.saveAfterTest"))}">${escapeHtml(t("settings.save"))}</button>
         <span class="cust-test-result" data-cust-result="${id}"></span>
       </div>
+      ${custApplyHtml(id)}
       ${groupPickerHtml(id)}
     </div>`;
 }
@@ -5241,15 +5930,15 @@ function accountChildRows(family: string): string {
         !showPin || isParallelAccountFamily(family)
           ? ""
           : i === 0
-            ? `<button class="star on acct-child-star" data-acct-setdef="${family}|${i}" title="${escapeHtml(t("customize.acctDefault"))}">★</button>`
-            : `<button class="star acct-child-star" data-acct-setdef="${family}|${i}" title="${escapeHtml(t("customize.acctMakeDefault"))}">☆</button>`;
+            ? `<button class="star on acct-child-star" data-acct-setdef="${family}|${i}" title="${escapeHtml(t("customize.acctDefault"))}">${uiIcon("star")}</button>`
+            : `<button class="star acct-child-star" data-acct-setdef="${family}|${i}" title="${escapeHtml(t("customize.acctMakeDefault"))}">${uiIcon("star")}</button>`;
       return `<div class="cust-account-child" data-acct-child="${escapeHtml(family)}|${i}">
         <span class="acct-child-label">${escapeHtml(label)}</span>
         <span class="dim acct-child-key">${escapeHtml(a.maskedKey)}</span>
         <span class="spacer"></span>
         ${star}
-        <button class="mini-btn" data-info="${escapeHtml(acctId) || escapeHtml(family)}" title="${escapeHtml(t("customize.credInfo"))}">?</button>
-        <button class="mini-btn" data-config="${escapeHtml(acctId)}" title="${escapeHtml(t("customize.configure"))}">⚙</button>
+        <button class="mini-btn" data-info="${escapeHtml(acctId) || escapeHtml(family)}" title="${escapeHtml(t("customize.credInfo"))}">${uiIcon("question")}</button>
+        <button class="mini-btn" data-config="${escapeHtml(acctId)}" title="${escapeHtml(t("customize.configure"))}">${uiIcon("gear")}</button>
         ${custInfoOpen === acctId ? renderCustInfo(acctId) : ""}
         ${custConfigOpen === acctId ? renderAccountConfig(acctId) : ""}
       </div>`;
@@ -5333,7 +6022,7 @@ function renderCustomize(): string {
             <span class="grip" title="${escapeHtml(t("customize.dragRows"))}">⠿</span>
             <label class="toggle mini"><input type="checkbox" data-visible="${id}|${escapeHtml(key)}"${visible ? " checked" : ""} /></label>
             <span class="cust-label">${escapeHtml(displayMetricLabel(key))}</span>
-            ${starrable ? `<button class="star${starred ? " on" : ""}" data-star="${id}|${escapeHtml(key)}" title="${escapeHtml(t("customize.star"))}">★</button>` : ""}
+            ${starrable ? `<button class="star${starred ? " on" : ""}" data-star="${id}|${escapeHtml(key)}" title="${escapeHtml(t("customize.star"))}">${uiIcon("star")}</button>` : ""}
           </div>`;
       };
 
@@ -5367,12 +6056,12 @@ function renderCustomize(): string {
             <button class="cust-expand" data-cust-expand="${id}" title="${open ? t("customize.collapse") : t("customize.expand")}">
               <span class="cust-head-icon" aria-hidden="true">${icon}</span>
               <span class="provider-name">${escapeHtml(name)}</span>
-              <span class="chev">⌄</span>
+              <span class="chev">${uiIcon("caretDown")}</span>
             </button>
             <span class="spacer"></span>
-            <button class="mini-btn cust-info-btn${custInfoOpen === id ? " on" : ""}" data-info="${id}" title="${escapeHtml(t("customize.credInfo"))}">?</button>
-            <button class="mini-btn cust-config-btn${custConfigOpen === id ? " on" : ""}" data-config="${id}" title="${escapeHtml(t("customize.configure"))}">⚙</button>
-            <button class="mini-btn" data-reset="${id}" title="${escapeHtml(t("customize.resetLayoutTip"))}">${escapeHtml(t("customize.resetLayout"))}</button>
+            <button class="mini-btn cust-info-btn${custInfoOpen === id ? " on" : ""}" data-info="${id}" title="${escapeHtml(t("customize.credInfo"))}">${uiIcon("question")}</button>
+            <button class="mini-btn cust-config-btn${custConfigOpen === id ? " on" : ""}" data-config="${id}" title="${escapeHtml(t("customize.configure"))}">${uiIcon("gear")}</button>
+            <button class="mini-btn icon-btn reset-layout-btn" data-reset="${id}" title="${escapeHtml(t("customize.resetLayoutTip"))}" aria-label="${escapeHtml(t("customize.resetLayoutTip"))}">${uiIcon("arrowsClockwise")}</button>
             <label class="toggle mini" title="${escapeHtml(t("customize.enable"))}"><input type="checkbox" data-enable="${id}"${enabled ? " checked" : ""} /></label>
           </div>
           ${accountRows}
@@ -5411,8 +6100,13 @@ function renderCustomize(): string {
   const starCount = Object.values(config.layout?.providers ?? {}).reduce((n, l) => n + l.starred.length, 0);
   return `
     <div class="customize-bar glass-bar">
-      <button class="dock-btn" data-customize-close>${escapeHtml(t("customize.done"))}</button>
-      <span class="detail">${escapeHtml(t("customize.starred", { n: starCount }))}</span>
+      <div class="customize-heading">
+        <button class="dock-btn" data-customize-close>${escapeHtml(t("customize.done"))}</button>
+        <div class="customize-heading-copy">
+          <strong>${escapeHtml(t("customize.title"))}</strong>
+        </div>
+      </div>
+      <span class="detail customize-summary">${escapeHtml(t("customize.starred", { n: starCount }))}</span>
       <button class="dock-btn danger" data-reset-all title="${escapeHtml(t("customize.resetAllTip"))}">${escapeHtml(t("customize.resetAll"))}</button>
     </div>
     <nav class="cust-az">${letters
@@ -5432,7 +6126,7 @@ function renderWelcome(): string {
       <div class="provider-head">
         <span class="provider-name">${escapeHtml(t("welcome.title"))}</span>
         <span class="spacer"></span>
-        <button class="share-btn welcome-close" data-welcome-close title="${escapeHtml(t("welcome.dismiss"))}">✕</button>
+        <button class="share-btn welcome-close" data-welcome-close title="${escapeHtml(t("welcome.dismiss"))}">${uiIcon("x")}</button>
       </div>
       <p class="placeholder" style="margin:2px 0 8px">
         ${escapeHtml(t("welcome.body"))}
@@ -5441,13 +6135,31 @@ function renderWelcome(): string {
     </article>`;
 }
 
-/// Cards laid out by group: ungrouped cards first (flat), then one section
-/// per used group in the groups' own order. Within a section the normal
-/// providerOrder sort applies. Sections are folded by the group's own
-/// collapsed flag.
+/// Cards laid out by top-level category first (Coding Agent / productivity),
+/// then the group layout inside each category: ungrouped cards flat, then
+/// one section per used group in the groups' own order. Categories without
+/// cards render nothing.
 function renderGroupedCards(): string {
   const snaps = orderedSnapshots();
+  if (snaps.length === 0) return "";
   const groups = usedCardGroups();
+  const head = (category: OverviewCategory) =>
+    `<div class="category-head"><span class="category-name">${escapeHtml(
+      t(`category.${category}`),
+    )}</span><span class="category-count">${
+      snaps.filter((s) => effectiveCategory(providerFamily(s.id)) === category).length
+    }</span></div>`;
+  return OVERVIEW_CATEGORIES.map((category) => {
+    const members = snaps.filter((s) => effectiveCategory(providerFamily(s.id)) === category);
+    return members.length ? head(category) + renderCategoryCards(members, groups) : "";
+  }).join("");
+}
+
+/// The pre-category wall layout: ungrouped cards first (flat), then one
+/// collapsible section per used group. Within a section the normal
+/// providerOrder sort applies. Sections are folded by the group's own
+/// collapsed flag.
+function renderCategoryCards(snaps: Snapshot[], groups: CardGroup[]): string {
   if (groups.length === 0) return snaps.map(renderCard).join("");
   const usedIds = new Set(groups.map((g) => g.id));
   const byGroup = new Map<string, Snapshot[]>();
@@ -5474,6 +6186,7 @@ function renderGroupedCards(): string {
         <span class="card-group-chevron">${chevron}</span>
         <span class="card-group-name">${escapeHtml(g.name)}</span>
         <span class="card-group-count">${members.length}</span>
+        <button class="card-group-remove" data-group-remove="${escapeHtml(g.id)}" title="${escapeHtml(t("customize.groupDeleteTip"))}" aria-label="${escapeHtml(t("customize.groupDelete"))}">${uiIcon("x")}</button>
       </div>`,
     );
     for (const s of members) {
@@ -5486,6 +6199,7 @@ function renderGroupedCards(): string {
 }
 
 function renderAll(): void {
+  hideSpendPop();
   const el = document.querySelector("#providers")!;
   el.innerHTML =
     renderWelcome() +
@@ -6421,16 +7135,20 @@ async function handleCustomizeClick(target: HTMLElement): Promise<boolean> {
   if (groupDelete) {
     const gid = groupDelete.dataset.groupDelete!;
     const g = cardGroup(gid);
-    if (
-      g &&
-      (await appConfirm({
+    if (g) {
+      const count = cardGroupMemberCount(gid);
+      if (count > 0) {
+        await appConfirm({ title: t("overview.groupDeleteBlockedTitle"), message: t("overview.groupDeleteBlockedBody", { name: g.name, n: count }), confirmLabel: t("dialog.ok") });
+        return true;
+      }
+      if (await appConfirm({
         title: t("customize.groupDelete"),
         message: t("customize.groupDeleteConfirm", { name: g.name }),
         confirmLabel: t("customize.groupDelete"),
         danger: true,
-      }))
-    ) {
-      deleteCardGroup(gid); // its renderAll also refreshes the drawer body
+      })) {
+        deleteCardGroup(gid); // its renderAll also refreshes the drawer body
+      }
     }
     return true;
   }
@@ -6449,6 +7167,7 @@ async function handleCustomizeClick(target: HTMLElement): Promise<boolean> {
   const cfgBtn = target.closest<HTMLElement>("[data-config]");
   if (cfgBtn) {
     const id = cfgBtn.dataset.config!;
+    if (custConfigOpen === id) custKeyEditing.delete(id);
     custConfigOpen = custConfigOpen === id ? null : id;
     custInfoOpen = null; // one panel at a time per row
     dismissAccountDialog?.();
@@ -6571,6 +7290,27 @@ async function handleCustomizeClick(target: HTMLElement): Promise<boolean> {
         baseUrl: panel?.querySelector<HTMLInputElement>("[data-cust-baseurl]") ?? null,
       });
     }
+    const note = panel?.querySelector<HTMLInputElement>(`[data-cust-note="${CSS.escape(id)}"]`);
+    if (note) setCardNote(id, note.value.trim());
+    return true;
+  }
+  const custEdit = target.closest<HTMLElement>("[data-cust-edit]");
+  if (custEdit) {
+    const id = custEdit.dataset.custEdit!;
+    custKeyEditing.add(id);
+    renderDrawerBody();
+    document
+      .querySelector<HTMLElement>(`#drawer-body [data-cust-provider="${CSS.escape(id)}"] [data-cust-key]`)
+      ?.focus();
+    return true;
+  }
+  const custApply = target.closest<HTMLElement>("[data-cust-apply]");
+  if (custApply) {
+    const id = custApply.dataset.custApply!;
+    const panel = custApply.closest<HTMLElement>(".cust-config");
+    const note = panel?.querySelector<HTMLInputElement>("[data-cust-note]");
+    if (note) setCardNote(id, note.value.trim());
+    void forceUsageRefreshAttempt(false).then(requestTraySync);
     return true;
   }
   const az = target.closest<HTMLElement>("[data-az]");
@@ -7123,7 +7863,7 @@ function renderOneNewApiSite(site: OneNewApiSiteDto): string {
       <div class="ona-site-head">
         <button type="button" class="ona-site-toggle" data-ona-toggle="${escapeHtml(site.id)}">
           <span class="ona-site-name">${escapeHtml(site.name)}</span>
-          <span class="chev">⌄</span>
+          <span class="chev">${uiIcon("caretDown")}</span>
         </button>
         <button type="button" class="mini-btn" data-ona-edit="${escapeHtml(site.id)}">${escapeHtml(t("settings.onenewapiEdit"))}</button>
         <button type="button" class="mini-btn danger" data-ona-delete="${escapeHtml(site.id)}">${escapeHtml(t("settings.onenewapiDelete"))}</button>
@@ -7642,11 +8382,138 @@ function populatePinnedOptions(): void {
   }
 }
 
+interface KeyVaultRow {
+  id: string;
+  service: string;
+  label: string;
+  masked: string;
+  note: string;
+}
+
+function renderKeyvault(rows: KeyVaultRow[]): void {
+  const root = document.querySelector<HTMLElement>("#keyvault-rows");
+  if (!root) return;
+  root.replaceChildren();
+  if (!rows.length) {
+    const empty = document.createElement("p");
+    empty.className = "settings-note kv-empty";
+    empty.textContent = t("settings.kvEmpty");
+    root.append(empty);
+    return;
+  }
+  for (const row of rows) {
+    const item = document.createElement("div");
+    item.className = "kv-item";
+    item.dataset.kvId = row.id;
+
+    const info = document.createElement("div");
+    info.className = "kv-info";
+    const service = document.createElement("span");
+    service.className = "kv-service-badge";
+    service.textContent = row.service;
+    const label = document.createElement("span");
+    label.className = "kv-label";
+    label.textContent = row.label || row.note || row.service;
+    const masked = document.createElement("code");
+    masked.className = "kv-masked";
+    masked.textContent = row.masked;
+    info.append(service, label, masked);
+
+    const actions = document.createElement("div");
+    actions.className = "kv-actions";
+    const copy = document.createElement("button");
+    copy.type = "button";
+    copy.className = "mini-btn";
+    copy.dataset.kvCopy = row.id;
+    copy.textContent = t("settings.kvCopy");
+    const remove = document.createElement("button");
+    remove.type = "button";
+    remove.className = "mini-btn danger";
+    remove.dataset.kvRemove = row.id;
+    remove.textContent = t("settings.kvRemove");
+    actions.append(copy, remove);
+    item.append(info, actions);
+    root.append(item);
+  }
+}
+
+async function loadKeyvault(): Promise<void> {
+  try {
+    const rows = await invoke<KeyVaultRow[]>("keyvault_list");
+    renderKeyvault(rows);
+  } catch (err) {
+    const root = document.querySelector<HTMLElement>("#keyvault-rows");
+    if (root) {
+      root.replaceChildren();
+      const error = document.createElement("p");
+      error.className = "settings-note kv-error";
+      error.textContent = `${t("settings.kvLoadFailed")}: ${String(err)}`;
+      root.append(error);
+    }
+  }
+}
+
+async function addKeyvaultEntry(): Promise<void> {
+  const service = document.querySelector<HTMLInputElement>("#kv-service");
+  const key = document.querySelector<HTMLInputElement>("#kv-key");
+  if (!service || !key || !service.value.trim() || !key.value.trim()) return;
+  const button = document.querySelector<HTMLButtonElement>("#kv-add-btn");
+  if (button) button.disabled = true;
+  try {
+    const rows = await invoke<KeyVaultRow[]>("keyvault_add", {
+      service: service.value.trim(),
+      label: service.value.trim(),
+      key: key.value.trim(),
+      note: "",
+    });
+    service.value = "";
+    key.value = "";
+    renderKeyvault(rows);
+  } catch (err) {
+    const status = document.querySelector("#status");
+    if (status) status.textContent = String(err);
+  } finally {
+    if (button) button.disabled = false;
+  }
+}
+
+async function removeKeyvaultEntry(id: string): Promise<void> {
+  const ok = await appConfirm({
+    title: t("settings.kvRemoveTitle"),
+    message: t("settings.kvRemoveBody"),
+    confirmLabel: t("settings.kvRemove"),
+    danger: true,
+  });
+  if (!ok) return;
+  try {
+    renderKeyvault(await invoke<KeyVaultRow[]>("keyvault_remove", { id }));
+  } catch (err) {
+    const status = document.querySelector("#status");
+    if (status) status.textContent = String(err);
+  }
+}
+
+async function copyKeyvaultEntry(id: string, button: HTMLButtonElement): Promise<void> {
+  try {
+    const rawKey = await invoke<string>("keyvault_copy", { id });
+    await navigator.clipboard.writeText(rawKey);
+    const old = button.textContent;
+    button.textContent = t("settings.kvCopied");
+    window.setTimeout(() => {
+      button.textContent = old || t("settings.kvCopy");
+    }, 1400);
+  } catch (err) {
+    const status = document.querySelector("#status");
+    if (status) status.textContent = String(err);
+  }
+}
+
 function applyLocale(): void {
   config.locale = normalizeLocalePref(config.locale);
   setActiveLocale(resolveLocale(config.locale));
   applyStaticI18n();
   renderOneNewApiSettings();
+  if (document.body.classList.contains("settings-open")) void loadKeyvault();
   applyAppearance();
   const status = document.querySelector("#status");
   if (status) {
@@ -7667,6 +8534,7 @@ function applyLocale(): void {
 
 async function initSettings(): Promise<void> {
   config = await invoke<Config>("get_config");
+  pruneEmptyCardGroups();
   config.locale = normalizeLocalePref(config.locale);
   try {
     const sys = await invoke<string>("system_ui_locale");
@@ -7679,8 +8547,14 @@ async function initSettings(): Promise<void> {
     spendTab = config.spendTab;
     rangeSelected = spendTab === "last30";
   }
-  if (config.overviewTab === "5h" || config.overviewTab === "week") {
+  if (config.overviewTab === "5h" || config.overviewTab === "week" || config.overviewTab === "month") {
     overviewTab = config.overviewTab;
+  }
+  if ((OVERVIEW_CATEGORIES as readonly string[]).includes(config.overviewCategory)) {
+    overviewCategory = config.overviewCategory;
+  }
+  if (config.overviewStyle !== "rings" && config.overviewStyle !== "bars") {
+    config.overviewStyle = "rings";
   }
 
   const interval = document.querySelector<HTMLInputElement>("#interval")!;
@@ -7831,6 +8705,24 @@ async function initSettings(): Promise<void> {
     }
   });
 
+  const categoryShortcut = document.querySelector<HTMLInputElement>("#category-shortcut")!;
+  categoryShortcut.value = config.categoryShortcut || "Shift+1";
+  categoryShortcut.addEventListener("keydown", (event) => {
+    if (event.key === "Tab" || event.key === "Escape") return;
+    event.preventDefault();
+    const captured = formatCapturedShortcut(event);
+    if (!captured) return;
+    categoryShortcut.value = captured;
+    config.categoryShortcut = captured;
+    void patchConfig({ categoryShortcut: captured });
+    document.querySelector("#status")!.textContent = t("footer.shortcutSaved");
+  });
+  categoryShortcut.addEventListener("change", () => {
+    const value = categoryShortcut.value.trim();
+    config.categoryShortcut = value;
+    void patchConfig({ categoryShortcut: value });
+  });
+
   const proxyEnabled = document.querySelector<HTMLInputElement>("#proxy-enabled")!;
   const proxyUrl = document.querySelector<HTMLInputElement>("#proxy-url")!;
   proxyEnabled.checked = config.proxy?.enabled ?? false;
@@ -7849,6 +8741,20 @@ async function initSettings(): Promise<void> {
 
   document.querySelector("#reset-all-settings")!.addEventListener("click", () => {
     void resetAllSettings();
+  });
+
+  document.querySelector("#kv-add-btn")?.addEventListener("click", () => {
+    void addKeyvaultEntry();
+  });
+  document.querySelector("#keyvault-rows")?.addEventListener("click", (event) => {
+    const target = event.target as HTMLElement;
+    const copy = target.closest<HTMLButtonElement>("[data-kv-copy]");
+    if (copy?.dataset.kvCopy) {
+      void copyKeyvaultEntry(copy.dataset.kvCopy, copy);
+      return;
+    }
+    const remove = target.closest<HTMLButtonElement>("[data-kv-remove]");
+    if (remove?.dataset.kvRemove) void removeKeyvaultEntry(remove.dataset.kvRemove);
   });
 
 }
@@ -7886,7 +8792,12 @@ async function resetAllSettings(): Promise<void> {
     notifyResetSoon: true,
     spendTab: "today",
     overviewTab: "5h",
+    overviewCategory: "coding",
+    overviewStyle: "rings",
+    categoryOverrides: {},
     spendMetric: "cost",
+    spendGrouping: "tool",
+    spendHeadRange: "today",
     showUsed: false,
     showTrend: false,
     resetExact: false,
@@ -7896,6 +8807,7 @@ async function resetAllSettings(): Promise<void> {
     density: "compact",
     glassEffects: true,
     shortcut: "",
+    categoryShortcut: "Shift+1",
     proxy: { enabled: false, url: "" },
     showTotalSpend: true,
     reduceAnimations: false,
@@ -7906,6 +8818,13 @@ async function resetAllSettings(): Promise<void> {
   rangeSelected = false;
   rangeTab = "d30";
   overviewTab = "5h";
+  overviewCategory = "coding";
+  if (config.spendGrouping !== "tool" && config.spendGrouping !== "model") {
+    config.spendGrouping = "tool";
+  }
+  if (config.spendHeadRange !== "today" && config.spendHeadRange !== "week" && config.spendHeadRange !== "month") {
+    config.spendHeadRange = "today";
+  }
   applyLocale();
   syncSettingsControls();
   scheduleAutoRefresh();
@@ -7946,6 +8865,7 @@ function syncSettingsControls(): void {
   setCheck("#glass", config.glassEffects !== false);
   setCheck("#reduce-anim", config.reduceAnimations === true);
   setNum("#shortcut", config.shortcut);
+  setNum("#category-shortcut", config.categoryShortcut || "Shift+1");
   setCheck("#proxy-enabled", config.proxy?.enabled ?? false);
   setNum("#proxy-url", config.proxy?.url ?? "");
   const autostart = document.querySelector<HTMLInputElement>("#autostart");
@@ -7980,26 +8900,34 @@ window.addEventListener("DOMContentLoaded", () => {
   // No lens init here: applyGlass() (via initSettings, after the saved
   // config arrives) owns it — a fixed timer raced the config load and
   // built the maps even for users who turned glass off.
-  // Bare Shift flips the Quota Overview between its 5-hour and weekly
-  // boards — the chord that follows the global popover shortcut (Alt+2
-  // shows the popover, Shift then toggles the board). The switch commits
-  // on Shift *keyup* and only when no other key went down in between:
-  // Shift pressed first (Shift+Tab, Shift then Ctrl+Z) is a chord, not a
-  // toggle. Typing targets are skipped (capitals / IME Shift handling),
-  // and Customize layout editing keeps its own keyboard world.
+  // Local shortcuts are handled only by this focused dashboard window. The
+  // wake shortcut is registered by Rust as the sole global shortcut.
   let shiftAlone = false;
+  const canCyclePeriod = () => isDashboardActive() && !customizeOpen &&
+    !document.body.classList.contains("settings-open") &&
+    !document.querySelector(".group-menu-overlay, #confirm-overlay") &&
+    !isTypingTarget(document.activeElement);
   window.addEventListener("keydown", (e) => {
-    konamiListen(e);
     if (e.key === "Shift") {
-      shiftAlone =
-        !e.repeat &&
-        !e.ctrlKey &&
-        !e.altKey &&
-        !e.metaKey &&
-        !customizeOpen &&
-        !isTypingTarget(document.activeElement);
+      shiftAlone = !e.repeat && !e.ctrlKey && !e.altKey && !e.metaKey &&
+        !e.isComposing && canCyclePeriod();
     } else {
       shiftAlone = false;
+    }
+    konamiListen(e);
+    if (
+      isDashboardActive() &&
+      shortcutMatches(e, config.categoryShortcut) &&
+      !e.repeat &&
+      !customizeOpen &&
+      !document.body.classList.contains("settings-open") &&
+      !e.isComposing &&
+      e.keyCode !== 229 &&
+      !isTypingTarget(document.activeElement)
+    ) {
+      e.preventDefault();
+      cycleOverviewCategory();
+      return;
     }
     if (e.ctrlKey && e.key.toLowerCase() === "z" && customizeOpen) {
       e.preventDefault();
@@ -8061,19 +8989,14 @@ window.addEventListener("DOMContentLoaded", () => {
     }
   });
   window.addEventListener("keyup", (e) => {
-    // Commit the bare-Shift board toggle here (see the keydown handler):
-    // by keyup time we know no second key joined the chord.
-    if (e.key === "Shift" && shiftAlone) {
-      shiftAlone = false;
-      switchOverviewTab(overviewTab === "5h" ? "week" : "5h");
+    if (e.key !== "Shift") return;
+    const cycle = shiftAlone;
+    shiftAlone = false;
+    if (cycle && !e.ctrlKey && !e.altKey && !e.metaKey && !e.isComposing && canCyclePeriod()) {
+      switchOverviewTab(OVERVIEW_TABS[(OVERVIEW_TABS.indexOf(overviewTab) + 1) % OVERVIEW_TABS.length]);
     }
   });
-  // The popover hides on focus loss — a Shift held across that moment
-  // never sees keyup, so its pending state must not survive to the next
-  // show.
-  window.addEventListener("blur", () => {
-    shiftAlone = false;
-  });
+  window.addEventListener("blur", () => { shiftAlone = false; });
   void getVersion().then((v) => {
     appVersion = v;
     buildText = `v${v} · build ${__BUILD_STAMP__}`;
@@ -8085,6 +9008,7 @@ window.addEventListener("DOMContentLoaded", () => {
   const setSettings = (open: boolean) => {
     document.body.classList.toggle("settings-open", open);
     document.querySelector("#settings-btn")?.classList.toggle("active", open);
+    if (open) void loadKeyvault();
   };
   document.querySelector("#settings-btn")!.addEventListener("click", () => {
     setDrawer(false);
@@ -8144,6 +9068,7 @@ window.addEventListener("DOMContentLoaded", () => {
   setupCustomizeDnD(drawerBody);
 
   const providersEl = document.querySelector<HTMLElement>("#providers")!;
+  setupOverviewGroupDrag(providersEl);
   // Group banners are focusable (role="button") — Enter/Space folds them
   // like a click would.
   providersEl.addEventListener("keydown", (e) => {
@@ -8162,12 +9087,33 @@ window.addEventListener("DOMContentLoaded", () => {
   };
   providersEl.addEventListener("click", (e) => {
     const button = (e.target as Element).closest<HTMLElement>("[data-spend-metric]");
-    if (!button) return;
-    const metric = button.dataset.spendMetric;
-    if (metric !== "cost" && metric !== "tokens") return;
-    config.spendMetric = metric;
-    void patchConfig({ spendMetric: metric });
-    renderAll();
+    if (button) {
+      const metric = button.dataset.spendMetric;
+      if (metric !== "cost" && metric !== "tokens") return;
+      config.spendMetric = metric;
+      void patchConfig({ spendMetric: metric });
+      renderAll();
+      return;
+    }
+    const groupBtn = (e.target as Element).closest<HTMLElement>("[data-spend-group]");
+    if (groupBtn) {
+      const grouping = groupBtn.dataset.spendGroup;
+      if (grouping !== "tool" && grouping !== "model") return;
+      if (config.spendGrouping === grouping) return;
+      config.spendGrouping = grouping;
+      void patchConfig({ spendGrouping: grouping });
+      renderAll();
+      return;
+    }
+    const headRange = (e.target as Element).closest<HTMLElement>("[data-spend-head-range]");
+    if (headRange) {
+      const range = headRange.dataset.spendHeadRange;
+      if (range !== "today" && range !== "week" && range !== "month") return;
+      if (config.spendHeadRange === range) return;
+      config.spendHeadRange = range;
+      void patchConfig({ spendHeadRange: range });
+      renderAll();
+    }
   });
   providersEl.addEventListener("contextmenu", (e) => {
     if ((e.target as Element).closest?.(".donut-wrap")) {
@@ -8178,7 +9124,7 @@ window.addEventListener("DOMContentLoaded", () => {
     // Right-click an overview cell = the same group menu the card's ⚙
     // opens, so re-grouping never needs scrolling to the cards below.
     const ovCell = (e.target as Element).closest?.<HTMLElement>(
-      ".overview-item[data-jump-provider]",
+      ".overview-item[data-jump-provider], .overview-bar-item[data-jump-provider], .expiring-row[data-jump-provider]",
     );
     if (ovCell?.dataset.jumpProvider) {
       e.preventDefault();
@@ -8189,7 +9135,7 @@ window.addEventListener("DOMContentLoaded", () => {
     const card = (e.target as Element).closest?.<HTMLElement>("article[data-provider]");
     if (card && card.dataset.provider && card.dataset.provider !== "__overview__") {
       e.preventDefault();
-      openGroupMenu(card.dataset.provider, card);
+      openGroupMenu(card.dataset.provider, card, false);
     }
   });
 
@@ -8202,10 +9148,16 @@ window.addEventListener("DOMContentLoaded", () => {
   };
   providersEl.addEventListener("mouseover", (e) => {
     const t = (e.target as Element).closest?.<HTMLElement>(".total-spend [data-pid]");
-    if (t) setDonutHot(t.dataset.pid ?? null);
+    if (t) {
+      setDonutHot(t.dataset.pid ?? null);
+      showSpendPop(t);
+    }
   });
   providersEl.addEventListener("mouseout", (e) => {
-    if ((e.target as Element).closest?.(".total-spend [data-pid]")) setDonutHot(null);
+    if ((e.target as Element).closest?.(".total-spend [data-pid]")) {
+      setDonutHot(null);
+      hideSpendPop();
+    }
   });
 
   // In-popover reordering: drag a card by the grip in its header. The new
@@ -8264,6 +9216,12 @@ window.addEventListener("DOMContentLoaded", () => {
   providersEl.addEventListener("click", (e) => {
     const target = e.target as HTMLElement;
 
+    const overviewMove = target.closest<HTMLElement>("[data-overview-move]");
+    if (overviewMove) {
+      openGroupMenu(overviewMove.dataset.overviewMove!, overviewMove);
+      return;
+    }
+
     const link = target.closest<HTMLElement>("[data-link]");
     if (link) {
       void invoke("open_link", { url: link.dataset.link }).catch((err) => {
@@ -8278,7 +9236,7 @@ window.addEventListener("DOMContentLoaded", () => {
     }
     const groupBtn = target.closest<HTMLElement>("[data-card-group-menu]");
     if (groupBtn) {
-      openGroupMenu(groupBtn.dataset.cardGroupMenu!, groupBtn);
+      openGroupMenu(groupBtn.dataset.cardGroupMenu!, groupBtn, false);
       return;
     }
     const acctTab = target.closest<HTMLElement>("[data-card-account]");
@@ -8329,10 +9287,36 @@ window.addEventListener("DOMContentLoaded", () => {
       }
       return;
     }
+    const spendFold = target.closest<HTMLElement>("[data-spend-fold]");
+    if (spendFold) {
+      config.layout ??= { providerOrder: [], providers: {} };
+      config.layout.spendCollapsed = !isSpendFolded();
+      saveLayout(false);
+      renderAll();
+      return;
+    }
     const ovTab = target.closest<HTMLElement>("[data-overview-tab]");
     if (ovTab) {
       const next = ovTab.dataset.overviewTab;
-      if (next === "5h" || next === "week") switchOverviewTab(next);
+      if (next === "5h" || next === "week" || next === "month") switchOverviewTab(next);
+      return;
+    }
+    const ovCat = target.closest<HTMLElement>("[data-overview-cat]");
+    if (ovCat) {
+      const next = ovCat.dataset.overviewCat ?? "";
+      if ((OVERVIEW_CATEGORIES as readonly string[]).includes(next)) {
+        switchOverviewCategory(next as OverviewCategory);
+      }
+      return;
+    }
+    const ovStyle = target.closest<HTMLElement>("[data-overview-style]");
+    if (ovStyle) {
+      const style = ovStyle.dataset.overviewStyle;
+      if (style !== "rings" && style !== "bars") return;
+      if (config.overviewStyle === style) return;
+      config.overviewStyle = style;
+      void patchConfig({ overviewStyle: style });
+      renderAll();
       return;
     }
     const ovExpiring = target.closest<HTMLElement>("[data-overview-expiring]");
@@ -8341,9 +9325,35 @@ window.addEventListener("DOMContentLoaded", () => {
       renderAll();
       return;
     }
+    const groupManage = target.closest<HTMLElement>("[data-overview-group-manage]");
+    if (groupManage) {
+      openGroupManagementPanel();
+      return;
+    }
     const peakHelp = target.closest<HTMLElement>("[data-overview-peak-help]");
     if (peakHelp) {
       openPeakHelp(peakHelp);
+      return;
+    }
+    const groupRemove = target.closest<HTMLElement>("[data-group-remove]");
+    if (groupRemove) {
+      const gid = groupRemove.dataset.groupRemove!;
+      const g = cardGroup(gid);
+      if (g) {
+        const count = cardGroupMemberCount(gid);
+        if (count > 0) {
+          void appConfirm({ title: t("overview.groupDeleteBlockedTitle"), message: t("overview.groupDeleteBlockedBody", { name: g.name, n: count }), confirmLabel: t("dialog.ok") });
+          return;
+        }
+        void appConfirm({
+          title: t("customize.groupDelete"),
+          message: t("customize.groupDeleteConfirm", { name: g.name }),
+          confirmLabel: t("customize.groupDelete"),
+          danger: true,
+        }).then((ok) => {
+          if (ok) deleteCardGroup(gid);
+        });
+      }
       return;
     }
     const groupToggle = target.closest<HTMLElement>("[data-group-toggle]");
