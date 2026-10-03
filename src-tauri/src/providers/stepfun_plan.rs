@@ -26,14 +26,41 @@ pub async fn snapshot_with_key(token: &str) -> Snapshot {
         Err(e) => Snapshot::error(ID, NAME, e),
     }
 }
+/// The stored token is "<access JWT>...<device JWT>". The platform rejects
+/// a bare token as "embezzled" — requests must also carry Oasis-Webid with
+/// the device_id from the trailing (device) JWT's payload.
+fn webid_from_token(token: &str) -> Option<String> {
+    use base64::Engine;
+    let jwt = token.split("...").last()?;
+    let payload_b64 = jwt.split('.').nth(1)?;
+    let payload = base64::engine::general_purpose::URL_SAFE_NO_PAD
+        .decode(payload_b64)
+        .or_else(|_| base64::engine::general_purpose::STANDARD_NO_PAD.decode(payload_b64))
+        .ok()?;
+    let v: Value = serde_json::from_slice(&payload).ok()?;
+    v.get("device_id")
+        .and_then(Value::as_str)
+        .filter(|s| !s.is_empty())
+        .map(str::to_string)
+}
+
 async fn post(token: &str, url: &str) -> Result<Value, String> {
-    let r = http()
+    let webid = webid_from_token(token);
+    let cookie = match &webid {
+        Some(w) => format!("Oasis-Token={token}; Oasis-Webid={w}"),
+        None => format!("Oasis-Token={token}"),
+    };
+    let mut req = http()
         .post(url)
         .header("Content-Type", "application/json")
         .header("Oasis-Token", token)
-        .header("Cookie", format!("Oasis-Token={token}"))
+        .header("Cookie", cookie)
         .header("Oasis-Appid", "10300")
-        .header("Oasis-Platform", "web")
+        .header("Oasis-Platform", "web");
+    if let Some(w) = &webid {
+        req = req.header("Oasis-Webid", w);
+    }
+    let r = req
         .json(&serde_json::json!({}))
         .send()
         .await
@@ -100,8 +127,28 @@ async fn fetch(token: &str) -> Result<Snapshot, String> {
 }
 #[cfg(test)]
 mod tests {
+    use super::webid_from_token;
+
     #[test]
     fn separate_id() {
         assert_eq!(super::ID, "stepfun-plan");
+    }
+
+    #[test]
+    fn webid_extracts_from_device_jwt() {
+        use base64::Engine;
+        let payload = base64::engine::general_purpose::URL_SAFE_NO_PAD
+            .encode(br#"{"app_id":10300,"device_id":"fbf12e2b1b5d3a3a57de1cfa87c069089a365ab0","platform":"web"}"#);
+        let token = format!("aaa.bbb.ccc...header.{}.sig", payload);
+        assert_eq!(
+            webid_from_token(&token).as_deref(),
+            Some("fbf12e2b1b5d3a3a57de1cfa87c069089a365ab0"),
+        );
+    }
+
+    #[test]
+    fn webid_absent_for_bare_token() {
+        assert_eq!(webid_from_token("header.payload.sig"), None);
+        assert_eq!(webid_from_token(""), None);
     }
 }
