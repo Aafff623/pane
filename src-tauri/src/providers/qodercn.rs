@@ -162,8 +162,16 @@ fn parse_snapshot(plan: Option<&Value>, usage: &Value) -> Result<Snapshot, Strin
         return Err("usage response has no credit total/used".into());
     };
 
-    let resets_at = json_f64(usage.get("expiresAt")).map(epoch_ms);
-    let mut metrics = vec![credit_row("Credits", used, total).with_reset(resets_at, None)];
+    // Collect package rows first: the main "Credits" row is an AGGREGATE —
+    // main pool + every available package (sum used / sum total), the
+    // "total credit wealth" reading the dashboard anchors on. Its reset is
+    // the earliest expiry across all pools (the denominator's first change).
+    // Trae CN's main Credits row is the same merged semantics.
+    let main_reset = json_f64(usage.get("expiresAt")).map(epoch_ms);
+    let mut pkg_used = 0.0;
+    let mut pkg_total = 0.0;
+    let mut earliest_reset = main_reset;
+    let mut package_rows: Vec<Metric> = Vec::new();
 
     for package in usage
         .get("dedicatedResourcePackages")
@@ -177,6 +185,8 @@ fn parse_snapshot(plan: Option<&Value>, usage: &Value) -> Result<Snapshot, Strin
         let (Some(p_total), Some(p_used)) =
             (json_f64(package.get("total")), json_f64(package.get("used")))
         else {
+            // A package missing used/total is skipped entirely — row AND
+            // aggregate — so a hidden denominator never inflates the pct.
             continue;
         };
         let label = package
@@ -195,13 +205,26 @@ fn parse_snapshot(plan: Option<&Value>, usage: &Value) -> Result<Snapshot, Strin
             .unwrap_or("Dedicated credits");
         // The main pool owns the plain "Credits" label everywhere in the
         // UI (pools, layout order, overview primary) — a vendor-authored
-        // package title must not shadow it.
+        // package title must not shadow it. Dropped from the aggregate too:
+        // it may be the main pool reported twice.
         if label == "Credits" {
             continue;
         }
+        pkg_used += p_used;
+        pkg_total += p_total;
         let reset = json_f64(package.get("expiresAt")).map(epoch_ms);
-        metrics.push(credit_row(label, p_used, p_total).with_reset(reset, None));
+        if let Some(r) = reset {
+            earliest_reset = Some(match earliest_reset {
+                Some(cur) => cur.min(r),
+                None => r,
+            });
+        }
+        package_rows.push(credit_row(label, p_used, p_total).with_reset(reset, None));
     }
+
+    let mut metrics = vec![credit_row("Credits", used + pkg_used, total + pkg_total)
+        .with_reset(earliest_reset, None)];
+    metrics.extend(package_rows);
 
     let plan = plan
         .and_then(|p| p.get("plan_tier_name"))
@@ -346,8 +369,13 @@ mod tests {
         // Main pool + the one available package; the unavailable one is skipped.
         assert_eq!(snap.metrics.len(), 2);
         assert_eq!(snap.metrics[0].label, "Credits");
+        // Main row is the aggregate: (5+5)/(2000+2000) — numerically the
+        // same 0.25 here by coincidence, detail and reset prove the merge.
         assert!((snap.metrics[0].used_percent.unwrap() - 0.25).abs() < 0.001);
-        assert_eq!(snap.metrics[0].resets_at, Some(1791648000000));
+        assert_eq!(snap.metrics[0].detail.as_deref(), Some("10 of 4000 credits used"));
+        // Aggregate reset = earliest expiry across pools (package 10-10
+        // beats the main pool's monthly 10-11).
+        assert_eq!(snap.metrics[0].resets_at, Some(1791620214801));
         assert_eq!(snap.metrics[1].label, "Qwen Exclusive Credits");
         assert!(snap.metrics[1].detail.as_deref().unwrap().contains("5 of 2000"));
         assert_eq!(snap.metrics[1].resets_at, Some(1791620214801));
@@ -378,6 +406,9 @@ mod tests {
         });
         let snap = parse_snapshot(None, &usage).expect("parse");
         assert_eq!(snap.metrics[1].label, "Dedicated credits");
+        // Aggregate main row: (0+10)/(100+50).
+        assert!((snap.metrics[0].used_percent.unwrap() - 6.667).abs() < 0.01);
+        assert_eq!(snap.metrics[0].detail.as_deref(), Some("10 of 150 credits used"));
     }
 
     #[test]
@@ -394,9 +425,88 @@ mod tests {
         });
         let snap = parse_snapshot(None, &usage).expect("parse");
         // The package row is dropped rather than colliding with the main
-        // pool's label (pool/maxed/layout engines are label-keyed).
+        // pool's label (pool/maxed/layout engines are label-keyed) — and
+        // it stays OUT of the aggregate: it may be the main pool reported
+        // twice, so 0/100 (not 10/150) locks the no-double-count rule.
         assert_eq!(snap.metrics.len(), 1);
         assert_eq!(snap.metrics[0].label, "Credits");
+        assert_eq!(snap.metrics[0].detail.as_deref(), Some("0 of 100 credits used"));
+    }
+
+    #[test]
+    fn aggregate_skips_unavailable_packages() {
+        let usage = json!({
+            "userQuota": {"total": 100.0, "used": 10.0},
+            "dedicatedResourcePackages": [
+                {"total": 100.0, "used": 90.0, "available": false,
+                 "displayLabels": [{"dimension": "title", "value": "gone"}]},
+                {"total": 100.0, "used": 30.0, "available": true,
+                 "displayLabels": [{"dimension": "title", "value": "live"}]}
+            ]
+        });
+        let snap = parse_snapshot(None, &usage).expect("parse");
+        // Only the available package joins: (10+30)/(100+100) = 20%.
+        assert_eq!(snap.metrics.len(), 2);
+        assert!((snap.metrics[0].used_percent.unwrap() - 20.0).abs() < 0.001);
+        assert_eq!(snap.metrics[1].label, "live");
+    }
+
+    #[test]
+    fn aggregate_reset_takes_the_earliest_expiry() {
+        // Package expires before the main pool's monthly reset. (Values are
+        // real epoch-ms magnitudes — epoch_ms promotes second-scale numbers.)
+        let early = json!({
+            "expiresAt": 1791648000000.0,
+            "userQuota": {"total": 100.0, "used": 0.0},
+            "dedicatedResourcePackages": [
+                {"total": 100.0, "used": 0.0, "expiresAt": 1791620214801.0, "available": true,
+                 "displayLabels": [{"dimension": "title", "value": "p"}]}]
+        });
+        assert_eq!(
+            parse_snapshot(None, &early).unwrap().metrics[0].resets_at,
+            Some(1791620214801)
+        );
+        // And the reverse order — the main pool's earlier expiry wins.
+        let late = json!({
+            "expiresAt": 1791620214801.0,
+            "userQuota": {"total": 100.0, "used": 0.0},
+            "dedicatedResourcePackages": [
+                {"total": 100.0, "used": 0.0, "expiresAt": 1791648000000.0, "available": true,
+                 "displayLabels": [{"dimension": "title", "value": "p"}]}]
+        });
+        assert_eq!(
+            parse_snapshot(None, &late).unwrap().metrics[0].resets_at,
+            Some(1791620214801)
+        );
+    }
+
+    #[test]
+    fn package_missing_fields_stays_out_of_the_aggregate() {
+        let usage = json!({
+            "userQuota": {"total": 100.0, "used": 0.0},
+            "dedicatedResourcePackages": [
+                // No `used` — row skipped AND denominator untouched.
+                {"total": 50.0, "available": true,
+                 "displayLabels": [{"dimension": "title", "value": "p1"}]},
+                // No `total` — same treatment.
+                {"used": 20.0, "available": true,
+                 "displayLabels": [{"dimension": "title", "value": "p2"}]}]
+        });
+        let snap = parse_snapshot(None, &usage).expect("parse");
+        assert_eq!(snap.metrics.len(), 1);
+        assert_eq!(snap.metrics[0].detail.as_deref(), Some("0 of 100 credits used"));
+    }
+
+    #[test]
+    fn all_zero_totals_do_not_panic() {
+        let usage = json!({
+            "userQuota": {"total": 0.0, "used": 0.0},
+            "dedicatedResourcePackages": [
+                {"total": 0.0, "used": 0.0, "available": true,
+                 "displayLabels": [{"dimension": "title", "value": "p"}]}]
+        });
+        let snap = parse_snapshot(None, &usage).expect("parse");
+        assert_eq!(snap.metrics[0].used_percent, Some(0.0));
     }
 
     #[test]
