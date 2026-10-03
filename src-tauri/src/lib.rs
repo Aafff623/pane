@@ -2616,6 +2616,13 @@ async fn fetch_spend() -> Vec<spend::ProviderSpend> {
     result
 }
 
+/// Returns the local token-ledger inventory without scanning or contacting
+/// providers. Used by diagnostics and future coverage UI.
+#[tauri::command]
+fn fetch_spend_sources() -> Vec<spend::SpendSourceStatus> {
+    spend::source_statuses()
+}
+
 /// Sampled quota history per card id — the trend fallback for cards with no
 /// local CLI logs (API-key accounts, relay keys). Cheap: one small file.
 #[tauri::command]
@@ -3737,6 +3744,7 @@ pub fn run() {
             refresh_provider,
             cached_usage,
             fetch_spend,
+            fetch_spend_sources,
             fetch_usage_history,
             fetch_spend_history,
             antigravity_capture_account,

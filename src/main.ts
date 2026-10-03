@@ -2938,11 +2938,9 @@ interface OverviewItem {
   quota: OverviewQuota;
 }
 
-/// A status section (可用 / 高峰 / 不可用) in the overview panel: one H1-style
-/// header, then untagged cards flat, then one H2-style sub-header per card
-/// group — the same bucketing the dashboard uses. Cards drift between
-/// sections on their own as quotas max out and recover; the group tag
-/// itself never has to change.
+/// A grouped overview panel: untagged cards first, then one sub-header per
+/// card group. Status stays on each card, so a group does not split when a
+/// provider reaches its limit and later recovers.
 function overviewSectionHtml(
   title: string,
   tone: "ok" | "down",
@@ -2961,10 +2959,12 @@ function overviewSectionHtml(
   }
   const grid = (list: OverviewItem[]) =>
     `<div class="overview-grid${config.overviewStyle === "bars" ? " ovbars" : ""}">${list.map(render).join("")}</div>`;
-  let html = `<div class="overview-section-head tone-${tone}">
-      <span class="overview-section-title">${escapeHtml(title)}</span>
-      <span class="overview-section-count">${items.length}</span>
-    </div>`;
+  let html = title
+    ? `<div class="overview-section-head tone-${tone}">
+        <span class="overview-section-title">${escapeHtml(title)}</span>
+        <span class="overview-section-count">${items.length}</span>
+      </div>`
+    : "";
   if (flat.length > 0) html += grid(flat);
   for (const g of groups) {
     const members = byGroup.get(g.id) ?? [];
@@ -3015,7 +3015,6 @@ function renderQuotaOverview(): string {
   // never disagree. An empty section renders nothing.
   const isDown = (it: OverviewItem) =>
     it.quota.status === "error" || isSnapshotMaxed(it.shownSnap);
-  const downItems = items.filter(isDown);
   const upItems = items.filter((it) => !isDown(it));
   const maxedCount = totalCount - errorCount - upItems.length;
 
@@ -3306,13 +3305,7 @@ function renderQuotaOverview(): string {
       </div>`
     : "";
   const sectionsView = !isFolded && !overviewExpiringOpen
-    ? `<div class="card-panel overview-panel">${[
-        // One 可用 section — in-peak tiles live inside it, marked by
-        // their yellow dots (plus the header's N-peak chip and hover
-        // tips). A separate peak section only stretched the scroll.
-        upItems.length > 0 ? overviewSectionHtml(t("overview.sectionAvailable"), "ok", upItems, overviewRender) : "",
-        downItems.length > 0 ? overviewSectionHtml(t("overview.sectionUnavailable"), "down", downItems, overviewRender) : "",
-      ].join("")}</div>`
+    ? `<div class="card-panel overview-panel">${overviewSectionHtml("", "ok", items, overviewRender)}</div>`
     : "";
 
   return `
@@ -3535,8 +3528,6 @@ function openGroupManagementPanel(): void {
   document.querySelector<HTMLElement>(".group-menu-overlay")?.remove();
   const builtins = [
     ...OVERVIEW_CATEGORIES.map((id) => ({ id, name: t(`category.${id}`), kind: t("overview.groupBuiltin") })),
-    { id: "available", name: t("overview.sectionAvailable"), kind: t("overview.groupBuiltin") },
-    { id: "unavailable", name: t("overview.sectionUnavailable"), kind: t("overview.groupBuiltin") },
   ];
   const overlay = document.createElement("div");
   overlay.className = "group-menu-overlay";

@@ -75,6 +75,79 @@ pub struct ProviderDays {
     pub days: DayMap,
 }
 
+/// Runtime inventory of token-usage sources. This is deliberately separate
+/// from `ProviderSpend`: a source can be installed but empty, or can feed
+/// another provider's card through routing (Pi, Hermes, OpenCode gateways).
+/// Keeping the inventory lets us see coverage gaps without inventing tokens.
+#[derive(Serialize, Clone)]
+pub struct SpendSourceStatus {
+    pub id: String,
+    pub tool: String,
+    pub form: String,
+    pub collector: String,
+    pub state: String,
+    pub feeds: Vec<String>,
+}
+
+fn source_status(
+    id: &str,
+    tool: &str,
+    form: &str,
+    collector: &str,
+    paths: &[PathBuf],
+    feeds: &[&str],
+) -> SpendSourceStatus {
+    SpendSourceStatus {
+        id: id.into(),
+        tool: tool.into(),
+        form: form.into(),
+        collector: collector.into(),
+        state: if paths.iter().any(|p| p.exists()) {
+            "detected".into()
+        } else {
+            "not_detected".into()
+        },
+        feeds: feeds.iter().map(|s| (*s).into()).collect(),
+    }
+}
+
+/// Enumerates the local ledgers that the spend engine knows how to read.
+/// `detected` means the source exists on this machine; it does not claim that
+/// every turn was persisted by the tool. Network-only sources are marked
+/// `runtime` because their local presence cannot prove account access.
+pub fn source_statuses() -> Vec<SpendSourceStatus> {
+    let home = dirs::home_dir().unwrap_or_default();
+    let claude = std::env::var("CLAUDE_CONFIG_DIR")
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| home.join(".claude"));
+    let codex = std::env::var("CODEX_HOME")
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| home.join(".codex"));
+    let pi = pi_sessions_dir();
+    let grok = std::env::var("GROK_HOME")
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| home.join(".grok"));
+    let qwen = home.join(".qwen").join("usage");
+    let kimi = providers::kimi::code_home().join("sessions");
+    let zcode = home.join(".zcode").join("cli");
+    let local = dirs::data_local_dir().unwrap_or_default();
+    vec![
+        source_status("claude-jsonl", "Claude Code", "JSONL session logs", "claude_line", &[claude.join("projects")], &["claude", "minimax", "aihubmix", "kimi"]),
+        source_status("codex-jsonl", "Codex", "JSONL rollout logs", "codex_line", &[codex.join("sessions"), codex.join("archived_sessions")], &["codex", "kimi"]),
+        source_status("zcode-sqlite", "ZCode", "SQLite + JSONL fallback", "zcode_db_data + zcode_line", &[zcode.join("db").join("db.sqlite"), zcode.join("rollout")], &["zcode"]),
+        source_status("pi-jsonl", "Pi coding agent", "JSONL session logs", "pi_line", &[pi], &["claude", "codex"]),
+        source_status("grok-jsonl", "Grok CLI", "JSONL unified log", "grok", &[grok.join("logs").join("unified.jsonl")], &["grok"]),
+        source_status("opencode-sqlite", "OpenCode Desktop / CLI", "SQLite message ledger", "providers::opencode::collect_cost_events", &[providers::opencode::data_dir().join("opencode.db")], &["opencode", "aihubmix"]),
+        source_status("devin-sqlite", "Devin", "SQLite sessions ledger", "providers::devin::collect_usage_events", &[crate::platform::config_home().map(|d| d.join("devin").join("cli").join("sessions.db")).unwrap_or_default()], &["devin"]),
+        source_status("minimax-sqlite", "MiniMax Agent", "SQLite token_usage ledger", "providers::minimax::collect_usage_events", &[home.join(".minimax").join("sqlite.db")], &["minimax"]),
+        source_status("hermes-sqlite", "Hermes Desktop", "SQLite session_model_usage ledger", "providers::hermes::collect_usage_events", &[local.join("hermes").join("state.db")], &["hermes", "minimax", "openrouter"]),
+        source_status("qwen-jsonl", "Qwen Code", "JSONL token ledger", "qwen_line", &[qwen], &["qwen"]),
+        source_status("kimi-jsonl", "Kimi Code", "JSONL wire ledger", "kimi_line", &[kimi], &["kimi"]),
+        source_status("antigravity-sqlite", "Antigravity IDE / CLI", "SQLite protobuf conversation ledger", "decode_antigravity_call", &[home.join(".gemini").join("antigravity").join("conversations"), home.join(".gemini").join("antigravity-cli").join("conversations")], &["antigravity"]),
+        SpendSourceStatus { id: "cursor-csv".into(), tool: "Cursor IDE".into(), form: "authenticated usage CSV".into(), collector: "providers::cursor::fetch_usage_csv".into(), state: "runtime".into(), feeds: vec!["cursor".into()] },
+    ]
+}
+
 /// Everything one file contributes: priced per-day totals plus the tally of
 /// unpriced (excluded) events per model name. Cached as a unit so exclusion
 /// counts survive the per-file cache.
@@ -2264,6 +2337,14 @@ fn parse_csv_date(s: &str) -> Option<DateTime<Utc>> {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn source_inventory_covers_desktop_and_runtime_ledgers() {
+        let sources = source_statuses();
+        assert!(sources.iter().any(|s| s.id == "opencode-sqlite" && s.form.contains("SQLite")));
+        assert!(sources.iter().any(|s| s.id == "antigravity-sqlite" && s.form.contains("protobuf")));
+        assert!(sources.iter().any(|s| s.id == "cursor-csv" && s.state == "runtime"));
+    }
 
     fn tokens_sum(d: &FileData) -> f64 {
         d.days.values().map(|v| v.1).sum()

@@ -364,3 +364,17 @@ anything unverified lives under `待确认` at the bottom.
   the vault.
 - **Tavily `/usage` carries NO period dates** — never fabricate a reset;
   plan (Researcher = 1000 credits/month) is surfaced as the plan label.
+
+## Token spend coverage system (2026-10-04)
+
+- Token totals are the primary fact; provider-reported cost wins when present,
+  otherwise the shared pricing catalog derives dollars. Unknown prices do not
+  erase measured tokens: they remain in totals/trends and are marked
+  `unpriced`.
+- Current local forms and routing rules are catalogued in
+  `docs/token-spend-coverage.md`. Sources include JSONL session logs, SQLite
+  ledgers, Antigravity protobuf-in-SQLite, OpenCode Desktop's
+  `~/.local/share/opencode/opencode.db`, and Cursor's authenticated CSV.
+- `spend::source_statuses()` plus the `fetch_spend_sources` Tauri command expose
+  whether each known source is detected locally, absent, or runtime-only. This
+  is coverage evidence, not a claim that every tool turn is persisted.

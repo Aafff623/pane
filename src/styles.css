@@ -4298,10 +4298,16 @@ body.no-glass #confirm-box {
   margin-bottom: 8px;
 }
 
+/* A folded spend bar is only a compact anchor; keep the overview close to it
+   instead of preserving the full card-to-card breathing room. */
+#providers > .total-spend.is-folded + .quota-overview {
+  margin-top: -12px;
+}
+
 .quota-overview .provider-head {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
   min-width: 0;
 }
 
@@ -4333,21 +4339,20 @@ body.no-glass #confirm-box {
   user-select: none;
 }
 
-/* Head space is tight (380px popover): the 可用/满额 chips stack vertically
-   in a narrow column so tabs stay left and the ⏱/⟳ buttons keep the right
-   edge, per the layout the user signed off on. */
+/* Keep the three status counts on one visual baseline. Their compact pills
+   read as a small legend beside the title instead of a second column. */
 .overview-badges {
   display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 2px;
+  flex-direction: row;
+  align-items: center;
+  gap: 5px;
   flex: none;
 }
 
 .overview-badges-tools {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
+  gap: 6px;
   flex: none;
 }
 
@@ -4358,9 +4363,12 @@ body.no-glass #confirm-box {
 }
 
 .overview-badges .overview-chip {
-  font-size: 9.5px;
+  font-size: 10px;
   gap: 3px;
-  padding: 1px 0;
+  padding: 3px 5px;
+  border: 1px solid color-mix(in oklab, var(--foreground) 12%, transparent);
+  border-radius: 999px;
+  background: color-mix(in oklab, var(--foreground) 4%, transparent);
 }
 
 .overview-badges .overview-chip-dot {
@@ -4856,8 +4864,8 @@ article.provider.card-highlight {
 
 /* ── Card groups ──────────────────────────────────────────────────────────── */
 
-/* Overview status sections: H1 = 可用/不可用 (auto, by quota state),
-   H2 = the card's own group tag. Counts right-align like group heads. */
+/* Card groups inside the merged overview panel. Counts right-align like the
+   dashboard's group heads; status is carried by each card's dot and tone. */
 
 .overview-section-head {
   display: flex;
