@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.4.67 — 2026-10-04
+
+- Add explicit add-account/API-key and remove-current-account actions to the
+  provider card menu.
+- Strengthen skin detail contrast in light and dark themes.
+
 ## 0.4.66 — 2026-10-04
 
 - Show one active period at a time in spend details so today, yesterday, and

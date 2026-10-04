@@ -2166,7 +2166,7 @@ function renderCard(s: Snapshot): string {
     }
   }
   return `
-    <article class="provider${muted} ${cardCollapsed ? "is-folded" : ""}" data-provider="${s.id}" data-origin="${escapeHtml(shown.dashboard_url ?? "")}">
+    <article class="provider${muted} ${cardCollapsed ? "is-folded" : ""}" data-provider="${s.id}" data-shown-account="${escapeHtml(shown.id)}" data-origin="${escapeHtml(shown.dashboard_url ?? "")}">
       <div class="provider-head">
         <span class="drag-grip" title="${escapeHtml(t("card.drag"))}">⠿</span>
         <span class="provider-name">${escapeHtml(notedName(s.id, s.name))}</span>
@@ -3900,6 +3900,9 @@ function openGroupMenu(cardId: string, anchor: HTMLElement, includeGrouping = tr
   const current = cardGroupId(cardId);
   const groups = cardGroups();
   const fam = providerFamily(cardId);
+  const shownId = anchor.closest<HTMLElement>("[data-shown-account]")?.dataset.shownAccount ?? cardId;
+  const accounts = accountsCache.get(fam) ?? [];
+  const accountIndex = accounts.findIndex((entry, index) => entry.id === shownId || (shownId === fam && index === 0 && !isParallelAccountFamily(fam)));
   const curCat = effectiveCategory(fam);
   const item = (gid: string, label: string, checked = false) =>
     `<button class="group-menu-item${checked ? " on" : ""}" data-group-pick="${escapeHtml(gid)}">
@@ -3926,11 +3929,13 @@ function openGroupMenu(cardId: string, anchor: HTMLElement, includeGrouping = tr
     <div class="group-menu${includeGrouping ? " overview-move-menu" : ""}" role="menu">
       <div class="group-menu-title">${escapeHtml(t(includeGrouping ? "overview.moveGroup" : "customize.cardSettings"))}</div>
       ${groupingHtml}
+      ${includeGrouping ? "" : `<button class="group-menu-item" data-card-config="${escapeHtml(fam)}"><span class="group-menu-check">＋</span>${escapeHtml(t(supportsExtraAccounts(fam) ? "customize.acctAdd" : "customize.addCredential"))}</button>`}
       <div class="group-menu-sep"></div>
       <button class="group-menu-item" data-card-note="${escapeHtml(cardId)}">
         <span class="group-menu-check">✎</span>${escapeHtml(t("customize.noteMenu"))}
       </button>
       ${includeGrouping ? "" : `<div class="group-menu-sep"></div>
+      ${accountIndex >= 0 ? `<button class="group-menu-item danger" data-card-account-remove="${accountIndex}"><span class="group-menu-check">×</span>${escapeHtml(t("customize.acctDelete"))} · ${escapeHtml(accounts[accountIndex].label)}</button>` : ""}
       <button class="group-menu-item danger" data-card-remove="${escapeHtml(cardId)}">
         <span class="group-menu-check">×</span>${escapeHtml(cardId.includes("@") ? t("customize.acctDelete") : t("customize.providerDelete"))}
       </button>`}
@@ -3942,6 +3947,21 @@ function openGroupMenu(cardId: string, anchor: HTMLElement, includeGrouping = tr
   overlay.addEventListener("click", (e) => {
     if (e.target === overlay) {
       close();
+      return;
+    }
+    const accountRemove = (e.target as HTMLElement).closest<HTMLElement>("[data-card-account-remove]");
+    if (accountRemove) {
+      close(); void doAccountRemove(fam, Number(accountRemove.dataset.cardAccountRemove)); return;
+    }
+    const configure = (e.target as HTMLElement).closest<HTMLElement>("[data-card-config]");
+    if (configure) {
+      close();
+      if (fam === "cursor") openCursorAccountDialog();
+      else if (supportsExtraAccounts(fam) && supportsApiKey(fam)) openAccountDialog(fam);
+      else {
+        skinMarketOpen = false; custConfigOpen = fam; setDrawer(true); renderDrawerBody();
+        document.querySelector<HTMLElement>(`#drawer-body [data-cust-provider="${CSS.escape(fam)}"]`)?.scrollIntoView({ block: "start" });
+      }
       return;
     }
     const removeBtn = (e.target as HTMLElement).closest<HTMLElement>("[data-card-remove]");

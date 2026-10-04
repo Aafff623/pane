@@ -3499,8 +3499,9 @@ body.party .fill {
 .skin-back { margin:4px 0 16px; padding:0; color:var(--muted-foreground); background:none; border:0; cursor:pointer; font:inherit; }
 .skin-detail-hero { display:grid; grid-template-columns:180px 1fr; align-items:center; gap:24px; min-height:260px; padding:24px; overflow:hidden; border-radius:18px; background:var(--skin-preview); background-size:cover; }
 .skin-detail-mascot { width:150px; filter:drop-shadow(0 16px 18px rgb(0 0 0 / .25)); animation:skin-float 4s ease-in-out infinite; }
+.skin-detail-hero > div:last-child { padding:14px 16px; border-radius:14px; background:rgb(0 0 0 / .42); box-shadow:0 8px 24px rgb(0 0 0 / .12); }
 .skin-detail-hero h2 { color:#fff; }
-.skin-detail-hero p:last-child { color:rgb(255 255 255 / .76); }
+.skin-detail-hero p:last-child { color:rgb(255 255 255 / .86); }
 .skin-detail-actions { display:flex; align-items:center; gap:12px; padding-top:14px; }
 .skin-market-actions { display:flex; align-items:center; gap:10px; margin:0 0 12px; }
 .skin-detail-note { color:var(--muted-foreground); font-size:11px; }
