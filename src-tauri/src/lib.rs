@@ -1534,6 +1534,7 @@ async fn account_snapshot(
         "stepfun" => providers::stepfun::snapshot_with_key_as(&key, &id, &name).await,
         "siliconflow" => providers::siliconflow::snapshot_with_key_as(&key, &id, &name).await,
         "novita" => providers::novita::snapshot_with_key_as(&key, &id, &name).await,
+        "clinepass" => providers::clinepass::snapshot_with_key_as(&key, &id, &name).await,
         "relaybalance" => match base_url.as_deref().map(str::trim).filter(|u| !u.is_empty()) {
             Some(url) => {
                 providers::relaybalance::snapshot_with_key_at(&key, url, &id, &name).await

@@ -31,9 +31,19 @@ pub async fn snapshot() -> Snapshot {
 
 /// Live test of a user-pasted key (Customize "Test"), never saved here.
 pub async fn snapshot_with_key(key: &str) -> Snapshot {
+    snapshot_with_key_as(key, ID, NAME).await
+}
+
+/// Account-pool variant: preserve the account card id and label while using
+/// the same ClinePass quota parser as the family card.
+pub async fn snapshot_with_key_as(key: &str, card_id: &str, card_name: &str) -> Snapshot {
     match fetch_with_key(key).await {
-        Ok(s) => s,
-        Err(e) => Snapshot::error(ID, NAME, e),
+        Ok(mut s) => {
+            s.id = card_id.into();
+            s.name = card_name.into();
+            s
+        }
+        Err(e) => Snapshot::error(card_id, card_name, e),
     }
 }
 

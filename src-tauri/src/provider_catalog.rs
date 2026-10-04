@@ -387,7 +387,7 @@ const PROVIDER_DEFINITIONS: &[ProviderDefinition] = &[
         display_name: "ClinePass",
         query_kind: QueryKind::NativeCodingPlan,
         supports_api_key: true,
-        supports_extra_accounts: false,
+        supports_extra_accounts: true,
         icon_key: "clinepass",
         category: ProviderCategory::Coding,
     },
