@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.4.68 — 2026-10-04
+- Fixed provider-card context menus so right-click actions stay anchored to the active card and account tab.
+
 ## 0.4.67 — 2026-10-04
 
 - Add explicit add-account/API-key and remove-current-account actions to the

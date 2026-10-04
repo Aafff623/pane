@@ -17,7 +17,7 @@ anything unverified lives under `待确认` at the bottom.
   project (detached from any upstream, 2026-09-06). A single branch `main`
   exists locally and on origin; feature work happens on `codex/<feature>`
   branches.
-- Version 0.4.67 (`package.json` + `src-tauri/tauri.conf.json`), identifier
+- Version 0.4.68 (`package.json` + `src-tauri/tauri.conf.json`), identifier
   `com.jazii.pane`, productName `Pane`.
 - Privacy boundary (asserted by tests in the code): tokens go only to their
   own vendor's API; pasted keys live in `%APPDATA%\Pane`; the 6736 HTTP API is
@@ -383,7 +383,7 @@ anything unverified lives under `待确认` at the bottom.
   whether each known source is detected locally, absent, or runtime-only. This
   is coverage evidence, not a claim that every tool turn is persisted.
 
-## UI repair facts (2026-10-04)
+## UI repair facts (2026-10-04; context-menu anchoring added in 0.4.68)
 
 - Overview rails and the provider column explicitly clip horizontal overflow;
   the category/period switch row may wrap within the card so Shift + wheel
