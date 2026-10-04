@@ -1632,7 +1632,11 @@ function maxProgressUsed(s: Snapshot): number {
 /// everywhere; gray = no successful fetch yet.
 function accountHealthDot(id: string): "red" | "green" | "gray" {
   const snap = lastSnapshots.find((s) => s.id === id);
-  if (!snap || snap.status !== "ok") return "gray";
+  if (!snap) return "gray";
+  // A rejected key is actionable, not an account with no data. Keep the
+  // gray dot for accounts that have not produced a snapshot yet.
+  if (snap.status === "error") return "red";
+  if (snap.status !== "ok") return "gray";
   if (!snap.metrics.length) return "gray";
   return isSnapshotMaxed(snap) ? "red" : "green";
 }
@@ -1996,7 +2000,7 @@ function renderCard(s: Snapshot): string {
         (snap) => snap.id === active && !isCardDisabled(snap.id),
       );
       if (activeSnap) shown = activeSnap;
-      accountCount = `<span class="provider-count">×${accountIds.length}</span>`;
+      accountCount = `<span class="provider-account-badge" title="${accountIds.length} accounts"><span class="provider-account-glyph" aria-hidden="true">⌁</span><span>${accountIds.length}</span></span>`;
       accountTabs = `<div class="card-account-tabs">${accountIds
         .map((id) => {
           const label = id === s.id

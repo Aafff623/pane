@@ -2458,6 +2458,34 @@ article.provider.is-folded:hover {
   background: rgb(212 212 216 / 0.08);
 }
 
+/* Multi-account family marker: a compact red signal sits beside the provider
+   name so the dashboard communicates account pooling before the user opens
+   the tabs. The glyph reads as a small linked cluster rather than a second
+   status dot; the number is the count of visible account snapshots. */
+.provider-account-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  flex: none;
+  min-width: 27px;
+  height: 19px;
+  padding: 0 6px 0 5px;
+  border: 1px solid rgb(248 113 113 / .72);
+  border-radius: 999px;
+  color: #fff;
+  background: linear-gradient(135deg, #b91c1c, #ef4444);
+  box-shadow: 0 3px 10px rgb(239 68 68 / .22);
+  font-size: 11px;
+  font-weight: 750;
+  line-height: 1;
+  letter-spacing: .01em;
+}
+.provider-account-glyph {
+  font-size: 14px;
+  line-height: 1;
+  transform: rotate(-18deg);
+}
+
 /* Health dot after the account label: red = a window maxed out (waiting
    for reset), green = room left everywhere, gray = no data yet. */
 .acct-dot {
