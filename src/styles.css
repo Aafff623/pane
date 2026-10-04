@@ -1614,7 +1614,7 @@ article.provider.is-folded:hover {
   flex: 1;
   min-width: 0;
   display: grid;
-  grid-template-columns: repeat(2, 1fr);
+  grid-template-columns: minmax(0, 1fr);
   gap: 16px;
   align-self: stretch;
 }
@@ -1629,6 +1629,7 @@ article.provider.is-folded:hover {
 .spend-col .col-head-row {
   display: flex;
   gap: 4px;
+  flex-wrap: wrap;
 }
 
 .ui-icon {
@@ -1946,10 +1947,10 @@ article.provider.is-folded:hover {
   color: var(--foreground);
 }
 
-.overview-bar-item .ovbar-pct.is-maxed,
-.overview-bar-item .ovbar-pct.is-error {
+.overview-bar-item .ovbar-pct.is-maxed {
   color: #ef4444;
 }
+.overview-bar-item .ovbar-pct.is-error { color: #f97316; }
 
 .overview-bar-item .ovbar-line2 {
   display: grid;
@@ -1976,14 +1977,14 @@ article.provider.is-folded:hover {
   background: #f59e0b;
 }
 
-.overview-bar-item .ovbar-fill.tone-maxed,
-.overview-bar-item .ovbar-fill.tone-error {
+.overview-bar-item .ovbar-fill.tone-maxed {
   background: #ef4444;
 }
+.overview-bar-item .ovbar-fill.tone-error { background: #f97316; }
 
 /* Errors have no known percentage: tint the track without inventing usage. */
 .overview-bar-item.tone-error .ovbar {
-  background: color-mix(in oklab, #ef4444 30%, transparent);
+  background: color-mix(in oklab, #f97316 30%, transparent);
 }
 
 .overview-bar-item .ovbar-meta {
@@ -2476,7 +2477,7 @@ article.provider.is-folded:hover {
   background: rgb(212 212 216 / 0.08);
 }
 
-/* Multi-account family marker: a compact red signal sits beside the provider
+/* Multi-account family marker: a neutral blue signal sits beside the provider
    name so the dashboard communicates account pooling before the user opens
    the tabs. The glyph reads as a small linked cluster rather than a second
    status dot; the number is the count of visible account snapshots. */
@@ -2488,11 +2489,11 @@ article.provider.is-folded:hover {
   min-width: 27px;
   height: 19px;
   padding: 0 6px 0 5px;
-  border: 1px solid rgb(248 113 113 / .72);
+  border: 1px solid rgb(96 165 250 / .65);
   border-radius: 999px;
   color: #fff;
-  background: linear-gradient(135deg, #b91c1c, #ef4444);
-  box-shadow: 0 3px 10px rgb(239 68 68 / .22);
+  background: linear-gradient(135deg, #1d4ed8, #2563eb);
+  box-shadow: 0 3px 10px rgb(37 99 235 / .16);
   font-size: 11px;
   font-weight: 750;
   line-height: 1;

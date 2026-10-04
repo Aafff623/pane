@@ -135,6 +135,7 @@ fn config_with_defaults(mut cfg: Value) -> Value {
     obj.entry("glassEffects").or_insert(json!(true));
     obj.entry("shortcut").or_insert(json!("Alt+2"));
     obj.entry("categoryShortcut").or_insert(json!("Shift+1"));
+    obj.entry("localShortcuts").or_insert(json!({}));
     obj.entry("proxy")
         .or_insert(json!({ "enabled": false, "url": "" }));
     obj.entry("showTotalSpend").or_insert(json!(true));
@@ -197,6 +198,7 @@ const CONFIG_KEYS: &[&str] = &[
     "glassEffects",
     "shortcut",
     "categoryShortcut",
+    "localShortcuts",
     "proxy",
     "showTotalSpend",
     "welcomeDismissed",

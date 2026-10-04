@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.4.66 — 2026-10-04
+
+- Show one active period at a time in spend details so today, yesterday, and
+  range totals cannot appear as duplicate provider columns.
+- Add configurable local shortcuts for settings, refresh, Customize, theme,
+  expiring view, and quota period, with duplicate-binding feedback.
+- Keep pooled-account badges informational blue rather than using an alarm red.
+
 ## 0.4.65 — 2026-10-04
 
 - Prevent horizontal overflow when scrolling the overview on narrow windows.

@@ -232,6 +232,7 @@ interface Config {
   glassEffects: boolean;
   shortcut: string;
   categoryShortcut: string;
+  localShortcuts: Record<string, string>;
   proxy: { enabled: boolean; url: string };
   showTotalSpend: boolean;
   welcomeDismissed: boolean;
@@ -270,6 +271,7 @@ const FRONTEND_CONFIG_KEYS = [
   "glassEffects",
   "shortcut",
   "categoryShortcut",
+  "localShortcuts",
   "proxy",
   "showTotalSpend",
   "welcomeDismissed",
@@ -468,6 +470,7 @@ let config: Config = {
   glassEffects: true,
   shortcut: "",
   categoryShortcut: "Shift+1",
+  localShortcuts: {},
   proxy: { enabled: false, url: "" },
   showTotalSpend: true,
   welcomeDismissed: false,
@@ -2590,12 +2593,7 @@ function showSpendPop(anchor: HTMLElement): void {
   const byModel = config.spendGrouping === "model";
   const live = byModel ? modelDonutEntries(spendTab) : donutEntries(spendTab);
   const ranged = byModel ? modelEntriesForRange(rangeTab) : donutEntriesForRange(rangeTab);
-  const altTab = spendTab === "today" ? "yesterday" : "today";
-  const alt = byModel ? modelDonutEntries(altTab) : donutEntries(altTab);
-  const entry =
-    live.find((e) => e.s.id === pid) ??
-    ranged.find((e) => e.s.id === pid) ??
-    alt.find((e) => e.s.id === pid);
+  const entry = (rangeSelected ? ranged : live).find((e) => e.s.id === pid);
   hideSpendPop();
   if (!entry) return;
   const lead = (id: string, colorId = id) => {
@@ -2734,6 +2732,11 @@ function renderTotalSpend(): string {
     return `<div class="col-total${s.length > 10 ? " long" : ""}" title="${escapeHtml(s)}">${escapeHtml(s)}</div>`;
   };
 
+  const periodControls = `
+    <button class="tab col-head${!rangeSelected && spendTab === "today" ? " active" : ""}" data-tab="today">${t("spend.today")}</button>
+    <button class="tab col-head${!rangeSelected && spendTab === "yesterday" ? " active" : ""}" data-tab="yesterday">${t("spend.yesterday")}</button>
+    ${(["d7", "d30", "all"] as const).map((id) => `<button class="tab col-head${rangeSelected && rangeTab === id ? " active" : ""}" data-range-tab="${id}">${t(id === "d7" ? "spend.days7" : id === "d30" ? "spend.days30" : "spend.rangeAll")}</button>`).join("")}`;
+
   const rangeCol = () => {
     const colEntries = groupedEntriesForRange(rangeTab);
     const totals = colEntries.reduce(
@@ -2742,14 +2745,10 @@ function renderTotalSpend(): string {
     );
     const shown = colEntries.slice(0, 9);
     const overflow = colEntries.length - shown.length;
-    const rangeButton = (id: RangeTab, label: string) =>
-      `<button class="tab col-head${rangeSelected && rangeTab === id ? " active" : ""}" data-range-tab="${id}">${label}</button>`;
     return `
       <div class="spend-col spend-range-col">
         <div class="col-head-row">
-          ${rangeButton("d7", t("spend.days7"))}
-          ${rangeButton("d30", t("spend.days30"))}
-          ${rangeButton("all", t("spend.rangeAll"))}
+          ${periodControls}
         </div>
         ${colTotalHtml({ ...emptyWindow(), ...totals, models: [] })}
         <div class="legend">
@@ -2773,8 +2772,7 @@ function renderTotalSpend(): string {
   const leftColHtml = `
       <div class="spend-col">
         <div class="col-head-row">
-          <button class="tab col-head${spendTab === "today" ? " active" : ""}" data-tab="today">${t("spend.today")}</button>
-          <button class="tab col-head${spendTab === "yesterday" ? " active" : ""}" data-tab="yesterday">${t("spend.yesterday")}</button>
+          ${periodControls}
         </div>
         ${colTotalHtml({ ...emptyWindow(), ...leftTotals, models: [] })}
         <div class="legend">
@@ -2799,8 +2797,7 @@ function renderTotalSpend(): string {
           <text class="donut-sub" x="48" y="62" text-anchor="middle" font-size="${fitFontSize(center.sub, 8, 12)}">${center.sub}</text>
         </svg>
         <div class="spend-cols">
-          ${leftColHtml}
-          ${rangeCol()}
+          ${rangeSelected ? rangeCol() : leftColHtml}
         </div>
       </div>`
     : `
@@ -2811,8 +2808,7 @@ function renderTotalSpend(): string {
           <text class="donut-sub" x="48" y="62" text-anchor="middle" font-size="${fitFontSize(center.sub, 8, 12)}">${center.sub}</text>
         </svg>
         <div class="spend-cols">
-          ${leftColHtml}
-          ${rangeCol()}
+          ${rangeSelected ? rangeCol() : leftColHtml}
         </div>
       </div>`;
 
@@ -3697,6 +3693,55 @@ function shortcutMatches(event: KeyboardEvent, shortcut: string): boolean {
   return expected.ctrl === event.ctrlKey && expected.alt === event.altKey &&
     expected.shift === event.shiftKey && expected.meta === event.metaKey &&
     shortcutKeyToken(event).toUpperCase() === key;
+}
+
+const LOCAL_SHORTCUTS = [
+  { id: "settings", key: "settings.actionSettings", default: "Ctrl+S" },
+  { id: "refresh", key: "settings.actionRefresh", default: "Ctrl+R" },
+  { id: "customize", key: "settings.actionCustomize", default: "Ctrl+E" },
+  { id: "theme", key: "settings.actionTheme", default: "Ctrl+L" },
+  { id: "expiring", key: "settings.actionExpiring", default: "T" },
+  { id: "period", key: "settings.actionPeriod", default: "Shift" },
+] as const;
+type LocalShortcutAction = (typeof LOCAL_SHORTCUTS)[number]["id"];
+function localShortcut(action: LocalShortcutAction): string {
+  return config.localShortcuts?.[action] ?? LOCAL_SHORTCUTS.find((row) => row.id === action)!.default;
+}
+
+function renderLocalShortcutSettings(): void {
+  const root = document.querySelector<HTMLElement>("#local-shortcuts");
+  if (!root) return;
+  root.innerHTML = LOCAL_SHORTCUTS.map((row) => `<div class="setting-row"><label for="shortcut-${row.id}">${escapeHtml(t(row.key))}</label><input id="shortcut-${row.id}" data-local-shortcut="${row.id}" value="${escapeHtml(localShortcut(row.id))}" autocomplete="off" spellcheck="false"><span class="shortcut-state" role="status" aria-live="polite"></span></div>`).join("");
+  root.querySelectorAll<HTMLInputElement>("[data-local-shortcut]").forEach((input) => {
+    const action = input.dataset.localShortcut as LocalShortcutAction;
+    const save = async () => {
+      const value = input.value.trim();
+      const canonical = (binding: string) => binding.toLowerCase().split("+").map((p) => p.trim()).sort().join("+");
+      const bindings = [config.shortcut, config.categoryShortcut, ...LOCAL_SHORTCUTS.filter((r) => r.id !== action).map((r) => localShortcut(r.id))];
+      const state = input.parentElement!.querySelector<HTMLElement>(".shortcut-state")!;
+      if (value && bindings.some((binding) => canonical(binding) === canonical(value))) {
+        state.textContent = t("settings.shortcutConflict"); state.className = "shortcut-state conflict"; return;
+      }
+      try {
+        await patchConfig({ localShortcuts: { ...config.localShortcuts, [action]: value } });
+        state.textContent = t("footer.shortcutSaved"); state.className = "shortcut-state available";
+      } catch (err) {
+        state.textContent = String(err); state.className = "shortcut-state conflict";
+      }
+    };
+    input.addEventListener("keydown", (event) => {
+      if (event.key === "Tab" || event.key === "Escape") return;
+      event.preventDefault();
+      if (event.key === "Backspace" || event.key === "Delete") input.value = "";
+      else {
+        const value = action === "period" && event.key === "Shift" ? "Shift" : formatCapturedShortcut(event);
+        if (!value) return;
+        input.value = value;
+      }
+      void save();
+    });
+    input.addEventListener("change", () => void save());
+  });
 }
 
 function isDashboardActive(): boolean {
@@ -6361,7 +6406,7 @@ let trailEntries: TrailEntry[] = [];
 // refresh doesn't snap a merged tick back to its first card.
 const trailCursorMemory = new Map<string, number>();
 
-const DOT_SEVERITY: Record<string, number> = { gray: 0, green: 1, yellow: 2, red: 3 };
+const DOT_SEVERITY: Record<string, number> = { gray: 0, green: 1, yellow: 2, red: 3, error: 4 };
 
 function rebuildTrail(): void {
   const trail = document.querySelector<HTMLElement>("#trail")!;
@@ -8681,6 +8726,7 @@ function applyLocale(): void {
 
 async function initSettings(): Promise<void> {
   config = await invoke<Config>("get_config");
+  config.localShortcuts = config.localShortcuts ?? {};
   pruneEmptyCardGroups();
   config.locale = normalizeLocalePref(config.locale);
   try {
@@ -8884,6 +8930,7 @@ async function initSettings(): Promise<void> {
     void patchConfig({ categoryShortcut: value });
   });
 
+  renderLocalShortcutSettings();
   const proxyEnabled = document.querySelector<HTMLInputElement>("#proxy-enabled")!;
   const proxyUrl = document.querySelector<HTMLInputElement>("#proxy-url")!;
   proxyEnabled.checked = config.proxy?.enabled ?? false;
@@ -8969,6 +9016,7 @@ async function resetAllSettings(): Promise<void> {
     glassEffects: true,
     shortcut: "",
     categoryShortcut: "Shift+1",
+    localShortcuts: {},
     proxy: { enabled: false, url: "" },
     showTotalSpend: true,
     reduceAnimations: false,
@@ -9027,6 +9075,7 @@ function syncSettingsControls(): void {
   setCheck("#reduce-anim", config.reduceAnimations === true);
   setNum("#shortcut", config.shortcut);
   setNum("#category-shortcut", config.categoryShortcut || "Shift+1");
+  renderLocalShortcutSettings();
   setCheck("#proxy-enabled", config.proxy?.enabled ?? false);
   setNum("#proxy-url", config.proxy?.url ?? "");
   const autostart = document.querySelector<HTMLInputElement>("#autostart");
@@ -9072,12 +9121,23 @@ window.addEventListener("DOMContentLoaded", () => {
     !isTypingTarget(document.activeElement);
   window.addEventListener("keydown", (e) => {
     if (e.key === "Shift") {
-      shiftAlone = !e.repeat && !e.ctrlKey && !e.altKey && !e.metaKey &&
+      shiftAlone = localShortcut("period") === "Shift" && !e.repeat && !e.ctrlKey && !e.altKey && !e.metaKey &&
         !e.isComposing && canCyclePeriod();
     } else {
       shiftAlone = false;
     }
     konamiListen(e);
+    if (!e.repeat && !e.isComposing && !isTypingTarget(document.activeElement) && isDashboardActive()) {
+      if (shortcutMatches(e, localShortcut("customize"))) {
+        e.preventDefault(); setSettings(false); setDrawer(!customizeOpen); return;
+      }
+      if (shortcutMatches(e, localShortcut("theme"))) {
+        e.preventDefault(); document.querySelector<HTMLElement>("#theme-btn")?.click(); return;
+      }
+      if (localShortcut("period") !== "Shift" && shortcutMatches(e, localShortcut("period")) && canCyclePeriod()) {
+        e.preventDefault(); switchOverviewTab(OVERVIEW_TABS[(OVERVIEW_TABS.indexOf(overviewTab) + 1) % OVERVIEW_TABS.length]); return;
+      }
+    }
     if (
       isDashboardActive() &&
       shortcutMatches(e, config.categoryShortcut) &&
@@ -9120,13 +9180,13 @@ window.addEventListener("DOMContentLoaded", () => {
       void invoke("hide_popover").catch(() => {});
     }
     // Ctrl+R refreshes data — and must NOT reload the webview.
-    if (e.ctrlKey && e.key.toLowerCase() === "r") {
+    if (shortcutMatches(e, localShortcut("refresh")) && !isTypingTarget(document.activeElement)) {
       e.preventDefault();
       void refresh(true, false, true);
     }
     // Ctrl+S toggles Settings — same semantics as the ⚙ button (and must
     // NOT trigger the webview "save page" dialog).
-    if (e.ctrlKey && e.key.toLowerCase() === "s") {
+    if (shortcutMatches(e, localShortcut("settings")) && !isTypingTarget(document.activeElement)) {
       e.preventDefault();
       setDrawer(false);
       setSettings(!document.body.classList.contains("settings-open"));
@@ -9139,11 +9199,7 @@ window.addEventListener("DOMContentLoaded", () => {
     // Customize. A collapsed overview is unfolded and scrolled into view
     // so the list is actually on screen.
     if (
-      e.key.toLowerCase() === "t" &&
-      !e.shiftKey &&
-      !e.ctrlKey &&
-      !e.altKey &&
-      !e.metaKey &&
+      shortcutMatches(e, localShortcut("expiring")) &&
       !e.repeat &&
       !e.isComposing &&
       e.keyCode !== 229 &&

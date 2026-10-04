@@ -17,7 +17,7 @@ anything unverified lives under `待确认` at the bottom.
   project (detached from any upstream, 2026-09-06). A single branch `main`
   exists locally and on origin; feature work happens on `codex/<feature>`
   branches.
-- Version 0.4.65 (`package.json` + `src-tauri/tauri.conf.json`), identifier
+- Version 0.4.66 (`package.json` + `src-tauri/tauri.conf.json`), identifier
   `com.jazii.pane`, productName `Pane`.
 - Privacy boundary (asserted by tests in the code): tokens go only to their
   own vendor's API; pasted keys live in `%APPDATA%\Pane`; the 6736 HTTP API is
@@ -398,3 +398,6 @@ anything unverified lives under `待确认` at the bottom.
   failed replacement, while Settings shows an explicit availability/conflict
   state. ClinePass uses the generated `users-three` Phosphor mark in
   `src/assets/providers/clinepass.svg`.
+- Spend details render the selected period as a single active column; local
+  shortcut settings cover six focused-window actions and reject duplicate
+  bindings. Pooled-account count badges use blue informational styling.
