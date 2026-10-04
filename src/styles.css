@@ -324,6 +324,7 @@ body.no-glass .sidebar::after {
 #refresh,
 #settings-btn,
 #customize-btn,
+#skin-btn,
 #theme-btn {
   background: none;
   border: none;
@@ -339,6 +340,8 @@ body.no-glass .sidebar::after {
 #settings-btn:hover,
 #customize-btn:hover,
 #customize-btn.active,
+#skin-btn:hover,
+#skin-btn.active,
 #theme-btn:hover,
 body.refreshing #refresh {
   background: var(--accent);
@@ -3419,7 +3422,7 @@ body.party .fill {
 }
 
 /* Skin market ------------------------------------------------------------ */
-#customize-btn .ui-icon { width: 16px; height: 16px; }
+#skin-btn .ui-icon { width: 16px; height: 16px; }
 .customize-skin-entry { display:flex; align-items:center; justify-content:space-between; gap:14px; margin:0 0 12px; padding:12px 14px; border:1px solid color-mix(in srgb, var(--skin-accent, var(--border)) 44%, var(--border)); border-radius:12px; background:linear-gradient(110deg, color-mix(in srgb, var(--skin-accent, var(--accent)) 14%, var(--card)), var(--card)); }
 .customize-skin-entry div { display:grid; gap:2px; }
 .customize-skin-entry strong { font-size:13px; }

@@ -8995,7 +8995,7 @@ function syncSettingsControls(): void {
 window.addEventListener("DOMContentLoaded", () => {
   const appLogo = document.querySelector<HTMLElement>("#app-logo")!;
   appLogo.innerHTML = `<img src="${paneLogo}" alt="Pane" />`;
-  document.querySelector<HTMLElement>("#customize-btn")!.innerHTML = uiIcon("palette", "Customize and skins");
+  document.querySelector<HTMLElement>("#skin-btn")!.innerHTML = uiIcon("palette", "Open skin market");
   applySkin();
   // Party mode, the easy way: triple-click the logo. (The Konami code
   // still works, for the culture.)
@@ -9152,6 +9152,12 @@ window.addEventListener("DOMContentLoaded", () => {
   document.querySelector("#customize-btn")!.addEventListener("click", () => {
     setSettings(false);
     setDrawer(!customizeOpen);
+  });
+  document.querySelector("#skin-btn")!.addEventListener("click", () => {
+    setSettings(false);
+    skinMarketOpen = true;
+    skinPreviewId = null;
+    setDrawer(true);
   });
   const drawerBody = document.querySelector<HTMLElement>("#drawer-body")!;
   drawerBody.addEventListener("click", (e) => {
