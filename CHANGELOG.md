@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.4.64 — 2026-10-04
+
+- Add the skin market with built-in wallpaper and mascot combinations.
+- Add pooled ClinePass API-key accounts, quota cards, and provider account badges.
+- Show rejected pooled accounts as explicit error states.
+- Refresh the README around the current product workflow and local-first boundaries.
+
 ## 0.4.63 — 2026-10-04
 
 ### Added
