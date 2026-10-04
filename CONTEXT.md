@@ -17,7 +17,7 @@ anything unverified lives under `待确认` at the bottom.
   project (detached from any upstream, 2026-09-06). A single branch `main`
   exists locally and on origin; feature work happens on `codex/<feature>`
   branches.
-- Version 0.4.49 (`package.json` + `src-tauri/tauri.conf.json`), identifier
+- Version 0.4.65 (`package.json` + `src-tauri/tauri.conf.json`), identifier
   `com.jazii.pane`, productName `Pane`.
 - Privacy boundary (asserted by tests in the code): tokens go only to their
   own vendor's API; pasted keys live in `%APPDATA%\Pane`; the 6736 HTTP API is
@@ -382,3 +382,19 @@ anything unverified lives under `待确认` at the bottom.
 - `spend::source_statuses()` plus the `fetch_spend_sources` Tauri command expose
   whether each known source is detected locally, absent, or runtime-only. This
   is coverage evidence, not a claim that every tool turn is persisted.
+
+## UI repair facts (2026-10-04)
+
+- Overview rails and the provider column explicitly clip horizontal overflow;
+  the category/period switch row may wrap within the card so Shift + wheel
+  cannot expose a page-sized blank side region.
+- Health dots distinguish `green` available, `yellow` peak, `red` maxed, and
+  `error` fetch/auth failure. An account-card removal targets only its
+  `family@fingerprint`; the family card remains enabled.
+- The overview month tab falls back to a weekly metric when a provider has no
+  monthly quota and labels that fallback. Skin market has a native-reset action;
+  the selected mascot is anchored at the outer card's bottom-right edge.
+- Global shortcut registration restores the previous working binding after a
+  failed replacement, while Settings shows an explicit availability/conflict
+  state. ClinePass uses the generated `users-three` Phosphor mark in
+  `src/assets/providers/clinepass.svg`.

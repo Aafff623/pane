@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.4.65 — 2026-10-04
+
+- Prevent horizontal overflow when scrolling the overview on narrow windows.
+- Separate maxed quota (red) from fetch/auth errors (orange) and show weekly
+  fallback feedback when a provider has no monthly quota.
+- Keep account-card removal scoped to that account; add native skin reset,
+  conflict feedback for global shortcuts, and a Phosphor ClinePass mark.
+
 ## 0.4.64 — 2026-10-04
 
 - Add the skin market with built-in wallpaper and mascot combinations.
