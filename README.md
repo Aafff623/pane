@@ -253,6 +253,7 @@ under [Privacy](#privacy--security).
 | Qoder CN | Qoder CN desktop app's encrypted sign-in (`auth.v1.dat`) → CN OpenAPI plan tier + credit pools with dedicated model packages |
 | Trae CN | Trae CN desktop app's sign-in (`storage.json`) → one row per credit pack (scope-split general vs Work-only, each with its own expiry; the pack being drained as a progress bar) + account tier |
 | Command Code | Command Code API key (Settings, `COMMAND_CODE_API_KEY`, or the CLI's `auth.json`) → 5h / weekly / monthly credit windows + extra credits; multiple GOAT subscriptions side by side |
+| ClinePass | `sk_` API key (Settings) → five-hour / weekly / monthly usage windows; supports multiple keys as separate account cards |
 | Doubao | Doubao desktop sign-in cookies (read while Doubao is quit, cached ~30 days) → 5h / 7-day windows, subscription renewal, quota-reset-card balance |
 | ClawsGO | ClawsGO token from the browser (`localStorage.clawsgo_token`) → monthly credit meter, remaining balance, 30-day requests + tokens |
 
@@ -304,14 +305,20 @@ whatever the community asks for loudest.
   organization or email ("Claude — Acme"). The same account signed in
   twice stays one card, and your existing setup is untouched.
 - **Account tabs for key providers** — DeepSeek, StepFun, SiliconFlow,
-  Novita, Kimi, Antigravity, Cursor, and Custom Balance keep multiple
-  logins as tabs on one card.
+  Novita, Kimi, Antigravity, Cursor, Custom Balance, and ClinePass keep
+  multiple logins as tabs or pooled account cards, with the account count
+  shown beside the provider status.
 - **One/New API sites** — add multiple compatible sites and multiple keys
   per site in Settings; every key gets its own quota tab on the merged
   card; secrets remain owner-only on this PC and are sent only to the
   configured origin.
 
 **Interface & control**
+
+- **Skin market** — open the palette button above Customize to preview
+  built-in wallpaper and mascot pairs. Applying a skin only adds a visual
+  layer; the native light/dark theme, cards, and provider data stay intact.
+  Press `Esc` to close the preview, then the market, then Customize.
 
 - **English, Chinese, and Russian** — choose a language explicitly or let
   Auto follow the Windows display language across the popover, tray, and

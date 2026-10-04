@@ -319,7 +319,12 @@ anything unverified lives under `待确认` at the bottom.
   directly (CodexBar's official plugin clamps 0..100 without scaling —
   verified against its source); `resetsAt` is RFC3339-with-nanos and is
   ABSENT while a window has zero usage, and is dropped when already in
-  the past (rolled anchor — no fake countdowns).
+  the past (rolled anchor — no fake countdowns). ClinePass supports pooled
+  API-key accounts in `accounts/clinepass.json`; each saved key receives a
+  stable account card and the provider header shows the pooled-account count.
+  A rejected key is rendered as an explicit error state rather than a gray
+  unknown dot. The current local pool contains the pre-existing key plus two
+  retained labeled accounts; a revoked third key was removed on 2026-10-04.
 - **SenseNova** (`sensenova`): quota is console-session only (sk- keys get
   401 auth_type_disabled). `GET platform.sensenova.cn/lite/console/v1/
   tokenplan/pool-usage`; string decimals, unix-second resets, pools keyed
