@@ -1,438 +1,175 @@
 <div align="center">
+  <img src="src/assets/pane-icon.png" width="128" height="128" alt="Pane icon" />
+  <h1>Pane</h1>
+  <p><strong>Every AI quota. One calm command center.</strong></p>
+  <p>一个常驻 Windows 托盘的 AI 用量看板：把不同厂商的额度、重置时间、账号池和本地消费，收进一个清晰的悬浮面板。</p>
 
-<img src="docs/readme/hero.jpg" width="100%" alt="Pane banner: the wordmark with the tagline Every AI quota. One tray., beside real Pane dashboard screenshots — a local spend donut and per-provider quota cards with reset countdowns" />
-
-# Pane
-
-**Track every AI quota, reset, and local CLI dollar amount without leaving Windows.**
-
-One click on the tray icon answers the questions every AI power user keeps
-asking: *How much of my Claude session is left? When does my Codex weekly
-reset? What did today actually cost me?*
-
-Pane is a free Windows tray companion for Claude, Codex, Cursor, Copilot,
-Kimi, Grok, and 25+ more AI providers. It is an independent, from-scratch
-Windows rebuild inspired by [OpenUsage](https://www.openusage.ai/).
-
-<p>
-  <a href="https://github.com/Aafff623/pane/releases/latest"><img src="https://img.shields.io/github/v/release/Aafff623/pane?style=flat&label=Release&color=2563eb&labelColor=172033" alt="Latest release"></a>
-  <img src="https://img.shields.io/badge/Windows-supported-0b1220?style=flat&logo=windows&logoColor=white" alt="Windows is the supported desktop">
-  <img src="https://img.shields.io/badge/macOS%20%2F%20Linux-preview-0b1220?style=flat" alt="macOS and Linux preview binaries">
-  <img src="https://img.shields.io/badge/Data-local%20first-0b1220?style=flat&labelColor=172033&color=2563eb" alt="Local-first data handling">
-  <img src="https://img.shields.io/badge/Providers-31%2B-0b1220?style=flat&labelColor=172033&color=dc2626" alt="31 or more providers">
-  <img src="https://img.shields.io/badge/Tauri-v2-0b1220?style=flat&logo=tauri&logoColor=FFC131" alt="Tauri v2">
-  <img src="https://img.shields.io/github/license/Aafff623/pane?style=flat&labelColor=172033" alt="MIT license">
-</p>
-
-**[trypane.xyz](https://trypane.xyz)** · [Guides](https://trypane.xyz/guides) · [Install](#install) · [How it works](#how-it-works) · [Providers](#providers-31-and-counting) · [Features](#features) · [Local API](docs/local-http-api.md) · [Privacy](#privacy--security) · [Credits](#credits)
-
-<img src="docs/readme-pane.png" width="100%" alt="Pane: a dark Windows AI telemetry board showing a 5-hour pace alert, a stable Codex quota, and a local-only provider monitor" />
-
+  <a href="https://github.com/Aafff623/pane/releases/latest"><img src="https://img.shields.io/github/v/release/Aafff623/pane?style=flat&label=Release&color=2563eb&labelColor=172033" alt="Latest release" /></a>
+  <img src="https://img.shields.io/badge/Windows-supported-0b1220?style=flat&logo=windows&logoColor=white" alt="Windows supported" />
+  <img src="https://img.shields.io/badge/Tauri-v2-0b1220?style=flat&logo=tauri&logoColor=FFC131" alt="Tauri v2" />
+  <img src="https://img.shields.io/badge/Data-local--first-0b1220?style=flat&labelColor=172033&color=2563eb" alt="Local first" />
+  <a href="https://github.com/Aafff623/pane/blob/main/LICENSE"><img src="https://img.shields.io/github/license/Aafff623/pane?style=flat&labelColor=172033" alt="MIT license" /></a>
 </div>
 
----
-
-## At a glance
-
-| Need | Pane shows it in the tray |
-| --- | --- |
-| Avoid a limit wall | 5-hour and weekly windows, reset countdowns, pace alerts |
-| Understand the bill | Today, yesterday, and 30-day local CLI spend, with token fallback when a public price is unavailable |
-| Keep accounts private | Tokens stay in the Windows user profile and are sent only to the selected provider; the local API is loopback-only |
-
 <p align="center">
-  <img src="docs/promo.png" width="860" alt="Pane interface proof: local spend donut, per-provider quota cards, usage bars, and reset countdowns" />
+  <a href="#为什么是-pane">为什么是 Pane</a> ·
+  <a href="#它能做什么">它能做什么</a> ·
+  <a href="#支持的来源">支持的来源</a> ·
+  <a href="#快速开始">快速开始</a> ·
+  <a href="#开发与验证">开发与验证</a>
 </p>
 
-## Why Pane
+> Pane 不替你调用模型，也不把数据上传到 Pane 服务。它只负责读取你已经授权的本地账号或 API key，向对应厂商查询额度，并把结果整理成一眼能读懂的状态。
 
-If you use AI coding tools seriously, you're juggling half a dozen separate
-subscriptions — Claude Max, ChatGPT/Codex, Copilot, Cursor, and whatever
-else this month brought. Each one hides its limits behind its own dashboard,
-counts in its own units, and resets on its own schedule. The only time you
-find out you're running low is when you hit the wall mid-task.
+## 📌 一句话说明
 
-Pane puts all of them in one place, in your system tray, refreshed every few
-minutes, with warnings *before* you hit the wall. It started as a Windows
-rebuild of the excellent [OpenUsage for macOS](https://github.com/robinebers/openusage)
-by [Robin Ebers](https://github.com/robinebers) and is growing into a
-broader AI-workflow companion from there.
+**Pane 是一个本地优先的 AI 订阅与额度看板。**
 
-## Install
+它把 Claude、Codex、Cursor、ClinePass、Copilot 以及更多 AI 工具的额度放进同一块悬浮面板：现在还剩多少、什么时候重置、哪个账号快到上限、今天花了多少，一次看清。
 
-Every release binary is built and published by GitHub Actions straight
-from the tagged source — public build logs, verifiable provenance.
+## 为什么是 Pane
 
-### winget (recommended)
+AI 工具越来越多，真正打断工作流的常常发生在这些瞬间：
 
-```
-winget install Pane.Pane
-```
+- 不知道当前订阅还剩多少，直到请求突然失败。
+- 同一个 provider 有多个账号，却分不清哪张卡对应哪一个账号。
+- 额度窗口、峰值时段、余额和本地消费分散在不同 CLI、网页和数据库里。
+- 想快速确认状态，却要打开一堆设置页。
 
-Pane is in [Microsoft's official winget community repo](https://github.com/microsoft/winget-pkgs/tree/master/manifests/p/Pane/Pane) —
-reviewed, hash-verified, no SmartScreen prompt.
+Pane 把这些信息压缩成一个安静的系统托盘工具。面板默认只展示最重要的状态，细节在需要时展开。
 
-### One-liner (PowerShell)
+## 它能做什么
+
+### 📊 配额总览
+
+- 用绿色、黄色、红色状态快速区分可用、高峰和额度不可用。
+- 统一展示 5 小时、日、周、月等滚动窗口，以及重置倒计时。
+- 同一 provider 的多个账号显示为独立卡片，并在 provider 标题旁显示账号数量徽标。
+- 查询失败会明确显示为错误状态，不再伪装成灰色的未知额度。
+
+### 🧾 本地消费
+
+- 读取支持的本地 CLI 日志，计算今日、昨日和近 30 天消费。
+- 支持美元与 token 视图，按模型展开明细。
+- 当模型价格未知时保留 token 事实，并明确标注未计价项。
+
+### 🧩 账号池
+
+- API key provider 可以在设置中保存多个账号。
+- 每个账号拥有稳定的本地卡片身份，删除或重排不会串号。
+- 凭据只保存在当前 Windows 用户目录，并只发送到对应 provider 的官方或用户配置端点。
+
+### 🎨 皮肤市场
+
+- 在 Customize 上方打开皮肤入口，选择内置壁纸与吉祥物组合。
+- 皮肤只增加视觉层，不改变原生主题、卡片数据和布局。
+- 快速唤醒悬浮框时，吉祥物会围绕面板短暂出现。
+- `Esc` 依次关闭预览、皮肤市场、Customize，最后交给现有面板隐藏逻辑。
+
+## 支持的来源
+
+Pane 当前覆盖 30+ 个 provider。下面列出最常用的几类，完整说明见 [Provider catalog](docs/providers.md)。
+
+| 类型 | 来源 | 读取方式 |
+| --- | --- | --- |
+| 订阅额度 | Claude、Codex、Cursor、GitHub Copilot | 本地登录状态 + 官方 usage API |
+| API key 额度 | DeepSeek、Kimi Code、StepFun、SiliconFlow、Novita | 设置中的 key、环境变量或 CLI 配置 |
+| 多账号池 | ClinePass、One/New API、Custom Balance 等 | `accounts/<provider>.json` 中的独立账号 |
+| 本地消费 | OpenCode、Claude Code、Codex CLI、Hermes 等 | 本地数据库或 CLI 日志 |
+| 本地服务 | Ollama | `127.0.0.1:11434` 模型与服务状态 |
+
+ClinePass 使用 `sk_` key 查询五小时、周、月三个滚动窗口；同一 provider 下的多个 key 会分别显示，并在卡片附近提示账号数量。
+
+## 1 分钟快速开始
+
+### 直接使用
+
+1. 从 [Releases](https://github.com/Aafff623/pane/releases) 下载 Windows 版本。
+2. 启动 Pane；它会进入系统托盘。
+3. 使用全局快捷键或点击托盘图标唤醒悬浮面板。
+4. 打开 Customize / Settings，按 provider 的提示完成本地登录或粘贴 API key。
+
+Pane 不需要单独注册账号。首次运行后，数据会保存在当前用户的 `%APPDATA%\Pane\` 下。
+
+### 从源码启动
 
 ```powershell
-irm https://trypane.xyz/install.ps1 | iex
-```
-
-Downloads the latest release, verifies its SHA-256, installs per-user
-(no admin), and launches Pane. No SmartScreen prompt.
-
-Piping a script straight into PowerShell runs whatever the server sends
-at that moment. Prefer to look first? Same script, two steps:
-
-```powershell
-iwr https://trypane.xyz/install.ps1 -OutFile install.ps1
-# read install.ps1 — one short, commented script — then:
-powershell -ExecutionPolicy Bypass -File .\install.ps1
-```
-
-(Or skip the script question entirely: `winget install Pane.Pane` above
-is hash-verified by Microsoft's pipeline.)
-
-### Installer (.exe)
-
-1. Grab **`Pane_x.y.z_x64-setup.exe`** from the
-   [latest release](https://github.com/Aafff623/pane/releases/latest).
-2. Run it. Pane installs per-user to `%LOCALAPPDATA%\Pane` — no admin
-   rights needed.
-3. Look for the Pane icon in the system tray (next to the clock). Click it.
-
-> **SmartScreen note:** the installer isn't code-signed yet, so Windows may
-> show "Windows protected your PC." Click **More info → Run anyway**. Code
-> signing is on the roadmap.
-
-Silent install (for scripts): `Pane_x.y.z_x64-setup.exe /S`
-
-### macOS / Linux (preview)
-
-The same tag also attaches a macOS `.dmg` (Apple Silicon runner) and
-Linux `.AppImage` / `.deb`. Tray placement, autostart wording, and
-menubar / AppIndicator behavior are still the Windows popover. Treat
-those builds as the first published binaries, not a finished port.
-
-New versions land on the [releases page](https://github.com/Aafff623/pane/releases/latest) —
-Pane checks on launch and every 4 hours, and turns the footer version
-stamp into an Update button when one is out.
-
-<details>
-<summary><strong>Build from source (and the fast local dev loop)</strong></summary>
-
-Prerequisites: Node.js 20+, Rust (stable-msvc), Visual Studio C++ Build
-Tools, WebView2 (bundled with Windows 11).
-
-```
-git clone https://github.com/Aafff623/pane
+git clone https://github.com/Aafff623/pane.git
 cd pane
-npm install
-npm run tauri dev     # run with hot reload
-npm run tauri build   # installer lands in src-tauri/target/release/bundle
+pnpm install
+pnpm dev
 ```
 
-**Fast local dev loop (Windows).** Iterate on the UI against the debug
-binary without the full Tauri toolchain — four steps, in order:
+开发模式需要两个进程：Vite 在 `127.0.0.1:1420` 提供前端，`pane.exe` 在 `127.0.0.1:6736` 提供本地 usage API。完整的 Windows 启动和 WebView2 缓存说明见 [`docs/dev-startup.md`](docs/dev-startup.md)。
+
+## 隐私边界
+
+Pane 是 local-first 工具：
+
+- token、cookie 和 API key 保存在 Windows 用户目录，不提交到 Git。
+- 查询请求只发送到对应 provider 的端点；Pane 没有中心后端替你转发额度。
+- 本地 HTTP API 只监听 loopback，并对敏感字段做脱敏处理。
+- 遥测默认不承载额度、消费或 provider 凭据；可在设置中关闭。
+
+详见 [`docs/privacy.md`](docs/privacy.md)。
+
+## 开发与验证
+
+### 前端
 
 ```powershell
-pnpm build             # 1. type gate + fresh dist/
-pnpm dev               # 2. Vite on 127.0.0.1:1420 — leave it running
-# 3. launch src-tauri/target/debug/pane.exe via CreateProcess with
-#    lpDesktop = "WinSta0\Default"; plain Start-Process lands on a
-#    non-interactive station and the window is created but invisible
-# 4. start the exe once more — the running instance pops the panel
-#    (the window starts hidden in the tray; a single tray-icon click
-#    or Alt+2 shows it too — double-click is a known bug, use single)
+pnpm build
 ```
 
-Three rules that keep this loop alive:
+这一步执行 TypeScript 检查并构建 Vite 生产资源。
 
-1. **Two processes, both required** — Vite on `127.0.0.1:1420` serving the
-   UI, `pane.exe` on `127.0.0.1:6736` as the Rust backend. Neither works
-   alone.
-2. **Loopback is IPv4 on purpose** — `devUrl` is `http://127.0.0.1:1420`.
-   Some Windows setups deny IPv6-loopback (`[::1]`) connections outright
-   and `localhost` may resolve to `::1` first, so always use `127.0.0.1`
-   for serving and probing.
-3. **Changing `devUrl` requires a Rust rebuild** — it is compiled into the
-   binary, not read at runtime.
+### Rust
 
-Stale UI after an edit? Clear `%LOCALAPPDATA%\com.jazii.pane\EBWebView` —
-WebView2 caches aggressively. The full guide (cache handling, launching
-from sandboxed agents via WMI, troubleshooting) lives in
-[`docs/dev-startup.md`](docs/dev-startup.md).
+```powershell
+cd src-tauri
+$env:PATH = "D:\Tools\mingw64\bin;$env:PATH"
+cargo +stable-x86_64-pc-windows-gnu check
+```
 
-</details>
+完整 release 构建和可见桌面启动方式见 [`docs/dev-startup.md`](docs/dev-startup.md)。
 
-## How it works
+### Provider 解析测试
 
-Pane is a small Tauri v2 app: a Rust core doing the data work, a vanilla
-TypeScript UI doing the glass. No Electron, no background services — one
-small process idling in the tray.
+```powershell
+cd parse-tests
+$env:PATH = "D:\Tools\mingw64\bin;$env:PATH"
+cargo +stable-x86_64-pc-windows-gnu test
+```
 
-<p align="center">
-  <img src="docs/readme/how-it-works.jpg" width="100%" alt="How Pane works in five steps: find your accounts, ask each vendor, project the reset, count the money, and stay local" />
-</p>
+## 项目地图
 
-**1. Finding your accounts.** The official CLIs and editors you already use
-keep their login tokens in well-known per-user locations — Claude Code
-writes `%USERPROFILE%\.claude\.credentials.json`, Codex CLI writes
-`%USERPROFILE%\.codex\auth.json`, the GitHub CLI stores its token in
-Windows Credential Manager, and so on. Pane reads those same files (or
-takes an API key you paste into Settings) and shows a card for every tool
-it finds. Tools it can't find start disabled — no dead cards.
+| 位置 | 作用 |
+| --- | --- |
+| `src/main.ts` | 看板渲染、刷新循环、设置、皮肤市场 |
+| `src/providerCatalog.ts` | 前端 provider 能力目录 |
+| `src/providerVisuals.ts` | provider 图标、颜色和品牌视觉 |
+| `src-tauri/src/lib.rs` | Tauri commands、快照缓存、账号交换保护 |
+| `src-tauri/src/providers/` | 各 provider 的额度查询适配器 |
+| `src-tauri/src/accounts.rs` | API key 账号池和稳定卡片身份 |
+| `docs/` | 启动、隐私、provider 和设计文档 |
 
-**2. Asking the vendors.** Every few minutes, each provider's token is sent
-to **its own vendor's API only** — the exact usage endpoints the vendors'
-own apps use — and the card updates with sessions, weekly windows, credit
-balances, and reset times. Expired OAuth tokens are refreshed and written
-back, which keeps your CLIs signed in too. Failing providers get benched
-briefly and their last good data is shown with an "Outdated" tag instead of
-a blank card.
+## 文档入口
 
-**3. Projecting the reset.** Bars color by how much you've used (blue to
-amber to red), and a background projection of your burn rate fires optional
-Windows toasts once per reset window — "Almost out", "Will run out" — so
-you hear about the wall before you hit it.
+- [开发启动指南](docs/dev-startup.md) — Windows 双进程、缓存和 pane.exe 启动
+- [Provider catalog](docs/providers.md) — provider 读取方式与字段说明
+- [皮肤市场设计](docs/skin-market-design.md) — 壁纸、吉祥物和退出交互
+- [本地 HTTP API](docs/local-http-api.md) — `127.0.0.1:6736/v1/usage`
+- [隐私说明](docs/privacy.md) — 凭据、网络请求和遥测边界
+- [CONTEXT.md](CONTEXT.md) — 已验证的领域事实与工程约束
 
-**4. Counting token consumption.** Pane reads the usage records your tools persist locally.
-Pane scans those logs (Claude, Codex, Grok, OpenCode, Devin CLI, Cursor
-CSV, MiniMax CLI, Kimi Code, Qwen Code, the pi coding agent, the Hermes
-desktop app), plus ZCode's SQLite ledger and Antigravity's IDE/CLI conversation databases. It prices requests with live per-model rates (LiteLLM /
-models.dev, refreshed daily — hourly while unknown models are around, so
-brand-new models price within the hour), and draws the Today /
-Yesterday / 30-day donut with a per-model breakdown. Click the ring to
-flip between dollars and tokens. On a flat-rate plan this shows what
-your usage *would* cost at API prices — the best ad for your
-subscription you'll ever see. Models with no public pricing keep their
-measured tokens but no guessed dollars — a ⚠ on the provider's spend row
-says some measured usage has no known dollar price. The supported sources,
-deduplication rules, and coverage limits are documented in
-[Token spend coverage](docs/token-spend-coverage.md). Local records can be incomplete;
-subscription percentages are never converted into guessed token counts.
+## 参与贡献
 
-**5. Staying local.** All of the above happens on your machine — no
-account, and your quotas, spend, and provider data never leave your PC.
-Pane reports two anonymous things about itself: the update check
-(country-level counting, no IPs stored) and an opt-out once-a-day
-statistic (random ID, version, enabled providers, success/failure counts —
-never amounts or error text). The full contract and the off switch are
-under [Privacy](#privacy--security).
+欢迎提交 issue、provider 适配、UI 改进和文档修订。请在提交前说明：
 
-## Providers (31 and counting)
-
-| Provider | How Pane connects |
-|---|---|
-| Claude (Claude Code) | `%USERPROFILE%\.claude\.credentials.json` + Anthropic usage API; multi-account — every discovered config-dir login gets its own card |
-| Codex (Codex CLI) | `%USERPROFILE%\.codex\auth.json` + ChatGPT usage API, incl. reset-credit redemption; multi-account like Claude |
-| Cursor | Cursor's local state database + cursor.com API |
-| OpenCode (Go plan) | Official account-wide usage API (Go key from `auth.json`, or pasted in Settings); local `opencode.db` for spend* |
-| GitHub Copilot | Copilot editor login or GitHub CLI (Credential Manager) + GitHub API |
-| Grok (Grok CLI) | `%USERPROFILE%\.grok\auth.json` + Grok billing/subscription APIs |
-| Devin (Devin CLI) | `%APPDATA%\devin\credentials.toml` + GetUserStatus RPC; local CLI session store for spend |
-| MiniMax | API key (Settings, env var, or CLI config) + token-plan API |
-| OpenRouter | API key (Settings) or key stored by OpenCode |
-| Z.ai | API key (Settings), CLI key file, or env var |
-| Antigravity | Local language server, or Google Cloud Code API via Credential Manager |
-| DeepSeek | API key (Settings) → balance |
-| Moonshot (Kimi API) | API key (Settings) → balance (global + CN endpoints) |
-| Kimi Code | Official CLI login (`kimi login`) or Kimi Coding API key (Settings) → Session + Weekly plan bars and membership name (Moderato / Allegretto / Allegro / Vivace); Moonshot API key → API wallet bar; local session spend |
-| ElevenLabs | API key (Settings) → character quota with reset pacing |
-| Ollama | Local server on :11434 — installed + loaded models, no key |
-| Codebuff | `codebuff login` credentials file or API key → credits + weekly limit |
-| Kilo | Kilo CLI login file or API key → credit blocks + Kilo Pass |
-| AihubMix | API key (Settings or auto-detected from OpenCode) → usage vs spending limit |
-| One/New API | Add multiple compatible sites and keys in Settings; one quota tab per key on a merged card, with owner-only local secret storage |
-| Qwen Code | Coding Plan key (Settings or env) → 5h/weekly/monthly request quotas + local spend |
-| Hermes | Local ledger `%LOCALAPPDATA%\hermes\state.db` → two recent user models, routes, and catalog-priced spend, including scoped AihubMix launch-model rates |
-| StepFun | API key (Settings or `STEPFUN_API_KEY`) → CNY balance (global + .ai hosts) |
-| SiliconFlow | API key (Settings or `SILICONFLOW_API_KEY`) → CNY balance (.cn + .com hosts) |
-| Novita AI | API key (Settings or `NOVITA_API_KEY`) → USD balance |
-| Custom Balance | Base URL + API key (Settings) → OpenAI-compatible billing (`/dashboard/billing/subscription` + `/usage`) at any relay that exposes it |
-| Qoder CN | Qoder CN desktop app's encrypted sign-in (`auth.v1.dat`) → CN OpenAPI plan tier + credit pools with dedicated model packages |
-| Trae CN | Trae CN desktop app's sign-in (`storage.json`) → one row per credit pack (scope-split general vs Work-only, each with its own expiry; the pack being drained as a progress bar) + account tier |
-| Command Code | Command Code API key (Settings, `COMMAND_CODE_API_KEY`, or the CLI's `auth.json`) → 5h / weekly / monthly credit windows + extra credits; multiple GOAT subscriptions side by side |
-| ClinePass | `sk_` API key (Settings) → five-hour / weekly / monthly usage windows; supports multiple keys as separate account cards |
-| Doubao | Doubao desktop sign-in cookies (read while Doubao is quit, cached ~30 days) → 5h / 7-day windows, subscription renewal, quota-reset-card balance |
-| ClawsGO | ClawsGO token from the browser (`localStorage.clawsgo_token`) → monthly credit meter, remaining balance, 30-day requests + tokens |
-
-\* OpenCode's meters use the official usage API that shipped in
-[anomalyco/opencode#16513](https://github.com/anomalyco/opencode/pull/16513)
-— the same account-wide numbers as the Zen dashboard, so usage from your
-other devices (or other people on a shared subscription) finally counts.
-If the API is unreachable, Pane falls back to computing this machine's
-usage locally from `opencode.db`, the same data `opencode stats` uses;
-dollar spend figures are always local.
-
-More on the way: IDE-database providers (Windsurf, JetBrains AI…) and
-whatever the community asks for loudest.
-
-## Features
-
-**Tracking**
-
-- **Quota Overview** — every active provider with rolling reset quotas in
-  one pinned section: picks the most binding quota per provider (5h session
-  metrics first, or daily/weekly/monthly plans), with a status dot and reset
-  countdown ring per provider, plus an independent green "N available" /
-  red "N maxed" symbol tally in the header.
-- **Codex reset credits** — see each banked credit's exact expiry and
-  redeem it with one click.
-- **Peak-hours awareness** — providers with time-of-day billing
-  (Z.ai / GLM-plan relays, Command Code GOAT, Qoder CN, Trae CN) turn
-  their status dot yellow while their peak window is active, and the
-  Quota Overview splits into Available / Peak / Unavailable with an
-  always-on peak counter. Hovering a peak tile explains the multiplier
-  rule and how much cheaper off-peak runs are.
-
-**Spend**
-
-- **Local spend donut** — Today / Yesterday / 30 Days with a per-model
-  breakdown and a 30-day trend, priced with live model rates. Hover a
-  slice and it pops out with its legend row; click the ring to flip
-  dollars ⇄ tokens.
-- **Burn-rate alerts** — bars color by used-% (blue → amber → red), and
-  optional Windows toasts fire once per reset window ("Almost out",
-  "Will run out") when your burn rate says you won't make it.
-
-**Accounts**
-
-- **Multi-account Claude & Codex** — running a personal plan AND a
-  work/enterprise seat? Keep the second login in its own folder (via
-  `CLAUDE_CONFIG_DIR` / `CODEX_HOME`) and Pane shows one card per
-  account — its own limits, plan, credits, and spend, named by its
-  organization or email ("Claude — Acme"). The same account signed in
-  twice stays one card, and your existing setup is untouched.
-- **Account tabs for key providers** — DeepSeek, StepFun, SiliconFlow,
-  Novita, Kimi, Antigravity, Cursor, Custom Balance, and ClinePass keep
-  multiple logins as tabs or pooled account cards, with the account count
-  shown beside the provider status.
-- **One/New API sites** — add multiple compatible sites and multiple keys
-  per site in Settings; every key gets its own quota tab on the merged
-  card; secrets remain owner-only on this PC and are sent only to the
-  configured origin.
-
-**Interface & control**
-
-- **Skin market** — open the palette button above Customize to preview
-  built-in wallpaper and mascot pairs. Applying a skin only adds a visual
-  layer; the native light/dark theme, cards, and provider data stay intact.
-  Press `Esc` to close the preview, then the market, then Customize.
-
-- **English, Chinese, and Russian** — choose a language explicitly or let
-  Auto follow the Windows display language across the popover, tray, and
-  quota notifications.
-- **Live tray numbers** — star up to two metrics per provider and they
-  render as logo + percentage pairs directly in the tray.
-- **Customize** — drag any card by its grip right in the popover to
-  reorder, or open the Customize screen (☰) to reorder metrics, hide
-  rows, and tuck rarely-needed ones behind an "On Demand" caret; every
-  row head shows the provider's brand mark (or a "?" placeholder),
-  blocks sit in the same card-group sections as the dashboard, and folded
-  cards surface their nearest reset countdown as a status-toned pill.
-  Ctrl+Z undoes.
-- **Liquid glass UI** — real SDF lens refraction on the auto-hiding
-  edge rails (app controls on the left, the provider icon trail on the
-  right) and glass bars, magnetic fisheye on the trail with authentic
-  brand avatars and health indicator dots, circular day/night wipe.
-- **Share cards** — hover a card, click ⧉, and paste anywhere: the copy
-  is exactly what the card shows (bars, reset hints, trend — buttons and
-  links stripped), framed with the Pane icon and tagline.
-- **Quick links** — Status / Dashboard shortcuts on every card.
-- **Keyboard** — `Alt+2` (configurable) toggles the panel; with the
-  panel open, bare `Shift` flips the overview 5h/Weekly board and bare
-  `T` flips it to the soonest-reset list; `Ctrl+S` toggles Settings;
-  `Ctrl+R` refreshes.
-- **[Local HTTP API](docs/local-http-api.md)** — one loopback endpoint
-  for scripts, Rainmeter widgets, stream overlays:
-
-  ```bash
-  curl -s http://127.0.0.1:6736/v1/usage
-  ```
-
-  Same wire format as the Mac app, but with no CORS headers and a
-  loopback-only Host check so web pages can't read it through your
-  browser (not even via DNS rebinding).
-- **Update checks** — Pane checks on launch and every 4 hours in the
-  background; when a release is out, the footer version stamp becomes an
-  Update button. One-click in-app install lands together with Pane's own
-  signing key (on the roadmap) — until then, grab new versions from the
-  [releases page](https://github.com/Aafff623/pane/releases/latest).
-- **Appearance** — System / Light / Dark, compact density, custom UI
-  font (Settings → Font lists every font installed on the system,
-  searchable and previewed in its own face), time format, global
-  shortcut (e.g. `Ctrl+Shift+U`), optional outbound proxy.
-
-## Privacy & security
-
-Pane reads credential files. You should not take our word for how it
-treats them — verify it:
-
-- **[docs/privacy.md](docs/privacy.md)** — the complete list of every
-  network call Pane can make. No event streams, no session recording,
-  no autocapture; the update check counts anonymous daily installs by
-  country (no IPs stored), and an opt-out daily statistic reports
-  version + enabled providers + refresh success/failure counts under a
-  random ID attached to nothing. That document explains exactly how,
-  field by field.
-- **[docs/providers.md](docs/providers.md)** — per provider: exactly which
-  files are read on your PC and exactly which endpoints they're sent to.
-- **[SECURITY.md](SECURITY.md)** — how to report vulnerabilities
-  privately, the security properties you can audit in source, and an
-  honest list of current limitations (unsigned installer — the release
-  binaries themselves are built by GitHub Actions from the tagged source,
-  with public build logs).
-
-The short version: tokens are sent only to their own vendor's API over
-HTTPS; pasted keys live in `%APPDATA%\Pane`, readable only by your
-Windows user; spend accounting parses your local logs locally; the HTTP
-API is loopback-only with no CORS and a Host check; update downloads come
-only from Pane's official release feed.
-
-## Settings (gear icon)
-
-Language (Auto / English / 中文 / Русский) · refresh interval · Start with
-Windows · tray metric picker · appearance and compact density · time format ·
-global shortcut · notification toggles · outbound proxy · provider API keys ·
-One/New API site and key management.
-
-## Contributing
-
-Found a wrong number, a broken provider, or a missing one?
-[Issues](https://github.com/Aafff623/pane/issues) are the fastest way in —
-[CONTRIBUTING.md](CONTRIBUTING.md) has the ground rules. The
-[roadmap](ROADMAP.md) shows what's shipping next, and
-[CHANGELOG.md](CHANGELOG.md) records every release.
-
-## Credits
-
-Pane exists because of
-**[OpenUsage for macOS](https://github.com/robinebers/openusage)** by
-**[Robin Ebers](https://github.com/robinebers)** (MIT). The hard part of a
-tool like this — knowing which credential files to read, which
-undocumented usage endpoints to call, and how to interpret their
-responses — is research Robin did first and published openly. Pane is an
-independent from-scratch rebuild for Windows (Rust + TypeScript instead of
-Swift), but it stands on that research and gladly says so. If you're on a
-Mac, use his app.
-
-Additional thanks:
-
-- [Tauri](https://tauri.app/) — the app shell that keeps Pane tiny.
-- [prasen.dev](https://www.prasen.dev/) — the original SDF liquid-glass
-  lens technique the UI's refraction is ported from.
-- [LiteLLM](https://github.com/BerriAI/litellm) and
-  [models.dev](https://models.dev/) — open model-price catalogs powering
-  the spend engine.
-- [shadcn/ui](https://ui.shadcn.com/) — the zinc design tokens the theme
-  is built on.
-
-Pane is not affiliated with or endorsed by Robin Ebers or any of the AI
-vendors listed. Provider names and logos belong to their respective owners
-and are used only to identify the services.
+1. 改动影响的 provider 或用户路径。
+2. 使用了哪些本地数据或外部 API。
+3. 如何验证，哪些部分仍需要手动验收。
 
 ## License
 
-[MIT](LICENSE) — © 2026 Jazii, with provider research credit to Robin
-Ebers' OpenUsage (MIT).
+[MIT](LICENSE)

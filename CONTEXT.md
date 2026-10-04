@@ -223,14 +223,13 @@ anything unverified lives under `待确认` at the bottom.
 
 ## README assets
 
-- `docs/readme-pane.png` is the published 1200 × 380 README hero. It is a
-  flattened PNG: typography and telemetry layout are deterministic, while the
-  isolated character/card material is composited into the final image. Keep
-  README copy and commands in Markdown; do not replace the hero with an SVG
-  that depends on an external raster layer.
-- `docs/promo.png` remains the interface proof directly below the hero. It is
-  a product screenshot, not a replacement for the project promise in the
-  first screen.
+- The README uses the existing product icon at `src/assets/pane-icon.png` as
+  its only project-local visual. The icon is square, already shipped with the
+  app, and should remain the canonical README identity mark.
+- README banners and screenshot strips were removed on 2026-10-04 so the
+  document stays searchable, lightweight, and accurate as the dashboard UI
+  changes. Product proof now lives in the feature sections and linked design
+  documents.
 
 ## 待确认
 
