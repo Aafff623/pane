@@ -35,6 +35,7 @@ declare const __BUILD_STAMP__: string;
 // app icon, which stays legible at tiny sizes.
 import paneLogo from "./assets/pane-logo.png?inline";
 import paneIcon from "./assets/pane-icon.png?inline";
+import auroraWallpaper from "./assets/skins/aurora.webp";
 // The repo's changelog ships inside the bundle, so the "What's new" dialog
 // and the Settings changelog viewer read the exact file releases maintain.
 import changelogRaw from "../CHANGELOG.md?raw";
@@ -569,6 +570,74 @@ let overviewCategory: OverviewCategory = "coding";
 /// the "act soon" view. Follows the 5h/week tab like the sections do.
 let overviewExpiringOpen = false;
 let customizeOpen = false;
+let skinMarketOpen = false;
+let skinPreviewId: string | null = null;
+
+type SkinId = "aurora" | "paper" | "arcade";
+interface SkinDefinition {
+  id: SkinId;
+  name: string;
+  tagline: string;
+  colors: [string, string, string];
+  wallpaper: string;
+  mascot: string;
+}
+
+const SKINS: SkinDefinition[] = [
+  {
+    id: "aurora",
+    name: "Aurora Desk",
+    tagline: "极光玻璃 · 夜间专注",
+    colors: ["#07111f", "#203d59", "#9af2d1"],
+    wallpaper: `url(${auroraWallpaper}), radial-gradient(circle at 18% 22%, rgba(126,249,210,.25), transparent 28%), radial-gradient(circle at 82% 8%, rgba(113,150,255,.3), transparent 34%), linear-gradient(145deg,#07111f 0%,#132943 48%,#1e3f4c 100%)`,
+    mascot: `<svg viewBox="0 0 120 120"><path d="M22 77c0-31 17-51 39-51s37 20 37 51c0 10-8 18-18 18H40c-10 0-18-8-18-18Z" fill="#b9ffe5"/><path d="M34 55c7-18 17-27 28-27 14 0 25 10 31 29-15-7-37-8-59-2Z" fill="#70d7c0"/><circle cx="47" cy="64" r="5" fill="#102333"/><circle cx="73" cy="64" r="5" fill="#102333"/><path d="M49 78c7 6 15 6 22 0" fill="none" stroke="#102333" stroke-width="4" stroke-linecap="round"/><path d="M57 25l3-13m8 14 8-10" stroke="#b9ffe5" stroke-width="4" stroke-linecap="round"/></svg>`,
+  },
+  {
+    id: "paper",
+    name: "Paper Orbit",
+    tagline: "纸张轨道 · 清爽工作台",
+    colors: ["#f2eadb", "#d6b98a", "#4f6c55"],
+    wallpaper: "radial-gradient(circle at 12% 78%, rgba(255,255,255,.65), transparent 24%), repeating-linear-gradient(115deg, rgba(92,72,45,.08) 0 1px, transparent 1px 18px), linear-gradient(135deg,#f2eadb,#ded0b7 54%,#b8c3a8)",
+    mascot: `<svg viewBox="0 0 120 120"><path d="m25 81 19-52 43 16-19 52Z" fill="#fff8e9" stroke="#765b3f" stroke-width="3"/><path d="m43 29 10-10 43 16-9 10Z" fill="#d7b37b" stroke="#765b3f" stroke-width="3"/><circle cx="55" cy="55" r="5" fill="#765b3f"/><circle cx="76" cy="63" r="5" fill="#765b3f"/><path d="M54 70c7 5 14 6 21 1" fill="none" stroke="#765b3f" stroke-width="3" stroke-linecap="round"/></svg>`,
+  },
+  {
+    id: "arcade",
+    name: "Neon Arcade",
+    tagline: "霓虹像素 · 快速唤醒",
+    colors: ["#110d22", "#36205f", "#ff7ad9"],
+    wallpaper: "linear-gradient(120deg, rgba(255,71,190,.22) 0 2px, transparent 2px 44px), linear-gradient(35deg, rgba(90,220,255,.18) 0 2px, transparent 2px 52px), radial-gradient(circle at 50% 36%, rgba(255,84,199,.24), transparent 34%), #110d22",
+    mascot: `<svg viewBox="0 0 120 120"><rect x="22" y="31" width="76" height="62" rx="20" fill="#ff7ad9" stroke="#72e9ff" stroke-width="4"/><circle cx="46" cy="61" r="8" fill="#17102e"/><circle cx="74" cy="61" r="8" fill="#17102e"/><path d="M45 78h30" stroke="#17102e" stroke-width="5" stroke-linecap="round"/><path d="M30 23v-8m60 8v-8" stroke="#72e9ff" stroke-width="4" stroke-linecap="round"/></svg>`,
+  },
+];
+
+const SKIN_STORAGE_KEY = "pane.skin.id";
+function activeSkin(): SkinDefinition | undefined {
+  const id = localStorage.getItem(SKIN_STORAGE_KEY) as SkinId | null;
+  return SKINS.find((skin) => skin.id === id);
+}
+
+function applySkin(skin = activeSkin()): void {
+  const root = document.documentElement;
+  const mascot = document.querySelector<HTMLElement>("#skin-mascot");
+  if (!skin) {
+    delete root.dataset.skin;
+    root.style.removeProperty("--skin-wallpaper");
+    root.style.removeProperty("--skin-accent");
+    if (mascot) mascot.innerHTML = "";
+    return;
+  }
+  root.dataset.skin = skin.id;
+  root.style.setProperty("--skin-wallpaper", skin.wallpaper);
+  root.style.setProperty("--skin-accent", skin.colors[2]);
+  if (mascot) mascot.innerHTML = skin.mascot;
+}
+
+function selectSkin(id: SkinId): void {
+  localStorage.setItem(SKIN_STORAGE_KEY, id);
+  applySkin(SKINS.find((skin) => skin.id === id));
+  document.querySelector("#status")!.textContent = `${SKINS.find((skin) => skin.id === id)?.name ?? "Skin"} applied`;
+  renderDrawerBody();
+}
 let revealTimer = 0;
 let animateExpandId: string | null = null;
 
@@ -5937,7 +6006,27 @@ function accountChildRows(family: string): string {
     .join("")}</div>`;
 }
 
+function renderSkinMarket(): string {
+  const selected = activeSkin()?.id;
+  const preview = skinPreviewId ? SKINS.find((skin) => skin.id === skinPreviewId) : undefined;
+  if (preview) {
+    return `<section class="skin-market skin-detail" aria-label="Skin preview">
+      <button class="skin-back" type="button" data-skin-back>← Skin market</button>
+      <div class="skin-detail-hero" style="--skin-preview:${preview.wallpaper}">
+        <div class="skin-detail-mascot">${preview.mascot}</div>
+        <div><p class="skin-kicker">SELECTED SKIN</p><h2>${escapeHtml(preview.name)}</h2><p>${escapeHtml(preview.tagline)}</p></div>
+      </div>
+      <div class="skin-detail-actions"><button class="mini-btn primary" data-skin-select="${preview.id}">${selected === preview.id ? "✓ Applied" : "Use this skin"}</button><span class="skin-detail-note">Wallpaper + mascot appear together when Pane wakes.</span></div>
+    </section>`;
+  }
+  return `<section class="skin-market" aria-label="Skin market">
+    <div class="skin-market-head"><div><p class="skin-kicker">PANE SKIN MARKET</p><h2>Make the popover yours</h2><p class="skin-market-copy">Choose a wallpaper and its companion mascot. Your native light/dark theme stays intact.</p></div><button class="mini-btn" data-skin-close>Done</button></div>
+    <div class="skin-grid">${SKINS.map((skin) => `<button class="skin-card${selected === skin.id ? " selected" : ""}" type="button" data-skin-preview="${skin.id}" style="--skin-preview:${skin.wallpaper}"><span class="skin-card-art"><span class="skin-card-mascot">${skin.mascot}</span></span><span class="skin-card-copy"><strong>${escapeHtml(skin.name)}</strong><small>${escapeHtml(skin.tagline)}</small></span>${selected === skin.id ? '<span class="skin-selected">Applied</span>' : ""}</button>`).join("")}</div>
+  </section>`;
+}
+
 function renderCustomize(): string {
+  if (skinMarketOpen) return renderSkinMarket();
   // A-Z by English display name, locale-independent. Card order is owned by
   // dragging cards on the main view; the drawer is for enabling,
   // configuring and per-row management, so a stable sorted list reads best.
@@ -6090,6 +6179,7 @@ function renderCustomize(): string {
 
   const starCount = Object.values(config.layout?.providers ?? {}).reduce((n, l) => n + l.starred.length, 0);
   return `
+    <div class="customize-skin-entry"><div><strong>Skin market</strong><span>Wallpaper · mascot · atmosphere</span></div><button class="mini-btn" data-skin-open>${uiIcon("palette", "Open skin market")}</button></div>
     <div class="customize-bar glass-bar">
       <div class="customize-heading">
         <button class="dock-btn" data-customize-close>${escapeHtml(t("customize.done"))}</button>
@@ -6213,7 +6303,12 @@ function renderDrawerBody(): void {
 
 function setDrawer(open: boolean): void {
   customizeOpen = open;
-  if (!open) dismissAccountDialog?.();  if (open) {
+  if (!open) {
+    dismissAccountDialog?.();
+    skinMarketOpen = false;
+    skinPreviewId = null;
+  }
+  if (open) {
     renderDrawerBody();
     // Local JSON list — cheap, and required if Customize opens before Settings.
     void loadOneNewApiSites();
@@ -7077,6 +7172,35 @@ function moveRow(L: ProviderLayout, key: string, target: string): void {
 }
 
 async function handleCustomizeClick(target: HTMLElement): Promise<boolean> {
+  const skinOpen = target.closest<HTMLElement>("[data-skin-open]");
+  if (skinOpen) {
+    skinMarketOpen = true;
+    skinPreviewId = null;
+    renderDrawerBody();
+    return true;
+  }
+  const skinClose = target.closest<HTMLElement>("[data-skin-close]");
+  if (skinClose) {
+    setDrawer(false);
+    return true;
+  }
+  const skinPreview = target.closest<HTMLElement>("[data-skin-preview]");
+  if (skinPreview) {
+    skinPreviewId = skinPreview.dataset.skinPreview as SkinId;
+    renderDrawerBody();
+    return true;
+  }
+  const skinBack = target.closest<HTMLElement>("[data-skin-back]");
+  if (skinBack) {
+    skinPreviewId = null;
+    renderDrawerBody();
+    return true;
+  }
+  const skinSelect = target.closest<HTMLElement>("[data-skin-select]");
+  if (skinSelect) {
+    selectSkin(skinSelect.dataset.skinSelect as SkinId);
+    return true;
+  }
   // One/New API site manager (relocated from Settings): expand/edit/delete
   // actions live inside the family row's account section.
   const onaHandled = handleOneNewApiClick(target);
@@ -8871,6 +8995,8 @@ function syncSettingsControls(): void {
 window.addEventListener("DOMContentLoaded", () => {
   const appLogo = document.querySelector<HTMLElement>("#app-logo")!;
   appLogo.innerHTML = `<img src="${paneLogo}" alt="Pane" />`;
+  document.querySelector<HTMLElement>("#customize-btn")!.innerHTML = uiIcon("palette", "Customize and skins");
+  applySkin();
   // Party mode, the easy way: triple-click the logo. (The Konami code
   // still works, for the culture.)
   let logoClicks = 0;
@@ -8930,6 +9056,16 @@ window.addEventListener("DOMContentLoaded", () => {
       // IME: Esc cancels an in-flight composition (candidate window) — it
       // must not double as "close the panel" / "hide the window".
       if (e.isComposing || e.keyCode === 229) return;
+      if (skinPreviewId) {
+        skinPreviewId = null;
+        renderDrawerBody();
+        return;
+      }
+      if (skinMarketOpen) {
+        skinMarketOpen = false;
+        renderDrawerBody();
+        return;
+      }
       if (customizeOpen || document.body.classList.contains("settings-open")) {
         setDrawer(false);
         setSettings(false);
@@ -9571,6 +9707,12 @@ window.addEventListener("DOMContentLoaded", () => {
     updateTrailActive();
     if (lastSnapshots.length && !customizeOpen) playReveal();
     requestTraySync();
+    const mascot = document.querySelector<HTMLElement>("#skin-mascot");
+    mascot?.classList.remove("wake");
+    if (activeSkin()) {
+      void mascot?.offsetWidth;
+      mascot?.classList.add("wake");
+    }
     void refresh();
   });
   void initSettings().then(() => {
