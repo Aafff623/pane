@@ -74,6 +74,8 @@ html,
 body {
   margin: 0;
   height: 100%;
+  max-width: 100%;
+  overflow-x: hidden;
 }
 
 body {
@@ -81,6 +83,7 @@ body {
   color: var(--foreground);
   user-select: none;
   overflow: hidden;
+  overscroll-behavior-x: none;
 }
 
 /* Selected skins live behind the existing cards and rails. Native light/dark
@@ -459,6 +462,16 @@ body.settings-open #settings {
   font-size: 12.5px;
   color: var(--secondary-foreground);
 }
+
+.shortcut-state {
+  min-width: 68px;
+  font-size: 10px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+.shortcut-state.checking { color: var(--muted-foreground); }
+.shortcut-state.available { color: #22c55e; }
+.shortcut-state.conflict { color: #ef4444; }
 
 .kv-add-row {
   align-items: stretch;
@@ -930,6 +943,9 @@ select:focus-visible {
   flex: 1;
   display: flex;
   min-height: 0;
+  min-width: 0;
+  max-width: 100%;
+  overflow-x: hidden;
 }
 
 /* Navigation trail: a refined provider avatar rail (Cockpit/cc-switch style).
@@ -1136,6 +1152,8 @@ select:focus-visible {
   min-width: 0;
   position: relative;
   overflow-y: auto;
+  overflow-x: hidden;
+  max-width: 100%;
   padding: 14px 14px 48px;
   display: flex;
   flex-direction: column;
@@ -2511,6 +2529,11 @@ article.provider.is-folded:hover {
   background: #eab308;
 }
 
+.acct-dot.error {
+  background: #f97316;
+  box-shadow: 0 0 4px rgb(249 115 22 / .8);
+}
+
 .acct-dot.gray {
   background: #71717a;
 }
@@ -3478,19 +3501,20 @@ body.party .fill {
 .skin-detail-hero h2 { color:#fff; }
 .skin-detail-hero p:last-child { color:rgb(255 255 255 / .76); }
 .skin-detail-actions { display:flex; align-items:center; gap:12px; padding-top:14px; }
+.skin-market-actions { display:flex; align-items:center; gap:10px; margin:0 0 12px; }
 .skin-detail-note { color:var(--muted-foreground); font-size:11px; }
 @keyframes skin-float { 50% { transform:translateY(-6px) rotate(2deg); } }
-#skin-mascot { position:fixed; z-index:44; left:50%; top:50%; width:72px; transform:translate(145px,-96px) rotate(4deg); pointer-events:none; opacity:0; filter:drop-shadow(0 12px 16px rgb(0 0 0 / .28)); }
+#skin-mascot { position:fixed; z-index:44; left:auto; right:12px; top:auto; bottom:12px; width:82px; transform:translateY(20px) rotate(4deg); pointer-events:none; opacity:0; filter:drop-shadow(0 12px 16px rgb(0 0 0 / .28)); }
 #skin-mascot svg { display:block; width:100%; height:auto; }
 #skin-mascot.wake { animation:mascot-wake .7s cubic-bezier(.16,1,.3,1) forwards, skin-float 4s ease-in-out .7s infinite; }
-@keyframes mascot-wake { from { opacity:0; transform:translate(115px,-72px) scale(.8) rotate(12deg); } to { opacity:.96; transform:translate(145px,-96px) scale(1) rotate(4deg); } }
+@keyframes mascot-wake { from { opacity:0; transform:translateY(28px) scale(.8) rotate(12deg); } to { opacity:.96; transform:translateY(0) scale(1) rotate(4deg); } }
 @media (max-width:640px) {
   .skin-grid { grid-template-columns:1fr; }
   .skin-card-art { min-height:118px; }
   .skin-detail-hero { grid-template-columns:110px 1fr; min-height:190px; padding:16px; gap:14px; }
   .skin-detail-mascot { width:100px; }
-  #skin-mascot { left:auto; right:16px; transform:translateY(-92px) rotate(4deg); }
-  @keyframes mascot-wake { from { opacity:0; transform:translateY(-68px) scale(.8) rotate(12deg); } to { opacity:.96; transform:translateY(-92px) scale(1) rotate(4deg); } }
+  #skin-mascot { right:10px; bottom:10px; width:64px; }
+  @keyframes mascot-wake { from { opacity:0; transform:translateY(24px) scale(.8) rotate(12deg); } to { opacity:.96; transform:translateY(0) scale(1) rotate(4deg); } }
 }
 
 body.party .app-logo {
@@ -4576,11 +4600,17 @@ body.no-glass #confirm-box {
   align-items: center;
   gap: 6px;
   margin: 2px 10px 6px;
+  min-width: 0;
+  max-width: calc(100% - 20px);
+  flex-wrap: wrap;
 }
 
 .quota-overview .overview-cat-tabs {
   display: inline-flex;
-  flex: none;
+  flex: 1 1 auto;
+  min-width: 0;
+  max-width: 100%;
+  overflow-x: auto;
   gap: 2px;
   margin: 0;
   padding: 2px;
@@ -4597,6 +4627,9 @@ body.no-glass #confirm-box {
 
 .quota-overview .overview-switch-row .overview-tabs {
   margin-left: auto;
+  flex: 0 1 auto;
+  max-width: 100%;
+  overflow-x: auto;
 }
 
 /* The head's ⏱/⟳ shrink a notch too — the ? next to the 高峰 chip needs
@@ -4856,6 +4889,11 @@ body.no-glass #confirm-box {
   box-shadow: 0 0 4px rgba(239, 68, 68, 0.8);
 }
 
+.overview-dot.error {
+  background: #f97316;
+  box-shadow: 0 0 4px rgb(249 115 22 / .8);
+}
+
 .overview-dot.gray {
   background: #71717a;
 }
@@ -4903,7 +4941,7 @@ body.no-glass #confirm-box {
 .overview-ring .ring-text.is-error {
   font-size: 11px;
   font-weight: 700;
-  fill: #ef4444;
+  fill: #f97316;
 }
 
 .overview-item-foot {

@@ -4,6 +4,7 @@ import claudeIcon from "./assets/providers/claude.svg?raw";
 import clawsgoIcon from "./assets/providers/clawsgo.svg?raw";
 import codexIcon from "./assets/providers/codex.svg?raw";
 import commandcodeIcon from "./assets/providers/commandcode.svg?raw";
+import clinepassIcon from "./assets/providers/clinepass.svg?raw";
 import copilotIcon from "./assets/providers/copilot.svg?raw";
 import cursorIcon from "./assets/providers/cursor.svg?raw";
 import deepseekIcon from "./assets/providers/deepseek.svg?raw";
@@ -44,6 +45,7 @@ const VISUALS: Readonly<Record<string, ProviderVisual>> = {
   antigravity: { iconKey: "antigravity", iconSvg: antigravityIcon },
   aihubmix: { iconKey: "aihubmix", iconSvg: aihubmixIcon },
   claude: { iconKey: "claude", iconSvg: claudeIcon },
+  clinepass: { iconKey: "clinepass", iconSvg: clinepassIcon },
   codex: { iconKey: "codex", iconSvg: codexIcon },
   copilot: { iconKey: "copilot", iconSvg: copilotIcon },
   cursor: { iconKey: "cursor", iconSvg: cursorIcon },

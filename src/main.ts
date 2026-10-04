@@ -632,10 +632,12 @@ function applySkin(skin = activeSkin()): void {
   if (mascot) mascot.innerHTML = skin.mascot;
 }
 
-function selectSkin(id: SkinId): void {
-  localStorage.setItem(SKIN_STORAGE_KEY, id);
-  applySkin(SKINS.find((skin) => skin.id === id));
-  document.querySelector("#status")!.textContent = `${SKINS.find((skin) => skin.id === id)?.name ?? "Skin"} applied`;
+function selectSkin(id: SkinId | null): void {
+  localStorage.setItem(SKIN_STORAGE_KEY, id ?? "");
+  applySkin(id ? SKINS.find((skin) => skin.id === id) : undefined);
+  document.querySelector("#status")!.textContent = id
+    ? `${SKINS.find((skin) => skin.id === id)?.name ?? "Skin"} applied`
+    : "Default skin applied";
   renderDrawerBody();
 }
 let revealTimer = 0;
@@ -1324,7 +1326,7 @@ function setCardNote(cardId: string, note: string): void {
 /// layout available in Customize for a later re-enable.
 function removeProviderCard(cardId: string): void {
   const family = providerFamily(cardId);
-  const target = isParallelAccountFamily(family) ? cardId : family;
+  const target = isParallelAccountFamily(family) || cardId.includes("@") ? cardId : family;
   if (!config.disabled.includes(target)) config.disabled = [...config.disabled, target];
   void patchConfig({ disabled: config.disabled });
   renderAll();
@@ -1630,12 +1632,12 @@ function maxProgressUsed(s: Snapshot): number {
 /// Health dot for an account tab: red = some window (session or weekly)
 /// is maxed out — the account is waiting for a reset; green = room left
 /// everywhere; gray = no successful fetch yet.
-function accountHealthDot(id: string): "red" | "green" | "gray" {
+function accountHealthDot(id: string): "red" | "green" | "gray" | "error" {
   const snap = lastSnapshots.find((s) => s.id === id);
   if (!snap) return "gray";
   // A rejected key is actionable, not an account with no data. Keep the
   // gray dot for accounts that have not produced a snapshot yet.
-  if (snap.status === "error") return "red";
+  if (snap.status === "error") return "error";
   if (snap.status !== "ok") return "gray";
   if (!snap.metrics.length) return "gray";
   return isSnapshotMaxed(snap) ? "red" : "green";
@@ -1787,7 +1789,7 @@ function maxedRowLabel(cardId: string): string | null {
 
 /// Combines the overall family health dot: green if any account is green (quota available),
 /// red if all are red, gray otherwise.
-function familyHealthDot(family: string): "red" | "green" | "gray" {
+function familyHealthDot(family: string): "red" | "green" | "gray" | "error" {
   const cards = lastSnapshots.filter((s) => {
     if (providerFamily(s.id) !== family || isCardDisabled(s.id)) return false;
     if (s.id.includes("@") && accountsCache.has(family)) {
@@ -1798,11 +1800,12 @@ function familyHealthDot(family: string): "red" | "green" | "gray" {
   if (cards.length === 0) return "gray";
   const dots = cards.map((s) => accountHealthDot(s.id));
   if (dots.some((d) => d === "green")) return "green";
+  if (dots.some((d) => d === "error")) return "error";
   if (dots.every((d) => d === "red")) return "red";
   return "gray";
 }
 
-function cardHealthDot(cardId: string): "red" | "green" | "gray" {
+function cardHealthDot(cardId: string): "red" | "green" | "gray" | "error" {
   const family = providerFamily(cardId);
   if (cardId === family && supportsExtraAccounts(family) && !isParallelAccountFamily(family)) {
     return familyHealthDot(family);
@@ -1815,12 +1818,13 @@ function cardHealthDot(cardId: string): "red" | "green" | "gray" {
 /// (green). Red (maxed / error) and gray keep their own meaning.
 function peakTintedDot(
   family: string,
-  dot: "red" | "green" | "gray",
-): "red" | "green" | "gray" | "yellow" {
+  dot: "red" | "green" | "gray" | "error",
+): "red" | "green" | "gray" | "yellow" | "error" {
   return dot === "green" && isProviderInPeak(family) ? "yellow" : dot;
 }
 
-function healthDotTitle(dot: "red" | "green" | "gray" | "yellow"): string {
+function healthDotTitle(dot: "red" | "green" | "gray" | "yellow" | "error"): string {
+  if (dot === "error") return t("customize.acctDotError");
   return dot === "red"
     ? t("customize.acctDotRed")
     : dot === "yellow"
@@ -1961,7 +1965,7 @@ function overviewHoverTip(s: Snapshot, quota: OverviewQuota, displayName: string
     }
   }
 
-  const win = quota.window ? t(windowLabelKey[quota.window]) : t("overview.winGeneric");
+  const win = overviewWindowLabel(quota);
   const pct = Math.round(quota.usedPercent);
   if (quota.resetsAt && quota.resetsAt > Date.now()) {
     return `${displayName}: ${win} ${pct}% · ${t("overview.resetsIn", { time: fmtDuration(quota.resetsAt - Date.now()) })}`;
@@ -2873,6 +2877,7 @@ interface OverviewQuota {
   // Text-metric value ("¥0.00 …" balance rows): tiles render this instead
   // of "no usage data" when the snapshot has no percent metric.
   valueText: string | null;
+  periodFallback: boolean;
   isMaxed: boolean;
   status: "ok" | "maxed" | "error" | "no_data" | "text";
 }
@@ -2886,6 +2891,7 @@ function extractOverviewQuota(s: Snapshot, cardIsMaxed = false, cardId = ""): Ov
       metricLabel: "",
       metricDetail: null,
       valueText: null,
+      periodFallback: false,
       isMaxed: false,
       status: "error",
     };
@@ -2922,8 +2928,14 @@ function extractOverviewQuota(s: Snapshot, cardIsMaxed = false, cardId = ""): Ov
   const monthPercents = percents.filter((m) => metricWindow(m) === "month");
 
   let best: Metric | null = null;
+  let periodFallback = false;
   if (overviewTab === "month" && monthPercents.length > 0) {
     best = pickOverview(monthPercents);
+  } else if (overviewTab === "month" && weekPercents.length > 0) {
+    // Some providers expose only a rolling session and weekly window. Keep
+    // the ring useful and make the fallback explicit in the tile metadata.
+    best = pickOverview(weekPercents);
+    periodFallback = true;
   } else if (preferWeek && weekPercents.length > 0) {
     best = pickOverview(weekPercents);
   } else if (sessionPercents.length > 0) {
@@ -2956,6 +2968,7 @@ function extractOverviewQuota(s: Snapshot, cardIsMaxed = false, cardId = ""): Ov
       metricLabel: best.label,
       metricDetail: best.detail ?? null,
       valueText: null,
+      periodFallback,
       isMaxed,
       status: isMaxed ? "maxed" : "ok",
     };
@@ -2974,6 +2987,7 @@ function extractOverviewQuota(s: Snapshot, cardIsMaxed = false, cardId = ""): Ov
       metricLabel: textMetric.label,
       metricDetail: textMetric.detail ?? null,
       valueText: textMetric.value ?? textMetric.detail ?? null,
+      periodFallback: false,
       isMaxed: false,
       status: "text",
     };
@@ -2986,6 +3000,7 @@ function extractOverviewQuota(s: Snapshot, cardIsMaxed = false, cardId = ""): Ov
     metricLabel: "",
     metricDetail: null,
     valueText: null,
+    periodFallback: false,
     isMaxed: false,
     status: "no_data",
   };
@@ -2995,6 +3010,11 @@ function overviewFailureLabel(s: Snapshot): string {
   if (s.status === "no_credentials") return t("overview.needsCredentials");
   if (/expired|cookie|sign in|log in|unauthori[sz]ed|401|403/i.test(s.error ?? "")) return t("overview.needsLogin");
   return t("overview.queryFailed");
+}
+
+function overviewWindowLabel(quota: OverviewQuota): string {
+  if (quota.periodFallback) return t("overview.monthFallback");
+  return quota.window ? t(windowLabelKey[quota.window]) : t("overview.winGeneric");
 }
 
 function isOverviewCollapsed(): boolean {
@@ -3136,10 +3156,10 @@ function renderQuotaOverview(): string {
       let statusDot = "green";
       if (quota.status === "error") {
         itemTone = "error";
-        statusDot = "red";
+        statusDot = "error";
         ringLabel = "!";
         textClass = "is-error";
-        progressCircle = `<circle class="ring-progress is-error" cx="${cx}" cy="${cy}" r="${r}" stroke="#ef4444" stroke-width="3.2" fill="none" />`;
+        progressCircle = `<circle class="ring-progress is-error" cx="${cx}" cy="${cy}" r="${r}" stroke="#f97316" stroke-width="3.2" fill="none" />`;
       } else if (quota.isMaxed) {
         itemTone = "maxed";
         statusDot = "red";
@@ -3183,7 +3203,7 @@ function renderQuotaOverview(): string {
       // Any maxed core row (e.g. a maxed monthly cap) means the provider
       // is walled off even when the ring's own window looks healthy —
       // flag the dot so the tile doesn't read as available.
-      if (isSnapshotMaxed(shownSnap)) statusDot = "red";
+      if (statusDot !== "error" && isSnapshotMaxed(shownSnap)) statusDot = "red";
 
       // Peak-hours tint: available (green) tiles inside the provider's
       // peak window read yellow; red (maxed / error) stays red.
@@ -3223,7 +3243,7 @@ function renderQuotaOverview(): string {
                       ? escapeHtml(fmtDuration(Math.max(0, quota.resetsAt - Date.now())))
                       : quota.window === "5h"
                         ? escapeHtml(t("card.notStarted"))
-                        : escapeHtml(t(windowLabelKey[quota.window])))
+                        : escapeHtml(overviewWindowLabel(quota)))
                   : escapeHtml(t("overview.noData"))}
             </span>
           </div>
@@ -3264,11 +3284,12 @@ function renderQuotaOverview(): string {
         : quota.window === "5h"
           ? t("card.notStarted")
           : quota.window !== null
-            ? t(windowLabelKey[quota.window])
+            ? overviewWindowLabel(quota)
             : t("overview.noData");
 
     let statusDot = "green";
-    if (quota.status === "error" || quota.isMaxed) statusDot = "red";
+    if (quota.status === "error") statusDot = "error";
+    else if (quota.isMaxed) statusDot = "red";
     if (statusDot === "green" && isSnapshotMaxed(shownSnap)) statusDot = "red";
     if (statusDot === "green" && isProviderInPeak(family)) statusDot = "yellow";
 
@@ -3866,7 +3887,7 @@ function openGroupMenu(cardId: string, anchor: HTMLElement, includeGrouping = tr
       </button>
       ${includeGrouping ? "" : `<div class="group-menu-sep"></div>
       <button class="group-menu-item danger" data-card-remove="${escapeHtml(cardId)}">
-        <span class="group-menu-check">×</span>${escapeHtml(t("customize.providerDelete"))}
+        <span class="group-menu-check">×</span>${escapeHtml(cardId.includes("@") ? t("customize.acctDelete") : t("customize.providerDelete"))}
       </button>`}
     </div>`;
   const close = () => {
@@ -3883,9 +3904,9 @@ function openGroupMenu(cardId: string, anchor: HTMLElement, includeGrouping = tr
       close();
       const name = notedName(cardId, providerDisplayName(fam) || cardId);
       void appConfirm({
-        title: t("customize.providerDeleteTitle"),
-        message: t("customize.providerDeleteConfirm", { name }),
-        confirmLabel: t("customize.providerDelete"),
+        title: cardId.includes("@") ? t("customize.acctCardDeleteTitle") : t("customize.providerDeleteTitle"),
+        message: cardId.includes("@") ? t("customize.acctCardDeleteConfirm", { name }) : t("customize.providerDeleteConfirm", { name }),
+        confirmLabel: cardId.includes("@") ? t("customize.acctDelete") : t("customize.providerDelete"),
         danger: true,
       }).then((ok) => {
         if (ok) removeProviderCard(cardId);
@@ -6020,11 +6041,12 @@ function renderSkinMarket(): string {
         <div class="skin-detail-mascot">${preview.mascot}</div>
         <div><p class="skin-kicker">SELECTED SKIN</p><h2>${escapeHtml(preview.name)}</h2><p>${escapeHtml(preview.tagline)}</p></div>
       </div>
-      <div class="skin-detail-actions"><button class="mini-btn primary" data-skin-select="${preview.id}">${selected === preview.id ? "✓ Applied" : "Use this skin"}</button><span class="skin-detail-note">Wallpaper + mascot appear together when Pane wakes.</span></div>
+      <div class="skin-detail-actions"><button class="mini-btn primary" data-skin-select="${preview.id}">${selected === preview.id ? "✓ Applied" : "Use this skin"}</button><button class="mini-btn" data-skin-reset>Use native</button><span class="skin-detail-note">Wallpaper + mascot appear together when Pane wakes.</span></div>
     </section>`;
   }
   return `<section class="skin-market" aria-label="Skin market">
     <div class="skin-market-head"><div><p class="skin-kicker">PANE SKIN MARKET</p><h2>Make the popover yours</h2><p class="skin-market-copy">Choose a wallpaper and its companion mascot. Your native light/dark theme stays intact.</p></div><button class="mini-btn" data-skin-close>Done</button></div>
+    <div class="skin-market-actions"><button class="mini-btn" data-skin-reset>Use native / reset</button><span class="skin-detail-note">Native wallpaper and theme remain unchanged.</span></div>
     <div class="skin-grid">${SKINS.map((skin) => `<button class="skin-card${selected === skin.id ? " selected" : ""}" type="button" data-skin-preview="${skin.id}" style="--skin-preview:${skin.wallpaper}"><span class="skin-card-art"><span class="skin-card-mascot">${skin.mascot}</span></span><span class="skin-card-copy"><strong>${escapeHtml(skin.name)}</strong><small>${escapeHtml(skin.tagline)}</small></span>${selected === skin.id ? '<span class="skin-selected">Applied</span>' : ""}</button>`).join("")}</div>
   </section>`;
 }
@@ -7203,6 +7225,12 @@ async function handleCustomizeClick(target: HTMLElement): Promise<boolean> {
   const skinSelect = target.closest<HTMLElement>("[data-skin-select]");
   if (skinSelect) {
     selectSkin(skinSelect.dataset.skinSelect as SkinId);
+    return true;
+  }
+  const skinReset = target.closest<HTMLElement>("[data-skin-reset]");
+  if (skinReset) {
+    selectSkin(null);
+    renderDrawerBody();
     return true;
   }
   // One/New API site manager (relocated from Settings): expand/edit/delete
@@ -8812,15 +8840,29 @@ async function initSettings(): Promise<void> {
   });
 
   const shortcut = document.querySelector<HTMLInputElement>("#shortcut")!;
+  const shortcutState = document.querySelector<HTMLElement>("#shortcut-state");
   shortcut.value = config.shortcut;
   shortcut.addEventListener("change", async () => {
     const status = document.querySelector("#status")!;
+    if (shortcutState) {
+      shortcutState.textContent = t("settings.shortcutChecking");
+      shortcutState.className = "shortcut-state checking";
+    }
     try {
       await invoke("set_shortcut", { shortcut: shortcut.value });
       await patchConfig({ shortcut: shortcut.value });
       status.textContent = shortcut.value.trim() ? t("footer.shortcutSaved") : t("footer.shortcutCleared");
+      if (shortcutState) {
+        shortcutState.textContent = shortcut.value.trim() ? t("settings.shortcutAvailable") : "";
+        shortcutState.className = "shortcut-state available";
+      }
     } catch (err) {
       status.textContent = `${err}`;
+      shortcut.value = config.shortcut;
+      if (shortcutState) {
+        shortcutState.textContent = t("settings.shortcutConflict");
+        shortcutState.className = "shortcut-state conflict";
+      }
     }
   });
 

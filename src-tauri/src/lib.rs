@@ -3501,7 +3501,21 @@ fn register_shortcut(app: &tauri::AppHandle, accel: &str) -> Result<(), String> 
 
 #[tauri::command]
 fn set_shortcut(app: tauri::AppHandle, shortcut: String) -> Result<(), String> {
-    register_shortcut(&app, &shortcut)
+    let previous = load_config()
+        .get("shortcut")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .to_string();
+    match register_shortcut(&app, &shortcut) {
+        Ok(()) => Ok(()),
+        Err(err) => {
+            // register_shortcut clears the global registry before attempting
+            // the new binding. Restore the last working shortcut so a failed
+            // Alt+2 change does not leave the app unreachable.
+            let _ = register_shortcut(&app, &previous);
+            Err(format!("shortcut unavailable: {err}"))
+        }
+    }
 }
 
 /// Spends one banked Codex rate-limit reset credit. Irreversible — the
