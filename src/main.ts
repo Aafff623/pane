@@ -3895,12 +3895,18 @@ function groupMenuPosition(rect: DOMRect, width: number, height: number, side: "
   };
 }
 
-function openGroupMenu(cardId: string, anchor: HTMLElement, includeGrouping = true): void {
+function openGroupMenu(
+  cardId: string,
+  anchor: HTMLElement,
+  includeGrouping = true,
+  contextPoint?: { x: number; y: number; target?: Element },
+): void {
   document.querySelector(".group-menu-overlay")?.remove();
   const current = cardGroupId(cardId);
   const groups = cardGroups();
   const fam = providerFamily(cardId);
-  const shownId = anchor.closest<HTMLElement>("[data-shown-account]")?.dataset.shownAccount ?? cardId;
+  const contextAccount = contextPoint?.target?.closest<HTMLElement>("[data-card-account]")?.dataset.cardAccount?.split("|")[1];
+  const shownId = contextAccount ?? anchor.closest<HTMLElement>("[data-shown-account]")?.dataset.shownAccount ?? cardId;
   const accounts = accountsCache.get(fam) ?? [];
   const accountIndex = accounts.findIndex((entry, index) => entry.id === shownId || (shownId === fam && index === 0 && !isParallelAccountFamily(fam)));
   const curCat = effectiveCategory(fam);
@@ -4039,6 +4045,17 @@ function openGroupMenu(cardId: string, anchor: HTMLElement, includeGrouping = tr
     const { x, y } = groupMenuPosition(rect, menu.offsetWidth, menu.offsetHeight, overviewMenuSide(tile), window.innerWidth, window.innerHeight);
     menu.style.left = `${x}px`;
     menu.style.top = `${y}px`;
+  } else if (contextPoint) {
+    // Context menus belong to the card that was pressed. Pick a lower corner
+    // based on the press side, then flip above the card only when its bottom
+    // would leave the viewport. This avoids menus detached at the window edge.
+    const rightSide = contextPoint.x <= rect.left + rect.width / 2;
+    const desiredX = rightSide ? rect.right - menu.offsetWidth : rect.left;
+    const belowY = rect.bottom + 4;
+    const aboveY = rect.top - menu.offsetHeight - 4;
+    const desiredY = belowY + menu.offsetHeight <= window.innerHeight - 8 ? belowY : aboveY;
+    menu.style.left = `${Math.max(8, Math.min(desiredX, window.innerWidth - menu.offsetWidth - 8))}px`;
+    menu.style.top = `${Math.max(8, Math.min(desiredY, window.innerHeight - menu.offsetHeight - 8))}px`;
   } else {
     menu.style.left = `${Math.max(8, Math.min(rect.right - menu.offsetWidth, window.innerWidth - menu.offsetWidth - 8))}px`;
     menu.style.top = `${Math.max(8, Math.min(rect.bottom + 4, window.innerHeight - menu.offsetHeight - 8))}px`;
@@ -9390,7 +9407,11 @@ window.addEventListener("DOMContentLoaded", () => {
     const card = (e.target as Element).closest?.<HTMLElement>("article[data-provider]");
     if (card && card.dataset.provider && card.dataset.provider !== "__overview__") {
       e.preventDefault();
-      openGroupMenu(card.dataset.provider, card, false);
+      openGroupMenu(card.dataset.provider, card, false, {
+        x: e.clientX,
+        y: e.clientY,
+        target: e.target as Element,
+      });
     }
   });
 
