@@ -98,6 +98,20 @@ interface HistorySpend {
   models: ModelSpend[];
 }
 
+interface DailyModelSpend {
+  model: string;
+  cost: number;
+  tokens: number;
+}
+
+interface DailySpendRow {
+  day: string;
+  id: string;
+  cost: number;
+  tokens: number;
+  models: DailyModelSpend[];
+}
+
 /// How to get each provider signed in again, for the ⚠ Outdated tooltip.
 const RELOGIN_KEYS: Record<string, string> = {
   claude: "stale.relogin.claude",
@@ -518,7 +532,10 @@ let refreshTimer: number | undefined;
 let lastSnapshots: Snapshot[] = [];
 let lastSpend: ProviderSpend[] = [];
 let lastSpendHistory: { d7: HistorySpend[]; all: HistorySpend[] } = { d7: [], all: [] };
+let lastSpendDaily: DailySpendRow[] = [];
 let spendLoaded = false;
+let spendDetailOpen = false;
+let spendDetailDay = "";
 /// Sampled quota history per card id (backend usage_history.json). Cards
 /// with local CLI logs trend from spend; every other card falls back to
 /// these daily "worst used percent" samples.
@@ -1983,6 +2000,17 @@ function metricPool(family: string, label: string): string | undefined {
   return METRIC_POOLS[family]?.[label];
 }
 
+/// Number of live account cards represented by an overview family tile.
+/// Keep this separate from the health dot: an account count is informational,
+/// so a red/orange provider state must never change its visual meaning.
+function overviewAccountCount(family: string): number {
+  const snapshotCount = lastSnapshots.filter(
+    (snapshot) => providerFamily(snapshot.id) === family && !isCardDisabled(snapshot.id),
+  ).length;
+  const configuredCount = accountsCache.get(family)?.length ?? 0;
+  return Math.max(snapshotCount, configuredCount);
+}
+
 function renderCard(s: Snapshot): string {
   const family = providerFamily(s.id);
   // Multi-account families render ONE dashboard card per family (the bare
@@ -2682,6 +2710,106 @@ function spendHeadTokens(range: SpendHeadRange): number {
     .reduce((sum, s) => sum + s.trend.slice(30 - days).reduce((a, b) => a + (b || 0), 0), 0);
 }
 
+function localDayKey(date: Date): string {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, "0");
+  const d = String(date.getDate()).padStart(2, "0");
+  return `${y}-${m}-${d}`;
+}
+
+function spendDetailValue(row: { cost: number; tokens: number }): number {
+  return config.spendMetric === "tokens" ? row.tokens : row.cost;
+}
+
+function spendDetailDayRows(day: string): DailySpendRow[] {
+  return lastSpendDaily
+    .filter((row) => row.day === day && !isCardDisabled(row.id))
+    .sort((a, b) => spendDetailValue(b) - spendDetailValue(a));
+}
+
+function renderSpendDetailOverlay(): string {
+  const today = new Date();
+  const end = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+  const start = new Date(end);
+  // 26 Sunday-aligned weeks (~half a year): square cells shrink to the panel
+  // width (ZCode's usage board layout) instead of forcing a horizontal scroll.
+  const heatWeeks = 26;
+  start.setDate(start.getDate() - (heatWeeks * 7 - 1) - start.getDay());
+  const daily = new Map<string, { cost: number; tokens: number; providers: number }>();
+  for (const row of lastSpendDaily) {
+    if (isCardDisabled(row.id)) continue;
+    const cell = daily.get(row.day) ?? { cost: 0, tokens: 0, providers: 0 };
+    cell.cost += row.cost;
+    cell.tokens += row.tokens;
+    cell.providers += 1;
+    daily.set(row.day, cell);
+  }
+  const values = [...daily.values()].map(spendDetailValue).filter((value) => value > 0);
+  const maxValue = Math.max(...values, 1);
+  const cells: string[] = [];
+  for (let index = 0; index < heatWeeks * 7; index += 1) {
+    const date = new Date(start);
+    date.setDate(start.getDate() + index);
+    const day = localDayKey(date);
+    const value = daily.get(day);
+    const amount = value ? spendDetailValue(value) : 0;
+    const level = amount <= 0 ? 0 : Math.min(4, Math.max(1, Math.ceil((amount / maxValue) * 4)));
+    const outside = date > end ? " outside" : "";
+    const selected = day === spendDetailDay ? " selected" : "";
+    const tip = value
+      ? `${day} · ${fmtMoney(value.cost)} · ${fmtTokens(value.tokens)} · ${value.providers} tools`
+      : `${day} · ${t("spendDetail.noUsage")}`;
+    cells.push(`<button class="spend-heat-cell level-${level}${outside}${selected}" data-spend-detail-day="${day}" title="${escapeHtml(tip)}" aria-label="${escapeHtml(tip)}"></button>`);
+  }
+  // Month labels under the grid: one span per run of same-month columns, and
+  // a column containing the 1st belongs to the new month (ZCode's rule).
+  const monthSpans: string[] = [];
+  let monthLabel = "";
+  let monthSpan = 0;
+  const flushMonth = () => {
+    if (monthSpan > 0) {
+      monthSpans.push(`<span style="grid-column: span ${monthSpan}">${escapeHtml(monthLabel)}</span>`);
+    }
+  };
+  for (let week = 0; week < heatWeeks; week += 1) {
+    let label = "";
+    for (let d = 0; d < 7; d += 1) {
+      const date = new Date(start);
+      date.setDate(start.getDate() + week * 7 + d);
+      if (date.getDate() === 1) {
+        label = date.toLocaleDateString(localeTag(), { month: "short" });
+        break;
+      }
+    }
+    if (label && label !== monthLabel) {
+      flushMonth();
+      monthLabel = label;
+      monthSpan = 1;
+    } else {
+      monthSpan += 1;
+    }
+  }
+  flushMonth();
+  const selectedDay = spendDetailDay || localDayKey(end);
+  const rows = spendDetailDayRows(selectedDay);
+  const selectedTotals = rows.reduce((sum, row) => ({ cost: sum.cost + row.cost, tokens: sum.tokens + row.tokens }), { cost: 0, tokens: 0 });
+  const detailRows = rows.length
+    ? rows.map((row) => {
+        const models = row.models.map((model) => `<div class="spend-detail-model"><span>${escapeHtml(model.model)}</span><span>${escapeHtml(fmtSpendVal({ cost: model.cost, tokens: model.tokens, models: [] }))}</span></div>`).join("");
+        return `<article class="spend-detail-tool"><div class="spend-detail-tool-head"><strong>${escapeHtml(providerNameForSpend(row.id))}</strong><span>${escapeHtml(fmtSpendVal({ cost: row.cost, tokens: row.tokens, models: [] }))}</span></div>${models || `<div class="spend-detail-model muted">${escapeHtml(t("spendDetail.noModelBreakdown"))}</div>`}</article>`;
+      }).join("")
+    : `<div class="spend-detail-empty">${escapeHtml(t("spendDetail.noUsage"))}</div>`;
+  return `<div class="spend-detail-overlay" role="dialog" aria-modal="true" aria-labelledby="spend-detail-title">
+    <section class="spend-detail-panel">
+      <header class="spend-detail-header"><div><p class="spend-detail-kicker">${escapeHtml(t("spendDetail.kicker"))}</p><h2 id="spend-detail-title">${escapeHtml(t("spendDetail.title"))}</h2><p>${escapeHtml(t("spendDetail.subtitle"))}</p></div><button class="mini-btn" data-spend-detail-close>${uiIcon("x")}</button></header>
+      <div class="spend-detail-summary"><div><span>${escapeHtml(selectedDay)}</span><strong>${escapeHtml(fmtMoney(selectedTotals.cost))}</strong></div><div><span>${escapeHtml(t("spendDetail.tokens"))}</span><strong>${escapeHtml(fmtTokens(selectedTotals.tokens))}</strong></div><div><span>${escapeHtml(t("spendDetail.tools"))}</span><strong>${rows.length}</strong></div></div>
+      <div class="spend-heat-wrap"><div class="spend-heat-top"><div class="spend-heat-legend"><span>${escapeHtml(t("spendDetail.less"))}</span><i class="spend-heat-cell spend-heat-swatch"></i><i class="spend-heat-cell spend-heat-swatch level-1"></i><i class="spend-heat-cell spend-heat-swatch level-2"></i><i class="spend-heat-cell spend-heat-swatch level-3"></i><i class="spend-heat-cell spend-heat-swatch level-4"></i><span>${escapeHtml(t("spendDetail.more"))}</span></div></div><div class="spend-heat-grid">${cells.join("")}</div><div class="spend-heat-months">${monthSpans.join("")}</div></div>
+      <div class="spend-detail-day-head"><h3>${escapeHtml(selectedDay)}</h3><span>${escapeHtml(t("spendDetail.dayHint"))}</span></div>
+      <div class="spend-detail-tools">${detailRows}</div>
+    </section>
+  </div>`;
+}
+
 function renderTotalSpend(): string {
   if (!config.showTotalSpend) return "";
   const isFolded = isSpendFolded();
@@ -2704,6 +2832,7 @@ function renderTotalSpend(): string {
         <div class="provider-head">
           <span class="provider-name">${escapeHtml(t("spend.title"))}</span>
           <span class="spacer"></span>
+          <button class="mini-btn spend-detail-btn" data-spend-details title="${escapeHtml(t("spendDetail.open"))}" aria-label="${escapeHtml(t("spendDetail.open"))}">${uiIcon("rows")}</button>
           ${foldChevron}
         </div>
         ${isFolded ? "" : `<div class="card-panel"><p class="placeholder" style="margin:4px 0">${note}</p></div>`}
@@ -2831,6 +2960,7 @@ function renderTotalSpend(): string {
         <div class="tabs spend-head-range-tabs" role="group" aria-label="${escapeHtml(t("spend.headRangeLabel"))}">
           ${(["today", "week", "month"] as const).map((r) => `<button class="tab spend-head-range-tab${config.spendHeadRange === r ? " active" : ""}" data-spend-head-range="${r}">${escapeHtml(t(`spend.hr.${r}`))}</button>`).join("")}
         </div>
+        <button class="mini-btn spend-detail-btn" data-spend-details title="${escapeHtml(t("spendDetail.open"))}" aria-label="${escapeHtml(t("spendDetail.open"))}">${uiIcon("rows")}</button>
         <button class="share-btn" data-share="__total__" title="${escapeHtml(t("card.share"))}">${uiIcon("shareNetwork")}</button>
         ${foldChevron}
       </div>
@@ -3138,6 +3268,10 @@ function renderQuotaOverview(): string {
       const visual = providerVisual(jumpId || family, origin);
       const icon = visual?.iconSvg ?? `<span class="icon-fallback">${escapeHtml(cardSnap.name.slice(0, 2))}</span>`;
       const displayName = notedName(jumpId, providerDisplayName(family) || cardSnap.name);
+      const accountCount = overviewAccountCount(family);
+      const accountBadge = accountCount > 1
+        ? `<span class="overview-account-count" title="${escapeHtml(t("overview.accountCount", { n: accountCount }))}">×${accountCount}</span>`
+        : "";
 
       const r = 16;
       const cx = 22;
@@ -3219,6 +3353,7 @@ function renderQuotaOverview(): string {
           <div class="overview-item-head">
             <span class="overview-item-icon">${icon}</span>
             <span class="overview-item-name">${escapeHtml(displayName)}</span>
+            ${accountBadge}
             <span class="overview-dot ${statusDot}"></span>
           </div>
           <div class="overview-ring-wrap">
@@ -3257,6 +3392,10 @@ function renderQuotaOverview(): string {
     const icon = visual?.iconSvg ?? `<span class="icon-fallback">${escapeHtml(cardSnap.name.slice(0, 2))}</span>`;
     const displayName = notedName(jumpId, providerDisplayName(family) || cardSnap.name);
     const nameClass = cardNote(jumpId) ? " is-note" : "";
+    const accountCount = overviewAccountCount(family);
+    const accountBadge = accountCount > 1
+      ? `<span class="overview-account-count" title="${escapeHtml(t("overview.accountCount", { n: accountCount }))}">×${accountCount}</span>`
+      : "";
 
     let itemTone = "normal";
     let pct: number | null = null;
@@ -3302,6 +3441,7 @@ function renderQuotaOverview(): string {
         <div class="ovbar-line1">
           <span class="overview-item-icon">${icon}</span>
           <span class="overview-item-name${nameClass}">${escapeHtml(displayName)}</span>
+          ${accountBadge}
           <span class="overview-dot ${statusDot}"></span>
           <span class="ovbar-pct ${pctClass}">${pct === null ? "—" : `${pct}%`}</span>
         </div>
@@ -6389,6 +6529,7 @@ function renderCategoryCards(snaps: Snapshot[], groups: CardGroup[]): string {
 
 function renderAll(): void {
   hideSpendPop();
+  document.querySelector(".spend-detail-overlay")?.remove();
   const el = document.querySelector("#providers")!;
   el.innerHTML =
     renderWelcome() +
@@ -6396,6 +6537,7 @@ function renderAll(): void {
     renderQuotaOverview() +
     renderGroupedCards();
   if (customizeOpen) renderDrawerBody();
+  if (spendDetailOpen) document.body.insertAdjacentHTML("beforeend", renderSpendDetailOverlay());
   rebuildTrail();
 }
 
@@ -6930,6 +7072,9 @@ async function refresh(
           invoke<HistorySpend[]>("fetch_spend_history", { rangeDays: null }).catch(() => []),
         ]).then(([d7, all]) => ({ d7, all })),
       );
+  const spendDailyPromise = usageOnly
+    ? Promise.resolve<DailySpendRow[] | null>(null)
+    : spendPromise.then(() => invoke<DailySpendRow[]>("fetch_spend_daily", { rangeDays: 365 }).catch(() => []));
   // The sampled quota history is one tiny JSON read — fetch it even for
   // usage-only refreshes so account cards keep their trend bars fresh.
   const quotaTrendPromise = invoke<Record<string, (number | null)[]>>("fetch_usage_history").catch(
@@ -7048,6 +7193,7 @@ async function refresh(
   }
   const spend = await spendPromise;
   const spendHistory = await spendHistoryPromise;
+  const spendDaily = await spendDailyPromise;
   const quotaTrend = await quotaTrendPromise;
   if (quotaTrend) {
     lastQuotaTrend = quotaTrend;
@@ -7061,6 +7207,9 @@ async function refresh(
   if (usageOnly) return;
   if (spendHistory && myGen >= lastAppliedSpendGen) {
     lastSpendHistory = spendHistory;
+  }
+  if (spendDaily && myGen >= lastAppliedSpendGen) {
+    lastSpendDaily = spendDaily;
   }
   spendLoaded = true;
   // Overlapping scans are allowed now that Refresh unlocks before spend
@@ -9199,6 +9348,11 @@ window.addEventListener("DOMContentLoaded", () => {
       // IME: Esc cancels an in-flight composition (candidate window) — it
       // must not double as "close the panel" / "hide the window".
       if (e.isComposing || e.keyCode === 229) return;
+      if (spendDetailOpen) {
+        spendDetailOpen = false;
+        document.querySelector(".spend-detail-overlay")?.remove();
+        return;
+      }
       if (skinPreviewId) {
         skinPreviewId = null;
         renderDrawerBody();
@@ -9412,6 +9566,28 @@ window.addEventListener("DOMContentLoaded", () => {
         y: e.clientY,
         target: e.target as Element,
       });
+    }
+  });
+
+  document.addEventListener("click", (e) => {
+    const target = e.target as HTMLElement;
+    const details = target.closest<HTMLElement>("[data-spend-details]");
+    if (details) {
+      e.preventDefault();
+      spendDetailOpen = true;
+      spendDetailDay = spendDetailDay || localDayKey(new Date());
+      renderAll();
+      return;
+    }
+    if (target.closest<HTMLElement>("[data-spend-detail-close]") || target.classList.contains("spend-detail-overlay")) {
+      spendDetailOpen = false;
+      document.querySelector(".spend-detail-overlay")?.remove();
+      return;
+    }
+    const day = target.closest<HTMLElement>("[data-spend-detail-day]");
+    if (day && spendDetailOpen) {
+      spendDetailDay = day.dataset.spendDetailDay ?? spendDetailDay;
+      renderAll();
     }
   });
 
