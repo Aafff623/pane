@@ -47,3 +47,12 @@ npm run tauri build   # produce the installer
 
 Rust changes need a rebuild + relaunch of the app — it's a long-lived
 tray process.
+
+## Releases
+
+Pushing a `v*` tag builds and publishes the release through CI.
+Release notes follow a fixed format — theme headline, a download
+matrix table (system × architecture with real file sizes), and
+`## 新增` / `## 变更` / `## 修复` sections. The full spec lives in
+[docs/release-format.md](docs/release-format.md); `CHANGELOG.md` is the
+single source of content and must be reconciled before tagging.

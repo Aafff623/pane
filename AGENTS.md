@@ -96,6 +96,7 @@ Verified domain facts, vocabulary, and hard constraints → [`CONTEXT.md`](CONTE
  The harness compiles the real `src-tauri/src` files via `#[path]` plus a `tauri-stub` crate (230 tests as of 2026-09-09). It used to live under `src-tauri/target/parse-tests`, where `cargo clean` eventually ate it; it is tracked at the repo root now.
 4. **UI acceptance is done by the user personally.** Agents deliver build/test evidence plus a short acceptance checklist — never claim "done and verified" from code reading alone.
 5. Non-trivial changes get a code-review pass plus a redundancy/simplifier scan before delivery, then re-test.
+6. **Release format** — every published release must follow [`docs/release-format.md`](docs/release-format.md): theme headline + download matrix table (system × architecture, with real sizes) on top, then `## 新增` / `## 变更` / `## 修复` sections written per the wording rules. `CHANGELOG.md` is the single source of content and is reconciled before tagging. `release.yml` must pass the body via `--notes-file`; bare `--generate-notes` (compare-link-only body) is a release-process defect.
 
 ## Uncertainty & existing work
 

@@ -54,3 +54,6 @@ pane.md
 # Wrangler local dev state (npx wrangler dev)
 site/.wrangler/
 
+
+# local AI-tool session residue
+.omo/

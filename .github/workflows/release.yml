@@ -157,6 +157,100 @@ jobs:
           PY
           ls -la artifacts latest.json
 
+      - name: Compose release notes
+        shell: bash
+        run: |
+          set -euo pipefail
+          ver=$(python3 -c "import json; print(json.load(open('src-tauri/tauri.conf.json'))['version'])")
+          tag="${GITHUB_REF_NAME:-}"
+          [[ "${GITHUB_REF:-}" == refs/tags/* ]] || tag="v$ver"
+          repo="${GITHUB_REPOSITORY:-Aafff623/pane}"
+          python3 - "$ver" "$tag" "$repo" <<'PY'
+          import os, re, sys
+          ver, tag, repo = sys.argv[1:]
+
+          # CHANGELOG.md is the single source of content. A missing or empty
+          # section for this version means the changelog was never reconciled —
+          # refuse to publish rather than emit an empty release body.
+          # Section boundary: the next VERSION heading only (`## 0.4.70`,
+          # `## Unreleased`) — the section's own `## 新增/变更/修复` subheads
+          # must stay inside the body.
+          changelog = open("CHANGELOG.md", encoding="utf-8").read()
+          m = re.search(
+              rf"^## {re.escape(ver)}(?!\d).*?$(.*?)(?=^## (?:\d|Unreleased)|\Z)",
+              changelog, re.M | re.S,
+          )
+          if not m:
+              sys.exit(f"CHANGELOG.md has no section for {ver} — reconcile it before tagging")
+          section = m.group(1).strip()
+          if not section:
+              sys.exit(f"CHANGELOG.md section for {ver} is empty — reconcile it before tagging")
+
+          # First plain text line before any list item (not a heading/quote/
+          # indented continuation) becomes the one-line theme headline;
+          # list-only sections stay on a bare version. The headline line is
+          # dropped from the body — it already lives in the # title.
+          headline = ""
+          headline_raw = None
+          for line in section.splitlines():
+              s = line.strip()
+              if not s or s.startswith("- "):
+                  break
+              if s.startswith(("#", ">")) or line[:1] in (" ", "\t"):
+                  continue
+              headline = s
+              headline_raw = line
+              break
+          if headline_raw is not None:
+              section = "\n".join(
+                  l for l in section.splitlines() if l != headline_raw
+              ).strip()
+
+          def mb(path):
+              return f"{os.path.getsize(path) / 1048576:.1f} MB"
+
+          def arch_of(name):
+              n = name.lower()
+              if "aarch64" in n or "arm64" in n:
+                  return "arm64"
+              return "x86_64"
+
+          # Pane bundles are already named Pane_<ver>_<os-arch>.<ext>, so the
+          # architecture comes straight from the filename.
+          BASE = f"https://github.com/{repo}/releases/download/{tag}"
+          cells = {"Windows": {}, "macOS": {}, "Linux": {}}
+          for f in sorted(os.listdir("artifacts")):
+              if not os.path.isfile(os.path.join("artifacts", f)):
+                  continue
+              if f.endswith("-setup.exe"):
+                  cells["Windows"]["x86_64"] = f"[exe]({BASE}/{f}) ({mb('artifacts/' + f)})"
+              elif f.endswith(".dmg"):
+                  cells["macOS"][arch_of(f)] = f"[dmg]({BASE}/{f}) ({mb('artifacts/' + f)})"
+              elif f.endswith((".deb", ".rpm", ".AppImage")):
+                  fmt = "AppImage" if f.endswith(".AppImage") else f.rsplit(".", 1)[1]
+                  cells["Linux"].setdefault(arch_of(f), {})[fmt] = \
+                      f"[{fmt}]({BASE}/{f}) ({mb('artifacts/' + f)})"
+          # Package managers first, portable last: deb → rpm → AppImage.
+          for arch, row in cells["Linux"].items():
+              cells["Linux"][arch] = "<br>".join(row[k] for k in ("deb", "rpm", "AppImage") if k in row)
+
+          def cell(row, arch):
+              return row.get(arch, "—")
+
+          title = f"Pane {tag}" + (f" — {headline}" if headline else "")
+          table = (
+              "| 系统 \\ 架构 | x86_64 (amd64) | arm64 (aarch64) |\n"
+              "| --- | --- | --- |\n"
+              f"| Windows | {cell(cells['Windows'], 'x86_64')} | {cell(cells['Windows'], 'arm64')} |\n"
+              f"| macOS | {cell(cells['macOS'], 'x86_64')} | {cell(cells['macOS'], 'arm64')} |\n"
+              f"| Linux | {cell(cells['Linux'], 'x86_64')} | {cell(cells['Linux'], 'arm64')} |"
+          )
+          with open("notes.md", "w", encoding="utf-8") as f:
+              f.write(f"# {title}\n\n{table}\n\n{section}\n")
+          print(open("notes.md", encoding="utf-8").read())
+          PY
+          ls -la notes.md
+
       - name: Upload dry-run artifacts
         if: github.event_name == 'workflow_dispatch'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
@@ -165,6 +259,7 @@ jobs:
           path: |
             artifacts/*
             latest.json
+            notes.md
 
       - name: Create GitHub release
         if: startsWith(github.ref, 'refs/tags/')
@@ -175,7 +270,7 @@ jobs:
           files=(artifacts/* latest.json)
           gh release create "$GITHUB_REF_NAME" \
             --title "Pane ${GITHUB_REF_NAME#v}" \
-            --generate-notes \
+            --notes-file notes.md \
             "${files[@]}"
 
       - name: Dispatch winget publish
