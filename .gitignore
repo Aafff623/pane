@@ -50,3 +50,7 @@ pane.md
 .cursor/
 
 .playwright-mcp/
+
+# Wrangler local dev state (npx wrangler dev)
+site/.wrangler/
+
