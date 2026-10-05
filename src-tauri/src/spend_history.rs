@@ -10,7 +10,7 @@ use std::collections::BTreeMap;
 use std::fs;
 use std::sync::{Mutex, OnceLock};
 
-const VERSION: u32 = 1;
+const VERSION: u32 = 3;
 
 #[derive(Serialize, Deserialize, Clone, Default, PartialEq, Debug)]
 struct ModelDay {
@@ -48,6 +48,39 @@ fn load_file() -> Result<HistoryFile, String> {
     };
     let file: HistoryFile = serde_json::from_str(raw.trim_start_matches('\u{feff}'))
         .map_err(|err| format!("parse spend history: {err}"))?;
+    migrate(file)
+}
+
+/// Version ladder. Each step drops only the cells whose provider's
+/// accounting changed; the next scan re-merges corrected numbers for every
+/// day the source still covers, and older days of that provider stay gone.
+/// Other providers are untouched.
+fn migrate(mut file: HistoryFile) -> Result<HistoryFile, String> {
+    if file.version == 1 {
+        // v1→v2: the zcode scanner stopped double-counting cache tokens
+        // (its input column already contains them, ~1.96x inflation).
+        for providers in file.days.values_mut() {
+            providers.remove("zcode");
+        }
+        file.version = 2;
+    }
+    if file.version == 2 {
+        // v2→v3: Claude's source switched to cc-switch's ledger (its proxy
+        // records real tokens even where a relay zeroed the CLI logs —
+        // the self-scan undercounted ~7-24x). Every stored claude cell is
+        // replaced by the real numbers the next scan merges. New
+        // cc-switch-only providers (mcode, …) need no clearing: their rows
+        // are pure additions.
+        for providers in file.days.values_mut() {
+            providers.remove("claude");
+            // Extra account cards (`claude@<fnv1a>`) stay: cc-switch's
+            // session import only reads the default ~/.claude/projects, so
+            // their self-scan accounting did not change — clearing them
+            // would erase history nothing re-merges.
+        }
+        file.version = 3;
+    }
+    file.days.retain(|_, providers| !providers.is_empty());
     if file.version != VERSION { return Err("unsupported spend history version".into()); }
     Ok(file)
 }
@@ -159,6 +192,64 @@ pub fn range_spend(range_days: Option<u32>) -> Result<Vec<RangeSpend>, String> {
     Ok(range_from(file, range_days, Local::now().date_naive()))
 }
 
+#[derive(Serialize, Clone)]
+pub struct DailyModelSpend {
+    pub model: String,
+    pub cost: f64,
+    pub tokens: f64,
+}
+
+#[derive(Serialize, Clone)]
+pub struct DailySpendRow {
+    pub day: String,
+    pub id: String,
+    pub cost: f64,
+    pub tokens: f64,
+    pub models: Vec<DailyModelSpend>,
+}
+
+/// Day/provider/model grain for the spend-detail heatmap. Read-only, served
+/// from the same cached store the merger keeps fresh.
+pub fn daily_spend(range_days: Option<u32>) -> Result<Vec<DailySpendRow>, String> {
+    let state = store().lock().map_err(|_| "spend history lock poisoned")?;
+    let file = state.as_ref().map_err(|err| err.clone())?;
+    Ok(daily_rows_from(file, range_days, Local::now().date_naive()))
+}
+
+fn daily_rows_from(file: &HistoryFile, range_days: Option<u32>, today: NaiveDate) -> Vec<DailySpendRow> {
+    let cutoff = range_days.map(|days| today - Duration::days(days.saturating_sub(1) as i64));
+    let mut rows = Vec::new();
+    for (day, providers) in &file.days {
+        let Ok(date) = NaiveDate::parse_from_str(day, "%Y-%m-%d") else { continue };
+        if cutoff.is_some_and(|start| date < start || date > today) { continue; }
+        for (id, cell) in providers {
+            let mut models: Vec<DailyModelSpend> = cell
+                .models
+                .iter()
+                .map(|(model, usage)| DailyModelSpend {
+                    model: model.clone(),
+                    cost: usage.cost,
+                    tokens: usage.tokens,
+                })
+                .filter(|usage| usage.cost > 0.0 || usage.tokens > 0.0)
+                .collect();
+            models.sort_by(|a, b| b.tokens.total_cmp(&a.tokens));
+            if cell.cost <= 0.0 && cell.tokens <= 0.0 && models.is_empty() {
+                continue;
+            }
+            rows.push(DailySpendRow {
+                day: day.clone(),
+                id: id.clone(),
+                cost: cell.cost,
+                tokens: cell.tokens,
+                models,
+            });
+        }
+    }
+    rows.sort_by(|a, b| a.day.cmp(&b.day).then_with(|| b.tokens.total_cmp(&a.tokens)));
+    rows
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -237,5 +328,87 @@ mod tests {
         assert_eq!(recent[0].tokens, 50.0);
         assert_eq!(recent[0].active_days, 2);
         assert_eq!(range_from(&file, None, today)[0].cost, 6.0);
+    }
+
+    #[test]
+    fn daily_rows_expose_models_and_respect_cutoff() {
+        let today = NaiveDate::from_ymd_opt(2026, 10, 5).unwrap();
+        let mut file = HistoryFile::default();
+        merge_into(&mut file, &[
+            days(today, "zcode", "GLM-5.3", 1.0, 30.0),
+            days(today, "zcode", "glm-5.3-flash", 0.5, 10.0),
+            days(today - Duration::days(40), "old", "m", 9.0, 90.0),
+        ]);
+        // Same day+provider collapses into one row; models sort by tokens.
+        let rows30 = daily_rows_from(&file, Some(30), today);
+        assert_eq!(rows30.len(), 1);
+        assert_eq!(rows30[0].id, "zcode");
+        assert_eq!(rows30[0].models.len(), 2);
+        assert_eq!(rows30[0].models[0].model, "GLM-5.3");
+        // No cutoff keeps the aged day, day-ascending.
+        let all = daily_rows_from(&file, None, today);
+        assert_eq!(all.len(), 2);
+        assert!(all[0].day < all[1].day);
+    }
+
+    #[test]
+    fn daily_rows_skip_all_zero_cells() {
+        let today = NaiveDate::from_ymd_opt(2026, 10, 5).unwrap();
+        let mut file = HistoryFile::default();
+        merge_into(&mut file, &[days(today, "ghost", "m", 0.0, 0.0)]);
+        assert!(daily_rows_from(&file, None, today).is_empty());
+    }
+
+    // ---- Version migrations -----------------------------------------------
+
+    fn cell(cost: f64, tokens: f64) -> ProviderDay {
+        ProviderDay { cost, tokens, models: BTreeMap::new() }
+    }
+
+    #[test]
+    fn v2_to_v3_clears_only_claude() {
+        let mut file = HistoryFile { version: 2, ..HistoryFile::default() };
+        file.days.insert("2026-10-01".to_string(), BTreeMap::from([
+            ("claude".to_string(), cell(1.0, 10.0)),
+            ("codex".to_string(), cell(2.0, 20.0)),
+        ]));
+        // A day holding only claude cells collapses with them.
+        file.days.insert("2026-09-30".to_string(), BTreeMap::from([
+            ("claude".to_string(), cell(3.0, 30.0)),
+        ]));
+        let file = migrate(file).unwrap();
+        assert_eq!(file.version, VERSION);
+        let day = &file.days["2026-10-01"];
+        assert!(!day.contains_key("claude"));
+        assert_eq!(day["codex"].cost, 2.0);
+        assert!(!file.days.contains_key("2026-09-30"));
+    }
+
+    #[test]
+    fn v1_migration_cascades_through_v3() {
+        let mut file = HistoryFile { version: 1, ..HistoryFile::default() };
+        file.days.insert("2026-10-01".to_string(), BTreeMap::from([
+            ("zcode".to_string(), cell(1.0, 10.0)),
+            ("claude".to_string(), cell(2.0, 20.0)),
+            ("kimi".to_string(), cell(3.0, 30.0)),
+        ]));
+        let file = migrate(file).unwrap();
+        assert_eq!(file.version, VERSION);
+        let day = &file.days["2026-10-01"];
+        assert!(!day.contains_key("zcode"));
+        assert!(!day.contains_key("claude"));
+        assert_eq!(day["kimi"].cost, 3.0);
+    }
+
+    #[test]
+    fn current_version_loads_untouched_future_version_errors() {
+        let mut file = HistoryFile { version: VERSION, ..HistoryFile::default() };
+        file.days.insert("2026-10-01".to_string(), BTreeMap::from([
+            ("claude".to_string(), cell(1.0, 10.0)),
+        ]));
+        let file = migrate(file).unwrap();
+        assert!(file.days["2026-10-01"].contains_key("claude"));
+        let future = HistoryFile { version: VERSION + 1, ..HistoryFile::default() };
+        assert!(migrate(future).is_err());
     }
 }

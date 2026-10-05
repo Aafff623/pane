@@ -2639,6 +2639,12 @@ fn fetch_spend_history(range_days: Option<u32>) -> Result<Vec<spend_history::Ran
     spend_history::range_spend(range_days)
 }
 
+/// Daily provider/model rows for the spend detail heatmap. Read-only.
+#[tauri::command]
+fn fetch_spend_daily(range_days: Option<u32>) -> Result<Vec<spend_history::DailySpendRow>, String> {
+    spend_history::daily_spend(range_days)
+}
+
 /// Validates a relay base URL for a provider that takes one; the rejection
 /// message names the provider's own card, never the other relay family.
 fn validate_relay_base_url(provider: &str, url: &str) -> Result<(), String> {
@@ -3764,6 +3770,7 @@ pub fn run() {
             fetch_spend_sources,
             fetch_usage_history,
             fetch_spend_history,
+            fetch_spend_daily,
             antigravity_capture_account,
             cursor_oauth_start,
             cursor_oauth_poll,

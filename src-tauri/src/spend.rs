@@ -130,11 +130,13 @@ pub fn source_statuses() -> Vec<SpendSourceStatus> {
     let qwen = home.join(".qwen").join("usage");
     let kimi = providers::kimi::code_home().join("sessions");
     let zcode = home.join(".zcode").join("cli");
+    let ccswitch = home.join(".cc-switch");
     let local = dirs::data_local_dir().unwrap_or_default();
     vec![
         source_status("claude-jsonl", "Claude Code", "JSONL session logs", "claude_line", &[claude.join("projects")], &["claude", "minimax", "aihubmix", "kimi"]),
         source_status("codex-jsonl", "Codex", "JSONL rollout logs", "codex_line", &[codex.join("sessions"), codex.join("archived_sessions")], &["codex", "kimi"]),
         source_status("zcode-sqlite", "ZCode", "SQLite + JSONL fallback", "zcode_db_data + zcode_line", &[zcode.join("db").join("db.sqlite"), zcode.join("rollout")], &["zcode"]),
+        source_status("ccswitch-sqlite", "cc-switch", "SQLite proxy + session-import ledger", "ccswitch_db_data", &[ccswitch.join("cc-switch.db")], &["claude", "codex", "opencode", "grok", "mcode", "gemini", "claude-desktop"]),
         source_status("pi-jsonl", "Pi coding agent", "JSONL session logs", "pi_line", &[pi], &["claude", "codex"]),
         source_status("grok-jsonl", "Grok CLI", "JSONL unified log", "grok", &[grok.join("logs").join("unified.jsonl")], &["grok"]),
         source_status("opencode-sqlite", "OpenCode Desktop / CLI", "SQLite message ledger", "providers::opencode::collect_cost_events", &[providers::opencode::data_dir().join("opencode.db")], &["opencode", "aihubmix"]),
@@ -290,7 +292,9 @@ fn cache() -> &'static Mutex<HashMap<PathBuf, FileEntry>> {
 // "Scanning session logs…" every day.
 // ---------------------------------------------------------------------------
 
-const PERSIST_VERSION: u32 = 3; // bump on cache format *or* parser-logic changes
+const PERSIST_VERSION: u32 = 4; // bump on cache format *or* parser-logic changes
+// v3→v4: zcode stopped double-counting cache buckets (input already
+// contains them, AI SDK v6), so cached v3 day-totals are ~1.96x inflated.
 
 /// Set when any file was (re)parsed this run — nothing changed, nothing saved.
 static CACHE_DIRTY: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
@@ -442,6 +446,67 @@ fn note_unpriced(data: &mut FileData, ts: DateTime<Utc>, model: &str, tokens: f6
     *data.unpriced.entry(model.to_string()).or_insert(0) += 1;
     if tokens > 0.0 {
         add_event(data, ts, model, 0.0, tokens);
+    }
+}
+
+/// add_event with the local day already resolved — sources that store a
+/// calendar day directly (cc-switch rollups) must not round-trip through a
+/// synthesized timestamp.
+fn add_day_event(data: &mut FileData, day: i32, model: &str, cost: f64, tokens: f64) {
+    let entry = data
+        .days
+        .entry((day, model.to_string()))
+        .or_insert((0.0, 0.0));
+    entry.0 += cost;
+    entry.1 += tokens;
+}
+
+/// note_unpriced with the local day already resolved — see `add_day_event`.
+fn note_unpriced_day(data: &mut FileData, day: i32, model: &str, tokens: f64) {
+    *data.unpriced.entry(model.to_string()).or_insert(0) += 1;
+    if tokens > 0.0 {
+        add_day_event(data, day, model, 0.0, tokens);
+    }
+}
+
+/// The set of local days a scan owns.
+fn day_set(data: &FileData) -> HashSet<i32> {
+    data.days.keys().map(|(day, _)| *day).collect()
+}
+
+/// Drop whole days from a scan (another source owns those days — see the
+/// cc-switch merge rules in `collect_daily`). Unpriced tallies carry no day
+/// info, so models left on no surviving day are pruned: a ⚠ for a day the
+/// scan no longer owns would be a false alarm.
+fn retain_days(data: &mut FileData, keep: impl Fn(i32) -> bool) {
+    data.days.retain(|(day, _), _| keep(*day));
+    let live: HashSet<&str> = data.days.keys().map(|(_, m)| m.as_str()).collect();
+    data.unpriced.retain(|model, _| live.contains(model.as_str()));
+}
+
+/// Layer in only the days `target` lacks: a day with any target row stays
+/// entirely the target's, so the two sources never mix within a day and
+/// nothing counts twice. Unpriced tallies follow the models actually moved
+/// (they carry no day info of their own).
+fn merge_missing_days(target: &mut FileData, source: FileData) {
+    if source.days.is_empty() {
+        return;
+    }
+    let have = day_set(target);
+    let mut moved: HashSet<String> = HashSet::new();
+    for ((day, model), (cost, tokens)) in source.days {
+        if have.contains(&day) {
+            continue;
+        }
+        moved.insert(model.clone());
+        let entry = target.days.entry((day, model)).or_insert((0.0, 0.0));
+        entry.0 += cost;
+        entry.1 += tokens;
+    }
+    for (model, count) in source.unpriced {
+        if moved.contains(&model) {
+            *target.unpriced.entry(model).or_insert(0) += count;
+        }
     }
 }
 
@@ -1017,7 +1082,16 @@ fn split_kimi_routed(all: &mut FileData) -> FileData {
 /// (ANTHROPIC_BASE_URL); those sessions log MiniMax models into the same
 /// files. That usage is split out and returned separately — it belongs on
 /// the MiniMax card, not Claude's.
-fn claude(extra: FileData) -> (ProviderSpend, FileData, FileData, FileData) {
+///
+/// Claude's primary source is cc-switch's ledger (`cc`/`cc_days`): its
+/// proxy saw the real tokens even where a relay zeroed the CLI logs, so on
+/// any day cc-switch covers, the self-scan yields outright. The cut is
+/// day-granular by design — a day cc-switch covers only partially (say a
+/// single proxied call among direct ones) is still counted from cc-switch
+/// alone. `extra` (pi sessions driving Claude accounts) is merged after
+/// that cut — pi days were already diffed against cc-switch's pi coverage
+/// by the caller.
+fn claude(extra: FileData, cc: FileData, cc_days: &HashSet<i32>) -> (ProviderSpend, FileData, FileData, FileData) {
     let root = std::env::var("CLAUDE_CONFIG_DIR")
         .map(PathBuf::from)
         .unwrap_or_else(|_| dirs::home_dir().unwrap_or_default().join(".claude"))
@@ -1031,10 +1105,12 @@ fn claude(extra: FileData) -> (ProviderSpend, FileData, FileData, FileData) {
         let data = file_days(&file, &mut |line, data| claude_line(&mut state, line, data));
         merge_data(&mut all, data);
     }
+    retain_days(&mut all, |day| !cc_days.contains(&day));
     // Usage from other scanners that belongs on this card (pi sessions
     // driving a Claude account) joins before the splits below, so it gets
     // the same model-based routing as natively-logged rows.
     merge_data(&mut all, extra);
+    merge_data(&mut all, cc);
     let minimax = split_models(&mut all, "MiniMax");
     // Qwen-family models in Claude Code logs mean the session ran against
     // AihubMix's Anthropic-compatible endpoint (the only way qwen slugs
@@ -1551,11 +1627,16 @@ fn codex_scan(home: &Path) -> FileData {
     all
 }
 
-fn codex(extra: FileData) -> (ProviderSpend, FileData) {
+fn codex(extra: FileData, cc: FileData) -> (ProviderSpend, FileData) {
     let home = std::env::var("CODEX_HOME")
         .map(PathBuf::from)
         .unwrap_or_else(|_| dirs::home_dir().unwrap_or_default().join(".codex"));
     let mut all = codex_scan(&home);
+    // cc-switch's Codex ledger is the same logs through the same algorithm
+    // (verified 1.00 day-for-day), but permanent — it fills days that aged
+    // out of the 31-day jsonl scan window. Pane stays the primary source:
+    // a day the self-scan covers is never mixed with cc-switch's.
+    merge_missing_days(&mut all, cc);
     // Pi sessions that drove a Codex account (passed in from the pi scan).
     merge_data(&mut all, extra);
     // Kimi OAuth / Moonshot turns routed through Codex (codex-router logs
@@ -1666,7 +1747,8 @@ fn zcode_db_data() -> (FileData, Option<i32>) {
         let mut stmt = conn
             .prepare(
                 "SELECT started_at, model_id, input_tokens, output_tokens,
-                        cache_creation_input_tokens, cache_read_input_tokens
+                        cache_creation_input_tokens, cache_read_input_tokens,
+                        computed_total_tokens
                  FROM model_usage WHERE started_at >= ?",
             )
             .ok()?;
@@ -1676,18 +1758,17 @@ fn zcode_db_data() -> (FileData, Option<i32>) {
         while let Ok(Some(row)) = rows.next() {
             let Ok(ts_ms) = row.get::<_, i64>(0) else { break };
             let Ok(model) = row.get::<_, String>(1) else { break };
-            let (Ok(input), Ok(output), Ok(cache_write), Ok(cache_read)) = (
+            let (Ok(input), Ok(output), Ok(cache_write), Ok(cache_read), Ok(computed)) = (
                 row.get::<_, f64>(2),
                 row.get::<_, f64>(3),
                 row.get::<_, f64>(4),
                 row.get::<_, f64>(5),
+                row.get::<_, f64>(6),
             ) else {
                 break;
             };
-            // ZCode's own totals (computed_total_tokens / the Settings
-            // page) are these four buckets — reasoning stays excluded to
-            // match the tool's arithmetic, not double it.
-            let tokens = input + output + cache_write + cache_read;
+            let (tokens, plain_input) =
+                zcode_totals(input, output, cache_write, cache_read, computed);
             let Some(ts) = DateTime::from_timestamp_millis(ts_ms) else { continue };
             let day = day_of_utc(ts);
             min_day = Some(min_day.map_or(day, |d: i32| d.min(day)));
@@ -1697,7 +1778,7 @@ fn zcode_db_data() -> (FileData, Option<i32>) {
             match probe_lookup(&model) {
                 Some(p) => {
                     let u = pricing::Usage {
-                        input,
+                        input: plain_input,
                         output,
                         cache_read,
                         cache_write_5m: cache_write,
@@ -1731,9 +1812,32 @@ fn stamp_of(path: &Path) -> (SystemTime, u64) {
         .unwrap_or((SystemTime::UNIX_EPOCH, 0))
 }
 
-/// One model request = one event, tokens counted like the other scanners
-/// (input + output + all cache traffic). `requestId` dedup is unnecessary —
-/// each request is written once to exactly one rollout file.
+/// ZCode usage semantics (AI SDK v6, verified against the live db: 36447/36447
+/// rows have provider_total = input + output): the `input` column/field is the
+/// TOTAL input side — plain text plus cache read/write — and the cache columns
+/// are only a breakdown of it, not additions. `total` (`totalTokens` in
+/// rollout jsonl, `computed_total_tokens` in the db) is exactly what ZCode's
+/// own Settings → Usage page sums. Returns (tokens, plain_input): tokens match
+/// that page, plain_input is the non-cached remainder so pricing does not bill
+/// the cache twice.
+fn zcode_totals(
+    input: f64,
+    output: f64,
+    cache_write: f64,
+    cache_read: f64,
+    total: f64,
+) -> (f64, f64) {
+    let input_side = if input > 0.0 { input } else { cache_write + cache_read };
+    let tokens = if total > 0.0 { total } else { input_side + output };
+    let plain_input = (input_side - cache_write - cache_read).max(0.0);
+    (tokens, plain_input)
+}
+
+/// One model request = one event, its total coming from `zcode_totals` —
+/// physically the same input+cache+output traffic the other scanners sum,
+/// just expressed through ZCode's already-totalled fields. `requestId`
+/// dedup is unnecessary — each request is written once to exactly one
+/// rollout file.
 fn zcode_line(line: &str, data: &mut FileData) {
     if !line.contains("\"usage\"") || !line.contains("\"modelId\"") {
         return;
@@ -1752,7 +1856,8 @@ fn zcode_line(line: &str, data: &mut FileData) {
     let output = usage.get("outputTokens").and_then(Value::as_f64).unwrap_or(0.0);
     let cache_read = usage.get("cacheReadTokens").and_then(Value::as_f64).unwrap_or(0.0);
     let cache_write = usage.get("cacheWriteTokens").and_then(Value::as_f64).unwrap_or(0.0);
-    let total = input + output + cache_read + cache_write;
+    let total_field = usage.get("totalTokens").and_then(Value::as_f64).unwrap_or(0.0);
+    let (total, plain_input) = zcode_totals(input, output, cache_write, cache_read, total_field);
     if total <= 0.0 {
         return;
     }
@@ -1760,7 +1865,7 @@ fn zcode_line(line: &str, data: &mut FileData) {
         pricing::request_cost(
             &price,
             &pricing::Usage {
-                input,
+                input: plain_input,
                 output,
                 cache_read,
                 cache_write_5m: cache_write,
@@ -1773,6 +1878,252 @@ fn zcode_line(line: &str, data: &mut FileData) {
         Some(c) => add_event(data, ts, model, c, total),
         None => note_unpriced(data, ts, model, total),
     }
+}
+
+// ---------------------------------------------------------------------------
+// cc-switch — read-only scan of its multi-tool usage ledger
+// ---------------------------------------------------------------------------
+//
+// cc-switch (~/.cc-switch/cc-switch.db) is a live multi-tool ledger: its
+// built-in proxy records real per-request tokens even when a relay zeroes
+// the CLI's own logs, and a 60-second loop imports each CLI's local session
+// logs. Detail rows (proxy_request_logs) cover roughly the last 30 days;
+// older rows fold into usage_daily_rollups (keyed by local calendar day)
+// and are deleted — only the UNION of both tables is the full history.
+// Costs are always recomputed through Pane's own catalog: cc-switch's
+// total_cost_usd follows its own price list and is deliberately ignored.
+
+/// cc-switch `input_token_semantics`: 0 = legacy (input contains cache
+/// read), 1 = total (input contains cache read + creation), 2 = fresh
+/// (cache excluded). Only these apps ever write cache-inclusive inputs;
+/// everything else stores fresh inputs whatever the flag says.
+const CCSWITCH_CACHE_INCLUSIVE: [&str; 3] = ["codex", "gemini", "grokbuild"];
+
+/// The plain (non-cache) input of a cc-switch row, per its
+/// input_token_semantics. The guards keep a row whose buckets contradict
+/// its declared semantics on the safe side (fresh = input, no
+/// subtraction), matching cc-switch's own SQL.
+fn ccswitch_fresh_input(
+    app: &str,
+    sem: i64,
+    input: f64,
+    cache_read: f64,
+    cache_creation: f64,
+) -> f64 {
+    if sem == 2 {
+        return input;
+    }
+    if CCSWITCH_CACHE_INCLUSIVE.contains(&app) {
+        if sem == 1 && input >= cache_read + cache_creation {
+            return input - cache_read - cache_creation;
+        }
+        if sem == 0 && input >= cache_read {
+            return input - cache_read;
+        }
+    }
+    input
+}
+
+/// Per-app spend read out of cc-switch.db. Fixed buckets (not a map) so a
+/// new cc-switch app_type surfaces as a None here instead of silently
+/// landing on the wrong card.
+#[derive(Default, Clone)]
+struct CcSwitchData {
+    claude: FileData,
+    codex: FileData,
+    opencode: FileData,
+    /// cc-switch calls the Grok CLI "grokbuild".
+    grok: FileData,
+    pi: FileData,
+    mcode: FileData,
+    gemini: FileData,
+    claude_desktop: FileData,
+}
+
+impl CcSwitchData {
+    fn bucket(&mut self, app: &str) -> Option<&mut FileData> {
+        match app {
+            "claude" => Some(&mut self.claude),
+            "codex" => Some(&mut self.codex),
+            "opencode" => Some(&mut self.opencode),
+            "grokbuild" => Some(&mut self.grok),
+            "pi" => Some(&mut self.pi),
+            "mcode" => Some(&mut self.mcode),
+            "gemini" => Some(&mut self.gemini),
+            "claude-desktop" => Some(&mut self.claude_desktop),
+            _ => None,
+        }
+    }
+}
+
+/// One cc-switch row (detail or rollup), priced through Pane's own catalog
+/// into its app bucket. Rollup rows aggregate a whole day of requests, so
+/// no single request can be proven long-context — they stay on base rates
+/// (same reasoning as the Cursor CSV scanner).
+#[allow(clippy::too_many_arguments)]
+fn ccswitch_add(
+    out: &mut CcSwitchData,
+    app: &str,
+    model: &str,
+    day: i32,
+    input: f64,
+    output: f64,
+    cache_read: f64,
+    cache_creation: f64,
+    sem: i64,
+    per_request: bool,
+) {
+    let Some(bucket) = out.bucket(app) else { return };
+    let fresh = ccswitch_fresh_input(app, sem, input, cache_read, cache_creation);
+    let tokens = fresh + cache_read + cache_creation + output;
+    if tokens <= 0.0 {
+        return;
+    }
+    match probe_lookup(model) {
+        Some(p) => {
+            let u = pricing::Usage {
+                input: fresh,
+                output,
+                cache_read,
+                cache_write_5m: cache_creation,
+                cache_write_1h: 0.0,
+            };
+            add_day_event(bucket, day, model, pricing::request_cost(&p, &u, per_request), tokens);
+        }
+        None => note_unpriced_day(bucket, day, model, tokens),
+    }
+}
+
+/// Parse of both cc-switch tables. `None` = unreadable this pass (missing,
+/// locked mid-write, schema drift) — the caller serves the last good parse
+/// or, without one, an empty scan (Pane's own scanners carry on alone).
+fn ccswitch_db_read(path: &Path) -> Option<CcSwitchData> {
+    let conn = rusqlite::Connection::open_with_flags(
+        path,
+        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
+    )
+    .ok()?;
+    let mut out = CcSwitchData::default();
+    // Detail rows live ~30 days before rolling up; 35 covers rollup lag.
+    // created_at is SECONDS.
+    let cutoff_s = (Local::now() - chrono::Duration::days(35)).timestamp();
+    let mut stmt = conn
+        .prepare(
+            "SELECT created_at, app_type, model, input_tokens, output_tokens,
+                    cache_read_tokens, cache_creation_tokens, input_token_semantics
+             FROM proxy_request_logs WHERE created_at >= ?",
+        )
+        .ok()?;
+    let mut rows = stmt.query([cutoff_s]).ok()?;
+    loop {
+        let row = match rows.next() {
+            Ok(Some(row)) => row,
+            Ok(None) => break,
+            // A truncated read would cache a partial day-set and the
+            // claude/codex day-diffing would then drop self-scanned days the
+            // ledger only half covers — treat any mid-iteration error as an
+            // unreadable db so the caller serves the last good parse.
+            Err(_) => return None,
+        };
+        let (Ok(ts_s), Ok(app), Ok(model)) = (
+            row.get::<_, i64>(0),
+            row.get::<_, String>(1),
+            row.get::<_, String>(2),
+        ) else {
+            continue;
+        };
+        let (Ok(input), Ok(output), Ok(cache_read), Ok(cache_creation)) = (
+            row.get::<_, f64>(3),
+            row.get::<_, f64>(4),
+            row.get::<_, f64>(5),
+            row.get::<_, f64>(6),
+        ) else {
+            continue;
+        };
+        let sem = row.get::<_, i64>(7).unwrap_or(0);
+        let Some(ts) = DateTime::from_timestamp(ts_s, 0) else { continue };
+        ccswitch_add(&mut out, &app, &model, day_of_utc(ts), input, output, cache_read, cache_creation, sem, true);
+    }
+    // Rollups: permanent history keyed by local calendar day (TEXT).
+    let mut stmt = conn
+        .prepare(
+            "SELECT date, app_type, model, input_tokens, output_tokens,
+                    cache_read_tokens, cache_creation_tokens, input_token_semantics
+             FROM usage_daily_rollups",
+        )
+        .ok()?;
+    let mut rows = stmt.query([]).ok()?;
+    loop {
+        let row = match rows.next() {
+            Ok(Some(row)) => row,
+            Ok(None) => break,
+            Err(_) => return None, // see the detail loop above
+        };
+        let (Ok(date), Ok(app), Ok(model)) = (
+            row.get::<_, String>(0),
+            row.get::<_, String>(1),
+            row.get::<_, String>(2),
+        ) else {
+            continue;
+        };
+        let (Ok(input), Ok(output), Ok(cache_read), Ok(cache_creation)) = (
+            row.get::<_, f64>(3),
+            row.get::<_, f64>(4),
+            row.get::<_, f64>(5),
+            row.get::<_, f64>(6),
+        ) else {
+            continue;
+        };
+        let sem = row.get::<_, i64>(7).unwrap_or(0);
+        let Some(day) = chrono::NaiveDate::parse_from_str(&date, "%Y-%m-%d")
+            .ok()
+            .map(|d| d.num_days_from_ce())
+        else {
+            continue;
+        };
+        ccswitch_add(&mut out, &app, &model, day, input, output, cache_read, cache_creation, sem, false);
+    }
+    Some(out)
+}
+
+/// cc-switch scan, cached on (db, wal) stamps — the wal grows with every
+/// proxied call, so its stamp is what invalidates. A locked/busy db serves
+/// the last good parse instead of dropping every cc-switch-fed slice.
+fn ccswitch_db_data() -> CcSwitchData {
+    static CACHE: Mutex<Option<((SystemTime, u64), (SystemTime, u64), CcSwitchData)>> =
+        Mutex::new(None);
+
+    let Some(db_path) =
+        dirs::home_dir().map(|h| h.join(".cc-switch").join("cc-switch.db"))
+    else {
+        return CcSwitchData::default();
+    };
+    if !db_path.exists() {
+        return CcSwitchData::default();
+    }
+    let db_stamp = stamp_of(&db_path);
+    let wal_stamp = stamp_of(&db_path.with_extension("db-wal"));
+    if let Ok(guard) = CACHE.lock() {
+        if let Some((d, w, data)) = guard.as_ref() {
+            if *d == db_stamp && *w == wal_stamp {
+                return data.clone();
+            }
+        }
+    }
+
+    let Some(data) = ccswitch_db_read(&db_path) else {
+        // Unreadable this pass — serve the last good parse when one exists.
+        if let Ok(guard) = CACHE.lock() {
+            if let Some((_, _, data)) = guard.as_ref() {
+                return data.clone();
+            }
+        }
+        return CcSwitchData::default();
+    };
+    if let Ok(mut guard) = CACHE.lock() {
+        *guard = Some((db_stamp, wal_stamp, data.clone()));
+    }
+    data
 }
 
 // ---------------------------------------------------------------------------
@@ -1920,7 +2271,8 @@ fn pi() -> (FileData, FileData) {
 /// (prompt/completion/reasoning/cached_prompt); those rows carry no model
 /// id, so the active model is tracked per CLI process from the model-change
 /// events the CLI also logs — the same scheme the Mac scanner uses.
-fn grok() -> ProviderSpend {
+/// `cc` is cc-switch's grokbuild ledger, filling days the log scan lacks.
+fn grok(cc: FileData) -> ProviderSpend {
     let root = std::env::var("GROK_HOME")
         .map(PathBuf::from)
         .unwrap_or_else(|_| dirs::home_dir().unwrap_or_default().join(".grok"));
@@ -1998,6 +2350,7 @@ fn grok() -> ProviderSpend {
         });
         merge_data(&mut all, data);
     }
+    merge_missing_days(&mut all, cc);
     build_spend("grok", "Grok", all)
 }
 
@@ -2011,7 +2364,8 @@ fn grok() -> ProviderSpend {
 /// Returns OpenCode's spend plus the AihubMix rows as raw FileData — the
 /// caller merges in AihubMix traffic from other CLIs (Claude Code) before
 /// building the card's spend.
-fn opencode() -> (ProviderSpend, FileData) {
+/// `cc` is cc-switch's opencode ledger, filling days the db scan lacks.
+fn opencode(cc: FileData) -> (ProviderSpend, FileData) {
     let mut oc = FileData::default();
     let mut aihubmix = FileData::default();
     for (ts_ms, cost, tokens, model, provider) in providers::opencode::collect_cost_events() {
@@ -2020,6 +2374,7 @@ fn opencode() -> (ProviderSpend, FileData) {
             add_event(target, ts, &model, cost, tokens);
         }
     }
+    merge_missing_days(&mut oc, cc);
     (build_spend("opencode", "OpenCode", oc), aihubmix)
 }
 
@@ -2379,9 +2734,12 @@ mod tests {
     fn zcode_usage_rides_inside_the_response() {
         let mut data = FileData::default();
         zcode_line(&zcode_line_sample(), &mut data);
-        // input + output + cache_read + cache_write — the top level
-        // carries no usage, so this passing proves the nested path.
-        assert_eq!(tokens_sum(&data), 326901.0 + 286.0 + 326528.0 + 0.0);
+        // inputTokens already contains the 326528 cache read (AI SDK v6
+        // total input), so tokens = totalTokens = input + output — the
+        // same arithmetic as ZCode's own Settings → Usage page. The top
+        // level carries no usage, so this passing also proves the nested
+        // path. (Pre-2026-10-04 this wrongly added the cache on top.)
+        assert_eq!(tokens_sum(&data), 326901.0 + 286.0);
         assert_eq!(data.days.len(), 1);
         // Whether the model prices is the catalog's business; tokens are
         // the fact under test either way.
@@ -2394,7 +2752,7 @@ mod tests {
         v["startedAt"] = json!("2026-09-11T23:00:00.000Z");
         let mut data = FileData::default();
         zcode_line(&v.to_string(), &mut data);
-        assert_eq!(tokens_sum(&data), 653715.0);
+        assert_eq!(tokens_sum(&data), 327_187.0);
     }
 
     #[test]
@@ -2420,6 +2778,29 @@ mod tests {
         let mut data = FileData::default();
         zcode_line(&v.to_string(), &mut data);
         assert!(data.days.is_empty());
+    }
+
+    #[test]
+    fn zcode_without_total_tokens_falls_back_to_input_plus_output() {
+        // Some rows (older writers) carry no totalTokens; input+output is
+        // still the full total because input includes the cache buckets.
+        let mut v: Value = serde_json::from_str(&zcode_line_sample()).unwrap();
+        v["response"]["usage"] = json!({"inputTokens": 100, "outputTokens": 50,
+            "cacheReadTokens": 50_000, "cacheWriteTokens": 0});
+        let mut data = FileData::default();
+        zcode_line(&v.to_string(), &mut data);
+        assert_eq!(tokens_sum(&data), 150.0);
+    }
+
+    #[test]
+    fn zcode_totals_covers_legacy_rows_without_input() {
+        // Legacy db rows with input=0: the cache buckets ARE the input side.
+        assert_eq!(zcode_totals(0.0, 5.0, 10.0, 20.0, 35.0), (35.0, 0.0));
+        assert_eq!(zcode_totals(0.0, 5.0, 10.0, 20.0, 0.0), (35.0, 0.0));
+        // Normal rows: input already includes the cache buckets, so the
+        // plain (priced) input is the non-cached remainder.
+        assert_eq!(zcode_totals(30.0, 5.0, 10.0, 15.0, 0.0), (35.0, 5.0));
+        assert_eq!(zcode_totals(30.0, 5.0, 0.0, 0.0, 0.0), (35.0, 30.0));
     }
 
     // ---- Log scan: bounded walk ------------------------------------------
@@ -3252,6 +3633,237 @@ mod tests {
         assert!(parse_dotnet_datetime("0001-01-01 00:00:00+00:00").is_none());
         assert!(parse_dotnet_datetime("not a date").is_none());
     }
+
+    // ---- cc-switch ledger --------------------------------------------------
+
+    #[test]
+    fn source_inventory_includes_ccswitch() {
+        let sources = source_statuses();
+        let cc = sources
+            .iter()
+            .find(|s| s.id == "ccswitch-sqlite")
+            .expect("ccswitch source registered");
+        assert!(cc.form.contains("SQLite"));
+        assert!(cc.feeds.iter().any(|f| f == "mcode"));
+        assert!(cc.feeds.iter().any(|f| f == "claude"));
+    }
+
+    #[test]
+    fn ccswitch_fresh_input_semantics() {
+        // sem=2 (fresh): input is already cache-free, for every app.
+        assert_eq!(ccswitch_fresh_input("codex", 2, 100.0, 60.0, 30.0), 100.0);
+        // sem=1 (total) on cache-inclusive apps: strip read + creation.
+        assert_eq!(ccswitch_fresh_input("codex", 1, 100.0, 60.0, 30.0), 10.0);
+        assert_eq!(ccswitch_fresh_input("gemini", 1, 100.0, 60.0, 30.0), 10.0);
+        assert_eq!(ccswitch_fresh_input("grokbuild", 1, 100.0, 60.0, 30.0), 10.0);
+        // sem=1 guard fails (cache buckets exceed input): input untouched.
+        assert_eq!(ccswitch_fresh_input("codex", 1, 50.0, 60.0, 30.0), 50.0);
+        // sem=0 (legacy) on cache-inclusive apps: strip cache read only.
+        assert_eq!(ccswitch_fresh_input("codex", 0, 100.0, 60.0, 30.0), 40.0);
+        // sem=0 guard fails: input untouched.
+        assert_eq!(ccswitch_fresh_input("codex", 0, 50.0, 60.0, 0.0), 50.0);
+        // Apps outside the cache-inclusive list never subtract.
+        assert_eq!(ccswitch_fresh_input("claude", 1, 100.0, 60.0, 30.0), 100.0);
+        assert_eq!(ccswitch_fresh_input("mcode", 0, 100.0, 60.0, 30.0), 100.0);
+        // Unknown sem values fall through untouched.
+        assert_eq!(ccswitch_fresh_input("codex", 7, 100.0, 60.0, 30.0), 100.0);
+    }
+
+    /// A scratch cc-switch.db with the two ledger tables (only the columns
+    /// the reader touches).
+    fn ccswitch_test_db(tag: &str) -> (rusqlite::Connection, PathBuf) {
+        let dir = std::env::temp_dir().join(format!("pane-ccswitch-{tag}-{}", std::process::id()));
+        let _ = fs::create_dir_all(&dir);
+        let path = dir.join("cc-switch.db");
+        let _ = fs::remove_file(&path);
+        let conn = rusqlite::Connection::open(&path).unwrap();
+        conn.execute_batch(
+            "CREATE TABLE proxy_request_logs (
+                request_id TEXT PRIMARY KEY, app_type TEXT NOT NULL, model TEXT NOT NULL,
+                input_tokens INTEGER NOT NULL DEFAULT 0, output_tokens INTEGER NOT NULL DEFAULT 0,
+                cache_read_tokens INTEGER NOT NULL DEFAULT 0,
+                cache_creation_tokens INTEGER NOT NULL DEFAULT 0,
+                input_token_semantics INTEGER NOT NULL DEFAULT 0,
+                created_at INTEGER NOT NULL);
+             CREATE TABLE usage_daily_rollups (
+                date TEXT NOT NULL, app_type TEXT NOT NULL, model TEXT NOT NULL,
+                input_tokens INTEGER NOT NULL DEFAULT 0, output_tokens INTEGER NOT NULL DEFAULT 0,
+                cache_read_tokens INTEGER NOT NULL DEFAULT 0,
+                cache_creation_tokens INTEGER NOT NULL DEFAULT 0,
+                input_token_semantics INTEGER NOT NULL DEFAULT 0);",
+        )
+        .unwrap();
+        (conn, path)
+    }
+
+    #[test]
+    fn ccswitch_read_unions_detail_and_rollups() {
+        let (conn, path) = ccswitch_test_db("union");
+        // created_at is SECONDS — local noon today.
+        let noon = Local::now()
+            .date_naive()
+            .and_hms_opt(12, 0, 0)
+            .unwrap()
+            .and_local_timezone(Local)
+            .unwrap()
+            .timestamp();
+        conn.execute(
+            "INSERT INTO proxy_request_logs (request_id, app_type, model,
+                input_tokens, output_tokens, cache_read_tokens,
+                cache_creation_tokens, input_token_semantics, created_at)
+             VALUES ('r1', 'codex', 'k3', 1000, 500, 600, 200, 1, ?)",
+            [noon],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO usage_daily_rollups (date, app_type, model,
+                input_tokens, output_tokens, cache_read_tokens,
+                cache_creation_tokens, input_token_semantics)
+             VALUES ('2026-03-10', 'claude', 'k3', 100, 50, 0, 0, 2)",
+            [],
+        )
+        .unwrap();
+        drop(conn);
+        let data = ccswitch_db_read(&path).expect("db reads");
+        let _ = fs::remove_dir_all(path.parent().unwrap());
+
+        // codex sem=1 detail row: fresh = 1000-600-200 = 200,
+        // tokens = 200 + 600 + 200 + 500 = 1500.
+        let day = day_of_utc(DateTime::from_timestamp(noon, 0).unwrap());
+        assert_eq!(data.codex.days[&(day, "k3".to_string())].1, 1500.0);
+        // The rollup row lands on its declared local day verbatim.
+        let rollup_day = chrono::NaiveDate::parse_from_str("2026-03-10", "%Y-%m-%d")
+            .unwrap()
+            .num_days_from_ce();
+        assert_eq!(data.claude.days[&(rollup_day, "k3".to_string())].1, 150.0);
+        // k3 is catalog-priced, so no unpriced tally on either bucket.
+        assert!(data.codex.unpriced.is_empty());
+        assert!(data.claude.unpriced.is_empty());
+    }
+
+    #[test]
+    fn ccswitch_detail_rows_straddle_local_midnight() {
+        let (conn, path) = ccswitch_test_db("midnight");
+        let today = Local::now().date_naive();
+        let midnight = today
+            .and_hms_opt(0, 0, 0)
+            .unwrap()
+            .and_local_timezone(Local)
+            .unwrap()
+            .timestamp();
+        for (id, ts) in [("before", midnight - 1), ("at", midnight)] {
+            conn.execute(
+                "INSERT INTO proxy_request_logs (request_id, app_type, model, output_tokens, created_at)
+                 VALUES (?, 'pi', 'k3', 10, ?)",
+                rusqlite::params![id, ts],
+            )
+            .unwrap();
+        }
+        drop(conn);
+        let data = ccswitch_db_read(&path).expect("db reads");
+        let _ = fs::remove_dir_all(path.parent().unwrap());
+        let today_ce = today.num_days_from_ce();
+        assert_eq!(data.pi.days[&(today_ce - 1, "k3".to_string())].1, 10.0);
+        assert_eq!(data.pi.days[&(today_ce, "k3".to_string())].1, 10.0);
+    }
+
+    #[test]
+    fn ccswitch_unknown_model_counts_tokens_without_dollars() {
+        let (conn, path) = ccswitch_test_db("unpriced");
+        let noon = Local::now()
+            .date_naive()
+            .and_hms_opt(12, 0, 0)
+            .unwrap()
+            .and_local_timezone(Local)
+            .unwrap()
+            .timestamp();
+        conn.execute(
+            "INSERT INTO proxy_request_logs (request_id, app_type, model, output_tokens, created_at)
+             VALUES ('r1', 'mcode', 'unknown', 100, ?)",
+            [noon],
+        )
+        .unwrap();
+        drop(conn);
+        let data = ccswitch_db_read(&path).expect("db reads");
+        let _ = fs::remove_dir_all(path.parent().unwrap());
+        assert_eq!(data.mcode.unpriced.get("unknown"), Some(&1));
+        let tokens: f64 = data.mcode.days.values().map(|v| v.1).sum();
+        let cost: f64 = data.mcode.days.values().map(|v| v.0).sum();
+        assert_eq!(tokens, 100.0);
+        assert_eq!(cost, 0.0);
+    }
+
+    #[test]
+    fn ccswitch_unknown_app_type_is_dropped() {
+        let (conn, path) = ccswitch_test_db("unknown-app");
+        conn.execute(
+            "INSERT INTO usage_daily_rollups (date, app_type, model, output_tokens)
+             VALUES ('2026-03-10', 'futuretool', 'k3', 10)",
+            [],
+        )
+        .unwrap();
+        drop(conn);
+        let data = ccswitch_db_read(&path).expect("db reads");
+        let _ = fs::remove_dir_all(path.parent().unwrap());
+        let total: f64 = [
+            &data.claude, &data.codex, &data.opencode, &data.grok, &data.pi,
+            &data.mcode, &data.gemini, &data.claude_desktop,
+        ]
+        .iter()
+        .flat_map(|d| d.days.values())
+        .map(|v| v.1)
+        .sum();
+        assert_eq!(total, 0.0);
+    }
+
+    #[test]
+    fn ccswitch_missing_or_garbage_db_falls_back_without_panic() {
+        let dir = std::env::temp_dir().join(format!("pane-ccswitch-bad-{}", std::process::id()));
+        let _ = fs::create_dir_all(&dir);
+        assert!(ccswitch_db_read(&dir.join("nope.db")).is_none());
+        let garbage = dir.join("garbage.db");
+        fs::write(&garbage, b"not a sqlite database").unwrap();
+        assert!(ccswitch_db_read(&garbage).is_none());
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    // ---- Day-level source merging (cc-switch vs Pane self-scans) -----------
+
+    /// Claude's merge rule: on a day cc-switch covers, the self-scan yields
+    /// outright (cc-switch's proxy is the real ledger).
+    #[test]
+    fn retain_days_drops_owned_days_and_prunes_unpriced() {
+        let mut data = FileData::default();
+        data.days.insert((100, "k3".into()), (1.0, 10.0));
+        data.days.insert((101, "k3".into()), (2.0, 20.0));
+        data.days.insert((101, "other".into()), (3.0, 30.0));
+        data.unpriced.insert("other".into(), 2);
+        data.unpriced.insert("ghost".into(), 1); // no day rows anywhere
+        let cc_days: HashSet<i32> = [100].into_iter().collect();
+        retain_days(&mut data, |d| !cc_days.contains(&d));
+        assert!(!data.days.contains_key(&(100, "k3".to_string())));
+        assert_eq!(data.days.len(), 2);
+        assert_eq!(data.unpriced.get("other"), Some(&2));
+        assert!(!data.unpriced.contains_key("ghost"));
+    }
+
+    /// Codex/opencode/grok's merge rule: Pane stays primary — a cc-switch
+    /// day Pane already covers is dropped, only absent days fill in.
+    #[test]
+    fn merge_missing_days_takes_only_absent_days() {
+        let mut target = FileData::default();
+        target.days.insert((100, "k3".into()), (1.0, 10.0));
+        let mut source = FileData::default();
+        source.days.insert((100, "k3".into()), (9.0, 90.0)); // pane owns day 100
+        source.days.insert((99, "k3".into()), (5.0, 50.0)); // cc fills day 99
+        source.unpriced.insert("k3".into(), 4);
+        source.unpriced.insert("absent-model".into(), 2);
+        merge_missing_days(&mut target, source);
+        assert_eq!(target.days[&(100, "k3".to_string())], (1.0, 10.0));
+        assert_eq!(target.days[&(99, "k3".to_string())], (5.0, 50.0));
+        assert_eq!(target.unpriced.get("k3"), Some(&4));
+        assert!(!target.unpriced.contains_key("absent-model"));
+    }
 }
 
 /// Minimal CSV field splitter with quoted-field support.
@@ -3566,9 +4178,25 @@ pub fn collect_daily(cursor_csv: Option<String>) -> (Vec<ProviderSpend>, Vec<Pro
     if let Ok(mut t) = touched().lock() {
         t.clear();
     }
-    let (pi_claude, pi_codex) = pi();
+    let (mut pi_claude, mut pi_codex) = pi();
+    // cc-switch's ledger (proxy + session imports): Claude's primary source
+    // (its proxy sees real tokens even where a relay zeroed the CLI logs),
+    // a day-level gap filler for the tools Pane scans itself, and the only
+    // source for mcode/gemini/claude-desktop.
+    let cc = ccswitch_db_data();
+    // cc-switch's pi rows don't name the account pi drove, so they fold
+    // onto the Claude card (pi's dominant target). Where cc-switch covers
+    // a pi day it owns it outright — Pane's own pi scan yields those days
+    // on both destination cards, or they'd count twice.
+    if !cc.pi.days.is_empty() {
+        let cc_pi_days = day_set(&cc.pi);
+        retain_days(&mut pi_claude, |day| !cc_pi_days.contains(&day));
+        retain_days(&mut pi_codex, |day| !cc_pi_days.contains(&day));
+        merge_data(&mut pi_claude, cc.pi);
+    }
+    let cc_claude_days = day_set(&cc.claude);
     let (claude_sp, mut minimax_extra, mut qwen_via_claude, mut kimi_routed) =
-        claude(pi_claude);
+        claude(pi_claude, cc.claude, &cc_claude_days);
     // Extra Claude accounts: own spend cards, with their MiniMax/qwen/Kimi-
     // routed rows folded into the same destinations as the default account's.
     let (extra_claude_spends, mm2, qw2, km2) = claude_extra_accounts();
@@ -3585,17 +4213,17 @@ pub fn collect_daily(cursor_csv: Option<String>) -> (Vec<ProviderSpend>, Vec<Pro
             hermes_rest.push(build_spend(id, name, data));
         }
     }
-    let (opencode_sp, mut aihubmix_data) = opencode();
+    let (opencode_sp, mut aihubmix_data) = opencode(cc.opencode);
     merge_data(&mut aihubmix_data, qwen_via_claude);
     let aihubmix_sp = build_spend("aihubmix", "AihubMix", aihubmix_data);
-    let (codex_sp, kimi_via_codex) = codex(pi_codex);
+    let (codex_sp, kimi_via_codex) = codex(pi_codex, cc.codex);
     merge_data(&mut kimi_routed, kimi_via_codex);
     let (extra_codex_spends, kimi_via_extra_codex) = codex_extra_accounts();
     merge_data(&mut kimi_routed, kimi_via_extra_codex);
     let mut list = vec![
         claude_sp,
         codex_sp,
-        grok(),
+        grok(cc.grok),
         opencode_sp,
         aihubmix_sp,
         devin(),
@@ -3605,6 +4233,11 @@ pub fn collect_daily(cursor_csv: Option<String>) -> (Vec<ProviderSpend>, Vec<Pro
         zcode(),
         antigravity(),
     ];
+    // cc-switch-only tools get their own cards (empty scans are filtered
+    // out by has_data at the end).
+    list.push(build_spend("mcode", "MaxCode", cc.mcode));
+    list.push(build_spend("gemini", "Gemini", cc.gemini));
+    list.push(build_spend("claude-desktop", "Claude Desktop", cc.claude_desktop));
     list.extend(extra_claude_spends);
     list.extend(extra_codex_spends);
     list.extend(hermes_rest);

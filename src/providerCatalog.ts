@@ -60,6 +60,7 @@ export const providerCatalog: readonly ProviderDefinition[] = [
   { familyId: "clinepass", displayName: "ClinePass", queryKind: "nativeCodingPlan", supportsApiKey: true, supportsExtraAccounts: true, supportsOAuth: false, iconKey: "clinepass" },
   { familyId: "sensenova", displayName: "SenseNova", queryKind: "nativeCodingPlan", supportsApiKey: false, supportsExtraAccounts: false, supportsOAuth: false, iconKey: "sensenova" },
   { familyId: "apigoto", displayName: "APIGOTO", queryKind: "nativeCodingPlan", supportsApiKey: true, supportsExtraAccounts: false, supportsOAuth: false, iconKey: "apigoto" },
+  { familyId: "mcode", displayName: "MaxCode", queryKind: "localOnly", supportsApiKey: false, supportsExtraAccounts: false, supportsOAuth: false, iconKey: "mcode" },
 ];
 
 export function providerFamily(id: string): string {
