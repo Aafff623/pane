@@ -3758,6 +3758,8 @@ function appPrompt(opts: {
   /// Confirm with an empty field resolves "" instead of null — needed to
   /// clear a value (e.g. a note falling back to the original name).
   allowEmpty?: boolean;
+  /// Password-style input (master-password prompts).
+  secret?: boolean;
 }): Promise<string | null> {
   return new Promise((resolve) => {
     const overlay = document.createElement("div");
@@ -3765,7 +3767,7 @@ function appPrompt(opts: {
     overlay.innerHTML = `
       <div id="confirm-box" role="dialog" aria-modal="true">
         <h3>${escapeHtml(opts.title)}</h3>
-        <input id="prompt-input" class="form-input" type="text" spellcheck="false" />
+        <input id="prompt-input" class="form-input" type="${opts.secret ? "password" : "text"}" spellcheck="false" autocomplete="off" />
         <div id="confirm-actions">
           <button id="confirm-cancel" type="button">${escapeHtml(t("dialog.cancel"))}</button>
           <button id="confirm-ok" type="button">${escapeHtml(opts.confirmLabel)}</button>
@@ -8823,7 +8825,152 @@ interface KeyVaultRow {
   note: string;
 }
 
+interface VaultStatus {
+  has_password: boolean;
+  unlocked: boolean;
+  count: number;
+}
+
+let vaultStatus: VaultStatus | null = null;
+let lastVaultRows: KeyVaultRow[] = [];
+
+// ── Master-password vault flows ────────────────────────────────────────────
+// The vault bar mirrors keyvault.rs: no password yet → offer "set password"
+// (everything still works, stored plaintext like before); password set →
+// locked/unlocked state with unlock/lock buttons. Viewing or copying a key
+// while locked routes through the unlock prompt first.
+
+function renderVaultBar(): void {
+  const bar = document.querySelector<HTMLElement>("#kv-vault-bar");
+  if (!bar || !vaultStatus) return;
+  bar.replaceChildren();
+  const inner = document.createElement("div");
+  inner.className = "kv-vault-bar-inner";
+  const state = document.createElement("span");
+  state.className = "kv-vault-state";
+  const action = document.createElement("button");
+  action.type = "button";
+  action.className = "mini-btn";
+  if (!vaultStatus.has_password) {
+    state.textContent = t("settings.kvVaultNoPassword");
+    action.textContent = t("settings.kvSetPassword");
+    action.dataset.kvVaultAction = "set";
+  } else if (vaultStatus.unlocked) {
+    state.textContent = t("settings.kvVaultUnlocked", { count: vaultStatus.count });
+    action.textContent = t("settings.kvLock");
+    action.dataset.kvVaultAction = "lock";
+  } else {
+    state.textContent = t("settings.kvVaultLocked", { count: vaultStatus.count });
+    state.classList.add("locked");
+    action.textContent = t("settings.kvUnlock");
+    action.dataset.kvVaultAction = "unlock";
+  }
+  inner.append(state, action);
+  bar.append(inner);
+}
+
+async function setVaultPassword(): Promise<void> {
+  const pw = await appPrompt({
+    title: t("settings.kvSetPasswordTitle"),
+    placeholder: t("settings.kvPasswordPlaceholder"),
+    confirmLabel: t("settings.kvSetPassword"),
+    secret: true,
+  });
+  if (pw === null) return;
+  const again = await appPrompt({
+    title: t("settings.kvPasswordConfirmTitle"),
+    placeholder: t("settings.kvPasswordPlaceholder"),
+    confirmLabel: t("settings.kvSetPassword"),
+    secret: true,
+  });
+  if (again === null) return;
+  if (pw !== again) {
+    const status = document.querySelector("#status");
+    if (status) status.textContent = t("settings.kvPasswordMismatch");
+    return;
+  }
+  try {
+    vaultStatus = await invoke<VaultStatus>("keyvault_set_password", { password: pw });
+    await loadKeyvault();
+  } catch (err) {
+    const status = document.querySelector("#status");
+    if (status) status.textContent = String(err);
+  }
+}
+
+/// Returns true when the vault ended up unlocked (so callers can retry the
+/// gated action that triggered the prompt).
+async function unlockVault(): Promise<boolean> {
+  const pw = await appPrompt({
+    title: t("settings.kvUnlockTitle"),
+    placeholder: t("settings.kvPasswordPlaceholder"),
+    confirmLabel: t("settings.kvUnlock"),
+    secret: true,
+  });
+  if (pw === null) return false;
+  try {
+    vaultStatus = await invoke<VaultStatus>("keyvault_unlock", { password: pw });
+    await loadKeyvault();
+    return true;
+  } catch {
+    const status = document.querySelector("#status");
+    if (status) status.textContent = t("settings.kvWrongPassword");
+    return false;
+  }
+}
+
+async function lockVault(): Promise<void> {
+  vaultStatus = await invoke<VaultStatus>("keyvault_lock");
+  await loadKeyvault();
+}
+
+async function revealKeyvaultEntry(id: string, button: HTMLButtonElement): Promise<void> {
+  const item = button.closest<HTMLElement>(".kv-item");
+  const code = item?.querySelector<HTMLElement>(".kv-masked");
+  if (!item || !code) return;
+  if (item.dataset.kvShown === "1") {
+    code.textContent = item.dataset.kvMasked || "";
+    code.classList.remove("kv-revealed");
+    item.dataset.kvShown = "0";
+    button.textContent = t("settings.kvReveal");
+    return;
+  }
+  try {
+    const raw = await invoke<string>("keyvault_reveal", { id });
+    item.dataset.kvMasked = code.textContent || "";
+    code.textContent = raw;
+    code.classList.add("kv-revealed");
+    item.dataset.kvShown = "1";
+    button.textContent = t("settings.kvHide");
+  } catch (err) {
+    if (String(err).includes("locked") && (await unlockVault())) {
+      return revealKeyvaultEntry(id, button);
+    }
+    const status = document.querySelector("#status");
+    if (status && !String(err).includes("locked")) status.textContent = String(err);
+  }
+}
+
+async function editKeyvaultNote(id: string): Promise<void> {
+  const row = lastVaultRows.find((r) => r.id === id);
+  const note = await appPrompt({
+    title: t("settings.kvNoteTitle"),
+    placeholder: t("settings.kvNotePlaceholder"),
+    initial: row?.note ?? "",
+    confirmLabel: t("settings.kvSaveNote"),
+    allowEmpty: true,
+  });
+  if (note === null) return;
+  try {
+    renderKeyvault(await invoke<KeyVaultRow[]>("keyvault_set_note", { id, note }));
+  } catch (err) {
+    const status = document.querySelector("#status");
+    if (status) status.textContent = String(err);
+  }
+}
+
 function renderKeyvault(rows: KeyVaultRow[]): void {
+  lastVaultRows = rows;
   const root = document.querySelector<HTMLElement>("#keyvault-rows");
   if (!root) return;
   root.replaceChildren();
@@ -8851,9 +8998,25 @@ function renderKeyvault(rows: KeyVaultRow[]): void {
     masked.className = "kv-masked";
     masked.textContent = row.masked;
     info.append(service, label, masked);
+    if (row.note) {
+      const note = document.createElement("span");
+      note.className = "kv-note-text";
+      note.textContent = row.note;
+      info.append(note);
+    }
 
     const actions = document.createElement("div");
     actions.className = "kv-actions";
+    const reveal = document.createElement("button");
+    reveal.type = "button";
+    reveal.className = "mini-btn";
+    reveal.dataset.kvReveal = row.id;
+    reveal.textContent = t("settings.kvReveal");
+    const noteBtn = document.createElement("button");
+    noteBtn.type = "button";
+    noteBtn.className = "mini-btn";
+    noteBtn.dataset.kvNote = row.id;
+    noteBtn.textContent = t("settings.kvEditNote");
     const copy = document.createElement("button");
     copy.type = "button";
     copy.className = "mini-btn";
@@ -8864,7 +9027,7 @@ function renderKeyvault(rows: KeyVaultRow[]): void {
     remove.className = "mini-btn danger";
     remove.dataset.kvRemove = row.id;
     remove.textContent = t("settings.kvRemove");
-    actions.append(copy, remove);
+    actions.append(reveal, noteBtn, copy, remove);
     item.append(info, actions);
     root.append(item);
   }
@@ -8872,7 +9035,12 @@ function renderKeyvault(rows: KeyVaultRow[]): void {
 
 async function loadKeyvault(): Promise<void> {
   try {
-    const rows = await invoke<KeyVaultRow[]>("keyvault_list");
+    const [status, rows] = await Promise.all([
+      invoke<VaultStatus>("keyvault_status"),
+      invoke<KeyVaultRow[]>("keyvault_list"),
+    ]);
+    vaultStatus = status;
+    renderVaultBar();
     renderKeyvault(rows);
   } catch (err) {
     const root = document.querySelector<HTMLElement>("#keyvault-rows");
@@ -8889,6 +9057,7 @@ async function loadKeyvault(): Promise<void> {
 async function addKeyvaultEntry(): Promise<void> {
   const service = document.querySelector<HTMLInputElement>("#kv-service");
   const key = document.querySelector<HTMLInputElement>("#kv-key");
+  const note = document.querySelector<HTMLInputElement>("#kv-note");
   if (!service || !key || !service.value.trim() || !key.value.trim()) return;
   const button = document.querySelector<HTMLButtonElement>("#kv-add-btn");
   if (button) button.disabled = true;
@@ -8897,10 +9066,11 @@ async function addKeyvaultEntry(): Promise<void> {
       service: service.value.trim(),
       label: service.value.trim(),
       key: key.value.trim(),
-      note: "",
+      note: note?.value.trim() ?? "",
     });
     service.value = "";
     key.value = "";
+    if (note) note.value = "";
     renderKeyvault(rows);
   } catch (err) {
     const status = document.querySelector("#status");
@@ -8936,8 +9106,11 @@ async function copyKeyvaultEntry(id: string, button: HTMLButtonElement): Promise
       button.textContent = old || t("settings.kvCopy");
     }, 1400);
   } catch (err) {
+    if (String(err).includes("locked") && (await unlockVault())) {
+      return copyKeyvaultEntry(id, button);
+    }
     const status = document.querySelector("#status");
-    if (status) status.textContent = String(err);
+    if (status && !String(err).includes("locked")) status.textContent = String(err);
   }
 }
 
@@ -9197,6 +9370,16 @@ async function initSettings(): Promise<void> {
   });
   document.querySelector("#keyvault-rows")?.addEventListener("click", (event) => {
     const target = event.target as HTMLElement;
+    const reveal = target.closest<HTMLButtonElement>("[data-kv-reveal]");
+    if (reveal?.dataset.kvReveal) {
+      void revealKeyvaultEntry(reveal.dataset.kvReveal, reveal);
+      return;
+    }
+    const noteBtn = target.closest<HTMLButtonElement>("[data-kv-note]");
+    if (noteBtn?.dataset.kvNote) {
+      void editKeyvaultNote(noteBtn.dataset.kvNote);
+      return;
+    }
     const copy = target.closest<HTMLButtonElement>("[data-kv-copy]");
     if (copy?.dataset.kvCopy) {
       void copyKeyvaultEntry(copy.dataset.kvCopy, copy);
@@ -9204,6 +9387,14 @@ async function initSettings(): Promise<void> {
     }
     const remove = target.closest<HTMLButtonElement>("[data-kv-remove]");
     if (remove?.dataset.kvRemove) void removeKeyvaultEntry(remove.dataset.kvRemove);
+  });
+
+  document.querySelector("#kv-vault-bar")?.addEventListener("click", (event) => {
+    const btn = (event.target as HTMLElement).closest<HTMLButtonElement>("[data-kv-vault-action]");
+    if (!btn) return;
+    if (btn.dataset.kvVaultAction === "set") void setVaultPassword();
+    else if (btn.dataset.kvVaultAction === "unlock") void unlockVault();
+    else if (btn.dataset.kvVaultAction === "lock") void lockVault();
   });
 
 }

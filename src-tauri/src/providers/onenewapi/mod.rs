@@ -2,7 +2,7 @@ mod billing;
 mod fingerprint;
 mod ids;
 mod snapshot;
-mod store;
+pub(crate) mod store;
 mod url;
 
 use serde::Serialize;

@@ -190,13 +190,15 @@
       <div class="acc-group">
         <button class="acc-head"><span data-i18n="settings.keyvault">API key vault</span> <span class="chev">&#8964;</span></button>
         <div class="acc-body"><div class="acc-inner">
+          <div id="kv-vault-bar"></div>
           <div id="keyvault-rows"></div>
           <div class="setting-row kv-add-row">
             <input id="kv-service" type="text" data-i18n-placeholder="settings.kvService" placeholder="Service (e.g. tavily)" spellcheck="false" />
+            <input id="kv-note" type="text" data-i18n-placeholder="settings.kvNotePlaceholder" placeholder="Note (optional)" spellcheck="false" />
             <input id="kv-key" type="password" data-i18n-placeholder="settings.kvKey" placeholder="API key" spellcheck="false" autocomplete="off" />
             <button class="mini-btn" id="kv-add-btn" data-i18n="settings.kvAdd">Add</button>
           </div>
-          <p class="kv-hint" data-i18n="settings.kvHint">Keys live in Pane's data directory (keyvault.json) — local projects can read them from there.</p>
+          <p class="kv-hint" data-i18n="settings.kvHint">Keys are sealed with your master password (Argon2id + AES-256-GCM); service, label and note stay readable so the locked vault still shows what it holds.</p>
         </div></div>
       </div>
 

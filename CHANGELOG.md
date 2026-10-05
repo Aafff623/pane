@@ -2,6 +2,12 @@
 
 ## Unreleased — 2026-10-05
 
+- Encrypt the API key vault with a master password: Argon2id-derived
+  AES-256-GCM seals each key value at rest while service/label/note stay
+  visible in the locked listing. Set a password once, unlock to view or copy
+  keys (View/Hide per row), lock manually or by restarting; keys now carry a
+  user-editable note.
+
 - Enable truly working auto-updates: releases are now signed with this
   project's own minisign key (repo secret TAURI_SIGNING_PRIVATE_KEY, pubkey
   embedded in the app), the updater reads this repo's GitHub Releases

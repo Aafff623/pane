@@ -1636,6 +1636,36 @@ fn keyvault_copy(id: String) -> Result<String, String> {
     keyvault::copy(&id)
 }
 
+#[tauri::command]
+fn keyvault_status() -> keyvault::VaultStatus {
+    keyvault::status()
+}
+
+#[tauri::command]
+fn keyvault_set_password(password: String) -> Result<keyvault::VaultStatus, String> {
+    keyvault::set_password(&password)
+}
+
+#[tauri::command]
+fn keyvault_unlock(password: String) -> Result<keyvault::VaultStatus, String> {
+    keyvault::unlock(&password)
+}
+
+#[tauri::command]
+fn keyvault_lock() -> keyvault::VaultStatus {
+    keyvault::lock()
+}
+
+#[tauri::command]
+fn keyvault_reveal(id: String) -> Result<String, String> {
+    keyvault::reveal(&id)
+}
+
+#[tauri::command]
+fn keyvault_set_note(id: String, note: String) -> Result<Vec<keyvault::VaultRow>, String> {
+    keyvault::set_note(&id, &note)
+}
+
 /// Called by the UI. Refreshes every enabled provider at the same time and
 /// returns whatever each one found — data, "not signed in", or an error.
 /// The disabled argument is accepted for compatibility but ignored:
@@ -3759,6 +3789,12 @@ pub fn run() {
             keyvault_add,
             keyvault_remove,
             keyvault_copy,
+            keyvault_status,
+            keyvault_set_password,
+            keyvault_unlock,
+            keyvault_lock,
+            keyvault_reveal,
+            keyvault_set_note,
             fetch_usage,
             refresh_provider,
             cached_usage,

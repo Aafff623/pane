@@ -187,7 +187,7 @@ fn create_empty(path: &Path) -> Result<(), String> {
     }
 }
 
-fn restrict_owner_only(path: &Path) -> Result<(), String> {
+pub(crate) fn restrict_owner_only(path: &Path) -> Result<(), String> {
     #[cfg(windows)]
     {
         let sid = current_user_sid()?;

@@ -551,6 +551,49 @@ body.settings-open #settings {
   font-size: 10.5px;
 }
 
+.kv-vault-bar-inner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 7px 8px;
+  margin-bottom: 7px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: color-mix(in oklab, var(--muted) 55%, transparent);
+}
+
+.kv-vault-state {
+  font-size: 10.5px;
+  color: var(--secondary-foreground);
+  min-width: 0;
+}
+
+.kv-vault-state.locked {
+  color: #d9a13b;
+  font-weight: 600;
+}
+
+.kv-note-text {
+  font-size: 10px;
+  color: var(--muted-foreground);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 140px;
+}
+
+.kv-masked.kv-revealed {
+  color: var(--foreground);
+  user-select: text;
+  white-space: normal;
+  word-break: break-all;
+}
+
+.kv-add-row {
+  flex-wrap: wrap;
+}
+
 .kv-hint,
 .kv-empty,
 .kv-error {

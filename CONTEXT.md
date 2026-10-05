@@ -414,6 +414,24 @@ anything unverified lives under `待确认` at the bottom.
   to the new month), Less/More legend on top; hovering shows $/tokens/tool
   count, clicking a day opens per-tool/per-model cards; Esc/backdrop closes.
   The panel is `overflow-x: hidden` — nothing inside may force a min width.
+- **Key vault encryption (2026-10-05)** — `keyvault.json` v2: per-entry
+  metadata (service/label/note/masked preview) stays plaintext so the locked
+  vault still lists its contents, while each key VALUE is sealed with
+  AES-256-GCM under a key derived from the master password via Argon2id
+  (19 MiB/2/1, OWASP floor; `argon2` + `rand_core` crates). A sealed canary
+  distinguishes wrong passwords from corruption. The derived key lives only
+  in process memory — restarting the app locks the vault. While locked,
+  `keys_for_service` returns empty and searchquota providers fall back to
+  their legacy sources (provider key files / env). Legacy v1 plaintext files
+  load unchanged until a password is set; setting one rewrites the file
+  encrypted, permanently.
+- **Updater (2026-10-05)** — signed with this project's own minisign key
+  (private key in the `TAURI_SIGNING_PRIVATE_KEY` repo secret; local backup
+  in `temp/updater-keygen.txt` — losing it kills update signing). The only
+  endpoint is this repo's GitHub Releases `latest.json`; the detached
+  upstream's trypane.xyz/ItsJazii endpoints were dropped. New versions raise
+  an in-app popup (`maybePromptUpdate`, once per version per run) beside the
+  footer update button.
 
 ## UI repair facts (2026-10-04; context-menu anchoring added in 0.4.68)
 
