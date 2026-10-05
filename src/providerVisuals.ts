@@ -14,6 +14,8 @@ import grokIcon from "./assets/providers/grok.svg?raw";
 import hermesIcon from "./assets/providers/hermes.svg?raw";
 import kimiIcon from "./assets/providers/kimi.svg?raw";
 import minimaxIcon from "./assets/providers/minimax.svg?raw";
+import mcodeIcon from "./assets/providers/mcode.svg?raw";
+import zcodeIcon from "./assets/providers/zcode.svg?raw";
 import novitaIcon from "./assets/providers/novita.svg?raw";
 import ollamaIcon from "./assets/providers/ollama.svg?raw";
 import onenewapiIcon from "./assets/providers/onenewapi.svg?raw";
@@ -56,6 +58,8 @@ const VISUALS: Readonly<Record<string, ProviderVisual>> = {
   kimi: { iconKey: "kimi", iconSvg: kimiIcon },
   linkso: { iconKey: "linkso", iconSvg: zaiIcon },
   minimax: { iconKey: "minimax", iconSvg: minimaxIcon },
+  mcode: { iconKey: "mcode", iconSvg: mcodeIcon },
+  zcode: { iconKey: "zcode", iconSvg: zcodeIcon },
   novita: { iconKey: "novita", iconSvg: novitaIcon, invertOnDarkTray: true },
   ollama: { iconKey: "ollama", iconSvg: ollamaIcon },
   onenewapi: { iconKey: "onenewapi", iconSvg: onenewapiIcon },

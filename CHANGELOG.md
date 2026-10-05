@@ -2,36 +2,36 @@
 
 ## 0.4.69 — 2026-10-05
 
-- Encrypt the API key vault with a master password: Argon2id-derived
-  AES-256-GCM seals each key value at rest while service/label/note stay
-  visible in the locked listing. Set a password once, unlock to view or copy
-  keys (View/Hide per row), lock manually or by restarting; keys now carry a
-  user-editable note.
+大面板与授权中心 / StepFun·SenseNova 登录根治 / 全机花费账本 / 发布流程规范
 
-- Enable truly working auto-updates: releases are now signed with this
-  project's own minisign key (repo secret TAURI_SIGNING_PRIVATE_KEY, pubkey
-  embedded in the app), the updater reads this repo's GitHub Releases
-  latest.json, and a new-version popup offers one-click install + restart.
-  The original upstream's update server endpoints were dropped (its builds
-  are signed with a key this app no longer trusts).
+## 新增
 
-- Switch Claude spend to cc-switch's local ledger (`~/.cc-switch/cc-switch.db`,
-  read-only) as the primary source: its proxy records real tokens even where a
-  relay zeroed the CLI logs (self-scan undercounted 7~24x). Pane's own scan now
-  only fills days cc-switch does not cover; codex/opencode/grok keep Pane's
-  scan with cc-switch backfilling missing days, all merged at day granularity
-  so nothing counts twice.
-- Add cc-switch-only spend cards: MaxCode (mcode), Gemini, Claude Desktop; pi
-  usage folds onto the Claude card. Costs still come from Pane's own pricing
-  catalog, never cc-switch's stored dollars.
-- Fix ZCode token accounting: `input` already includes cache read/write, so
-  totals are input+output (not a cache-inflated sum) and costs bill the
-  non-cached remainder. spend_history migrates v2→v3 (clears stored Claude
-  cells so the real ledger re-merges; earlier v1→v2 cleared ZCode cells).
-- Add a spend heatmap from the total-spend bar's detail icon, styled after
-  ZCode's usage board: 26 Sunday-aligned weeks of square shrink-to-fit cells
-  with month labels and a Less/More legend, hover $/token/tool counts, and a
-  per-day drill-down of per-tool/per-model cards.
+- **运行时大面板窗口**：同一 bundle 上新增 cc-switch 形态的大面板（双形态 PoC），设置中心与授权中心迁入面板左侧导航，跨窗口配置实时同步
+- **cc-switch 式设置中心 + 完整托盘菜单**：大面板内的分节设置视图；托盘菜单补齐全量入口
+- **授权中心视图**：按家族分组的账号行（头像+名称+额度列+⋯菜单），聚合 OAuth/捕获/导入的多账号管理入口
+- **StepFun Step Plan 重写**：凭据升级为三元组（`token/账号/密码`，兼容旧 `{apiKey}`）；L0-L3 授权阶梯（JWT 预检→RefreshToken 单飞轮换→密码三步登录），HTTP 429 永不上梯；解析器同时支持 5h/周窗口与 Credit 月池双形态，30 分钟死局破解
+- **SenseNova 浏览器一键授权（PKCE）**：设置内两步式授权块（S256 + state），`oauth_finish` 接受回跳 URL/令牌 JSON/裸 JWT/纯 code 四种输入；`refresh_token` 持久化+轮换链路实测跑通，3 小时过期自动续期，永不再粘
+- **Z.ai 双域名回退**：`api.z.ai`（Bearer）凭据被拒或无指标时自动落 `open.bigmodel.cn`（裸 key）；凭据错误按 HTTP 200 + `success:false` 响应体判定（实测智谱网关行为），网络错误/5xx/429 不降级
+- **每日花费热力图**：总花费条详情入口，ZCode 风格 26 周日对齐方格 + 月份标签 + Less/More 图例，悬浮显示 $/token/工具数，单日下钻按工具/模型展开
+- **ZCode / MaxCode 品牌图标**：花费列表与图例使用官方品牌图标
+- **密钥保险箱主密码加密**：Argon2id 派生 AES-256-GCM 封存每个 key（服务名/标签/备注保持明文可见）；设一次密码，解锁查看/复制（逐行显隐），手动或重启上锁；key 支持用户备注
+- **自动更新根治**：release 以本项目自有 minisign 私钥签名（公钥内嵌），更新器读本仓库 GitHub Releases `latest.json`，新版本弹窗一键安装+重启；上游更新端点弃用
+- **官网一期**：`site/` 子项目，Magpie 式零依赖静态站 + Cloudflare Worker + 测试与 CI
+
+## 变更
+
+- **Claude 花费以 cc-switch 本地账本为主源**（`~/.cc-switch/cc-switch.db` 只读）：中转清零 CLI 日志的场景按真实 token 记账（自扫描曾低估 7~24 倍）；Pane 自扫描仅补 cc-switch 未覆盖的天，按天粒度合流零重复
+- **新增 cc-switch 独有花费卡**：MaxCode（mcode）、Gemini、Claude Desktop；pi 并入 Claude 卡；成本始终走 Pane 自有价格表
+- **总花费头部精简**：删除与下方重复的「今日/本周/每月」胶囊组，⚡ 数字直接跟随「今天/昨天/7天/30天/全部」当前选择
+- **版本号移位**：从独立设置行改为设置页底部的弱化页脚
+- **总览横栏单行化**：分类 chips 与「5h/7d/月」胶囊同行（分类区窄窗内横滚），「MCP / 搜索」文案精简为「MCP 搜索」
+- **ZCode 计量修正**：`input` 已含 cache 读写，总量= input+output（不再虚增），成本按非缓存部分计费；spend_history v2→v3 迁移
+
+## 修复
+
+- **Command Code 家族状态聚合**：全部账号不可用时，主卡不再误报「需重新登录」——改为显示家族内重置时间最早的健康账号（红环+重置倒计时=待刷新）；账号彻底失效时直白话报错 `subscription inactive or expired`（不再抛形状解析错误）
+- **SenseNova 设置粘贴保存链路**：通用 `{apiKey}` 粘贴格式此前写入后 provider 读不回，已加 serde 别名兼容
+- **总览分类行窄窗截断**：chip 内边距与行距压缩，最窄窗口下「MCP 搜索」完整显示
 
 ## 0.4.68 — 2026-10-04
 - Fixed provider-card context menus so right-click actions stay anchored to the active card and account tab.

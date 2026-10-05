@@ -123,7 +123,6 @@ fn config_with_defaults(mut cfg: Value) -> Value {
     obj.entry("categoryOverrides").or_insert(json!({}));
     obj.entry("spendMetric").or_insert(json!("cost"));
     obj.entry("spendGrouping").or_insert(json!("tool"));
-    obj.entry("spendHeadRange").or_insert(json!("today"));
     obj.entry("overviewStyle").or_insert(json!("rings"));
     obj.entry("showUsed").or_insert(json!(false));
     obj.entry("resetExact").or_insert(json!(false));
@@ -189,7 +188,6 @@ const CONFIG_KEYS: &[&str] = &[
     "notifyWillRunOut",
     "spendMetric",
     "spendGrouping",
-    "spendHeadRange",
     "overviewStyle",
     "spendTab",
     "overviewTab",

@@ -4782,22 +4782,22 @@ body.no-glass #confirm-box {
   border-radius: 6px;
 }
 
-/* Switch row under the overview head: category segments left, window
-   segments right. Two switch groups never share the head row — that
-   ballooned into giant wrapped buttons on narrow windows. */
+/* Switch row under the overview head: one line — category segments left
+   (scrolling when tight), window capsules pinned right. The old wrap put
+   the capsules on their own line and left both halves of the bar blank. */
 .quota-overview .overview-switch-row {
   display: flex;
   align-items: center;
-  gap: 6px;
-  margin: 2px 10px 6px;
+  gap: 4px;
+  margin: 2px 8px 6px;
   min-width: 0;
-  max-width: calc(100% - 20px);
-  flex-wrap: wrap;
+  max-width: calc(100% - 16px);
+  flex-wrap: nowrap;
 }
 
 .quota-overview .overview-cat-tabs {
   display: inline-flex;
-  flex: 1 1 auto;
+  flex: 1 1 0;
   min-width: 0;
   max-width: 100%;
   overflow-x: auto;
@@ -4810,14 +4810,14 @@ body.no-glass #confirm-box {
 .quota-overview .overview-cat-tabs .tab {
   flex: none;
   white-space: nowrap;
-  padding: 2px 8px;
+  padding: 2px 6px;
   font-size: 10px;
   border-radius: 6px;
 }
 
 .quota-overview .overview-switch-row .overview-tabs {
   margin-left: auto;
-  flex: 0 1 auto;
+  flex: 0 0 auto;
   max-width: 100%;
   overflow-x: auto;
 }
@@ -5761,6 +5761,16 @@ body.panel-form #skin-mascot {
 .st-value {
   color: var(--muted-foreground);
   font-size: 12.5px;
+}
+
+/* Quiet version stamp at the very bottom of the panel settings. */
+.st-version-foot {
+  display: block;
+  margin: 14px 0 2px;
+  text-align: center;
+  font-size: 11px;
+  color: var(--muted-foreground);
+  opacity: 0.7;
 }
 
 /* Window-form segmented radios. */

@@ -250,7 +250,6 @@ interface Config {
   categoryOverrides: Record<string, OverviewCategory>;
   spendMetric: "cost" | "tokens" | "mtok";
   spendGrouping: "tool" | "model";
-  spendHeadRange: "today" | "week" | "month";
   showUsed: boolean;
   showTrend: boolean;
   resetExact: boolean;
@@ -291,7 +290,6 @@ const FRONTEND_CONFIG_KEYS = [
   "categoryOverrides",
   "spendMetric",
   "spendGrouping",
-  "spendHeadRange",
   "showUsed",
   "showTrend",
   "resetExact",
@@ -492,7 +490,6 @@ let config: Config = {
   categoryOverrides: {},
   spendMetric: "cost",
   spendGrouping: "tool",
-  spendHeadRange: "today",
   showUsed: false,
   showTrend: false,
   resetExact: false,
@@ -586,6 +583,20 @@ function resolveDisplayedAccount(family: string, defaultId: string, accountIds: 
   }
   if (candidates.includes(defaultId)) return defaultId;
   if (candidates.length) return candidates[0];
+  // All accounts blocked, but a sibling that is ok-and-maxed with a known
+  // upcoming reset means capacity is coming back — show the soonest one's
+  // countdown ("awaiting refresh") instead of a dead default's re-login
+  // error. Per-account resets only: @-cards scan their own metrics here,
+  // and the status gate keeps an errored bare card out of the set.
+  const recovering = accountIds
+    .filter((id) => {
+      const snap = lastSnapshots.find((s) => s.id === id);
+      return snap?.status === "ok" && isSnapshotMaxed(snap) && nearestResetSeconds(id) > 0;
+    })
+    .sort((a, b) => nearestResetSeconds(a) - nearestResetSeconds(b));
+  if (recovering.length) {
+    return manual && recovering.includes(manual) ? manual : recovering[0];
+  }
   // All accounts blocked: preserve the selected account so its reason is visible.
   return manual && accountIds.includes(manual) ? manual : accountIds.includes(defaultId) ? defaultId : accountIds[0] ?? defaultId;
 }
@@ -2759,22 +2770,6 @@ function switchSpendTab(tab: SpendTab): void {
   renderAll();
 }
 
-type SpendHeadRange = "today" | "week" | "month";
-
-/// Token total for the header chip, off the per-provider 30-day trend
-/// arrays (trend[29] = today). Windows are calendar-based: today, this
-/// week since Monday, this month since the 1st (trend depth caps the
-/// month window at 30 days — only the 31st undercounts by day one).
-function spendHeadTokens(range: SpendHeadRange): number {
-  const now = new Date();
-  const weekday = (now.getDay() + 6) % 7; // Monday = 0
-  const take = range === "today" ? 0 : range === "week" ? weekday : now.getDate() - 1;
-  const days = Math.min(take + 1, 30);
-  return lastSpend
-    .filter((s) => !isCardDisabled(s.id))
-    .reduce((sum, s) => sum + s.trend.slice(30 - days).reduce((a, b) => a + (b || 0), 0), 0);
-}
-
 function localDayKey(date: Date): string {
   const y = date.getFullYear();
   const m = String(date.getMonth() + 1).padStart(2, "0");
@@ -3007,11 +3002,17 @@ function renderTotalSpend(): string {
       </div>`;
 
   const contributors = lastSpend.map((s) => s.name).join(", ");
+  // The ⚡ stamp mirrors the selected window below (today/yesterday/7d/30d/all)
+  // — the old standalone head-range tabs duplicated that choice.
+  const headRangeKey = rangeSelected
+    ? rangeTab === "d7" ? "spend.days7" : rangeTab === "d30" ? "spend.days30" : "spend.rangeAll"
+    : spendTab === "yesterday" ? "spend.yesterday" : "spend.today";
+  const headTokens = entries.reduce((sum, e) => sum + e.w.tokens, 0);
   return `
     <article class="provider total-spend${isFolded ? " is-folded" : ""}">
       <div class="provider-head">
         <span class="provider-name">${escapeHtml(t("spend.title"))}</span>
-        <span class="spend-head-value" title="${escapeHtml(t("spend.headTokens", { range: t(`spend.hr.${config.spendHeadRange}`) }))}">${uiIcon("lightning")}${escapeHtml(fmtTokens(spendHeadTokens(config.spendHeadRange)))}</span>
+        <span class="spend-head-value" title="${escapeHtml(t("spend.headTokens", { range: t(headRangeKey) }))}">${uiIcon("lightning")}${escapeHtml(fmtTokens(headTokens))}</span>
         ${isFolded ? "" : `<span class="info" title="${escapeHtml(t("spend.info", { names: contributors }))}">${uiIcon("info")}</span>`}
         <span class="spacer"></span>
         ${isFolded ? "" : `
@@ -3022,9 +3023,6 @@ function renderTotalSpend(): string {
         <div class="spend-metric-tabs" role="group" aria-label="${escapeHtml(t("spend.metricLabel"))}">
           ${(["cost", "tokens"] as const).map((metric) => `<button class="tab spend-metric-tab${config.spendMetric === metric ? " active" : ""}" data-spend-metric="${metric}">${escapeHtml(t(METRIC_NAMES[metric]))}</button>`).join("")}
         </div>`}
-        <div class="tabs spend-head-range-tabs" role="group" aria-label="${escapeHtml(t("spend.headRangeLabel"))}">
-          ${(["today", "week", "month"] as const).map((r) => `<button class="tab spend-head-range-tab${config.spendHeadRange === r ? " active" : ""}" data-spend-head-range="${r}">${escapeHtml(t(`spend.hr.${r}`))}</button>`).join("")}
-        </div>
         <button class="mini-btn spend-detail-btn" data-spend-details title="${escapeHtml(t("spendDetail.open"))}" aria-label="${escapeHtml(t("spendDetail.open"))}">${uiIcon("rows")}</button>
         <button class="share-btn" data-share="__total__" title="${escapeHtml(t("card.share"))}">${uiIcon("shareNetwork")}</button>
         ${foldChevron}
@@ -9662,7 +9660,6 @@ async function resetAllSettings(): Promise<void> {
     categoryOverrides: {},
     spendMetric: "cost",
     spendGrouping: "tool",
-    spendHeadRange: "today",
     showUsed: false,
     showTrend: false,
     resetExact: false,
@@ -9689,9 +9686,6 @@ async function resetAllSettings(): Promise<void> {
   overviewCategory = "coding";
   if (config.spendGrouping !== "tool" && config.spendGrouping !== "model") {
     config.spendGrouping = "tool";
-  }
-  if (config.spendHeadRange !== "today" && config.spendHeadRange !== "week" && config.spendHeadRange !== "month") {
-    config.spendHeadRange = "today";
   }
   applyLocale();
   syncSettingsControls();
@@ -9983,10 +9977,9 @@ function buildPanelShell(): void {
   // --- About ---------------------------------------------------------------
   const about = panelBlock("st-about", "settings.about");
   const versionValue = document.createElement("span");
-  versionValue.className = "st-value";
   versionValue.id = "st-version";
+  versionValue.className = "st-version-foot";
   versionValue.textContent = "…";
-  about.body.append(panelRow("settings.version", versionValue));
   const checkBtn = document.createElement("button");
   checkBtn.type = "button";
   checkBtn.className = "mini-btn";
@@ -10015,6 +10008,9 @@ function buildPanelShell(): void {
   ack.dataset.i18n = "settings.ackBody";
   ack.textContent = t("settings.ackBody");
   about.body.append(ack);
+  // Version is a quiet footer in the blank area under the last rows —
+  // the user asked for it not to be a standalone setting row.
+  about.body.append(versionValue);
   settingsView.append(about.section);
 
   shell.append(nav, main);
@@ -10760,15 +10756,6 @@ window.addEventListener("DOMContentLoaded", () => {
       void patchConfig({ spendGrouping: grouping });
       renderAll();
       return;
-    }
-    const headRange = (e.target as Element).closest<HTMLElement>("[data-spend-head-range]");
-    if (headRange) {
-      const range = headRange.dataset.spendHeadRange;
-      if (range !== "today" && range !== "week" && range !== "month") return;
-      if (config.spendHeadRange === range) return;
-      config.spendHeadRange = range;
-      void patchConfig({ spendHeadRange: range });
-      renderAll();
     }
   });
   providersEl.addEventListener("contextmenu", (e) => {
