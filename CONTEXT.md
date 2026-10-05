@@ -382,6 +382,38 @@ anything unverified lives under `待确认` at the bottom.
 - `spend::source_statuses()` plus the `fetch_spend_sources` Tauri command expose
   whether each known source is detected locally, absent, or runtime-only. This
   is coverage evidence, not a claim that every tool turn is persisted.
+- **cc-switch ledger source (2026-10-05)** — `ccswitch_db_data()` in `spend.rs`
+  read-only scans `~/.cc-switch/cc-switch.db`: `proxy_request_logs` detail
+  (last 35 days, `created_at` in SECONDS) UNION `usage_daily_rollups`
+  (permanent, `date` = local-day TEXT). `input_token_semantics` CASE normalizes
+  fresh input (0=legacy incl. cache-read, 1=total incl. both caches, 2=fresh;
+  cache-inclusive apps: codex/gemini/grokbuild). Merging is day-level set
+  difference, never double-counted: claude's card switched to cc-switch as
+  primary (its proxy records real tokens where relays zero the CLI logs —
+  self-scan undercounted 7~24x; self-scan keeps only days cc-switch lacks);
+  codex/opencode/grok keep Pane's scan as primary with cc-switch filling
+  missing days; pi folds onto the claude card with both pi destinations
+  yielding cc-covered days; mcode (MaxCode), gemini and claude-desktop are
+  cc-switch-only cards (mcode is spend-only: frontend `providerCatalog.ts`
+  entry, no Rust quota provider). Costs always come from Pane's own catalog
+  (`probe_lookup`), never cc-switch's `total_cost_usd`; rollup rows price at
+  base rates (no per-request long-context claim). Model splits
+  (MiniMax/qwen→AihubMix/kimi-routed) also apply to cc-switch rows.
+  Mid-iteration read errors abort to the last good parse — a truncated day
+  set would poison the day-diffing.
+- **spend_history VERSION = 3** — v1→v2 cleared zcode cells (cache
+  double-count fix), v2→v3 clears only bare `claude` cells (cc-switch source
+  switch). Extra `claude@<fnv1a>` account cards keep their history: cc-switch
+  covers only the default `~/.claude/projects`, so their self-scan accounting
+  is unchanged and clearing would erase unreplacable data.
+- **Spend heatmap (2026-10-05)** — the total-spend bar's detail icon opens a
+  26-week Sunday-aligned heatmap from `spend_history` (`fetch_spend_daily`
+  → `daily_spend`), styled after ZCode's usage board: square shrink-to-fit
+  cells (`repeat(26, minmax(0,1fr))` + `aspect-ratio: 1`, no horizontal
+  scroll), month labels under the grid (a column containing the 1st belongs
+  to the new month), Less/More legend on top; hovering shows $/tokens/tool
+  count, clicking a day opens per-tool/per-model cards; Esc/backdrop closes.
+  The panel is `overflow-x: hidden` — nothing inside may force a min width.
 
 ## UI repair facts (2026-10-04; context-menu anchoring added in 0.4.68)
 

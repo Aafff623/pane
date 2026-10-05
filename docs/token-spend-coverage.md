@@ -15,6 +15,7 @@
 
 | 形态 | 当前入口 | 计量方式 | 归并/限制 |
 | --- | --- | --- | --- |
+| cc-switch 聚合 ledger | `~/.cc-switch/cc-switch.db`（只读） | `proxy_request_logs` 明细（近 35 天，`created_at` 为秒）∪ `usage_daily_rollups`（永久，本地日 TEXT）；`input_token_semantics` CASE 归一 fresh input | claude 主源（自扫只补 cc 没有的日）；codex/opencode/grok 补缺日；mcode/gemini/claude-desktop 纯 cc 来源；成本走 Pane 自己的价目表，不采信 `total_cost_usd` |
 | Claude Code CLI | `~/.claude/projects/**/*.jsonl` | assistant `message.usage`，优先 `costUSD` | MiniMax、Qwen、Kimi 路由按模型拆出 |
 | Codex CLI / rollout | `~/.codex/sessions`、`archived_sessions` | `token_count`，累计值转单次增量 | 子 agent/fork 回放去重 |
 | ZCode CLI/Desktop | `~/.zcode/cli/db/db.sqlite` + rollout JSONL | SQLite `model_usage` 为主，旧日志补历史 | DB 覆盖日不再叠加 JSONL |

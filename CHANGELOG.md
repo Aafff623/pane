@@ -1,5 +1,25 @@
 # Changelog
 
+## Unreleased — 2026-10-05
+
+- Switch Claude spend to cc-switch's local ledger (`~/.cc-switch/cc-switch.db`,
+  read-only) as the primary source: its proxy records real tokens even where a
+  relay zeroed the CLI logs (self-scan undercounted 7~24x). Pane's own scan now
+  only fills days cc-switch does not cover; codex/opencode/grok keep Pane's
+  scan with cc-switch backfilling missing days, all merged at day granularity
+  so nothing counts twice.
+- Add cc-switch-only spend cards: MaxCode (mcode), Gemini, Claude Desktop; pi
+  usage folds onto the Claude card. Costs still come from Pane's own pricing
+  catalog, never cc-switch's stored dollars.
+- Fix ZCode token accounting: `input` already includes cache read/write, so
+  totals are input+output (not a cache-inflated sum) and costs bill the
+  non-cached remainder. spend_history migrates v2→v3 (clears stored Claude
+  cells so the real ledger re-merges; earlier v1→v2 cleared ZCode cells).
+- Add a spend heatmap from the total-spend bar's detail icon, styled after
+  ZCode's usage board: 26 Sunday-aligned weeks of square shrink-to-fit cells
+  with month labels and a Less/More legend, hover $/token/tool counts, and a
+  per-day drill-down of per-tool/per-model cards.
+
 ## 0.4.68 — 2026-10-04
 - Fixed provider-card context menus so right-click actions stay anchored to the active card and account tab.
 
