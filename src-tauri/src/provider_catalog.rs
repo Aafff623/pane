@@ -479,6 +479,8 @@ mod tests {
             "novita",
             "relaybalance",
             "linkso",
+            "commandcode",
+            "clinepass",
         ];
         let actual: Vec<&str> = provider_definitions()
             .iter()
@@ -523,6 +525,10 @@ mod tests {
             "novita",
             "relaybalance",
             "linkso",
+            "commandcode",
+            "clawsgo",
+            "clinepass",
+            "apigoto",
         ];
         let actual: Vec<&str> = provider_definitions()
             .iter()

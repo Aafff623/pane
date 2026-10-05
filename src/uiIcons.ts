@@ -12,8 +12,9 @@ import microphone from "./assets/icons/microphone-bold.svg?raw";
 import circleNotch from "./assets/icons/circle-notch-bold.svg?raw";
 import rows from "./assets/icons/rows-bold.svg?raw";
 import palette from "./assets/icons/palette-bold.svg?raw";
+import key from "./assets/icons/key-bold.svg?raw";
 
-const ICONS = { gear, arrowsClockwise, shareNetwork, star, info, question, x, caretUp, caretDown, lightning, microphone, circleNotch, rows, palette } as const;
+const ICONS = { gear, arrowsClockwise, shareNetwork, star, info, question, x, caretUp, caretDown, lightning, microphone, circleNotch, rows, palette, key } as const;
 
 export type UiIconName = keyof typeof ICONS;
 

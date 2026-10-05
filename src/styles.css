@@ -5793,3 +5793,188 @@ body.panel-form #skin-mascot {
   margin: 0;
   accent-color: var(--primary);
 }
+
+/* ---------------------------------------------------------------------------
+   Auth center (panel window, M3) — family group cards of account rows,
+   layout borrowed from cc-switch's ManagedAccountsGroup: avatar + name +
+   second line left, quota column right, row menu at the edge.
+   --------------------------------------------------------------------------- */
+
+.auth-group-icon {
+  width: 24px;
+  height: 24px;
+  display: grid;
+  place-items: center;
+  color: var(--foreground);
+}
+
+.auth-group-icon svg {
+  width: 20px;
+  height: 20px;
+}
+
+.auth-group-head .mini-btn {
+  margin-left: auto;
+}
+
+.auth-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 10px 8px 16px;
+  min-height: 56px;
+}
+
+.auth-avatar {
+  flex: none;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--border);
+  background: var(--accent);
+  color: var(--muted-foreground);
+  font-size: 12.5px;
+  font-weight: 600;
+  text-transform: uppercase;
+  user-select: none;
+}
+
+.auth-id {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.auth-name-line {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.auth-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13.5px;
+  font-weight: 500;
+  color: var(--foreground);
+}
+
+.auth-pill {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  height: 18px;
+  padding: 0 6px;
+  border-radius: 999px;
+  font-size: 11px;
+  border: 1px solid var(--border);
+  color: var(--secondary-foreground);
+}
+
+.auth-pill.reauth {
+  border: none;
+  background: color-mix(in srgb, var(--destructive, #dc2626) 14%, transparent);
+  color: var(--destructive, #dc2626);
+}
+
+.auth-sub {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  color: var(--muted-foreground);
+}
+
+.auth-sub.reauth {
+  color: var(--destructive, #dc2626);
+}
+
+.auth-quota {
+  flex: none;
+  max-width: 180px;
+  text-align: right;
+  font-size: 12.5px;
+  color: var(--secondary-foreground);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.auth-quota.dim {
+  color: var(--muted-foreground);
+}
+
+.auth-empty {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 16px;
+  font-size: 12.5px;
+  color: var(--muted-foreground);
+}
+
+.auth-empty .mini-btn {
+  margin-left: auto;
+}
+
+.auth-flow {
+  margin: 0 12px 12px;
+  padding: 10px 14px;
+  border-radius: 8px;
+  background: var(--accent);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  font-size: 12.5px;
+  color: var(--secondary-foreground);
+}
+
+.auth-flow-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 500;
+  color: var(--foreground);
+}
+
+.auth-flow-head .mini-btn {
+  margin-left: auto;
+}
+
+.auth-flow-code {
+  display: inline-flex;
+  align-items: center;
+  height: 26px;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--card);
+  font-family: monospace;
+  font-size: 13px;
+  letter-spacing: 1px;
+  color: var(--foreground);
+}
+
+.auth-flow-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.auth-flow.err {
+  color: var(--destructive, #dc2626);
+}
+
+.auth-note {
+  font-size: 12px;
+  color: var(--muted-foreground);
+}

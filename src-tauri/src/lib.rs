@@ -1,5 +1,6 @@
 mod accounts;
 mod antigravity_accounts;
+mod auth_center;
 mod cursor_accounts;
 mod cursor_oauth;
 mod fonts;
@@ -290,6 +291,11 @@ fn set_config_inner(patch: Value) -> Result<Value, String> {
 fn set_config(app: tauri::AppHandle, patch: Value) -> Result<Value, String> {
     let cfg = set_config_inner(patch)?;
     apply_tray_locale(&app, &cfg);
+    // Cross-window sync (dual-form M3): the other window's in-memory config
+    // is stale the moment this write lands — tell every window to reload.
+    // Empty payload: receivers pull get_config themselves and skip the event
+    // when their own write just went out, so no echo loop.
+    let _ = app.emit("config-updated", ());
     Ok(cfg)
 }
 
@@ -3176,6 +3182,15 @@ fn account_list(provider: String) -> Result<Vec<Value>, String> {
         .collect())
 }
 
+/// The panel window's auth center (M3): every auth family with its account
+/// rows — antigravity slots, cursor accounts, and the single OAuth login of
+/// codex/copilot/grok. Read-only assembly over the existing stores; quota
+/// and needs-reauth state come from the snapshot cache on the frontend.
+#[tauri::command]
+fn auth_center_list() -> Vec<auth_center::AuthFamilyGroup> {
+    auth_center::collect()
+}
+
 /// Known env-var fallbacks per provider, for get_credential_status. The
 /// saved-file probe is providers::stored_key_file; local-CLI detection is
 /// each provider's own local_credential_hint (dispatched just below).
@@ -3796,12 +3811,14 @@ fn get_window_form() -> String {
 /// other window commands: config writes take the CONFIG_WRITE mutex, which
 /// must never be held on the main thread across window work.
 #[tauri::command]
-async fn set_window_form(form: String) -> Result<(), String> {
+async fn set_window_form(app: tauri::AppHandle, form: String) -> Result<(), String> {
     let form = match form.as_str() {
         "panel" => "panel",
         _ => "floating",
     };
     set_config_inner(json!({ "windowForm": form }))?;
+    // Same cross-window note as set_config: windowForm is a frontend key.
+    let _ = app.emit("config-updated", ());
     Ok(())
 }
 
@@ -4008,6 +4025,7 @@ pub fn run() {
             account_rename,
             account_set_default,
             account_list,
+            auth_center_list,
             get_credential_status,
             oauth_start,
             oauth_poll,

@@ -32,3 +32,21 @@ pub mod usage_history;
 
 #[path = "../../src-tauri/src/spend_history.rs"]
 pub mod spend_history;
+
+#[path = "../../src-tauri/src/provider_catalog.rs"]
+pub mod provider_catalog;
+
+#[path = "../../src-tauri/src/accounts.rs"]
+pub mod accounts;
+
+#[path = "../../src-tauri/src/antigravity_accounts.rs"]
+pub mod antigravity_accounts;
+
+#[path = "../../src-tauri/src/cursor_oauth.rs"]
+pub mod cursor_oauth;
+
+#[path = "../../src-tauri/src/cursor_accounts.rs"]
+pub mod cursor_accounts;
+
+#[path = "../../src-tauri/src/auth_center.rs"]
+pub mod auth_center;

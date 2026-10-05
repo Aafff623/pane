@@ -765,6 +765,14 @@ function fmtExact(ts: number): string {
 let configSaveQueue: Promise<void> = Promise.resolve();
 let configSaveError: string | null = null;
 
+// Cross-window sync (dual-form M3): set_config broadcasts "config-updated"
+// after every persisted write. A window must reload on OTHER windows'
+// writes but not re-load its own echo — and its queued writes must win over
+// a reload landing mid-flight. Track in-flight writes + the last send time;
+// the listener skips events that are plausibly our own.
+let configWritesInFlight = 0;
+let lastLocalConfigWriteAt = 0;
+
 function snapshotConfig(): Config {
   const payload = {} as Record<string, unknown>;
   for (const key of FRONTEND_CONFIG_KEYS) {
@@ -792,9 +800,16 @@ async function patchConfig(patch: Partial<Config>): Promise<void> {
   // the next save retries that still-live in-memory state as well.
   const payload = snapshotConfig();
   const save = configSaveQueue.then(async () => {
-    const echoed = await invoke<Config>("set_config", { patch: payload });
-    applyConfigEcho(payload, echoed);
-    configSaveError = null;
+    configWritesInFlight += 1;
+    lastLocalConfigWriteAt = Date.now();
+    try {
+      const echoed = await invoke<Config>("set_config", { patch: payload });
+      applyConfigEcho(payload, echoed);
+      configSaveError = null;
+    } finally {
+      configWritesInFlight -= 1;
+      lastLocalConfigWriteAt = Date.now();
+    }
   });
   configSaveQueue = save.catch(() => {});
   try {
@@ -805,6 +820,34 @@ async function patchConfig(patch: Partial<Config>): Promise<void> {
     if (status) status.textContent = t("footer.configSaveFailed", { err: configSaveError });
     throw err;
   }
+}
+
+/// Another window persisted a config write (the backend broadcasts
+/// "config-updated" after every successful set_config): pull the canonical
+/// file and re-apply everything the boot/reset paths apply. Without this
+/// the other window keeps its stale in-memory config and its next
+/// patchConfig would write the old values back over this write.
+async function reloadConfigFromBackend(): Promise<void> {
+  // Our own write's echo, or a write still queued/in flight here: the local
+  // snapshot is newer (or about to be), so the event is not news.
+  if (configWritesInFlight > 0 || Date.now() - lastLocalConfigWriteAt < 800) return;
+  let fresh: Config;
+  try {
+    fresh = await invoke<Config>("get_config");
+  } catch {
+    return;
+  }
+  // A local write that started while get_config was in flight wins.
+  if (configWritesInFlight > 0) return;
+  fresh.localShortcuts = fresh.localShortcuts ?? {};
+  config = fresh;
+  pruneEmptyCardGroups();
+  applyLocale();
+  syncSettingsControls();
+  if (!IS_PANEL_FORM) scheduleAutoRefresh();
+  applyAppearance();
+  applyGlass();
+  applyReduceMotion();
 }
 
 // ---------------------------------------------------------------------------
@@ -9229,6 +9272,9 @@ function applyLocale(): void {
     }
   }
   if (lastSnapshots.length) renderIfVisible();
+  // Auth-center rows paint with t() at render time — re-render so a locale
+  // switch retranslates them (static [data-i18n] is already handled above).
+  if (IS_PANEL_FORM && authViewActive) renderAuthCenter();
   populatePinnedOptions();
   renderBuildInfo();
 }
@@ -9710,8 +9756,8 @@ function buildPanelShell(): void {
   const shell = document.createElement("div");
   shell.id = "panel-shell";
 
-  // Left icon nav — M2 ships the settings view only; M3 adds
-  // Dashboard / Auth-center entries here.
+  // Left icon nav — settings + auth center (M3); a Dashboard entry can
+  // join here later.
   const nav = document.createElement("nav");
   nav.id = "panel-nav";
   const logo = document.createElement("span");
@@ -9723,8 +9769,18 @@ function buildPanelShell(): void {
   settingsItem.className = "panel-nav-item active";
   settingsItem.title = t("settings.title");
   settingsItem.dataset.i18nTitle = "settings.title";
+  settingsItem.dataset.panelView = "settings";
   settingsItem.innerHTML = uiIcon("gear", t("settings.title"));
-  nav.append(logo, settingsItem);
+  const authItem = document.createElement("button");
+  authItem.type = "button";
+  authItem.className = "panel-nav-item";
+  authItem.title = t("auth.title");
+  authItem.dataset.i18nTitle = "auth.title";
+  authItem.dataset.panelView = "auth";
+  authItem.innerHTML = uiIcon("key", t("auth.title"));
+  settingsItem.addEventListener("click", () => setPanelView("settings"));
+  authItem.addEventListener("click", () => setPanelView("auth"));
+  nav.append(logo, settingsItem, authItem);
 
   const main = document.createElement("div");
   main.id = "panel-main";
@@ -9737,6 +9793,18 @@ function buildPanelShell(): void {
   const scroll = document.createElement("div");
   scroll.id = "panel-scroll";
   main.append(head, scroll);
+
+  // Two switchable views share the scroll area (M3): settings and the auth
+  // center. setPanelView toggles them and retitles the header.
+  const settingsView = document.createElement("div");
+  settingsView.id = "panel-view-settings";
+  const authView = document.createElement("div");
+  authView.id = "panel-view-auth";
+  authView.hidden = true;
+  authView.addEventListener("click", (e) => {
+    void handleAuthCenterClick(e.target as HTMLElement);
+  });
+  scroll.append(settingsView, authView);
 
   // --- General: re-parented popover rows + the new dual-form controls ----
   const general = panelBlock("st-general", "settings.general");
@@ -9808,7 +9876,7 @@ function buildPanelShell(): void {
     else void invoke("close_panel_window").catch(() => {});
   });
   generalCard.append(panelRow("settings.windowForm", formGroup));
-  scroll.append(general.section);
+  settingsView.append(general.section);
 
   // --- API key vault: the popover's vault UI, moved in whole -------------
   const keyvault = panelBlock("st-keyvault", "settings.keyvault");
@@ -9819,7 +9887,7 @@ function buildPanelShell(): void {
     if (el) kvPad.append(el);
   }
   keyvault.body.append(kvPad);
-  scroll.append(keyvault.section);
+  settingsView.append(keyvault.section);
 
   // --- Shortcuts: wake + category + local bindings, moved in whole -------
   const shortcuts = panelBlock("st-shortcuts", "settings.shortcutManage");
@@ -9830,7 +9898,7 @@ function buildPanelShell(): void {
     while (shortcutInner.firstChild) scPad.append(shortcutInner.firstChild as HTMLElement);
   }
   shortcuts.body.append(scPad);
-  scroll.append(shortcuts.section);
+  settingsView.append(shortcuts.section);
 
   // --- About ---------------------------------------------------------------
   const about = panelBlock("st-about", "settings.about");
@@ -9867,7 +9935,7 @@ function buildPanelShell(): void {
   ack.dataset.i18n = "settings.ackBody";
   ack.textContent = t("settings.ackBody");
   about.body.append(ack);
-  scroll.append(about.section);
+  settingsView.append(about.section);
 
   shell.append(nav, main);
   document.body.appendChild(shell);
@@ -9882,6 +9950,465 @@ function initPanelForm(): void {
     const el = document.querySelector("#st-version");
     if (el) el.textContent = `v${v} · build ${__BUILD_STAMP__}`;
   });
+}
+
+// ---------------------------------------------------------------------------
+// Auth center (panel window, M3 — cc-switch borrow)
+// ---------------------------------------------------------------------------
+// The second panel view: account rows grouped by family (antigravity /
+// codex / copilot / cursor / grok-as-xAI), laid out like cc-switch's
+// ManagedAccountsGroup — avatar + name + second line on the left, a quota
+// column on the right, a ⋯ menu at the edge. All data comes from existing
+// chains: auth_center_list shapes the stores the accounts modules already
+// own, the quota column reads the same snapshot cache the dashboard cards
+// use, and add/remove/relogin ride the existing OAuth / capture / import /
+// account_remove commands — no new credential logic lives here.
+
+/// One auth_center_list row.
+interface AuthAccountRow {
+  id: string;
+  label: string;
+  email?: string;
+  maskedKey: string;
+  capturedAt?: number;
+  kind: "slot" | "account" | "oauth";
+}
+
+interface AuthFamilyGroup {
+  family: string;
+  accounts: AuthAccountRow[];
+}
+
+let authGroups: AuthFamilyGroup[] | null = null;
+let authViewActive = false;
+
+/// A device-code login between "Add account" and completion/cancel,
+/// rendered as the four-state block inside the family card (starting →
+/// polling → success | error), mirroring GroupLoginFlow's shape.
+interface AuthFlow {
+  phase: "starting" | "polling" | "success" | "error";
+  deviceAuthId: string;
+  userCode: string;
+  error: string | null;
+  label: string | null;
+  timer?: number;
+}
+const authFlows = new Map<string, AuthFlow>();
+
+function stopAuthFlow(family: string): void {
+  const flow = authFlows.get(family);
+  if (flow?.timer !== undefined) window.clearInterval(flow.timer);
+}
+
+function authFlowBusy(): boolean {
+  for (const flow of authFlows.values()) {
+    if (flow.phase === "starting" || flow.phase === "polling") return true;
+  }
+  return false;
+}
+
+function setPanelView(view: "settings" | "auth"): void {
+  authViewActive = view === "auth";
+  document.querySelectorAll<HTMLElement>("#panel-nav .panel-nav-item").forEach((el) => {
+    el.classList.toggle("active", el.dataset.panelView === view);
+  });
+  const h1 = document.querySelector<HTMLElement>("#panel-head h1");
+  if (h1) {
+    h1.dataset.i18n = view === "auth" ? "auth.title" : "settings.title";
+    h1.textContent = t(h1.dataset.i18n);
+  }
+  const settingsView = document.querySelector<HTMLElement>("#panel-view-settings");
+  const authView = document.querySelector<HTMLElement>("#panel-view-auth");
+  if (settingsView) settingsView.hidden = view !== "settings";
+  if (authView) authView.hidden = view !== "auth";
+  if (view === "auth") void loadAuthCenter();
+}
+
+async function loadAuthCenter(): Promise<void> {
+  const container = document.querySelector<HTMLElement>("#panel-view-auth");
+  if (!container) return;
+  if (!authGroups) {
+    container.innerHTML = `<div class="auth-empty">${escapeHtml(t("auth.loading"))}</div>`;
+  }
+  try {
+    authGroups = await invoke<AuthFamilyGroup[]>("auth_center_list");
+  } catch (err) {
+    container.innerHTML = `<div class="auth-empty"><span>${escapeHtml(t("auth.loadFailed", { err: String(err) }))}</span><button class="mini-btn" type="button" data-auth-retry>${escapeHtml(t("auth.retry"))}</button></div>`;
+    return;
+  }
+  // The panel skips the boot fetch, so the first visit can precede the
+  // backend loop's first broadcast — seed the quota column from the
+  // persisted snapshot cache, exactly like the popover's first paint.
+  if (!lastSnapshots.length) {
+    try {
+      const cached = await invoke<Snapshot[]>("cached_usage");
+      if (cached.length && !lastSnapshots.length) lastSnapshots = cached;
+    } catch {
+      // No cache: the quota column shows its dash until the first tick.
+    }
+  }
+  renderAuthCenter();
+}
+
+function renderAuthCenter(): void {
+  const container = document.querySelector<HTMLElement>("#panel-view-auth");
+  if (!container || !authGroups) return;
+  container.innerHTML = authGroups.map(authGroupHtml).join("");
+}
+
+function authRowName(family: string, acct: AuthAccountRow): string {
+  return (
+    acct.label.trim() ||
+    acct.email ||
+    acct.id.split("@")[1]?.slice(0, 8) ||
+    providerDisplayName(family)
+  );
+}
+
+/// The snapshot behind a row: the account's own card id, which for OAuth
+/// single-login families IS the bare family id.
+function authRowSnapshot(acct: AuthAccountRow): Snapshot | undefined {
+  return lastSnapshots.find((s) => s.id === acct.id);
+}
+
+/// Same sign-in-failure classification the ⚠ Outdated tooltip uses.
+function authNeedsReauth(snap: Snapshot | undefined): string | null {
+  const err = (snap?.error ?? snap?.warning ?? "").trim();
+  if (!err) return null;
+  return /http 40[13]|invalid_grant|expired|no refresh token|sign[- ]?in|log ?in|credentials/i.test(err)
+    ? err
+    : null;
+}
+
+function authQuotaHtml(snap: Snapshot | undefined, reauth: string | null): string {
+  if (reauth || !snap || snap.status !== "ok") {
+    return `<span class="auth-quota dim">—</span>`;
+  }
+  const bar = snap.metrics.find((m) => m.kind === "progress" && m.used_percent !== null);
+  if (bar) {
+    return `<span class="auth-quota" title="${escapeHtml(bar.detail ?? "")}">${escapeHtml(displayMetricLabel(bar.label))} ${Math.round(bar.used_percent!)}%</span>`;
+  }
+  const text = snap.metrics.find((m) => m.value);
+  if (text) {
+    return `<span class="auth-quota">${escapeHtml(displayMetricLabel(text.label))} ${escapeHtml(text.value!)}</span>`;
+  }
+  return `<span class="auth-quota dim">—</span>`;
+}
+
+function authRowHtml(family: string, acct: AuthAccountRow, index: number): string {
+  const snap = authRowSnapshot(acct);
+  const reauth = authNeedsReauth(snap);
+  const name = authRowName(family, acct);
+  let sub: string;
+  if (reauth) {
+    // cc-switch swaps the second line for the reauth reason.
+    sub = `<div class="auth-sub reauth" title="${escapeHtml(reauth)}">${escapeHtml(reauth)}</div>`;
+  } else {
+    const details: string[] = [];
+    if (acct.capturedAt) {
+      const date = new Date(acct.capturedAt * 1000).toLocaleDateString(localeTag(), {
+        year: "numeric",
+        month: "short",
+        day: "numeric",
+      });
+      details.push(t("auth.captured", { date }));
+    }
+    details.push(acct.maskedKey);
+    details.push(snap ? t("auth.monitoring") : t("auth.noCard"));
+    sub = `<div class="auth-sub">${escapeHtml(details.join(" · "))}</div>`;
+  }
+  return `<div class="auth-row" data-auth-row="${escapeHtml(acct.id)}">
+    <span class="auth-avatar" aria-hidden="true">${escapeHtml(name.charAt(0) || "?")}</span>
+    <div class="auth-id">
+      <div class="auth-name-line">
+        <span class="auth-name" title="${escapeHtml(name)}">${escapeHtml(name)}</span>
+        ${reauth ? `<span class="auth-pill reauth">${escapeHtml(t("auth.needsReauth"))}</span>` : ""}
+      </div>
+      ${sub}
+    </div>
+    ${authQuotaHtml(snap, reauth)}
+    <button class="mini-btn" type="button" data-auth-menu="${escapeHtml(family)}|${index}" title="${escapeHtml(t("auth.more"))}" aria-label="${escapeHtml(t("auth.more"))}">⋯</button>
+  </div>`;
+}
+
+function authFlowHtml(family: string): string {
+  const flow = authFlows.get(family);
+  if (!flow) return "";
+  if (flow.phase === "error") {
+    return `<div class="auth-flow err" role="status">
+      <div class="auth-flow-head"><span>${escapeHtml(t("auth.flow.failed", { err: flow.error ?? "" }))}</span>
+        <button class="mini-btn" type="button" data-auth-flow-retry="${escapeHtml(family)}">${escapeHtml(t("auth.retry"))}</button>
+        <button class="mini-btn" type="button" data-auth-flow-close="${escapeHtml(family)}">${escapeHtml(t("auth.flow.close"))}</button></div>
+    </div>`;
+  }
+  if (flow.phase === "success") {
+    return `<div class="auth-flow" role="status">
+      <div class="auth-flow-head"><span>${escapeHtml(t("auth.flow.success", { label: flow.label ?? "" }))}</span></div>
+    </div>`;
+  }
+  const codeRow = flow.userCode
+    ? `<div class="auth-flow-row"><span>${escapeHtml(t("auth.flow.enterCode"))}</span>
+        <code class="auth-flow-code">${escapeHtml(flow.userCode)}</code>
+        <button class="mini-btn" type="button" data-auth-flow-copy="${escapeHtml(family)}">${escapeHtml(t("auth.flow.copy"))}</button></div>
+       <div class="auth-note">${escapeHtml(t("auth.flow.waiting"))}</div>`
+    : "";
+  return `<div class="auth-flow" role="status">
+    <div class="auth-flow-head"><span>${escapeHtml(t("auth.flow.starting"))}</span>
+      <button class="mini-btn" type="button" data-auth-flow-cancel="${escapeHtml(family)}">${escapeHtml(t("auth.flow.cancel"))}</button></div>
+    ${codeRow}
+  </div>`;
+}
+
+function authGroupHtml(group: AuthFamilyGroup): string {
+  const family = group.family;
+  const name = providerDisplayName(family);
+  const icon = providerVisual(family)?.iconSvg ?? "";
+  // oauth.rs keeps ONE device-code login per provider — codex/copilot/grok
+  // can only ever hold a single row, so their "add" is the empty-state
+  // login button and re-login lives in the row's ⋯ menu.
+  const singleLogin = OAUTH_PROVIDERS.has(family);
+  const rows = group.accounts.map((acct, i) => authRowHtml(family, acct, i)).join("");
+  const empty =
+    group.accounts.length === 0
+      ? `<div class="auth-empty"><span>${escapeHtml(singleLogin ? t("auth.emptyOauth") : t("auth.empty"))}</span>
+        <button class="mini-btn" type="button" data-auth-add="${escapeHtml(family)}">${escapeHtml(singleLogin ? t("auth.login") : t("auth.addAccount"))}</button></div>`
+      : "";
+  const addBtn =
+    !singleLogin && group.accounts.length > 0
+      ? `<button class="mini-btn" type="button" data-auth-add="${escapeHtml(family)}">${escapeHtml(t("auth.addAccount"))}</button>`
+      : "";
+  return `<section class="st-block" data-auth-group="${escapeHtml(family)}">
+    <div class="st-block-head auth-group-head">
+      <span class="auth-group-icon" aria-hidden="true">${icon}</span>
+      <h2>${escapeHtml(name)}</h2>
+      ${addBtn}
+    </div>
+    <div class="st-card">${rows}${empty}${authFlowHtml(family)}</div>
+  </section>`;
+}
+
+function handleAuthCenterClick(target: HTMLElement): void {
+  if (target.closest("[data-auth-retry]")) {
+    authGroups = null;
+    void loadAuthCenter();
+    return;
+  }
+  const add = target.closest<HTMLElement>("[data-auth-add]");
+  if (add) {
+    authAddAccount(add.dataset.authAdd!);
+    return;
+  }
+  const menu = target.closest<HTMLElement>("[data-auth-menu]");
+  if (menu) {
+    const [family, index] = menu.dataset.authMenu!.split("|");
+    openAuthRowMenu(family, Number(index), menu);
+    return;
+  }
+  const cancel = target.closest<HTMLElement>("[data-auth-flow-cancel]");
+  if (cancel) {
+    const family = cancel.dataset.authFlowCancel!;
+    stopAuthFlow(family);
+    authFlows.delete(family);
+    renderAuthCenter();
+    return;
+  }
+  const retry = target.closest<HTMLElement>("[data-auth-flow-retry]");
+  if (retry) {
+    void startAuthOauthFlow(retry.dataset.authFlowRetry!);
+    return;
+  }
+  const close = target.closest<HTMLElement>("[data-auth-flow-close]");
+  if (close) {
+    authFlows.delete(close.dataset.authFlowClose!);
+    renderAuthCenter();
+    return;
+  }
+  const copy = target.closest<HTMLElement>("[data-auth-flow-copy]");
+  if (copy) {
+    const code = authFlows.get(copy.dataset.authFlowCopy!)?.userCode;
+    if (code) {
+      void navigator.clipboard.writeText(code).then(() => {
+        copy.textContent = t("auth.flow.copied");
+      });
+    }
+  }
+}
+
+/// "Add account" per family, riding the existing login chains — nothing
+/// here re-implements an OAuth flow.
+function authAddAccount(family: string): void {
+  if (authFlowBusy()) return;
+  if (family === "antigravity") {
+    void doAntigravityCapture(family).then(() => loadAuthCenter());
+    return;
+  }
+  if (family === "cursor") {
+    // The existing three-tab dialog (OAuth / token / JSON); its success
+    // path forces a usage refresh, whose broadcast reloads this view.
+    openCursorAccountDialog();
+    return;
+  }
+  if (OAUTH_PROVIDERS.has(family)) {
+    void startAuthOauthFlow(family);
+  }
+}
+
+/// Device-code login against the existing oauth_start/oauth_poll commands.
+async function startAuthOauthFlow(family: string): Promise<void> {
+  stopAuthFlow(family);
+  authFlows.set(family, { phase: "starting", deviceAuthId: "", userCode: "", error: null, label: null });
+  renderAuthCenter();
+  let started: { device_auth_id: string; user_code: string; verify_url: string };
+  try {
+    started = await invoke("oauth_start", { provider: family });
+  } catch (err) {
+    authFlows.set(family, { phase: "error", deviceAuthId: "", userCode: "", error: String(err), label: null });
+    renderAuthCenter();
+    return;
+  }
+  void invoke("open_link", { url: started.verify_url }).catch(() => {});
+  const flow: AuthFlow = {
+    phase: "polling",
+    deviceAuthId: started.device_auth_id,
+    userCode: started.user_code,
+    error: null,
+    label: null,
+  };
+  authFlows.set(family, flow);
+  renderAuthCenter();
+  flow.timer = window.setInterval(() => void pollAuthOauth(family), 3000);
+  void pollAuthOauth(family);
+}
+
+/// One poll tick; the backend paces itself against the server-asked
+/// interval, so a fixed 3 s timer here is safe (same as the drawer's).
+async function pollAuthOauth(family: string): Promise<void> {
+  const flow = authFlows.get(family);
+  if (!flow || flow.phase !== "polling" || !flow.deviceAuthId) return;
+  let r: { done: boolean; label: string | null; error: string | null };
+  try {
+    r = await invoke("oauth_poll", { provider: family, deviceAuthId: flow.deviceAuthId });
+  } catch (err) {
+    stopAuthFlow(family);
+    flow.phase = "error";
+    flow.error = String(err);
+    renderAuthCenter();
+    return;
+  }
+  if (!r.done && !r.error) return; // still waiting for the user
+  stopAuthFlow(family);
+  if (r.error) {
+    flow.phase = "error";
+    flow.error = r.error;
+    renderAuthCenter();
+    return;
+  }
+  flow.phase = "success";
+  flow.label = r.label;
+  renderAuthCenter();
+  credStatusCache.delete(family);
+  // Brief success beat, then the fresh account row replaces the block.
+  window.setTimeout(() => {
+    if (authFlows.get(family) === flow) authFlows.delete(family);
+    void loadAuthCenter();
+  }, 1600);
+  void forceUsageRefreshAttempt(false).then(requestTraySync);
+}
+
+/// The row's ⋯ menu, styled on the dashboard's group menu: re-login for
+/// single-login OAuth families, remove/sign-out for every row. Copy-token
+/// is deliberately absent — account keys never leave the backend (only the
+/// masked form does), so there is no existing copy chain to ride. Parallel
+/// families (antigravity/cursor) have no default concept and OAuth families
+/// are single-login, so "set default" has no semantics to call either.
+function openAuthRowMenu(family: string, index: number, anchor: HTMLElement): void {
+  document.querySelector(".group-menu-overlay")?.remove();
+  const acct = authGroups?.find((g) => g.family === family)?.accounts[index];
+  if (!acct) return;
+  const singleLogin = OAUTH_PROVIDERS.has(family);
+  const name = authRowName(family, acct);
+  const overlay = document.createElement("div");
+  overlay.className = "group-menu-overlay";
+  overlay.innerHTML = `<div class="group-menu" role="menu">
+    <div class="group-menu-title">${escapeHtml(name)}</div>
+    ${singleLogin ? `<button class="group-menu-item" type="button" data-auth-menu-relogin="${escapeHtml(family)}"><span class="group-menu-check">↻</span>${escapeHtml(t("auth.relogin"))}</button>` : ""}
+    <button class="group-menu-item danger" type="button" data-auth-menu-remove="${escapeHtml(family)}|${index}"><span class="group-menu-check">×</span>${escapeHtml(singleLogin ? t("auth.logout") : t("auth.remove"))}</button>
+  </div>`;
+  const close = () => {
+    overlay.remove();
+    document.removeEventListener("keydown", onKey, true);
+  };
+  const onKey = (e: KeyboardEvent) => {
+    if (e.key === "Escape") {
+      e.stopPropagation();
+      close();
+    }
+  };
+  overlay.addEventListener("click", (e) => {
+    if (e.target === overlay) {
+      close();
+      return;
+    }
+    const relogin = (e.target as HTMLElement).closest<HTMLElement>("[data-auth-menu-relogin]");
+    if (relogin) {
+      close();
+      void startAuthOauthFlow(relogin.dataset.authMenuRelogin!);
+      return;
+    }
+    const remove = (e.target as HTMLElement).closest<HTMLElement>("[data-auth-menu-remove]");
+    if (remove) {
+      const [fam, idx] = remove.dataset.authMenuRemove!.split("|");
+      close();
+      void authRemoveAccount(fam, Number(idx));
+    }
+  });
+  document.addEventListener("keydown", onKey, true);
+  document.body.appendChild(overlay);
+  // Anchor to the ⋯ button, opening below-right and flipping up at the
+  // window's bottom edge, same recipe as the card context menu.
+  const menu = overlay.querySelector<HTMLElement>(".group-menu")!;
+  const rect = anchor.getBoundingClientRect();
+  const belowY = rect.bottom + 4;
+  const aboveY = rect.top - menu.offsetHeight - 4;
+  const desiredY = belowY + menu.offsetHeight <= window.innerHeight - 8 ? belowY : aboveY;
+  menu.style.left = `${Math.max(8, Math.min(rect.right - menu.offsetWidth, window.innerWidth - menu.offsetWidth - 8))}px`;
+  menu.style.top = `${Math.max(8, desiredY)}px`;
+}
+
+/// Remove rides the existing chains: account_remove for slot/import
+/// families, oauth_logout for single-login ones.
+async function authRemoveAccount(family: string, index: number): Promise<void> {
+  const acct = authGroups?.find((g) => g.family === family)?.accounts[index];
+  if (!acct) return;
+  const singleLogin = OAUTH_PROVIDERS.has(family);
+  const name = authRowName(family, acct);
+  const ok = await appConfirm(
+    singleLogin
+      ? {
+          title: t("auth.logoutTitle"),
+          message: t("auth.logoutBody", { name: providerDisplayName(family) }),
+          confirmLabel: t("auth.logout"),
+          danger: true,
+        }
+      : {
+          title: t("auth.removeTitle"),
+          message: t("auth.removeBody", { label: name }),
+          confirmLabel: t("auth.remove").replace(/…$/, ""),
+          danger: true,
+        },
+  );
+  if (!ok) return;
+  const status = document.querySelector("#status");
+  try {
+    if (singleLogin) await invoke("oauth_logout", { provider: family });
+    else await invoke("account_remove", { provider: family, index });
+    credStatusCache.delete(family);
+    if (status) status.textContent = t("auth.removed");
+    await loadAuthCenter();
+    void forceUsageRefreshAttempt(false).then(requestTraySync);
+  } catch (err) {
+    if (status) status.textContent = t("auth.removeFailed", { err: String(err) });
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -10610,6 +11137,12 @@ window.addEventListener("DOMContentLoaded", () => {
     requestTraySync();
   });
 
+  // Cross-window config sync: the other window persisted a write — reload
+  // and re-apply (self-writes are filtered inside).
+  void listen("config-updated", () => {
+    void reloadConfigFromBackend();
+  });
+
   // The backend's background loop refreshes even while this window is
   // hidden (where setInterval is throttled dead). Adopt its results;
   // rendering still defers to the next open via renderIfVisible().
@@ -10620,6 +11153,10 @@ window.addEventListener("DOMContentLoaded", () => {
     ensureLayout();
     renderIfVisible();
     requestTraySync();
+    // Auth center: fresh quota columns and account lists (a login/import
+    // finishing elsewhere also lands here). A live login flow owns its
+    // card block, so don't re-render under it.
+    if (IS_PANEL_FORM && authViewActive && !authFlowBusy()) void loadAuthCenter();
   });
 
   // Back from hidden: pull the backend's latest right away instead of

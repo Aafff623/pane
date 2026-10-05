@@ -1,4 +1,4 @@
-﻿# Pane — Agent Rules
+# Pane — Agent Rules
 
 > This file is auto-read by AI coding agents (Antigravity, Codex, Claude, etc.)
 > on session start.  Keep it up to date whenever startup or build steps change.
@@ -68,6 +68,7 @@ Then re-run the launch step.
 | Local CLI-log spend scanner + model pricing | `src-tauri/src/spend.rs`, `src-tauri/src/pricing.rs` |
 | OAuth — device-code (codex/copilot/xai) · PKCE (Cursor) | `src-tauri/src/oauth.rs`, `src-tauri/src/cursor_oauth.rs` |
 | Multi-account stores (card ids are `family@<fnv1a>`) | `src-tauri/src/accounts.rs`, `antigravity_accounts.rs`, `cursor_accounts.rs` |
+| Panel-window auth center — grouped account rows (read-only assembly) | `src-tauri/src/auth_center.rs` (+ `auth_center_list` in lib.rs) |
 | One/New API relay subsystem | `src-tauri/src/providers/onenewapi/` |
 | Local HTTP API `127.0.0.1:6736/v1/usage` (secret-redacting, tested) | `src-tauri/src/httpapi.rs` |
 | Provider/parsing test harness (compiles the real sources via `#[path]`) | `parse-tests/` |
