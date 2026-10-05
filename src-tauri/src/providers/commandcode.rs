@@ -195,7 +195,23 @@ fn metrics_from_docs(credits: &Value, subs: Option<&Value>) -> Result<(Option<St
         metrics.push(m);
     }
     if metrics.is_empty() {
-        return Err("no usage windows in credits response".into());
+        // Windows absent: a positive credit pool still renders (the card
+        // degrades to a Monthly row). Windows absent AND every pool at
+        // zero means the subscription itself is inactive — say so plainly
+        // instead of blaming the response shape.
+        let pool_nonzero = credit_pool
+            .map(|c| {
+                ["monthlyCredits", "purchasedCredits", "freeCredits"]
+                    .iter()
+                    .any(|k| c.get(*k).and_then(Value::as_f64).is_some_and(|v| v > 0.0))
+            })
+            .unwrap_or(false);
+        if !pool_nonzero {
+            return Err(
+                "subscription inactive or expired — no window limits and no credits on this account"
+                    .into(),
+            );
+        }
     }
 
     // Monthly credits: `monthlyCredits` is the amount LEFT. A known plan
@@ -386,5 +402,37 @@ mod tests {
         assert!(metrics_from_docs(&json!({"foo": 1}), None).is_err());
         let no_windows = json!({"credits": {"monthlyCredits": 5.0}});
         assert!(metrics_from_docs(&no_windows, None).is_err());
+    }
+
+    #[test]
+    fn dead_subscription_says_so_plainly() {
+        // Live Goat 1 shape (2026-10-05): subscription inactive — no live
+        // window limits, every credit pool at zero, subscriptions returns
+        // data:null. The old "no usage windows in credits response"
+        // message sent the user hunting for a parser bug.
+        let credits = json!({
+            "credits": {"monthlyCredits": 0.0, "purchasedCredits": 0.0, "freeCredits": 0.0},
+            "windowLimits": {"limited": false, "fiveHour": null, "weekly": null}
+        });
+        let subs = json!({"success": true, "data": null});
+        let err = metrics_from_docs(&credits, Some(&subs))
+            .err()
+            .expect("dead shape must be an error");
+        assert!(err.contains("subscription inactive or expired"), "got: {err}");
+    }
+
+    #[test]
+    fn zero_windows_with_positive_pool_degrades_to_monthly() {
+        // A windowless account that still has credits is a legal shape —
+        // it must render a Monthly row rather than an error.
+        let credits = json!({
+            "credits": {"monthlyCredits": 12.5, "purchasedCredits": 0.0, "freeCredits": 0.0},
+            "windowLimits": {"limited": false, "fiveHour": null, "weekly": null}
+        });
+        let (plan, metrics) = metrics_from_docs(&credits, None).unwrap();
+        assert_eq!(plan, None);
+        assert_eq!(labels(&metrics), ["Monthly"]);
+        assert_eq!(metrics[0].kind, "text");
+        assert!(metrics[0].value.as_deref().unwrap().contains("$12.50"));
     }
 }
