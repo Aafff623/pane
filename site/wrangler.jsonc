@@ -1,0 +1,17 @@
+// pane.<account-subdomain>.workers.dev: the static site in public/, plus
+// worker.js for language negotiation. Deploy with `npx wrangler deploy`
+// from here (CI: .github/workflows/site-deploy.yml).
+{
+  "name": "pane",
+  "main": "worker.js",
+  "compatibility_date": "2026-10-01",
+  "assets": {
+    "directory": "./public",
+    "binding": "ASSETS",
+    // every request, so worker.js can negotiate the home page's language
+    "run_worker_first": true
+  },
+  // A real domain later goes here, nothing else changes:
+  // "routes": [{ "pattern": "pane.example.com", "custom_domain": true }]
+  "observability": { "enabled": true }
+}

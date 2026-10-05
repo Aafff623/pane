@@ -1,0 +1,463 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Pane</title>
+<meta name="description" data-i18n-attr="content:meta.desc" content="Pane 是常驻 Windows 托盘的本地面板，把 41 家 AI 编程工具与模型厂商的额度、余额和花费聚到一处。密钥只存本机，查询直连官方接口。">
+<meta name="color-scheme" content="dark light">
+<meta name="theme-color" content="#0b0b0c">
+<script>
+// The chosen theme (dark, light, or the system's) is on <html data-theme>
+// before anything paints. Pane is a dark-first app, so the site defaults to
+// dark; the button steps dark → light → system.
+// The page is Chinese, or English when the worker served it at /en/;
+// T(zh, en) is a script's words in the page's language.
+window.LANG = document.documentElement.lang.slice(0, 2);
+window.T = (zh, en) => (LANG === "en" ? en ?? zh : zh);
+window.themeTitle = (m) => T("主题：" + { dark: "深色", light: "浅色", system: "跟随系统" }[m], "Theme: " + { dark: "dark", light: "light", system: "system" }[m]);
+(() => {
+  let mode = "dark";
+  try { mode = localStorage.getItem("theme") || "dark"; } catch {}
+  const q = matchMedia("(prefers-color-scheme: light)");
+  const apply = () => {
+    const t = mode === "system" ? (q.matches ? "light" : "dark") : mode;
+    document.documentElement.dataset.theme = t;
+    document.querySelector('meta[name="theme-color"]').content = t === "dark" ? "#0b0b0c" : "#fafafa";
+    document.querySelectorAll("button.theme:not(.menu):not(.lang)").forEach((b) => { b.dataset.mode = mode; b.title = themeTitle(mode); });
+  };
+  q.addEventListener("change", () => mode === "system" && apply());
+  window.setTheme = (m) => { mode = m; try { m === "system" ? localStorage.removeItem("theme") : localStorage.setItem("theme", m); } catch {} apply(); };
+  window.themeMode = () => mode;
+  apply();
+})();
+</script>
+<link rel="icon" href="/favicon.png" type="image/png">
+<link rel="apple-touch-icon" href="/favicon.png">
+<meta property="og:title" content="Pane">
+<meta property="og:description" data-i18n-attr="content:meta.tagline" content="每个 AI 工具的额度和花费，一眼看清。">
+<meta property="og:type" content="website">
+<meta name="twitter:title" content="Pane">
+<meta name="twitter:description" data-i18n-attr="content:meta.tagline" content="每个 AI 工具的额度和花费，一眼看清。">
+<style>
+:root {
+  --bg: #0b0b0c;
+  --bg2: #121214;
+  --card: #161618;
+  --ink: #f2f2f3;
+  --ink2: #b3b3ba;
+  --ink3: #7a7a82;
+  --line: #26262a;
+  --btn: #f2f2f3;
+  --btn-ink: #0b0b0c;
+  --code: #151517;
+  --shadow: 0 1px 2px rgba(0,0,0,.3), 0 20px 60px -20px rgba(0,0,0,.8);
+}
+:root[data-theme="light"] {
+  --bg: #fafafa;
+  --bg2: #f1f1f2;
+  --card: #ffffff;
+  --ink: #111112;
+  --ink2: #4a4a50;
+  --ink3: #85858c;
+  --line: #e4e4e7;
+  --btn: #111112;
+  --btn-ink: #fafafa;
+  --code: #f4f4f5;
+  --shadow: 0 1px 2px rgba(0,0,0,.04), 0 12px 40px -12px rgba(0,0,0,.18);
+}
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme]) {
+    --bg: #fafafa;
+    --bg2: #f1f1f2;
+    --card: #ffffff;
+    --ink: #111112;
+    --ink2: #4a4a50;
+    --ink3: #85858c;
+    --line: #e4e4e7;
+    --btn: #111112;
+    --btn-ink: #fafafa;
+    --code: #f4f4f5;
+    --shadow: 0 1px 2px rgba(0,0,0,.04), 0 12px 40px -12px rgba(0,0,0,.18);
+  }
+}
+/* dark is the default: the light variant only shows under data-theme="light" */
+.for-light { display: none !important; }
+[data-theme="light"] .for-light { display: block !important; }
+[data-theme="light"] .for-dark { display: none !important; }
+.theme { display: inline-grid; place-items: center; width: 34px; height: 34px; border-radius: 8px; border: 1px solid var(--line); background: transparent; color: var(--ink2); cursor: pointer; padding: 0; }
+.theme:hover { color: var(--ink); }
+.theme svg { width: 16px; height: 16px; display: none; }
+.theme.gh svg { display: block; }
+.theme[data-mode="system"] .i-system, .theme[data-mode="light"] .i-light, .theme[data-mode="dark"] .i-dark { display: block; }
+* { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font: 16px/1.6 -apple-system, BlinkMacSystemFont, "SF Pro Text", "Inter", "Segoe UI", system-ui, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans CJK SC", sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+a { color: inherit; }
+code, pre, kbd { font-family: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace; }
+.wrap { max-width: 1080px; margin: 0 auto; padding: 0 24px; }
+
+nav { position: sticky; top: 0; z-index: 10; backdrop-filter: saturate(1.4) blur(14px); -webkit-backdrop-filter: saturate(1.4) blur(14px); background: color-mix(in srgb, var(--bg) 78%, transparent); border-bottom: 1px solid transparent; transition: border-color .2s; }
+nav.scrolled { border-bottom-color: var(--line); }
+nav .wrap { display: flex; align-items: center; gap: 28px; height: 60px; }
+.brand { display: flex; align-items: center; gap: 9px; font-weight: 650; font-size: 17px; letter-spacing: -.01em; text-decoration: none; }
+.brand img { width: 24px; height: 24px; border-radius: 6px; }
+nav .links { display: flex; gap: 24px; margin-left: auto; font-size: 14px; color: var(--ink2); }
+nav .links a { text-decoration: none; }
+nav .links a:hover { color: var(--ink); }
+nav .links .in-menu, nav .menu { display: none; }
+.langs { position: relative; }
+.theme.lang svg { display: block; }
+.lang-menu { position: absolute; right: 0; top: calc(100% + 8px); z-index: 11; display: grid; min-width: 140px; padding: 4px; background: var(--card); border: 1px solid var(--line); border-radius: 10px; box-shadow: var(--shadow); }
+.lang-menu[hidden] { display: none; }
+.lang-menu a { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 8px 10px; border-radius: 6px; font-size: 14px; color: var(--ink2); text-decoration: none; }
+.lang-menu a:hover, .lang-menu a:focus-visible { background: var(--code); color: var(--ink); outline: none; }
+.lang-menu a[aria-current] { color: var(--ink); font-weight: 560; }
+.lang-menu a[aria-current]::after { content: "✓"; font-weight: 400; }
+.menu svg { width: 16px; height: 16px; display: block; }
+.menu .i-close, nav.open .menu .i-open { display: none; }
+nav.open .menu .i-close { display: block; }
+:lang(zh) .hero h1, :lang(zh) h2 { letter-spacing: -.01em; }
+:lang(zh) .eyebrow, :lang(zh) .agents p { letter-spacing: .04em; }
+.btn { display: inline-flex; align-items: center; gap: 8px; padding: 0 18px; height: 42px; border-radius: 10px; background: var(--btn); color: var(--btn-ink); text-decoration: none; font-weight: 560; font-size: 15px; white-space: nowrap; border: 1px solid var(--btn); transition: transform .12s, opacity .12s; }
+.btn:hover { opacity: .88; }
+.btn:active { transform: translateY(1px); }
+.btn.small { height: 34px; padding: 0 14px; font-size: 14px; border-radius: 8px; }
+.btn.ghost { background: transparent; color: var(--ink); border-color: var(--line); }
+.btn svg { width: 16px; height: 16px; }
+
+.hero { padding: 80px 0 32px; display: grid; grid-template-columns: 1.05fr .95fr; gap: 56px; align-items: center; }
+.hero h1 { font-size: clamp(40px, 6vw, 64px); line-height: 1.08; letter-spacing: -.03em; font-weight: 700; margin: 0 0 22px; }
+.hero h1 span { color: var(--ink3); }
+.hero p.lede { font-size: 19px; color: var(--ink2); margin: 0 0 32px; max-width: 30em; }
+.cta { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; }
+.meta { margin-top: 14px; font-size: 13px; color: var(--ink3); }
+.meta a { color: var(--ink2); }
+.shot img { width: 100%; height: auto; max-width: 400px; display: block; margin: 0 auto; border-radius: 14px; box-shadow: var(--shadow); border: 1px solid var(--line); }
+
+section { padding: 88px 0 0; }
+.eyebrow { font-size: 13px; letter-spacing: .08em; text-transform: uppercase; color: var(--ink3); margin: 0 0 12px; }
+h2 { font-size: clamp(30px, 4vw, 42px); line-height: 1.15; letter-spacing: -.03em; margin: 0 0 16px; font-weight: 680; }
+.sub { font-size: 18px; color: var(--ink2); max-width: 38em; margin: 0 0 40px; }
+
+.wall { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 1px; background: var(--line); border: 1px solid var(--line); border-radius: 16px; overflow: hidden; }
+.wall li { display: flex; align-items: center; gap: 10px; background: var(--card); padding: 12px 14px; font-size: 14px; color: var(--ink2); }
+.wall img { width: 24px; height: 24px; border-radius: 6px; flex: none; }
+
+.steps { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1px; background: var(--line); border: 1px solid var(--line); border-radius: 16px; overflow: hidden; counter-reset: step; }
+.steps > div { background: var(--card); padding: 28px 26px 30px; position: relative; }
+.steps > div::before { counter-increment: step; content: counter(step); display: grid; place-items: center; width: 30px; height: 30px; border-radius: 9px; background: var(--bg2); border: 1px solid var(--line); color: var(--ink3); font-size: 14px; font-weight: 600; font-variant-numeric: tabular-nums; margin-bottom: 16px; }
+.steps h3 { margin: 0 0 8px; font-size: 16.5px; letter-spacing: -.01em; font-weight: 640; }
+.steps p { margin: 0; color: var(--ink2); font-size: 15px; }
+.steps code { font-size: 13px; background: var(--code); padding: 1px 5px; border-radius: 4px; }
+
+.grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1px; background: var(--line); border: 1px solid var(--line); border-radius: 16px; overflow: hidden; }
+.grid > div { background: var(--card); padding: 26px 24px 28px; }
+.grid h3 { margin: 0 0 8px; font-size: 16px; letter-spacing: -.01em; font-weight: 640; }
+.grid p { margin: 0; color: var(--ink2); font-size: 14.5px; }
+.grid code { font-size: 13px; background: var(--code); padding: 1px 5px; border-radius: 4px; }
+
+figure { margin: 0 0 44px; }
+figure:last-child { margin-bottom: 0; }
+figure img { width: 100%; height: auto; display: block; border-radius: 14px; box-shadow: var(--shadow); border: 1px solid var(--line); }
+figcaption { margin-top: 12px; font-size: 13.5px; color: var(--ink3); }
+.note { margin-top: 26px; font-size: 13.5px; color: var(--ink3); }
+.note code { font-size: 12.5px; background: var(--code); padding: 1px 5px; border-radius: 4px; }
+
+.apicol { display: grid; grid-template-columns: 1.15fr .85fr; gap: 28px; align-items: start; }
+pre { margin: 0; background: var(--code); border: 1px solid var(--line); border-radius: 12px; padding: 20px 22px; overflow-x: auto; font-size: 13.5px; line-height: 1.75; color: var(--ink); }
+pre .c { color: var(--ink3); }
+pre + pre { margin-top: 14px; }
+.copyrow { display: flex; justify-content: flex-end; margin-top: 8px; }
+.copy { height: 32px; padding: 0 12px; border-radius: 8px; border: 1px solid var(--line); background: var(--card); color: var(--ink); font: inherit; font-size: 13px; cursor: pointer; }
+.copy:hover { border-color: var(--ink3); }
+
+.final { text-align: center; padding: 120px 0 100px; }
+.final img.mark { width: 88px; height: 88px; border-radius: 20px; margin-bottom: 18px; }
+.final .cta { justify-content: center; }
+.final .sub { margin-left: auto; margin-right: auto; }
+footer { border-top: 1px solid var(--line); padding: 28px 0 40px; font-size: 13.5px; color: var(--ink3); }
+footer .wrap { display: flex; flex-wrap: wrap; gap: 12px 24px; align-items: center; }
+footer .links { margin-left: auto; display: flex; gap: 20px; }
+footer a { text-decoration: none; }
+footer a:hover { color: var(--ink); }
+
+@media (max-width: 860px) {
+  .hero { grid-template-columns: 1fr; padding-top: 56px; gap: 40px; }
+  .steps, .grid { grid-template-columns: 1fr; }
+  .apicol { grid-template-columns: 1fr; }
+  nav .links { position: absolute; top: 60px; left: 0; right: 0; display: none; flex-direction: column; gap: 4px; padding: 12px 24px 18px; background: var(--bg); border-bottom: 1px solid var(--line); }
+  nav.open .links { display: flex; }
+  nav .links .in-menu { display: block; }
+  nav .menu { display: inline-grid; }
+  nav .links a { padding: 8px 0; }
+}
+</style>
+</head>
+<body>
+
+<nav id="nav"><div class="wrap">
+  <a class="brand" href="/"><img src="/favicon.png" alt="">Pane</a>
+  <div class="links" id="links">
+    <a class="hide" href="#how" data-i18n="nav.how">工作原理</a>
+    <a class="hide" href="#providers" data-i18n="nav.providers">支持对象</a>
+    <a class="hide" href="#shots" data-i18n="nav.shots">截图</a>
+    <a href="#api" data-i18n="nav.api">本地 API</a>
+    <a class="hide-sm" href="https://github.com/Aafff623/pane/releases" data-i18n="nav.releases">版本发布</a>
+    <a class="in-menu" href="https://github.com/Aafff623/pane">GitHub</a>
+  </div>
+  <div class="langs">
+    <button class="theme lang" type="button" aria-label="语言" title="语言" aria-haspopup="true" aria-expanded="false" aria-controls="langs" data-i18n-attr="aria-label:nav.language,title:nav.language"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><circle cx="8" cy="8" r="6.25"/><path d="M1.75 8h12.5M8 1.75c1.7 1.75 2.55 3.83 2.55 6.25S9.7 12.5 8 14.25M8 1.75C6.3 3.5 5.45 5.58 5.45 8S6.3 12.5 8 14.25"/></svg></button>
+    <div class="lang-menu" id="langs" hidden>
+      <a href="/" hreflang="zh" lang="zh">中文</a>
+      <a href="/en/" hreflang="en" lang="en">English</a>
+    </div>
+  </div>
+  <a class="theme gh" href="https://github.com/Aafff623/pane" aria-label="Pane on GitHub" title="Pane on GitHub"><svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0 0 16 8c0-4.42-3.58-8-8-8Z"/></svg></a>
+  <button class="theme" type="button" aria-label="Theme" title="Theme"><svg class="i-system" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="1.75" y="2.75" width="12.5" height="8.5" rx="1.5"/><path d="M5.5 14h5M8 11.25V14"/></svg><svg class="i-light" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><circle cx="8" cy="8" r="3"/><path d="M8 1v1.5M8 13.5V15M1 8h1.5M13.5 8H15M3 3l1 1M12 12l1 1M3 13l1-1M12 4l1-1"/></svg><svg class="i-dark" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"><path d="M13.5 9.5A5.5 5.5 0 0 1 6.5 2.5a5.5 5.5 0 1 0 7 7Z"/></svg></button>
+  <a class="btn small" href="https://github.com/Aafff623/pane/releases/latest" data-i18n="nav.download">下载</a>
+  <button class="theme menu" type="button" aria-label="菜单" aria-expanded="false" aria-controls="links" data-i18n-attr="aria-label:nav.menu"><svg class="i-open" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M2.5 4.5h11M2.5 8h11M2.5 11.5h11"/></svg><svg class="i-close" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M3.5 3.5l9 9M12.5 3.5l-9 9"/></svg></button>
+</div></nav>
+
+<main class="wrap">
+  <header class="hero">
+    <div>
+      <h1 data-i18n="hero.h1">每个 AI 工具的额度和花费，<span>一眼看清。</span></h1>
+      <p class="lede" data-i18n="hero.lede">Pane 是常驻 Windows 托盘的本地面板，把你正在用的 AI 编程工具和模型厂商——Claude、Codex、Cursor、Kimi 等 41 家——的额度、余额和订阅状态聚到一处。密钥只存本机，查询直连各家官方接口，数据不出你的电脑。</p>
+      <div class="cta">
+        <a class="btn" href="https://github.com/Aafff623/pane/releases/latest"><svg viewBox="0 0 16 16" fill="currentColor"><path d="M1 2.3 6.7 1.5v5.6H1V2.3Zm6.4-.9L15 .3v6.8H7.4V1.4ZM1 7.9h5.7v5.6L1 12.7V7.9Zm6.4 0H15v6.8l-7.6-1.1V7.9Z"/></svg><span data-i18n="hero.dl">下载最新版</span></a>
+        <a class="btn ghost" href="https://github.com/Aafff623/pane" data-i18n="hero.gh">GitHub 仓库</a>
+      </div>
+      <div class="meta"><span data-i18n="hero.free">免费</span> · <a href="https://github.com/Aafff623/pane/blob/main/LICENSE" data-i18n="hero.oss">开源（MIT）</a> · <span data-i18n="hero.os">Windows 优先，macOS 与 Linux 随版本构建</span></div>
+    </div>
+    <div class="shot">
+      <img loading="lazy" class="for-light" src="/img/overview-light.png" width="880" height="1100" data-i18n-attr="alt:alt.overview" alt="Pane 主面板：各家 AI 工具的额度进度与重置时间">
+      <img loading="lazy" class="for-dark" src="/img/overview-dark.png" width="880" height="1100" data-i18n-attr="alt:alt.overview" alt="Pane 主面板：各家 AI 工具的额度进度与重置时间">
+    </div>
+  </header>
+
+  <section id="providers">
+    <p class="eyebrow" data-i18n="prov.eyebrow">支持对象</p>
+    <h2 data-i18n="prov.h2">41 家厂商，一面墙装下。</h2>
+    <p class="sub" data-i18n="prov.sub">模型厂商、中转服务、本地服务器，外加自定义余额查询——从 Claude、Codex、Cursor 到 DeepSeek、Kimi、SiliconFlow，名单随版本持续增长。</p>
+    <ul class="wall">
+      <li><img src="/img/providers/claude.svg" width="24" height="24" alt="">Claude</li>
+      <li><img src="/img/providers/codex.svg" width="24" height="24" alt="">Codex</li>
+      <li><img src="/img/providers/cursor.svg" width="24" height="24" alt="">Cursor</li>
+      <li><img src="/img/providers/opencode.svg" width="24" height="24" alt="">OpenCode</li>
+      <li><img src="/img/providers/copilot.svg" width="24" height="24" alt="">Copilot</li>
+      <li><img src="/img/providers/grok.svg" width="24" height="24" alt="">Grok</li>
+      <li><img src="/img/providers/devin.svg" width="24" height="24" alt="">Devin</li>
+      <li><img src="/img/providers/minimax.svg" width="24" height="24" alt="">MiniMax</li>
+      <li><img src="/img/providers/openrouter.svg" width="24" height="24" alt="">OpenRouter</li>
+      <li><img src="/img/providers/z-ai.svg" width="24" height="24" alt="">Z.ai</li>
+      <li><img src="/img/providers/antigravity.svg" width="24" height="24" alt="">Antigravity</li>
+      <li><img src="/img/providers/deepseek.svg" width="24" height="24" alt="">DeepSeek</li>
+      <li><img src="/img/providers/kimi-api.svg" width="24" height="24" alt="">Kimi API</li>
+      <li><img src="/img/providers/elevenlabs.svg" width="24" height="24" alt="">ElevenLabs</li>
+      <li><img src="/img/providers/ollama.svg" width="24" height="24" alt="">Ollama</li>
+      <li><img src="/img/providers/codebuff.svg" width="24" height="24" alt="">Codebuff</li>
+      <li><img src="/img/providers/kilo.svg" width="24" height="24" alt="">Kilo</li>
+      <li><img src="/img/providers/aihubmix.svg" width="24" height="24" alt="">AihubMix</li>
+      <li><img src="/img/providers/one-new-api.svg" width="24" height="24" alt="">One/New API</li>
+      <li><img src="/img/providers/qwen-code.svg" width="24" height="24" alt="">Qwen Code</li>
+      <li><img src="/img/providers/hermes.svg" width="24" height="24" alt="">Hermes</li>
+      <li><img src="/img/providers/kimi-code.svg" width="24" height="24" alt="">Kimi Code</li>
+      <li><img src="/img/providers/stepfun.svg" width="24" height="24" alt="">StepFun</li>
+      <li><img src="/img/providers/stepfun-step-plan.svg" width="24" height="24" alt="">StepFun Step Plan</li>
+      <li><img src="/img/providers/shandianshuo.svg" width="24" height="24" alt="">闪电说</li>
+      <li><img src="/img/providers/siliconflow.svg" width="24" height="24" alt="">SiliconFlow</li>
+      <li><img src="/img/providers/novita-ai.svg" width="24" height="24" alt="">Novita AI</li>
+      <li><img src="/img/providers/custom-balance.svg" width="24" height="24" alt="">Custom Balance</li>
+      <li><img src="/img/providers/glm-v1-pro.svg" width="24" height="24" alt="">GLM V1 Pro</li>
+      <li><img src="/img/providers/qoder-cn.svg" width="24" height="24" alt="">Qoder CN</li>
+      <li><img src="/img/providers/trae-cn.svg" width="24" height="24" alt="">Trae CN</li>
+      <li><img src="/img/providers/command-code.svg" width="24" height="24" alt="">Command Code</li>
+      <li><img src="/img/providers/doubao.svg" width="24" height="24" alt="">Doubao</li>
+      <li><img src="/img/providers/clawsgo.svg" width="24" height="24" alt="">ClawsGO</li>
+      <li><img src="/img/providers/bochaai.svg" width="24" height="24" alt="">BochaAI</li>
+      <li><img src="/img/providers/tavily.svg" width="24" height="24" alt="">Tavily</li>
+      <li><img src="/img/providers/firecrawl.svg" width="24" height="24" alt="">Firecrawl</li>
+      <li><img src="/img/providers/clinepass.svg" width="24" height="24" alt="">ClinePass</li>
+      <li><img src="/img/providers/sensenova.svg" width="24" height="24" alt="">SenseNova</li>
+      <li><img src="/img/providers/apigoto.svg" width="24" height="24" alt="">APIGOTO</li>
+      <li><img src="/img/providers/brave-search.svg" width="24" height="24" alt="">Brave Search</li>
+    </ul>
+  </section>
+
+  <section id="how">
+    <p class="eyebrow" data-i18n="how.eyebrow">工作原理</p>
+    <h2 data-i18n="how.h2">三步，全部在本机完成。</h2>
+    <p class="sub" data-i18n="how.sub">没有账号体系，没有云端同步。Pane 只和你的电脑、以及各家厂商自己的 API 打交道。</p>
+    <div class="steps">
+      <div>
+        <h3 data-i18n="how.s1.t">添加凭据</h3>
+        <p data-i18n="how.s1.p">把 API key 或 OAuth 登录添加进 Pane。密钥只写入本机的 Pane 数据目录，可再套上主密码加密保险库。</p>
+      </div>
+      <div>
+        <h3 data-i18n="how.s2.t">本地查询</h3>
+        <p data-i18n="how.s2.p">Pane 定时直连各家官方接口拉取额度与余额，并扫描本机 CLI 日志统计花费——不经过任何第三方服务器。</p>
+      </div>
+      <div>
+        <h3 data-i18n="how.s3.t">总览面板</h3>
+        <p data-i18n="how.s3.p">托盘图标实时投影最紧张的额度；点开面板看每家的进度条、重置倒计时和花费热力图。</p>
+      </div>
+    </div>
+  </section>
+
+  <section id="details">
+    <p class="eyebrow" data-i18n="det.eyebrow">细节</p>
+    <h2 data-i18n="det.h2">本地优先，是一件认真的事。</h2>
+    <div class="grid">
+      <div>
+        <h3 data-i18n="det.local.t">密钥不出本机</h3>
+        <p data-i18n="det.local.p">令牌只发往对应厂商自己的 API。本地接口只监听回环地址、校验 Host 头、不开 CORS。</p>
+      </div>
+      <div>
+        <h3 data-i18n="det.vault.t">主密码保险库</h3>
+        <p data-i18n="det.vault.p">可选的主密码加密保险库，给本机存放的凭据再加一层锁，每条密钥可附备注。</p>
+      </div>
+      <div>
+        <h3 data-i18n="det.spend.t">花费统计与热力图</h3>
+        <p data-i18n="det.spend.p">按工具、按模型汇总 token 与花费，每日热力图最长回看 365 天。</p>
+      </div>
+      <div>
+        <h3 data-i18n="det.tray.t">托盘常驻</h3>
+        <p data-i18n="det.tray.p">最小化到 Windows 托盘安静待命，额度将尽可弹提醒，不打扰。</p>
+      </div>
+      <div>
+        <h3 data-i18n="det.update.t">签名自动更新</h3>
+        <p data-i18n="det.update.p">新版本从 GitHub Releases 签名下载、校验后安装，升级无需打开官网。</p>
+      </div>
+      <div>
+        <h3 data-i18n="det.api.t">本地 JSON API</h3>
+        <p data-i18n="det.api.p">一个只读接口把面板数据交给你自己的脚本和自动化，见下文。</p>
+      </div>
+    </div>
+  </section>
+
+  <section id="shots">
+    <p class="eyebrow" data-i18n="shot.eyebrow">截图</p>
+    <h2 data-i18n="shot.h2">界面，如实展示。</h2>
+    <p class="sub" data-i18n="shot.sub">暗色与浅色各一张，文件名固定——替换 site/public/img/ 下的同名文件即可更新。</p>
+    <figure>
+      <img loading="lazy" class="for-light" src="/img/spend-light.png" width="1600" height="1000" data-i18n-attr="alt:alt.spend" alt="Pane 花费面板：按工具与模型汇总的 token 与费用">
+      <img loading="lazy" class="for-dark" src="/img/spend-dark.png" width="1600" height="1000" data-i18n-attr="alt:alt.spend" alt="Pane 花费面板：按工具与模型汇总的 token 与费用">
+      <figcaption data-i18n="shot.spend.cap">按工具与模型的花费总览</figcaption>
+    </figure>
+    <figure>
+      <img loading="lazy" class="for-light" src="/img/heatmap-light.png" width="1280" height="720" data-i18n-attr="alt:alt.heatmap" alt="Pane 的 365 天每日花费热力图">
+      <img loading="lazy" class="for-dark" src="/img/heatmap-dark.png" width="1280" height="720" data-i18n-attr="alt:alt.heatmap" alt="Pane 的 365 天每日花费热力图">
+      <figcaption data-i18n="shot.heat.cap">365 天每日花费热力图</figcaption>
+    </figure>
+    <p class="note" data-i18n="shot.note">当前为占位图：同名替换 overview / spend / heatmap 的 -dark.png 与 -light.png 即可，无需改代码。</p>
+  </section>
+
+  <section id="api">
+    <p class="eyebrow" data-i18n="api.eyebrow">本地 API</p>
+    <h2 data-i18n="api.h2">读数，交给你的脚本。</h2>
+    <p class="sub" data-i18n="api.sub">Pane 在本机暴露一个只读 JSON 接口，只接受来自回环地址的请求。面板看到的一切，脚本也能拿到。</p>
+    <div class="apicol">
+      <div>
+        <pre id="api-curl"><span class="c" data-i18n="api.c1"># 所有 provider 的最新快照</span>
+curl http://127.0.0.1:6736/v1/usage
+
+<span class="c" data-i18n="api.c2"># 单查某一家</span>
+curl http://127.0.0.1:6736/v1/usage/claude</pre>
+        <div class="copyrow"><button class="copy" type="button" data-copy="api-curl" data-i18n="copy">复制</button></div>
+      </div>
+      <pre>[
+  {
+    "providerId": "claude",
+    "displayName": "Claude",
+    "plan": "Pro",
+    "lines": [
+      { "type": "progress", "label": "…",
+        "used": 42, "limit": 100,
+        "format": { "kind": "percent" },
+        "resetsAt": "2026-10-08T03:00:00.000Z",
+        "periodDurationMs": 432000000,
+        "color": null },
+      { "type": "text", "label": "…",
+        "value": "…", "subtitle": "…",
+        "resetsAt": null, "color": null }
+    ],
+    "fetchedAt": "2026-10-05T12:00:00.000Z"
+  }
+]</pre>
+    </div>
+    <p class="note" data-i18n="api.note">接口只监听 127.0.0.1、校验 Host 头、不提供 CORS；密钥永远不会出现在响应里。</p>
+  </section>
+
+  <section class="final">
+    <img class="mark" src="/favicon.png" alt="">
+    <h2 data-i18n="fin.h2">少开几个网页，多看一眼托盘。</h2>
+    <p class="sub" data-i18n="fin.sub">免费、开源、本地优先。Windows 优先，macOS 与 Linux 构建随版本发布。</p>
+    <div class="cta">
+      <a class="btn" href="https://github.com/Aafff623/pane/releases/latest" data-i18n="fin.dl">下载最新版</a>
+      <a class="btn ghost" href="https://github.com/Aafff623/pane" data-i18n="fin.gh">GitHub 仓库</a>
+    </div>
+  </section>
+</main>
+
+<footer><div class="wrap">
+  <span data-i18n="foot.tag">Pane — 本地优先的 AI 额度面板</span>
+  <div class="links">
+    <a href="https://github.com/Aafff623/pane" data-i18n="foot.src">源码</a>
+    <a href="https://github.com/Aafff623/pane/releases" data-i18n="foot.rel">版本发布</a>
+    <a href="https://github.com/Aafff623/pane/issues" data-i18n="foot.issues">问题反馈</a>
+  </div>
+</div></footer>
+
+<script>
+(() => {
+  const nav = document.getElementById("nav");
+
+  // The theme button steps dark → light → system (dark is this site's default).
+  const next = { dark: "light", light: "system", system: "dark" };
+  document.querySelectorAll("button.theme:not(.menu):not(.lang)").forEach((b) => {
+    b.dataset.mode = themeMode();
+    b.title = themeTitle(themeMode());
+    b.addEventListener("click", () => setTheme(next[themeMode()]));
+  });
+  // On a narrow screen the links fold into a menu; a link picked, a tap
+  // outside or Escape closes it.
+  const menu = nav.querySelector(".menu");
+  const open = (on) => { nav.classList.toggle("open", on); menu.setAttribute("aria-expanded", String(on)); };
+  menu.addEventListener("click", () => open(!nav.classList.contains("open")));
+  nav.querySelectorAll(".links a").forEach((a) => a.addEventListener("click", () => open(false)));
+  document.addEventListener("click", (e) => { if (!nav.contains(e.target)) open(false); });
+  document.addEventListener("keydown", (e) => { if (e.key === "Escape" && nav.classList.contains("open")) { open(false); menu.focus(); } });
+
+  // The language menu. The language picked is remembered in a cookie, so /
+  // stops redirecting once another language was asked for.
+  const langBtn = nav.querySelector(".lang"), langs = document.getElementById("langs");
+  const langOpen = (on) => { langs.hidden = !on; langBtn.setAttribute("aria-expanded", String(on)); };
+  langBtn.addEventListener("click", () => { open(false); langOpen(langs.hidden); });
+  langs.querySelectorAll("a").forEach((a) => {
+    if (a.hreflang === LANG) a.setAttribute("aria-current", "page");
+    a.addEventListener("click", () => { document.cookie = "lang=" + a.hreflang + "; path=/; max-age=31536000; samesite=lax"; });
+  });
+  document.addEventListener("click", (e) => { if (!langBtn.parentNode.contains(e.target)) langOpen(false); });
+  document.addEventListener("keydown", (e) => { if (e.key === "Escape" && !langs.hidden) { langOpen(false); langBtn.focus(); } });
+  menu.addEventListener("click", () => langOpen(false));
+
+  const onScroll = () => nav.classList.toggle("scrolled", scrollY > 8);
+  addEventListener("scroll", onScroll, { passive: true }); onScroll();
+
+  document.querySelectorAll(".copy").forEach((b) => b.addEventListener("click", async () => {
+    try {
+      await navigator.clipboard.writeText(document.getElementById(b.dataset.copy).textContent);
+      b.textContent = T("已复制", "Copied"); setTimeout(() => (b.textContent = T("复制", "Copy")), 1400);
+    } catch {}
+  }));
+})();
+</script>
+</body>
+</html>

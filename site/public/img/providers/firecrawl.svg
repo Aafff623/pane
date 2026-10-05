@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64">
+  <rect width="64" height="64" rx="14" fill="hsl(58 38% 32%)"/>
+  <rect x="0.5" y="0.5" width="63" height="63" rx="13.5" fill="none" stroke="rgba(255,255,255,.14)"/>
+  <text x="32" y="33" text-anchor="middle" dominant-baseline="central" font-family="-apple-system,'Segoe UI',system-ui,'PingFang SC','Microsoft YaHei',sans-serif" font-size="26" font-weight="600" fill="#f4f4f5">F</text>
+</svg>
