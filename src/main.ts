@@ -6244,6 +6244,30 @@ function renderCustConfig(id: string): string {
       ${groupPickerHtml(id)}
     </div>`;
   }
+  if (id === "sensenova") {
+    // One-time browser sign-in: the link is generated backend-side (PKCE),
+    // then whatever the browser yields goes back through oauth_finish —
+    // no long-lived token ever sits in an input.
+    return `<div class="cust-config cust-form">
+      ${status}
+      <div class="form-actions">
+        <button class="mini-btn" data-sensenova-oauth-start="1">${escapeHtml(t("customize.sensenovaStart"))}</button>
+      </div>
+      <p class="settings-note">${escapeHtml(t("customize.sensenovaStartHelp"))}</p>
+      <div class="form-field">
+        <span class="form-label">${escapeHtml(t("customize.sensenovaPasteLabel"))}</span>
+        <input class="form-input" type="password" data-sensenova-code="${id}" placeholder="${escapeHtml(t("customize.sensenovaPastePh"))}" autocomplete="off" spellcheck="false" />
+        <div class="form-help">${escapeHtml(t("customize.sensenovaPasteHelp"))}</div>
+      </div>
+      <div class="form-actions">
+        <button class="mini-btn" data-sensenova-oauth-finish="${id}">${escapeHtml(t("customize.sensenovaFinish"))}</button>
+        <span class="cust-test-result" data-sensenova-result="${id}"></span>
+      </div>
+      ${custNoteField(id)}
+      ${custApplyHtml(id)}
+      ${groupPickerHtml(id)}
+    </div>`;
+  }
   if (!KEY_PROVIDERS.has(id)) {
     // An account card (deepseek@<fingerprint>) gets its own small config
     // panel: the masked key, the live snapshot status (connectivity as of
@@ -7725,6 +7749,16 @@ async function handleCustomizeClick(target: HTMLElement): Promise<boolean> {
     });
     return true;
   }
+  const sensenovaStart = target.closest<HTMLElement>("[data-sensenova-oauth-start]");
+  if (sensenovaStart) {
+    void runSensenovaOauthStart();
+    return true;
+  }
+  const sensenovaFinish = target.closest<HTMLElement>("[data-sensenova-oauth-finish]");
+  if (sensenovaFinish) {
+    void runSensenovaOauthFinish();
+    return true;
+  }
   const oauthLogin = target.closest<HTMLElement>("[data-oauth-login]");
   if (oauthLogin) {
     void startOauthLogin(oauthLogin.dataset.oauthLogin!);
@@ -7920,6 +7954,52 @@ async function handleCustomizeClick(target: HTMLElement): Promise<boolean> {
     return true;
   }
   return false;
+}
+
+function setSensenovaResult(text: string, ok: boolean | null): void {
+  const result = document
+    .querySelector<HTMLElement>(
+      `#drawer-body [data-cust-provider="${CSS.escape("sensenova")}"]`,
+    )
+    ?.querySelector<HTMLElement>("[data-sensenova-result]");
+  if (!result) return;
+  result.textContent = text;
+  result.classList.toggle("ok", ok === true);
+  result.classList.toggle("err", ok === false);
+}
+
+/// SenseNova sign-in step 1: build the PKCE link backend-side and open it.
+async function runSensenovaOauthStart(): Promise<void> {
+  try {
+    const url = await invoke<string>("sensenova_oauth_start");
+    await invoke("open_link", { url });
+    setSensenovaResult(t("customize.sensenovaOpened"), true);
+  } catch (err) {
+    setSensenovaResult(`${t("customize.testFailed")}: ${String(err)}`, false);
+  }
+}
+
+/// SenseNova sign-in step 2: submit whatever the browser yielded —
+/// redirect URL, token payload, bare token, or code.
+async function runSensenovaOauthFinish(): Promise<void> {
+  const panel = document.querySelector<HTMLElement>(
+    `#drawer-body [data-cust-provider="${CSS.escape("sensenova")}"]`,
+  );
+  const input = panel?.querySelector<HTMLInputElement>("[data-sensenova-code]");
+  const value = input?.value.trim() ?? "";
+  if (!value) {
+    setSensenovaResult(t("customize.sensenovaPasteEmpty"), false);
+    return;
+  }
+  setSensenovaResult(t("customize.testing"), null);
+  try {
+    const snap = await invoke<{ metrics: unknown[] }>("sensenova_oauth_finish", { input: value });
+    setSensenovaResult(t("customize.testOk", { n: snap.metrics.length }), true);
+    if (input) input.value = "";
+    void forceUsageRefreshAttempt(false).then(requestTraySync);
+  } catch (err) {
+    setSensenovaResult(`${t("customize.testFailed")}: ${String(err)}`, false);
+  }
 }
 
 /// "Test connection" behind the ⚙ panel: validates the pasted key through

@@ -3746,6 +3746,20 @@ fn stepfun_plan_clear() {
     providers::stepfun_plan::clear_creds();
 }
 
+/// SenseNova: build the PKCE authorization URL for the one-time browser
+/// sign-in (the verifier/state stay in memory for `sensenova_oauth_finish`).
+#[tauri::command]
+fn sensenova_oauth_start() -> String {
+    providers::sensenova::oauth_start()
+}
+
+/// SenseNova: exchange/persist whatever the browser yielded (redirect URL,
+/// token payload, bare access token, or raw code) and probe the pools.
+#[tauri::command]
+async fn sensenova_oauth_finish(input: String) -> Result<providers::Snapshot, String> {
+    providers::sensenova::oauth_finish(&input).await
+}
+
 /// Shared panel-window opener: focus the existing window instead of stacking
 /// duplicates, build it otherwise. Used by the open_panel_window command and
 /// the tray menu ("Open main panel" / "Settings…").
@@ -4050,7 +4064,9 @@ pub fn run() {
             set_window_form,
             stepfun_plan_test,
             stepfun_plan_save,
-            stepfun_plan_clear
+            stepfun_plan_clear,
+            sensenova_oauth_start,
+            sensenova_oauth_finish
         ])
         .setup(|app| {
             spawn_update_checker(app.handle());

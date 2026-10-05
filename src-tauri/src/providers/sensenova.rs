@@ -12,10 +12,11 @@
 //!       atomically (temp file + rename). invalid_grant drops the token
 //!       and falls through; repeated failures back off 30s → 5m → 30m,
 //!       then stop auto-retrying until the next process start.
-//!   L2  no/failed refresh → bootstrap guidance (v1: paste tokens once in
-//!       Settings; webview silent SSO re-auth is a phase-2 acquisition
-//!       path — its interception feasibility is unverified, so it ships
-//!       later rather than blind).
+//!   L2  no/failed refresh → sign in again with one browser authorization:
+//!       Settings builds a PKCE /oauth2/auth link (public client `nova`);
+//!       whatever the browser yields — redirect URL, token payload, or a
+//!       bare access token — is exchanged/persisted here, and the refresh
+//!       token it issues is what makes L1 permanent.
 //!   L3  everything failed → error snapshot; lib.rs's stale-snapshot
 //!       mechanism shows the last good numbers with a warning instead of
 //!       passing old data off as current.
@@ -23,7 +24,9 @@
 //! ladder; only authentication rejection does.
 
 use super::{http, json_body, Metric, Snapshot};
+use base64::Engine;
 use serde_json::Value;
+use sha2::{Digest, Sha256};
 use std::path::PathBuf;
 use std::sync::Mutex;
 
@@ -33,12 +36,18 @@ const MAX_BODY_BYTES: usize = 128 * 1024;
 const POOL_URL: &str = "https://platform.sensenova.cn/lite/console/v1/tokenplan/pool-usage";
 const TOKEN_URL: &str = "https://platform.sensenova.cn/oauth2/token";
 const CLIENT_ID: &str = "nova"; // public PKCE client id, from their frontend JS
+const AUTH_URL: &str = "https://platform.sensenova.cn/oauth2/auth";
+const REDIRECT_URI: &str = "https://platform.sensenova.cn";
+/// The redirect + scope pre-encoded for the query string (fixed values).
+const REDIRECT_URI_ENCODED: &str = "https%3A%2F%2Fplatform.sensenova.cn";
+const AUTH_SCOPE_ENCODED: &str = "openid%20offline%20offline_access";
 
 const BACKOFFS_MS: [i64; 3] = [30_000, 5 * 60_000, 30 * 60_000];
 
 /// Persisted credential slot: %APPDATA%/Pane/sensenova.json.
 #[derive(Clone, Default, serde::Serialize, serde::Deserialize)]
 struct Creds {
+    #[serde(default, alias = "apiKey")]
     access_token: String,
     #[serde(default, skip_serializing_if = "String::is_empty")]
     refresh_token: String,
@@ -145,7 +154,7 @@ async fn fetch() -> Result<Snapshot, String> {
         return Ok(Snapshot::no_credentials(
             ID,
             NAME,
-            "Sign in to SenseNova Token Plan in Settings (paste the session tokens once).",
+            "Sign in to SenseNova Token Plan in Settings (one browser authorization keeps it renewed).",
         ));
     }
 
@@ -270,6 +279,191 @@ async fn refresh_via_oauth(refresh: &str) -> Result<(String, Option<String>), Re
         .filter(|s| !s.is_empty() && *s != refresh)
         .map(str::to_string);
     Ok((access, rotated))
+}
+
+// ── Browser sign-in (PKCE authorization code) ──────────────────────────────
+
+/// 32 bytes of entropy: RandomState is OS-seeded and a monotonic counter
+/// keeps successive calls distinct — no new dependency (same recipe as
+/// cursor_oauth.rs).
+fn random_bytes() -> [u8; 32] {
+    use std::hash::{BuildHasher, Hasher};
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static COUNTER: AtomicU64 = AtomicU64::new(0);
+    let seed = std::collections::hash_map::RandomState::new().build_hasher().finish();
+    let n = COUNTER.fetch_add(1, Ordering::Relaxed);
+    let mut out = [0u8; 32];
+    for (i, byte) in out.iter_mut().enumerate() {
+        let mut x = seed
+            ^ n.wrapping_mul(0x9E37_79B9_7F4A_7C15)
+            ^ ((i as u64).wrapping_mul(0xBF58_476D_1CE4_E5B9));
+        x ^= x >> 12;
+        x ^= x << 25;
+        x ^= x >> 27;
+        *byte = (x & 0xff) as u8;
+    }
+    out
+}
+
+fn generate_code_verifier() -> String {
+    base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(random_bytes())
+}
+
+fn generate_code_challenge(code_verifier: &str) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(code_verifier.as_bytes());
+    base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(hasher.finalize())
+}
+
+/// PKCE material for the in-flight browser authorization. Memory only: a
+/// restart invalidates it and the user just reopens the link.
+struct PendingAuth {
+    verifier: String,
+    state: String,
+}
+
+static PENDING: Mutex<Option<PendingAuth>> = Mutex::new(None);
+
+fn auth_url(challenge: &str, state: &str) -> String {
+    format!(
+        "{AUTH_URL}?response_type=code&client_id={CLIENT_ID}&code_challenge_method=S256\
+         &code_challenge={challenge}&redirect_uri={REDIRECT_URI_ENCODED}\
+         &scope={AUTH_SCOPE_ENCODED}&state={state}&lang=zh-CN"
+    )
+}
+
+/// Settings "Sign in": build the PKCE link and remember its verifier/state.
+pub fn oauth_start() -> String {
+    let verifier = generate_code_verifier();
+    let state = generate_code_verifier();
+    let challenge = generate_code_challenge(&verifier);
+    if let Ok(mut guard) = PENDING.lock() {
+        *guard = Some(PendingAuth { verifier, state: state.clone() });
+    }
+    auth_url(&challenge, &state)
+}
+
+fn looks_like_jwt(s: &str) -> bool {
+    s.starts_with("eyJ") && s.matches('.').count() == 2 && !s.contains(char::is_whitespace)
+}
+
+/// A token payload copied from DevTools (camelCase or snake_case accepted).
+fn tokens_from_payload(doc: &Value) -> Option<(String, Option<String>)> {
+    let access = doc
+        .get("access_token")
+        .or_else(|| doc.get("accessToken"))
+        .and_then(Value::as_str)
+        .filter(|s| !s.is_empty())?
+        .to_string();
+    let refresh = doc
+        .get("refresh_token")
+        .or_else(|| doc.get("refreshToken"))
+        .and_then(Value::as_str)
+        .filter(|s| !s.is_empty())
+        .map(str::to_string);
+    Some((access, refresh))
+}
+
+/// Redirect URL → (code, state). A bare code passes through; an error
+/// redirect is rejected with its reason.
+fn split_code_and_state(input: &str) -> Result<(String, Option<String>), String> {
+    let Some((_, query)) = input.split_once('?') else {
+        if input.contains('/') || input.contains(char::is_whitespace) {
+            return Err(
+                "that does not look like an authorization code — paste the redirect URL".into(),
+            );
+        }
+        return Ok((input.to_string(), None));
+    };
+    let mut code = None;
+    let mut state = None;
+    let mut error = None;
+    for pair in query.split(|c| c == '&' || c == '#') {
+        let Some((key, value)) = pair.split_once('=') else {
+            continue;
+        };
+        match key {
+            "code" => code = Some(value.to_string()),
+            "state" => state = Some(value.to_string()),
+            "error" => error = Some(value.to_string()),
+            _ => {}
+        }
+    }
+    if let Some(e) = error {
+        return Err(format!("authorization was rejected: {e}"));
+    }
+    match code.filter(|c| !c.is_empty()) {
+        Some(c) => Ok((c, state)),
+        None => Err("no code in the pasted URL — rerun the authorization link".into()),
+    }
+}
+
+fn save_oauth_tokens(access: &str, refresh: Option<&str>) {
+    let mut creds = load_creds();
+    creds.access_token = access.trim().to_string();
+    if let Some(r) = refresh.map(str::trim).filter(|r| !r.is_empty()) {
+        creds.refresh_token = r.to_string();
+    }
+    save_creds(&creds);
+}
+
+/// Exchange the authorization code under our stored PKCE verifier.
+async fn exchange_code(code: &str, state: Option<&str>) -> Result<String, String> {
+    let pending = PENDING.lock().ok().and_then(|mut guard| guard.take());
+    let Some(pending) = pending else {
+        return Err("authorization session expired — open the link again".into());
+    };
+    if let Some(s) = state.filter(|s| !s.is_empty()) {
+        if s != pending.state {
+            return Err("authorization state mismatch — start the sign-in again".into());
+        }
+    }
+    let resp = http()
+        .post(TOKEN_URL)
+        .form(&[
+            ("grant_type", "authorization_code"),
+            ("client_id", CLIENT_ID),
+            ("code", code),
+            ("redirect_uri", REDIRECT_URI),
+            ("code_verifier", pending.verifier.as_str()),
+            ("state", pending.state.as_str()),
+        ])
+        .send()
+        .await
+        .map_err(|e| format!("token request: {e}"))?;
+    if !resp.status().is_success() {
+        return Err(format!("token endpoint: HTTP {}", resp.status()));
+    }
+    let doc = json_body(resp, MAX_BODY_BYTES, "SenseNova token").await?;
+    let (access, refresh) =
+        tokens_from_payload(&doc).ok_or("token response carried no access_token")?;
+    save_oauth_tokens(&access, refresh.as_deref());
+    Ok(access)
+}
+
+/// Settings "Finish sign-in": take whatever the browser/DevTools yielded —
+/// a redirect URL, the token payload JSON, a bare access token (JWT), or a
+/// raw code — persist the credential pair, and return a live snapshot.
+pub async fn oauth_finish(input: &str) -> Result<Snapshot, String> {
+    let input = input.trim();
+    if input.is_empty() {
+        return Err("paste the redirect URL, token payload, or authorization code".into());
+    }
+    if input.starts_with('{') {
+        let doc: Value =
+            serde_json::from_str(input).map_err(|e| format!("not valid JSON: {e}"))?;
+        let (access, refresh) =
+            tokens_from_payload(&doc).ok_or("the pasted JSON carries no access_token")?;
+        save_oauth_tokens(&access, refresh.as_deref());
+        return fetch_pools(&access).await.map_err(|e| describe(&e));
+    }
+    if looks_like_jwt(input) {
+        save_oauth_tokens(input, None);
+        return fetch_pools(input).await.map_err(|e| describe(&e));
+    }
+    let (code, state) = split_code_and_state(input)?;
+    let access = exchange_code(&code, state.as_deref()).await?;
+    fetch_pools(&access).await.map_err(|e| describe(&e))
 }
 
 async fn fetch_pools(token: &str) -> Result<Snapshot, FetchErr> {
@@ -464,5 +658,61 @@ mod tests {
     fn backoff_ladder_progression() {
         // The schedule itself: 30s, 5m, 30m (then stays at the last rung).
         assert_eq!(BACKOFFS_MS, [30_000, 300_000, 1_800_000]);
+    }
+
+    #[test]
+    fn pkce_challenge_matches_the_rfc_7636_vector() {
+        let challenge = generate_code_challenge("dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk");
+        assert_eq!(challenge, "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM");
+        let verifier = generate_code_verifier();
+        assert!(verifier.len() >= 43);
+        assert!(!verifier.contains('+') && !verifier.contains('/') && !verifier.contains('='));
+    }
+
+    #[test]
+    fn auth_url_carries_pkce_and_the_offline_scope() {
+        let url = auth_url("CHALLENGE", "STATE");
+        assert!(url.starts_with("https://platform.sensenova.cn/oauth2/auth?"));
+        assert!(url.contains("client_id=nova"));
+        assert!(url.contains("code_challenge_method=S256"));
+        assert!(url.contains("code_challenge=CHALLENGE"));
+        assert!(url.contains("redirect_uri=https%3A%2F%2Fplatform.sensenova.cn"));
+        assert!(url.contains("offline_access"));
+        assert!(url.contains("state=STATE"));
+    }
+
+    #[test]
+    fn redirect_urls_and_bare_codes_split_cleanly() {
+        let (code, state) =
+            split_code_and_state("https://platform.sensenova.cn/?code=abc123&state=xyz&lang=zh-CN")
+                .unwrap();
+        assert_eq!(code, "abc123");
+        assert_eq!(state.as_deref(), Some("xyz"));
+        assert_eq!(split_code_and_state("abc123").unwrap(), ("abc123".into(), None));
+        let err = split_code_and_state("https://platform.sensenova.cn/?error=access_denied")
+            .err()
+            .unwrap();
+        assert!(err.contains("access_denied"));
+        assert!(split_code_and_state("https://platform.sensenova.cn/?state=xyz").is_err());
+        assert!(split_code_and_state("not a code").is_err());
+    }
+
+    #[test]
+    fn token_payloads_accept_both_spellings_and_a_bare_jwt() {
+        let snake = serde_json::json!({"access_token": "a", "refresh_token": "r"});
+        assert_eq!(tokens_from_payload(&snake), Some(("a".into(), Some("r".into()))));
+        let camel = serde_json::json!({"accessToken": "a", "refreshToken": "r"});
+        assert_eq!(tokens_from_payload(&camel), Some(("a".into(), Some("r".into()))));
+        assert_eq!(tokens_from_payload(&serde_json::json!({"refresh_token": "r"})), None);
+        assert!(looks_like_jwt("eyJhbGciOiJub25lIn0.eyJleHAiOjF9.sig"));
+        assert!(!looks_like_jwt("abc"));
+        assert!(!looks_like_jwt("https://platform.sensenova.cn/?code=x"));
+    }
+
+    #[test]
+    fn legacy_api_key_blob_reads_as_access_token() {
+        let creds: Creds = serde_json::from_str(r#"{"apiKey":"tok"}"#).unwrap();
+        assert_eq!(creds.access_token, "tok");
+        assert!(creds.refresh_token.is_empty());
     }
 }
