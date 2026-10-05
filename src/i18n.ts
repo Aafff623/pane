@@ -47,6 +47,10 @@ const en: Dict = {
   "update.to": "⬆ Update to v{version}",
   "update.installing": "Installing…",
   "update.retry": "⬆ Update to v{version} — retry",
+  "update.availableTitle": "Update available — v{version}",
+  "update.availableBody": "A new version of Pane is ready. Install now and restart?",
+  "update.later": "Later",
+  "update.now": "Update now",
 
   "settings.done": "← Done",
   "settings.title": "Settings",
@@ -726,6 +730,10 @@ const zh: Dict = {
   "update.to": "⬆ 更新到 v{version}",
   "update.installing": "正在安装…",
   "update.retry": "⬆ 更新到 v{version} — 重试",
+  "update.availableTitle": "发现新版本 v{version}",
+  "update.availableBody": "Pane 有新版本可用。立即安装并重启？",
+  "update.later": "稍后",
+  "update.now": "立即更新",
 
   "settings.done": "← 完成",
   "settings.title": "设置",
@@ -1382,6 +1390,10 @@ const ru: Dict = {
   "update.to": "⬆ Обновить до v{version}",
   "update.installing": "Установка…",
   "update.retry": "⬆ Обновить до v{version} — повторить",
+  "update.availableTitle": "Доступно обновление — v{version}",
+  "update.availableBody": "Готова новая версия Pane. Установить и перезапустить?",
+  "update.later": "Позже",
+  "update.now": "Обновить",
 
   "settings.done": "← Готово",
   "settings.title": "Настройки",

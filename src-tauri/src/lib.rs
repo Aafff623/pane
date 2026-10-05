@@ -3539,22 +3539,18 @@ async fn codex_redeem_credit(
     providers::codex::redeem_credit(&pid, &credit_id).await
 }
 
-/// Updater with the app version stamped into the endpoint by us. Tauri's
-/// `{{current_version}}` template arrives percent-encoded and never gets
-/// substituted in query strings, so 0.4.17 installs literally reported
-/// "?v={{current_version}}" — the version is now formatted in Rust.
-/// GitHub stays as the automatic fallback; the pubkey comes from config.
-fn updater_endpoint_strings(version: &str) -> [String; 2] {
-    [
-        format!("https://trypane.xyz/api/update?v={version}"),
-        "https://github.com/ItsJazii/pane/releases/latest/download/latest.json".into(),
-    ]
+/// Update manifest endpoint: this project's own GitHub Releases
+/// `latest.json`, signed with this project's minisign key. The original
+/// upstream's trypane.xyz server and ItsJazii releases were dropped when the
+/// project detached — their builds are signed with a key this app no longer
+/// trusts, so querying them could only produce signature failures.
+fn updater_endpoint_strings() -> [String; 1] {
+    ["https://github.com/Aafff623/pane/releases/latest/download/latest.json".into()]
 }
 
 fn build_updater(app: &tauri::AppHandle) -> Result<tauri_plugin_updater::Updater, String> {
     use tauri_plugin_updater::UpdaterExt;
-    let version = app.package_info().version.to_string();
-    let endpoints = updater_endpoint_strings(&version)
+    let endpoints = updater_endpoint_strings()
         .into_iter()
         .map(|endpoint| endpoint.parse().map_err(|e| format!("endpoint parse: {e}")))
         .collect::<Result<Vec<_>, _>>()?;
@@ -3950,13 +3946,10 @@ mod tests {
     }
 
     #[test]
-    fn updater_prefers_trypane_then_github() {
+    fn updater_points_at_own_github_releases() {
         assert_eq!(
-            updater_endpoint_strings("0.4.46"),
-            [
-                "https://trypane.xyz/api/update?v=0.4.46".to_string(),
-                "https://github.com/ItsJazii/pane/releases/latest/download/latest.json".to_string(),
-            ]
+            updater_endpoint_strings(),
+            ["https://github.com/Aafff623/pane/releases/latest/download/latest.json".to_string()]
         );
     }
 

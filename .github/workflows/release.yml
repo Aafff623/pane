@@ -51,16 +51,13 @@ jobs:
       - name: Install frontend deps
         run: npm ci
 
-      # This repo has no minisign private key (the updater pubkey embedded
-      # in tauri.conf.json belongs to the original upstream), so updater
-      # artifacts cannot be signed here. Write the override to a file:
-      # inline JSON on Windows npm loses its double quotes.
-      - name: Write unsigned-bundle override
-        shell: bash
-        run: printf '%s\n' '{"bundle":{"createUpdaterArtifacts":false}}' > build-config.json
-
+      # Updater artifacts are signed with this project's own minisign key
+      # (TAURI_SIGNING_PRIVATE_KEY repo secret, no password; the matching
+      # pubkey is embedded in tauri.conf.json).
       - name: Build
-        run: npm run tauri build -- --config build-config.json --bundles ${{ matrix.bundles }}
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+        run: npm run tauri build -- --bundles ${{ matrix.bundles }}
 
       - name: Stage artifacts
         shell: bash
@@ -68,6 +65,7 @@ jobs:
           mkdir -p dist-artifacts
           find src-tauri/target/release/bundle -type f \( \
             -name '*-setup.exe' -o -name '*.dmg' -o -name '*.AppImage' -o -name '*.deb' \
+            -o -name '*.sig' -o -name '*.app.tar.gz' \
           \) -exec cp {} dist-artifacts/ \;
           ls -la dist-artifacts
           test -n "$(ls -A dist-artifacts)"
@@ -110,28 +108,41 @@ jobs:
 
           win=$(find artifacts -name '*-setup.exe' -print -quit)
           mac=$(find artifacts -name '*.dmg' -print -quit)
+          macup=$(find artifacts -name '*.app.tar.gz' -print -quit)
           appimage=$(find artifacts -name '*.AppImage' -print -quit)
           deb=$(find artifacts -name '*.deb' -print -quit)
           if [[ -z "$win" ]]; then
             echo "Windows NSIS installer missing; refusing to publish." >&2
             exit 1
           fi
+          # Signed updater artifacts are mandatory: an empty signature makes
+          # every client reject the update silently.
+          for f in "$win" ${macup:+"$macup"} ${appimage:+"$appimage"}; do
+            if [[ ! -s "$f.sig" ]]; then
+              echo "Missing updater signature '$f.sig' — is TAURI_SIGNING_PRIVATE_KEY set?" >&2
+              exit 1
+            fi
+          done
 
           sha256() { sha256sum "$1" | awk '{print $1}'; }
           win_hash=$(sha256 "$win")
           notes="https://github.com/Aafff623/pane/blob/main/CHANGELOG.md"
           pub_date=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
-          python3 - "$ver" "$tag" "$notes" "$pub_date" "$win" "$win_hash" "${mac:-}" "${appimage:-}" <<'PY'
+          python3 - "$ver" "$tag" "$notes" "$pub_date" "$win" "$win_hash" "${mac:-}" "${macup:-}" "${appimage:-}" <<'PY'
           import json, os, sys
-          ver, tag, notes, pub_date, win, win_hash, mac, appimage = sys.argv[1:]
+          ver, tag, notes, pub_date, win, win_hash, mac, macup, appimage = sys.argv[1:]
           base = f"https://github.com/Aafff623/pane/releases/download/{tag}"
+          def sig(path):
+              with open(path + ".sig", encoding="utf-8") as f:
+                  return f.read().strip()
           platforms = {
-              "windows-x86_64": {"signature": "", "url": f"{base}/{os.path.basename(win)}"}
+              "windows-x86_64": {"signature": sig(win), "url": f"{base}/{os.path.basename(win)}"}
           }
-          if mac:
-              platforms["darwin-aarch64"] = {"signature": "", "url": f"{base}/{os.path.basename(mac)}"}
+          # The macOS updater consumes the .app.tar.gz, not the dmg.
+          if macup:
+              platforms["darwin-aarch64"] = {"signature": sig(macup), "url": f"{base}/{os.path.basename(macup)}"}
           if appimage:
-              platforms["linux-x86_64"] = {"signature": "", "url": f"{base}/{os.path.basename(appimage)}"}
+              platforms["linux-x86_64"] = {"signature": sig(appimage), "url": f"{base}/{os.path.basename(appimage)}"}
           manifest = {
               "version": ver,
               "notes": notes,

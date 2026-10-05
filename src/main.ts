@@ -3621,13 +3621,68 @@ async function checkForUpdate(): Promise<void> {
     // Only ever upgrade knowledge: a null result must not erase a version
     // the background checker announced while this check was in flight.
     const v = await invoke<string | null>("check_update");
-    if (v) updateVersion = v;
+    if (v) {
+      updateVersion = v;
+      maybePromptUpdate(v);
+    }
   } catch {
     // Offline or GitHub unreachable — the stamp just returns; the
     // 4-hourly background checker will try again anyway.
   }
   checkingUpdate = false;
   renderBuildInfo();
+}
+
+// Update popup — a newly discovered version (popover-open check or the
+// 4-hourly background checker) prompts once per version per run; the footer
+// button stays as the always-visible entry point. Mirrors appConfirm's
+// overlay, with "later" dismissing via Esc/backdrop like a confirm cancel.
+let updatePromptedFor: string | null = null;
+
+function maybePromptUpdate(version: string): void {
+  if (updatePromptedFor === version || document.querySelector("#update-overlay")) return;
+  updatePromptedFor = version;
+  const overlay = document.createElement("div");
+  overlay.id = "update-overlay";
+  overlay.innerHTML = `
+    <div id="update-box" role="dialog" aria-modal="true">
+      <h3>${escapeHtml(t("update.availableTitle", { version }))}</h3>
+      <p>${escapeHtml(t("update.availableBody", { version }))}</p>
+      <div id="update-actions">
+        <button id="update-later" type="button">${escapeHtml(t("update.later"))}</button>
+        <button id="update-now" type="button">${escapeHtml(t("update.now"))}</button>
+      </div>
+    </div>`;
+  const close = () => {
+    document.removeEventListener("keydown", onKey, true);
+    overlay.remove();
+  };
+  const onKey = (e: KeyboardEvent) => {
+    if (e.key === "Escape") {
+      e.preventDefault();
+      e.stopPropagation();
+      close();
+    }
+  };
+  overlay.addEventListener("click", (e) => {
+    if (e.target === overlay) close();
+  });
+  overlay.querySelector("#update-later")!.addEventListener("click", close);
+  const nowBtn = overlay.querySelector<HTMLButtonElement>("#update-now")!;
+  nowBtn.addEventListener("click", () => {
+    // On success the app restarts, so only the failure path matters here.
+    nowBtn.textContent = t("update.installing");
+    nowBtn.disabled = true;
+    invoke("install_update").catch((err) => {
+      nowBtn.textContent = t("update.now");
+      nowBtn.disabled = false;
+      const body = overlay.querySelector("#update-box p");
+      if (body) body.textContent = t("footer.updateFailed", { err: String(err) });
+    });
+  });
+  document.addEventListener("keydown", onKey, true);
+  document.body.appendChild(overlay);
+  nowBtn.focus();
 }
 
 // ---------------------------------------------------------------------------
@@ -9980,6 +10035,7 @@ window.addEventListener("DOMContentLoaded", () => {
   void listen<string>("update-available", (e) => {
     updateVersion = e.payload;
     renderBuildInfo();
+    maybePromptUpdate(e.payload);
   });
 
   void listen("tray-strip-restore", () => {

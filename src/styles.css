@@ -4212,7 +4212,8 @@ body.no-glass .cust-dock {
    In-app confirm dialog (replaces the native "localhost says" popup)
 --------------------------------------------------------------------------- */
 
-#confirm-overlay {
+#confirm-overlay,
+#update-overlay {
   position: fixed;
   inset: 0;
   z-index: 90;
@@ -4226,7 +4227,8 @@ body.no-glass .cust-dock {
 }
 
 /* Same liquid-glass material as the What's-new dialog. */
-#confirm-box {
+#confirm-box,
+#update-box {
   width: min(88%, 300px);
   background:
     linear-gradient(180deg, rgba(255, 255, 255, 0.07), rgba(255, 255, 255, 0) 38%),
@@ -4245,26 +4247,30 @@ body.no-glass .cust-dock {
   animation: confirm-pop 0.18s cubic-bezier(0.2, 0.8, 0.3, 1);
 }
 
-#confirm-box h3 {
+#confirm-box h3,
+#update-box h3 {
   font-size: 14px;
   font-weight: 650;
   margin: 0 0 6px;
 }
 
-#confirm-box p {
+#confirm-box p,
+#update-box p {
   font-size: 12.5px;
   line-height: 1.5;
   color: var(--muted-foreground);
   margin: 0 0 14px;
 }
 
-#confirm-actions {
+#confirm-actions,
+#update-actions {
   display: flex;
   justify-content: flex-end;
   gap: 8px;
 }
 
-#confirm-actions button {
+#confirm-actions button,
+#update-actions button {
   font-family: inherit;
   font-size: 12px;
   font-weight: 600;
@@ -4274,27 +4280,32 @@ body.no-glass .cust-dock {
   transition: opacity 0.15s ease, transform 0.1s ease;
 }
 
-#confirm-actions button:active {
+#confirm-actions button:active,
+#update-actions button:active {
   transform: scale(0.95);
 }
 
-#confirm-cancel {
+#confirm-cancel,
+#update-later {
   background: transparent;
   border: 1px solid var(--border);
   color: var(--secondary-foreground);
 }
 
-#confirm-cancel:hover {
+#confirm-cancel:hover,
+#update-later:hover {
   background: var(--accent);
 }
 
-#confirm-ok {
+#confirm-ok,
+#update-now {
   background: var(--primary);
   border: 1px solid transparent;
   color: var(--primary-foreground);
 }
 
-#confirm-ok:hover {
+#confirm-ok:hover,
+#update-now:hover {
   opacity: 0.85;
 }
 
@@ -4316,7 +4327,9 @@ body.no-glass .cust-dock {
 
 @media (prefers-reduced-motion: reduce) {
   #confirm-overlay,
-  #confirm-box {
+  #confirm-box,
+  #update-overlay,
+  #update-box {
     animation: none;
   }
 }
@@ -4511,7 +4524,8 @@ body.no-glass .cust-dock {
 
 /* Light theme: white glass, same as the sidebar's light recipe. */
 :root[data-theme="light"] #whatsnew-box,
-:root[data-theme="light"] #confirm-box {
+:root[data-theme="light"] #confirm-box,
+:root[data-theme="light"] #update-box {
   background:
     linear-gradient(180deg, rgba(255, 255, 255, 0.5), rgba(255, 255, 255, 0) 38%),
     rgba(255, 255, 255, 0.6);

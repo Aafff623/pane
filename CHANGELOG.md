@@ -2,6 +2,13 @@
 
 ## Unreleased — 2026-10-05
 
+- Enable truly working auto-updates: releases are now signed with this
+  project's own minisign key (repo secret TAURI_SIGNING_PRIVATE_KEY, pubkey
+  embedded in the app), the updater reads this repo's GitHub Releases
+  latest.json, and a new-version popup offers one-click install + restart.
+  The original upstream's update server endpoints were dropped (its builds
+  are signed with a key this app no longer trusts).
+
 - Switch Claude spend to cc-switch's local ledger (`~/.cc-switch/cc-switch.db`,
   read-only) as the primary source: its proxy records real tokens even where a
   relay zeroed the CLI logs (self-scan undercounted 7~24x). Pane's own scan now
