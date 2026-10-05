@@ -6157,6 +6157,14 @@ function renderCustConfig(id: string): string {
       </div>
       <p class="settings-note">${escapeHtml(t("customize.stepfunPlanLoginHelp"))}</p>
       <div class="form-field">
+        <span class="form-label">${escapeHtml(t("customize.stepfunPlanUserLabel"))}</span>
+        <input class="form-input" type="text" data-cust-user="${id}" placeholder="${escapeHtml(t("customize.stepfunPlanUserPh"))}" autocomplete="username" spellcheck="false" />
+      </div>
+      <div class="form-field">
+        <span class="form-label">${escapeHtml(t("customize.stepfunPlanPassLabel"))}</span>
+        <input class="form-input" type="password" data-cust-pass="${id}" placeholder="${escapeHtml(t("customize.stepfunPlanPassPh"))}" autocomplete="new-password" spellcheck="false" />
+      </div>
+      <div class="form-field">
         <span class="form-label">${escapeHtml(t("customize.stepfunPlanTokenLabel"))}</span>
         <input class="form-input" type="password" data-cust-key="${id}" placeholder="${escapeHtml(t("customize.stepfunPlanTokenPh"))}" autocomplete="new-password" spellcheck="false" />
         <div class="form-help">${escapeHtml(t("customize.formKeyHelp"))}</div>
@@ -7719,6 +7727,36 @@ async function handleCustomizeClick(target: HTMLElement): Promise<boolean> {
     const id = custSave.dataset.custSave!;
     const panel = custSave.closest(".cust-config");
     const keyInp = panel?.querySelector<HTMLInputElement>("[data-cust-key]");
+    if (id === "stepfun-plan") {
+      // Triple-credential save: the command validates the account with a
+      // real login before storing, so a typo fails here, not later.
+      const username = panel?.querySelector<HTMLInputElement>("[data-cust-user]")?.value.trim() ?? "";
+      const password = panel?.querySelector<HTMLInputElement>("[data-cust-pass]")?.value ?? "";
+      const result = panel?.querySelector<HTMLElement>("[data-cust-result]");
+      void invoke("stepfun_plan_save", {
+        token: keyInp?.value.trim() ?? "",
+        username,
+        password,
+      })
+        .then(() => {
+          if (result) {
+            result.textContent = t("customize.stepfunPlanSaved");
+            result.classList.toggle("ok", true);
+            result.classList.toggle("err", false);
+          }
+          const passInp = panel?.querySelector<HTMLInputElement>("[data-cust-pass]");
+          if (passInp) passInp.value = ""; // never leave the password in the DOM
+          void forceUsageRefreshAttempt(false).then(requestTraySync);
+        })
+        .catch((err: unknown) => {
+          if (result) {
+            result.textContent = `${t("customize.testFailed")}: ${String(err)}`;
+            result.classList.toggle("ok", false);
+            result.classList.toggle("err", true);
+          }
+        });
+      return true;
+    }
     if (keyInp) {
       void saveApiKey(id, {
         key: keyInp,
@@ -7834,6 +7872,37 @@ async function runCustKeyTest(id: string): Promise<void> {
     result.classList.toggle("err", ok === false);
   };
   const key = keyInp.value.trim();
+  if (id === "stepfun-plan") {
+    // Step Plan takes account+password (auto-renewing session) or a pasted
+    // token pair — the generic single-key probe doesn't apply.
+    const username = panel?.querySelector<HTMLInputElement>("[data-cust-user]")?.value.trim() ?? "";
+    const password = panel?.querySelector<HTMLInputElement>("[data-cust-pass]")?.value ?? "";
+    if (!key && !(username && password)) {
+      show(t("customize.testEmpty"), false);
+      if (saveBtn) saveBtn.disabled = false;
+      return;
+    }
+    if (saveBtn) saveBtn.disabled = true;
+    show(t("customize.testing"), null);
+    try {
+      const r = await invoke<{ ok: boolean; metrics: number; message: string }>("stepfun_plan_test", {
+        token: key,
+        username,
+        password,
+      });
+      if (!isCurrentTestGeneration("cust", id, generation)) return;
+      if (r.ok) {
+        show(t("customize.testOk", { n: r.metrics }), true);
+        if (saveBtn) saveBtn.disabled = false;
+      } else {
+        show(`${t("customize.testFailed")}: ${r.message}`, false);
+      }
+    } catch (err) {
+      if (!isCurrentTestGeneration("cust", id, generation)) return;
+      show(`${t("customize.testFailed")}: ${String(err)}`, false);
+    }
+    return;
+  }
   if (!key) {
     show(t("customize.testEmpty"), false);
     if (saveBtn) saveBtn.disabled = false; // empty = clear the stored key
@@ -9627,6 +9696,14 @@ window.addEventListener("DOMContentLoaded", () => {
       e.preventDefault();
       setDrawer(false);
       setSettings(!document.body.classList.contains("settings-open"));
+    }
+    // Ctrl+Shift+P opens the big panel window (dual-form PoC).
+    if (
+      e.ctrlKey && e.shiftKey && !e.altKey && e.code === "KeyP" &&
+      !e.repeat && !isTypingTarget(document.activeElement)
+    ) {
+      e.preventDefault();
+      void invoke("open_panel_window").catch(() => {});
     }
     // Bare T flips the Quota Overview to its soonest-reset (expiring)
     // list — the follow-up key after the global popover shortcut (Alt+2

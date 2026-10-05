@@ -2761,7 +2761,7 @@ async fn test_api_key(
         "kimi" => providers::kimi::snapshot_with_key(key).await,
         "opencode" => providers::opencode::snapshot_with_key(key).await,
         "stepfun" => providers::stepfun::snapshot_with_key(key).await,
-        "stepfun-plan" => providers::stepfun_plan::snapshot_with_key(key).await,
+        "stepfun-plan" => providers::stepfun_plan::snapshot_with_creds(key, "", "").await,
         "clinepass" => providers::clinepass::snapshot_with_key(key).await,
         "sensenova" => providers::sensenova::snapshot_with_key(key).await,
         "apigoto" => providers::apigoto::snapshot_with_key(key).await,
@@ -3623,6 +3623,72 @@ async fn check_update(app: tauri::AppHandle) -> Result<Option<String>, String> {
         .map_err(|e| e.to_string())
 }
 
+/// StepFun Step Plan: test pasted credentials (token pair, or account +
+/// password which runs a throwaway login). Never writes anything.
+#[tauri::command]
+async fn stepfun_plan_test(
+    token: String,
+    username: String,
+    password: String,
+) -> Result<serde_json::Value, String> {
+    let snap = providers::stepfun_plan::snapshot_with_creds(&token, &username, &password).await;
+    Ok(serde_json::json!({
+        "ok": snap.status == "ok",
+        "metrics": snap.metrics.len(),
+        "message": snap.error.unwrap_or_default(),
+    }))
+}
+
+/// StepFun Step Plan: persist credentials. Account + password without a
+/// token runs one real login so the stored pair is born here (and a bad
+/// password fails at save time, not at the next refresh).
+#[tauri::command]
+async fn stepfun_plan_save(
+    token: String,
+    username: String,
+    password: String,
+) -> Result<(), String> {
+    providers::stepfun_plan::save_creds_interactive(&token, &username, &password).await
+}
+
+/// StepFun Step Plan: drop the stored pair + account.
+#[tauri::command]
+fn stepfun_plan_clear() {
+    providers::stepfun_plan::clear_creds();
+}
+
+/// Panel-form PoC (dual-form product work): a second window over the same
+/// frontend bundle — resizable, decorated, taskbar-visible, not always-on-top.
+/// Re-opening focuses the existing window instead of stacking duplicates.
+/// Must stay an ASYNC command: on Windows, WebviewWindowBuilder::build()
+/// deadlocks inside synchronous commands / run_on_main_thread (wry's own
+/// docs) — and the deadlock left a live frame with a permanently blank
+/// webview, the exact white screen this PoC first produced.
+#[tauri::command]
+async fn open_panel_window(app: tauri::AppHandle) -> Result<(), String> {
+    if let Some(w) = app.get_webview_window("panel") {
+        w.set_focus().map_err(|e| e.to_string())?;
+        return Ok(());
+    }
+    tauri::WebviewWindowBuilder::new(&app, "panel", tauri::WebviewUrl::App("index.html".into()))
+        .title("Pane")
+        .inner_size(960.0, 640.0)
+        .resizable(true)
+        .decorations(true)
+        .always_on_top(false)
+        .skip_taskbar(false)
+        .visible(true)
+        .build()
+        .map_err(|e| e.to_string())?;
+    if let Some(w) = app.get_webview_window("panel") {
+        match w.url() {
+            Ok(url) => eprintln!("[pane] panel window opened, url={url}"),
+            Err(_) => eprintln!("[pane] panel window opened (url unreadable)"),
+        }
+    }
+    Ok(())
+}
+
 /// Startup + every 4 h: quiet update check; a hit emits "update-available"
 /// with the new version so the frontend can show its banner. 404 (no
 /// releases yet) and offline are non-events.
@@ -3843,7 +3909,11 @@ pub fn run() {
             hide_popover,
             codex_redeem_credit,
             install_update,
-            check_update
+            check_update,
+            open_panel_window,
+            stepfun_plan_test,
+            stepfun_plan_save,
+            stepfun_plan_clear
         ])
         .setup(|app| {
             spawn_update_checker(app.handle());
