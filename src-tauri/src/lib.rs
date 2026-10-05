@@ -28,7 +28,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde_json::{json, Value};
 use tauri::{
-    menu::{Menu, MenuItem},
+    menu::{CheckMenuItem, Menu, MenuItem, PredefinedMenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
     Emitter, Manager, WindowEvent,
 };
@@ -152,6 +152,12 @@ fn config_with_defaults(mut cfg: Value) -> Value {
     obj.entry("hideUsageWhileSharing").or_insert(json!(false));
     obj.entry("showTrend").or_insert(json!(false));
     obj.entry("locale").or_insert(json!("auto"));
+    // Dual-form: "floating" (tray popover) stays the default; "panel" is the
+    // large settings panel window. silentStart is stored-only for now —
+    // the popover already launches hidden, so the flag carries no extra
+    // behavior until the panel form learns auto-open-at-login semantics.
+    obj.entry("windowForm").or_insert(json!("floating"));
+    obj.entry("silentStart").or_insert(json!(false));
     cfg
 }
 
@@ -208,6 +214,8 @@ const CONFIG_KEYS: &[&str] = &[
     "hideUsageWhileSharing",
     "showTrend",
     "locale",
+    "windowForm",
+    "silentStart",
 ];
 
 static CONFIG_WRITE: Mutex<()> = Mutex::new(());
@@ -220,6 +228,9 @@ fn apply_config_patch(cfg: &mut Value, patch: &Value) {
                 if k == "locale" {
                     let ok = matches!(v.as_str(), Some("auto" | "en" | "zh" | "ru"));
                     target.insert(k.clone(), if ok { v.clone() } else { json!("auto") });
+                } else if k == "windowForm" {
+                    let ok = matches!(v.as_str(), Some("floating" | "panel"));
+                    target.insert(k.clone(), if ok { v.clone() } else { json!("floating") });
                 } else if k == "uiFont" {
                     // A font family name at most — trim and cap so a stray
                     // paste can't bloat config.json.
@@ -298,14 +309,70 @@ fn apply_tray_locale(app: &tauri::AppHandle, cfg: &Value) {
     }
     *last = Some(next);
     drop(last);
-    let Ok(quit) = MenuItem::with_id(app, "quit", i18n::quit_label(cfg), true, None::<&str>) else {
+    rebuild_tray_menu(app);
+}
+
+// ---------------------------------------------------------------------------
+// Tray menu (dual-form M2): open panel · show popover (check) · refresh all ·
+// settings · autostart (check) · quit. Rebuilt wholesale on state changes —
+// Windows set_text is fine, but a rebuild is simpler and the menu is closed
+// at every rebuild point anyway (after a click, or before it opens).
+// ---------------------------------------------------------------------------
+
+/// The popover's on-screen state, treating a Win+D-iconified window as
+/// hidden — the same rule toggle_popover uses.
+fn main_popover_visible(app: &tauri::AppHandle) -> bool {
+    app.get_webview_window("main")
+        .map(|w| w.is_visible().unwrap_or(false) && !w.is_minimized().unwrap_or(false))
+        .unwrap_or(false)
+}
+
+fn autostart_now_enabled(app: &tauri::AppHandle) -> bool {
+    use tauri_plugin_autostart::ManagerExt;
+    app.autolaunch().is_enabled().unwrap_or(false)
+}
+
+fn build_tray_menu(app: &tauri::AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
+    let cfg = config_with_defaults(load_config());
+    // "Open main panel" stays on top: when every window got lost, the tray
+    // is the only way back (cc-switch's hard-won lesson).
+    let open_panel = MenuItem::with_id(app, "open_panel", i18n::open_panel_label(&cfg), true, None::<&str>)?;
+    let show_popover = CheckMenuItem::with_id(
+        app,
+        "show_popover",
+        i18n::show_popover_label(&cfg),
+        true,
+        main_popover_visible(app),
+        None::<&str>,
+    )?;
+    let refresh_all = MenuItem::with_id(app, "refresh_all", i18n::refresh_all_label(&cfg), true, None::<&str>)?;
+    let sep1 = PredefinedMenuItem::separator(app)?;
+    let settings = MenuItem::with_id(app, "open_settings", i18n::settings_label(&cfg), true, None::<&str>)?;
+    let autostart = CheckMenuItem::with_id(
+        app,
+        "autostart",
+        i18n::autostart_label(&cfg),
+        true,
+        autostart_now_enabled(app),
+        None::<&str>,
+    )?;
+    let sep2 = PredefinedMenuItem::separator(app)?;
+    let quit = MenuItem::with_id(app, "quit", i18n::quit_label(&cfg), true, None::<&str>)?;
+    Menu::with_items(
+        app,
+        &[&open_panel, &show_popover, &refresh_all, &sep1, &settings, &autostart, &sep2, &quit],
+    )
+}
+
+fn rebuild_tray_menu(app: &tauri::AppHandle) {
+    let Some(tray) = app.tray_by_id("tray") else {
         return;
     };
-    let Ok(menu) = Menu::with_items(app, &[&quit]) else {
-        return;
-    };
-    if let Some(tray) = app.tray_by_id("tray") {
-        let _ = tray.set_menu(Some(menu));
+    match build_tray_menu(app) {
+        Ok(menu) => {
+            let _ = tray.set_menu(Some(menu));
+        }
+        Err(e) => eprintln!("[pane] rebuild tray menu: {e}"),
     }
 }
 
@@ -2487,30 +2554,37 @@ fn refresh_minutes_from(cfg: &Value) -> u64 {
         .max(1)
 }
 
+/// One full refresh pass without a webview: fetch every provider, sync the
+/// main tray numbers, and emit "usage-updated" so any open window can adopt
+/// the fresh snapshots. Shared by the background loop and the tray menu's
+/// "Refresh all quotas".
+async fn fetch_and_broadcast_usage(app: &tauri::AppHandle) -> Vec<providers::Snapshot> {
+    let snapshots = run_usage_fetch(app).await;
+    // The tray strip's provider logos are rasterized by the webview,
+    // so the background loop only refreshes the main tray icon and
+    // treats the last applied strip as the strip state.
+    let cfg = config_with_defaults(load_config());
+    if let Some(projection_cfg) = tray_projection_config_from(&cfg) {
+        let strip_active = last_strip().lock().map(|s| !s.is_empty()).unwrap_or(false);
+        let projection =
+            tray_projection::project_main_tray(&snapshots, &projection_cfg, strip_active);
+        if let Err(error) = apply_main_tray_projection(app, &projection) {
+            eprintln!("[pane] background tray sync: {error}");
+        }
+    }
+    let _ = app.emit("usage-updated", &snapshots);
+    snapshots
+}
+
 /// Auto-refresh that does not depend on the webview: fetches first (an
 /// immediate live pass at launch — the webview's startup refresh dies with
 /// the network at boot), then sleeps refreshMinutes (re-read every cycle,
-/// so a Settings change applies without a restart), updates the main tray
-/// numbers, and emits "usage-updated" so an open window can adopt the
-/// fresh snapshots.
+/// so a Settings change applies without a restart).
 fn spawn_auto_refresh(app: tauri::AppHandle) {
     tauri::async_runtime::spawn(async move {
         let mut outage_retries = 0u32;
         loop {
-            let snapshots = run_usage_fetch(&app).await;
-            // The tray strip's provider logos are rasterized by the webview,
-            // so the background loop only refreshes the main tray icon and
-            // treats the last applied strip as the strip state.
-            let cfg = config_with_defaults(load_config());
-            if let Some(projection_cfg) = tray_projection_config_from(&cfg) {
-                let strip_active = last_strip().lock().map(|s| !s.is_empty()).unwrap_or(false);
-                let projection =
-                    tray_projection::project_main_tray(&snapshots, &projection_cfg, strip_active);
-                if let Err(error) = apply_main_tray_projection(&app, &projection) {
-                    eprintln!("[pane] background tray sync: {error}");
-                }
-            }
-            let _ = app.emit("usage-updated", &snapshots);
+            let snapshots = fetch_and_broadcast_usage(&app).await;
 
             // Nothing came back live (boot with the network still coming up,
             // Wi-Fi down, …): the failed pass just benched every provider,
@@ -2519,7 +2593,7 @@ fn spawn_auto_refresh(app: tauri::AppHandle) {
             let got_live = snapshots
                 .iter()
                 .any(|s| s.status == "ok" && !s.stale);
-            let minutes = refresh_minutes_from(&cfg);
+            let minutes = refresh_minutes_from(&config_with_defaults(load_config()));
             if !snapshots.is_empty() && !got_live && outage_retries < 5 {
                 outage_retries += 1;
                 clear_soft_benches();
@@ -3657,20 +3731,22 @@ fn stepfun_plan_clear() {
     providers::stepfun_plan::clear_creds();
 }
 
-/// Panel-form PoC (dual-form product work): a second window over the same
-/// frontend bundle — resizable, decorated, taskbar-visible, not always-on-top.
-/// Re-opening focuses the existing window instead of stacking duplicates.
-/// Must stay an ASYNC command: on Windows, WebviewWindowBuilder::build()
-/// deadlocks inside synchronous commands / run_on_main_thread (wry's own
-/// docs) — and the deadlock left a live frame with a permanently blank
-/// webview, the exact white screen this PoC first produced.
-#[tauri::command]
-async fn open_panel_window(app: tauri::AppHandle) -> Result<(), String> {
+/// Shared panel-window opener: focus the existing window instead of stacking
+/// duplicates, build it otherwise. Used by the open_panel_window command and
+/// the tray menu ("Open main panel" / "Settings…").
+///
+/// MUST only be reached from async contexts: on Windows,
+/// WebviewWindowBuilder::build() deadlocks inside synchronous commands /
+/// run_on_main_thread (wry's own docs) — and the deadlock left a live frame
+/// with a permanently blank webview, the exact white screen this PoC first
+/// produced. Tray menu callbacks therefore forward here via
+/// tauri::async_runtime::spawn.
+async fn ensure_panel_window(app: &tauri::AppHandle) -> Result<(), String> {
     if let Some(w) = app.get_webview_window("panel") {
         w.set_focus().map_err(|e| e.to_string())?;
         return Ok(());
     }
-    tauri::WebviewWindowBuilder::new(&app, "panel", tauri::WebviewUrl::App("index.html".into()))
+    tauri::WebviewWindowBuilder::new(app, "panel", tauri::WebviewUrl::App("index.html".into()))
         .title("Pane")
         .inner_size(960.0, 640.0)
         .resizable(true)
@@ -3686,6 +3762,46 @@ async fn open_panel_window(app: tauri::AppHandle) -> Result<(), String> {
             Err(_) => eprintln!("[pane] panel window opened (url unreadable)"),
         }
     }
+    Ok(())
+}
+
+/// Panel-form PoC (dual-form product work): a second window over the same
+/// frontend bundle — resizable, decorated, taskbar-visible, not always-on-top.
+/// Must stay an ASYNC command — see ensure_panel_window for the deadlock note.
+#[tauri::command]
+async fn open_panel_window(app: tauri::AppHandle) -> Result<(), String> {
+    ensure_panel_window(&app).await
+}
+
+/// Window-form switch to "floating" closes the panel window; from inside the
+/// panel window this is a self-close. No-op when it is not open.
+#[tauri::command]
+async fn close_panel_window(app: tauri::AppHandle) -> Result<(), String> {
+    if let Some(w) = app.get_webview_window("panel") {
+        w.close().map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
+#[tauri::command]
+fn get_window_form() -> String {
+    config_with_defaults(load_config())
+        .get("windowForm")
+        .and_then(Value::as_str)
+        .unwrap_or("floating")
+        .to_string()
+}
+
+/// Persist the preferred window form ("floating" | "panel"). Async like the
+/// other window commands: config writes take the CONFIG_WRITE mutex, which
+/// must never be held on the main thread across window work.
+#[tauri::command]
+async fn set_window_form(form: String) -> Result<(), String> {
+    let form = match form.as_str() {
+        "panel" => "panel",
+        _ => "floating",
+    };
+    set_config_inner(json!({ "windowForm": form }))?;
     Ok(())
 }
 
@@ -3911,6 +4027,9 @@ pub fn run() {
             install_update,
             check_update,
             open_panel_window,
+            close_panel_window,
+            get_window_form,
+            set_window_form,
             stepfun_plan_test,
             stepfun_plan_save,
             stepfun_plan_clear
@@ -3919,14 +4038,7 @@ pub fn run() {
             spawn_update_checker(app.handle());
             spawn_share_watcher(app.handle().clone());
             spawn_auto_refresh(app.handle().clone());
-            let quit = MenuItem::with_id(
-                app,
-                "quit",
-                i18n::quit_label(&config_with_defaults(load_config())),
-                true,
-                None::<&str>,
-            )?;
-            let menu = Menu::with_items(app, &[&quit])?;
+            let menu = build_tray_menu(app.handle())?;
 
             TrayIconBuilder::with_id("tray")
                 .icon(app.default_window_icon().unwrap().clone())
@@ -3934,19 +4046,65 @@ pub fn run() {
                 .menu(&menu)
                 .show_menu_on_left_click(false)
                 .on_menu_event(|app, event| {
-                    if event.id.as_ref() == "quit" {
-                        app.exit(0);
+                    match event.id.as_ref() {
+                        "quit" => app.exit(0),
+                        // Menu callbacks are synchronous main-thread code —
+                        // building a window here deadlocks (see
+                        // ensure_panel_window), so hop to the async runtime.
+                        "open_panel" | "open_settings" => {
+                            let handle = app.clone();
+                            tauri::async_runtime::spawn(async move {
+                                if let Err(e) = ensure_panel_window(&handle).await {
+                                    eprintln!("[pane] tray open panel: {e}");
+                                }
+                            });
+                        }
+                        "show_popover" => {
+                            toggle_popover_centered(app);
+                            rebuild_tray_menu(app);
+                        }
+                        "refresh_all" => {
+                            let handle = app.clone();
+                            tauri::async_runtime::spawn(async move {
+                                // Same courtesy as the frontend Refresh
+                                // button: ordinary error benches must not
+                                // stand between the click and a real fetch.
+                                clear_soft_benches();
+                                fetch_and_broadcast_usage(&handle).await;
+                            });
+                        }
+                        "autostart" => {
+                            use tauri_plugin_autostart::ManagerExt;
+                            let enable = !autostart_now_enabled(app);
+                            // Same pair as the set_autostart command: persist
+                            // the choice, then flip the registry entry.
+                            let _ = set_config_inner(json!({ "autostart": enable }));
+                            let manager = app.autolaunch();
+                            let result = if enable { manager.enable() } else { manager.disable() };
+                            if let Err(e) = result {
+                                eprintln!("[pane] tray autostart: {e}");
+                            }
+                            rebuild_tray_menu(app);
+                        }
+                        _ => {}
                     }
                 })
                 .on_tray_icon_event(|tray, event| {
-                    if let TrayIconEvent::Click {
-                        button: MouseButton::Left,
-                        button_state: MouseButtonState::Up,
-                        position,
-                        ..
-                    } = event
-                    {
-                        toggle_popover(tray.app_handle(), position);
+                    match event {
+                        TrayIconEvent::Click {
+                            button: MouseButton::Left,
+                            button_state: MouseButtonState::Up,
+                            position,
+                            ..
+                        } => toggle_popover(tray.app_handle(), position),
+                        // Refresh check states (popover visible, autostart)
+                        // right before the menu opens.
+                        TrayIconEvent::Click {
+                            button: MouseButton::Right,
+                            button_state: MouseButtonState::Down,
+                            ..
+                        } => rebuild_tray_menu(tray.app_handle()),
+                        _ => {}
                     }
                 })
                 .build(app)?;

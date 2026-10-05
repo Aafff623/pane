@@ -1,6 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getVersion } from "@tauri-apps/api/app";
+import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
 import {
   providerCatalog,
   providerCategory,
@@ -28,6 +29,21 @@ import {
 
 // Injected by vite.config.ts at build time, e.g. "0707.1432".
 declare const __BUILD_STAMP__: string;
+
+// Dual-form: the "panel" window loads this same bundle but presents the
+// settings large panel; the tray popover ("main") keeps the floating
+// dashboard. The label comes from local window metadata — no IPC, so no
+// capability permission is needed. Outside Tauri (plain vite in a browser)
+// the metadata is absent: fall back to "main".
+const WINDOW_LABEL = (() => {
+  try {
+    return getCurrentWebviewWindow().label;
+  } catch {
+    return "main";
+  }
+})();
+const IS_PANEL_FORM = WINDOW_LABEL === "panel";
+if (IS_PANEL_FORM) document.body.classList.add("panel-form");
 
 // Inlined as data URIs (not URLs) so the share-card SVG snapshot can
 // embed them — rasterized SVG images can't load external resources.
@@ -254,6 +270,8 @@ interface Config {
   reduceAnimations: boolean;
   hideUsageWhileSharing: boolean;
   locale: LocalePref;
+  windowForm: "floating" | "panel";
+  silentStart: boolean;
 }
 
 const FRONTEND_CONFIG_KEYS = [
@@ -293,6 +311,8 @@ const FRONTEND_CONFIG_KEYS = [
   "reduceAnimations",
   "hideUsageWhileSharing",
   "locale",
+  "windowForm",
+  "silentStart",
 ] as const satisfies readonly (keyof Config)[];
 type _AssertAllConfigKeys = Exclude<keyof Config, (typeof FRONTEND_CONFIG_KEYS)[number]> extends never
   ? true
@@ -492,6 +512,8 @@ let config: Config = {
   reduceAnimations: false,
   hideUsageWhileSharing: false,
   locale: "auto",
+  windowForm: "floating",
+  silentStart: false,
 };
 let lastFetch = 0;
 let refreshing = false;
@@ -7418,6 +7440,10 @@ async function buildTrayStripEntries(state: TraySyncState): Promise<TrayStripEnt
 }
 
 function requestTraySync(): void {
+  // Panel form: the popover window owns the tray surfaces. Syncing from
+  // here before any snapshot arrived would push an empty strip over the
+  // main window's — only join in once usage-updated has warmed the cache.
+  if (IS_PANEL_FORM && !lastSnapshots.length) return;
   pendingTraySync = captureTraySyncState();
   if (!traySyncRunning) void drainTraySyncQueue();
 }
@@ -9188,7 +9214,7 @@ function applyLocale(): void {
   setActiveLocale(resolveLocale(config.locale));
   applyStaticI18n();
   renderOneNewApiSettings();
-  if (document.body.classList.contains("settings-open")) void loadKeyvault();
+  if (document.body.classList.contains("settings-open") || IS_PANEL_FORM) void loadKeyvault();
   applyAppearance();
   const status = document.querySelector("#status");
   if (status) {
@@ -9212,6 +9238,10 @@ async function initSettings(): Promise<void> {
   config.localShortcuts = config.localShortcuts ?? {};
   pruneEmptyCardGroups();
   config.locale = normalizeLocalePref(config.locale);
+  // Panel form: build the settings shell after config lands (controls read
+  // initial values from it) but before applyLocale, so applyStaticI18n
+  // translates the new DOM in the same pass.
+  if (IS_PANEL_FORM) initPanelForm();
   try {
     const sys = await invoke<string>("system_ui_locale");
     setSystemLocale(sys === "zh" || sys === "ru" ? sys : "en");
@@ -9523,6 +9553,8 @@ async function resetAllSettings(): Promise<void> {
     reduceAnimations: false,
     hideUsageWhileSharing: false,
     locale: "auto",
+    windowForm: "floating",
+    silentStart: false,
   }).catch(() => {});
   spendTab = "today";
   rangeSelected = false;
@@ -9581,7 +9613,275 @@ function syncSettingsControls(): void {
   setNum("#proxy-url", config.proxy?.url ?? "");
   const autostart = document.querySelector<HTMLInputElement>("#autostart");
   if (autostart) autostart.checked = true;
+  // Panel-form controls (absent in the popover window).
+  const silentStart = document.querySelector<HTMLInputElement>("#st-silent-start");
+  if (silentStart) silentStart.checked = config.silentStart === true;
+  const form = config.windowForm === "panel" ? "panel" : "floating";
+  const formRadio = document.querySelector<HTMLInputElement>(
+    `input[name="window-form"][value="${form}"]`,
+  );
+  if (formRadio) formRadio.checked = true;
   populatePinnedOptions();
+}
+
+// ---------------------------------------------------------------------------
+// Panel form ("panel" window): the settings large panel
+// ---------------------------------------------------------------------------
+// Dual-form M2 (cc-switch borrow): the second window presents a settings
+// panel instead of the floating dashboard. Layout re-creates cc-switch's
+// four SettingsLayout primitives in plain HTML/CSS — a block title
+// (15px/600) over a bordered card of hairline-divided rows, label left and
+// control right (the .st-* classes in styles.css carry the numbers). The
+// popover's own accordion settings page is untouched; the two coexist.
+//
+// Most controls are RE-PARENTED from the popover settings DOM rather than
+// rebuilt: initSettings wires them by id, and moving an element keeps its
+// listeners, so the key vault, shortcut capture, and font picker work here
+// with no duplicated logic. The popover chrome they leave behind is
+// display:none in this window; the main window's own DOM is unaffected.
+
+function panelRow(labelKey: string, ...controls: HTMLElement[]): HTMLElement {
+  const row = document.createElement("div");
+  row.className = "setting-row";
+  const label = document.createElement("label");
+  label.dataset.i18n = labelKey;
+  label.textContent = t(labelKey);
+  row.append(label, ...controls);
+  return row;
+}
+
+function panelSwitchRow(labelKey: string, tipKey: string, input: HTMLInputElement): HTMLElement {
+  const row = document.createElement("div");
+  row.className = "setting-row";
+  const toggle = document.createElement("label");
+  toggle.className = "toggle";
+  toggle.title = t(tipKey);
+  toggle.dataset.i18nTitle = tipKey;
+  const span = document.createElement("span");
+  span.dataset.i18n = labelKey;
+  span.textContent = t(labelKey);
+  toggle.append(input, span);
+  row.append(toggle);
+  return row;
+}
+
+function panelBlock(id: string, titleKey: string): { section: HTMLElement; body: HTMLElement } {
+  const section = document.createElement("section");
+  section.className = "st-block";
+  section.id = id;
+  const head = document.createElement("div");
+  head.className = "st-block-head";
+  const h2 = document.createElement("h2");
+  h2.dataset.i18n = titleKey;
+  h2.textContent = t(titleKey);
+  head.append(h2);
+  const body = document.createElement("div");
+  body.className = "st-card";
+  section.append(head, body);
+  return { section, body };
+}
+
+async function panelCheckForUpdate(btn: HTMLButtonElement): Promise<void> {
+  btn.disabled = true;
+  btn.textContent = t("update.check");
+  try {
+    // Same command the footer's update entry uses; a hit goes through the
+    // existing prompt + install_update chain.
+    const v = await invoke<string | null>("check_update");
+    if (v) {
+      updateVersion = v;
+      maybePromptUpdate(v);
+      btn.textContent = t("update.to", { version: v });
+    } else {
+      btn.textContent = t("settings.updateLatest");
+    }
+  } catch (err) {
+    btn.textContent = t("footer.updateFailed", { err: String(err) });
+  } finally {
+    btn.disabled = false;
+    window.setTimeout(() => {
+      if (!updateVersion) btn.textContent = t("settings.checkUpdate");
+    }, 2600);
+  }
+}
+
+function buildPanelShell(): void {
+  if (document.querySelector("#panel-shell")) return;
+  const shell = document.createElement("div");
+  shell.id = "panel-shell";
+
+  // Left icon nav — M2 ships the settings view only; M3 adds
+  // Dashboard / Auth-center entries here.
+  const nav = document.createElement("nav");
+  nav.id = "panel-nav";
+  const logo = document.createElement("span");
+  logo.id = "panel-logo";
+  logo.className = "app-logo";
+  logo.innerHTML = `<img src="${paneLogo}" alt="Pane" />`;
+  const settingsItem = document.createElement("button");
+  settingsItem.type = "button";
+  settingsItem.className = "panel-nav-item active";
+  settingsItem.title = t("settings.title");
+  settingsItem.dataset.i18nTitle = "settings.title";
+  settingsItem.innerHTML = uiIcon("gear", t("settings.title"));
+  nav.append(logo, settingsItem);
+
+  const main = document.createElement("div");
+  main.id = "panel-main";
+  const head = document.createElement("header");
+  head.id = "panel-head";
+  const h1 = document.createElement("h1");
+  h1.dataset.i18n = "settings.title";
+  h1.textContent = t("settings.title");
+  head.append(h1);
+  const scroll = document.createElement("div");
+  scroll.id = "panel-scroll";
+  main.append(head, scroll);
+
+  // --- General: re-parented popover rows + the new dual-form controls ----
+  const general = panelBlock("st-general", "settings.general");
+  const generalCard = general.body;
+  const moveRow = (controlId: string) => {
+    const row = document.querySelector(`#${controlId}`)?.closest<HTMLElement>(".setting-row");
+    if (row) generalCard.append(row);
+  };
+  moveRow("locale");
+  moveRow("appearance");
+  moveRow("ui-font");
+  moveRow("density");
+  moveRow("glass");
+  moveRow("reduce-anim");
+  moveRow("interval");
+  moveRow("pinned");
+  moveRow("timeformat");
+  const shortcutEntry = document.createElement("button");
+  shortcutEntry.type = "button";
+  shortcutEntry.className = "mini-btn";
+  shortcutEntry.dataset.i18n = "settings.manage";
+  shortcutEntry.textContent = t("settings.manage");
+  shortcutEntry.addEventListener("click", () => {
+    document
+      .querySelector("#st-shortcuts")
+      ?.scrollIntoView({ behavior: reduceMotion() ? "auto" : "smooth" });
+  });
+  generalCard.append(panelRow("settings.shortcutManage", shortcutEntry));
+  moveRow("autostart");
+  // Stored-only for now: the popover already launches hidden, so the flag
+  // carries no extra behavior until the panel form grows auto-open-at-login
+  // semantics. The tooltip says exactly that.
+  const silentStart = document.createElement("input");
+  silentStart.id = "st-silent-start";
+  silentStart.type = "checkbox";
+  silentStart.checked = config.silentStart === true;
+  silentStart.addEventListener("change", () => {
+    void patchConfig({ silentStart: silentStart.checked }).catch(() => {});
+  });
+  generalCard.append(panelSwitchRow("settings.silentStart", "settings.silentStartTip", silentStart));
+  const formGroup = document.createElement("div");
+  formGroup.className = "st-radio-group";
+  for (const value of ["floating", "panel"] as const) {
+    const label = document.createElement("label");
+    const radio = document.createElement("input");
+    radio.type = "radio";
+    radio.name = "window-form";
+    radio.value = value;
+    radio.checked = (config.windowForm ?? "floating") === value;
+    const span = document.createElement("span");
+    const key = value === "panel" ? "settings.windowFormPanel" : "settings.windowFormFloating";
+    span.dataset.i18n = key;
+    span.textContent = t(key);
+    label.append(radio, span);
+    formGroup.append(label);
+  }
+  formGroup.addEventListener("change", () => {
+    const value =
+      formGroup.querySelector<HTMLInputElement>("input:checked")?.value === "panel"
+        ? "panel"
+        : "floating";
+    // set_window_form persists; the local mirror keeps the next patchConfig
+    // snapshot from writing the old value back.
+    config.windowForm = value;
+    void invoke("set_window_form", { form: value }).catch(() => {});
+    // Immediate effect: "panel" focuses (or opens) the panel window;
+    // "floating" closes it — a self-close when picked from inside it.
+    if (value === "panel") void invoke("open_panel_window").catch(() => {});
+    else void invoke("close_panel_window").catch(() => {});
+  });
+  generalCard.append(panelRow("settings.windowForm", formGroup));
+  scroll.append(general.section);
+
+  // --- API key vault: the popover's vault UI, moved in whole -------------
+  const keyvault = panelBlock("st-keyvault", "settings.keyvault");
+  const kvPad = document.createElement("div");
+  kvPad.className = "st-pad";
+  for (const selector of ["#kv-vault-bar", "#keyvault-rows", ".kv-add-row", ".kv-hint"]) {
+    const el = document.querySelector<HTMLElement>(selector);
+    if (el) kvPad.append(el);
+  }
+  keyvault.body.append(kvPad);
+  scroll.append(keyvault.section);
+
+  // --- Shortcuts: wake + category + local bindings, moved in whole -------
+  const shortcuts = panelBlock("st-shortcuts", "settings.shortcutManage");
+  const scPad = document.createElement("div");
+  scPad.className = "st-pad";
+  const shortcutInner = document.querySelector("#shortcut")?.closest(".acc-inner");
+  if (shortcutInner) {
+    while (shortcutInner.firstChild) scPad.append(shortcutInner.firstChild as HTMLElement);
+  }
+  shortcuts.body.append(scPad);
+  scroll.append(shortcuts.section);
+
+  // --- About ---------------------------------------------------------------
+  const about = panelBlock("st-about", "settings.about");
+  const versionValue = document.createElement("span");
+  versionValue.className = "st-value";
+  versionValue.id = "st-version";
+  versionValue.textContent = "…";
+  about.body.append(panelRow("settings.version", versionValue));
+  const checkBtn = document.createElement("button");
+  checkBtn.type = "button";
+  checkBtn.className = "mini-btn";
+  checkBtn.dataset.i18n = "settings.checkUpdate";
+  checkBtn.textContent = t("settings.checkUpdate");
+  checkBtn.addEventListener("click", () => {
+    void panelCheckForUpdate(checkBtn);
+  });
+  about.body.append(panelRow("settings.update", checkBtn));
+  const changelogBtn = document.querySelector<HTMLElement>("#changelog-btn");
+  if (changelogBtn) {
+    const row = document.createElement("div");
+    row.className = "setting-row";
+    row.append(changelogBtn);
+    about.body.append(row);
+  }
+  const resetBtn = document.querySelector<HTMLElement>("#reset-all-settings");
+  if (resetBtn) {
+    const row = document.createElement("div");
+    row.className = "setting-row";
+    row.append(resetBtn);
+    about.body.append(row);
+  }
+  const ack = document.createElement("p");
+  ack.className = "settings-note st-pad";
+  ack.dataset.i18n = "settings.ackBody";
+  ack.textContent = t("settings.ackBody");
+  about.body.append(ack);
+  scroll.append(about.section);
+
+  shell.append(nav, main);
+  document.body.appendChild(shell);
+}
+
+function initPanelForm(): void {
+  buildPanelShell();
+  // No accordion gating here — the vault is visible as soon as the panel
+  // opens (the popover only loads it while its settings page is open).
+  void loadKeyvault();
+  void getVersion().then((v) => {
+    const el = document.querySelector("#st-version");
+    if (el) el.textContent = `v${v} · build ${__BUILD_STAMP__}`;
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -10323,9 +10623,10 @@ window.addEventListener("DOMContentLoaded", () => {
   });
 
   // Back from hidden: pull the backend's latest right away instead of
-  // waiting out the rest of the refresh interval.
+  // waiting out the rest of the refresh interval. The panel form skips
+  // this — it renders no cards, and usage-updated keeps its cache warm.
   document.addEventListener("visibilitychange", () => {
-    if (!document.hidden) void refresh(true);
+    if (!document.hidden && !IS_PANEL_FORM) void refresh(true);
   });
 
   void listen("popover-shown", () => {
@@ -10365,6 +10666,12 @@ window.addEventListener("DOMContentLoaded", () => {
     void refresh();
   });
   void initSettings().then(() => {
+    if (IS_PANEL_FORM) {
+      // Settings-only surface: the backend auto-refresh loop already fetches
+      // and broadcasts usage-updated — no boot fetch, no refresh timer, no
+      // What's-new popup in this window.
+      return;
+    }
     scheduleAutoRefresh();
     void paintCachedSnapshots();
     void refresh(true);

@@ -20,6 +20,48 @@ pub fn quit_label(cfg: &Value) -> &'static str {
     }
 }
 
+// Tray menu (M2 dual-form work). Same pattern as quit_label: Rust paints
+// these, so the strings live here.
+pub fn open_panel_label(cfg: &Value) -> &'static str {
+    match resolved_locale(cfg) {
+        "zh" => "打开主面板",
+        "ru" => "Открыть главную панель",
+        _ => "Open main panel",
+    }
+}
+
+pub fn show_popover_label(cfg: &Value) -> &'static str {
+    match resolved_locale(cfg) {
+        "zh" => "显示悬浮窗",
+        "ru" => "Показать всплывающее окно",
+        _ => "Show floating window",
+    }
+}
+
+pub fn refresh_all_label(cfg: &Value) -> &'static str {
+    match resolved_locale(cfg) {
+        "zh" => "刷新全部额度",
+        "ru" => "Обновить все квоты",
+        _ => "Refresh all quotas",
+    }
+}
+
+pub fn settings_label(cfg: &Value) -> &'static str {
+    match resolved_locale(cfg) {
+        "zh" => "设置…",
+        "ru" => "Настройки…",
+        _ => "Settings…",
+    }
+}
+
+pub fn autostart_label(cfg: &Value) -> &'static str {
+    match resolved_locale(cfg) {
+        "zh" => "开机自启",
+        "ru" => "Запускать с Windows",
+        _ => "Start with Windows",
+    }
+}
+
 pub fn metric_label(cfg: &Value, label: &str) -> String {
     match resolved_locale(cfg) {
         "zh" => zh_metric(label),

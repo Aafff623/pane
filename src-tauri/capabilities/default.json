@@ -1,8 +1,8 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Capability for the main window. Only core IPC: the frontend talks to Rust exclusively through app commands (open_link, install_update, ...), so no plugin surface is exposed to the webview.",
-  "windows": ["main"],
+  "description": "Capability for the main window and the panel window (dual-form). Only core IPC: the frontend talks to Rust exclusively through app commands (open_link, install_update, ...), so no plugin surface is exposed to the webview.",
+  "windows": ["main", "panel"],
   "permissions": [
     "core:default"
   ]
