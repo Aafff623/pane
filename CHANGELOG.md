@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased — 2026-10-05
+## 0.4.69 — 2026-10-05
 
 - Encrypt the API key vault with a master password: Argon2id-derived
   AES-256-GCM seals each key value at rest while service/label/note stay
