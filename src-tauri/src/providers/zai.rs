@@ -5,6 +5,15 @@
 //! 6 = weekly). An idle session window reports no nextResetTime — it only
 //! starts counting on first use.
 //!
+//! Two domains serve the same product: the international api.z.ai (the
+//! common case) and the CN open.bigmodel.cn. The account's key decides
+//! which host answers — the other rejects it — so a rejection or a
+//! metric-less shape on the first domain falls through to the second.
+//! Note the gateway reports credential failures as HTTP 200 +
+//! `success:false`, so both the status and the body are checked.
+//! cc-switch routes the same way; its CN host takes the raw key, no
+//! Bearer prefix.
+//!
 //! Key sources: our Settings pane, ZAI_API_KEY / GLM_API_KEY, or the Z.ai
 //! CLI's own key file.
 
@@ -13,6 +22,54 @@ use serde_json::Value;
 
 const ID: &str = "zai";
 const NAME: &str = "Z.ai";
+
+const QUOTA_PATH: &str = "/api/monitor/usage/quota/limit";
+const PLAN_PATH: &str = "/api/biz/subscription/list";
+
+/// One Zhipu domain. Both hosts share paths and JSON shape; only the auth
+/// spelling differs — api.z.ai accepts the Bearer form this module has
+/// always sent, open.bigmodel.cn takes the raw key (cc-switch measured).
+struct Endpoint {
+    base: &'static str,
+    bearer: bool,
+}
+
+/// Tried in order; the first domain that yields metrics wins.
+const ENDPOINTS: [Endpoint; 2] = [
+    Endpoint { base: "https://api.z.ai", bearer: true },
+    Endpoint { base: "https://open.bigmodel.cn", bearer: false },
+];
+
+/// How one domain attempt failed — decides whether the next domain gets a
+/// turn. Credential rejection (a 401/403 status, or Zhipu's HTTP-200
+/// `success:false` body — probed live 2026-10-05) and a metric-less shape
+/// are the two "wrong host for this key" signals; everything else
+/// (network trouble, 5xx, throttling) is fatal for the refresh cycle.
+enum DomainErr {
+    Auth,
+    Empty,
+    Other(String),
+}
+
+fn auth_rejected(status: u16) -> bool {
+    matches!(status, 401 | 403)
+}
+
+/// Zhipu reports credential problems as HTTP 200 + `success:false` — the
+/// status alone can't tell a bad key from a working host (probed live
+/// 2026-10-05), so the body has to route the domain fallback too.
+fn business_error(doc: &Value) -> bool {
+    doc.get("success").and_then(Value::as_bool) == Some(false)
+}
+
+fn with_auth(req: reqwest::RequestBuilder, ep: &Endpoint, key: &str) -> reqwest::RequestBuilder {
+    let req = req.header("Accept-Language", "en-US,en");
+    if ep.bearer {
+        req.bearer_auth(key)
+    } else {
+        req.header("Authorization", key)
+    }
+}
 
 fn find_key() -> Option<String> {
     if let Some(key) = stored_api_key("zai", &["ZAI_API_KEY", "GLM_API_KEY"]) {
@@ -67,24 +124,49 @@ async fn fetch() -> Result<Snapshot, String> {
 }
 
 async fn fetch_with_key(key: &str) -> Result<Snapshot, String> {
-    let quota_req = http()
-        .get("https://api.z.ai/api/monitor/usage/quota/limit")
-        .bearer_auth(&key)
-        .send();
-    let plan_req = http()
-        .get("https://api.z.ai/api/biz/subscription/list")
-        .bearer_auth(&key)
-        .send();
+    let mut rejected = 0usize;
+    for ep in &ENDPOINTS {
+        match fetch_from(ep, key).await {
+            Ok(snapshot) => return Ok(snapshot),
+            Err(DomainErr::Auth) => rejected += 1,
+            Err(DomainErr::Empty) => {}
+            Err(DomainErr::Other(e)) => return Err(e),
+        }
+    }
+    if rejected == ENDPOINTS.len() {
+        return Err(
+            "API key was rejected on both api.z.ai and open.bigmodel.cn — check it in Settings"
+                .into(),
+        );
+    }
+    Err("unexpected quota response shape (endpoint is undocumented)".into())
+}
+
+async fn fetch_from(ep: &Endpoint, key: &str) -> Result<Snapshot, DomainErr> {
+    let quota_req = with_auth(http().get(format!("{}{}", ep.base, QUOTA_PATH)), ep, key).send();
+    let plan_req = with_auth(http().get(format!("{}{}", ep.base, PLAN_PATH)), ep, key).send();
     let (quota_resp, plan_resp) = tokio::join!(quota_req, plan_req);
 
-    let quota_resp = quota_resp.map_err(|e| format!("quota request: {e}"))?;
-    if quota_resp.status().as_u16() == 401 {
-        return Err("API key was rejected — check it in Settings".into());
+    let quota_resp = quota_resp.map_err(|e| DomainErr::Other(format!("quota request: {e}")))?;
+    if auth_rejected(quota_resp.status().as_u16()) {
+        return Err(DomainErr::Auth);
     }
     if !quota_resp.status().is_success() {
-        return Err(format!("quota endpoint: HTTP {}", quota_resp.status()));
+        return Err(DomainErr::Other(format!(
+            "quota endpoint: HTTP {}",
+            quota_resp.status()
+        )));
     }
-    let quota: Value = quota_resp.json().await.map_err(|e| format!("quota parse: {e}"))?;
+    let quota: Value = quota_resp
+        .json()
+        .await
+        .map_err(|e| DomainErr::Other(format!("quota parse: {e}")))?;
+
+    // Checked before the metric walk: an error body carries no data, and
+    // without this it would masquerade as an empty shape.
+    if business_error(&quota) {
+        return Err(DomainErr::Auth);
+    }
 
     let mut other = Vec::new();
     let mut tokens = Vec::new();
@@ -94,7 +176,7 @@ async fn fetch_with_key(key: &str) -> Result<Snapshot, String> {
     push_token_metrics(tokens, &mut metrics);
     metrics.append(&mut other);
     if metrics.is_empty() {
-        return Err("unexpected quota response shape (endpoint is undocumented)".into());
+        return Err(DomainErr::Empty);
     }
     metrics.truncate(5);
 
@@ -402,5 +484,39 @@ mod tests {
         assert_eq!(labels(&metrics), ["Session"]);
         assert_eq!(metrics[0].used_percent, Some(20.0));
         assert_eq!(metrics[0].detail.as_deref(), Some("400 of 2000"));
+    }
+
+    #[test]
+    fn cn_domain_comes_second_and_uses_the_raw_key() {
+        let bases: Vec<&str> = ENDPOINTS.iter().map(|e| e.base).collect();
+        assert_eq!(bases, ["https://api.z.ai", "https://open.bigmodel.cn"]);
+        assert!(ENDPOINTS[0].bearer, "international host keeps the Bearer form");
+        assert!(!ENDPOINTS[1].bearer, "CN host takes the raw key");
+    }
+
+    #[test]
+    fn fallback_fires_on_auth_rejection_or_an_empty_shape_only() {
+        assert!(auth_rejected(401));
+        assert!(auth_rejected(403));
+        assert!(!auth_rejected(429), "throttling is not a credential verdict");
+        assert!(!auth_rejected(500));
+        // A 200-with-success:false gateway body carries no metrics, so the
+        // next domain gets its chance instead of erroring immediately.
+        assert!(metrics_from_quota(&json!({"success": false, "msg": "Invalid API key"})).is_empty());
+    }
+
+    #[test]
+    fn http_200_business_errors_route_to_the_next_domain() {
+        // Probed live 2026-10-05: a missing/invalid Zhipu key answers
+        // HTTP 200 + success:false, not 401 — reading only the status
+        // would send the fallback hunting a shape bug.
+        let missing_key = json!({
+            "code": 1001,
+            "msg": "Authentication parameter not received in Header, unable to authenticate",
+            "success": false
+        });
+        assert!(business_error(&missing_key));
+        assert!(!business_error(&json!({"code": 200, "data": {"limits": []}})));
+        assert!(!business_error(&json!({"limits": []})));
     }
 }
