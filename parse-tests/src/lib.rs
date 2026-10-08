@@ -39,6 +39,9 @@ pub mod provider_catalog;
 #[path = "../../src-tauri/src/accounts.rs"]
 pub mod accounts;
 
+#[path = "../../src-tauri/src/secretstore.rs"]
+pub mod secretstore;
+
 #[path = "../../src-tauri/src/antigravity_accounts.rs"]
 pub mod antigravity_accounts;
 
@@ -50,3 +53,6 @@ pub mod cursor_accounts;
 
 #[path = "../../src-tauri/src/auth_center.rs"]
 pub mod auth_center;
+
+mod catalog_consistency;
+mod config_consistency;
