@@ -57,6 +57,10 @@ pub struct ProviderSpend {
     /// under-report and the ⚠ says so.
     pub unpriced: u64,
     pub unpriced_models: Vec<String>,
+    /// Tokens are a credits-derived blend, not measured facts (Qoder CN writes
+    /// all-zero usage into its local session logs). The UI flags such rows.
+    #[serde(default)]
+    pub estimated: bool,
 }
 
 impl ProviderSpend {
@@ -140,6 +144,7 @@ pub fn source_statuses() -> Vec<SpendSourceStatus> {
         source_status("pi-jsonl", "Pi coding agent", "JSONL session logs", "pi_line", &[pi], &["claude", "codex"]),
         source_status("grok-jsonl", "Grok CLI", "JSONL unified log", "grok", &[grok.join("logs").join("unified.jsonl")], &["grok"]),
         source_status("opencode-sqlite", "OpenCode Desktop / CLI", "SQLite message ledger", "providers::opencode::collect_cost_events", &[providers::opencode::data_dir().join("opencode.db")], &["opencode", "aihubmix"]),
+        source_status("qoder-credits", "Qoder CN", "credits ledger → blended token estimate (official docs price credits per task, not per token)", "usage_history::credit_trend_map", &[crate::providers::config_dir().join("credit_history.json")], &["qoder"]),
         source_status("devin-sqlite", "Devin", "SQLite sessions ledger", "providers::devin::collect_usage_events", &[crate::platform::config_home().map(|d| d.join("devin").join("cli").join("sessions.db")).unwrap_or_default()], &["devin"]),
         source_status("minimax-sqlite", "MiniMax Agent", "SQLite token_usage ledger", "providers::minimax::collect_usage_events", &[home.join(".minimax").join("sqlite.db")], &["minimax"]),
         source_status("hermes-sqlite", "Hermes Desktop", "SQLite session_model_usage ledger", "providers::hermes::collect_usage_events", &[local.join("hermes").join("state.db")], &["hermes", "minimax", "openrouter"]),
@@ -547,6 +552,48 @@ fn finalize_models(raw: HashMap<String, (f64, f64)>, window_cost: f64) -> Vec<Mo
     named
 }
 
+/// Qoder CN persists no usable token counters (its session jsonl carries
+/// all-zero usage), but its credits ledger does move. Official docs price
+/// credits per task (Ask ≈ 3-4, Agent ≈ 7-50 per request), not per token, so
+/// tokens here are a blended estimate behind one tunable constant; the row is
+/// flagged `estimated` everywhere it renders.
+const QODER_CREDIT_TOKENS_ESTIMATE: f64 = 25_000.0;
+
+fn build_qoder_days(
+    trends: &[(String, Vec<Option<f64>>)],
+    today: chrono::NaiveDate,
+) -> FileData {
+    let mut data = FileData {
+        days: DayMap::default(),
+        unpriced: HashMap::new(),
+    };
+    for (card, trend) in trends {
+        if !card.starts_with("qodercn") {
+            continue;
+        }
+        let last = trend.len().saturating_sub(1);
+        for (i, diff) in trend.iter().enumerate() {
+            let Some(credits) = diff else { continue };
+            if *credits <= 0.0 {
+                continue;
+            }
+            let day = (today - chrono::Duration::days((last - i) as i64)).num_days_from_ce();
+            let entry = data
+                .days
+                .entry((day, "credit-estimate".to_string()))
+                .or_insert((0.0, 0.0));
+            entry.1 += credits * QODER_CREDIT_TOKENS_ESTIMATE;
+        }
+    }
+    data
+}
+
+fn qoder_credit_estimate() -> FileData {
+    let trends: Vec<(String, Vec<Option<f64>>)> =
+        crate::usage_history::credit_trend_map().into_iter().collect();
+    build_qoder_days(&trends, Local::now().date_naive())
+}
+
 fn build_spend(id: impl Into<String>, name: impl Into<String>, data: FileData) -> ProviderSpend {
     let id = id.into();
     let name = name.into();
@@ -566,6 +613,7 @@ fn build_spend(id: impl Into<String>, name: impl Into<String>, data: FileData) -
         trend_cost: vec![0.0; TREND_DAYS],
         unpriced: data.unpriced.values().sum(),
         unpriced_models,
+        estimated: false,
     };
     let mut models: [HashMap<String, (f64, f64)>; 3] =
         [HashMap::new(), HashMap::new(), HashMap::new()];
@@ -806,6 +854,24 @@ fn claude_price(model: &str) -> Option<(f64, f64, f64, f64)> {
 
 fn codex_price(model: &str) -> (f64, f64, f64) {
     let m = model.to_lowercase();
+    // 6-series backstop (official 2026-09 pricing): keeps a fresh-offline
+    // first run — supplement, catalogs and probe cache all empty — from
+    // billing the new models at the gpt-5 default below. Full "gpt-6…"
+    // patterns so "gpt-5.6-sol" can never match the 6-sol arm. Reached
+    // only when every catalog source missed; cache write bills at input
+    // here, as it always has on this static path.
+    if m.contains("gpt-6.1-sol") {
+        return (2.0, 10.0, 0.1);
+    }
+    if m.contains("gpt-6-sol") {
+        return (2.0, 10.0, 0.2);
+    }
+    if m.contains("gpt-6-luna") {
+        return (0.10, 0.5, 0.01);
+    }
+    if m.contains("gpt-6-astra") {
+        return (10.0, 50.0, 1.0);
+    }
     if m.contains("mini") || m.contains("spark") {
         (0.25, 2.0, 0.025)
     } else {
@@ -1368,6 +1434,15 @@ fn codex_long_context(dated: &str) -> Option<(f64, f64, f64)> {
         // base rates (terra used to share gpt-5.4's row).
         "gpt-5.6-terra" => Some((4.0, 18.0, 0.4)),
         "gpt-5.6-luna" => Some((0.4, 1.8, 0.04)),
+        // 6-series (developers.openai.com/api/docs/pricing, verified
+        // 2026-10-07): >272K bills the whole request at 2× input/cache and
+        // 1.5× output, same shape as 5.6. Without these rows the supplement
+        // card — a flat price with no tier fields — wins and long sessions
+        // silently under-report (single-direction low bias).
+        "gpt-6.1-sol" => Some((4.0, 15.0, 0.2)),
+        "gpt-6-sol" => Some((4.0, 15.0, 0.4)),
+        "gpt-6-luna" => Some((0.2, 0.75, 0.02)),
+        "gpt-6-astra" => Some((20.0, 75.0, 2.0)),
         _ => None,
     }
 }
@@ -2694,6 +2769,30 @@ mod tests {
     use serde_json::json;
 
     #[test]
+    fn qoder_credit_estimate_blends_ledger_diffs_into_tokens() {
+        let today = chrono::NaiveDate::from_ymd_opt(2026, 10, 7).unwrap();
+        let trends = vec![
+            ("qodercn".to_string(), vec![None, Some(4.0), Some(0.0), Some(6.5)]),
+            ("qodercn@ab12".to_string(), vec![None, Some(1.0), None, Some(3.5)]),
+            ("traecn".to_string(), vec![None, Some(9.0), None, None]),
+        ];
+        let data = build_qoder_days(&trends, today);
+        let tok = |day: i32| -> f64 {
+            data.days
+                .iter()
+                .filter(|((d, _), _)| *d == day)
+                .map(|(_, (_, t))| *t)
+                .sum()
+        };
+        let now = today.num_days_from_ce();
+        assert_eq!(tok(now), 10.0 * QODER_CREDIT_TOKENS_ESTIMATE);
+        assert_eq!(tok(now - 2), 5.0 * QODER_CREDIT_TOKENS_ESTIMATE);
+        // Zero-diff days stay absent and other families never leak in.
+        assert_eq!(data.days.len(), 2);
+        assert!(data.days.keys().all(|(_, m)| m == "credit-estimate"));
+    }
+
+    #[test]
     fn source_inventory_covers_desktop_and_runtime_ledgers() {
         let sources = source_statuses();
         assert!(sources.iter().any(|s| s.id == "opencode-sqlite" && s.form.contains("SQLite")));
@@ -3200,6 +3299,39 @@ mod tests {
         assert_eq!(codex_dated_base("gpt-4-0125-preview"), "gpt-4-0125-preview");
     }
 
+    #[test]
+    fn codex_six_series_carries_official_long_context_tiers() {
+        // developers.openai.com/api/docs/pricing, verified 2026-10-07: the
+        // whole request bills at 2× input/cache, 1.5× output above 272K.
+        // Without these rows the supplement's flat card wins and long
+        // sessions under-report (single-direction low bias).
+        assert_eq!(codex_long_context("gpt-6.1-sol"), Some((4.0, 15.0, 0.2)));
+        assert_eq!(codex_long_context("gpt-6-sol"), Some((4.0, 15.0, 0.4)));
+        assert_eq!(codex_long_context("gpt-6-luna"), Some((0.2, 0.75, 0.02)));
+        assert_eq!(codex_long_context("gpt-6-astra"), Some((20.0, 75.0, 2.0)));
+        // Dated snapshot spellings land on the same rows…
+        assert_eq!(
+            codex_long_context(&codex_dated_base("gpt-6.1-sol-2026-09-29")),
+            Some((4.0, 15.0, 0.2))
+        );
+        // …and the 5.6 rows the 6-series joined are untouched.
+        assert_eq!(codex_long_context("gpt-5.6-sol"), Some((10.0, 45.0, 1.0)));
+        assert_eq!(codex_long_context("gpt-5.4"), Some((5.0, 22.5, 0.5)));
+    }
+
+    #[test]
+    fn codex_static_backstop_prices_the_six_series() {
+        // Reached only when supplement + catalogs + probe cache all miss.
+        assert_eq!(codex_price("gpt-6.1-sol"), (2.0, 10.0, 0.1));
+        assert_eq!(codex_price("gpt-6-sol"), (2.0, 10.0, 0.2));
+        assert_eq!(codex_price("gpt-6-luna"), (0.10, 0.5, 0.01));
+        assert_eq!(codex_price("gpt-6-astra"), (10.0, 50.0, 1.0));
+        // "gpt-5.6-sol" must not leak into the 6-sol arm (still the old
+        // gpt-5 default on this static path; the supplement carries the
+        // real promo card).
+        assert_eq!(codex_price("gpt-5.6-sol"), (1.25, 10.0, 0.125));
+    }
+
     // ---- Claude: advisor iterations, sidechain dedup, synthetic ----------
 
     fn claude_run(lines: &[String]) -> FileData {
@@ -3589,25 +3721,80 @@ mod tests {
         out
     }
 
-    fn antigravity_blob(input: u64, output: u64, thoughts: u64, model: &str) -> Vec<u8> {
+    fn antigravity_blob(system: u64, input: u64, output: u64, cache: u64, model: &str) -> Vec<u8> {
         let usage = [
-            pb_varint_field(1, input),
-            pb_varint_field(2, output),
-            pb_varint_field(3, thoughts),
+            pb_varint_field(1, system),
+            pb_varint_field(2, input),
+            pb_varint_field(3, output),
+            pb_varint_field(5, cache),
         ]
         .concat();
         let info = pb_msg(&[(4, usage), (19, model.as_bytes().to_vec())]);
         pb_msg(&[(1, info)])
     }
 
+    /// The same blob with the schema-optional embedded timing
+    /// (field 9 → field 4 = Timestamp → field 1 = seconds).
+    fn antigravity_blob_with_ts(secs: u64, model: &str) -> Vec<u8> {
+        let usage = pb_varint_field(2, 10);
+        let timing = pb_msg(&[(4, pb_varint_field(1, secs))]);
+        let info = pb_msg(&[(4, usage), (19, model.as_bytes().to_vec()), (9, timing)]);
+        pb_msg(&[(1, info)])
+    }
+
+    /// The correlated `steps.metadata` shape (field 1 = Timestamp message).
+    fn antigravity_step_md(secs: u64) -> Vec<u8> {
+        pb_msg(&[(1, pb_varint_field(1, secs))])
+    }
+
     #[test]
-    fn antigravity_decodes_usage_and_model() {
-        let blob = antigravity_blob(1318, 5368, 161, "gemini-3.8-flash");
+    fn antigravity_decodes_four_fields() {
+        let blob = antigravity_blob(1318, 5368, 161, 40_782, "gemini-3.8-flash");
         let call = decode_antigravity_call(&blob).expect("call decodes");
-        assert_eq!(call.input, 1318);
-        assert_eq!(call.output, 5368);
-        assert_eq!(call.reasoning, 161);
+        assert_eq!(call.system, 1318);
+        assert_eq!(call.input, 5368);
+        assert_eq!(call.output, 161);
+        assert_eq!(call.cache_read, 40_782);
         assert_eq!(call.model, "gemini-3.8-flash");
+        assert_eq!(call.ts, None);
+    }
+
+    #[test]
+    fn antigravity_timestamps_decode_from_both_paths() {
+        // Embedded timing wins when present…
+        let blob = antigravity_blob_with_ts(1_791_366_967, "gemini-3.8-flash");
+        assert_eq!(
+            decode_antigravity_call(&blob).expect("call decodes").ts,
+            Some(1_791_366_967)
+        );
+        // …and the steps.metadata fallback parses the same Timestamp shape.
+        assert_eq!(
+            antigravity_ts_from_step(&antigravity_step_md(1_791_366_967)),
+            Some(1_791_366_967)
+        );
+        // Unset (zero) and garbage both read as "no time".
+        assert_eq!(
+            antigravity_ts_from_step(&antigravity_step_md(0)),
+            None
+        );
+        assert_eq!(antigravity_ts_from_step(&[0xff, 0xff]), None);
+    }
+
+    #[test]
+    fn antigravity_usage_bills_system_and_input_together() {
+        let call = AntigravityCall {
+            system: 1318,
+            input: 5368,
+            output: 161,
+            cache_read: 40_782,
+            model: "gemini-3.8-flash".into(),
+            ts: None,
+        };
+        let (u, tokens) = antigravity_usage(&call);
+        assert_eq!(u.input, 6686.0);
+        assert_eq!(u.output, 161.0);
+        assert_eq!(u.cache_read, 40_782.0);
+        assert_eq!(tokens, 47_629.0);
     }
 
     #[test]
@@ -3953,16 +4140,29 @@ fn pb_fields(buf: &[u8]) -> Vec<(u32, PbField<'_>)> {
 }
 
 /// A `gen_metadata` blob decodes to `field 1 = LLMGenerationInfo
-/// { 4 = UsageMetadata { 1 input, 2 output, 3 thoughts }, 19 = model }` —
-/// per-call independent values (no cumulative deltas needed; 1/2/3 are the
-/// Prompt/Completion/Reasoning numbers the IDE itself displays). The format
-/// is undocumented: any missing field drops the row rather than guessing.
+/// { 4 = UsageMetadata { 1 systemPrompt, 2 input, 3 output, 5 cacheRead },
+/// 19 = model, 9 = optional timing }`. Field semantics were re-verified
+/// against 9701 rows across 122 local stores (2026-10-08) plus the
+/// reference decoder: field 1 is a near-constant system prompt (~1318),
+/// field 2 is the user input, field 3 the generation, field 5 the cache
+/// re-reads. The IDE's own UI displays 1/2/3 as prompt/completion/
+/// reasoning, which is where the earlier mislabeling came from — pricing
+/// must bill 1+2 as input and 5 at the cache rate. Any missing field drops
+/// the row rather than guessing.
 struct AntigravityCall {
+    system: u64,
     input: u64,
     output: u64,
-    reasoning: u64,
+    cache_read: u64,
     model: String,
+    /// Embedded event time (unix seconds). Present in the schema but empty
+    /// on every local row — the scanner falls back to `steps.metadata`.
+    ts: Option<i64>,
 }
+
+/// Oversized `steps.metadata` blobs are skipped (reference scanner's
+/// maximumBlobBytes): they are attachments, never timestamp envelopes.
+const MAX_ANTIGRAVITY_STEP_BYTES: usize = 1024 * 1024;
 
 fn decode_antigravity_call(blob: &[u8]) -> Option<AntigravityCall> {
     let (_, PbField::Len(info)) = pb_fields(blob).into_iter().find(|(f, _)| *f == 1)? else {
@@ -3979,17 +4179,85 @@ fn decode_antigravity_call(blob: &[u8]) -> Option<AntigravityCall> {
     if model.is_empty() {
         return None;
     }
-    let mut call = AntigravityCall { input: 0, output: 0, reasoning: 0, model: model.to_string() };
+    let mut call = AntigravityCall {
+        system: 0,
+        input: 0,
+        output: 0,
+        cache_read: 0,
+        model: model.to_string(),
+        ts: None,
+    };
     for (f, v) in pb_fields(usage) {
         let PbField::Varint(v) = v else { continue };
         match f {
-            1 => call.input = v,
-            2 => call.output = v,
-            3 => call.reasoning = v,
+            1 => call.system = v,
+            2 => call.input = v,
+            3 => call.output = v,
+            5 => call.cache_read = v,
             _ => {}
         }
     }
+    // Embedded timing: field 9 → field 4 (Timestamp) → field 1 (seconds).
+    call.ts = fields
+        .iter()
+        .find(|(f, _)| *f == 9)
+        .and_then(|(_, v)| match v {
+            PbField::Len(timing) => Some(*timing),
+            _ => None,
+        })
+        .and_then(|timing| {
+            pb_fields(timing)
+                .into_iter()
+                .find(|(f, _)| *f == 4)
+                .and_then(|(_, v)| match v {
+                    PbField::Len(ts) => Some(ts),
+                    _ => None,
+                })
+        })
+        .and_then(antigravity_ts_from_message);
     Some(call)
+}
+
+/// A Timestamp message (field 1 = seconds varint) → unix seconds; None when
+/// the field is missing or zero (the proto's "unset" spelling).
+fn antigravity_ts_from_message(ts: &[u8]) -> Option<i64> {
+    pb_fields(ts)
+        .into_iter()
+        .find(|(f, _)| *f == 1)
+        .and_then(|(_, v)| match v {
+            PbField::Varint(s) if s > 0 => i64::try_from(s).ok(),
+            _ => None,
+        })
+}
+
+/// `steps.metadata` → unix seconds: field 1 is a Timestamp message. This is
+/// the only timestamp path that exists on real machines — the correlated
+/// `steps.idx` equals `gen_metadata.idx`.
+fn antigravity_ts_from_step(step_metadata: &[u8]) -> Option<i64> {
+    pb_fields(step_metadata)
+        .into_iter()
+        .find(|(f, _)| *f == 1)
+        .and_then(|(_, v)| match v {
+            PbField::Len(ts) => Some(ts),
+            _ => None,
+        })
+        .and_then(antigravity_ts_from_message)
+}
+
+/// Token → pricing mapping for one event: system prompt + user input bill
+/// as input (the long-context prompt check in `request_cost` adds cache
+/// reads on top of it), the generation bills as output, cache re-reads at
+/// the cache rate. Returned tokens = everything the call moved.
+fn antigravity_usage(call: &AntigravityCall) -> (pricing::Usage, f64) {
+    let tokens = (call.system + call.input + call.output + call.cache_read) as f64;
+    let u = pricing::Usage {
+        input: (call.system + call.input) as f64,
+        output: call.output as f64,
+        cache_read: call.cache_read as f64,
+        cache_write_5m: 0.0,
+        cache_write_1h: 0.0,
+    };
+    (u, tokens)
 }
 
 /// Antigravity's summaries store .NET datetimes like
@@ -4080,21 +4348,38 @@ fn cached_parse(path: &Path, parse: impl FnOnce() -> Option<FileData>) -> FileDa
 }
 
 /// Antigravity (Google's agentic IDE + its CLI) token usage, read from the
-/// per-conversation SQLite stores under `~/.gemini/antigravity{,-cli}/
-/// conversations/`. Each `gen_metadata` row is one model call; blobs carry
-/// no timestamps, so a conversation attributes to the day its summaries
-/// row was last modified (a multi-day conversation lands on its final
-/// day — a documented smear for the usage view). Its subscription models
-/// are usually absent from the pricing catalog: tokens always count,
-/// dollars stay 0 with the ⚠ marker.
+/// per-conversation SQLite stores under `~/.gemini/antigravity*/
+/// conversations/`. Each `gen_metadata` row is one model call; its day
+/// comes from the correlated `steps.metadata` timestamp (verified: 100% of
+/// local rows carry it there while the embedded timestamp is empty),
+/// falling back to the summaries day, the db mtime and finally now — a
+/// coarse anchor beats dropping a whole store. Its subscription models are
+/// usually absent from the pricing catalog: tokens always count, dollars
+/// stay 0 with the ⚠ marker.
 fn antigravity() -> ProviderSpend {
     let mut data = FileData::default();
     let Some(home) = dirs::home_dir() else {
         return build_spend("antigravity", "Antigravity", data);
     };
     let cutoff = SystemTime::now() - std::time::Duration::from_secs(31 * 86_400);
-    for base in ["antigravity", "antigravity-cli"] {
-        let conv_dir = home.join(".gemini").join(base).join("conversations");
+    // Directory discovery follows the vendor prefix so future editions
+    // (`antigravity-cli`, …) are picked up without a code change.
+    let gemini = home.join(".gemini");
+    let Ok(editions) = fs::read_dir(&gemini) else {
+        return build_spend("antigravity", "Antigravity", data);
+    };
+    let mut base_dirs: Vec<PathBuf> = editions
+        .flatten()
+        .map(|e| e.path())
+        .filter(|p| {
+            p.file_name()
+                .and_then(|n| n.to_str())
+                .is_some_and(|n| n.starts_with("antigravity"))
+        })
+        .collect();
+    base_dirs.sort();
+    for base_dir in base_dirs {
+        let conv_dir = base_dir.join("conversations");
         let Ok(entries) = fs::read_dir(&conv_dir) else { continue };
         let days = antigravity_summary_days(&conv_dir);
         let mut files: Vec<PathBuf> = entries.flatten().map(|e| e.path()).collect();
@@ -4105,18 +4390,31 @@ fn antigravity() -> ProviderSpend {
                 continue; // skips the -wal/-shm sidecars (they end .db-wal/.db-shm)
             }
             let Ok(meta) = fs::metadata(&db) else { continue };
-            if meta.modified().unwrap_or(SystemTime::UNIX_EPOCH) < cutoff {
+            // The WAL can hold the newest writes; its mtime participates in
+            // the freshness prefilter (the reference scanner's
+            // latestModification does the same).
+            let db_mtime = meta.modified().unwrap_or(SystemTime::UNIX_EPOCH);
+            let wal_path = {
+                let mut p = db.clone().into_os_string();
+                p.push("-wal");
+                PathBuf::from(p)
+            };
+            let freshest = fs::metadata(&wal_path)
+                .and_then(|m| m.modified())
+                .map(|t| t.max(db_mtime))
+                .unwrap_or(db_mtime);
+            if freshest < cutoff {
                 continue;
             }
             let conv_id = db.file_stem().unwrap_or_default().to_string_lossy().into_owned();
-            let anchor = days
+            // Fallback when a row has no event time of its own.
+            let fallback_anchor = days
                 .get(&conv_id)
                 .copied()
                 .or_else(|| {
-                    fs::metadata(&db)
-                        .and_then(|m| m.modified())
+                    db_mtime
+                        .duration_since(SystemTime::UNIX_EPOCH)
                         .ok()
-                        .and_then(|t| t.duration_since(SystemTime::UNIX_EPOCH).ok())
                         .and_then(|d| DateTime::from_timestamp_millis(d.as_millis() as i64))
                 })
                 .unwrap_or_else(Utc::now);
@@ -4126,37 +4424,60 @@ fn antigravity() -> ProviderSpend {
                     rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
                 )
                 .ok()?;
-                let mut stmt = conn.prepare("SELECT data FROM gen_metadata ORDER BY idx").ok()?;
+                // Per-event wall-clock times live in `steps.metadata`
+                // (field 1 = Timestamp), keyed by the correlated index. A
+                // missing table just means no per-event times on this
+                // edition — the anchor falls back per row.
+                let mut step_ts: HashMap<i64, i64> = HashMap::new();
+                if let Ok(mut stmt) = conn.prepare("SELECT idx, metadata FROM steps") {
+                    if let Ok(mut rows) = stmt.query([]) {
+                        while let Ok(Some(row)) = rows.next() {
+                            let (Ok(idx), Ok(md)) =
+                                (row.get::<_, i64>(0), row.get::<_, Vec<u8>>(1))
+                            else {
+                                break;
+                            };
+                            if md.len() > MAX_ANTIGRAVITY_STEP_BYTES {
+                                continue;
+                            }
+                            if let Some(secs) = antigravity_ts_from_step(&md) {
+                                step_ts.insert(idx, secs);
+                            }
+                        }
+                    }
+                }
+                let mut stmt = conn.prepare("SELECT idx, data FROM gen_metadata ORDER BY idx").ok()?;
                 let mut rows = stmt.query([]).ok()?;
                 let mut d = FileData::default();
                 while let Ok(Some(row)) = rows.next() {
-                    let Ok(blob) = row.get::<_, Vec<u8>>(0) else { break };
+                    let (Ok(idx), Ok(blob)) = (row.get::<_, i64>(0), row.get::<_, Vec<u8>>(1))
+                    else {
+                        break;
+                    };
                     let Some(call) = decode_antigravity_call(&blob) else { continue };
-                    let tokens = (call.input + call.output + call.reasoning) as f64;
+                    let (u, tokens) = antigravity_usage(&call);
                     if tokens <= 0.0 {
                         continue;
                     }
+                    let at = call
+                        .ts
+                        .or_else(|| step_ts.get(&idx).copied())
+                        .and_then(|secs| DateTime::from_timestamp(secs, 0))
+                        .unwrap_or(fallback_anchor);
                     // probe_lookup (not bare pricing::lookup): the question
                     // must be recorded so a catalog refresh re-prices an
                     // unchanged conversation db via probes_still_vouch.
                     match probe_lookup(&call.model) {
                         Some(p) => {
-                            let u = pricing::Usage {
-                                input: call.input as f64,
-                                output: (call.output + call.reasoning) as f64,
-                                cache_read: 0.0,
-                                cache_write_5m: 0.0,
-                                cache_write_1h: 0.0,
-                            };
                             add_event(
                                 &mut d,
-                                anchor,
+                                at,
                                 &call.model,
                                 pricing::request_cost(&p, &u, true),
                                 tokens,
                             );
                         }
-                        None => note_unpriced(&mut d, anchor, &call.model, tokens),
+                        None => note_unpriced(&mut d, at, &call.model, tokens),
                     }
                 }
                 Some(d)
@@ -4236,6 +4557,9 @@ pub fn collect_daily(cursor_csv: Option<String>) -> (Vec<ProviderSpend>, Vec<Pro
     // cc-switch-only tools get their own cards (empty scans are filtered
     // out by has_data at the end).
     list.push(build_spend("mcode", "MaxCode", cc.mcode));
+    let mut qoder = build_spend("qoder", "Qoder", qoder_credit_estimate());
+    qoder.estimated = true;
+    list.push(qoder);
     list.push(build_spend("gemini", "Gemini", cc.gemini));
     list.push(build_spend("claude-desktop", "Claude Desktop", cc.claude_desktop));
     list.extend(extra_claude_spends);

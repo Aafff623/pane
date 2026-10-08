@@ -27,7 +27,7 @@
 | Hermes Desktop | `%LOCALAPPDATA%/hermes/state.db` | `session_model_usage` 累计桶 | MiniMax/OpenRouter 路由分流 |
 | Qwen Code | `~/.qwen/usage/token-usage-*.jsonl` | 每请求 token ledger | 只读近 31 天 |
 | Kimi Code | Kimi code home 下 `sessions/**/*.jsonl` | `usage.record` turn 桶 | Moonshot 前缀归一化 |
-| Antigravity IDE / CLI | `~/.gemini/antigravity*/conversations/*.db` | SQLite `gen_metadata` 中的 protobuf usage | 对话库按摘要日期归属日 |
+| Antigravity IDE / CLI | `~/.gemini/antigravity*/conversations/*.db` | SQLite `gen_metadata` 中的 protobuf usage（1=system/2=input/3=output/5=cacheRead） | 按事件时间戳归属日（`steps.metadata`，field 1 = Timestamp；缺省降级摘要日期→库 mtime） |
 | Cursor IDE | 认证后的 usage-events CSV | 远端 CSV 的已汇总 token | 需要 Cursor 可用认证；本地无日志时属于运行时来源 |
 
 订阅额度 API、网页余额和服务端百分比不属于 token spend ledger；它们继续走 quota provider，不能拿百分比反推 token。
@@ -61,3 +61,14 @@
 - `runtime`：需要认证或网络请求，不能用本地文件存在性判断。
 
 这个清单只报告覆盖证据，不生成 token，也不把“发现文件”宣称成“所有请求都已记录”。后续收到新的 OpenCode Desktop 调研后，应先把它映射到上面的形态和契约，再决定是否新增解析器。
+
+## Qoder CN — credits-derived token estimate (2026-10-07)
+
+Qoder CN writes all-zero `usage` into its local session jsonl, so no measured
+tokens exist on this machine. Its credits ledger does move, so the spend panel
+shows a **flagged estimate**: daily credits diffs (the same ledger behind the
+qodercn card trend) × `QODER_CREDIT_TOKENS_ESTIMATE` (25 000 tokens/credit,
+blended). Official docs price credits per task (Ask ≈ 3-4, Agent ≈ 7-50 per
+request), not per token, so the constant is a planning assumption, editable in
+one place (`spend.rs`), and every row it feeds carries `estimated: true`
+(UI badge 「估算」). Dollars are never guessed for it.

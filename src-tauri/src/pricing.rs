@@ -166,7 +166,7 @@ pub fn generation() -> u64 {
 /// fingerprinted below — an app update that reprices the same files would
 /// otherwise leave history at the old dollars until upstream happens to
 /// rewrite a catalog.
-const CORRECTIONS_REV: u32 = 10; // 10: AihubMix Qwen3.8-Max-0902 snapshot pricing
+const CORRECTIONS_REV: u32 = 13; // 13: antigravity four-field decode + per-event day
 
 /// The corrections revision on its own — the spend cache treats a changed
 /// revision as a hard discard (the *code* that prices changed), while a
@@ -714,6 +714,13 @@ fn resolve(s: &Store, model: &str, depth: u8) -> Option<Price> {
     // does one trailing token get peeled and the rest rerun — compositions
     // unwind right to left ("…-max-xhigh" → "…-max" → base), the depth cap
     // bounds it, and a real entry for any tail in any source always wins.
+    //
+    // `-n` is deliberately NOT in this table: Antigravity logs
+    // "gemini-3.8-flash-n", but no official price row for that SKU exists
+    // (checked 2026-10-07 — search + catalogs all miss; the bare "-n" is
+    // an Antigravity-internal tag, not a published Google SKU). Stripping
+    // it would silently bill an unverified SKU at flash rates; it stays
+    // token-only unpriced until the SKU is confirmed.
     for suffix in ["-xhigh", "-light", "-low", "-medium", "-high", "-max", "-ultra"] {
         if let Some(base) = canonical.strip_suffix(suffix) {
             return resolve(s, base, depth + 1);
@@ -838,6 +845,17 @@ fn builtin_price(canonical: &str) -> Option<Price> {
         // output $6, implicit cache read $0.25, explicit cache write $2.50.
         // Public catalogs still carry 0/0 placeholders for these slugs.
         "qwen3.8-max" | "qwen3.8-max-preview" => Some(Price::flat(2.0, 6.0, 0.25, 2.5)),
+        // MiniMax M3.1 Flash Preview — MiniMax publishes NO per-token price
+        // for it (subscription-only via M Plan, verified 2026-10-07), so it
+        // would otherwise ride a 0/0 catalog placeholder at $0 on real
+        // usage (33.7M tok on this machine alone). Billed at the
+        // previous-generation M3 card ($0.30 in / $1.20 out / $0.06 cache
+        // read, no published cache-write rate → writes at input) as a
+        // labeled ESTIMATE — swap to the official row when MiniMax
+        // publishes one.
+        "MiniMax-M3.1-Flash-Preview" | "minimax-m3.1-flash-preview" => {
+            Some(Price::flat(0.30, 1.2, 0.06, 0.30))
+        }
         // Grok 4.6, released 2026-08-12 — docs.x.ai/docs/pricing (USD/MTok):
         // $2 in / $0.50 cached / $6 out; prompts ≥200k bill $4 / $1 / $12
         // for the WHOLE request (xAI's long-context rule matches
@@ -1056,6 +1074,24 @@ mod tests {
         );
         let p = super::resolve(&store, "aihubmix/qwen3.8-max-2026-09-02", 0).unwrap();
         assert_eq!((p.input, p.output), (9.0, 9.0));
+    }
+
+    #[test]
+    fn minimax_m31_flash_preview_bills_the_m3_fallback_card() {
+        // No official per-token price exists (subscription-only M Plan,
+        // verified 2026-10-07); the fallback bills at the previous-gen M3
+        // card instead of a 0/0 catalog placeholder's silent $0. Empty
+        // store = builtin only.
+        let store = super::Store::default();
+        for slug in ["MiniMax-M3.1-Flash-Preview", "minimax-m3.1-flash-preview"] {
+            let p = super::resolve(&store, slug, 0)
+                .unwrap_or_else(|| panic!("{slug} did not price"));
+            assert_eq!(
+                (p.input, p.output, p.cache_read, p.cache_write),
+                (0.30, 1.2, 0.06, 0.30),
+                "{slug}"
+            );
+        }
     }
 
     #[test]
