@@ -54,6 +54,40 @@
       </defs>
     </svg>
 
+    <!-- First-launch-per-boot brand splash. Hidden by default; main.ts shows
+         it once per boot session (gated by config.lastStartupBootId) and on
+         Replay from Settings. Click anywhere to skip. -->
+    <div id="splash" class="hide" role="dialog" aria-label="Startup animation">
+      <div class="sa-col">
+        <div class="sa-logo-wrap">
+          <svg class="sa-mark" viewBox="0 0 512 512" aria-hidden="true">
+            <defs>
+              <linearGradient id="sa-tile" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0" stop-color="#232a33"/>
+                <stop offset="1" stop-color="#12161c"/>
+              </linearGradient>
+              <linearGradient id="sa-arcg" x1="0" y1="1" x2="1" y2="0">
+                <stop offset="0" stop-color="#3f7ef0"/>
+                <stop offset="1" stop-color="#6ea8ff"/>
+              </linearGradient>
+            </defs>
+            <rect width="512" height="512" rx="112" fill="url(#sa-tile)"/>
+            <g transform="rotate(135 256 256)">
+              <circle cx="256" cy="256" r="150" fill="none" stroke="#2a313c" stroke-width="62" pathLength="360" stroke-dasharray="270 90" stroke-linecap="round"/>
+              <circle id="sa-arc" cx="256" cy="256" r="150" fill="none" stroke="url(#sa-arcg)" stroke-width="62" pathLength="360" stroke-dasharray="360" stroke-dashoffset="145" stroke-linecap="round"/>
+            </g>
+            <line id="sa-needle" x1="256" y1="256" x2="352" y2="188" stroke="#f8fafc" stroke-width="34" stroke-linecap="round"/>
+            <circle id="sa-hub" cx="256" cy="256" r="46" fill="#f8fafc"/>
+          </svg>
+          <span class="sa-rip"></span>
+          <span class="sa-rip r2"></span>
+        </div>
+        <div class="sa-word" aria-label="Pane"><span>P</span><span>a</span><span>n</span><span>e</span></div>
+        <div class="sa-sub" data-i18n="splash.tagline">AI usage at a glance</div>
+      </div>
+      <span class="sa-skip" data-i18n="splash.skipHint">Click anywhere to skip</span>
+    </div>
+
     <main class="popover">
       <div class="main-col">
         <div class="content">
@@ -127,6 +161,7 @@
       <div class="panel-head glass-bar">
         <button class="mini-btn" id="settings-close" data-i18n="settings.done">&#8592; Done</button>
         <span class="panel-title" data-i18n="settings.title">Settings</span>
+        <button class="mini-btn settings-save-all" id="settings-save-all" type="button" data-i18n="settings.save" disabled>Save</button>
       </div>
 
       <div class="acc-group open">
@@ -182,7 +217,40 @@
             <label class="toggle" title="Skip card entrance motion and the day/night wipe. Windows' own 'Animation effects' setting is still respected." data-i18n-title="settings.reduceAnimTip"><input id="reduce-anim" type="checkbox" /> <span data-i18n="settings.reduceAnim">Reduce animations</span></label>
           </div>
           <div class="setting-row">
+            <label class="toggle" title="Play the brand animation the first time Pane is shown after each system boot." data-i18n-title="settings.startupAnimTip"><input id="startup-anim" type="checkbox" /> <span data-i18n="settings.startupAnim">Startup animation</span></label>
+            <button class="link-btn" id="splash-replay" type="button" data-i18n="settings.startupAnimReplay">Replay</button>
+          </div>
+          <div class="setting-row">
+            <label for="jump-animation" data-i18n="settings.jumpAnimation">Overview jump</label>
+            <select id="jump-animation">
+              <option value="smooth" data-i18n="settings.jumpAnimationSmooth">Smooth scroll</option>
+              <option value="instant" data-i18n="settings.jumpAnimationInstant">Instant jump</option>
+            </select>
+          </div>
+          <div class="setting-row">
             <label class="toggle"><input id="show-total-spend" type="checkbox" /> <span data-i18n="settings.showSpend">Show Total Spend card</span></label>
+          </div>
+          <div class="setting-row">
+            <label for="spend-tier-mode" data-i18n="settings.spendTiers">Spend icon levels</label>
+            <select id="spend-tier-mode">
+              <option value="builtin" data-i18n="settings.spendTiersBuiltin">Built-in (100M / 250M / 500M per day)</option>
+              <option value="custom" data-i18n="settings.spendTiersCustom">Custom</option>
+            </select>
+          </div>
+          <div class="setting-row" id="spend-tier-custom" hidden>
+            <label data-i18n="settings.spendTiersLevels">Medium / High / Max (M tokens per day)</label>
+            <input id="spend-tier-medium" type="number" min="1" max="100000" step="10" />
+            <input id="spend-tier-high" type="number" min="1" max="100000" step="10" />
+            <input id="spend-tier-max" type="number" min="1" max="100000" step="10" />
+          </div>
+          <div class="setting-row">
+            <label class="toggle" title="Unfinished features under active development (currently: the skin market). May be unstable." data-i18n-title="settings.experimentalTip"><input id="experimental-features" type="checkbox" /> <span data-i18n="settings.experimental">Experimental features</span></label>
+          </div>
+          <div class="setting-row">
+            <label class="toggle" title="Category chips wrap into a two-row grid (3 per row, 6 max) instead of one compact scrollable row; extra categories hide behind …" data-i18n-title="settings.overviewCatFullTip"><input id="overview-cat-full" type="checkbox" /> <span data-i18n="settings.overviewCatFull">Show all overview categories</span></label>
+          </div>
+          <div class="setting-row">
+            <label class="toggle" title="Automatically claim Qoder CN's daily 100-credit benefit once per claim window. Off by default: it performs a write on your account." data-i18n-title="settings.qoderCheckinTip"><input id="qoder-checkin" type="checkbox" /> <span data-i18n="settings.qoderCheckin">Qoder CN daily check-in</span></label>
           </div>
         </div></div>
       </div>

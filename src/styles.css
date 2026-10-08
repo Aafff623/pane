@@ -270,6 +270,7 @@ body.no-glass .sidebar::after {
 .main-col {
   flex: 1;
   min-width: 0;
+  min-height: 0;
   display: flex;
   flex-direction: column;
   position: relative;
@@ -361,6 +362,8 @@ body.refreshing #refresh {
   background: var(--background);
   padding: 12px 14px;
   overflow-y: auto;
+  visibility: hidden;
+  pointer-events: none;
   transform: translateX(103%);
   transition: transform 0.28s cubic-bezier(0.16, 1, 0.3, 1);
   scrollbar-width: none;
@@ -371,6 +374,8 @@ body.refreshing #refresh {
 }
 
 body.settings-open #settings {
+  visibility: visible;
+  pointer-events: auto;
   transform: none;
 }
 
@@ -523,6 +528,165 @@ body.settings-open #settings {
 
 .kv-info {
   flex-wrap: wrap;
+}
+
+/* Brand mark on a vault row (tavily/firecrawl resolve to real icons;
+   everything else falls back to the key glyph). */
+.kv-icon {
+  display: inline-flex;
+  flex: none;
+  color: var(--muted-foreground);
+}
+.kv-icon svg {
+  width: 15px;
+  height: 15px;
+}
+
+/* ---- Keys page (panel window): provider credential rows ---- */
+
+.st-kv-note {
+  margin: 0 0 10px;
+}
+
+.skey-list {
+  display: flex;
+  flex-direction: column;
+}
+
+.skey-item {
+  padding: 9px 0;
+  border-bottom: 1px solid var(--border);
+}
+.skey-item:last-child {
+  border-bottom: none;
+}
+
+.skey-head {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-width: 0;
+}
+
+.skey-icon {
+  display: inline-flex;
+  flex: none;
+  color: var(--muted-foreground);
+}
+.skey-icon svg {
+  width: 18px;
+  height: 18px;
+}
+
+.skey-name {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--foreground);
+}
+
+.skey-state {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+  color: var(--muted-foreground);
+}
+.skey-state.ok {
+  color: var(--muted-foreground);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.skey-actions {
+  display: flex;
+  flex: none;
+  gap: 6px;
+}
+
+.skey-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 9px;
+  animation: skey-editor-in 0.16s ease;
+}
+
+@keyframes skey-editor-in {
+  from {
+    opacity: 0;
+    transform: translateY(-3px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.skey-editor-actions {
+  display: flex;
+  gap: 8px;
+}
+.skey-error {
+  font-size: 11px;
+  color: var(--destructive);
+}
+
+.skey-accounts {
+  display: flex;
+  flex-direction: column;
+  margin: 6px 0 2px 27px;
+}
+
+.skey-account {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding: 6px 0;
+  font-size: 11.5px;
+  border-top: 1px dashed var(--border);
+}
+.skey-account:first-child {
+  border-top: none;
+}
+
+.skey-acct-label {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--foreground);
+}
+
+.skey-acct-masked {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--muted-foreground);
+  font-size: 11px;
+}
+
+.skey-account-actions {
+  display: flex;
+  flex: none;
+  gap: 6px;
+  margin-left: auto;
+}
+
+/* Dense action rows follow the vault's own scale (.kv-actions). */
+.skey-actions .mini-btn,
+.skey-account-actions .mini-btn {
+  padding: 4px 7px;
+  font-size: 10.5px;
 }
 
 .kv-service-badge {
@@ -985,6 +1149,7 @@ select:focus-visible {
 .content {
   flex: 1;
   display: flex;
+  flex-direction: column;
   min-height: 0;
   min-width: 0;
   max-width: 100%;
@@ -1191,8 +1356,10 @@ select:focus-visible {
 }
 
 #providers {
-  flex: 1;
+  flex: 1 1 0;
   min-width: 0;
+  min-height: 0;
+  height: 0;
   position: relative;
   overflow-y: auto;
   overflow-x: hidden;
@@ -1244,15 +1411,19 @@ select:focus-visible {
 /* Drag grip: appears on card hover, left of the provider name. */
 .drag-grip {
   opacity: 0;
+  width: 0;
+  overflow: hidden;
   cursor: grab;
   color: var(--muted-foreground);
   font-size: 11px;
-  margin-right: 1px;
+  margin-right: 0;
   user-select: none;
-  transition: opacity 0.15s ease;
+  transition: opacity 0.15s ease, width 0.15s ease;
 }
 .provider:hover .drag-grip {
   opacity: 0.8;
+  width: 10px;
+  margin-right: 1px;
 }
 .provider.dragging {
   opacity: 0.45;
@@ -1270,11 +1441,235 @@ select:focus-visible {
   height: 22px;
 }
 
+/* Top directory bar, copied from Magpie's .seg: no grey track behind the
+   tabs — only the active one gets a thumb pill with a soft edge shadow. */
+.settings-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 2px;
+  margin: 0 auto 14px;
+  padding: 2px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  width: fit-content;
+}
+
+.settings-tabs button {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  flex: 0 0 auto;
+  min-height: 24px;
+  height: 24px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted-foreground);
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background .15s ease, color .15s ease;
+}
+
+.settings-tabs .ui-icon {
+  width: 14px;
+  height: 14px;
+  opacity: 0.8;
+}
+
+.settings-tabs button:hover:not(.active) {
+  color: var(--foreground);
+}
+
+.settings-tabs button.active {
+  background: color-mix(in srgb, var(--foreground) 10%, transparent);
+  color: var(--foreground);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.22), inset 0 0.5px 0 rgba(255, 255, 255, 0.06);
+}
+
+/* Floating settings follows the Magpie sheet proportions: centered, bounded,
+   and readable without taking over the whole desktop. The panel-form window
+   keeps its dedicated full-window layout below. */
+body:not(.panel-form).settings-open::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: 49;
+  background: rgb(0 0 0 / 0.42);
+}
+
+body:not(.panel-form) #settings {
+  inset: 50% auto auto 50%;
+  width: min(760px, calc(100vw - 32px));
+  height: min(760px, calc(100vh - 48px));
+  max-height: calc(100vh - 48px);
+  padding: 18px 20px 22px;
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  box-shadow: 0 24px 80px rgb(0 0 0 / 0.38);
+  transform: translate(-50%, -46%) scale(.98);
+  opacity: 0;
+  transition: transform .24s cubic-bezier(.16,1,.3,1), opacity .2s ease;
+}
+
+body:not(.panel-form) #settings .panel-head {
+  position: static;
+  z-index: auto;
+}
+
+body:not(.panel-form).settings-open #settings {
+  transform: translate(-50%, -50%) scale(1);
+  opacity: 1;
+}
+
+.metric.trend .trend-plot {
+  flex: 1;
+  min-width: 0;
+}
+
+.metric.trend .trend-plot .trend-chart {
+  width: 100%;
+}
+
+.trend-dates {
+  display: flex;
+  justify-content: space-between;
+  gap: 6px;
+  /* --muted is a surface swatch (near-invisible as text in both themes);
+     the dates are text, so they take the foreground-muted token. */
+  color: var(--muted-foreground);
+  font-size: 9px;
+  line-height: 1.2;
+  white-space: nowrap;
+}
+
+.trend-dates span:last-child {
+  text-align: right;
+}
+
 .provider-head {
   display: flex;
   align-items: center;
   gap: 6px;
   margin-bottom: 9px;
+  /* The head must never outgrow the popover: the name/plan shrink, the
+     action buttons keep their size and stay inside the card. */
+  min-width: 0;
+  overflow: hidden;
+}
+
+.provider-head .provider-name {
+  min-width: 64px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  flex: 0 1 auto;
+}
+
+.provider-head .plan {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.provider-head .spacer {
+  flex: 1 1 auto;
+  min-width: 4px;
+}
+
+.head-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  flex: none;
+}
+/* The action cluster only appears on hover; while hidden it yields its whole
+   width to the provider name (opacity keeps layout, so the buttons live in
+   normal flow and the status overlays the same box, cross-fading). */
+.head-right {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  flex: none;
+}
+.head-actions {
+  position: absolute;
+  right: 0;
+  top: 50%;
+  translate: 0 -50%;
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  opacity: 0;
+  transition: opacity 0.15s ease;
+}
+.head-right .head-status {
+  transition: opacity 0.15s ease;
+}
+.provider:hover .head-actions {
+  opacity: 1;
+}
+.provider:hover .head-right .head-status {
+  opacity: 0;
+}
+/* Folded cards already carry dot+percent in the fold badge — no duplicate. */
+article.provider.is-folded .head-right .head-status {
+  display: none;
+}
+.head-pct {
+  font-size: 12.5px;
+  font-weight: 700;
+  color: var(--foreground);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---------------------------------------------------------------------------
+   Head budget layout (general mechanism, every card, every form).
+   Each card is a size container; when the row cannot pay for all fields,
+   the lowest-information ones drop out first (plan text → badge digits →
+   head percent), each surviving in its title tooltip. The provider name is
+   never a drop candidate — it takes whatever budget remains and its font
+   is fitted to that budget by fitProviderNames().
+--------------------------------------------------------------------------- */
+article.provider {
+  container-type: inline-size;
+}
+@container (max-width: 330px) {
+  .provider-head .plan {
+    display: none;
+  }
+}
+@container (max-width: 290px) {
+  .provider-head .provider-account-badge span:last-child {
+    display: none;
+  }
+  .provider-head .provider-account-badge {
+    min-width: 0;
+    padding: 0 4px;
+  }
+}
+@container (max-width: 250px) {
+  .provider-head .head-status .head-pct {
+    display: none;
+  }
+}
+
+.provider-head button,
+.provider-head .drag-grip,
+.provider-head .card-refresh,
+.provider-head .share-btn,
+.provider-head .card-fold-toggle,
+.provider-head .provider-icon,
+.provider-head .provider-account-badge,
+.provider-head .peak-badge,
+.provider-head .pinned-badge,
+.provider-head .stale {
+  flex: none;
 }
 
 /* Folded cards tuck the head margin (no card-panel under it) and add a
@@ -1309,7 +1704,7 @@ article.provider.is-folded:hover {
 }
 
 .provider-name {
-  font-size: 16px;
+  font-size: var(--compact-label-size, 16px);
   font-weight: 650;
   letter-spacing: -0.015em;
   line-height: 1.25;
@@ -1317,7 +1712,7 @@ article.provider.is-folded:hover {
 }
 
 :root[data-density="compact"] .provider-name {
-  font-size: 15px;
+  font-size: var(--compact-label-size, 15px);
 }
 
 .provider-count {
@@ -1508,6 +1903,8 @@ article.provider.is-folded:hover {
   text-overflow: ellipsis;
   white-space: nowrap;
   text-align: right;
+  font-size: clamp(9px, 1.7vw, 11px);
+  letter-spacing: -0.01em;
 }
 
 .metric-text {
@@ -1530,6 +1927,8 @@ article.provider.is-folded:hover {
   text-overflow: ellipsis;
   white-space: nowrap;
   text-align: right;
+  font-size: clamp(9px, 1.7vw, 11px);
+  letter-spacing: -0.01em;
 }
 
 .placeholder {
@@ -1680,6 +2079,48 @@ article.provider.is-folded:hover {
   width: 26px;
   height: 26px;
   padding: 5px;
+}
+
+/* Update-push indicator in the Total Spend header — the mainstream quiet
+   affordance (Cursor-style): a green circular up arrow that appears only
+   while a version is announced. Clicking starts the download in place; the
+   ring fills with real byte progress, then the app installs and restarts. */
+.spend-update-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  flex: none;
+  padding: 0;
+  border: 1px solid rgb(34 197 94 / 0.45);
+  border-radius: 50%;
+  background: rgb(34 197 94 / 0.12);
+  color: #22c55e;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+.spend-update-btn:hover {
+  background: rgb(34 197 94 / 0.24);
+}
+.spend-update-btn .ui-icon {
+  width: 12px;
+  height: 12px;
+}
+.spend-update-btn.busy {
+  cursor: default;
+  background: conic-gradient(#22c55e calc(var(--pct, 0) * 1%), rgb(34 197 94 / 0.12) 0);
+}
+:root[data-theme="light"] .spend-update-btn {
+  color: #16a34a;
+  border-color: rgb(22 163 74 / 0.45);
+  background: rgb(22 163 74 / 0.12);
+}
+:root[data-theme="light"] .spend-update-btn:hover {
+  background: rgb(22 163 74 / 0.22);
+}
+:root[data-theme="light"] .spend-update-btn.busy {
+  background: conic-gradient(#16a34a calc(var(--pct, 0) * 1%), rgb(22 163 74 / 0.12) 0);
 }
 
 .spend-detail-overlay {
@@ -2078,7 +2519,7 @@ article.provider.is-folded:hover {
 .overview-bar-item .overview-item-name {
   flex: 1;
   min-width: 0;
-  font-size: 10.5px;
+  font-size: var(--compact-label-size, 10.5px);
   color: var(--secondary-foreground);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -2086,7 +2527,7 @@ article.provider.is-folded:hover {
 }
 
 .overview-bar-item .overview-item-name.is-note {
-  font-size: 9px;
+  font-size: var(--compact-label-size, 9px);
   letter-spacing: -0.02em;
 }
 
@@ -2413,11 +2854,16 @@ article.provider.is-folded:hover {
 }
 
 /* Form-style gear panels (DSH/cockpit conventions): stacked fields —
-   label above a full-width input, help text under it, actions last. */
+   label above a full-width input, help text under it, actions last.
+   `align-items: stretch` is load-bearing: the `.cust-config` rule above
+   sets `center` for its inline wrap layout, and a column flexbox that
+   inherits it shrink-wraps + centers every child (buttons float mid-panel,
+   fields collapse to content width) — the panel looks scrambled. */
 .cust-form {
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  align-items: stretch;
+  gap: 12px;
   padding: 12px;
   border: 1px solid var(--border);
   border-radius: 10px;
@@ -2453,6 +2899,25 @@ article.provider.is-folded:hover {
 .cust-form .form-input:focus-visible {
   border-color: #52525b;
   box-shadow: 0 0 0 3px rgb(212 212 216 / 0.1);
+}
+
+/* Group picker trigger. It replaces a native <select> whose popup WebView2
+   drew from the host's PreferredColorScheme — that ignored the page's dark
+   theme and rendered light text on white. The trigger keeps the .form-input
+   look; its menu is a .group-menu overlay, so both follow the page theme. */
+.cust-form .form-input.cust-group-trigger {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.cust-group-trigger .cust-group-chev {
+  color: var(--muted-foreground);
+  font-size: 11px;
+  line-height: 1;
 }
 
 .cust-form .form-help {
@@ -2532,6 +2997,63 @@ article.provider.is-folded:hover {
   flex-basis: 100%;
 }
 
+/* Destructive zone at the end of a provider's gear panel: delete lives
+   apart from the ordinary actions, with its way-back hint underneath. */
+.cust-danger {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: -6px 0 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: rgb(255 255 255 / 0.02);
+}
+.cust-danger .form-help {
+  flex: 1 1 100%;
+}
+
+/* Removed-provider registry at the drawer footer: one collapsed line that
+   expands into restore rows. */
+.cust-removed {
+  margin: 12px 2px 4px;
+  border: 1px dashed var(--border);
+  border-radius: 8px;
+}
+.cust-removed-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  background: none;
+  border: none;
+  color: var(--muted-foreground);
+  font: inherit;
+  font-size: 11.5px;
+  padding: 8px 10px;
+  cursor: pointer;
+}
+.cust-removed-head .chev {
+  transition: transform 0.2s;
+}
+.cust-removed.open .cust-removed-head .chev {
+  transform: rotate(180deg);
+}
+.cust-removed-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 0 10px 10px;
+}
+.cust-removed-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 12px;
+}
+
 /* The account ⚙ panel is a small form (note name / key mask /
    connectivity / actions), not a horizontal action row — stack it. */
 .cust-config.account-config {
@@ -2557,6 +3079,22 @@ article.provider.is-folded:hover {
   background: transparent;
   color: var(--muted-foreground);
   cursor: pointer;
+}
+
+.card-account-tab {
+  min-width: 0;
+  max-width: 92px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.card-account-tab.compact {
+  width: 28px;
+  max-width: 28px;
+  padding: 3px 4px;
+  font-size: 10px;
+  text-align: center;
 }
 
 .cursor-tab.on {
@@ -2634,6 +3172,10 @@ article.provider.is-folded:hover {
   margin: -2px 0 8px;
 }
 
+.card-account-tabs.compact {
+  gap: 3px;
+}
+
 .card-account-tab {
   font: inherit;
   font-size: 11px;
@@ -2643,6 +3185,62 @@ article.provider.is-folded:hover {
   background: transparent;
   color: var(--muted-foreground);
   cursor: pointer;
+}
+
+.card-account-pin-head.on {
+  color: #facc15;
+}
+
+:root[data-theme="light"] .card-account-pin-head.on {
+  color: #a16207;
+}
+
+.cust-search-wrap {
+  position: relative;
+  padding: 2px 2px 8px;
+}
+.cust-search-icon {
+  position: absolute;
+  left: 11px;
+  top: calc(50% - 4px);
+  translate: 0 -50%;
+  display: inline-flex;
+  color: var(--muted-foreground);
+  pointer-events: none;
+}
+.cust-search-icon .ui-icon {
+  width: 13px;
+  height: 13px;
+}
+.cust-search {
+  width: 100%;
+  padding: 7px 12px 7px 30px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 10px;
+  background: rgba(9, 9, 11, 0.35);
+  backdrop-filter: var(--bar-filter);
+  -webkit-backdrop-filter: var(--bar-filter);
+  box-shadow:
+    inset 0 1px 1.5px rgba(255, 255, 255, 0.12),
+    inset 0 -0.5px 1px rgba(255, 255, 255, 0.05);
+  color: var(--foreground);
+  font-size: 12px;
+  outline: none;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+.cust-search:focus {
+  border-color: color-mix(in srgb, var(--accent, #3b82f6) 45%, transparent);
+  box-shadow:
+    inset 0 1px 1.5px rgba(255, 255, 255, 0.12),
+    0 0 0 3px color-mix(in srgb, var(--accent, #3b82f6) 16%, transparent);
+}
+.cust-search::placeholder {
+  color: var(--muted-foreground);
+}
+:root[data-theme="light"] .cust-search {
+  background: rgba(255, 255, 255, 0.5);
+  border-color: rgba(0, 0, 0, 0.08);
+  box-shadow: inset 0 1px 1.5px rgba(255, 255, 255, 0.6);
 }
 
 .card-account-tab.on {
@@ -2660,15 +3258,15 @@ article.provider.is-folded:hover {
   align-items: center;
   gap: 3px;
   flex: none;
-  min-width: 27px;
+  min-width: 25px;
   height: 19px;
-  padding: 0 6px 0 5px;
+  padding: 0 5px 0 4px;
   border: 1px solid rgb(96 165 250 / .65);
   border-radius: 999px;
   color: #fff;
   background: linear-gradient(135deg, #1d4ed8, #2563eb);
   box-shadow: 0 3px 10px rgb(37 99 235 / .16);
-  font-size: 11px;
+  font-size: 10px;
   font-weight: 750;
   line-height: 1;
   letter-spacing: .01em;
@@ -2743,11 +3341,27 @@ article.provider.is-folded:hover {
 }
 
 .cred-chip {
+  /* inline-block + max-width: a long chip (检测到本地登录：Cursor editor
+     local sign-in) must wrap as ONE rounded box; as a plain inline span it
+     fragments across lines with torn borders. */
+  display: inline-block;
+  max-width: 100%;
+  box-sizing: border-box;
   font-size: 11px;
-  padding: 2px 8px;
+  line-height: 1.5;
+  padding: 3px 9px;
   border-radius: 999px;
   border: 1px solid var(--border);
   color: var(--muted-foreground);
+}
+
+/* Credential chips get their own flex row so long + short chips (status +
+   plan tier) wrap cleanly instead of colliding as inline text. */
+[data-cred-chips] {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 6px;
 }
 
 .cred-chip.ok {
@@ -2846,6 +3460,13 @@ article.provider.is-folded:hover {
   line-height: 1.3;
   width: 100%;
   box-sizing: border-box;
+}
+
+.fold-main-quota {
+  color: var(--foreground);
+  font-size: 10px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
 }
 
 .fold-badge.warn {
@@ -3762,6 +4383,11 @@ body.party .trail-tick.active {
   color: #fecaca;
 }
 
+:root[data-theme="light"] .dock-btn.danger:hover {
+  background: rgba(220, 38, 38, 0.12);
+  color: #b91c1c;
+}
+
 .dock-sep {
   width: 1px;
   height: 16px;
@@ -3815,6 +4441,9 @@ body.party .trail-tick.active {
   color: var(--muted-foreground);
   line-height: 0.4;
   font-size: 13px;
+  /* name↔chevron only: the 7px flex gap is shared with the icon, so the
+     extra separation lives here (≈12px total) */
+  margin-left: 5px;
   transition: transform 0.24s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
@@ -4303,6 +4932,48 @@ body.no-glass .cust-dock {
   line-height: 1.5;
   color: var(--muted-foreground);
   margin: 0 0 14px;
+}
+
+/* "?" provider-quota help dialog (openProviderHelp) */
+.help-kind {
+  display: inline-block;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  color: var(--muted-foreground);
+  margin: 2px 0 10px;
+}
+
+.help-steps {
+  margin: 0 0 12px;
+  padding-inline-start: 18px;
+  display: grid;
+  gap: 6px;
+}
+
+.help-steps li {
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--muted-foreground);
+}
+
+.help-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+  margin: 0 0 14px;
+}
+
+.help-links a {
+  font-size: 12px;
+  color: var(--accent, #4c8bf5);
+  text-decoration: none;
+}
+
+.help-links a:hover {
+  text-decoration: underline;
 }
 
 #confirm-actions,
@@ -4813,6 +5484,27 @@ body.no-glass #confirm-box {
   padding: 2px 6px;
   font-size: 10px;
   border-radius: 6px;
+  /* Long category names truncate instead of eating the row. */
+  max-width: 72px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Full mode (Settings → 完全显示分类): two-row grid, 3 chips per row, the
+   window capsules stay vertically centered across both rows. */
+.quota-overview .overview-switch-row:has(.overview-cat-tabs.full) {
+  align-items: center;
+}
+.quota-overview .overview-cat-tabs.full {
+  flex-wrap: wrap;
+  overflow: hidden;
+  /* two rows of 20px chips + gap + padding, no third row peeks out */
+  max-height: 46px;
+}
+.quota-overview .overview-cat-tabs.full .tab {
+  flex: 0 0 calc(33.33% - 2px);
+  max-width: none;
+  text-align: center;
 }
 
 .quota-overview .overview-switch-row .overview-tabs {
@@ -5050,7 +5742,7 @@ body.no-glass #confirm-box {
 }
 
 .overview-item-name {
-  font-size: 10.5px;
+  font-size: var(--compact-label-size, 10.5px);
   font-weight: 500;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -5060,6 +5752,9 @@ body.no-glass #confirm-box {
 
 /* Informational multi-account marker; health remains encoded by the dot. */
 .overview-account-count {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 2px;
   flex: none;
   padding: 1px 4px;
   border: 1px solid color-mix(in oklab, #60a5fa 42%, transparent);
@@ -5071,6 +5766,37 @@ body.no-glass #confirm-box {
   line-height: 1.2;
   font-variant-numeric: tabular-nums;
   letter-spacing: -0.02em;
+}
+
+/* Light theme: pale blue/red text on a translucent tint washed out to
+   unreadable — switch to the deep end of the same hue. */
+:root[data-theme="light"] .overview-account-count {
+  color: #1d4ed8;
+  border-color: color-mix(in oklab, #2563eb 45%, transparent);
+  background: color-mix(in oklab, #2563eb 10%, transparent);
+}
+
+.overview-account-count b {
+  font-size: 9px;
+  font-weight: 800;
+}
+
+.overview-account-count i {
+  font-size: 7px;
+  font-style: normal;
+  opacity: .9;
+}
+
+.overview-account-count.is-empty {
+  border-color: color-mix(in oklab, #ef4444 48%, transparent);
+  background: color-mix(in oklab, #991b1b 24%, transparent);
+  color: #fecaca;
+}
+
+:root[data-theme="light"] .overview-account-count.is-empty {
+  color: #b91c1c;
+  border-color: color-mix(in oklab, #dc2626 45%, transparent);
+  background: color-mix(in oklab, #dc2626 10%, transparent);
 }
 
 .overview-dot {
@@ -5167,8 +5893,140 @@ body.no-glass #confirm-box {
 
 /* Card highlight flash when jumped from overview */
 article.provider.card-highlight {
+  outline: 2px solid #3b82f6;
+  outline-offset: -2px;
   animation: card-glow 1.2s ease;
 }
+
+.provider-account-badge.is-empty {
+  border-color: rgb(239 68 68 / .65);
+  background: linear-gradient(135deg, #991b1b, #dc2626);
+}
+
+.provider-account-badge.is-ready {
+  border-color: rgb(16 185 129 / .65);
+  background: linear-gradient(135deg, #047857, #10b981);
+}
+
+.provider-account-badge.is-partial {
+  border-color: rgb(245 158 11 / .7);
+  background: linear-gradient(135deg, #b45309, #f59e0b);
+}
+
+.provider-account-availability {
+  font-size: 8px;
+  font-weight: 650;
+  opacity: .9;
+}
+
+.pinned-status-warn {
+  flex: none;
+  color: #f59e0b;
+  font-size: 9px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+:root[data-theme="light"] .pinned-status-warn {
+  color: #b45309;
+}
+
+.overview-account-meters {
+  display: grid;
+  gap: 3px;
+  width: 100%;
+  margin-top: 5px;
+}
+
+.overview-account-rings {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 5px;
+  width: 100%;
+  margin-top: 4px;
+}
+
+.overview-account-ring {
+  display: grid;
+  justify-items: center;
+  gap: 1px;
+  min-width: 30px;
+  max-width: 44px;
+  overflow: hidden;
+  color: var(--muted-foreground);
+  font-size: 7px;
+  line-height: 1.1;
+  text-align: center;
+}
+
+.overview-account-ring svg {
+  width: 28px;
+  height: 28px;
+}
+
+.overview-account-ring span {
+  overflow: hidden;
+  max-width: 44px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.overview-account-meter {
+  display: grid;
+  grid-template-columns: 7px minmax(0, 1fr) minmax(34px, 1fr) auto;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  font-size: 8px;
+  color: var(--muted-foreground);
+}
+
+.overview-account-meter-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.overview-account-meter-track {
+  height: 3px;
+  overflow: hidden;
+  border-radius: 99px;
+  background: var(--border);
+}
+
+.overview-account-meter-track i {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: #10b981;
+}
+
+.overview-account-meter-track i.red { background: #ef4444; }
+.overview-account-meter-track i.error { background: #f97316; }
+.overview-account-meter-track i.gray { background: var(--muted-foreground); }
+
+:root[data-theme="light"] .overview-account-meter-track i { background: #059669; }
+:root[data-theme="light"] .overview-account-meter-track i.red { background: #dc2626; }
+:root[data-theme="light"] .overview-account-meter-track i.error { background: #c2410c; }
+
+.est-badge {
+  margin-left: 5px;
+  padding: 0 4px;
+  border: 1px solid rgb(245 158 11 / .6);
+  border-radius: 4px;
+  color: #f59e0b;
+  font-size: 8.5px;
+  font-weight: 600;
+  letter-spacing: .04em;
+  vertical-align: 1px;
+}
+
+:root[data-theme="light"] .est-badge {
+  color: #b45309;
+  border-color: rgb(180 83 9 / .55);
+}
+.overview-account-meter b { font-weight: 600; color: var(--foreground); }
 
 @keyframes card-glow {
   0% {
@@ -5462,29 +6320,25 @@ article.provider.card-highlight {
   position: relative;
 }
 
-.overview-move-btn {
-  position: absolute;
-  right: 2px;
-  bottom: 2px;
-  width: 18px;
-  height: 18px;
-  display: flex;
+/* Multi-account fold caret on overview tiles (replaces the removed
+   move-to-group button — grouping is right-click only now). */
+.overview-acct-fold {
+  display: inline-flex;
   align-items: center;
   justify-content: center;
-  padding: 2px;
-  border: 1px solid var(--border);
+  width: 16px;
+  height: 16px;
+  padding: 1px;
+  border: 0;
   border-radius: 4px;
   color: var(--muted-foreground);
-  background: var(--card);
+  background: transparent;
   cursor: pointer;
-  opacity: 0.5;
 }
-
-.overview-move-btn svg { width: 12px; height: 12px; }
-.overview-move-btn:hover,
-.overview-move-btn:focus-visible { opacity: 1; color: var(--foreground); }
-.overview-bar-item .ovbar-meta { padding-right: 20px; box-sizing: border-box; }
-.overview-item .overview-item-foot { padding-right: 15px; box-sizing: border-box; }
+.overview-acct-fold svg { width: 11px; height: 11px; }
+.overview-acct-fold:hover { color: var(--foreground); background: color-mix(in srgb, var(--foreground) 8%, transparent); }
+.overview-bar-item .ovbar-meta { box-sizing: border-box; }
+.overview-item .overview-item-foot { box-sizing: border-box; }
 .overview-drag-source { opacity: 0.35; }
 .overview-drag-active { user-select: none; cursor: grabbing; }
 
@@ -5710,14 +6564,15 @@ body.panel-form #skin-mascot {
   border-top: 1px solid var(--border);
 }
 
-/* SettingsRow: px-4 py-3, name left / control right. Applies both to the
-   re-parented popover rows and the panel's own .setting-row markup. */
+/* SettingsRow: name left / control right. Applies both to the re-parented
+   popover rows and the panel's own .setting-row markup. Density tuned so a
+   full page reads at a glance and only long pages scroll. */
 .st-card .setting-row {
   margin: 0;
-  padding: 12px 16px;
-  gap: 16px;
-  min-height: 28px;
-  font-size: 14px;
+  padding: 7px 14px;
+  gap: 12px;
+  min-height: 34px;
+  font-size: 13px;
   color: var(--secondary-foreground);
 }
 
@@ -5727,26 +6582,25 @@ body.panel-form #skin-mascot {
   color: var(--foreground);
 }
 
-/* SettingsSwitchRow: toggle rows put the text left and the switch right,
-   and the switch grows to the 40x22 panel size. */
+/* SettingsSwitchRow: toggle rows put the text left and the switch right. */
 .st-card .setting-row .toggle {
   width: 100%;
   margin-right: 0;
   flex-direction: row-reverse;
   justify-content: space-between;
-  font-size: 14px;
+  font-size: 13px;
   font-weight: 500;
   color: var(--foreground);
 }
 
 .st-card .setting-row .toggle input[type="checkbox"] {
-  width: 40px;
-  height: 22px;
-  background-image: radial-gradient(circle 8px at 11px 11px, #a1a1aa 98%, transparent);
+  width: 36px;
+  height: 20px;
+  background-image: radial-gradient(circle 7px at 10px 10px, #a1a1aa 98%, transparent);
 }
 
 .st-card .setting-row .toggle input[type="checkbox"]:checked {
-  background-image: radial-gradient(circle 8px at 29px 11px, var(--primary-foreground) 98%, transparent);
+  background-image: radial-gradient(circle 7px at 26px 10px, var(--primary-foreground) 98%, transparent);
 }
 
 /* Non-row content inside a card (key vault, shortcuts, notes). */
@@ -5987,4 +6841,264 @@ body.panel-form #skin-mascot {
 .auth-note {
   font-size: 12px;
   color: var(--muted-foreground);
+}
+
+/* ---------------------------------------------------------------------------
+   First-launch-per-boot splash (#splash). Brand moment on a fixed dark
+   stage regardless of theme; respects the OS "animation effects" switch by
+   degrading to a static card that still fades out on the same timer.
+   --------------------------------------------------------------------------- */
+#splash {
+  position: fixed;
+  inset: 0;
+  z-index: 2000;
+  background:
+    radial-gradient(120% 90% at 50% 38%, #11161d 0%, #09090b 62%),
+    #09090b;
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+  opacity: 1;
+  transition: opacity 0.4s ease;
+}
+#splash.hide {
+  opacity: 0;
+  pointer-events: none;
+}
+.sa-col {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  position: relative;
+}
+.sa-logo-wrap {
+  position: relative;
+  width: 104px;
+  height: 104px;
+}
+.sa-mark {
+  width: 104px;
+  height: 104px;
+  display: block;
+  filter: drop-shadow(0 24px 60px rgba(0, 0, 0, 0.55))
+    drop-shadow(0 0 46px rgba(63, 126, 240, 0.16));
+}
+.sa-rip {
+  position: absolute;
+  inset: 0;
+  border-radius: 26px;
+  pointer-events: none;
+  border: 1.5px solid rgba(110, 168, 255, 0.5);
+  opacity: 0;
+}
+.sa-rip.r2 {
+  border-color: rgba(56, 189, 248, 0.38);
+}
+.sa-word {
+  margin-top: 26px;
+  font-size: 25px;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  color: #f4f4f5;
+}
+.sa-word span {
+  display: inline-block;
+}
+.sa-sub {
+  margin-top: 9px;
+  font-size: 11.5px;
+  letter-spacing: 0.34em;
+  padding-left: 0.34em;
+  color: rgba(110, 168, 255, 0.85);
+}
+.sa-skip {
+  position: absolute;
+  bottom: 26px;
+  right: 30px;
+  font-size: 11.5px;
+  color: rgba(250, 250, 250, 0.35);
+  letter-spacing: 0.05em;
+}
+/* The splash timeline is GSAP-driven (JS); these only neutralize leftovers. */
+@media (prefers-reduced-motion: reduce) {
+  #splash, #splash * { animation: none !important; transition: none !important; }
+}
+body.reduce-anim #splash,
+body.reduce-anim #splash * {
+  animation: none !important;
+  transition: none !important;
+}
+
+/* Text-style button used inside settings rows (e.g. splash Replay). */
+.link-btn {
+  background: none;
+  border: none;
+  padding: 2px 6px;
+  font-size: 12px;
+  color: var(--accent, #3b82f6);
+  cursor: pointer;
+  border-radius: 6px;
+}
+.link-btn:hover {
+  background: rgba(128, 128, 140, 0.15);
+}
+
+/* ---------------------------------------------------------------------------
+   Magpie-style settings surface (floating sheet + panel window):
+   section = small quiet caption over a bordered card; rows inside the card
+   separated by hairlines, label left / control right. Nothing folds.
+   --------------------------------------------------------------------------- */
+
+/* --- Floating sheet (#settings) ------------------------------------------ */
+#settings .acc-group {
+  border: 0;
+  background: none;
+  margin-bottom: 16px;
+  overflow: visible;
+}
+
+/* The old accordion head is now a static caption above the card. */
+#settings .acc-head {
+  pointer-events: none;
+  justify-content: flex-start;
+  padding: 0 6px 6px;
+  font-size: 11px;
+  font-weight: 650;
+  letter-spacing: 0.06em;
+  color: var(--muted-foreground);
+}
+#settings .acc-head:hover {
+  background: none;
+}
+#settings .acc-head .chev {
+  display: none;
+}
+
+/* Always expanded — page switching is the top pill bar's job. */
+#settings .acc-body,
+#settings .acc-group.open .acc-body {
+  grid-template-rows: 1fr;
+  transition: none;
+}
+
+/* The card itself (Magpie .list): border + radius, rows clipped inside. */
+#settings .acc-inner,
+#settings .acc-group.open .acc-inner {
+  padding: 0;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  overflow: hidden;
+}
+
+/* Magpie .row: comfortable height, hairline between rows. */
+#settings .acc-inner > * + * {
+  border-top: 1px solid color-mix(in srgb, var(--border) 65%, transparent);
+}
+#settings .setting-row {
+  margin: 0;
+  min-height: 40px;
+  padding: 6px 12px;
+  gap: 9px;
+}
+#settings .setting-row > label {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-weight: 500;
+  color: var(--foreground);
+}
+/* Toggle rows: name left, switch right (Magpie SettingsSwitchRow). */
+#settings .setting-row > label.toggle {
+  flex-direction: row-reverse;
+  justify-content: space-between;
+  width: 100%;
+}
+#settings .setting-row select,
+#settings .setting-row input[type="text"],
+#settings .setting-row input[type="number"] {
+  margin-left: auto;
+}
+#settings .settings-note {
+  margin: 0;
+  padding: 10px 12px;
+}
+/* Buttons living directly in a card (reset, changelog) get row padding. */
+#settings .acc-inner > button {
+  margin: 8px 12px;
+}
+
+/* --- Panel window ---------------------------------------------------------- */
+/* Same pill bar, centered over the wider panel canvas. */
+.panel-tabs {
+  margin: 2px auto 16px;
+}
+
+/* Section heads become Magpie captions (small, quiet, over the card). */
+.st-block-head h2 {
+  font-size: 11px;
+  font-weight: 650;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted-foreground);
+  padding: 0 6px 6px;
+  margin: 0;
+}
+.st-block {
+  margin-bottom: 16px;
+}
+.st-block[hidden] {
+  display: none;
+}
+.st-card {
+  border-radius: 12px;
+}
+.st-card > * + * {
+  border-top: 1px solid color-mix(in srgb, var(--border) 65%, transparent);
+}
+
+/* ---------------------------------------------------------------------------
+   Spend-card lightning tiers: gradient fill + glow scale with daily
+   usage. tier-0 keeps the stock currentColor bolt. Works on both themes —
+   the gradients are saturated enough for light, luminous enough for dark.
+   --------------------------------------------------------------------------- */
+.spend-bolt {
+  display: inline-flex;
+  align-items: center;
+}
+.spend-bolt svg {
+  width: 13px;
+  height: 13px;
+}
+.spend-bolt.tier-1 svg {
+  filter: drop-shadow(0 0 3px rgba(52, 211, 153, 0.45));
+}
+.spend-bolt.tier-2 svg {
+  filter: drop-shadow(0 0 4px rgba(249, 115, 22, 0.55));
+}
+.spend-bolt.tier-3 svg {
+  filter: drop-shadow(0 0 5px rgba(232, 121, 249, 0.6));
+  animation: bolt-shine 2.4s ease-in-out infinite;
+}
+@keyframes bolt-shine {
+  50% { filter: drop-shadow(0 0 8px rgba(167, 139, 250, 0.8)); }
+}
+body.reduce-anim .spend-bolt.tier-3 svg {
+  animation: none;
+}
+
+/* Noted account capsule inside a compact row: text width instead of the
+   fixed number cell, with auto-shrinking label (minimum 8px, then clip). */
+.card-account-tab.compact-noted {
+  width: auto;
+  max-width: 72px;
+  padding: 3px 7px;
+  font-size: 10px;
+  text-align: left;
+}
+.card-account-tab-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--compact-label-size, 10.5px);
 }

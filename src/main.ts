@@ -5,13 +5,14 @@ import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
 import {
   providerCatalog,
   providerCategory,
+  providerDefinition,
   providerFamily,
   supportsApiKey,
   supportsExtraAccounts,
 } from "./providerCatalog";
 import { PEAK_RULES, isProviderInPeak, type PeakRule } from "./peakHours";
 import { providerVisual } from "./providerVisuals";
-import { uiIcon } from "./uiIcons";
+import { uiIcon, type UiIconName } from "./uiIcons";
 import {
   applyStaticI18n,
   displayLinkLabel,
@@ -49,6 +50,7 @@ if (IS_PANEL_FORM) document.body.classList.add("panel-form");
 // embed them — rasterized SVG images can't load external resources.
 // The bare ring suits the sidebar; the footer uses the full rounded
 // app icon, which stays legible at tiny sizes.
+import { gsap } from "gsap";
 import paneLogo from "./assets/pane-logo.png?inline";
 import paneIcon from "./assets/pane-icon.png?inline";
 import auroraWallpaper from "./assets/skins/aurora.webp";
@@ -68,6 +70,11 @@ interface Metric {
   value: string | null;
   resets_at: number | null;
   period_ms: number | null;
+}
+
+interface MetricTokenUsage {
+  tokens: number;
+  source: "provider" | "ledger";
 }
 
 interface Snapshot {
@@ -104,6 +111,7 @@ interface ProviderSpend {
   trend_cost: number[];
   unpriced: number;
   unpriced_models: string[];
+  estimated?: boolean;
 }
 
 interface HistorySpend {
@@ -180,6 +188,14 @@ function unpricedWarn(sp: ProviderSpend | undefined): string {
 }
 
 type SpendTab = "today" | "yesterday" | "last30";
+
+/// Small tag for rows whose tokens are a credits-derived blend (Qoder CN),
+/// not measured facts.
+function estBadgeFor(id: string): string {
+  const sp = lastSpend.find((s) => s.id === id);
+  if (!sp?.estimated) return "";
+  return `<span class="est-badge" title="${escapeHtml(t("spend.estimateTip"))}">${escapeHtml(t("spend.estimate"))}</span>`;
+}
 type RangeTab = "d7" | "d30" | "all";
 const OVERVIEW_TABS = ["5h", "week", "month"] as const;
 type OverviewTab = (typeof OVERVIEW_TABS)[number];
@@ -211,6 +227,8 @@ interface ProviderLayout {
   // catalog name. Stored per CARD id, so parallel-account cards each keep
   // their own note.
   note?: string;
+  // Account selected as the provider's explicit pinned seat.
+  pinnedAccount?: string;
 }
 
 interface Layout {
@@ -267,10 +285,20 @@ interface Config {
   welcomeDismissed: boolean;
   lastSeenVersion: string;
   reduceAnimations: boolean;
+  jumpAnimation: "smooth" | "instant";
   hideUsageWhileSharing: boolean;
   locale: LocalePref;
   windowForm: "floating" | "panel";
   silentStart: boolean;
+  startupAnimation: boolean;
+  lastStartupBootId: number | null;
+  overviewExpanded: string[];
+  experimentalFeatures: boolean;
+  spendIconTiers: { medium: number; high: number; max: number } | null;
+  overviewCatFull: boolean;
+  mainScrollTop: number;
+  qoderCheckin: boolean;
+  removedProviders: string[];
 }
 
 const FRONTEND_CONFIG_KEYS = [
@@ -307,10 +335,20 @@ const FRONTEND_CONFIG_KEYS = [
   "welcomeDismissed",
   "lastSeenVersion",
   "reduceAnimations",
+  "jumpAnimation",
   "hideUsageWhileSharing",
   "locale",
   "windowForm",
   "silentStart",
+  "startupAnimation",
+  "lastStartupBootId",
+  "overviewExpanded",
+  "experimentalFeatures",
+  "spendIconTiers",
+  "overviewCatFull",
+  "mainScrollTop",
+  "qoderCheckin",
+  "removedProviders",
 ] as const satisfies readonly (keyof Config)[];
 type _AssertAllConfigKeys = Exclude<keyof Config, (typeof FRONTEND_CONFIG_KEYS)[number]> extends never
   ? true
@@ -401,7 +439,6 @@ const PROVIDER_LINKS: Record<string, { label: string; url: string }[]> = {
   siliconflow: [{ label: "Dashboard", url: "https://cloud.siliconflow.cn/" }],
   novita: [{ label: "Dashboard", url: "https://novita.ai/" }],
   relaybalance: [],
-  linkso: [],
   kimi: [
     { label: "Console", url: "https://www.kimi.com/code/console" },
     { label: "Quota", url: "https://www.kimi.com/membership/subscription?tab=quota" },
@@ -491,7 +528,7 @@ let config: Config = {
   spendMetric: "cost",
   spendGrouping: "tool",
   showUsed: false,
-  showTrend: false,
+  showTrend: true,
   resetExact: false,
   timeFormat: "auto",
   layout: null,
@@ -507,11 +544,40 @@ let config: Config = {
   welcomeDismissed: false,
   lastSeenVersion: "",
   reduceAnimations: false,
+  jumpAnimation: "smooth",
   hideUsageWhileSharing: false,
   locale: "auto",
   windowForm: "floating",
   silentStart: false,
+  startupAnimation: true,
+  lastStartupBootId: null,
+  overviewExpanded: [],
+  experimentalFeatures: false,
+  spendIconTiers: null,
+  overviewCatFull: false,
+  mainScrollTop: 0,
+  qoderCheckin: false,
+  removedProviders: [],
 };
+let pendingJumpAnimation: "smooth" | "instant" | null = null;
+let settingsDirty = false;
+
+function setSettingsDirty(dirty: boolean): void {
+  settingsDirty = dirty;
+  document.querySelectorAll<HTMLButtonElement>(".settings-save-all").forEach((button) => {
+    button.disabled = !dirty;
+  });
+}
+
+async function applySettingsAndReload(): Promise<void> {
+  if (!settingsDirty) return;
+  if (pendingJumpAnimation && pendingJumpAnimation !== config.jumpAnimation) {
+    await patchConfig({ jumpAnimation: pendingJumpAnimation });
+    pendingJumpAnimation = null;
+  }
+  setSettingsDirty(false);
+  window.location.reload();
+}
 let lastFetch = 0;
 let refreshing = false;
 // A forced refresh requested while one was already in flight (saving an
@@ -559,6 +625,7 @@ let spendDetailDay = "";
 /// with local CLI logs trend from spend; every other card falls back to
 /// these daily "worst used percent" samples.
 let lastQuotaTrend: Record<string, (number | null)[]> = {};
+let lastCreditTrend: Record<string, (number | null)[]> = {};
 
 /// Tracks manual account-tab selections made by the user in the current view.
 /// Cleared on popover reopening or account mutations.
@@ -570,6 +637,10 @@ const userSelectedAccountFor = new Map<string, string>();
 /// Failed, exhausted and stale accounts yield to a healthy sibling. This routes
 /// dashboard display without reordering saved credentials or changing other tools.
 function resolveDisplayedAccount(family: string, defaultId: string, accountIds: string[]): string {
+  // Automatic quota preference applies only until the user chooses a tab.
+  // Exhausted or failed accounts must remain inspectable.
+  const manual = userSelectedAccountFor.get(family) ?? providerLayout(family).pinnedAccount;
+  if (manual && accountIds.includes(manual)) return manual;
   const available = accountIds.filter((id) => {
     const snap = lastSnapshots.find((s) => s.id === id);
     return snap?.status === "ok" && !isSnapshotMaxed(snap) && accountHealthDot(id) === "green";
@@ -577,10 +648,6 @@ function resolveDisplayedAccount(family: string, defaultId: string, accountIds: 
   // Fresh successful queries win over cached readings whose latest query failed.
   const fresh = available.filter((id) => !lastSnapshots.find((s) => s.id === id)?.stale);
   const candidates = fresh.length ? fresh : available;
-  const manual = userSelectedAccountFor.get(family);
-  if (manual && candidates.includes(manual)) {
-    return manual;
-  }
   if (candidates.includes(defaultId)) return defaultId;
   if (candidates.length) return candidates[0];
   // All accounts blocked, but a sibling that is ok-and-maxed with a known
@@ -595,20 +662,25 @@ function resolveDisplayedAccount(family: string, defaultId: string, accountIds: 
     })
     .sort((a, b) => nearestResetSeconds(a) - nearestResetSeconds(b));
   if (recovering.length) {
-    return manual && recovering.includes(manual) ? manual : recovering[0];
+    return recovering[0];
   }
-  // All accounts blocked: preserve the selected account so its reason is visible.
-  return manual && accountIds.includes(manual) ? manual : accountIds.includes(defaultId) ? defaultId : accountIds[0] ?? defaultId;
+  return accountIds.includes(defaultId) ? defaultId : accountIds[0] ?? defaultId;
 }
 
-type TrendSource = { id: string; trend: (number | null)[]; quota: boolean; fmt: (v: number) => string };
+type TrendSource = { id: string; trend: (number | null)[]; quota: boolean; credits?: boolean; fmt: (v: number) => string };
+
+/// Credit counts are small whole numbers (38 of 2000), so no k/M suffix.
+const fmtCredits = (v: number): string => Math.round(v).toLocaleString(localeTag());
 
 /// The trend data for one card: local-log spend when the id has one, else
+/// the credits ledger for credits-billed cards (Qoder CN / Trae CN), else
 /// the backend's sampled quota history (API-key accounts, relay keys).
 function trendSourceFor(id: string): TrendSource | undefined {
   const local = lastSpend.find((sp) => sp.id === id);
   const metricCost = config.spendMetric === "cost";
   if (local) return { id, trend: metricCost ? local.trend_cost : local.trend, quota: false, fmt: metricCost ? fmtMoney : fmtTokens };
+  const credits = lastCreditTrend[id];
+  if (credits?.some((v) => v != null && v > 0)) return { id, trend: credits, quota: false, credits: true, fmt: fmtCredits };
   const sampled = lastQuotaTrend[id];
   if (sampled?.some((v) => v != null && v > 0)) return { id, trend: sampled, quota: true, fmt: fmtTokens };
   return undefined;
@@ -693,6 +765,22 @@ function selectSkin(id: SkinId | null): void {
     : "Default skin applied";
   renderDrawerBody();
 }
+
+/// Experimental-features gate: off = the skin market's entries don't even
+/// render. Hot-unplug — turning it off closes the market and drops back to
+/// the native skin in one step.
+function applyExperimental(): void {
+  const on = config.experimentalFeatures === true;
+  const skinBtn = document.querySelector<HTMLElement>("#skin-btn");
+  if (skinBtn) skinBtn.hidden = !on;
+  if (on) return;
+  if (skinMarketOpen || skinPreviewId) {
+    skinMarketOpen = false;
+    skinPreviewId = null;
+    if (customizeOpen) renderDrawerBody();
+  }
+  if (activeSkin()) selectSkin(null);
+}
 let revealTimer = 0;
 let animateExpandId: string | null = null;
 
@@ -744,6 +832,30 @@ function fmtTokens(v: number): string {
   if (v >= 1e6) return `${(v / 1e6).toFixed(1)}M`;
   if (v >= 1e3) return `${(v / 1e3).toFixed(1)}K`;
   return String(Math.round(v));
+}
+
+// Token counts must come from an actual provider report or the local spend
+// ledger. A quota percentage is deliberately never converted into tokens.
+function parseTokenAmount(text: string | null | undefined): number | null {
+  if (!text || /\b(?:credit|credits|积分)\b/i.test(text)) return null;
+  const match = text.match(/([\d,.]+)\s*([kmbt])?\s*tokens?\b/i);
+  if (!match) return null;
+  const amount = Number(match[1].replace(/,/g, ""));
+  if (!Number.isFinite(amount) || amount < 0) return null;
+  const multiplier = ({ k: 1e3, m: 1e6, b: 1e9, t: 1e12 } as Record<string, number>)[(match[2] ?? "").toLowerCase()] ?? 1;
+  return amount * multiplier;
+}
+
+function metricTokenUsage(providerId: string, metric: Metric): MetricTokenUsage | null {
+  const raw = [metric.detail, metric.value, metric.label].filter(Boolean).join(" · ");
+  const reported = parseTokenAmount(raw);
+  if (reported !== null) return { tokens: reported, source: "provider" };
+
+  // Local CLI/SQLite ledgers are real token counts, but their window is 30
+  // days rather than the provider quota window. The UI labels that source.
+  const ledger = lastSpend.find((sp) => sp.id === providerId);
+  if (ledger && ledger.last30.tokens > 0) return { tokens: ledger.last30.tokens, source: "ledger" };
+  return null;
 }
 
 function fmtDuration(ms: number): string {
@@ -807,6 +919,7 @@ function applyConfigEcho(sent: Config, echoed: Config): void {
 
 async function patchConfig(patch: Partial<Config>): Promise<void> {
   Object.assign(config, patch);
+  if (document.body.classList.contains("settings-open") || IS_PANEL_FORM) setSettingsDirty(true);
   // Send a full current snapshot. If an earlier serialized write failed,
   // the next save retries that still-live in-memory state as well.
   const payload = snapshotConfig();
@@ -859,6 +972,7 @@ async function reloadConfigFromBackend(): Promise<void> {
   applyAppearance();
   applyGlass();
   applyReduceMotion();
+  applyExperimental();
 }
 
 // ---------------------------------------------------------------------------
@@ -1297,21 +1411,34 @@ function ensureLayout(): void {
     }
   }
 
-  // Repair legacy autoCollapsed artifact and stale collapsed: false entries that block auto-folding
-  for (const [pid, L] of Object.entries(layout.providers)) {
+  // A merged card owns one layout, even when its bare account is offline
+  // and has no metrics. Collect rows from every sibling without resetting
+  // the user's hidden/on-demand choices.
+  for (const s of lastSnapshots) {
+    const family = providerFamily(s.id);
+    if (s.id !== family || !supportsExtraAccounts(family) || isParallelAccountFamily(family)) continue;
+    const L = layout.providers[family];
+    if (!L) continue;
+    const siblings = lastSnapshots.filter((snap) => providerFamily(snap.id) === family && !isCardDisabled(snap.id));
+    for (const snap of siblings) {
+      const defaults = defaultProviderLayout(snap, lastSpend.find((sp) => sp.id === snap.id), Boolean(trendSourceFor(snap.id)), false);
+      for (const key of defaults.metricOrder) {
+        if (L.metricOrder.includes(key)) continue;
+        L.metricOrder.push(key);
+        if (defaults.onDemand.includes(key)) L.onDemand.push(key);
+        changed = true;
+      }
+    }
+  }
+
+  // Remove the obsolete autoCollapsed marker once. Explicit collapsed
+  // choices otherwise survive refreshes and changes in account health.
+  for (const L of Object.values(layout.providers)) {
     if ("autoCollapsed" in L) {
       delete (L as any).autoCollapsed;
       if (L.collapsed === false) {
         delete L.collapsed;
       }
-      changed = true;
-    }
-    if (L.collapsed === false && isCardFoldCandidate(pid)) {
-      delete L.collapsed;
-      changed = true;
-    }
-    if (L.collapsed === true && !isCardFoldCandidate(pid)) {
-      delete L.collapsed;
       changed = true;
     }
   }
@@ -1401,6 +1528,48 @@ function notedName(cardId: string, fallback: string): string {
   return cardNote(cardId) || fallback;
 }
 
+/// Storage key for an account-level note. The default (bare) account shares
+/// the family card's id, so its note parks under a synthetic sibling key —
+/// otherwise renaming "account 1" would silently retitle the provider.
+/// The @-shape keeps the key valid through layout pruning.
+function accountNoteKey(accountId: string): string {
+  return accountId.includes("@") ? accountId : `${accountId}@__default__`;
+}
+
+/// An account's OWN note (never the provider's). Empty when unset.
+function accountNote(accountId: string): string {
+  return cardNote(accountNoteKey(accountId));
+}
+
+// Keep compact labels readable without letting a long custom note stretch a
+// card.  The inline value is numeric-only and the CSS still enforces the
+// minimum size plus ellipsis when the available width is genuinely too small.
+function compactLabelStyle(text: string, maxPx: number, minPx: number): string {
+  const length = [...text].length;
+  const size = Math.max(minPx, Math.min(maxPx, maxPx - Math.max(0, length - 8) * 0.45));
+  return `style="--compact-label-size:${size.toFixed(1)}px"`;
+}
+
+/// Measured label fitting: start at the max size and step down only while the
+/// text actually overflows the space the flex layout gave the element, so
+/// short names stay large and ellipsis is a last resort (min size exceeded).
+/// Character-count guesses (compactLabelStyle) got this wrong in both
+/// directions — tiny fonts with room to spare, and ellipsis while space sat
+/// unused next to badges.
+function fitProviderNames(): void {
+  const dense = document.documentElement.dataset.density === "compact";
+  for (const el of document.querySelectorAll<HTMLElement>(".provider-name[data-fit-max]")) {
+    const max = Number(el.dataset.fitMax ?? 16) - (dense ? 1 : 0);
+    const min = Number(el.dataset.fitMin ?? 10);
+    let size = max;
+    el.style.fontSize = `${size}px`;
+    while (size > min && el.scrollWidth > el.clientWidth) {
+      size -= 0.5;
+      el.style.fontSize = `${size}px`;
+    }
+  }
+}
+
 function setCardNote(cardId: string, note: string): void {
   config.layout ??= { providerOrder: [], providers: {} };
   if (!config.layout.providers[cardId]) {
@@ -1422,10 +1591,32 @@ function setCardNote(cardId: string, note: string): void {
 /// layout available in Customize for a later re-enable.
 function removeProviderCard(cardId: string): void {
   const family = providerFamily(cardId);
-  const target = isParallelAccountFamily(family) || cardId.includes("@") ? cardId : family;
-  if (!config.disabled.includes(target)) config.disabled = [...config.disabled, target];
-  void patchConfig({ disabled: config.disabled });
+  // Account cards (kimi@<fp>, antigravity@<fp>, an One/New API key, …)
+  // keep the old hide-this-card semantics — the family row stays put.
+  if (cardId.includes("@")) {
+    if (!config.disabled.includes(cardId)) config.disabled = [...config.disabled, cardId];
+    void patchConfig({ disabled: config.disabled });
+    renderAll();
+    return;
+  }
+  // Provider-level delete: gone from the Customize list AND every
+  // dashboard surface (disabled stops the fetch), credentials kept on
+  // disk — the drawer footer's removed list is the way back.
+  config.removedProviders = [...new Set([...config.removedProviders, family])];
+  if (!config.disabled.includes(family)) config.disabled = [...config.disabled, family];
+  void patchConfig({ removedProviders: config.removedProviders, disabled: config.disabled });
+  custConfigOpen = null;
   renderAll();
+  renderDrawerBody();
+}
+
+/// Undo a provider delete: back into the drawer and dashboards, enabled.
+function restoreProviderFamily(family: string): void {
+  config.removedProviders = config.removedProviders.filter((id) => id !== family);
+  config.disabled = config.disabled.filter((id) => id !== family);
+  void patchConfig({ removedProviders: config.removedProviders, disabled: config.disabled });
+  renderAll();
+  renderDrawerBody();
 }
 
 /// Groups that actually have at least one card — empty groups don't render.
@@ -1517,7 +1708,7 @@ function saveLayout(syncTray = true): void {
 // Dashboard rendering
 // ---------------------------------------------------------------------------
 
-function renderMetric(m: Metric): string {
+function renderMetric(m: Metric, providerId?: string): string {
   if (m.kind === "progress" && m.used_percent !== null) {
     const used = clampPercent(m.used_percent);
     const left = Math.round(100 - used);
@@ -1525,8 +1716,16 @@ function renderMetric(m: Metric): string {
     // 0-60% used → blue, 60-75% → amber, 75-100% → red. The bar's width
     // already IS the used percent, so the thresholds compare `used`.
     const level = used >= 75 ? "low" : used >= 60 ? "warn" : "";
-    const headline = config.showUsed ? t("card.pctUsed", { n: Math.round(used) }) : t("card.pctLeft", { n: left });
-    const headlineAlt = config.showUsed ? t("card.pctLeft", { n: left }) : t("card.pctUsed", { n: Math.round(used) });
+    const tokenUsage = providerId ? metricTokenUsage(providerId, m) : null;
+    const tokenHeadline = tokenUsage ? t("card.tokens", { n: fmtTokens(tokenUsage.tokens) }) : null;
+    const headline = tokenHeadline ?? (config.showUsed ? t("card.pctUsed", { n: Math.round(used) }) : t("card.pctLeft", { n: left }));
+    const headlineAlt = tokenHeadline
+      ? tokenUsage?.source === "ledger"
+        ? t("card.tokensWindow", { n: fmtTokens(tokenUsage.tokens) })
+        : t("card.tokensSourceProvider")
+      : config.showUsed
+        ? t("card.pctLeft", { n: left })
+        : t("card.pctUsed", { n: Math.round(used) });
 
     let resetHtml = "";
     let resetPlain = "";
@@ -1568,10 +1767,11 @@ function renderMetric(m: Metric): string {
     const detailText = m.detail ? displayMetricDetail(m.detail) : "";
     const detailHtml = [resetHtml, detailText ? escapeHtml(detailText) : ""].filter(Boolean).join(" · ");
     const footTitle = [resetPlain, detailText].filter(Boolean).join(" · ");
+    const metricLabel = displayMetricLabel(m.label);
     return `
       <div class="metric">
         <div class="metric-head">
-          <span class="metric-label">${escapeHtml(displayMetricLabel(m.label))}</span>
+          <span class="metric-label" title="${escapeHtml(metricLabel)}">${escapeHtml(metricLabel)}</span>
         </div>
         <div class="bar">
           <div class="fill ${level}" style="width:${used}%"></div>
@@ -1586,6 +1786,7 @@ function renderMetric(m: Metric): string {
   // the metric carries redeem detail. A credit dying within 24h gets an
   // amber dot so it isn't wasted.
   if (m.kind === "action") {
+    const metricLabel = displayMetricLabel(m.label);
     const expiry =
       m.resets_at !== null
         ? t("card.expires", { when: fmtExact(m.resets_at) })
@@ -1600,7 +1801,7 @@ function renderMetric(m: Metric): string {
       : "";
     return `
       <div class="metric-text action-row">
-        <span>${soon}${escapeHtml(displayMetricLabel(m.label))}</span>
+        <span title="${escapeHtml(metricLabel)}">${soon}${escapeHtml(metricLabel)}</span>
         <span class="action-right">
           <span class="detail" title="${escapeHtml(expiry)}">${escapeHtml(expiry)}</span>
           ${useBtn}
@@ -1608,9 +1809,10 @@ function renderMetric(m: Metric): string {
       </div>`;
   }
   const textValue = displayMetricDetail(m.value ?? "");
+  const metricLabel = displayMetricLabel(m.label);
   return `
     <div class="metric-text">
-      <span>${escapeHtml(displayMetricLabel(m.label))}</span>
+      <span title="${escapeHtml(metricLabel)}">${escapeHtml(metricLabel)}</span>
       <span class="detail" title="${escapeHtml(textValue)}">${escapeHtml(textValue)}</span>
     </div>`;
 }
@@ -1620,20 +1822,27 @@ function renderTrend(source: TrendSource): string {
   const max = Math.max(...source.trend.map((v) => v ?? 0));
   const peakIdx = source.trend.indexOf(max);
   const dayMs = 86_400_000;
-  const dateOf = (i: number) =>
-    new Date(Date.now() - (29 - i) * dayMs).toLocaleDateString(localeTag(), { month: "short", day: "numeric" });
+  const dateOf = (i: number, weekday = false) =>
+    new Date(Date.now() - (29 - i) * dayMs).toLocaleDateString(localeTag(), {
+      weekday: weekday ? "short" : undefined,
+      month: "short",
+      day: "numeric",
+    });
   // Each day is a group: the visible bar plus a full-height invisible hit
   // area so thin bars are easy to hover; [data-trend] drives the tooltip.
   const bars = source.trend
     .map((v, i) => {
       const h = v != null && v > 0 ? Math.max(2, (v / max) * 30) : 1;
       return `<g class="trend-day">
+        <title>${escapeHtml(dateOf(i, true))}</title>
         <rect class="${v == null ? "trend-nodata" : v > 0 ? "trend-bar" : "trend-zero"}" x="${i * 10}" y="${32 - h}" width="7" height="${h}" rx="1.5"/>
         <rect class="trend-hit" data-trend="${source.id}|${i}" x="${i * 10 - 1.5}" y="0" width="10" height="32" fill="transparent"/>
       </g>`;
     })
     .join("");
-  const title = source.quota
+  const title = source.credits
+    ? t("spend.creditTrendTip", { from: dateOf(0), to: dateOf(29) })
+    : source.quota
     ? t("spend.quotaTrendTip", { from: dateOf(0), to: dateOf(29) })
     : t("spend.trendTip", {
         from: dateOf(0),
@@ -1641,10 +1850,24 @@ function renderTrend(source: TrendSource): string {
         value: source.fmt(max),
         peak: dateOf(peakIdx),
       });
+  const trendLabel = source.credits
+    ? t("spend.creditTrend")
+    : source.quota
+      ? t("spend.quotaTrend")
+      : config.spendMetric === "cost"
+        ? t("spend.costTrend")
+        : t("spend.tokenTrend");
   return `
     <div class="metric trend">
-      <span class="metric-label" title="${escapeHtml(title)}">${escapeHtml(t(source.quota ? "spend.quotaTrend" : config.spendMetric === "cost" ? "spend.costTrend" : "spend.tokenTrend"))}</span>
-      <svg class="trend-chart" viewBox="0 0 297 32" preserveAspectRatio="none">${bars}</svg>
+      <span class="metric-label" title="${escapeHtml(title)}">${escapeHtml(trendLabel)}</span>
+      <div class="trend-plot">
+        <svg class="trend-chart" viewBox="0 0 297 32" preserveAspectRatio="none">${bars}</svg>
+        <div class="trend-dates" aria-hidden="true">
+          <span>${escapeHtml(dateOf(0, true))}</span>
+          <span>${escapeHtml(dateOf(14, true))}</span>
+          <span>${escapeHtml(dateOf(29, true))}</span>
+        </div>
+      </div>
     </div>`;
 }
 
@@ -1680,7 +1903,7 @@ function renderItem(s: Snapshot, spend: ProviderSpend | undefined, key: string):
   if (spendKey)
     return spend ? renderSpendRow(s.id, spendKey[0], spendKey[1], spend[spendKey[1]], spend) : "";
   const metric = s.metrics.find((m) => m.label === key);
-  return metric ? renderMetric(metric) : "";
+  return metric ? renderMetric(metric, s.id) : "";
 }
 
 /// One/New API is two-level: family id `onenewapi` hides every key card.
@@ -1716,13 +1939,19 @@ function isCoreQuotaMetric(m: Metric): boolean {
 }
 
 function maxProgressUsed(s: Snapshot): number {
-  return s.metrics.reduce(
-    (best, m) =>
-      isCoreQuotaMetric(m) && m.used_percent !== null
-        ? Math.max(best, m.used_percent)
-        : best,
-    0,
-  );
+  return peakCoreProgress(s) ?? 0;
+}
+
+/// Peak percentage over the core quota windows, or null when the snapshot has
+/// no percentage metric at all (text-only cards). 0 is a real reading here, so
+/// callers that print a percentage must not confuse it with "nothing to show".
+function peakCoreProgress(s: Snapshot): number | null {
+  let best: number | null = null;
+  for (const m of s.metrics) {
+    if (!isCoreQuotaMetric(m) || m.used_percent === null) continue;
+    if (best === null || m.used_percent > best) best = m.used_percent;
+  }
+  return best;
 }
 
 /// Health dot for an account tab: red = some window (session or weekly)
@@ -1812,8 +2041,9 @@ function isCardFoldCandidate(cardId: string): boolean {
 ///   - false      → always expanded
 function isCardCollapsed(cardId: string): boolean {
   const layout = providerLayout(cardId);
-  if (layout.collapsed !== undefined) return layout.collapsed;
-  return isCardFoldCandidate(cardId);
+  // Detail cards are EXPANDED by default; folding is a deliberate user
+  // choice made through the card's fold control and remembered in layout.
+  return layout.collapsed === true;
 }
 
 /// When collapsed, returns the nearest reset across relevant snapshots for
@@ -1896,8 +2126,10 @@ function familyHealthDot(family: string): "red" | "green" | "gray" | "error" {
   if (cards.length === 0) return "gray";
   const dots = cards.map((s) => accountHealthDot(s.id));
   if (dots.some((d) => d === "green")) return "green";
+  // A sibling with a red, resettable quota is still a known exhausted
+  // account. Gray is reserved for a pool with no numeric quota at all.
+  if (dots.some((d) => d === "red")) return "red";
   if (dots.some((d) => d === "error")) return "error";
-  if (dots.every((d) => d === "red")) return "red";
   return "gray";
 }
 
@@ -2087,6 +2319,34 @@ function overviewAccountCount(family: string): number {
   return Math.max(snapshotCount, configuredCount);
 }
 
+function overviewAccountSnapshots(family: string): Snapshot[] {
+  return lastSnapshots.filter((snapshot) =>
+    providerFamily(snapshot.id) === family &&
+    !isCardDisabled(snapshot.id) &&
+    (!snapshot.id.includes("@") || !accountsCache.has(family) || accountsCache.get(family)?.some((entry) => entry.id === snapshot.id)),
+  );
+}
+
+function accountAvailabilitySummary(family: string): { total: number; available: number; unavailable: number } {
+  const accounts = overviewAccountSnapshots(family);
+  const available = accounts.filter((snapshot) => accountHealthDot(snapshot.id) === "green").length;
+  const configured = accountsCache.get(family)?.length ?? 0;
+  const total = Math.max(accounts.length, configured);
+  return { total, available, unavailable: Math.max(0, total - available) };
+}
+
+function setPinnedAccount(family: string, accountId: string): void {
+  const layout = config.layout ?? { providerOrder: [], providers: {} };
+  const current = layout.providers[family] ?? {
+    metricOrder: [], onDemand: [], hidden: [], starred: [], expanded: false,
+  };
+  current.pinnedAccount = current.pinnedAccount === accountId ? undefined : accountId;
+  layout.providers[family] = current;
+  config.layout = layout;
+  saveLayout(false);
+  renderAll();
+}
+
 function renderCard(s: Snapshot): string {
   const family = providerFamily(s.id);
   // Multi-account families render ONE dashboard card per family (the bare
@@ -2095,8 +2355,9 @@ function renderCard(s: Snapshot): string {
   let shown = s;
   let accountCount = "";
   let accountTabs = "";
+  let accountIds: string[] = [];
   if (s.id === family && supportsExtraAccounts(family) && !isParallelAccountFamily(family)) {
-    const accountIds = lastSnapshots
+    accountIds = lastSnapshots
       .filter((snap) => providerFamily(snap.id) === family && !isCardDisabled(snap.id))
       .map((snap) => snap.id);
     if (accountIds.length > 1) {
@@ -2111,16 +2372,26 @@ function renderCard(s: Snapshot): string {
         (snap) => snap.id === active && !isCardDisabled(snap.id),
       );
       if (activeSnap) shown = activeSnap;
-      accountCount = `<span class="provider-account-badge" title="${accountIds.length} accounts"><span class="provider-account-glyph" aria-hidden="true">⌁</span><span>${accountIds.length}</span></span>`;
-      accountTabs = `<div class="card-account-tabs">${accountIds
-        .map((id) => {
+      const availableAccounts = accountIds.filter((id) => accountHealthDot(id) === "green").length;
+      const accountState = availableAccounts === 0 ? "is-empty" : availableAccounts === accountIds.length ? "is-ready" : "is-partial";
+      accountCount = `<span class="provider-account-badge ${accountState}" title="${escapeHtml(`${accountIds.length} accounts · ${availableAccounts} available`)}"><span class="provider-account-glyph" aria-hidden="true">●</span><span>${accountIds.length}/${availableAccounts}</span></span>`;
+      const compactTabs = accountIds.length >= 4;
+      accountTabs = `<div class="card-account-tabs${compactTabs ? " compact" : ""}">${accountIds
+        .map((id, index) => {
           const label = id === s.id
-            ? (accountsCache.get(family)?.[0]?.label || t("customize.acctDefaultShort"))
+            ? (accountNote(id) || accountsCache.get(family)?.[0]?.label || t("customize.acctDefaultShort"))
             : labelForAccount(id, accountsCache.get(family) ?? []);
           const on = id === shown.id;
           const dot = peakTintedDot(family, accountHealthDot(id));
           const dotTitle = healthDotTitle(dot);
-          return `<button class="card-account-tab${on ? " on" : ""}" data-card-account="${family}|${escapeHtml(id)}" title="${escapeHtml(dotTitle)}"><span class="acct-dot ${dot}"></span>${escapeHtml(label)}</button>`;
+          // Compact number capsules exist to save space — but a renamed
+          // account shows its note ("TTA"); only unnamed ones keep the
+          // number. Noted capsules get text width + auto-shrink instead of
+          // the fixed number cell.
+          const note = accountNote(id);
+          const tabLabel = compactTabs && !note ? String(index + 1) : label;
+          const tabTitle = `${label} · ${dotTitle}`;
+          return `<button type="button" class="card-account-tab${on ? " on" : ""}${compactTabs && !note ? " compact" : ""}${compactTabs && note ? " compact-noted" : ""}" data-card-account="${family}|${escapeHtml(id)}" title="${escapeHtml(tabTitle)}" aria-label="${escapeHtml(label)}"><span class="acct-dot ${dot}"></span><span class="card-account-tab-label" ${compactLabelStyle(tabLabel, 10.5, 8)}>${escapeHtml(tabLabel)}</span></button>`;
         })
         .join("")}</div>`;
     }
@@ -2144,7 +2415,7 @@ function renderCard(s: Snapshot): string {
       if (borrowed) shown = borrowed;
     }
   }
-  const plan = shown.plan ? `<span class="plan">${escapeHtml(shown.plan)}</span>` : "";
+  const plan = shown.plan ? `<span class="plan" title="${escapeHtml(shown.plan)}">${escapeHtml(shown.plan)}</span>` : "";
   // Peak-hours marker on the head: expanded standalone cards carry no
   // health dot, so the yellow peak state needs its own spot (next to the
   // plan badge). Same predicate as the dot tint: available AND in peak.
@@ -2153,6 +2424,11 @@ function renderCard(s: Snapshot): string {
     !isCardCollapsed(s.id) && cardHealthDot(s.id) === "green" && isProviderInPeak(family)
       ? `<span class="peak-dot" title="${escapeHtml(`${t("peak.now")} ${t(PEAK_RULES[family].tipKey)}`)}"></span>`
       : "";
+  const pinnedId = providerLayout(family).pinnedAccount;
+  const pinnedSnap = pinnedId ? lastSnapshots.find((snap) => snap.id === pinnedId) : undefined;
+  const pinnedBadge = pinnedSnap && isSnapshotMaxed(pinnedSnap) && familyHealthDot(family) === "green"
+    ? `<span class="pinned-status-warn" title="${escapeHtml(t("customize.acctPinnedExhaustedHint"))}">★ ${escapeHtml(t("customize.acctPinnedExhausted"))}</span>`
+    : "";
   const icon = providerVisual(shown.id, shown.dashboard_url ?? undefined)?.iconSvg ?? "";
   const muted = shown.status === "ok" ? "" : " muted";
 
@@ -2221,15 +2497,32 @@ function renderCard(s: Snapshot): string {
   // Hide per-account tabs and the ×N badge when folded — the family health
   // dot and reset countdown already summarise the whole family.
   const finalAccountTabs = cardCollapsed ? "" : accountTabs;
-  const finalAccountCount = cardCollapsed ? "" : accountCount;
+  const finalAccountCount = accountCount;
   const refreshBtn =
     shown.status === "ok" || shown.status === "error"
       ? `<button class="card-refresh" data-card-refresh="${shown.id}" title="${escapeHtml(t("card.refresh"))}">${uiIcon("arrowsClockwise")}</button>`
+      : "";
+  // One permanent pin entry in the head, acting on whichever account is
+  // currently shown — the per-tab stars were pure noise on 6-account cards.
+  const headPin =
+    accountIds.length > 1
+      ? (() => {
+          const pinnedNow = providerLayout(family).pinnedAccount === shown.id;
+          return `<button type="button" class="mini-btn card-account-pin-head${pinnedNow ? " on" : ""}" data-card-pin="${family}|${escapeHtml(shown.id)}" title="${escapeHtml(pinnedNow ? t("customize.acctUnpin") : t("customize.acctPin"))}">${pinnedNow ? "★" : "☆"}</button>`;
+        })()
       : "";
   const share =
     shown.status === "ok"
       ? `<button class="share-btn" data-share="${shown.id}" title="${escapeHtml(t("card.share"))}">${uiIcon("shareNetwork")}</button>`
       : "";
+  // Head status lives in the right zone (before the action cluster) so the
+  // provider name keeps the whole left side and can render larger. Text-only
+  // snapshots have no percentage to show — render nothing rather than "0%".
+  const headPct = shown.status === "ok" ? peakCoreProgress(shown) : null;
+  const headStatus =
+    headPct === null
+      ? ""
+      : `<span class="head-status" title="${escapeHtml(`${Math.round(headPct)}% · ${healthDotTitle(peakTintedDot(family, cardHealthDot(s.id)))}`)}"><span class="acct-dot ${peakTintedDot(family, cardHealthDot(s.id))}"></span><span class="head-pct">${Math.round(headPct)}%</span></span>`;
   // Folded state: visually prominent reset countdown badge with health status
   // and generous breathing room instead of a cramped raw text sliver.
   let foldLine = "";
@@ -2250,6 +2543,7 @@ function renderCard(s: Snapshot): string {
         <div class="fold-row">
           <div class="fold-badge ${badgeTone}">
             <span class="acct-dot ${dot}" title="${escapeHtml(dotTitle)}"></span>
+            <span class="fold-main-quota">${headPct === null ? "—" : `${Math.round(headPct)}%`}</span>
             <span class="fold-label">${escapeHtml(label)}</span>
             <span class="fold-timer" data-reset-at="${Date.now() + resetSecs * 1000}">${escapeHtml(fmtDuration(resetSecs * 1000))}</span>
           </div>
@@ -2264,6 +2558,7 @@ function renderCard(s: Snapshot): string {
         <div class="fold-row">
           <div class="fold-badge normal">
             <span class="acct-dot ${dot}" title="${escapeHtml(dotTitle)}"></span>
+            <span class="fold-main-quota">${headPct === null ? "—" : `${Math.round(headPct)}%`}</span>
             <span class="fold-label">${escapeHtml(label)}</span>
           </div>
         </div>`;
@@ -2273,16 +2568,23 @@ function renderCard(s: Snapshot): string {
     <article class="provider${muted} ${cardCollapsed ? "is-folded" : ""}" data-provider="${s.id}" data-shown-account="${escapeHtml(shown.id)}" data-origin="${escapeHtml(shown.dashboard_url ?? "")}">
       <div class="provider-head">
         <span class="drag-grip" title="${escapeHtml(t("card.drag"))}">⠿</span>
-        <span class="provider-name">${escapeHtml(notedName(s.id, s.name))}</span>
+        <span class="provider-name" data-fit-max="17" data-fit-min="11" title="${escapeHtml(notedName(s.id, s.name))}">${escapeHtml(notedName(s.id, s.name))}</span>
         ${finalAccountCount}
         ${plan}
+        ${pinnedBadge}
         ${peakBadge}
         ${stale}
         <span class="spacer"></span>
-        <button class="mini-btn card-group-btn" data-card-group-menu="${escapeHtml(s.id)}" title="${escapeHtml(t("customize.cardSettings"))}">${uiIcon("gear")}</button>
-        ${foldChevron}
-        ${refreshBtn}
-        ${share}
+        <span class="head-right">
+          ${headStatus}
+          <span class="head-actions">
+            <button class="mini-btn card-group-btn" data-card-group-menu="${escapeHtml(s.id)}" title="${escapeHtml(t("customize.cardSettings"))}">${uiIcon("gear")}</button>
+            ${foldChevron}
+            ${headPin}
+            ${refreshBtn}
+            ${share}
+          </span>
+        </span>
         <span class="provider-icon">${icon}</span>
       </div>
       ${cardCollapsed ? foldLine : `<div class="card-panel">
@@ -2677,7 +2979,7 @@ function legendRowHtml(e: DonutEntry): string {
   return `
         <div class="legend-row" data-pid="${e.s.id}">
           ${lead}
-          <span class="legend-name">${escapeHtml(e.s.name)}${detail}</span>
+          <span class="legend-name">${escapeHtml(e.s.name)}${estBadgeFor(e.s.id)}${detail}</span>
           <span class="legend-val">${fmtSpendVal(e.w)}</span>
         </div>`;
 }
@@ -2715,7 +3017,7 @@ function showSpendPop(anchor: HTMLElement): void {
   const el = document.createElement("div");
   el.className = "spend-pop";
   el.innerHTML = `
-    <div class="spend-pop-head">${lead(entry.s.id)}<span class="spend-pop-name">${escapeHtml(entry.s.name)}</span></div>
+    <div class="spend-pop-head">${lead(entry.s.id)}<span class="spend-pop-name">${escapeHtml(entry.s.name)}${estBadgeFor(entry.s.id)}</span></div>
     <div class="spend-pop-val">${escapeHtml(fmtMoney(entry.w.cost))} · ${escapeHtml(fmtTokens(entry.w.tokens))}</div>
     ${parts ? `<div class="spend-pop-sep"></div>${parts}` : ""}`;
   document.body.appendChild(el);
@@ -3008,11 +3310,42 @@ function renderTotalSpend(): string {
     ? rangeTab === "d7" ? "spend.days7" : rangeTab === "d30" ? "spend.days30" : "spend.rangeAll"
     : spendTab === "yesterday" ? "spend.yesterday" : "spend.today";
   const headTokens = entries.reduce((sum, e) => sum + e.w.tokens, 0);
+  // ⚡ tier by daily-equivalent usage: the built-in ladder is 100M / 250M /
+  // 500M tokens per day; the 7d/30d windows rescale by their day count
+  // (700M/week reads "medium"). config.spendIconTiers overrides the ladder.
+  const windowDays = rangeSelected ? (rangeTab === "d7" ? 7 : 30) : 1;
+  const tiers = config.spendIconTiers ?? { medium: 100_000_000, high: 250_000_000, max: 500_000_000 };
+  const boltTier =
+    headTokens >= tiers.max * windowDays ? 3
+    : headTokens >= tiers.high * windowDays ? 2
+    : headTokens >= tiers.medium * windowDays ? 1
+    : 0;
+  // Gradient-filled bolt per tier (emerald→cyan / amber→orange / violet→
+  // fuchsia→cyan) so the stamp reads at a glance in both light and dark.
+  const boltSvg = (tier: number): string => {
+    const svg = uiIcon("lightning");
+    if (tier === 0) return svg;
+    const stops = tier === 1
+      ? ["#34d399", "#22d3ee"]
+      : tier === 2
+        ? ["#fbbf24", "#f97316"]
+        : ["#a78bfa", "#e879f9", "#22d3ee"];
+    const stopsHtml = stops
+      .map((c, i) => `<stop offset="${Math.round((i / (stops.length - 1)) * 100)}%" stop-color="${c}"/>`)
+      .join("");
+    return svg
+      .replace('fill="currentColor"', `fill="url(#bolt-grad-${tier})"`)
+      .replace(/(<svg[^>]*>)/, `$1<defs><linearGradient id="bolt-grad-${tier}" x1="0" y1="0" x2="1" y2="1">${stopsHtml}</linearGradient></defs>`);
+  };
+  const boltTip = boltTier > 0
+    ? t(`spend.boltTier${boltTier}` as "spend.boltTier1", { n: fmtTokens((boltTier === 1 ? tiers.medium : boltTier === 2 ? tiers.high : tiers.max) * windowDays) })
+    : "";
+  const boltHtml = `<span class="spend-bolt tier-${boltTier}"${boltTip ? ` title="${escapeHtml(boltTip)}"` : ""}>${boltSvg(boltTier)}</span>`;
   return `
     <article class="provider total-spend${isFolded ? " is-folded" : ""}">
       <div class="provider-head">
         <span class="provider-name">${escapeHtml(t("spend.title"))}</span>
-        <span class="spend-head-value" title="${escapeHtml(t("spend.headTokens", { range: t(headRangeKey) }))}">${uiIcon("lightning")}${escapeHtml(fmtTokens(headTokens))}</span>
+        <span class="spend-head-value" title="${escapeHtml(t("spend.headTokens", { range: t(headRangeKey) }))}">${boltHtml}${escapeHtml(fmtTokens(headTokens))}</span>
         ${isFolded ? "" : `<span class="info" title="${escapeHtml(t("spend.info", { names: contributors }))}">${uiIcon("info")}</span>`}
         <span class="spacer"></span>
         ${isFolded ? "" : `
@@ -3023,6 +3356,7 @@ function renderTotalSpend(): string {
         <div class="spend-metric-tabs" role="group" aria-label="${escapeHtml(t("spend.metricLabel"))}">
           ${(["cost", "tokens"] as const).map((metric) => `<button class="tab spend-metric-tab${config.spendMetric === metric ? " active" : ""}" data-spend-metric="${metric}">${escapeHtml(t(METRIC_NAMES[metric]))}</button>`).join("")}
         </div>`}
+        ${updateVersion ? `<button class="spend-update-btn${updatePushing ? " busy" : ""}" data-update-push${updatePushing && updatePct != null ? ` style="--pct:${updatePct}"` : ""} title="${escapeHtml(t("update.pushTip", { version: updateVersion }))}" aria-label="${escapeHtml(t("update.pushTip", { version: updateVersion }))}">${uiIcon("arrowUp")}</button>` : ""}
         <button class="mini-btn spend-detail-btn" data-spend-details title="${escapeHtml(t("spendDetail.open"))}" aria-label="${escapeHtml(t("spendDetail.open"))}">${uiIcon("rows")}</button>
         <button class="share-btn" data-share="__total__" title="${escapeHtml(t("card.share"))}">${uiIcon("shareNetwork")}</button>
         ${foldChevron}
@@ -3218,6 +3552,7 @@ interface OverviewItem {
   cardSnap: Snapshot;
   shownSnap: Snapshot;
   quota: OverviewQuota;
+  accountSummary: { total: number; available: number; unavailable: number };
 }
 
 /// A grouped overview panel: untagged cards first, then one sub-header per
@@ -3283,7 +3618,7 @@ function renderQuotaOverview(): string {
       const wallSecs = nearestResetSeconds(s.id);
       quota.resetsAt = wallSecs > 0 ? Date.now() + wallSecs * 1000 : null;
     }
-    return { cardSnap: s, shownSnap: shown, quota };
+    return { cardSnap: s, shownSnap: shown, quota, accountSummary: accountAvailabilitySummary(providerFamily(s.id)) };
   });
 
   const totalCount = items.length;
@@ -3324,7 +3659,46 @@ function renderQuotaOverview(): string {
         Number(isSnapshotMaxed(b.shownSnap)) - Number(isSnapshotMaxed(a.shownSnap)),
     );
 
-  const itemHtml = ({ cardSnap, shownSnap, quota }: OverviewItem): string => {
+  const accountMetersHtml = (family: string): string => {
+    const accounts = overviewAccountSnapshots(family);
+    if (accounts.length <= 1) return "";
+    return `<div class="overview-account-meters">${accounts.map((account) => {
+      const q = extractOverviewQuota(account, isSnapshotMaxed(account), account.id);
+      const label = labelForAccount(account.id, accountsCache.get(family) ?? []);
+      const tone = accountHealthDot(account.id);
+      const pct = q.status === "maxed" ? 100 : q.window !== null ? Math.round(q.usedPercent) : 0;
+      return `<div class="overview-account-meter" title="${escapeHtml(label)} · ${pct}%"><span class="acct-dot ${tone}"></span><span class="overview-account-meter-label">${escapeHtml(label)}</span><span class="overview-account-meter-track"><i class="${tone}" style="width:${pct}%"></i></span><b>${pct}%</b></div>`;
+    }).join("")}</div>`;
+  };
+
+  const accountRingsHtml = (family: string): string => {
+    const accounts = overviewAccountSnapshots(family);
+    if (accounts.length <= 1) return "";
+    const circumference = 2 * Math.PI * 10;
+    return `<div class="overview-account-rings">${accounts.map((account) => {
+      const q = extractOverviewQuota(account, isSnapshotMaxed(account), account.id);
+      const tone = accountHealthDot(account.id);
+      const pct = q.status === "maxed" ? 100 : q.window !== null ? Math.round(q.usedPercent) : 0;
+      const label = labelForAccount(account.id, accountsCache.get(family) ?? []);
+      const stroke = tone === "red" ? "#ef4444" : tone === "error" ? "#f97316" : tone === "gray" ? "var(--muted-foreground)" : "#10b981";
+      const offset = circumference * (1 - pct / 100);
+      return `<div class="overview-account-ring" title="${escapeHtml(label)} · ${pct}%"><svg viewBox="0 0 28 28" aria-hidden="true"><circle cx="14" cy="14" r="10" class="ring-track" stroke-width="2.4" fill="none"/><circle cx="14" cy="14" r="10" stroke="${stroke}" stroke-width="2.4" fill="none" stroke-linecap="round" stroke-dasharray="${circumference.toFixed(2)}" stroke-dashoffset="${offset.toFixed(2)}" transform="rotate(-90 14 14)"/></svg><span>${escapeHtml(label)}</span></div>`;
+    }).join("")}</div>`;
+  };
+
+  /// Multi-account overview tiles fold by default: the main account's
+  /// ring/bar plus the N/available badge stay, per-account rings/meters hide
+  /// until the user expands the family (remembered in config).
+  const overviewAcctFolded = (family: string, accountCount: number): boolean =>
+    accountCount > 1 && !(config.overviewExpanded ?? []).includes(family);
+
+  const overviewAcctFoldBtn = (family: string, accountCount: number): string => {
+    if (accountCount <= 1) return "";
+    const folded = overviewAcctFolded(family, accountCount);
+    return `<button type="button" class="overview-acct-fold" data-overview-acct-fold="${escapeHtml(family)}" title="${escapeHtml(t(folded ? "card.expand" : "card.collapse"))}" aria-label="${escapeHtml(t(folded ? "card.expand" : "card.collapse"))}">${uiIcon(folded ? "caretDown" : "caretUp")}</button>`;
+  };
+
+  const itemHtml = ({ cardSnap, shownSnap, quota, accountSummary }: OverviewItem): string => {
       const family = providerFamily(cardSnap.id);
       const jumpId = isParallelAccountFamily(family) ? shownSnap.id : cardSnap.id;
       const origin = shownSnap.dashboard_url ?? undefined;
@@ -3333,7 +3707,7 @@ function renderQuotaOverview(): string {
       const displayName = notedName(jumpId, providerDisplayName(family) || cardSnap.name);
       const accountCount = overviewAccountCount(family);
       const accountBadge = accountCount > 1
-        ? `<span class="overview-account-count" title="${escapeHtml(t("overview.accountCount", { n: accountCount }))}">×${accountCount}</span>`
+        ? `<span class="overview-account-count ${accountSummary.available === 0 ? "is-empty" : ""}" title="${escapeHtml(t("overview.accountSummary", { available: accountSummary.available, unavailable: accountSummary.unavailable, total: accountSummary.total }))}"><b>${accountCount}/${accountSummary.available}</b></span>`
         : "";
 
       const r = 16;
@@ -3412,11 +3786,11 @@ function renderQuotaOverview(): string {
       }
       return `
         <div class="overview-item tone-${itemTone}" data-jump-provider="${escapeHtml(jumpId)}" title="${escapeHtml(fullTooltip)} · ${escapeHtml(t("overview.groupHint"))}">
-          <button type="button" class="overview-move-btn" data-overview-move="${escapeHtml(jumpId)}" title="${escapeHtml(t("overview.moveGroup"))}" aria-label="${escapeHtml(t("overview.moveGroup"))}">${uiIcon("rows")}</button>
           <div class="overview-item-head">
             <span class="overview-item-icon">${icon}</span>
-            <span class="overview-item-name">${escapeHtml(displayName)}</span>
+            <span class="overview-item-name" ${compactLabelStyle(displayName, 10.5, 8.5)} title="${escapeHtml(displayName)}">${escapeHtml(displayName)}</span>
             ${accountBadge}
+            ${overviewAcctFoldBtn(family, accountCount)}
             <span class="overview-dot ${statusDot}"></span>
           </div>
           <div class="overview-ring-wrap">
@@ -3426,6 +3800,8 @@ function renderQuotaOverview(): string {
               <text class="ring-text ${textClass}" x="${cx}" y="${cy + 4}" text-anchor="middle">${ringLabel}</text>
             </svg>
           </div>
+          ${overviewAcctFolded(family, accountCount) ? "" : accountRingsHtml(family)}
+          ${overviewAcctFolded(family, accountCount) ? "" : accountMetersHtml(family)}
           <div class="overview-item-foot">
             <span class="overview-item-meta ${quota.isMaxed ? 'meta-maxed' : ''}"${quota.resetsAt ? ` data-reset-at="${quota.resetsAt}"` : ""}>
               ${quota.status === "error" ? escapeHtml(overviewFailureLabel(shownSnap)) : quota.isMaxed
@@ -3447,7 +3823,7 @@ function renderQuotaOverview(): string {
   /// Compact two-line bar alternative to the ring tiles: slimmer rows in a
   /// two-column grid — line 1 = icon/name/percent, line 2 = thin bar plus
   /// the reset countdown or the relevant window state.
-  const barItemHtml = ({ cardSnap, shownSnap, quota }: OverviewItem): string => {
+  const barItemHtml = ({ cardSnap, shownSnap, quota, accountSummary }: OverviewItem): string => {
     const family = providerFamily(cardSnap.id);
     const jumpId = isParallelAccountFamily(family) ? shownSnap.id : cardSnap.id;
     const origin = shownSnap.dashboard_url ?? undefined;
@@ -3457,7 +3833,7 @@ function renderQuotaOverview(): string {
     const nameClass = cardNote(jumpId) ? " is-note" : "";
     const accountCount = overviewAccountCount(family);
     const accountBadge = accountCount > 1
-      ? `<span class="overview-account-count" title="${escapeHtml(t("overview.accountCount", { n: accountCount }))}">×${accountCount}</span>`
+      ? `<span class="overview-account-count ${accountSummary.available === 0 ? "is-empty" : ""}" title="${escapeHtml(t("overview.accountSummary", { available: accountSummary.available, unavailable: accountSummary.unavailable, total: accountSummary.total }))}"><b>${accountCount}/${accountSummary.available}</b></span>`
       : "";
 
     let itemTone = "normal";
@@ -3500,11 +3876,11 @@ function renderQuotaOverview(): string {
 
     return `
       <div class="overview-bar-item tone-${itemTone}" data-jump-provider="${escapeHtml(jumpId)}" title="${escapeHtml(fullTooltip)} · ${escapeHtml(t("overview.groupHint"))}">
-        <button type="button" class="overview-move-btn" data-overview-move="${escapeHtml(jumpId)}" title="${escapeHtml(t("overview.moveGroup"))}" aria-label="${escapeHtml(t("overview.moveGroup"))}">${uiIcon("rows")}</button>
         <div class="ovbar-line1">
           <span class="overview-item-icon">${icon}</span>
-          <span class="overview-item-name${nameClass}">${escapeHtml(displayName)}</span>
+          <span class="overview-item-name${nameClass}" ${compactLabelStyle(displayName, nameClass ? 9 : 10.5, 8.5)} title="${escapeHtml(displayName)}">${escapeHtml(displayName)}</span>
           ${accountBadge}
+          ${overviewAcctFoldBtn(family, accountCount)}
           <span class="overview-dot ${statusDot}"></span>
           <span class="ovbar-pct ${pctClass}">${pct === null ? "—" : `${pct}%`}</span>
         </div>
@@ -3512,6 +3888,7 @@ function renderQuotaOverview(): string {
           <span class="ovbar"><span class="ovbar-fill tone-${itemTone}" style="width:${pct ?? 0}%"></span></span>
           <span class="ovbar-meta">${escapeHtml(meta || t("overview.noData"))}</span>
         </div>
+        ${overviewAcctFolded(family, accountCount) ? "" : accountMetersHtml(family)}
       </div>`;
   };
 
@@ -3622,11 +3999,26 @@ function renderQuotaOverview(): string {
         ${foldChevron}
       </div>
       ${isFolded ? "" : `<div class="overview-switch-row">
-        <div class="tabs overview-cat-tabs">
-          ${OVERVIEW_CATEGORIES.map(
-            (c) =>
-              `<button type="button" class="tab${overviewCategory === c ? " active" : ""}" data-overview-cat="${c}">${escapeHtml(t(`category.${c}`))}</button>`,
-          ).join("")}
+        <div class="tabs overview-cat-tabs${config.overviewCatFull === true ? " full" : ""}">
+          ${(() => {
+            // Full mode: a two-row grid, 3 chips per row, 6 max — more
+            // categories collapse into a … chip that opens the board.
+            const chips =
+              config.overviewCatFull === true && OVERVIEW_CATEGORIES.length > 6
+                ? OVERVIEW_CATEGORIES.slice(0, 5)
+                : OVERVIEW_CATEGORIES;
+            const html = chips
+              .map(
+                (c) =>
+                  `<button type="button" class="tab${overviewCategory === c ? " active" : ""}" data-overview-cat="${c}" title="${escapeHtml(t(`category.${c}`))}">${escapeHtml(t(`category.${c}`))}</button>`,
+              )
+              .join("");
+            const more =
+              config.overviewCatFull === true && OVERVIEW_CATEGORIES.length > 6
+                ? `<button type="button" class="tab overview-cat-more" data-overview-cat-more title="${escapeHtml(t("overview.groupManage"))}">…</button>`
+                : "";
+            return html + more;
+          })()}
         </div>
         ${overviewCategory === "coding" ? `
         <div class="tabs overview-tabs">
@@ -3647,6 +4039,22 @@ function renderQuotaOverview(): string {
 
 let buildText = "";
 let updateVersion: string | null = null;
+/// In-flight push state for the spend-header indicator. Module-level so a
+/// dashboard re-render mid-download keeps the ring (the button element is
+/// replaced on every refresh cycle).
+let updatePushing = false;
+let updatePct: number | null = null;
+let updateSeen = 0;
+
+/// Repaint the push indicator from module state — the button element can be
+/// replaced by a card re-render while a download runs.
+function syncPushProgress(): void {
+  const btn = document.querySelector<HTMLElement>("[data-update-push]");
+  if (!btn) return;
+  btn.classList.toggle("busy", updatePushing);
+  if (updatePushing && updatePct != null) btn.style.setProperty("--pct", String(updatePct));
+  else btn.style.removeProperty("--pct");
+}
 let checkingUpdate = false;
 
 function renderBuildInfo(): void {
@@ -3686,6 +4094,9 @@ async function checkForUpdate(): Promise<void> {
     const v = await invoke<string | null>("check_update");
     if (v) {
       updateVersion = v;
+      // The Total Spend header carries the push indicator — repaint so the
+      // green arrow appears the moment a version is announced.
+      renderIfVisible();
       maybePromptUpdate(v);
     }
   } catch {
@@ -3867,6 +4278,87 @@ function appPrompt(opts: {
     input.focus();
     input.select();
   });
+}
+
+/// The "?" help for one provider: how its quota is queried, in plain words.
+/// The kind is derived from the catalog — API-key providers get their
+/// console link and paste steps, browser-sign-in providers point at the
+/// gear-menu sign-in, everything else is a local-credential family that
+/// Pane discovers from the official client. Never mentions endpoints or
+/// reverse-engineering — user-facing wording only.
+function openProviderHelp(fam: string) {
+  const def = providerDefinition(fam);
+  const keyUrl = getApiKeyLink(fam);
+  const oauth = def?.supportsOAuth ?? false;
+  const keyable = (def?.supportsApiKey ?? false) || !!keyUrl;
+  const badge = keyable ? t("customize.helpBadgeKey") : oauth ? t("customize.helpBadgeOauth") : t("customize.helpBadgeLocal");
+  const steps: string[] = [];
+  if (keyable) {
+    steps.push(t("customize.helpStepKey1"));
+    steps.push(t("customize.helpStepKey2"));
+  } else if (oauth) {
+    steps.push(t("customize.helpStepOauth1"));
+  } else {
+    steps.push(t("customize.helpStepLocal1"));
+    steps.push(t("customize.helpStepLocal2"));
+  }
+  if (!keyable && !oauth && !(PROVIDER_LINKS[fam]?.length)) {
+    steps.push(t("customize.helpUnknown"));
+  }
+  steps.push(t("customize.helpStepTest"));
+  const links = [...(PROVIDER_LINKS[fam] ?? [])];
+  if (keyUrl && !links.some((l) => l.url === keyUrl)) {
+    links.unshift({ label: t("customize.helpOpenConsole"), url: keyUrl });
+  }
+
+  const overlay = document.createElement("div");
+  overlay.id = "confirm-overlay";
+  overlay.innerHTML = `
+    <div id="confirm-box" role="dialog" aria-modal="true">
+      <h3>${escapeHtml(providerDisplayName(fam))} · ${escapeHtml(t("customize.helpMenu"))}</h3>
+      <div class="help-kind">${escapeHtml(badge)}</div>
+      <ol class="help-steps">${steps.map((s) => `<li>${escapeHtml(s)}</li>`).join("")}</ol>
+      ${links.length ? `<div class="help-links">${links.map((l) => `<a href="${escapeHtml(l.url)}" target="_blank" rel="noreferrer">${escapeHtml(l.label)} ↗</a>`).join("")}</div>` : ""}
+      <div id="confirm-actions">
+        <button id="help-test" type="button">⚡ ${escapeHtml(t("customize.helpTest"))}</button>
+        <button id="confirm-ok" type="button">${escapeHtml(t("dialog.ok"))}</button>
+      </div>
+    </div>`;
+  const close = () => {
+    overlay.remove();
+    document.removeEventListener("keydown", onKey, true);
+  };
+  const onKey = (e: KeyboardEvent) => {
+    if (e.key === "Escape") {
+      e.preventDefault();
+      close();
+    }
+  };
+  overlay.addEventListener("click", (e) => {
+    if (e.target === overlay) close();
+  });
+  overlay.querySelector("#confirm-ok")!.addEventListener("click", close);
+  const testBtn = overlay.querySelector<HTMLButtonElement>("#help-test")!;
+  testBtn.addEventListener("click", () => {
+    const cardId = fam; // test_provider resolves the family's active card
+    testBtn.disabled = true;
+    testBtn.textContent = t("customize.helpTesting");
+    invoke<string>("test_provider", { providerId: cardId })
+      .then((res) => {
+        const ms = res.split(":").pop() ?? "";
+        testBtn.textContent = res.startsWith("ok:")
+          ? t("card.testOk", { ms })
+          : t("card.testFail", { err: res.slice(0, res.lastIndexOf(":")) });
+      })
+      .catch((err: unknown) => {
+        testBtn.textContent = t("card.testFail", { err: String(err) });
+      })
+      .finally(() => {
+        testBtn.disabled = false;
+      });
+  });
+  document.addEventListener("keydown", onKey, true);
+  document.body.appendChild(overlay);
 }
 
 /// The dashboard card's group menu — the main-page tagging entry. Lists
@@ -4159,16 +4651,22 @@ function openGroupMenu(
   cardId: string,
   anchor: HTMLElement,
   includeGrouping = true,
-  contextPoint?: { x: number; y: number; target?: Element },
+  contextPoint?: { x: number; y: number; target?: Element; atCursor?: boolean },
 ): void {
   document.querySelector(".group-menu-overlay")?.remove();
   const current = cardGroupId(cardId);
   const groups = cardGroups();
   const fam = providerFamily(cardId);
-  const contextAccount = contextPoint?.target?.closest<HTMLElement>("[data-card-account]")?.dataset.cardAccount?.split("|")[1];
+  const contextTarget = contextPoint?.target?.closest<HTMLElement>("[data-card-account], [data-card-pin]");
+  const contextAccount = contextTarget?.dataset.cardAccount?.split("|")[1]
+    ?? contextTarget?.dataset.cardPin?.split("|")[1];
   const shownId = contextAccount ?? anchor.closest<HTMLElement>("[data-shown-account]")?.dataset.shownAccount ?? cardId;
   const accounts = accountsCache.get(fam) ?? [];
   const accountIndex = accounts.findIndex((entry, index) => entry.id === shownId || (shownId === fam && index === 0 && !isParallelAccountFamily(fam)));
+  // Archive/restore rows: the archive target is the account this menu was
+  // opened on (the ⚙ context or the card's shown account); the family's
+  // parked accounts follow below for one-click restore.
+  const familyArchived = includeGrouping ? [] : (archivedAccountsCache.get(fam) ?? []);
   const curCat = effectiveCategory(fam);
   const item = (gid: string, label: string, checked = false) =>
     `<button class="group-menu-item${checked ? " on" : ""}" data-group-pick="${escapeHtml(gid)}">
@@ -4198,10 +4696,23 @@ function openGroupMenu(
       ${includeGrouping ? "" : `<button class="group-menu-item" data-card-config="${escapeHtml(fam)}"><span class="group-menu-check">＋</span>${escapeHtml(t(supportsExtraAccounts(fam) ? "customize.acctAdd" : "customize.addCredential"))}</button>`}
       <div class="group-menu-sep"></div>
       <button class="group-menu-item" data-card-note="${escapeHtml(cardId)}">
-        <span class="group-menu-check">✎</span>${escapeHtml(t("customize.noteMenu"))}
+        <span class="group-menu-check">✎</span>${escapeHtml(t("customize.noteProviderMenu"))}
       </button>
+      ${contextAccount ? `<button class="group-menu-item" data-card-acct-note="${escapeHtml(contextAccount)}">
+        <span class="group-menu-check">✎</span>${escapeHtml(t("customize.noteAccountMenu"))} · ${escapeHtml(labelForAccount(contextAccount, accounts))}
+      </button>` : ""}
+      ${contextAccount ? `<button class="group-menu-item" data-card-pin-acct="${escapeHtml(contextAccount)}"><span class="group-menu-check">★</span>${escapeHtml(t(providerLayout(fam).pinnedAccount === contextAccount ? "customize.acctUnpin" : "customize.acctPin"))} · ${escapeHtml(labelForAccount(contextAccount, accounts))}</button>` : ""}
+      ${includeGrouping ? "" : `<button class="group-menu-item" data-card-help="${escapeHtml(fam)}"><span class="group-menu-check">?</span>${escapeHtml(t("customize.helpMenu"))}</button><button class="group-menu-item" data-card-test="${escapeHtml(shownId)}"><span class="group-menu-check">⚡</span>${escapeHtml(t("customize.testConnection"))}</button>`}
       ${includeGrouping ? "" : `<div class="group-menu-sep"></div>
-      ${accountIndex >= 0 ? `<button class="group-menu-item danger" data-card-account-remove="${accountIndex}"><span class="group-menu-check">×</span>${escapeHtml(t("customize.acctDelete"))} · ${escapeHtml(accounts[accountIndex].label)}</button>` : ""}
+      ${accountIndex >= 0 ? `<button class="group-menu-item" data-card-acct-archive="${accountIndex}"><span class="group-menu-check">⬇</span>${escapeHtml(t("customize.acctArchive"))} · ${escapeHtml(labelForAccount(shownId, accounts))}</button>` : ""}
+      ${familyArchived.length ? `${familyArchived
+          .map(
+            (entry) =>
+              `<button class="group-menu-item" data-card-acct-restore="${escapeHtml(fam)}|${escapeHtml(entry.card_id)}"><span class="group-menu-check">⤴</span>${escapeHtml(t("customize.acctRestore"))} · ${escapeHtml(entry.label || entry.card_id)}</button>`,
+          )
+          .join("")}<div class="group-menu-sep"></div>` : ""}
+      <div class="group-menu-sep"></div>
+      ${accountIndex >= 0 ? `<button class="group-menu-item danger" data-card-account-remove="${accountIndex}"><span class="group-menu-check">×</span>${escapeHtml(t("customize.acctDelete"))} · ${escapeHtml(labelForAccount(shownId, accounts))}</button>` : ""}
       <button class="group-menu-item danger" data-card-remove="${escapeHtml(cardId)}">
         <span class="group-menu-check">×</span>${escapeHtml(cardId.includes("@") ? t("customize.acctDelete") : t("customize.providerDelete"))}
       </button>`}
@@ -4218,6 +4729,25 @@ function openGroupMenu(
     const accountRemove = (e.target as HTMLElement).closest<HTMLElement>("[data-card-account-remove]");
     if (accountRemove) {
       close(); void doAccountRemove(fam, Number(accountRemove.dataset.cardAccountRemove)); return;
+    }
+    const accountArchive = (e.target as HTMLElement).closest<HTMLElement>("[data-card-acct-archive]");
+    if (accountArchive) {
+      close();
+      void doAccountArchive(fam, Number(accountArchive.dataset.cardAcctArchive));
+      return;
+    }
+    const accountRestore = (e.target as HTMLElement).closest<HTMLElement>("[data-card-acct-restore]");
+    if (accountRestore) {
+      const [restoreFam, restoreCardId] = accountRestore.dataset.cardAcctRestore!.split("|");
+      close();
+      void doAccountRestore(restoreFam, restoreCardId);
+      return;
+    }
+    const helpBtn = (e.target as HTMLElement).closest<HTMLElement>("[data-card-help]");
+    if (helpBtn) {
+      close();
+      openProviderHelp(helpBtn.dataset.cardHelp!);
+      return;
     }
     const configure = (e.target as HTMLElement).closest<HTMLElement>("[data-card-config]");
     if (configure) {
@@ -4246,17 +4776,65 @@ function openGroupMenu(
     }
     const noteBtn = (e.target as HTMLElement).closest<HTMLElement>("[data-card-note]");
     if (noteBtn) {
+      // Provider-level note: drives the card title everywhere.
+      const noteId = noteBtn.dataset.cardNote!;
       close();
       void appPrompt({
         title: t("customize.notePrompt", { name: fallbackName }),
         placeholder: t("customize.notePh"),
-        initial: cardNote(cardId),
+        initial: cardNote(noteId),
         confirmLabel: t("settings.save"),
         allowEmpty: true,
       }).then((note) => {
         if (note === null) return;
-        setCardNote(cardId, note);
+        setCardNote(noteId, note);
       });
+      return;
+    }
+    const acctNoteBtn = (e.target as HTMLElement).closest<HTMLElement>("[data-card-acct-note]");
+    if (acctNoteBtn) {
+      // Account-level note: rides the account's own key — the default (bare)
+      // account parks under family@__default__ so it never retitles the
+      // provider (see accountNoteKey).
+      const acctId = acctNoteBtn.dataset.cardAcctNote!;
+      const key = accountNoteKey(acctId);
+      const name = labelForAccount(acctId, accountsCache.get(fam) ?? []);
+      close();
+      void appPrompt({
+        title: t("customize.notePrompt", { name }),
+        placeholder: t("customize.notePh"),
+        initial: cardNote(key),
+        confirmLabel: t("settings.save"),
+        allowEmpty: true,
+      }).then((note) => {
+        if (note === null) return;
+        setCardNote(key, note);
+      });
+      return;
+    }
+    const pinAcct = (e.target as HTMLElement).closest<HTMLElement>("[data-card-pin-acct]");
+    if (pinAcct) {
+      close();
+      setPinnedAccount(fam, pinAcct.dataset.cardPinAcct!);
+      return;
+    }
+    const testBtn = (e.target as HTMLElement).closest<HTMLElement>("[data-card-test]");
+    if (testBtn) {
+      const testId = testBtn.dataset.cardTest!;
+      close();
+      const status = document.querySelector("#status")!;
+      status.textContent = t("card.testing");
+      void invoke<string>("test_provider", { providerId: testId })
+        .then((result) => {
+          const ms = result.split(":").pop() ?? "";
+          status.textContent = result.startsWith("ok:")
+            ? t("card.testOk", { ms })
+            : t("card.testFail", { err: result.slice(0, result.lastIndexOf(":")) });
+          void refresh(true, true);
+        })
+        .catch((err) => {
+          status.textContent = t("card.testFail", { err: String(err) });
+        });
       return;
     }
     const catBtn = includeGrouping
@@ -4273,20 +4851,7 @@ function openGroupMenu(
     if (!pick) return;
     const choice = pick.dataset.groupPick!;
     close();
-    if (choice === "__new__") {
-      void appPrompt({
-        title: t("customize.groupNewPrompt"),
-        placeholder: t("customize.groupNew"),
-        confirmLabel: t("dialog.ok"),
-      }).then((name) => {
-        if (!name) return;
-        const gid = newGroupId();
-        upsertCardGroup(gid, name);
-        setCardGroup(cardId, gid);
-      });
-    } else {
-      setCardGroup(cardId, choice);
-    }
+    void applyGroupChoice(cardId, choice);
   });
   const onKey = (e: KeyboardEvent) => {
     if (e.key === "Escape") {
@@ -4300,8 +4865,17 @@ function openGroupMenu(
   // Overview buttons use their whole tile as the anchor, matching right-click.
   const menu = overlay.querySelector<HTMLElement>(".group-menu")!;
   const tile = includeGrouping ? anchor.closest<HTMLElement>(".overview-item, .overview-bar-item, .expiring-row") : null;
-  const rect = (tile ?? anchor).getBoundingClientRect();
-  if (tile) {
+  const accountAnchor = contextPoint?.target?.closest<HTMLElement>("[data-card-account], [data-card-pin]");
+  const rect = (accountAnchor ?? tile ?? anchor).getBoundingClientRect();
+  if (contextPoint?.atCursor) {
+    // Right-click menus belong at the pointer. Drop below the cursor, flip
+    // above when the menu would overflow the bottom, clamp inside the window.
+    const belowY = contextPoint.y + 6;
+    const aboveY = contextPoint.y - menu.offsetHeight - 6;
+    const desiredY = belowY + menu.offsetHeight <= window.innerHeight - 8 ? belowY : aboveY;
+    menu.style.left = `${Math.max(8, Math.min(contextPoint.x, window.innerWidth - menu.offsetWidth - 8))}px`;
+    menu.style.top = `${Math.max(8, Math.min(desiredY, window.innerHeight - menu.offsetHeight - 8))}px`;
+  } else if (tile) {
     const { x, y } = groupMenuPosition(rect, menu.offsetWidth, menu.offsetHeight, overviewMenuSide(tile), window.innerWidth, window.innerHeight);
     menu.style.left = `${x}px`;
     menu.style.top = `${y}px`;
@@ -4737,6 +5311,63 @@ function reduceMotion(): boolean {
   );
 }
 
+/// Chromium (WebView2 included) silently turns programmatic
+/// behavior:"smooth" scrolls into no-ops when the OS "animate controls"
+/// setting is off — the scroll never starts, so overview jumps to cards
+/// below the fold dead-click. Probe once at boot; every jump site falls
+/// back to instant scrolling when smooth is unavailable.
+let smoothScrollWorks = true;
+function probeSmoothScroll(): void {
+  const probe = document.createElement("div");
+  probe.setAttribute("aria-hidden", "true");
+  probe.style.cssText =
+    "position:fixed;left:-9999px;top:0;width:40px;height:40px;overflow-y:scroll;";
+  probe.innerHTML = "<div style='height:120px'></div>";
+  document.body.appendChild(probe);
+  probe.scrollTo({ top: 60, behavior: "smooth" });
+  window.setTimeout(() => {
+    smoothScrollWorks = probe.scrollTop > 0;
+    probe.remove();
+  }, 150);
+}
+function scrollBehavior(): ScrollBehavior {
+  return smoothScrollWorks ? "smooth" : "auto";
+}
+
+function overviewJumpBehavior(): ScrollBehavior {
+  return config.jumpAnimation === "instant" ? "auto" : "smooth";
+}
+
+let overviewJumpFrame = 0;
+function scrollOverviewCard(card: HTMLElement): void {
+  const scroller = document.querySelector<HTMLElement>("#providers");
+  if (!scroller) return;
+  const scrollerRect = scroller.getBoundingClientRect();
+  const cardRect = card.getBoundingClientRect();
+  const target = Math.max(
+    0,
+    scroller.scrollTop + cardRect.top - scrollerRect.top - (scroller.clientHeight - cardRect.height) / 2,
+  );
+  cancelAnimationFrame(overviewJumpFrame);
+  if (overviewJumpBehavior() === "auto") {
+    scroller.scrollTop = target;
+    return;
+  }
+  const start = scroller.scrollTop;
+  const distance = target - start;
+  const started = performance.now();
+  const duration = Math.min(520, Math.max(260, Math.abs(distance) * 0.55));
+  const tick = (now: number) => {
+    const progress = Math.min(1, (now - started) / duration);
+    const eased = progress < 0.5
+      ? 4 * progress * progress * progress
+      : 1 - Math.pow(-2 * progress + 2, 3) / 2;
+    scroller.scrollTop = start + distance * eased;
+    if (progress < 1) overviewJumpFrame = requestAnimationFrame(tick);
+  };
+  overviewJumpFrame = requestAnimationFrame(tick);
+}
+
 function applyReduceMotion(): void {
   document.body.classList.toggle("reduce-anim", config.reduceAnimations === true);
 }
@@ -4883,6 +5514,14 @@ function applyAppearance(): void {
   const mode =
     config.appearance === "system" ? (systemLight.matches ? "light" : "dark") : config.appearance;
   document.documentElement.dataset.theme = mode;
+  // WebView2's native UI (the <select> popup menu, scrollbars) is painted by
+  // the host's PreferredColorScheme, which page CSS cannot reach. An explicit
+  // theme pins it to Pane's choice; "system" passes null to release it back to
+  // Auto — pinning there would pollute prefers-color-scheme and stall the
+  // follow-the-system change listener below.
+  void getCurrentWebviewWindow()
+    .setTheme(config.appearance === "system" ? null : (mode as "light" | "dark"))
+    .catch(() => {});
   document.documentElement.dataset.density = config.density;
   const btn = document.querySelector<HTMLElement>("#theme-btn");
   if (btn) {
@@ -4902,6 +5541,7 @@ function applyUiFont(): void {
   const font = String(config.uiFont ?? "").trim();
   if (!font) {
     root.style.removeProperty("--app-font");
+    requestAnimationFrame(fitProviderNames);
     return;
   }
   const safe = font.replace(/[\\"]/g, "\\$&");
@@ -4909,6 +5549,54 @@ function applyUiFont(): void {
     "--app-font",
     `"${safe}", "Segoe UI Variable", "Segoe UI", system-ui, sans-serif`,
   );
+  requestAnimationFrame(fitProviderNames);
+}
+
+// Magpie-style top-level settings navigation for the floating window. The
+// existing accordion markup remains the source of truth; tabs only switch
+// which section is visible, so no setting control or listener is duplicated.
+function setupFloatingSettingsTabs(): void {
+  const settings = document.querySelector<HTMLElement>("#settings");
+  const head = settings?.querySelector<HTMLElement>(".panel-head");
+  if (!settings || !head || settings.querySelector(".settings-tabs")) return;
+  const definitions = [
+    ["general", "settings.tabGeneral"],
+    ["usage", "settings.tabUsage"],
+    ["shortcuts", "settings.tabShortcuts"],
+    ["notifications", "settings.tabNotifications"],
+    ["privacy", "settings.tabPrivacy"],
+    ["network", "settings.tabNetwork"],
+    ["about", "settings.tabAbout"],
+  ] as const;
+  const groups = Array.from(settings.querySelectorAll<HTMLElement>(".acc-group"));
+  const tabs = document.createElement("div");
+  tabs.className = "settings-tabs";
+  tabs.setAttribute("role", "tablist");
+  tabs.setAttribute("aria-label", t("settings.title"));
+  const activate = (id: string) => {
+    groups.forEach((group, index) => {
+      const section = definitions[index]?.[0] ?? "general";
+      group.hidden = section !== id;
+    });
+    tabs.querySelectorAll<HTMLButtonElement>("button").forEach((button) => {
+      const active = button.dataset.settingsTab === id;
+      button.classList.toggle("active", active);
+      button.setAttribute("aria-selected", String(active));
+    });
+  };
+  definitions.forEach(([id, labelKey], index) => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.dataset.settingsTab = id;
+    button.dataset.i18n = labelKey;
+    button.textContent = t(labelKey);
+    button.setAttribute("role", "tab");
+    button.addEventListener("click", () => activate(id));
+    tabs.append(button);
+    if (groups[index]) groups[index].dataset.settingsSection = id;
+  });
+  head.after(tabs);
+  activate("general");
 }
 
 /// Settings font picker internals. The menu is a body-level fixed layer (the
@@ -5077,6 +5765,8 @@ const custExpanded = new Set<string>();
 // Which provider's inline config panel is open (one at a time).
 // Session-only, like custExpanded.
 let custConfigOpen: string | null = null;
+/// Whether the drawer footer's removed-provider list is expanded.
+let custRemovedOpen = false;
 // Single-key providers show the saved credential as a compact account row.
 // The input form is an explicit add/edit action, so opening settings never
 // drops the user into a blank form over an existing credential.
@@ -5188,7 +5878,6 @@ const PROVIDER_CRED_INFO: Record<string, { auto: string; methods: CredMethod[] }
   siliconflow: { auto: "customize.cred.siliconflow", methods: ["paste"] },
   novita: { auto: "customize.cred.novita", methods: ["paste"] },
   relaybalance: { auto: "customize.cred.relaybalance", methods: ["paste"] },
-  linkso: { auto: "customize.cred.linkso", methods: ["paste"] },
   qodercn: { auto: "customize.cred.qodercn", methods: ["local"] },
   traecn: { auto: "customize.cred.traecn", methods: ["local"] },
   shandianshuo: { auto: "customize.cred.shandianshuo", methods: ["local"] },
@@ -5319,13 +6008,13 @@ function credAccountsHtml(id: string): string {
 const OAUTH_PROVIDERS = new Set(["codex", "grok", "copilot"]);
 
 // Relay families whose saved credential also carries a user-chosen base
-// URL (relaybalance, linkso) — their gear panel and account dialog show
+// URL (relaybalance) — its gear panel and account dialog show
 // the extra URL field.
-const RELAY_BASE_URL_FAMILIES = new Set(["relaybalance", "linkso"]);
+const RELAY_BASE_URL_FAMILIES = new Set(["relaybalance"]);
 
 // ---------------------------------------------------------------------------
 // Extra API-key accounts (Phase 3.2) — deepseek/kimi/stepfun/siliconflow/
-// novita/relaybalance/linkso. The gear panel's single-key field stays the family's main
+// novita/relaybalance. The gear panel's single-key field stays the family's main
 // card; each entry below adds a stable <provider>@<fingerprint> card on the
 // dashboard.
 // ---------------------------------------------------------------------------
@@ -5370,7 +6059,30 @@ function fetchAccounts(family: string): void {
   refreshAccounts(family);
 }
 
+/// Archived account tombstones per family (archived_accounts.json via the
+/// backend). Kept beside accountsCache so the card menu can offer restore
+/// rows synchronously.
+interface ArchivedAccountRow {
+  provider: string;
+  card_id: string;
+  label: string;
+  archived_at: number;
+}
+const archivedAccountsCache = new Map<string, ArchivedAccountRow[]>();
+
 function refreshAccounts(family: string): void {
+  void invoke<ArchivedAccountRow[]>("archived_accounts", { provider: family })
+    .then((list) => {
+      archivedAccountsCache.set(family, list);
+      // The archive list changes independently of account_list. Repaint the
+      // menu source immediately so a freshly archived account is offered in
+      // Restore without requiring another quota refresh.
+      if (customizeOpen) renderDrawerBody();
+      else if (lastSnapshots.length) renderIfVisible();
+    })
+    .catch(() => {
+      archivedAccountsCache.set(family, []);
+    });
   void invoke<AccountEntry[]>("account_list", { provider: family })
     .then((list) => {
       accountsCache.set(family, list);
@@ -5392,6 +6104,10 @@ function refreshAccounts(family: string): void {
 /// 3. fingerprint suffix (id after the @)
 /// 4. bare id as last resort
 function labelForAccount(id: string, list: AccountEntry[]): string {
+  // A per-account note (renamed from the account's own context menu) beats
+  // the stored label — that's the whole point of renaming one capsule.
+  const note = accountNote(id);
+  if (note) return note;
   const entry = list.find((e) => e.id === id);
   if (entry?.label) return entry.label;
   if (entry?.email) return entry.email;
@@ -5888,6 +6604,22 @@ async function doAccountArchive(family: string, index: number): Promise<void> {
   }
 }
 
+/// Restores an archived account: the credential comes back from the archive
+/// store, the card reappears with its original stable id (usage history and
+/// layout reattach automatically).
+async function doAccountRestore(family: string, cardId: string): Promise<void> {
+  const status = document.querySelector("#status")!;
+  try {
+    await invoke("account_restore", { provider: family, cardId });
+    userSelectedAccountFor.delete(family);
+    refreshAccounts(family);
+    status.textContent = t("customize.acctRestored");
+    void forceUsageRefreshAttempt(false).then(requestTraySync);
+  } catch (err) {
+    status.textContent = t("customize.acctAddFailed", { err: String(err) });
+  }
+}
+
 /// Makes the account at `index` the default: it moves to position 0 in the
 /// accounts file and publishes under the bare family id on the next fetch.
 /// Its old <provider>@<fingerprint> card folds away into the main card.
@@ -6091,7 +6823,7 @@ function renderCustStatus(id: string): string {
 /// that path clears the stored key).
 ///
 /// Multi-account providers (deepseek/kimi/stepfun/siliconflow/novita/
-/// relaybalance/linkso) are account-modeled: every key lives in the accounts
+/// relaybalance) are account-modeled: every key lives in the accounts
 /// list, so the action section is just "Add account" + the account list +
 /// a "Get API key" link — the standalone key field would be a second,
 /// confusing save path for the same identity (phase 2, user report).
@@ -6104,15 +6836,7 @@ function renderCustStatus(id: string): string {
 /// credential kind — grouping is orthogonal to how the card connects.
 function groupPickerHtml(id: string): string {
   const current = cardGroupId(id);
-  const groups = cardGroups();
-  const options = [
-    `<option value=""${current === "" ? " selected" : ""}>${escapeHtml(t("customize.groupNone"))}</option>`,
-    ...groups.map(
-      (g) =>
-        `<option value="${escapeHtml(g.id)}"${current === g.id ? " selected" : ""}>${escapeHtml(g.name)}</option>`,
-    ),
-    `<option value="__new__">${escapeHtml(t("customize.groupNew"))}…</option>`,
-  ].join("");
+  const currentName = current === "" ? t("customize.groupNone") : (cardGroup(current)?.name ?? t("customize.groupNone"));
   const manage =
     current === ""
       ? ""
@@ -6121,11 +6845,69 @@ function groupPickerHtml(id: string): string {
   return `<div class="form-field">
       <span class="form-label">${escapeHtml(t("customize.groupLabel"))}</span>
       <div class="form-actions">
-        <select class="form-input" data-group-select="${escapeHtml(id)}">${options}</select>
+        <button type="button" class="form-input cust-group-trigger" data-group-open="${escapeHtml(id)}" aria-haspopup="menu"><span>${escapeHtml(currentName)}</span><span class="cust-group-chev">⌄</span></button>
         ${manage}
       </div>
       <div class="form-help">${escapeHtml(t("customize.groupHelp"))}</div>
     </div>`;
+}
+
+/// Commit a group choice for one card: "__new__" prompts for a name first.
+/// Shared by the card's own group menu and the ⚙ panel's group picker.
+async function applyGroupChoice(cardId: string, choice: string): Promise<void> {
+  if (choice === "__new__") {
+    const name = await appPrompt({
+      title: t("customize.groupNewPrompt"),
+      placeholder: t("customize.groupNew"),
+      confirmLabel: t("dialog.ok"),
+    });
+    if (!name) return;
+    const gid = newGroupId();
+    upsertCardGroup(gid, name);
+    setCardGroup(cardId, gid);
+    return;
+  }
+  setCardGroup(cardId, choice);
+}
+
+/// The ⚙ panel's group picker opens a self-drawn menu instead of a native
+/// `<select>`: WebView2 paints the native popup from the host's
+/// PreferredColorScheme, which ignores the page's dark theme and renders
+/// light text on white — unreadable (user report 2026-10-08). The overlay
+/// reuses the card group menu's styles, so it follows the theme everywhere.
+function openGroupPicker(cardId: string, anchor: HTMLElement): void {
+  document.querySelector(".group-menu-overlay")?.remove();
+  const current = cardGroupId(cardId);
+  const item = (gid: string, label: string, checked = false) =>
+    `<button class="group-menu-item${checked ? " on" : ""}" data-group-pick="${escapeHtml(gid)}"><span class="group-menu-check">${checked ? "✓" : ""}</span>${escapeHtml(label)}</button>`;
+  const overlay = document.createElement("div");
+  overlay.className = "group-menu-overlay";
+  overlay.innerHTML = `<div class="group-menu" role="menu">
+      <div class="group-menu-title">${escapeHtml(t("customize.groupLabel"))}</div>
+      ${item("", t("customize.groupNone"), current === "")}
+      ${cardGroups()
+        .map((g) => item(g.id, g.name, current === g.id))
+        .join("")}
+      <div class="group-menu-sep"></div>
+      ${item("__new__", `${t("customize.groupNew")}…`)}
+    </div>`;
+  const close = () => overlay.remove();
+  overlay.addEventListener("click", (e) => {
+    if (e.target === overlay) {
+      close();
+      return;
+    }
+    const pick = (e.target as HTMLElement).closest<HTMLElement>("[data-group-pick]");
+    if (!pick) return;
+    const choice = pick.dataset.groupPick!;
+    close();
+    void applyGroupChoice(cardId, choice);
+  });
+  document.body.appendChild(overlay);
+  const menu = overlay.querySelector<HTMLElement>(".group-menu")!;
+  const rect = anchor.getBoundingClientRect();
+  menu.style.left = `${Math.max(8, Math.min(rect.left, window.innerWidth - menu.offsetWidth - 8))}px`;
+  menu.style.top = `${Math.max(8, Math.min(rect.bottom + 4, window.innerHeight - menu.offsetHeight - 8))}px`;
 }
 
 function renderCompactKeySummary(id: string): string {
@@ -6154,6 +6936,17 @@ function custApplyHtml(id: string): string {
   return `<div class="form-actions cust-apply-actions">
       <button class="mini-btn primary" data-cust-apply="${escapeHtml(id)}">${escapeHtml(t("customize.saveRefresh"))}</button>
       <span class="cust-test-result" data-cust-apply-result="${escapeHtml(id)}"></span>
+    </div>`;
+}
+
+/// Delete row for a provider's gear panel: full removal from Customize and
+/// every dashboard surface, with the drawer footer as the way back.
+/// Account rows (id !== family) keep their own menu-driven hide.
+function custDangerZone(id: string): string {
+  if (id !== providerFamily(id)) return "";
+  return `<div class="cust-danger">
+      <button class="mini-btn danger" data-remove-provider="${escapeHtml(id)}">${escapeHtml(t("customize.providerDelete"))}</button>
+      <span class="form-help">${escapeHtml(t("customize.providerDeleteHint"))}</span>
     </div>`;
 }
 
@@ -6198,11 +6991,16 @@ function renderCustConfig(id: string): string {
     }
     // The account list itself lives as child rows under the family row;
     // this panel is only the connection method + the add/get-key actions.
+    const customHint =
+      id === "relaybalance"
+        ? `<p class="settings-note">${escapeHtml(t("customize.customRelayHint"))}</p>`
+        : "";
     return `<div class="cust-config cust-form">
         <div class="form-field">
           <span class="form-label">${escapeHtml(t("customize.connLabel"))}</span>
           <div data-cred-chips="${escapeHtml(id)}">${credChipsHtml(id)}</div>
         </div>
+        ${customHint}
         <div class="form-actions">
           ${primary}
           ${linkLink}
@@ -6425,6 +7223,29 @@ function renderSkinMarket(): string {
   </section>`;
 }
 
+/// Footer registry of providers deleted from Customize — the one-line way
+/// back that keeps a mis-click from being permanent.
+function removedProvidersHtml(): string {
+  const removed = config.removedProviders;
+  if (!removed.length) return "";
+  const rows = removed
+    .map((fam) => {
+      const name = ALL_PROVIDERS.find(([pid]) => pid === fam)?.[1] ?? fam;
+      return `<div class="cust-removed-row">
+          <span class="cust-label">${escapeHtml(name)}</span>
+          <button class="mini-btn" data-restore-provider="${escapeHtml(fam)}">${escapeHtml(t("customize.providerRestore"))}</button>
+        </div>`;
+    })
+    .join("");
+  return `<div class="cust-removed${custRemovedOpen ? " open" : ""}">
+      <button class="cust-removed-head" data-removed-toggle>
+        <span>${escapeHtml(t("customize.removedHead", { n: removed.length }))}</span>
+        <span class="chev">${uiIcon("caretDown")}</span>
+      </button>
+      ${custRemovedOpen ? `<div class="cust-removed-list">${rows}</div>` : ""}
+    </div>`;
+}
+
 function renderCustomize(): string {
   if (skinMarketOpen) return renderSkinMarket();
   // A-Z by English display name, locale-independent. Card order is owned by
@@ -6444,6 +7265,19 @@ function renderCustomize(): string {
       if (id !== fam && supportsExtraAccounts(fam)) {
         // Antigravity slot cards (antigravity@<fp>) also hang under the
         // family row as child rows — same treatment.
+        return false;
+      }
+      // A family deleted from the catalog must not haunt the drawer even when
+      // a saved layout still lists it (old providerOrder / disabled entries):
+      // no snapshot AND no catalog entry means the provider no longer exists.
+      // A merely disabled family has no snapshot either — famKnown keeps its
+      // re-enable toggle alive.
+      const famKnown =
+        ALL_PROVIDERS.some(([pid]) => pid === fam) || fam === ONA_FAMILY || supportsExtraAccounts(fam);
+      if (!snapshot && !famKnown) return false;
+      // Deleted providers leave the drawer entirely — a re-enable toggle
+      // for them would defeat the point; restore lives in the footer.
+      if (config.removedProviders.includes(providerFamily(id))) {
         return false;
       }
       // A retired account card (its login left this machine) keeps its
@@ -6545,7 +7379,7 @@ function renderCustomize(): string {
             <label class="toggle mini" title="${escapeHtml(t("customize.enable"))}"><input type="checkbox" data-enable="${id}"${enabled ? " checked" : ""} /></label>
           </div>
           ${accountRows}
-          ${custConfigOpen === id ? renderCustConfig(id) : ""}
+          ${custConfigOpen === id ? renderCustConfig(id) + custDangerZone(id) : ""}
           ${custInfoOpen === id ? renderCustInfo(id) : ""}
           <div class="acc-body"><div class="acc-inner cust-rows">${rows}</div></div>
         </article>`,
@@ -6578,8 +7412,13 @@ function renderCustomize(): string {
   }
 
   const starCount = Object.values(config.layout?.providers ?? {}).reduce((n, l) => n + l.starred.length, 0);
+  // The skin market rides the experimental-features gate: entry hidden
+  // entirely unless the user opted in from Settings.
+  const skinEntry = config.experimentalFeatures === true
+    ? `<div class="customize-skin-entry"><div><strong>Skin market</strong><span>Wallpaper · mascot · atmosphere</span></div><button class="mini-btn" data-skin-open>${uiIcon("palette", "Open skin market")}</button></div>`
+    : "";
   return `
-    <div class="customize-skin-entry"><div><strong>Skin market</strong><span>Wallpaper · mascot · atmosphere</span></div><button class="mini-btn" data-skin-open>${uiIcon("palette", "Open skin market")}</button></div>
+    ${skinEntry}
     <div class="customize-bar glass-bar">
       <div class="customize-heading">
         <button class="dock-btn" data-customize-close>${escapeHtml(t("customize.done"))}</button>
@@ -6593,7 +7432,13 @@ function renderCustomize(): string {
     <nav class="cust-az">${letters
       .map((l) => `<button data-az="${l}">${l}</button>`)
       .join("")}</nav>
-    ${blocksHtml}`;
+    <div class="cust-search-wrap">
+      <span class="cust-search-icon">${uiIcon("magnifyingGlass")}</span>
+      <input id="cust-search" class="cust-search" type="search" autocomplete="off"
+        placeholder="${escapeHtml(t("customize.searchPlaceholder"))}" />
+    </div>
+    ${blocksHtml}
+    ${removedProvidersHtml()}`;
 }
 
 // ---------------------------------------------------------------------------
@@ -6691,12 +7536,78 @@ function renderAll(): void {
   if (customizeOpen) renderDrawerBody();
   if (spendDetailOpen) document.body.insertAdjacentHTML("beforeend", renderSpendDetailOverlay());
   rebuildTrail();
+  requestAnimationFrame(fitProviderNames);
+}
+
+/// Jumps from a quota-overview item to its real provider card. Grouped cards
+/// may live inside a hidden `.card-group-fold`; reveal that group first, then
+/// resolve the card again because renderAll() rebuilds the provider DOM.
+function jumpToProviderCard(providerId: string): void {
+  const selector = `article.provider[data-provider="${CSS.escape(providerId)}"]`;
+  const card = document.querySelector<HTMLElement>(selector);
+  if (!card) return;
+
+  const hiddenGroup = card.closest<HTMLElement>(".card-group-fold[hidden]");
+  if (hiddenGroup) {
+    const group = cardGroup(cardGroupId(providerId));
+    if (group) {
+      group.collapsed = false;
+      void patchConfig({ layout: config.layout });
+      renderAll();
+      requestAnimationFrame(() => jumpToProviderCard(providerId));
+      return;
+    }
+  }
+
+  scrollOverviewCard(card);
+  card.classList.add("card-highlight");
+  setTimeout(() => card.classList.remove("card-highlight"), 1200);
 }
 
 function renderDrawerBody(): void {
   const body = document.querySelector<HTMLElement>("#drawer-body");
   if (!body) return;
   body.innerHTML = renderCustomize();
+  if (custSearchQuery) {
+    const inp = body.querySelector<HTMLInputElement>("#cust-search");
+    if (inp) inp.value = custSearchQuery;
+    applyCustSearch(custSearchQuery);
+  }
+}
+
+/// Fuzzy-ish filter for the Customize drawer: case-insensitive substring on
+/// the display name or family id, so prefixes, suffixes and middles all hit.
+/// Rows hide in place (no re-render) to keep the input's focus and caret.
+let custSearchQuery = "";
+function applyCustSearch(raw: string): void {
+  custSearchQuery = raw;
+  const query = raw.trim().toLowerCase();
+  let visible = 0;
+  for (const blk of document.querySelectorAll<HTMLElement>(".customize-block")) {
+    const hit =
+      !query ||
+      (blk.dataset.name ?? "").includes(query) ||
+      (blk.dataset.custProvider ?? "").toLowerCase().includes(query);
+    blk.style.display = hit ? "" : "none";
+    if (hit) visible++;
+  }
+  for (const gh of document.querySelectorAll<HTMLElement>(".cust-group-head")) {
+    let el = gh.nextElementSibling as HTMLElement | null;
+    let any = false;
+    while (el && el.classList.contains("customize-block")) {
+      if (el.style.display !== "none") any = true;
+      el = el.nextElementSibling as HTMLElement | null;
+    }
+    gh.style.display = any ? "" : "none";
+  }
+  const body = document.querySelector<HTMLElement>("#drawer-body");
+  document.querySelector(".cust-search-empty")?.remove();
+  if (!visible && body) {
+    const empty = document.createElement("p");
+    empty.className = "placeholder cust-search-empty";
+    empty.textContent = t("customize.searchEmpty");
+    body.appendChild(empty);
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -6909,15 +7820,21 @@ function setupTrailScroll(): void {
   }
 
   moreTop?.addEventListener("click", () => {
-    trail?.scrollBy({ top: -50, behavior: "smooth" });
+    trail?.scrollBy({ top: -50, behavior: scrollBehavior() });
   });
 
   moreBottom?.addEventListener("click", () => {
-    trail?.scrollBy({ top: 50, behavior: "smooth" });
+    trail?.scrollBy({ top: 50, behavior: scrollBehavior() });
   });
 
   window.addEventListener("resize", () => {
     updateTrailLayout();
+    requestAnimationFrame(fitProviderNames);
+  });
+
+  document.addEventListener("input", (e) => {
+    const inp = (e.target as HTMLElement | null)?.closest?.("#cust-search");
+    if (inp) applyCustSearch((inp as HTMLInputElement).value);
   });
 }
 
@@ -6980,7 +7897,7 @@ function updateTrailActive(): void {
     const isAct = j === activeEntry;
     tick.classList.toggle("active", isAct);
     if (isAct && trail && trail.scrollHeight > trail.clientHeight) {
-      tick.scrollIntoView({ block: "nearest", behavior: "smooth" });
+      tick.scrollIntoView({ block: "nearest", behavior: scrollBehavior() });
     }
   });
   updateTrailScrollIndicators();
@@ -6997,8 +7914,12 @@ function showTrendTip(el: HTMLElement): void {
   const tip = document.querySelector<HTMLElement>("#model-tip")!;
   const [id, idxStr] = (el.dataset.trend ?? "").split("|");
   const spend = lastSpend.find((s) => s.id === id);
-  const sampled = spend ? undefined : lastQuotaTrend[id];
-  if (!spend && !sampled) return;
+  // Mirror trendSourceFor's precedence: credits-billed cards render the
+  // credit series, so the hover must read it too.
+  const credits = spend ? undefined : lastCreditTrend[id];
+  const useCredits = !spend && credits?.some((v) => v != null && v > 0);
+  const sampled = spend || useCredits ? undefined : lastQuotaTrend[id];
+  if (!spend && !sampled && !useCredits) return;
   const i = Number(idxStr);
   if (Number.isNaN(i)) return;
   const date = new Date(Date.now() - (29 - i) * 86_400_000).toLocaleDateString(localeTag(), {
@@ -7019,6 +7940,12 @@ function showTrendTip(el: HTMLElement): void {
       dayVal > 0 ? escapeHtml(metricCost ? fmtMoney(dayVal) : t("card.tokens", { n: fmtTokens(dayVal) })) : escapeHtml(t("spend.noUsage"))
     }</span></div>
     ${dayVal > 0 ? `<div class="tip-line detail"><span>${escapeHtml(t("spend.of30", { n: share < 1 ? "<1" : share.toFixed(0) }))}</span></div>` : ""}`;
+  } else if (useCredits && credits) {
+    const dayVal = credits[i];
+    lines = `
+    <div class="tip-line"><span class="tip-name">${escapeHtml(date)}</span><span>${
+      dayVal == null ? escapeHtml(t("spend.noDataDay")) : dayVal > 0 ? escapeHtml(t("spend.creditBarTip", { n: fmtCredits(dayVal) })) : escapeHtml(t("spend.noUsage"))
+    }</span></div>`;
   } else {
     const pct = sampled?.[i];
     lines = `
@@ -7232,6 +8159,11 @@ async function refresh(
   const quotaTrendPromise = invoke<Record<string, (number | null)[]>>("fetch_usage_history").catch(
     () => null,
   );
+  // Credits-billed cards (Qoder CN / Trae CN): daily credit consumption,
+  // kept apart from the percent-based quota trend and any token totals.
+  const creditTrendPromise = invoke<Record<string, (number | null)[]>>("fetch_credit_history").catch(
+    () => null,
+  );
   try {
     await unparkRecentlyKeyed();
     let snapshots = await invoke<Snapshot[]>("fetch_usage", {
@@ -7351,6 +8283,14 @@ async function refresh(
     lastQuotaTrend = quotaTrend;
     // A usage-only refresh rendered before the history landed; account
     // cards gaining their first trend need the layout patched + repainted.
+    if (usageOnly && lastSnapshots.length) {
+      ensureLayout();
+      if (!customizeOpen) renderIfVisible();
+    }
+  }
+  const creditTrend = await creditTrendPromise;
+  if (creditTrend) {
+    lastCreditTrend = creditTrend;
     if (usageOnly && lastSnapshots.length) {
       ensureLayout();
       if (!customizeOpen) renderIfVisible();
@@ -7648,6 +8588,11 @@ async function handleCustomizeClick(target: HTMLElement): Promise<boolean> {
     });
     return true;
   }
+  const groupOpen = target.closest<HTMLElement>("[data-group-open]");
+  if (groupOpen) {
+    openGroupPicker(groupOpen.dataset.groupOpen!, groupOpen);
+    return true;
+  }
   const groupRename = target.closest<HTMLElement>("[data-group-rename]");
   if (groupRename) {
     const gid = groupRename.dataset.groupRename!;
@@ -7696,6 +8641,30 @@ async function handleCustomizeClick(target: HTMLElement): Promise<boolean> {
     }
     // Toggle in place so the accordion animates instead of re-rendering.
     expand.closest(".customize-block")?.classList.toggle("open", custExpanded.has(id));
+    return true;
+  }
+  const removeBtn = target.closest<HTMLElement>("[data-remove-provider]");
+  if (removeBtn) {
+    const id = removeBtn.dataset.removeProvider!;
+    const name = ALL_PROVIDERS.find(([pid]) => pid === id)?.[1] ?? id;
+    void appConfirm({
+      title: t("customize.providerDeleteTitle"),
+      message: t("customize.providerDeleteConfirm", { name }),
+      confirmLabel: t("customize.providerDelete"),
+    }).then((ok) => {
+      if (ok) removeProviderCard(id);
+    });
+    return true;
+  }
+  const restoreBtn = target.closest<HTMLElement>("[data-restore-provider]");
+  if (restoreBtn) {
+    restoreProviderFamily(restoreBtn.dataset.restoreProvider!);
+    return true;
+  }
+  const removedToggle = target.closest<HTMLElement>("[data-removed-toggle]");
+  if (removedToggle) {
+    custRemovedOpen = !custRemovedOpen;
+    renderDrawerBody();
     return true;
   }
   const cfgBtn = target.closest<HTMLElement>("[data-config]");
@@ -7891,7 +8860,7 @@ async function handleCustomizeClick(target: HTMLElement): Promise<boolean> {
   if (az) {
     document
       .querySelector<HTMLElement>(`#drawer-body [data-letter="${az.dataset.az}"]:not([hidden])`)
-      ?.scrollIntoView({ behavior: "smooth", block: "start" });
+      ?.scrollIntoView({ behavior: scrollBehavior(), block: "start" });
     return true;
   }
   const closeBtn = target.closest("[data-customize-close]");
@@ -8177,27 +9146,6 @@ async function handleCustomizeChange(target: HTMLInputElement): Promise<void> {
     if (target.checked) L.hidden = L.hidden.filter((k) => k !== key);
     else if (!L.hidden.includes(key)) L.hidden.push(key);
     saveLayout();
-  }
-  if (target.dataset.groupSelect !== undefined) {
-    const id = target.dataset.groupSelect;
-    const choice = target.value;
-    if (choice === "__new__") {
-      // Re-render so the select snaps back to the card's real group while
-      // the name dialog is open.
-      renderDrawerBody();
-      const name = await appPrompt({
-        title: t("customize.groupNewPrompt"),
-        placeholder: t("customize.groupNew"),
-        confirmLabel: t("dialog.ok"),
-      });
-      if (name) {
-        const gid = newGroupId();
-        upsertCardGroup(gid, name);
-        setCardGroup(id, gid);
-      }
-      return;
-    }
-    setCardGroup(id, choice); // its renderAll also refreshes the drawer body
   }
 }
 
@@ -8562,7 +9510,7 @@ function focusOneNewApiSite(id: string): void {
   requestAnimationFrame(() => {
     document.querySelector(`[data-ona-site="${CSS.escape(id)}"]`)?.scrollIntoView({
       block: "nearest",
-      behavior: "smooth",
+      behavior: scrollBehavior(),
     });
   });
 }
@@ -8982,7 +9930,7 @@ async function saveApiKey(
         enableGeneration = markProviderEnablePending(provider);
       }
     }
-    // Providers with a user-chosen endpoint (relaybalance, linkso) carry a
+    // Providers with a user-chosen endpoint (relaybalance) carry a
     // base URL input next to the key field; Save persists both together.
     const baseUrl = fields.baseUrl?.value.trim() || null;
     await invoke("set_api_key", { provider, key, baseUrl });
@@ -9064,24 +10012,28 @@ function renderVaultBar(): void {
   inner.className = "kv-vault-bar-inner";
   const state = document.createElement("span");
   state.className = "kv-vault-state";
-  const action = document.createElement("button");
-  action.type = "button";
-  action.className = "mini-btn";
+  const buttons: HTMLButtonElement[] = [];
+  const button = (label: string, action: string) => {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = "mini-btn";
+    b.textContent = label;
+    b.dataset.kvVaultAction = action;
+    buttons.push(b);
+  };
   if (!vaultStatus.has_password) {
     state.textContent = t("settings.kvVaultNoPassword");
-    action.textContent = t("settings.kvSetPassword");
-    action.dataset.kvVaultAction = "set";
+    button(t("settings.kvSetPassword"), "set");
   } else if (vaultStatus.unlocked) {
     state.textContent = t("settings.kvVaultUnlocked", { count: vaultStatus.count });
-    action.textContent = t("settings.kvLock");
-    action.dataset.kvVaultAction = "lock";
+    button(t("settings.kvChange"), "change");
+    button(t("settings.kvLock"), "lock");
   } else {
     state.textContent = t("settings.kvVaultLocked", { count: vaultStatus.count });
     state.classList.add("locked");
-    action.textContent = t("settings.kvUnlock");
-    action.dataset.kvVaultAction = "unlock";
+    button(t("settings.kvUnlock"), "unlock");
   }
-  inner.append(state, action);
+  inner.append(state, ...buttons);
   bar.append(inner);
 }
 
@@ -9140,6 +10092,106 @@ async function lockVault(): Promise<void> {
   await loadKeyvault();
 }
 
+/// Change the master password: verify the old one server-side, then set and
+/// confirm the new one. The whole vault is re-sealed on success.
+async function changeVaultPassword(): Promise<void> {
+  const status = document.querySelector("#status");
+  const old = await appPrompt({
+    title: t("settings.kvChange"),
+    placeholder: t("settings.kvChangeOldPh"),
+    confirmLabel: t("settings.kvChangeNext"),
+    secret: true,
+  });
+  if (old === null) return;
+  const next = await appPrompt({
+    title: t("settings.kvChangeNewTitle"),
+    placeholder: t("settings.kvChangeNewPh"),
+    confirmLabel: t("settings.kvChangeNext"),
+    secret: true,
+  });
+  if (next === null) return;
+  const again = await appPrompt({
+    title: t("settings.kvPasswordConfirmTitle"),
+    placeholder: t("settings.kvChangeRepeatPh"),
+    confirmLabel: t("settings.kvChange"),
+    secret: true,
+  });
+  if (again === null) return;
+  if (next !== again) {
+    if (status) status.textContent = t("settings.kvPasswordMismatch");
+    return;
+  }
+  try {
+    vaultStatus = await invoke<VaultStatus>("change_master_password", { old, new: next });
+    if (status) status.textContent = t("settings.kvChanged");
+    await loadKeyvault();
+  } catch (err) {
+    if (status) {
+      status.textContent = String(err).includes("wrong master password")
+        ? t("settings.kvWrongPassword")
+        : String(err);
+    }
+  }
+}
+
+/// Reveal a stored provider/account key in place: probe with the open
+/// session (an empty password answers when unlocked), fall back to the
+/// master-password prompt, toggle back on the second click. One password
+/// and one lock cover the vault and every key — matching the backend gate.
+async function revealSettingsKey(
+  family: string,
+  entryId: string | null,
+  button: HTMLButtonElement,
+  stateEl: HTMLElement,
+): Promise<void> {
+  const status = document.querySelector("#status");
+  if (button.dataset.revealed === "1") {
+    if (button.dataset.masked) stateEl.textContent = button.dataset.masked;
+    delete button.dataset.revealed;
+    button.textContent = t("settings.kvReveal");
+    return;
+  }
+  const call = (password: string) =>
+    entryId
+      ? invoke<string>("reveal_account_key", { provider: family, id: entryId, password })
+      : invoke<string>("reveal_provider_key", { provider: family, password });
+  try {
+    let raw: string;
+    try {
+      raw = await call("");
+    } catch (err) {
+      const msg = String(err);
+      if (msg.includes("no master password is set")) {
+        if (status) status.textContent = t("settings.kvSetFirst");
+        return;
+      }
+      if (!msg.includes("wrong master password")) {
+        if (status) status.textContent = msg;
+        return;
+      }
+      const pw = await appPrompt({
+        title: t("settings.kvUnlockTitle"),
+        placeholder: t("settings.kvPasswordPlaceholder"),
+        confirmLabel: t("settings.kvUnlock"),
+        secret: true,
+      });
+      if (pw === null) return;
+      raw = await call(pw);
+    }
+    button.dataset.masked = stateEl.textContent || "";
+    stateEl.textContent = raw;
+    button.dataset.revealed = "1";
+    button.textContent = t("settings.kvHide");
+  } catch (err) {
+    const msg = String(err);
+    if (status) {
+      status.textContent = msg.includes("wrong master password")
+        ? t("settings.kvWrongPassword")
+        : msg;
+    }
+  }
+}
+
 async function revealKeyvaultEntry(id: string, button: HTMLButtonElement): Promise<void> {
   const item = button.closest<HTMLElement>(".kv-item");
   const code = item?.querySelector<HTMLElement>(".kv-masked");
@@ -9185,6 +10237,363 @@ async function editKeyvaultNote(id: string): Promise<void> {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Settings panel: provider credential management (the keys page)
+// ---------------------------------------------------------------------------
+
+/// Which family's inline key editor or add-account form is open. Panel-local
+/// (its window owns the DOM), re-rendered in place on every change.
+const skeyEditing = new Set<string>();
+const skeyAddingAccount = new Set<string>();
+
+/// Families whose credential is a plain API key, from the catalog — the
+/// same set Customize manages. OAuth / local sign-in families are not
+/// key-manageable and stay out; that boundary is intentional, not a gap.
+function settingsKeyFamilies(): string[] {
+  return [...KEY_PROVIDERS].filter((family) => !config.removedProviders.includes(family));
+}
+
+/// One provider's fresh credential facts (used by both the bulk load and
+/// single-row refreshes after a write).
+async function refreshSettingsProviderKey(family: string): Promise<void> {
+  try {
+    credStatusCache.set(
+      family,
+      await invoke<CredStatus>("get_credential_status", { provider: family }),
+    );
+  } catch {
+    // A failed probe must not blank a row into a wrong "not set" state.
+  }
+  if (supportsExtraAccounts(family)) {
+    try {
+      accountsCache.set(
+        family,
+        await invoke<AccountEntry[]>("account_list", { provider: family }),
+      );
+    } catch {
+      // Keep the previous list on failure.
+    }
+  }
+}
+
+async function loadSettingsProviderKeys(): Promise<void> {
+  await Promise.all(settingsKeyFamilies().map((family) => refreshSettingsProviderKey(family)));
+  renderSettingsProviderKeys();
+}
+
+function renderSettingsProviderKeys(): void {
+  const root = document.querySelector<HTMLElement>("#settings-keys-rows");
+  if (!root) return;
+  root.replaceChildren();
+  // Configured rows first, then A–Z by display name.
+  const families = settingsKeyFamilies().sort((a, b) => {
+    const configured = (f: string) =>
+      Number(
+        credStatusCache.get(f)?.storedKey === true ||
+          (accountsCache.get(f)?.length ?? 0) > 0,
+      );
+    return (
+      configured(b) - configured(a) ||
+      providerDisplayName(a).localeCompare(providerDisplayName(b), "en")
+    );
+  });
+  for (const family of families) root.append(settingsKeyRow(family));
+}
+
+function settingsKeyRow(family: string): HTMLElement {
+  const status = credStatusCache.get(family);
+  const accounts = accountsCache.get(family) ?? [];
+  const multi = supportsExtraAccounts(family);
+  const configured = multi ? accounts.length > 0 : status?.storedKey === true;
+
+  const item = document.createElement("div");
+  item.className = "skey-item";
+  item.dataset.skeyFamily = family;
+
+  const head = document.createElement("div");
+  head.className = "skey-head";
+  const icon = document.createElement("span");
+  icon.className = "skey-icon";
+  icon.innerHTML = providerVisual(family)?.iconSvg ?? uiIcon("key");
+  const name = document.createElement("span");
+  name.className = "skey-name";
+  name.textContent = providerDisplayName(family);
+  const state = document.createElement("span");
+  state.className = `skey-state${configured ? " ok" : ""}`;
+  if (multi) {
+    state.textContent = accounts.length
+      ? t("settings.acctCount", { n: accounts.length })
+      : t("settings.keyNotSet");
+  } else if (configured) {
+    state.textContent = status?.maskedKey || t("settings.keyConfigured");
+  } else {
+    state.textContent = status?.envKey ? t("settings.keyEnv") : t("settings.keyNotSet");
+  }
+  const actions = document.createElement("span");
+  actions.className = "skey-actions";
+  head.append(icon, name, state, actions);
+  item.append(head);
+
+  const button = (label: string, extraClass = "") => {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = `mini-btn${extraClass}`;
+    b.textContent = label;
+    return b;
+  };
+
+  if (multi) {
+    const open = skeyAddingAccount.has(family);
+    const add = button(open ? t("dialog.cancel") : t("customize.acctAdd"));
+    add.addEventListener("click", () => {
+      open ? skeyAddingAccount.delete(family) : skeyAddingAccount.add(family);
+      renderSettingsProviderKeys();
+    });
+    actions.append(add);
+  } else if (skeyEditing.has(family)) {
+    const cancel = button(t("dialog.cancel"));
+    cancel.addEventListener("click", () => {
+      skeyEditing.delete(family);
+      renderSettingsProviderKeys();
+    });
+    actions.append(cancel);
+  } else {
+    if (configured) {
+      const view = button(t("settings.kvReveal"));
+      view.addEventListener("click", () => {
+        void revealSettingsKey(family, null, view, state);
+      });
+      actions.append(view);
+    }
+    const edit = button(configured ? t("settings.keyReplace") : t("settings.keyEdit"));
+    edit.addEventListener("click", () => {
+      skeyEditing.add(family);
+      renderSettingsProviderKeys();
+    });
+    actions.append(edit);
+    if (configured) {
+      const remove = button(t("settings.keyRemove"), " danger");
+      remove.addEventListener("click", () => {
+        void appConfirm({
+          title: t("settings.keyRemove"),
+          message: t("settings.keyRemoveConfirm", { name: providerDisplayName(family) }),
+          confirmLabel: t("settings.kvRemove"),
+        }).then(async (ok) => {
+          if (!ok) return;
+          try {
+            await invoke("set_api_key", { provider: family, key: "" });
+          } catch (err) {
+            console.error("remove api key failed:", err);
+          }
+          await refreshSettingsProviderKey(family);
+          renderSettingsProviderKeys();
+        });
+      });
+      actions.append(remove);
+    }
+  }
+
+  if (!multi && skeyEditing.has(family)) item.append(settingsKeyEditor(family));
+  if (multi) {
+    if (accounts.length) {
+      const list = document.createElement("div");
+      list.className = "skey-accounts";
+      accounts.forEach((entry, index) => list.append(settingsAccountRow(family, entry, index)));
+      item.append(list);
+    }
+    if (skeyAddingAccount.has(family)) item.append(settingsAccountEditor(family));
+  }
+  return item;
+}
+
+/// Inline key editor: password field (+ base URL for relay families) with
+/// Save/Cancel. Saves through the exact command Customize uses, so the
+/// card picks the key up on its next refresh.
+function settingsKeyEditor(family: string): HTMLElement {
+  const form = document.createElement("div");
+  form.className = "skey-editor";
+  const key = document.createElement("input");
+  key.type = "password";
+  key.className = "form-input";
+  key.placeholder = t("settings.keyPlaceholder");
+  key.autocomplete = "off";
+  key.spellcheck = false;
+  form.append(key);
+  let url: HTMLInputElement | null = null;
+  if (RELAY_BASE_URL_FAMILIES.has(family)) {
+    url = document.createElement("input");
+    url.type = "text";
+    url.className = "form-input";
+    url.placeholder = "https://api.example.com";
+    url.spellcheck = false;
+    void invoke<string | null>("get_base_url", { provider: family })
+      .then((v) => {
+        if (v && url) url.value = v;
+      })
+      .catch(() => {});
+    form.append(url);
+  }
+  const err = document.createElement("div");
+  err.className = "skey-error";
+  const row = document.createElement("div");
+  row.className = "skey-editor-actions";
+  const save = document.createElement("button");
+  save.type = "button";
+  save.className = "mini-btn primary";
+  save.textContent = t("settings.save");
+  save.addEventListener("click", () => {
+    const value = key.value.trim();
+    if (!value) {
+      err.textContent = t("settings.keyRequired");
+      return;
+    }
+    save.disabled = true;
+    void invoke("set_api_key", {
+      provider: family,
+      key: value,
+      baseUrl: url?.value.trim() || null,
+    })
+      .then(async () => {
+        skeyEditing.delete(family);
+        await refreshSettingsProviderKey(family);
+        renderSettingsProviderKeys();
+      })
+      .catch((e) => {
+        err.textContent = String(e);
+        save.disabled = false;
+      });
+  });
+  row.append(save);
+  form.append(row, err);
+  return form;
+}
+
+function settingsAccountRow(family: string, entry: AccountEntry, index: number): HTMLElement {
+  const row = document.createElement("div");
+  row.className = "skey-account";
+  const label = document.createElement("span");
+  label.className = "skey-acct-label";
+  label.textContent = entry.label || entry.email || entry.maskedKey;
+  const masked = document.createElement("span");
+  masked.className = "skey-acct-masked";
+  masked.textContent = entry.maskedKey;
+  const actions = document.createElement("span");
+  actions.className = "skey-account-actions";
+  if (entry.id) {
+    const view = document.createElement("button");
+    view.type = "button";
+    view.className = "mini-btn";
+    view.textContent = t("settings.kvReveal");
+    view.addEventListener("click", () => {
+      void revealSettingsKey(family, entry.id!, view, masked);
+    });
+    actions.append(view);
+  }
+  const rename = document.createElement("button");
+  rename.type = "button";
+  rename.className = "mini-btn";
+  rename.textContent = t("settings.acctRename");
+  rename.addEventListener("click", () => {
+    void appPrompt({
+      title: t("settings.acctRename"),
+      initial: entry.label,
+      confirmLabel: t("settings.save"),
+    }).then(async (next) => {
+      if (next == null || next === entry.label) return;
+      try {
+        await invoke("account_rename", { provider: family, index, label: next });
+      } catch (e) {
+        console.error("account rename failed:", e);
+      }
+      await refreshSettingsProviderKey(family);
+      renderSettingsProviderKeys();
+    });
+  });
+  const remove = document.createElement("button");
+  remove.type = "button";
+  remove.className = "mini-btn danger";
+  remove.textContent = t("settings.kvRemove");
+  remove.addEventListener("click", () => {
+    void appConfirm({
+      title: t("settings.acctRemoveConfirm", { name: entry.label || entry.maskedKey }),
+      message: t("settings.acctRemoveHint"),
+      confirmLabel: t("customize.acctDelete"),
+    }).then(async (ok) => {
+      if (!ok) return;
+      try {
+        await invoke("account_remove", { provider: family, index });
+      } catch (e) {
+        console.error("account remove failed:", e);
+      }
+      await refreshSettingsProviderKey(family);
+      renderSettingsProviderKeys();
+    });
+  });
+  actions.append(rename, remove);
+  row.append(label, masked, actions);
+  return row;
+}
+
+function settingsAccountEditor(family: string): HTMLElement {
+  const form = document.createElement("div");
+  form.className = "skey-editor skey-editor-account";
+  const label = document.createElement("input");
+  label.type = "text";
+  label.className = "form-input";
+  label.placeholder = t("settings.acctLabelPh");
+  label.spellcheck = false;
+  const key = document.createElement("input");
+  key.type = "password";
+  key.className = "form-input";
+  key.placeholder = t("settings.keyPlaceholder");
+  key.autocomplete = "off";
+  key.spellcheck = false;
+  form.append(label, key);
+  let url: HTMLInputElement | null = null;
+  if (RELAY_BASE_URL_FAMILIES.has(family)) {
+    url = document.createElement("input");
+    url.type = "text";
+    url.className = "form-input";
+    url.placeholder = "https://api.example.com";
+    url.spellcheck = false;
+    form.append(url);
+  }
+  const err = document.createElement("div");
+  err.className = "skey-error";
+  const row = document.createElement("div");
+  row.className = "skey-editor-actions";
+  const save = document.createElement("button");
+  save.type = "button";
+  save.className = "mini-btn primary";
+  save.textContent = t("settings.save");
+  save.addEventListener("click", () => {
+    const value = key.value.trim();
+    if (!value) {
+      err.textContent = t("settings.keyRequired");
+      return;
+    }
+    save.disabled = true;
+    void invoke("account_add", {
+      provider: family,
+      label: label.value.trim(),
+      apiKey: value,
+      baseUrl: url?.value.trim() || null,
+    })
+      .then(async () => {
+        skeyAddingAccount.delete(family);
+        await refreshSettingsProviderKey(family);
+        renderSettingsProviderKeys();
+      })
+      .catch((e) => {
+        err.textContent = String(e);
+        save.disabled = false;
+      });
+  });
+  row.append(save);
+  form.append(row, err);
+  return form;
+}
+
 function renderKeyvault(rows: KeyVaultRow[]): void {
   lastVaultRows = rows;
   const root = document.querySelector<HTMLElement>("#keyvault-rows");
@@ -9204,6 +10613,11 @@ function renderKeyvault(rows: KeyVaultRow[]): void {
 
     const info = document.createElement("div");
     info.className = "kv-info";
+    const icon = document.createElement("span");
+    icon.className = "kv-icon";
+    // Free-text service names resolve to a brand mark when one exists
+    // (tavily, firecrawl); everything else falls back to the key glyph.
+    icon.innerHTML = providerVisual(row.service.trim().toLowerCase())?.iconSvg ?? uiIcon("key");
     const service = document.createElement("span");
     service.className = "kv-service-badge";
     service.textContent = row.service;
@@ -9213,7 +10627,7 @@ function renderKeyvault(rows: KeyVaultRow[]): void {
     const masked = document.createElement("code");
     masked.className = "kv-masked";
     masked.textContent = row.masked;
-    info.append(service, label, masked);
+    info.append(icon, service, label, masked);
     if (row.note) {
       const note = document.createElement("span");
       note.className = "kv-note-text";
@@ -9359,6 +10773,7 @@ function applyLocale(): void {
 
 async function initSettings(): Promise<void> {
   config = await invoke<Config>("get_config");
+  markConfigLoaded();
   config.localShortcuts = config.localShortcuts ?? {};
   pruneEmptyCardGroups();
   config.locale = normalizeLocalePref(config.locale);
@@ -9366,6 +10781,9 @@ async function initSettings(): Promise<void> {
   // initial values from it) but before applyLocale, so applyStaticI18n
   // translates the new DOM in the same pass.
   if (IS_PANEL_FORM) initPanelForm();
+  document.querySelector<HTMLButtonElement>("#settings-save-all")?.addEventListener("click", () => {
+    void applySettingsAndReload();
+  });
   try {
     const sys = await invoke<string>("system_ui_locale");
     setSystemLocale(sys === "zh" || sys === "ru" ? sys : "en");
@@ -9448,6 +10866,90 @@ async function initSettings(): Promise<void> {
     void patchConfig({ showTotalSpend: showSpend.checked }).then(renderAll);
   });
 
+  // Spend-bolt tiers: built-in ladder or three custom daily thresholds (the
+  // inputs hold M tokens; config stores raw token counts).
+  const tierMode = document.querySelector<HTMLSelectElement>("#spend-tier-mode")!;
+  const tierCustom = document.querySelector<HTMLElement>("#spend-tier-custom")!;
+  const tierInputs = {
+    medium: document.querySelector<HTMLInputElement>("#spend-tier-medium")!,
+    high: document.querySelector<HTMLInputElement>("#spend-tier-high")!,
+    max: document.querySelector<HTMLInputElement>("#spend-tier-max")!,
+  };
+  const paintTierInputs = () => {
+    const current = config.spendIconTiers ?? { medium: 100_000_000, high: 250_000_000, max: 500_000_000 };
+    tierInputs.medium.value = String(Math.round(current.medium / 1_000_000));
+    tierInputs.high.value = String(Math.round(current.high / 1_000_000));
+    tierInputs.max.value = String(Math.round(current.max / 1_000_000));
+    tierCustom.hidden = tierMode.value !== "custom";
+  };
+  const saveTierInputs = () => {
+    const medium = Math.max(1, Number(tierInputs.medium.value) || 100) * 1_000_000;
+    const high = Math.max(medium, Number(tierInputs.high.value) || 250) * 1_000_000;
+    const max = Math.max(high, Number(tierInputs.max.value) || 500) * 1_000_000;
+    config.spendIconTiers = { medium, high, max };
+    void patchConfig({ spendIconTiers: config.spendIconTiers }).then(renderAll);
+  };
+  tierMode.value = config.spendIconTiers ? "custom" : "builtin";
+  paintTierInputs();
+  tierMode.addEventListener("change", () => {
+    if (tierMode.value === "builtin") {
+      config.spendIconTiers = null;
+      void patchConfig({ spendIconTiers: null }).then(renderAll);
+      paintTierInputs();
+    } else {
+      paintTierInputs();
+      saveTierInputs();
+    }
+  });
+  for (const input of Object.values(tierInputs)) {
+    input.addEventListener("change", () => {
+      if (tierMode.value === "custom") saveTierInputs();
+    });
+  }
+
+  // Experimental features: off = entries don't render; enabling asks first
+  // (unstable/compat risk); disabling hot-unplugs back to native.
+  const experimental = document.querySelector<HTMLInputElement>("#experimental-features")!;
+  experimental.checked = config.experimentalFeatures === true;
+  experimental.addEventListener("change", () => {
+    if (experimental.checked) {
+      void appConfirm({
+        title: t("settings.experimental"),
+        message: t("settings.experimentalWarn"),
+        confirmLabel: t("dialog.ok"),
+      }).then((ok) => {
+        if (!ok) {
+          experimental.checked = false;
+          return;
+        }
+        config.experimentalFeatures = true;
+        void patchConfig({ experimentalFeatures: true });
+        applyExperimental();
+      });
+    } else {
+      config.experimentalFeatures = false;
+      void patchConfig({ experimentalFeatures: false });
+      applyExperimental();
+    }
+  });
+  applyExperimental();
+
+  const catFull = document.querySelector<HTMLInputElement>("#overview-cat-full")!;
+  catFull.checked = config.overviewCatFull === true;
+  catFull.addEventListener("change", () => {
+    config.overviewCatFull = catFull.checked;
+    void patchConfig({ overviewCatFull: catFull.checked }).then(renderAll);
+  });
+
+  // Qoder CN daily check-in: off by default — it claims benefits with the
+  // user's credential, so it only runs when explicitly enabled here.
+  const qoderCheckin = document.querySelector<HTMLInputElement>("#qoder-checkin")!;
+  qoderCheckin.checked = config.qoderCheckin === true;
+  qoderCheckin.addEventListener("change", () => {
+    config.qoderCheckin = qoderCheckin.checked;
+    void patchConfig({ qoderCheckin: qoderCheckin.checked });
+  });
+
   applyAppearance();
   const appearance = document.querySelector<HTMLSelectElement>("#appearance")!;
   appearance.value = config.appearance;
@@ -9508,6 +11010,28 @@ async function initSettings(): Promise<void> {
     void patchConfig({ reduceAnimations: reduceAnim.checked }).then(applyReduceMotion);
   });
   applyReduceMotion();
+
+  const startupAnim = document.querySelector<HTMLInputElement>("#startup-anim")!;
+  startupAnim.checked = config.startupAnimation !== false;
+  startupAnim.addEventListener("change", () => {
+    void patchConfig({ startupAnimation: startupAnim.checked });
+  });
+  document.querySelector("#splash-replay")?.addEventListener("click", () => {
+    // Close the settings panel so the splash is actually visible. Mirrors
+    // setSettings(false) — that helper is scoped to the boot wiring below.
+    document.body.classList.remove("settings-open");
+    document.querySelector("#settings-btn")?.classList.remove("active");
+    if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
+    playSplash();
+  });
+
+  const jumpAnimation = document.querySelector<HTMLSelectElement>("#jump-animation")!;
+  jumpAnimation.value = config.jumpAnimation === "instant" ? "instant" : "smooth";
+  pendingJumpAnimation = null;
+  jumpAnimation.addEventListener("change", () => {
+    pendingJumpAnimation = jumpAnimation.value === "instant" ? "instant" : "smooth";
+    setSettingsDirty(true);
+  });
 
   const hideShare = document.querySelector<HTMLInputElement>("#hide-while-sharing")!;
   hideShare.checked = config.hideUsageWhileSharing === true;
@@ -9618,6 +11142,7 @@ async function initSettings(): Promise<void> {
     if (btn.dataset.kvVaultAction === "set") void setVaultPassword();
     else if (btn.dataset.kvVaultAction === "unlock") void unlockVault();
     else if (btn.dataset.kvVaultAction === "lock") void lockVault();
+    else if (btn.dataset.kvVaultAction === "change") void changeVaultPassword();
   });
 
 }
@@ -9661,7 +11186,7 @@ async function resetAllSettings(): Promise<void> {
     spendMetric: "cost",
     spendGrouping: "tool",
     showUsed: false,
-    showTrend: false,
+    showTrend: true,
     resetExact: false,
     timeFormat: "auto",
     layout: null,
@@ -9674,6 +11199,7 @@ async function resetAllSettings(): Promise<void> {
     proxy: { enabled: false, url: "" },
     showTotalSpend: true,
     reduceAnimations: false,
+    jumpAnimation: "smooth",
     hideUsageWhileSharing: false,
     locale: "auto",
     windowForm: "floating",
@@ -9726,6 +11252,7 @@ function syncSettingsControls(): void {
   setCheck("#density", config.density === "compact");
   setCheck("#glass", config.glassEffects !== false);
   setCheck("#reduce-anim", config.reduceAnimations === true);
+  setSelect("#jump-animation", config.jumpAnimation === "instant" ? "instant" : "smooth");
   setNum("#shortcut", config.shortcut);
   setNum("#category-shortcut", config.categoryShortcut || "Shift+1");
   renderLocalShortcutSettings();
@@ -9863,7 +11390,14 @@ function buildPanelShell(): void {
   const h1 = document.createElement("h1");
   h1.dataset.i18n = "settings.title";
   h1.textContent = t("settings.title");
-  head.append(h1);
+  const save = document.createElement("button");
+  save.type = "button";
+  save.className = "mini-btn settings-save-all";
+  save.dataset.i18n = "settings.save";
+  save.textContent = t("settings.save");
+  save.disabled = true;
+  save.addEventListener("click", () => void applySettingsAndReload());
+  head.append(h1, save);
   const scroll = document.createElement("div");
   scroll.id = "panel-scroll";
   main.append(head, scroll);
@@ -9880,6 +11414,59 @@ function buildPanelShell(): void {
   });
   scroll.append(settingsView, authView);
 
+  // Magpie-style top directory bar: one pill per settings category, shared
+  // vocabulary with the floating form's tabs. Switching pages only hides
+  // blocks — every control stays mounted so its wiring never re-runs.
+  const PANEL_PAGES: ReadonlyArray<readonly [string, string, string, UiIconName]> = [
+    ["general", "st-general", "settings.tabGeneral", "gear"],
+    ["usage", "st-keyvault", "settings.tabUsage", "key"],
+    ["shortcuts", "st-shortcuts", "settings.tabShortcuts", "keyboard"],
+    ["notifications", "st-notifications", "settings.tabNotifications", "bell"],
+    ["privacy", "st-privacy", "settings.tabPrivacy", "shield"],
+    ["network", "st-network", "settings.tabNetwork", "globe"],
+    ["about", "st-about", "settings.tabAbout", "info"],
+  ];
+  const panelTabs = document.createElement("div");
+  panelTabs.className = "settings-tabs panel-tabs";
+  panelTabs.setAttribute("role", "tablist");
+  panelTabs.setAttribute("aria-label", t("settings.title"));
+  const activatePanelPage = (pageId: string) => {
+    for (const [id, blockId] of PANEL_PAGES) {
+      const block = document.querySelector<HTMLElement>(`#${blockId}`);
+      if (block) block.hidden = id !== pageId;
+    }
+    panelTabs.querySelectorAll<HTMLButtonElement>("button").forEach((button) => {
+      const active = button.dataset.settingsTab === pageId;
+      button.classList.toggle("active", active);
+      button.setAttribute("aria-selected", String(active));
+    });
+  };
+  for (const [id, , labelKey, iconName] of PANEL_PAGES) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.dataset.settingsTab = id;
+    button.setAttribute("role", "tab");
+    const label = document.createElement("span");
+    label.dataset.i18n = labelKey;
+    label.textContent = t(labelKey);
+    button.innerHTML = uiIcon(iconName);
+    button.append(label);
+    button.addEventListener("click", () => activatePanelPage(id));
+    panelTabs.append(button);
+  }
+  settingsView.append(panelTabs);
+
+  // Rows/notes moved from the popover markup (each window owns its own
+  // document — the floating settings keeps its copy).
+  const moveToCard = (card: HTMLElement, ...selectors: string[]) => {
+    for (const selector of selectors) {
+      const el = document.querySelector<HTMLElement>(selector);
+      if (!el) continue;
+      const row = el.closest<HTMLElement>(".setting-row") ?? el;
+      card.append(row);
+    }
+  };
+
   // --- General: re-parented popover rows + the new dual-form controls ----
   const general = panelBlock("st-general", "settings.general");
   const generalCard = general.body;
@@ -9893,6 +11480,7 @@ function buildPanelShell(): void {
   moveRow("density");
   moveRow("glass");
   moveRow("reduce-anim");
+  moveRow("jump-animation");
   moveRow("interval");
   moveRow("pinned");
   moveRow("timeformat");
@@ -9904,7 +11492,7 @@ function buildPanelShell(): void {
   shortcutEntry.addEventListener("click", () => {
     document
       .querySelector("#st-shortcuts")
-      ?.scrollIntoView({ behavior: reduceMotion() ? "auto" : "smooth" });
+      ?.scrollIntoView({ behavior: reduceMotion() ? "auto" : scrollBehavior() });
   });
   generalCard.append(panelRow("settings.shortcutManage", shortcutEntry));
   moveRow("autostart");
@@ -9952,16 +11540,35 @@ function buildPanelShell(): void {
   generalCard.append(panelRow("settings.windowForm", formGroup));
   settingsView.append(general.section);
 
-  // --- API key vault: the popover's vault UI, moved in whole -------------
-  const keyvault = panelBlock("st-keyvault", "settings.keyvault");
+  // --- Keys page: provider credentials + the MCP/search vault ------------
+  // Two cards under one page id so the tab toggle keeps working: the
+  // provider-keys card covers every API-key provider (the same catalog set
+  // Customize manages), the second carries the popover's generic vault UI
+  // for MCP/search keys.
+  const keyPage = document.createElement("div");
+  keyPage.id = "st-keyvault";
+  const providerKeys = panelBlock("st-kv-providers", "settings.keysProviders");
+  const pkPad = document.createElement("div");
+  pkPad.className = "st-pad";
+  const pkNote = document.createElement("p");
+  pkNote.className = "settings-note st-kv-note";
+  pkNote.dataset.i18n = "settings.keysProvidersHint";
+  pkNote.textContent = t("settings.keysProvidersHint");
+  const pkRows = document.createElement("div");
+  pkRows.id = "settings-keys-rows";
+  pkRows.className = "skey-list";
+  pkPad.append(pkNote, pkRows);
+  providerKeys.body.append(pkPad);
+  const mcpKeys = panelBlock("st-kv-mcp", "settings.keysMcp");
   const kvPad = document.createElement("div");
   kvPad.className = "st-pad";
   for (const selector of ["#kv-vault-bar", "#keyvault-rows", ".kv-add-row", ".kv-hint"]) {
     const el = document.querySelector<HTMLElement>(selector);
     if (el) kvPad.append(el);
   }
-  keyvault.body.append(kvPad);
-  settingsView.append(keyvault.section);
+  mcpKeys.body.append(kvPad);
+  keyPage.append(providerKeys.section, mcpKeys.section);
+  settingsView.append(keyPage);
 
   // --- Shortcuts: wake + category + local bindings, moved in whole -------
   const shortcuts = panelBlock("st-shortcuts", "settings.shortcutManage");
@@ -10013,6 +11620,49 @@ function buildPanelShell(): void {
   about.body.append(versionValue);
   settingsView.append(about.section);
 
+  // --- Notifications / Privacy / Network: re-parented 1:1 from the popover
+  // markup, so the panel window carries the same seven pages as the
+  // floating sheet instead of a subset.
+  const notifications = panelBlock("st-notifications", "settings.notifications");
+  moveToCard(
+    notifications.body,
+    '[data-i18n="settings.notifyNote"]',
+    "#notify-almost",
+    "#notify-close",
+    "#notify-runout",
+    "#notify-resetsoon",
+  );
+  settingsView.append(notifications.section);
+
+  const privacy = panelBlock("st-privacy", "settings.privacy");
+  moveToCard(
+    privacy.body,
+    '[data-i18n="settings.privacyNote"]',
+    "#telemetry",
+    "#hide-while-sharing",
+    "#show-trend",
+  );
+  settingsView.append(privacy.section);
+
+  const network = panelBlock("st-network", "settings.network");
+  moveToCard(network.body, "#proxy-enabled", "#proxy-url", '[data-i18n="settings.networkNote"]');
+  settingsView.append(network.section);
+
+  // About also takes the entries the floating sheet keeps outside its
+  // groups: changelog + reset.
+  moveToCard(about.body, "#changelog-btn", "#reset-all-settings");
+
+  // General rows that joined the floating sheet after this shell was first
+  // written — keep the two forms at parity.
+  moveRow("startup-anim");
+  moveRow("show-total-spend");
+  moveRow("spend-tier-mode");
+  moveRow("spend-tier-custom");
+  moveRow("experimental-features");
+  moveRow("overview-cat-full");
+
+  activatePanelPage("general");
+
   shell.append(nav, main);
   document.body.appendChild(shell);
 }
@@ -10022,6 +11672,7 @@ function initPanelForm(): void {
   // No accordion gating here — the vault is visible as soon as the panel
   // opens (the popover only loads it while its settings page is open).
   void loadKeyvault();
+  void loadSettingsProviderKeys();
   void getVersion().then((v) => {
     const el = document.querySelector("#st-version");
     if (el) el.textContent = `v${v} · build ${__BUILD_STAMP__}`;
@@ -10491,11 +12142,124 @@ async function authRemoveAccount(family: string, index: number): Promise<void> {
 // Boot
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// Startup splash — plays the first time the popover is shown after each OS
+// boot (config.startupAnimation off = never). The gate lives in config's
+// lastStartupBootId; launching hidden to the tray must not burn the one
+// showing, so the trigger is "popover shown", not "webview loaded".
+// ---------------------------------------------------------------------------
+
+let splashGateChecked = false;
+let splashTimer: number | undefined;
+let splashTl: ReturnType<typeof gsap.timeline> | undefined;
+let markConfigLoaded: () => void = () => {};
+const configLoaded = new Promise<void>((resolve) => {
+  markConfigLoaded = resolve;
+});
+
+function hideSplash(): void {
+  window.clearTimeout(splashTimer);
+  splashTl?.pause();
+  document.querySelector("#splash")?.classList.add("hide");
+}
+
+function playSplash(): void {
+  const splash = document.querySelector<HTMLElement>("#splash");
+  if (!splash) return;
+  window.clearTimeout(splashTimer);
+  splashTl?.kill();
+  splash.classList.remove("hide");
+
+  // Brand beat: tile settles in, the quota arc draws itself, the needle
+  // sweeps to its reading, ripples breathe out, then the wordmark rises.
+  const tl = gsap.timeline({ onComplete: hideSplash });
+  splashTl = tl;
+  tl.fromTo(
+    ".sa-mark",
+    { scale: 0.8, opacity: 0, transformOrigin: "50% 50%" },
+    { scale: 1, opacity: 1, duration: 0.6, ease: "power3.out" },
+    0,
+  )
+    .fromTo(
+      "#sa-arc",
+      { strokeDashoffset: 360 },
+      { strokeDashoffset: 145, duration: 1.0, ease: "power2.inOut" },
+      0.18,
+    )
+    .fromTo(
+      "#sa-needle",
+      { rotation: -70, opacity: 0, svgOrigin: "256 256" },
+      { rotation: 0, opacity: 1, duration: 0.7, ease: "power2.out" },
+      0.5,
+    )
+    .fromTo(
+      "#sa-hub",
+      { scale: 0, svgOrigin: "256 256" },
+      { scale: 1, duration: 0.5, ease: "back.out(2.5)" },
+      0.62,
+    )
+    .fromTo(
+      ".sa-rip",
+      { scale: 0.7, opacity: 0.55 },
+      { scale: 1.7, opacity: 0, duration: 1.2, ease: "power2.out", stagger: 0.25 },
+      0.55,
+    )
+    .fromTo(
+      ".sa-word span",
+      { y: 16, opacity: 0 },
+      { y: 0, opacity: 1, duration: 0.55, ease: "power3.out", stagger: 0.06 },
+      0.78,
+    )
+    .fromTo(
+      ".sa-sub",
+      { y: 8, opacity: 0 },
+      { y: 0, opacity: 1, duration: 0.5, ease: "power2.out" },
+      1.05,
+    )
+    .to(
+      ".sa-col",
+      { scale: 1.05, opacity: 0, duration: 0.45, ease: "power2.in" },
+      2.45,
+    );
+
+  if (reduceMotion()) {
+    // No motion, but the composed frame still shows: park just before the
+    // exit tween and let the normal dismiss path run.
+    tl.pause();
+    tl.progress(2.45 / tl.duration());
+    splashTimer = window.setTimeout(hideSplash, 1200);
+    return;
+  }
+  // Backstop for a timeline stalled by boot-time tab throttling.
+  splashTimer = window.setTimeout(hideSplash, 4500);
+}
+
+async function maybePlayStartupAnimation(): Promise<void> {
+  if (splashGateChecked || IS_PANEL_FORM) return;
+  // popover-shown can race the config load — the gate value lives in config.
+  await configLoaded;
+  if (config.startupAnimation === false) return;
+  splashGateChecked = true;
+  const bootId = await invoke<number | null>("get_boot_id").catch(() => null);
+  // boot_id is derived (wall now − uptime) and truncated to whole seconds on
+  // both ends, so an NTP step right after boot jitters it by ~1s. Compare with
+  // a tolerance or the splash replays inside the same boot session.
+  const seenBoot = config.lastStartupBootId;
+  if (bootId != null && seenBoot != null && Math.abs(bootId - seenBoot) <= 60) return;
+  if (bootId != null) {
+    config.lastStartupBootId = bootId;
+    void patchConfig({ lastStartupBootId: bootId });
+  }
+  playSplash();
+}
+
 window.addEventListener("DOMContentLoaded", () => {
   const appLogo = document.querySelector<HTMLElement>("#app-logo")!;
   appLogo.innerHTML = `<img src="${paneLogo}" alt="Pane" />`;
+  document.querySelector("#splash")?.addEventListener("click", hideSplash);
   document.querySelector<HTMLElement>("#skin-btn")!.innerHTML = uiIcon("palette", "Open skin market");
   applySkin();
+  setupFloatingSettingsTabs();
   // Party mode, the easy way: triple-click the logo. (The Konami code
   // still works, for the culture.)
   let logoClicks = 0;
@@ -10593,12 +12357,12 @@ window.addEventListener("DOMContentLoaded", () => {
       e.preventDefault();
       void refresh(true, false, true);
     }
-    // Ctrl+S toggles Settings — same semantics as the ⚙ button (and must
-    // NOT trigger the webview "save page" dialog).
+    // Ctrl+S opens Settings — same semantics as the ⚙ button: the standalone
+    // panel window (and must NOT trigger the webview "save page" dialog).
     if (shortcutMatches(e, localShortcut("settings")) && !isTypingTarget(document.activeElement)) {
       e.preventDefault();
       setDrawer(false);
-      setSettings(!document.body.classList.contains("settings-open"));
+      void invoke("open_panel_window").catch(() => {});
     }
     // Ctrl+Shift+P opens the big panel window (dual-form PoC).
     if (
@@ -10654,25 +12418,36 @@ window.addEventListener("DOMContentLoaded", () => {
   const setSettings = (open: boolean) => {
     document.body.classList.toggle("settings-open", open);
     document.querySelector("#settings-btn")?.classList.toggle("active", open);
+    if (!open && document.activeElement instanceof HTMLElement) {
+      // Native <select> popups can outlive the sliding panel in WebView2;
+      // blur the control before hiding the surface so it cannot remain over
+      // the dashboard or steal the next click.
+      document.activeElement.blur();
+    }
     if (open) void loadKeyvault();
   };
+  // Settings is one system: the popover ⚙ opens the same standalone panel
+  // window the tray's 设置 entry opens — no in-popover sheet anymore.
   document.querySelector("#settings-btn")!.addEventListener("click", () => {
     setDrawer(false);
-    setSettings(!document.body.classList.contains("settings-open"));
+    void invoke("open_panel_window").catch(() => {});
   });
   document.querySelector("#settings-close")!.addEventListener("click", () => setSettings(false));
   document.querySelector("#changelog-btn")!.addEventListener("click", () => {
     setSettings(false);
     showChangelogDialog(t("dialog.changelog"), parseChangelog());
   });
-  document.querySelectorAll<HTMLElement>(".acc-head").forEach((head) => {
-    head.addEventListener("click", () => head.parentElement!.classList.toggle("open"));
+  // Magpie-style settings: sections are static caption + card, always
+  // expanded — the top pill tabs switch pages, nothing folds anymore.
+  document.querySelectorAll<HTMLElement>(".acc-group").forEach((group) => {
+    group.classList.add("open");
   });
   document.querySelector("#customize-btn")!.addEventListener("click", () => {
     setSettings(false);
     setDrawer(!customizeOpen);
   });
   document.querySelector("#skin-btn")!.addEventListener("click", () => {
+    if (config.experimentalFeatures !== true) return;
     setSettings(false);
     skinMarketOpen = true;
     skinPreviewId = null;
@@ -10721,6 +12496,28 @@ window.addEventListener("DOMContentLoaded", () => {
 
   const providersEl = document.querySelector<HTMLElement>("#providers")!;
   setupOverviewGroupDrag(providersEl);
+  // WebView2 can swallow wheel input before it reaches a nested flex
+  // scroller. Capture at the window and hit-test the pointer instead, then
+  // move only the provider list. This also works when the pointer is over a
+  // card child whose own handler calls preventDefault().
+  window.addEventListener("wheel", (event) => {
+    if (!event.deltaY) return;
+    // Only reroute wheel events that actually land on the card list. When an
+    // overlay surface (customize drawer, skin market, settings, menus) is
+    // open it covers #providers' rect; without this check the capture below
+    // scrolled the hidden list and ate the event, leaving every overlay a
+    // dead, unscrollable page.
+    const hit = event.target as HTMLElement | null;
+    if (!hit || !providersEl.contains(hit)) return;
+    const rect = providersEl.getBoundingClientRect();
+    if (event.clientX < rect.left || event.clientX > rect.right ||
+        event.clientY < rect.top || event.clientY > rect.bottom) return;
+    const max = providersEl.scrollHeight - providersEl.clientHeight;
+    if (max <= 0) return;
+    const before = providersEl.scrollTop;
+    providersEl.scrollTop = Math.max(0, Math.min(max, before + event.deltaY));
+    if (providersEl.scrollTop !== before) event.preventDefault();
+  }, { passive: false, capture: true });
   // Group banners are focusable (role="button") — Enter/Space folds them
   // like a click would.
   providersEl.addEventListener("keydown", (e) => {
@@ -10757,6 +12554,28 @@ window.addEventListener("DOMContentLoaded", () => {
       renderAll();
       return;
     }
+    // Total Spend header: the green arrow shows up only while a version is
+    // announced; clicking it pushes the update right away (the popover-open
+    // check and the footer entry keep working unchanged). Progress state
+    // lives at module level so card re-renders mid-download keep the ring.
+    const pushBtn = (e.target as Element).closest<HTMLElement>("[data-update-push]");
+    if (pushBtn) {
+      if (updatePushing) return;
+      updatePushing = true;
+      updatePct = null;
+      updateSeen = 0;
+      syncPushProgress();
+      // On success the app restarts into the new version; only the failure
+      // path needs in-place feedback.
+      void invoke("install_update").catch((err) => {
+        updatePushing = false;
+        updatePct = null;
+        syncPushProgress();
+        const status = document.querySelector("#status");
+        if (status) status.textContent = t("footer.updateFailed", { err: String(err) });
+      });
+      return;
+    }
   });
   providersEl.addEventListener("contextmenu", (e) => {
     if ((e.target as Element).closest?.(".donut-wrap")) {
@@ -10771,7 +12590,15 @@ window.addEventListener("DOMContentLoaded", () => {
     );
     if (ovCell?.dataset.jumpProvider) {
       e.preventDefault();
-      openGroupMenu(ovCell.dataset.jumpProvider, ovCell);
+      // Anchor at the cursor: the tile-side anchoring was designed for the ⚙
+      // button on a wide layout — in the popover's ~285px CSS viewport it
+      // flings the ~200px menu to the opposite edge of the window.
+      openGroupMenu(ovCell.dataset.jumpProvider, ovCell, true, {
+        x: e.clientX,
+        y: e.clientY,
+        atCursor: true,
+        target: e.target as Element,
+      });
       return;
     }
     // Right-click on a card = the group menu, same as the head's ⚙.
@@ -10885,9 +12712,16 @@ window.addEventListener("DOMContentLoaded", () => {
   providersEl.addEventListener("click", (e) => {
     const target = e.target as HTMLElement;
 
-    const overviewMove = target.closest<HTMLElement>("[data-overview-move]");
-    if (overviewMove) {
-      openGroupMenu(overviewMove.dataset.overviewMove!, overviewMove);
+    const overviewAcctFold = target.closest<HTMLElement>("[data-overview-acct-fold]");
+    if (overviewAcctFold) {
+      const family = overviewAcctFold.dataset.overviewAcctFold!;
+      const expanded = [...(config.overviewExpanded ?? [])];
+      const idx = expanded.indexOf(family);
+      if (idx >= 0) expanded.splice(idx, 1);
+      else expanded.push(family);
+      config.overviewExpanded = expanded;
+      void patchConfig({ overviewExpanded: expanded });
+      renderAll();
       return;
     }
 
@@ -10906,6 +12740,13 @@ window.addEventListener("DOMContentLoaded", () => {
     const groupBtn = target.closest<HTMLElement>("[data-card-group-menu]");
     if (groupBtn) {
       openGroupMenu(groupBtn.dataset.cardGroupMenu!, groupBtn, false);
+      return;
+    }
+    const pinBtn = target.closest<HTMLElement>("[data-card-pin]");
+    if (pinBtn) {
+      const raw = pinBtn.dataset.cardPin ?? "";
+      const splitAt = raw.indexOf("|");
+      if (splitAt > 0) setPinnedAccount(raw.slice(0, splitAt), raw.slice(splitAt + 1));
       return;
     }
     const acctTab = target.closest<HTMLElement>("[data-card-account]");
@@ -10941,8 +12782,9 @@ window.addEventListener("DOMContentLoaded", () => {
     if (cardFold) {
       const id = cardFold.dataset.cardFold!;
       const L = providerLayout(id);
-      const auto = isCardFoldCandidate(id);
-      L.collapsed = !(L.collapsed ?? auto);
+      // Flip whatever the card currently shows — the default is expanded,
+      // so the first click folds.
+      L.collapsed = !isCardCollapsed(id);
       saveLayout(false);
       renderAll();
       return;
@@ -10968,6 +12810,11 @@ window.addEventListener("DOMContentLoaded", () => {
     if (ovTab) {
       const next = ovTab.dataset.overviewTab;
       if (next === "5h" || next === "week" || next === "month") switchOverviewTab(next);
+      return;
+    }
+    const ovCatMore = target.closest<HTMLElement>("[data-overview-cat-more]");
+    if (ovCatMore) {
+      openGroupManagementPanel();
       return;
     }
     const ovCat = target.closest<HTMLElement>("[data-overview-cat]");
@@ -11048,12 +12895,7 @@ window.addEventListener("DOMContentLoaded", () => {
     if (jump) {
       const pid = jump.dataset.jumpProvider;
       if (pid) {
-        const card = document.querySelector<HTMLElement>(`article[data-provider="${CSS.escape(pid)}"]`);
-        if (card) {
-          card.scrollIntoView({ behavior: "smooth", block: "start" });
-          card.classList.add("card-highlight");
-          setTimeout(() => card.classList.remove("card-highlight"), 1200);
-        }
+        jumpToProviderCard(pid);
       }
       return;
     }
@@ -11151,6 +12993,21 @@ window.addEventListener("DOMContentLoaded", () => {
         void patchConfig({ resetExact: config.resetExact });
       }
       renderAll();
+      return;
+    }
+    // Folded card: clicking anywhere outside its controls (fold chevron,
+    // refresh, links… all handled above) opens the detail — expand, then
+    // center + highlight it like an overview jump.
+    const foldedCard = target.closest<HTMLElement>("article.provider[data-provider]");
+    if (foldedCard) {
+      const pid = foldedCard.dataset.provider!;
+      if (isCardCollapsed(pid)) {
+        const L = providerLayout(pid);
+        L.collapsed = false;
+        saveLayout(false);
+        renderAll();
+        requestAnimationFrame(() => jumpToProviderCard(pid));
+      }
     }
   });
 
@@ -11174,10 +13031,19 @@ window.addEventListener("DOMContentLoaded", () => {
     if (hovered && (!to || !hovered.contains(to))) tip.hidden = true;
   });
   let scrollRaf = 0;
+  let scrollSaveTimer: number | undefined;
   providersEl.addEventListener("scroll", () => {
     tip.hidden = true;
     cancelAnimationFrame(scrollRaf);
     scrollRaf = requestAnimationFrame(updateTrailActive);
+    // Dashboard memory: the scroll offset persists (debounced) so a
+    // re-summoned popover lands on the same panel — spend card vs quota
+    // overview — instead of snapping back to the top.
+    window.clearTimeout(scrollSaveTimer);
+    scrollSaveTimer = window.setTimeout(() => {
+      config.mainScrollTop = providersEl.scrollTop;
+      void patchConfig({ mainScrollTop: providersEl.scrollTop });
+    }, 400);
   });
 
   document.querySelector("#trail")!.addEventListener("click", (e) => {
@@ -11190,14 +13056,26 @@ window.addEventListener("DOMContentLoaded", () => {
     const idx = entry.indices[entry.cursor % entry.indices.length];
     entry.cursor = (entry.cursor + 1) % entry.indices.length;
     trailCursorMemory.set(entry.key, entry.cursor);
-    trailCards()[idx]?.scrollIntoView({ behavior: reduceMotion() ? "auto" : "smooth", block: "start" });
+    trailCards()[idx]?.scrollIntoView({ behavior: reduceMotion() ? "auto" : scrollBehavior(), block: "start" });
   });
 
   // The 4-hourly background checker feeds the same footer button.
   void listen<string>("update-available", (e) => {
     updateVersion = e.payload;
+    renderIfVisible();
     renderBuildInfo();
     maybePromptUpdate(e.payload);
+  });
+
+  // Byte progress for the push indicator: the green ring fills as chunks
+  // arrive; a card re-render reads the same module state.
+  void listen<{ chunk: number; total: number | null }>("update-progress", (e) => {
+    if (!updatePushing) return;
+    updateSeen += e.payload.chunk;
+    updatePct = e.payload.total
+      ? Math.min(100, Math.round((updateSeen / e.payload.total) * 100))
+      : null;
+    syncPushProgress();
   });
 
   void listen("tray-strip-restore", () => {
@@ -11235,6 +13113,7 @@ window.addEventListener("DOMContentLoaded", () => {
 
   void listen("popover-shown", () => {
     void checkForUpdate();
+    void maybePlayStartupAnimation();
     // Always reopen on the main page, at the top — leftover Customize/
     // Settings panels, a stale confirm dialog, or a stale scroll position
     // from the previous visit feel like the app is stuck mid-page.
@@ -11256,7 +13135,15 @@ window.addEventListener("DOMContentLoaded", () => {
     } else if (lastSnapshots.length) {
       renderAll();
     }
-    providersEl.scrollTop = 0;
+    // Land where the user left off: the persisted scroll offset decides
+    // whether the spend card or the quota overview is in view. Fold states
+    // (overview / spend) already persist in layout, so both halves of the
+    // "same page as last time" contract hold across ESC and restarts.
+    // Deferred one frame so the freshly rendered list has its height.
+    const rememberedScroll = config.mainScrollTop ?? 0;
+    requestAnimationFrame(() => {
+      providersEl.scrollTop = rememberedScroll;
+    });
     rebuildTrail();
     updateTrailActive();
     if (lastSnapshots.length && !customizeOpen) playReveal();
@@ -11270,6 +13157,9 @@ window.addEventListener("DOMContentLoaded", () => {
     void refresh();
   });
   void initSettings().then(() => {
+    // Capability probe runs in both window forms: overview jumps and trail
+    // scrolls live in the popover, but the settings panel scrolls too.
+    probeSmoothScroll();
     if (IS_PANEL_FORM) {
       // Settings-only surface: the backend auto-refresh loop already fetches
       // and broadcasts usage-updated — no boot fetch, no refresh timer, no
@@ -11279,6 +13169,14 @@ window.addEventListener("DOMContentLoaded", () => {
     scheduleAutoRefresh();
     void paintCachedSnapshots();
     void refresh(true);
+    // Manual launch with the window already visible: popover-shown never
+    // fires, so the splash gate runs here too.
+    void getCurrentWebviewWindow()
+      .isVisible()
+      .then((visible) => {
+        if (visible) void maybePlayStartupAnimation();
+      })
+      .catch(() => {});
     // Queued, not shown: the window is usually still hidden in the tray at
     // startup — the first popover-shown presents it. Runs after the config
     // load so lastSeenVersion is the real stored value, not the default.
