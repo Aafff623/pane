@@ -12,6 +12,7 @@ import {
 } from "./providerCatalog";
 import { PEAK_RULES, isProviderInPeak, type PeakRule } from "./peakHours";
 import { providerVisual } from "./providerVisuals";
+import { MECHANISMS } from "./providerMechanisms";
 import { uiIcon, type UiIconName } from "./uiIcons";
 import {
   applyStaticI18n,
@@ -4289,20 +4290,26 @@ function appPrompt(opts: {
 function openProviderHelp(fam: string) {
   const def = providerDefinition(fam);
   const keyUrl = getApiKeyLink(fam);
-  const oauth = def?.supportsOAuth ?? false;
-  const keyable = (def?.supportsApiKey ?? false) || !!keyUrl;
-  const badge = keyable ? t("customize.helpBadgeKey") : oauth ? t("customize.helpBadgeOauth") : t("customize.helpBadgeLocal");
+  // What this provider actually accepts, from the curated table — a family
+  // that only reads a local sign-in must never be told to paste a key.
+  const methods = PROVIDER_CRED_INFO[fam]?.methods ?? (def?.supportsApiKey ? ["paste"] : ["local"]);
+  const badgeLabels: Record<CredMethod, string> = {
+    paste: t("customize.helpBadgeKey"),
+    oauth: t("customize.helpBadgeOauth"),
+    local: t("customize.helpBadgeLocal"),
+  };
+  const badge = methods.length ? methods.map((m) => badgeLabels[m]).join(" + ") : t("customize.helpBadgeNone");
   const steps: string[] = [];
-  if (keyable) {
+  if (methods.includes("paste")) {
     steps.push(t("customize.helpStepKey1"));
     steps.push(t("customize.helpStepKey2"));
-  } else if (oauth) {
-    steps.push(t("customize.helpStepOauth1"));
-  } else {
+  }
+  if (methods.includes("oauth")) steps.push(t("customize.helpStepOauth1"));
+  if (methods.includes("local")) {
     steps.push(t("customize.helpStepLocal1"));
     steps.push(t("customize.helpStepLocal2"));
   }
-  if (!keyable && !oauth && !(PROVIDER_LINKS[fam]?.length)) {
+  if (methods.length === 0 && !(PROVIDER_LINKS[fam]?.length)) {
     steps.push(t("customize.helpUnknown"));
   }
   steps.push(t("customize.helpStepTest"));
@@ -4311,12 +4318,56 @@ function openProviderHelp(fam: string) {
     links.unshift({ label: t("customize.helpOpenConsole"), url: keyUrl });
   }
 
+  // The mechanism table answers what the generic steps cannot: which local
+  // files this machine is read from, which env vars count, and where the
+  // numbers come from. Values stay technical (paths, env names, hosts) so a
+  // path can never drift into a translated string.
+  const mech = MECHANISMS[fam];
+  const live = lastSnapshots.find((s) => s.id === fam);
+  const provideText = methods.length
+    ? methods.map((m) => t(`customize.helpProvide_${m}`)).join("  +  ")
+    : t("customize.helpProvide_none");
+  const mechRows: [string, string][] = mech
+    ? [
+        [
+          t("customize.helpMechReads"),
+          mech.reads?.length ? mech.reads.join("  ·  ") : t("customize.helpMechReadsNone"),
+        ],
+        ...((mech.env?.length
+          ? [[t("customize.helpMechEnv"), mech.env.join("  ·  ")]]
+          : []) as [string, string][]),
+        [t("customize.helpMechProvide"), provideText],
+        [
+          t("customize.helpMechSource"),
+          mech.hosts?.length ? mech.hosts.join("  ·  ") : t("customize.helpMechSourceLocal"),
+        ],
+        ...((live?.metrics?.length
+          ? [
+              [
+                t("customize.helpMechLive"),
+                live.metrics
+                  .slice(0, 3)
+                  .map((m) => `${m.label}${m.used_percent != null ? ` ${Math.round(m.used_percent)}%` : ""}`)
+                  .join("  ·  "),
+              ],
+            ]
+          : []) as [string, string][]),
+      ]
+    : [];
+
   const overlay = document.createElement("div");
   overlay.id = "confirm-overlay";
   overlay.innerHTML = `
     <div id="confirm-box" role="dialog" aria-modal="true">
       <h3>${escapeHtml(providerDisplayName(fam))} · ${escapeHtml(t("customize.helpMenu"))}</h3>
       <div class="help-kind">${escapeHtml(badge)}</div>
+      ${
+        mechRows.length
+          ? `<dl class="help-mech">${mechRows
+              .map(([k, v]) => `<div><dt>${escapeHtml(k)}</dt><dd>${escapeHtml(v)}</dd></div>`)
+              .join("")}</dl>`
+          : ""
+      }
       <ol class="help-steps">${steps.map((s) => `<li>${escapeHtml(s)}</li>`).join("")}</ol>
       ${links.length ? `<div class="help-links">${links.map((l) => `<a href="${escapeHtml(l.url)}" target="_blank" rel="noreferrer">${escapeHtml(l.label)} ↗</a>`).join("")}</div>` : ""}
       <div id="confirm-actions">
@@ -5875,6 +5926,16 @@ const PROVIDER_CRED_INFO: Record<string, { auto: string; methods: CredMethod[] }
   clinepass: { auto: "customize.cred.clinepass", methods: ["paste"] },
   sensenova: { auto: "customize.cred.sensenova", methods: ["paste"] },
   apigoto: { auto: "customize.cred.apigoto", methods: ["paste"] },
+  "amp": { auto: "customize.cred.amp", methods: ["paste"] },
+  "bedrock": { auto: "customize.cred.bedrock", methods: ["local"] },
+  "chutes": { auto: "customize.cred.chutes", methods: ["paste"] },
+  "deepgram": { auto: "customize.cred.deepgram", methods: ["paste"] },
+  "kiro": { auto: "customize.cred.kiro", methods: ["local"] },
+  "openai-api": { auto: "customize.cred.openaiApi", methods: ["paste"] },
+  "poe": { auto: "customize.cred.poe", methods: ["paste"] },
+  "venice": { auto: "customize.cred.venice", methods: ["paste"] },
+  "vertexai": { auto: "customize.cred.vertexai", methods: ["local"] },
+  "warp": { auto: "customize.cred.warp", methods: ["paste"] },
   siliconflow: { auto: "customize.cred.siliconflow", methods: ["paste"] },
   novita: { auto: "customize.cred.novita", methods: ["paste"] },
   relaybalance: { auto: "customize.cred.relaybalance", methods: ["paste"] },
@@ -10246,11 +10307,19 @@ async function editKeyvaultNote(id: string): Promise<void> {
 const skeyEditing = new Set<string>();
 const skeyAddingAccount = new Set<string>();
 
-/// Families whose credential is a plain API key, from the catalog — the
-/// same set Customize manages. OAuth / local sign-in families are not
-/// key-manageable and stay out; that boundary is intentional, not a gap.
-function settingsKeyFamilies(): string[] {
-  return [...KEY_PROVIDERS].filter((family) => !config.removedProviders.includes(family));
+/// Every provider shown on the Keys & quota page: the whole catalog minus
+/// the MCP/search families (their keys live in the MCP card) and the
+/// One/New API relay (it has its own site manager). Key-capable families get
+/// key controls; OAuth / local sign-in families show their live sign-in
+/// state and the "?" explainer instead — the page states what each provider
+/// needs, even where there is no key to paste.
+const CRED_PAGE_SKIP = new Set(["bocha", "tavily", "firecrawl", "brave", "onenewapi"]);
+function settingsCredentialFamilies(): string[] {
+  return providerCatalog
+    .map((definition) => definition.familyId)
+    .filter(
+      (family) => !CRED_PAGE_SKIP.has(family) && !config.removedProviders.includes(family),
+    );
 }
 
 /// One provider's fresh credential facts (used by both the bulk load and
@@ -10277,7 +10346,7 @@ async function refreshSettingsProviderKey(family: string): Promise<void> {
 }
 
 async function loadSettingsProviderKeys(): Promise<void> {
-  await Promise.all(settingsKeyFamilies().map((family) => refreshSettingsProviderKey(family)));
+  await Promise.all(settingsCredentialFamilies().map((family) => refreshSettingsProviderKey(family)));
   renderSettingsProviderKeys();
 }
 
@@ -10286,7 +10355,7 @@ function renderSettingsProviderKeys(): void {
   if (!root) return;
   root.replaceChildren();
   // Configured rows first, then A–Z by display name.
-  const families = settingsKeyFamilies().sort((a, b) => {
+  const families = settingsCredentialFamilies().sort((a, b) => {
     const configured = (f: string) =>
       Number(
         credStatusCache.get(f)?.storedKey === true ||
@@ -10320,7 +10389,15 @@ function settingsKeyRow(family: string): HTMLElement {
   name.textContent = providerDisplayName(family);
   const state = document.createElement("span");
   state.className = `skey-state${configured ? " ok" : ""}`;
-  if (multi) {
+  // Families without a key are read from a local sign-in (Claude Code,
+  // Cursor, gcloud, …): their state is that sign-in, and there is nothing
+  // to paste — the "?" explains what the provider actually needs.
+  const keyable = providerDefinition(family)?.supportsApiKey ?? false;
+  if (!keyable) {
+    const local = status?.membership || status?.oauth || status?.localCli;
+    state.textContent = local || t("settings.credLocalMissing");
+    state.classList.toggle("ok", Boolean(local));
+  } else if (multi) {
     state.textContent = accounts.length
       ? t("settings.acctCount", { n: accounts.length })
       : t("settings.keyNotSet");
@@ -10333,6 +10410,17 @@ function settingsKeyRow(family: string): HTMLElement {
   actions.className = "skey-actions";
   head.append(icon, name, state, actions);
   item.append(head);
+
+  // "?" first: it sits left of the row's own buttons (查看 / 添加 …) and is
+  // the only control a non-key family has.
+  const help = document.createElement("button");
+  help.type = "button";
+  help.className = "mini-btn skey-help";
+  help.textContent = "?";
+  help.title = t("customize.helpMenu");
+  help.addEventListener("click", () => openProviderHelp(family));
+  actions.append(help);
+  if (!keyable) return item;
 
   const button = (label: string, extraClass = "") => {
     const b = document.createElement("button");

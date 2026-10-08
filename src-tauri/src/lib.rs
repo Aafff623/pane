@@ -308,6 +308,16 @@ const DEFAULT_DISABLED_PROVIDERS: &[&str] = &[
     "sensenova",
     "apigoto",
     "brave",
+    "amp",
+    "bedrock",
+    "chutes",
+    "deepgram",
+    "kiro",
+    "openai-api",
+    "poe",
+    "venice",
+    "vertexai",
+    "warp",
 ];
 
 static CONFIG_WRITE: Mutex<()> = Mutex::new(());
@@ -819,7 +829,7 @@ struct StripEntry {
 /// strip ids are validated against this before becoming tray icon ids,
 /// including `family@account` cards. Stale family-level strip icons are
 /// removed for exactly this set.
-const STRIP_PROVIDER_IDS: [&str; 40] = [
+const STRIP_PROVIDER_IDS: [&str; 50] = [
     "claude",
     "codex",
     "cursor",
@@ -860,6 +870,16 @@ const STRIP_PROVIDER_IDS: [&str; 40] = [
     "sensenova",
     "apigoto",
     "brave",
+    "amp",
+    "bedrock",
+    "chutes",
+    "deepgram",
+    "kiro",
+    "openai-api",
+    "poe",
+    "venice",
+    "vertexai",
+    "warp",
 ];
 
 async fn update_tray_strip(app: tauri::AppHandle, entries: Vec<StripEntry>) -> Result<(), String> {
@@ -2015,6 +2035,16 @@ async fn fetch_provider_snapshot(provider_id: String, allow_disabled: bool) -> R
             "clinepass" => providers::clinepass::snapshot().await,
             "sensenova" => providers::sensenova::snapshot().await,
             "apigoto" => providers::apigoto::snapshot().await,
+            "amp" => providers::amp::snapshot().await,
+            "bedrock" => providers::bedrock::snapshot().await,
+            "chutes" => providers::chutes::snapshot().await,
+            "deepgram" => providers::deepgram::snapshot().await,
+            "kiro" => providers::kiro::snapshot().await,
+            "openai-api" => providers::openai_api::snapshot().await,
+            "poe" => providers::poe::snapshot().await,
+            "venice" => providers::venice::snapshot().await,
+            "vertexai" => providers::vertexai::snapshot().await,
+            "warp" => providers::warp::snapshot().await,
             _ => return Err(format!("no single-provider refresh for {family}")),
         });
     }
@@ -2201,6 +2231,16 @@ async fn run_usage_fetch(app: &tauri::AppHandle) -> Vec<providers::Snapshot> {
         ("clinepass", Box::pin(guarded("clinepass".into(), "ClinePass".into(), providers::clinepass::snapshot()))),
         ("sensenova", Box::pin(guarded("sensenova".into(), "SenseNova".into(), providers::sensenova::snapshot()))),
         ("apigoto", Box::pin(guarded("apigoto".into(), "APIGOTO".into(), providers::apigoto::snapshot()))),
+        ("amp", Box::pin(guarded("amp".into(), "Amp".into(), providers::amp::snapshot()))),
+        ("bedrock", Box::pin(guarded("bedrock".into(), "AWS Bedrock".into(), providers::bedrock::snapshot()))),
+        ("chutes", Box::pin(guarded("chutes".into(), "Chutes".into(), providers::chutes::snapshot()))),
+        ("deepgram", Box::pin(guarded("deepgram".into(), "Deepgram".into(), providers::deepgram::snapshot()))),
+        ("kiro", Box::pin(guarded("kiro".into(), "Kiro".into(), providers::kiro::snapshot()))),
+        ("openai-api", Box::pin(guarded("openai-api".into(), "OpenAI API".into(), providers::openai_api::snapshot()))),
+        ("poe", Box::pin(guarded("poe".into(), "Poe".into(), providers::poe::snapshot()))),
+        ("venice", Box::pin(guarded("venice".into(), "Venice".into(), providers::venice::snapshot()))),
+        ("vertexai", Box::pin(guarded("vertexai".into(), "Vertex AI".into(), providers::vertexai::snapshot()))),
+        ("warp", Box::pin(guarded("warp".into(), "Warp".into(), providers::warp::snapshot()))),
     ];
     // Skip the leftover Moonshot fetch only when the last Kimi card
     // actually painted — a credentials file alone is not enough (expired
@@ -3120,6 +3160,13 @@ async fn test_api_key(
         "clinepass" => providers::clinepass::snapshot_with_key(key).await,
         "sensenova" => providers::sensenova::snapshot_with_key(key).await,
         "apigoto" => providers::apigoto::snapshot_with_key(key).await,
+        "amp" => providers::amp::snapshot_with_key(key).await,
+        "chutes" => providers::chutes::snapshot_with_key(key).await,
+        "deepgram" => providers::deepgram::snapshot_with_key(key).await,
+        "openai-api" => providers::openai_api::snapshot_with_key(key).await,
+        "poe" => providers::poe::snapshot_with_key(key).await,
+        "venice" => providers::venice::snapshot_with_key(key).await,
+        "warp" => providers::warp::snapshot_with_key(key).await,
         "siliconflow" => providers::siliconflow::snapshot_with_key(key).await,
         "novita" => providers::novita::snapshot_with_key(key).await,
         "relaybalance" => {
@@ -3618,6 +3665,13 @@ fn provider_env_vars(provider: &str) -> &'static [&'static str] {
         "tavily" => &["TAVILY_API_KEY"],
         "clinepass" => &["CLINE_API_KEY"],
         "apigoto" => &["APIGOTO_API_KEY"],
+        "amp" => &["AMP_API_KEY"],
+        "chutes" => &["CHUTES_API_KEY"],
+        "deepgram" => &["DEEPGRAM_API_KEY"],
+        "openai-api" => &["OPENAI_ADMIN_KEY"],
+        "poe" => &["POE_API_KEY"],
+        "venice" => &["VENICE_API_KEY"],
+        "warp" => &["WARP_API_KEY", "WARP_TOKEN"],
         "firecrawl" => &["FIRECRAWL_API_KEY", "FIRECRAWL_FIRECRAWL_API_KEY"],
         "brave" => &["BRAVE_API_KEY", "BRAVE_SEARCH_API_KEY"],
         "siliconflow" => &["SILICONFLOW_API_KEY"],
@@ -3673,6 +3727,13 @@ fn get_credential_status(provider: String) -> Value {
         "clinepass" => providers::clinepass::local_credential_hint(),
         "sensenova" => providers::sensenova::local_credential_hint(),
         "apigoto" => providers::apigoto::local_credential_hint(),
+        "amp" => providers::amp::local_credential_hint(),
+        "chutes" => providers::chutes::local_credential_hint(),
+        "deepgram" => providers::deepgram::local_credential_hint(),
+        "openai-api" => providers::openai_api::local_credential_hint(),
+        "poe" => providers::poe::local_credential_hint(),
+        "venice" => providers::venice::local_credential_hint(),
+        "warp" => providers::warp::local_credential_hint(),
         "shandianshuo" => providers::shandianshuo::local_credential_hint(),
         "bocha" => providers::searchquota::local_credential_hint("bocha", &["BOCHA_API_KEY"]),
         "tavily" => providers::searchquota::local_credential_hint("tavily", &["TAVILY_API_KEY"]),
@@ -3689,6 +3750,7 @@ fn get_credential_status(provider: String) -> Value {
         "commandcode" => providers::commandcode::local_credential_hint(),
         "doubao" => providers::doubao::local_credential_hint(),
         "clawsgo" => providers::clawsgo::local_credential_hint(),
+        "kiro" => providers::kiro::local_credential_hint(),
         _ => None,
     };
     // Subscription/membership badge: Cursor reads it straight from the

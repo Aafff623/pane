@@ -61,6 +61,16 @@ export const providerCatalog: readonly ProviderDefinition[] = [
   { familyId: "apigoto", displayName: "APIGOTO", queryKind: "nativeCodingPlan", supportsApiKey: true, supportsExtraAccounts: false, supportsOAuth: false, iconKey: "apigoto" },
   { familyId: "mcode", displayName: "MaxCode", queryKind: "localOnly", supportsApiKey: false, supportsExtraAccounts: false, supportsOAuth: false, iconKey: "mcode" },
   { familyId: "qoder", displayName: "Qoder", queryKind: "localOnly", supportsApiKey: false, supportsExtraAccounts: false, supportsOAuth: false, iconKey: "qodercn" },
+  { familyId: "amp", displayName: "Amp", queryKind: "nativeBalance", supportsApiKey: true, supportsExtraAccounts: false, supportsOAuth: false, iconKey: "amp" },
+  { familyId: "bedrock", displayName: "AWS Bedrock", queryKind: "nativeBalance", supportsApiKey: false, supportsExtraAccounts: false, supportsOAuth: false, iconKey: "bedrock" },
+  { familyId: "chutes", displayName: "Chutes", queryKind: "nativeBalance", supportsApiKey: true, supportsExtraAccounts: false, supportsOAuth: false, iconKey: "chutes" },
+  { familyId: "deepgram", displayName: "Deepgram", queryKind: "nativeBalance", supportsApiKey: true, supportsExtraAccounts: false, supportsOAuth: false, iconKey: "deepgram" },
+  { familyId: "kiro", displayName: "Kiro", queryKind: "nativeCodingPlan", supportsApiKey: false, supportsExtraAccounts: false, supportsOAuth: false, iconKey: "kiro" },
+  { familyId: "openai-api", displayName: "OpenAI API", queryKind: "nativeBalance", supportsApiKey: true, supportsExtraAccounts: false, supportsOAuth: false, iconKey: "openai" },
+  { familyId: "poe", displayName: "Poe", queryKind: "nativeBalance", supportsApiKey: true, supportsExtraAccounts: false, supportsOAuth: false, iconKey: "poe" },
+  { familyId: "venice", displayName: "Venice", queryKind: "nativeBalance", supportsApiKey: true, supportsExtraAccounts: false, supportsOAuth: false, iconKey: "venice" },
+  { familyId: "vertexai", displayName: "Vertex AI", queryKind: "localOnly", supportsApiKey: false, supportsExtraAccounts: false, supportsOAuth: false, iconKey: "vertexai" },
+  { familyId: "warp", displayName: "Warp", queryKind: "nativeCodingPlan", supportsApiKey: true, supportsExtraAccounts: false, supportsOAuth: false, iconKey: "warp" },
 ];
 
 export function providerFamily(id: string): string {

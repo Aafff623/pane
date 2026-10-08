@@ -35,6 +35,16 @@ pub mod stepfun;
 pub mod stepfun_plan;
 pub mod traecn;
 pub mod zai;
+pub mod amp;
+pub mod bedrock;
+pub mod chutes;
+pub mod deepgram;
+pub mod openai_api;
+pub mod poe;
+pub mod venice;
+pub mod vertexai;
+pub mod warp;
+pub mod kiro;
 
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;

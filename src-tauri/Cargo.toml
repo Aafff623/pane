@@ -41,6 +41,9 @@ tokio = { version = "1", features = ["macros", "process", "sync", "time"] }
 chrono = "0.4"
 base64 = "0.22"
 sha2 = "0.10"
+# AWS-style V4 request signing: Bedrock's Cost Explorer and Volcengine Ark's
+# GetCodingPlanUsage / GetAgentPlanAFPUsage share the same HMAC chain.
+hmac = "0.12"
 # Qoder CN (Chromium os_crypt AES-256-GCM) and Trae CN (ByteCrypto
 # AES-128-CBC) credential files; pure Rust, no system backend.
 aes = "0.8"

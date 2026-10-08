@@ -54,5 +54,6 @@ pub mod cursor_accounts;
 #[path = "../../src-tauri/src/auth_center.rs"]
 pub mod auth_center;
 
+
 mod catalog_consistency;
 mod config_consistency;

@@ -40,6 +40,16 @@ import braveIcon from "./assets/providers/brave.svg?raw";
 import apigotoIcon from "./assets/providers/apigoto.svg?raw";
 import shandianshuoIcon from "./assets/providers/shandianshuo.svg?raw";
 import { providerDefinition, providerFamily } from "./providerCatalog";
+import ampIcon from "./assets/providers/amp.svg?raw";
+import bedrockIcon from "./assets/providers/bedrock.svg?raw";
+import chutesIcon from "./assets/providers/chutes.svg?raw";
+import deepgramIcon from "./assets/providers/deepgram.svg?raw";
+import kiroIcon from "./assets/providers/kiro.svg?raw";
+import openaiIcon from "./assets/providers/openai.svg?raw";
+import poeIcon from "./assets/providers/poe.svg?raw";
+import veniceIcon from "./assets/providers/venice.svg?raw";
+import vertexaiIcon from "./assets/providers/vertexai.svg?raw";
+import warpIcon from "./assets/providers/warp.svg?raw";
 
 export interface ProviderVisual {
   iconKey: string;
@@ -91,6 +101,16 @@ const VISUALS: Readonly<Record<string, ProviderVisual>> = {
   firecrawl: { iconKey: "firecrawl", iconSvg: firecrawlIcon },
   brave: { iconKey: "brave", iconSvg: braveIcon },
   apigoto: { iconKey: "apigoto", iconSvg: apigotoIcon },
+  amp: { iconKey: "amp", iconSvg: ampIcon },
+  bedrock: { iconKey: "bedrock", iconSvg: bedrockIcon },
+  chutes: { iconKey: "chutes", iconSvg: chutesIcon },
+  deepgram: { iconKey: "deepgram", iconSvg: deepgramIcon },
+  kiro: { iconKey: "kiro", iconSvg: kiroIcon },
+  "openai-api": { iconKey: "openai", iconSvg: openaiIcon },
+  poe: { iconKey: "poe", iconSvg: poeIcon },
+  venice: { iconKey: "venice", iconSvg: veniceIcon },
+  vertexai: { iconKey: "vertexai", iconSvg: vertexaiIcon },
+  warp: { iconKey: "warp", iconSvg: warpIcon },
 };
 
 /// Known One/New API hosts that ship their own colorful mark.  Keyed by hostname
