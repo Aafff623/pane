@@ -3180,7 +3180,7 @@ dependencies = [
 
 [[package]]
 name = "pane"
-version = "0.4.69"
+version = "0.5.0"
 dependencies = [
  "aes 0.8.4",
  "aes-gcm",
