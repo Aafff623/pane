@@ -7451,30 +7451,11 @@ function renderCustomize(): string {
       };
     });
 
-  // Sections mirror the dashboard's grouping: ungrouped blocks first
-  // (flat, no header), then one labeled section per card group in the
-  // user's own order; stale tags (group deleted, card still points at
-  // it) render flat. A–Z order holds within each section.
-  const groupDefs = cardGroups();
-  const liveGroups = new Set(groupDefs.map((g) => g.id));
-  const flatHtml: string[] = [];
-  const byGroup = new Map<string, string[]>();
-  for (const block of blocks) {
-    const gid = cardGroupId(block.id);
-    if (!gid || !liveGroups.has(gid)) {
-      flatHtml.push(block.html);
-      continue;
-    }
-    const list = byGroup.get(gid) ?? [];
-    list.push(block.html);
-    byGroup.set(gid, list);
-  }
-  let blocksHtml = flatHtml.join("");
-  for (const g of groupDefs) {
-    const members = byGroup.get(g.id);
-    if (!members?.length) continue;
-    blocksHtml += `<div class="cust-group-head"><span class="cust-group-name">${escapeHtml(g.name)}</span><span class="cust-group-count">${members.length}</span></div>${members.join("")}`;
-  }
+  // Strict A–Z across the whole drawer (user requirement 2026-10-08): the
+  // dashboard's card groups (custom buckets like 鸡蛋/羊毛) order the MAIN
+  // view only — in the drawer they are ignored entirely, so enabling and
+  // configuring always happens in one predictable alphabetical list.
+  const blocksHtml = blocks.map((b) => b.html).join("");
 
   const starCount = Object.values(config.layout?.providers ?? {}).reduce((n, l) => n + l.starred.length, 0);
   // The skin market rides the experimental-features gate: entry hidden
@@ -7655,15 +7636,6 @@ function applyCustSearch(raw: string): void {
       (blk.dataset.custProvider ?? "").toLowerCase().includes(query);
     blk.style.display = hit ? "" : "none";
     if (hit) visible++;
-  }
-  for (const gh of document.querySelectorAll<HTMLElement>(".cust-group-head")) {
-    let el = gh.nextElementSibling as HTMLElement | null;
-    let any = false;
-    while (el && el.classList.contains("customize-block")) {
-      if (el.style.display !== "none") any = true;
-      el = el.nextElementSibling as HTMLElement | null;
-    }
-    gh.style.display = any ? "" : "none";
   }
   const body = document.querySelector<HTMLElement>("#drawer-body");
   document.querySelector(".cust-search-empty")?.remove();

@@ -4473,29 +4473,6 @@ body.party .trail-tick.active {
   color: var(--muted-foreground);
 }
 
-/* Group section head inside Customize — mirrors the dashboard's card
-   groups but is a plain label (no folding; the drawer's own per-provider
-   accordions already handle collapse). */
-.cust-group-head {
-  display: flex;
-  align-items: baseline;
-  gap: 6px;
-  margin: 14px 2px 4px;
-  font-size: 11px;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: var(--muted-foreground);
-}
-
-.cust-group-name {
-  font-weight: 700;
-}
-
-.cust-group-count {
-  font-size: 10px;
-  opacity: 0.8;
-}
-
 .customize-block .acc-body {
   display: grid;
   grid-template-rows: 0fr;
