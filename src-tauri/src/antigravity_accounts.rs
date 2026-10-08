@@ -47,8 +47,8 @@ pub fn load_slots_from(base: &Path) -> Vec<AgSlot> {
 
 pub fn save_slots_to(base: &Path, slots: &[AgSlot]) -> Result<(), String> {
     std::fs::create_dir_all(base).map_err(|e| format!("create config dir: {e}"))?;
-    std::fs::write(
-        slots_file(base),
+    crate::accounts::write_json_atomic(
+        &slots_file(base),
         serde_json::to_string_pretty(slots).unwrap_or_default(),
     )
     .map_err(|e| format!("write antigravity slots: {e}"))

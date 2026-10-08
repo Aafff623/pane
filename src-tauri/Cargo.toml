@@ -50,6 +50,11 @@ cbc = "0.1"
 # params) derives the AES-256-GCM key; rand_core supplies salt/nonces.
 argon2 = "0.5"
 rand_core = { version = "0.6", features = ["getrandom"] }
+# Provider/account API keys live in the OS credential vault (keyring-rs:
+# Windows Credential Manager / macOS Keychain / Linux Secret Service); the
+# JSON files keep only non-secret fields. The default `v1` feature bundle
+# pulls the native store for each platform.
+keyring = "4"
 dirs = "6"
 rusqlite = { version = "0.32", features = ["bundled", "backup"] }
 toml = "0.8"
@@ -65,4 +70,4 @@ font-kit = "0.14"
 [target.'cfg(windows)'.dependencies]
 webview2-com = "0.38"
 windows-core = "0.61"
-windows = { version = "0.61", features = ["Win32_Foundation", "Win32_Globalization", "Win32_Graphics_Dwm", "Win32_Security_Authorization", "Win32_Security_Credentials", "Win32_Security_Cryptography", "Win32_Storage_FileSystem", "Win32_System_Memory", "Win32_System_Threading", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging"] }
+windows = { version = "0.61", features = ["Win32_Foundation", "Win32_Globalization", "Win32_Graphics_Dwm", "Win32_Security_Authorization", "Win32_Security_Credentials", "Win32_Security_Cryptography", "Win32_Storage_FileSystem", "Win32_System_Memory", "Win32_System_SystemInformation", "Win32_System_Threading", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging"] }

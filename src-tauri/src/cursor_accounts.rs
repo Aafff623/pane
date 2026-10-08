@@ -25,8 +25,8 @@ pub fn load_accounts_from(base: &Path) -> Vec<CursorAccount> {
 
 pub fn save_accounts_to(base: &Path, accounts: &[CursorAccount]) -> Result<(), String> {
     std::fs::create_dir_all(base).map_err(|e| format!("create config dir: {e}"))?;
-    std::fs::write(
-        accounts_file(base),
+    crate::accounts::write_json_atomic(
+        &accounts_file(base),
         serde_json::to_string_pretty(accounts).unwrap_or_default(),
     )
     .map_err(|e| format!("write cursor accounts: {e}"))

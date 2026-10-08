@@ -383,17 +383,56 @@ fn row_from_sealed(e: &SealedEntry) -> VaultRow {
 }
 
 /// Set (or change) the master password and encrypt the whole vault with it.
-/// Changing requires the unlocked session (the old key re-opens every entry).
 pub fn set_password(password: &str) -> Result<VaultStatus, String> {
-    let password = password.trim();
-    if password.len() < 4 {
-        return Err("master password needs at least 4 characters".into());
-    }
     let path = vault_path();
     let entries = match load_store_from(&path) {
         Store::Plain(entries) => entries,
         Store::Sealed(file) => open_all(&file)?,
     };
+    seal_and_store(password, &entries)
+}
+
+/// Change the master password: the old one must verify against the on-disk
+/// canary first, then the whole vault is re-sealed under the new one.
+pub fn change_password(old: &str, new: &str) -> Result<VaultStatus, String> {
+    match load_store_from(&vault_path()) {
+        Store::Plain(_) => Err("no master password is set".into()),
+        Store::Sealed(file) => {
+            let old_key = derive_key(old.trim(), &file.kdf)?;
+            open(&old_key, &file.canary_nonce_b64, &file.canary_b64)?;
+            let entries = open_all(&file)?;
+            seal_and_store(new, &entries)
+        }
+    }
+}
+
+/// True while a verified key is held in memory (vault unlocked).
+pub fn session_open() -> bool {
+    SESSION_KEY.lock().map(|g| g.is_some()).unwrap_or(false)
+}
+
+/// Verify `password` against the on-disk canary and open the session — the
+/// provider/account-key reveal gate shares this with the vault so users
+/// face one password and one lock. Errors [`ERR_WRONG_PASSWORD`] on a
+/// mismatch; "no master password is set" when none exists yet.
+pub fn verify_for_reveal(password: &str) -> Result<(), String> {
+    match load_store_from(&vault_path()) {
+        Store::Plain(_) => Err("no master password is set".into()),
+        Store::Sealed(file) => {
+            let key = derive_key(password.trim(), &file.kdf)?;
+            open(&key, &file.canary_nonce_b64, &file.canary_b64)?;
+            set_session_key(key);
+            Ok(())
+        }
+    }
+}
+
+fn seal_and_store(password: &str, entries: &[VaultEntry]) -> Result<VaultStatus, String> {
+    let password = password.trim();
+    if password.len() < 4 {
+        return Err("master password needs at least 4 characters".into());
+    }
+    let path = vault_path();
     let mut salt = [0u8; 16];
     OsRng.fill_bytes(&mut salt);
     let kdf = KdfSection {
@@ -406,7 +445,7 @@ pub fn set_password(password: &str) -> Result<VaultStatus, String> {
     let key = derive_key(password, &kdf)?;
     let (canary_nonce_b64, canary_b64) = seal(&key, CANARY_PLAINTEXT)?;
     let mut sealed = Vec::with_capacity(entries.len());
-    for e in &entries {
+    for e in entries {
         sealed.push(seal_entry(&key, e)?);
     }
     let file = VaultFile { version: VAULT_VERSION, kdf, canary_nonce_b64, canary_b64, entries: sealed };

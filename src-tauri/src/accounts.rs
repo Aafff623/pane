@@ -32,6 +32,26 @@ pub struct ArchivedAccount {
     pub card_id: String,
     pub label: String,
     pub archived_at: i64,
+    /// Credential kept so an archived account can be restored as-is. Old
+    /// records (before restore existed) simply have no key and can only be
+    /// inspected, never resurrected.
+    #[serde(default)]
+    pub api_key: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub base_url: Option<String>,
+}
+
+/// Archived credentials for account stores that have their own JSON shape
+/// (Antigravity OAuth slots and Cursor accounts).  The payload stays on disk
+/// and is never returned to the WebView; the command layer only exposes the
+/// label and stable card id.
+#[derive(Serialize, Deserialize, Clone, PartialEq, Debug)]
+pub struct ArchivedExternalAccount {
+    pub provider: String,
+    pub card_id: String,
+    pub label: String,
+    pub archived_at: i64,
+    pub payload: serde_json::Value,
 }
 
 fn accounts_dir(base: &std::path::Path) -> PathBuf {
@@ -54,11 +74,88 @@ pub fn serialize_accounts(entries: &[AccountEntry]) -> String {
     serde_json::to_string_pretty(entries).unwrap_or_default()
 }
 
+/// On-disk row: the public `AccountEntry` plus the stable vault id. Kept
+/// private so the public struct stays literal-friendly; legacy files simply
+/// lack the `id` key and get it captured during the plaintext migration.
+#[derive(Serialize, Deserialize, Default)]
+struct StoredAccount {
+    #[serde(default)]
+    id: String,
+    #[serde(default)]
+    label: String,
+    #[serde(rename = "apiKey", default, skip_serializing_if = "String::is_empty")]
+    api_key: String,
+    #[serde(rename = "baseUrl", default, skip_serializing_if = "Option::is_none")]
+    base_url: Option<String>,
+}
+
 pub fn load_accounts_from(base: &std::path::Path, provider: &str) -> Vec<AccountEntry> {
-    let raw = std::fs::read_to_string(accounts_file(base, provider)).unwrap_or_default();
-    let mut out = parse_accounts(&raw);
-    out.retain(|e| !e.api_key.trim().is_empty());
+    let path = accounts_file(base, provider);
+    let raw = std::fs::read_to_string(&path).unwrap_or_default();
+    let stored: Vec<StoredAccount> =
+        serde_json::from_str(raw.trim_start_matches('\u{feff}')).unwrap_or_default();
+    let mut out: Vec<AccountEntry> = Vec::with_capacity(stored.len());
+    let mut rows: Vec<StoredAccount> = Vec::with_capacity(stored.len());
+    let mut dirty = false;
+    for mut row in stored {
+        if row.api_key.trim().is_empty() {
+            // Migrated row: the OS vault holds the key; the persisted id is
+            // the only address back to it.
+            let mut api_key = String::new();
+            if !row.id.is_empty() {
+                if let crate::secretstore::Secret::Found(key) =
+                    crate::secretstore::get(&crate::secretstore::account_key(&row.id))
+                {
+                    api_key = key;
+                }
+            }
+            if api_key.is_empty() {
+                continue; // key gone — the same drop the legacy loader applied
+            }
+            out.push(AccountEntry {
+                label: row.label.clone(),
+                api_key,
+                base_url: row.base_url.clone(),
+            });
+            rows.push(row);
+            continue;
+        }
+        // Plaintext row: capture the stable id and move the secret into the
+        // vault — the field leaves the file only after the write succeeded.
+        let entry = AccountEntry {
+            label: row.label.clone(),
+            api_key: row.api_key.clone(),
+            base_url: row.base_url.clone(),
+        };
+        if row.id.is_empty() {
+            row.id = card_id_for_account(provider, &entry);
+        }
+        if crate::secretstore::put(
+            &crate::secretstore::account_key(&row.id),
+            entry.api_key.trim(),
+        )
+        .is_ok()
+        {
+            row.api_key.clear();
+            dirty = true;
+        }
+        out.push(entry);
+        rows.push(row);
+    }
+    if dirty {
+        if let Ok(text) = serde_json::to_string_pretty(&rows) {
+            let _ = write_json_atomic(&path, text);
+        }
+    }
     out
+}
+
+/// Temp file + rename so a crash mid-write can never truncate a store that
+/// holds plaintext credentials. Shared by the other token stores.
+pub(crate) fn write_json_atomic(path: &std::path::Path, contents: String) -> Result<(), String> {
+    let tmp = path.with_extension("json.tmp");
+    std::fs::write(&tmp, contents).map_err(|e| format!("write {}: {e}", tmp.display()))?;
+    std::fs::rename(&tmp, path).map_err(|e| format!("rename {}: {e}", tmp.display()))
 }
 
 pub fn save_accounts_to(
@@ -68,8 +165,31 @@ pub fn save_accounts_to(
 ) -> Result<(), String> {
     let dir = accounts_dir(base);
     std::fs::create_dir_all(&dir).map_err(|e| format!("create accounts dir: {e}"))?;
-    std::fs::write(accounts_file(base, provider), serialize_accounts(entries))
-        .map_err(|e| format!("write accounts file: {e}"))
+    // Keys move into the OS vault as the file is written; a row whose vault
+    // write fails keeps its plaintext (the documented fallback).
+    let mut rows: Vec<StoredAccount> = Vec::with_capacity(entries.len());
+    for entry in entries {
+        let mut row = StoredAccount {
+            id: String::new(),
+            label: entry.label.clone(),
+            api_key: entry.api_key.clone(),
+            base_url: entry.base_url.clone(),
+        };
+        if !entry.api_key.trim().is_empty() {
+            row.id = card_id_for_account(provider, entry);
+            if crate::secretstore::put(
+                &crate::secretstore::account_key(&row.id),
+                entry.api_key.trim(),
+            )
+            .is_ok()
+            {
+                row.api_key.clear();
+            }
+        }
+        rows.push(row);
+    }
+    let text = serde_json::to_string_pretty(&rows).map_err(|e| e.to_string())?;
+    write_json_atomic(&accounts_file(base, provider), text)
 }
 
 /// The app's real store. Keeping the dir implicit here (and explicit in the
@@ -87,19 +207,122 @@ fn archive_file(base: &std::path::Path) -> PathBuf {
     base.join("archived_accounts.json")
 }
 
-pub fn load_archived_from(base: &std::path::Path) -> Vec<ArchivedAccount> {
-    let raw = std::fs::read_to_string(archive_file(base)).unwrap_or_default();
+fn external_archive_file(base: &std::path::Path) -> PathBuf {
+    base.join("archived_external_accounts.json")
+}
+
+pub fn load_archived_external_from(base: &std::path::Path) -> Vec<ArchivedExternalAccount> {
+    let raw = std::fs::read_to_string(external_archive_file(base)).unwrap_or_default();
     serde_json::from_str(raw.trim_start_matches('\u{feff}')).unwrap_or_default()
 }
 
-pub fn archive_account(account: ArchivedAccount) -> Result<(), String> {
-    let base = crate::providers::config_dir();
-    let mut list = load_archived_from(&base);
+pub fn archive_external_to(
+    base: &std::path::Path,
+    account: ArchivedExternalAccount,
+) -> Result<(), String> {
+    std::fs::create_dir_all(base).map_err(|e| format!("create config dir: {e}"))?;
+    let mut list = load_archived_external_from(base);
     if !list.iter().any(|a| a.card_id == account.card_id) {
         list.push(account);
     }
-    std::fs::write(archive_file(&base), serde_json::to_string_pretty(&list).unwrap_or_default())
-        .map_err(|e| format!("write archived accounts: {e}"))
+    write_json_atomic(
+        &external_archive_file(base),
+        serde_json::to_string_pretty(&list).unwrap_or_default(),
+    )
+    .map_err(|e| format!("write external archive: {e}"))
+}
+
+pub fn remove_archived_external_from(
+    base: &std::path::Path,
+    card_id: &str,
+) -> Result<(), String> {
+    let mut list = load_archived_external_from(base);
+    let before = list.len();
+    list.retain(|a| a.card_id != card_id);
+    if list.len() == before {
+        return Ok(());
+    }
+    write_json_atomic(
+        &external_archive_file(base),
+        serde_json::to_string_pretty(&list).unwrap_or_default(),
+    )
+    .map_err(|e| format!("write external archive: {e}"))
+}
+
+pub fn load_archived_from(base: &std::path::Path) -> Vec<ArchivedAccount> {
+    let raw = std::fs::read_to_string(archive_file(base)).unwrap_or_default();
+    let mut list: Vec<ArchivedAccount> =
+        serde_json::from_str(raw.trim_start_matches('\u{feff}')).unwrap_or_default();
+    // Hydrate credentials that live in the vault (migrated tombstones).
+    for a in list.iter_mut() {
+        if a.api_key.trim().is_empty() && !a.card_id.is_empty() {
+            if let crate::secretstore::Secret::Found(key) =
+                crate::secretstore::get(&crate::secretstore::archived_key(&a.card_id))
+            {
+                a.api_key = key;
+            }
+        }
+    }
+    list
+}
+
+/// Moves an archived credential into the OS vault (keyed by its stable card
+/// id) and returns the row ready for disk — the plaintext stays in the
+/// written copy only when the vault write failed. Idempotent, so it can
+/// also strip re-hydrated rows before a rewrite.
+fn without_plaintext_key(mut account: ArchivedAccount) -> ArchivedAccount {
+    if !account.api_key.trim().is_empty()
+        && crate::secretstore::put(
+            &crate::secretstore::archived_key(&account.card_id),
+            account.api_key.trim(),
+        )
+        .is_ok()
+    {
+        account.api_key.clear();
+    }
+    account
+}
+
+pub fn archive_account(account: ArchivedAccount) -> Result<(), String> {
+    archive_account_to(&crate::providers::config_dir(), account)
+}
+
+pub fn archive_account_to(base: &std::path::Path, account: ArchivedAccount) -> Result<(), String> {
+    std::fs::create_dir_all(base).map_err(|e| format!("create config dir: {e}"))?;
+    let account = without_plaintext_key(account);
+    let mut list = load_archived_from(base);
+    if !list.iter().any(|a| a.card_id == account.card_id) {
+        list.push(account);
+    }
+    let list: Vec<ArchivedAccount> = list.into_iter().map(without_plaintext_key).collect();
+    write_json_atomic(
+        &archive_file(base),
+        serde_json::to_string_pretty(&list).unwrap_or_default(),
+    )
+    .map_err(|e| format!("write archived accounts: {e}"))
+}
+
+/// Drops a tombstone from the archive store (after a restore reaped its
+/// credential back into the active accounts file), and with it the vault
+/// copy of the credential.
+pub fn remove_archived(card_id: &str) -> Result<(), String> {
+    remove_archived_from(&crate::providers::config_dir(), card_id)
+}
+
+pub fn remove_archived_from(base: &std::path::Path, card_id: &str) -> Result<(), String> {
+    crate::secretstore::remove(&crate::secretstore::archived_key(card_id));
+    let mut list = load_archived_from(base);
+    let before = list.len();
+    list.retain(|a| a.card_id != card_id);
+    if list.len() == before {
+        return Ok(());
+    }
+    let list: Vec<ArchivedAccount> = list.into_iter().map(without_plaintext_key).collect();
+    write_json_atomic(
+        &archive_file(base),
+        serde_json::to_string_pretty(&list).unwrap_or_default(),
+    )
+    .map_err(|e| format!("write archived accounts: {e}"))
 }
 
 pub fn provider_takes_accounts(provider: &str) -> bool {
@@ -249,6 +472,54 @@ mod tests {
     }
 
     #[test]
+    fn archive_store_keeps_credential_and_restores_by_card_id() {
+        let base = std::env::temp_dir().join(format!("pane-archive-test-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        // Archive two accounts; the credential and base_url must survive.
+        let first = ArchivedAccount {
+            provider: "deepseek".into(),
+            card_id: "deepseek@aa11".into(),
+            label: "burnt".into(),
+            archived_at: 1,
+            api_key: "sk-gone".into(),
+            base_url: None,
+        };
+        let second = ArchivedAccount {
+            provider: "deepseek".into(),
+            card_id: "deepseek@bb22".into(),
+            label: "relay".into(),
+            archived_at: 2,
+            api_key: "sk-relay".into(),
+            base_url: Some("https://relay.example.com".into()),
+        };
+        archive_account_to(&base, first.clone()).expect("archive 1");
+        archive_account_to(&base, second.clone()).expect("archive 2");
+        // Archiving the same card id again must not duplicate the tombstone.
+        archive_account_to(&base, first.clone()).expect("archive dup");
+        let archived = load_archived_from(&base);
+        assert_eq!(archived.len(), 2);
+        assert_eq!(archived[1].api_key, "sk-relay");
+        assert_eq!(archived[1].base_url.as_deref(), Some("https://relay.example.com"));
+        // Restoring reaps the tombstone, keeps the sibling.
+        remove_archived_from(&base, "deepseek@aa11").expect("restore-reap");
+        let remaining = load_archived_from(&base);
+        assert_eq!(remaining.len(), 1);
+        assert_eq!(remaining[0].card_id, "deepseek@bb22");
+        // Removing an unknown id is a no-op, not an error.
+        remove_archived_from(&base, "deepseek@zz99").expect("no-op");
+        assert_eq!(load_archived_from(&base).len(), 1);
+        // Old records without a key still parse (serde default).
+        std::fs::write(
+            archive_file(&base),
+            "[{\"provider\":\"kimi\",\"card_id\":\"kimi@old\",\"label\":\"legacy\",\"archived_at\":0}]",
+        )
+        .expect("write legacy");
+        let legacy = load_archived_from(&base);
+        assert_eq!(legacy.last().unwrap().api_key, "");
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
     fn load_drops_entries_without_a_key() {
         let base = std::env::temp_dir().join(format!("pane-accts-empty-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&base);
@@ -371,7 +642,7 @@ mod tests {
 
     #[test]
     fn family_display_name_comes_from_catalog() {
-        assert_eq!(family_display_name("relaybalance"), "Custom Balance");
+        assert_eq!(family_display_name("relaybalance"), "Custom Relay");
         assert_eq!(family_display_name("future-provider"), "future-provider");
     }
 }
