@@ -2,18 +2,20 @@
 
 ## 0.6.0 — 未发布
 
-Provider 目录补全 · 第一批 10 家 / Kiro 免 spawn / 「密钥与额度」机制说明
+Provider 目录补全 · 前两批 14 家 / Kiro 免 spawn / 「密钥与额度」机制说明
 
 ## 新增
 
-- **10 家 Provider 还原**：`amp` · `bedrock` · `chutes` · `deepgram` · `openai-api` · `poe` · `venice` · `vertexai` · `warp` · `kiro` 恢复接入（Rust adapter、品牌图标、三语文案、环境变量与「测试连通性」全链路）；默认全部禁用，需在设置「密钥与额度」逐家启用；Bedrock / Vertex AI 读本机 AWS / gcloud 凭据（无凭据时显示未配置属正常），其余 7 家粘 key 即用
+- **10 家 Provider 还原（第一批）**：`amp` · `bedrock` · `chutes` · `deepgram` · `openai-api` · `poe` · `venice` · `vertexai` · `warp` · `kiro` 恢复接入（Rust adapter、品牌图标、三语文案、环境变量与「测试连通性」全链路）；默认全部禁用，需在设置「密钥与额度」逐家启用；Bedrock / Vertex AI 读本机 AWS / gcloud 凭据（无凭据时显示未配置属正常），其余 7 家粘 key 即用
+- **4 家新 Provider（第二批）**：`mimo`（小米 MiMo，粘贴平台 serviceToken 或 API key 二选一——token 报月度用量、key 报余额/Token Plan，自动识别）、`trae`（Trae 国际版，读本机 `%APPDATA%\Trae` 登录态，host 随账号区域）、`qoder`（Qoder 国际版，读本机 `com.qoder.app.stable` 登录态打 `openapi.qoder.sh`）、`zed`（纯本地：只读 Zed 编辑器 `threads.db`，统计 zed.dev 托管模型的全部/近 30 天 token 与近期模型 Top3，BYOK 线程不计）；四家同样默认禁用；`zstd` 依赖引入（解压 Zed 线程数据）
 - **Kiro 直读本地库**：不再调用 `kiro-cli`（旧通道每次调用触发 CLI 自更新、向 %TEMP% 堆安装包）——改为只读打开 `%LOCALAPPDATA%\kiro-cli\data.sqlite3`（`KIRO_DATA_DIR` 可覆盖）取登录 token 与 profile ARN，直连 CodeWhisperer `GetUsageLimits`；额度卡新增 Overage（超额已用/上限）与超额计费行，bonus 花费并入计划用量时明确标注；未知 region 的 ARN 拒绝请求而非把 token 发往猜测端点
-- **「密钥与额度」机制说明页**：覆盖 45 家——每行新增「?」，弹窗讲清该家取数机制（读取哪些本地文件/数据库、按优先级读哪些环境变量、查询哪些域名）、按认证形态给出「你要提供」步骤（粘贴 key / OAuth 登录 / 本地登录），底部附本次实测实时指标；本地登录类（Claude / Kiro / Vertex AI 等）不再被要求粘 key
-- **解析测试补齐**：本批 10 家各补解析用例共 24 条（Bedrock SigV4 签名头构造与花费分组过滤、Kiro 凭据库读取与 ARN/重置时间校验、Warp GraphQL 聚合、Chutes 宽容字段匹配等），provider 解析测试 489 → 513
+- **「密钥与额度」机制说明页**：覆盖全部 provider 家族——每行新增「?」，弹窗讲清该家取数机制（读取哪些本地文件/数据库、按优先级读哪些环境变量、查询哪些域名）、按认证形态给出「你要提供」步骤（粘贴 key / OAuth 登录 / 本地登录），底部附本次实测实时指标；本地登录类（Claude / Kiro / Trae / Qoder / Vertex AI 等）不再被要求粘 key
+- **解析测试补齐**：第一批 24 条 + 第二批 10 条（MiMo 三形态解析、Zed threads.db zstd 往返与按模型聚合、Trae 国际版登录 blob 解密、Qoder 目录候选序），provider 解析测试 489 → 523
 
 ## 变更
 
 - **`openai` 家族更名 `openai-api`**：按 Admin key 口径正名（显示名 "OpenAI API"，环境变量 `OPENAI_ADMIN_KEY`），避免与 Codex 订阅卡混淆；`hmac` 依赖引入主 crate（Bedrock SigV4 签名用，后续火山方舟 V4 签名共用）
+- **Qoder CN 积分花费估算归位 `qodercn` 家族**：花费面板的「Qoder」积分估算卡更名为「Qoder CN」（数据源本就是 CN 版积分账本）；`qoder` 家族让位给国际版配额卡，两个版本不再共用一个 family
 
 ## 0.5.0 — 2026-10-07
 

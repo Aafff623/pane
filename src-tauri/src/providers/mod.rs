@@ -45,6 +45,10 @@ pub mod venice;
 pub mod vertexai;
 pub mod warp;
 pub mod kiro;
+pub mod mimo;
+pub mod trae;
+pub mod qoder;
+pub mod zed;
 
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;

@@ -60,6 +60,8 @@ rand_core = { version = "0.6", features = ["getrandom"] }
 keyring = "4"
 dirs = "6"
 rusqlite = { version = "0.32", features = ["bundled", "backup"] }
+# Zed's assistant threads are zstd-compressed inside threads.db.
+zstd = "0.13"
 toml = "0.8"
 regex = "1"
 prost = "0.13" # Grok GetRemainingResets protobuf codec

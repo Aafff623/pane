@@ -16,7 +16,7 @@ Handoff parcels in `temp/handoff/` cite task IDs from this board. The board does
 ## Next
 
 - [ ] T-0003 — 注册表收口：`provider_runtime.rs` 单表驱动 refresh，docs 覆盖基线并入一致性门禁
-- [ ] T-0004 — Provider 全量补全（5 批）：Batch 1 已收口并提交（10 家还原 + Kiro 直读本地库 + 24 条解析用例 + CHANGELOG 0.6.0 记账）；待用户定夺 crof（域名改名端点失效）、真实出数验证需用户提供任一新增家 key；Batch 2 起未开工
+- [ ] T-0004 — Provider 全量补全（5 批）：Batch 1（10 家还原）与 Batch 2（MiMo / Trae 国际 / Qoder 国际 / Zed 本地遥测）均已收口并提交；待用户定夺 crof、真实出数验证需用户提供 key；Batch 3（Factory / JetBrains / Groq / HuggingFace / LongCat / Sub2API / Mistral / Perplexity）起未开工
 - [ ] T-0005 — Analytics 用量面板：先出 `temp/preview/` 原型拍板，再接线（Rust 聚合命令 + 自绘 SVG）
 - [ ] T-0006 — CI 门禁补齐：加 PR 触发的 `ci.yml`（前端 build + parse-tests 去代理运行）
 - [ ] T-0007 — 把 4 个模块的 84 个「死测试」挂进 parse-tests harness（`lib.rs`/`tray_projection`/`telemetry`/`httpapi`）

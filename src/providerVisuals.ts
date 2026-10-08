@@ -50,6 +50,10 @@ import poeIcon from "./assets/providers/poe.svg?raw";
 import veniceIcon from "./assets/providers/venice.svg?raw";
 import vertexaiIcon from "./assets/providers/vertexai.svg?raw";
 import warpIcon from "./assets/providers/warp.svg?raw";
+import mimoIcon from "./assets/providers/mimo.svg?raw";
+import traeIcon from "./assets/providers/trae.svg?raw";
+import qoderIcon from "./assets/providers/qoder.svg?raw";
+import zedIcon from "./assets/providers/zed.svg?raw";
 
 export interface ProviderVisual {
   iconKey: string;
@@ -111,6 +115,10 @@ const VISUALS: Readonly<Record<string, ProviderVisual>> = {
   venice: { iconKey: "venice", iconSvg: veniceIcon },
   vertexai: { iconKey: "vertexai", iconSvg: vertexaiIcon },
   warp: { iconKey: "warp", iconSvg: warpIcon },
+  mimo: { iconKey: "mimo", iconSvg: mimoIcon },
+  trae: { iconKey: "trae", iconSvg: traeIcon },
+  qoder: { iconKey: "qoder", iconSvg: qoderIcon },
+  zed: { iconKey: "zed", iconSvg: zedIcon },
 };
 
 /// Known One/New API hosts that ship their own colorful mark.  Keyed by hostname

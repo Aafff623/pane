@@ -499,6 +499,42 @@ const PROVIDER_DEFINITIONS: &[ProviderDefinition] = &[
         icon_key: "warp",
         category: ProviderCategory::Coding,
     },
+    ProviderDefinition {
+        family_id: "mimo",
+        display_name: "MiMo",
+        query_kind: QueryKind::NativeCodingPlan,
+        supports_api_key: true,
+        supports_extra_accounts: false,
+        icon_key: "mimo",
+        category: ProviderCategory::Coding,
+    },
+    ProviderDefinition {
+        family_id: "trae",
+        display_name: "Trae",
+        query_kind: QueryKind::NativeSnapshot,
+        supports_api_key: false,
+        supports_extra_accounts: false,
+        icon_key: "trae",
+        category: ProviderCategory::Coding,
+    },
+    ProviderDefinition {
+        family_id: "qoder",
+        display_name: "Qoder",
+        query_kind: QueryKind::NativeSnapshot,
+        supports_api_key: false,
+        supports_extra_accounts: false,
+        icon_key: "qoder",
+        category: ProviderCategory::Coding,
+    },
+    ProviderDefinition {
+        family_id: "zed",
+        display_name: "Zed",
+        query_kind: QueryKind::LocalOnly,
+        supports_api_key: false,
+        supports_extra_accounts: false,
+        icon_key: "zed",
+        category: ProviderCategory::Coding,
+    },
 ];
 
 pub fn provider_definitions() -> &'static [ProviderDefinition] {
@@ -614,6 +650,7 @@ mod tests {
             "poe",
             "venice",
             "warp",
+            "mimo",
         ];
         let actual: Vec<&str> = provider_definitions()
             .iter()

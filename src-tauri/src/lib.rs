@@ -318,6 +318,10 @@ const DEFAULT_DISABLED_PROVIDERS: &[&str] = &[
     "venice",
     "vertexai",
     "warp",
+    "mimo",
+    "trae",
+    "qoder",
+    "zed",
 ];
 
 static CONFIG_WRITE: Mutex<()> = Mutex::new(());
@@ -829,7 +833,7 @@ struct StripEntry {
 /// strip ids are validated against this before becoming tray icon ids,
 /// including `family@account` cards. Stale family-level strip icons are
 /// removed for exactly this set.
-const STRIP_PROVIDER_IDS: [&str; 50] = [
+const STRIP_PROVIDER_IDS: [&str; 54] = [
     "claude",
     "codex",
     "cursor",
@@ -880,6 +884,10 @@ const STRIP_PROVIDER_IDS: [&str; 50] = [
     "venice",
     "vertexai",
     "warp",
+    "mimo",
+    "trae",
+    "qoder",
+    "zed",
 ];
 
 async fn update_tray_strip(app: tauri::AppHandle, entries: Vec<StripEntry>) -> Result<(), String> {
@@ -2045,6 +2053,10 @@ async fn fetch_provider_snapshot(provider_id: String, allow_disabled: bool) -> R
             "venice" => providers::venice::snapshot().await,
             "vertexai" => providers::vertexai::snapshot().await,
             "warp" => providers::warp::snapshot().await,
+            "mimo" => providers::mimo::snapshot().await,
+            "trae" => providers::trae::snapshot().await,
+            "qoder" => providers::qoder::snapshot().await,
+            "zed" => providers::zed::snapshot().await,
             _ => return Err(format!("no single-provider refresh for {family}")),
         });
     }
@@ -2241,6 +2253,10 @@ async fn run_usage_fetch(app: &tauri::AppHandle) -> Vec<providers::Snapshot> {
         ("venice", Box::pin(guarded("venice".into(), "Venice".into(), providers::venice::snapshot()))),
         ("vertexai", Box::pin(guarded("vertexai".into(), "Vertex AI".into(), providers::vertexai::snapshot()))),
         ("warp", Box::pin(guarded("warp".into(), "Warp".into(), providers::warp::snapshot()))),
+        ("mimo", Box::pin(guarded("mimo".into(), "MiMo".into(), providers::mimo::snapshot()))),
+        ("trae", Box::pin(guarded("trae".into(), "Trae".into(), providers::trae::snapshot()))),
+        ("qoder", Box::pin(guarded("qoder".into(), "Qoder".into(), providers::qoder::snapshot()))),
+        ("zed", Box::pin(guarded("zed".into(), "Zed".into(), providers::zed::snapshot()))),
     ];
     // Skip the leftover Moonshot fetch only when the last Kimi card
     // actually painted — a credentials file alone is not enough (expired
@@ -3167,6 +3183,7 @@ async fn test_api_key(
         "poe" => providers::poe::snapshot_with_key(key).await,
         "venice" => providers::venice::snapshot_with_key(key).await,
         "warp" => providers::warp::snapshot_with_key(key).await,
+        "mimo" => providers::mimo::snapshot_with_key(key).await,
         "siliconflow" => providers::siliconflow::snapshot_with_key(key).await,
         "novita" => providers::novita::snapshot_with_key(key).await,
         "relaybalance" => {
@@ -3672,6 +3689,7 @@ fn provider_env_vars(provider: &str) -> &'static [&'static str] {
         "poe" => &["POE_API_KEY"],
         "venice" => &["VENICE_API_KEY"],
         "warp" => &["WARP_API_KEY", "WARP_TOKEN"],
+        "mimo" => &["MIMO_API_KEY"],
         "firecrawl" => &["FIRECRAWL_API_KEY", "FIRECRAWL_FIRECRAWL_API_KEY"],
         "brave" => &["BRAVE_API_KEY", "BRAVE_SEARCH_API_KEY"],
         "siliconflow" => &["SILICONFLOW_API_KEY"],
@@ -3751,6 +3769,10 @@ fn get_credential_status(provider: String) -> Value {
         "doubao" => providers::doubao::local_credential_hint(),
         "clawsgo" => providers::clawsgo::local_credential_hint(),
         "kiro" => providers::kiro::local_credential_hint(),
+        "trae" => providers::trae::local_credential_hint(),
+        "qoder" => providers::qoder::local_credential_hint(),
+        "zed" => providers::zed::local_credential_hint(),
+        "mimo" => providers::mimo::local_credential_hint(),
         _ => None,
     };
     // Subscription/membership badge: Cursor reads it straight from the

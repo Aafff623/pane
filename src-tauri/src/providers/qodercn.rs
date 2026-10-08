@@ -61,8 +61,8 @@ async fn fetch() -> Result<Snapshot, String> {
     };
     let token = load_token(&auth_path)?;
     let (plan, usage) = tokio::join!(
-        fetch_api(&token, PLAN_PATH, "plan"),
-        fetch_api(&token, USAGE_PATH, "usage")
+        fetch_api(OPENAPI_BASE, &token, PLAN_PATH, "plan"),
+        fetch_api(OPENAPI_BASE, &token, USAGE_PATH, "usage")
     );
     let usage = usage?;
     parse_snapshot(plan.as_ref().ok(), &usage)
@@ -74,7 +74,8 @@ fn auth_file_path() -> Option<PathBuf> {
 
 /// auth.v1.dat → session token. The AES-GCM key travels in `Local State`,
 /// so a missing/corrupt Local State is the same as no sign-in for us.
-fn load_token(auth_path: &Path) -> Result<String, String> {
+/// Shared with the international `qoder` card (path is a parameter).
+pub(crate) fn load_token(auth_path: &Path) -> Result<String, String> {
     // Raw bytes, not text: the v10 blob is AES-GCM ciphertext and never
     // survives a UTF-8 read.
     let raw = super::read_small_bytes(auth_path, MAX_AUTH_BYTES, "auth.v1.dat")?;
@@ -133,9 +134,13 @@ fn decode_os_crypt(raw: &[u8], key: &[u8; 32]) -> Result<Vec<u8>, String> {
 
 /// One authenticated OpenAPI GET. A rejected session token is the IDE's
 /// sign-in dying — surface it as guidance instead of a raw HTTP code.
-async fn fetch_api(token: &str, path: &str, what: &str) -> Result<Value, String> {
+/// One authenticated OpenAPI GET (base is a parameter: the CN card hits
+/// openapi.qoder.com.cn, the international card openapi.qoder.sh — each
+/// site rejects the other's tokens). A rejected session token is the IDE's
+/// sign-in dying — surface it as guidance instead of a raw HTTP code.
+pub(crate) async fn fetch_api(base: &str, token: &str, path: &str, what: &str) -> Result<Value, String> {
     let resp = http()
-        .get(format!("{OPENAPI_BASE}{path}"))
+        .get(format!("{base}{path}"))
         .bearer_auth(token)
         .header("Accept", "application/json")
         .timeout(Duration::from_secs(8))
@@ -145,7 +150,7 @@ async fn fetch_api(token: &str, path: &str, what: &str) -> Result<Value, String>
     let status = resp.status();
     if !status.is_success() {
         if status.as_u16() == 401 || status.as_u16() == 403 {
-            return Err("Qoder CN session token was rejected — sign in again in Qoder CN".into());
+            return Err("Qoder session token was rejected — sign in again in the Qoder app".into());
         }
         return Err(format!("{what} endpoint: HTTP {status}"));
     }
@@ -153,6 +158,16 @@ async fn fetch_api(token: &str, path: &str, what: &str) -> Result<Value, String>
 }
 
 fn parse_snapshot(plan: Option<&Value>, usage: &Value) -> Result<Snapshot, String> {
+    let (plan, metrics) = credit_metrics(plan, usage)?;
+    Ok(Snapshot::ok(ID, NAME, plan, metrics))
+}
+
+/// Usage payload → (tier, card rows); shared with the international
+/// `qoder` card (the API shape is identical across both sites).
+pub(crate) fn credit_metrics(
+    plan: Option<&Value>,
+    usage: &Value,
+) -> Result<(Option<String>, Vec<Metric>), String> {
     let quota = usage
         .get("userQuota")
         .ok_or("usage response has no userQuota")?;
@@ -253,7 +268,7 @@ fn parse_snapshot(plan: Option<&Value>, usage: &Value) -> Result<Snapshot, Strin
         .and_then(|p| p.get("plan_tier_name"))
         .and_then(Value::as_str)
         .map(str::to_string);
-    Ok(Snapshot::ok(ID, NAME, plan, metrics))
+    Ok((plan, metrics))
 }
 
 fn credit_row(label: &str, used: f64, total: f64) -> Metric {

@@ -233,6 +233,14 @@ anything unverified lives under `待确认` at the bottom.
 
 ## 待确认
 
+- Qoder 国际版 (family `qoder`) 的 Windows 配置目录按命名惯例取
+  `com.qoder.app.stable`（CN 版为 `com.qodercn.app.stable`），备选 `Qoder`；
+  端点 `openapi.qoder.sh` 与 API 路径 (`/api/v2/user/plan`、
+  `/api/v2/quota/usage`) 已由参考源证实，但目录名待真实装机核验 (2026-10-08，Batch 2)。
+- Trae 国际版 (family `trae`) 的用量端点先试 v2 再回退 v1
+  (`/trae/api/v{1,2}/pay/ide_user_ent_usage`)；CN 版实测 v2，cockpit 参考为 v1，
+  国际版真实版本待装机核验 (2026-10-08，Batch 2)。
+
 - `pnpm` is the package manager in use but only `package-lock.json` is
   tracked (no `pnpm-lock.yaml`). Commit a pnpm lockfile, or standardize on
   npm?

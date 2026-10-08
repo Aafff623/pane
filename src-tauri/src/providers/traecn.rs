@@ -28,7 +28,7 @@ const DEFAULT_HOST: &str = "https://api.trae.cn";
 const ENT_USAGE_PATH: &str = "/trae/api/v2/pay/ide_user_ent_usage";
 const PAY_STATUS_PATH: &str = "/trae/api/v2/pay/ide_user_pay_status";
 
-const MAX_STORAGE_BYTES: u64 = 1024 * 1024; // grows with the profile/plugin count
+pub(crate) const MAX_STORAGE_BYTES: u64 = 1024 * 1024; // grows with the profile/plugin count
 const MAX_API_BYTES: usize = 128 * 1024;
 
 pub async fn snapshot() -> Snapshot {
@@ -103,7 +103,9 @@ fn storage_path() -> Option<std::path::PathBuf> {
     })
 }
 
-async fn fetch_json(host: &str, path: &str, what: &str, token: &str) -> Result<Value, String> {
+/// One authenticated usage/pay-status POST; shared with the international
+/// `trae` card (host is a parameter, token format is the same JWT).
+pub(crate) async fn fetch_json(host: &str, path: &str, what: &str, token: &str) -> Result<Value, String> {
     let url = format!("{host}{path}");
     let resp = http()
         .post(&url)
@@ -118,7 +120,7 @@ async fn fetch_json(host: &str, path: &str, what: &str, token: &str) -> Result<V
     let status = resp.status();
     if !status.is_success() {
         if status.as_u16() == 401 || status.as_u16() == 403 {
-            return Err("Trae CN session token was rejected — open Trae CN once to refresh it".into());
+            return Err("Trae session token was rejected — open the Trae app once to refresh it".into());
         }
         return Err(format!("{what}: HTTP {status}"));
     }
@@ -126,6 +128,12 @@ async fn fetch_json(host: &str, path: &str, what: &str, token: &str) -> Result<V
 }
 
 fn parse_snapshot(plan: Option<&str>, usage: &Value) -> Result<Snapshot, String> {
+    let metrics = credit_metrics(usage)?;
+    Ok(Snapshot::ok(ID, NAME, plan.map(str::to_string), metrics))
+}
+
+/// Usage payload → card rows; shared with the international `trae` card.
+pub(crate) fn credit_metrics(usage: &Value) -> Result<Vec<Metric>, String> {
     let summary = usage
         .pointer("/usage_summary")
         .ok_or("usage response has no usage_summary")?;
@@ -142,7 +150,7 @@ fn parse_snapshot(plan: Option<&str>, usage: &Value) -> Result<Snapshot, String>
     let pct = if total > 0.0 { (consumed / total * 100.0).clamp(0.0, 100.0) } else { 0.0 };
     let mut metrics = vec![Metric::progress("Credits", pct, Some(format!("{consumed:.2} of {total:.0} credits used")))];
     metrics.extend(pack_rows(usage));
-    Ok(Snapshot::ok(ID, NAME, plan.map(str::to_string), metrics))
+    Ok(metrics)
 }
 
 /// Trae stacks several hard-expiry credit packs (loyalty perk, monthly
@@ -305,7 +313,8 @@ fn derive_key_iv(random_key: &[u8], salt: &[u8; SHA512_LEN]) -> Option<([u8; 16]
 }
 
 /// One ByteCrypto value → the decrypted JSON document of the sign-in blob.
-fn decode_auth_blob(b64_value: &str) -> Result<Value, String> {
+/// Shared with the international `trae` card (same crypto, same key).
+pub(crate) fn decode_auth_blob(b64_value: &str) -> Result<Value, String> {
     use base64::Engine;
     let raw = base64::engine::general_purpose::STANDARD
         .decode(b64_value.trim())
@@ -369,7 +378,7 @@ fn epoch_ms(n: f64) -> i64 {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use aes::cipher::block_padding::Pkcs7;
     use aes::cipher::{BlockEncryptMut, KeyIvInit};
@@ -378,6 +387,13 @@ mod tests {
     use sha2::{Digest, Sha512};
 
     type Aes128CbcEnc = cbc::Encryptor<aes::Aes128>;
+
+    /// Encrypt a plain payload into the base64 storage.json value form.
+    /// Shared with the international `trae` card's tests.
+    pub(crate) fn encrypt_blob_for_tests(plain: &[u8]) -> String {
+        let blob = byte_crypto_encrypt(plain, &[7u8; 32], false);
+        base64::engine::general_purpose::STANDARD.encode(blob)
+    }
 
     /// Mirror of the IDE's encrypt path so tests can round-trip real blobs.
     fn byte_crypto_encrypt(plain: &[u8], random_key: &[u8; 32], private: bool) -> Vec<u8> {

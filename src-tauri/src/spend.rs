@@ -144,7 +144,7 @@ pub fn source_statuses() -> Vec<SpendSourceStatus> {
         source_status("pi-jsonl", "Pi coding agent", "JSONL session logs", "pi_line", &[pi], &["claude", "codex"]),
         source_status("grok-jsonl", "Grok CLI", "JSONL unified log", "grok", &[grok.join("logs").join("unified.jsonl")], &["grok"]),
         source_status("opencode-sqlite", "OpenCode Desktop / CLI", "SQLite message ledger", "providers::opencode::collect_cost_events", &[providers::opencode::data_dir().join("opencode.db")], &["opencode", "aihubmix"]),
-        source_status("qoder-credits", "Qoder CN", "credits ledger → blended token estimate (official docs price credits per task, not per token)", "usage_history::credit_trend_map", &[crate::providers::config_dir().join("credit_history.json")], &["qoder"]),
+        source_status("qodercn-credits", "Qoder CN", "credits ledger → blended token estimate (official docs price credits per task, not per token)", "usage_history::credit_trend_map", &[crate::providers::config_dir().join("credit_history.json")], &["qodercn"]),
         source_status("devin-sqlite", "Devin", "SQLite sessions ledger", "providers::devin::collect_usage_events", &[crate::platform::config_home().map(|d| d.join("devin").join("cli").join("sessions.db")).unwrap_or_default()], &["devin"]),
         source_status("minimax-sqlite", "MiniMax Agent", "SQLite token_usage ledger", "providers::minimax::collect_usage_events", &[home.join(".minimax").join("sqlite.db")], &["minimax"]),
         source_status("hermes-sqlite", "Hermes Desktop", "SQLite session_model_usage ledger", "providers::hermes::collect_usage_events", &[local.join("hermes").join("state.db")], &["hermes", "minimax", "openrouter"]),
@@ -4557,7 +4557,7 @@ pub fn collect_daily(cursor_csv: Option<String>) -> (Vec<ProviderSpend>, Vec<Pro
     // cc-switch-only tools get their own cards (empty scans are filtered
     // out by has_data at the end).
     list.push(build_spend("mcode", "MaxCode", cc.mcode));
-    let mut qoder = build_spend("qoder", "Qoder", qoder_credit_estimate());
+    let mut qoder = build_spend("qodercn", "Qoder CN", qoder_credit_estimate());
     qoder.estimated = true;
     list.push(qoder);
     list.push(build_spend("gemini", "Gemini", cc.gemini));

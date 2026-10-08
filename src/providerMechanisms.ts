@@ -68,4 +68,8 @@ export const MECHANISMS: Record<string, Mechanism> = {
   "venice": { kind: "key", env: ["VENICE_API_KEY"], hosts: ["api.venice.ai"] },
   "vertexai": { kind: "local", reads: ["%APPDATA%\\gcloud\\application_default_credentials.json"], env: ["CLOUDSDK_CONFIG", "GOOGLE_CLOUD_PROJECT"], hosts: ["oauth2.googleapis.com"] },
   "warp": { kind: "key", env: ["WARP_API_KEY", "WARP_TOKEN"], hosts: ["app.warp.dev"] },
+  "mimo": { kind: "key", env: ["MIMO_API_KEY"], hosts: ["platform.xiaomimimo.com", "token-plan-sgp.xiaomimimo.com", "api.xiaomimimo.com"] },
+  "trae": { kind: "local", reads: ["%APPDATA%\Trae\User\globalStorage\storage.json"], hosts: ["grow-normal.trae.ai", "growsg-normal.trae.ai"] },
+  "qoder": { kind: "local", reads: ["%APPDATA%\com.qoder.app.stable\auth.v1.dat"], hosts: ["openapi.qoder.sh"] },
+  "zed": { kind: "local", reads: ["%LOCALAPPDATA%\Zed\threads\threads.db"] },
 };

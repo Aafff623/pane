@@ -14,7 +14,7 @@ mod tests {
 
     /// Families that intentionally live only in the frontend mirror
     /// (spend-only cards with no Rust quota provider).
-    const TS_ONLY_WHITELIST: &[&str] = &["mcode", "qoder"];
+    const TS_ONLY_WHITELIST: &[&str] = &["mcode"];
 
     fn ts_family_ids() -> Vec<String> {
         let mut out = vec![];
