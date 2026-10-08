@@ -13,8 +13,14 @@ import circleNotch from "./assets/icons/circle-notch-bold.svg?raw";
 import rows from "./assets/icons/rows-bold.svg?raw";
 import palette from "./assets/icons/palette-bold.svg?raw";
 import key from "./assets/icons/key-bold.svg?raw";
+import magnifyingGlass from "./assets/icons/magnifying-glass-bold.svg?raw";
+import bell from "./assets/icons/bell-bold.svg?raw";
+import shield from "./assets/icons/shield-bold.svg?raw";
+import globe from "./assets/icons/globe-bold.svg?raw";
+import keyboard from "./assets/icons/keyboard-bold.svg?raw";
+import arrowUp from "./assets/icons/arrow-up-bold.svg?raw";
 
-const ICONS = { gear, arrowsClockwise, shareNetwork, star, info, question, x, caretUp, caretDown, lightning, microphone, circleNotch, rows, palette, key } as const;
+const ICONS = { gear, arrowsClockwise, shareNetwork, star, info, question, x, caretUp, caretDown, lightning, microphone, circleNotch, rows, palette, key, magnifyingGlass, bell, shield, globe, keyboard, arrowUp } as const;
 
 export type UiIconName = keyof typeof ICONS;
 

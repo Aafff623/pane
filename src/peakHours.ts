@@ -3,7 +3,7 @@
 // the machine's timezone. Rules verified against official docs on
 // 2026-09-15:
 //
-//   - zai / linkso (GLM Coding Plan): peak Mon–Fri 14:00–18:00 bills 1×,
+//   - zai (GLM Coding Plan): peak Mon–Fri 14:00–18:00 bills 1×,
 //     every other hour (weekends included) bills half credits (0.5×).
 //   - commandcode (GOAT): the plan's own rolling windows are clock-free;
 //     only DeepSeek-routed models inherit DeepSeek's peak Mon–Fri
@@ -29,10 +29,6 @@ export const PEAK_RULES: Record<string, PeakRule> = {
   zai: {
     windows: [{ days: WORKDAYS, fromMin: at(14), toMin: at(18) }],
     tipKey: "peak.rule.zai",
-  },
-  linkso: {
-    windows: [{ days: WORKDAYS, fromMin: at(14), toMin: at(18) }],
-    tipKey: "peak.rule.linkso",
   },
   commandcode: {
     windows: [

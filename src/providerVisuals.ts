@@ -2,6 +2,7 @@ import antigravityIcon from "./assets/providers/antigravity.svg?raw";
 import aihubmixIcon from "./assets/providers/aihubmix.svg?raw";
 import claudeIcon from "./assets/providers/claude.svg?raw";
 import clawsgoIcon from "./assets/providers/clawsgo.svg?raw";
+import codebuffIcon from "./assets/providers/codebuff.svg?raw";
 import codexIcon from "./assets/providers/codex.svg?raw";
 import commandcodeIcon from "./assets/providers/commandcode.svg?raw";
 import clinepassIcon from "./assets/providers/clinepass.svg?raw";
@@ -10,8 +11,10 @@ import cursorIcon from "./assets/providers/cursor.svg?raw";
 import deepseekIcon from "./assets/providers/deepseek.svg?raw";
 import devinIcon from "./assets/providers/devin.svg?raw";
 import doubaoIcon from "./assets/providers/doubao.svg?raw";
+import elevenlabsIcon from "./assets/providers/elevenlabs.svg?raw";
 import grokIcon from "./assets/providers/grok.svg?raw";
 import hermesIcon from "./assets/providers/hermes.svg?raw";
+import kiloIcon from "./assets/providers/kilo.svg?raw";
 import kimiIcon from "./assets/providers/kimi.svg?raw";
 import minimaxIcon from "./assets/providers/minimax.svg?raw";
 import mcodeIcon from "./assets/providers/mcode.svg?raw";
@@ -23,6 +26,8 @@ import opencodeIcon from "./assets/providers/opencode.svg?raw";
 import openrouterIcon from "./assets/providers/openrouter.svg?raw";
 import qwenIcon from "./assets/providers/qwen.svg?raw";
 import qodercnIcon from "./assets/providers/qodercn.svg?raw";
+import relaybalanceIcon from "./assets/providers/relaybalance.svg?raw";
+import sensenovaIcon from "./assets/providers/sensenova.svg?raw";
 import traecnIcon from "./assets/providers/traecn.svg?raw";
 import sharkaiIcon from "./assets/providers/sharkai.svg?raw";
 import siliconflowIcon from "./assets/providers/siliconflow.svg?raw";
@@ -32,7 +37,8 @@ import bochaIcon from "./assets/providers/bocha.svg?raw";
 import tavilyIcon from "./assets/providers/tavily.svg?raw";
 import firecrawlIcon from "./assets/providers/firecrawl.svg?raw";
 import braveIcon from "./assets/providers/brave.svg?raw";
-import lightningIcon from "./assets/icons/lightning-bold.svg?raw";
+import apigotoIcon from "./assets/providers/apigoto.svg?raw";
+import shandianshuoIcon from "./assets/providers/shandianshuo.svg?raw";
 import { providerDefinition, providerFamily } from "./providerCatalog";
 
 export interface ProviderVisual {
@@ -48,6 +54,7 @@ const VISUALS: Readonly<Record<string, ProviderVisual>> = {
   aihubmix: { iconKey: "aihubmix", iconSvg: aihubmixIcon },
   claude: { iconKey: "claude", iconSvg: claudeIcon },
   clinepass: { iconKey: "clinepass", iconSvg: clinepassIcon },
+  codebuff: { iconKey: "codebuff", iconSvg: codebuffIcon },
   codex: { iconKey: "codex", iconSvg: codexIcon },
   copilot: { iconKey: "copilot", iconSvg: copilotIcon },
   cursor: { iconKey: "cursor", iconSvg: cursorIcon },
@@ -55,8 +62,8 @@ const VISUALS: Readonly<Record<string, ProviderVisual>> = {
   devin: { iconKey: "devin", iconSvg: devinIcon },
   grok: { iconKey: "grok", iconSvg: grokIcon },
   hermes: { iconKey: "hermes", iconSvg: hermesIcon },
+  kilo: { iconKey: "kilo", iconSvg: kiloIcon },
   kimi: { iconKey: "kimi", iconSvg: kimiIcon },
-  linkso: { iconKey: "linkso", iconSvg: zaiIcon },
   minimax: { iconKey: "minimax", iconSvg: minimaxIcon },
   mcode: { iconKey: "mcode", iconSvg: mcodeIcon },
   zcode: { iconKey: "zcode", iconSvg: zcodeIcon },
@@ -74,12 +81,16 @@ const VISUALS: Readonly<Record<string, ProviderVisual>> = {
   traecn: { iconKey: "traecn", iconSvg: traecnIcon },
   commandcode: { iconKey: "commandcode", iconSvg: commandcodeIcon, invertOnDarkTray: true },
   doubao: { iconKey: "doubao", iconSvg: doubaoIcon },
+  elevenlabs: { iconKey: "elevenlabs", iconSvg: elevenlabsIcon },
+  relaybalance: { iconKey: "relaybalance", iconSvg: relaybalanceIcon },
+  sensenova: { iconKey: "sensenova", iconSvg: sensenovaIcon },
   clawsgo: { iconKey: "clawsgo", iconSvg: clawsgoIcon, invertOnDarkTray: true },
-  shandianshuo: { iconKey: "shandianshuo", iconSvg: lightningIcon },
+  shandianshuo: { iconKey: "shandianshuo", iconSvg: shandianshuoIcon },
   bocha: { iconKey: "bocha", iconSvg: bochaIcon },
   tavily: { iconKey: "tavily", iconSvg: tavilyIcon },
   firecrawl: { iconKey: "firecrawl", iconSvg: firecrawlIcon },
   brave: { iconKey: "brave", iconSvg: braveIcon },
+  apigoto: { iconKey: "apigoto", iconSvg: apigotoIcon },
 };
 
 /// Known One/New API hosts that ship their own colorful mark.  Keyed by hostname
