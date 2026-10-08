@@ -235,19 +235,3 @@ function initKeyboardDemo() {
 }
 initKeyboardDemo();
 
-// Every download button points at the releases page, so a blocked or
-// rate-limited API still leaves a working link. When the API answers we swap
-// in the newest Windows installer asset, making one click download it — the
-// site needs no redeploy when the next release ships.
-async function pointDownloadsAtLatestInstaller() {
-  const links = [...document.querySelectorAll('[data-latest-installer]')];
-  if (!links.length) return;
-  try {
-    const response = await fetch('https://api.github.com/repos/Aafff623/pane/releases/latest', { headers: { Accept: 'application/vnd.github+json' } });
-    if (!response.ok) return;
-    const asset = ((await response.json()).assets || []).find(item => /-setup\.exe$/.test(item.name));
-    if (!asset || !asset.browser_download_url) return;
-    for (const link of links) link.href = asset.browser_download_url;
-  } catch { /* keep the releases page link */ }
-}
-pointDownloadsAtLatestInstaller();
