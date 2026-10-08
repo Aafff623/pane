@@ -10,7 +10,6 @@ Handoff parcels in `temp/handoff/` cite task IDs from this board. The board does
 
 ## In progress
 
-- [ ] T-0001 — 发布 0.5.0：打 tag `v0.5.0` 触发 CI 发布，并在正式版机器上完成一次应用内更新验证（前置：用户 UI 验收 + 对话内明确授权；0.5.0 内容已随分主题提交入库）
 - [ ] T-0016 — 官网模块二交互演示右侧布局与模块三/四 GSAP 动效恢复：将 Alt+2/Shift 交互卡片重构至面板右侧第 3 列空置区，彻底恢复双向跑马灯与特性卡片循环播放动效
 - [ ] T-0019 — 花费面板时段完整性（通用 bug）：今天 / 昨天 / 7 天 / 30 天 / 全部 各时段在「美元」与「tokens」两种口径下都显示非零数据（官网演示数据已修；真机扫描口径待核对）
 
@@ -23,7 +22,7 @@ Handoff parcels in `temp/handoff/` cite task IDs from this board. The board does
 - [ ] T-0007 — 把 4 个模块的 84 个「死测试」挂进 parse-tests harness（`lib.rs`/`tray_projection`/`telemetry`/`httpapi`）
 - [ ] T-0008 — 收尾欠账：长墙镜像白名单逐家实测扩展、ru 语言 38 键、`docs/providers.md` 16 节
 - [ ] T-0009 — Qoder 配额卡：用户完成一次 device-code 登录后按实测响应实现（端点情报已在 handoff）
-- [ ] T-0010 — 发布资产与杂项：`install.ps1` 上游指向 6 处、`ROADMAP`/`README` 计数、`stash@{0}` 处置、项目 skill 落位与入库、**装机目录自启 exe 换正式构建**（实测为依赖 Vite 的开发构建——无 Vite 时开机自启只显示报错页；换正式版后走应用内更新，不再卸载重装）
+- [ ] T-0010 — 发布资产与杂项：`install.ps1` 上游指向 6 处、`ROADMAP`/`README` 计数、`stash@{0}` 处置、项目 skill 落位与入库、**装机目录自启 exe 换正式构建**（实测为依赖 Vite 的开发构建——无 Vite 时开机自启只显示报错页；换正式版后走应用内更新，不再卸载重装，并在换装后实测一次应用内更新（v0.5.0 的 latest.json 通道首次可验））
 
 - [ ] T-0012 — 官网模块二重做「使用流程」区块：快捷键（Alt+2/Shift/Ctrl+S/Esc）+ 基本功能（多账号/总花费/额度查询）+ 生态扩展声明（不止 Coding Agent，生产力工具皆可接入）
 - [ ] T-0013 — 官网第三模块 provider 图标深浅主题可见性修复（claude/hermes 等暗色看不清；深浅主题下全部可辨，验收双主题逐图肉眼过）
