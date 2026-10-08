@@ -29,7 +29,7 @@
 - **Provider 删除**：provider 设置面板（齿轮）与卡片菜单新增「删除此 Provider」——从自定义看板与主页看板一并移除（凭据保留）；自定义看板底部「已删除的 Provider」一行随时可恢复
 - **实验性功能开关**：皮肤市场默认隐藏，开启需二次确认，关闭即热切回原生皮肤（`experimentalFeatures`）
 - **新装默认精简**：首次安装仅默认启用 8 个主流家族，其余 33 家偏门默认禁用（`DEFAULT_DISABLED_PROVIDERS`，老配置不受影响）
-- **官网正式上线**：`https://pane.threetwoa.live`（Cloudflare 自定义域）；首屏交互演示由真实前端打包驱动——9 个快捷键演示（`Alt+2` / `Esc` / `Shift` / `Shift+1` / `Ctrl+S` / `Ctrl+E` / `Ctrl+L` / `Ctrl+R` / `T`，点击与按键均可触发）、深浅主题切换、移动端布局
+- **官网正式上线**：`https://pane.threetwoa.live`（Cloudflare 自定义域）；首屏交互演示由真实前端打包驱动——9 个快捷键演示（`Alt+2` / `Esc` / `Shift` / `Shift+1` / `Ctrl+S` / `Ctrl+E` / `Ctrl+L` / `Ctrl+R` / `T`，点击与按键均可触发）、深浅主题切换、移动端布局；「下载 Windows 版」点击直接取最新安装包（实时解析 GitHub 最新 Release，失败回退 Release 页面）；站点当前为中文单语，英文版后续再做
 
 ## 变更
 
