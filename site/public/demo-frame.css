@@ -1,0 +1,13 @@
+/* Host-only framing. Keep Pane's native auto-hide side rails and interaction model. */
+html,body { height:100%; }
+body { border-radius:14px; }
+#side-zone,#side-zone-right { width:10px!important; }
+#side-zone:hover,#side-zone:focus-within,#side-zone-right:hover,#side-zone-right:focus-within { width:42px!important; }
+#side-zone .sidebar { left:0!important; transform:translate(calc(-100% + 4px))!important; }
+#side-zone-right .sidebar-right { left:auto!important; right:0!important; transform:translate(calc(100% - 4px))!important; }
+#side-zone:hover .sidebar,#side-zone:focus-within .sidebar,
+#side-zone-right:hover .sidebar-right,#side-zone-right:focus-within .sidebar-right { transform:none!important; }
+.content { padding-left:0!important; padding-right:0!important; }
+#settings { overflow-y:auto; }
+.settings-open #settings { transform:translateX(0)!important; visibility:visible!important; }
+@media (prefers-reduced-motion:reduce) { *,*::before,*::after { animation:none!important; transition:none!important; scroll-behavior:auto!important; } }

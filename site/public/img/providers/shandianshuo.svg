@@ -1,5 +1,13 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64">
-  <rect width="64" height="64" rx="14" fill="hsl(298 38% 32%)"/>
-  <rect x="0.5" y="0.5" width="63" height="63" rx="13.5" fill="none" stroke="rgba(255,255,255,.14)"/>
-  <text x="32" y="33" text-anchor="middle" dominant-baseline="central" font-family="-apple-system,'Segoe UI',system-ui,'PingFang SC','Microsoft YaHei',sans-serif" font-size="26" font-weight="600" fill="#f4f4f5">闪</text>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24">
+  <defs>
+    <linearGradient id="sds-tile" x1="12" y1="0" x2="12" y2="24" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#FFC900"/>
+      <stop offset="1" stop-color="#F6820D"/>
+    </linearGradient>
+  </defs>
+  <rect width="24" height="24" rx="6" fill="url(#sds-tile)"/>
+  <path fill="#F8FAFC" d="M14.1 2.6 7.5 12.7h3.3L9.2 21.4l7.5-10.9h-3.4l2.2-7.9Z"/>
+  <rect x="9.3" y="5.1" width="3.1" height="0.95" fill="url(#sds-tile)"/>
+  <rect x="8.7" y="6.8" width="3.1" height="0.95" fill="url(#sds-tile)"/>
+  <rect x="8.1" y="8.5" width="3.1" height="0.95" fill="url(#sds-tile)"/>
 </svg>

@@ -1,0 +1,377 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Pane</title>
+  <link rel="stylesheet" href="/fonts/fonts.css"><link rel="stylesheet" href="/demo-frame.css?v=7">  <script type="module" crossorigin src="/demo/assets/index-Bx_2g8R3.js"></script>
+  <link rel="stylesheet" crossorigin href="/demo/assets/index-CHpPgawq.css">
+</head>
+
+  <body>
+    <!-- Liquid-glass lens (prasen.dev original): rounded-rect SDF lens map —
+         refraction hugs the rim, center stays optically flat — with R/G/B
+         displaced at different strengths for a real prism fringe. Filter
+         dimensions and maps are filled in by initLiquidLens() per element. -->
+    <svg aria-hidden="true" width="0" height="0" style="position: absolute">
+      <defs>
+        <filter id="lens-side" x="0" y="0" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB">
+          <feImage id="lens-map-side" href="" x="0" y="0" result="map" />
+          <feDisplacementMap in="SourceGraphic" in2="map" scale="39" xChannelSelector="R" yChannelSelector="G" result="dispR" />
+          <feColorMatrix in="dispR" type="matrix" values="1 0 0 0 0  0 0 0 0 0  0 0 0 0 0  0 0 0 1 0" result="chR" />
+          <feDisplacementMap in="SourceGraphic" in2="map" scale="32" xChannelSelector="R" yChannelSelector="G" result="dispG" />
+          <feColorMatrix in="dispG" type="matrix" values="0 0 0 0 0  0 1 0 0 0  0 0 0 0 0  0 0 0 1 0" result="chG" />
+          <feDisplacementMap in="SourceGraphic" in2="map" scale="25" xChannelSelector="R" yChannelSelector="G" result="dispB" />
+          <feColorMatrix in="dispB" type="matrix" values="0 0 0 0 0  0 0 0 0 0  0 0 1 0 0  0 0 0 1 0" result="chB" />
+          <feBlend in="chR" in2="chG" mode="screen" result="rg" />
+          <feBlend in="rg" in2="chB" mode="screen" result="rgb" />
+          <feGaussianBlur in="rgb" stdDeviation="0.35" />
+        </filter>
+        <filter id="lens-bar" x="0" y="0" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB">
+          <feImage id="lens-map-bar" href="" x="0" y="0" result="map" />
+          <feDisplacementMap in="SourceGraphic" in2="map" scale="39" xChannelSelector="R" yChannelSelector="G" result="dispR" />
+          <feColorMatrix in="dispR" type="matrix" values="1 0 0 0 0  0 0 0 0 0  0 0 0 0 0  0 0 0 1 0" result="chR" />
+          <feDisplacementMap in="SourceGraphic" in2="map" scale="32" xChannelSelector="R" yChannelSelector="G" result="dispG" />
+          <feColorMatrix in="dispG" type="matrix" values="0 0 0 0 0  0 1 0 0 0  0 0 0 0 0  0 0 0 1 0" result="chG" />
+          <feDisplacementMap in="SourceGraphic" in2="map" scale="25" xChannelSelector="R" yChannelSelector="G" result="dispB" />
+          <feColorMatrix in="dispB" type="matrix" values="0 0 0 0 0  0 0 0 0 0  0 0 1 0 0  0 0 0 1 0" result="chB" />
+          <feBlend in="chR" in2="chG" mode="screen" result="rg" />
+          <feBlend in="rg" in2="chB" mode="screen" result="rgb" />
+          <feGaussianBlur in="rgb" stdDeviation="0.35" />
+        </filter>
+        <filter id="lens-footer" x="0" y="0" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB">
+          <feImage id="lens-map-footer" href="" x="0" y="0" result="map" />
+          <feDisplacementMap in="SourceGraphic" in2="map" scale="39" xChannelSelector="R" yChannelSelector="G" result="dispR" />
+          <feColorMatrix in="dispR" type="matrix" values="1 0 0 0 0  0 0 0 0 0  0 0 0 0 0  0 0 0 1 0" result="chR" />
+          <feDisplacementMap in="SourceGraphic" in2="map" scale="32" xChannelSelector="R" yChannelSelector="G" result="dispG" />
+          <feColorMatrix in="dispG" type="matrix" values="0 0 0 0 0  0 1 0 0 0  0 0 0 0 0  0 0 0 1 0" result="chG" />
+          <feDisplacementMap in="SourceGraphic" in2="map" scale="25" xChannelSelector="R" yChannelSelector="G" result="dispB" />
+          <feColorMatrix in="dispB" type="matrix" values="0 0 0 0 0  0 0 0 0 0  0 0 1 0 0  0 0 0 1 0" result="chB" />
+          <feBlend in="chR" in2="chG" mode="screen" result="rg" />
+          <feBlend in="rg" in2="chB" mode="screen" result="rgb" />
+          <feGaussianBlur in="rgb" stdDeviation="0.35" />
+        </filter>
+      </defs>
+    </svg>
+
+    <!-- First-launch-per-boot brand splash. Hidden by default; main.ts shows
+         it once per boot session (gated by config.lastStartupBootId) and on
+         Replay from Settings. Click anywhere to skip. -->
+    <div id="splash" class="hide" role="dialog" aria-label="Startup animation">
+      <div class="sa-col">
+        <div class="sa-logo-wrap">
+          <svg class="sa-mark" viewBox="0 0 512 512" aria-hidden="true">
+            <defs>
+              <linearGradient id="sa-tile" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0" stop-color="#232a33"/>
+                <stop offset="1" stop-color="#12161c"/>
+              </linearGradient>
+              <linearGradient id="sa-arcg" x1="0" y1="1" x2="1" y2="0">
+                <stop offset="0" stop-color="#3f7ef0"/>
+                <stop offset="1" stop-color="#6ea8ff"/>
+              </linearGradient>
+            </defs>
+            <rect width="512" height="512" rx="112" fill="url(#sa-tile)"/>
+            <g transform="rotate(135 256 256)">
+              <circle cx="256" cy="256" r="150" fill="none" stroke="#2a313c" stroke-width="62" pathLength="360" stroke-dasharray="270 90" stroke-linecap="round"/>
+              <circle id="sa-arc" cx="256" cy="256" r="150" fill="none" stroke="url(#sa-arcg)" stroke-width="62" pathLength="360" stroke-dasharray="360" stroke-dashoffset="145" stroke-linecap="round"/>
+            </g>
+            <line id="sa-needle" x1="256" y1="256" x2="352" y2="188" stroke="#f8fafc" stroke-width="34" stroke-linecap="round"/>
+            <circle id="sa-hub" cx="256" cy="256" r="46" fill="#f8fafc"/>
+          </svg>
+          <span class="sa-rip"></span>
+          <span class="sa-rip r2"></span>
+        </div>
+        <div class="sa-word" aria-label="Pane"><span>P</span><span>a</span><span>n</span><span>e</span></div>
+        <div class="sa-sub" data-i18n="splash.tagline">AI usage at a glance</div>
+      </div>
+      <span class="sa-skip" data-i18n="splash.skipHint">Click anywhere to skip</span>
+    </div>
+
+    <main class="popover">
+      <div class="main-col">
+        <div class="content">
+          <section id="providers">
+            <div class="skeleton-card">
+              <div class="skeleton-line title"></div>
+              <div class="skeleton-line bar"></div>
+              <div class="skeleton-line short"></div>
+            </div>
+            <div class="skeleton-card">
+              <div class="skeleton-line title"></div>
+              <div class="skeleton-line bar"></div>
+              <div class="skeleton-line short"></div>
+            </div>
+            <div class="skeleton-card">
+              <div class="skeleton-line title"></div>
+              <div class="skeleton-line bar"></div>
+              <div class="skeleton-line short"></div>
+            </div>
+          </section>
+        </div>
+
+        <footer>
+          <span id="status">Starting…</span>
+          <span id="build-info"></span>
+        </footer>
+      </div>
+
+      <!-- Auto-hiding sidebars: a 4px sliver on each edge until the cursor
+           reaches it, then the rail slides out over the cards. Left rail:
+           app controls. Right rail: the provider icon trail. -->
+      <div id="side-zone">
+        <aside class="sidebar">
+          <span id="app-logo" class="app-logo" title="Pane"></span>
+          <div class="sidebar-buttons top">
+            <button id="theme-btn" title="Light / dark mode" data-i18n-title="sidebar.theme">&#9728;</button>
+            <button id="refresh" title="Refresh now" data-i18n-title="sidebar.refresh">&#10227;</button>
+          </div>
+          <div class="sidebar-buttons bottom">
+            <button id="skin-btn" title="Skin market" aria-label="Skin market"></button>
+            <button id="customize-btn" title="Customize" data-i18n-title="sidebar.customize" aria-label="Customize">&#9776;</button>
+            <button id="settings-btn" title="Settings" data-i18n-title="sidebar.settings">&#9881;</button>
+          </div>
+        </aside>
+      </div>
+
+      <div id="side-zone-right">
+        <aside class="sidebar sidebar-right">
+          <div id="trail-wrap">
+            <button id="trail-more-top" class="trail-more top" title="向上滚动" hidden aria-label="Scroll up">
+              <span class="trail-dots">•••</span>
+            </button>
+            <nav id="trail" aria-label="Card navigation" data-i18n-aria="sidebar.cards"></nav>
+            <button id="trail-more-bottom" class="trail-more bottom" title="向下滚动" hidden aria-label="Scroll down">
+              <span class="trail-dots">•••</span>
+            </button>
+          </div>
+        </aside>
+      </div>
+    </main>
+
+    <div id="skin-mascot" aria-hidden="true"></div>
+
+    <!-- Customize: full-window panel sliding in from the left. -->
+    <aside id="drawer" aria-label="Customize" data-i18n-aria="sidebar.customize">
+      <div id="drawer-body"></div>
+    </aside>
+
+    <!-- Settings: full-window panel sliding in from the right. -->
+    <aside id="settings" aria-label="Settings" data-i18n-aria="settings.title">
+      <div class="panel-head glass-bar">
+        <button class="mini-btn" id="settings-close" data-i18n="settings.done">&#8592; Done</button>
+        <span class="panel-title" data-i18n="settings.title">Settings</span>
+        <button class="mini-btn settings-save-all" id="settings-save-all" type="button" data-i18n="settings.save" disabled>Save</button>
+      </div>
+
+      <div class="acc-group open">
+        <button class="acc-head"><span data-i18n="settings.general">General</span> <span class="chev">&#8964;</span></button>
+        <div class="acc-body"><div class="acc-inner">
+          <div class="setting-row">
+            <label for="locale" data-i18n="settings.language">Language</label>
+            <select id="locale">
+              <option value="auto" data-i18n="settings.langAuto">Auto</option>
+              <option value="en" data-i18n="settings.langEn">English</option>
+              <option value="zh" data-i18n="settings.langZh">中文</option>
+              <option value="ru" data-i18n="settings.langRu">Русский</option>
+            </select>
+          </div>
+          <div class="setting-row">
+            <label for="interval" data-i18n="settings.refreshEvery">Refresh every</label>
+            <input id="interval" type="number" min="1" max="120" value="5" /> <span class="unit" data-i18n="settings.min">min</span>
+          </div>
+          <div class="setting-row">
+            <label class="toggle"><input id="autostart" type="checkbox" /> <span data-i18n="settings.startWithWindows">Start with Windows</span></label>
+          </div>
+          <div class="setting-row">
+            <label for="pinned" data-i18n="settings.trayShows">Tray icon shows</label>
+            <select id="pinned"></select>
+          </div>
+          <div class="setting-row">
+            <label for="timeformat" data-i18n="settings.timeFormat">Time format</label>
+            <select id="timeformat">
+              <option value="auto" data-i18n="settings.timeAuto">Auto</option>
+              <option value="12" data-i18n="settings.time12">12-hour</option>
+              <option value="24" data-i18n="settings.time24">24-hour</option>
+            </select>
+          </div>
+          <div class="setting-row">
+            <label for="appearance" data-i18n="settings.appearance">Appearance</label>
+            <select id="appearance">
+              <option value="system" data-i18n="settings.appearSystem">System</option>
+              <option value="light" data-i18n="settings.appearLight">Light</option>
+              <option value="dark" data-i18n="settings.appearDark">Dark</option>
+            </select>
+          </div>
+          <div class="setting-row">
+            <label for="ui-font" data-i18n="settings.font">Font</label>
+            <input id="ui-font" type="text" spellcheck="false" autocomplete="off" placeholder="Type to filter installed fonts" data-i18n-placeholder="settings.fontPh" data-i18n-title="settings.fontTip" title="Applies to the whole interface. Clear to reset." />
+          </div>
+          <div class="setting-row">
+            <label class="toggle"><input id="density" type="checkbox" /> <span data-i18n="settings.compact">Compact layout</span></label>
+          </div>
+          <div class="setting-row">
+            <label class="toggle" title="Turn off on slower PCs — replaces the glass refraction with a simple solid look" data-i18n-title="settings.glassTip"><input id="glass" type="checkbox" /> <span data-i18n="settings.glass">Liquid glass effects</span></label>
+          </div>
+          <div class="setting-row">
+            <label class="toggle" title="Skip card entrance motion and the day/night wipe. Windows' own 'Animation effects' setting is still respected." data-i18n-title="settings.reduceAnimTip"><input id="reduce-anim" type="checkbox" /> <span data-i18n="settings.reduceAnim">Reduce animations</span></label>
+          </div>
+          <div class="setting-row">
+            <label class="toggle" title="Play the brand animation the first time Pane is shown after each system boot." data-i18n-title="settings.startupAnimTip"><input id="startup-anim" type="checkbox" /> <span data-i18n="settings.startupAnim">Startup animation</span></label>
+            <button class="link-btn" id="splash-replay" type="button" data-i18n="settings.startupAnimReplay">Replay</button>
+          </div>
+          <div class="setting-row">
+            <label for="jump-animation" data-i18n="settings.jumpAnimation">Overview jump</label>
+            <select id="jump-animation">
+              <option value="smooth" data-i18n="settings.jumpAnimationSmooth">Smooth scroll</option>
+              <option value="instant" data-i18n="settings.jumpAnimationInstant">Instant jump</option>
+            </select>
+          </div>
+          <div class="setting-row">
+            <label class="toggle"><input id="show-total-spend" type="checkbox" /> <span data-i18n="settings.showSpend">Show Total Spend card</span></label>
+          </div>
+          <div class="setting-row">
+            <label for="spend-tier-mode" data-i18n="settings.spendTiers">Spend icon levels</label>
+            <select id="spend-tier-mode">
+              <option value="builtin" data-i18n="settings.spendTiersBuiltin">Built-in (100M / 250M / 500M per day)</option>
+              <option value="custom" data-i18n="settings.spendTiersCustom">Custom</option>
+            </select>
+          </div>
+          <div class="setting-row" id="spend-tier-custom" hidden>
+            <label data-i18n="settings.spendTiersLevels">Medium / High / Max (M tokens per day)</label>
+            <input id="spend-tier-medium" type="number" min="1" max="100000" step="10" />
+            <input id="spend-tier-high" type="number" min="1" max="100000" step="10" />
+            <input id="spend-tier-max" type="number" min="1" max="100000" step="10" />
+          </div>
+          <div class="setting-row">
+            <label class="toggle" title="Unfinished features under active development (currently: the skin market). May be unstable." data-i18n-title="settings.experimentalTip"><input id="experimental-features" type="checkbox" /> <span data-i18n="settings.experimental">Experimental features</span></label>
+          </div>
+          <div class="setting-row">
+            <label class="toggle" title="Category chips wrap into a two-row grid (3 per row, 6 max) instead of one compact scrollable row; extra categories hide behind …" data-i18n-title="settings.overviewCatFullTip"><input id="overview-cat-full" type="checkbox" /> <span data-i18n="settings.overviewCatFull">Show all overview categories</span></label>
+          </div>
+          <div class="setting-row">
+            <label class="toggle" title="Automatically claim Qoder CN's daily 100-credit benefit once per claim window. Off by default: it performs a write on your account." data-i18n-title="settings.qoderCheckinTip"><input id="qoder-checkin" type="checkbox" /> <span data-i18n="settings.qoderCheckin">Qoder CN daily check-in</span></label>
+          </div>
+        </div></div>
+      </div>
+
+      <div class="acc-group">
+        <button class="acc-head"><span data-i18n="settings.keyvault">API key vault</span> <span class="chev">&#8964;</span></button>
+        <div class="acc-body"><div class="acc-inner">
+          <div id="kv-vault-bar"></div>
+          <div id="keyvault-rows"></div>
+          <div class="setting-row kv-add-row">
+            <input id="kv-service" type="text" data-i18n-placeholder="settings.kvService" placeholder="Service (e.g. tavily)" spellcheck="false" />
+            <input id="kv-note" type="text" data-i18n-placeholder="settings.kvNotePlaceholder" placeholder="Note (optional)" spellcheck="false" />
+            <input id="kv-key" type="password" data-i18n-placeholder="settings.kvKey" placeholder="API key" spellcheck="false" autocomplete="off" />
+            <button class="mini-btn" id="kv-add-btn" data-i18n="settings.kvAdd">Add</button>
+          </div>
+          <p class="kv-hint" data-i18n="settings.kvHint">Keys are sealed with your master password (Argon2id + AES-256-GCM); service, label and note stay readable so the locked vault still shows what it holds.</p>
+        </div></div>
+      </div>
+
+      <div class="acc-group">
+        <button class="acc-head"><span data-i18n="settings.shortcutManage">快捷键管理</span> <span class="chev">&#8964;</span></button>
+        <div class="acc-body"><div class="acc-inner">
+          <p class="settings-note" data-i18n="settings.shortcutManageHint">唤醒快捷键可以全局使用；其他快捷键只在 Pane 面板已唤醒并获得焦点时生效。</p>
+          <div class="setting-row">
+            <label for="shortcut" data-i18n="settings.wakeShortcut">快速唤醒</label>
+            <input id="shortcut" type="text" placeholder="e.g. Alt+2" data-i18n-placeholder="settings.wakeShortcutPh" spellcheck="false" />
+            <span id="shortcut-state" class="shortcut-state" role="status" aria-live="polite"></span>
+          </div>
+          <div class="setting-row">
+            <label for="category-shortcut" data-i18n="settings.categoryShortcut">切换分类</label>
+            <input id="category-shortcut" type="text" placeholder="e.g. Shift+1" data-i18n-placeholder="settings.categoryShortcutPh" spellcheck="false" autocomplete="off" />
+          </div>
+          <p class="settings-note" data-i18n="settings.shortcutCaptureHint">点击输入框后直接按下组合键即可设置。</p>
+          <div id="local-shortcuts"></div>
+        </div></div>
+      </div>
+
+      <div class="acc-group">
+        <button class="acc-head"><span data-i18n="settings.notifications">Notifications</span> <span class="chev">&#8964;</span></button>
+        <div class="acc-body"><div class="acc-inner">
+          <p class="settings-note" data-i18n="settings.notifyNote">
+            Windows toasts when a quota worsens — once per metric per reset period.
+          </p>
+          <div class="setting-row">
+            <label class="toggle"><input id="notify-almost" type="checkbox" /> <span data-i18n="settings.notifyAlmost">Almost out (&lt;10% left)</span></label>
+          </div>
+          <div class="setting-row">
+            <label class="toggle"><input id="notify-close" type="checkbox" /> <span data-i18n="settings.notifyClose">Cutting it close</span></label>
+          </div>
+          <div class="setting-row">
+            <label class="toggle"><input id="notify-runout" type="checkbox" /> <span data-i18n="settings.notifyRunout">Will run out</span></label>
+          </div>
+          <div class="setting-row">
+            <label class="toggle"><input id="notify-resetsoon" type="checkbox" /> <span data-i18n="settings.notifyResetSoon">5-hour window resetting soon</span></label>
+          </div>
+        </div></div>
+      </div>
+
+      <div class="acc-group">
+        <button class="acc-head"><span data-i18n="settings.privacy">Privacy</span> <span class="chev">&#8964;</span></button>
+        <div class="acc-body"><div class="acc-inner">
+          <p class="settings-note" data-i18n="settings.privacyNote">
+            One anonymous "alive today" ping and per-provider success/failure
+            counts, once a day, under a random ID attached to nothing. No
+            usage amounts, no spend, no IPs stored. Full details in
+            docs/privacy.md.
+          </p>
+          <div class="setting-row">
+            <label class="toggle"><input id="telemetry" type="checkbox" /> <span data-i18n="settings.telemetry">Share anonymous usage statistics</span></label>
+          </div>
+          <div class="setting-row">
+            <label class="toggle" title="During Presentation Settings, exclusive fullscreen, or remote control, tray percentages hide. The Pane icon and starred provider logos stay. A Teams/Zoom window share is not detected. Off by default." data-i18n-title="settings.hideSharingTip"><input id="hide-while-sharing" type="checkbox" /> <span data-i18n="settings.hideSharing">Hide tray numbers while screen sharing</span></label>
+          </div>
+          <div class="setting-row">
+            <label class="toggle" title="Show the Usage Trend bar on provider cards that log token usage. Off by default — enable this to see quota history on cards that record it." data-i18n-title="settings.showTrendTip"><input id="show-trend" type="checkbox" /> <span data-i18n="settings.showTrend">Show usage trend on cards</span></label>
+          </div>
+        </div></div>
+      </div>
+
+      <div class="acc-group">
+        <button class="acc-head"><span data-i18n="settings.network">Network</span> <span class="chev">&#8964;</span></button>
+        <div class="acc-body"><div class="acc-inner">
+          <div class="setting-row">
+            <label class="toggle"><input id="proxy-enabled" type="checkbox" /> <span data-i18n="settings.useProxy">Use proxy</span></label>
+          </div>
+          <div class="setting-row">
+            <label for="proxy-url" data-i18n="settings.proxyUrl">Proxy URL</label>
+            <input id="proxy-url" type="text" placeholder="socks5://host:1080" spellcheck="false" />
+          </div>
+          <p class="settings-note" data-i18n="settings.networkNote">
+            Applies after the app restarts. Local usage API always runs at
+            http://127.0.0.1:6736/v1/usage
+          </p>
+        </div></div>
+      </div>
+
+      <div class="acc-group">
+        <button class="acc-head"><span data-i18n="settings.advanced">Advanced</span> <span class="chev">&#8964;</span></button>
+        <div class="acc-body"><div class="acc-inner">
+          <p class="settings-note" data-i18n="settings.advancedNote">
+            Restores every preference to its default and re-detects installed
+            tools. API keys and your usage history stay. Proxy changes still
+            need a restart.
+          </p>
+          <button id="reset-all-settings" type="button" class="danger-btn" data-i18n="settings.resetAll">
+            Reset all settings
+          </button>
+        </div></div>
+      </div>
+
+      <button id="changelog-btn" type="button" data-i18n="settings.changelog">
+        What&#8217;s new &#183; Changelog
+      </button>
+
+      <p class="settings-note" style="margin-top: 12px" data-i18n="settings.customizeHint">
+        Providers, row order, and tray-strip stars live in
+        Customize (&#9776; in the sidebar). Star up to 2
+        metrics per provider there to show them as tray icons.
+      </p>
+    </aside>
+
+    <div id="model-tip" hidden></div>
+  </body>
+</html>

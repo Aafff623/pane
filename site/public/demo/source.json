@@ -1,0 +1,10 @@
+{
+  "version": "0.5.0",
+  "files": {
+    "index.html": "ee004968fa0134f6c42a07c86e7a2677595d5fadde910ddd2f151071ef7d24e0",
+    "src/main.ts": "92c85f198446bddd859a48d8687b1f93f5d2b0291903b27756a0d0c1314afc00",
+    "src/styles.css": "7109392fe5cbab3c1f9701a971aa863843ff6b4882461ead1439400d0f31d861",
+    "src/i18n.ts": "f4f0b0ac4a9a18ed285a499e6e78fd82f1115bf5885d28e05f67db465fa90246",
+    "src/providerCatalog.ts": "ddbf38121d6e3092dd92d90c437a11d57a2af675cb123acfa78161701cca2977"
+  }
+}

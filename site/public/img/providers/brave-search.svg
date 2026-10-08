@@ -1,5 +1,1 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64">
-  <rect width="64" height="64" rx="14" fill="hsl(252 38% 32%)"/>
-  <rect x="0.5" y="0.5" width="63" height="63" rx="13.5" fill="none" stroke="rgba(255,255,255,.14)"/>
-  <text x="32" y="33" text-anchor="middle" dominant-baseline="central" font-family="-apple-system,'Segoe UI',system-ui,'PingFang SC','Microsoft YaHei',sans-serif" font-size="22" font-weight="600" fill="#f4f4f5">BS</text>
-</svg>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24"><path d="M12 1.5 14.6 4h3.9l1.7 3.4-1.4 3.5L21 12l-2.2 1.1 1.4 3.5-1.7 3.4h-3.9L12 22.5 9.4 20H5.5l-1.7-3.4 1.4-3.5L3 12l2.2-1.1-1.4-3.5L5.5 4h3.9L12 1.5Z" fill="#FB542B"/><text x="12" y="16.2" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="10" font-weight="700" fill="#FFFFFF">B</text></svg>

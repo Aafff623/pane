@@ -1,5 +1,1 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64">
-  <rect width="64" height="64" rx="14" fill="hsl(220 38% 32%)"/>
-  <rect x="0.5" y="0.5" width="63" height="63" rx="13.5" fill="none" stroke="rgba(255,255,255,.14)"/>
-  <text x="32" y="33" text-anchor="middle" dominant-baseline="central" font-family="-apple-system,'Segoe UI',system-ui,'PingFang SC','Microsoft YaHei',sans-serif" font-size="22" font-weight="600" fill="#f4f4f5">Tv</text>
-</svg>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24" fill="currentColor"><path d="M12 1.6 7.7 7.4h2.5v5.8h3.6V7.4h2.5Z"/><path d="M12 1.6 7.7 7.4h2.5v5.8h3.6V7.4h2.5Z" transform="rotate(90 12 12)"/><path d="M12 1.6 7.7 7.4h2.5v5.8h3.6V7.4h2.5Z" transform="rotate(225 12 12)"/><circle cx="11.5" cy="13.6" r="2.1"/></svg>

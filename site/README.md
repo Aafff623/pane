@@ -8,4 +8,4 @@ Magpie 式零框架单文件官网：无构建、无依赖，`public/index.html`
 - 换截图：同名替换 `public/img/` 下 `overview / spend / heatmap` 的 `-dark.png` 与 `-light.png`（尺寸按 `<img>` 的 width/height），零代码改动
 - 加语言 checklist：`i18n.js` 顶部注释（字典 + LANGS + 页面语言菜单 + T() 参数）
 
-Roadmap：真域名（`wrangler.jsonc` 加 `routes` 平移，其余不动）、`/api/latest`（worker.js 里有 TODO，release.yml 已产 latest.json + sha256）、交互 Demo（额度刷新倒计时，静态 90 分之后再做）。
+已上线：**https://pane.threetwoa.live**（`wrangler.jsonc` 的 `routes` + `custom_domain`；workers.dev 试玩地址已随自定义域自动关闭）。Roadmap：`/api/latest`（worker.js 里有 TODO，release.yml 已产 latest.json + sha256）、交互 Demo（额度刷新倒计时，静态 90 分之后再做）。

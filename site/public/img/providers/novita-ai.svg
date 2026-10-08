@@ -1,5 +1,11 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64">
-  <rect width="64" height="64" rx="14" fill="hsl(85 38% 32%)"/>
-  <rect x="0.5" y="0.5" width="63" height="63" rx="13.5" fill="none" stroke="rgba(255,255,255,.14)"/>
-  <text x="32" y="33" text-anchor="middle" dominant-baseline="central" font-family="-apple-system,'Segoe UI',system-ui,'PingFang SC','Microsoft YaHei',sans-serif" font-size="26" font-weight="600" fill="#f4f4f5">N</text>
+<svg width="1em" height="1em" style="flex:none;line-height:1" viewBox="0 0 40 40" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <title>Novita</title>
+  <g clip-path="url(#clip0_3135_1230)">
+    <path d="M15.5564 8.26172V16.5239L2.1875 29.8928H15.5564V21.6302L23.8194 29.8928H37.1875L15.5564 8.26172Z" fill="#000000"/>
+  </g>
+  <defs>
+    <clipPath id="clip0_3135_1230">
+      <rect width="35" height="21.6311" fill="white" transform="translate(2.1875 8.26172)"/>
+    </clipPath>
+  </defs>
 </svg>

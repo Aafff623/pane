@@ -1,5 +1,6 @@
-// pane.<account-subdomain>.workers.dev. The site is static files in public/;
-// this worker adds language negotiation on top of them.
+// pane.threetwoa.live. The site is static files in public/; this worker adds
+// language negotiation on top of them. (The workers.dev trial address is off:
+// wrangler disables it once a custom-domain route is declared.)
 //
 //   /        the home page in Chinese (the source language of
 //            public/index.html). A browser that prefers English is sent to
