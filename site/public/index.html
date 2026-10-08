@@ -5,11 +5,11 @@
 <meta name="theme-color" content="#08090a"><title>Pane — AI 用量工作台</title>
 <meta name="description" content="Pane 把 AI 工具的额度、花费和重置时间，放进一个看得见的桌面面板。">
 <link rel="icon" href="/brand-logo.png"><link rel="stylesheet" href="/fonts/fonts.css"><link rel="stylesheet" href="/site.css?v=28">
-<script>window.LANG=document.documentElement.lang.startsWith('en')?'en':'zh';window.T=(zh,en)=>LANG==='en'?en:zh;try{document.documentElement.dataset.theme=localStorage.getItem('pane-site-theme')||'dark'}catch{}</script>
-<script src="/vendor/gsap.min.js"></script><script type="module" src="/site.js?v=23"></script>
+<script>try{document.documentElement.dataset.theme=localStorage.getItem('pane-site-theme')||'dark'}catch{}</script>
+<script src="/vendor/gsap.min.js"></script><script type="module" src="/site.js?v=24"></script>
 </head>
 <body>
-<header class="site-header"><nav class="wrap nav"><a href="/" class="brand"><img src="/brand-logo.png" width="20" height="20" alt="">Pane</a><span class="nav-context"><i></i>LOCAL USAGE WORKSPACE</span><div class="nav-links"><a href="#demo">体验</a><a href="#features">能力</a><a href="#faq">FAQ</a></div><div class="nav-actions"><button class="icon-button" id="theme" aria-label="切换主题"><img src="/icons/sun.svg" alt="" width="17"></button><a class="language" href="/en/" id="language" aria-label="切换中文和英文">中 / EN</a><a class="github" href="https://github.com/Aafff623/pane"><img src="/icons/github-logo.svg" width="18" alt=""></a><a class="button compact" href="https://github.com/Aafff623/pane/releases/latest">下载</a></div></nav></header>
+<header class="site-header"><nav class="wrap nav"><a href="/" class="brand"><img src="/brand-logo.png" width="20" height="20" alt="">Pane</a><span class="nav-context"><i></i>LOCAL USAGE WORKSPACE</span><div class="nav-links"><a href="#demo">体验</a><a href="#features">能力</a><a href="#faq">FAQ</a></div><div class="nav-actions"><button class="icon-button" id="theme" aria-label="切换主题"><img src="/icons/sun.svg" alt="" width="17"></button><a class="github" href="https://github.com/Aafff623/pane"><img src="/icons/github-logo.svg" width="18" alt=""></a><a class="button compact" data-latest-installer href="https://github.com/Aafff623/pane/releases/latest">下载</a></div></nav></header>
 <main>
 <section class="hero wrap">
   <div class="hero-meta"><span>01 / OVERVIEW</span><span>DESKTOP COMPANION · v0.4</span></div>
@@ -18,7 +18,7 @@
       <p class="eyebrow"><span class="eyebrow-dot"></span>AI usage, made legible.</p>
       <h1 class="title-art"><span class="title-lead">让每一次调用</span><em class="title-focus"><span class="title-outline">都</span><span class="title-solid">看得见</span></em></h1>
       <p class="hero-description">Pane 是一个本地桌面用量工作台。额度、花费、重置时间和账户状态，集中在一个悬浮窗里，随时可查。</p>
-      <div class="hero-actions"><a class="button hero-download" href="https://github.com/Aafff623/pane/releases/latest"><img src="/icons/windows-logo.svg" width="16" alt="">下载 Windows 版</a><a href="#demo" class="text-link">打开互动演示 <span>↘</span></a></div>
+      <div class="hero-actions"><a class="button hero-download" data-latest-installer href="https://github.com/Aafff623/pane/releases/latest"><img src="/icons/windows-logo.svg" width="16" alt="">下载 Windows 版</a><a href="#demo" class="text-link">打开互动演示 <span>↘</span></a></div>
       <div class="hero-stats"><div><b>43</b><span>providers</span></div><div><b>local</b><span>credentials</span></div><div><b>Alt + 2</b><span>quick access · 内置，可自定义</span></div></div>
     </div>
     <aside class="blueprint-note" data-tilt-card>
@@ -181,7 +181,7 @@
   <div class="wrap">
     <span class="section-index">06 / GET PANE</span>
     <h2>把用量带回你的桌面。</h2>
-    <div class="bottom-actions"><a class="button" href="https://github.com/Aafff623/pane/releases/latest"><img src="/icons/windows-logo.svg" width="16" alt="">下载 Windows 版</a><span class="button platform-disabled"><span class="platform-mark">⌘</span>macOS <small>未上线</small></span><span class="button platform-disabled"><span class="platform-mark">◆</span>Linux <small>未上线</small></span><a href="#demo" class="button secondary">先体验一下</a></div>
+    <div class="bottom-actions"><a class="button" data-latest-installer href="https://github.com/Aafff623/pane/releases/latest"><img src="/icons/windows-logo.svg" width="16" alt="">下载 Windows 版</a><span class="button platform-disabled"><span class="platform-mark">⌘</span>macOS <small>未上线</small></span><span class="button platform-disabled"><span class="platform-mark">◆</span>Linux <small>未上线</small></span><a href="#demo" class="button secondary">先体验一下</a></div>
     <p class="platforms">Windows 已提供 · macOS / Linux 即将上线 · Open source</p>
   </div>
 </section>

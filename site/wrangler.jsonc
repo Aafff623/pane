@@ -1,5 +1,5 @@
-// pane.threetwoa.live — the static site in public/, plus worker.js for
-// language negotiation. Deploy with `npx wrangler deploy` from here
+// pane.threetwoa.live — the static site in public/, served through worker.js.
+// Deploy with `npx wrangler deploy` from here
 // (CI: .github/workflows/site-deploy.yml).
 {
   "name": "pane",
@@ -8,7 +8,8 @@
   "assets": {
     "directory": "./public",
     "binding": "ASSETS",
-    // every request, so worker.js can negotiate the home page's language
+    // every request, so the worker stays the single entry point for the
+    // site (it is a pass-through today and grows the /api/latest proxy)
     "run_worker_first": true
   },
   "routes": [{ "pattern": "pane.threetwoa.live", "custom_domain": true }],

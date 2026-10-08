@@ -1,14 +1,18 @@
-// The home page in other languages. public/index.html is written in
-// Chinese (Pane's primary audience), each string to translate marked
-// data-i18n="key" (its inner HTML) or data-i18n-attr="attr:key,..." (its
-// attributes); worker.js serves the page at /<lang>/ with these put in.
-// site.test.mjs fails on a key the page doesn't have or the dictionary
-// misses — the two stay in step by force, not by memory.
+// English translations, parked. The site ships Chinese only (see worker.js);
+// nothing imports this file right now. When English is picked up again, the
+// client-side text dictionary that actually shipped before launch is in git
+// history: `git show a7e2d12:site/public/site.js`.
+//
+// The home page is written in Chinese (Pane's primary audience); a string to
+// translate is marked data-i18n="key" (its inner HTML) or
+// data-i18n-attr="attr:key,..." (its attributes) and served at /<lang>/ with
+// these put in. site.test.mjs fails on a key the page doesn't have or the
+// dictionary misses — the two stay in step by force, not by memory.
 //
 // A language is added here and in LANGS (its dictionary and its
 // "<html lang>" value), in the page's language menu, and in any script's
-// T() calls. window.T in index.html takes the Chinese first, then one
-// argument per language in LANGS order; the test asserts the count.
+// T() calls (window.T in index.html takes the Chinese first, then one
+// argument per language in LANGS order).
 
 const en = {
   "meta.desc": "Pane is a Windows tray panel that keeps the quotas, balances and spend of 41 AI coding tools and model vendors in one place. Keys stay on your machine; queries go straight to each vendor's own API.",
