@@ -289,20 +289,11 @@ const PROVIDER_DEFINITIONS: &[ProviderDefinition] = &[
     },
     ProviderDefinition {
         family_id: "relaybalance",
-        display_name: "Custom Balance",
+        display_name: "Custom Relay",
         query_kind: QueryKind::NativeBalance,
         supports_api_key: true,
         supports_extra_accounts: true,
         icon_key: "relaybalance",
-        category: ProviderCategory::Coding,
-    },
-    ProviderDefinition {
-        family_id: "linkso",
-        display_name: "GLM V1 Pro",
-        query_kind: QueryKind::NativeBalance,
-        supports_api_key: true,
-        supports_extra_accounts: true,
-        icon_key: "linkso",
         category: ProviderCategory::Coding,
     },
     ProviderDefinition {
@@ -442,7 +433,7 @@ pub fn supports_api_key(family_id: &str) -> bool {
 /// URL (stored alongside the key, hashed into account card ids). Shared by
 /// lib.rs's save paths and accounts.rs so the two can't drift apart.
 pub fn takes_base_url(family_id: &str) -> bool {
-    matches!(family_id, "relaybalance" | "linkso")
+    matches!(family_id, "relaybalance")
 }
 
 /// Returns the family part of a card id. Account fingerprints and One/New API
@@ -478,7 +469,6 @@ mod tests {
             "siliconflow",
             "novita",
             "relaybalance",
-            "linkso",
             "commandcode",
             "clinepass",
         ];
@@ -500,7 +490,6 @@ mod tests {
     #[test]
     fn relay_base_url_families_are_flagged() {
         assert!(takes_base_url("relaybalance"));
-        assert!(takes_base_url("linkso"));
         assert!(!takes_base_url("deepseek"));
     }
 
@@ -524,7 +513,6 @@ mod tests {
             "siliconflow",
             "novita",
             "relaybalance",
-            "linkso",
             "commandcode",
             "clawsgo",
             "clinepass",
@@ -560,7 +548,6 @@ mod tests {
             ("opencode", QueryKind::Composite),
             ("novita", QueryKind::NativeBalance),
             ("relaybalance", QueryKind::NativeBalance),
-            ("linkso", QueryKind::NativeBalance),
         ];
         for (family, query_kind) in expected {
             let definition = provider_definition(family)

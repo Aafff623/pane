@@ -815,7 +815,12 @@ fn parse_snapshot(doc: &Value) -> Result<Snapshot, String> {
 fn progress_from(label: &str, node: &Value, period_ms: i64) -> Option<Metric> {
     let used = used_percent(node)?;
     let resets_at = parse_reset(node.get("resetTime").or_else(|| node.get("reset_time")));
-    Some(Metric::progress(label, used, None).with_reset(resets_at, Some(period_ms)))
+    // An exhausted window otherwise renders as a bare red ring with no
+    // explanation — say the limit is reached and when it reopens (the
+    // long-window wall itself is mirrored onto shorter meters centrally,
+    // in `providers::mirror_week_wall`).
+    let detail = (used >= 99.5).then(|| super::exhaustion_detail(label, resets_at));
+    Some(Metric::progress(label, used, detail).with_reset(resets_at, Some(period_ms)))
 }
 
 fn is_session_window(entry: &Value) -> bool {
@@ -1059,6 +1064,38 @@ mod tests {
         let snap = parse_snapshot(&doc).expect("weekly-only is ok");
         assert_eq!(labels(&snap.metrics), ["Weekly"]);
     }
+
+    #[test]
+    fn exhausted_weekly_explains_itself() {
+        // The API reports used >= limit once the weekly wall stands — the
+        // meter must say so and count down to the reset instead of showing
+        // a bare red ring (the monthly cap is invisible until hit).
+        // The countdown truncates to whole minutes, so a reset exactly 3 days
+        // out renders "2d 23h" the moment a millisecond passes between fixture
+        // and format — keep an hour of margin so "3d" is unambiguous.
+        let resets_at = Utc::now().timestamp_millis() + 3 * 24 * HOUR_MS + HOUR_MS;
+        let doc = json!({"usage": {
+            "limit": 2048, "used": 2048, "remaining": 0,
+            "resetTime": resets_at
+        }});
+        let snap = parse_snapshot(&doc).expect("exhausted weekly parses");
+        let weekly = &snap.metrics[0];
+        assert_eq!(weekly.used_percent, Some(100.0));
+        let detail = weekly.detail.as_deref().expect("exhaustion detail");
+        assert!(detail.starts_with("Weekly limit reached"), "{detail}");
+        assert!(detail.contains("resets in 3d"), "{detail}");
+    }
+
+    #[test]
+    fn partially_used_weekly_has_no_exhaustion_detail() {
+        let doc = json!({"usage": {"limit": 2048, "used": 214, "remaining": 1834}});
+        let snap = parse_snapshot(&doc).expect("partial weekly parses");
+        assert!(snap.metrics[0].detail.is_none());
+    }
+
+    // The "weekly wall mirrors onto the session meter" behavior lives in
+    // `providers::mirror_week_wall` (mod.rs) with its own tests — parse here
+    // stays honest to what the API said.
 
     #[test]
     fn empty_body_is_an_error() {

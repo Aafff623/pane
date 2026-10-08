@@ -1,4 +1,4 @@
-//! Custom Balance — a generic balance check for relay/gateway sites that
+//! Custom Relay — a generic balance check for relay/gateway sites that
 //! expose the OpenAI dashboard-billing endpoints (DMXAPI, PackyCode, Micu,
 //! CrazyRouter, SudoCode.chat, XycAi, E-FlowCode, CherryIN, AICodeWith, …).
 //! Same shape as AihubMix: `hard_limit_usd` from the subscription endpoint
@@ -15,7 +15,7 @@ use serde_json::Value;
 use std::net::{Ipv4Addr, Ipv6Addr};
 
 const ID: &str = "relaybalance";
-const NAME: &str = "Custom Balance";
+const NAME: &str = "Custom Relay";
 const MAX_BODY_BYTES: usize = 64 * 1024;
 
 /// The `total_usage` field's unit. Relays follow the classic OpenAI
@@ -42,7 +42,7 @@ fn is_local_http_ip(hostname: &str) -> bool {
 /// private, loopback, and link-local IP literals so a key cannot be sent over
 /// the network in clear text by accident.
 pub fn validate_base_url(raw: &str) -> Result<(), String> {
-    validate_base_url_for("Custom Balance", raw)
+    validate_base_url_for("Custom Relay", raw)
 }
 
 /// The same rule for every relay-URL family; `name` is the provider the
@@ -334,9 +334,9 @@ mod tests {
 
     #[test]
     fn named_error_keeps_account_identity() {
-        let snap = snapshot_error_for_card("network", "relaybalance@2", "Custom Balance — Work");
+        let snap = snapshot_error_for_card("network", "relaybalance@2", "Custom Relay — Work");
         assert_eq!(snap.id, "relaybalance@2");
-        assert_eq!(snap.name, "Custom Balance — Work");
+        assert_eq!(snap.name, "Custom Relay — Work");
     }
 
     #[test]
@@ -393,20 +393,20 @@ mod tests {
                     "key-one",
                     &base,
                     "relaybalance@1",
-                    "Custom Balance — Work"
+                    "Custom Relay — Work"
                 ),
                 snapshot_with_key_at(
                     "key-two",
                     &base,
                     "relaybalance@2",
-                    "Custom Balance — Personal"
+                    "Custom Relay — Personal"
                 )
             )
         });
         server.join().expect("mock relay server");
 
         assert_eq!(work.id, "relaybalance@1");
-        assert_eq!(work.name, "Custom Balance — Work");
+        assert_eq!(work.name, "Custom Relay — Work");
         assert_eq!(
             work.metrics
                 .iter()
@@ -415,7 +415,7 @@ mod tests {
             Some("$9.00")
         );
         assert_eq!(personal.id, "relaybalance@2");
-        assert_eq!(personal.name, "Custom Balance — Personal");
+        assert_eq!(personal.name, "Custom Relay — Personal");
         assert_eq!(
             personal
                 .metrics

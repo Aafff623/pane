@@ -256,6 +256,18 @@ pub fn hide_window_border(window: &tauri::WebviewWindow) {
     }
 }
 
+/// Boot instant as a unix timestamp: now minus the tick-count uptime.
+/// GetTickCount64 wraps after ~585 million years, so no wrap handling.
+pub fn boot_id() -> Option<u64> {
+    use windows::Win32::System::SystemInformation::GetTickCount64;
+    let uptime_secs = unsafe { GetTickCount64() } / 1000;
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .ok()?
+        .as_secs();
+    Some(now.saturating_sub(uptime_secs))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -184,6 +184,25 @@ pub fn set_webview_memory_level(_window: &tauri::WebviewWindow, _low: bool) {}
 
 pub fn hide_window_border(_window: &tauri::WebviewWindow) {}
 
+/// Linux answers with /proc/stat's btime; macOS with sysctl's kern.boottime.
+/// Both are boot-session-stable unix timestamps.
+#[cfg(target_os = "linux")]
+pub fn boot_id() -> Option<u64> {
+    let stat = std::fs::read_to_string("/proc/stat").ok()?;
+    stat.lines()
+        .find_map(|line| line.strip_prefix("btime "))
+        .and_then(|v| v.trim().parse().ok())
+}
+
+#[cfg(target_os = "macos")]
+pub fn boot_id() -> Option<u64> {
+    let out = run_hidden("sysctl", &["-n", "kern.boottime"])?;
+    // "{ sec = 1699999999, usec = 0 } ..."
+    let start = out.find("sec = ")? + "sec = ".len();
+    let digits: String = out[start..].chars().take_while(|c| c.is_ascii_digit()).collect();
+    digits.parse().ok()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

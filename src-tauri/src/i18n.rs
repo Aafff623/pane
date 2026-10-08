@@ -46,6 +46,14 @@ pub fn refresh_all_label(cfg: &Value) -> &'static str {
     }
 }
 
+pub fn tray_left_label(cfg: &Value, n: i64) -> String {
+    match resolved_locale(cfg) {
+        "zh" => format!("剩余 {n}%"),
+        "ru" => format!("осталось {n}%"),
+        _ => format!("{n}% left"),
+    }
+}
+
 pub fn settings_label(cfg: &Value) -> &'static str {
     match resolved_locale(cfg) {
         "zh" => "设置…",

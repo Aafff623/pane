@@ -222,6 +222,29 @@ fn parse_snapshot(plan: Option<&Value>, usage: &Value) -> Result<Snapshot, Strin
         package_rows.push(credit_row(label, p_used, p_total).with_reset(reset, None));
     }
 
+    // Paid add-on / granted credit packs live in a sibling top-level bucket
+    // (verified live 2026-10-07: {total, used, remaining, percentage, unit,
+    // detailUrl} — no name, no expiry of its own). Same treatment as
+    // dedicated packages: into the aggregate AND its own detail row, so pack
+    // credits the main pool doesn't know about stay visible instead of
+    // hiding behind a maxed-out red ring.
+    if let Some(add) = usage.get("addOnQuota") {
+        let a_total = json_f64(add.get("total")).or_else(|| json_f64(add.get("cap")));
+        let a_used = json_f64(add.get("used")).or_else(|| {
+            match (a_total, json_f64(add.get("remaining"))) {
+                (Some(t), Some(r)) => Some((t - r).max(0.0)),
+                _ => None,
+            }
+        });
+        if let (Some(a_total), Some(a_used)) = (a_total, a_used) {
+            if a_total > 0.0 {
+                pkg_used += a_used;
+                pkg_total += a_total;
+                package_rows.push(credit_row("Add-on credits", a_used, a_total));
+            }
+        }
+    }
+
     let mut metrics = vec![credit_row("Credits", used + pkg_used, total + pkg_total)
         .with_reset(earliest_reset, None)];
     metrics.extend(package_rows);
@@ -257,6 +280,267 @@ fn epoch_ms(n: f64) -> i64 {
     } else {
         (n * 1000.0) as i64
     }
+}
+
+// ---- Daily benefit check-in (default off; config key `qoderCheckin`) ----
+//
+// The growth API hands every signed-in account 100 credits per day
+// (CLAIM_BENEFIT campaigns, refreshed 10:00 UTC+8). The device token Pane
+// already holds works on /sash/ unchanged (verified 2026-10-07), and
+// claiming an already-claimed campaign is idempotent (HTTP 200 +
+// replayed:true), so a retry can never double-claim. One text metric row
+// reports the state; the ledger file keeps the once-per-window rhythm.
+
+const CAMPAIGNS_PATH: &str = "/sash/api/v1/me/campaigns";
+const CHECKIN_STATE_FILE: &str = "qoder_checkin.json";
+const CHECKIN_LABEL: &str = "Daily check-in";
+/// After a failed attempt, wait this long before the next try so a broken
+/// endpoint doesn't turn every refresh cycle into a claim hammer.
+const CHECKIN_RETRY_MS: i64 = 30 * 60 * 1000;
+/// "inactive" days re-check at this pace — a campaign can appear any time.
+const CHECKIN_IDLE_RECHECK_MS: i64 = 6 * 60 * 60 * 1000;
+
+/// One credential's check-in record. Pane's Qoder CN is single-credential
+/// by design, so the file is one flat record, not a per-uid map.
+#[derive(Default, Clone, serde::Serialize, serde::Deserialize)]
+struct CheckinState {
+    /// Beijing-day index the record belongs to (diagnostics only; the gate
+    /// is `next_check_at`).
+    day: i64,
+    /// "claimed" | "done" | "inactive" | "failed"
+    status: String,
+    amount: f64,
+    last_at: i64,
+    #[serde(default)]
+    error: String,
+    /// Earliest instant (epoch ms) the next network attempt makes sense:
+    /// the current claim window's end for settled states, now + idle pace
+    /// for inactive, last attempt + retry for failed.
+    #[serde(default)]
+    next_check_at: i64,
+}
+
+/// Beijing-day index (UTC+8, no DST): rolls over at 16:00 UTC.
+fn beijing_day(unix_secs: i64) -> i64 {
+    (unix_secs + 8 * 3600).div_euclid(86_400)
+}
+
+/// What to do with today's campaigns list: claim these ids, or the day is
+/// already settled ("done" = every benefit claimed, "inactive" = the list
+/// carries no claimable-benefit campaign at all).
+enum CheckinStep {
+    Claim(Vec<String>),
+    Settle(&'static str),
+}
+
+fn checkin_step_from_campaigns(doc: &Value) -> Result<CheckinStep, String> {
+    let campaigns = doc
+        .get("campaigns")
+        .and_then(Value::as_array)
+        .ok_or("campaigns response has no list")?;
+    let mut to_claim = Vec::new();
+    let mut seen_benefit = false;
+    let mut all_claimed = true;
+    for c in campaigns {
+        if c.get("actionType").and_then(Value::as_str) != Some("CLAIM_BENEFIT") {
+            continue;
+        }
+        seen_benefit = true;
+        match c.get("claimStatus").and_then(Value::as_str) {
+            Some("CLAIMABLE") => {
+                all_claimed = false;
+                if let Some(id) = c.get("campaignId").and_then(Value::as_str) {
+                    to_claim.push(id.to_string());
+                }
+            }
+            Some("CLAIMED") => {}
+            _ => all_claimed = false,
+        }
+    }
+    if !to_claim.is_empty() {
+        return Ok(CheckinStep::Claim(to_claim));
+    }
+    if !seen_benefit {
+        return Ok(CheckinStep::Settle("inactive"));
+    }
+    Ok(CheckinStep::Settle("done"))
+}
+
+/// POST claim response → (amount, replayed). Live shape is flat
+/// `{status, replayed?, benefit:{amount}}`; the reference client also saw a
+/// `{data:{...}}` wrapper — unwrap it when present. Anything that is not a
+/// fresh CLAIMED counts as replayed so odd responses can't cause re-claim
+/// spam.
+fn claim_outcome(doc: &Value) -> (f64, bool) {
+    let body = doc.get("data").filter(|d| d.is_object()).unwrap_or(doc);
+    let amount = json_f64(body.pointer("/benefit/amount")).unwrap_or(0.0);
+    let replayed = body.get("replayed").and_then(Value::as_bool).unwrap_or(false)
+        || body.get("status").and_then(Value::as_str) != Some("CLAIMED");
+    (amount, replayed)
+}
+
+/// When the settled state may look at the network again: the far end among
+/// the benefit campaigns' windows (the next one opens right after the
+/// current closes), with a fallback pace when the list is bare.
+fn next_open_from_campaigns(doc: &Value) -> i64 {
+    let mut ends: Vec<f64> = doc
+        .get("campaigns")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter(|c| c.get("actionType").and_then(Value::as_str) == Some("CLAIM_BENEFIT"))
+        .filter_map(|c| json_f64(c.get("endAt")))
+        .collect();
+    ends.sort_by(|a, b| b.partial_cmp(a).unwrap_or(std::cmp::Ordering::Equal));
+    ends.first()
+        .map(|e| epoch_ms(*e) + 60_000)
+        .unwrap_or_else(|| chrono::Utc::now().timestamp_millis() + CHECKIN_IDLE_RECHECK_MS)
+}
+
+fn checkin_text(status: &str, amount: f64, error: &str) -> String {
+    match status {
+        "claimed" => format!("+{} credits claimed today", amount.max(0.0) as i64),
+        "done" => "already claimed today".into(),
+        "inactive" => "no check-in campaign today".into(),
+        "failed" if error.is_empty() => "check-in failed".into(),
+        "failed" => format!("check-in failed: {error}"),
+        _ => status.to_string(),
+    }
+}
+
+fn checkin_state_path() -> Option<PathBuf> {
+    Some(super::config_dir().join(CHECKIN_STATE_FILE))
+}
+
+fn load_checkin_state() -> CheckinState {
+    let Some(path) = checkin_state_path() else {
+        return CheckinState::default();
+    };
+    std::fs::read_to_string(path)
+        .ok()
+        .and_then(|s| serde_json::from_str(&s).ok())
+        .unwrap_or_default()
+}
+
+fn save_checkin_state(state: &CheckinState) {
+    if let Some(path) = checkin_state_path() {
+        if let Ok(body) = serde_json::to_string(state) {
+            let _ = crate::accounts::write_json_atomic(&path, body);
+        }
+    }
+}
+
+fn push_checkin_row(snap: &mut Snapshot, state: &CheckinState) {
+    snap.metrics
+        .push(Metric::text(CHECKIN_LABEL, checkin_text(&state.status, state.amount, &state.error)));
+}
+
+/// Runs the daily check-in for this card, appending one text row to the
+/// snapshot. Call sites are the same two places long-wall mirroring runs —
+/// the global refresh cycle and the manual ⟳ — so both paths agree; the
+/// connectivity test never claims. Config gating happens in lib.rs (the
+/// parse-tests harness has no config module); here only family and
+/// snapshot health gate.
+pub(crate) async fn maybe_checkin(card_id: &str, snap: &mut Snapshot) {
+    let family = card_id.split('@').next().unwrap_or(card_id);
+    if family != ID || snap.status != "ok" {
+        return;
+    }
+    let now_ms = chrono::Utc::now().timestamp_millis();
+    let mut state = load_checkin_state();
+
+    // Settled states answer from the ledger until their window reopens;
+    // failures retry at most every CHECKIN_RETRY_MS.
+    if state.status != "failed" && now_ms < state.next_check_at {
+        push_checkin_row(snap, &state);
+        return;
+    }
+    if state.status == "failed" && now_ms - state.last_at < CHECKIN_RETRY_MS {
+        push_checkin_row(snap, &state);
+        return;
+    }
+
+    let Some(auth_path) = auth_file_path() else {
+        return;
+    };
+    let Ok(token) = load_token(&auth_path) else {
+        return;
+    };
+
+    let (status, amount, next_check_at, error) = match run_checkin(&token).await {
+        Ok((s, a, n)) => (s, a, n, String::new()),
+        Err(e) => (
+            "failed".to_string(),
+            0.0,
+            now_ms + CHECKIN_RETRY_MS,
+            e,
+        ),
+    };
+    state = CheckinState {
+        day: beijing_day(chrono::Utc::now().timestamp()),
+        status,
+        amount,
+        last_at: now_ms,
+        error,
+        next_check_at,
+    };
+    save_checkin_state(&state);
+    push_checkin_row(snap, &state);
+}
+
+async fn run_checkin(token: &str) -> Result<(String, f64, i64), String> {
+    let doc = checkin_request(token, CAMPAIGNS_PATH, false).await?;
+    let next_open = next_open_from_campaigns(&doc);
+    match checkin_step_from_campaigns(&doc)? {
+        CheckinStep::Settle(s) => Ok((s.to_string(), 0.0, next_open)),
+        CheckinStep::Claim(ids) => {
+            let mut amount = 0.0;
+            let mut fresh = false;
+            for id in ids {
+                let out = checkin_request(token, &format!("{CAMPAIGNS_PATH}/{id}/claim"), true)
+                    .await?;
+                let (a, replayed) = claim_outcome(&out);
+                amount += a;
+                fresh |= !replayed;
+            }
+            Ok((
+                if fresh { "claimed" } else { "done" }.to_string(),
+                amount,
+                next_open,
+            ))
+        }
+    }
+}
+
+/// One /sash/ call with the header set the growth API expects
+/// (Cosy-ClientType + a plain "Qoder" UA, same as the reference client).
+async fn checkin_request(token: &str, path: &str, post: bool) -> Result<Value, String> {
+    let mut req = if post {
+        http()
+            .post(format!("{OPENAPI_BASE}{path}"))
+            .header("Content-Type", "application/json")
+            .body("{}".to_string())
+    } else {
+        http().get(format!("{OPENAPI_BASE}{path}"))
+    };
+    req = req
+        .bearer_auth(token)
+        .header("Accept", "application/json")
+        .header("Cosy-ClientType", "10")
+        .header("User-Agent", "Qoder");
+    let resp = req
+        .timeout(Duration::from_secs(8))
+        .send()
+        .await
+        .map_err(|e| format!("check-in request: {e}"))?;
+    let status = resp.status();
+    if !status.is_success() {
+        if status.as_u16() == 401 || status.as_u16() == 403 {
+            return Err("session token rejected — sign in again in Qoder CN".into());
+        }
+        return Err(format!("check-in endpoint: HTTP {status}"));
+    }
+    super::json_body(resp, MAX_API_BYTES, "check-in").await
 }
 
 #[cfg(test)]
@@ -513,5 +797,128 @@ mod tests {
     fn epoch_seconds_are_promoted_to_millis() {
         assert_eq!(epoch_ms(1_789_102_821.0), 1_789_102_821_000);
         assert_eq!(epoch_ms(1_791_648_000_000.0), 1_791_648_000_000);
+    }
+
+    #[test]
+    fn addon_bucket_merges_into_aggregate_with_its_own_row() {
+        // Live-verified shape (2026-10-07): flat bucket, no name/expiry.
+        let usage = json!({
+            "userQuota": {"total": 2000.0, "used": 2000.0},
+            "addOnQuota": {"total": 500.0, "used": 500.0, "remaining": 0.0, "unit": "credits"}
+        });
+        let snap = parse_snapshot(None, &usage).expect("parse");
+        assert_eq!(snap.metrics.len(), 2);
+        assert_eq!(snap.metrics[0].label, "Credits");
+        assert_eq!(snap.metrics[0].used_percent, Some(100.0));
+        assert_eq!(snap.metrics[1].label, "Add-on credits");
+        assert_eq!(snap.metrics[1].used_percent, Some(100.0));
+    }
+
+    #[test]
+    fn addon_bucket_absent_changes_nothing() {
+        let usage = json!({"userQuota": {"total": 100.0, "used": 40.0}});
+        let snap = parse_snapshot(None, &usage).expect("parse");
+        assert_eq!(snap.metrics.len(), 1);
+        assert_eq!(snap.metrics[0].used_percent, Some(40.0));
+    }
+
+    #[test]
+    fn addon_zero_total_is_skipped() {
+        let usage = json!({
+            "userQuota": {"total": 100.0, "used": 40.0},
+            "addOnQuota": {"total": 0.0, "used": 0.0}
+        });
+        let snap = parse_snapshot(None, &usage).expect("parse");
+        assert_eq!(snap.metrics.len(), 1);
+    }
+
+    #[test]
+    fn addon_used_falls_back_to_total_minus_remaining() {
+        let usage = json!({
+            "userQuota": {"total": 100.0, "used": 10.0},
+            "addOnQuota": {"total": 50.0, "remaining": 30.0}
+        });
+        let snap = parse_snapshot(None, &usage).expect("parse");
+        assert_eq!(snap.metrics.len(), 2);
+        // used falls back to 50-30=20; aggregate (10+20)/(100+50) = 20%,
+        // the add-on row alone is 40%.
+        assert_eq!(snap.metrics[0].used_percent, Some(20.0));
+        assert_eq!(snap.metrics[1].used_percent, Some(40.0));
+    }
+
+    #[test]
+    fn checkin_claimable_campaign_yields_claim() {
+        let doc = json!({"claimable": true, "campaigns": [
+            {"campaignId": "c1", "actionType": "CLAIM_BENEFIT",
+             "claimStatus": "CLAIMABLE", "endAt": 1791424740},
+            {"campaignId": "c2", "actionType": "VIEW_DETAILS", "claimStatus": "CLAIMED"}
+        ]});
+        match checkin_step_from_campaigns(&doc).expect("step") {
+            CheckinStep::Claim(ids) => assert_eq!(ids, vec!["c1".to_string()]),
+            CheckinStep::Settle(s) => panic!("expected a claim step, got settle {s}"),
+        }
+    }
+
+    #[test]
+    fn checkin_all_claimed_settles_done() {
+        let doc = json!({"claimable": false, "campaigns": [
+            {"campaignId": "c1", "actionType": "CLAIM_BENEFIT", "claimStatus": "CLAIMED"}
+        ]});
+        match checkin_step_from_campaigns(&doc).expect("step") {
+            CheckinStep::Settle("done") => {}
+            _ => panic!("expected done"),
+        }
+    }
+
+    #[test]
+    fn checkin_without_benefit_campaign_is_inactive() {
+        let doc = json!({"campaigns": [
+            {"campaignId": "c2", "actionType": "VIEW_DETAILS", "claimStatus": "CLAIMED"}
+        ]});
+        match checkin_step_from_campaigns(&doc).expect("step") {
+            CheckinStep::Settle("inactive") => {}
+            _ => panic!("expected inactive"),
+        }
+    }
+
+    #[test]
+    fn claim_response_replayed_means_done() {
+        // Fresh claim: status CLAIMED, no replay flag.
+        assert_eq!(claim_outcome(&json!({"status": "CLAIMED", "benefit": {"amount": 100}})), (100.0, false));
+        // Idempotent replay (verified live): replayed:true, still 200.
+        assert_eq!(claim_outcome(&json!({"status": "CLAIMED", "replayed": true, "benefit": {"amount": 100}})), (100.0, true));
+        // The {data:{...}} wrapper some clients see unwraps fine.
+        assert_eq!(
+            claim_outcome(&json!({"data": {"status": "CLAIMED", "replayed": true, "benefit": {"amount": 100}}})),
+            (100.0, true)
+        );
+        // An unrecognized status counts as replayed — never re-claim spam.
+        assert_eq!(claim_outcome(&json!({"status": "WEIRD"})), (0.0, true));
+    }
+
+    #[test]
+    fn checkin_next_open_follows_the_window_end() {
+        let doc = json!({"campaigns": [
+            {"campaignId": "c1", "actionType": "CLAIM_BENEFIT", "endAt": 1791424740}
+        ]});
+        assert_eq!(next_open_from_campaigns(&doc), 1_791_424_740_000 + 60_000);
+        // Bare list → idle pace from now (no panic, sane fallback).
+        assert!(next_open_from_campaigns(&json!({"campaigns": []})) > 0);
+    }
+
+    #[test]
+    fn beijing_day_rolls_at_sixteen_utc() {
+        // 57599 = 15:59:59 UTC → still the previous Beijing day; 57600 =
+        // 16:00:00 UTC = Beijing midnight → next day.
+        assert_eq!(beijing_day(57_599), 0);
+        assert_eq!(beijing_day(57_600), 1);
+    }
+
+    #[test]
+    fn checkin_text_covers_the_four_states() {
+        assert_eq!(checkin_text("claimed", 100.0, ""), "+100 credits claimed today");
+        assert_eq!(checkin_text("done", 0.0, ""), "already claimed today");
+        assert_eq!(checkin_text("inactive", 0.0, ""), "no check-in campaign today");
+        assert_eq!(checkin_text("failed", 0.0, "HTTP 503"), "check-in failed: HTTP 503");
     }
 }

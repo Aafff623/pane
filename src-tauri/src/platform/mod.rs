@@ -43,6 +43,14 @@ pub fn dpapi_unprotect(blob: &[u8]) -> Option<Vec<u8>> {
     imp::dpapi_unprotect(blob)
 }
 
+/// Seconds-resolution unix timestamp of the current OS boot. Stable for the
+/// whole boot session, so the startup animation can tell "already played
+/// this boot" from "first launch after this boot". `None` where the OS does
+/// not answer — the caller then plays once per app launch instead.
+pub fn boot_id() -> Option<u64> {
+    imp::boot_id()
+}
+
 /// Credential blob → text: UTF-8 or UTF-16 LE, unwrapping go-keyring's
 /// `go-keyring-base64:` prefix (used by Go CLIs like gh and Antigravity).
 fn decode_secret(blob: &[u8]) -> Option<String> {

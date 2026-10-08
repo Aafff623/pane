@@ -15,7 +15,6 @@ pub mod grok;
 pub mod hermes;
 pub mod kilo;
 pub mod kimi;
-pub mod linkso;
 pub mod minimax;
 pub mod moonshot;
 pub mod novita;
@@ -403,18 +402,12 @@ pub fn provider_disabled(id: &str) -> bool {
         .is_some_and(|a| a.iter().any(|v| v.as_str() == Some(id)))
 }
 
-/// API key lookup: our saved config file first, then environment variables.
+/// API key lookup: the OS credential vault first (lazily migrating the
+/// legacy plaintext file on first sight), then environment variables.
 pub fn stored_api_key(provider: &str, env_vars: &[&str]) -> Option<String> {
     let path = config_dir().join(format!("{provider}.json"));
-    if let Ok(raw) = std::fs::read_to_string(&path) {
-        if let Ok(doc) = serde_json::from_str::<serde_json::Value>(&raw) {
-            if let Some(key) = doc.get("apiKey").and_then(serde_json::Value::as_str) {
-                let key = key.trim();
-                if !key.is_empty() {
-                    return Some(key.to_string());
-                }
-            }
-        }
+    if let Some(key) = crate::secretstore::resolve_provider_key(provider, &path) {
+        return Some(key);
     }
     for var in env_vars {
         if let Ok(key) = std::env::var(var) {
@@ -427,15 +420,12 @@ pub fn stored_api_key(provider: &str, env_vars: &[&str]) -> Option<String> {
     None
 }
 
-/// Pure file probe (no env fallback): the apiKey saved in
-/// %APPDATA%\Pane\<provider>.json, if any. Used by get_credential_status
+/// Pure "is a key saved" probe (no env fallback): the OS credential vault
+/// first, then the plaintext fallback file. Used by get_credential_status
 /// to report "stored key" separately from the env-var fallback.
 pub fn stored_key_file(provider: &str) -> Option<String> {
     let path = config_dir().join(format!("{provider}.json"));
-    let raw = std::fs::read_to_string(&path).ok()?;
-    let doc = serde_json::from_str::<serde_json::Value>(&raw).ok()?;
-    let key = doc.get("apiKey")?.as_str()?.trim().to_string();
-    if key.is_empty() { None } else { Some(key) }
+    crate::secretstore::resolve_provider_key(provider, &path)
 }
 
 /// Companion to `stored_api_key` for providers whose saved blob also carries
@@ -460,4 +450,133 @@ pub fn stored_base_url(provider: &str) -> Option<String> {
 pub fn remove_stored_key_file(provider: &str) {
     let path = config_dir().join(format!("{provider}.json"));
     let _ = std::fs::remove_file(path);
+}
+
+// ---------------------------------------------------------------------------
+// Long-window wall mirroring
+// ---------------------------------------------------------------------------
+
+/// Families where a long-window (weekly/monthly) cap is a hard wall: once it
+/// is exhausted, requests are rejected no matter how much short-window
+/// budget remains. Families whose long cap has escape hatches (Codex's
+/// banked reset credits, pools that fail over) must NOT be listed here —
+/// the mirror would show "dead" while the account can still answer.
+/// Extend one family at a time, after its wall behavior is confirmed live.
+pub const WEEK_WALL_MIRROR_FAMILIES: &[&str] = &["kimi"];
+
+/// Shortest window that counts as a "long wall" (6 days: weekly and monthly
+/// qualify, 5-hour sessions never do).
+const WALL_MIN_PERIOD_MS: i64 = 6 * 24 * 3600_000;
+
+/// "{label} limit reached · resets in {human}" — plain-words explanation for
+/// an exhausted window, shown under the meter instead of a bare red ring.
+pub fn exhaustion_detail(label: &str, resets_at: Option<i64>) -> String {
+    let Some(ms) = resets_at else {
+        return format!("{label} limit reached");
+    };
+    let now_ms = chrono::Utc::now().timestamp_millis();
+    let mins = (ms - now_ms).max(0) / 60_000;
+    let human = if mins >= 1440 {
+        format!("{}d {}h", mins / 1440, (mins % 1440) / 60)
+    } else if mins >= 60 {
+        format!("{}h {}m", mins / 60, mins % 60)
+    } else {
+        format!("{mins}m")
+    };
+    format!("{label} limit reached · resets in {human}")
+}
+
+/// While a long window's wall stands, a still-green session meter is a
+/// mirage — the card would read "32% used, all fine" for an account that
+/// cannot answer anything until the wall lifts. Mirror the wall onto the
+/// session meter: 100%, the wall's own reset instant and period, and a
+/// detail naming it. Applies after parsing, on every fetch, so the card,
+/// the overview rings and the local API all agree.
+pub fn mirror_week_wall(card_id: &str, snap: &mut Snapshot) {
+    let family = card_id.split('@').next().unwrap_or(card_id);
+    if !WEEK_WALL_MIRROR_FAMILIES.contains(&family) || snap.status != "ok" {
+        return;
+    }
+    // The hardest standing wall wins: the longest-period exhausted window.
+    let wall = snap
+        .metrics
+        .iter()
+        .filter(|m| {
+            m.kind == "progress"
+                && m.used_percent.is_some_and(|u| u >= 99.5)
+                && m.period_ms.is_some_and(|p| p >= WALL_MIN_PERIOD_MS)
+        })
+        .max_by_key(|m| m.period_ms.unwrap_or(0));
+    let Some(wall) = wall else { return };
+    let (used, resets_at, period_ms, label) =
+        (wall.used_percent, wall.resets_at, wall.period_ms, wall.label.clone());
+    for m in snap.metrics.iter_mut() {
+        if m.kind == "progress" && m.period_ms.is_some_and(|p| p < WALL_MIN_PERIOD_MS) {
+            m.used_percent = Some(used.unwrap_or(100.0).max(100.0).min(100.0));
+            m.resets_at = resets_at;
+            m.period_ms = period_ms;
+            m.detail = Some(exhaustion_detail(&label, resets_at));
+        }
+    }
+}
+
+#[cfg(test)]
+mod wall_tests {
+    use super::*;
+
+    const HOUR_MS: i64 = 3600_000;
+    const DAY_MS: i64 = 24 * HOUR_MS;
+
+    fn snap_with(session_used: f64, weekly_used: f64) -> Snapshot {
+        let resets = chrono::Utc::now().timestamp_millis() + 4 * DAY_MS;
+        Snapshot::ok(
+            "kimi",
+            "Kimi Code",
+            None,
+            vec![
+                Metric::progress("Session", session_used, None)
+                    .with_reset(Some(resets - 3 * DAY_MS), Some(5 * HOUR_MS)),
+                Metric::progress("Weekly", weekly_used, None)
+                    .with_reset(Some(resets), Some(7 * DAY_MS)),
+            ],
+        )
+    }
+
+    #[test]
+    fn standing_weekly_wall_mirrors_onto_short_windows() {
+        let mut snap = snap_with(32.0, 100.0);
+        let resets = snap.metrics[1].resets_at;
+        mirror_week_wall("kimi", &mut snap);
+        let session = &snap.metrics[0];
+        assert_eq!(session.used_percent, Some(100.0));
+        assert_eq!(session.resets_at, resets);
+        assert_eq!(session.period_ms, Some(7 * DAY_MS));
+        let detail = session.detail.as_deref().expect("mirror detail");
+        assert!(detail.starts_with("Weekly limit reached"), "{detail}");
+    }
+
+    #[test]
+    fn healthy_weekly_leaves_short_windows_alone() {
+        let mut snap = snap_with(32.0, 10.4);
+        mirror_week_wall("kimi", &mut snap);
+        assert!((snap.metrics[0].used_percent.unwrap() - 32.0).abs() < 0.01);
+        assert!(snap.metrics[0].detail.is_none());
+    }
+
+    #[test]
+    fn families_outside_the_list_are_untouched() {
+        // Codex is deliberately excluded: banked reset credits keep the
+        // account usable past the weekly line, so the mirror would lie.
+        let mut snap = snap_with(32.0, 100.0);
+        snap.id = "codex".into();
+        mirror_week_wall("codex", &mut snap);
+        assert!((snap.metrics[0].used_percent.unwrap() - 32.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn parallel_account_cards_mirror_too() {
+        let mut snap = snap_with(32.0, 100.0);
+        mirror_week_wall("kimi@deadbeef", &mut snap);
+        assert_eq!(snap.metrics[0].used_percent, Some(100.0));
+    }
 }

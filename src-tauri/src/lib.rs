@@ -1,4 +1,5 @@
 mod accounts;
+mod secretstore;
 mod antigravity_accounts;
 mod auth_center;
 mod cursor_accounts;
@@ -29,7 +30,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde_json::{json, Value};
 use tauri::{
-    menu::{CheckMenuItem, Menu, MenuItem, PredefinedMenuItem},
+    menu::{CheckMenuItem, IsMenuItem, Menu, MenuItem, PredefinedMenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
     Emitter, Manager, WindowEvent,
 };
@@ -109,7 +110,12 @@ fn config_with_defaults(mut cfg: Value) -> Value {
     // dark + compact. (Autostart defaults on in setup; tray icon defaults
     // to Auto via pinned = null.)
     obj.entry("refreshMinutes").or_insert(json!(1));
-    obj.entry("disabled").or_insert(json!([]));
+    // Fresh installs start lean: mainstream subscriptions visible, niche
+    // vendors wait disabled in Customize until the user enables them.
+    // Existing configs already carry their own list — entry() never
+    // overwrites it.
+    obj.entry("disabled")
+        .or_insert(json!(DEFAULT_DISABLED_PROVIDERS));
     obj.entry("pinned").or_insert(Value::Null);
     obj.entry("trayProviders").or_insert(json!([]));
     obj.entry("notifyAlmostOut").or_insert(json!(true));
@@ -149,8 +155,9 @@ fn config_with_defaults(mut cfg: Value) -> Value {
     // data flows is the one state a privacy control must never be in.
     obj.entry("telemetry").or_insert(json!(true));
     obj.entry("reduceAnimations").or_insert(json!(false));
+    obj.entry("jumpAnimation").or_insert(json!("smooth"));
     obj.entry("hideUsageWhileSharing").or_insert(json!(false));
-    obj.entry("showTrend").or_insert(json!(false));
+    obj.entry("showTrend").or_insert(json!(true));
     obj.entry("locale").or_insert(json!("auto"));
     // Dual-form: "floating" (tray popover) stays the default; "panel" is the
     // large settings panel window. silentStart is stored-only for now —
@@ -158,12 +165,46 @@ fn config_with_defaults(mut cfg: Value) -> Value {
     // behavior until the panel form learns auto-open-at-login semantics.
     obj.entry("windowForm").or_insert(json!("floating"));
     obj.entry("silentStart").or_insert(json!(false));
+    // Startup splash: on by default; lastStartupBootId is the boot session
+    // it last played in (null = never). Seeded here so a frontend config
+    // write can never drop the gate.
+    obj.entry("startupAnimation").or_insert(json!(true));
+    obj.entry("lastStartupBootId").or_insert(Value::Null);
+    // Overview: multi-account families the user expanded (absent = folded
+    // to the main account's ring/bar plus the N/M count).
+    obj.entry("overviewExpanded").or_insert(json!([]));
+    // Experimental features gate (skin market lives here): off means the
+    // entry points don't even render.
+    obj.entry("experimentalFeatures").or_insert(json!(false));
+    // Spend-card lightning tiers: null = built-in (100M/250M/500M per day);
+    // an object {medium, high, max} overrides the daily thresholds.
+    obj.entry("spendIconTiers").or_insert(Value::Null);
+    // Category chips: off = single compact row; on = full two-row grid (3 per row, 6 max + … board).
+    obj.entry("overviewCatFull").or_insert(json!(false));
+    // Dashboard memory: where the card list was scrolled to when the
+    // popover was last dismissed (0 = top).
+    obj.entry("mainScrollTop").or_insert(json!(0));
+    // Qoder CN daily benefit check-in: OFF by default — it performs a write
+    // (claim) on the user's account, so it only runs when explicitly asked.
+    obj.entry("qoderCheckin").or_insert(json!(false));
+    // Providers the user deleted from Customize: filtered out of the
+    // drawer's list entirely (never offered as re-enable rows). Removal
+    // also disables them, so they vanish from dashboards/tray; the drawer
+    // footer offers restore.
+    obj.entry("removedProviders").or_insert(json!([]));
     cfg
 }
 
 #[tauri::command]
 fn system_ui_locale() -> &'static str {
     i18n::system_ui_locale()
+}
+
+/// Boot-session id for the startup-animation gate. `None` where the OS
+/// cannot answer — the frontend then plays once per app launch.
+#[tauri::command]
+fn get_boot_id() -> Option<u64> {
+    platform::boot_id()
 }
 
 #[tauri::command]
@@ -186,6 +227,10 @@ const CONFIG_KEYS: &[&str] = &[
     "notifyAlmostOut",
     "notifyCuttingClose",
     "notifyWillRunOut",
+    // Seeded true by config_with_defaults and read by alerts.rs; without it
+    // here the settings toggle's save was dropped ("ignoring unknown key")
+    // and the switch could never take effect.
+    "notifyResetSoon",
     "spendMetric",
     "spendGrouping",
     "overviewStyle",
@@ -210,11 +255,59 @@ const CONFIG_KEYS: &[&str] = &[
     "lastSeenVersion",
     "telemetry",
     "reduceAnimations",
+    "jumpAnimation",
     "hideUsageWhileSharing",
     "showTrend",
     "locale",
     "windowForm",
     "silentStart",
+    "startupAnimation",
+    "lastStartupBootId",
+    "overviewExpanded",
+    "experimentalFeatures",
+    "spendIconTiers",
+    "overviewCatFull",
+    "mainScrollTop",
+    "qoderCheckin",
+    "removedProviders",
+];
+
+/// Providers hidden by default on a fresh install: everything outside the
+/// mainstream subscriptions (Claude / Codex / Cursor / Grok / GLM / MiniMax /
+/// Antigravity / Kimi). They stay one toggle away in Customize.
+const DEFAULT_DISABLED_PROVIDERS: &[&str] = &[
+    "opencode",
+    "copilot",
+    "devin",
+    "openrouter",
+    "deepseek",
+    "moonshot",
+    "elevenlabs",
+    "ollama",
+    "codebuff",
+    "kilo",
+    "aihubmix",
+    "onenewapi",
+    "qwen",
+    "hermes",
+    "stepfun",
+    "stepfun-plan",
+    "shandianshuo",
+    "siliconflow",
+    "novita",
+    "relaybalance",
+    "qodercn",
+    "traecn",
+    "commandcode",
+    "doubao",
+    "clawsgo",
+    "bocha",
+    "tavily",
+    "firecrawl",
+    "clinepass",
+    "sensenova",
+    "apigoto",
+    "brave",
 ];
 
 static CONFIG_WRITE: Mutex<()> = Mutex::new(());
@@ -336,6 +429,53 @@ fn autostart_now_enabled(app: &tauri::AppHandle) -> bool {
     app.autolaunch().is_enabled().unwrap_or(false)
 }
 
+/// The tray menu keeps a compact, read-only status list like ccSwitch. It is
+/// built from Pane's last-good snapshot cache, so opening the native menu does
+/// not wait on network requests or the WebView. A click on one of these rows
+/// returns to the live floating dashboard; the full management surface lives
+/// behind the separate Settings… item below.
+fn cached_tray_provider_rows(cfg: &Value) -> Vec<(String, String)> {
+    const MAX_ROWS: usize = 8;
+    let disabled: HashSet<String> = cfg
+        .get("disabled")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(Value::as_str)
+        .map(str::to_string)
+        .collect();
+    let mut rows: Vec<(String, String)> = Vec::new();
+    let Ok(cache) = last_ok().lock() else {
+        return rows;
+    };
+    for (id, cached) in cache.iter() {
+        if disabled.contains(id) || cached.snap.status != "ok" {
+            continue;
+        }
+        let metric = cached
+            .snap
+            .metrics
+            .iter()
+            .find(|m| m.kind == "progress" && m.used_percent.is_some());
+        let suffix = metric
+            .and_then(|m| m.used_percent)
+            .map(|used| {
+                format!(
+                    " · {}",
+                    i18n::tray_left_label(cfg, (100.0 - used.clamp(0.0, 100.0)).round() as i64)
+                )
+            })
+            .unwrap_or_default();
+        rows.push((
+            format!("tray_provider:{id}"),
+            format!("{}{}", cached.snap.name, suffix),
+        ));
+    }
+    rows.sort_by(|a, b| a.1.to_lowercase().cmp(&b.1.to_lowercase()));
+    rows.truncate(MAX_ROWS);
+    rows
+}
+
 fn build_tray_menu(app: &tauri::AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
     let cfg = config_with_defaults(load_config());
     // "Open main panel" stays on top: when every window got lost, the tray
@@ -351,6 +491,15 @@ fn build_tray_menu(app: &tauri::AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
     )?;
     let refresh_all = MenuItem::with_id(app, "refresh_all", i18n::refresh_all_label(&cfg), true, None::<&str>)?;
     let sep1 = PredefinedMenuItem::separator(app)?;
+    let provider_items: Vec<MenuItem<tauri::Wry>> = cached_tray_provider_rows(&cfg)
+        .into_iter()
+        .map(|(id, label)| MenuItem::with_id(app, id, label, true, None::<&str>))
+        .collect::<tauri::Result<Vec<_>>>()?;
+    let provider_refs: Vec<&dyn IsMenuItem<tauri::Wry>> = provider_items
+        .iter()
+        .map(|item| item as &dyn IsMenuItem<tauri::Wry>)
+        .collect();
+    let sep_providers = PredefinedMenuItem::separator(app)?;
     let settings = MenuItem::with_id(app, "open_settings", i18n::settings_label(&cfg), true, None::<&str>)?;
     let autostart = CheckMenuItem::with_id(
         app,
@@ -362,10 +511,18 @@ fn build_tray_menu(app: &tauri::AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
     )?;
     let sep2 = PredefinedMenuItem::separator(app)?;
     let quit = MenuItem::with_id(app, "quit", i18n::quit_label(&cfg), true, None::<&str>)?;
-    Menu::with_items(
-        app,
-        &[&open_panel, &show_popover, &refresh_all, &sep1, &settings, &autostart, &sep2, &quit],
-    )
+    let mut items: Vec<&dyn IsMenuItem<tauri::Wry>> = vec![
+        &open_panel,
+        &show_popover,
+        &refresh_all,
+        &sep1,
+    ];
+    items.extend(provider_refs);
+    if !provider_items.is_empty() {
+        items.push(&sep_providers);
+    }
+    items.extend([&settings as &dyn IsMenuItem<tauri::Wry>, &autostart, &sep2, &quit]);
+    Menu::with_items(app, &items)
 }
 
 fn rebuild_tray_menu(app: &tauri::AppHandle) {
@@ -662,7 +819,7 @@ struct StripEntry {
 /// strip ids are validated against this before becoming tray icon ids,
 /// including `family@account` cards. Stale family-level strip icons are
 /// removed for exactly this set.
-const STRIP_PROVIDER_IDS: [&str; 41] = [
+const STRIP_PROVIDER_IDS: [&str; 40] = [
     "claude",
     "codex",
     "cursor",
@@ -690,7 +847,6 @@ const STRIP_PROVIDER_IDS: [&str; 41] = [
     "siliconflow",
     "novita",
     "relaybalance",
-    "linkso",
     "qodercn",
     "traecn",
     "commandcode",
@@ -1440,6 +1596,23 @@ fn card_is_disabled(id: &str, disabled: &[String]) -> bool {
     family_of(id) == "onenewapi" && disabled.iter().any(|d| d == "onenewapi")
 }
 
+// Qoder CN daily benefit check-in (default off, `qoderCheckin`): runs where
+// long-wall mirroring runs — the global cycle and the manual ⟳ — so both
+// paths agree; the connectivity test never claims. The config read is paid
+// only by qodercn cards.
+async fn apply_qoder_checkin(card_id: &str, snap: &mut providers::Snapshot) {
+    if !card_id.starts_with("qodercn") {
+        return;
+    }
+    let on = config_with_defaults(load_config())
+        .get("qoderCheckin")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    if on {
+        providers::qodercn::maybe_checkin(card_id, snap).await;
+    }
+}
+
 // Owned id/name so dynamically discovered account cards (claude@<hash>)
 // can ride the same guard as the static providers under a 'static spawn.
 async fn guarded<F>(id: String, name: String, fut: F) -> providers::Snapshot
@@ -1458,7 +1631,12 @@ where
     if let Some(note) = benched {
         return providers::Snapshot::error(id, name, note);
     }
-    let snap = fut.await;
+    let mut snap = fut.await;
+    // Long-window wall mirroring: while a weekly/monthly cap stands, short
+    // windows would show a green mirage. Family-gated in
+    // providers::WEEK_WALL_MIRROR_FAMILIES.
+    providers::mirror_week_wall(id, &mut snap);
+    apply_qoder_checkin(id, &mut snap).await;
     let mut map = fail_state().lock().unwrap();
     if snap.status == "error" {
         let err = snap.error.clone().unwrap_or_default();
@@ -1618,14 +1796,6 @@ async fn account_snapshot(
                 "this account has no base URL — remove and re-add it".into(),
             ),
         },
-        "linkso" => match base_url.as_deref().map(str::trim).filter(|u| !u.is_empty()) {
-            Some(url) => providers::linkso::snapshot_with_key_at(&key, url, &id, &name).await,
-            None => providers::Snapshot::error(
-                &id,
-                &name,
-                "this account has no base URL — remove and re-add it".into(),
-            ),
-        },
         other => providers::Snapshot::error(
             &id,
             &name,
@@ -1766,9 +1936,36 @@ async fn fetch_usage(
 /// frontend's `lastSnapshots` by the caller.
 #[tauri::command]
 async fn refresh_provider(provider_id: String) -> Result<providers::Snapshot, String> {
+    let mut snap = fetch_provider_snapshot(provider_id.clone(), false).await?;
+    // Same long-wall mirroring the global cycle applies in guarded() — a
+    // manual ⟳ must not paint the green mirage back over the wall.
+    providers::mirror_week_wall(&provider_id, &mut snap);
+    apply_qoder_checkin(&provider_id, &mut snap).await;
+    Ok(snap)
+}
+
+/// Connectivity test from the card menu: one real authenticated request with
+/// the stored credential, timed. Disabled cards are allowed — the point is
+/// testing a key BEFORE enabling the provider. For vendors whose quota
+/// window only starts ticking on the first request (GLM 5h, Doubao), this
+/// is also what opens the clock without burning a chat turn by hand.
+/// Returns "ok:<ms>" or "<error>:<ms>" so the frontend can localize.
+#[tauri::command]
+async fn test_provider(provider_id: String) -> Result<String, String> {
+    let started = std::time::Instant::now();
+    let snap = fetch_provider_snapshot(provider_id, true).await?;
+    let ms = started.elapsed().as_millis();
+    Ok(match snap.status.as_str() {
+        "ok" => format!("ok:{ms}"),
+        _ => format!("{}:{ms}", snap.error.unwrap_or_else(|| "unknown error".into())),
+    })
+}
+
+async fn fetch_provider_snapshot(provider_id: String, allow_disabled: bool) -> Result<providers::Snapshot, String> {
     let family = family_of(&provider_id);
     let cfg = config_with_defaults(load_config());
-    if cfg
+    if !allow_disabled
+        && cfg
         .get("disabled")
         .and_then(Value::as_array)
         .is_some_and(|a| a.iter().any(|v| v.as_str() == Some(family.as_str())))
@@ -1805,7 +2002,6 @@ async fn refresh_provider(provider_id: String) -> Result<providers::Snapshot, St
             "siliconflow" => providers::siliconflow::snapshot().await,
             "novita" => providers::novita::snapshot().await,
             "relaybalance" => providers::relaybalance::snapshot().await,
-            "linkso" => providers::linkso::snapshot().await,
             "qodercn" => providers::qodercn::snapshot().await,
             "traecn" => providers::traecn::snapshot().await,
             "commandcode" => providers::commandcode::snapshot().await,
@@ -1992,7 +2188,6 @@ async fn run_usage_fetch(app: &tauri::AppHandle) -> Vec<providers::Snapshot> {
         ("siliconflow", Box::pin(guarded("siliconflow".into(), "SiliconFlow".into(), providers::siliconflow::snapshot()))),
         ("novita", Box::pin(guarded("novita".into(), "Novita AI".into(), providers::novita::snapshot()))),
         ("relaybalance", Box::pin(guarded("relaybalance".into(), "Custom Balance".into(), providers::relaybalance::snapshot()))),
-        ("linkso", Box::pin(guarded("linkso".into(), "GLM V1 Pro".into(), providers::linkso::snapshot()))),
         ("qodercn", Box::pin(guarded("qodercn".into(), "Qoder CN".into(), providers::qodercn::snapshot()))),
         ("traecn", Box::pin(guarded("traecn".into(), "Trae CN".into(), providers::traecn::snapshot()))),
         ("commandcode", Box::pin(guarded("commandcode".into(), "Command Code".into(), providers::commandcode::snapshot()))),
@@ -2351,6 +2546,7 @@ async fn run_usage_fetch(app: &tauri::AppHandle) -> Vec<providers::Snapshot> {
         if let Ok(mut map) = cache.lock() {
             let mut dirty = false;
             let mut history_samples: Vec<(String, f64)> = Vec::new();
+            let mut credit_samples: Vec<(String, f64)> = Vec::new();
             for s in all.iter_mut() {
                 if family_of(&s.id) == "onenewapi" {
                     let current = onenewapi_snapshot_generations([s.id.clone()]);
@@ -2390,6 +2586,9 @@ async fn run_usage_fetch(app: &tauri::AppHandle) -> Vec<providers::Snapshot> {
                     if let Some(used) = usage_history::worst_used_percent(&s.metrics) {
                         history_samples.push((s.id.clone(), used));
                     }
+                    if let Some(credits) = usage_history::credits_used_from_metrics(&s.metrics) {
+                        credit_samples.push((s.id.clone(), credits));
+                    }
                     dirty = true;
                 } else if s.status == "error" {
                     if let Some(previous) = map.get(&s.id) {
@@ -2403,6 +2602,7 @@ async fn run_usage_fetch(app: &tauri::AppHandle) -> Vec<providers::Snapshot> {
                     eprintln!("[pane] snapshot cache refresh: {error}");
                 }
                 usage_history::record_samples(&history_samples);
+                usage_history::record_credit_samples(&credit_samples);
             }
         }
     }
@@ -2576,6 +2776,10 @@ async fn fetch_and_broadcast_usage(app: &tauri::AppHandle) -> Vec<providers::Sna
             eprintln!("[pane] background tray sync: {error}");
         }
     }
+    // Rebuild outside the native right-click event. Replacing a Win32 menu
+    // while it is opening causes the white flash / immediate dismissal seen
+    // when `set_menu` runs from MouseButtonState::Down.
+    rebuild_tray_menu(&app);
     let _ = app.emit("usage-updated", &snapshots);
     snapshots
 }
@@ -2741,6 +2945,14 @@ fn fetch_usage_history() -> std::collections::BTreeMap<String, Vec<Option<f64>>>
     usage_history::trend_map()
 }
 
+/// Daily credit consumption per card id. Qoder CN / Trae CN bill in credits,
+/// not tokens — this series is theirs alone and never feeds token or
+/// dollar totals.
+#[tauri::command]
+fn fetch_credit_history() -> std::collections::BTreeMap<String, Vec<Option<f64>>> {
+    usage_history::credit_trend_map()
+}
+
 /// Long-range spend from permanent daily rollups. `None` means all retained history.
 #[tauri::command]
 fn fetch_spend_history(range_days: Option<u32>) -> Result<Vec<spend_history::RangeSpend>, String> {
@@ -2764,7 +2976,7 @@ fn validate_relay_base_url(provider: &str, url: &str) -> Result<(), String> {
 
 /// Saves (or clears, when `key` is empty) a user-pasted API key to
 /// %APPDATA%\Pane\<provider>.json. Providers with a user-chosen endpoint
-/// (relaybalance, linkso) pass `base_url` too, stored alongside as `baseUrl`.
+/// (relaybalance) pass `base_url` too, stored alongside as `baseUrl`.
 #[tauri::command]
 fn set_api_key(provider: String, key: String, base_url: Option<String>) -> Result<(), String> {
     if !provider_catalog::supports_api_key(&provider) {
@@ -2775,18 +2987,83 @@ fn set_api_key(provider: String, key: String, base_url: Option<String>) -> Resul
     let path = dir.join(format!("{provider}.json"));
     let key = key.trim();
     if key.is_empty() {
+        // Deleting a key deletes both the plaintext fallback and the vault copy.
         let _ = std::fs::remove_file(&path);
+        secretstore::remove(&secretstore::provider_key(&provider));
         return Ok(());
     }
-    let mut doc = serde_json::json!({ "apiKey": key });
-    if let Some(url) = base_url.as_deref().map(str::trim).filter(|u| !u.is_empty()) {
+    // Validate the optional relay URL before any write.
+    let base_url = base_url.as_deref().map(str::trim).filter(|u| !u.is_empty());
+    if let Some(url) = base_url {
         if !provider_catalog::takes_base_url(&provider) {
             return Err("this provider does not take a base URL".into());
         }
         validate_relay_base_url(&provider, url)?;
+    }
+    // Keys live in the OS credential vault; the file carries only non-secret
+    // fields. A failed vault write falls back to the plaintext file — the
+    // exact behavior from before the migration, so nothing can be lost.
+    let vaulted = secretstore::put(&secretstore::provider_key(&provider), key).is_ok();
+    let mut doc = serde_json::json!({});
+    if !vaulted {
+        doc["apiKey"] = serde_json::Value::from(key);
+    }
+    if let Some(url) = base_url {
         doc["baseUrl"] = serde_json::Value::from(url);
     }
+    if doc.as_object().is_some_and(|o| o.is_empty()) {
+        let _ = std::fs::remove_file(&path);
+        return Ok(());
+    }
     std::fs::write(&path, doc.to_string()).map_err(|e| format!("write key file: {e}"))
+}
+
+/// The reveal gate's "set a password first" spelling — the frontend matches
+/// this to route the user into the vault setup instead of showing an error.
+const NO_MASTER_PASSWORD: &str = "no master password is set";
+
+/// Shared prologue for the reveal commands: no password → guidance error;
+/// unlocked session → pass; otherwise verify and open the session. One
+/// verification covers the vault and every provider/account reveal until a
+/// lock.
+fn reveal_gate(password: &str) -> Result<(), String> {
+    if !keyvault::status().has_password {
+        return Err(NO_MASTER_PASSWORD.into());
+    }
+    if keyvault::session_open() {
+        return Ok(());
+    }
+    keyvault::verify_for_reveal(password)
+}
+
+/// Reveal a provider's saved API key after master-password verification.
+#[tauri::command]
+fn reveal_provider_key(provider: String, password: String) -> Result<String, String> {
+    let family = family_of(&provider);
+    reveal_gate(&password)?;
+    providers::stored_key_file(&family)
+        .ok_or_else(|| "no saved key for this provider".to_string())
+}
+
+/// Reveal one account key (addressed by its stable card id) after
+/// master-password verification.
+#[tauri::command]
+fn reveal_account_key(provider: String, id: String, password: String) -> Result<String, String> {
+    let family = family_of(&provider);
+    reveal_gate(&password)?;
+    accounts::load_accounts(&family)
+        .into_iter()
+        .find(|a| accounts::card_id_for_account(&family, a) == id)
+        .map(|a| a.api_key)
+        .filter(|k| !k.trim().is_empty())
+        .ok_or_else(|| "no saved key for this account".to_string())
+}
+
+/// Change the master password: verify the old one first, then re-seal the
+/// whole vault under the new one.
+#[tauri::command]
+fn change_master_password(old: String, new: String) -> Result<keyvault::VaultStatus, String> {
+    keyvault::change_password(&old, &new)
 }
 
 /// The base URL saved alongside a provider's API key (Custom Balance's and
@@ -2852,14 +3129,6 @@ async fn test_api_key(
                 .filter(|u| !u.is_empty())
                 .ok_or_else(|| "a base URL is required for Custom Balance".to_string())?;
             providers::relaybalance::snapshot_with_key(key, url).await
-        }
-        "linkso" => {
-            let url = base_url
-                .as_deref()
-                .map(str::trim)
-                .filter(|u| !u.is_empty())
-                .ok_or_else(|| "a base URL is required for GLM V1 Pro".to_string())?;
-            providers::linkso::snapshot_with_key(key, url).await
         }
         _ => return Err(format!("unknown provider: {provider}")),
     };
@@ -2999,6 +3268,37 @@ fn account_remove(provider: String, index: usize) -> Result<(), String> {
 /// card id is retained so usage_history.json remains attached to this identity.
 #[tauri::command]
 fn account_archive(provider: String, index: usize) -> Result<(), String> {
+    let base = crate::providers::config_dir();
+    if provider == "antigravity" {
+        let mut slots = antigravity_accounts::load_slots();
+        if index >= slots.len() {
+            return Err(format!("no antigravity slot #{index}"));
+        }
+        let slot = slots.remove(index);
+        let card_id = antigravity_accounts::card_id_for_slot(&slot);
+        let label = slot.label.clone();
+        let payload = serde_json::to_value(&slot).map_err(|e| format!("archive antigravity slot: {e}"))?;
+        accounts::archive_external_to(&base, accounts::ArchivedExternalAccount {
+            provider: provider.clone(), card_id, label, payload,
+            archived_at: chrono::Utc::now().timestamp_millis(),
+        })?;
+        return antigravity_accounts::save_slots(&slots);
+    }
+    if provider == "cursor" {
+        let mut entries = cursor_accounts::load_accounts();
+        if index >= entries.len() {
+            return Err(format!("no cursor account #{index}"));
+        }
+        let entry = entries.remove(index);
+        let card_id = cursor_accounts::card_id_for_account(&entry);
+        let label = entry.label.clone();
+        let payload = serde_json::to_value(&entry).map_err(|e| format!("archive cursor account: {e}"))?;
+        accounts::archive_external_to(&base, accounts::ArchivedExternalAccount {
+            provider: provider.clone(), card_id, label, payload,
+            archived_at: chrono::Utc::now().timestamp_millis(),
+        })?;
+        return cursor_accounts::save_accounts(&entries);
+    }
     if !accounts::provider_takes_accounts(&provider) {
         return Err(format!("unknown multi-account provider: {provider}"));
     }
@@ -3016,14 +3316,118 @@ fn account_archive(provider: String, index: usize) -> Result<(), String> {
     let card_id = accounts::card_id_for_account(&provider, &entry);
     accounts::archive_account(accounts::ArchivedAccount {
         provider: provider.clone(),
+        label: entry.label.clone(),
+        api_key: entry.api_key.clone(),
+        base_url: entry.base_url.clone(),
         card_id,
-        label: entry.label,
         archived_at: chrono::Utc::now().timestamp_millis(),
     })?;
     accounts::save_accounts(&provider, &entries)?;
     if index == 0 {
         let _ = forget_provider_snapshot(&provider);
     }
+    Ok(())
+}
+
+#[derive(serde::Serialize)]
+struct ArchivedAccountSummary {
+    provider: String,
+    card_id: String,
+    label: String,
+    archived_at: i64,
+}
+
+/// Lists the family's archived accounts without returning retained
+/// credentials to the WebView.
+#[tauri::command]
+fn archived_accounts(provider: String) -> Vec<ArchivedAccountSummary> {
+    let base = crate::providers::config_dir();
+    let mut result: Vec<_> = accounts::load_archived_from(&base)
+        .into_iter()
+        .filter(|a| a.provider == provider)
+        .map(|a| ArchivedAccountSummary {
+            provider: a.provider,
+            card_id: a.card_id,
+            label: a.label,
+            archived_at: a.archived_at,
+        })
+        .collect();
+    result.extend(
+        accounts::load_archived_external_from(&base)
+            .into_iter()
+            .filter(|a| a.provider == provider)
+            .map(|a| ArchivedAccountSummary {
+                provider: a.provider,
+                card_id: a.card_id,
+                label: a.label,
+                archived_at: a.archived_at,
+            }),
+    );
+    result
+}
+
+/// Restores an archived account: its kept credential re-enters the active
+/// accounts file under the original stable card id, so usage history and
+/// layout reattach without migration. Accounts archived before credentials
+/// were kept have an empty key and are rejected (nothing to restore).
+#[tauri::command]
+fn account_restore(provider: String, card_id: String) -> Result<(), String> {
+    let base = crate::providers::config_dir();
+    if provider == "antigravity" {
+        let archived = accounts::load_archived_external_from(&base)
+            .into_iter()
+            .find(|a| a.provider == provider && a.card_id == card_id)
+            .ok_or_else(|| format!("no archived account {card_id} for {provider}"))?;
+        let slot: antigravity_accounts::AgSlot = serde_json::from_value(archived.payload)
+            .map_err(|e| format!("restore antigravity slot: {e}"))?;
+        let mut slots = antigravity_accounts::load_slots();
+        if slots.iter().any(|s| antigravity_accounts::card_id_for_slot(s) == card_id) {
+            return Err(format!("account {card_id} already exists"));
+        }
+        slots.push(slot);
+        antigravity_accounts::save_slots(&slots)?;
+        return accounts::remove_archived_external_from(&base, &card_id);
+    }
+    if provider == "cursor" {
+        let archived = accounts::load_archived_external_from(&base)
+            .into_iter()
+            .find(|a| a.provider == provider && a.card_id == card_id)
+            .ok_or_else(|| format!("no archived account {card_id} for {provider}"))?;
+        let entry: cursor_oauth::CursorAccount = serde_json::from_value(archived.payload)
+            .map_err(|e| format!("restore cursor account: {e}"))?;
+        let mut entries = cursor_accounts::load_accounts();
+        if entries.iter().any(|e| cursor_accounts::card_id_for_account(e) == card_id) {
+            return Err(format!("account {card_id} already exists"));
+        }
+        entries.push(entry);
+        cursor_accounts::save_accounts(&entries)?;
+        return accounts::remove_archived_external_from(&base, &card_id);
+    }
+    if !accounts::provider_takes_accounts(&provider) {
+        return Err(format!("unknown multi-account provider: {provider}"));
+    }
+    let base = crate::providers::config_dir();
+    let archived = accounts::load_archived_from(&base)
+        .into_iter()
+        .find(|a| a.provider == provider && a.card_id == card_id)
+        .ok_or_else(|| format!("no archived account {card_id} for {provider}"))?;
+    if archived.api_key.trim().is_empty() {
+        return Err(format!("archived account {card_id} kept no credential"));
+    }
+    let mut entries = accounts::load_accounts(&provider);
+    if entries
+        .iter()
+        .any(|e| accounts::card_id_for_account(&provider, e) == card_id)
+    {
+        return Err(format!("account {card_id} already exists"));
+    }
+    entries.push(accounts::AccountEntry {
+        label: archived.label,
+        api_key: archived.api_key,
+        base_url: archived.base_url,
+    });
+    accounts::save_accounts(&provider, &entries)?;
+    accounts::remove_archived(&card_id)?;
     Ok(())
 }
 
@@ -3680,13 +4084,25 @@ fn build_updater(app: &tauri::AppHandle) -> Result<tauri_plugin_updater::Updater
 
 /// Downloads and installs a pending update, then restarts the app. Only
 /// called from the frontend banner after check_for_update announced one.
+/// Byte progress streams as `update-progress` events so the spend-header
+/// indicator can fill a real ring — the mainstream download-progress
+/// detail (electron-updater exposes the same event).
 #[tauri::command]
 async fn install_update(app: tauri::AppHandle) -> Result<(), String> {
     let updater = build_updater(&app)?;
     match updater.check().await.map_err(|e| e.to_string())? {
         Some(update) => {
+            let handle = app.clone();
             update
-                .download_and_install(|_, _| {}, || {})
+                .download_and_install(
+                    move |chunk_len, content_len| {
+                        let _ = handle.emit(
+                            "update-progress",
+                            serde_json::json!({ "chunk": chunk_len, "total": content_len }),
+                        );
+                    },
+                    || {},
+                )
                 .await
                 .map_err(|e| e.to_string())?;
             app.restart();
@@ -3770,12 +4186,18 @@ async fn sensenova_oauth_finish(input: String) -> Result<providers::Snapshot, St
 /// tauri::async_runtime::spawn.
 async fn ensure_panel_window(app: &tauri::AppHandle) -> Result<(), String> {
     if let Some(w) = app.get_webview_window("panel") {
+        // A prior close/minimize can leave the native handle alive while the
+        // window is not visible. Make the tray action idempotent and visibly
+        // recover the existing panel instead of flashing and disappearing.
+        let _ = w.unminimize();
+        let _ = w.show();
         w.set_focus().map_err(|e| e.to_string())?;
         return Ok(());
     }
     tauri::WebviewWindowBuilder::new(app, "panel", tauri::WebviewUrl::App("index.html".into()))
         .title("Pane")
         .inner_size(960.0, 640.0)
+        .center()
         .resizable(true)
         .decorations(true)
         .always_on_top(false)
@@ -4008,10 +4430,13 @@ pub fn run() {
             keyvault_set_note,
             fetch_usage,
             refresh_provider,
+            test_provider,
             cached_usage,
             fetch_spend,
             fetch_spend_sources,
             fetch_usage_history,
+            fetch_credit_history,
+            get_boot_id,
             fetch_spend_history,
             fetch_spend_daily,
             antigravity_capture_account,
@@ -4020,6 +4445,9 @@ pub fn run() {
             cursor_oauth_cancel,
             cursor_import,
             set_api_key,
+            reveal_provider_key,
+            reveal_account_key,
+            change_master_password,
             onenewapi_list_sites,
             onenewapi_probe_site,
             onenewapi_create_site,
@@ -4034,6 +4462,8 @@ pub fn run() {
             account_add,
             account_remove,
             account_archive,
+            account_restore,
+            archived_accounts,
             account_rename,
             account_set_default,
             account_list,
@@ -4118,6 +4548,13 @@ pub fn run() {
                             }
                             rebuild_tray_menu(app);
                         }
+                        id if id.starts_with("tray_provider:") => {
+                            // Provider rows are status shortcuts, not a
+                            // second settings surface. Return to the live
+                            // dashboard so the user can inspect that card.
+                            toggle_popover_centered(app);
+                            rebuild_tray_menu(app);
+                        }
                         _ => {}
                     }
                 })
@@ -4135,7 +4572,10 @@ pub fn run() {
                             button: MouseButton::Right,
                             button_state: MouseButtonState::Down,
                             ..
-                        } => rebuild_tray_menu(tray.app_handle()),
+                        } => {
+                            // The native menu is already attached to the tray.
+                            // Do not replace it during the opening gesture.
+                        }
                         _ => {}
                     }
                 })
