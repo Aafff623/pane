@@ -79,9 +79,9 @@ anything unverified lives under `待确认` at the bottom.
   the availability tally. Independent pools (Cursor Auto vs API, Antigravity
   Gemini vs Claude) are maxed only when every *present* pool is exhausted.
   Cursor's 5h-tab ring follows `Cursor Models` (Auto), not the API pool.
-- **Peak hours (高峰)** — time-of-day billing windows for 5 families,
+- **Peak hours (高峰)** — time-of-day billing windows for 4 families,
   rules table + Beijing-time (UTC+8) checker in `src/peakHours.ts`
-  (verified against official docs 2026-09-15): zai/linkso Mon–Fri
+  (verified against official docs 2026-09-15): zai Mon–Fri
   14:00–18:00; commandcode Mon–Fri 09:00–12:00 & 14:00–18:00 (only
   DeepSeek-routed models; weekends never peak); qodercn & traecn daily
   08:00–22:00 (weekend daytime IS peak — both use a "daily" wording, no
@@ -425,6 +425,20 @@ anything unverified lives under `待确认` at the bottom.
   their legacy sources (provider key files / env). Legacy v1 plaintext files
   load unchanged until a password is set; setting one rewrites the file
   encrypted, permanently.
+- **Provider/account keys in the OS vault (2026-10-08)** — the 22 providers'
+  API keys and every multi-account key now live in the OS credential store
+  via `keyring` (`secretstore.rs`, service "Pane"; entry names
+  `provider:<family>` / `account:<card-id>` / `archived:<card-id>` on the
+  stable `<family>@<fnv1a>` ids). JSON files keep only non-secret fields;
+  reads lazily migrate old plaintext — the vault write must succeed before
+  the field leaves the file, and a failed vault write keeps the plaintext
+  file as the fallback. `reveal_provider_key` / `reveal_account_key` demand
+  the master password (same canary + session as the vault; "查看" in the
+  panel) — the password gates human viewing, background refresh never needs
+  it. `change_master_password` verifies the old password first. The
+  parse-tests harness swaps in an in-memory store via the `harness` feature.
+  Provider-specific credential files (onenewapi sites, OAuth stores) are NOT
+  migrated yet.
 - **Updater (2026-10-05)** — signed with this project's own minisign key
   (private key in the `TAURI_SIGNING_PRIVATE_KEY` repo secret; local backup
   in `temp/updater-keygen.txt` — losing it kills update signing). The only
@@ -446,7 +460,7 @@ anything unverified lives under `待确认` at the bottom.
   the selected mascot is anchored at the outer card's bottom-right edge.
 - Global shortcut registration restores the previous working binding after a
   failed replacement, while Settings shows an explicit availability/conflict
-  state. ClinePass uses the generated `users-three` Phosphor mark in
+  state. ClinePass uses the official Cline bot mark (Magpie icon set, MIT) in
   `src/assets/providers/clinepass.svg`.
 - Spend details render the selected period as a single active column; local
   shortcut settings cover six focused-window actions and reject duplicate

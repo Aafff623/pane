@@ -2,7 +2,14 @@
 
 > 生效日期：2026-10-05 ｜ 状态：强制执行
 > 本规范对标 OhMyMeme/OhMyMeme 的发布风格（分析报告见 `temp/release-style/ANALYSIS-20261005.md`，本地参考不入库）。
-> 每次 `v*` tag 发布都必须按本规范执行。AGENTS.md「Validation & delivery」第 6 条为对应规则。
+> 每次 `v*` tag 发布都必须按本规范执行。AGENTS.md「Validation & delivery」第 7 条为对应规则。
+
+## 0. 发布前置门禁
+
+发布只能发生在本地需求实现完成、相关构建与测试通过，并且用户本人已经
+完成 UI 验收且在当前对话中明确授权之后。没有这两个条件，不得创建 release、
+tag、commit 或 push；本地端口可用、截图、构建成功和 Agent 自检都不能代替
+用户验收。
 
 ## 1. 发布正文结构（固定骨架）
 

@@ -5,7 +5,7 @@ file and `AGENTS.md`. Use it for anything that must not touch the repo.
 
 | Subdirectory | Purpose |
 |--------------|---------|
-| `handoff/`   | Cross-session / cross-agent handoff docs. Index + naming rules in [`handoff/README.md`](handoff/README.md). |
+| `handoff/`   | Cross-session / cross-agent handoff docs (`YYYYMMDD-HHMMSS-T-<task-id>-<topic>.md`; no index file — newest = latest timestamp). |
 | `input/`     | Raw user-provided material (keep provenance; never edit originals). |
 | `research/`  | Investigation notes, source studies (e.g. cc-switch, cockpit-tools). |
 | `reports/`   | Finished reports awaiting promotion into `docs/` or disposal. |

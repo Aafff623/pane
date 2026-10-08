@@ -1,4 +1,4 @@
-﻿# Pane — Agent Startup Guide
+# Pane — Agent Startup Guide
 
 > **Read this first.**  This file is the canonical startup reference for any
 > AI agent (Antigravity, Codex, Claude, Kimi, etc.) working on this repo.
@@ -7,13 +7,28 @@
 
 ---
 
+## Development and release are separate tracks
+
+The normal development loop never runs the installed release package. It uses
+the checkout's Vite server and debug binary:
+
+| Track | Frontend | Native binary | Purpose |
+|---|---|---|---|
+| Local development | `pnpm dev` → `127.0.0.1:1420` | `src-tauri\target\debug\pane.exe` → `127.0.0.1:6736` | HMR, debugging, tray and `Alt+2` acceptance |
+| Published release | bundled `dist/` | `src-tauri\target\release\bundle\...` installer / exe | GitHub Release and installed-user distribution |
+
+`pnpm build` is a validation/build step; it does not publish a release and it
+does not replace the Vite dev server. The release workflow starts from a
+version tag and uploads generated installer artifacts. Do not use an installed
+release exe to validate uncommitted frontend changes.
+
 ## Architecture in one sentence
 
 Pane is a **Tauri** app: the Rust backend (`src-tauri/`) compiles to
 `pane.exe`, which opens a **WebView2** window that loads the frontend from
-`http://127.0.0.1:1420`.  In dev mode that URL is served by Vite (live
-reload).  In production the binary still reads `127.0.0.1:1420` — so you
-must always have something serving `dist/` there.
+`http://127.0.0.1:1420` in development. Vite serves that URL with live
+reload. Production builds bundle `frontendDist: "../dist"` into the native
+app; the installed release does not require the Vite server on `1420`.
 (Explicit IPv4: on machines where IPv6 loopback `[::1]` connections are
 blocked — WFP filter / VPN driver — `localhost` may resolve to `::1`
 first and every probe fails with access-denied.)
@@ -27,59 +42,45 @@ There are **two independent processes** that must both be running:
 
 ---
 
-## Quick-start (frontend-only changes — no Rust rebuild)
+## Quick-start (development)
+
+For the normal local loop, run the one-shot launcher after building the
+frontend. It starts Vite and the debug binary through WMI, redirects logs, and
+waits for both ports:
 
 ```powershell
-# 1. Build the frontend
 cd D:\code\pane
 pnpm build
-
-# 2. Kill any previous pane + free port 1420
-Stop-Process -Name pane -Force -ErrorAction SilentlyContinue
-# If something else owns 1420:
-# Get-NetTCPConnection -LocalPort 1420 | ForEach-Object { Stop-Process -Id $_.OwningProcess -Force }
-
-# 3. Clear WebView2 cache (prevents serving stale CSS/JS)
-Remove-Item -Recurse -Force "$env:LOCALAPPDATA\com.jazii.pane\EBWebView" -ErrorAction SilentlyContinue
-
-# 4. Start Vite dev server in background (correct cache headers, HMR)
-Start-Process powershell -ArgumentList '-NoProfile -Command "cd D:\code\pane; pnpm dev"' -WindowStyle Minimized
-
-# 5. Launch pane.exe on the INTERACTIVE desktop (WinSta0\Default is required)
-#    Direct Start-Process / & runs on a non-interactive station — window invisible.
-$code = @"
-using System; using System.Runtime.InteropServices;
-public class PaneLauncher {
-  [StructLayout(LayoutKind.Sequential, CharSet=CharSet.Unicode)]
-  public struct STARTUPINFO {
-    public int cb, _r; public string lpDesktop, _t;
-    public int _a,_b,_c,_d,_e,_f,_g,_h; public short _i,_j;
-    public IntPtr _k,_l,_m,_n;
-  }
-  [StructLayout(LayoutKind.Sequential)]
-  public struct PROCESS_INFORMATION { public IntPtr hProcess,hThread; public int dwProcessId,dwThreadId; }
-  [DllImport("kernel32.dll",SetLastError=true,CharSet=CharSet.Unicode)]
-  public static extern bool CreateProcess(string a,string b,IntPtr c,IntPtr d,bool e,uint f,IntPtr g,string h,ref STARTUPINFO i,out PROCESS_INFORMATION j);
-  [DllImport("kernel32.dll")] public static extern bool CloseHandle(IntPtr h);
-  public static int Launch(string exe, string cwd, string desktop) {
-    var si = new STARTUPINFO(); si.cb = Marshal.SizeOf(si); si.lpDesktop = desktop;
-    PROCESS_INFORMATION pi;
-    if (!CreateProcess(null, exe, IntPtr.Zero, IntPtr.Zero, false, 0, IntPtr.Zero, cwd, ref si, out pi))
-      throw new Exception("CreateProcess error " + Marshal.GetLastWin32Error());
-    CloseHandle(pi.hThread); CloseHandle(pi.hProcess);
-    return pi.dwProcessId;
-  }
-}
-"@
-Add-Type -TypeDefinition $code
-$env:PATH = "D:\code\pane\src-tauri\target\debug;D:\Tools\mingw64\bin;" + $env:PATH
-$pid2 = [PaneLauncher]::Launch("D:\code\pane\src-tauri\target\debug\pane.exe", "D:\code\pane", "WinSta0\Default")
-Write-Host "pane.exe launched, PID $pid2"
+& .\temp\scripts\restart-pane-dev.ps1
 ```
 
-Press **Alt+2** or click the tray icon to open the panel.
+Acceptance requires all three signals: `127.0.0.1:1420` responds, the Pane
+API on `127.0.0.1:6736` responds, and the debug Pane appears with its tray icon
+on the interactive desktop. Press `Alt+2` (or the configured global shortcut)
+to summon the popover. A port-only `200` response is not UI acceptance.
 
----
+Do not
+replace the WMI launcher with a bare `Start-Process` or `& pane.exe`: those can
+place the window on a non-interactive station or attach stdout to a transient
+Agent pipe.
+
+## Required delivery sequence
+
+Every requested change follows this order:
+
+1. Implement the request in the local checkout and run the relevant build,
+   tests, and development startup checks.
+2. Leave the local debug services running for the user's own acceptance:
+   Vite on `127.0.0.1:1420`, the debug Pane API on `127.0.0.1:6736`, the
+   visible Pane window/tray icon, and the configured global shortcut.
+3. Wait for the user to personally test the UI and explicitly authorize the
+   next delivery step in the conversation.
+4. Only after that authorization may an agent prepare a commit, push a branch,
+   create a tag, or publish a release. Release packaging is a separate step
+   from local debugging and must also follow [`docs/release-format.md`](release-format.md).
+
+Build output, HTTP `200` responses, screenshots, and an agent's code review do
+not replace the user's acceptance or authorization.
 
 ## If UI still shows old content (WebView2 cache)
 

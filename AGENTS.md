@@ -5,8 +5,9 @@
 
 ## Critical: always read first
 **Full startup guide → [`docs/dev-startup.md`](docs/dev-startup.md)**
+**Cross-session task board → [`TODO.md`](TODO.md)** — read at session start; handoff parcels cite its `T-XXXX` IDs.
 
-## TL;DR startup sequence (frontend changes only)
+## TL;DR startup sequence (local development only)
 
 ```powershell
 # Step 1: build
@@ -16,24 +17,26 @@ cd D:\code\pane && pnpm build
 Stop-Process -Name pane -Force -ErrorAction SilentlyContinue
 Remove-Item -Recurse -Force "$env:LOCALAPPDATA\com.jazii.pane\EBWebView" -ErrorAction SilentlyContinue
 
-# Step 3: start Vite dev server (NOT python http.server)
-# Run in a separate/background shell:
-pnpm dev
+# Step 2–3: start Vite and the debug Pane together. This is the local
+# development launcher; it is not the installed release executable.
+& .\temp\scripts\restart-pane-dev.ps1
 
-# Step 4: launch pane.exe on the interactive desktop
-# Must use CreateProcess with lpDesktop="WinSta0\Default"
-# See docs/dev-startup.md for the full PowerShell snippet
+# Step 4: press Alt+2 (or the configured shortcut) and verify the popover and
+# the Pane tray icon on the interactive desktop.
 ```
 
 ## Non-negotiable rules
 
 1. **Two processes required**: Vite on `:1420` + `pane.exe` on `:6736`.
    Neither works without the other.
+   These are local development services. Published installers and release
+   executables are a separate track and are not used for normal debugging.
 2. **Always use `pnpm dev`** for serving the frontend — Python's `http.server`
    causes permanent WebView2 cache locks.
-3. **Launch `pane.exe` via `CreateProcess(WinSta0\Default)`** — using
-   `Start-Process` or `&` makes the window appear on a non-interactive
-   station (invisible to user).
+3. **Use `temp/scripts/restart-pane-dev.ps1` to launch `pane.exe`** — it uses
+   WMI with log redirection so the process survives the Agent shell and stays
+   on the interactive desktop. A bare `Start-Process` or `& pane.exe` is not a
+   valid development launch path.
 4. **Clear `%LOCALAPPDATA%\com.jazii.pane\EBWebView`** whenever you see
    stale UI. WebView2 caches assets aggressively.
 5. **`src-tauri/Cargo.toml` crate-type stays `["rlib"]`.** This is a
@@ -81,7 +84,14 @@ Verified domain facts, vocabulary, and hard constraints → [`CONTEXT.md`](CONTE
 - **Canonical startup guide**: `docs/dev-startup.md`. This file only summarizes it.
 - **README.md** Features/Providers copy can lag the code — trust `src/main.ts` + `src-tauri/src/provider_catalog.rs` over README.
 - **Local-only, never commit**: `.codegraph/` (auto-syncs at turn end — don't hand-sync), `.agents/mcp.json`, and everything under `temp/` except its `README.md` / `AGENTS.md`.
+- **Task board**: `TODO.md` (tracked) is the canonical cross-session task state — board/parcel split with `temp/handoff/`: parcels cite task IDs, never keep a second list, and there is no index file (newest handoff = latest filename timestamp).
 - **Resolved (2026-09-05)**: `AGENTS.md`, `docs/dev-startup.md` and the governance assets (`CLAUDE.md`, `CONTEXT.md`, `temp/` contract files) are tracked in Git; the one-off `run_test.cmd` launcher moved to `temp/scripts/` (local-only).
+
+## Secrets (persist on receipt)
+
+- Any key, token, or credential that appears in a session is saved to `temp/secrets/` (Git-ignored) in the same turn — save silently, report the path, never ask for confirmation.
+- Before requesting a credential, search `temp/secrets/` and Git-ignored env files first; never ask for the same value twice.
+- Secrets never enter Git-tracked files, logs, or replies, and never leave this machine.
 
 ## Validation & delivery
 
@@ -93,10 +103,11 @@ Verified domain facts, vocabulary, and hard constraints → [`CONTEXT.md`](CONTE
  $env:PATH = "D:\Tools\mingw64\bin;$env:PATH"
  cargo +stable-x86_64-pc-windows-gnu test
  ```
- The harness compiles the real `src-tauri/src` files via `#[path]` plus a `tauri-stub` crate (230 tests as of 2026-09-09). It used to live under `src-tauri/target/parse-tests`, where `cargo clean` eventually ate it; it is tracked at the repo root now.
+ The harness compiles the real `src-tauri/src` files via `#[path]` plus a `tauri-stub` crate (489 tests as of 2026-10-08). It used to live under `src-tauri/target/parse-tests`, where `cargo clean` eventually ate it; it is tracked at the repo root now.
 4. **UI acceptance is done by the user personally.** Agents deliver build/test evidence plus a short acceptance checklist — never claim "done and verified" from code reading alone.
 5. Non-trivial changes get a code-review pass plus a redundancy/simplifier scan before delivery, then re-test.
-6. **Release format** — every published release must follow [`docs/release-format.md`](docs/release-format.md): theme headline + download matrix table (system × architecture, with real sizes) on top, then `## 新增` / `## 变更` / `## 修复` sections written per the wording rules. `CHANGELOG.md` is the single source of content and is reconciled before tagging. `release.yml` must pass the body via `--notes-file`; bare `--generate-notes` (compare-link-only body) is a release-process defect.
+6. **Release authorization gate** — local implementation and validation must finish first; the user must personally perform UI acceptance and give explicit authorization in the conversation. Until both conditions are present, do not create a release, tag, commit, or push. A build, port check, screenshot, or agent opinion is not user acceptance.
+7. **Release format** — every published release must follow [`docs/release-format.md`](docs/release-format.md): theme headline + download matrix table (system × architecture, with real sizes) on top, then `## 新增` / `## 变更` / `## 修复` sections written per the wording rules. `CHANGELOG.md` is the single source of content and is reconciled before tagging. `release.yml` must pass the body via `--notes-file`; bare `--generate-notes` (compare-link-only body) is a release-process defect.
 
 ## Uncertainty & existing work
 
