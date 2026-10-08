@@ -482,6 +482,50 @@ body.settings-open #settings {
   align-items: stretch;
 }
 
+/* Q&A recovery editor / challenge rows under the vault bar. */
+.kv-recovery {
+  display: grid;
+  gap: 8px;
+  margin: 6px 0 10px;
+}
+
+.kv-recovery-row {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.kv-recovery-row input {
+  flex: 1 1 0;
+  min-width: 0;
+  background: var(--background);
+  border: 1px solid var(--input);
+  border-radius: 7px;
+  color: var(--foreground);
+  font-size: 12px;
+  font-family: inherit;
+  padding: 4px 8px;
+}
+
+.kv-recovery-row .rc-q {
+  flex: 2 1 0;
+}
+
+.kv-recovery-row .rc-q-text {
+  flex: 0 0 45%;
+  font-size: 12px;
+}
+
+.kv-recovery-actions {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.kv-recovery-actions .spacer {
+  flex: 1;
+}
+
 .kv-add-row input {
   min-width: 0;
   flex: 1 1 0;

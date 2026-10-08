@@ -10030,6 +10030,7 @@ interface VaultStatus {
   has_password: boolean;
   unlocked: boolean;
   count: number;
+  recovery_questions: number;
 }
 
 let vaultStatus: VaultStatus | null = null;
@@ -10064,11 +10065,16 @@ function renderVaultBar(): void {
   } else if (vaultStatus.unlocked) {
     state.textContent = t("settings.kvVaultUnlocked", { count: vaultStatus.count });
     button(t("settings.kvChange"), "change");
+    button(
+      vaultStatus.recovery_questions > 0 ? t("settings.kvRecoveryEdit") : t("settings.kvRecoverySet"),
+      "questions",
+    );
     button(t("settings.kvLock"), "lock");
   } else {
     state.textContent = t("settings.kvVaultLocked", { count: vaultStatus.count });
     state.classList.add("locked");
     button(t("settings.kvUnlock"), "unlock");
+    if (vaultStatus.recovery_questions > 0) button(t("settings.kvForgot"), "forgot");
   }
   inner.append(state, ...buttons);
   bar.append(inner);
@@ -10097,9 +10103,186 @@ async function setVaultPassword(): Promise<void> {
   try {
     vaultStatus = await invoke<VaultStatus>("keyvault_set_password", { password: pw });
     await loadKeyvault();
+    // Fresh password in hand — walk straight into recovery-question setup
+    // (skip = no forgot-password path; the vault bar keeps the entry).
+    renderRecoveryEditor(pw);
   } catch (err) {
     const status = document.querySelector("#status");
     if (status) status.textContent = String(err);
+  }
+}
+
+// ── Q&A recovery (forgot master password) ───────────────────────────────────
+
+let recoveryPresetPw: string | null = null;
+
+const RECOVERY_PRESET_KEYS = [
+  "settings.kvQFruit",
+  "settings.kvQTool",
+  "settings.kvQPet",
+  "settings.kvQCartoon",
+  "settings.kvQTravel",
+  "settings.kvQUniversity",
+  "settings.kvQPhone",
+  "settings.kvQMovie",
+];
+
+function recoveryEditorRow(): HTMLElement {
+  const row = document.createElement("div");
+  row.className = "kv-recovery-row";
+  row.innerHTML = `
+    <input type="text" class="rc-q" list="kv-recovery-presets" maxlength="60"
+      placeholder="${escapeHtml(t("settings.kvRecoveryQPh"))}" spellcheck="false" />
+    <input type="password" class="rc-a" maxlength="40" autocomplete="off"
+      placeholder="${escapeHtml(t("settings.kvRecoveryAPh"))}" />
+    <input type="password" class="rc-a2" maxlength="40" autocomplete="off"
+      placeholder="${escapeHtml(t("settings.kvRecoveryA2Ph"))}" />
+    <button type="button" class="mini-btn" data-rc-del>−</button>`;
+  return row;
+}
+
+/// The set/change-questions form. `pw` is the just-collected password when
+/// the flow follows set-password (submit reuses it); null → submit prompts.
+function renderRecoveryEditor(pw: string | null): void {
+  recoveryPresetPw = pw;
+  const panel = document.querySelector<HTMLElement>("#kv-recovery-panel");
+  if (!panel) return;
+  const presets = document.createElement("datalist");
+  presets.id = "kv-recovery-presets";
+  presets.innerHTML = RECOVERY_PRESET_KEYS.map(
+    (k) => `<option value="${escapeHtml(t(k))}"></option>`,
+  ).join("");
+  const wrap = document.createElement("div");
+  wrap.className = "kv-recovery";
+  wrap.innerHTML = `
+    <p class="kv-hint">${escapeHtml(t("settings.kvRecoveryHint"))}</p>
+    <div class="kv-recovery-rows"></div>
+    <div class="kv-recovery-actions">
+      <button type="button" class="mini-btn" data-rc-add>${escapeHtml(t("settings.kvRecoveryAdd"))}</button>
+      <span class="spacer"></span>
+      <button type="button" class="mini-btn" data-rc-cancel>${escapeHtml(t("dialog.cancel"))}</button>
+      <button type="button" class="mini-btn" data-rc-save>${escapeHtml(t("settings.kvRecoverySave"))}</button>
+    </div>`;
+  panel.replaceChildren(presets, wrap);
+  const rows = wrap.querySelector<HTMLElement>(".kv-recovery-rows")!;
+  // Default and recommendation: two questions.
+  rows.append(recoveryEditorRow(), recoveryEditorRow());
+}
+
+async function submitRecoveryEditor(): Promise<void> {
+  const status = document.querySelector("#status");
+  const panel = document.querySelector<HTMLElement>("#kv-recovery-panel");
+  if (!panel) return;
+  const rows = [...panel.querySelectorAll<HTMLElement>(".kv-recovery-row")];
+  const questions: [string, string][] = [];
+  for (const r of rows) {
+    const q = (r.querySelector(".rc-q") as HTMLInputElement).value.trim();
+    const a = (r.querySelector(".rc-a") as HTMLInputElement).value;
+    const a2 = (r.querySelector(".rc-a2") as HTMLInputElement).value;
+    if (!q || !a.trim()) {
+      if (status) status.textContent = t("settings.kvRecoveryFillAll");
+      return;
+    }
+    if (a !== a2) {
+      if (status) status.textContent = t("settings.kvRecoveryMismatch");
+      return;
+    }
+    questions.push([q, a]);
+  }
+  let pw = recoveryPresetPw;
+  recoveryPresetPw = null;
+  if (pw === null) {
+    pw = await appPrompt({
+      title: t("settings.kvUnlockTitle"),
+      placeholder: t("settings.kvPasswordPlaceholder"),
+      confirmLabel: t("settings.kvUnlock"),
+      secret: true,
+    });
+    if (pw === null) return;
+  }
+  try {
+    vaultStatus = await invoke<VaultStatus>("keyvault_set_recovery", { password: pw, questions });
+    if (status) status.textContent = t("settings.kvRecoverySaved", { n: questions.length });
+    panel.replaceChildren();
+    await loadKeyvault();
+  } catch (err) {
+    if (status) status.textContent = String(err);
+  }
+}
+
+/// The forgot-password challenge: every stored question + one answer each;
+/// all answers must verify before a new master password is accepted.
+async function renderRecoveryChallenge(): Promise<void> {
+  const panel = document.querySelector<HTMLElement>("#kv-recovery-panel");
+  if (!panel) return;
+  let qs: [string, string][] = [];
+  try {
+    qs = await invoke<[string, string][]>("keyvault_recovery_questions");
+  } catch {
+    qs = [];
+  }
+  if (!qs.length) return;
+  const wrap = document.createElement("div");
+  wrap.className = "kv-recovery";
+  const qRows = qs
+    .map(
+      ([, q], i) => `
+    <div class="kv-recovery-row">
+      <span class="rc-q-text">${escapeHtml(q)}</span>
+      <input type="password" class="rc-answer" data-rc-ans="${i}" maxlength="40" autocomplete="off"
+        placeholder="${escapeHtml(t("settings.kvRecoveryAPh"))}" />
+    </div>`,
+    )
+    .join("");
+  wrap.innerHTML = `
+    <p class="kv-hint">${escapeHtml(t("settings.kvForgotHint"))}</p>
+    ${qRows}
+    <div class="kv-recovery-actions">
+      <span class="spacer"></span>
+      <button type="button" class="mini-btn" data-rc-cancel>${escapeHtml(t("dialog.cancel"))}</button>
+      <button type="button" class="mini-btn" data-rc-reset>${escapeHtml(t("settings.kvForgotSubmit"))}</button>
+    </div>`;
+  panel.replaceChildren(wrap);
+}
+
+async function submitRecoveryChallenge(): Promise<void> {
+  const status = document.querySelector("#status");
+  const panel = document.querySelector<HTMLElement>("#kv-recovery-panel");
+  if (!panel) return;
+  const inputs = [...panel.querySelectorAll<HTMLInputElement>(".rc-answer")];
+  if (inputs.some((i) => !i.value.trim())) {
+    if (status) status.textContent = t("settings.kvRecoveryFillAll");
+    return;
+  }
+  const np = await appPrompt({
+    title: t("settings.kvNewPwTitle"),
+    placeholder: t("settings.kvPasswordPlaceholder"),
+    confirmLabel: t("settings.kvChangeNext"),
+    secret: true,
+  });
+  if (np === null) return;
+  const again = await appPrompt({
+    title: t("settings.kvPasswordConfirmTitle"),
+    placeholder: t("settings.kvPasswordPlaceholder"),
+    confirmLabel: t("settings.kvForgotSubmit"),
+    secret: true,
+  });
+  if (again === null) return;
+  if (np !== again) {
+    if (status) status.textContent = t("settings.kvPasswordMismatch");
+    return;
+  }
+  try {
+    vaultStatus = await invoke<VaultStatus>("keyvault_recovery_reset", {
+      answers: inputs.map((i) => i.value),
+      newPassword: np,
+    });
+    if (status) status.textContent = t("settings.kvRecoveryDone");
+    panel.replaceChildren();
+    await loadKeyvault();
+  } catch (err) {
+    if (status) status.textContent = String(err);
+    // keep the challenge panel so the user can retry (or read the cooldown)
   }
 }
 
@@ -11207,6 +11390,47 @@ async function initSettings(): Promise<void> {
     else if (btn.dataset.kvVaultAction === "unlock") void unlockVault();
     else if (btn.dataset.kvVaultAction === "lock") void lockVault();
     else if (btn.dataset.kvVaultAction === "change") void changeVaultPassword();
+    else if (btn.dataset.kvVaultAction === "questions") renderRecoveryEditor(null);
+    else if (btn.dataset.kvVaultAction === "forgot") void renderRecoveryChallenge();
+  });
+
+  // Q&A recovery: add/remove rows, submit the editor, or submit the
+  // forgot-password challenge. All inline under the vault bar.
+  document.querySelector("#kv-recovery-panel")?.addEventListener("click", (event) => {
+    const target = event.target as HTMLElement;
+    const status = document.querySelector("#status");
+    const panel = document.querySelector<HTMLElement>("#kv-recovery-panel");
+    if (!panel) return;
+    if (target.closest("[data-rc-add]")) {
+      if (panel.querySelectorAll(".kv-recovery-row").length >= 5) {
+        if (status) status.textContent = t("settings.kvRecoveryMax");
+        return;
+      }
+      panel.querySelector(".kv-recovery-rows")?.append(recoveryEditorRow());
+    } else if (target.closest("[data-rc-del]")) {
+      const rowsEl = panel.querySelectorAll(".kv-recovery-row");
+      if (rowsEl.length <= 1) return; // one is the floor
+      void (async () => {
+        // Dropping to a single question gets a nudge back to two: one
+        // answer is far easier to guess or dig out of social profiles.
+        if (rowsEl.length === 2) {
+          const keep = await appConfirm({
+            title: t("settings.kvRecoverySingleTitle"),
+            message: t("settings.kvRecoverySingleBody"),
+            confirmLabel: t("settings.kvRecoveryKeepOne"),
+          });
+          if (!keep) return;
+        }
+        rowsEl[rowsEl.length - 1].remove();
+      })();
+    } else if (target.closest("[data-rc-cancel]")) {
+      recoveryPresetPw = null;
+      panel.replaceChildren();
+    } else if (target.closest("[data-rc-save]")) {
+      void submitRecoveryEditor();
+    } else if (target.closest("[data-rc-reset]")) {
+      void submitRecoveryChallenge();
+    }
   });
 
 }
@@ -11626,7 +11850,7 @@ function buildPanelShell(): void {
   const mcpKeys = panelBlock("st-kv-mcp", "settings.keysMcp");
   const kvPad = document.createElement("div");
   kvPad.className = "st-pad";
-  for (const selector of ["#kv-vault-bar", "#keyvault-rows", ".kv-add-row", ".kv-hint"]) {
+  for (const selector of ["#kv-vault-bar", "#kv-recovery-panel", "#keyvault-rows", ".kv-add-row", ".kv-hint"]) {
     const el = document.querySelector<HTMLElement>(selector);
     if (el) kvPad.append(el);
   }

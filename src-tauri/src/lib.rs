@@ -1915,6 +1915,34 @@ fn keyvault_set_password(password: String) -> Result<keyvault::VaultStatus, Stri
     keyvault::set_password(&password)
 }
 
+/// (Re)set the Q&A recovery questions — the master password is verified
+/// against the on-disk canary first, so a stale session cannot rewrite them.
+#[tauri::command]
+fn keyvault_set_recovery(
+    password: String,
+    questions: Vec<(String, String)>,
+) -> Result<keyvault::VaultStatus, String> {
+    keyvault::set_recovery(&password, &questions)
+}
+
+/// The challenge surface for the forgot-password flow: (id, question) pairs,
+/// readable while locked. Answers never leave this function unsealed.
+#[tauri::command]
+fn keyvault_recovery_questions() -> Vec<(String, String)> {
+    keyvault::recovery_questions()
+}
+
+/// Forgot-password reset: every answer must verify, then the recovered old
+/// password is used internally to re-seal the vault under `new_password`.
+/// Rate-limited (5 misses → 5-minute cooldown) because answers are words.
+#[tauri::command]
+fn keyvault_recovery_reset(
+    answers: Vec<String>,
+    new_password: String,
+) -> Result<keyvault::VaultStatus, String> {
+    keyvault::recovery_reset(&answers, &new_password)
+}
+
 #[tauri::command]
 fn keyvault_unlock(password: String) -> Result<keyvault::VaultStatus, String> {
     keyvault::unlock(&password)
@@ -4508,6 +4536,9 @@ pub fn run() {
             keyvault_copy,
             keyvault_status,
             keyvault_set_password,
+            keyvault_set_recovery,
+            keyvault_recovery_questions,
+            keyvault_recovery_reset,
             keyvault_unlock,
             keyvault_lock,
             keyvault_reveal,

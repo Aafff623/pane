@@ -6,6 +6,7 @@ Provider 目录补全 · 前两批 14 家 / Kiro 免 spawn / 「密钥与额度�
 
 ## 新增
 
+- **主密码 Q&A 恢复（忘记密码兜底 + 二次验证）**：设置主密码后立即引导配置恢复问题——默认且推荐 2 个（内置 8 个问题可选：最喜欢的水果/最常用的编程工具/第一只宠物的名字等，也可自填），答案需输入两次确认；数量可在 1~5 个间调整，减到 1 个时弹窗说明"单个答案更易被身边人猜中"劝留 2 个；忘记主密码时在锁定状态点「忘记密码？」连续答对全部问题即可设置新密码（旧密码不出前端、库整体重封、答案不区分大小写与多余空格）；连续答错 5 次进入 5 分钟冷却防暴力猜测；更换主密码后恢复问题保持有效（密封自动轮转）。磁盘上问题为明文（锁定时显示挑战）、答案与主密码全部密封（答案各自 Argon2id 加盐 + AES-256-GCM，随机恢复密钥三路封存）
 - **10 家 Provider 还原（第一批）**：`amp` · `bedrock` · `chutes` · `deepgram` · `openai-api` · `poe` · `venice` · `vertexai` · `warp` · `kiro` 恢复接入（Rust adapter、品牌图标、三语文案、环境变量与「测试连通性」全链路）；默认全部禁用，需在设置「密钥与额度」逐家启用；Bedrock / Vertex AI 读本机 AWS / gcloud 凭据（无凭据时显示未配置属正常），其余 7 家粘 key 即用
 - **4 家新 Provider（第二批）**：`mimo`（小米 MiMo，粘贴平台 serviceToken 或 API key 二选一——token 报月度用量、key 报余额/Token Plan，自动识别）、`trae`（Trae 国际版，读本机 `%APPDATA%\Trae` 登录态，host 随账号区域）、`qoder`（Qoder 国际版，读本机 `com.qoder.app.stable` 登录态打 `openapi.qoder.sh`）、`zed`（纯本地：只读 Zed 编辑器 `threads.db`，统计 zed.dev 托管模型的全部/近 30 天 token 与近期模型 Top3，BYOK 线程不计）；四家同样默认禁用；`zstd` 依赖引入（解压 Zed 线程数据）
 - **Kiro 直读本地库**：不再调用 `kiro-cli`（旧通道每次调用触发 CLI 自更新、向 %TEMP% 堆安装包）——改为只读打开 `%LOCALAPPDATA%\kiro-cli\data.sqlite3`（`KIRO_DATA_DIR` 可覆盖）取登录 token 与 profile ARN，直连 CodeWhisperer `GetUsageLimits`；额度卡新增 Overage（超额已用/上限）与超额计费行，bonus 花费并入计划用量时明确标注；未知 region 的 ARN 拒绝请求而非把 token 发往猜测端点

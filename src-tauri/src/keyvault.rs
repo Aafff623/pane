@@ -82,6 +82,283 @@ struct VaultFile {
     canary_nonce_b64: String,
     canary_b64: String,
     entries: Vec<SealedEntry>,
+    /// Optional Q&A recovery ("forgot master password"): a random recovery
+    /// key is sealed once per answer, under the vault key, and the master
+    /// password under it. Absent on pre-recovery files.
+    #[serde(default)]
+    recovery: Option<RecoverySection>,
+}
+
+// ── Q&A recovery ─────────────────────────────────────────────────────────────
+//
+// The user picks N questions (default 2, minimum 1) whose answers only they
+// know. A random 32-byte recovery key R is generated and sealed three ways:
+//   - under Argon2id(each answer) — so ALL answers unseal R
+//   - under the vault key — so change_password can re-seal the master
+//     password under R without asking the questions again
+// and the master password itself is sealed under R. Forgetting the password
+// then means: answer every question → R → old password → set a new one.
+// Each answer also gets its own canary so a wrong answer is told apart from
+// a right one question-by-question without touching R.
+
+/// Answers are normalized before use — a recovery flow is not the place to
+/// fail on case or stray spaces.
+fn normalize_answer(answer: &str) -> String {
+    answer.trim().to_lowercase().split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+const RECOVERY_MIN_QUESTIONS: usize = 1;
+const RECOVERY_MAX_QUESTIONS: usize = 5;
+const RECOVERY_FAIL_LIMIT: u32 = 5;
+const RECOVERY_COOLDOWN: std::time::Duration = std::time::Duration::from_secs(5 * 60);
+
+#[derive(Clone, serde::Serialize, serde::Deserialize)]
+struct RecoveryQuestion {
+    id: String,
+    /// Stored plaintext: the challenge UI must render it while locked.
+    question: String,
+    answer_salt_b64: String,
+    canary_nonce_b64: String,
+    canary_b64: String,
+    key_nonce_b64: String,
+    key_b64: String,
+}
+
+#[derive(Clone, serde::Serialize, serde::Deserialize)]
+struct RecoverySection {
+    questions: Vec<RecoveryQuestion>,
+    /// R sealed under the vault key (lets change_password rotate the sealed
+    /// master password without the answers).
+    backup_nonce_b64: String,
+    backup_b64: String,
+    /// The master password sealed under R.
+    master_nonce_b64: String,
+    master_b64: String,
+}
+
+/// Failed reset attempts (process-wide): RECOVERY_FAIL_LIMIT misses inside
+/// the window → cooldown. Answers are human words, not passwords — guessing
+/// "apple" must not be free.
+static RECOVERY_FAILS: Mutex<Option<(u32, std::time::Instant)>> = Mutex::new(None);
+
+fn recovery_cooldown_remaining() -> Option<std::time::Duration> {
+    let g = RECOVERY_FAILS.lock().ok()?;
+    let (fails, first_fail) = (*g)?;
+    if fails >= RECOVERY_FAIL_LIMIT {
+        let elapsed = first_fail.elapsed();
+        if elapsed < RECOVERY_COOLDOWN {
+            return Some(RECOVERY_COOLDOWN - elapsed);
+        }
+    }
+    None
+}
+
+fn note_recovery_failure() {
+    if let Ok(mut g) = RECOVERY_FAILS.lock() {
+        let entry = g.get_or_insert_with(|| (0, std::time::Instant::now()));
+        entry.0 += 1;
+    }
+}
+
+fn clear_recovery_failures() {
+    if let Ok(mut g) = RECOVERY_FAILS.lock() {
+        *g = None;
+    }
+}
+
+fn answer_kdf(answer: &str, salt_b64: &str) -> Result<[u8; 32], String> {
+    let kdf = KdfSection {
+        algo: "argon2id".into(),
+        salt_b64: salt_b64.into(),
+        m_kib: ARGON_M_KIB,
+        t: ARGON_T,
+        p: ARGON_P,
+    };
+    derive_key(&normalize_answer(answer), &kdf)
+}
+
+fn validate_recovery_questions(questions: &[(String, String)]) -> Result<(), String> {
+    if questions.len() < RECOVERY_MIN_QUESTIONS || questions.len() > RECOVERY_MAX_QUESTIONS {
+        return Err(format!(
+            "recovery needs {RECOVERY_MIN_QUESTIONS}–{RECOVERY_MAX_QUESTIONS} questions"
+        ));
+    }
+    for (q, a) in questions {
+        let q = q.trim();
+        if q.is_empty() || q.chars().count() > 60 {
+            return Err("each question needs 1–60 characters".into());
+        }
+        let a = normalize_answer(a);
+        if a.chars().count() < 2 || a.chars().count() > 40 {
+            return Err("each answer needs 2–40 characters (letters, not essays)".into());
+        }
+    }
+    Ok(())
+}
+
+/// Build the recovery section: R sealed under every answer and under the
+/// vault key, the master password sealed under R.
+fn build_recovery(
+    vault_key: &[u8; 32],
+    password: &str,
+    questions: &[(String, String)],
+) -> Result<RecoverySection, String> {
+    validate_recovery_questions(questions)?;
+    let mut recovery_key = [0u8; 32];
+    OsRng.fill_bytes(&mut recovery_key);
+    let mut sealed_questions = Vec::with_capacity(questions.len());
+    for (i, (q, a)) in questions.iter().enumerate() {
+        let mut salt = [0u8; 16];
+        OsRng.fill_bytes(&mut salt);
+        let answer_key = answer_kdf(a, &b64().encode(salt))?;
+        let (canary_nonce_b64, canary_b64) = seal(&answer_key, CANARY_PLAINTEXT)?;
+        let (key_nonce_b64, key_b64) = seal(&answer_key, &recovery_key)?;
+        sealed_questions.push(RecoveryQuestion {
+            id: format!("q{}", i + 1),
+            question: q.trim().to_string(),
+            answer_salt_b64: b64().encode(salt),
+            canary_nonce_b64,
+            canary_b64,
+            key_nonce_b64,
+            key_b64,
+        });
+    }
+    let (backup_nonce_b64, backup_b64) = seal(vault_key, &recovery_key)?;
+    let (master_nonce_b64, master_b64) = seal(&recovery_key, password.trim().as_bytes())?;
+    Ok(RecoverySection { questions: sealed_questions, backup_nonce_b64, backup_b64, master_nonce_b64, master_b64 })
+}
+
+/// Every answer must pass its canary; then R unseals the master password.
+/// Used by the forgot-password flow (which adds rate limiting) and tests.
+fn try_recovery(recovery: &RecoverySection, answers: &[String]) -> Result<String, String> {
+    if answers.len() != recovery.questions.len() {
+        return Err("answer every question".into());
+    }
+    let mut recovery_key: Option<[u8; 32]> = None;
+    for (q, answer) in recovery.questions.iter().zip(answers.iter()) {
+        let answer_key = answer_kdf(answer, &q.answer_salt_b64)?;
+        if open(&answer_key, &q.canary_nonce_b64, &q.canary_b64).is_err() {
+            return Err("an answer did not match".into());
+        }
+        if recovery_key.is_none() {
+            let raw = open(&answer_key, &q.key_nonce_b64, &q.key_b64)?;
+            recovery_key =
+                Some(raw.as_slice().try_into().map_err(|_| "recovery key is malformed".to_string())?);
+        }
+    }
+    let Some(recovery_key) = recovery_key else {
+        return Err("no recovery questions are set".into());
+    };
+    String::from_utf8(
+        open(&recovery_key, &recovery.master_nonce_b64, &recovery.master_b64)
+            .map_err(|_| "recovery data is unreadable".to_string())?,
+    )
+    .map_err(|_| "recovery data is malformed".to_string())
+}
+
+/// (Re)set the recovery questions. The master password is verified against
+/// the on-disk canary first — the caller just proved it, but the file is
+/// what gets rewritten.
+pub fn set_recovery(
+    password: &str,
+    questions: &[(String, String)],
+) -> Result<VaultStatus, String> {
+    let path = vault_path();
+    let Store::Sealed(mut file) = load_store_from(&path) else {
+        return Err("set a master password before recovery questions".into());
+    };
+    // Verify the password against the file's canary (not the session) so a
+    // stale unlocked session can never rewrite recovery with a wrong password.
+    let vault_key = derive_key(password.trim(), &file.kdf)?;
+    open(&vault_key, &file.canary_nonce_b64, &file.canary_b64)?;
+    let recovery = build_recovery(&vault_key, password, questions)?;
+    file.recovery = Some(recovery);
+    save_sealed_to(&path, &file)?;
+    Ok(status_from(&file, session_key().is_some()))
+}
+
+/// The challenge surface: (id, question) pairs, readable while locked.
+pub fn recovery_questions() -> Vec<(String, String)> {
+    match load_store_from(&vault_path()) {
+        Store::Sealed(file) => file
+            .recovery
+            .map(|r| r.questions.into_iter().map(|q| (q.id, q.question)).collect())
+            .unwrap_or_default(),
+        Store::Plain(_) => Vec::new(),
+    }
+}
+
+/// Rotate the sealed master password under R and re-seal R under the new
+/// vault key. Called from password changes; the answers and their seals are
+/// untouched.
+fn rotate_recovery_master(
+    recovery: &mut RecoverySection,
+    old_vault_key: &[u8; 32],
+    new_vault_key: &[u8; 32],
+    new_password: &str,
+) -> Result<(), String> {
+    let recovery_key = open(old_vault_key, &recovery.backup_nonce_b64, &recovery.backup_b64)?;
+    let recovery_key: [u8; 32] =
+        recovery_key.as_slice().try_into().map_err(|_| "recovery key is malformed".to_string())?;
+    let (master_nonce_b64, master_b64) = seal(&recovery_key, new_password.trim().as_bytes())?;
+    let (backup_nonce_b64, backup_b64) = seal(new_vault_key, &recovery_key)?;
+    recovery.master_nonce_b64 = master_nonce_b64;
+    recovery.master_b64 = master_b64;
+    recovery.backup_nonce_b64 = backup_nonce_b64;
+    recovery.backup_b64 = backup_b64;
+    Ok(())
+}
+
+/// Forgot-password path: every answer must verify, then the sealed master
+/// password comes back and is immediately used to set `new_password`
+/// (re-sealing the whole vault). Never returns the old password to the
+/// caller — the frontend only learns success/failure.
+pub fn recovery_reset(answers: &[String], new_password: &str) -> Result<VaultStatus, String> {
+    if let Some(left) = recovery_cooldown_remaining() {
+        let mins = (left.as_secs() / 60).max(1);
+        return Err(format!("too many wrong attempts — try again in {mins} min"));
+    }
+    let path = vault_path();
+    let Store::Sealed(file) = load_store_from(&path) else {
+        return Err("no master password is set".into());
+    };
+    let Some(recovery) = file.recovery.as_ref() else {
+        return Err("no recovery questions are set".into());
+    };
+    let master = match try_recovery(recovery, answers) {
+        Ok(master) => master,
+        Err(e) => {
+            note_recovery_failure();
+            return Err(e);
+        }
+    };
+
+    // change_password in one step, with the recovered password as the old
+    // one — the caller never sees the old password, only success/failure.
+    let old_vault_key = derive_key(master.trim(), &file.kdf)?;
+    open(&old_vault_key, &file.canary_nonce_b64, &file.canary_b64)?;
+    let entries = open_all_from(&file, &old_vault_key)?;
+    let status = seal_and_store(new_password, &entries, file.recovery.clone().map(|r| (r, old_vault_key)))?;
+    clear_recovery_failures();
+    Ok(status)
+}
+
+/// Like [`open_all`] but with an explicit key (recovery must not depend on
+/// the in-memory session, which the forgot-password flow cannot have).
+fn open_all_from(file: &VaultFile, key: &[u8; 32]) -> Result<Vec<VaultEntry>, String> {
+    file.entries
+        .iter()
+        .map(|e| {
+            Ok(VaultEntry {
+                id: e.id.clone(),
+                service: e.service.clone(),
+                label: e.label.clone(),
+                key: open_entry(key, e)?,
+                note: e.note.clone(),
+                created_at: e.created_at,
+            })
+        })
+        .collect()
 }
 
 enum Store {
@@ -340,16 +617,28 @@ pub struct VaultStatus {
     pub has_password: bool,
     pub unlocked: bool,
     pub count: usize,
+    /// Set recovery questions; 0 = none (forgot-password path unavailable).
+    pub recovery_questions: usize,
 }
 
 pub fn status() -> VaultStatus {
     match load_store_from(&vault_path()) {
-        Store::Plain(entries) => VaultStatus { has_password: false, unlocked: true, count: entries.len() },
-        Store::Sealed(file) => VaultStatus {
-            has_password: true,
-            unlocked: session_key().is_some(),
-            count: file.entries.len(),
+        Store::Plain(entries) => VaultStatus {
+            has_password: false,
+            unlocked: true,
+            count: entries.len(),
+            recovery_questions: 0,
         },
+        Store::Sealed(file) => status_from(&file, session_key().is_some()),
+    }
+}
+
+fn status_from(file: &VaultFile, unlocked: bool) -> VaultStatus {
+    VaultStatus {
+        has_password: true,
+        unlocked,
+        count: file.entries.len(),
+        recovery_questions: file.recovery.as_ref().map(|r| r.questions.len()).unwrap_or(0),
     }
 }
 
@@ -383,25 +672,28 @@ fn row_from_sealed(e: &SealedEntry) -> VaultRow {
 }
 
 /// Set (or change) the master password and encrypt the whole vault with it.
+/// Any previously set recovery questions are dropped — they sealed the OLD
+/// password, and the set-password flow re-collects questions right after.
 pub fn set_password(password: &str) -> Result<VaultStatus, String> {
     let path = vault_path();
     let entries = match load_store_from(&path) {
         Store::Plain(entries) => entries,
         Store::Sealed(file) => open_all(&file)?,
     };
-    seal_and_store(password, &entries)
+    seal_and_store(password, &entries, None)
 }
 
 /// Change the master password: the old one must verify against the on-disk
-/// canary first, then the whole vault is re-sealed under the new one.
+/// canary first, then the whole vault is re-sealed under the new one — the
+/// recovery questions survive with their seals rotated to the new password.
 pub fn change_password(old: &str, new: &str) -> Result<VaultStatus, String> {
     match load_store_from(&vault_path()) {
         Store::Plain(_) => Err("no master password is set".into()),
         Store::Sealed(file) => {
             let old_key = derive_key(old.trim(), &file.kdf)?;
             open(&old_key, &file.canary_nonce_b64, &file.canary_b64)?;
-            let entries = open_all(&file)?;
-            seal_and_store(new, &entries)
+            let entries = open_all_from(&file, &old_key)?;
+            seal_and_store(new, &entries, file.recovery.map(|r| (r, old_key)))
         }
     }
 }
@@ -427,7 +719,14 @@ pub fn verify_for_reveal(password: &str) -> Result<(), String> {
     }
 }
 
-fn seal_and_store(password: &str, entries: &[VaultEntry]) -> Result<VaultStatus, String> {
+/// Build + write the sealed vault. `keep` carries the previous recovery
+/// section and the OLD vault key so its seals rotate to the new password;
+/// `None` writes the file without recovery.
+fn seal_and_store(
+    password: &str,
+    entries: &[VaultEntry],
+    keep: Option<(RecoverySection, [u8; 32])>,
+) -> Result<VaultStatus, String> {
     let password = password.trim();
     if password.len() < 4 {
         return Err("master password needs at least 4 characters".into());
@@ -448,23 +747,31 @@ fn seal_and_store(password: &str, entries: &[VaultEntry]) -> Result<VaultStatus,
     for e in entries {
         sealed.push(seal_entry(&key, e)?);
     }
-    let file = VaultFile { version: VAULT_VERSION, kdf, canary_nonce_b64, canary_b64, entries: sealed };
+    let mut recovery = None;
+    if let Some((mut r, old_key)) = keep {
+        rotate_recovery_master(&mut r, &old_key, &key, password)?;
+        recovery = Some(r);
+    }
+    let file = VaultFile { version: VAULT_VERSION, kdf, canary_nonce_b64, canary_b64, entries: sealed, recovery };
     save_sealed_to(&path, &file)?;
     set_session_key(key);
-    Ok(VaultStatus { has_password: true, unlocked: true, count: file.entries.len() })
+    Ok(status_from(&file, true))
 }
 
 pub fn unlock(password: &str) -> Result<VaultStatus, String> {
     match load_store_from(&vault_path()) {
         // No password set yet — the vault is inherently open.
-        Store::Plain(entries) => {
-            Ok(VaultStatus { has_password: false, unlocked: true, count: entries.len() })
-        }
+        Store::Plain(entries) => Ok(VaultStatus {
+            has_password: false,
+            unlocked: true,
+            count: entries.len(),
+            recovery_questions: 0,
+        }),
         Store::Sealed(file) => {
             let key = derive_key(password.trim(), &file.kdf)?;
             open(&key, &file.canary_nonce_b64, &file.canary_b64)?;
             set_session_key(key);
-            Ok(VaultStatus { has_password: true, unlocked: true, count: file.entries.len() })
+            Ok(status_from(&file, true))
         }
     }
 }
@@ -665,7 +972,7 @@ mod tests {
         let key = derive_key(password, &kdf).unwrap();
         let (canary_nonce_b64, canary_b64) = seal(&key, CANARY_PLAINTEXT).unwrap();
         let sealed = entries.iter().map(|e| seal_entry(&key, e).unwrap()).collect();
-        let file = VaultFile { version: VAULT_VERSION, kdf, canary_nonce_b64, canary_b64, entries: sealed };
+        let file = VaultFile { version: VAULT_VERSION, kdf, canary_nonce_b64, canary_b64, entries: sealed, recovery: None };
         save_sealed_to(path, &file).unwrap();
         key
     }
@@ -763,5 +1070,87 @@ mod tests {
         // Metadata stays readable for the locked listing.
         assert!(raw.contains("Tavily key 1"));
         let _ = std::fs::remove_file(&path);
+    }
+
+    // ── Q&A recovery ────────────────────────────────────────────────────────
+
+    fn questions_2() -> Vec<(String, String)> {
+        vec![
+            ("你最喜欢的水果是什么？".into(), "Apple".into()),
+            ("你最常用的编程工具是什么？".into(), "  Rust   Lang  ".into()),
+        ]
+    }
+
+    #[test]
+    fn recovery_requires_every_answer_normalized() {
+        let vault_key = [7u8; 32];
+        let recovery = build_recovery(&vault_key, "master-pw-1", &questions_2()).unwrap();
+        // Both right (answers normalized: case + collapsed spaces).
+        let ok = try_recovery(
+            &recovery,
+            &["  apple ".into(), "rust lang".into()],
+        )
+        .unwrap();
+        assert_eq!(ok, "master-pw-1");
+        // One wrong → rejected, no partial credit.
+        assert!(try_recovery(&recovery, &["apple".into(), "python".into()]).is_err());
+        // Wrong count → rejected.
+        assert!(try_recovery(&recovery, &["apple".into()]).is_err());
+    }
+
+    #[test]
+    fn recovery_seals_store_no_plaintext_answers_or_password() {
+        let recovery = build_recovery(&[7u8; 32], "master-pw-1", &questions_2()).unwrap();
+        let raw = serde_json::to_string(&recovery).unwrap();
+        assert!(!raw.contains("master-pw-1"));
+        assert!(!raw.to_lowercase().contains("apple"));
+        assert!(!raw.to_lowercase().contains("rust"));
+        // Questions themselves are plaintext by design (challenge UI).
+        assert!(raw.contains("水果"));
+    }
+
+    #[test]
+    fn recovery_survives_a_master_password_change() {
+        let old_key = [7u8; 32];
+        let mut recovery = build_recovery(&old_key, "old-master", &questions_2()).unwrap();
+        let new_key = [9u8; 32];
+        rotate_recovery_master(&mut recovery, &old_key, &new_key, "new-master").unwrap();
+        // Same answers now recover the NEW password.
+        assert_eq!(
+            try_recovery(&recovery, &["apple".into(), "rust lang".into()]).unwrap(),
+            "new-master"
+        );
+    }
+
+    #[test]
+    fn recovery_question_validation_bounds() {
+        let key = [1u8; 32];
+        assert!(build_recovery(&key, "pw", &[]).is_err()); // zero questions
+        let six: Vec<(String, String)> =
+            (0..6).map(|i| (format!("Q{i}?"), "ans".into())).collect();
+        assert!(build_recovery(&key, "pw", &six).is_err()); // more than five
+        assert!(build_recovery(&key, "pw", &[("".into(), "ans".into())]).is_err()); // empty question
+        assert!(build_recovery(&key, "pw", &[("Q".repeat(61), "ans".into())]).is_err()); // long question
+        assert!(build_recovery(&key, "pw", &[("Q?".into(), "x".into())]).is_err()); // 1-char answer
+        assert!(build_recovery(&key, "pw", &[("Q?".into(), "a".repeat(41))]).is_err()); // long answer
+        // One question is a legal (if discouraged) configuration.
+        assert!(build_recovery(&key, "pw", &[("Q?".into(), "ans".into())]).is_ok());
+    }
+
+    #[test]
+    fn answer_normalization_collapses_case_and_spaces() {
+        assert_eq!(normalize_answer("  Apple   Pie "), "apple pie");
+        assert_eq!(normalize_answer("apple pie"), normalize_answer("APPLE  PIE"));
+    }
+
+    #[test]
+    fn recovery_failure_counter_reaches_cooldown_and_resets() {
+        clear_recovery_failures();
+        for _ in 0..RECOVERY_FAIL_LIMIT {
+            note_recovery_failure();
+        }
+        assert!(recovery_cooldown_remaining().is_some());
+        clear_recovery_failures();
+        assert!(recovery_cooldown_remaining().is_none());
     }
 }
