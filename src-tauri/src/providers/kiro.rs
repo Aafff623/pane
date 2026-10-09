@@ -29,8 +29,102 @@ pub async fn snapshot() -> Snapshot {
     }
 }
 
+/// Snapshot for one Pane-managed Kiro login (login_accounts): the usage
+/// call runs with the login's own bearer + profileArn; a rejected token
+/// is refreshed once (rotated pair written back) before the error stands.
+pub async fn snapshot_with_login(login: crate::login_accounts::LoginAccount) -> Snapshot {
+    let id = crate::login_accounts::card_id_for_account(ID, &login);
+    let name = login_card_name(&login);
+    match fetch_with_login(&login, true).await {
+        Ok(s) => s,
+        Err(e) => Snapshot::error(&id, &name, e),
+    }
+}
+
+pub(crate) fn login_card_name(login: &crate::login_accounts::LoginAccount) -> String {
+    if !login.label.trim().is_empty() {
+        return login.label.clone();
+    }
+    if !login.email.trim().is_empty() {
+        return format!("Kiro — {}", login.email);
+    }
+    format!("Kiro @{}", login.account_id.rsplit('/').next().unwrap_or("profile"))
+}
+
+/// The profileArn-backed usage flow for one login. `allow_refresh` gates
+/// the single retry: a refresh write-back then re-runs the query once.
+async fn fetch_with_login(
+    login: &crate::login_accounts::LoginAccount,
+    allow_refresh: bool,
+) -> Result<Snapshot, String> {
+    let id = crate::login_accounts::card_id_for_account(ID, login);
+    let name = login_card_name(login);
+    let Some(endpoint) = endpoint_for_arn(&login.account_id) else {
+        return Err("unsupported profile ARN — no known endpoint for its region".into());
+    };
+    let resp = http()
+        .post(endpoint)
+        .header("Content-Type", "application/x-amz-json-1.0")
+        .header("X-Amz-Target", TARGET)
+        .bearer_auth(&login.access_token)
+        .json(&json!({ "profileArn": login.account_id }))
+        .send()
+        .await
+        .map_err(|e| format!("GetUsageLimits request: {e}"))?;
+    if resp.status().as_u16() == 401 && allow_refresh && !login.refresh_token.trim().is_empty() {
+        let mut doc = crate::kiro_login::refresh(&login.refresh_token).await?;
+        crate::kiro_login::ensure_expires_at(&mut doc);
+        let new_access = doc
+            .get("accessToken")
+            .or_else(|| doc.get("access_token"))
+            .and_then(Value::as_str)
+            .filter(|s| !s.trim().is_empty())
+            .ok_or("refresh response missing accessToken")?
+            .to_string();
+        let new_refresh = doc
+            .get("refreshToken")
+            .or_else(|| doc.get("refresh_token"))
+            .and_then(Value::as_str)
+            .unwrap_or(&login.refresh_token)
+            .to_string();
+        // Write the rotated pair back (reload first so a concurrent
+        // rename/remove from the UI is not clobbered).
+        let mut accounts = crate::login_accounts::load(ID);
+        if let Some(entry) = accounts.iter_mut().find(|a| a.account_id == login.account_id) {
+            entry.access_token = new_access.clone();
+            entry.refresh_token = new_refresh;
+            if let Some(expires_at) = doc.get("expiresAt").and_then(Value::as_str) {
+                entry.expires_at = expires_at.to_string();
+            }
+        }
+        let _ = crate::login_accounts::save(ID, &accounts);
+        let mut updated = login.clone();
+        updated.access_token = new_access;
+        return Box::pin(fetch_with_login(&updated, false)).await;
+    }
+    if resp.status().as_u16() == 401 {
+        return Err("token was rejected — sign in again from the auth center".into());
+    }
+    if !resp.status().is_success() {
+        return Err(format!("GetUsageLimits: HTTP {}", resp.status()));
+    }
+    let doc: Value = resp.json().await.map_err(|e| format!("GetUsageLimits parse: {e}"))?;
+    parse_usage(&doc).map(|mut s| {
+        s.id = id;
+        s.name = name;
+        s
+    })
+}
+
 pub fn local_credential_hint() -> Option<String> {
     state_db_candidates().iter().any(|p| p.is_file()).then(|| "Kiro CLI sign-in".to_string())
+}
+
+/// The local CLI login's profileArn, for the account-card dedup — the same
+/// identity Pane logins key on.
+pub fn default_identity() -> Option<String> {
+    let db = state_db_candidates().into_iter().find(|p| p.is_file())?;
+    read_identity(&db).ok().flatten().map(|i| i.profile_arn)
 }
 
 /// data.sqlite3 candidates in priority order: `KIRO_DATA_DIR` wins, then

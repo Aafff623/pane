@@ -457,7 +457,9 @@ const PROVIDER_DEFINITIONS: &[ProviderDefinition] = &[
         display_name: "Kiro",
         query_kind: QueryKind::NativeCodingPlan,
         supports_api_key: false,
-        supports_extra_accounts: false,
+        // Pane-managed Kiro logins (auth center, browser PKCE) are
+        // independent accounts — same parallel-card treatment as Codex.
+        supports_extra_accounts: true,
         icon_key: "kiro",
         category: ProviderCategory::Coding,
     },
@@ -706,6 +708,7 @@ mod tests {
             "amp",
             "chutes",
             "deepgram",
+            "kiro",
             "openai-api",
             "poe",
             "venice",

@@ -64,7 +64,7 @@ export const providerCatalog: readonly ProviderDefinition[] = [
   { familyId: "bedrock", displayName: "AWS Bedrock", queryKind: "nativeBalance", supportsApiKey: false, supportsExtraAccounts: false, supportsOAuth: false, iconKey: "bedrock" },
   { familyId: "chutes", displayName: "Chutes", queryKind: "nativeBalance", supportsApiKey: true, supportsExtraAccounts: true, supportsOAuth: false, iconKey: "chutes" },
   { familyId: "deepgram", displayName: "Deepgram", queryKind: "nativeBalance", supportsApiKey: true, supportsExtraAccounts: true, supportsOAuth: false, iconKey: "deepgram" },
-  { familyId: "kiro", displayName: "Kiro", queryKind: "nativeCodingPlan", supportsApiKey: false, supportsExtraAccounts: false, supportsOAuth: false, iconKey: "kiro" },
+  { familyId: "kiro", displayName: "Kiro", queryKind: "nativeCodingPlan", supportsApiKey: false, supportsExtraAccounts: true, supportsOAuth: true, iconKey: "kiro" },
   { familyId: "openai-api", displayName: "OpenAI API", queryKind: "nativeBalance", supportsApiKey: true, supportsExtraAccounts: true, supportsOAuth: false, iconKey: "openai" },
   { familyId: "poe", displayName: "Poe", queryKind: "nativeBalance", supportsApiKey: true, supportsExtraAccounts: true, supportsOAuth: false, iconKey: "poe" },
   { familyId: "venice", displayName: "Venice", queryKind: "nativeBalance", supportsApiKey: true, supportsExtraAccounts: true, supportsOAuth: false, iconKey: "venice" },

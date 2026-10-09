@@ -11,6 +11,7 @@ mod keyvault;
 mod alerts;
 mod httpapi;
 mod i18n;
+mod kiro_login;
 mod login_accounts;
 mod oauth;
 mod platform;
@@ -2215,6 +2216,7 @@ async fn fetch_provider_snapshot(provider_id: String, allow_disabled: bool) -> R
             .ok_or_else(|| format!("no {family} account {provider_id}"))?;
         return Ok(match family.as_str() {
             "copilot" => providers::copilot::snapshot_with_login(login).await,
+            "kiro" => providers::kiro::snapshot_with_login(login).await,
             _ => providers::grok::snapshot_with_login(login).await,
         });
     }
@@ -2446,14 +2448,15 @@ async fn run_usage_fetch(app: &tauri::AppHandle) -> Vec<providers::Snapshot> {
             Box::pin(guarded(id.clone(), name, providers::codex::snapshot_with_login(login))),
         ));
     }
-    // Pane-managed Copilot/Grok logins (auth center): one card per stored
-    // account. Dedup rules per family:
+    // Pane-managed Copilot/Grok/Kiro logins (auth center): one card per
+    // stored account. Dedup rules per family:
     // - the single OAuth slot renders as the BARE family card whenever it
     //   wins the default card's credential order, so a store entry that IS
     //   the slot's account (same identity, or same token for legacy slots
     //   that carry no account id) never double-cards;
-    // - grok's CLI auth.json names its account uuid, so a login for THAT
-    //   account is skipped too (the bare card already renders it).
+    // - grok's CLI auth.json names its account uuid, and kiro's local
+    //   database its profileArn, so a login for THAT account is skipped
+    //   too (the bare card already renders it).
     for family in login_accounts::LOGIN_FAMILIES {
         let slot = oauth::load(family).map(|t| {
             (
@@ -2463,6 +2466,7 @@ async fn run_usage_fetch(app: &tauri::AppHandle) -> Vec<providers::Snapshot> {
         });
         let mut known: HashSet<String> = match family {
             "grok" => providers::grok::default_identity().into_iter().collect(),
+            "kiro" => providers::kiro::default_identity().into_iter().collect(),
             _ => HashSet::new(),
         };
         for login in login_accounts::load_with_imported_single_login(family) {
@@ -2477,17 +2481,22 @@ async fn run_usage_fetch(app: &tauri::AppHandle) -> Vec<providers::Snapshot> {
                 continue;
             }
             let id = login_accounts::card_id_for_account(family, &login);
-            let name = match family {
-                "copilot" => providers::copilot::login_card_name(&login),
-                _ => providers::grok::login_card_name(&login),
-            };
-            // The two snapshot futures are distinct types — box one trait
-            // object before guarded wraps it.
-            let fut: std::pin::Pin<
-                Box<dyn std::future::Future<Output = providers::Snapshot> + Send>,
-            > = match family {
-                "copilot" => Box::pin(providers::copilot::snapshot_with_login(login)),
-                _ => Box::pin(providers::grok::snapshot_with_login(login)),
+            let (name, fut): (
+                String,
+                std::pin::Pin<Box<dyn std::future::Future<Output = providers::Snapshot> + Send>>,
+            ) = match family {
+                "copilot" => (
+                    providers::copilot::login_card_name(&login),
+                    Box::pin(providers::copilot::snapshot_with_login(login)),
+                ),
+                "kiro" => (
+                    providers::kiro::login_card_name(&login),
+                    Box::pin(providers::kiro::snapshot_with_login(login)),
+                ),
+                _ => (
+                    providers::grok::login_card_name(&login),
+                    Box::pin(providers::grok::snapshot_with_login(login)),
+                ),
             };
             futs.push((id.clone(), Box::pin(guarded(id.clone(), name, fut))));
         }
@@ -3533,8 +3542,22 @@ fn account_remove(provider: String, index: usize) -> Result<(), String> {
         if index >= logins.len() {
             return Err(format!("no {provider} account #{index}"));
         }
-        logins.remove(index);
-        return login_accounts::save(&provider, &logins);
+        let removed = logins.remove(index);
+        // The legacy single OAuth slot imports lazily, so if the removed
+        // account IS the slot's, delete the file too — otherwise the next
+        // load resurrects the row and the bare family card keeps rendering
+        // the very account the user just deleted.
+        let removed_slot = oauth::load(&provider).is_some_and(|t| {
+            t.account_id
+                .as_deref()
+                .is_some_and(|id| !id.is_empty() && id == removed.account_id)
+                || t.access_token == removed.access_token
+        });
+        login_accounts::save(&provider, &logins)?;
+        if removed_slot {
+            let _ = oauth::logout(&provider);
+        }
+        return Ok(());
     }
     if !accounts::provider_takes_accounts(&provider) {
         return Err(format!("unknown multi-account provider: {provider}"));
@@ -4167,6 +4190,23 @@ async fn codex_login_poll(login_id: String) -> codex_login::LoginPoll {
 #[tauri::command]
 fn codex_login_cancel(login_id: String) {
     codex_login::cancel(&login_id);
+}
+
+/// Kiro browser PKCE login (app.kiro.dev portal + fixed-port callback):
+/// start → open the auth URL → poll until the token exchange completes.
+#[tauri::command]
+fn kiro_login_start() -> Result<kiro_login::LoginStart, String> {
+    kiro_login::start()
+}
+
+#[tauri::command]
+async fn kiro_login_poll(login_id: String) -> kiro_login::LoginPoll {
+    kiro_login::poll(&login_id).await
+}
+
+#[tauri::command]
+fn kiro_login_cancel(login_id: String) {
+    kiro_login::cancel(&login_id);
 }
 
 /// Deletes Pane's own OAuth credential file for the provider. The CLI's
@@ -4866,6 +4906,9 @@ pub fn run() {
             codex_login_start,
             codex_login_poll,
             codex_login_cancel,
+            kiro_login_start,
+            kiro_login_poll,
+            kiro_login_cancel,
             oauth_logout,
             get_config,
             set_config,

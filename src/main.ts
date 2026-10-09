@@ -6215,6 +6215,9 @@ function credAccountsHtml(id: string): string {
 // Providers with a browser sign-in owned by Pane itself (Phase 3.1). The
 // backend stores tokens under %APPDATA%\Pane\oauth\<provider>.json.
 const OAUTH_PROVIDERS = new Set(["codex", "grok", "copilot"]);
+/// Browser-PKCE families (the backend runs the loopback callback and its
+/// own `<family>_login_*` commands).
+const BROWSER_LOGIN_PROVIDERS = new Set(["codex", "kiro"]);
 
 // Relay families whose saved credential also carries a user-chosen base
 // URL (relaybalance) — its gear panel and account dialog show
@@ -12280,7 +12283,8 @@ function stopAuthFlow(family: string): void {
   const flow = authFlows.get(family);
   if (flow?.timer !== undefined) window.clearInterval(flow.timer);
   if (flow?.loginId) {
-    void invoke("codex_login_cancel", { loginId: flow.loginId }).catch(() => {});
+    // Every browser-login family (codex/kiro) has its own cancel command.
+    void invoke(`${family}_login_cancel`, { loginId: flow.loginId }).catch(() => {});
   }
 }
 
@@ -12540,21 +12544,25 @@ function authAddAccount(family: string): void {
     openCursorAccountDialog();
     return;
   }
-  if (OAUTH_PROVIDERS.has(family)) {
+  if (OAUTH_PROVIDERS.has(family) || BROWSER_LOGIN_PROVIDERS.has(family)) {
     void startAuthOauthFlow(family);
   }
 }
 
-/// Device-code login against the existing oauth_start/oauth_poll commands.
+/// Login entry point for the sign-in families. Browser-PKCE families
+/// (codex/kiro) open the auth URL and poll the backend's local-callback
+/// state; device-code families (copilot/grok, and codex's fallback)
+/// ride oauth_start/oauth_poll.
 async function startAuthOauthFlow(family: string): Promise<void> {
   stopAuthFlow(family);
-  if (family === "codex") {
-    // Browser PKCE first (the CLI's own loopback flow); the Codex CLI owns
-    // port 1455 while it runs, so a busy port falls through to device code.
+  if (BROWSER_LOGIN_PROVIDERS.has(family)) {
+    // Browser PKCE first (the IDEs' own loopback flows). Codex's CLI owns
+    // port 1455 while it runs, so a busy port falls through to device code;
+    // kiro has no device-code ladder and stops on failure.
     authFlows.set(family, { phase: "starting", deviceAuthId: "", userCode: "", error: null, label: null });
     renderAuthCenter();
     try {
-      const started = await invoke<{ loginId: string; authUrl: string }>("codex_login_start");
+      const started = await invoke<{ loginId: string; authUrl: string }>(`${family}_login_start`);
       void invoke("open_link", { url: started.authUrl }).catch(() => {});
       const flow: AuthFlow = {
         phase: "browser",
@@ -12566,9 +12574,14 @@ async function startAuthOauthFlow(family: string): Promise<void> {
       };
       authFlows.set(family, flow);
       renderAuthCenter();
-      flow.timer = window.setInterval(() => void pollCodexBrowserLogin(family), 2000);
+      flow.timer = window.setInterval(() => void pollBrowserLogin(family), 2000);
       return;
-    } catch {
+    } catch (err) {
+      if (family !== "codex") {
+        authFlows.set(family, { phase: "error", deviceAuthId: "", userCode: "", error: String(err), label: null });
+        renderAuthCenter();
+        return;
+      }
       // Port busy or unavailable — fall through to the device-code flow.
     }
   }
@@ -12596,14 +12609,14 @@ async function startAuthOauthFlow(family: string): Promise<void> {
   void pollAuthOauth(family);
 }
 
-/// One poll tick for the Codex browser login: the callback lands in the
-/// backend, this just collects the outcome.
-async function pollCodexBrowserLogin(family: string): Promise<void> {
+/// One poll tick for a browser login (codex/kiro): the callback lands in
+/// the backend, this just collects the outcome.
+async function pollBrowserLogin(family: string): Promise<void> {
   const flow = authFlows.get(family);
   if (!flow || flow.phase !== "browser" || !flow.loginId) return;
   let r: { done: boolean; label: string | null; error: string | null };
   try {
-    r = await invoke("codex_login_poll", { loginId: flow.loginId });
+    r = await invoke(`${family}_login_poll`, { loginId: flow.loginId });
   } catch (err) {
     stopAuthFlow(family);
     flow.phase = "error";
