@@ -49,6 +49,14 @@ pub mod mimo;
 pub mod trae;
 pub mod qoder;
 pub mod zed;
+pub mod factory;
+pub mod jetbrains;
+pub mod groq;
+pub mod huggingface;
+pub mod longcat;
+pub mod sub2api;
+pub mod mistral;
+pub mod perplexity;
 
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;

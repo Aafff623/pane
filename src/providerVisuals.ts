@@ -54,6 +54,14 @@ import mimoIcon from "./assets/providers/mimo.svg?raw";
 import traeIcon from "./assets/providers/trae.svg?raw";
 import qoderIcon from "./assets/providers/qoder.svg?raw";
 import zedIcon from "./assets/providers/zed.svg?raw";
+import factoryIcon from "./assets/providers/factory.svg?raw";
+import jetbrainsIcon from "./assets/providers/jetbrains.svg?raw";
+import groqIcon from "./assets/providers/groq.svg?raw";
+import huggingfaceIcon from "./assets/providers/huggingface.svg?raw";
+import longcatIcon from "./assets/providers/longcat.svg?raw";
+import sub2apiIcon from "./assets/providers/sub2api.svg?raw";
+import mistralIcon from "./assets/providers/mistral.svg?raw";
+import perplexityIcon from "./assets/providers/perplexity.svg?raw";
 
 export interface ProviderVisual {
   iconKey: string;
@@ -119,6 +127,14 @@ const VISUALS: Readonly<Record<string, ProviderVisual>> = {
   trae: { iconKey: "trae", iconSvg: traeIcon },
   qoder: { iconKey: "qoder", iconSvg: qoderIcon },
   zed: { iconKey: "zed", iconSvg: zedIcon },
+  factory: { iconKey: "factory", iconSvg: factoryIcon },
+  jetbrains: { iconKey: "jetbrains", iconSvg: jetbrainsIcon },
+  groq: { iconKey: "groq", iconSvg: groqIcon },
+  huggingface: { iconKey: "huggingface", iconSvg: huggingfaceIcon },
+  longcat: { iconKey: "longcat", iconSvg: longcatIcon },
+  sub2api: { iconKey: "sub2api", iconSvg: sub2apiIcon },
+  mistral: { iconKey: "mistral", iconSvg: mistralIcon },
+  perplexity: { iconKey: "perplexity", iconSvg: perplexityIcon },
 };
 
 /// Known One/New API hosts that ship their own colorful mark.  Keyed by hostname

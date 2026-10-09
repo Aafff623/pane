@@ -322,6 +322,14 @@ const DEFAULT_DISABLED_PROVIDERS: &[&str] = &[
     "trae",
     "qoder",
     "zed",
+    "factory",
+    "jetbrains",
+    "groq",
+    "huggingface",
+    "longcat",
+    "sub2api",
+    "mistral",
+    "perplexity",
 ];
 
 static CONFIG_WRITE: Mutex<()> = Mutex::new(());
@@ -833,7 +841,7 @@ struct StripEntry {
 /// strip ids are validated against this before becoming tray icon ids,
 /// including `family@account` cards. Stale family-level strip icons are
 /// removed for exactly this set.
-const STRIP_PROVIDER_IDS: [&str; 54] = [
+const STRIP_PROVIDER_IDS: [&str; 62] = [
     "claude",
     "codex",
     "cursor",
@@ -888,6 +896,14 @@ const STRIP_PROVIDER_IDS: [&str; 54] = [
     "trae",
     "qoder",
     "zed",
+    "factory",
+    "jetbrains",
+    "groq",
+    "huggingface",
+    "longcat",
+    "sub2api",
+    "mistral",
+    "perplexity",
 ];
 
 async fn update_tray_strip(app: tauri::AppHandle, entries: Vec<StripEntry>) -> Result<(), String> {
@@ -2085,6 +2101,14 @@ async fn fetch_provider_snapshot(provider_id: String, allow_disabled: bool) -> R
             "trae" => providers::trae::snapshot().await,
             "qoder" => providers::qoder::snapshot().await,
             "zed" => providers::zed::snapshot().await,
+            "factory" => providers::factory::snapshot().await,
+            "jetbrains" => providers::jetbrains::snapshot().await,
+            "groq" => providers::groq::snapshot().await,
+            "huggingface" => providers::huggingface::snapshot().await,
+            "longcat" => providers::longcat::snapshot().await,
+            "sub2api" => providers::sub2api::snapshot().await,
+            "mistral" => providers::mistral::snapshot().await,
+            "perplexity" => providers::perplexity::snapshot().await,
             _ => return Err(format!("no single-provider refresh for {family}")),
         });
     }
@@ -2285,6 +2309,14 @@ async fn run_usage_fetch(app: &tauri::AppHandle) -> Vec<providers::Snapshot> {
         ("trae", Box::pin(guarded("trae".into(), "Trae".into(), providers::trae::snapshot()))),
         ("qoder", Box::pin(guarded("qoder".into(), "Qoder".into(), providers::qoder::snapshot()))),
         ("zed", Box::pin(guarded("zed".into(), "Zed".into(), providers::zed::snapshot()))),
+        ("factory", Box::pin(guarded("factory".into(), "Droid".into(), providers::factory::snapshot()))),
+        ("jetbrains", Box::pin(guarded("jetbrains".into(), "JetBrains AI".into(), providers::jetbrains::snapshot()))),
+        ("groq", Box::pin(guarded("groq".into(), "Groq".into(), providers::groq::snapshot()))),
+        ("huggingface", Box::pin(guarded("huggingface".into(), "Hugging Face".into(), providers::huggingface::snapshot()))),
+        ("longcat", Box::pin(guarded("longcat".into(), "LongCat".into(), providers::longcat::snapshot()))),
+        ("sub2api", Box::pin(guarded("sub2api".into(), "sub2api".into(), providers::sub2api::snapshot()))),
+        ("mistral", Box::pin(guarded("mistral".into(), "Mistral".into(), providers::mistral::snapshot()))),
+        ("perplexity", Box::pin(guarded("perplexity".into(), "Perplexity".into(), providers::perplexity::snapshot()))),
     ];
     // Skip the leftover Moonshot fetch only when the last Kimi card
     // actually painted — a credentials file alone is not enough (expired
@@ -3212,6 +3244,14 @@ async fn test_api_key(
         "venice" => providers::venice::snapshot_with_key(key).await,
         "warp" => providers::warp::snapshot_with_key(key).await,
         "mimo" => providers::mimo::snapshot_with_key(key).await,
+        "factory" => providers::factory::snapshot_with_key(key).await,
+        "groq" => providers::groq::snapshot_with_key(key).await,
+        "huggingface" => providers::huggingface::snapshot_with_key(key).await,
+        "longcat" => providers::longcat::snapshot_with_key(key).await,
+        "sub2api" => providers::sub2api::snapshot_with_key(key).await,
+        "mistral" => providers::mistral::snapshot_with_key(key).await,
+        "perplexity" => providers::perplexity::snapshot_with_key(key).await,
+
         "siliconflow" => providers::siliconflow::snapshot_with_key(key).await,
         "novita" => providers::novita::snapshot_with_key(key).await,
         "relaybalance" => {
@@ -3718,6 +3758,14 @@ fn provider_env_vars(provider: &str) -> &'static [&'static str] {
         "venice" => &["VENICE_API_KEY"],
         "warp" => &["WARP_API_KEY", "WARP_TOKEN"],
         "mimo" => &["MIMO_API_KEY"],
+        "factory" => &["FACTORY_API_KEY"],
+        "groq" => &["GROQ_API_KEY"],
+        "huggingface" => &["HF_TOKEN", "HUGGINGFACE_API_KEY", "HUGGING_FACE_HUB_TOKEN"],
+        "longcat" => &["LONGCAT_COOKIE"],
+        "sub2api" => &["SUB2API_API_KEY"],
+        "mistral" => &["MISTRAL_COOKIE"],
+        "perplexity" => &["PERPLEXITY_SESSION_TOKEN", "PERPLEXITY_COOKIE"],
+
         "firecrawl" => &["FIRECRAWL_API_KEY", "FIRECRAWL_FIRECRAWL_API_KEY"],
         "brave" => &["BRAVE_API_KEY", "BRAVE_SEARCH_API_KEY"],
         "siliconflow" => &["SILICONFLOW_API_KEY"],
@@ -3801,6 +3849,14 @@ fn get_credential_status(provider: String) -> Value {
         "qoder" => providers::qoder::local_credential_hint(),
         "zed" => providers::zed::local_credential_hint(),
         "mimo" => providers::mimo::local_credential_hint(),
+        "factory" => providers::factory::local_credential_hint(),
+        "jetbrains" => providers::jetbrains::local_credential_hint(),
+        "groq" => providers::groq::local_credential_hint(),
+        "huggingface" => providers::huggingface::local_credential_hint(),
+        "longcat" => providers::longcat::local_credential_hint(),
+        "sub2api" => providers::sub2api::local_credential_hint(),
+        "mistral" => providers::mistral::local_credential_hint(),
+        "perplexity" => providers::perplexity::local_credential_hint(),
         _ => None,
     };
     // Subscription/membership badge: Cursor reads it straight from the

@@ -74,6 +74,14 @@ export const providerCatalog: readonly ProviderDefinition[] = [
   { familyId: "trae", displayName: "Trae", queryKind: "nativeSnapshot", supportsApiKey: false, supportsExtraAccounts: false, supportsOAuth: false, iconKey: "trae" },
   { familyId: "qoder", displayName: "Qoder", queryKind: "nativeSnapshot", supportsApiKey: false, supportsExtraAccounts: false, supportsOAuth: false, iconKey: "qoder" },
   { familyId: "zed", displayName: "Zed", queryKind: "localOnly", supportsApiKey: false, supportsExtraAccounts: false, supportsOAuth: false, iconKey: "zed" },
+  { familyId: "factory", displayName: "Droid", queryKind: "nativeCodingPlan", supportsApiKey: true, supportsExtraAccounts: false, supportsOAuth: false, iconKey: "factory" },
+  { familyId: "jetbrains", displayName: "JetBrains AI", queryKind: "localOnly", supportsApiKey: false, supportsExtraAccounts: false, supportsOAuth: false, iconKey: "jetbrains" },
+  { familyId: "groq", displayName: "Groq", queryKind: "nativeBalance", supportsApiKey: true, supportsExtraAccounts: false, supportsOAuth: false, iconKey: "groq" },
+  { familyId: "huggingface", displayName: "Hugging Face", queryKind: "nativeBalance", supportsApiKey: true, supportsExtraAccounts: false, supportsOAuth: false, iconKey: "huggingface" },
+  { familyId: "longcat", displayName: "LongCat", queryKind: "nativeCodingPlan", supportsApiKey: true, supportsExtraAccounts: false, supportsOAuth: false, iconKey: "longcat" },
+  { familyId: "sub2api", displayName: "sub2api", queryKind: "nativeCodingPlan", supportsApiKey: true, supportsExtraAccounts: false, supportsOAuth: false, iconKey: "sub2api" },
+  { familyId: "mistral", displayName: "Mistral", queryKind: "nativeBalance", supportsApiKey: true, supportsExtraAccounts: false, supportsOAuth: false, iconKey: "mistral" },
+  { familyId: "perplexity", displayName: "Perplexity", queryKind: "nativeBalance", supportsApiKey: true, supportsExtraAccounts: false, supportsOAuth: false, iconKey: "perplexity" },
 ];
 
 export function providerFamily(id: string): string {
