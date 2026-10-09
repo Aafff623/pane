@@ -2,16 +2,18 @@
 
 ## 0.6.0 — 未发布
 
-Provider 目录补全 · 前两批 14 家 / Kiro 免 spawn / 「密钥与额度」机制说明
+Provider 目录补全 · 前四批 23 家 / Kiro 免 spawn / 主密码 Q&A 恢复 / 「密钥与额度」机制说明
 
 ## 新增
 
 - **主密码 Q&A 恢复（忘记密码兜底 + 二次验证）**：设置主密码后立即引导配置恢复问题——默认且推荐 2 个（内置 8 个问题可选：最喜欢的水果/最常用的编程工具/第一只宠物的名字等，也可自填），答案需输入两次确认；数量可在 1~5 个间调整，减到 1 个时弹窗说明"单个答案更易被身边人猜中"劝留 2 个；忘记主密码时在锁定状态点「忘记密码？」连续答对全部问题即可设置新密码（旧密码不出前端、库整体重封、答案不区分大小写与多余空格）；连续答错 5 次进入 5 分钟冷却防暴力猜测；更换主密码后恢复问题保持有效（密封自动轮转）。磁盘上问题为明文（锁定时显示挑战）、答案与主密码全部密封（答案各自 Argon2id 加盐 + AES-256-GCM，随机恢复密钥三路封存）
 - **10 家 Provider 还原（第一批）**：`amp` · `bedrock` · `chutes` · `deepgram` · `openai-api` · `poe` · `venice` · `vertexai` · `warp` · `kiro` 恢复接入（Rust adapter、品牌图标、三语文案、环境变量与「测试连通性」全链路）；默认全部禁用，需在设置「密钥与额度」逐家启用；Bedrock / Vertex AI 读本机 AWS / gcloud 凭据（无凭据时显示未配置属正常），其余 7 家粘 key 即用
 - **4 家新 Provider（第二批）**：`mimo`（小米 MiMo，粘贴平台 serviceToken 或 API key 二选一——token 报月度用量、key 报余额/Token Plan，自动识别）、`trae`（Trae 国际版，读本机 `%APPDATA%\Trae` 登录态，host 随账号区域）、`qoder`（Qoder 国际版，读本机 `com.qoder.app.stable` 登录态打 `openapi.qoder.sh`）、`zed`（纯本地：只读 Zed 编辑器 `threads.db`，统计 zed.dev 托管模型的全部/近 30 天 token 与近期模型 Top3，BYOK 线程不计）；四家同样默认禁用；`zstd` 依赖引入（解压 Zed 线程数据）
+- **8 家新 Provider（第三批）**：`droid`（Factory：billing/limits 的 5h/周/月窗口 + 旧版订阅用量回退 + 加购余额行）、`jetbrains`（纯本地读 IDE 的 AIAssistantQuotaManager2.xml——月度积分进度、加购池、续期重置，多 IDE 取最新）、`groq`（公开 API 响应头里的每日请求/token 预算）、`huggingface`（whoami 身份 + 当月推理账单，计费 = max(0, 已用-包含)，403 给出权限指引）、`longcat`（粘贴网页 Cookie：token 包摘要优先、旧版 tokenUsage 回退、燃料包副行）、`sub2api`（自建网关：自填部署 URL + 分组 key，订阅窗口/配额/钱包三形态 + key 级请求与 token 统计）、`mistral`（admin Cookie：当月 token 合计 + Vibe 用量 + 信用钱包）、`perplexity`（会话令牌：信用额度按 经常→已购→赠品 顺序归因）
+- **火山方舟（第四批）**：`volcengine`——粘贴 `AK:SK`（ark.volcengine.com 的 API Key 账号），V4 签名直译（HMAC-SHA256 签名链，与 Bedrock 同构共用 hmac/sha2）；Agent Plan 的 AFP 5小时/周/月窗口与 Coding Plan 的分层窗口双探测，任一返回即出卡
 - **Kiro 直读本地库**：不再调用 `kiro-cli`（旧通道每次调用触发 CLI 自更新、向 %TEMP% 堆安装包）——改为只读打开 `%LOCALAPPDATA%\kiro-cli\data.sqlite3`（`KIRO_DATA_DIR` 可覆盖）取登录 token 与 profile ARN，直连 CodeWhisperer `GetUsageLimits`；额度卡新增 Overage（超额已用/上限）与超额计费行，bonus 花费并入计划用量时明确标注；未知 region 的 ARN 拒绝请求而非把 token 发往猜测端点
 - **「密钥与额度」机制说明页**：覆盖全部 provider 家族——每行新增「?」，弹窗讲清该家取数机制（读取哪些本地文件/数据库、按优先级读哪些环境变量、查询哪些域名）、按认证形态给出「你要提供」步骤（粘贴 key / OAuth 登录 / 本地登录），底部附本次实测实时指标；本地登录类（Claude / Kiro / Trae / Qoder / Vertex AI 等）不再被要求粘 key
-- **解析测试补齐**：第一批 24 条 + 第二批 10 条（MiMo 三形态解析、Zed threads.db zstd 往返与按模型聚合、Trae 国际版登录 blob 解密、Qoder 目录候选序），provider 解析测试 489 → 523
+- **解析测试补齐**：第一批 24 条 + 第二批 10 条 + 第三批 16 条 + 第四批 5 条（MiMo 三形态、Zed threads.db zstd 往返、火山签名链与双计划解析、Perplexity 三段归因、Sub2API 三形态等），provider 解析测试 489 → 550
 
 ## 变更
 

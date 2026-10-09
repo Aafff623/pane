@@ -5948,6 +5948,7 @@ const PROVIDER_CRED_INFO: Record<string, { auto: string; methods: CredMethod[] }
   "sub2api": { auto: "customize.cred.sub2api", methods: ["paste"] },
   "mistral": { auto: "customize.cred.mistral", methods: ["paste"] },
   "perplexity": { auto: "customize.cred.perplexity", methods: ["paste"] },
+  "volcengine": { auto: "customize.cred.volcengine", methods: ["paste"] },
   siliconflow: { auto: "customize.cred.siliconflow", methods: ["paste"] },
   novita: { auto: "customize.cred.novita", methods: ["paste"] },
   relaybalance: { auto: "customize.cred.relaybalance", methods: ["paste"] },

@@ -607,6 +607,15 @@ const PROVIDER_DEFINITIONS: &[ProviderDefinition] = &[
         icon_key: "perplexity",
         category: ProviderCategory::Coding,
     },
+    ProviderDefinition {
+        family_id: "volcengine",
+        display_name: "Volcengine Ark",
+        query_kind: QueryKind::NativeCodingPlan,
+        supports_api_key: true,
+        supports_extra_accounts: false,
+        icon_key: "volcengine",
+        category: ProviderCategory::Coding,
+    },
 ];
 
 pub fn provider_definitions() -> &'static [ProviderDefinition] {
@@ -730,6 +739,7 @@ mod tests {
             "sub2api",
             "mistral",
             "perplexity",
+            "volcengine",
         ];
         let actual: Vec<&str> = provider_definitions()
             .iter()

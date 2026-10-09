@@ -330,6 +330,7 @@ const DEFAULT_DISABLED_PROVIDERS: &[&str] = &[
     "sub2api",
     "mistral",
     "perplexity",
+    "volcengine",
 ];
 
 static CONFIG_WRITE: Mutex<()> = Mutex::new(());
@@ -841,7 +842,7 @@ struct StripEntry {
 /// strip ids are validated against this before becoming tray icon ids,
 /// including `family@account` cards. Stale family-level strip icons are
 /// removed for exactly this set.
-const STRIP_PROVIDER_IDS: [&str; 62] = [
+const STRIP_PROVIDER_IDS: [&str; 63] = [
     "claude",
     "codex",
     "cursor",
@@ -904,6 +905,7 @@ const STRIP_PROVIDER_IDS: [&str; 62] = [
     "sub2api",
     "mistral",
     "perplexity",
+    "volcengine",
 ];
 
 async fn update_tray_strip(app: tauri::AppHandle, entries: Vec<StripEntry>) -> Result<(), String> {
@@ -2109,6 +2111,7 @@ async fn fetch_provider_snapshot(provider_id: String, allow_disabled: bool) -> R
             "sub2api" => providers::sub2api::snapshot().await,
             "mistral" => providers::mistral::snapshot().await,
             "perplexity" => providers::perplexity::snapshot().await,
+            "volcengine" => providers::volcengine::snapshot().await,
             _ => return Err(format!("no single-provider refresh for {family}")),
         });
     }
@@ -2317,6 +2320,7 @@ async fn run_usage_fetch(app: &tauri::AppHandle) -> Vec<providers::Snapshot> {
         ("sub2api", Box::pin(guarded("sub2api".into(), "sub2api".into(), providers::sub2api::snapshot()))),
         ("mistral", Box::pin(guarded("mistral".into(), "Mistral".into(), providers::mistral::snapshot()))),
         ("perplexity", Box::pin(guarded("perplexity".into(), "Perplexity".into(), providers::perplexity::snapshot()))),
+        ("volcengine", Box::pin(guarded("volcengine".into(), "Volcengine Ark".into(), providers::volcengine::snapshot()))),
     ];
     // Skip the leftover Moonshot fetch only when the last Kimi card
     // actually painted — a credentials file alone is not enough (expired
@@ -3251,6 +3255,7 @@ async fn test_api_key(
         "sub2api" => providers::sub2api::snapshot_with_key(key).await,
         "mistral" => providers::mistral::snapshot_with_key(key).await,
         "perplexity" => providers::perplexity::snapshot_with_key(key).await,
+        "volcengine" => providers::volcengine::snapshot_with_key(key).await,
 
         "siliconflow" => providers::siliconflow::snapshot_with_key(key).await,
         "novita" => providers::novita::snapshot_with_key(key).await,
@@ -3765,6 +3770,7 @@ fn provider_env_vars(provider: &str) -> &'static [&'static str] {
         "sub2api" => &["SUB2API_API_KEY"],
         "mistral" => &["MISTRAL_COOKIE"],
         "perplexity" => &["PERPLEXITY_SESSION_TOKEN", "PERPLEXITY_COOKIE"],
+        "volcengine" => &["VOLC_ACCESS_KEY"],
 
         "firecrawl" => &["FIRECRAWL_API_KEY", "FIRECRAWL_FIRECRAWL_API_KEY"],
         "brave" => &["BRAVE_API_KEY", "BRAVE_SEARCH_API_KEY"],
@@ -3857,6 +3863,7 @@ fn get_credential_status(provider: String) -> Value {
         "sub2api" => providers::sub2api::local_credential_hint(),
         "mistral" => providers::mistral::local_credential_hint(),
         "perplexity" => providers::perplexity::local_credential_hint(),
+        "volcengine" => providers::volcengine::local_credential_hint(),
         _ => None,
     };
     // Subscription/membership badge: Cursor reads it straight from the

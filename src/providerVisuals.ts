@@ -62,6 +62,7 @@ import longcatIcon from "./assets/providers/longcat.svg?raw";
 import sub2apiIcon from "./assets/providers/sub2api.svg?raw";
 import mistralIcon from "./assets/providers/mistral.svg?raw";
 import perplexityIcon from "./assets/providers/perplexity.svg?raw";
+import volcengineIcon from "./assets/providers/volcengine.svg?raw";
 
 export interface ProviderVisual {
   iconKey: string;
@@ -135,6 +136,7 @@ const VISUALS: Readonly<Record<string, ProviderVisual>> = {
   sub2api: { iconKey: "sub2api", iconSvg: sub2apiIcon },
   mistral: { iconKey: "mistral", iconSvg: mistralIcon },
   perplexity: { iconKey: "perplexity", iconSvg: perplexityIcon },
+  volcengine: { iconKey: "volcengine", iconSvg: volcengineIcon },
 };
 
 /// Known One/New API hosts that ship their own colorful mark.  Keyed by hostname

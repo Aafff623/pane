@@ -57,6 +57,7 @@ pub mod longcat;
 pub mod sub2api;
 pub mod mistral;
 pub mod perplexity;
+pub mod volcengine;
 
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;

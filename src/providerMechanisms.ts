@@ -80,4 +80,5 @@ export const MECHANISMS: Record<string, Mechanism> = {
   "sub2api": { kind: "key", reads: ["%APPDATA%\\Pane\\sub2api.json"], env: ["SUB2API_API_KEY"], hosts: ["(your sub2api deployment URL)"] },
   "mistral": { kind: "key", env: ["MISTRAL_COOKIE"], hosts: ["admin.mistral.ai"] },
   "perplexity": { kind: "key", env: ["PERPLEXITY_SESSION_TOKEN", "PERPLEXITY_COOKIE"], hosts: ["www.perplexity.ai"] },
+  "volcengine": { kind: "key", env: ["VOLC_ACCESS_KEY", "VOLC_SECRET_KEY"], hosts: ["open.volcengineapi.com"] },
 };

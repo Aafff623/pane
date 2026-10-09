@@ -16,7 +16,7 @@ Handoff parcels in `temp/handoff/` cite task IDs from this board. The board does
 ## Next
 
 - [ ] T-0003 — 注册表收口：`provider_runtime.rs` 单表驱动 refresh，docs 覆盖基线并入一致性门禁
-- [ ] T-0004 — Provider 全量补全（5 批）：Batch 1（10 家还原）与 Batch 2（MiMo / Trae 国际 / Qoder 国际 / Zed 本地遥测）已提交并通过用户验收（2026-10-08，crof 与真实出数验证用户已自行处理）；Batch 3（Factory / JetBrains / Groq / HuggingFace / LongCat / Sub2API / Mistral / Perplexity）起未开工
+- [ ] T-0004 — Provider 全量补全（5 批）：Batch 1-4 已提交（共 23 家：10 还原 + MiMo/Trae国际/Qoder国际/Zed + Droid/JetBrains/Groq/HuggingFace/LongCat/sub2api/Mistral/Perplexity + 火山方舟），测试 489→550；**未落地项**：千帆/腾讯TokenHub/华为云/讯飞/360 的额度端点在全部参考库中不存在（需装机抓包，不编造）；CodeBuddy/腾讯需 device-code 登录流（T-0009 型）；通义灵码无现成实现需自研抓包；Batch 5 长尾等用户点单。真实出数验证仍需用户提供各家的 key
 - [ ] T-0005 — Analytics 用量面板：先出 `temp/preview/` 原型拍板，再接线（Rust 聚合命令 + 自绘 SVG）
 - [ ] T-0006 — CI 门禁补齐：加 PR 触发的 `ci.yml`（前端 build + parse-tests 去代理运行）
 - [ ] T-0007 — 把 4 个模块的 84 个「死测试」挂进 parse-tests harness（`lib.rs`/`tray_projection`/`telemetry`/`httpapi`）

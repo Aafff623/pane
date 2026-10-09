@@ -82,6 +82,7 @@ export const providerCatalog: readonly ProviderDefinition[] = [
   { familyId: "sub2api", displayName: "sub2api", queryKind: "nativeCodingPlan", supportsApiKey: true, supportsExtraAccounts: false, supportsOAuth: false, iconKey: "sub2api" },
   { familyId: "mistral", displayName: "Mistral", queryKind: "nativeBalance", supportsApiKey: true, supportsExtraAccounts: false, supportsOAuth: false, iconKey: "mistral" },
   { familyId: "perplexity", displayName: "Perplexity", queryKind: "nativeBalance", supportsApiKey: true, supportsExtraAccounts: false, supportsOAuth: false, iconKey: "perplexity" },
+  { familyId: "volcengine", displayName: "Volcengine Ark", queryKind: "nativeCodingPlan", supportsApiKey: true, supportsExtraAccounts: false, supportsOAuth: false, iconKey: "volcengine" },
 ];
 
 export function providerFamily(id: string): string {
