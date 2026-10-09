@@ -1842,11 +1842,16 @@ async fn account_snapshot(
                 "this account has no base URL — remove and re-add it".into(),
             ),
         },
-        other => providers::Snapshot::error(
-            &id,
-            &name,
-            format!("unknown multi-account provider: {other}"),
-        ),
+        // Every other key family fetches through the shared probe and is
+        // re-branded with this account's card id + display name.
+        _ => match key_snapshot_for(&family, &key, base_url).await {
+            Ok(mut snap) => {
+                snap.id = id.clone();
+                snap.name = name.clone();
+                snap
+            }
+            Err(e) => providers::Snapshot::error(&id, &name, e),
+        },
     }
 }
 
@@ -3197,30 +3202,16 @@ fn get_base_url(provider: String) -> Option<String> {
     }
 }
 
-/// Outcome of a live test_api_key probe, shown in the Customize ⚙ panel:
-/// the metric count on success, the backend's error verbatim on failure.
-#[derive(serde::Serialize)]
-struct TestResult {
-    ok: bool,
-    metrics: usize,
-    message: String,
-}
-
-/// Live test of a pasted API key against its provider (Customize "Test
-/// connection"). Pure probe — nothing is written, the key never touches
-/// disk. Custom Balance and Linkso additionally need the relay's base URL;
-/// testing always uses the pasted values, never the stored ones.
-#[tauri::command]
-async fn test_api_key(
-    provider: String,
-    key: String,
+/// One family's live snapshot for a bare key — the shared probe behind
+/// the Settings test-before-save button and the generic extra-account
+/// fetch (which re-brands the result with the account's card id/name).
+async fn key_snapshot_for(
+    provider: &str,
+    key: &str,
     base_url: Option<String>,
-) -> Result<TestResult, String> {
-    let key = key.trim();
-    if key.is_empty() {
-        return Err("API key is empty".into());
-    }
-    let snap = match provider.as_str() {
+) -> Result<providers::Snapshot, String> {
+    Ok(match provider {
+
         "openrouter" => providers::openrouter::snapshot_with_key(key).await,
         "zai" => providers::zai::snapshot_with_key(key).await,
         "commandcode" => providers::commandcode::snapshot_with_key(key).await,
@@ -3275,7 +3266,33 @@ async fn test_api_key(
             providers::relaybalance::snapshot_with_key(key, url).await
         }
         _ => return Err(format!("unknown provider: {provider}")),
-    };
+    })
+}
+
+/// Outcome of a live test_api_key probe, shown in the Customize ⚙ panel:
+/// the metric count on success, the backend's error verbatim on failure.
+#[derive(serde::Serialize)]
+struct TestResult {
+    ok: bool,
+    metrics: usize,
+    message: String,
+}
+
+/// Live test of a pasted API key against its provider (Customize "Test
+/// connection"). Pure probe — nothing is written, the key never touches
+/// disk. Custom Balance and Linkso additionally need the relay's base URL;
+/// testing always uses the pasted values, never the stored ones.
+#[tauri::command]
+async fn test_api_key(
+    provider: String,
+    key: String,
+    base_url: Option<String>,
+) -> Result<TestResult, String> {
+    let key = key.trim();
+    if key.is_empty() {
+        return Err("API key is empty".into());
+    }
+    let snap = key_snapshot_for(&provider, key, base_url).await?;
     Ok(TestResult {
         ok: snap.status == "ok",
         metrics: snap.metrics.len(),

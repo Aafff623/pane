@@ -634,6 +634,10 @@ mod tests {
             "siliconflow",
             "novita",
             "relaybalance",
+            "deepgram",
+            "groq",
+            "mistral",
+            "volcengine",
         ] {
             assert!(provider_takes_accounts(p));
         }
