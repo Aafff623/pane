@@ -2390,17 +2390,20 @@ function renderCard(s: Snapshot): string {
           const on = id === shown.id;
           const dot = peakTintedDot(family, accountHealthDot(id));
           const dotTitle = healthDotTitle(dot);
-          // Compact number capsules exist to save space — but a named or
-          // noted account shows its label/note ("njf3", "TTA"); only unnamed
-          // ones keep the number. Named capsules get text width + auto-shrink
-          // instead of the fixed number cell.
+          // Compact number capsules exist to save space — but a named,
+          // noted, or default account shows its human label/note ("默认",
+          // "njf3", "TTA"); only truly unnamed secondary accounts keep the
+          // number. Named capsules get text width + auto-shrink instead of
+          // the fixed number cell.
           const list = accountsCache.get(family) ?? [];
           const entry = id === s.id ? list[0] : list.find((a) => a.id === id);
           const note = accountNote(id);
+          const isDefaultAcct = id === s.id || index === 0;
           const hasCustomName = Boolean(note || entry?.label?.trim() || entry?.email?.trim());
-          const tabLabel = compactTabs && !hasCustomName ? String(index + 1) : label;
+          const isNamed = isDefaultAcct || hasCustomName;
+          const tabLabel = compactTabs && !isNamed ? String(index + 1) : label;
           const tabTitle = `${label} · ${dotTitle}`;
-          return `<button type="button" class="card-account-tab${on ? " on" : ""}${compactTabs && !hasCustomName ? " compact" : ""}${compactTabs && hasCustomName ? " compact-noted" : ""}" data-card-account="${family}|${escapeHtml(id)}" title="${escapeHtml(tabTitle)}" aria-label="${escapeHtml(label)}"><span class="acct-dot ${dot}"></span><span class="card-account-tab-label" ${compactLabelStyle(tabLabel, 10.5, 8)}>${escapeHtml(tabLabel)}</span></button>`;
+          return `<button type="button" class="card-account-tab${on ? " on" : ""}${compactTabs && !isNamed ? " compact" : ""}${compactTabs && isNamed ? " compact-noted" : ""}" data-card-account="${family}|${escapeHtml(id)}" title="${escapeHtml(tabTitle)}" aria-label="${escapeHtml(label)}"><span class="acct-dot ${dot}"></span><span class="card-account-tab-label" ${compactLabelStyle(tabLabel, 10.5, 8)}>${escapeHtml(tabLabel)}</span></button>`;
         })
         .join("")}</div>`;
     }
