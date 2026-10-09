@@ -16,6 +16,7 @@ import worker from "./worker.js";
 import { LANGS } from "./i18n.js";
 
 const html = await readFile(new URL("./public/index.html", import.meta.url), "utf8");
+const siteScript = await readFile(new URL("./public/site.js", import.meta.url), "utf8");
 const RELEASES_PAGE = "https://github.com/Aafff623/pane/releases/latest";
 
 test("site content: Pane landing page includes the product sections", () => {
@@ -54,6 +55,12 @@ test("links: GitHub goes to Aafff623/pane, download buttons use the edge route",
   const wired = [...html.matchAll(/<a[^>]*data-latest-installer[^>]*>/g)];
   assert.equal(wired.length, 3, "download buttons");
   for (const [tag] of wired) assert.ok(tag.includes('href="/download/windows"'), tag);
+});
+
+test("theme: host and embedded panel themes stay isolated", () => {
+  assert.match(siteScript, /let demoTheme='dark'/);
+  assert.doesNotMatch(siteScript, /settingsFrame\.contentWindow\?\.postMessage\(\{type:'pane-demo',action:'theme'\}/);
+  assert.match(siteScript, /transport\(["']theme["']\)/);
 });
 
 test("download/windows: newest installer, else the releases page", async () => {

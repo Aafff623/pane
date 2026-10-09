@@ -56,6 +56,12 @@ export default {
       }
       return Response.redirect(target, 302);
     }
+    // Keep one canonical markup source. The English route is selected by the
+    // host page script, while the asset request itself still resolves to the
+    // same index document.
+    if (url.pathname === "/en" || url.pathname === "/en/") {
+      return env.ASSETS.fetch(new Request(new URL("/index.html", url), req));
+    }
     return env.ASSETS.fetch(req);
   },
 };
