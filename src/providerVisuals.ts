@@ -110,7 +110,7 @@ const VISUALS: Readonly<Record<string, ProviderVisual>> = {
   zai: { iconKey: "zai", iconSvg: zaiIcon },
   qodercn: { iconKey: "qodercn", iconSvg: qodercnIcon },
   traecn: { iconKey: "traecn", iconSvg: traecnIcon },
-  commandcode: { iconKey: "commandcode", iconSvg: darkSilhouette(commandcodeIcon), invertOnDarkTray: true },
+  commandcode: { iconKey: "commandcode", iconSvg: commandcodeIcon },
   doubao: { iconKey: "doubao", iconSvg: doubaoIcon },
   elevenlabs: { iconKey: "elevenlabs", iconSvg: elevenlabsIcon },
   relaybalance: { iconKey: "relaybalance", iconSvg: relaybalanceIcon },
