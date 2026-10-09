@@ -256,19 +256,35 @@ pub fn error_chain(err: &dyn std::error::Error) -> String {
     parts.join(" ← ")
 }
 
-/// Send a request built against [`http`]; when the transport itself fails,
-/// retry once over a direct connection. HTTP responses (4xx/5xx) count as
-/// success here — only transport errors fall through to the retry.
+/// Send a request built against [`http`], retrying once over a *direct*
+/// connection when the first attempt fails at the transport level OR comes
+/// back 403.
+///
+/// The 403 retry exists for Cloudflare-fronted vendors (auth.openai.com):
+/// challenges track the transport, so a 403 that answers through a proxy's
+/// exit IP often passes direct — and a 403 from the edge never reached the
+/// API, so retrying costs one extra request, not a consumed credential.
+/// Every other HTTP response passes through untouched.
 pub async fn send_with_direct_fallback(
     build: impl Fn(&reqwest::Client) -> reqwest::RequestBuilder,
 ) -> Result<reqwest::Response, String> {
-    match build(&http()).send().await {
+    let primary = build(&http()).send().await;
+    let retry = match &primary {
+        Ok(resp) => resp.status().as_u16() == 403,
+        Err(_) => true,
+    };
+    if !retry {
+        return Ok(primary.expect("checked Ok"));
+    }
+    match build(&http_direct()).send().await {
         Ok(resp) => Ok(resp),
-        Err(primary) => match build(&http_direct()).send().await {
+        Err(fallback) => match primary {
+            // The first attempt still produced an HTTP answer — keep it; a
+            // transport-failed retry must not erase a real response.
             Ok(resp) => Ok(resp),
-            Err(fallback) => Err(format!(
+            Err(primary_err) => Err(format!(
                 "request failed ({}), direct retry also failed ({})",
-                error_chain(&primary),
+                error_chain(&primary_err),
                 error_chain(&fallback)
             )),
         },

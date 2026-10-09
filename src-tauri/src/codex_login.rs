@@ -6,6 +6,26 @@
 //! becomes its own card. The port belongs to the Codex CLI while it runs —
 //! `start` then answers [`PORT_IN_USE`] and the caller falls back to the
 //! device-code flow, which is exactly cockpit's fallback ladder too.
+//!
+//! ## Field notes (sign-in failures seen in the wild)
+//!
+//! - **Browser lands on "Just a moment…" / 403**: Cloudflare's managed
+//!   challenge on the consent page. Ad-blocking extensions (AdGuard and
+//!   friends inject scripts into the page) break the challenge script; an
+//!   incognito window or disabling the blocker for `auth.openai.com` passes.
+//!   A flagged proxy exit IP repeats the wall — switching nodes helps.
+//! - **`token exchange: error sending request`**: the shell's HTTP proxy
+//!   (`HTTP_PROXY` / `https_proxy` / `all_proxy`) reset TLS for
+//!   `auth.openai.com`. [`crate::providers::send_with_direct_fallback`]
+//!   retries the exchange over a direct connection.
+//! - **`token exchange: HTTP 403`**: the edge blocked the server-side
+//!   exchange; the same helper retries over the other transport, and the
+//!   error text carries the browser-side guidance above.
+//! - The authorize URL carries the official client's `codex_cli_simplified_flow`,
+//!   `id_token_add_organizations` and `originator` parameters, so the browser
+//!   takes the simple consent path instead of the dashboard one.
+//! - Auth codes are single-use and a pending login expires after 5 minutes —
+//!   every failure means starting a fresh browser sign-in.
 
 use base64::Engine;
 use rand_core::{OsRng, RngCore};
@@ -22,6 +42,9 @@ const CLIENT_ID: &str = "app_EMoamEEZ73f0CkXaXp7hrann";
 const CALLBACK_PORT: u16 = 1455;
 const REDIRECT_URI: &str = "http://localhost:1455/auth/callback";
 const SCOPES: &str = "openid profile email offline_access";
+/// The official desktop client's originator; the authorize URL carries it so
+/// the browser takes the simplified consent path.
+const ORIGINATOR: &str = "Codex Desktop";
 const LOGIN_TIMEOUT: Duration = Duration::from_secs(300);
 /// Sentinel the frontend matches on to fall back to the device-code flow.
 pub const PORT_IN_USE: &str = "CODEX_OAUTH_PORT_IN_USE";
@@ -117,11 +140,12 @@ fn pct_decode(s: &str) -> String {
 
 pub fn build_auth_url(state: &str, challenge: &str) -> String {
     format!(
-        "{AUTH_ENDPOINT}?response_type=code&client_id={CLIENT_ID}&redirect_uri={}&scope={}&state={}&code_challenge={}&code_challenge_method=S256",
+        "{AUTH_ENDPOINT}?response_type=code&client_id={CLIENT_ID}&redirect_uri={}&scope={}&state={}&code_challenge={}&code_challenge_method=S256&id_token_add_organizations=true&codex_cli_simplified_flow=true&originator={}",
         pct_encode(REDIRECT_URI),
         pct_encode(SCOPES),
         state,
         challenge,
+        pct_encode(ORIGINATOR),
     )
 }
 
@@ -243,7 +267,17 @@ async fn exchange_code(code: &str, verifier: &str) -> Result<crate::oauth::Store
     .await
     .map_err(|e| format!("token exchange: {e}"))?;
     if !resp.status().is_success() {
-        return Err(format!("token exchange: HTTP {}", resp.status()));
+        let status = resp.status();
+        if status.as_u16() == 403 {
+            return Err(
+                "token exchange: HTTP 403 — Cloudflare blocked this sign-in. Common causes: \
+                 an ad-blocking extension interfering with the browser challenge, or a flagged \
+                 network exit IP. Disable the blocker (or use an incognito window) / switch \
+                 network node, then retry."
+                    .into(),
+            );
+        }
+        return Err(format!("token exchange: HTTP {status}"));
     }
     let tok: Value = resp.json().await.map_err(|e| format!("token exchange parse: {e}"))?;
     let access_token = tok
@@ -380,5 +414,9 @@ mod tests {
         assert!(url.contains("code_challenge=ch&code_challenge_method=S256"));
         assert!(url.contains(&format!("redirect_uri={}", pct_encode(REDIRECT_URI))));
         assert!(url.contains("scope=openid%20profile%20email%20offline_access"));
+        // The official client's simplified-flow parameters (cockpit parity).
+        assert!(url.contains("id_token_add_organizations=true"));
+        assert!(url.contains("codex_cli_simplified_flow=true"));
+        assert!(url.contains("originator=Codex%20Desktop"));
     }
 }
