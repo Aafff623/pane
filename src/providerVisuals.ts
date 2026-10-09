@@ -72,6 +72,14 @@ export interface ProviderVisual {
   recolorOnTray?: boolean;
 }
 
+/// Near-black brand marks become white silhouettes on the dark theme
+/// (brightness(0) invert(1) via CSS); Groq's white mark becomes a black
+/// silhouette on the light theme instead. Class is baked into the raw svg
+/// so every render site (settings rows, customize, tray) gets it for free.
+const darkSilhouette = (svg: string): string => svg.replace(/<svg\b/i, '<svg class="pv-silhouette-dark"');
+const lightSilhouette = (svg: string): string => svg.replace(/<svg\b/i, '<svg class="pv-silhouette-light"');
+
+
 const VISUALS: Readonly<Record<string, ProviderVisual>> = {
   antigravity: { iconKey: "antigravity", iconSvg: antigravityIcon },
   aihubmix: { iconKey: "aihubmix", iconSvg: aihubmixIcon },
@@ -90,7 +98,7 @@ const VISUALS: Readonly<Record<string, ProviderVisual>> = {
   minimax: { iconKey: "minimax", iconSvg: minimaxIcon },
   mcode: { iconKey: "mcode", iconSvg: mcodeIcon },
   zcode: { iconKey: "zcode", iconSvg: zcodeIcon },
-  novita: { iconKey: "novita", iconSvg: novitaIcon, invertOnDarkTray: true },
+  novita: { iconKey: "novita", iconSvg: darkSilhouette(novitaIcon), invertOnDarkTray: true },
   ollama: { iconKey: "ollama", iconSvg: ollamaIcon },
   onenewapi: { iconKey: "onenewapi", iconSvg: onenewapiIcon },
   sharkai: { iconKey: "sharkai", iconSvg: sharkaiIcon },
@@ -102,12 +110,12 @@ const VISUALS: Readonly<Record<string, ProviderVisual>> = {
   zai: { iconKey: "zai", iconSvg: zaiIcon },
   qodercn: { iconKey: "qodercn", iconSvg: qodercnIcon },
   traecn: { iconKey: "traecn", iconSvg: traecnIcon },
-  commandcode: { iconKey: "commandcode", iconSvg: commandcodeIcon, invertOnDarkTray: true },
+  commandcode: { iconKey: "commandcode", iconSvg: darkSilhouette(commandcodeIcon), invertOnDarkTray: true },
   doubao: { iconKey: "doubao", iconSvg: doubaoIcon },
   elevenlabs: { iconKey: "elevenlabs", iconSvg: elevenlabsIcon },
   relaybalance: { iconKey: "relaybalance", iconSvg: relaybalanceIcon },
   sensenova: { iconKey: "sensenova", iconSvg: sensenovaIcon },
-  clawsgo: { iconKey: "clawsgo", iconSvg: clawsgoIcon, invertOnDarkTray: true },
+  clawsgo: { iconKey: "clawsgo", iconSvg: darkSilhouette(clawsgoIcon), invertOnDarkTray: true },
   shandianshuo: { iconKey: "shandianshuo", iconSvg: shandianshuoIcon },
   bocha: { iconKey: "bocha", iconSvg: bochaIcon },
   tavily: { iconKey: "tavily", iconSvg: tavilyIcon },
@@ -126,11 +134,11 @@ const VISUALS: Readonly<Record<string, ProviderVisual>> = {
   warp: { iconKey: "warp", iconSvg: warpIcon },
   mimo: { iconKey: "mimo", iconSvg: mimoIcon },
   trae: { iconKey: "trae", iconSvg: traeIcon },
-  qoder: { iconKey: "qoder", iconSvg: qoderIcon },
+  qoder: { iconKey: "qoder", iconSvg: darkSilhouette(qoderIcon) },
   zed: { iconKey: "zed", iconSvg: zedIcon },
-  factory: { iconKey: "factory", iconSvg: factoryIcon },
+  factory: { iconKey: "factory", iconSvg: darkSilhouette(factoryIcon) },
   jetbrains: { iconKey: "jetbrains", iconSvg: jetbrainsIcon },
-  groq: { iconKey: "groq", iconSvg: groqIcon },
+  groq: { iconKey: "groq", iconSvg: lightSilhouette(groqIcon) },
   huggingface: { iconKey: "huggingface", iconSvg: huggingfaceIcon },
   longcat: { iconKey: "longcat", iconSvg: longcatIcon },
   sub2api: { iconKey: "sub2api", iconSvg: sub2apiIcon },

@@ -1,3 +1,10 @@
+/* First-paint i18n gate: html ships with .i18n-boot and the boot script
+   removes it once the cached locale has translated the static DOM — the
+   UI never flashes in the wrong language. */
+html.i18n-boot body {
+  opacity: 0;
+}
+
 /* Design tokens lifted from shadcn/ui's dark zinc theme (ui.shadcn.com) —
    the palette and component treatments, hand-ported to plain CSS. */
 
@@ -483,6 +490,20 @@ body.settings-open #settings {
 }
 
 /* Q&A recovery editor / challenge rows under the vault bar. */
+/* Keys page header: master-password bar pinned to the page's top-right,
+   Q&A recovery panel spanning full width underneath it. */
+.st-kv-head {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
+  margin: 2px 0 6px;
+}
+
+.st-kv-head #kv-recovery-panel {
+  width: 100%;
+}
+
 .kv-recovery {
   display: grid;
   gap: 8px;
@@ -524,6 +545,22 @@ body.settings-open #settings {
 
 .kv-recovery-actions .spacer {
   flex: 1;
+}
+
+/* Brand marks whose vendor art is near-black (Factory/Droid, Qoder,
+   Novita, CommandCode, ClawsGO) render as white silhouettes on the dark
+   theme; Groq's all-white mark renders as a black silhouette on the light
+   theme. The themes themselves flip via :root[data-theme]. */
+:root svg.pv-silhouette-dark {
+  filter: brightness(0) invert(1);
+}
+
+:root[data-theme="light"] svg.pv-silhouette-dark {
+  filter: none;
+}
+
+:root[data-theme="light"] svg.pv-silhouette-light {
+  filter: brightness(0);
 }
 
 .kv-add-row input {

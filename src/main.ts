@@ -19,6 +19,7 @@ import {
   displayLinkLabel,
   displayMetricDetail,
   displayMetricLabel,
+  detectSystemLocale,
   localeTag,
   normalizeLocalePref,
   resolveLocale,
@@ -10363,6 +10364,50 @@ async function changeVaultPassword(): Promise<void> {
   }
 }
 
+/// Copy a stored provider/account key straight to the clipboard — same
+/// gate as viewing (open session first, master-password prompt when
+/// locked), but the plaintext never renders anywhere.
+async function copySettingsKey(
+  family: string,
+  entryId: string | null,
+  button: HTMLButtonElement,
+): Promise<void> {
+  const status = document.querySelector("#status");
+  const call = (password: string) =>
+    entryId
+      ? invoke<string>("reveal_account_key", { provider: family, id: entryId, password })
+      : invoke<string>("reveal_provider_key", { provider: family, password });
+  try {
+    let raw: string;
+    try {
+      raw = await call("");
+    } catch (err) {
+      const msg = String(err);
+      if (msg.includes("no master password is set")) {
+        if (status) status.textContent = t("settings.kvSetFirst");
+        return;
+      }
+      if (!msg.includes("wrong master password")) throw err;
+      const pw = await appPrompt({
+        title: t("settings.kvUnlockTitle"),
+        placeholder: t("settings.kvPasswordPlaceholder"),
+        confirmLabel: t("settings.kvUnlock"),
+        secret: true,
+      });
+      if (pw === null) return;
+      raw = await call(pw);
+    }
+    await navigator.clipboard.writeText(raw);
+    const old = button.textContent;
+    button.textContent = t("settings.kvCopied");
+    window.setTimeout(() => {
+      button.textContent = old || t("settings.kvCopy");
+    }, 1400);
+  } catch (err) {
+    if (status) status.textContent = String(err);
+  }
+}
+
 /// Reveal a stored provider/account key in place: probe with the open
 /// session (an empty password answers when unlocked), fall back to the
 /// master-password prompt, toggle back on the second click. One password
@@ -10620,6 +10665,11 @@ function settingsKeyRow(family: string): HTMLElement {
         void revealSettingsKey(family, null, view, state);
       });
       actions.append(view);
+      const copy = button(t("settings.kvCopy"));
+      copy.addEventListener("click", () => {
+        void copySettingsKey(family, null, copy);
+      });
+      actions.append(copy);
     }
     const edit = button(configured ? t("settings.keyReplace") : t("settings.keyEdit"));
     edit.addEventListener("click", () => {
@@ -10744,6 +10794,14 @@ function settingsAccountRow(family: string, entry: AccountEntry, index: number):
       void revealSettingsKey(family, entry.id!, view, masked);
     });
     actions.append(view);
+    const copy = document.createElement("button");
+    copy.type = "button";
+    copy.className = "mini-btn";
+    copy.textContent = t("settings.kvCopy");
+    copy.addEventListener("click", () => {
+      void copySettingsKey(family, entry.id!, copy);
+    });
+    actions.append(copy);
   }
   const rename = document.createElement("button");
   rename.type = "button";
@@ -11002,6 +11060,11 @@ async function copyKeyvaultEntry(id: string, button: HTMLButtonElement): Promise
 
 function applyLocale(): void {
   config.locale = normalizeLocalePref(config.locale);
+  try {
+    localStorage.setItem("pane.locale", config.locale);
+  } catch {
+    /* non-fatal */
+  }
   setActiveLocale(resolveLocale(config.locale));
   applyStaticI18n();
   renderOneNewApiSettings();
@@ -11844,6 +11907,15 @@ function buildPanelShell(): void {
   // for MCP/search keys.
   const keyPage = document.createElement("div");
   keyPage.id = "st-keyvault";
+  // Master-password entry lives at the page's top-right (the vault bar with
+  // add/switch/unlock + the Q&A recovery panel); the MCP card below keeps
+  // only its key rows.
+  const kvHead = document.createElement("div");
+  kvHead.className = "st-kv-head";
+  for (const selector of ["#kv-vault-bar", "#kv-recovery-panel"]) {
+    const el = document.querySelector<HTMLElement>(selector);
+    if (el) kvHead.append(el);
+  }
   const providerKeys = panelBlock("st-kv-providers", "settings.keysProviders");
   const pkPad = document.createElement("div");
   pkPad.className = "st-pad";
@@ -11859,12 +11931,12 @@ function buildPanelShell(): void {
   const mcpKeys = panelBlock("st-kv-mcp", "settings.keysMcp");
   const kvPad = document.createElement("div");
   kvPad.className = "st-pad";
-  for (const selector of ["#kv-vault-bar", "#kv-recovery-panel", "#keyvault-rows", ".kv-add-row", ".kv-hint"]) {
+  for (const selector of ["#keyvault-rows", ".kv-add-row", ".kv-hint"]) {
     const el = document.querySelector<HTMLElement>(selector);
     if (el) kvPad.append(el);
   }
   mcpKeys.body.append(kvPad);
-  keyPage.append(providerKeys.section, mcpKeys.section);
+  keyPage.append(kvHead, providerKeys.section, mcpKeys.section);
   settingsView.append(keyPage);
 
   // --- Shortcuts: wake + category + local bindings, moved in whole -------
@@ -12551,6 +12623,23 @@ async function maybePlayStartupAnimation(): Promise<void> {
 }
 
 window.addEventListener("DOMContentLoaded", () => {
+  // First-paint locale: the last applied preference is cached locally and
+  // restored synchronously here, so the static DOM never flashes in English
+  // while get_config resolves; applyLocale reconciles it a moment later.
+  try {
+    setSystemLocale(detectSystemLocale());
+    const cached = localStorage.getItem("pane.locale");
+    if (cached === "en" || cached === "zh" || cached === "ru" || cached === "auto") {
+      config.locale = cached;
+      setActiveLocale(resolveLocale(cached));
+    } else {
+      setActiveLocale(resolveLocale(config.locale));
+    }
+    applyStaticI18n();
+  } catch {
+    /* translation retry happens in applyLocale */
+  }
+  document.documentElement.classList.remove("i18n-boot");
   const appLogo = document.querySelector<HTMLElement>("#app-logo")!;
   appLogo.innerHTML = `<img src="${paneLogo}" alt="Pane" />`;
   document.querySelector("#splash")?.addEventListener("click", hideSplash);
