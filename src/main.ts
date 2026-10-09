@@ -1917,11 +1917,11 @@ function isCardDisabled(id: string, disabled: string[] = config.disabled): boole
 }
 
 /// Families whose extra accounts are PARALLEL cards (Antigravity captured
-/// slots, Cursor imported logins) — the bare family card stays the local
-/// login and never merges into tabs. Every other multi-account family
-/// renders ONE merged card with account tabs.
+/// slots, Cursor imported logins, Codex Pane sign-ins) — the bare family
+/// card stays the local login and never merges into tabs. Every other
+/// multi-account family renders ONE merged card with account tabs.
 function isParallelAccountFamily(family: string): boolean {
-  return family === "antigravity" || family === "cursor";
+  return family === "antigravity" || family === "cursor" || family === "codex";
 }
 
 /// The "maxed out" threshold for the account-tab health dot.

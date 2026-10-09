@@ -51,7 +51,10 @@ const PROVIDER_DEFINITIONS: &[ProviderDefinition] = &[
         display_name: "Codex",
         query_kind: QueryKind::NativeSnapshot,
         supports_api_key: false,
-        supports_extra_accounts: false,
+        // Pane-managed logins (auth center) are independent accounts, so the
+        // family is account-aware; the frontend renders them as parallel
+        // cards like Antigravity's slots rather than merged tabs.
+        supports_extra_accounts: true,
         icon_key: "codex",
         category: ProviderCategory::Coding,
     },
@@ -668,6 +671,7 @@ mod tests {
         // Antigravity's captured OAuth slots, Cursor's imported logins,
         // and the One/New API relay sites (site = account).
         let expected = [
+            "codex",
             "cursor",
             "opencode",
             "minimax",

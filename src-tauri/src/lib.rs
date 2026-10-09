@@ -3383,6 +3383,13 @@ fn account_add(
     api_key: String,
     base_url: Option<String>,
 ) -> Result<(), String> {
+    if provider == "codex" {
+        // Codex accounts are Pane sign-ins, not pasted keys — the store is
+        // codex_accounts and the entry point is the auth center.
+        return Err(
+            "Codex accounts are added by signing in: Auth center → Codex → Add account".into(),
+        );
+    }
     if !accounts::provider_takes_accounts(&provider) {
         return Err(format!("unknown multi-account provider: {provider}"));
     }
