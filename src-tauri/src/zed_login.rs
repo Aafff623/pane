@@ -276,6 +276,7 @@ pub fn cancel(login_id: &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rsa::RsaPublicKey;
 
     #[test]
     fn a_sealed_token_unseals_with_its_own_key() {
