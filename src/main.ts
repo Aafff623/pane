@@ -2374,9 +2374,13 @@ function renderCard(s: Snapshot): string {
         (snap) => snap.id === active && !isCardDisabled(snap.id),
       );
       if (activeSnap) shown = activeSnap;
+      const totalAccounts = accountIds.length;
       const availableAccounts = accountIds.filter((id) => accountHealthDot(id) === "green").length;
-      const accountState = availableAccounts === 0 ? "is-empty" : availableAccounts === accountIds.length ? "is-ready" : "is-partial";
-      accountCount = `<span class="provider-account-badge ${accountState}" title="${escapeHtml(`${accountIds.length} accounts · ${availableAccounts} available`)}"><span class="provider-account-glyph" aria-hidden="true">●</span><span>${accountIds.length}/${availableAccounts}</span></span>`;
+      const ratio = totalAccounts > 0 ? availableAccounts / totalAccounts : 0;
+      const isLow = availableAccounts <= 0 || ratio <= 0.5;
+      const availClass = isLow ? "is-low" : "is-ok";
+      const accountState = availableAccounts === 0 ? "is-empty" : availableAccounts === totalAccounts ? "is-ready" : "is-partial";
+      accountCount = `<span class="provider-account-badge ${accountState}" title="${escapeHtml(`${totalAccounts} accounts · ${availableAccounts} available`)}"><span class="provider-account-glyph" aria-hidden="true">●</span><span class="provider-account-numbers"><span class="acct-count-total">${totalAccounts}</span><span class="acct-count-sep">/</span><span class="acct-count-avail ${availClass}">${availableAccounts}</span></span></span>`;
       const compactTabs = accountIds.length >= 4;
       accountTabs = `<div class="card-account-tabs${compactTabs ? " compact" : ""}">${accountIds
         .map((id, index) => {
