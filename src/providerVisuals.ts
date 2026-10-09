@@ -3,6 +3,7 @@ import aihubmixIcon from "./assets/providers/aihubmix.svg?raw";
 import claudeIcon from "./assets/providers/claude.svg?raw";
 import clawsgoIcon from "./assets/providers/clawsgo.svg?raw";
 import codebuffIcon from "./assets/providers/codebuff.svg?raw";
+import codebuddyIcon from "./assets/providers/codebuddy.svg?raw";
 import codexIcon from "./assets/providers/codex.svg?raw";
 import commandcodeIcon from "./assets/providers/commandcode.svg?raw";
 import clinepassIcon from "./assets/providers/clinepass.svg?raw";
@@ -86,6 +87,7 @@ const VISUALS: Readonly<Record<string, ProviderVisual>> = {
   claude: { iconKey: "claude", iconSvg: claudeIcon },
   clinepass: { iconKey: "clinepass", iconSvg: clinepassIcon },
   codebuff: { iconKey: "codebuff", iconSvg: codebuffIcon },
+  codebuddy: { iconKey: "codebuddy", iconSvg: codebuddyIcon },
   codex: { iconKey: "codex", iconSvg: codexIcon },
   copilot: { iconKey: "copilot", iconSvg: copilotIcon },
   cursor: { iconKey: "cursor", iconSvg: cursorIcon },

@@ -15,7 +15,9 @@ use crate::{antigravity_accounts, cursor_accounts};
 
 /// The families the auth center groups, in display order. "grok" is the
 /// xAI family id (its device-code flow lives in oauth.rs under that name).
-pub const AUTH_FAMILIES: [&str; 7] = ["antigravity", "codex", "copilot", "cursor", "grok", "kiro", "qoder"];
+pub const AUTH_FAMILIES: [&str; 8] = [
+    "antigravity", "codex", "codebuddy", "copilot", "cursor", "grok", "kiro", "qoder",
+];
 
 #[derive(Serialize, Clone, Debug, PartialEq)]
 pub struct AuthAccountRow {
@@ -78,7 +80,7 @@ fn rows_for_family_from(base: &Path, family: &str) -> Vec<AuthAccountRow> {
                 kind: "account",
             })
             .collect(),
-        "copilot" | "grok" | "kiro" | "qoder" => {
+        "codebuddy" | "copilot" | "grok" | "kiro" | "qoder" => {
             crate::login_accounts::load_with_imported_single_login_from(base, family)
                 .iter()
                 .map(|login| AuthAccountRow {
@@ -129,7 +131,7 @@ mod tests {
         let groups = collect_from(&base);
         assert_eq!(groups.len(), AUTH_FAMILIES.len());
         assert_eq!(groups[0].family, "antigravity");
-        assert_eq!(groups[4].family, "grok");
+        assert!(groups.iter().any(|g| g.family == "grok"));
         assert!(groups.iter().all(|g| g.accounts.is_empty()));
         let _ = std::fs::remove_dir_all(&base);
     }

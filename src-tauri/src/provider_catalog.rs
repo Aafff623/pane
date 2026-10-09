@@ -59,6 +59,16 @@ const PROVIDER_DEFINITIONS: &[ProviderDefinition] = &[
         category: ProviderCategory::Coding,
     },
     ProviderDefinition {
+        family_id: "codebuddy",
+        display_name: "CodeBuddy",
+        query_kind: QueryKind::NativeSnapshot,
+        supports_api_key: false,
+        // Login-only family: every Pane sign-in is its own account card.
+        supports_extra_accounts: true,
+        icon_key: "codebuddy",
+        category: ProviderCategory::Coding,
+    },
+    ProviderDefinition {
         family_id: "cursor",
         display_name: "Cursor",
         query_kind: QueryKind::NativeSnapshot,
@@ -681,6 +691,7 @@ mod tests {
         // Pane-managed login families (copilot/grok).
         let expected = [
             "codex",
+            "codebuddy",
             "cursor",
             "opencode",
             "copilot",

@@ -3,6 +3,7 @@ mod secretstore;
 mod antigravity_accounts;
 mod auth_center;
 mod codex_accounts;
+mod codebuddy_login;
 mod codex_login;
 mod cursor_accounts;
 mod cursor_oauth;
@@ -2219,6 +2220,7 @@ async fn fetch_provider_snapshot(provider_id: String, allow_disabled: bool) -> R
             "copilot" => providers::copilot::snapshot_with_login(login).await,
             "kiro" => providers::kiro::snapshot_with_login(login).await,
             "qoder" => providers::qoder::snapshot_with_login(login).await,
+            "codebuddy" => providers::codebuddy::snapshot_with_login(login).await,
             _ => providers::grok::snapshot_with_login(login).await,
         });
     }
@@ -2311,6 +2313,7 @@ async fn run_usage_fetch(app: &tauri::AppHandle) -> Vec<providers::Snapshot> {
         ("cursor", Box::pin(guarded("cursor".into(), "Cursor".into(), providers::cursor::snapshot()))),
         ("opencode", Box::pin(guarded("opencode".into(), "OpenCode".into(), providers::opencode::snapshot()))),
         ("copilot", Box::pin(guarded("copilot".into(), "Copilot".into(), providers::copilot::snapshot()))),
+        ("codebuddy", Box::pin(guarded("codebuddy".into(), "CodeBuddy".into(), providers::codebuddy::snapshot()))),
         ("grok", Box::pin(guarded("grok".into(), "Grok".into(), providers::grok::snapshot()))),
         ("devin", Box::pin(guarded("devin".into(), "Devin".into(), providers::devin::snapshot()))),
         ("minimax", Box::pin(guarded("minimax".into(), "MiniMax".into(), providers::minimax::snapshot()))),
@@ -2499,6 +2502,10 @@ async fn run_usage_fetch(app: &tauri::AppHandle) -> Vec<providers::Snapshot> {
                 "qoder" => (
                     providers::qoder::login_card_name(&login),
                     Box::pin(providers::qoder::snapshot_with_login(login)),
+                ),
+                "codebuddy" => (
+                    providers::codebuddy::login_card_name(&login),
+                    Box::pin(providers::codebuddy::snapshot_with_login(login)),
                 ),
                 _ => (
                     providers::grok::login_card_name(&login),
@@ -4233,6 +4240,23 @@ fn qoder_login_cancel(login_id: String) {
     qoder_login::cancel(&login_id);
 }
 
+/// CodeBuddy (Tencent) scan login: auth/state → browser page → auth/token
+/// poll. start → open the auth URL → poll until the scan completes.
+#[tauri::command]
+async fn codebuddy_login_start() -> Result<codebuddy_login::LoginStart, String> {
+    codebuddy_login::start().await
+}
+
+#[tauri::command]
+async fn codebuddy_login_poll(login_id: String) -> codebuddy_login::LoginPoll {
+    codebuddy_login::poll(&login_id).await
+}
+
+#[tauri::command]
+fn codebuddy_login_cancel(login_id: String) {
+    codebuddy_login::cancel(&login_id);
+}
+
 /// Deletes Pane's own OAuth credential file for the provider. The CLI's
 /// sign-in is untouched.
 #[tauri::command]
@@ -4936,6 +4960,9 @@ pub fn run() {
             qoder_login_start,
             qoder_login_poll,
             qoder_login_cancel,
+            codebuddy_login_start,
+            codebuddy_login_poll,
+            codebuddy_login_cancel,
             oauth_logout,
             get_config,
             set_config,

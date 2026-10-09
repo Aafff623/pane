@@ -6217,7 +6217,7 @@ function credAccountsHtml(id: string): string {
 const OAUTH_PROVIDERS = new Set(["codex", "grok", "copilot"]);
 /// Browser-PKCE families (the backend runs the loopback callback and its
 /// own `<family>_login_*` commands).
-const BROWSER_LOGIN_PROVIDERS = new Set(["codex", "kiro", "qoder"]);
+const BROWSER_LOGIN_PROVIDERS = new Set(["codebuddy", "codex", "kiro", "qoder"]);
 
 // Relay families whose saved credential also carries a user-chosen base
 // URL (relaybalance) — its gear panel and account dialog show
