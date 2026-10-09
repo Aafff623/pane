@@ -12456,19 +12456,17 @@ function authGroupHtml(group: AuthFamilyGroup): string {
   const family = group.family;
   const name = providerDisplayName(family);
   const icon = providerVisual(family)?.iconSvg ?? "";
-  // oauth.rs keeps ONE device-code login per provider; copilot/grok can
-  // only ever hold a single row, so their "add" is the empty-state login
-  // button. Codex accumulates one account per completed sign-in (its own
-  // store), so it behaves like the multi-account families here.
-  const singleLogin = OAUTH_PROVIDERS.has(family) && family !== "codex";
+  // Every OAuth family (codex/copilot/grok) accumulates one account per
+  // completed sign-in in its own store, so they all behave like the
+  // multi-account families here: rows + an "add account" (login) button.
   const rows = group.accounts.map((acct, i) => authRowHtml(family, acct, i)).join("");
   const empty =
     group.accounts.length === 0
-      ? `<div class="auth-empty"><span>${escapeHtml(singleLogin ? t("auth.emptyOauth") : t("auth.empty"))}</span>
-        <button class="mini-btn" type="button" data-auth-add="${escapeHtml(family)}">${escapeHtml(singleLogin ? t("auth.login") : t("auth.addAccount"))}</button></div>`
+      ? `<div class="auth-empty"><span>${escapeHtml(t("auth.empty"))}</span>
+        <button class="mini-btn" type="button" data-auth-add="${escapeHtml(family)}">${escapeHtml(t("auth.addAccount"))}</button></div>`
       : "";
   const addBtn =
-    !singleLogin && group.accounts.length > 0
+    group.accounts.length > 0
       ? `<button class="mini-btn" type="button" data-auth-add="${escapeHtml(family)}">${escapeHtml(t("auth.addAccount"))}</button>`
       : "";
   return `<section class="st-block" data-auth-group="${escapeHtml(family)}">
@@ -12667,24 +12665,23 @@ async function pollAuthOauth(family: string): Promise<void> {
   void forceUsageRefreshAttempt(false).then(requestTraySync);
 }
 
-/// The row's ⋯ menu, styled on the dashboard's group menu: re-login for
-/// single-login OAuth families, remove/sign-out for every row. Copy-token
-/// is deliberately absent — account keys never leave the backend (only the
-/// masked form does), so there is no existing copy chain to ride. Parallel
-/// families (antigravity/cursor) have no default concept and OAuth families
-/// are single-login, so "set default" has no semantics to call either.
+/// The row's ⋯ menu, styled on the dashboard's group menu. Removing an
+/// account row drops just that login; signing in another account is the
+/// group's "add account" button. Copy-token is deliberately absent —
+/// account keys never leave the backend (only the masked form does), so
+/// there is no existing copy chain to ride. Parallel families have no
+/// default concept and OAuth families are per-login accounts, so "set
+/// default" has no semantics to call either.
 function openAuthRowMenu(family: string, index: number, anchor: HTMLElement): void {
   document.querySelector(".group-menu-overlay")?.remove();
   const acct = authGroups?.find((g) => g.family === family)?.accounts[index];
   if (!acct) return;
-  const singleLogin = OAUTH_PROVIDERS.has(family) && family !== "codex";
   const name = authRowName(family, acct);
   const overlay = document.createElement("div");
   overlay.className = "group-menu-overlay";
   overlay.innerHTML = `<div class="group-menu" role="menu">
     <div class="group-menu-title">${escapeHtml(name)}</div>
-    ${singleLogin ? `<button class="group-menu-item" type="button" data-auth-menu-relogin="${escapeHtml(family)}"><span class="group-menu-check">↻</span>${escapeHtml(t("auth.relogin"))}</button>` : ""}
-    <button class="group-menu-item danger" type="button" data-auth-menu-remove="${escapeHtml(family)}|${index}"><span class="group-menu-check">×</span>${escapeHtml(singleLogin ? t("auth.logout") : t("auth.remove"))}</button>
+    <button class="group-menu-item danger" type="button" data-auth-menu-remove="${escapeHtml(family)}|${index}"><span class="group-menu-check">×</span>${escapeHtml(t("auth.remove"))}</button>
   </div>`;
   const close = () => {
     overlay.remove();
@@ -12699,12 +12696,6 @@ function openAuthRowMenu(family: string, index: number, anchor: HTMLElement): vo
   overlay.addEventListener("click", (e) => {
     if (e.target === overlay) {
       close();
-      return;
-    }
-    const relogin = (e.target as HTMLElement).closest<HTMLElement>("[data-auth-menu-relogin]");
-    if (relogin) {
-      close();
-      void startAuthOauthFlow(relogin.dataset.authMenuRelogin!);
       return;
     }
     const remove = (e.target as HTMLElement).closest<HTMLElement>("[data-auth-menu-remove]");
@@ -12727,33 +12718,22 @@ function openAuthRowMenu(family: string, index: number, anchor: HTMLElement): vo
   menu.style.top = `${Math.max(8, desiredY)}px`;
 }
 
-/// Remove rides the existing chains: account_remove for slot/import
-/// families, oauth_logout for single-login ones.
+/// Remove rides the existing account_remove chain for every family (slot,
+/// import, and login-store families alike).
 async function authRemoveAccount(family: string, index: number): Promise<void> {
   const acct = authGroups?.find((g) => g.family === family)?.accounts[index];
   if (!acct) return;
-  const singleLogin = OAUTH_PROVIDERS.has(family) && family !== "codex";
   const name = authRowName(family, acct);
-  const ok = await appConfirm(
-    singleLogin
-      ? {
-          title: t("auth.logoutTitle"),
-          message: t("auth.logoutBody", { name: providerDisplayName(family) }),
-          confirmLabel: t("auth.logout"),
-          danger: true,
-        }
-      : {
-          title: t("auth.removeTitle"),
-          message: t("auth.removeBody", { label: name }),
-          confirmLabel: t("auth.remove").replace(/…$/, ""),
-          danger: true,
-        },
-  );
+  const ok = await appConfirm({
+    title: t("auth.removeTitle"),
+    message: t("auth.removeBody", { label: name }),
+    confirmLabel: t("auth.remove").replace(/…$/, ""),
+    danger: true,
+  });
   if (!ok) return;
   const status = document.querySelector("#status");
   try {
-    if (singleLogin) await invoke("oauth_logout", { provider: family });
-    else await invoke("account_remove", { provider: family, index });
+    await invoke("account_remove", { provider: family, index });
     credStatusCache.delete(family);
     if (status) status.textContent = t("auth.removed");
     await loadAuthCenter();

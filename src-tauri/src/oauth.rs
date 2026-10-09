@@ -236,7 +236,7 @@ fn parse_interval(v: Option<&Value>) -> u64 {
 
 /// JWT payload as JSON — the middle base64 chunk. Used for the account
 /// label and Codex's workspace/plan claims; never logged.
-fn jwt_claims(token: &str) -> Option<Value> {
+pub(crate) fn jwt_claims(token: &str) -> Option<Value> {
     let payload = token.split('.').nth(1)?;
     let bytes = base64::engine::general_purpose::URL_SAFE_NO_PAD
         .decode(payload)
@@ -729,8 +729,8 @@ async fn poll_copilot(device_auth_id: &str, _flow: &PendingFlow) -> PollResponse
         Some(tok) => tok.to_string(),
         None => return PollResponse::failure("token response missing access_token".into()),
     };
-    // Fetch the GitHub login for the account label.
-    let label = fetch_copilot_label(&github_token).await;
+    // Fetch the GitHub login + user id for the account label and identity.
+    let (label, user_id) = fetch_copilot_identity(&github_token).await;
     let tokens = StoredTokens {
         access_token: github_token.clone(),
         refresh_token: github_token.clone(),
@@ -738,19 +738,28 @@ async fn poll_copilot(device_auth_id: &str, _flow: &PendingFlow) -> PollResponse
         // 365 days is a safe refresh cadence, and refresh just re-stores.
         expires_at: expires_at_rfc3339(Some(365 * 24 * 3600)),
         label,
-        account_id: None,
+        account_id: user_id.map(|id| id.to_string()),
         id_token: None,
     };
     if let Err(e) = save("copilot", &tokens) {
         return PollResponse::failure(e);
+    }
+    // Multi-account: the completed sign-in also becomes its own card.
+    if let Ok(login) = crate::login_accounts::from_stored(&tokens) {
+        if let Err(e) = crate::login_accounts::record_login("copilot", login) {
+            return PollResponse::failure(e);
+        }
     }
     PENDING.lock().unwrap().remove(device_auth_id);
     PollResponse::success(tokens.label.clone())
 }
 
 /// The GitHub login behind an OAuth token, for the account chip label.
-async fn fetch_copilot_label(github_token: &str) -> Option<String> {
-    let resp = http()
+/// The GitHub account's display login and numeric user id for one OAuth
+/// token. The id is the stable identity for the copilot login-account
+/// store (logins can be renamed, ids never change).
+async fn fetch_copilot_identity(github_token: &str) -> (Option<String>, Option<u64>) {
+    let resp = match http()
         .get("https://api.github.com/user")
         .header("Authorization", format!("token {github_token}"))
         .header("Accept", "application/vnd.github+json")
@@ -758,12 +767,18 @@ async fn fetch_copilot_label(github_token: &str) -> Option<String> {
         .timeout(HTTP_TIMEOUT)
         .send()
         .await
-        .ok()?;
+    {
+        Ok(resp) => resp,
+        Err(_) => return (None, None),
+    };
     if !resp.status().is_success() {
-        return None;
+        return (None, None);
     }
-    let user: Value = read_json(resp, "github user").await.ok()?;
-    user.get("login")
+    let Ok(user) = read_json(resp, "github user").await else {
+        return (None, None);
+    };
+    let login = user
+        .get("login")
         .and_then(Value::as_str)
         .filter(|s| !s.is_empty())
         .map(str::to_string)
@@ -772,7 +787,9 @@ async fn fetch_copilot_label(github_token: &str) -> Option<String> {
                 .and_then(Value::as_str)
                 .filter(|s| !s.is_empty())
                 .map(str::to_string)
-        })
+        });
+    let id = user.get("id").and_then(Value::as_u64);
+    (login, id)
 }
 
 /// A usable GitHub OAuth token for copilot.rs: the stored GitHub token.
@@ -823,17 +840,23 @@ fn finish_login(provider: &str, doc: &Value) -> Result<Option<String>, String> {
         .and_then(Value::as_str)
         .filter(|s| !s.trim().is_empty())
         .map(str::to_string);
-    let account_id = if provider == "codex" {
-        claims
+    let account_id = match provider {
+        "codex" => claims
             .as_ref()
             .and_then(|c| {
                 c.pointer("/https:~1~1api.openai.com~1auth/chatgpt_account_id")
                     .or_else(|| c.get("chatgpt_account_id"))
             })
             .and_then(Value::as_str)
-            .map(str::to_string)
-    } else {
-        None
+            .map(str::to_string),
+        // grok: the id_token's sub is the stable account identity.
+        "grok" => claims
+            .as_ref()
+            .and_then(|c| c.get("sub"))
+            .and_then(Value::as_str)
+            .filter(|s| !s.trim().is_empty())
+            .map(str::to_string),
+        _ => None,
     };
     let tokens = StoredTokens {
         access_token,
@@ -844,6 +867,15 @@ fn finish_login(provider: &str, doc: &Value) -> Result<Option<String>, String> {
         id_token,
     };
     save(provider, &tokens)?;
+    // Multi-account families (grok) record the completed sign-in into the
+    // login-account store too — every login becomes its own card. A
+    // sign-in with no account id still saved the slot above; only the
+    // account card is skipped.
+    if crate::login_accounts::takes_login_accounts(provider) {
+        if let Ok(login) = crate::login_accounts::from_stored(&tokens) {
+            crate::login_accounts::record_login(provider, login)?;
+        }
+    }
     Ok(label)
 }
 
@@ -867,15 +899,24 @@ pub async fn valid_tokens(provider: &str) -> Result<Option<StoredTokens>, String
         return Err(RELOGIN_HINT.into());
     }
     let refreshed = refresh(provider, &stored.refresh_token).await?;
-    // Fold the refreshed token into the stored record: keep the label and,
-    // for Codex, adopt a rotated id_token / workspace when one comes back.
+    let next = fold_refreshed(provider, &stored, &refreshed);
+    save(provider, &next)?;
+    Ok(Some(next))
+}/// Fold a refreshed token pair into a stored record: keep the label and
+/// identity fields, adopt a rotated id_token (and the identity claims it
+/// carries) when one comes back.
+fn fold_refreshed(
+    provider: &str,
+    stored: &StoredTokens,
+    refreshed: &StoredTokens,
+) -> StoredTokens {
     let mut next = stored.clone();
-    next.access_token = refreshed.access_token;
+    next.access_token = refreshed.access_token.clone();
     if !refreshed.refresh_token.is_empty() {
-        next.refresh_token = refreshed.refresh_token;
+        next.refresh_token = refreshed.refresh_token.clone();
     }
-    next.expires_at = refreshed.expires_at;
-    if let Some(id_token) = refreshed.id_token {
+    next.expires_at = refreshed.expires_at.clone();
+    if let Some(id_token) = refreshed.id_token.clone() {
         if let Some(claims) = jwt_claims(&id_token) {
             if provider == "codex" {
                 if let Some(account_id) = claims
@@ -892,8 +933,25 @@ pub async fn valid_tokens(provider: &str) -> Result<Option<StoredTokens>, String
         }
         next.id_token = Some(id_token);
     }
-    save(provider, &next)?;
-    Ok(Some(next))
+    next
+}
+
+/// One refresh round-trip for an arbitrary stored pair (a login-account
+/// entry, not the single slot): refreshes and returns the folded pair
+/// WITHOUT writing any file — the caller owns the store it came from.
+/// `Ok(None)` means the stored access token is still usable as-is.
+pub async fn refresh_pair(
+    provider: &str,
+    stored: &StoredTokens,
+) -> Result<Option<StoredTokens>, String> {
+    if !stored.access_token.is_empty() && !access_expired(stored, Utc::now()) {
+        return Ok(None);
+    }
+    if stored.refresh_token.is_empty() {
+        return Err(RELOGIN_HINT.into());
+    }
+    let refreshed = refresh(provider, &stored.refresh_token).await?;
+    Ok(Some(fold_refreshed(provider, stored, &refreshed)))
 }
 
 /// One refresh round-trip; the rotated pair comes back unsaved.

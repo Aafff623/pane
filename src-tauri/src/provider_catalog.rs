@@ -83,7 +83,9 @@ const PROVIDER_DEFINITIONS: &[ProviderDefinition] = &[
         display_name: "Copilot",
         query_kind: QueryKind::NativeSnapshot,
         supports_api_key: false,
-        supports_extra_accounts: false,
+        // Pane-managed GitHub logins (auth center) are independent
+        // accounts — same parallel-card treatment as Codex's logins.
+        supports_extra_accounts: true,
         icon_key: "copilot",
         category: ProviderCategory::Coding,
     },
@@ -92,7 +94,9 @@ const PROVIDER_DEFINITIONS: &[ProviderDefinition] = &[
         display_name: "Grok",
         query_kind: QueryKind::NativeSnapshot,
         supports_api_key: false,
-        supports_extra_accounts: false,
+        // Pane-managed xAI logins (auth center) are independent accounts —
+        // same parallel-card treatment as Codex's logins.
+        supports_extra_accounts: true,
         icon_key: "grok",
         category: ProviderCategory::Coding,
     },
@@ -669,11 +673,14 @@ mod tests {
     fn catalog_marks_the_multi_account_families() {
         // Every API-key family (sub-accounts = separate keys), plus
         // Antigravity's captured OAuth slots, Cursor's imported logins,
-        // and the One/New API relay sites (site = account).
+        // the One/New API relay sites (site = account), and the
+        // Pane-managed login families (copilot/grok).
         let expected = [
             "codex",
             "cursor",
             "opencode",
+            "copilot",
+            "grok",
             "minimax",
             "openrouter",
             "zai",

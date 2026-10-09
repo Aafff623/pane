@@ -138,6 +138,28 @@ pub async fn snapshot() -> Snapshot {
     }
 }
 
+/// Snapshot for one Pane-managed GitHub login (login_accounts): GitHub
+/// OAuth tokens are long-lived and don't rotate, so the stored token is
+/// used as-is — a rejection is a clear sign-in-again error on the card.
+pub async fn snapshot_with_login(login: crate::login_accounts::LoginAccount) -> Snapshot {
+    let id = crate::login_accounts::card_id_for_account("copilot", &login);
+    let name = login_card_name(&login);
+    match fetch_with_token(&login.access_token, &id, &name).await {
+        Ok(s) => s,
+        Err(e) => Snapshot::error(&id, &name, e),
+    }
+}
+
+pub(crate) fn login_card_name(login: &crate::login_accounts::LoginAccount) -> String {
+    if !login.label.trim().is_empty() {
+        return login.label.clone();
+    }
+    if !login.email.trim().is_empty() {
+        return format!("Copilot — {}", login.email);
+    }
+    format!("Copilot @{}", login.account_id)
+}
+
 async fn fetch() -> Result<Snapshot, String> {
     // Pane's own OAuth login (oauth.rs) takes precedence over the editor's
     // or the CLI's — the user explicitly signed in here, and "Is there a
@@ -158,7 +180,12 @@ async fn fetch() -> Result<Snapshot, String> {
         }
         Err(e) => return Err(e),
     };
+    fetch_with_token(&token, ID, NAME).await
+}
 
+/// The usage query under one GitHub OAuth token, publishing as `id`/`name`
+/// (the bare card or one account card — same endpoint, same parsing).
+async fn fetch_with_token(token: &str, id: &str, name: &str) -> Result<Snapshot, String> {
     let resp = http()
         .get("https://api.github.com/copilot_internal/user")
         .header("Authorization", format!("token {token}"))
@@ -198,7 +225,7 @@ async fn fetch() -> Result<Snapshot, String> {
     if metrics.is_empty() {
         return Err("no quota data in response (plan may not expose quotas)".into());
     }
-    Ok(Snapshot::ok(ID, NAME, plan, metrics))
+    Ok(Snapshot::ok(id, name, plan, metrics))
 }
 
 #[cfg(test)]

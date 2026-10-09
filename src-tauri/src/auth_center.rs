@@ -1,8 +1,8 @@
 //! Auth center (panel window, M3): grouped account rows for the
 //! authorization page. Read-only assembly over the existing credential
-//! stores — antigravity slots, cursor accounts, and the single device-code
-//! OAuth login of codex/copilot/grok (oauth.rs keeps one login per
-//! provider, so those families have at most one row). Storage logic stays
+//! stores — antigravity slots, cursor accounts, and the Pane-managed login
+//! stores of codex/copilot/grok (every completed sign-in is one account
+//! row; the legacy single OAuth slots import lazily). Storage logic stays
 //! in the owning modules; this file only shapes what they already load.
 //!
 //! Kept free of Tauri types so the parse-tests harness compiles it via
@@ -11,7 +11,7 @@
 use serde::Serialize;
 use std::path::Path;
 
-use crate::{accounts, antigravity_accounts, cursor_accounts, oauth};
+use crate::{antigravity_accounts, cursor_accounts};
 
 /// The families the auth center groups, in display order. "grok" is the
 /// xAI family id (its device-code flow lives in oauth.rs under that name).
@@ -78,19 +78,17 @@ fn rows_for_family_from(base: &Path, family: &str) -> Vec<AuthAccountRow> {
                 kind: "account",
             })
             .collect(),
-        "copilot" | "grok" => oauth::load_from(&base.join("oauth"), family)
-            .map(|tokens| {
-                let login = tokens.label.clone().unwrap_or_default();
-                vec![AuthAccountRow {
-                    id: family.to_string(),
-                    email: (!login.is_empty()).then_some(login.clone()),
-                    label: login,
-                    masked_key: accounts::mask_key(&tokens.access_token),
-                    captured_at: None,
-                    kind: "oauth",
-                }]
+        "copilot" | "grok" => crate::login_accounts::load_with_imported_single_login_from(base, family)
+            .iter()
+            .map(|login| AuthAccountRow {
+                id: crate::login_accounts::card_id_for_account(family, login),
+                label: login.label.clone(),
+                email: (!login.email.trim().is_empty()).then(|| login.email.clone()),
+                masked_key: crate::login_accounts::mask_token(&login.access_token),
+                captured_at: Some(login.added_at).filter(|ts| *ts > 0),
+                kind: "account",
             })
-            .unwrap_or_default(),
+            .collect(),
         _ => Vec::new(),
     }
 }
@@ -114,6 +112,7 @@ pub fn collect() -> Vec<AuthFamilyGroup> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::oauth;
     use crate::cursor_oauth::CursorAccount;
 
     fn temp_base(tag: &str) -> std::path::PathBuf {
@@ -200,9 +199,30 @@ mod tests {
         assert_eq!(codex[0].label, "me@example.com");
         assert_eq!(codex[0].captured_at.is_some(), true);
 
+        // copilot/grok: the legacy single OAuth slot imports lazily as an
+        // ACCOUNT row with a fingerprint card id (multi-account families).
+        std::fs::write(
+            oauth_dir.join("grok.json"),
+            serde_json::to_string_pretty(&oauth::StoredTokens {
+                access_token: "grok-access-token".into(),
+                refresh_token: "grok-refresh".into(),
+                expires_at: "2030-01-01T00:00:00Z".into(),
+                label: Some("grok@x.ai".into()),
+                account_id: Some("xai-sub-77".into()),
+                id_token: None,
+            })
+            .unwrap(),
+        )
+        .expect("grok tokens");
+        let groups = collect_from(&base);
+        let grok = &groups.iter().find(|g| g.family == "grok").unwrap().accounts;
+        assert_eq!(grok.len(), 1);
+        assert_eq!(grok[0].kind, "account");
+        assert!(grok[0].id.starts_with("grok@"));
+        assert_ne!(grok[0].id, "grok");
+
         // Families without a stored login stay empty.
         assert!(by_family("copilot").accounts.is_empty());
-        assert!(by_family("grok").accounts.is_empty());
         let _ = std::fs::remove_dir_all(&base);
     }
 

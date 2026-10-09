@@ -32,6 +32,93 @@ pub async fn snapshot() -> Snapshot {
     }
 }
 
+/// Snapshot for one Pane-managed xAI login (login_accounts): the stored
+/// pair is refreshed when it is (nearly) expired — rotated tokens are
+/// written back into the login store — then the shared usage flow runs
+/// under the account's own card id and label.
+pub async fn snapshot_with_login(login: crate::login_accounts::LoginAccount) -> Snapshot {
+    let id = crate::login_accounts::card_id_for_account("grok", &login);
+    let name = login_card_name(&login);
+    match login_access_token(&login).await {
+        Ok(token) => match fetch_with_token(&token, &id, &name).await {
+            Ok(s) => s,
+            Err(e) => Snapshot::error(&id, &name, e),
+        },
+        Err(e) => Snapshot::error(&id, &name, e),
+    }
+}
+
+pub(crate) fn login_card_name(login: &crate::login_accounts::LoginAccount) -> String {
+    if !login.label.trim().is_empty() {
+        return login.label.clone();
+    }
+    if !login.email.trim().is_empty() {
+        return format!("Grok — {}", login.email);
+    }
+    format!("Grok @{}", login.account_id)
+}
+
+/// The CLI login's account identity ("<issuer>::<account-uuid>" key in
+/// auth.json), for the account-card dedup — the same uuid the Pane login's
+/// id_token carries as `sub`.
+pub fn default_identity() -> Option<String> {
+    let raw = std::fs::read_to_string(auth_path()).ok()?;
+    let doc: Value = serde_json::from_str(&raw).ok()?;
+    let key = doc.as_object()?.keys().next()?;
+    key.split_once("::").map(|(_, uuid)| uuid.trim().to_string()).filter(|u| !u.is_empty())
+}
+
+/// Resolve (and if needed refresh + write back) one login account's access
+/// token. GitHub-style "no expiry recorded" entries fall through to the
+/// stored token; xAI pairs always carry an expiry.
+async fn login_access_token(login: &crate::login_accounts::LoginAccount) -> Result<String, String> {
+    let fresh = !login.access_token.is_empty()
+        && DateTime::parse_from_rfc3339(login.expires_at.trim())
+            .map(|t| t.with_timezone(&Utc) > Utc::now() + Duration::seconds(60))
+            .unwrap_or(false);
+    if fresh {
+        return Ok(login.access_token.clone());
+    }
+    if login.refresh_token.trim().is_empty() {
+        if !login.access_token.is_empty() {
+            return Ok(login.access_token.clone());
+        }
+        return Err(
+            "Grok login expired and has no refresh token — sign in again from the auth center"
+                .into(),
+        );
+    }
+    let stored = crate::oauth::StoredTokens {
+        access_token: login.access_token.clone(),
+        refresh_token: login.refresh_token.clone(),
+        expires_at: login.expires_at.clone(),
+        label: (!login.label.trim().is_empty()).then(|| login.label.clone()),
+        account_id: Some(login.account_id.clone()),
+        id_token: (!login.id_token.is_empty()).then(|| login.id_token.clone()),
+    };
+    match crate::oauth::refresh_pair(ID, &stored).await {
+        Ok(Some(refreshed)) => {
+            // Rotated pair goes back into the login store; reload first so a
+            // concurrent rename or remove from the UI is not clobbered.
+            let mut accounts = crate::login_accounts::load(ID);
+            if let Some(entry) = accounts.iter_mut().find(|a| a.account_id == login.account_id) {
+                entry.access_token = refreshed.access_token.clone();
+                if !refreshed.refresh_token.is_empty() {
+                    entry.refresh_token = refreshed.refresh_token.clone();
+                }
+                entry.expires_at = refreshed.expires_at.clone();
+                if let Some(id_token) = refreshed.id_token {
+                    entry.id_token = id_token;
+                }
+            }
+            let _ = crate::login_accounts::save(ID, &accounts);
+            Ok(refreshed.access_token)
+        }
+        Ok(None) => Ok(login.access_token.clone()),
+        Err(e) => Err(e),
+    }
+}
+
 /// Reads the Grok CLI's auth.json and returns a usable access token,
 /// refreshing (and writing the rotated pair back to the CLI's own file)
 /// when the stored one has expired.
@@ -154,7 +241,12 @@ async fn fetch() -> Result<Snapshot, String> {
             Err(e) => return Err(e),
         }
     };
+    fetch_with_token(&token, ID, NAME).await
+}
 
+/// The usage flow under one access token, publishing as `id`/`name` (the
+/// bare card or one Pane login card — same endpoints, same parsing).
+async fn fetch_with_token(token: &str, id: &str, name: &str) -> Result<Snapshot, String> {
     let billing_req = http()
         .get("https://cli-chat-proxy.grok.com/v1/billing?format=credits")
         .bearer_auth(&token)
@@ -225,7 +317,7 @@ async fn fetch() -> Result<Snapshot, String> {
 
     let plan = resolve_subscription_plan(settings.as_ref(), user.as_ref());
 
-    Ok(Snapshot::ok(ID, NAME, plan, metrics))
+    Ok(Snapshot::ok(id, name, plan, metrics))
 }
 
 fn resolve_subscription_plan(settings: Option<&Value>, user: Option<&Value>) -> Option<String> {

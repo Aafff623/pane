@@ -11,6 +11,7 @@ mod keyvault;
 mod alerts;
 mod httpapi;
 mod i18n;
+mod login_accounts;
 mod oauth;
 mod platform;
 mod pricing;
@@ -1353,6 +1354,14 @@ fn configured_extra_account_ids() -> HashSet<String> {
             .iter()
             .map(codex_accounts::card_id_for_account),
     );
+    // Pane-managed Copilot/Grok logins (login_accounts stores, same deal).
+    for family in login_accounts::LOGIN_FAMILIES {
+        ids.extend(
+            login_accounts::load_with_imported_single_login(family)
+                .iter()
+                .map(|login| login_accounts::card_id_for_account(family, login)),
+        );
+    }
     // One/New API relay sites are accounts too — their card ids come from
     // the site store (one per key, plus token-only sites), not accounts.rs.
     ids.extend(providers::onenewapi::key_card_ids());
@@ -2197,6 +2206,19 @@ async fn fetch_provider_snapshot(provider_id: String, allow_disabled: bool) -> R
         return Ok(providers::codex::snapshot_with_login(login).await);
     }
 
+    // Pane-managed Copilot/Grok logins (auth center): one card per stored
+    // account, fetched under its own identity.
+    if login_accounts::takes_login_accounts(&family) {
+        let login = login_accounts::load_with_imported_single_login(&family)
+            .into_iter()
+            .find(|l| login_accounts::card_id_for_account(&family, &l) == provider_id)
+            .ok_or_else(|| format!("no {family} account {provider_id}"))?;
+        return Ok(match family.as_str() {
+            "copilot" => providers::copilot::snapshot_with_login(login).await,
+            _ => providers::grok::snapshot_with_login(login).await,
+        });
+    }
+
     // One/New API relay accounts: cards come from the site store, keyed by
     // relay key id (or site id for token-only sites). The bare family id
     // resolves to the first card — the merged card's default tab.
@@ -2423,6 +2445,52 @@ async fn run_usage_fetch(app: &tauri::AppHandle) -> Vec<providers::Snapshot> {
             id.clone(),
             Box::pin(guarded(id.clone(), name, providers::codex::snapshot_with_login(login))),
         ));
+    }
+    // Pane-managed Copilot/Grok logins (auth center): one card per stored
+    // account. Dedup rules per family:
+    // - the single OAuth slot renders as the BARE family card whenever it
+    //   wins the default card's credential order, so a store entry that IS
+    //   the slot's account (same identity, or same token for legacy slots
+    //   that carry no account id) never double-cards;
+    // - grok's CLI auth.json names its account uuid, so a login for THAT
+    //   account is skipped too (the bare card already renders it).
+    for family in login_accounts::LOGIN_FAMILIES {
+        let slot = oauth::load(family).map(|t| {
+            (
+                t.account_id.clone().unwrap_or_default(),
+                t.access_token.clone(),
+            )
+        });
+        let mut known: HashSet<String> = match family {
+            "grok" => providers::grok::default_identity().into_iter().collect(),
+            _ => HashSet::new(),
+        };
+        for login in login_accounts::load_with_imported_single_login(family) {
+            if let Some((slot_acct, slot_tok)) = &slot {
+                let same_as_slot = (!slot_acct.is_empty() && slot_acct == &login.account_id)
+                    || slot_tok == &login.access_token;
+                if same_as_slot {
+                    continue;
+                }
+            }
+            if !known.insert(login.account_id.clone()) {
+                continue;
+            }
+            let id = login_accounts::card_id_for_account(family, &login);
+            let name = match family {
+                "copilot" => providers::copilot::login_card_name(&login),
+                _ => providers::grok::login_card_name(&login),
+            };
+            // The two snapshot futures are distinct types — box one trait
+            // object before guarded wraps it.
+            let fut: std::pin::Pin<
+                Box<dyn std::future::Future<Output = providers::Snapshot> + Send>,
+            > = match family {
+                "copilot" => Box::pin(providers::copilot::snapshot_with_login(login)),
+                _ => Box::pin(providers::grok::snapshot_with_login(login)),
+            };
+            futs.push((id.clone(), Box::pin(guarded(id.clone(), name, fut))));
+        }
     }
     let mut expected_onenewapi_generations = HashMap::new();
     let onenewapi_generation_before = onenewapi_mutation_generation();
@@ -3460,6 +3528,14 @@ fn account_remove(provider: String, index: usize) -> Result<(), String> {
         logins.remove(index);
         return codex_accounts::save_accounts(&logins);
     }
+    if login_accounts::takes_login_accounts(&provider) {
+        let mut logins = login_accounts::load_with_imported_single_login(&provider);
+        if index >= logins.len() {
+            return Err(format!("no {provider} account #{index}"));
+        }
+        logins.remove(index);
+        return login_accounts::save(&provider, &logins);
+    }
     if !accounts::provider_takes_accounts(&provider) {
         return Err(format!("unknown multi-account provider: {provider}"));
     }
@@ -3697,6 +3773,22 @@ fn account_rename(provider: String, index: usize, label: String) -> Result<(), S
         }
         accounts[index].label = label.trim().to_string();
         return cursor_accounts::save_accounts(&accounts);
+    }
+    if provider == "codex" {
+        let mut logins = codex_accounts::load_with_imported_single_login();
+        if index >= logins.len() {
+            return Err(format!("no codex account #{index}"));
+        }
+        logins[index].label = label.trim().to_string();
+        return codex_accounts::save_accounts(&logins);
+    }
+    if login_accounts::takes_login_accounts(&provider) {
+        let mut logins = login_accounts::load_with_imported_single_login(&provider);
+        if index >= logins.len() {
+            return Err(format!("no {provider} account #{index}"));
+        }
+        logins[index].label = label.trim().to_string();
+        return login_accounts::save(&provider, &logins);
     }
     if !accounts::provider_takes_accounts(&provider) {
         return Err(format!("unknown multi-account provider: {provider}"));
