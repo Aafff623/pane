@@ -212,17 +212,18 @@ async fn login_access(login: &crate::codex_accounts::CodexLogin) -> Result<Acces
                     .into(),
             );
         }
-        let resp = http()
-            .post("https://auth.openai.com/oauth/token")
-            .json(&json!({
-                "client_id": CLIENT_ID,
-                "grant_type": "refresh_token",
-                "refresh_token": refresh,
-                "scope": "openid profile email",
-            }))
-            .send()
-            .await
-            .map_err(|e| format!("token refresh: {e}"))?;
+        let resp = crate::providers::send_with_direct_fallback(|client| {
+            client
+                .post("https://auth.openai.com/oauth/token")
+                .json(&json!({
+                    "client_id": CLIENT_ID,
+                    "grant_type": "refresh_token",
+                    "refresh_token": refresh,
+                    "scope": "openid profile email",
+                }))
+        })
+        .await
+        .map_err(|e| format!("token refresh: {e}"))?;
         if !resp.status().is_success() {
             return Err(format!("token refresh failed: HTTP {}", resp.status()));
         }
@@ -333,17 +334,18 @@ async fn load_access(dir: &std::path::Path) -> Result<Access, String> {
         if refresh.is_empty() {
             return Err("access token expired and no refresh token — run `codex login` again".into());
         }
-        let resp = http()
-            .post("https://auth.openai.com/oauth/token")
-            .json(&json!({
-                "client_id": CLIENT_ID,
-                "grant_type": "refresh_token",
-                "refresh_token": refresh,
-                "scope": "openid profile email",
-            }))
-            .send()
-            .await
-            .map_err(|e| format!("token refresh: {e}"))?;
+        let resp = crate::providers::send_with_direct_fallback(|client| {
+            client
+                .post("https://auth.openai.com/oauth/token")
+                .json(&json!({
+                    "client_id": CLIENT_ID,
+                    "grant_type": "refresh_token",
+                    "refresh_token": refresh,
+                    "scope": "openid profile email",
+                }))
+        })
+        .await
+        .map_err(|e| format!("token refresh: {e}"))?;
         if !resp.status().is_success() {
             return Err(format!("token refresh failed: HTTP {}", resp.status()));
         }

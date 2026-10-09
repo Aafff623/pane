@@ -225,6 +225,56 @@ pub fn http() -> reqwest::Client {
         .clone()
 }
 
+/// Same timeouts as [`http`] but no proxy at all — neither the config's nor
+/// the environment's. The fallback for vendor endpoints that a machine's
+/// env proxy breaks at the TLS layer while direct access works (seen with a
+/// Clash port resetting auth.openai.com's handshake).
+pub fn http_direct() -> reqwest::Client {
+    static CLIENT: std::sync::OnceLock<reqwest::Client> = std::sync::OnceLock::new();
+    CLIENT
+        .get_or_init(|| {
+            http_builder()
+                .no_proxy()
+                .build()
+                .expect("failed to build direct http client")
+        })
+        .clone()
+}
+
+/// One error plus its source chain, joined — reqwest's Display stops at
+/// "error sending request" and hides the real cause (DNS, TLS, reset).
+pub fn error_chain(err: &dyn std::error::Error) -> String {
+    let mut parts = vec![err.to_string()];
+    let mut cursor = err.source();
+    while let Some(next) = cursor {
+        let text = next.to_string();
+        if !parts.contains(&text) {
+            parts.push(text);
+        }
+        cursor = next.source();
+    }
+    parts.join(" ← ")
+}
+
+/// Send a request built against [`http`]; when the transport itself fails,
+/// retry once over a direct connection. HTTP responses (4xx/5xx) count as
+/// success here — only transport errors fall through to the retry.
+pub async fn send_with_direct_fallback(
+    build: impl Fn(&reqwest::Client) -> reqwest::RequestBuilder,
+) -> Result<reqwest::Response, String> {
+    match build(&http()).send().await {
+        Ok(resp) => Ok(resp),
+        Err(primary) => match build(&http_direct()).send().await {
+            Ok(resp) => Ok(resp),
+            Err(fallback) => Err(format!(
+                "request failed ({}), direct retry also failed ({})",
+                error_chain(&primary),
+                error_chain(&fallback)
+            )),
+        },
+    }
+}
+
 /// Same client as [`http`] but never follows redirects. One/New API status
 /// and billing calls must not be bounced onto another origin.
 pub fn http_no_redirect() -> reqwest::Client {
@@ -601,5 +651,26 @@ mod wall_tests {
         let mut snap = snap_with(32.0, 100.0);
         mirror_week_wall("kimi@deadbeef", &mut snap);
         assert_eq!(snap.metrics[0].used_percent, Some(100.0));
+    }
+
+    #[test]
+    fn error_chain_walks_the_source_chain() {
+        use std::error::Error;
+        #[derive(Debug)]
+        struct Outer(std::io::Error);
+        impl std::fmt::Display for Outer {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                write!(f, "request failed")
+            }
+        }
+        impl Error for Outer {
+            fn source(&self) -> Option<&(dyn Error + 'static)> {
+                Some(&self.0)
+            }
+        }
+        let err = Outer(std::io::Error::other("root cause: connection reset"));
+        let text = error_chain(&err);
+        assert!(text.starts_with("request failed"), "{text}");
+        assert!(text.contains("root cause: connection reset"), "{text}");
     }
 }

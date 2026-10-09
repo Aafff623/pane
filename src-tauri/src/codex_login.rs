@@ -226,18 +226,22 @@ pub fn start() -> Result<LoginStart, String> {
 
 /// The token exchange for one captured code.
 async fn exchange_code(code: &str, verifier: &str) -> Result<crate::oauth::StoredTokens, String> {
-    let resp = crate::providers::http()
-        .post(TOKEN_ENDPOINT)
-        .form(&[
-            ("grant_type", "authorization_code"),
-            ("code", code),
-            ("redirect_uri", REDIRECT_URI),
-            ("client_id", CLIENT_ID),
-            ("code_verifier", verifier),
-        ])
-        .send()
-        .await
-        .map_err(|e| format!("token exchange: {e}"))?;
+    // Direct-retry on transport failure: a machine's environment proxy can
+    // reset this endpoint's TLS while direct access works (Settings → Network
+    // owns the proxy Pane actually intends to use).
+    let resp = crate::providers::send_with_direct_fallback(|client| {
+        client
+            .post(TOKEN_ENDPOINT)
+            .form(&[
+                ("grant_type", "authorization_code"),
+                ("code", code),
+                ("redirect_uri", REDIRECT_URI),
+                ("client_id", CLIENT_ID),
+                ("code_verifier", verifier),
+            ])
+    })
+    .await
+    .map_err(|e| format!("token exchange: {e}"))?;
     if !resp.status().is_success() {
         return Err(format!("token exchange: HTTP {}", resp.status()));
     }
