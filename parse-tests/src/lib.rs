@@ -72,6 +72,9 @@ pub mod codebuddy_login;
 #[path = "../../src-tauri/src/windsurf_login.rs"]
 pub mod windsurf_login;
 
+#[path = "../../src-tauri/src/trae_login.rs"]
+pub mod trae_login;
+
 #[path = "../../src-tauri/src/auth_center.rs"]
 pub mod auth_center;
 

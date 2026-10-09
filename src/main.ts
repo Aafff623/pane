@@ -6222,6 +6222,7 @@ const BROWSER_LOGIN_PROVIDERS = new Set([
   "codex",
   "kiro",
   "qoder",
+  "trae",
   "windsurf",
 ]);
 

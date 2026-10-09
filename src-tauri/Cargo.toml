@@ -53,6 +53,10 @@ cbc = "0.1"
 # params) derives the AES-256-GCM key; rand_core supplies salt/nonces.
 argon2 = "0.5"
 rand_core = { version = "0.6", features = ["getrandom"] }
+# Trae's token exchange carries a per-device ECDSA P-256 public key
+# (DeviceInfo.DevicePublicKey, SPKI DER in PEM). Only the public half
+# travels, so the signing side of the stack stays out.
+p256 = { version = "0.13", features = ["pkcs8"] }
 # Provider/account API keys live in the OS credential vault (keyring-rs:
 # Windows Credential Manager / macOS Keychain / Linux Secret Service); the
 # JSON files keep only non-secret fields. The default `v1` feature bundle

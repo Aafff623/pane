@@ -34,6 +34,36 @@ pub async fn snapshot() -> Snapshot {
     }
 }
 
+/// Snapshot for one Pane-managed Trae login (international edition): the
+/// same entitlement query the IDE's own token drives, under the
+/// account's card id.
+pub async fn snapshot_with_login(login: crate::login_accounts::LoginAccount) -> Snapshot {
+    let id = crate::login_accounts::card_id_for_account(ID, &login);
+    let name = login_card_name(&login);
+    let host = login
+        .extra
+        .get("host")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|s| s.starts_with("https://"))
+        .unwrap_or(DEFAULT_HOST)
+        .to_string();
+    match fetch_with_token(&login.access_token, &host, &id, &name).await {
+        Ok(s) => s,
+        Err(e) => Snapshot::error(&id, &name, e),
+    }
+}
+
+pub(crate) fn login_card_name(login: &crate::login_accounts::LoginAccount) -> String {
+    if !login.label.trim().is_empty() {
+        return login.label.clone();
+    }
+    if !login.email.trim().is_empty() {
+        return format!("Trae — {}", login.email);
+    }
+    format!("Trae @{}", &login.account_id[..login.account_id.len().min(12)])
+}
+
 /// Pure local probe for the Customize gear panel (no network): the Trae
 /// app's storage.json carries an encrypted sign-in blob.
 pub fn local_credential_hint() -> Option<String> {
@@ -55,19 +85,24 @@ async fn fetch() -> Result<Snapshot, String> {
         ));
     };
     let (token, host) = read_sign_in(&path)?;
-    let usage = match traecn::fetch_json(&host, ENT_USAGE_PATH, "usage endpoint", &token).await {
+    fetch_with_token(&token, &host, ID, NAME).await
+}
+
+/// The entitlement query under one session token, publishing as
+/// `id`/`name` (the bare card or one login card).
+async fn fetch_with_token(token: &str, host: &str, id: &str, name: &str) -> Result<Snapshot, String> {
+    let usage = match traecn::fetch_json(host, ENT_USAGE_PATH, "usage endpoint", token).await {
         Ok(usage) => usage,
         Err(e) if e.contains("HTTP 404") => {
-            traecn::fetch_json(&host, ENT_USAGE_PATH_V1, "usage endpoint (v1)", &token).await?
+            traecn::fetch_json(host, ENT_USAGE_PATH_V1, "usage endpoint (v1)", token).await?
         }
         Err(e) => return Err(e),
     };
-    let pay_status = match traecn::fetch_json(&host, PAY_STATUS_PATH, "pay-status endpoint", &token)
-        .await
+    let pay_status = match traecn::fetch_json(host, PAY_STATUS_PATH, "pay-status endpoint", token).await
     {
         Ok(p) => Some(p),
         Err(e) if e.contains("HTTP 404") => {
-            traecn::fetch_json(&host, PAY_STATUS_PATH_V1, "pay-status endpoint (v1)", &token)
+            traecn::fetch_json(host, PAY_STATUS_PATH_V1, "pay-status endpoint (v1)", token)
                 .await
                 .ok()
         }
@@ -79,7 +114,7 @@ async fn fetch() -> Result<Snapshot, String> {
             .map(str::to_string)
     });
     let metrics = traecn::credit_metrics(&usage)?;
-    Ok(Snapshot::ok(ID, NAME, plan, metrics))
+    Ok(Snapshot::ok(id, name, plan, metrics))
 }
 
 /// storage.json → (session token, API host). Same blob shape as the CN

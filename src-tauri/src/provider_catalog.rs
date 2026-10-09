@@ -542,7 +542,9 @@ const PROVIDER_DEFINITIONS: &[ProviderDefinition] = &[
         display_name: "Trae",
         query_kind: QueryKind::NativeSnapshot,
         supports_api_key: false,
-        supports_extra_accounts: false,
+        // Pane-managed Trae logins (auth center, international edition)
+        // are independent accounts — same treatment as Codex's.
+        supports_extra_accounts: true,
         icon_key: "trae",
         category: ProviderCategory::Coding,
     },
@@ -738,6 +740,7 @@ mod tests {
             "windsurf",
             "warp",
             "mimo",
+            "trae",
             "qoder",
             "factory",
             "groq",

@@ -15,6 +15,7 @@ mod i18n;
 mod kiro_login;
 mod login_accounts;
 mod qoder_login;
+mod trae_login;
 mod windsurf_login;
 mod oauth;
 mod platform;
@@ -2223,6 +2224,7 @@ async fn fetch_provider_snapshot(provider_id: String, allow_disabled: bool) -> R
             "qoder" => providers::qoder::snapshot_with_login(login).await,
             "codebuddy" => providers::codebuddy::snapshot_with_login(login).await,
             "windsurf" => providers::windsurf::snapshot_with_login(login).await,
+            "trae" => providers::trae::snapshot_with_login(login).await,
             _ => providers::grok::snapshot_with_login(login).await,
         });
     }
@@ -2513,6 +2515,10 @@ async fn run_usage_fetch(app: &tauri::AppHandle) -> Vec<providers::Snapshot> {
                 "windsurf" => (
                     providers::windsurf::login_card_name(&login),
                     Box::pin(providers::windsurf::snapshot_with_login(login)),
+                ),
+                "trae" => (
+                    providers::trae::login_card_name(&login),
+                    Box::pin(providers::trae::snapshot_with_login(login)),
                 ),
                 _ => (
                     providers::grok::login_card_name(&login),
@@ -4282,6 +4288,23 @@ fn windsurf_login_cancel(login_id: String) {
     windsurf_login::cancel(&login_id);
 }
 
+/// Trae (international) browser login: GetLoginGuidance → the IDE's
+/// authorization page → loopback /authorize → auth-code exchange.
+#[tauri::command]
+async fn trae_login_start() -> Result<trae_login::LoginStart, String> {
+    trae_login::start().await
+}
+
+#[tauri::command]
+async fn trae_login_poll(login_id: String) -> trae_login::LoginPoll {
+    trae_login::poll(&login_id).await
+}
+
+#[tauri::command]
+fn trae_login_cancel(login_id: String) {
+    trae_login::cancel(&login_id);
+}
+
 /// Deletes Pane's own OAuth credential file for the provider. The CLI's
 /// sign-in is untouched.
 #[tauri::command]
@@ -4991,6 +5014,9 @@ pub fn run() {
             windsurf_login_start,
             windsurf_login_poll,
             windsurf_login_cancel,
+            trae_login_start,
+            trae_login_poll,
+            trae_login_cancel,
             oauth_logout,
             get_config,
             set_config,
