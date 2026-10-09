@@ -256,39 +256,30 @@ pub fn error_chain(err: &dyn std::error::Error) -> String {
     parts.join(" ← ")
 }
 
-/// Send a request built against [`http`], retrying once over a *direct*
-/// connection when the first attempt fails at the transport level OR comes
-/// back 403.
-///
-/// The 403 retry exists for Cloudflare-fronted vendors (auth.openai.com):
-/// challenges track the transport, so a 403 that answers through a proxy's
-/// exit IP often passes direct — and a 403 from the edge never reached the
-/// API, so retrying costs one extra request, not a consumed credential.
-/// Every other HTTP response passes through untouched.
+/// Send a request with a small transport ladder: the proxy-respecting client
+/// twice (TLS through an unstable local proxy is the common flake), then a
+/// direct connection. A 403 from the first two attempts also moves on — edge
+/// blocks track the transport — but a DIRECT 403 is returned as-is: it is
+/// usually a final answer (e.g. OpenAI's unsupported-country block, which
+/// retrying can never fix).
 pub async fn send_with_direct_fallback(
     build: impl Fn(&reqwest::Client) -> reqwest::RequestBuilder,
 ) -> Result<reqwest::Response, String> {
-    let primary = build(&http()).send().await;
-    let retry = match &primary {
-        Ok(resp) => resp.status().as_u16() == 403,
-        Err(_) => true,
-    };
-    if !retry {
-        return Ok(primary.expect("checked Ok"));
+    let mut last = String::new();
+    for attempt in 0..3 {
+        let client = if attempt < 2 { http() } else { http_direct() };
+        match build(&client).send().await {
+            Ok(resp) => {
+                if resp.status().as_u16() == 403 && attempt < 2 {
+                    last = "HTTP 403 over the proxy path".into();
+                    continue;
+                }
+                return Ok(resp);
+            }
+            Err(err) => last = error_chain(&err),
+        }
     }
-    match build(&http_direct()).send().await {
-        Ok(resp) => Ok(resp),
-        Err(fallback) => match primary {
-            // The first attempt still produced an HTTP answer — keep it; a
-            // transport-failed retry must not erase a real response.
-            Ok(resp) => Ok(resp),
-            Err(primary_err) => Err(format!(
-                "request failed ({}), direct retry also failed ({})",
-                error_chain(&primary_err),
-                error_chain(&fallback)
-            )),
-        },
-    }
+    Err(format!("request failed after retries ({last})"))
 }
 
 /// Same client as [`http`] but never follows redirects. One/New API status

@@ -18,9 +18,13 @@
 //!   (`HTTP_PROXY` / `https_proxy` / `all_proxy`) reset TLS for
 //!   `auth.openai.com`. [`crate::providers::send_with_direct_fallback`]
 //!   retries the exchange over a direct connection.
-//! - **`token exchange: HTTP 403`**: the edge blocked the server-side
-//!   exchange; the same helper retries over the other transport, and the
-//!   error text carries the browser-side guidance above.
+//! - **`token exchange: HTTP 403`**: two distinct causes, told apart by the
+//!   response body — `unsupported_country_region_territory` means the exit IP
+//!   is in a region OpenAI rejects (a direct connection from the mainland
+//!   can NEVER pass; the sign-in must ride a working proxy), otherwise the
+//!   edge blocked it and the browser-side guidance below applies.
+//! - Local proxy TLS through Clash-style ports can flake intermittently —
+//!   the transport ladder retries the proxy path once before going direct.
 //! - The authorize URL carries the official client's `codex_cli_simplified_flow`,
 //!   `id_token_add_organizations` and `originator` parameters, so the browser
 //!   takes the simple consent path instead of the dashboard one.
@@ -268,9 +272,21 @@ async fn exchange_code(code: &str, verifier: &str) -> Result<crate::oauth::Store
     .map_err(|e| format!("token exchange: {e}"))?;
     if !resp.status().is_success() {
         let status = resp.status();
+        let body = resp.text().await.unwrap_or_default();
         if status.as_u16() == 403 {
+            if body.contains("unsupported_country_region_territory") {
+                // A direct connection from an unsupported region — retrying
+                // will never fix it; the sign-in must ride a working proxy.
+                return Err(
+                    "token exchange: HTTP 403 — OpenAI rejects this network exit's \
+                     country/region (unsupported_country_region_territory). Sign-in has to go \
+                     through a working proxy: set one in Settings → Network (or fix the system \
+                     proxy), then retry."
+                        .into(),
+                );
+            }
             return Err(
-                "token exchange: HTTP 403 — Cloudflare blocked this sign-in. Common causes: \
+                "token exchange: HTTP 403 — the edge blocked this sign-in. Common causes: \
                  an ad-blocking extension interfering with the browser challenge, or a flagged \
                  network exit IP. Disable the blocker (or use an incognito window) / switch \
                  network node, then retry."
