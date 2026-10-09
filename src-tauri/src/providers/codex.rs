@@ -108,7 +108,7 @@ pub fn discover_extra_accounts() -> Vec<CodexAccount> {
             continue;
         }
         seen.push(account_id.clone());
-        let hash8: String = account_id.chars().filter(|c| *c != '-').take(8).collect();
+        let hash8 = crate::codex_accounts::hash8(&account_id);
         let name = match email {
             Some(e) => format!("Codex — {e}"),
             None => format!("Codex @{hash8}"),
@@ -137,8 +137,9 @@ pub fn local_credential_hint() -> Option<String> {
 }
 
 /// Access tokens are JWTs: three base64 chunks separated by dots. The middle
-/// chunk is a JSON object with the expiry time and plan info.
-fn jwt_claims(token: &str) -> Option<Value> {
+/// chunk is a JSON object with the expiry time and plan info. Shared with
+/// the codex account store's identity extraction.
+pub(crate) fn jwt_claims(token: &str) -> Option<Value> {
     let payload = token.split('.').nth(1)?;
     let bytes = base64::engine::general_purpose::URL_SAFE_NO_PAD
         .decode(payload)
@@ -157,6 +158,96 @@ pub async fn snapshot_at(dir: PathBuf, id: String, name: String) -> Snapshot {
         Ok(s) => s,
         Err(e) => Snapshot::error(&id, &name, e),
     }
+}
+
+/// Snapshot for one Pane-managed login (codex_accounts): the stored token
+/// pair is refreshed when it is (nearly) expired — rotated tokens are
+/// written back into the account store — then the shared usage flow runs
+/// under the account's own card id and label.
+pub async fn snapshot_with_login(login: crate::codex_accounts::CodexLogin) -> Snapshot {
+    let id = crate::codex_accounts::card_id_for_account(&login);
+    let name = login_card_name(&login);
+    match login_access(&login).await {
+        Ok(auth) => match fetch_with_access(auth, &id, &name).await {
+            Ok(s) => s,
+            Err(e) => Snapshot::error(&id, &name, e),
+        },
+        Err(e) => Snapshot::error(&id, &name, e),
+    }
+}
+
+pub(crate) fn login_card_name(login: &crate::codex_accounts::CodexLogin) -> String {
+    if !login.label.trim().is_empty() {
+        return login.label.clone();
+    }
+    if !login.email.trim().is_empty() {
+        return format!("Codex — {}", login.email);
+    }
+    format!("Codex @{}", crate::codex_accounts::hash8(&login.account_id))
+}
+
+/// Resolve (and if needed refresh) a stored login. The refreshed pair is
+/// written back into the account store so the next fetch starts fresh; the
+/// store is re-loaded right before the write so a concurrent rename or
+/// remove from the UI is not clobbered.
+async fn login_access(login: &crate::codex_accounts::CodexLogin) -> Result<Access, String> {
+    let plan_claim = |id_token: &str| {
+        jwt_claims(id_token).and_then(|c| {
+            c.pointer("/https:~1~1api.openai.com~1auth/chatgpt_plan_type")
+                .and_then(Value::as_str)
+                .map(str::to_string)
+        })
+    };
+    let exp = jwt_claims(&login.access_token)
+        .and_then(|c| c.get("exp").and_then(Value::as_i64))
+        .unwrap_or(0);
+    let mut access = login.access_token.clone();
+    let mut refresh = login.refresh_token.clone();
+    let mut id_token = login.id_token.clone();
+    let mut plan = plan_claim(&id_token);
+    if access.is_empty() || exp <= Utc::now().timestamp() + 60 {
+        if refresh.trim().is_empty() {
+            return Err(
+                "Codex login expired and has no refresh token — sign in again from the auth center"
+                    .into(),
+            );
+        }
+        let resp = http()
+            .post("https://auth.openai.com/oauth/token")
+            .json(&json!({
+                "client_id": CLIENT_ID,
+                "grant_type": "refresh_token",
+                "refresh_token": refresh,
+                "scope": "openid profile email",
+            }))
+            .send()
+            .await
+            .map_err(|e| format!("token refresh: {e}"))?;
+        if !resp.status().is_success() {
+            return Err(format!("token refresh failed: HTTP {}", resp.status()));
+        }
+        let tok: Value = resp.json().await.map_err(|e| format!("token refresh parse: {e}"))?;
+        access = tok
+            .get("access_token")
+            .and_then(Value::as_str)
+            .ok_or("refresh response missing access_token")?
+            .to_string();
+        if let Some(r) = tok.get("refresh_token").and_then(Value::as_str) {
+            refresh = r.to_string();
+        }
+        if let Some(i) = tok.get("id_token").and_then(Value::as_str) {
+            id_token = i.to_string();
+            plan = plan_claim(&id_token);
+        }
+        let mut accounts = crate::codex_accounts::load_accounts();
+        if let Some(stored) = accounts.iter_mut().find(|a| a.account_id == login.account_id) {
+            stored.access_token = access.clone();
+            stored.refresh_token = refresh.clone();
+            stored.id_token = id_token.clone();
+            let _ = crate::codex_accounts::save_accounts(&accounts);
+        }
+    }
+    Ok(Access { token: access, account_id: login.account_id.clone(), plan })
 }
 
 struct Access {
@@ -312,6 +403,12 @@ async fn fetch(dir: &std::path::Path, id: &str, name: &str) -> Result<Snapshot, 
         }
         load_access(dir).await?
     };
+    fetch_with_access(auth, id, name).await
+}
+
+/// The shared usage flow once an account's credentials are resolved — CLI
+/// homes, discovered CODEX_HOMEs and Pane-managed logins all land here.
+async fn fetch_with_access(auth: Access, id: &str, name: &str) -> Result<Snapshot, String> {
     let (access, account_id) = (auth.token, auth.account_id);
     let mut plan = auth.plan;
 

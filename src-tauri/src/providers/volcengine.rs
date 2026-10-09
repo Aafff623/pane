@@ -8,7 +8,7 @@
 //! monthly windows) and GetCodingPlanUsage (per-level Percent windows).
 
 use super::{http, stored_api_key, Metric, Snapshot};
-use serde_json::{json, Value};
+use serde_json::Value;
 
 const ID: &str = "volcengine";
 const NAME: &str = "Volcengine Ark";

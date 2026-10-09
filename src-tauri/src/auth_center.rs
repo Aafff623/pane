@@ -67,7 +67,18 @@ fn rows_for_family_from(base: &Path, family: &str) -> Vec<AuthAccountRow> {
                 kind: "account",
             })
             .collect(),
-        "codex" | "copilot" | "grok" => oauth::load_from(&base.join("oauth"), family)
+        "codex" => crate::codex_accounts::load_with_imported_single_login_from(base)
+            .iter()
+            .map(|login| AuthAccountRow {
+                id: crate::codex_accounts::card_id_for_account(login),
+                label: login.label.clone(),
+                email: (!login.email.trim().is_empty()).then(|| login.email.clone()),
+                masked_key: crate::codex_accounts::mask_token(&login.access_token),
+                captured_at: Some(login.added_at).filter(|ts| *ts > 0),
+                kind: "account",
+            })
+            .collect(),
+        "copilot" | "grok" => oauth::load_from(&base.join("oauth"), family)
             .map(|tokens| {
                 let login = tokens.label.clone().unwrap_or_default();
                 vec![AuthAccountRow {
@@ -158,7 +169,7 @@ mod tests {
                 refresh_token: String::new(),
                 expires_at: "2030-01-01T00:00:00Z".into(),
                 label: Some("me@example.com".into()),
-                account_id: None,
+                account_id: Some("acct-1234".into()),
                 id_token: None,
             })
             .unwrap(),
@@ -182,10 +193,12 @@ mod tests {
 
         let codex = &by_family("codex").accounts;
         assert_eq!(codex.len(), 1);
-        assert_eq!(codex[0].kind, "oauth");
-        assert_eq!(codex[0].id, "codex");
+        // A codex login is an ACCOUNT row now (multi-account family): its
+        // card id follows the codex@<hash8> scheme the fetch path mints.
+        assert_eq!(codex[0].kind, "account");
+        assert_eq!(codex[0].id, "codex@acct1234");
         assert_eq!(codex[0].label, "me@example.com");
-        assert_eq!(codex[0].captured_at, None);
+        assert_eq!(codex[0].captured_at.is_some(), true);
 
         // Families without a stored login stay empty.
         assert!(by_family("copilot").accounts.is_empty());

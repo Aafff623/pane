@@ -51,6 +51,9 @@ pub mod cursor_oauth;
 #[path = "../../src-tauri/src/cursor_accounts.rs"]
 pub mod cursor_accounts;
 
+#[path = "../../src-tauri/src/codex_accounts.rs"]
+pub mod codex_accounts;
+
 #[path = "../../src-tauri/src/auth_center.rs"]
 pub mod auth_center;
 

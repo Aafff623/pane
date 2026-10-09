@@ -2,6 +2,7 @@ mod accounts;
 mod secretstore;
 mod antigravity_accounts;
 mod auth_center;
+mod codex_accounts;
 mod cursor_accounts;
 mod cursor_oauth;
 mod fonts;
@@ -1345,6 +1346,12 @@ fn configured_extra_account_ids() -> HashSet<String> {
             .iter()
             .map(cursor_accounts::card_id_for_account),
     );
+    // Pane-managed Codex logins are accounts too (their own store file).
+    ids.extend(
+        codex_accounts::load_with_imported_single_login()
+            .iter()
+            .map(codex_accounts::card_id_for_account),
+    );
     // One/New API relay sites are accounts too — their card ids come from
     // the site store (one per key, plus token-only sites), not accounts.rs.
     ids.extend(providers::onenewapi::key_card_ids());
@@ -2172,13 +2179,21 @@ async fn fetch_provider_snapshot(provider_id: String, allow_disabled: bool) -> R
         );
     }
     if family == "codex" {
-        let account = providers::codex::discover_extra_accounts()
+        if let Some(account) = providers::codex::discover_extra_accounts()
             .into_iter()
             .find(|a| a.id == provider_id)
+        {
+            return Ok(
+                providers::codex::snapshot_at(account.dir, provider_id.clone(), account.name).await,
+            );
+        }
+        // Pane-managed logins (auth center) mint their codex@ cards from the
+        // account store; discovery only covers CLI homes.
+        let login = codex_accounts::load_with_imported_single_login()
+            .into_iter()
+            .find(|l| codex_accounts::card_id_for_account(l) == provider_id)
             .ok_or_else(|| format!("no codex account {provider_id}"))?;
-        return Ok(
-            providers::codex::snapshot_at(account.dir, provider_id.clone(), account.name).await,
-        );
+        return Ok(providers::codex::snapshot_with_login(login).await);
     }
 
     // One/New API relay accounts: cards come from the site store, keyed by
@@ -2385,6 +2400,27 @@ async fn run_usage_fetch(app: &tauri::AppHandle) -> Vec<providers::Snapshot> {
                 name.clone(),
                 providers::codex::snapshot_at(dir, id, name),
             )),
+        ));
+    }
+    // Pane-managed Codex logins (auth center): one card per stored account,
+    // deduped against the CLI homes above and the default login — the same
+    // ChatGPT account must never double-card.
+    let mut codex_known: HashSet<String> = providers::codex::discover_extra_accounts()
+        .into_iter()
+        .map(|a| a.id)
+        .collect();
+    if let Some(default) = providers::codex::default_identity() {
+        codex_known.insert(codex_accounts::card_id_for_account_id(&default));
+    }
+    for login in codex_accounts::load_with_imported_single_login() {
+        let id = codex_accounts::card_id_for_account(&login);
+        if !codex_known.insert(id.clone()) {
+            continue;
+        }
+        let name = providers::codex::login_card_name(&login);
+        futs.push((
+            id.clone(),
+            Box::pin(guarded(id.clone(), name, providers::codex::snapshot_with_login(login))),
         ));
     }
     let mut expected_onenewapi_generations = HashMap::new();
@@ -3406,6 +3442,16 @@ fn account_remove(provider: String, index: usize) -> Result<(), String> {
         accounts.remove(index);
         return cursor_accounts::save_accounts(&accounts);
     }
+    if provider == "codex" {
+        // Same list the auth center and account_list report (the legacy
+        // single login imports first, so indices line up).
+        let mut logins = codex_accounts::load_with_imported_single_login();
+        if index >= logins.len() {
+            return Err(format!("no codex account #{index}"));
+        }
+        logins.remove(index);
+        return codex_accounts::save_accounts(&logins);
+    }
     if !accounts::provider_takes_accounts(&provider) {
         return Err(format!("unknown multi-account provider: {provider}"));
     }
@@ -3729,6 +3775,23 @@ fn account_list(provider: String) -> Result<Vec<Value>, String> {
             })
             .collect());
     }
+    if provider == "codex" {
+        // Codex accounts are Pane-made logins (auth center); the pre-multi-
+        // account single login imports first so both surfaces list the same
+        // rows in the same order.
+        return Ok(codex_accounts::load_with_imported_single_login()
+            .iter()
+            .map(|login| {
+                json!({
+                    "id": codex_accounts::card_id_for_account(login),
+                    "label": login.label,
+                    "email": login.email,
+                    "maskedKey": codex_accounts::mask_token(&login.access_token),
+                    "baseUrl": null,
+                })
+            })
+            .collect());
+    }
     if !accounts::provider_takes_accounts(&provider) {
         return Err(format!("unknown multi-account provider: {provider}"));
     }
@@ -3976,7 +4039,16 @@ fn cursor_import(json_content: String) -> Result<usize, String> {
 /// user is still authorizing — the `done`/`error` fields carry the state.
 #[tauri::command]
 async fn oauth_poll(provider: String, device_auth_id: String) -> oauth::PollResponse {
-    oauth::poll(&provider, &device_auth_id).await
+    let response = oauth::poll(&provider, &device_auth_id).await;
+    // Every completed Codex sign-in becomes its own account in the store, so
+    // N ChatGPT subscriptions can be monitored side by side; the single
+    // oauth/codex.json slot stays as the default card's fallback.
+    if provider == "codex" && response.done {
+        if let Some(tokens) = oauth::load("codex") {
+            let _ = codex_accounts::record_login(&tokens);
+        }
+    }
+    response
 }
 
 /// Deletes Pane's own OAuth credential file for the provider. The CLI's

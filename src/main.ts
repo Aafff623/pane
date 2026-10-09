@@ -12442,10 +12442,11 @@ function authGroupHtml(group: AuthFamilyGroup): string {
   const family = group.family;
   const name = providerDisplayName(family);
   const icon = providerVisual(family)?.iconSvg ?? "";
-  // oauth.rs keeps ONE device-code login per provider — codex/copilot/grok
-  // can only ever hold a single row, so their "add" is the empty-state
-  // login button and re-login lives in the row's ⋯ menu.
-  const singleLogin = OAUTH_PROVIDERS.has(family);
+  // oauth.rs keeps ONE device-code login per provider; copilot/grok can
+  // only ever hold a single row, so their "add" is the empty-state login
+  // button. Codex accumulates one account per completed sign-in (its own
+  // store), so it behaves like the multi-account families here.
+  const singleLogin = OAUTH_PROVIDERS.has(family) && family !== "codex";
   const rows = group.accounts.map((acct, i) => authRowHtml(family, acct, i)).join("");
   const empty =
     group.accounts.length === 0
@@ -12604,7 +12605,7 @@ function openAuthRowMenu(family: string, index: number, anchor: HTMLElement): vo
   document.querySelector(".group-menu-overlay")?.remove();
   const acct = authGroups?.find((g) => g.family === family)?.accounts[index];
   if (!acct) return;
-  const singleLogin = OAUTH_PROVIDERS.has(family);
+  const singleLogin = OAUTH_PROVIDERS.has(family) && family !== "codex";
   const name = authRowName(family, acct);
   const overlay = document.createElement("div");
   overlay.className = "group-menu-overlay";
@@ -12659,7 +12660,7 @@ function openAuthRowMenu(family: string, index: number, anchor: HTMLElement): vo
 async function authRemoveAccount(family: string, index: number): Promise<void> {
   const acct = authGroups?.find((g) => g.family === family)?.accounts[index];
   if (!acct) return;
-  const singleLogin = OAUTH_PROVIDERS.has(family);
+  const singleLogin = OAUTH_PROVIDERS.has(family) && family !== "codex";
   const name = authRowName(family, acct);
   const ok = await appConfirm(
     singleLogin
