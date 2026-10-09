@@ -4556,7 +4556,7 @@ pub fn collect_daily(cursor_csv: Option<String>) -> (Vec<ProviderSpend>, Vec<Pro
     ];
     // cc-switch-only tools get their own cards (empty scans are filtered
     // out by has_data at the end).
-    list.push(build_spend("mcode", "MaxCode", cc.mcode));
+    list.push(build_spend("mcode", "MiniMax Code", cc.mcode));
     let mut qoder = build_spend("qodercn", "Qoder CN", qoder_credit_estimate());
     qoder.estimated = true;
     list.push(qoder);

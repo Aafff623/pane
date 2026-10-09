@@ -115,7 +115,7 @@ const VISUALS: Readonly<Record<string, ProviderVisual>> = {
   elevenlabs: { iconKey: "elevenlabs", iconSvg: elevenlabsIcon },
   relaybalance: { iconKey: "relaybalance", iconSvg: relaybalanceIcon },
   sensenova: { iconKey: "sensenova", iconSvg: sensenovaIcon },
-  clawsgo: { iconKey: "clawsgo", iconSvg: darkSilhouette(clawsgoIcon), invertOnDarkTray: true },
+  clawsgo: { iconKey: "clawsgo", iconSvg: clawsgoIcon },
   shandianshuo: { iconKey: "shandianshuo", iconSvg: shandianshuoIcon },
   bocha: { iconKey: "bocha", iconSvg: bochaIcon },
   tavily: { iconKey: "tavily", iconSvg: tavilyIcon },

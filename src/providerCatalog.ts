@@ -59,7 +59,7 @@ export const providerCatalog: readonly ProviderDefinition[] = [
   { familyId: "clinepass", displayName: "ClinePass", queryKind: "nativeCodingPlan", supportsApiKey: true, supportsExtraAccounts: true, supportsOAuth: false, iconKey: "clinepass" },
   { familyId: "sensenova", displayName: "SenseNova", queryKind: "nativeCodingPlan", supportsApiKey: false, supportsExtraAccounts: false, supportsOAuth: false, iconKey: "sensenova" },
   { familyId: "apigoto", displayName: "APIGOTO", queryKind: "nativeCodingPlan", supportsApiKey: true, supportsExtraAccounts: true, supportsOAuth: false, iconKey: "apigoto" },
-  { familyId: "mcode", displayName: "MaxCode", queryKind: "localOnly", supportsApiKey: false, supportsExtraAccounts: false, supportsOAuth: false, iconKey: "mcode" },
+  { familyId: "mcode", displayName: "MiniMax Code", queryKind: "localOnly", supportsApiKey: false, supportsExtraAccounts: false, supportsOAuth: false, iconKey: "mcode" },
   { familyId: "amp", displayName: "Amp", queryKind: "nativeBalance", supportsApiKey: true, supportsExtraAccounts: true, supportsOAuth: false, iconKey: "amp" },
   { familyId: "bedrock", displayName: "AWS Bedrock", queryKind: "nativeBalance", supportsApiKey: false, supportsExtraAccounts: false, supportsOAuth: false, iconKey: "bedrock" },
   { familyId: "chutes", displayName: "Chutes", queryKind: "nativeBalance", supportsApiKey: true, supportsExtraAccounts: true, supportsOAuth: false, iconKey: "chutes" },
