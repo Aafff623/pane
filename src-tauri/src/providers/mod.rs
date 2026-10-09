@@ -200,6 +200,84 @@ fn proxy_url() -> Option<&'static str> {
         .as_deref()
 }
 
+/// "127.0.0.1:7897" or "http=127.0.0.1:7897;https=127.0.0.1:7897" → one URL.
+/// https wins when both are listed (every vendor we talk to is https).
+fn parse_win_proxy(raw: &str) -> Option<String> {
+    let raw = raw.trim();
+    if raw.is_empty() {
+        return None;
+    }
+    let pick = |scheme: &str| {
+        raw.split(';')
+            .filter_map(|part| part.trim().split_once('='))
+            .find(|(key, _)| key.trim().eq_ignore_ascii_case(scheme))
+            .map(|(_, value)| value.trim().to_string())
+            .filter(|value| !value.is_empty())
+    };
+    let host = pick("https")
+        .or_else(|| pick("http"))
+        .or_else(|| (!raw.contains('=')).then(|| raw.to_string()))?;
+    if host.is_empty() {
+        return None;
+    }
+    Some(if host.contains("://") { host } else { format!("http://{host}") })
+}
+
+/// The Windows system proxy (HKCU → Internet Settings), which Clash-style
+/// tools flip whenever the user switches nodes or ports — following it keeps
+/// Pane in step with the OS without a config edit. PAC scripts are ignored
+/// (reqwest cannot execute them). Read once per app run, like the config
+/// proxy: a port change needs an app restart, not a config change.
+#[cfg(windows)]
+fn windows_system_proxy() -> Option<String> {
+    use windows::Win32::Foundation::ERROR_SUCCESS;
+    use windows::Win32::System::Registry::{
+        RegGetValueW, HKEY_CURRENT_USER, RRF_RT_REG_DWORD, RRF_RT_REG_SZ,
+    };
+    let wide = |s: &str| s.encode_utf16().chain(std::iter::once(0)).collect::<Vec<u16>>();
+    let subkey = wide("Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings");
+    unsafe {
+        let mut enabled: u32 = 0;
+        let mut size = std::mem::size_of::<u32>() as u32;
+        let name = wide("ProxyEnable");
+        let status = RegGetValueW(
+            HKEY_CURRENT_USER,
+            windows::core::PCWSTR(subkey.as_ptr()),
+            windows::core::PCWSTR(name.as_ptr()),
+            RRF_RT_REG_DWORD,
+            None,
+            Some(&mut enabled as *mut u32 as *mut std::ffi::c_void),
+            Some(&mut size),
+        );
+        if status != ERROR_SUCCESS || enabled == 0 {
+            return None;
+        }
+        let mut buf = [0u16; 512];
+        let mut size = (buf.len() * 2) as u32;
+        let name = wide("ProxyServer");
+        let status = RegGetValueW(
+            HKEY_CURRENT_USER,
+            windows::core::PCWSTR(subkey.as_ptr()),
+            windows::core::PCWSTR(name.as_ptr()),
+            RRF_RT_REG_SZ,
+            None,
+            Some(buf.as_mut_ptr() as *mut std::ffi::c_void),
+            Some(&mut size),
+        );
+        if status != ERROR_SUCCESS {
+            return None;
+        }
+        let chars = (size as usize / 2).saturating_sub(1); // drop the NUL
+        let raw = String::from_utf16_lossy(&buf[..chars.min(buf.len())]);
+        parse_win_proxy(&raw)
+    }
+}
+
+#[cfg(not(windows))]
+fn windows_system_proxy() -> Option<String> {
+    None
+}
+
 fn http_builder() -> reqwest::ClientBuilder {
     let mut builder = reqwest::Client::builder()
         .user_agent("Pane-Windows/0.3")
@@ -209,7 +287,11 @@ fn http_builder() -> reqwest::ClientBuilder {
         // waits on the slowest provider chain. Failing to connect in 5 s
         // is a dead network — fail fast, serve the cached snapshot.
         .connect_timeout(std::time::Duration::from_secs(5));
-    if let Some(url) = proxy_url() {
+    // Proxy order: the config's explicit choice first, then the Windows
+    // system proxy the OS and browsers already honor (Clash flips its port
+    // there when the user switches nodes). reqwest's own env-var handling
+    // stays as the last resort when neither is set.
+    if let Some(url) = proxy_url().map(str::to_string).or_else(windows_system_proxy) {
         if let Ok(proxy) = reqwest::Proxy::all(url) {
             let proxy = proxy.no_proxy(reqwest::NoProxy::from_string("localhost,127.0.0.1,::1"));
             builder = builder.proxy(proxy);
@@ -679,5 +761,21 @@ mod wall_tests {
         let text = error_chain(&err);
         assert!(text.starts_with("request failed"), "{text}");
         assert!(text.contains("root cause: connection reset"), "{text}");
+    }
+
+    #[test]
+    fn windows_proxy_string_parses_all_the_shapes() {
+        assert_eq!(parse_win_proxy("127.0.0.1:7897").as_deref(), Some("http://127.0.0.1:7897"));
+        assert_eq!(
+            parse_win_proxy("http=127.0.0.1:7892;https=127.0.0.1:7897").as_deref(),
+            Some("http://127.0.0.1:7897")
+        );
+        assert_eq!(parse_win_proxy("http=1.2.3.4:8080").as_deref(), Some("http://1.2.3.4:8080"));
+        assert_eq!(
+            parse_win_proxy("https://1.2.3.4:8080").as_deref(),
+            Some("https://1.2.3.4:8080")
+        );
+        assert_eq!(parse_win_proxy(""), None);
+        assert_eq!(parse_win_proxy("http=;https="), None);
     }
 }
