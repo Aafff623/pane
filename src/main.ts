@@ -2384,9 +2384,13 @@ function renderCard(s: Snapshot): string {
       const compactTabs = accountIds.length >= 4;
       accountTabs = `<div class="card-account-tabs${compactTabs ? " compact" : ""}">${accountIds
         .map((id, index) => {
-          const label = id === s.id
-            ? (accountNote(id) || accountsCache.get(family)?.[0]?.label || t("customize.acctDefaultShort"))
-            : labelForAccount(id, accountsCache.get(family) ?? []);
+          const isDefaultAcct = id === s.id || index === 0;
+          const list = accountsCache.get(family) ?? [];
+          const entry = id === s.id ? list[0] : list.find((a) => a.id === id);
+          const note = accountNote(id);
+          const label = isDefaultAcct
+            ? (note || entry?.label?.trim() || list[0]?.label?.trim() || t("customize.acctDefaultShort"))
+            : labelForAccount(id, list);
           const on = id === shown.id;
           const dot = peakTintedDot(family, accountHealthDot(id));
           const dotTitle = healthDotTitle(dot);
@@ -2395,10 +2399,6 @@ function renderCard(s: Snapshot): string {
           // "njf3", "TTA"); only truly unnamed secondary accounts keep the
           // number. Named capsules get text width + auto-shrink instead of
           // the fixed number cell.
-          const list = accountsCache.get(family) ?? [];
-          const entry = id === s.id ? list[0] : list.find((a) => a.id === id);
-          const note = accountNote(id);
-          const isDefaultAcct = id === s.id || index === 0;
           const hasCustomName = Boolean(note || entry?.label?.trim() || entry?.email?.trim());
           const isNamed = isDefaultAcct || hasCustomName;
           const tabLabel = compactTabs && !isNamed ? String(index + 1) : label;
@@ -3710,6 +3710,22 @@ function renderQuotaOverview(): string {
     return `<button type="button" class="overview-acct-fold" data-overview-acct-fold="${escapeHtml(family)}" title="${escapeHtml(t(folded ? "card.expand" : "card.collapse"))}" aria-label="${escapeHtml(t(folded ? "card.expand" : "card.collapse"))}">${uiIcon(folded ? "caretDown" : "caretUp")}</button>`;
   };
 
+  const overviewAccountBadgeHtml = (accountCount: number, accountSummary: { total: number; available: number; unavailable: number }): string => {
+    if (accountCount <= 1) return "";
+    const total = accountCount;
+    const available = accountSummary.available;
+    const ratio = total > 0 ? available / total : 0;
+    const isLow = available <= 0 || ratio <= 0.5;
+    const availClass = isLow ? "is-low" : "is-ok";
+    const emptyClass = available === 0 ? " is-empty" : "";
+    const title = escapeHtml(t("overview.accountSummary", {
+      available: accountSummary.available,
+      unavailable: accountSummary.unavailable,
+      total: accountSummary.total,
+    }));
+    return `<span class="overview-account-count${emptyClass}" title="${title}"><b class="acct-count-total">${total}</b><span class="acct-count-sep">/</span><b class="acct-count-avail ${availClass}">${available}</b></span>`;
+  };
+
   const itemHtml = ({ cardSnap, shownSnap, quota, accountSummary }: OverviewItem): string => {
       const family = providerFamily(cardSnap.id);
       const jumpId = isParallelAccountFamily(family) ? shownSnap.id : cardSnap.id;
@@ -3718,9 +3734,7 @@ function renderQuotaOverview(): string {
       const icon = visual?.iconSvg ?? `<span class="icon-fallback">${escapeHtml(cardSnap.name.slice(0, 2))}</span>`;
       const displayName = notedName(jumpId, providerDisplayName(family) || cardSnap.name);
       const accountCount = overviewAccountCount(family);
-      const accountBadge = accountCount > 1
-        ? `<span class="overview-account-count ${accountSummary.available === 0 ? "is-empty" : ""}" title="${escapeHtml(t("overview.accountSummary", { available: accountSummary.available, unavailable: accountSummary.unavailable, total: accountSummary.total }))}"><b>${accountCount}/${accountSummary.available}</b></span>`
-        : "";
+      const accountBadge = overviewAccountBadgeHtml(accountCount, accountSummary);
 
       const r = 16;
       const cx = 22;
@@ -3844,9 +3858,7 @@ function renderQuotaOverview(): string {
     const displayName = notedName(jumpId, providerDisplayName(family) || cardSnap.name);
     const nameClass = cardNote(jumpId) ? " is-note" : "";
     const accountCount = overviewAccountCount(family);
-    const accountBadge = accountCount > 1
-      ? `<span class="overview-account-count ${accountSummary.available === 0 ? "is-empty" : ""}" title="${escapeHtml(t("overview.accountSummary", { available: accountSummary.available, unavailable: accountSummary.unavailable, total: accountSummary.total }))}"><b>${accountCount}/${accountSummary.available}</b></span>`
-      : "";
+    const accountBadge = overviewAccountBadgeHtml(accountCount, accountSummary);
 
     let itemTone = "normal";
     let pct: number | null = null;

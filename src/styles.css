@@ -3515,12 +3515,26 @@ article.provider.is-folded:hover {
   font-weight: 800;
 }
 .acct-count-avail.is-ok {
-  color: #4ade80;
+  color: #4ade80 !important;
   text-shadow: 0 0 6px rgb(74 222 128 / .35);
 }
 .acct-count-avail.is-low {
-  color: #f87171;
+  color: #f87171 !important;
   text-shadow: 0 0 6px rgb(248 113 113 / .35);
+}
+:root[data-theme="light"] .acct-count-total {
+  color: #64748b;
+}
+:root[data-theme="light"] .acct-count-sep {
+  color: rgb(0 0 0 / .35);
+}
+:root[data-theme="light"] .acct-count-avail.is-ok {
+  color: #16a34a !important;
+  text-shadow: none;
+}
+:root[data-theme="light"] .acct-count-avail.is-low {
+  color: #dc2626 !important;
+  text-shadow: none;
 }
 
 /* Health dot after the account label: red = a window maxed out (waiting
@@ -6002,6 +6016,51 @@ body.no-glass #confirm-box {
 .overview-account-count b {
   font-size: 9px;
   font-weight: 800;
+  line-height: 1;
+}
+
+.overview-account-count .acct-count-total {
+  color: #cbd5e1;
+  font-weight: 750;
+}
+
+.overview-account-count .acct-count-sep {
+  color: rgb(255 255 255 / .45);
+  font-size: 8px;
+  font-weight: 500;
+  margin: 0 1px;
+}
+
+.overview-account-count .acct-count-avail {
+  font-weight: 850;
+}
+
+.overview-account-count .acct-count-avail.is-ok {
+  color: #4ade80 !important;
+  text-shadow: 0 0 6px rgb(74 222 128 / .4);
+}
+
+.overview-account-count .acct-count-avail.is-low {
+  color: #f87171 !important;
+  text-shadow: 0 0 6px rgb(248 113 113 / .4);
+}
+
+:root[data-theme="light"] .overview-account-count .acct-count-total {
+  color: #64748b;
+}
+
+:root[data-theme="light"] .overview-account-count .acct-count-sep {
+  color: rgb(0 0 0 / .35);
+}
+
+:root[data-theme="light"] .overview-account-count .acct-count-avail.is-ok {
+  color: #16a34a !important;
+  text-shadow: none;
+}
+
+:root[data-theme="light"] .overview-account-count .acct-count-avail.is-low {
+  color: #dc2626 !important;
+  text-shadow: none;
 }
 
 .overview-account-count i {
