@@ -3,6 +3,7 @@ mod secretstore;
 mod antigravity_accounts;
 mod auth_center;
 mod codex_accounts;
+mod codex_login;
 mod cursor_accounts;
 mod cursor_oauth;
 mod fonts;
@@ -4051,6 +4052,24 @@ async fn oauth_poll(provider: String, device_auth_id: String) -> oauth::PollResp
     response
 }
 
+/// Starts the Codex browser PKCE login (127.0.0.1:1455 loopback). Errors
+/// with "CODEX_OAUTH_PORT_IN_USE" when the Codex CLI owns the port — the
+/// frontend then falls back to the device-code flow.
+#[tauri::command]
+fn codex_login_start() -> Result<codex_login::LoginStart, String> {
+    codex_login::start()
+}
+
+#[tauri::command]
+async fn codex_login_poll(login_id: String) -> codex_login::LoginPoll {
+    codex_login::poll(&login_id).await
+}
+
+#[tauri::command]
+fn codex_login_cancel(login_id: String) {
+    codex_login::cancel(&login_id);
+}
+
 /// Deletes Pane's own OAuth credential file for the provider. The CLI's
 /// sign-in is untouched.
 #[tauri::command]
@@ -4745,6 +4764,9 @@ pub fn run() {
             get_credential_status,
             oauth_start,
             oauth_poll,
+            codex_login_start,
+            codex_login_poll,
+            codex_login_cancel,
             oauth_logout,
             get_config,
             set_config,

@@ -54,6 +54,9 @@ pub mod cursor_accounts;
 #[path = "../../src-tauri/src/codex_accounts.rs"]
 pub mod codex_accounts;
 
+#[path = "../../src-tauri/src/codex_login.rs"]
+pub mod codex_login;
+
 #[path = "../../src-tauri/src/auth_center.rs"]
 pub mod auth_center;
 

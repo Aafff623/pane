@@ -12265,8 +12265,10 @@ let authViewActive = false;
 /// rendered as the four-state block inside the family card (starting →
 /// polling → success | error), mirroring GroupLoginFlow's shape.
 interface AuthFlow {
-  phase: "starting" | "polling" | "success" | "error";
+  phase: "starting" | "polling" | "browser" | "success" | "error";
   deviceAuthId: string;
+  /** Codex browser login id (loopback flow); absent for device-code flows. */
+  loginId?: string;
   userCode: string;
   error: string | null;
   label: string | null;
@@ -12277,11 +12279,14 @@ const authFlows = new Map<string, AuthFlow>();
 function stopAuthFlow(family: string): void {
   const flow = authFlows.get(family);
   if (flow?.timer !== undefined) window.clearInterval(flow.timer);
+  if (flow?.loginId) {
+    void invoke("codex_login_cancel", { loginId: flow.loginId }).catch(() => {});
+  }
 }
 
 function authFlowBusy(): boolean {
   for (const flow of authFlows.values()) {
-    if (flow.phase === "starting" || flow.phase === "polling") return true;
+    if (flow.phase === "starting" || flow.phase === "polling" || flow.phase === "browser") return true;
   }
   return false;
 }
@@ -12425,6 +12430,15 @@ function authFlowHtml(family: string): string {
       <div class="auth-flow-head"><span>${escapeHtml(t("auth.flow.success", { label: flow.label ?? "" }))}</span></div>
     </div>`;
   }
+  if (flow.phase === "browser") {
+    // Codex loopback login: the browser tab owns the interaction, this card
+    // just watches the callback.
+    return `<div class="auth-flow" role="status">
+      <div class="auth-flow-head"><span>${escapeHtml(t("auth.flow.browser"))}</span>
+        <button class="mini-btn" type="button" data-auth-flow-cancel="${escapeHtml(family)}">${escapeHtml(t("auth.flow.cancel"))}</button></div>
+      <div class="auth-note">${escapeHtml(t("auth.flow.browserNote"))}</div>
+    </div>`;
+  }
   const codeRow = flow.userCode
     ? `<div class="auth-flow-row"><span>${escapeHtml(t("auth.flow.enterCode"))}</span>
         <code class="auth-flow-code">${escapeHtml(flow.userCode)}</code>
@@ -12536,6 +12550,30 @@ function authAddAccount(family: string): void {
 /// Device-code login against the existing oauth_start/oauth_poll commands.
 async function startAuthOauthFlow(family: string): Promise<void> {
   stopAuthFlow(family);
+  if (family === "codex") {
+    // Browser PKCE first (the CLI's own loopback flow); the Codex CLI owns
+    // port 1455 while it runs, so a busy port falls through to device code.
+    authFlows.set(family, { phase: "starting", deviceAuthId: "", userCode: "", error: null, label: null });
+    renderAuthCenter();
+    try {
+      const started = await invoke<{ loginId: string; authUrl: string }>("codex_login_start");
+      void invoke("open_link", { url: started.authUrl }).catch(() => {});
+      const flow: AuthFlow = {
+        phase: "browser",
+        deviceAuthId: "",
+        loginId: started.loginId,
+        userCode: "",
+        error: null,
+        label: null,
+      };
+      authFlows.set(family, flow);
+      renderAuthCenter();
+      flow.timer = window.setInterval(() => void pollCodexBrowserLogin(family), 2000);
+      return;
+    } catch {
+      // Port busy or unavailable — fall through to the device-code flow.
+    }
+  }
   authFlows.set(family, { phase: "starting", deviceAuthId: "", userCode: "", error: null, label: null });
   renderAuthCenter();
   let started: { device_auth_id: string; user_code: string; verify_url: string };
@@ -12558,6 +12596,40 @@ async function startAuthOauthFlow(family: string): Promise<void> {
   renderAuthCenter();
   flow.timer = window.setInterval(() => void pollAuthOauth(family), 3000);
   void pollAuthOauth(family);
+}
+
+/// One poll tick for the Codex browser login: the callback lands in the
+/// backend, this just collects the outcome.
+async function pollCodexBrowserLogin(family: string): Promise<void> {
+  const flow = authFlows.get(family);
+  if (!flow || flow.phase !== "browser" || !flow.loginId) return;
+  let r: { done: boolean; label: string | null; error: string | null };
+  try {
+    r = await invoke("codex_login_poll", { loginId: flow.loginId });
+  } catch (err) {
+    stopAuthFlow(family);
+    flow.phase = "error";
+    flow.error = String(err);
+    renderAuthCenter();
+    return;
+  }
+  if (!r.done && !r.error) return; // still waiting for the callback
+  stopAuthFlow(family);
+  if (r.error) {
+    flow.phase = "error";
+    flow.error = r.error;
+    renderAuthCenter();
+    return;
+  }
+  flow.phase = "success";
+  flow.label = r.label;
+  renderAuthCenter();
+  credStatusCache.delete(family);
+  window.setTimeout(() => {
+    if (authFlows.get(family) === flow) authFlows.delete(family);
+    void loadAuthCenter();
+  }, 1600);
+  void forceUsageRefreshAttempt(false).then(requestTraySync);
 }
 
 /// One poll tick; the backend paces itself against the server-asked
