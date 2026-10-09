@@ -685,6 +685,13 @@ body.settings-open #settings {
   white-space: nowrap;
 }
 
+.skey-detail {
+  margin: 3px 0 0 27px;
+  font-size: 11.5px;
+  color: var(--muted-foreground);
+  overflow-wrap: anywhere;
+}
+
 .skey-actions {
   display: flex;
   flex: none;
@@ -2836,6 +2843,10 @@ article.provider.is-folded:hover {
 
 #st-keyvault .skey-state,
 #st-keyvault .skey-state.ok {
+  font-size: 12px;
+}
+
+#st-keyvault .skey-detail {
   font-size: 12px;
 }
 

@@ -44,10 +44,23 @@ async fn fetch() -> Result<Snapshot, String> {
 }
 
 async fn fetch_with_key(key: &str) -> Result<Snapshot, String> {
-    let Some(mut base) = stored_base_url(ID) else {
+    let Some(base) = stored_base_url(ID) else {
         return Err("no base URL configured — type your sub2api deployment URL in Settings (gear icon)".into());
     };
-    base = base.trim_end_matches('/').to_string();
+    fetch_at(key, &base).await
+}
+
+/// Live probe with a caller-supplied URL — the Settings test-first flow
+/// checks the typed URL before anything is written to disk.
+pub async fn snapshot_with_key_and_url(key: &str, base_url: &str) -> Snapshot {
+    match fetch_at(key, base_url).await {
+        Ok(s) => s,
+        Err(e) => Snapshot::error(ID, NAME, e),
+    }
+}
+
+async fn fetch_at(key: &str, base: &str) -> Result<Snapshot, String> {
+    let base = base.trim().trim_end_matches('/').to_string();
     if !base.starts_with("https://") && !base.starts_with("http://127.0.0.1") && !base.starts_with("http://localhost") {
         return Err("base URL must be HTTPS (loopback HTTP allowed)".into());
     }

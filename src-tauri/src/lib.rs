@@ -3252,7 +3252,14 @@ async fn test_api_key(
         "groq" => providers::groq::snapshot_with_key(key).await,
         "huggingface" => providers::huggingface::snapshot_with_key(key).await,
         "longcat" => providers::longcat::snapshot_with_key(key).await,
-        "sub2api" => providers::sub2api::snapshot_with_key(key).await,
+        "sub2api" => {
+            let url = base_url
+                .as_deref()
+                .map(str::trim)
+                .filter(|u| !u.is_empty())
+                .ok_or_else(|| "a base URL is required for sub2api".to_string())?;
+            providers::sub2api::snapshot_with_key_and_url(key, url).await
+        }
         "mistral" => providers::mistral::snapshot_with_key(key).await,
         "perplexity" => providers::perplexity::snapshot_with_key(key).await,
         "volcengine" => providers::volcengine::snapshot_with_key(key).await,

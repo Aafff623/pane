@@ -6085,7 +6085,7 @@ const OAUTH_PROVIDERS = new Set(["codex", "grok", "copilot"]);
 // Relay families whose saved credential also carries a user-chosen base
 // URL (relaybalance) — its gear panel and account dialog show
 // the extra URL field.
-const RELAY_BASE_URL_FAMILIES = new Set(["relaybalance"]);
+const RELAY_BASE_URL_FAMILIES = new Set(["relaybalance", "sub2api"]);
 
 // ---------------------------------------------------------------------------
 // Extra API-key accounts (Phase 3.2) — deepseek/kimi/stepfun/siliconflow/
@@ -10607,9 +10607,22 @@ function settingsKeyRow(family: string): HTMLElement {
   // Cursor, gcloud, …): their state is that sign-in, and there is nothing
   // to paste — the "?" explains what the provider actually needs.
   const keyable = providerDefinition(family)?.supportsApiKey ?? false;
+  const local = status?.membership || status?.oauth || status?.localCli;
+  // Locally connected (IDE sign-in / Pane OAuth / membership): say so and
+  // name the exact source — the mechanism table's files — whether or not
+  // the family also accepts a pasted key.
+  let detail: HTMLElement | null = null;
+  const connected = !configured && Boolean(local);
+  if (connected) {
+    const mech = MECHANISMS[family];
+    const parts = [String(local)];
+    if (mech?.reads?.length) parts.push(t("settings.credReads", { files: mech.reads.join(" · ") }));
+    detail = document.createElement("div");
+    detail.className = "skey-detail";
+    detail.textContent = `${t("settings.credConnected")} · ${parts.join(" · ")}`;
+  }
   if (!keyable) {
-    const local = status?.membership || status?.oauth || status?.localCli;
-    state.textContent = local || t("settings.credLocalMissing");
+    state.textContent = local ? t("settings.credConnected") : t("settings.credLocalMissing");
     state.classList.toggle("ok", Boolean(local));
   } else if (multi) {
     state.textContent = accounts.length
@@ -10617,6 +10630,9 @@ function settingsKeyRow(family: string): HTMLElement {
       : t("settings.keyNotSet");
   } else if (configured) {
     state.textContent = status?.maskedKey || t("settings.keyConfigured");
+  } else if (connected) {
+    state.textContent = t("settings.credConnected");
+    state.classList.add("ok");
   } else {
     state.textContent = status?.envKey ? t("settings.keyEnv") : t("settings.keyNotSet");
   }
@@ -10624,6 +10640,7 @@ function settingsKeyRow(family: string): HTMLElement {
   actions.className = "skey-actions";
   head.append(icon, name, state, actions);
   item.append(head);
+  if (detail) item.append(detail);
 
   // "?" first: it sits left of the row's own buttons (查看 / 添加 …) and is
   // the only control a non-key family has.
@@ -10715,6 +10732,80 @@ function settingsKeyRow(family: string): HTMLElement {
   return item;
 }
 
+/// Test-first save gate for the key editors: key-based families talk to
+/// preset endpoints, so their pasted credential must pass a live probe
+/// (test_api_key — a pure read; nothing is written) before Save unlocks.
+/// Families with no live probe fall back to a direct save. Editing the
+/// input after a pass re-arms the gate.
+function attachKeyTest(
+  family: string,
+  keyInput: HTMLInputElement,
+  urlInput: HTMLInputElement | null,
+  save: HTMLButtonElement,
+  err: HTMLElement,
+): HTMLButtonElement {
+  const test = document.createElement("button");
+  test.type = "button";
+  test.className = "mini-btn";
+  test.innerHTML = uiIcon("lightning") + escapeHtml(t("settings.keyTest"));
+  let passed = false;
+  const arm = () => {
+    passed = false;
+    save.disabled = true;
+    test.classList.remove("ok");
+    test.innerHTML = uiIcon("lightning") + escapeHtml(t("settings.keyTest"));
+  };
+  save.disabled = true;
+  keyInput.addEventListener("input", () => {
+    if (passed) arm();
+  });
+  urlInput?.addEventListener("input", () => {
+    if (passed) arm();
+  });
+  test.addEventListener("click", () => {
+    const value = keyInput.value.trim();
+    if (!value) {
+      err.textContent = t("settings.keyRequired");
+      return;
+    }
+    test.disabled = true;
+    test.innerHTML = uiIcon("lightning") + escapeHtml(t("customize.helpTesting"));
+    void invoke<{ ok: boolean; metrics: number; message: string }>("test_api_key", {
+      provider: family,
+      key: value,
+      baseUrl: urlInput?.value.trim() || null,
+    })
+      .then((res) => {
+        if (res.ok) {
+          passed = true;
+          save.disabled = false;
+          err.textContent = "";
+          test.classList.add("ok");
+          test.innerHTML = uiIcon("lightning") + escapeHtml(t("settings.keyTestOk"));
+        } else {
+          save.disabled = true;
+          err.textContent = res.message || t("settings.keyTestFail");
+        }
+      })
+      .catch((e) => {
+        const msg = String(e);
+        if (msg.includes("unknown provider")) {
+          // No live probe exists for this family — direct save, no gate.
+          test.remove();
+          save.disabled = false;
+          return;
+        }
+        save.disabled = true;
+        err.textContent = msg;
+      })
+      .finally(() => {
+        test.disabled = false;
+        if (!passed) test.innerHTML = uiIcon("lightning") + escapeHtml(t("settings.keyTest"));
+      });
+  });
+  return test;
+}
+
 /// Inline key editor: password field (+ base URL for relay families) with
 /// Save/Cancel. Saves through the exact command Customize uses, so the
 /// card picks the key up on its next refresh.
@@ -10772,7 +10863,8 @@ function settingsKeyEditor(family: string): HTMLElement {
         save.disabled = false;
       });
   });
-  row.append(save);
+  // Test-first: Save unlocks only after a passing probe (attachKeyTest).
+  row.append(attachKeyTest(family, key, url, save, err), save);
   form.append(row, err);
   return form;
 }
@@ -10906,7 +10998,8 @@ function settingsAccountEditor(family: string): HTMLElement {
         save.disabled = false;
       });
   });
-  row.append(save);
+  // Test-first: Save unlocks only after a passing probe (attachKeyTest).
+  row.append(attachKeyTest(family, key, url, save, err), save);
   form.append(row, err);
   return form;
 }

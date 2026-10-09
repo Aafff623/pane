@@ -640,7 +640,7 @@ pub fn supports_api_key(family_id: &str) -> bool {
 /// URL (stored alongside the key, hashed into account card ids). Shared by
 /// lib.rs's save paths and accounts.rs so the two can't drift apart.
 pub fn takes_base_url(family_id: &str) -> bool {
-    matches!(family_id, "relaybalance")
+    matches!(family_id, "relaybalance" | "sub2api")
 }
 
 /// Returns the family part of a card id. Account fingerprints and One/New API
@@ -697,6 +697,7 @@ mod tests {
     #[test]
     fn relay_base_url_families_are_flagged() {
         assert!(takes_base_url("relaybalance"));
+        assert!(takes_base_url("sub2api"));
         assert!(!takes_base_url("deepseek"));
     }
 
