@@ -2749,6 +2749,9 @@ article.provider.is-folded:hover {
 }
 
 .mini-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
   background: var(--muted);
   border: none;
   border-radius: 7px;
@@ -2776,6 +2779,64 @@ article.provider.is-folded:hover {
 
 .mini-btn.danger:hover {
   background: #7f1d1d;
+}
+
+/* Keys-page action chips: tinted icon buttons — copy reads green, remove
+   reads red, the row help "?" stays quiet gray; every button keeps its
+   label so nothing depends on icon literacy alone. */
+.mini-btn .ui-icon {
+  width: 14px;
+  height: 14px;
+}
+
+.mini-btn.danger {
+  color: #fca5a5;
+  background: rgba(239, 68, 68, 0.15);
+}
+
+.mini-btn.ok {
+  color: #86efac;
+  background: rgba(34, 197, 94, 0.15);
+}
+
+.mini-btn.ok:hover {
+  background: rgba(34, 197, 94, 0.28);
+}
+
+:root[data-theme="light"] .mini-btn.danger {
+  color: #b91c1c;
+}
+
+:root[data-theme="light"] .mini-btn.ok {
+  color: #15803d;
+}
+
+.skey-help {
+  color: var(--muted-foreground);
+  background: transparent;
+}
+
+.skey-help .ui-icon {
+  width: 15px;
+  height: 15px;
+}
+
+/* A touch larger throughout the keys page. */
+#st-keyvault .mini-btn {
+  font-size: 12.5px;
+}
+
+#st-keyvault .kv-vault-state {
+  font-size: 11.5px;
+}
+
+#st-keyvault .skey-name {
+  font-size: 13.5px;
+}
+
+#st-keyvault .skey-state,
+#st-keyvault .skey-state.ok {
+  font-size: 12px;
 }
 
 .grip {

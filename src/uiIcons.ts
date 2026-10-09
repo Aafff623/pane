@@ -19,8 +19,16 @@ import shield from "./assets/icons/shield-bold.svg?raw";
 import globe from "./assets/icons/globe-bold.svg?raw";
 import keyboard from "./assets/icons/keyboard-bold.svg?raw";
 import arrowUp from "./assets/icons/arrow-up-bold.svg?raw";
+import copy from "./assets/icons/copy-bold.svg?raw";
+import trash from "./assets/icons/trash-bold.svg?raw";
+import eye from "./assets/icons/eye-bold.svg?raw";
+import eyeSlash from "./assets/icons/eye-slash-bold.svg?raw";
+import pencil from "./assets/icons/pencil-simple-bold.svg?raw";
+import plus from "./assets/icons/plus-bold.svg?raw";
+import lock from "./assets/icons/lock-bold.svg?raw";
+import lockOpen from "./assets/icons/lock-open-bold.svg?raw";
 
-const ICONS = { gear, arrowsClockwise, shareNetwork, star, info, question, x, caretUp, caretDown, lightning, microphone, circleNotch, rows, palette, key, magnifyingGlass, bell, shield, globe, keyboard, arrowUp } as const;
+const ICONS = { gear, arrowsClockwise, shareNetwork, star, info, question, x, caretUp, caretDown, lightning, microphone, circleNotch, rows, palette, key, magnifyingGlass, bell, shield, globe, keyboard, arrowUp, copy, trash, eye, eyeSlash, pencil, plus, lock, lockOpen } as const;
 
 export type UiIconName = keyof typeof ICONS;
 

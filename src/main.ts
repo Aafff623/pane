@@ -10061,30 +10061,31 @@ function renderVaultBar(): void {
   const state = document.createElement("span");
   state.className = "kv-vault-state";
   const buttons: HTMLButtonElement[] = [];
-  const button = (label: string, action: string) => {
+  const button = (label: string, action: string, iconName: UiIconName) => {
     const b = document.createElement("button");
     b.type = "button";
     b.className = "mini-btn";
-    b.textContent = label;
+    b.innerHTML = uiIcon(iconName) + escapeHtml(label);
     b.dataset.kvVaultAction = action;
     buttons.push(b);
   };
   if (!vaultStatus.has_password) {
     state.textContent = t("settings.kvVaultNoPassword");
-    button(t("settings.kvSetPassword"), "set");
+    button(t("settings.kvSetPassword"), "set", "key");
   } else if (vaultStatus.unlocked) {
     state.textContent = t("settings.kvVaultUnlocked", { count: vaultStatus.count });
-    button(t("settings.kvChange"), "change");
+    button(t("settings.kvChange"), "change", "key");
     button(
       vaultStatus.recovery_questions > 0 ? t("settings.kvRecoveryEdit") : t("settings.kvRecoverySet"),
       "questions",
+      "shield",
     );
-    button(t("settings.kvLock"), "lock");
+    button(t("settings.kvLock"), "lock", "lock");
   } else {
     state.textContent = t("settings.kvVaultLocked", { count: vaultStatus.count });
     state.classList.add("locked");
-    button(t("settings.kvUnlock"), "unlock");
-    if (vaultStatus.recovery_questions > 0) button(t("settings.kvForgot"), "forgot");
+    button(t("settings.kvUnlock"), "unlock", "lockOpen");
+    if (vaultStatus.recovery_questions > 0) button(t("settings.kvForgot"), "forgot", "question");
   }
   inner.append(state, ...buttons);
   bar.append(inner);
@@ -10399,9 +10400,9 @@ async function copySettingsKey(
     }
     await navigator.clipboard.writeText(raw);
     const old = button.textContent;
-    button.textContent = t("settings.kvCopied");
+    button.innerHTML = uiIcon("copy") + escapeHtml(t("settings.kvCopied"));
     window.setTimeout(() => {
-      button.textContent = old || t("settings.kvCopy");
+      button.innerHTML = uiIcon("copy") + escapeHtml(old || t("settings.kvCopy"));
     }, 1400);
   } catch (err) {
     if (status) status.textContent = String(err);
@@ -10422,7 +10423,7 @@ async function revealSettingsKey(
   if (button.dataset.revealed === "1") {
     if (button.dataset.masked) stateEl.textContent = button.dataset.masked;
     delete button.dataset.revealed;
-    button.textContent = t("settings.kvReveal");
+    button.innerHTML = uiIcon("eye") + escapeHtml(t("settings.kvReveal"));
     return;
   }
   const call = (password: string) =>
@@ -10455,7 +10456,7 @@ async function revealSettingsKey(
     button.dataset.masked = stateEl.textContent || "";
     stateEl.textContent = raw;
     button.dataset.revealed = "1";
-    button.textContent = t("settings.kvHide");
+    button.innerHTML = uiIcon("eyeSlash") + escapeHtml(t("settings.kvHide"));
   } catch (err) {
     const msg = String(err);
     if (status) {
@@ -10474,7 +10475,7 @@ async function revealKeyvaultEntry(id: string, button: HTMLButtonElement): Promi
     code.textContent = item.dataset.kvMasked || "";
     code.classList.remove("kv-revealed");
     item.dataset.kvShown = "0";
-    button.textContent = t("settings.kvReveal");
+    button.innerHTML = uiIcon("eye") + escapeHtml(t("settings.kvReveal"));
     return;
   }
   try {
@@ -10483,7 +10484,7 @@ async function revealKeyvaultEntry(id: string, button: HTMLButtonElement): Promi
     code.textContent = raw;
     code.classList.add("kv-revealed");
     item.dataset.kvShown = "1";
-    button.textContent = t("settings.kvHide");
+    button.innerHTML = uiIcon("eyeSlash") + escapeHtml(t("settings.kvHide"));
   } catch (err) {
     if (String(err).includes("locked") && (await unlockVault())) {
       return revealKeyvaultEntry(id, button);
@@ -10629,23 +10630,25 @@ function settingsKeyRow(family: string): HTMLElement {
   const help = document.createElement("button");
   help.type = "button";
   help.className = "mini-btn skey-help";
-  help.textContent = "?";
+  help.innerHTML = uiIcon("question");
   help.title = t("customize.helpMenu");
+  help.setAttribute("aria-label", t("customize.helpMenu"));
   help.addEventListener("click", () => openProviderHelp(family));
   actions.append(help);
   if (!keyable) return item;
 
-  const button = (label: string, extraClass = "") => {
+  const button = (label: string, extraClass = "", iconName?: UiIconName) => {
     const b = document.createElement("button");
     b.type = "button";
     b.className = `mini-btn${extraClass}`;
-    b.textContent = label;
+    if (iconName) b.innerHTML = uiIcon(iconName) + escapeHtml(label);
+    else b.textContent = label;
     return b;
   };
 
   if (multi) {
     const open = skeyAddingAccount.has(family);
-    const add = button(open ? t("dialog.cancel") : t("customize.acctAdd"));
+    const add = button(open ? t("dialog.cancel") : t("customize.acctAdd"), "", open ? undefined : "plus");
     add.addEventListener("click", () => {
       open ? skeyAddingAccount.delete(family) : skeyAddingAccount.add(family);
       renderSettingsProviderKeys();
@@ -10660,25 +10663,25 @@ function settingsKeyRow(family: string): HTMLElement {
     actions.append(cancel);
   } else {
     if (configured) {
-      const view = button(t("settings.kvReveal"));
+      const view = button(t("settings.kvReveal"), "", "eye");
       view.addEventListener("click", () => {
         void revealSettingsKey(family, null, view, state);
       });
       actions.append(view);
-      const copy = button(t("settings.kvCopy"));
+      const copy = button(t("settings.kvCopy"), " ok", "copy");
       copy.addEventListener("click", () => {
         void copySettingsKey(family, null, copy);
       });
       actions.append(copy);
     }
-    const edit = button(configured ? t("settings.keyReplace") : t("settings.keyEdit"));
+    const edit = button(configured ? t("settings.keyReplace") : t("settings.keyEdit"), "", "pencil");
     edit.addEventListener("click", () => {
       skeyEditing.add(family);
       renderSettingsProviderKeys();
     });
     actions.append(edit);
     if (configured) {
-      const remove = button(t("settings.keyRemove"), " danger");
+      const remove = button(t("settings.keyRemove"), " danger", "trash");
       remove.addEventListener("click", () => {
         void appConfirm({
           title: t("settings.keyRemove"),
@@ -10789,15 +10792,15 @@ function settingsAccountRow(family: string, entry: AccountEntry, index: number):
     const view = document.createElement("button");
     view.type = "button";
     view.className = "mini-btn";
-    view.textContent = t("settings.kvReveal");
+    view.innerHTML = uiIcon("eye") + escapeHtml(t("settings.kvReveal"));
     view.addEventListener("click", () => {
       void revealSettingsKey(family, entry.id!, view, masked);
     });
     actions.append(view);
     const copy = document.createElement("button");
     copy.type = "button";
-    copy.className = "mini-btn";
-    copy.textContent = t("settings.kvCopy");
+    copy.className = "mini-btn ok";
+    copy.innerHTML = uiIcon("copy") + escapeHtml(t("settings.kvCopy"));
     copy.addEventListener("click", () => {
       void copySettingsKey(family, entry.id!, copy);
     });
@@ -10806,7 +10809,7 @@ function settingsAccountRow(family: string, entry: AccountEntry, index: number):
   const rename = document.createElement("button");
   rename.type = "button";
   rename.className = "mini-btn";
-  rename.textContent = t("settings.acctRename");
+  rename.innerHTML = uiIcon("pencil") + escapeHtml(t("settings.acctRename"));
   rename.addEventListener("click", () => {
     void appPrompt({
       title: t("settings.acctRename"),
@@ -10826,7 +10829,7 @@ function settingsAccountRow(family: string, entry: AccountEntry, index: number):
   const remove = document.createElement("button");
   remove.type = "button";
   remove.className = "mini-btn danger";
-  remove.textContent = t("settings.kvRemove");
+  remove.innerHTML = uiIcon("trash") + escapeHtml(t("settings.kvRemove"));
   remove.addEventListener("click", () => {
     void appConfirm({
       title: t("settings.acctRemoveConfirm", { name: entry.label || entry.maskedKey }),
@@ -10955,22 +10958,22 @@ function renderKeyvault(rows: KeyVaultRow[]): void {
     reveal.type = "button";
     reveal.className = "mini-btn";
     reveal.dataset.kvReveal = row.id;
-    reveal.textContent = t("settings.kvReveal");
+    reveal.innerHTML = uiIcon("eye") + escapeHtml(t("settings.kvReveal"));
     const noteBtn = document.createElement("button");
     noteBtn.type = "button";
     noteBtn.className = "mini-btn";
     noteBtn.dataset.kvNote = row.id;
-    noteBtn.textContent = t("settings.kvEditNote");
+    noteBtn.innerHTML = uiIcon("pencil") + escapeHtml(t("settings.kvEditNote"));
     const copy = document.createElement("button");
     copy.type = "button";
-    copy.className = "mini-btn";
+    copy.className = "mini-btn ok";
     copy.dataset.kvCopy = row.id;
-    copy.textContent = t("settings.kvCopy");
+    copy.innerHTML = uiIcon("copy") + escapeHtml(t("settings.kvCopy"));
     const remove = document.createElement("button");
     remove.type = "button";
     remove.className = "mini-btn danger";
     remove.dataset.kvRemove = row.id;
-    remove.textContent = t("settings.kvRemove");
+    remove.innerHTML = uiIcon("trash") + escapeHtml(t("settings.kvRemove"));
     actions.append(reveal, noteBtn, copy, remove);
     item.append(info, actions);
     root.append(item);
@@ -11045,9 +11048,9 @@ async function copyKeyvaultEntry(id: string, button: HTMLButtonElement): Promise
     const rawKey = await invoke<string>("keyvault_copy", { id });
     await navigator.clipboard.writeText(rawKey);
     const old = button.textContent;
-    button.textContent = t("settings.kvCopied");
+    button.innerHTML = uiIcon("copy") + escapeHtml(t("settings.kvCopied"));
     window.setTimeout(() => {
-      button.textContent = old || t("settings.kvCopy");
+      button.innerHTML = uiIcon("copy") + escapeHtml(old || t("settings.kvCopy"));
     }, 1400);
   } catch (err) {
     if (String(err).includes("locked") && (await unlockVault())) {
