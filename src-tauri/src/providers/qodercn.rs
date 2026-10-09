@@ -52,14 +52,19 @@ pub fn local_credential_hint() -> Option<String> {
 }
 
 async fn fetch() -> Result<Snapshot, String> {
-    let Some(auth_path) = auth_file_path() else {
+    // auth_file_path() resolves regardless of existence — a missing file is
+    // "signed out / never signed in", which deserves the guidance, not a raw
+    // OS error.
+    let Some(auth_path) = auth_file_path().filter(|p| p.is_file()) else {
         return Ok(Snapshot::no_credentials(
             ID,
             NAME,
-            "Qoder CN sign-in not found. Open Qoder CN and sign in once, then refresh.",
+            "Qoder CN sign-in state not found — the app was never signed in on this machine, or the sign-in was dropped after long disuse. Open Qoder CN, sign in again, then refresh.",
         ));
     };
-    let token = load_token(&auth_path)?;
+    let token = load_token(&auth_path).map_err(|e| {
+        format!("Qoder CN sign-in state is unreadable ({e}) — open Qoder CN once, then refresh.")
+    })?;
     let (plan, usage) = tokio::join!(
         fetch_api(OPENAPI_BASE, &token, PLAN_PATH, "plan"),
         fetch_api(OPENAPI_BASE, &token, USAGE_PATH, "usage")

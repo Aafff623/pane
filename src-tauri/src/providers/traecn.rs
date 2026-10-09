@@ -51,14 +51,19 @@ pub fn local_credential_hint() -> Option<String> {
 }
 
 async fn fetch() -> Result<Snapshot, String> {
-    let Some(path) = storage_path() else {
+    // storage_path() resolves regardless of existence — a missing file means
+    // the IDE was never signed in here (or the sign-in was dropped after
+    // long disuse), which deserves the guidance, not a raw OS error.
+    let Some(path) = storage_path().filter(|p| p.is_file()) else {
         return Ok(Snapshot::no_credentials(
             ID,
             NAME,
-            "Trae CN sign-in not found. Open Trae CN and sign in once, then refresh.",
+            "Trae CN sign-in state not found — the IDE was never signed in on this machine, or the sign-in was dropped after long disuse. Open Trae CN, sign in again, then refresh.",
         ));
     };
-    let raw = super::read_small_text(&path, MAX_STORAGE_BYTES, "storage.json")?;
+    let raw = super::read_small_text(&path, MAX_STORAGE_BYTES, "storage.json").map_err(|e| {
+        format!("Trae CN sign-in state is unreadable ({e}) — open Trae CN once, then refresh.")
+    })?;
     let doc: Value =
         serde_json::from_str(raw.trim_start_matches('\u{feff}')).map_err(|e| format!("parse storage.json: {e}"))?;
     let encrypted = doc

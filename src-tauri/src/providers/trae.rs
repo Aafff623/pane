@@ -45,11 +45,13 @@ pub fn local_credential_hint() -> Option<String> {
 }
 
 async fn fetch() -> Result<Snapshot, String> {
-    let Some(path) = storage_path() else {
+    // Same as the CN card: the path resolves regardless of existence, so a
+    // missing file is "signed out / never signed in", not a raw OS error.
+    let Some(path) = storage_path().filter(|p| p.is_file()) else {
         return Ok(Snapshot::no_credentials(
             ID,
             NAME,
-            "Trae sign-in not found. Open Trae and sign in once, then refresh.",
+            "Trae sign-in state not found — the IDE was never signed in on this machine, or the sign-in was dropped after long disuse. Open Trae, sign in again, then refresh.",
         ));
     };
     let (token, host) = read_sign_in(&path)?;
