@@ -45,6 +45,7 @@ pub mod poe;
 pub mod venice;
 pub mod vertexai;
 pub mod warp;
+pub mod windsurf;
 pub mod kiro;
 pub mod mimo;
 pub mod trae;

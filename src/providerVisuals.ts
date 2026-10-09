@@ -5,6 +5,7 @@ import clawsgoIcon from "./assets/providers/clawsgo.svg?raw";
 import codebuffIcon from "./assets/providers/codebuff.svg?raw";
 import codebuddyIcon from "./assets/providers/codebuddy.svg?raw";
 import codexIcon from "./assets/providers/codex.svg?raw";
+import windsurfIcon from "./assets/providers/windsurf.svg?raw";
 import commandcodeIcon from "./assets/providers/commandcode.svg?raw";
 import clinepassIcon from "./assets/providers/clinepass.svg?raw";
 import copilotIcon from "./assets/providers/copilot.svg?raw";
@@ -89,6 +90,7 @@ const VISUALS: Readonly<Record<string, ProviderVisual>> = {
   codebuff: { iconKey: "codebuff", iconSvg: codebuffIcon },
   codebuddy: { iconKey: "codebuddy", iconSvg: codebuddyIcon },
   codex: { iconKey: "codex", iconSvg: codexIcon },
+  windsurf: { iconKey: "windsurf", iconSvg: windsurfIcon },
   copilot: { iconKey: "copilot", iconSvg: copilotIcon },
   cursor: { iconKey: "cursor", iconSvg: cursorIcon },
   deepseek: { iconKey: "deepseek", iconSvg: deepseekIcon },

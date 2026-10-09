@@ -69,6 +69,9 @@ pub mod qoder_login;
 #[path = "../../src-tauri/src/codebuddy_login.rs"]
 pub mod codebuddy_login;
 
+#[path = "../../src-tauri/src/windsurf_login.rs"]
+pub mod windsurf_login;
+
 #[path = "../../src-tauri/src/auth_center.rs"]
 pub mod auth_center;
 

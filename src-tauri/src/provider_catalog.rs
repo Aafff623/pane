@@ -510,6 +510,16 @@ const PROVIDER_DEFINITIONS: &[ProviderDefinition] = &[
         category: ProviderCategory::Coding,
     },
     ProviderDefinition {
+        family_id: "windsurf",
+        display_name: "Windsurf",
+        query_kind: QueryKind::NativeSnapshot,
+        supports_api_key: false,
+        // Login-only family: every Pane sign-in is its own account card.
+        supports_extra_accounts: true,
+        icon_key: "windsurf",
+        category: ProviderCategory::Coding,
+    },
+    ProviderDefinition {
         family_id: "warp",
         display_name: "Warp",
         query_kind: QueryKind::NativeCodingPlan,
@@ -725,6 +735,7 @@ mod tests {
             "openai-api",
             "poe",
             "venice",
+            "windsurf",
             "warp",
             "mimo",
             "qoder",

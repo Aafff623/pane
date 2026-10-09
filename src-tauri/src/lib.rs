@@ -15,6 +15,7 @@ mod i18n;
 mod kiro_login;
 mod login_accounts;
 mod qoder_login;
+mod windsurf_login;
 mod oauth;
 mod platform;
 mod pricing;
@@ -2221,6 +2222,7 @@ async fn fetch_provider_snapshot(provider_id: String, allow_disabled: bool) -> R
             "kiro" => providers::kiro::snapshot_with_login(login).await,
             "qoder" => providers::qoder::snapshot_with_login(login).await,
             "codebuddy" => providers::codebuddy::snapshot_with_login(login).await,
+            "windsurf" => providers::windsurf::snapshot_with_login(login).await,
             _ => providers::grok::snapshot_with_login(login).await,
         });
     }
@@ -2314,6 +2316,7 @@ async fn run_usage_fetch(app: &tauri::AppHandle) -> Vec<providers::Snapshot> {
         ("opencode", Box::pin(guarded("opencode".into(), "OpenCode".into(), providers::opencode::snapshot()))),
         ("copilot", Box::pin(guarded("copilot".into(), "Copilot".into(), providers::copilot::snapshot()))),
         ("codebuddy", Box::pin(guarded("codebuddy".into(), "CodeBuddy".into(), providers::codebuddy::snapshot()))),
+        ("windsurf", Box::pin(guarded("windsurf".into(), "Windsurf".into(), providers::windsurf::snapshot()))),
         ("grok", Box::pin(guarded("grok".into(), "Grok".into(), providers::grok::snapshot()))),
         ("devin", Box::pin(guarded("devin".into(), "Devin".into(), providers::devin::snapshot()))),
         ("minimax", Box::pin(guarded("minimax".into(), "MiniMax".into(), providers::minimax::snapshot()))),
@@ -2506,6 +2509,10 @@ async fn run_usage_fetch(app: &tauri::AppHandle) -> Vec<providers::Snapshot> {
                 "codebuddy" => (
                     providers::codebuddy::login_card_name(&login),
                     Box::pin(providers::codebuddy::snapshot_with_login(login)),
+                ),
+                "windsurf" => (
+                    providers::windsurf::login_card_name(&login),
+                    Box::pin(providers::windsurf::snapshot_with_login(login)),
                 ),
                 _ => (
                     providers::grok::login_card_name(&login),
@@ -4257,6 +4264,24 @@ fn codebuddy_login_cancel(login_id: String) {
     codebuddy_login::cancel(&login_id);
 }
 
+/// Windsurf browser login (implicit flow on an ephemeral loopback port,
+/// then the seat-management key exchange): start → open the auth URL →
+/// poll until the callback lands.
+#[tauri::command]
+fn windsurf_login_start() -> Result<windsurf_login::LoginStart, String> {
+    windsurf_login::start()
+}
+
+#[tauri::command]
+async fn windsurf_login_poll(login_id: String) -> windsurf_login::LoginPoll {
+    windsurf_login::poll(&login_id).await
+}
+
+#[tauri::command]
+fn windsurf_login_cancel(login_id: String) {
+    windsurf_login::cancel(&login_id);
+}
+
 /// Deletes Pane's own OAuth credential file for the provider. The CLI's
 /// sign-in is untouched.
 #[tauri::command]
@@ -4963,6 +4988,9 @@ pub fn run() {
             codebuddy_login_start,
             codebuddy_login_poll,
             codebuddy_login_cancel,
+            windsurf_login_start,
+            windsurf_login_poll,
+            windsurf_login_cancel,
             oauth_logout,
             get_config,
             set_config,

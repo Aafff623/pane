@@ -71,6 +71,7 @@ export const providerCatalog: readonly ProviderDefinition[] = [
   { familyId: "venice", displayName: "Venice", queryKind: "nativeBalance", supportsApiKey: true, supportsExtraAccounts: true, supportsOAuth: false, iconKey: "venice" },
   { familyId: "vertexai", displayName: "Vertex AI", queryKind: "localOnly", supportsApiKey: false, supportsExtraAccounts: false, supportsOAuth: false, iconKey: "vertexai" },
   { familyId: "warp", displayName: "Warp", queryKind: "nativeCodingPlan", supportsApiKey: true, supportsExtraAccounts: true, supportsOAuth: false, iconKey: "warp" },
+  { familyId: "windsurf", displayName: "Windsurf", queryKind: "nativeSnapshot", supportsApiKey: false, supportsExtraAccounts: true, supportsOAuth: true, iconKey: "windsurf" },
   { familyId: "mimo", displayName: "MiMo", queryKind: "nativeCodingPlan", supportsApiKey: true, supportsExtraAccounts: true, supportsOAuth: false, iconKey: "mimo" },
   { familyId: "trae", displayName: "Trae", queryKind: "nativeSnapshot", supportsApiKey: false, supportsExtraAccounts: false, supportsOAuth: false, iconKey: "trae" },
   { familyId: "qoder", displayName: "Qoder", queryKind: "nativeSnapshot", supportsApiKey: false, supportsExtraAccounts: true, supportsOAuth: true, iconKey: "qoder" },
