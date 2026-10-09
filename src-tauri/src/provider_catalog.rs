@@ -564,7 +564,9 @@ const PROVIDER_DEFINITIONS: &[ProviderDefinition] = &[
         display_name: "Zed",
         query_kind: QueryKind::LocalOnly,
         supports_api_key: false,
-        supports_extra_accounts: false,
+        // Pane-managed Zed logins (auth center) are independent accounts;
+        // the bare card stays the editor's local usage telemetry.
+        supports_extra_accounts: true,
         icon_key: "zed",
         category: ProviderCategory::Coding,
     },
@@ -742,6 +744,7 @@ mod tests {
             "mimo",
             "trae",
             "qoder",
+            "zed",
             "factory",
             "groq",
             "huggingface",

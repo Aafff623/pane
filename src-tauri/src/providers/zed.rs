@@ -28,6 +28,66 @@ pub async fn snapshot() -> Snapshot {
     }
 }
 
+/// Snapshot for one Pane-managed Zed login. Zed exposes no usage API to
+/// desktop credentials — the billing endpoints answer 401 for them, so
+/// the account card carries identity + plan (cockpit reads the same
+/// `/client/users/me` and nothing more); the editor's actual usage
+/// stays on the local card above.
+pub async fn snapshot_with_login(login: crate::login_accounts::LoginAccount) -> Snapshot {
+    let id = crate::login_accounts::card_id_for_account(ID, &login);
+    let name = login_card_name(&login);
+    let resp = match super::http()
+        .get(format!("{}/client/users/me", crate::zed_login::CLOUD_BASE_URL))
+        .header("Authorization", format!("{} {}", login.account_id, login.access_token))
+        .send()
+        .await
+    {
+        Ok(resp) => resp,
+        Err(e) => return Snapshot::error(&id, &name, format!("Zed profile request: {e}")),
+    };
+    if resp.status().as_u16() == 401 || resp.status().as_u16() == 403 {
+        return Snapshot::error(&id, &name, "Zed session expired — sign in again from the auth center".into());
+    }
+    if !resp.status().is_success() {
+        return Snapshot::error(&id, &name, format!("Zed profile: HTTP {}", resp.status()));
+    }
+    let user: Value = match resp.json().await {
+        Ok(v) => v,
+        Err(e) => return Snapshot::error(&id, &name, format!("Zed profile parse: {e}")),
+    };
+    let plan = user
+        .pointer("/plan/plan_v3")
+        .or_else(|| user.pointer("/plan/plan"))
+        .or_else(|| user.pointer("/plan/name"))
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_string);
+    let mut metrics = Vec::new();
+    if let Some(github) = user
+        .pointer("/github_login")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    {
+        metrics.push(Metric::text("GitHub", github.to_string()));
+    }
+    // Usage is not published to desktop credentials; say so on the card
+    // instead of showing an empty one.
+    metrics.push(Metric::text(
+        "Usage",
+        "not published to editor logins — see the local Zed card".into(),
+    ));
+    Snapshot::ok(&id, &name, plan.or_else(|| Some(name.clone())), metrics)
+}
+
+pub(crate) fn login_card_name(login: &crate::login_accounts::LoginAccount) -> String {
+    if !login.label.trim().is_empty() {
+        return login.label.clone();
+    }
+    format!("Zed — {}", login.account_id)
+}
+
 /// Pure local probe for the Customize gear panel (no network): Zed's thread
 /// database exists on this machine.
 pub fn local_credential_hint() -> Option<String> {

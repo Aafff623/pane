@@ -57,6 +57,8 @@ rand_core = { version = "0.6", features = ["getrandom"] }
 # (DeviceInfo.DevicePublicKey, SPKI DER in PEM). Only the public half
 # travels, so the signing side of the stack stays out.
 p256 = { version = "0.13", features = ["pkcs8"] }
+# Zed signs the loopback callback's access token to the device key (OAEP, Pkcs1v15 fallback).
+rsa = "0.9"
 # Provider/account API keys live in the OS credential vault (keyring-rs:
 # Windows Credential Manager / macOS Keychain / Linux Secret Service); the
 # JSON files keep only non-secret fields. The default `v1` feature bundle

@@ -35,6 +35,8 @@ sha2 = "0.10"
 hmac = "0.12"
 # Trae's device-bound token exchange (mirrors src-tauri/Cargo.toml).
 p256 = { version = "0.13", features = ["pkcs8"] }
+# Zed's RSA-OAEP loopback callback (mirrors src-tauri/Cargo.toml).
+rsa = "0.9"
 aes = "0.8"
 aes-gcm = "0.10"
 cbc = "0.1"

@@ -75,7 +75,7 @@ export const providerCatalog: readonly ProviderDefinition[] = [
   { familyId: "mimo", displayName: "MiMo", queryKind: "nativeCodingPlan", supportsApiKey: true, supportsExtraAccounts: true, supportsOAuth: false, iconKey: "mimo" },
   { familyId: "trae", displayName: "Trae", queryKind: "nativeSnapshot", supportsApiKey: false, supportsExtraAccounts: true, supportsOAuth: true, iconKey: "trae" },
   { familyId: "qoder", displayName: "Qoder", queryKind: "nativeSnapshot", supportsApiKey: false, supportsExtraAccounts: true, supportsOAuth: true, iconKey: "qoder" },
-  { familyId: "zed", displayName: "Zed", queryKind: "localOnly", supportsApiKey: false, supportsExtraAccounts: false, supportsOAuth: false, iconKey: "zed" },
+  { familyId: "zed", displayName: "Zed", queryKind: "localOnly", supportsApiKey: false, supportsExtraAccounts: true, supportsOAuth: true, iconKey: "zed" },
   { familyId: "factory", displayName: "Droid", queryKind: "nativeCodingPlan", supportsApiKey: true, supportsExtraAccounts: true, supportsOAuth: false, iconKey: "factory" },
   { familyId: "jetbrains", displayName: "JetBrains AI", queryKind: "localOnly", supportsApiKey: false, supportsExtraAccounts: false, supportsOAuth: false, iconKey: "jetbrains" },
   { familyId: "groq", displayName: "Groq", queryKind: "nativeBalance", supportsApiKey: true, supportsExtraAccounts: true, supportsOAuth: false, iconKey: "groq" },

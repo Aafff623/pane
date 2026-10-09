@@ -2386,14 +2386,17 @@ function renderCard(s: Snapshot): string {
           const on = id === shown.id;
           const dot = peakTintedDot(family, accountHealthDot(id));
           const dotTitle = healthDotTitle(dot);
-          // Compact number capsules exist to save space — but a renamed
-          // account shows its note ("TTA"); only unnamed ones keep the
-          // number. Noted capsules get text width + auto-shrink instead of
-          // the fixed number cell.
+          // Compact number capsules exist to save space — but a named or
+          // noted account shows its label/note ("njf3", "TTA"); only unnamed
+          // ones keep the number. Named capsules get text width + auto-shrink
+          // instead of the fixed number cell.
+          const list = accountsCache.get(family) ?? [];
+          const entry = id === s.id ? list[0] : list.find((a) => a.id === id);
           const note = accountNote(id);
-          const tabLabel = compactTabs && !note ? String(index + 1) : label;
+          const hasCustomName = Boolean(note || entry?.label?.trim() || entry?.email?.trim());
+          const tabLabel = compactTabs && !hasCustomName ? String(index + 1) : label;
           const tabTitle = `${label} · ${dotTitle}`;
-          return `<button type="button" class="card-account-tab${on ? " on" : ""}${compactTabs && !note ? " compact" : ""}${compactTabs && note ? " compact-noted" : ""}" data-card-account="${family}|${escapeHtml(id)}" title="${escapeHtml(tabTitle)}" aria-label="${escapeHtml(label)}"><span class="acct-dot ${dot}"></span><span class="card-account-tab-label" ${compactLabelStyle(tabLabel, 10.5, 8)}>${escapeHtml(tabLabel)}</span></button>`;
+          return `<button type="button" class="card-account-tab${on ? " on" : ""}${compactTabs && !hasCustomName ? " compact" : ""}${compactTabs && hasCustomName ? " compact-noted" : ""}" data-card-account="${family}|${escapeHtml(id)}" title="${escapeHtml(tabTitle)}" aria-label="${escapeHtml(label)}"><span class="acct-dot ${dot}"></span><span class="card-account-tab-label" ${compactLabelStyle(tabLabel, 10.5, 8)}>${escapeHtml(tabLabel)}</span></button>`;
         })
         .join("")}</div>`;
     }
@@ -6224,6 +6227,7 @@ const BROWSER_LOGIN_PROVIDERS = new Set([
   "qoder",
   "trae",
   "windsurf",
+  "zed",
 ]);
 
 // Relay families whose saved credential also carries a user-chosen base
