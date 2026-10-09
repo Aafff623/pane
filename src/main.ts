@@ -2380,7 +2380,7 @@ function renderCard(s: Snapshot): string {
       const isLow = availableAccounts <= 0 || ratio <= 0.5;
       const availClass = isLow ? "is-low" : "is-ok";
       const accountState = availableAccounts === 0 ? "is-empty" : availableAccounts === totalAccounts ? "is-ready" : "is-partial";
-      accountCount = `<span class="provider-account-badge ${accountState}" title="${escapeHtml(`${totalAccounts} accounts · ${availableAccounts} available`)}"><span class="provider-account-glyph" aria-hidden="true">●</span><span class="provider-account-numbers"><span class="acct-count-total">${totalAccounts}</span><span class="acct-count-sep">/</span><span class="acct-count-avail ${availClass}">${availableAccounts}</span></span></span>`;
+      accountCount = `<span class="provider-account-badge ${accountState}" title="${escapeHtml(`${availableAccounts}/${totalAccounts} available accounts`)}"><span class="provider-account-glyph" aria-hidden="true">●</span><span class="provider-account-numbers"><span class="acct-count-avail ${availClass}">${availableAccounts}</span><span class="acct-count-sep">/</span><span class="acct-count-total">${totalAccounts}</span></span></span>`;
       const compactTabs = accountIds.length >= 4;
       accountTabs = `<div class="card-account-tabs${compactTabs ? " compact" : ""}">${accountIds
         .map((id, index) => {
@@ -3723,7 +3723,7 @@ function renderQuotaOverview(): string {
       unavailable: accountSummary.unavailable,
       total: accountSummary.total,
     }));
-    return `<span class="overview-account-count${emptyClass}" title="${title}"><b class="acct-count-total">${total}</b><span class="acct-count-sep">/</span><b class="acct-count-avail ${availClass}">${available}</b></span>`;
+    return `<span class="overview-account-count${emptyClass}" title="${title}"><b class="acct-count-avail ${availClass}">${available}</b><span class="acct-count-sep">/</span><b class="acct-count-total">${total}</b></span>`;
   };
 
   const itemHtml = ({ cardSnap, shownSnap, quota, accountSummary }: OverviewItem): string => {
