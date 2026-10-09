@@ -4512,40 +4512,174 @@ function localShortcut(action: LocalShortcutAction): string {
   return config.localShortcuts?.[action] ?? LOCAL_SHORTCUTS.find((row) => row.id === action)!.default;
 }
 
-function renderLocalShortcutSettings(): void {
+const SHORTCUT_MODIFIER_KEYS = new Set(["Control", "Alt", "Shift", "Meta"]);
+const SHORTCUT_DEFAULTS: Record<string, string> = {
+  wake: "Alt+2",
+  category: "Shift+1",
+  ...Object.fromEntries(LOCAL_SHORTCUTS.map((row) => [row.id, row.default])),
+};
+
+function shortcutRows(): { id: string; labelKey: string }[] {
+  return [
+    { id: "wake", labelKey: "settings.wakeShortcut" },
+    { id: "category", labelKey: "settings.categoryShortcut" },
+    ...LOCAL_SHORTCUTS.map((row) => ({ id: row.id as string, labelKey: row.key as string })),
+  ];
+}
+
+function shortcutValue(id: string): string {
+  if (id === "wake") return config.shortcut ?? "";
+  if (id === "category") return config.categoryShortcut || "";
+  return localShortcut(id as LocalShortcutAction);
+}
+
+/// Binding → key-cap chips ("Ctrl+S" → [Ctrl] + [S]); empty = 未设置.
+function shortcutChips(value: string): string {
+  const trimmed = value.trim();
+  if (!trimmed) return `<span class="sc-unset">${escapeHtml(t("settings.shortcutUnset"))}</span>`;
+  return trimmed
+    .split("+")
+    .map((part) => `<kbd>${escapeHtml(part.trim())}</kbd>`)
+    .join('<span class="sc-plus">+</span>');
+}
+
+/// One renderer for every row (wake + category + local actions): identical
+/// markup means identical alignment, and the recorder UX follows the
+/// mainstream pattern (VS Code / Raycast): click to record, Esc cancels,
+/// Backspace clears, the ↺ button restores the built-in default, and the ×
+/// clears the binding so a fresh one can be recorded. Conflicts surface as
+/// the row's red state text.
+function renderShortcutSettings(): void {
   const root = document.querySelector<HTMLElement>("#local-shortcuts");
   if (!root) return;
-  root.innerHTML = LOCAL_SHORTCUTS.map((row) => `<div class="setting-row"><label for="shortcut-${row.id}">${escapeHtml(t(row.key))}</label><input id="shortcut-${row.id}" data-local-shortcut="${row.id}" value="${escapeHtml(localShortcut(row.id))}" autocomplete="off" spellcheck="false"><span class="shortcut-state" role="status" aria-live="polite"></span></div>`).join("");
-  root.querySelectorAll<HTMLInputElement>("[data-local-shortcut]").forEach((input) => {
-    const action = input.dataset.localShortcut as LocalShortcutAction;
-    const save = async () => {
-      const value = input.value.trim();
-      const canonical = (binding: string) => binding.toLowerCase().split("+").map((p) => p.trim()).sort().join("+");
-      const bindings = [config.shortcut, config.categoryShortcut, ...LOCAL_SHORTCUTS.filter((r) => r.id !== action).map((r) => localShortcut(r.id))];
-      const state = input.parentElement!.querySelector<HTMLElement>(".shortcut-state")!;
-      if (value && bindings.some((binding) => canonical(binding) === canonical(value))) {
-        state.textContent = t("settings.shortcutConflict"); state.className = "shortcut-state conflict"; return;
-      }
-      try {
-        await patchConfig({ localShortcuts: { ...config.localShortcuts, [action]: value } });
-        state.textContent = t("footer.shortcutSaved"); state.className = "shortcut-state available";
-      } catch (err) {
-        state.textContent = String(err); state.className = "shortcut-state conflict";
-      }
-    };
-    input.addEventListener("keydown", (event) => {
-      if (event.key === "Tab" || event.key === "Escape") return;
-      event.preventDefault();
-      if (event.key === "Backspace" || event.key === "Delete") input.value = "";
-      else {
-        const value = action === "period" && event.key === "Shift" ? "Shift" : formatCapturedShortcut(event);
-        if (!value) return;
-        input.value = value;
-      }
-      void save();
+  root.innerHTML = shortcutRows()
+    .map((row) => {
+      const value = shortcutValue(row.id).trim();
+      const canReset = value !== (SHORTCUT_DEFAULTS[row.id] ?? "");
+      return `<div class="setting-row shortcut-row" data-sc-row="${row.id}">
+        <label>${escapeHtml(t(row.labelKey))}</label>
+        <span class="shortcut-state" role="status" aria-live="polite"></span>
+        ${canReset ? `<button type="button" class="mini-btn sc-icon" data-sc-reset="${row.id}" title="${escapeHtml(t("settings.shortcutResetTip"))}" aria-label="${escapeHtml(t("settings.shortcutResetTip"))}">${uiIcon("arrowsClockwise")}</button>` : ""}
+        <button type="button" class="shortcut-field" data-sc-field="${row.id}">${shortcutChips(value)}</button>
+        ${value ? `<button type="button" class="mini-btn sc-icon" data-sc-clear="${row.id}" title="${escapeHtml(t("settings.shortcutClearTip"))}" aria-label="${escapeHtml(t("settings.shortcutClearTip"))}">${uiIcon("x")}</button>` : ""}
+      </div>`;
+    })
+    .join("");
+  root.querySelectorAll<HTMLButtonElement>("[data-sc-reset]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const id = btn.dataset.scReset!;
+      void applyShortcut(id, SHORTCUT_DEFAULTS[id] ?? "");
     });
-    input.addEventListener("change", () => void save());
   });
+  root.querySelectorAll<HTMLButtonElement>("[data-sc-clear]").forEach((btn) => {
+    btn.addEventListener("click", () => void applyShortcut(btn.dataset.scClear!, ""));
+  });
+  root.querySelectorAll<HTMLButtonElement>("[data-sc-field]").forEach((field) => {
+    field.addEventListener("click", () => startShortcutRecording(field));
+  });
+}
+
+function startShortcutRecording(field: HTMLButtonElement): void {
+  if (field.classList.contains("recording")) return;
+  const id = field.dataset.scField!;
+  const row = field.closest<HTMLElement>(".shortcut-row");
+  const state = row?.querySelector<HTMLElement>(".shortcut-state") ?? null;
+  field.classList.add("recording");
+  field.innerHTML = `<span class="sc-recording">${escapeHtml(t("settings.shortcutRecording"))}</span>`;
+  if (state) {
+    state.textContent = "";
+    state.className = "shortcut-state";
+  }
+  let finished = false;
+  const finish = (next: string | null) => {
+    if (finished) return;
+    finished = true;
+    document.removeEventListener("keydown", onKey, true);
+    field.classList.remove("recording");
+    if (next === null) {
+      // Cancel: restore the chips in place (no re-render, so a click that
+      // is already headed for another row still lands correctly).
+      field.innerHTML = shortcutChips(shortcutValue(id));
+      return;
+    }
+    void applyShortcut(id, next);
+  };
+  const onKey = (event: KeyboardEvent) => {
+    event.preventDefault();
+    event.stopPropagation();
+    if (event.key === "Escape") {
+      finish(null);
+      return;
+    }
+    if (event.key === "Backspace" || event.key === "Delete") {
+      finish("");
+      return;
+    }
+    if (SHORTCUT_MODIFIER_KEYS.has(event.key)) {
+      // A lone modifier is legal only for the cycle key (its default IS Shift).
+      if (id === "period" && event.key === "Shift") finish("Shift");
+      return;
+    }
+    const captured = formatCapturedShortcut(event);
+    if (captured) finish(captured);
+  };
+  document.addEventListener("keydown", onKey, true);
+  field.addEventListener("blur", () => finish(null), { once: true });
+}
+
+const shortcutCanonical = (binding: string) =>
+  binding.toLowerCase().split("+").map((p) => p.trim()).filter(Boolean).sort().join("+");
+
+async function applyShortcut(id: string, value: string): Promise<void> {
+  const trimmed = value.trim();
+  const row = document.querySelector<HTMLElement>(`[data-sc-row="${id}"]`);
+  const state = row?.querySelector<HTMLElement>(".shortcut-state") ?? null;
+  const status = document.querySelector("#status");
+  if (trimmed) {
+    const clash = shortcutRows().some((other) => {
+      if (other.id === id) return false;
+      const otherValue = shortcutValue(other.id).trim();
+      return otherValue && shortcutCanonical(otherValue) === shortcutCanonical(trimmed);
+    });
+    if (clash) {
+      if (state) {
+        state.textContent = t("settings.shortcutConflict");
+        state.className = "shortcut-state conflict";
+      }
+      renderShortcutSettings();
+      return;
+    }
+  }
+  if (state) {
+    state.textContent = t("settings.shortcutChecking");
+    state.className = "shortcut-state checking";
+  }
+  try {
+    if (id === "wake") {
+      await invoke("set_shortcut", { shortcut: trimmed });
+      await patchConfig({ shortcut: trimmed });
+    } else if (id === "category") {
+      config.categoryShortcut = trimmed;
+      await patchConfig({ categoryShortcut: trimmed });
+    } else {
+      await patchConfig({ localShortcuts: { ...config.localShortcuts, [id]: trimmed } });
+    }
+    if (status) status.textContent = trimmed ? t("footer.shortcutSaved") : t("footer.shortcutCleared");
+    renderShortcutSettings();
+    const fresh = document.querySelector<HTMLElement>(`[data-sc-row="${id}"] .shortcut-state`);
+    if (fresh && trimmed) {
+      fresh.textContent = t("settings.shortcutAvailable");
+      fresh.className = "shortcut-state available";
+    }
+  } catch (err) {
+    if (status) status.textContent = String(err);
+    renderShortcutSettings();
+    const fresh = document.querySelector<HTMLElement>(`[data-sc-row="${id}"] .shortcut-state`);
+    if (fresh) {
+      fresh.textContent = t("settings.shortcutConflict");
+      fresh.className = "shortcut-state conflict";
+    }
+  }
 }
 
 function isDashboardActive(): boolean {
@@ -11461,52 +11595,7 @@ async function initSettings(): Promise<void> {
     void patchConfig({ showTrend: showTrendEl.checked }).then(renderAll);
   });
 
-  const shortcut = document.querySelector<HTMLInputElement>("#shortcut")!;
-  const shortcutState = document.querySelector<HTMLElement>("#shortcut-state");
-  shortcut.value = config.shortcut;
-  shortcut.addEventListener("change", async () => {
-    const status = document.querySelector("#status")!;
-    if (shortcutState) {
-      shortcutState.textContent = t("settings.shortcutChecking");
-      shortcutState.className = "shortcut-state checking";
-    }
-    try {
-      await invoke("set_shortcut", { shortcut: shortcut.value });
-      await patchConfig({ shortcut: shortcut.value });
-      status.textContent = shortcut.value.trim() ? t("footer.shortcutSaved") : t("footer.shortcutCleared");
-      if (shortcutState) {
-        shortcutState.textContent = shortcut.value.trim() ? t("settings.shortcutAvailable") : "";
-        shortcutState.className = "shortcut-state available";
-      }
-    } catch (err) {
-      status.textContent = `${err}`;
-      shortcut.value = config.shortcut;
-      if (shortcutState) {
-        shortcutState.textContent = t("settings.shortcutConflict");
-        shortcutState.className = "shortcut-state conflict";
-      }
-    }
-  });
-
-  const categoryShortcut = document.querySelector<HTMLInputElement>("#category-shortcut")!;
-  categoryShortcut.value = config.categoryShortcut || "Shift+1";
-  categoryShortcut.addEventListener("keydown", (event) => {
-    if (event.key === "Tab" || event.key === "Escape") return;
-    event.preventDefault();
-    const captured = formatCapturedShortcut(event);
-    if (!captured) return;
-    categoryShortcut.value = captured;
-    config.categoryShortcut = captured;
-    void patchConfig({ categoryShortcut: captured });
-    document.querySelector("#status")!.textContent = t("footer.shortcutSaved");
-  });
-  categoryShortcut.addEventListener("change", () => {
-    const value = categoryShortcut.value.trim();
-    config.categoryShortcut = value;
-    void patchConfig({ categoryShortcut: value });
-  });
-
-  renderLocalShortcutSettings();
+  renderShortcutSettings();
   const proxyEnabled = document.querySelector<HTMLInputElement>("#proxy-enabled")!;
   const proxyUrl = document.querySelector<HTMLInputElement>("#proxy-url")!;
   proxyEnabled.checked = config.proxy?.enabled ?? false;
@@ -11709,9 +11798,7 @@ function syncSettingsControls(): void {
   setCheck("#glass", config.glassEffects !== false);
   setCheck("#reduce-anim", config.reduceAnimations === true);
   setSelect("#jump-animation", config.jumpAnimation === "instant" ? "instant" : "smooth");
-  setNum("#shortcut", config.shortcut);
-  setNum("#category-shortcut", config.categoryShortcut || "Shift+1");
-  renderLocalShortcutSettings();
+  renderShortcutSettings();
   setCheck("#proxy-enabled", config.proxy?.enabled ?? false);
   setNum("#proxy-url", config.proxy?.url ?? "");
   const autostart = document.querySelector<HTMLInputElement>("#autostart");
@@ -12039,7 +12126,7 @@ function buildPanelShell(): void {
   const shortcuts = panelBlock("st-shortcuts", "settings.shortcutManage");
   const scPad = document.createElement("div");
   scPad.className = "st-pad";
-  const shortcutInner = document.querySelector("#shortcut")?.closest(".acc-inner");
+  const shortcutInner = document.querySelector("#local-shortcuts")?.closest(".acc-inner");
   if (shortcutInner) {
     while (shortcutInner.firstChild) scPad.append(shortcutInner.firstChild as HTMLElement);
   }

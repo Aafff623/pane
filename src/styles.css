@@ -475,6 +475,71 @@ body.settings-open #settings {
   color: var(--secondary-foreground);
 }
 
+/* Shortcut recorder rows: one layout for every row (wake, category and
+   local actions) so the columns line up; the field renders the binding as
+   key caps and owns the record/cancel/clear affordances. */
+.shortcut-row .shortcut-field {
+  flex: none;
+  width: 178px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  background: var(--background);
+  border: 1px solid var(--input);
+  border-radius: 7px;
+  color: var(--foreground);
+  font: inherit;
+  font-size: 12px;
+  padding: 5px 9px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.shortcut-row .shortcut-field:hover {
+  border-color: #52525b;
+}
+
+.shortcut-row .shortcut-field.recording {
+  border-color: #52525b;
+  box-shadow: 0 0 0 3px rgb(212 212 216 / 0.12);
+}
+
+.shortcut-row .shortcut-field.recording .sc-recording {
+  color: var(--muted-foreground);
+  animation: scPulse 1.2s ease-in-out infinite;
+}
+
+@keyframes scPulse {
+  50% {
+    opacity: 0.4;
+  }
+}
+
+.shortcut-row .shortcut-field kbd {
+  background: var(--muted);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  padding: 1px 6px;
+  font-family: inherit;
+  font-size: 11.5px;
+  font-weight: 600;
+}
+
+.shortcut-row .sc-plus {
+  color: var(--muted-foreground);
+  font-size: 10px;
+}
+
+.shortcut-row .sc-unset {
+  color: var(--muted-foreground);
+  font-style: italic;
+}
+
+.shortcut-row .sc-icon {
+  padding: 4px 7px;
+}
+
 .shortcut-state {
   min-width: 68px;
   font-size: 10px;
