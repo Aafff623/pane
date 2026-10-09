@@ -13,6 +13,7 @@ mod httpapi;
 mod i18n;
 mod kiro_login;
 mod login_accounts;
+mod qoder_login;
 mod oauth;
 mod platform;
 mod pricing;
@@ -2217,6 +2218,7 @@ async fn fetch_provider_snapshot(provider_id: String, allow_disabled: bool) -> R
         return Ok(match family.as_str() {
             "copilot" => providers::copilot::snapshot_with_login(login).await,
             "kiro" => providers::kiro::snapshot_with_login(login).await,
+            "qoder" => providers::qoder::snapshot_with_login(login).await,
             _ => providers::grok::snapshot_with_login(login).await,
         });
     }
@@ -2467,6 +2469,7 @@ async fn run_usage_fetch(app: &tauri::AppHandle) -> Vec<providers::Snapshot> {
         let mut known: HashSet<String> = match family {
             "grok" => providers::grok::default_identity().into_iter().collect(),
             "kiro" => providers::kiro::default_identity().into_iter().collect(),
+            "qoder" => providers::qoder::default_identity().await.into_iter().collect(),
             _ => HashSet::new(),
         };
         for login in login_accounts::load_with_imported_single_login(family) {
@@ -2492,6 +2495,10 @@ async fn run_usage_fetch(app: &tauri::AppHandle) -> Vec<providers::Snapshot> {
                 "kiro" => (
                     providers::kiro::login_card_name(&login),
                     Box::pin(providers::kiro::snapshot_with_login(login)),
+                ),
+                "qoder" => (
+                    providers::qoder::login_card_name(&login),
+                    Box::pin(providers::qoder::snapshot_with_login(login)),
                 ),
                 _ => (
                     providers::grok::login_card_name(&login),
@@ -4209,6 +4216,23 @@ fn kiro_login_cancel(login_id: String) {
     kiro_login::cancel(&login_id);
 }
 
+/// Qoder device login (qoder.com selection page + openapi deviceToken
+/// poll): start → open the auth URL → poll until the token lands.
+#[tauri::command]
+fn qoder_login_start() -> Result<qoder_login::LoginStart, String> {
+    qoder_login::start()
+}
+
+#[tauri::command]
+async fn qoder_login_poll(login_id: String) -> qoder_login::LoginPoll {
+    qoder_login::poll(&login_id).await
+}
+
+#[tauri::command]
+fn qoder_login_cancel(login_id: String) {
+    qoder_login::cancel(&login_id);
+}
+
 /// Deletes Pane's own OAuth credential file for the provider. The CLI's
 /// sign-in is untouched.
 #[tauri::command]
@@ -4909,6 +4933,9 @@ pub fn run() {
             kiro_login_start,
             kiro_login_poll,
             kiro_login_cancel,
+            qoder_login_start,
+            qoder_login_poll,
+            qoder_login_cancel,
             oauth_logout,
             get_config,
             set_config,

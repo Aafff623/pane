@@ -63,6 +63,9 @@ pub mod login_accounts;
 #[path = "../../src-tauri/src/kiro_login.rs"]
 pub mod kiro_login;
 
+#[path = "../../src-tauri/src/qoder_login.rs"]
+pub mod qoder_login;
+
 #[path = "../../src-tauri/src/auth_center.rs"]
 pub mod auth_center;
 

@@ -531,7 +531,9 @@ const PROVIDER_DEFINITIONS: &[ProviderDefinition] = &[
         display_name: "Qoder",
         query_kind: QueryKind::NativeSnapshot,
         supports_api_key: false,
-        supports_extra_accounts: false,
+        // Pane-managed Qoder logins (auth center, device login) are
+        // independent accounts — same parallel-card treatment as Codex.
+        supports_extra_accounts: true,
         icon_key: "qoder",
         category: ProviderCategory::Coding,
     },
@@ -714,6 +716,7 @@ mod tests {
             "venice",
             "warp",
             "mimo",
+            "qoder",
             "factory",
             "groq",
             "huggingface",

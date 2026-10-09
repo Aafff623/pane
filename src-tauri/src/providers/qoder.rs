@@ -9,6 +9,7 @@
 
 use super::qodercn;
 use super::Snapshot;
+use serde_json::Value;
 use std::path::{Path, PathBuf};
 
 const ID: &str = "qoder";
@@ -35,6 +36,44 @@ pub fn local_credential_hint() -> Option<String> {
     auth_file_path().map(|_| "Qoder app sign-in".to_string())
 }
 
+/// Snapshot for one Pane-managed Qoder login (login_accounts): the same
+/// openapi plan + credit-usage pair the app's own token uses, under the
+/// account's card id.
+pub async fn snapshot_with_login(login: crate::login_accounts::LoginAccount) -> Snapshot {
+    let id = crate::login_accounts::card_id_for_account(ID, &login);
+    let name = login_card_name(&login);
+    match fetch_with_token(&login.access_token, &id, &name).await {
+        Ok(s) => s,
+        Err(e) => Snapshot::error(&id, &name, e),
+    }
+}
+
+pub(crate) fn login_card_name(login: &crate::login_accounts::LoginAccount) -> String {
+    if !login.label.trim().is_empty() {
+        return login.label.clone();
+    }
+    if !login.email.trim().is_empty() {
+        return format!("Qoder — {}", login.email);
+    }
+    format!("Qoder @{}", &login.account_id[..login.account_id.len().min(12)])
+}
+
+/// The local app token's account id (userinfo), for the account-card
+/// dedup — a Pane login for the same Qoder user must not double-card.
+/// Only reaches the network when the Qoder app is installed.
+pub async fn default_identity() -> Option<String> {
+    let auth_path = auth_file_path()?;
+    let token = qodercn::load_token(&auth_path).ok()?;
+    let doc = qodercn::fetch_api(OPENAPI_BASE, &token, "/api/v1/userinfo", "userinfo")
+        .await
+        .ok()?;
+    doc.get("id")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_string)
+}
+
 async fn fetch() -> Result<Snapshot, String> {
     let Some(auth_path) = auth_file_path() else {
         return Ok(Snapshot::no_credentials(
@@ -44,13 +83,17 @@ async fn fetch() -> Result<Snapshot, String> {
         ));
     };
     let token = qodercn::load_token(&auth_path)?;
+    fetch_with_token(&token, ID, NAME).await
+}
+
+async fn fetch_with_token(token: &str, id: &str, name: &str) -> Result<Snapshot, String> {
     let (plan, usage) = tokio::join!(
-        qodercn::fetch_api(OPENAPI_BASE, &token, PLAN_PATH, "plan"),
-        qodercn::fetch_api(OPENAPI_BASE, &token, USAGE_PATH, "usage")
+        qodercn::fetch_api(OPENAPI_BASE, token, PLAN_PATH, "plan"),
+        qodercn::fetch_api(OPENAPI_BASE, token, USAGE_PATH, "usage")
     );
     let usage = usage?;
     let (plan, metrics) = qodercn::credit_metrics(plan.as_ref().ok(), &usage)?;
-    Ok(Snapshot::ok(ID, NAME, plan, metrics))
+    Ok(Snapshot::ok(id, name, plan, metrics))
 }
 
 fn auth_file_path() -> Option<PathBuf> {

@@ -72,7 +72,7 @@ export const providerCatalog: readonly ProviderDefinition[] = [
   { familyId: "warp", displayName: "Warp", queryKind: "nativeCodingPlan", supportsApiKey: true, supportsExtraAccounts: true, supportsOAuth: false, iconKey: "warp" },
   { familyId: "mimo", displayName: "MiMo", queryKind: "nativeCodingPlan", supportsApiKey: true, supportsExtraAccounts: true, supportsOAuth: false, iconKey: "mimo" },
   { familyId: "trae", displayName: "Trae", queryKind: "nativeSnapshot", supportsApiKey: false, supportsExtraAccounts: false, supportsOAuth: false, iconKey: "trae" },
-  { familyId: "qoder", displayName: "Qoder", queryKind: "nativeSnapshot", supportsApiKey: false, supportsExtraAccounts: false, supportsOAuth: false, iconKey: "qoder" },
+  { familyId: "qoder", displayName: "Qoder", queryKind: "nativeSnapshot", supportsApiKey: false, supportsExtraAccounts: true, supportsOAuth: true, iconKey: "qoder" },
   { familyId: "zed", displayName: "Zed", queryKind: "localOnly", supportsApiKey: false, supportsExtraAccounts: false, supportsOAuth: false, iconKey: "zed" },
   { familyId: "factory", displayName: "Droid", queryKind: "nativeCodingPlan", supportsApiKey: true, supportsExtraAccounts: true, supportsOAuth: false, iconKey: "factory" },
   { familyId: "jetbrains", displayName: "JetBrains AI", queryKind: "localOnly", supportsApiKey: false, supportsExtraAccounts: false, supportsOAuth: false, iconKey: "jetbrains" },
