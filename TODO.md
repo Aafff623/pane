@@ -10,16 +10,6 @@ Handoff parcels in `temp/handoff/` cite task IDs from this board. The board does
 
 ## In progress
 
-- [ ] T-0026 — Firecrawl 等文字余额 Provider 在总览条形/圆环及悬停中展示真实余额；可靠百分比保持实填，分母未知时用中性斜纹条/虚线圆环和 ? 标记；多 Key 分别显示余额与日期，不累加共享余额；构建、选择/真实渲染器回归、浏览器图形检查及规范重启通过，待用户原生 UI 验收（证据 temp/reports/firecrawl-overview-text-20261010.md）
-
-- [ ] T-0025 — 悬浮看板字号按真实行宽及各标题剩余空间独立放大/缩小，随窗口、重绘及字体加载更新；总览百分比/时间/胶囊同步适配，详情 provider 图标内缩 6 px；前端构建、320/450/800 px 浏览器布局检查及规范重启通过，待用户原生 UI 验收（证据 temp/reports/responsive-typography-20261010.md）
-
-- [ ] T-0024 — 开发弹窗黑屏修复：启动脚本按 -Id 正确替换旧 Vite 并检查主脚本/样式；收窄 Vite 扫描与监听目录，加入可见加载及重载提示；前端构建、资源 HTTP 200、实际进程替换及浏览器可见性检查通过，规范重启后待用户原生 UI 验收（证据 temp/reports/black-screen-recovery-20261010.md）
-
-- [ ] T-0023 — 全部 65 家 Provider 查询入口与额度机制审计已落地：移除已确认的缺用量补 0/固定套餐上限/历史余额推额度；修复 Firecrawl/Tavily 范围、OpenRouter 周期与 Brave 凭据缓存；前端/Rust 构建、609 项测试（新增 19）、规范重启及本机 Firecrawl/Tavily/Brave 等接口核验通过；完整边界见 temp/reports/provider-quota-mechanism-audit-20261010.md，待用户 UI 验收
-- [ ] T-0020 — MCP/搜索多Key层级管理与卡片排版修复（Firecrawl多Key并列显示与全量额度查询，解决趋势图穿插），及Codex CLI网络重试与错误态诊断
-- [ ] T-0021 — Brave 使用「已用 X / Y credits」，Bocha ¥ 余额不动；Firecrawl 按真实余额与重置日期展示，不将 plan credits 当总额度或倒推已用（含额外额度、团队共享场景）；纳入 T-0023 的统一机制修复，待用户 UI 验收
-- [ ] T-0022 — 已备份删除保险库指定 3 条 Firecrawl；按用户追加要求将 fc-06e…5f32 加密入库（6→7），设置页可管理，ZCode CLI 副本保留并按值去重，fc-922…839c 环境变量保留；卡片仍为 2 把不同 Key，待用户设置页/UI 验收
 - [ ] T-0016 — 官网模块二交互演示右侧布局与模块三/四 GSAP 动效恢复：将 Alt+2/Shift 交互卡片重构至面板右侧第 3 列空置区，彻底恢复双向跑马灯与特性卡片循环播放动效
 - [ ] T-0019 — 花费面板时段完整性（通用 bug）：今天 / 昨天 / 7 天 / 30 天 / 全部 各时段在「美元」与「tokens」两种口径下都显示非零数据（官网演示数据已修；真机扫描口径待核对）
 
