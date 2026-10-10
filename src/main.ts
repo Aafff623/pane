@@ -14,6 +14,8 @@ import { PEAK_RULES, isProviderInPeak, type PeakRule } from "./peakHours";
 import { providerVisual } from "./providerVisuals";
 import { MECHANISMS } from "./providerMechanisms";
 import { uiIcon, type UiIconName } from "./uiIcons";
+import { fitDashboardTypography, observeDashboardTypography } from "./responsiveTypography";
+import { overviewTextMetrics } from "./overviewTextMetrics";
 import {
   applyStaticI18n,
   displayLinkLabel,
@@ -72,11 +74,6 @@ interface Metric {
   value: string | null;
   resets_at: number | null;
   period_ms: number | null;
-}
-
-interface MetricTokenUsage {
-  tokens: number;
-  source: "provider" | "ledger";
 }
 
 interface Snapshot {
@@ -177,16 +174,6 @@ function staleHelp(s: Snapshot): string {
     fix = t("stale.fixNet");
   }
   return `${w}.\n${fix}\n${t("stale.tail")}`;
-}
-
-/// ⚠ shown when some events have no known model price — their tokens are
-/// counted, but no dollars are guessed, so dollar totals under-report.
-function unpricedWarn(sp: ProviderSpend | undefined): string {
-  if (!sp || sp.unpriced <= 0) return "";
-  const models = sp.unpriced_models.join(", ") || "unknown models";
-  return `<span class="stale" title="${escapeHtml(
-    t("unpriced.tip", { n: sp.unpriced, models }),
-  )}">⚠</span>`;
 }
 
 type SpendTab = "today" | "yesterday" | "last30";
@@ -836,29 +823,6 @@ function fmtTokens(v: number): string {
   return String(Math.round(v));
 }
 
-// Token counts must come from an actual provider report or the local spend
-// ledger. A quota percentage is deliberately never converted into tokens.
-function parseTokenAmount(text: string | null | undefined): number | null {
-  if (!text || /\b(?:credit|credits|积分)\b/i.test(text)) return null;
-  const match = text.match(/([\d,.]+)\s*([kmbt])?\s*tokens?\b/i);
-  if (!match) return null;
-  const amount = Number(match[1].replace(/,/g, ""));
-  if (!Number.isFinite(amount) || amount < 0) return null;
-  const multiplier = ({ k: 1e3, m: 1e6, b: 1e9, t: 1e12 } as Record<string, number>)[(match[2] ?? "").toLowerCase()] ?? 1;
-  return amount * multiplier;
-}
-
-function metricTokenUsage(providerId: string, metric: Metric): MetricTokenUsage | null {
-  const raw = [metric.detail, metric.value, metric.label].filter(Boolean).join(" · ");
-  const reported = parseTokenAmount(raw);
-  if (reported !== null) return { tokens: reported, source: "provider" };
-
-  // Local CLI/SQLite ledgers are real token counts, but their window is 30
-  // days rather than the provider quota window. The UI labels that source.
-  const ledger = lastSpend.find((sp) => sp.id === providerId);
-  if (ledger && ledger.last30.tokens > 0) return { tokens: ledger.last30.tokens, source: "ledger" };
-  return null;
-}
 
 function fmtDuration(ms: number): string {
   const mins = Math.max(1, Math.round(ms / 60000));
@@ -993,28 +957,16 @@ function defaultProviderLayout(
     if (order.includes(m.label)) continue; // one row per label
     order.push(m.label);
     // Used stays on the card: unlimited One/New API keys have no bar.
-    if (m.kind !== "progress" && m.label !== "Used") onDemand.push(m.label);
+    // For MCP / search services, don't tuck their per-key balance rows into onDemand.
+    const isMcpCard = s?.id ? providerCategory(providerFamily(s.id)) === "mcp" : false;
+    if (m.kind !== "progress" && m.label !== "Used" && !isMcpCard) onDemand.push(m.label);
   }
   // Balance-only providers (Moonshot, DeepSeek…) have no progress rows at
   // all — tucking everything would leave an empty card with a floating
   // caret, so their text rows stay visible.
   if (order.length > 0 && onDemand.length === order.length) onDemand.length = 0;
-  if (spend && config.showTrend) {
+  if ((spend || hasTrend) && config.showTrend) {
     order.push(TREND_KEY); // trend stays always-visible when opted in, like Mac
-    for (const [label] of SPEND_KEYS) {
-      order.push(label);
-      onDemand.push(label);
-    }
-  } else if (spend) {
-    // Spend source present but trend opt-in is off: surface the spend
-    // breakdown without the bar.
-    for (const [label] of SPEND_KEYS) {
-      order.push(label);
-      onDemand.push(label);
-    }
-  } else if (hasTrend && config.showTrend) {
-    // Quota-history trend (no local logs): the bars only, no spend rows.
-    order.push(TREND_KEY);
   }
   const starred = migrateStar
     ? (s?.metrics ?? []).filter((m) => m.kind === "progress").slice(0, 2).map((m) => m.label)
@@ -1120,7 +1072,24 @@ function ensureLayout(): void {
     changed = true;
   }
 
+  // Removed providers must never be re-appended into providerOrder, and
+  // must be purged if they slipped into layout.
+  const prunedOrder = layout.providerOrder.filter(
+    (id) => !config.removedProviders.includes(providerFamily(id)),
+  );
+  if (prunedOrder.length !== layout.providerOrder.length) {
+    layout.providerOrder = prunedOrder;
+    changed = true;
+  }
+  for (const id of Object.keys(layout.providers)) {
+    if (config.removedProviders.includes(providerFamily(id))) {
+      delete layout.providers[id];
+      changed = true;
+    }
+  }
+
   for (const [id] of ALL_PROVIDERS) {
+    if (config.removedProviders.includes(id)) continue;
     if (!layout.providerOrder.includes(id)) {
       layout.providerOrder.push(id);
       changed = true;
@@ -1318,13 +1287,18 @@ function ensureLayout(): void {
         void patchConfig({ pinned: null }).catch(() => {});
       }
     }
+    // MCP / search cards carry one text row per stored key; those rows are
+    // the card's point, so they stay always-visible and grouped directly
+    // under the headline bar instead of scattering around the trend chart.
+    const isMcpCard = providerCategory(providerFamily(s.id)) === "mcp";
     // New metrics ship once; spend rows appear when spend data first exists.
     for (const m of s.metrics) {
       if (!L.metricOrder.includes(m.label)) {
-        // Progress bars slot in above the Usage Trend (bars first, trend
-        // after, like the Mac cards); everything else appends at the end.
+        // Progress bars (and every MCP key row) slot in above the Usage
+        // Trend — bars and keys first, trend after, like the Mac cards;
+        // everything else appends at the end.
         const trendAt = L.metricOrder.indexOf(TREND_KEY);
-        if (m.kind === "progress" && trendAt >= 0) {
+        if ((m.kind === "progress" || isMcpCard) && trendAt >= 0) {
           L.metricOrder.splice(trendAt, 0, m.label);
         } else {
           L.metricOrder.push(m.label);
@@ -1332,7 +1306,8 @@ function ensureLayout(): void {
         // Trae CN's pack rows are the card's point — the split the user
         // wants to see — so its text rows ship always-visible instead of
         // behind the Show-more caret (progress bars never tuck anyway).
-        if (m.kind !== "progress" && m.label !== "Used" && providerFamily(s.id) !== "traecn") {
+        // MCP key rows get the same treatment (see defaultProviderLayout).
+        if (m.kind !== "progress" && m.label !== "Used" && providerFamily(s.id) !== "traecn" && !isMcpCard) {
           L.onDemand.push(m.label);
         }
         changed = true;
@@ -1381,6 +1356,26 @@ function ensureLayout(): void {
     if (dedupedOrder.length !== L.metricOrder.length) {
       L.metricOrder = dedupedOrder;
       changed = true;
+    }
+    // Repair MCP / search layouts saved while a key discovered on a later
+    // refresh was appended AFTER the trend chart, splitting the key list in
+    // two. Key rows belong together under the headline bar, trend last.
+    if (isMcpCard) {
+      const trendAt = L.metricOrder.indexOf(TREND_KEY);
+      if (trendAt >= 0 && trendAt !== L.metricOrder.length - 1) {
+        L.metricOrder.splice(trendAt, 1);
+        L.metricOrder.push(TREND_KEY);
+        changed = true;
+      }
+      // The same incremental path tucked new key rows behind the Show-more
+      // caret, even though defaultProviderLayout has always kept MCP key
+      // rows visible. Promote this card's own rows back onto the card;
+      // spend rows stay tucked.
+      const own = new Set(s.metrics.map((m) => m.label));
+      if (L.onDemand.some((k) => own.has(k))) {
+        L.onDemand = L.onDemand.filter((k) => !own.has(k));
+        changed = true;
+      }
     }
     // Repair saved layouts where EVERY visible row sits behind the caret
     // (balance-only cards defaulted that way before this rule existed):
@@ -1552,24 +1547,15 @@ function compactLabelStyle(text: string, maxPx: number, minPx: number): string {
   return `style="--compact-label-size:${size.toFixed(1)}px"`;
 }
 
-/// Measured label fitting: start at the max size and step down only while the
-/// text actually overflows the space the flex layout gave the element, so
-/// short names stay large and ellipsis is a last resort (min size exceeded).
-/// Character-count guesses (compactLabelStyle) got this wrong in both
-/// directions — tiny fonts with room to spare, and ellipsis while space sat
-/// unused next to badges.
+let refreshTypographyObservation: (() => void) | undefined;
+
+/// Fit both overview rows and detail headings against their own pixel budgets.
 function fitProviderNames(): void {
-  const dense = document.documentElement.dataset.density === "compact";
-  for (const el of document.querySelectorAll<HTMLElement>(".provider-name[data-fit-max]")) {
-    const max = Number(el.dataset.fitMax ?? 16) - (dense ? 1 : 0);
-    const min = Number(el.dataset.fitMin ?? 10);
-    let size = max;
-    el.style.fontSize = `${size}px`;
-    while (size > min && el.scrollWidth > el.clientWidth) {
-      size -= 0.5;
-      el.style.fontSize = `${size}px`;
-    }
-  }
+  const root = document.querySelector<HTMLElement>("#providers");
+  if (!root) return;
+  refreshTypographyObservation ??= observeDashboardTypography(root);
+  refreshTypographyObservation();
+  fitDashboardTypography(root);
 }
 
 function setCardNote(cardId: string, note: string): void {
@@ -1597,7 +1583,14 @@ function removeProviderCard(cardId: string): void {
   // keep the old hide-this-card semantics — the family row stays put.
   if (cardId.includes("@")) {
     if (!config.disabled.includes(cardId)) config.disabled = [...config.disabled, cardId];
-    void patchConfig({ disabled: config.disabled });
+    if (config.layout?.providerOrder) {
+      config.layout.providerOrder = config.layout.providerOrder.filter((id) => id !== cardId);
+    }
+    if (config.layout?.providers) {
+      delete config.layout.providers[cardId];
+    }
+    lastSnapshots = lastSnapshots.filter((s) => s.id !== cardId);
+    void patchConfig({ disabled: config.disabled, layout: config.layout });
     renderAll();
     return;
   }
@@ -1606,7 +1599,16 @@ function removeProviderCard(cardId: string): void {
   // disk — the drawer footer's removed list is the way back.
   config.removedProviders = [...new Set([...config.removedProviders, family])];
   if (!config.disabled.includes(family)) config.disabled = [...config.disabled, family];
-  void patchConfig({ removedProviders: config.removedProviders, disabled: config.disabled });
+  if (config.layout?.providerOrder) {
+    config.layout.providerOrder = config.layout.providerOrder.filter((id) => providerFamily(id) !== family);
+  }
+  if (config.layout?.providers) {
+    for (const key of Object.keys(config.layout.providers)) {
+      if (providerFamily(key) === family) delete config.layout.providers[key];
+    }
+  }
+  lastSnapshots = lastSnapshots.filter((s) => providerFamily(s.id) !== family);
+  void patchConfig({ removedProviders: config.removedProviders, disabled: config.disabled, layout: config.layout });
   custConfigOpen = null;
   renderAll();
   renderDrawerBody();
@@ -1710,7 +1712,7 @@ function saveLayout(syncTray = true): void {
 // Dashboard rendering
 // ---------------------------------------------------------------------------
 
-function renderMetric(m: Metric, providerId?: string): string {
+function renderMetric(m: Metric, _providerId?: string): string {
   if (m.kind === "progress" && m.used_percent !== null) {
     const used = clampPercent(m.used_percent);
     const left = Math.round(100 - used);
@@ -1718,16 +1720,10 @@ function renderMetric(m: Metric, providerId?: string): string {
     // 0-60% used → blue, 60-75% → amber, 75-100% → red. The bar's width
     // already IS the used percent, so the thresholds compare `used`.
     const level = used >= 75 ? "low" : used >= 60 ? "warn" : "";
-    const tokenUsage = providerId ? metricTokenUsage(providerId, m) : null;
-    const tokenHeadline = tokenUsage ? t("card.tokens", { n: fmtTokens(tokenUsage.tokens) }) : null;
-    const headline = tokenHeadline ?? (config.showUsed ? t("card.pctUsed", { n: Math.round(used) }) : t("card.pctLeft", { n: left }));
-    const headlineAlt = tokenHeadline
-      ? tokenUsage?.source === "ledger"
-        ? t("card.tokensWindow", { n: fmtTokens(tokenUsage.tokens) })
-        : t("card.tokensSourceProvider")
-      : config.showUsed
-        ? t("card.pctLeft", { n: left })
-        : t("card.pctUsed", { n: Math.round(used) });
+    // Detail card metrics uniformly display remaining percentage
+    // per user specification; token usage is not displayed here.
+    const headline = config.showUsed ? t("card.pctUsed", { n: Math.round(used) }) : t("card.pctLeft", { n: left });
+    const headlineAlt = config.showUsed ? t("card.pctLeft", { n: left }) : t("card.pctUsed", { n: Math.round(used) });
 
     let resetHtml = "";
     let resetPlain = "";
@@ -1873,37 +1869,14 @@ function renderTrend(source: TrendSource): string {
     </div>`;
 }
 
-function renderSpendRow(
-  providerId: string,
-  label: string,
-  key: SpendTab,
-  w: SpendWindow,
-  sp?: ProviderSpend,
-): string {
-  // Cursor's CSV aggregates requests, so its dollars are honest estimates.
-  const text =
-    w.tokens > 0 || w.cost > 0.005
-      ? providerId === "cursor"
-        ? t("card.tokensEst", { cost: fmtMoney(w.cost), n: fmtTokens(w.tokens) })
-        : t("card.tokensPlain", { cost: fmtMoney(w.cost), n: fmtTokens(w.tokens) })
-      : t("card.noData");
-  const warn = key === "last30" ? unpricedWarn(sp) : "";
-  return `
-    <div class="metric-text spend-row" data-spend="${providerId}|${key}">
-      <span>${escapeHtml(displayMetricLabel(label))} ${warn}</span>
-      <span class="detail">${text}</span>
-    </div>`;
-}
-
 /// One card row addressed by its layout key.
-function renderItem(s: Snapshot, spend: ProviderSpend | undefined, key: string): string {
+function renderItem(s: Snapshot, _spend: ProviderSpend | undefined, key: string): string {
   if (key === TREND_KEY) {
     const trend = trendSourceFor(s.id);
     return trend ? renderTrend(trend) : "";
   }
   const spendKey = SPEND_KEYS.find(([label]) => label === key);
-  if (spendKey)
-    return spend ? renderSpendRow(s.id, spendKey[0], spendKey[1], spend[spendKey[1]], spend) : "";
+  if (spendKey) return ""; // Detail cards uniformly hide token spend rows; total spend is aggregated at the top.
   const metric = s.metrics.find((m) => m.label === key);
   return metric ? renderMetric(metric, s.id) : "";
 }
@@ -1911,17 +1884,18 @@ function renderItem(s: Snapshot, spend: ProviderSpend | undefined, key: string):
 /// One/New API is two-level: family id `onenewapi` hides every key card.
 /// Claude/Codex extra accounts stay independent of the bare family id.
 function isCardDisabled(id: string, disabled: string[] = config.disabled): boolean {
-  if (disabled.includes(id)) return true;
   const fam = providerFamily(id);
+  if (config.removedProviders.includes(fam) || config.removedProviders.includes(id)) return true;
+  if (disabled.includes(id) || disabled.includes(fam)) return true;
   return fam === "onenewapi" && disabled.includes("onenewapi");
 }
 
 /// Families whose extra accounts are PARALLEL cards (Antigravity captured
-/// slots, Cursor imported logins, Codex Pane sign-ins) — the bare family
+/// slots, Cursor imported logins) — the bare family
 /// card stays the local login and never merges into tabs. Every other
 /// multi-account family renders ONE merged card with account tabs.
 function isParallelAccountFamily(family: string): boolean {
-  return family === "antigravity" || family === "cursor" || family === "codex";
+  return family === "antigravity" || family === "cursor";
 }
 
 /// The "maxed out" threshold for the account-tab health dot.
@@ -2253,6 +2227,10 @@ function formatHoverMetric(m: Metric, label = displayMetricLabel(m.label)): stri
 function overviewHoverTip(s: Snapshot, quota: OverviewQuota, displayName: string): string {
   if (quota.status === "error") return `${displayName}: ${t("overview.offline")}`;
   if (quota.status === "no_data") return `${displayName}: ${t("overview.noData")}`;
+  if (quota.status === "text") {
+    const rows = overviewTextMetrics(s.metrics || [], providerFamily(s.id));
+    return `${displayName}: ${rows.map((m) => `${m.label}: ${m.value ?? m.detail}`).join(" · ")} · ${t("overview.ratioUnknown")}`;
+  }
 
   const family = providerFamily(s.id);
   const core = (s.metrics || []).filter((m) => isCoreQuotaMetric(m) && m.used_percent !== null);
@@ -3511,14 +3489,12 @@ function extractOverviewQuota(s: Snapshot, cardIsMaxed = false, cardId = ""): Ov
 
   // No percent metric, but a text row ("¥12.34" balances, MCP notes)?
   // Surface its value so tiles read real content instead of 无用量数据.
-  const textMetric = (s.metrics || []).find(
-    (m) => m.kind === "text" && (m.value ?? m.detail),
-  );
+  const textMetric = overviewTextMetrics(s.metrics || [], providerFamily(s.id))[0];
   if (textMetric) {
     return {
       window: null,
       usedPercent: 0,
-      resetsAt: null,
+      resetsAt: textMetric.resets_at,
       metricLabel: textMetric.label,
       metricDetail: textMetric.detail ?? null,
       valueText: textMetric.value ?? textMetric.detail ?? null,
@@ -3545,6 +3521,14 @@ function overviewFailureLabel(s: Snapshot): string {
   if (s.status === "no_credentials") return t("overview.needsCredentials");
   if (/expired|cookie|sign in|log in|unauthori[sz]ed|401|403/i.test(s.error ?? "")) return t("overview.needsLogin");
   return t("overview.queryFailed");
+}
+
+function overviewTextValuesHtml(s: Snapshot): string {
+  const rows = overviewTextMetrics(s.metrics || [], providerFamily(s.id));
+  return `<span class="overview-text-values">${rows.map((m) => {
+    const value = m.value ?? m.detail ?? "";
+    return `<span class="overview-text-value" title="${escapeHtml(`${m.label}: ${value}`)}">${escapeHtml(value)}</span>`;
+  }).join("")}</span>`;
 }
 
 function overviewWindowLabel(quota: OverviewQuota): string {
@@ -3787,6 +3771,10 @@ function renderQuotaOverview(): string {
           stroke-dasharray="${circumference.toFixed(2)}"
           stroke-dashoffset="${dashoffset.toFixed(2)}"
           transform="rotate(-90 ${cx} ${cy})" />`;
+      } else if (quota.status === "text") {
+        ringLabel = "?";
+        textClass = "is-unknown";
+        progressCircle = `<circle class="ring-progress is-unknown" cx="${cx}" cy="${cy}" r="${r}" stroke="var(--muted-foreground)" stroke-width="3.2" fill="none" stroke-dasharray="3 4" />`;
       } else {
         statusDot = "green";
         ringLabel = "—";
@@ -3814,12 +3802,12 @@ function renderQuotaOverview(): string {
         <div class="overview-item tone-${itemTone}" data-jump-provider="${escapeHtml(jumpId)}" title="${escapeHtml(fullTooltip)} · ${escapeHtml(t("overview.groupHint"))}">
           <div class="overview-item-head">
             <span class="overview-item-icon">${icon}</span>
-            <span class="overview-item-name" ${compactLabelStyle(displayName, 10.5, 8.5)} title="${escapeHtml(displayName)}">${escapeHtml(displayName)}</span>
+            <span class="overview-item-name" title="${escapeHtml(displayName)}">${escapeHtml(displayName)}</span>
             ${accountBadge}
             ${overviewAcctFoldBtn(family, accountCount)}
             <span class="overview-dot ${statusDot}"></span>
           </div>
-          <div class="overview-ring-wrap">
+          <div class="overview-ring-wrap"${quota.status === "text" ? ` title="${escapeHtml(t("overview.ratioUnknown"))}"` : ""}>
             <svg width="44" height="44" viewBox="0 0 44 44" class="overview-ring">
               <circle class="ring-track" cx="${cx}" cy="${cy}" r="${r}" stroke="var(--border)" stroke-width="3.2" fill="none" opacity="0.4" />
               ${progressCircle}
@@ -3829,8 +3817,8 @@ function renderQuotaOverview(): string {
           ${overviewAcctFolded(family, accountCount) ? "" : accountRingsHtml(family)}
           ${overviewAcctFolded(family, accountCount) ? "" : accountMetersHtml(family)}
           <div class="overview-item-foot">
-            <span class="overview-item-meta ${quota.isMaxed ? 'meta-maxed' : ''}"${quota.resetsAt ? ` data-reset-at="${quota.resetsAt}"` : ""}>
-              ${quota.status === "error" ? escapeHtml(overviewFailureLabel(shownSnap)) : quota.isMaxed
+            <span class="overview-item-meta ${quota.isMaxed ? 'meta-maxed' : ''}"${quota.resetsAt && quota.window !== null ? ` data-reset-at="${quota.resetsAt}"` : ""}>
+              ${quota.status === "text" ? overviewTextValuesHtml(shownSnap) : quota.status === "error" ? escapeHtml(overviewFailureLabel(shownSnap)) : quota.isMaxed
                 ? (quota.resetsAt
                     ? escapeHtml(fmtDuration(Math.max(0, quota.resetsAt - Date.now())))
                     : escapeHtml(t("overview.maxedBadge", { n: "" }).trim()))
@@ -3902,15 +3890,15 @@ function renderQuotaOverview(): string {
       <div class="overview-bar-item tone-${itemTone}" data-jump-provider="${escapeHtml(jumpId)}" title="${escapeHtml(fullTooltip)} · ${escapeHtml(t("overview.groupHint"))}">
         <div class="ovbar-line1">
           <span class="overview-item-icon">${icon}</span>
-          <span class="overview-item-name${nameClass}" ${compactLabelStyle(displayName, nameClass ? 9 : 10.5, 8.5)} title="${escapeHtml(displayName)}">${escapeHtml(displayName)}</span>
+          <span class="overview-item-name${nameClass}" title="${escapeHtml(displayName)}">${escapeHtml(displayName)}</span>
           ${accountBadge}
           ${overviewAcctFoldBtn(family, accountCount)}
           <span class="overview-dot ${statusDot}"></span>
-          <span class="ovbar-pct ${pctClass}">${pct === null ? "—" : `${pct}%`}</span>
+          <span class="ovbar-pct ${pctClass}"${quota.status === "text" ? ` title="${escapeHtml(t("overview.ratioUnknown"))}" aria-label="${escapeHtml(t("overview.ratioUnknown"))}"` : ""}>${quota.status === "text" ? "?" : pct === null ? "—" : `${pct}%`}</span>
         </div>
         <div class="ovbar-line2">
-          <span class="ovbar"><span class="ovbar-fill tone-${itemTone}" style="width:${pct ?? 0}%"></span></span>
-          <span class="ovbar-meta">${escapeHtml(meta || t("overview.noData"))}</span>
+          <span class="ovbar${quota.status === "text" ? " is-unknown" : ""}"${quota.status === "text" ? ` title="${escapeHtml(t("overview.ratioUnknown"))}"` : ""}>${quota.status === "text" ? "" : `<span class="ovbar-fill tone-${itemTone}" style="width:${pct ?? 0}%"></span>`}</span>
+          <span class="ovbar-meta">${quota.status === "text" ? overviewTextValuesHtml(shownSnap) : escapeHtml(meta || t("overview.noData"))}</span>
         </div>
         ${overviewAcctFolded(family, accountCount) ? "" : accountMetersHtml(family)}
       </div>`;
@@ -4207,24 +4195,53 @@ function appConfirm(opts: {
   message: string;
   confirmLabel: string;
   danger?: boolean;
-}): Promise<boolean> {
+  checkboxLabel: string;
+  checkboxDefault?: boolean;
+}): Promise<{ ok: boolean; checked: boolean }>;
+function appConfirm(opts: {
+  title: string;
+  message: string;
+  confirmLabel: string;
+  danger?: boolean;
+}): Promise<boolean>;
+function appConfirm(opts: {
+  title: string;
+  message: string;
+  confirmLabel: string;
+  danger?: boolean;
+  checkboxLabel?: string;
+  checkboxDefault?: boolean;
+}): Promise<any> {
   return new Promise((resolve) => {
     const overlay = document.createElement("div");
     overlay.id = "confirm-overlay";
+    const checkboxHtml = opts.checkboxLabel
+      ? `<label class="confirm-checkbox-row"><input type="checkbox" id="confirm-checkbox" ${opts.checkboxDefault !== false ? "checked" : ""}><span>${escapeHtml(opts.checkboxLabel)}</span></label>`
+      : "";
     overlay.innerHTML = `
       <div id="confirm-box" role="dialog" aria-modal="true">
         <h3>${escapeHtml(opts.title)}</h3>
         <p>${escapeHtml(opts.message)}</p>
+        ${checkboxHtml}
         <div id="confirm-actions">
           <button id="confirm-cancel" type="button">${escapeHtml(t("dialog.cancel"))}</button>
           <button id="confirm-ok" type="button" class="${opts.danger ? "danger" : ""}">${escapeHtml(opts.confirmLabel)}</button>
         </div>
       </div>`;
+    const getChecked = () => {
+      const cb = overlay.querySelector<HTMLInputElement>("#confirm-checkbox");
+      return cb ? cb.checked : false;
+    };
     const done = (ok: boolean) => {
       dismissConfirm = null;
       document.removeEventListener("keydown", onKey, true);
+      const checked = getChecked();
       overlay.remove();
-      resolve(ok);
+      if (opts.checkboxLabel) {
+        resolve({ ok, checked });
+      } else {
+        resolve(ok);
+      }
     };
     dismissConfirm = () => done(false);
     const onKey = (e: KeyboardEvent) => {
@@ -4941,7 +4958,15 @@ function openGroupMenu(
     const accountArchive = (e.target as HTMLElement).closest<HTMLElement>("[data-card-acct-archive]");
     if (accountArchive) {
       close();
-      void doAccountArchive(fam, Number(accountArchive.dataset.cardAcctArchive));
+      const idx = Number(accountArchive.dataset.cardAcctArchive);
+      const name = labelForAccount(shownId, accounts);
+      void appConfirm({
+        title: t("customize.acctArchive"),
+        message: `确定要归档账号 ${name} 吗？已归档账号将停止日常轮询，您可以随时在“设置 -> 密钥与额度”中重新找回并恢复。`,
+        confirmLabel: t("customize.acctArchive"),
+      }).then((ok) => {
+        if (ok) void doAccountArchive(fam, idx);
+      });
       return;
     }
     const accountRestore = (e.target as HTMLElement).closest<HTMLElement>("[data-card-acct-restore]");
@@ -4972,13 +4997,22 @@ function openGroupMenu(
     if (removeBtn) {
       close();
       const name = notedName(cardId, providerDisplayName(fam) || cardId);
+      const isSubAccount = cardId.includes("@");
       void appConfirm({
-        title: cardId.includes("@") ? t("customize.acctCardDeleteTitle") : t("customize.providerDeleteTitle"),
-        message: cardId.includes("@") ? t("customize.acctCardDeleteConfirm", { name }) : t("customize.providerDeleteConfirm", { name }),
-        confirmLabel: cardId.includes("@") ? t("customize.acctDelete") : t("customize.providerDelete"),
+        title: isSubAccount ? t("customize.acctCardDeleteTitle") : t("customize.providerDeleteTitle"),
+        message: isSubAccount
+          ? `删除后，该账号的密钥与配置将无法找回。确定要删除 ${name} 吗？`
+          : `删除后，该 Provider 的所有账号及密钥将无法找回。确定要删除 ${name} 吗？`,
+        confirmLabel: isSubAccount ? t("customize.acctDelete") : t("customize.providerDelete"),
         danger: true,
-      }).then((ok) => {
-        if (ok) removeProviderCard(cardId);
+        checkboxLabel: "我已知晓，并且保存该账号的用量数据",
+        checkboxDefault: true,
+      }).then(async (res) => {
+        if (!res.ok) return;
+        if (!res.checked) {
+          await invoke("remove_usage_history", { cardId }).catch(() => {});
+        }
+        removeProviderCard(cardId);
       });
       return;
     }
@@ -6309,8 +6343,10 @@ interface ArchivedAccountRow {
   card_id: string;
   label: string;
   archived_at: number;
+  masked_key?: string;
 }
 const archivedAccountsCache = new Map<string, ArchivedAccountRow[]>();
+const archivedOpenFamilies = new Set<string>();
 
 function refreshAccounts(family: string): void {
   void invoke<ArchivedAccountRow[]>("archived_accounts", { provider: family })
@@ -6805,16 +6841,22 @@ async function doAccountAdd(family: string): Promise<void> {
 /// this triggers (fetch_usage simply stops spawning it).
 async function doAccountRemove(family: string, index: number): Promise<void> {
   const list = accountsCache.get(family) ?? [];
-  const label = list[index]?.label || t("customize.acctDefaultName", { n: index + 1 });
-  const ok = await appConfirm({
+  const entry = list[index];
+  const label = entry?.label || t("customize.acctDefaultName", { n: index + 1 });
+  const res = await appConfirm({
     title: t("customize.acctDelTitle"),
-    message: t("customize.acctDelBody", { label }),
+    message: `删除后，该账号的密钥与配置将无法找回。确定要删除 ${label} 吗？`,
     confirmLabel: t("customize.acctDelConfirm"),
     danger: true,
+    checkboxLabel: "我已知晓，并且保存该账号的用量数据",
+    checkboxDefault: true,
   });
-  if (!ok) return;
+  if (!res.ok) return;
   const status = document.querySelector("#status")!;
   try {
+    if (!res.checked && entry?.id) {
+      await invoke("remove_usage_history", { cardId: entry.id }).catch(() => {});
+    }
     await invoke("account_remove", { provider: family, index });
     userSelectedAccountFor.delete(family);
     refreshAccounts(family);
@@ -6830,7 +6872,7 @@ async function doAccountArchive(family: string, index: number): Promise<void> {
   const label = list[index]?.label || t("customize.acctDefaultName", { n: index + 1 });
   const ok = await appConfirm({
     title: t("customize.acctArchive"),
-    message: t("customize.acctArchiveBody", { label }),
+    message: `确定要归档账号 ${label} 吗？已归档账号将停止日常轮询，您可以随时在“设置 -> 密钥与额度”中重新找回并恢复。`,
     confirmLabel: t("customize.acctArchive"),
     danger: false,
   });
@@ -7418,7 +7460,7 @@ function accountChildRows(family: string): string {
   // Pin (置顶) controls exist only with 2+ accounts — a single account has
   // nothing to order against. Applies to EVERY multi-account family.
   const showPin = list.length >= 2;
-  return `<div class="cust-account-children" data-accounts-children="${escapeHtml(family)}">${list
+  const children = list
     .map((a, i) => {
       const acctId = a.id ?? "";
       const label = labelForAccount(acctId, list);
@@ -7442,7 +7484,29 @@ function accountChildRows(family: string): string {
         ${custConfigOpen === acctId ? renderAccountConfig(acctId) : ""}
       </div>`;
     })
-    .join("")}</div>`;
+    .join("");
+
+  const archived = archivedAccountsCache.get(family) ?? [];
+  const isOpen = archivedOpenFamilies.has(family);
+  const archivedHtml = `<div class="cust-archived-section${isOpen ? " open" : ""}" data-archived-family="${escapeHtml(family)}">
+    <button type="button" class="cust-archived-toggle" data-archived-toggle="${escapeHtml(family)}">
+      <span class="cust-archived-title">已归档的账号${archived.length > 0 ? ` (${archived.length})` : ""}</span>
+      <span class="cust-archived-icon chev">${uiIcon(isOpen ? "caretUp" : "caretDown")}</span>
+    </button>
+    ${isOpen ? `<div class="cust-archived-list">
+      ${archived.length === 0 ? `<div class="cust-archived-empty dim">暂无已归档账号</div>` : archived.map((item) => `
+        <div class="cust-account-child is-archived" data-archived-card="${escapeHtml(item.card_id)}">
+          <span class="acct-child-label">${escapeHtml(item.label || item.card_id)}</span>
+          <span class="dim acct-child-key">${escapeHtml(item.masked_key || "***")}</span>
+          <span class="spacer"></span>
+          <button class="mini-btn" data-archived-copy="${escapeHtml(family)}|${escapeHtml(item.card_id)}" title="${escapeHtml(t("settings.kvCopy"))}">${uiIcon("copy")}</button>
+          <button class="mini-btn" data-archived-restore="${escapeHtml(family)}|${escapeHtml(item.card_id)}" title="恢复账号">恢复</button>
+        </div>
+      `).join("")}
+    </div>` : ""}
+  </div>`;
+
+  return `<div class="cust-account-children" data-accounts-children="${escapeHtml(family)}">${children}${archivedHtml}</div>`;
 }
 
 function renderSkinMarket(): string {
@@ -8328,6 +8392,67 @@ async function forceUsageRefreshAttempt(usageOnly = true): Promise<void> {
   await completed;
 }
 
+interface BackoffRetryEntry {
+  attempts: number;
+  timer: number | null;
+}
+
+const backoffRetries = new Map<string, BackoffRetryEntry>();
+
+function clearBackoffRetry(cardId: string): void {
+  const entry = backoffRetries.get(cardId);
+  if (entry) {
+    if (entry.timer !== null) window.clearTimeout(entry.timer);
+    backoffRetries.delete(cardId);
+  }
+}
+
+function scheduleBackoffRetries(snapshots: Snapshot[]): void {
+  for (const s of snapshots) {
+    // A healthy card or unconfigured card clears any queued retry
+    if ((!s.stale && s.status === "ok") || s.status === "no_credentials" || isCardDisabled(s.id)) {
+      clearBackoffRetry(s.id);
+      continue;
+    }
+
+    // Hit when stale or error (network timeout / proxy issue)
+    const isOutdated = s.stale || s.status === "error" || s.status === "stale";
+    if (!isOutdated) continue;
+
+    const existing = backoffRetries.get(s.id);
+    if (existing && existing.timer !== null) {
+      // Already scheduled for next retry pass
+      continue;
+    }
+
+    const attempts = existing ? existing.attempts : 0;
+    // Exponential backoff: 2m, 4m, 8m, capped at 16m
+    const delayMs = Math.min(16 * 60_000, 2 * 60_000 * Math.pow(2, attempts));
+    const timer = window.setTimeout(async () => {
+      const current = backoffRetries.get(s.id);
+      if (current) current.timer = null;
+      try {
+        const snap = await invoke<Snapshot>("refresh_provider", { providerId: s.id });
+        const idx = lastSnapshots.findIndex((item) => item.id === s.id);
+        if (idx >= 0) lastSnapshots[idx] = snap;
+        else lastSnapshots.push(snap);
+        renderIfVisible();
+        if (!snap.stale && snap.status === "ok") {
+          clearBackoffRetry(s.id);
+        } else {
+          if (current) current.attempts += 1;
+          scheduleBackoffRetries(lastSnapshots);
+        }
+      } catch {
+        if (current) current.attempts += 1;
+        scheduleBackoffRetries(lastSnapshots);
+      }
+    }, delayMs);
+
+    backoffRetries.set(s.id, { attempts, timer });
+  }
+}
+
 async function refresh(
   force = false,
   usageOnly = false,
@@ -8381,7 +8506,7 @@ async function refresh(
   try {
     await unparkRecentlyKeyed();
     let snapshots = await invoke<Snapshot[]>("fetch_usage", {
-      disabled: [...config.disabled],
+      disabled: [...new Set([...config.disabled, ...config.removedProviders])],
       // Only explicit clicks (Refresh button, Ctrl+R, overview ⟳) may
       // clear ordinary-error benches; timer/refocus passes stay polite.
       clearBenches: interactive,
@@ -8469,6 +8594,7 @@ async function refresh(
       lastLayoutSnapshot = JSON.stringify(config.layout);
     }
     renderIfVisible();
+    scheduleBackoffRetries(lastSnapshots);
     if (firstData && !customizeOpen && !document.hidden) playReveal();
     requestTraySync();
     const time = new Date().toLocaleTimeString(localeTag(), { hour: "2-digit", minute: "2-digit" });
@@ -8863,10 +8989,17 @@ async function handleCustomizeClick(target: HTMLElement): Promise<boolean> {
     const name = ALL_PROVIDERS.find(([pid]) => pid === id)?.[1] ?? id;
     void appConfirm({
       title: t("customize.providerDeleteTitle"),
-      message: t("customize.providerDeleteConfirm", { name }),
+      message: `删除后，该 Provider 的所有账号及密钥将无法找回。确定要删除 ${name} 吗？`,
       confirmLabel: t("customize.providerDelete"),
-    }).then((ok) => {
-      if (ok) removeProviderCard(id);
+      danger: true,
+      checkboxLabel: "我已知晓，并且保存该账号的用量数据",
+      checkboxDefault: true,
+    }).then(async (res) => {
+      if (!res.ok) return;
+      if (!res.checked) {
+        await invoke("remove_usage_history", { cardId: id }).catch(() => {});
+      }
+      removeProviderCard(id);
     });
     return true;
   }
@@ -8879,6 +9012,29 @@ async function handleCustomizeClick(target: HTMLElement): Promise<boolean> {
   if (removedToggle) {
     custRemovedOpen = !custRemovedOpen;
     renderDrawerBody();
+    return true;
+  }
+  const archivedToggle = target.closest<HTMLElement>("[data-archived-toggle]");
+  if (archivedToggle) {
+    const fam = archivedToggle.dataset.archivedToggle!;
+    if (archivedOpenFamilies.has(fam)) archivedOpenFamilies.delete(fam);
+    else {
+      archivedOpenFamilies.add(fam);
+      refreshAccounts(fam);
+    }
+    renderDrawerBody();
+    return true;
+  }
+  const archivedCopy = target.closest<HTMLElement>("[data-archived-copy]");
+  if (archivedCopy) {
+    const [fam, cardId] = (archivedCopy.dataset.archivedCopy ?? "").split("|");
+    void copySettingsKey(fam, cardId, archivedCopy as HTMLButtonElement);
+    return true;
+  }
+  const archivedRestore = target.closest<HTMLElement>("[data-archived-restore]");
+  if (archivedRestore) {
+    const [fam, cardId] = (archivedRestore.dataset.archivedRestore ?? "").split("|");
+    void doAccountRestore(fam, cardId);
     return true;
   }
   const cfgBtn = target.closest<HTMLElement>("[data-config]");
@@ -10635,8 +10791,8 @@ async function revealSettingsKey(
 }
 
 async function revealKeyvaultEntry(id: string, button: HTMLButtonElement): Promise<void> {
-  const item = button.closest<HTMLElement>(".kv-item");
-  const code = item?.querySelector<HTMLElement>(".kv-masked");
+  const item = button.closest<HTMLElement>(".kv-item, .skey-account");
+  const code = item?.querySelector<HTMLElement>(".kv-masked, .skey-acct-masked");
   if (!item || !code) return;
   if (item.dataset.kvShown === "1") {
     code.textContent = item.dataset.kvMasked || "";
@@ -10666,7 +10822,7 @@ async function editKeyvaultNote(id: string): Promise<void> {
   const note = await appPrompt({
     title: t("settings.kvNoteTitle"),
     placeholder: t("settings.kvNotePlaceholder"),
-    initial: row?.note ?? "",
+    initial: row?.label || row?.note || "",
     confirmLabel: t("settings.kvSaveNote"),
     allowEmpty: true,
   });
@@ -10674,6 +10830,9 @@ async function editKeyvaultNote(id: string): Promise<void> {
   try {
     renderKeyvault(await invoke<KeyVaultRow[]>("keyvault_set_note", { id, note }));
   } catch (err) {
+    if (String(err).includes("locked") && (await unlockVault())) {
+      return editKeyvaultNote(id);
+    }
     const status = document.querySelector("#status");
     if (status) status.textContent = String(err);
   }
@@ -10788,13 +10947,14 @@ function settingsKeyRow(family: string): HTMLElement {
     detail.className = "skey-detail";
     detail.textContent = `${t("settings.credConnected")} · ${parts.join(" · ")}`;
   }
-  if (!keyable) {
-    state.textContent = local ? t("settings.credConnected") : t("settings.credLocalMissing");
-    state.classList.toggle("ok", Boolean(local));
-  } else if (multi) {
+  if (multi) {
     state.textContent = accounts.length
       ? t("settings.acctCount", { n: accounts.length })
       : t("settings.keyNotSet");
+    state.classList.toggle("ok", accounts.length > 0);
+  } else if (!keyable) {
+    state.textContent = local ? t("settings.credConnected") : t("settings.credLocalMissing");
+    state.classList.toggle("ok", Boolean(local));
   } else if (configured) {
     state.textContent = status?.maskedKey || t("settings.keyConfigured");
   } else if (connected) {
@@ -10819,7 +10979,7 @@ function settingsKeyRow(family: string): HTMLElement {
   help.setAttribute("aria-label", t("customize.helpMenu"));
   help.addEventListener("click", () => openProviderHelp(family));
   actions.append(help);
-  if (!keyable) return item;
+  if (!keyable && !multi) return item;
 
   const button = (label: string, extraClass = "", iconName?: UiIconName) => {
     const b = document.createElement("button");
@@ -10831,13 +10991,22 @@ function settingsKeyRow(family: string): HTMLElement {
   };
 
   if (multi) {
-    const open = skeyAddingAccount.has(family);
-    const add = button(open ? t("dialog.cancel") : t("customize.acctAdd"), "", open ? undefined : "plus");
-    add.addEventListener("click", () => {
-      open ? skeyAddingAccount.delete(family) : skeyAddingAccount.add(family);
-      renderSettingsProviderKeys();
-    });
-    actions.append(add);
+    const isOauth = providerDefinition(family)?.supportsOAuth && !keyable;
+    if (isOauth) {
+      const add = button(t("customize.acctAdd"), "", "plus");
+      add.addEventListener("click", () => {
+        void startOauthLogin(family);
+      });
+      actions.append(add);
+    } else {
+      const open = skeyAddingAccount.has(family);
+      const add = button(open ? t("dialog.cancel") : t("customize.acctAdd"), "", open ? undefined : "plus");
+      add.addEventListener("click", () => {
+        open ? skeyAddingAccount.delete(family) : skeyAddingAccount.add(family);
+        renderSettingsProviderKeys();
+      });
+      actions.append(add);
+    }
   } else if (skeyEditing.has(family)) {
     const cancel = button(t("dialog.cancel"));
     cancel.addEventListener("click", () => {
@@ -11047,7 +11216,8 @@ function settingsAccountRow(family: string, entry: AccountEntry, index: number):
   masked.textContent = entry.maskedKey;
   const actions = document.createElement("span");
   actions.className = "skey-account-actions";
-  if (entry.id) {
+  const keyable = providerDefinition(family)?.supportsApiKey ?? false;
+  if (entry.id && keyable) {
     const view = document.createElement("button");
     view.type = "button";
     view.className = "mini-btn";
@@ -11085,27 +11255,31 @@ function settingsAccountRow(family: string, entry: AccountEntry, index: number):
       renderSettingsProviderKeys();
     });
   });
-  const remove = document.createElement("button");
-  remove.type = "button";
-  remove.className = "mini-btn danger";
-  remove.innerHTML = uiIcon("trash") + escapeHtml(t("settings.kvRemove"));
-  remove.addEventListener("click", () => {
-    void appConfirm({
-      title: t("settings.acctRemoveConfirm", { name: entry.label || entry.maskedKey }),
-      message: t("settings.acctRemoveHint"),
-      confirmLabel: t("customize.acctDelete"),
-    }).then(async (ok) => {
-      if (!ok) return;
-      try {
-        await invoke("account_remove", { provider: family, index });
-      } catch (e) {
-        console.error("account remove failed:", e);
-      }
-      await refreshSettingsProviderKey(family);
-      renderSettingsProviderKeys();
+  const isCli = family === "codex" && (entry.id === "codex" || entry.maskedKey === "CLI 登录");
+  if (!isCli) {
+    actions.append(rename);
+    const remove = document.createElement("button");
+    remove.type = "button";
+    remove.className = "mini-btn danger";
+    remove.innerHTML = uiIcon("trash") + escapeHtml(t("settings.kvRemove"));
+    remove.addEventListener("click", () => {
+      void appConfirm({
+        title: t("settings.acctRemoveConfirm", { name: entry.label || entry.maskedKey }),
+        message: t("settings.acctRemoveHint"),
+        confirmLabel: t("customize.acctDelete"),
+      }).then(async (ok) => {
+        if (!ok) return;
+        try {
+          await invoke("account_remove", { provider: family, index });
+        } catch (e) {
+          console.error("account remove failed:", e);
+        }
+        await refreshSettingsProviderKey(family);
+        renderSettingsProviderKeys();
+      });
     });
-  });
-  actions.append(rename, remove);
+    actions.append(remove);
+  }
   row.append(label, masked, actions);
   return row;
 }
@@ -11171,73 +11345,284 @@ function settingsAccountEditor(family: string): HTMLElement {
   return form;
 }
 
+interface McpServiceMeta {
+  id: string;
+  name: string;
+  iconKey: string;
+}
+
+const CORE_MCP_SERVICES: readonly McpServiceMeta[] = [
+  { id: "firecrawl", name: "Firecrawl", iconKey: "firecrawl" },
+  { id: "tavily", name: "Tavily", iconKey: "tavily" },
+  { id: "bocha", name: "BochaAI", iconKey: "bocha" },
+  { id: "brave", name: "Brave Search", iconKey: "brave" },
+];
+
+const kvAddingForService = new Set<string>();
+let kvAddingCustomService = false;
+
+async function saveKeyvaultEntry(
+  service: string,
+  label: string,
+  key: string,
+  note = "",
+): Promise<void> {
+  const s = service.trim().toLowerCase();
+  const k = key.trim();
+  if (!s || !k) return;
+  const run = () =>
+    invoke<KeyVaultRow[]>("keyvault_add", {
+      service: s,
+      label: label.trim() || `${service.trim()} key`,
+      key: k,
+      note: note.trim(),
+    });
+  try {
+    const rows = await run();
+    kvAddingForService.delete(s);
+    kvAddingCustomService = false;
+    renderKeyvault(rows);
+  } catch (err) {
+    if (String(err).includes("locked") && (await unlockVault())) {
+      return saveKeyvaultEntry(service, label, key, note);
+    }
+    const status = document.querySelector("#status");
+    if (status) status.textContent = String(err);
+  }
+}
+
 function renderKeyvault(rows: KeyVaultRow[]): void {
   lastVaultRows = rows;
   const root = document.querySelector<HTMLElement>("#keyvault-rows");
   if (!root) return;
   root.replaceChildren();
-  if (!rows.length) {
-    const empty = document.createElement("p");
-    empty.className = "settings-note kv-empty";
-    empty.textContent = t("settings.kvEmpty");
-    root.append(empty);
-    return;
-  }
-  for (const row of rows) {
-    const item = document.createElement("div");
-    item.className = "kv-item";
-    item.dataset.kvId = row.id;
 
-    const info = document.createElement("div");
-    info.className = "kv-info";
+  // Group existing vault keys by service
+  const grouped = new Map<string, KeyVaultRow[]>();
+  for (const row of rows) {
+    const s = row.service.trim().toLowerCase();
+    const list = grouped.get(s) ?? [];
+    list.push(row);
+    grouped.set(s, list);
+  }
+
+  // Combine core MCP/Search services with any custom services found in rows
+  const serviceList: McpServiceMeta[] = [...CORE_MCP_SERVICES];
+  for (const s of grouped.keys()) {
+    if (!serviceList.some((svc) => svc.id === s)) {
+      serviceList.push({
+        id: s,
+        name: s.charAt(0).toUpperCase() + s.slice(1),
+        iconKey: s,
+      });
+    }
+  }
+
+  for (const svc of serviceList) {
+    const list = grouped.get(svc.id) ?? [];
+    const configured = list.length > 0;
+    const isAdding = kvAddingForService.has(svc.id);
+
+    const item = document.createElement("div");
+    item.className = "skey-item";
+    item.dataset.skeyFamily = svc.id;
+
+    // Service card header
+    const head = document.createElement("div");
+    head.className = "skey-head";
+
     const icon = document.createElement("span");
-    icon.className = "kv-icon";
-    // Free-text service names resolve to a brand mark when one exists
-    // (tavily, firecrawl); everything else falls back to the key glyph.
-    icon.innerHTML = providerVisual(row.service.trim().toLowerCase())?.iconSvg ?? uiIcon("key");
-    const service = document.createElement("span");
-    service.className = "kv-service-badge";
-    service.textContent = row.service;
-    const label = document.createElement("span");
-    label.className = "kv-label";
-    label.textContent = row.label || row.note || row.service;
-    const masked = document.createElement("code");
-    masked.className = "kv-masked";
-    masked.textContent = row.masked;
-    info.append(icon, service, label, masked);
-    if (row.note) {
-      const note = document.createElement("span");
-      note.className = "kv-note-text";
-      note.textContent = row.note;
-      info.append(note);
+    icon.className = "skey-icon";
+    icon.innerHTML = providerVisual(svc.iconKey)?.iconSvg ?? uiIcon("key");
+
+    const name = document.createElement("span");
+    name.className = "skey-name";
+    name.textContent = svc.name;
+
+    const state = document.createElement("span");
+    state.className = `skey-state${configured ? " ok" : ""}`;
+    state.textContent = configured
+      ? t("settings.acctCount", { n: list.length })
+      : t("settings.keyNotSet");
+
+    const actions = document.createElement("span");
+    actions.className = "skey-actions";
+
+    const addBtn = document.createElement("button");
+    addBtn.type = "button";
+    addBtn.className = "mini-btn";
+    addBtn.innerHTML = isAdding ? escapeHtml(t("dialog.cancel")) : uiIcon("plus") + escapeHtml(t("settings.kvAdd"));
+    addBtn.addEventListener("click", () => {
+      if (isAdding) kvAddingForService.delete(svc.id);
+      else kvAddingForService.add(svc.id);
+      renderKeyvault(lastVaultRows);
+    });
+    actions.append(addBtn);
+
+    head.append(icon, name, state, actions);
+    item.append(head);
+
+    // Inline key adder form
+    if (isAdding) {
+      const form = document.createElement("div");
+      form.className = "skey-editor skey-editor-account";
+
+      const labelInput = document.createElement("input");
+      labelInput.type = "text";
+      labelInput.className = "form-input";
+      labelInput.placeholder = "密钥备注 (如: 团队 / 个人 / 生产)";
+      labelInput.spellcheck = false;
+
+      const keyInput = document.createElement("input");
+      keyInput.type = "password";
+      keyInput.className = "form-input";
+      keyInput.placeholder = t("settings.keyPlaceholder");
+      keyInput.autocomplete = "off";
+      keyInput.spellcheck = false;
+
+      const formActions = document.createElement("div");
+      formActions.className = "skey-editor-actions";
+
+      const saveBtn = document.createElement("button");
+      saveBtn.type = "button";
+      saveBtn.className = "mini-btn ok";
+      saveBtn.textContent = t("settings.save");
+      saveBtn.addEventListener("click", () => {
+        void saveKeyvaultEntry(svc.id, labelInput.value, keyInput.value);
+      });
+
+      const cancelBtn = document.createElement("button");
+      cancelBtn.type = "button";
+      cancelBtn.className = "mini-btn";
+      cancelBtn.textContent = t("dialog.cancel");
+      cancelBtn.addEventListener("click", () => {
+        kvAddingForService.delete(svc.id);
+        renderKeyvault(lastVaultRows);
+      });
+
+      formActions.append(saveBtn, cancelBtn);
+      form.append(labelInput, keyInput, formActions);
+      item.append(form);
     }
 
-    const actions = document.createElement("div");
-    actions.className = "kv-actions";
-    const reveal = document.createElement("button");
-    reveal.type = "button";
-    reveal.className = "mini-btn";
-    reveal.dataset.kvReveal = row.id;
-    reveal.innerHTML = uiIcon("eye") + escapeHtml(t("settings.kvReveal"));
-    const noteBtn = document.createElement("button");
-    noteBtn.type = "button";
-    noteBtn.className = "mini-btn";
-    noteBtn.dataset.kvNote = row.id;
-    noteBtn.innerHTML = uiIcon("pencil") + escapeHtml(t("settings.kvEditNote"));
-    const copy = document.createElement("button");
-    copy.type = "button";
-    copy.className = "mini-btn ok";
-    copy.dataset.kvCopy = row.id;
-    copy.innerHTML = uiIcon("copy") + escapeHtml(t("settings.kvCopy"));
-    const remove = document.createElement("button");
-    remove.type = "button";
-    remove.className = "mini-btn danger";
-    remove.dataset.kvRemove = row.id;
-    remove.innerHTML = uiIcon("trash") + escapeHtml(t("settings.kvRemove"));
-    actions.append(reveal, noteBtn, copy, remove);
-    item.append(info, actions);
+    // Child API keys list (the clean hierarchy)
+    if (list.length > 0) {
+      const accountsList = document.createElement("div");
+      accountsList.className = "skey-accounts";
+
+      for (const row of list) {
+        const rowEl = document.createElement("div");
+        rowEl.className = "skey-account";
+        rowEl.dataset.kvId = row.id;
+
+        const labelSpan = document.createElement("span");
+        labelSpan.className = "skey-acct-label";
+        labelSpan.textContent = row.label || row.note || `${svc.name} key`;
+
+        const maskedSpan = document.createElement("span");
+        maskedSpan.className = "skey-acct-masked";
+        maskedSpan.textContent = row.masked;
+
+        const rowActions = document.createElement("span");
+        rowActions.className = "skey-account-actions";
+
+        const revealBtn = document.createElement("button");
+        revealBtn.type = "button";
+        revealBtn.className = "mini-btn";
+        revealBtn.dataset.kvReveal = row.id;
+        revealBtn.innerHTML = uiIcon("eye") + escapeHtml(t("settings.kvReveal"));
+
+        const copyBtn = document.createElement("button");
+        copyBtn.type = "button";
+        copyBtn.className = "mini-btn ok";
+        copyBtn.dataset.kvCopy = row.id;
+        copyBtn.innerHTML = uiIcon("copy") + escapeHtml(t("settings.kvCopy"));
+
+        const editBtn = document.createElement("button");
+        editBtn.type = "button";
+        editBtn.className = "mini-btn";
+        editBtn.dataset.kvNote = row.id;
+        editBtn.innerHTML = uiIcon("pencil") + escapeHtml(t("settings.acctRename"));
+
+        const delBtn = document.createElement("button");
+        delBtn.type = "button";
+        delBtn.className = "mini-btn danger";
+        delBtn.dataset.kvRemove = row.id;
+        delBtn.innerHTML = uiIcon("trash") + escapeHtml(t("settings.kvRemove"));
+
+        rowActions.append(revealBtn, copyBtn, editBtn, delBtn);
+        rowEl.append(labelSpan, maskedSpan, rowActions);
+        accountsList.append(rowEl);
+      }
+
+      item.append(accountsList);
+    }
+
     root.append(item);
   }
+
+  // Footer: Add other custom MCP service
+  const customBlock = document.createElement("div");
+  customBlock.className = "skey-item kv-custom-adder";
+
+  if (!kvAddingCustomService) {
+    const addCustomBtn = document.createElement("button");
+    addCustomBtn.type = "button";
+    addCustomBtn.className = "mini-btn";
+    addCustomBtn.style.marginTop = "6px";
+    addCustomBtn.innerHTML = uiIcon("plus") + " 添加其他 MCP / 搜索服务";
+    addCustomBtn.addEventListener("click", () => {
+      kvAddingCustomService = true;
+      renderKeyvault(lastVaultRows);
+    });
+    customBlock.append(addCustomBtn);
+  } else {
+    const form = document.createElement("div");
+    form.className = "skey-editor skey-editor-account";
+
+    const svclabel = document.createElement("input");
+    svclabel.type = "text";
+    svclabel.className = "form-input";
+    svclabel.placeholder = "服务名称 / 标识 (如: exasearch / mineru)";
+    svclabel.spellcheck = false;
+
+    const keyLabel = document.createElement("input");
+    keyLabel.type = "text";
+    keyLabel.className = "form-input";
+    keyLabel.placeholder = "密钥备注 (如: 默认)";
+    keyLabel.spellcheck = false;
+
+    const keyVal = document.createElement("input");
+    keyVal.type = "password";
+    keyVal.className = "form-input";
+    keyVal.placeholder = t("settings.keyPlaceholder");
+    keyVal.autocomplete = "off";
+
+    const formActions = document.createElement("div");
+    formActions.className = "skey-editor-actions";
+
+    const saveBtn = document.createElement("button");
+    saveBtn.type = "button";
+    saveBtn.className = "mini-btn ok";
+    saveBtn.textContent = t("settings.save");
+    saveBtn.addEventListener("click", () => {
+      void saveKeyvaultEntry(svclabel.value, keyLabel.value, keyVal.value);
+    });
+
+    const cancelBtn = document.createElement("button");
+    cancelBtn.type = "button";
+    cancelBtn.className = "mini-btn";
+    cancelBtn.textContent = t("dialog.cancel");
+    cancelBtn.addEventListener("click", () => {
+      kvAddingCustomService = false;
+      renderKeyvault(lastVaultRows);
+    });
+
+    formActions.append(saveBtn, cancelBtn);
+    form.append(svclabel, keyLabel, keyVal, formActions);
+    customBlock.append(form);
+  }
+  root.append(customBlock);
 }
 
 async function loadKeyvault(): Promise<void> {
@@ -11266,31 +11651,18 @@ async function addKeyvaultEntry(): Promise<void> {
   const key = document.querySelector<HTMLInputElement>("#kv-key");
   const note = document.querySelector<HTMLInputElement>("#kv-note");
   if (!service || !key || !service.value.trim() || !key.value.trim()) return;
-  const button = document.querySelector<HTMLButtonElement>("#kv-add-btn");
-  if (button) button.disabled = true;
-  try {
-    const rows = await invoke<KeyVaultRow[]>("keyvault_add", {
-      service: service.value.trim(),
-      label: service.value.trim(),
-      key: key.value.trim(),
-      note: note?.value.trim() ?? "",
-    });
-    service.value = "";
-    key.value = "";
-    if (note) note.value = "";
-    renderKeyvault(rows);
-  } catch (err) {
-    const status = document.querySelector("#status");
-    if (status) status.textContent = String(err);
-  } finally {
-    if (button) button.disabled = false;
-  }
+  void saveKeyvaultEntry(service.value, note?.value ?? "", key.value);
+  service.value = "";
+  key.value = "";
+  if (note) note.value = "";
 }
 
 async function removeKeyvaultEntry(id: string): Promise<void> {
+  const row = lastVaultRows.find((r) => r.id === id);
+  const name = row?.label || row?.note || row?.service || "API key";
   const ok = await appConfirm({
     title: t("settings.kvRemoveTitle"),
-    message: t("settings.kvRemoveBody"),
+    message: t("settings.acctRemoveConfirm", { name }),
     confirmLabel: t("settings.kvRemove"),
     danger: true,
   });
@@ -11298,6 +11670,9 @@ async function removeKeyvaultEntry(id: string): Promise<void> {
   try {
     renderKeyvault(await invoke<KeyVaultRow[]>("keyvault_remove", { id }));
   } catch (err) {
+    if (String(err).includes("locked") && (await unlockVault())) {
+      return removeKeyvaultEntry(id);
+    }
     const status = document.querySelector("#status");
     if (status) status.textContent = String(err);
   }
@@ -13432,6 +13807,8 @@ window.addEventListener("DOMContentLoaded", () => {
           const idx = lastSnapshots.findIndex((s) => s.id === id);
           if (idx >= 0) lastSnapshots[idx] = snap;
           else lastSnapshots.push(snap);
+          if (!snap.stale && snap.status === "ok") clearBackoffRetry(id);
+          else scheduleBackoffRetries(lastSnapshots);
           renderAll();
         })
         .catch(() => {
@@ -13762,6 +14139,7 @@ window.addEventListener("DOMContentLoaded", () => {
     lastSnapshots = hideFoldedMoonshot(e.payload);
     ensureLayout();
     renderIfVisible();
+    scheduleBackoffRetries(lastSnapshots);
     requestTraySync();
     // Auth center: fresh quota columns and account lists (a login/import
     // finishing elsewhere also lands here). A live login flow owns its

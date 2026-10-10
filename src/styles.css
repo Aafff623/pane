@@ -1,9 +1,33 @@
 /* First-paint i18n gate: html ships with .i18n-boot and the boot script
    removes it once the cached locale has translated the static DOM — the
    UI never flashes in the wrong language. */
-html.i18n-boot body {
+html.i18n-boot body > :not(#boot-fallback) {
   opacity: 0;
 }
+
+#boot-fallback { display: none; }
+html.i18n-boot #boot-fallback {
+  display: flex;
+  position: fixed;
+  inset: 0;
+  z-index: 2147483647;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  padding: 24px;
+  background: #09090b;
+  color: #fafafa;
+  text-align: center;
+  font: 14px/1.6 system-ui, sans-serif;
+}
+#boot-fallback p { margin: 0; }
+#boot-fallback .boot-recovery {
+  opacity: 0;
+  animation: boot-recovery-show 0s 8s forwards;
+}
+#boot-fallback a { color: #93c5fd; }
+@keyframes boot-recovery-show { to { opacity: 1; } }
 
 /* Design tokens lifted from shadcn/ui's dark zinc theme (ui.shadcn.com) —
    the palette and component treatments, hand-ported to plain CSS. */
@@ -551,7 +575,7 @@ body.settings-open #settings {
 .shortcut-state.conflict { color: #ef4444; }
 
 .kv-add-row {
-  align-items: stretch;
+  display: none !important;
 }
 
 /* Q&A recovery editor / challenge rows under the vault bar. */
@@ -1715,6 +1739,12 @@ body:not(.panel-form).settings-open #settings {
   overflow: hidden;
 }
 
+/* Reserve a real inset, so the trailing brand mark and its actions stay
+   inside the header in every expanded/folded provider card. */
+.provider-head:has(> .provider-icon) {
+  padding-inline-end: 6px;
+}
+
 .provider-head .provider-name {
   min-width: 64px;
   overflow: hidden;
@@ -2657,8 +2687,8 @@ article.provider.is-folded:hover {
 }
 
 .overview-bar-item .overview-item-icon {
-  width: 15px;
-  height: 15px;
+  width: clamp(16px, 3.3cqi, 22px);
+  height: clamp(16px, 3.3cqi, 22px);
   flex: none;
   display: inline-flex;
   color: var(--foreground);
@@ -2672,6 +2702,7 @@ article.provider.is-folded:hover {
 .overview-bar-item .overview-item-name {
   flex: 1;
   min-width: 0;
+  max-width: none;
   font-size: var(--compact-label-size, 10.5px);
   color: var(--secondary-foreground);
   overflow: hidden;
@@ -2686,6 +2717,11 @@ article.provider.is-folded:hover {
 
 .overview-bar-item .overview-account-count {
   margin-left: 1px;
+  font-size: clamp(9px, 2cqi, 13px);
+}
+
+.overview-bar-item .overview-account-count b {
+  font-size: inherit;
 }
 
 .overview-bar-item .overview-dot {
@@ -2709,7 +2745,7 @@ article.provider.is-folded:hover {
 
 .overview-bar-item .ovbar-pct {
   flex: none;
-  font-size: 10.5px;
+  font-size: clamp(12px, 2.6cqi, 18px);
   font-weight: 600;
   font-variant-numeric: tabular-nums;
   color: var(--foreground);
@@ -2755,14 +2791,46 @@ article.provider.is-folded:hover {
   background: color-mix(in oklab, #f97316 30%, transparent);
 }
 
+/* A balance without a denominator still has a graphical quota indicator.
+   Neutral stripes/dashes communicate unknown proportion, never 0% or 100%. */
+.overview-bar-item .ovbar.is-unknown {
+  background: repeating-linear-gradient(135deg,
+    color-mix(in oklab, var(--muted-foreground) 50%, transparent) 0 4px,
+    color-mix(in oklab, var(--muted-foreground) 16%, transparent) 4px 8px);
+}
+.overview-ring .ring-text.is-unknown {
+  fill: var(--muted-foreground);
+}
+
 .overview-bar-item .ovbar-meta {
   width: 100%;
   max-width: none;
-  font-size: 9px;
+  font-size: clamp(11px, 2.3cqi, 15px);
   color: var(--muted-foreground);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+/* Balance-only providers have real data but no trustworthy percentage.
+   Show their reported values instead of an empty quota track or "no data". */
+.overview-text-values {
+  display: grid;
+  gap: 3px;
+  max-width: 100%;
+  text-align: start;
+}
+.overview-text-value {
+  display: block;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  line-height: 1.45;
+}
+
+.overview-item-foot:has(.overview-text-values) {
+  width: 100%;
+  max-width: 100%;
+  font-size: 11px;
 }
 
 .spend-metric-tab {
@@ -3213,6 +3281,51 @@ article.provider.is-folded:hover {
 
 .cust-account-child .cust-config {
   flex-basis: 100%;
+}
+
+.cust-archived-section {
+  margin-top: 6px;
+  border: 1px dashed var(--border);
+  border-radius: 8px;
+  background: rgb(255 255 255 / 0.015);
+}
+
+.cust-archived-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  padding: 6px 10px;
+  background: none;
+  border: none;
+  color: var(--muted-foreground);
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  border-radius: 8px;
+}
+
+.cust-archived-toggle:hover {
+  color: var(--foreground);
+  background: var(--accent);
+}
+
+.cust-archived-list {
+  padding: 4px 6px 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.cust-account-child.is-archived {
+  opacity: 0.85;
+  background: rgb(255 255 255 / 0.02);
+}
+
+.cust-archived-empty {
+  padding: 6px 8px;
+  font-size: 11px;
+  text-align: center;
 }
 
 /* Destructive zone at the end of a provider's gear panel: delete lives
@@ -5171,6 +5284,24 @@ body.no-glass .cust-dock {
   margin: 0 0 14px;
 }
 
+.confirm-checkbox-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 16px;
+  font-size: 12px;
+  color: var(--foreground);
+  cursor: pointer;
+  user-select: none;
+}
+
+.confirm-checkbox-row input[type="checkbox"] {
+  accent-color: var(--accent);
+  width: 14px;
+  height: 14px;
+  cursor: pointer;
+}
+
 /* "?" provider-quota help dialog (openProviderHelp) */
 .help-kind {
   display: inline-block;
@@ -5984,7 +6115,12 @@ body.no-glass #confirm-box {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  max-width: 44px;
+  max-width: none;
+}
+
+.overview-item-head .overview-item-name {
+  min-width: 0;
+  flex: 0 1 auto;
 }
 
 /* Informational multi-account marker; health remains encoded by the dot. */

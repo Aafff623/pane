@@ -9,6 +9,15 @@
   </head>
 
   <body>
+    <!-- Independent of the module bundle: a failed resource load must leave
+         visible recovery guidance instead of a permanently hidden body. -->
+    <div id="boot-fallback" role="status" aria-live="polite">
+      <p>正在加载 Pane… / Loading Pane…</p>
+      <div class="boot-recovery">
+        <p>加载仍未完成，请重新加载。 / Still loading. Please reload.</p>
+        <a href="/">重新加载 / Reload</a>
+      </div>
+    </div>
     <!-- Liquid-glass lens (prasen.dev original): rounded-rect SDF lens map —
          refraction hugs the rim, center stays optically flat — with R/G/B
          displaced at different strengths for a real prism fringe. Filter
@@ -267,7 +276,7 @@
             <input id="kv-key" type="password" data-i18n-placeholder="settings.kvKey" placeholder="API key" spellcheck="false" autocomplete="off" />
             <button class="mini-btn" id="kv-add-btn" data-i18n="settings.kvAdd">Add</button>
           </div>
-          <p class="kv-hint" data-i18n="settings.kvHint">Keys are sealed with your master password (Argon2id + AES-256-GCM); service, label and note stay readable so the locked vault still shows what it holds.</p>
+          <p class="kv-hint" data-i18n="settings.kvHint">Keys are sealed with your master password (Argon2id + AES-256-GCM); service, label and note stay readable so the locked vault still shows what it holds. Cards also monitor keys from environment variables and the ZCode CLI config, and mark vault keys 🔒 while the vault is locked.</p>
         </div></div>
       </div>
 
