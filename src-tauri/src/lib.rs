@@ -115,10 +115,10 @@ fn config_with_defaults(mut cfg: Value) -> Value {
         cfg = json!({});
     }
     let obj = cfg.as_object_mut().unwrap();
-    // Out-of-the-box experience: 1-min refresh, all three quota alerts on,
+    // Out-of-the-box experience: 5-min refresh, all three quota alerts on,
     // dark + compact. (Autostart defaults on in setup; tray icon defaults
     // to Auto via pinned = null.)
-    obj.entry("refreshMinutes").or_insert(json!(1));
+    obj.entry("refreshMinutes").or_insert(json!(5));
     // Fresh installs start lean: mainstream subscriptions visible, niche
     // vendors wait disabled in Customize until the user enables them.
     // Existing configs already carry their own list — entry() never

@@ -79,4 +79,58 @@ mod tests {
              ALLOWED_TS_ONLY with the reason"
         );
     }
+
+    /// The refresh default drifted once: Rust seeded new configs with 1
+    /// minute while the frontend, the website and the docs all promised 5.
+    /// New users silently got 1-minute polling against vendor APIs. Pin the
+    /// number everywhere it is written as a literal so the next drift fails
+    /// here instead of shipping.
+    const REFRESH_DEFAULT: u32 = 5;
+
+    fn refresh_literals_in_frontend() -> Vec<u32> {
+        let mut found = Vec::new();
+        let mut rest = TS_MAIN;
+        while let Some(at) = rest.find("refreshMinutes: ") {
+            rest = &rest[at + "refreshMinutes: ".len()..];
+            let digits: String = rest.chars().take_while(char::is_ascii_digit).collect();
+            if !digits.is_empty() {
+                found.push(digits.parse().expect("refreshMinutes literal parses"));
+            }
+        }
+        found
+    }
+
+    #[test]
+    fn refresh_default_agrees_across_rust_and_frontend() {
+        let literals = refresh_literals_in_frontend();
+        assert!(
+            literals.len() >= 2,
+            "expected the initial config and the settings reset to both carry a \
+             refreshMinutes literal, found {literals:?}"
+        );
+        let divergent: Vec<u32> = literals
+            .iter()
+            .copied()
+            .filter(|n| *n != REFRESH_DEFAULT)
+            .collect();
+        assert!(
+            divergent.is_empty(),
+            "frontend refreshMinutes literals disagree with the {REFRESH_DEFAULT}-minute \
+             default: {divergent:?}"
+        );
+
+        assert!(
+            RS_LIB.contains("obj.entry(\"refreshMinutes\").or_insert(json!(5));"),
+            "config_with_defaults must seed refreshMinutes = {REFRESH_DEFAULT}"
+        );
+        let fallback = RS_LIB
+            .split("fn refresh_minutes_from")
+            .nth(1)
+            .expect("refresh_minutes_from exists");
+        let fallback = &fallback[..fallback.find('}').expect("function body ends")];
+        assert!(
+            fallback.contains(".unwrap_or(5)"),
+            "refresh_minutes_from must fall back to {REFRESH_DEFAULT} minutes, body: {fallback}"
+        );
+    }
 }

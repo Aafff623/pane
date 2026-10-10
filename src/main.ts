@@ -12122,7 +12122,7 @@ async function resetAllSettings(): Promise<void> {
     // Invalid leftover shortcut shouldn't block the rest of the reset.
   }
   await patchConfig({
-    refreshMinutes: 1,
+    refreshMinutes: 5,
     disabled: [],
     pinned: null,
     trayProviders: [],
