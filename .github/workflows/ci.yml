@@ -1,0 +1,37 @@
+# CI gate: the frontend build and the parse-tests harness.
+#
+# release.yml only builds and packages — without this gate a type error or a
+# broken provider parser could ship in a tagged release. The site tests have
+# their own gate in site-deploy.yml (PR + main on `site/**`).
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: npm ci
+      # tsc --noEmit + vite build (the same command the release uses).
+      - run: npm run build
+
+  # The harness compiles the real src-tauri sources via #[path] against a
+  # Tauri stub; it is developed and verified on Windows, which is also the
+  # target platform, so the gate runs there rather than on Linux.
+  parse-tests:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: parse-tests
+      - run: cargo test
+        working-directory: parse-tests
