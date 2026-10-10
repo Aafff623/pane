@@ -1,6 +1,11 @@
 {
   "name": "pane",
   "private": true,
+  "description": "Local-first AI usage dashboard for quotas, balances, reset times, multi-account management and CLI token spend.",
+  "homepage": "https://pane.threetwoa.live",
+  "repository": { "type": "git", "url": "https://github.com/Aafff623/pane.git" },
+  "license": "MIT",
+  "keywords": ["ai-usage", "quota-monitoring", "token-usage", "cost-tracking", "multi-account", "local-first", "desktop-app", "tauri", "rust", "typescript", "vite"],
   "version": "0.5.0",
   "type": "module",
   "scripts": {

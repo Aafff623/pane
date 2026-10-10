@@ -16,9 +16,11 @@
         "label": "main",
         "title": "Pane",
         "dragDropEnabled": false,
-        "width": 380,
-        "height": 600,
-        "resizable": false,
+        "width": 450,
+        "height": 640,
+        "minWidth": 380,
+        "minHeight": 560,
+        "resizable": true,
         "decorations": false,
         "alwaysOnTop": true,
         "skipTaskbar": true,
@@ -45,8 +47,9 @@
     "createUpdaterArtifacts": true,
     "publisher": "Pane",
     "copyright": "© 2026 Pane contributors (MIT)",
-    "shortDescription": "AI usage limits in your system tray",
-    "longDescription": "Pane shows how much of your session and weekly limits each AI tool has left, from the system tray. Windows is the supported desktop; macOS and Linux builds are preview.",
+    "shortDescription": "Local-first AI usage dashboard",
+    "longDescription": "Pane brings AI quotas, balances, reset times, account pools and local CLI token spend into one on-demand desktop panel. Built with Tauri, Rust and TypeScript, it keeps credentials on your computer. Windows is the primary development and validation platform; macOS and Linux builds are preview.",
+    "homepage": "https://pane.threetwoa.live",
     "windows": {
       "nsis": {
         "installerIcon": "icons/icon.ico"
