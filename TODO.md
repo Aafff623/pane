@@ -1,6 +1,6 @@
 # Pane TODO
 
-<!-- next-task-id: 0028 -->
+<!-- next-task-id: 0030 -->
 
 This file is the canonical board for cross-session task state.
 
@@ -18,17 +18,18 @@ Handoff parcels in `temp/handoff/` cite task IDs from this board. The board does
 - [ ] T-0003 — 注册表收口：`provider_runtime.rs` 单表驱动 refresh，docs 覆盖基线并入一致性门禁
 - [ ] T-0004 — Provider 全量补全（5 批）：Batch 1-4 已提交（共 23 家：10 还原 + MiMo/Trae国际/Qoder国际/Zed + Droid/JetBrains/Groq/HuggingFace/LongCat/sub2api/Mistral/Perplexity + 火山方舟），测试 489→550；**未落地项**：千帆/腾讯TokenHub/华为云/讯飞/360 的额度端点在全部参考库中不存在（需装机抓包，不编造）；CodeBuddy/腾讯需 device-code 登录流（T-0009 型）；通义灵码无现成实现需自研抓包；Batch 5 长尾等用户点单。真实出数验证仍需用户提供各家的 key
 - [ ] T-0005 — Analytics 用量面板：先出 `temp/preview/` 原型拍板，再接线（Rust 聚合命令 + 自绘 SVG）
-- [ ] T-0006 — CI 门禁补齐：加 PR 触发的 `ci.yml`（前端 build + parse-tests 去代理运行）
 - [ ] T-0007 — 把 4 个模块的 84 个「死测试」挂进 parse-tests harness（`lib.rs`/`tray_projection`/`telemetry`/`httpapi`）
 - [ ] T-0008 — 收尾欠账：长墙镜像白名单逐家实测扩展、ru 语言 38 键、`docs/providers.md` 16 节
 - [ ] T-0009 — Qoder 配额卡：用户完成一次 device-code 登录后按实测响应实现（端点情报已在 handoff）
-- [ ] T-0010 — 发布资产与杂项：`install.ps1` 上游指向 6 处、`ROADMAP`/`README` 计数、`stash@{0}` 处置、项目 skill 落位与入库、**装机目录自启 exe 换正式构建**（实测为依赖 Vite 的开发构建——无 Vite 时开机自启只显示报错页；换正式版后走应用内更新，不再卸载重装，并在换装后实测一次应用内更新（v0.5.0 的 latest.json 通道首次可验））
+- [ ] T-0010 — 发布资产与杂项：`ROADMAP`/`README` 计数、`stash@{0}` 处置、项目 skill 落位与入库、**装机目录自启 exe 换正式构建**（实测为依赖 Vite 的开发构建——无 Vite 时开机自启只显示报错页；换正式版后走应用内更新，不再卸载重装，并在换装后实测一次应用内更新（v0.5.0 的 latest.json 通道首次可验））。install.ps1 下载源已修正到本仓（2026-10-10）
 
 - [ ] T-0012 — 官网模块二重做「使用流程」区块：快捷键（Alt+2/Shift/Ctrl+S/Esc）+ 基本功能（多账号/总花费/额度查询）+ 生态扩展声明（不止 Coding Agent，生产力工具皆可接入）
 - [ ] T-0013 — 官网第三模块 provider 图标深浅主题可见性修复（claude/hermes 等暗色看不清；深浅主题下全部可辨，验收双主题逐图肉眼过）
 - [ ] T-0014 — 复核官网第六轮成果（艺术字/默认配置卡/字号/keyvault 模拟），按审美与一致性问题重做或收敛
 - [ ] T-0015 — 官网首屏深度美化：重新设计艺术字「让每一次调用 / 都看得见」的字形、层次、动效与首屏构图，完成桌面与移动端视觉验收
 - [ ] T-0027 — winget 首发收录：manifest PR microsoft/winget-pkgs#449939 已提交（Pane.Pane 0.6.0，nullsoft/user/SHA256 与 latest.json 一致），待官方管道与审核合并；合并后 winget.yml 自动派发才生效（releaser 只能更新已有包）
+- [ ] T-0028 — SignPath Foundation 免费签名申请（**用户指示暂缓**）：申请内容底稿已备（`temp/signpath/application-draft.md`，含 8 文本字段 + 4 下拉框值 + 英文长文）；内置浏览器无法可靠填写该跨域 HubSpot 表单（操作原生 select 两次触发渲染器崩溃、表单被清空），需用户在自己浏览器按底稿粘贴并提交；提交前需先办：Code signing policy 文档、下载页 SignPath 声明、遥测装期告知、install.ps1（已修）
+- [ ] T-0029 — keyvault 安全问答恢复机制改造（P0 安全，待方案确认）：现状为恢复密钥 R 分别用每个答案各封一次，答对**任意一题**即可解出 R→主密码，且失败冷却只在内存（拷走 keyvault.json 可离线猜单题）；拟改高熵恢复码（用户离线保存），需兼容迁移方案，实施前需用户拍板
 
 ## Rules
 
