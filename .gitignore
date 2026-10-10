@@ -57,3 +57,6 @@ site/.wrangler/
 
 # local AI-tool session residue
 .omo/
+
+# ZCode harness session state (local)
+.zcode/
