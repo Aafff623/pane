@@ -1,4 +1,5 @@
 @font-face{font-family:Manrope;src:url('/fonts/Manrope-Variable.woff2') format('woff2');font-weight:200 800;font-style:normal;font-display:swap}
 /* Noto Sans SC ships as unicode-range shards upstream; the stack falls back
    to the system CJK face (Microsoft YaHei / PingFang) where shards are not
-   bundled. */
+   bundled. The hero title's kai style likewise rides on system faces
+   (STKaiti on macOS/Office, KaiTi on Windows) — no webfont payload. */

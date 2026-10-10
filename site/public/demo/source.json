@@ -1,10 +1,10 @@
 {
   "version": "0.5.0",
   "files": {
-    "index.html": "ee004968fa0134f6c42a07c86e7a2677595d5fadde910ddd2f151071ef7d24e0",
-    "src/main.ts": "92c85f198446bddd859a48d8687b1f93f5d2b0291903b27756a0d0c1314afc00",
-    "src/styles.css": "7109392fe5cbab3c1f9701a971aa863843ff6b4882461ead1439400d0f31d861",
-    "src/i18n.ts": "f4f0b0ac4a9a18ed285a499e6e78fd82f1115bf5885d28e05f67db465fa90246",
-    "src/providerCatalog.ts": "ddbf38121d6e3092dd92d90c437a11d57a2af675cb123acfa78161701cca2977"
+    "index.html": "944ca6dee71d59d4c13b4dde92c34760e3e12f1fc8971c0f8d6d92e4597a75db",
+    "src/main.ts": "f0c2d75725695028fe2259634902a9fd94c5af079da8c2f76bf27657da8672f6",
+    "src/styles.css": "fb99ff9393f588b149a1e94b0a0d67c93596d4b729f2e7d8e16e96beebeb1a12",
+    "src/i18n.ts": "a5699097c563561dec4e3a628b204e766b7a9fb67a888c91653894b6172a0974",
+    "src/providerCatalog.ts": "d56f9054585d64a0b26ee246fa4090c9ba3d9923bb9d9ed91a2c644ce7e2fdb4"
   }
 }

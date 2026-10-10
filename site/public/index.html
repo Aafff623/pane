@@ -2,31 +2,74 @@
 <html lang="zh-CN" data-theme="dark">
 <head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<meta name="theme-color" content="#08090a"><title>Pane — AI 用量工作台</title>
-<meta name="description" content="Pane 把 AI 工具的额度、花费和重置时间，放进一个看得见的桌面面板。">
-<link rel="icon" href="/brand-logo.png"><link rel="stylesheet" href="/fonts/fonts.css"><link rel="stylesheet" href="/site.css?v=28">
+<meta name="theme-color" content="#08090a"><title>Pane — 本地优先的 AI 用量工作台</title>
+<meta name="description" content="Pane 将 AI 工具的额度、余额、重置时间、多账号与本地 CLI Token 花费汇集到一个随时可唤出的桌面面板。基于 Tauri、Rust 和 TypeScript 构建，凭据保存在本机。">
+<link rel="canonical" href="https://pane.threetwoa.live/">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Pane">
+<meta property="og:title" content="Pane — 本地优先的 AI 用量工作台">
+<meta property="og:description" content="额度、余额、重置时间、多账号与 CLI Token 花费，一窗掌握。基于 Tauri、Rust 和 TypeScript 构建，凭据保存在本机。">
+<meta property="og:url" content="https://pane.threetwoa.live/">
+<meta property="og:locale" content="zh_CN">
+<meta property="og:image" content="https://pane.threetwoa.live/brand-logo.png?v=2">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:title" content="Pane — 本地优先的 AI 用量工作台">
+<meta name="twitter:description" content="额度、余额、重置时间、多账号与 CLI Token 花费，一窗掌握。基于 Tauri、Rust 和 TypeScript 构建，凭据保存在本机。">
+<meta name="twitter:image" content="https://pane.threetwoa.live/brand-logo.png?v=2">
+<link rel="alternate" hreflang="zh-CN" href="https://pane.threetwoa.live/">
+<link rel="alternate" hreflang="en" href="https://pane.threetwoa.live/en/">
+<link rel="alternate" hreflang="x-default" href="https://pane.threetwoa.live/">
+<link rel="icon" href="/brand-logo.png?v=2"><link rel="stylesheet" href="/fonts/fonts.css?v=3"><link rel="stylesheet" href="/site.css?v=47">
 <script>try{document.documentElement.dataset.theme=localStorage.getItem('pane-site-theme')||'dark'}catch{}</script>
-<script src="/vendor/gsap.min.js"></script><script type="module" src="/site.js?v=25"></script>
+<script src="/vendor/gsap.min.js"></script><script src="/vendor/rough-notation.js"></script><script type="module" src="/site.js?v=40"></script>
 </head>
 <body>
-<header class="site-header"><nav class="wrap nav"><a href="/" class="brand"><img src="/brand-logo.png" width="20" height="20" alt="">Pane</a><span class="nav-context"><i></i>LOCAL USAGE WORKSPACE</span><div class="nav-links"><a href="#demo">体验</a><a href="#features">能力</a><a href="#faq">FAQ</a></div><div class="nav-actions"><button class="icon-button" id="language" aria-label="切换语言">EN</button><button class="icon-button" id="theme" aria-label="切换主题"><img src="/icons/sun.svg" alt="" width="17"></button><a class="github" href="https://github.com/Aafff623/pane"><img src="/icons/github-logo.svg" width="18" alt=""></a><a class="button compact" data-latest-installer href="/download/windows">下载</a></div></nav></header>
+<div id="grid-bg" aria-hidden="true" data-grid-size="40" data-grid-squares="30" data-grid-max-opacity="0.1" data-grid-duration="3" data-grid-repeat-delay="1"></div>
+<header class="site-header"><nav class="wrap nav"><a href="/" class="brand"><img src="/brand-logo.png?v=2" width="20" height="20" alt="">Pane</a><span class="nav-context"><i></i>LOCAL USAGE WORKSPACE</span><div class="nav-links"><a href="#demo">体验</a><a href="#features">能力</a><a href="#faq">FAQ</a></div><div class="nav-actions"><button class="icon-button" id="language" aria-label="切换语言">EN</button><button class="icon-button" id="theme" aria-label="切换主题"><img src="/icons/sun.svg" alt="" width="17"></button><a class="github" href="https://github.com/Aafff623/pane"><img src="/icons/github-logo.svg" width="18" alt=""></a><a class="button compact" data-latest-installer href="/download/windows">下载</a></div></nav></header>
 <main>
 <section class="hero wrap">
-  <div class="hero-meta"><span>01 / 概览</span><span>桌面伴侣 · v0.4</span></div>
+  <div class="hero-meta"><span>01 / 概览</span><span>桌面伴侣 · v0.5.0</span></div>
   <div class="hero-grid">
     <div class="hero-copy">
       <p class="eyebrow"><span class="eyebrow-dot"></span>AI 用量，一目了然。</p>
-      <h1 class="title-art"><span class="title-lead">让每一次调用</span><em class="title-focus title-rebuilt">看得见</em></h1>
+      <h1 class="hero-title"><span class="hero-title-lead">让每一次<span class="ink-mark" data-hl-type="highlight" data-hl-color="#87CEFA" data-hl-padding="3">调用</span></span><span class="hero-title-focus"><span class="ink-mark ink-mark-underline" data-hl-type="underline" data-hl-color="#FF9800" data-hl-stroke="3" data-hl-padding="5">看得见</span></span></h1>
       <p class="hero-description">Pane 是一个本地桌面用量工作台。额度、花费、重置时间和账户状态，集中在一个悬浮窗里，随时可查。</p>
       <div class="hero-actions"><a class="button hero-download" data-latest-installer href="/download/windows"><img src="/icons/windows-logo.svg" width="16" alt="">下载 Windows 版</a><a href="#demo" class="text-link">打开互动演示 <span>↘</span></a></div>
-      <div class="hero-stats"><div><b>43</b><span>服务商</span></div><div><b>本地</b><span>凭据留在本机</span></div><div><b>Alt + 2</b><span>快速访问 · 内置，可自定义</span></div></div>
+      <div class="hero-stats"><div><b>66</b><span>服务商</span></div><div><b>本地</b><span>凭据留在本机</span></div><div><b>Alt + 2</b><span>快速访问 · 内置，可自定义</span></div></div>
     </div>
     <aside class="blueprint-note" data-tilt-card>
-      <div class="agent-portrait"><div class="agent-carousel" aria-roledescription="carousel" aria-label="Pane 伴侣插画"><img class="agent-slide is-active" src="/pane-agent-01.png" alt="坐在用量面板旁的 Pane 伴侣"><img class="agent-slide" src="/pane-agent-02.png" alt="展示额度环的 Pane 伴侣"><img class="agent-slide" src="/pane-agent-03.png" alt="被用量图表环绕的 Pane 机器人伴侣"><div class="agent-dots"><button class="is-active" type="button" aria-label="查看插画 1"></button><button type="button" aria-label="查看插画 2"></button><button type="button" aria-label="查看插画 3"></button></div></div><span>实时伴侣</span></div>
+      <div class="agent-portrait"><img src="/pane-agent-03.png" alt="手持扳手坐在全息台上的 Pane 机器人伴侣"><span>实时伴侣</span></div>
       <span class="note-kicker">PANE / 你的桌面伴侣</span>
       <p>额度 · 花费 · 账户状态<br>在手边，也在你的掌握之中。</p>
       <span class="note-foot">示例数据 · 不连接真实账户</span>
     </aside>
+  </div>
+</section>
+<section id="why-pane" class="why-pane wrap" aria-labelledby="why-pane-title">
+  <div class="why-panel">
+    <div class="why-copy">
+      <span class="why-kicker">WHY PANE / 少一点来回切换</span>
+      <h2 id="why-pane-title">查一次用量，不必跑遍每个后台。</h2>
+      <p>如果你也被来回查用量困扰：在各个 Harness 工具里翻使用统计，再去对应官网的 Dashboard 查额度、查 Credits，不妨试试 Pane。把支持的工具用量集中到一个悬浮窗，少切几个页面。</p>
+      <a class="why-link" href="#demo">就在下面，试一试 <span aria-hidden="true">↘</span></a>
+    </div>
+    <div class="why-flow">
+      <div class="why-flow-head"><span class="why-flow-label">用量汇集 / 示例数据</span><button class="why-pause" type="button" aria-pressed="false">暂停动画</button></div>
+      <div class="why-stage">
+        <svg class="why-wires" aria-hidden="true"></svg>
+        <div class="why-work why-node"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><rect x="2" y="4" width="20" height="16" rx="3"/><path d="m6 9 3 3-3 3m6 0h5"/></svg><b>你的工作</b><small>保持专注</small></div>
+        <div class="why-destination why-node"><img src="/brand-logo.png?v=2" width="32" height="32" alt=""><b>Pane</b><small>一个悬浮窗，随时可查</small><kbd>Alt + 2</kbd></div>
+        <div class="why-sources">
+          <button class="why-source" type="button" data-value="1.2M tokens" style="--usage:72%"><i class="why-dot"></i><img src="/img/providers/claude.svg" width="18" height="18" alt=""><b>Claude Code <small>Harness · 日志统计</small></b><em>1.2M tokens</em><span class="why-meter"><i></i></span></button>
+          <button class="why-source" type="button" data-value="32%" style="--usage:32%"><i class="why-dot"></i><img src="/img/providers/codex.svg" width="18" height="18" alt=""><b>Codex <small>Dashboard · 5h 额度</small></b><em>32%</em><span class="why-meter"><i></i></span></button>
+          <button class="why-source" type="button" data-value="68%" style="--usage:68%"><i class="why-dot"></i><img src="/img/providers/cursor.svg" width="18" height="18" alt=""><b>Cursor <small>Dashboard · 月度额度</small></b><em>68%</em><span class="why-meter"><i></i></span></button>
+          <button class="why-source" type="button" data-value="$18.40" style="--usage:46%"><i class="why-dot"></i><img src="/img/providers/openrouter.svg" width="18" height="18" alt=""><b>OpenRouter <small>Credits · 余额</small></b><em>$18.40</em><span class="why-meter"><i></i></span></button>
+          <button class="why-source" type="button" data-value="9%" style="--usage:9%"><i class="why-dot"></i><img src="/img/providers/tavily.svg" width="18" height="18" alt=""><b>Tavily <small>Dashboard · 请求用量</small></b><em>9%</em><span class="why-meter"><i></i></span></button>
+        </div>
+      </div>
+      <div class="why-flow-foot"><p class="why-flow-caption">用量从不同入口汇集，工作留在当前窗口。</p><span class="why-flow-count"><b>0</b><small>次演示汇集</small></span></div>
+      <p class="why-flow-note">点击任意来源，查看汇集过程。仅演示动画，不连接真实账户。</p>
+    </div>
   </div>
 </section>
 <section id="demo" class="demo-section">
@@ -53,7 +96,7 @@
         <div class="legend-foot">实时 / 示例数据</div>
       </div>
       <div class="demo-stage">
-        <div class="demo-topbar"><span class="demo-brand"><img src="/brand-logo.png" width="17" alt="">Pane</span><span class="demo-status"><i></i>示例数据 · 交互体验</span><button class="text-button" id="reset-demo"><img src="/icons/arrows-clockwise.svg" width="15" alt="">重置</button></div>
+        <div class="demo-topbar"><span class="demo-brand"><img src="/brand-logo.png?v=2" width="17" alt="">Pane</span><span class="demo-status"><i></i>示例数据 · 交互体验</span><button class="text-button" id="reset-demo"><img src="/icons/arrows-clockwise.svg" width="15" alt="">重置</button></div>
         <div class="demo-desktop">
           <div class="demo-annotation annotation-sample" data-anchor="sample" data-group="a"><span class="annotation-number">01</span><strong>示例数据层</strong><span>额度、花费与账户均用于演示。<br>可以操作，不会连接真实账户。</span><i class="annotation-connector"></i></div>
           <div class="demo-annotation annotation-left" data-anchor="left" data-group="a"><strong>边缘轻触，侧栏浮现</strong><span>把鼠标移到面板左侧，<br>查看主题、刷新与设置。</span><i class="annotation-connector"></i></div>
@@ -97,14 +140,57 @@
         </div>
         <div class="keyboard-feedback" role="status" aria-live="polite">点击开始，再试试快捷键。</div>
         <small>网页演示在此区域获得焦点时生效，也可点击上方按键。桌面版支持全局 Alt + 2。</small>
-        <div class="stage-config"><span class="config-kicker">运行说明</span><dl><div><dt>真实前端</dt><dd>示例额度与账户，可操作，不连接真实账户。</dd></div><div><dt>刷新与设置</dt><dd>默认每 6 分钟刷新；底部按钮可手动刷新、打开设置。</dd></div></dl></div>
+        <div class="stage-config"><span class="config-kicker">运行说明</span><dl><div><dt>真实前端</dt><dd>示例额度与账户，可操作，不连接真实账户。</dd></div><div><dt>刷新与设置</dt><dd>默认每 5 分钟刷新；底部按钮可手动刷新、打开设置。</dd></div></dl></div>
       </aside>
     </div>
   </div>
 </section>
-<section class="provider-section ruled">
+<section id="ecosystem" class="ecosystem-section ruled" aria-labelledby="ecosystem-title">
+  <div class="wrap ecosystem-layout">
+    <div class="ecosystem-art">
+      <div class="ecosystem-visual">
+        <div class="why-orbits" role="img" aria-label="更多支持的服务围绕 Pane 汇集">
+            <div class="why-orbit-ring why-orbit-outer"></div><div class="why-orbit-ring why-orbit-inner"></div>
+            <span class="why-orbit-icon why-orbit-outer" style="--angle:0" title="Claude"><img src="/img/providers/claude.svg" width="24" height="24" alt="Claude"></span>
+            <span class="why-orbit-icon why-orbit-outer" style="--angle:45" title="Codex"><img src="/img/providers/codex.svg" width="24" height="24" alt="Codex"></span>
+            <span class="why-orbit-icon why-orbit-outer" style="--angle:90" title="Cursor"><img src="/img/providers/cursor.svg" width="24" height="24" alt="Cursor"></span>
+            <span class="why-orbit-icon why-orbit-outer" style="--angle:135" title="Copilot"><img src="/img/providers/copilot.svg" width="24" height="24" alt="Copilot"></span>
+            <span class="why-orbit-icon why-orbit-outer" style="--angle:180" title="DeepSeek"><img src="/img/providers/deepseek.svg" width="24" height="24" alt="DeepSeek"></span>
+            <span class="why-orbit-icon why-orbit-outer" style="--angle:225" title="Kimi"><img src="/img/providers/kimi-code.svg" width="24" height="24" alt="Kimi"></span>
+            <span class="why-orbit-icon why-orbit-outer" style="--angle:270" title="MiniMax"><img src="/img/providers/minimax.svg" width="24" height="24" alt="MiniMax"></span>
+            <span class="why-orbit-icon why-orbit-outer" style="--angle:315" title="Qoder"><img src="/img/providers/qoder-cn.svg" width="24" height="24" alt="Qoder"></span>
+            <span class="why-orbit-icon why-orbit-inner" style="--angle:22.5" title="OpenRouter"><img src="/img/providers/openrouter.svg" width="20" height="20" alt="OpenRouter"></span>
+            <span class="why-orbit-icon why-orbit-inner" style="--angle:67.5" title="Grok"><img src="/img/providers/grok.svg" width="20" height="20" alt="Grok"></span>
+            <span class="why-orbit-icon why-orbit-inner" style="--angle:112.5" title="Tavily"><img src="/img/providers/tavily.svg" width="20" height="20" alt="Tavily"></span>
+            <span class="why-orbit-icon why-orbit-inner" style="--angle:157.5" title="Firecrawl"><img src="/img/providers/firecrawl.svg" width="20" height="20" alt="Firecrawl"></span>
+            <span class="why-orbit-icon why-orbit-inner" style="--angle:202.5" title="SiliconFlow"><img src="/img/providers/siliconflow.svg" width="20" height="20" alt="SiliconFlow"></span>
+            <span class="why-orbit-icon why-orbit-inner" style="--angle:247.5" title="ElevenLabs"><img src="/img/providers/elevenlabs.svg" width="20" height="20" alt="ElevenLabs"></span>
+            <span class="why-orbit-icon why-orbit-inner" style="--angle:292.5" title="Ollama"><img src="/img/providers/ollama.svg" width="20" height="20" alt="Ollama"></span>
+            <span class="why-orbit-icon why-orbit-inner" style="--angle:337.5" title="闪电说"><img src="/img/providers/shandianshuo.svg" width="20" height="20" alt="闪电说"></span>
+          </div>
+
+        <div class="ecosystem-core"><img src="/brand-logo.png?v=2" width="48" height="48" alt=""><b>Pane</b><span>连接分散的用量</span></div>
+      </div>
+      <div class="ecosystem-art-foot"><span>不同服务，同一个入口</span><button class="ecosystem-pause why-pause" type="button" aria-pressed="false">暂停轨道</button></div>
+    </div>
+    <div class="ecosystem-copy">
+      <span class="why-kicker">PANE ECOSYSTEM / 让连接继续生长</span>
+      <h2 id="ecosystem-title">从 AI 工具出发，<br>连接更多领域的用量。</h2>
+      <p class="ecosystem-intro">目前收录 <strong>66 个服务商</strong>，覆盖编程 Agent、模型 API、语音与搜索等服务。Pane 的方向，是把不同领域的额度、余额与订阅状态，带到同一个桌面入口。</p>
+      <div class="ecosystem-domains">
+        <div><span>01 / AI 与内容生产</span><p>模型与 Agent · 图像与视频 · 语音与翻译 · 搜索与爬虫</p></div>
+        <div><span>02 / 工作效率与商业运营</span><p>自动化工作流 · 办公与设计 SaaS · 电商与物流 · 营销与通信</p></div>
+        <div><span>03 / 数字资源与开发基础设施</span><p>云部署与算力 · 数据库与分析 · 网盘与备份 · 网络与流量</p></div>
+        <div><span>04 / 个人数字会员</span><p>消费级工具、知识与教育会员</p></div>
+      </div>
+      <p class="ecosystem-outlook">4 个生态方向，13 个候选领域。以上是拓展构想，接入将依据可用接口逐步推进；当前支持请查看下方服务列表。</p>
+      <a class="why-link" href="#connected-providers">查看当前服务 <span aria-hidden="true">↘</span></a>
+    </div>
+  </div>
+</section>
+<section id="connected-providers" class="provider-section ruled">
   <div class="wrap">
-    <div class="section-head compact"><div><span class="section-index">03</span><h2>已连接服务</h2></div><p>真实项目中的 43 个服务商，双向循环滚动展示。<br>每一行都是完整轨道，不会停在半截。</p></div>
+    <div class="section-head compact"><div><span class="section-index">03</span><h2>已连接服务</h2></div><p>真实项目收录 66 个服务商，这里双向循环滚动展示。<br>每一行都是完整轨道，不会停在半截。</p></div>
     <div class="integrations">
       <ul class="marquee-track">
         <li><img src="/img/providers/claude.svg?v=3" alt="">Claude</li>
@@ -167,23 +253,37 @@
 <section id="faq" class="faq-section ruled">
   <div class="faq-wrap">
     <div class="section-head"><div><span class="section-index">05</span><h2>FAQ</h2></div><p>关于 Pane、演示面板和本地数据的常见问题。</p></div>
-    <details><summary>Pane 是做什么的？</summary><p>Pane 是一个本地桌面面板，汇总 AI 编程工具和模型厂商的额度、余额、重置时间，以及本地 CLI 的 Token 与花费。</p></details>
-    <details><summary>支持哪些工具？</summary><p>包括 Claude、Codex、Cursor、Antigravity、GitHub Copilot、Kimi、Z.ai、OpenRouter 等。</p></details>
-    <details><summary>网页中的面板能操作吗？</summary><p>可以。这里运行的是 Pane 的真实前端，使用固定的演示数据。你可以切换周期、查看花费热力图、打开设置和调整主题。</p></details>
-    <details><summary>账户与密钥会上传到哪里？</summary><p>桌面版把凭据存储在本机，网页体验不会读取你的本地账户或密钥。</p></details>
-    <details><summary>支持哪些操作系统？</summary><p>主要在 Windows 上开发与验证，GitHub Releases 也提供 macOS 与 Linux 构建。</p></details>
-    <details><summary>安装后如何开始？</summary><p>从 GitHub Releases 选择你的系统与架构，安装后打开 Pane，在设置中配置工具，再用 Alt+2 唤出面板。</p></details>
+    <div class="faq-groups">
+      <div class="faq-group">
+        <h3 class="faq-group-title">关于 Pane</h3>
+        <details class="faq-item"><summary>Pane 是做什么的？</summary><div class="faq-body"><p>Pane 是一个本地桌面面板，汇总 AI 编程工具和模型厂商的额度、余额、重置时间，以及本地 CLI 的 Token 与花费。</p></div></details>
+        <details class="faq-item"><summary>支持哪些工具？</summary><div class="faq-body"><p>包括 Claude、Codex、Cursor、Antigravity、GitHub Copilot、Kimi、Z.ai、OpenRouter 等。</p></div></details>
+        <details class="faq-item"><summary>Pane 是开源的吗？</summary><div class="faq-body"><p>是。源码公开可审阅，匿名遥测可以随时关闭。</p></div></details>
+      </div>
+      <div class="faq-group">
+        <h3 class="faq-group-title">演示与数据</h3>
+        <details class="faq-item"><summary>网页中的面板能操作吗？</summary><div class="faq-body"><p>可以。这里运行的是 Pane 的真实前端，使用固定的演示数据。你可以切换周期、查看花费热力图、打开设置和调整主题。</p></div></details>
+        <details class="faq-item"><summary>账户与密钥会上传到哪里？</summary><div class="faq-body"><p>桌面版把凭据存储在本机，网页体验不会读取你的本地账户或密钥。</p></div></details>
+        <details class="faq-item"><summary>花费和 Token 数据从哪里来？</summary><div class="faq-body"><p>从本地 CLI 日志回看，按模型拆分 Token 与花费，不经过任何云端服务。</p></div></details>
+      </div>
+      <div class="faq-group">
+        <h3 class="faq-group-title">账号与安装</h3>
+        <details class="faq-item"><summary>可以同时管理多个账号吗？</summary><div class="faq-body"><p>可以。同一服务商下能挂多个账号，账号徽章显示池中数量和可用状态。</p></div></details>
+        <details class="faq-item"><summary>支持哪些操作系统？</summary><div class="faq-body"><p>主要在 Windows 上开发与验证，GitHub Releases 也提供 macOS 与 Linux 构建。</p></div></details>
+        <details class="faq-item"><summary>安装后如何开始？</summary><div class="faq-body"><p>从 GitHub Releases 选择你的系统与架构，安装后打开 Pane，在设置中配置工具，再用 Alt+2 唤出面板。</p></div></details>
+      </div>
+    </div>
+    <p class="faq-contact"><span>没找到你要的答案？</span> <a href="https://github.com/Aafff623/pane/issues">提交一个 issue</a></p>
   </div>
 </section>
 <section id="download" class="download-section ruled">
   <div class="wrap">
     <span class="section-index">06 / 获取 PANE</span>
-    <h2>把用量带回你的桌面。</h2>
     <div class="bottom-actions"><a class="button" data-latest-installer href="/download/windows"><img src="/icons/windows-logo.svg" width="16" alt="">下载 Windows 版</a><span class="button platform-disabled"><span class="platform-mark">⌘</span>macOS <small>未上线</small></span><span class="button platform-disabled"><span class="platform-mark">◆</span>Linux <small>未上线</small></span><a href="#demo" class="button secondary">先体验一下</a></div>
     <p class="platforms">Windows 已提供 · macOS / Linux 即将上线 · 开源</p>
   </div>
 </section>
 </main>
-<footer class="site-footer ruled"><div class="wrap footer-content"><a href="/" class="brand"><img src="/brand-logo.png" width="18" alt="">Pane</a><div><a href="https://github.com/Aafff623/pane">源代码</a><a href="https://github.com/Aafff623/pane#readme">文档</a><a href="https://github.com/Aafff623/pane/issues">反馈</a><span>© 2026 Pane</span></div></div></footer>
+<footer class="site-footer ruled"><div class="wordmark-footer" id="wordmark-footer" aria-hidden="true"><div class="wf-stage"><span class="wf-word">Pane</span></div><span class="wf-hairline"></span></div><div class="wrap footer-content"><a href="/" class="brand"><img src="/brand-logo.png?v=2" width="18" alt="">Pane</a><div><a href="https://github.com/Aafff623/pane">源代码</a><a href="https://github.com/Aafff623/pane#readme">文档</a><a href="https://github.com/Aafff623/pane/issues">反馈</a><span>© 2026 Pane</span></div></div></footer>
 </body>
 </html>

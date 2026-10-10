@@ -13,7 +13,7 @@ const version = __SOURCE_VERSION__;
 let keyboardDemoEnabled = false;
 
 // The demo mirrors the author's real floating window: same enabled families,
-// groups (🥚鸡蛋 / 🐑羊毛), notes, account pool, density and MV Boli UI font.
+// groups (🥚鸡蛋 / 🐑羊毛), notes, account pool, regular density and MV Boli UI font.
 const DISABLED = ['devin', 'openrouter', 'elevenlabs', 'ollama', 'codebuff', 'kilo', 'aihubmix', 'qwen', 'hermes', 'opencode', 'deepseek', 'claude', 'moonshot', 'grok', 'cursor', 'siliconflow', 'novita', 'relaybalance', 'clawsgo', 'stepfun', 'onenewapi', 'traecn'];
 const LAYOUT_ORDER = ['codex', 'opencode', 'copilot', 'minimax', 'zai', 'antigravity', 'deepseek', 'stepfun-plan', 'qodercn', 'doubao', 'clawsgo', 'shandianshuo', 'tavily', 'kimi', 'stepfun', 'commandcode@63592739d4022730c40f340504638dfd', 'bocha', 'firecrawl', 'brave', 'clinepass', 'clinepass@67ae0d8e0f651d5c85389d55b439010d', 'clinepass@061fa48ec8ce213347f645f9ba6e85b6', 'clinepass@37364f9058253ce13c44730f4761c3e0', 'clinepass@6dd83003c55ed8d3b87dbe698f82a6e6', 'clinepass@bf604e26e7d5a98163f51d4148e714e8', 'sensenova', 'apigoto', 'claude', 'traecn', 'onenewapi@BjhOUJrUH3GNZO0milB15Q', 'commandcode', 'cursor', 'grok', 'devin', 'openrouter', 'moonshot', 'elevenlabs', 'ollama', 'codebuff', 'kilo', 'aihubmix', 'onenewapi', 'qwen', 'hermes', 'siliconflow', 'novita', 'relaybalance', 'mcode', 'qoder'];
 const NOTES: Record<string, string> = {
@@ -29,7 +29,7 @@ const POOL_NOTES: Record<string, string> = {
 const GROUPS: Record<string, string> = { antigravity: 'g6', codex: 'g6', commandcode: 'g6', kimi: 'g6', minimax: 'g6', zai: 'g6', copilot: 'g5', doubao: 'g5' };
 
 let config: Record<string, any> = {
-  refreshMinutes: 6, disabled: [...DISABLED],
+  refreshMinutes: 5, disabled: [...DISABLED],
   pinned: null, trayProviders: [], telemetry: false,
   notifyAlmostOut: false, notifyCuttingClose: false, notifyWillRunOut: false, notifyResetSoon: true,
   spendTab: 'today', overviewTab: '5h', overviewCategory: 'coding', overviewStyle: 'bars',
@@ -42,7 +42,7 @@ let config: Record<string, any> = {
       ...(NOTES[id] ? { note: NOTES[id] } : {}), ...(POOL_NOTES[id] ? { note: POOL_NOTES[id] } : {}), ...(GROUPS[id] ? { group: GROUPS[id] } : {}),
     }])),
   },
-  appearance: params.get('theme') === 'light' ? 'light' : 'dark', density: 'compact', uiFont: 'MV Boli',
+  appearance: params.get('theme') === 'light' ? 'light' : 'dark', density: 'regular', uiFont: 'MV Boli',
   glassEffects: true, shortcut: 'Alt+2', categoryShortcut: 'Shift+1', localShortcuts: {},
   proxy: { enabled: false, url: '' }, showTotalSpend: true, welcomeDismissed: true,
   lastSeenVersion: version, reduceAnimations: matchMedia('(prefers-reduced-motion: reduce)').matches,
@@ -67,9 +67,9 @@ const quota = (used: number, resetHours: number, periodHours = 5) => ({
 // two exhausted cards (Qoder CN, Kimi), two in peak (GLM, Command Code), a
 // ClinePass 6-account pool, "not started" cards and MCP no-data rows.
 const snapshotDefs: Record<string, () => Record<string, unknown>> = {
-  'stepfun-plan': () => ({ metrics: [quota(10, 12 * 24 + 23, 24 * 30), quota(34, 24 * 30, 24 * 30)] }),
+  'stepfun-plan': () => ({ metrics: [quota(12, 10 * 24 + 18, 24 * 30)] }),
   qodercn: () => ({ metrics: [
-    { label: 'Session', kind: 'progress', used_percent: 100, detail: '已用 2500 / 2500 额度', value: null, resets_at: hours(3 * 24 + 7), period_ms: 5 * 3_600_000 },
+    { label: 'Session', kind: 'progress', used_percent: 100, detail: '已用 2500 / 2500 额度', value: null, resets_at: hours(24 + 2), period_ms: 5 * 3_600_000 },
     { label: 'Add-on credits', kind: 'progress', used_percent: 100, detail: '已用 500 / 500 额度', value: null, resets_at: null, period_ms: null },
   ] }),
   clinepass: () => ({ metrics: [
@@ -107,7 +107,12 @@ const poolAccounts = [
 ] as const;
 
 const snapshots = [
-  ...enabledIds.map(id => ({
+  // Only providers with sample data: a catalog entry without a snapshotDefs
+  // entry renders as an empty "no usage data" card, which makes the panel look
+  // nothing like the real window (the desktop app hides credential-less
+  // providers). Filtering here — rather than narrowing enabledIds — keeps the
+  // blocklist semantics intact for everything else that reads it.
+  ...enabledIds.filter(id => snapshotDefs[id]).map(id => ({
     id,
     name: NOTES[id] || providerCatalog.find(p => p.familyId === id)?.displayName || id,
     plan: 'Pro', status: 'ok', error: null, stale: false, warning: null,
@@ -126,19 +131,23 @@ const snapshots = [
 ];
 
 const spendModels = [
-  { model: 'GLM-5-3', cost: 7.65, tokens: 76_500_000 },
-  { model: 'GLM-5-3-Flash', cost: 2.22, tokens: 74_100_000 },
-  { model: 'Other', cost: 2.05, tokens: 41_000_000 },
-  { model: 'gpt-6.1-sol', cost: 8.06, tokens: 17_900_000 },
+  { model: 'deepseek/deepseek-v4.1-flash', cost: 8.13, tokens: 813_000_000 },
+  { model: 'gemini-3.8-flash-n', cost: 1.36, tokens: 136_300_000 },
+  { model: 'MiniMax-M3.1-Flash-Preview', cost: 1.06, tokens: 106_000_000 },
+  { model: 'step-5-preview', cost: 0.87, tokens: 86_700_000 },
+  { model: 'GLM-5.3', cost: 0.32, tokens: 32_100_000 },
+  { model: 'gpt-6.1-sol', cost: 0.27, tokens: 26_700_000 },
+  { model: 'Other', cost: 0.02, tokens: 428_700 },
 ];
-// Dollars are priced per model (blended GLM-ish rates) so that no range ×
-// metric combination can land on $0.00 / 0 tokens: every period sums this
-// window, and `daily` scales it.
+// Token proportions mirror the supplied floating-panel screenshot. Dollar
+// amounts are illustrative demo values, not model prices or live account data.
+// Every period scales this same window for consistent totals and breakdowns.
 const round2 = (n: number) => Math.round(n * 100) / 100;
 const windowCost = () => spendModels.reduce((sum, m) => sum + m.cost, 0);
+const windowTokens = () => spendModels.reduce((sum, m) => sum + m.tokens, 0);
 const tokenWindow = (factor = 1) => ({
   cost: round2(windowCost() * factor),
-  tokens: Math.round(209_500_000 * factor),
+  tokens: Math.round(windowTokens() * factor),
   models: spendModels.map(m => ({ ...m, cost: round2(m.cost * factor), tokens: Math.round(m.tokens * factor) })),
 });
 const spend = ['codex'].map((id, i) => ({
@@ -177,7 +186,8 @@ export async function invoke<T>(command: string, args: Record<string, any> = {})
       if (args.patch?.overviewTab) publishDemoPeriod();
       result = config; break;
     case 'cached_usage': case 'fetch_usage':
-      if (command === 'fetch_usage') await new Promise(r => setTimeout(r, 350));
+      // No network in the demo: answer immediately so the first paint is
+      // instant instead of waiting on a simulated round-trip.
       result = snapshots; break;
     case 'refresh_provider': result = snapshots.find(s => s.id === args.providerId); break;
     case 'fetch_spend': result = spend; break;

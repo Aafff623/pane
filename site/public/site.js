@@ -1,4 +1,5 @@
 import { en } from '/i18n.js';
+import { initUsageFlow } from '/usage-flow.js?v=2';
 const frame=document.querySelector('#pane-demo'),settingsFrame=document.querySelector('#pane-settings'),root=document.documentElement;let selected='overview',refreshTimer; let demoTheme='dark';
 root.classList.add('motion-ready');
 // Kept for the parked bilingual copy. The launched site is Chinese-only, but
@@ -15,28 +16,54 @@ function setTexts(selector, keys, html = false) { document.querySelectorAll(sele
 function applyEnglishCopy() {
   if (!isEnglish) return;
   document.documentElement.lang = 'en';
-  document.title = "Pane — AI usage workspace";
+  document.title = en.metaTitle;
+  for (const selector of ['meta[name="description"]', 'meta[property="og:description"]', 'meta[name="twitter:description"]']) document.querySelector(selector)?.setAttribute('content', en.metaDescription);
+  for (const selector of ['meta[property="og:title"]', 'meta[name="twitter:title"]']) document.querySelector(selector)?.setAttribute('content', en.metaTitle);
+  document.querySelector('link[rel="canonical"]')?.setAttribute('href', 'https://pane.threetwoa.live/en/');
+  document.querySelector('meta[property="og:url"]')?.setAttribute('content', 'https://pane.threetwoa.live/en/');
+  document.querySelector('meta[property="og:locale"]')?.setAttribute('content', 'en_US');
+  const heroLead = document.querySelector('.hero-title-lead');
+  if (heroLead?.firstChild?.nodeType === Node.TEXT_NODE) heroLead.firstChild.textContent = en.heroTitleLead;
+  setText('.hero-title-lead .ink-mark', 'heroTitleCall');
+  setText('.hero-title-focus .ink-mark', 'heroTitleVisible');
   setText('.nav-context', 'navContext'); setTexts('.nav-links a', ['navDemo','navFeatures','navFaq']); setText('#language', 'language'); setText('.nav-actions .compact', 'navDownload');
   setTexts('.hero-meta span', ['heroMetaLeft','heroMetaRight']); setText('.eyebrow', 'heroEyebrow');
-  document.querySelector('.title-art').innerHTML = '<span class="title-lead">Every AI tool\'s quota</span><em class="title-focus"><span class="title-outline">and spend,</span><span class="title-solid">at a glance.</span></em>';
   setText('.hero-description', 'heroDesc'); setText('.hero-download', 'heroDownload'); setText('.text-link', 'heroDemo'); setTexts('.hero-stats span', ['providers','credentials','shortcut']); setText('.hero-stats>div:nth-child(2) b','localCredentials');
-  setTexts('.agent-portrait span, .note-kicker', ['live','portraitLabel']); document.querySelectorAll('.agent-slide').forEach((img,i)=>img.alt=['Pane companion seated with a usage dashboard','Pane companion standing with a quota ring','Pane robot companion surrounded by usage charts'][i]); document.querySelectorAll('.agent-dots button').forEach((b,i)=>b.setAttribute('aria-label',`Show illustration ${i+1}`)); setText('.blueprint-note p', 'portraitCopy', true); setText('.note-foot', 'portraitNote'); setText('.stage-rail>span','workflow'); setText('.keyboard-demo>span','keyboardKicker'); setText('.config-kicker','runtimeKicker');
+  setText('.why-kicker','whyKicker'); setText('#why-pane-title','whyTitle'); setText('.why-copy p','whyCopy'); setText('.why-link','whyLink'); setText('.why-destination small','whyDestination');
+  document.querySelector('.why-orbits')?.setAttribute('aria-label','More supported providers connected around Pane'); setText('.why-work b','whyWork'); setText('.why-work small','whyFocus'); setText('.why-flow-label','whyFlowLabel'); setText('.why-pause','whyPause'); setText('.why-flow-caption','whyFlowCaption'); setText('.why-flow-note','whyFlowNote'); setText('.why-flow-count small','whyFlowCount'); setTexts('.why-source small',['whyClaude','whyCodex','whyCursor','whyRouter','whyTavily']);
+  const ecosystemCopy={'.ecosystem-copy .why-kicker':'PANE ECOSYSTEM / Connections that keep growing','#ecosystem-title':'Starting with AI tools. Connecting usage across more fields.','.ecosystem-intro':'Pane currently lists 66 providers across coding agents, model APIs, voice and search. Our direction is to bring quotas, balances and subscription status from more fields into one desktop entry point.','.ecosystem-art-foot>span':'Different services. One entry point.','.ecosystem-pause':'Pause orbit','.ecosystem-core>span':'Connect scattered usage','.ecosystem-outlook':'4 ecosystem directions, 13 candidate fields. These are expansion ideas; integrations depend on available interfaces. See the current service list below.','.ecosystem-copy .why-link':'Explore current services ↘'};
+  for(const [selector,value] of Object.entries(ecosystemCopy)){const node=document.querySelector(selector);if(node)node.textContent=value}
+  const domains=[['01 / AI & content creation','Models & agents · Images & video · Voice & translation · Search & crawling'],['02 / Productivity & business','Workflow automation · Office & design SaaS · Commerce & logistics · Marketing & communication'],['03 / Digital resources & infrastructure','Cloud & compute · Databases & analytics · Storage & backups · Networks & traffic'],['04 / Personal digital memberships','Consumer tools, knowledge & education memberships']];
+  document.querySelectorAll('.ecosystem-domains>div').forEach((node,i)=>{node.querySelector('span').textContent=domains[i][0];node.querySelector('p').textContent=domains[i][1]});
+  setTexts('.agent-portrait span, .note-kicker', ['live','portraitLabel']); setText('.blueprint-note p', 'portraitCopy', true); setText('.note-foot', 'portraitNote'); setText('.stage-rail>span','workflow'); setText('.keyboard-demo>span','keyboardKicker'); setText('.config-kicker','runtimeKicker');
   setText('.download-section .section-index','downloadIndex'); setText('.demo-section .section-head h2', 'demoTitle'); setText('.demo-section .section-head p', 'demoDesc', true); setText('.demo-status', 'demoStatus'); setText('#reset-demo', 'reset'); setText('.workflow-legend>.legend-kicker', 'how'); setText('.legend-heading b', 'workflow'); setText('.legend-heading small', 'shortcuts');
   setTexts('.shortcut-list span', ['alt2','shift','ctrls','esc']); setTexts('.legend-capabilities .legend-heading b, .legend-capabilities .legend-heading small, .legend-desc', ['capabilities','capabilitiesKicker','capabilitiesCopy']); setText('.legend-ecosystem b','ecosystem'); setText('.legend-ecosystem span','ecosystemCopy'); setText('.legend-foot','sample');
   setTexts('.keyboard-demo button b', ['toggle','close','period','category','settingsShortcut','customize','themeShortcut','refreshShortcut','expiring']); setTexts('.stage-config dt', ['runtime','runtimeSettings']); setTexts('.stage-config dd', ['runtimeCopy','runtimeSettingsCopy']);
   const notes=[['.annotation-sample strong','annSample'],['.annotation-sample>span:not(.annotation-number)','annSampleCopy'],['.annotation-left strong','annEdge'],['.annotation-left>span','annEdgeCopy'],['.annotation-right strong','annProviders'],['.annotation-right>span','annProvidersCopy'],['.annotation-tabs strong','annTabs'],['.annotation-tabs>span:not(.annotation-number)','annTabsCopy'],['.annotation-periods strong','annPeriods'],['.annotation-periods>span:not(.annotation-number)','annPeriodsCopy'],['.annotation-accounts strong','annAccounts'],['.annotation-accounts>span:not(.annotation-number)','annAccountsCopy'],['.annotation-spend strong','annSpend'],['.annotation-spend>span:not(.annotation-number)','annSpendCopy'],['.annotation-pool strong','annPool'],['.annotation-pool>span','annPoolCopy'],['.annotation-groups strong','annGroups'],['.annotation-groups>span:not(.annotation-number)','annGroupsCopy'],['.annotation-status strong','annStatus'],['.annotation-status>span','annStatusCopy'],['.annotation-settings strong','annSettings'],['.annotation-settings>span:not(.annotation-number)','annSettingsCopy'],['.annotation-refresh strong','annRefresh'],['.annotation-refresh>span','annRefreshCopy']]; notes.forEach(([s,k])=>setText(s,k,k.endsWith('Copy')));
   setTexts('.demo-controls button', ['overview','spend','settings','refresh']); setText('.demo-rest>b','restTitle'); setText('.demo-rest p','restCopy'); setText('.keyboard-demo>span','keyboardKicker'); setText('.keyboard-demo h3','keyboardTitle'); setText('.keyboard-demo>p','keyboardCopy'); setText('#keyboard-start','start'); setText('.keyboard-feedback','keyboardNote'); setText('.keyboard-demo>small','keyboardHint');
-  setText('.provider-section .section-head h2','providersTitle'); setText('.provider-section .section-head p','providersCopy',true); setText('.feature-section .section-head h2','featuresTitle'); setText('.feature-section .section-head p','featuresCopy'); setTexts('.feature-grid h3',['quotaTitle','spendTitle','resetTitle','privacyTitle']); setTexts('.feature-grid p',['quotaCopy','spendCopy','resetCopy','privacyCopy']); setText('.faq-section .section-head p','faqCopy'); setTexts('.faq-section summary',['faq.q1','faq.q2','faq.q3','faq.q4','faq.q5','faq.q6']); setTexts('.faq-section details p',['faq.a1','faq.a2','faq.a3','faq.a4','faq.a5','faq.a6']); setText('.download-section h2','downloadTitle'); setTexts('.platform-disabled small',['coming','coming']); setText('.bottom-actions .secondary','tryDemo'); setText('.platforms','downloadNote'); setTexts('.site-footer .footer-content>div a',['source','docs','feedback']);
+  setText('.provider-section .section-head h2','providersTitle'); setText('.provider-section .section-head p','providersCopy',true); setText('.feature-section .section-head h2','featuresTitle'); setText('.feature-section .section-head p','featuresCopy'); setTexts('.feature-grid h3',['quotaTitle','spendTitle','resetTitle','privacyTitle']); setTexts('.feature-grid p',['quotaCopy','spendCopy','resetCopy','privacyCopy']);   // FAQ English copy resolves through the group/item structure (group 1 items
+  // 1-3 -> faq.q1..q3, and so on) rather than one flat positional list, so the
+  // key for each row is derived from its place in the groups instead of from a
+  // hand-maintained array that regrouping would silently misalign.
+  document.querySelectorAll('.faq-group').forEach((group, gi) => { const set = (node, key) => { if (node && isEnglish && en[key]) node.textContent = en[key]; }; set(group.querySelector('.faq-group-title'), `faq.g${gi + 1}`); group.querySelectorAll('.faq-item').forEach((item, ii) => { const n = gi * 3 + ii + 1; set(item.querySelector('summary'), `faq.q${n}`); set(item.querySelector('.faq-body p'), `faq.a${n}`); }); });
+  setText('.faq-section .section-head p', 'faqCopy');
+  setText('.faq-contact span', 'faq.contactPrompt'); setText('.faq-contact a', 'faq.cta');
+  setTexts('.platform-disabled small',['coming','coming']); setText('.bottom-actions .secondary','tryDemo'); setText('.platforms','downloadNote'); setTexts('.site-footer .footer-content>div a',['source','docs','feedback']);
 }
 applyEnglishCopy();
-// The hero uses a small, art-directed carousel instead of a looping GIF.
-const agentSlides=[...document.querySelectorAll('.agent-slide')];
-const agentDots=[...document.querySelectorAll('.agent-dots button')];
-let agentIndex=0, agentTimer;
-function showAgentSlide(index){if(!agentSlides.length)return;agentIndex=(index+agentSlides.length)%agentSlides.length;agentSlides.forEach((slide,i)=>slide.classList.toggle('is-active',i===agentIndex));agentDots.forEach((dot,i)=>{dot.classList.toggle('is-active',i===agentIndex);dot.setAttribute('aria-current',i===agentIndex?'true':'false')})}
-function restartAgentCarousel(){clearInterval(agentTimer);if(agentSlides.length>1&&!matchMedia('(prefers-reduced-motion: reduce)').matches)agentTimer=setInterval(()=>showAgentSlide(agentIndex+1),5200)}
-agentDots.forEach((dot,i)=>dot.addEventListener('click',()=>{showAgentSlide(i);restartAgentCarousel()}));showAgentSlide(0);restartAgentCarousel();
-document.querySelector('#language')?.addEventListener('click',()=>{location.href=isEnglish?'/':'/?lang=en'});
+initUsageFlow(isEnglish,en);
+initProviderOrbits();
+
+function initProviderOrbits(){
+  const section=document.querySelector('.ecosystem-section');if(!section)return;
+  const button=section.querySelector('.ecosystem-pause');
+  let paused=false,visible=!('IntersectionObserver' in window);
+  const sync=()=>section.classList.toggle('is-paused',paused||!visible||document.hidden);
+  button.addEventListener('click',()=>{paused=!paused;button.setAttribute('aria-pressed',String(paused));button.textContent=isEnglish?(paused?'Resume orbit':'Pause orbit'):(paused?'继续轨道':'暂停轨道');sync()});
+  if('IntersectionObserver' in window)new IntersectionObserver(entries=>{visible=entries[0].isIntersecting;sync()},{threshold:.05}).observe(section);
+  document.addEventListener('visibilitychange',sync);sync();
+}
+document.querySelector('#language')?.addEventListener('click',()=>{location.href=isEnglish?'/':'/en/'});
 
 // Keep margin annotations attached to real demo geometry as cards and tabs move.
 let demoAnchors;
@@ -137,15 +164,52 @@ function updateNoteAct(){
 addEventListener('scroll',updateNoteAct,{passive:true});
 addEventListener('resize',updateNoteAct,{passive:true});
 updateNoteAct();
-// Title art: split into per-character spans so the entrance can stagger.
-document.querySelectorAll('.title-art').forEach(t=>{
-  const walk=n=>{[...n.childNodes].forEach(c=>{
-    if(c.nodeType===3&&c.textContent.trim()){const frag=document.createDocumentFragment();let ci=0;for(const ch of c.textContent){const s=document.createElement('span');s.className=ch===' '?'char char-space':'char';s.style.setProperty('--i',ci);s.style.setProperty('--dy',((ci%3)-1)*2+'px');s.style.setProperty('--rot',((ci%4)-1.5)*.7+'deg');ci++;s.textContent=ch===' '?'\u00a0':ch;frag.append(s)}c.replaceWith(frag)}
-    else if(c.nodeType===1)walk(c);
-  })};
-  walk(t);
-});
-const settingsButton=document.querySelector('[data-demo=settings]');const settingsWrap=document.querySelector('#pane-settings-wrap');function setSettingsOverlay(open){if(open&&settingsWrap.hidden){if(!settingsFrame.dataset.loaded){settingsFrame.src=`/demo/index.html?lang=${demoLang}&theme=${demoTheme}&settings=1`;settingsFrame.dataset.loaded='1'}settingsWrap.hidden=false}if(!open)settingsWrap.hidden=true;settingsButton.classList.toggle('active',!settingsWrap.hidden)}settingsButton.addEventListener('click',()=>setSettingsOverlay(settingsWrap.hidden));document.querySelector('#pane-settings-close').addEventListener('click',()=>setSettingsOverlay(false));function send(action){frame.contentWindow?.postMessage({type:'pane-demo',action},location.origin)}function loadDemo(){frame.src=`/demo/index.html?lang=${demoLang}&theme=${demoTheme}`;settingsWrap.hidden=true;settingsFrame.removeAttribute('src');delete settingsFrame.dataset.loaded;selected='overview';desktop.dataset.mode='auto';document.querySelectorAll('[data-demo]').forEach(b=>b.classList.toggle('active',b.dataset.demo===selected))}loadDemo();document.querySelector('#theme').addEventListener('click',()=>{root.dataset.theme=root.dataset.theme==='light'?'dark':'light';try{localStorage.setItem('pane-site-theme',root.dataset.theme)}catch{};document.querySelector('#theme img').src=`/icons/${root.dataset.theme==='light'?'moon':'sun'}.svg`});document.querySelector('#reset-demo').addEventListener('click',loadDemo);document.querySelectorAll('[data-demo]').forEach(b=>b.addEventListener('click',()=>{const a=b.dataset.demo;if(a==='settings'){desktop.dataset.mode='settings';updateNoteAct();return}if(a!=='refresh')setSettingsOverlay(false);if(a==='refresh'){desktop.dataset.mode='refresh';updateNoteAct();b.disabled=true;send(a);clearTimeout(refreshTimer);refreshTimer=setTimeout(()=>b.disabled=false,650);return}selected=a;desktop.dataset.mode=a;send(a);document.querySelectorAll('[data-demo]').forEach(x=>x.classList.toggle('active',x.dataset.demo===selected));updateNoteAct()}));document.querySelectorAll('details').forEach(d=>d.addEventListener('toggle',()=>{if(d.open)document.querySelectorAll('details').forEach(x=>{if(x!==d)x.open=false})}));
+// Hero ink marks: the hand-drawn highlighter treatment. rough-notation is
+// the library Magic UI's Highlighter component wraps; this site is
+// zero-framework, so the annotate calls live here with the demo's colours
+// (highlight #87CEFA / underline #FF9800). Marks are drawn only after the
+// CSS entrance settles — rough-notation measures the element's box, and
+// animating children would skew the SVG it injects.
+const inkMarks=[...document.querySelectorAll('.ink-mark')];
+const reduceMotion=matchMedia('(prefers-reduced-motion: reduce)').matches;
+function drawInkMarks(){
+  for(const el of inkMarks){
+    el.__rough?.remove();
+    const mark=RoughNotation.annotate(el,{
+      type:el.dataset.hlType||'highlight',
+      color:el.dataset.hlColor||'#87CEFA',
+      strokeWidth:Number(el.dataset.hlStroke||1.5),
+      animationDuration:reduceMotion?0:600,
+      iterations:2,
+      padding:Number(el.dataset.hlPadding||2),
+      multiline:true,
+    });
+    mark.show();
+    el.__rough=mark;
+  }
+}
+let inkStarted=false;
+function initInkMarks(){
+  if(!inkMarks.length||typeof RoughNotation==='undefined')return;
+  const start=()=>{
+    if(inkStarted)return;
+    inkStarted=true;
+    drawInkMarks();
+    // Webfonts swap in after first paint and change the measured boxes.
+    document.fonts?.ready.then(drawInkMarks);
+    // Redraw on layout shifts, mirroring the upstream component's observers.
+    const ro=new ResizeObserver(()=>drawInkMarks());
+    for(const el of inkMarks)ro.observe(el);
+    ro.observe(document.body);
+  };
+  if(reduceMotion){start();return}
+  // .hero-title is a .hero-copy child, so it carries the rise-in animation;
+  // its animationend fires once the entrance has finished.
+  document.querySelector('.hero-title')?.addEventListener('animationend',start,{once:true});
+  setTimeout(start,1800); // backgrounded tabs throttle animation events
+}
+initInkMarks();
+const settingsButton=document.querySelector('[data-demo=settings]');const settingsWrap=document.querySelector('#pane-settings-wrap');function setSettingsOverlay(open){if(open&&settingsWrap.hidden){if(!settingsFrame.dataset.loaded){settingsFrame.src=`/demo/index.html?lang=${demoLang}&theme=${demoTheme}&settings=1`;settingsFrame.dataset.loaded='1'}settingsWrap.hidden=false}if(!open)settingsWrap.hidden=true;settingsButton.classList.toggle('active',!settingsWrap.hidden)}settingsButton.addEventListener('click',()=>setSettingsOverlay(settingsWrap.hidden));document.querySelector('#pane-settings-close').addEventListener('click',()=>setSettingsOverlay(false));function send(action){frame.contentWindow?.postMessage({type:'pane-demo',action},location.origin)}function loadDemo(){frame.src=`/demo/index.html?lang=${demoLang}&theme=${demoTheme}`;settingsWrap.hidden=true;settingsFrame.removeAttribute('src');delete settingsFrame.dataset.loaded;selected='overview';desktop.dataset.mode='auto';document.querySelectorAll('[data-demo]').forEach(b=>b.classList.toggle('active',b.dataset.demo===selected))}loadDemo();document.querySelector('#theme').addEventListener('click',()=>{root.dataset.theme=root.dataset.theme==='light'?'dark':'light';try{localStorage.setItem('pane-site-theme',root.dataset.theme)}catch{};document.querySelector('#theme img').src=`/icons/${root.dataset.theme==='light'?'moon':'sun'}.svg`});document.querySelector('#reset-demo').addEventListener('click',loadDemo);document.querySelectorAll('[data-demo]').forEach(b=>b.addEventListener('click',()=>{const a=b.dataset.demo;if(a==='settings'){desktop.dataset.mode='settings';updateNoteAct();return}if(a!=='refresh')setSettingsOverlay(false);if(a==='refresh'){desktop.dataset.mode='refresh';updateNoteAct();b.disabled=true;send(a);clearTimeout(refreshTimer);refreshTimer=setTimeout(()=>b.disabled=false,650);return}selected=a;desktop.dataset.mode=a;send(a);document.querySelectorAll('[data-demo]').forEach(x=>x.classList.toggle('active',x.dataset.demo===selected));updateNoteAct()}));document.querySelectorAll('details').forEach(d=>d.addEventListener('toggle',()=>{if(!d.open)return;const scope=d.closest('.faq-group')||document;scope.querySelectorAll('details').forEach(x=>{if(x!==d)x.open=false})}));
 
 const gsap = window.gsap;
 if (gsap && !matchMedia('(prefers-reduced-motion: reduce)').matches) {
@@ -311,3 +375,110 @@ function initKeyboardDemo() {
   render();
 }
 initKeyboardDemo();
+
+// Global animated grid background: Magic UI's Animated Grid Pattern
+// (upstream source archived in vendor/magicui-animated-grid-pattern/) driven
+// by the site's vendored GSAP instead of React + motion. Same DOM shape (SVG
+// pattern + a rect grid), same 40px cells, same animation parameters —
+// duration / repeat:1 with yoyo (= motion's repeatType:"reverse") /
+// repeatDelay / delay:index*0.1 / random reposition on complete. Colours live
+// in CSS theme variables, so flipping the theme needs no re-init. Idempotent,
+// and degrades to the static grid when GSAP is absent.
+function initGridBackground(){
+  const host=document.querySelector('#grid-bg');
+  if(!host||host.dataset.ready)return;
+  host.dataset.ready='1';
+  const cell=Number(host.dataset.gridSize)||40;
+  const count=Number(host.dataset.gridSquares)||30;
+  const maxOpacity=Number(host.dataset.gridMaxOpacity)||0.1;
+  const duration=Number(host.dataset.gridDuration)||3;
+  const repeatDelay=Number(host.dataset.gridRepeatDelay)||1;
+  const ns='http://www.w3.org/2000/svg';
+  const patternId=`grid-bg-${Math.random().toString(36).slice(2,9)}`;
+  host.innerHTML=`<svg aria-hidden="true"><defs><pattern id="${patternId}" width="${cell}" height="${cell}" patternUnits="userSpaceOnUse" x="-1" y="-1"><path class="grid-line" d="M.5 ${cell}V.5H${cell}"/></pattern></defs><rect width="100%" height="100%" fill="url(#${patternId})"/><svg x="-1" y="-1"><g class="grid-squares"></g></svg></svg>`;
+  const layer=host.querySelector('.grid-squares');
+  const reduceMotion=matchMedia('(prefers-reduced-motion: reduce)').matches;
+  let dims={width:0,height:0}, ctx=null, ro=null;
+  const gridW=()=>Math.max(1,Math.floor(dims.width/cell));
+  const gridH=()=>Math.max(1,Math.floor(dims.height/cell));
+  function place(rect){
+    rect.setAttribute('x',Math.floor(Math.random()*gridW())*cell+1);
+    rect.setAttribute('y',Math.floor(Math.random()*gridH())*cell+1);
+  }
+  function build(){
+    ctx?.revert();
+    ctx=null;
+    layer.textContent='';
+    // Reduced motion, or a phone-width viewport: keep the static grid only.
+    if(reduceMotion||dims.width<=720||!window.gsap)return;
+    ctx=gsap.context(()=>{
+      for(let i=0;i<count;i++){
+        const rect=document.createElementNS(ns,'rect');
+        rect.setAttribute('class','grid-square');
+        rect.setAttribute('width',cell-1);
+        rect.setAttribute('height',cell-1);
+        rect.setAttribute('opacity','0');
+        layer.appendChild(rect);
+        const run=()=>{
+          place(rect);
+          gsap.fromTo(rect,{opacity:0},{opacity:maxOpacity,duration,repeat:1,yoyo:true,repeatDelay,delay:i*0.1,onComplete:run});
+        };
+        run();
+      }
+    });
+  }
+  const measure=()=>{
+    const w=Math.round(host.clientWidth), h=Math.round(host.clientHeight);
+    if(!w||!h||(w===dims.width&&h===dims.height))return;
+    dims={width:w,height:h};
+    build();
+  };
+  measure();
+  if('ResizeObserver' in window){ro=new ResizeObserver(measure);ro.observe(host)}
+  window.addEventListener('pagehide',()=>{ro?.disconnect();ctx?.revert()},{once:true});
+}
+initGridBackground();
+
+// Wordmark footer: the metallic shine tracks the pointer. Same approach as
+// upstream (vendor/ruixen-wordmark-footer/) — a per-frame lerp at factor 0.1
+// writing backgroundImage straight to the node, zero re-renders — driven here
+// without React or motion. The entrance is a CSS transition toggled by an
+// IntersectionObserver so reduced motion can disable it in CSS alone, and the
+// pointer loop is skipped entirely on devices without hover.
+function initWordmarkFooter(){
+  const section=document.querySelector('#wordmark-footer');
+  const word=section&&section.querySelector('.wf-word');
+  if(!section||!word)return;
+  const shine=(x,y)=>`radial-gradient(ellipse 100% 100% at ${x.toFixed(1)}% ${y.toFixed(1)}%, color-mix(in srgb,var(--ink) 88%,transparent) 0%, color-mix(in srgb,var(--ink) 62%,transparent) 24%, color-mix(in srgb,var(--ink) 34%,transparent) 50%, color-mix(in srgb,var(--ink) 16%,transparent) 100%)`;
+  const reduceMotion=matchMedia('(prefers-reduced-motion: reduce)').matches;
+  let curX=50,curY=30,tgtX=50,tgtY=30,hovering=false,frame=0;
+  const paint=()=>{
+    const k=reduceMotion?1:0.1;
+    curX+=(tgtX-curX)*k; curY+=(tgtY-curY)*k;
+    word.style.backgroundImage=shine(curX,curY);
+    if(hovering||Math.abs(tgtX-curX)>.05||Math.abs(tgtY-curY)>.05)frame=requestAnimationFrame(paint);
+    else frame=0;
+  };
+  const start=()=>{if(!frame)frame=requestAnimationFrame(paint)};
+  // Gate on the event's own pointerType instead of a one-shot
+  // matchMedia('(hover:hover)') read at init: some hosts report no hover while
+  // the page is still settling, and a stale false there would kill the shine
+  // for the whole session. Touch input is what must not drive it.
+  section.addEventListener('pointermove',e=>{if(e.pointerType==='touch')return;const r=section.getBoundingClientRect();tgtX=((e.clientX-r.left)/r.width)*100;tgtY=((e.clientY-r.top)/r.height)*100;hovering=true;start()});
+  section.addEventListener('pointerleave',()=>{hovering=false;tgtX=50;tgtY=30;start()});
+  const stage=section.querySelector('.wf-stage');
+  const reveal=()=>section.classList.add('is-inview');
+  const revealNow=()=>{if(stage){stage.style.transition='none';stage.style.opacity='1';stage.style.transform='none'}reveal()};
+  if('IntersectionObserver' in window){
+    const obs=new IntersectionObserver(entries=>{for(const entry of entries){if(entry.isIntersecting){reveal();obs.disconnect()}}},{threshold:.1});
+    obs.observe(section);
+  }else reveal();
+  // A tab that never paints (backgrounded, or a host whose render frames are
+  // suspended) fires neither IntersectionObserver callbacks nor CSS
+  // transitions, which would leave the wordmark invisible forever. Fall back
+  // to the final state with the transition switched off — the same backstop
+  // the ink marks use for throttled animation events.
+  setTimeout(()=>{if(!section.classList.contains('is-inview'))revealNow()},1500);
+  window.addEventListener('pagehide',()=>{if(frame)cancelAnimationFrame(frame)},{once:true});
+}
+initWordmarkFooter();
