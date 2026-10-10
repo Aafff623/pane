@@ -117,23 +117,6 @@ async fn fetch_with_key(key: &str, card_id: &str, card_name: &str) -> Result<Sna
     Ok(Snapshot::ok(card_id, card_name, plan, metrics))
 }
 
-/// Monthly credit cap per plan, from the official pricing page. Only the
-/// plans whose planId spelling has been observed in the wild are mapped —
-/// an unmapped plan renders its Monthly row as a plain dollar amount
-/// instead of a wrong percentage.
-fn plan_cap(plan_id: &str) -> Option<f64> {
-    let id = plan_id.to_lowercase();
-    if id.contains("goat") {
-        Some(70.0)
-    } else if id.contains("team") {
-        Some(40.0) // Team Pro
-    } else if id.contains("pro") {
-        Some(80.0)
-    } else {
-        None // max10/max20 (150/300) and anything future: no guesswork
-    }
-}
-
 fn plan_display_name(plan_id: Option<&str>) -> Option<String> {
     let id = plan_id?.to_lowercase();
     if id.contains("goat") {
@@ -181,10 +164,13 @@ fn iso_to_epoch_ms(raw: &str) -> Option<i64> {
 }
 
 /// The parse pipeline fetch() runs, kept pure for the unit tests below.
-fn metrics_from_docs(credits: &Value, subs: Option<&Value>) -> Result<(Option<String>, Vec<Metric>), String> {
-    let windows = credits
-        .get("windowLimits")
-        .ok_or_else(|| "unexpected credits response shape (endpoint is undocumented)".to_string())?;
+fn metrics_from_docs(
+    credits: &Value,
+    subs: Option<&Value>,
+) -> Result<(Option<String>, Vec<Metric>), String> {
+    let windows = credits.get("windowLimits").ok_or_else(|| {
+        "unexpected credits response shape (endpoint is undocumented)".to_string()
+    })?;
     let credit_pool = credits.get("credits");
 
     let mut metrics = Vec::new();
@@ -214,9 +200,8 @@ fn metrics_from_docs(credits: &Value, subs: Option<&Value>) -> Result<(Option<St
         }
     }
 
-    // Monthly credits: `monthlyCredits` is the amount LEFT. A known plan
-    // cap turns it into a meter against the cycle reset; an unknown plan
-    // degrades to a dollar line (never a guessed percentage).
+    // monthlyCredits is remaining balance. Pricing tables do not establish
+    // this account's actual cap (custom/team/promotional plans can differ).
     let monthly_left = credit_pool
         .and_then(|c| c.get("monthlyCredits"))
         .and_then(Value::as_f64);
@@ -226,38 +211,24 @@ fn metrics_from_docs(credits: &Value, subs: Option<&Value>) -> Result<(Option<St
         .and_then(Value::as_str)
         .map(str::to_string);
     if let Some(left) = monthly_left {
-        let cap = plan_id.as_deref().and_then(plan_cap);
         let period_end = sub
             .and_then(|s| s.get("currentPeriodEnd"))
             .and_then(Value::as_str)
             .and_then(iso_to_epoch_ms);
-        match cap {
-            Some(cap) if cap > 0.0 => {
-                let used = (cap - left).clamp(0.0, cap);
-                metrics.push(
-                    Metric::progress(
-                        "Monthly",
-                        (used / cap * 100.0).clamp(0.0, 100.0),
-                        Some(format!("${left:.2} of ${cap:.2} left")),
-                    )
-                    .with_reset(period_end, Some(30 * 86_400_000)),
-                );
-            }
-            _ => {
-                let mut value = format!("${left:.2} credits left");
-                if period_end.is_some() {
-                    value.push_str(" · resets with billing cycle");
-                }
-                metrics.push(Metric::text("Monthly", value).with_reset(period_end, None));
-            }
+        let mut value = format!("${left:.2} credits left");
+        if period_end.is_some() {
+            value.push_str(" · resets with billing cycle");
         }
+        metrics.push(Metric::text("Monthly", value).with_reset(period_end, None));
     }
 
     // Extra credits (purchased + free) bypass the window limits — the
     // number that matters once a window is exhausted.
     let extra = credit_pool
         .map(|c| {
-            c.get("purchasedCredits").and_then(Value::as_f64).unwrap_or(0.0)
+            c.get("purchasedCredits")
+                .and_then(Value::as_f64)
+                .unwrap_or(0.0)
                 + c.get("freeCredits").and_then(Value::as_f64).unwrap_or(0.0)
         })
         .unwrap_or(0.0);
@@ -323,10 +294,17 @@ mod tests {
         assert_eq!(metrics[0].resets_at, Some(1789218784243));
         assert_eq!(metrics[0].period_ms, Some(SESSION_MS));
 
-        // monthlyCredits is what is LEFT: 28.71 of 70 → 58.98% used.
-        assert_eq!(metrics[2].used_percent, Some((70.0 - 28.7129895114) / 70.0 * 100.0));
-        assert_eq!(metrics[2].resets_at, iso_to_epoch_ms("2026-10-02T18:03:24.000Z"));
-        assert!(metrics[2].detail.as_deref().unwrap().contains("$28.71 of $70.00 left"));
+        // Remaining is observed; a public price table is not an account cap.
+        assert_eq!(metrics[2].used_percent, None);
+        assert_eq!(
+            metrics[2].resets_at,
+            iso_to_epoch_ms("2026-10-02T18:03:24.000Z")
+        );
+        assert!(metrics[2]
+            .value
+            .as_deref()
+            .unwrap()
+            .contains("$28.71 credits left"));
     }
 
     #[test]
@@ -365,23 +343,37 @@ mod tests {
 
     #[test]
     fn extra_credits_row_appears_only_when_present() {
-        let ( _, plain) = metrics_from_docs(&goat_credits(), None).unwrap();
+        let (_, plain) = metrics_from_docs(&goat_credits(), None).unwrap();
         assert!(!labels(&plain).contains(&"Extra credits"));
 
         let mut credits = goat_credits();
         credits["credits"]["purchasedCredits"] = json!(3.2);
         credits["credits"]["freeCredits"] = json!(0.5);
         let (_, extra) = metrics_from_docs(&credits, None).unwrap();
-        assert_eq!(labels(&extra), ["Session", "Weekly", "Monthly", "Extra credits"]);
-        assert_eq!(extra[3].value.as_deref(), Some("$3.70 · not window-limited"));
+        assert_eq!(
+            labels(&extra),
+            ["Session", "Weekly", "Monthly", "Extra credits"]
+        );
+        assert_eq!(
+            extra[3].value.as_deref(),
+            Some("$3.70 · not window-limited")
+        );
     }
 
     #[test]
-    fn plan_cap_mapping_covers_documented_plans() {
-        assert_eq!(plan_cap("individual-goat"), Some(70.0));
-        assert_eq!(plan_cap("individual-pro"), Some(80.0));
-        assert_eq!(plan_cap("team-pro"), Some(40.0));
-        assert_eq!(plan_cap("individual-max-10x"), None); // unmapped stays unmapped
+    fn paid_plan_name_never_implies_static_monthly_cap() {
+        for id in [
+            "individual-goat",
+            "individual-pro",
+            "team-pro",
+            "enterprise-pro",
+        ] {
+            let mut subs = goat_subs();
+            subs["data"]["planId"] = json!(id);
+            let (_, rows) = metrics_from_docs(&goat_credits(), Some(&subs)).unwrap();
+            assert_eq!(rows[2].kind, "text");
+            assert_eq!(rows[2].used_percent, None);
+        }
     }
 
     #[test]
@@ -418,7 +410,10 @@ mod tests {
         let err = metrics_from_docs(&credits, Some(&subs))
             .err()
             .expect("dead shape must be an error");
-        assert!(err.contains("subscription inactive or expired"), "got: {err}");
+        assert!(
+            err.contains("subscription inactive or expired"),
+            "got: {err}"
+        );
     }
 
     #[test]

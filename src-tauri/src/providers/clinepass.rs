@@ -85,7 +85,9 @@ fn parse_snapshot(doc: &Value) -> Result<Snapshot, String> {
         .ok_or("ClinePass response has no usage limits")?;
     let mut metrics = Vec::new();
     for w in limits {
-        let Some(kind) = w.get("type").and_then(Value::as_str) else { continue };
+        let Some(kind) = w.get("type").and_then(Value::as_str) else {
+            continue;
+        };
         let (label, period_ms) = match kind {
             "five_hour" => ("Session", 5 * 3_600_000i64),
             "weekly" => ("Weekly", 7 * 86_400_000i64),
@@ -93,7 +95,9 @@ fn parse_snapshot(doc: &Value) -> Result<Snapshot, String> {
             // unknown window kind: ignore, don't guess
             _ => continue,
         };
-        let used = number(w.get("percentUsed")).unwrap_or(0.0);
+        let Some(used) = number(w.get("percentUsed")).filter(|v| v.is_finite() && *v >= 0.0) else {
+            continue;
+        };
         let reset = w
             .get("resetsAt")
             .and_then(Value::as_str)
@@ -103,8 +107,12 @@ fn parse_snapshot(doc: &Value) -> Result<Snapshot, String> {
             // between server write and our read — no stale countdown.
             .filter(|ms| *ms > chrono::Utc::now().timestamp_millis());
         metrics.push(
-            Metric::progress(label, used.clamp(0.0, 100.0), Some(format!("{used:.0}% used")))
-                .with_reset(reset, Some(period_ms)),
+            Metric::progress(
+                label,
+                used.clamp(0.0, 100.0),
+                Some(format!("{used:.0}% used")),
+            )
+            .with_reset(reset, Some(period_ms)),
         );
     }
     if metrics.is_empty() {
@@ -120,6 +128,13 @@ fn number(v: Option<&Value>) -> Option<f64> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn missing_percent_is_not_zero() {
+        assert!(
+            parse_snapshot(&serde_json::json!({"data":{"limits":[{"type":"monthly"}]}})).is_err()
+        );
+    }
 
     #[test]
     fn parses_three_windows_with_resets() {
@@ -170,7 +185,10 @@ mod tests {
         let snap = parse_snapshot(&doc).expect("parse");
         assert_eq!(snap.metrics.len(), 1);
         assert_eq!(snap.metrics[0].label, "Session");
-        assert!(snap.metrics[0].resets_at.is_none(), "rolled-over window must not fake a countdown");
+        assert!(
+            snap.metrics[0].resets_at.is_none(),
+            "rolled-over window must not fake a countdown"
+        );
     }
 
     #[test]

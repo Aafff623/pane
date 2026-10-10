@@ -33,7 +33,10 @@ fn project_rows(doc: &Value) -> Vec<(String, String)> {
                 .filter_map(|p| {
                     Some((
                         p.get("project_id")?.as_str()?.to_string(),
-                        p.get("name").and_then(Value::as_str).unwrap_or("Project").to_string(),
+                        p.get("name")
+                            .and_then(Value::as_str)
+                            .unwrap_or("Project")
+                            .to_string(),
                     ))
                 })
                 .collect()
@@ -42,11 +45,14 @@ fn project_rows(doc: &Value) -> Vec<(String, String)> {
 }
 
 /// The /balances payload → sum of every balance's amount.
-fn balances_total(doc: &Value) -> f64 {
-    doc.get("balances")
-        .and_then(Value::as_array)
-        .map(|rows| rows.iter().filter_map(|b| b.get("amount").and_then(Value::as_f64)).sum())
-        .unwrap_or(0.0)
+fn balances_total(doc: &Value) -> Option<f64> {
+    let rows = doc.get("balances")?.as_array()?;
+    let amounts: Option<Vec<f64>> = rows
+        .iter()
+        .map(|b| b.get("amount")?.as_f64().filter(|v| v.is_finite()))
+        .collect();
+    let total = amounts?.iter().sum::<f64>();
+    total.is_finite().then_some(total)
 }
 
 async fn fetch() -> Result<Snapshot, String> {
@@ -73,7 +79,10 @@ async fn fetch_with_key(key: &str) -> Result<Snapshot, String> {
     if !resp.status().is_success() {
         return Err(format!("projects endpoint: HTTP {}", resp.status()));
     }
-    let doc: Value = resp.json().await.map_err(|e| format!("projects parse: {e}"))?;
+    let doc: Value = resp
+        .json()
+        .await
+        .map_err(|e| format!("projects parse: {e}"))?;
     let projects = project_rows(&doc);
     if projects.is_empty() {
         return Err("no projects visible to this key".into());
@@ -92,16 +101,29 @@ async fn fetch_with_key(key: &str) -> Result<Snapshot, String> {
         if !resp.status().is_success() {
             continue; // key may lack balances scope on this project
         }
-        let doc: Value = resp.json().await.map_err(|e| format!("balances parse: {e}"))?;
-        let total = balances_total(&doc);
-        let label =
-            if projects.len() == 1 { "Balance".to_string() } else { format!("Balance — {name}") };
+        let doc: Value = resp
+            .json()
+            .await
+            .map_err(|e| format!("balances parse: {e}"))?;
+        let Some(total) = balances_total(&doc) else {
+            continue;
+        };
+        let label = if projects.len() == 1 {
+            "Balance".to_string()
+        } else {
+            format!("Balance — {name}")
+        };
         metrics.push(Metric::text(&label, format!("${total:.2}")));
     }
     if metrics.is_empty() {
         return Err("key has no access to project balances".into());
     }
-    Ok(Snapshot::ok(ID, NAME, Some("Pay as you go".into()), metrics))
+    Ok(Snapshot::ok(
+        ID,
+        NAME,
+        Some("Pay as you go".into()),
+        metrics,
+    ))
 }
 
 #[cfg(test)]
@@ -127,8 +149,10 @@ mod tests {
 
     #[test]
     fn balances_amounts_sum_across_the_array() {
-        let doc = json!({ "balances": [ { "amount": 12.5 }, { "amount": 7.5 }, {} ] });
-        assert!((balances_total(&doc) - 20.0).abs() < 1e-9);
-        assert_eq!(balances_total(&json!({ "balances": [] })), 0.0);
+        let doc = json!({ "balances": [ { "amount": 12.5 }, { "amount": 7.5 } ] });
+        assert!((balances_total(&doc).unwrap() - 20.0).abs() < 1e-9);
+        assert_eq!(balances_total(&json!({ "balances": [] })), Some(0.0));
+        assert_eq!(balances_total(&json!({})), None);
+        assert_eq!(balances_total(&json!({"balances":[{}]})), None);
     }
 }

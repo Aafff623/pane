@@ -49,10 +49,25 @@ async fn fetch_with_key(key: &str) -> Result<Snapshot, String> {
     if !resp.status().is_success() {
         return Err(format!("subscription endpoint: HTTP {}", resp.status()));
     }
-    let doc: Value = resp.json().await.map_err(|e| format!("subscription parse: {e}"))?;
+    let doc: Value = resp
+        .json()
+        .await
+        .map_err(|e| format!("subscription parse: {e}"))?;
 
-    let used = doc.get("character_count").and_then(Value::as_f64).unwrap_or(0.0);
-    let limit = doc.get("character_limit").and_then(Value::as_f64).unwrap_or(0.0);
+    parse_subscription(&doc)
+}
+
+fn parse_subscription(doc: &Value) -> Result<Snapshot, String> {
+    let used = doc
+        .get("character_count")
+        .and_then(Value::as_f64)
+        .filter(|n| n.is_finite() && *n >= 0.0)
+        .ok_or("missing valid character_count")?;
+    let limit = doc
+        .get("character_limit")
+        .and_then(Value::as_f64)
+        .filter(|n| n.is_finite() && *n >= 0.0)
+        .ok_or("missing valid character_limit")?;
     if limit <= 0.0 {
         return Err("no character quota in response".into());
     }
@@ -64,7 +79,11 @@ async fn fetch_with_key(key: &str) -> Result<Snapshot, String> {
     let mut metrics = vec![Metric::progress(
         "Characters",
         used / limit * 100.0,
-        Some(format!("{} of {} characters used", group(used as u64), group(limit as u64))),
+        Some(format!(
+            "{} of {} characters used",
+            group(used as u64),
+            group(limit as u64)
+        )),
     )
     // Monthly quota — period is ~30d, close enough for pacing.
     .with_reset(resets_at, Some(30 * 24 * 3600 * 1000))];
@@ -81,6 +100,16 @@ async fn fetch_with_key(key: &str) -> Result<Snapshot, String> {
         }
     }
 
+    if doc
+        .get("can_extend_character_limit")
+        .and_then(Value::as_bool)
+        == Some(true)
+    {
+        metrics.push(Metric::text(
+            "Overage",
+            "Additional paid usage enabled".into(),
+        ));
+    }
     let plan = doc.get("tier").and_then(Value::as_str).map(|t| {
         let mut c = t.chars();
         match c.next() {
@@ -102,4 +131,21 @@ fn group(n: u64) -> String {
         out.push(ch);
     }
     out
+}
+
+#[cfg(test)]
+mod quota_regressions {
+    use super::*;
+
+    #[test]
+    fn missing_usage_is_not_zero_and_paid_tier_comes_from_api() {
+        assert!(parse_subscription(
+            &serde_json::json!({"character_limit":1000000,"tier":"creator"})
+        )
+        .is_err());
+        let snap = parse_subscription(&serde_json::json!({"character_count":50000,"character_limit":1000000,"tier":"creator","can_extend_character_limit":true})).unwrap();
+        assert_eq!(snap.plan.as_deref(), Some("Creator"));
+        assert_eq!(snap.metrics[0].used_percent, Some(5.0));
+        assert!(snap.metrics.iter().any(|m| m.label == "Overage"));
+    }
 }

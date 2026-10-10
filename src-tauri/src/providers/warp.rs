@@ -16,7 +16,9 @@ pub async fn snapshot() -> Snapshot {
 
 fn parse_iso_ms(v: Option<&Value>) -> Option<i64> {
     let s = v?.as_str()?;
-    chrono::DateTime::parse_from_rfc3339(s).ok().map(|d| d.timestamp_millis())
+    chrono::DateTime::parse_from_rfc3339(s)
+        .ok()
+        .map(|d| d.timestamp_millis())
 }
 
 pub fn local_credential_hint() -> Option<String> {
@@ -67,10 +69,16 @@ async fn fetch_with_key(key: &str) -> Result<Snapshot, String> {
     if !resp.status().is_success() {
         return Err(format!("graphql endpoint: HTTP {}", resp.status()));
     }
-    let doc: Value = resp.json().await.map_err(|e| format!("graphql parse: {e}"))?;
+    let doc: Value = resp
+        .json()
+        .await
+        .map_err(|e| format!("graphql parse: {e}"))?;
     if let Some(errors) = doc.get("errors").and_then(Value::as_array) {
-        let msgs: Vec<&str> =
-            errors.iter().filter_map(|e| e.get("message").and_then(Value::as_str)).take(3).collect();
+        let msgs: Vec<&str> = errors
+            .iter()
+            .filter_map(|e| e.get("message").and_then(Value::as_str))
+            .take(3)
+            .collect();
         if !msgs.is_empty() {
             return Err(format!("GraphQL: {}", msgs.join("; ")));
         }
@@ -84,20 +92,28 @@ fn parse_usage(doc: &Value) -> Result<Snapshot, String> {
     let user = doc
         .pointer("/data/user/user")
         .ok_or("no user payload in response (is the key valid?)")?;
-    let info = user.get("requestLimitInfo").ok_or("no requestLimitInfo in response")?;
+    let info = user
+        .get("requestLimitInfo")
+        .ok_or("no requestLimitInfo in response")?;
     let unlimited = match info.get("isUnlimited") {
         Some(Value::Bool(b)) => *b,
         Some(Value::String(s)) => s == "true",
         _ => false,
     };
-    let limit = info.get("requestLimit").and_then(Value::as_f64).unwrap_or(0.0);
-    let used = info.get("requestsUsedSinceLastRefresh").and_then(Value::as_f64).unwrap_or(0.0);
+    let limit = info
+        .get("requestLimit")
+        .and_then(Value::as_f64)
+        .filter(|v| v.is_finite() && *v > 0.0);
+    let used = info
+        .get("requestsUsedSinceLastRefresh")
+        .and_then(Value::as_f64)
+        .filter(|v| v.is_finite() && *v >= 0.0);
     let resets_at = parse_iso_ms(info.get("nextRefreshTime"));
 
     let mut metrics = Vec::new();
     if unlimited {
         metrics.push(Metric::text("Requests", "Unlimited".into()));
-    } else if limit > 0.0 {
+    } else if let (Some(limit), Some(used)) = (limit, used) {
         metrics.push(
             Metric::progress(
                 "Requests",
@@ -113,8 +129,16 @@ fn parse_usage(doc: &Value) -> Result<Snapshot, String> {
     let mut remaining = 0.0f64;
     let mut next_expiry: Option<i64> = None;
     let mut eat = |g: &Value| {
-        let total = g.get("requestCreditsGranted").and_then(Value::as_f64).unwrap_or(0.0);
-        let left = g.get("requestCreditsRemaining").and_then(Value::as_f64).unwrap_or(0.0);
+        let (Some(total), Some(left)) = (
+            g.get("requestCreditsGranted")
+                .and_then(Value::as_f64)
+                .filter(|v| v.is_finite() && *v >= 0.0),
+            g.get("requestCreditsRemaining")
+                .and_then(Value::as_f64)
+                .filter(|v| v.is_finite() && *v >= 0.0),
+        ) else {
+            return;
+        };
         granted += total;
         remaining += left;
         if left > 0.0 {
@@ -123,10 +147,18 @@ fn parse_usage(doc: &Value) -> Result<Snapshot, String> {
             }
         }
     };
-    for g in user.get("bonusGrants").and_then(Value::as_array).unwrap_or(&vec![]) {
+    for g in user
+        .get("bonusGrants")
+        .and_then(Value::as_array)
+        .unwrap_or(&vec![])
+    {
         eat(g);
     }
-    for ws in user.get("workspaces").and_then(Value::as_array).unwrap_or(&vec![]) {
+    for ws in user
+        .get("workspaces")
+        .and_then(Value::as_array)
+        .unwrap_or(&vec![])
+    {
         for g in ws
             .pointer("/bonusGrantsInfo/grants")
             .and_then(Value::as_array)
@@ -156,6 +188,24 @@ fn parse_usage(doc: &Value) -> Result<Snapshot, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn missing_request_usage_is_unknown_not_zero() {
+        let mut doc = limit_doc(serde_json::json!(false));
+        doc["data"]["user"]["user"]["requestLimitInfo"]
+            .as_object_mut()
+            .unwrap()
+            .remove("requestsUsedSinceLastRefresh");
+        let result = parse_usage(&doc);
+        assert!(
+            result.is_err()
+                || result
+                    .unwrap()
+                    .metrics
+                    .iter()
+                    .all(|m| m.label != "Requests")
+        );
+    }
 
     fn limit_doc(unlimited: Value) -> Value {
         json!({
@@ -204,7 +254,10 @@ mod tests {
         assert_eq!(snap.metrics[0].value.as_deref(), Some("Unlimited"));
         // isUnlimited has also arrived as the string "true".
         let stringy = limit_doc(json!("true"));
-        assert_eq!(parse_usage(&stringy).unwrap().plan.as_deref(), Some("Unlimited"));
+        assert_eq!(
+            parse_usage(&stringy).unwrap().plan.as_deref(),
+            Some("Unlimited")
+        );
     }
 
     #[test]

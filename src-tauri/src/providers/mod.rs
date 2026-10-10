@@ -1,65 +1,65 @@
 pub mod aihubmix;
+pub mod amp;
 pub mod antigravity;
+pub mod apigoto;
+pub mod bedrock;
+pub mod chutes;
 pub mod claude;
 pub mod clawsgo;
-pub mod codebuff;
+pub mod clinepass;
 pub mod codebuddy;
+pub mod codebuff;
 pub mod codex;
 pub mod commandcode;
 pub mod copilot;
 pub mod cursor;
+pub mod deepgram;
 pub mod deepseek;
 pub mod devin;
 pub mod doubao;
 pub mod elevenlabs;
+pub mod factory;
 pub mod grok;
+pub mod groq;
 pub mod hermes;
+pub mod huggingface;
+pub mod jetbrains;
 pub mod kilo;
 pub mod kimi;
+pub mod kiro;
+pub mod longcat;
+pub mod mimo;
 pub mod minimax;
+pub mod mistral;
 pub mod moonshot;
 pub mod novita;
 pub mod ollama;
 pub mod onenewapi;
+pub mod openai_api;
 pub mod opencode;
 pub mod openrouter;
+pub mod perplexity;
+pub mod poe;
+pub mod qoder;
 pub mod qodercn;
 pub mod qwen;
-pub mod shandianshuo;
-pub mod searchquota;
-pub mod clinepass;
-pub mod sensenova;
-pub mod apigoto;
 pub mod relaybalance;
+pub mod searchquota;
+pub mod sensenova;
+pub mod shandianshuo;
 pub mod siliconflow;
 pub mod stepfun;
 pub mod stepfun_plan;
+pub mod sub2api;
+pub mod trae;
 pub mod traecn;
-pub mod zai;
-pub mod amp;
-pub mod bedrock;
-pub mod chutes;
-pub mod deepgram;
-pub mod openai_api;
-pub mod poe;
 pub mod venice;
 pub mod vertexai;
+pub mod volcengine;
 pub mod warp;
 pub mod windsurf;
-pub mod kiro;
-pub mod mimo;
-pub mod trae;
-pub mod qoder;
+pub mod zai;
 pub mod zed;
-pub mod factory;
-pub mod jetbrains;
-pub mod groq;
-pub mod huggingface;
-pub mod longcat;
-pub mod sub2api;
-pub mod mistral;
-pub mod perplexity;
-pub mod volcengine;
 
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
@@ -80,10 +80,15 @@ pub struct Metric {
 
 impl Metric {
     pub fn progress(label: &str, used_percent: f64, detail: Option<String>) -> Self {
+        // Unknown/invalid arithmetic must never masquerade as an empty quota
+        // or reach JSON serialization as NaN/Infinity.
+        if !used_percent.is_finite() {
+            return Self::text(label, "Usage unavailable".into());
+        }
         Self {
             label: label.into(),
             kind: "progress".into(),
-            used_percent: Some(used_percent),
+            used_percent: Some(used_percent.clamp(0.0, 100.0)),
             detail,
             value: None,
             resets_at: None,
@@ -222,7 +227,11 @@ fn parse_win_proxy(raw: &str) -> Option<String> {
     if host.is_empty() {
         return None;
     }
-    Some(if host.contains("://") { host } else { format!("http://{host}") })
+    Some(if host.contains("://") {
+        host
+    } else {
+        format!("http://{host}")
+    })
 }
 
 /// The Windows system proxy (HKCU → Internet Settings), which Clash-style
@@ -236,7 +245,11 @@ fn windows_system_proxy() -> Option<String> {
     use windows::Win32::System::Registry::{
         RegGetValueW, HKEY_CURRENT_USER, RRF_RT_REG_DWORD, RRF_RT_REG_SZ,
     };
-    let wide = |s: &str| s.encode_utf16().chain(std::iter::once(0)).collect::<Vec<u16>>();
+    let wide = |s: &str| {
+        s.encode_utf16()
+            .chain(std::iter::once(0))
+            .collect::<Vec<u16>>()
+    };
     let subkey = wide("Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings");
     unsafe {
         let mut enabled: u32 = 0;
@@ -293,7 +306,10 @@ fn http_builder() -> reqwest::ClientBuilder {
     // system proxy the OS and browsers already honor (Clash flips its port
     // there when the user switches nodes). reqwest's own env-var handling
     // stays as the last resort when neither is set.
-    if let Some(url) = proxy_url().map(str::to_string).or_else(windows_system_proxy) {
+    if let Some(url) = proxy_url()
+        .map(str::to_string)
+        .or_else(windows_system_proxy)
+    {
         if let Ok(proxy) = reqwest::Proxy::all(url) {
             let proxy = proxy.no_proxy(reqwest::NoProxy::from_string("localhost,127.0.0.1,::1"));
             builder = builder.proxy(proxy);
@@ -458,22 +474,9 @@ pub fn credential_string(target: &str) -> Option<String> {
     crate::platform::secret(target)
 }
 
-/// Percent-used meter for pay-as-you-go balances. These APIs report only
-/// what's left — never "of how much" — so Pane remembers the highest
-/// balance it has ever seen per provider (a top-up raises it automatically)
-/// and meters usage against that high-water mark. Persisted so restarts
-/// keep the story. As a progress row it also feeds the notification rules
-/// ("Almost Out" fires under 10% remaining) like every other meter.
-pub fn credit_meter(provider: &str, sign: &str, balance: f64) -> Option<Metric> {
-    credit_meter_labeled(provider, sign, balance, "Credits used", "")
-}
-
-/// credit_meter with a caller-chosen row label and caption suffix —
-/// purchased-credit pools (Codex Extra credits, Devin's extra balance)
-/// meter identically but shouldn't all be called "Credits used", and some
-/// carry an extra unit in the caption ("· N credits").
-pub fn credit_meter_labeled(
-    provider: &str,
+/// Balance-only APIs cannot establish consumed credits or a quota ceiling.
+/// Preserve the actual balance without deriving a meter from local history.
+pub fn balance_metric(
     sign: &str,
     balance: f64,
     label: &str,
@@ -482,39 +485,9 @@ pub fn credit_meter_labeled(
     if !balance.is_finite() || balance < 0.0 {
         return None;
     }
-    // Providers refresh concurrently and this is a read-modify-write on a
-    // shared file — serialize it, or one card's just-raised high-water
-    // mark can be overwritten by another's stale copy.
-    static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
-    let _guard = LOCK.lock();
-    let path = config_dir().join("credit_baselines.json");
-    let mut doc: serde_json::Value = std::fs::read_to_string(&path)
-        .ok()
-        .and_then(|raw| serde_json::from_str(&raw).ok())
-        .filter(serde_json::Value::is_object)
-        .unwrap_or_else(|| serde_json::json!({}));
-    let high = doc
-        .get(provider)
-        .and_then(serde_json::Value::as_f64)
-        .unwrap_or(0.0);
-    if balance > high {
-        doc[provider] = serde_json::Value::from(balance);
-        let _ = std::fs::write(
-            &path,
-            serde_json::to_string_pretty(&doc).unwrap_or_default(),
-        );
-    }
-    let high = high.max(balance);
-    if high <= 0.0 {
-        return None;
-    }
-    let used = ((1.0 - balance / high) * 100.0).clamp(0.0, 100.0);
-    Some(Metric::progress(
+    Some(Metric::text(
         label,
-        used,
-        Some(format!(
-            "{sign}{balance:.2} of {sign}{high:.2} left{caption_suffix}"
-        )),
+        format!("{sign}{balance:.2} left{caption_suffix}"),
     ))
 }
 
@@ -561,7 +534,14 @@ pub fn provider_disabled(id: &str) -> bool {
     else {
         return false;
     };
-    cfg.get("disabled")
+    let disabled = cfg
+        .get("disabled")
+        .and_then(serde_json::Value::as_array)
+        .is_some_and(|a| a.iter().any(|v| v.as_str() == Some(id)));
+    if disabled {
+        return true;
+    }
+    cfg.get("removedProviders")
         .and_then(serde_json::Value::as_array)
         .is_some_and(|a| a.iter().any(|v| v.as_str() == Some(id)))
 }
@@ -672,8 +652,12 @@ pub fn mirror_week_wall(card_id: &str, snap: &mut Snapshot) {
         })
         .max_by_key(|m| m.period_ms.unwrap_or(0));
     let Some(wall) = wall else { return };
-    let (used, resets_at, period_ms, label) =
-        (wall.used_percent, wall.resets_at, wall.period_ms, wall.label.clone());
+    let (used, resets_at, period_ms, label) = (
+        wall.used_percent,
+        wall.resets_at,
+        wall.period_ms,
+        wall.label.clone(),
+    );
     for m in snap.metrics.iter_mut() {
         if m.kind == "progress" && m.period_ms.is_some_and(|p| p < WALL_MIN_PERIOD_MS) {
             m.used_percent = Some(used.unwrap_or(100.0).max(100.0).min(100.0));
@@ -687,6 +671,29 @@ pub fn mirror_week_wall(card_id: &str, snap: &mut Snapshot) {
 #[cfg(test)]
 mod wall_tests {
     use super::*;
+
+    #[test]
+    fn balance_only_sources_never_fabricate_a_quota_from_local_history() {
+        let row = balance_metric("$", 7.5, "Extra credits", "").unwrap();
+        assert_eq!(row.kind, "text");
+        assert_eq!(row.used_percent, None);
+        assert_eq!(row.value.as_deref(), Some("$7.50 left"));
+        assert!(balance_metric("$", f64::NAN, "Extra credits", "").is_none());
+    }
+
+    #[test]
+    fn invalid_percent_cannot_serialize_as_a_valid_empty_quota() {
+        for invalid in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            let row = Metric::progress("Quota", invalid, None);
+            assert_eq!(row.kind, "text");
+            assert_eq!(row.used_percent, None);
+            assert!(serde_json::to_value(row).is_ok());
+        }
+        assert_eq!(
+            Metric::progress("Quota", 120.0, None).used_percent,
+            Some(100.0)
+        );
+    }
 
     const HOUR_MS: i64 = 3600_000;
     const DAY_MS: i64 = 24 * HOUR_MS;
@@ -767,12 +774,18 @@ mod wall_tests {
 
     #[test]
     fn windows_proxy_string_parses_all_the_shapes() {
-        assert_eq!(parse_win_proxy("127.0.0.1:7897").as_deref(), Some("http://127.0.0.1:7897"));
+        assert_eq!(
+            parse_win_proxy("127.0.0.1:7897").as_deref(),
+            Some("http://127.0.0.1:7897")
+        );
         assert_eq!(
             parse_win_proxy("http=127.0.0.1:7892;https=127.0.0.1:7897").as_deref(),
             Some("http://127.0.0.1:7897")
         );
-        assert_eq!(parse_win_proxy("http=1.2.3.4:8080").as_deref(), Some("http://1.2.3.4:8080"));
+        assert_eq!(
+            parse_win_proxy("http=1.2.3.4:8080").as_deref(),
+            Some("http://1.2.3.4:8080")
+        );
         assert_eq!(
             parse_win_proxy("https://1.2.3.4:8080").as_deref(),
             Some("https://1.2.3.4:8080")

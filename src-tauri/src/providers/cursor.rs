@@ -26,8 +26,13 @@ pub fn local_credential_hint() -> Option<String> {
 /// gear panel can badge "Free" vs "Pro" without a network call. Reads a
 /// temporary copy, same dance as the token read.
 pub fn local_membership() -> Option<String> {
-    let Some(db_path) = state_db_path() else { return None };
-    let tmp = std::env::temp_dir().join(format!("openusage-cursor-membership-{}.vscdb", std::process::id()));
+    let Some(db_path) = state_db_path() else {
+        return None;
+    };
+    let tmp = std::env::temp_dir().join(format!(
+        "openusage-cursor-membership-{}.vscdb",
+        std::process::id()
+    ));
     let read = |conn: &rusqlite::Connection| -> rusqlite::Result<(Option<String>, Option<String>)> {
         let get = |key: &str| -> rusqlite::Result<Option<String>> {
             match conn.query_row("SELECT value FROM ItemTable WHERE key = ?1", [key], |r| {
@@ -38,13 +43,19 @@ pub fn local_membership() -> Option<String> {
                 Err(e) => Err(e),
             }
         };
-        Ok((get("cursorAuth/stripeMembershipType")?, get("cursorAuth/stripeSubscriptionStatus")?))
+        Ok((
+            get("cursorAuth/stripeMembershipType")?,
+            get("cursorAuth/stripeSubscriptionStatus")?,
+        ))
     };
     let pair = match std::fs::copy(&db_path, &tmp) {
         Ok(_) => {
-            let out = rusqlite::Connection::open_with_flags(&tmp, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
-                .and_then(|conn| read(&conn))
-                .ok();
+            let out = rusqlite::Connection::open_with_flags(
+                &tmp,
+                rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
+            )
+            .and_then(|conn| read(&conn))
+            .ok();
             let _ = std::fs::remove_file(&tmp);
             out
         }
@@ -52,7 +63,9 @@ pub fn local_membership() -> Option<String> {
     };
     let (membership, status) = pair?;
     let membership = membership.map(|v| unquote(&v)).filter(|v| !v.is_empty());
-    let status = status.map(|v| unquote(&v)).filter(|v| !v.is_empty() && !v.eq_ignore_ascii_case("active"));
+    let status = status
+        .map(|v| unquote(&v))
+        .filter(|v| !v.is_empty() && !v.eq_ignore_ascii_case("active"));
     // Normalize the same way cockpit does (types/cursor.ts): student→pro,
     // business/team→enterprise; the badge shows Free / Pro / Pro+ / Ultra.
     let badge = membership.map(|m| match m.to_ascii_lowercase().as_str() {
@@ -71,7 +84,9 @@ pub fn local_membership() -> Option<String> {
     }
 }
 
-fn read_pair(conn: &rusqlite::Connection) -> Result<(Option<String>, Option<String>), rusqlite::Error> {
+fn read_pair(
+    conn: &rusqlite::Connection,
+) -> Result<(Option<String>, Option<String>), rusqlite::Error> {
     let get = |key: &str| -> Result<Option<String>, rusqlite::Error> {
         match conn.query_row("SELECT value FROM ItemTable WHERE key = ?1", [key], |r| {
             r.get::<_, String>(0)
@@ -81,7 +96,10 @@ fn read_pair(conn: &rusqlite::Connection) -> Result<(Option<String>, Option<Stri
             Err(e) => Err(e),
         }
     };
-    Ok((get("cursorAuth/accessToken")?, get("cursorAuth/refreshToken")?))
+    Ok((
+        get("cursorAuth/accessToken")?,
+        get("cursorAuth/refreshToken")?,
+    ))
 }
 
 /// (mtime, size) of the editor DB. Used so a refresh that sees the same
@@ -121,8 +139,13 @@ fn read_state_values() -> Result<(Option<String>, Option<String>), String> {
     Ok(pair)
 }
 
-fn read_state_values_fresh(db_path: &std::path::Path) -> Result<(Option<String>, Option<String>), String> {
-    let uri = format!("file:{}?immutable=1", db_path.to_string_lossy().replace('\\', "/"));
+fn read_state_values_fresh(
+    db_path: &std::path::Path,
+) -> Result<(Option<String>, Option<String>), String> {
+    let uri = format!(
+        "file:{}?immutable=1",
+        db_path.to_string_lossy().replace('\\', "/")
+    );
     if let Ok(pair) = rusqlite::Connection::open_with_flags(
         &uri,
         rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_URI,
@@ -168,7 +191,10 @@ fn jwt_sub(token: &str) -> Option<String> {
         .decode(payload)
         .ok()?;
     let claims: Value = serde_json::from_slice(&bytes).ok()?;
-    claims.get("sub").and_then(Value::as_str).map(str::to_string)
+    claims
+        .get("sub")
+        .and_then(Value::as_str)
+        .map(str::to_string)
 }
 
 pub async fn snapshot() -> Snapshot {
@@ -215,7 +241,9 @@ pub async fn fetch_usage_csv() -> Option<String> {
     if token.is_empty() {
         return stale();
     }
-    let Some(sub) = jwt_sub(&token) else { return stale() };
+    let Some(sub) = jwt_sub(&token) else {
+        return stale();
+    };
     let user_id = sub.split('|').next_back().unwrap_or(&sub).to_string();
     let cookie = format!("WorkosCursorSessionToken={user_id}%3A%3A{token}");
 
@@ -240,7 +268,9 @@ pub async fn fetch_usage_csv() -> Option<String> {
         eprintln!("[pane] cursor csv: HTTP {}", resp.status());
         return stale();
     }
-    let Ok(body) = resp.text().await else { return stale() };
+    let Ok(body) = resp.text().await else {
+        return stale();
+    };
     if body.trim().is_empty() {
         return stale();
     }
@@ -265,7 +295,9 @@ fn refreshed_token() -> &'static std::sync::Mutex<Option<String>> {
 /// 401/403 so the caller can refresh and retry.
 async fn connect_post(method: &str, token: &str) -> Result<Option<Value>, String> {
     let resp = http()
-        .post(format!("https://api2.cursor.sh/aiserver.v1.DashboardService/{method}"))
+        .post(format!(
+            "https://api2.cursor.sh/aiserver.v1.DashboardService/{method}"
+        ))
         .bearer_auth(token)
         .header("Content-Type", "application/json")
         .header("Connect-Protocol-Version", "1")
@@ -309,7 +341,10 @@ async fn refresh_access_token(refresh: &str) -> Option<String> {
 }
 
 fn num(v: Option<&Value>) -> Option<f64> {
-    v.and_then(|x| x.as_f64().or_else(|| x.as_str().and_then(|s| s.parse().ok())))
+    v.and_then(|x| {
+        x.as_f64()
+            .or_else(|| x.as_str().and_then(|s| s.parse().ok()))
+    })
 }
 
 fn dollars(cents: f64) -> String {
@@ -327,9 +362,11 @@ fn dollars(cents: f64) -> String {
 fn credit_grants_metric(grants: &Value) -> Option<Metric> {
     let has = grants.get("hasCreditGrants").and_then(Value::as_bool);
     let total = num(grants.get("totalCents")).unwrap_or(0.0);
-    let used = num(grants.get("usedCents")).unwrap_or(0.0);
-    let remaining = num(grants.get("creditBalanceCents"))
-        .unwrap_or_else(|| (total - used).max(0.0));
+    let used = num(grants.get("usedCents"));
+    let remaining = num(grants.get("creditBalanceCents")).or_else(|| {
+        used.filter(|_| total > 0.0)
+            .map(|used| (total - used).max(0.0))
+    })?;
     // Explicit false wins even if leftover totals are still on the payload
     // (expired grant). A 100% bar from that would also trip Almost Out.
     if has == Some(false) {
@@ -525,7 +562,9 @@ async fn fetch_with_token(
         if let Ok(s) = summary_fetch(&token).await {
             return Ok(rename_snapshot(s, card_id, card_name));
         }
-        return legacy_fetch(&token).await.map(|s| rename_snapshot(s, card_id, card_name));
+        return legacy_fetch(&token)
+            .await
+            .map(|s| rename_snapshot(s, card_id, card_name));
     }
     let plan_usage = plan_usage.unwrap();
 
@@ -612,7 +651,9 @@ async fn fetch_with_token(
     let spend_type = spend_limit
         .and_then(|s| s.get("limitType").and_then(Value::as_str))
         .map(str::to_lowercase);
-    let pooled_limit = spend_limit.and_then(|s| num(s.get("pooledLimit"))).unwrap_or(0.0);
+    let pooled_limit = spend_limit
+        .and_then(|s| num(s.get("pooledLimit")))
+        .unwrap_or(0.0);
     let is_team = plan.as_deref().map(|p| p.eq_ignore_ascii_case("team")) == Some(true)
         || spend_type.as_deref() == Some("team")
         || pooled_limit > 0.0;
@@ -628,7 +669,6 @@ async fn fetch_with_token(
             _ => None,
         }
     });
-    let used_cents = used_cents_opt.unwrap_or(0.0);
 
     // The per-bucket bars mirror Cursor's own Plan & Usage page — "Cursor
     // Models" (the auto bucket: Composer, Cursor Grok, …) and "Other
@@ -684,11 +724,17 @@ async fn fetch_with_token(
                         .map(|s| rename_snapshot(s, card_id, card_name))
                 }
             };
+            let used_cents =
+                used_cents_opt.ok_or("Cursor team response missing totalSpend and remaining")?;
             metrics.push(
                 Metric::progress(
                     "Total usage",
                     (used_cents / limit_cents * 100.0).clamp(0.0, 100.0),
-                    Some(format!("{} / {} this cycle", dollars(used_cents), dollars(limit_cents))),
+                    Some(format!(
+                        "{} / {} this cycle",
+                        dollars(used_cents),
+                        dollars(limit_cents)
+                    )),
                 )
                 .with_reset(resets_at, Some(period_ms)),
             );
@@ -733,7 +779,9 @@ async fn fetch_with_token(
     }
 
     if let Some(s) = spend_limit {
-        let od_limit = num(s.get("individualLimit")).or(num(s.get("pooledLimit"))).unwrap_or(0.0);
+        let od_limit = num(s.get("individualLimit"))
+            .or(num(s.get("pooledLimit")))
+            .unwrap_or(0.0);
         let od_remaining = num(s.get("individualRemaining")).or(num(s.get("pooledRemaining")));
         let od_spent = [
             num(s.get("individualUsed")),
@@ -743,15 +791,18 @@ async fn fetch_with_token(
         .into_iter()
         .flatten()
         .find(|v| *v > 0.0)
-        .or_else(|| od_remaining.map(|r| (od_limit - r).max(0.0)))
-        .unwrap_or(0.0);
-        if od_limit > 0.0 {
+        .or_else(|| {
+            od_remaining
+                .filter(|_| od_limit > 0.0)
+                .map(|r| (od_limit - r).max(0.0))
+        });
+        if let Some(od_spent) = od_spent.filter(|_| od_limit > 0.0) {
             metrics.push(Metric::progress(
                 "On-demand",
                 (od_spent / od_limit * 100.0).clamp(0.0, 100.0),
                 Some(format!("{} / {}", dollars(od_spent), dollars(od_limit))),
             ));
-        } else if od_spent > 0.0 {
+        } else if let Some(od_spent) = od_spent.filter(|v| *v > 0.0) {
             metrics.push(Metric::text("On-demand", dollars(od_spent)));
         }
     }
@@ -946,17 +997,18 @@ fn summary_snapshot(doc: &Value) -> Option<Snapshot> {
         });
     if let Some(b) = od {
         let od_limit = num(b.get("limit")).unwrap_or(0.0);
-        let od_spent = num(b.get("used"))
-            .filter(|u| *u > 0.0)
-            .or_else(|| num(b.get("remaining")).map(|r| (od_limit - r).max(0.0)))
-            .unwrap_or(0.0);
-        if od_limit > 0.0 {
+        let od_spent = num(b.get("used")).filter(|u| *u > 0.0).or_else(|| {
+            num(b.get("remaining"))
+                .filter(|_| od_limit > 0.0)
+                .map(|r| (od_limit - r).max(0.0))
+        });
+        if let Some(od_spent) = od_spent.filter(|_| od_limit > 0.0) {
             metrics.push(Metric::progress(
                 "On-demand",
                 (od_spent / od_limit * 100.0).clamp(0.0, 100.0),
                 Some(format!("{} / {}", dollars(od_spent), dollars(od_limit))),
             ));
-        } else if od_spent > 0.0 {
+        } else if let Some(od_spent) = od_spent.filter(|v| *v > 0.0) {
             metrics.push(Metric::text("On-demand", dollars(od_spent)));
         }
     }
@@ -989,7 +1041,10 @@ async fn legacy_fetch(token: &str) -> Result<Snapshot, String> {
     if !usage_resp.status().is_success() {
         return Err(format!("usage endpoint: HTTP {}", usage_resp.status()));
     }
-    let usage: Value = usage_resp.json().await.map_err(|e| format!("usage parse: {e}"))?;
+    let usage: Value = usage_resp
+        .json()
+        .await
+        .map_err(|e| format!("usage parse: {e}"))?;
 
     let mut plan: Option<String> = None;
     if let Ok(r) = plan_resp {
@@ -1011,16 +1066,16 @@ async fn legacy_fetch(token: &str) -> Result<Snapshot, String> {
 fn legacy_snapshot(usage: &Value, plan: Option<String>) -> Result<Snapshot, String> {
     let mut metrics = Vec::new();
     if let Some(gpt4) = usage.get("gpt-4") {
-        let used = gpt4.get("numRequests").and_then(Value::as_f64).unwrap_or(0.0);
-        match gpt4.get("maxRequestUsage").and_then(Value::as_f64) {
-            Some(max) if max > 0.0 => {
+        let used = gpt4.get("numRequests").and_then(Value::as_f64);
+        match (used, gpt4.get("maxRequestUsage").and_then(Value::as_f64)) {
+            (Some(used), Some(max)) if max > 0.0 => {
                 metrics.push(Metric::progress(
                     "Requests",
                     used / max * 100.0,
                     Some(format!("{used:.0} / {max:.0} this cycle")),
                 ));
             }
-            _ if used > 0.0 => {
+            (Some(used), _) if used > 0.0 => {
                 metrics.push(Metric::text("Requests this cycle", format!("{used:.0}")));
             }
             _ => {}
@@ -1035,6 +1090,15 @@ fn legacy_snapshot(usage: &Value, plan: Option<String>) -> Result<Snapshot, Stri
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn grants_limit_without_used_or_balance_is_unknown() {
+        assert!(credit_grants_metric(
+            &serde_json::json!({"hasCreditGrants":true,"totalCents":100000})
+        )
+        .is_none());
+    }
+
     use serde_json::json;
 
     #[test]
@@ -1191,7 +1255,9 @@ mod tests {
         assert_eq!(total.kind, "text");
         assert_eq!(total.value.as_deref(), Some("$110 this cycle"));
         assert!(
-            snap.metrics.iter().all(|m| m.used_percent.unwrap_or(0.0) < 100.0),
+            snap.metrics
+                .iter()
+                .all(|m| m.used_percent.unwrap_or(0.0) < 100.0),
             "no bar may read maxed while the buckets still have room"
         );
     }
@@ -1260,7 +1326,10 @@ mod tests {
         let capped = json!({ "gpt-4": { "numRequests": 60, "maxRequestUsage": 500 } });
         let snap = legacy_snapshot(&capped, None).expect("cap");
         assert_eq!(snap.metrics[0].kind, "progress");
-        assert_eq!(snap.metrics[0].detail.as_deref(), Some("60 / 500 this cycle"));
+        assert_eq!(
+            snap.metrics[0].detail.as_deref(),
+            Some("60 / 500 this cycle")
+        );
         assert!(legacy_snapshot(&json!({}), None).is_err());
     }
 
@@ -1329,4 +1398,3 @@ mod tests {
         assert!(bonus_metric(&json!({}), Some(10.0)).is_none());
     }
 }
-

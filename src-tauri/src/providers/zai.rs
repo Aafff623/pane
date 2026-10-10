@@ -36,8 +36,14 @@ struct Endpoint {
 
 /// Tried in order; the first domain that yields metrics wins.
 const ENDPOINTS: [Endpoint; 2] = [
-    Endpoint { base: "https://api.z.ai", bearer: true },
-    Endpoint { base: "https://open.bigmodel.cn", bearer: false },
+    Endpoint {
+        base: "https://api.z.ai",
+        bearer: true,
+    },
+    Endpoint {
+        base: "https://open.bigmodel.cn",
+        bearer: false,
+    },
 ];
 
 /// How one domain attempt failed — decides whether the next domain gets a
@@ -76,7 +82,10 @@ fn find_key() -> Option<String> {
         return Some(key);
     }
     // The Z.ai CLI's own key file.
-    let path = dirs::home_dir()?.join(".config").join("zai").join("key.json");
+    let path = dirs::home_dir()?
+        .join(".config")
+        .join("zai")
+        .join("key.json");
     let raw = std::fs::read_to_string(path).ok()?;
     let doc: Value = serde_json::from_str(&raw).ok()?;
     doc.get("apiKey")
@@ -88,7 +97,10 @@ fn find_key() -> Option<String> {
 /// Pure local probe for the Customize gear panel (no network): the Z.ai
 /// CLI's own key file carries a key.
 pub fn local_credential_hint() -> Option<String> {
-    let path = dirs::home_dir()?.join(".config").join("zai").join("key.json");
+    let path = dirs::home_dir()?
+        .join(".config")
+        .join("zai")
+        .join("key.json");
     let raw = std::fs::read_to_string(path).ok()?;
     let doc: Value = serde_json::from_str(&raw).ok()?;
     doc.get("apiKey")
@@ -218,8 +230,18 @@ fn collect_quota_metrics(node: &Value, metrics: &mut Vec<Metric>, tokens: &mut V
                 .iter()
                 .find_map(|k| map.get(*k).and_then(Value::as_str));
             if type_name == Some("TIME_LIMIT") {
-                let used = map.get("currentValue").and_then(Value::as_f64).unwrap_or(0.0).max(0.0);
-                let cap = map.get("usage").and_then(Value::as_f64).unwrap_or(0.0).max(0.0);
+                let Some(used) = map
+                    .get("currentValue")
+                    .and_then(Value::as_f64)
+                    .filter(|v| v.is_finite() && *v >= 0.0)
+                else {
+                    return;
+                };
+                let cap = map
+                    .get("usage")
+                    .and_then(Value::as_f64)
+                    .unwrap_or(0.0)
+                    .max(0.0);
                 if cap > 0.0 {
                     let resets_at = map
                         .get("nextResetTime")
@@ -490,7 +512,10 @@ mod tests {
     fn cn_domain_comes_second_and_uses_the_raw_key() {
         let bases: Vec<&str> = ENDPOINTS.iter().map(|e| e.base).collect();
         assert_eq!(bases, ["https://api.z.ai", "https://open.bigmodel.cn"]);
-        assert!(ENDPOINTS[0].bearer, "international host keeps the Bearer form");
+        assert!(
+            ENDPOINTS[0].bearer,
+            "international host keeps the Bearer form"
+        );
         assert!(!ENDPOINTS[1].bearer, "CN host takes the raw key");
     }
 
@@ -498,11 +523,16 @@ mod tests {
     fn fallback_fires_on_auth_rejection_or_an_empty_shape_only() {
         assert!(auth_rejected(401));
         assert!(auth_rejected(403));
-        assert!(!auth_rejected(429), "throttling is not a credential verdict");
+        assert!(
+            !auth_rejected(429),
+            "throttling is not a credential verdict"
+        );
         assert!(!auth_rejected(500));
         // A 200-with-success:false gateway body carries no metrics, so the
         // next domain gets its chance instead of erroring immediately.
-        assert!(metrics_from_quota(&json!({"success": false, "msg": "Invalid API key"})).is_empty());
+        assert!(
+            metrics_from_quota(&json!({"success": false, "msg": "Invalid API key"})).is_empty()
+        );
     }
 
     #[test]
@@ -516,7 +546,9 @@ mod tests {
             "success": false
         });
         assert!(business_error(&missing_key));
-        assert!(!business_error(&json!({"code": 200, "data": {"limits": []}})));
+        assert!(!business_error(
+            &json!({"code": 200, "data": {"limits": []}})
+        ));
         assert!(!business_error(&json!({"limits": []})));
     }
 }

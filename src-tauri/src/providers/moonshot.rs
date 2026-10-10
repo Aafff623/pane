@@ -134,22 +134,14 @@ fn rows_from_balance(
     sign: &str,
     api_label: bool,
 ) -> Vec<Metric> {
-    let mut metrics = Vec::new();
-    // High-water key stays "moonshot" so a fold onto the Kimi card keeps
-    // the same Credits-used baseline the Moonshot card already learned.
-    let label = wallet_label(api_label);
-    if let Some(meter) = super::credit_meter_labeled(ID, sign, available, label, "") {
-        metrics.push(meter);
-    }
-    metrics.extend(text_rows(available, voucher, cash, sign, api_label));
-    metrics
+    text_rows(available, voucher, cash, sign, api_label)
 }
 
 fn wallet_label(api_label: bool) -> &'static str {
     if api_label {
         "API"
     } else {
-        "Credits used"
+        "Balance"
     }
 }
 
@@ -161,7 +153,10 @@ fn text_rows(
     api_label: bool,
 ) -> Vec<Metric> {
     let mut metrics = Vec::new();
-    metrics.push(Metric::text("Balance", format!("{sign}{available:.2}")));
+    metrics.push(Metric::text(
+        wallet_label(api_label),
+        format!("{sign}{available:.2}"),
+    ));
     if let Some(v) = voucher {
         if v > 0.0 {
             metrics.push(Metric::text("Vouchers", format!("{sign}{v:.2}")));
@@ -185,13 +180,13 @@ mod tests {
         let rows = text_rows(80.0, Some(80.0), Some(0.0), "$", true);
         assert_eq!(
             rows.iter().map(|m| m.label.as_str()).collect::<Vec<_>>(),
-            ["Balance", "Vouchers"]
+            ["API", "Vouchers"]
         );
     }
 
     #[test]
     fn standalone_moonshot_keeps_credits_used() {
-        assert_eq!(wallet_label(false), "Credits used");
+        assert_eq!(wallet_label(false), "Balance");
         let rows = text_rows(50.0, None, Some(0.0), "$", false);
         assert_eq!(
             rows.iter().map(|m| m.label.as_str()).collect::<Vec<_>>(),

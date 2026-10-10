@@ -353,6 +353,22 @@ pub fn credit_trend_map() -> BTreeMap<String, Vec<Option<f64>>> {
         .collect()
 }
 
+/// Remove history for a card when deleted without keeping usage data.
+pub fn remove_card_history(id: &str) {
+    {
+        let mut file = store().lock().unwrap();
+        if file.entries.remove(id).is_some() {
+            persist(&file);
+        }
+    }
+    {
+        let mut file = credit_store().lock().unwrap();
+        if file.entries.remove(id).is_some() {
+            persist_credits(&file);
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

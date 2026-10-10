@@ -65,7 +65,9 @@ async fn request(cookie: &str, method_get: bool, path: &str) -> Result<Value, St
     let resp = req.send().await.map_err(|e| format!("{path}: {e}"))?;
     let status = resp.status();
     if status.as_u16() == 401 || status.as_u16() == 403 {
-        return Err("LongCat session expired — paste a fresh Cookie header in Settings (gear icon)".into());
+        return Err(
+            "LongCat session expired — paste a fresh Cookie header in Settings (gear icon)".into(),
+        );
     }
     if !status.is_success() {
         return Err(format!("{path}: HTTP {status}"));
@@ -84,7 +86,13 @@ async fn fetch_with_credential(cred: &str) -> Result<Snapshot, String> {
         .map(str::to_string);
 
     let mut primary: Option<(f64, f64)> = None; // (total, used)
-    if let Ok(summary) = request(&cookie, false, "/api/pay/quota/metering/token-packs/summary").await {
+    if let Ok(summary) = request(
+        &cookie,
+        false,
+        "/api/pay/quota/metering/token-packs/summary",
+    )
+    .await
+    {
         let lot = summary.get("currentLot");
         let active = lot
             .and_then(|l| l.get("status"))
@@ -94,7 +102,11 @@ async fn fetch_with_credential(cred: &str) -> Result<Snapshot, String> {
         if let Some(l) = lot.filter(|_| active) {
             let total = l.get("totalToken").and_then(Value::as_f64).unwrap_or(0.0);
             if total > 0.0 {
-                let used = l.get("consumedToken").and_then(Value::as_f64).unwrap_or(0.0);
+                let used = l
+                    .get("consumedToken")
+                    .and_then(Value::as_f64)
+                    .filter(|v| v.is_finite() && *v >= 0.0)
+                    .ok_or("active token pack missing consumedToken")?;
                 primary = Some((total, used));
             }
         }
@@ -104,19 +116,35 @@ async fn fetch_with_credential(cred: &str) -> Result<Snapshot, String> {
         // only answers when the summary had no active lot.
         let usage = request(&cookie, true, "/api/lc-platform/v1/tokenUsage").await?;
         let u = usage.get("usage").unwrap_or(&usage);
-        let total = u.get("totalToken").and_then(Value::as_f64).ok_or("tokenUsage was missing totalToken")?;
+        let total = u
+            .get("totalToken")
+            .and_then(Value::as_f64)
+            .ok_or("tokenUsage was missing totalToken")?;
         let used = u
             .get("usedToken")
             .and_then(Value::as_f64)
-            .unwrap_or_else(|| total - u.get("availableToken").and_then(Value::as_f64).unwrap_or(total));
+            .or_else(|| {
+                u.get("availableToken")
+                    .and_then(Value::as_f64)
+                    .map(|remaining| total - remaining)
+            })
+            .filter(|v| v.is_finite() && *v >= 0.0)
+            .ok_or("tokenUsage missing usedToken and availableToken")?;
         primary = Some((total, used));
     }
 
     let (total, used) = primary.ok_or("no usable quota in response")?;
+    if !total.is_finite() || total <= 0.0 {
+        return Err("token quota has no positive total".into());
+    }
     let mut metrics = vec![Metric::progress(
         "Tokens",
         (used / total * 100.0).clamp(0.0, 100.0),
-        Some(format!("{} of {} tokens", fmt_tokens(used), fmt_tokens(total))),
+        Some(format!(
+            "{} of {} tokens",
+            fmt_tokens(used),
+            fmt_tokens(total)
+        )),
     )];
 
     // Pending fuel packages: remaining tokens + nearest expiry.
@@ -124,7 +152,12 @@ async fn fetch_with_credential(cred: &str) -> Result<Snapshot, String> {
         let mut remaining = 0.0;
         let mut count = 0;
         let mut soonest: Option<i64> = None;
-        for pack in fuel.get("list").and_then(Value::as_array).into_iter().flatten() {
+        for pack in fuel
+            .get("list")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+        {
             if let Some(avail) = pack.get("availableToken").and_then(Value::as_f64) {
                 remaining += avail;
                 count += 1;
@@ -133,8 +166,16 @@ async fn fetch_with_credential(cred: &str) -> Result<Snapshot, String> {
                 .iter()
                 .find_map(|k| pack.get(*k))
                 .and_then(|v| match v {
-                    Value::Number(n) => n.as_f64().map(|n| if n > 1e12 { n as i64 } else { (n * 1000.0) as i64 }),
-                    Value::String(s) => chrono::DateTime::parse_from_rfc3339(s).ok().map(|d| d.timestamp_millis()),
+                    Value::Number(n) => n.as_f64().map(|n| {
+                        if n > 1e12 {
+                            n as i64
+                        } else {
+                            (n * 1000.0) as i64
+                        }
+                    }),
+                    Value::String(s) => chrono::DateTime::parse_from_rfc3339(s)
+                        .ok()
+                        .map(|d| d.timestamp_millis()),
                     _ => None,
                 });
             if let Some(e) = expiry {
@@ -143,8 +184,11 @@ async fn fetch_with_credential(cred: &str) -> Result<Snapshot, String> {
         }
         if count > 0 {
             metrics.push(
-                Metric::text("Fuel packs", format!("{} tokens left", fmt_tokens(remaining)))
-                    .with_reset(soonest, None),
+                Metric::text(
+                    "Fuel packs",
+                    format!("{} tokens left", fmt_tokens(remaining)),
+                )
+                .with_reset(soonest, None),
             );
         }
     }
@@ -171,6 +215,9 @@ mod tests {
     fn cookie_header_takes_full_header_or_bare_token() {
         assert_eq!(cookie_header("Cookie: a=1; b=2"), "a=1; b=2");
         assert_eq!(cookie_header("a=1"), "a=1");
-        assert_eq!(cookie_header("raw-token-value"), "__Secure-authjs.session-token=raw-token-value");
+        assert_eq!(
+            cookie_header("raw-token-value"),
+            "__Secure-authjs.session-token=raw-token-value"
+        );
     }
 }

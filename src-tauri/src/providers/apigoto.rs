@@ -110,7 +110,11 @@ fn parse_snapshot(doc: &Value) -> Result<Snapshot, String> {
             .filter(|s| !s.trim().is_empty() && num(doc.get("balance")).unwrap_or(0.0) != 0.0);
         let mut rows = vec![Metric::text(
             "Subscription",
-            if sub.is_some() { "expired".into() } else { format!("none ({mode})") },
+            if sub.is_some() {
+                "expired".into()
+            } else {
+                format!("none ({mode})")
+            },
         )];
         if let Some(b) = balance {
             rows.push(Metric::text("Balance", format!("¥{b}")));
@@ -121,8 +125,12 @@ fn parse_snapshot(doc: &Value) -> Result<Snapshot, String> {
     }
 
     let sub = sub.expect("checked live");
-    let used = num(sub.get("used")).unwrap_or(0.0);
-    let limit = num(sub.get("limit")).unwrap_or(0.0);
+    let used = num(sub.get("used"))
+        .filter(|v| v.is_finite() && *v >= 0.0)
+        .ok_or("missing valid subscription.used")?;
+    let limit = num(sub.get("limit"))
+        .filter(|v| v.is_finite() && *v > 0.0)
+        .ok_or("missing positive subscription.limit")?;
     let window_sec = num(sub.get("window_sec")).unwrap_or(0.0);
     let plan = sub
         .get("plan_name")
@@ -135,7 +143,11 @@ fn parse_snapshot(doc: &Value) -> Result<Snapshot, String> {
         .and_then(|x| chrono::DateTime::parse_from_rfc3339(x).ok())
         .map(|d| d.timestamp_millis());
 
-    let pct = if limit > 0.0 { (used / limit * 100.0).clamp(0.0, 100.0) } else { 0.0 };
+    let pct = if limit > 0.0 {
+        (used / limit * 100.0).clamp(0.0, 100.0)
+    } else {
+        0.0
+    };
     let mut detail = String::new();
     if let Some(rem) = num(doc.get("remaining")).filter(|r| *r > 0.0) {
         let unit = doc.get("unit").and_then(Value::as_str).unwrap_or("USD");
@@ -156,7 +168,10 @@ fn parse_snapshot(doc: &Value) -> Result<Snapshot, String> {
         // window reset — the anchor-rolling window intentionally exposes
         // no reset instant (official docs).
         Metric::progress("Credits", pct, Some(detail)).with_reset(expiry_ms, None),
-        Metric::text("Plan", plan.clone().unwrap_or_else(|| "subscription".into())),
+        Metric::text(
+            "Plan",
+            plan.clone().unwrap_or_else(|| "subscription".into()),
+        ),
     ];
     Ok(Snapshot::ok(ID, NAME, plan, metrics))
 }
@@ -164,6 +179,13 @@ fn parse_snapshot(doc: &Value) -> Result<Snapshot, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn live_subscription_missing_usage_is_not_free_empty_allowance() {
+        let mut doc: Value = serde_json::from_str(REAL_200).unwrap();
+        doc["subscription"].as_object_mut().unwrap().remove("used");
+        assert!(parse_snapshot(&doc).is_err());
+    }
 
     /// Verbatim live response captured 2026-10-03 (numbers + decimal
     /// strings mixed, subscription present).
@@ -212,7 +234,11 @@ mod tests {
         let snap = parse_snapshot(&doc).expect("parse");
         assert_eq!(snap.metrics.len(), 1);
         assert_eq!(snap.metrics[0].label, "Subscription");
-        assert!(snap.metrics[0].value.as_deref().unwrap().contains("none (payg)"));
+        assert!(snap.metrics[0]
+            .value
+            .as_deref()
+            .unwrap()
+            .contains("none (payg)"));
     }
 
     #[test]
@@ -225,9 +251,16 @@ mod tests {
         });
         let snap = parse_snapshot(&doc).expect("parse");
         assert!(snap.metrics.iter().all(|m| m.kind != "progress"));
-        assert!(snap.metrics[0].value.as_deref().unwrap().contains("expired"));
+        assert!(snap.metrics[0]
+            .value
+            .as_deref()
+            .unwrap()
+            .contains("expired"));
         // Balance diagnostic rides along when non-zero.
-        assert!(snap.metrics.iter().any(|m| m.value.as_deref() == Some("¥0.50000")));
+        assert!(snap
+            .metrics
+            .iter()
+            .any(|m| m.value.as_deref() == Some("¥0.50000")));
     }
 
     #[test]

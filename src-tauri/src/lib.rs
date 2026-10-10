@@ -462,20 +462,34 @@ fn autostart_now_enabled(app: &tauri::AppHandle) -> bool {
 }
 
 /// The tray menu keeps a compact, read-only status list like ccSwitch. It is
+fn effective_disabled_list(cfg: &Value) -> Vec<String> {
+    let mut out: Vec<String> = cfg
+        .get("disabled")
+        .and_then(Value::as_array)
+        .map(|a| {
+            a.iter()
+                .filter_map(Value::as_str)
+                .map(str::to_string)
+                .collect()
+        })
+        .unwrap_or_default();
+    if let Some(removed) = cfg.get("removedProviders").and_then(Value::as_array) {
+        for r in removed.iter().filter_map(Value::as_str) {
+            if !out.iter().any(|d| d == r) {
+                out.push(r.to_string());
+            }
+        }
+    }
+    out
+}
+
 /// built from Pane's last-good snapshot cache, so opening the native menu does
 /// not wait on network requests or the WebView. A click on one of these rows
 /// returns to the live floating dashboard; the full management surface lives
 /// behind the separate Settings… item below.
 fn cached_tray_provider_rows(cfg: &Value) -> Vec<(String, String)> {
     const MAX_ROWS: usize = 8;
-    let disabled: HashSet<String> = cfg
-        .get("disabled")
-        .and_then(Value::as_array)
-        .into_iter()
-        .flatten()
-        .filter_map(Value::as_str)
-        .map(str::to_string)
-        .collect();
+    let disabled: HashSet<String> = effective_disabled_list(cfg).into_iter().collect();
     let mut rows: Vec<(String, String)> = Vec::new();
     let Ok(cache) = last_ok().lock() else {
         return rows;
@@ -1991,12 +2005,17 @@ fn keyvault_recovery_reset(
 
 #[tauri::command]
 fn keyvault_unlock(password: String) -> Result<keyvault::VaultStatus, String> {
-    keyvault::unlock(&password)
+    let status = keyvault::unlock(&password)?;
+    // The locked-vault rows on the MCP/search cards are now stale.
+    providers::searchquota::invalidate_all();
+    Ok(status)
 }
 
 #[tauri::command]
 fn keyvault_lock() -> keyvault::VaultStatus {
-    keyvault::lock()
+    let status = keyvault::lock();
+    providers::searchquota::invalidate_all();
+    status
 }
 
 #[tauri::command]
@@ -2020,7 +2039,6 @@ async fn fetch_usage(
     disabled: Option<Vec<String>>,
     clear_benches: Option<bool>,
 ) -> Vec<providers::Snapshot> {
-    let _ = disabled;
     // Only an explicit user click (Refresh button, Ctrl+R, the overview ⟳)
     // may knock again on ordinary-error benches; timer and refocus passes
     // stay bench-respecting so a failing provider isn't re-probed on every
@@ -2028,7 +2046,7 @@ async fn fetch_usage(
     if clear_benches.unwrap_or(false) {
         clear_soft_benches();
     }
-    run_usage_fetch(&app).await
+    run_usage_fetch_inner(&app, disabled).await
 }
 
 /// Refreshes ONE provider card on demand (the ⟳ button in the card head).
@@ -2066,11 +2084,9 @@ async fn test_provider(provider_id: String) -> Result<String, String> {
 async fn fetch_provider_snapshot(provider_id: String, allow_disabled: bool) -> Result<providers::Snapshot, String> {
     let family = family_of(&provider_id);
     let cfg = config_with_defaults(load_config());
+    let disabled = effective_disabled_list(&cfg);
     if !allow_disabled
-        && cfg
-        .get("disabled")
-        .and_then(Value::as_array)
-        .is_some_and(|a| a.iter().any(|v| v.as_str() == Some(family.as_str())))
+        && disabled.iter().any(|d| d == &family)
         && family_of(&provider_id) != "onenewapi"
     {
         return Err(format!("{family} is disabled"));
@@ -2288,18 +2304,20 @@ fn usage_fetch_lock() -> &'static tauri::async_runtime::Mutex<()> {
 /// of its life hidden, where WebView2 throttles the frontend's setInterval
 /// to a halt — so the auto-refresh loop in setup() drives this directly.
 async fn run_usage_fetch(app: &tauri::AppHandle) -> Vec<providers::Snapshot> {
+    run_usage_fetch_inner(app, None).await
+}
+
+async fn run_usage_fetch_inner(app: &tauri::AppHandle, extra_disabled: Option<Vec<String>>) -> Vec<providers::Snapshot> {
     let _guard = usage_fetch_lock().lock().await;
     let cfg = config_with_defaults(load_config());
-    let disabled: Vec<String> = cfg
-        .get("disabled")
-        .and_then(Value::as_array)
-        .map(|a| {
-            a.iter()
-                .filter_map(Value::as_str)
-                .map(str::to_string)
-                .collect()
-        })
-        .unwrap_or_default();
+    let mut disabled: Vec<String> = effective_disabled_list(&cfg);
+    if let Some(extra) = extra_disabled {
+        for e in extra {
+            if !disabled.iter().any(|d| d == &e) {
+                disabled.push(e);
+            }
+        }
+    }
 
     // Each provider future is boxed onto the heap and spawned as its own
     // task. A single tokio::join! over 28 inlined futures builds one huge
@@ -3109,16 +3127,7 @@ fn cached_usage() -> Vec<providers::Snapshot> {
     };
 
     let cfg = config_with_defaults(load_config());
-    let disabled: Vec<String> = cfg
-        .get("disabled")
-        .and_then(Value::as_array)
-        .map(|a| {
-            a.iter()
-                .filter_map(Value::as_str)
-                .map(str::to_string)
-                .collect()
-        })
-        .unwrap_or_default();
+    let disabled: Vec<String> = effective_disabled_list(&cfg);
     let configured_onenewapi: HashSet<String> = providers::onenewapi::key_cards()
         .map(|cards| cards.into_iter().map(|card| card.id).collect())
         .unwrap_or_default();
@@ -3179,10 +3188,8 @@ async fn fetch_spend() -> Vec<spend::ProviderSpend> {
     // to the blocking scan. Unlike every other spend source it's an
     // authenticated NETWORK call, so it honors the disabled toggle the same
     // way fetch_usage does — a switched-off Cursor makes no requests.
-    let cursor_disabled = config_with_defaults(load_config())
-        .get("disabled")
-        .and_then(Value::as_array)
-        .is_some_and(|a| a.iter().any(|v| v.as_str() == Some("cursor")));
+    let cfg = config_with_defaults(load_config());
+    let cursor_disabled = effective_disabled_list(&cfg).iter().any(|v| v == "cursor");
     let cursor_csv = if cursor_disabled {
         None
     } else {
@@ -3323,9 +3330,18 @@ fn reveal_provider_key(provider: String, password: String) -> Result<String, Str
 fn reveal_account_key(provider: String, id: String, password: String) -> Result<String, String> {
     let family = family_of(&provider);
     reveal_gate(&password)?;
-    accounts::load_accounts(&family)
+    if let Some(key) = accounts::load_accounts(&family)
         .into_iter()
         .find(|a| accounts::card_id_for_account(&family, a) == id)
+        .map(|a| a.api_key)
+        .filter(|k| !k.trim().is_empty())
+    {
+        return Ok(key);
+    }
+    let base = crate::providers::config_dir();
+    accounts::load_archived_from(&base)
+        .into_iter()
+        .find(|a| a.provider == family && a.card_id == id)
         .map(|a| a.api_key)
         .filter(|k| !k.trim().is_empty())
         .ok_or_else(|| "no saved key for this account".to_string())
@@ -3561,13 +3577,20 @@ fn account_remove(provider: String, index: usize) -> Result<(), String> {
         return cursor_accounts::save_accounts(&accounts);
     }
     if provider == "codex" {
-        // Same list the auth center and account_list report (the legacy
-        // single login imports first, so indices line up).
         let mut logins = codex_accounts::load_with_imported_single_login();
-        if index >= logins.len() {
+        let has_cli = providers::codex::default_account_info().is_some();
+        let target_idx = if has_cli {
+            if index == 0 {
+                return Err("默认 CLI 账号由本地环境管理，无法在面板中删除".into());
+            }
+            index - 1
+        } else {
+            index
+        };
+        if target_idx >= logins.len() {
             return Err(format!("no codex account #{index}"));
         }
-        logins.remove(index);
+        logins.remove(target_idx);
         return codex_accounts::save_accounts(&logins);
     }
     if login_accounts::takes_login_accounts(&provider) {
@@ -3682,6 +3705,7 @@ struct ArchivedAccountSummary {
     card_id: String,
     label: String,
     archived_at: i64,
+    masked_key: String,
 }
 
 /// Lists the family's archived accounts without returning retained
@@ -3693,6 +3717,7 @@ fn archived_accounts(provider: String) -> Vec<ArchivedAccountSummary> {
         .into_iter()
         .filter(|a| a.provider == provider)
         .map(|a| ArchivedAccountSummary {
+            masked_key: accounts::mask_key(&a.api_key),
             provider: a.provider,
             card_id: a.card_id,
             label: a.label,
@@ -3708,9 +3733,17 @@ fn archived_accounts(provider: String) -> Vec<ArchivedAccountSummary> {
                 card_id: a.card_id,
                 label: a.label,
                 archived_at: a.archived_at,
+                masked_key: "***".to_string(),
             }),
     );
     result
+}
+
+/// Deletes recorded usage history for a card when the user explicitly unchecks
+/// the keep-usage option during card removal.
+#[tauri::command]
+fn remove_usage_history(card_id: String) {
+    usage_history::remove_card_history(&card_id);
 }
 
 /// Restores an archived account: its kept credential re-enters the active
@@ -3832,10 +3865,19 @@ fn account_rename(provider: String, index: usize, label: String) -> Result<(), S
     }
     if provider == "codex" {
         let mut logins = codex_accounts::load_with_imported_single_login();
-        if index >= logins.len() {
+        let has_cli = providers::codex::default_account_info().is_some();
+        let target_idx = if has_cli {
+            if index == 0 {
+                return Err("默认 CLI 账号标签跟随本地环境，如需重命名请在看板卡片备注中设置".into());
+            }
+            index - 1
+        } else {
+            index
+        };
+        if target_idx >= logins.len() {
             return Err(format!("no codex account #{index}"));
         }
-        logins[index].label = label.trim().to_string();
+        logins[target_idx].label = label.trim().to_string();
         return codex_accounts::save_accounts(&logins);
     }
     if login_accounts::takes_login_accounts(&provider) {
@@ -3932,21 +3974,38 @@ fn account_list(provider: String) -> Result<Vec<Value>, String> {
             .collect());
     }
     if provider == "codex" {
-        // Codex accounts are Pane-made logins (auth center); the pre-multi-
-        // account single login imports first so both surfaces list the same
-        // rows in the same order.
-        return Ok(codex_accounts::load_with_imported_single_login()
-            .iter()
-            .map(|login| {
-                json!({
-                    "id": codex_accounts::card_id_for_account(login),
-                    "label": login.label,
-                    "email": login.email,
-                    "maskedKey": codex_accounts::mask_token(&login.access_token),
-                    "baseUrl": null,
-                })
-            })
-            .collect());
+        let mut list = Vec::new();
+        if let Some((_account_id, email)) = providers::codex::default_account_info() {
+            list.push(json!({
+                "id": "codex",
+                "label": email.clone().unwrap_or_else(|| "默认 (CLI)".into()),
+                "email": email,
+                "maskedKey": "CLI 登录",
+                "baseUrl": null,
+            }));
+        }
+        for login in codex_accounts::load_with_imported_single_login() {
+            let id = codex_accounts::card_id_for_account(&login);
+            if list.iter().any(|existing| existing.get("id").and_then(Value::as_str) == Some(&id)) {
+                continue;
+            }
+            list.push(json!({
+                "id": id,
+                "label": if login.label.trim().is_empty() {
+                    if login.email.trim().is_empty() {
+                        "Codex 账号".into()
+                    } else {
+                        login.email.clone()
+                    }
+                } else {
+                    login.label.clone()
+                },
+                "email": login.email,
+                "maskedKey": codex_accounts::mask_token(&login.access_token),
+                "baseUrl": null,
+            }));
+        }
+        return Ok(list);
     }
     if !accounts::provider_takes_accounts(&provider) {
         return Err(format!("unknown multi-account provider: {provider}"));
@@ -5015,6 +5074,7 @@ pub fn run() {
             account_remove,
             account_archive,
             account_restore,
+            remove_usage_history,
             archived_accounts,
             account_rename,
             account_set_default,

@@ -96,7 +96,11 @@ async fn fetch_quota(key: &str) -> Option<Snapshot> {
     let mut console_refused = false;
     for console in CONSOLES {
         for header in ["authorization", "x-api-key", "x-dashscope-api-key"] {
-            let value = if header == "authorization" { format!("Bearer {key}") } else { key.to_string() };
+            let value = if header == "authorization" {
+                format!("Bearer {key}")
+            } else {
+                key.to_string()
+            };
             let resp = http()
                 .post(format!("{console}{RPC_QUERY}"))
                 .header(header, value)
@@ -114,7 +118,9 @@ async fn fetch_quota(key: &str) -> Option<Snapshot> {
                 }
                 continue;
             }
-            let Ok(doc) = resp.json::<Value>().await else { continue };
+            let Ok(doc) = resp.json::<Value>().await else {
+                continue;
+            };
             if let Some(snap) = parse_quota(&doc) {
                 // Working auth: lift the stand-down so quota stays live.
                 QUOTA_BLOCKED_UNTIL.store(0, Ordering::Relaxed);
@@ -149,14 +155,15 @@ fn find_object_with<'a>(v: &'a Value, marker: &str) -> Option<&'a Value> {
 /// Numbers may arrive as JSON numbers or quoted strings; take either.
 fn num(v: &Value, key: &str) -> Option<f64> {
     let f = v.get(key)?;
-    f.as_f64().or_else(|| f.as_str().and_then(|s| s.trim().parse().ok()))
+    f.as_f64()
+        .or_else(|| f.as_str().and_then(|s| s.trim().parse().ok()))
 }
 
 fn parse_quota(doc: &Value) -> Option<Snapshot> {
     let q = find_object_with(doc, "per5HourTotalQuota")?;
     let window = |label: &str, used_key: &str, total_key: &str, reset_key: &str, period: i64| {
         let total = num(q, total_key).filter(|t| *t > 0.0)?;
-        let used = num(q, used_key).unwrap_or(0.0);
+        let used = num(q, used_key).filter(|v| v.is_finite() && *v >= 0.0)?;
         let resets = num(q, reset_key).map(|ms| ms as i64).filter(|ms| *ms > 0);
         Some(
             Metric::progress(
@@ -168,9 +175,27 @@ fn parse_quota(doc: &Value) -> Option<Snapshot> {
         )
     };
     let metrics: Vec<Metric> = [
-        window("Session", "per5HourUsedQuota", "per5HourTotalQuota", "per5HourQuotaNextRefreshTime", 5 * HOUR_MS),
-        window("Weekly", "perWeekUsedQuota", "perWeekTotalQuota", "perWeekQuotaNextRefreshTime", 7 * 24 * HOUR_MS),
-        window("Monthly", "perBillMonthUsedQuota", "perBillMonthTotalQuota", "perBillMonthQuotaNextRefreshTime", 30 * 24 * HOUR_MS),
+        window(
+            "Session",
+            "per5HourUsedQuota",
+            "per5HourTotalQuota",
+            "per5HourQuotaNextRefreshTime",
+            5 * HOUR_MS,
+        ),
+        window(
+            "Weekly",
+            "perWeekUsedQuota",
+            "perWeekTotalQuota",
+            "perWeekQuotaNextRefreshTime",
+            7 * 24 * HOUR_MS,
+        ),
+        window(
+            "Monthly",
+            "perBillMonthUsedQuota",
+            "perBillMonthTotalQuota",
+            "perBillMonthQuotaNextRefreshTime",
+            30 * 24 * HOUR_MS,
+        ),
     ]
     .into_iter()
     .flatten()
@@ -189,6 +214,11 @@ fn parse_quota(doc: &Value) -> Option<Snapshot> {
 mod tests {
     use super::*;
 
+    #[test]
+    fn cap_without_usage_is_not_unused_quota() {
+        assert!(parse_quota(&serde_json::json!({"per5HourTotalQuota":10000})).is_none());
+    }
+
     /// Live diagnostic (ignored): shows what each console/header attempt
     /// returns so quota-auth failures can be debugged without ever
     /// printing the key. Run:
@@ -202,8 +232,11 @@ mod tests {
         };
         for console in CONSOLES {
             for header in ["authorization", "x-api-key", "x-dashscope-api-key"] {
-                let value =
-                    if header == "authorization" { format!("Bearer {key}") } else { key.clone() };
+                let value = if header == "authorization" {
+                    format!("Bearer {key}")
+                } else {
+                    key.clone()
+                };
                 let resp = http()
                     .post(format!("{console}{RPC_QUERY}"))
                     .header(header, value)
@@ -223,15 +256,25 @@ mod tests {
             }
         }
         // Does the coding endpoint itself expose quota via response headers?
-        for base in
-            ["https://coding-intl.dashscope.aliyuncs.com/v1", "https://coding.dashscope.aliyuncs.com/v1"]
-        {
-            match http().get(format!("{base}/models")).bearer_auth(&key).send().await {
+        for base in [
+            "https://coding-intl.dashscope.aliyuncs.com/v1",
+            "https://coding.dashscope.aliyuncs.com/v1",
+        ] {
+            match http()
+                .get(format!("{base}/models"))
+                .bearer_auth(&key)
+                .send()
+                .await
+            {
                 Ok(r) => {
                     println!("{base}/models -> {}", r.status());
                     for (name, value) in r.headers() {
                         let n = name.as_str().to_ascii_lowercase();
-                        if n.contains("limit") || n.contains("quota") || n.contains("remain") || n.contains("usage") {
+                        if n.contains("limit")
+                            || n.contains("quota")
+                            || n.contains("remain")
+                            || n.contains("usage")
+                        {
                             println!("  header {n}: {:?}", value);
                         }
                     }
@@ -255,7 +298,9 @@ fn local_ledger() -> Option<Snapshot> {
     let today = now.format("%Y-%m-%d").to_string();
     let (mut day_req, mut mon_req) = (0u64, 0u64);
     for line in raw.lines() {
-        let Ok(v) = serde_json::from_str::<Value>(line) else { continue };
+        let Ok(v) = serde_json::from_str::<Value>(line) else {
+            continue;
+        };
         if v.get("totalTokens").and_then(Value::as_f64).unwrap_or(0.0) <= 0.0 {
             continue;
         }

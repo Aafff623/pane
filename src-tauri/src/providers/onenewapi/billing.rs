@@ -25,11 +25,7 @@ pub fn metrics_from(
                 .and_then(|v| v.as_i64())
                 .filter(|ms| *ms > 0)
                 .map(|ms| (ms * 1000, 24 * 60 * 60 * 1000));
-            let mut progress = Metric::progress(
-                "Usage",
-                pct,
-                Some(format_pair(unit, used, limit)),
-            );
+            let mut progress = Metric::progress("Usage", pct, Some(format_pair(unit, used, limit)));
             if let Some((resets_at, period_ms)) = reset_pair {
                 progress.resets_at = Some(resets_at);
                 progress.period_ms = Some(period_ms);
@@ -84,7 +80,7 @@ pub(crate) fn subscription_view(
         })?;
     let id = active.get("id").and_then(Value::as_i64)?;
     let total = quota_units(active.get("amount_total"))?;
-    let used = quota_units(active.get("amount_used")).unwrap_or(0.0).max(0.0);
+    let used = quota_units(active.get("amount_used"))?.max(0.0);
     let per_unit = if per_unit.is_finite() && per_unit > 0.0 {
         per_unit
     } else {
@@ -102,8 +98,11 @@ pub(crate) fn subscription_view(
         let used_value = display(used);
         let total_value = display(total);
         let pct = (used / total * 100.0).clamp(0.0, 100.0);
-        let mut usage =
-            Metric::progress("Usage", pct, Some(format_pair(unit, used_value, total_value)));
+        let mut usage = Metric::progress(
+            "Usage",
+            pct,
+            Some(format_pair(unit, used_value, total_value)),
+        );
         usage.resets_at = parse_access_until(active.get("next_reset_time"));
         // Daily reset → the bar's pace window is 24 h, the same way the
         // GLM plan delivers "Resets in 2h 14m" for a 5-hour session.
@@ -465,9 +464,12 @@ mod tests {
 
     #[test]
     fn tokens_used_only_and_unlimited_zero_are_integers() {
-        let used_only =
-            metrics_from(&json!({}), Some(&json!({"total_usage": 1234})), &DisplayUnit::Tokens)
-                .unwrap();
+        let used_only = metrics_from(
+            &json!({}),
+            Some(&json!({"total_usage": 1234})),
+            &DisplayUnit::Tokens,
+        )
+        .unwrap();
         assert_eq!(by_label(&used_only, "Used").value.as_deref(), Some("12"));
 
         let unlimited = json!({
@@ -576,11 +578,14 @@ mod tests {
         sub["end_time"] = json!(0);
         let view = subscription_view(&body, &DisplayUnit::Usd, 500_000.0, 1.0).unwrap();
         assert_eq!(view.metrics.len(), 1);
-        assert_eq!(by_label(&view.metrics, "Used").value.as_deref(), Some("$250.00"));
+        assert_eq!(
+            by_label(&view.metrics, "Used").value.as_deref(),
+            Some("$250.00")
+        );
     }
 
     #[test]
-    fn subscription_view_overuse_fills_bar_and_missing_used_means_empty() {
+    fn subscription_view_overuse_fills_bar_and_missing_used_is_unknown() {
         let mut body = subscription_body();
         let sub = &mut body["data"]["subscriptions"][0]["subscription"];
         sub["amount_used"] = json!(1_500_000_000i64);
@@ -589,16 +594,12 @@ mod tests {
         assert_eq!(usage.used_percent, Some(100.0));
         assert_eq!(usage.detail.as_deref(), Some("$3000.00 of $2000.00"));
 
-        // A missing amount_used reads as nothing spent → bar empty, full
-        // allowance still left.
+        // Missing usage is unknown, not proof of an unspent allowance.
         body["data"]["subscriptions"][0]["subscription"]
             .as_object_mut()
             .unwrap()
             .remove("amount_used");
-        let view = subscription_view(&body, &DisplayUnit::Usd, 500_000.0, 1.0).unwrap();
-        let usage = by_label(&view.metrics, "Usage");
-        assert_eq!(usage.used_percent, Some(0.0));
-        assert_eq!(usage.detail.as_deref(), Some("$0.00 of $2000.00"));
+        assert!(subscription_view(&body, &DisplayUnit::Usd, 500_000.0, 1.0).is_none());
     }
 
     #[test]
@@ -607,15 +608,15 @@ mod tests {
         // conversion only affects the human-readable detail.
         // CNY site: 279 000 000 / 600 000 * 7.25 = ¥3371.25,
         // 1 000 000 000 / 600 000 * 7.25 = ¥12083.33.
-        let view = subscription_view(&subscription_body(), &DisplayUnit::Cny, 600_000.0, 7.25)
-            .unwrap();
+        let view =
+            subscription_view(&subscription_body(), &DisplayUnit::Cny, 600_000.0, 7.25).unwrap();
         let usage = by_label(&view.metrics, "Usage");
         assert!((usage.used_percent.unwrap() - 27.9).abs() < 1e-9);
         assert_eq!(usage.detail.as_deref(), Some("¥3371.25 of ¥12083.33"));
 
         // Tokens sites keep raw quota counts without a currency symbol.
-        let view = subscription_view(&subscription_body(), &DisplayUnit::Tokens, 500_000.0, 1.0)
-            .unwrap();
+        let view =
+            subscription_view(&subscription_body(), &DisplayUnit::Tokens, 500_000.0, 1.0).unwrap();
         let usage = by_label(&view.metrics, "Usage");
         assert!((usage.used_percent.unwrap() - 27.9).abs() < 1e-9);
         assert_eq!(usage.detail.as_deref(), Some("279000000 of 1000000000"));

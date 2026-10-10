@@ -909,6 +909,23 @@ pub fn keys_for_service(service: &str) -> Vec<(String, String)> {
     }
 }
 
+/// (label, masked) for a service's sealed entries while the vault is LOCKED.
+/// Labels and masks sit outside the sealed section, so no password is needed —
+/// this is how a card still lists every key the user stored instead of
+/// silently dropping the ones it cannot read. An unlocked (or plain) vault
+/// returns nothing: [`keys_for_service`] already hands those over.
+pub fn locked_service_entries(service: &str) -> Vec<(String, String)> {
+    match load_store_from(&vault_path()) {
+        Store::Sealed(file) if session_key().is_none() => file
+            .entries
+            .iter()
+            .filter(|e| e.service.eq_ignore_ascii_case(service))
+            .map(|e| (e.label.clone(), e.masked.clone()))
+            .collect(),
+        _ => Vec::new(),
+    }
+}
+
 /// Which service an entry id belongs to (needed before removal, so cache
 /// invalidation knows which provider to refetch).
 pub fn service_of(id: &str) -> Option<String> {

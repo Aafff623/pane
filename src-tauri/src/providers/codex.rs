@@ -124,6 +124,11 @@ pub fn default_identity() -> Option<String> {
     dir_identity(&default_home()).map(|(a, _)| a)
 }
 
+/// The default login's identity and email if present.
+pub fn default_account_info() -> Option<(String, Option<String>)> {
+    dir_identity(&default_home())
+}
+
 /// Pure local probe for the Customize gear panel (existence only, no
 /// network): which Codex CLI sign-in this machine already has.
 pub fn local_credential_hint() -> Option<String> {
@@ -414,13 +419,20 @@ async fn fetch_with_access(auth: Access, id: &str, name: &str) -> Result<Snapsho
     let (access, account_id) = (auth.token, auth.account_id);
     let mut plan = auth.plan;
 
-    let mut req = http()
-        .get("https://chatgpt.com/backend-api/wham/usage")
-        .bearer_auth(&access);
-    if !account_id.is_empty() {
-        req = req.header("chatgpt-account-id", &account_id);
-    }
-    let resp = req.send().await.map_err(|e| format!("usage request: {e}"))?;
+    let resp = crate::providers::send_with_direct_fallback(|client| {
+        let mut req = client
+            .get("https://chatgpt.com/backend-api/wham/usage")
+            .bearer_auth(&access);
+        if !account_id.is_empty() {
+            req = req.header("chatgpt-account-id", &account_id);
+        }
+        req
+    })
+    .await
+    // The credentials ARE read by now (this runs only with a resolved login);
+    // a failure here is the network path, so say so instead of leaking the
+    // bare reqwest URL and looking like a missing sign-in.
+    .map_err(|e| format!("网络连接失败：无法访问 chatgpt.com（已自动重试代理与直连）— {e}"))?;
     if !resp.status().is_success() {
         return Err(format!("usage endpoint: HTTP {}", resp.status()));
     }
@@ -458,11 +470,7 @@ async fn fetch_with_access(auth: Access, id: &str, name: &str) -> Result<Snapsho
         }
     }
 
-    // Extra Usage: pay-as-you-go credit balance ($0.04 per credit). A
-    // positive balance gets a plan-style meter against the highest balance
-    // seen (a top-up raises it, same mechanism as Moonshot/DeepSeek); a
-    // spent balance still reads "$0.00 · 0 credits" — that's information,
-    // not noise.
+    // Extra credits are a reported balance, not an inferred quota ceiling.
     // The same serializer that quotes the balance may quote this flag.
     let unlimited = usage
         .pointer("/credits/unlimited")
@@ -473,10 +481,7 @@ async fn fetch_with_access(auth: Access, id: &str, name: &str) -> Result<Snapsho
         if credits > 0.0 {
             let dollars = credits * 0.04;
             let suffix = format!(" · {credits:.0} credits");
-            // High-water baseline keyed per CARD, not per family — two
-            // accounts' balances must never share one baseline.
-            let meter_key = format!("{id}-extra");
-            match super::credit_meter_labeled(&meter_key, "$", dollars, "Extra credits", &suffix)
+            match super::balance_metric( "$", dollars, "Extra credits", &suffix)
             {
                 Some(m) => metrics.push(m),
                 None => metrics.push(Metric::text(
@@ -633,16 +638,20 @@ fn parse_expiry_ms(v: Option<&Value>) -> Option<i64> {
 /// Best-effort: still-available credits as (id, expires_at ms), soonest
 /// expiry first. The extra headers mirror the Codex desktop client.
 async fn fetch_reset_credits(access: &str, account_id: &str) -> Option<Vec<(String, Option<i64>)>> {
-    let mut req = http()
-        .get(CREDITS_URL)
-        .bearer_auth(access)
-        .header("Accept", "application/json")
-        .header("OpenAI-Beta", "codex-1")
-        .header("originator", "Codex Desktop");
-    if !account_id.is_empty() {
-        req = req.header("chatgpt-account-id", account_id);
-    }
-    let resp = req.send().await.ok()?;
+    let resp = crate::providers::send_with_direct_fallback(|client| {
+        let mut req = client
+            .get(CREDITS_URL)
+            .bearer_auth(access)
+            .header("Accept", "application/json")
+            .header("OpenAI-Beta", "codex-1")
+            .header("originator", "Codex Desktop");
+        if !account_id.is_empty() {
+            req = req.header("chatgpt-account-id", account_id);
+        }
+        req
+    })
+    .await
+    .ok()?;
     if !resp.status().is_success() {
         return None;
     }

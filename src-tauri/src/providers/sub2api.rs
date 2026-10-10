@@ -45,7 +45,10 @@ async fn fetch() -> Result<Snapshot, String> {
 
 async fn fetch_with_key(key: &str) -> Result<Snapshot, String> {
     let Some(base) = stored_base_url(ID) else {
-        return Err("no base URL configured — type your sub2api deployment URL in Settings (gear icon)".into());
+        return Err(
+            "no base URL configured — type your sub2api deployment URL in Settings (gear icon)"
+                .into(),
+        );
     };
     fetch_at(key, &base).await
 }
@@ -61,10 +64,16 @@ pub async fn snapshot_with_key_and_url(key: &str, base_url: &str) -> Snapshot {
 
 async fn fetch_at(key: &str, base: &str) -> Result<Snapshot, String> {
     let base = base.trim().trim_end_matches('/').to_string();
-    if !base.starts_with("https://") && !base.starts_with("http://127.0.0.1") && !base.starts_with("http://localhost") {
+    if !base.starts_with("https://")
+        && !base.starts_with("http://127.0.0.1")
+        && !base.starts_with("http://localhost")
+    {
         return Err("base URL must be HTTPS (loopback HTTP allowed)".into());
     }
-    let url = format!("{base}/v1/usage?days=30&timezone={}", pct_encode(&local_tz()));
+    let url = format!(
+        "{base}/v1/usage?days=30&timezone={}",
+        pct_encode(&local_tz())
+    );
     let resp = http()
         .get(&url)
         .bearer_auth(&key)
@@ -91,7 +100,9 @@ fn pct_encode(s: &str) -> String {
     let mut out = String::new();
     for b in s.bytes() {
         match b {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => out.push(b as char),
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                out.push(b as char)
+            }
             _ => out.push_str(&format!("%{b:02X}")),
         }
     }
@@ -100,8 +111,16 @@ fn pct_encode(s: &str) -> String {
 
 fn parse_date(v: &Value) -> Option<i64> {
     match v {
-        Value::Number(n) => n.as_f64().map(|n| if n > 1e12 { n as i64 } else { (n * 1000.0) as i64 }),
-        Value::String(s) => chrono::DateTime::parse_from_rfc3339(s).ok().map(|d| d.timestamp_millis()),
+        Value::Number(n) => n.as_f64().map(|n| {
+            if n > 1e12 {
+                n as i64
+            } else {
+                (n * 1000.0) as i64
+            }
+        }),
+        Value::String(s) => chrono::DateTime::parse_from_rfc3339(s)
+            .ok()
+            .map(|d| d.timestamp_millis()),
         _ => None,
     }
 }
@@ -114,7 +133,13 @@ fn money(value: f64, unit: &str) -> String {
     }
 }
 
-fn window(label: &str, used: f64, limit: Option<f64>, unit: &str, reset: Option<i64>) -> Option<Metric> {
+fn window(
+    label: &str,
+    used: f64,
+    limit: Option<f64>,
+    unit: &str,
+    reset: Option<i64>,
+) -> Option<Metric> {
     let limit = limit?;
     if limit <= 0.0 {
         return None;
@@ -133,8 +158,16 @@ fn parse_usage(doc: &Value) -> Result<Snapshot, String> {
     if doc.get("isValid").and_then(Value::as_bool) == Some(false) {
         return Err("key was rejected — check that it is active and assigned to a group".into());
     }
-    let quota_unit = doc.pointer("/quota/unit").and_then(Value::as_str).unwrap_or("USD").to_string();
-    let unit = doc.get("unit").and_then(Value::as_str).unwrap_or(&quota_unit).to_string();
+    let quota_unit = doc
+        .pointer("/quota/unit")
+        .and_then(Value::as_str)
+        .unwrap_or("USD")
+        .to_string();
+    let unit = doc
+        .get("unit")
+        .and_then(Value::as_str)
+        .unwrap_or(&quota_unit)
+        .to_string();
 
     let mut metrics = Vec::new();
     let sub = doc.get("subscription").filter(|s| s.is_object());
@@ -146,32 +179,64 @@ fn parse_usage(doc: &Value) -> Result<Snapshot, String> {
             ("weekly_usage_usd", "Weekly"),
             ("monthly_usage_usd", "Monthly"),
         ] {
-            let used = get(key).unwrap_or(0.0);
+            let Some(used) = get(key).filter(|v| v.is_finite() && *v >= 0.0) else {
+                continue;
+            };
             let limit = get(&key.replace("usage", "limit"));
             if let Some(m) = window(label, used, limit, "USD", reset) {
                 metrics.push(m);
             }
         }
     } else if let Some(quota) = doc.get("quota").filter(|q| q.is_object()) {
-        let used = quota.get("used").and_then(Value::as_f64).unwrap_or(0.0);
+        let used = quota
+            .get("used")
+            .and_then(Value::as_f64)
+            .filter(|v| v.is_finite() && *v >= 0.0);
         let limit = quota.get("limit").and_then(Value::as_f64);
-        if let Some(m) = window("Quota", used, limit, &quota_unit, doc.get("expires_at").and_then(parse_date)) {
+        if let Some(m) = used.and_then(|used| {
+            window(
+                "Quota",
+                used,
+                limit,
+                &quota_unit,
+                doc.get("expires_at").and_then(parse_date),
+            )
+        }) {
             metrics.push(m);
         }
     }
 
     // Optional 5h / 1d / 7d rate-limit windows.
-    for rate in doc.get("rate_limits").and_then(Value::as_array).into_iter().flatten() {
-        let Some(w) = rate.get("window").and_then(Value::as_str) else { continue };
+    for rate in doc
+        .get("rate_limits")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+    {
+        let Some(w) = rate.get("window").and_then(Value::as_str) else {
+            continue;
+        };
         let label = match w.to_ascii_lowercase().as_str() {
             "5h" => "5-hour limit",
             "1d" => "Daily limit",
             "7d" => "7-day limit",
             other => return Err(format!("unknown rate-limit window `{other}`")),
         };
-        let used = rate.get("used").and_then(Value::as_f64).unwrap_or(0.0);
+        let Some(used) = rate
+            .get("used")
+            .and_then(Value::as_f64)
+            .filter(|v| v.is_finite() && *v >= 0.0)
+        else {
+            continue;
+        };
         let limit = rate.get("limit").and_then(Value::as_f64);
-        if let Some(m) = window(label, used, limit, "USD", rate.get("reset_at").and_then(parse_date)) {
+        if let Some(m) = window(
+            label,
+            used,
+            limit,
+            "USD",
+            rate.get("reset_at").and_then(parse_date),
+        ) {
             metrics.push(m);
         }
     }
@@ -180,7 +245,12 @@ fn parse_usage(doc: &Value) -> Result<Snapshot, String> {
         metrics.push(Metric::text("Balance", money(balance, &unit)));
     }
     for (bucket, label) in [("today", "Today"), ("total", "All time")] {
-        let Some(t) = doc.pointer(&format!("/usage/{bucket}")).filter(|v| v.is_object()) else { continue };
+        let Some(t) = doc
+            .pointer(&format!("/usage/{bucket}"))
+            .filter(|v| v.is_object())
+        else {
+            continue;
+        };
         let requests = t.get("requests").and_then(Value::as_i64);
         let tokens = t.get("total_tokens").and_then(Value::as_i64);
         if let Some(r) = requests {
@@ -218,6 +288,23 @@ fn fmt_tokens(n: f64) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn caps_without_usage_never_show_empty_windows() {
+        assert!(
+            parse_usage(&serde_json::json!({"subscription":{"monthly_limit_usd":500}})).is_err()
+        );
+        assert!(parse_usage(
+            &serde_json::json!({"quota":{"limit":500},"rate_limits":[{"window":"5h","limit":20}]})
+        )
+        .is_err());
+        let snap = parse_usage(
+            &serde_json::json!({"subscription":{"monthly_limit_usd":500,"monthly_usage_usd":0}}),
+        )
+        .unwrap();
+        assert_eq!(snap.metrics[0].used_percent, Some(0.0));
+    }
+
     use serde_json::json;
 
     #[test]
@@ -241,7 +328,19 @@ mod tests {
         });
         let snap = parse_usage(&doc).unwrap();
         let labels: Vec<&str> = snap.metrics.iter().map(|m| m.label.as_str()).collect();
-        assert_eq!(labels, ["Daily", "Weekly", "Monthly", "5-hour limit", "Today requests", "Today tokens", "All time requests", "All time tokens"]);
+        assert_eq!(
+            labels,
+            [
+                "Daily",
+                "Weekly",
+                "Monthly",
+                "5-hour limit",
+                "Today requests",
+                "Today tokens",
+                "All time requests",
+                "All time tokens"
+            ]
+        );
         assert_eq!(snap.metrics[0].used_percent, Some(32.0));
         assert_eq!(snap.metrics[0].resets_at, Some(1_793_491_200_000));
         assert_eq!(snap.metrics[3].used_percent, Some(50.0));

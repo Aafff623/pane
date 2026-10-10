@@ -37,8 +37,12 @@ pub async fn snapshot_with_key(key: &str) -> Snapshot {
 
 async fn fetch() -> Result<Snapshot, String> {
     let (env_ak, env_sk) = (
-        std::env::var("VOLC_ACCESS_KEY").ok().filter(|s| !s.trim().is_empty()),
-        std::env::var("VOLC_SECRET_KEY").ok().filter(|s| !s.trim().is_empty()),
+        std::env::var("VOLC_ACCESS_KEY")
+            .ok()
+            .filter(|s| !s.trim().is_empty()),
+        std::env::var("VOLC_SECRET_KEY")
+            .ok()
+            .filter(|s| !s.trim().is_empty()),
     );
     if let (Some(ak), Some(sk)) = (env_ak, env_sk) {
         return fetch_with(&ak, &sk).await;
@@ -74,13 +78,21 @@ async fn call(ak: &str, sk: &str, action: &str) -> Result<Value, String> {
     let query = norm_query(&[("Action", action), ("Version", "2024-01-01")]);
     let body = "{}";
     let headers = sign(ak, sk, "POST", "/", &query, body);
-    let mut req = http().post(format!("https://{HOST}/?{query}")).body(body.to_string());
+    let mut req = http()
+        .post(format!("https://{HOST}/?{query}"))
+        .body(body.to_string());
     for (k, v) in headers {
         req = req.header(k, v);
     }
-    let resp = req.send().await.map_err(|e| format!("{action} request: {e}"))?;
+    let resp = req
+        .send()
+        .await
+        .map_err(|e| format!("{action} request: {e}"))?;
     let status = resp.status();
-    let doc: Value = resp.json().await.map_err(|e| format!("{action} parse: {e}"))?;
+    let doc: Value = resp
+        .json()
+        .await
+        .map_err(|e| format!("{action} parse: {e}"))?;
     if !status.is_success() {
         // Volcengine errors carry a message under ResponseMetadata.
         let msg = doc
@@ -111,7 +123,11 @@ async fn fetch_with(ak: &str, sk: &str) -> Result<Snapshot, String> {
         // likely has no plan at all.
         let err = |r: &Result<Value, String>| r.as_ref().err().cloned().unwrap_or_default();
         let afp_err = err(&afp);
-        let detail = if afp_err.is_empty() { err(&coding) } else { afp_err };
+        let detail = if afp_err.is_empty() {
+            err(&coding)
+        } else {
+            afp_err
+        };
         if detail.is_empty() {
             return Err("no plan quota found for this AK/SK".into());
         }
@@ -122,21 +138,50 @@ async fn fetch_with(ak: &str, sk: &str) -> Result<Snapshot, String> {
 
 /// Agent Plan: Result.{AFPFiveHour,AFPWeekly,AFPMonthly}{Quota,Used,ResetTime}.
 fn afp_metrics(doc: &Value) -> Vec<Metric> {
-    let Some(result) = doc.get("Result") else { return vec![] };
+    let Some(result) = doc.get("Result") else {
+        return vec![];
+    };
     let mut out = Vec::new();
-    for (key, label) in [("AFPFiveHour", "5-hour"), ("AFPWeekly", "Weekly"), ("AFPMonthly", "Monthly")] {
-        let Some(item) = result.get(key) else { continue };
-        let quota = item.get("Quota").and_then(Value::as_f64).unwrap_or(0.0);
-        let used = item.get("Used").and_then(Value::as_f64).unwrap_or(0.0);
+    for (key, label) in [
+        ("AFPFiveHour", "5-hour"),
+        ("AFPWeekly", "Weekly"),
+        ("AFPMonthly", "Monthly"),
+    ] {
+        let Some(item) = result.get(key) else {
+            continue;
+        };
+        let (Some(quota), Some(used)) = (
+            item.get("Quota")
+                .and_then(Value::as_f64)
+                .filter(|v| v.is_finite() && *v >= 0.0),
+            item.get("Used")
+                .and_then(Value::as_f64)
+                .filter(|v| v.is_finite() && *v >= 0.0),
+        ) else {
+            continue;
+        };
         if quota <= 0.0 && used <= 0.0 {
             continue;
         }
-        let pct = if quota > 0.0 { (used / quota * 100.0).clamp(0.0, 100.0) } else { 100.0 };
+        if quota == 0.0 {
+            out.push(Metric::text(
+                label,
+                format!("{used:.0} credits used · no positive quota returned"),
+            ));
+            continue;
+        }
+        let pct = (used / quota * 100.0).clamp(0.0, 100.0);
         let reset = item
             .get("ResetTime")
             .and_then(Value::as_f64)
             .filter(|t| *t > 0.0)
-            .map(|t| if t > 1e12 { t as i64 } else { (t * 1000.0) as i64 });
+            .map(|t| {
+                if t > 1e12 {
+                    t as i64
+                } else {
+                    (t * 1000.0) as i64
+                }
+            });
         out.push(
             Metric::progress(label, pct, Some(format!("{used:.0} of {quota:.0} credits")))
                 .with_reset(reset, None),
@@ -152,8 +197,14 @@ fn coding_metrics(doc: &Value) -> Vec<Metric> {
     };
     let mut out = Vec::new();
     for item in list {
-        let level = item.get("Level").and_then(Value::as_str).unwrap_or("").to_lowercase();
-        let Some(mut pct) = item.get("Percent").and_then(Value::as_f64) else { continue };
+        let level = item
+            .get("Level")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_lowercase();
+        let Some(mut pct) = item.get("Percent").and_then(Value::as_f64) else {
+            continue;
+        };
         if pct <= 1.0 {
             pct *= 100.0; // ratios arrive as 0…1
         }
@@ -161,10 +212,20 @@ fn coding_metrics(doc: &Value) -> Vec<Metric> {
             .get("ResetTimestamp")
             .and_then(Value::as_f64)
             .filter(|t| *t > 0.0)
-            .map(|t| if t > 1e12 { t as i64 } else { (t * 1000.0) as i64 });
+            .map(|t| {
+                if t > 1e12 {
+                    t as i64
+                } else {
+                    (t * 1000.0) as i64
+                }
+            });
         out.push(
-            Metric::progress(&level, pct.clamp(0.0, 100.0), Some(format!("{pct:.0}% used")))
-                .with_reset(reset, None),
+            Metric::progress(
+                &level,
+                pct.clamp(0.0, 100.0),
+                Some(format!("{pct:.0}% used")),
+            )
+            .with_reset(reset, None),
         );
     }
     out
@@ -177,7 +238,9 @@ fn pct_encode(s: &str) -> String {
     let mut out = String::new();
     for b in s.bytes() {
         match b {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => out.push(b as char),
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                out.push(b as char)
+            }
             _ => out.push_str(&format!("%{b:02X}")),
         }
     }
@@ -203,7 +266,14 @@ fn hmac_sha256(key: &[u8], data: &str) -> Vec<u8> {
     mac.finalize().into_bytes().to_vec()
 }
 
-fn sign(ak: &str, sk: &str, method: &str, path: &str, query: &str, body: &str) -> Vec<(String, String)> {
+fn sign(
+    ak: &str,
+    sk: &str,
+    method: &str,
+    path: &str,
+    query: &str,
+    body: &str,
+) -> Vec<(String, String)> {
     use sha2::{Digest, Sha256};
     let hex = |b: &[u8]| b.iter().map(|x| format!("{x:02x}")).collect::<String>();
     let now = chrono::Utc::now();
@@ -221,9 +291,8 @@ fn sign(ak: &str, sk: &str, method: &str, path: &str, query: &str, body: &str) -
     let canonical_headers: String = signed.iter().map(|(k, v)| format!("{k}:{v}\n")).collect();
     let signed_headers = signed.iter().map(|(k, _)| *k).collect::<Vec<_>>().join(";");
 
-    let canonical_request = format!(
-        "{method}\n{path}\n{query}\n{canonical_headers}\n{signed_headers}\n{body_hash}"
-    );
+    let canonical_request =
+        format!("{method}\n{path}\n{query}\n{canonical_headers}\n{signed_headers}\n{body_hash}");
     let scope = format!("{date}/{REGION}/{SERVICE}/request");
     let string_to_sign = format!(
         "HMAC-SHA256\n{x_date}\n{scope}\n{}",
@@ -249,6 +318,16 @@ fn sign(ak: &str, sk: &str, method: &str, path: &str, query: &str, body: &str) -
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn agent_plan_missing_used_does_not_become_zero_percent() {
+        assert!(
+            afp_metrics(&serde_json::json!({"Result":{"AFPMonthly":{"Quota":1000000}}})).is_empty()
+        );
+        let rows = afp_metrics(&serde_json::json!({"Result":{"AFPMonthly":{"Quota":0,"Used":5}}}));
+        assert_eq!(rows[0].used_percent, None);
+    }
+
     use serde_json::json;
 
     #[test]
@@ -268,9 +347,20 @@ mod tests {
 
     #[test]
     fn signature_carries_the_volcengine_chain() {
-        let headers = sign("AKTEST", "SKTEST", "POST", "/", "Action=X&Version=2024-01-01", "{}");
+        let headers = sign(
+            "AKTEST",
+            "SKTEST",
+            "POST",
+            "/",
+            "Action=X&Version=2024-01-01",
+            "{}",
+        );
         let get = |k: &str| {
-            headers.iter().find(|(h, _)| h == k).map(|(_, v)| v.clone()).unwrap()
+            headers
+                .iter()
+                .find(|(h, _)| h == k)
+                .map(|(_, v)| v.clone())
+                .unwrap()
         };
         let auth = get("Authorization");
         assert!(auth.starts_with("HMAC-SHA256 Credential=AKTEST/20"));

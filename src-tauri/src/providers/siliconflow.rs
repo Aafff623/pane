@@ -82,11 +82,6 @@ async fn fetch_with_key(key: &str, card_id: &str, card_name: &str) -> Result<Sna
             return Err("no balance in response".into());
         };
         let mut metrics = Vec::new();
-        // Usage line + low-credit notifications, metered against the
-        // highest balance seen (top-ups raise it).
-        if let Some(meter) = super::credit_meter(card_id, "¥", balance) {
-            metrics.push(meter);
-        }
         metrics.push(Metric::text("Balance", format!("¥{balance:.2}")));
         metrics.append(&mut extra);
         return Ok(Snapshot::ok(

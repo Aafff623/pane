@@ -124,14 +124,12 @@ fn extract_cookie_header() -> Option<String> {
     // Devin's locked-DB pattern: try the backup API first (works when the
     // writer allows readers); fall back to a plain copy.
     let snapshot_ok = (|| -> Result<(), String> {
-        let src_conn = rusqlite::Connection::open_with_flags(
-            &src,
-            rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
-        )
-        .map_err(|e| e.to_string())?;
+        let src_conn =
+            rusqlite::Connection::open_with_flags(&src, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
+                .map_err(|e| e.to_string())?;
         let mut dst_conn = rusqlite::Connection::open(&dst).map_err(|e| e.to_string())?;
-        let backup = rusqlite::backup::Backup::new(&src_conn, &mut dst_conn)
-            .map_err(|e| e.to_string())?;
+        let backup =
+            rusqlite::backup::Backup::new(&src_conn, &mut dst_conn).map_err(|e| e.to_string())?;
         backup
             .run_to_completion(5, Duration::from_millis(20), None)
             .map_err(|e| e.to_string())?;
@@ -145,14 +143,14 @@ fn extract_cookie_header() -> Option<String> {
 
     let dir = user_data_dir()?;
     let key = os_crypt_key(&dir).ok()?;
-    let conn = rusqlite::Connection::open_with_flags(
-        &dst,
-        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
-    )
-    .ok()?;
-    let mut stmt =
-        conn.prepare("SELECT host_key, name, encrypted_value FROM cookies WHERE host_key LIKE '%doubao.com'")
+    let conn =
+        rusqlite::Connection::open_with_flags(&dst, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
             .ok()?;
+    let mut stmt = conn
+        .prepare(
+            "SELECT host_key, name, encrypted_value FROM cookies WHERE host_key LIKE '%doubao.com'",
+        )
+        .ok()?;
     let rows: Vec<(String, String, Vec<u8>)> = stmt
         .query_map([], |row| {
             Ok((
@@ -214,8 +212,11 @@ fn looks_like_text(s: &str) -> bool {
 
 /// `Local State` → `os_crypt.encrypted_key` → DPAPI → 32-byte AES key.
 fn os_crypt_key(dir: &std::path::Path) -> Result<[u8; 32], String> {
-    let raw =
-        read_small_text(&dir.join(LOCAL_STATE_REL), MAX_LOCAL_STATE_BYTES, "Local State")?;
+    let raw = read_small_text(
+        &dir.join(LOCAL_STATE_REL),
+        MAX_LOCAL_STATE_BYTES,
+        "Local State",
+    )?;
     use base64::Engine;
     let doc: Value = serde_json::from_str(raw.trim_start_matches('\u{feff}'))
         .map_err(|e| format!("parse Local State: {e}"))?;
@@ -229,9 +230,10 @@ fn os_crypt_key(dir: &std::path::Path) -> Result<[u8; 32], String> {
     let wrapped = wrapped
         .strip_prefix(b"DPAPI")
         .ok_or("encrypted_key lacks the DPAPI prefix")?;
-    let key = crate::platform::dpapi_unprotect(wrapped)
-        .ok_or("DPAPI unwrap of the Doubao key failed")?;
-    key.try_into().map_err(|_| "os_crypt key is not 32 bytes".to_string())
+    let key =
+        crate::platform::dpapi_unprotect(wrapped).ok_or("DPAPI unwrap of the Doubao key failed")?;
+    key.try_into()
+        .map_err(|_| "os_crypt key is not 32 bytes".to_string())
 }
 
 /// Chromium os_crypt v10: nonce = bytes 3..15, ciphertext+tag = 15...
@@ -258,7 +260,10 @@ async fn fetch() -> Result<Snapshot, String> {
 }
 
 async fn fetch_with_cookie(cookie: &str) -> Result<Snapshot, String> {
-    let (quota_resp, cards_resp) = tokio::join!(post_json(QUOTA_URL, cookie, "quota"), post_json(CARDS_URL, cookie, "cards"));
+    let (quota_resp, cards_resp) = tokio::join!(
+        post_json(QUOTA_URL, cookie, "quota"),
+        post_json(CARDS_URL, cookie, "cards")
+    );
 
     let quota_resp = quota_resp?;
     if quota_resp.status().as_u16() == 401 || quota_resp.status().as_u16() == 403 {
@@ -280,7 +285,9 @@ async fn fetch_with_cookie(cookie: &str) -> Result<Snapshot, String> {
         );
     }
     let cards: Option<Value> = match cards_resp {
-        Ok(resp) if resp.status().is_success() => json_body(resp, MAX_CARD_BYTES, "cards").await.ok(),
+        Ok(resp) if resp.status().is_success() => {
+            json_body(resp, MAX_CARD_BYTES, "cards").await.ok()
+        }
         _ => None,
     };
 
@@ -329,25 +336,34 @@ fn metrics_from_docs(
         .filter_map(|g| g.get("window_limits").and_then(Value::as_array))
         .flatten()
     {
-        let wt = limit.get("window_type").and_then(Value::as_i64).unwrap_or(0);
-        let used = limit
+        let wt = limit
+            .get("window_type")
+            .and_then(Value::as_i64)
+            .unwrap_or(0);
+        let Some(used) = limit
             .get("used_percent")
             .and_then(Value::as_f64)
-            .unwrap_or(0.0);
+            .filter(|v| v.is_finite() && *v >= 0.0)
+        else {
+            continue;
+        };
         let start = limit.get("start_time").and_then(Value::as_i64).unwrap_or(0);
         let end = limit.get("end_time").and_then(Value::as_i64).unwrap_or(0);
         rows.push((wt, used, start, end));
     }
     // window_type 1 = 5h session, 2 = 7d weekly (live-verified). An idle
     // session window reports end_time 0 — "starts counting on first use".
-    for (wt, label, fallback_period) in
-        [(1i64, "Session", 5 * HOUR_MS), (2, "Weekly", 7 * DAY_MS)]
+    for (wt, label, fallback_period) in [(1i64, "Session", 5 * HOUR_MS), (2, "Weekly", 7 * DAY_MS)]
     {
         let Some(row) = rows.iter().find(|r| r.0 == wt) else {
             continue;
         };
         let (_, used, start, end) = *row;
-        let period = if end > start && start > 0 { end - start } else { fallback_period };
+        let period = if end > start && start > 0 {
+            end - start
+        } else {
+            fallback_period
+        };
         metrics.push(
             Metric::progress(label, used.clamp(0.0, 100.0), None)
                 .with_reset((end > 0).then_some(end), Some(period)),
@@ -363,9 +379,16 @@ fn metrics_from_docs(
         if end > 0 {
             let day = end / 1000;
             let date = chrono::DateTime::from_timestamp(day, 0)
-                .map(|t| t.with_timezone(&chrono::Local).format("%Y-%m-%d").to_string())
+                .map(|t| {
+                    t.with_timezone(&chrono::Local)
+                        .format("%Y-%m-%d")
+                        .to_string()
+                })
                 .unwrap_or_default();
-            metrics.push(Metric::text("Subscription", format!("renews {date}")).with_reset(Some(end), Some(30 * DAY_MS)));
+            metrics.push(
+                Metric::text("Subscription", format!("renews {date}"))
+                    .with_reset(Some(end), Some(30 * DAY_MS)),
+            );
         }
     }
 
@@ -373,14 +396,21 @@ fn metrics_from_docs(
     // Surface the earliest expiry — a card past it doesn't come back, so
     // a bare count would overstate what's usable.
     if let Some(data) = cards.and_then(|c| c.get("data")) {
-        let count = data.get("available_count").and_then(Value::as_i64).unwrap_or(0);
+        let count = data
+            .get("available_count")
+            .and_then(Value::as_i64)
+            .unwrap_or(0);
         if count > 0 {
             let expiry = data
                 .get("earliest_expire_time")
                 .and_then(Value::as_i64)
                 .filter(|ms| *ms > 0)
                 .and_then(|ms| chrono::DateTime::from_timestamp(ms / 1000, 0))
-                .map(|t| t.with_timezone(&chrono::Local).format("%Y-%m-%d").to_string());
+                .map(|t| {
+                    t.with_timezone(&chrono::Local)
+                        .format("%Y-%m-%d")
+                        .to_string()
+                });
             let value = match expiry {
                 Some(d) => format!("{count} available · earliest expires {d}"),
                 None => format!("{count} available"),
@@ -395,6 +425,13 @@ fn metrics_from_docs(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn missing_window_percent_is_not_zero() {
+        let doc = serde_json::json!({"data":{"window_limit_section":{"window_limit_groups":[{"window_limits":[{"window_type":1}]}]}}});
+        assert!(metrics_from_docs(&doc, None).is_err());
+    }
+
     use serde_json::json;
 
     fn quota_doc() -> Value {
@@ -459,11 +496,17 @@ mod tests {
             "earliest_expire_time": 1790866212579i64,
             "has_available_card": true}, "code": 0});
         let with = metrics_from_docs(&quota_doc(), Some(&cards)).unwrap().1;
-        assert_eq!(labels(&with), ["Session", "Weekly", "Subscription", "Reset cards"]);
+        assert_eq!(
+            labels(&with),
+            ["Session", "Weekly", "Subscription", "Reset cards"]
+        );
         // Date renders in the machine's local zone; keep the assertion
         // loose so it holds under any TZ the harness runs in.
         let value = with[3].value.as_deref().unwrap();
-        assert!(value.starts_with("7 available · earliest expires 2026-10-0"), "{value}");
+        assert!(
+            value.starts_with("7 available · earliest expires 2026-10-0"),
+            "{value}"
+        );
     }
 
     #[test]

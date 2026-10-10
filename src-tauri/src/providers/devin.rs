@@ -17,7 +17,12 @@ fn credentials_paths() -> Vec<PathBuf> {
         paths.push(local.join("devin").join("credentials.toml"));
     }
     if let Some(home) = dirs::home_dir() {
-        paths.push(home.join(".local").join("share").join("devin").join("credentials.toml"));
+        paths.push(
+            home.join(".local")
+                .join("share")
+                .join("devin")
+                .join("credentials.toml"),
+        );
     }
     paths
 }
@@ -77,19 +82,26 @@ mod tests {
         };
         let raw = std::fs::read_to_string(&path).unwrap();
         let doc: toml::Value = toml::from_str(&raw).unwrap();
-        let api_key = doc.get("windsurf_api_key").and_then(toml::Value::as_str).unwrap();
+        let api_key = doc
+            .get("windsurf_api_key")
+            .and_then(toml::Value::as_str)
+            .unwrap();
         let server = doc
             .get("api_server_url")
             .and_then(toml::Value::as_str)
             .unwrap_or("https://server.codeium.com")
             .trim_end_matches('/');
         let resp = http()
-            .post(format!("{server}/exa.seat_management_pb.SeatManagementService/GetUserStatus"))
+            .post(format!(
+                "{server}/exa.seat_management_pb.SeatManagementService/GetUserStatus"
+            ))
             .header("Content-Type", "application/json")
             .header("Connect-Protocol-Version", "1")
-            .json(&json!({ "metadata": { "apiKey": api_key, "ideName": "devin",
+            .json(
+                &json!({ "metadata": { "apiKey": api_key, "ideName": "devin",
                 "ideVersion": COMPAT_VERSION, "extensionName": "devin",
-                "extensionVersion": COMPAT_VERSION, "locale": "en" } }))
+                "extensionVersion": COMPAT_VERSION, "locale": "en" } }),
+            )
             .send()
             .await
             .unwrap();
@@ -98,7 +110,8 @@ mod tests {
         println!(
             "planStatus: {}",
             serde_json::to_string_pretty(
-                body.pointer("/userStatus/planStatus").unwrap_or(&Value::Null)
+                body.pointer("/userStatus/planStatus")
+                    .unwrap_or(&Value::Null)
             )
             .unwrap()
         );
@@ -115,7 +128,8 @@ async fn fetch() -> Result<Snapshot, String> {
     };
 
     let raw = std::fs::read_to_string(&path).map_err(|e| format!("read credentials.toml: {e}"))?;
-    let doc: toml::Value = toml::from_str(&raw).map_err(|e| format!("parse credentials.toml: {e}"))?;
+    let doc: toml::Value =
+        toml::from_str(&raw).map_err(|e| format!("parse credentials.toml: {e}"))?;
     let api_key = doc
         .get("windsurf_api_key")
         .and_then(toml::Value::as_str)
@@ -153,7 +167,10 @@ async fn fetch() -> Result<Snapshot, String> {
     if !resp.status().is_success() {
         return Err(format!("status endpoint: HTTP {}", resp.status()));
     }
-    let body: Value = resp.json().await.map_err(|e| format!("status parse: {e}"))?;
+    let body: Value = resp
+        .json()
+        .await
+        .map_err(|e| format!("status parse: {e}"))?;
 
     let plan_status = body
         .pointer("/userStatus/planStatus")
@@ -176,10 +193,14 @@ async fn fetch() -> Result<Snapshot, String> {
     // percent alongside a present reset therefore means 0% left — not "no
     // quota" — else a fully spent week rendered as a fresh 0%-used bar
     // (the same omitted-field trick Grok pulls with creditUsagePercent).
-    let daily_remaining =
-        zero_when_omitted(as_num(plan_status.get("dailyQuotaRemainingPercent")), daily_reset);
-    let weekly_remaining =
-        zero_when_omitted(as_num(plan_status.get("weeklyQuotaRemainingPercent")), weekly_reset);
+    let daily_remaining = zero_when_omitted(
+        as_num(plan_status.get("dailyQuotaRemainingPercent")),
+        daily_reset,
+    );
+    let weekly_remaining = zero_when_omitted(
+        as_num(plan_status.get("weeklyQuotaRemainingPercent")),
+        weekly_reset,
+    );
 
     const DAY: i64 = 86_400_000;
     let to_ms = |unix: Option<f64>| unix.map(|s| (s * 1000.0) as i64);
@@ -213,10 +234,9 @@ async fn fetch() -> Result<Snapshot, String> {
     }
     if let Some(micros) = as_num(plan_status.get("overageBalanceMicros")) {
         let dollars = micros.max(0.0) / 1_000_000.0;
-        // A funded balance meters like a plan window (against the highest
-        // balance seen — a top-up raises it); an empty one stays a plain row.
+        // Preserve the reported balance; no plan cap can be inferred from it.
         let meter = (dollars > 0.0)
-            .then(|| super::credit_meter_labeled("devin-extra", "$", dollars, "Extra balance", ""))
+            .then(|| super::balance_metric("$", dollars, "Extra balance", ""))
             .flatten();
         match meter {
             Some(m) => metrics.push(m),
@@ -270,7 +290,9 @@ pub fn collect_usage_events() -> Vec<UsageEvent> {
     use std::sync::Mutex;
     static CACHE: Mutex<Option<(FileStamp, FileStamp, Vec<UsageEvent>)>> = Mutex::new(None);
 
-    let Some(db_path) = sessions_db_path() else { return Vec::new() };
+    let Some(db_path) = sessions_db_path() else {
+        return Vec::new();
+    };
     if !db_path.exists() {
         return Vec::new();
     }
@@ -318,15 +340,13 @@ pub fn collect_usage_events() -> Vec<UsageEvent> {
 /// with proper locks, retrying briefly while the writer is busy).
 fn snapshot_db(src_path: &std::path::Path, dst_path: &std::path::Path) -> Result<(), String> {
     let _ = std::fs::remove_file(dst_path);
-    let src = rusqlite::Connection::open_with_flags(
-        src_path,
-        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
-    )
-    .map_err(|e| format!("open live db: {e}"))?;
+    let src =
+        rusqlite::Connection::open_with_flags(src_path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
+            .map_err(|e| format!("open live db: {e}"))?;
     let mut dst =
         rusqlite::Connection::open(dst_path).map_err(|e| format!("open snapshot: {e}"))?;
-    let backup = rusqlite::backup::Backup::new(&src, &mut dst)
-        .map_err(|e| format!("backup init: {e}"))?;
+    let backup =
+        rusqlite::backup::Backup::new(&src, &mut dst).map_err(|e| format!("backup init: {e}"))?;
     backup
         .run_to_completion(256, std::time::Duration::from_millis(10), None)
         .map_err(|e| format!("backup run: {e}"))
@@ -355,12 +375,16 @@ fn read_usage_events(db: &std::path::Path) -> Result<Vec<UsageEvent>, String> {
     let mut out = Vec::new();
     for row in rows.flatten() {
         let (session_id, chat_message, node_created_s, model) = row;
-        let Ok(msg) = serde_json::from_str::<Value>(&chat_message) else { continue };
+        let Ok(msg) = serde_json::from_str::<Value>(&chat_message) else {
+            continue;
+        };
         if msg.get("role").and_then(Value::as_str) != Some("assistant") {
             continue;
         }
         let md = msg.get("metadata").cloned().unwrap_or(Value::Null);
-        let Some(metrics) = md.get("metrics").filter(|m| m.is_object()) else { continue };
+        let Some(metrics) = md.get("metrics").filter(|m| m.is_object()) else {
+            continue;
+        };
         // One message can appear on several branches of the session forest.
         if let Some(mid) = msg
             .get("message_id")

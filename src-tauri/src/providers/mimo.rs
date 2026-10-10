@@ -63,15 +63,15 @@ fn service_token_value(cred: &str) -> String {
     cred.to_string()
 }
 
-async fn try_json(
-    headers: Vec<(&str, String)>,
-    url: &str,
-) -> Result<Option<(u16, Value)>, String> {
+async fn try_json(headers: Vec<(&str, String)>, url: &str) -> Result<Option<(u16, Value)>, String> {
     let mut req = http().get(url).timeout(Duration::from_secs(10));
     for (k, v) in headers {
         req = req.header(k, v);
     }
-    let resp = req.send().await.map_err(|e| format!("request {url}: {e}"))?;
+    let resp = req
+        .send()
+        .await
+        .map_err(|e| format!("request {url}: {e}"))?;
     let status = resp.status().as_u16();
     let text = resp.text().await.map_err(|e| format!("read {url}: {e}"))?;
     match serde_json::from_str::<Value>(&text) {
@@ -111,11 +111,20 @@ async fn fetch_platform(cookie: &str) -> Result<Option<Snapshot>, String> {
     if matches!(status, 401 | 403) || status >= 400 {
         return Ok(None);
     }
-    if body.get("code").and_then(Value::as_i64).is_some_and(|c| c != 0) {
+    if body
+        .get("code")
+        .and_then(Value::as_i64)
+        .is_some_and(|c| c != 0)
+    {
         return Ok(None);
     }
     match plan_metrics(&body) {
-        Ok(metrics) => Ok(Some(Snapshot::ok(ID, NAME, Some("MiMo · Token Plan".into()), metrics))),
+        Ok(metrics) => Ok(Some(Snapshot::ok(
+            ID,
+            NAME,
+            Some("MiMo · Token Plan".into()),
+            metrics,
+        ))),
         Err(_) => Ok(None),
     }
 }
@@ -130,11 +139,20 @@ async fn fetch_bearer(key: &str) -> Result<Snapshot, String> {
         if matches!(status, 401 | 403) || status >= 400 {
             continue;
         }
-        if body.get("code").and_then(Value::as_i64).is_some_and(|c| c != 0) {
+        if body
+            .get("code")
+            .and_then(Value::as_i64)
+            .is_some_and(|c| c != 0)
+        {
             continue;
         }
         if let Ok(metrics) = plan_metrics(&body) {
-            return Ok(Snapshot::ok(ID, NAME, Some("MiMo · Token Plan".into()), metrics));
+            return Ok(Snapshot::ok(
+                ID,
+                NAME,
+                Some("MiMo · Token Plan".into()),
+                metrics,
+            ));
         }
     }
     for base in [TOKEN_PLAN_BASE, PAYG_BASE] {
@@ -162,11 +180,16 @@ async fn fetch_bearer(key: &str) -> Result<Snapshot, String> {
         .await?
         {
             if status == 200 {
-                return Err("no quota API for this key — check usage at platform.xiaomimimo.com".into());
+                return Err(
+                    "no quota API for this key — check usage at platform.xiaomimimo.com".into(),
+                );
             }
         }
     }
-    Err("credential was rejected — paste a fresh serviceToken or API key in Settings (gear icon)".into())
+    Err(
+        "credential was rejected — paste a fresh serviceToken or API key in Settings (gear icon)"
+            .into(),
+    )
 }
 
 /// Platform monthUsage → token windows. `{ "data": { "monthUsage": {
@@ -179,8 +202,12 @@ fn plan_metrics(body: &Value) -> Result<Vec<Metric>, String> {
     let mut metrics = Vec::new();
     for item in items {
         let name = item.get("name").and_then(Value::as_str).unwrap_or("token");
-        let used = item.get("used").map(json_f64).unwrap_or(0.0);
-        let limit = item.get("limit").map(json_f64).unwrap_or(0.0);
+        let (Some(used), Some(limit)) = (
+            item.get("used").and_then(json_f64),
+            item.get("limit").and_then(json_f64),
+        ) else {
+            continue;
+        };
         if limit <= 0.0 {
             continue;
         }
@@ -190,8 +217,16 @@ fn plan_metrics(body: &Value) -> Result<Vec<Metric>, String> {
         };
         let pct = (used / limit * 100.0).clamp(0.0, 100.0);
         metrics.push(
-            Metric::progress(&label, pct, Some(format!("{} of {} tokens used", fmt_tokens(used), fmt_tokens(limit))))
-                .with_reset(None, Some(MONTH_MS)),
+            Metric::progress(
+                &label,
+                pct,
+                Some(format!(
+                    "{} of {} tokens used",
+                    fmt_tokens(used),
+                    fmt_tokens(limit)
+                )),
+            )
+            .with_reset(None, Some(MONTH_MS)),
         );
     }
     if metrics.is_empty() {
@@ -207,24 +242,40 @@ fn balance_metrics(body: &Value, base: &str) -> Result<(Option<String>, Vec<Metr
 
     let mut metrics = Vec::new();
     if let (Some(remaining), Some(limit)) = (
-        data.get("token_balance").map(json_f64),
-        data.get("token_limit").map(json_f64),
+        data.get("token_balance").and_then(json_f64),
+        data.get("token_limit").and_then(json_f64),
     ) {
-        if limit > 0.0 {
-            let used = (limit - remaining).max(0.0);
+        if remaining > limit {
+            metrics.push(Metric::text(
+                "Monthly tokens",
+                format!(
+                    "{} tokens left · includes extra allowance",
+                    fmt_tokens(remaining)
+                ),
+            ));
+        } else if limit > 0.0 {
+            let used = limit - remaining;
             let pct = (used / limit * 100.0).clamp(0.0, 100.0);
             metrics.push(
                 Metric::progress(
                     "Monthly tokens",
                     pct,
-                    Some(format!("{} of {} tokens used", fmt_tokens(used), fmt_tokens(limit))),
+                    Some(format!(
+                        "{} of {} tokens used",
+                        fmt_tokens(used),
+                        fmt_tokens(limit)
+                    )),
                 )
                 .with_reset(None, Some(MONTH_MS)),
             );
         }
     }
-    for (label, key) in [("Balance", "balance"), ("Paid", "charge_balance"), ("Granted", "granted_balance")] {
-        if let Some(v) = data.get(key).map(json_f64).filter(|v| *v > 0.0) {
+    for (label, key) in [
+        ("Balance", "balance"),
+        ("Paid", "charge_balance"),
+        ("Granted", "granted_balance"),
+    ] {
+        if let Some(v) = data.get(key).and_then(json_f64).filter(|v| *v >= 0.0) {
             metrics.push(Metric::text(label, format!("¥{v:.2}")));
         }
     }
@@ -238,18 +289,20 @@ fn balance_metrics(body: &Value, base: &str) -> Result<(Option<String>, Vec<Metr
         .filter(|s| !s.is_empty())
         .map(str::to_string)
         .unwrap_or_else(|| {
-            if base == TOKEN_PLAN_BASE { "Token Plan".into() } else { "PAYG".into() }
+            if base == TOKEN_PLAN_BASE {
+                "Token Plan".into()
+            } else {
+                "PAYG".into()
+            }
         });
     Ok((Some(format!("MiMo · {plan_label}")), metrics))
 }
 
 /// Vendor surfaces send numbers as numbers or strings; accept both.
-fn json_f64(v: &Value) -> f64 {
-    match v {
-        Value::Number(n) => n.as_f64().unwrap_or(0.0),
-        Value::String(s) => s.trim().parse().unwrap_or(0.0),
-        _ => 0.0,
-    }
+fn json_f64(v: &Value) -> Option<f64> {
+    v.as_f64()
+        .or_else(|| v.as_str()?.trim().parse().ok())
+        .filter(|n| n.is_finite() && *n >= 0.0)
 }
 
 fn fmt_tokens(n: f64) -> String {
@@ -267,6 +320,28 @@ fn fmt_tokens(n: f64) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn invalid_or_missing_token_usage_does_not_become_zero() {
+        assert!(plan_metrics(
+            &serde_json::json!({"data":{"monthUsage":{"items":[{"limit":1000000}]}}})
+        )
+        .is_err());
+        assert_eq!(json_f64(&serde_json::json!("NaN")), None);
+        assert_eq!(json_f64(&serde_json::json!("bad")), None);
+        assert!(balance_metrics(
+            &serde_json::json!({"data":{"token_balance":"bad","token_limit":1000}}),
+            TOKEN_PLAN_BASE
+        )
+        .is_err());
+        let (_, rows) = balance_metrics(
+            &serde_json::json!({"data":{"token_balance":2000,"token_limit":1000}}),
+            TOKEN_PLAN_BASE,
+        )
+        .unwrap();
+        assert!(rows.iter().all(|m| m.used_percent.is_none()));
+    }
+
     use serde_json::json;
 
     #[test]
@@ -319,7 +394,13 @@ mod tests {
     #[test]
     fn service_token_extraction_takes_the_cookie_form_or_the_raw_value() {
         assert_eq!(service_token_value("raw-token"), "raw-token");
-        assert_eq!(service_token_value("Cookie: a=1; api-platform_serviceToken=\"abc==\"; b=2"), "abc==");
-        assert_eq!(service_token_value("api-platform_serviceToken=plain"), "plain");
+        assert_eq!(
+            service_token_value("Cookie: a=1; api-platform_serviceToken=\"abc==\"; b=2"),
+            "abc=="
+        );
+        assert_eq!(
+            service_token_value("api-platform_serviceToken=plain"),
+            "plain"
+        );
     }
 }

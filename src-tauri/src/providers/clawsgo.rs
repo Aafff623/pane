@@ -80,7 +80,9 @@ async fn rpc(key: &str, method: &str, params: Value) -> Result<Value, String> {
     if let Some(err) = doc.get("error").filter(|e| !e.is_null()) {
         let code = err.get("code").and_then(Value::as_str).unwrap_or("ERROR");
         if code == "UNAUTHORIZED" {
-            return Err("ClawsGO token was rejected — paste a fresh clawsgo_token in Settings".into());
+            return Err(
+                "ClawsGO token was rejected — paste a fresh clawsgo_token in Settings".into(),
+            );
         }
         return Err(format!("{method}: {code}"));
     }
@@ -129,14 +131,24 @@ fn metrics_from_docs(
     let s = sub
         .get("subscription")
         .ok_or("unexpected subscription response shape")?;
-    let grant = s.get("monthlyGrantMilli").and_then(Value::as_f64).unwrap_or(0.0);
-    let spent = s.get("cycleSpentMilli").and_then(Value::as_f64).unwrap_or(0.0);
-    let balance = s.get("balanceMilli").and_then(Value::as_f64).unwrap_or(0.0);
+    let grant = s
+        .get("monthlyGrantMilli")
+        .and_then(Value::as_f64)
+        .filter(|v| v.is_finite() && *v > 0.0);
+    let spent = s
+        .get("cycleSpentMilli")
+        .and_then(Value::as_f64)
+        .filter(|v| v.is_finite() && *v >= 0.0);
+    let balance = s
+        .get("balanceMilli")
+        .and_then(Value::as_f64)
+        .filter(|v| v.is_finite())
+        .ok_or("missing valid subscription.balanceMilli")?;
 
     let mut metrics = Vec::new();
 
     // Cycle credits: granted monthly, lapse at planEndAt — a real meter.
-    if grant > 0.0 {
+    if let (Some(grant), Some(spent)) = (grant, spent) {
         let reset = s
             .get("planEndAt")
             .and_then(Value::as_str)
@@ -166,10 +178,15 @@ fn metrics_from_docs(
     // traffic included, same convention as the spend panel).
     if let Some(u) = usage.and_then(|d| d.get("usageStats")) {
         let requests = u.get("requestCount").and_then(Value::as_f64).unwrap_or(0.0);
-        let tokens = ["inputTokens", "cacheReadTokens", "cacheCreationTokens", "outputTokens"]
-            .iter()
-            .filter_map(|k| u.get(*k).and_then(Value::as_f64))
-            .sum::<f64>();
+        let tokens = [
+            "inputTokens",
+            "cacheReadTokens",
+            "cacheCreationTokens",
+            "outputTokens",
+        ]
+        .iter()
+        .filter_map(|k| u.get(*k).and_then(Value::as_f64))
+        .sum::<f64>();
         metrics.push(Metric::text(
             "30-Day Usage",
             format!("{:.0} requests · {:.1}M tokens", requests, tokens / 1e6),
@@ -204,6 +221,14 @@ fn title_case(s: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn empty_subscription_does_not_become_zero_balance() {
+        assert!(metrics_from_docs(&serde_json::json!({"subscription":{}}), None, "plan").is_err());
+        let (_,rows)=metrics_from_docs(&serde_json::json!({"subscription":{"monthlyGrantMilli":10000000,"balanceMilli":3000000}}),None,"pro").unwrap();
+        assert!(rows.iter().all(|m| m.used_percent.is_none()));
+    }
+
     use serde_json::json;
 
     fn sub_doc() -> Value {
@@ -235,15 +260,26 @@ mod tests {
 
     #[test]
     fn live_shapes_render_plan_rows() {
-        let (plan, metrics) =
-            metrics_from_docs(&sub_doc(), Some(&usage_doc()), "plus").unwrap();
+        let (plan, metrics) = metrics_from_docs(&sub_doc(), Some(&usage_doc()), "plus").unwrap();
         assert_eq!(plan.as_deref(), Some("Plus"));
         assert_eq!(labels(&metrics), ["Monthly", "Balance", "30-Day Usage"]);
 
-        assert_eq!(metrics[0].used_percent, Some(15073508.0 / 30000000.0 * 100.0));
-        assert!(metrics[0].detail.as_deref().unwrap().contains("15074 of 30000"));
+        assert_eq!(
+            metrics[0].used_percent,
+            Some(15073508.0 / 30000000.0 * 100.0)
+        );
+        assert!(metrics[0]
+            .detail
+            .as_deref()
+            .unwrap()
+            .contains("15074 of 30000"));
         let reset = metrics[0].resets_at.unwrap();
-        assert_eq!(reset, chrono::DateTime::parse_from_rfc3339("2026-09-30T04:46:35.368Z").unwrap().timestamp_millis());
+        assert_eq!(
+            reset,
+            chrono::DateTime::parse_from_rfc3339("2026-09-30T04:46:35.368Z")
+                .unwrap()
+                .timestamp_millis()
+        );
 
         assert_eq!(metrics[1].value.as_deref(), Some("292 credits left"));
         assert_eq!(

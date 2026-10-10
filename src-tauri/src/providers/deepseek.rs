@@ -55,39 +55,50 @@ async fn fetch_with_key(key: &str, card_id: &str, card_name: &str) -> Result<Sna
     if !resp.status().is_success() {
         return Err(format!("balance endpoint: HTTP {}", resp.status()));
     }
-    let doc: Value = resp.json().await.map_err(|e| format!("balance parse: {e}"))?;
+    let doc: Value = resp
+        .json()
+        .await
+        .map_err(|e| format!("balance parse: {e}"))?;
 
     // balance_infos rows carry stringified decimals per currency (CNY/USD).
     let mut metrics = Vec::new();
-    for (i, row) in doc
+    for row in doc
         .get("balance_infos")
         .and_then(Value::as_array)
         .unwrap_or(&vec![])
         .iter()
-        .enumerate()
     {
         let currency = row.get("currency").and_then(Value::as_str).unwrap_or("?");
-        let total = row
+        let Some(total) = row
             .get("total_balance")
             .and_then(Value::as_str)
             .and_then(|s| s.parse::<f64>().ok())
-            .unwrap_or(0.0);
+            .filter(|v| v.is_finite())
+        else {
+            continue;
+        };
         let sign = if currency == "CNY" { "¥" } else { "$" };
-        // Usage line + low-credit notifications for the primary currency,
-        // metered against the highest balance seen (top-ups raise it).
-        if i == 0 {
-            if let Some(meter) = super::credit_meter(card_id, sign, total) {
-                metrics.push(meter);
-            }
-        }
-        metrics.push(Metric::text(&format!("Balance ({currency})"), format!("{sign}{total:.2}")));
+        metrics.push(Metric::text(
+            &format!("Balance ({currency})"),
+            format!("{sign}{total:.2}"),
+        ));
     }
     if metrics.is_empty() {
         return Err("no balance info in response".into());
     }
 
-    let available = doc.get("is_available").and_then(Value::as_bool).unwrap_or(true);
-    let plan = Some(if available { "Pay as you go" } else { "Out of credit" }.to_string());
+    let available = doc
+        .get("is_available")
+        .and_then(Value::as_bool)
+        .unwrap_or(true);
+    let plan = Some(
+        if available {
+            "Pay as you go"
+        } else {
+            "Out of credit"
+        }
+        .to_string(),
+    );
     Ok(Snapshot::ok(card_id, card_name, plan, metrics))
 }
 

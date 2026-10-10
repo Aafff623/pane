@@ -14,7 +14,10 @@ pub async fn snapshot() -> Snapshot {
 /// `codebuff login` writes ~/.config/manicode/credentials.json (the CLI's
 /// former name): { "default": { "authToken": … } } or a top-level authToken.
 fn cli_token() -> Option<String> {
-    let path = dirs::home_dir()?.join(".config").join("manicode").join("credentials.json");
+    let path = dirs::home_dir()?
+        .join(".config")
+        .join("manicode")
+        .join("credentials.json");
     let doc: Value = serde_json::from_str(&std::fs::read_to_string(path).ok()?).ok()?;
     doc.pointer("/default/authToken")
         .or_else(|| doc.get("authToken"))
@@ -33,7 +36,11 @@ fn parse_reset_ms(v: Option<&Value>) -> Option<i64> {
         Value::String(s) => chrono::DateTime::parse_from_rfc3339(s)
             .ok()
             .map(|d| d.timestamp_millis())
-            .or_else(|| s.parse::<i64>().ok().map(|n| if n > 10_000_000_000 { n } else { n * 1000 })),
+            .or_else(|| {
+                s.parse::<i64>()
+                    .ok()
+                    .map(|n| if n > 10_000_000_000 { n } else { n * 1000 })
+            }),
         Value::Number(n) => {
             let n = n.as_i64()?;
             Some(if n > 10_000_000_000 { n } else { n * 1000 })
@@ -81,17 +88,27 @@ async fn fetch_with_key(key: &str) -> Result<Snapshot, String> {
     if !usage_resp.status().is_success() {
         return Err(format!("usage endpoint: HTTP {}", usage_resp.status()));
     }
-    let doc: Value = usage_resp.json().await.map_err(|e| format!("usage parse: {e}"))?;
+    let doc: Value = usage_resp
+        .json()
+        .await
+        .map_err(|e| format!("usage parse: {e}"))?;
 
-    let used = doc.get("usage").or_else(|| doc.get("used")).and_then(Value::as_f64);
-    let total = doc.get("quota").or_else(|| doc.get("limit")).and_then(Value::as_f64);
-    let remaining =
-        doc.get("remainingBalance").or_else(|| doc.get("remaining")).and_then(Value::as_f64);
+    let used = doc
+        .get("usage")
+        .or_else(|| doc.get("used"))
+        .and_then(Value::as_f64);
+    let total = doc
+        .get("quota")
+        .or_else(|| doc.get("limit"))
+        .and_then(Value::as_f64);
+    let remaining = doc
+        .get("remainingBalance")
+        .or_else(|| doc.get("remaining"))
+        .and_then(Value::as_f64);
     let resets_at = parse_reset_ms(doc.get("next_quota_reset"));
 
     let mut metrics = Vec::new();
-    let effective_total = total.or(used.zip(remaining).map(|(u, r)| u + r));
-    match (used, effective_total) {
+    match (used, total) {
         (Some(u), Some(t)) if t > 0.0 => metrics.push(
             Metric::progress(
                 "Credits",
@@ -100,8 +117,17 @@ async fn fetch_with_key(key: &str) -> Result<Snapshot, String> {
             )
             .with_reset(resets_at, None),
         ),
-        (Some(_), _) => metrics.push(Metric::progress("Credits", 100.0, Some("Exhausted".into()))),
+        (Some(u), _) => metrics.push(Metric::text(
+            "Credits",
+            format!("{u:.0} credits used · quota not reported"),
+        )),
         _ => {}
+    }
+    if let Some(remaining) = remaining {
+        metrics.push(Metric::text(
+            "Balance",
+            format!("{remaining:.0} credits left"),
+        ));
     }
 
     // Subscription is best-effort: plan name + weekly rate-limit window.
