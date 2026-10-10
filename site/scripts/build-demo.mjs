@@ -79,6 +79,8 @@ const demoHtmlPath = resolve(outDir, 'index.html');
 await writeFile(demoHtmlPath, (await readFile(demoHtmlPath, 'utf8')).replaceAll('\r\n', '\n'));
 const files = ['index.html', 'src/main.ts', 'src/styles.css', 'src/i18n.ts', 'src/providerCatalog.ts'];
 const hashes = {};
-for (const file of files) hashes[file] = createHash('sha256').update(await readFile(resolve(source, file))).digest('hex');
+// Hash CRLF-normalized content so a Windows checkout (autocrlf) records the
+// same provenance as the LF checkout CI verifies against.
+for (const file of files) hashes[file] = createHash('sha256').update((await readFile(resolve(source, file), 'utf8')).replaceAll('\r\n', '\n')).digest('hex');
 await writeFile(resolve(outDir, 'source.json'), JSON.stringify({ version: pkg.version, files: hashes }, null, 2));
 console.log(`Pane ${pkg.version} real frontend bundled to ${outDir}`);

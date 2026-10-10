@@ -1,10 +1,10 @@
 {
   "version": "0.6.0",
   "files": {
-    "index.html": "944ca6dee71d59d4c13b4dde92c34760e3e12f1fc8971c0f8d6d92e4597a75db",
-    "src/main.ts": "e4cf98f6d60790f30a3f26c446b18b129af7f4f90c6bd6437877e726f071ada8",
-    "src/styles.css": "1a982ed1fb5def73adc541ac1da604ca6d90a6b95ffdfdbabf39969070f84b2a",
-    "src/i18n.ts": "a5699097c563561dec4e3a628b204e766b7a9fb67a888c91653894b6172a0974",
+    "index.html": "7fbf4713edeaa7aa49b8c91ea3395fb51d6d7dade574bf88f796fda48a524feb",
+    "src/main.ts": "f0c2d75725695028fe2259634902a9fd94c5af079da8c2f76bf27657da8672f6",
+    "src/styles.css": "fb99ff9393f588b149a1e94b0a0d67c93596d4b729f2e7d8e16e96beebeb1a12",
+    "src/i18n.ts": "466b1093d4519e89caf3bb245615de44e0270b4a749f4111ef7b42ad96a5f4bb",
     "src/providerCatalog.ts": "d56f9054585d64a0b26ee246fa4090c9ba3d9923bb9d9ed91a2c644ce7e2fdb4"
   }
 }

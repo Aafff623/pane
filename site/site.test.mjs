@@ -67,7 +67,7 @@ test("theme: host and embedded panel themes stay isolated", () => {
 test("demo: bundled frontend matches the current app sources", async () => {
   const provenance = JSON.parse(await readFile(new URL("./public/demo/source.json", import.meta.url), "utf8"));
   for (const [file, expected] of Object.entries(provenance.files)) {
-    const current = createHash("sha256").update(await readFile(new URL(`../${file}`, import.meta.url))).digest("hex");
+    const current = createHash("sha256").update((await readFile(new URL(`../${file}`, import.meta.url), "utf8")).replaceAll("\r\n", "\n")).digest("hex");
     assert.equal(current, expected, `${file} changed; run node site/scripts/build-demo.mjs`);
   }
 });
