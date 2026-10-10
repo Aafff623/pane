@@ -11,11 +11,11 @@ This is the complete list. Anything not listed here does not happen.
 
 | Destination | When | What is sent |
 |---|---|---|
-| Each provider's own API (Anthropic, OpenAI/ChatGPT, cursor.com, GitHub, x.ai, opencode.ai, Devin, MiniMax, OpenRouter, Z.ai, Google, DeepSeek, Moonshot, Kimi Code, ElevenLabs, Codebuff, Kilo, AihubMix, StepFun, SiliconFlow, Novita, Alibaba Model Studio…) | Every refresh (default 1 min), only for providers you have enabled | That provider's own token/key, exactly as its official tool would send it. Full per-provider detail: [providers.md](providers.md) |
+| Each provider's own API (Anthropic, OpenAI/ChatGPT, cursor.com, GitHub, x.ai, opencode.ai, Devin, MiniMax, OpenRouter, Z.ai, Google, DeepSeek, Moonshot, Kimi Code, ElevenLabs, Codebuff, Kilo, AihubMix, StepFun, SiliconFlow, Novita, Alibaba Model Studio…) | Every refresh (default 5 min), only for providers you have enabled | That provider's own token/key, exactly as its official tool would send it. Full per-provider detail: [providers.md](providers.md) |
 | User-configured Custom Balance relay origins | Every refresh, only when Custom Balance is enabled | Subscription + usage requests send that account's API key as Bearer to the configured relay origin only; public origins must use HTTPS, and plaintext HTTP is limited to private, loopback, or link-local IP literals. The origin and key are never sent to Pane servers. |
 | User-configured One/New API origins | Status probe when saving/changing a site, plus one unauthenticated backfill if a stored site has no display unit; billing on every refresh for enabled keys | `/api/status` with no key. Subscription + usage send that site's key as Bearer, **only to that origin** — never to Pane servers. |
 | `raw.githubusercontent.com` (LiteLLM), `models.dev`, `robinebers.github.io` | ~Daily | Anonymous GET for public model price tables (no identifying data) |
-| `trypane.xyz/api/update` (the legacy `pane.jazii.dev/api/update` redirects there; GitHub Releases is the final fallback) | On launch + every 4 h | Anonymous GET for the update manifest, carrying the app version. See "The update check" below for exactly what this counts. |
+| `github.com/Aafff623/pane/releases/latest/download/latest.json` | On launch + every 4 h | Anonymous GET for this project's own update manifest, carrying no app data. GitHub may log the request as the host; Pane runs no counter. See "The update check" below. |
 | `us.i.posthog.com` | Once per day (unless switched off) | The two anonymous daily-statistic events described in "Anonymous usage statistics" below — a random ID, version, enabled-provider list, and per-provider success/failure counts. Never usage amounts, spend, keys, or error text. |
 | `127.0.0.1:11434` (your own PC) | Every refresh, if Ollama is enabled | Local-only query of your Ollama server |
 
@@ -65,33 +65,34 @@ auditable file: [`src-tauri/src/telemetry.rs`](../src-tauri/src/telemetry.rs)
 ## The update check
 
 Pane has to ask *somewhere* "is there a newer version?" — that request
-existed from day one. New builds ask `trypane.xyz` first and use GitHub as
-the automatic fallback. Old builds that still call `pane.jazii.dev` are
-handled by a permanent redirect to `trypane.xyz`. Every endpoint serves
-the same manifest, and every update is still signature-verified against
-the key baked into the app. The server counts, per day: **how many
-distinct installs checked in, from which country, on which version.** That's
-the entire list. Concretely:
+existed from day one. Current builds ask exactly one endpoint: this
+project's own GitHub Releases manifest
+(`github.com/Aafff623/pane/releases/latest/download/latest.json`, also
+pinned in `tauri.conf.json`). The upstream `trypane.xyz` /
+`pane.jazii.dev` endpoints were dropped when the project detached — their
+builds are signed with a key this app no longer trusts, so querying them
+could only produce signature failures. Every update is
+signature-verified against the minisign key baked into the app.
 
-- **No IP addresses are stored.** Uniqueness comes from a salted one-way
-  hash folded into a [HyperLogLog](https://en.wikipedia.org/wiki/HyperLogLog)
-  — a counter that can say "≈37 distinct installs today" but is
-  mathematically incapable of listing them.
-- **Country** is the two-letter code the CDN edge derives; nothing
-  finer (no city, no region, no coordinates).
-- **Version** is the `?v=` parameter the updater sends.
-- Nothing else: no machine ids, no usernames, no usage data — your
-  quotas, spend, and provider data never leave your PC, same as always.
-
-The counting code is public in the site repo, and the request itself is
-identical either way — the only thing that changed is who serves the
-manifest first.
+Pane itself operates no counting server and stores nothing about the
+check. GitHub, as the host of the manifest, may log the request (IP,
+timestamp) under [GitHub's own privacy
+statement](https://docs.github.com/site-policy/privacy-policies/github-general-privacy-statement);
+that logging is GitHub's, not Pane's, and Pane receives only the manifest
+JSON. No machine ids, no usernames, no usage data — your quotas, spend,
+and provider data never leave your PC, same as always.
 
 ## What stays on your PC
 
 - **Credentials**: read from the files the official CLIs already maintain
-  (see [providers.md](providers.md)); pasted API keys live in
-  `%APPDATA%\Pane\<provider>.json`. One/New API sites and keys use a
+  (see [providers.md](providers.md)); pasted API keys live in the OS
+  credential vault (Windows Credential Manager / macOS Keychain / Linux
+  Secret Service), and the JSON files keep only non-secret fields — a row
+  whose vault write fails keeps its plaintext as the documented fallback.
+  Login-based accounts (OAuth / device-code) are different: their tokens
+  sit in `%APPDATA%\Pane\login-accounts\<family>.json` as plaintext JSON,
+  protected by your user profile ACL rather than the vault. One/New API
+  sites and keys use a
   nested `%APPDATA%\Pane\onenewapi.json`, written owner-only (Windows
   protected DACL / Unix `0600`) so a permissive Pane directory cannot
   expose the secrets; Settings lists names, URLs, and
