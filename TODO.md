@@ -1,6 +1,6 @@
 # Pane TODO
 
-<!-- next-task-id: 0027 -->
+<!-- next-task-id: 0028 -->
 
 This file is the canonical board for cross-session task state.
 
@@ -28,6 +28,7 @@ Handoff parcels in `temp/handoff/` cite task IDs from this board. The board does
 - [ ] T-0013 — 官网第三模块 provider 图标深浅主题可见性修复（claude/hermes 等暗色看不清；深浅主题下全部可辨，验收双主题逐图肉眼过）
 - [ ] T-0014 — 复核官网第六轮成果（艺术字/默认配置卡/字号/keyvault 模拟），按审美与一致性问题重做或收敛
 - [ ] T-0015 — 官网首屏深度美化：重新设计艺术字「让每一次调用 / 都看得见」的字形、层次、动效与首屏构图，完成桌面与移动端视觉验收
+- [ ] T-0027 — winget 首发收录：向 microsoft/winget-pkgs 手工提交首个版本 manifest，之后 winget.yml 的自动派发才生效（v0.6.0 派发因包不存在 continue-on-error 失败，不阻塞 Release）
 
 ## Rules
 
