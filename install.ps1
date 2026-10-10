@@ -1,6 +1,6 @@
 # Pane quick installer
 #
-#   irm https://trypane.xyz/install.ps1 | iex
+#   irm https://raw.githubusercontent.com/Aafff623/pane/main/install.ps1 | iex
 #
 # Downloads the latest signed release from GitHub, installs per-user
 # (no admin), and launches Pane. Works on Windows PowerShell 5.1 and pwsh.
@@ -15,10 +15,10 @@ Write-Host '  Pane - AI usage limits in your system tray' -ForegroundColor Cyan
 Write-Host ''
 
 Write-Host '> Finding the latest release...'
-$release = Invoke-RestMethod 'https://api.github.com/repos/ItsJazii/pane/releases/latest' `
+$release = Invoke-RestMethod 'https://api.github.com/repos/Aafff623/pane/releases/latest' `
     -Headers @{ 'User-Agent' = 'pane-installer' } -UseBasicParsing
 $asset = $release.assets | Where-Object { $_.name -match '^Pane_.+_x64-setup\.exe$' } | Select-Object -First 1
-if (-not $asset) { throw 'No installer found in the latest release - please report this at https://github.com/ItsJazii/pane/issues' }
+if (-not $asset) { throw 'No installer found in the latest release - please report this at https://github.com/Aafff623/pane/issues' }
 
 $dest = Join-Path $env:TEMP $asset.name
 Write-Host ("> Downloading {0} ({1:N1} MB)..." -f $asset.name, ($asset.size / 1MB))
@@ -33,17 +33,17 @@ Invoke-WebRequest $asset.browser_download_url -OutFile $dest -UseBasicParsing
 $manifest = $release.assets | Where-Object { $_.name -eq 'latest.json' } | Select-Object -First 1
 if (-not $manifest) {
     Remove-Item $dest -Force -ErrorAction SilentlyContinue
-    throw 'Release is missing its latest.json manifest - not installing. Please report this at https://github.com/ItsJazii/pane/issues'
+    throw 'Release is missing its latest.json manifest - not installing. Please report this at https://github.com/Aafff623/pane/issues'
 }
 $expected = (Invoke-RestMethod $manifest.browser_download_url -UseBasicParsing).sha256
 if (-not $expected) {
     Remove-Item $dest -Force -ErrorAction SilentlyContinue
-    throw 'Release manifest has no sha256 field - not installing. Please report this at https://github.com/ItsJazii/pane/issues'
+    throw 'Release manifest has no sha256 field - not installing. Please report this at https://github.com/Aafff623/pane/issues'
 }
 $actual = (Get-FileHash $dest -Algorithm SHA256).Hash.ToLower()
 if ($actual -ne $expected.ToLower()) {
     Remove-Item $dest -Force -ErrorAction SilentlyContinue
-    throw 'Integrity check FAILED - download does not match the release manifest SHA-256. Not installing. Please report this at https://github.com/ItsJazii/pane/issues'
+    throw 'Integrity check FAILED - download does not match the release manifest SHA-256. Not installing. Please report this at https://github.com/Aafff623/pane/issues'
 }
 Write-Host '> SHA-256 verified.'
 
@@ -55,7 +55,7 @@ Remove-Item $dest -Force -ErrorAction SilentlyContinue
 if ($proc.ExitCode -ne 0) { throw "Installer exited with code $($proc.ExitCode)" }
 
 $exe = Join-Path $env:LOCALAPPDATA 'Pane\pane.exe'
-if (-not (Test-Path $exe)) { throw 'Install finished but pane.exe was not found - please report this at https://github.com/ItsJazii/pane/issues' }
+if (-not (Test-Path $exe)) { throw 'Install finished but pane.exe was not found - please report this at https://github.com/Aafff623/pane/issues' }
 
 Start-Process $exe
 Write-Host ''

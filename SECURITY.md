@@ -37,14 +37,16 @@ All of this is auditable in the source — links go to the exact code.
   namespace in its `id_token`) before any request — a look-alike
   credential file from another app never enters the lane.
 - **No analytics SDK, no crash reporter, no event streams.** Pane's
-  entire self-reporting surface is two anonymous channels, both
-  documented field-by-field in [docs/privacy.md](docs/privacy.md): the
-  update check (country-level install counting, no IPs stored) and an
-  opt-out once-a-day usage statistic (random install ID, daily rollups,
-  error categories only — one auditable file,
+  entire self-reporting surface is one anonymous channel, documented
+  field-by-field in [docs/privacy.md](docs/privacy.md): an opt-out
+  once-a-day usage statistic (random install ID, daily rollups, error
+  categories only — one auditable file,
   [`src-tauri/src/telemetry.rs`](src-tauri/src/telemetry.rs)). Turning
-  the statistic off is a hard stop and deletes the stored ID. The full
-  list of network calls Pane can make is in
+  the statistic off is a hard stop and deletes the stored ID. The update
+  check adds no reporting of its own: it is a plain GET for this
+  project's own GitHub Releases `latest.json` (GitHub may log the request
+  under GitHub's own privacy statement; Pane runs no counter and stores
+  nothing). The full list of network calls Pane can make is in
   [docs/privacy.md](docs/privacy.md).
 - **The local HTTP API is loopback-only, CORS-locked, and Host-checked.**
   It binds `127.0.0.1:6736`, serves usage numbers (never credentials),
@@ -69,16 +71,22 @@ All of this is auditable in the source — links go to the exact code.
 - **Credential files are backed up before write.** When Pane writes a
   refreshed OAuth token back to a CLI's credential file, it first copies
   the original to `*.pane-bak` — a bad write can never cost you a login.
-- **API keys you paste** are stored in `%APPDATA%\Pane` on your PC,
-  readable only by your Windows user, and sent only to their own vendor.
-  One/New API sites and keys use a nested owner-only store; Settings returns
+- **API keys you paste** go into the OS credential vault (Windows
+  Credential Manager, macOS Keychain, Linux Secret Service); the JSON
+  files keep only non-secret fields, and a row whose vault write fails
+  keeps its plaintext as the documented fallback. Login-based accounts
+  (OAuth/device-code) keep their tokens in
+  `%APPDATA%\Pane\login-accounts\<family>.json` as plaintext JSON —
+  protected by your user profile ACL, not by the vault. One/New API sites
+  and keys use a nested owner-only store; Settings returns
   labels and origins after save, never secret values or fragments.
 
 ## Known limitations (honesty section)
 
 - The installer is **not yet Authenticode-signed**, so SmartScreen warns
   on first run. Updates are minisign-verified regardless. A code-signing
-  certificate is planned. (The `irm https://trypane.xyz/install.ps1 | iex`
+  certificate is planned. (The
+  `irm https://raw.githubusercontent.com/Aafff623/pane/main/install.ps1 | iex`
   install path and winget don't trigger SmartScreen.)
 - Release binaries are built by GitHub Actions from the pushed tag —
   see [.github/workflows/release.yml](.github/workflows/release.yml);
