@@ -827,8 +827,14 @@ mod tests {
             let Ok(sid) = super::current_user_sid() else {
                 return false;
             };
+            // SDDL renders the built-in Administrator account (RID -500) as
+            // the well-known alias "LA" instead of its raw SID, so a raw
+            // substring match never sees the owner ACE on machines that run
+            // as the built-in admin (GitHub's windows runners do). Accept
+            // either spelling of the same account.
+            let owner_alias = if sid.ends_with("-500") { "LA" } else { sid.as_str() };
             sddl.contains("D:P")
-                && sddl.contains(&sid)
+                && (sddl.contains(&sid) || sddl.contains(owner_alias))
                 && sddl.contains(";SY)")
                 && !sddl.contains(";WD)")
                 && !sddl.contains(";BU)")
