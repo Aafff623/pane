@@ -22,10 +22,8 @@ parse-tests/target
 build-latest.log
 
 # Local handoff / research / secrets workspace (see temp/README.md);
-# the workspace contract files stay tracked
-temp/*
-!temp/README.md
-!temp/AGENTS.md
+# the whole temp/ tree is local-only — nothing under it is ever tracked
+temp/
 
 # Local-only agent config (project MCP) and code index
 .agents/mcp.json

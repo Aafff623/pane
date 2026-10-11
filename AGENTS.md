@@ -83,9 +83,9 @@ Verified domain facts, vocabulary, and hard constraints → [`CONTEXT.md`](CONTE
 
 - **Canonical startup guide**: `docs/dev-startup.md`. This file only summarizes it.
 - **README.md** Features/Providers copy can lag the code — trust `src/main.ts` + `src-tauri/src/provider_catalog.rs` over README.
-- **Local-only, never commit**: `.codegraph/` (auto-syncs at turn end — don't hand-sync), `.agents/mcp.json`, and everything under `temp/` except its `README.md` / `AGENTS.md`.
+- **Local-only, never commit**: `.codegraph/` (auto-syncs at turn end — don't hand-sync), `.agents/mcp.json`, and the **entire `temp/` tree** (boundary docs `temp/README.md` / `temp/AGENTS.md` included — they stay on disk locally but are untracked).
 - **Task board**: `TODO.md` (tracked) is the canonical cross-session task state — board/parcel split with `temp/handoff/`: parcels cite task IDs, never keep a second list, and there is no index file (newest handoff = latest filename timestamp).
-- **Resolved (2026-09-05)**: `AGENTS.md`, `docs/dev-startup.md` and the governance assets (`CLAUDE.md`, `CONTEXT.md`, `temp/` contract files) are tracked in Git; the one-off `run_test.cmd` launcher moved to `temp/scripts/` (local-only).
+- **Resolved (2026-09-05, amended 2026-10-11)**: `AGENTS.md`, `docs/dev-startup.md` and the governance assets (`CLAUDE.md`, `CONTEXT.md`) are tracked in Git; the `temp/` contract files were untracked on 2026-10-11 (owner decision: the whole `temp/` tree is local-only, remote has no `temp/` at all); the one-off `run_test.cmd` launcher moved to `temp/scripts/` (local-only).
 
 ## Secrets (persist on receipt)
 
