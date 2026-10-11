@@ -31,10 +31,12 @@ Used by `/wayfinder`. The **map** is a file with one **child** file per ticket.
 
 ## Legacy state in this repo (pane)
 
-`TODO.md` at the repo root is the pre-Matt cross-session task board
-(`T-0001`…`T-00xx` IDs, an allocator comment, optimistic-concurrency
-protocol). It is **legacy state pending explicit migration** into
-`.scratch/`: until the owner approves and that migration completes, do not
-create new tasks on the board and do not mirror tracker issues onto it.
-Existing T-numbers stay stable and are kept as historical links when
-migrated. `.scratch/` is durable work state — tracked in Git, never ignored.
+The pre-Matt cross-session task board `TODO.md` (`T-0001`…`T-00xx` IDs, an
+allocator comment, an optimistic-concurrency protocol) was **retired on
+2026-10-11**. The owner archived it locally at
+`temp/board-archive-20261011-TODO.md` (untracked) and migrated its one open
+ticket into `.scratch/` (first ticket: `analytics-quota-dashboard`, formerly
+`T-0005`). Do not recreate the board or mirror tracker issues onto it;
+historical `T-XXXX` IDs cited by old handoff parcels stay valid as links only.
+
+`.scratch/` is durable work state — tracked in Git, never ignored.

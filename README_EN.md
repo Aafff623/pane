@@ -218,7 +218,7 @@ Claude, Codex, CodeBuddy, Cursor, OpenCode, Copilot, Grok, Devin, MiniMax, OpenR
 
 ## <a id="download"></a>🚀 Quick start & download
 
-### Current mainline version: `0.5.0`
+### Current mainline version: `0.7.0`
 
 | Platform | Installer | Status | Download |
 | :--- | :--- | :--- | :--- |
@@ -376,7 +376,9 @@ New features go on a `codex/<feature>` branch and merge back to `main` after ver
 - [Local HTTP API](docs/local-http-api.md) — `127.0.0.1:6736/v1/usage`
 - [Privacy](docs/privacy.md) — credentials, network requests and telemetry boundaries
 - [Skin market design](docs/skin-market-design.md) — wallpapers, mascot and exit interaction
-- [CONTEXT.md](CONTEXT.md) — verified domain facts and engineering constraints
+- [CONTEXT.md](CONTEXT.md) — domain glossary (terms)
+- [Project facts](docs/project-facts.md) — verified engineering facts, constraints and failure modes
+- [README assets](docs/readme-assets.md) — screenshots, logo and zh/en mirroring rules
 
 ---
 

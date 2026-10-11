@@ -5,6 +5,7 @@
 
 ## Critical: always read first
 **Full startup guide → [`docs/dev-startup.md`](docs/dev-startup.md)**
+**Verified engineering facts → [`docs/project-facts.md`](docs/project-facts.md)** — scope, code paths, hard constraints, failure modes, credential/vault semantics.
 **Task tracker → [`docs/agents/issue-tracker.md`](docs/agents/issue-tracker.md)** — tickets live under `.scratch/` (Matt-configured 2026-10-11; the old `TODO.md` board is retired — git history and a local `temp/` archive only). Handoff parcels in `temp/handoff/` may still cite old `T-XXXX` IDs as historical links.
 
 ## TL;DR startup sequence (local development only)
@@ -77,14 +78,15 @@ Then re-run the launch step.
 | Provider/parsing test harness (compiles the real sources via `#[path]`) | `parse-tests/` |
 | Runtime data — never commit anything from here | `%APPDATA%\Pane\` (config.json, accounts/, onenewapi.json, last_snapshots.json, usage_history.json, telemetry.json …) |
 
-Verified domain facts, vocabulary, and hard constraints → [`CONTEXT.md`](CONTEXT.md).
+Domain vocabulary (the glossary) → [`CONTEXT.md`](CONTEXT.md); verified engineering
+facts, constraints and failure modes → [`docs/project-facts.md`](docs/project-facts.md).
 
 ## Authoritative vs local-only files
 
 - **Canonical startup guide**: `docs/dev-startup.md`. This file only summarizes it.
 - **README.md** Features/Providers copy can lag the code — trust `src/main.ts` + `src-tauri/src/provider_catalog.rs` over README.
 - **Local-only, never commit**: `.codegraph/` (auto-syncs at turn end — don't hand-sync), `.agents/mcp.json`, and the **entire `temp/` tree** (boundary docs `temp/README.md` / `temp/AGENTS.md` included — they stay on disk locally but are untracked).
-- **Task tracker**: the issue-tracker authority is [`docs/agents/issue-tracker.md`](docs/agents/issue-tracker.md) — local markdown under `.scratch/` (since 2026-10-11; triage labels in `docs/agents/triage-labels.md`, domain docs in `docs/agents/domain.md`). `TODO.md` is the pre-Matt board kept as **legacy state pending explicit migration** into `.scratch/`: do not create new tasks there or mirror between the two systems. Handoff parcels still live in `temp/handoff/` and cite task IDs; there is no index file (newest handoff = latest filename timestamp).
+- **Task tracker**: the issue-tracker authority is [`docs/agents/issue-tracker.md`](docs/agents/issue-tracker.md) — local markdown under `.scratch/` (since 2026-10-11; triage labels in `docs/agents/triage-labels.md`, domain docs in `docs/agents/domain.md`). The old `TODO.md` board was **retired on 2026-10-11**: it is archived locally at `temp/board-archive-20261011-TODO.md` (untracked) and its one open ticket was migrated into `.scratch/` — do not recreate it or mirror between the two systems. Handoff parcels still live in `temp/handoff/` and cite task IDs; there is no index file (newest handoff = latest filename timestamp).
 - **Resolved (2026-09-05, amended 2026-10-11)**: `AGENTS.md`, `docs/dev-startup.md` and the governance assets (`CLAUDE.md`, `CONTEXT.md`) are tracked in Git; the `temp/` contract files were untracked on 2026-10-11 (owner decision: the whole `temp/` tree is local-only, remote has no `temp/` at all); the one-off `run_test.cmd` launcher moved to `temp/scripts/` (local-only).
 
 ## Secrets (persist on receipt)
@@ -103,7 +105,7 @@ Verified domain facts, vocabulary, and hard constraints → [`CONTEXT.md`](CONTE
  $env:PATH = "D:\Tools\mingw64\bin;$env:PATH"
  cargo +stable-x86_64-pc-windows-gnu test
  ```
- The harness compiles the real `src-tauri/src` files via `#[path]` plus a `tauri-stub` crate (489 tests as of 2026-10-08). It used to live under `src-tauri/target/parse-tests`, where `cargo clean` eventually ate it; it is tracked at the repo root now.
+ The harness compiles the real `src-tauri/src` files via `#[path]` plus a `tauri-stub` crate (673 passing, 13 ignored as of 2026-10-11). It used to live under `src-tauri/target/parse-tests`, where `cargo clean` eventually ate it; it is tracked at the repo root now.
 4. **UI acceptance is done by the user personally.** Agents deliver build/test evidence plus a short acceptance checklist — never claim "done and verified" from code reading alone.
 5. Non-trivial changes get a code-review pass plus a redundancy/simplifier scan before delivery, then re-test.
 6. **Release authorization gate** — local implementation and validation must finish first; the user must personally perform UI acceptance and give explicit authorization in the conversation. Until both conditions are present, do not create a release, tag, commit, or push. A build, port check, screenshot, or agent opinion is not user acceptance.
@@ -111,7 +113,7 @@ Verified domain facts, vocabulary, and hard constraints → [`CONTEXT.md`](CONTE
 
 ## Uncertainty & existing work
 
-- Never invent endpoints, file paths, response shapes, or UI copy — read the code first; anything unverifiable gets marked `待确认` in `CONTEXT.md`.
+- Never invent endpoints, file paths, response shapes, or UI copy — read the code first; anything unverifiable gets marked `待确认` in [`docs/project-facts.md`](docs/project-facts.md).
 - Check `git status` + recent commits before editing; leave unrelated work-in-progress alone.
 - New features go on a `codex/<feature>` branch and merge back to `main` only after verification.
 - Destructive operations (delete/overwrite/clean) require the user's explicit confirmation first.

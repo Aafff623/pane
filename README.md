@@ -216,7 +216,7 @@ Claude、Codex、CodeBuddy、Cursor、OpenCode、Copilot、Grok、Devin、MiniMa
 
 ## <a id="download"></a>🚀 快速开始与下载
 
-### 当前主线版本：`0.5.0`
+### 当前主线版本：`0.7.0`
 
 | 平台 | 安装包 | 状态 | 下载入口 |
 | :--- | :--- | :--- | :--- |
@@ -406,7 +406,9 @@ Pane 是 local-first 工具：
 - [AI Agent 排查 Skill](skills/pane/) — 让 coding agent 自助排查 Pane
 - [隐私说明](docs/privacy.md) — 凭据、网络请求和遥测边界
 - [皮肤市场设计](docs/skin-market-design.md) — 壁纸、吉祥物和退出交互
-- [CONTEXT.md](CONTEXT.md) — 已验证的领域事实与工程约束
+- [CONTEXT.md](CONTEXT.md) — 领域词汇表（术语）
+- [工程事实](docs/project-facts.md) — 已验证的工程事实、约束与故障模式
+- [README 素材维护](docs/readme-assets.md) — 截图/图标与中英镜像维护规则
 
 ---
 
