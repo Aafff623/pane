@@ -10364,6 +10364,12 @@ interface VaultStatus {
   unlocked: boolean;
   count: number;
   recovery_questions: number;
+  /** v3 only: a recovery code is enrolled. */
+  recovery_code?: boolean;
+  /** uninitialized | legacy_plain | ok | corrupted | unsupported_version | io_error */
+  state?: string;
+  version?: number | null;
+  issue_code?: string | null;
 }
 
 let vaultStatus: VaultStatus | null = null;
@@ -10392,7 +10398,32 @@ function renderVaultBar(): void {
     b.dataset.kvVaultAction = action;
     buttons.push(b);
   };
-  if (!vaultStatus.has_password) {
+  const problemText: Record<string, string> = {
+    corrupted: t("settings.kvVaultCorrupted"),
+    unsupported_version: t("settings.kvVaultUnsupported"),
+    io_error: t("settings.kvVaultIoError"),
+  };
+  if (!vaultStatus.has_password && vaultStatus.state !== "legacy_plain") {
+    // Empty state: one compact row — icon, two short lines, one CTA.
+    const card = document.createElement("div");
+    card.className = "kv-vault-empty-card";
+    card.innerHTML = `
+      <span class="kv-vault-empty-icon">${uiIcon("shield")}</span>
+      <span class="kv-vault-empty-texts">
+        <strong class="kv-vault-empty-title">${escapeHtml(t("settings.kvVaultEmptyTitle"))}</strong>
+        <span class="kv-vault-empty-sub">${escapeHtml(t("settings.kvVaultEmptySub"))}</span>
+      </span>
+      <button type="button" class="kv-vault-empty-cta" data-kv-vault-action="setup">${escapeHtml(t("settings.kvAddMaster"))}</button>`;
+    bar.append(card);
+    return;
+  }
+  if (vaultStatus.state && problemText[vaultStatus.state]) {
+    // Damaged/newer/unreadable file: diagnosis only, never any write button.
+    state.textContent = problemText[vaultStatus.state];
+    state.classList.add("locked");
+  } else if (!vaultStatus.has_password) {
+    // A plain v1 file: offer the old v2 upgrade (the v3 wizard only
+    // starts from a truly empty machine).
     state.textContent = t("settings.kvVaultNoPassword");
     button(t("settings.kvSetPassword"), "set", "key");
   } else if (vaultStatus.unlocked) {
@@ -10403,18 +10434,34 @@ function renderVaultBar(): void {
       "questions",
       "shield",
     );
+    if (vaultStatus.version === 3) {
+      button(
+        vaultStatus.recovery_code
+          ? t("settings.kvRecoveryCodeRegen")
+          : t("settings.kvRecoveryCodeGen"),
+        "recovery-code",
+        "shield",
+      );
+      if (vaultStatus.recovery_code) {
+        button(t("settings.kvRecoveryCodeOff"), "recovery-code-off", "shield");
+      }
+    }
     button(t("settings.kvLock"), "lock", "lock");
   } else {
     state.textContent = t("settings.kvVaultLocked", { count: vaultStatus.count });
     state.classList.add("locked");
     button(t("settings.kvUnlock"), "unlock", "lockOpen");
-    if (vaultStatus.recovery_questions > 0) button(t("settings.kvForgot"), "forgot", "question");
+    if (vaultStatus.recovery_questions > 0 || vaultStatus.recovery_code) {
+      button(t("settings.kvForgot"), "forgot", "question");
+    }
   }
   inner.append(state, ...buttons);
   bar.append(inner);
 }
 
 async function setVaultPassword(): Promise<void> {
+  // v1-legacy upgrade path only (plain file → v2); brand-new vaults go
+  // through the three-step wizard (vaultSetupWizard below).
   const pw = await appPrompt({
     title: t("settings.kvSetPasswordTitle"),
     placeholder: t("settings.kvPasswordPlaceholder"),
@@ -10446,6 +10493,228 @@ async function setVaultPassword(): Promise<void> {
   }
 }
 
+// ── v3 setup wizard: one dialog, three steps, one recovery code ─────────────
+//
+// Step 1 pick an unlock code (≥16 code points, letters AND digits) ·
+// Step 2 exactly three security questions · Step 3 type the unlock code
+// twice to prove it stuck. One atomic backend call creates the vault with
+// questions + recovery code enrolled; the code is then revealed once with
+// a TXT download. Cancelling before "create" leaves no file behind.
+
+function vaultSetupWizard(): void {
+  if (document.querySelector("#vault-setup-overlay")) return;
+  const overlay = document.createElement("div");
+  overlay.id = "vault-setup-overlay";
+  overlay.innerHTML = `
+    <div id="vault-setup-box" role="dialog" aria-modal="true">
+      <datalist id="vault-setup-presets">${RECOVERY_PRESET_KEYS.map(
+        (k) => `<option value="${escapeHtml(t(k))}"></option>`,
+      ).join("")}</datalist>
+      <h3>${escapeHtml(t("settings.kvWizardTitle"))}</h3>
+      <p class="vault-steps" id="vault-setup-steps"></p>
+      <div id="vault-setup-body"></div>
+      <p class="vault-setup-error" id="vault-setup-error" hidden></p>
+      <div class="kv-recovery-actions">
+        <button type="button" class="mini-btn" id="vault-setup-cancel">${escapeHtml(t("dialog.cancel"))}</button>
+        <span class="spacer"></span>
+        <button type="button" class="mini-btn" id="vault-setup-back" hidden>${escapeHtml(t("settings.kvWizardBack"))}</button>
+        <button type="button" class="mini-btn" id="vault-setup-next"></button>
+      </div>
+    </div>`;
+  document.body.append(overlay);
+  const close = async () => {
+    overlay.remove();
+    document.removeEventListener("keydown", onKey, true);
+    await loadKeyvault();
+  };
+  const onKey = (e: KeyboardEvent) => {
+    if (e.key === "Escape" && step < 3) void close();
+  };
+  document.addEventListener("keydown", onKey, true);
+  overlay.addEventListener("click", (e) => {
+    if (e.target === overlay && step < 3) void close();
+  });
+  overlay.querySelector("#vault-setup-cancel")?.addEventListener("click", () => void close());
+
+  let step: 1 | 2 | 3 = 1; // 3 = done state (recovery code reveal)
+  let unlockCode = "";
+  let wizardQuestions: [string, string][] = [];
+  let printed = "";
+  let downloaded = false;
+  const body = overlay.querySelector<HTMLElement>("#vault-setup-body")!;
+  const errEl = overlay.querySelector<HTMLElement>("#vault-setup-error")!;
+  const backBtn = overlay.querySelector<HTMLButtonElement>("#vault-setup-back")!;
+  const nextBtn = overlay.querySelector<HTMLButtonElement>("#vault-setup-next")!;
+
+  const fail = (msg: string) => {
+    errEl.textContent = msg;
+    errEl.hidden = false;
+    errEl.classList.remove("info");
+  };
+  const info = (msg: string) => {
+    errEl.textContent = msg;
+    errEl.hidden = false;
+    errEl.classList.add("info");
+  };
+  const showNext = (label: string) => {
+    nextBtn.textContent = label;
+  };
+  const renderSteps = () => {
+    const labels = [t("settings.kvWizardStep1"), t("settings.kvWizardStep2")];
+    const el = overlay.querySelector<HTMLElement>("#vault-setup-steps")!;
+    el.replaceChildren();
+    labels.forEach((l, i) => {
+      const n = i + 1;
+      const done = step === 3 || n < step;
+      const active = n === step && step < 3;
+      const dot = document.createElement("span");
+      dot.className = `vault-step-dot${done ? " done" : ""}${active ? " active" : ""}`;
+      dot.textContent = done ? "✓" : String(n);
+      const lbl = document.createElement("span");
+      lbl.className = `vault-step-label${active ? " active" : ""}`;
+      lbl.textContent = l;
+      el.append(dot, lbl);
+      if (n < 2) {
+        const line = document.createElement("span");
+        line.className = `vault-step-line${n < step || step === 3 ? " done" : ""}`;
+        el.append(line);
+      }
+    });
+  };
+  const renderStep1 = () => {
+    body.innerHTML = `
+      <p class="kv-hint">${escapeHtml(t("settings.kvWizardStep1Hint"))}</p>
+      <input type="password" id="vs-code" maxlength="200" autocomplete="new-password"
+        placeholder="${escapeHtml(t("settings.kvV3CodePlaceholder"))}" />
+      <input type="password" id="vs-code2" maxlength="200" autocomplete="new-password"
+        placeholder="${escapeHtml(t("settings.kvWizardConfirmPh"))}" />
+      <p class="vault-recommend">${escapeHtml(t("settings.kvV3CodeRecommend"))}</p>`;
+    body.querySelector<HTMLInputElement>("#vs-code")!.focus();
+  };
+  const renderStep2 = () => {
+    const row = (i: number) => `
+      <div class="vault-setup-qrow">
+        <input type="text" class="vs-q" list="vault-setup-presets" maxlength="60"
+          placeholder="${escapeHtml(t("settings.kvRecoveryQPh"))} ${i + 1}" spellcheck="false" />
+        <input type="password" class="vs-a" maxlength="80" autocomplete="new-password"
+          placeholder="${escapeHtml(t("settings.kvRecoveryAPh"))}" />
+      </div>`;
+    body.innerHTML = `
+      <p class="kv-hint">${escapeHtml(t("settings.kvV3QEditorHint"))}</p>
+      ${row(0)}${row(1)}${row(2)}`;
+  };
+  const renderDone = () => {
+    body.innerHTML = `
+      <p class="kv-hint">${escapeHtml(t("settings.kvRecoveryCodeOnce"))}</p>
+      <code class="kv-recovery-code">${escapeHtml(printed)}</code>`;
+  };
+
+  const validateStep1 = (): boolean => {
+    const code = body.querySelector<HTMLInputElement>("#vs-code")!.value;
+    const again = body.querySelector<HTMLInputElement>("#vs-code2")!.value;
+    if ([...code].length < 6) {
+      fail(t("settings.kvWizardErrShort"));
+      return false;
+    }
+    if (code !== again) {
+      fail(t("settings.kvWizardErrConfirm"));
+      return false;
+    }
+    unlockCode = code;
+    return true;
+  };
+  const collectQuestions = (): boolean => {
+    const rows = [...body.querySelectorAll<HTMLElement>(".vault-setup-qrow")];
+    const qs: [string, string][] = [];
+    for (const r of rows) {
+      const q = (r.querySelector(".vs-q") as HTMLInputElement).value.trim();
+      const a = (r.querySelector(".vs-a") as HTMLInputElement).value.trim();
+      if (!q || a.length < 2) {
+        fail(t("settings.kvWizardErrQFill"));
+        return false;
+      }
+      qs.push([q, a]);
+    }
+    const norm = (s: string) => s.toLowerCase().split(/\s+/).join(" ");
+    const uniqQ = new Set(qs.map(([q]) => q)).size;
+    const uniqA = new Set(qs.map(([, a]) => norm(a))).size;
+    if (uniqQ !== 3 || uniqA !== 3) {
+      fail(t("settings.kvWizardErrQDup"));
+      return false;
+    }
+    wizardQuestions = qs;
+    return true;
+  };
+  const createVault = async () => {
+    nextBtn.disabled = true;
+    showNext(t("settings.kvWizardCreating"));
+    try {
+      const [st, code] = await invoke<[VaultStatus, string]>("keyvault_v3_setup", {
+        code: unlockCode,
+        questions: wizardQuestions,
+      });
+      vaultStatus = st;
+      printed = code;
+      step = 3;
+      backBtn.hidden = true;
+      overlay.querySelector("#vault-setup-cancel")?.setAttribute("hidden", "");
+      renderDone();
+      renderSteps();
+      downloaded = false;
+      showNext(t("settings.kvRecoveryCodeDownload"));
+    } catch (err) {
+      fail(String(err));
+      showNext(t("settings.kvWizardCreate"));
+    } finally {
+      nextBtn.disabled = false;
+    }
+  };
+
+  nextBtn.addEventListener("click", () => {
+    errEl.hidden = true;
+    if (step === 1) {
+      if (validateStep1()) {
+        step = 2;
+        renderStep2();
+        backBtn.hidden = false;
+        showNext(t("settings.kvWizardCreate"));
+        renderSteps();
+      }
+    } else if (step === 2) {
+      if (collectQuestions()) void createVault();
+    } else if (step === 3 && !downloaded) {
+      void (async () => {
+        try {
+          const path = await saveRecoveryCodeTxt(printed);
+          if (path === null) return; // cancelled — keep offering the download
+          info(t("settings.kvRecoveryCodeSavedAt", { path }));
+          downloaded = true;
+          showNext(t("settings.kvWizardDone"));
+        } catch (err) {
+          fail(String(err));
+        }
+      })();
+    } else if (step === 3) {
+      void close();
+    }
+  });
+
+  backBtn.addEventListener("click", () => {
+    errEl.hidden = true;
+    if (step === 2) {
+      step = 1;
+      renderStep1();
+      backBtn.hidden = true;
+      showNext(t("settings.kvWizardNext"));
+      renderSteps();
+    }
+  });
+
+  renderSteps();
+  renderStep1();
+  showNext(t("settings.kvWizardNext"));
+}
+
 // ── Q&A recovery (forgot master password) ───────────────────────────────────
 
 let recoveryPresetPw: string | null = null;
@@ -10461,26 +10730,29 @@ const RECOVERY_PRESET_KEYS = [
   "settings.kvQMovie",
 ];
 
-function recoveryEditorRow(): HTMLElement {
+function recoveryEditorRow(hideDelete = false): HTMLElement {
   const row = document.createElement("div");
   row.className = "kv-recovery-row";
   row.innerHTML = `
     <input type="text" class="rc-q" list="kv-recovery-presets" maxlength="60"
       placeholder="${escapeHtml(t("settings.kvRecoveryQPh"))}" spellcheck="false" />
-    <input type="password" class="rc-a" maxlength="40" autocomplete="off"
+    <input type="password" class="rc-a" maxlength="80" autocomplete="off"
       placeholder="${escapeHtml(t("settings.kvRecoveryAPh"))}" />
-    <input type="password" class="rc-a2" maxlength="40" autocomplete="off"
+    <input type="password" class="rc-a2" maxlength="80" autocomplete="off"
       placeholder="${escapeHtml(t("settings.kvRecoveryA2Ph"))}" />
-    <button type="button" class="mini-btn" data-rc-del>−</button>`;
+    ${hideDelete ? "" : `<button type="button" class="mini-btn" data-rc-del>−</button>`}`;
   return row;
 }
 
 /// The set/change-questions form. `pw` is the just-collected password when
 /// the flow follows set-password (submit reuses it); null → submit prompts.
+/// v3 vaults take exactly three fixed questions (no add/remove); v2 keeps
+/// the free-form 1–5 row editor.
 function renderRecoveryEditor(pw: string | null): void {
   recoveryPresetPw = pw;
   const panel = document.querySelector<HTMLElement>("#kv-recovery-panel");
   if (!panel) return;
+  const v3 = vaultStatus?.version === 3;
   const presets = document.createElement("datalist");
   presets.id = "kv-recovery-presets";
   presets.innerHTML = RECOVERY_PRESET_KEYS.map(
@@ -10489,18 +10761,23 @@ function renderRecoveryEditor(pw: string | null): void {
   const wrap = document.createElement("div");
   wrap.className = "kv-recovery";
   wrap.innerHTML = `
-    <p class="kv-hint">${escapeHtml(t("settings.kvRecoveryHint"))}</p>
+    <p class="kv-hint">${escapeHtml(t(v3 ? "settings.kvV3QEditorHint" : "settings.kvRecoveryHint"))}</p>
     <div class="kv-recovery-rows"></div>
     <div class="kv-recovery-actions">
-      <button type="button" class="mini-btn" data-rc-add>${escapeHtml(t("settings.kvRecoveryAdd"))}</button>
+      ${v3 ? "" : `<button type="button" class="mini-btn" data-rc-add>${escapeHtml(t("settings.kvRecoveryAdd"))}</button>`}
       <span class="spacer"></span>
       <button type="button" class="mini-btn" data-rc-cancel>${escapeHtml(t("dialog.cancel"))}</button>
       <button type="button" class="mini-btn" data-rc-save>${escapeHtml(t("settings.kvRecoverySave"))}</button>
     </div>`;
   panel.replaceChildren(presets, wrap);
   const rows = wrap.querySelector<HTMLElement>(".kv-recovery-rows")!;
-  // Default and recommendation: two questions.
-  rows.append(recoveryEditorRow(), recoveryEditorRow());
+  if (v3) {
+    // Exactly three, all required (pairwise-distinct enforced in Rust).
+    rows.append(recoveryEditorRow(true), recoveryEditorRow(true), recoveryEditorRow(true));
+  } else {
+    // Default and recommendation: two questions.
+    rows.append(recoveryEditorRow(), recoveryEditorRow());
+  }
 }
 
 async function submitRecoveryEditor(): Promise<void> {
@@ -10539,16 +10816,318 @@ async function submitRecoveryEditor(): Promise<void> {
     if (status) status.textContent = t("settings.kvRecoverySaved", { n: questions.length });
     panel.replaceChildren();
     await loadKeyvault();
+    // v3: walk straight into the one-time recovery-code enrollment while
+    // the just-verified password is still in hand.
+    if (vaultStatus?.version === 3 && !vaultStatus.recovery_code) {
+      const want = await appConfirm({
+        title: t("settings.kvRecoveryCodeTitle"),
+        message: t("settings.kvRecoveryCodeOffer"),
+        confirmLabel: t("settings.kvRecoveryCodeGen"),
+      });
+      if (want) await generateRecoveryCode(pw);
+    }
   } catch (err) {
     if (status) status.textContent = String(err);
   }
 }
 
-/// The forgot-password challenge: every stored question + one answer each;
-/// all answers must verify before a new master password is accepted.
-async function renderRecoveryChallenge(): Promise<void> {
+// ── v3 recovery code (one-time print + TXT export) ──────────────────────────
+
+/// Enroll a fresh recovery code. The printed code exists only in this
+/// response — the panel shows it once with a TXT download.
+async function generateRecoveryCode(presetPw?: string): Promise<void> {
+  const status = document.querySelector("#status");
+  let pw = presetPw ?? null;
+  if (pw === null) {
+    pw = await appPrompt({
+      title: t("settings.kvUnlockTitle"),
+      placeholder: t("settings.kvPasswordPlaceholder"),
+      confirmLabel: t("settings.kvRecoveryCodeGen"),
+      secret: true,
+    });
+  }
+  if (pw === null) return;
+  try {
+    const [st, printed] = await invoke<[VaultStatus, string]>(
+      "keyvault_v3_enable_recovery_code",
+      { password: pw },
+    );
+    vaultStatus = st;
+    showRecoveryCodePanel(printed);
+  } catch (err) {
+    if (status) status.textContent = String(err);
+  }
+}
+
+async function disableRecoveryCode(): Promise<void> {
+  const status = document.querySelector("#status");
+  const sure = await appConfirm({
+    title: t("settings.kvRecoveryCodeOff"),
+    message: t("settings.kvRecoveryCodeOffConfirm"),
+    confirmLabel: t("settings.kvRecoveryCodeOff"),
+  });
+  if (!sure) return;
+  const pw = await appPrompt({
+    title: t("settings.kvUnlockTitle"),
+    placeholder: t("settings.kvPasswordPlaceholder"),
+    confirmLabel: t("settings.kvRecoveryCodeOff"),
+    secret: true,
+  });
+  if (pw === null) return;
+  try {
+    vaultStatus = await invoke<VaultStatus>("keyvault_v3_disable_recovery_code", {
+      password: pw,
+    });
+    if (status) status.textContent = t("settings.kvRecoveryCodeDisabled");
+    await loadKeyvault();
+  } catch (err) {
+    if (status) status.textContent = String(err);
+  }
+}
+
+/// TXT body for the one-time recovery code (download + wizard share it).
+function recoveryCodeTxt(printed: string): string {
+  return (
+    `Pane 密钥保险箱 — 恢复码 / Recovery Code\n` +
+    `生成时间 Generated: ${new Date().toISOString()}\n\n` +
+    `${printed}\n\n` +
+    `此码仅显示一次。忘记解锁码时，用它重置解锁码。\n` +
+    `任何持有此码的人都可以重置你的解锁码，请妥善保管。\n` +
+    `This code is shown once. Anyone holding it can reset your unlock code — keep it safe.\n`
+  );
+}
+
+/// Native "Save as…" through the Rust command — the WebView2 sandbox does
+/// not turn an <a download> into a file dialog, so the OS dialog opens on
+/// the Rust side. Returns the chosen path, or null when cancelled.
+async function saveRecoveryCodeTxt(printed: string): Promise<string | null> {
+  return invoke<string | null>("save_text_file", {
+    contents: recoveryCodeTxt(printed),
+    suggestedName: "pane-recovery-code.txt",
+  });
+}
+
+/// The one-time reveal: the code, a TXT download, and an explicit
+/// "I saved it" acknowledgment that closes the panel.
+function showRecoveryCodePanel(printed: string): void {
   const panel = document.querySelector<HTMLElement>("#kv-recovery-panel");
   if (!panel) return;
+  const wrap = document.createElement("div");
+  wrap.className = "kv-recovery";
+  wrap.innerHTML = `
+    <p class="kv-hint">${escapeHtml(t("settings.kvRecoveryCodeOnce"))}</p>
+    <code class="kv-recovery-code">${escapeHtml(printed)}</code>
+    <div class="kv-recovery-actions">
+      <button type="button" class="mini-btn" data-v3r-download>${escapeHtml(t("settings.kvRecoveryCodeDownload"))}</button>
+      <span class="spacer"></span>
+      <button type="button" class="mini-btn" data-v3r-done>${escapeHtml(t("settings.kvRecoveryCodeDone"))}</button>
+    </div>`;
+  panel.replaceChildren(wrap);
+  wrap.querySelector("[data-v3r-download]")?.addEventListener("click", async () => {
+    const status = document.querySelector("#status");
+    try {
+      const path = await saveRecoveryCodeTxt(printed);
+      if (path && status) status.textContent = t("settings.kvRecoveryCodeSavedAt", { path });
+    } catch (err) {
+      if (status) status.textContent = String(err);
+    }
+  });
+  wrap.querySelector("[data-v3r-done]")?.addEventListener("click", async () => {
+    panel.replaceChildren();
+    await loadKeyvault();
+  });
+}
+
+// ── v3 forgot-unlock-code reset (questions / typed code / TXT upload) ───────
+
+/// Fold a string the same way Rust's recovery_code_normalize does, then
+/// check it against the Crockford alphabet (no I, L, O, U).
+function looksLikeRecoveryCode(folded: string): boolean {
+  return /^[0-9A-HJKMNP-TV-Z]{34}$/.test(folded);
+}
+
+function foldRecoveryCodeLikeRust(s: string): string {
+  return s
+    .replace(/[\s-]/g, "")
+    .toUpperCase()
+    .replace(/O/g, "0")
+    .replace(/[IL]/g, "1");
+}
+
+/// Lift a code out of arbitrary text: whole-string fold first, then the
+/// first line that folds to a valid 34-char Crockford string (an exported
+/// TXT carries prose around the code).
+function extractRecoveryCode(text: string): string | null {
+  const whole = foldRecoveryCodeLikeRust(text);
+  if (looksLikeRecoveryCode(whole)) return whole;
+  for (const line of text.split(/\r?\n/)) {
+    const folded = foldRecoveryCodeLikeRust(line);
+    if (looksLikeRecoveryCode(folded)) return folded;
+  }
+  return null;
+}
+
+/// Modal shell shared by the vault dialogs. Returns null when a dialog with
+/// the same id is already open. The caller sets the submit button's label.
+function vaultModalShell(id: string, title: string): {
+  overlay: HTMLElement;
+  body: HTMLElement;
+  err: HTMLElement;
+  submit: HTMLButtonElement;
+  close: () => void;
+} | null {
+  if (document.querySelector(`#${id}-overlay`)) return null;
+  const overlay = document.createElement("div");
+  overlay.id = `${id}-overlay`;
+  overlay.innerHTML = `
+    <div id="${id}-box" role="dialog" aria-modal="true">
+      <h3>${escapeHtml(title)}</h3>
+      <div id="${id}-body"></div>
+      <p class="vault-setup-error" id="${id}-error" hidden></p>
+      <div class="kv-recovery-actions">
+        <button type="button" class="mini-btn" id="${id}-cancel">${escapeHtml(t("dialog.cancel"))}</button>
+        <span class="spacer"></span>
+        <button type="button" class="mini-btn primary" id="${id}-submit"></button>
+      </div>
+    </div>`;
+  document.body.append(overlay);
+  function close(): void {
+    overlay.remove();
+    document.removeEventListener("keydown", onKey, true);
+  }
+  function onKey(e: KeyboardEvent): void {
+    if (e.key === "Escape") close();
+  }
+  document.addEventListener("keydown", onKey, true);
+  overlay.addEventListener("click", (e) => {
+    if (e.target === overlay) close();
+  });
+  overlay.querySelector(`#${id}-cancel`)?.addEventListener("click", close);
+  return {
+    overlay,
+    body: overlay.querySelector<HTMLElement>(`#${id}-body`)!,
+    err: overlay.querySelector<HTMLElement>(`#${id}-error`)!,
+    submit: overlay.querySelector<HTMLButtonElement>(`#${id}-submit`)!,
+    close,
+  };
+}
+
+type VaultShell = NonNullable<ReturnType<typeof vaultModalShell>>;
+
+/// v3 forgot-code dialog: verify by answering any two of the three
+/// questions, or by typing the recovery code twice, or by uploading the
+/// exported TXT — then set a new unlock code (typed twice as well).
+async function vaultResetDialog(): Promise<void> {
+  const shell = vaultModalShell("vault-reset", t("settings.kvResetTitle"));
+  if (!shell) return;
+  let qs: [string, string][] = [];
+  try {
+    qs = await invoke<[string, string][]>("keyvault_recovery_questions");
+  } catch {
+    qs = [];
+  }
+  const qRows = qs
+    .map(
+      ([id, q]) => `
+    <div class="kv-recovery-row">
+      <span class="rc-q-text">${escapeHtml(q)}</span>
+      <input type="password" class="rc-answer" data-v3r-ans="${escapeHtml(id)}" maxlength="80" autocomplete="off"
+        placeholder="${escapeHtml(t("settings.kvRecoveryAPh"))}" />
+    </div>`,
+    )
+    .join("");
+  const codeBlock = vaultStatus?.recovery_code
+    ? `<div class="kv-recovery-row">
+      <input type="password" class="rc-code" data-v3r-code maxlength="40" autocomplete="off"
+        placeholder="${escapeHtml(t("settings.kvRecoveryCodePh"))}" />
+      <input type="password" class="rc-code" data-v3r-code2 maxlength="40" autocomplete="off"
+        placeholder="${escapeHtml(t("settings.kvRecoveryCodeAgainPh"))}" />
+    </div>
+    <div class="kv-recovery-actions">
+      <button type="button" class="mini-btn" data-v3r-upload>${escapeHtml(t("settings.kvV3Upload"))}</button>
+      <input type="file" accept=".txt,text/plain" hidden data-v3r-file />
+    </div>`
+    : "";
+  shell.body.innerHTML = `
+    <p class="kv-hint">${escapeHtml(t("settings.kvV3ForgotHint"))}</p>
+    ${qRows ? `<div class="kv-recovery-rows">${qRows}</div>` : ""}
+    ${codeBlock}`;
+  shell.submit.textContent = t("settings.kvV3ResetSubmit");
+  // TXT upload: read the file, lift the code, fill both inputs.
+  shell.body.querySelector("[data-v3r-upload]")?.addEventListener("click", () => {
+    shell.body.querySelector<HTMLInputElement>("[data-v3r-file]")?.click();
+  });
+  shell.body.querySelector<HTMLInputElement>("[data-v3r-file]")?.addEventListener("change", async (e) => {
+    const file = (e.target as HTMLInputElement).files?.[0];
+    if (!file) return;
+    const code = extractRecoveryCode(await file.text());
+    if (!code) {
+      shell.err.textContent = t("settings.kvV3FileBad");
+      shell.err.hidden = false;
+      return;
+    }
+    const a = shell.body.querySelector<HTMLInputElement>("[data-v3r-code]");
+    const b = shell.body.querySelector<HTMLInputElement>("[data-v3r-code2]");
+    if (a) a.value = code;
+    if (b) b.value = code;
+  });
+  shell.submit.addEventListener("click", () => void submitV3Reset(shell));
+}
+
+async function submitV3Reset(shell: VaultShell): Promise<void> {
+  const fail = (m: string) => {
+    shell.err.textContent = m;
+    shell.err.hidden = false;
+  };
+  const answers: [string, string][] = [];
+  for (const input of [...shell.body.querySelectorAll<HTMLInputElement>("[data-v3r-ans]")]) {
+    if (input.value.trim()) answers.push([input.dataset.v3rAns ?? "", input.value]);
+  }
+  const codeA = shell.body.querySelector<HTMLInputElement>("[data-v3r-code]")?.value ?? "";
+  const codeB = shell.body.querySelector<HTMLInputElement>("[data-v3r-code2]")?.value ?? "";
+  const useCode = codeA.trim().length > 0;
+  if (useCode) {
+    if (codeA !== codeB) return fail(t("settings.kvV3CodeMismatch"));
+  } else if (answers.length < 2) {
+    return fail(t("settings.kvV3AnswerTwo"));
+  }
+  const np = await appPrompt({
+    title: t("settings.kvNewPwTitle"),
+    placeholder: t("settings.kvV3CodePlaceholder"),
+    confirmLabel: t("settings.kvChangeNext"),
+    secret: true,
+  });
+  if (np === null) return;
+  if ([...np].length < 6) return fail(t("settings.kvV3CodeHint"));
+  const again = await appPrompt({
+    title: t("settings.kvPasswordConfirmTitle"),
+    placeholder: t("settings.kvPasswordPlaceholder"),
+    confirmLabel: t("settings.kvV3ResetSubmit"),
+    secret: true,
+  });
+  if (again === null) return;
+  if (np !== again) return fail(t("settings.kvPasswordMismatch"));
+  try {
+    vaultStatus = await invoke<VaultStatus>("keyvault_v3_reset_unlock_code", {
+      answers: useCode ? null : answers,
+      recoveryCode: useCode ? codeA : null,
+      newCode: np,
+    });
+    shell.close();
+    const status = document.querySelector("#status");
+    if (status) status.textContent = t("settings.kvV3ResetDone");
+    await loadKeyvault();
+  } catch (err) {
+    fail(String(err));
+    // keep the dialog so the user can retry (or read the cooldown)
+  }
+}
+
+/// v2 forgot-password dialog: every stored question + one answer each;
+/// all answers must verify before a new master password is accepted.
+async function recoveryChallengeDialog(): Promise<void> {
+  const shell = vaultModalShell("vault-reset", t("settings.kvResetTitle"));
+  if (!shell) return;
   let qs: [string, string][] = [];
   try {
     qs = await invoke<[string, string][]>("keyvault_recovery_questions");
@@ -10556,38 +11135,29 @@ async function renderRecoveryChallenge(): Promise<void> {
     qs = [];
   }
   if (!qs.length) return;
-  const wrap = document.createElement("div");
-  wrap.className = "kv-recovery";
-  const qRows = qs
-    .map(
-      ([, q], i) => `
+  shell.body.innerHTML = `
+    <p class="kv-hint">${escapeHtml(t("settings.kvForgotHint"))}</p>
+    ${qs
+      .map(
+        ([, q], i) => `
     <div class="kv-recovery-row">
       <span class="rc-q-text">${escapeHtml(q)}</span>
       <input type="password" class="rc-answer" data-rc-ans="${i}" maxlength="40" autocomplete="off"
         placeholder="${escapeHtml(t("settings.kvRecoveryAPh"))}" />
     </div>`,
-    )
-    .join("");
-  wrap.innerHTML = `
-    <p class="kv-hint">${escapeHtml(t("settings.kvForgotHint"))}</p>
-    ${qRows}
-    <div class="kv-recovery-actions">
-      <span class="spacer"></span>
-      <button type="button" class="mini-btn" data-rc-cancel>${escapeHtml(t("dialog.cancel"))}</button>
-      <button type="button" class="mini-btn" data-rc-reset>${escapeHtml(t("settings.kvForgotSubmit"))}</button>
-    </div>`;
-  panel.replaceChildren(wrap);
+      )
+      .join("")}`;
+  shell.submit.textContent = t("settings.kvForgotSubmit");
+  shell.submit.addEventListener("click", () => void submitRecoveryChallenge(shell));
 }
 
-async function submitRecoveryChallenge(): Promise<void> {
-  const status = document.querySelector("#status");
-  const panel = document.querySelector<HTMLElement>("#kv-recovery-panel");
-  if (!panel) return;
-  const inputs = [...panel.querySelectorAll<HTMLInputElement>(".rc-answer")];
-  if (inputs.some((i) => !i.value.trim())) {
-    if (status) status.textContent = t("settings.kvRecoveryFillAll");
-    return;
-  }
+async function submitRecoveryChallenge(shell: VaultShell): Promise<void> {
+  const fail = (m: string) => {
+    shell.err.textContent = m;
+    shell.err.hidden = false;
+  };
+  const inputs = [...shell.body.querySelectorAll<HTMLInputElement>(".rc-answer")];
+  if (inputs.some((i) => !i.value.trim())) return fail(t("settings.kvRecoveryFillAll"));
   const np = await appPrompt({
     title: t("settings.kvNewPwTitle"),
     placeholder: t("settings.kvPasswordPlaceholder"),
@@ -10602,21 +11172,19 @@ async function submitRecoveryChallenge(): Promise<void> {
     secret: true,
   });
   if (again === null) return;
-  if (np !== again) {
-    if (status) status.textContent = t("settings.kvPasswordMismatch");
-    return;
-  }
+  if (np !== again) return fail(t("settings.kvPasswordMismatch"));
   try {
     vaultStatus = await invoke<VaultStatus>("keyvault_recovery_reset", {
       answers: inputs.map((i) => i.value),
       newPassword: np,
     });
+    shell.close();
+    const status = document.querySelector("#status");
     if (status) status.textContent = t("settings.kvRecoveryDone");
-    panel.replaceChildren();
     await loadKeyvault();
   } catch (err) {
-    if (status) status.textContent = String(err);
-    // keep the challenge panel so the user can retry (or read the cooldown)
+    fail(String(err));
+    // keep the dialog so the user can retry (or read the cooldown)
   }
 }
 
@@ -12052,15 +12620,24 @@ async function initSettings(): Promise<void> {
     const btn = (event.target as HTMLElement).closest<HTMLButtonElement>("[data-kv-vault-action]");
     if (!btn) return;
     if (btn.dataset.kvVaultAction === "set") void setVaultPassword();
+    else if (btn.dataset.kvVaultAction === "setup") vaultSetupWizard();
     else if (btn.dataset.kvVaultAction === "unlock") void unlockVault();
     else if (btn.dataset.kvVaultAction === "lock") void lockVault();
     else if (btn.dataset.kvVaultAction === "change") void changeVaultPassword();
     else if (btn.dataset.kvVaultAction === "questions") renderRecoveryEditor(null);
-    else if (btn.dataset.kvVaultAction === "forgot") void renderRecoveryChallenge();
+    else if (btn.dataset.kvVaultAction === "recovery-code") void generateRecoveryCode();
+    else if (btn.dataset.kvVaultAction === "recovery-code-off") void disableRecoveryCode();
+    else if (btn.dataset.kvVaultAction === "forgot") {
+      // v3 vaults take the three-path reset (questions / typed code / TXT
+      // upload); v2 keeps its answer-everything challenge. Both open a
+      // modal dialog, not an inline panel.
+      if (vaultStatus?.version === 3) void vaultResetDialog();
+      else void recoveryChallengeDialog();
+    }
   });
 
-  // Q&A recovery: add/remove rows, submit the editor, or submit the
-  // forgot-password challenge. All inline under the vault bar.
+  // Q&A recovery editor (set/change questions) stays inline under the bar;
+  // the forgot-password dialogs bind their own handlers.
   document.querySelector("#kv-recovery-panel")?.addEventListener("click", (event) => {
     const target = event.target as HTMLElement;
     const status = document.querySelector("#status");
@@ -12093,8 +12670,6 @@ async function initSettings(): Promise<void> {
       panel.replaceChildren();
     } else if (target.closest("[data-rc-save]")) {
       void submitRecoveryEditor();
-    } else if (target.closest("[data-rc-reset]")) {
-      void submitRecoveryChallenge();
     }
   });
 

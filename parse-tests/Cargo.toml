@@ -26,7 +26,11 @@ harness = []
 [dependencies]
 tauri = { path = "tauri-stub" }
 serde = { version = "1", features = ["derive"] }
-serde_json = "1"
+# preserve_order mirrors the app build, where tauri-utils→schemars turns it
+# on for the real runtime dependency graph. keyvault_v3's canonical JSON must
+# not depend on serde_json's Map type — running the suite under the same
+# feature keeps that divergence from ever going unnoticed here again.
+serde_json = { version = "1", features = ["preserve_order"] }
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "socks"] }
 tokio = { version = "1", features = ["macros", "process", "rt-multi-thread", "sync", "time"] }
 chrono = "0.4"
@@ -42,6 +46,10 @@ aes-gcm = "0.10"
 cbc = "0.1"
 argon2 = "0.5"
 rand_core = { version = "0.6", features = ["getrandom"] }
+# Keyvault v3 (mirrors src-tauri/Cargo.toml).
+hkdf = "0.12"
+zeroize = "1"
+unicode-normalization = "0.1"
 dirs = "6"
 rusqlite = { version = "0.32", features = ["bundled", "backup"] }
 # Zed's assistant threads are zstd-compressed inside threads.db.

@@ -9,6 +9,7 @@ mod cursor_accounts;
 mod cursor_oauth;
 mod fonts;
 mod keyvault;
+mod keyvault_v3;
 mod alerts;
 mod httpapi;
 mod i18n;
@@ -1930,7 +1931,7 @@ fn accounts_with_imported_main_key(family: &str) -> Vec<accounts::AccountEntry> 
 // ── Key vault commands: thin wrappers over keyvault.rs's plain API. ────────
 
 #[tauri::command]
-fn keyvault_list() -> Vec<keyvault::VaultRow> {
+fn keyvault_list() -> Result<Vec<keyvault::VaultRow>, String> {
     keyvault::list()
 }
 
@@ -2001,6 +2002,91 @@ fn keyvault_recovery_reset(
     new_password: String,
 ) -> Result<keyvault::VaultStatus, String> {
     keyvault::recovery_reset(&answers, &new_password)
+}
+
+/// Native "Save as…" for an exported text file (recovery-code TXT). The
+/// dialog runs on a blocking thread; a cancelled dialog returns null, not
+/// an error. The webview never touches the dialog plugin directly — this
+/// app command is the only seam, same rule as the rest of the IPC surface.
+#[tauri::command]
+async fn save_text_file(
+    app: tauri::AppHandle,
+    contents: String,
+    suggested_name: String,
+) -> Result<Option<String>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        use tauri_plugin_dialog::DialogExt;
+        let picked = app
+            .dialog()
+            .file()
+            .set_file_name(&suggested_name)
+            .add_filter("Text", &["txt"])
+            .blocking_save_file();
+        let Some(picked) = picked else {
+            return Ok(None);
+        };
+        let path = picked.into_path().map_err(|e| e.to_string())?;
+        std::fs::write(&path, contents).map_err(|e| format!("write {}: {e}", path.display()))?;
+        Ok(Some(path.display().to_string()))
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// v3 setup wizard, one shot: create the vault (unlock code + exactly three
+/// questions + enrolled recovery code) in a single atomic file write. The
+/// printed recovery code comes back exactly once. Only valid while no vault
+/// exists at all.
+/// read-only and shown to the user before anything is written; `install`
+/// backs up replaced files and is idempotent.
+#[tauri::command]
+}
+
+#[tauri::command]
+}
+
+#[tauri::command]
+fn keyvault_v3_setup(
+    code: String,
+    questions: Vec<(String, String)>,
+) -> Result<(keyvault::VaultStatus, String), String> {
+    keyvault::setup_v3(&code, &questions)
+}
+
+/// v3: enroll a fresh recovery code. The printed code is returned exactly
+/// once (never stored); re-enrolling rotates the id/salt, revoking the old
+/// code against the new file.
+#[tauri::command]
+fn keyvault_v3_enable_recovery_code(
+    password: String,
+) -> Result<(keyvault::VaultStatus, String), String> {
+    keyvault::enable_recovery_code(&password)
+}
+
+#[tauri::command]
+fn keyvault_v3_disable_recovery_code(password: String) -> Result<keyvault::VaultStatus, String> {
+    keyvault::disable_recovery_code(&password)
+}
+
+/// v3 forgot-code reset. Exactly one factor: `answers` are (question_id,
+/// answer) pairs — any two of three suffice — or `recovery_code` (typed or
+/// lifted from the exported TXT; the same normalization applies). The DEK
+/// never changes, so entries/questions stay byte-identical. Rate-limited
+/// like the v2 flow.
+#[tauri::command]
+fn keyvault_v3_reset_unlock_code(
+    answers: Option<Vec<(String, String)>>,
+    recovery_code: Option<String>,
+    new_code: String,
+) -> Result<keyvault::VaultStatus, String> {
+    if answers.is_none() == recovery_code.is_none() {
+        return Err("provide exactly one recovery factor (answers or recovery code)".into());
+    }
+    keyvault::reset_unlock_code_v3(
+        answers.as_deref().unwrap_or(&[]),
+        recovery_code.as_deref(),
+        &new_code,
+    )
 }
 
 #[tauri::command]
@@ -5025,6 +5111,7 @@ pub fn run() {
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
+        .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![
             keyvault_list,
             keyvault_add,
@@ -5035,6 +5122,11 @@ pub fn run() {
             keyvault_set_recovery,
             keyvault_recovery_questions,
             keyvault_recovery_reset,
+            keyvault_v3_setup,
+            save_text_file,
+            keyvault_v3_enable_recovery_code,
+            keyvault_v3_disable_recovery_code,
+            keyvault_v3_reset_unlock_code,
             keyvault_unlock,
             keyvault_lock,
             keyvault_reveal,
