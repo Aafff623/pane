@@ -30,7 +30,7 @@ Handoff parcels in `temp/handoff/` cite task IDs from this board. The board does
 - [ ] T-0007 — 把 4 个模块的 84 个「死测试」挂进 parse-tests harness（`lib.rs`/`tray_projection`/`telemetry`/`httpapi`）
 - [ ] T-0008 — 收尾欠账：长墙镜像白名单逐家实测扩展、ru 语言 38 键、`docs/providers.md` 16 节
 - [ ] T-0009 — Qoder 配额卡：用户完成一次 device-code 登录后按实测响应实现（端点情报已在 handoff）
-- [ ] T-0010 — 发布资产与杂项：`ROADMAP`/`README` 计数、`stash@{0}` 处置、项目 skill 落位与入库、**装机目录自启 exe 换正式构建**（实测为依赖 Vite 的开发构建——无 Vite 时开机自启只显示报错页；换正式版后走应用内更新，不再卸载重装，并在换装后实测一次应用内更新（v0.5.0 的 latest.json 通道首次可验））。install.ps1 下载源已修正到本仓（2026-10-10）
+- [ ] T-0010 — 发布资产与杂项：`ROADMAP`/`README` 计数、`stash@{0}` 处置、项目 skill 落位与入库、~~装机目录自启 exe 换正式构建~~（**已解决**：装机目录 0.6.0 起即 CI 正式构建，2026-10-11 已随 v0.7.0 用官方 setup.exe 静默更新并验证 `/v1/status` version=0.7.0）；剩「换装后实测一次应用内更新（latest.json 通道）」待下个版本触发。install.ps1 下载源已修正到本仓（2026-10-10）
 
 - [ ] T-0012 — 官网模块二重做「使用流程」区块：快捷键（Alt+2/Shift/Ctrl+S/Esc）+ 基本功能（多账号/总花费/额度查询）+ 生态扩展声明（不止 Coding Agent，生产力工具皆可接入）
 - [ ] T-0013 — 官网第三模块 provider 图标深浅主题可见性修复（claude/hermes 等暗色看不清；深浅主题下全部可辨，验收双主题逐图肉眼过）
