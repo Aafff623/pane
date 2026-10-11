@@ -22,6 +22,8 @@ pub mod providers;
 pub mod keyvault;
 #[path = "../../src-tauri/src/keyvault_v3/mod.rs"]
 pub mod keyvault_v3;
+#[path = "../../src-tauri/src/search_keys.rs"]
+pub mod search_keys;
 
 #[path = "../../src-tauri/src/pricing.rs"]
 pub mod pricing;

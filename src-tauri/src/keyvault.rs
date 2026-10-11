@@ -639,7 +639,7 @@ fn open_all(file: &VaultFile) -> Result<Vec<VaultEntry>, String> {
 
 /// Stable id: service + short digest of the key — seeding twice never
 /// duplicates an entry, and re-adding the same key is a no-op update.
-fn entry_id(service: &str, key: &str) -> String {
+pub(crate) fn entry_id(service: &str, key: &str) -> String {
     let mut h: u64 = 0xcbf29ce484222325;
     for b in key.bytes() {
         h ^= b as u64;
@@ -863,6 +863,28 @@ pub fn status() -> VaultStatus {
 /// Errors on every problem state — the frontend's existing try/catch shows
 /// the reason instead of ever rendering a fake empty vault.
 pub fn list() -> Result<Vec<VaultRow>, String> {
+    // Search-service keys live in a plaintext Pane-managed file, not the
+    // vault — they are listed alongside the vault rows so Settings shows one
+    // unified key list.
+    let mut out = search_key_rows();
+    out.extend(vault_rows()?);
+    Ok(out)
+}
+
+fn search_key_rows() -> Vec<VaultRow> {
+    crate::search_keys::list()
+        .into_iter()
+        .map(|k| VaultRow {
+            masked: mask_key(&k.key),
+            id: k.id,
+            service: k.service,
+            label: k.label,
+            note: String::new(),
+        })
+        .collect()
+}
+
+fn vault_rows() -> Result<Vec<VaultRow>, String> {
     match read_store_from(&vault_path()) {
         ReadStore::Missing => Ok(Vec::new()),
         ReadStore::LegacyV1(mut entries) => {
@@ -1230,6 +1252,12 @@ fn reset_unlock_code_v3_at(
 }
 
 pub fn add(service: &str, label: &str, key: &str, note: &str) -> Result<Vec<VaultRow>, String> {
+    // Search services are stored in the plaintext Pane file — readable on
+    // every launch without unlocking the vault.
+    if crate::search_keys::is_search_service(service) {
+        crate::search_keys::add(service, label, key)?;
+        return list();
+    }
     if service.trim().is_empty() || key.trim().is_empty() {
         return Err("service and key are required".into());
     }
@@ -1302,6 +1330,10 @@ fn vault_id_bytes_pub(file: &crate::keyvault_v3::VaultFileV3) -> [u8; 16] {
 }
 
 pub fn remove(id: &str) -> Result<Vec<VaultRow>, String> {
+    if crate::search_keys::service_of(id).is_some() {
+        crate::search_keys::remove(id)?;
+        return list();
+    }
     let path = vault_path();
     match read_store_from(&path) {
         ReadStore::Missing => Err("no such key".into()),
@@ -1383,6 +1415,9 @@ pub fn set_note(id: &str, note: &str) -> Result<Vec<VaultRow>, String> {
 /// Raw key for viewing/clipboard — the only path that un-masks, and only the
 /// in-app frontend can call it. A sealed vault must be unlocked first.
 pub fn reveal(id: &str) -> Result<String, String> {
+    if crate::search_keys::service_of(id).is_some() {
+        return crate::search_keys::reveal(id);
+    }
     match read_store_from(&vault_path()) {
         ReadStore::Missing => Err("no such key".into()),
         ReadStore::LegacyV1(entries) => entries
@@ -1416,6 +1451,11 @@ pub fn copy(id: &str) -> Result<String, String> {
 /// locked one (safe fallback, no writes) while `status()` surfaces the
 /// problem — the working copies never live only in the vault.
 pub fn keys_for_service(service: &str) -> Vec<(String, String)> {
+    // Search services come from the plaintext Pane file — always readable,
+    // never gated behind an unlock.
+    if crate::search_keys::is_search_service(service) {
+        return crate::search_keys::for_service(service);
+    }
     match read_store_from(&vault_path()) {
         ReadStore::LegacyV1(entries) => entries
             .into_iter()
@@ -1453,6 +1493,10 @@ pub fn keys_for_service(service: &str) -> Vec<(String, String)> {
 /// silently dropping the ones it cannot read. An unlocked (or plain) vault
 /// returns nothing: [`keys_for_service`] already hands those over.
 pub fn locked_service_entries(service: &str) -> Vec<(String, String)> {
+    // Search-service keys are plaintext, so they are never "locked".
+    if crate::search_keys::is_search_service(service) {
+        return Vec::new();
+    }
     match read_store_from(&vault_path()) {
         ReadStore::SealedV2(file) if session_key().is_none() => file
             .entries
@@ -1473,6 +1517,9 @@ pub fn locked_service_entries(service: &str) -> Vec<(String, String)> {
 /// Which service an entry id belongs to (needed before removal, so cache
 /// invalidation knows which provider to refetch).
 pub fn service_of(id: &str) -> Option<String> {
+    if let Some(service) = crate::search_keys::service_of(id) {
+        return Some(service);
+    }
     match read_store_from(&vault_path()) {
         ReadStore::LegacyV1(entries) => entries.into_iter().find(|e| e.id == id).map(|e| e.service),
         ReadStore::SealedV2(file) => file.entries.into_iter().find(|e| e.id == id).map(|e| e.service),

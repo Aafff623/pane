@@ -10,6 +10,7 @@ mod cursor_oauth;
 mod fonts;
 mod keyvault;
 mod keyvault_v3;
+mod search_keys;
 mod agent_skill;
 mod alerts;
 mod httpapi;

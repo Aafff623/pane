@@ -1,12 +1,12 @@
 //! Search / MCP service quota providers (Bocha, Tavily, Firecrawl, Brave).
 //!
-//! Key resolution: the Pane key vault (`%APPDATA%/Pane/keyvault.json`) is
-//! the primary source — entries are keyed by service id and keep a
-//! user-facing label that shows up on per-key rows. Legacy sources (env
-//! vars, tavily-keys.json, the ZCode CLI MCP config) stay as fallbacks and
-//! are deduped by key value. Adding/removing a vault key invalidates this
-//! module's cache, so the next refresh tick picks the new key set up
-//! automatically.
+//! Key resolution: these four services' keys live in the Pane-managed
+//! plaintext store (`%APPDATA%/Pane/search-keys.json`), NOT the encrypted
+//! vault — see `search_keys`. They are read from nowhere else: no environment
+//! variables, no third-party MCP client config. The user adds them in
+//! Settings, and each key keeps a user-facing label that shows up on the
+//! per-key rows. Adding/removing a key invalidates this module's cache, so
+//! the next refresh tick picks the new key set up automatically.
 //!
 //! A key is a credential, not proof of an independent quota pool. Team/account
 //! balances are shown separately; only explicitly key-scoped counters aggregate.
@@ -133,15 +133,15 @@ impl Keyed {
 }
 
 /// The value shown on a key row the vault holds but cannot read (locked).
+#[allow(dead_code)]
 const LOCKED_ROW: &str = "🔒 保险箱已锁定（解锁后查询）";
 
-/// Vault keys (with their labels) first, then legacy keys (masked label),
-/// deduped by key value. The second half of the pair is one row per vault
-/// entry the LOCKED vault could not hand over — the card then still lists
-/// every key the user stored, marked unqueried, instead of quietly showing
-/// fewer keys than the vault does. Masks already covered by a readable key
-/// are skipped (a vault copy of an env key is not a second pool).
-fn collect_keys(service: &str, legacy: Vec<String>) -> (Vec<Keyed>, Vec<Metric>) {
+/// Vault-free key resolution for the search services: keys come from the
+/// Pane-managed plaintext store (`search-keys.json`) only — never from
+/// environment variables or a third-party MCP client config. What the user
+/// adds in Settings is exactly what Pane queries. `locked` stays in the
+/// signature shape (always empty here) so the callers read unchanged.
+fn collect_keys(service: &str) -> (Vec<Keyed>, Vec<Metric>) {
     let mut out: Vec<Keyed> = Vec::new();
     for (label, key) in crate::keyvault::keys_for_service(service) {
         let key = key.trim().to_string();
@@ -155,71 +155,7 @@ fn collect_keys(service: &str, legacy: Vec<String>) -> (Vec<Keyed>, Vec<Metric>)
         };
         out.push(Keyed { label, key });
     }
-    for key in legacy {
-        let key = key.trim().to_string();
-        if key.is_empty() || out.iter().any(|k| k.key == key) {
-            continue;
-        }
-        out.push(Keyed {
-            label: Keyed::masked(&key),
-            key,
-        });
-    }
-    let seen: Vec<String> = out.iter().map(|k| Keyed::masked(&k.key)).collect();
-    let locked = crate::keyvault::locked_service_entries(service)
-        .into_iter()
-        .filter(|(_, masked)| !seen.contains(masked))
-        .map(|(label, masked)| {
-            let name = if label.trim().is_empty() {
-                masked
-            } else {
-                label
-            };
-            Metric::text(&name, LOCKED_ROW.into())
-        })
-        .collect();
-    (out, locked)
-}
-
-/// The active Firecrawl legacy key: the ZCode CLI's MCP server config
-/// carries the literal current key; env vars may still hold the old one.
-fn firecrawl_legacy_key() -> Option<String> {
-    let cfg = dirs::home_dir()?
-        .join(".zcode")
-        .join("cli")
-        .join("config.json");
-    let text = std::fs::read_to_string(cfg).ok()?;
-    let v: Value = serde_json::from_str(&text).ok()?;
-    let key = v
-        .pointer("/mcp/servers/firecrawl/env/FIRECRAWL_API_KEY")
-        .and_then(Value::as_str)?
-        .trim()
-        .to_string();
-    (!key.is_empty()).then_some(key)
-}
-
-/// Tavily legacy keys: the Pane-managed list (`tavily-keys.json`) plus env.
-fn tavily_legacy_keys() -> Vec<String> {
-    let mut out = Vec::new();
-    let path = super::config_dir().join("tavily-keys.json");
-    if let Ok(raw) = std::fs::read_to_string(&path) {
-        if let Ok(v) = serde_json::from_str::<Value>(&raw) {
-            for k in v
-                .get("keys")
-                .and_then(Value::as_array)
-                .into_iter()
-                .flatten()
-            {
-                if let Some(s) = k.as_str().map(str::trim).filter(|s| !s.is_empty()) {
-                    out.push(s.to_string());
-                }
-            }
-        }
-    }
-    if let Some(env) = env_key(&["TAVILY_API_KEY"]) {
-        out.push(env);
-    }
-    out
+    (out, Vec::new())
 }
 
 fn bearer(url: &str, key: &str, what: &str) -> reqwest::RequestBuilder {
@@ -286,11 +222,15 @@ fn no_keys(id: &str, name: &str, add_hint: &str, locked: &[Metric]) -> Snapshot 
     }
 }
 
-/// Pure local probe for the Customize gear panel (no network): a key is
-/// present in the vault or the environment.
+/// Pure local probe for the Customize gear panel (no network): where a key
+/// for this service would come from.
 pub fn local_credential_hint(service: &str, env_vars: &[&str]) -> Option<String> {
     if !crate::keyvault::keys_for_service(service).is_empty() {
-        return Some("Pane 密钥保险箱".to_string());
+        return Some(if crate::search_keys::is_search_service(service) {
+            "Pane 搜索密钥文件".to_string()
+        } else {
+            "Pane 密钥保险箱".to_string()
+        });
     }
     env_key(env_vars).map(|_| "环境变量".to_string())
 }
@@ -298,7 +238,7 @@ pub fn local_credential_hint(service: &str, env_vars: &[&str]) -> Option<String>
 // ── Bocha ───────────────────────────────────────────────────────────────────
 
 pub async fn bocha_snapshot() -> Snapshot {
-    let (keys, locked) = collect_keys("bocha", env_key(&["BOCHA_API_KEY"]).into_iter().collect());
+    let (keys, locked) = collect_keys("bocha");
     let slot = snapshot_slot("bocha", &keys, &locked);
     if let Some(snap) = fresh_or(&slot, TTL) {
         return snap;
@@ -374,7 +314,7 @@ async fn bocha_fetch(keys: &[Keyed]) -> Result<Snapshot, String> {
 // ── Tavily ──────────────────────────────────────────────────────────────────
 
 pub async fn tavily_snapshot() -> Snapshot {
-    let (keys, locked) = collect_keys("tavily", tavily_legacy_keys());
+    let (keys, locked) = collect_keys("tavily");
     let slot = snapshot_slot("tavily", &keys, &locked);
     if let Some(snap) = fresh_or(&slot, TTL) {
         return snap;
@@ -483,16 +423,16 @@ fn tavily_snapshot_from_results(
                     .paygo
                     .map(|v| format!(" · 按量已用 {v:.0} credits"))
                     .unwrap_or_default();
-                if count == 1 {
-                    if let Some(limit) = u.limit.filter(|l| *l > 0.0) {
-                        metrics.push(Metric::progress(
-                            "Credits",
-                            u.used / limit * 100.0,
-                            Some(account.clone()),
-                        ));
+                let detail = format!("{key} · {account}{paygo}");
+                // The bar is this key's ACCOUNT consumed share
+                // (plan_usage / plan_limit) — one account is one 1000-credit
+                // pool, so keys sharing an account show the same bar.
+                match u.limit.filter(|l| *l > 0.0) {
+                    Some(limit) => {
+                        metrics.push(Metric::progress(&label, u.used / limit * 100.0, Some(detail)))
                     }
+                    None => metrics.push(Metric::text(&label, detail)),
                 }
-                metrics.push(Metric::text(&label, format!("{key} · {account}{paygo}")));
             }
             Err(e) => {
                 metrics.push(Metric::text(&label, "查询失败".into()));
@@ -526,16 +466,7 @@ fn tavily_snapshot_from_results(
 // ── Firecrawl ───────────────────────────────────────────────────────────────
 
 pub async fn firecrawl_snapshot() -> Snapshot {
-    let (keys, locked) = collect_keys(
-        "firecrawl",
-        firecrawl_legacy_key()
-            .into_iter()
-            .chain(env_key(&[
-                "FIRECRAWL_FIRECRAWL_API_KEY",
-                "FIRECRAWL_API_KEY",
-            ]))
-            .collect(),
-    );
+    let (keys, locked) = collect_keys("firecrawl");
     let slot = snapshot_slot("firecrawl", &keys, &locked);
     if let Some(snap) = fresh_or(&slot, TTL) {
         return snap;
@@ -601,11 +532,19 @@ fn firecrawl_key_metric(label: &str, usage: &FirecrawlKeyUsage) -> Metric {
     } else {
         ""
     };
-    let value = format!(
+    let detail = format!(
         "剩余 {:.0} credits（套餐 {:.0}{extra}）{reset}",
         usage.remaining, usage.plan
     );
-    Metric::text(label, value).with_reset(usage.reset, None)
+    // The bar is the PLAN's consumed share. A balance above the plan means
+    // grants/top-ups are in play, which cannot make consumption negative, so
+    // those read as 0% used (the detail still shows the real balance).
+    let pct = if usage.plan > 0.0 {
+        ((usage.plan - usage.remaining).max(0.0) / usage.plan * 100.0).clamp(0.0, 100.0)
+    } else {
+        0.0
+    };
+    Metric::progress(label, pct, Some(detail)).with_reset(usage.reset, None)
 }
 
 /// `GET /v1/team/credit-usage` preserves the total balance and billing end.
@@ -679,12 +618,7 @@ fn firecrawl_snapshot_from_results(
 // ── Brave ───────────────────────────────────────────────────────────────────
 
 pub async fn brave_snapshot() -> Snapshot {
-    let (keys, locked) = collect_keys(
-        "brave",
-        env_key(&["BRAVE_API_KEY", "BRAVE_SEARCH_API_KEY"])
-            .into_iter()
-            .collect(),
-    );
+    let (keys, locked) = collect_keys("brave");
     if keys.is_empty() {
         return no_keys(
             "brave",
@@ -728,16 +662,15 @@ fn cached_brave_quota(q: &BraveKeyQuota, elapsed: Duration) -> Option<BraveKeyQu
 }
 
 fn brave_key_metric(label: &str, quota: &BraveKeyQuota) -> Metric {
-    let value = if quota.limit == 0.0 {
-        "月额度不限".into()
-    } else {
-        format!(
-            "已用 {:.0} / {:.0} credits",
-            (quota.limit - quota.remaining).max(0.0),
-            quota.limit
-        )
-    };
-    Metric::text(label, value)
+    if quota.limit == 0.0 {
+        return Metric::text(label, "月额度不限".into());
+    }
+    let used = (quota.limit - quota.remaining).max(0.0);
+    Metric::progress(
+        label,
+        (used / quota.limit * 100.0).clamp(0.0, 100.0),
+        Some(format!("已用 {:.0} / {:.0} credits", used, quota.limit)),
+    )
 }
 
 /// One REAL search per key: Brave exposes no quota endpoint, only
@@ -892,8 +825,11 @@ mod tests {
         )])
         .unwrap();
         assert_eq!(snap.plan.as_deref(), Some("Bootstrap"));
+        // A single key renders as one bar off the ACCOUNT usage/limit.
+        assert_eq!(snap.metrics.len(), 1);
+        assert_eq!(snap.metrics[0].kind, "progress");
         assert!((snap.metrics[0].used_percent.unwrap() - 500.0 / 15000.0 * 100.0).abs() < 1e-9);
-        let row = snap.metrics[1].value.as_deref().unwrap();
+        let row = snap.metrics[0].detail.as_deref().unwrap();
         assert!(row.contains("Key 已用 150 / 1000"));
         assert!(row.contains("账户套餐已用 500 / 15000"));
         assert!(row.contains("按量已用 25"));
@@ -1063,26 +999,30 @@ mod tests {
             .unwrap()
             .contains("可能共享"));
         let row = &snap.metrics[1];
-        assert!(row.value.as_deref().unwrap().contains("10890 credits"));
-        assert!(row.value.as_deref().unwrap().contains("10-28"));
+        assert_eq!(row.kind, "progress");
+        // A balance above the plan (grants) reads as 0% used, never negative.
+        assert_eq!(row.used_percent, Some(0.0));
+        assert!(row.detail.as_deref().unwrap().contains("10890 credits"));
+        assert!(row.detail.as_deref().unwrap().contains("含额外额度"));
         assert_eq!(row.resets_at, reset);
         assert_eq!(
-            snap.metrics[2].value.as_deref(),
+            snap.metrics[2].detail.as_deref(),
             Some("剩余 0 credits（套餐 1000）")
         );
+        assert_eq!(snap.metrics[2].used_percent, Some(100.0));
     }
 
     #[test]
-    fn firecrawl_balance_below_plan_does_not_prove_consumption() {
+    fn firecrawl_balance_bar_uses_the_plan_and_marks_extra_credits() {
         let usage = parse_firecrawl_usage(&json!({"remaining_credits": 967, "plan_credits": 1000}))
             .unwrap();
         let snap = firecrawl_snapshot_from_results(vec![("key".into(), Ok(usage))]).unwrap();
-        // One key → exactly one row. A headline clone would duplicate it.
+        // One key → exactly one row, a bar off the plan.
         assert_eq!(snap.metrics.len(), 1);
-        assert_eq!(snap.metrics[0].kind, "text");
-        assert_eq!(snap.metrics[0].used_percent, None);
+        assert_eq!(snap.metrics[0].kind, "progress");
+        assert!((snap.metrics[0].used_percent.unwrap() - 3.3).abs() < 0.1);
         assert_eq!(
-            snap.metrics[0].value.as_deref(),
+            snap.metrics[0].detail.as_deref(),
             Some("剩余 967 credits（套餐 1000）")
         );
         assert!(parse_firecrawl_usage(&json!({"plan_credits": 1000})).is_err());
@@ -1119,7 +1059,7 @@ mod tests {
         assert!(cached_brave_quota(&q, Duration::from_secs(100)).is_none());
         assert!(cached_brave_quota(&q, BRAVE_TTL).is_none());
         assert_eq!(
-            brave_key_metric("key", &q).value.as_deref(),
+            brave_key_metric("key", &q).detail.as_deref(),
             Some("已用 6 / 2000 credits")
         );
     }
