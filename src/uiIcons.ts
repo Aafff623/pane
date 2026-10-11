@@ -1,4 +1,5 @@
 import gear from "./assets/icons/gear-bold.svg?raw";
+import { postIcon, POST_ICON_MAP } from "./skinIcons";
 import arrowsClockwise from "./assets/icons/arrows-clockwise-bold.svg?raw";
 import shareNetwork from "./assets/icons/share-network-bold.svg?raw";
 import star from "./assets/icons/star-bold.svg?raw";
@@ -33,9 +34,11 @@ const ICONS = { gear, arrowsClockwise, shareNetwork, star, info, question, x, ca
 export type UiIconName = keyof typeof ICONS;
 
 /** Inline Phosphor SVG with the current text color and a stable UI class. */
-export function uiIcon(name: UiIconName, label?: string): string {
+export function uiIcon(name: UiIconName, label?: string, postIndex?: number): string {
   const title = label ? ` aria-label="${label.replace(/"/g, "&quot;")}"` : " aria-hidden=\"true\"";
-  return ICONS[name]
+  const native = ICONS[name]
     .replace("<svg ", `<svg class="ui-icon" focusable="false"${title} `)
     .replace(/\s(width|height)="16"/g, "");
+  const themed = POST_ICON_MAP[name];
+  return native + (themed ? postIcon(postIndex ?? themed[0], postIndex === undefined ? themed[1] : false, label) : "");
 }

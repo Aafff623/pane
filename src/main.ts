@@ -57,7 +57,8 @@ if (IS_PANEL_FORM) document.body.classList.add("panel-form");
 import { gsap } from "gsap";
 import paneLogo from "./assets/pane-logo.png?inline";
 import paneIcon from "./assets/pane-icon.png?inline";
-import auroraWallpaper from "./assets/skins/aurora.webp";
+import { SKINS, SKIN_STORAGE_KEY, readSkin, embedSkinImages, type SkinId } from "./skins";
+import { postIcon } from "./skinIcons";
 // The repo's changelog ships inside the bundle, so the "What's new" dialog
 // and the Settings changelog viewer read the exact file releases maintain.
 import changelogRaw from "../CHANGELOG.md?raw";
@@ -836,91 +837,49 @@ let overviewCategory: OverviewCategory = "coding";
 let overviewExpiringOpen = false;
 let customizeOpen = false;
 let skinMarketOpen = false;
-let skinPreviewId: string | null = null;
+let skinPreviewMode: "light" | "dark" | "both" = "both";
 
-type SkinId = "aurora" | "paper" | "arcade";
-interface SkinDefinition {
-  id: SkinId;
-  name: string;
-  tagline: string;
-  colors: [string, string, string];
-  wallpaper: string;
-  mascot: string;
+function activeSkin() {
+  try {
+    const id = readSkin(window.localStorage);
+    return SKINS.find((skin) => skin.id === id);
+  } catch { return undefined; }
 }
 
-const SKINS: SkinDefinition[] = [
-  {
-    id: "aurora",
-    name: "Aurora Desk",
-    tagline: "极光玻璃 · 夜间专注",
-    colors: ["#07111f", "#203d59", "#9af2d1"],
-    wallpaper: `url(${auroraWallpaper}), radial-gradient(circle at 18% 22%, rgba(126,249,210,.25), transparent 28%), radial-gradient(circle at 82% 8%, rgba(113,150,255,.3), transparent 34%), linear-gradient(145deg,#07111f 0%,#132943 48%,#1e3f4c 100%)`,
-    mascot: `<svg viewBox="0 0 120 120"><path d="M22 77c0-31 17-51 39-51s37 20 37 51c0 10-8 18-18 18H40c-10 0-18-8-18-18Z" fill="#b9ffe5"/><path d="M34 55c7-18 17-27 28-27 14 0 25 10 31 29-15-7-37-8-59-2Z" fill="#70d7c0"/><circle cx="47" cy="64" r="5" fill="#102333"/><circle cx="73" cy="64" r="5" fill="#102333"/><path d="M49 78c7 6 15 6 22 0" fill="none" stroke="#102333" stroke-width="4" stroke-linecap="round"/><path d="M57 25l3-13m8 14 8-10" stroke="#b9ffe5" stroke-width="4" stroke-linecap="round"/></svg>`,
-  },
-  {
-    id: "paper",
-    name: "Paper Orbit",
-    tagline: "纸张轨道 · 清爽工作台",
-    colors: ["#f2eadb", "#d6b98a", "#4f6c55"],
-    wallpaper: "radial-gradient(circle at 12% 78%, rgba(255,255,255,.65), transparent 24%), repeating-linear-gradient(115deg, rgba(92,72,45,.08) 0 1px, transparent 1px 18px), linear-gradient(135deg,#f2eadb,#ded0b7 54%,#b8c3a8)",
-    mascot: `<svg viewBox="0 0 120 120"><path d="m25 81 19-52 43 16-19 52Z" fill="#fff8e9" stroke="#765b3f" stroke-width="3"/><path d="m43 29 10-10 43 16-9 10Z" fill="#d7b37b" stroke="#765b3f" stroke-width="3"/><circle cx="55" cy="55" r="5" fill="#765b3f"/><circle cx="76" cy="63" r="5" fill="#765b3f"/><path d="M54 70c7 5 14 6 21 1" fill="none" stroke="#765b3f" stroke-width="3" stroke-linecap="round"/></svg>`,
-  },
-  {
-    id: "arcade",
-    name: "Neon Arcade",
-    tagline: "霓虹像素 · 快速唤醒",
-    colors: ["#110d22", "#36205f", "#ff7ad9"],
-    wallpaper: "linear-gradient(120deg, rgba(255,71,190,.22) 0 2px, transparent 2px 44px), linear-gradient(35deg, rgba(90,220,255,.18) 0 2px, transparent 2px 52px), radial-gradient(circle at 50% 36%, rgba(255,84,199,.24), transparent 34%), #110d22",
-    mascot: `<svg viewBox="0 0 120 120"><rect x="22" y="31" width="76" height="62" rx="20" fill="#ff7ad9" stroke="#72e9ff" stroke-width="4"/><circle cx="46" cy="61" r="8" fill="#17102e"/><circle cx="74" cy="61" r="8" fill="#17102e"/><path d="M45 78h30" stroke="#17102e" stroke-width="5" stroke-linecap="round"/><path d="M30 23v-8m60 8v-8" stroke="#72e9ff" stroke-width="4" stroke-linecap="round"/></svg>`,
-  },
-];
-
-const SKIN_STORAGE_KEY = "pane.skin.id";
-function activeSkin(): SkinDefinition | undefined {
-  const id = localStorage.getItem(SKIN_STORAGE_KEY) as SkinId | null;
-  return SKINS.find((skin) => skin.id === id);
-}
-
-function applySkin(skin = activeSkin()): void {
+function applySkin(): void {
   const root = document.documentElement;
-  const mascot = document.querySelector<HTMLElement>("#skin-mascot");
-  if (!skin) {
-    delete root.dataset.skin;
-    root.style.removeProperty("--skin-wallpaper");
-    root.style.removeProperty("--skin-accent");
-    if (mascot) mascot.innerHTML = "";
-    return;
-  }
-  root.dataset.skin = skin.id;
-  root.style.setProperty("--skin-wallpaper", skin.wallpaper);
-  root.style.setProperty("--skin-accent", skin.colors[2]);
-  if (mascot) mascot.innerHTML = skin.mascot;
+  const skin = activeSkin();
+  if (skin) root.dataset.skin = skin.id;
+  else delete root.dataset.skin;
 }
 
 function selectSkin(id: SkinId | null): void {
-  localStorage.setItem(SKIN_STORAGE_KEY, id ?? "");
-  applySkin(id ? SKINS.find((skin) => skin.id === id) : undefined);
-  document.querySelector("#status")!.textContent = id
-    ? `${SKINS.find((skin) => skin.id === id)?.name ?? "Skin"} applied`
-    : "Default skin applied";
-  renderDrawerBody();
+  try {
+    if (id) localStorage.setItem(SKIN_STORAGE_KEY, id);
+    else localStorage.removeItem(SKIN_STORAGE_KEY);
+  } catch {
+    document.querySelector("#status")!.textContent = t("skin.saveFailed");
+    return;
+  }
+  applySkin();
+  document.querySelector("#status")!.textContent = id ? "" : t("skin.nativeApplied");
+  requestAnimationFrame(fitProviderNames);
+  const button = document.querySelector<HTMLButtonElement>("[data-skin-select]");
+  if (button) {
+    button.disabled = id === "signal";
+    button.textContent = t(id ? "skin.applied" : "skin.use");
+  }
 }
 
-/// Experimental-features gate: off = the skin market's entries don't even
-/// render. Hot-unplug — turning it off closes the market and drops back to
-/// the native skin in one step.
-function applyExperimental(): void {
-  const on = config.experimentalFeatures === true;
-  const skinBtn = document.querySelector<HTMLElement>("#skin-btn");
-  if (skinBtn) skinBtn.hidden = !on;
-  if (on) return;
-  if (skinMarketOpen || skinPreviewId) {
-    skinMarketOpen = false;
-    skinPreviewId = null;
-    if (customizeOpen) renderDrawerBody();
-  }
-  if (activeSkin()) selectSkin(null);
-}
+// Both window forms share the same origin. The emitting window applies locally;
+// other windows receive this event without changing the user's appearance mode.
+window.addEventListener("storage", (event) => {
+  if (event.key !== SKIN_STORAGE_KEY && event.key !== null) return;
+  applySkin();
+  requestAnimationFrame(fitProviderNames);
+  if (skinMarketOpen) renderDrawerBody();
+});
+
 let revealTimer = 0;
 let animateExpandId: string | null = null;
 
@@ -1089,7 +1048,7 @@ async function reloadConfigFromBackend(): Promise<void> {
   applyAppearance();
   applyGlass();
   applyReduceMotion();
-  applyExperimental();
+  applySkin();
 }
 
 // ---------------------------------------------------------------------------
@@ -1918,13 +1877,15 @@ function renderMetric(m: Metric, _providerId?: string): string {
     const footTitle = [resetPlain, detailText].filter(Boolean).join(" · ");
     const metricLabel = displayMetricLabel(m.label);
     return `
-      <div class="metric">
+      <div class="metric" style="--skin-meter:${config.showUsed ? used : left}%">
         <div class="metric-head">
           <span class="metric-label" title="${escapeHtml(metricLabel)}">${escapeHtml(metricLabel)}</span>
+          ${m.period_ms !== null && m.period_ms > 0 ? `<span class="skin-period">${escapeHtml(fmtDuration(m.period_ms))}</span>` : ""}
         </div>
         <div class="bar">
           <div class="fill ${level}" style="width:${used}%"></div>
         </div>
+        <span class="skin-meter-caption">${escapeHtml(headlineAlt)}</span>
         <div class="metric-foot">
           <span class="left-val clickable" data-flip="usage" title="${escapeHtml(headlineAlt)}">${headline}</span>
           <span class="detail" title="${escapeHtml(footTitle)}">${detailHtml}</span>
@@ -4089,8 +4050,8 @@ function renderQuotaOverview(): string {
 
   const styleTabs = `
         <div class="tabs overview-style-tabs" role="group" aria-label="${escapeHtml(t("overview.styleLabel"))}">
-          <button type="button" class="tab${config.overviewStyle === "rings" ? " active" : ""}" data-overview-style="rings" title="${escapeHtml(t("overview.styleRings"))}">${uiIcon("circleNotch")}</button>
-          <button type="button" class="tab${config.overviewStyle === "bars" ? " active" : ""}" data-overview-style="bars" title="${escapeHtml(t("overview.styleBars"))}">${uiIcon("rows")}</button>
+          <button type="button" class="tab${config.overviewStyle === "rings" ? " active" : ""}" data-overview-style="rings" title="${escapeHtml(t("overview.styleRings"))}">${uiIcon("circleNotch", undefined, 14)}</button>
+          <button type="button" class="tab${config.overviewStyle === "bars" ? " active" : ""}" data-overview-style="bars" title="${escapeHtml(t("overview.styleBars"))}">${uiIcon("rows", undefined, 13)}</button>
         </div>`;
 
   // Availability badges: three disjoint symbols — green shows the
@@ -5626,10 +5587,10 @@ async function shareCard(id: string): Promise<void> {
     // document is the <svg>, so the attributes are mirrored there for the
     // :root[data-…] rules to keep matching.
     const root = document.documentElement;
-    const svgMarkup =
+    let svgMarkup =
       `<svg xmlns="http://www.w3.org/2000/svg" width="${W2 * S}" height="${H2 * S}" ` +
       `viewBox="0 0 ${W2} ${H2}" data-theme="${root.dataset.theme ?? ""}" ` +
-      `data-density="${root.dataset.density ?? ""}">` +
+      `data-density="${root.dataset.density ?? ""}" data-skin="${root.dataset.skin ?? ""}">` +
       `<foreignObject width="${W2}" height="${H2}">` +
       `<div xmlns="http://www.w3.org/1999/xhtml" id="snap-root">` +
       // CDATA so CSS containing XML-special characters (`<`, `&` — e.g. in
@@ -5639,6 +5600,8 @@ async function shareCard(id: string): Promise<void> {
       new XMLSerializer().serializeToString(clone) +
       `<div id="snap-foot"><img src="${paneIcon}" alt="" /><span>${escapeHtml(t("share.tagline"))}</span></div>` +
       `</div></foreignObject></svg>`;
+
+    if (root.dataset.skin === "signal") svgMarkup = await embedSkinImages(svgMarkup);
 
     const img = new Image();
     img.src = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svgMarkup)}`;
@@ -5954,7 +5917,7 @@ function applyAppearance(): void {
   document.documentElement.dataset.density = config.density;
   const btn = document.querySelector<HTMLElement>("#theme-btn");
   if (btn) {
-    btn.textContent = mode === "light" ? "☾" : "☀";
+    btn.innerHTML = `<span class="native-theme-icon">${mode === "light" ? "☾" : "☀"}</span>${postIcon(mode === "light" ? 1 : 0)}`;
     btn.title = mode === "light" ? t("sidebar.themeToDark") : t("sidebar.themeToLight");
     delete btn.dataset.tip;
   }
@@ -7696,23 +7659,32 @@ function accountChildRows(family: string): string {
   return `<div class="cust-account-children" data-accounts-children="${escapeHtml(family)}">${children}${archivedHtml}</div>`;
 }
 
+// Preview uses the production metric renderer with fixed, non-account data.
+function renderSkinSample(mode: "light" | "dark"): string {
+  const metric = (label: string, used: number, period: number) => renderMetric({
+    label, kind: "progress", used_percent: used, detail: null,
+    value: null, resets_at: null, period_ms: period,
+  }).replace(/ data-flip="[^"]*"/g, "").replace(/ clickable/g, "");
+  return `<div class="skin-sample" data-skin="signal" data-theme="${mode}">
+    <div class="skin-sample-head"><span>${t(mode === "light" ? "skin.light" : "skin.dark")}</span><span class="skin-sample-brand">${t("skin.signal")}</span></div>
+    <div class="signal-spend"><span>${t("skin.spendToday")}</span><strong>$18<span>.42</span></strong><span class="signal-spend-note">${t("skin.spendNote")}</span></div>
+    <div class="provider"><div class="provider-head"><div class="signal-provider-label"><strong class="provider-name">Claude</strong><span class="signal-state">${t("skin.normal")}</span></div><span class="signal-plan">Pro</span></div><div class="card-panel">
+      ${metric(t("skin.session"), 32, 5 * 3_600_000)}${metric(t("skin.week"), 68, 7 * 86_400_000)}${metric(t("skin.lowQuota"), 87, 5 * 3_600_000)}
+    </div></div>
+    <div class="signal-message" role="note"><span class="signal-error-mark" aria-hidden="true">!</span><div><strong>Codex · ${t("skin.disconnected")}</strong><p>${t("skin.sampleError")}</p></div></div>
+    <div class="signal-fetch"><span class="signal-pulse" aria-hidden="true"></span>${t("skin.sampleLoading")}</div>
+  </div>`;
+}
+
 function renderSkinMarket(): string {
   const selected = activeSkin()?.id;
-  const preview = skinPreviewId ? SKINS.find((skin) => skin.id === skinPreviewId) : undefined;
-  if (preview) {
-    return `<section class="skin-market skin-detail" aria-label="Skin preview">
-      <button class="skin-back" type="button" data-skin-back>← Skin market</button>
-      <div class="skin-detail-hero" style="--skin-preview:${preview.wallpaper}">
-        <div class="skin-detail-mascot">${preview.mascot}</div>
-        <div><p class="skin-kicker">SELECTED SKIN</p><h2>${escapeHtml(preview.name)}</h2><p>${escapeHtml(preview.tagline)}</p></div>
-      </div>
-      <div class="skin-detail-actions"><button class="mini-btn primary" data-skin-select="${preview.id}">${selected === preview.id ? "✓ Applied" : "Use this skin"}</button><button class="mini-btn" data-skin-reset>Use native</button><span class="skin-detail-note">Wallpaper + mascot appear together when Pane wakes.</span></div>
-    </section>`;
-  }
-  return `<section class="skin-market" aria-label="Skin market">
-    <div class="skin-market-head"><div><p class="skin-kicker">PANE SKIN MARKET</p><h2>Make the popover yours</h2><p class="skin-market-copy">Choose a wallpaper and its companion mascot. Your native light/dark theme stays intact.</p></div><button class="mini-btn" data-skin-close>Done</button></div>
-    <div class="skin-market-actions"><button class="mini-btn" data-skin-reset>Use native / reset</button><span class="skin-detail-note">Native wallpaper and theme remain unchanged.</span></div>
-    <div class="skin-grid">${SKINS.map((skin) => `<button class="skin-card${selected === skin.id ? " selected" : ""}" type="button" data-skin-preview="${skin.id}" style="--skin-preview:${skin.wallpaper}"><span class="skin-card-art"><span class="skin-card-mascot">${skin.mascot}</span></span><span class="skin-card-copy"><strong>${escapeHtml(skin.name)}</strong><small>${escapeHtml(skin.tagline)}</small></span>${selected === skin.id ? '<span class="skin-selected">Applied</span>' : ""}</button>`).join("")}</div>
+  const skin = SKINS[0];
+  const previewMode = skinPreviewMode === "both" && window.matchMedia("(max-width:640px)").matches ? "light" : skinPreviewMode;
+  return `<section class="skin-market" aria-label="${t("skin.market")}">
+    <div class="skin-market-head"><div><h2>${t(skin.nameKey)}</h2><p class="skin-market-copy">${t(skin.taglineKey)}</p></div><button class="mini-btn" data-skin-close>${t("skin.back")}</button></div>
+    <div class="skin-preview-toolbar" role="group" aria-label="${t("skin.previewMode")}">${(["light", "dark", "both"] as const).map((mode) => `<button class="skin-mode-btn" type="button" data-skin-mode="${mode}" aria-pressed="${previewMode === mode}">${t(mode === "light" ? "skin.light" : mode === "dark" ? "skin.dark" : "skin.both")}</button>`).join("")}</div>
+    <div class="skin-preview-pair" data-preview-mode="${previewMode}">${renderSkinSample("light")}${renderSkinSample("dark")}</div>
+    <div class="skin-detail-actions"><button class="mini-btn primary" data-skin-select="signal" ${selected === "signal" ? "disabled" : ""}>${t(selected === "signal" ? "skin.applied" : "skin.use")}</button><button class="mini-btn" data-skin-reset>${t("skin.native")}</button><span>${t("skin.followsMode")}</span></div>
   </section>`;
 }
 
@@ -7886,11 +7858,7 @@ function renderCustomize(): string {
   const blocksHtml = blocks.map((b) => b.html).join("");
 
   const starCount = Object.values(config.layout?.providers ?? {}).reduce((n, l) => n + l.starred.length, 0);
-  // The skin market rides the experimental-features gate: entry hidden
-  // entirely unless the user opted in from Settings.
-  const skinEntry = config.experimentalFeatures === true
-    ? `<div class="customize-skin-entry"><div><strong>Skin market</strong><span>Wallpaper · mascot · atmosphere</span></div><button class="mini-btn" data-skin-open>${uiIcon("palette", "Open skin market")}</button></div>`
-    : "";
+  const skinEntry = `<div class="customize-skin-entry"><div><strong>${t("skin.market")}</strong><span>${t("skin.entry")}</span></div><button class="mini-btn" data-skin-open>${uiIcon("palette", t("skin.market"))}</button></div>`;
   return `
     ${skinEntry}
     <div class="customize-bar glass-bar">
@@ -8003,6 +7971,7 @@ function renderAll(): void {
   document.querySelector(".spend-detail-overlay")?.remove();
   const el = document.querySelector("#providers")!;
   el.innerHTML =
+    `<div class="post-banner"><strong>${escapeHtml(t("skin.signal"))}</strong><span class="post-mascot" aria-hidden="true"></span></div>` +
     renderWelcome() +
     renderTotalSpend() +
     renderQuotaOverview() +
@@ -8084,7 +8053,6 @@ function setDrawer(open: boolean): void {
   if (!open) {
     dismissAccountDialog?.();
     skinMarketOpen = false;
-    skinPreviewId = null;
   }
   if (open) {
     renderDrawerBody();
@@ -9062,28 +9030,21 @@ function moveRow(L: ProviderLayout, key: string, target: string): void {
 }
 
 async function handleCustomizeClick(target: HTMLElement): Promise<boolean> {
+  const skinMode = target.closest<HTMLElement>("[data-skin-mode]")?.dataset.skinMode;
+  if (skinMode === "light" || skinMode === "dark" || skinMode === "both") {
+    skinPreviewMode = skinMode;
+    renderDrawerBody();
+    return true;
+  }
   const skinOpen = target.closest<HTMLElement>("[data-skin-open]");
   if (skinOpen) {
     skinMarketOpen = true;
-    skinPreviewId = null;
     renderDrawerBody();
     return true;
   }
   const skinClose = target.closest<HTMLElement>("[data-skin-close]");
   if (skinClose) {
     setDrawer(false);
-    return true;
-  }
-  const skinPreview = target.closest<HTMLElement>("[data-skin-preview]");
-  if (skinPreview) {
-    skinPreviewId = skinPreview.dataset.skinPreview as SkinId;
-    renderDrawerBody();
-    return true;
-  }
-  const skinBack = target.closest<HTMLElement>("[data-skin-back]");
-  if (skinBack) {
-    skinPreviewId = null;
-    renderDrawerBody();
     return true;
   }
   const skinSelect = target.closest<HTMLElement>("[data-skin-select]");
@@ -9094,7 +9055,6 @@ async function handleCustomizeClick(target: HTMLElement): Promise<boolean> {
   const skinReset = target.closest<HTMLElement>("[data-skin-reset]");
   if (skinReset) {
     selectSkin(null);
-    renderDrawerBody();
     return true;
   }
   // One/New API site manager (relocated from Settings): expand/edit/delete
@@ -12629,8 +12589,7 @@ async function initSettings(): Promise<void> {
     });
   }
 
-  // Experimental features: off = entries don't render; enabling asks first
-  // (unstable/compat risk); disabling hot-unplugs back to native.
+  // Reserved experimental features retain their opt-in. Skins are independent.
   const experimental = document.querySelector<HTMLInputElement>("#experimental-features")!;
   experimental.checked = config.experimentalFeatures === true;
   experimental.addEventListener("change", () => {
@@ -12646,15 +12605,13 @@ async function initSettings(): Promise<void> {
         }
         config.experimentalFeatures = true;
         void patchConfig({ experimentalFeatures: true });
-        applyExperimental();
       });
     } else {
       config.experimentalFeatures = false;
       void patchConfig({ experimentalFeatures: false });
-      applyExperimental();
     }
   });
-  applyExperimental();
+  applySkin();
 
   const catFull = document.querySelector<HTMLInputElement>("#overview-cat-full")!;
   catFull.checked = config.overviewCatFull === true;
@@ -14090,7 +14047,8 @@ window.addEventListener("DOMContentLoaded", () => {
   const appLogo = document.querySelector<HTMLElement>("#app-logo")!;
   appLogo.innerHTML = `<img src="${paneLogo}" alt="Pane" />`;
   document.querySelector("#splash")?.addEventListener("click", hideSplash);
-  document.querySelector<HTMLElement>("#skin-btn")!.innerHTML = uiIcon("palette", "Open skin market");
+  document.querySelector<HTMLElement>("#skin-btn")!.innerHTML = uiIcon("palette", t("skin.market"));
+  activeSkin();
   applySkin();
   setupFloatingSettingsTabs();
   // Party mode, the easy way: triple-click the logo. (The Konami code
@@ -14166,11 +14124,6 @@ window.addEventListener("DOMContentLoaded", () => {
       if (spendDetailOpen) {
         spendDetailOpen = false;
         document.querySelector(".spend-detail-overlay")?.remove();
-        return;
-      }
-      if (skinPreviewId) {
-        skinPreviewId = null;
-        renderDrawerBody();
         return;
       }
       if (skinMarketOpen) {
@@ -14280,10 +14233,8 @@ window.addEventListener("DOMContentLoaded", () => {
     setDrawer(!customizeOpen);
   });
   document.querySelector("#skin-btn")!.addEventListener("click", () => {
-    if (config.experimentalFeatures !== true) return;
     setSettings(false);
     skinMarketOpen = true;
-    skinPreviewId = null;
     setDrawer(true);
   });
   const drawerBody = document.querySelector<HTMLElement>("#drawer-body")!;
@@ -14968,12 +14919,6 @@ window.addEventListener("DOMContentLoaded", () => {
     updateTrailActive();
     if (lastSnapshots.length && !customizeOpen) playReveal();
     requestTraySync();
-    const mascot = document.querySelector<HTMLElement>("#skin-mascot");
-    mascot?.classList.remove("wake");
-    if (activeSkin()) {
-      void mascot?.offsetWidth;
-      mascot?.classList.add("wake");
-    }
     void refresh();
   });
   void initSettings().then(() => {
