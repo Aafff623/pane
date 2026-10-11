@@ -241,9 +241,9 @@ anything unverified lives under `待确认` at the bottom.
   (`/trae/api/v{1,2}/pay/ide_user_ent_usage`)；CN 版实测 v2，cockpit 参考为 v1，
   国际版真实版本待装机核验 (2026-10-08，Batch 2)。
 
-- `pnpm` is the package manager in use but only `package-lock.json` is
-  tracked (no `pnpm-lock.yaml`). Commit a pnpm lockfile, or standardize on
-  npm?
+- `pnpm` is the package manager in use; `pnpm-lock.yaml` and
+  `package-lock.json` (CI's `npm ci` gate) are both tracked as of
+  2026-10-10 — the earlier "only package-lock tracked" question is closed.
 
 ## Resolved decisions
 
@@ -453,7 +453,13 @@ anything unverified lives under `待确认` at the bottom.
   endpoint is this repo's GitHub Releases `latest.json`; the detached
   upstream's trypane.xyz/ItsJazii endpoints were dropped. New versions raise
   an in-app popup (`maybePromptUpdate`, once per version per run) beside the
-  footer update button.
+  footer update button. Since 2026-10-10 the updater follows the app-wide
+  proxy chain (config `proxy.url` → Windows system proxy,
+  `providers::outbound_proxy_url`) and caps the manifest check at 20 s —
+  the plugin's reqwest is built without the system-proxy feature, so
+  system-proxy users previously updated over a direct github.com link.
+  Transport failures render the localized `update.networkHint`. Channel
+  details: `docs/update-mechanism.md`.
 
 ## UI repair facts (2026-10-04; context-menu anchoring added in 0.4.68)
 
