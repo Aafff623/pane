@@ -201,8 +201,6 @@ src-tauri/src/
   main.rs              Tauri entry, tray, IPC command table
   providers/           Per-provider Rust modules (quota fetching)
   spend.rs             Token spend accounting from local CLI logs
-scripts/
-  dev-pane.cmd         One-shot dev cycle (build → serve → launch)
 docs/
   dev-startup.md       ← this file
 dist/                  Compiled frontend (output of pnpm build)
