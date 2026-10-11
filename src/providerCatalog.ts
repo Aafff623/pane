@@ -15,7 +15,7 @@ export interface ProviderDefinition {
   supportsOAuth: boolean;
   iconKey: string;
   /** Dashboard category. Absent = coding agent (the historical default). */
-  category?: "coding" | "productivity" | "mcp";
+  category?: "coding" | "mcp";
 }
 
 export const providerCatalog: readonly ProviderDefinition[] = [
@@ -44,7 +44,7 @@ export const providerCatalog: readonly ProviderDefinition[] = [
   { familyId: "kimi", displayName: "Kimi Code", queryKind: "composite", supportsApiKey: true, supportsExtraAccounts: true, supportsOAuth: false, iconKey: "kimi" },
   { familyId: "stepfun", displayName: "StepFun", queryKind: "nativeBalance", supportsApiKey: true, supportsExtraAccounts: true, supportsOAuth: false, iconKey: "stepfun" },
   { familyId: "stepfun-plan", displayName: "StepFun Step Plan", queryKind: "nativeCodingPlan", supportsApiKey: true, supportsExtraAccounts: true, supportsOAuth: false, iconKey: "stepfun" },
-  { familyId: "shandianshuo", displayName: "闪电说", queryKind: "nativeCodingPlan", supportsApiKey: false, supportsExtraAccounts: false, supportsOAuth: false, iconKey: "shandianshuo", category: "productivity" },
+  { familyId: "shandianshuo", displayName: "闪电说", queryKind: "nativeCodingPlan", supportsApiKey: false, supportsExtraAccounts: false, supportsOAuth: false, iconKey: "shandianshuo" },
   { familyId: "siliconflow", displayName: "SiliconFlow", queryKind: "nativeBalance", supportsApiKey: true, supportsExtraAccounts: true, supportsOAuth: false, iconKey: "siliconflow" },
   { familyId: "novita", displayName: "Novita AI", queryKind: "nativeBalance", supportsApiKey: true, supportsExtraAccounts: true, supportsOAuth: false, iconKey: "novita" },
   { familyId: "relaybalance", displayName: "Custom Relay", queryKind: "nativeBalance", supportsApiKey: true, supportsExtraAccounts: true, supportsOAuth: false, iconKey: "relaybalance" },
@@ -95,7 +95,7 @@ export function providerDefinition(familyId: string): ProviderDefinition | undef
   return providerCatalog.find((definition) => definition.familyId === familyId);
 }
 
-export type ProviderCategory = "coding" | "productivity" | "mcp";
+export type ProviderCategory = "coding" | "mcp";
 
 export function providerCategory(familyId: string): ProviderCategory {
   return providerDefinition(familyId)?.category ?? "coding";

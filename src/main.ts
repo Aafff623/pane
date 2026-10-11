@@ -189,7 +189,7 @@ function estBadgeFor(id: string): string {
 type RangeTab = "d7" | "d30" | "all";
 const OVERVIEW_TABS = ["5h", "week", "month"] as const;
 type OverviewTab = (typeof OVERVIEW_TABS)[number];
-const OVERVIEW_CATEGORIES = ["coding", "productivity", "mcp"] as const;
+const OVERVIEW_CATEGORIES = ["coding", "mcp"] as const;
 type OverviewCategory = (typeof OVERVIEW_CATEGORIES)[number];
 
 // Per-provider layout: which rows show, their order, which are tucked
@@ -1608,9 +1608,18 @@ function setCardGroup(cardId: string, groupId: string): void {
 
 /// Category a family renders under: the user's per-family override wins
 /// over the catalog default. Right-click menu → 分类 moves a family
-/// between Coding Agent / productivity without touching the catalog.
+/// between Coding Agent / MCP without touching the catalog. An override
+/// naming a group that no longer exists (the retired "productivity" group)
+/// falls back to the catalog default rather than making the card vanish.
 function effectiveCategory(family: string): OverviewCategory {
-  return config.categoryOverrides?.[family] ?? providerCategory(family);
+  const override = config.categoryOverrides?.[family];
+  if (override && (OVERVIEW_CATEGORIES as readonly string[]).includes(override)) {
+    return override;
+  }
+  const fromCatalog = providerCategory(family) as string;
+  return (OVERVIEW_CATEGORIES as readonly string[]).includes(fromCatalog)
+    ? (fromCatalog as OverviewCategory)
+    : "coding";
 }
 
 /// Clicking the family's effective category clears the override (back to

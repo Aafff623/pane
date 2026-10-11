@@ -12,14 +12,14 @@ pub enum QueryKind {
     LocalOnly,
 }
 
-/// Dashboard grouping: coding agents are the historical default; anything
-/// that is not an AI coding tool (voice assistants, document/MCP/search
-/// utilities) lands in Productivity, and quota-metered MCP/search services
-/// land in Mcp. Keep in sync with `src/providerCatalog.ts`.
+/// Dashboard grouping. Two built-in groups only: coding agents (the
+/// historical default) and quota-metered MCP/search services. Everything that
+/// is not a search service is Coding — there is no third "productivity"
+/// group, so a fresh install never shows a group it has no providers for.
+/// Keep in sync with `src/providerCatalog.ts`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ProviderCategory {
     Coding,
-    Productivity,
     Mcp,
 }
 
@@ -284,7 +284,7 @@ const PROVIDER_DEFINITIONS: &[ProviderDefinition] = &[
         supports_api_key: false,
         supports_extra_accounts: false,
         icon_key: "shandianshuo",
-        category: ProviderCategory::Productivity,
+        category: ProviderCategory::Coding,
     },
     ProviderDefinition {
         family_id: "siliconflow",
