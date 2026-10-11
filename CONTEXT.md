@@ -16,6 +16,9 @@ project language (reconsider) or it is a real gap to settle.
 
 ## Domain vocabulary
 
+- **额度 (quota)** — 供应商给出的、有上限且带重置窗口的许可量；语义是"还剩多少、何时重置"（百分比 + 倒计时）。由「额度总览」承载。
+- **用量 (usage)** — 已消耗的绝对量；语义是"消耗了多少"，按天累积。由「用量面板」（即原「总花费」面板）承载。与额度是两回事：额度看许可，用量看消耗。
+- **计量单位 (unit)** — 用量的计数单位（token、积分、分钟、字符、次数、容量、货币…）。「用量面板」按计量单位分组：只有可通约的项才进同一张图，单位之间不做换算；同名单位（如"积分"）在不同厂商之间未必可通约。
 - **family** — one provider identity shared by all its cards: `claude`,
   `codex`, `cursor`, `kimi`, `onenewapi`, … 28 families in
   `src-tauri/src/provider_catalog.rs`, mirrored in `src/providerCatalog.ts`
