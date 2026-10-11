@@ -5,7 +5,7 @@
 
 ## Critical: always read first
 **Full startup guide → [`docs/dev-startup.md`](docs/dev-startup.md)**
-**Cross-session task board → [`TODO.md`](TODO.md)** — read at session start; handoff parcels cite its `T-XXXX` IDs.
+**Task tracker → [`docs/agents/issue-tracker.md`](docs/agents/issue-tracker.md)** — tickets live under `.scratch/` (Matt-configured 2026-10-11; the old `TODO.md` board is retired — git history and a local `temp/` archive only). Handoff parcels in `temp/handoff/` may still cite old `T-XXXX` IDs as historical links.
 
 ## TL;DR startup sequence (local development only)
 
