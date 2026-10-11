@@ -135,6 +135,9 @@ pub fn source_statuses() -> Vec<SpendSourceStatus> {
     let kimi = providers::kimi::code_home().join("sessions");
     let zcode = home.join(".zcode").join("cli");
     let ccswitch = home.join(".cc-switch");
+    let dsh_home = std::env::var("DSH_HOME")
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| home.join(".dsh"));
     let local = dirs::data_local_dir().unwrap_or_default();
     vec![
         source_status("claude-jsonl", "Claude Code", "JSONL session logs", "claude_line", &[claude.join("projects")], &["claude", "minimax", "aihubmix", "kimi"]),
@@ -144,9 +147,10 @@ pub fn source_statuses() -> Vec<SpendSourceStatus> {
         source_status("pi-jsonl", "Pi coding agent", "JSONL session logs", "pi_line", &[pi], &["claude", "codex"]),
         source_status("grok-jsonl", "Grok CLI", "JSONL unified log", "grok", &[grok.join("logs").join("unified.jsonl")], &["grok"]),
         source_status("opencode-sqlite", "OpenCode Desktop / CLI", "SQLite message ledger", "providers::opencode::collect_cost_events", &[providers::opencode::data_dir().join("opencode.db")], &["opencode", "aihubmix"]),
-        source_status("qodercn-credits", "Qoder CN", "credits ledger → blended token estimate (official docs price credits per task, not per token)", "usage_history::credit_trend_map", &[crate::providers::config_dir().join("credit_history.json")], &["qodercn"]),
+        source_status("qodercn-credits", "Qoder CN", "credits ledger (credits cannot be converted to tokens — shown as a separate credits list)", "usage_history::credit_extras", &[crate::providers::config_dir().join("credit_history.json")], &["qodercn", "traecn"]),
         source_status("devin-sqlite", "Devin", "SQLite sessions ledger", "providers::devin::collect_usage_events", &[crate::platform::config_home().map(|d| d.join("devin").join("cli").join("sessions.db")).unwrap_or_default()], &["devin"]),
-        source_status("minimax-sqlite", "MiniMax Agent", "SQLite token_usage ledger", "providers::minimax::collect_usage_events", &[home.join(".minimax").join("sqlite.db")], &["minimax"]),
+        source_status("minimax-sqlite", "MiniMax Agent", "SQLite token_usage ledger", "providers::minimax::collect_usage_events", &[home.join(".minimax").join("sqlite.db"), home.join(".minimax").join("v2").join("sqlite").join("runtime-state.sqlite")], &["minimax", "mcode"]),
+        source_status("dsh-jsonl-zstd", "DeepSeek Harness", "multi-frame zstd session logs", "spend::dsh", &[dsh_home.join("sessions")], &["dsh"]),
         source_status("hermes-sqlite", "Hermes Desktop", "SQLite session_model_usage ledger", "providers::hermes::collect_usage_events", &[local.join("hermes").join("state.db")], &["hermes", "minimax", "openrouter"]),
         source_status("qwen-jsonl", "Qwen Code", "JSONL token ledger", "qwen_line", &[qwen], &["qwen"]),
         source_status("kimi-jsonl", "Kimi Code", "JSONL wire ledger", "kimi_line", &[kimi], &["kimi"]),
@@ -557,42 +561,7 @@ fn finalize_models(raw: HashMap<String, (f64, f64)>, window_cost: f64) -> Vec<Mo
 /// credits per task (Ask ≈ 3-4, Agent ≈ 7-50 per request), not per token, so
 /// tokens here are a blended estimate behind one tunable constant; the row is
 /// flagged `estimated` everywhere it renders.
-const QODER_CREDIT_TOKENS_ESTIMATE: f64 = 25_000.0;
 
-fn build_qoder_days(
-    trends: &[(String, Vec<Option<f64>>)],
-    today: chrono::NaiveDate,
-) -> FileData {
-    let mut data = FileData {
-        days: DayMap::default(),
-        unpriced: HashMap::new(),
-    };
-    for (card, trend) in trends {
-        if !card.starts_with("qodercn") {
-            continue;
-        }
-        let last = trend.len().saturating_sub(1);
-        for (i, diff) in trend.iter().enumerate() {
-            let Some(credits) = diff else { continue };
-            if *credits <= 0.0 {
-                continue;
-            }
-            let day = (today - chrono::Duration::days((last - i) as i64)).num_days_from_ce();
-            let entry = data
-                .days
-                .entry((day, "credit-estimate".to_string()))
-                .or_insert((0.0, 0.0));
-            entry.1 += credits * QODER_CREDIT_TOKENS_ESTIMATE;
-        }
-    }
-    data
-}
-
-fn qoder_credit_estimate() -> FileData {
-    let trends: Vec<(String, Vec<Option<f64>>)> =
-        crate::usage_history::credit_trend_map().into_iter().collect();
-    build_qoder_days(&trends, Local::now().date_naive())
-}
 
 fn build_spend(id: impl Into<String>, name: impl Into<String>, data: FileData) -> ProviderSpend {
     let id = id.into();
@@ -1219,9 +1188,10 @@ fn claude_extra_accounts() -> (Vec<ProviderSpend>, FileData, FileData, FileData)
 /// MiniMax spend: the Agent CLI's local token_usage store (its own cost_usd
 /// preferred, catalog-priced otherwise) plus whatever Claude Code logged
 /// while pointed at MiniMax's endpoint (passed in from the Claude scan).
-fn minimax(extra: FileData) -> ProviderSpend {
-    let mut data = extra;
-    for ev in providers::minimax::collect_usage_events() {
+/// Fold per-turn MiniMax-store events into `data` with catalog pricing;
+/// rows carrying the CLI's own cost use it, unknown models go unpriced.
+fn merge_agent_events(data: &mut FileData, events: Vec<providers::minimax::UsageEvent>) {
+    for ev in events {
         let Some(ts) = DateTime::from_timestamp_millis(ev.ts_ms) else { continue };
         let tokens = ev.input + ev.output + ev.reasoning + ev.cache_read + ev.cache_write;
         if tokens <= 0.0 && ev.cost_usd <= 0.0 {
@@ -1232,7 +1202,7 @@ fn minimax(extra: FileData) -> ProviderSpend {
         // all use.
         let model = ev.model.strip_prefix("minimax/").unwrap_or(&ev.model).to_string();
         if ev.cost_usd > 0.0 {
-            add_event(&mut data, ts, &model, ev.cost_usd, tokens);
+            add_event(data, ts, &model, ev.cost_usd, tokens);
             continue;
         }
         match pricing::lookup(&model) {
@@ -1244,12 +1214,129 @@ fn minimax(extra: FileData) -> ProviderSpend {
                     cache_write_5m: ev.cache_write,
                     cache_write_1h: 0.0,
                 };
-                add_event(&mut data, ts, &model, pricing::request_cost(&p, &u, true), tokens);
+                add_event(data, ts, &model, pricing::request_cost(&p, &u, true), tokens);
             }
-            None => note_unpriced(&mut data, ts, &model, tokens),
+            None => note_unpriced(data, ts, &model, tokens),
         }
     }
+}
+
+fn minimax(extra: FileData) -> ProviderSpend {
+    let mut data = extra;
+    merge_agent_events(&mut data, providers::minimax::collect_usage_events());
     build_spend("minimax", "MiniMax", data)
+}
+
+/// The MiniMax CLI's own v2 store as day-level data — the mcode backfill
+/// source for days cc-switch's proxy never recorded.
+fn minimax_agent_v2_data() -> FileData {
+    let mut data = FileData::default();
+    merge_agent_events(&mut data, providers::minimax::collect_v2_usage_events());
+    data
+}
+
+/// DeepSeek Harness (dsh): session logs are multi-frame zstd JSONL under
+/// `~/.dsh/sessions/**/session*.jsonl.zstd`. Only `assistant/message` events
+/// carry usage (`data.usage.{input,output,cacheRead,total}Tokens` — the
+/// streaming chunks don't, so summing messages never double-counts); day
+/// attribution is the event's top-level `time` (ms). `data.model` is often
+/// empty on this machine — such turns land unpriced rather than guessed.
+/// Counting follows the official community tool (LeemanCheung/dsh-token-
+/// usage, MIT): reasoning is already inside output, never added again.
+fn dsh() -> ProviderSpend {
+    build_spend("dsh", "DeepSeek Harness", dsh_data())
+}
+
+fn dsh_data() -> FileData {
+    fn scan(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
+        let Ok(entries) = std::fs::read_dir(dir) else { return };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                scan(&path, out);
+            } else if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
+                if name.starts_with("session") && name.ends_with(".jsonl.zstd") {
+                    out.push(path);
+                }
+            }
+        }
+    }
+    let mut data = FileData::default();
+    let Some(home) = dirs::home_dir() else {
+        return data;
+    };
+    let root = std::env::var("DSH_HOME")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|_| home.join(".dsh"))
+        .join("sessions");
+    let mut files = Vec::new();
+    scan(&root, &mut files);
+    files.sort();
+    dsh_files_data(&files)
+}
+
+/// Pure core of [`dsh_data`] — takes explicit files so tests can feed a
+/// temp directory without env races.
+fn dsh_files_data(files: &[std::path::PathBuf]) -> FileData {
+    let mut data = FileData::default();
+    for path in files {
+        let Ok(raw) = std::fs::read(path) else { continue };
+        // Multi-frame zstd: a one-shot decompress only yields the first
+        // frame (~200 bytes here). The streaming Decoder drains all frames.
+        let Ok(text) = zstd::stream::decode_all(&raw[..]) else { continue };
+        let Ok(text) = String::from_utf8(text) else { continue };
+        let events: Vec<serde_json::Value> = text
+            .lines()
+            .filter_map(|line| serde_json::from_str(line).ok())
+            .collect();
+        // The assistant turns usually carry no model name; the session's
+        // `request/context` event does. Use it as the file's default.
+        let model_hint = events
+            .iter()
+            .find_map(|ev| {
+                (ev.get("type").and_then(|v| v.as_str()) == Some("request/context"))
+                    .then(|| ev.get("data").and_then(|d| d.get("model")).and_then(|m| m.as_str()))
+                    .flatten()
+            })
+            .unwrap_or_default()
+            .to_string();
+        for ev in &events {
+            if ev.get("type").and_then(|v| v.as_str()) != Some("assistant/message") {
+                continue;
+            }
+            let Some(usage) = ev.get("data").and_then(|d| d.get("usage")) else { continue };
+            let num = |k: &str| usage.get(k).and_then(|v| v.as_f64()).unwrap_or(0.0);
+            let input = num("inputTokens");
+            let output = num("outputTokens");
+            let cache_read = num("cacheReadTokens");
+            let tokens = input + output + cache_read;
+            if tokens <= 0.0 {
+                continue;
+            }
+            let ts_ms = ev.get("time").and_then(|v| v.as_i64()).unwrap_or_default();
+            let Some(ts) = DateTime::from_timestamp_millis(ts_ms) else { continue };
+            let own = ev
+                .get("data")
+                .and_then(|d| d.get("model"))
+                .and_then(|m| m.as_str())
+                .unwrap_or_default();
+            let model = if own.is_empty() { model_hint.as_str() } else { own };
+            match pricing::lookup(model) {
+                Some(p) if !model.is_empty() => {
+                    let u = pricing::Usage {
+                        input,
+                        output,
+                        cache_read,
+                        cache_write_5m: 0.0,
+                        cache_write_1h: 0.0,
+                    };
+                    add_event(&mut data, ts, model, pricing::request_cost(&p, &u, true), tokens);
+                }
+                _ => note_unpriced(&mut data, ts, if model.is_empty() { "dsh" } else { model }, tokens),
+            }
+        }
+    }
+    data
 }
 
 /// Which spend slice a Hermes row belongs to. MiniMax- and OpenRouter-routed
@@ -2768,29 +2855,6 @@ mod tests {
     use super::*;
     use serde_json::json;
 
-    #[test]
-    fn qoder_credit_estimate_blends_ledger_diffs_into_tokens() {
-        let today = chrono::NaiveDate::from_ymd_opt(2026, 10, 7).unwrap();
-        let trends = vec![
-            ("qodercn".to_string(), vec![None, Some(4.0), Some(0.0), Some(6.5)]),
-            ("qodercn@ab12".to_string(), vec![None, Some(1.0), None, Some(3.5)]),
-            ("traecn".to_string(), vec![None, Some(9.0), None, None]),
-        ];
-        let data = build_qoder_days(&trends, today);
-        let tok = |day: i32| -> f64 {
-            data.days
-                .iter()
-                .filter(|((d, _), _)| *d == day)
-                .map(|(_, (_, t))| *t)
-                .sum()
-        };
-        let now = today.num_days_from_ce();
-        assert_eq!(tok(now), 10.0 * QODER_CREDIT_TOKENS_ESTIMATE);
-        assert_eq!(tok(now - 2), 5.0 * QODER_CREDIT_TOKENS_ESTIMATE);
-        // Zero-diff days stay absent and other families never leak in.
-        assert_eq!(data.days.len(), 2);
-        assert!(data.days.keys().all(|(_, m)| m == "credit-estimate"));
-    }
 
     #[test]
     fn source_inventory_covers_desktop_and_runtime_ledgers() {
@@ -4018,6 +4082,71 @@ mod tests {
 
     /// Claude's merge rule: on a day cc-switch covers, the self-scan yields
     /// outright (cc-switch's proxy is the real ledger).
+    // ── T-0033: dsh scanner + MiniMax v2 backfill ─────────────────────────
+
+    /// A multi-frame zstd fixture (the real logs append frames — one-shot
+    /// decode yields only the first ~200 bytes, the bug the streaming
+    /// decoder exists to avoid).
+    fn write_multiframe_zstd(path: &std::path::Path, frames: &[&str]) {
+        use std::io::Write;
+        let mut out = std::io::BufWriter::new(std::fs::File::create(path).unwrap());
+        for frame in frames {
+            let mut enc = zstd::stream::Encoder::new(&mut out, 3).unwrap();
+            enc.write_all(frame.as_bytes()).unwrap();
+            enc.finish().unwrap();
+        }
+    }
+
+    #[test]
+    fn dsh_decodes_all_frames_and_counts_only_assistant_messages() {
+        let dir = std::env::temp_dir().join(format!("pane-dsh-test-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        // 2026-10-05T00:00:00Z ≈ 1791072000000 ms.
+        let frame1 = concat!(
+            r#"{"type":"session/start","time":1791072000000}"#, "\n",
+            r#"{"type":"assistant/message","time":1791072000000,"data":{"usage":{"inputTokens":100,"outputTokens":20,"cacheReadTokens":5,"totalTokens":125}}}"#, "\n",
+        );
+        // assistant/chunk carries no usage — must not count even if present.
+        let frame2 = concat!(
+            r#"{"type":"assistant/chunk","time":1791072000000,"data":{"text":"hi"}}"#, "\n",
+            r#"{"type":"assistant/message","time":1791158400000,"data":{"model":"","usage":{"inputTokens":1000,"outputTokens":200,"cacheReadTokens":0,"totalTokens":1200}}}"#, "\n",
+        );
+        write_multiframe_zstd(&dir.join("session-a.jsonl.zstd"), &[frame1, frame2]);
+        let files = vec![dir.join("session-a.jsonl.zstd")];
+        let data = super::dsh_files_data(&files);
+        // Both messages: (100+20+5) + (1000+200+0) = 1325 tokens, unpriced
+        // (no model name) but never dropped.
+        let tokens: f64 = data.days.values().map(|(_, t)| *t).sum();
+        assert_eq!(tokens, 1325.0, "days: {:?}", data.days);
+        assert!(!data.unpriced.is_empty(), "modelless turns land unpriced");
+        // Two distinct days → two day keys.
+        assert_eq!(data.days.len(), 2);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    #[ignore = "real-machine anchor: needs this machine's ~/.dsh corpus (926.9M)"]
+    fn dsh_real_machine_token_anchor() {
+        let data = super::dsh_data();
+        let tokens: f64 = data.days.values().map(|(_, t)| *t).sum();
+        assert!(
+            (tokens - 926_900_000.0).abs() < 5_000_000.0,
+            "dsh tokens drifted from the 926.9M anchor: {tokens}"
+        );
+    }
+
+    #[test]
+    #[ignore = "real-machine anchor: needs this machine's MiniMax v2 store (~910M)"]
+    fn minimax_v2_backfill_anchor() {
+        let data = super::minimax_agent_v2_data();
+        let tokens: f64 = data.days.values().map(|(_, t)| *t).sum();
+        assert!(
+            (tokens - 910_000_000.0).abs() < 20_000_000.0,
+            "v2 backfill drifted from the ~910M anchor: {tokens}"
+        );
+    }
+
     #[test]
     fn retain_days_drops_owned_days_and_prunes_unpriced() {
         let mut data = FileData::default();
@@ -4555,13 +4684,23 @@ pub fn collect_daily(cursor_csv: Option<String>) -> (Vec<ProviderSpend>, Vec<Pro
         antigravity(),
     ];
     // cc-switch-only tools get their own cards (empty scans are filtered
-    // out by has_data at the end).
-    list.push(build_spend("mcode", "MiniMax Code", cc.mcode));
-    let mut qoder = build_spend("qodercn", "Qoder CN", qoder_credit_estimate());
-    qoder.estimated = true;
-    list.push(qoder);
+    // out by has_data at the end). mcode: cc-switch's proxy ledger is
+    // primary; the CLI's own v2 store backfills days the proxy never saw
+    // (it records the same turns — verified ~910M vs cc's 913M — so days
+    // cc owns are dropped from the backfill to avoid double counting).
+    let mut mcode_data = cc.mcode;
+    let cc_mcode_days = day_set(&mcode_data);
+    let mut mcode_backfill = minimax_agent_v2_data();
+    retain_days(&mut mcode_backfill, |d| !cc_mcode_days.contains(&d));
+    merge_data(&mut mcode_data, mcode_backfill);
+    list.push(build_spend("mcode", "MiniMax Code", mcode_data));
+    // Qoder CN / Trae CN bill in credits, which cannot be converted into
+    // tokens or dollars honestly — they are surfaced by the spend panel as a
+    // separate credits list (fetch_credit_extras), never blended into these
+    // totals.
     list.push(build_spend("gemini", "Gemini", cc.gemini));
     list.push(build_spend("claude-desktop", "Claude Desktop", cc.claude_desktop));
+    list.push(dsh());
     list.extend(extra_claude_spends);
     list.extend(extra_codex_spends);
     list.extend(hermes_rest);

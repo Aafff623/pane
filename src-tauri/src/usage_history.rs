@@ -254,11 +254,16 @@ fn credit_persist_path() -> PathBuf {
 fn credit_store() -> &'static Mutex<CreditFile> {
     static STORE: OnceLock<Mutex<CreditFile>> = OnceLock::new();
     STORE.get_or_init(|| {
-        let file = fs::read_to_string(credit_persist_path())
+        // The derive(Default) store seeds version 0, so every file written
+        // before this was fixed carries version 0 — an exact `== 1` filter
+        // silently dropped the whole ledger (credits never accumulated).
+        // Accept anything up to the current version and upgrade in place.
+        let mut file = fs::read_to_string(credit_persist_path())
             .ok()
             .and_then(|raw| serde_json::from_str::<CreditFile>(&raw).ok())
-            .filter(|doc| doc.version == CREDIT_VERSION)
+            .filter(|doc| doc.version <= CREDIT_VERSION)
             .unwrap_or_default();
+        file.version = CREDIT_VERSION;
         Mutex::new(file)
     })
 }
@@ -295,6 +300,69 @@ pub fn record_credit_samples(samples: &[(String, f64)]) {
         record_credit_sample(&mut file.entries, id, &today, *used);
     }
     persist_credits(file);
+}
+
+/// One day's credit consumption for a credits-denominated card.
+#[derive(Serialize, Clone, Debug, PartialEq)]
+pub struct CreditDay {
+    /// Local calendar day, "YYYY-MM-DD".
+    pub day: String,
+    /// Credits consumed that day (day-over-day diff of the absolute
+    /// readings, mid-day resets included).
+    pub consumed: f64,
+}
+
+/// Per-day credits for Qoder CN / Trae CN. Credits cannot be converted into
+/// tokens or dollars honestly, so the spend panel lists these day by day
+/// instead of blending them into the period totals.
+#[derive(Serialize, Clone, Debug, PartialEq)]
+pub struct CreditExtra {
+    pub id: String,
+    /// Latest absolute reading — the card's cumulative "credits used" figure
+    /// and the day it was taken. Shown as-is (labelled cumulative): it is a
+    /// real observation, unlike a per-day number with no baseline.
+    pub latest: Option<f64>,
+    pub latest_day: Option<String>,
+    /// Day-over-day consumption, oldest first. Empty until a second reading
+    /// exists (one reading alone cannot say what a day consumed).
+    pub days: Vec<CreditDay>,
+}
+
+pub fn credit_extras() -> Vec<CreditExtra> {
+    let file = credit_store().lock().unwrap();
+    let mut out: Vec<CreditExtra> = Vec::new();
+    for (id, samples) in file.entries.iter() {
+        let mut days: Vec<CreditDay> = Vec::new();
+        let mut prev: Option<f64> = None;
+        for sample in samples {
+            let end = sample.last.unwrap_or(sample.used);
+            match prev {
+                // Day-over-day diff; a mid-day reset shows as `last < used`,
+                // so the post-reset segment is charged on top.
+                Some(p) => {
+                    let consumed =
+                        (sample.used - p).max(0.0) + if end < sample.used { end } else { 0.0 };
+                    days.push(CreditDay { day: sample.day.clone(), consumed });
+                }
+                // No baseline yet: the stored number is the card's CUMULATIVE
+                // reading, not that day's consumption — showing it as a daily
+                // figure would invent data. Wait for the next reading.
+                None => {}
+            }
+            prev = Some(end);
+        }
+        let latest = samples.last();
+        if latest.is_some() || !days.is_empty() {
+            out.push(CreditExtra {
+                id: id.clone(),
+                latest: latest.map(|s| s.last.unwrap_or(s.used)),
+                latest_day: latest.map(|s| s.day.clone()),
+                days,
+            });
+        }
+    }
+    out.sort_by(|a, b| a.id.cmp(&b.id));
+    out
 }
 
 /// 30-day daily consumption for one card: each observed day reads its diff
@@ -383,6 +451,29 @@ mod tests {
             resets_at: None,
             period_ms: None,
         }
+    }
+
+    #[test]
+    #[ignore = "real-machine anchor: reads this machine's credit_history.json"]
+    fn credit_extras_real_machine() {
+        let extras = credit_extras();
+        // A single stored reading has no baseline, so no daily consumption
+        // can be derived — the list must stay empty rather than echo the
+        // cumulative number as if it were one day's spend.
+        assert!(
+            extras.iter().all(|e| e.days.iter().all(|d| d.consumed >= 0.0)),
+            "credits days malformed: {extras:?}"
+        );
+        let qoder = extras.iter().find(|e| e.id.starts_with("qodercn"));
+        assert!(qoder.is_some(), "qoder row missing entirely: {extras:?}");
+        assert!(
+            qoder.unwrap().latest.is_some(),
+            "the cumulative reading must still be surfaced: {extras:?}"
+        );
+        assert!(
+            qoder.unwrap().days.len() <= 1,
+            "more derived days than stored baselines exist: {extras:?}"
+        );
     }
 
     #[test]

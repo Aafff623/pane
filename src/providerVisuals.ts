@@ -11,6 +11,7 @@ import clinepassIcon from "./assets/providers/clinepass.svg?raw";
 import copilotIcon from "./assets/providers/copilot.svg?raw";
 import cursorIcon from "./assets/providers/cursor.svg?raw";
 import deepseekIcon from "./assets/providers/deepseek.svg?raw";
+import dshIcon from "./assets/providers/dsh.svg?raw";
 import devinIcon from "./assets/providers/devin.svg?raw";
 import doubaoIcon from "./assets/providers/doubao.svg?raw";
 import elevenlabsIcon from "./assets/providers/elevenlabs.svg?raw";
@@ -94,6 +95,8 @@ const VISUALS: Readonly<Record<string, ProviderVisual>> = {
   copilot: { iconKey: "copilot", iconSvg: copilotIcon },
   cursor: { iconKey: "cursor", iconSvg: cursorIcon },
   deepseek: { iconKey: "deepseek", iconSvg: deepseekIcon },
+  // DeepSeek Harness: the official harness shares DeepSeek's whale mark.
+  dsh: { iconKey: "dsh", iconSvg: dshIcon },
   devin: { iconKey: "devin", iconSvg: devinIcon },
   grok: { iconKey: "grok", iconSvg: grokIcon },
   hermes: { iconKey: "hermes", iconSvg: hermesIcon },

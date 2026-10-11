@@ -488,8 +488,13 @@ const en: Dict = {
     "No spend data yet — appears once Claude Code, Codex, or another CLI logs some usage on this PC.",
   "spend.emptyPeriod": "No spend in this period.",
   "spend.emptyPeriodTip": "No spend recorded in this period.",
+  "spend.credits": "Credits",
+  "spend.creditsUnit": "credits",
+  "spend.creditsUsed": "cycle used",
+  "spend.creditsTip":
+    "Qoder CN / Trae CN bill in credits, which cannot be converted into tokens or dollars honestly. Listed per day (each day's own consumption), independent of the period tabs.",
   "spend.info":
-    "Fed by: {names}. All figures are local estimates from each tool's own logs.",
+    "Fed by: {names}. Local estimates from each tool's own logs — tools with no local token ledger (Trae CN, Doubao) cannot be counted here.",
   "spend.clickTip":
     "{exact} — computed locally from session logs. Click to show {next}.",
   "spend.today": "Today",
@@ -1460,7 +1465,12 @@ const zh: Dict = {
     "还没有花费数据 — 等这台电脑上的 Claude Code、Codex 或其他 CLI 记下用量后就会出现。",
   "spend.emptyPeriod": "这段时间没有花费。",
   "spend.emptyPeriodTip": "这段时间没有记录花费。",
-  "spend.info": "数据来自：{names}。都是根据各工具本地日志估算的。",
+  "spend.credits": "积分",
+  "spend.creditsUnit": "积分",
+  "spend.creditsUsed": "本周期已用",
+  "spend.creditsTip":
+    "Qoder CN / Trae CN 以积分（credits）计费，无法折算为 token 或美元。这里按天列出每天消耗的积分，不随时段切换。",
+  "spend.info": "数据来自：{names}。按各工具本地日志估算；本地不落 token 台账的工具（Trae CN、豆包）无法计入。",
   "spend.clickTip": "{exact} — 根据本地会话日志计算。点击可改为显示{next}。",
   "spend.today": "今天",
   "spend.yesterday": "昨天",
@@ -2388,8 +2398,13 @@ const ru: Dict = {
     "Пока нет данных о тратах — появятся, когда Claude Code, Codex или другой CLI запишет использование на этом ПК.",
   "spend.emptyPeriod": "За этот период трат нет.",
   "spend.emptyPeriodTip": "За этот период траты не записаны.",
+  "spend.credits": "Кредиты",
+  "spend.creditsUnit": "кр.",
+  "spend.creditsUsed": "израсходовано за цикл",
+  "spend.creditsTip":
+    "Qoder CN / Trae CN тарифицируются в кредитах — их нельзя честно пересчитать в токены или доллары. Показаны по дням (расход каждого дня), независимо от периодов.",
   "spend.info":
-    "Источники: {names}. Все цифры — локальные оценки по журналам самих инструментов.",
+    "Источники: {names}. Локальные оценки по журналам инструментов; инструменты без локального учёта токенов (Trae CN, Doubao) здесь не учитываются.",
   "spend.clickTip":
     "{exact} — посчитано локально по журналам сессий. Нажмите, чтобы показать {next}.",
   "spend.today": "Сегодня",

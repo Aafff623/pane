@@ -604,9 +604,160 @@ const refreshAttemptWaiters: Array<{ generation: number; resolve: () => void }> 
 let lastAppliedSpendGen = 0;
 let refreshTimer: number | undefined;
 let lastSnapshots: Snapshot[] = [];
+// ── T-0033: spend-ledger normalization ─────────────────────────────────────
+// The spend panels are a ledger of what local CLIs actually wrote — card
+// enablement is a quota-tracking concern, not a spend concern (a disabled or
+// deleted provider's CLI still burns tokens). Before any view consumes the
+// data, fold historical id renames and product lines so each product is one
+// row and no turn is counted twice:
+// · kimi ↔ moonshot — one scanner under two historical ids. The same day
+//   often holds identical cells under both names, so duplicates take the
+//   max (never the sum); a lone kimi cell is renamed.
+// · claude-desktop folds into claude (desktop and CLI are one product);
+//   those are genuinely different turns, so they sum.
+// · minimax folds into mcode (both are MiniMax usage the user cares about
+//   as one product); those are different ledgers, so they sum.
+const SPEND_FOLD: Record<string, { into: string; sum: boolean }> = {
+  kimi: { into: "moonshot", sum: false },
+  "claude-desktop": { into: "claude", sum: true },
+  // minimax is Claude-Code-routed MiniMax usage while mcode is the MiniMax
+  // Code CLI's own ledger — different turns, so they sum.
+  minimax: { into: "mcode", sum: true },
+};
+const SPEND_PRODUCT_NAME: Record<string, string> = {
+  claude: "Claude Code",
+  moonshot: "Kimi Code",
+  mcode: "MiniMax Code",
+};
+
+function foldSpendId(id: string): string {
+  return SPEND_FOLD[id]?.into ?? id;
+}
+
+function spendProductName(id: string, fallback: string): string {
+  return SPEND_PRODUCT_NAME[id] ?? fallback;
+}
+
+function mergeModelSpends(a: ModelSpend[], b: ModelSpend[]): ModelSpend[] {
+  const byModel = new Map<string, ModelSpend>();
+  for (const m of [...a, ...b]) {
+    const cur = byModel.get(m.model);
+    if (cur) {
+      cur.cost += m.cost;
+      cur.tokens += m.tokens;
+    } else {
+      byModel.set(m.model, { ...m });
+    }
+  }
+  return [...byModel.values()];
+}
+
+function mergeWindows(a: SpendWindow, b: SpendWindow): SpendWindow {
+  return {
+    cost: a.cost + b.cost,
+    tokens: a.tokens + b.tokens,
+    models: mergeModelSpends(a.models, b.models),
+  };
+}
+
+/// Fold one list of per-id rows into product rows. `weight` reads the
+/// comparison figure for the "same ledger, two names" case (max wins);
+/// `merge` combines two rows of the same product.
+function foldRows<T extends { id: string }>(
+  rows: T[],
+  weight: (row: T) => number,
+  merge: (a: T, b: T) => T,
+  rename: (row: T, id: string) => T,
+): T[] {
+  const out = new Map<string, T>();
+  for (const row of rows) {
+    const id = foldSpendId(row.id);
+    const existing = out.get(id);
+    if (!existing) {
+      out.set(id, rename(row, id));
+      continue;
+    }
+    const sums = SPEND_FOLD[row.id]?.sum ?? SPEND_FOLD[existing.id]?.sum ?? false;
+    // Sum only when the two rows are different ledgers (claude-desktop vs
+    // claude); same-ledger aliases keep the bigger row.
+    out.set(id, sums ? merge(existing, row) : weight(row) > weight(existing) ? rename(row, id) : existing);
+  }
+  return [...out.values()];
+}
+
+function normalizeProviderSpend(list: ProviderSpend[]): ProviderSpend[] {
+  return foldRows(
+    list,
+    (row) => row.last30.tokens,
+    (a, b) => ({
+      ...a,
+      today: mergeWindows(a.today, b.today),
+      yesterday: mergeWindows(a.yesterday, b.yesterday),
+      last30: mergeWindows(a.last30, b.last30),
+      trend: a.trend.map((v, i) => v + (b.trend[i] ?? 0)),
+      trend_cost: a.trend_cost.map((v, i) => v + (b.trend_cost[i] ?? 0)),
+      unpriced: a.unpriced + b.unpriced,
+      unpriced_models: [...new Set([...a.unpriced_models, ...b.unpriced_models])],
+    }),
+    (row, id) => ({ ...row, id, name: spendProductName(id, row.name) }),
+  );
+}
+
+function normalizeHistory(rows: HistorySpend[]): HistorySpend[] {
+  return foldRows(
+    rows,
+    (row) => row.tokens,
+    (a, b) => ({
+      ...a,
+      cost: a.cost + b.cost,
+      tokens: a.tokens + b.tokens,
+      active_days: Math.max(a.active_days, b.active_days),
+      models: mergeModelSpends(a.models, b.models),
+    }),
+    (row, id) => ({ ...row, id }),
+  );
+}
+
+function normalizeDaily(rows: DailySpendRow[]): DailySpendRow[] {
+  // Same fold, but keyed per day so two products never merge across days.
+  const out = new Map<string, DailySpendRow>();
+  for (const row of rows) {
+    const id = foldSpendId(row.id);
+    const key = `${row.day}|${id}`;
+    const existing = out.get(key);
+    if (!existing) {
+      out.set(key, { ...row, id });
+      continue;
+    }
+    const sums = SPEND_FOLD[row.id]?.sum ?? false;
+    if (sums) {
+      existing.cost += row.cost;
+      existing.tokens += row.tokens;
+      existing.models = mergeModelSpends(existing.models, row.models);
+    } else if (row.tokens > existing.tokens) {
+      out.set(key, { ...row, id });
+    }
+  }
+  return [...out.values()];
+}
+
 let lastSpend: ProviderSpend[] = [];
 let lastSpendHistory: { d7: HistorySpend[]; all: HistorySpend[] } = { d7: [], all: [] };
 let lastSpendDaily: DailySpendRow[] = [];
+/** Qoder CN / Trae CN bill in credits — listed per day, never blended into
+ * the period totals (credits cannot be converted into tokens or dollars). */
+interface CreditDay {
+  day: string;
+  consumed: number;
+}
+interface CreditExtra {
+  id: string;
+  /** Latest cumulative "credits used" reading + its day (a real observation). */
+  latest: number | null;
+  latest_day: string | null;
+  days: CreditDay[];
+}
+let lastCreditExtras: CreditExtra[] = [];
 let spendLoaded = false;
 let spendDetailOpen = false;
 let spendDetailDay = "";
@@ -2688,7 +2839,6 @@ function providerNameForSpend(id: string): string {
 function historyEntries(range: Exclude<RangeTab, "d30">): DonutEntry[] {
   const rows = range === "d7" ? lastSpendHistory.d7 : lastSpendHistory.all;
   const base = rows
-    .filter((row) => !isCardDisabled(row.id))
     .map((row) => ({
       s: {
         id: row.id,
@@ -2751,8 +2901,9 @@ function foldDonutEntries(all: DonutEntry[], tab: SpendTab): DonutEntry[] {
 }
 
 function donutEntries(tab: SpendTab): DonutEntry[] {
+  // T-0033 plan B: no enablement filter — the ledger shows every measured
+  // spend, disabled or not (see normalizeProviderSpend).
   const all: DonutEntry[] = lastSpend
-    .filter((s) => !isCardDisabled(s.id)) // disabled = gone everywhere
     .map((s) => ({ s, w: s[tab] }));
   return foldDonutEntries(all, tab);
 }
@@ -2817,14 +2968,12 @@ function entriesFromModelAgg(acc: Map<string, ModelAgg>, tab: SpendTab): DonutEn
 /// By-model slices for the live windows (today/yesterday/last30).
 function modelDonutEntries(tab: SpendTab): DonutEntry[] {
   const rows = lastSpend
-    .filter((s) => !isCardDisabled(s.id))
     .map((s) => ({ id: s.id, name: s.name, models: s[tab].models }));
   return entriesFromModelAgg(aggregateModels(rows), tab);
 }
 
 function modelHistoryEntries(range: Exclude<RangeTab, "d30">): DonutEntry[] {
   const rows = (range === "d7" ? lastSpendHistory.d7 : lastSpendHistory.all)
-    .filter((row) => !isCardDisabled(row.id))
     .map((row) => ({ id: row.id, name: providerNameForSpend(row.id), models: row.models }));
   return entriesFromModelAgg(aggregateModels(rows), "last30");
 }
@@ -3075,7 +3224,7 @@ function spendDetailValue(row: { cost: number; tokens: number }): number {
 
 function spendDetailDayRows(day: string): DailySpendRow[] {
   return lastSpendDaily
-    .filter((row) => row.day === day && !isCardDisabled(row.id))
+    .filter((row) => row.day === day)
     .sort((a, b) => spendDetailValue(b) - spendDetailValue(a));
 }
 
@@ -3089,7 +3238,6 @@ function renderSpendDetailOverlay(): string {
   start.setDate(start.getDate() - (heatWeeks * 7 - 1) - start.getDay());
   const daily = new Map<string, { cost: number; tokens: number; providers: number }>();
   for (const row of lastSpendDaily) {
-    if (isCardDisabled(row.id)) continue;
     const cell = daily.get(row.day) ?? { cost: 0, tokens: 0, providers: 0 };
     cell.cost += row.cost;
     cell.tokens += row.tokens;
@@ -3293,6 +3441,33 @@ function renderTotalSpend(): string {
         </div>
       </div>`;
 
+  // Credits-denominated providers cannot be converted into tokens/dollars
+  // honestly. They are listed DAY BY DAY (each day's own consumption) — the
+  // list does not follow the today/yesterday/7d/30d/all period tabs.
+  const creditName = (id: string) =>
+    id.startsWith("qodercn") ? "Qoder CN" : id.startsWith("traecn") ? "Trae CN" : id;
+  const creditRow = lastCreditExtras.length
+    ? `<div class="spend-credits" title="${escapeHtml(t("spend.creditsTip"))}"><span class="spend-credits-label">${escapeHtml(t("spend.credits"))}</span><div class="spend-credit-days">${lastCreditExtras
+        .map((c) => {
+          const rows: string[] = [];
+          // The cumulative reading is an observation, so it always shows
+          // (labelled as such) — per-day consumption only once a baseline
+          // exists.
+          if (c.latest != null) {
+            rows.push(
+              `<span class="spend-credit-item"><strong>${escapeHtml(creditName(c.id))}</strong> ${escapeHtml(t("spend.creditsUsed"))} ${escapeHtml(fmtTokens(c.latest))} ${escapeHtml(t("spend.creditsUnit"))}${c.latest_day ? ` <span class="spend-credit-day">(${escapeHtml(c.latest_day.slice(5))})</span>` : ""}</span>`,
+            );
+          }
+          for (const d of c.days) {
+            rows.push(
+              `<span class="spend-credit-item"><strong>${escapeHtml(creditName(c.id))}</strong> <span class="spend-credit-day">${escapeHtml(d.day.slice(5))}</span> ${escapeHtml(fmtTokens(d.consumed))} ${escapeHtml(t("spend.creditsUnit"))}</span>`,
+            );
+          }
+          return rows.join("");
+        })
+        .join("")}</div></div>`
+    : "";
+
   const contributors = lastSpend.map((s) => s.name).join(", ");
   // The ⚡ stamp mirrors the selected window below (today/yesterday/7d/30d/all)
   // — the old standalone head-range tabs duplicated that choice.
@@ -3353,6 +3528,7 @@ function renderTotalSpend(): string {
       </div>
       ${isFolded ? "" : `<div class="card-panel">
         ${body}
+        ${creditRow}
       </div>`}
     </article>`;
 }
@@ -8482,6 +8658,9 @@ async function refresh(
   const spendPromise = usageOnly
     ? Promise.resolve<ProviderSpend[] | null>(null)
     : invoke<ProviderSpend[]>("fetch_spend").catch(() => null);
+  const creditExtrasPromise = usageOnly
+    ? Promise.resolve<CreditExtra[] | null>(null)
+    : invoke<CreditExtra[]>("fetch_credit_extras").catch(() => null);
   const spendHistoryPromise = usageOnly
     ? Promise.resolve<{ d7: HistorySpend[]; all: HistorySpend[] } | null>(null)
     : spendPromise.then(() =>
@@ -8638,17 +8817,24 @@ async function refresh(
   }
   if (usageOnly) return;
   if (spendHistory && myGen >= lastAppliedSpendGen) {
-    lastSpendHistory = spendHistory;
+    lastSpendHistory = {
+      d7: normalizeHistory(spendHistory.d7),
+      all: normalizeHistory(spendHistory.all),
+    };
   }
   if (spendDaily && myGen >= lastAppliedSpendGen) {
-    lastSpendDaily = spendDaily;
+    lastSpendDaily = normalizeDaily(spendDaily);
   }
   spendLoaded = true;
   // Overlapping scans are allowed now that Refresh unlocks before spend
   // finishes. Keep the newest successful result — a later failed scan
   // (null) must not discard dollars an older pass already computed.
+  const creditExtras = await creditExtrasPromise;
+  if (creditExtras && myGen >= lastAppliedSpendGen) {
+    lastCreditExtras = creditExtras;
+  }
   if (spend && myGen >= lastAppliedSpendGen) {
-    lastSpend = spend;
+    lastSpend = normalizeProviderSpend(spend);
     lastAppliedSpendGen = myGen;
   }
   if (lastSnapshots.length) ensureLayout();

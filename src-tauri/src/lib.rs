@@ -3330,6 +3330,14 @@ fn fetch_spend_history(range_days: Option<u32>) -> Result<Vec<spend_history::Ran
     spend_history::range_spend(range_days)
 }
 
+/// Credits-denominated providers (Qoder CN / Trae CN): credits cannot be
+/// converted into tokens or dollars honestly, so the spend panel lists them
+/// separately instead of blending them into the totals.
+#[tauri::command]
+fn fetch_credit_extras() -> Vec<usage_history::CreditExtra> {
+    usage_history::credit_extras()
+}
+
 /// Daily provider/model rows for the spend detail heatmap. Read-only.
 #[tauri::command]
 fn fetch_spend_daily(range_days: Option<u32>) -> Result<Vec<spend_history::DailySpendRow>, String> {
@@ -5149,6 +5157,7 @@ pub fn run() {
             fetch_credit_history,
             get_boot_id,
             fetch_spend_history,
+            fetch_credit_extras,
             fetch_spend_daily,
             antigravity_capture_account,
             cursor_oauth_start,

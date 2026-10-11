@@ -151,14 +151,36 @@ pub struct RangeSpend {
     pub models: Vec<crate::spend::ModelSpend>,
 }
 
+/// Historical scanner aliases: the Kimi scanner switched its output id from
+/// `kimi` to `moonshot`, and the ledger keeps both names' cells. Aggregation
+/// folds them into one row (per day, max) so a rename never double-counts.
+fn spend_alias(id: &str) -> &str {
+    match id {
+        "kimi" => "moonshot",
+        other => other,
+    }
+}
+
 fn range_from(file: &HistoryFile, range_days: Option<u32>, today: NaiveDate) -> Vec<RangeSpend> {
     let cutoff = range_days.map(|days| today - Duration::days(days.saturating_sub(1) as i64));
     let mut by_provider: BTreeMap<String, (f64, f64, u32, BTreeMap<String, (f64, f64)>)> = BTreeMap::new();
     for (day_key, providers) in &file.days {
         let Ok(day) = NaiveDate::parse_from_str(day_key, "%Y-%m-%d") else { continue };
         if cutoff.is_some_and(|start| day < start || day > today) { continue; }
+        // T-0033: one scanner, two historical ids (kimi ⇄ moonshot). Fold
+        // aliases WITHIN the day first — the same day often holds identical
+        // cells under both names, so the bigger cell wins (never the sum),
+        // and early kimi-only days survive the rename.
+        let mut day_cells: BTreeMap<&str, &ProviderDay> = BTreeMap::new();
         for (id, cell) in providers {
-            let entry = by_provider.entry(id.clone()).or_default();
+            let id = spend_alias(id);
+            let take = day_cells.get(id).map_or(true, |prev| cell.tokens > prev.tokens);
+            if take {
+                day_cells.insert(id, cell);
+            }
+        }
+        for (id, cell) in day_cells {
+            let entry = by_provider.entry(id.to_string()).or_default();
             entry.0 += cell.cost;
             entry.1 += cell.tokens;
             if cell.tokens > 0.0 || cell.cost > 0.004 { entry.2 += 1; }
@@ -260,6 +282,48 @@ mod tests {
         let mut data = HashMap::new();
         data.insert((day.num_days_from_ce(), model.to_string()), (cost, tokens));
         crate::spend::ProviderDays { id: id.to_string(), name: id.to_string(), days: data }
+    }
+
+    // ── T-0033: kimi ⇄ moonshot alias folding ─────────────────────────────
+
+    #[test]
+    #[ignore = "real-machine anchor: reads this machine's spend_history.json"]
+    fn real_history_has_no_kimi_row() {
+        let all = range_spend(None).unwrap_or_default();
+        let ids: Vec<&str> = all.iter().map(|r| r.id.as_str()).collect();
+        assert!(!ids.contains(&"kimi"), "kimi row survived the fold: {ids:?}");
+        assert!(ids.contains(&"moonshot"), "moonshot row missing: {ids:?}");
+    }
+
+    /// Same day under both historical ids → ONE row (max, never the sum);
+    /// an early kimi-only day survives the rename.
+    #[test]
+    fn range_from_folds_kimi_alias_per_day() {
+        let mut days: BTreeMap<String, BTreeMap<String, ProviderDay>> = BTreeMap::new();
+        let cell = |tokens: f64| ProviderDay {
+            cost: tokens / 1e6,
+            tokens,
+            models: BTreeMap::new(),
+        };
+        // 2026-09-01: both names carry the same 2,389,931 (the rename dup).
+        let mut day1 = BTreeMap::new();
+        day1.insert("kimi".to_string(), cell(2_389_931.0));
+        day1.insert("moonshot".to_string(), cell(2_389_931.0));
+        days.insert("2026-09-01".to_string(), day1);
+        // 2026-08-31: only the old name (pre-rename history).
+        let mut day2 = BTreeMap::new();
+        day2.insert("kimi".to_string(), cell(52_811_343.0));
+        days.insert("2026-08-31".to_string(), day2);
+        let file = HistoryFile { version: VERSION, days };
+        let today = NaiveDate::from_ymd_opt(2026, 9, 2).unwrap();
+        let rows = range_from(&file, None, today);
+        assert_eq!(rows.len(), 1, "kimi and moonshot must fold into one row");
+        let ids: Vec<&str> = rows.iter().map(|r| r.id.as_str()).collect();
+        assert_eq!(ids, vec!["moonshot"], "unexpected rows: {ids:?}");
+        assert_eq!(rows[0].id, "moonshot");
+        // 2,389,931 (not doubled) + 52,811,343 (renamed day survives).
+        assert_eq!(rows[0].tokens, 2_389_931.0 + 52_811_343.0);
+        assert_eq!(rows[0].active_days, 2);
     }
 
     #[test]

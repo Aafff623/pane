@@ -337,6 +337,87 @@ fn read_usage_events(db: &std::path::Path) -> Result<Vec<UsageEvent>, String> {
     Ok(rows.flatten().collect())
 }
 
+/// The v2 CLI store (`~/.minimax/v2/sqlite/runtime-state.sqlite`) keeps the
+/// same per-turn ledger under `local_runtime_token_usage`. It is the local
+/// ground truth for MiniMax Code, so the spend engine reads it as a
+/// day-level backfill for the mcode card for days cc-switch's proxy didn't
+/// record (proxy off / cc-switch not running). Same snapshot-and-cache
+/// machinery as the v1 store above.
+pub fn collect_v2_usage_events() -> Vec<UsageEvent> {
+    use std::sync::Mutex;
+    static CACHE: Mutex<Option<(FileStamp, FileStamp, Vec<UsageEvent>)>> = Mutex::new(None);
+
+    let Some(db_path) = dirs::home_dir().map(|h| {
+        h.join(".minimax")
+            .join("v2")
+            .join("sqlite")
+            .join("runtime-state.sqlite")
+    }) else {
+        return Vec::new();
+    };
+    if !db_path.exists() {
+        return Vec::new();
+    }
+    let db_stamp = file_stamp(&db_path);
+    let wal_stamp = file_stamp(&db_path.with_extension("sqlite-wal"));
+
+    if let Ok(cache) = CACHE.lock() {
+        if let Some((d, w, events)) = cache.as_ref() {
+            if *d == db_stamp && *w == wal_stamp {
+                return events.clone();
+            }
+        }
+    }
+
+    let tmp_base = std::env::temp_dir().join(format!("pane-minimax-v2-{}", std::process::id()));
+    let tmp_db = tmp_base.with_extension("db");
+    let events = snapshot_db(&db_path, &tmp_db).and_then(|()| read_v2_usage_events(&tmp_db));
+    for suffix in ["db", "db-wal", "db-shm"] {
+        let _ = std::fs::remove_file(tmp_base.with_extension(suffix));
+    }
+
+    match events {
+        Ok(events) => {
+            if let Ok(mut cache) = CACHE.lock() {
+                *cache = Some((db_stamp, wal_stamp, events.clone()));
+            }
+            events
+        }
+        Err(_) => CACHE
+            .lock()
+            .ok()
+            .and_then(|c| c.as_ref().map(|(_, _, e)| e.clone()))
+            .unwrap_or_default(),
+    }
+}
+
+fn read_v2_usage_events(db: &std::path::Path) -> Result<Vec<UsageEvent>, String> {
+    let conn = rusqlite::Connection::open(db).map_err(|e| format!("open v2 db copy: {e}"))?;
+    let mut stmt = conn
+        .prepare(
+            "SELECT ts, model, input_tokens, output_tokens, reasoning_tokens,
+                    cache_read_tokens, cache_write_tokens, cost_usd
+             FROM local_runtime_token_usage",
+        )
+        .map_err(|e| format!("query local_runtime_token_usage: {e}"))?;
+    let rows = stmt
+        .query_map([], |row| {
+            Ok(UsageEvent {
+                ts_ms: row.get::<_, i64>(0)?,
+                // The v2 store leaves model NULL on some turns.
+                model: row.get::<_, Option<String>>(1)?.unwrap_or_default(),
+                input: row.get::<_, f64>(2).unwrap_or(0.0),
+                output: row.get::<_, f64>(3).unwrap_or(0.0),
+                reasoning: row.get::<_, f64>(4).unwrap_or(0.0),
+                cache_read: row.get::<_, f64>(5).unwrap_or(0.0),
+                cache_write: row.get::<_, f64>(6).unwrap_or(0.0),
+                cost_usd: row.get::<_, f64>(7).unwrap_or(0.0),
+            })
+        })
+        .map_err(|e| format!("read local_runtime_token_usage: {e}"))?;
+    Ok(rows.flatten().collect())
+}
+
 #[cfg(test)]
 mod tests {
     use super::cli_config_key;

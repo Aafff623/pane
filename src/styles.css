@@ -628,6 +628,37 @@ body.settings-open #settings {
 
 /* The one-time recovery-code reveal: monospace, selectable, wrapped so a
    35-char code never overflows the settings panel. */
+/* Credits extras line on the total-spend card (Qoder CN / Trae CN). */
+.spend-credits {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin: 6px 2px 0;
+  font-size: 10.5px;
+  color: var(--muted-foreground);
+}
+
+.spend-credit-days {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.spend-credit-day {
+  color: var(--muted-foreground);
+  font-variant-numeric: tabular-nums;
+}
+
+.spend-credits-label {
+  font-weight: 600;
+}
+
+.spend-credit-item strong {
+  color: var(--foreground);
+  font-weight: 600;
+  margin-right: 3px;
+}
+
 .kv-recovery-code {
   display: block;
   font-family: var(--mono-font, "Consolas", monospace);
