@@ -48,6 +48,13 @@ html.i18n-boot #boot-fallback {
   --primary: #fafafa;
   --primary-foreground: #09090b;
   --accent: #27272a;
+  --control-hover: #3f3f46;
+  --field-surface: rgb(0 0 0 / 0.25);
+  --floating-surface: #18181b;
+  --glass-surface: rgba(24, 24, 27, 0.55);
+  --glass-sheen: rgba(255, 255, 255, 0.07);
+  --glass-border: rgba(255, 255, 255, 0.12);
+  --floating-shadow: rgb(0 0 0 / 0.5);
   --destructive: #ef4444;
   --chart-blue: #3b82f6;
   /* Cursor's brand black flips to white on the dark theme (like the Mac
@@ -77,6 +84,13 @@ html.i18n-boot #boot-fallback {
   --primary: #18181b;
   --primary-foreground: #fafafa;
   --accent: #f4f4f5;
+  --control-hover: #e4e4e7;
+  --field-surface: #ffffff;
+  --floating-surface: #fafafa;
+  --glass-surface: rgba(255, 255, 255, 0.94);
+  --glass-sheen: rgba(255, 255, 255, 0.5);
+  --glass-border: rgba(0, 0, 0, 0.1);
+  --floating-shadow: rgb(0 0 0 / 0.18);
   --spend-cursor: #18181b;
   color-scheme: light;
 }
@@ -1413,7 +1427,7 @@ select:focus-visible {
 }
 
 .key-row button:hover {
-  background: #3f3f46;
+  background: var(--control-hover);
 }
 
 .ona-site {
@@ -1615,7 +1629,7 @@ select:focus-visible {
 .ona-add button:hover,
 .ona-edit-actions button:hover,
 .ona-key-add button:hover {
-  background: #3f3f46;
+  background: var(--control-hover);
 }
 
 /* ---------------------------------------------------------------- cards */
@@ -2556,9 +2570,11 @@ article.provider.is-folded:hover {
 
 .spend-detail-btn {
   flex: none;
+  align-items: center;
+  justify-content: center;
   width: 26px;
   height: 26px;
-  padding: 5px;
+  padding: 0;
 }
 
 /* Update-push indicator in the Total Spend header — the mainstream quiet
@@ -2623,7 +2639,7 @@ article.provider.is-folded:hover {
   padding: 20px;
   border: 1px solid var(--border);
   border-radius: 18px;
-  background: var(--card);
+  background: var(--floating-surface);
   box-shadow: 0 22px 70px rgb(0 0 0 / 0.46);
 }
 
@@ -3202,7 +3218,13 @@ article.provider.is-folded:hover {
 }
 
 .mini-btn:hover {
-  background: #3f3f46;
+  background: var(--control-hover);
+}
+
+.mini-btn.primary:not(:disabled):hover {
+  background: var(--primary);
+  color: var(--primary-foreground);
+  filter: brightness(0.94);
 }
 
 .mini-btn:disabled {
@@ -3244,8 +3266,12 @@ article.provider.is-folded:hover {
   color: #b91c1c;
 }
 
+:root[data-theme="light"] .mini-btn.danger:hover {
+  background: rgba(239, 68, 68, 0.22);
+}
+
 :root[data-theme="light"] .mini-btn.ok {
-  color: #15803d;
+  color: #166534;
 }
 
 .skey-help {
@@ -3468,7 +3494,7 @@ article.provider.is-folded:hover {
 .cust-form .form-input {
   width: 100%;
   box-sizing: border-box;
-  background: rgb(0 0 0 / 0.25);
+  background: var(--field-surface);
   border: 1px solid var(--input);
   border-radius: 8px;
   color: var(--foreground);
@@ -3740,7 +3766,7 @@ article.provider.is-folded:hover {
 .cursor-json-input {
   box-sizing: border-box;
   width: 100%;
-  background: rgb(0 0 0 / 0.25);
+  background: var(--field-surface);
   border: 1px solid var(--input);
   border-radius: 8px;
   color: var(--foreground);
@@ -3749,6 +3775,14 @@ article.provider.is-folded:hover {
   padding: 8px 12px;
   resize: vertical;
   outline: none;
+}
+
+.cust-form .form-input::placeholder,
+.cursor-json-input::placeholder,
+#vault-setup-body input::placeholder,
+#vault-reset-body input::placeholder {
+  color: var(--muted-foreground);
+  opacity: 1;
 }
 
 .cust-config.account-config .account-field input {
@@ -4291,7 +4325,7 @@ article.provider.is-folded:hover {
   width: min(92vw, 380px);
   max-height: calc(100vh - 24px);
   overflow-y: auto;
-  background: var(--card);
+  background: var(--floating-surface);
   border: 1px solid var(--border);
   border-radius: 14px;
   padding: 16px;
@@ -5550,15 +5584,16 @@ body.no-glass .cust-dock {
 #update-box {
   width: min(88%, 300px);
   background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.07), rgba(255, 255, 255, 0) 38%),
-    rgba(24, 24, 27, 0.55);
+    linear-gradient(180deg, var(--glass-sheen), transparent 38%),
+    var(--glass-surface);
   backdrop-filter: blur(24px) saturate(1.5) brightness(1.04);
   -webkit-backdrop-filter: blur(24px) saturate(1.5) brightness(1.04);
-  border: 1px solid rgba(255, 255, 255, 0.12);
+  color: var(--foreground);
+  border: 1px solid var(--glass-border);
   border-radius: 18px;
   padding: 18px 18px 14px;
   box-shadow:
-    0 24px 60px rgb(0 0 0 / 0.5),
+    0 24px 60px var(--floating-shadow),
     inset 0 1px 1.5px rgba(255, 255, 255, 0.35),
     inset 0 -1px 1px rgba(255, 255, 255, 0.08),
     inset 1.5px 0 1.5px rgba(255, 255, 255, 0.06),
@@ -5737,15 +5772,16 @@ body.no-glass .cust-dock {
   width: min(92%, 340px);
   max-height: 78vh;
   background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.07), rgba(255, 255, 255, 0) 38%),
-    rgba(24, 24, 27, 0.55);
+    linear-gradient(180deg, var(--glass-sheen), transparent 38%),
+    var(--glass-surface);
   backdrop-filter: blur(24px) saturate(1.5) brightness(1.04);
   -webkit-backdrop-filter: blur(24px) saturate(1.5) brightness(1.04);
-  border: 1px solid rgba(255, 255, 255, 0.12);
+  color: var(--foreground);
+  border: 1px solid var(--glass-border);
   border-radius: 18px;
   padding: 18px 18px 14px;
   box-shadow:
-    0 24px 60px rgb(0 0 0 / 0.5),
+    0 24px 60px var(--floating-shadow),
     inset 0 1px 1.5px rgba(255, 255, 255, 0.35),
     inset 0 -1px 1px rgba(255, 255, 255, 0.08),
     inset 1.5px 0 1.5px rgba(255, 255, 255, 0.06),
@@ -5901,29 +5937,20 @@ body.no-glass .cust-dock {
   background: color-mix(in srgb, var(--destructive, #ef4444) 12%, transparent);
 }
 
-/* Light theme: white glass, same as the sidebar's light recipe. */
-:root[data-theme="light"] #whatsnew-box,
-:root[data-theme="light"] #confirm-box,
-:root[data-theme="light"] #update-box {
-  background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.5), rgba(255, 255, 255, 0) 38%),
-    rgba(255, 255, 255, 0.6);
-  border: 1px solid rgba(0, 0, 0, 0.1);
-  box-shadow:
-    0 24px 60px rgb(0 0 0 / 0.3),
-    inset 0 1px 1.5px rgba(255, 255, 255, 0.7);
-}
-
 :root[data-theme="light"] #whatsnew-body::-webkit-scrollbar-thumb {
   background: rgba(0, 0, 0, 0.18);
 }
 
 /* Glass effects off: flat opaque surfaces, like every other glass layer. */
 body.no-glass #whatsnew-box,
-body.no-glass #confirm-box {
+body.no-glass #confirm-box,
+body.no-glass #update-box,
+body.no-glass #vault-setup-box,
+body.no-glass #vault-reset-box,
+body.no-glass .group-menu {
   backdrop-filter: none !important;
   -webkit-backdrop-filter: none !important;
-  background: var(--card) !important;
+  background: var(--floating-surface) !important;
   border-color: var(--border) !important;
 }
 
@@ -6628,6 +6655,17 @@ article.provider.card-highlight {
   background: linear-gradient(135deg, #b45309, #f59e0b);
 }
 
+/* Dark numerals in light mode need a light badge as well; changing only
+   the text leaves green/gray account counts on saturated dark gradients. */
+:root[data-theme="light"] .provider-account-badge {
+  color:var(--foreground);
+  background:#eff6ff;
+  border-color:#93c5fd;
+}
+:root[data-theme="light"] .provider-account-badge.is-empty { background:#fef2f2; border-color:#fca5a5; }
+:root[data-theme="light"] .provider-account-badge.is-ready { background:#f0fdf4; border-color:#86efac; }
+:root[data-theme="light"] .provider-account-badge.is-partial { background:#fffbeb; border-color:#fcd34d; }
+
 .provider-account-availability {
   font-size: 8px;
   font-weight: 650;
@@ -6940,15 +6978,16 @@ article.provider.card-highlight {
   max-width: 220px;
   padding: 4px;
   border-radius: 10px;
-  /* Same glass recipe as #confirm-box - a flat --card fill would let the
-     card text underneath bleed through the menu. */
+  /* Theme-aware glass; enough opacity to keep underlying text from
+     bleeding through the light menu. */
   background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.07), rgba(255, 255, 255, 0) 38%),
-    rgba(24, 24, 27, 0.55);
+    linear-gradient(180deg, var(--glass-sheen), transparent 38%),
+    var(--glass-surface);
   backdrop-filter: blur(24px) saturate(1.5) brightness(1.04);
   -webkit-backdrop-filter: blur(24px) saturate(1.5) brightness(1.04);
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  box-shadow: 0 8px 24px rgb(0 0 0 / 0.4);
+  color: var(--foreground);
+  border: 1px solid var(--glass-border);
+  box-shadow: 0 8px 24px var(--floating-shadow);
 }
 
 .group-menu-title {
@@ -7650,7 +7689,7 @@ body.reduce-anim #splash * {
   border: none;
   padding: 2px 6px;
   font-size: 12px;
-  color: var(--accent, #3b82f6);
+  color: var(--primary);
   cursor: pointer;
   border-radius: 6px;
 }
