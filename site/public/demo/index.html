@@ -1,11 +1,11 @@
 <!doctype html>
 <html lang="en" class="i18n-boot">
   <head>
-    <meta charset="UTF-8" />
+    <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Pane</title>
-  <link rel="stylesheet" href="/fonts/fonts.css"><link rel="stylesheet" href="/demo-frame.css?v=7"><script>(function(){window.requestAnimationFrame=function(cb){return window.setTimeout(function(){cb(window.performance.now())},16)};window.cancelAnimationFrame=function(id){window.clearTimeout(id)};document.addEventListener("DOMContentLoaded",function(){setTimeout(function(){if(document.querySelector(".skeleton-card")){var b=document.querySelector("#refresh");if(b)b.click()}},900)})})()</script>  <script type="module" crossorigin src="/demo/assets/index-DyKM6gpA.js"></script>
-  <link rel="stylesheet" crossorigin href="/demo/assets/index-CTcPGJZO.css">
+  <link rel="stylesheet" href="/fonts/fonts.css"><link rel="stylesheet" href="/demo-frame.css?v=7"><script>(function(){window.requestAnimationFrame=function(cb){return window.setTimeout(function(){cb(window.performance.now())},16)};window.cancelAnimationFrame=function(id){window.clearTimeout(id)};document.addEventListener("DOMContentLoaded",function(){setTimeout(function(){if(document.querySelector(".skeleton-card")){var b=document.querySelector("#refresh");if(b)b.click()}},900)})})()</script>  <script type="module" crossorigin src="/demo/assets/index-Bx-_ju_I.js"></script>
+  <link rel="stylesheet" crossorigin href="/demo/assets/index-gii8yQP5.css">
 </head>
 
   <body>
@@ -136,7 +136,7 @@
             <button id="refresh" title="Refresh now" data-i18n-title="sidebar.refresh">&#10227;</button>
           </div>
           <div class="sidebar-buttons bottom">
-            <button id="skin-btn" title="Skin market" aria-label="Skin market"></button>
+            <button id="skin-btn" data-i18n-title="skin.market" data-i18n-aria="skin.market" title="Skin market" aria-label="Skin market"></button>
             <button id="customize-btn" title="Customize" data-i18n-title="sidebar.customize" aria-label="Customize">&#9776;</button>
             <button id="settings-btn" title="Settings" data-i18n-title="sidebar.settings">&#9881;</button>
           </div>
@@ -158,7 +158,6 @@
       </div>
     </main>
 
-    <div id="skin-mascot" aria-hidden="true"></div>
 
     <!-- Customize: full-window panel sliding in from the left. -->
     <aside id="drawer" aria-label="Customize" data-i18n-aria="sidebar.customize">
@@ -253,13 +252,17 @@
             <input id="spend-tier-max" type="number" min="1" max="100000" step="10" />
           </div>
           <div class="setting-row">
-            <label class="toggle" title="Unfinished features under active development (currently: the skin market). May be unstable." data-i18n-title="settings.experimentalTip"><input id="experimental-features" type="checkbox" /> <span data-i18n="settings.experimental">Experimental features</span></label>
+            <label class="toggle" title="Unfinished features under active development. Skins are available independently of this switch." data-i18n-title="settings.experimentalTip"><input id="experimental-features" type="checkbox" /> <span data-i18n="settings.experimental">Experimental features</span></label>
           </div>
           <div class="setting-row">
             <label class="toggle" title="Category chips wrap into a two-row grid (3 per row, 6 max) instead of one compact scrollable row; extra categories hide behind …" data-i18n-title="settings.overviewCatFullTip"><input id="overview-cat-full" type="checkbox" /> <span data-i18n="settings.overviewCatFull">Show all overview categories</span></label>
           </div>
           <div class="setting-row">
             <label class="toggle" title="Automatically claim Qoder CN's daily 100-credit benefit once per claim window. Off by default: it performs a write on your account." data-i18n-title="settings.qoderCheckinTip"><input id="qoder-checkin" type="checkbox" /> <span data-i18n="settings.qoderCheckin">Qoder CN daily check-in</span></label>
+          </div>
+          <div class="setting-row">
+            <label data-i18n-title="settings.agentSkillTip" title="Copies a small skill folder into ~/.agents/skills/pane so your coding agent (Claude Code, Codex, Cursor, ZCode…) can diagnose Pane problems itself through the local read-only API. Shows a plan first; existing files are backed up once." data-i18n="settings.agentSkill">AI agent troubleshooting skill</label>
+            <button class="mini-btn" id="install-agent-skill" data-i18n="settings.agentSkillInstall">Install</button>
           </div>
         </div></div>
       </div>

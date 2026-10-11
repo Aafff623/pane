@@ -1,13 +1,16 @@
 // Magpie routing motion + Magic UI Animated Beam, adapted to a static site.
 // Original sources and MIT notices: site/vendor/{magpie-routing,magicui-animated-beam}.
+import { paneMotion } from '/motion.js?v=1';
+import { bindMotionToggle } from '/ui.js?v=1';
+
 export function initUsageFlow(isEnglish,en){
   const host=document.querySelector('.why-flow');if(!host)return;
   const stage=host.querySelector('.why-stage'),svg=host.querySelector('.why-wires');
   const work=host.querySelector('.why-work'),hub=host.querySelector('.why-destination');
   const rows=[...host.querySelectorAll('.why-source')],caption=host.querySelector('.why-flow-caption');
   const count=host.querySelector('.why-flow-count b'),pause=host.querySelector('.why-pause');
-  const motion=matchMedia('(prefers-reduced-motion: reduce)'),ns='http://www.w3.org/2000/svg';
-  let visible=!('IntersectionObserver' in window),paused=false,frame=0,previous=0,time=0,next=0,index=0,total=0,trips=[];
+  const reduce=matchMedia('(prefers-reduced-motion: reduce)'),ns='http://www.w3.org/2000/svg';
+  let visible=!('IntersectionObserver' in window),frame=0,previous=0,time=0,next=0,index=0,total=0,trips=[];
   const make=(tag,attrs,parent=svg)=>{const node=document.createElementNS(ns,tag);for(const [k,v] of Object.entries(attrs))node.setAttribute(k,v);parent.append(node);return node};
   const defs=make('defs',{});
   const wires=[work,...rows].map((_,i)=>{
@@ -62,19 +65,25 @@ export function initUsageFlow(isEnglish,en){
   }
   function sync(){
     if(frame)cancelAnimationFrame(frame);frame=0;previous=0;
-    host.classList.toggle('is-paused',paused||!visible||document.hidden||motion.matches);
-    if(!paused&&visible&&!document.hidden&&!motion.matches)frame=requestAnimationFrame(tick);
+    // Reduced motion stays authoritative even when the visitor un-pauses: the
+    // shared switch is a preference, the OS setting is a floor.
+    const still=paneMotion.paused||reduce.matches;
+    host.classList.toggle('is-paused',still||!visible||document.hidden);
+    if(!still&&visible&&!document.hidden)frame=requestAnimationFrame(tick);
   }
   rows.forEach((row,i)=>row.addEventListener('click',()=>{
     clear();select(i);index=i;next=time;
-    if(motion.matches){count.textContent=String(++total);return}
-    if(paused){paused=false;pause.setAttribute('aria-pressed','false');pause.textContent=text('暂停动画',en.whyPause)}sync();
+    if(reduce.matches){count.textContent=String(++total);return}
+    sync();
   }));
-  pause.addEventListener('click',()=>{paused=!paused;pause.setAttribute('aria-pressed',String(paused));pause.textContent=paused?text('继续动画',en.whyResume):text('暂停动画',en.whyPause);sync()});
+  // The collector's switch is the page-wide switch; the label and aria state
+  // come from the shared controller so every pause button on the page agrees.
+  bindMotionToggle(pause,paneMotion,paused=>paused?text('恢复动画',en.whyResume):text('暂停动画',en.whyPause));
+  paneMotion.subscribe(sync);
   const resize=new ResizeObserver(layout);resize.observe(stage);
   const observer='IntersectionObserver' in window?new IntersectionObserver(entries=>{visible=entries[0].isIntersecting;sync()},{threshold:.1}):null;
   observer?.observe(stage);document.addEventListener('visibilitychange',sync);
-  motion.addEventListener('change',()=>{clear();sync()});
+  reduce.addEventListener('change',()=>{clear();sync()});
   window.addEventListener('pagehide',()=>{if(frame)cancelAnimationFrame(frame);frame=0});window.addEventListener('pageshow',sync);
   rows.forEach(row=>row.setAttribute('aria-pressed','false'));layout();sync();
 }

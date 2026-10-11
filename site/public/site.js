@@ -1,5 +1,7 @@
 import { en } from '/i18n.js';
-import { initUsageFlow } from '/usage-flow.js?v=2';
+import { initUsageFlow } from '/usage-flow.js?v=4';
+import { paneMotion } from '/motion.js?v=1';
+import { formatByKind, warmHover, isHoverWarm, onLongPress, moveRovingFocus, bindMotionToggle } from '/ui.js?v=1';
 const frame=document.querySelector('#pane-demo'),settingsFrame=document.querySelector('#pane-settings'),root=document.documentElement;let selected='overview',refreshTimer; let demoTheme='dark';
 root.classList.add('motion-ready');
 // Kept for the parked bilingual copy. The launched site is Chinese-only, but
@@ -10,6 +12,8 @@ const legacyTranslations = {
 };
 
 const isEnglish = location.pathname === '/en' || location.pathname.startsWith('/en/') || new URLSearchParams(location.search).get('lang') === 'en';
+// Every pause control on the page names the same shared state the same way.
+const motionLabel = paused => paused ? (isEnglish ? en.whyResume : '恢复动画') : (isEnglish ? en.whyPause : '暂停动画');
 const demoLang = isEnglish ? 'en' : 'zh';
 function setText(selector, key, html = false) { const node = document.querySelector(selector); if (node && isEnglish && en[key]) html ? node.innerHTML = en[key] : node.textContent = en[key]; }
 function setTexts(selector, keys, html = false) { document.querySelectorAll(selector).forEach((node, i) => { const value = en[keys[i]]; if (node && isEnglish && value) html ? node.innerHTML = value : node.textContent = value; }); }
@@ -26,42 +30,157 @@ function applyEnglishCopy() {
   if (heroLead?.firstChild?.nodeType === Node.TEXT_NODE) heroLead.firstChild.textContent = en.heroTitleLead;
   setText('.hero-title-lead .ink-mark', 'heroTitleCall');
   setText('.hero-title-focus .ink-mark', 'heroTitleVisible');
-  setText('.nav-context', 'navContext'); setTexts('.nav-links a', ['navDemo','navFeatures','navFaq']); setText('#language', 'language'); setText('.nav-actions .compact', 'navDownload');
-  setTexts('.hero-meta span', ['heroMetaLeft','heroMetaRight']); setText('.eyebrow', 'heroEyebrow');
+  setText('.nav-context .chip__label', 'navContext'); setTexts('.nav-links a', ['navDemo','navFeatures','navFaq']); setText('#language', 'language'); setText('.nav-actions .button', 'navDownload');
+  // Icon-only controls need a name in whichever language the page is showing.
+  for(const [selector,label] of [['.nav-actions .github','GitHub repository'],['.nav-links','Page sections'],['#language','Switch language'],['#theme','Switch theme'],['#pane-settings-close','Close settings window']]){
+    const node=document.querySelector(selector);
+    if(node)node.setAttribute('aria-label',label);
+  }
+  setTexts('.hero-meta span', ['heroMetaLeft','heroMetaRight']); setText('.eyebrow .chip__label', 'heroEyebrow');
   setText('.hero-description', 'heroDesc'); setText('.hero-download', 'heroDownload'); setText('.text-link', 'heroDemo'); setTexts('.hero-stats span', ['providers','credentials','shortcut']); setText('.hero-stats>div:nth-child(2) b','localCredentials');
   setText('.why-kicker','whyKicker'); setText('#why-pane-title','whyTitle'); setText('.why-copy p','whyCopy'); setText('.why-link','whyLink'); setText('.why-destination small','whyDestination');
-  document.querySelector('.why-orbits')?.setAttribute('aria-label','More supported providers connected around Pane'); setText('.why-work b','whyWork'); setText('.why-work small','whyFocus'); setText('.why-flow-label','whyFlowLabel'); setText('.why-pause','whyPause'); setText('.why-flow-caption','whyFlowCaption'); setText('.why-flow-note','whyFlowNote'); setText('.why-flow-count small','whyFlowCount'); setTexts('.why-source small',['whyClaude','whyCodex','whyCursor','whyRouter','whyTavily']);
-  const ecosystemCopy={'.ecosystem-copy .why-kicker':'PANE ECOSYSTEM / Connections that keep growing','#ecosystem-title':'Starting with AI tools. Connecting usage across more fields.','.ecosystem-intro':'Pane currently lists 66 providers across coding agents, model APIs, voice and search. Our direction is to bring quotas, balances and subscription status from more fields into one desktop entry point.','.ecosystem-art-foot>span':'Different services. One entry point.','.ecosystem-pause':'Pause orbit','.ecosystem-core>span':'Connect scattered usage','.ecosystem-outlook':'4 ecosystem directions, 13 candidate fields. These are expansion ideas; integrations depend on available interfaces. See the current service list below.','.ecosystem-copy .why-link':'Explore current services ↘'};
+  setText('.why-work b','whyWork'); setText('.why-work small','whyFocus'); setText('.why-flow-label','whyFlowLabel'); setText('.why-pause','whyPause'); setText('.why-flow-caption','whyFlowCaption'); setText('.why-flow-note','whyFlowNote'); setText('.why-flow-count small','whyFlowCount'); setTexts('.why-source small',['whyClaude','whyCodex','whyCursor','whyRouter','whyTavily']);
+  const ecosystemCopy={'.ecosystem-copy .why-kicker':'PANE ECOSYSTEM / Connections that keep growing','#ecosystem-title':'Starting with AI tools. Connecting usage across more fields.','.ecosystem-intro':'Pane currently lists 66 providers across coding agents, model APIs, voice and search. Our direction is to bring quotas, balances and subscription status from more fields into one desktop entry point.','.ecosystem-art-foot>span':'Different services. One entry point.','.ecosystem-core>span':'Connect scattered usage','.ecosystem-outlook':'4 ecosystem directions, 13 candidate fields. These are expansion ideas; integrations depend on available interfaces. See the current service list below.','.ecosystem-copy .why-link':'Explore current services ↘'};
   for(const [selector,value] of Object.entries(ecosystemCopy)){const node=document.querySelector(selector);if(node)node.textContent=value}
-  const domains=[['01 / AI & content creation','Models & agents · Images & video · Voice & translation · Search & crawling'],['02 / Productivity & business','Workflow automation · Office & design SaaS · Commerce & logistics · Marketing & communication'],['03 / Digital resources & infrastructure','Cloud & compute · Databases & analytics · Storage & backups · Networks & traffic'],['04 / Personal digital memberships','Consumer tools, knowledge & education memberships']];
+  const domains=[['AI & content creation','Models & agents · Images & video · Voice & translation · Search & crawling'],['Productivity & business','Workflow automation · Office & design SaaS · Commerce & logistics · Marketing & communication'],['Digital resources & infrastructure','Cloud & compute · Databases & analytics · Storage & backups · Networks & traffic'],['Personal digital memberships','Consumer tools, knowledge & education memberships']];
   document.querySelectorAll('.ecosystem-domains>div').forEach((node,i)=>{node.querySelector('span').textContent=domains[i][0];node.querySelector('p').textContent=domains[i][1]});
   setTexts('.agent-portrait span, .note-kicker', ['live','portraitLabel']); setText('.blueprint-note p', 'portraitCopy', true); setText('.note-foot', 'portraitNote'); setText('.stage-rail>span','workflow'); setText('.keyboard-demo>span','keyboardKicker'); setText('.config-kicker','runtimeKicker');
-  setText('.download-section .section-index','downloadIndex'); setText('.demo-section .section-head h2', 'demoTitle'); setText('.demo-section .section-head p', 'demoDesc', true); setText('.demo-status', 'demoStatus'); setText('#reset-demo', 'reset'); setText('.workflow-legend>.legend-kicker', 'how'); setText('.legend-heading b', 'workflow'); setText('.legend-heading small', 'shortcuts');
-  setTexts('.shortcut-list span', ['alt2','shift','ctrls','esc']); setTexts('.legend-capabilities .legend-heading b, .legend-capabilities .legend-heading small, .legend-desc', ['capabilities','capabilitiesKicker','capabilitiesCopy']); setText('.legend-ecosystem b','ecosystem'); setText('.legend-ecosystem span','ecosystemCopy'); setText('.legend-foot','sample');
+  setText('.download-section .section-index','downloadIndex'); setText('.demo-section .section-head h2', 'demoTitle'); setText('.demo-section .section-head p', 'demoDesc', true); setText('.demo-status .chip__label', 'demoStatus'); setText('#reset-demo', 'reset'); setText('.workflow-legend>.legend-kicker', 'how'); setText('.legend-heading b', 'workflow'); setText('.legend-heading small', 'shortcuts');
+  setTexts('.shortcut-list span', ['alt2','shift','ctrls','esc']); setTexts('.legend-capabilities .legend-heading b, .legend-capabilities .legend-heading small, .legend-desc', ['capabilities','capabilitiesKicker','capabilitiesCopy']); setText('.legend-ecosystem b','ecosystem'); setText('.legend-ecosystem span','ecosystemCopy'); setText('.legend-foot .chip__label','sample');
   setTexts('.keyboard-demo button b', ['toggle','close','period','category','settingsShortcut','customize','themeShortcut','refreshShortcut','expiring']); setTexts('.stage-config dt', ['runtime','runtimeSettings']); setTexts('.stage-config dd', ['runtimeCopy','runtimeSettingsCopy']);
   const notes=[['.annotation-sample strong','annSample'],['.annotation-sample>span:not(.annotation-number)','annSampleCopy'],['.annotation-left strong','annEdge'],['.annotation-left>span','annEdgeCopy'],['.annotation-right strong','annProviders'],['.annotation-right>span','annProvidersCopy'],['.annotation-tabs strong','annTabs'],['.annotation-tabs>span:not(.annotation-number)','annTabsCopy'],['.annotation-periods strong','annPeriods'],['.annotation-periods>span:not(.annotation-number)','annPeriodsCopy'],['.annotation-accounts strong','annAccounts'],['.annotation-accounts>span:not(.annotation-number)','annAccountsCopy'],['.annotation-spend strong','annSpend'],['.annotation-spend>span:not(.annotation-number)','annSpendCopy'],['.annotation-pool strong','annPool'],['.annotation-pool>span','annPoolCopy'],['.annotation-groups strong','annGroups'],['.annotation-groups>span:not(.annotation-number)','annGroupsCopy'],['.annotation-status strong','annStatus'],['.annotation-status>span','annStatusCopy'],['.annotation-settings strong','annSettings'],['.annotation-settings>span:not(.annotation-number)','annSettingsCopy'],['.annotation-refresh strong','annRefresh'],['.annotation-refresh>span','annRefreshCopy']]; notes.forEach(([s,k])=>setText(s,k,k.endsWith('Copy')));
-  setTexts('.demo-controls button', ['overview','spend','settings','refresh']); setText('.demo-rest>b','restTitle'); setText('.demo-rest p','restCopy'); setText('.keyboard-demo>span','keyboardKicker'); setText('.keyboard-demo h3','keyboardTitle'); setText('.keyboard-demo>p','keyboardCopy'); setText('#keyboard-start','start'); setText('.keyboard-feedback','keyboardNote'); setText('.keyboard-demo>small','keyboardHint');
-  setText('.provider-section .section-head h2','providersTitle'); setText('.provider-section .section-head p','providersCopy',true); setText('.feature-section .section-head h2','featuresTitle'); setText('.feature-section .section-head p','featuresCopy'); setTexts('.feature-grid h3',['quotaTitle','spendTitle','resetTitle','privacyTitle']); setTexts('.feature-grid p',['quotaCopy','spendCopy','resetCopy','privacyCopy']);   // FAQ English copy resolves through the group/item structure (group 1 items
+  setTexts('.demo-controls button', ['overview','spend','settings','refresh']); setText('.demo-rest>b','restTitle'); setText('.demo-rest p','restCopy'); setText('.keyboard-demo>span','keyboardKicker'); setText('.keyboard-demo h3','keyboardTitle'); setText('.keyboard-demo>p','keyboardCopy'); setText('#keyboard-start','start'); setText('.keyboard-feedback__text','keyboardNote'); setText('.keyboard-demo>small','keyboardHint');
+  setText('.provider-section .section-head h2','providersTitle'); setText('.provider-section .section-head p','providersCopy',true); setText('.feature-section .section-head h2','featuresTitle'); setText('.feature-section .section-head p','featuresCopy'); setTexts('.feature-grid h3',['quotaTitle','spendTitle','resetTitle','privacyTitle']); setTexts('.feature-grid p',['quotaCopy','spendCopy','resetCopy','privacyCopy']);
+  setTexts('.frag-title',['fragQuota','fragSpend','fragReset','fragKeys']); setTexts('.frag-tag .chip__label',['fragTagQuota','fragTagSpend','fragTagReset','fragTagKeys']); setTexts('.frag-row b',['fragRow5h','fragRowWeek','fragRowMonth']); setText('.frag-total span','fragToday'); setText('.frag-note','fragResetNote');   // FAQ English copy resolves through the group/item structure (group 1 items
   // 1-3 -> faq.q1..q3, and so on) rather than one flat positional list, so the
   // key for each row is derived from its place in the groups instead of from a
   // hand-maintained array that regrouping would silently misalign.
   document.querySelectorAll('.faq-group').forEach((group, gi) => { const set = (node, key) => { if (node && isEnglish && en[key]) node.textContent = en[key]; }; set(group.querySelector('.faq-group-title'), `faq.g${gi + 1}`); group.querySelectorAll('.faq-item').forEach((item, ii) => { const n = gi * 3 + ii + 1; set(item.querySelector('summary'), `faq.q${n}`); set(item.querySelector('.faq-body p'), `faq.a${n}`); }); });
   setText('.faq-section .section-head p', 'faqCopy');
   setText('.faq-contact span', 'faq.contactPrompt'); setText('.faq-contact a', 'faq.cta');
-  setTexts('.platform-disabled small',['coming','coming']); setText('.bottom-actions .secondary','tryDemo'); setText('.platforms','downloadNote'); setTexts('.site-footer .footer-content>div a',['source','docs','feedback']);
+  setTexts('.bottom-actions .chip__label',['coming','coming']); setText('.bottom-actions .button[data-variant=secondary]','tryDemo'); setText('.platforms','downloadNote'); setTexts('.site-footer .footer-content>div a',['source','docs','feedback']);
 }
 applyEnglishCopy();
 initUsageFlow(isEnglish,en);
 initProviderOrbits();
+initProviderMarquee();
+initDataDisplay();
+
+// The provider belt is the one self-moving surface that had no switch of its
+// own; it now shares the page-wide one, which is also what makes the belt
+// comply with WCAG 2.2.2 (hover-pause alone is not a pause mechanism).
+function initProviderMarquee(){
+  const integrations=document.querySelector('.integrations');
+  if(!integrations)return;
+  paneMotion.subscribe(()=>integrations.classList.toggle('is-paused',paneMotion.paused));
+  bindMotionToggle(document.querySelector('.marquee-pause'),paneMotion,motionLabel);
+}
+
+// Numbers and meter semantics — the part of the HeroUI model that survives
+// without React. Every figure the page shows used to be a hard-coded string;
+// they now carry the number plus its shape and are rendered through Intl, and
+// the five source rows get a real accessible name built from their own parts
+// instead of the run-on flattened text a button would otherwise announce.
+function initDataDisplay(){
+  for(const node of document.querySelectorAll('[data-number]')){
+    const value=Number(node.dataset.number);
+    if(!Number.isFinite(value))continue;
+    node.textContent=formatByKind(node.dataset.format,value)+(node.dataset.unit||'');
+  }
+  const joiner=isEnglish?', ':'，';
+  for(const row of document.querySelectorAll('.why-source')){
+    const name=row.querySelector('b')?.childNodes[0]?.textContent.trim();
+    const source=row.querySelector('small')?.textContent.trim();
+    const value=row.querySelector('em')?.textContent.trim();
+    const label=[name,source,value].filter(Boolean).join(joiner);
+    if(label)row.setAttribute('aria-label',label);
+  }
+  // The three hero stats used to read as one run-on blob; each gets its own name.
+  for(const stat of document.querySelectorAll('.hero-stats>div')){
+    const value=stat.querySelector('b')?.textContent.trim();
+    const label=stat.querySelector('span')?.textContent.trim();
+    if(value&&label)stat.setAttribute('aria-label',`${value} ${label}`);
+  }
+  if(isEnglish)document.querySelector('.frag-chart')?.setAttribute('aria-label',en.fragChartLabel);
+}
 
 function initProviderOrbits(){
   const section=document.querySelector('.ecosystem-section');if(!section)return;
+  const visual=section.querySelector('.ecosystem-visual');
   const button=section.querySelector('.ecosystem-pause');
-  let paused=false,visible=!('IntersectionObserver' in window);
-  const sync=()=>section.classList.toggle('is-paused',paused||!visible||document.hidden);
-  button.addEventListener('click',()=>{paused=!paused;button.setAttribute('aria-pressed',String(paused));button.textContent=isEnglish?(paused?'Resume orbit':'Pause orbit'):(paused?'继续轨道':'暂停轨道');sync()});
+  const card=section.querySelector('.orbit-card');
+  const icons=[...section.querySelectorAll('.why-orbit-icon')];
+  if(!visual||!button)return;
+  let visible=!('IntersectionObserver' in window);
+  const sync=()=>section.classList.toggle('is-paused',paneMotion.paused||!visible||document.hidden);
+  // The orbit switch is the page-wide switch, not a private one: it carries the
+  // same label as the collector's and moves every ambient animation together.
+  bindMotionToggle(button,paneMotion,motionLabel);
+  paneMotion.subscribe(sync);
   if('IntersectionObserver' in window)new IntersectionObserver(entries=>{visible=entries[0].isIntersecting;sync()},{threshold:.05}).observe(section);
   document.addEventListener('visibilitychange',sync);sync();
+
+  // Hover card. Its labels come from copy the section already owns — the four
+  // directions and the page's general promise — so no per-provider capability
+  // is asserted that the site cannot back up.
+  const directions={1:['AI 与内容生产','AI & content creation'],2:['工作效率与商业运营','Productivity & business'],3:['数字资源与开发基础设施','Digital resources & infrastructure'],4:['个人数字会员','Personal memberships']};
+  const cardNote=isEnglish?'Quota, balance and subscription status in one floating window.':'额度 · 余额 · 订阅状态，同一个悬浮窗。';
+  const cardCta=isEnglish?'See connected services ↘':'查看已连接服务 ↘';
+  // The card follows React Aria's PreviewTrigger model — which is what HeroUI's
+  // hover card wraps: an open delay that is skipped inside the shared warm
+  // window, a close delay long enough to travel into the card, and keyboard +
+  // long-press paths, because hover exists for none of those visitors.
+  const openCard=icon=>{
+    if(!card)return;
+    const info=directions[icon.dataset.domain];
+    const name=icon.getAttribute('aria-label')||'';
+    card.style.setProperty('--domain',`var(--domain-${icon.dataset.domain})`);
+    card.querySelector('.orbit-card-name').textContent=name;
+    card.querySelector('.orbit-card-domain').textContent=info?info[isEnglish?1:0]:'';
+    card.querySelector('.orbit-card-note').textContent=cardNote;
+    card.querySelector('.orbit-card-cta').textContent=cardCta;
+    card.setAttribute('aria-label',name);
+    card.hidden=false;
+    // Sit beside the icon. Hovering the orbit freezes the icons, so the card
+    // does not have to chase a moving target.
+    const box=visual.getBoundingClientRect(),r=icon.getBoundingClientRect();
+    const left=Math.max(6,Math.min(r.right-box.left+12,box.width-card.offsetWidth-6));
+    const top=Math.max(6,Math.min(r.top-box.top+r.height/2-card.offsetHeight/2,box.height-card.offsetHeight-6));
+    card.style.left=`${left}px`;card.style.top=`${top}px`;
+    warmHover();
+  };
+  const closeCard=()=>{if(card)card.hidden=true};
+  let openTimer=0,closeTimer=0,openIcon=null;
+  const cancelTimers=()=>{clearTimeout(openTimer);clearTimeout(closeTimer)};
+  const scheduleOpen=icon=>{cancelTimers();openIcon=icon;openTimer=setTimeout(()=>openCard(icon),isHoverWarm()?0:180)};
+  // The close is delayed and cancelled when the pointer reaches the card, so
+  // travelling from the icon into the card never dismisses it.
+  const scheduleClose=()=>{clearTimeout(closeTimer);closeTimer=setTimeout(closeCard,300)};
+  card?.addEventListener('pointerenter',cancelTimers);
+  card?.addEventListener('pointerleave',scheduleClose);
+  card?.addEventListener('keydown',event=>{if(event.key==='Escape'){cancelTimers();closeCard();openIcon?.focus()}});
+  icons.forEach(icon=>{
+    icon.addEventListener('pointerenter',()=>scheduleOpen(icon));
+    icon.addEventListener('pointerleave',scheduleClose);
+    icon.addEventListener('focus',()=>{cancelTimers();openCard(icon)});
+    icon.addEventListener('blur',()=>{if(!card?.contains(document.activeElement))scheduleClose()});
+    icon.addEventListener('keydown',event=>{if(event.key==='Escape'){cancelTimers();closeCard();icon.focus()}});
+    onLongPress(icon,()=>openCard(icon));
+    // Clicking a provider jumps to the list of everything Pane already reads.
+    icon.addEventListener('click',()=>{location.hash='#connected-providers'});
+  });
+  // Escape closes from anywhere, unless something closer already handled it
+  // (the keyboard demo's own Escape handler marks the event as handled).
+  document.addEventListener('keydown',event=>{
+    if(event.defaultPrevented||event.key!=='Escape'||!card||card.hidden)return;
+    cancelTimers();closeCard();openIcon?.focus();
+  });
+  // Pointing at a direction in the right-hand list lights its icons on the left.
+  section.querySelectorAll('.ecosystem-domains>div').forEach((row,i)=>{
+    const value=String(i+1);
+    row.addEventListener('pointerenter',()=>{visual.dataset.domainFocus=value});
+    row.addEventListener('pointerleave',()=>{delete visual.dataset.domainFocus});
+  });
 }
 document.querySelector('#language')?.addEventListener('click',()=>{location.href=isEnglish?'/':'/en/'});
 
@@ -209,7 +328,77 @@ function initInkMarks(){
   setTimeout(start,1800); // backgrounded tabs throttle animation events
 }
 initInkMarks();
-const settingsButton=document.querySelector('[data-demo=settings]');const settingsWrap=document.querySelector('#pane-settings-wrap');function setSettingsOverlay(open){if(open&&settingsWrap.hidden){if(!settingsFrame.dataset.loaded){settingsFrame.src=`/demo/index.html?lang=${demoLang}&theme=${demoTheme}&settings=1`;settingsFrame.dataset.loaded='1'}settingsWrap.hidden=false}if(!open)settingsWrap.hidden=true;settingsButton.classList.toggle('active',!settingsWrap.hidden)}settingsButton.addEventListener('click',()=>setSettingsOverlay(settingsWrap.hidden));document.querySelector('#pane-settings-close').addEventListener('click',()=>setSettingsOverlay(false));function send(action){frame.contentWindow?.postMessage({type:'pane-demo',action},location.origin)}function loadDemo(){frame.src=`/demo/index.html?lang=${demoLang}&theme=${demoTheme}`;settingsWrap.hidden=true;settingsFrame.removeAttribute('src');delete settingsFrame.dataset.loaded;selected='overview';desktop.dataset.mode='auto';document.querySelectorAll('[data-demo]').forEach(b=>b.classList.toggle('active',b.dataset.demo===selected))}loadDemo();document.querySelector('#theme').addEventListener('click',()=>{root.dataset.theme=root.dataset.theme==='light'?'dark':'light';try{localStorage.setItem('pane-site-theme',root.dataset.theme)}catch{};document.querySelector('#theme img').src=`/icons/${root.dataset.theme==='light'?'moon':'sun'}.svg`});document.querySelector('#reset-demo').addEventListener('click',loadDemo);document.querySelectorAll('[data-demo]').forEach(b=>b.addEventListener('click',()=>{const a=b.dataset.demo;if(a==='settings'){desktop.dataset.mode='settings';updateNoteAct();return}if(a!=='refresh')setSettingsOverlay(false);if(a==='refresh'){desktop.dataset.mode='refresh';updateNoteAct();b.disabled=true;send(a);clearTimeout(refreshTimer);refreshTimer=setTimeout(()=>b.disabled=false,650);return}selected=a;desktop.dataset.mode=a;send(a);document.querySelectorAll('[data-demo]').forEach(x=>x.classList.toggle('active',x.dataset.demo===selected));updateNoteAct()}));document.querySelectorAll('details').forEach(d=>d.addEventListener('toggle',()=>{if(!d.open)return;const scope=d.closest('.faq-group')||document;scope.querySelectorAll('details').forEach(x=>{if(x!==d)x.open=false})}));
+const settingsButton=document.querySelector('[data-demo=settings]');const settingsWrap=document.querySelector('#pane-settings-wrap');let settingsOpener=null;
+// A real modal. role/aria-modal live on the markup; the script owns what the
+// markup cannot — moving focus in on open, trapping Tab inside, closing on
+// Escape, and handing focus back to whatever opened it.
+function setSettingsOverlay(open){
+  const wasHidden=settingsWrap.hidden;
+  if(open&&wasHidden){
+    if(!settingsFrame.dataset.loaded){settingsFrame.src=`/demo/index.html?lang=${demoLang}&theme=${demoTheme}&settings=1`;settingsFrame.dataset.loaded='1'}
+    settingsWrap.hidden=false;
+    settingsOpener=document.activeElement;
+    document.querySelector('#pane-settings-close').focus();
+  }
+  if(!open&&!wasHidden){
+    settingsWrap.hidden=true;
+    (settingsOpener instanceof HTMLElement?settingsOpener:settingsButton)?.focus();
+  }
+  settingsButton.classList.toggle('active',!settingsWrap.hidden);
+  settingsButton.setAttribute('aria-expanded',String(!settingsWrap.hidden));
+}
+settingsWrap.addEventListener('keydown',event=>{
+  if(event.key==='Escape'){event.preventDefault();setSettingsOverlay(false);return}
+  if(event.key!=='Tab')return;
+  const focusables=[...settingsWrap.querySelectorAll('button,[href],iframe,[tabindex]:not([tabindex="-1"])')].filter(el=>!el.hasAttribute('disabled'));
+  if(!focusables.length)return;
+  const first=focusables[0],last=focusables[focusables.length-1];
+  if(event.shiftKey&&document.activeElement===first){event.preventDefault();last.focus()}
+  else if(!event.shiftKey&&document.activeElement===last){event.preventDefault();first.focus()}
+});settingsButton.addEventListener('click',()=>setSettingsOverlay(settingsWrap.hidden));document.querySelector('#pane-settings-close').addEventListener('click',()=>setSettingsOverlay(false));function send(action){frame.contentWindow?.postMessage({type:'pane-demo',action},location.origin)}function loadDemo(){frame.src=`/demo/index.html?lang=${demoLang}&theme=${demoTheme}`;settingsWrap.hidden=true;settingsFrame.removeAttribute('src');delete settingsFrame.dataset.loaded;selected='overview';desktop.dataset.mode='auto';syncDemoControls()}loadDemo();document.querySelector('#theme').addEventListener('click',()=>{root.dataset.theme=root.dataset.theme==='light'?'dark':'light';try{localStorage.setItem('pane-site-theme',root.dataset.theme)}catch{};document.querySelector('#theme img').src=`/icons/${root.dataset.theme==='light'?'moon':'sun'}.svg`});document.querySelector('#reset-demo').addEventListener('click',loadDemo);document.querySelectorAll('[data-demo]').forEach(b=>b.addEventListener('click',()=>{const a=b.dataset.demo;if(a==='settings'){desktop.dataset.mode='settings';updateNoteAct();return}if(a!=='refresh')setSettingsOverlay(false);if(a==='refresh'){desktop.dataset.mode='refresh';updateNoteAct();b.disabled=true;send(a);clearTimeout(refreshTimer);refreshTimer=setTimeout(()=>b.disabled=false,650);return}selected=a;desktop.dataset.mode=a;send(a);syncDemoControls();updateNoteAct()}));// One panel open per FAQ group. `<details>` stays because it is the more
+// accessible primitive — the FAQ keeps working with no script at all — so the
+// accordion keeps its disclosure list and only gains what the primitive lacks.
+document.querySelectorAll('.faq-group').forEach(group=>{
+  const items=[...group.querySelectorAll('details.faq-item')];
+  items.forEach(item=>item.addEventListener('toggle',()=>{if(!item.open)return;items.forEach(other=>{if(other!==item)other.open=false})}));
+});
+// HeroUI's accordion lets the arrow keys walk a group's headers. Tab still
+// leaves the group, so this is an addition, not a different model.
+function initFaqNavigation(){
+  for(const group of document.querySelectorAll('.faq-group')){
+    const summaries=[...group.querySelectorAll('.faq-item>summary')];
+    if(!summaries.length)continue;
+    summaries.forEach(summary=>summary.addEventListener('keydown',event=>{
+      if(event.key==='Home'){event.preventDefault();summaries[0].focus();return}
+      if(event.key==='End'){event.preventDefault();summaries[summaries.length-1].focus();return}
+      moveRovingFocus(summaries,summary,event,{orientation:'vertical'});
+    }));
+  }
+}
+// The four demo controls are a toolbar, not a segmented control: two switch the
+// panel's view, one opens the settings overlay, one fires a refresh. So the
+// group carries toolbar semantics with roving focus, and each control carries
+// the state it actually has (pressed / expanded).
+function syncDemoControls(){
+  document.querySelectorAll('[data-demo]').forEach(button=>{
+    const on=button.dataset.demo===selected;
+    button.classList.toggle('active',on);
+    if(button.hasAttribute('aria-pressed'))button.setAttribute('aria-pressed',String(on));
+  });
+}
+function initDemoToolbar(){
+  const toolbar=document.querySelector('.demo-controls');
+  if(!toolbar)return;
+  const buttons=[...toolbar.querySelectorAll('button')];
+  toolbar.addEventListener('keydown',event=>{
+    if(event.key==='Home'){event.preventDefault();buttons[0].focus();return}
+    if(event.key==='End'){event.preventDefault();buttons[buttons.length-1].focus();return}
+    moveRovingFocus(buttons,document.activeElement,event);
+  });
+}
+initFaqNavigation();
+initDemoToolbar();
+syncDemoControls();
 
 const gsap = window.gsap;
 if (gsap && !matchMedia('(prefers-reduced-motion: reduce)').matches) {
@@ -228,28 +417,50 @@ if (gsap && !matchMedia('(prefers-reduced-motion: reduce)').matches) {
     // the handoff is continuous instead of jumping one card at a time.
     document.querySelectorAll('.marquee-track').forEach((track,index)=>{
       if (!track.dataset.looped) {
-        [...track.children].forEach(item => track.append(item.cloneNode(true)));
+        // The duplicate belt is a visual device. Marking it aria-hidden keeps
+        // assistive tech from reading every provider twice.
+        [...track.children].forEach(item=>{const clone=item.cloneNode(true);clone.setAttribute('aria-hidden','true');track.append(clone)});
         track.dataset.looped='true';
       }
       track.classList.add(index ? 'belt-reverse' : 'belt-forward');
     });
-    // Continuous idle loops for the four feature legends (user request: the
-    // fourth module should keep animating, not just play its entrance once).
-    document.querySelectorAll('.feature-art').forEach(art => {
-      const rings = art.querySelectorAll('.mini-ring');
-      const bars = art.querySelectorAll('.bar-art i');
-      const clock = art.querySelector('.clock-face');
-      const shield = art.querySelector('.shield');
-      if (rings.length === 3) {
-        gsap.to(rings[0], { y: '+=7', rotation: 7, duration: 2.2, yoyo: true, repeat: -1, ease: 'sine.inOut' });
-        gsap.to(rings[1], { y: '-=7', rotation: -6, duration: 2.6, yoyo: true, repeat: -1, ease: 'sine.inOut' });
-        gsap.to(rings[2], { y: '+=7', rotation: 5, duration: 2.4, yoyo: true, repeat: -1, ease: 'sine.inOut' });
-      }
-      if (bars.length) bars.forEach((bar, i) => gsap.fromTo(bar, { scaleY: .72 }, { scaleY: 1, duration: .9 + i * .13, yoyo: true, repeat: -1, ease: 'sine.inOut', transformOrigin: 'bottom' }));
-      if (clock) gsap.to(clock, { rotation: 9, y: -3, duration: 1.6, yoyo: true, repeat: -1, ease: 'sine.inOut' });
-      if (shield) gsap.to(shield, { y: '-=9', duration: 1.8, yoyo: true, repeat: -1, ease: 'sine.inOut' });
-      art.querySelectorAll('.quota-bars em').forEach((fill,i)=>gsap.fromTo(fill,{scaleX:.18},{scaleX:1,duration:1.1+i*.18,delay:i*.12,yoyo:true,repeat:-1,ease:'sine.inOut',transformOrigin:'left center'}));
+    // Feature fragments. The entrance builds each cell once — quota bars fill,
+    // the spend chart grows, the credential rows slide in — and then leaves one
+    // quiet idle beat per cell. This replaces the old infinite yoyo that ran on
+    // every element of all four cells at the same time; the cells now borrow the
+    // panel's calm instead of pulsing at the visitor. Idles only run while the
+    // grid is on screen and the shared switch says motion is allowed.
+    document.querySelectorAll('.feature-art .frag').forEach(frag => {
+      const fills = frag.querySelectorAll('.frag-row em');
+      const track = frag.querySelector('.frag-track i');
+      const bars = frag.querySelectorAll('.frag-chart i');
+      const keys = frag.querySelectorAll('.frag-key');
+      if (fills.length) gsap.fromTo(fills, { scaleX: 0 }, { scaleX: 1, duration: .85, stagger: .1, ease: 'power3.out', transformOrigin: 'left center' });
+      if (track) gsap.fromTo(track, { scaleX: 0 }, { scaleX: 1, duration: 1, ease: 'power3.out', transformOrigin: 'left center' });
+      if (bars.length) gsap.fromTo(bars, { scaleY: 0 }, { scaleY: 1, duration: .7, stagger: .06, ease: 'power3.out', transformOrigin: 'bottom center' });
+      if (keys.length) gsap.fromTo(keys, { opacity: 0, x: -6 }, { opacity: 1, x: 0, duration: .5, stagger: .12, ease: 'power2.out' });
     });
+    const fragIdles = [];
+    document.querySelectorAll('.feature-art .frag').forEach(frag => {
+      const fills = frag.querySelectorAll('.frag-row em');
+      const peak = frag.querySelector('.frag-chart i:last-child');
+      const masked = frag.querySelectorAll('.frag-key span');
+      if (fills.length) fragIdles.push(gsap.to(fills, { opacity: .72, duration: 1.9, yoyo: true, repeat: -1, ease: 'sine.inOut', stagger: .25 }));
+      if (peak) fragIdles.push(gsap.to(peak, { scaleY: 1.06, duration: 1.7, yoyo: true, repeat: -1, ease: 'sine.inOut', transformOrigin: 'bottom center' }));
+      if (masked.length) fragIdles.push(gsap.to(masked, { opacity: .55, duration: 2.2, yoyo: true, repeat: -1, ease: 'sine.inOut', stagger: .3 }));
+    });
+    let fragOnScreen = false;
+    const syncFragIdles = () => {
+      const run = fragOnScreen && !paneMotion.paused && !document.hidden;
+      for (const tween of fragIdles) run ? tween.resume() : tween.pause();
+    };
+    for (const tween of fragIdles) tween.pause();
+    const gridEl = document.querySelector('.feature-grid');
+    if (gridEl && 'IntersectionObserver' in window) new IntersectionObserver(entries => { fragOnScreen = entries[0].isIntersecting; syncFragIdles(); }, { threshold: .1 }).observe(gridEl);
+    else fragOnScreen = true;
+    document.addEventListener('visibilitychange', syncFragIdles);
+    paneMotion.subscribe(syncFragIdles);
+    syncFragIdles();
     document.querySelectorAll('[data-tilt-card]').forEach(card => {
       card.addEventListener('pointermove', event => { const r = card.getBoundingClientRect(); gsap.to(card, { rotateY: ((event.clientX-r.left)/r.width-.5)*4, rotateX: -((event.clientY-r.top)/r.height-.5)*4, duration: .25, overwrite: true }); });
       card.addEventListener('pointerleave', () => gsap.to(card, { rotateX: 0, rotateY: 0, duration: .45, ease: 'power2.out' }));
@@ -269,6 +480,14 @@ function initKeyboardDemo() {
   const stage = document.querySelector('.blueprint-stage');
   const start = document.querySelector('#keyboard-start');
   const feedback = document.querySelector('.keyboard-feedback');
+  // The status line is a toast, not a paragraph: a status colour plus an
+  // indicator, and aria-atomic so the whole message is announced instead of
+  // only the fragment that changed.
+  function setFeedback(text,status='info'){
+    feedback.dataset.status=status;
+    const node=feedback.querySelector('.keyboard-feedback__text');
+    if(node)node.textContent=text;else feedback.textContent=text;
+  }
   const app = frame.parentElement;
   const rest = document.querySelector('.demo-rest');
   const periods = { '5h': '5 小时', week: '7 天', month: '每月' };
@@ -298,13 +517,13 @@ function initKeyboardDemo() {
     start.textContent = active ? (isEnglish ? 'End interaction ↗' : '结束交互 ↗') : (isEnglish ? 'Start interaction ↗' : '点击开始交互 ↗');
     start.setAttribute('aria-pressed', String(active));
     for (const [name, button] of Object.entries(buttons)) button.disabled = !active || (!visible && name !== 'toggle');
-    feedback.textContent = note || (active ? (visible ? (isEnglish ? `Panel visible · ${periods[period]}` : `面板已浮现 · 当前 ${periods[period]}`) : (isEnglish ? 'Panel dismissed · press Alt + 2 or use a key above' : '面板已收起 · 按 Alt + 2 或上方按键唤出')) : (isEnglish ? 'Start here, then try a shortcut.' : '点击开始，再试试快捷键。'));
+    setFeedback(note || (active ? (visible ? (isEnglish ? `Panel visible · ${periods[period]}` : `面板已浮现 · 当前 ${periods[period]}`) : (isEnglish ? 'Panel dismissed · press Alt + 2 or use a key above' : '面板已收起 · 按 Alt + 2 或上方按键唤出')) : (isEnglish ? 'Start here, then try a shortcut.' : '点击开始，再试试快捷键。')));
     positionAnnotations();
   }
   function say(text) {
     if (!active) return;
     note = text;
-    feedback.textContent = text;
+    setFeedback(text,'success');
     clearTimeout(noteTimer);
     noteTimer = setTimeout(() => { note = ''; render(); }, 2800);
   }
@@ -398,16 +617,24 @@ function initGridBackground(){
   host.innerHTML=`<svg aria-hidden="true"><defs><pattern id="${patternId}" width="${cell}" height="${cell}" patternUnits="userSpaceOnUse" x="-1" y="-1"><path class="grid-line" d="M.5 ${cell}V.5H${cell}"/></pattern></defs><rect width="100%" height="100%" fill="url(#${patternId})"/><svg x="-1" y="-1"><g class="grid-squares"></g></svg></svg>`;
   const layer=host.querySelector('.grid-squares');
   const reduceMotion=matchMedia('(prefers-reduced-motion: reduce)').matches;
-  let dims={width:0,height:0}, ctx=null, ro=null;
+  let dims={width:0,height:0}, ctx=null, ro=null, tweens=[];
   const gridW=()=>Math.max(1,Math.floor(dims.width/cell));
   const gridH=()=>Math.max(1,Math.floor(dims.height/cell));
   function place(rect){
     rect.setAttribute('x',Math.floor(Math.random()*gridW())*cell+1);
     rect.setAttribute('y',Math.floor(Math.random()*gridH())*cell+1);
   }
+  // The breathing squares answer to the page-wide switch like every other
+  // ambient animation. They are the one effect a visitor cannot reach from the
+  // section they live in, so the shared state has to arrive from here.
+  function applyMotion(){
+    const run=!paneMotion.paused&&!document.hidden;
+    for(const tween of tweens)if(tween)run?tween.resume():tween.pause();
+  }
   function build(){
     ctx?.revert();
     ctx=null;
+    tweens=[];
     layer.textContent='';
     // Reduced motion, or a phone-width viewport: keep the static grid only.
     if(reduceMotion||dims.width<=720||!window.gsap)return;
@@ -419,13 +646,16 @@ function initGridBackground(){
         rect.setAttribute('height',cell-1);
         rect.setAttribute('opacity','0');
         layer.appendChild(rect);
+        // A wider stagger than the upstream 0.1s: with fewer squares each pulse
+        // should read as one deliberate mark, not a drifting blob.
         const run=()=>{
           place(rect);
-          gsap.fromTo(rect,{opacity:0},{opacity:maxOpacity,duration,repeat:1,yoyo:true,repeatDelay,delay:i*0.1,onComplete:run});
+          tweens[i]=gsap.fromTo(rect,{opacity:0},{opacity:maxOpacity,duration,repeat:1,yoyo:true,repeatDelay,delay:i*0.22,onComplete:run});
         };
         run();
       }
     });
+    applyMotion();
   }
   const measure=()=>{
     const w=Math.round(host.clientWidth), h=Math.round(host.clientHeight);
@@ -435,6 +665,8 @@ function initGridBackground(){
   };
   measure();
   if('ResizeObserver' in window){ro=new ResizeObserver(measure);ro.observe(host)}
+  paneMotion.subscribe(applyMotion);
+  document.addEventListener('visibilitychange',applyMotion);
   window.addEventListener('pagehide',()=>{ro?.disconnect();ctx?.revert()},{once:true});
 }
 initGridBackground();
@@ -482,3 +714,23 @@ function initWordmarkFooter(){
   window.addEventListener('pagehide',()=>{if(frame)cancelAnimationFrame(frame)},{once:true});
 }
 initWordmarkFooter();
+
+// The reset cell's countdown is the one part of the feature row that keeps
+// moving on its own: a real clock, so the cell reads as the live panel rather
+// than a screenshot of it. It honours the shared switch and reduced motion.
+function initFeatureCountdown(){
+  const el=document.querySelector('.frag-countdown');
+  if(!el)return;
+  const reduce=matchMedia('(prefers-reduced-motion: reduce)');
+  const start=Number(el.dataset.countdown)||0;
+  let left=start;
+  const pad=n=>String(n).padStart(2,'0');
+  const paint=()=>{el.textContent=`${pad(Math.floor(left/3600))}:${pad(Math.floor(left/60)%60)}:${pad(left%60)}`};
+  paint();
+  setInterval(()=>{
+    if(paneMotion.paused||reduce.matches||document.hidden)return;
+    left=left>0?left-1:start;
+    paint();
+  },1000);
+}
+initFeatureCountdown();

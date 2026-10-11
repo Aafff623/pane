@@ -1,7 +1,12 @@
 @font-face{font-family:Manrope;src:url('/fonts/Manrope-Variable.woff2') format('woff2');font-weight:200 800;font-style:normal;font-display:swap}
 @font-face{font-family:'Noto Sans SC';src:url('/fonts/NotoSansSC-Variable.woff2') format('woff2');font-weight:100 900;font-style:normal;font-display:swap}
-:root{--bg:#08090a;--surface:#0d0f11;--panel:#111417;--ink:#eef1f2;--muted:#9ba3a8;--faint:#626a70;--line:#242a2e;--line-strong:#374046;--accent:#64d7c2;--blue:#78a9ff;color-scheme:dark}
-:root[data-theme=light]{--bg:#f4f5f3;--surface:#fff;--panel:#f8f9f8;--ink:#101415;--muted:#5e686c;--faint:#899196;--line:#dce2df;--line-strong:#bec9c5;--accent:#087d6d;--blue:#2866c7;color-scheme:light}
+:root{--bg:#08090a;--surface:#0d0f11;--panel:#111417;--ink:#eef1f2;--muted:#9ba3a8;--faint:#7b8389;--line:#242a2e;--line-strong:#374046;--accent:#64d7c2;--blue:#78a9ff;--domain-1:#64d7c2;--domain-2:#78a9ff;--domain-3:#a98bff;--domain-4:#e0a24f;color-scheme:dark}
+/* --faint is the quietest text tier and is only ever used for text (or as a
+   chip's text colour), so it has to clear WCAG AA on every surface it lands
+   on. The old #626a70 measured 3.36–3.62:1 — readable as a caption only if you
+   already knew what it said. Both tiers were re-picked against the darkest
+   surface they sit on (#111417 in dark, #f8f9f8 in light). */
+:root[data-theme=light]{--bg:#f4f5f3;--surface:#fff;--panel:#f8f9f8;--ink:#101415;--muted:#556065;--faint:#666e73;--line:#dce2df;--line-strong:#bec9c5;--accent:#087d6d;--blue:#2866c7;--domain-1:#087d6d;--domain-2:#2866c7;--domain-3:#6b46c9;--domain-4:#9a6212;color-scheme:light}
 *{box-sizing:border-box}
 html{scroll-behavior:smooth}
 body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.6 Manrope,'Noto Sans SC',sans-serif;-webkit-font-smoothing:antialiased;overflow-x:clip}
@@ -31,8 +36,6 @@ img{display:block;max-width:100%}
 .why-flow{margin-top:28px;padding:20px 0 14px}
 .why-flow-head,.why-flow-foot{display:flex;justify-content:space-between;align-items:center;gap:16px}
 .why-flow-label{font-size:11px;letter-spacing:.06em;color:var(--muted)}
-.why-pause{border:1px solid var(--line);border-radius:6px;background:var(--panel);color:var(--muted);padding:5px 10px;font-size:11px}
-.why-pause:hover{border-color:var(--accent);color:var(--ink)}
 .why-stage{position:relative;display:grid;grid-template-columns:110px 160px minmax(0,1fr);gap:64px;align-items:center;min-height:300px;padding:24px 0}
 .why-wires{position:absolute;inset:0;width:100%;height:100%;overflow:visible;pointer-events:none}
 .why-wire{fill:none;stroke:var(--line-strong);stroke-width:1.5;transition:stroke .25s}
@@ -46,11 +49,33 @@ img{display:block;max-width:100%}
 .why-orbits{position:absolute;inset:0}
 .why-orbit-outer{--duration:20}
 .why-orbit-inner{--duration:10}
-.why-orbit-ring{position:absolute;left:50%;top:50%;width:calc(var(--radius)*2px);height:calc(var(--radius)*2px);transform:translate(-50%,-50%);border:1px solid color-mix(in srgb,var(--ink) 10%,transparent);border-radius:50%;pointer-events:none}
-.why-orbit-icon{position:absolute;left:50%;top:50%;margin-left:calc(var(--icon-size)/-2);margin-top:calc(var(--icon-size)/-2);width:var(--icon-size);height:var(--icon-size);display:flex;align-items:center;justify-content:center;border-radius:50%;background:#fff;border:1px solid #dfe4e1;box-shadow:0 2px 12px #0002;animation:why-orbit calc(var(--duration)*1s) linear infinite;will-change:transform}
+.why-orbit-ring{position:absolute;left:50%;top:50%;width:calc(var(--radius)*2px);height:calc(var(--radius)*2px);transform:translate(-50%,-50%);border:1px solid color-mix(in srgb,var(--ink) 14%,transparent);border-radius:50%;pointer-events:none}
+/* The provider disc is a theme surface, not a fixed white chip: a white 40px
+   circle was the brightest object on the dark page. Monochrome logos get the
+   same dark-mode invert list the marquee already ships, so both surfaces draw
+   every logo the same way. The ring carries the ecosystem direction, which is
+   what lets the left half and the right-hand list point at each other. */
+.why-orbit-icon{position:absolute;left:50%;top:50%;margin-left:calc(var(--icon-size)/-2);margin-top:calc(var(--icon-size)/-2);width:var(--icon-size);height:var(--icon-size);display:flex;align-items:center;justify-content:center;padding:0;border-radius:50%;background:var(--surface);border:1px solid color-mix(in srgb,var(--domain,var(--line-strong)) 70%,var(--line-strong));box-shadow:0 2px 12px #0002;animation:why-orbit calc(var(--duration)*1s) linear infinite;will-change:transform;transition:border-color .2s,box-shadow .2s,opacity .25s,background-color .2s}
+.why-orbit-icon[data-domain="1"]{--domain:var(--domain-1)}
+.why-orbit-icon[data-domain="2"]{--domain:var(--domain-2)}
+.why-orbit-icon[data-domain="3"]{--domain:var(--domain-3)}
+.why-orbit-icon[data-domain="4"]{--domain:var(--domain-4)}
+.why-orbit-icon:hover,.why-orbit-icon:focus-visible{border-color:var(--domain);background:color-mix(in srgb,var(--domain) 12%,var(--surface));box-shadow:0 0 0 3px color-mix(in srgb,var(--domain) 22%,transparent);outline:none}
 .why-orbit-icon.why-orbit-inner{animation-direction:reverse}
 .why-orbit-icon img{width:70%;height:70%;object-fit:contain}
 .why-orbits:hover .why-orbit-icon,.ecosystem-section.is-paused .why-orbit-icon{animation-play-state:paused}
+/* Pointing at a direction in the right-hand list dims everything that is not in it. */
+.ecosystem-visual[data-domain-focus="1"] .why-orbit-icon:not([data-domain="1"]),
+.ecosystem-visual[data-domain-focus="2"] .why-orbit-icon:not([data-domain="2"]),
+.ecosystem-visual[data-domain-focus="3"] .why-orbit-icon:not([data-domain="3"]),
+.ecosystem-visual[data-domain-focus="4"] .why-orbit-icon:not([data-domain="4"]){opacity:.22}
+:root:not([data-theme=light]) .why-orbit-icon img[src*="cursor"],
+:root:not([data-theme=light]) .why-orbit-icon img[src*="openrouter"],
+:root:not([data-theme=light]) .why-orbit-icon img[src*="grok"],
+:root:not([data-theme=light]) .why-orbit-icon img[src*="tavily"],
+:root:not([data-theme=light]) .why-orbit-icon img[src*="ollama"],
+:root:not([data-theme=light]) .why-orbit-icon img[src*="elevenlabs"]{filter:invert(1) brightness(1.15)}
+:root:not([data-theme=light]) .why-orbit-icon img[src*="kimi"]{filter:invert(1) hue-rotate(180deg)}
 /* Original Magic UI counter-rotation keeps every provider icon upright. */
 @keyframes why-orbit{0%{transform:rotate(calc(var(--angle)*1deg)) translateY(calc(var(--radius)*1px)) rotate(calc(var(--angle)*-1deg))}100%{transform:rotate(calc(var(--angle)*1deg + 360deg)) translateY(calc(var(--radius)*1px)) rotate(calc(var(--angle)*-1deg - 360deg))}}
 .why-destination b{font-size:22px;letter-spacing:-.04em}
@@ -75,30 +100,74 @@ img{display:block;max-width:100%}
 :root[data-theme=dark] .why-source img[src*="cursor"],:root[data-theme=dark] .why-source img[src*="openrouter"],:root[data-theme=dark] .why-source img[src*="tavily"]{filter:invert(1)}
 @media(prefers-reduced-motion:reduce){.why-wire.is-live,.why-node.is-hit{animation:none}.why-source,.why-meter i{transition:none}.why-packet{display:none}}
 @media(prefers-reduced-motion:reduce){.why-orbit-icon{animation:none;transform:rotate(calc(var(--angle)*1deg)) translateY(calc(var(--radius)*1px)) rotate(calc(var(--angle)*-1deg));will-change:auto}}
+/* Source rows carry their data kind. All five used to be the same grey bar
+   under five different units (tokens / percent / dollars), which made the
+   "one window, five different things" claim invisible. tokens is a consumed
+   volume (accent), quota is a limit with thresholds (blue + 50%/80% ticks),
+   balance is a point value (blue with a round end cap). */
+.why-source[data-kind=tokens]{--kind:var(--accent)}
+.why-source[data-kind=quota],.why-source[data-kind=balance]{--kind:var(--blue)}
+.why-meter{overflow:visible}
+.why-meter i{border-radius:2px}
+.why-source .why-dot{border-color:color-mix(in srgb,var(--kind,var(--line-strong)) 60%,transparent)}
+.why-source:hover,.why-source.is-active{border-color:var(--kind,var(--accent));box-shadow:0 0 0 2px color-mix(in srgb,var(--kind,var(--accent)) 8%,transparent)}
+.why-source.is-active .why-dot{background:var(--kind,var(--accent));border-color:var(--kind,var(--accent));box-shadow:0 0 6px var(--kind,var(--accent))}
+.why-source.is-active .why-meter i{background:var(--kind,var(--accent))}
+/* Threshold marks on limit rows. They live on the track, so they read as
+   "where the bar is relative to 50% and 80%" rather than as extra fill. */
+.why-source[data-kind=quota] .why-meter::after{content:'';position:absolute;inset:-2px 0;pointer-events:none;background:linear-gradient(var(--tick),var(--tick)) 50% 0/1px 100% no-repeat,linear-gradient(var(--tick),var(--tick)) 80% 0/1px 100% no-repeat;--tick:color-mix(in srgb,var(--ink) 42%,transparent)}
+/* A balance is a value you sit at, not a bar you fill: the fill ends in a dot. */
+.why-source[data-kind=balance] .why-meter i{position:relative;border-radius:99px}
+.why-source[data-kind=balance] .why-meter i::after{content:'';position:absolute;right:0;top:50%;width:5px;height:5px;border-radius:50%;background:inherit;transform:translate(50%,-50%);box-shadow:0 0 0 2px var(--surface)}
 .site-header{height:64px;border-bottom:1px solid var(--line);position:relative;z-index:5;background:color-mix(in srgb,var(--bg) 94%,transparent)}
 .nav{height:64px;display:flex;align-items:center;gap:26px}
 .brand{display:flex;align-items:center;gap:9px;font-weight:700;letter-spacing:-.03em}
 .brand img{border-radius:5px}
-.nav-context{font:10px/1 Manrope,sans-serif;letter-spacing:.12em;color:var(--faint);display:flex;align-items:center;gap:8px}
-.nav-context i,.demo-status i{width:6px;height:6px;border-radius:50%;background:var(--accent);display:inline-block}
 .nav-links{display:flex;gap:26px;margin-left:auto;color:var(--muted);font-size:12px}
 .nav-actions{display:flex;align-items:center;gap:16px}
 .language,.github{font:11px Manrope;color:var(--muted)}
 .icon-button,.text-button{border:0;background:none;color:var(--muted);display:flex;align-items:center;gap:7px}
 .icon-button{width:28px;height:28px;justify-content:center}
 #language{width:36px;white-space:nowrap;font-size:11px;letter-spacing:0}
-.icon-button img,.github img,.demo-controls img,.text-button img,.clock-face img,.shield img{filter:invert(1)}
+.icon-button img,.github img,.demo-controls img,.text-button img{filter:invert(1)}
 .button img{filter:none}
-:root[data-theme=light] .icon-button img,:root[data-theme=light] .github img,:root[data-theme=light] .button img,:root[data-theme=light] .demo-controls img,:root[data-theme=light] .text-button img,:root[data-theme=light] .clock-face img,:root[data-theme=light] .shield img{filter:none}
-.button{display:inline-flex;align-items:center;justify-content:center;gap:8px;padding:11px 17px;background:var(--ink);color:var(--bg);border:1px solid var(--ink);font-size:12px;font-weight:700}
-.button.compact{padding:7px 12px}
-.button.secondary{background:transparent;color:var(--ink);border-color:var(--line-strong)}
+:root[data-theme=light] .icon-button img,:root[data-theme=light] .github img,:root[data-theme=light] .button img,:root[data-theme=light] .demo-controls img,:root[data-theme=light] .text-button img{filter:none}
+/* Buttons follow HeroUI's two axes: variant (how it looks) × size. The site
+   carried one base class plus one-off modifiers (.compact / .secondary /
+   .platform-disabled) — the same idea spelled three ways. */
+.button{display:inline-flex;align-items:center;justify-content:center;gap:8px;padding:11px 17px;border:1px solid var(--ink);background:var(--ink);color:var(--bg);font-size:12px;font-weight:700}
+.button[data-variant=primary]{background:var(--ink);color:var(--bg);border-color:var(--ink)}
+.button[data-variant=secondary]{background:transparent;color:var(--ink);border-color:var(--line-strong)}
+.button[data-variant=tertiary]{background:transparent;color:var(--muted);border-color:var(--line);font-weight:500}
+.button[data-variant=ghost]{background:transparent;color:var(--muted);border-color:transparent}
+.button[data-size=sm]{padding:7px 12px}
+.button[data-size=lg]{padding:13px 20px;font-size:13px}
+.button[aria-disabled=true]{cursor:default;opacity:.55;pointer-events:none}
+/* HeroUI's Chip, in the two shapes this page actually needs: `plain` is a dot
+   plus a label with no chrome (the kickers), `soft` is a tinted pill (a real
+   badge). Six near-identical hand-rolled variants collapse into one. */
+.chip{display:inline-flex;align-items:center;gap:7px;font:10px/1.5 Manrope,sans-serif;letter-spacing:.1em;color:var(--chip-color,var(--muted));white-space:nowrap}
+.chip[data-size=sm]{font-size:9px}
+.chip__dot{flex:none;width:6px;height:6px;border-radius:50%;background:var(--chip-color,var(--accent))}
+.chip[data-shape=square] .chip__dot{width:7px;height:7px;border-radius:1px}
+.chip__label{min-width:0}
+.chip[data-variant=soft]{padding:2px 8px;border:1px solid color-mix(in srgb,var(--chip-color,var(--accent)) 45%,transparent);border-radius:999px;letter-spacing:.05em}
+.chip[data-color=accent]{--chip-color:var(--accent)}
+.chip[data-color=success]{--chip-color:var(--accent)}
+.chip[data-color=warning]{--chip-color:var(--domain-4)}
+.chip[data-color=danger]{--chip-color:#e0605f}
+.chip[data-color=blue]{--chip-color:var(--blue)}
+.chip[data-color=muted]{--chip-color:var(--muted)}
+.chip[data-color=faint]{--chip-color:var(--faint)}
+/* The two pause switches share one look; their state lives on aria-pressed,
+   which is also what the shared motion controller writes. */
+.toggle-button{border:1px solid var(--line);border-radius:6px;background:var(--panel);color:var(--muted);padding:5px 10px;font-size:11px}
+.toggle-button:hover{border-color:var(--accent);color:var(--ink)}
+.toggle-button[aria-pressed=true]{border-color:var(--accent);background:color-mix(in srgb,var(--accent) 10%,var(--panel));color:var(--ink)}
 .hero{padding-top:72px;padding-bottom:88px}
 .hero-meta,.section-head,.hero-stats{display:flex;justify-content:space-between;align-items:center}
 .hero-meta{font:10px Manrope;letter-spacing:.13em;color:var(--faint);border-bottom:1px solid var(--line);padding-bottom:13px}
 .hero-grid{display:grid;grid-template-columns:minmax(0,1fr) 372px;gap:64px;padding-top:66px;align-items:start}
-.eyebrow{font:11px Manrope;letter-spacing:.13em;color:var(--muted);text-transform:uppercase;display:flex;align-items:center;gap:9px}
-.eyebrow-dot{width:7px;height:7px;background:var(--accent);display:inline-block}
 .hero-title{margin:24px 0 28px;max-width:840px;display:flex;flex-direction:column;gap:4px;font-family:"STKaiti","KaiTi","Kaiti SC","BiauKai",serif}
 .hero-title-lead{font-size:clamp(26px,3.2vw,42px);font-weight:400;letter-spacing:.02em;color:var(--ink);line-height:1.45}
 .hero-title-focus{font-size:clamp(64px,8vw,116px);font-weight:400;letter-spacing:.02em;line-height:1.15;color:var(--ink)}
@@ -141,7 +210,7 @@ h2{font-size:22px;letter-spacing:-.04em;margin:0;font-weight:600}
 .legend-node b{font-size:14.5px;font-weight:600}
 .legend-node small{font:10px Manrope;color:var(--faint);letter-spacing:.05em}
 .legend-desc{grid-column:2;margin:2px 0 0;font-size:12px;line-height:1.8;color:var(--muted)}
-.legend-foot{font:9px Manrope;color:var(--accent);letter-spacing:.1em;margin-top:auto}
+.legend-foot{margin-top:auto}
 .legend-block{display:flex;flex-direction:column;gap:12px}
 .legend-heading{display:grid;grid-template-columns:12px 1fr;column-gap:8px;align-items:baseline}
 .legend-heading i{width:7px;height:7px;border:1px solid var(--accent);grid-row:span 2;margin-top:4px}
@@ -154,14 +223,23 @@ kbd{display:inline-flex;align-items:center;justify-content:center;min-height:22p
 .shortcut-list strong{color:var(--ink);font-weight:600}
 .legend-capabilities{border-top:1px solid var(--line);padding-top:16px}
 .legend-capabilities .legend-desc{margin:0;padding-left:20px}
-.legend-ecosystem{border-left:2px solid var(--blue);padding:2px 0 2px 12px;display:flex;flex-direction:column;gap:3px}
+/* HeroUI's Alert shape: indicator + title + description. The site's
+   blue-left-border callout becomes that structure, borrowing the marker the
+   legend headings already use so the section keeps one visual vocabulary. */
+.legend-ecosystem{display:grid;grid-template-columns:12px minmax(0,1fr);column-gap:8px;border-left:2px solid var(--alert-color,var(--blue));padding:2px 0 2px 12px}
+.legend-ecosystem .alert__indicator{width:7px;height:7px;border:1px solid var(--alert-color,var(--blue));margin-top:4px}
+.alert__content{display:flex;flex-direction:column;gap:3px}
+.alert__title{font-size:11px;color:var(--ink)}
+.alert[data-status=accent]{--alert-color:var(--blue)}
+.alert[data-status=success]{--alert-color:var(--accent)}
+.alert[data-status=warning]{--alert-color:var(--domain-4)}
+.alert[data-status=danger]{--alert-color:#e0605f}
 .legend-ecosystem b{font-size:11px;color:var(--ink)}
 .stage-rail{grid-column:1;grid-row:1/3}
 .workflow-legend{grid-column:2;grid-row:1;border-right:0;padding:26px 22px 0;gap:16px}
 .demo-stage{grid-column:2;grid-row:2;position:relative;z-index:1;margin:22px;border:1px solid var(--line-strong);background:var(--panel);min-width:0}
 .demo-topbar{height:44px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:14px;padding:0 16px}
 .demo-brand{display:flex;align-items:center;gap:7px;font-weight:700;font-size:12px}
-.demo-status{font:10px Manrope;color:var(--muted);display:flex;align-items:center;gap:7px}
 .text-button{margin-left:auto;font-size:11px}
 .demo-desktop{--wf-width:439px;--wf-scale:.90205;height:690px;position:relative;background:var(--panel);display:flex;align-items:center;justify-content:center;overflow:hidden}
 .demo-desktop:before{content:'PANE / DEMO';position:absolute;top:18px;right:18px;font:9px Manrope;letter-spacing:.14em;color:var(--faint)}
@@ -203,7 +281,7 @@ kbd{display:inline-flex;align-items:center;justify-content:center;min-height:22p
 .demo-desktop.is-settings .annotation-sample,.demo-desktop.is-settings .annotation-tabs{visibility:hidden}
 .demo-controls{display:flex;justify-content:center;gap:4px;padding:10px;border-top:1px solid var(--line);flex-wrap:wrap}
 .demo-controls button{display:flex;align-items:center;gap:7px;background:transparent;border:1px solid transparent;color:var(--muted);padding:7px 11px;font-size:11px}
-.demo-controls button.active,.demo-controls button:hover{color:var(--ink);border-color:var(--line-strong)}
+.demo-controls button.active,.demo-controls button[aria-pressed=true],.demo-controls button[aria-expanded=true],.demo-controls button:hover{color:var(--ink);border-color:var(--line-strong)}
 .demo-controls img{width:15px;height:15px;opacity:.7}
 /* Mobile replaces the floating margin annotations with this static brief;
    the absolutely-positioned notes only work on the desktop stage. */
@@ -239,25 +317,38 @@ kbd{display:inline-flex;align-items:center;justify-content:center;min-height:22p
 .feature-art{height:190px;position:relative;display:flex;align-items:center;justify-content:center}
 .feature-grid h3{font-size:15px;font-weight:600;margin:0 0 9px}
 .feature-grid p{font-size:12px;line-height:1.8;color:var(--muted);margin:0}
-.mini-ring{display:flex;align-items:center;justify-content:center;width:55px;height:55px;border-radius:50%;border:4px solid var(--line-strong);font:12px Manrope;position:relative}
-.mini-ring.r1{border-top-color:var(--blue);transform:translateY(16px)}
-.mini-ring.r2{margin:0 -3px;border-top-color:var(--accent);transform:translateY(-20px);z-index:1;background:var(--bg)}
-.mini-ring.r3{border-top-color:var(--accent);border-right-color:var(--blue);transform:translateY(16px)}
-.bar-art{height:80px;display:flex;gap:8px;align-items:flex-end}
-.bar-art i{width:11px;height:40%;background:var(--line-strong)}
-.bar-art i:nth-child(2){height:55%}
-.bar-art i:nth-child(3){height:42%}
-.bar-art i:nth-child(4){height:72%;background:var(--blue)}
-.bar-art i:nth-child(5){height:58%;background:var(--blue)}
-.bar-art i:nth-child(6){height:84%;background:var(--accent)}
-.bar-art i:nth-child(7){height:100%;background:var(--accent)}
-.art-total{position:absolute;top:44px;font:14px Manrope;color:var(--muted)}
-.clock-face{width:72px;height:72px;border:1px solid var(--accent);display:grid;place-items:center}
-.clock-face img{width:38px}
-.reset-label{position:absolute;top:146px;font:11px Manrope;color:var(--muted)}
-.device-outline{width:110px;height:78px;border:1px solid var(--line-strong);position:absolute;top:49px}
-.shield{width:52px;height:58px;background:var(--accent);display:grid;place-items:center;transform:translate(19px,19px)}
-.shield img{width:31px}
+/* Feature cells are slices of the real panel, not four unrelated drawings: one
+   frame (panel fill, ring, 12px radius, mini title bar) wraps quota rows, a
+   spend chart, a live reset countdown and a credential list. Four art systems
+   that used to disagree about stroke, radius and palette now share one. */
+.frag{display:flex;flex-direction:column;width:min(244px,100%);min-height:152px;border:1px solid var(--line-strong);border-radius:12px;background:var(--panel);box-shadow:0 8px 20px #0004;overflow:hidden;text-align:left}
+.frag-head{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:9px 12px;border-bottom:1px solid var(--line)}
+.frag-title{font-size:11px;font-weight:600;color:var(--ink)}
+.frag-body{flex:1;padding:12px}
+.frag-row{display:grid;grid-template-columns:46px minmax(0,1fr) 34px;align-items:center;gap:8px;font:10px Manrope,sans-serif;color:var(--muted)}
+.frag-row+.frag-row{margin-top:9px}
+.frag-row b{font-weight:500;color:var(--faint);white-space:nowrap}
+.frag-row i{display:block;height:6px;border-radius:3px;background:var(--line);overflow:hidden}
+.frag-row em{display:block;width:var(--value);height:100%;border-radius:3px;background:linear-gradient(90deg,var(--blue),var(--accent));transform-origin:left center}
+.frag-row span{text-align:right;color:var(--ink);font-variant-numeric:tabular-nums}
+.frag-chart{display:flex;align-items:flex-end;gap:6px;height:62px}
+.frag-chart i{flex:1;height:var(--h);border-radius:2px 2px 0 0;background:var(--line-strong);transform-origin:bottom center}
+.frag-chart i:nth-child(4),.frag-chart i:nth-child(5){background:var(--blue)}
+.frag-chart i:nth-child(6),.frag-chart i:nth-child(7){background:var(--accent)}
+.frag-total{display:flex;align-items:baseline;justify-content:space-between;margin-top:11px}
+.frag-total b{font:600 15px Manrope,sans-serif;font-variant-numeric:tabular-nums;color:var(--ink)}
+.frag-total span{font:9px Manrope,sans-serif;letter-spacing:.1em;color:var(--faint)}
+.frag-countdown{font:600 25px/1.15 Manrope,sans-serif;letter-spacing:-.02em;font-variant-numeric:tabular-nums;color:var(--ink)}
+.frag-track{margin:12px 0 9px;height:4px;border-radius:2px;background:var(--line);overflow:hidden}
+.frag-track i{display:block;width:var(--value);height:100%;border-radius:2px;background:var(--accent)}
+.frag-note{font-size:10px;line-height:1.6;color:var(--muted)}
+.frag-key-list{margin:0}
+.frag-key{display:flex;align-items:center;gap:8px;padding:8px 0;border-bottom:1px solid var(--line);font-size:10px}
+.frag-key:last-child{border-bottom:0;padding-bottom:0}
+.frag-key dt{flex:none;width:72px;font-size:10px;font-weight:600;color:var(--ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.frag-key dd{display:flex;align-items:center;gap:8px;flex:1;min-width:0;margin:0}
+.frag-key span{flex:1;min-width:0;font-family:ui-monospace,Menlo,Consolas,monospace;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.frag-lock{flex:none;width:13px;height:13px;background:var(--accent);mask:url('/icons/shield-check.svg') center/contain no-repeat;-webkit-mask:url('/icons/shield-check.svg') center/contain no-repeat}
 /* Grouped FAQ — Ruixen UI's Grouped FAQ Section (upstream archived in
    vendor/ruixen-grouped-faq/), adapted to this site's flat/hairline language.
    A closed row is one hairline; an open row lifts into a card. The lift uses
@@ -330,8 +421,6 @@ html[data-theme=light] .faq-item[open]{box-shadow:0 0 0 1px var(--line-strong),0
 .faq-section .section-head{max-width:900px;margin-left:auto;margin-right:auto}
 .marquee-track{display:flex;width:max-content;min-width:100%;will-change:transform}
 .marquee-track li{width:150px;flex:0 0 150px}
-.platform-disabled{cursor:default;opacity:.55;color:var(--muted);background:transparent;border-color:var(--line);font-weight:500}
-.platform-disabled small{font:9px Manrope;letter-spacing:.05em;color:var(--accent);border:1px solid var(--accent);padding:2px 4px}
 .platform-mark{font-family:Georgia,serif;font-size:16px;color:var(--muted)}
 
 /* Mature callout treatment: quiet label cards with a terminal dot instead of oversized arrowheads. */
@@ -343,17 +432,15 @@ html[data-theme=light] .faq-item[open]{box-shadow:0 0 0 1px var(--line-strong),0
 .marquee-track.belt-forward{animation:provider-belt-forward 34s linear infinite}
 .marquee-track.belt-reverse{animation:provider-belt-reverse 38s linear infinite}
 .marquee-track:hover{animation-play-state:paused}
+/* WCAG 2.2.2: content that moves on its own for more than five seconds needs a
+   pause mechanism the visitor can reach. Hover-pause alone is not one. */
+.integrations.is-paused .marquee-track{animation-play-state:paused}
+.section-head-side{display:flex;align-items:flex-end;justify-content:flex-end;gap:16px}
 @keyframes provider-belt-forward{from{transform:translate3d(0,0,0)}to{transform:translate3d(-50%,0,0)}}
 @keyframes provider-belt-reverse{from{transform:translate3d(-50%,0,0)}to{transform:translate3d(0,0,0)}}
 @media(prefers-reduced-motion:reduce){.marquee-track.belt-forward,.marquee-track.belt-reverse{animation-play-state:paused}}
 .feature-art{overflow:visible}
 .feature-art>*{will-change:transform,opacity}
-.quota-bars{width:min(240px,90%);display:grid;gap:13px}
-.quota-bars>div{display:grid;grid-template-columns:42px 1fr 34px;align-items:center;gap:9px;font:10px Manrope;color:var(--muted)}
-.quota-bars b{font-weight:500;color:var(--faint);white-space:nowrap}
-.quota-bars i{display:block;height:8px;border:1px solid var(--line-strong);background:var(--surface);overflow:hidden;transform:skewX(-16deg)}
-.quota-bars em{display:block;width:var(--value);height:100%;background:linear-gradient(90deg,var(--blue),var(--accent));transform-origin:left center;box-shadow:0 0 14px color-mix(in srgb,var(--accent) 50%,transparent)}
-.quota-bars span{color:var(--ink);text-align:right}
 .hero-stats{position:relative;border:1px solid color-mix(in srgb,var(--accent) 28%,var(--line));padding:17px 18px 15px;margin-left:10px;background:linear-gradient(105deg,color-mix(in srgb,var(--accent) 5%,transparent),transparent 42%)}
 .hero-stats:before,.hero-stats:after{position:absolute;color:var(--accent);font:28px Georgia,serif;line-height:1}
 .hero-stats:before{content:'“';left:-9px;top:-15px;background:var(--bg);padding:0 3px}
@@ -426,7 +513,8 @@ html[data-theme=light] .faq-item[open]{box-shadow:0 0 0 1px var(--line-strong),0
 .demo-annotation{display:none}
 .demo-brief{display:grid;gap:8px;padding:12px 12px 14px;border-top:1px solid var(--line)}
 .demo-topbar{padding:0 11px}
-.demo-status{font-size:9px}
+.demo-topbar .chip{font-size:9px}
+.section-head-side{flex-direction:column;align-items:flex-start;gap:12px}
 .marquee-track{grid-template-columns:repeat(2,minmax(130px,1fr))}
 .feature-section,.faq-section,.provider-section{padding:60px 0}
 .feature-grid{grid-template-columns:1fr}
@@ -437,7 +525,7 @@ html[data-theme=light] .faq-item[open]{box-shadow:0 0 0 1px var(--line-strong),0
 .footer-content>div{flex-wrap:wrap;gap:12px}
 .download-section{padding:70px 0}
 .bottom-actions{flex-wrap:wrap}
-.platform-disabled{padding:10px 12px}
+.bottom-actions [aria-disabled=true]{padding:10px 12px}
 .marquee-track li{width:145px;flex-basis:145px}
 }
 @media(max-width:420px){.wrap{padding:0 18px}
@@ -466,11 +554,20 @@ html[data-theme=light] .faq-item[open]{box-shadow:0 0 0 1px var(--line-strong),0
 .keyboard-steps button:not(:disabled):hover{border-color:var(--accent);background:color-mix(in srgb,var(--accent) 7%,transparent)}
 .keyboard-steps kbd,.demo-rest kbd{font:600 11px Manrope,monospace;border:1px solid var(--line-strong);border-bottom-width:3px;padding:3px 7px;border-radius:4px;color:var(--ink)}
 .keyboard-steps b{font-size:11px;font-weight:500}
-.keyboard-feedback{padding:12px 0;border-top:1px solid var(--line);font-size:11px;line-height:1.8;color:var(--accent);min-height:44px}
+.keyboard-feedback{display:grid;grid-template-columns:12px minmax(0,1fr);column-gap:8px;align-items:start;padding:12px 0;border-top:1px solid var(--line);font-size:11px;line-height:1.8;color:var(--status-color,var(--muted));min-height:44px}
+/* A toast, not a paragraph: an indicator plus the message, with the status
+   carried by one colour so a confirmed action reads differently from a hint. */
+.keyboard-feedback__mark{width:7px;height:7px;border-radius:50%;background:var(--status-color,var(--muted));margin-top:7px}
+.keyboard-feedback[data-status=info]{--status-color:var(--muted)}
+.keyboard-feedback[data-status=success]{--status-color:var(--accent)}
+.keyboard-feedback[data-status=warning]{--status-color:var(--domain-4)}
+.keyboard-feedback[data-status=danger]{--status-color:#e0605f}
 .keyboard-demo.is-active{border-color:color-mix(in srgb,var(--accent) 50%,var(--line))}
 .keyboard-demo .stage-config{padding-top:16px;margin-top:12px}
 .app-window[hidden],.demo-rest[hidden]{display:none}
 .demo-rest{align-self:center;display:flex;flex-direction:column;align-items:center;justify-content:center;width:calc(var(--wf-width) * var(--wf-scale));height:calc(640px * var(--wf-scale));gap:22px;background:color-mix(in srgb,var(--accent) 3%,var(--panel));border:1px dashed var(--line-strong);text-align:center}
+.demo-rest__mark{width:54px;height:54px;border:1px dashed var(--line-strong);border-radius:12px;position:relative}
+.demo-rest__mark::after{content:'';position:absolute;left:11px;right:11px;top:50%;border-top:1px solid var(--line-strong)}
 .demo-rest>span{font:10px Manrope;letter-spacing:.16em;color:var(--accent)}
 .demo-rest>b{font-size:26px;font-weight:500;color:var(--ink)}
 .demo-rest p{font-size:12px;color:var(--muted)}
@@ -504,8 +601,21 @@ html[data-theme=light] .faq-item[open]{box-shadow:0 0 0 1px var(--line-strong),0
 .ecosystem-core{display:flex;flex-direction:column;align-items:center;gap:10px;z-index:1}.ecosystem-core b{font-size:30px;letter-spacing:-.05em}.ecosystem-core span{font-size:11px;color:var(--muted)}
 .ecosystem-art-foot{display:flex;align-items:center;justify-content:center;gap:24px;font-size:11px;color:var(--muted);margin-top:22px}
 .ecosystem-copy h2{font-size:clamp(26px,3vw,40px);line-height:1.4;letter-spacing:-.04em;margin:14px 0 20px;font-weight:600}
-.ecosystem-intro{font-size:14px;line-height:1.9;color:var(--muted)}.ecosystem-intro strong{color:var(--ink);font-weight:600}
-.ecosystem-domains{margin:26px 0;display:grid;gap:16px}.ecosystem-domains>div{border-bottom:1px solid var(--line);padding-bottom:14px}.ecosystem-domains span{font-size:12px;color:var(--ink)}.ecosystem-domains p{font-size:11px;line-height:1.8;color:var(--muted);margin:5px 0 0}
+.ecosystem-intro{font-size:14px;line-height:1.9;color:var(--muted);max-width:62ch}.ecosystem-intro strong{color:var(--ink);font-weight:600}
+.ecosystem-domains{margin:26px 0;display:grid;gap:16px}.ecosystem-domains>div{border-bottom:1px solid var(--line);padding-bottom:14px;transition:border-color .2s}.ecosystem-domains>div:hover{border-bottom-color:var(--domain)}.ecosystem-domains span{display:flex;align-items:center;gap:9px;font-size:12px;color:var(--ink)}.ecosystem-domains span::before{content:'';flex:none;width:7px;height:7px;border-radius:50%;background:var(--domain,var(--accent))}.ecosystem-domains p{font-size:11px;line-height:1.8;color:var(--muted);margin:5px 0 0}
+/* Hover name card for an orbit provider. The orbit freezes while the pointer
+   is inside it, so the card can sit beside the frozen icon instead of chasing
+   a moving target. */
+/* The card accepts the pointer so travelling from the icon into it does not
+   dismiss it (React Aria's PreviewTrigger calls this the safe area). */
+.orbit-card{position:absolute;z-index:3;width:200px;padding:12px 14px;border:1px solid var(--line-strong);border-radius:12px;background:color-mix(in srgb,var(--panel) 94%,transparent);box-shadow:0 12px 30px #0007;display:grid;gap:3px;pointer-events:auto;text-align:left}
+.orbit-card[hidden]{display:none}
+.orbit-card-dot{width:7px;height:7px;border-radius:50%;background:var(--domain,var(--accent))}
+.orbit-card-name{font-size:13px;font-weight:650;color:var(--ink)}
+.orbit-card-domain{font:10px Manrope,sans-serif;letter-spacing:.06em;color:var(--domain,var(--accent))}
+.orbit-card-note{margin:3px 0 0;font-size:11px;line-height:1.7;color:var(--muted)}
+.orbit-card-cta{font-size:10px;color:var(--faint)}
+.orbit-card-cta:hover,.orbit-card-cta:focus-visible{color:var(--ink)}
 .ecosystem-outlook{font-size:10px;line-height:1.9;color:var(--faint);margin:0;max-width:470px}
 @media(max-width:1000px){.ecosystem-layout{gap:32px}.ecosystem-visual{width:320px;height:320px}.ecosystem-visual .why-orbit-outer{--radius:140;--icon-size:32px}.ecosystem-visual .why-orbit-inner{--radius:98;--icon-size:26px}}
 @media(max-width:720px){.ecosystem-section{padding:48px 0}.ecosystem-layout{grid-template-columns:1fr;gap:42px}.ecosystem-visual{width:280px;height:280px}.ecosystem-visual .why-orbit-outer{--radius:120;--icon-size:30px}.ecosystem-visual .why-orbit-inner{--radius:84;--icon-size:24px}.ecosystem-core img{width:36px;height:36px}.ecosystem-core b{font-size:24px}.ecosystem-core span{font-size:9px}}
