@@ -1,0 +1,4 @@
+# The skill payload is compiled into the exe with include_str! and shipped
+# byte-identical from three sources (repo copy, installer download, settings
+# button). Pin LF so a CI autocrlf checkout cannot bake CRLF into the binary.
+skills/pane/** text eol=lf

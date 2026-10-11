@@ -107,10 +107,13 @@ mod tests {
             assert!(*rel == "SKILL.md" || rel.starts_with("references/"), "{rel}");
         }
         // The frontmatter name must match the parent directory (spec rule).
-        let skill = SKILL_FILES[0].1;
-        assert!(skill.starts_with("---\nname: pane\n"), "frontmatter name must be `pane`");
+        // The bytes differ per checkout eol (CI's autocrlf checkout hands
+        // include_str! CRLF text), so assert on parsed lines, not a prefix.
+        let mut skill_lines = SKILL_FILES[0].1.lines();
+        assert_eq!(skill_lines.next(), Some("---"));
+        assert_eq!(skill_lines.next(), Some("name: pane"), "frontmatter name must be `pane`");
         // Progressive disclosure: the body stays well under the 500-line cap.
-        assert!(skill.lines().count() < 200, "SKILL.md grew past its budget");
+        assert!(SKILL_FILES[0].1.lines().count() < 200, "SKILL.md grew past its budget");
     }
 
     #[test]
