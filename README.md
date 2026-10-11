@@ -248,6 +248,37 @@ pnpm dev
 
 ---
 
+## <a id="agent"></a>🤖 让你的 AI Agent 自己排查 Pane
+
+Pane 内置一个**只读诊断 API**和一个**排查 Skill**。装上后，你可以直接对自己的 coding agent（Claude Code / Codex / Cursor / ZCode 等）说"帮我查一下 Pane 哪个卡有问题"，它会自己读本地 API 定位原因并给出修复步骤——不用等发版。
+
+### 本地只读诊断 API（无需配置，Pane 运行时即开）
+
+```powershell
+curl -s --noproxy '*' http://127.0.0.1:6736/v1/doctor     # 一句话健康结论 + 每项失败的修复办法
+curl -s --noproxy '*' http://127.0.0.1:6736/v1/providers  # 每张卡的状态 / 错误 / 是否过期
+curl -s --noproxy '*' http://127.0.0.1:6736/v1/status     # 版本 / 运行时长 / 刷新年龄
+curl -s --noproxy '*' http://127.0.0.1:6736/v1/sources    # 本机花费数据源清单
+```
+
+仅监听 `127.0.0.1`、无鉴权、**永不出凭据**（错误文本中的网址也会打码）。完整契约见 [`docs/local-http-api.md`](docs/local-http-api.md)。
+
+### 安装排查 Skill（三选一，可叠加）
+
+| 方式 | 操作 |
+| :--- | :--- |
+| **安装器自动** | 用 [`install.ps1`](install.ps1) 安装/更新 Pane 时自动装入 `~/.agents/skills/pane/` |
+| **应用内一键** | Pane 设置（`Ctrl + S`）→ 常规 → **AI Agent 排查 Skill → 安装**（会先展示写入计划，覆盖前自动备份） |
+| **仓库获取** | 本仓库 [`skills/pane/`](skills/pane/)；支持 `npx skills add Aafff623/pane`，或手动拷贝到 `~/.agents/skills/pane/` |
+
+装好后重启你的 agent（或开个新会话），然后直接问它：
+
+> 我的 Pane 有张卡片没数据，帮我看看是什么原因。
+
+Skill 会引导 agent 按证据走决策树（`/v1/doctor` → `/v1/providers` → 症状库），区分"被禁用 / 没配密钥 / 登录过期 / 网络 / 刷新卡死"，并把每一步的观察与推断分开汇报。
+
+---
+
 ## <a id="i18n"></a>🌐 多语言支持 (Internationalization)
 
 界面语言可在设置 → 常规中随时切换：
@@ -371,7 +402,8 @@ Pane 是 local-first 工具：
 
 - [开发启动指南](docs/dev-startup.md) — Windows 双进程、缓存和 `pane.exe` 启动
 - [Provider catalog](docs/providers.md) — provider 读取方式与字段说明
-- [本地 HTTP API](docs/local-http-api.md) — `127.0.0.1:6736/v1/usage`
+- [本地 HTTP API](docs/local-http-api.md) — `127.0.0.1:6736`（usage + 只读诊断端点）
+- [AI Agent 排查 Skill](skills/pane/) — 让 coding agent 自助排查 Pane
 - [隐私说明](docs/privacy.md) — 凭据、网络请求和遥测边界
 - [皮肤市场设计](docs/skin-market-design.md) — 壁纸、吉祥物和退出交互
 - [CONTEXT.md](CONTEXT.md) — 已验证的领域事实与工程约束

@@ -58,6 +58,27 @@ $exe = Join-Path $env:LOCALAPPDATA 'Pane\pane.exe'
 if (-not (Test-Path $exe)) { throw 'Install finished but pane.exe was not found - please report this at https://github.com/Aafff623/pane/issues' }
 
 Start-Process $exe
+
+# Optional: drop the Pane troubleshooting skill into the shared agent-skills
+# directory so the user's own coding agent (Claude Code, Codex, Cursor, ZCode,
+# ...) can diagnose Pane problems from the local read-only API. Non-fatal:
+# a failed copy never blocks or fails the app install.
+Write-Host '> Installing the AI-agent troubleshooting skill (optional)...'
+try {
+    $skillDir = Join-Path $env:USERPROFILE '.agents\skills\pane'
+    $refDir = Join-Path $skillDir 'references'
+    New-Item -ItemType Directory -Force -Path $refDir | Out-Null
+    $raw = 'https://raw.githubusercontent.com/Aafff623/pane/main/skills/pane'
+    Invoke-WebRequest "$raw/SKILL.md" -OutFile (Join-Path $skillDir 'SKILL.md') -UseBasicParsing
+    foreach ($ref in 'symptoms', 'providers', 'spend', 'update') {
+        Invoke-WebRequest "$raw/references/$ref.md" -OutFile (Join-Path $refDir "$ref.md") -UseBasicParsing
+    }
+    Write-Host ("  Skill installed: {0}" -f $skillDir) -ForegroundColor Green
+    Write-Host '  Ask your coding agent to "check my Pane" and it can triage from the local API.'
+} catch {
+    Write-Host '  (skill copy skipped - install it later from Pane Settings)' -ForegroundColor DarkYellow
+}
+
 Write-Host ''
 Write-Host ("  Pane {0} installed - look for the icon in your system tray (next to the clock)." -f $release.tag_name) -ForegroundColor Green
 Write-Host '  It auto-detects the AI tools you already use; add API keys via the gear icon.'

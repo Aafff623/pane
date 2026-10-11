@@ -8,6 +8,33 @@ GET http://127.0.0.1:6736/v1/usage          # all enabled providers
 GET http://127.0.0.1:6736/v1/usage/:id      # one provider (e.g. /claude, /onenewapi@<key-id>)
 ```
 
+## Diagnostic endpoints
+
+Four more read-only endpoints exist so a coding agent (or you) can triage
+Pane without reading files. Same security posture as `/v1/usage` — loopback
+only, no auth, **never credentials**.
+
+```
+GET http://127.0.0.1:6736/v1/status     # version, uptime, refresh age, provider rollups, proxy SOURCE
+GET http://127.0.0.1:6736/v1/providers  # every card with status/stale/error/warning + disabled/removed id lists
+GET http://127.0.0.1:6736/v1/doctor     # checks[{name, ok, classification, detail, remediation}] + healthy
+GET http://127.0.0.1:6736/v1/sources    # local spend sources: detected vs absent
+```
+
+- `/v1/doctor` is the entry point: read `healthy`, then apply the
+  `remediation` of every check whose `classification` is `failed`. Only facts
+  this process can establish become ok/fail; anything not decidable in-process
+  is `classification: "info"` with the honest reason — never a guessed verdict.
+- `/v1/providers` carries the fields the macOS-compatible `/v1/usage` wire
+  format deliberately drops (`status`, `stale`, `error`, `warning`), so an
+  agent can tell "no data" from "disabled / no credentials / auth failed /
+  network". Provider-supplied error text has URLs stripped to `<endpoint>`:
+  reqwest embeds the request URL, which can carry a private relay host.
+- `/v1/status` reports the proxy as a **source** (`config` / `system` /
+  `none`), never the address.
+- `last_snapshots.json` in `%APPDATA%\Pane\` still works as a fallback when
+  the API is unreachable.
+
 Wire format (compatible with the macOS OpenUsage API):
 
 ```json

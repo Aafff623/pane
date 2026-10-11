@@ -10,6 +10,7 @@ mod cursor_oauth;
 mod fonts;
 mod keyvault;
 mod keyvault_v3;
+mod agent_skill;
 mod alerts;
 mod httpapi;
 mod i18n;
@@ -2037,12 +2038,17 @@ async fn save_text_file(
 /// questions + enrolled recovery code) in a single atomic file write. The
 /// printed recovery code comes back exactly once. Only valid while no vault
 /// exists at all.
+/// Plan / execute the AI-agent troubleshooting-skill install. `plan` is
 /// read-only and shown to the user before anything is written; `install`
 /// backs up replaced files and is idempotent.
 #[tauri::command]
+fn agent_skill_plan() -> Result<Vec<String>, String> {
+    agent_skill::plan()
 }
 
 #[tauri::command]
+fn agent_skill_install() -> Result<Vec<String>, String> {
+    agent_skill::install()
 }
 
 #[tauri::command]
@@ -5123,6 +5129,8 @@ pub fn run() {
             keyvault_recovery_questions,
             keyvault_recovery_reset,
             keyvault_v3_setup,
+            agent_skill_plan,
+            agent_skill_install,
             save_text_file,
             keyvault_v3_enable_recovery_code,
             keyvault_v3_disable_recovery_code,

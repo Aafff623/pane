@@ -12475,6 +12475,27 @@ async function initSettings(): Promise<void> {
     void patchConfig({ qoderCheckin: qoderCheckin.checked });
   });
 
+  // AI-agent troubleshooting skill: plan first (shown for approval), then
+  // write — existing files are backed up once, identical content is kept.
+  const skillBtn = document.querySelector<HTMLButtonElement>("#install-agent-skill");
+  skillBtn?.addEventListener("click", async () => {
+    const status = document.querySelector("#status");
+    try {
+      const plan = await invoke<string[]>("agent_skill_plan");
+      const ok = await appConfirm({
+        title: t("settings.agentSkillTitle"),
+        message: t("settings.agentSkillConfirm", { plan: plan.join("\n") }),
+        confirmLabel: t("settings.agentSkillInstall"),
+      });
+      if (!ok) return;
+      const done = await invoke<string[]>("agent_skill_install");
+      const target = done[done.length - 1] ?? "";
+      if (status) status.textContent = t("settings.agentSkillDone", { path: target });
+    } catch (err) {
+      if (status) status.textContent = String(err);
+    }
+  });
+
   applyAppearance();
   const appearance = document.querySelector<HTMLSelectElement>("#appearance")!;
   appearance.value = config.appearance;

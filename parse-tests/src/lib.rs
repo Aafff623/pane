@@ -29,6 +29,12 @@ pub mod pricing;
 #[path = "../../src-tauri/src/spend.rs"]
 pub mod spend;
 
+#[path = "../../src-tauri/src/httpapi.rs"]
+pub mod httpapi;
+
+#[path = "../../src-tauri/src/agent_skill.rs"]
+pub mod agent_skill;
+
 #[path = "../../src-tauri/src/usage_history.rs"]
 pub mod usage_history;
 
