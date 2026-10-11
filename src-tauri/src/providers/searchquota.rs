@@ -663,15 +663,15 @@ fn firecrawl_snapshot_from_results(
             first_error.unwrap_or_default()
         ));
     }
-    let headline = if count == 1 {
-        rows[0].clone()
-    } else {
-        Metric::text(
-            "Credits",
-            format!("{ok_count}/{count} keys · 团队余额分别显示（可能共享）"),
-        )
-    };
-    let mut metrics = vec![headline];
+    // A single key: its balance row IS the card's line, so it goes out alone.
+    // (Emitting a headline clone on top of it printed the same string twice.)
+    if count == 1 {
+        return Ok(Snapshot::ok("firecrawl", "Firecrawl", None, rows));
+    }
+    let mut metrics = vec![Metric::text(
+        "Credits",
+        format!("{ok_count}/{count} keys · 团队余额分别显示（可能共享）"),
+    )];
     metrics.extend(rows);
     Ok(Snapshot::ok("firecrawl", "Firecrawl", None, metrics))
 }
@@ -1077,10 +1077,12 @@ mod tests {
         let usage = parse_firecrawl_usage(&json!({"remaining_credits": 967, "plan_credits": 1000}))
             .unwrap();
         let snap = firecrawl_snapshot_from_results(vec![("key".into(), Ok(usage))]).unwrap();
+        // One key → exactly one row. A headline clone would duplicate it.
+        assert_eq!(snap.metrics.len(), 1);
         assert_eq!(snap.metrics[0].kind, "text");
         assert_eq!(snap.metrics[0].used_percent, None);
         assert_eq!(
-            snap.metrics[1].value.as_deref(),
+            snap.metrics[0].value.as_deref(),
             Some("剩余 967 credits（套餐 1000）")
         );
         assert!(parse_firecrawl_usage(&json!({"plan_credits": 1000})).is_err());
