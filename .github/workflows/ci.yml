@@ -9,6 +9,12 @@ on:
   pull_request:
   push:
     branches: [main]
+  # Manual dispatch lets a release session pre-flight the exact working tree
+  # on a probe branch (git stash create -> push that SHA -> gh workflow run
+  # --ref ci-probe) while it is still splitting commits, so environment-only
+  # test failures surface before main is pushed. See temp/wrapup-070 for the
+  # 0.7.0 post-mortem this was added for.
+  workflow_dispatch:
 
 jobs:
   frontend:
