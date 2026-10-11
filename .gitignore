@@ -48,6 +48,7 @@ pane.md
 .cursor/
 
 .playwright-mcp/
+.playwright-cli/
 
 # Wrangler local dev state (npx wrangler dev)
 site/.wrangler/
@@ -58,3 +59,4 @@ site/.wrangler/
 
 # ZCode harness session state (local)
 .zcode/
+.zcodeignore
