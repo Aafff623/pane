@@ -4783,11 +4783,27 @@ fn build_updater(app: &tauri::AppHandle) -> Result<tauri_plugin_updater::Updater
         .into_iter()
         .map(|endpoint| endpoint.parse().map_err(|e| format!("endpoint parse: {e}")))
         .collect::<Result<Vec<_>, _>>()?;
-    app.updater_builder()
+    let mut builder = app
+        .updater_builder()
         .endpoints(endpoints)
-        .map_err(|e| e.to_string())?
-        .build()
-        .map_err(|e| e.to_string())
+        .map_err(|e| e.to_string())?;
+    // The plugin's client reads proxy env vars only — a Clash-style Windows
+    // system proxy is invisible to it (the plugin builds reqwest without the
+    // system-proxy feature), so manifest fetches rode a direct github.com
+    // connection and died on flaky links with "error sending request". Feed
+    // it the same chain every provider client uses. An unparsable proxy
+    // value is skipped, not fatal — same tolerance as providers' http_builder.
+    if let Some(url) = providers::outbound_proxy_url() {
+        if let Ok(proxy) = url.parse() {
+            builder = builder.proxy(proxy);
+        }
+    }
+    // Cap the manifest check so a dead link errors in seconds instead of
+    // parking the install button on OS-level TCP timeouts. The plugin
+    // builds the download client without a total timeout, so this never
+    // cuts a slow installer download short.
+    builder = builder.timeout(std::time::Duration::from_secs(20));
+    builder.build().map_err(|e| e.to_string())
 }
 
 /// Downloads and installs a pending update, then restarts the app. Only

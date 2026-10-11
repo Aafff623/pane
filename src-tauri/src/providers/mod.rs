@@ -293,6 +293,16 @@ fn windows_system_proxy() -> Option<String> {
     None
 }
 
+/// The effective outbound proxy URL — the config's explicit choice first,
+/// then the Windows system proxy the OS and browsers already honor (Clash
+/// flips its port there when the user switches nodes) — or None for direct.
+/// Shared by every provider client and the updater client so release
+/// traffic follows the same chain; reqwest's own env-var handling stays as
+/// the last resort when neither is set.
+pub(crate) fn outbound_proxy_url() -> Option<String> {
+    proxy_url().map(str::to_string).or_else(windows_system_proxy)
+}
+
 fn http_builder() -> reqwest::ClientBuilder {
     let mut builder = reqwest::Client::builder()
         .user_agent("Pane-Windows/0.3")
@@ -302,14 +312,7 @@ fn http_builder() -> reqwest::ClientBuilder {
         // waits on the slowest provider chain. Failing to connect in 5 s
         // is a dead network — fail fast, serve the cached snapshot.
         .connect_timeout(std::time::Duration::from_secs(5));
-    // Proxy order: the config's explicit choice first, then the Windows
-    // system proxy the OS and browsers already honor (Clash flips its port
-    // there when the user switches nodes). reqwest's own env-var handling
-    // stays as the last resort when neither is set.
-    if let Some(url) = proxy_url()
-        .map(str::to_string)
-        .or_else(windows_system_proxy)
-    {
+    if let Some(url) = outbound_proxy_url() {
         if let Ok(proxy) = reqwest::Proxy::all(url) {
             let proxy = proxy.no_proxy(reqwest::NoProxy::from_string("localhost,127.0.0.1,::1"));
             builder = builder.proxy(proxy);

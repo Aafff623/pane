@@ -4255,16 +4255,7 @@ function renderBuildInfo(): void {
     btn.id = "update-btn";
     btn.textContent = t("update.to", { version });
     btn.addEventListener("click", () => {
-      btn.textContent = t("update.installing");
-      btn.disabled = true;
-      // On success the app restarts, so only the failure path matters:
-      // re-enable the button and surface the reason.
-      invoke("install_update").catch((err) => {
-        btn.textContent = t("update.retry", { version });
-        btn.disabled = false;
-        const status = document.querySelector("#status");
-        if (status) status.textContent = t("footer.updateFailed", { err: String(err) });
-      });
+      if (!updatePushing) maybePromptUpdate(version, true);
     });
     el.replaceChildren(btn);
   } else {
@@ -4285,7 +4276,6 @@ async function checkForUpdate(): Promise<void> {
       // The Total Spend header carries the push indicator — repaint so the
       // green arrow appears the moment a version is announced.
       renderIfVisible();
-      maybePromptUpdate(v);
     }
   } catch {
     // Offline or GitHub unreachable — the stamp just returns; the
@@ -4295,14 +4285,24 @@ async function checkForUpdate(): Promise<void> {
   renderBuildInfo();
 }
 
-// Update popup — a newly discovered version (popover-open check or the
-// 4-hourly background checker) prompts once per version per run; the footer
+// Update popup — detection exposes the indicator; clicking it opens the
+// confirmation. The footer
 // button stays as the always-visible entry point. Mirrors appConfirm's
 // overlay, with "later" dismissing via Esc/backdrop like a confirm cancel.
 let updatePromptedFor: string | null = null;
 
-function maybePromptUpdate(version: string): void {
-  if (updatePromptedFor === version || document.querySelector("#update-overlay")) return;
+/// Updater failures arrive as raw reqwest strings. A transport-level
+/// "error sending request for url" is the machine's path to github.com
+/// dying (flaky direct link, proxy down) — name that in the user's
+/// language and keep the original error line for diagnosis.
+function updateErrorText(err: unknown): string {
+  const raw = String(err);
+  if (/error sending request/i.test(raw)) return t("update.networkHint", { err: raw });
+  return raw;
+}
+
+function maybePromptUpdate(version: string, manual = false): void {
+  if ((!manual && updatePromptedFor === version) || document.querySelector("#update-overlay")) return;
   updatePromptedFor = version;
   const overlay = document.createElement("div");
   overlay.id = "update-overlay";
@@ -4331,15 +4331,26 @@ function maybePromptUpdate(version: string): void {
   });
   overlay.querySelector("#update-later")!.addEventListener("click", close);
   const nowBtn = overlay.querySelector<HTMLButtonElement>("#update-now")!;
+  const body = overlay.querySelector("#update-box p");
+  const availableBody = t("update.availableBody", { version });
   nowBtn.addEventListener("click", () => {
+    if (updatePushing) return;
+    updatePushing = true;
+    updatePct = null;
+    updateSeen = 0;
+    syncPushProgress();
     // On success the app restarts, so only the failure path matters here.
     nowBtn.textContent = t("update.installing");
     nowBtn.disabled = true;
+    // A retry must not keep the previous attempt's error on screen.
+    if (body) body.textContent = availableBody;
     invoke("install_update").catch((err) => {
+      updatePushing = false;
+      updatePct = null;
+      syncPushProgress();
       nowBtn.textContent = t("update.now");
       nowBtn.disabled = false;
-      const body = overlay.querySelector("#update-box p");
-      if (body) body.textContent = t("footer.updateFailed", { err: String(err) });
+      if (body) body.textContent = t("footer.updateFailed", { err: updateErrorText(err) });
     });
   });
   document.addEventListener("keydown", onKey, true);
@@ -13070,7 +13081,7 @@ async function panelCheckForUpdate(btn: HTMLButtonElement): Promise<void> {
     const v = await invoke<string | null>("check_update");
     if (v) {
       updateVersion = v;
-      maybePromptUpdate(v);
+      maybePromptUpdate(v, true);
       btn.textContent = t("update.to", { version: v });
     } else {
       btn.textContent = t("settings.updateLatest");
@@ -14376,26 +14387,11 @@ window.addEventListener("DOMContentLoaded", () => {
       renderAll();
       return;
     }
-    // Total Spend header: the green arrow shows up only while a version is
-    // announced; clicking it pushes the update right away (the popover-open
-    // check and the footer entry keep working unchanged). Progress state
-    // lives at module level so card re-renders mid-download keep the ring.
+    // Open the update confirmation; installation starts from its action.
     const pushBtn = (e.target as Element).closest<HTMLElement>("[data-update-push]");
     if (pushBtn) {
       if (updatePushing) return;
-      updatePushing = true;
-      updatePct = null;
-      updateSeen = 0;
-      syncPushProgress();
-      // On success the app restarts into the new version; only the failure
-      // path needs in-place feedback.
-      void invoke("install_update").catch((err) => {
-        updatePushing = false;
-        updatePct = null;
-        syncPushProgress();
-        const status = document.querySelector("#status");
-        if (status) status.textContent = t("footer.updateFailed", { err: String(err) });
-      });
+      if (updateVersion) maybePromptUpdate(updateVersion, true);
       return;
     }
   });
@@ -14888,7 +14884,6 @@ window.addEventListener("DOMContentLoaded", () => {
     updateVersion = e.payload;
     renderIfVisible();
     renderBuildInfo();
-    maybePromptUpdate(e.payload);
   });
 
   // Byte progress for the push indicator: the green ring fills as chunks
