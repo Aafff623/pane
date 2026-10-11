@@ -215,11 +215,10 @@ anything unverified lives under `待确认` at the bottom.
 - `docs/adr/0002-platform-seam.md` — OS capabilities go through
   `src-tauri/src/platform/`; Windows stays the supported tray, Linux/macOS
   are first published binaries.
-- `docs/plans/pane-account-model-v2.md` — account model v2 (trend for every
-  card, credential accounts, OAuth expansion). Phase 1 landed as
-  `usage_history.rs` + frontend trend fallback.
-- `docs/plans/` and `docs/superpowers/plans/` — quota architecture,
-  api-key quota providers, Antigravity multi-account, UI overhaul phases.
+- `docs/plans/` and `docs/superpowers/plans/` (removed 2026-10-11 as completed
+  and absorbed) — used to hold quota architecture, api-key quota providers,
+  Antigravity multi-account and UI-overhaul phase plans; the durable outcomes
+  live in this file and the ADRs.
 
 ## README assets
 
