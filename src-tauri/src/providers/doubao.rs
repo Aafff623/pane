@@ -205,13 +205,13 @@ fn decrypt_cookie(blob: &[u8], key: &[u8; 32]) -> Option<String> {
 
 /// The peel sanity bar: cookie values are printable text, so a wrong key
 /// or wrong header length (binary junk) is rejected here.
-fn looks_like_text(s: &str) -> bool {
+pub(crate) fn looks_like_text(s: &str) -> bool {
     let printable = s.chars().filter(|c| !c.is_control()).count();
     printable * 2 > s.len()
 }
 
 /// `Local State` → `os_crypt.encrypted_key` → DPAPI → 32-byte AES key.
-fn os_crypt_key(dir: &std::path::Path) -> Result<[u8; 32], String> {
+pub(crate) fn os_crypt_key(dir: &std::path::Path) -> Result<[u8; 32], String> {
     let raw = read_small_text(
         &dir.join(LOCAL_STATE_REL),
         MAX_LOCAL_STATE_BYTES,
@@ -231,14 +231,14 @@ fn os_crypt_key(dir: &std::path::Path) -> Result<[u8; 32], String> {
         .strip_prefix(b"DPAPI")
         .ok_or("encrypted_key lacks the DPAPI prefix")?;
     let key =
-        crate::platform::dpapi_unprotect(wrapped).ok_or("DPAPI unwrap of the Doubao key failed")?;
+        crate::platform::dpapi_unprotect(wrapped).ok_or("DPAPI unwrap of the os_crypt key failed")?;
     key.try_into()
         .map_err(|_| "os_crypt key is not 32 bytes".to_string())
 }
 
 /// Chromium os_crypt v10: nonce = bytes 3..15, ciphertext+tag = 15...
 /// (Same scheme as Qoder CN's auth.v1.dat.)
-fn decode_os_crypt(raw: &[u8], key: &[u8; 32]) -> Result<Vec<u8>, String> {
+pub(crate) fn decode_os_crypt(raw: &[u8], key: &[u8; 32]) -> Result<Vec<u8>, String> {
     if raw.len() < 3 + 12 + 16 || &raw[..3] != b"v10" {
         return Err("not a v10 os_crypt blob".into());
     }

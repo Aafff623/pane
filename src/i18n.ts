@@ -430,6 +430,9 @@ const en: Dict = {
   "card.hintWorkbuddyEncrypted": "WorkBuddy's desktop sign-in is stored encrypted on this machine and Pane does not decrypt it. Sign in from the auth center instead.",
   "card.hintWorkbuddyUnreadable": "WorkBuddy desktop sign-in could not be read: {reason}",
   "card.hintSessionExpired": "{name} session expired — sign in again from the auth center",
+  "card.hintWbWebExpired": "WorkBuddy web session expired — import a fresh cookie in Customize, or sign in from the auth center.",
+  "card.hintWbWebError": "WorkBuddy web session: {reason}",
+  "card.hintWbWebNoData": "WorkBuddy web session returned no quota data",
   "card.outdated": "⚠ Outdated",
   "card.bootCache": "Cached data · refreshing",
   "card.showMore": "Show more",
@@ -708,6 +711,16 @@ const en: Dict = {
   "welcome.open": "Open Customize",
   "welcome.dismiss": "Dismiss",
 
+  "customize.wbWebEnable": "Use a WorkBuddy web session (explicit import)",
+  "customize.wbWebHelp": "Reads quota from www.workbuddy.cn with a session you import yourself — Chrome import or a pasted cookie. The session is bound to your browser's User-Agent; nothing is requested until you enable it.",
+  "customize.wbWebImport": "Import from Chrome",
+  "customize.wbWebClear": "Clear session",
+  "customize.wbWebPastePh": "Paste cookie (name=value; …)",
+  "customize.wbWebSave": "Save cookie",
+  "customize.wbWebStatus": "Session saved ({when}) · Chrome {major}",
+  "customize.wbWebNone": "No web session saved yet.",
+  "customize.wbWebImported": "Imported from Chrome (major {major}).",
+  "customize.wbWebSaved": "Cookie saved.",
   "customize.done": "← Done",
   "customize.searchPlaceholder": "Search providers…",
   "customize.searchEmpty": "No matching providers",
@@ -1456,6 +1469,9 @@ const zh: Dict = {
   "card.hintWorkbuddyEncrypted": "本机 WorkBuddy 桌面版的登录态是加密存储的，Pane 不解密它——请改从授权中心登录。",
   "card.hintWorkbuddyUnreadable": "WorkBuddy 桌面版登录态读取失败：{reason}",
   "card.hintSessionExpired": "{name} 会话已过期——请从授权中心重新登录",
+  "card.hintWbWebExpired": "WorkBuddy 网页会话已过期——请在自定义面板重新导入 Cookie，或从授权中心登录。",
+  "card.hintWbWebError": "WorkBuddy 网页会话：{reason}",
+  "card.hintWbWebNoData": "WorkBuddy 网页会话没有返回额度数据",
   "card.outdated": "⚠ 数据过时",
   "card.bootCache": "缓存数据 · 刷新中",
   "card.showMore": "显示更多",
@@ -1727,6 +1743,16 @@ const zh: Dict = {
   "welcome.open": "打开自定义",
   "welcome.dismiss": "关闭",
 
+  "customize.wbWebEnable": "使用 WorkBuddy 网页会话（显式导入）",
+  "customize.wbWebHelp": "用你自己导入的会话从 www.workbuddy.cn 读额度——支持从 Chrome 导入或粘贴 Cookie。会话与浏览器 User-Agent 绑定；未启用前不会发出任何请求。",
+  "customize.wbWebImport": "从 Chrome 导入",
+  "customize.wbWebClear": "清除会话",
+  "customize.wbWebPastePh": "粘贴 Cookie（name=value; …）",
+  "customize.wbWebSave": "保存 Cookie",
+  "customize.wbWebStatus": "会话已保存（{when}）· Chrome {major}",
+  "customize.wbWebNone": "尚未保存网页会话。",
+  "customize.wbWebImported": "已从 Chrome 导入（大版本 {major}）。",
+  "customize.wbWebSaved": "Cookie 已保存。",
   "customize.done": "← 完成",
   "customize.searchPlaceholder": "搜索 provider…",
   "customize.searchEmpty": "没有匹配的 provider",
@@ -2428,6 +2454,9 @@ const ru: Dict = {
   "card.hintWorkbuddyEncrypted": "Сеанс WorkBuddy на этом компьютере хранится в зашифрованном виде, и Pane его не расшифровывает. Войдите через центр авторизации.",
   "card.hintWorkbuddyUnreadable": "Не удалось прочитать сеанс WorkBuddy: {reason}",
   "card.hintSessionExpired": "Сеанс {name} истёк — войдите снова через центр авторизации",
+  "card.hintWbWebExpired": "Веб-сеанс WorkBuddy истёк — импортируйте новый cookie в разделе настройки или войдите через центр авторизации.",
+  "card.hintWbWebError": "Веб-сеанс WorkBuddy: {reason}",
+  "card.hintWbWebNoData": "Веб-сеанс WorkBuddy не вернул данных о лимитах",
   "card.outdated": "⚠ Данные устарели",
   "card.bootCache": "Кэшированные данные · обновляем",
   "card.showMore": "Ещё",
@@ -2699,6 +2728,16 @@ const ru: Dict = {
   "link.Quota": "Квота",
   "link.API": "API",
 
+  "customize.wbWebEnable": "Использовать веб-сеанс WorkBuddy (явный импорт)",
+  "customize.wbWebHelp": "Читает лимиты с www.workbuddy.cn по сеансу, который вы импортируете сами — из Chrome или вставкой cookie. Сеанс привязан к User-Agent браузера; до включения запросы не отправляются.",
+  "customize.wbWebImport": "Импорт из Chrome",
+  "customize.wbWebClear": "Очистить сеанс",
+  "customize.wbWebPastePh": "Вставьте cookie (name=value; …)",
+  "customize.wbWebSave": "Сохранить cookie",
+  "customize.wbWebStatus": "Сеанс сохранён ({when}) · Chrome {major}",
+  "customize.wbWebNone": "Веб-сеанс ещё не сохранён.",
+  "customize.wbWebImported": "Импортировано из Chrome (версия {major}).",
+  "customize.wbWebSaved": "Cookie сохранён.",
   "welcome.title": "Добро пожаловать 👋",
   "welcome.body":
     "Настроены инструменты ИИ, найденные на этом ПК. Карточки, звёзды трея и скрытые строки — в «Настройка».",
@@ -3154,6 +3193,14 @@ export function displayCardHint(text: string): string {
   if (unreadable) return t("card.hintWorkbuddyUnreadable", { reason: unreadable[1] });
   const expired = text.match(/^(.+) session expired — sign in again from the auth center$/);
   if (expired) return t("card.hintSessionExpired", { name: expired[1] });
+  if (/^WorkBuddy web session expired — import a fresh cookie in Customize, or sign in from the auth center\.$/.test(text)) {
+    return t("card.hintWbWebExpired");
+  }
+  const webErr = text.match(/^WorkBuddy web session: (.+)$/);
+  if (webErr) return t("card.hintWbWebError", { reason: webErr[1] });
+  if (/^WorkBuddy web session returned no quota data$/.test(text)) {
+    return t("card.hintWbWebNoData");
+  }
   return text;
 }
 

@@ -59,6 +59,7 @@ pub mod volcengine;
 pub mod warp;
 pub mod windsurf;
 pub mod workbuddy_local;
+pub mod workbuddy_web;
 pub mod zai;
 pub mod zcode_weekend;
 pub mod zed;

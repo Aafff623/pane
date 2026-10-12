@@ -2112,6 +2112,34 @@ async fn skin_pack_remove(id: String) -> Result<(), String> {
     skin_packs::skin_pack_remove(id).await
 }
 
+/// WorkBuddy's web-session fallback (ticket 06): the Customize panel's
+/// explicit enable / import / clear surface. The cookie itself never
+/// travels back to the frontend — only its presence does.
+#[tauri::command]
+fn workbuddy_web_status() -> providers::workbuddy_web::WebStatus {
+    providers::workbuddy_web::status()
+}
+
+#[tauri::command]
+fn workbuddy_web_set_enabled(enabled: bool) -> Result<(), String> {
+    providers::workbuddy_web::set_enabled(enabled)
+}
+
+#[tauri::command]
+fn workbuddy_web_import_chrome() -> Result<u32, String> {
+    providers::workbuddy_web::import_from_chrome()
+}
+
+#[tauri::command]
+fn workbuddy_web_save_cookie(cookie: String) -> Result<(), String> {
+    providers::workbuddy_web::save_cookie(cookie)
+}
+
+#[tauri::command]
+fn workbuddy_web_clear() -> Result<(), String> {
+    providers::workbuddy_web::clear()
+}
+
 #[tauri::command]
 fn keyvault_v3_setup(
     code: String,
@@ -5280,6 +5308,11 @@ pub fn run() {
             skin_pack_download,
             skin_pack_list,
             skin_pack_remove,
+            workbuddy_web_status,
+            workbuddy_web_set_enabled,
+            workbuddy_web_import_chrome,
+            workbuddy_web_save_cookie,
+            workbuddy_web_clear,
             save_text_file,
             keyvault_v3_enable_recovery_code,
             keyvault_v3_disable_recovery_code,

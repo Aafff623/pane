@@ -894,6 +894,9 @@ let skinMarketOpen = false;
 let skinPreviewMode: "light" | "dark" | "both" = "both";
 /// Which sidebar entry the workshop is showing; null = the applied skin.
 let skinMarketSelected: SkinId | null = null;
+/// WorkBuddy's web-session status (ticket 06), loaded at boot and after
+/// every action; the cookie itself never leaves Rust.
+let wbWebStatus: { enabled: boolean; has_cookie: boolean; chrome_major: number | null; saved_at: string | null } | null = null;
 /// Pack id while its download runs; blocks a second parallel download.
 let skinDownloading: string | null = null;
 
@@ -7566,6 +7569,42 @@ function custDangerZone(id: string): string {
     </div>`;
 }
 
+/// The WorkBuddy web-session block (ticket 06): explicit enable, Chrome
+/// import or pasted cookie, and a status line. The cookie never travels
+/// back from Rust — only its presence and the detected Chrome major.
+function wbWebSectionHtml(): string {
+  const s = wbWebStatus;
+  const statusLine = !s
+    ? ""
+    : s.has_cookie
+      ? t("customize.wbWebStatus", {
+          major: s.chrome_major ?? "—",
+          when: (s.saved_at ?? "").slice(0, 16).replace("T", " "),
+        })
+      : t("customize.wbWebNone");
+  return `<div class="cust-config-sub">
+      <label class="wb-web-enable"><input type="checkbox" data-wb-web-toggle ${s?.enabled ? "checked" : ""}/> ${escapeHtml(t("customize.wbWebEnable"))}</label>
+      <p class="settings-note">${escapeHtml(t("customize.wbWebHelp"))}</p>
+      <div class="form-actions">
+        <button class="mini-btn" data-wb-web-import>${escapeHtml(t("customize.wbWebImport"))}</button>
+        <button class="mini-btn" data-wb-web-clear ${s?.has_cookie ? "" : "disabled"}>${escapeHtml(t("customize.wbWebClear"))}</button>
+      </div>
+      <div class="form-actions">
+        <input class="form-input" type="text" data-wb-web-cookie placeholder="${escapeHtml(t("customize.wbWebPastePh"))}" spellcheck="false" autocomplete="off" />
+        <button class="mini-btn" data-wb-web-save>${escapeHtml(t("customize.wbWebSave"))}</button>
+      </div>
+      ${statusLine ? `<p class="settings-note">${escapeHtml(statusLine)}</p>` : ""}
+    </div>`;
+}
+
+async function refreshWorkbuddyWebStatus(): Promise<void> {
+  try {
+    wbWebStatus = await invoke("workbuddy_web_status");
+  } catch {
+    wbWebStatus = null;
+  }
+}
+
 function renderCustConfig(id: string): string {
   const status = renderCustStatus(id);
   const fam = providerFamily(id);
@@ -7611,6 +7650,9 @@ function renderCustConfig(id: string): string {
       id === "relaybalance"
         ? `<p class="settings-note">${escapeHtml(t("customize.customRelayHint"))}</p>`
         : "";
+    // WorkBuddy's third route (ticket 06): an explicitly imported web
+    // session, off by default — nothing is requested until it is enabled.
+    const wbWeb = id === "workbuddy" ? wbWebSectionHtml() : "";
     return `<div class="cust-config cust-form">
         <div class="form-field">
           <span class="form-label">${escapeHtml(t("customize.connLabel"))}</span>
@@ -7624,6 +7666,7 @@ function renderCustConfig(id: string): string {
         ${custNoteField(id)}
         ${custApplyHtml(id)}
         ${groupPickerHtml(id)}
+        ${wbWeb}
       </div>`;
   }
   if (id === "stepfun-plan") {
@@ -9336,6 +9379,49 @@ async function handleCustomizeClick(target: HTMLElement): Promise<boolean> {
       skinDownloading = null;
       renderDrawerBody();
     }
+    return true;
+  }
+  // WorkBuddy's web-session fallback (ticket 06): enable / import / paste /
+  // clear. Every action refreshes the status block in place.
+  const wbToggle = target.closest<HTMLInputElement>("[data-wb-web-toggle]");
+  if (wbToggle) {
+    try {
+      await invoke("workbuddy_web_set_enabled", { enabled: wbToggle.checked });
+    } catch { /* status refresh below shows the truth */ }
+    await refreshWorkbuddyWebStatus();
+    renderDrawerBody();
+    return true;
+  }
+  if (target.closest<HTMLElement>("[data-wb-web-import]")) {
+    try {
+      const major = await invoke<number>("workbuddy_web_import_chrome");
+      document.querySelector("#status")!.textContent = t("customize.wbWebImported", { major });
+    } catch (error) {
+      document.querySelector("#status")!.textContent = String(error);
+    }
+    await refreshWorkbuddyWebStatus();
+    renderDrawerBody();
+    return true;
+  }
+  if (target.closest<HTMLElement>("[data-wb-web-save]")) {
+    const input = document.querySelector<HTMLInputElement>("[data-wb-web-cookie]");
+    try {
+      await invoke("workbuddy_web_save_cookie", { cookie: input?.value ?? "" });
+      if (input) input.value = "";
+      document.querySelector("#status")!.textContent = t("customize.wbWebSaved");
+    } catch (error) {
+      document.querySelector("#status")!.textContent = String(error);
+    }
+    await refreshWorkbuddyWebStatus();
+    renderDrawerBody();
+    return true;
+  }
+  if (target.closest<HTMLElement>("[data-wb-web-clear]")) {
+    try {
+      await invoke("workbuddy_web_clear");
+    } catch { /* nothing stored is the same outcome */ }
+    await refreshWorkbuddyWebStatus();
+    renderDrawerBody();
     return true;
   }
   // One/New API site manager (relocated from Settings): expand/edit/delete
@@ -14405,6 +14491,10 @@ window.addEventListener("DOMContentLoaded", () => {
     applySkin();
     if (skinMarketOpen) renderDrawerBody();
     void migrateSkinFromIndex();
+  });
+  // WorkBuddy's web-session block renders inside the Customize drawer.
+  void refreshWorkbuddyWebStatus().then(() => {
+    if (customizeOpen) renderDrawerBody();
   });
   setupFloatingSettingsTabs();
   // Party mode, the easy way: triple-click the logo. (The Konami code

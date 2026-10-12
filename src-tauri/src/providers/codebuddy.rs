@@ -28,25 +28,31 @@ const UA: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (
 /// the other routes stay the user's choice.
 pub async fn snapshot(f: &'static Family) -> Snapshot {
     if f.family_id == "workbuddy" {
-        match crate::providers::workbuddy_local::read() {
+        // Tier 1: the desktop app's own auth store, read straight off disk
+        // (`workbuddy_local`) — no ceremony, the route magpie takes.
+        let local_failure = match crate::providers::workbuddy_local::read() {
             crate::providers::workbuddy_local::LocalRead::Session(session) => {
                 return snapshot_from_desktop(f, *session).await;
             }
-            crate::providers::workbuddy_local::LocalRead::Encrypted => {
-                return Snapshot::no_credentials(
-                    f.family_id,
-                    f.display_name,
-                    "WorkBuddy's desktop sign-in is stored encrypted on this machine and Pane does not decrypt it. Sign in from the auth center instead.",
-                );
-            }
+            crate::providers::workbuddy_local::LocalRead::Encrypted => Some(
+                "WorkBuddy's desktop sign-in is stored encrypted on this machine and Pane does not decrypt it. Sign in from the auth center instead.".to_string(),
+            ),
             crate::providers::workbuddy_local::LocalRead::Unreadable(reason) => {
-                return Snapshot::error(
-                    f.family_id,
-                    f.display_name,
-                    format!("WorkBuddy desktop sign-in could not be read: {reason}"),
-                );
+                Some(format!("WorkBuddy desktop sign-in could not be read: {reason}"))
             }
-            crate::providers::workbuddy_local::LocalRead::Missing => {}
+            crate::providers::workbuddy_local::LocalRead::Missing => None,
+        };
+        // Tier 3: the explicitly-imported web session, when enabled. Off
+        // means not a single request leaves this machine.
+        if let Some(snap) =
+            crate::providers::workbuddy_web::snapshot(f.family_id, f.display_name).await
+        {
+            return snap;
+        }
+        // Tier 1 failed and no web session: the card states the specific
+        // reason and offers the tier-2 jump to the auth center.
+        if let Some(reason) = local_failure {
+            return Snapshot::no_credentials(f.family_id, f.display_name, &reason);
         }
     }
     let hint = format!("Sign in with {} from the auth center to see its quota.", f.display_name);
@@ -455,20 +461,20 @@ fn resource_items(body: &Value) -> Vec<&Value> {
 /// `credits` (spec D6): one meter from total/remaining, the frozen
 /// capacity as a Reserved row, the earliest future cycle end as the
 /// reset, and the package name as the plan label.
-struct CreditsFace {
-    total: f64,
-    remain: f64,
-    frozen: f64,
+pub(crate) struct CreditsFace {
+    pub(crate) total: f64,
+    pub(crate) remain: f64,
+    pub(crate) frozen: f64,
     /// Nothing finite to meter against, and the vendor said unlimited —
     /// a family with any finite pack still meters (this stays false).
-    unlimited: bool,
-    reset_ms: Option<i64>,
-    plan: Option<String>,
+    pub(crate) unlimited: bool,
+    pub(crate) reset_ms: Option<i64>,
+    pub(crate) plan: Option<String>,
 }
 
 impl CreditsFace {
     /// Rollover above the grant reads as zero used, never negative.
-    fn used(&self) -> f64 {
+    pub(crate) fn used(&self) -> f64 {
         (self.total - self.remain).max(0.0)
     }
 }
@@ -569,7 +575,7 @@ fn credits_face(body: &Value, now_ms: i64) -> Option<CreditsFace> {
     credits_face_from_items(&resource_items(body), now_ms)
 }
 
-fn credits_face_from_items(packs: &[&Value], now_ms: i64) -> Option<CreditsFace> {
+pub(crate) fn credits_face_from_items(packs: &[&Value], now_ms: i64) -> Option<CreditsFace> {
     let mut face = CreditsFace {
         total: 0.0,
         remain: 0.0,

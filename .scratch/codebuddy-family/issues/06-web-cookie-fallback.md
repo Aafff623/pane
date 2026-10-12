@@ -6,7 +6,7 @@
 
 **Blocked by:** 04
 
-**Status:** ready-for-agent
+**Status:** done（2026-10-12 落地于 main）
 
 - [ ] 设置里可显式启用并导入会话（Chrome 导入 / 手贴 Cookie 两种方式）
 - [ ] 启用后卡片显示 credits；**未启用时该通道完全不发请求**
