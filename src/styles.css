@@ -1838,6 +1838,14 @@ select:focus-visible {
   flex-direction: column;
   gap: 20px;
   scrollbar-width: none;
+  /* The list is rebuilt wholesale on every state change, and the freshly
+     inserted cards settle their text metrics a frame later (heights dip a few
+     px and come back). Chromium's scroll anchoring reacts to that transient
+     by scrolling the list down a few px, and because the dip reverts the
+     shift stays — a few px per click, accumulating into a visible upward
+     creep of the whole list. The app keeps its own scroll offset
+     (config.mainScrollTop), so anchoring is not wanted here. */
+  overflow-anchor: none;
 }
 
 #providers::-webkit-scrollbar {
@@ -6106,13 +6114,17 @@ body.no-glass .group-menu {
 }
 
 .quota-overview .overview-cat-tabs .tab {
-  flex: none;
+  /* Content-driven width: a chip is as wide as its label and only shrinks
+     (with the ellipsis) once the row genuinely runs out of room. The old
+     fixed `max-width: 72px` ellipsised labels like "Coding Agent" while the
+     bar still had space to spare. */
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: none;
   white-space: nowrap;
   padding: 2px 6px;
   font-size: 10px;
   border-radius: 6px;
-  /* Long category names truncate instead of eating the row. */
-  max-width: 72px;
   overflow: hidden;
   text-overflow: ellipsis;
 }
