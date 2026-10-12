@@ -34,6 +34,45 @@ export interface PackSkin {
 let packSkins: PackSkin[] = [];
 let packsLoaded = false;
 
+/// The official distribution index (static file beside the site deploy —
+/// same origin, same pipeline, no extra infrastructure). Last good copy
+/// survives in localStorage so the workshop works offline.
+export const SKINS_INDEX_URL = "https://pane.threetwoa.live/skins/index.json";
+export interface RemotePackEntry {
+  id: string;
+  name: string;
+  version: string;
+  size: number;
+  sha256: string;
+  url: string;
+}
+let remoteIndex: RemotePackEntry[] = [];
+
+export function remotePackIndex(): RemotePackEntry[] {
+  return remoteIndex;
+}
+
+export async function refreshSkinIndex(): Promise<void> {
+  try {
+    const res = await fetch(SKINS_INDEX_URL, { cache: "no-store" });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const doc = (await res.json()) as { packs?: RemotePackEntry[] };
+    remoteIndex = (doc.packs ?? []).filter(
+      (p) => typeof p.id === "string" && typeof p.url === "string" && typeof p.sha256 === "string",
+    );
+    try {
+      localStorage.setItem("pane.skins.index", JSON.stringify(remoteIndex));
+    } catch { /* private mode — memory copy is enough for the session. */ }
+  } catch {
+    if (!remoteIndex.length) {
+      try {
+        const cached = localStorage.getItem("pane.skins.index");
+        if (cached) remoteIndex = JSON.parse(cached) as RemotePackEntry[];
+      } catch { /* nothing cached — workshop just shows built-ins. */ }
+    }
+  }
+}
+
 export function packSkinList(): PackSkin[] {
   return packSkins;
 }

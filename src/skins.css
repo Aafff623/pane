@@ -108,6 +108,8 @@
 .skin-side-item:hover { background:var(--muted); }
 .skin-side-item.active { border-color:var(--foreground); background:var(--muted); }
 .skin-side-thumb { width:96px; height:64px; flex:none; border-radius:8px; overflow:hidden; position:relative; background:var(--muted); box-shadow:0 0 0 1px var(--border); }
+.skin-side-thumb-empty { display:grid; place-items:center; color:var(--muted-foreground); }
+.skin-market-preview-note { margin:18px 0; padding:22px; border:1px dashed var(--border); border-radius:16px; color:var(--muted-foreground); font-size:13px; text-align:center; }
 .skin-side-thumb .skin-sample { position:absolute; top:0; left:0; width:400px; zoom:0.24; padding:10px; animation:none; border-radius:0; }
 .skin-side-meta { display:grid; gap:3px; min-width:0; }
 .skin-side-meta strong { font-size:13px; font-weight:600; }

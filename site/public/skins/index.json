@@ -1,0 +1,21 @@
+{
+  "generatedAt": "2026-10-12T11:08:14.838Z",
+  "packs": [
+    {
+      "id": "signal",
+      "name": "Cloud Post Office",
+      "version": "1.0.0",
+      "size": 10261253,
+      "sha256": "eb83f2802f605b23fc42561c70537ea99b1922084bb78b15bd5cef22d79c98d2",
+      "url": "https://pane.threetwoa.live/skins/pane-skin-signal-1.0.0.zip"
+    },
+    {
+      "id": "ink",
+      "name": "山水笺 Ink Wash",
+      "version": "1.0.0",
+      "size": 4100340,
+      "sha256": "34621d00e035e2b54b65ce129414cc57422431b05591690986de55567136470b",
+      "url": "https://pane.threetwoa.live/skins/pane-skin-ink-1.0.0.zip"
+    }
+  ]
+}
