@@ -123,6 +123,38 @@ pub fn mask_token(token: &str) -> String {
     format!("…{tail}")
 }
 
+/// account_list rows for one login-backed family — the same {id, label,
+/// email, maskedKey} shape the API-key lane emits, so the frontend treats
+/// both stores identically. Regression guard for the 2026-10-12 bug:
+/// account_list only read the API-key store, so a scanned WorkBuddy login
+/// was stored yet invisible to the frontend's account cache (which then
+/// purged the account card on every refresh).
+pub fn account_rows(family: &str, logins: &[LoginAccount]) -> Vec<Value> {
+    let display_name = crate::provider_catalog::provider_definition(family)
+        .map(|d| d.display_name)
+        .unwrap_or(family);
+    logins
+        .iter()
+        .map(|login| {
+            serde_json::json!({
+                "id": card_id_for_account(family, login),
+                "label": if login.label.trim().is_empty() {
+                    if login.email.trim().is_empty() {
+                        format!("{display_name} 账号")
+                    } else {
+                        login.email.clone()
+                    }
+                } else {
+                    login.label.clone()
+                },
+                "email": login.email,
+                "maskedKey": mask_token(&login.access_token),
+                "baseUrl": Value::Null,
+            })
+        })
+        .collect()
+}
+
 /// Upsert by account id; an incoming empty label keeps the stored one so a
 /// re-login never wipes a user-set name.
 pub fn upsert(accounts: &mut Vec<LoginAccount>, incoming: LoginAccount) {
@@ -347,5 +379,50 @@ mod tests {
     fn mask_keeps_only_a_tail() {
         assert_eq!(mask_token("gho_abcdefgh"), "…efgh");
         assert_eq!(mask_token("ab"), "…");
+    }
+
+    #[test]
+    fn account_rows_serve_every_login_family_from_the_login_store() {
+        // The 2026-10-12 bug: account_list had no login-store branch, so a
+        // scanned WorkBuddy login never reached the frontend (its empty
+        // account cache purged the account card on every refresh).
+        for family in LOGIN_FAMILIES {
+            let rows = account_rows(family, &[account("42", "Named")]);
+            assert_eq!(rows.len(), 1, "{family}");
+            assert_eq!(rows[0]["id"], serde_json::json!(card_id_for_account(family, &account("42", "Named"))));
+            assert_eq!(rows[0]["label"], "Named");
+            assert_eq!(rows[0]["maskedKey"], "…alue"); // gho_token_value
+            assert!(rows[0]["baseUrl"].is_null(), "{family}");
+        }
+        // Empty label falls back to the email, then the display name —
+        // never a blank tab.
+        let by_email = account_rows("workbuddy", &[account("7", "")]);
+        assert_eq!(by_email[0]["label"], "user@example.com");
+        let mut bare = account("7", "");
+        bare.email = String::new();
+        let by_name = account_rows("workbuddy", &[bare]);
+        assert_eq!(by_name[0]["label"], "WorkBuddy 账号");
+    }
+
+    #[test]
+    fn catalog_login_only_families_are_all_login_families() {
+        // Drift guard: a catalog family that is login-only (no API key,
+        // extra accounts) but missing from LOGIN_FAMILIES would fall
+        // through account_list to the API-key store and list nothing.
+        let own_stores = ["cursor", "antigravity", "codex", "onenewapi"]; // their own stores/lists
+        let catalog: Vec<&str> = crate::provider_catalog::provider_definitions()
+            .iter()
+            .filter(|d| !d.supports_api_key && d.supports_extra_accounts)
+            .map(|d| d.family_id)
+            .collect();
+        let missing: Vec<&str> = catalog
+            .iter()
+            .copied()
+            .filter(|f| !own_stores.contains(f) && !LOGIN_FAMILIES.contains(f))
+            .collect();
+        assert!(
+            missing.is_empty(),
+            "login-only families missing from LOGIN_FAMILIES: {missing:?}"
+        );
     }
 }

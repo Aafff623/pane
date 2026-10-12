@@ -4224,6 +4224,13 @@ fn account_list(provider: String) -> Result<Vec<Value>, String> {
         }
         return Ok(list);
     }
+    // Login-backed families (auth center) keep their accounts in the login
+    // store; the generic branch below reads the API-key store, which these
+    // families never use (supports_api_key: false).
+    if login_accounts::takes_login_accounts(&provider) {
+        let logins = login_accounts::load_with_imported_single_login(&provider);
+        return Ok(login_accounts::account_rows(&provider, &logins));
+    }
     if !accounts::provider_takes_accounts(&provider) {
         return Err(format!("unknown multi-account provider: {provider}"));
     }

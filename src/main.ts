@@ -2558,7 +2558,10 @@ function metricPool(family: string, label: string): string | undefined {
 /// so a red/orange provider state must never change its visual meaning.
 function overviewAccountCount(family: string): number {
   const snapshotCount = lastSnapshots.filter(
-    (snapshot) => providerFamily(snapshot.id) === family && !isCardDisabled(snapshot.id),
+    (snapshot) =>
+      providerFamily(snapshot.id) === family &&
+      !isCardDisabled(snapshot.id) &&
+      !isBareHintCard(snapshot),
   ).length;
   const configuredCount = accountsCache.get(family)?.length ?? 0;
   return Math.max(snapshotCount, configuredCount);
