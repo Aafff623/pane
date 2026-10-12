@@ -6,7 +6,7 @@
 
 **Blocked by:** None — can start immediately.
 
-**Status:** ready-for-agent
+**Status:** done（落地 main，parse-tests 覆盖）
 
 - [ ] 租户描述表存在，`codebuddy` 的全部调用点都从表取值，无残留硬编码主机名 / platform
 - [ ] 现有行为零变化：登录、卡面、额度读数与改动前一致

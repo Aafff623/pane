@@ -1,7 +1,7 @@
 # 02 — 皮肤持久态与主题专属启动动画
 
 Type: task
-Status: ready-for-agent
+Status: done（落地 main 7519fbd：持久化+主题化启动动画）
 Blocked by: None
 
 ## What to build

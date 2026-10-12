@@ -1,7 +1,7 @@
 # 06 — 官网 demo 与本地 1:1 同步
 
 Type: task
-Status: ready-for-agent
+Status: done（落地 main 61666d3 demo 重建）
 Blocked by: 01, 02, 05
 
 ## What to build

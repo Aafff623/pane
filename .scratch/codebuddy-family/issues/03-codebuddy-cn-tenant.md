@@ -8,7 +8,7 @@
 
 **Blocked by:** 02
 
-**Status:** ready-for-agent
+**Status:** done（落地 main；实机验收待用户）
 
 - [ ] 设置里能登录 CodeBuddy CN，登录后出现独立卡片
 - [ ] 卡面按 02 口径显示额度；标题能与 CodeBuddy（国际站）区分

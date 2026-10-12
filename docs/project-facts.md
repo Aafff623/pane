@@ -148,12 +148,15 @@ Last reconciled: 2026-10-11 (Pane 0.7.0).
 
 ## Search/MCP quota system (2026-10-03, searchquota + keyvault unification)
 
-- **Key resolution**: the vault (`keyvault.json`) is the PRIMARY key source
-  for bocha/tavily/firecrawl/brave — entries carry the user label shown on
-  per-key rows; legacy sources (env, tavily-keys.json, ZCode MCP config)
-  stay as deduped fallbacks. `keyvault_add/remove` calls
-  `searchquota::invalidate_service` so the next tick refetches with the new
-  key set (no 45-min cache stall).
+- **Key resolution** (superseded 2026-10-11 by the search-keys cut, commit
+  961c50e): bocha/tavily/firecrawl/brave keys come ONLY from the
+  Pane-managed plaintext `search-keys.json` (`search_keys::for_service`) —
+  never from environment variables, `tavily-keys.json`, or a third-party
+  MCP client config, and never gated behind a vault unlock
+  (`keyvault::keys_for_service` routes search services away from the vault
+  entirely). What the user adds in Settings is exactly what Pane queries.
+  `keyvault_add/remove` still calls `searchquota::invalidate_service` so
+  the next tick refetches with the new key set (no 45-min cache stall).
 - **Multi-key = multi-pool**: every provider sums pools for the headline
   metric (the overview ring) and lists one row per key with the vault label
   (or a masked tail for legacy keys). Firecrawl's headline reset is the
@@ -234,7 +237,11 @@ Last reconciled: 2026-10-11 (Pane 0.7.0).
   API keys and every multi-account key now live in the OS credential store
   via `keyring` (`secretstore.rs`, service "Pane"; entry names
   `provider:<family>` / `account:<card-id>` / `archived:<card-id>` on the
-  stable `<family>@<fnv1a>` ids). JSON files keep only non-secret fields;
+  stable `<family>@<fnv1a>` ids). JSON files keep only non-secret fields —
+  with three deliberate plaintext exceptions: `search-keys.json` (search /
+  MCP keys by design, 2026-10-11 cut), `login-accounts/<family>.json`
+  (OAuth login tokens, auth-center families), and `workbuddy_web.json`
+  (the explicitly imported WorkBuddy web-session cookie);
   reads lazily migrate old plaintext — the vault write must succeed before
   the field leaves the file, and a failed vault write keeps the plaintext
   file as the fallback. `reveal_provider_key` / `reveal_account_key` demand

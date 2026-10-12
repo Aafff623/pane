@@ -4,7 +4,7 @@
 
 **Blocked by:** 04
 
-**Status:** ready-for-agent
+**Status:** done（落地 main cb7c676；企业账号实测待用户）
 
 - [ ] 企业账号：个人资源接口返回空 → 自动走企业用量接口，显示真实总量 / 已用 / 剩余
 - [ ] `limitNum == -1` → 显示「不限量」

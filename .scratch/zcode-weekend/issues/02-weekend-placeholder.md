@@ -1,7 +1,7 @@
 # 02 — ZCode Weekend 行常驻与占位话术
 
 Type: task
-Status: ready-for-agent
+Status: done（落地 main 3b6b142）
 Blocked by: None
 
 ## What to build

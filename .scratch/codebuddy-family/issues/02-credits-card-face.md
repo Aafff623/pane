@@ -12,7 +12,7 @@
 
 **Blocked by:** 01
 
-**Status:** ready-for-agent
+**Status:** done（落地 main，parse-tests 覆盖）
 
 - [ ] 卡面出现 credits 计量条 + 套餐名 + 重置时间；冻结额度 > 0 时出现 Reserved 行
 - [ ] 总量为 0 → 退化为 Left / Total 文本行

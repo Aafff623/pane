@@ -98,6 +98,8 @@
 **决策：不读、不解密桌面客户端会话。** 理由：需要**执行厂商二进制**、密钥非 DPAPI/os_crypt 而是随客户端版本变化，属于脆弱且高风险的依赖；Pane 走自管登录（D2）已能拿到同类 token。CodexBar 亦明确选择不读。
 
 > **2026-10-11 用户确认**：token 走 **Pane 自管登录**；不引入厂商私有信封解密。本决策已定，无需再评估。
+>
+> **2026-10-12 修订（用户拍板，见 issues/06 评论）**：WorkBuddy 首选改为**直读桌面客户端的明文字段**（`workbuddy_local.rs`，只读、拒信封不解密）；信封解密仍然不做。原 D3 的「不读」仅指不解密信封的部分继续成立；「Pane 自管登录」降为第二档。
 
 ### D4 — 兜底通道：网页会话 cookie（显式启用）
 
@@ -125,7 +127,7 @@
 
 按 CodexBar 已发布的展示口径：
 
-- **Credits 计量条**：总量 / 剩余（`CycleTotalCapacity` / `CycleRemainCapacity`），副行 `450 / 500 credits left`；已用 = 总量 − 剩余（**结转高于发放时读作 0%，不出现负百分比**）
+- **Credits 计量条**：总量 / 剩余（`CycleTotalCapacity` / `CycleRemainCapacity`）；已用 = 总量 − 剩余（**结转高于发放时读作 0%，不出现负百分比**）。副行实际文案为 `450 of 500 credits used`（非最初写的 `450 / 500 credits left`）——这是 D7 台账钩子的硬要求（detail 以 `credits used` 结尾），有意为之，两处口径以此为准。
 - **套餐名**：`SubscriptionPackageName`（免费档为「体验版」）
 - **重置时间**：`CycleEndTime` **无时区，按中国标准时间 UTC+8 解释**，取最早的未来周期
 - **Reserved 行**：`CycleFrozenCapacity` 大于 0 时显示

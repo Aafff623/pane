@@ -183,6 +183,16 @@ Ground rules that apply to every provider:
   counting on first use, so it shows as "not started". Older
   subscriptions report a single token window and show just the Session
   row.
+- **Weekend row (auxiliary):** machines with a local ZCode desktop session
+  get one extra row — "ZCode Weekend Build" grant usage. **Reads:**
+  `~/.zcode/v2/credentials.json` (the ZCode CLI's AES-256-GCM-encrypted
+  session JWT, decrypted locally; the first entry that decrypts to a JWT
+  wins). **Calls:** `zcode.z.ai/api/v1/zcode-plan/billing/balance`, which
+  requires an `X-Device-Mid` header but only checks it exists — Pane keeps
+  its own UUID beside config.json. A live grant renders the usage bar; a
+  session without one renders a "Weekend not started" placeholder; no
+  local session renders no row. A failed request holds the last verdict so
+  the row never flickers between refreshes.
 
 ## Antigravity
 
@@ -506,10 +516,11 @@ one `/v2/plugin` billing gateway). They differ only in **host** and the
 | CodeBuddy CN | `https://www.codebuddy.cn` | `ide` |
 | WorkBuddy | `https://copilot.tencent.com` | `workbuddy` |
 
-- **Reads:** nothing of the vendor's own desktop app — Pane manages this
-  sign-in itself and stores the session in its own
-  `login-accounts/<family>.json`. Each tenant becomes its own card
-  (`family@<hash>`), so disabling one never disables another.
+- **Reads:** the sign-in Pane manages itself in
+  `login-accounts/<family>.json` (QR scan via the auth center). Each tenant
+  becomes its own card (`family@<hash>`), so disabling one never disables
+  another. WorkBuddy additionally reads two opt-in surfaces of the vendor's
+  own apps — see the two WorkBuddy-only routes below.
 - **Calls:** `POST {host}/v2/plugin/auth/state?platform={platform}` to
   start the QR handshake, `GET {host}/v2/plugin/auth/token?state=…` to poll
   it, and `POST {host}/v2/plugin/auth/token/refresh` (refresh token in the
@@ -528,6 +539,34 @@ one `/v2/plugin` billing gateway). They differ only in **host** and the
   personal endpoint, so their usage is read from
   `POST /v2/billing/meter/get-enterprise-user-usage` — the same call the
   web dashboard's own `/profile/usage` page makes.
+
+### WorkBuddy desktop sign-in (tier 1 — automatic)
+
+- **Reads:** `%LOCALAPPDATA%\CodeBuddyExtension\Data\Public\auth\workbuddy-desktop.info`
+  — the WorkBuddy desktop app's shared sign-in file, read-only, only while
+  WorkBuddy is not running. Fields the app re-encrypted into
+  `{ "$wbEncrypted": 1, "envelope": … }` envelopes are refused, never
+  decrypted — an enveloped sign-in simply shows the sign-in hint instead.
+- **Calls:** the same `/v2/plugin` billing gateway as the scanned route,
+  with the desktop token.
+- **Shows:** the same credits face as the scanned route (one shared row
+  builder, `codebuddy::credits_face_metrics`).
+
+### WorkBuddy web-session cookie (tier 3 — explicit opt-in)
+
+- **Reads:** only after the user enables the channel and imports a cookie:
+  Chrome's `Default/Network/Cookies` SQLite (copied to a temp snapshot that
+  a `Drop` guard deletes on every exit path) + `Local State` for the
+  DPAPI-wrapped `os_crypt` key — the shared `providers/chromium.rs` peel,
+  also used by Doubao. Or a cookie pasted by hand. The channel is off by
+  default and then makes **zero** requests. Store:
+  `workbuddy_web.json` (cookie + detected Chrome major, never written
+  without an import action).
+- **Calls:** `POST https://www.workbuddy.cn/billing/meter/get-user-resource-summary`
+  (root path, not under `/v2/plugin`) with a UA built from the local
+  Chrome's major version; a rejection retries once with the previous major
+  before reporting the session expired.
+- **Shows:** the same credits face as the token route (spec D6 basis).
 
 ---
 

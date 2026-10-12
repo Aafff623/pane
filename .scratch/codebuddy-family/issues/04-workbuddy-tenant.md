@@ -6,7 +6,7 @@
 
 **Blocked by:** 03
 
-**Status:** ready-for-agent
+**Status:** done（落地 main；用户已实测扫码落库）
 
 - [ ] 设置里能登录 WorkBuddy，登录后出现独立卡片
 - [ ] 卡面显示 credits 计量条 + 套餐名 + 重置时间
