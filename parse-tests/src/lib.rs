@@ -37,6 +37,9 @@ pub mod httpapi;
 #[path = "../../src-tauri/src/agent_skill.rs"]
 pub mod agent_skill;
 
+#[path = "../../src-tauri/src/skin_packs.rs"]
+pub mod skin_packs;
+
 #[path = "../../src-tauri/src/usage_history.rs"]
 pub mod usage_history;
 

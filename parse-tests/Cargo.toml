@@ -36,6 +36,7 @@ tokio = { version = "1", features = ["macros", "process", "rt-multi-thread", "sy
 chrono = "0.4"
 base64 = "0.22"
 sha2 = "0.10"
+zip = { version = "2", default-features = false, features = ["deflate"] }
 hmac = "0.12"
 # Trae's device-bound token exchange (mirrors src-tauri/Cargo.toml).
 p256 = { version = "0.13", features = ["pkcs8"] }

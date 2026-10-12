@@ -11,6 +11,7 @@ mod fonts;
 mod keyvault;
 mod keyvault_v3;
 mod search_keys;
+mod skin_packs;
 mod agent_skill;
 mod alerts;
 mod httpapi;
@@ -2057,6 +2058,28 @@ fn agent_skill_plan() -> Result<Vec<String>, String> {
 #[tauri::command]
 fn agent_skill_install() -> Result<Vec<String>, String> {
     agent_skill::install()
+}
+
+/// Skin resource packs (workshop): download/verify/install a pack zip,
+/// list installed packs with their self-contained CSS, or remove one.
+#[tauri::command]
+async fn skin_pack_install(zip_path: String) -> Result<skin_packs::SkinPackManifest, String> {
+    skin_packs::skin_pack_install(zip_path).await
+}
+
+#[tauri::command]
+async fn skin_pack_download(url: String, sha256: String) -> Result<skin_packs::SkinPackManifest, String> {
+    skin_packs::skin_pack_download(url, sha256).await
+}
+
+#[tauri::command]
+async fn skin_pack_list() -> Result<Vec<skin_packs::InstalledPack>, String> {
+    skin_packs::skin_pack_list().await
+}
+
+#[tauri::command]
+async fn skin_pack_remove(id: String) -> Result<(), String> {
+    skin_packs::skin_pack_remove(id).await
 }
 
 #[tauri::command]
@@ -5214,6 +5237,10 @@ pub fn run() {
             keyvault_v3_setup,
             agent_skill_plan,
             agent_skill_install,
+            skin_pack_install,
+            skin_pack_download,
+            skin_pack_list,
+            skin_pack_remove,
             save_text_file,
             keyvault_v3_enable_recovery_code,
             keyvault_v3_disable_recovery_code,

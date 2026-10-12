@@ -1,4 +1,5 @@
 /** Built-in skins own appearance only. Provider data and user fonts stay intact. */
+import { invoke } from "@tauri-apps/api/core";
 import day from "./assets/skins/cloud-post/day.png";
 import night from "./assets/skins/cloud-post/night.png";
 import icons from "./assets/skins/cloud-post/icons.png";
@@ -10,22 +11,77 @@ import grain from "./assets/skins/ink-wash/paper-grain.svg";
 import brush from "./assets/skins/ink-wash/brush-mask.svg";
 import chineseBrush from "./assets/skins/ink-wash/fonts/MaShanZheng-ui.ttf?url";
 import latinBrush from "./assets/skins/ink-wash/fonts/PermanentMarker-Regular.ttf?url";
-export type SkinId = "signal" | "ink";
+/// A skin id: the two built-ins, or any installed resource-pack id.
+export type SkinId = "signal" | "ink" | (string & {});
 export const SKIN_STORAGE_KEY = "pane.skin.id";
 export const SKINS = [
   { id: "signal" as const, nameKey: "skin.signal" as const, taglineKey: "skin.signalTagline" as const },
   { id: "ink" as const, nameKey: "skin.ink" as const, taglineKey: "skin.inkTagline" as const },
 ];
+
+/// Installed resource-pack skins (workshop). Built-ins ship with the app;
+/// packs arrive through the workshop and hot-load without a restart. The
+/// entry CSS arrives fully self-contained from Rust (assets inlined as
+/// data URLs), so injecting one <style> is the whole install — and the
+/// share-PNG pipeline needs no pack awareness.
+export interface PackSkin {
+  id: string;
+  name: string;
+  version: string;
+  entryCss: string;
+}
+
+let packSkins: PackSkin[] = [];
+let packsLoaded = false;
+
+export function packSkinList(): PackSkin[] {
+  return packSkins;
+}
+
+export function isPackSkin(id: string | null | undefined): boolean {
+  return !!id && packSkins.some((p) => p.id === id);
+}
+
+function injectPackCss(p: PackSkin): void {
+  if (document.querySelector(`style[data-skin-pack="${p.id}"]`)) return;
+  const style = document.createElement("style");
+  style.dataset.skinPack = p.id;
+  style.textContent = p.entryCss;
+  document.head.appendChild(style);
+}
+
+/// Loads the installed pack registry and injects each pack's stylesheet.
+/// Safe to call twice; safe when the command surface is missing (browser
+/// demo) — built-ins only, then.
+export async function refreshInstalledPacks(): Promise<void> {
+  let packs: { id: string; name: string; version: string; entry_css: string }[];
+  try {
+    packs = await invoke("skin_pack_list");
+  } catch {
+    return;
+  }
+  for (const old of packSkins) {
+    document.querySelector(`style[data-skin-pack="${old.id}"]`)?.remove();
+  }
+  packSkins = packs.map((p) => ({ id: p.id, name: p.name, version: p.version, entryCss: p.entry_css }));
+  packsLoaded = true;
+  for (const p of packSkins) injectPackCss(p);
+}
+
 export function normalizeSkin(id: unknown): SkinId | null {
-  return id === "signal" || id === "ink" ? id : null;
+  if (id === "signal" || id === "ink") return id;
+  return typeof id === "string" && packSkins.some((p) => p.id === id) ? id : null;
 }
 
 export function readSkin(storage: Pick<Storage, "getItem" | "removeItem">): SkinId | null {
   try {
     const id = storage.getItem(SKIN_STORAGE_KEY);
-    if (normalizeSkin(id)) return normalizeSkin(id);
-    // Retired experimental skins must never reappear after an upgrade.
-    if (id) storage.removeItem(SKIN_STORAGE_KEY);
+    const known = normalizeSkin(id);
+    if (known) return known;
+    // Retired built-ins must never reappear after an upgrade. An id that
+    // could be a pack keeps its early-paint cache until the pack registry
+    // settles — config.json stays authoritative either way.
+    if (id && packsLoaded && !isPackSkin(id)) storage.removeItem(SKIN_STORAGE_KEY);
   } catch { /* Storage unavailable: keep the native appearance. */ }
   return null;
 }

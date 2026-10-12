@@ -57,7 +57,7 @@ if (IS_PANEL_FORM) document.body.classList.add("panel-form");
 import { gsap } from "gsap";
 import paneLogo from "./assets/pane-logo.png?inline";
 import paneIcon from "./assets/pane-icon.png?inline";
-import { SKINS, SKIN_STORAGE_KEY, readSkin, normalizeSkin, embedSkinImages, type SkinId } from "./skins";
+import { SKINS, SKIN_STORAGE_KEY, readSkin, normalizeSkin, embedSkinImages, packSkinList, refreshInstalledPacks, type SkinId } from "./skins";
 import { playThemeStartup } from "./themeStartup";
 import { decorateInkSkin, clearInkSkin } from "./inkEffects";
 import "./inkSkin.css";
@@ -849,7 +849,8 @@ let skinMarketSelected: SkinId | null = null;
 function activeSkin() {
   try {
     const id = config.skinId === undefined ? readSkin(window.localStorage) : normalizeSkin(config.skinId);
-    return SKINS.find((skin) => skin.id === id);
+    if (!id) return undefined;
+    return SKINS.find((skin) => skin.id === id) ?? packSkinList().find((p) => p.id === id);
   } catch { return undefined; }
 }
 
@@ -7759,23 +7760,25 @@ function renderSkinSample(mode: "light" | "dark", skinId: SkinId = "signal", com
 
 function renderSkinMarket(): string {
   const selected = activeSkin()?.id;
-  const current = skinMarketSelected ?? selected ?? SKINS[0].id;
-  const skin = SKINS.find((s) => s.id === current) ?? SKINS[0];
+  const entries = [...SKINS, ...packSkinList()];
+  const current = skinMarketSelected ?? selected ?? entries[0].id;
+  const skin = entries.find((s) => s.id === current) ?? entries[0];
+  const skinTagline = "taglineKey" in skin ? t(skin.taglineKey) : `v${skin.version}`;
   const previewMode = skinPreviewMode === "both" && window.matchMedia("(max-width:640px)").matches ? "light" : skinPreviewMode;
   return `<section class="skin-market" aria-label="${t("skin.market")}">
     <div class="skin-market-head"><h2>${t("skin.market")}</h2><button class="mini-btn" data-skin-close>${t("skin.back")}</button></div>
     <div class="skin-market-body">
       <aside class="skin-market-side">
-        ${SKINS.map((s) => `<button class="skin-side-item${s.id === skin.id ? " active" : ""}" type="button" data-skin-pick="${s.id}">
+        ${entries.map((s) => `<button class="skin-side-item${s.id === skin.id ? " active" : ""}" type="button" data-skin-pick="${s.id}">
             <span class="skin-side-thumb">${renderSkinSample("light", s.id, true)}</span>
-            <span class="skin-side-meta"><strong>${t(s.nameKey)}</strong><span class="skin-side-state">${selected === s.id ? t("skin.applied") : t("skin.installed")}</span></span>
+            <span class="skin-side-meta"><strong>${"nameKey" in s ? t(s.nameKey) : s.name}</strong><span class="skin-side-state">${selected === s.id ? t("skin.applied") : t("skin.installed")}</span></span>
           </button>`).join("")}
       </aside>
       <div class="skin-market-main">
-        <p class="skin-market-copy">${t(skin.taglineKey)}</p>
+        <p class="skin-market-copy">${skinTagline}</p>
         <div class="skin-preview-toolbar" role="group" aria-label="${t("skin.previewMode")}">${(["light", "dark", "both"] as const).map((mode) => `<button class="skin-mode-btn" type="button" data-skin-mode="${mode}" aria-pressed="${previewMode === mode}">${t(mode === "light" ? "skin.light" : mode === "dark" ? "skin.dark" : "skin.both")}</button>`).join("")}</div>
         <div class="skin-preview-pair" data-preview-mode="${previewMode}">${renderSkinSample("light", skin.id)}${renderSkinSample("dark", skin.id)}</div>
-        <div class="skin-detail-actions"><button class="mini-btn primary" data-skin-select="${skin.id}" ${selected === skin.id ? "disabled" : ""}>${t(selected === skin.id ? "skin.applied" : "skin.use")}</button><button class="mini-btn" data-skin-reset>${t("skin.native")}</button><span>${t("skin.followsMode")}</span></div>
+        <div class="skin-detail-actions"><button class="mini-btn primary" data-skin-select="${skin.id}" ${selected === skin.id ? "disabled" : ""}>${t(selected === skin.id ? "skin.applied" : "skin.use")}</button><button class="mini-btn" data-skin-reset>${t("skin.native")}</button>${"version" in skin ? `<button class="mini-btn" data-skin-remove="${skin.id}">${t("skin.remove")}</button>` : ""}<span>${t("skin.followsMode")}</span></div>
       </div>
     </div>
   </section>`;
@@ -9155,6 +9158,21 @@ async function handleCustomizeClick(target: HTMLElement): Promise<boolean> {
   const skinReset = target.closest<HTMLElement>("[data-skin-reset]");
   if (skinReset) {
     selectSkin(null);
+    return true;
+  }
+  const skinRemove = target.closest<HTMLElement>("[data-skin-remove]")?.dataset.skinRemove;
+  if (skinRemove) {
+    // A pack is re-downloadable, so removal stays one click. Removing the
+    // applied pack falls back to the native appearance first.
+    if (activeSkin()?.id === skinRemove) await selectSkin(null);
+    try {
+      await invoke("skin_pack_remove", { id: skinRemove });
+      await refreshInstalledPacks();
+      if (skinMarketSelected === skinRemove) skinMarketSelected = null;
+      renderDrawerBody();
+    } catch {
+      document.querySelector("#status")!.textContent = t("skin.removeFailed");
+    }
     return true;
   }
   // One/New API site manager (relocated from Settings): expand/edit/delete
@@ -14052,7 +14070,9 @@ function playSplash(): void {
   if (skin) {
     hideSplash();
     stopThemeStartup = playThemeStartup(skin.id, reduceMotion(), {
-      name: t(skin.nameKey), tagline: t(skin.taglineKey), skip: t("splash.skipHint"),
+      name: "nameKey" in skin ? t(skin.nameKey) : skin.name,
+      tagline: "taglineKey" in skin ? t(skin.taglineKey) : `v${skin.version}`,
+      skip: t("splash.skipHint"),
     });
     return;
   }
@@ -14168,6 +14188,13 @@ window.addEventListener("DOMContentLoaded", () => {
   document.querySelector<HTMLElement>("#skin-btn")!.innerHTML = uiIcon("palette", t("skin.market"));
   activeSkin();
   applySkin();
+  // Installed resource-pack skins arrive async (Rust reads + inlines their
+  // CSS); re-apply once the registry settles so a saved pack skin lights up
+  // after first paint, and the workshop lists them.
+  void refreshInstalledPacks().then(() => {
+    applySkin();
+    if (skinMarketOpen) renderDrawerBody();
+  });
   setupFloatingSettingsTabs();
   // Party mode, the easy way: triple-click the logo. (The Konami code
   // still works, for the culture.)
