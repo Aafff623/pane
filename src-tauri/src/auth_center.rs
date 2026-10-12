@@ -286,4 +286,17 @@ mod tests {
         assert_eq!(ag[0].captured_at, None);
         let _ = std::fs::remove_dir_all(&base);
     }
+
+    #[test]
+    fn every_login_family_is_an_auth_center_family() {
+        // Drift guard (2026-10-12 bug class): a family added to the login
+        // store but missing from AUTH_FAMILIES would store accounts the
+        // auth center never lists.
+        for family in crate::login_accounts::LOGIN_FAMILIES {
+            assert!(
+                AUTH_FAMILIES.contains(&family),
+                "{family} is a login family but not an auth-center family"
+            );
+        }
+    }
 }

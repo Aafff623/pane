@@ -12,15 +12,17 @@ pub enum QueryKind {
     LocalOnly,
 }
 
-/// Dashboard grouping. Two built-in groups only: coding agents (the
-/// historical default) and quota-metered MCP/search services. Everything that
-/// is not a search service is Coding — there is no third "productivity"
-/// group, so a fresh install never shows a group it has no providers for.
+/// Dashboard grouping. Two built-in groups: coding agents (the historical
+/// default) and quota-metered MCP/search services. A catalog category may
+/// fall outside the built-ins (闪电说's `Productivity`) — the frontend
+/// renders those sections only when a visible provider carries them, so a
+/// fresh install still shows just the two built-ins.
 /// Keep in sync with `src/providerCatalog.ts`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ProviderCategory {
     Coding,
     Mcp,
+    Productivity,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -306,7 +308,7 @@ const PROVIDER_DEFINITIONS: &[ProviderDefinition] = &[
         supports_api_key: false,
         supports_extra_accounts: false,
         icon_key: "shandianshuo",
-        category: ProviderCategory::Coding,
+        category: ProviderCategory::Productivity,
     },
     ProviderDefinition {
         family_id: "siliconflow",
@@ -716,7 +718,7 @@ pub fn query_kind_for_instance(id: &str) -> Option<QueryKind> {
 mod tests {
     use super::{
         family_of, provider_definition, provider_definitions, query_kind_for_instance,
-        supports_extra_accounts, takes_base_url, QueryKind,
+        supports_extra_accounts, takes_base_url, ProviderCategory, QueryKind,
     };
 
     #[test]
@@ -898,5 +900,21 @@ mod tests {
             Some(QueryKind::Composite)
         );
         assert_eq!(query_kind_for_instance("unknown@1"), None);
+    }
+
+    #[test]
+    fn shandianshuo_stays_productivity() {
+        // Regression (2026-10-12 review): 6188a6f flattened 闪电说 to Coding
+        // and deleted the Productivity variant against the user's recorded
+        // preference (.scratch/ui-defaults/issues/03). The dashboard keeps
+        // exactly two BUILT-IN groups; this catalog category renders only
+        // when a visible provider carries it.
+        let sd = provider_definition("shandianshuo").expect("shandianshuo in catalog");
+        assert_eq!(sd.category, ProviderCategory::Productivity);
+        let extras: Vec<_> = provider_definitions()
+            .iter()
+            .filter(|d| d.category == ProviderCategory::Productivity && d.family_id != "shandianshuo")
+            .collect();
+        assert!(extras.is_empty(), "unexpected productivity families: {extras:?}");
     }
 }

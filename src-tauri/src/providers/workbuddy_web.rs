@@ -29,7 +29,7 @@
 //! end is present the balance is kept, which is exactly the accepted
 //! degrade.
 
-use super::codebuddy::{credits_face_from_items, CreditsFace};
+use super::codebuddy::{credits_face_from_items, credits_face_metrics};
 use super::{config_dir, error_chain, http, read_small_text, Metric, Snapshot};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -190,7 +190,7 @@ fn extract_chrome_cookie() -> Result<String, String> {
     if !snapshot_ok {
         return Err("Chrome's cookie database is locked — close Chrome and try again".into());
     }
-    let key = super::doubao::os_crypt_key(&dir)?;
+    let key = super::chromium::os_crypt_key(&dir)?;
     let conn =
         rusqlite::Connection::open_with_flags(&dst, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
             .map_err(|e| format!("open cookie snapshot: {e}"))?;
@@ -244,9 +244,9 @@ fn extract_chrome_cookie() -> Result<String, String> {
 /// own quirk, not Chrome's). App-bound `v20` blobs fail the decode and are
 /// skipped — the paste path remains.
 fn decrypt_chrome_cookie(blob: &[u8], key: &[u8; 32]) -> Option<String> {
-    let plain = super::doubao::decode_os_crypt(blob, key).ok()?;
+    let plain = super::chromium::decode_os_crypt(blob, key).ok()?;
     let text = String::from_utf8(plain).ok()?;
-    super::doubao::looks_like_text(&text).then_some(text)
+    super::chromium::looks_like_text(&text).then_some(text)
 }
 
 // ---------------------------------------------------------------------------
@@ -337,14 +337,14 @@ fn web_packs(data: &Value) -> Vec<&Value> {
     Vec::new()
 }
 
-/// The card row set for a web summary — same口径 as the token route's
+/// The card row set for a web summary — same basis as the token route's
 /// credits face (spec D6): meter, Unlimited / Left text degrade, Reserved.
 fn metrics_from_summary(data: &Value, now_ms: i64) -> (Vec<Metric>, Option<String>) {
     let packs = web_packs(data);
     let mut metrics = Vec::new();
     let mut plan = None;
     if let Some(face) = credits_face_from_items(&packs, now_ms) {
-        metrics.extend(face_metrics(&face));
+        metrics.extend(credits_face_metrics(&face));
         plan = face.plan.clone();
     }
     if plan.is_none() {
@@ -361,33 +361,7 @@ fn metrics_from_summary(data: &Value, now_ms: i64) -> (Vec<Metric>, Option<Strin
     (metrics, plan)
 }
 
-/// One credits face → rows (mirrors the token route exactly).
-fn face_metrics(face: &CreditsFace) -> Vec<Metric> {
-    let mut metrics = Vec::new();
-    if face.total > 0.0 {
-        let used = face.used();
-        let pct = (used / face.total * 100.0).clamp(0.0, 100.0);
-        metrics.push(
-            Metric::progress(
-                "Credits",
-                pct,
-                Some(format!("{used:.0} of {:.0} credits used", face.total)),
-            )
-            .with_reset(face.reset_ms, None),
-        );
-    } else if face.unlimited {
-        metrics.push(Metric::text("Credits", "Unlimited".to_string()));
-    } else {
-        metrics.push(Metric::text("Credits", format!("{:.0} credits left", face.remain)));
-    }
-    if face.frozen > 0.0 {
-        metrics.push(Metric::text(
-            "Reserved",
-            format!("{:.0} credits reserved", face.frozen),
-        ));
-    }
-    metrics
-}
+
 
 /// The web route's snapshot, or `None` when the channel is off / has no
 /// cookie — in which case the caller falls back to the sign-in hint and

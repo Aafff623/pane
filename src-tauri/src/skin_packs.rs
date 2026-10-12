@@ -53,6 +53,20 @@ pub struct InstalledPack {
     pub entry_css: String,
 }
 
+/// Is this a value `config.skinId` may persist? The two built-ins, or a
+/// resource-pack id. A shape check (not a membership check): a pack id may
+/// be persisted before the pack exists locally — the frontend's
+/// `migrateSkinFromIndex` downloads it on first run — so unknown-but-shaped
+/// ids must survive the config patch. Path characters and oversized values
+/// stay rejected. (Regression: the patch once accepted only "signal" |
+/// "ink", silently wiping every pack selection on save.)
+pub fn valid_skin_id(id: &str) -> bool {
+    id == "signal"
+        || id == "ink"
+        || ((1..=64).contains(&id.len())
+            && id.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_'))
+}
+
 pub fn skins_dir() -> std::path::PathBuf {
     crate::providers::config_dir().join("skins")
 }
@@ -294,8 +308,10 @@ fn read_installed(id: &str) -> Result<InstalledPack, String> {
 }
 
 /// Every installed pack, entry CSS inlined and ready to inject. A pack
-/// whose files were tampered with after install fails validation and is
-/// skipped (the workshop simply does not offer it).
+/// whose manifest no longer parses (or whose entry CSS is missing) is
+/// skipped — the workshop simply does not offer it. Files are NOT
+/// re-hashed here: the sha256 gate ran once at install time, and
+/// re-verifying every pack on every list would tax each refresh.
 pub fn list_packs() -> Vec<InstalledPack> {
     let mut packs = Vec::new();
     let Ok(entries) = std::fs::read_dir(skins_dir()) else {
@@ -467,5 +483,23 @@ mod tests {
             sha256_hex(b"abc"),
             "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
         );
+    }
+
+    #[test]
+    fn skin_id_shape_accepts_pack_ids_rejects_garbage() {
+        // Regression (2026-10-12): the config patch once coerced every pack
+        // id to null, so a downloaded skin silently reverted to native on
+        // restart and the cross-machine migration id never survived a save.
+        for good in ["signal", "ink", "ink-wash", "pane-skin-ink", "a", &"x".repeat(64)] {
+            assert!(valid_skin_id(good), "{good:?} should persist");
+        }
+        for bad in [
+            "",                                  // empty
+            &"x".repeat(65),                     // oversized
+            "../escape", "with space", "a/b", "a.b", // path / separator / dot
+            "说明",                              // non-ascii label, not an id
+        ] {
+            assert!(!valid_skin_id(bad), "{bad:?} must not persist");
+        }
     }
 }

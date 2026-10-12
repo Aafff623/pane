@@ -15,8 +15,14 @@ export interface ProviderDefinition {
   supportsOAuth: boolean;
   iconKey: string;
   /** Dashboard category. Absent = coding agent (the historical default). */
-  category?: "coding" | "mcp";
+  category?: "coding" | "mcp" | "productivity";
 }
+
+/** Every category the catalog can name, in stable chip order — the two
+ *  built-ins first, extras after. Sections render an extra only when a
+ *  visible provider carries it (闪电说's productivity), so a fresh install
+ *  still shows just the two built-in groups. */
+export const CATALOG_CATEGORIES = ["coding", "mcp", "productivity"] as const;
 
 export const providerCatalog: readonly ProviderDefinition[] = [
   { familyId: "claude", displayName: "Claude", queryKind: "nativeSnapshot", supportsApiKey: false, supportsExtraAccounts: false, supportsOAuth: false, iconKey: "claude" },
@@ -46,7 +52,7 @@ export const providerCatalog: readonly ProviderDefinition[] = [
   { familyId: "kimi", displayName: "Kimi Code", queryKind: "composite", supportsApiKey: true, supportsExtraAccounts: true, supportsOAuth: false, iconKey: "kimi" },
   { familyId: "stepfun", displayName: "StepFun", queryKind: "nativeBalance", supportsApiKey: true, supportsExtraAccounts: true, supportsOAuth: false, iconKey: "stepfun" },
   { familyId: "stepfun-plan", displayName: "StepFun Step Plan", queryKind: "nativeCodingPlan", supportsApiKey: true, supportsExtraAccounts: true, supportsOAuth: false, iconKey: "stepfun" },
-  { familyId: "shandianshuo", displayName: "闪电说", queryKind: "nativeCodingPlan", supportsApiKey: false, supportsExtraAccounts: false, supportsOAuth: false, iconKey: "shandianshuo" },
+  { familyId: "shandianshuo", displayName: "闪电说", queryKind: "nativeCodingPlan", supportsApiKey: false, supportsExtraAccounts: false, supportsOAuth: false, iconKey: "shandianshuo", category: "productivity" },
   { familyId: "siliconflow", displayName: "SiliconFlow", queryKind: "nativeBalance", supportsApiKey: true, supportsExtraAccounts: true, supportsOAuth: false, iconKey: "siliconflow" },
   { familyId: "novita", displayName: "Novita AI", queryKind: "nativeBalance", supportsApiKey: true, supportsExtraAccounts: true, supportsOAuth: false, iconKey: "novita" },
   { familyId: "relaybalance", displayName: "Custom Relay", queryKind: "nativeBalance", supportsApiKey: true, supportsExtraAccounts: true, supportsOAuth: false, iconKey: "relaybalance" },
@@ -97,7 +103,7 @@ export function providerDefinition(familyId: string): ProviderDefinition | undef
   return providerCatalog.find((definition) => definition.familyId === familyId);
 }
 
-export type ProviderCategory = "coding" | "mcp";
+export type ProviderCategory = "coding" | "mcp" | "productivity";
 
 export function providerCategory(familyId: string): ProviderCategory {
   return providerDefinition(familyId)?.category ?? "coding";

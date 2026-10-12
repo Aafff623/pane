@@ -411,4 +411,22 @@ mod tests {
         assert!(data_of(&json!({ "data": "nope" })).is_none());
         assert!(data_of(&json!({})).is_none());
     }
+
+    #[test]
+    fn family_rows_stay_listed_everywhere() {
+        // Drift guard (2026-10-12 bug class): a new family member must join
+        // the login store list (its accounts live there) and the provider
+        // catalog, or its scanned logins become invisible — exactly the
+        // workbuddy/codebuddycn holes fixed on 2026-10-12.
+        for family in FAMILIES {
+            assert!(
+                crate::login_accounts::LOGIN_FAMILIES.contains(&family.family_id),
+                "{} missing from LOGIN_FAMILIES", family.family_id
+            );
+            assert!(
+                crate::provider_catalog::provider_definition(family.family_id).is_some(),
+                "{} missing from the provider catalog", family.family_id
+            );
+        }
+    }
 }

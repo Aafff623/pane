@@ -3,6 +3,7 @@ pub mod amp;
 pub mod antigravity;
 pub mod apigoto;
 pub mod bedrock;
+pub mod chromium;
 pub mod chutes;
 pub mod claude;
 pub mod clawsgo;

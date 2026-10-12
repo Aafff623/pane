@@ -3,12 +3,14 @@ import { listen } from "@tauri-apps/api/event";
 import { getVersion } from "@tauri-apps/api/app";
 import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
 import {
+  CATALOG_CATEGORIES,
   providerCatalog,
   providerCategory,
   providerDefinition,
   providerFamily,
   supportsApiKey,
   supportsExtraAccounts,
+  type ProviderCategory,
 } from "./providerCatalog";
 import { PEAK_RULES, isProviderInPeak, type PeakRule } from "./peakHours";
 import { providerVisual } from "./providerVisuals";
@@ -194,8 +196,21 @@ function estBadgeFor(id: string): string {
 type RangeTab = "d7" | "d30" | "all";
 const OVERVIEW_TABS = ["5h", "week", "month"] as const;
 type OverviewTab = (typeof OVERVIEW_TABS)[number];
+/// The two built-in groups, fixed (user rule 2026-10-11): exactly these
+/// names ship for everyone. A catalog category outside this list (闪电说's
+/// "productivity") is tolerated: chips, cycle and sections append it only
+/// while a visible provider carries it.
 const OVERVIEW_CATEGORIES = ["coding", "mcp"] as const;
-type OverviewCategory = (typeof OVERVIEW_CATEGORIES)[number];
+type OverviewCategory = ProviderCategory;
+
+/// Built-ins always render; extra catalog categories join only when a
+/// visible provider carries one.
+function presentCategories(): OverviewCategory[] {
+  const present = new Set(orderedSnapshots().map((s) => effectiveCategory(providerFamily(s.id))));
+  const builtins = OVERVIEW_CATEGORIES as readonly string[];
+  const extras = CATALOG_CATEGORIES.filter((c) => !builtins.includes(c) && present.has(c));
+  return [...OVERVIEW_CATEGORIES, ...extras];
+}
 
 // Per-provider layout: which rows show, their order, which are tucked
 // behind the caret ("On Demand"), and which are starred for the tray strip.
@@ -1002,8 +1017,7 @@ async function selectSkin(id: SkinId | null): Promise<void> {
   requestAnimationFrame(fitProviderNames);
   for (const button of document.querySelectorAll<HTMLButtonElement>("[data-skin-select]")) {
     button.disabled = button.dataset.skinSelect === id;
-    button.textContent = t(id ? "skin.applied" : "skin.use");
-    if (!button.disabled) button.textContent = t("skin.use");
+    button.textContent = t(button.disabled ? "skin.applied" : "skin.use");
   }
 }
 
@@ -1748,18 +1762,16 @@ function setCardGroup(cardId: string, groupId: string): void {
 
 /// Category a family renders under: the user's per-family override wins
 /// over the catalog default. Right-click menu → 分类 moves a family
-/// between Coding Agent / MCP without touching the catalog. An override
-/// naming a group that no longer exists (the retired "productivity" group)
-/// falls back to the catalog default rather than making the card vanish.
+/// between the known groups without touching the catalog. An override the
+/// catalog cannot name falls back to the catalog default rather than
+/// making the card vanish.
 function effectiveCategory(family: string): OverviewCategory {
   const override = config.categoryOverrides?.[family];
-  if (override && (OVERVIEW_CATEGORIES as readonly string[]).includes(override)) {
-    return override;
+  if (override && (CATALOG_CATEGORIES as readonly string[]).includes(override)) {
+    return override as OverviewCategory;
   }
-  const fromCatalog = providerCategory(family) as string;
-  return (OVERVIEW_CATEGORIES as readonly string[]).includes(fromCatalog)
-    ? (fromCatalog as OverviewCategory)
-    : "coding";
+  const fromCatalog = providerCategory(family);
+  return (CATALOG_CATEGORIES as readonly string[]).includes(fromCatalog) ? fromCatalog : "coding";
 }
 
 /// Clicking the family's effective category clears the override (back to
@@ -4334,10 +4346,11 @@ function renderQuotaOverview(): string {
           ${(() => {
             // Full mode: a two-row grid, 3 chips per row, 6 max — more
             // categories collapse into a … chip that opens the board.
+            const categories = presentCategories();
             const chips =
-              config.overviewCatFull === true && OVERVIEW_CATEGORIES.length > 6
-                ? OVERVIEW_CATEGORIES.slice(0, 5)
-                : OVERVIEW_CATEGORIES;
+              config.overviewCatFull === true && categories.length > 6
+                ? categories.slice(0, 5)
+                : categories;
             const html = chips
               .map(
                 (c) =>
@@ -4345,7 +4358,7 @@ function renderQuotaOverview(): string {
               )
               .join("");
             const more =
-              config.overviewCatFull === true && OVERVIEW_CATEGORIES.length > 6
+              config.overviewCatFull === true && categories.length > 6
                 ? `<button type="button" class="tab overview-cat-more" data-overview-cat-more title="${escapeHtml(t("overview.groupManage"))}">…</button>`
                 : "";
             return html + more;
@@ -5056,8 +5069,9 @@ function isDashboardActive(): boolean {
 }
 
 function cycleOverviewCategory(): void {
-  const index = OVERVIEW_CATEGORIES.indexOf(overviewCategory);
-  const next = OVERVIEW_CATEGORIES[(index + 1) % OVERVIEW_CATEGORIES.length];
+  const categories = presentCategories();
+  const index = categories.indexOf(overviewCategory);
+  const next = categories[(index + 1) % categories.length];
   switchOverviewCategory(next);
 }
 
@@ -7965,7 +7979,7 @@ function renderSkinMarket(): string {
         <p class="skin-market-copy">${skin.tagline}${skin.updateAvailable ? ` · ${t("skin.updateAvailable")}` : ""}</p>
         <div class="skin-preview-toolbar" role="group" aria-label="${t("skin.previewMode")}">${(["light", "dark", "both"] as const).map((mode) => `<button class="skin-mode-btn" type="button" data-skin-mode="${mode}" aria-pressed="${previewMode === mode}">${t(mode === "light" ? "skin.light" : mode === "dark" ? "skin.dark" : "skin.both")}</button>`).join("")}</div>
         ${pair}
-        <div class="skin-detail-actions">${skinActionHtml(skin)}<button class="mini-btn" data-skin-reset>${t("skin.native")}</button><span>${t("skin.followsMode")}</span></div>
+        <div class="skin-detail-actions">${skinActionHtml(skin)}${skin.state === "remote" ? `<button class="mini-btn" data-skin-reset>${t("skin.native")}</button>` : ""}<span>${t("skin.followsMode")}</span></div>
       </div>
     </div>
   </section>`;
@@ -12879,7 +12893,7 @@ async function initSettings(): Promise<void> {
   if (config.overviewTab === "5h" || config.overviewTab === "week" || config.overviewTab === "month") {
     overviewTab = config.overviewTab;
   }
-  if ((OVERVIEW_CATEGORIES as readonly string[]).includes(config.overviewCategory)) {
+  if ((CATALOG_CATEGORIES as readonly string[]).includes(config.overviewCategory)) {
     overviewCategory = config.overviewCategory;
   }
   if (config.overviewStyle !== "rings" && config.overviewStyle !== "bars") {
@@ -14396,6 +14410,7 @@ function playSplash(): void {
       name: "nameKey" in skin ? t(skin.nameKey) : skin.name,
       tagline: "taglineKey" in skin ? t(skin.taglineKey) : `v${skin.version}`,
       skip: t("splash.skipHint"),
+      aria: t("theme.introAria", { theme: "nameKey" in skin ? t(skin.nameKey) : skin.name }),
     });
     return;
   }
@@ -15069,7 +15084,7 @@ window.addEventListener("DOMContentLoaded", () => {
     const ovCat = target.closest<HTMLElement>("[data-overview-cat]");
     if (ovCat) {
       const next = ovCat.dataset.overviewCat ?? "";
-      if ((OVERVIEW_CATEGORIES as readonly string[]).includes(next)) {
+      if ((CATALOG_CATEGORIES as readonly string[]).includes(next)) {
         switchOverviewCategory(next as OverviewCategory);
       }
       return;

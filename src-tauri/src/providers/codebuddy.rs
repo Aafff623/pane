@@ -405,26 +405,7 @@ async fn finish(f: &Family, access: &Access, id: &str, name: &str) -> Result<Sna
     }
     let mut plan = None;
     if let Some(face) = &face {
-        if face.total > 0.0 {
-            // Rollover above the grant reads as 0% used, never negative.
-            let used = face.used();
-            let pct = (used / face.total * 100.0).clamp(0.0, 100.0);
-            let meter = Metric::progress(
-                "Credits",
-                pct,
-                Some(format!("{used:.0} of {:.0} credits used", face.total)),
-            )
-            .with_reset(face.reset_ms, None);
-            metrics.push(meter);
-        } else if face.unlimited {
-            metrics.push(Metric::text("Credits", "Unlimited".to_string()));
-        } else {
-            // No total to meter against — the honest degrade is plain numbers.
-            metrics.push(Metric::text("Credits", format!("{:.0} credits left", face.remain)));
-        }
-        if face.frozen > 0.0 {
-            metrics.push(Metric::text("Reserved", format!("{:.0} credits reserved", face.frozen)));
-        }
+        metrics.extend(credits_face_metrics(face));
         plan = face.plan.clone();
     }
     for pack in &packs {
@@ -573,6 +554,34 @@ fn is_credits_pack(pack: &Value) -> bool {
 #[cfg(test)]
 fn credits_face(body: &Value, now_ms: i64) -> Option<CreditsFace> {
     credits_face_from_items(&resource_items(body), now_ms)
+}
+
+/// One credits face → card rows. Shared by the token route (`finish`) and
+/// the WorkBuddy web-session route, so both stay on one meter/unlimited/
+/// left/reserved basis.
+pub(crate) fn credits_face_metrics(face: &CreditsFace) -> Vec<Metric> {
+    let mut metrics = Vec::new();
+    if face.total > 0.0 {
+        // Rollover above the grant reads as 0% used, never negative.
+        let used = face.used();
+        let pct = (used / face.total * 100.0).clamp(0.0, 100.0);
+        let meter = Metric::progress(
+            "Credits",
+            pct,
+            Some(format!("{used:.0} of {:.0} credits used", face.total)),
+        )
+        .with_reset(face.reset_ms, None);
+        metrics.push(meter);
+    } else if face.unlimited {
+        metrics.push(Metric::text("Credits", "Unlimited".to_string()));
+    } else {
+        // No total to meter against — the honest degrade is plain numbers.
+        metrics.push(Metric::text("Credits", format!("{:.0} credits left", face.remain)));
+    }
+    if face.frozen > 0.0 {
+        metrics.push(Metric::text("Reserved", format!("{:.0} credits reserved", face.frozen)));
+    }
+    metrics
 }
 
 pub(crate) fn credits_face_from_items(packs: &[&Value], now_ms: i64) -> Option<CreditsFace> {

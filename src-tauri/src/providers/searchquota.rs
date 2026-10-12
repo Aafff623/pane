@@ -91,16 +91,11 @@ fn credential_slot(service: &str, key: &str) -> String {
     format!("{service}:{:x}", Sha256::digest(key.trim().as_bytes()))
 }
 
-fn snapshot_slot(service: &str, keys: &[Keyed], locked: &[Metric]) -> String {
+fn snapshot_slot(service: &str, keys: &[Keyed]) -> String {
     let mut hash = Sha256::new();
     for field in keys
         .iter()
         .flat_map(|k| [k.key.as_str(), k.label.as_str()])
-        .chain(
-            locked
-                .iter()
-                .flat_map(|m| [m.label.as_str(), m.value.as_deref().unwrap_or("")]),
-        )
     {
         hash.update((field.len() as u64).to_le_bytes());
         hash.update(field.as_bytes());
@@ -132,16 +127,11 @@ impl Keyed {
     }
 }
 
-/// The value shown on a key row the vault holds but cannot read (locked).
-#[allow(dead_code)]
-const LOCKED_ROW: &str = "🔒 保险箱已锁定（解锁后查询）";
-
 /// Vault-free key resolution for the search services: keys come from the
 /// Pane-managed plaintext store (`search-keys.json`) only — never from
 /// environment variables or a third-party MCP client config. What the user
-/// adds in Settings is exactly what Pane queries. `locked` stays in the
-/// signature shape (always empty here) so the callers read unchanged.
-fn collect_keys(service: &str) -> (Vec<Keyed>, Vec<Metric>) {
+/// adds in Settings is exactly what Pane queries.
+fn collect_keys(service: &str) -> Vec<Keyed> {
     let mut out: Vec<Keyed> = Vec::new();
     for (label, key) in crate::keyvault::keys_for_service(service) {
         let key = key.trim().to_string();
@@ -155,7 +145,7 @@ fn collect_keys(service: &str) -> (Vec<Keyed>, Vec<Metric>) {
         };
         out.push(Keyed { label, key });
     }
-    (out, Vec::new())
+    out
 }
 
 fn bearer(url: &str, key: &str, what: &str) -> reqwest::RequestBuilder {
@@ -166,60 +156,8 @@ fn bearer(url: &str, key: &str, what: &str) -> reqwest::RequestBuilder {
         .header("User-Agent", format!("pane/{what}"))
 }
 
-/// Append the locked-vault rows to a snapshot, widening the headline's
-/// "· N keys" into "· N/M keys" so the count matches the rows below instead of
-/// reading as the whole story. A longer suffix would just be ellipsized away.
-fn with_locked(mut snap: Snapshot, locked: Vec<Metric>) -> Snapshot {
-    if !locked.is_empty() {
-        if let Some(head) = snap.metrics.first_mut().filter(|m| m.kind == "text") {
-            if let Some(value) = head.value.as_mut() {
-                value.push_str(&format!(" · {} keys 待解锁", locked.len()));
-            }
-        }
-        if let Some(head) = snap.metrics.iter_mut().find(|m| m.kind == "progress") {
-            if let Some(detail) = head.detail.as_mut() {
-                *detail = widen_key_count(detail, locked.len());
-            }
-        }
-        snap.metrics.extend(locked);
-    }
-    snap
-}
-
-/// `… · 2 keys` → `… · 2/5 keys` (3 locked). Any other shape is returned
-/// unchanged: the headline either carries no key count or already fits.
-fn widen_key_count(detail: &str, locked: usize) -> String {
-    let Some(at) = detail.find(" keys") else {
-        return detail.to_string();
-    };
-    let Some(sep) = detail[..at].rfind("· ") else {
-        return detail.to_string();
-    };
-    let count = detail[sep + "· ".len()..at].trim();
-    if count.is_empty() || !count.bytes().all(|b| b.is_ascii_digit()) {
-        return detail.to_string();
-    }
-    let total = count.parse::<usize>().unwrap_or(0) + locked;
-    format!("{}· {count}/{total}{}", &detail[..sep], &detail[at..])
-}
-
-/// The "no credentials" snapshot for a card whose only keys live in a locked
-/// vault: the note names how many are waiting instead of telling the user to
-/// add a key they already stored.
-fn no_keys(id: &str, name: &str, add_hint: &str, locked: &[Metric]) -> Snapshot {
-    if locked.is_empty() {
-        Snapshot::no_credentials(id, name, add_hint)
-    } else {
-        Snapshot::no_credentials(
-            id,
-            name,
-            &format!(
-                "密钥保险箱已锁定，{} 把 {} key 暂不可用（解锁保险箱后自动查询）。",
-                locked.len(),
-                name
-            ),
-        )
-    }
+fn no_keys(id: &str, name: &str, add_hint: &str) -> Snapshot {
+    Snapshot::no_credentials(id, name, add_hint)
 }
 
 /// Pure local probe for the Customize gear panel (no network): where a key
@@ -238,8 +176,8 @@ pub fn local_credential_hint(service: &str, env_vars: &[&str]) -> Option<String>
 // ── Bocha ───────────────────────────────────────────────────────────────────
 
 pub async fn bocha_snapshot() -> Snapshot {
-    let (keys, locked) = collect_keys("bocha");
-    let slot = snapshot_slot("bocha", &keys, &locked);
+    let keys = collect_keys("bocha");
+    let slot = snapshot_slot("bocha", &keys);
     if let Some(snap) = fresh_or(&slot, TTL) {
         return snap;
     }
@@ -248,12 +186,11 @@ pub async fn bocha_snapshot() -> Snapshot {
             "bocha",
             "BochaAI",
             "在密钥保险箱添加 BochaAI key（或设置环境变量 BOCHA_API_KEY）后可查询余额。",
-            &locked,
+            
         );
     }
     match bocha_fetch(&keys).await {
         Ok(snap) => {
-            let snap = with_locked(snap, locked);
             remember_ok(&slot, &snap);
             snap
         }
@@ -314,8 +251,8 @@ async fn bocha_fetch(keys: &[Keyed]) -> Result<Snapshot, String> {
 // ── Tavily ──────────────────────────────────────────────────────────────────
 
 pub async fn tavily_snapshot() -> Snapshot {
-    let (keys, locked) = collect_keys("tavily");
-    let slot = snapshot_slot("tavily", &keys, &locked);
+    let keys = collect_keys("tavily");
+    let slot = snapshot_slot("tavily", &keys);
     if let Some(snap) = fresh_or(&slot, TTL) {
         return snap;
     }
@@ -324,12 +261,11 @@ pub async fn tavily_snapshot() -> Snapshot {
             "tavily",
             "Tavily",
             "在密钥保险箱添加 Tavily key（或设置环境变量 TAVILY_API_KEY）后可查询额度。",
-            &locked,
+            
         );
     }
     match tavily_fetch(&keys).await {
         Ok(snap) => {
-            let snap = with_locked(snap, locked);
             remember_ok(&slot, &snap);
             snap
         }
@@ -466,8 +402,8 @@ fn tavily_snapshot_from_results(
 // ── Firecrawl ───────────────────────────────────────────────────────────────
 
 pub async fn firecrawl_snapshot() -> Snapshot {
-    let (keys, locked) = collect_keys("firecrawl");
-    let slot = snapshot_slot("firecrawl", &keys, &locked);
+    let keys = collect_keys("firecrawl");
+    let slot = snapshot_slot("firecrawl", &keys);
     if let Some(snap) = fresh_or(&slot, TTL) {
         return snap;
     }
@@ -476,12 +412,11 @@ pub async fn firecrawl_snapshot() -> Snapshot {
             "firecrawl",
             "Firecrawl",
             "在密钥保险箱添加 Firecrawl key（或设置环境变量 FIRECRAWL_API_KEY）后可查询额度。",
-            &locked,
+            
         );
     }
     match firecrawl_fetch(&keys).await {
         Ok(snap) => {
-            let snap = with_locked(snap, locked);
             remember_ok(&slot, &snap);
             snap
         }
@@ -618,17 +553,17 @@ fn firecrawl_snapshot_from_results(
 // ── Brave ───────────────────────────────────────────────────────────────────
 
 pub async fn brave_snapshot() -> Snapshot {
-    let (keys, locked) = collect_keys("brave");
+    let keys = collect_keys("brave");
     if keys.is_empty() {
         return no_keys(
             "brave",
             "Brave Search",
             "在密钥保险箱添加 Brave key（或设置环境变量 BRAVE_API_KEY）后可查询月配额。",
-            &locked,
+            
         );
     }
     match brave_fetch(&keys).await {
-        Ok(snap) => with_locked(snap, locked),
+        Ok(snap) => snap,
         Err(e) => Snapshot::error("brave", "Brave Search", e),
     }
 }
@@ -864,24 +799,16 @@ mod tests {
             label: "one".into(),
         }];
         assert_ne!(
-            snapshot_slot("tavily", &first, &[]),
-            snapshot_slot("tavily", &second, &[])
+            snapshot_slot("tavily", &first),
+            snapshot_slot("tavily", &second)
         );
         let renamed = vec![Keyed {
             key: "first".into(),
             label: "renamed".into(),
         }];
         assert_ne!(
-            snapshot_slot("tavily", &first, &[]),
-            snapshot_slot("tavily", &renamed, &[])
-        );
-        assert_ne!(
-            snapshot_slot("tavily", &first, &[]),
-            snapshot_slot(
-                "tavily",
-                &first,
-                &[Metric::text("locked", "解锁后查询".into())]
-            )
+            snapshot_slot("tavily", &first),
+            snapshot_slot("tavily", &renamed)
         );
     }
 
@@ -934,28 +861,6 @@ mod tests {
         assert!(usage.key_unlimited);
         let missing_limit = json!({"key":{"usage":0},"account":{"plan_usage":3.0}});
         assert!(!parse_tavily_usage(&missing_limit).unwrap().key_unlimited);
-    }
-
-    #[test]
-    fn locked_rows_widen_the_headline_key_count_only_when_the_shape_fits() {
-        assert_eq!(
-            widen_key_count("已用 1000 / 2000 credits · 2 keys", 3),
-            "已用 1000 / 2000 credits · 2/5 keys"
-        );
-        assert_eq!(
-            widen_key_count(
-                "已用 193 / 2000 credits · 1 keys（每次探测消耗 1 次查询）",
-                1
-            ),
-            "已用 193 / 2000 credits · 1/2 keys（每次探测消耗 1 次查询）"
-        );
-        // No "· N keys" tail: the headline is left exactly as it was.
-        assert_eq!(widen_key_count("¥12.34", 2), "¥12.34");
-        assert_eq!(
-            widen_key_count("已用 1000 / 2000 credits", 2),
-            "已用 1000 / 2000 credits"
-        );
-        assert_eq!(widen_key_count("used · many keys", 2), "used · many keys");
     }
 
     #[test]

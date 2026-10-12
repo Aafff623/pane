@@ -368,7 +368,7 @@ fn apply_config_patch(cfg: &mut Value, patch: &Value) {
                     target.insert(k.clone(), if ok { v.clone() } else { json!("floating") });
                 } else if k == "skinId" {
                     let skin = match v.as_str() {
-                        Some("signal" | "ink") => v.clone(),
+                        Some(id) if skin_packs::valid_skin_id(id) => v.clone(),
                         _ => Value::Null,
                     };
                     target.insert(k.clone(), skin);
@@ -2187,7 +2187,7 @@ fn keyvault_v3_reset_unlock_code(
 #[tauri::command]
 fn keyvault_unlock(password: String) -> Result<keyvault::VaultStatus, String> {
     let status = keyvault::unlock(&password)?;
-    // The locked-vault rows on the MCP/search cards are now stale.
+    // Newly readable keys change what the MCP/search cards can query.
     providers::searchquota::invalidate_all();
     Ok(status)
 }

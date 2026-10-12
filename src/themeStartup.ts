@@ -5,6 +5,8 @@ export function playThemeStartup(skin: SkinId, reduced: boolean, labels: {
     name: string;
     tagline: string;
     skip: string;
+    /** Localized overlay description for screen readers. */
+    aria: string;
 }): () => void {
     const theme = skin === 'ink' ? 'ink' : 'post';
     let overlay: HTMLElement | null = null, timer: ReturnType<typeof setTimeout> | undefined, timeline: gsap.core.Timeline | null = null;
@@ -18,7 +20,7 @@ export function playThemeStartup(skin: SkinId, reduced: boolean, labels: {
     overlay = document.createElement('section');
     overlay.className = 'theme-intro ' + theme + (reduced ? ' reduced' : '');
     overlay.setAttribute('role', 'dialog');
-    overlay.setAttribute('aria-label', theme === 'ink' ? '山水笺启动动画' : '云端邮局启动动画');
+    overlay.setAttribute('aria-label', labels.aria);
     const art = theme === 'ink' ? `<div class="intro-inkdrop"></div><div class="intro-mountains"></div><div class="intro-koi"></div><div class="intro-ink-seal">山<br>水</div>` :
         `<div class="intro-post-lines"></div><div class="intro-envelope"><div class="intro-letter"><div class="intro-stamp">P</div><span>PANE POST</span><i></i><i></i><i></i></div><div class="intro-flap"></div><div class="intro-pocket"></div><div class="intro-postmark">云端邮局<br><small>用量来信</small></div></div>`;
     overlay.innerHTML = `<div class="intro-art" aria-hidden="true">${art}</div><div class="intro-caption"><span class="intro-brand">PANE</span><h1>${labels.name}</h1><p>${labels.tagline}</p></div><button class="intro-skip" type="button">${labels.skip}</button>`;
