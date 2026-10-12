@@ -57,7 +57,10 @@ if (IS_PANEL_FORM) document.body.classList.add("panel-form");
 import { gsap } from "gsap";
 import paneLogo from "./assets/pane-logo.png?inline";
 import paneIcon from "./assets/pane-icon.png?inline";
-import { SKINS, SKIN_STORAGE_KEY, readSkin, embedSkinImages, type SkinId } from "./skins";
+import { SKINS, SKIN_STORAGE_KEY, readSkin, normalizeSkin, embedSkinImages, type SkinId } from "./skins";
+import { playThemeStartup } from "./themeStartup";
+import { decorateInkSkin, clearInkSkin } from "./inkEffects";
+import "./inkSkin.css";
 import { postIcon } from "./skinIcons";
 // The repo's changelog ships inside the bundle, so the "What's new" dialog
 // and the Settings changelog viewer read the exact file releases maintain.
@@ -284,6 +287,7 @@ interface Config {
   lastStartupBootId: number | null;
   overviewExpanded: string[];
   experimentalFeatures: boolean;
+  skinId?: SkinId | null;
   spendIconTiers: { medium: number; high: number; max: number } | null;
   overviewCatFull: boolean;
   mainScrollTop: number;
@@ -334,6 +338,7 @@ const FRONTEND_CONFIG_KEYS = [
   "lastStartupBootId",
   "overviewExpanded",
   "experimentalFeatures",
+  "skinId",
   "spendIconTiers",
   "overviewCatFull",
   "mainScrollTop",
@@ -841,7 +846,7 @@ let skinPreviewMode: "light" | "dark" | "both" = "both";
 
 function activeSkin() {
   try {
-    const id = readSkin(window.localStorage);
+    const id = config.skinId === undefined ? readSkin(window.localStorage) : normalizeSkin(config.skinId);
     return SKINS.find((skin) => skin.id === id);
   } catch { return undefined; }
 }
@@ -851,23 +856,40 @@ function applySkin(): void {
   const skin = activeSkin();
   if (skin) root.dataset.skin = skin.id;
   else delete root.dataset.skin;
+  if (skin?.id === "ink") root.setAttribute("data-ink", "");
+  else root.removeAttribute("data-ink");
+  const host = document.querySelector<HTMLElement>("#providers");
+  if (skin?.id === "ink" && host) decorateInkSkin(host);
+  else clearInkSkin(document.body);
 }
 
-function selectSkin(id: SkinId | null): void {
+let skinSelectionSaving = false;
+async function selectSkin(id: SkinId | null): Promise<void> {
+  if (skinSelectionSaving) return;
+  skinSelectionSaving = true;
+  const previous = config.skinId;
+  try {
+    await patchConfig({ skinId: normalizeSkin(id) });
+  } catch {
+    config.skinId = previous;
+    document.querySelector("#status")!.textContent = t("skin.saveFailed");
+    return;
+  } finally {
+    skinSelectionSaving = false;
+  }
+  // An early-paint cache only; config.json is authoritative, including null.
   try {
     if (id) localStorage.setItem(SKIN_STORAGE_KEY, id);
     else localStorage.removeItem(SKIN_STORAGE_KEY);
-  } catch {
-    document.querySelector("#status")!.textContent = t("skin.saveFailed");
-    return;
-  }
+  } catch { /* A successful native config save still takes precedence. */ }
   applySkin();
+  renderAll();
   document.querySelector("#status")!.textContent = id ? "" : t("skin.nativeApplied");
   requestAnimationFrame(fitProviderNames);
-  const button = document.querySelector<HTMLButtonElement>("[data-skin-select]");
-  if (button) {
-    button.disabled = id === "signal";
+  for (const button of document.querySelectorAll<HTMLButtonElement>("[data-skin-select]")) {
+    button.disabled = button.dataset.skinSelect === id;
     button.textContent = t(id ? "skin.applied" : "skin.use");
+    if (!button.disabled) button.textContent = t("skin.use");
   }
 }
 
@@ -1040,6 +1062,7 @@ async function reloadConfigFromBackend(): Promise<void> {
   // A local write that started while get_config was in flight wins.
   if (configWritesInFlight > 0) return;
   fresh.localShortcuts = fresh.localShortcuts ?? {};
+  fresh.skinId = normalizeSkin(fresh.skinId);
   config = fresh;
   pruneEmptyCardGroups();
   applyLocale();
@@ -1049,6 +1072,7 @@ async function reloadConfigFromBackend(): Promise<void> {
   applyGlass();
   applyReduceMotion();
   applySkin();
+  if (skinMarketOpen) renderDrawerBody();
 }
 
 // ---------------------------------------------------------------------------
@@ -5533,9 +5557,18 @@ async function shareCard(id: string): Promise<void> {
     const FOOT = 30; // logo + tagline row
 
     let css = "";
+    const appendRules = (rules: CSSRuleList) => {
+      for (const rule of Array.from(rules)) {
+        // SVG image dimensions include the 2x export scale; media queries
+        // must retain the live window's layout rather than reflow at 2x width.
+        if (rule instanceof CSSMediaRule) {
+          if (matchMedia(rule.conditionText).matches) appendRules(rule.cssRules);
+        } else css += rule.cssText + "\n";
+      }
+    };
     for (const sheet of Array.from(document.styleSheets)) {
       try {
-        for (const rule of Array.from(sheet.cssRules)) css += rule.cssText + "\n";
+        appendRules(sheet.cssRules);
       } catch {
         // Inaccessible sheet (shouldn't happen — all styles are bundled).
       }
@@ -5596,21 +5629,40 @@ async function shareCard(id: string): Promise<void> {
     // document is the <svg>, so the attributes are mirrored there for the
     // :root[data-…] rules to keep matching.
     const root = document.documentElement;
+    if (root.hasAttribute("data-ink")) {
+      const appearance = getComputedStyle(root);
+      // Chromium's SVG-image renderer does not reliably resolve URL-valued
+      // custom properties across SVG/XHTML. Put the URL at its CSS use site.
+      for (const name of ["--ink-koi", "--ink-landscape", "--ink-grain"]) {
+        css = css.split(`var(${name})`).join(appearance.getPropertyValue(name));
+      }
+    }
+    // Paint servers live outside the card in the app. The isolated SVG needs
+    // its own copies for quota strokes and credit-trend brush textures.
+    const inkDefs = root.hasAttribute("data-ink")
+      ? document.getElementById("ink-graph-paint")?.closest("svg")?.innerHTML ?? ""
+      : "";
     let svgMarkup =
       `<svg xmlns="http://www.w3.org/2000/svg" width="${W2 * S}" height="${H2 * S}" ` +
       `viewBox="0 0 ${W2} ${H2}" data-theme="${root.dataset.theme ?? ""}" ` +
-      `data-density="${root.dataset.density ?? ""}" data-skin="${root.dataset.skin ?? ""}">` +
-      `<foreignObject width="${W2}" height="${H2}">` +
-      `<div xmlns="http://www.w3.org/1999/xhtml" id="snap-root">` +
+      `data-density="${root.dataset.density ?? ""}" data-skin="${root.dataset.skin ?? ""}" ` +
+      `style="${escapeHtml(root.style.cssText)}" ` +
+      `${root.hasAttribute("data-ink") ? "data-ink=\"\"" : ""}>` +
       // CDATA so CSS containing XML-special characters (`<`, `&` — e.g. in
       // a content: string) can never malform the snapshot document. A
       // literal "]]>" inside CSS would end the section early, so split it.
-      `<style><![CDATA[${css.split("]]>").join("]]]]><![CDATA[>")}]]></style>` +
+      // An SVG-namespace style is parsed as CSS in an SVG image document;
+      // XHTML style + CDATA inside foreignObject loses theme rules in Chromium.
+      `<style xmlns="http://www.w3.org/2000/svg"><![CDATA[${css.split("]]>").join("]]]]><![CDATA[>")}]]></style>` +
+      inkDefs +
+      `<foreignObject width="${W2}" height="${H2}">` +
+      `<div xmlns="http://www.w3.org/1999/xhtml" id="snap-root">` +
       new XMLSerializer().serializeToString(clone) +
       `<div id="snap-foot"><img src="${paneIcon}" alt="" /><span>${escapeHtml(t("share.tagline"))}</span></div>` +
       `</div></foreignObject></svg>`;
 
-    if (root.dataset.skin === "signal") svgMarkup = await embedSkinImages(svgMarkup);
+    const skin = activeSkin();
+    if (skin) svgMarkup = await embedSkinImages(svgMarkup, skin.id);
 
     const img = new Image();
     img.src = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svgMarkup)}`;
@@ -7671,13 +7723,13 @@ function accountChildRows(family: string): string {
 }
 
 // Preview uses the production metric renderer with fixed, non-account data.
-function renderSkinSample(mode: "light" | "dark"): string {
+function renderSkinSample(mode: "light" | "dark", skinId: SkinId = "signal"): string {
   const metric = (label: string, used: number, period: number) => renderMetric({
     label, kind: "progress", used_percent: used, detail: null,
     value: null, resets_at: null, period_ms: period,
   }).replace(/ data-flip="[^"]*"/g, "").replace(/ clickable/g, "");
-  return `<div class="skin-sample" data-skin="signal" data-theme="${mode}">
-    <div class="skin-sample-head"><span>${t(mode === "light" ? "skin.light" : "skin.dark")}</span><span class="skin-sample-brand">${t("skin.signal")}</span></div>
+  return `<div class="skin-sample" data-skin="${skinId}" ${skinId === "ink" ? "data-ink" : ""} data-theme="${mode}">
+    <div class="skin-sample-head"><span>${t(mode === "light" ? "skin.light" : "skin.dark")}</span><span class="skin-sample-brand">${t(skinId === "ink" ? "skin.ink" : "skin.signal")}</span></div>
     <div class="signal-spend"><span>${t("skin.spendToday")}</span><strong>$18<span>.42</span></strong><span class="signal-spend-note">${t("skin.spendNote")}</span></div>
     <div class="provider"><div class="provider-head"><div class="signal-provider-label"><strong class="provider-name">Claude</strong><span class="signal-state">${t("skin.normal")}</span></div><span class="signal-plan">Pro</span></div><div class="card-panel">
       ${metric(t("skin.session"), 32, 5 * 3_600_000)}${metric(t("skin.week"), 68, 7 * 86_400_000)}${metric(t("skin.lowQuota"), 87, 5 * 3_600_000)}
@@ -7689,13 +7741,12 @@ function renderSkinSample(mode: "light" | "dark"): string {
 
 function renderSkinMarket(): string {
   const selected = activeSkin()?.id;
-  const skin = SKINS[0];
   const previewMode = skinPreviewMode === "both" && window.matchMedia("(max-width:640px)").matches ? "light" : skinPreviewMode;
   return `<section class="skin-market" aria-label="${t("skin.market")}">
-    <div class="skin-market-head"><div><h2>${t(skin.nameKey)}</h2><p class="skin-market-copy">${t(skin.taglineKey)}</p></div><button class="mini-btn" data-skin-close>${t("skin.back")}</button></div>
+    <div class="skin-market-head"><h2>${t("skin.market")}</h2><button class="mini-btn" data-skin-close>${t("skin.back")}</button></div>
     <div class="skin-preview-toolbar" role="group" aria-label="${t("skin.previewMode")}">${(["light", "dark", "both"] as const).map((mode) => `<button class="skin-mode-btn" type="button" data-skin-mode="${mode}" aria-pressed="${previewMode === mode}">${t(mode === "light" ? "skin.light" : mode === "dark" ? "skin.dark" : "skin.both")}</button>`).join("")}</div>
-    <div class="skin-preview-pair" data-preview-mode="${previewMode}">${renderSkinSample("light")}${renderSkinSample("dark")}</div>
-    <div class="skin-detail-actions"><button class="mini-btn primary" data-skin-select="signal" ${selected === "signal" ? "disabled" : ""}>${t(selected === "signal" ? "skin.applied" : "skin.use")}</button><button class="mini-btn" data-skin-reset>${t("skin.native")}</button><span>${t("skin.followsMode")}</span></div>
+    ${SKINS.map(skin => `<section class="skin-market-option"><h3>${t(skin.nameKey)}</h3><p class="skin-market-copy">${t(skin.taglineKey)}</p><div class="skin-preview-pair" data-preview-mode="${previewMode}">${renderSkinSample("light", skin.id)}${renderSkinSample("dark", skin.id)}</div><div class="skin-detail-actions"><button class="mini-btn primary" data-skin-select="${skin.id}" ${selected === skin.id ? "disabled" : ""}>${t(selected === skin.id ? "skin.applied" : "skin.use")}</button></div></section>`).join("")}
+    <div class="skin-detail-actions"><button class="mini-btn" data-skin-reset>${t("skin.native")}</button><span>${t("skin.followsMode")}</span></div>
   </section>`;
 }
 
@@ -7987,6 +8038,7 @@ function renderAll(): void {
     renderTotalSpend() +
     renderQuotaOverview() +
     renderGroupedCards();
+  decorateInkSkin(el as HTMLElement);
   if (customizeOpen) renderDrawerBody();
   if (spendDetailOpen) document.body.insertAdjacentHTML("beforeend", renderSpendDetailOverlay());
   rebuildTrail();
@@ -12466,7 +12518,13 @@ function applyLocale(): void {
 
 async function initSettings(): Promise<void> {
   config = await invoke<Config>("get_config");
-  markConfigLoaded();
+  if (config.skinId === undefined) {
+    const legacy = readSkin(window.localStorage);
+    try { await patchConfig({ skinId: legacy }); } catch { config.skinId = legacy; }
+  } else config.skinId = normalizeSkin(config.skinId);
+  applyAppearance();
+  applyReduceMotion();
+  applySkin();
   config.localShortcuts = config.localShortcuts ?? {};
   pruneEmptyCardGroups();
   config.locale = normalizeLocalePref(config.locale);
@@ -12484,6 +12542,8 @@ async function initSettings(): Promise<void> {
     // Dev / missing command — fall back to navigator.language.
   }
   applyLocale();
+  document.documentElement.classList.remove("i18n-boot");
+  markConfigLoaded();
   if (["today", "yesterday", "last30"].includes(config.spendTab)) {
     spendTab = config.spendTab;
     rangeSelected = spendTab === "last30";
@@ -13936,18 +13996,29 @@ async function authRemoveAccount(family: string, index: number): Promise<void> {
 let splashGateChecked = false;
 let splashTimer: number | undefined;
 let splashTl: ReturnType<typeof gsap.timeline> | undefined;
+let stopThemeStartup: (() => void) | undefined;
 let markConfigLoaded: () => void = () => {};
 const configLoaded = new Promise<void>((resolve) => {
   markConfigLoaded = resolve;
 });
 
 function hideSplash(): void {
+  stopThemeStartup?.();
+  stopThemeStartup = undefined;
   window.clearTimeout(splashTimer);
   splashTl?.pause();
   document.querySelector("#splash")?.classList.add("hide");
 }
 
 function playSplash(): void {
+  const skin = activeSkin();
+  if (skin) {
+    hideSplash();
+    stopThemeStartup = playThemeStartup(skin.id, reduceMotion(), {
+      name: t(skin.nameKey), tagline: t(skin.taglineKey), skip: t("splash.skipHint"),
+    });
+    return;
+  }
   const splash = document.querySelector<HTMLElement>("#splash");
   if (!splash) return;
   window.clearTimeout(splashTimer);
@@ -14054,7 +14125,6 @@ window.addEventListener("DOMContentLoaded", () => {
   } catch {
     /* translation retry happens in applyLocale */
   }
-  document.documentElement.classList.remove("i18n-boot");
   const appLogo = document.querySelector<HTMLElement>("#app-logo")!;
   appLogo.innerHTML = `<img src="${paneLogo}" alt="Pane" />`;
   document.querySelector("#splash")?.addEventListener("click", hideSplash);

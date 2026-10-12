@@ -1,0 +1,39 @@
+:root[data-theme-intro] #splash{display:none!important}
+.theme-intro{--intro-paper:#f3f2ec;--intro-ink:#30342f;--intro-muted:#73796e;--intro-red:#a14032;position:fixed;inset:0;z-index:2500;overflow:hidden;background:var(--intro-paper);color:var(--intro-ink);background-image:url('./assets/skins/ink-wash/paper-grain.svg');display:flex;flex-direction:column;align-items:center;justify-content:center;}
+:root[data-theme=dark] .theme-intro{--intro-paper:#171a1b;--intro-ink:#e0e2d8;--intro-muted:#a2aa9c;--intro-red:#df9383}
+.theme-intro.post{--intro-paper:#f5e8d2;--intro-ink:#3f565e;--intro-muted:#71838a;--intro-red:#b05b43}
+:root[data-theme=dark] .theme-intro.post{--intro-paper:#203049;--intro-ink:#f3d4a8;--intro-muted:#acbfd1;--intro-red:#e8a586}
+.intro-art{position:relative;width:min(280px,75vw);height:250px;flex:none}
+.intro-caption{text-align:center;position:relative;z-index:2;margin-top:22px;}
+.intro-brand{font:10px 'Segoe UI',sans-serif;letter-spacing:.45em;opacity:.65;padding-left:.45em}
+.intro-caption h1{font-size:38px;font-weight:400;margin:12px 0;letter-spacing:.18em;padding-left:.18em}
+.ink .intro-caption h1{font-family:var(--ink-display-font,'KaiTi',serif)}
+.intro-caption p{font-size:12px;letter-spacing:.12em;color:var(--intro-muted);margin:0}
+.intro-skip{font:12px 'Segoe UI','Microsoft YaHei',sans-serif;border:1px solid currentColor;padding:7px 12px;border-radius:3px;cursor:pointer;background:transparent;color:inherit}
+.intro-skip{position:absolute;bottom:28px;color:var(--intro-muted);z-index:5}
+.intro-skip:focus-visible{outline:2px solid currentColor;outline-offset:4px}
+.intro-inkdrop{position:absolute;width:120px;height:110px;left:80px;top:65px;background:radial-gradient(ellipse,#30342f30 0%,#30342f17 40%,transparent 70%);border-radius:45% 55% 60% 40%;filter:blur(5px);}
+.intro-mountains{position:fixed;inset:0;pointer-events:none;background:url('./assets/skins/ink-wash/mountains-v4.png') center bottom/cover no-repeat;opacity:.23;}
+:root[data-theme=dark] .intro-mountains{filter:invert(1);opacity:.2}
+.intro-koi{position:absolute;inset:12px;background:url('./assets/skins/ink-wash/koi-red-v4.png') center/contain no-repeat;}
+.intro-ink-seal{position:absolute;right:-4px;bottom:18px;border:1px solid var(--intro-red);color:var(--intro-red);font:17px/1.25 var(--ink-display-font,'KaiTi',serif);padding:6px 4px;transform:rotate(-5deg);}
+.intro-envelope{position:absolute;width:244px;height:158px;left:18px;top:88px;perspective:700px;}
+.intro-letter{position:absolute;inset:0 15px;background:var(--intro-paper);border:1px solid var(--intro-muted);padding:22px 20px;box-sizing:border-box;box-shadow:0 8px 24px #0002;transform:translateY(-78px);height:185px;}
+.intro-letter>span{font:11px 'Segoe UI',sans-serif;letter-spacing:.13em;display:block;padding-top:17px}
+.intro-letter i{display:block;height:1px;background:var(--intro-muted);opacity:.4;width:70%;margin-top:14px}
+.intro-letter i:nth-of-type(2){width:85%}.intro-letter i:nth-of-type(3){width:55%}
+.intro-stamp{position:absolute;right:14px;top:15px;border:2px dotted var(--intro-muted);padding:5px 8px;font:18px Georgia,serif;color:var(--intro-ink)}
+.intro-postmark{position:absolute;right:13px;bottom:27px;width:69px;height:69px;border:2px solid var(--intro-red);outline:1px solid var(--intro-red);outline-offset:-6px;border-radius:50%;display:flex;flex-direction:column;align-items:center;justify-content:center;color:var(--intro-red);font-size:12px;transform:rotate(-14deg);}
+.intro-postmark small{font-size:9px;letter-spacing:.1em;margin-top:4px}
+.intro-pocket{position:absolute;inset:0;background:color-mix(in srgb,var(--intro-paper) 90%,var(--intro-muted));clip-path:polygon(0 0,50% 50%,100% 0,100% 100%,0 100%);border-bottom:2px solid var(--intro-muted)}
+.intro-pocket::after{content:'';position:absolute;inset:9px;border:1px dashed var(--intro-muted);opacity:.6}
+.intro-flap{position:absolute;inset:0;background:var(--intro-muted);clip-path:polygon(0 0,100% 0,50% 52%);transform-origin:top;opacity:.24}
+.intro-post-lines{position:absolute;inset:30px -40px;background:repeating-linear-gradient(0deg,transparent 0 14px,var(--intro-muted) 14px 15px,transparent 15px 23px);mask-image:radial-gradient(ellipse,#0002,transparent 65%);transform:rotate(-12deg);}
+.intro-postmark{z-index:4}
+/* Motion is owned by the GSAP timeline; CSS only supplies composition. */
+.theme-intro,.theme-intro *{animation:none!important;transition:none!important}
+.intro-glyph{display:inline-block}
+.intro-letter{transform:none}
+.intro-flap{transform:none;backface-visibility:visible}
+.intro-envelope>.intro-postmark{right:-18px;bottom:9px;z-index:5;background:color-mix(in srgb,var(--intro-paper) 88%,transparent)}
+@media(max-height:500px){.intro-art{height:205px;margin:-20px}.intro-caption{margin-top:5px}.intro-caption h1{font-size:28px}.intro-skip{bottom:14px}}

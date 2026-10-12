@@ -277,6 +277,7 @@ const CONFIG_KEYS: &[&str] = &[
     "lastStartupBootId",
     "overviewExpanded",
     "experimentalFeatures",
+    "skinId",
     "spendIconTiers",
     "overviewCatFull",
     "mainScrollTop",
@@ -358,6 +359,12 @@ fn apply_config_patch(cfg: &mut Value, patch: &Value) {
                 } else if k == "windowForm" {
                     let ok = matches!(v.as_str(), Some("floating" | "panel"));
                     target.insert(k.clone(), if ok { v.clone() } else { json!("floating") });
+                } else if k == "skinId" {
+                    let skin = match v.as_str() {
+                        Some("signal" | "ink") => v.clone(),
+                        _ => Value::Null,
+                    };
+                    target.insert(k.clone(), skin);
                 } else if k == "uiFont" {
                     // A font family name at most — trim and cap so a stray
                     // paste can't bloat config.json.
