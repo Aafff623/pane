@@ -426,6 +426,10 @@ const en: Dict = {
 
   "card.notConnected": "Not connected",
   "card.signIn": "Sign in",
+  "card.hintSignIn": "Sign in with {name} from the auth center to see its quota.",
+  "card.hintWorkbuddyEncrypted": "WorkBuddy's desktop sign-in is stored encrypted on this machine and Pane does not decrypt it. Sign in from the auth center instead.",
+  "card.hintWorkbuddyUnreadable": "WorkBuddy desktop sign-in could not be read: {reason}",
+  "card.hintSessionExpired": "{name} session expired — sign in again from the auth center",
   "card.outdated": "⚠ Outdated",
   "card.bootCache": "Cached data · refreshing",
   "card.showMore": "Show more",
@@ -1448,6 +1452,10 @@ const zh: Dict = {
 
   "card.notConnected": "未连接",
   "card.signIn": "去登录",
+  "card.hintSignIn": "请从授权中心登录 {name} 以查看额度。",
+  "card.hintWorkbuddyEncrypted": "本机 WorkBuddy 桌面版的登录态是加密存储的，Pane 不解密它——请改从授权中心登录。",
+  "card.hintWorkbuddyUnreadable": "WorkBuddy 桌面版登录态读取失败：{reason}",
+  "card.hintSessionExpired": "{name} 会话已过期——请从授权中心重新登录",
   "card.outdated": "⚠ 数据过时",
   "card.bootCache": "缓存数据 · 刷新中",
   "card.showMore": "显示更多",
@@ -2416,6 +2424,10 @@ const ru: Dict = {
 
   "card.notConnected": "Не подключено",
   "card.signIn": "Войти",
+  "card.hintSignIn": "Войдите в {name} через центр авторизации, чтобы увидеть лимиты.",
+  "card.hintWorkbuddyEncrypted": "Сеанс WorkBuddy на этом компьютере хранится в зашифрованном виде, и Pane его не расшифровывает. Войдите через центр авторизации.",
+  "card.hintWorkbuddyUnreadable": "Не удалось прочитать сеанс WorkBuddy: {reason}",
+  "card.hintSessionExpired": "Сеанс {name} истёк — войдите снова через центр авторизации",
   "card.outdated": "⚠ Данные устарели",
   "card.bootCache": "Кэшированные данные · обновляем",
   "card.showMore": "Ещё",
@@ -3121,6 +3133,28 @@ export function displayMetricLabel(label: string): string {
     return t("metric.modelWeekly", { model: label.slice(0, -7) });
   }
   return label;
+}
+
+/// Rust emits card hints in English (per-provider no-data / degraded
+/// messages). Translate the known shapes at paint time so a Chinese or
+/// Russian UI never shows a bare English sentence where the guidance
+/// lives.
+export function displayCardHint(text: string): string {
+  if (getLocale() === "en" || !text) return text;
+  const generic = text.match(/^Sign in with (.+) from the auth center to see its quota\.$/);
+  if (generic) return t("card.hintSignIn", { name: generic[1] });
+  if (
+    /^WorkBuddy's desktop sign-in is stored encrypted on this machine and Pane does not decrypt it\. Sign in from the auth center instead\.$/.test(
+      text,
+    )
+  ) {
+    return t("card.hintWorkbuddyEncrypted");
+  }
+  const unreadable = text.match(/^WorkBuddy desktop sign-in could not be read: (.+)$/);
+  if (unreadable) return t("card.hintWorkbuddyUnreadable", { reason: unreadable[1] });
+  const expired = text.match(/^(.+) session expired — sign in again from the auth center$/);
+  if (expired) return t("card.hintSessionExpired", { name: expired[1] });
+  return text;
 }
 
 export function displayLinkLabel(label: string): string {

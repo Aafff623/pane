@@ -21,6 +21,7 @@ import {
   displayLinkLabel,
   displayMetricDetail,
   displayMetricLabel,
+  displayCardHint,
   detectSystemLocale,
   localeTag,
   normalizeLocalePref,
@@ -2718,7 +2719,7 @@ function renderCard(s: Snapshot): string {
         ${L.expanded ? `<div class="on-demand${anim}">${onDemandHtml}</div>` : ""}`;
     }
   } else {
-    body = `<p class="placeholder">${escapeHtml(shown.error ?? t("card.notConnected"))}</p>${authJumpHtml(shown)}`;
+    body = `<p class="placeholder">${escapeHtml(displayCardHint(shown.error ?? t("card.notConnected")))}</p>${authJumpHtml(shown)}`;
   }
 
   const stale = !shown.stale
