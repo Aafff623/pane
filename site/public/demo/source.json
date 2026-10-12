@@ -2,9 +2,9 @@
   "version": "0.7.0",
   "files": {
     "index.html": "103623c0358808e6493d579345051349ab5c4c1c5684cd5ac18293b8e0d427a9",
-    "src/main.ts": "caf556322551f8b3b173147efa3d02ebd3f5be9fbb14136b9344484def9edf97",
-    "src/styles.css": "50ffb221fee12a71ceb284e8ec04e54df1bc16ae6d5a32d91bcb5188b7f811c1",
-    "src/i18n.ts": "be028038d1d1a92ac1d05be6fb9a82a0a5dbefa2c23dab30e63a5ee5e3e7df09",
-    "src/providerCatalog.ts": "a4ea56e9f3acad172467456719c983d87b47e3aee2ee3db0facd5f6182c48546"
+    "src/main.ts": "e929af6ef8c47d975948e47cbf9faec3ffeed0720a64ae838d318a63e1481ade",
+    "src/styles.css": "1d02925472f778c95c050b2fec0584dc7a5d161bae543b801e354ec202b00151",
+    "src/i18n.ts": "20527ab41e40ff35b552090007e7d9e0e02c87836ba545158a8e8ba569f95afb",
+    "src/providerCatalog.ts": "d9541aea63befcc91f05d096d1baf3c38686ae36f57868425632284f414814f1"
   }
 }
