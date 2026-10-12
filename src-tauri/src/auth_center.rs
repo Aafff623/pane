@@ -81,8 +81,8 @@ fn rows_for_family_from(base: &Path, family: &str) -> Vec<AuthAccountRow> {
                 kind: "account",
             })
             .collect(),
-        "codebuddy" | "copilot" | "grok" | "kiro" | "qoder" | "trae" | "windsurf"
-        | "zed" => {
+        "codebuddy" | "codebuddycn" | "workbuddy" | "copilot" | "grok" | "kiro"
+        | "qoder" | "trae" | "windsurf" | "zed" => {
             crate::login_accounts::load_with_imported_single_login_from(base, family)
                 .iter()
                 .map(|login| AuthAccountRow {
@@ -135,6 +135,41 @@ mod tests {
         assert_eq!(groups[0].family, "antigravity");
         assert!(groups.iter().any(|g| g.family == "grok"));
         assert!(groups.iter().all(|g| g.accounts.is_empty()));
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn workbuddy_and_codebuddycn_rows_come_from_the_login_store() {
+        // Regression: the login-backed match arm once listed every family
+        // EXCEPT workbuddy/codebuddycn, so a scanned WorkBuddy account was
+        // stored, rendered on its card, and yet invisible in the auth
+        // center (2026-10-12 user report).
+        let base = temp_base("workbuddy");
+        for family in ["workbuddy", "codebuddycn"] {
+            crate::login_accounts::save_to(
+                &base,
+                family,
+                &[crate::login_accounts::LoginAccount {
+                    account_id: "uid-1".into(),
+                    email: String::new(),
+                    label: "1aaac1cc".into(),
+                    access_token: "tok".into(),
+                    refresh_token: String::new(),
+                    id_token: String::new(),
+                    expires_at: String::new(),
+                    added_at: 1_700_000_000,
+                    extra: serde_json::json!({ "uid": "uid-1" }),
+                }],
+            )
+            .expect("seed login");
+        }
+        let groups = collect_from(&base);
+        for family in ["workbuddy", "codebuddycn"] {
+            let group = groups.iter().find(|g| g.family == family).expect("group");
+            assert_eq!(group.accounts.len(), 1, "{family} must list its login");
+            assert_eq!(group.accounts[0].label, "1aaac1cc");
+            assert_eq!(group.accounts[0].kind, "account");
+        }
         let _ = std::fs::remove_dir_all(&base);
     }
 

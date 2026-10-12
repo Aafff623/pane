@@ -2604,8 +2604,12 @@ function renderCard(s: Snapshot): string {
   if (s.id === family && supportsExtraAccounts(family) && !isParallelAccountFamily(family)) {
     accountIds = lastSnapshots
       .filter((snap) => providerFamily(snap.id) === family && !isCardDisabled(snap.id))
+      // A bare family card that is a pure hint (no_credentials) is not an
+      // account: counting it produced the phantom "1/2" badge and a 置顶
+      // tab on login-only families (WorkBuddy).
+      .filter((snap) => !(snap.id === family && snap.status === "no_credentials"))
       .map((snap) => snap.id);
-    if (accountIds.length > 1) {
+    if (accountIds.length >= 1) {
       // Families whose bare card IS an account (kimi) default to it; One/New
       // API has no bare snapshot at all, so the default tab is the first
       // healthy account — otherwise the computed tabs would never light up.
@@ -2649,6 +2653,12 @@ function renderCard(s: Snapshot): string {
           return `<button type="button" class="card-account-tab${on ? " on" : ""}${compactTabs && !isNamed ? " compact" : ""}${compactTabs && isNamed ? " compact-noted" : ""}" data-card-account="${family}|${escapeHtml(id)}" title="${escapeHtml(tabTitle)}" aria-label="${escapeHtml(label)}"><span class="acct-dot ${dot}"></span><span class="card-account-tab-label" ${compactLabelStyle(tabLabel, 10.5, 8)}>${escapeHtml(tabLabel)}</span></button>`;
         })
         .join("")}</div>`;
+      if (accountIds.length <= 1) {
+        // One real account: the bare card already displays it — no ratio
+        // badge and no tab strip.
+        accountCount = "";
+        accountTabs = "";
+      }
     }
     // The synthesized One/New API family card carries the family id but no
     // real snapshot backs it — display the first healthy account directly
