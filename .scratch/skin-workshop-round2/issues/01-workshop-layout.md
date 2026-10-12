@@ -1,7 +1,7 @@
 # 01 — 工坊两级布局与下载/使用两步制
 
 Type: task
-Status: ready-for-agent
+Status: done（见对应 commit，2026-10-12）
 Blocked by: None
 
 ## What to build

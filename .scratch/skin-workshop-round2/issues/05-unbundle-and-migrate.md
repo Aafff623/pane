@@ -1,7 +1,7 @@
 # 05 — signal/ink 全量出包与老用户迁移
 
 Type: task
-Status: ready-for-agent
+Status: 大部分完成——出包+迁移已落地；「拆资产翻闸」待 CF 部署（push）后执行
 Blocked by: 03, 04
 
 ## What to build

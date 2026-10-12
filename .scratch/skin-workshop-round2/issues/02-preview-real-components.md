@@ -1,7 +1,7 @@
 # 02 — 预览真实组件化（与真实主题完全一致）
 
 Type: task
-Status: ready-for-agent
+Status: done（见对应 commit，2026-10-12）
 Blocked by: 01
 
 ## What to build

@@ -1,7 +1,7 @@
 # 03 — 皮肤资源包格式与热加载器
 
 Type: task
-Status: ready-for-agent
+Status: done（见对应 commit，2026-10-12）
 Blocked by: None
 
 ## What to build

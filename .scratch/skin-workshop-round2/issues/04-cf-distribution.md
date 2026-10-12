@@ -1,7 +1,7 @@
 # 04 — Cloudflare 分发渠道（worker 索引 + R2 存包）
 
 Type: task
-Status: ready-for-agent
+Status: done（见对应 commit，2026-10-12）
 Blocked by: 03
 
 ## What to build
