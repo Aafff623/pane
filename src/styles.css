@@ -2470,28 +2470,19 @@ article.provider.is-folded:hover {
 
 .donut-wrap {
   display: flex;
+  /* Stacked is the only layout: ring above the time-range column at every
+     viewport width and DPI scaling. A side-by-side row used to live here
+     behind a 440px media query and read as a broken card on 100%-scaling
+     machines (2026-10-12 user report; regression loop:
+     temp/scripts/spend-layout-loop.mjs must stay green at every width). */
+  flex-direction: column;
   align-items: center;
-  gap: 10px;
+  gap: 6px;
   margin-top: 10px;
 }
 
-/* Narrow viewports (small widget on high-DPI displays): a 96px ring plus
-   two legend columns cannot fit side by side — names ellipsize to a few
-   characters. Stack the ring above the columns so every legend row gets
-   half the full card width. */
-@media (max-width: 440px) {
-  .donut-wrap {
-    flex-direction: column;
-    gap: 6px;
-  }
-
-  .donut-wrap > svg {
-    margin: 0 auto;
-  }
-
-  .spend-cols {
-    width: 100%;
-  }
+.donut-wrap > svg {
+  margin: 0 auto;
 }
 
 .legend {
@@ -2537,6 +2528,7 @@ article.provider.is-folded:hover {
 .spend-cols {
   flex: 1;
   min-width: 0;
+  width: 100%;
   display: grid;
   grid-template-columns: minmax(0, 1fr);
   gap: 16px;
