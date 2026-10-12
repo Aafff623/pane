@@ -2432,6 +2432,20 @@ article.provider.is-folded:hover {
   padding: 8px;
 }
 
+/* A card with no data because it needs a sign-in offers the jump to the auth
+   center right under the hint that asks for it. */
+.placeholder + .auth-jump {
+  margin-top: 8px;
+}
+
+/* The auth-center block a popover jump asked for, lit briefly so the eye
+   lands on it after the scroll. */
+.auth-jump-target {
+  box-shadow: 0 0 0 2px var(--accent);
+  border-radius: 8px;
+  transition: box-shadow 1.2s ease-out;
+}
+
 .provider.muted {
   padding: 7px 13px;
   opacity: 0.7;

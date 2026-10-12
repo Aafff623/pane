@@ -425,6 +425,7 @@ const en: Dict = {
   "dialog.whatsNew": "What's new in v{version}",
 
   "card.notConnected": "Not connected",
+  "card.signIn": "Sign in",
   "card.outdated": "⚠ Outdated",
   "card.bootCache": "Cached data · refreshing",
   "card.showMore": "Show more",
@@ -1446,6 +1447,7 @@ const zh: Dict = {
   "dialog.whatsNew": "v{version} 有什么新内容",
 
   "card.notConnected": "未连接",
+  "card.signIn": "去登录",
   "card.outdated": "⚠ 数据过时",
   "card.bootCache": "缓存数据 · 刷新中",
   "card.showMore": "显示更多",
@@ -2413,6 +2415,7 @@ const ru: Dict = {
   "dialog.whatsNew": "Что нового в v{version}",
 
   "card.notConnected": "Не подключено",
+  "card.signIn": "Войти",
   "card.outdated": "⚠ Данные устарели",
   "card.bootCache": "Кэшированные данные · обновляем",
   "card.showMore": "Ещё",

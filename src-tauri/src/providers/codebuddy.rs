@@ -20,13 +20,164 @@ const UA: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (
 
 /// Login-only family: the bare card reports how to add an account, and
 /// every stored login renders its own `<family>@<fingerprint>` card.
+///
+/// WorkBuddy gets one more source ahead of that hint: the desktop app's own
+/// auth store, read straight off disk (`workbuddy_local`) — the route magpie
+/// takes, so no scan is involved. It is read-only, and when the store is
+/// encrypted at rest or absent the card falls back to the sign-in hint and
+/// the other routes stay the user's choice.
 pub async fn snapshot(f: &'static Family) -> Snapshot {
+    if f.family_id == "workbuddy" {
+        match crate::providers::workbuddy_local::read() {
+            crate::providers::workbuddy_local::LocalRead::Session(session) => {
+                return snapshot_from_desktop(f, *session).await;
+            }
+            crate::providers::workbuddy_local::LocalRead::Encrypted => {
+                return Snapshot::no_credentials(
+                    f.family_id,
+                    f.display_name,
+                    "WorkBuddy's desktop sign-in is stored encrypted on this machine and Pane does not decrypt it. Sign in from the auth center instead.",
+                );
+            }
+            crate::providers::workbuddy_local::LocalRead::Unreadable(reason) => {
+                return Snapshot::error(
+                    f.family_id,
+                    f.display_name,
+                    format!("WorkBuddy desktop sign-in could not be read: {reason}"),
+                );
+            }
+            crate::providers::workbuddy_local::LocalRead::Missing => {}
+        }
+    }
     let hint = format!("Sign in with {} from the auth center to see its quota.", f.display_name);
     Snapshot::no_credentials(f.family_id, f.display_name, &hint)
 }
 
-pub fn local_credential_hint(_f: &Family) -> Option<String> {
-    None
+/// The desktop app's session, shaped like a Pane login so it takes the same
+/// read path.
+///
+/// Follows magpie's route for this source: the access token is used as it is
+/// until it is within a minute of expiring, then refreshed once and the
+/// rotated pair kept **here** — WorkBuddy's own file is never written, and
+/// nothing is minted into Pane's login store either, so the desktop app stays
+/// the sole owner of that file.
+async fn snapshot_from_desktop(
+    f: &'static Family,
+    session: crate::providers::workbuddy_local::LocalSession,
+) -> Snapshot {
+    let fresh = desktop_fresh_tokens(f, &session).await;
+    let (access_token, refresh_token) = match fresh {
+        Some(pair) => pair,
+        None => (session.access_token.clone(), session.refresh_token.clone()),
+    };
+    let login = crate::login_accounts::LoginAccount {
+        account_id: session.uid.clone(),
+        email: String::new(),
+        label: format!("{} — desktop app", f.display_name),
+        access_token,
+        refresh_token,
+        id_token: String::new(),
+        expires_at: session
+            .expires_at_ms
+            .and_then(chrono::DateTime::from_timestamp_millis)
+            .map(|t| t.to_rfc3339())
+            .unwrap_or_default(),
+        added_at: 0,
+        extra: json!({ "uid": session.uid, "domain": session.domain }),
+    };
+    let id = crate::login_accounts::card_id_for_account(f.family_id, &login);
+    let name = login_card_name(f, &login);
+
+    match fetch_with_login(f, &login, false).await {
+        Ok(snapshot) => snapshot,
+        Err(error) => Snapshot::error(&id, &name, error),
+    }
+}
+
+/// The rotated pair for a desktop-file account, cached in memory for the
+/// session (magpie's `wbTokens`): without it every refresh cycle would read
+/// the file's now-stale stamp and rotate the token again.
+static DESKTOP_TOKENS: std::sync::LazyLock<std::sync::Mutex<std::collections::HashMap<String, (String, String)>>> =
+    std::sync::LazyLock::new(|| std::sync::Mutex::new(std::collections::HashMap::new()));
+
+/// magpie's rule for a desktop-store token: refresh only when the access
+/// token is within a minute of expiring, the store actually said when it
+/// expires, and the refresh token is present and not itself lapsed. Anything
+/// else leaves the token alone and lets the request try what there is.
+fn desktop_needs_refresh(
+    session: &crate::providers::workbuddy_local::LocalSession,
+    now_ms: i64,
+) -> bool {
+    let Some(expires_at) = session.expires_at_ms else {
+        return false; // the store did not say — trust it until the server refuses
+    };
+    if now_ms < expires_at - 60_000 {
+        return false; // still has life
+    }
+    if session.refresh_token.trim().is_empty() {
+        return false;
+    }
+    !session.refresh_expires_at_ms.is_some_and(|at| now_ms >= at)
+}
+
+/// Refresh the desktop app's token only when it is about to lapse (magpie
+/// refreshes a minute ahead), and only when the refresh token itself is still
+/// inside its own lifetime. A refresh failure is not fatal: the current token
+/// is tried as it is, exactly as magpie does.
+async fn desktop_fresh_tokens(
+    f: &'static Family,
+    session: &crate::providers::workbuddy_local::LocalSession,
+) -> Option<(String, String)> {
+    let cached = DESKTOP_TOKENS.lock().ok()?.get(&session.uid).cloned();
+    if let Some(pair) = &cached {
+        return Some(pair.clone());
+    }
+    if !desktop_needs_refresh(session, chrono::Utc::now().timestamp_millis()) {
+        return None;
+    }
+    let rotated = crate::codebuddy_login::refresh(
+        f,
+        &session.access_token,
+        &session.refresh_token,
+        Some(&session.domain),
+    )
+    .await
+    .ok()?;
+    let access = rotated
+        .get("accessToken")
+        .or_else(|| rotated.get("access_token"))
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|s| !s.is_empty())?
+        .to_string();
+    let refresh = rotated
+        .get("refreshToken")
+        .or_else(|| rotated.get("refresh_token"))
+        .and_then(Value::as_str)
+        .unwrap_or(&session.refresh_token)
+        .to_string();
+    DESKTOP_TOKENS
+        .lock()
+        .ok()?
+        .insert(session.uid.clone(), (access.clone(), refresh.clone()));
+    Some((access, refresh))
+}
+
+/// Pure local probe for the Customize gear panel (no network): the desktop
+/// app's sign-in store, when it holds a readable session.
+pub fn local_credential_hint(f: &Family) -> Option<String> {
+    if f.family_id != "workbuddy" {
+        return None;
+    }
+    match crate::providers::workbuddy_local::read() {
+        crate::providers::workbuddy_local::LocalRead::Session(_) => {
+            Some("WorkBuddy desktop app sign-in (read-only)".to_string())
+        }
+        crate::providers::workbuddy_local::LocalRead::Encrypted => {
+            Some("WorkBuddy desktop sign-in is encrypted at rest".to_string())
+        }
+        _ => None,
+    }
 }
 
 /// Snapshot for one Pane-managed family login. A rejected token
@@ -525,6 +676,51 @@ fn pack_row(pack: &Value) -> (String, String) {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    fn desktop_session(expires_at_ms: Option<i64>, refresh_expires_at_ms: Option<i64>, refresh: &str) -> crate::providers::workbuddy_local::LocalSession {
+        crate::providers::workbuddy_local::LocalSession {
+            uid: "u-1".into(),
+            access_token: "at".into(),
+            refresh_token: refresh.into(),
+            domain: "www.workbuddy.cn".into(),
+            expires_at_ms,
+            refresh_expires_at_ms,
+        }
+    }
+
+    #[test]
+    fn a_desktop_token_with_life_left_is_left_alone() {
+        let now = 1_000_000_000_000i64;
+        let s = desktop_session(Some(now + 86_400_000), Some(now + 172_800_000), "rt");
+        assert!(!desktop_needs_refresh(&s, now));
+    }
+
+    #[test]
+    fn a_desktop_token_inside_the_last_minute_is_refreshed() {
+        let now = 1_000_000_000_000i64;
+        let s = desktop_session(Some(now + 30_000), Some(now + 86_400_000), "rt");
+        assert!(desktop_needs_refresh(&s, now));
+        // exactly a minute ahead is still "about to lapse"
+        let edge = desktop_session(Some(now + 60_000), Some(now + 86_400_000), "rt");
+        assert!(desktop_needs_refresh(&edge, now));
+    }
+
+    #[test]
+    fn an_undated_desktop_token_is_trusted_until_refused() {
+        let now = 1_000_000_000_000i64;
+        assert!(!desktop_needs_refresh(&desktop_session(None, None, "rt"), now));
+    }
+
+    #[test]
+    fn a_lapsed_refresh_token_stops_the_refresh() {
+        let now = 1_000_000_000_000i64;
+        // refresh token already past its own expiry
+        let lapsed = desktop_session(Some(now - 1), Some(now - 1), "rt");
+        assert!(!desktop_needs_refresh(&lapsed, now));
+        // no refresh token at all
+        let none = desktop_session(Some(now - 1), None, "  ");
+        assert!(!desktop_needs_refresh(&none, now));
+    }
 
     #[test]
     fn resource_items_accepts_the_known_shapes() {

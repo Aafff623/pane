@@ -286,6 +286,10 @@ const CONFIG_KEYS: &[&str] = &[
     "mainScrollTop",
     "qoderCheckin",
     "removedProviders",
+    // Frontend-owned: the popover's one-shot "open the panel here" request
+    // (see applyPanelIntent in main.ts). Stored so the panel window can read
+    // it on boot — the two windows share nothing else.
+    "panelIntent",
 ];
 
 /// Providers hidden by default on a fresh install: everything outside the
