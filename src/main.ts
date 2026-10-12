@@ -241,6 +241,15 @@ interface CardGroup {
   collapsed?: boolean;
 }
 
+/// A one-shot "open the panel here" request from the popover. The two windows
+/// share only the config store and the config-updated event, so the intent
+/// rides in the config and the panel applies the newest stamp it has not seen.
+interface PanelIntent {
+  view: "auth";
+  family?: string;
+  at: number;
+}
+
 interface Config {
   refreshMinutes: number;
   disabled: string[];
@@ -289,6 +298,7 @@ interface Config {
   mainScrollTop: number;
   qoderCheckin: boolean;
   removedProviders: string[];
+  panelIntent: PanelIntent | null;
 }
 
 const FRONTEND_CONFIG_KEYS = [
@@ -337,6 +347,7 @@ const FRONTEND_CONFIG_KEYS = [
   "spendIconTiers",
   "overviewCatFull",
   "mainScrollTop",
+  "panelIntent",
   "qoderCheckin",
   "removedProviders",
 ] as const satisfies readonly (keyof Config)[];
@@ -548,6 +559,7 @@ let config: Config = {
   mainScrollTop: 0,
   qoderCheckin: false,
   removedProviders: [],
+  panelIntent: null,
 };
 let pendingJumpAnimation: "smooth" | "instant" | null = null;
 let settingsDirty = false;
@@ -1042,6 +1054,8 @@ async function reloadConfigFromBackend(): Promise<void> {
   fresh.localShortcuts = fresh.localShortcuts ?? {};
   config = fresh;
   pruneEmptyCardGroups();
+  // The other window may have just handed us a "open this family" request.
+  applyPanelIntent();
   applyLocale();
   syncSettingsControls();
   if (!IS_PANEL_FORM) scheduleAutoRefresh();
@@ -2578,7 +2592,7 @@ function renderCard(s: Snapshot): string {
         ${L.expanded ? `<div class="on-demand${anim}">${onDemandHtml}</div>` : ""}`;
     }
   } else {
-    body = `<p class="placeholder">${escapeHtml(shown.error ?? t("card.notConnected"))}</p>`;
+    body = `<p class="placeholder">${escapeHtml(shown.error ?? t("card.notConnected"))}</p>${authJumpHtml(shown)}`;
   }
 
   const stale = shown.stale
@@ -12474,6 +12488,9 @@ async function initSettings(): Promise<void> {
   // initial values from it) but before applyLocale, so applyStaticI18n
   // translates the new DOM in the same pass.
   if (IS_PANEL_FORM) initPanelForm();
+  // The shell exists now, so an intent the popover wrote before opening this
+  // window can land (see applyPanelIntent).
+  applyPanelIntent();
   document.querySelector<HTMLButtonElement>("#settings-save-all")?.addEventListener("click", () => {
     void applySettingsAndReload();
   });
@@ -13476,6 +13493,56 @@ function setPanelView(view: "settings" | "auth"): void {
   if (settingsView) settingsView.hidden = view !== "settings";
   if (authView) authView.hidden = view !== "auth";
   if (view === "auth") void loadAuthCenter();
+}
+
+let appliedPanelIntentAt = 0;
+
+/// The popover's "open this family in the auth center" request, applied once
+/// per stamp. The two windows share only the config and the config-updated
+/// event, so the config *is* the message — no new IPC channel.
+function applyPanelIntent(): void {
+  if (!IS_PANEL_FORM) return;
+  const intent = config.panelIntent;
+  if (!intent || intent.at <= appliedPanelIntentAt) return;
+  // Before the panel shell exists there is nothing to switch, and consuming
+  // the stamp here would silently drop the request.
+  if (!document.querySelector("#panel-view-auth")) return;
+  appliedPanelIntentAt = intent.at;
+  if (intent.view === "auth") {
+    setPanelView("auth");
+    if (intent.family) void focusAuthFamily(intent.family);
+  }
+}
+
+/// Bring one family's block in the auth center into view, with a brief
+/// highlight so the eye lands on it. The center renders asynchronously, so
+/// wait for its rows first.
+async function focusAuthFamily(family: string): Promise<void> {
+  await loadAuthCenter();
+  const section = document.querySelector<HTMLElement>(`[data-auth-group="${CSS.escape(family)}"]`);
+  if (!section) return;
+  section.scrollIntoView({ block: "start", behavior: scrollBehavior() });
+  section.classList.add("auth-jump-target");
+  window.setTimeout(() => section.classList.remove("auth-jump-target"), 1600);
+}
+
+/// Open the panel on this family's auth-center block: write the intent (the
+/// panel picks it up on boot, or on the config-updated event when it is
+/// already open), then ask for the window.
+async function jumpToAuthCenter(family: string): Promise<void> {
+  await patchConfig({ panelIntent: { view: "auth", family, at: Date.now() } }).catch(() => {});
+  void invoke("open_panel_window").catch(() => {});
+}
+
+/// A card with no data because it needs a Pane sign-in gets a button that
+/// lands on its row in the auth center — the journey its hint describes,
+/// without making the user go find the page. Families Pane can sign in for
+/// are the ones the catalog marks as OAuth; a key-only family is pointed at
+/// its own key field by its hint instead.
+function authJumpHtml(snap: Snapshot): string {
+  const family = providerFamily(snap.id);
+  if (snap.status !== "no_credentials" || providerDefinition(family)?.supportsOAuth !== true) return "";
+  return `<button class="mini-btn auth-jump" type="button" data-auth-jump="${escapeHtml(family)}">${escapeHtml(t("card.signIn"))}</button>`;
 }
 
 async function loadAuthCenter(): Promise<void> {
@@ -14527,6 +14594,11 @@ window.addEventListener("DOMContentLoaded", () => {
       const raw = pinBtn.dataset.cardPin ?? "";
       const splitAt = raw.indexOf("|");
       if (splitAt > 0) setPinnedAccount(raw.slice(0, splitAt), raw.slice(splitAt + 1));
+      return;
+    }
+    const authJump = target.closest<HTMLElement>("[data-auth-jump]");
+    if (authJump) {
+      void jumpToAuthCenter(authJump.dataset.authJump!);
       return;
     }
     const acctTab = target.closest<HTMLElement>("[data-card-account]");
