@@ -2332,7 +2332,11 @@ async fn fetch_provider_snapshot(provider_id: String, allow_disabled: bool) -> R
             "copilot" => providers::copilot::snapshot_with_login(login).await,
             "kiro" => providers::kiro::snapshot_with_login(login).await,
             "qoder" => providers::qoder::snapshot_with_login(login).await,
-            "codebuddy" => providers::codebuddy::snapshot_with_login(login).await,
+            // Every CodeBuddy-family member is one row in the family table.
+            fam if codebuddy_login::family(fam).is_some() => {
+                let f = codebuddy_login::known_family(fam);
+                providers::codebuddy::snapshot_with_login(f, login).await
+            }
             "windsurf" => providers::windsurf::snapshot_with_login(login).await,
             "trae" => providers::trae::snapshot_with_login(login).await,
             "zed" => providers::zed::snapshot_with_login(login).await,
@@ -2424,13 +2428,12 @@ async fn run_usage_fetch_inner(app: &tauri::AppHandle, extra_disabled: Option<Ve
     // auto-updater downloaded a fresh installer to %TEMP% on every refresh
     // (gigabytes within days). Futures are lazy, so building and dropping
     // a disabled entry here runs none of its code.
-    let base: Vec<(&str, BoxedSnap)> = vec![
+    let mut base: Vec<(&str, BoxedSnap)> = vec![
         ("claude", Box::pin(guarded("claude".into(), "Claude".into(), providers::claude::snapshot()))),
         ("codex", Box::pin(guarded("codex".into(), "Codex".into(), providers::codex::snapshot()))),
         ("cursor", Box::pin(guarded("cursor".into(), "Cursor".into(), providers::cursor::snapshot()))),
         ("opencode", Box::pin(guarded("opencode".into(), "OpenCode".into(), providers::opencode::snapshot()))),
         ("copilot", Box::pin(guarded("copilot".into(), "Copilot".into(), providers::copilot::snapshot()))),
-        ("codebuddy", Box::pin(guarded("codebuddy".into(), "CodeBuddy".into(), providers::codebuddy::snapshot()))),
         ("windsurf", Box::pin(guarded("windsurf".into(), "Windsurf".into(), providers::windsurf::snapshot()))),
         ("grok", Box::pin(guarded("grok".into(), "Grok".into(), providers::grok::snapshot()))),
         ("devin", Box::pin(guarded("devin".into(), "Devin".into(), providers::devin::snapshot()))),
@@ -2490,6 +2493,18 @@ async fn run_usage_fetch_inner(app: &tauri::AppHandle, extra_disabled: Option<Ve
         ("perplexity", Box::pin(guarded("perplexity".into(), "Perplexity".into(), providers::perplexity::snapshot()))),
         ("volcengine", Box::pin(guarded("volcengine".into(), "Volcengine Ark".into(), providers::volcengine::snapshot()))),
     ];
+    // CodeBuddy family: one bare card per table row. Adding a member is a
+    // row in `codebuddy_login::FAMILIES`, never an edit here.
+    for f in codebuddy_login::FAMILIES {
+        base.push((
+            f.family_id,
+            Box::pin(guarded(
+                f.family_id.into(),
+                f.display_name.into(),
+                providers::codebuddy::snapshot(f),
+            )),
+        ));
+    }
     // Skip the leftover Moonshot fetch only when the last Kimi card
     // actually painted — a credentials file alone is not enough (expired
     // login / network blip would otherwise hide the wallet with nothing
@@ -2621,10 +2636,14 @@ async fn run_usage_fetch_inner(app: &tauri::AppHandle, extra_disabled: Option<Ve
                     providers::qoder::login_card_name(&login),
                     Box::pin(providers::qoder::snapshot_with_login(login)),
                 ),
-                "codebuddy" => (
-                    providers::codebuddy::login_card_name(&login),
-                    Box::pin(providers::codebuddy::snapshot_with_login(login)),
-                ),
+                // CodeBuddy family: the table owns host, platform and name.
+                fam if codebuddy_login::family(fam).is_some() => {
+                    let f = codebuddy_login::known_family(fam);
+                    (
+                        providers::codebuddy::login_card_name(f, &login),
+                        Box::pin(providers::codebuddy::snapshot_with_login(f, login)),
+                    )
+                }
                 "windsurf" => (
                     providers::windsurf::login_card_name(&login),
                     Box::pin(providers::windsurf::snapshot_with_login(login)),
@@ -4419,11 +4438,23 @@ fn qoder_login_cancel(login_id: String) {
     qoder_login::cancel(&login_id);
 }
 
-/// CodeBuddy (Tencent) scan login: auth/state → browser page → auth/token
-/// poll. start → open the auth URL → poll until the scan completes.
+/// CodeBuddy family (Tencent) scan login: auth/state → browser page →
+/// auth/token poll. The family table supplies host + platform, so each
+/// member gets its own command triple under the frontend's
+/// `<family>_login_*` naming convention.
 #[tauri::command]
 async fn codebuddy_login_start() -> Result<codebuddy_login::LoginStart, String> {
-    codebuddy_login::start().await
+    codebuddy_login::start(codebuddy_login::known_family("codebuddy")).await
+}
+
+#[tauri::command]
+async fn codebuddycn_login_start() -> Result<codebuddy_login::LoginStart, String> {
+    codebuddy_login::start(codebuddy_login::known_family("codebuddycn")).await
+}
+
+#[tauri::command]
+async fn workbuddy_login_start() -> Result<codebuddy_login::LoginStart, String> {
+    codebuddy_login::start(codebuddy_login::known_family("workbuddy")).await
 }
 
 #[tauri::command]
@@ -4432,7 +4463,27 @@ async fn codebuddy_login_poll(login_id: String) -> codebuddy_login::LoginPoll {
 }
 
 #[tauri::command]
+async fn codebuddycn_login_poll(login_id: String) -> codebuddy_login::LoginPoll {
+    codebuddy_login::poll(&login_id).await
+}
+
+#[tauri::command]
+async fn workbuddy_login_poll(login_id: String) -> codebuddy_login::LoginPoll {
+    codebuddy_login::poll(&login_id).await
+}
+
+#[tauri::command]
 fn codebuddy_login_cancel(login_id: String) {
+    codebuddy_login::cancel(&login_id);
+}
+
+#[tauri::command]
+fn codebuddycn_login_cancel(login_id: String) {
+    codebuddy_login::cancel(&login_id);
+}
+
+#[tauri::command]
+fn workbuddy_login_cancel(login_id: String) {
     codebuddy_login::cancel(&login_id);
 }
 
@@ -5221,6 +5272,12 @@ pub fn run() {
             codebuddy_login_start,
             codebuddy_login_poll,
             codebuddy_login_cancel,
+            codebuddycn_login_start,
+            codebuddycn_login_poll,
+            codebuddycn_login_cancel,
+            workbuddy_login_start,
+            workbuddy_login_poll,
+            workbuddy_login_cancel,
             windsurf_login_start,
             windsurf_login_poll,
             windsurf_login_cancel,

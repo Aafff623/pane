@@ -6434,11 +6434,13 @@ const OAUTH_PROVIDERS = new Set(["codex", "grok", "copilot"]);
 /// own `<family>_login_*` commands).
 const BROWSER_LOGIN_PROVIDERS = new Set([
   "codebuddy",
+  "codebuddycn",
   "codex",
   "kiro",
   "qoder",
   "trae",
   "windsurf",
+  "workbuddy",
   "zed",
 ]);
 

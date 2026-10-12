@@ -14,8 +14,51 @@ use serde_json::Value;
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
-const API_ENDPOINT: &str = "https://www.codebuddy.ai";
 const API_PREFIX: &str = "/v2/plugin";
+
+/// One CodeBuddy-family product. The family shares the `copilot` Keycloak
+/// realm and the `/v2/plugin` billing gateway; members differ only in host
+/// and the `platform` handshake parameter.
+pub struct Family {
+    pub family_id: &'static str,
+    pub display_name: &'static str,
+    pub api_endpoint: &'static str,
+    pub platform: &'static str,
+}
+
+/// Adding a family member is adding one row here — the login flow, the
+/// provider module and the catalog wiring all read from this table
+/// (`.scratch/codebuddy-family/spec.md` D1/D2).
+pub const FAMILIES: &[Family] = &[
+    Family {
+        family_id: "codebuddy",
+        display_name: "CodeBuddy",
+        api_endpoint: "https://www.codebuddy.ai",
+        platform: "ide",
+    },
+    Family {
+        family_id: "codebuddycn",
+        display_name: "CodeBuddy CN",
+        api_endpoint: "https://www.codebuddy.cn",
+        platform: "ide",
+    },
+    Family {
+        family_id: "workbuddy",
+        display_name: "WorkBuddy",
+        api_endpoint: "https://copilot.tencent.com",
+        platform: "workbuddy",
+    },
+];
+
+pub fn family(family_id: &str) -> Option<&'static Family> {
+    FAMILIES.iter().find(|f| f.family_id == family_id)
+}
+
+/// The descriptor for a registered member. Panics only on a caller naming
+/// an id the table does not hold — a programming error, never user input.
+pub fn known_family(family_id: &str) -> &'static Family {
+    family(family_id).expect("codebuddy family member is registered")
+}
 const LOGIN_TIMEOUT: Duration = Duration::from_secs(600);
 const REMOTE_POLL_INTERVAL: Duration = Duration::from_millis(1500);
 /// Browser identity headers the IDE sends on every plugin call.
@@ -38,6 +81,8 @@ pub struct LoginPoll {
 
 struct Pending {
     login_id: String,
+    /// The family this sign-in belongs to — its endpoint serves the polls.
+    family: &'static Family,
     /// The server-issued state the token poll keys on.
     state: String,
     next_remote_poll: Instant,
@@ -57,8 +102,8 @@ fn http() -> reqwest::Client {
     crate::providers::http()
 }
 
-fn plugin_url(path: &str) -> String {
-    format!("{API_ENDPOINT}{API_PREFIX}{path}")
+fn plugin_url(f: &Family, path: &str) -> String {
+    format!("{}{API_PREFIX}{path}", f.api_endpoint)
 }
 
 /// codebuddy.ai answers every plugin call with `{code, data, message}`;
@@ -99,9 +144,9 @@ impl Tenant {
     }
 }
 
-pub async fn start() -> Result<LoginStart, String> {
+pub async fn start(family: &'static Family) -> Result<LoginStart, String> {
     let resp = http()
-        .post(plugin_url("/auth/state?platform=ide"))
+        .post(plugin_url(family, &format!("/auth/state?platform={}", family.platform)))
         .header("User-Agent", UA)
         .header("X-No-Authorization", "true")
         .header("X-No-User-Id", "true")
@@ -120,12 +165,13 @@ pub async fn start() -> Result<LoginStart, String> {
     let auth_url = as_str(data, "authUrl")
         .or_else(|| as_str(data, "auth_url"))
         .or_else(|| as_str(data, "url"))
-        .unwrap_or_else(|| format!("{API_ENDPOINT}/login?state={state}"));
+        .unwrap_or_else(|| format!("{}/login?state={state}", family.api_endpoint));
 
     let login_id = random_token();
     let mut guard = PENDING.lock().map_err(|_| "login state poisoned".to_string())?;
     *guard = Some(Pending {
         login_id: login_id.clone(),
+        family,
         state,
         next_remote_poll: Instant::now(),
         deadline: Instant::now() + LOGIN_TIMEOUT,
@@ -135,7 +181,7 @@ pub async fn start() -> Result<LoginStart, String> {
 }
 
 pub async fn poll(login_id: &str) -> LoginPoll {
-    let (state, expired, done, too_soon) = {
+    let (family, state, expired, done, too_soon) = {
         let Ok(mut guard) = PENDING.lock() else {
             return LoginPoll { done: false, label: None, error: Some("login state poisoned".into()) };
         };
@@ -146,7 +192,7 @@ pub async fn poll(login_id: &str) -> LoginPoll {
         if !too_soon {
             p.next_remote_poll = Instant::now() + REMOTE_POLL_INTERVAL;
         }
-        (p.state.clone(), Instant::now() > p.deadline, p.done, too_soon)
+        (p.family, p.state.clone(), Instant::now() > p.deadline, p.done, too_soon)
     };
     if done {
         return LoginPoll { done: true, label: None, error: None };
@@ -160,7 +206,7 @@ pub async fn poll(login_id: &str) -> LoginPoll {
     }
 
     let resp = match http()
-        .get(plugin_url(&format!("/auth/token?state={state}")))
+        .get(plugin_url(family, &format!("/auth/token?state={state}")))
         .header("User-Agent", UA)
         .header("X-No-Authorization", "true")
         .header("X-No-User-Id", "true")
@@ -203,7 +249,7 @@ pub async fn poll(login_id: &str) -> LoginPoll {
         .unwrap_or_default();
 
     // Account profile: uid / nickname / email / tenant.
-    let profile = fetch_account(&access_token, &state, domain.as_deref()).await;
+    let profile = fetch_account(family, &access_token, &state, domain.as_deref()).await;
     let uid = profile
         .as_ref()
         .and_then(|p| as_str(p, "uid"))
@@ -249,7 +295,7 @@ pub async fn poll(login_id: &str) -> LoginPoll {
 
     let poll_label = label.clone();
     let stored = crate::login_accounts::record_login(
-        "codebuddy",
+        family.family_id,
         crate::login_accounts::LoginAccount {
             account_id,
             email,
@@ -269,9 +315,14 @@ pub async fn poll(login_id: &str) -> LoginPoll {
     }
 }
 
-async fn fetch_account(access_token: &str, state: &str, domain: Option<&str>) -> Option<Value> {
+async fn fetch_account(
+    family: &Family,
+    access_token: &str,
+    state: &str,
+    domain: Option<&str>,
+) -> Option<Value> {
     let mut req = http()
-        .get(plugin_url(&format!("/login/account?state={state}")))
+        .get(plugin_url(family, &format!("/login/account?state={state}")))
         .header("User-Agent", UA)
         .header("Authorization", format!("Bearer {access_token}"))
         .header("X-No-User-Id", "true")
@@ -287,9 +338,14 @@ async fn fetch_account(access_token: &str, state: &str, domain: Option<&str>) ->
 
 /// One refresh round-trip: the IDE carries the refresh token in its own
 /// header (not the body) — returns the rotated token data.
-pub async fn refresh(access_token: &str, refresh_token: &str, domain: Option<&str>) -> Result<Value, String> {
+pub async fn refresh(
+    family: &Family,
+    access_token: &str,
+    refresh_token: &str,
+    domain: Option<&str>,
+) -> Result<Value, String> {
     let mut req = http()
-        .post(plugin_url("/auth/token/refresh"))
+        .post(plugin_url(family, "/auth/token/refresh"))
         .header("User-Agent", UA)
         .header("Authorization", format!("Bearer {access_token}"))
         .header("X-Refresh-Token", refresh_token)

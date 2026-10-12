@@ -15,9 +15,9 @@ use crate::{antigravity_accounts, cursor_accounts};
 
 /// The families the auth center groups, in display order. "grok" is the
 /// xAI family id (its device-code flow lives in oauth.rs under that name).
-pub const AUTH_FAMILIES: [&str; 11] = [
-    "antigravity", "codebuddy", "codex", "copilot", "cursor", "grok", "kiro", "qoder",
-    "trae", "windsurf", "zed",
+pub const AUTH_FAMILIES: [&str; 13] = [
+    "antigravity", "codebuddy", "codebuddycn", "codex", "copilot", "cursor", "grok", "kiro", "qoder",
+    "trae", "windsurf", "workbuddy", "zed",
 ];
 
 #[derive(Serialize, Clone, Debug, PartialEq)]

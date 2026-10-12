@@ -22,6 +22,8 @@ export const providerCatalog: readonly ProviderDefinition[] = [
   { familyId: "claude", displayName: "Claude", queryKind: "nativeSnapshot", supportsApiKey: false, supportsExtraAccounts: false, supportsOAuth: false, iconKey: "claude" },
   { familyId: "codex", displayName: "Codex", queryKind: "nativeSnapshot", supportsApiKey: false, supportsExtraAccounts: true, supportsOAuth: true, iconKey: "codex" },
   { familyId: "codebuddy", displayName: "CodeBuddy", queryKind: "nativeSnapshot", supportsApiKey: false, supportsExtraAccounts: true, supportsOAuth: true, iconKey: "codebuddy" },
+  { familyId: "codebuddycn", displayName: "CodeBuddy CN", queryKind: "nativeSnapshot", supportsApiKey: false, supportsExtraAccounts: true, supportsOAuth: true, iconKey: "codebuddy" },
+  { familyId: "workbuddy", displayName: "WorkBuddy", queryKind: "nativeSnapshot", supportsApiKey: false, supportsExtraAccounts: true, supportsOAuth: true, iconKey: "workbuddy" },
   { familyId: "cursor", displayName: "Cursor", queryKind: "nativeSnapshot", supportsApiKey: false, supportsExtraAccounts: true, supportsOAuth: false, iconKey: "cursor" },
   { familyId: "opencode", displayName: "OpenCode", queryKind: "composite", supportsApiKey: true, supportsExtraAccounts: true, supportsOAuth: false, iconKey: "opencode" },
   { familyId: "copilot", displayName: "Copilot", queryKind: "nativeSnapshot", supportsApiKey: false, supportsExtraAccounts: true, supportsOAuth: true, iconKey: "copilot" },

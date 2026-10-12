@@ -69,6 +69,28 @@ const PROVIDER_DEFINITIONS: &[ProviderDefinition] = &[
         category: ProviderCategory::Coding,
     },
     ProviderDefinition {
+        family_id: "codebuddycn",
+        display_name: "CodeBuddy CN",
+        query_kind: QueryKind::NativeSnapshot,
+        supports_api_key: false,
+        // Same login-only family; shares the CodeBuddy mark (one brand,
+        // two regional sites).
+        supports_extra_accounts: true,
+        icon_key: "codebuddy",
+        category: ProviderCategory::Coding,
+    },
+    ProviderDefinition {
+        family_id: "workbuddy",
+        display_name: "WorkBuddy",
+        query_kind: QueryKind::NativeSnapshot,
+        supports_api_key: false,
+        // Same login-only family; Tencent's desktop AI assistant, billed
+        // through the same credits gateway.
+        supports_extra_accounts: true,
+        icon_key: "workbuddy",
+        category: ProviderCategory::Coding,
+    },
+    ProviderDefinition {
         family_id: "cursor",
         display_name: "Cursor",
         query_kind: QueryKind::NativeSnapshot,
@@ -706,6 +728,8 @@ mod tests {
         let expected = [
             "codex",
             "codebuddy",
+            "codebuddycn",
+            "workbuddy",
             "cursor",
             "opencode",
             "copilot",

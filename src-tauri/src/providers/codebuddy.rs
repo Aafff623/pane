@@ -1,55 +1,57 @@
-//! CodeBuddy (Tencent, codebuddy.ai) — quota through the IDE's own
-//! billing endpoints.
+//! CodeBuddy family (Tencent) — one module for every family member
+//! (CodeBuddy / CodeBuddy CN / WorkBuddy). They share the `copilot`
+//! account realm and the `/v2/plugin` billing gateway and differ only in
+//! host and the `platform` handshake parameter, so the family table in
+//! `codebuddy_login` parameterizes everything here: adding a member is a
+//! row there, not a copy of this file.
 //!
-//! There is no local credential source in Pane: the card exists only
-//! through Pane-managed logins (codebuddy_login), one account card each.
-//! The quota surface is text-shaped — the vendor's dosage notice plus
-//! the payment type and the resource packs — so the rows are text, not
-//! meters, exactly like cockpit renders the same three fields.
+//! There is no local credential source in Pane: cards exist only through
+//! Pane-managed logins (codebuddy_login), one account card each. The card
+//! face is a credits meter (total/remaining, reset at the earliest future
+//! cycle end, frozen capacity as a Reserved row) plus the vendor's dosage
+//! notice — same three fields the web dashboard shows.
 
 use super::{http, Metric, Snapshot};
+use crate::codebuddy_login::Family;
 use serde_json::{json, Value};
 use std::time::Duration;
 
-const ID: &str = "codebuddy";
-const NAME: &str = "CodeBuddy";
-const API_ENDPOINT: &str = "https://www.codebuddy.ai";
 const UA: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
 
 /// Login-only family: the bare card reports how to add an account, and
-/// every stored login renders its own `codebuddy@<fingerprint>` card.
-pub async fn snapshot() -> Snapshot {
-    Snapshot::no_credentials(
-        ID,
-        NAME,
-        "Sign in with CodeBuddy from the auth center to see its quota.",
-    )
+/// every stored login renders its own `<family>@<fingerprint>` card.
+pub async fn snapshot(f: &'static Family) -> Snapshot {
+    let hint = format!("Sign in with {} from the auth center to see its quota.", f.display_name);
+    Snapshot::no_credentials(f.family_id, f.display_name, &hint)
 }
 
-pub fn local_credential_hint() -> Option<String> {
+pub fn local_credential_hint(_f: &Family) -> Option<String> {
     None
 }
 
-/// Snapshot for one Pane-managed CodeBuddy login. A rejected token
+/// Snapshot for one Pane-managed family login. A rejected token
 /// refreshes once through the IDE's refresh call (rotated pair written
 /// back) before the error stands.
-pub async fn snapshot_with_login(login: crate::login_accounts::LoginAccount) -> Snapshot {
-    let id = crate::login_accounts::card_id_for_account(ID, &login);
-    let name = login_card_name(&login);
-    match fetch_with_login(&login, true).await {
+pub async fn snapshot_with_login(
+    f: &'static Family,
+    login: crate::login_accounts::LoginAccount,
+) -> Snapshot {
+    let id = crate::login_accounts::card_id_for_account(f.family_id, &login);
+    let name = login_card_name(f, &login);
+    match fetch_with_login(f, &login, true).await {
         Ok(s) => s,
         Err(e) => Snapshot::error(&id, &name, e),
     }
 }
 
-pub(crate) fn login_card_name(login: &crate::login_accounts::LoginAccount) -> String {
+pub(crate) fn login_card_name(f: &Family, login: &crate::login_accounts::LoginAccount) -> String {
     if !login.label.trim().is_empty() {
         return login.label.clone();
     }
     if !login.email.trim().is_empty() {
-        return format!("CodeBuddy — {}", login.email);
+        return format!("{} — {}", f.display_name, login.email);
     }
-    format!("CodeBuddy @{}", &login.account_id[..login.account_id.len().min(12)])
+    format!("{} @{}", f.display_name, &login.account_id[..login.account_id.len().min(12)])
 }
 
 struct Access {
@@ -59,11 +61,12 @@ struct Access {
 }
 
 async fn fetch_with_login(
+    f: &'static Family,
     login: &crate::login_accounts::LoginAccount,
     allow_refresh: bool,
 ) -> Result<Snapshot, String> {
-    let id = crate::login_accounts::card_id_for_account(ID, login);
-    let name = login_card_name(login);
+    let id = crate::login_accounts::card_id_for_account(f.family_id, login);
+    let name = login_card_name(f, login);
     let access = Access {
         token: login.access_token.clone(),
         refresh_token: login.refresh_token.clone(),
@@ -72,9 +75,10 @@ async fn fetch_with_login(
 
     // The vendor signals a dead session with 401/403 on the first call,
     // so the token is probed rather than pre-judged by its expiry stamp.
-    let first = billing_post(&access, "/v2/billing/meter/get-dosage-notify", None).await?;
+    let first = billing_post(f, &access, "/v2/billing/meter/get-dosage-notify", None).await?;
     if first.rejected && allow_refresh && !access.refresh_token.trim().is_empty() {
         let rotated = crate::codebuddy_login::refresh(
+            f,
             &access.token,
             &access.refresh_token,
             access.tenant.domain.as_deref(),
@@ -94,27 +98,31 @@ async fn fetch_with_login(
             .and_then(Value::as_str)
             .unwrap_or(&access.refresh_token)
             .to_string();
-        write_back(login, &new_token, &new_refresh, &rotated);
+        write_back(f.family_id, login, &new_token, &new_refresh, &rotated);
         let updated = Access {
             token: new_token,
             refresh_token: new_refresh,
             tenant: access.tenant,
         };
-        return Box::pin(finish(&updated, &id, &name)).await;
+        return Box::pin(finish(f, &updated, &id, &name)).await;
     }
     if first.rejected {
-        return Err("CodeBuddy session expired — sign in again from the auth center".into());
+        return Err(format!(
+            "{} session expired — sign in again from the auth center",
+            f.display_name
+        ));
     }
-    finish(&access, &id, &name).await
+    finish(f, &access, &id, &name).await
 }
 
 fn write_back(
+    family_id: &str,
     login: &crate::login_accounts::LoginAccount,
     token: &str,
     refresh_token: &str,
     rotated: &Value,
 ) {
-    let mut accounts = crate::login_accounts::load(ID);
+    let mut accounts = crate::login_accounts::load(family_id);
     if let Some(entry) = accounts.iter_mut().find(|a| a.account_id == login.account_id) {
         entry.access_token = token.to_string();
         entry.refresh_token = refresh_token.to_string();
@@ -132,7 +140,7 @@ fn write_back(
             entry.extra["domain"] = Value::String(domain.to_string());
         }
     }
-    let _ = crate::login_accounts::save(ID, &accounts);
+    let _ = crate::login_accounts::save(family_id, &accounts);
 }
 
 struct Billing {
@@ -140,9 +148,16 @@ struct Billing {
     rejected: bool,
 }
 
-async fn billing_post(access: &Access, path: &str, body: Option<Value>) -> Result<Billing, String> {
+async fn billing_post(
+    f: &Family,
+    access: &Access,
+    path: &str,
+    body: Option<Value>,
+) -> Result<Billing, String> {
+    // The billing gateway rejects requests without a browser User-Agent
+    // (403 / code 10085), so UA is mandatory on every call.
     let mut req = http()
-        .post(format!("{API_ENDPOINT}{path}"))
+        .post(format!("{}{path}", f.api_endpoint))
         .timeout(Duration::from_secs(30))
         .header("User-Agent", UA)
         .header("Accept", "application/json, text/plain, */*")
@@ -181,7 +196,7 @@ async fn billing_post(access: &Access, path: &str, body: Option<Value>) -> Resul
     Ok(Billing { body, rejected: false })
 }
 
-async fn finish(access: &Access, id: &str, name: &str) -> Result<Snapshot, String> {
+async fn finish(f: &Family, access: &Access, id: &str, name: &str) -> Result<Snapshot, String> {
     let now = chrono::Local::now();
     let resource_body = json!({
         "PageNumber": 1,
@@ -194,9 +209,9 @@ async fn finish(access: &Access, id: &str, name: &str) -> Result<Snapshot, Strin
             .to_string(),
     });
     let (dosage, payment, resources) = tokio::join!(
-        billing_post(access, "/v2/billing/meter/get-dosage-notify", None),
-        billing_post(access, "/v2/billing/meter/get-payment-type", None),
-        billing_post(access, "/v2/billing/meter/get-user-resource", Some(resource_body)),
+        billing_post(f, access, "/v2/billing/meter/get-dosage-notify", None),
+        billing_post(f, access, "/v2/billing/meter/get-payment-type", None),
+        billing_post(f, access, "/v2/billing/meter/get-user-resource", Some(resource_body)),
     );
     let dosage = dosage?;
     let payment = payment?;
@@ -206,7 +221,7 @@ async fn finish(access: &Access, id: &str, name: &str) -> Result<Snapshot, Strin
     let dosage_data = dosage.body.get("data").cloned().unwrap_or(Value::Null);
     let notice = ["dosageNotifyEn", "dosageNotifyZh", "dosageNotifyCode"]
         .iter()
-        .find_map(|k| dosage_data.get(*k).and_then(value_as_display).filter(|s| !s.is_empty()));
+        .find_map(|k| dosage_data.get(*k).and_then(Value::as_str).filter(|s| !s.is_empty()));
     if let Some(notice) = notice {
         metrics.push(Metric::text("Quota", notice.to_string()));
     }
@@ -215,28 +230,192 @@ async fn finish(access: &Access, id: &str, name: &str) -> Result<Snapshot, Strin
         .get("data")
         .and_then(|d| d.as_str().or_else(|| d.get("paymentType").and_then(Value::as_str)))
         .map(str::trim)
-        .filter(|s| !s.is_empty());
-    for pack in resource_items(&resources.body) {
+        .filter(|s| !s.is_empty())
+        .map(str::to_string);
+
+    let now_ms = chrono::Utc::now().timestamp_millis();
+    let packs = resource_items(&resources.body);
+    let face = credits_face_from_items(&packs, now_ms);
+    let mut plan = None;
+    if let Some(face) = &face {
+        if face.total > 0.0 {
+            // Rollover above the grant reads as 0% used, never negative.
+            let used = face.used();
+            let pct = (used / face.total * 100.0).clamp(0.0, 100.0);
+            let meter = Metric::progress(
+                "Credits",
+                pct,
+                Some(format!("{used:.0} of {:.0} credits used", face.total)),
+            )
+            .with_reset(face.reset_ms, None);
+            metrics.push(meter);
+        } else if face.unlimited {
+            metrics.push(Metric::text("Credits", "Unlimited".to_string()));
+        } else {
+            // No total to meter against — the honest degrade is plain numbers.
+            metrics.push(Metric::text("Credits", format!("{:.0} credits left", face.remain)));
+        }
+        if face.frozen > 0.0 {
+            metrics.push(Metric::text("Reserved", format!("{:.0} credits reserved", face.frozen)));
+        }
+        plan = face.plan.clone();
+    }
+    for pack in &packs {
+        // A pack the meter already aggregates would only repeat it.
+        if face.is_some() && is_credits_pack(pack) {
+            continue;
+        }
         let (label, detail) = pack_row(pack);
         metrics.push(Metric::text(&label, detail));
     }
     if metrics.is_empty() {
-        return Err("CodeBuddy reported no quota data".into());
+        return Err(format!("{} reported no quota data", f.display_name));
     }
     metrics.truncate(6);
-    Ok(Snapshot::ok(id, name, payment_type.map(str::to_string), metrics))
+    Ok(Snapshot::ok(id, name, plan.or(payment_type), metrics))
 }
 
-fn value_as_display(value: &Value) -> Option<&str> {
-    value.as_str()
-}
-
+/// The packs array, wherever the gateway decided to nest it this quarter.
 fn resource_items(body: &Value) -> Vec<&Value> {
-    ["/data/resources", "/data/data/resources", "/data/Response/Data/Accounts", "/Response/Data/Accounts"]
-        .into_iter()
-        .find_map(|path| body.pointer(path).and_then(Value::as_array))
-        .map(|items| items.iter().collect())
-        .unwrap_or_default()
+    [
+        "/data/resources",
+        "/data/data/resources",
+        "/data/Response/Data/Accounts",
+        "/data/data/Response/Data/Accounts",
+        "/Response/Data/Accounts",
+    ]
+    .into_iter()
+    .find_map(|path| body.pointer(path).and_then(Value::as_array))
+    .map(|items| items.iter().collect())
+    .unwrap_or_default()
+}
+
+/// The card's credits face, aggregated over the packs whose unit is
+/// `credits` (spec D6): one meter from total/remaining, the frozen
+/// capacity as a Reserved row, the earliest future cycle end as the
+/// reset, and the package name as the plan label.
+struct CreditsFace {
+    total: f64,
+    remain: f64,
+    frozen: f64,
+    /// Nothing finite to meter against, and the vendor said unlimited —
+    /// a family with any finite pack still meters (this stays false).
+    unlimited: bool,
+    reset_ms: Option<i64>,
+    plan: Option<String>,
+}
+
+impl CreditsFace {
+    /// Rollover above the grant reads as zero used, never negative.
+    fn used(&self) -> f64 {
+        (self.total - self.remain).max(0.0)
+    }
+}
+
+/// Numbers arrive as JSON numbers or decimal strings ("450.0") — both parse.
+fn num(v: Option<&Value>) -> Option<f64> {
+    match v? {
+        Value::Number(n) => n.as_f64(),
+        Value::String(s) => s.trim().parse().ok(),
+        _ => None,
+    }
+}
+
+fn pack_num(pack: &Value, keys: &[&str]) -> Option<f64> {
+    keys.iter().find_map(|k| num(pack.get(*k)))
+}
+
+/// `yyyy-MM-dd HH:mm:ss` with no zone — the vendor means China Standard
+/// Time (UTC+8), matching the web dashboard's own reading.
+fn cycle_end_ms(raw: &str) -> Option<i64> {
+    use chrono::TimeZone;
+    let naive = chrono::NaiveDateTime::parse_from_str(raw.trim(), "%Y-%m-%d %H:%M:%S").ok()?;
+    let utc8 = chrono::FixedOffset::east_opt(8 * 3600)?;
+    Some(utc8.from_local_datetime(&naive).single()?.timestamp_millis())
+}
+
+/// A pack counts as credits unless it says otherwise — the older shapes
+/// carried no `CapacityUnit` at all.
+fn is_credits_pack(pack: &Value) -> bool {
+    pack.get("CapacityUnit")
+        .and_then(Value::as_str)
+        .map_or(true, |unit| unit.eq_ignore_ascii_case("credits"))
+}
+
+/// Test-only convenience: the whole body in, the face out.
+#[cfg(test)]
+fn credits_face(body: &Value, now_ms: i64) -> Option<CreditsFace> {
+    credits_face_from_items(&resource_items(body), now_ms)
+}
+
+fn credits_face_from_items(packs: &[&Value], now_ms: i64) -> Option<CreditsFace> {
+    let mut face = CreditsFace {
+        total: 0.0,
+        remain: 0.0,
+        frozen: 0.0,
+        unlimited: false,
+        reset_ms: None,
+        plan: None,
+    };
+    let mut seen = false;
+    let mut saw_unlimited = false;
+    for pack in packs {
+        if !is_credits_pack(pack) {
+            continue;
+        }
+        seen = true;
+        let total = pack_num(
+            pack,
+            &["CycleCapacitySizePrecise", "CycleCapacitySize", "CycleTotalCapacity", "totalAmount", "total"],
+        );
+        let remain = pack_num(
+            pack,
+            &["CycleCapacityRemainPrecise", "CycleCapacityRemain", "CycleRemainCapacity", "remainAmount", "remain"],
+        );
+        // Unlimited packs (limit -1) carry no meter — never summed in.
+        let unlimited = pack.get("Unlimited").and_then(Value::as_bool).unwrap_or(false)
+            || total.is_some_and(|t| t == -1.0);
+        if unlimited {
+            saw_unlimited = true;
+        } else {
+            if let Some(t) = total {
+                face.total += t;
+            }
+            if let Some(r) = remain {
+                face.remain += r;
+            }
+        }
+        if let Some(frozen) = pack_num(pack, &["CycleFrozenCapacity", "frozenCapacity"]) {
+            face.frozen += frozen;
+        }
+        if face.plan.is_none() {
+            face.plan = ["PackageName", "resourceName", "name", "productName", "packageName"]
+                .iter()
+                .find_map(|k| {
+                    pack.get(*k)
+                        .and_then(Value::as_str)
+                        .map(str::trim)
+                        .filter(|s| !s.is_empty())
+                        .map(str::to_string)
+                });
+        }
+        for key in ["CycleEndTime", "cycleEndTime", "endTime", "packageEndTime"] {
+            if let Some(raw) = pack
+                .get(key)
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+            {
+                if let Some(ms) = cycle_end_ms(raw).filter(|ms| *ms > now_ms) {
+                    face.reset_ms = Some(face.reset_ms.map_or(ms, |cur| cur.min(ms)));
+                }
+            }
+        }
+    }
+    // "Unlimited" is a property of the whole face, not of one pack: a
+    // family that also holds finite credits still gets a meter.
+    face.unlimited = seen && saw_unlimited && face.total == 0.0;
+    seen.then_some(face)
 }
 
 /// One resource pack row: its name plus whatever remaining/expiry
@@ -283,6 +462,10 @@ mod tests {
         assert_eq!(resource_items(&body).len(), 1);
         let nested = json!({ "data": { "data": { "resources": [ { "a": 1 } ] } } });
         assert_eq!(resource_items(&nested).len(), 1);
+        let accounts = json!({ "data": { "Response": { "Data": { "Accounts": [ { "a": 1 } ] } } } });
+        assert_eq!(resource_items(&accounts).len(), 1);
+        let double_nested = json!({ "data": { "data": { "Response": { "Data": { "Accounts": [ { "a": 1 }, { "b": 2 } ] } } } } });
+        assert_eq!(resource_items(&double_nested).len(), 2);
         assert!(resource_items(&json!({ "data": {} })).is_empty());
     }
 
@@ -301,5 +484,140 @@ mod tests {
         let (label, detail) = pack_row(&json!({}));
         assert_eq!(label, "Package");
         assert_eq!(detail, "active");
+    }
+
+    fn resource_body(packs: Value) -> Value {
+        json!({ "code": 0, "data": { "Response": { "Data": { "Accounts": packs } } } })
+    }
+
+    const NOW_MS: i64 = 1_760_000_000_000; // 2025-10-09 ~09:46 UTC
+
+    #[test]
+    fn credits_face_meters_from_decimal_strings() {
+        // The gateway's own wrap: precise fields are decimal strings.
+        let face = credits_face(
+            &resource_body(json!([{
+                "PackageCode": "TCACA_code_free",
+                "PackageName": "体验版",
+                "CycleCapacitySizePrecise": "500",
+                "CycleCapacityRemainPrecise": "450.5",
+                "CapacityUnit": "credits",
+                "CycleEndTime": "2026-01-31 00:00:00"
+            }])),
+            NOW_MS,
+        )
+        .expect("face");
+        assert_eq!(face.total, 500.0);
+        assert_eq!(face.remain, 450.5);
+        assert_eq!(face.used(), 49.5);
+        assert_eq!(face.plan.as_deref(), Some("体验版"));
+        // 2026-01-31 00:00:00 UTC+8 = 1769788800000.
+        assert_eq!(face.reset_ms, Some(1_769_788_800_000));
+    }
+
+    #[test]
+    fn only_credits_packs_are_summed() {
+        let face = credits_face(
+            &resource_body(json!([
+                { "PackageName": "credits pack", "CycleCapacitySize": 200.0, "CycleCapacityRemain": 100.0, "CapacityUnit": "credits" },
+                { "PackageName": "gpu pack", "CycleCapacitySize": 999.0, "CycleCapacityRemain": 1.0, "CapacityUnit": "gpu_minutes" }
+            ])),
+            NOW_MS,
+        )
+        .expect("face");
+        assert_eq!(face.total, 200.0);
+        assert_eq!(face.remain, 100.0);
+    }
+
+    #[test]
+    fn rollover_above_the_grant_reads_zero_used() {
+        let face = credits_face(
+            &resource_body(json!([{
+                "CycleCapacitySize": 100.0, "CycleCapacityRemain": 180.0, "CapacityUnit": "credits"
+            }])),
+            NOW_MS,
+        )
+        .expect("face");
+        assert_eq!(face.used(), 0.0);
+    }
+
+    #[test]
+    fn unlimited_packs_carry_no_meter() {
+        let face = credits_face(
+            &resource_body(json!([
+                { "CycleCapacitySize": 500.0, "CycleCapacityRemain": 100.0, "CapacityUnit": "credits" },
+                { "CycleCapacitySize": -1.0, "CycleCapacityRemain": -1.0, "CapacityUnit": "credits", "Unlimited": false }
+            ])),
+            NOW_MS,
+        )
+        .expect("face");
+        assert_eq!(face.total, 500.0);
+        assert_eq!(face.remain, 100.0);
+        assert!(!face.unlimited);
+    }
+
+    #[test]
+    fn an_all_unlimited_family_reads_unlimited() {
+        let face = credits_face(
+            &resource_body(json!([
+                { "CycleCapacitySize": -1.0, "CycleCapacityRemain": -1.0, "CapacityUnit": "credits" }
+            ])),
+            NOW_MS,
+        )
+        .expect("face");
+        assert!(face.unlimited);
+        assert_eq!(face.total, 0.0);
+    }
+
+    #[test]
+    fn zero_total_degrades_but_frozen_stays_visible() {
+        let face = credits_face(
+            &resource_body(json!([{
+                "CycleCapacityRemain": 0.0, "CycleFrozenCapacity": 12.0, "CapacityUnit": "credits"
+            }])),
+            NOW_MS,
+        )
+        .expect("face");
+        assert_eq!(face.total, 0.0);
+        assert_eq!(face.remain, 0.0);
+        assert_eq!(face.frozen, 12.0);
+    }
+
+    #[test]
+    fn reset_takes_the_earliest_future_cycle_end_in_utc8() {
+        // 2025-01-01 is in the past at NOW_MS — only the 2026 end counts.
+        let face = credits_face(
+            &resource_body(json!([
+                { "CycleCapacitySize": 10.0, "CapacityUnit": "credits", "CycleEndTime": "2025-01-01 00:00:00" },
+                { "CycleCapacitySize": 20.0, "CapacityUnit": "credits", "CycleEndTime": "2026-02-01 00:00:00" },
+                { "CycleCapacitySize": 30.0, "CapacityUnit": "credits", "CycleEndTime": "2026-03-01 00:00:00" }
+            ])),
+            NOW_MS,
+        )
+        .expect("face");
+        // 2026-02-01 00:00:00 UTC+8 = 1769875200000.
+        assert_eq!(face.reset_ms, Some(1_769_875_200_000));
+    }
+
+    #[test]
+    fn cycle_end_ms_reads_bare_timestamps_as_utc8() {
+        // 2026-01-01 00:00 +08:00 == 2025-12-31T16:00:00Z = 1767196800000.
+        assert_eq!(cycle_end_ms("2026-01-01 00:00:00"), Some(1_767_196_800_000));
+        assert_eq!(cycle_end_ms("not a date"), None);
+    }
+
+    #[test]
+    fn missing_unit_defaults_to_credits_for_legacy_shapes() {
+        // The older codebuddy.ai shape carried no CapacityUnit at all.
+        let face = credits_face(
+            &resource_body(json!([{
+                "resourceName": "Pro pack", "totalAmount": 100.0, "remainAmount": 40.0
+            }])),
+            NOW_MS,
+        )
+        .expect("face");
+        assert_eq!(face.total, 100.0);
+        assert_eq!(face.remain, 40.0);
+        assert_eq!(face.plan.as_deref(), Some("Pro pack"));
     }
 }

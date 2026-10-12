@@ -4,6 +4,7 @@ import claudeIcon from "./assets/providers/claude.svg?raw";
 import clawsgoIcon from "./assets/providers/clawsgo.svg?raw";
 import codebuffIcon from "./assets/providers/codebuff.svg?raw";
 import codebuddyIcon from "./assets/providers/codebuddy.svg?raw";
+import workbuddyIcon from "./assets/providers/workbuddy.svg?raw";
 import codexIcon from "./assets/providers/codex.svg?raw";
 import windsurfIcon from "./assets/providers/windsurf.svg?raw";
 import commandcodeIcon from "./assets/providers/commandcode.svg?raw";
@@ -90,6 +91,8 @@ const VISUALS: Readonly<Record<string, ProviderVisual>> = {
   clinepass: { iconKey: "clinepass", iconSvg: clinepassIcon },
   codebuff: { iconKey: "codebuff", iconSvg: codebuffIcon },
   codebuddy: { iconKey: "codebuddy", iconSvg: codebuddyIcon },
+  // Tencent's desktop AI assistant — same billing family, own mark.
+  workbuddy: { iconKey: "workbuddy", iconSvg: workbuddyIcon },
   codex: { iconKey: "codex", iconSvg: codexIcon },
   windsurf: { iconKey: "windsurf", iconSvg: windsurfIcon },
   copilot: { iconKey: "copilot", iconSvg: copilotIcon },
