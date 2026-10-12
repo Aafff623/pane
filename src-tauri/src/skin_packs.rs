@@ -126,10 +126,10 @@ fn validate_manifest(m: &SkinPackManifest) -> Result<(), String> {
     Ok(())
 }
 
-/// Reads the zip in memory: manifest → validate → hash-verify every file
-/// against the manifest → extract into `skins/<id>/` (replacing any prior
-/// install of the same id). Returns the verified manifest.
-fn install_from_bytes(bytes: &[u8]) -> Result<SkinPackManifest, String> {
+/// Verifies the zip in memory: manifest → validate → hash-verify every
+/// file against the manifest. Returns the manifest and the verified
+/// members (no writes) — the install step just persists them.
+fn verify_pack(bytes: &[u8]) -> Result<(SkinPackManifest, std::collections::BTreeMap<String, Vec<u8>>), String> {
     let mut archive = zip::ZipArchive::new(std::io::Cursor::new(bytes))
         .map_err(|e| format!("not a readable skin pack zip: {e}"))?;
     if archive.len() > 600 {
@@ -190,6 +190,13 @@ fn install_from_bytes(bytes: &[u8]) -> Result<SkinPackManifest, String> {
             return Err(format!("manifest file missing from pack: {}", f.path));
         }
     }
+    Ok((manifest, extracted))
+}
+
+/// Reads the zip in memory and installs it into `skins/<id>/` (replacing
+/// any prior install of the same id). Returns the verified manifest.
+fn install_from_bytes(bytes: &[u8]) -> Result<SkinPackManifest, String> {
+    let (manifest, extracted) = verify_pack(bytes)?;
 
     let dir = skins_dir().join(&manifest.id);
     if dir.exists() {
@@ -430,6 +437,28 @@ mod tests {
         assert!(out.contains("https://x/y.png"), "remote url untouched");
         assert!(out.contains("data:image/png;base64,AA"), "data url untouched");
         std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn the_shipped_official_packs_pass_verification() {
+        // The committed artifacts (site/public/skins) are the exact bytes
+        // the workshop serves; running them through the real verifier is
+        // the release gate for the pack format (entry-name separators,
+        // hashes, manifest completeness).
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../site/public/skins");
+        let mut checked = 0;
+        for e in std::fs::read_dir(&dir).expect("site/public/skins must exist").flatten() {
+            let name = e.file_name().to_string_lossy().into_owned();
+            if !name.starts_with("pane-skin-") || !name.ends_with(".zip") {
+                continue;
+            }
+            let bytes = std::fs::read(e.path()).unwrap();
+            let (manifest, extracted) =
+                verify_pack(&bytes).unwrap_or_else(|e| panic!("{name}: {e}"));
+            assert!(extracted.contains_key(&manifest.entry));
+            checked += 1;
+        }
+        assert!(checked >= 2, "expected the official packs, found {checked}");
     }
 
     #[test]
