@@ -1,8 +1,10 @@
-# CI gate: the frontend build and the parse-tests harness.
+# CI gate: the frontend build, the parse-tests harness, and the site locks.
 #
 # release.yml only builds and packages — without this gate a type error or a
-# broken provider parser could ship in a tagged release. The site tests have
-# their own gate in site-deploy.yml (PR + main on `site/**`).
+# broken provider parser could ship in a tagged release. The site tests also
+# run in site-deploy.yml, but that workflow is path-filtered to `site/**`:
+# src-only pushes — exactly the ones that stale the demo bundle — never
+# reach it, so they are gated here unconditionally.
 name: CI
 
 on:
@@ -41,3 +43,15 @@ jobs:
           workspaces: parse-tests
       - run: cargo test
         working-directory: parse-tests
+
+  # Zero-dependency invariant locks: i18n pairing, asset existence, demo
+  # provenance hashes, hero numbers. No npm install — they only read tracked
+  # files, which is what makes them cheap enough for every push and PR.
+  site:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: node --test site/*.test.mjs
