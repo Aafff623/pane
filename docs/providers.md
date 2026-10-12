@@ -493,6 +493,42 @@ Ground rules that apply to every provider:
   Feature-flag-only packs (e.g. 免费, no `credits_limit`) are skipped.
   Expired token → open Trae CN once and refresh.
 
+## CodeBuddy family (CodeBuddy / CodeBuddy CN / WorkBuddy)
+
+Three tenants of one Tencent CodeBuddy account system (one Keycloak realm,
+one `/v2/plugin` billing gateway). They differ only in **host** and the
+`platform` handshake parameter — the family table in
+`codebuddy_login::FAMILIES` is the single source of those three rows:
+
+| Card | Host | `platform` |
+|---|---|---|
+| CodeBuddy | `https://www.codebuddy.ai` | `ide` |
+| CodeBuddy CN | `https://www.codebuddy.cn` | `ide` |
+| WorkBuddy | `https://copilot.tencent.com` | `workbuddy` |
+
+- **Reads:** nothing of the vendor's own desktop app — Pane manages this
+  sign-in itself and stores the session in its own
+  `login-accounts/<family>.json`. Each tenant becomes its own card
+  (`family@<hash>`), so disabling one never disables another.
+- **Calls:** `POST {host}/v2/plugin/auth/state?platform={platform}` to
+  start the QR handshake, `GET {host}/v2/plugin/auth/token?state=…` to poll
+  it, and `POST {host}/v2/plugin/auth/token/refresh` (refresh token in the
+  `X-Refresh-Token` header) to renew. Usage comes from the same host:
+  `POST /v2/billing/meter/get-dosage-notify`,
+  `POST /v2/billing/meter/get-payment-type` and
+  `POST /v2/billing/meter/get-user-resource`. Every call carries a browser
+  User-Agent: the billing gateway answers `403` / `code 10085` without one.
+- **Shows:** a credits meter (used/total, countdown to the earliest future
+  cycle end, rendered in UTC+8), the plan name, and one text row per
+  resource pack the meter does not already aggregate. Packs count as
+  credits when `CapacityUnit` says so — and also when it is absent, since
+  the older shapes carried no unit at all. Unlimited plans read
+  "Unlimited"; with no total to meter against, the row degrades to plain
+  credits left. Enterprise members get an empty resource list from the
+  personal endpoint, so their usage is read from
+  `POST /v2/billing/meter/get-enterprise-user-usage` — the same call the
+  web dashboard's own `/profile/usage` page makes.
+
 ---
 
 Provider request formats were researched from two MIT-licensed macOS

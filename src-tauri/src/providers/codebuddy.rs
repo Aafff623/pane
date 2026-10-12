@@ -406,7 +406,8 @@ fn enterprise_face_from_body(body: &Value, now_ms: i64) -> Option<CreditsFace> {
 
 /// A pack counts as credits unless it says otherwise — the older shapes
 /// carried no `CapacityUnit` at all.
-fn is_credits_pack(pack: &Value) -> bool {    pack.get("CapacityUnit")
+fn is_credits_pack(pack: &Value) -> bool {
+    pack.get("CapacityUnit")
         .and_then(Value::as_str)
         .map_or(true, |unit| unit.eq_ignore_ascii_case("credits"))
 }
@@ -458,7 +459,7 @@ fn credits_face_from_items(packs: &[&Value], now_ms: i64) -> Option<CreditsFace>
             face.frozen += frozen;
         }
         if face.plan.is_none() {
-            face.plan = ["PackageName", "resourceName", "name", "productName", "packageName"]
+            face.plan = ["PackageName", "SubscriptionPackageName", "resourceName", "name", "productName", "packageName"]
                 .iter()
                 .find_map(|k| {
                     pack.get(*k)
