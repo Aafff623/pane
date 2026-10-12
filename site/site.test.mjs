@@ -76,7 +76,9 @@ test("demo: bundled frontend matches the current app sources", async () => {
 //    (package.json) and the provider count (src/providerCatalog.ts). Both
 //    drifted before (v0.4 / 43 against 0.5.0 / 66); pin them here so the next
 //    catalog expansion or version bump fails the suite instead of shipping
-//    stale marketing copy.
+//    stale marketing copy. Every occurrence is checked — the zh body says the
+//    count in two places, the hero stat block once, and the served English
+//    dictionary once — a single stale spot must fail the suite.
 test("copy: hero numbers match package.json and the provider catalog", async () => {
   const pkg = JSON.parse(
     await readFile(new URL("../package.json", import.meta.url), "utf8"),
@@ -89,7 +91,13 @@ test("copy: hero numbers match package.json and the provider catalog", async () 
   assert.ok(providerCount > 0, "catalog entries found");
   assert.ok(html.includes(`桌面伴侣 · v${pkg.version}`), `hero meta shows v${pkg.version}`);
   assert.match(html, new RegExp(`<b>${providerCount}</b><span>服务商</span>`), "hero stats show the catalog size");
-  assert.ok(html.includes(`${providerCount} 个服务商`), "provider section names the catalog size");
+  const zhCounts = [...html.matchAll(/(\d+) 个服务商/g)].map((m) => Number(m[1]));
+  assert.ok(zhCounts.length >= 2, "zh body mentions the provider count");
+  assert.deepEqual([...new Set(zhCounts)], [providerCount], `every zh mention says ${providerCount}, saw ${zhCounts}`);
+  const enCopy = LANGS.en.dict.providersCopy;
+  const enCounts = [...enCopy.matchAll(/\b(\d+) providers\b/g)].map((m) => Number(m[1]));
+  assert.ok(enCounts.length >= 1, "en dictionary mentions the provider count");
+  assert.deepEqual([...new Set(enCounts)], [providerCount], `every en mention says ${providerCount}, saw ${enCounts}`);
 });
 
 // 6. The FAQ is a grouped accordion (Ruixen-style): three topic groups of

@@ -1,5 +1,5 @@
 import { createRequire } from 'node:module';
-import { readFile, mkdir, writeFile } from 'node:fs/promises';
+import { readFile, mkdir, writeFile, rm } from 'node:fs/promises';
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { createHash } from 'node:crypto';
@@ -13,6 +13,12 @@ const { build } = await import(pathToFileURL(viteEntry).href);
 const pkg = JSON.parse(await readFile(resolve(source, 'package.json'), 'utf8'));
 const outDir = resolve(site, 'public/demo');
 await mkdir(outDir, { recursive: true });
+// Every file under demo/assets is a hashed Vite emission (chunks, CSS, the
+// skin PNGs, the aurora backdrop) — nothing hand-placed lives there. Wiping
+// the directory before each build is what keeps old chunks from piling up:
+// with emptyOutDir:false a stale 0.6.0 bundle once sat next to the live one,
+// shipping two versions in a single folder.
+await rm(resolve(outDir, 'assets'), { recursive: true, force: true });
 await build({
   configFile: false,
   root: source,

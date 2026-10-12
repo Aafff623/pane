@@ -257,6 +257,14 @@ function publishDemoPeriod() {
   if (params.get('settings') !== '1') parent.postMessage({ type: 'pane-demo-period', period: config.overviewTab }, location.origin);
 }
 
+// The workshop is a drawer state of the real frontend: [data-skin-close]
+// closes it from the market view, [data-customize-close] from the customize
+// view; whichever is absent is a no-op, so one helper covers every state.
+function closeSkinDrawer() {
+  document.querySelector('[data-skin-close]')?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+  document.querySelector('[data-customize-close]')?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+}
+
 // Alt+2 is a native global shortcut in Pane. The web demo forwards it to
 // its host; Shift is left to the real frontend's press/release handler.
 window.addEventListener('keydown', event => {
@@ -281,16 +289,18 @@ window.addEventListener('message', event => {
     document.body.classList.remove('settings-open');
     document.querySelector('#settings-close')?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     document.querySelector('[data-spend-detail-close]')?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    closeSkinDrawer();
     document.querySelector('.content')?.scrollTo({ top: 0, behavior: 'auto' });
   }
   if (action === 'spend') {
     document.body.classList.remove('settings-open');
+    closeSkinDrawer();
     document.querySelector('[data-spend-details]')?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
   }
   if (action === 'refresh') document.querySelector('#refresh')?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
   if (action === 'theme') document.querySelector('#theme-btn')?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
   if (action === 'cycle-category') {
-    const cats = ['coding', 'productivity', 'mcp'];
+    const cats = ['coding', 'mcp'];
     const active = document.querySelector<HTMLElement>('[data-overview-cat].active')?.dataset.overviewCat || 'coding';
     const next = cats[(cats.indexOf(active) + 1) % cats.length];
     const btn = document.querySelector<HTMLElement>(`[data-overview-cat="${next}"]`);
@@ -298,6 +308,10 @@ window.addEventListener('message', event => {
     if (btn) parent.postMessage({ type: 'pane-demo-category', category: next, label: btn.textContent?.trim() || next }, location.origin);
   }
   if (action === 'customize') document.querySelector<HTMLElement>('#customize-btn')?.click();
+  // #skin-btn is the app's own workshop entry (the drawer opens straight onto
+  // the skin market), so the host button replays a real click — the exact
+  // path a desktop user takes, not a bespoke web view.
+  if (action === 'skins') document.querySelector<HTMLElement>('#skin-btn')?.click();
   // T (expiring list) is keyboard-only in the app; replay it inside the demo.
   if (action === 'expiring') window.dispatchEvent(new KeyboardEvent('keydown', { key: 't', code: 'KeyT', bubbles: true }));
 });

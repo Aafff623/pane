@@ -11,6 +11,11 @@
 tag、commit 或 push；本地端口可用、截图、构建成功和 Agent 自检都不能代替
 用户验收。
 
+前端（`src/`）有改动的版本，发布前必须重跑 `node site/scripts/build-demo.mjs`
+并让 `node --test site/site.test.mjs` 全绿——官网交互演示是真实前端的构建产物，
+provenance 哈希失配即表示演示区已过期（2026-10 曾发生 src 先行合入、演示区
+落后两个提交的漂移，此后该闸门同时挂在 ci.yml 的 site job 上）。
+
 ## 1. 发布正文结构（固定骨架）
 
 ```markdown
