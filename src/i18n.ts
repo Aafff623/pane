@@ -1006,6 +1006,7 @@ const en: Dict = {
   "tray.left": "{label}: {n}% left",
 
   "detail.unlimited": "Unlimited",
+  "detail.weekendNotStarted": "Weekend not started",
   "detail.moneyOfLeft": "{a} of {b} left",
   "detail.moneyOfLeftCredits": "{a} of {b} left · {n} credits",
   "detail.moneyLeftOf": "{a} left of {b}",
@@ -2000,6 +2001,7 @@ const zh: Dict = {
   "tray.left": "{label}：剩余 {n}%",
 
   "detail.unlimited": "无限制",
+  "detail.weekendNotStarted": "周末未开始",
   "detail.moneyOfLeft": "{a} / {b} 剩余",
   "detail.moneyOfLeftCredits": "{a} / {b} 剩余 · {n} 额度",
   "detail.moneyLeftOf": "{a} / {b} 剩余",
@@ -2968,6 +2970,7 @@ const ru: Dict = {
   "tray.left": "{label}: осталось {n}%",
 
   "detail.unlimited": "Без лимита",
+  "detail.weekendNotStarted": "Выходные ещё не начались",
   "detail.moneyOfLeft": "{a} / {b} осталось",
   "detail.moneyOfLeftCredits": "{a} / {b} осталось · {n} кредитов",
   "detail.moneyLeftOf": "{a} / {b} осталось",
@@ -3119,6 +3122,7 @@ export function displayMetricDetail(text: string): string {
   m = text.match(new RegExp(`^(${num}) of (${num}) left$`, "i"));
   if (m) return t("detail.countOfLeft", { a: m[1], b: m[2] });
   if (/^available$/i.test(text.trim())) return t("card.available");
+  if (/^weekend not started$/i.test(text.trim())) return t("detail.weekendNotStarted");
   if (/^unlimited$/i.test(text.trim())) return t("detail.unlimited");
   return text;
 }

@@ -5,10 +5,13 @@
 //! ~/.zcode/v2/credentials.json, with the balance served by
 //! zcode.z.ai/api/v1/zcode-plan/billing/balance.
 //!
-//! The grant is displayed as one auxiliary row on the Z.ai card, so every
-//! failure here is silent: no local JWT, a rejected request, or no
-//! unexpired weekend plan simply yields no row (`.scratch/zcode-weekend/
-//! spec.md` — "现在不是周末，或者读取不到这个参数，这块也是不显示的").
+//! The grant is displayed as one auxiliary row on the Z.ai card. Policy
+//! (2026-10-12 amendment, issues/02-weekend-placeholder): a machine with a
+//! local ZCode session always shows the row — a live grant renders the
+//! usage bar, no live grant renders a "Weekend not started" placeholder —
+//! while a machine without a local session (or with an expired one) shows
+//! no row at all. A failed request holds this run's last verdict so the
+//! row never flickers between refreshes (`.scratch/zcode-weekend/spec.md`).
 //!
 //! Crypto and endpoint semantics mirror magpie's Go implementation
 //! (zcode.go zcodeSecret/zcodeDecrypt, zcode_start.go zcodeStartBalance):
@@ -32,9 +35,13 @@ const ZCODE_API: &str = "https://zcode.z.ai";
 /// The ZCode build whose requests we mirror; the endpoint only sanity-checks it.
 const APP_VERSION: &str = "3.14.3";
 const LABEL: &str = "ZCode Weekend";
+/// Canonical English caption for the no-live-grant placeholder; the
+/// frontend translates it at paint time (detail.weekendNotStarted).
+const NOT_STARTED: &str = "Weekend not started";
 
 /// One row's worth of weekend grant, already summed across the plan's
 /// token buckets.
+#[derive(Clone)]
 pub struct WeekendAllowance {
     pub used: f64,
     pub total: f64,
@@ -44,19 +51,59 @@ pub struct WeekendAllowance {
     pub period_ms: Option<i64>,
 }
 
-/// Reads the local ZCode session and pulls the live weekend balance.
-/// `None` on every obstacle — this row must never turn the card into an
-/// error or a warning.
-pub async fn weekend_allowance() -> Option<WeekendAllowance> {
+/// What the row should say this refresh: the live grant, or the
+/// not-started placeholder.
+#[derive(Clone)]
+pub enum WeekendState {
+    Live(WeekendAllowance),
+    NotYet,
+}
+
+/// The row for the Z.ai card, or `None` when this machine has no local
+/// ZCode session — the row is absent entirely, never a lying placeholder.
+pub async fn weekend_row() -> Option<super::Metric> {
     let jwt = read_local_jwt()?;
     let now_s = chrono::Utc::now().timestamp();
-    // An expired session can only come back as an auth error; skip the
-    // dead call until the user signs in to ZCode again.
+    // An expired session is a logged-out machine as far as this row is
+    // concerned; skip the dead call until the user signs in again.
     if jwt_expired(&jwt, now_s) {
         return None;
     }
-    let doc = fetch_balance(&jwt, &device_mid()).await?;
-    parse_weekend(&doc, now_s)
+    match fetch_balance(&jwt, &device_mid()).await {
+        Some(doc) => {
+            let state = parse_weekend(&doc, now_s)
+                .map(WeekendState::Live)
+                .unwrap_or(WeekendState::NotYet);
+            store_last(&state);
+            Some(state_metric(&state))
+        }
+        // Transient failure: hold this run's last verdict so the row does
+        // not flicker on a blip; a cold-start miss shows no row this cycle.
+        None => cached_last().as_ref().map(state_metric),
+    }
+}
+
+fn last_state() -> &'static std::sync::Mutex<Option<WeekendState>> {
+    static LAST: std::sync::OnceLock<std::sync::Mutex<Option<WeekendState>>> =
+        std::sync::OnceLock::new();
+    LAST.get_or_init(|| std::sync::Mutex::new(None))
+}
+
+fn store_last(state: &WeekendState) {
+    if let Ok(mut slot) = last_state().lock() {
+        *slot = Some(state.clone());
+    }
+}
+
+fn cached_last() -> Option<WeekendState> {
+    last_state().lock().ok().and_then(|slot| slot.clone())
+}
+
+fn state_metric(state: &WeekendState) -> super::Metric {
+    match state {
+        WeekendState::Live(w) => metric(w),
+        WeekendState::NotYet => super::Metric::text(LABEL, NOT_STARTED.into()),
+    }
 }
 
 /// The card row: usage bar + "已用 / 总量" detail + reset countdown, in the
@@ -665,6 +712,24 @@ mod tests {
         // Without the named entry the scan falls back to file order.
         store.remove("zcodejwttoken");
         assert_eq!(pick_jwt(&store, &key).as_deref(), Some("aaa.bbb.ccc"));
+    }
+
+    #[test]
+    fn not_yet_state_renders_the_placeholder_text_row() {
+        let row = state_metric(&WeekendState::NotYet);
+        assert_eq!(row.kind, "text");
+        assert_eq!(row.label, "ZCode Weekend");
+        assert_eq!(row.value.as_deref(), Some("Weekend not started"));
+        assert_eq!(row.used_percent, None);
+        // The live state still renders the progress row.
+        let live = state_metric(&WeekendState::Live(WeekendAllowance {
+            used: 10.0,
+            total: 300.0,
+            resets_at_ms: Some(1_760_300_000_000),
+            period_ms: Some(86_400_000),
+        }));
+        assert_eq!(live.kind, "progress");
+        assert_eq!(live.label, "ZCode Weekend");
     }
 
     #[test]

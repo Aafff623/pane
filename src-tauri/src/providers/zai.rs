@@ -129,12 +129,13 @@ pub async fn snapshot_with_key(key: &str) -> Snapshot {
 async fn fetch() -> Result<Snapshot, String> {
     match find_key() {
         Some(key) => fetch_with_key(&key).await,
-        // No Z.ai key. The ZCode weekend grant is tied to the local ZCode
-        // session, not to that key — with one on record the card shows it
-        // alone instead of the paste-a-key hint (.scratch/zcode-weekend).
+        // No Z.ai key. The ZCode weekend row is tied to the local ZCode
+        // session, not to that key — with a session on record the card
+        // shows the row (live grant or not-started placeholder) alone
+        // instead of the paste-a-key hint (.scratch/zcode-weekend).
         None => {
-            Ok(match zcode_weekend::weekend_allowance().await {
-                Some(w) => Snapshot::ok(ID, NAME, None, vec![zcode_weekend::metric(&w)]),
+            Ok(match zcode_weekend::weekend_row().await {
+                Some(row) => Snapshot::ok(ID, NAME, None, vec![row]),
                 None => Snapshot::no_credentials(
                     ID,
                     NAME,
@@ -164,11 +165,12 @@ async fn fetch_with_key(key: &str) -> Result<Snapshot, String> {
     Err("unexpected quota response shape (endpoint is undocumented)".into())
 }
 
-/// The ZCode weekend grant rides along as the card's last row; a miss
-/// (no local session, expired, no live grant) is simply no row.
+/// The ZCode weekend row rides along as the card's last row: live grant →
+/// usage bar, session without a grant → not-started placeholder, no local
+/// session → no row.
 async fn attach_weekend(mut snap: Snapshot) -> Snapshot {
-    if let Some(w) = zcode_weekend::weekend_allowance().await {
-        snap.metrics.push(zcode_weekend::metric(&w));
+    if let Some(row) = zcode_weekend::weekend_row().await {
+        snap.metrics.push(row);
     }
     snap
 }

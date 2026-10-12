@@ -1,6 +1,6 @@
 # ZCode Weekend 额度行（智谱 / GLM 卡片）
 
-**Status:** implemented（2026-10-12 落地于 main，待用户 UI 验收；parse-tests 699 全绿）
+**Status:** implemented（2026-10-12 落地于 main）＋ amendment：02 票把"静默隐藏"改为**登录态内常驻+占位话术**（见 issues/02-weekend-placeholder.md，同日用户拍板）
 **Feature dir:** `.scratch/zcode-weekend/`
 **Date:** 2026-10-12
 **接口配方:** 已实测拉通（见下"已核实事实"），非推测
