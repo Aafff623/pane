@@ -58,6 +58,7 @@ pub mod vertexai;
 pub mod volcengine;
 pub mod warp;
 pub mod windsurf;
+pub mod workbuddy_local;
 pub mod zai;
 pub mod zed;
 
