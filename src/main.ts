@@ -2564,10 +2564,19 @@ function overviewAccountCount(family: string): number {
   return Math.max(snapshotCount, configuredCount);
 }
 
+/// A bare family card that is a pure no_credentials hint is NOT an
+/// account: it must not inflate account counts or stand in for the
+/// family's data while real accounts exist (WorkBuddy / CodeBuddy — the
+/// phantom "0/2" and "未配置凭据" the user saw in both views).
+function isBareHintCard(snap: Snapshot): boolean {
+  return snap.id === providerFamily(snap.id) && snap.status === "no_credentials";
+}
+
 function overviewAccountSnapshots(family: string): Snapshot[] {
   return lastSnapshots.filter((snapshot) =>
     providerFamily(snapshot.id) === family &&
     !isCardDisabled(snapshot.id) &&
+    !isBareHintCard(snapshot) &&
     (!snapshot.id.includes("@") || !accountsCache.has(family) || accountsCache.get(family)?.some((entry) => entry.id === snapshot.id)),
   );
 }
@@ -2604,10 +2613,9 @@ function renderCard(s: Snapshot): string {
   if (s.id === family && supportsExtraAccounts(family) && !isParallelAccountFamily(family)) {
     accountIds = lastSnapshots
       .filter((snap) => providerFamily(snap.id) === family && !isCardDisabled(snap.id))
-      // A bare family card that is a pure hint (no_credentials) is not an
-      // account: counting it produced the phantom "1/2" badge and a 置顶
-      // tab on login-only families (WorkBuddy).
-      .filter((snap) => !(snap.id === family && snap.status === "no_credentials"))
+      // A bare family card that is a pure hint is not an account (see
+      // isBareHintCard) — counting it produced the phantom "1/2" badge.
+      .filter((snap) => !isBareHintCard(snap))
       .map((snap) => snap.id);
     if (accountIds.length >= 1) {
       // Families whose bare card IS an account (kimi) default to it; One/New
@@ -2909,9 +2917,15 @@ function pickOverviewShown(card: Snapshot): Snapshot {
   const family = providerFamily(card.id);
   const siblings = lastSnapshots.filter(
     (snap) => providerFamily(snap.id) === family && !isCardDisabled(snap.id) &&
+      !isBareHintCard(snap) &&
       (!snap.id.includes("@") || !accountsCache.has(family) ||
         accountsCache.get(family)?.some((account) => account.id === snap.id)),
   );
+  if (isBareHintCard(card) && siblings.length >= 1) {
+    // The bare hint must never stand in for a family that has accounts.
+    const selected = resolveDisplayedAccount(family, card.id, siblings.map((s) => s.id));
+    return siblings.find((s) => s.id === selected) ?? siblings[0];
+  }
   if (siblings.length <= 1) return card;
   const selected = resolveDisplayedAccount(family, card.id, siblings.map((s) => s.id));
   return siblings.find((s) => s.id === selected) ?? card;
