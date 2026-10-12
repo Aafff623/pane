@@ -1,6 +1,6 @@
 # ZCode Weekend 额度行（智谱 / GLM 卡片）
 
-**Status:** needs-triage — 有 2 个待确认点（见 Open Questions）
+**Status:** implemented（2026-10-12 落地于 main，待用户 UI 验收；parse-tests 699 全绿）
 **Feature dir:** `.scratch/zcode-weekend/`
 **Date:** 2026-10-12
 **接口配方:** 已实测拉通（见下"已核实事实"），非推测

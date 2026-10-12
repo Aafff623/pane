@@ -59,6 +59,7 @@ pub mod volcengine;
 pub mod warp;
 pub mod windsurf;
 pub mod zai;
+pub mod zcode_weekend;
 pub mod zed;
 
 use serde::{Deserialize, Serialize};

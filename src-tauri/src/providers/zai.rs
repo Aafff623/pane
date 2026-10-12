@@ -20,6 +20,8 @@
 use super::{http, stored_api_key, Metric, Snapshot};
 use serde_json::Value;
 
+use super::zcode_weekend;
+
 const ID: &str = "zai";
 const NAME: &str = "Z.ai";
 
@@ -125,21 +127,29 @@ pub async fn snapshot_with_key(key: &str) -> Snapshot {
 }
 
 async fn fetch() -> Result<Snapshot, String> {
-    let Some(key) = find_key() else {
-        return Ok(Snapshot::no_credentials(
-            ID,
-            NAME,
-            "Paste a Z.ai API key in Settings (gear icon).",
-        ));
-    };
-    fetch_with_key(&key).await
+    match find_key() {
+        Some(key) => fetch_with_key(&key).await,
+        // No Z.ai key. The ZCode weekend grant is tied to the local ZCode
+        // session, not to that key — with one on record the card shows it
+        // alone instead of the paste-a-key hint (.scratch/zcode-weekend).
+        None => {
+            Ok(match zcode_weekend::weekend_allowance().await {
+                Some(w) => Snapshot::ok(ID, NAME, None, vec![zcode_weekend::metric(&w)]),
+                None => Snapshot::no_credentials(
+                    ID,
+                    NAME,
+                    "Paste a Z.ai API key in Settings (gear icon).",
+                ),
+            })
+        }
+    }
 }
 
 async fn fetch_with_key(key: &str) -> Result<Snapshot, String> {
     let mut rejected = 0usize;
     for ep in &ENDPOINTS {
         match fetch_from(ep, key).await {
-            Ok(snapshot) => return Ok(snapshot),
+            Ok(snapshot) => return Ok(attach_weekend(snapshot).await),
             Err(DomainErr::Auth) => rejected += 1,
             Err(DomainErr::Empty) => {}
             Err(DomainErr::Other(e)) => return Err(e),
@@ -152,6 +162,15 @@ async fn fetch_with_key(key: &str) -> Result<Snapshot, String> {
         );
     }
     Err("unexpected quota response shape (endpoint is undocumented)".into())
+}
+
+/// The ZCode weekend grant rides along as the card's last row; a miss
+/// (no local session, expired, no live grant) is simply no row.
+async fn attach_weekend(mut snap: Snapshot) -> Snapshot {
+    if let Some(w) = zcode_weekend::weekend_allowance().await {
+        snap.metrics.push(zcode_weekend::metric(&w));
+    }
+    snap
 }
 
 async fn fetch_from(ep: &Endpoint, key: &str) -> Result<Snapshot, DomainErr> {
