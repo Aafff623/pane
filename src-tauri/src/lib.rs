@@ -41,6 +41,8 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Mutex, OnceLock};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use rand_core::RngCore;
+
 use serde_json::{json, Value};
 use tauri::{
     menu::{CheckMenuItem, IsMenuItem, Menu, MenuItem, PredefinedMenuItem},
@@ -1841,17 +1843,41 @@ fn restore_kimi_wallet_rows(current: &mut providers::Snapshot, previous: &provid
     }
 }
 
+/// Consecutive failed fetches per card id — the degrade threshold needs
+/// two in a row, so one network blip never paints ⚠ (the cache serves
+/// silently). A live result clears the entry.
+fn failure_streaks() -> &'static std::sync::Mutex<std::collections::HashMap<String, u32>> {
+    static STREAKS: std::sync::OnceLock<std::sync::Mutex<std::collections::HashMap<String, u32>>> =
+        std::sync::OnceLock::new();
+    STREAKS.get_or_init(|| std::sync::Mutex::new(std::collections::HashMap::new()))
+}
+
+fn bump_failure_streak(id: &str) -> u32 {
+    let mut map = failure_streaks()
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let streak = map.entry(id.to_string()).and_modify(|c| *c += 1).or_insert(1);
+    *streak
+}
+
+fn clear_failure_streak(id: &str) {
+    if let Ok(mut map) = failure_streaks().lock() {
+        map.remove(id);
+    }
+}
+
 fn restore_last_success_after_error(
     current: &mut providers::Snapshot,
     previous: &providers::Snapshot,
     age_ms: i64,
+    consecutive_failures: u32,
 ) -> bool {
     if current.status != "error" || age_ms > SNAPSHOT_CACHE_MS {
         return false;
     }
     let warning = current.error.clone();
     *current = previous.clone();
-    if age_ms > STALE_GRACE_MS {
+    if providers::should_mark_stale(age_ms > STALE_GRACE_MS, consecutive_failures) {
         current.stale = true;
         current.warning = warning;
     }
@@ -3008,6 +3034,7 @@ async fn run_usage_fetch_inner(app: &tauri::AppHandle, extra_disabled: Option<Ve
                     }
                 }
                 if s.status == "ok" && !skip_cache {
+                    clear_failure_streak(&s.id);
                     map.insert(
                         s.id.clone(),
                         CachedSnap {
@@ -3023,9 +3050,10 @@ async fn run_usage_fetch_inner(app: &tauri::AppHandle, extra_disabled: Option<Ve
                     }
                     dirty = true;
                 } else if s.status == "error" {
+                    let streak = bump_failure_streak(&s.id);
                     if let Some(previous) = map.get(&s.id) {
                         let age = now_ms - previous.at;
-                        restore_last_success_after_error(s, &previous.snap, age);
+                        restore_last_success_after_error(s, &previous.snap, age, streak);
                     }
                 }
             }
@@ -3240,7 +3268,11 @@ fn spawn_auto_refresh(app: tauri::AppHandle) {
                 tokio::time::sleep(std::time::Duration::from_secs(15)).await;
             } else {
                 outage_retries = 0;
-                tokio::time::sleep(std::time::Duration::from_secs(minutes * 60)).await;
+                // ±10% jitter on the cadence so a fleet of providers never
+                // lines up against one rate-limit window on every tick.
+                let jitter = 90 + (rand_core::OsRng.next_u64() % 21) as u64;
+                let seconds = (minutes as u64).saturating_mul(60).saturating_mul(jitter) / 100;
+                tokio::time::sleep(std::time::Duration::from_secs(seconds.max(60))).await;
             }
         }
     });
@@ -3312,6 +3344,9 @@ fn cached_usage() -> Vec<providers::Snapshot> {
         .map(|(_, c)| {
             let mut s = c.snap;
             s.stale = true;
+            // A warm start is a preheat, not a fault: the neutral
+            // "cached · refreshing" chip replaces the failure-driven ⚠.
+            s.boot_cache = true;
             s
         })
         .collect();
@@ -5700,7 +5735,8 @@ mod tests {
         assert!(restore_last_success_after_error(
             &mut current,
             &previous,
-            1_000
+            1_000,
+            1,
         ));
         assert_eq!(current.status, "ok");
         assert!(!current.stale);
@@ -5722,11 +5758,33 @@ mod tests {
             &mut current,
             &previous,
             STALE_GRACE_MS + 1,
+            2,
         ));
         assert_eq!(current.status, "ok");
         assert!(current.stale);
         assert_eq!(current.warning.as_deref(), Some("timeout"));
         assert_eq!(current.metrics[0].used_percent, Some(25.0));
+    }
+
+    #[test]
+    fn one_consecutive_failure_past_the_grace_stays_silent() {
+        let previous = Snapshot::ok(
+            "codex",
+            "Codex",
+            None,
+            vec![Metric::progress("Weekly", 25.0, None)],
+        );
+        let mut current = Snapshot::error("codex", "Codex", "timeout".into());
+
+        assert!(restore_last_success_after_error(
+            &mut current,
+            &previous,
+            STALE_GRACE_MS + 1,
+            1,
+        ));
+        assert_eq!(current.status, "ok");
+        assert!(!current.stale, "the first failure never warns");
+        assert_eq!(current.warning, None);
     }
 
     #[test]
@@ -5743,6 +5801,7 @@ mod tests {
             &mut current,
             &previous,
             SNAPSHOT_CACHE_MS + 1,
+            5,
         ));
         assert_eq!(current.status, "error");
         assert!(!current.stale);

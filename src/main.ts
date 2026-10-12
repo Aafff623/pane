@@ -88,6 +88,7 @@ interface Snapshot {
   error: string | null;
   metrics: Metric[];
   stale: boolean;
+  boot_cache?: boolean;
   warning: string | null;
   dashboard_url?: string | null;
 }
@@ -575,6 +576,40 @@ async function applySettingsAndReload(): Promise<void> {
 }
 let lastFetch = 0;
 let refreshing = false;
+/// True while the footer status line carries the idle "数据更新于…" text —
+/// the minute ticker may rewrite it; any transient message clears it.
+let statusShowsUpdated = false;
+let statusIdleText = "";
+
+/// The neutral freshness line (Grafana-style): relative minutes while
+/// fresh enough, absolute clock time once an hour has passed.
+function idleFooterText(): string {
+  const mins = Math.floor((Date.now() - lastFetch) / 60_000);
+  if (mins >= 1 && mins < 60) return t("footer.updatedAgo", { n: mins });
+  const time = new Date(lastFetch).toLocaleTimeString(localeTag(), {
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+  return t("footer.updated", { time });
+}
+
+function writeIdleFooter(): void {
+  const status = document.querySelector("#status");
+  if (!status) return;
+  statusIdleText = idleFooterText();
+  statusShowsUpdated = true;
+  status.textContent = statusIdleText;
+}
+
+/// Rewrites the freshness line as minutes pass — but only while no
+/// transient message (save result, error, …) has replaced it since.
+function renderIdleFooter(): void {
+  if (!statusShowsUpdated) return;
+  const status = document.querySelector("#status");
+  if (!status || status.textContent !== statusIdleText) return;
+  statusIdleText = idleFooterText();
+  status.textContent = statusIdleText;
+}
 // A forced refresh requested while one was already in flight (saving an
 // API key races the auto-refresh timer). Dropping it would leave the new
 // state unfetched and the status line stuck on the save message.
@@ -609,6 +644,7 @@ let completedRefreshGeneration = 0;
 const refreshAttemptWaiters: Array<{ generation: number; resolve: () => void }> = [];
 let lastAppliedSpendGen = 0;
 let refreshTimer: number | undefined;
+let footerTick: number | undefined;
 let lastSnapshots: Snapshot[] = [];
 // ── T-0033: spend-ledger normalization ─────────────────────────────────────
 // The spend panels are a ledger of what local CLIs actually wrote — card
@@ -2671,9 +2707,11 @@ function renderCard(s: Snapshot): string {
     body = `<p class="placeholder">${escapeHtml(shown.error ?? t("card.notConnected"))}</p>`;
   }
 
-  const stale = shown.stale
-    ? `<span class="stale" title="${escapeHtml(staleHelp(shown))}">${escapeHtml(t("card.outdated"))}</span>`
-    : "";
+  const stale = !shown.stale
+    ? ""
+    : shown.boot_cache
+      ? `<span class="stale boot" title="${escapeHtml(t("card.bootCache"))}">${escapeHtml(t("card.bootCache"))}</span>`
+      : `<span class="stale clickable" data-card-refresh="${shown.id}" title="${escapeHtml(staleHelp(shown))}">${escapeHtml(t("card.outdated"))}</span>`;
   const dashUrl = (shown.dashboard_url ?? "").trim();
   const dashOk = /^https?:\/\//i.test(dashUrl);
   const staticLinks = PROVIDER_LINKS[shown.id] ?? PROVIDER_LINKS[family] ?? [];
@@ -7700,9 +7738,11 @@ function renderAccountConfig(id: string): string {
         ? escapeHtml(t("customize.connNoCred"))
         : escapeHtml(t("customize.connError", { err: snap.error ?? "" }))
     : escapeHtml(t("customize.connUnknown"));
-  const stale = snap?.stale
-    ? `<span class="stale" title="${escapeHtml(staleHelp(snap))}">${escapeHtml(t("card.outdated"))}</span>`
-    : "";
+  const stale = !snap?.stale
+    ? ""
+    : snap.boot_cache
+      ? `<span class="stale boot">${escapeHtml(t("card.bootCache"))}</span>`
+      : `<span class="stale" title="${escapeHtml(staleHelp(snap))}">${escapeHtml(t("card.outdated"))}</span>`;
   return `<div class="cust-config cust-form account-config">
       <div class="form-field">
         <span class="form-label">${escapeHtml(t("customize.acctNoteLabel"))}</span>
@@ -8929,10 +8969,12 @@ async function refresh(
     scheduleBackoffRetries(lastSnapshots);
     if (firstData && !customizeOpen && !document.hidden) playReveal();
     requestTraySync();
-    const time = new Date().toLocaleTimeString(localeTag(), { hour: "2-digit", minute: "2-digit" });
-    status.textContent = configSaveError
-      ? t("footer.configSaveFailed", { err: configSaveError })
-      : t("footer.updated", { time });
+    if (configSaveError) {
+      statusShowsUpdated = false;
+      status.textContent = t("footer.configSaveFailed", { err: configSaveError });
+    } else {
+      writeIdleFooter();
+    }
   } catch (err) {
     status.textContent = configSaveError
       ? t("footer.configSaveFailed", { err: configSaveError })
@@ -9009,6 +9051,12 @@ function scheduleAutoRefresh(): void {
     if (document.hidden) return;
     void refresh();
   }, minutes * 60 * 1000);
+  // The freshness line walks even when no refresh runs.
+  if (footerTick === undefined) {
+    footerTick = window.setInterval(() => {
+      if (!document.hidden) renderIdleFooter();
+    }, 60_000);
+  }
 }
 
 const logoPixels = new Map<string, number[]>();
@@ -12651,17 +12699,11 @@ function applyLocale(): void {
   renderOneNewApiSettings();
   if (document.body.classList.contains("settings-open") || IS_PANEL_FORM) void loadKeyvault();
   applyAppearance();
-  const status = document.querySelector("#status");
-  if (status) {
-    if (lastSnapshots.length) {
-      const time = new Date().toLocaleTimeString(localeTag(), {
-        hour: "2-digit",
-        minute: "2-digit",
-      });
-      status.textContent = t("footer.updated", { time });
-    } else {
-      status.textContent = t("footer.starting");
-    }
+  if (lastSnapshots.length) {
+    writeIdleFooter();
+  } else {
+    const status = document.querySelector("#status");
+    if (status) status.textContent = t("footer.starting");
   }
   if (lastSnapshots.length) renderIfVisible();
   // Auth-center rows paint with t() at render time — re-render so a locale

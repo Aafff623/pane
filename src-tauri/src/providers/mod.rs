@@ -129,6 +129,11 @@ pub struct Snapshot {
     pub error: Option<String>,
     pub metrics: Vec<Metric>,
     pub stale: bool,
+    /// True when this snapshot came from the boot-time disk cache
+    /// (cached_usage): the frontend renders a neutral "cached · refreshing"
+    /// chip instead of the failure-driven ⚠ — a warm start is not a fault.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub boot_cache: bool,
     pub warning: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub dashboard_url: Option<String>,
@@ -144,6 +149,7 @@ impl Snapshot {
             error: None,
             metrics,
             stale: false,
+            boot_cache: false,
             warning: None,
             dashboard_url: None,
         }
@@ -158,6 +164,7 @@ impl Snapshot {
             error: Some(hint.into()),
             metrics: vec![],
             stale: false,
+            boot_cache: false,
             warning: None,
             dashboard_url: None,
         }
@@ -172,6 +179,7 @@ impl Snapshot {
             error: Some(message),
             metrics: vec![],
             stale: false,
+            boot_cache: false,
             warning: None,
             dashboard_url: None,
         }
@@ -672,6 +680,14 @@ pub fn mirror_week_wall(card_id: &str, snap: &mut Snapshot) {
     }
 }
 
+/// The ⚠ threshold: the silent grace must have passed AND this is at least
+/// the second consecutive failure — a single blip never warns (the cache
+/// serves silently instead). Lives here so the parse-tests harness (which
+/// does not compile lib.rs) can hold the decision logic.
+pub fn should_mark_stale(age_past_grace: bool, consecutive_failures: u32) -> bool {
+    age_past_grace && consecutive_failures >= 2
+}
+
 #[cfg(test)]
 mod wall_tests {
     use super::*;
@@ -701,6 +717,17 @@ mod wall_tests {
 
     const HOUR_MS: i64 = 3600_000;
     const DAY_MS: i64 = 24 * HOUR_MS;
+
+    #[test]
+    fn stale_warning_needs_grace_passed_and_two_consecutive_failures() {
+        assert!(!should_mark_stale(false, 0));
+        assert!(!should_mark_stale(false, 5));
+        // One blip past the grace stays silent; the second consecutive
+        // failure is the warning line.
+        assert!(!should_mark_stale(true, 0));
+        assert!(!should_mark_stale(true, 1));
+        assert!(should_mark_stale(true, 2));
+    }
 
     fn snap_with(session_used: f64, weekly_used: f64) -> Snapshot {
         let resets = chrono::Utc::now().timestamp_millis() + 4 * DAY_MS;

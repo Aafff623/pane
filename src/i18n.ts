@@ -55,6 +55,7 @@ const en: Dict = {
   "footer.starting": "Starting…",
   "footer.refreshing": "Refreshing…",
   "footer.updated": "Updated {time}",
+  "footer.updatedAgo": "Data updated {n} min ago",
   "footer.refreshFailed": "Refresh failed: {err}",
   "footer.keySaved": "{name} key saved",
   "footer.keySaveFailed": "Could not save key: {err}",
@@ -425,6 +426,7 @@ const en: Dict = {
 
   "card.notConnected": "Not connected",
   "card.outdated": "⚠ Outdated",
+  "card.bootCache": "Cached data · refreshing",
   "card.showMore": "Show more",
   "card.showLess": "Show less",
   "card.share": "Copy card as image",
@@ -1076,6 +1078,7 @@ const zh: Dict = {
   "footer.starting": "正在启动…",
   "footer.refreshing": "正在刷新…",
   "footer.updated": "已更新 {time}",
+  "footer.updatedAgo": "数据更新于 {n} 分钟前",
   "footer.refreshFailed": "刷新失败：{err}",
   "footer.keySaved": "已保存 {name} 密钥",
   "footer.keySaveFailed": "无法保存密钥：{err}",
@@ -1444,6 +1447,7 @@ const zh: Dict = {
 
   "card.notConnected": "未连接",
   "card.outdated": "⚠ 数据过时",
+  "card.bootCache": "缓存数据 · 刷新中",
   "card.showMore": "显示更多",
   "card.showLess": "收起",
   "card.share": "复制卡片为图片",
@@ -2080,6 +2084,7 @@ const ru: Dict = {
   "footer.starting": "Запуск…",
   "footer.refreshing": "Обновление…",
   "footer.updated": "Обновлено {time}",
+  "footer.updatedAgo": "Данные обновлены {n} мин. назад",
   "footer.refreshFailed": "Ошибка обновления: {err}",
   "footer.keySaved": "Ключ {name} сохранён",
   "footer.keySaveFailed": "Не удалось сохранить ключ: {err}",
@@ -2409,6 +2414,7 @@ const ru: Dict = {
 
   "card.notConnected": "Не подключено",
   "card.outdated": "⚠ Данные устарели",
+  "card.bootCache": "Кэшированные данные · обновляем",
   "card.showMore": "Ещё",
   "card.showLess": "Свернуть",
   "card.share": "Скопировать карточку как изображение",

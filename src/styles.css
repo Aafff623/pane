@@ -2212,6 +2212,15 @@ article.provider.is-folded:hover {
   cursor: default;
 }
 
+/* The degraded ⚠ doubles as a one-click retry for this card; the boot
+   preheat chip is neutral info, never a warning. */
+.stale.clickable {
+  cursor: pointer;
+}
+.stale.boot {
+  color: var(--muted-foreground);
+}
+
 /* Plain grey text beside the name — no pill — matching the Mac header. */
 .plan {
   font-size: 11px;
