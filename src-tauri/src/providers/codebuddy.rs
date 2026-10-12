@@ -235,7 +235,17 @@ async fn finish(f: &Family, access: &Access, id: &str, name: &str) -> Result<Sna
 
     let now_ms = chrono::Utc::now().timestamp_millis();
     let packs = resource_items(&resources.body);
-    let face = credits_face_from_items(&packs, now_ms);
+    let mut face = credits_face_from_items(&packs, now_ms);
+    if face.is_none() {
+        // Enterprise members get an empty resource list from the personal
+        // endpoint; their usage lives behind the enterprise endpoint the
+        // web dashboard's own /profile/usage page calls.
+        if access.tenant.enterprise_id.is_some() {
+            if let Ok(body) = fetch_enterprise_usage(f, access).await {
+                face = enterprise_face_from_body(&body, now_ms);
+            }
+        }
+    }
     let mut plan = None;
     if let Some(face) = &face {
         if face.total > 0.0 {
@@ -334,10 +344,69 @@ fn cycle_end_ms(raw: &str) -> Option<i64> {
     Some(utc8.from_local_datetime(&naive).single()?.timestamp_millis())
 }
 
+/// Enterprise members: the personal resource endpoint answers with an
+/// empty list, so the web dashboard's own `/profile/usage` page reads this
+/// one instead (empty body, the enterprise id rides the tenant headers).
+async fn fetch_enterprise_usage(f: &Family, access: &Access) -> Result<Value, String> {
+    let billing = billing_post(
+        f,
+        access,
+        "/v2/billing/meter/get-enterprise-user-usage",
+        Some(json!({})),
+    )
+    .await?;
+    if billing.rejected {
+        return Err(format!("{} enterprise usage: session rejected", f.display_name));
+    }
+    Ok(billing.body)
+}
+
+/// Cycle stamps arrive as `yyyy-MM-dd HH:mm:ss` (UTC+8) or as epoch
+/// numbers in seconds or millis — accept all three.
+fn timestamp_ms(value: &Value) -> Option<i64> {
+    let from_epoch = |raw: i64| {
+        Some(if raw > 1_000_000_000_000 { raw } else { raw.saturating_mul(1000) })
+    };
+    match value {
+        Value::Number(n) => n.as_i64().and_then(from_epoch),
+        Value::String(s) => {
+            let s = s.trim();
+            cycle_end_ms(s).or_else(|| s.parse::<i64>().ok().and_then(from_epoch))
+        }
+        _ => None,
+    }
+}
+
+/// The enterprise usage shape: `{credit, limitNum, cycleStartTime,
+/// cycleEndTime, cycleResetTime}`. Used = `credit`, remaining = `limitNum −
+/// credit`, and a limit of -1 means unlimited.
+fn enterprise_face_from_body(body: &Value, now_ms: i64) -> Option<CreditsFace> {
+    let data = ["/data/data", "/data"]
+        .iter()
+        .find_map(|path| body.pointer(path))
+        .unwrap_or(body);
+    let limit = pack_num(data, &["limitNum", "limit_num"])?;
+    let used = pack_num(data, &["usedNum", "used_num", "credit"]).unwrap_or(0.0);
+    let unlimited = limit == -1.0;
+    let reset_ms = ["cycleEndTime", "cycle_end_time", "cycleResetTime", "cycle_reset_time"]
+        .iter()
+        .filter_map(|key| data.get(*key))
+        .filter_map(timestamp_ms)
+        .filter(|ms| *ms > now_ms)
+        .min();
+    Some(CreditsFace {
+        total: if unlimited { 0.0 } else { limit },
+        remain: if unlimited { 0.0 } else { (limit - used).max(0.0) },
+        frozen: 0.0,
+        unlimited,
+        reset_ms,
+        plan: None,
+    })
+}
+
 /// A pack counts as credits unless it says otherwise — the older shapes
 /// carried no `CapacityUnit` at all.
-fn is_credits_pack(pack: &Value) -> bool {
-    pack.get("CapacityUnit")
+fn is_credits_pack(pack: &Value) -> bool {    pack.get("CapacityUnit")
         .and_then(Value::as_str)
         .map_or(true, |unit| unit.eq_ignore_ascii_case("credits"))
 }
@@ -619,5 +688,50 @@ mod tests {
         assert_eq!(face.total, 100.0);
         assert_eq!(face.remain, 40.0);
         assert_eq!(face.plan.as_deref(), Some("Pro pack"));
+    }
+
+    #[test]
+    fn enterprise_face_reads_limit_and_credit() {
+        // The shape cockpit's #1911 fix reads: total 2000 / used 378.
+        let face = enterprise_face_from_body(
+            &json!({
+                "data": { "data": {
+                    "limitNum": 2000, "credit": 378,
+                    "cycleStartTime": "2026-01-01 00:00:00",
+                    "cycleEndTime": "2026-02-01 00:00:00"
+                } }
+            }),
+            NOW_MS,
+        )
+        .expect("face");
+        assert_eq!(face.total, 2000.0);
+        assert_eq!(face.used(), 378.0);
+        assert_eq!(face.remain, 1622.0);
+        assert_eq!(face.reset_ms, Some(1_769_875_200_000));
+    }
+
+    #[test]
+    fn enterprise_limit_minus_one_is_unlimited() {
+        let face = enterprise_face_from_body(
+            &json!({ "data": { "limitNum": -1, "credit": 5 } }),
+            NOW_MS,
+        )
+        .expect("face");
+        assert!(face.unlimited);
+        assert_eq!(face.total, 0.0);
+    }
+
+    #[test]
+    fn enterprise_accepts_epoch_and_underscored_keys() {
+        let face = enterprise_face_from_body(
+            &json!({ "limit_num": 100, "used_num": 10, "cycle_reset_time": 1_769_875_200_000i64 }),
+            NOW_MS,
+        )
+        .expect("face");
+        assert_eq!(face.total, 100.0);
+        assert_eq!(face.used(), 10.0);
+        assert_eq!(face.reset_ms, Some(1_769_875_200_000));
+        // No limit at all is not a face — the caller keeps its own reading.
+        assert!(enterprise_face_from_body(&json!({ "credit": 5 }), NOW_MS).is_none());
     }
 }
