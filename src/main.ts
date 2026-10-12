@@ -843,6 +843,8 @@ let overviewExpiringOpen = false;
 let customizeOpen = false;
 let skinMarketOpen = false;
 let skinPreviewMode: "light" | "dark" | "both" = "both";
+/// Which sidebar entry the workshop is showing; null = the applied skin.
+let skinMarketSelected: SkinId | null = null;
 
 function activeSkin() {
   try {
@@ -7726,31 +7728,56 @@ function accountChildRows(family: string): string {
   return `<div class="cust-account-children" data-accounts-children="${escapeHtml(family)}">${children}${archivedHtml}</div>`;
 }
 
-// Preview uses the production metric renderer with fixed, non-account data.
-function renderSkinSample(mode: "light" | "dark", skinId: SkinId = "signal"): string {
+// Preview renders the REAL provider-card structure (article.provider →
+// provider-head → card-panel) so each skin's stylesheet themes it exactly
+// as it themes the dashboard — fonts and components identical, per the
+// workshop acceptance line. Fixed, non-account data only.
+function renderSkinSample(mode: "light" | "dark", skinId: SkinId = "signal", compact = false): string {
   const metric = (label: string, used: number, period: number) => renderMetric({
     label, kind: "progress", used_percent: used, detail: null,
     value: null, resets_at: null, period_ms: period,
   }).replace(/ data-flip="[^"]*"/g, "").replace(/ clickable/g, "");
+  const icon = providerVisual("claude")?.iconSvg ?? "";
   return `<div class="skin-sample" data-skin="${skinId}" ${skinId === "ink" ? "data-ink" : ""} data-theme="${mode}">
-    <div class="skin-sample-head"><span>${t(mode === "light" ? "skin.light" : "skin.dark")}</span><span class="skin-sample-brand">${t(skinId === "ink" ? "skin.ink" : "skin.signal")}</span></div>
-    <div class="signal-spend"><span>${t("skin.spendToday")}</span><strong>$18<span>.42</span></strong><span class="signal-spend-note">${t("skin.spendNote")}</span></div>
-    <div class="provider"><div class="provider-head"><div class="signal-provider-label"><strong class="provider-name">Claude</strong><span class="signal-state">${t("skin.normal")}</span></div><span class="signal-plan">Pro</span></div><div class="card-panel">
-      ${metric(t("skin.session"), 32, 5 * 3_600_000)}${metric(t("skin.week"), 68, 7 * 86_400_000)}${metric(t("skin.lowQuota"), 87, 5 * 3_600_000)}
-    </div></div>
-    <div class="signal-message" role="note"><span class="signal-error-mark" aria-hidden="true">!</span><div><strong>Codex · ${t("skin.disconnected")}</strong><p>${t("skin.sampleError")}</p></div></div>
-    <div class="signal-fetch"><span class="signal-pulse" aria-hidden="true"></span>${t("skin.sampleLoading")}</div>
+    ${compact ? "" : `<div class="skin-sample-head"><span>${t(mode === "light" ? "skin.light" : "skin.dark")}</span><span class="skin-sample-brand">${t(skinId === "ink" ? "skin.ink" : "skin.signal")}</span></div>`}
+    <article class="provider">
+      <div class="provider-head">
+        <span class="provider-name" data-fit-max="17" data-fit-min="11">Claude</span>
+        <span class="head-status"><span class="acct-dot green"></span><span class="head-pct">32%</span></span>
+        <span class="spacer"></span>
+        <span class="plan">Pro</span>
+        <span class="provider-icon">${icon}</span>
+      </div>
+      <div class="card-panel">
+        ${metric(t("skin.session"), 32, 5 * 3_600_000)}
+        ${metric(t("skin.week"), 68, 7 * 86_400_000)}
+        ${metric(t("skin.lowQuota"), 87, 5 * 3_600_000)}
+      </div>
+    </article>
   </div>`;
 }
 
 function renderSkinMarket(): string {
   const selected = activeSkin()?.id;
+  const current = skinMarketSelected ?? selected ?? SKINS[0].id;
+  const skin = SKINS.find((s) => s.id === current) ?? SKINS[0];
   const previewMode = skinPreviewMode === "both" && window.matchMedia("(max-width:640px)").matches ? "light" : skinPreviewMode;
   return `<section class="skin-market" aria-label="${t("skin.market")}">
     <div class="skin-market-head"><h2>${t("skin.market")}</h2><button class="mini-btn" data-skin-close>${t("skin.back")}</button></div>
-    <div class="skin-preview-toolbar" role="group" aria-label="${t("skin.previewMode")}">${(["light", "dark", "both"] as const).map((mode) => `<button class="skin-mode-btn" type="button" data-skin-mode="${mode}" aria-pressed="${previewMode === mode}">${t(mode === "light" ? "skin.light" : mode === "dark" ? "skin.dark" : "skin.both")}</button>`).join("")}</div>
-    ${SKINS.map(skin => `<section class="skin-market-option"><h3>${t(skin.nameKey)}</h3><p class="skin-market-copy">${t(skin.taglineKey)}</p><div class="skin-preview-pair" data-preview-mode="${previewMode}">${renderSkinSample("light", skin.id)}${renderSkinSample("dark", skin.id)}</div><div class="skin-detail-actions"><button class="mini-btn primary" data-skin-select="${skin.id}" ${selected === skin.id ? "disabled" : ""}>${t(selected === skin.id ? "skin.applied" : "skin.use")}</button></div></section>`).join("")}
-    <div class="skin-detail-actions"><button class="mini-btn" data-skin-reset>${t("skin.native")}</button><span>${t("skin.followsMode")}</span></div>
+    <div class="skin-market-body">
+      <aside class="skin-market-side">
+        ${SKINS.map((s) => `<button class="skin-side-item${s.id === skin.id ? " active" : ""}" type="button" data-skin-pick="${s.id}">
+            <span class="skin-side-thumb">${renderSkinSample("light", s.id, true)}</span>
+            <span class="skin-side-meta"><strong>${t(s.nameKey)}</strong><span class="skin-side-state">${selected === s.id ? t("skin.applied") : t("skin.installed")}</span></span>
+          </button>`).join("")}
+      </aside>
+      <div class="skin-market-main">
+        <p class="skin-market-copy">${t(skin.taglineKey)}</p>
+        <div class="skin-preview-toolbar" role="group" aria-label="${t("skin.previewMode")}">${(["light", "dark", "both"] as const).map((mode) => `<button class="skin-mode-btn" type="button" data-skin-mode="${mode}" aria-pressed="${previewMode === mode}">${t(mode === "light" ? "skin.light" : mode === "dark" ? "skin.dark" : "skin.both")}</button>`).join("")}</div>
+        <div class="skin-preview-pair" data-preview-mode="${previewMode}">${renderSkinSample("light", skin.id)}${renderSkinSample("dark", skin.id)}</div>
+        <div class="skin-detail-actions"><button class="mini-btn primary" data-skin-select="${skin.id}" ${selected === skin.id ? "disabled" : ""}>${t(selected === skin.id ? "skin.applied" : "skin.use")}</button><button class="mini-btn" data-skin-reset>${t("skin.native")}</button><span>${t("skin.followsMode")}</span></div>
+      </div>
+    </div>
   </section>`;
 }
 
@@ -9100,6 +9127,12 @@ async function handleCustomizeClick(target: HTMLElement): Promise<boolean> {
   const skinMode = target.closest<HTMLElement>("[data-skin-mode]")?.dataset.skinMode;
   if (skinMode === "light" || skinMode === "dark" || skinMode === "both") {
     skinPreviewMode = skinMode;
+    renderDrawerBody();
+    return true;
+  }
+  const skinPick = target.closest<HTMLElement>("[data-skin-pick]")?.dataset.skinPick;
+  if (skinPick) {
+    skinMarketSelected = skinPick as SkinId;
     renderDrawerBody();
     return true;
   }

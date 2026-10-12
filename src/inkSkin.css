@@ -110,9 +110,6 @@
 :is(:root[data-ink],.skin-sample[data-ink]) .overview-cat-tabs .tab:where(:not(.skin-sample:not([data-ink]),.skin-sample:not([data-ink]) *)){font-size:12px;line-height:1.4;padding-inline:6px}
 :is(:root[data-ink],.skin-sample[data-ink]) .spend-head-value:where(:not(.skin-sample:not([data-ink]),.skin-sample:not([data-ink]) *)){font-family:var(--ink-display-font);font-weight:400;font-size:14px}
 
-.skin-market-option{padding:12px 0 20px;border-bottom:1px solid var(--border)}
-[data-skin=ink] .signal-spend{background:var(--accent);color:var(--foreground)}
-[data-skin=ink] .signal-message{color:var(--muted-foreground)}
 /* Shares keep the theme's paper surface instead of the native light frame. */
 :is(:root[data-ink],.skin-sample[data-ink]) .ink-donut-art{position:relative;width:130px;height:130px;flex:none;display:flex;align-items:center;justify-content:center}
 :is(:root[data-ink],.skin-sample[data-ink]) .ink-donut-art>.ink-koi{inset:0;width:130px;height:130px}
