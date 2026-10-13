@@ -13,9 +13,10 @@
 #
 # Needs a WINGET_TOKEN repository secret: a classic personal access token
 # with ONLY the `public_repo` scope (create at github.com/settings/tokens).
-# The action uses it to push a branch to the ItsJazii/winget-pkgs fork and
+# The action uses it to push a branch to the Aafff623/winget-pkgs fork and
 # open the PR. Without the secret the job fails loudly and the release is
-# otherwise unaffected.
+# otherwise unaffected. (Configured 2026-10-13 after 19 straight failures
+# dating to the 2026-09-06 repo transfer, which stranded the secret.)
 name: Publish to winget
 
 on:
