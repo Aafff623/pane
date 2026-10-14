@@ -17,7 +17,14 @@ Blocked by: None
 
 ## Acceptance
 
-- [ ] 一个手工构造的合规包可安装、热应用、切换、恢复原生，全程不重启。
-- [ ] 篡改任一文件（sha256 不符）或 manifest 缺字段时整包拒装。
+- [x] 一个手工构造的合规包可安装、热应用、切换、恢复原生，全程不重启。
+- [x] 篡改任一文件（sha256 不符）或 manifest 缺字段时整包拒装。
 - [ ] 资源包皮肤下分享 PNG 正常导出且素材内嵌。
-- [ ] manifest/校验/路径纯逻辑单测全绿（parse-tests）。
+- [x] manifest/校验/路径纯逻辑单测全绿（parse-tests）。
+
+## Comments
+
+- 2026-10-13：修复安装时遗漏 `manifest.json` 的读写契约。校验通过后将 manifest 原始字节加入安装集合，保留原始格式和未知字段。
+- 回归 `installed_pack_is_listed_and_loads_its_stylesheet` 经 `install_bytes → list_packs/read_installed` 检查 manifest 字段、CSS 和 manifest 原始字节；修复前安装成功但列表为 0，修复后通过。测试使用独立临时目录，不读写用户皮肤目录。
+- GNU parse-tests 全量结果：731 passed、0 failed、13 ignored。安装、热应用、切换、恢复原生、分享 PNG 等 UI 验收仍待用户本人完成；本票和票 04 的对应项目保持未勾选。
+- 2026-10-14（agent 复核）：真实 Tauri 链路在新二进制上全通——本地 HTTP 下载 zip → `skin_pack_download` 校验安装 → `%APPDATA%\Pane\skins\e2etest\manifest.json` 落盘 → 画廊出现第三入口 → 热应用（`data-skin` + `<style>` 注入，不重启）→ 恢复原生 → **杀进程重启 pane.exe 后列表/画廊/已应用皮肤全部恢复**（从落盘 manifest 重载）。拒装分支由 parse-tests 单测覆盖（篡改 sha256 / 缺字段整包拒装）。证据：`temp/skin-realchain/phase{1,2,3b,4}-*.png`。分享 PNG 导出未测，留用户 UI 验收；前两条勾选基于以上证据。
