@@ -19,7 +19,7 @@ const ENDPOINTS: [&str; 4] = [
     "https://api.minimaxi.com/v1/api/openplatform/coding_plan/remains",
 ];
 
-fn find_api_key() -> Option<String> {
+pub(crate) fn find_api_key() -> Option<String> {
     if let Some(key) = super::stored_api_key(ID, &["MINIMAX_API_KEY"]) {
         return Some(key);
     }

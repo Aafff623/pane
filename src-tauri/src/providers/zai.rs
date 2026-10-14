@@ -79,7 +79,7 @@ fn with_auth(req: reqwest::RequestBuilder, ep: &Endpoint, key: &str) -> reqwest:
     }
 }
 
-fn find_key() -> Option<String> {
+pub(crate) fn find_key() -> Option<String> {
     if let Some(key) = stored_api_key("zai", &["ZAI_API_KEY", "GLM_API_KEY"]) {
         return Some(key);
     }
