@@ -68,6 +68,10 @@ pub fn valid_skin_id(id: &str) -> bool {
 }
 
 pub fn skins_dir() -> std::path::PathBuf {
+    #[cfg(test)]
+    if let Some(dir) = tests::SKINS_DIR.with(|dir| dir.borrow().clone()) {
+        return dir;
+    }
     crate::providers::config_dir().join("skins")
 }
 
@@ -204,6 +208,8 @@ fn verify_pack(bytes: &[u8]) -> Result<(SkinPackManifest, std::collections::BTre
             return Err(format!("manifest file missing from pack: {}", f.path));
         }
     }
+    // The loader requires this file; persist the exact bytes we validated.
+    extracted.insert("manifest.json".into(), manifest_bytes);
     Ok((manifest, extracted))
 }
 
@@ -387,6 +393,72 @@ pub async fn skin_pack_remove(id: String) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    std::thread_local! {
+        pub(super) static SKINS_DIR: std::cell::RefCell<Option<std::path::PathBuf>> = const {
+            std::cell::RefCell::new(None)
+        };
+    }
+
+    struct TestSkinsDir(std::path::PathBuf);
+
+    impl TestSkinsDir {
+        fn new() -> Self {
+            let nonce = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
+            let dir = std::env::temp_dir()
+                .join(format!("pane-skinpack-install-{}-{nonce}", std::process::id()));
+            std::fs::create_dir(&dir).unwrap();
+            SKINS_DIR.with(|root| *root.borrow_mut() = Some(dir.clone()));
+            Self(dir)
+        }
+    }
+
+    impl Drop for TestSkinsDir {
+        fn drop(&mut self) {
+            SKINS_DIR.with(|root| *root.borrow_mut() = None);
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
+    #[test]
+    fn installed_pack_is_listed_and_loads_its_stylesheet() {
+        use std::io::Write;
+
+        let _root = TestSkinsDir::new();
+        let css = b"[data-skin=roundtrip]{color:tomato}";
+        let raw_manifest = format!(
+            "{{\n  \"id\":\"roundtrip\",\"name\":\"Round Trip\",\"version\":\"1.2.3\",\"min_app_version\":\"0.7.0\",\"entry\":\"skin.css\",\"files\":[{{\"path\":\"skin.css\",\"sha256\":\"{}\"}}],\"extra\":true\n}}",
+            sha256_hex(css)
+        );
+        let mut zip = zip::ZipWriter::new(std::io::Cursor::new(Vec::new()));
+        let options = zip::write::SimpleFileOptions::default();
+        zip.start_file("manifest.json", options).unwrap();
+        zip.write_all(raw_manifest.as_bytes()).unwrap();
+        zip.start_file("skin.css", options).unwrap();
+        zip.write_all(css).unwrap();
+        let bytes = zip.finish().unwrap().into_inner();
+
+        let installed = install_bytes(&bytes).expect("valid pack installs");
+        assert_eq!(installed.id, "roundtrip");
+        let packs = list_packs();
+        assert_eq!(packs.len(), 1, "successful installation must appear in the workshop");
+        let loaded = read_installed("roundtrip").expect("installed pack loads from disk");
+        for pack in [&packs[0], &loaded] {
+            assert_eq!(pack.manifest.id, "roundtrip");
+            assert_eq!(pack.manifest.name, "Round Trip");
+            assert_eq!(pack.manifest.version, "1.2.3");
+            assert_eq!(pack.manifest.min_app_version, "0.7.0");
+            assert_eq!(pack.manifest.entry, "skin.css");
+            assert_eq!(pack.manifest.files.len(), 1);
+            assert_eq!(pack.entry_css.as_bytes(), css);
+        }
+        assert_eq!(
+            std::fs::read(skins_dir().join("roundtrip/manifest.json")).unwrap(),
+            raw_manifest.as_bytes(),
+            "persist the exact verified manifest, including formatting and unknown fields"
+        );
+    }
 
     fn manifest() -> SkinPackManifest {
         SkinPackManifest {
