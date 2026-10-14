@@ -246,6 +246,9 @@ function avoidAnnotationCollisions(){
   }
 }
 window.addEventListener('message',event=>{
+  if(event.source===settingsFrame.contentWindow&&event.origin===location.origin&&event.data?.type==='pane-demo'&&event.data.action==='tour-replay'){
+    setSettingsOverlay(false);send('tour-replay');return;
+  }
   if(event.source!==frame.contentWindow || event.origin!==location.origin)return;
   if(event.data?.type==='pane-demo-anchors'){demoAnchors=event.data;positionAnnotations();return}
   // The panel's own gear button asks the host to reveal the settings window.

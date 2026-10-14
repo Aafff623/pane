@@ -8,7 +8,7 @@ declare const __SOURCE_VERSION__: string;
 
 const families = providerCatalog.map(provider => provider.familyId);
 const params = new URLSearchParams(location.search);
-const locale = params.get('lang') === 'en' ? 'en' : 'zh';
+const locale = params.get('lang') === 'en' ? 'en' : params.get('lang') === 'ru' ? 'ru' : 'zh';
 const version = __SOURCE_VERSION__;
 let keyboardDemoEnabled = false;
 
@@ -56,6 +56,17 @@ let config: Record<string, any> = {
 };
 
 const copy = <T>(v: T): T => structuredClone(v);
+const demoListeners = new Map<string, Set<(payload: unknown) => void>>();
+function emitDemo(event: string, payload: unknown): void {
+  for (const handler of demoListeners.get(event) ?? []) handler(payload);
+}
+// Test the real onboarding gate with disposable demo settings only.
+if (params.get('tour') === 'fresh' || params.get('tour') === 'seen') {
+  config.lastSeenVersion = '';
+  config.welcomeDismissed = false;
+  config.tourSeen = params.get('tour') === 'seen';
+}
+let wakeSettings = { zai: false, minimax: false, zaiRegion: 'global', minimaxRegion: 'global' };
 const now = Date.now();
 const hours = (h: number) => now + h * 3_600_000;
 const quota = (used: number, resetHours: number, periodHours = 5) => ({
@@ -193,7 +204,15 @@ export async function invoke<T>(command: string, args: Record<string, any> = {})
     case 'fetch_spend': result = spend; break;
     case 'fetch_spend_history': result = spend.map(s => ({ id: s.id, ...s.last30, active_days: 24 })); break;
     case 'fetch_spend_daily': result = daily; break;
-    case 'fetch_usage_history': case 'fetch_credit_history': result = Object.fromEntries(families.map((id, i) => [id, [12, 18, 25, 22, 34, 30, 40].map(n => n + i * 4)])); break;
+    case 'fetch_credit_history': result = Object.fromEntries(['qodercn', 'traecn'].map((id, i) => [id, Array.from({length:30}, (_,day) => day < 3 ? null : (day * 31 + i * 17) % 300)])); break;
+    case 'font_pack_list': result = []; break;
+    case 'reset_wake_settings': result = wakeSettings; break;
+    case 'reset_wake_status': result = []; break;
+    case 'reset_wake_set': wakeSettings = { ...wakeSettings, ...args.settings }; result = null; break;
+    case 'replay_tour':
+      if (params.get('settings') === '1' && parent !== window) parent.postMessage({ type: 'pane-demo', action: 'tour-replay' }, location.origin);
+      else emitDemo('tour-replay', null);
+      result = null; break;
     case 'system_ui_locale': result = locale; break;
     case 'get_autostart': result = false; break;
     case 'get_boot_id': result = 1; break;
@@ -238,7 +257,12 @@ export async function invoke<T>(command: string, args: Record<string, any> = {})
   }
   return copy(result) as T;
 }
-export async function listen() { return () => {}; }
+export async function listen<T>(event: string, handler: (event: { payload: T }) => void) {
+  const callback = (payload: unknown) => handler({ payload: payload as T });
+  const callbacks = demoListeners.get(event) ?? new Set();
+  callbacks.add(callback); demoListeners.set(event, callbacks);
+  return () => { callbacks.delete(callback); };
+}
 export async function getVersion() { return version; }
 // The desktop settings surface is the "panel" window: the same bundle with
 // label=panel renders the large settings panel (IS_PANEL_FORM branch).
@@ -277,6 +301,7 @@ window.addEventListener('keydown', event => {
 window.addEventListener('message', event => {
   if (event.source !== parent || event.origin !== location.origin || event.data?.type !== 'pane-demo') return;
   const action = event.data.action;
+  if (action === 'tour-replay') emitDemo('tour-replay', null);
   if (action === 'keyboard-demo') { keyboardDemoEnabled = event.data.enabled === true; publishDemoPeriod(); }
   if (action === 'cycle-period') {
     const periods = ['5h', 'week', 'month'];
