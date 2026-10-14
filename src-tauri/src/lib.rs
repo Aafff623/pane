@@ -4929,17 +4929,29 @@ async fn codex_redeem_credit(
 /// detached — their builds are signed with a key this app no longer trusts,
 /// so querying them could only produce signature failures.
 ///
-/// First is our own edge route: the same GitHub manifest, except CN clients
-/// get the Windows installer URL rewritten to the Gitee mirror (GitHub
-/// release assets measure ~40 KB/s from Chinese networks against ~315 KB/s
-/// from Gitee). The edge route is geo-aware, so it needs no client-side
-/// branch. Second is GitHub's own manifest: tauri-plugin-updater only moves
-/// on when a request fails or answers non-2xx, so a slow-but-working edge
-/// route still wins — which is why the fast source is listed first and the
-/// reachable-everywhere source second.
-fn updater_endpoint_strings() -> [String; 2] {
+/// The first endpoint is our own edge route: the same GitHub manifest,
+/// except CN clients get the Windows installer URL rewritten to the Gitee
+/// mirror (GitHub release assets measure ~40 KB/s from Chinese networks
+/// against ~1.9 MB/s from Gitee). The edge decides by the request's country
+/// — but a CN user behind a global proxy exits abroad, so Cloudflare sees
+/// the proxy's country and the geo branch misses exactly the users who
+/// suffer most. A client that resolves a proxy therefore asks for the
+/// mirror explicitly (`?source=gitee`); the route still probes the mirror
+/// before offering it. Second comes the plain edge route (geo by IP), then
+/// GitHub's own manifest as the reachable-everywhere fallback.
+///
+/// Ordering matters: tauri-plugin-updater only advances to the next URL when
+/// a request fails or answers non-2xx, never for slowness.
+fn updater_endpoint_strings() -> [String; 3] {
+    let edge = "https://pane.threetwoa.live/update/latest.json";
+    let first = if providers::outbound_proxy_url().is_some() {
+        format!("{edge}?source=gitee")
+    } else {
+        edge.to_string()
+    };
     [
-        "https://pane.threetwoa.live/update/latest.json".into(),
+        first,
+        edge.to_string(),
         "https://github.com/Aafff623/pane/releases/latest/download/latest.json".into(),
     ]
 }
