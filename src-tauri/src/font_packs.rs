@@ -399,18 +399,10 @@ mod tests {
         assert!(read_installed(&root.join("test-font")).is_err());
         std::fs::remove_dir_all(root).unwrap();
     }
-    #[test]
-    fn official_font_artifacts_pass_the_real_gate() {
-        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../site/public/fonts");
-        let mut count = 0;
-        for e in std::fs::read_dir(root).unwrap().flatten() {
-            if e.path().extension().and_then(|s| s.to_str()) == Some("zip") {
-                verify(&std::fs::read(e.path()).unwrap()).unwrap();
-                count += 1;
-            }
-        }
-        assert!(count >= 2);
-    }
+    // No "official artifacts pass the gate" test: the official catalog ships
+    // empty by owner decision (2026-10-14), so there are no real packs to
+    // gate. The synthetic packs above cover verify/install/tamper end to end;
+    // restore a real-artifact test alongside the first catalog entry.
     #[test]
     fn rejects_unlisted_traversal_and_duplicate_zip_members() {
         for name in [
