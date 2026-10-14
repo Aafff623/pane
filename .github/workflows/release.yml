@@ -319,7 +319,7 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p gitee-assets
-          gh release download "$GITHUB_REF_NAME" --pattern '*-setup.exe*' --dir gitee-assets
+          gh release download "$GITHUB_REF_NAME" --repo "${{ github.repository }}" --pattern '*-setup.exe*' --dir gitee-assets
           ls -la gitee-assets
 
       - name: Publish to Gitee
