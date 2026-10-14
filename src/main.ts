@@ -4394,14 +4394,27 @@ let updatePushing = false;
 let updatePct: number | null = null;
 let updateSeen = 0;
 
-/// Repaint the push indicator from module state — the button element can be
-/// replaced by a card re-render while a download runs.
+/// Repaint both update surfaces from module state — their elements can be
+/// replaced by a card re-render while a download runs. The spend-header ring
+/// fills with byte progress; the footer button must stop offering (and
+/// silently ignoring clicks for) an update that is already in flight.
 function syncPushProgress(): void {
   const btn = document.querySelector<HTMLElement>("[data-update-push]");
-  if (!btn) return;
-  btn.classList.toggle("busy", updatePushing);
-  if (updatePushing && updatePct != null) btn.style.setProperty("--pct", String(updatePct));
-  else btn.style.removeProperty("--pct");
+  if (btn) {
+    btn.classList.toggle("busy", updatePushing);
+    if (updatePushing && updatePct != null) btn.style.setProperty("--pct", String(updatePct));
+    else btn.style.removeProperty("--pct");
+  }
+  const footer = document.querySelector<HTMLButtonElement>("#update-btn");
+  if (footer && updateVersion) {
+    if (updatePushing) {
+      footer.textContent = t("update.installing");
+      footer.disabled = true;
+    } else {
+      footer.textContent = t("update.to", { version: updateVersion });
+      footer.disabled = false;
+    }
+  }
 }
 let checkingUpdate = false;
 
@@ -4413,7 +4426,13 @@ function renderBuildInfo(): void {
     const version = updateVersion;
     const btn = document.createElement("button");
     btn.id = "update-btn";
-    btn.textContent = t("update.to", { version });
+    // A re-render mid-download must not resurrect the stale CTA text.
+    if (updatePushing) {
+      btn.textContent = t("update.installing");
+      btn.disabled = true;
+    } else {
+      btn.textContent = t("update.to", { version });
+    }
     btn.addEventListener("click", () => {
       if (!updatePushing) maybePromptUpdate(version, true);
     });
