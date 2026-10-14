@@ -100,7 +100,7 @@ fn safe_pack_path(path: &str) -> bool {
     })
 }
 
-fn validate_manifest(m: &SkinPackManifest) -> Result<(), String> {
+pub(crate) fn validate_manifest(m: &SkinPackManifest) -> Result<(), String> {
     let id_ok = !m.id.is_empty()
         && m.id.len() <= 32
         && m.id.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-')
@@ -147,7 +147,7 @@ fn validate_manifest(m: &SkinPackManifest) -> Result<(), String> {
 /// Verifies the zip in memory: manifest → validate → hash-verify every
 /// file against the manifest. Returns the manifest and the verified
 /// members (no writes) — the install step just persists them.
-fn verify_pack(bytes: &[u8]) -> Result<(SkinPackManifest, std::collections::BTreeMap<String, Vec<u8>>), String> {
+pub(crate) fn verify_pack(bytes: &[u8]) -> Result<(SkinPackManifest, std::collections::BTreeMap<String, Vec<u8>>), String> {
     let mut archive = zip::ZipArchive::new(std::io::Cursor::new(bytes))
         .map_err(|e| format!("not a readable skin pack zip: {e}"))?;
     if archive.len() > 600 {
