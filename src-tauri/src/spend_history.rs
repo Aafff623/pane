@@ -244,7 +244,18 @@ fn daily_rows_from(file: &HistoryFile, range_days: Option<u32>, today: NaiveDate
     for (day, providers) in &file.days {
         let Ok(date) = NaiveDate::parse_from_str(day, "%Y-%m-%d") else { continue };
         if cutoff.is_some_and(|start| date < start || date > today) { continue; }
+        // Same alias fold as range_from (T-0033): one scanner, two
+        // historical ids — fold within the day, bigger cell wins, so the
+        // heatmap never shows kimi + moonshot as a double spend.
+        let mut day_cells: BTreeMap<&str, &ProviderDay> = BTreeMap::new();
         for (id, cell) in providers {
+            let id = spend_alias(id);
+            let take = day_cells.get(id).map_or(true, |prev| cell.tokens > prev.tokens);
+            if take {
+                day_cells.insert(id, cell);
+            }
+        }
+        for (id, cell) in day_cells {
             let mut models: Vec<DailyModelSpend> = cell
                 .models
                 .iter()
@@ -261,7 +272,7 @@ fn daily_rows_from(file: &HistoryFile, range_days: Option<u32>, today: NaiveDate
             }
             rows.push(DailySpendRow {
                 day: day.clone(),
-                id: id.clone(),
+                id: id.to_string(),
                 cost: cell.cost,
                 tokens: cell.tokens,
                 models,
@@ -324,6 +335,36 @@ mod tests {
         // 2,389,931 (not doubled) + 52,811,343 (renamed day survives).
         assert_eq!(rows[0].tokens, 2_389_931.0 + 52_811_343.0);
         assert_eq!(rows[0].active_days, 2);
+    }
+
+    /// The heatmap endpoint folds the same alias: one row per day, and the
+    /// pre-rename day keeps the moonshot id (T-0033 fixed the aggregate
+    /// view only; this locks the detail view to the same rule).
+    #[test]
+    fn daily_rows_from_folds_kimi_alias_per_day() {
+        let mut days: BTreeMap<String, BTreeMap<String, ProviderDay>> = BTreeMap::new();
+        let cell = |tokens: f64| ProviderDay {
+            cost: tokens / 1e6,
+            tokens,
+            models: BTreeMap::new(),
+        };
+        let mut day1 = BTreeMap::new();
+        day1.insert("kimi".to_string(), cell(2_389_931.0));
+        day1.insert("moonshot".to_string(), cell(2_389_931.0));
+        days.insert("2026-09-01".to_string(), day1);
+        let mut day2 = BTreeMap::new();
+        day2.insert("kimi".to_string(), cell(52_811_343.0));
+        days.insert("2026-08-31".to_string(), day2);
+        let file = HistoryFile { version: VERSION, days };
+        let today = NaiveDate::from_ymd_opt(2026, 9, 2).unwrap();
+        let rows = daily_rows_from(&file, None, today);
+        assert_eq!(rows.len(), 2, "two days, one row each — no kimi duplicate");
+        let ids: Vec<&str> = rows.iter().map(|r| r.id.as_str()).collect();
+        assert_eq!(ids, vec!["moonshot", "moonshot"], "ids: {ids:?}");
+        let sep1 = rows.iter().find(|r| r.day == "2026-09-01").expect("rename-dup day");
+        let aug31 = rows.iter().find(|r| r.day == "2026-08-31").expect("pre-rename day survives");
+        assert_eq!(sep1.tokens, 2_389_931.0, "same-day dup must not double");
+        assert_eq!(aug31.tokens, 52_811_343.0);
     }
 
     #[test]
