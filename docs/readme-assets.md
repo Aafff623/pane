@@ -2,52 +2,82 @@
 
 ## Published files
 
-| File | Role | Update rule |
+All shots are theme-adaptive pairs (GitHub picks dark or light per the reader's
+theme via `<picture>`), captured from the **real frontend demo bundle** with
+fixed demo data — never a real account.
+
+| File pair | Role | Window |
 | --- | --- | --- |
-| `src/assets/pane-logo.png` | Canonical Pane product logo used in the README header | Keep as the identity mark; update only when the product branding changes. |
-| `attachments/overview-dark.png` | 额度总览面板截图（功能特性 1） | 从当前官网演示前端截图，使用示例数据。 |
-| `attachments/spend-dark.png` | 花费详情面板截图（功能特性 2） | 从当前官网演示前端截图，使用示例数据。 |
-| `attachments/heatmap-dark.png` | 花费热力图截图（功能特性 2） | 从当前官网演示前端截图，使用示例数据。 |
+| `attachments/overview-{dark,light}.png` | Hero screenshot in the centered header + 任何额度 subsection left cell | 450×640 CSS @2x |
+| `attachments/overview-week-{dark,light}.png` | 任何额度 subsection right cell | 450×640 CSS @2x |
+| `attachments/how-{dark,light}.png` | 「它如何工作」架构图（HTML/SVG fixture 渲染，非 UI 截图） | 1160×430 @2x |
+| `attachments/customize-{dark,light}.png` | 来源接入 subsection | 450×640 CSS @2x |
+| `attachments/spend-detail-heat-{dark,light}.png` | 花费 subsection（明细 + 365 天热力图） | 780×1200 CSS @2x |
+| `attachments/skins-{dark,light}.png` | 皮肤工坊 subsection（画廊布局） | 450×640 CSS @2x |
+| `attachments/settings-keys-{dark,light}.png` | 密钥 subsection（设置 · 密钥与额度页） | 975×677 CSS @2x |
+| `attachments/expiring-{dark,light}.png` | 还有 subsection（临期清单） | 450×640 CSS @2x |
+| `src/assets/pane-logo.png` | README 头部产品 logo（链接到官网） | 更换品牌时才动 |
 
-## Static captures
+Spare shots (settings-shortcuts, settings-general, spend-detail 450,
+overview-month) stay out of the tree; regenerate on demand.
 
-The three `attachments/*.png` files were captured on 2026-10-10 from the current
-frontend rebuilt with `node site/scripts/build-demo.mjs` and served by the local
-Worker. They show the quota overview, model spend card and daily-use heatmap.
-All values are demo data; these captures do not read real accounts or credentials.
+## Structure (magpie skeleton, since 2026-10-14)
 
-Use static images for now. When GIF recordings are available, update the image
-paths in both READMEs and this table together, preserving the centered image slots.
+`README.md` / `README_EN.md` mirror yetone/magpie's section skeleton exactly,
+with Pane content: centered header (linked logo → tagline → badges → platform
+badges → bold nav links → language switch → **hero screenshot**) →
+**Is Pane for you?** → **Quick start** (3 numbered steps + from-source
+`<details>`) → **Supported sources** (auth-shape table + `<details>` full
+list) → **How it fits together** (diagram picture + prose) → **What it does**
+(8 subsections: 任何额度 / 来源接入 / 多账号池 / 花费 / 皮肤工坊 / 密钥 /
+Agent 自诊 / 还有, each ending in a centered `<picture>` or a 50%/50%
+two-column table with `<sub>` captions; shortcuts table inside `<details>`)
+→ **Documentation** link table → **Privacy** dense paragraph → **Community**
+(contributing prose + theme-adaptive star-history chart) → **License**.
+
+## Capture pipeline
+
+UI shots (regenerate after the version bump, so footers match the release):
+
+```powershell
+node site/scripts/build-demo.mjs          # demo bundle from the working tree
+node temp/scripts/readme-shots.mjs temp/readme-final2 --root site/public
+# copy the pairs you need into attachments/
+```
+
+Diagram shots (edit `temp/readme-diagram/how-it-fits.html`, then):
+
+```powershell
+node temp/scripts/readme-diagram-shot.mjs
+```
+
+Rules baked into the harnesses:
+
+- Floating-window views are captured at the **real window size** (450×640 CSS
+  per `src-tauri/tauri.conf.json`; heatmap 780×1200; settings 975×677). The
+  window scrolls in real life — a fold cut is authentic; the main board keeps
+  every category's cards in the DOM (~5000px), so full-content capture is
+  impossible anyway.
+- Settings-window clicks MUST be scoped to `#panel-shell` — the popover's
+  hidden settings overlay lives in the same document and swallows unscoped
+  `[data-settings-tab]` selectors.
+- `document.getAnimations().forEach(a => a.finish())` freezes entrance
+  animations deterministically instead of sleeping longer.
 
 ## Bilingual maintenance
 
-`README.md` (zh-CN) and `README_EN.md` (en) are a **mirrored pair**: same 12 anchor ids
-(`intro, demo, highlights, features, providers, download, i18n, build, structure, privacy,
-contributing, license`), same section order, same tables and the same 66-provider list.
-
-When you change one, change the other in the same commit. The numbers that must stay in
-sync across both files: the test-harness link, the provider count (66), the default-enabled
-families (11) and the refresh interval (5 minutes).
+`README.md` (zh-CN) and `README_EN.md` (en) are a **mirrored pair**: same
+section skeleton, same anchor ids (`intro, quickstart, providers, how,
+features, docs, privacy, community, license`), same tables, same image set
+and the same 68-provider list. When you change one, change the other in the
+same commit. Verify with `node temp/scripts/check-readme.mjs` (image refs
+exist, anchor mirror, badge == list count, tag balance).
 
 ## Hardcoded numbers that drift
 
 | Where | Value | Refresh rule |
 | --- | --- | --- |
-| Tests badge | `parse-tests` | Links to the harness without a hardcoded pass count. Report executed test counts with their verification date. |
-| Providers badge + `<details>` list | `66` + full name list | The list is generated from `src/providerCatalog.ts`, not hand-maintained — regenerate on catalog changes. |
-
-## Layout
-
-The README uses a centered header, an emoji-anchored section list, and numbered
-feature sections (`### N. <emoji> <title>`) that end with a centered screenshot
-block (`<div align="center">` + `<img>`, `<br/><br/>` between multiple images).
-
-Screenshots are copied into `attachments/` instead of being referenced from
-`site/public/img/` so the README stays self-contained. The site keeps dark/light
-pairs; the README uses dark captures for a consistent presentation. The app's default appearance follows the system.
-Swap in the light variants — or a `<picture>` element — if a theme-adaptive
-version is wanted.
-
-Product behavior, commands, provider detail, privacy boundaries, and design
-decisions stay in searchable Markdown and linked documents so the page does not
-become stale when the dashboard changes.
+| Providers badge + `<details>` list | `68` + full name list | Generated from `src/providerCatalog.ts` (`displayName` per entry) — regenerate on catalog changes. |
+| Default-enabled families claim | "Claude、Codex、Cursor、Grok、Z.ai、MiniMax、Antigravity、Kimi 等" | Derived from `DEFAULT_DISABLED_PROVIDERS` in `src-tauri/src/lib.rs`; the exact count is deliberately not stated. |
+| Tests badge | `parse-tests` | Links to the harness without a hardcoded pass count. |
+| Footer version in screenshots | must equal the release version | Always re-run the capture pipeline after a version bump. |

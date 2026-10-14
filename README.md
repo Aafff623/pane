@@ -1,144 +1,228 @@
 <div align="center">
 
-<img src="src/assets/pane-logo.png" width="110" height="110" alt="Pane Logo" />
+<a href="https://pane.threetwoa.live"><img src="src/assets/pane-logo.png" width="112" alt="pane"></a>
 
 # Pane
 
 ### 常驻托盘的本地用量与额度工作台
 
-**Usage, quotas, balances and resets — one desktop workspace.**
+**用量、额度、余额与重置时间 —— 一个桌面工作台全看清。**
 
-[![Release Version](https://img.shields.io/github/v/release/Aafff623/pane?style=flat-square&label=Release&color=2563EB&labelColor=172033)](https://github.com/Aafff623/pane/releases)
-[![Platform](https://img.shields.io/badge/Platform-Windows%2010%20%7C%2011%20(x64)-0078D4.svg?style=flat-square&logo=windows)](https://github.com/Aafff623/pane/releases)
-[![Tauri](https://img.shields.io/badge/Tauri-v2-24C8DB.svg?style=flat-square&logo=tauri&logoColor=white)](https://tauri.app/)
-[![Rust](https://img.shields.io/badge/Rust-172033.svg?style=flat-square&logo=rust&logoColor=white)](src-tauri/Cargo.toml)
-[![TypeScript](https://img.shields.io/badge/TypeScript-3178C6.svg?style=flat-square&logo=typescript&logoColor=white)](package.json)
-[![Vite](https://img.shields.io/badge/Vite-646CFF.svg?style=flat-square&logo=vite&logoColor=white)](vite.config.ts)
-[![Providers](https://img.shields.io/badge/Providers-66-2563EB.svg?style=flat-square)](docs/providers.md)
-[![Tests](https://img.shields.io/badge/Tests-parse--tests-2563EB.svg?style=flat-square)](parse-tests/)
+[![Release](https://img.shields.io/github/v/release/Aafff623/pane?style=flat-square&label=Release&color=2563EB&labelColor=172033)](https://github.com/Aafff623/pane/releases)
+[![Stars](https://img.shields.io/github/stars/Aafff623/pane?style=flat-square&color=2563EB&labelColor=172033)](https://github.com/Aafff623/pane/stargazers)
 [![License](https://img.shields.io/badge/License-MIT-10B981.svg?style=flat-square)](LICENSE)
-[![Language](https://img.shields.io/badge/Language-zh--CN%20%7C%20en%20%7C%20ru-8B5CF6.svg?style=flat-square)](#i18n)
-[![Local First](https://img.shields.io/badge/Data-Local--First-172033.svg?style=flat-square)](docs/privacy.md)
+[![Tests](https://img.shields.io/badge/Tests-parse--tests-2563EB.svg?style=flat-square)](parse-tests/)
 
-<br/>
+[![Windows](https://img.shields.io/badge/Windows-10%20%7C%2011%20(x64)-0078D4.svg?style=flat-square&logo=windows&logoColor=white)](https://github.com/Aafff623/pane/releases/latest)
+[![macOS](https://img.shields.io/badge/macOS-dmg-8B5CF6.svg?style=flat-square&logo=apple&logoColor=white)](https://github.com/Aafff623/pane/releases)
+[![Linux](https://img.shields.io/badge/Linux-AppImage%20%7C%20.deb-172033.svg?style=flat-square&logo=linux&logoColor=white)](https://github.com/Aafff623/pane/releases)
+[![Providers](https://img.shields.io/badge/Providers-68-2563EB.svg?style=flat-square)](docs/providers.md)
+[![Tauri](https://img.shields.io/badge/Tauri-v2-24C8DB.svg?style=flat-square&logo=tauri&logoColor=white)](https://tauri.app/)
+[![Local First](https://img.shields.io/badge/Data-Local--First-10B981.svg?style=flat-square)](docs/privacy.md)
 
-**[简体中文](README.md)** • **[English](README_EN.md)**
+**[下载](#quickstart)** &nbsp;·&nbsp; **[文档](#docs)** &nbsp;·&nbsp; **[在线演示](https://pane.threetwoa.live)** &nbsp;·&nbsp; **[官网](https://pane.threetwoa.live)**
 
-[官网](https://pane.threetwoa.live/) • [英文官网](https://pane.threetwoa.live/en/) • [GitHub](https://github.com/Aafff623/pane)
+**[简体中文](README.md)** · **[English](README_EN.md)**
 
-<br/>
-
-[📖 简介](#intro) • [🎬 在线演示](#demo) • [🌟 功能概览](#highlights) • [✨ 功能特性](#features) • [🔌 支持的来源](#providers) • [🚀 快速开始](#download) • [🛠️ 本地构建](#build) • [📂 项目结构](#structure) • [🔐 隐私边界](#privacy) • [📋 更新日志](CHANGELOG.md)
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="attachments/overview-dark.png">
+  <img src="attachments/overview-light.png" width="420" alt="Pane 悬浮面板：额度总览">
+</picture>
 
 </div>
 
 ---
 
-## <a id="intro"></a>📖 简介
+## <a id="intro"></a>Pane 适合你吗？
 
-**Pane** 是一个本地优先的**用量与额度工作台**。它把不同工具与在线服务的**用量、剩余额度、余额、重置时间和账户状态**，收进一个随时可唤出的桌面面板，方便集中查看和管理。
+每个 AI 工具都把额度放在自己的控制台里：Claude 是 5 小时会话，Codex 看周额度，中转站按 key 计余额，CLI 的花费散落在本地日志。想知道「现在还剩多少、什么时候重置、哪个账号快到顶、今天花了多少」，你得开五个网页、翻三处本地文件。
 
-当前目录收录 **66 个来源**，覆盖 AI 编程与模型服务、语音等生产力工具，以及搜索、爬虫与 MCP 服务；支持的本地 CLI 还可汇总 **Token 与花费**。各来源能读取哪些指标，取决于对应接口或本地数据。
+**Pane 把它们收进一个 `Alt + 2` 随时唤出的桌面面板：**
 
-后续接入方向围绕「可查询的用量与资源」展开：自动化与工作流、办公与商业 SaaS、云算力与数据库、网盘与存储、网络流量和数字会员等，都可以作为扩展候选。具备可读取的用量、额度、余额或有效期数据，是评估接入的基础；具体仍需核实访问权限并适配接口与计量口径。这些方向不代表目前已支持。
+- **一处看清** —— 5 小时 / 7 天 / 每月额度、余额、重置倒计时与账户状态，`Shift` 一键换挡；
+- **本地优先** —— token、cookie 与 API key 只存在本机系统凭据库和用户目录，查询直连各厂商端点，Pane 没有中转后端；
+- **常驻不打扰** —— 托盘常驻、每 5 分钟自动刷新（可调），查询失败如实显示为错误状态，而不是灰掉的未知额度。
 
-用 `Alt + 2` 在任何窗口之上唤出面板，`Shift` 在同一张总览里切换 **5 小时 / 7 天 / 每月**周期，`Esc` 收起回到当前工作。不打断工作流，只在你需要的时候给出准确上下文。
+如果上面有两条说的是你，Pane 值得一试。Pane 是 Windows 桌面工具（macOS / Linux 随 Release 提供构建）。
 
-> 💡 **设计重点**：
-> - **本地优先**：token、cookie、API key 保存在本机系统凭据库与用户目录，不上传、不经过 Pane 的中转后端；查询请求直达对应厂商端点；
-> - **一个桌面层**：额度查询、重置倒计时、多账号池、总花费与密钥管理都集中在一个面板，设置是独立窗口而非网页后台；
-> - **常驻不打扰**：托盘常驻，默认每 5 分钟自动刷新一次（可调），失败会如实显示为错误状态而不是灰掉的未知额度。
+## <a id="quickstart"></a>快速开始
 
-## <a id="demo"></a>🎬 在线演示
+1. **下载安装** —— 从 [Releases](https://github.com/Aafff623/pane/releases/latest) 拿对应平台的安装包。Windows 10/11 (x64) 的 `*-setup.exe` 是主要开发与验证平台；安装后 Pane 进入系统托盘，不需要注册账号。
+2. **接入来源** —— `Ctrl + S` 打开设置，按各服务商的提示完成本地登录（Copilot / Codex / Claude 等）或粘贴 API key；未启用的卡片也能先用「⚡ 测试连通性」验证。
+3. **日常使用** —— `Alt + 2` 唤出 / 收起面板，`Shift` 在 5 小时 / 7 天 / 每月间切换，`T` 看临期清单，`Esc` 收起回到工作。
 
-不想先安装？官网内置了**真实前端打包驱动**的交互演示——`Alt + 2`、`Shift`、`Ctrl + S` 等 9 个快捷键、深浅主题切换和移动端布局都能直接试。演示数据固定，不连接真实账户；桌面版支持全局快捷键。
+不想先安装？[官网在线演示](https://pane.threetwoa.live)由真实前端打包驱动，9 组快捷键和深浅主题都能直接试；演示数据固定，不连接真实账户。
+
+<details>
+<summary><b>从源码构建</b></summary>
+
+```powershell
+git clone https://github.com/Aafff623/pane.git
+cd pane
+pnpm install
+pnpm build          # 前端（TypeScript 检查 + Vite 构建）
+pnpm tauri build    # 完整桌面应用
+```
+
+开发模式需要两个进程：Vite 在 `127.0.0.1:1420` 提供前端，`pane.exe` 在 `127.0.0.1:6736` 提供本地 usage API。完整说明见 [开发启动指南](docs/dev-startup.md)。
+
+</details>
+
+## <a id="providers"></a>支持的来源
+
+当前目录收录 **68 个来源**，三种读取形态：
+
+| 形态 | 覆盖 | 读取方式 |
+| --- | --- | --- |
+| 本地登录状态 | Claude、Codex、Cursor、Copilot、Antigravity 等 | 本机 IDE / CLI 的登录凭据 + 官方 usage API |
+| OAuth 设备流 | Grok、Kiro、SenseNova 等 | 应用内发起，token 自动轮换持久化 |
+| API key | DeepSeek、Kimi Code、StepFun、SiliconFlow、Novita 等 | 设置中的 key、环境变量或 CLI 配置 |
+
+同一服务商可以挂**多个账号**独立出卡（ClinePass、One/New API、Custom Relay 等），本地 CLI（Claude Code、Codex CLI、ZCode、OpenCode 等）的花费从日志直接扫描。开箱默认启用主流订阅家族（Claude、Codex、Cursor、Grok、Z.ai、MiniMax、Antigravity、Kimi 等），其余在设置中按需开启。
+
+<details>
+<summary><b>全部 68 个服务商一览</b>（与 <code>src/providerCatalog.ts</code> 一致）</summary>
+
+Claude、Codex、CodeBuddy、CodeBuddy CN、WorkBuddy、Cursor、OpenCode、Copilot、Grok、Devin、MiniMax、OpenRouter、Z.ai、Antigravity、DeepSeek、Kimi API、ElevenLabs、Ollama、Codebuff、Kilo、AihubMix、One/New API、Qwen Code、Hermes、Kimi Code、StepFun、StepFun Step Plan、闪电说、SiliconFlow、Novita AI、Custom Relay、Qoder CN、Trae CN、Command Code、Doubao、ClawsGO、BochaAI、Tavily、Firecrawl、Brave Search、ClinePass、SenseNova、APIGOTO、MiniMax Code、Amp、AWS Bedrock、Chutes、Deepgram、Kiro、OpenAI API、Poe、Venice、Vertex AI、Warp、Windsurf、MiMo、Trae、Qoder、Zed、Droid、JetBrains AI、Groq、Hugging Face、LongCat、sub2api、Mistral、Perplexity、Volcengine Ark
+
+</details>
+
+## <a id="how"></a>它如何工作
 
 <div align="center">
-
-[![在线演示](https://img.shields.io/badge/Pane-🎬%20打开互动演示%20pane.threetwoa.live-2563EB?style=for-the-badge&logo=googlechrome&logoColor=white)](https://pane.threetwoa.live)
-
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="attachments/how-dark.png">
+    <img src="attachments/how-light.png" width="820" alt="Pane 架构：本地核心直连各厂商端点">
+  </picture>
 </div>
 
-## <a id="highlights"></a>🌟 功能概览
+额度查询由 Rust 核心定时发起，**直连各厂商官方端点**，Pane 不在中间转发；token 花费从本地 CLI 日志扫描得出，不经过任何云端服务；凭据存系统凭据库与用户目录；本地只读诊断 API 只监听 `127.0.0.1`。各来源能读哪些指标取决于其接口或本地数据，逐家说明见 [Provider catalog](docs/providers.md)。
 
-Pane 把「现在还剩多少、什么时候重置、哪个账号快到上限、今天花了多少」压缩成一个安静的托盘工具。面板默认只展示最重要的状态，细节在需要时展开。
+## <a id="features"></a>它能做什么
 
-| 功能方向 | 当前能力 |
-| :--- | :--- |
-| **额度总览** | 5 小时 / 7 天 / 每月周期切换、绿黄红状态、重置倒计时、失败即报错 |
-| **本地花费** | 读本地 CLI 日志回看 Token 与美元花费，按模型拆分明细与分档图标 |
-| **多账号池** | 同一服务商挂多个账号、独立出卡、两级备注、设为默认与归档 |
-| **分类与分组** | Coding Agent / 生产力工具 / MCP 搜索标签、可自定义批注、抽屉内搜索 |
-| **密钥管理** | 系统凭据库存储、主密码验证后查看明文、本机登录态识别 |
-| **快捷键体系** | 9 组内置快捷键、全行冲突检测、逐键重录与一键还原 |
-| **主题与外观** | 深浅主题、开机品牌动画、实验性皮肤市场（默认隐藏） |
-| **服务商接入** | 66 家服务商，本地登录 / OAuth / API key 三种读取形态 |
+### 任何额度，一处看清
 
-> 📋 更完整的版本变化请查看 [CHANGELOG.md](CHANGELOG.md)。
+悬浮面板用一张总览回答「还剩多少、什么时候重置」：绿 / 黄 / 红三态区分可用、高峰和不可用，剩余额度与重置倒计时直接上卡面；`Shift` 在 5 小时 / 7 天 / 每月间切换。查询失败如实显示为错误状态，不伪装成灰色的未知额度；没有月额度的服务商在月视图回退到周额度并标注。
 
----
+<table>
+  <tr>
+    <td width="50%" align="center" valign="top">
+      <picture>
+        <source media="(prefers-color-scheme: dark)" srcset="attachments/overview-dark.png">
+        <img src="attachments/overview-light.png" width="390" alt="额度总览 · 5 小时视图">
+      </picture><br/>
+      <sub>5 小时会话视图</sub>
+    </td>
+    <td width="50%" align="center" valign="top">
+      <picture>
+        <source media="(prefers-color-scheme: dark)" srcset="attachments/overview-week-dark.png">
+        <img src="attachments/overview-week-light.png" width="390" alt="额度总览 · 周视图">
+      </picture><br/>
+      <sub>周视图 · 重置倒计时与分组</sub>
+    </td>
+  </tr>
+</table>
 
-## <a id="features"></a>✨ 功能特性
+**长墙镜像**：周 / 月额度打满时，短周期环直接镜像墙状态（100% + 刷新倒计时），消除「5 小时环还绿着但请求全被拒」的假象；额度耗尽给出可读解释（如 `Weekly limit reached · resets in 2d 21h`），而不是空详情的裸红环。
 
-### 1. 📊 额度，一处看清
+### 来源接入
 
-- 会话（5 小时）、周度（7 天）与月度额度汇集到同一张总览，用 `Shift` 直接切换周期；
-- 用绿色、黄色、红色状态快速区分可用、高峰和额度不可用；
-- 查询失败会明确显示为错误状态，不再伪装成灰色的未知额度；
-- 没有月额度的服务商在月视图会回退到周额度，并明确标注回退状态。
+68 家按三种认证形态接入，每张卡都有「⚡ 测试连通性」（未启用也可测，状态栏显示 `连通正常 · N ms`）和「? 额度查询说明」（按认证形态给出 key / OAuth / 本地登录的步骤模板与控制台直链）。Customize 抽屉里就地搜索、自定义分组（🥚🐑）、两级备注，移除的 Provider 随时恢复：
+
+> 分类标签按 **Coding Agent / 生产力工具 / MCP 搜索**切换；已删除的 Provider 收进抽屉底部，一键找回。
 
 <div align="center">
-  <img src="attachments/overview-dark.png" width="420" alt="Pane 额度总览面板" />
-  <br/><sub>当前前端静态截图，使用示例数据，不连接真实账户。</sub>
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="attachments/customize-dark.png">
+    <img src="attachments/customize-light.png" width="390" alt="Customize 抽屉：搜索、分组与开关">
+  </picture>
 </div>
 
----
+### 多账号池
 
-### 2. 🧾 花费，有迹可循
-
-- 读取支持的本地 CLI 日志，计算今日、昨日和近 30 天消费，不经过任何云端服务；
-- 支持美元与 token 双视图，按模型展开明细；
-- 当模型价格未知时保留 token 事实，并明确标注未计价项；
-- 花费卡图标按日 token 量分档渐变，阈值可在设置中自定义；
-- 各 CLI 的计量方式与覆盖范围见 [Token 花费覆盖](docs/token-spend-coverage.md)。
-
-<div align="center">
-  <img src="attachments/spend-dark.png" width="420" alt="Pane 花费详情面板" />
-  <br/><br/>
-  <img src="attachments/heatmap-dark.png" width="720" alt="Pane 花费热力图" />
-  <br/><sub>花费与热力图使用示例数据；暂用静态图片，后续可替换为 GIF。</sub>
-</div>
-
----
-
-### 3. ⏱️ 重置，不再猜测
-
-- 每个窗口显示剩余额度与恢复时间倒计时；
-- **长墙镜像**：周/月额度打满时，短周期环直接镜像墙状态（100% + 刷新倒计时），消除「5 小时环还是绿的但请求全被拒」的假象（首期覆盖 Kimi，其余家族逐家实测后扩展）；
-- 额度耗尽时给出可读解释（如 `Weekly limit reached · resets in Xd Yh`），而不是一个空详情的裸红环。
-
----
-
-### 4. 🧩 账号池，一个服务商多个账号
-
-- API key 类服务商可以在设置中保存多个账号，各自独立出卡；
-- 每个账号拥有稳定的本地卡片身份，删除或重排不会串号；
+- API key 类服务商可在设置中保存多个账号，各自独立出卡；
+- 每个账号有稳定的本地卡片身份，删除或重排不会串号；
 - 备注分两级：「Provider 名称」只改卡片标题，「子账号名称」只改该账号；
 - 右键账号胶囊可设为默认主账号、归档或恢复（凭据随档）；
-- 总览默认收起为「主账号环 + 用量条 + N/M 徽章」，点击展开。
+- 总览默认收起为「主账号环 + 用量条 + `N/M` 徽章」，点击展开。
 
----
+### 花费，有迹可循
 
-### 5. 🗂️ 分类、批注与卡片分组
+读取本地 CLI 日志计算消费，不经过任何云端服务；支持美元与 token 双视图，按模型展开明细：
 
-- 标签栏按 **Coding Agent / 生产力工具 / MCP 搜索**分类切换；
-- 批注可自定义，按自己的工作流组织看板；
-- Customize 抽屉顶部搜索框按名称就地过滤，分组头随空隐藏；
-- 每个 provider 都可以从看板移除，底部「已删除的 Provider」随时可恢复。
+| 能力 | 说明 |
+| :--- | :--- |
+| 今日 / 昨日 / 近 30 天 | 按窗口汇总 token 与美元 |
+| 模型明细 | 按模型拆分花费与 token，未知价格保留事实并标注未计价 |
+| 365 天热力图 | 回看每日使用强度 |
+| 分档图标 | 花费卡图标按日 token 量渐变，阈值可自定义 |
 
----
+<div align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="attachments/spend-detail-heat-dark.png">
+    <img src="attachments/spend-detail-heat-light.png" width="680" alt="花费明细与 365 天热力图">
+  </picture>
+  <br/><sub>示例数据，不连接真实账户；各 CLI 计量口径见 <a href="docs/token-spend-coverage.md">Token 花费覆盖</a></sub>
+</div>
 
-### 6. ⌨️ 快捷键，随叫随到
+### 皮肤工坊
+
+深浅主题一键切换（`Ctrl + L`）；**皮肤市场为实验性功能，默认隐藏**，需在设置中二次确认开启。工坊是画廊式布局：上方完整预览当前选中皮肤（以总花费面板为样张），下方缩略图浏览，底部「使用这款皮肤 / 恢复原生外观」常驻；日间 / 夜间 / 并排三种预览模式，切换时保留滚动位置与键盘焦点。
+
+<details>
+<summary><b>资源包格式</b></summary>
+
+皮肤以资源包分发：zip 内含 `manifest.json`（id、名称、版本、minAppVersion、入口 CSS、逐文件 sha256）+ 资产文件。安装 = 解压 + 逐文件校验 + manifest 合法性检查，任何一项不过整包拒装不留残骸；已装包落在 `%APPDATA%\Pane\skins\<id>\`，重启后仍从磁盘恢复。壁纸、吉祥物和退出交互成套换装，关闭即热切回原生皮肤。设计文档见 [皮肤市场设计](docs/skin-market-design.md)。
+
+</details>
+
+<div align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="attachments/skins-dark.png">
+    <img src="attachments/skins-light.png" width="390" alt="皮肤工坊：画廊布局与总花费样张">
+  </picture>
+</div>
+
+### 密钥，留在本机
+
+provider 主密钥与全部子账号密钥存入**系统凭据库**（Windows 凭据管理器等），JSON 文件不再明文落盘；「密钥与额度」页每一行都需**主密码验证**才能查看明文，明文不上屏、可一键复制；本机登录类行内显示绿色「已连接」并写明读取来源。
+
+| | |
+| :--- | :--- |
+| **凭据存储** | 系统凭据库 + 用户目录，不上传、不进 Git |
+| **查看明文** | 主密码验证后逐行解锁，可复制、不驻屏 |
+| **快捷键** | 9 组内置、全行冲突检测、逐键重录、一键还原 |
+
+<div align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="attachments/settings-keys-dark.png">
+    <img src="attachments/settings-keys-light.png" width="520" alt="设置面板：密钥与额度页">
+  </picture>
+</div>
+
+### 让你的 AI Agent 自己排查 Pane
+
+Pane 内置**只读诊断 API**（仅监听 `127.0.0.1`、无鉴权、**永不出凭据**，错误文本中的网址也打码）和一个排查 Skill。装上后直接对 coding agent（Claude Code / Codex / Cursor / ZCode 等）说「帮我查一下 Pane 哪个卡有问题」，它会自己定位原因并给出修复步骤——不用等发版：
+
+```powershell
+curl -s --noproxy '*' http://127.0.0.1:6736/v1/doctor     # 一句话健康结论 + 每项失败的修复办法
+curl -s --noproxy '*' http://127.0.0.1:6736/v1/providers  # 每张卡的状态 / 错误 / 是否过期
+curl -s --noproxy '*' http://127.0.0.1:6736/v1/status     # 版本 / 运行时长 / 刷新年龄
+curl -s --noproxy '*' http://127.0.0.1:6736/v1/sources    # 本机花费数据源清单
+```
+
+Skill 三选一安装：`install.ps1` 安装器自动装入、设置 → 常规 → **AI Agent 排查 Skill → 安装**、或从仓库 [`skills/pane/`](skills/pane/) 获取（支持 `npx skills add Aafff623/pane`）。完整契约见 [本地 HTTP API](docs/local-http-api.md)。
+
+### 还有
+
+- **临期清单** —— `T` 呼出，按重置时间排序，顶部就是「该行动」的部分；
+- **托盘直达** —— 右键直出各 provider 状态行（读本地快照，零网络请求）与设置入口；
+- **更新不打断** —— 检测到新版本时总花费横栏出现轻量 ↑ 指示器，点击原地下载，圆环按真实字节进度填充，完成后自动安装重启；
+- **三语界面** —— 简体中文 / English / Русский，跟随系统或手动切换；
+- **开机动画** —— 弹出主窗时的品牌动画可开关、可重播，系统减动效时停格成片帧退场。
+
+<details>
+<summary><b>全部 9 组内置快捷键</b></summary>
 
 | 快捷键 | 作用 |
 | :--- | :--- |
@@ -152,268 +236,44 @@ Pane 把「现在还剩多少、什么时候重置、哪个账号快到上限、
 | `Ctrl + R` | 立即刷新用量 |
 | `T` | 查看临期清单 |
 
-- 快捷键以键帽呈现，点击即录制、`Esc` 取消、`Backspace` 清除、`↺` 恢复内置默认；
-- 冲突全行互查并红字提示，被系统占用时会保留上一次可用绑定。
-
----
-
-### 7. 🔐 密钥，留在本机
-
-- provider 主密钥与全部子账号密钥存入**系统凭据库**（Windows 凭据管理器等），JSON 文件不再明文落盘；
-- 「密钥与额度」页每一行都需**主密码验证**才能查看明文，明文不上屏、可一键复制；
-- 本机登录类（Copilot / Antigravity / Claude 等）行内显示绿色「已连接」并写明读取来源。
-
----
-
-### 8. 🎨 主题与外观
-
-- 深色 / 浅色主题一键切换，卡片入场与昼夜切换动画可关；
-- 弹出主窗时播放开机品牌动画，可在设置中开关或重播，系统减动效时停格成片帧后正常退场；
-- **皮肤市场为实验性功能，默认隐藏**，需在设置中二次确认后开启，关闭即热切回原生皮肤。
-
----
-
-### 9. 🔌 服务商，按认证形态读取
-
-- 目录收录 **66 家**服务商，首次安装默认启用 11 个主流家族（Claude、Codex、Cursor、Grok、Z.ai 等），其余在设置中按需开启；
-- 三种读取形态：本地登录状态、OAuth 设备流、API key；
-- 卡片菜单「⚡ 测试连通性」对未启用的卡也可测，状态栏显示 `连通正常 · N ms` 或失败原因；
-- 「? 额度查询说明」按认证形态自动给出 key / OAuth / 本地三种步骤模板与控制台直链。
-
----
-
-### 10. 🔄 托盘与更新
-
-- 托盘右键直出各 provider 状态行（读本地快照，零网络请求）与设置入口；
-- 检测到新版本时总花费横栏出现轻量 ↑ 指示器，不弹窗打断；点击即原地下载，圆环按真实字节进度填充，完成后自动安装并重启。
-
----
-
-## <a id="providers"></a>🔌 支持的来源
-
-Pane 当前覆盖 66 个服务商。下面列出最常用的几类，完整说明见 [Provider catalog](docs/providers.md)。
-
-这里的 66 是当前源码目录的数量；已发布安装包支持的来源以对应版本为准。各来源可读取的额度、余额或本地花费范围不同。
-
-| 类型 | 来源 | 读取方式 |
-| --- | --- | --- |
-| 订阅额度 | Claude、Codex、Cursor、GitHub Copilot | 本地登录状态 + 官方 usage API |
-| API key 额度 | DeepSeek、Kimi Code、StepFun、SiliconFlow、Novita | 设置中的 key、环境变量或 CLI 配置 |
-| 多账号池 | ClinePass、One/New API、Custom Relay 等 | `accounts/<provider>.json` 中的独立账号 |
-| 本地消费 | OpenCode、Claude Code、Codex CLI、Hermes 等 | 本地数据库或 CLI 日志 |
-| 本地服务 | Ollama | `127.0.0.1:11434` 模型与服务状态 |
-
-ClinePass 使用 `sk_` key 查询五小时、周、月三个滚动窗口；同一 provider 下的多个 key 会分别显示，并在卡片附近提示账号数量。
-
-<details>
-<summary><b>全部 66 个服务商一览</b>（点击展开，与 <code>src/providerCatalog.ts</code> 一致）</summary>
-
-Claude、Codex、CodeBuddy、Cursor、OpenCode、Copilot、Grok、Devin、MiniMax、OpenRouter、Z.ai、Antigravity、DeepSeek、Kimi API、ElevenLabs、Ollama、Codebuff、Kilo、AihubMix、One/New API、Qwen Code、Hermes、Kimi Code、StepFun、StepFun Step Plan、闪电说、SiliconFlow、Novita AI、Custom Relay、Qoder CN、Trae CN、Command Code、Doubao、ClawsGO、BochaAI、Tavily、Firecrawl、Brave Search、ClinePass、SenseNova、APIGOTO、MiniMax Code、Amp、AWS Bedrock、Chutes、Deepgram、Kiro、OpenAI API、Poe、Venice、Vertex AI、Warp、Windsurf、MiMo、Trae、Qoder、Zed、Droid、JetBrains AI、Groq、Hugging Face、LongCat、sub2api、Mistral、Perplexity、Volcengine Ark
-
 </details>
 
----
+<div align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="attachments/expiring-dark.png">
+    <img src="attachments/expiring-light.png" width="390" alt="临期清单">
+  </picture>
+</div>
 
-## <a id="download"></a>🚀 快速开始与下载
+## <a id="docs"></a>文档
 
-### 当前主线版本：`0.7.0`
-
-| 平台 | 安装包 | 状态 | 下载入口 |
-| :--- | :--- | :--- | :--- |
-| **Windows 10 / 11 (x64)** | `*-setup.exe`（NSIS 安装器） | 🟢 主要开发与验证平台 | [⬇️ 下载最新版](https://github.com/Aafff623/pane/releases/latest) |
-| **macOS** | `.dmg` | 🟡 随 Release 提供构建 | [⬇️ 前往下载](https://github.com/Aafff623/pane/releases) |
-| **Linux** | `.AppImage` / `.deb` | 🟡 随 Release 提供构建 | [⬇️ 前往下载](https://github.com/Aafff623/pane/releases) |
-| **历史版本归档** | 全部历史产物 | 📂 版本回溯与对比 | [📂 浏览 Releases 归档](https://github.com/Aafff623/pane/releases) |
-
-### 基础使用流程：
-
-1. 从 [Releases](https://github.com/Aafff623/pane/releases) 下载对应平台的安装包并启动，Pane 会进入系统托盘；
-2. 按 `Alt + 2`（或点击托盘图标）唤出悬浮面板，面板出现在桌面正中央；
-3. 打开设置（`Ctrl + S`），按各服务商的提示完成本地登录或粘贴 API key；未启用的卡片也可用「⚡ 测试连通性」先验证；
-4. 用 `Shift` 切换 5 小时 / 7 天 / 每月周期，确认额度与重置时间；
-5. `Esc` 收起面板，回到当前工作。
-
-Pane 不需要单独注册账号。首次运行后，数据保存在当前用户的 `%APPDATA%\Pane\` 下。
-
-### 从源码启动
-
-```powershell
-git clone https://github.com/Aafff623/pane.git
-cd pane
-pnpm install
-pnpm dev
-```
-
-开发模式需要两个进程：Vite 在 `127.0.0.1:1420` 提供前端，`pane.exe` 在 `127.0.0.1:6736` 提供本地 usage API。完整的 Windows 启动和 WebView2 缓存说明见 [`docs/dev-startup.md`](docs/dev-startup.md)。
-
----
-
-## <a id="agent"></a>🤖 让你的 AI Agent 自己排查 Pane
-
-Pane 内置一个**只读诊断 API**和一个**排查 Skill**。装上后，你可以直接对自己的 coding agent（Claude Code / Codex / Cursor / ZCode 等）说"帮我查一下 Pane 哪个卡有问题"，它会自己读本地 API 定位原因并给出修复步骤——不用等发版。
-
-### 本地只读诊断 API（无需配置，Pane 运行时即开）
-
-```powershell
-curl -s --noproxy '*' http://127.0.0.1:6736/v1/doctor     # 一句话健康结论 + 每项失败的修复办法
-curl -s --noproxy '*' http://127.0.0.1:6736/v1/providers  # 每张卡的状态 / 错误 / 是否过期
-curl -s --noproxy '*' http://127.0.0.1:6736/v1/status     # 版本 / 运行时长 / 刷新年龄
-curl -s --noproxy '*' http://127.0.0.1:6736/v1/sources    # 本机花费数据源清单
-```
-
-仅监听 `127.0.0.1`、无鉴权、**永不出凭据**（错误文本中的网址也会打码）。完整契约见 [`docs/local-http-api.md`](docs/local-http-api.md)。
-
-### 安装排查 Skill（三选一，可叠加）
-
-| 方式 | 操作 |
+| | |
 | :--- | :--- |
-| **安装器自动** | 用 [`install.ps1`](install.ps1) 安装/更新 Pane 时自动装入 `~/.agents/skills/pane/` |
-| **应用内一键** | Pane 设置（`Ctrl + S`）→ 常规 → **AI Agent 排查 Skill → 安装**（会先展示写入计划，覆盖前自动备份） |
-| **仓库获取** | 本仓库 [`skills/pane/`](skills/pane/)；支持 `npx skills add Aafff623/pane`，或手动拷贝到 `~/.agents/skills/pane/` |
+| [开发启动指南](docs/dev-startup.md) | [Provider catalog](docs/providers.md) |
+| [本地 HTTP API](docs/local-http-api.md) | [Token 花费覆盖](docs/token-spend-coverage.md) |
+| [隐私说明](docs/privacy.md) | [皮肤市场设计](docs/skin-market-design.md) |
+| [工程事实与约束](docs/project-facts.md) | [领域词汇表](CONTEXT.md) |
+| [README 素材维护](docs/readme-assets.md) | [更新日志](CHANGELOG.md) |
 
-装好后重启你的 agent（或开个新会话），然后直接问它：
+## <a id="privacy"></a>隐私
 
-> 我的 Pane 有张卡片没数据，帮我看看是什么原因。
+Pane 是 local-first 工具：token、cookie 和 API key 保存在系统凭据库与 Windows 用户目录，不提交到 Git、不上传；查询请求只发送到对应 provider 的端点，Pane 没有中心后端替你转发额度；本地 HTTP API 只监听 loopback 并对敏感字段脱敏；遥测默认不承载额度、消费或 provider 凭据，可在设置中关闭。详见 [`docs/privacy.md`](docs/privacy.md)，安全披露流程见 [`SECURITY.md`](SECURITY.md)。
 
-Skill 会引导 agent 按证据走决策树（`/v1/doctor` → `/v1/providers` → 症状库），区分"被禁用 / 没配密钥 / 登录过期 / 网络 / 刷新卡死"，并把每一步的观察与推断分开汇报。
+## <a id="community"></a>参与
 
----
+欢迎提交 issue、provider 适配、UI 改进和文档修订。提交前请说明：改动影响的 provider 或用户路径、使用了哪些本地数据或外部 API、如何验证。新功能走 `codex/<feature>` 分支，验证通过后合并回 `main`；详见 [`CONTRIBUTING.md`](CONTRIBUTING.md)。UI 验收由维护者本人完成——真实界面证据优先于代码阅读。
 
-## <a id="i18n"></a>🌐 多语言支持 (Internationalization)
+<div align="center">
 
-界面语言可在设置 → 常规中随时切换：
+<a href="https://star-history.com/#Aafff623/pane&Date">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=Aafff623/pane&type=Date&theme=dark" />
+    <img src="https://api.star-history.com/svg?repos=Aafff623/pane&type=Date" alt="Star History Chart" width="660" />
+  </picture>
+</a>
 
-| 语言代码 | 显示名称 | 支持状态 |
-| :--- | :--- | :---: |
-| `zh` | 🇨🇳 简体中文 | 🟢 完整支持 |
-| `en` | 🇺🇸 English | 🟢 完整支持 |
-| `ru` | 🇷🇺 Русский | 🟢 完整支持 |
-| `auto` | 🖥️ 跟随操作系统语言 | 🟢 完整支持 |
+</div>
 
-官网提供中文与英文入口：[`/`](https://pane.threetwoa.live/) 与 [`/en/`](https://pane.threetwoa.live/en/)。当前源码已支持双语，线上更新随官网部署生效。
+## <a id="license"></a>许可证
 
----
-
-## <a id="build"></a>🛠️ 本地构建与开发
-
-### 环境要求
-
-- Windows 10 / 11 (x64)
-- [Node.js](https://nodejs.org/) 20+ 与 `pnpm`
-- [Rust](https://rustup.rs/) stable 工具链
-- WebView2 Runtime（Windows 10/11 通常已内置）
-
-### 编译与运行
-
-```powershell
-# 1. 克隆代码仓库
-git clone https://github.com/Aafff623/pane.git
-cd pane
-
-# 2. 安装前端依赖
-pnpm install
-
-# 3. 仅前端（TypeScript 检查 + Vite 构建）
-pnpm build
-
-# 4. 完整桌面应用（前端 + Rust）
-pnpm tauri build
-```
-
-### Rust 侧检查
-
-```powershell
-cd src-tauri
-$env:PATH = "D:\Tools\mingw64\bin;$env:PATH"
-cargo +stable-x86_64-pc-windows-gnu check
-```
-
-### 运行 Provider 解析测试
-
-`parse-tests` 通过 `#[path]` 直接编译 `src-tauri/src` 下的真实源码，另配一个 `tauri-stub` crate，因此无需链接完整 Tauri 应用即可运行：
-
-```powershell
-cd parse-tests
-$env:PATH = "D:\Tools\mingw64\bin;$env:PATH"
-cargo +stable-x86_64-pc-windows-gnu test
-```
-
----
-
-## <a id="structure"></a>📂 项目结构
-
-```text
-pane/
-├── src/                             # 前端（TypeScript + Vite，无框架）
-│   ├── main.ts                      # 看板渲染、刷新循环、设置、皮肤市场
-│   ├── i18n.ts                      # 三语字典（zh / en / ru）
-│   ├── providerCatalog.ts           # 前端 provider 能力目录
-│   ├── providerVisuals.ts           # provider 图标、颜色与品牌视觉
-│   ├── providerMechanisms.ts        # 各 provider 的读取机制说明文案
-│   ├── peakHours.ts                 # 高峰时段判定
-│   ├── uiIcons.ts                   # 界面图标
-│   └── styles.css                   # 全部样式（含窄窗断点）
-├── src-tauri/                       # 桌面端（Rust / Tauri v2）
-│   ├── src/lib.rs                   # Tauri commands、快照缓存、账号交换保护
-│   ├── src/providers/               # 各 provider 的额度查询适配器
-│   ├── src/accounts.rs              # API key 账号池与稳定卡片身份
-│   ├── src/keyvault.rs              # 主密钥与密钥库
-│   ├── src/secretstore.rs           # 系统凭据库封装
-│   ├── src/spend.rs / pricing.rs    # 本地 CLI 消费扫描与模型定价
-│   ├── src/httpapi.rs               # 本地 API（127.0.0.1:6736/v1/usage）
-│   ├── src/telemetry.rs             # 匿名遥测（可关闭）
-│   ├── src/platform/                # OS 接缝（密钥、区域、进程、路径）
-│   └── src/*_login.rs / oauth.rs    # 各家登录与 OAuth 设备流
-├── parse-tests/                     # Provider 解析测试载体（编译真实源码）
-├── site/                            # 官网（零框架单文件 + Cloudflare Worker）
-├── docs/                            # 启动、隐私、provider 与设计文档
-├── attachments/                     # README 截图素材
-├── CHANGELOG.md                     # 完整版本更新日志
-├── CONTRIBUTING.md                  # 贡献指南
-└── LICENSE                          # MIT 许可证
-```
-
----
-
-## <a id="privacy"></a>🔐 隐私边界
-
-Pane 是 local-first 工具：
-
-- token、cookie 和 API key 保存在 Windows 用户目录与系统凭据库，不提交到 Git；
-- 查询请求只发送到对应 provider 的端点；Pane 没有中心后端替你转发额度；
-- 本地 HTTP API 只监听 loopback，并对敏感字段做脱敏处理；
-- 遥测默认不承载额度、消费或 provider 凭据；可在设置中关闭。
-
-详见 [`docs/privacy.md`](docs/privacy.md)；安全披露流程见 [`SECURITY.md`](SECURITY.md)。
-
----
-
-## <a id="contributing"></a>🤝 参与贡献
-
-欢迎提交 issue、provider 适配、UI 改进和文档修订。请在提交前说明：
-
-1. 改动影响的 provider 或用户路径；
-2. 使用了哪些本地数据或外部 API；
-3. 如何验证，哪些部分仍需要手动验收。
-
-新功能走 `codex/<feature>` 分支，验证通过后再合并回 `main`。详见 [`CONTRIBUTING.md`](CONTRIBUTING.md)。
-
-### 相关文档
-
-- [开发启动指南](docs/dev-startup.md) — Windows 双进程、缓存和 `pane.exe` 启动
-- [Provider catalog](docs/providers.md) — provider 读取方式与字段说明
-- [本地 HTTP API](docs/local-http-api.md) — `127.0.0.1:6736`（usage + 只读诊断端点）
-- [AI Agent 排查 Skill](skills/pane/) — 让 coding agent 自助排查 Pane
-- [隐私说明](docs/privacy.md) — 凭据、网络请求和遥测边界
-- [皮肤市场设计](docs/skin-market-design.md) — 壁纸、吉祥物和退出交互
-- [CONTEXT.md](CONTEXT.md) — 领域词汇表（术语）
-- [工程事实](docs/project-facts.md) — 已验证的工程事实、约束与故障模式
-- [README 素材维护](docs/readme-assets.md) — 截图/图标与中英镜像维护规则
-
----
-
-## <a id="license"></a>📄 开源许可证
-
-本项目采用 [MIT License](LICENSE) 授权。
-
-Copyright (c) 2026 Jazii (Pane for Windows)
+本项目采用 [MIT License](LICENSE) 授权。Copyright (c) 2026 Jazii (Pane for Windows)

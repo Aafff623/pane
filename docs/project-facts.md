@@ -306,13 +306,20 @@ changes.
 
 - The README header uses `src/assets/pane-logo.png` as the product identity
   mark (both `README.md` and `README_EN.md`).
-- Feature sections embed three screenshots from `attachments/*.png` (quota
-  overview, model spend, daily-use heatmap), captured 2026-10-10 from the
-  rebuilt demo frontend with demo data.
-- README banners and screenshot strips were removed on 2026-10-04 so the
-  document stays searchable, lightweight, and accurate as the dashboard UI
-  changes. Product proof now lives in the feature sections and linked design
-  documents.
+- Feature sections embed nine theme-adaptive screenshot pairs from
+  `attachments/*.png` (hero overview + weekly view, architecture diagram,
+  customize drawer, spend heatmap, skin workshop gallery, settings keys
+  page, expiring list), captured 2026-10-14 from the 0.8.1 demo frontend
+  via `temp/scripts/readme-shots.mjs` (real window sizes, device scale 2,
+  demo data) plus `temp/scripts/readme-diagram-shot.mjs` for the diagram.
+  GitHub picks dark or light per the reader's theme through `<picture>`
+  elements.
+- The READMEs replicate yetone/magpie's section skeleton with Pane content
+  (2026-10-14): centered header with an embedded hero screenshot, "Is Pane
+  for you?", quick start, supported sources, "How it fits together" diagram
+  picture, eight What-it-does subsections, docs table, privacy paragraph,
+  community + star history, license. Banners and screenshot strips from the
+  pre-2026-10-04 layout remain gone.
 
 ## 待确认
 
