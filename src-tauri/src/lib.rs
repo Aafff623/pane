@@ -12,6 +12,8 @@ mod keyvault;
 mod keyvault_v3;
 mod search_keys;
 mod skin_packs;
+mod font_packs;
+mod reset_wake;
 mod agent_skill;
 mod alerts;
 mod httpapi;
@@ -161,6 +163,11 @@ fn config_with_defaults(mut cfg: Value) -> Value {
         .or_insert(json!({ "enabled": false, "url": "" }));
     obj.entry("showTotalSpend").or_insert(json!(true));
     obj.entry("welcomeDismissed").or_insert(json!(false));
+    // First-run spotlight tour: false until the user finishes or skips it
+    // (or replays it from Settings). Frontend-owned; seeded here so the
+    // key survives a config rewrite and the Settings row reads a real value.
+    obj.entry("tourSeen").or_insert(json!(false));
+    obj.entry("tourPending").or_insert(json!(false));
     // Empty = "never recorded": the frontend uses it to tell a fresh
     // install (no What's-new popup) from an update (popup with the notes).
     obj.entry("lastSeenVersion").or_insert(json!(""));
@@ -267,6 +274,8 @@ const CONFIG_KEYS: &[&str] = &[
     "proxy",
     "showTotalSpend",
     "welcomeDismissed",
+    "tourSeen",
+    "tourPending",
     "lastSeenVersion",
     "telemetry",
     "reduceAnimations",
@@ -2112,6 +2121,49 @@ async fn skin_pack_remove(id: String) -> Result<(), String> {
     skin_packs::skin_pack_remove(id).await
 }
 
+#[tauri::command]
+async fn font_pack_list() -> Result<Vec<font_packs::InstalledFontPack>, String> {
+    font_packs::font_pack_list().await
+}
+
+#[tauri::command]
+async fn font_pack_download(app: tauri::AppHandle, url: String, sha256: String) -> Result<font_packs::FontPackManifest, String> {
+    let pack = font_packs::font_pack_download(url, sha256).await?;
+    let _ = app.emit("font-packs-updated", ());
+    Ok(pack)
+}
+
+#[tauri::command]
+async fn font_pack_install(app: tauri::AppHandle, zip_path: String) -> Result<font_packs::FontPackManifest, String> {
+    let pack = font_packs::font_pack_install(zip_path).await?;
+    let _ = app.emit("font-packs-updated", ());
+    Ok(pack)
+}
+
+#[tauri::command]
+async fn font_pack_remove(app: tauri::AppHandle, id: String) -> Result<(), String> {
+    font_packs::font_pack_remove(id).await?;
+    let _ = app.emit("font-packs-updated", ());
+    Ok(())
+}
+
+#[tauri::command]
+async fn reset_wake_settings() -> Result<reset_wake::Settings, String> {
+    reset_wake::settings().await
+}
+
+#[tauri::command]
+async fn reset_wake_set(app: tauri::AppHandle, settings: reset_wake::Settings, consent: bool) -> Result<(), String> {
+    reset_wake::set_settings(settings, consent).await?;
+    let _ = app.emit("reset-wake-settings-updated", ());
+    Ok(())
+}
+
+#[tauri::command]
+async fn reset_wake_status() -> Result<Vec<reset_wake::WakeStatus>, String> {
+    reset_wake::statuses().await
+}
+
 /// WorkBuddy's web-session fallback (ticket 06): the Customize panel's
 /// explicit enable / import / clear surface. The cookie itself never
 /// travels back to the frontend — only its presence does.
@@ -3035,7 +3087,6 @@ async fn run_usage_fetch_inner(app: &tauri::AppHandle, extra_disabled: Option<Ve
             .unwrap_or(0);
         if let Ok(mut map) = cache.lock() {
             let mut dirty = false;
-            let mut history_samples: Vec<(String, f64)> = Vec::new();
             let mut credit_samples: Vec<(String, f64)> = Vec::new();
             for s in all.iter_mut() {
                 if family_of(&s.id) == "onenewapi" {
@@ -3074,9 +3125,6 @@ async fn run_usage_fetch_inner(app: &tauri::AppHandle, extra_disabled: Option<Ve
                             snap: s.clone(),
                         },
                     );
-                    if let Some(used) = usage_history::worst_used_percent(&s.metrics) {
-                        history_samples.push((s.id.clone(), used));
-                    }
                     if let Some(credits) = usage_history::credits_used_from_metrics(&s.metrics) {
                         credit_samples.push((s.id.clone(), credits));
                     }
@@ -3093,7 +3141,6 @@ async fn run_usage_fetch_inner(app: &tauri::AppHandle, extra_disabled: Option<Ve
                 if let Err(error) = persist_last_ok(&map) {
                     eprintln!("[pane] snapshot cache refresh: {error}");
                 }
-                usage_history::record_samples(&history_samples);
                 usage_history::record_credit_samples(&credit_samples);
             }
         }
@@ -3129,6 +3176,9 @@ async fn run_usage_fetch_inner(app: &tauri::AppHandle, extra_disabled: Option<Ve
     // wallet card whenever the plan card is actually showing.
     fold_moonshot_into_kimi(&mut all);
 
+    if let Ok(mut latest) = wake_snapshots().lock() {
+        *latest = all.clone();
+    }
     httpapi::publish(&all);
     // Anonymous daily-rollup telemetry (Settings → "Share anonymous usage
     // statistics"). Fire-and-forget: it must never delay or fail a refresh.
@@ -3280,6 +3330,26 @@ async fn fetch_and_broadcast_usage(app: &tauri::AppHandle) -> Vec<providers::Sna
 /// immediate live pass at launch — the webview's startup refresh dies with
 /// the network at boot), then sleeps refreshMinutes (re-read every cycle,
 /// so a Settings change applies without a restart).
+fn wake_snapshots() -> &'static Mutex<Vec<providers::Snapshot>> {
+    static LATEST: OnceLock<Mutex<Vec<providers::Snapshot>>> = OnceLock::new();
+    LATEST.get_or_init(|| Mutex::new(Vec::new()))
+}
+
+fn spawn_reset_wake(app: tauri::AppHandle) {
+    tauri::async_runtime::spawn(async move {
+        loop {
+            let snapshots = wake_snapshots().lock().map(|latest| latest.clone()).unwrap_or_default();
+            if let Ok(settings) = reset_wake::settings().await {
+                match reset_wake::tick(&settings, &snapshots).await {
+                    Ok(statuses) => { let _ = app.emit("reset-wake-updated", statuses); }
+                    Err(error) => eprintln!("[pane] automatic wake: {error}"),
+                }
+            }
+            tokio::time::sleep(std::time::Duration::from_secs(60)).await;
+        }
+    });
+}
+
 fn spawn_auto_refresh(app: tauri::AppHandle) {
     tauri::async_runtime::spawn(async move {
         let mut outage_retries = 0u32;
@@ -3424,13 +3494,6 @@ async fn fetch_spend() -> Vec<spend::ProviderSpend> {
 #[tauri::command]
 fn fetch_spend_sources() -> Vec<spend::SpendSourceStatus> {
     spend::source_statuses()
-}
-
-/// Sampled quota history per card id — the trend fallback for cards with no
-/// local CLI logs (API-key accounts, relay keys). Cheap: one small file.
-#[tauri::command]
-fn fetch_usage_history() -> std::collections::BTreeMap<String, Vec<Option<f64>>> {
-    usage_history::trend_map()
 }
 
 /// Daily credit consumption per card id. Qoder CN / Trae CN bill in credits,
@@ -3852,7 +3915,7 @@ fn account_remove(provider: String, index: usize) -> Result<(), String> {
 }
 
 /// Archives an account before removing it from the active cards. The stable
-/// card id is retained so usage_history.json remains attached to this identity.
+/// card id is retained so credit history stays attached to this identity.
 #[tauri::command]
 fn account_archive(provider: String, index: usize) -> Result<(), String> {
     let base = crate::providers::config_dir();
@@ -5299,6 +5362,22 @@ fn toggle_popover_centered(app: &tauri::AppHandle) {
     let _ = window.emit("popover-shown", ());
 }
 
+/// Shows the popover (never toggles it off) and asks it to replay the
+/// first-run spotlight tour. The tour highlights popover elements, so a
+/// replay requested from the settings panel window must land in the
+/// popover's own document rather than the panel's.
+#[tauri::command]
+fn replay_tour(app: tauri::AppHandle) {
+    let Some(window) = app.get_webview_window("main") else {
+        return;
+    };
+    set_webview_memory_level(&window, false);
+    let _ = window.unminimize();
+    let _ = window.show();
+    let _ = window.set_focus();
+    let _ = window.emit("tour-replay", ());
+}
+
 /// Hide the popover from the webview (Esc key): mirrors the tray toggle's
 /// hide branch so the webview drops to low memory while parked in the tray.
 #[tauri::command]
@@ -5345,6 +5424,13 @@ pub fn run() {
             skin_pack_download,
             skin_pack_list,
             skin_pack_remove,
+            font_pack_list,
+            font_pack_download,
+            font_pack_install,
+            font_pack_remove,
+            reset_wake_settings,
+            reset_wake_set,
+            reset_wake_status,
             workbuddy_web_status,
             workbuddy_web_set_enabled,
             workbuddy_web_import_chrome,
@@ -5364,7 +5450,6 @@ pub fn run() {
             cached_usage,
             fetch_spend,
             fetch_spend_sources,
-            fetch_usage_history,
             fetch_credit_history,
             get_boot_id,
             fetch_spend_history,
@@ -5442,6 +5527,7 @@ pub fn run() {
             copy_share_image,
             set_shortcut,
             hide_popover,
+            replay_tour,
             codex_redeem_credit,
             install_update,
             check_update,
@@ -5459,6 +5545,7 @@ pub fn run() {
             spawn_update_checker(app.handle());
             spawn_share_watcher(app.handle().clone());
             spawn_auto_refresh(app.handle().clone());
+            spawn_reset_wake(app.handle().clone());
             let menu = build_tray_menu(app.handle())?;
 
             TrayIconBuilder::with_id("tray")

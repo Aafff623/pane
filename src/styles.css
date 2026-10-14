@@ -1331,6 +1331,35 @@ select:focus-visible {
   color: var(--muted-foreground);
 }
 
+.font-recommended {
+  margin-left: 6px;
+  font-size: 10px;
+  padding: 0 5px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--muted-foreground);
+}
+
+.font-pack-badge,
+.font-pack-chip {
+  font-size: 10px;
+  padding: 0 5px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--muted-foreground);
+  white-space: nowrap;
+}
+
+.font-pack-badge {
+  color: var(--foreground);
+}
+
+.font-pack-hint {
+  margin: 4px 0 0;
+  font-size: 12px;
+  color: var(--muted-foreground);
+}
+
 .font-empty {
   padding: 8px 9px;
   font-size: 12px;
@@ -5520,6 +5549,179 @@ body.no-glass .cust-dock {
 }
 .snap-card .metric {
   margin: 12px 0;
+}
+
+/* First-run spotlight tour (ticket 082-05). The dimmer is the hole's own
+   huge box-shadow, so the highlighted target stays crisp and interactive:
+   the overlay passes clicks through, only the tip card takes them. */
+.font-pack-manager, .reset-wake-manager {
+  margin: 12px 0;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+.font-pack-manager p, .reset-wake-manager p, .reset-wake-status { color: var(--muted-foreground); font-size: 11px; }
+.font-pack-manager input { min-width: 0; max-width: 100%; flex: 1 1 120px; }
+.font-pack-manager button { flex-shrink: 0; }
+.wake-setting-row { display: flex; align-items: center; gap: 8px; margin: 8px 0; }
+.wake-setting-row select { margin-left: auto; max-width: 190px; }
+.reset-wake-status { margin: 8px 0 0; }
+#tour-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 300;
+  pointer-events: none;
+}
+.tour-hole {
+  position: absolute;
+  border-radius: 14px;
+  box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.62);
+  outline: 1.5px solid rgba(255, 255, 255, 0.28);
+  transition: left 0.22s ease, top 0.22s ease, width 0.22s ease, height 0.22s ease;
+}
+.tour-tip {
+  position: absolute;
+  pointer-events: auto;
+  width: 244px;
+  padding: 12px 14px 10px;
+  border-radius: 12px;
+  background: var(--popover, var(--card));
+  border: 1px solid var(--border);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.35);
+  transition: left 0.22s ease, top 0.22s ease;
+}
+.tour-step-count {
+  font-size: 10.5px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted-foreground);
+  margin-bottom: 4px;
+}
+.tour-tip-title {
+  margin: 0 0 4px;
+  font-size: 13.5px;
+  font-weight: 600;
+}
+.tour-tip-body {
+  margin: 0 0 10px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--muted-foreground);
+}
+.tour-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.tour-skip {
+  border: none;
+  background: none;
+  padding: 2px 0;
+  font: inherit;
+  font-size: 11.5px;
+  color: var(--muted-foreground);
+  cursor: pointer;
+}
+.tour-skip:hover {
+  color: var(--foreground);
+}
+.tour-next {
+  font-weight: 600;
+}
+
+/* Spend envelope (ticket 082-04): the range-scoped share template copied
+   from the total-spend button. Only ever rendered inside the snapshot
+   document — flat rows, no interaction, values already baked in. */
+.envelope {
+  display: block;
+}
+.envelope-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.envelope-title {
+  font-size: 14px;
+  font-weight: 600;
+}
+.envelope-chip {
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--muted);
+  color: var(--muted-foreground);
+  white-space: nowrap;
+}
+.envelope-total {
+  font-size: 20px;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  margin-bottom: 12px;
+}
+.envelope-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.envelope-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12.5px;
+}
+.envelope-row .legend-ico {
+  display: inline-flex;
+  width: 16px;
+  height: 16px;
+  flex: none;
+}
+.envelope-row .dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex: none;
+  margin: 0 4px;
+}
+.envelope-name {
+  min-width: 0;
+  max-width: 38%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.envelope-name .est-badge {
+  margin-left: 4px;
+}
+.envelope-bar {
+  flex: 1;
+  height: 6px;
+  border-radius: 3px;
+  background: var(--muted);
+  overflow: hidden;
+}
+.envelope-bar i {
+  display: block;
+  height: 100%;
+  border-radius: 3px;
+}
+.envelope-val {
+  flex: none;
+  font-variant-numeric: tabular-nums;
+  color: var(--muted-foreground);
+}
+.envelope-more {
+  font-size: 11.5px;
+  color: var(--muted-foreground);
+  padding-left: 28px;
+}
+.envelope-empty {
+  font-size: 12.5px;
+  color: var(--muted-foreground);
+  padding: 8px 0 4px;
 }
 
 /* Donut hover: the pointed-at wedge slides outward along its bisector

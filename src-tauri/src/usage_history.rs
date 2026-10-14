@@ -1,11 +1,9 @@
-//! Per-card quota history — the sampled "worst used percent" behind the
-//! trend bars on cards that have no local CLI logs. spend.rs builds trends
-//! from local session logs (claude/codex/kimi CLI); API-key accounts and
-//! relay keys never appear there, because their quota lives on the vendor
-//! side and every quota endpoint only answers with the current window.
-//! So each successful fetch samples the card's most-drained progress metric
-//! into a per-day bucket; the frontend renders those buckets as the trend
-//! for any card the local-log spend doesn't cover.
+//! Credits usage ledger — the daily credit consumption behind the trend
+//! bars on credits-billed cards (Qoder CN / Trae CN). spend.rs builds
+//! token/dollar trends from local session logs (claude/codex/kimi CLI);
+//! credits cannot be converted into either, so every successful fetch
+//! samples the card's absolute "credits used" reading into a per-day
+//! bucket and the frontend renders the day-over-day diffs as the trend.
 
 use crate::providers::Metric;
 use chrono::{Duration, Local, NaiveDate};
@@ -15,7 +13,6 @@ use std::fs;
 use std::path::PathBuf;
 use std::sync::{Mutex, OnceLock};
 
-const VERSION: u32 = 1;
 /// Days kept per card. The trend spans 30; the slack absorbs days the app
 /// stayed closed or the provider errored, so the window doesn't shrink.
 const KEEP_DAYS: i64 = 35;
@@ -27,81 +24,22 @@ struct DaySample {
     /// Local calendar day, "YYYY-MM-DD" — sortable, and the trend axis is
     /// built from the same strings.
     day: String,
-    /// Max used_percent recorded that day across the card's progress rows.
+    /// Max absolute "credits used" reading recorded that day — a drain
+    /// never un-happens within a day, even across fetches.
     used: f64,
-    /// Latest reading of the day (credit stores only). A mid-day pool reset
-    /// drops it below `used`; the trend then charges the post-reset segment
-    /// on top of the pre-reset diff. Absent on percent history and on credit
-    /// files written before this field existed.
+    /// Latest reading of the day. A mid-day pool reset drops it below
+    /// `used`; the trend then charges the post-reset segment on top of the
+    /// pre-reset diff. Absent on credit files written before this field
+    /// existed.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     last: Option<f64>,
-}
-
-#[derive(Serialize, Deserialize, Default)]
-struct HistoryFile {
-    version: u32,
-    /// card id → samples, sorted by day.
-    entries: BTreeMap<String, Vec<DaySample>>,
-}
-
-impl HistoryFile {
-    fn new() -> Self {
-        Self {
-            version: VERSION,
-            entries: BTreeMap::new(),
-        }
-    }
 }
 
 fn today_string() -> String {
     Local::now().date_naive().format("%Y-%m-%d").to_string()
 }
 
-/// The card's most-drained progress row this fetch. Session windows roll
-/// back to 0% on reset while Weekly carries the real drain, and which row
-/// is "the" quota differs per vendor — the max is the honest per-card value
-/// without hardcoding metric labels.
-pub fn worst_used_percent(metrics: &[Metric]) -> Option<f64> {
-    metrics
-        .iter()
-        .filter(|m| m.kind == "progress")
-        .filter_map(|m| m.used_percent)
-        .fold(None, |acc: Option<f64>, v| {
-            Some(match acc {
-                Some(best) if best >= v => best,
-                _ => v,
-            })
-        })
-}
-
-/// Upsert one sample: same-day samples keep the max (a drain never un-happens
-/// within a day, even if a window reset made a later fetch read lower).
-fn record_sample(
-    entries: &mut BTreeMap<String, Vec<DaySample>>,
-    id: &str,
-    day: &str,
-    used: f64,
-) {
-    let samples = entries.entry(id.to_string()).or_default();
-    match samples.iter_mut().find(|s| s.day == day) {
-        Some(existing) => {
-            if used > existing.used {
-                existing.used = used;
-            }
-        }
-        None => {
-            samples.push(DaySample {
-                day: day.to_string(),
-                used,
-                last: None,
-            });
-            samples.sort_by(|a, b| a.day.cmp(&b.day));
-        }
-    }
-    prune_samples(samples, day, KEEP_DAYS);
-}
-
-/// Credit variant of [`record_sample`]: same-day keeps the max in `used` (a
+/// Credit variant of the day upsert: same-day keeps the max in `used` (a
 /// drain never un-happens) but also remembers the latest reading, so a
 /// mid-day pool reset stays visible to [`credit_trend_for`].
 fn record_credit_sample(
@@ -143,99 +81,8 @@ fn parse_day(day: &str) -> Option<NaiveDate> {
     NaiveDate::parse_from_str(day, "%Y-%m-%d").ok()
 }
 
-/// The 30-value trend for one card, oldest first, today last. Days without
-/// a sample read None — "no data" is distinct from a sampled 0.
-fn trend_for(
-    entries: &BTreeMap<String, Vec<DaySample>>,
-    id: &str,
-    today: &str,
-) -> Vec<Option<f64>> {
-    let Some(today) = parse_day(today) else {
-        return vec![None; TREND_DAYS];
-    };
-    let samples = entries.get(id);
-    (0..TREND_DAYS as i64)
-        .map(|i| {
-            let day = (today - Duration::days(TREND_DAYS as i64 - 1 - i))
-                .format("%Y-%m-%d")
-                .to_string();
-            samples
-                .and_then(|list| list.iter().find(|s| s.day == day))
-                .map(|s| s.used)
-        })
-        .collect()
-}
-
-fn persist_path() -> PathBuf {
-    crate::providers::config_dir().join("usage_history.json")
-}
-
-fn store() -> &'static Mutex<HistoryFile> {
-    static STORE: OnceLock<Mutex<HistoryFile>> = OnceLock::new();
-    STORE.get_or_init(|| {
-        let file = fs::read_to_string(persist_path())
-            .ok()
-            .and_then(|raw| serde_json::from_str::<HistoryFile>(&raw).ok())
-            .filter(|doc| doc.version == VERSION)
-            .unwrap_or_else(HistoryFile::new);
-        Mutex::new(file)
-    })
-}
-
-fn persist(file: &HistoryFile) {
-    let tmp = persist_path().with_extension("json.tmp");
-    if fs::write(&tmp, serde_json::to_string(file).unwrap_or_default()).is_ok() {
-        let _ = fs::rename(&tmp, persist_path());
-    }
-}
-
-/// Record already-extracted (card id, used percent) pairs in one write.
-pub fn record_samples(samples: &[(String, f64)]) {
-    if samples.is_empty() {
-        return;
-    }
-    let today = today_string();
-    let file = &mut *store().lock().unwrap();
-    for (id, used) in samples {
-        record_sample(&mut file.entries, id, &today, *used);
-    }
-    persist(file);
-}
-
-/// card id → 30-day trend, for the frontend's trend fallback.
-pub fn trend_map() -> BTreeMap<String, Vec<Option<f64>>> {
-    let today = today_string();
-    let file = store().lock().unwrap();
-    file.entries
-        .keys()
-        .map(|id| (id.clone(), trend_for(&file.entries, id, &today)))
-        .collect()
-}
-
-/// Move history when a multi-account family changes the identity published by
-/// its bare card. Existing samples are merged instead of overwritten.
-pub fn migrate_card_id(from: &str, to: &str) {
-    if from == to { return; }
-    let file = &mut *store().lock().unwrap();
-    let Some(mut samples) = file.entries.remove(from) else { return; };
-    let target = file.entries.entry(to.to_string()).or_default();
-    for sample in samples.drain(..) {
-        if let Some(existing) = target.iter_mut().find(|item| item.day == sample.day) {
-            existing.used = existing.used.max(sample.used);
-        } else {
-            target.push(sample);
-        }
-    }
-    target.sort_by(|a, b| a.day.cmp(&b.day));
-    persist(file);
-}
-
 // ---------------------------------------------------------------------------
-// Credits ledger — Qoder CN / Trae CN bill in credits, and their token usage
-// is structurally unavailable. Same per-day sampling shape as the quota
-// ledger above, but the stored value is the ABSOLUTE "credits used" reading
-// and the rendered trend is the day-over-day consumption diff. Kept in its
-// own file so credit numbers can never leak into percent or token series.
+// Credits ledger store
 // ---------------------------------------------------------------------------
 
 const CREDIT_VERSION: u32 = 1;
@@ -461,19 +308,29 @@ pub fn credit_trend_map() -> BTreeMap<String, Vec<Option<f64>>> {
         .collect()
 }
 
-/// Remove history for a card when deleted without keeping usage data.
-pub fn remove_card_history(id: &str) {
-    {
-        let mut file = store().lock().unwrap();
-        if file.entries.remove(id).is_some() {
-            persist(&file);
+/// Move history when a multi-account family changes the identity published by
+/// its bare card. Existing samples are merged instead of overwritten.
+pub fn migrate_card_id(from: &str, to: &str) {
+    if from == to { return; }
+    let file = &mut *credit_store().lock().unwrap();
+    let Some(mut samples) = file.entries.remove(from) else { return; };
+    let target = file.entries.entry(to.to_string()).or_default();
+    for sample in samples.drain(..) {
+        if let Some(existing) = target.iter_mut().find(|item| item.day == sample.day) {
+            existing.used = existing.used.max(sample.used);
+        } else {
+            target.push(sample);
         }
     }
-    {
-        let mut file = credit_store().lock().unwrap();
-        if file.entries.remove(id).is_some() {
-            persist_credits(&file);
-        }
+    target.sort_by(|a, b| a.day.cmp(&b.day));
+    persist_credits(file);
+}
+
+/// Remove history for a card when deleted without keeping usage data.
+pub fn remove_card_history(id: &str) {
+    let mut file = credit_store().lock().unwrap();
+    if file.entries.remove(id).is_some() {
+        persist_credits(&file);
     }
 }
 
@@ -602,48 +459,24 @@ mod tests {
     }
 
     #[test]
-    fn worst_used_takes_the_max_progress_row() {
-        let metrics = vec![
-            metric("progress", Some(12.0)),
-            metric("text", Some(99.0)), // text rows never count
-            metric("progress", Some(78.0)),
-            metric("progress", None),
-        ];
-        assert_eq!(worst_used_percent(&metrics), Some(78.0));
-        assert_eq!(worst_used_percent(&[]), None);
-    }
-
-    #[test]
-    fn same_day_samples_keep_the_max() {
-        let mut entries = BTreeMap::new();
-        record_sample(&mut entries, "kimi@fp", "2026-09-01", 40.0);
-        record_sample(&mut entries, "kimi@fp", "2026-09-01", 20.0); // window reset read
-        record_sample(&mut entries, "kimi@fp", "2026-09-01", 65.0);
-        assert_eq!(entries["kimi@fp"][0].used, 65.0);
-    }
-
-    #[test]
     fn prune_drops_samples_older_than_the_window() {
         let mut entries = BTreeMap::new();
-        record_sample(&mut entries, "a", "2026-07-01", 10.0);
-        record_sample(&mut entries, "a", "2026-08-20", 20.0);
-        record_sample(&mut entries, "a", "2026-09-03", 30.0);
+        record_credit_sample(&mut entries, "a", "2026-07-01", 10.0);
+        record_credit_sample(&mut entries, "a", "2026-08-20", 20.0);
+        record_credit_sample(&mut entries, "a", "2026-09-03", 30.0);
         prune_samples(entries.get_mut("a").unwrap(), "2026-09-03", KEEP_DAYS);
         let days: Vec<&str> = entries["a"].iter().map(|s| s.day.as_str()).collect();
         assert_eq!(days, ["2026-08-20", "2026-09-03"]); // 07-01 is > 35 days old
     }
 
     #[test]
-    fn trend_spans_thirty_days_ending_today_with_gaps_as_none() {
+    fn same_day_credit_samples_keep_the_max_and_latest() {
         let mut entries = BTreeMap::new();
-        record_sample(&mut entries, "a", "2026-09-03", 55.0); // today
-        record_sample(&mut entries, "a", "2026-08-05", 42.0); // 29 days back
-        let trend = trend_for(&entries, "a", "2026-09-03");
-        assert_eq!(trend.len(), 30);
-        assert_eq!(trend[0], Some(42.0));
-        assert_eq!(trend[1], None);
-        assert_eq!(trend[29], Some(55.0));
-        assert!(trend_for(&entries, "missing", "2026-09-03").iter().all(|v| v.is_none()));
+        record_credit_sample(&mut entries, "qodercn", "2026-09-04", 900.0);
+        record_credit_sample(&mut entries, "qodercn", "2026-09-04", 5.0); // pool reset mid-day
+        let sample = &entries["qodercn"][0];
+        assert_eq!(sample.used, 900.0, "the drain never un-happens");
+        assert_eq!(sample.last, Some(5.0), "the latest reading survives for the diff");
     }
 
     #[test]
@@ -675,10 +508,10 @@ mod tests {
     #[test]
     fn credit_trend_diffs_against_previous_observation() {
         let mut entries = BTreeMap::new();
-        record_sample(&mut entries, "qodercn", "2026-09-01", 100.0);
-        record_sample(&mut entries, "qodercn", "2026-09-02", 138.0); // +38
+        record_credit_sample(&mut entries, "qodercn", "2026-09-01", 100.0);
+        record_credit_sample(&mut entries, "qodercn", "2026-09-02", 138.0); // +38
         // 09-03 not observed; the gap's consumption lands whole on 09-04.
-        record_sample(&mut entries, "qodercn", "2026-09-04", 200.0); // +62
+        record_credit_sample(&mut entries, "qodercn", "2026-09-04", 200.0); // +62
         let trend = credit_trend_for(&entries, "qodercn", "2026-09-04");
         assert_eq!(trend[26], None); // first observed day: no baseline
         assert_eq!(trend[27], Some(38.0));
@@ -689,9 +522,9 @@ mod tests {
     #[test]
     fn credit_trend_uses_pre_window_baseline_and_zeroes_resets() {
         let mut entries = BTreeMap::new();
-        record_sample(&mut entries, "qodercn", "2026-08-01", 500.0); // before window
-        record_sample(&mut entries, "qodercn", "2026-09-03", 550.0); // today-1: +50
-        record_sample(&mut entries, "qodercn", "2026-09-04", 10.0); // reset → 0
+        record_credit_sample(&mut entries, "qodercn", "2026-08-01", 500.0); // before window
+        record_credit_sample(&mut entries, "qodercn", "2026-09-03", 550.0); // today-1: +50
+        record_credit_sample(&mut entries, "qodercn", "2026-09-04", 10.0); // reset → 0
         let trend = credit_trend_for(&entries, "qodercn", "2026-09-04");
         assert_eq!(trend[28], Some(50.0));
         assert_eq!(trend[29], Some(0.0));

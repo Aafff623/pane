@@ -62,6 +62,9 @@ import paneLogo from "./assets/pane-logo.png?inline";
 import paneIcon from "./assets/pane-icon.png?inline";
 import { SKINS, SKIN_STORAGE_KEY, readSkin, normalizeSkin, embedSkinImages, packSkinList, isPackSkin, refreshInstalledPacks, remotePackIndex, refreshSkinIndex, type SkinId } from "./skins";
 import { playThemeStartup } from "./themeStartup";
+import { initialTourPending } from "./onboardingState";
+import { loadFontPacks, fontPackFamilies, mountFontPackManager } from "./fontPacks";
+import { loadResetWake, mountResetWakeSettings, resetWakeBadge, acceptWakeStatuses, type WakeStatus } from "./resetWake";
 import { decorateInkSkin, clearInkSkin } from "./inkEffects";
 import "./inkSkin.css";
 import { postIcon } from "./skinIcons";
@@ -265,7 +268,7 @@ interface CardGroup {
 /// share only the config store and the config-updated event, so the intent
 /// rides in the config and the panel applies the newest stamp it has not seen.
 interface PanelIntent {
-  view: "auth";
+  view: "auth" | "settings";
   family?: string;
   at: number;
 }
@@ -302,6 +305,8 @@ interface Config {
   proxy: { enabled: boolean; url: string };
   showTotalSpend: boolean;
   welcomeDismissed: boolean;
+  tourSeen: boolean;
+  tourPending: boolean;
   lastSeenVersion: string;
   reduceAnimations: boolean;
   jumpAnimation: "smooth" | "instant";
@@ -354,6 +359,8 @@ const FRONTEND_CONFIG_KEYS = [
   "proxy",
   "showTotalSpend",
   "welcomeDismissed",
+  "tourSeen",
+  "tourPending",
   "lastSeenVersion",
   "reduceAnimations",
   "jumpAnimation",
@@ -565,6 +572,8 @@ let config: Config = {
   proxy: { enabled: false, url: "" },
   showTotalSpend: true,
   welcomeDismissed: false,
+  tourSeen: false,
+  tourPending: false,
   lastSeenVersion: "",
   reduceAnimations: false,
   jumpAnimation: "smooth",
@@ -831,10 +840,6 @@ let lastCreditExtras: CreditExtra[] = [];
 let spendLoaded = false;
 let spendDetailOpen = false;
 let spendDetailDay = "";
-/// Sampled quota history per card id (backend usage_history.json). Cards
-/// with local CLI logs trend from spend; every other card falls back to
-/// these daily "worst used percent" samples.
-let lastQuotaTrend: Record<string, (number | null)[]> = {};
 let lastCreditTrend: Record<string, (number | null)[]> = {};
 
 /// Tracks manual account-tab selections made by the user in the current view.
@@ -877,22 +882,22 @@ function resolveDisplayedAccount(family: string, defaultId: string, accountIds: 
   return accountIds.includes(defaultId) ? defaultId : accountIds[0] ?? defaultId;
 }
 
-type TrendSource = { id: string; trend: (number | null)[]; quota: boolean; credits?: boolean; fmt: (v: number) => string };
+type TrendSource = { id: string; trend: (number | null)[]; credits?: boolean; fmt: (v: number) => string };
 
 /// Credit counts are small whole numbers (38 of 2000), so no k/M suffix.
 const fmtCredits = (v: number): string => Math.round(v).toLocaleString(localeTag());
 
-/// The trend data for one card: local-log spend when the id has one, else
-/// the credits ledger for credits-billed cards (Qoder CN / Trae CN), else
-/// the backend's sampled quota history (API-key accounts, relay keys).
+/// The trend data for one card — quantity series only, never percentages:
+/// local-log spend (tokens or dollars, per the metric toggle) when the id
+/// has one, else the credits ledger for credits-billed cards (Qoder CN /
+/// Trae CN). API-key and relay cards have no honest per-day quantity
+/// source, so they show no trend row at all.
 function trendSourceFor(id: string): TrendSource | undefined {
   const local = lastSpend.find((sp) => sp.id === id);
   const metricCost = config.spendMetric === "cost";
-  if (local) return { id, trend: metricCost ? local.trend_cost : local.trend, quota: false, fmt: metricCost ? fmtMoney : fmtTokens };
+  if (local) return { id, trend: metricCost ? local.trend_cost : local.trend, fmt: metricCost ? fmtMoney : fmtTokens };
   const credits = lastCreditTrend[id];
-  if (credits?.some((v) => v != null && v > 0)) return { id, trend: credits, quota: false, credits: true, fmt: fmtCredits };
-  const sampled = lastQuotaTrend[id];
-  if (sampled?.some((v) => v != null && v > 0)) return { id, trend: sampled, quota: true, fmt: fmtTokens };
+  if (credits?.some((v) => v != null && v > 0)) return { id, trend: credits, credits: true, fmt: fmtCredits };
   return undefined;
 }
 let spendTab: SpendTab = "today";
@@ -2117,8 +2122,6 @@ function renderTrend(source: TrendSource): string {
     .join("");
   const title = source.credits
     ? t("spend.creditTrendTip", { from: dateOf(0), to: dateOf(29) })
-    : source.quota
-    ? t("spend.quotaTrendTip", { from: dateOf(0), to: dateOf(29) })
     : t("spend.trendTip", {
         from: dateOf(0),
         to: dateOf(29),
@@ -2127,11 +2130,9 @@ function renderTrend(source: TrendSource): string {
       });
   const trendLabel = source.credits
     ? t("spend.creditTrend")
-    : source.quota
-      ? t("spend.quotaTrend")
-      : config.spendMetric === "cost"
-        ? t("spend.costTrend")
-        : t("spend.tokenTrend");
+    : config.spendMetric === "cost"
+      ? t("spend.costTrend")
+      : t("spend.tokenTrend");
   return `
     <div class="metric trend">
       <span class="metric-label" title="${escapeHtml(title)}">${escapeHtml(trendLabel)}</span>
@@ -2787,7 +2788,7 @@ function renderCard(s: Snapshot): string {
   const foldChevron = cardCollapsed
     ? `<button class="card-fold-toggle" data-card-fold="${escapeHtml(s.id)}" title="${escapeHtml(t("card.expand"))}">${uiIcon("caretDown")}</button>`
     : `<button class="card-fold-toggle" data-card-fold="${escapeHtml(s.id)}" title="${escapeHtml(t("card.collapse"))}">${uiIcon("caretUp")}</button>`;
-  const finalBody = cardCollapsed ? "" : body;
+  const finalBody = cardCollapsed ? "" : body + resetWakeBadge(shown.id);
   // Hide per-account tabs and the ×N badge when folded — the family health
   // dot and reset countdown already summarise the whole family.
   const finalAccountTabs = cardCollapsed ? "" : accountTabs;
@@ -3605,24 +3606,7 @@ function renderTotalSpend(): string {
   // windows as the token rows (today / yesterday / 7d / 30d / all), one row
   // per account, and a window with nothing consumed hides the row entirely
   // (an all-zero window hides the whole section).
-  const creditWindow = (w: CreditWindows): number =>
-    rangeSelected
-      ? rangeTab === "d7"
-        ? w.d7
-        : rangeTab === "d30"
-          ? w.d30
-          : w.all
-      : spendTab === "yesterday"
-        ? w.yesterday
-        : w.today;
-  const creditRows = lastCreditExtras
-    .map((c) => ({
-      id: c.id,
-      name: notedName(c.id, providerDisplayName(providerFamily(c.id))),
-      value: creditWindow(c.windows),
-    }))
-    .filter((row) => row.value > 0)
-    .sort((a, b) => a.name.localeCompare(b.name, localeTag()));
+  const creditRows = creditEntriesForRange(rangeSelected ? rangeTab : spendTab === "yesterday" ? "yesterday" : "today");
   const creditRow = creditRows.length
     ? `<div class="spend-credits" title="${escapeHtml(t("spend.creditsTip"))}"><span class="spend-credits-label">${escapeHtml(t("spend.credits"))}</span>${creditRows
         .map(
@@ -5624,7 +5608,7 @@ function parseChangelog(): ChangelogSection[] {
 /// each bullet list — the dialog is a glance, not the changelog: a long
 /// release reads as its first few lines plus an ellipsis row (the full text
 /// stays one click away in CHANGELOG.md).
-function renderChangelogBody(md: string, maxItems = 4): string {
+function renderChangelogBody(md: string, maxItems = Number.POSITIVE_INFINITY): string {
   const inline = (s: string) =>
     escapeHtml(s)
       .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
@@ -5632,25 +5616,31 @@ function renderChangelogBody(md: string, maxItems = 4): string {
   let html = "";
   let items: string[] = [];
   let para = "";
+  let remaining = maxItems;
+  let truncated = false;
   const flushItems = () => {
     if (items.length) {
-      const shown = items.slice(0, maxItems);
+      const shown = items.slice(0, remaining);
+      remaining -= shown.length;
       const rest = items.length - shown.length;
-      html += `<ul>${shown.map((i) => `<li>${inline(i)}</li>`).join("")}${
-        rest > 0 ? `<li class="whatsnew-more">…</li>` : ""
-      }</ul>`;
+      if (shown.length || (rest > 0 && !truncated)) {
+        html += `<ul>${shown.map((i) => `<li>${inline(i)}</li>`).join("")}${
+          rest > 0 && !truncated ? `<li class="whatsnew-more">…</li>` : ""
+        }</ul>`;
+      }
+      truncated ||= rest > 0;
     }
     items = [];
   };
   const flushPara = () => {
-    if (para) html += `<p>${inline(para)}</p>`;
+    if (para && remaining > 0) html += `<p>${inline(para)}</p>`;
     para = "";
   };
   for (const line of md.split("\n")) {
     if (line.startsWith("### ")) {
       flushItems();
       flushPara();
-      html += `<h5>${escapeHtml(line.slice(4).trim())}</h5>`;
+      if (remaining > 0) html += `<h5>${escapeHtml(line.slice(4).trim())}</h5>`;
     } else if (line.startsWith("- ")) {
       flushPara();
       items.push(line.slice(2));
@@ -5674,20 +5664,19 @@ let dismissWhatsNew: (() => void) | null = null;
 
 /// Card-styled scrollable dialog listing changelog sections. Esc, backdrop
 /// clicks (anywhere outside the card), and the Got it button all dismiss.
-function showChangelogDialog(title: string, sections: ChangelogSection[]): void {
+function showChangelogDialog(title: string, sections: ChangelogSection[], compact = false): void {
   dismissWhatsNew?.();
   const overlay = document.createElement("div");
   overlay.id = "whatsnew-overlay";
   // The dialog covers the version that was just installed. A skipped
   // release chain used to dump every section — long enough that nobody read
   // it; the newest one is the "what changed for me" answer.
-  const list = sections
-    .slice(0, 1)
+  const list = (compact ? sections.slice(0, 1) : sections)
     .map(
       (s) =>
         `<section><h4>v${escapeHtml(s.version)}${
           s.date ? `<span>${escapeHtml(s.date)}</span>` : ""
-        }</h4>${renderChangelogBody(s.body)}</section>`,
+        }</h4>${renderChangelogBody(s.body, compact ? 4 : Number.POSITIVE_INFINITY)}</section>`,
     )
     .join("");
   overlay.innerHTML = `
@@ -5748,54 +5737,135 @@ function computeWhatsNew(version: string): ChangelogSection[] | null {
   return out.length ? out : null;
 }
 
+/// Rasterizes one prepared element (a curated card clone, or the spend
+/// envelope) into a PNG on the clipboard. Page CSS is collected with
+/// animations frozen at their final state (static SVG rasterization would
+/// otherwise render entrance animations invisible), the element is measured
+/// offscreen, wrapped in the snapshot frame (pad + logo foot), rendered
+/// through an SVG image document, and drawn onto a 2x canvas.
+async function copyElementSnapshot(el: HTMLElement, W: number): Promise<void> {
+  await document.fonts.ready;
+  const S = 2;
+  const PAD = 20; // frame around the card, like the Mac share cards
+  const FOOT = 30; // logo + tagline row
+
+  let css = "";
+  const appendRules = (rules: CSSRuleList) => {
+    for (const rule of Array.from(rules)) {
+      // SVG image dimensions include the 2x export scale; media queries
+      // must retain the live window's layout rather than reflow at 2x width.
+      if (rule instanceof CSSMediaRule) {
+        if (matchMedia(rule.conditionText).matches) appendRules(rule.cssRules);
+      } else css += rule.cssText + "\n";
+    }
+  };
+  for (const sheet of Array.from(document.styleSheets)) {
+    try {
+      appendRules(sheet.cssRules);
+    } catch {
+      // Inaccessible sheet (shouldn't happen — all styles are bundled).
+    }
+  }
+  // Static rasterization renders CSS animations at time zero, which for
+  // the entrance animations means an invisible card. Freeze final state.
+  // The body's inherited text styles are re-declared on the wrapper since
+  // the snapshot document has no <body>.
+  const bodyStyle = getComputedStyle(document.body);
+  css +=
+    "*{animation:none!important;transition:none!important}" +
+    "#snap-root .share-btn{display:none!important}" +
+    `#snap-foot{display:flex;align-items:center;justify-content:center;gap:6px;` +
+    `height:${FOOT}px;color:var(--muted-foreground);font-size:12px}` +
+    "#snap-foot img{width:16px;height:16px;border-radius:4px}";
+
+  el.style.margin = "0";
+  el.style.width = `${W}px`;
+  el.style.boxSizing = "border-box";
+
+  // The curated clone is shorter than the on-screen card (chrome removed),
+  // so measure IT — briefly attached offscreen — instead of sizing the
+  // canvas from the original and leaving dead space.
+  el.style.position = "fixed";
+  el.style.left = "-99999px";
+  el.style.top = "0";
+  document.body.appendChild(el);
+  const H = Math.ceil(el.getBoundingClientRect().height);
+  el.remove();
+  el.style.position = "";
+  el.style.left = "";
+  el.style.top = "";
+  const W2 = W + PAD * 2;
+  const H2 = H + PAD * 2 + FOOT;
+  css +=
+    `#snap-root{font-family:${bodyStyle.fontFamily};font-size:${bodyStyle.fontSize};` +
+    `color:${bodyStyle.color};letter-spacing:${bodyStyle.letterSpacing};` +
+    `background:var(--background);padding:${PAD}px;box-sizing:border-box;` +
+    `width:${W2}px;height:${H2}px}`;
+
+  // data-theme / data-density live on <html>; :root of the snapshot
+  // document is the <svg>, so the attributes are mirrored there for the
+  // :root[data-…] rules to keep matching.
+  const root = document.documentElement;
+  if (root.hasAttribute("data-ink")) {
+    const appearance = getComputedStyle(root);
+    // Chromium's SVG-image renderer does not reliably resolve URL-valued
+    // custom properties across SVG/XHTML. Put the URL at its CSS use site.
+    for (const name of ["--ink-koi", "--ink-landscape", "--ink-grain"]) {
+      css = css.split(`var(${name})`).join(appearance.getPropertyValue(name));
+    }
+  }
+  // Paint servers live outside the card in the app. The isolated SVG needs
+  // its own copies for quota strokes and credit-trend brush textures.
+  const inkDefs = root.hasAttribute("data-ink")
+    ? document.getElementById("ink-graph-paint")?.closest("svg")?.innerHTML ?? ""
+    : "";
+  let svgMarkup =
+    `<svg xmlns="http://www.w3.org/2000/svg" width="${W2 * S}" height="${H2 * S}" ` +
+    `viewBox="0 0 ${W2} ${H2}" data-theme="${root.dataset.theme ?? ""}" ` +
+    `data-density="${root.dataset.density ?? ""}" data-skin="${root.dataset.skin ?? ""}" ` +
+    `style="${escapeHtml(root.style.cssText)}" ` +
+    `${root.hasAttribute("data-ink") ? "data-ink=\"\"" : ""}>` +
+    // CDATA so CSS containing XML-special characters (`<`, `&` — e.g. in
+    // a content: string) can never malform the snapshot document. A
+    // literal "]]>" inside CSS would end the section early, so split it.
+    // An SVG-namespace style is parsed as CSS in an SVG image document;
+    // XHTML style + CDATA inside foreignObject loses theme rules in Chromium.
+    `<style xmlns="http://www.w3.org/2000/svg"><![CDATA[${css.split("]]>").join("]]]]><![CDATA[>")}]]></style>` +
+    inkDefs +
+    `<foreignObject width="${W2}" height="${H2}">` +
+    `<div xmlns="http://www.w3.org/1999/xhtml" id="snap-root">` +
+    new XMLSerializer().serializeToString(el) +
+    `<div id="snap-foot"><img src="${paneIcon}" alt="" /><span>${escapeHtml(t("share.tagline"))}</span></div>` +
+    `</div></foreignObject></svg>`;
+
+  const skin = activeSkin();
+  if (skin) svgMarkup = await embedSkinImages(svgMarkup, skin.id);
+
+  const img = new Image();
+  img.src = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svgMarkup)}`;
+  await img.decode();
+
+  const canvas = document.createElement("canvas");
+  canvas.width = W2 * S;
+  canvas.height = H2 * S;
+  const ctx = canvas.getContext("2d")!;
+  ctx.drawImage(img, 0, 0);
+
+  const dataUrl = canvas.toDataURL("image/png");
+  const pngBase64 = dataUrl.slice(dataUrl.indexOf(",") + 1);
+  await invoke("copy_share_image", { pngBase64 });
+}
+
+/// Copies one provider card as-is. The total-spend button no longer lands
+/// here — it opens the range menu and copies a spend envelope instead.
 async function shareCard(id: string): Promise<void> {
   const status = document.querySelector("#status")!;
   try {
-    const el =
-      id === "__total__"
-        ? document.querySelector<HTMLElement>("article.total-spend")
-        : document.querySelector<HTMLElement>(`article.provider[data-provider="${id}"]`);
+    const el = document.querySelector<HTMLElement>(`article.provider[data-provider="${id}"]`);
     if (!el) return;
 
-    const rect = el.getBoundingClientRect();
-    const W = Math.ceil(rect.width);
-    const S = 2;
-    const PAD = 20; // frame around the card, like the Mac share cards
-    const FOOT = 30; // logo + tagline row
-
-    let css = "";
-    const appendRules = (rules: CSSRuleList) => {
-      for (const rule of Array.from(rules)) {
-        // SVG image dimensions include the 2x export scale; media queries
-        // must retain the live window's layout rather than reflow at 2x width.
-        if (rule instanceof CSSMediaRule) {
-          if (matchMedia(rule.conditionText).matches) appendRules(rule.cssRules);
-        } else css += rule.cssText + "\n";
-      }
-    };
-    for (const sheet of Array.from(document.styleSheets)) {
-      try {
-        appendRules(sheet.cssRules);
-      } catch {
-        // Inaccessible sheet (shouldn't happen — all styles are bundled).
-      }
-    }
-    // Static rasterization renders CSS animations at time zero, which for
-    // the entrance animations means an invisible card. Freeze final state.
-    // The body's inherited text styles are re-declared on the wrapper since
-    // the snapshot document has no <body>.
-    const bodyStyle = getComputedStyle(document.body);
-    css +=
-      "*{animation:none!important;transition:none!important}" +
-      "#snap-root .share-btn{display:none!important}" +
-      `#snap-foot{display:flex;align-items:center;justify-content:center;gap:6px;` +
-      `height:${FOOT}px;color:var(--muted-foreground);font-size:12px}` +
-      "#snap-foot img{width:16px;height:16px;border-radius:4px}";
-
+    const W = Math.ceil(el.getBoundingClientRect().width);
     const clone = el.cloneNode(true) as HTMLElement;
-    clone.style.margin = "0";
-    clone.style.width = `${W}px`;
-    clone.style.boxSizing = "border-box";
 
     // Shares are strictly what's on screen: everything the card currently
     // renders — bars, quota bars, the trend, and the On Demand section
@@ -5806,88 +5876,317 @@ async function shareCard(id: string): Promise<void> {
     // .snap-card restores the card surface the popover no longer draws
     // (cards sit flat on the background there, panels carry the chrome).
     clone.classList.add("snap-card");
-    if (id !== "__total__") {
-      clone
-        .querySelectorAll(".share-btn, .card-caret, .quick-links, .action-row, .drag-grip")
-        .forEach((n) => n.remove());
-    }
+    clone
+      .querySelectorAll(".share-btn, .card-caret, .quick-links, .action-row, .drag-grip")
+      .forEach((n) => n.remove());
 
-    // The curated clone is shorter than the on-screen card (chrome
-    // removed), so measure IT — briefly attached offscreen — instead of
-    // sizing the canvas from the original and leaving dead space.
-    clone.style.position = "fixed";
-    clone.style.left = "-99999px";
-    clone.style.top = "0";
-    document.body.appendChild(clone);
-    const H = Math.ceil(clone.getBoundingClientRect().height);
-    clone.remove();
-    clone.style.position = "";
-    clone.style.left = "";
-    clone.style.top = "";
-    const W2 = W + PAD * 2;
-    const H2 = H + PAD * 2 + FOOT;
-    css +=
-      `#snap-root{font-family:${bodyStyle.fontFamily};font-size:${bodyStyle.fontSize};` +
-      `color:${bodyStyle.color};letter-spacing:${bodyStyle.letterSpacing};` +
-      `background:var(--background);padding:${PAD}px;box-sizing:border-box;` +
-      `width:${W2}px;height:${H2}px}`;
-
-    // data-theme / data-density live on <html>; :root of the snapshot
-    // document is the <svg>, so the attributes are mirrored there for the
-    // :root[data-…] rules to keep matching.
-    const root = document.documentElement;
-    if (root.hasAttribute("data-ink")) {
-      const appearance = getComputedStyle(root);
-      // Chromium's SVG-image renderer does not reliably resolve URL-valued
-      // custom properties across SVG/XHTML. Put the URL at its CSS use site.
-      for (const name of ["--ink-koi", "--ink-landscape", "--ink-grain"]) {
-        css = css.split(`var(${name})`).join(appearance.getPropertyValue(name));
-      }
-    }
-    // Paint servers live outside the card in the app. The isolated SVG needs
-    // its own copies for quota strokes and credit-trend brush textures.
-    const inkDefs = root.hasAttribute("data-ink")
-      ? document.getElementById("ink-graph-paint")?.closest("svg")?.innerHTML ?? ""
-      : "";
-    let svgMarkup =
-      `<svg xmlns="http://www.w3.org/2000/svg" width="${W2 * S}" height="${H2 * S}" ` +
-      `viewBox="0 0 ${W2} ${H2}" data-theme="${root.dataset.theme ?? ""}" ` +
-      `data-density="${root.dataset.density ?? ""}" data-skin="${root.dataset.skin ?? ""}" ` +
-      `style="${escapeHtml(root.style.cssText)}" ` +
-      `${root.hasAttribute("data-ink") ? "data-ink=\"\"" : ""}>` +
-      // CDATA so CSS containing XML-special characters (`<`, `&` — e.g. in
-      // a content: string) can never malform the snapshot document. A
-      // literal "]]>" inside CSS would end the section early, so split it.
-      // An SVG-namespace style is parsed as CSS in an SVG image document;
-      // XHTML style + CDATA inside foreignObject loses theme rules in Chromium.
-      `<style xmlns="http://www.w3.org/2000/svg"><![CDATA[${css.split("]]>").join("]]]]><![CDATA[>")}]]></style>` +
-      inkDefs +
-      `<foreignObject width="${W2}" height="${H2}">` +
-      `<div xmlns="http://www.w3.org/1999/xhtml" id="snap-root">` +
-      new XMLSerializer().serializeToString(clone) +
-      `<div id="snap-foot"><img src="${paneIcon}" alt="" /><span>${escapeHtml(t("share.tagline"))}</span></div>` +
-      `</div></foreignObject></svg>`;
-
-    const skin = activeSkin();
-    if (skin) svgMarkup = await embedSkinImages(svgMarkup, skin.id);
-
-    const img = new Image();
-    img.src = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svgMarkup)}`;
-    await img.decode();
-
-    const canvas = document.createElement("canvas");
-    canvas.width = W2 * S;
-    canvas.height = H2 * S;
-    const ctx = canvas.getContext("2d")!;
-    ctx.drawImage(img, 0, 0);
-
-    const dataUrl = canvas.toDataURL("image/png");
-    const pngBase64 = dataUrl.slice(dataUrl.indexOf(",") + 1);
-    await invoke("copy_share_image", { pngBase64 });
+    await copyElementSnapshot(clone, W);
     status.textContent = t("footer.copied");
   } catch (err) {
     status.textContent = t("footer.shareFailed", { err: String(err) });
   }
+}
+
+// ---------------------------------------------------------------------------
+// Spend envelope share (ticket 082-04): the total-spend share button opens a
+// time-range menu, and the copy is a purpose-built envelope template for the
+// chosen window — not a screenshot of whatever tabs happen to be active.
+// ---------------------------------------------------------------------------
+
+type ShareRange = "today" | "yesterday" | "d7" | "d30" | "all";
+
+const SHARE_RANGE_LABEL: Record<ShareRange, string> = {
+  today: "spend.today",
+  yesterday: "spend.yesterday",
+  d7: "spend.days7",
+  d30: "spend.days30",
+  all: "spend.rangeAll",
+};
+
+/// The same entries the spend panel renders for a window — grouped by the
+/// user's tool/model toggle — so the copied numbers can never disagree with
+/// the chosen range.
+function envelopeEntries(range: ShareRange): DonutEntry[] {
+  const byModel = config.spendGrouping === "model";
+  if (range === "today" || range === "yesterday") {
+    return byModel ? modelDonutEntries(range) : donutEntries(range);
+  }
+  return byModel ? modelEntriesForRange(range) : donutEntriesForRange(range);
+}
+
+function creditEntriesForRange(range: ShareRange): { id: string; name: string; value: number }[] {
+  return lastCreditExtras.map((credit) => ({
+    id: credit.id,
+    name: notedName(credit.id, providerDisplayName(providerFamily(credit.id))),
+    value: credit.windows[range === "all" ? "all" : range],
+  })).filter((row) => row.value > 0).sort((a, b) => a.name.localeCompare(b.name, localeTag()));
+}
+
+async function shareSpendEnvelope(range: ShareRange): Promise<void> {
+  const status = document.querySelector("#status")!;
+  try {
+    const entries = envelopeEntries(range);
+    const credits = creditEntriesForRange(range);
+    const totals = entries.reduce(
+      (acc, e) => ({ cost: acc.cost + e.w.cost, tokens: acc.tokens + e.w.tokens }),
+      { cost: 0, tokens: 0 },
+    );
+    // Bars track the active metric so the visual matches the printed values.
+    const metricVal = (w: SpendWindow) => spendVal(w);
+    const denom = Math.max(...entries.map((e) => metricVal(e.w)), 0);
+    const shown = entries.slice(0, 6);
+    const overflow = entries.length - shown.length;
+    const lead = (id: string) => {
+      const icon = providerVisual(id)?.iconSvg;
+      return icon
+        ? `<span class="legend-ico">${icon}</span>`
+        : `<span class="dot" style="background:${spendColor(id)}"></span>`;
+    };
+    const rows = shown
+      .map((e) => {
+        const pct = denom > 0 ? Math.max(2, Math.round((metricVal(e.w) / denom) * 100)) : 0;
+        return `<div class="envelope-row">${lead(e.s.id)}<span class="envelope-name">${escapeHtml(e.s.name)}${estBadgeFor(e.s.id)}</span><span class="envelope-bar" aria-hidden="true"><i style="width:${pct}%;background:${spendColor(e.s.id)}"></i></span><span class="envelope-val">${escapeHtml(fmtSpendVal(e.w))}</span></div>`;
+      })
+      .join("");
+    const body = entries.length
+      ? `${rows}${overflow > 0 ? `<div class="envelope-more">+${overflow}</div>` : ""}`
+      : credits.length ? "" : `<div class="envelope-empty">${escapeHtml(t("spend.noUsage"))}</div>`;
+    const creditBody = credits.length ? `<div class="spend-credits"><span class="spend-credits-label">${escapeHtml(t("spend.credits"))}</span>${credits.map((row) => `<span class="spend-credit-item"><span class="spend-credit-name">${escapeHtml(row.name)}</span><span class="spend-credit-value">${escapeHtml(fmtCredits(row.value))} ${escapeHtml(t("spend.creditsUnit"))}</span></span>`).join("")}</div>` : "";
+
+    const card = document.createElement("div");
+    card.className = "envelope snap-card";
+    card.innerHTML = `
+      <div class="envelope-head"><span class="envelope-title">${escapeHtml(t("spend.title"))}</span><span class="envelope-chip">${escapeHtml(t(SHARE_RANGE_LABEL[range]))}</span></div>
+      <div class="envelope-total">${escapeHtml(fmtMoney(totals.cost))} · ${escapeHtml(t("card.tokens", { n: fmtTokens(totals.tokens) }))}</div>
+      <div class="envelope-rows">${body}</div>${creditBody}`;
+    const live = document.querySelector<HTMLElement>("article.total-spend");
+    const W = live ? Math.ceil(live.getBoundingClientRect().width) : 380;
+    await copyElementSnapshot(card, W);
+    status.textContent = t("footer.copied");
+  } catch (err) {
+    status.textContent = t("footer.shareFailed", { err: String(err) });
+  }
+}
+
+/// Time-range menu behind the total-spend share button. Same overlay/menu
+/// styling as the card group menu; Esc and outside clicks dismiss.
+function openShareRangeMenu(anchor: HTMLElement): void {
+  hideSpendPop();
+  document.querySelector(".group-menu-overlay")?.remove();
+  const current: ShareRange = rangeSelected ? rangeTab : spendTab === "yesterday" ? "yesterday" : "today";
+  const overlay = document.createElement("div");
+  overlay.className = "group-menu-overlay";
+  overlay.innerHTML = `
+    <div class="group-menu" role="menu">
+      <div class="group-menu-title">${escapeHtml(t("share.rangeTitle"))}</div>
+      ${(Object.keys(SHARE_RANGE_LABEL) as ShareRange[])
+        .map(
+          (r) =>
+            `<button class="group-menu-item${r === current ? " on" : ""}" data-share-range="${r}"><span class="group-menu-check">${r === current ? "✓" : ""}</span>${escapeHtml(t(SHARE_RANGE_LABEL[r]))}</button>`,
+        )
+        .join("")}
+    </div>`;
+  const close = () => {
+    overlay.remove();
+    document.removeEventListener("keydown", onKey, true);
+  };
+  const onKey = (e: KeyboardEvent) => {
+    if (e.key === "Escape") {
+      e.stopPropagation();
+      close();
+    }
+  };
+  overlay.addEventListener("click", (e) => {
+    const pick = (e.target as HTMLElement).closest<HTMLElement>("[data-share-range]");
+    if (pick) {
+      close();
+      void shareSpendEnvelope(pick.dataset.shareRange as ShareRange);
+      return;
+    }
+    if (e.target === overlay) close();
+  });
+  document.addEventListener("keydown", onKey, true);
+  document.body.appendChild(overlay);
+  // Drop the menu under the button's right edge, clamped inside the window.
+  const menu = overlay.querySelector<HTMLElement>(".group-menu")!;
+  const rect = anchor.getBoundingClientRect();
+  menu.style.left = `${Math.max(8, Math.min(rect.right - menu.offsetWidth, window.innerWidth - menu.offsetWidth - 8))}px`;
+  menu.style.top = `${Math.max(8, Math.min(rect.bottom + 4, window.innerHeight - menu.offsetHeight - 8))}px`;
+}
+
+// ---------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
+// First-run spotlight tour (ticket 082-05). Steps highlight one entry point
+// at a time with a dimmed hole and a small card: 上一步 / 下一步 / 跳过.
+// Auto-starts only on the first launch after installing (no stored version
+// at boot) and only until it has been seen once — existing installs are
+// never interrupted. Settings → 常规 replays it on demand.
+// ---------------------------------------------------------------------------
+
+type TourStep = { target: string; titleKey: string; bodyKey: string };
+
+/// Anchor selectors, in teaching order. A step whose target is missing (a
+/// fresh install can have no provider cards yet) is skipped, so the tour
+/// adapts to whatever the popover actually renders.
+const TOUR_STEPS: TourStep[] = [
+  { target: ".total-spend", titleKey: "tour.spendTitle", bodyKey: "tour.spendBody" },
+  { target: ".quota-overview", titleKey: "tour.overviewTitle", bodyKey: "tour.overviewBody" },
+  {
+    target: 'article.provider[data-provider]:not(.total-spend):not(.quota-overview):not(.welcome-card)',
+    titleKey: "tour.cardTitle",
+    bodyKey: "tour.cardBody",
+  },
+  { target: "#side-zone-right", titleKey: "tour.trailTitle", bodyKey: "tour.trailBody" },
+  { target: "#side-zone", titleKey: "tour.railTitle", bodyKey: "tour.railBody" },
+];
+
+/// Captured once at boot, before the What's-new pass writes the current
+/// version into config: an empty stored version means this is the first
+/// launch after installing, which is the only case the tour auto-starts.
+let freshInstallAtBoot = false;
+let tourContentReady = false;
+let tourSteps: TourStep[] = [];
+let tourIndex = 0;
+let tourOverlay: HTMLElement | null = null;
+let tourReposition: (() => void) | null = null;
+
+const tourActive = () => tourOverlay !== null;
+
+/// Marks the tour seen — both 跳过 and 走完 land here, so it can only ever
+/// auto-present once.
+function markTourSeen(): void {
+  config.tourSeen = true;
+  config.tourPending = false;
+  void patchConfig({ tourSeen: true, tourPending: false });
+}
+
+function endTour(): void {
+  if (tourReposition) {
+    window.removeEventListener("resize", tourReposition);
+    document.removeEventListener("scroll", tourReposition, true);
+  }
+  tourReposition = null;
+  tourOverlay?.remove();
+  tourOverlay = null;
+  document.removeEventListener("keydown", onTourKey, true);
+}
+
+function onTourKey(e: KeyboardEvent): void {
+  if (e.key === "Escape") {
+    e.preventDefault();
+    e.stopPropagation();
+    markTourSeen();
+    endTour();
+  }
+}
+
+/// The steps whose target exists right now.
+function availableTourSteps(): TourStep[] {
+  return TOUR_STEPS.filter((s) => document.querySelector<HTMLElement>(s.target));
+}
+
+function showTourStep(index: number): void {
+  const step = tourSteps[index];
+  if (!step || !tourOverlay) return;
+  const target = document.querySelector<HTMLElement>(step.target);
+  if (!target) {
+    // The target vanished (a re-render dropped it) — move on, or finish.
+    if (index + 1 < tourSteps.length) showTourStep(index + 1);
+    else endTour();
+    return;
+  }
+  tourIndex = index;
+  const isFirst = index === 0;
+  const isLast = index === tourSteps.length - 1;
+  const tip = tourOverlay.querySelector<HTMLElement>(".tour-tip")!;
+  tip.innerHTML = `
+    <div class="tour-step-count">${escapeHtml(t("tour.step", { n: String(index + 1), total: String(tourSteps.length) }))}</div>
+    <h4 class="tour-tip-title">${escapeHtml(t(step.titleKey))}</h4>
+    <p class="tour-tip-body">${escapeHtml(t(step.bodyKey))}</p>
+    <div class="tour-actions">
+      <button type="button" class="tour-skip" data-tour-skip>${escapeHtml(t("tour.skip"))}</button>
+      <span class="spacer"></span>
+      ${isFirst ? "" : `<button type="button" class="mini-btn" data-tour-prev>${escapeHtml(t("tour.prev"))}</button>`}
+      <button type="button" class="mini-btn tour-next" data-tour-next>${escapeHtml(t(isLast ? "tour.done" : "tour.next"))}</button>
+    </div>`;
+  target.scrollIntoView({ block: "nearest", behavior: "instant" });
+  positionTour();
+  tip.querySelector<HTMLButtonElement>("[data-tour-next]")?.focus({ preventScroll: true });
+}
+
+/// Places the hole over the target and the card beside it, clamping both
+/// inside the window. Runs on every step, scroll and resize.
+function positionTour(): void {
+  if (!tourOverlay) return;
+  const step = tourSteps[tourIndex];
+  const target = step ? document.querySelector<HTMLElement>(step.target) : null;
+  if (!target) return;
+  const hole = tourOverlay.querySelector<HTMLElement>(".tour-hole")!;
+  const tip = tourOverlay.querySelector<HTMLElement>(".tour-tip")!;
+  const r = target.getBoundingClientRect();
+  const pad = 6;
+  const left = Math.min(window.innerWidth - 2, Math.max(2, r.left - pad));
+  const top = Math.min(window.innerHeight - 2, Math.max(2, r.top - pad));
+  const width = Math.max(0, Math.min(window.innerWidth - 2, r.right + pad) - left);
+  const height = Math.max(0, Math.min(window.innerHeight - 2, r.bottom + pad) - top);
+  hole.style.left = `${left}px`;
+  hole.style.top = `${top}px`;
+  hole.style.width = `${width}px`;
+  hole.style.height = `${height}px`;
+  // Below the target when there is room, above otherwise; centred on it but
+  // clamped to the window edges.
+  const tipW = tip.offsetWidth;
+  const tipH = tip.offsetHeight;
+  let tipTop = top + height + 10;
+  if (tipTop + tipH > window.innerHeight - 8) tipTop = Math.max(8, top - tipH - 10);
+  const tipLeft = Math.max(8, Math.min(left + width / 2 - tipW / 2, window.innerWidth - tipW - 8));
+  tip.style.left = `${tipLeft}px`;
+  tip.style.top = `${tipTop}px`;
+}
+
+function startTour(): void {
+  endTour();
+  tourSteps = availableTourSteps();
+  if (tourSteps.length === 0) return;
+  const overlay = document.createElement("div");
+  overlay.id = "tour-overlay";
+  overlay.innerHTML = `<div class="tour-hole"></div><div class="tour-tip" role="dialog" aria-modal="false"></div>`;
+  tourOverlay = overlay;
+  overlay.addEventListener("click", (e) => {
+    const target = e.target as HTMLElement;
+    if (target.closest("[data-tour-skip]")) {
+      markTourSeen();
+      endTour();
+      return;
+    }
+    if (target.closest("[data-tour-next]")) {
+      if (tourIndex + 1 < tourSteps.length) showTourStep(tourIndex + 1);
+      else {
+        markTourSeen();
+        endTour();
+      }
+      return;
+    }
+    if (target.closest("[data-tour-prev]")) {
+      if (tourIndex > 0) showTourStep(tourIndex - 1);
+      return;
+    }
+  });
+  tourReposition = () => positionTour();
+  window.addEventListener("resize", tourReposition);
+  // Capture phase: the content column scrolls, not the window.
+  document.addEventListener("scroll", tourReposition, true);
+  document.addEventListener("keydown", onTourKey, true);
+  document.body.appendChild(overlay);
+  showTourStep(0);
+}
+
+/// Auto-presentation gate: fresh install only, once, and never while the
+/// startup splash owns the screen (the splash calls back when it clears).
+function maybeStartTour(): void {
+  if (IS_PANEL_FORM || tourActive() || !tourContentReady) return;
+  if (config.tourSeen || !freshInstallAtBoot) return;
+  startTour();
 }
 
 // ---------------------------------------------------------------------------
@@ -6307,7 +6606,7 @@ function onFontMenuOutside(e: PointerEvent): void {
 function renderFontOptions(filter: string): void {
   const menu = fontMenu;
   if (!menu) return;
-  const all = systemFontFamilies ?? [];
+  const all = [...new Set([...fontPackFamilies(), ...(systemFontFamilies ?? [])])];
   const q = filter.trim().toLowerCase();
   fontMenuList = q ? all.filter((f) => f.toLowerCase().includes(q)) : all;
   const current = String(config.uiFont ?? "").trim().toLowerCase();
@@ -6325,7 +6624,17 @@ function renderFontOptions(filter: string): void {
     opt.className =
       `font-option${name.toLowerCase() === current ? " selected" : ""}` +
       `${i === fontMenuFocused ? " focused" : ""}`;
+    opt.dataset.family = name;
     opt.textContent = name;
+    // MV Boli ships with every Windows install; recommend it instead of
+    // redistributing Microsoft's proprietary font file.
+    if (name.toLowerCase() === "mv boli") {
+      const badge = document.createElement("span");
+      badge.className = "font-recommended";
+      badge.textContent = t("settings.fontRecommended");
+      badge.dataset.i18n = "settings.fontRecommended";
+      opt.append(badge);
+    }
     opt.style.fontFamily = fontStack(name);
     menu.appendChild(opt);
   });
@@ -6339,7 +6648,8 @@ function openFontMenu(): void {
   menu.className = "font-menu";
   menu.addEventListener("click", (e) => {
     const opt = (e.target as HTMLElement).closest<HTMLElement>(".font-option");
-    if (opt?.textContent) selectFont(opt.textContent);
+    // dataset.family, not textContent: recommended rows carry a badge span.
+    if (opt?.dataset.family) selectFont(opt.dataset.family);
   });
   document.body.appendChild(menu);
   fontMenu = menu;
@@ -8723,9 +9033,9 @@ function updateTrailActive(): void {
 // Spend row model tooltip
 // ---------------------------------------------------------------------------
 
-/// Tooltip for one Usage Trend bar: date + the day's value — dollars or
-/// tokens for local-log spends (follows the metric toggle), sampled
-/// used-percent for quota history, "no data" for unsampled days.
+/// Tooltip for one Usage Trend bar: date + the day's quantity — dollars or
+/// tokens for local-log spends (follows the metric toggle), credits for
+/// credits-billed cards, "no data" for unsampled days. Never percentages.
 function showTrendTip(el: HTMLElement): void {
   const tip = document.querySelector<HTMLElement>("#model-tip")!;
   const [id, idxStr] = (el.dataset.trend ?? "").split("|");
@@ -8734,8 +9044,7 @@ function showTrendTip(el: HTMLElement): void {
   // credit series, so the hover must read it too.
   const credits = spend ? undefined : lastCreditTrend[id];
   const useCredits = !spend && credits?.some((v) => v != null && v > 0);
-  const sampled = spend || useCredits ? undefined : lastQuotaTrend[id];
-  if (!spend && !sampled && !useCredits) return;
+  if (!spend && !useCredits) return;
   const i = Number(idxStr);
   if (Number.isNaN(i)) return;
   const date = new Date(Date.now() - (29 - i) * 86_400_000).toLocaleDateString(localeTag(), {
@@ -8749,24 +9058,15 @@ function showTrendTip(el: HTMLElement): void {
     const metricCost = config.spendMetric === "cost";
     const series = metricCost ? spend.trend_cost : spend.trend;
     const dayVal = series[i] ?? 0;
-    const total = series.reduce((a, b) => a + b, 0);
-    const share = total > 0 ? (dayVal / total) * 100 : 0;
     lines = `
     <div class="tip-line"><span class="tip-name">${escapeHtml(date)}</span><span>${
       dayVal > 0 ? escapeHtml(metricCost ? fmtMoney(dayVal) : t("card.tokens", { n: fmtTokens(dayVal) })) : escapeHtml(t("spend.noUsage"))
-    }</span></div>
-    ${dayVal > 0 ? `<div class="tip-line detail"><span>${escapeHtml(t("spend.of30", { n: share < 1 ? "<1" : share.toFixed(0) }))}</span></div>` : ""}`;
-  } else if (useCredits && credits) {
-    const dayVal = credits[i];
+    }</span></div>`;
+  } else {
+    const dayVal = credits![i];
     lines = `
     <div class="tip-line"><span class="tip-name">${escapeHtml(date)}</span><span>${
       dayVal == null ? escapeHtml(t("spend.noDataDay")) : dayVal > 0 ? escapeHtml(t("spend.creditBarTip", { n: fmtCredits(dayVal) })) : escapeHtml(t("spend.noUsage"))
-    }</span></div>`;
-  } else {
-    const pct = sampled?.[i];
-    lines = `
-    <div class="tip-line"><span class="tip-name">${escapeHtml(date)}</span><span>${
-      pct == null ? escapeHtml(t("spend.noDataDay")) : pct > 0 ? escapeHtml(t("spend.quotaBarTip", { n: Math.round(pct) })) : escapeHtml(t("spend.noUsage"))
     }</span></div>`;
   }
   tip.innerHTML = lines;
@@ -9034,13 +9334,9 @@ async function refresh(
   const spendDailyPromise = usageOnly
     ? Promise.resolve<DailySpendRow[] | null>(null)
     : spendPromise.then(() => invoke<DailySpendRow[]>("fetch_spend_daily", { rangeDays: 365 }).catch(() => []));
-  // The sampled quota history is one tiny JSON read — fetch it even for
-  // usage-only refreshes so account cards keep their trend bars fresh.
-  const quotaTrendPromise = invoke<Record<string, (number | null)[]>>("fetch_usage_history").catch(
-    () => null,
-  );
-  // Credits-billed cards (Qoder CN / Trae CN): daily credit consumption,
-  // kept apart from the percent-based quota trend and any token totals.
+  // Credits-billed cards (Qoder CN / Trae CN): daily credit consumption —
+  // one tiny JSON read, fetched even for usage-only refreshes so their
+  // trend bars stay fresh. Kept apart from any token totals.
   const creditTrendPromise = invoke<Record<string, (number | null)[]>>("fetch_credit_history").catch(
     () => null,
   );
@@ -9161,16 +9457,6 @@ async function refresh(
   const spend = await spendPromise;
   const spendHistory = await spendHistoryPromise;
   const spendDaily = await spendDailyPromise;
-  const quotaTrend = await quotaTrendPromise;
-  if (quotaTrend) {
-    lastQuotaTrend = quotaTrend;
-    // A usage-only refresh rendered before the history landed; account
-    // cards gaining their first trend need the layout patched + repainted.
-    if (usageOnly && lastSnapshots.length) {
-      ensureLayout();
-      if (!customizeOpen) renderIfVisible();
-    }
-  }
   const creditTrend = await creditTrendPromise;
   if (creditTrend) {
     lastCreditTrend = creditTrend;
@@ -13181,6 +13467,32 @@ async function initSettings(): Promise<void> {
     void patchConfig({ uiFont: uiFont.value.trim() }).then(applyAppearance);
   });
 
+  for (const manager of document.querySelectorAll<HTMLElement>(".font-pack-manager")) {
+    void mountFontPackManager(manager, {
+      t,
+      getSelected: () => config.uiFont,
+      onRemoved: async (family) => {
+        if (config.uiFont === family) {
+          await patchConfig({ uiFont: "" });
+          uiFont.value = "";
+          uiFont.style.fontFamily = "";
+          applyAppearance();
+        }
+      },
+      onChange: () => { if (fontMenu) renderFontOptions(uiFont.value); },
+    }).catch(() => {});
+  }
+  document.querySelector("#tour-replay")?.addEventListener("click", () => {
+    document.querySelector<HTMLElement>("#settings-close")?.click();
+    setDrawer(false);
+    startTour();
+  });
+  for (const manager of document.querySelectorAll<HTMLElement>(".reset-wake-manager")) {
+    void mountResetWakeSettings(manager, () => appConfirm({
+      title: t("settings.wake.title"), message: t("settings.wake.consent"), confirmLabel: t("dialog.ok"),
+    }), renderAll);
+  }
+
   const density = document.querySelector<HTMLInputElement>("#density")!;
   density.checked = config.density === "compact";
   density.addEventListener("change", () => {
@@ -13668,6 +13980,11 @@ function buildPanelShell(): void {
   moveRow("locale");
   moveRow("appearance");
   moveRow("ui-font");
+  const fontManager = document.querySelector<HTMLElement>(".font-pack-manager");
+  if (fontManager) generalCard.append(fontManager);
+  const wakeManager = document.querySelector<HTMLElement>(".reset-wake-manager");
+  if (wakeManager) generalCard.append(wakeManager);
+  document.querySelector("#tour-replay")?.closest(".setting-row")?.remove();
   moveRow("density");
   moveRow("glass");
   moveRow("reduce-anim");
@@ -13729,6 +14046,25 @@ function buildPanelShell(): void {
     else void invoke("close_panel_window").catch(() => {});
   });
   generalCard.append(panelRow("settings.windowForm", formGroup));
+  // Replay the first-run spotlight tour on demand.
+  const replayTour = document.createElement("button");
+  replayTour.type = "button";
+  replayTour.className = "mini-btn";
+  replayTour.dataset.i18n = "settings.tourReplay";
+  replayTour.textContent = t("settings.tourReplay");
+  replayTour.addEventListener("click", () => {
+    // The tour lives in the popover's document. From the panel form, ask
+    // the backend to surface the popover and replay there; in the popover
+    // itself, just close the panels over it and start.
+    if (IS_PANEL_FORM) {
+      void invoke("replay_tour").catch(() => {});
+      return;
+    }
+    document.querySelector<HTMLElement>("#settings-close")?.click();
+    setDrawer(false);
+    startTour();
+  });
+  generalCard.append(panelRow("settings.tourReplayLabel", replayTour));
   settingsView.append(general.section);
 
   // --- Keys page: provider credentials + the MCP/search vault ------------
@@ -13959,6 +14295,12 @@ function setPanelView(view: "settings" | "auth"): void {
 
 let appliedPanelIntentAt = 0;
 
+/// A panel intent is a one-shot cross-window message: applied once per stamp
+/// and cleared from config the moment it is read, so a stale "jump to auth
+/// center" can never replay on the next fresh panel window. The TTL bounds
+/// the message further — an intent older than this is dropped, not applied.
+const PANEL_INTENT_TTL_MS = 10_000;
+
 /// The popover's "open this family in the auth center" request, applied once
 /// per stamp. The two windows share only the config and the config-updated
 /// event, so the config *is* the message — no new IPC channel.
@@ -13970,9 +14312,16 @@ function applyPanelIntent(): void {
   // the stamp here would silently drop the request.
   if (!document.querySelector("#panel-view-auth")) return;
   appliedPanelIntentAt = intent.at;
+  // Consume on read, stale or not: leaving it in config replayed the auth
+  // jump on every future fresh panel window (the gear opened the auth
+  // center "by default" bug).
+  void patchConfig({ panelIntent: null }).catch(() => {});
+  if (Date.now() - intent.at > PANEL_INTENT_TTL_MS) return;
   if (intent.view === "auth") {
     setPanelView("auth");
     if (intent.family) void focusAuthFamily(intent.family);
+  } else {
+    setPanelView("settings");
   }
 }
 
@@ -14464,6 +14813,8 @@ async function authRemoveAccount(family: string, index: number): Promise<void> {
 
 let splashGateChecked = false;
 let splashTimer: number | undefined;
+/// True between playSplash() and hideSplash() — the first-run tour gate.
+let splashOn = false;
 let splashTl: ReturnType<typeof gsap.timeline> | undefined;
 let stopThemeStartup: (() => void) | undefined;
 let markConfigLoaded: () => void = () => {};
@@ -14476,7 +14827,16 @@ function hideSplash(): void {
   stopThemeStartup = undefined;
   window.clearTimeout(splashTimer);
   splashTl?.pause();
+  splashOn = false;
   document.querySelector("#splash")?.classList.add("hide");
+  // The first-run tour waits for the splash to clear rather than fighting
+  // it for the screen.
+  maybeStartTour();
+}
+
+/// True while the startup splash owns the screen (the tour holds off).
+function splashPlaying(): boolean {
+  return splashOn;
 }
 
 function playSplash(): void {
@@ -14493,6 +14853,7 @@ function playSplash(): void {
   }
   const splash = document.querySelector<HTMLElement>("#splash");
   if (!splash) return;
+  splashOn = true;
   window.clearTimeout(splashTimer);
   splashTl?.kill();
   splash.classList.remove("hide");
@@ -14713,7 +15074,7 @@ window.addEventListener("DOMContentLoaded", () => {
     if (shortcutMatches(e, localShortcut("settings")) && !isTypingTarget(document.activeElement)) {
       e.preventDefault();
       setDrawer(false);
-      void invoke("open_panel_window").catch(() => {});
+      void openSettingsPanel();
     }
     // Ctrl+Shift+P opens the big panel window (dual-form PoC).
     if (
@@ -14779,10 +15140,17 @@ window.addEventListener("DOMContentLoaded", () => {
   };
   // Settings is one system: the popover ⚙ opens the same standalone panel
   // window the tray's 设置 entry opens — no in-popover sheet anymore.
-  document.querySelector("#settings-btn")!.addEventListener("click", () => {
-    setDrawer(false);
-    void invoke("open_panel_window").catch(() => {});
-  });
+/// Open the standalone panel on the settings view. The intent doubles as the
+/// cross-window message: an already-open panel switches back from the auth
+/// center instead of merely being focused on whatever view it last showed.
+async function openSettingsPanel(): Promise<void> {
+  await patchConfig({ panelIntent: { view: "settings", at: Date.now() } }).catch(() => {});
+  void invoke("open_panel_window").catch(() => {});
+}
+document.querySelector("#settings-btn")!.addEventListener("click", () => {
+  setDrawer(false);
+  void openSettingsPanel();
+});
   document.querySelector("#settings-close")!.addEventListener("click", () => setSettings(false));
   document.querySelector("#changelog-btn")!.addEventListener("click", () => {
     setSettings(false);
@@ -15068,7 +15436,11 @@ window.addEventListener("DOMContentLoaded", () => {
     }
     const shareBtn = target.closest<HTMLElement>("[data-share]");
     if (shareBtn) {
-      void shareCard(shareBtn.dataset.share!);
+      // The total-spend copy is range-scoped (ticket 082-04): pick a window
+      // first, then the envelope template for that window goes to the
+      // clipboard. Provider cards keep the instant as-is snapshot.
+      if (shareBtn.dataset.share === "__total__") openShareRangeMenu(shareBtn);
+      else void shareCard(shareBtn.dataset.share!);
       return;
     }
     const groupBtn = target.closest<HTMLElement>("[data-card-group-menu]");
@@ -15418,6 +15790,28 @@ window.addEventListener("DOMContentLoaded", () => {
     syncPushProgress();
   });
 
+  // Replay requested from the settings panel window: the backend surfaced
+  // the popover and routed the request here.
+  void listen("tour-replay", () => {
+    setDrawer(false);
+    setSettings(false);
+    dismissConfirm?.();
+    startTour();
+  });
+  void listen<WakeStatus[]>("reset-wake-updated", ({ payload }) => {
+    acceptWakeStatuses(payload);
+    renderIfVisible();
+  });
+  void listen("reset-wake-settings-updated", () => {
+    void loadResetWake().then(renderIfVisible).catch(() => {});
+  });
+  void listen("font-packs-updated", () => {
+    void loadFontPacks().then(() => {
+      applyAppearance();
+      if (fontMenu) renderFontOptions(document.querySelector<HTMLInputElement>("#ui-font")?.value ?? "");
+    }).catch(() => {});
+  });
+
   void listen("tray-strip-restore", () => {
     requestTraySync();
   });
@@ -15454,7 +15848,6 @@ window.addEventListener("DOMContentLoaded", () => {
 
   void listen("popover-shown", () => {
     void checkForUpdate();
-    void maybePlayStartupAnimation();
     // Always reopen on the main page, at the top — leftover Customize/
     // Settings panels, a stale confirm dialog, or a stale scroll position
     // from the previous visit feel like the app is stuck mid-page.
@@ -15465,7 +15858,7 @@ window.addEventListener("DOMContentLoaded", () => {
     userSelectedAccountFor.clear();
     // A fresh update's notes present on the first open after launch.
     if (pendingWhatsNew) {
-      showChangelogDialog(t("dialog.whatsNew", { version: appVersion }), pendingWhatsNew);
+      showChangelogDialog(t("dialog.whatsNew", { version: appVersion }), pendingWhatsNew, true);
       pendingWhatsNew = null;
     }
     // Replay any renders skipped while hidden, before the reveal plays.
@@ -15490,8 +15883,21 @@ window.addEventListener("DOMContentLoaded", () => {
     if (lastSnapshots.length && !customizeOpen) playReveal();
     requestTraySync();
     void refresh();
+    // First-run spotlight tour: after the render above. The splash decides
+    // here — it plays (and calls back when it clears), or it doesn't and
+    // the tour starts right away.
+    void maybePlayStartupAnimation().then(() => {
+      if (!splashPlaying()) maybeStartTour();
+    });
   });
   void initSettings().then(() => {
+    freshInstallAtBoot = initialTourPending(config);
+    if (freshInstallAtBoot && !config.tourPending) {
+      config.tourPending = true;
+      void patchConfig({ tourPending: true });
+    }
+    void loadFontPacks().then(applyAppearance).catch(() => {});
+    void loadResetWake().then(renderIfVisible).catch(() => {});
     // Capability probe runs in both window forms: overview jumps and trail
     // scrolls live in the popover, but the settings panel scrolls too.
     probeSmoothScroll();
@@ -15503,19 +15909,30 @@ window.addEventListener("DOMContentLoaded", () => {
     }
     scheduleAutoRefresh();
     void paintCachedSnapshots();
-    void refresh(true);
+    void refresh(true).finally(() => {
+      // refresh() can queue its paint for the next animation frame. The
+      // tour must discover anchors after that paint, including first boot.
+      if (lastSnapshots.length) renderAll();
+      tourContentReady = true;
+      if (!splashPlaying() && !document.hidden) maybeStartTour();
+    });
     // Manual launch with the window already visible: popover-shown never
     // fires, so the splash gate runs here too.
     void getCurrentWebviewWindow()
       .isVisible()
       .then((visible) => {
-        if (visible) void maybePlayStartupAnimation();
+        if (visible) void maybePlayStartupAnimation().then(() => {
+          if (!splashPlaying()) maybeStartTour();
+        });
       })
       .catch(() => {});
     // Queued, not shown: the window is usually still hidden in the tray at
     // startup — the first popover-shown presents it. Runs after the config
     // load so lastSeenVersion is the real stored value, not the default.
     void getVersion().then((v) => {
+      // Read the stored version BEFORE the What's-new pass overwrites it:
+      // empty means this is the first launch after installing, and only
+      // then does the spotlight tour auto-present.
       pendingWhatsNew = computeWhatsNew(v);
     });
   });

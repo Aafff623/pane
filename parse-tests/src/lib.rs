@@ -40,6 +40,12 @@ pub mod agent_skill;
 #[path = "../../src-tauri/src/skin_packs.rs"]
 pub mod skin_packs;
 
+#[path = "../../src-tauri/src/font_packs.rs"]
+pub mod font_packs;
+
+#[path = "../../src-tauri/src/reset_wake.rs"]
+pub mod reset_wake;
+
 #[path = "../../src-tauri/src/usage_history.rs"]
 pub mod usage_history;
 
