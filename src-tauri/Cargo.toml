@@ -1,6 +1,6 @@
 [package]
 name = "pane"
-version = "0.8.1"
+version = "0.8.2"
 description = "Local-first AI usage dashboard for quotas, balances, reset times, multi-account management and CLI token spend."
 authors = ["Aafff623", "jazii"]
 homepage = "https://pane.threetwoa.live"
