@@ -59,6 +59,7 @@ function applyEnglishCopy() {
   setText('.faq-section .section-head p', 'faqCopy');
   setText('.faq-contact span', 'faq.contactPrompt'); setText('.faq-contact a', 'faq.cta');
   setTexts('.bottom-actions .chip__label',['coming','coming']); setText('.bottom-actions .button[data-variant=secondary]','tryDemo'); setText('.platforms','downloadNote'); setTexts('.site-footer .footer-content>div a',['source','docs','feedback']);
+  setText('#design .section-index','designIndex'); setText('#design .section-head h2','designTitle'); setText('#design .section-head p','designCopy'); setTexts('#design .design-card h3',['designCard1','designCard2']); setTexts('#design .design-card p',['designCard1Copy','designCard2Copy']); setTexts('#design .design-open',['designOpen','designOpen']);
 }
 applyEnglishCopy();
 initUsageFlow(isEnglish,en);

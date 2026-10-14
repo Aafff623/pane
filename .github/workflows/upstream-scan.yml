@@ -1,0 +1,90 @@
+name: Upstream reference scan
+
+# Weekly check of the reference repositories we borrow mechanisms from
+# (see docs/reference-repos.md). The scheduled run only reports (job summary +
+# `upstream-scan-report` artifact) and never writes to the repository. A manual
+# run with `update_docs: true` rewrites the baseline block and the "最近检查"
+# table and opens a PR, so nothing unattended ever commits.
+#
+# No repository secret is required: GitHub's auto-provided token only raises the
+# API rate limit, and the scanner falls back to the public endpoints without it.
+
+on:
+  schedule:
+    - cron: "0 3 * * 1" # Mondays 03:00 UTC
+  workflow_dispatch:
+    inputs:
+      update_docs:
+        description: "Rewrite the baseline in docs/reference-repos.md and open a PR"
+        type: boolean
+        default: false
+      fail_on_drift:
+        description: "Fail when an upstream repo published a release past the baseline"
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: upstream-scan
+  cancel-in-progress: false
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # only used by the manual update path
+      pull-requests: write # only used by the manual update path
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Scan upstream repositories
+        id: scan
+        continue-on-error: true
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          # schedule: always fail on drift · dispatch: honor the input
+          FAIL_ON_DRIFT: ${{ github.event_name != 'workflow_dispatch' || inputs.fail_on_drift }}
+        run: |
+          if [ "${FAIL_ON_DRIFT}" = "false" ]; then
+            node .github/scripts/upstream-scan.mjs --no-fail-on-drift
+          else
+            node .github/scripts/upstream-scan.mjs
+          fi
+
+      - name: Upload report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: upstream-scan-report
+          path: upstream-scan-report.md
+          if-no-files-found: warn
+
+      - name: Update baseline and open a PR
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.update_docs }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          node .github/scripts/upstream-scan.mjs --update
+          if git diff --quiet -- docs/reference-repos.md; then
+            echo "Baseline already current; nothing to commit."
+            exit 0
+          fi
+          branch="chore/upstream-scan-$(date -u +%Y%m%d-%H%M%S)"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -b "$branch"
+          git add docs/reference-repos.md
+          git commit -m "chore(reference-repos): refresh upstream baseline ($(date -u +%Y-%m-%d))"
+          git push -u origin "$branch"
+          gh pr create --base main --head "$branch" \
+            --title "chore(reference-repos): upstream scan $(date -u +%Y-%m-%d)" \
+            --body-file upstream-scan-report.md
+
+      - name: Fail the run when the scan reported drift or an error
+        if: ${{ steps.scan.outcome == 'failure' && !(github.event_name == 'workflow_dispatch' && inputs.update_docs) }}
+        run: |
+          echo "::error::upstream-scan exited non-zero — see the job summary and the upstream-scan-report artifact."
+          exit 1

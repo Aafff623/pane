@@ -60,3 +60,7 @@ site/.wrangler/
 # ZCode harness session state (local)
 .zcode/
 .zcodeignore
+
+# Archify diagram working files (candidates + receipts); the published
+# diagrams live under site/public/design/.
+.archify/
