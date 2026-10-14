@@ -68,6 +68,7 @@ jobs:
   # Zero-dependency invariant locks: i18n pairing, asset existence, demo
   # provenance hashes, hero numbers. No npm install — they only read tracked
   # files, which is what makes them cheap enough for every push and PR.
+  # The app-side i18n pairing test rides along here for the same reason.
   site:
     runs-on: ubuntu-latest
     steps:
@@ -75,4 +76,4 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - run: node --test site/*.test.mjs
+      - run: node --test site/*.test.mjs tests/i18n-pairing.test.mjs
