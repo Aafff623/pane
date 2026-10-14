@@ -100,6 +100,12 @@ pub mod zed_login;
 #[path = "../../src-tauri/src/auth_center.rs"]
 pub mod auth_center;
 
+#[path = "../../src-tauri/src/tray_projection.rs"]
+pub mod tray_projection;
+
+#[path = "../../src-tauri/src/telemetry.rs"]
+pub mod telemetry;
+
 
 mod catalog_consistency;
 mod config_consistency;
