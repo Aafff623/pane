@@ -4949,11 +4949,18 @@ fn updater_endpoint_strings() -> [String; 3] {
     } else {
         edge.to_string()
     };
-    [
+    let endpoints = [
         first,
         edge.to_string(),
         "https://github.com/Aafff623/pane/releases/latest/download/latest.json".into(),
-    ]
+    ];
+    // Support aid: PANE_UPDATE_DEBUG=1 makes the resolved order visible in
+    // the log, which is the only way to tell which manifest (and therefore
+    // which download host) a machine actually took.
+    if std::env::var_os("PANE_UPDATE_DEBUG").is_some() {
+        eprintln!("[pane] updater endpoints: {endpoints:?}");
+    }
+    endpoints
 }
 
 fn build_updater(app: &tauri::AppHandle) -> Result<tauri_plugin_updater::Updater, String> {
