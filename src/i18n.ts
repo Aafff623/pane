@@ -542,9 +542,8 @@ const en: Dict = {
   "spend.emptyPeriodTip": "No spend recorded in this period.",
   "spend.credits": "Credits",
   "spend.creditsUnit": "credits",
-  "spend.creditsUsed": "cycle used",
   "spend.creditsTip":
-    "Qoder CN / Trae CN bill in credits, which cannot be converted into tokens or dollars honestly. Listed per day (each day's own consumption), independent of the period tabs.",
+    "Qoder CN / Trae CN bill in credits, which cannot be converted into tokens or dollars honestly. Shown the same way as tokens: one row per account, following the selected period — an account that consumed nothing in it stays hidden.",
   "spend.info":
     "Fed by: {names}. Local estimates from each tool's own logs — tools with no local token ledger (Trae CN, Doubao) cannot be counted here.",
   "spend.clickTip":
@@ -1583,9 +1582,8 @@ const zh: Dict = {
   "spend.emptyPeriodTip": "这段时间没有记录花费。",
   "spend.credits": "积分",
   "spend.creditsUnit": "积分",
-  "spend.creditsUsed": "本周期已用",
   "spend.creditsTip":
-    "Qoder CN / Trae CN 以积分（credits）计费，无法折算为 token 或美元。这里按天列出每天消耗的积分，不随时段切换。",
+    "Qoder CN / Trae CN 以积分（credits）计费，无法折算为 token 或美元。与 token 行同口径：一账号一行、跟随所选时段；该时段没有消耗的账号不显示。",
   "spend.info": "数据来自：{names}。按各工具本地日志估算；本地不落 token 台账的工具（Trae CN、豆包）无法计入。",
   "spend.clickTip": "{exact} — 根据本地会话日志计算。点击可改为显示{next}。",
   "spend.today": "今天",
@@ -2575,9 +2573,8 @@ const ru: Dict = {
   "spend.emptyPeriodTip": "За этот период траты не записаны.",
   "spend.credits": "Кредиты",
   "spend.creditsUnit": "кр.",
-  "spend.creditsUsed": "израсходовано за цикл",
   "spend.creditsTip":
-    "Qoder CN / Trae CN тарифицируются в кредитах — их нельзя честно пересчитать в токены или доллары. Показаны по дням (расход каждого дня), независимо от периодов.",
+    "Qoder CN / Trae CN тарифицируются в кредитах — их нельзя честно пересчитать в токены или доллары. Показаны так же, как токены: одна строка на аккаунт, следует выбранному периоду; аккаунты без расхода за период скрыты.",
   "spend.info":
     "Источники: {names}. Локальные оценки по журналам инструментов; инструменты без локального учёта токенов (Trae CN, Doubao) здесь не учитываются.",
   "spend.clickTip":

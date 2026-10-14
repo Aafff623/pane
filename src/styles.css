@@ -626,31 +626,37 @@ body.settings-open #settings {
 .spend-credits {
   display: flex;
   flex-direction: column;
-  gap: 3px;
+  gap: 2px;
   margin: 6px 2px 0;
   font-size: 10.5px;
   color: var(--muted-foreground);
-}
-
-.spend-credit-days {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-
-.spend-credit-day {
-  color: var(--muted-foreground);
-  font-variant-numeric: tabular-nums;
 }
 
 .spend-credits-label {
   font-weight: 600;
 }
 
-.spend-credit-item strong {
+/* One line per account: name left (ellipsised when long), value right —
+   the same read as the token rows above. */
+.spend-credit-item {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+}
+
+.spend-credit-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   color: var(--foreground);
   font-weight: 600;
-  margin-right: 3px;
+}
+
+.spend-credit-value {
+  flex: 0 0 auto;
+  font-variant-numeric: tabular-nums;
 }
 
 .kv-recovery-code {

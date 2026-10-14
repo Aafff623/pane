@@ -814,18 +814,18 @@ function normalizeDaily(rows: DailySpendRow[]): DailySpendRow[] {
 let lastSpend: ProviderSpend[] = [];
 let lastSpendHistory: { d7: HistorySpend[]; all: HistorySpend[] } = { d7: [], all: [] };
 let lastSpendDaily: DailySpendRow[] = [];
-/** Qoder CN / Trae CN bill in credits — listed per day, never blended into
- * the period totals (credits cannot be converted into tokens or dollars). */
-interface CreditDay {
-  day: string;
-  consumed: number;
+/** Credits consumed inside each panel window — the same five windows the
+ * token rows use, so both surfaces always agree on the selected period. */
+interface CreditWindows {
+  today: number;
+  yesterday: number;
+  d7: number;
+  d30: number;
+  all: number;
 }
 interface CreditExtra {
   id: string;
-  /** Latest cumulative "credits used" reading + its day (a real observation). */
-  latest: number | null;
-  latest_day: string | null;
-  days: CreditDay[];
+  windows: CreditWindows;
 }
 let lastCreditExtras: CreditExtra[] = [];
 let spendLoaded = false;
@@ -3600,31 +3600,36 @@ function renderTotalSpend(): string {
         </div>
       </div>`;
 
-  // Credits-denominated providers cannot be converted into tokens/dollars
-  // honestly. They are listed DAY BY DAY (each day's own consumption) — the
-  // list does not follow the today/yesterday/7d/30d/all period tabs.
-  const creditName = (id: string) =>
-    id.startsWith("qodercn") ? "Qoder CN" : id.startsWith("traecn") ? "Trae CN" : id;
-  const creditRow = lastCreditExtras.length
-    ? `<div class="spend-credits" title="${escapeHtml(t("spend.creditsTip"))}"><span class="spend-credits-label">${escapeHtml(t("spend.credits"))}</span><div class="spend-credit-days">${lastCreditExtras
-        .map((c) => {
-          const rows: string[] = [];
-          // The cumulative reading is an observation, so it always shows
-          // (labelled as such) — per-day consumption only once a baseline
-          // exists.
-          if (c.latest != null) {
-            rows.push(
-              `<span class="spend-credit-item"><strong>${escapeHtml(creditName(c.id))}</strong> ${escapeHtml(t("spend.creditsUsed"))} ${escapeHtml(fmtTokens(c.latest))} ${escapeHtml(t("spend.creditsUnit"))}${c.latest_day ? ` <span class="spend-credit-day">(${escapeHtml(c.latest_day.slice(5))})</span>` : ""}</span>`,
-            );
-          }
-          for (const d of c.days) {
-            rows.push(
-              `<span class="spend-credit-item"><strong>${escapeHtml(creditName(c.id))}</strong> <span class="spend-credit-day">${escapeHtml(d.day.slice(5))}</span> ${escapeHtml(fmtTokens(d.consumed))} ${escapeHtml(t("spend.creditsUnit"))}</span>`,
-            );
-          }
-          return rows.join("");
-        })
-        .join("")}</div></div>`
+  // Credits-denominated cards cannot be converted into tokens/dollars
+  // honestly, so they keep their own rows — but they follow the SAME period
+  // windows as the token rows (today / yesterday / 7d / 30d / all), one row
+  // per account, and a window with nothing consumed hides the row entirely
+  // (an all-zero window hides the whole section).
+  const creditWindow = (w: CreditWindows): number =>
+    rangeSelected
+      ? rangeTab === "d7"
+        ? w.d7
+        : rangeTab === "d30"
+          ? w.d30
+          : w.all
+      : spendTab === "yesterday"
+        ? w.yesterday
+        : w.today;
+  const creditRows = lastCreditExtras
+    .map((c) => ({
+      id: c.id,
+      name: notedName(c.id, providerDisplayName(providerFamily(c.id))),
+      value: creditWindow(c.windows),
+    }))
+    .filter((row) => row.value > 0)
+    .sort((a, b) => a.name.localeCompare(b.name, localeTag()));
+  const creditRow = creditRows.length
+    ? `<div class="spend-credits" title="${escapeHtml(t("spend.creditsTip"))}"><span class="spend-credits-label">${escapeHtml(t("spend.credits"))}</span>${creditRows
+        .map(
+          (row) =>
+            `<span class="spend-credit-item"><span class="spend-credit-name">${escapeHtml(row.name)}</span><span class="spend-credit-value">${escapeHtml(fmtTokens(row.value))} ${escapeHtml(t("spend.creditsUnit"))}</span></span>`,
+        )
+        .join("")}</div>`
     : "";
 
   const contributors = lastSpend.map((s) => s.name).join(", ");

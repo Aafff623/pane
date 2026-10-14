@@ -4,17 +4,19 @@
 
 **Blocked by:** None（owner 已拍板 spec 两条，可立即开始）
 
-**Status:** ready-for-agent
+**Status:** done（落地 main 8f19c8c，parse-tests 737:0:13）
 
-- [ ] 日差计算（相邻读数差分、mid-day 重置叠加）抽成纯函数，语义与现状完全一致，既有行为不回归
-- [ ] 窗口求和抽成纯函数：入参 = 账本条目 + today，出参 = 今天 / 昨天 / 7 天 / 30 天 / 全部 五个窗口的合计
-- [ ] 窗口定义与 token 侧逐字对齐（否则同一 tab 下积分与 token 数字会互相矛盾）：今天 / 昨天 = 本地日日偏移桶；7 天 = 含今天的 7 日滚动；30 天 = 含今天的 30 日窗口（同 token 侧 last30）；全部 = 账本全部已记录日
-- [ ] today 取与 `credit_trend_map` 同一个本地日来源（`today_string()`），不另造时间源
-- [ ] 测试覆盖：五个窗口求和；今天 0 而昨天 >0 的边界；0 消耗不产生行；**单读数无基线 → 各窗口全 0（并注明这不是回归）**；同一 provider 两个卡 id 互不串行
-- [ ] 测试形态对标同文件 `credit_trend_for` 的既有用例（固定账本条目 + 固定 today → 断言数字）
-- [ ] 新增测试在实现前为红、实现后转绿；不得改断言或跳过检查
-- [ ] parse-tests 全量绿（改 Rust 后必须复跑基线，不只看新增用例）
+- [x] 日差计算（相邻读数差分、mid-day 重置叠加）抽成纯函数，语义与现状完全一致，既有行为不回归
+- [x] 窗口求和抽成纯函数：入参 = 账本条目 + today，出参 = 今天 / 昨天 / 7 天 / 30 天 / 全部 五个窗口的合计
+- [x] 窗口定义与 token 侧逐字对齐（否则同一 tab 下积分与 token 数字会互相矛盾）：今天 / 昨天 = 本地日日偏移桶；7 天 = 含今天的 7 日滚动；30 天 = 含今天的 30 日窗口（同 token 侧 last30）；全部 = 账本全部已记录日
+- [x] today 取与 `credit_trend_map` 同一个本地日来源（`today_string()`），不另造时间源
+- [x] 测试覆盖：五个窗口求和；今天 0 而昨天 >0 的边界；0 消耗不产生行；**单读数无基线 → 各窗口全 0（并注明这不是回归）**；同一 provider 两个卡 id 互不串行
+- [x] 测试形态对标同文件 `credit_trend_for` 的既有用例（固定账本条目 + 固定 today → 断言数字）
+- [x] 新增测试在实现前为红、实现后转绿；不得改断言或跳过检查
+- [x] parse-tests 全量绿（改 Rust 后必须复跑基线，不只看新增用例）
 
 ## Comments
 
 - 2026-10-14：由 spec `.scratch/credits-follow-period-tabs/spec.md` 拆分。`credit_extras()` 读真实账本文件无法直接单测，`credit_trend_for` 是纯函数先例——本票即把同一手法用在日差与窗口求和上。
+
+- 2026-10-14 实现并验证：抽 `credit_day_series` + `credit_window_totals` 两个纯函数（对标 `credit_trend_for`），`credit_extras()` 改为返回五窗口合计；新增 6 个用例（无基线不出数、逐日差分、mid-day 重置两段计费、五窗口求和、单读数全 0、同 provider 多账号互不串行），全量 parse-tests 737:0:13。
