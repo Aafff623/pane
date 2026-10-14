@@ -312,55 +312,95 @@ pub struct CreditDay {
     pub consumed: f64,
 }
 
-/// Per-day credits for Qoder CN / Trae CN. Credits cannot be converted into
-/// tokens or dollars honestly, so the spend panel lists these day by day
-/// instead of blending them into the period totals.
+/// Credits consumed inside each panel window. The windows mirror the token
+/// side exactly — today / yesterday are local days, 7d and 30d are rolling
+/// windows that include today, all is every recorded day — so the credits
+/// rows and the token rows can never disagree on the same tab.
+#[derive(Serialize, Clone, Debug, Default, PartialEq)]
+pub struct CreditWindows {
+    pub today: f64,
+    pub yesterday: f64,
+    pub d7: f64,
+    pub d30: f64,
+    pub all: f64,
+}
+
+/// Windowed credits for credits-billed cards (Qoder CN, WorkBuddy, …).
+/// Credits cannot be converted into tokens or dollars honestly, so the spend
+/// panel gives them their own rows instead of blending them into the
+/// token/dollar totals.
 #[derive(Serialize, Clone, Debug, PartialEq)]
 pub struct CreditExtra {
     pub id: String,
-    /// Latest absolute reading — the card's cumulative "credits used" figure
-    /// and the day it was taken. Shown as-is (labelled cumulative): it is a
-    /// real observation, unlike a per-day number with no baseline.
-    pub latest: Option<f64>,
-    pub latest_day: Option<String>,
-    /// Day-over-day consumption, oldest first. Empty until a second reading
-    /// exists (one reading alone cannot say what a day consumed).
-    pub days: Vec<CreditDay>,
+    pub windows: CreditWindows,
+}
+
+/// Day-over-day credit consumption for one card, oldest first. The first
+/// reading is a cumulative figure with no baseline — it produces nothing
+/// (showing it as a daily number would invent data).
+fn credit_day_series(samples: &[DaySample]) -> Vec<CreditDay> {
+    let mut days: Vec<CreditDay> = Vec::new();
+    let mut prev: Option<f64> = None;
+    for sample in samples {
+        let end = sample.last.unwrap_or(sample.used);
+        if let Some(p) = prev {
+            // Day-over-day diff; a mid-day reset shows as `last < used`, so
+            // the post-reset segment is charged on top.
+            let consumed = (sample.used - p).max(0.0) + if end < sample.used { end } else { 0.0 };
+            days.push(CreditDay { day: sample.day.clone(), consumed });
+        }
+        prev = Some(end);
+    }
+    days
+}
+
+/// Sum the recorded per-day consumption inside each panel window. `today`
+/// comes from the same local-day source as `credit_trend_map`, so both
+/// surfaces agree on where a window starts.
+fn credit_window_totals(days: &[CreditDay], today: &str) -> CreditWindows {
+    let Some(today) = parse_day(today) else {
+        return CreditWindows::default();
+    };
+    let mut out = CreditWindows::default();
+    for day in days {
+        let Some(date) = parse_day(&day.day) else {
+            continue;
+        };
+        out.all += day.consumed;
+        let offset = (today - date).num_days();
+        // A reading dated after "today" (clock skew, hand-edited file) counts
+        // only in the whole-ledger window.
+        if offset < 0 {
+            continue;
+        }
+        if offset == 0 {
+            out.today += day.consumed;
+        }
+        if offset == 1 {
+            out.yesterday += day.consumed;
+        }
+        if offset < 7 {
+            out.d7 += day.consumed;
+        }
+        if offset < TREND_DAYS as i64 {
+            out.d30 += day.consumed;
+        }
+    }
+    out
 }
 
 pub fn credit_extras() -> Vec<CreditExtra> {
+    let today = today_string();
     let file = credit_store().lock().unwrap();
-    let mut out: Vec<CreditExtra> = Vec::new();
-    for (id, samples) in file.entries.iter() {
-        let mut days: Vec<CreditDay> = Vec::new();
-        let mut prev: Option<f64> = None;
-        for sample in samples {
-            let end = sample.last.unwrap_or(sample.used);
-            match prev {
-                // Day-over-day diff; a mid-day reset shows as `last < used`,
-                // so the post-reset segment is charged on top.
-                Some(p) => {
-                    let consumed =
-                        (sample.used - p).max(0.0) + if end < sample.used { end } else { 0.0 };
-                    days.push(CreditDay { day: sample.day.clone(), consumed });
-                }
-                // No baseline yet: the stored number is the card's CUMULATIVE
-                // reading, not that day's consumption — showing it as a daily
-                // figure would invent data. Wait for the next reading.
-                None => {}
-            }
-            prev = Some(end);
-        }
-        let latest = samples.last();
-        if latest.is_some() || !days.is_empty() {
-            out.push(CreditExtra {
-                id: id.clone(),
-                latest: latest.map(|s| s.last.unwrap_or(s.used)),
-                latest_day: latest.map(|s| s.day.clone()),
-                days,
-            });
-        }
-    }
+    let mut out: Vec<CreditExtra> = file
+        .entries
+        .iter()
+        .filter(|(_, samples)| !samples.is_empty())
+        .map(|(id, samples)| CreditExtra {
+            id: id.clone(),
+            windows: credit_window_totals(&credit_day_series(samples), &today),
+        })
+        .collect();
     out.sort_by(|a, b| a.id.cmp(&b.id));
     out
 }
@@ -453,27 +493,112 @@ mod tests {
         }
     }
 
+    fn credit_sample(day: &str, used: f64, last: Option<f64>) -> DaySample {
+        DaySample { day: day.into(), used, last }
+    }
+
     #[test]
     #[ignore = "real-machine anchor: reads this machine's credit_history.json"]
     fn credit_extras_real_machine() {
         let extras = credit_extras();
-        // A single stored reading has no baseline, so no daily consumption
-        // can be derived — the list must stay empty rather than echo the
-        // cumulative number as if it were one day's spend.
-        assert!(
-            extras.iter().all(|e| e.days.iter().all(|d| d.consumed >= 0.0)),
-            "credits days malformed: {extras:?}"
-        );
+        // A single stored reading has no baseline, so every window reads zero
+        // rather than echoing the cumulative number as one day's spend. On
+        // this machine Qoder CN is exactly that case — zero here is "no
+        // data", not a regression.
         let qoder = extras.iter().find(|e| e.id.starts_with("qodercn"));
         assert!(qoder.is_some(), "qoder row missing entirely: {extras:?}");
-        assert!(
-            qoder.unwrap().latest.is_some(),
-            "the cumulative reading must still be surfaced: {extras:?}"
+        assert_eq!(
+            qoder.unwrap().windows,
+            CreditWindows::default(),
+            "a lone reading must not produce a window total: {extras:?}"
         );
         assert!(
-            qoder.unwrap().days.len() <= 1,
-            "more derived days than stored baselines exist: {extras:?}"
+            extras
+                .iter()
+                .all(|e| e.windows.all >= 0.0 && e.windows.today >= 0.0 && e.windows.d30 >= 0.0),
+            "credits windows malformed: {extras:?}"
         );
+    }
+
+    #[test]
+    fn credit_day_series_needs_a_baseline() {
+        // The first reading is cumulative: no baseline means no day to charge.
+        let days = credit_day_series(&[credit_sample("2026-10-10", 2500.0, None)]);
+        assert!(days.is_empty(), "a lone reading produced a day: {days:?}");
+    }
+
+    #[test]
+    fn credit_day_series_diffs_observed_days() {
+        let days = credit_day_series(&[
+            credit_sample("2026-10-10", 100.0, None),
+            credit_sample("2026-10-11", 130.0, None),
+            credit_sample("2026-10-12", 150.0, None),
+        ]);
+        assert_eq!(days.len(), 2, "one day per reading after the first: {days:?}");
+        assert_eq!(days[0].consumed, 30.0);
+        assert_eq!(days[1].consumed, 20.0);
+    }
+
+    #[test]
+    fn credit_day_series_charges_a_mid_day_reset_on_top() {
+        // used jumped 100 → 150 while `last` fell to 20: the pool reset
+        // mid-day, so the day consumed the pre-reset diff (50) plus the
+        // post-reset reading (20).
+        let days = credit_day_series(&[
+            credit_sample("2026-10-10", 100.0, None),
+            credit_sample("2026-10-11", 150.0, Some(20.0)),
+        ]);
+        assert_eq!(days[0].consumed, 70.0);
+    }
+
+    #[test]
+    fn credit_window_totals_sum_each_window() {
+        let days: Vec<CreditDay> = [
+            ("2026-10-20", 5.0), // today
+            ("2026-10-19", 3.0), // yesterday
+            ("2026-10-14", 2.0), // 6 days back — inside 7d
+            ("2026-10-13", 9.0), // 7 days back — outside 7d, inside 30d
+            ("2026-09-21", 4.0), // 29 days back — inside 30d
+            ("2026-09-20", 7.0), // 30 days back — whole ledger only
+        ]
+        .iter()
+        .map(|(day, consumed)| CreditDay { day: (*day).into(), consumed: *consumed })
+        .collect();
+        let w = credit_window_totals(&days, "2026-10-20");
+        assert_eq!(w.today, 5.0);
+        assert_eq!(w.yesterday, 3.0);
+        assert_eq!(w.d7, 10.0, "today + yesterday + 6 days back");
+        assert_eq!(w.d30, 23.0, "everything within 30 days of today");
+        assert_eq!(w.all, 30.0, "every recorded day");
+    }
+
+    #[test]
+    fn credit_window_totals_are_zero_until_a_baseline_exists() {
+        // Qoder CN's real shape: one stored reading, no baseline. Every
+        // window reads zero — the row disappears, and that is "no data",
+        // not a regression.
+        let days = credit_day_series(&[credit_sample("2026-10-10", 2500.0, None)]);
+        assert_eq!(credit_window_totals(&days, "2026-10-14"), CreditWindows::default());
+    }
+
+    #[test]
+    fn credit_windows_stay_per_account() {
+        // Two accounts of the same provider are summed apart: a flat account
+        // contributes nothing while its sibling's consumption shows.
+        let a = credit_day_series(&[
+            credit_sample("2026-10-19", 10.0, None),
+            credit_sample("2026-10-20", 25.0, None),
+        ]);
+        let b = credit_day_series(&[
+            credit_sample("2026-10-19", 500.0, None),
+            credit_sample("2026-10-20", 500.0, None),
+        ]);
+        let wa = credit_window_totals(&a, "2026-10-20");
+        let wb = credit_window_totals(&b, "2026-10-20");
+        assert_eq!(wa.today, 15.0);
+        assert_eq!(wa.all, 15.0);
+        assert_eq!(wb.today, 0.0, "a flat account consumes nothing");
+        assert_eq!(wb.all, 0.0);
     }
 
     #[test]
