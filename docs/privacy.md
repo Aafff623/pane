@@ -48,6 +48,9 @@ same disclosed-and-toggleable approach as the Mac app Pane is a port of):
   One/New API (`onenewapi`) is reported as that family id at most once
   per refresh. Site ids, key ids, configured counts, labels, and origins
   never leave the machine.
+  This rollup is deliberately lossy: if a send fails, that day's
+  summary is dropped — there is no retry queue, nothing is persisted
+  waiting to be sent later.
 
 The identity attached to these events is a **random UUID** generated on
 your machine — derived from nothing (not your hardware, not your IP, not
@@ -58,9 +61,11 @@ ingestion (country-level GeoIP resolves first, then the IP is dropped).
 
 What is *never* sent, with this toggle on or off: your quotas, usage
 percentages, spend amounts, model names from your logs, tokens, keys,
-file paths, or any free-form text. The entire implementation is one
-auditable file: [`src-tauri/src/telemetry.rs`](../src-tauri/src/telemetry.rs)
-— no SDK, just two documented POSTs.
+file paths, or any free-form text. The implementation is fully auditable
+in two places: the payload assembly lives next to the refresh
+orchestration in `src-tauri/src/lib.rs`, and the constants, UUID
+generation and the two documented POSTs (no SDK) live in
+[`src-tauri/src/telemetry.rs`](../src-tauri/src/telemetry.rs).
 
 ## The update check
 
