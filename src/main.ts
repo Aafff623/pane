@@ -3677,19 +3677,21 @@ function renderTotalSpend(): string {
         <span class="spend-head-value" title="${escapeHtml(t("spend.headTokens", { range: t(headRangeKey) }))}">${boltHtml}${escapeHtml(fmtTokens(headTokens))}</span>
         ${isFolded ? "" : `<span class="info" title="${escapeHtml(t("spend.info", { names: contributors }))}">${uiIcon("info")}</span>`}
         <span class="spacer"></span>
-        ${isFolded ? "" : `
+        ${updateVersion ? `<button class="spend-update-btn${updatePushing ? " busy" : ""}" data-update-push${updatePushing && updatePct != null ? ` style="--pct:${updatePct}"` : ""} title="${escapeHtml(t("update.pushTip", { version: updateVersion }))}" aria-label="${escapeHtml(t("update.pushTip", { version: updateVersion }))}">${uiIcon("arrowUp")}</button>` : ""}
+        <button class="mini-btn spend-detail-btn" data-spend-details title="${escapeHtml(t("spendDetail.open"))}" aria-label="${escapeHtml(t("spendDetail.open"))}">${uiIcon("rows")}</button>
+        <button class="share-btn" data-share="__total__" title="${escapeHtml(t("card.share"))}">${uiIcon("shareNetwork")}</button>
+        ${foldChevron}
+      </div>
+      ${isFolded ? "" : `
+      <div class="spend-filter-row">
         <div class="tabs spend-group-tabs" role="group" aria-label="${escapeHtml(t("spend.groupLabel"))}">
           <button class="tab spend-group-tab${config.spendGrouping === "tool" ? " active" : ""}" data-spend-group="tool">${escapeHtml(t("spend.byTool"))}</button>
           <button class="tab spend-group-tab${config.spendGrouping === "model" ? " active" : ""}" data-spend-group="model">${escapeHtml(t("spend.byModel"))}</button>
         </div>
         <div class="spend-metric-tabs" role="group" aria-label="${escapeHtml(t("spend.metricLabel"))}">
           ${(["cost", "tokens"] as const).map((metric) => `<button class="tab spend-metric-tab${config.spendMetric === metric ? " active" : ""}" data-spend-metric="${metric}">${escapeHtml(t(METRIC_NAMES[metric]))}</button>`).join("")}
-        </div>`}
-        ${updateVersion ? `<button class="spend-update-btn${updatePushing ? " busy" : ""}" data-update-push${updatePushing && updatePct != null ? ` style="--pct:${updatePct}"` : ""} title="${escapeHtml(t("update.pushTip", { version: updateVersion }))}" aria-label="${escapeHtml(t("update.pushTip", { version: updateVersion }))}">${uiIcon("arrowUp")}</button>` : ""}
-        <button class="mini-btn spend-detail-btn" data-spend-details title="${escapeHtml(t("spendDetail.open"))}" aria-label="${escapeHtml(t("spendDetail.open"))}">${uiIcon("rows")}</button>
-        <button class="share-btn" data-share="__total__" title="${escapeHtml(t("card.share"))}">${uiIcon("shareNetwork")}</button>
-        ${foldChevron}
-      </div>
+        </div>
+      </div>`}
       ${isFolded ? "" : `<div class="card-panel">
         ${body}
         ${creditRow}
@@ -5618,7 +5620,11 @@ function parseChangelog(): ChangelogSection[] {
 /// so a bold/code span wrapped across the file's ~70-column lines still
 /// matches. Input is escaped before any markup is applied, so the changelog
 /// can never inject HTML.
-function renderChangelogBody(md: string): string {
+/// Renders a changelog section for the What's-new dialog. `maxItems` caps
+/// each bullet list — the dialog is a glance, not the changelog: a long
+/// release reads as its first few lines plus an ellipsis row (the full text
+/// stays one click away in CHANGELOG.md).
+function renderChangelogBody(md: string, maxItems = 4): string {
   const inline = (s: string) =>
     escapeHtml(s)
       .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
@@ -5627,7 +5633,13 @@ function renderChangelogBody(md: string): string {
   let items: string[] = [];
   let para = "";
   const flushItems = () => {
-    if (items.length) html += `<ul>${items.map((i) => `<li>${inline(i)}</li>`).join("")}</ul>`;
+    if (items.length) {
+      const shown = items.slice(0, maxItems);
+      const rest = items.length - shown.length;
+      html += `<ul>${shown.map((i) => `<li>${inline(i)}</li>`).join("")}${
+        rest > 0 ? `<li class="whatsnew-more">…</li>` : ""
+      }</ul>`;
+    }
     items = [];
   };
   const flushPara = () => {
@@ -5666,7 +5678,11 @@ function showChangelogDialog(title: string, sections: ChangelogSection[]): void 
   dismissWhatsNew?.();
   const overlay = document.createElement("div");
   overlay.id = "whatsnew-overlay";
+  // The dialog covers the version that was just installed. A skipped
+  // release chain used to dump every section — long enough that nobody read
+  // it; the newest one is the "what changed for me" answer.
   const list = sections
+    .slice(0, 1)
     .map(
       (s) =>
         `<section><h4>v${escapeHtml(s.version)}${

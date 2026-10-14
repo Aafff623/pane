@@ -1978,19 +1978,21 @@ ${a("stale.tail")}`}function uu(t){const e=Ge.find(n=>n.id===t);return e!=null&&
         <span class="spend-head-value" title="${u(a("spend.headTokens",{range:a(x)}))}">${I}${u(mt(L))}</span>
         ${t?"":`<span class="info" title="${u(a("spend.info",{names:P}))}">${B("info")}</span>`}
         <span class="spacer"></span>
-        ${t?"":`
+        ${ft?`<button class="spend-update-btn${Rt?" busy":""}" data-update-push${Rt&&no!=null?` style="--pct:${no}"`:""} title="${u(a("update.pushTip",{version:ft}))}" aria-label="${u(a("update.pushTip",{version:ft}))}">${B("arrowUp")}</button>`:""}
+        <button class="mini-btn spend-detail-btn" data-spend-details title="${u(a("spendDetail.open"))}" aria-label="${u(a("spendDetail.open"))}">${B("rows")}</button>
+        <button class="share-btn" data-share="__total__" title="${u(a("card.share"))}">${B("shareNetwork")}</button>
+        ${s}
+      </div>
+      ${t?"":`
+      <div class="spend-filter-row">
         <div class="tabs spend-group-tabs" role="group" aria-label="${u(a("spend.groupLabel"))}">
           <button class="tab spend-group-tab${m.spendGrouping==="tool"?" active":""}" data-spend-group="tool">${u(a("spend.byTool"))}</button>
           <button class="tab spend-group-tab${m.spendGrouping==="model"?" active":""}" data-spend-group="model">${u(a("spend.byModel"))}</button>
         </div>
         <div class="spend-metric-tabs" role="group" aria-label="${u(a("spend.metricLabel"))}">
           ${["cost","tokens"].map(z=>`<button class="tab spend-metric-tab${m.spendMetric===z?" active":""}" data-spend-metric="${z}">${u(a(gl[z]))}</button>`).join("")}
-        </div>`}
-        ${ft?`<button class="spend-update-btn${Rt?" busy":""}" data-update-push${Rt&&no!=null?` style="--pct:${no}"`:""} title="${u(a("update.pushTip",{version:ft}))}" aria-label="${u(a("update.pushTip",{version:ft}))}">${B("arrowUp")}</button>`:""}
-        <button class="mini-btn spend-detail-btn" data-spend-details title="${u(a("spendDetail.open"))}" aria-label="${u(a("spendDetail.open"))}">${B("rows")}</button>
-        <button class="share-btn" data-share="__total__" title="${u(a("card.share"))}">${B("shareNetwork")}</button>
-        ${s}
-      </div>
+        </div>
+      </div>`}
       ${t?"":`<div class="card-panel">
         ${k}
         ${b}
@@ -2205,8 +2207,8 @@ ${a("stale.tail")}`}function uu(t){const e=Ge.find(n=>n.id===t);return e!=null&&
       <div class="group-menu-title">${u(a("peak.helpTitle"))}</div>
       ${n||`<div class="peak-help-empty">${u(a("peak.helpEmpty"))}</div>`}
     </div>`;const o=()=>{s.remove(),document.removeEventListener("keydown",i,!0)};s.addEventListener("click",h=>{(h.target===s||!h.target.closest(".peak-help"))&&o()});const i=h=>{h.key==="Escape"&&(h.stopPropagation(),o())};document.addEventListener("keydown",i,!0),document.body.appendChild(s);const r=s.querySelector(".peak-help"),c=t.getBoundingClientRect(),l=r.offsetWidth,d=Math.max(8,Math.min(c.left+c.width/2-l/2,window.innerWidth-l-8));r.style.left=`${d}px`,r.style.top=`${Math.min(c.bottom+6,window.innerHeight-r.offsetHeight-8)}px`}function Xu(){const t=[];for(const e of $m.split(/^## /m).slice(1)){const n=e.indexOf(`
-`),s=e.slice(0,n).trim();if(/^unreleased$/i.test(s))continue;const o=s.match(/^([\d.]+)\s*—\s*(.+)$/);t.push({version:o?o[1]:s,date:o?o[2]:"",body:e.slice(n+1).trim()})}return t}function G2(t){const e=c=>u(c).replace(/\*\*(.+?)\*\*/g,"<strong>$1</strong>").replace(/`([^`]+)`/g,"<code>$1</code>");let n="",s=[],o="";const i=()=>{s.length&&(n+=`<ul>${s.map(c=>`<li>${e(c)}</li>`).join("")}</ul>`),s=[]},r=()=>{o&&(n+=`<p>${e(o)}</p>`),o=""};for(const c of t.split(`
-`))c.startsWith("### ")?(i(),r(),n+=`<h5>${u(c.slice(4).trim())}</h5>`):c.startsWith("- ")?(r(),s.push(c.slice(2))):/^\s+\S/.test(c)&&s.length?s[s.length-1]+=" "+c.trim():c.trim()?(i(),o+=(o?" ":"")+c.trim()):r();return i(),r(),n}let yo=null;function j2(t,e){yo==null||yo();const n=document.createElement("div");n.id="whatsnew-overlay";const s=e.map(r=>`<section><h4>v${u(r.version)}${r.date?`<span>${u(r.date)}</span>`:""}</h4>${G2(r.body)}</section>`).join("");n.innerHTML=`
+`),s=e.slice(0,n).trim();if(/^unreleased$/i.test(s))continue;const o=s.match(/^([\d.]+)\s*—\s*(.+)$/);t.push({version:o?o[1]:s,date:o?o[2]:"",body:e.slice(n+1).trim()})}return t}function G2(t,e=4){const n=l=>u(l).replace(/\*\*(.+?)\*\*/g,"<strong>$1</strong>").replace(/`([^`]+)`/g,"<code>$1</code>");let s="",o=[],i="";const r=()=>{if(o.length){const l=o.slice(0,e),d=o.length-l.length;s+=`<ul>${l.map(p=>`<li>${n(p)}</li>`).join("")}${d>0?'<li class="whatsnew-more">…</li>':""}</ul>`}o=[]},c=()=>{i&&(s+=`<p>${n(i)}</p>`),i=""};for(const l of t.split(`
+`))l.startsWith("### ")?(r(),c(),s+=`<h5>${u(l.slice(4).trim())}</h5>`):l.startsWith("- ")?(c(),o.push(l.slice(2))):/^\s+\S/.test(l)&&o.length?o[o.length-1]+=" "+l.trim():l.trim()?(r(),i+=(i?" ":"")+l.trim()):c();return r(),c(),s}let yo=null;function j2(t,e){yo==null||yo();const n=document.createElement("div");n.id="whatsnew-overlay";const s=e.slice(0,1).map(r=>`<section><h4>v${u(r.version)}${r.date?`<span>${u(r.date)}</span>`:""}</h4>${G2(r.body)}</section>`).join("");n.innerHTML=`
     <div id="whatsnew-box" role="dialog" aria-modal="true">
       <h3>${u(t)}</h3>
       <div id="whatsnew-body">${s}</div>

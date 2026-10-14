@@ -3163,7 +3163,27 @@ article.provider.is-folded:hover {
 }
 
 .total-spend .provider-head {
+  /* The action buttons (details / share / fold) must never leave the title
+     row: only the name, the value and the info glyph shrink, so the same
+     buttons sit on the same line whether the card is folded or open. The
+     period/filter tabs live on their own row below (see .spend-filter-row). */
+  flex-wrap: nowrap;
+}
+
+.total-spend .provider-head .provider-name,
+.total-spend .provider-head .spend-head-value {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.spend-filter-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
   flex-wrap: wrap;
+  margin-bottom: 6px;
 }
 
 .total-spend .donut-total {
@@ -5733,8 +5753,7 @@ body.no-glass .cust-dock {
   display: flex;
   flex-direction: column;
   width: min(92%, 340px);
-  max-height: 78vh;
-  background:
+  max-height: 78vh;  background:
     linear-gradient(180deg, var(--glass-sheen), transparent 38%),
     var(--glass-surface);
   backdrop-filter: blur(24px) saturate(1.5) brightness(1.04);
@@ -5750,6 +5769,12 @@ body.no-glass .cust-dock {
     inset 1.5px 0 1.5px rgba(255, 255, 255, 0.06),
     inset -1.5px 0 1.5px rgba(255, 255, 255, 0.06);
   animation: confirm-pop 0.18s cubic-bezier(0.2, 0.8, 0.3, 1);
+}
+
+/* The dialog caps each list; this is the "there is more in CHANGELOG.md"
+   row that replaces the trimmed bullets. */
+.whatsnew-more {
+  color: var(--faint);
 }
 
 #whatsnew-body::-webkit-scrollbar {
