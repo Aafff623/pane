@@ -142,7 +142,7 @@ pub fn record_credit_samples(samples: &[(String, f64)]) {
         return;
     }
     let today = today_string();
-    let file = &mut *credit_store().lock().unwrap();
+    let file = &mut *credit_store().lock().unwrap_or_else(|e| e.into_inner());
     for (id, used) in samples {
         record_credit_sample(&mut file.entries, id, &today, *used);
     }
@@ -238,7 +238,7 @@ fn credit_window_totals(days: &[CreditDay], today: &str) -> CreditWindows {
 
 pub fn credit_extras() -> Vec<CreditExtra> {
     let today = today_string();
-    let file = credit_store().lock().unwrap();
+    let file = credit_store().lock().unwrap_or_else(|e| e.into_inner());
     let mut out: Vec<CreditExtra> = file
         .entries
         .iter()
@@ -301,7 +301,7 @@ fn credit_trend_for(
 /// card id → 30-day credit-consumption trend, for the frontend.
 pub fn credit_trend_map() -> BTreeMap<String, Vec<Option<f64>>> {
     let today = today_string();
-    let file = credit_store().lock().unwrap();
+    let file = credit_store().lock().unwrap_or_else(|e| e.into_inner());
     file.entries
         .keys()
         .map(|id| (id.clone(), credit_trend_for(&file.entries, id, &today)))
@@ -312,7 +312,7 @@ pub fn credit_trend_map() -> BTreeMap<String, Vec<Option<f64>>> {
 /// its bare card. Existing samples are merged instead of overwritten.
 pub fn migrate_card_id(from: &str, to: &str) {
     if from == to { return; }
-    let file = &mut *credit_store().lock().unwrap();
+    let file = &mut *credit_store().lock().unwrap_or_else(|e| e.into_inner());
     let Some(mut samples) = file.entries.remove(from) else { return; };
     let target = file.entries.entry(to.to_string()).or_default();
     for sample in samples.drain(..) {
@@ -328,7 +328,7 @@ pub fn migrate_card_id(from: &str, to: &str) {
 
 /// Remove history for a card when deleted without keeping usage data.
 pub fn remove_card_history(id: &str) {
-    let mut file = credit_store().lock().unwrap();
+    let mut file = credit_store().lock().unwrap_or_else(|e| e.into_inner());
     if file.entries.remove(id).is_some() {
         persist_credits(&file);
     }

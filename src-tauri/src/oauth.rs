@@ -297,7 +297,7 @@ const RELOGIN_HINT: &str = "OAuth login expired — sign in again from the gear 
 /// xAI's token + device-authorization endpoints from the OIDC discovery
 /// document, validated to actually live on auth.x.ai over https.
 async fn xai_endpoints() -> Result<(String, String), String> {
-    if let Some(endpoints) = XAI_ENDPOINTS.lock().unwrap().clone() {
+    if let Some(endpoints) = XAI_ENDPOINTS.lock().unwrap_or_else(|e| e.into_inner()).clone() {
         return Ok(endpoints);
     }
     let resp = http()
@@ -331,7 +331,7 @@ async fn xai_endpoints() -> Result<(String, String), String> {
         Ok(url.to_string())
     };
     let endpoints = (endpoint("token_endpoint")?, endpoint("device_authorization_endpoint")?);
-    *XAI_ENDPOINTS.lock().unwrap() = Some(endpoints.clone());
+    *XAI_ENDPOINTS.lock().unwrap_or_else(|e| e.into_inner()) = Some(endpoints.clone());
     Ok(endpoints)
 }
 
@@ -496,7 +496,7 @@ async fn start_xai() -> Result<StartResponse, String> {
 }
 
 fn register_pending(device_auth_id: String, flow: PendingFlow) {
-    let mut pending = PENDING.lock().unwrap();
+    let mut pending = PENDING.lock().unwrap_or_else(|e| e.into_inner());
     // Drop flows the user abandoned, so the map can't grow without bound.
     let now = now_ms();
     pending.retain(|_, f| f.expires_at_ms > now);
@@ -512,7 +512,7 @@ pub async fn poll(provider: &str, device_auth_id: &str) -> PollResponse {
         return PollResponse::failure(format!("OAuth sign-in is not available for {provider}"));
     }
     let flow = {
-        let pending = PENDING.lock().unwrap();
+        let pending = PENDING.lock().unwrap_or_else(|e| e.into_inner());
         pending.get(device_auth_id).map(|f| PendingFlow {
             provider: f.provider.clone(),
             user_code: f.user_code.clone(),
@@ -530,7 +530,7 @@ pub async fn poll(provider: &str, device_auth_id: &str) -> PollResponse {
     }
     let now = now_ms();
     if flow.expires_at_ms <= now {
-        PENDING.lock().unwrap().remove(device_auth_id);
+        PENDING.lock().unwrap_or_else(|e| e.into_inner()).remove(device_auth_id);
         return PollResponse::failure("the sign-in code expired — start again".into());
     }
     // The frontend polls on a fixed timer; the server-asked interval
@@ -539,7 +539,7 @@ pub async fn poll(provider: &str, device_auth_id: &str) -> PollResponse {
     if flow.next_poll_at_ms > now {
         return PollResponse::pending();
     }
-    if let Some(f) = PENDING.lock().unwrap().get_mut(device_auth_id) {
+    if let Some(f) = PENDING.lock().unwrap_or_else(|e| e.into_inner()).get_mut(device_auth_id) {
         f.next_poll_at_ms = now + flow.interval_secs as i64 * 1000;
     }
     match provider {
@@ -569,7 +569,7 @@ async fn poll_codex(device_auth_id: &str, flow: &PendingFlow) -> PollResponse {
         return PollResponse::pending();
     }
     if status == 410 {
-        PENDING.lock().unwrap().remove(device_auth_id);
+        PENDING.lock().unwrap_or_else(|e| e.into_inner()).remove(device_auth_id);
         return PollResponse::failure("the sign-in code expired — start again".into());
     }
     if status != 200 {
@@ -611,7 +611,7 @@ async fn poll_codex(device_auth_id: &str, flow: &PendingFlow) -> PollResponse {
     };
     match finish_login("codex", &doc) {
         Ok(label) => {
-            PENDING.lock().unwrap().remove(device_auth_id);
+            PENDING.lock().unwrap_or_else(|e| e.into_inner()).remove(device_auth_id);
             PollResponse::success(label)
         }
         Err(e) => PollResponse::failure(e),
@@ -643,18 +643,18 @@ async fn poll_xai(device_auth_id: &str, flow: &PendingFlow) -> PollResponse {
             "authorization_pending" => PollResponse::pending(),
             "slow_down" => {
                 // Back off an extra 5s per slow_down, like the RFC asks.
-                if let Some(f) = PENDING.lock().unwrap().get_mut(device_auth_id) {
+                if let Some(f) = PENDING.lock().unwrap_or_else(|e| e.into_inner()).get_mut(device_auth_id) {
                     f.interval_secs = (f.interval_secs + 5).min(MAX_POLL_INTERVAL_SECS);
                     f.next_poll_at_ms = now_ms() + f.interval_secs as i64 * 1000;
                 }
                 PollResponse::pending()
             }
             "access_denied" => {
-                PENDING.lock().unwrap().remove(device_auth_id);
+                PENDING.lock().unwrap_or_else(|e| e.into_inner()).remove(device_auth_id);
                 PollResponse::failure("sign-in was declined".into())
             }
             "expired_token" => {
-                PENDING.lock().unwrap().remove(device_auth_id);
+                PENDING.lock().unwrap_or_else(|e| e.into_inner()).remove(device_auth_id);
                 PollResponse::failure("the sign-in code expired — start again".into())
             }
             _ => PollResponse::failure(format!("poll request: HTTP {status} ({code})")),
@@ -665,7 +665,7 @@ async fn poll_xai(device_auth_id: &str, flow: &PendingFlow) -> PollResponse {
     }
     match finish_login("grok", &doc) {
         Ok(label) => {
-            PENDING.lock().unwrap().remove(device_auth_id);
+            PENDING.lock().unwrap_or_else(|e| e.into_inner()).remove(device_auth_id);
             PollResponse::success(label)
         }
         Err(e) => PollResponse::failure(e),
@@ -697,18 +697,18 @@ async fn poll_copilot(device_auth_id: &str, _flow: &PendingFlow) -> PollResponse
             "authorization_pending" => PollResponse::pending(),
             "slow_down" => {
                 // Back off an extra 5s per slow_down, like the RFC asks.
-                if let Some(f) = PENDING.lock().unwrap().get_mut(device_auth_id) {
+                if let Some(f) = PENDING.lock().unwrap_or_else(|e| e.into_inner()).get_mut(device_auth_id) {
                     f.interval_secs = (f.interval_secs + 5).min(MAX_POLL_INTERVAL_SECS);
                     f.next_poll_at_ms = now_ms() + f.interval_secs as i64 * 1000;
                 }
                 PollResponse::pending()
             }
             "access_denied" => {
-                PENDING.lock().unwrap().remove(device_auth_id);
+                PENDING.lock().unwrap_or_else(|e| e.into_inner()).remove(device_auth_id);
                 PollResponse::failure("sign-in was declined".into())
             }
             "expired_token" => {
-                PENDING.lock().unwrap().remove(device_auth_id);
+                PENDING.lock().unwrap_or_else(|e| e.into_inner()).remove(device_auth_id);
                 PollResponse::failure("the sign-in code expired — start again".into())
             }
             _ => PollResponse::failure(format!("poll request: HTTP {status} ({code})")),
@@ -750,7 +750,7 @@ async fn poll_copilot(device_auth_id: &str, _flow: &PendingFlow) -> PollResponse
             return PollResponse::failure(e);
         }
     }
-    PENDING.lock().unwrap().remove(device_auth_id);
+    PENDING.lock().unwrap_or_else(|e| e.into_inner()).remove(device_auth_id);
     PollResponse::success(tokens.label.clone())
 }
 

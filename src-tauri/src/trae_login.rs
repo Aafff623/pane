@@ -264,7 +264,7 @@ pub async fn start() -> Result<LoginStart, String> {
     let thread_login = login_id.clone();
     std::thread::spawn(move || loop {
         {
-            let guard = PENDING.lock().unwrap();
+            let guard = PENDING.lock().unwrap_or_else(|e| e.into_inner());
             match guard.as_ref() {
                 Some(p) if p.login_id == thread_login && !p.done && Instant::now() <= p.deadline => {}
                 _ => return,

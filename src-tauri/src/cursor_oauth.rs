@@ -113,7 +113,7 @@ pub fn start_login() -> Result<CursorOAuthStart, String> {
         "{}?challenge={}&uuid={}&mode=login",
         CURSOR_LOGIN_URL, code_challenge, login_uuid
     );
-    *pending().lock().unwrap() = Some(PendingOAuthState {
+    *pending().lock().unwrap_or_else(|e| e.into_inner()) = Some(PendingOAuthState {
         login_id: login_id.clone(),
         uuid: login_uuid,
         code_verifier,
@@ -153,7 +153,7 @@ struct PollResponse {
 /// (still waiting).
 pub async fn poll_login(login_id: &str) -> CursorOAuthPoll {
     let (uuid, code_verifier) = {
-        let guard = pending().lock().unwrap();
+        let guard = pending().lock().unwrap_or_else(|e| e.into_inner());
         let Some(state) = guard.as_ref() else {
             return CursorOAuthPoll {
                 done: false,
@@ -169,7 +169,7 @@ pub async fn poll_login(login_id: &str) -> CursorOAuthPoll {
             };
         }
         if now_secs() > state.expires_at {
-            *pending().lock().unwrap() = None;
+            *pending().lock().unwrap_or_else(|e| e.into_inner()) = None;
             return CursorOAuthPoll {
                 done: false,
                 account: None,
@@ -214,7 +214,7 @@ pub async fn poll_login(login_id: &str) -> CursorOAuthPoll {
     let Some(access_token) = poll_data.access_token else {
         return CursorOAuthPoll { done: false, account: None, error: None };
     };
-    *pending().lock().unwrap() = None;
+    *pending().lock().unwrap_or_else(|e| e.into_inner()) = None;
     let email = poll_data
         .auth_id
         .as_deref()

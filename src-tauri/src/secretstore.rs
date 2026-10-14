@@ -102,7 +102,7 @@ mod backend {
     static MAP: Mutex<Option<HashMap<String, String>>> = Mutex::new(None);
 
     pub fn get(key: &str) -> Secret {
-        let guard = MAP.lock().unwrap();
+        let guard = MAP.lock().unwrap_or_else(|e| e.into_inner());
         match guard.as_ref().and_then(|m| m.get(key)) {
             Some(v) => Secret::Found(v.clone()),
             None => Secret::Missing,
@@ -118,7 +118,7 @@ mod backend {
     }
 
     pub fn remove(key: &str) {
-        if let Some(map) = MAP.lock().unwrap().as_mut() {
+        if let Some(map) = MAP.lock().unwrap_or_else(|e| e.into_inner()).as_mut() {
             map.remove(key);
         }
     }

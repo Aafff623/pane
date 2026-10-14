@@ -470,7 +470,7 @@ fn note_probe(now_ms: i64, outcome: ProbeOutcome) {
 /// timestamped in kimi_probe_log.json.
 async fn monthly_limit_row(access: &str) -> Option<Metric> {
     let now_ms = Utc::now().timestamp_millis();
-    if let Some(memo) = probe_memos().lock().unwrap().get(access) {
+    if let Some(memo) = probe_memos().lock().unwrap_or_else(|e| e.into_inner()).get(access) {
         if memo.monthly.is_some() {
             let waiting_on_anchor =
                 memo.resets_at.is_some_and(|resets_at| now_ms < resets_at);

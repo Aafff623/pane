@@ -105,7 +105,7 @@ pub fn request_cost_at(p: &Price, u: &Usage, threshold: f64) -> f64 {
 /// published — a fast-flagged request without data bills at standard
 /// rates rather than a guessed premium (Mac behavior).
 pub fn fast_multiplier(model: &str) -> f64 {
-    let s = store().lock().unwrap();
+    let s = store().lock().unwrap_or_else(|e| e.into_inner());
     s.fast_multipliers.get(model).copied().unwrap_or(1.0)
 }
 
@@ -417,7 +417,7 @@ fn load_from_disk(store: &mut Store) {
 /// blocking thread). Network failures leave the cached/parsed data in place.
 pub fn ensure_fresh() {
     {
-        let mut s = store().lock().unwrap();
+        let mut s = store().lock().unwrap_or_else(|e| e.into_inner());
         if !s.loaded_from_disk {
             load_from_disk(&mut s);
         }
@@ -502,7 +502,7 @@ pub fn ensure_fresh() {
                 Ok(doc) => {
                     let _ = std::fs::create_dir_all(dir());
                     let _ = std::fs::write(dir().join(format!("{source}.json")), &body);
-                    ingest(&mut store().lock().unwrap(), source, &doc);
+                    ingest(&mut store().lock().unwrap_or_else(|e| e.into_inner()), source, &doc);
                     state[source] = json!({ "etag": new_etag, "fetchedAt": now, "failedAt": 0 });
                     GENERATION.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                     UNPRICED_HINT.store(false, std::sync::atomic::Ordering::Relaxed);
@@ -529,7 +529,7 @@ pub fn ensure_fresh() {
 /// USD per million tokens for `model`, or None if no source prices it.
 /// Memoized; disk-cache only (call ensure_fresh() beforehand to update).
 pub fn lookup(model: &str) -> Option<Price> {
-    let mut s = store().lock().unwrap();
+    let mut s = store().lock().unwrap_or_else(|e| e.into_inner());
     if !s.loaded_from_disk {
         load_from_disk(&mut s);
     }

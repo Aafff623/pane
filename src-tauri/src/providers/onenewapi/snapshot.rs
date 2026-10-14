@@ -242,7 +242,7 @@ pub async fn backfill_missing_display_units(path: &Path) {
         return;
     };
     let missing: Vec<(String, String)> = {
-        let mut claimed = backfill_claimed().lock().unwrap();
+        let mut claimed = backfill_claimed().lock().unwrap_or_else(|e| e.into_inner());
         doc.sites
             .iter()
             .filter(|site| site.display_unit.is_none() || site.per_unit.is_none())

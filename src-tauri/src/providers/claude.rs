@@ -51,7 +51,7 @@ fn cached_identity_of(path: &std::path::Path) -> Option<(String, Option<String>)
     let meta = std::fs::metadata(path).ok()?;
     let (mtime, size) = (meta.modified().ok()?, meta.len());
     let cache = CACHE.get_or_init(Default::default);
-    if let Some((m, s, v)) = cache.lock().unwrap().get(path) {
+    if let Some((m, s, v)) = cache.lock().unwrap_or_else(|e| e.into_inner()).get(path) {
         if *m == mtime && *s == size {
             return v.clone();
         }
@@ -60,7 +60,7 @@ fn cached_identity_of(path: &std::path::Path) -> Option<(String, Option<String>)
         .ok()
         .and_then(|raw| serde_json::from_str::<Value>(&raw).ok())
         .and_then(|doc| identity_from(&doc));
-    cache.lock().unwrap().insert(path.to_path_buf(), (mtime, size, parsed.clone()));
+    cache.lock().unwrap_or_else(|e| e.into_inner()).insert(path.to_path_buf(), (mtime, size, parsed.clone()));
     parsed
 }
 

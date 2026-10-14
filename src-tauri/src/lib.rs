@@ -1245,7 +1245,7 @@ struct FailState {
 /// the user explicitly refreshes and when the background loop retries a
 /// total outage: a bench from our own failed pass must not swallow them.
 fn clear_soft_benches() {
-    retain_rate_limited_benches(&mut fail_state().lock().unwrap());
+    retain_rate_limited_benches(&mut fail_state().lock().unwrap_or_else(|e| e.into_inner()));
 }
 
 /// Pure core of [`clear_soft_benches`] so tests exercise the policy on a
@@ -1323,7 +1323,7 @@ fn persist_last_ok(map: &HashMap<String, CachedSnap>) -> Result<(), String> {
 }
 
 fn forget_provider_snapshots(ids: &[String]) -> Result<(), String> {
-    let mut map = last_ok().lock().unwrap();
+    let mut map = last_ok().lock().unwrap_or_else(|e| e.into_inner());
     let mut next = map.clone();
     let mut changed = false;
     for id in ids {
@@ -1334,7 +1334,7 @@ fn forget_provider_snapshots(ids: &[String]) -> Result<(), String> {
         *map = next;
     }
     drop(map);
-    let mut failures = fail_state().lock().unwrap();
+    let mut failures = fail_state().lock().unwrap_or_else(|e| e.into_inner());
     for id in ids {
         failures.remove(id);
         alerts::forget_snapshot(id);
@@ -1654,7 +1654,7 @@ fn rename_cached_snapshot(id: &str, new_name: String) -> Result<(), String> {
 }
 
 fn rename_cached_snapshots(renames: &[(String, String)]) -> Result<(), String> {
-    let mut map = last_ok().lock().unwrap();
+    let mut map = last_ok().lock().unwrap_or_else(|e| e.into_inner());
     rename_cached_snapshots_in(&mut map, renames, persist_last_ok)
 }
 
@@ -1732,7 +1732,7 @@ where
     let name = name.as_str();
     let now = now_ms() as i64;
     let benched = {
-        let map = fail_state().lock().unwrap();
+        let map = fail_state().lock().unwrap_or_else(|e| e.into_inner());
         map.get(id)
             .filter(|f| now < f.until_ms)
             .map(|f| f.note.clone())
@@ -1746,7 +1746,7 @@ where
     // providers::WEEK_WALL_MIRROR_FAMILIES.
     providers::mirror_week_wall(id, &mut snap);
     apply_qoder_checkin(id, &mut snap).await;
-    let mut map = fail_state().lock().unwrap();
+    let mut map = fail_state().lock().unwrap_or_else(|e| e.into_inner());
     if snap.status == "error" {
         let err = snap.error.clone().unwrap_or_default();
         let rate_limited = err.contains("429");
@@ -2993,7 +2993,7 @@ async fn run_usage_fetch_inner(app: &tauri::AppHandle, extra_disabled: Option<Ve
         {
             enabled_ids.retain(|id| id != "onenewapi");
         }
-        let mut failures = fail_state().lock().unwrap();
+        let mut failures = fail_state().lock().unwrap_or_else(|e| e.into_inner());
         for id in stale_onenewapi_ids {
             failures.remove(&id);
         }
@@ -3040,7 +3040,7 @@ async fn run_usage_fetch_inner(app: &tauri::AppHandle, extra_disabled: Option<Ve
                 .ok()
                 .and_then(|raw| serde_json::from_str(&raw).ok())
                 .unwrap_or_else(|| json!({}));
-            let mut map = cache.lock().unwrap();
+            let mut map = cache.lock().unwrap_or_else(|e| e.into_inner());
             let mut removed = false;
             let mut to_store = serde_json::Map::new();
             for fam in ["claude", "codex"] {
@@ -3166,7 +3166,7 @@ async fn run_usage_fetch_inner(app: &tauri::AppHandle, extra_disabled: Option<Ve
         {
             enabled_ids.retain(|id| id != "onenewapi");
         }
-        let mut failures = fail_state().lock().unwrap();
+        let mut failures = fail_state().lock().unwrap_or_else(|e| e.into_inner());
         for id in stale_onenewapi_ids {
             failures.remove(&id);
         }
