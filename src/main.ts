@@ -914,6 +914,7 @@ let skinMarketSelected: SkinId | null = null;
 let wbWebStatus: { enabled: boolean; has_cookie: boolean; chrome_major: number | null; saved_at: string | null } | null = null;
 /// Pack id while its download runs; blocks a second parallel download.
 let skinDownloading: string | null = null;
+let skinMarketFeedback: string | null = null;
 
 /// One workshop row: a built-in, an installed pack, or a remote pack the
 /// index offers but this machine does not have yet.
@@ -997,11 +998,14 @@ async function selectSkin(id: SkinId | null): Promise<void> {
   if (skinSelectionSaving) return;
   skinSelectionSaving = true;
   const previous = config.skinId;
+  skinMarketFeedback = null;
   try {
     await patchConfig({ skinId: normalizeSkin(id) });
   } catch {
     config.skinId = previous;
+    skinMarketFeedback = t("skin.saveFailed");
     document.querySelector("#status")!.textContent = t("skin.saveFailed");
+    if (skinMarketOpen) renderDrawerBody();
     return;
   } finally {
     skinSelectionSaving = false;
@@ -1017,7 +1021,7 @@ async function selectSkin(id: SkinId | null): Promise<void> {
   requestAnimationFrame(fitProviderNames);
   for (const button of document.querySelectorAll<HTMLButtonElement>("[data-skin-select]")) {
     button.disabled = button.dataset.skinSelect === id;
-    button.textContent = t(button.disabled ? "skin.applied" : "skin.use");
+    button.innerHTML = `${uiIcon(button.disabled ? "checkCircle" : "paintBrush")}<span>${t(button.disabled ? "skin.applied" : "skin.use")}</span>`;
   }
 }
 
@@ -7927,30 +7931,39 @@ function accountChildRows(family: string): string {
   return `<div class="cust-account-children" data-accounts-children="${escapeHtml(family)}">${children}${archivedHtml}</div>`;
 }
 
-// Preview renders the REAL provider-card structure (article.provider →
-// provider-head → card-panel) so each skin's stylesheet themes it exactly
-// as it themes the dashboard — fonts and components identical, per the
-// workshop acceptance line. Fixed, non-account data only.
+// The spend preview uses the dashboard's card, donut geometry and legend
+// classes with fixed data. It never reads account spend or changes live tabs.
 function renderSkinSample(mode: "light" | "dark", skinId: SkinId = "signal", compact = false): string {
-  const metric = (label: string, used: number, period: number) => renderMetric({
-    label, kind: "progress", used_percent: used, detail: null,
-    value: null, resets_at: null, period_ms: period,
-  }).replace(/ data-flip="[^"]*"/g, "").replace(/ clickable/g, "");
-  const icon = providerVisual("claude")?.iconSvg ?? "";
-  return `<div class="skin-sample" data-skin="${skinId}" ${skinId === "ink" ? "data-ink" : ""} data-theme="${mode}">
-    ${compact ? "" : `<div class="skin-sample-head"><span>${t(mode === "light" ? "skin.light" : "skin.dark")}</span><span class="skin-sample-brand">${t(skinId === "ink" ? "skin.ink" : "skin.signal")}</span></div>`}
-    <article class="provider">
+  const rows = [
+    { id: "claude", name: "Claude", cost: 18.4 },
+    { id: "codex", name: "Codex", cost: 9.6 },
+    { id: "copilot", name: "Copilot", cost: 4.8 },
+  ];
+  const total = rows.reduce((sum, row) => sum + row.cost, 0);
+  let angle = 0;
+  const segments = rows.map((row) => {
+    const start = angle;
+    angle += row.cost / total * TAU;
+    return `<path class="seg" fill-rule="evenodd" d="${sectorPath(start + 0.025, angle - 0.025)}" style="fill:${spendColor(row.id)}"></path>`;
+  }).join("");
+  const ring = `<svg width="96" height="96" viewBox="0 0 96 96" aria-hidden="true">${segments}<text class="donut-total" x="48" y="49" text-anchor="middle" font-size="13" font-weight="600">$32.80</text><text class="donut-sub" x="48" y="61" text-anchor="middle" font-size="8">${t("spend.today")}</text></svg>`;
+  return `<div class="skin-sample" data-skin="${skinId}" ${skinId === "ink" ? "data-ink" : ""} data-theme="${mode}" role="img" aria-label="${escapeHtml(t("skin.spendPreview"))}">
+    ${compact ? "" : `<div class="skin-sample-head"><span>${uiIcon(mode === "light" ? "sun" : "moon")}${t(mode === "light" ? "skin.light" : "skin.dark")}</span></div>`}
+    <article class="provider total-spend" inert>
       <div class="provider-head">
-        <span class="provider-name" data-fit-max="17" data-fit-min="11">Claude</span>
-        <span class="head-status"><span class="acct-dot green"></span><span class="head-pct">32%</span></span>
+        <span class="provider-name">${t("spend.title")}</span>
         <span class="spacer"></span>
-        <span class="plan">Pro</span>
-        <span class="provider-icon">${icon}</span>
+        <span class="spend-head-value">${uiIcon("lightning")}2.4M</span>
       </div>
       <div class="card-panel">
-        ${metric(t("skin.session"), 32, 5 * 3_600_000)}
-        ${metric(t("skin.week"), 68, 7 * 86_400_000)}
-        ${metric(t("skin.lowQuota"), 87, 5 * 3_600_000)}
+        <div class="donut-wrap">
+          ${skinId === "ink" ? `<div class="ink-donut-art"><span class="ink-koi" aria-hidden="true"></span>${ring}</div>` : ring}
+          <div class="spend-cols"><div class="spend-col">
+            <div class="col-head-row"><span class="tab col-head active">${t("spend.today")}</span><span class="tab col-head">${t("spend.yesterday")}</span><span class="tab col-head">${t("spend.days7")}</span></div>
+            <div class="col-total">$32.80</div>
+            <div class="legend">${rows.map((row) => `<div class="legend-row"><span class="dot" style="background:${spendColor(row.id)}"></span><span class="legend-name">${row.name}</span><span class="legend-val">$${row.cost.toFixed(2)}</span></div>`).join("")}</div>
+          </div></div>
+        </div>
       </div>
     </article>
   </div>`;
@@ -7965,23 +7978,23 @@ function renderSkinMarket(): string {
     ? `<p class="skin-market-preview-note">${t("skin.previewAfterDownload")}</p>`
     : `<div class="skin-preview-pair" data-preview-mode="${previewMode}">${renderSkinSample("light", skin.id as SkinId)}${renderSkinSample("dark", skin.id as SkinId)}</div>`;
   return `<section class="skin-market" aria-label="${t("skin.market")}">
-    <div class="skin-market-head"><h2>${t("skin.market")}</h2><button class="mini-btn" data-skin-close>${t("skin.back")}</button></div>
+    <div class="skin-market-head"><h2>${t("skin.market")}</h2><span class="skin-current-label">${t("skin.current")}${escapeHtml(activeSkin() ? entries.find((entry) => entry.state === "applied")?.name ?? "" : t("skin.nativeName"))}</span><button class="mini-btn skin-back-btn" type="button" data-skin-close>${uiIcon("arrowLeft")}<span>${t("skin.back")}</span></button></div>
     <div class="skin-market-body">
-      <aside class="skin-market-side">
-        ${entries.map((s) => `<button class="skin-side-item${s.id === skin.id ? " active" : ""}" type="button" data-skin-pick="${s.id}">
+      <div class="skin-market-main" id="skin-market-detail">
+        <div class="skin-detail-head"><div><h3>${escapeHtml(skin.name)}</h3><p class="skin-market-copy">${escapeHtml(skin.tagline)}${skin.updateAvailable ? ` · ${t("skin.updateAvailable")}` : ""}</p></div><span class="skin-preview-label">${t("skin.preview")}</span></div>
+        <div class="skin-preview-toolbar" role="group" aria-label="${t("skin.previewMode")}">${(["light", "dark", "both"] as const).map((mode) => `<button class="skin-mode-btn" type="button" data-skin-mode="${mode}" aria-pressed="${previewMode === mode}">${uiIcon(mode === "light" ? "sun" : mode === "dark" ? "moon" : "columns")}<span>${t(mode === "light" ? "skin.light" : mode === "dark" ? "skin.dark" : "skin.both")}</span></button>`).join("")}</div>
+        ${pair}
+      </div>
+      <div class="skin-market-gallery" role="group" aria-label="${t("skin.choose")}">
+        ${entries.map((s) => `<button class="skin-side-item${s.id === skin.id ? " active" : ""}" type="button" data-skin-pick="${escapeHtml(s.id)}" aria-pressed="${s.id === skin.id}" aria-controls="skin-market-detail">
             ${s.state === "remote"
               ? `<span class="skin-side-thumb skin-side-thumb-empty">${uiIcon("palette", s.name)}</span>`
               : `<span class="skin-side-thumb">${renderSkinSample("light", s.id as SkinId, true)}</span>`}
-            <span class="skin-side-meta"><strong>${s.name}</strong><span class="skin-side-state">${s.state === "applied" ? t("skin.applied") : s.state === "remote" ? t("skin.remoteState") : t("skin.installed")}</span></span>
+            <span class="skin-side-meta"><strong>${escapeHtml(s.name)}</strong><span class="skin-side-state${s.state === "applied" ? " is-applied" : ""}">${s.state === "applied" ? `${uiIcon("checkCircle")} ${t("skin.applied")}` : s.state === "remote" ? t("skin.remoteState") : t("skin.installed")}</span></span>
           </button>`).join("")}
-      </aside>
-      <div class="skin-market-main">
-        <p class="skin-market-copy">${skin.tagline}${skin.updateAvailable ? ` · ${t("skin.updateAvailable")}` : ""}</p>
-        <div class="skin-preview-toolbar" role="group" aria-label="${t("skin.previewMode")}">${(["light", "dark", "both"] as const).map((mode) => `<button class="skin-mode-btn" type="button" data-skin-mode="${mode}" aria-pressed="${previewMode === mode}">${t(mode === "light" ? "skin.light" : mode === "dark" ? "skin.dark" : "skin.both")}</button>`).join("")}</div>
-        ${pair}
-        <div class="skin-detail-actions">${skinActionHtml(skin)}${skin.state === "remote" ? `<button class="mini-btn" data-skin-reset>${t("skin.native")}</button>` : ""}<span>${t("skin.followsMode")}</span></div>
       </div>
     </div>
+    <div class="skin-detail-actions">${skinMarketFeedback ? `<p class="skin-market-feedback" role="alert">${escapeHtml(skinMarketFeedback)}</p>` : ""}<div class="skin-action-context"><strong>${escapeHtml(skin.name)}</strong><span>${t("skin.followsMode")}</span></div><div class="skin-action-buttons">${skinActionHtml(skin)}${skin.state === "remote" ? `<button class="mini-btn skin-reset-btn" type="button" data-skin-reset ${activeSkin() ? "" : "disabled"}>${uiIcon("arrowCounterClockwise")}<span>${t("skin.native")}</span></button>` : ""}</div></div>
   </section>`;
 }
 
@@ -7997,7 +8010,7 @@ function skinActionHtml(skin: MarketEntry): string {
   const removeBtn = isPack
     ? `<button class="mini-btn" data-skin-remove="${skin.id}" ${applied ? "disabled" : ""}>${t("skin.remove")}</button>`
     : "";
-  return `<button class="mini-btn primary" data-skin-select="${skin.id}" ${applied ? "disabled" : ""}>${t(applied ? "skin.applied" : "skin.use")}</button><button class="mini-btn" data-skin-reset>${t("skin.native")}</button>${removeBtn}`;
+  return `<button class="mini-btn primary" data-skin-select="${skin.id}" ${applied ? "disabled" : ""}>${uiIcon(applied ? "checkCircle" : "paintBrush")}<span>${t(applied ? "skin.applied" : "skin.use")}</span></button><button class="mini-btn skin-reset-btn" data-skin-reset ${activeSkin() ? "" : "disabled"}>${uiIcon("arrowCounterClockwise")}<span>${t("skin.native")}</span></button>${removeBtn}`;
 }
 
 /// Footer registry of providers deleted from Customize — the one-line way
@@ -8323,7 +8336,23 @@ function jumpToProviderCard(providerId: string): void {
 function renderDrawerBody(): void {
   const body = document.querySelector<HTMLElement>("#drawer-body");
   if (!body) return;
+  const scrollTop = body.querySelector(".skin-market-body")?.scrollTop ?? 0;
+  const focused = document.activeElement;
+  const focusAttr = focused instanceof HTMLElement && body.contains(focused)
+    ? ["data-skin-pick", "data-skin-mode", "data-skin-select", "data-skin-reset", "data-skin-download", "data-skin-remove", "data-skin-close"].find((attr) => focused.hasAttribute(attr))
+    : undefined;
+  const focusValue = focusAttr ? focused!.getAttribute(focusAttr) : null;
+  document.querySelector("#drawer")?.classList.toggle("skin-workshop-open", skinMarketOpen);
   body.innerHTML = renderCustomize();
+  const scroller = body.querySelector(".skin-market-body");
+  if (scroller) scroller.scrollTop = scrollTop;
+  if (focusAttr) {
+    const restored = body.querySelector<HTMLElement>(`[${focusAttr}="${CSS.escape(focusValue ?? "")}"]`);
+    const target = restored && !restored.matches(":disabled")
+      ? restored
+      : body.querySelector<HTMLElement>(".skin-side-item.active");
+    target?.focus({ preventScroll: true });
+  }
   if (custSearchQuery) {
     const inp = body.querySelector<HTMLInputElement>("#cust-search");
     if (inp) inp.value = custSearchQuery;
@@ -8366,6 +8395,7 @@ function setDrawer(open: boolean): void {
   if (!open) {
     dismissAccountDialog?.();
     skinMarketOpen = false;
+    document.querySelector("#drawer")?.classList.remove("skin-workshop-open");
   }
   if (open) {
     renderDrawerBody();
@@ -9359,12 +9389,14 @@ async function handleCustomizeClick(target: HTMLElement): Promise<boolean> {
   }
   const skinPick = target.closest<HTMLElement>("[data-skin-pick]")?.dataset.skinPick;
   if (skinPick) {
+    skinMarketFeedback = null;
     skinMarketSelected = skinPick as SkinId;
     renderDrawerBody();
     return true;
   }
   const skinOpen = target.closest<HTMLElement>("[data-skin-open]");
   if (skinOpen) {
+    skinMarketFeedback = null;
     skinMarketOpen = true;
     renderDrawerBody();
     // Freshen the distribution index while the workshop is open; the
@@ -9391,6 +9423,7 @@ async function handleCustomizeClick(target: HTMLElement): Promise<boolean> {
   }
   const skinRemove = target.closest<HTMLElement>("[data-skin-remove]")?.dataset.skinRemove;
   if (skinRemove) {
+    skinMarketFeedback = null;
     // A pack is re-downloadable, so removal stays one click. Removing the
     // applied pack falls back to the native appearance first.
     if (activeSkin()?.id === skinRemove) await selectSkin(null);
@@ -9400,6 +9433,8 @@ async function handleCustomizeClick(target: HTMLElement): Promise<boolean> {
       if (skinMarketSelected === skinRemove) skinMarketSelected = null;
       renderDrawerBody();
     } catch {
+      skinMarketFeedback = t("skin.removeFailed");
+      renderDrawerBody();
       document.querySelector("#status")!.textContent = t("skin.removeFailed");
     }
     return true;
@@ -9409,12 +9444,14 @@ async function handleCustomizeClick(target: HTMLElement): Promise<boolean> {
     const entry = marketEntries().find((e) => e.id === skinDownload && e.remote);
     if (entry?.remote) {
       skinDownloading = skinDownload;
+      skinMarketFeedback = null;
       renderDrawerBody();
       try {
         await invoke("skin_pack_download", { url: entry.remote.url, sha256: entry.remote.sha256 });
         await refreshInstalledPacks();
         skinMarketSelected = skinDownload;
       } catch {
+        skinMarketFeedback = t("skin.downloadFailed");
         document.querySelector("#status")!.textContent = t("skin.downloadFailed");
       }
       skinDownloading = null;

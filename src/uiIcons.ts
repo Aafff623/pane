@@ -28,8 +28,15 @@ import pencil from "./assets/icons/pencil-simple-bold.svg?raw";
 import plus from "./assets/icons/plus-bold.svg?raw";
 import lock from "./assets/icons/lock-bold.svg?raw";
 import lockOpen from "./assets/icons/lock-open-bold.svg?raw";
+import arrowLeft from "./assets/icons/arrow-left-regular.svg?raw";
+import sun from "./assets/icons/sun-regular.svg?raw";
+import moon from "./assets/icons/moon-regular.svg?raw";
+import paintBrush from "./assets/icons/paint-brush-regular.svg?raw";
+import arrowCounterClockwise from "./assets/icons/arrow-counter-clockwise-regular.svg?raw";
+import checkCircle from "./assets/icons/check-circle-regular.svg?raw";
+import columns from "./assets/icons/columns-regular.svg?raw";
 
-const ICONS = { gear, arrowsClockwise, shareNetwork, star, info, question, x, caretUp, caretDown, lightning, microphone, circleNotch, rows, palette, key, magnifyingGlass, bell, shield, globe, keyboard, arrowUp, copy, trash, eye, eyeSlash, pencil, plus, lock, lockOpen } as const;
+const ICONS = { gear, arrowsClockwise, shareNetwork, star, info, question, x, caretUp, caretDown, lightning, microphone, circleNotch, rows, palette, key, magnifyingGlass, bell, shield, globe, keyboard, arrowUp, copy, trash, eye, eyeSlash, pencil, plus, lock, lockOpen, arrowLeft, sun, moon, paintBrush, arrowCounterClockwise, checkCircle, columns } as const;
 
 export type UiIconName = keyof typeof ICONS;
 
