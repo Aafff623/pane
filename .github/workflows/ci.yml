@@ -23,12 +23,16 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+        with:
+          version: 10
       - uses: actions/setup-node@v4
         with:
           node-version: 20
-      - run: npm ci
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
       # tsc --noEmit + vite build (the same command the release uses).
-      - run: npm run build
+      - run: pnpm run build
 
   # The harness compiles the real src-tauri sources via #[path] against a
   # Tauri stub; it is developed and verified on Windows, which is also the
