@@ -48,6 +48,23 @@ jobs:
       - run: cargo test
         working-directory: parse-tests
 
+  # src-tauri's own #[test]s — 836 across the tree, including the lib.rs
+  # snapshot/purge data-loss guards — never ran anywhere: the harness
+  # covers the pure modules, but lib.rs needs the real Tauri runtime and
+  # this dev machine's GNU toolchain can't link a test exe. MSVC on CI
+  # links the release build fine (release.yml proves it), so this job is
+  # what keeps the remaining tests alive.
+  src-tauri-tests:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+      - run: cargo test
+        working-directory: src-tauri
+
   # Zero-dependency invariant locks: i18n pairing, asset existence, demo
   # provenance hashes, hero numbers. No npm install — they only read tracked
   # files, which is what makes them cheap enough for every push and PR.
