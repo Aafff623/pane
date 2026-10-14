@@ -4,7 +4,7 @@
 
 **Blocked by:** None
 
-**Status:** ready-for-agent
+**Status:** in-review（实现已核实，验收边界见Comments）
 
 - [ ] 参考仓库更新到最新，记录版本/提交
 - [ ] 产出「值得借鉴的机制」差异笔记（按对 Pane 的价值排序）
@@ -14,3 +14,5 @@
 ## Comments
 
 - 2026-10-14：由 spec `.scratch/release-082/spec.md` 拆分（owner 批次需求）。
+
+- 2026-10-14（Codex独立接续）：核实既有docs/reference-repos.md与.github/workflows/upstream-scan.yml：4个参考仓库的commit/release基线已落文档，每周一03:00 UTC定时扫描、报告artifact、漂移失败可见；定时路径不写仓库。node --check .github/scripts/upstream-scan.mjs通过。本轮未额外fetch/改上游工作树，未触发远程Actions。

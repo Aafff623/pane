@@ -1,6 +1,6 @@
 # 0.8.2 批次：引导、资源包、趋势单位与生态维护
 
-**Status:** ready-for-agent（W11 待 owner 提供 MCP 凭据；W1/W4 有素材/样式依赖）
+**Status:** in-review（本地主要实现与验证完成；W4最终视觉/W13原生验收与发布授权待owner；W1已获官方取图授权并替换）
 **Feature dir:** `.scratch/release-082/`
 **Date:** 2026-10-14
 **来源:** owner 一次性需求清单（2026-10-14）+ ZCode 只读侦察（代码位置、现状、缺口）

@@ -4,7 +4,7 @@
 
 **Blocked by:** None
 
-**Status:** ready-for-agent
+**Status:** in-review（实现已核实，验收边界见Comments）
 
 - [ ] 展开态与折叠态的动作按钮都在标题行（不再出现第二行）
 - [ ] 两个态的按钮顺序、间距、尺寸一致；标题过长时省略号且不挤掉按钮
@@ -14,3 +14,5 @@
 ## Comments
 
 - 2026-10-14：由 spec `.scratch/release-082/spec.md` 拆分（owner 批次需求）。
+
+- 2026-10-14（Codex独立接续）：核实既有 d18dec1 实现：展开/折叠的三枚动作均在provider-head中；当前demo在420 CSS宽下两态均无横向溢出。原生UI按钮位置终验仍归owner。

@@ -8,7 +8,8 @@ fixed demo data — never a real account.
 
 | File pair | Role | Window |
 | --- | --- | --- |
-| `attachments/overview-{dark,light}.png` | Hero screenshot in the centered header + 任何额度 subsection left cell | 450×640 CSS @2x |
+| `attachments/hero-{dark,light}.jpg` | Centered header; compact spend header plus quota overview, captured 2026-10-14 | 450×640 CSS capture |
+| `attachments/overview-{dark,light}.png` | 任何额度 subsection left cell; expanded spend detail | 450×640 CSS @2x |
 | `attachments/overview-week-{dark,light}.png` | 任何额度 subsection right cell | 450×640 CSS @2x |
 | `attachments/how-{dark,light}.png` | 「它如何工作」架构图（HTML/SVG fixture 渲染，非 UI 截图） | 1160×430 @2x |
 | `attachments/customize-{dark,light}.png` | 来源接入 subsection | 450×640 CSS @2x |
