@@ -25,8 +25,8 @@
 **[简体中文](README.md)** · **[English](README_EN.md)**
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="attachments/overview-dark.png">
-  <img src="attachments/overview-light.png" width="420" alt="Pane 悬浮面板：额度总览">
+  <source media="(prefers-color-scheme: dark)" srcset="attachments/hero-dark.jpg">
+  <img src="attachments/hero-light.jpg" width="420" alt="Pane 悬浮面板：额度总览">
 </picture>
 
 </div>
@@ -156,6 +156,7 @@ Claude、Codex、CodeBuddy、CodeBuddy CN、WorkBuddy、Cursor、OpenCode、Copi
 | 模型明细 | 按模型拆分花费与 token，未知价格保留事实并标注未计价 |
 | 365 天热力图 | 回看每日使用强度 |
 | 分档图标 | 花费卡图标按日 token 量渐变，阈值可自定义 |
+| 复制为图片 | 总花费卡先选时间范围（今天 / 昨天 / 7 天 / 30 天 / 全部）再生成分享图；provider 卡即时整卡快照 |
 
 <div align="center">
   <picture>
@@ -215,11 +216,14 @@ Skill 三选一安装：`install.ps1` 安装器自动装入、设置 → 常规 
 
 ### 还有
 
+- **新手引导** —— 首次安装自动播放 5 步聚光灯引导（上一步 / 下一步 / 跳过，`Esc` 退出），老用户不被打扰；设置 → 常规「重新演示」随时重看；
 - **临期清单** —— `T` 呼出，按重置时间排序，顶部就是「该行动」的部分；
 - **托盘直达** —— 右键直出各 provider 状态行（读本地快照，零网络请求）与设置入口；
 - **更新不打断** —— 检测到新版本时总花费横栏出现轻量 ↑ 指示器，点击原地下载，圆环按真实字节进度填充，完成后自动安装重启；
 - **三语界面** —— 简体中文 / English / Русский，跟随系统或手动切换；
-- **开机动画** —— 弹出主窗时的品牌动画可开关、可重播，系统减动效时停格成片帧退场。
+- **开机动画** —— 弹出主窗时的品牌动画可开关、可重播，系统减动效时停格成片帧退场；
+- **字体资源包** —— 与皮肤包同一套 zip + manifest + sha256 校验，在设置字体附近按需下载安装，装完即进字体下拉；官方目录当前为空，推荐先用 Windows 自带的 MV Boli；
+- **刷新点自动触发** —— 默认关闭；GLM / MiniMax 等 5 小时套餐到刷新点自动发一次轻量请求叫醒计费周期，需在设置中显式开启，卡片有状态标识。
 
 <details>
 <summary><b>全部 9 组内置快捷键</b></summary>
@@ -254,6 +258,7 @@ Skill 三选一安装：`install.ps1` 安装器自动装入、设置 → 常规 
 | [隐私说明](docs/privacy.md) | [皮肤市场设计](docs/skin-market-design.md) |
 | [工程事实与约束](docs/project-facts.md) | [领域词汇表](CONTEXT.md) |
 | [README 素材维护](docs/readme-assets.md) | [更新日志](CHANGELOG.md) |
+| [厂商情报](docs/provider-intel.md) | [更新机制](docs/update-mechanism.md) |
 
 ## <a id="privacy"></a>隐私
 

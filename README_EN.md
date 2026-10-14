@@ -25,8 +25,8 @@
 **[English](README_EN.md)** · **[简体中文](README.md)**
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="attachments/overview-dark.png">
-  <img src="attachments/overview-light.png" width="420" alt="Pane floating panel: quota overview">
+  <source media="(prefers-color-scheme: dark)" srcset="attachments/hero-dark.jpg">
+  <img src="attachments/hero-light.jpg" width="420" alt="Pane floating panel: quota overview">
 </picture>
 
 </div>
@@ -156,6 +156,7 @@ Local CLI logs are scanned to compute spend — no cloud service involved; dolla
 | Model breakdown | Spend and tokens per model; unknown prices keep the facts and are marked unpriced |
 | 365-day heatmap | Daily intensity at a glance |
 | Tiered icons | Spend-card icons tier by daily token volume; thresholds customizable |
+| Copy as image | The total-spend card asks for a range first (today / yesterday / 7 days / 30 days / all) and then renders the share image; provider cards snapshot instantly |
 
 <div align="center">
   <picture>
@@ -215,11 +216,14 @@ Install the skill one of three ways: automatically via the `install.ps1` install
 
 ### Also
 
+- **Onboarding tour** — a 5-step spotlight tour plays automatically on first install (back / next / skip, `Esc` exits); existing users are never interrupted, and settings → General → "Replay" runs it again on demand;
 - **Expiring list** — summon with `T`, sorted by reset time; the top is the "act now" part;
 - **Tray at hand** — right-click surfaces every provider's status row straight from the local snapshot (zero network) plus settings entries;
 - **Non-intrusive updates** — a lightweight ↑ indicator on the total-spend bar when a new version lands; clicking downloads in place with a byte-accurate progress ring, then installs and restarts;
 - **Three UI languages** — 简体中文 / English / Русский, following the system or set manually;
-- **Boot animation** — the brand animation when the panel opens can be turned off or replayed, freezing to a still frame under reduced-motion systems.
+- **Boot animation** — the brand animation when the panel opens can be turned off or replayed, freezing to a still frame under reduced-motion systems;
+- **Font packs** — the same zip + manifest + sha256 verification as skins, downloaded from settings near the font picker and applied straight into the font dropdown; the official catalog is currently empty, so the recommended pick is MV Boli, which ships with Windows;
+- **Auto-trigger at reset** — off by default: GLM / MiniMax style 5-hour plans can send one minimal request at the next reset to wake the billing window, enabled explicitly in settings, with a status badge on the card.
 
 <details>
 <summary><b>All nine built-in shortcuts</b></summary>
@@ -254,6 +258,7 @@ Install the skill one of three ways: automatically via the `install.ps1` install
 | [Privacy notes](docs/privacy.md) | [Skin market design](docs/skin-market-design.md) |
 | [Engineering facts & constraints](docs/project-facts.md) | [Domain glossary](CONTEXT.md) |
 | [README asset maintenance](docs/readme-assets.md) | [Changelog](CHANGELOG.md) |
+| [Provider intel](docs/provider-intel.md) | [Update mechanism](docs/update-mechanism.md) |
 
 ## <a id="privacy"></a>Privacy
 
