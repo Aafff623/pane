@@ -22,6 +22,7 @@
 //! and the existing state file (UUID included) is deleted — turning it
 //! back on starts as a brand-new anonymous install.
 
+use rand_core::{OsRng, RngCore};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::collections::HashMap;
@@ -88,8 +89,7 @@ fn save_state(state: &State) {
     }
 }
 
-/// Random v4-style UUID from OS entropy (getrandom via the ring of deps we
-/// already have would be heavier — two calls to the system RNG suffice).
+/// Random v4-style UUID from the OS RNG.
 fn new_uuid() -> String {
     let mut bytes = [0u8; 16];
     getrandom_fill(&mut bytes);
@@ -112,24 +112,7 @@ fn new_uuid() -> String {
 }
 
 fn getrandom_fill(buf: &mut [u8]) {
-    // rand isn't in the tree; derive entropy from the OS UUID generator.
-    use std::time::{SystemTime, UNIX_EPOCH};
-    let mut seed = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_nanos() as u64)
-        .unwrap_or(0)
-        ^ (std::process::id() as u64).wrapping_mul(0x9E37_79B9_7F4A_7C15);
-    for chunk in buf.chunks_mut(8) {
-        // splitmix64 — statistically solid for an anonymous identifier.
-        seed = seed.wrapping_add(0x9E37_79B9_7F4A_7C15);
-        let mut z = seed;
-        z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
-        z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
-        z ^= z >> 31;
-        for (i, b) in chunk.iter_mut().enumerate() {
-            *b = (z >> (i * 8)) as u8;
-        }
-    }
+    OsRng.fill_bytes(buf);
 }
 
 // ---------------------------------------------------------------------------

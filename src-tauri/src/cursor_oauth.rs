@@ -6,6 +6,7 @@
 //! server — the poll endpoint is Cursor's own.
 
 use base64::Engine;
+use rand_core::{OsRng, RngCore};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::sync::{Mutex, OnceLock};
@@ -74,25 +75,11 @@ fn now_secs() -> i64 {
         .unwrap_or(0)
 }
 
-/// 32 bytes of entropy: RandomState is OS-seeded (ASLR/heap randomization
-/// per process) and a monotonic counter keeps successive calls distinct —
-/// verifier and uuid must not derive from each other. No new dependency.
+/// 32 bytes from the OS RNG — verifier and uuid each draw fresh entropy
+/// and must not derive from each other.
 fn random_bytes() -> [u8; 32] {
-    use std::hash::{BuildHasher, Hasher};
-    use std::sync::atomic::{AtomicU64, Ordering};
-    static COUNTER: AtomicU64 = AtomicU64::new(0);
-    let seed = std::collections::hash_map::RandomState::new().build_hasher().finish();
-    let n = COUNTER.fetch_add(1, Ordering::Relaxed);
     let mut out = [0u8; 32];
-    for (i, byte) in out.iter_mut().enumerate() {
-        let mut x = seed
-            ^ n.wrapping_mul(0x9E37_79B9_7F4A_7C15)
-            ^ ((i as u64).wrapping_mul(0xBF58_476D_1CE4_E5B9));
-        x ^= x >> 12;
-        x ^= x << 25;
-        x ^= x >> 27;
-        *byte = (x & 0xff) as u8;
-    }
+    OsRng.fill_bytes(&mut out);
     out
 }
 
