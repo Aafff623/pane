@@ -4924,13 +4924,24 @@ async fn codex_redeem_credit(
     providers::codex::redeem_credit(&pid, &credit_id).await
 }
 
-/// Update manifest endpoint: this project's own GitHub Releases
-/// `latest.json`, signed with this project's minisign key. The original
-/// upstream's trypane.xyz server and ItsJazii releases were dropped when the
-/// project detached — their builds are signed with a key this app no longer
-/// trusts, so querying them could only produce signature failures.
-fn updater_endpoint_strings() -> [String; 1] {
-    ["https://github.com/Aafff623/pane/releases/latest/download/latest.json".into()]
+/// Update manifest endpoints, tried in order. The original upstream's
+/// trypane.xyz server and ItsJazii releases were dropped when the project
+/// detached — their builds are signed with a key this app no longer trusts,
+/// so querying them could only produce signature failures.
+///
+/// First is our own edge route: the same GitHub manifest, except CN clients
+/// get the Windows installer URL rewritten to the Gitee mirror (GitHub
+/// release assets measure ~40 KB/s from Chinese networks against ~315 KB/s
+/// from Gitee). The edge route is geo-aware, so it needs no client-side
+/// branch. Second is GitHub's own manifest: tauri-plugin-updater only moves
+/// on when a request fails or answers non-2xx, so a slow-but-working edge
+/// route still wins — which is why the fast source is listed first and the
+/// reachable-everywhere source second.
+fn updater_endpoint_strings() -> [String; 2] {
+    [
+        "https://pane.threetwoa.live/update/latest.json".into(),
+        "https://github.com/Aafff623/pane/releases/latest/download/latest.json".into(),
+    ]
 }
 
 fn build_updater(app: &tauri::AppHandle) -> Result<tauri_plugin_updater::Updater, String> {

@@ -279,3 +279,59 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: gh workflow run winget.yml -f tag=$GITHUB_REF_NAME
+
+  # Mirror the Windows installer to Gitee so the edge manifest
+  # (/update/latest.json on pane.threetwoa.live) can send CN clients to a
+  # domestic host: GitHub release assets measure ~40 KB/s from Chinese
+  # networks against ~315 KB/s from Gitee (2026-10-14, 21 MB installer).
+  # The bytes are identical to the GitHub asset and the updater verifies the
+  # minisign signature client-side, so the mirror is never trusted.
+  #
+  # A missing GITEE_TOKEN fails this job loudly instead of silently skipping
+  # the mirror: a skipped mirror is indistinguishable from a working one
+  # until users notice the slow downloads (the lesson cc-switch documents in
+  # its own R2 sync).
+  #
+  # Requires: a Gitee repo (GITEE_OWNER/GITEE_REPO below) with at least one
+  # commit on GITEE_BRANCH, and a personal access token (projects scope) in
+  # the GITEE_TOKEN secret.
+  gitee-mirror:
+    needs: release
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    env:
+      GITEE_OWNER: fan-tengda
+      GITEE_REPO: pane
+      GITEE_BRANCH: master
+    steps:
+      - name: Require the Gitee token
+        env:
+          GITEE_TOKEN: ${{ secrets.GITEE_TOKEN }}
+        run: |
+          if [ -z "$GITEE_TOKEN" ]; then
+            echo "::error::GITEE_TOKEN is not set — the Gitee mirror would be skipped and every CN update would fall back to GitHub speed (~40 KB/s)."
+            exit 1
+          fi
+
+      - name: Download the Windows installer from the fresh release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          mkdir -p gitee-assets
+          gh release download "$GITHUB_REF_NAME" --pattern '*-setup.exe*' --dir gitee-assets
+          ls -la gitee-assets
+
+      - name: Publish to Gitee
+        uses: nICEnnnnnnnLee/action-gitee-release@44b412edade0c837fb0ad7d73f4674ec07c8b722 # v2.0.0
+        with:
+          gitee_action: create_release
+          gitee_owner: ${{ env.GITEE_OWNER }}
+          gitee_repo: ${{ env.GITEE_REPO }}
+          gitee_token: ${{ secrets.GITEE_TOKEN }}
+          gitee_tag_name: ${{ github.ref_name }}
+          gitee_release_name: Pane ${{ github.ref_name }}
+          gitee_release_body: 国内下载镜像（更新加速用）。完整说明见 GitHub Release：https://github.com/Aafff623/pane/releases
+          gitee_target_commitish: ${{ env.GITEE_BRANCH }}
+          gitee_upload_retry_times: 3
+          gitee_files: gitee-assets/*

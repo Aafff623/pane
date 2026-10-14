@@ -11,6 +11,19 @@
 //                       public/index.html point at this route — no client
 //                       script involved.
 //
+//   /update/latest.json the in-app updater's first endpoint. The manifest is
+//                       a few hundred bytes, but the installer it points at
+//                       is 21 MB — and GitHub release assets reach Chinese
+//                       networks at tens of KB/s (measured ~40 KB/s against
+//                       ~315 KB/s from Gitee, 2026-10-14). For CN clients
+//                       this route rewrites the Windows URL to the Gitee
+//                       mirror, leaving every other field and platform
+//                       untouched; everyone else gets the manifest as-is.
+//                       The mirror is probed before it is offered, so a
+//                       missing or broken Gitee copy costs speed, never
+//                       availability — and the app's second endpoint is
+//                       GitHub's own manifest, so this route may fail freely.
+//
 // Everything else is the static site in public/, via env.ASSETS.fetch.
 // (The workers.dev trial address is off: wrangler disables it once a
 // custom-domain route is declared.)
@@ -27,6 +40,13 @@ import { en } from "./i18n.js";
 const REPO = "Aafff623/pane";
 const RELEASES_PAGE = `https://github.com/${REPO}/releases/latest`;
 const INSTALLER = /-setup\.exe$/;
+// The Gitee mirror of the same release. The release workflow uploads the
+// Windows installer there (same bytes, same minisign signature); the updater
+// verifies the signature client-side, so this host is never trusted.
+const GITEE_REPO = "fan-tengda/pane";
+const MANIFEST_URL = `https://github.com/${REPO}/releases/latest/download/latest.json`;
+const GITEE_ASSET = (version) =>
+  `https://gitee.com/${GITEE_REPO}/releases/download/v${version}/Pane_${version}_x64-setup.exe`;
 
 // Serve English metadata in the initial HTML so search and sharing clients
 // receive the right title and canonical URL without executing site.js.
@@ -60,6 +80,60 @@ async function latestWindowsInstaller() {
   return asset?.browser_download_url ?? null;
 }
 
+// updateManifest serves the updater manifest, pointing CN clients at the
+// Gitee-mirrored installer. Requests for /update/latest.json are made by
+// pane.exe (not a browser), so request.cf is always populated; the header
+// fallback exists for local dev and tests.
+async function updateManifest(req) {
+  const upstream = await fetch(MANIFEST_URL, { cf: { cacheTtl: 300, cacheEverything: true } });
+  if (!upstream.ok) return new Response("updater manifest unavailable", { status: 502 });
+  const body = await upstream.text();
+  const source = new URL(req.url).searchParams.get("source");
+  const country = req.cf?.country ?? req.headers.get("CF-IPCountry") ?? "";
+  const wantGitee = source === "gitee" || (source !== "github" && country === "CN");
+  const plain = () => new Response(body, { headers: manifestHeaders("github") });
+  if (!wantGitee) return plain();
+  let doc;
+  try {
+    doc = JSON.parse(body);
+  } catch {
+    return plain();
+  }
+  const version = doc?.version;
+  const win = doc?.platforms?.["windows-x86_64"];
+  if (!version || typeof win?.url !== "string") return plain();
+  const mirror = GITEE_ASSET(version);
+  if (!(await giteeMirrorReady(mirror))) return plain();
+  win.url = mirror;
+  return new Response(JSON.stringify(doc), { headers: manifestHeaders("gitee") });
+}
+
+// giteeMirrorReady probes the mirror asset before it is offered. Gitee
+// answers a HEAD with a redirect to its object storage and 404 for a missing
+// attachment; anything unexpected counts as "not ready" so the caller keeps
+// the GitHub URL. The cf.cacheTtl keeps the probe off repeat requests.
+async function giteeMirrorReady(url) {
+  try {
+    const res = await fetch(url, {
+      method: "HEAD",
+      redirect: "follow",
+      cf: { cacheTtl: 600, cacheEverything: true },
+    });
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
+function manifestHeaders(via) {
+  return {
+    "content-type": "application/json; charset=utf-8",
+    "cache-control": "public, max-age=300",
+    // Debugging aid only — the updater ignores unknown headers.
+    "x-pane-manifest-via": via,
+  };
+}
+
 export default {
   async fetch(req, env) {
     const url = new URL(req.url);
@@ -72,6 +146,9 @@ export default {
         // gets the visitor to the right download.
       }
       return Response.redirect(target, 302);
+    }
+    if (url.pathname === "/update/latest.json") {
+      return updateManifest(req);
     }
     // Keep one canonical markup source. The English route is selected by the
     // host page script, while the asset request itself still resolves to the

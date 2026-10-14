@@ -204,3 +204,66 @@ test("download/windows: newest installer, else the releases page", async () => {
     globalThis.fetch = realFetch;
   }
 });
+
+test("update/latest.json: CN clients get the Gitee-mirrored installer", async () => {
+  const env = { ASSETS: { fetch: async () => new Response("assets") } };
+  const manifest = {
+    version: "9.9.9",
+    platforms: {
+      "windows-x86_64": { url: "https://github.com/x/win.exe", signature: "SIG" },
+      "darwin-aarch64": { url: "https://github.com/x/mac.dmg", signature: "SIG2" },
+    },
+  };
+  const at = async (headers = {}, search = "") =>
+    worker.fetch(new Request(`https://pane.local/update/latest.json${search}`, { headers }), env);
+  const realFetch = globalThis.fetch;
+  try {
+    const seen = [];
+    const stub = (headStatus) => async (input, init = {}) => {
+      const url = String(input);
+      seen.push(`${init.method ?? "GET"} ${url}`);
+      if (url.includes("releases/latest/download/latest.json")) {
+        return new Response(JSON.stringify(manifest), { status: 200 });
+      }
+      if (url.startsWith("https://gitee.com/")) return new Response(null, { status: headStatus });
+      throw new Error(`unexpected fetch ${url}`);
+    };
+
+    globalThis.fetch = stub(200);
+    const cn = await at({ "CF-IPCountry": "CN" });
+    assert.equal(cn.status, 200);
+    assert.equal(cn.headers.get("x-pane-manifest-via"), "gitee");
+    const body = await cn.json();
+    assert.equal(
+      body.platforms["windows-x86_64"].url,
+      "https://gitee.com/fan-tengda/pane/releases/download/v9.9.9/Pane_9.9.9_x64-setup.exe",
+      "windows URL rewritten to the mirror",
+    );
+    assert.equal(body.platforms["windows-x86_64"].signature, "SIG", "signature untouched");
+    assert.equal(body.platforms["darwin-aarch64"].url, "https://github.com/x/mac.dmg", "other platforms untouched");
+    assert.ok(seen.some((s) => s.startsWith("HEAD https://gitee.com/")), "mirror probed with HEAD");
+
+    globalThis.fetch = stub(200);
+    const us = await at({ "CF-IPCountry": "US" });
+    assert.equal(us.headers.get("x-pane-manifest-via"), "github");
+    assert.equal((await us.json()).platforms["windows-x86_64"].url, "https://github.com/x/win.exe");
+
+    globalThis.fetch = stub(404);
+    const missing = await at({ "CF-IPCountry": "CN" });
+    assert.equal(missing.headers.get("x-pane-manifest-via"), "github", "missing mirror falls back to GitHub");
+    assert.equal((await missing.json()).platforms["windows-x86_64"].url, "https://github.com/x/win.exe");
+
+    globalThis.fetch = stub(404);
+    const forced = await at({ "CF-IPCountry": "US" }, "?source=gitee");
+    assert.equal(forced.headers.get("x-pane-manifest-via"), "github", "override still requires a ready mirror");
+
+    globalThis.fetch = stub(200);
+    const forcedOff = await at({ "CF-IPCountry": "CN" }, "?source=github");
+    assert.equal(forcedOff.headers.get("x-pane-manifest-via"), "github", "source=github disables the rewrite");
+
+    globalThis.fetch = async () => new Response("nope", { status: 500 });
+    assert.equal((await at({ "CF-IPCountry": "CN" })).status, 502, "upstream failure surfaces as 502");
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+});

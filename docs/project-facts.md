@@ -256,8 +256,7 @@ Last reconciled: 2026-10-11 (Pane 0.7.0).
 
 - Signed with this project's own minisign key (private key in the
   `TAURI_SIGNING_PRIVATE_KEY` repo secret; local backup in
-  `temp/secrets/` — losing it kills update signing). The only endpoint is
-  this repo's GitHub Releases `latest.json`; the detached upstream's
+  `temp/secrets/` — losing it kills update signing). The detached upstream's
   trypane.xyz/ItsJazii endpoints were dropped. New versions raise an in-app
   popup (`maybePromptUpdate`, once per version per run) beside the footer
   update button. Since 2026-10-10 the updater follows the app-wide proxy
@@ -267,6 +266,23 @@ Last reconciled: 2026-10-11 (Pane 0.7.0).
   system-proxy users previously updated over a direct github.com link.
   Transport failures render the localized `update.networkHint`. Channel
   details: `docs/update-mechanism.md`.
+- Endpoints are tried in order and the updater only moves on when a request
+  fails or answers non-2xx (tauri-plugin-updater 2.10 source), so the fast
+  source must be listed first. Since 2026-10-14 the list is
+  `[pane.threetwoa.live/update/latest.json, GitHub latest.json]`: the edge
+  route serves the same GitHub manifest but rewrites the Windows installer
+  URL to the Gitee mirror for CN clients (`request.cf.country`, with a
+  `?source=` override for debugging), after probing that the mirror asset
+  exists — a missing mirror falls back to the GitHub URL, so it can cost
+  speed but never availability. Measured 2026-10-14 on the author's machine:
+  GitHub release asset ~37–39 KB/s (direct and proxied), own CF domain
+  ~43 KB/s, Gitee release attachment ~315 KB/s.
+- The Gitee mirror is uploaded by the `gitee-mirror` job in `release.yml`
+  (action `nICEnnnnnnnLee/action-gitee-release`, pinned) using the
+  `GITEE_TOKEN` secret; the job fails loudly when the secret is missing. It
+  needs a Gitee repo (`fan-tengda/pane`, branch `master`) that exists with at
+  least one commit. Bytes are identical to the GitHub asset and the minisign
+  signature is verified client-side, so the mirror is never trusted.
 
 ## UI facts (2026-10-04; context-menu anchoring added in 0.4.68)
 

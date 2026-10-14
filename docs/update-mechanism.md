@@ -6,12 +6,24 @@ happens when the network path fails. Release *content* rules live in
 
 ## Channel
 
-- Manifest: `https://github.com/Aafff623/pane/releases/latest/download/latest.json`
-  — the latest release's signed manifest, produced by `release.yml` on
-  every tag.
+- Endpoints, tried in order (the plugin only advances on a failed or non-2xx
+  request, so the fast source must come first):
+  1. `https://pane.threetwoa.live/update/latest.json` — the site Worker
+     serving the same GitHub manifest, except CN clients
+     (`request.cf.country`) get the Windows URL rewritten to the Gitee
+     mirror (measured 2026-10-14: GitHub asset ~40 KB/s vs Gitee ~315 KB/s
+     from a Chinese network). The mirror is probed before it is offered; a
+     missing Gitee copy falls back to the GitHub URL, so the mirror can cost
+     speed but never availability. `?source=gitee|github` overrides for
+     debugging.
+  2. `https://github.com/Aafff623/pane/releases/latest/download/latest.json`
+     — GitHub's own manifest, the reachable-everywhere fallback.
 - Installer: the manifest's `platforms["windows-x86_64"].url` points at the
-  release asset `Pane_<version>_x64-setup.exe` (NSIS), with the detached
-  minisign signature beside it (`.sig`).
+  release asset `Pane_<version>_x64-setup.exe` (NSIS) — on GitHub, or on the
+  Gitee mirror for CN clients — with the detached minisign signature beside
+  it (`.sig`). The mirror is uploaded by the `gitee-mirror` job in
+  `release.yml` (needs the `GITEE_TOKEN` secret and a Gitee repo that exists
+  with at least one commit) and holds byte-identical files.
 - Trust: the embedded per-asset signature is verified against the minisign
   public key baked into `tauri.conf.json` (`plugins.updater.pubkey`). The
   private signing key lives in the `TAURI_SIGNING_PRIVATE_KEY` repo secret
@@ -53,12 +65,14 @@ happens when the network path fails. Release *content* rules live in
   installer download intentionally has no total timeout — the plugin's
   download client is unbounded, so a slow download progresses instead of
   dying at an arbitrary cap.
-- The plugin tries multiple endpoints in order; today there is exactly one.
-  A CN-reachable mirror manifest (e.g. the site's Cloudflare Worker
-  proxying `latest.json`) is the evaluated next step (T-0030). Note the
-  installer URL inside the manifest would still point at GitHub, so a
-  mirror alone only fixes the check leg unless the worker also proxies
-  assets.
+- The CN mirror (2026-10-14) fixes the check leg and the asset leg at once:
+  the edge route rewrites the installer URL, not just the manifest source —
+  a manifest mirror alone would still hand out a GitHub asset URL. Design
+  borrowed from cc-switch (`sync-r2.yml`: custom-domain manifest first,
+  GitHub second, hard-fail when the mirror secrets are missing); the
+  difference is geo-routing via `request.cf.country` instead of a single
+  global mirror, so non-CN clients keep GitHub's speed. macOS/Linux entries
+  stay on GitHub — the AppImage exceeds Gitee's 100 MB per-file limit.
 
 ## Known limits
 
