@@ -4,7 +4,7 @@
 
 **Blocked by:** None (can start immediately)
 
-**Status:** ready-for-agent
+**Status:** implemented（2026-10-15，见对应 commit）
 
 - [ ] AGENTS.md 项目地图中 main.ts 条目不再含具体行数（改相对描述）
 - [ ] privacy.md 遥测审计入口从「单一文件」改为指向 telemetry 模块与命令层 payload 构造两处

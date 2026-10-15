@@ -4,7 +4,7 @@
 
 **Blocked by:** None (can start immediately)
 
-**Status:** ready-for-agent
+**Status:** implemented（2026-10-15，见对应 commit）
 
 - [ ] ru 字典补齐 43 个缺失键（皮肤 5、页脚 onenewapi 9、设置 onenewapi 28、metric.expiry 1——按 en 语义译俄语）
 - [ ] en 与 zh 字典各补 1 个 ru 独有键（stepfunPlan 凭据提示），三字典完全对齐

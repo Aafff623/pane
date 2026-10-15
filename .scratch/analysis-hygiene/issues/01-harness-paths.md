@@ -4,7 +4,7 @@
 
 **Blocked by:** None (can start immediately)
 
-**Status:** ready-for-agent
+**Status:** implemented（2026-10-15，见对应 commit）
 
 - [ ] harness 清单新增 tray_projection 与 telemetry 两个模块的 `#[path]` 条目
 - [ ] parse-tests `cargo test`（去代理环境）较 673 基线净增 ≥39 个通过（26+13）

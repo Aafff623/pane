@@ -4,7 +4,7 @@
 
 **Blocked by:** None (can start immediately)
 
-**Status:** ready-for-agent
+**Status:** implemented（2026-10-15，见对应 commit）
 
 - [ ] refresh-ux spec 增补一节：renderAll 直接调用点归拢到调度器/入口加 hidden 早退，注明证据来源与分析包编号
 - [ ] 不改动 refresh-ux spec 既有内容与票状态

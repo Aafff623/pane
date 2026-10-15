@@ -4,7 +4,7 @@
 
 **Blocked by:** None (can start immediately)
 
-**Status:** ready-for-agent
+**Status:** implemented（2026-10-15，见对应 commit）
 
 - [ ] package-lock.json 从仓库删除（.gitignore 无需新增条目——目标是消灭而非忽略）
 - [ ] CI 前端 job 改为 pnpm 安装（frozen-lockfile）+ pnpm 构建（带 pnpm action-setup）

@@ -4,7 +4,7 @@
 
 **Blocked by:** None (can start immediately)
 
-**Status:** ready-for-agent
+**Status:** implemented（2026-10-15，见对应 commit）
 
 - [ ] 别名归一化步骤从汇总视图内联提升为明细行与汇总共用的归一化点
 - [ ] 明细行构造对同天同源别名折叠为一行（保留原聚合语义，不丢模型明细）

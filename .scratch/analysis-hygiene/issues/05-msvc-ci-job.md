@@ -4,7 +4,7 @@
 
 **Blocked by:** 04（同一 ci.yml，串行化编辑避免冲突）
 
-**Status:** ready-for-agent
+**Status:** implemented（2026-10-15，见对应 commit）
 
 - [ ] ci.yml 新增独立 job：windows-latest + stable MSVC toolchain + rust-cache + src-tauri 目录 cargo test
 - [ ] job 与 parse-tests job 相互独立，任一失败都能单独定位

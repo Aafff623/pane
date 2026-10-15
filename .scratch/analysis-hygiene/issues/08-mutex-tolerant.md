@@ -4,7 +4,7 @@
 
 **Blocked by:** None (can start immediately)
 
-**Status:** ready-for-agent
+**Status:** implemented（2026-10-15，见对应 commit）
 
 - [ ] 全部非测试 `lock().unwrap()` 换为 `unwrap_or_else(|e| e.into_inner())` 容忍写法（以实现时实测清单为准，核实时点为 ~49 处、8+ 文件）
 - [ ] 已验证不可达的防御性 unwrap 不动；测试模块内不动

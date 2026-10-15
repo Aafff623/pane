@@ -1,6 +1,6 @@
 # 工程卫生批次：分析包核实后的落地（analysis-hygiene）
 
-**Status:** ready-for-agent
+**Status:** implemented（10/10 票落地 codex/analysis-hygiene 分支，2026-10-15；UI 无关项以 parse-tests 794:0:13 + tsc/vite 证据交付，CI 两项待 push 后验证）
 **来源**：`D:\code\pane-analysis-20261014\` 三轮分析包 + 08-agent-verification 独立核实（13/14 证实）+ owner 2026-10-14 深夜三拍板（P1-5=keyring 扩展、P1-2=删 package-lock 切 pnpm、批次①立即做）。
 **分支**：`codex/analysis-hygiene`（主工作树直接改，不用 worktree——owner 指定）。
 

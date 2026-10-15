@@ -4,7 +4,7 @@
 
 **Blocked by:** 01（telemetry 模块测试进 harness 后，其 13 个断言可覆盖本次改动）
 
-**Status:** ready-for-agent
+**Status:** implemented（2026-10-15，见对应 commit）
 
 - [ ] cursor 登录流的随机字节生成改用 rand_core OsRng，xorshift 展开实现删除
 - [ ] 遥测 UUID 的随机填充改用 OsRng，splitmix64 实现与「rand isn't in the tree」注释删除

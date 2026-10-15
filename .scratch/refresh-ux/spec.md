@@ -53,3 +53,8 @@
 
 - 用户拍板（2026-10-12）：方向认、可选项全要。
 - 命名沿用现状词汇：stale=降级、boot_cache=开机预热，不引入新领域词。
+
+## Amendment（2026-10-14，analysis-hygiene 批次并入）
+
+- 外部分析包核实（pane-analysis-20261014 报告 06-D5，工作区 agent 已复核）：`renderAll()` 共 49 处调用，其中约 44 处直接同步调用，绕过 `renderIfVisible`/`scheduleRender` 调度器的 `document.hidden` 挂起与 rAF 合并——popover 隐藏时一次配置变更仍触发 `#providers` 全量 innerHTML 重建。与本 spec 的「隐藏期不无谓重绘」目标同源。
+- 实施建议并入本 spec：直接调用点改走调度器，或至少在 renderAll 入口加 hidden 早退；时机随本 spec 实施一并处理，不另立票。
