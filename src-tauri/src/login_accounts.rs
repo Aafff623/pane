@@ -553,6 +553,10 @@ mod tests {
 
     /// A broken vault never loses the credential: the plaintext keeps
     /// serving reads, and the first healthy read migrates and strips.
+    /// Harness-gated: the failure injection (`secretstore::fail_puts_for`)
+    /// only exists in the harness build, and only there is the vault an
+    /// in-memory store a test may break on purpose.
+    #[cfg(feature = "harness")]
     #[test]
     fn broken_vault_keeps_plaintext_and_migrates_when_healthy() {
         let base = std::env::temp_dir().join(format!("pane-login-vaultfail-{}", std::process::id()));

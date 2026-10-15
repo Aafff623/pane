@@ -5735,9 +5735,17 @@ mod tests {
 
     #[test]
     fn updater_points_at_own_github_releases() {
+        // Edge-first ladder (CN mirror + direct edge), the project's own
+        // GitHub releases last; no upstream project endpoint anywhere.
+        let endpoints = updater_endpoint_strings();
+        assert_eq!(endpoints.len(), 3, "ladder shape: {endpoints:?}");
         assert_eq!(
-            updater_endpoint_strings(),
-            ["https://github.com/Aafff623/pane/releases/latest/download/latest.json".to_string()]
+            endpoints.last().unwrap(),
+            "https://github.com/Aafff623/pane/releases/latest/download/latest.json"
+        );
+        assert!(
+            endpoints.iter().all(|e| !e.contains("ItsJazii")),
+            "an upstream endpoint survived: {endpoints:?}"
         );
     }
 
