@@ -41,6 +41,7 @@ import bochaIcon from "./assets/providers/bocha.svg?raw";
 import tavilyIcon from "./assets/providers/tavily.svg?raw";
 import firecrawlIcon from "./assets/providers/firecrawl.svg?raw";
 import braveIcon from "./assets/providers/brave.svg?raw";
+import giphyIcon from "./assets/providers/giphy.svg?raw";
 import apigotoIcon from "./assets/providers/apigoto.svg?raw";
 import shandianshuoIcon from "./assets/providers/shandianshuo.svg?raw";
 import { providerDefinition, providerFamily } from "./providerCatalog";
@@ -131,6 +132,7 @@ const VISUALS: Readonly<Record<string, ProviderVisual>> = {
   tavily: { iconKey: "tavily", iconSvg: tavilyIcon },
   firecrawl: { iconKey: "firecrawl", iconSvg: firecrawlIcon },
   brave: { iconKey: "brave", iconSvg: braveIcon },
+  giphy: { iconKey: "giphy", iconSvg: giphyIcon },
   apigoto: { iconKey: "apigoto", iconSvg: apigotoIcon },
   amp: { iconKey: "amp", iconSvg: ampIcon },
   bedrock: { iconKey: "bedrock", iconSvg: bedrockIcon },

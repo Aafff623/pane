@@ -1080,6 +1080,8 @@ const en: Dict = {
 "customize.cred.clinepass": "ClinePass subscription — paste an sk- API key (app.cline.bot → Account → API Keys)",
   "customize.cred.sensenova": "SenseNova Token Plan — paste the session access token (refresh token supported)",
 "customize.cred.stepfunPlan": "Independent Step Plan session — paste the StepFun session token",
+  "customize.cred.giphy":
+    "Paste your GIPHY developer-dashboard access_token — NOT the API key (the stats API rejects app keys). Get it from developers.giphy.com → DevTools → Application → Cookies → access_token.",
   "customize.cred.shandianshuo": "Read the signed-in Shandianshuo desktop session",
   "customize.stepfunPlanLogin": "Open StepFun login",
   "customize.stepfunPlanLoginHelp": "Account + password lets Pane renew the 30-minute session automatically; a pasted session token also works. The password is stored only in the local credential file.",
@@ -2175,6 +2177,8 @@ const zh: Dict = {
 "customize.cred.clinepass": "ClinePass 订阅 — 粘贴 sk- API key（app.cline.bot → Account → API Keys 创建）",
   "customize.cred.sensenova": "商汤 Token Plan — 粘贴会话 access token（支持 refresh token 自动续期）",
 "customize.cred.stepfunPlan": "独立的 Step Plan 会话 — 请粘贴 StepFun 会话令牌",
+  "customize.cred.giphy":
+    "粘贴 GIPHY 开发者面板的 access_token——不是 API key（统计接口会拒绝应用密钥）。获取：developers.giphy.com → F12 → Application → Cookies → access_token。",
   "customize.cred.shandianshuo": "读取已登录的闪电说桌面端会话",
   "customize.stepfunPlanLogin": "打开 StepFun 登录",
   "customize.stepfunPlanLoginHelp": "填入账号密码后 Pane 自动续期会话（30 分钟自动换新）；也支持只粘贴会话令牌。密码仅保存在本机凭据文件。",
@@ -3262,6 +3266,8 @@ const ru: Dict = {
     "Сначала используется сохранённый в Pane или переданный через переменную окружения Kimi Coding API-ключ; OAuth Kimi Code CLI используется только без API-ключа",
   "customize.cred.stepfun": "Сам ничего не читает — вставьте ключ (или задайте STEPFUN_API_KEY)",
   "customize.cred.stepfunPlan": "Отдельная сессия Step Plan — вставьте токен сессии StepFun",
+  "customize.cred.giphy":
+    "Вставьте access_token панели разработчика GIPHY — НЕ API-ключ (статистика отклоняет ключи приложений). developers.giphy.com → DevTools → Application → Cookies → access_token.",
     "customize.cred.apigoto": "Подписка APIGOTO — вставьте sk- API key (консоль www.apigoto.com)",
   "customize.cred.amp": "Amp — вставьте API key в настройках",
   "customize.cred.bedrock": "AWS Bedrock — читается из локального входа на этой машине",

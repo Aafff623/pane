@@ -7035,6 +7035,9 @@ const KEY_PROVIDERS = new Set(
 /// OAuth flow, local = its own CLI/desktop sign-in.
 type CredMethod = "paste" | "oauth" | "local";
 const PROVIDER_CRED_INFO: Record<string, { auto: string; methods: CredMethod[] }> = {
+  // GIPHY 的凭据是开发者面板的 access_token（不是 API key）：面板接口只认
+  // 「面板用户」身份，用 API key 会被 403 Not a Partner Hub User 拒绝。
+  giphy: { auto: "customize.cred.giphy", methods: ["paste"] },
   claude: { auto: "customize.cred.claude", methods: ["local"] },
   codex: { auto: "customize.cred.codex", methods: ["local", "oauth"] },
   cursor: { auto: "customize.cred.cursor", methods: ["local"] },

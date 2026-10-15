@@ -451,6 +451,17 @@ const PROVIDER_DEFINITIONS: &[ProviderDefinition] = &[
         category: ProviderCategory::Mcp,
     },
     ProviderDefinition {
+        family_id: "giphy",
+        display_name: "GIPHY",
+        query_kind: QueryKind::NativeBalance,
+        // Credential is the developer-dashboard access_token, pasted through
+        // the same key lane (keyring-backed) as every other provider.
+        supports_api_key: true,
+        supports_extra_accounts: false,
+        icon_key: "giphy",
+        category: ProviderCategory::Mcp,
+    },
+    ProviderDefinition {
         family_id: "amp",
         display_name: "Amp",
         query_kind: QueryKind::NativeBalance,
@@ -826,6 +837,7 @@ mod tests {
             "clawsgo",
             "clinepass",
             "apigoto",
+            "giphy",
             "amp",
             "chutes",
             "deepgram",

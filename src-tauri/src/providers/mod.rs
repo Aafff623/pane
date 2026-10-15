@@ -20,6 +20,7 @@ pub mod devin;
 pub mod doubao;
 pub mod elevenlabs;
 pub mod factory;
+pub mod giphy;
 pub mod grok;
 pub mod groq;
 pub mod hermes;
