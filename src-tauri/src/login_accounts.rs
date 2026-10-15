@@ -10,10 +10,14 @@
 //! accounts.rs), so usage history and layout stay attached across
 //! re-logins and renames.
 //!
-//! Tokens live in `%APPDATA%\Pane\login-accounts\<family>.json`, the same
-//! file-based shape as the sibling codex store. Family-specific material
-//! that a login flow captured (idc region, client ids, profile ARNs…)
-//! rides in [`LoginAccount::extra`] — the store stays schema-agnostic.
+//! Tokens live in the OS credential vault (one `token:login/<card_id>`
+//! slot per account, see secretstore.rs); the per-family JSON file under
+//! `%APPDATA%\Pane\login-accounts\` keeps only non-secrets (labels, ids,
+//! expiry, extra). Legacy plaintext token entries migrate to the vault on
+//! first read — the vault write must succeed before the file loses them.
+//! Family-specific material that a login flow captured (idc region,
+//! client ids, profile ARNs…) rides in [`LoginAccount::extra`] — the
+//! store stays schema-agnostic.
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -64,19 +68,98 @@ pub fn parse_accounts(raw: &str) -> Vec<LoginAccount> {
     serde_json::from_str(raw.trim_start_matches('\u{feff}')).unwrap_or_default()
 }
 
+/// Vault slot for one card's tokens — the card id already carries the
+/// family, so the scope is unique per account across all stores.
+fn vault_scope(family: &str, account: &LoginAccount) -> String {
+    format!("login/{}", card_id_for_account(family, account))
+}
+
+/// Read-through to the vault: each account's tokens come from the OS
+/// credential store when it has them; a plaintext file entry migrates on
+/// first sight (vault write first, then the file keeps only non-secrets).
+/// A broken vault keeps the file working as the fallback.
 pub fn load_from(base: &Path, family: &str) -> Vec<LoginAccount> {
     let raw = std::fs::read_to_string(accounts_file(base, family)).unwrap_or_default();
     let mut out = parse_accounts(&raw);
+    let mut strip_file: Vec<usize> = Vec::new();
+    for (idx, account) in out.iter_mut().enumerate() {
+        let scope = vault_scope(family, account);
+        if let Some(triple) = crate::secretstore::get_triple(&scope) {
+            account.access_token = triple.access_token;
+            account.refresh_token = triple.refresh_token;
+            account.id_token = triple.id_token;
+            // The file copy (if any tokens linger) is stale — strip it too.
+            strip_file.push(idx);
+            continue;
+        }
+        if !account.access_token.is_empty() {
+            let triple = crate::secretstore::TokenTriple {
+                access_token: account.access_token.clone(),
+                refresh_token: account.refresh_token.clone(),
+                id_token: account.id_token.clone(),
+            };
+            if crate::secretstore::put_triple(&scope, &triple) {
+                strip_file.push(idx);
+            }
+        }
+    }
+    if !strip_file.is_empty() {
+        let mut file_rows = parse_accounts(&raw);
+        for idx in strip_file {
+            if let Some(row) = file_rows.get_mut(idx) {
+                row.access_token.clear();
+                row.refresh_token.clear();
+                row.id_token.clear();
+            }
+        }
+        // Best-effort: a failed rewrite keeps the plaintext fallback.
+        if let Ok(body) = serde_json::to_string_pretty(&file_rows) {
+            let _ = crate::accounts::write_json_atomic(&accounts_file(base, family), body);
+        }
+    }
     out.retain(|a| !a.account_id.trim().is_empty() && !a.access_token.trim().is_empty());
     out
 }
 
+/// Vault-first save: tokens that reach the vault are stripped from the
+/// persisted JSON; entries the vault refused keep their plaintext (the
+/// fallback keeps working). Vault slots of cards that left the list are
+/// removed so a deleted account leaves nothing behind.
 pub fn save_to(base: &Path, family: &str, accounts: &[LoginAccount]) -> Result<(), String> {
+    let mut rows: Vec<LoginAccount> = accounts.to_vec();
+    let keep_scopes: Vec<String> = rows
+        .iter()
+        .map(|a| vault_scope(family, a))
+        .collect();
+    for (row, scope) in rows.iter_mut().zip(&keep_scopes) {
+        if row.access_token.is_empty() {
+            continue;
+        }
+        let triple = crate::secretstore::TokenTriple {
+            access_token: row.access_token.clone(),
+            refresh_token: row.refresh_token.clone(),
+            id_token: row.id_token.clone(),
+        };
+        if crate::secretstore::put_triple(scope, &triple) {
+            row.access_token.clear();
+            row.refresh_token.clear();
+            row.id_token.clear();
+        }
+    }
+    // GC: drop vault slots for cards no longer in the file.
+    for old in parse_accounts(
+        &std::fs::read_to_string(accounts_file(base, family)).unwrap_or_default(),
+    ) {
+        let scope = vault_scope(family, &old);
+        if !keep_scopes.contains(&scope) {
+            crate::secretstore::remove(&crate::secretstore::token_key(&scope));
+        }
+    }
     std::fs::create_dir_all(base.join("login-accounts"))
         .map_err(|e| format!("create login-accounts dir: {e}"))?;
     crate::accounts::write_json_atomic(
         &accounts_file(base, family),
-        serde_json::to_string_pretty(accounts).unwrap_or_default(),
+        serde_json::to_string_pretty(&rows).unwrap_or_default(),
     )
     .map_err(|e| format!("write {family} login accounts: {e}"))
 }
@@ -424,5 +507,82 @@ mod tests {
             missing.is_empty(),
             "login-only families missing from LOGIN_FAMILIES: {missing:?}"
         );
+    }
+
+    /// The vault owns the tokens; the file keeps only non-secrets. Saving
+    /// strips the file where the vault took over, a later load merges the
+    /// pair back, and dropping the account GCs the vault slot.
+    #[test]
+    fn vault_holds_tokens_and_the_file_keeps_nonsecrets() {
+        let base = std::env::temp_dir().join(format!("pane-login-vault-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        let mut acct = account("9001", "Named");
+        acct.access_token = "gho_vault_pair".into();
+        acct.refresh_token = "rt_vault_pair".into();
+        let scope = crate::secretstore::token_key(&format!(
+            "login/{}",
+            card_id_for_account("copilot", &acct)
+        ));
+        crate::secretstore::remove(&scope);
+        save_to(&base, "copilot", &[acct.clone()]).unwrap();
+        let file = base.join("login-accounts").join("copilot.json");
+        let raw = std::fs::read_to_string(&file).unwrap();
+        assert!(raw.contains("Named"), "labels stay behind: {raw}");
+        assert!(!raw.contains("gho_vault_pair"), "tokens must not persist: {raw}");
+        assert_eq!(
+            crate::secretstore::get_triple(&format!(
+                "login/{}",
+                card_id_for_account("copilot", &acct)
+            ))
+            .map(|t| t.access_token),
+            Some("gho_vault_pair".to_string())
+        );
+        let back = load_from(&base, "copilot");
+        assert_eq!(back.len(), 1);
+        assert_eq!(back[0].access_token, "gho_vault_pair");
+        assert_eq!(back[0].label, "Named");
+        // A card removed from the save list leaves nothing in the vault.
+        save_to(&base, "copilot", &[]).unwrap();
+        assert!(matches!(
+            crate::secretstore::get(&scope),
+            crate::secretstore::Secret::Missing
+        ));
+        crate::secretstore::remove(&scope);
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    /// A broken vault never loses the credential: the plaintext keeps
+    /// serving reads, and the first healthy read migrates and strips.
+    #[test]
+    fn broken_vault_keeps_plaintext_and_migrates_when_healthy() {
+        let base = std::env::temp_dir().join(format!("pane-login-vaultfail-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        let mut acct = account("9002", "Fallback");
+        acct.access_token = "gho_fallback".into();
+        let scope = crate::secretstore::token_key(&format!(
+            "login/{}",
+            card_id_for_account("copilot", &acct)
+        ));
+        crate::secretstore::remove(&scope);
+        std::fs::create_dir_all(base.join("login-accounts")).unwrap();
+        let file = base.join("login-accounts").join("copilot.json");
+        std::fs::write(&file, serde_json::to_string_pretty(&[acct.clone()]).unwrap()).unwrap();
+        // Vault writes fail for THIS slot only → tokens still served, the
+        // plaintext file stays intact as the fallback.
+        crate::secretstore::fail_puts_for(&scope);
+        let during = load_from(&base, "copilot");
+        assert_eq!(during.len(), 1);
+        assert_eq!(during[0].access_token, "gho_fallback");
+        let raw = std::fs::read_to_string(&file).unwrap();
+        assert!(raw.contains("gho_fallback"), "fallback keeps the plaintext: {raw}");
+        crate::secretstore::clear_put_failures();
+        // A healthy vault migrates on the next read and strips the file.
+        let after = load_from(&base, "copilot");
+        assert_eq!(after.len(), 1);
+        assert_eq!(after[0].access_token, "gho_fallback");
+        let raw = std::fs::read_to_string(&file).unwrap();
+        assert!(!raw.contains("gho_fallback"), "migrated file must be stripped: {raw}");
+        crate::secretstore::remove(&scope);
+        let _ = std::fs::remove_dir_all(&base);
     }
 }

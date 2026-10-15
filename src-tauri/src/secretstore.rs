@@ -36,6 +36,45 @@ pub fn archived_key(card_id: &str) -> String {
     format!("archived:{card_id}")
 }
 
+/// Login/OAuth token blobs (refresh tokens, account token pairs) live under
+/// their own namespace so they group separately from API keys in the OS
+/// vault UI. The scope is a stable, unique slug (`oauth/codex`,
+/// `login/<family>@<fnv1a>`, `searchkey/<id>`, …).
+pub fn token_key(scope: &str) -> String {
+    format!("token:{scope}")
+}
+
+/// The login-style secret triple one account card keeps in the vault.
+/// Account JSON files persist the same record with these fields emptied —
+/// the vault owns the secrets, the file owns labels, ids and expiry.
+#[derive(serde::Serialize, serde::Deserialize, Default, Clone, PartialEq, Eq, Debug)]
+pub struct TokenTriple {
+    #[serde(default)]
+    pub access_token: String,
+    #[serde(default)]
+    pub refresh_token: String,
+    #[serde(default)]
+    pub id_token: String,
+}
+
+/// One card's triple from the vault, if present.
+pub fn get_triple(scope: &str) -> Option<TokenTriple> {
+    match get(&token_key(scope)) {
+        Secret::Found(raw) => serde_json::from_str(&raw).ok(),
+        Secret::Missing | Secret::Unavailable => None,
+    }
+}
+
+/// Vault-first triple write: `true` = the vault took it and the caller may
+/// strip the file copy; `false` = vault unavailable, the caller keeps the
+/// plaintext fallback so the credential keeps working.
+pub fn put_triple(scope: &str, triple: &TokenTriple) -> bool {
+    serde_json::to_string(triple)
+        .ok()
+        .and_then(|blob| put(&token_key(scope), &blob).ok())
+        .is_some()
+}
+
 pub fn get(key: &str) -> Secret {
     backend::get(key)
 }
@@ -100,6 +139,10 @@ mod backend {
     use std::sync::Mutex;
 
     static MAP: Mutex<Option<HashMap<String, String>>> = Mutex::new(None);
+    /// Failure injection for the "broken vault" path: puts whose key starts
+    /// with this prefix fail, everything else (and every other test) is
+    /// unaffected.
+    pub(super) static FAIL_PUT_PREFIX: Mutex<Option<String>> = Mutex::new(None);
 
     pub fn get(key: &str) -> Secret {
         let guard = MAP.lock().unwrap_or_else(|e| e.into_inner());
@@ -110,8 +153,17 @@ mod backend {
     }
 
     pub fn put(key: &str, secret: &str) -> Result<(), String> {
+        if let Some(prefix) = FAIL_PUT_PREFIX
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .as_ref()
+        {
+            if key.starts_with(prefix.as_str()) {
+                return Err("injected vault failure (test)".into());
+            }
+        }
         MAP.lock()
-            .unwrap()
+            .unwrap_or_else(|e| e.into_inner())
             .get_or_insert_with(HashMap::new)
             .insert(key.to_string(), secret.to_string());
         Ok(())
@@ -122,6 +174,19 @@ mod backend {
             map.remove(key);
         }
     }
+}
+
+/// Test-only failure injection (harness backend): puts whose key starts
+/// with `prefix` fail so the broken-vault fallback paths are exercisable.
+#[cfg(feature = "harness")]
+pub fn fail_puts_for(prefix: &str) {
+    *backend::FAIL_PUT_PREFIX.lock().unwrap_or_else(|e| e.into_inner()) = Some(prefix.to_string());
+}
+
+/// Undoes [`fail_puts_for`].
+#[cfg(feature = "harness")]
+pub fn clear_put_failures() {
+    *backend::FAIL_PUT_PREFIX.lock().unwrap_or_else(|e| e.into_inner()) = None;
 }
 
 #[cfg(not(feature = "harness"))]

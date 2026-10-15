@@ -9,8 +9,10 @@
 //! account single OAuth slot imports lazily (its file stays — the default
 //! card still falls back to it).
 //!
-//! Tokens live in `%APPDATA%\Pane\codex-accounts.json`, the same
-//! file-based shape as the sibling Cursor account store.
+//! Tokens live in the OS credential vault (one `token:codex/<card_id>`
+//! slot per account, see secretstore.rs); `%APPDATA%\Pane\codex-accounts.json`
+//! keeps only non-secrets (labels, emails, expiry). Legacy plaintext token
+//! entries migrate to the vault on first read.
 
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
@@ -43,18 +45,92 @@ pub fn parse_accounts(raw: &str) -> Vec<CodexLogin> {
     serde_json::from_str(raw.trim_start_matches('\u{feff}')).unwrap_or_default()
 }
 
+/// Vault slot for one card's tokens; the card id derives from the stable
+/// (non-secret) ChatGPT account id, so the scope survives token stripping.
+fn vault_scope(account_id: &str) -> String {
+    format!("codex/{}", card_id_for_account_id(account_id))
+}
+
+/// Read-through to the vault (see login_accounts::load_from): vault tokens
+/// win, plaintext file entries migrate lazily, a broken vault falls back
+/// to the file.
 pub fn load_accounts_from(base: &Path) -> Vec<CodexLogin> {
     let raw = std::fs::read_to_string(accounts_file(base)).unwrap_or_default();
     let mut out = parse_accounts(&raw);
+    let mut strip_file: Vec<usize> = Vec::new();
+    for (idx, account) in out.iter_mut().enumerate() {
+        let scope = vault_scope(&account.account_id);
+        if let Some(triple) = crate::secretstore::get_triple(&scope) {
+            account.access_token = triple.access_token;
+            account.refresh_token = triple.refresh_token;
+            account.id_token = triple.id_token;
+            strip_file.push(idx);
+            continue;
+        }
+        if !account.access_token.is_empty() {
+            let triple = crate::secretstore::TokenTriple {
+                access_token: account.access_token.clone(),
+                refresh_token: account.refresh_token.clone(),
+                id_token: account.id_token.clone(),
+            };
+            if crate::secretstore::put_triple(&scope, &triple) {
+                strip_file.push(idx);
+            }
+        }
+    }
+    if !strip_file.is_empty() {
+        let mut file_rows = parse_accounts(&raw);
+        for idx in strip_file {
+            if let Some(row) = file_rows.get_mut(idx) {
+                row.access_token.clear();
+                row.refresh_token.clear();
+                row.id_token.clear();
+            }
+        }
+        if let Ok(body) = serde_json::to_string_pretty(&file_rows) {
+            let _ = crate::accounts::write_json_atomic(&accounts_file(base), body);
+        }
+    }
     out.retain(|a| !a.account_id.trim().is_empty() && !a.access_token.trim().is_empty());
     out
 }
 
+/// Vault-first save (see login_accounts::save_to): stripped where the
+/// vault took over, plaintext kept where it refused; vault slots of cards
+/// that left the list are removed.
 pub fn save_accounts_to(base: &Path, accounts: &[CodexLogin]) -> Result<(), String> {
+    let mut rows: Vec<CodexLogin> = accounts.to_vec();
+    let keep_scopes: Vec<String> = rows
+        .iter()
+        .map(|a| vault_scope(&a.account_id))
+        .collect();
+    for (row, scope) in rows.iter_mut().zip(&keep_scopes) {
+        if row.access_token.is_empty() {
+            continue;
+        }
+        let triple = crate::secretstore::TokenTriple {
+            access_token: row.access_token.clone(),
+            refresh_token: row.refresh_token.clone(),
+            id_token: row.id_token.clone(),
+        };
+        if crate::secretstore::put_triple(scope, &triple) {
+            row.access_token.clear();
+            row.refresh_token.clear();
+            row.id_token.clear();
+        }
+    }
+    for old in parse_accounts(
+        &std::fs::read_to_string(accounts_file(base)).unwrap_or_default(),
+    ) {
+        let scope = vault_scope(&old.account_id);
+        if !keep_scopes.contains(&scope) {
+            crate::secretstore::remove(&crate::secretstore::token_key(&scope));
+        }
+    }
     std::fs::create_dir_all(base).map_err(|e| format!("create config dir: {e}"))?;
     crate::accounts::write_json_atomic(
         &accounts_file(base),
-        serde_json::to_string_pretty(accounts).unwrap_or_default(),
+        serde_json::to_string_pretty(&rows).unwrap_or_default(),
     )
     .map_err(|e| format!("write codex accounts: {e}"))
 }
@@ -249,6 +325,32 @@ mod tests {
         let back = load_accounts_from(&base);
         assert_eq!(back.len(), 2);
         assert_eq!(back[1].label, "B");
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    /// The vault owns the tokens; the file keeps only non-secrets, and a
+    /// card removed from the save list leaves nothing in the vault.
+    #[test]
+    fn vault_holds_tokens_and_the_file_keeps_nonsecrets() {
+        let base = std::env::temp_dir().join(format!("pane-codex-vault-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        let account = login("cx-vault-1", "Vaulted");
+        let scope = crate::secretstore::token_key(&vault_scope("cx-vault-1"));
+        crate::secretstore::remove(&scope);
+        save_accounts_to(&base, &[account]).unwrap();
+        let raw = std::fs::read_to_string(accounts_file(&base)).unwrap();
+        assert!(raw.contains("Vaulted"), "labels stay behind: {raw}");
+        assert!(!raw.contains("eyJhbGciOi.access.sig"), "tokens must not persist: {raw}");
+        let back = load_accounts_from(&base);
+        assert_eq!(back.len(), 1);
+        assert_eq!(back[0].access_token, "eyJhbGciOi.access.sig");
+        // GC: an emptied save list drops the vault slot too.
+        save_accounts_to(&base, &[]).unwrap();
+        assert!(matches!(
+            crate::secretstore::get(&scope),
+            crate::secretstore::Secret::Missing
+        ));
+        crate::secretstore::remove(&scope);
         let _ = std::fs::remove_dir_all(&base);
     }
 }

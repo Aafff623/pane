@@ -25,6 +25,17 @@ All of this is auditable in the source — links go to the exact code.
   ([`src-tauri/src/providers/`](src-tauri/src/providers/) — one module per
   provider; see [docs/providers.md](docs/providers.md) for the exact files
   read and endpoints called).
+- **At-rest storage policy: the OS credential vault owns every secret Pane
+  itself persists.** API keys, OAuth/login refresh tokens, Cursor/Codex
+  account token pairs, and search/MCP keys all live in the platform's
+  native store (Windows Credential Manager via
+  [`src-tauri/src/secretstore.rs`](src-tauri/src/secretstore.rs)); the JSON
+  files under `%APPDATA%\Pane\` keep only non-secret fields (labels, ids,
+  expiry, card-id snapshots). Legacy plaintext entries migrate on first
+  read — the vault write must succeed before the file loses the secret, so
+  a broken vault degrades to the plaintext fallback instead of losing the
+  credential. Credentials Pane *discovers* (owned by other CLIs/editors)
+  stay in their own files; Pane never copies them into its stores.
 - **Multi-account discovery widens where credentials are *found*, never
   where they are *sent*.** To support second logins kept via
   `CLAUDE_CONFIG_DIR`/`CODEX_HOME`, Pane scans dot-folders in your home

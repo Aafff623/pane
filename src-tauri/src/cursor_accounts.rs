@@ -1,33 +1,138 @@
 //! Cursor account store — multi-account support for the Cursor family,
 //! mirroring cockpit-tools' cursor_account.rs (import formats included).
-//! Accounts live in %APPDATA%\Pane\cursor-accounts.json; each one carries
-//! its own token pair so its quota is queried independently of whatever
-//! account the local editor is logged into.
+//! Token pairs live in the OS credential vault (one `token:cursor/<card_id>`
+//! slot per account, see secretstore.rs); `%APPDATA%\Pane\cursor-accounts.json`
+//! keeps only non-secrets plus a card-id snapshot (the card id hashes the
+//! access token, so the snapshot routes the vault lookup once the token is
+//! gone from the file). Each account's quota is queried independently of
+//! whatever account the local editor is logged into.
 
 use crate::cursor_oauth::CursorAccount;
+use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
 fn accounts_file(base: &Path) -> PathBuf {
     base.join("cursor-accounts.json")
 }
 
-/// Tolerates a UTF-8 BOM like every other Pane JSON store.
-pub fn parse_accounts(raw: &str) -> Vec<CursorAccount> {
+/// File row: the account plus a non-secret card-id snapshot. The card id
+/// hashes the access token, so once the tokens live in the vault the file
+/// row can no longer derive it — the snapshot routes the vault lookup
+/// (same serialized shape as before: the snapshot is one additive field).
+#[derive(Serialize, Deserialize, Clone)]
+struct CursorRow {
+    #[serde(flatten)]
+    account: CursorAccount,
+    #[serde(rename = "cardId", default, skip_serializing_if = "Option::is_none")]
+    card_id: Option<String>,
+}
+
+fn parse_rows(raw: &str) -> Vec<CursorRow> {
     serde_json::from_str(raw.trim_start_matches('\u{feff}')).unwrap_or_default()
 }
 
-pub fn load_accounts_from(base: &Path) -> Vec<CursorAccount> {
-    let raw = std::fs::read_to_string(accounts_file(base)).unwrap_or_default();
-    let mut out = parse_accounts(&raw);
-    out.retain(|a| !a.access_token.trim().is_empty());
-    out
+/// Vault slot for one card's token pair, routed by the card id (a hash of
+/// the access token — non-secret, already displayed as the card identity).
+fn vault_scope(card_id: &str) -> String {
+    format!("cursor/{card_id}")
 }
 
+/// Read-through to the vault (see login_accounts::load_from): vault tokens
+/// win, plaintext rows migrate lazily, a broken vault keeps the file
+/// working. Rows whose tokens are gone everywhere are dropped, as before.
+pub fn load_accounts_from(base: &Path) -> Vec<CursorAccount> {
+    let raw = std::fs::read_to_string(accounts_file(base)).unwrap_or_default();
+    let mut rows = parse_rows(&raw);
+    // `rows` keep the merged (usable) tokens for the caller; `disk_rows` is
+    // the file-shape copy written back after a migration — the returned
+    // accounts must never be the stripped ones.
+    let mut disk_rows = rows.clone();
+    let mut dirty = false;
+    for (row, disk) in rows.iter_mut().zip(disk_rows.iter_mut()) {
+        let card = row
+            .card_id
+            .clone()
+            .unwrap_or_else(|| card_id_for_account(&row.account));
+        let scope = vault_scope(&card);
+        if let Some(triple) = crate::secretstore::get_triple(&scope) {
+            row.account.access_token = triple.access_token;
+            if !triple.refresh_token.is_empty() {
+                row.account.refresh_token = Some(triple.refresh_token);
+            }
+            if row.card_id.is_none() {
+                disk.card_id = Some(card);
+                dirty = true;
+            }
+            continue;
+        }
+        if !row.account.access_token.is_empty() {
+            let triple = crate::secretstore::TokenTriple {
+                access_token: row.account.access_token.clone(),
+                refresh_token: row.account.refresh_token.clone().unwrap_or_default(),
+                id_token: String::new(),
+            };
+            if crate::secretstore::put_triple(&scope, &triple) {
+                disk.account.access_token.clear();
+                disk.account.refresh_token = None;
+                disk.card_id = Some(card);
+                dirty = true;
+            }
+        }
+    }
+    if dirty {
+        // Best-effort rewrite: keeps only the non-secret row shape.
+        if let Ok(body) = serde_json::to_string_pretty(&disk_rows) {
+            let _ = crate::accounts::write_json_atomic(&accounts_file(base), body);
+        }
+    }
+    rows.into_iter()
+        .map(|r| r.account)
+        .filter(|a| !a.access_token.trim().is_empty())
+        .collect()
+}
+
+/// Vault-first save (see login_accounts::save_to): the pair reaches the
+/// vault and the file row keeps the card-id snapshot with empty tokens;
+/// entries the vault refused keep their plaintext. Vault slots of cards
+/// that left the list are removed when their card id is still derivable.
 pub fn save_accounts_to(base: &Path, accounts: &[CursorAccount]) -> Result<(), String> {
+    let mut rows: Vec<CursorRow> = accounts
+        .iter()
+        .map(|a| CursorRow { account: a.clone(), card_id: Some(card_id_for_account(a)) })
+        .collect();
+    for row in rows.iter_mut() {
+        if row.account.access_token.is_empty() {
+            continue;
+        }
+        let card = row.card_id.clone().unwrap_or_default();
+        let triple = crate::secretstore::TokenTriple {
+            access_token: row.account.access_token.clone(),
+            refresh_token: row.account.refresh_token.clone().unwrap_or_default(),
+            id_token: String::new(),
+        };
+        if crate::secretstore::put_triple(&vault_scope(&card), &triple) {
+            row.account.access_token.clear();
+            row.account.refresh_token = None;
+        }
+    }
+    for old in parse_rows(
+        &std::fs::read_to_string(accounts_file(base)).unwrap_or_default(),
+    ) {
+        // A pre-snapshot legacy row with tokens still names its card (via
+        // the token); a stripped row without a snapshot can't — its slot
+        // stays behind, inert.
+        let card = old
+            .card_id
+            .unwrap_or_else(|| card_id_for_account(&old.account));
+        if rows.iter().any(|r| r.card_id.as_deref() == Some(card.as_str())) {
+            continue;
+        }
+        crate::secretstore::remove(&crate::secretstore::token_key(&vault_scope(&card)));
+    }
     std::fs::create_dir_all(base).map_err(|e| format!("create config dir: {e}"))?;
     crate::accounts::write_json_atomic(
         &accounts_file(base),
-        serde_json::to_string_pretty(accounts).unwrap_or_default(),
+        serde_json::to_string_pretty(&rows).unwrap_or_default(),
     )
     .map_err(|e| format!("write cursor accounts: {e}"))
 }
@@ -280,5 +385,40 @@ mod tests {
     fn masking_shows_head_and_tail() {
         assert_eq!(mask_token("abcd1234567890wxyz"), "abcd…wxyz");
         assert_eq!(mask_token("ab"), "…");
+    }
+
+    /// The vault owns the token pair; the file row keeps the non-secrets
+    /// plus the card-id snapshot, and the merged account still mints the
+    /// same card id (the snapshot routes the lookup once the token left
+    /// the file).
+    #[test]
+    fn vault_roundtrip_keeps_the_card_snapshot() {
+        let base = std::env::temp_dir().join(format!("pane-cursor-vault-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        let account = CursorAccount {
+            label: "CursorVault".into(),
+            email: "cv@x.com".into(),
+            auth_id: Some("au-cv-1".into()),
+            access_token: "tok-cursor-vault-1".into(),
+            refresh_token: Some("rt-cv-1".into()),
+            membership: None,
+            captured_at: 0,
+        };
+        let card = card_id_for_account(&account);
+        let scope = crate::secretstore::token_key(&vault_scope(&card));
+        crate::secretstore::remove(&scope);
+        save_accounts_to(&base, &[account]).unwrap();
+        let raw = std::fs::read_to_string(accounts_file(&base)).unwrap();
+        assert!(raw.contains("\"cardId\""), "snapshot rides in the file row: {raw}");
+        assert!(raw.contains(&card), "snapshot must carry the card id: {raw}");
+        assert!(!raw.contains("tok-cursor-vault-1"), "tokens must not persist: {raw}");
+        assert!(raw.contains("CursorVault"), "labels stay behind: {raw}");
+        let back = load_accounts_from(&base);
+        assert_eq!(back.len(), 1);
+        assert_eq!(back[0].access_token, "tok-cursor-vault-1");
+        assert_eq!(back[0].refresh_token.as_deref(), Some("rt-cv-1"));
+        assert_eq!(card_id_for_account(&back[0]), card, "card identity must be stable");
+        crate::secretstore::remove(&scope);
+        let _ = std::fs::remove_dir_all(&base);
     }
 }

@@ -2,10 +2,13 @@
 //!
 //! Scope: Codex (OpenAI), Grok (xAI), and Copilot (GitHub) — the three
 //! providers whose device code endpoints are proven (same public client ids
-//! the CLIs themselves use). Tokens live in %APPDATA%\Pane\oauth\<provider>.json
-//! and nowhere else: never in the repo, never in logs, and the CLI's own
-//! credential files are never written from here (refresh writes back to
-//! Pane's file only).
+//! the CLIs themselves use). Tokens live in the OS credential vault
+//! (Windows Credential Manager; see secretstore.rs) and nowhere else: never
+//! in the repo, never in logs. Legacy installs kept a plaintext
+//! %APPDATA%\Pane\oauth\<provider>.json — it migrates to the vault on
+//! first read and is deleted only after the vault write succeeded. The
+//! CLI's own credential files are never written from here (refresh writes
+//! back to Pane's store only).
 //!
 //! Flow per provider:
 //! 1. `start` asks the vendor for a device code and returns the user code
@@ -157,9 +160,26 @@ fn file_path(dir: &Path, provider: &str) -> PathBuf {
     dir.join(format!("{provider}.json"))
 }
 
+fn vault_key(provider: &str) -> String {
+    crate::secretstore::token_key(&format!("oauth/{provider}"))
+}
+
 pub fn load_from(dir: &Path, provider: &str) -> Option<StoredTokens> {
+    // Vault first: the OS credential store owns the tokens; the legacy
+    // plaintext file is read only when the vault has nothing (or is down).
+    if let crate::secretstore::Secret::Found(raw) = crate::secretstore::get(&vault_key(provider)) {
+        if let Ok(tokens) = serde_json::from_str::<StoredTokens>(&raw) {
+            return Some(tokens);
+        }
+    }
     let raw = std::fs::read_to_string(file_path(dir, provider)).ok()?;
-    serde_json::from_str(&raw).ok()
+    let tokens: StoredTokens = serde_json::from_str(&raw).ok()?;
+    // Lazy migration — the vault write must succeed BEFORE the plaintext
+    // file is dropped, so a broken vault keeps the file working.
+    if crate::secretstore::put(&vault_key(provider), &raw).is_ok() {
+        let _ = std::fs::remove_file(file_path(dir, provider));
+    }
+    Some(tokens)
 }
 
 /// The stored Pane OAuth credential for a provider, if any.
@@ -173,11 +193,18 @@ pub fn label(provider: &str) -> Option<String> {
     load(provider).and_then(|t| t.label)
 }
 
-/// Atomic write (tmp + rename), like the CLI credential write-backs do.
+/// Vault-first credential write. With the vault up, the token pair lives
+/// ONLY in the OS credential store and the legacy file is removed; with the
+/// vault down, the atomic plaintext write keeps sign-in working (the next
+/// successful load migrates it).
 fn save_to(dir: &Path, provider: &str, tokens: &StoredTokens) -> Result<(), String> {
+    let body = serde_json::to_string_pretty(tokens).map_err(|e| format!("serialize: {e}"))?;
+    if crate::secretstore::put(&vault_key(provider), &body).is_ok() {
+        let _ = std::fs::remove_file(file_path(dir, provider));
+        return Ok(());
+    }
     std::fs::create_dir_all(dir).map_err(|e| format!("create oauth dir: {e}"))?;
     let path = file_path(dir, provider);
-    let body = serde_json::to_string_pretty(tokens).map_err(|e| format!("serialize: {e}"))?;
     let tmp = path.with_extension("json.tmp");
     std::fs::write(&tmp, body)
         .and_then(|_| {
@@ -193,10 +220,12 @@ fn save(provider: &str, tokens: &StoredTokens) -> Result<(), String> {
     save_to(&oauth_dir(), provider, tokens)
 }
 
-/// `oauth_logout`: delete Pane's OAuth file for the provider. The CLI's
-/// own credentials are untouched.
+/// `oauth_logout`: delete Pane's stored OAuth credential (vault entry and
+/// any legacy file) for the provider. The CLI's own credentials are
+/// untouched.
 pub fn logout(provider: &str) -> Result<(), String> {
     check_provider(provider)?;
+    crate::secretstore::remove(&vault_key(provider));
     let path = file_path(&oauth_dir(), provider);
     if path.exists() {
         std::fs::remove_file(&path).map_err(|e| format!("remove oauth file: {e}"))?;
@@ -1059,6 +1088,15 @@ mod tests {
         dir
     }
 
+    /// The vault-touching tests below share the process-global harness
+    /// backend (cargo runs tests in parallel threads) and several use the
+    /// same `oauth:codex` / `oauth:grok` slots — serialize them.
+    static VAULT_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    fn vault_guard() -> std::sync::MutexGuard<'static, ()> {
+        VAULT_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
     #[test]
     fn endpoint_constants_match_the_cli_clients() {
         assert_eq!(CODEX_CLIENT_ID, "app_EMoamEEZ73f0CkXaXp7hrann");
@@ -1117,7 +1155,10 @@ mod tests {
 
     #[test]
     fn save_load_logout_roundtrip() {
+        let _vault = vault_guard();
         let dir = tmp_dir("roundtrip");
+        let scope = vault_key("codex");
+        crate::secretstore::remove(&scope);
         let tokens = StoredTokens {
             access_token: "access".into(),
             refresh_token: "refresh".into(),
@@ -1127,13 +1168,86 @@ mod tests {
             id_token: None,
         };
         save_to(&dir, "codex", &tokens).unwrap();
+        // Vault-first save leaves no plaintext file behind.
+        assert!(!file_path(&dir, "codex").exists());
         assert_eq!(load_from(&dir, "codex"), Some(tokens));
+        let grok_scope = vault_key("grok");
+        crate::secretstore::remove(&grok_scope);
         assert!(load_from(&dir, "grok").is_none());
         // Corrupt JSON reads as absent, never as a panic.
         std::fs::write(file_path(&dir, "grok"), "{not json").unwrap();
         assert!(load_from(&dir, "grok").is_none());
-        std::fs::remove_file(file_path(&dir, "codex")).unwrap();
+        // Logout clears the vault slot too.
+        logout("codex").unwrap();
         assert!(load_from(&dir, "codex").is_none());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A legacy plaintext file migrates to the vault on first read, and the
+    /// file disappears only after the vault write succeeded.
+    #[test]
+    fn legacy_plaintext_file_migrates_on_load() {
+        let _vault = vault_guard();
+        let dir = tmp_dir("migrate");
+        let scope = vault_key("grok");
+        crate::secretstore::remove(&scope);
+        let tokens = StoredTokens {
+            access_token: "a".into(),
+            refresh_token: "r".into(),
+            expires_at: "2026-09-03T12:00:00+00:00".into(),
+            label: None,
+            account_id: None,
+            id_token: None,
+        };
+        std::fs::write(
+            file_path(&dir, "grok"),
+            serde_json::to_string_pretty(&tokens).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(load_from(&dir, "grok"), Some(tokens.clone()));
+        // The vault owns the credential; the plaintext file is gone.
+        assert!(matches!(
+            crate::secretstore::get(&scope),
+            crate::secretstore::Secret::Found(_)
+        ));
+        assert!(!file_path(&dir, "grok").exists());
+        // Second load answers from the vault alone.
+        assert_eq!(load_from(&dir, "grok"), Some(tokens));
+        crate::secretstore::remove(&scope);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A vault entry beats a stale plaintext file (post-rotation state).
+    #[test]
+    fn vault_entry_wins_over_the_file() {
+        let _vault = vault_guard();
+        let dir = tmp_dir("vaultwins");
+        let scope = vault_key("codex");
+        crate::secretstore::remove(&scope);
+        let vaulted = StoredTokens {
+            access_token: "fresh".into(),
+            refresh_token: "fresh-r".into(),
+            expires_at: "2026-09-04T12:00:00+00:00".into(),
+            label: None,
+            account_id: None,
+            id_token: None,
+        };
+        let stale = StoredTokens {
+            access_token: "stale".into(),
+            refresh_token: "stale-r".into(),
+            expires_at: "2026-09-03T12:00:00+00:00".into(),
+            label: None,
+            account_id: None,
+            id_token: None,
+        };
+        crate::secretstore::put(&scope, &serde_json::to_string(&vaulted).unwrap()).unwrap();
+        std::fs::write(
+            file_path(&dir, "codex"),
+            serde_json::to_string_pretty(&stale).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(load_from(&dir, "codex"), Some(vaulted));
+        crate::secretstore::remove(&scope);
         let _ = std::fs::remove_dir_all(&dir);
     }
 

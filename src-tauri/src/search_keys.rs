@@ -36,7 +36,7 @@ pub struct SearchKey {
     pub created_at: i64,
 }
 
-#[derive(Serialize, Deserialize, Default)]
+#[derive(Serialize, Deserialize, Default, Clone)]
 struct File {
     version: u32,
     keys: Vec<SearchKey>,
@@ -52,24 +52,74 @@ fn store_path() -> PathBuf {
     crate::providers::config_dir().join("search-keys.json")
 }
 
+/// Vault slot for one key — the entry id is a service+key hash (non-secret,
+/// it IS the row identity), so the slot survives key stripping.
+fn vault_key(id: &str) -> String {
+    crate::secretstore::token_key(&format!("searchkey/{id}"))
+}
+
+/// Read-through to the vault: the OS credential store owns the key
+/// material; a plaintext file entry migrates on first sight (vault write
+/// first, then the file keeps only the non-secret row). A broken vault
+/// keeps the file working as the fallback.
 fn read_from(path: &Path) -> File {
-    std::fs::read_to_string(path)
+    let raw = std::fs::read_to_string(path).unwrap_or_default();
+    let mut file = serde_json::from_str::<File>(&raw)
         .ok()
-        .and_then(|raw| serde_json::from_str::<File>(&raw).ok())
         .filter(|f| f.version <= VERSION)
         .map(|mut f| {
             f.version = VERSION;
             f
         })
-        .unwrap_or_default()
+        .unwrap_or_default();
+    // `file` keeps the merged (usable) keys for the caller; `stripped` is
+    // the file-shape copy written back after a successful migration — the
+    // returned keys must never be the cleared ones.
+    let mut stripped = file.clone();
+    let mut dirty = false;
+    for (entry, disk) in file.keys.iter_mut().zip(stripped.keys.iter_mut()) {
+        match crate::secretstore::get(&vault_key(&entry.id)) {
+            crate::secretstore::Secret::Found(k) => entry.key = k,
+            crate::secretstore::Secret::Missing => {
+                if !entry.key.is_empty()
+                    && crate::secretstore::put(&vault_key(&entry.id), &entry.key).is_ok()
+                {
+                    disk.key.clear();
+                    dirty = true;
+                }
+            }
+            crate::secretstore::Secret::Unavailable => {}
+        }
+    }
+    if dirty {
+        if let Ok(body) = serde_json::to_string_pretty(&stripped) {
+            let _ = write_plain(path, &body);
+        }
+    }
+    file
 }
 
+/// Vault-first write: keys that reach the vault are stripped from the file;
+/// entries the vault refused keep their plaintext (the fallback keeps
+/// working).
 fn write_to(path: &Path, file: &File) -> Result<(), String> {
+    let mut rows = file.clone();
+    for entry in rows.keys.iter_mut() {
+        if entry.key.is_empty() {
+            continue;
+        }
+        if crate::secretstore::put(&vault_key(&entry.id), &entry.key).is_ok() {
+            entry.key.clear();
+        }
+    }
+    write_plain(path, &serde_json::to_string_pretty(&rows).map_err(|e| e.to_string())?)
+}
+
+fn write_plain(path: &Path, text: &str) -> Result<(), String> {
     if let Some(dir) = path.parent() {
         let _ = std::fs::create_dir_all(dir);
     }
     let tmp = path.with_extension("json.tmp");
-    let text = serde_json::to_string_pretty(file).map_err(|e| e.to_string())?;
     std::fs::write(&tmp, text).map_err(|e| format!("write search-keys.json: {e}"))?;
     std::fs::rename(&tmp, path).map_err(|e| format!("write search-keys.json: {e}"))
 }
@@ -145,6 +195,8 @@ pub fn remove(id: &str) -> Result<Vec<SearchKey>, String> {
     if file.keys.len() == before {
         return Err("no such key".into());
     }
+    // The vault slot goes with the row — a deleted key leaves nothing behind.
+    crate::secretstore::remove(&vault_key(id));
     write_to(&path, &file)?;
     Ok(file.keys)
 }
@@ -229,6 +281,44 @@ mod tests {
         let id = file.keys[0].id.clone();
         assert_eq!(file.keys[0].key, "sk-829abcdefghij7243");
         assert!(id.starts_with("bocha-"));
+        let _ = std::fs::remove_file(&path);
+    }
+
+    /// The vault owns the key material; the file keeps the non-secret row,
+    /// and reads merge the key back transparently.
+    #[test]
+    fn vault_holds_keys_and_the_file_keeps_rows() {
+        let path = temp("vault");
+        add_temp(&path, "tavily", "tv", "tvly-vault-9f21");
+        let id = read_from(&path).keys[0].id.clone();
+        let scope = vault_key(&id);
+        crate::secretstore::remove(&scope);
+        // Seed a plaintext row, then let a read migrate it.
+        std::fs::write(
+            &path,
+            serde_json::to_string_pretty(&File {
+                version: VERSION,
+                keys: vec![SearchKey {
+                    id: id.clone(),
+                    service: "tavily".into(),
+                    label: "tv".into(),
+                    key: "tvly-vault-9f21".into(),
+                    created_at: 1,
+                }],
+            })
+            .unwrap(),
+        )
+        .unwrap();
+        let merged = read_from(&path);
+        assert_eq!(merged.keys[0].key, "tvly-vault-9f21");
+        let raw = std::fs::read_to_string(&path).unwrap();
+        assert!(!raw.contains("tvly-vault-9f21"), "migrated file must be stripped: {raw}");
+        assert!(raw.contains("\"tavily\""), "the row itself stays: {raw}");
+        assert!(matches!(
+            crate::secretstore::get(&scope),
+            crate::secretstore::Secret::Found(ref v) if v == "tvly-vault-9f21"
+        ));
+        crate::secretstore::remove(&scope);
         let _ = std::fs::remove_file(&path);
     }
 }
