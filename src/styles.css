@@ -8096,3 +8096,30 @@ body.reduce-anim .spend-bolt.tier-3 svg {
 .board-empty-body { font-size: 12px; opacity: 0.75; max-width: 320px; }
 .board-empty-cta { margin-top: 6px; }
 .unconfigured-fold-head { opacity: 0.85; }
+
+/* --- First-run detection picker --- */
+.picker-box { max-width: 460px; width: min(92vw, 460px); }
+.picker-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 46vh;
+  overflow-y: auto;
+  margin: 10px 0 4px;
+  padding: 4px;
+  border: 1px solid var(--border, #3a3f4a);
+  border-radius: 10px;
+}
+.picker-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: 8px;
+  cursor: pointer;
+}
+.picker-row:hover { background: rgba(127, 127, 127, 0.12); }
+.picker-icon svg { width: 18px; height: 18px; display: block; }
+.picker-name { flex: 1; font-size: 12.5px; }
+.picker-note { font-size: 11px; opacity: 0.7; }
+.picker-empty { margin: 10px 6px; font-size: 12px; opacity: 0.75; }

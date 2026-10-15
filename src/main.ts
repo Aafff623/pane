@@ -315,6 +315,7 @@ interface Config {
   windowForm: "floating" | "panel";
   silentStart: boolean;
   hideUnconfigured: boolean;
+  setupPicked: boolean;
   startupAnimation: boolean;
   lastStartupBootId: number | null;
   overviewExpanded: string[];
@@ -370,6 +371,7 @@ const FRONTEND_CONFIG_KEYS = [
   "windowForm",
   "silentStart",
   "hideUnconfigured",
+  "setupPicked",
   "startupAnimation",
   "lastStartupBootId",
   "overviewExpanded",
@@ -584,6 +586,7 @@ let config: Config = {
   windowForm: "floating",
   silentStart: false,
   hideUnconfigured: true,
+  setupPicked: false,
   startupAnimation: true,
   lastStartupBootId: null,
   overviewExpanded: [],
@@ -4703,6 +4706,168 @@ function appPrompt(opts: {
   });
 }
 
+// ---------------------------------------------------------------------------
+// First-run detection picker — probe every provider, let the user pick
+// ---------------------------------------------------------------------------
+
+type PickerRow = { id: string; name: string; note: string; checked: boolean };
+
+/// Families that reported credentials on this machine, in probe order.
+/// Any status but `no_credentials` counts: an expired login is exactly what
+/// the user should see (the card will say "sign in again").
+function detectedFamilies(snaps: Snapshot[]): Map<string, Snapshot> {
+  const out = new Map<string, Snapshot>();
+  for (const s of snaps) {
+    if (s.id !== providerFamily(s.id)) continue;
+    if (s.status === "no_credentials") continue;
+    out.set(s.id, s);
+  }
+  return out;
+}
+
+/// The disabled list a picker confirmation produces: every known family
+/// that was NOT checked. Account-scoped entries (`family@<fp>`, per-account
+/// switches the picker does not show) and explicitly removed providers are
+/// carried over untouched.
+function disabledFromPick(checked: ReadonlySet<string>): string[] {
+  const known = new Set(ALL_PROVIDERS.map(([id]) => id));
+  const disabled = ALL_PROVIDERS.map(([id]) => id).filter((id) => !checked.has(id));
+  for (const id of config.disabled) {
+    if (!known.has(id) && !disabled.includes(id)) disabled.push(id);
+  }
+  for (const id of config.removedProviders) {
+    if (!disabled.includes(id)) disabled.push(id);
+  }
+  return disabled;
+}
+
+/// The picker itself: the confirm overlay with a scrollable checklist.
+/// Resolves the checked ids, or null when the user dismissed (Esc /
+/// backdrop / cancel) — the caller then applies the defaults.
+function appProviderPicker(
+  rows: PickerRow[],
+  opts: { title: string; note: string; empty: string; confirmLabel: string },
+): Promise<Set<string> | null> {
+  return new Promise((resolve) => {
+    const overlay = document.createElement("div");
+    overlay.id = "confirm-overlay";
+    const rowsHtml = rows
+      .map((r) => {
+        const icon = providerVisual(r.id)?.iconSvg ?? `<span class="icon-fallback">?</span>`;
+        return `<label class="picker-row" data-picker-row="${escapeHtml(r.id)}">
+          <input type="checkbox" data-picker-check="${escapeHtml(r.id)}"${r.checked ? " checked" : ""}>
+          <span class="picker-icon" aria-hidden="true">${icon}</span>
+          <span class="picker-name">${escapeHtml(r.name)}</span>
+          <span class="picker-note">${escapeHtml(r.note)}</span>
+        </label>`;
+      })
+      .join("");
+    overlay.innerHTML = `
+      <div id="confirm-box" class="picker-box" role="dialog" aria-modal="true">
+        <h3>${escapeHtml(opts.title)}</h3>
+        <p>${escapeHtml(opts.note)}</p>
+        <div class="picker-list">${rowsHtml || `<p class="picker-empty">${escapeHtml(opts.empty)}</p>`}</div>
+        <div id="confirm-actions">
+          <button id="confirm-cancel" type="button">${escapeHtml(t("dialog.cancel"))}</button>
+          <button id="confirm-ok" type="button">${escapeHtml(opts.confirmLabel)}</button>
+        </div>
+      </div>`;
+    const done = (ok: boolean) => {
+      document.removeEventListener("keydown", onKey, true);
+      const checked = new Set<string>();
+      overlay.querySelectorAll<HTMLInputElement>("[data-picker-check]").forEach((box) => {
+        if (box.checked) checked.add(box.dataset.pickerCheck!);
+      });
+      overlay.remove();
+      resolve(ok ? checked : null);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        e.stopPropagation();
+        done(false);
+      }
+    };
+    overlay.addEventListener("click", (e) => {
+      if (e.target === overlay) done(false);
+    });
+    overlay.querySelector("#confirm-cancel")!.addEventListener("click", () => done(false));
+    overlay.querySelector("#confirm-ok")!.addEventListener("click", () => done(true));
+    document.addEventListener("keydown", onKey, true);
+    document.body.appendChild(overlay);
+    overlay.querySelector<HTMLButtonElement>("#confirm-ok")!.focus();
+  });
+}
+
+/// Probe EVERY provider once (the static default-disabled list does not
+/// gate detection — that list is only a convenience for untouched
+/// installs), then let the user pick what lands on the board.
+///
+/// First run: everything detected is checked, plus the two starter cards
+/// when nothing at all was detected (they are the new-user onboarding).
+/// Re-run from Settings: only currently enabled providers are checked —
+/// newly detected tools appear unchecked, so re-running stays a deliberate
+/// add rather than a silent reset.
+async function runProviderPicker(firstRun: boolean): Promise<void> {
+  let snaps: Snapshot[];
+  try {
+    snaps = await invoke<Snapshot[]>("fetch_usage", {
+      disabled: [...config.removedProviders],
+      clearBenches: false,
+    });
+  } catch {
+    // Probing failed: leave refresh()'s first-launch fallback to clean up.
+    return;
+  }
+  const detected = detectedFamilies(snaps);
+  const rows: PickerRow[] = [...detected.entries()].map(([id, snap]) => ({
+    id,
+    name: providerDisplayName(id),
+    note: snap.status === "ok" ? t("customize.connOk") : overviewFailureLabel(snap),
+    checked: firstRun || !config.disabled.includes(id),
+  }));
+  for (const id of STARTER_FAMILIES) {
+    if (detected.has(id) || !ALL_PROVIDERS.some(([pid]) => pid === id)) continue;
+    rows.push({
+      id,
+      name: providerDisplayName(id),
+      note: t("picker.suggested"),
+      // First run: an empty machine keeps the two guide cards (the 0.8.x
+      // onboarding), a machine with real tools starts them unchecked.
+      // Re-run: whatever the user currently has stays as it is.
+      checked: firstRun ? detected.size === 0 : !config.disabled.includes(id),
+    });
+  }
+  const picked = await appProviderPicker(rows, {
+    title: t(firstRun ? "picker.titleFirst" : "picker.titleRerun"),
+    note: detected.size
+      ? t(firstRun ? "picker.noteFirst" : "picker.noteRerun")
+      : t("picker.noteEmpty"),
+    empty: t("picker.empty"),
+    confirmLabel: t("picker.confirm"),
+  });
+  const chosen = picked ?? new Set(rows.filter((r) => r.checked).map((r) => r.id));
+  // Layout entries mark the picked families as known, so refresh()'s
+  // new-provider branch never auto-disables the user's own choice; writing
+  // a layout at all is also what retires the old first-launch auto-disable.
+  const layout = config.layout ?? { providerOrder: [], providers: {} };
+  for (const id of chosen) {
+    layout.providers[id] ??= {
+      metricOrder: [],
+      onDemand: [],
+      hidden: [],
+      starred: [],
+      expanded: false,
+    };
+  }
+  config.disabled = disabledFromPick(chosen);
+  config.layout = layout;
+  config.setupPicked = true;
+  await patchConfig({ disabled: config.disabled, layout, setupPicked: true }).catch(() => {});
+  renderAll();
+  void forceUsageRefreshAttempt(false).then(requestTraySync);
+}
+
 /// The "?" help for one provider: how its quota is queried, in plain words.
 /// The kind is derived from the catalog — API-key providers get their
 /// console link and paste steps, browser-sign-in providers point at the
@@ -6069,6 +6234,9 @@ const TOUR_STEPS: TourStep[] = [
 /// version into config: an empty stored version means this is the first
 /// launch after installing, which is the only case the tour auto-starts.
 let freshInstallAtBoot = false;
+/// In flight while the first-run detection picker is open — the tour waits
+/// on it (see maybeStartTour).
+let firstRunPickerPending: Promise<void> | null = null;
 let tourContentReady = false;
 let tourSteps: TourStep[] = [];
 let tourIndex = 0;
@@ -6208,7 +6376,17 @@ function startTour(): void {
 
 /// Auto-presentation gate: fresh install only, once, and never while the
 /// startup splash owns the screen (the splash calls back when it clears).
+/// The first-run detection picker outranks the tour: the tour spotlights
+/// the board, so it must wait until the user's picks are on it.
 function maybeStartTour(): void {
+  if (firstRunPickerPending) {
+    const pending = firstRunPickerPending;
+    void pending.then(() => {
+      if (firstRunPickerPending === pending) firstRunPickerPending = null;
+      maybeStartTour();
+    });
+    return;
+  }
   if (IS_PANEL_FORM || tourActive() || !tourContentReady) return;
   if (config.tourSeen || !freshInstallAtBoot) return;
   startTour();
@@ -9410,8 +9588,10 @@ async function refresh(
     });
     // First launch ever (no layout yet): start with only the providers that
     // actually have credentials on this PC, like the Mac app's first-run
-    // detection. The rest stay available in Customize.
-    if (config.layout === null && snapshots.length > 0) {
+    // detection. The rest stay available in Customize. Skipped while the
+    // detection picker is up — it owns the first-run choice and writes the
+    // final list itself (this branch is its fallback when probing failed).
+    if (config.layout === null && snapshots.length > 0 && !firstRunPickerPending) {
       // Claude and Codex always start enabled — their "connect me" cards are
       // the new-user onboarding. Everything else without credentials waits
       // in Customize (a fresh PC with zero AI tools sees just those two).
@@ -13769,6 +13949,7 @@ async function resetAllSettings(): Promise<void> {
     windowForm: "floating",
     silentStart: false,
     hideUnconfigured: true,
+    setupPicked: false,
   }).catch(() => {});
   spendTab = "today";
   rangeSelected = false;
@@ -14085,6 +14266,15 @@ function buildPanelShell(): void {
     void patchConfig({ hideUnconfigured: hideUnconfigured.checked }).then(renderAll);
   });
   generalCard.append(panelSwitchRow("settings.hideUnconfigured", "settings.hideUnconfiguredTip", hideUnconfigured));
+  const redetect = document.createElement("button");
+  redetect.type = "button";
+  redetect.className = "mini-btn";
+  redetect.textContent = t("settings.redetect");
+  redetect.addEventListener("click", () => {
+    // Same flow as first run, but defaults follow the current choice.
+    void runProviderPicker(false);
+  });
+  generalCard.append(panelRow("settings.redetectTip", redetect));
   const formGroup = document.createElement("div");
   formGroup.className = "st-radio-group";
   for (const value of ["floating", "panel"] as const) {
@@ -15988,6 +16178,11 @@ document.querySelector("#settings-btn")!.addEventListener("click", () => {
       // and broadcasts usage-updated — no boot fetch, no refresh timer, no
       // What's-new popup in this window.
       return;
+    }
+    // True first run: probe everything and let the user pick what lands on
+    // the board (the tour waits for the picker — see maybeStartTour).
+    if (!config.setupPicked && config.layout === null) {
+      firstRunPickerPending = runProviderPicker(true);
     }
     scheduleAutoRefresh();
     void paintCachedSnapshots();

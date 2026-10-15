@@ -418,6 +418,18 @@ const en: Dict = {
   "settings.silentStart": "Silent start",
   "settings.silentStartTip":
     "Reserved for the panel form. The floating popover already starts hidden in the tray; this flag only stores the preference for now.",
+  "picker.titleFirst": "We found these tools on this PC",
+  "picker.titleRerun": "Detected providers",
+  "picker.noteFirst":
+    "Tick what you want Pane to watch — the cards land straight on your board. Everything unticked stays available in Customize.",
+  "picker.noteRerun": "Re-scanned your machine. Newly detected tools start unticked so nothing you set up before changes.",
+  "picker.noteEmpty":
+    "No signed-in AI tool was detected on this PC. You can still watch the two below, or add any provider later from Customize.",
+  "picker.empty": "Nothing detected",
+  "picker.confirm": "Start watching",
+  "picker.suggested": "Suggested — not detected here",
+  "settings.redetect": "Re-scan this PC",
+  "settings.redetectTip": "Scan again for AI tools with local sign-ins (installed after setup shows up here).",
   "settings.hideUnconfigured": "Hide unconfigured providers",
   "settings.hideUnconfiguredTip":
     "Bare \"no credentials\" cards fold into one collapsed section at the bottom of the board, and the overview skips them. Turn off to see every enabled provider in place.",
@@ -1523,6 +1535,16 @@ const zh: Dict = {
   "settings.silentStart": "静默启动",
   "settings.silentStartTip":
     "为大面板形态预留。悬浮窗本就隐藏启动到托盘；该选项目前只保存偏好。",
+  "picker.titleFirst": "在这台电脑上检测到这些工具",
+  "picker.titleRerun": "检测到的 Provider",
+  "picker.noteFirst": "勾选你想让 Pane 盯着的工具，确认后卡片直接进额度总览。没勾的留在定制面板，随时可用。",
+  "picker.noteRerun": "已重新扫描本机。新检测到的工具默认不勾，不会改动你之前的设置。",
+  "picker.noteEmpty": "没有检测到本机已登录的 AI 工具。可以先看下面两个，或之后随时去定制面板添加。",
+  "picker.empty": "什么都没检测到",
+  "picker.confirm": "开始监控",
+  "picker.suggested": "推荐接入 — 本机未检测到",
+  "settings.redetect": "重新检测本机工具",
+  "settings.redetectTip": "重新扫描本机带登录态的 AI 工具（设置完成后新装的工具会在这里出现）。",
   "settings.hideUnconfigured": "隐藏未配置的 Provider",
   "settings.hideUnconfiguredTip": "「未配置凭据」的卡片折叠为看板底部一个收起分组，总览也不再显示它们；关闭后按原样全部平铺。",
   "board.unconfigured": "未配置的 Provider",
@@ -2610,6 +2632,18 @@ const ru: Dict = {
   "settings.silentStart": "Тихий запуск",
   "settings.silentStartTip":
     "Зарезервировано для формы панели. Всплывающее окно и так запускается скрытым в трее; флаг пока только сохраняет предпочтение.",
+  "picker.titleFirst": "На этом ПК найдены инструменты",
+  "picker.titleRerun": "Обнаруженные провайдеры",
+  "picker.noteFirst":
+    "Отметьте, за чем следить — карточки сразу появятся на доске. Всё неотмеченное останется в настройках.",
+  "picker.noteRerun": "Сканирование повторено. Новые инструменты не отмечены по умолчанию, прежние настройки не меняются.",
+  "picker.noteEmpty":
+    "На этом ПК не найдено AI-инструментов с входом. Можно следить за двумя ниже или добавить провайдера позже.",
+  "picker.empty": "Ничего не найдено",
+  "picker.confirm": "Начать слежение",
+  "picker.suggested": "Рекомендуется — здесь не обнаружен",
+  "settings.redetect": "Пересканировать ПК",
+  "settings.redetectTip": "Повторный поиск AI-инструментов с локальным входом (установленные позже появятся здесь).",
   "settings.hideUnconfigured": "Скрыть неконфигурированные провайдеры",
   "settings.hideUnconfiguredTip":
     "Карточки «нет учётных данных» сворачиваются в одну секцию внизу доски и не показываются в обзоре; выключите, чтобы видеть всех как раньше.",

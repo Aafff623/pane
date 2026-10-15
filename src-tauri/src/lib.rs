@@ -192,6 +192,11 @@ fn config_with_defaults(mut cfg: Value) -> Value {
     // with an effectively empty disabled list show 50+ dead cards). Stays a
     // user toggle in Settings → General.
     obj.entry("hideUnconfigured").or_insert(json!(true));
+    // First-run detection: marked once the user has walked the
+    // "detected providers" picker (or dismissed it — dismissals count, the
+    // defaults apply). The picker itself runs in the frontend; this key
+    // only records that it is done, so it never shows twice.
+    obj.entry("setupPicked").or_insert(json!(false));
     // Startup splash: on by default; lastStartupBootId is the boot session
     // it last played in (null = never). Seeded here so a frontend config
     // write can never drop the gate.
@@ -291,6 +296,7 @@ const CONFIG_KEYS: &[&str] = &[
     "windowForm",
     "silentStart",
     "hideUnconfigured",
+    "setupPicked",
     "startupAnimation",
     "lastStartupBootId",
     "overviewExpanded",
