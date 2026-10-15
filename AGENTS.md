@@ -110,6 +110,7 @@ facts, constraints and failure modes → [`docs/project-facts.md`](docs/project-
 5. Non-trivial changes get a code-review pass plus a redundancy/simplifier scan before delivery, then re-test.
 6. **Release authorization gate** — local implementation and validation must finish first; the user must personally perform UI acceptance and give explicit authorization in the conversation. Until both conditions are present, do not create a release, tag, commit, or push. A build, port check, screenshot, or agent opinion is not user acceptance.
 7. **Release format** — every published release must follow [`docs/release-format.md`](docs/release-format.md): theme headline + download matrix table (system × architecture, with real sizes) on top, then `## 新增` / `## 变更` / `## 修复` sections written per the wording rules. `CHANGELOG.md` is the single source of content and is reconciled before tagging. `release.yml` must pass the body via `--notes-file`; bare `--generate-notes` (compare-link-only body) is a release-process defect.
+   **Two release modes, decided by the tag alone**: `v0.8.4` = formal (becomes GitHub Latest — updater, website download, winget and the CN mirror all follow it); `v0.9.0-rc.1` (a hyphen in the version) = preview (same installers, marked pre-release, so no auto-update, no website download, no winget, no mirror — share the link with testers). Details and the version-number policy: release-format §6.
 
 ## Uncertainty & existing work
 

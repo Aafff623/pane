@@ -67,3 +67,33 @@ provenance 哈希失配即表示演示区已过期（2026-10 曾发生 src 先�
 - `release.yml` 创建 release 时**必须使用 `--notes-file`** 传入按本规范生成的正文，**禁止裸用 `--generate-notes`**（自动正文只有 compare 链接，视为发布流程缺陷）。**已实现**：`Compose release notes` 步骤从 CHANGELOG.md 对应版本节 + artifacts 实际体积自动生成 `notes.md`，`Create GitHub release` 改用 `--notes-file notes.md`（2026-10-05 起）。
 - 矩阵表的体积由 CI 从 artifact 实际大小自动计算（MB 一位小数），缺失的架构组合填 `—`，不虚构链接。
 - 手动 `gh release create` 或 CI 之外的应急发布同样适用本规范；应急后须补全 CHANGELOG.md。
+
+## 6. 发布模式：正式版 / 预览版（2026-10-15 起）
+
+两种模式**只由 tag 决定**，不需要额外参数：
+
+| 模式 | tag 形式 | 效果 |
+|---|---|---|
+| **正式版** | `v0.8.4` | Release 成为 GitHub 的 **Latest**——应用内自动更新与官网下载按钮都指向它；winget 与 Gitee CN 镜像照常 |
+| **预览版** | `v0.9.0-rc.1`（版本段含 `-`） | 同样构建三平台安装包，但 Release 标为 **pre-release**：GitHub 的 `/releases/latest` 跳过它 → 自动更新、官网下载、winget、CN 镜像**全部不涉及**；把 Release 链接直接发给测试者即可 |
+
+判定规则：tag 去掉 `v` 后含 `-` 即预览（语义化版本里 `-` 就是预发布标记）。`release.yml` 据此加 `--prerelease`，并跳过 winget 派发与 Gitee 镜像作业；`winget.yml` 自身也有 `release.prerelease` 守卫，手动翻转预发布标记也不会误发到 winget。
+
+**版本号策略（推荐 tag-only）**：预览阶段三处版本文件（`tauri.conf.json` / `package.json` / `Cargo.toml`）**保持数字版**（如 `0.9.0`），预览标识只放 tag——零风险、无需额外的 CHANGELOG 分节、正式版发布时版本文件无缝接续。此时 Release 标题是 `Pane 0.9.0-rc.1`（取自 tag），安装包文件名用数字版（`Pane_0.9.0_x64-setup.exe`），应用内显示 `0.9.0`。
+
+若希望应用内也显示 `-rc.1`（测试者一眼可辨、且正式版发布后 RC 用户会收到升级提示），可把三处版本写成带后缀的 `0.9.0-rc.1`：此时 CHANGELOG 必须存在同名分节 `## 0.9.0-rc.1`（否则 CI 按第 3 节硬闸门拒绝发布），且**首次这类构建要在 CI 里盯一眼**——Tauri 的 Windows NSIS 打包器对预发布版本号的接受度未在本项目实测过。
+
+无论哪种策略，**CHANGELOG 必须有对应版本分节**（tag-only 策略下即数字版分节：`v0.9.0-rc.1` 对应 `## 0.9.0`）——第 3 节的硬闸门对预览版同样生效，缺节时 CI 直接拒绝发布。
+
+**命令示例**：
+
+```bash
+# 正式版
+git tag -a v0.8.4 -F notes.md && git push origin v0.8.4
+# 预览版（用户端零影响）
+git tag -a v0.9.0-rc.1 -F notes.md && git push origin v0.9.0-rc.1
+# 只想留个版本记录、不发 Release：用非 v 开头的 tag（release.yml 只监听 v*）
+git tag -a pre-cleanup-1 && git push origin pre-cleanup-1
+```
+
+注意：预发布的资产名与正式版同号时（如 RC 与正式版都是 `0.9.0`）文件名相同，但分属不同 Release，互不覆盖；预发布 Release 里的 `latest.json` 不会被任何自动通道读取。

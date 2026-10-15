@@ -2,6 +2,18 @@
 # source. Manual runs (workflow_dispatch) upload artifacts without creating
 # a release, for dry-run verification.
 #
+# Two release modes, both driven by the tag alone:
+#   v0.8.4       → formal release: published as GitHub's "Latest", which is
+#                  what the in-app updater and the website download button
+#                  read; winget and the Gitee CN mirror run.
+#   v0.9.0-rc.1  → preview: the same installers, but the release is marked
+#                  pre-release, so GitHub's /releases/latest skips it — no
+#                  auto-update, no website download, no winget, no mirror.
+#                  Hand it to testers by link; it can never reach stable
+#                  users by accident.
+# (A hyphen in the tag IS the semver prerelease marker, so the rule needs no
+# extra input.)
+#
 # Matrix: Windows NSIS (supported), macOS dmg and Linux AppImage/deb
 # (first published binaries — tray UX is still Windows-shaped).
 name: Release
@@ -276,13 +288,21 @@ jobs:
         run: |
           shopt -s nullglob
           files=(artifacts/* latest.json)
+          # A hyphen in the version part marks a preview (semver prerelease):
+          # GitHub then keeps it out of /releases/latest, so the updater and
+          # the website never see it.
+          prerelease=""
+          case "${GITHUB_REF_NAME#v}" in *-*) prerelease="--prerelease" ;; esac
           gh release create "$GITHUB_REF_NAME" \
             --title "Pane ${GITHUB_REF_NAME#v}" \
+            $prerelease \
             --notes-file notes.md \
             "${files[@]}"
 
+      # Previews never reach package managers or the CN mirror: both exist
+      # to serve stable users.
       - name: Dispatch winget publish
-        if: startsWith(github.ref, 'refs/tags/')
+        if: startsWith(github.ref, 'refs/tags/') && !contains(github.ref_name, '-')
         continue-on-error: true
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -305,7 +325,9 @@ jobs:
   # the GITEE_TOKEN secret.
   gitee-mirror:
     needs: release
-    if: startsWith(github.ref, 'refs/tags/')
+    # Stable tags only — a preview gets no CN mirror page (nothing should
+    # ever point a stable CN client at a prerelease).
+    if: startsWith(github.ref, 'refs/tags/') && !contains(github.ref_name, '-')
     runs-on: ubuntu-latest
     env:
       GITEE_OWNER: fan-tengda

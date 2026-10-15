@@ -31,6 +31,10 @@ on:
 
 jobs:
   winget:
+    # Never publish a preview to winget: the release event fires for
+    # prereleases too, and a package-manager user should not be offered a
+    # preview build. Manual dispatches (with an explicit tag) still work.
+    if: github.event_name == 'workflow_dispatch' || !github.event.release.prerelease
     runs-on: windows-latest
     steps:
       # Pinned to a commit SHA (was @v2): this third-party action receives
