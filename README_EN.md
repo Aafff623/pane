@@ -186,7 +186,7 @@ Skins distribute as resource packs: a zip holding `manifest.json` (id, name, ver
 
 ### Keys stay on your machine
 
-Provider master keys and every sub-account key live in the **OS credential store** (Windows Credential Manager, …) — no more plaintext JSON on disk; each row on the "Keys & usage" page requires **master-password verification** to reveal, with plaintext never staying on screen and one-click copy; local-login rows show a green "connected" state naming where the credential is read from.
+Provider master keys, every sub-account key, **and all login tokens** (OAuth / login refresh tokens, Cursor / Codex account tokens, search keys) live in the **OS credential store** (Windows Credential Manager, …) — the JSON files keep non-secret fields only; legacy plaintext entries migrate automatically on first read, and the plaintext is dropped only after the store write succeeded. Each row on the "Keys & usage" page requires **master-password verification** to reveal, with plaintext never staying on screen and one-click copy; local-login rows show a green "connected" state naming where the credential is read from.
 
 | | |
 | :--- | :--- |
