@@ -64,7 +64,7 @@ Then re-run the launch step.
 
 | Area | Location |
 |------|----------|
-| Frontend UI — rendering, refresh loop, settings (single-file entry point, sectioned by comment banners; grown well past 10k lines) | `src/main.ts` |
+| Frontend UI — rendering, refresh loop, settings (single-file entry point, sectioned by comment banners; by far the largest file in the repo) | `src/main.ts` |
 | Provider catalog (frontend mirror of the Rust one) | `src/providerCatalog.ts` |
 | Brand icons / colors | `src/providerVisuals.ts` |
 | OS seam (secrets, locale, processes, paths, WebView hint) | `src-tauri/src/platform/` |

@@ -233,24 +233,30 @@ Last reconciled: 2026-10-11 (Pane 0.7.0).
   their legacy sources (provider key files / env). Legacy v1 plaintext files
   load unchanged until a password is set; setting one rewrites the file
   encrypted, permanently.
-- **Provider/account keys in the OS vault (2026-10-08)** — the 22 providers'
-  API keys and every multi-account key now live in the OS credential store
-  via `keyring` (`secretstore.rs`, service "Pane"; entry names
-  `provider:<family>` / `account:<card-id>` / `archived:<card-id>` on the
-  stable `<family>@<fnv1a>` ids). JSON files keep only non-secret fields —
-  with three deliberate plaintext exceptions: `search-keys.json` (search /
-  MCP keys by design, 2026-10-11 cut), `login-accounts/<family>.json`
-  (OAuth login tokens, auth-center families), and `workbuddy_web.json`
-  (the explicitly imported WorkBuddy web-session cookie);
-  reads lazily migrate old plaintext — the vault write must succeed before
-  the field leaves the file, and a failed vault write keeps the plaintext
-  file as the fallback. `reveal_provider_key` / `reveal_account_key` demand
+- **Provider/account keys in the OS vault (2026-10-08; extended 2026-10-15)** —
+  the 22 providers' API keys, every multi-account key, AND all Pane-managed
+  login tokens now live in the OS credential store via `keyring`
+  (`secretstore.rs`, service "Pane"; entry names `provider:<family>` /
+  `account:<card-id>` / `archived:<card-id>` on the stable
+  `<family>@<fnv1a>` ids, plus `token:<scope>` slots — `token:oauth/<provider>`
+  for the device-flow single slots, `token:login/<card-id>`,
+  `token:codex/<card-id>`, `token:cursor/<card-id>`,
+  `token:searchkey/<entry-id>`). JSON files keep only non-secret fields
+  (labels, ids, expiry; cursor rows carry a `cardId` snapshot because the
+  card id hashes the access token). Reads lazily migrate old plaintext —
+  the vault write must succeed before the field leaves the file, and a
+  failed vault write keeps the plaintext file as the fallback. The 2026-10-11
+  "three deliberate plaintext exceptions" entry is superseded (owner 拍板
+  A 案, analysis-hygiene batch, commit f73b4d1): search-keys.json,
+  login-accounts/*.json, the oauth single slots and the cursor/codex
+  account stores all migrate on first read. Remaining deliberate plaintext
+  exception: `workbuddy_web.json` (the explicitly imported WorkBuddy
+  web-session cookie — not covered by the 2026-10-14 batch decision).
+  `reveal_provider_key` / `reveal_account_key` demand
   the master password (same canary + session as the vault; "查看" in the
   panel) — the password gates human viewing, background refresh never needs
   it. `change_master_password` verifies the old password first. The
   parse-tests harness swaps in an in-memory store via the `harness` feature.
-  Provider-specific credential files (onenewapi sites, OAuth stores) are NOT
-  migrated yet.
 
 ## Update mechanism
 

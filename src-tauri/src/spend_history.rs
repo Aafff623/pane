@@ -161,25 +161,31 @@ fn spend_alias(id: &str) -> &str {
     }
 }
 
+/// T-0033: one scanner, two historical ids (kimi ⇄ moonshot). Fold aliases
+/// WITHIN the day — the same day often holds identical cells under both
+/// names, so the bigger cell wins (never the sum), and early kimi-only
+/// days survive the rename. Shared by the aggregate and detail views.
+fn fold_day_aliases<'a>(
+    providers: &'a BTreeMap<String, ProviderDay>,
+) -> BTreeMap<&'a str, &'a ProviderDay> {
+    let mut day_cells: BTreeMap<&str, &ProviderDay> = BTreeMap::new();
+    for (id, cell) in providers {
+        let id = spend_alias(id);
+        let take = day_cells.get(id).map_or(true, |prev| cell.tokens > prev.tokens);
+        if take {
+            day_cells.insert(id, cell);
+        }
+    }
+    day_cells
+}
+
 fn range_from(file: &HistoryFile, range_days: Option<u32>, today: NaiveDate) -> Vec<RangeSpend> {
     let cutoff = range_days.map(|days| today - Duration::days(days.saturating_sub(1) as i64));
     let mut by_provider: BTreeMap<String, (f64, f64, u32, BTreeMap<String, (f64, f64)>)> = BTreeMap::new();
     for (day_key, providers) in &file.days {
         let Ok(day) = NaiveDate::parse_from_str(day_key, "%Y-%m-%d") else { continue };
         if cutoff.is_some_and(|start| day < start || day > today) { continue; }
-        // T-0033: one scanner, two historical ids (kimi ⇄ moonshot). Fold
-        // aliases WITHIN the day first — the same day often holds identical
-        // cells under both names, so the bigger cell wins (never the sum),
-        // and early kimi-only days survive the rename.
-        let mut day_cells: BTreeMap<&str, &ProviderDay> = BTreeMap::new();
-        for (id, cell) in providers {
-            let id = spend_alias(id);
-            let take = day_cells.get(id).map_or(true, |prev| cell.tokens > prev.tokens);
-            if take {
-                day_cells.insert(id, cell);
-            }
-        }
-        for (id, cell) in day_cells {
+        for (id, cell) in fold_day_aliases(providers) {
             let entry = by_provider.entry(id.to_string()).or_default();
             entry.0 += cell.cost;
             entry.1 += cell.tokens;
@@ -244,18 +250,9 @@ fn daily_rows_from(file: &HistoryFile, range_days: Option<u32>, today: NaiveDate
     for (day, providers) in &file.days {
         let Ok(date) = NaiveDate::parse_from_str(day, "%Y-%m-%d") else { continue };
         if cutoff.is_some_and(|start| date < start || date > today) { continue; }
-        // Same alias fold as range_from (T-0033): one scanner, two
-        // historical ids — fold within the day, bigger cell wins, so the
-        // heatmap never shows kimi + moonshot as a double spend.
-        let mut day_cells: BTreeMap<&str, &ProviderDay> = BTreeMap::new();
-        for (id, cell) in providers {
-            let id = spend_alias(id);
-            let take = day_cells.get(id).map_or(true, |prev| cell.tokens > prev.tokens);
-            if take {
-                day_cells.insert(id, cell);
-            }
-        }
-        for (id, cell) in day_cells {
+        // The same alias fold as the aggregate view — the heatmap never
+        // shows kimi + moonshot as a double spend.
+        for (id, cell) in fold_day_aliases(providers) {
             let mut models: Vec<DailyModelSpend> = cell
                 .models
                 .iter()

@@ -41,7 +41,7 @@
 - **OsRng 换法**：cursor_oauth.rs 的 `random_bytes()` 与 telemetry.rs 的 `getrandom_fill()` 改用 `rand_core::OsRng`（依赖已在 Cargo.toml），删除 splitmix64/xorshift 实现与失实注释（"No new dependency"、"rand isn't in the tree"）。
 - **OAuth 令牌进钥匙串（owner 拍板 A 案）**：沿用 API key 已验证的 secretstore 模式与三步迁移（先写 keyring → 读回确认 → 删明文文件）；keyring 条目命名沿用既有 `account:<card_id>` 风格语义，按 provider+账号作用域命名；读取路径 keyring 优先、明文文件兜底（迁移前旧装机态）；失败不 panic、降级并保留原文件。覆盖 oauth.rs（device-code 流令牌）、login_accounts.rs、cursor_accounts.rs、codex_accounts.rs、search_keys.rs 五处明文存储点。keyvault 不用于机器自动使用的凭证（需人工解锁，与静默刷新冲突）。
 - **双锁收一（owner 拍板）**：删除 package-lock.json；ci.yml 前端 job 从 `npm ci`/`npm run build` 改为 pnpm 安装（`--frozen-lockfile`）与构建。
-- **i18n 门禁**：新增零依赖 node 测试脚本比对 en/zh/ru 三字典键集（照抄 site 的零依赖不变量测试模式），接进 ci.yml site job 同层；补 ru 缺失 43 键（skin.* 5、footer.onenewapi* 9、settings.onenewapi* 28、metric.expiry 1，翻译按 en 语义翻成俄语）与 en/zh 各补 `customize.cred.stepfunPlan`（按 ru 现有语义回填）。
+- **i18n 门禁**：新增零依赖 node 测试脚本比对 en/zh/ru 三字典键集（照抄 site 的零依赖不变量测试模式），接进 ci.yml site job 同层；补 ru 缺失 43 键（skin.* 5、footer.onenewapi* 9、settings.onenewapi* 28、metric.expiry 1，翻译按 en 语义翻成俄语）。（勘误：初版另要求 en/zh 补 stepfunPlan 共 44 键，系核实者早期扫描器 bug，边界切块法复核三字典均已有该键，实际补 43）。
 - **spend_alias 折叠**：别名归一化从 range_from 内联提到 daily_rows_from 与 range_from 共用的归一化步骤，热力图行与汇总口径一致。
 - **mutex 容忍写法**：49 处非测试 `lock().unwrap()` 统一为 `lock().unwrap_or_else(|e| e.into_inner())`（lib.rs:425 既有先例）；已验证不可达的防御性 unwrap 不动；不引入新辅助函数（最小改动）。
 - **文档修正**：AGENTS.md 项目地图 main.ts 行去掉具体行数；privacy.md「one auditable file」改为指向 telemetry.rs + lib.rs 两处（或合并说明）；隐私文档补 provider_refresh_daily 有损性一句。
@@ -70,3 +70,8 @@
 - 仓库活跃增长中，实施前各 ticket 自行重测锚点行号（08 报告基于 a2c8ebc 时点）。
 - 本地 commit 由 agent 自行划分粒度；**push 一律等 owner 明确授权**（ci-probe 预跑同样属于 push，先问）。
 - MSVC CI job 若首跑因环境差异挂掉，单独修，不与本批次其它 commit 混合。
+
+## Review 跟进（2026-10-15 code-review 后记录）
+
+- **已修**：project-facts.md 凭据事实段对齐新拍板（旧「三处明文例外」废止）；spec 勘误（44→43 键、读回确认口径对齐 resolve_provider_key 先例）；AGENTS.md 彻底去数字（"by far the largest file"）；spend_history 两视图折叠提为共享 `fold_day_aliases`。
+- **遗留（deferred，不阻塞本批次）**：①四店 vault 迁移样板同形度高（read-through 懒迁移+写成功脱敏+save GC），后续可在 secretstore 提取泛型助手——动它先立票；②`remove_triple` 缺位导致调用方手拼 `remove(&token_key(&scope))`，随 ① 一并收；③**workbuddy_web.json（显式导入的 WorkBuddy web 会话 cookie）仍是明文**——不在分析包五点、不在本批 owner 拍板范围，是否同样入 vault 待 owner 定。
