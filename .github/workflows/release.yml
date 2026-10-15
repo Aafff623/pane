@@ -62,7 +62,10 @@ jobs:
       - name: Build
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-        run: pnpm run tauri build -- --bundles ${{ matrix.bundles }}
+        # pnpm passes extra args without the npm-style `--` separator; the
+        # `--` form leaked through to cargo ("unexpected argument
+        # '--bundles'"). `pnpm exec` names the binary explicitly.
+        run: pnpm exec tauri build --bundles ${{ matrix.bundles }}
 
       - name: Stage artifacts
         shell: bash
