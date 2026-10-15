@@ -13826,6 +13826,8 @@ function syncSettingsControls(): void {
   // Panel-form controls (absent in the popover window).
   const silentStart = document.querySelector<HTMLInputElement>("#st-silent-start");
   if (silentStart) silentStart.checked = config.silentStart === true;
+  const hideUnconfiguredBox = document.querySelector<HTMLInputElement>("#st-hide-unconfigured");
+  if (hideUnconfiguredBox) hideUnconfiguredBox.checked = config.hideUnconfigured !== false;
   const form = config.windowForm === "panel" ? "panel" : "floating";
   const formRadio = document.querySelector<HTMLInputElement>(
     `input[name="window-form"][value="${form}"]`,
@@ -14080,7 +14082,7 @@ function buildPanelShell(): void {
   hideUnconfigured.type = "checkbox";
   hideUnconfigured.checked = config.hideUnconfigured !== false;
   hideUnconfigured.addEventListener("change", () => {
-    void patchConfig({ hideUnconfigured: hideUnconfigured.checked }).catch(() => {});
+    void patchConfig({ hideUnconfigured: hideUnconfigured.checked }).then(renderAll);
   });
   generalCard.append(panelSwitchRow("settings.hideUnconfigured", "settings.hideUnconfiguredTip", hideUnconfigured));
   const formGroup = document.createElement("div");
