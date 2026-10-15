@@ -187,6 +187,11 @@ fn config_with_defaults(mut cfg: Value) -> Value {
     // behavior until the panel form learns auto-open-at-login semantics.
     obj.entry("windowForm").or_insert(json!("floating"));
     obj.entry("silentStart").or_insert(json!(false));
+    // Board cleanliness: bare "no credentials" cards fold into one collapsed
+    // section instead of flooding the dashboard (issue: fresh/legacy configs
+    // with an effectively empty disabled list show 50+ dead cards). Stays a
+    // user toggle in Settings → General.
+    obj.entry("hideUnconfigured").or_insert(json!(true));
     // Startup splash: on by default; lastStartupBootId is the boot session
     // it last played in (null = never). Seeded here so a frontend config
     // write can never drop the gate.
@@ -285,6 +290,7 @@ const CONFIG_KEYS: &[&str] = &[
     "locale",
     "windowForm",
     "silentStart",
+    "hideUnconfigured",
     "startupAnimation",
     "lastStartupBootId",
     "overviewExpanded",

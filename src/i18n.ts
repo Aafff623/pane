@@ -418,6 +418,14 @@ const en: Dict = {
   "settings.silentStart": "Silent start",
   "settings.silentStartTip":
     "Reserved for the panel form. The floating popover already starts hidden in the tray; this flag only stores the preference for now.",
+  "settings.hideUnconfigured": "Hide unconfigured providers",
+  "settings.hideUnconfiguredTip":
+    "Bare \"no credentials\" cards fold into one collapsed section at the bottom of the board, and the overview skips them. Turn off to see every enabled provider in place.",
+  "board.unconfigured": "Unconfigured providers",
+  "board.emptyTitle": "Nothing to watch yet",
+  "board.emptyBody":
+    "No provider with usable credentials is on the board. Add a key or sign in to your first provider to start monitoring.",
+  "board.emptyCta": "Add a provider",
   "settings.windowForm": "Window form",
   "settings.windowFormFloating": "Floating popover",
   "settings.windowFormPanel": "Large panel",
@@ -1515,6 +1523,12 @@ const zh: Dict = {
   "settings.silentStart": "静默启动",
   "settings.silentStartTip":
     "为大面板形态预留。悬浮窗本就隐藏启动到托盘；该选项目前只保存偏好。",
+  "settings.hideUnconfigured": "隐藏未配置的 Provider",
+  "settings.hideUnconfiguredTip": "「未配置凭据」的卡片折叠为看板底部一个收起分组，总览也不再显示它们；关闭后按原样全部平铺。",
+  "board.unconfigured": "未配置的 Provider",
+  "board.emptyTitle": "还没有可看的额度",
+  "board.emptyBody": "看板上没有可用凭据的 Provider。给第一家配置密钥或登录，即可开始监控额度。",
+  "board.emptyCta": "去添加 Provider",
   "settings.windowForm": "窗口形态",
   "settings.windowFormFloating": "悬浮窗",
   "settings.windowFormPanel": "大面板",
@@ -2596,6 +2610,14 @@ const ru: Dict = {
   "settings.silentStart": "Тихий запуск",
   "settings.silentStartTip":
     "Зарезервировано для формы панели. Всплывающее окно и так запускается скрытым в трее; флаг пока только сохраняет предпочтение.",
+  "settings.hideUnconfigured": "Скрыть неконфигурированные провайдеры",
+  "settings.hideUnconfiguredTip":
+    "Карточки «нет учётных данных» сворачиваются в одну секцию внизу доски и не показываются в обзоре; выключите, чтобы видеть всех как раньше.",
+  "board.unconfigured": "Неконфигурированные провайдеры",
+  "board.emptyTitle": "Пока нечего отслеживать",
+  "board.emptyBody":
+    "На доске нет провайдеров с рабочими учётными данными. Добавьте ключ или войдите в первый провайдер, чтобы начать мониторинг.",
+  "board.emptyCta": "Добавить провайдера",
   "settings.windowForm": "Форма окна",
   "settings.windowFormFloating": "Всплывающее окно",
   "settings.windowFormPanel": "Большая панель",

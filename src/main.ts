@@ -314,6 +314,7 @@ interface Config {
   locale: LocalePref;
   windowForm: "floating" | "panel";
   silentStart: boolean;
+  hideUnconfigured: boolean;
   startupAnimation: boolean;
   lastStartupBootId: number | null;
   overviewExpanded: string[];
@@ -368,6 +369,7 @@ const FRONTEND_CONFIG_KEYS = [
   "locale",
   "windowForm",
   "silentStart",
+  "hideUnconfigured",
   "startupAnimation",
   "lastStartupBootId",
   "overviewExpanded",
@@ -581,6 +583,7 @@ let config: Config = {
   locale: "auto",
   windowForm: "floating",
   silentStart: false,
+  hideUnconfigured: true,
   startupAnimation: true,
   lastStartupBootId: null,
   overviewExpanded: [],
@@ -1200,7 +1203,10 @@ async function reloadConfigFromBackend(): Promise<void> {
   if (configWritesInFlight > 0) return;
   fresh.localShortcuts = fresh.localShortcuts ?? {};
   fresh.skinId = normalizeSkin(fresh.skinId);
+  const hideUnconfiguredChanged =
+    (config.hideUnconfigured !== false) !== (fresh.hideUnconfigured !== false);
   config = fresh;
+  if (hideUnconfiguredChanged) renderAll();
   pruneEmptyCardGroups();
   // The other window may have just handed us a "open this family" request.
   applyPanelIntent();
@@ -2592,6 +2598,21 @@ function isBareHintCard(snap: Snapshot): boolean {
   return snap.id === providerFamily(snap.id) && snap.status === "no_credentials";
 }
 
+/// Families whose bare "no credentials" card stays on the board even with
+/// hideUnconfigured: those two cards ARE the new-user onboarding (the same
+/// starter set as refresh()'s first-launch detection).
+const STARTER_FAMILIES = new Set(["claude", "codex"]);
+
+/// A bare hint card that folds into the "未配置" section when the board
+/// cleanliness toggle is on (default). Everything else renders in place.
+function isFoldableHintCard(s: Snapshot): boolean {
+  return isBareHintCard(s) && !STARTER_FAMILIES.has(providerFamily(s.id));
+}
+
+/// Session-only: the "未配置" fold starts collapsed every launch; expanding
+/// it is a look-around action, not a preference worth persisting.
+let unconfiguredFoldOpen = false;
+
 function overviewAccountSnapshots(family: string): Snapshot[] {
   return lastSnapshots.filter((snapshot) =>
     providerFamily(snapshot.id) === family &&
@@ -2922,9 +2943,13 @@ function orderedSnapshots(): Snapshot[] {
 function overviewSnapshots(): Snapshot[] {
   const seen = new Set<string>();
   const out: Snapshot[] = [];
+  const folding = config.hideUnconfigured !== false;
   for (const s of orderedSnapshots()) {
     const fam = providerFamily(s.id);
     if (seen.has(fam)) continue;
+    // "需凭据" tiles carry no data — with the board cleanliness toggle on
+    // they stay off the overview (the fold on the board still lists them).
+    if (folding && isFoldableHintCard(s)) continue;
     seen.add(fam);
     out.push(s);
   }
@@ -8584,18 +8609,53 @@ function renderWelcome(): string {
 /// cards render nothing.
 function renderGroupedCards(): string {
   const snaps = orderedSnapshots();
-  if (snaps.length === 0) return "";
+  if (snaps.length === 0) return renderBoardEmptyState();
+  // Board cleanliness (issue: fresh/legacy configs flooded the dashboard
+  // with "未配置凭据" cards): bare hint cards fold into one collapsed
+  // section; the claude/codex starter cards stay out front.
+  const folding = config.hideUnconfigured !== false;
+  const unconfigured = folding ? snaps.filter(isFoldableHintCard) : [];
+  const unconfiguredIds = new Set(unconfigured.map((s) => s.id));
+  const visible = folding ? snaps.filter((s) => !unconfiguredIds.has(s.id)) : snaps;
   const groups = usedCardGroups();
   const head = (category: OverviewCategory) =>
     `<div class="category-head"><span class="category-name">${escapeHtml(
       t(`category.${category}`),
     )}</span><span class="category-count">${
-      snaps.filter((s) => effectiveCategory(providerFamily(s.id)) === category).length
+      visible.filter((s) => effectiveCategory(providerFamily(s.id)) === category).length
     }</span></div>`;
-  return OVERVIEW_CATEGORIES.map((category) => {
-    const members = snaps.filter((s) => effectiveCategory(providerFamily(s.id)) === category);
+  const sections = OVERVIEW_CATEGORIES.map((category) => {
+    const members = visible.filter((s) => effectiveCategory(providerFamily(s.id)) === category);
     return members.length ? head(category) + renderCategoryCards(members, groups) : "";
   }).join("");
+  // Everything unconfigured and nothing else: guide the user to add one
+  // instead of a lone fold header.
+  const guide = visible.length === 0 ? renderBoardEmptyState() : "";
+  const fold = unconfigured.length
+    ? `<div class="card-group-head unconfigured-fold-head" data-unconfigured-toggle role="button" tabindex="0">
+        <span class="card-group-chevron">${unconfiguredFoldOpen ? "⌄" : "›"}</span>
+        <span class="card-group-name">${escapeHtml(t("board.unconfigured"))}</span>
+        <span class="card-group-count">${unconfigured.length}</span>
+      </div>` +
+      unconfigured
+        .map(
+          (s) =>
+            (unconfiguredFoldOpen ? renderCard(s) : `<div class="card-group-fold" hidden>${renderCard(s)}</div>`),
+        )
+        .join("")
+    : "";
+  return sections + guide + fold;
+}
+
+/// The friendly guide when the board has nothing to show (everything
+/// disabled, or everything unconfigured and folded away).
+function renderBoardEmptyState(): string {
+  return `<div class="board-empty">
+    <span class="board-empty-icon" aria-hidden="true">${uiIcon("plus")}</span>
+    <div class="board-empty-title">${escapeHtml(t("board.emptyTitle"))}</div>
+    <div class="board-empty-body">${escapeHtml(t("board.emptyBody"))}</div>
+    <button class="mini-btn board-empty-cta" data-board-empty-cta>${escapeHtml(t("board.emptyCta"))}</button>
+  </div>`;
 }
 
 /// The pre-category wall layout: ungrouped cards first (flat), then one
@@ -9355,12 +9415,11 @@ async function refresh(
       // Claude and Codex always start enabled — their "connect me" cards are
       // the new-user onboarding. Everything else without credentials waits
       // in Customize (a fresh PC with zero AI tools sees just those two).
-      const starters = new Set(["claude", "codex"]);
       const noCreds = snapshots
         .filter(
           (s) =>
             s.status === "no_credentials" &&
-            !starters.has(s.id) &&
+            !STARTER_FAMILIES.has(s.id) &&
             !recentlyKeyed.has(s.id)
         )
         .map((s) => s.id);
@@ -13709,6 +13768,7 @@ async function resetAllSettings(): Promise<void> {
     locale: "auto",
     windowForm: "floating",
     silentStart: false,
+    hideUnconfigured: true,
   }).catch(() => {});
   spendTab = "today";
   rangeSelected = false;
@@ -14015,6 +14075,14 @@ function buildPanelShell(): void {
     void patchConfig({ silentStart: silentStart.checked }).catch(() => {});
   });
   generalCard.append(panelSwitchRow("settings.silentStart", "settings.silentStartTip", silentStart));
+  const hideUnconfigured = document.createElement("input");
+  hideUnconfigured.id = "st-hide-unconfigured";
+  hideUnconfigured.type = "checkbox";
+  hideUnconfigured.checked = config.hideUnconfigured !== false;
+  hideUnconfigured.addEventListener("change", () => {
+    void patchConfig({ hideUnconfigured: hideUnconfigured.checked }).catch(() => {});
+  });
+  generalCard.append(panelSwitchRow("settings.hideUnconfigured", "settings.hideUnconfiguredTip", hideUnconfigured));
   const formGroup = document.createElement("div");
   formGroup.className = "st-radio-group";
   for (const value of ["floating", "panel"] as const) {
@@ -15236,10 +15304,12 @@ document.querySelector("#settings-btn")!.addEventListener("click", () => {
     if (providersEl.scrollTop !== before) event.preventDefault();
   }, { passive: false, capture: true });
   // Group banners are focusable (role="button") — Enter/Space folds them
-  // like a click would.
+  // like a click would. The "未配置" fold head behaves the same.
   providersEl.addEventListener("keydown", (e) => {
     if (e.key !== "Enter" && e.key !== " ") return;
-    const banner = (e.target as HTMLElement).closest<HTMLElement>("[data-group-toggle]");
+    const banner = (e.target as HTMLElement).closest<HTMLElement>(
+      "[data-group-toggle], [data-unconfigured-toggle]",
+    );
     if (!banner) return;
     e.preventDefault();
     banner.click();
@@ -15509,6 +15579,16 @@ document.querySelector("#settings-btn")!.addEventListener("click", () => {
         saveLayout(false);
         renderAll();
       }
+      return;
+    }
+    const uncfgToggle = target.closest<HTMLElement>("[data-unconfigured-toggle]");
+    if (uncfgToggle) {
+      unconfiguredFoldOpen = !unconfiguredFoldOpen;
+      renderAll();
+      return;
+    }
+    if (target.closest<HTMLElement>("[data-board-empty-cta]")) {
+      setDrawer(true);
       return;
     }
     const spendFold = target.closest<HTMLElement>("[data-spend-fold]");
