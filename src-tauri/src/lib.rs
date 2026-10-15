@@ -122,6 +122,14 @@ fn config_with_defaults(mut cfg: Value) -> Value {
     if !cfg.is_object() {
         cfg = json!({});
     }
+    // Whether this install already has a layout decides the first-run
+    // detection default: an install with a layout has been set up before
+    // (upgrade path — the picker must never appear), a layout-less one is
+    // brand new (the picker shows once). Computed BEFORE the layout key is
+    // defaulted below, so it reflects what the user's file actually held.
+    let already_set_up = cfg
+        .get("layout")
+        .is_some_and(|l| !l.is_null());
     let obj = cfg.as_object_mut().unwrap();
     // Out-of-the-box experience: 5-min refresh, all three quota alerts on,
     // dark + compact. (Autostart defaults on in setup; tray icon defaults
@@ -195,8 +203,9 @@ fn config_with_defaults(mut cfg: Value) -> Value {
     // First-run detection: marked once the user has walked the
     // "detected providers" picker (or dismissed it — dismissals count, the
     // defaults apply). The picker itself runs in the frontend; this key
-    // only records that it is done, so it never shows twice.
-    obj.entry("setupPicked").or_insert(json!(false));
+    // only records that it is done, so it never shows twice. An install
+    // that already had a layout predates the picker → starts marked done.
+    obj.entry("setupPicked").or_insert(json!(already_set_up));
     // Startup splash: on by default; lastStartupBootId is the boot session
     // it last played in (null = never). Seeded here so a frontend config
     // write can never drop the gate.
@@ -2283,6 +2292,7 @@ async fn fetch_usage(
     app: tauri::AppHandle,
     disabled: Option<Vec<String>>,
     clear_benches: Option<bool>,
+    probe_all: Option<bool>,
 ) -> Vec<providers::Snapshot> {
     // Only an explicit user click (Refresh button, Ctrl+R, the overview ⟳)
     // may knock again on ordinary-error benches; timer and refocus passes
@@ -2291,7 +2301,7 @@ async fn fetch_usage(
     if clear_benches.unwrap_or(false) {
         clear_soft_benches();
     }
-    run_usage_fetch_inner(&app, disabled).await
+    run_usage_fetch_inner_mode(&app, disabled, probe_all.unwrap_or(false)).await
 }
 
 /// Refreshes ONE provider card on demand (the ⟳ button in the card head).
@@ -2557,9 +2567,26 @@ async fn run_usage_fetch(app: &tauri::AppHandle) -> Vec<providers::Snapshot> {
 }
 
 async fn run_usage_fetch_inner(app: &tauri::AppHandle, extra_disabled: Option<Vec<String>>) -> Vec<providers::Snapshot> {
+    run_usage_fetch_inner_mode(app, extra_disabled, false).await
+}
+
+/// `probe_all` ignores the config's own disabled list and probes every
+/// provider that is not in `extra_disabled`. It exists for the first-run
+/// detection pass, which must see providers the static default-disabled
+/// list would otherwise skip before anything is spawned (that list is a
+/// convenience for untouched installs, never a detection gate).
+async fn run_usage_fetch_inner_mode(
+    app: &tauri::AppHandle,
+    extra_disabled: Option<Vec<String>>,
+    probe_all: bool,
+) -> Vec<providers::Snapshot> {
     let _guard = usage_fetch_lock().lock().await;
     let cfg = config_with_defaults(load_config());
-    let mut disabled: Vec<String> = effective_disabled_list(&cfg);
+    let mut disabled: Vec<String> = if probe_all {
+        Vec::new()
+    } else {
+        effective_disabled_list(&cfg)
+    };
     if let Some(extra) = extra_disabled {
         for e in extra {
             if !disabled.iter().any(|d| d == &e) {

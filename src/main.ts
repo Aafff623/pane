@@ -4814,6 +4814,9 @@ async function runProviderPicker(firstRun: boolean): Promise<void> {
     snaps = await invoke<Snapshot[]>("fetch_usage", {
       disabled: [...config.removedProviders],
       clearBenches: false,
+      // Full detection: the backend must not skip the static default-disabled
+      // families — they are exactly what this pass exists to discover.
+      probeAll: true,
     });
   } catch {
     // Probing failed: leave refresh()'s first-launch fallback to clean up.
@@ -4826,6 +4829,16 @@ async function runProviderPicker(firstRun: boolean): Promise<void> {
     note: snap.status === "ok" ? t("customize.connOk") : overviewFailureLabel(snap),
     checked: firstRun || !config.disabled.includes(id),
   }));
+  // Re-run only: everything currently switched on stays in the list, even
+  // when this scan found no credentials for it — confirming must never
+  // silently switch off a card the user keeps on purpose.
+  if (!firstRun) {
+    for (const [id] of ALL_PROVIDERS) {
+      if (detected.has(id) || rows.some((r) => r.id === id)) continue;
+      if (config.disabled.includes(id)) continue;
+      rows.push({ id, name: providerDisplayName(id), note: t("picker.notDetected"), checked: true });
+    }
+  }
   for (const id of STARTER_FAMILIES) {
     if (detected.has(id) || !ALL_PROVIDERS.some(([pid]) => pid === id)) continue;
     rows.push({
@@ -16180,8 +16193,11 @@ document.querySelector("#settings-btn")!.addEventListener("click", () => {
       return;
     }
     // True first run: probe everything and let the user pick what lands on
-    // the board (the tour waits for the picker — see maybeStartTour).
-    if (!config.setupPicked && config.layout === null) {
+    // the board (the tour waits for the picker — see maybeStartTour). Keyed
+    // on setupPicked alone: the boot refresh materializes a layout early, so
+    // "layout === null" would already be false by the time this runs again
+    // after an interrupted first run.
+    if (!config.setupPicked) {
       firstRunPickerPending = runProviderPicker(true);
     }
     scheduleAutoRefresh();

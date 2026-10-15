@@ -121,8 +121,8 @@ jobs:
           if [[ "${GITHUB_REF:-}" != refs/tags/* ]]; then
             tag="v$ver"
           fi
-          if [[ "$tag" != "v$ver" ]]; then
-            echo "Tag '$tag' does not match tauri.conf.json version 'v$ver' — bump the version before tagging." >&2
+          if [[ "$tag" != "v$ver" && "$tag" != "v$ver"-* ]]; then
+            echo "Tag '$tag' does not match tauri.conf.json version '$ver' — bump the version before tagging (a preview tag may append a suffix, e.g. v$ver-rc.1)." >&2
             exit 1
           fi
 

@@ -97,3 +97,5 @@ git tag -a pre-cleanup-1 && git push origin pre-cleanup-1
 ```
 
 注意：预发布的资产名与正式版同号时（如 RC 与正式版都是 `0.9.0`）文件名相同，但分属不同 Release，互不覆盖；预发布 Release 里的 `latest.json` 不会被任何自动通道读取。
+
+**失败与补救**：预览与正式共用同一条流水线，任一步失败（最常见的是 CHANGELOG 缺该版本分节、或 tag 与 `tauri.conf.json` 版本不匹配）都会停在「tag 已推、Release 未建」。补救：修好内容后在 Actions 里对该 run 点 **Re-run**，或删掉 tag 重推（`git push origin :refs/tags/vX` 后重打）；构建产物本身保留 90 天，也可手动 `gh release create <tag> --prerelease --notes-file notes.md <files>` 应急。版本匹配规则：tag 必须等于 `v<tauri.conf.json 版本>`，或在该版本后追加 `-` 后缀（如 `v0.8.4-rc.1` 配版本 `0.8.4`）。
