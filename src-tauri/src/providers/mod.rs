@@ -81,6 +81,14 @@ pub struct Metric {
     pub value: Option<String>,
     pub resets_at: Option<i64>,
     pub period_ms: Option<i64>,
+    /// Per-key availability for the search/MCP families, whose several
+    /// api-keys flatten into rows on ONE snapshot: `Some(true)` when this
+    /// round's read returned a value, `Some(false)` when it failed. `None`
+    /// on headline/summary rows and on every other provider, so the UI can
+    /// count keys without parsing row text (which carries both readings and
+    /// failure messages).
+    #[serde(default)]
+    pub available: Option<bool>,
 }
 
 impl Metric {
@@ -98,6 +106,7 @@ impl Metric {
             value: None,
             resets_at: None,
             period_ms: None,
+            available: None,
         }
     }
 
@@ -111,12 +120,20 @@ impl Metric {
             value: Some(value),
             resets_at: None,
             period_ms: None,
+            available: None,
         }
     }
 
     pub fn with_reset(mut self, resets_at: Option<i64>, period_ms: Option<i64>) -> Self {
         self.resets_at = resets_at;
         self.period_ms = period_ms;
+        self
+    }
+
+    /// Marks a per-key row of a search/MCP family as available this round
+    /// (see `available`). Only those families call this.
+    pub fn with_available(mut self, available: bool) -> Self {
+        self.available = Some(available);
         self
     }
 }

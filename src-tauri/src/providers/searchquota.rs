@@ -233,19 +233,29 @@ async fn bocha_fetch_key(key: &str) -> Result<f64, String> {
 }
 
 async fn bocha_fetch(keys: &[Keyed]) -> Result<Snapshot, String> {
+    let mut results = Vec::with_capacity(keys.len());
+    for k in keys {
+        results.push((k.label.clone(), bocha_fetch_key(&k.key).await));
+    }
+    bocha_snapshot_from_results(results)
+}
+
+fn bocha_snapshot_from_results(
+    results: Vec<(String, Result<f64, String>)>,
+) -> Result<Snapshot, String> {
     let mut total = 0.0;
     let mut rows: Vec<Metric> = Vec::new();
     let mut first_error: Option<String> = None;
     let mut ok_count = 0usize;
-    for k in keys {
-        match bocha_fetch_key(&k.key).await {
+    for (label, result) in results {
+        match result {
             Ok(remaining) => {
                 ok_count += 1;
                 total += remaining;
-                rows.push(Metric::text(&k.label, format!("¥{remaining:.2}")));
+                rows.push(Metric::text(&label, format!("¥{remaining:.2}")).with_available(true));
             }
             Err(e) => {
-                rows.push(Metric::text(&k.label, e.clone()));
+                rows.push(Metric::text(&label, e.clone()).with_available(false));
                 if first_error.is_none() {
                     first_error = Some(e);
                 }
@@ -379,14 +389,15 @@ fn tavily_snapshot_from_results(
                 // (plan_usage / plan_limit) — one account is one 1000-credit
                 // pool, so keys sharing an account show the same bar.
                 match u.limit.filter(|l| *l > 0.0) {
-                    Some(limit) => {
-                        metrics.push(Metric::progress(&label, u.used / limit * 100.0, Some(detail)))
-                    }
-                    None => metrics.push(Metric::text(&label, detail)),
+                    Some(limit) => metrics.push(
+                        Metric::progress(&label, u.used / limit * 100.0, Some(detail))
+                            .with_available(true),
+                    ),
+                    None => metrics.push(Metric::text(&label, detail).with_available(true)),
                 }
             }
             Err(e) => {
-                metrics.push(Metric::text(&label, "查询失败".into()));
+                metrics.push(Metric::text(&label, "查询失败".into()).with_available(false));
                 first_error.get_or_insert(e);
             }
         }
@@ -538,10 +549,10 @@ fn firecrawl_snapshot_from_results(
         match result {
             Ok(u) => {
                 ok_count += 1;
-                rows.push(firecrawl_key_metric(&label, &u));
+                rows.push(firecrawl_key_metric(&label, &u).with_available(true));
             }
             Err(e) => {
-                rows.push(Metric::text(&label, "查询失败".into()));
+                rows.push(Metric::text(&label, "查询失败".into()).with_available(false));
                 first_error.get_or_insert(e);
             }
         }
@@ -611,9 +622,11 @@ fn cached_brave_quota(q: &BraveKeyQuota, elapsed: Duration) -> Option<BraveKeyQu
     Some(q)
 }
 
+/// Only ever built from a key whose probe succeeded, so the row is marked
+/// available (see `Metric::available`) — the badge counts it as usable.
 fn brave_key_metric(label: &str, quota: &BraveKeyQuota) -> Metric {
     if quota.limit == 0.0 {
-        return Metric::text(label, "月额度不限".into());
+        return Metric::text(label, "月额度不限".into()).with_available(true);
     }
     let used = (quota.limit - quota.remaining).max(0.0);
     Metric::progress(
@@ -621,6 +634,7 @@ fn brave_key_metric(label: &str, quota: &BraveKeyQuota) -> Metric {
         (used / quota.limit * 100.0).clamp(0.0, 100.0),
         Some(format!("已用 {:.0} / {:.0} credits", used, quota.limit)),
     )
+    .with_available(true)
 }
 
 /// One REAL search per key: Brave exposes no quota endpoint, only
@@ -709,7 +723,7 @@ async fn brave_fetch(keys: &[Keyed]) -> Result<Snapshot, String> {
                     q
                 }
                 Err(e) => {
-                    per_key.push(Metric::text(&k.label, e.clone()));
+                    per_key.push(Metric::text(&k.label, e.clone()).with_available(false));
                     if first_error.is_none() {
                         first_error = Some(e);
                     }
@@ -995,5 +1009,77 @@ mod tests {
         assert!(masked.starts_with("tvly-d"));
         assert!(masked.ends_with("mnop"));
         assert!(!masked.contains("abcdefghij"));
+    }
+
+    /// The card-head badge counts key rows by this flag, so a readable key
+    /// must be `Some(true)`, a failed one `Some(false)`, and the headline /
+    /// summary row `None` (it is not a key).
+    #[test]
+    fn per_key_rows_carry_availability_and_summaries_do_not() {
+        let bocha = bocha_snapshot_from_results(vec![
+            ("first".into(), Ok(12.5)),
+            ("second".into(), Err("key 无效".into())),
+        ])
+        .unwrap();
+        assert_eq!(bocha.metrics.len(), 3, "headline + one row per key");
+        assert_eq!(bocha.metrics[0].label, "Balance");
+        assert_eq!(bocha.metrics[0].available, None);
+        assert_eq!(bocha.metrics[1].available, Some(true));
+        assert_eq!(bocha.metrics[2].available, Some(false));
+        // Every key failing stays a snapshot-level error: no rows to count.
+        assert!(
+            bocha_snapshot_from_results(vec![("only".into(), Err("key 无效".into()))]).is_err()
+        );
+
+        let doc = json!({"key":{"usage":150,"limit":1000},"account":{"plan_usage":500,"plan_limit":15000}});
+        let tavily = tavily_snapshot_from_results(vec![
+            ("one".into(), Ok(parse_tavily_usage(&doc).unwrap())),
+            ("two".into(), Err("key 无效".into())),
+        ])
+        .unwrap();
+        assert_eq!(tavily.metrics.len(), 3, "summary + one row per key");
+        assert_eq!(tavily.metrics[0].available, None);
+        assert_eq!(tavily.metrics[1].available, Some(true));
+        assert_eq!(tavily.metrics[2].available, Some(false));
+
+        let usage =
+            parse_firecrawl_usage(&json!({"remaining_credits": 967, "plan_credits": 1000}))
+                .unwrap();
+        let firecrawl = firecrawl_snapshot_from_results(vec![
+            ("one".into(), Ok(usage)),
+            ("two".into(), Err("key 无效".into())),
+        ])
+        .unwrap();
+        assert_eq!(firecrawl.metrics.len(), 3);
+        assert_eq!(firecrawl.metrics[0].available, None);
+        assert_eq!(firecrawl.metrics[1].available, Some(true));
+        assert_eq!(firecrawl.metrics[2].available, Some(false));
+        // One key renders alone — a single available row, no headline.
+        let single = firecrawl_snapshot_from_results(vec![(
+            "only".into(),
+            Ok(parse_firecrawl_usage(&json!({"remaining_credits": 1, "plan_credits": 1000}))
+                .unwrap()),
+        )])
+        .unwrap();
+        assert_eq!(single.metrics.len(), 1);
+        assert_eq!(single.metrics[0].available, Some(true));
+    }
+
+    #[test]
+    fn brave_key_rows_are_available_including_the_unlimited_case() {
+        let finite = BraveKeyQuota {
+            remaining: 1994.0,
+            limit: 2000.0,
+            reset_secs: 100.0,
+        };
+        assert_eq!(brave_key_metric("key", &finite).available, Some(true));
+        let unlimited = BraveKeyQuota {
+            remaining: 0.0,
+            limit: 0.0,
+            reset_secs: 100.0,
+        };
+        let m = brave_key_metric("key", &unlimited);
+        assert_eq!(m.value.as_deref(), Some("月额度不限"));
+        assert_eq!(m.available, Some(true));
     }
 }
