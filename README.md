@@ -70,6 +70,8 @@ pnpm tauri build    # 完整桌面应用
 
 ## <a id="providers"></a>支持的来源
 
+接入前可查看 [Provider 凭据与查询能力（三张表）](docs/provider-credentials.md)：分别说明 API key、Access Token／Cookie 等专用凭据、本地配置文件，以及套餐和账单权限边界。公开接口与推理协议的依据见 [API 核验记录](docs/provider-api-verification.md)。
+
 当前目录收录 **68 个来源**，三种读取形态：
 
 | 形态 | 覆盖 | 读取方式 |
@@ -103,6 +105,8 @@ Claude、Codex、CodeBuddy、CodeBuddy CN、WorkBuddy、Cursor、OpenCode、Copi
 ### 任何额度，一处看清
 
 悬浮面板用一张总览回答「还剩多少、什么时候重置」：绿 / 黄 / 红三态区分可用、高峰和不可用，剩余额度与重置倒计时直接上卡面；`Shift` 在 5 小时 / 7 天 / 每月间切换。查询失败如实显示为错误状态，不伪装成灰色的未知额度；没有月额度的服务商在月视图回退到周额度并标注。
+
+0.8.5 起，新用户默认使用紧凑条形双列视图。账号可以在测试失败时保存；保存并开启后立即进入总览，查询异常会显示错误类型及修复入口。保存账号不代表已获得套餐或账单读取权限。
 
 <table>
   <tr>

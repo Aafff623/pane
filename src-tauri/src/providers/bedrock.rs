@@ -34,7 +34,7 @@ async fn resolve_creds() -> Result<Option<AwsCreds>, String> {
     };
     let out = tokio::time::timeout(
         std::time::Duration::from_secs(20),
-        tokio::process::Command::new("aws")
+        crate::platform::hidden_command("aws")
             .args(["configure", "export-credentials", "--profile", &profile, "--format", "process"])
             .env_remove("AWS_PROFILE")
             .output(),

@@ -181,19 +181,146 @@ pub fn github_cli_hosts() -> Vec<std::path::PathBuf> {
 pub(crate) fn run_hidden(program: &str, args: &[&str]) -> Option<String> {
     let mut cmd = std::process::Command::new(program);
     cmd.args(args);
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-        cmd.creation_flags(CREATE_NO_WINDOW);
-    }
+    hide_window(&mut cmd);
     let out = cmd.output().ok()?;
     Some(String::from_utf8_lossy(&out.stdout).into_owned())
 }
 
+/// The async twin of [`run_hidden`], for callers inside a tokio task (the
+/// provider probes). Same obligation: every console child must go through
+/// one of these two, never a bare `Command::new`.
+///
+/// This matters because `pane.exe` is a GUI-subsystem binary in release
+/// builds (`main.rs`: `windows_subsystem = "windows"` when not
+/// `debug_assertions`), so it has **no console to hand down**. An unflagged
+/// console child therefore makes Windows allocate a fresh one, and on
+/// Windows 11 with Windows Terminal as the default terminal that is a
+/// visible black window flashing on every probe — reported as issue #2 and
+/// invisible in debug builds, which do own a console.
+pub(crate) fn hidden_command(program: &str) -> tokio::process::Command {
+    let mut cmd = tokio::process::Command::new(program);
+    #[cfg(windows)]
+    {
+        // tokio's own `creation_flags`; no `CommandExt` import needed.
+        cmd.creation_flags(CREATE_NO_WINDOW);
+    }
+    cmd
+}
+
+/// `CREATE_NO_WINDOW` — the child gets no console at all.
+#[cfg(windows)]
+const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+
+#[cfg(windows)]
+fn hide_window(cmd: &mut std::process::Command) {
+    use std::os::windows::process::CommandExt;
+    cmd.creation_flags(CREATE_NO_WINDOW);
+}
+
+#[cfg(not(windows))]
+fn hide_window(_cmd: &mut std::process::Command) {}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The crate's source root, however this test was built: `src-tauri/src`
+    /// from the crate itself, `../src-tauri/src` from the parse-tests
+    /// harness. Panics rather than skipping — a guard that can silently not
+    /// run is worse than no guard.
+    fn source_root() -> std::path::PathBuf {
+        let mut dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        for _ in 0..3 {
+            for cand in [dir.join("src-tauri").join("src"), dir.join("src")] {
+                if cand.join("platform").join("mod.rs").is_file() {
+                    return cand;
+                }
+            }
+            match dir.parent() {
+                Some(p) => dir = p.to_path_buf(),
+                None => break,
+            }
+        }
+        panic!("could not locate src-tauri/src from {}", env!("CARGO_MANIFEST_DIR"));
+    }
+
+    fn collect_rust_files(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
+        let Ok(entries) = std::fs::read_dir(dir) else {
+            return;
+        };
+        for e in entries.flatten() {
+            let p = e.path();
+            if p.is_dir() {
+                collect_rust_files(&p, out);
+            } else if p.extension().is_some_and(|x| x == "rs") {
+                out.push(p);
+            }
+        }
+    }
+
+    /// Every console child must suppress its window (issue #2: a bare
+    /// `Command::new` inherits nothing from the GUI-subsystem `pane.exe`, so
+    /// Windows opens a console that flashes on screen). The sanctioned entry
+    /// points are `run_hidden` and `hidden_command` in this file; this test
+    /// fails the moment anyone spawns a tokio child elsewhere.
+    ///
+    /// Only the tokio constructor is policed: every provider probe is async,
+    /// so that is where the defect lived and where a regression would land.
+    /// The sync path is already funnelled through `run_hidden`, and its only
+    /// other caller is a `#[cfg(test)]` mklink probe.
+    #[test]
+    fn no_bare_tokio_command_spawns_outside_this_module() {
+        let root = source_root();
+        let mut files = Vec::new();
+        collect_rust_files(&root, &mut files);
+        assert!(
+            files.len() > 50,
+            "source scan found only {} files under {} — wrong root?",
+            files.len(),
+            root.display()
+        );
+        let sanctioned = std::path::Path::new("platform").join("mod.rs");
+        let offenders: Vec<String> = files
+            .iter()
+            .filter(|f| !f.ends_with(&sanctioned))
+            .filter(|f| {
+                std::fs::read_to_string(f)
+                    .is_ok_and(|t| t.contains("tokio::process::Command::new"))
+            })
+            .map(|f| f.strip_prefix(&root).unwrap_or(f).display().to_string())
+            .collect();
+        assert!(
+            offenders.is_empty(),
+            "these spawn a console child with no CREATE_NO_WINDOW (use \
+             platform::hidden_command): {offenders:?}"
+        );
+    }
+
+    /// Both spawn helpers must still run a real console child and capture its
+    /// stdout: the window-suppression flag must not break the spawn itself.
+    #[cfg(windows)]
+    #[test]
+    fn hidden_spawns_still_run_and_capture_stdout() {
+        let sync = run_hidden("cmd", &["/C", "echo", "pane-probe"]);
+        assert!(
+            sync.as_ref().is_some_and(|s| s.contains("pane-probe")),
+            "run_hidden lost its output: {sync:?}"
+        );
+        let out = tokio::runtime::Runtime::new()
+            .unwrap()
+            .block_on(async {
+                hidden_command("cmd")
+                    .args(["/C", "echo", "pane-probe"])
+                    .output()
+                    .await
+                    .ok()
+            })
+            .map(|o| String::from_utf8_lossy(&o.stdout).into_owned());
+        assert!(
+            out.as_ref().is_some_and(|s| s.contains("pane-probe")),
+            "hidden_command lost its output: {out:?}"
+        );
+    }
 
     #[test]
     fn decodes_plain_utf8() {

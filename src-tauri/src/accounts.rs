@@ -203,6 +203,15 @@ pub fn save_accounts(provider: &str, entries: &[AccountEntry]) -> Result<(), Str
     save_accounts_to(&crate::providers::config_dir(), provider, entries)
 }
 
+/// A bare family snapshot belongs to the first key, not permanently to the
+/// family. Keep the queried identity alongside each in-flight result.
+pub fn snapshot_identities(provider: &str, entries: &[AccountEntry]) -> std::collections::HashMap<String, String> {
+    entries.iter().enumerate().map(|(index, entry)| {
+        let identity = card_id_for_account(provider, entry);
+        (if index == 0 { provider.to_string() } else { identity.clone() }, identity)
+    }).collect()
+}
+
 fn archive_file(base: &std::path::Path) -> PathBuf {
     base.join("archived_accounts.json")
 }

@@ -188,6 +188,36 @@ impl Snapshot {
             dashboard_url: None,
         }
     }
+
+    /// Credentials ARE present and usable, but this provider's quota cannot
+    /// be read without something more (a browser-session token, a password,
+    /// an extra id). The card belongs on the board either way — the user
+    /// asked for exactly this: never make a provider vanish because one
+    /// additional step is missing; say which step it is.
+    ///
+    /// `hint` is the user-facing "what to provide, and where to get it";
+    /// `plan` is whatever the provider can already state about the account
+    /// (e.g. a wallet balance it CAN read).
+    pub fn needs_setup(
+        id: &str,
+        name: &str,
+        plan: Option<String>,
+        metrics: Vec<Metric>,
+        hint: &str,
+    ) -> Self {
+        Self {
+            id: id.into(),
+            name: name.into(),
+            plan,
+            status: "needs_setup".into(),
+            error: Some(hint.into()),
+            metrics,
+            stale: false,
+            boot_cache: false,
+            warning: None,
+            dashboard_url: None,
+        }
+    }
 }
 
 /// Optional outbound proxy from config.json `proxy: { enabled, url }`.

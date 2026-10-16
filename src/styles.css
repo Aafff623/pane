@@ -8123,3 +8123,22 @@ body.reduce-anim .spend-bolt.tier-3 svg {
 .picker-name { flex: 1; font-size: 12.5px; }
 .picker-note { font-size: 11px; opacity: 0.7; }
 .picker-empty { margin: 10px 6px; font-size: 12px; opacity: 0.75; }
+
+/* --- needs_setup: credential saved, usage API needs one more step --- */
+.needs-setup {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 9px 10px;
+  margin-top: 6px;
+  border: 1px dashed var(--warn-border, #8a6d1f);
+  border-radius: 10px;
+  background: rgba(255, 176, 32, 0.06);
+  font-size: 11.5px;
+  line-height: 1.45;
+}
+.needs-setup-icon { opacity: 0.8; flex: none; margin-top: 1px; }
+.needs-setup-icon svg { width: 14px; height: 14px; display: block; }
+.needs-setup-text { flex: 1; opacity: 0.92; }
+.needs-setup-btn { flex: none; align-self: center; }
+.needs-setup-rows { margin-bottom: 2px; }

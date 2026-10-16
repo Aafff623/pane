@@ -225,6 +225,7 @@ pub(crate) fn providers_payload_from(
             "ok": by_status("ok"),
             "error": by_status("error"),
             "no_credentials": by_status("no_credentials"),
+            "needs_setup": by_status("needs_setup"),
             "stale": snaps.iter().filter(|s| s.stale).count(),
         },
         "lastRefreshAt": (published_at > 0).then(|| iso8601(published_at)),
@@ -265,6 +266,7 @@ fn status_payload(cfg: &Value, fetched_at: &str) -> Value {
             "ok": snaps.iter().filter(|s| s.status == "ok").count(),
             "error": snaps.iter().filter(|s| s.status == "error").count(),
             "no_credentials": snaps.iter().filter(|s| s.status == "no_credentials").count(),
+            "needs_setup": snaps.iter().filter(|s| s.status == "needs_setup").count(),
             "stale": snaps.iter().filter(|s| s.stale).count(),
         },
         "config": {

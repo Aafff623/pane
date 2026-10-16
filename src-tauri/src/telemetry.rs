@@ -249,9 +249,10 @@ fn accumulate(state: &mut State, today: &str, outcomes: &[Outcome]) -> Vec<Value
         state.day = today.to_string();
     }
     for o in outcomes {
-        // "no_credentials" is a setup state, not a refresh result — a card
-        // waiting for a sign-in shouldn't read as a daily failure.
-        if o.status == "no_credentials" {
+        // "no_credentials" and "needs_setup" are setup states, not refresh
+        // results — a card waiting for the user to finish configuring
+        // shouldn't read as a daily failure.
+        if o.status == "no_credentials" || o.status == "needs_setup" {
             continue;
         }
         let entry = state.providers.entry(o.id.clone()).or_default();

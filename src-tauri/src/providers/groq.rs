@@ -1,7 +1,7 @@
 //! Groq — API-key card reading the rate-limit response headers of a plain
 //! `GET /models` call (mechanism per openusage's Groq provider): Groq's
-//! public API answers every request with `x-ratelimit-*-day` headers
-//! describing the key's daily request/token budgets.
+//! public API answers every request with `x-ratelimit-*` headers
+//! describing the key's daily request and per-minute token budgets.
 
 use super::{http, stored_api_key, Metric, Snapshot};
 
@@ -56,7 +56,12 @@ async fn fetch_with_key(key: &str) -> Result<Snapshot, String> {
         .iter()
         .filter_map(|(k, v)| Some((k.to_string(), v.to_str().ok()?.to_string())))
         .collect();
-    parse_headers(&headers)
+    match parse_headers(&headers) {
+        Ok(snapshot) => Ok(snapshot),
+        Err(_) => Ok(Snapshot::needs_setup(ID, NAME, None,
+            vec![Metric::text("Connection", "API key accepted".into())],
+            "API key accepted, but the models response carries no rate-limit headers. No quota data is available from this read-only endpoint.")),
+    }
 }
 
 /// x-ratelimit headers → daily progress rows. The reset header is a duration
@@ -81,8 +86,8 @@ fn parse_headers(headers: &[(String, String)]) -> Result<Snapshot, String> {
     };
 
     let mut metrics = Vec::new();
-    let req_limit = get("x-ratelimit-limit-requests-day").and_then(|v| v.parse::<f64>().ok());
-    let req_left = get("x-ratelimit-remaining-requests-day").and_then(|v| v.parse::<f64>().ok());
+    let req_limit = get("x-ratelimit-limit-requests").and_then(|v| v.parse::<f64>().ok());
+    let req_left = get("x-ratelimit-remaining-requests").and_then(|v| v.parse::<f64>().ok());
     if let (Some(limit), Some(left)) = (req_limit, req_left) {
         if limit > 0.0 {
             let used = (limit - left).max(0.0);
@@ -92,22 +97,22 @@ fn parse_headers(headers: &[(String, String)]) -> Result<Snapshot, String> {
                     (used / limit * 100.0).clamp(0.0, 100.0),
                     Some(format!("{:.0} of {:.0} requests", used, limit)),
                 )
-                .with_reset(parse_reset(get("x-ratelimit-reset-requests-day")), None),
+                .with_reset(parse_reset(get("x-ratelimit-reset-requests")), None),
             );
         }
     }
-    let tok_limit = get("x-ratelimit-limit-tokens-day").and_then(|v| v.parse::<f64>().ok());
-    let tok_left = get("x-ratelimit-remaining-tokens-day").and_then(|v| v.parse::<f64>().ok());
+    let tok_limit = get("x-ratelimit-limit-tokens").and_then(|v| v.parse::<f64>().ok());
+    let tok_left = get("x-ratelimit-remaining-tokens").and_then(|v| v.parse::<f64>().ok());
     if let (Some(limit), Some(left)) = (tok_limit, tok_left) {
         if limit > 0.0 {
             let used = (limit - left).max(0.0);
             metrics.push(
                 Metric::progress(
-                    "Tokens / day",
+                    "Tokens / minute",
                     (used / limit * 100.0).clamp(0.0, 100.0),
                     Some(format!("{} of {} tokens", fmt(used), fmt(limit))),
                 )
-                .with_reset(parse_reset(get("x-ratelimit-reset-tokens-day")), None),
+                .with_reset(parse_reset(get("x-ratelimit-reset-tokens")), None),
             );
         }
     }
@@ -132,13 +137,13 @@ mod tests {
     use super::*;
 
     #[test]
-    fn daily_request_and_token_budgets_become_rows() {
+    fn official_rpd_and_tpm_headers_become_distinct_rows() {
         let headers = vec![
-            ("x-ratelimit-limit-requests-day".into(), "14400".into()),
-            ("x-ratelimit-remaining-requests-day".into(), "10800".into()),
-            ("x-ratelimit-reset-requests-day".into(), "3600".into()),
-            ("x-ratelimit-limit-tokens-day".into(), "200000".into()),
-            ("x-ratelimit-remaining-tokens-day".into(), "50000".into()),
+            ("x-ratelimit-limit-requests".into(), "14400".into()),
+            ("x-ratelimit-remaining-requests".into(), "10800".into()),
+            ("x-ratelimit-reset-requests".into(), "3600".into()),
+            ("x-ratelimit-limit-tokens".into(), "200000".into()),
+            ("x-ratelimit-remaining-tokens".into(), "50000".into()),
         ];
         let snap = parse_headers(&headers).unwrap();
         assert_eq!(snap.status, "ok");
@@ -148,6 +153,7 @@ mod tests {
         assert!(req.resets_at.is_some());
         let tokens = &snap.metrics[1];
         assert_eq!(tokens.used_percent, Some(75.0));
+        assert_eq!(tokens.label, "Tokens / minute");
         assert_eq!(tokens.detail.as_deref(), Some("150.0K of 200.0K tokens"));
     }
 

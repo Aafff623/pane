@@ -154,7 +154,7 @@ fn config_with_defaults(mut cfg: Value) -> Value {
     obj.entry("categoryOverrides").or_insert(json!({}));
     obj.entry("spendMetric").or_insert(json!("cost"));
     obj.entry("spendGrouping").or_insert(json!("tool"));
-    obj.entry("overviewStyle").or_insert(json!("rings"));
+    obj.entry("overviewStyle").or_insert(json!("bars"));
     obj.entry("showUsed").or_insert(json!(false));
     obj.entry("resetExact").or_insert(json!(false));
     obj.entry("timeFormat").or_insert(json!("auto"));
@@ -163,6 +163,7 @@ fn config_with_defaults(mut cfg: Value) -> Value {
     obj.entry("density").or_insert(json!("compact"));
     // Empty = stock UI font stack; a family name replaces only the head of it.
     obj.entry("uiFont").or_insert(json!(""));
+    obj.entry("uiFontPromptVersion").or_insert(json!(""));
     obj.entry("glassEffects").or_insert(json!(true));
     obj.entry("shortcut").or_insert(json!("Alt+2"));
     obj.entry("categoryShortcut").or_insert(json!("Shift+1"));
@@ -286,6 +287,7 @@ const CONFIG_KEYS: &[&str] = &[
     "appearance",
     "density",
     "uiFont",
+    "uiFontPromptVersion",
     "glassEffects",
     "shortcut",
     "categoryShortcut",
@@ -2302,7 +2304,9 @@ async fn fetch_usage(
     if clear_benches.unwrap_or(false) {
         clear_soft_benches();
     }
-    run_usage_fetch_inner_mode(&app, disabled, probe_all.unwrap_or(false)).await
+    let snapshots = run_usage_fetch_inner_mode(&app, disabled, probe_all.unwrap_or(false)).await;
+    let _ = app.emit("usage-updated", &snapshots);
+    snapshots
 }
 
 /// Refreshes ONE provider card on demand (the ⟳ button in the card head).
@@ -2333,6 +2337,13 @@ async fn test_provider(provider_id: String) -> Result<String, String> {
     let ms = started.elapsed().as_millis();
     Ok(match snap.status.as_str() {
         "ok" => format!("ok:{ms}"),
+        // A credential that connects but cannot read quota is not a failed
+        // test — the Customize panel must say what is missing instead of
+        // painting it red (user rule 2026-10-15).
+        "needs_setup" => format!(
+            "needs_setup:{}:{ms}",
+            snap.error.unwrap_or_else(|| "one more step needed".into())
+        ),
         _ => format!("{}:{ms}", snap.error.unwrap_or_else(|| "unknown error".into())),
     })
 }
@@ -2348,9 +2359,23 @@ async fn fetch_provider_snapshot(provider_id: String, allow_disabled: bool) -> R
         return Err(format!("{family} is disabled"));
     }
 
-    // Bare family id → the native provider path.
+    // The bare card is accounts[0] whenever this family has pasted accounts.
+    if provider_id == family && provider_catalog::provider_definition(&family)
+        .is_some_and(|p| p.supports_api_key && p.supports_extra_accounts) {
+        if let Some(entry) = accounts_with_imported_main_key(&family).first().cloned() {
+            let identity = accounts::card_id_for_account(&family, &entry);
+            let snap = account_snapshot(family.clone(), family.clone(), family.clone(),
+                entry.api_key, entry.base_url).await;
+            if accounts_with_imported_main_key(&family).first()
+                .is_none_or(|current| accounts::card_id_for_account(&family, current) != identity) {
+                return Err("account changed while the query was running; retry".into());
+            }
+            return Ok(snap);
+        }
+    }
+    // No pasted default → the native provider path.
     if provider_id == family {
-        return Ok(match family.as_str() {
+        let snap = match family.as_str() {
             "claude" => providers::claude::snapshot().await,
             "codex" => providers::codex::snapshot().await,
             "cursor" => providers::cursor::snapshot().await,
@@ -2414,7 +2439,13 @@ async fn fetch_provider_snapshot(provider_id: String, allow_disabled: bool) -> R
             "perplexity" => providers::perplexity::snapshot().await,
             "volcengine" => providers::volcengine::snapshot().await,
             _ => return Err(format!("no single-provider refresh for {family}")),
-        });
+        };
+        if provider_catalog::provider_definition(&family)
+            .is_some_and(|p| p.supports_api_key && p.supports_extra_accounts)
+            && !accounts_with_imported_main_key(&family).is_empty() {
+            return Err("account changed while the query was running; retry".into());
+        }
+        return Ok(snap);
     }
 
     // Antigravity credential slots.
@@ -2540,14 +2571,19 @@ async fn fetch_provider_snapshot(provider_id: String, allow_disabled: bool) -> R
             accounts::family_display_name(&family),
             accounts::display_label(&acct.label, index + 1, locale)
         );
-        return Ok(account_snapshot(
+        let snap = account_snapshot(
             family.clone(),
             provider_id.clone(),
             name,
             acct.api_key.clone(),
             acct.base_url.clone(),
         )
-        .await);
+        .await;
+        if accounts::snapshot_identities(&family, &accounts::load_accounts(&family))
+            .get(&provider_id) != Some(&provider_id) {
+            return Err("account changed while the query was running; retry".into());
+        }
+        return Ok(snap);
     }
 
     Err(format!("no single-provider refresh for {provider_id}"))
@@ -2711,6 +2747,12 @@ async fn run_usage_fetch_inner_mode(
     }
     let multi_account_families: HashSet<&str> =
         extra_accounts.iter().map(|(family, _)| *family).collect();
+    let mut expected_key_identities: HashMap<String, String> = extra_accounts.iter()
+        .flat_map(|(family, entries)| accounts::snapshot_identities(family, entries)).collect();
+    for definition in provider_catalog::provider_definitions().iter()
+        .filter(|p| p.supports_api_key && p.supports_extra_accounts) {
+        expected_key_identities.entry(definition.family_id.into()).or_default();
+    }
     let mut futs: Vec<(String, BoxedSnap)> = base
         .into_iter()
         .filter(|(id, _)| {
@@ -3018,6 +3060,7 @@ async fn run_usage_fetch_inner_mode(
             all.push(snap);
         }
     }
+    retain_current_key_accounts(&mut all, &expected_key_identities);
     let current_onenewapi_generations = onenewapi_snapshot_generations(
         all.iter()
             .filter(|snapshot| family_of(&snapshot.id) == "onenewapi")
@@ -3128,6 +3171,7 @@ async fn run_usage_fetch_inner_mode(
             .map(|d| d.as_millis() as i64)
             .unwrap_or(0);
         if let Ok(mut map) = cache.lock() {
+            retain_current_key_accounts(&mut all, &expected_key_identities);
             let mut dirty = false;
             let mut credit_samples: Vec<(String, f64)> = Vec::new();
             for s in all.iter_mut() {
@@ -3188,6 +3232,7 @@ async fn run_usage_fetch_inner_mode(
         }
     }
 
+    retain_current_key_accounts(&mut all, &expected_key_identities);
     // A mutation can begin after the first post-request check. Recheck after
     // the cache critical section so an old result is neither published nor
     // included in alerts/telemetry while its replacement is being saved.
@@ -3696,7 +3741,7 @@ async fn key_snapshot_for(
     base_url: Option<String>,
 ) -> Result<providers::Snapshot, String> {
     Ok(match provider {
-
+        "bocha" | "tavily" | "firecrawl" | "brave" => providers::searchquota::snapshot_with_key(provider, key).await,
         "openrouter" => providers::openrouter::snapshot_with_key(key).await,
         "zai" => providers::zai::snapshot_with_key(key).await,
         "commandcode" => providers::commandcode::snapshot_with_key(key).await,
@@ -3761,6 +3806,7 @@ struct TestResult {
     ok: bool,
     metrics: usize,
     message: String,
+    snapshot: providers::Snapshot,
 }
 
 /// Live test of a pasted API key against its provider (Customize "Test
@@ -3781,7 +3827,8 @@ async fn test_api_key(
     Ok(TestResult {
         ok: snap.status == "ok",
         metrics: snap.metrics.len(),
-        message: snap.error.unwrap_or_default(),
+        message: snap.error.clone().unwrap_or_default(),
+        snapshot: snap,
     })
 }
 
@@ -3822,15 +3869,15 @@ fn antigravity_capture_account(label: String) -> Result<(), String> {
 }
 
 /// Appends one extra API-key account (Customize ⚙ → "Add account") to
-/// %APPDATA%\Pane\accounts\<provider>.json. The key has already passed a
-/// test_api_key probe on the frontend; nothing here touches the network.
+/// %APPDATA%\Pane\accounts\<provider>.json. Failed probes may also be
+/// saved for later repair; nothing here touches the network.
 #[tauri::command]
 fn account_add(
     provider: String,
     label: String,
     api_key: String,
     base_url: Option<String>,
-) -> Result<(), String> {
+) -> Result<String, String> {
     if provider == "codex" {
         // Codex accounts are Pane sign-ins, not pasted keys — the store is
         // codex_accounts and the entry point is the auth center.
@@ -3874,7 +3921,37 @@ fn account_add(
         return Err("this API key and relay URL are already added".into());
     }
     entries.push(candidate);
-    accounts::save_accounts(&provider, &entries)
+    accounts::save_accounts(&provider, &entries)?;
+    let _ = forget_provider_snapshot(&provider);
+    Ok(candidate_id)
+}
+
+/// Replaces a pasted credential by stable identity, never by a stale row
+/// index. The new fingerprint is returned so the UI can reconcile its tabs.
+#[tauri::command]
+fn account_update(provider: String, card_id: String, label: String, api_key: String,
+    base_url: Option<String>) -> Result<String, String> {
+    if !provider_catalog::provider_definition(&provider).is_some_and(|p| p.supports_api_key && p.supports_extra_accounts) {
+        return Err("this provider requires its own sign-in flow".into());
+    }
+    let mut entries = accounts::load_accounts(&provider);
+    let index = entries.iter().position(|entry| accounts::card_id_for_account(&provider, entry) == card_id)
+        .ok_or("account no longer exists")?;
+    if api_key.trim().is_empty() { return Err("credential is empty".into()); }
+    let base_url = base_url.filter(|url| !url.trim().is_empty());
+    if provider_catalog::takes_base_url(&provider) {
+        validate_relay_base_url(&provider, base_url.as_deref().ok_or("a base URL is required")?)?;
+    } else if base_url.is_some() { return Err("this provider does not take a base URL".into()); }
+    let candidate = accounts::AccountEntry { label: label.trim().into(), api_key: api_key.trim().into(), base_url };
+    let new_id = accounts::card_id_for_account(&provider, &candidate);
+    if entries.iter().enumerate().any(|(i, entry)| i != index && accounts::card_id_for_account(&provider, entry) == new_id) {
+        return Err("this credential is already added".into());
+    }
+    entries[index] = candidate;
+    accounts::save_accounts(&provider, &entries)?;
+    let _ = forget_provider_snapshot(&card_id);
+    if index == 0 { let _ = forget_provider_snapshot(&provider); }
+    Ok(new_id)
 }
 
 /// Removes the account at `index` — its position in the accounts file,
@@ -4350,6 +4427,17 @@ fn account_list(provider: String) -> Result<Vec<Value>, String> {
             })
         })
         .collect())
+}
+
+fn retain_current_key_accounts(snapshots: &mut Vec<providers::Snapshot>, expected: &HashMap<String, String>) {
+    let families: HashSet<String> = expected.keys().map(|id| family_of(id)).collect();
+    let current: HashMap<String, String> = families.iter().flat_map(|family| {
+        let mut identities = accounts::snapshot_identities(family, &accounts_with_imported_main_key(family));
+        identities.entry(family.clone()).or_default();
+        identities
+    }).collect();
+    snapshots.retain(|snapshot| expected.get(&snapshot.id)
+        .is_none_or(|identity| current.get(&snapshot.id) == Some(identity)));
 }
 
 /// The panel window's auth center (M3): every auth family with its account
@@ -5154,6 +5242,7 @@ async fn stepfun_plan_test(
     let snap = providers::stepfun_plan::snapshot_with_creds(&token, &username, &password).await;
     Ok(serde_json::json!({
         "ok": snap.status == "ok",
+        "status": snap.status,
         "metrics": snap.metrics.len(),
         "message": snap.error.unwrap_or_default(),
     }))
@@ -5173,8 +5262,8 @@ async fn stepfun_plan_save(
 
 /// StepFun Step Plan: drop the stored pair + account.
 #[tauri::command]
-fn stepfun_plan_clear() {
-    providers::stepfun_plan::clear_creds();
+async fn stepfun_plan_clear() {
+    providers::stepfun_plan::clear_creds().await;
 }
 
 /// SenseNova: build the PKCE authorization URL for the one-time browser
@@ -5520,6 +5609,7 @@ pub fn run() {
             get_base_url,
             test_api_key,
             account_add,
+            account_update,
             account_remove,
             account_archive,
             account_restore,

@@ -120,6 +120,21 @@ struct Keyed {
     key: String,
 }
 
+/// Probe the entered credential without writing it to the account store.
+/// Brave uses the same per-key cache as normal refreshes because a probe
+/// spends one real search query.
+pub async fn snapshot_with_key(service: &str, key: &str) -> Snapshot {
+    let keys = [Keyed { label: "Connection test".into(), key: key.trim().into() }];
+    let result = match service {
+        "bocha" => bocha_fetch(&keys).await,
+        "tavily" => tavily_fetch(&keys).await,
+        "firecrawl" => firecrawl_fetch(&keys).await,
+        "brave" => brave_fetch(&keys).await,
+        _ => Err("unknown search service".into()),
+    };
+    result.unwrap_or_else(|error| Snapshot::error(service, service, error))
+}
+
 impl Keyed {
     /// `tvly-dev…whtQ` — enough to tell keys apart without exposing them.
     fn masked(key: &str) -> String {

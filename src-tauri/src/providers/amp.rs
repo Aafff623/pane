@@ -62,10 +62,11 @@ fn parse_display_text(text: &str) -> (Vec<Metric>, Option<String>) {
 }
 
 async fn cli_usage() -> Option<String> {
-    // The amp CLI on PATH (npm installs amp.cmd on Windows).
+    // The amp CLI on PATH (npm installs amp.cmd on Windows). Spawned through
+    // the platform seam so the console child cannot flash a window (issue #2).
     let out = tokio::time::timeout(
         std::time::Duration::from_secs(15),
-        tokio::process::Command::new("cmd")
+        crate::platform::hidden_command("cmd")
             .args(["/C", "amp", "usage"])
             .env("NO_COLOR", "1")
             .output(),

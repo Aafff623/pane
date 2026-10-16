@@ -63,6 +63,9 @@ import paneIcon from "./assets/pane-icon.png?inline";
 import { SKINS, SKIN_STORAGE_KEY, readSkin, normalizeSkin, embedSkinImages, packSkinList, isPackSkin, refreshInstalledPacks, remotePackIndex, refreshSkinIndex, type SkinId } from "./skins";
 import { playThemeStartup } from "./themeStartup";
 import { initialTourPending } from "./onboardingState";
+import { fontOnboardingMode, type FontOnboarding } from "./fontOnboarding";
+import { credentialFailure, accountFormReady, enabledAccountCount } from "./credentialPolicy";
+import { keyAvailabilityCounts, keyAvailabilityRows, keyAvailabilitySummary, overviewFoldCount } from "./keyAvailability";
 import { loadFontPacks, fontPackFamilies, mountFontPackManager } from "./fontPacks";
 import { loadResetWake, mountResetWakeSettings, resetWakeBadge, acceptWakeStatuses, type WakeStatus } from "./resetWake";
 import { decorateInkSkin, clearInkSkin } from "./inkEffects";
@@ -84,6 +87,9 @@ interface Metric {
   value: string | null;
   resets_at: number | null;
   period_ms: number | null;
+  /// Set by the search/MCP families on their per-key rows only (null on
+  /// headline/summary rows and for every other provider).
+  available?: boolean | null;
 }
 
 interface Snapshot {
@@ -298,6 +304,7 @@ interface Config {
   appearance: "system" | "light" | "dark";
   density: "regular" | "compact";
   uiFont: string;
+  uiFontPromptVersion: string;
   glassEffects: boolean;
   shortcut: string;
   categoryShortcut: string;
@@ -354,6 +361,7 @@ const FRONTEND_CONFIG_KEYS = [
   "appearance",
   "density",
   "uiFont",
+  "uiFontPromptVersion",
   "glassEffects",
   "shortcut",
   "categoryShortcut",
@@ -557,7 +565,7 @@ let config: Config = {
   spendTab: "today",
   overviewTab: "5h",
   overviewCategory: "coding",
-  overviewStyle: "rings",
+  overviewStyle: "bars",
   categoryOverrides: {},
   spendMetric: "cost",
   spendGrouping: "tool",
@@ -569,6 +577,7 @@ let config: Config = {
   appearance: "system",
   density: "regular",
   uiFont: "",
+  uiFontPromptVersion: "",
   glassEffects: true,
   shortcut: "",
   categoryShortcut: "Shift+1",
@@ -2193,6 +2202,9 @@ const MAXED_PCT = 99.5;
 /// as Web Searches). Auxiliary limits must not trigger full provider card exhaustion.
 function isCoreQuotaMetric(m: Metric): boolean {
   if (m.kind !== "progress") return false;
+  // A derived app ceiling is identified by its detail; the app name is
+  // user supplied and may contain words such as "search" or "on-demand".
+  if (isDerivedCeilingDetail(m.detail)) return true;
   const label = m.label.toLowerCase();
   if (label.includes("search")) return false;
   // On-demand is a paid overflow pool, not the plan quota. A spent
@@ -2205,8 +2217,14 @@ function isCoreQuotaMetric(m: Metric): boolean {
   return true;
 }
 
-function maxProgressUsed(s: Snapshot): number {
-  return peakCoreProgress(s) ?? 0;
+/// True for a progress row that declares its own ceiling DERIVED rather than
+/// measured — GIPHY's per-app bar (documented 100 calls/hour beta cap × 24,
+/// numerator = newest *completed* day). The row states both facts in its own
+/// English detail, so the overview tile repeats the qualifier instead of a
+/// bare "Quota 1%" that would read as a measured quota. Keyed on the same
+/// detail shape displayMetricDetail translates.
+function isDerivedCeilingDetail(detail: string | null | undefined): boolean {
+  return !!detail && /ceiling derived from/.test(detail);
 }
 
 /// Peak percentage over the core quota windows, or null when the snapshot has
@@ -2224,12 +2242,15 @@ function peakCoreProgress(s: Snapshot): number | null {
 /// Health dot for an account tab: red = some window (session or weekly)
 /// is maxed out — the account is waiting for a reset; green = room left
 /// everywhere; gray = no successful fetch yet.
-function accountHealthDot(id: string): "red" | "green" | "gray" | "error" {
+function accountHealthDot(id: string): "red" | "green" | "gray" | "yellow" | "error" {
   const snap = lastSnapshots.find((s) => s.id === id);
   if (!snap) return "gray";
   // A rejected key is actionable, not an account with no data. Keep the
   // gray dot for accounts that have not produced a snapshot yet.
   if (snap.status === "error") return "error";
+  // "one more step needed" is a user action, not an outage: the same yellow
+  // the rest of the UI uses for "needs attention".
+  if (snap.status === "needs_setup") return "yellow";
   if (snap.status !== "ok") return "gray";
   if (!snap.metrics.length) return "gray";
   return isSnapshotMaxed(snap) ? "red" : "green";
@@ -2253,7 +2274,7 @@ function isSnapshotMaxed(s: Snapshot): boolean {
     const present = new Set<string>();
     const maxed = new Set<string>();
     for (const m of s.metrics) {
-      if (!isCoreQuotaMetric(m) || m.used_percent === null) continue;
+      if (!isCoreQuotaMetric(m) || isDerivedCeilingDetail(m.detail) || m.used_percent === null) continue;
       const pool = pools[m.label];
       if (!pool) continue;
       present.add(pool);
@@ -2261,7 +2282,7 @@ function isSnapshotMaxed(s: Snapshot): boolean {
     }
     if (present.size > 0) return [...present].every((p) => maxed.has(p));
   }
-  return maxProgressUsed(s) >= MAXED_PCT;
+  return s.metrics.some((m) => isCoreQuotaMetric(m) && !isDerivedCeilingDetail(m.detail) && m.used_percent !== null && m.used_percent >= MAXED_PCT);
 }
 
 /// Returns true when this card should be automatically collapsed:
@@ -2310,7 +2331,14 @@ function isCardCollapsed(cardId: string): boolean {
   const layout = providerLayout(cardId);
   // Detail cards are EXPANDED by default; folding is a deliberate user
   // choice made through the card's fold control and remembered in layout.
-  return layout.collapsed === true;
+  if (layout.collapsed !== true) return false;
+  // A search/MCP card holding a single api-key renders no fold control, so
+  // a flag saved while it had more keys must not keep it folded — the card
+  // would render collapsed with no way back (the click-to-expand path asks
+  // this same predicate). Counts, not the badge summary: exactly one key
+  // row is the case that matters, and 0 rows is "not a key card at all".
+  const snap = lastSnapshots.find((s) => s.id === cardId);
+  return keyAvailabilityCounts(snap?.metrics).total !== 1;
 }
 
 /// When collapsed, returns the nearest reset across relevant snapshots for
@@ -2382,7 +2410,7 @@ function maxedRowLabel(cardId: string): string | null {
 
 /// Combines the overall family health dot: green if any account is green (quota available),
 /// red if all are red, gray otherwise.
-function familyHealthDot(family: string): "red" | "green" | "gray" | "error" {
+function familyHealthDot(family: string): "red" | "green" | "gray" | "yellow" | "error" {
   const cards = lastSnapshots.filter((s) => {
     if (providerFamily(s.id) !== family || isCardDisabled(s.id)) return false;
     if (s.id.includes("@") && accountsCache.has(family)) {
@@ -2397,10 +2425,13 @@ function familyHealthDot(family: string): "red" | "green" | "gray" | "error" {
   // account. Gray is reserved for a pool with no numeric quota at all.
   if (dots.some((d) => d === "red")) return "red";
   if (dots.some((d) => d === "error")) return "error";
+  // A credential that needs one more step outranks "no data": something IS
+  // configured and the user has a concrete action to take.
+  if (dots.some((d) => d === "yellow")) return "yellow";
   return "gray";
 }
 
-function cardHealthDot(cardId: string): "red" | "green" | "gray" | "error" {
+function cardHealthDot(cardId: string): "red" | "green" | "gray" | "yellow" | "error" {
   const family = providerFamily(cardId);
   if (cardId === family && supportsExtraAccounts(family) && !isParallelAccountFamily(family)) {
     return familyHealthDot(family);
@@ -2413,20 +2444,34 @@ function cardHealthDot(cardId: string): "red" | "green" | "gray" | "error" {
 /// (green). Red (maxed / error) and gray keep their own meaning.
 function peakTintedDot(
   family: string,
-  dot: "red" | "green" | "gray" | "error",
+  dot: "red" | "green" | "gray" | "yellow" | "error",
 ): "red" | "green" | "gray" | "yellow" | "error" {
   return dot === "green" && isProviderInPeak(family) ? "yellow" : dot;
 }
 
-function healthDotTitle(dot: "red" | "green" | "gray" | "yellow" | "error"): string {
+/// Tooltip for a health dot. A yellow dot has two sources — the peak-hours
+/// tint on a green dot, and a credential that needs one more step — and the
+/// colour alone cannot tell them apart, so the card id decides which
+/// sentence is true. Calling without one keeps the peak-hours wording.
+function healthDotTitle(
+  dot: "red" | "green" | "gray" | "yellow" | "error",
+  cardId = "",
+): string {
   if (dot === "error") return t("customize.acctDotError");
+  if (dot === "yellow") {
+    const family = providerFamily(cardId);
+    const needsSetup = cardId === family && supportsExtraAccounts(family) && !isParallelAccountFamily(family)
+      ? cardHealthDot(cardId) === "yellow"
+      : lastSnapshots.find((s) => s.id === cardId)?.status === "needs_setup";
+    return needsSetup
+      ? t("customize.acctDotSetup")
+      : t("customize.acctDotYellow");
+  }
   return dot === "red"
     ? t("customize.acctDotRed")
-    : dot === "yellow"
-      ? t("customize.acctDotYellow")
-      : dot === "green"
-        ? t("customize.acctDotGreen")
-        : t("customize.acctDotGray");
+    : dot === "green"
+      ? t("customize.acctDotGreen")
+      : t("customize.acctDotGray");
 }
 
 // Quota pools: which independent meter group a metric label belongs to.
@@ -2517,10 +2562,19 @@ function formatHoverMetric(m: Metric, label = displayMetricLabel(m.label)): stri
 /// for Copilot/Z.ai, every independent pool for Cursor/Antigravity.
 function overviewHoverTip(s: Snapshot, quota: OverviewQuota, displayName: string): string {
   if (quota.status === "error") return `${displayName}: ${t("overview.offline")}`;
+  if (quota.status === "needs_setup") return `${displayName}: ${t("overview.needsSetup")}`;
   if (quota.status === "no_data") return `${displayName}: ${t("overview.noData")}`;
   if (quota.status === "text") {
     const rows = overviewTextMetrics(s.metrics || [], providerFamily(s.id));
     return `${displayName}: ${rows.map((m) => `${m.label}: ${m.value ?? m.detail}`).join(" · ")} · ${t("overview.ratioUnknown")}`;
+  }
+  // A derived ceiling must carry its own wording on hover too — the metric's
+  // detail already says "last completed day … ceiling derived from …".
+  if (quota.derivedCeiling) {
+    const detail = quota.metricDetail
+      ? displayMetricDetail(quota.metricDetail)
+      : t("overview.derivedCeiling");
+    return `${displayName}: ${detail}`;
   }
 
   const family = providerFamily(s.id);
@@ -2589,7 +2643,7 @@ function overviewAccountCount(family: string): number {
       !isCardDisabled(snapshot.id) &&
       !isBareHintCard(snapshot),
   ).length;
-  const configuredCount = accountsCache.get(family)?.length ?? 0;
+  const configuredCount = enabledAccountCount(accountsCache.get(family) ?? [], config.disabled);
   return Math.max(snapshotCount, configuredCount);
 }
 
@@ -2628,7 +2682,7 @@ function overviewAccountSnapshots(family: string): Snapshot[] {
 function accountAvailabilitySummary(family: string): { total: number; available: number; unavailable: number } {
   const accounts = overviewAccountSnapshots(family);
   const available = accounts.filter((snapshot) => accountHealthDot(snapshot.id) === "green").length;
-  const configured = accountsCache.get(family)?.length ?? 0;
+  const configured = enabledAccountCount(accountsCache.get(family) ?? [], config.disabled);
   const total = Math.max(accounts.length, configured);
   return { total, available, unavailable: Math.max(0, total - available) };
 }
@@ -2643,6 +2697,22 @@ function setPinnedAccount(family: string, accountId: string): void {
   config.layout = layout;
   saveLayout(false);
   renderAll();
+}
+
+function cardMetricRows(layout: ProviderLayout, metrics: Metric[]): { always: string[]; onDemand: string[] } {
+  const present = new Set(metrics.map((m) => m.label));
+  const visible = layout.metricOrder.filter((k) => !layout.hidden.includes(k) && (present.has(k) || k === TREND_KEY));
+  let always = visible.filter((k) => !layout.onDemand.includes(k));
+  let onDemand = visible.filter((k) => layout.onDemand.includes(k));
+  if (!always.length) {
+    always = metrics.map((m) => m.label).filter((k) => !layout.hidden.includes(k) && !onDemand.includes(k));
+    if (!always.length && onDemand.length) {
+      // Keep one reading visible while preserving the user's saved layout.
+      always = [onDemand[0]];
+      onDemand = onDemand.slice(1);
+    }
+  }
+  return { always, onDemand };
 }
 
 function renderCard(s: Snapshot): string {
@@ -2692,7 +2762,7 @@ function renderCard(s: Snapshot): string {
             : labelForAccount(id, list);
           const on = id === shown.id;
           const dot = peakTintedDot(family, accountHealthDot(id));
-          const dotTitle = healthDotTitle(dot);
+          const dotTitle = healthDotTitle(dot, id);
           // Compact number capsules exist to save space — but a named,
           // noted, or default account shows its human label/note ("默认",
           // "njf3", "TTA"); only truly unnamed secondary accounts keep the
@@ -2732,6 +2802,21 @@ function renderCard(s: Snapshot): string {
       if (borrowed) shown = borrowed;
     }
   }
+  // Search/MCP families hold every api-key as a metric row on ONE snapshot
+  // (not one snapshot per account), so the multi-account branch above never
+  // fires for them. Their rows carry the backend's per-key availability
+  // flag; show the same N/M badge the account families use once 2+ keys
+  // are configured (a single key renders no badge). The same counts drive
+  // the fold below — the two must agree, or a card could fold with no
+  // badge to explain what it is hiding.
+  const keyCounts = keyAvailabilityCounts(s.metrics);
+  if (!accountCount && keyCounts.total >= 2) {
+    const ratio = keyCounts.available / keyCounts.total;
+    const availClass = keyCounts.available <= 0 || ratio <= 0.5 ? "is-low" : "is-ok";
+    const state =
+      keyCounts.available === 0 ? "is-empty" : keyCounts.available === keyCounts.total ? "is-ready" : "is-partial";
+    accountCount = `<span class="provider-account-badge ${state}" title="${escapeHtml(t("card.keySummary", { available: keyCounts.available, total: keyCounts.total }))}"><span class="provider-account-glyph" aria-hidden="true">●</span><span class="provider-account-numbers"><span class="acct-count-avail ${availClass}">${keyCounts.available}</span><span class="acct-count-sep">/</span><span class="acct-count-total">${keyCounts.total}</span></span></span>`;
+  }
   const plan = shown.plan ? `<span class="plan" title="${escapeHtml(shown.plan)}">${escapeHtml(shown.plan)}</span>` : "";
   // Peak-hours marker on the head: expanded standalone cards carry no
   // health dot, so the yellow peak state needs its own spot (next to the
@@ -2751,12 +2836,22 @@ function renderCard(s: Snapshot): string {
 
   let body: string;
   let caret = "";
-  if (shown.status === "ok") {
+  if (shown.status === "needs_setup") {
+    // Credential present, quota not readable: show whatever the credential
+    // CAN report, then spell out the missing step. The card must never
+    // collapse into a bare "failed" shell (user rule 2026-10-15).
+    const rows = shown.metrics.map((m) => renderMetric(m, shown.id)).join("");
+    body =
+      (rows ? `<div class="needs-setup-rows">${rows}</div>` : "") +
+      `<div class="needs-setup">
+        <span class="needs-setup-icon" aria-hidden="true">${uiIcon("key")}</span>
+        <span class="needs-setup-text">${escapeHtml(displayCardHint(shown.error ?? t("card.needsSetupFallback")))}</span>
+        <button class="mini-btn needs-setup-btn" type="button" data-needs-setup="${escapeHtml(shown.id)}">${escapeHtml(t("card.needsSetupAction"))}</button>
+      </div>`;
+  } else if (shown.status === "ok") {
     const L = providerLayout(s.id);
     const spend = lastSpend.find((sp) => sp.id === shown.id);
-    const visible = L.metricOrder.filter((k) => !L.hidden.includes(k));
-    const always = visible.filter((k) => !L.onDemand.includes(k));
-    const onDemand = visible.filter((k) => L.onDemand.includes(k));
+    const { always, onDemand } = cardMetricRows(L, shown.metrics);
     // Pool-grouped metric rows. A pool header is inserted when the card's
     // metrics span 2+ distinct pools (Antigravity Gemini vs Claude, Cursor
     // Auto vs API).
@@ -2784,7 +2879,7 @@ function renderCard(s: Snapshot): string {
         ${L.expanded ? `<div class="on-demand${anim}">${onDemandHtml}</div>` : ""}`;
     }
   } else {
-    body = `<p class="placeholder">${escapeHtml(displayCardHint(shown.error ?? t("card.notConnected")))}</p>${authJumpHtml(shown)}`;
+    body = `<p class="placeholder">${escapeHtml(failureText(shown.error ?? t("card.notConnected"), shown.status))}</p>${credentialRepairHtml(shown)}`;
   }
 
   const stale = !shown.stale
@@ -2809,16 +2904,22 @@ function renderCard(s: Snapshot): string {
   // and family state. The chevron toggles between collapsed/expanded and
   // remembers the choice per family.
   const cardCollapsed = isCardCollapsed(s.id);
-  const foldChevron = cardCollapsed
-    ? `<button class="card-fold-toggle" data-card-fold="${escapeHtml(s.id)}" title="${escapeHtml(t("card.expand"))}">${uiIcon("caretDown")}</button>`
-    : `<button class="card-fold-toggle" data-card-fold="${escapeHtml(s.id)}" title="${escapeHtml(t("card.collapse"))}">${uiIcon("caretUp")}</button>`;
+  // A single-key card is one row: it renders no badge and no fold control
+  // (isCardCollapsed refuses to fold it either), so the head stays quiet.
+  const singleKeyCard = keyCounts.total === 1;
+  const foldChevron = singleKeyCard
+    ? ""
+    : cardCollapsed
+      ? `<button class="card-fold-toggle" data-card-fold="${escapeHtml(s.id)}" title="${escapeHtml(t("card.expand"))}">${uiIcon("caretDown")}</button>`
+      : `<button class="card-fold-toggle" data-card-fold="${escapeHtml(s.id)}" title="${escapeHtml(t("card.collapse"))}">${uiIcon("caretUp")}</button>`;
   const finalBody = cardCollapsed ? "" : body + resetWakeBadge(shown.id);
-  // Hide per-account tabs and the ×N badge when folded — the family health
-  // dot and reset countdown already summarise the whole family.
+  // Hide the per-account tabs when folded — the head badge, the family
+  // health dot and the fold line already summarise the whole family. The
+  // badge itself stays: it is the folded card's account/key count.
   const finalAccountTabs = cardCollapsed ? "" : accountTabs;
   const finalAccountCount = accountCount;
   const refreshBtn =
-    shown.status === "ok" || shown.status === "error"
+    shown.status === "ok" || shown.status === "error" || shown.status === "needs_setup"
       ? `<button class="card-refresh" data-card-refresh="${shown.id}" title="${escapeHtml(t("card.refresh"))}">${uiIcon("arrowsClockwise")}</button>`
       : "";
   // One permanent pin entry in the head, acting on whichever account is
@@ -2841,13 +2942,28 @@ function renderCard(s: Snapshot): string {
   const headStatus =
     headPct === null
       ? ""
-      : `<span class="head-status" title="${escapeHtml(`${Math.round(headPct)}% · ${healthDotTitle(peakTintedDot(family, cardHealthDot(s.id)))}`)}"><span class="acct-dot ${peakTintedDot(family, cardHealthDot(s.id))}"></span><span class="head-pct">${Math.round(headPct)}%</span></span>`;
+      : `<span class="head-status" title="${escapeHtml(`${Math.round(headPct)}% · ${healthDotTitle(peakTintedDot(family, cardHealthDot(s.id)), s.id)}`)}"><span class="acct-dot ${peakTintedDot(family, cardHealthDot(s.id))}"></span><span class="head-pct">${Math.round(headPct)}%</span></span>`;
   // Folded state: visually prominent reset countdown badge with health status
   // and generous breathing room instead of a cramped raw text sliver.
   let foldLine = "";
-  if (cardCollapsed) {
+  if (cardCollapsed && keyCounts.total >= 2) {
+    // Multi-key cards fold to the same sentence the head badge abbreviates:
+    // the quota line below counts a percentage and a reset instant these
+    // rows never carry, so it would claim "quota available" while keys are
+    // down. The dot tracks key availability rather than quota — green =
+    // every key answered this round, yellow = some failed, red = none did.
+    const down = keyCounts.total - keyCounts.available;
+    const keyDot = keyCounts.available === 0 ? "red" : down > 0 ? "yellow" : "green";
+    foldLine = `
+        <div class="fold-row">
+          <div class="fold-badge ${down > 0 ? "warn" : "normal"}">
+            <span class="acct-dot ${keyDot}"></span>
+            <span class="fold-label">${escapeHtml(t("card.keySummary", { available: keyCounts.available, total: keyCounts.total }))}</span>
+          </div>
+        </div>`;
+  } else if (cardCollapsed) {
     const dot = peakTintedDot(family, cardHealthDot(s.id));
-    const dotTitle = healthDotTitle(dot);
+    const dotTitle = healthDotTitle(dot, s.id);
     const resetSecs = nearestResetSeconds(s.id);
     const isMaxed = isCardFoldCandidate(s.id) || dot === "red";
     const maxedLabel = isMaxed ? maxedRowLabel(s.id) : null;
@@ -3741,12 +3857,16 @@ interface OverviewQuota {
   // The shown metric's own "x / y" line, surfaced on overview tiles so a
   // bare 0% still reads with its total (MCP/search cards).
   metricDetail: string | null;
+  // The shown metric declares its ceiling DERIVED, not measured (GIPHY's
+  // 100 calls/hour × 24 beta cap). Tiles must repeat that qualifier — a
+  // bare percent would read as a measured quota.
+  derivedCeiling: boolean;
   // Text-metric value ("¥0.00 …" balance rows): tiles render this instead
   // of "no usage data" when the snapshot has no percent metric.
   valueText: string | null;
   periodFallback: boolean;
   isMaxed: boolean;
-  status: "ok" | "maxed" | "error" | "no_data" | "text";
+  status: "ok" | "maxed" | "error" | "no_data" | "text" | "needs_setup";
 }
 
 function extractOverviewQuota(s: Snapshot, cardIsMaxed = false, cardId = ""): OverviewQuota {
@@ -3757,10 +3877,11 @@ function extractOverviewQuota(s: Snapshot, cardIsMaxed = false, cardId = ""): Ov
       resetsAt: null,
       metricLabel: "",
       metricDetail: null,
+      derivedCeiling: false,
       valueText: null,
       periodFallback: false,
       isMaxed: false,
-      status: "error",
+      status: s.status === "needs_setup" ? "needs_setup" : "error",
     };
   }
 
@@ -3824,7 +3945,7 @@ function extractOverviewQuota(s: Snapshot, cardIsMaxed = false, cardId = ""): Ov
     // The ring follows the metric it displays — a sibling pool at 100%
     // must not force this one to a red 100. Fold state (`cardIsMaxed`)
     // only fills in a reset time when the shown bar itself is spent.
-    const isMaxed = usedPercent >= MAXED_PCT || (!!s.plan && /out of credit/i.test(s.plan));
+    const isMaxed = (!isDerivedCeilingDetail(best.detail) && usedPercent >= MAXED_PCT) || (!!s.plan && /out of credit/i.test(s.plan));
     const resetSecs = cardIsMaxed && cardId ? nearestResetSeconds(cardId) : 0;
     const resetsAt =
       best.resets_at ?? (resetSecs > 0 ? Date.now() + resetSecs * 1000 : null);
@@ -3834,6 +3955,7 @@ function extractOverviewQuota(s: Snapshot, cardIsMaxed = false, cardId = ""): Ov
       resetsAt,
       metricLabel: best.label,
       metricDetail: best.detail ?? null,
+      derivedCeiling: isDerivedCeilingDetail(best.detail),
       valueText: null,
       periodFallback,
       isMaxed,
@@ -3851,6 +3973,7 @@ function extractOverviewQuota(s: Snapshot, cardIsMaxed = false, cardId = ""): Ov
       resetsAt: textMetric.resets_at,
       metricLabel: textMetric.label,
       metricDetail: textMetric.detail ?? null,
+      derivedCeiling: false,
       valueText: textMetric.value ?? textMetric.detail ?? null,
       periodFallback: false,
       isMaxed: false,
@@ -3864,6 +3987,7 @@ function extractOverviewQuota(s: Snapshot, cardIsMaxed = false, cardId = ""): Ov
     resetsAt: null,
     metricLabel: "",
     metricDetail: null,
+    derivedCeiling: false,
     valueText: null,
     periodFallback: false,
     isMaxed: false,
@@ -3873,19 +3997,41 @@ function extractOverviewQuota(s: Snapshot, cardIsMaxed = false, cardId = ""): Ov
 
 function overviewFailureLabel(s: Snapshot): string {
   if (s.status === "no_credentials") return t("overview.needsCredentials");
+  // A credential that is present but needs one more step is not a failure —
+  // the card is telling the user what to do, so the tile must not contradict
+  // it with "query failed" (issue #2 follow-up).
+  if (s.status === "needs_setup") return t("overview.needsSetup");
   if (/expired|cookie|sign in|log in|unauthori[sz]ed|401|403/i.test(s.error ?? "")) return t("overview.needsLogin");
   return t("overview.queryFailed");
+}
+
+/// Renders a `test_provider` result. The backend answers `ok:<ms>`,
+/// `needs_setup:<hint>:<ms>`, or `<error>:<ms>`. A credential that connects
+/// but cannot read quota is a warning with the fix spelled out — not a
+/// failure (user rule 2026-10-15).
+function testProviderLabel(res: string): string {
+  const ms = res.split(":").pop() ?? "";
+  if (res.startsWith("ok:")) return t("card.testOk", { ms });
+  if (res.startsWith("needs_setup:")) {
+    return t("card.testNeedsSetup", {
+      err: displayCardHint(res.slice("needs_setup:".length, res.lastIndexOf(":"))),
+    });
+  }
+  return t("card.testFail", { err: res.slice(0, res.lastIndexOf(":")) });
 }
 
 function overviewTextValuesHtml(s: Snapshot): string {
   const rows = overviewTextMetrics(s.metrics || [], providerFamily(s.id));
   return `<span class="overview-text-values">${rows.map((m) => {
-    const value = m.value ?? m.detail ?? "";
+    const value = displayMetricDetail(m.value ?? m.detail ?? "");
     return `<span class="overview-text-value" title="${escapeHtml(`${m.label}: ${value}`)}">${escapeHtml(value)}</span>`;
   }).join("")}</span>`;
 }
 
 function overviewWindowLabel(quota: OverviewQuota): string {
+  // A derived ceiling has no window to name — say what the number is
+  // instead, so the tile never reads as a measured quota.
+  if (quota.derivedCeiling) return t("overview.derivedCeiling");
   if (quota.periodFallback) return t("overview.monthFallback");
   return quota.window ? t(windowLabelKey[quota.window]) : t("overview.winGeneric");
 }
@@ -4036,32 +4182,77 @@ function renderQuotaOverview(): string {
     }).join("")}</div>`;
   };
 
-  /// Multi-account overview tiles fold by default: the main account's
-  /// ring/bar plus the N/available badge stay, per-account rings/meters hide
-  /// until the user expands the family (remembered in config).
-  const overviewAcctFolded = (family: string, accountCount: number): boolean =>
-    accountCount > 1 && !(config.overviewExpanded ?? []).includes(family);
+  /// Search/MCP tiles expand to their per-key rows instead of account
+  /// rings/meters: one row per api-key, green when this round's probe
+  /// answered and red when it failed. A progress key row puts its own quota
+  /// percent in the meter's bold slot — short, exactly like an account's.
+  /// A text key row (a balance, "unlimited", or the failure reason) folds
+  /// its reading into the ellipsised label instead, because tiles run as
+  /// narrow as 76px and the bold slot has no ellipsis: a long error must
+  /// never widen the tile. The row markup is the account meter's, so both
+  /// folds read identically. Returns "" for 0/1 flagged rows — nothing to
+  /// fold.
+  const overviewKeyListHtml = (snap: Snapshot): string => {
+    const rows = keyAvailabilityRows(snap.metrics);
+    if (rows.length <= 1) return "";
+    return `<div class="overview-account-meters">${rows.map((m) => {
+      const tone = m.available === true ? "green" : "red";
+      const pct = m.kind === "progress" && m.used_percent !== null
+        ? Math.round(m.used_percent)
+        : null;
+      const value = m.value ?? m.detail ?? "";
+      const shown = pct !== null ? `${pct}%` : value;
+      const label = pct !== null || !value ? m.label : `${m.label} · ${value}`;
+      return `<div class="overview-account-meter" title="${escapeHtml(`${m.label}: ${shown}`)}"><span class="acct-dot ${tone}"></span><span class="overview-account-meter-label">${escapeHtml(label)}</span><span class="overview-account-meter-track"><i class="${tone}" style="width:${pct ?? 0}%"></i></span><b>${pct !== null ? `${pct}%` : ""}</b></div>`;
+    }).join("")}</div>`;
+  };
 
-  const overviewAcctFoldBtn = (family: string, accountCount: number): string => {
-    if (accountCount <= 1) return "";
-    const folded = overviewAcctFolded(family, accountCount);
+  /// Overview tiles fold by default: the main account's ring/bar plus the
+  /// N/available badge stay, the extra rows hide until the user expands the
+  /// family (remembered in config). `foldCount` is the tile's foldable row
+  /// count — account snapshots for multi-account families, api-keys for the
+  /// search/MCP families (see overviewFoldCount).
+  const overviewAcctFolded = (family: string, foldCount: number): boolean =>
+    foldCount > 1 && !(config.overviewExpanded ?? []).includes(family);
+
+  const overviewAcctFoldBtn = (family: string, foldCount: number): string => {
+    if (foldCount <= 1) return "";
+    const folded = overviewAcctFolded(family, foldCount);
     return `<button type="button" class="overview-acct-fold" data-overview-acct-fold="${escapeHtml(family)}" title="${escapeHtml(t(folded ? "card.expand" : "card.collapse"))}" aria-label="${escapeHtml(t(folded ? "card.expand" : "card.collapse"))}">${uiIcon(folded ? "caretDown" : "caretUp")}</button>`;
+  };
+
+  const overviewCountBadge = (total: number, available: number, title: string): string => {
+    const ratio = total > 0 ? available / total : 0;
+    const availClass = available <= 0 || ratio <= 0.5 ? "is-low" : "is-ok";
+    const emptyClass = available === 0 ? " is-empty" : "";
+    return `<span class="overview-account-count${emptyClass}" title="${escapeHtml(title)}"><b class="acct-count-avail ${availClass}">${available}</b><span class="acct-count-sep">/</span><b class="acct-count-total">${total}</b></span>`;
   };
 
   const overviewAccountBadgeHtml = (accountCount: number, accountSummary: { total: number; available: number; unavailable: number }): string => {
     if (accountCount <= 1) return "";
-    const total = accountCount;
-    const available = accountSummary.available;
-    const ratio = total > 0 ? available / total : 0;
-    const isLow = available <= 0 || ratio <= 0.5;
-    const availClass = isLow ? "is-low" : "is-ok";
-    const emptyClass = available === 0 ? " is-empty" : "";
-    const title = escapeHtml(t("overview.accountSummary", {
-      available: accountSummary.available,
-      unavailable: accountSummary.unavailable,
-      total: accountSummary.total,
-    }));
-    return `<span class="overview-account-count${emptyClass}" title="${title}"><b class="acct-count-avail ${availClass}">${available}</b><span class="acct-count-sep">/</span><b class="acct-count-total">${total}</b></span>`;
+    return overviewCountBadge(
+      accountCount,
+      accountSummary.available,
+      t("overview.accountSummary", {
+        available: accountSummary.available,
+        unavailable: accountSummary.unavailable,
+        total: accountSummary.total,
+      }),
+    );
+  };
+
+  /// Search/MCP families report api-keys, not accounts: their key rows carry
+  /// the backend availability flag on the family's single snapshot, so the
+  /// tile badge counts keys instead of snapshots.
+  const overviewKeyBadgeHtml = (snap: Snapshot): string => {
+    const keys = keyAvailabilitySummary(snap.metrics);
+    return keys
+      ? overviewCountBadge(
+          keys.total,
+          keys.available,
+          t("card.keySummary", { available: keys.available, total: keys.total }),
+        )
+      : "";
   };
 
   const itemHtml = ({ cardSnap, shownSnap, quota, accountSummary }: OverviewItem): string => {
@@ -4072,7 +4263,9 @@ function renderQuotaOverview(): string {
       const icon = visual?.iconSvg ?? `<span class="icon-fallback">${escapeHtml(cardSnap.name.slice(0, 2))}</span>`;
       const displayName = notedName(jumpId, providerDisplayName(family) || cardSnap.name);
       const accountCount = overviewAccountCount(family);
-      const accountBadge = overviewAccountBadgeHtml(accountCount, accountSummary);
+      const accountBadge = overviewKeyBadgeHtml(shownSnap) || overviewAccountBadgeHtml(accountCount, accountSummary);
+      // Accounts or api-keys, whichever this family folds (never both).
+      const foldCount = overviewFoldCount(accountCount, keyAvailabilityCounts(shownSnap.metrics).total);
 
       const r = 16;
       const cx = 22;
@@ -4091,6 +4284,10 @@ function renderQuotaOverview(): string {
         ringLabel = "!";
         textClass = "is-error";
         progressCircle = `<circle class="ring-progress is-error" cx="${cx}" cy="${cy}" r="${r}" stroke="#f97316" stroke-width="3.2" fill="none" />`;
+      } else if (quota.status === "needs_setup") {
+        // Configured but unreadable: a warning tint, not the failure ring.
+        itemTone = "warn";
+        statusDot = "yellow";
       } else if (quota.isMaxed) {
         itemTone = "maxed";
         statusDot = "red";
@@ -4158,7 +4355,7 @@ function renderQuotaOverview(): string {
             <span class="overview-item-icon">${icon}</span>
             <span class="overview-item-name" title="${escapeHtml(displayName)}">${escapeHtml(displayName)}</span>
             ${accountBadge}
-            ${overviewAcctFoldBtn(family, accountCount)}
+            ${overviewAcctFoldBtn(family, foldCount)}
             <span class="overview-dot ${statusDot}"></span>
           </div>
           <div class="overview-ring-wrap"${quota.status === "text" ? ` title="${escapeHtml(t("overview.ratioUnknown"))}"` : ""}>
@@ -4168,11 +4365,12 @@ function renderQuotaOverview(): string {
               <text class="ring-text ${textClass}" x="${cx}" y="${cy + 4}" text-anchor="middle">${ringLabel}</text>
             </svg>
           </div>
-          ${overviewAcctFolded(family, accountCount) ? "" : accountRingsHtml(family)}
-          ${overviewAcctFolded(family, accountCount) ? "" : accountMetersHtml(family)}
+          ${overviewAcctFolded(family, foldCount) ? "" : accountRingsHtml(family)}
+          ${overviewAcctFolded(family, foldCount) ? "" : accountMetersHtml(family)}
+          ${overviewAcctFolded(family, foldCount) ? "" : overviewKeyListHtml(shownSnap)}
           <div class="overview-item-foot">
             <span class="overview-item-meta ${quota.isMaxed ? 'meta-maxed' : ''}"${quota.resetsAt && quota.window !== null ? ` data-reset-at="${quota.resetsAt}"` : ""}>
-              ${quota.status === "text" ? overviewTextValuesHtml(shownSnap) : quota.status === "error" ? escapeHtml(overviewFailureLabel(shownSnap)) : quota.isMaxed
+              ${quota.status === "text" ? overviewTextValuesHtml(shownSnap) : quota.status === "error" || quota.status === "needs_setup" ? escapeHtml(overviewFailureLabel(shownSnap)) : quota.isMaxed
                 ? (quota.resetsAt
                     ? escapeHtml(fmtDuration(Math.max(0, quota.resetsAt - Date.now())))
                     : escapeHtml(t("overview.maxedBadge", { n: "" }).trim()))
@@ -4200,7 +4398,9 @@ function renderQuotaOverview(): string {
     const displayName = notedName(jumpId, providerDisplayName(family) || cardSnap.name);
     const nameClass = cardNote(jumpId) ? " is-note" : "";
     const accountCount = overviewAccountCount(family);
-    const accountBadge = overviewAccountBadgeHtml(accountCount, accountSummary);
+    const accountBadge = overviewKeyBadgeHtml(shownSnap) || overviewAccountBadgeHtml(accountCount, accountSummary);
+    // Accounts or api-keys, whichever this family folds (never both).
+    const foldCount = overviewFoldCount(accountCount, keyAvailabilityCounts(shownSnap.metrics).total);
 
     let itemTone = "normal";
     let pct: number | null = null;
@@ -4208,6 +4408,9 @@ function renderQuotaOverview(): string {
     if (quota.status === "error") {
       itemTone = "error";
       pctClass = "is-error";
+    } else if (quota.status === "needs_setup") {
+      // Configured but unreadable: a warning tint, not the failure tone.
+      itemTone = "warn";
     } else if (quota.isMaxed) {
       itemTone = "maxed";
       pct = 100;
@@ -4217,7 +4420,7 @@ function renderQuotaOverview(): string {
       if (pct >= 80) itemTone = "warn";
     }
 
-    const meta = quota.status === "error"
+    const meta = quota.status === "error" || quota.status === "needs_setup"
       ? overviewFailureLabel(shownSnap)
       : quota.resetsAt
         ? fmtDuration(Math.max(0, quota.resetsAt - Date.now()))
@@ -4229,6 +4432,7 @@ function renderQuotaOverview(): string {
 
     let statusDot = "green";
     if (quota.status === "error") statusDot = "error";
+    else if (quota.status === "needs_setup") statusDot = "yellow";
     else if (quota.isMaxed) statusDot = "red";
     if (statusDot === "green" && isSnapshotMaxed(shownSnap)) statusDot = "red";
     if (statusDot === "green" && isProviderInPeak(family)) statusDot = "yellow";
@@ -4246,7 +4450,7 @@ function renderQuotaOverview(): string {
           <span class="overview-item-icon">${icon}</span>
           <span class="overview-item-name${nameClass}" title="${escapeHtml(displayName)}">${escapeHtml(displayName)}</span>
           ${accountBadge}
-          ${overviewAcctFoldBtn(family, accountCount)}
+          ${overviewAcctFoldBtn(family, foldCount)}
           <span class="overview-dot ${statusDot}"></span>
           <span class="ovbar-pct ${pctClass}"${quota.status === "text" ? ` title="${escapeHtml(t("overview.ratioUnknown"))}" aria-label="${escapeHtml(t("overview.ratioUnknown"))}"` : ""}>${quota.status === "text" ? "?" : pct === null ? "—" : `${pct}%`}</span>
         </div>
@@ -4254,7 +4458,8 @@ function renderQuotaOverview(): string {
           <span class="ovbar${quota.status === "text" ? " is-unknown" : ""}"${quota.status === "text" ? ` title="${escapeHtml(t("overview.ratioUnknown"))}"` : ""}>${quota.status === "text" ? "" : `<span class="ovbar-fill tone-${itemTone}" style="width:${pct ?? 0}%"></span>`}</span>
           <span class="ovbar-meta">${quota.status === "text" ? overviewTextValuesHtml(shownSnap) : escapeHtml(meta || t("overview.noData"))}</span>
         </div>
-        ${overviewAcctFolded(family, accountCount) ? "" : accountMetersHtml(family)}
+        ${overviewAcctFolded(family, foldCount) ? "" : accountMetersHtml(family)}
+        ${overviewAcctFolded(family, foldCount) ? "" : overviewKeyListHtml(shownSnap)}
       </div>`;
   };
 
@@ -4304,7 +4509,11 @@ function renderQuotaOverview(): string {
     const visual = providerVisual(jumpId || family, origin);
     const icon = visual?.iconSvg ?? `<span class="icon-fallback">${escapeHtml(cardSnap.name.slice(0, 2))}</span>`;
     const displayName = notedName(jumpId, providerDisplayName(family) || cardSnap.name);
-    const win = quota.window === null ? "" : escapeHtml(t(windowLabelKey[quota.window]));
+    // A derived ceiling has no window; the chip states that instead of a
+    // bare "Quota" that would imply a measured period.
+    const win = quota.window === null
+      ? ""
+      : escapeHtml(quota.derivedCeiling ? t("overview.derivedCeiling") : t(windowLabelKey[quota.window]));
     return `
         <div class="expiring-row${rowClass}" data-jump-provider="${escapeHtml(jumpId)}">
           <span class="expiring-icon">${icon}</span>
@@ -4887,6 +5096,21 @@ async function runProviderPicker(firstRun: boolean): Promise<void> {
 /// gear-menu sign-in, everything else is a local-credential family that
 /// Pane discovers from the official client. Never mentions endpoints or
 /// reverse-engineering — user-facing wording only.
+function mechanismFactsHtml(family: string): string {
+  const mech = MECHANISMS[family];
+  if (!mech) return "";
+  const rows = [
+    [t("provider.help.credential"), t(credentialLabelKey(family))],
+    [t("provider.help.capabilities"), (mech.provides ?? []).map(displayMetricLabel).join(" · ")],
+    [t("customize.helpMechReads"), mech.reads?.join(" · ") || t("customize.helpMechReadsNone")],
+    [t("customize.helpMechEnv"), mech.env?.join(" · ") || "—"],
+    [t("customize.helpMechSource"), mech.hosts?.join(" · ") || t("customize.helpMechSourceLocal")],
+    [t("provider.help.principle"), t(mech.hosts?.length ? "provider.principle.remote" : "provider.principle.local")],
+    [t("provider.help.boundary"), t(mech.limitsKey ?? "provider.limit.general")],
+  ];
+  return `<dl class="help-mech">${rows.map(([label, value]) => `<div><dt>${escapeHtml(label)}</dt><dd>${escapeHtml(value)}</dd></div>`).join("")}</dl>`;
+}
+
 function openProviderHelp(fam: string) {
   const def = providerDefinition(fam);
   const keyUrl = getApiKeyLink(fam);
@@ -4901,8 +5125,9 @@ function openProviderHelp(fam: string) {
   const badge = methods.length ? methods.map((m) => badgeLabels[m]).join(" + ") : t("customize.helpBadgeNone");
   const steps: string[] = [];
   if (methods.includes("paste")) {
-    steps.push(t("customize.helpStepKey1"));
-    steps.push(t("customize.helpStepKey2"));
+    steps.push(t("customize.helpPasteCredential", { credential: t(credentialLabelKey(fam)) }));
+    const instructions = PROVIDER_CRED_INFO[fam]?.auto;
+    if (instructions) steps.push(t(instructions));
   }
   if (methods.includes("oauth")) steps.push(t("customize.helpStepOauth1"));
   if (methods.includes("local")) {
@@ -4918,56 +5143,13 @@ function openProviderHelp(fam: string) {
     links.unshift({ label: t("customize.helpOpenConsole"), url: keyUrl });
   }
 
-  // The mechanism table answers what the generic steps cannot: which local
-  // files this machine is read from, which env vars count, and where the
-  // numbers come from. Values stay technical (paths, env names, hosts) so a
-  // path can never drift into a translated string.
-  const mech = MECHANISMS[fam];
-  const live = lastSnapshots.find((s) => s.id === fam);
-  const provideText = methods.length
-    ? methods.map((m) => t(`customize.helpProvide_${m}`)).join("  +  ")
-    : t("customize.helpProvide_none");
-  const mechRows: [string, string][] = mech
-    ? [
-        [
-          t("customize.helpMechReads"),
-          mech.reads?.length ? mech.reads.join("  ·  ") : t("customize.helpMechReadsNone"),
-        ],
-        ...((mech.env?.length
-          ? [[t("customize.helpMechEnv"), mech.env.join("  ·  ")]]
-          : []) as [string, string][]),
-        [t("customize.helpMechProvide"), provideText],
-        [
-          t("customize.helpMechSource"),
-          mech.hosts?.length ? mech.hosts.join("  ·  ") : t("customize.helpMechSourceLocal"),
-        ],
-        ...((live?.metrics?.length
-          ? [
-              [
-                t("customize.helpMechLive"),
-                live.metrics
-                  .slice(0, 3)
-                  .map((m) => `${m.label}${m.used_percent != null ? ` ${Math.round(m.used_percent)}%` : ""}`)
-                  .join("  ·  "),
-              ],
-            ]
-          : []) as [string, string][]),
-      ]
-    : [];
-
   const overlay = document.createElement("div");
   overlay.id = "confirm-overlay";
   overlay.innerHTML = `
     <div id="confirm-box" role="dialog" aria-modal="true">
       <h3>${escapeHtml(providerDisplayName(fam))} · ${escapeHtml(t("customize.helpMenu"))}</h3>
       <div class="help-kind">${escapeHtml(badge)}</div>
-      ${
-        mechRows.length
-          ? `<dl class="help-mech">${mechRows
-              .map(([k, v]) => `<div><dt>${escapeHtml(k)}</dt><dd>${escapeHtml(v)}</dd></div>`)
-              .join("")}</dl>`
-          : ""
-      }
+      ${mechanismFactsHtml(fam)}
       <ol class="help-steps">${steps.map((s) => `<li>${escapeHtml(s)}</li>`).join("")}</ol>
       ${links.length ? `<div class="help-links">${links.map((l) => `<a href="${escapeHtml(l.url)}" target="_blank" rel="noreferrer">${escapeHtml(l.label)} ↗</a>`).join("")}</div>` : ""}
       <div id="confirm-actions">
@@ -4996,10 +5178,7 @@ function openProviderHelp(fam: string) {
     testBtn.textContent = t("customize.helpTesting");
     invoke<string>("test_provider", { providerId: cardId })
       .then((res) => {
-        const ms = res.split(":").pop() ?? "";
-        testBtn.textContent = res.startsWith("ok:")
-          ? t("card.testOk", { ms })
-          : t("card.testFail", { err: res.slice(0, res.lastIndexOf(":")) });
+        testBtn.textContent = testProviderLabel(res);
       })
       .catch((err: unknown) => {
         testBtn.textContent = t("card.testFail", { err: String(err) });
@@ -5629,10 +5808,7 @@ function openGroupMenu(
       status.textContent = t("card.testing");
       void invoke<string>("test_provider", { providerId: testId })
         .then((result) => {
-          const ms = result.split(":").pop() ?? "";
-          status.textContent = result.startsWith("ok:")
-            ? t("card.testOk", { ms })
-            : t("card.testFail", { err: result.slice(0, result.lastIndexOf(":")) });
+          status.textContent = testProviderLabel(result);
           void refresh(true, true);
         })
         .catch((err) => {
@@ -5863,11 +6039,12 @@ function renderChangelogBody(md: string, maxItems = Number.POSITIVE_INFINITY): s
 
 /// Same lifecycle as dismissConfirm: the popover reopen routine clears a
 /// stale dialog left behind by hide-on-focus-loss.
-let dismissWhatsNew: (() => void) | null = null;
+let dismissWhatsNew: ((userAction?: boolean) => void) | null = null;
 
 /// Card-styled scrollable dialog listing changelog sections. Esc, backdrop
 /// clicks (anywhere outside the card), and the Got it button all dismiss.
-function showChangelogDialog(title: string, sections: ChangelogSection[], compact = false): void {
+function showChangelogDialog(title: string, sections: ChangelogSection[], compact = false,
+  actions?: { confirm: string; cancel?: string; accept: () => void; dismiss: () => void }): void {
   dismissWhatsNew?.();
   const overlay = document.createElement("div");
   overlay.id = "whatsnew-overlay";
@@ -5884,18 +6061,19 @@ function showChangelogDialog(title: string, sections: ChangelogSection[], compac
     .join("");
   overlay.innerHTML = `
     <div id="whatsnew-box" role="dialog" aria-modal="true">
-      <h3>${escapeHtml(title)}</h3>
+      ${actions ? `<div class="account-dialog-head"><h3>${escapeHtml(title)}</h3><button id="whatsnew-close" class="account-dialog-close" type="button" aria-label="${escapeHtml(t("dialog.cancel"))}">${uiIcon("x")}</button></div>` : `<h3>${escapeHtml(title)}</h3>`}
       <div id="whatsnew-body">${list}</div>
       <div id="whatsnew-actions">
-        <button id="whatsnew-ok" type="button">${escapeHtml(t("dialog.gotIt"))}</button>
+        ${actions?.cancel ? `<button id="whatsnew-cancel" type="button">${escapeHtml(actions.cancel)}</button>` : ""}<button id="whatsnew-ok" type="button">${escapeHtml(actions?.confirm ?? t("dialog.gotIt"))}</button>
       </div>
     </div>`;
-  const done = () => {
+  const done = (userAction = true, accepted = false) => {
+    if (userAction && actions) { if (accepted) actions.accept(); else actions.dismiss(); }
     dismissWhatsNew = null;
     document.removeEventListener("keydown", onKey, true);
     overlay.remove();
   };
-  dismissWhatsNew = done;
+  dismissWhatsNew = (userAction = false) => done(userAction);
   const onKey = (e: KeyboardEvent) => {
     if (e.key === "Escape") {
       e.preventDefault();
@@ -5906,7 +6084,9 @@ function showChangelogDialog(title: string, sections: ChangelogSection[], compac
   overlay.addEventListener("click", (e) => {
     if (e.target === overlay) done();
   });
-  overlay.querySelector("#whatsnew-ok")!.addEventListener("click", done);
+  overlay.querySelector("#whatsnew-ok")!.addEventListener("click", () => done(true, true));
+  overlay.querySelector("#whatsnew-cancel")?.addEventListener("click", () => done());
+  overlay.querySelector("#whatsnew-close")?.addEventListener("click", () => done());
   document.addEventListener("keydown", onKey, true);
   document.body.appendChild(overlay);
 }
@@ -6247,6 +6427,49 @@ const TOUR_STEPS: TourStep[] = [
 /// version into config: an empty stored version means this is the first
 /// launch after installing, which is the only case the tour auto-starts.
 let freshInstallAtBoot = false;
+let pendingFontGuide: FontOnboarding = "skip";
+
+async function prepareFontOnboarding(): Promise<void> {
+  if (IS_PANEL_FORM) return;
+  let fonts: string[] = [];
+  try { fonts = await invoke<string[]>("list_system_fonts"); } catch { return; }
+  const mode = fontOnboardingMode({ ...config, uiFontPromptVersion: config.uiFontPromptVersion ?? "" }, fonts);
+  pendingFontGuide = mode;
+  const version = await getVersion();
+  if (mode === "skip") {
+    if (!config.uiFontPromptVersion || config.uiFontPromptVersion.startsWith("pending-"))
+      await patchConfig({ uiFontPromptVersion: version });
+    return;
+  }
+  const patch: Partial<Config> = { uiFontPromptVersion: `pending-${mode}` };
+  if (mode === "new" && !config.uiFont && fonts.some((font) => font.toLowerCase() === "mv boli")) patch.uiFont = "MV Boli";
+  await patchConfig(patch);
+  applyAppearance();
+}
+
+function maybeShowFontGuide(): boolean {
+  if (pendingFontGuide === "skip" || document.hidden || IS_PANEL_FORM) return false;
+  if (document.querySelector("#whatsnew-overlay")) return true;
+  const fresh = pendingFontGuide === "new";
+  const complete = (accept: boolean) => {
+    pendingFontGuide = "skip";
+    void getVersion().then((version) => patchConfig({ uiFontPromptVersion: version,
+      ...(fresh ? { welcomeDismissed: true } : accept ? { uiFont: "MV Boli" } : {}),
+    })).then(() => { applyAppearance(); maybeStartTour(); });
+  };
+  const theme = activeSkin();
+  const name = theme ? ("nameKey" in theme ? t(theme.nameKey) : theme.name) : t("skin.nativeName");
+  const body = fresh
+    ? `${t("fontGuide.font", { font: config.uiFont || t("fontGuide.system") })}\n\n${t("fontGuide.theme", { theme: name, themes: marketEntries().map((entry) => entry.name).join(" / ") })}`
+    : t("fontGuide.upgradeBody");
+  showChangelogDialog(t(fresh ? "fontGuide.newTitle" : "fontGuide.upgradeTitle"),
+    [{ version: appVersion, date: "", body }], false, {
+      confirm: t(fresh ? "dialog.gotIt" : "fontGuide.accept"),
+      cancel: fresh ? undefined : t("fontGuide.decline"),
+      accept: () => complete(!fresh), dismiss: () => complete(false),
+    });
+  return true;
+}
 /// In flight while the first-run detection picker is open — the tour waits
 /// on it (see maybeStartTour).
 let firstRunPickerPending: Promise<void> | null = null;
@@ -6401,6 +6624,7 @@ function maybeStartTour(): void {
     return;
   }
   if (IS_PANEL_FORM || tourActive() || !tourContentReady) return;
+  if (maybeShowFontGuide()) return;
   if (config.tourSeen || !freshInstallAtBoot) return;
   startTour();
 }
@@ -7106,7 +7330,7 @@ function renderCustInfo(id: string): string {
         .map((m) => `<li>${escapeHtml(t(`customize.credMethod.${m}`))}</li>`)
         .join("")
     : `<li class="dim">${escapeHtml(t("customize.credMethodNone"))}</li>`;
-  return `<div class="cust-config cust-info">
+  return `<div class="cust-config cust-info">${mechanismFactsHtml(providerFamily(id))}
       <p><span class="cust-info-label">${escapeHtml(t("customize.credAutoLabel"))}</span>${auto}</p>
       <ol class="cust-info-methods">
         ${methods}
@@ -7257,6 +7481,65 @@ interface AccountEntry {
 // Cached account lists so a drawer re-render doesn't blank the panels,
 // same trade-off as credStatusCache.
 const accountsCache = new Map<string, AccountEntry[]>();
+const accountProbeSnapshots = new Map<string, Snapshot>();
+
+function credentialLabelKey(family: string): string {
+  if (["giphy", "clawsgo", "stepfun-plan", "sensenova", "mimo"].includes(family)) return "customize.accessTokenLabel";
+  if (["longcat", "mistral", "perplexity"].includes(family)) return "customize.cookieLabel";
+  if (family === "volcengine") return "customize.cloudKeyLabel";
+  return "customize.acctKeyLabel";
+}
+
+function failureText(message: string, status = "error"): string {
+  return `${t(`credential.error.${credentialFailure(message, status)}`)} · ${displayCardHint(message)}`;
+}
+
+function credentialRepairHtml(snapshot: Snapshot): string {
+  return `${authJumpHtml(snapshot)}<div class="needs-setup"><button class="mini-btn" type="button" data-card-refresh="${escapeHtml(snapshot.id)}">${escapeHtml(t("customize.test"))}</button><button class="mini-btn" type="button" data-needs-setup="${escapeHtml(snapshot.id)}">${escapeHtml(t("card.needsSetupAction"))}</button><button class="mini-btn" type="button" data-provider-help="${escapeHtml(providerFamily(snapshot.id))}">?</button></div>`;
+}
+
+function resetAccountSaveButton(form: HTMLElement | null): void {
+  const family = form?.querySelector<HTMLInputElement>("[data-acct-key]")?.dataset.acctKey ?? "";
+  const save = form?.querySelector<HTMLButtonElement>("[data-acct-add]");
+  if (save) save.disabled = !accountFormReady(
+    form?.querySelector<HTMLInputElement>("[data-acct-key]")?.value ?? "",
+    form?.querySelector<HTMLInputElement>("[data-acct-label]")?.value ?? "",
+    form?.querySelector<HTMLInputElement>("[data-acct-baseurl]")?.value ?? "",
+    RELAY_BASE_URL_FAMILIES.has(family),
+  );
+}
+
+// Every credential editor uses this same mutation path. List and quota
+// caches must change together, including while Customize remains open.
+async function afterCredentialMutation(family: string, savedId?: string, enable = true): Promise<void> {
+  if (enable) recentlyKeyed.set(family, refreshGeneration);
+  const layout = config.layout ?? { providerOrder: [], providers: {} };
+  layout.providers[family] ??= { metricOrder: [], onDemand: [], hidden: [], starred: [], expanded: false };
+  if (enable) await patchConfig({ disabled: config.disabled.filter((id) => id !== family),
+    removedProviders: config.removedProviders.filter((id) => id !== family), layout });
+  const previous = accountsCache.get(family)?.[0]?.id;
+  await refreshSettingsProviderKey(family);
+  const current = accountsCache.get(family) ?? [];
+  if (savedId && previous !== current[0]?.id) lastSnapshots = lastSnapshots.filter((snapshot) => snapshot.id !== family);
+  reconcileAccountLayout(family, current);
+  const probe = accountProbeSnapshots.get(family);
+  for (const [index, entry] of (accountsCache.get(family) ?? []).entries()) {
+    const id = index === 0 ? family : entry.id!;
+    if (!id || lastSnapshots.some((snapshot) => snapshot.id === id)) continue;
+    lastSnapshots.push(probe && entry.id === savedId ? { ...probe, id, name: providerDisplayName(family) } : {
+      id, name: providerDisplayName(family), plan: null, status: "error", metrics: [],
+      error: t("credential.pending"), warning: null, stale: false, boot_cache: false,
+    } as Snapshot);
+  }
+  accountProbeSnapshots.delete(family);
+  renderIfVisible();
+  if (IS_PANEL_FORM) {
+    // fetch_usage broadcasts usage-updated to the popover as well.
+    await invoke("fetch_usage", { clearBenches: true });
+  } else {
+    void forceUsageRefreshAttempt(true).then(requestTraySync);
+  }
+}
 
 // The account editor is a real modal, not an inline expansion inside the
 // provider row. Keep one dismissal hook so opening another provider or
@@ -7317,7 +7600,7 @@ function refreshAccounts(family: string): void {
       // The list feeds both the Customize child rows and the dashboard's
       // merged-card tabs, so both surfaces need the fresh labels.
       if (customizeOpen) renderDrawerBody();
-      else if (layoutChanged || lastSnapshots.length) renderIfVisible();
+      if (layoutChanged || lastSnapshots.length) renderIfVisible();
     })
     .catch(() => {
       accountsCache.set(family, []);
@@ -7552,17 +7835,18 @@ function openCursorAccountDialog(): void {
   });
 }
 
-function openAccountDialog(family: string): void {
+function openAccountDialog(family: string, editId?: string): void {
   dismissAccountDialog?.();
   const overlay = document.createElement("div");
   overlay.id = "account-overlay";
+  if (editId) overlay.dataset.editAccount = editId;
   overlay.innerHTML = `
     <section class="account-dialog" data-account-dialog="${escapeHtml(family)}" role="dialog" aria-modal="true" aria-labelledby="account-dialog-title">
       <div class="account-dialog-head">
         <h3 id="account-dialog-title">${escapeHtml(t("customize.acctDialogTitle", { name: providerDisplayName(family) }))}</h3>
         <button class="account-dialog-close" data-acct-close type="button" aria-label="${escapeHtml(t("dialog.cancel"))}">${uiIcon("x")}</button>
       </div>
-      <p class="account-dialog-help">${escapeHtml(t("customize.acctDialogHelp"))}</p>
+      <p class="account-dialog-help">${escapeHtml(t("customize.accountSaveHint"))}</p><p class="account-dialog-help">${escapeHtml(t(PROVIDER_CRED_INFO[family]?.auto ?? "customize.helpUnknown"))}</p>
       ${
         getApiKeyLink(family)
           ? `<p class="account-dialog-getkey"><button class="mini-btn" data-acct-getkey="${escapeHtml(getApiKeyLink(family)!)}" type="button">${escapeHtml(t("customize.getApiKey"))}</button></p>`
@@ -7570,7 +7854,7 @@ function openAccountDialog(family: string): void {
       }
       <div class="account-dialog-form">
         <label class="account-field">
-          <span>${escapeHtml(t("customize.acctKeyLabel"))}</span>
+          <span>${escapeHtml(t(credentialLabelKey(family)))}</span>
           <input type="password" data-acct-key="${escapeHtml(family)}" placeholder="${escapeHtml(t("settings.keyPlaceholder"))}" autocomplete="new-password" spellcheck="false" />
         </label>
         <label class="account-field">
@@ -7642,6 +7926,13 @@ function openAccountDialog(family: string): void {
   document.body.appendChild(overlay);
   const form = overlay.querySelector<HTMLElement>(".account-dialog-form");
   resetAcctTestState(form);
+  if (editId) {
+    const entry = accountsCache.get(family)?.find((row) => row.id === editId);
+    const label = overlay.querySelector<HTMLInputElement>("[data-acct-label]");
+    const url = overlay.querySelector<HTMLInputElement>("[data-acct-baseurl]");
+    if (label) label.value = entry?.label ?? "";
+    if (url) url.value = entry?.baseUrl ?? "";
+  }
   overlay.querySelector<HTMLInputElement>("[data-acct-key]")?.focus();
 }
 
@@ -7683,23 +7974,26 @@ async function runAccountKeyTest(family: string): Promise<void> {
   try {
     const baseUrl =
       block?.querySelector<HTMLInputElement>("[data-acct-baseurl]")?.value.trim() ?? "";
-    const r = await invoke<{ ok: boolean; metrics: number; message: string }>("test_api_key", {
+    const r = await invoke<{ ok: boolean; metrics: number; message: string; snapshot?: Snapshot }>("test_api_key", {
       provider: family,
       key,
       baseUrl: baseUrl || null,
     });
     if (!isCurrentTestGeneration("acct", family, generation)) return;
     if (testBtn) testBtn.disabled = false;
+    if (r.snapshot) accountProbeSnapshots.set(family, r.snapshot);
     if (r.ok) {
       show(t("customize.testOk", { n: r.metrics }), true);
       if (addBtn) addBtn.disabled = false;
     } else {
-      show(`${t("customize.testFailed")}: ${r.message}`, false);
+      show(failureText(r.message, r.snapshot?.status), false);
     }
   } catch (err) {
     if (!isCurrentTestGeneration("acct", family, generation)) return;
     if (testBtn) testBtn.disabled = false;
-    show(`${t("customize.testFailed")}: ${String(err)}`, false);
+    show(failureText(String(err)), false);
+  } finally {
+    if (isCurrentTestGeneration("acct", family, generation)) resetAccountSaveButton(block);
   }
 }
 
@@ -7750,32 +8044,18 @@ async function doAccountAdd(family: string): Promise<void> {
   const status = document.querySelector("#status")!;
   const result = block?.querySelector<HTMLElement>("[data-acct-result]");
   try {
-    await invoke("account_add", {
+    const savedId = await invoke<string>(block?.closest<HTMLElement>("#account-overlay")?.dataset.editAccount ? "account_update" : "account_add", {
       provider: family,
+      cardId: block?.closest<HTMLElement>("#account-overlay")?.dataset.editAccount ?? null,
       label: labelInp.value.trim(),
       apiKey: keyInp.value.trim(),
       baseUrl:
         block?.querySelector<HTMLInputElement>("[data-acct-baseurl]")?.value.trim() || null,
     });
-    // An added account says "show me this provider" — pull the family out
-    // of Disabled exactly like pasting a key does, or first-run parking
-    // keeps hiding the account card that was just created.
-    recentlyKeyed.set(family, refreshGeneration);
-    const enableGeneration = config.disabled.includes(family)
-      ? markProviderEnablePending(family)
-      : null;
-    if (enableGeneration !== null) {
-      await patchConfig({
-        disabled: config.disabled.filter((id) => id !== family),
-      }).catch(() => {});
-    }
-    refreshAccounts(family);
+    await afterCredentialMutation(family, savedId);
     status.textContent = t("customize.acctAdded", { name: providerDisplayName(family) });
     dismissAccountDialog?.();
-    void forceUsageRefreshAttempt(false).then(() => {
-      if (enableGeneration !== null) finishProviderEnable(family, enableGeneration);
-      requestTraySync();
-    });
+
   } catch (err) {
     status.textContent = t("customize.acctAddFailed", { err: String(err) });
     if (result) {
@@ -8406,9 +8686,11 @@ function renderAccountConfig(id: string): string {
   const statusText = snap
     ? snap.status === "ok"
       ? escapeHtml(t("customize.connOk"))
-      : snap.status === "no_credentials"
-        ? escapeHtml(t("customize.connNoCred"))
-        : escapeHtml(t("customize.connError", { err: snap.error ?? "" }))
+      : snap.status === "needs_setup"
+        ? escapeHtml(t("overview.needsSetup"))
+        : snap.status === "no_credentials"
+          ? escapeHtml(t("customize.connNoCred"))
+          : escapeHtml(t("customize.connError", { err: snap.error ?? "" }))
     : escapeHtml(t("customize.connUnknown"));
   const stale = !snap?.stale
     ? ""
@@ -8429,7 +8711,7 @@ function renderAccountConfig(id: string): string {
         <div class="form-help">${statusText}${stale}</div>
       </div>
       <div class="form-actions">
-        <button class="mini-btn" data-acct-rename="${escapeHtml(fam)}|${index}">${escapeHtml(t("settings.save"))}</button>
+        <button class="mini-btn" data-needs-setup="${escapeHtml(id)}">${escapeHtml(t("card.needsSetupAction"))}</button><button class="mini-btn" data-acct-rename="${escapeHtml(fam)}|${index}">${escapeHtml(t("settings.save"))}</button>
         <button class="mini-btn" data-acct-archive="${escapeHtml(fam)}|${index}" title="${escapeHtml(t("customize.acctArchive"))}">${escapeHtml(t("customize.acctArchive"))}</button>
         <button class="mini-btn danger" data-acct-del="${escapeHtml(fam)}|${index}" title="${escapeHtml(t("customize.acctDelete"))}">${escapeHtml(t("customize.acctDelete"))}</button>
       </div>
@@ -9502,7 +9784,7 @@ function clearBackoffRetry(cardId: string): void {
 function scheduleBackoffRetries(snapshots: Snapshot[]): void {
   for (const s of snapshots) {
     // A healthy card or unconfigured card clears any queued retry
-    if ((!s.stale && s.status === "ok") || s.status === "no_credentials" || isCardDisabled(s.id)) {
+    if ((!s.stale && (s.status === "ok" || s.status === "needs_setup")) || s.status === "no_credentials" || isCardDisabled(s.id)) {
       clearBackoffRetry(s.id);
       continue;
     }
@@ -10554,13 +10836,16 @@ async function runCustKeyTest(id: string): Promise<void> {
     if (saveBtn) saveBtn.disabled = true;
     show(t("customize.testing"), null);
     try {
-      const r = await invoke<{ ok: boolean; metrics: number; message: string }>("stepfun_plan_test", {
+      const r = await invoke<{ ok: boolean; status: string; metrics: number; message: string }>("stepfun_plan_test", {
         token: key,
         username,
         password,
       });
       if (!isCurrentTestGeneration("cust", id, generation)) return;
-      if (r.ok) {
+      if (r.status === "needs_setup") {
+        show(t("card.testNeedsSetup", { err: displayCardHint(r.message) }), null);
+        if (saveBtn) saveBtn.disabled = false;
+      } else if (r.ok) {
         show(t("customize.testOk", { n: r.metrics }), true);
         if (saveBtn) saveBtn.disabled = false;
       } else {
@@ -10570,6 +10855,7 @@ async function runCustKeyTest(id: string): Promise<void> {
       if (!isCurrentTestGeneration("cust", id, generation)) return;
       show(`${t("customize.testFailed")}: ${String(err)}`, false);
     }
+    if (isCurrentTestGeneration("cust", id, generation) && saveBtn) saveBtn.disabled = false;
     return;
   }
   if (!key) {
@@ -10582,7 +10868,7 @@ async function runCustKeyTest(id: string): Promise<void> {
   try {
     const baseUrl =
       panel?.querySelector<HTMLInputElement>("[data-cust-baseurl]")?.value.trim() ?? "";
-    const r = await invoke<{ ok: boolean; metrics: number; message: string }>("test_api_key", {
+    const r = await invoke<{ ok: boolean; metrics: number; message: string; snapshot?: Snapshot }>("test_api_key", {
       provider: id,
       key,
       baseUrl: baseUrl || null,
@@ -10598,6 +10884,7 @@ async function runCustKeyTest(id: string): Promise<void> {
     if (!isCurrentTestGeneration("cust", id, generation)) return;
     show(`${t("customize.testFailed")}: ${String(err)}`, false);
   }
+  if (isCurrentTestGeneration("cust", id, generation) && saveBtn) saveBtn.disabled = false;
 }
 
 /// Any edit to the key/base-URL inputs invalidates the previous test:
@@ -10609,7 +10896,7 @@ function resetCustTestState(panel: HTMLElement | null): void {
   const result = panel.querySelector<HTMLElement>("[data-cust-result]");
   const id = keyInp?.dataset.custKey;
   if (id) bumpTestGeneration("cust", id);
-  if (saveBtn) saveBtn.disabled = keyInp?.value.trim() ? true : false;
+  if (saveBtn) saveBtn.disabled = false;
   if (result) {
     result.textContent = "";
     result.classList.remove("ok", "err");
@@ -10621,19 +10908,23 @@ function syncAccountTestButton(form: HTMLElement | null): void {
   const key = form.querySelector<HTMLInputElement>("[data-acct-key]")?.value.trim();
   const label = form.querySelector<HTMLInputElement>("[data-acct-label]")?.value.trim();
   const testBtn = form.querySelector<HTMLButtonElement>("[data-acct-test]");
-  if (testBtn) testBtn.disabled = !(key && label);
+  const url = form.querySelector<HTMLInputElement>("[data-acct-baseurl]")?.value ?? "";
+  const family = form.querySelector<HTMLInputElement>("[data-acct-key]")?.dataset.acctKey ?? "";
+  const ready = accountFormReady(key ?? "", label ?? "", url, RELAY_BASE_URL_FAMILIES.has(family));
+  if (testBtn) testBtn.disabled = !ready;
+  resetAccountSaveButton(form);
 }
 
 /// Any edit to the account dialog's inputs invalidates its passing test:
-/// Save re-locks until the new values are tested again.
+/// Save follows required fields; a failed test never prevents persistence.
 function resetAcctTestState(form: HTMLElement | null): void {
   if (!form) return;
-  const addBtn = form.querySelector<HTMLButtonElement>("[data-acct-add]");
   const result = form.querySelector<HTMLElement>("[data-acct-result]");
   const family = form.querySelector<HTMLInputElement>("[data-acct-key]")?.dataset.acctKey;
   if (family) bumpTestGeneration("acct", family);
   syncAccountTestButton(form);
-  if (addBtn) addBtn.disabled = true;
+  accountProbeSnapshots.delete(family ?? "");
+  resetAccountSaveButton(form);
   if (result) {
     result.textContent = "";
     result.classList.remove("ok", "err");
@@ -12820,75 +13111,48 @@ function settingsKeyRow(family: string): HTMLElement {
 }
 
 /// Test-first save gate for the key editors: key-based families talk to
-/// preset endpoints, so their pasted credential must pass a live probe
-/// (test_api_key — a pure read; nothing is written) before Save unlocks.
-/// Families with no live probe fall back to a direct save. Editing the
-/// input after a pass re-arms the gate.
+/// preset endpoints. Testing is independent from saving so failed credentials
+/// can remain visible and be repaired later. Input edits invalidate old probes.
 function attachKeyTest(
-  family: string,
-  keyInput: HTMLInputElement,
-  urlInput: HTMLInputElement | null,
-  save: HTMLButtonElement,
-  err: HTMLElement,
+  family: string, keyInput: HTMLInputElement, urlInput: HTMLInputElement | null,
+  save: HTMLButtonElement, err: HTMLElement,
 ): HTMLButtonElement {
   const test = document.createElement("button");
-  test.type = "button";
-  test.className = "mini-btn";
-  test.innerHTML = uiIcon("lightning") + escapeHtml(t("settings.keyTest"));
-  let passed = false;
-  const arm = () => {
-    passed = false;
-    save.disabled = true;
+  test.type = "button"; test.className = "mini-btn";
+  test.textContent = t("settings.keyTest");
+  let generation = 0;
+  const update = () => {
+    generation++;
+    accountProbeSnapshots.delete(family);
+    save.disabled = !keyInput.value.trim() || Boolean(urlInput && !urlInput.value.trim());
+    test.disabled = save.disabled;
     test.classList.remove("ok");
-    test.innerHTML = uiIcon("lightning") + escapeHtml(t("settings.keyTest"));
+    err.textContent = "";
   };
-  save.disabled = true;
-  keyInput.addEventListener("input", () => {
-    if (passed) arm();
-  });
-  urlInput?.addEventListener("input", () => {
-    if (passed) arm();
-  });
-  test.addEventListener("click", () => {
-    const value = keyInput.value.trim();
-    if (!value) {
-      err.textContent = t("settings.keyRequired");
-      return;
-    }
+  keyInput.addEventListener("input", update);
+  urlInput?.addEventListener("input", update);
+  update();
+  test.addEventListener("click", async () => {
+    const current = ++generation;
     test.disabled = true;
-    test.innerHTML = uiIcon("lightning") + escapeHtml(t("customize.helpTesting"));
-    void invoke<{ ok: boolean; metrics: number; message: string }>("test_api_key", {
-      provider: family,
-      key: value,
-      baseUrl: urlInput?.value.trim() || null,
-    })
-      .then((res) => {
-        if (res.ok) {
-          passed = true;
-          save.disabled = false;
-          err.textContent = "";
-          test.classList.add("ok");
-          test.innerHTML = uiIcon("lightning") + escapeHtml(t("settings.keyTestOk"));
-        } else {
-          save.disabled = true;
-          err.textContent = res.message || t("settings.keyTestFail");
-        }
-      })
-      .catch((e) => {
-        const msg = String(e);
-        if (msg.includes("unknown provider")) {
-          // No live probe exists for this family — direct save, no gate.
-          test.remove();
-          save.disabled = false;
-          return;
-        }
-        save.disabled = true;
-        err.textContent = msg;
-      })
-      .finally(() => {
-        test.disabled = false;
-        if (!passed) test.innerHTML = uiIcon("lightning") + escapeHtml(t("settings.keyTest"));
+    test.textContent = t("customize.testing");
+    try {
+      const result = await invoke<{ok: boolean; message: string; snapshot?: Snapshot}>("test_api_key", {
+        provider: family, key: keyInput.value.trim(), baseUrl: urlInput?.value.trim() || null,
       });
+      if (current !== generation || !test.isConnected) return;
+      if (result.snapshot) accountProbeSnapshots.set(family, result.snapshot);
+      test.classList.toggle("ok", result.ok);
+      err.textContent = result.ok ? t("settings.keyTestOk") : failureText(result.message);
+    } catch (error) {
+      if (current === generation) err.textContent = failureText(String(error));
+    } finally {
+      if (current === generation) {
+        test.disabled = false;
+        test.textContent = t("settings.keyTest");
+        save.disabled = !keyInput.value.trim() || Boolean(urlInput && !urlInput.value.trim());
+      }
+    }
   });
   return test;
 }
@@ -12942,7 +13206,7 @@ function settingsKeyEditor(family: string): HTMLElement {
     })
       .then(async () => {
         skeyEditing.delete(family);
-        await refreshSettingsProviderKey(family);
+        await afterCredentialMutation(family);
         renderSettingsProviderKeys();
       })
       .catch((e) => {
@@ -12950,7 +13214,7 @@ function settingsKeyEditor(family: string): HTMLElement {
         save.disabled = false;
       });
   });
-  // Test-first: Save unlocks only after a passing probe (attachKeyTest).
+  // Testing and saving are independent; failed credentials remain repairable.
   row.append(attachKeyTest(family, key, url, save, err), save);
   form.append(row, err);
   return form;
@@ -13008,6 +13272,13 @@ function settingsAccountRow(family: string, entry: AccountEntry, index: number):
   });
   const isCli = family === "codex" && (entry.id === "codex" || entry.maskedKey === "CLI 登录");
   if (!isCli) {
+    if (KEY_PROVIDERS.has(family) && entry.id) {
+      const repair = document.createElement("button");
+      repair.className = "mini-btn"; repair.type = "button";
+      repair.textContent = t("card.needsSetupAction");
+      repair.addEventListener("click", () => openAccountDialog(family, entry.id));
+      actions.append(repair);
+    }
     actions.append(rename);
     const remove = document.createElement("button");
     remove.type = "button";
@@ -13025,7 +13296,7 @@ function settingsAccountRow(family: string, entry: AccountEntry, index: number):
         } catch (e) {
           console.error("account remove failed:", e);
         }
-        await refreshSettingsProviderKey(family);
+        await afterCredentialMutation(family, undefined, false);
         renderSettingsProviderKeys();
       });
     });
@@ -13074,15 +13345,15 @@ function settingsAccountEditor(family: string): HTMLElement {
       return;
     }
     save.disabled = true;
-    void invoke("account_add", {
+    void invoke<string>("account_add", {
       provider: family,
       label: label.value.trim(),
       apiKey: value,
       baseUrl: url?.value.trim() || null,
     })
-      .then(async () => {
+      .then(async (savedId) => {
         skeyAddingAccount.delete(family);
-        await refreshSettingsProviderKey(family);
+        await afterCredentialMutation(family, savedId);
         renderSettingsProviderKeys();
       })
       .catch((e) => {
@@ -13090,7 +13361,7 @@ function settingsAccountEditor(family: string): HTMLElement {
         save.disabled = false;
       });
   });
-  // Test-first: Save unlocks only after a passing probe (attachKeyTest).
+  // Testing and saving are independent; failed credentials remain repairable.
   row.append(attachKeyTest(family, key, url, save, err), save);
   form.append(row, err);
   return form;
@@ -13133,6 +13404,7 @@ async function saveKeyvaultEntry(
     kvAddingForService.delete(s);
     kvAddingCustomService = false;
     renderKeyvault(rows);
+    await afterCredentialMutation(s);
   } catch (err) {
     if (String(err).includes("locked") && (await unlockVault())) {
       return saveKeyvaultEntry(service, label, key, note);
@@ -13238,6 +13510,10 @@ function renderKeyvault(rows: KeyVaultRow[]): void {
       saveBtn.type = "button";
       saveBtn.className = "mini-btn ok";
       saveBtn.textContent = t("settings.save");
+      const testResult = document.createElement("div");
+      testResult.className = "skey-error";
+      const testBtn = CORE_MCP_SERVICES.some((service) => service.id === svc.id)
+        ? attachKeyTest(svc.id, keyInput, null, saveBtn, testResult) : null;
       saveBtn.addEventListener("click", () => {
         void saveKeyvaultEntry(svc.id, labelInput.value, keyInput.value);
       });
@@ -13251,8 +13527,9 @@ function renderKeyvault(rows: KeyVaultRow[]): void {
         renderKeyvault(lastVaultRows);
       });
 
+      if (testBtn) formActions.append(testBtn);
       formActions.append(saveBtn, cancelBtn);
-      form.append(labelInput, keyInput, formActions);
+      form.append(labelInput, keyInput, formActions, testResult);
       item.append(form);
     }
 
@@ -13515,7 +13792,7 @@ async function initSettings(): Promise<void> {
     overviewCategory = config.overviewCategory;
   }
   if (config.overviewStyle !== "rings" && config.overviewStyle !== "bars") {
-    config.overviewStyle = "rings";
+    config.overviewStyle = "bars";
   }
 
   const interval = document.querySelector<HTMLInputElement>("#interval")!;
@@ -13941,7 +14218,7 @@ async function resetAllSettings(): Promise<void> {
     spendTab: "today",
     overviewTab: "5h",
     overviewCategory: "coding",
-    overviewStyle: "rings",
+    overviewStyle: "bars",
     categoryOverrides: {},
     spendMetric: "cost",
     spendGrouping: "tool",
@@ -14598,6 +14875,14 @@ function applyPanelIntent(): void {
     if (intent.family) void focusAuthFamily(intent.family);
   } else {
     setPanelView("settings");
+    if (intent.family && CORE_MCP_SERVICES.some((service) => service.id === intent.family)) {
+      document.querySelector<HTMLButtonElement>('.panel-tabs [data-settings-tab="usage"]')?.click();
+      kvAddingForService.add(intent.family);
+      void loadKeyvault().then(() => {
+        document.querySelector<HTMLElement>(`[data-skey-family="${CSS.escape(intent.family!)}"]`)
+          ?.scrollIntoView({ block: "start", behavior: scrollBehavior() });
+      });
+    }
   }
 }
 
@@ -15738,6 +16023,33 @@ document.querySelector("#settings-btn")!.addEventListener("click", () => {
       void jumpToAuthCenter(authJump.dataset.authJump!);
       return;
     }
+    const help = target.closest<HTMLElement>("[data-provider-help]");
+    if (help) { openProviderHelp(help.dataset.providerHelp!); return; }
+    const needsSetup = target.closest<HTMLElement>("[data-needs-setup]");
+    if (needsSetup) {
+      // Straight to the place the hint talks about: the provider's own
+      // credential panel in Customize (same route the gear menu uses).
+      const cardId = needsSetup.dataset.needsSetup!;
+      const fam = providerFamily(cardId);
+      if (KEY_PROVIDERS.has(fam) && supportsExtraAccounts(fam) && (cardId.includes("@") || accountsCache.get(fam)?.[0]?.id)) {
+        openAccountDialog(fam, cardId.includes("@") ? cardId : accountsCache.get(fam)![0].id);
+        return;
+      }
+      if (["bocha", "tavily", "firecrawl", "brave"].includes(fam)) {
+        void patchConfig({ panelIntent: { view: "settings", family: fam, at: Date.now() } }).then(() => invoke("open_panel_window"));
+        return;
+      }
+      if (providerDefinition(fam)?.supportsOAuth) { void jumpToAuthCenter(fam); return; }
+      custKeyEditing.add(fam);
+      skinMarketOpen = false;
+      custConfigOpen = fam;
+      setDrawer(true);
+      renderDrawerBody();
+      document
+        .querySelector<HTMLElement>(`#drawer-body [data-cust-provider="${CSS.escape(fam)}"]`)
+        ?.scrollIntoView({ block: "start" });
+      return;
+    }
     const acctTab = target.closest<HTMLElement>("[data-card-account]");
     if (acctTab) {
       const [family, acctId] = acctTab.dataset.cardAccount!.split("|");
@@ -16113,10 +16425,16 @@ document.querySelector("#settings-btn")!.addEventListener("click", () => {
   // The backend's background loop refreshes even while this window is
   // hidden (where setInterval is throttled dead). Adopt its results;
   // rendering still defers to the next open via renderIfVisible().
-  void listen<Snapshot[]>("usage-updated", (e) => {
+  let usageEventGeneration = 0;
+  void listen<Snapshot[]>("usage-updated", async (e) => {
+    const generation = ++usageEventGeneration;
     if (refreshing || !Array.isArray(e.payload)) return;
     lastFetch = Date.now();
-    lastSnapshots = hideFoldedMoonshot(e.payload);
+    const incoming = e.payload;
+    await Promise.all([...new Set(incoming.map((snapshot) => providerFamily(snapshot.id)))]
+      .filter(supportsExtraAccounts).map(refreshSettingsProviderKey));
+    if (refreshing || generation !== usageEventGeneration) return;
+    lastSnapshots = hideFoldedMoonshot(incoming);
     ensureLayout();
     renderIfVisible();
     scheduleBackoffRetries(lastSnapshots);
@@ -16131,6 +16449,7 @@ document.querySelector("#settings-btn")!.addEventListener("click", () => {
   // waiting out the rest of the refresh interval. The panel form skips
   // this — it renders no cards, and usage-updated keeps its cache warm.
   document.addEventListener("visibilitychange", () => {
+    if (document.hidden && pendingFontGuide !== "skip") dismissWhatsNew?.(true);
     if (!document.hidden && !IS_PANEL_FORM) void refresh(true);
   });
 
@@ -16142,10 +16461,10 @@ document.querySelector("#settings-btn")!.addEventListener("click", () => {
     setDrawer(false);
     setSettings(false);
     dismissConfirm?.();
-    dismissWhatsNew?.();
+    dismissWhatsNew?.(pendingFontGuide !== "skip");
     userSelectedAccountFor.clear();
     // A fresh update's notes present on the first open after launch.
-    if (pendingWhatsNew) {
+    if (pendingWhatsNew && pendingFontGuide === "skip") {
       showChangelogDialog(t("dialog.whatsNew", { version: appVersion }), pendingWhatsNew, true);
       pendingWhatsNew = null;
     }
@@ -16178,8 +16497,10 @@ document.querySelector("#settings-btn")!.addEventListener("click", () => {
       if (!splashPlaying()) maybeStartTour();
     });
   });
-  void initSettings().then(() => {
-    freshInstallAtBoot = initialTourPending(config);
+  void initSettings().then(async () => {
+    const needsInitialTour = initialTourPending(config);
+    await prepareFontOnboarding();
+    freshInstallAtBoot = needsInitialTour;
     if (freshInstallAtBoot && !config.tourPending) {
       config.tourPending = true;
       void patchConfig({ tourPending: true });

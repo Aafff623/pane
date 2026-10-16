@@ -8,7 +8,7 @@ const ID: &str = "novita";
 const NAME: &str = "Novita AI";
 const MAX_BODY_BYTES: usize = 64 * 1024;
 
-const BALANCE_URL: &str = "https://api.novita.ai/v3/user/balance";
+const BALANCE_URL: &str = "https://api.novita.ai/openapi/v1/billing/balance/detail";
 
 /// No local credential source — a Settings key or NOVITA_API_KEY only
 /// (both reported separately by get_credential_status).

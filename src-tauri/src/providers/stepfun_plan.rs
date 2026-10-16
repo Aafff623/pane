@@ -92,24 +92,26 @@ fn save_creds(creds: &Creds) {
     }
 }
 
-/// Renewal bookkeeping: single-flight so a concurrent refresh cycle can't
-/// pile duplicate logins onto PassportService, plus backoff after repeated
-/// failures (a wrong password should be heard once, not every 30s).
+/// Backoff for the entire renewal/login ladder. FETCH_LOCK serializes callers.
 #[derive(Default)]
 struct Renew {
-    in_flight: bool,
     failures: u32,
     next_attempt_ms: i64,
+    last_error: Option<AuthErr>,
 }
 
 static RENEW: Mutex<Renew> = Mutex::new(Renew {
-    in_flight: false,
     failures: 0,
     next_attempt_ms: 0,
+    last_error: None,
 });
 
+// Waiters reload credentials after the active refresh has persisted its pair.
+// Holding an async guard also releases the flight when a future is cancelled.
+static FETCH_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
 /// Why a login/refresh failed — decides backoff and user messaging.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 enum AuthErr {
     /// Credential rejected (401/invalid grant/bad password): final for this
     /// attempt, back off, never silently retry the same secret.
@@ -129,8 +131,45 @@ pub fn local_credential_hint() -> Option<String> {
 pub async fn snapshot() -> Snapshot {
     match fetch().await {
         Ok(s) => s,
+        // `fetch` turns a rejected-but-present credential into a
+        // needs_setup snapshot itself (the card must survive); what reaches
+        // here is a genuine fault.
         Err(e) => Snapshot::error(ID, NAME, e),
     }
+}
+
+/// The "credential present, one more step needed" card: hint + whatever the
+/// stored key can already read.
+async fn needs_setup_snapshot() -> Snapshot {
+    needs_setup_for(&load_creds().token).await
+}
+
+async fn needs_setup_for(token: &str) -> Snapshot {
+    let shape = if token.trim().is_empty() {
+        TokenShape::Empty
+    } else {
+        token_shape(token)
+    };
+    // The wallet read is the same Open-Platform endpoint the `stepfun`
+    // family uses; a Step Plan session token cannot read it, an API key can.
+    let mut metrics = Vec::new();
+    let plan = if let Some(wallet) = wallet_snapshot(token).await {
+        metrics = wallet.metrics;
+        wallet.plan
+    } else {
+        None
+    };
+    Snapshot::needs_setup(ID, NAME, plan, metrics, &setup_hint(&shape))
+}
+
+/// Pay-as-you-go wallet via the Open-Platform accounts endpoint, when the
+/// stored credential is an API key. `None` when it isn't readable.
+async fn wallet_snapshot(token: &str) -> Option<Snapshot> {
+    if token.trim().is_empty() || token_shape(token) != TokenShape::NotAJwt {
+        return None;
+    }
+    let snap = crate::providers::stepfun::snapshot_with_key(token).await;
+    (snap.status == "ok").then_some(snap)
 }
 
 /// Live test of pasted credentials (Customize "Test"); never saved. A pasted
@@ -140,6 +179,7 @@ pub async fn snapshot_with_creds(token: &str, username: &str, password: &str) ->
     if !token.is_empty() {
         return match fetch_with(token).await {
             Ok(s) => s,
+            Err(FetchErr::Auth) => pasted_token_fallback(token, wallet_snapshot(token).await),
             Err(e) => Snapshot::error(ID, NAME, describe_fetch(e)),
         };
     }
@@ -154,6 +194,16 @@ pub async fn snapshot_with_creds(token: &str, username: &str, password: &str) ->
         Err(AuthErr::Transient(m)) => {
             Snapshot::error(ID, NAME, format!("Step Plan sign-in unavailable: {m}"))
         }
+    }
+}
+
+// A pasted key must prove connectivity before Test can say "connected".
+// Stored cards may remain visible with guidance even when that proof fails.
+fn pasted_token_fallback(token: &str, wallet: Option<Snapshot>) -> Snapshot {
+    let hint = setup_hint(&token_shape(token));
+    match wallet {
+        Some(wallet) => Snapshot::needs_setup(ID, NAME, wallet.plan, wallet.metrics, &hint),
+        None => Snapshot::error(ID, NAME, hint),
     }
 }
 
@@ -172,6 +222,7 @@ pub async fn save_creds_interactive(
     username: &str,
     password: &str,
 ) -> Result<(), String> {
+    let _flight = FETCH_LOCK.lock().await;
     let mut creds = load_creds();
     // Non-empty fields overwrite; an empty field keeps whatever is stored —
     // filling only the account must not wipe the token pair (and vice versa).
@@ -194,11 +245,83 @@ pub async fn save_creds_interactive(
         creds.token = tok;
     }
     save_creds(&creds);
+    *renew_state() = Renew::default();
     Ok(())
 }
 
-pub fn clear_creds() {
+pub async fn clear_creds() {
+    let _flight = FETCH_LOCK.lock().await;
     let _ = std::fs::remove_file(creds_path());
+    *renew_state() = Renew::default();
+}
+
+/// What a pasted credential actually is. The console API only accepts a
+/// session pair ("<access JWT>...<refresh JWT>"); an Open-Platform API key
+/// looks like a key, not a JWT, and gets `token is illegal` — the user must
+/// be told that difference instead of seeing a bare failure.
+#[derive(Debug, PartialEq, Eq)]
+enum TokenShape {
+    /// "<access JWT>...<refresh JWT>" — the shape the console accepts.
+    SessionPair,
+    /// A single JWT (no pair): the refresh half is missing.
+    SingleJwt,
+    /// Not a JWT at all (an Open-Platform API key, e.g. `sk-…`/32-char key).
+    NotAJwt,
+    Empty,
+}
+
+fn token_shape(token: &str) -> TokenShape {
+    let t = token.trim();
+    if t.is_empty() {
+        return TokenShape::Empty;
+    }
+    let halves: Vec<&str> = t.rsplit("...").collect();
+    if halves.len() >= 2 && halves.iter().all(|h| looks_like_jwt(h)) {
+        return TokenShape::SessionPair;
+    }
+    if looks_like_jwt(t) {
+        return TokenShape::SingleJwt;
+    }
+    TokenShape::NotAJwt
+}
+
+/// Three dot-separated, non-empty chunks whose middle decodes as JSON —
+/// the shape test only. It must NOT require a `device_id` claim: the access
+/// half of a real Oasis pair carries no device_id (only the refresh half
+/// does), and demanding one misclassified a perfectly good session pair as
+/// "not a JWT" (2026-10-15).
+fn looks_like_jwt(s: &str) -> bool {
+    use base64::Engine;
+    let s = s.trim();
+    let mut parts = s.split('.');
+    let (Some(head), Some(payload), Some(sig), None) =
+        (parts.next(), parts.next(), parts.next(), parts.next())
+    else {
+        return false;
+    };
+    if head.is_empty() || payload.is_empty() || sig.is_empty() {
+        return false;
+    }
+    base64::engine::general_purpose::URL_SAFE_NO_PAD
+        .decode(payload)
+        .or_else(|_| base64::engine::general_purpose::STANDARD_NO_PAD.decode(payload))
+        .is_ok_and(|bytes| serde_json::from_slice::<Value>(&bytes).is_ok())
+}
+
+/// The user-facing remediation for a credential shape this API can't use.
+fn setup_hint(shape: &TokenShape) -> String {
+    match shape {
+        TokenShape::SessionPair => {
+            "Step Plan session was rejected — it may have expired; save the credentials again in Settings.".into()
+        }
+        TokenShape::SingleJwt => {
+            "Step Plan needs the FULL session pair, not just the access token: open platform.stepfun.com in a browser, log in, then DevTools → Application → Cookies → copy the whole Oasis-Token value (two JWTs joined by \"...\") into Settings → Step Plan.".into()
+        }
+        TokenShape::NotAJwt => {
+            "This is an Open-Platform API key, not a Step Plan session. An API key can only read the pay-as-you-go wallet, never the plan quota. To read Step Plan usage, open platform.stepfun.com → DevTools → Application → Cookies → copy the Oasis-Token value, or save your StepFun account + password in Settings (Pane then renews the session itself).".into()
+        }
+        TokenShape::Empty => "Save your StepFun Step Plan session or account+password in Settings.".into(),
+    }
 }
 
 /// The stored Oasis-Webid for a pair: the refresh half's `device_id` claim
@@ -214,7 +337,8 @@ fn webid_for_token(token: &str) -> String {
     DEFAULT_WEBID.to_string()
 }
 
-fn device_id_of_jwt(jwt: &str) -> Option<String> {
+/// One claim out of a JWT's payload, when the token parses at all.
+fn jwt_claim(jwt: &str, name: &str) -> Option<Value> {
     use base64::Engine;
     let payload_b64 = jwt.split('.').nth(1)?;
     let bytes = base64::engine::general_purpose::URL_SAFE_NO_PAD
@@ -222,27 +346,97 @@ fn device_id_of_jwt(jwt: &str) -> Option<String> {
         .or_else(|_| base64::engine::general_purpose::STANDARD_NO_PAD.decode(payload_b64))
         .ok()?;
     let v: Value = serde_json::from_slice(&bytes).ok()?;
-    v.get("device_id")
-        .and_then(Value::as_str)
-        .map(str::to_string)
+    v.get(name).cloned()
+}
+
+fn device_id_of_jwt(jwt: &str) -> Option<String> {
+    jwt_claim(jwt, "device_id")?.as_str().map(str::to_string)
+}
+
+/// The account identity the platform stamps into BOTH halves of a pair. A
+/// genuine rotation preserves it; the anonymous session the passport service
+/// hands back for a token it cannot use carries a different one.
+fn oasis_id_of(token: &str) -> Option<String> {
+    let mut identity = None;
+    for half in token.split("...") {
+        let Some(claim) = jwt_claim(half, "oasis_id") else {
+            continue;
+        };
+        let id = match claim {
+            Value::Number(n) => n.as_u64()?,
+            Value::String(s) => s.parse::<u64>().ok()?,
+            _ => return None,
+        };
+        if id == 0 {
+            return None;
+        }
+        let id = id.to_string();
+        if identity.as_ref().is_some_and(|old| old != &id) {
+            return None;
+        }
+        identity = Some(id);
+    }
+    identity
+}
+
+/// Accept a rotated pair only when it proves it is the SAME account.
+///
+/// A 200 does NOT mean the rotation worked: handed a token it cannot use,
+/// PassportService/RefreshToken answers 200 with a brand-new ANONYMOUS device
+/// session (`activated:false`, `age:1`, `device_id` = the pre-registration
+/// webid) — measured 2026-10-15. Persisting that would silently destroy the
+/// user's real session and strand the card on "rejected", so the pair has to
+/// carry a matching `oasis_id`; anything else leaves the stored credential
+/// untouched and sends the ladder to `needs_setup`.
+fn accept_rotation(stored: &str, rotated: &str) -> Result<(), AuthErr> {
+    reject_anonymous_access(rotated)?;
+    match (oasis_id_of(stored), oasis_id_of(rotated)) {
+        (Some(old), Some(new)) if old == new => Ok(()),
+        (Some(_), Some(_)) => Err(AuthErr::Invalid(
+            "refresh answered with a different account's session".into(),
+        )),
+        _ => Err(AuthErr::Invalid(
+            "refresh answered without an account identity".into(),
+        )),
+    }
+}
+
+/// A successful sign-in must land on a DIFFERENT identity than the throwaway
+/// device session it started from: `RegisterDevice` mints an anonymous
+/// account, and signing in has to switch away from it. A response that just
+/// carries the device session back means the password was not accepted — the
+/// same 200-without-success trap as `accept_rotation`, one step earlier.
+fn accept_login(device: &str, signed_in: &str) -> Result<(), AuthErr> {
+    reject_anonymous_access(signed_in)?;
+    match (oasis_id_of(device), oasis_id_of(signed_in)) {
+        (Some(anon), Some(user)) if anon != user => Ok(()),
+        _ => Err(AuthErr::Invalid(
+            "sign-in did not return a signed-in account".into(),
+        )),
+    }
+}
+
+fn reject_anonymous_access(token: &str) -> AuthResult<()> {
+    if jwt_claim(token.split("...").next().unwrap_or_default(), "activated")
+        == Some(Value::Bool(false))
+    {
+        return Err(AuthErr::Invalid(
+            "returned an anonymous device session".into(),
+        ));
+    }
+    Ok(())
 }
 
 /// Access-segment JWT exp as ms-from-now (60s skew floor); None when the
 /// token is unparseable or the pair has no access half.
 fn access_expires_in_ms(token: &str) -> Option<i64> {
-    use base64::Engine;
     let jwt = token.split("...").next()?;
-    let payload_b64 = jwt.split('.').nth(1)?;
-    let bytes = base64::engine::general_purpose::URL_SAFE_NO_PAD
-        .decode(payload_b64)
-        .or_else(|_| base64::engine::general_purpose::STANDARD_NO_PAD.decode(payload_b64))
-        .ok()?;
-    let v: Value = serde_json::from_slice(&bytes).ok()?;
-    let exp = v.get("exp")?.as_i64()?;
+    let exp = jwt_claim(jwt, "exp")?.as_i64()?;
     Some(exp * 1000 - chrono::Utc::now().timestamp_millis())
 }
 
 async fn fetch() -> Result<Snapshot, String> {
+    let _flight = FETCH_LOCK.lock().await;
     let mut creds = load_creds();
     if creds.token.is_empty() && creds.username.is_empty() {
         return Ok(Snapshot::no_credentials(
@@ -263,77 +457,82 @@ async fn fetch() -> Result<Snapshot, String> {
     }
 
     // L1: rotate the pair via RefreshToken (single-flight + backoff).
-    let refreshed = if !creds.token.is_empty() {
-        renew(&mut creds).await
-    } else {
-        None
-    };
+    let refreshed = renew(&mut creds).await.map_err(|e| describe_login(&e))?;
     let token = match refreshed {
         Some(t) => t,
         None => {
-            // L2: refresh impossible/dead — full login if the account is on
-            // file (its own single-flight + backoff inside).
-            if !creds.username.is_empty() && !creds.password.is_empty() {
-                match full_login(&creds.username, &creds.password).await {
-                    Ok(t) => {
-                        creds.token = t.clone();
-                        save_creds(&creds);
-                        t
-                    }
-                    Err(e) => return Err(describe_login(&e)),
-                }
-            } else {
-                return Err(
-                    "Step Plan session expired — sign in again in Settings (account + password)"
-                        .to_string(),
-                );
-            }
+            // A credential is on file but the plan endpoint refuses it
+            // (typical: an Open-Platform API key, or a session without
+            // its refresh half). Keep the card and say what to provide.
+            return Ok(needs_setup_snapshot().await);
         }
     };
     match fetch_with(&token).await {
         Ok(s) => Ok(s),
-        Err(FetchErr::Auth) => Err(
-            "Step Plan session was rejected — check your account in Settings".to_string(),
-        ),
+        Err(FetchErr::Auth) => Ok(needs_setup_snapshot().await),
         Err(FetchErr::Other(m)) => Err(m),
     }
 }
 
-/// One RefreshToken attempt under the single-flight lock; returns the new
-/// pair on success (creds already persisted with the rotated pair).
-async fn renew(creds: &mut Creds) -> Option<String> {
+/// The renewal bookkeeping lock. A poisoned mutex must not wedge the ladder:
+/// `Renew` only holds backoff state; the async flight guard releases on drop.
+fn renew_state() -> std::sync::MutexGuard<'static, Renew> {
+    RENEW
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
+/// Refresh, then password login only on rejection, under FETCH_LOCK.
+/// Both stages share backoff; only successful pairs are persisted.
+async fn renew(creds: &mut Creds) -> AuthResult<Option<String>> {
     // Scoped so the guard provably dies before the await below (the guarded
     // future must stay Send for lib.rs's refresh pool).
     {
-        let mut guard = RENEW.lock().ok()?;
-        if guard.in_flight {
-            return None;
-        }
+        let guard = renew_state();
         let now = chrono::Utc::now().timestamp_millis();
         if guard.failures > 0 && now < guard.next_attempt_ms {
-            return None;
+            return match &guard.last_error {
+                Some(AuthErr::Transient(m)) => Err(AuthErr::Transient(m.clone())),
+                _ if !creds.username.is_empty() && !creds.password.is_empty() => Err(guard
+                    .last_error
+                    .clone()
+                    .unwrap_or_else(|| AuthErr::Invalid("sign-in cooling down".into()))),
+                _ => Ok(None),
+            };
         }
-        guard.in_flight = true;
     }
 
-    let result = refresh_pair(&creds.token).await;
+    let mut result = if creds.token.is_empty() {
+        Err(AuthErr::Invalid("no session pair".into()))
+    } else {
+        refresh_pair(&creds.token).await
+    };
+    // Network failures and throttling must never trigger password login.
+    let can_login = !creds.username.is_empty() && !creds.password.is_empty();
+    if matches!(result, Err(AuthErr::Invalid(_))) && can_login {
+        result = full_login(&creds.username, &creds.password).await;
+    }
 
     {
-        let mut guard = RENEW.lock().ok()?;
-        guard.in_flight = false;
+        let mut guard = renew_state();
         match result {
             Ok(pair) => {
                 guard.failures = 0;
                 guard.next_attempt_ms = 0;
+                guard.last_error = None;
                 creds.token = pair.clone();
                 save_creds(creds);
-                Some(pair)
+                Ok(Some(pair))
             }
-            Err(_) => {
+            Err(e) => {
                 let step = (guard.failures as usize).min(BACKOFFS_MS.len() - 1);
                 guard.next_attempt_ms = chrono::Utc::now().timestamp_millis() + BACKOFFS_MS[step];
-                guard.failures += 1;
-                None
+                guard.failures = guard.failures.saturating_add(1);
+                guard.last_error = Some(e.clone());
+                match e {
+                    AuthErr::Invalid(_) if !can_login => Ok(None),
+                    e => Err(e),
+                }
             }
         }
     }
@@ -346,7 +545,7 @@ fn describe_login(e: &AuthErr) -> String {
     }
 }
 
-/// Full 3-step login (no lock — callers hold the RENEW flight context or are
+/// Full 3-step login (no lock — callers hold the FETCH_LOCK guard or are
 /// interactive one-shots): INGRESSCOOKIE → RegisterDevice → SignInByPassword.
 async fn full_login(username: &str, password: &str) -> AuthResult<String> {
     let ingress = get_ingress_cookie().await?;
@@ -372,19 +571,17 @@ async fn full_login(username: &str, password: &str) -> AuthResult<String> {
     }
     let status = resp.status();
     if !status.is_success() {
-        let body = resp.text().await.unwrap_or_default();
-        // A wrong password answers 200-with-error or 4xx — both final.
-        return Err(AuthErr::Invalid(format!(
-            "HTTP {status} {}",
-            body.chars().take(160).collect::<String>()
-        )));
+        // Never include the upstream body: auth responses may echo inputs.
+        return Err(auth_http_error(status.as_u16(), "sign-in"));
     }
     let doc: Value = resp
         .json()
         .await
         .map_err(|e| AuthErr::Transient(format!("body: {e}")))?;
-    combine_token(&doc, "login")
-        .ok_or_else(|| AuthErr::Invalid("no access token in login response".into()))
+    let pair = combine_token(&doc, "login")
+        .ok_or_else(|| AuthErr::Invalid("no access token in login response".into()))?;
+    accept_login(&anon, &pair)?;
+    Ok(pair)
 }
 
 /// Step 1: GET the platform homepage and harvest INGRESSCOOKIE from
@@ -400,7 +597,10 @@ async fn get_ingress_cookie() -> AuthResult<String> {
         .await
         .map_err(|e| AuthErr::Transient(format!("network: {e}")))?;
     if !resp.status().is_success() {
-        return Err(AuthErr::Transient(format!("homepage HTTP {}", resp.status())));
+        return Err(AuthErr::Transient(format!(
+            "homepage HTTP {}",
+            resp.status()
+        )));
     }
     for value in resp.headers().get_all("set-cookie") {
         let Ok(s) = value.to_str() else { continue };
@@ -438,12 +638,12 @@ async fn register_device(ingress: &str) -> AuthResult<String> {
         .json()
         .await
         .map_err(|e| AuthErr::Transient(format!("body: {e}")))?;
-    combine_token(&doc, "device")
-        .ok_or_else(|| AuthErr::Transient("no device token".into()))
+    combine_token(&doc, "device").ok_or_else(|| AuthErr::Transient("no device token".into()))
 }
 
 /// Rotate the stored pair. A 4xx body ("token is expired"/"illegal") means
-/// the pair is dead for good — that routes the caller to full login.
+/// the pair is dead for good — that routes the caller to full login. A 2xx is
+/// NOT sufficient proof of success (see `accept_rotation`).
 async fn refresh_pair(token: &str) -> AuthResult<String> {
     let webid = webid_for_token(token);
     let resp = http()
@@ -454,19 +654,34 @@ async fn refresh_pair(token: &str) -> AuthResult<String> {
         .header("oasis-platform", "web")
         .header("oasis-webid", &webid)
         .header("Oasis-Token", token)
-        .header("Cookie", format!("Oasis-Token={token}; Oasis-Webid={webid}"))
+        .header(
+            "Cookie",
+            format!("Oasis-Token={token}; Oasis-Webid={webid}"),
+        )
         .json(&serde_json::json!({}))
         .send()
         .await
         .map_err(|e| AuthErr::Transient(format!("network: {e}")))?;
     if !resp.status().is_success() {
-        return Err(AuthErr::Invalid(format!("refresh HTTP {}", resp.status())));
+        return Err(auth_http_error(resp.status().as_u16(), "refresh"));
     }
     let doc: Value = resp
         .json()
         .await
         .map_err(|e| AuthErr::Transient(format!("body: {e}")))?;
-    combine_token(&doc, "refresh").ok_or_else(|| AuthErr::Invalid("no token in refresh".into()))
+    let pair = combine_token(&doc, "refresh")
+        .ok_or_else(|| AuthErr::Invalid("no token in refresh".into()))?;
+    accept_rotation(token, &pair)?;
+    Ok(pair)
+}
+
+fn auth_http_error(status: u16, operation: &str) -> AuthErr {
+    let message = format!("{operation} HTTP {status}");
+    if status == 429 || status >= 500 {
+        AuthErr::Transient(message)
+    } else {
+        AuthErr::Invalid(message)
+    }
 }
 
 /// {accessToken:{raw}, refreshToken:{raw}} → "<access>...<refresh>" — the
@@ -516,7 +731,10 @@ async fn post_usage(token: &str, url: &str) -> Result<Value, FetchErr> {
         .header("oasis-appid", APP_ID)
         .header("oasis-platform", "web")
         .header("oasis-webid", &webid)
-        .header("Cookie", format!("Oasis-Token={token}; Oasis-Webid={webid}"));
+        .header(
+            "Cookie",
+            format!("Oasis-Token={token}; Oasis-Webid={webid}"),
+        );
     if url != SIGN_IN_URL {
         req = req.header("Oasis-Token", token);
     }
@@ -627,6 +845,77 @@ fn parse_snapshot(rate: &Value, status: Option<&Value>) -> Result<Snapshot, Stri
 mod tests {
     use super::*;
 
+    #[test]
+    fn account_identity_rejects_null_zero_and_conflicting_halves() {
+        let valid = jwt(r#"{"oasis_id":42}"#);
+        for claim in [
+            r#"{"oasis_id":null}"#,
+            r#"{"oasis_id":0}"#,
+            r#"{"oasis_id":true}"#,
+            r#"{"oasis_id":[]}"#,
+        ] {
+            let invalid = jwt(claim);
+            assert!(accept_rotation(&invalid, &invalid).is_err());
+            assert!(accept_login(&invalid, &valid).is_err());
+        }
+        let conflicting = pair(&valid, &jwt(r#"{"oasis_id":43}"#));
+        assert!(accept_rotation(&valid, &conflicting).is_err());
+        let string_id = jwt(r#"{"oasis_id":"42"}"#);
+        assert!(accept_rotation(&valid, &string_id).is_ok());
+        assert!(accept_login(&valid, &string_id).is_err());
+    }
+
+    #[test]
+    fn auth_throttling_and_server_errors_are_retryable_not_rejections() {
+        for status in [429, 500, 502, 503] {
+            assert!(matches!(
+                auth_http_error(status, "refresh"),
+                AuthErr::Transient(_)
+            ));
+        }
+        for status in [400, 401, 403] {
+            assert!(matches!(
+                auth_http_error(status, "refresh"),
+                AuthErr::Invalid(_)
+            ));
+        }
+    }
+
+    #[test]
+    fn pasted_key_needs_a_successful_wallet_read_to_count_as_connected() {
+        let token = "synthetic-api-key-not-a-jwt";
+        assert_eq!(pasted_token_fallback(token, None).status, "error");
+        let wallet = Snapshot::ok(
+            "stepfun",
+            "StepFun",
+            None,
+            vec![Metric::text("Balance", "¥1.00".into())],
+        );
+        let setup = pasted_token_fallback(token, Some(wallet));
+        assert_eq!(setup.status, "needs_setup");
+        assert_eq!(setup.metrics[0].value.as_deref(), Some("¥1.00"));
+    }
+
+    /// A syntactically valid JWT carrying exactly `claims`.
+    fn jwt(claims: &str) -> String {
+        use base64::Engine;
+        let head = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(br#"{"alg":"RS256"}"#);
+        let body = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(claims.as_bytes());
+        format!("{head}.{body}.c2ln")
+    }
+
+    /// "<access>...<refresh>" — the pair form the console accepts.
+    fn pair(access: &str, refresh: &str) -> String {
+        format!("{access}...{refresh}")
+    }
+
+    /// Synthetic account and anonymous-session claims, preserving the observed
+    /// field shapes without retaining personal account or device identifiers.
+    const REAL_ACCESS: &str = r#"{"activated":true,"age":171,"exp":1792078025,"mode":2,"oasis_id":123456789012345678,"real_name_status":1}"#;
+    const REAL_REFRESH: &str = r#"{"app_id":10300,"device_id":"synthetic-signed-in-device","exp":1794099614,"oasis_id":123456789012345678}"#;
+    const ANON_ACCESS: &str = r#"{"activated":false,"age":1,"exp":1792079183,"mode":1,"oasis_id":234567890123456789,"real_name_status":0}"#;
+    const ANON_REFRESH: &str = r#"{"app_id":10300,"device_id":"c8a1002d2c457e758785a9979832217c7c0b884c","exp":1794669383,"oasis_id":234567890123456789}"#;
+
     /// Verbatim shape from a CodexBar fixture (2026-10) — string decimals,
     /// pool + one 30-day bucket. topup_credit_left_rate = 0 → no Top-up row.
     const CREDIT_SAMPLE: &str = r#"{"plan_credit_rate_limit":{
@@ -707,8 +996,8 @@ mod tests {
     #[test]
     fn webid_prefers_refresh_half_device_id_then_default() {
         use base64::Engine;
-        let access = base64::engine::general_purpose::URL_SAFE_NO_PAD
-            .encode(br#"{"exp":9999999999}"#);
+        let access =
+            base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(br#"{"exp":9999999999}"#);
         let refresh = base64::engine::general_purpose::URL_SAFE_NO_PAD
             .encode(br#"{"device_id":"abc123","exp":9999999999}"#);
         let pair = format!("h.{access}.s...h.{refresh}.s");
@@ -735,7 +1024,10 @@ mod tests {
             "accessToken": {"raw": "ACCESS"},
             "refreshToken": {"raw": "REFRESH"}
         });
-        assert_eq!(combine_token(&doc, "login").as_deref(), Some("ACCESS...REFRESH"));
+        assert_eq!(
+            combine_token(&doc, "login").as_deref(),
+            Some("ACCESS...REFRESH")
+        );
         let doc = serde_json::json!({"accessToken": {"raw": "ACCESS"}});
         assert_eq!(combine_token(&doc, "device").as_deref(), Some("ACCESS"));
         let doc = serde_json::json!({"refreshToken": {"raw": "X"}});
@@ -762,5 +1054,146 @@ mod tests {
     fn separate_id() {
         assert_eq!(ID, "stepfun-plan");
         assert_eq!(BACKOFFS_MS, [30_000, 300_000, 1_800_000]);
+    }
+
+    /// Real shapes: an Open-Platform API key, a lone access JWT, and the
+    /// "<access>...<refresh>" pair the console accepts. Critically, the
+    /// access half has NO `device_id` (only the refresh half does) — the
+    /// pair must still classify as a session.
+    #[test]
+    fn token_shape_classifies_the_three_real_inputs() {
+        // A synthetic opaque API key, never a real credential.
+        assert_eq!(
+            token_shape("test-open-platform-key-not-a-jwt"),
+            TokenShape::NotAJwt
+        );
+        // The access half of a real Oasis pair: a JWT with no device_id.
+        let access = jwt(r#"{"exp":1900000000,"user_id":123}"#);
+        assert_eq!(token_shape(&access), TokenShape::SingleJwt);
+        assert!(
+            !access.contains("device_id"),
+            "fixture must model the real access half"
+        );
+        let pair = format!(
+            "{access}...{}",
+            jwt(r#"{"device_id":"dev-1","exp":1900000000}"#)
+        );
+        assert_eq!(
+            token_shape(&pair),
+            TokenShape::SessionPair,
+            "a real session pair must not be mistaken for an API key"
+        );
+        assert_eq!(token_shape("   "), TokenShape::Empty);
+    }
+
+    /// The regression that cost the owner his pinned card (2026-10-15): the
+    /// endpoint answers a token it cannot use with HTTP 200 and a fresh
+    /// ANONYMOUS session. Accepting that as a rotation overwrites the real
+    /// credential — the guard must reject anything but the same account.
+    #[test]
+    fn a_rotation_must_prove_the_same_account() {
+        let real = pair(&jwt(REAL_ACCESS), &jwt(REAL_REFRESH));
+        let anon = pair(&jwt(ANON_ACCESS), &jwt(ANON_REFRESH));
+        let rotated = pair(
+            &jwt(r#"{"activated":true,"exp":1792080000,"oasis_id":123456789012345678}"#),
+            &jwt(r#"{"device_id":"dev-1","exp":1795000000,"oasis_id":123456789012345678}"#),
+        );
+        // Same account, fresh expiries → a genuine rotation.
+        assert!(accept_rotation(&real, &rotated).is_ok());
+        // The anonymous session handed back for an unusable token.
+        assert!(accept_rotation(&real, &anon).is_err());
+        // A stored API key carries no identity → never a valid rotation. This
+        // is exactly the state the card must survive, not overwrite.
+        assert!(accept_rotation(
+            "test-open-platform-key-not-a-jwt",
+            &anon
+        )
+        .is_err());
+        // A rotated pair with no identity cannot prove anything.
+        let opaque = pair(&jwt(r#"{"exp":1792080000}"#), &jwt(r#"{"exp":1795000000}"#));
+        assert!(accept_rotation(&real, &opaque).is_err());
+        // Continuity alone cannot turn an anonymous session into a login.
+        assert!(accept_rotation(&anon, &anon).is_err());
+    }
+
+    /// The same trap one step earlier: a sign-in response that merely carries
+    /// the throwaway device session back must not count as a signed-in account.
+    #[test]
+    fn a_sign_in_must_leave_the_anonymous_device_behind() {
+        let device = pair(&jwt(ANON_ACCESS), &jwt(ANON_REFRESH));
+        let user = pair(&jwt(REAL_ACCESS), &jwt(REAL_REFRESH));
+        assert!(accept_login(&device, &user).is_ok());
+        // The response echoed the device session → the password was refused.
+        assert!(accept_login(&device, &device).is_err());
+        let other_anon = pair(
+            &jwt(r#"{"activated":false,"oasis_id":345678901234567890}"#),
+            &jwt(r#"{"oasis_id":345678901234567890}"#),
+        );
+        assert!(accept_login(&device, &other_anon).is_err());
+        // No identity to compare against → cannot be trusted either way.
+        let opaque = pair(&jwt(r#"{"exp":1}"#), &jwt(r#"{"exp":2}"#));
+        assert!(accept_login(&device, &opaque).is_err());
+        assert!(accept_login("not-a-jwt", &user).is_err());
+    }
+
+    /// The anon session is a well-formed pair, so the user must get the
+    /// "session was rejected" guidance — not the "this is an API key" one.
+    #[test]
+    fn the_anonymous_session_reads_as_a_session_not_an_api_key() {
+        let anon = pair(&jwt(ANON_ACCESS), &jwt(ANON_REFRESH));
+        assert_eq!(token_shape(&anon), TokenShape::SessionPair);
+        assert_ne!(
+            oasis_id_of(&anon),
+            oasis_id_of(&pair(&jwt(REAL_ACCESS), &jwt(REAL_REFRESH)))
+        );
+    }
+
+    #[test]
+    fn oasis_id_is_read_from_whichever_half_carries_it() {
+        let expected = Some("123456789012345678".to_string());
+        assert_eq!(
+            oasis_id_of(&pair(&jwt(REAL_ACCESS), &jwt(r#"{"exp":1}"#))),
+            expected
+        );
+        assert_eq!(
+            oasis_id_of(&pair(&jwt(r#"{"exp":1}"#), &jwt(REAL_REFRESH))),
+            expected
+        );
+        assert_eq!(oasis_id_of("not-a-jwt"), None);
+    }
+
+    /// Every shape must produce a hint that says what to do — a bare failure
+    /// is exactly what the user asked us to stop showing.
+    #[test]
+    fn every_shape_has_actionable_guidance() {
+        for shape in [
+            TokenShape::SessionPair,
+            TokenShape::SingleJwt,
+            TokenShape::NotAJwt,
+            TokenShape::Empty,
+        ] {
+            let hint = setup_hint(&shape);
+            assert!(hint.len() > 40, "hint too thin for {shape:?}: {hint}");
+        }
+        // The API-key case must name the concrete path, not just "sign in".
+        let api_key_hint = setup_hint(&TokenShape::NotAJwt);
+        assert!(api_key_hint.contains("Oasis-Token"), "{api_key_hint}");
+        assert!(api_key_hint.contains("password"), "{api_key_hint}");
+    }
+
+    /// A credential-present-but-unreadable snapshot must stay on the board
+    /// with a stated status, not degrade to an error card.
+    #[test]
+    fn needs_setup_is_not_an_error_status() {
+        let snap = Snapshot::needs_setup(
+            ID,
+            NAME,
+            Some("Pay as you go".into()),
+            vec![Metric::text("Balance", "¥-0.18".into())],
+            "hint",
+        );
+        assert_eq!(snap.status, "needs_setup");
+        assert_eq!(snap.metrics.len(), 1);
+        assert!(snap.error.is_some());
     }
 }

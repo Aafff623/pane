@@ -53,64 +53,43 @@ async fn fetch_with_key(key: &str, source: &str) -> Result<Snapshot, String> {
         .send();
     let (credits_resp, key_resp) = tokio::join!(credits_req, key_req);
 
-    let credits_resp = credits_resp.map_err(|e| format!("credits request: {e}"))?;
-    if credits_resp.status().as_u16() == 401 {
-        return Err(format!(
-            "{source} was rejected — paste a fresh key in Settings (gear icon)"
-        ));
+    let credits = quota_document(credits_resp, "credits").await;
+    let info = quota_document(key_resp, "key").await;
+    if credits.is_err() && info.is_err() {
+        return Err(format!("{source}: {}", info.err().unwrap_or_else(|| "quota query failed".into())));
     }
-    if !credits_resp.status().is_success() {
-        return Err(format!("credits endpoint: HTTP {}", credits_resp.status()));
-    }
-    let credits: Value = credits_resp
-        .json()
-        .await
-        .map_err(|e| format!("credits parse: {e}"))?;
-    let data = credits.get("data").unwrap_or(&credits);
+    snapshot_from_documents(credits.ok().as_ref(), info.ok().as_ref())
+}
 
+async fn quota_document(response: Result<reqwest::Response, reqwest::Error>, label: &str) -> Result<Value, String> {
+    let response = response.map_err(|error| format!("{label} network: {error}"))?;
+    if !response.status().is_success() { return Err(format!("{label} HTTP {}", response.status())); }
+    super::json_body(response, 256 * 1024, label).await
+}
+
+fn snapshot_from_documents(credits: Option<&Value>, info: Option<&Value>) -> Result<Snapshot, String> {
     let mut metrics = Vec::new();
-    let total = data.get("total_credits").and_then(Value::as_f64);
-    let used = data.get("total_usage").and_then(Value::as_f64);
-    if let (Some(total), Some(used)) = (total, used) {
-        metrics.push(Metric::text(
-            "Balance",
-            format!("${:.2}", (total - used).max(0.0)),
-        ));
-        if total > 0.0 {
-            metrics.push(Metric::progress(
-                "Credits",
-                used / total * 100.0,
-                Some(format!("${used:.2} of ${total:.2} used")),
-            ));
+    if let Some(credits) = credits {
+        let data = credits.get("data").unwrap_or(credits);
+        if let (Some(total), Some(used)) = (data.get("total_credits").and_then(Value::as_f64), data.get("total_usage").and_then(Value::as_f64)) {
+            metrics.push(Metric::text("Balance", format!("${:.2}", (total - used).max(0.0))));
+            if total > 0.0 { metrics.push(Metric::progress("Credits", used / total * 100.0,
+                Some(format!("${used:.2} of ${total:.2} used")))); }
         }
     }
-
-    let mut plan = None;
-    if let Ok(resp) = key_resp {
-        if resp.status().is_success() {
-            if let Ok(info) = resp.json::<Value>().await {
-                let data = info.get("data").unwrap_or(&info).clone();
-                plan = data
-                    .get("is_free_tier")
-                    .and_then(Value::as_bool)
-                    .map(|free| {
-                        if free {
-                            "Free tier".to_string()
-                        } else {
-                            "Pay as you go".to_string()
-                        }
-                    });
-                if let Some(metric) = key_limit_metric(&data) {
-                    metrics.push(metric);
-                }
-            }
+    if let Some(info) = info {
+        let data = info.get("data").unwrap_or(info);
+        if let Some(metric) = key_limit_metric(data) { metrics.push(metric); }
+        else if let Some(usage) = data.get("usage").and_then(Value::as_f64) {
+            metrics.push(Metric::text("Key usage", format!("${usage:.2}")));
         }
     }
-
-    if metrics.is_empty() {
-        return Err("no credit data in response".into());
+    if metrics.is_empty() { return Err("no quota data in response".into()); }
+    let mut snapshot = Snapshot::ok(ID, NAME, None, metrics);
+    if credits.is_none() {
+        snapshot.warning = Some("Account credits require a Management key; showing this key's own usage and limit.".into());
     }
-    Ok(Snapshot::ok(ID, NAME, plan, metrics))
+    Ok(snapshot)
 }
 
 /// Match consumption to the configured reset window. Lifetime usage is only
@@ -150,6 +129,16 @@ fn key_limit_metric(data: &Value) -> Option<Metric> {
 mod tests {
     use super::*;
     use serde_json::json;
+    #[test]
+    fn ordinary_key_survives_missing_management_permission() {
+        let info = json!({"data":{"limit":100,"limit_remaining":75,"usage":25}});
+        let snapshot = snapshot_from_documents(None, Some(&info)).unwrap();
+        assert_eq!(snapshot.status, "ok");
+        assert_eq!(snapshot.metrics[0].used_percent, Some(25.0));
+        assert!(snapshot.warning.unwrap().contains("Management key"));
+        assert!(snapshot_from_documents(None, None).is_err());
+    }
+
     #[test]
     fn key_limit_uses_current_window_not_lifetime_usage() {
         let doc =
