@@ -513,6 +513,7 @@ async fn fetch_with_access(auth: Access, id: &str, name: &str) -> Result<Snapsho
                     value: Some("Available".into()),
                     resets_at: *expires_at,
                     period_ms: None,
+                    available: None,
                 });
             }
         }

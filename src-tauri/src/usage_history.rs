@@ -347,6 +347,7 @@ mod tests {
             value: None,
             resets_at: None,
             period_ms: None,
+            available: None,
         }
     }
 
@@ -489,6 +490,7 @@ mod tests {
             value: None,
             resets_at: None,
             period_ms: None,
+            available: None,
         };
         assert_eq!(credits_used_from_metrics(&[credits]), Some(38.0));
         // A "Credits" label without the credits detail is not a credit row.
@@ -500,6 +502,7 @@ mod tests {
             value: None,
             resets_at: None,
             period_ms: None,
+            available: None,
         };
         assert_eq!(credits_used_from_metrics(&[lookalike]), None);
         assert_eq!(credits_used_from_metrics(&[metric("progress", Some(10.0))]), None);
