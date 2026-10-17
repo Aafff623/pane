@@ -64,3 +64,6 @@ site/.wrangler/
 # Archify diagram working files (candidates + receipts); the published
 # diagrams live under site/public/design/.
 .archify/
+
+# Mimosa security-scanner local state (finding ledger, run history, hook state)
+.mimosa/
