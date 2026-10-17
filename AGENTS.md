@@ -60,6 +60,26 @@ cargo +stable-x86_64-pc-windows-gnu build
 ```
 Then re-run the launch step.
 
+## Build artifacts (`target/`)
+
+A healthy `src-tauri/target` is ~14 GB and `parse-tests/target` ~7 GB — that is
+this crate graph's dependency tree, not a defect. It only grows abnormally in two
+ways, and cargo never reclaims either on its own:
+
+- **Stale duplicate app-crate artifacts.** Every build whose flags or feature set
+  differ from the last one emits a new `pane-*.exe` (~495 MB) plus
+  `libpane_lib-*.rlib` (~270 MB) pair under a new hash, and the old ones stay on
+  disk. Keep build invocations identical to avoid accumulating them.
+- **Incremental caches.** Disabled via `[profile.dev] incremental = false` in
+  both `src-tauri/Cargo.toml` and `parse-tests/Cargo.toml`. Measured: one
+  app-crate rebuild writes ~460 MB of cache and saves ~37 s (81 s vs 118 s), so
+  the caches had reached 23 GB. cargo still creates an empty `incremental/`.
+
+Shrink with `cargo clean -p pane` (app crate only; the dependency tree is kept).
+Avoid a full `cargo clean` unless you have time to rebuild everything — and note
+that cleaning `parse-tests/target` only costs that harness's rebuild.
+Local `release` profiles are never needed: releases are built by CI.
+
 ## Project map (where things live)
 
 | Area | Location |

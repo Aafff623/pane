@@ -96,3 +96,9 @@ font-kit = "0.14"
 webview2-com = "0.38"
 windows-core = "0.61"
 windows = { version = "0.61", features = ["Win32_Foundation", "Win32_Globalization", "Win32_Graphics_Dwm", "Win32_Security_Authorization", "Win32_Security_Credentials", "Win32_Security_Cryptography", "Win32_Storage_FileSystem", "Win32_System_Memory", "Win32_System_Registry", "Win32_System_SystemInformation", "Win32_System_Threading", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging"] }
+
+# Incremental caches reached 23 GB of target/ in this workspace: one app-crate
+# rebuild writes ~460 MB of cache and saves ~37 s (81 s vs 118 s). Dependencies
+# stay cached either way, so only the app crate is recompiled.
+[profile.dev]
+incremental = false
