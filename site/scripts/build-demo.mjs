@@ -57,7 +57,7 @@ await build({
       // instead of vsync-aligned ones. The DOMContentLoaded backstop then only
       // nudges a refresh if the static skeleton is somehow still on screen.
       const shim = '<script>(function(){window.requestAnimationFrame=function(cb){return window.setTimeout(function(){cb(window.performance.now())},16)};window.cancelAnimationFrame=function(id){window.clearTimeout(id)};document.addEventListener("DOMContentLoaded",function(){setTimeout(function(){if(document.querySelector(".skeleton-card")){var b=document.querySelector("#refresh");if(b)b.click()}},900)})})()</script>';
-      return html.replace('</head>', '<link rel="stylesheet" href="/fonts/fonts.css"><link rel="stylesheet" href="/demo-frame.css?v=7">' + shim + '</head>');
+      return html.replace('</head>', '<link rel="stylesheet" href="/fonts/fonts.css"><link rel="stylesheet" href="/demo-frame.css?v=7"><link rel="stylesheet" href="/demo-target-cursor.css?v=1"><script defer src="/demo-target-cursor.js?v=2"></script>' + shim + '</head>');
     },
   } }, {
     // The desktop app parks its repaints while its window is hidden:

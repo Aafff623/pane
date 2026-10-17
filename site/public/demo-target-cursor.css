@@ -1,0 +1,40 @@
+.target-cursor {
+  position: fixed;
+  inset: 0;
+  z-index: 2147483647;
+  pointer-events: none;
+}
+
+.target-cursor__corner {
+  position: absolute;
+  top: 0;
+  left: 0;
+  box-sizing: border-box;
+  border-style: solid;
+  border-color: var(--target-cursor-color, #ffffff);
+  transform-origin: 0 0;
+  will-change: transform;
+}
+
+.target-cursor__dot {
+  position: absolute;
+  top: 0;
+  left: 0;
+  border-radius: 50%;
+  background: var(--target-cursor-color, #ffffff);
+  will-change: transform;
+}
+
+.target-cursor__label {
+  position: absolute;
+  top: 0;
+  left: 0;
+  color: var(--target-cursor-color, #ffffff);
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1;
+  white-space: nowrap;
+  opacity: 0;
+  will-change: transform, opacity;
+}
+

@@ -44,7 +44,8 @@ let config: Record<string, any> = {
   },
   appearance: params.get('theme') === 'light' ? 'light' : 'dark', density: 'regular', uiFont: 'MV Boli',
   glassEffects: true, shortcut: 'Alt+2', categoryShortcut: 'Shift+1', localShortcuts: {},
-  proxy: { enabled: false, url: '' }, showTotalSpend: true, welcomeDismissed: true,
+  // Sample accounts are already curated; visitors should land in the panel.
+  proxy: { enabled: false, url: '' }, showTotalSpend: true, welcomeDismissed: true, setupPicked: true,
   lastSeenVersion: version, reduceAnimations: matchMedia('(prefers-reduced-motion: reduce)').matches,
   jumpAnimation: 'smooth', hideUsageWhileSharing: false, locale, windowForm: 'floating',
   silentStart: false, startupAnimation: false, lastStartupBootId: 1, overviewExpanded: [],

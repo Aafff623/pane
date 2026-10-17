@@ -46,6 +46,24 @@ test("assets: every local file index.html references exists", () => {
   assert.deepEqual(missing, []);
 });
 
+test("assets: the site's lazy effect imports resolve to local JavaScript", async () => {
+  const pending = [new URL('./public/site.js', import.meta.url)];
+  const visited = new Set();
+  while (pending.length) {
+    const file = pending.pop();
+    if (visited.has(file.href)) continue;
+    visited.add(file.href);
+    const source = await readFile(file, 'utf8');
+    for (const [, specifier] of source.matchAll(/(?:from\s*|import\s*\()\s*['"]([^'"]+)['"]/g)) {
+      const dependency = specifier.startsWith('/')
+        ? new URL(`./public${specifier.split('?')[0]}`, import.meta.url)
+        : new URL(specifier.split('?')[0], file);
+      assert.ok(existsSync(dependency), `${file.pathname} imports missing ${specifier}`);
+      pending.push(dependency);
+    }
+  }
+});
+
 test("links: GitHub goes to Aafff623/pane, download buttons use the edge route", () => {
   const gh = [...html.matchAll(/https:\/\/github\.com\/[^"\s<)]*/g)].map((m) => m[0]);
   assert.ok(gh.length >= 4, "expected repo, releases and issues links");
@@ -94,10 +112,21 @@ test("copy: hero numbers match package.json and the provider catalog", async () 
   const zhCounts = [...html.matchAll(/(\d+) 个服务商/g)].map((m) => Number(m[1]));
   assert.ok(zhCounts.length >= 2, "zh body mentions the provider count");
   assert.deepEqual([...new Set(zhCounts)], [providerCount], `every zh mention says ${providerCount}, saw ${zhCounts}`);
-  const enCopy = LANGS.en.dict.providersCopy;
+  assert.ok(LANGS.en.dict.heroMetaRight.endsWith(`v${pkg.version}`), "English hero shows the current version");
+  const servedEnglish = await import("./public/i18n.js");
+  assert.deepEqual(servedEnglish.en, LANGS.en.dict, "Worker and browser English dictionaries stay in sync");
+  const enCopy = `${LANGS.en.dict.providersCopy} ${LANGS.en.dict.ecosystemIntro}`;
   const enCounts = [...enCopy.matchAll(/\b(\d+) providers\b/g)].map((m) => Number(m[1]));
-  assert.ok(enCounts.length >= 1, "en dictionary mentions the provider count");
+  assert.ok(enCounts.length >= 2, "both English provider descriptions mention the catalog size");
   assert.deepEqual([...new Set(enCounts)], [providerCount], `every en mention says ${providerCount}, saw ${enCounts}`);
+});
+
+test("English downloads: both Windows labels have a translation target without replacing their icons", () => {
+  const windowsLinks = [...html.matchAll(/<a\b[^>]*data-latest-installer[^>]*>([\s\S]*?)<\/a>/g)]
+    .map((match) => match[1]).filter((body) => body.includes("windows-logo.svg"));
+  assert.equal(windowsLinks.length, 2);
+  for (const body of windowsLinks) assert.match(body, /<span data-download-label>下载 Windows 版<\/span>/);
+  assert.match(siteScript, /setTexts\('\[data-download-label\]', \['heroDownload','heroDownload'\]\)/);
 });
 
 // 6. The FAQ is a grouped accordion (Ruixen-style): three topic groups of

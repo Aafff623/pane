@@ -1,0 +1,15 @@
+/* Decorative canvases never replace the native cursor or capture clicks. */
+.site-glow{position:fixed;inset:0;z-index:10;pointer-events:none;overflow:hidden;opacity:.52}
+.site-glow canvas{display:block;width:100%;height:100%;mix-blend-mode:screen}
+:root[data-theme=light] .site-glow{opacity:.32}
+.site-glow[hidden]{display:none}
+@media(prefers-reduced-motion:reduce),(hover:none),(pointer:coarse){.site-glow{display:none}}
+/* PixelSwap is the only theme transition. The native root crossfade and local
+   colour/opacity easing would otherwise animate on top of each pixel window. */
+:root[data-theme-transition=pixel]::view-transition-old(root),
+:root[data-theme-transition=pixel]::view-transition-new(root){animation:none;mix-blend-mode:normal}
+:root[data-theme-transition=pixel]::view-transition{pointer-events:none}
+:root[data-theme-transition=pixel]::view-transition-new(root){clip-path:inset(0)}
+:root[data-theme-transition=pixel] *,
+:root[data-theme-transition=pixel] *::before,
+:root[data-theme-transition=pixel] *::after{transition:none;animation-play-state:paused}

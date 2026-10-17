@@ -1,11 +1,15 @@
 import { en } from '/i18n.js';
-import { initUsageFlow } from '/usage-flow.js?v=4';
+import { initSiteEffects } from '/effects.js?v=11';
+import { initThemeSwap } from '/theme-swap.js?v=4';
+import { initUsageFlow } from '/usage-flow.js?v=5';
 import { paneMotion } from '/motion.js?v=1';
+import { initHeroReactions } from '/hero-reactions.js?v=3';
+import { initLineSidebar } from '/line-sidebar.js?v=2';
+import { initHeaderNav } from '/header-nav.js?v=1';
 import { formatByKind, warmHover, isHoverWarm, onLongPress, moveRovingFocus, bindMotionToggle } from '/ui.js?v=1';
 const frame=document.querySelector('#pane-demo'),settingsFrame=document.querySelector('#pane-settings'),root=document.documentElement;let selected='overview',refreshTimer; let demoTheme='dark';
 root.classList.add('motion-ready');
-// Kept for the parked bilingual copy. The launched site is Chinese-only, but
-// retaining the map here keeps the source ready for the next edge rewrite.
+// Older copy retained for the text-node translations below.
 const legacyTranslations = {
   '示例数据 · 交互体验':'Sample data · Interactive preview','这是一组示例数据':'Sample data, real interaction','额度、花费与账户均用于演示。':'Quotas, spend and accounts are sample data.','可以操作，不会连接真实账户。':'Explore freely. No real accounts are connected.','按真实项目分类':'Categories from Pane','边缘轻触，侧栏浮现':'Hover the edge to reveal','服务导航，按需出现':'Provider navigation on demand','桌面端 AI 用量面板':'Your desktop AI usage monitor',
   '功能':'Features','下载':'Download','文档':'Docs','常见问题':'FAQ','立即体验':'Try it','所有 AI 工具的用量':'AI usage for every tool','一个悬浮窗，一眼看清':'One floating window. Everything clear.','连接你的 AI 编程工具 — 查看额度、追踪花费、掌握重置时间，让每一次使用都心中有数。':'Connect your AI coding tools — see quotas, track spend and know when limits reset.','下载 Windows 版':'Download for Windows','支持你的常用工具':'Works with your tools','交互体验':'Interactive preview','重置':'Reset','你的 AI 用量，随时在手边':'Your AI usage, always within reach','点击圆环、切换周期':'Click a ring or change the period','或打开花费详情':'or open spend details','额度总览':'Quota overview','花费详情':'Spend details','设置':'Settings','刷新用量':'Refresh usage','为每天都在用 AI 的你而设计。Pane 把分散的用量信息，变成随时可看的桌面面板。':'Designed for people who use AI every day. Pane turns scattered usage data into a desktop panel you can always see.','额度，一处看清':'Quotas in one view','多个工具、多组账户，汇集到一个总览。会话、周度与月度额度，点击即可切换。':'Bring multiple tools and accounts into one overview. Switch between session, weekly and monthly limits.','花费，有迹可循':'Spend, with a trail','从本地 CLI 日志汇总 Token 与花费。用热力图回看每一天，按工具和模型查看明细。':'Aggregate tokens and spend from local CLI logs. Review every day on a heatmap, by tool and model.','重置，不再猜测':'Resets, without guessing','额度还剩多少、什么时候恢复，一眼可见。接近上限与重置时，桌面提醒帮你留意。':'See what remains and when it resets. Desktop alerts call out limits and upcoming resets.','密钥，留在本机':'Keys stay local','密钥存储在你的电脑上，查询直连对应厂商。开源代码可审阅，匿名遥测可关闭。':'Keys stay on your computer and queries go directly to each provider. The code is open to review and anonymous telemetry is optional.','你可能想知道':'Questions, answered','你的 AI 用量，现在尽在眼前。':'Your AI usage, right in front of you.','下载 Pane':'Download Pane','先体验一下':'Try the demo','源代码':'Source','反馈':'Feedback'
@@ -37,16 +41,17 @@ function applyEnglishCopy() {
     if(node)node.setAttribute('aria-label',label);
   }
   setTexts('.hero-meta span', ['heroMetaLeft','heroMetaRight']); setText('.eyebrow .chip__label', 'heroEyebrow');
-  setText('.hero-description', 'heroDesc'); setText('.hero-download', 'heroDownload'); setText('.text-link', 'heroDemo'); setTexts('.hero-stats span', ['providers','credentials','shortcut']); setText('.hero-stats>div:nth-child(2) b','localCredentials');
+  setText('.hero-description', 'heroDesc'); setTexts('[data-download-label]', ['heroDownload','heroDownload']); setText('.text-link', 'heroDemo'); setTexts('.hero-stats span', ['providers','credentials','shortcut']); setText('.hero-stats>div:nth-child(2) b','localCredentials');
   setText('.why-kicker','whyKicker'); setText('#why-pane-title','whyTitle'); setText('.why-copy p','whyCopy'); setText('.why-link','whyLink'); setText('.why-destination small','whyDestination');
   setText('.why-work b','whyWork'); setText('.why-work small','whyFocus'); setText('.why-flow-label','whyFlowLabel'); setText('.why-pause','whyPause'); setText('.why-flow-caption','whyFlowCaption'); setText('.why-flow-note','whyFlowNote'); setText('.why-flow-count small','whyFlowCount'); setTexts('.why-source small',['whyClaude','whyCodex','whyCursor','whyRouter','whyTavily']);
-  const ecosystemCopy={'.ecosystem-copy .why-kicker':'PANE ECOSYSTEM / Connections that keep growing','#ecosystem-title':'Starting with AI tools. Connecting usage across more fields.','.ecosystem-intro':'Pane currently lists 66 providers across coding agents, model APIs, voice and search. Our direction is to bring quotas, balances and subscription status from more fields into one desktop entry point.','.ecosystem-art-foot>span':'Different services. One entry point.','.ecosystem-core>span':'Connect scattered usage','.ecosystem-outlook':'4 ecosystem directions, 13 candidate fields. These are expansion ideas; integrations depend on available interfaces. See the current service list below.','.ecosystem-copy .why-link':'Explore current services ↘'};
+  setText('.ecosystem-intro', 'ecosystemIntro');
+  const ecosystemCopy={'.ecosystem-copy .why-kicker':'PANE ECOSYSTEM / AVAILABLE TODAY','#ecosystem-title':'Usage from your everyday tools. One place to check.','.ecosystem-art-foot>span':'Different services. One entry point.','.ecosystem-core>span':'Connect scattered usage','.ecosystem-outlook':'4 ecosystem directions, 13 candidate fields. These are expansion ideas, not currently supported integrations; availability depends on provider interfaces.','.ecosystem-copy .why-link':'Explore current services ↘'};
   for(const [selector,value] of Object.entries(ecosystemCopy)){const node=document.querySelector(selector);if(node)node.textContent=value}
   const domains=[['AI & content creation','Models & agents · Images & video · Voice & translation · Search & crawling'],['Productivity & business','Workflow automation · Office & design SaaS · Commerce & logistics · Marketing & communication'],['Digital resources & infrastructure','Cloud & compute · Databases & analytics · Storage & backups · Networks & traffic'],['Personal digital memberships','Consumer tools, knowledge & education memberships']];
   document.querySelectorAll('.ecosystem-domains>div').forEach((node,i)=>{node.querySelector('span').textContent=domains[i][0];node.querySelector('p').textContent=domains[i][1]});
   setTexts('.agent-portrait span, .note-kicker', ['live','portraitLabel']); setText('.blueprint-note p', 'portraitCopy', true); setText('.note-foot', 'portraitNote'); setText('.stage-rail>span','workflow'); setText('.keyboard-demo>span','keyboardKicker'); setText('.config-kicker','runtimeKicker');
-  setText('.download-section .section-index','downloadIndex'); setText('.demo-section .section-head h2', 'demoTitle'); setText('.demo-section .section-head p', 'demoDesc', true); setText('.demo-status .chip__label', 'demoStatus'); setText('#reset-demo', 'reset'); setText('.workflow-legend>.legend-kicker', 'how'); setText('.legend-heading b', 'workflow'); setText('.legend-heading small', 'shortcuts');
-  setTexts('.shortcut-list span', ['alt2','shift','ctrls','esc']); setTexts('.legend-capabilities .legend-heading b, .legend-capabilities .legend-heading small, .legend-desc', ['capabilities','capabilitiesKicker','capabilitiesCopy']); setText('.legend-ecosystem b','ecosystem'); setText('.legend-ecosystem span','ecosystemCopy'); setText('.legend-foot .chip__label','sample');
+  setText('.download-section .section-index','downloadIndex'); setText('.demo-section .section-head h2', 'demoTitle'); setText('.demo-section .section-head p', 'demoDesc', true); setText('.demo-status .chip__label', 'demoStatus'); setText('#reset-demo', 'reset'); document.querySelector('.workflow-guide summary').textContent='Desktop keyboard shortcuts'; document.querySelector('.ecosystem-roadmap summary').textContent='Future integration directions';
+  setTexts('.shortcut-list span', ['alt2','shift','ctrls','esc']);
   setTexts('.keyboard-demo button b', ['toggle','close','period','category','settingsShortcut','customize','themeShortcut','refreshShortcut','expiring']); setTexts('.stage-config dt', ['runtime','runtimeSettings','agentSelf']); setTexts('.stage-config dd', ['runtimeCopy','runtimeSettingsCopy','agentSelfCopy']);
   const notes=[['.annotation-sample strong','annSample'],['.annotation-sample>span:not(.annotation-number)','annSampleCopy'],['.annotation-left strong','annEdge'],['.annotation-left>span','annEdgeCopy'],['.annotation-right strong','annProviders'],['.annotation-right>span','annProvidersCopy'],['.annotation-tabs strong','annTabs'],['.annotation-tabs>span:not(.annotation-number)','annTabsCopy'],['.annotation-periods strong','annPeriods'],['.annotation-periods>span:not(.annotation-number)','annPeriodsCopy'],['.annotation-accounts strong','annAccounts'],['.annotation-accounts>span:not(.annotation-number)','annAccountsCopy'],['.annotation-spend strong','annSpend'],['.annotation-spend>span:not(.annotation-number)','annSpendCopy'],['.annotation-pool strong','annPool'],['.annotation-pool>span','annPoolCopy'],['.annotation-groups strong','annGroups'],['.annotation-groups>span:not(.annotation-number)','annGroupsCopy'],['.annotation-status strong','annStatus'],['.annotation-status>span','annStatusCopy'],['.annotation-settings strong','annSettings'],['.annotation-settings>span:not(.annotation-number)','annSettingsCopy'],['.annotation-refresh strong','annRefresh'],['.annotation-refresh>span','annRefreshCopy']]; notes.forEach(([s,k])=>setText(s,k,k.endsWith('Copy')));
   setTexts('.demo-controls button span', ['overview','spend','settings','skins','refresh']); setText('.demo-rest>b','restTitle'); setText('.demo-rest p','restCopy'); setText('.keyboard-demo>span','keyboardKicker'); setText('.keyboard-demo h3','keyboardTitle'); setText('.keyboard-demo>p','keyboardCopy'); setText('#keyboard-start','start'); setText('.keyboard-feedback__text','keyboardNote'); setText('.keyboard-demo>small','keyboardHint');
@@ -359,7 +364,7 @@ settingsWrap.addEventListener('keydown',event=>{
   const first=focusables[0],last=focusables[focusables.length-1];
   if(event.shiftKey&&document.activeElement===first){event.preventDefault();last.focus()}
   else if(!event.shiftKey&&document.activeElement===last){event.preventDefault();first.focus()}
-});settingsButton.addEventListener('click',()=>setSettingsOverlay(settingsWrap.hidden));document.querySelector('#pane-settings-close').addEventListener('click',()=>setSettingsOverlay(false));function send(action){frame.contentWindow?.postMessage({type:'pane-demo',action},location.origin)}function loadDemo(){frame.src=`/demo/index.html?lang=${demoLang}&theme=${demoTheme}`;settingsWrap.hidden=true;settingsFrame.removeAttribute('src');delete settingsFrame.dataset.loaded;selected='overview';desktop.dataset.mode='auto';syncDemoControls()}loadDemo();document.querySelector('#theme').addEventListener('click',()=>{root.dataset.theme=root.dataset.theme==='light'?'dark':'light';try{localStorage.setItem('pane-site-theme',root.dataset.theme)}catch{};document.querySelector('#theme img').src=`/icons/${root.dataset.theme==='light'?'moon':'sun'}.svg`});document.querySelector('#reset-demo').addEventListener('click',loadDemo);document.querySelectorAll('[data-demo]').forEach(b=>b.addEventListener('click',()=>{const a=b.dataset.demo;if(a==='settings'){desktop.dataset.mode='settings';updateNoteAct();return}if(a!=='refresh')setSettingsOverlay(false);if(a==='refresh'){desktop.dataset.mode='refresh';updateNoteAct();b.disabled=true;send(a);clearTimeout(refreshTimer);refreshTimer=setTimeout(()=>b.disabled=false,650);return}selected=a;desktop.dataset.mode=a;send(a);syncDemoControls();updateNoteAct()}));// One panel open per FAQ group. `<details>` stays because it is the more
+});settingsButton.addEventListener('click',()=>setSettingsOverlay(settingsWrap.hidden));document.querySelector('#pane-settings-close').addEventListener('click',()=>setSettingsOverlay(false));function send(action){frame.contentWindow?.postMessage({type:'pane-demo',action},location.origin)}function loadDemo(){frame.src=`/demo/index.html?lang=${demoLang}&theme=${demoTheme}`;settingsWrap.hidden=true;settingsFrame.removeAttribute('src');delete settingsFrame.dataset.loaded;selected='overview';desktop.dataset.mode='auto';syncDemoControls()}loadDemo();document.querySelector('#reset-demo').addEventListener('click',loadDemo);document.querySelectorAll('[data-demo]').forEach(b=>b.addEventListener('click',()=>{const a=b.dataset.demo;if(a==='settings'){desktop.dataset.mode='settings';updateNoteAct();return}if(a!=='refresh')setSettingsOverlay(false);if(a==='refresh'){desktop.dataset.mode='refresh';updateNoteAct();b.disabled=true;send(a);clearTimeout(refreshTimer);refreshTimer=setTimeout(()=>b.disabled=false,650);return}selected=a;desktop.dataset.mode=a;send(a);syncDemoControls();updateNoteAct()}));// One panel open per FAQ group. `<details>` stays because it is the more
 // accessible primitive — the FAQ keeps working with no script at all — so the
 // accordion keeps its disclosure list and only gains what the primitive lacks.
 document.querySelectorAll('.faq-group').forEach(group=>{
@@ -675,49 +680,11 @@ function initGridBackground(){
 }
 initGridBackground();
 
-// Wordmark footer: the metallic shine tracks the pointer. Same approach as
-// upstream (vendor/ruixen-wordmark-footer/) — a per-frame lerp at factor 0.1
-// writing backgroundImage straight to the node, zero re-renders — driven here
-// without React or motion. The entrance is a CSS transition toggled by an
-// IntersectionObserver so reduced motion can disable it in CSS alone, and the
-// pointer loop is skipped entirely on devices without hover.
-function initWordmarkFooter(){
-  const section=document.querySelector('#wordmark-footer');
-  const word=section&&section.querySelector('.wf-word');
-  if(!section||!word)return;
-  const shine=(x,y)=>`radial-gradient(ellipse 100% 100% at ${x.toFixed(1)}% ${y.toFixed(1)}%, color-mix(in srgb,var(--ink) 88%,transparent) 0%, color-mix(in srgb,var(--ink) 62%,transparent) 24%, color-mix(in srgb,var(--ink) 34%,transparent) 50%, color-mix(in srgb,var(--ink) 16%,transparent) 100%)`;
-  const reduceMotion=matchMedia('(prefers-reduced-motion: reduce)').matches;
-  let curX=50,curY=30,tgtX=50,tgtY=30,hovering=false,frame=0;
-  const paint=()=>{
-    const k=reduceMotion?1:0.1;
-    curX+=(tgtX-curX)*k; curY+=(tgtY-curY)*k;
-    word.style.backgroundImage=shine(curX,curY);
-    if(hovering||Math.abs(tgtX-curX)>.05||Math.abs(tgtY-curY)>.05)frame=requestAnimationFrame(paint);
-    else frame=0;
-  };
-  const start=()=>{if(!frame)frame=requestAnimationFrame(paint)};
-  // Gate on the event's own pointerType instead of a one-shot
-  // matchMedia('(hover:hover)') read at init: some hosts report no hover while
-  // the page is still settling, and a stale false there would kill the shine
-  // for the whole session. Touch input is what must not drive it.
-  section.addEventListener('pointermove',e=>{if(e.pointerType==='touch')return;const r=section.getBoundingClientRect();tgtX=((e.clientX-r.left)/r.width)*100;tgtY=((e.clientY-r.top)/r.height)*100;hovering=true;start()});
-  section.addEventListener('pointerleave',()=>{hovering=false;tgtX=50;tgtY=30;start()});
-  const stage=section.querySelector('.wf-stage');
-  const reveal=()=>section.classList.add('is-inview');
-  const revealNow=()=>{if(stage){stage.style.transition='none';stage.style.opacity='1';stage.style.transform='none'}reveal()};
-  if('IntersectionObserver' in window){
-    const obs=new IntersectionObserver(entries=>{for(const entry of entries){if(entry.isIntersecting){reveal();obs.disconnect()}}},{threshold:.1});
-    obs.observe(section);
-  }else reveal();
-  // A tab that never paints (backgrounded, or a host whose render frames are
-  // suspended) fires neither IntersectionObserver callbacks nor CSS
-  // transitions, which would leave the wordmark invisible forever. Fall back
-  // to the final state with the transition switched off — the same backstop
-  // the ink marks use for throttled animation events.
-  setTimeout(()=>{if(!section.classList.contains('is-inview'))revealNow()},1500);
-  window.addEventListener('pagehide',()=>{if(frame)cancelAnimationFrame(frame)},{once:true});
-}
-initWordmarkFooter();
+initHeaderNav();
+initHeroReactions();
+initLineSidebar();
+const siteEffects = initSiteEffects();
+initThemeSwap({ root, button:document.querySelector('#theme'), syncEffects:() => siteEffects?.syncTheme(), motionPaused:() => paneMotion.paused });
 
 // The reset cell's countdown is the one part of the feature row that keeps
 // moving on its own: a real clock, so the cell reads as the live panel rather
