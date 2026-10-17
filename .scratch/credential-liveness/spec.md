@@ -57,3 +57,11 @@
 ## 2026-10-16 Owner acceptance
 
 Owner personally accepted account synchronization, failed-account repair/visibility, X/X updates and font-guide dismissal, and explicitly authorized v0.8.5 publication in this conversation. Implementation acceptance is complete. Release CI and distribution results will be recorded after execution; the known parallel local mock-transport failure remains disclosed above.
+
+## 2026-10-16 v0.8.5 release outcome
+
+- Clean release history pushed to `origin/main`: `74b6a37` (chore: release v0.8.5) -> `4e85475` -> `36fdcac`. Each was built with `commit-tree` on parent `ab0fbf4`, so the local branch's pre-scrub history (which still contains the real shared StepFun key fixture) never reached the remote.
+- `v0.8.5` tag pushed on `36fdcac`. Release workflow run `38919004888` completed **success**: all three platform builds, the `release` job, and `gitee-mirror`.
+- Published as GitHub **Latest** (not draft, not prerelease), `targetCommitish: main`. Assets: `latest.json`, `Pane_0.8.5_x64-setup.exe` (21.3 MB) + `.sig`, `Pane_0.8.5_aarch64.dmg` (24.6 MB), `Pane_0.8.5_amd64.deb` (27.3 MB) + `.sig`, `Pane_0.8.5_amd64.AppImage` (100.9 MB) + `.sig`. Body carries the theme headline, real-size download matrix and 新增/变更/修复 sections per `docs/release-format.md`.
+- `latest.json` reports 0.8.5 with signed `windows-x86_64` / `linux-x86_64` entries. Winget publish run `38920615519`: success.
+- Still open and disclosed: the One/New API mock transport failure under parallel test threads (serial run 819 passed / 0 failed / 13 ignored). macOS/Linux runtime UX and the real in-app update path remain unverified.
