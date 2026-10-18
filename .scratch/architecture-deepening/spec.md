@@ -1,9 +1,10 @@
 # Pane architecture deepening
 
-Status: ready-for-human
+Status: accepted
 Date: 2026-10-17
 Baseline: 97f027d
 Branch: codex/architecture-deepening
+Accepted: 2026-10-18 (owner confirmed the vault reveal/copy flow and the overview balance display; release v0.8.6 authorized)
 Owner request: all, list the complete plan, investigate deeply, implement and finish.
 
 ## Problem

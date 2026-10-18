@@ -1,7 +1,7 @@
 # 16 - Integration and final review
 
 Type: task
-Status: ready-for-human
+Status: resolved
 Blocked by: 15
 Coverage: S2, all
 
@@ -52,6 +52,6 @@ Completed 2026-10-18; see the final local evidence below.
 - Simplification consolidated hash/priority/pi/backfill knowledge and removed
   the resetWakeState module. Distinct vendor login protocols, historical schemas
   and resource installation rollback remain justified by their real contracts.
-- Owner desktop/live-vendor acceptance is OPEN: owner-acceptance.md. The task is
-  ready for human acceptance, not globally complete. Local implementation commit
-  made 2026-10-18; no push/tag/release.
+- Owner confirmed the vault reveal/copy flow and the overview balance display
+  on 2026-10-18, and authorized the v0.8.6 release. Owner desktop/live-vendor
+  acceptance is otherwise as recorded above.

@@ -8,6 +8,10 @@ checkout through `temp/scripts/restart-pane-dev.ps1`; startup, process terminati
 and WebView cache cleanup remain separate deliberate operations. This engagement
 has not launched the app, stopped services or touched real credential stores.
 
+Accepted 2026-10-18: the owner confirmed the vault reveal/copy flow and the
+overview balance display, and authorized the v0.8.6 release. The remaining
+checklist items below were not individually recorded in this session.
+
 - [ ] Show the popover with the configured shortcut; check the tray and settings.
 - [ ] Refresh repeatedly, switch accounts during refresh, and verify newer
   readings and account identities remain attached to the correct cards.
