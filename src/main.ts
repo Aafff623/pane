@@ -12630,6 +12630,24 @@ async function submitRecoveryChallenge(shell: VaultShell): Promise<void> {
   }
 }
 
+/// Small in-panel feedback line for vault actions. The settings window has
+/// no footer status area, so failures would otherwise be invisible.
+function settingsToast(message: string, isError = false): void {
+  let toast = document.querySelector<HTMLElement>("#settings-toast");
+  if (!toast) {
+    toast = document.createElement("div");
+    toast.id = "settings-toast";
+    document.body.append(toast);
+  }
+  toast.textContent = message;
+  toast.hidden = false;
+  toast.classList.toggle("is-error", isError);
+  clearTimeout((settingsToast as unknown as { timer?: number }).timer);
+  (settingsToast as unknown as { timer?: number }).timer = window.setTimeout(() => {
+    toast!.hidden = true;
+  }, 3200);
+}
+
 /// Returns true when the vault ended up unlocked (so callers can retry the
 /// gated action that triggered the prompt).
 async function unlockVault(): Promise<boolean> {
@@ -12646,8 +12664,14 @@ async function unlockVault(): Promise<boolean> {
     // the button and masked-key nodes the caller is holding, so its reveal
     // would write into a detached node and look like a dead click.
     renderVaultBar();
+    settingsToast(`${t("settings.kvUnlock")} ✓`);
     return true;
-  } catch {
+  } catch (err) {
+    const message = String(err);
+    settingsToast(
+      message.includes("wrong master password") ? t("settings.kvWrongPassword") : message,
+      true,
+    );
     const status = document.querySelector("#status");
     if (status) status.textContent = t("settings.kvWrongPassword");
     return false;
@@ -12717,6 +12741,15 @@ async function copySettingsKey(
   try {
     if (vaultStatus?.has_password && !vaultStatus.unlocked) {
       if (!(await unlockVault())) return;
+      const row = document.querySelector<HTMLElement>(
+        entryId
+          ? `.skey-account[data-skey-account="${CSS.escape(entryId)}"]`
+          : `.skey-item[data-skey-family="${CSS.escape(family)}"]`,
+      );
+      const nextButton = row?.querySelector<HTMLButtonElement>(
+        entryId ? "[data-skey-copy]" : "[data-skey-provider-copy]",
+      );
+      if (nextButton) button = nextButton;
     }
     let raw: string;
     try {
@@ -12736,6 +12769,12 @@ async function copySettingsKey(
       });
       if (pw === null) return;
       raw = await call(pw);
+      // A direct password probe also opens the backend session; reflect it
+      // so the next reveal/copy in this window does not prompt again.
+      try {
+        vaultStatus = await invoke<VaultStatus>("keyvault_status");
+        renderVaultBar();
+      } catch { /* keep the previous status */ }
     }
     await navigator.clipboard.writeText(raw);
     const old = button.textContent;
@@ -12744,6 +12783,11 @@ async function copySettingsKey(
       button.innerHTML = uiIcon("copy") + escapeHtml(old || t("settings.kvCopy"));
     }, 1400);
   } catch (err) {
+    const message = String(err);
+    settingsToast(
+      message.includes("wrong master password") ? t("settings.kvWrongPassword") : message,
+      true,
+    );
     if (status) status.textContent = String(err);
   }
 }
@@ -12772,6 +12816,17 @@ async function revealSettingsKey(
   try {
     if (vaultStatus?.has_password && !vaultStatus.unlocked) {
       if (!(await unlockVault())) return;
+      const row = document.querySelector<HTMLElement>(
+        entryId
+          ? `.skey-account[data-skey-account="${CSS.escape(entryId)}"]`
+          : `.skey-item[data-skey-family="${CSS.escape(family)}"]`,
+      );
+      button = row?.querySelector<HTMLButtonElement>(
+        entryId ? "[data-skey-reveal]" : "[data-skey-provider-reveal]",
+      ) ?? button;
+      stateEl = row?.querySelector<HTMLElement>(
+        entryId ? ".skey-acct-masked" : ".skey-state",
+      ) ?? stateEl;
     }
     let raw: string;
     try {
@@ -12794,6 +12849,12 @@ async function revealSettingsKey(
       });
       if (pw === null) return;
       raw = await call(pw);
+      // A direct password probe also opens the backend session; reflect it
+      // so the next reveal/copy in this window does not prompt again.
+      try {
+        vaultStatus = await invoke<VaultStatus>("keyvault_status");
+        renderVaultBar();
+      } catch { /* keep the previous status */ }
     }
     button.dataset.masked = stateEl.textContent || "";
     stateEl.textContent = raw;
@@ -12801,6 +12862,10 @@ async function revealSettingsKey(
     button.innerHTML = uiIcon("eyeSlash") + escapeHtml(t("settings.kvHide"));
   } catch (err) {
     const msg = String(err);
+    settingsToast(
+      msg.includes("wrong master password") ? t("settings.kvWrongPassword") : msg,
+      true,
+    );
     if (status) {
       status.textContent = msg.includes("wrong master password")
         ? t("settings.kvWrongPassword")
@@ -13036,11 +13101,13 @@ function settingsKeyRow(family: string): HTMLElement {
   } else {
     if (configured) {
       const view = button(t("settings.kvReveal"), "", "eye");
+      view.dataset.skeyProviderReveal = family;
       view.addEventListener("click", () => {
         void revealSettingsKey(family, null, view, state);
       });
       actions.append(view);
       const copy = button(t("settings.kvCopy"), " ok", "copy");
+      copy.dataset.skeyProviderCopy = family;
       copy.addEventListener("click", () => {
         void copySettingsKey(family, null, copy);
       });
@@ -13200,6 +13267,7 @@ function settingsKeyEditor(family: string): HTMLElement {
 function settingsAccountRow(family: string, entry: AccountEntry, index: number): HTMLElement {
   const row = document.createElement("div");
   row.className = "skey-account";
+  row.dataset.skeyAccount = entry.id ?? "";
   const label = document.createElement("span");
   label.className = "skey-acct-label";
   label.textContent = entry.label || entry.email || entry.maskedKey;
@@ -13213,6 +13281,7 @@ function settingsAccountRow(family: string, entry: AccountEntry, index: number):
     const view = document.createElement("button");
     view.type = "button";
     view.className = "mini-btn";
+    view.dataset.skeyReveal = entry.id ?? "";
     view.innerHTML = uiIcon("eye") + escapeHtml(t("settings.kvReveal"));
     view.addEventListener("click", () => {
       void revealSettingsKey(family, entry.id!, view, masked);
@@ -13221,6 +13290,7 @@ function settingsAccountRow(family: string, entry: AccountEntry, index: number):
     const copy = document.createElement("button");
     copy.type = "button";
     copy.className = "mini-btn ok";
+    copy.dataset.skeyCopy = entry.id ?? "";
     copy.innerHTML = uiIcon("copy") + escapeHtml(t("settings.kvCopy"));
     copy.addEventListener("click", () => {
       void copySettingsKey(family, entry.id!, copy);

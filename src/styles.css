@@ -1228,6 +1228,30 @@ body.settings-open #settings {
   word-break: break-all;
 }
 
+/* Vault action feedback in the panel window (no footer status area). */
+#settings-toast {
+  position: fixed;
+  left: 50%;
+  bottom: 24px;
+  z-index: 1200;
+  max-width: 70vw;
+  padding: 8px 14px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--card);
+  color: var(--foreground);
+  box-shadow: 0 10px 30px rgb(0 0 0 / 35%);
+  font-size: 12px;
+  transform: translateX(-50%);
+}
+#settings-toast.is-error {
+  border-color: #ef4444;
+  color: #f87171;
+}
+#settings-toast[hidden] {
+  display: none;
+}
+
 .kv-add-row {
   flex-wrap: wrap;
 }
