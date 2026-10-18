@@ -17,7 +17,7 @@ import { providerVisual } from "./providerVisuals";
 import { MECHANISMS } from "./providerMechanisms";
 import { uiIcon, type UiIconName } from "./uiIcons";
 import { fitDashboardTypography, observeDashboardTypography } from "./responsiveTypography";
-import { overviewTextMetrics } from "./overviewTextMetrics";
+import { overviewTextHeadline, overviewTextMetrics } from "./overviewTextMetrics";
 import { RefreshState } from "./refreshState";
 import { RenderScheduler } from "./renderScheduler";
 import { primaryMeterTrend, type MeterTrend, type UsageUnit } from "./usageUnits";
@@ -4274,6 +4274,7 @@ function renderQuotaOverview(): string {
       const cx = 22;
       const cy = 22;
       const circumference = 100.53; // 2 * Math.PI * 16
+      const textHeadline = quota.status === "text" ? overviewTextHeadline(quota, 6) : null;
 
       let strokeColor = "var(--border)";
       let progressCircle = "";
@@ -4326,7 +4327,7 @@ function renderQuotaOverview(): string {
           stroke-dashoffset="${dashoffset.toFixed(2)}"
           transform="rotate(-90 ${cx} ${cy})" />`;
       } else if (quota.status === "text") {
-        ringLabel = "?";
+        ringLabel = textHeadline ? escapeHtml(textHeadline) : "?";
         textClass = "is-unknown";
         progressCircle = `<circle class="ring-progress is-unknown" cx="${cx}" cy="${cy}" r="${r}" stroke="var(--muted-foreground)" stroke-width="3.2" fill="none" stroke-dasharray="3 4" />`;
       } else {
@@ -4373,7 +4374,7 @@ function renderQuotaOverview(): string {
           ${overviewAcctFolded(family, foldCount) ? "" : overviewKeyListHtml(shownSnap)}
           <div class="overview-item-foot">
             <span class="overview-item-meta ${quota.isMaxed ? 'meta-maxed' : ''}"${quota.resetsAt && quota.window !== null ? ` data-reset-at="${quota.resetsAt}"` : ""}>
-              ${quota.status === "text" ? overviewTextValuesHtml(shownSnap) : quota.status === "error" || quota.status === "needs_setup" ? escapeHtml(overviewFailureLabel(shownSnap)) : quota.isMaxed
+              ${quota.status === "text" ? (textHeadline && quota.metricLabel ? escapeHtml(displayMetricLabel(quota.metricLabel)) : overviewTextValuesHtml(shownSnap)) : quota.status === "error" || quota.status === "needs_setup" ? escapeHtml(overviewFailureLabel(shownSnap)) : quota.isMaxed
                 ? (quota.resetsAt
                     ? escapeHtml(fmtDuration(Math.max(0, quota.resetsAt - Date.now())))
                     : escapeHtml(t("overview.maxedBadge", { n: "" }).trim()))
@@ -4404,6 +4405,9 @@ function renderQuotaOverview(): string {
     const accountBadge = overviewKeyBadgeHtml(shownSnap) || overviewAccountBadgeHtml(accountCount, accountSummary);
     // Accounts or api-keys, whichever this family folds (never both).
     const foldCount = overviewFoldCount(accountCount, keyAvailabilityCounts(shownSnap.metrics).total);
+
+    // Same as the ring: a known balance replaces the unknown-ratio "?".
+    const textHeadline = quota.status === "text" ? overviewTextHeadline(quota, 12) : null;
 
     let itemTone = "normal";
     let pct: number | null = null;
@@ -4455,11 +4459,11 @@ function renderQuotaOverview(): string {
           ${accountBadge}
           ${overviewAcctFoldBtn(family, foldCount)}
           <span class="overview-dot ${statusDot}"></span>
-          <span class="ovbar-pct ${pctClass}"${quota.status === "text" ? ` title="${escapeHtml(t("overview.ratioUnknown"))}" aria-label="${escapeHtml(t("overview.ratioUnknown"))}"` : ""}>${quota.status === "text" ? "?" : pct === null ? "—" : `${pct}%`}</span>
+          <span class="ovbar-pct ${pctClass}"${quota.status === "text" ? ` title="${escapeHtml(t("overview.ratioUnknown"))}" aria-label="${escapeHtml(t("overview.ratioUnknown"))}"` : ""}>${quota.status === "text" ? escapeHtml(textHeadline ?? "?") : pct === null ? "—" : `${pct}%`}</span>
         </div>
         <div class="ovbar-line2">
           <span class="ovbar${quota.status === "text" ? " is-unknown" : ""}"${quota.status === "text" ? ` title="${escapeHtml(t("overview.ratioUnknown"))}"` : ""}>${quota.status === "text" ? "" : `<span class="ovbar-fill tone-${itemTone}" style="width:${pct ?? 0}%"></span>`}</span>
-          <span class="ovbar-meta">${quota.status === "text" ? overviewTextValuesHtml(shownSnap) : escapeHtml(meta || t("overview.noData"))}</span>
+          <span class="ovbar-meta">${quota.status === "text" ? (textHeadline && quota.metricLabel ? escapeHtml(displayMetricLabel(quota.metricLabel)) : overviewTextValuesHtml(shownSnap)) : escapeHtml(meta || t("overview.noData"))}</span>
         </div>
         ${overviewAcctFolded(family, foldCount) ? "" : accountMetersHtml(family)}
         ${overviewAcctFolded(family, foldCount) ? "" : overviewKeyListHtml(shownSnap)}

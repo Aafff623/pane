@@ -3634,6 +3634,10 @@ export function t(key: string, vars?: Record<string, string | number>): string {
 export function displayMetricLabel(label: string): string {
   const key = METRIC_KEYS[label];
   if (key) return t(key);
+  // Per-currency balances (DeepSeek: "Balance (CNY)") keep the currency and
+  // localize only the noun.
+  const balance = label.match(/^Balance \(([A-Z]{3})\)$/);
+  if (balance) return `${t("metric.balance")} (${balance[1]})`;
   const resetCredit = label.match(/^Reset credit(?: (\d+))?$/);
   if (resetCredit) {
     return resetCredit[1]

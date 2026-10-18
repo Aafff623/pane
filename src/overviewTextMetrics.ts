@@ -13,3 +13,16 @@ export function overviewTextMetrics<T extends TextMetric>(metrics: readonly T[],
   if (family === "firecrawl" && text.length > 1) return text.slice(1);
   return text.slice(0, 1);
 }
+
+interface TextQuota {
+  valueText?: string | null;
+}
+
+// Text-only providers (balances, notes) have no ratio to draw, but their
+// reading is more useful than a question mark. Keep it short enough for the
+// percent/ring slot; longer copy stays in the foot line.
+export function overviewTextHeadline(quota: TextQuota, maxChars: number): string | null {
+  const value = quota.valueText?.trim();
+  if (!value || value.length > maxChars) return null;
+  return value;
+}
