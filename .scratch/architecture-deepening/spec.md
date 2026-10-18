@@ -1,6 +1,6 @@
 # Pane architecture deepening
 
-Status: accepted
+Status: released
 Date: 2026-10-17
 Baseline: 97f027d
 Branch: codex/architecture-deepening
