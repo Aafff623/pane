@@ -223,3 +223,17 @@ mod tests {
         assert_eq!(loopback_port("no-port-here"), None);
     }
 }
+
+pub fn system_proxy() -> Option<String> { None }
+
+pub fn restrict_owner_only(path: &std::path::Path) -> Result<(), String> {
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))
+        .map_err(|error| format!("restrict private file: {error}"))
+}
+
+pub fn replace_file(replacement: &std::path::Path, destination: &std::path::Path) -> std::io::Result<()> {
+    std::fs::rename(replacement, destination)
+}
+
+pub fn path_is_fully_absolute(path: &std::path::Path) -> bool { path.is_absolute() }

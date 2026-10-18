@@ -2,6 +2,7 @@
 //! the contract each function has to honor.
 
 use std::collections::BTreeMap;
+use std::path::Path;
 
 use super::{run_hidden, ProcessInfo};
 
@@ -296,4 +297,239 @@ mod tests {
         // filter drops it rather than building the command anyway.
         assert!(list_processes(&["'; Remove-Item C:\\ #"]).is_empty());
     }
+}
+
+/// The Windows system proxy (HKCU → Internet Settings), which Clash-style
+/// tools flip whenever the user switches nodes or ports — following it keeps
+/// Pane in step with the OS without a config edit. PAC scripts are ignored
+/// (reqwest cannot execute them). Read once per app run, like the config
+/// proxy: a port change needs an app restart, not a config change.
+pub fn system_proxy() -> Option<String> {
+    use windows::Win32::Foundation::ERROR_SUCCESS;
+    use windows::Win32::System::Registry::{
+        RegGetValueW, HKEY_CURRENT_USER, RRF_RT_REG_DWORD, RRF_RT_REG_SZ,
+    };
+    let wide = |s: &str| {
+        s.encode_utf16()
+            .chain(std::iter::once(0))
+            .collect::<Vec<u16>>()
+    };
+    let subkey = wide("Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings");
+    unsafe {
+        let mut enabled: u32 = 0;
+        let mut size = std::mem::size_of::<u32>() as u32;
+        let name = wide("ProxyEnable");
+        let status = RegGetValueW(
+            HKEY_CURRENT_USER,
+            windows::core::PCWSTR(subkey.as_ptr()),
+            windows::core::PCWSTR(name.as_ptr()),
+            RRF_RT_REG_DWORD,
+            None,
+            Some(&mut enabled as *mut u32 as *mut std::ffi::c_void),
+            Some(&mut size),
+        );
+        if status != ERROR_SUCCESS || enabled == 0 {
+            return None;
+        }
+        let mut buf = [0u16; 512];
+        let mut size = (buf.len() * 2) as u32;
+        let name = wide("ProxyServer");
+        let status = RegGetValueW(
+            HKEY_CURRENT_USER,
+            windows::core::PCWSTR(subkey.as_ptr()),
+            windows::core::PCWSTR(name.as_ptr()),
+            RRF_RT_REG_SZ,
+            None,
+            Some(buf.as_mut_ptr() as *mut std::ffi::c_void),
+            Some(&mut size),
+        );
+        if status != ERROR_SUCCESS {
+            return None;
+        }
+        let chars = (size as usize / 2).saturating_sub(1); // drop the NUL
+        let raw = String::from_utf16_lossy(&buf[..chars.min(buf.len())]);
+        super::parse_win_proxy(&raw)
+    }
+}
+
+
+
+pub(crate) fn current_user_sid() -> Result<String, String> {
+    static SID: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    if let Some(s) = SID.get() {
+        return Ok(s.clone());
+    }
+    let s = query_current_user_sid()?;
+    Ok(SID.get_or_init(|| s).clone())
+}
+
+struct LocalAlloc(*mut core::ffi::c_void);
+
+impl Drop for LocalAlloc {
+    fn drop(&mut self) {
+        if !self.0.is_null() {
+            use windows::Win32::Foundation::{LocalFree, HLOCAL};
+            unsafe {
+                let _ = LocalFree(Some(HLOCAL(self.0)));
+            }
+        }
+    }
+}
+
+fn query_current_user_sid() -> Result<String, String> {
+    use windows::core::PWSTR;
+    use windows::Win32::Foundation::{CloseHandle, HANDLE};
+    use windows::Win32::Security::Authorization::ConvertSidToStringSidW;
+    use windows::Win32::Security::{GetTokenInformation, TokenUser, TOKEN_QUERY, TOKEN_USER};
+    use windows::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
+
+    unsafe {
+        let mut token = HANDLE::default();
+        OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &mut token)
+            .map_err(|e| format!("restrict private file: {e}"))?;
+        let mut needed = 0u32;
+        let _ = GetTokenInformation(token, TokenUser, None, 0, &mut needed);
+        let mut buf = vec![0u8; needed as usize];
+        let info = GetTokenInformation(
+            token,
+            TokenUser,
+            Some(buf.as_mut_ptr().cast()),
+            needed,
+            &mut needed,
+        );
+        let _ = CloseHandle(token);
+        info.map_err(|e| format!("restrict private file: {e}"))?;
+        let user = &*(buf.as_ptr() as *const TOKEN_USER);
+        let mut sid = PWSTR::null();
+        ConvertSidToStringSidW(user.User.Sid, &mut sid)
+            .map_err(|e| format!("restrict private file: {e}"))?;
+        let _free = LocalAlloc(sid.0.cast());
+        sid.to_string()
+            .map_err(|e| format!("restrict private file: {e}"))
+    }
+}
+
+pub(crate) fn set_protected_dacl(path: &Path, sddl: &str) -> Result<(), String> {
+    use windows::core::PCWSTR;
+    use windows::Win32::Foundation::ERROR_SUCCESS;
+    use windows::Win32::Security::Authorization::{
+        ConvertStringSecurityDescriptorToSecurityDescriptorW, SetNamedSecurityInfoW,
+        SDDL_REVISION_1, SE_FILE_OBJECT,
+    };
+    use windows::Win32::Security::{
+        GetSecurityDescriptorDacl, ACL, DACL_SECURITY_INFORMATION,
+        PROTECTED_DACL_SECURITY_INFORMATION, PSECURITY_DESCRIPTOR,
+    };
+
+    let path_w = path_wide(path);
+    let sddl_w: Vec<u16> = sddl.encode_utf16().chain(std::iter::once(0)).collect();
+    let mut sd = PSECURITY_DESCRIPTOR::default();
+    unsafe {
+        ConvertStringSecurityDescriptorToSecurityDescriptorW(
+            PCWSTR(sddl_w.as_ptr()),
+            SDDL_REVISION_1,
+            &mut sd,
+            None,
+        )
+        .map_err(|e| format!("restrict private file: {e}"))?;
+        let _free = LocalAlloc(sd.0);
+        let mut present = windows::core::BOOL::default();
+        let mut defaulted = windows::core::BOOL::default();
+        let mut dacl: *mut ACL = std::ptr::null_mut();
+        GetSecurityDescriptorDacl(sd, &mut present, &mut dacl, &mut defaulted)
+            .map_err(|e| format!("restrict private file: {e}"))?;
+        if !present.as_bool() || dacl.is_null() {
+            return Err("restrict private file: missing DACL".into());
+        }
+        let err = SetNamedSecurityInfoW(
+            PCWSTR(path_w.as_ptr()),
+            SE_FILE_OBJECT,
+            DACL_SECURITY_INFORMATION | PROTECTED_DACL_SECURITY_INFORMATION,
+            None,
+            None,
+            Some(dacl),
+            None,
+        );
+        if err != ERROR_SUCCESS {
+            return Err(format!("restrict private file: {err:?}"));
+        }
+    }
+    Ok(())
+}
+
+fn path_wide(path: &Path) -> Vec<u16> {
+    use std::os::windows::ffi::OsStrExt;
+    path.as_os_str()
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect()
+}
+
+#[cfg(test)]
+pub(crate) fn dacl_sddl(path: &Path) -> Result<String, String> {
+    use windows::core::{PCWSTR, PWSTR};
+    use windows::Win32::Foundation::ERROR_SUCCESS;
+    use windows::Win32::Security::Authorization::{
+        ConvertSecurityDescriptorToStringSecurityDescriptorW, GetNamedSecurityInfoW,
+        SDDL_REVISION_1, SE_FILE_OBJECT,
+    };
+    use windows::Win32::Security::{DACL_SECURITY_INFORMATION, PSECURITY_DESCRIPTOR};
+
+    let path_w = path_wide(path);
+    let mut sd = PSECURITY_DESCRIPTOR::default();
+    unsafe {
+        let err = GetNamedSecurityInfoW(
+            PCWSTR(path_w.as_ptr()),
+            SE_FILE_OBJECT,
+            DACL_SECURITY_INFORMATION,
+            None,
+            None,
+            None,
+            None,
+            &mut sd,
+        );
+        if err != ERROR_SUCCESS {
+            return Err(format!("read DACL: {err:?}"));
+        }
+        let _free_sd = LocalAlloc(sd.0);
+        let mut sddl = PWSTR::null();
+        ConvertSecurityDescriptorToStringSecurityDescriptorW(
+            sd,
+            SDDL_REVISION_1,
+            DACL_SECURITY_INFORMATION,
+            &mut sddl,
+            None,
+        )
+        .map_err(|e| format!("read DACL: {e}"))?;
+        let _free_sddl = LocalAlloc(sddl.0.cast());
+        sddl.to_string().map_err(|e| format!("read DACL: {e}"))
+    }
+}
+
+pub fn replace_file(replacement: &Path, destination: &Path) -> std::io::Result<()> {
+    use windows::core::PCWSTR;
+    use windows::Win32::Storage::FileSystem::{
+        MoveFileExW, MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH,
+    };
+
+    let destination = path_wide(destination);
+    let replacement = path_wide(replacement);
+    unsafe {
+        MoveFileExW(
+            PCWSTR(replacement.as_ptr()),
+            PCWSTR(destination.as_ptr()),
+            MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH,
+        )
+    }
+    .map_err(std::io::Error::other)
+}
+
+
+pub fn restrict_owner_only(path: &std::path::Path) -> Result<(), String> {
+    let sid = current_user_sid()?;
+    set_protected_dacl(path, &format!("D:P(A;;FA;;;SY)(A;;FA;;;{sid})"))
+}
+
+pub fn path_is_fully_absolute(path: &std::path::Path) -> bool {
+    path.is_absolute() && matches!(path.components().next(), Some(std::path::Component::Prefix(_)))
 }

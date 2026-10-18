@@ -349,7 +349,13 @@ async fn tavily_fetch(keys: &[Keyed]) -> Result<Snapshot, String> {
     for k in keys {
         results.push((k.label.clone(), tavily_fetch_key(&k.key).await));
     }
-    tavily_snapshot_from_results(results)
+    let mut snapshot = tavily_snapshot_from_results(results)?;
+    for (metric, key) in snapshot.metrics.iter_mut().filter(|metric| metric.available.is_some()).zip(keys) {
+        if let Some(reading) = &mut metric.usage {
+            reading.scope = credential_slot("tavily", &key.key);
+        }
+    }
+    Ok(snapshot)
 }
 
 fn tavily_snapshot_from_results(
@@ -391,9 +397,13 @@ fn tavily_snapshot_from_results(
                 match u.limit.filter(|l| *l > 0.0) {
                     Some(limit) => metrics.push(
                         Metric::progress(&label, u.used / limit * 100.0, Some(detail))
+                            .with_usage(crate::usage_units::UsageUnit::Credits, u.key_used, u.key_limit)
+                            .with_usage_scope(label.clone())
                             .with_available(true),
                     ),
-                    None => metrics.push(Metric::text(&label, detail).with_available(true)),
+                    None => metrics.push(Metric::text(&label, detail)
+                        .with_usage(crate::usage_units::UsageUnit::Credits, u.key_used, u.key_limit)
+                        .with_usage_scope(label.clone()).with_available(true)),
                 }
             }
             Err(e) => {
@@ -789,6 +799,9 @@ mod tests {
         )])
         .unwrap();
         assert_eq!(snap.plan.as_deref(), Some("Bootstrap"));
+        let reading = snap.metrics[0].usage.as_ref().unwrap();
+        assert_eq!(reading.used, 150.0, "sample explicit key usage, not the shared account's 500 credits");
+        assert_eq!(reading.unit, crate::usage_units::UsageUnit::Credits);
         // A single key renders as one bar off the ACCOUNT usage/limit.
         assert_eq!(snap.metrics.len(), 1);
         assert_eq!(snap.metrics[0].kind, "progress");

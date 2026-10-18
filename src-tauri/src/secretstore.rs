@@ -87,6 +87,59 @@ pub fn remove(key: &str) {
     backend::remove(key)
 }
 
+/// Session documents share one vault slot so token/password rotations persist
+/// together. A failed vault write retains the existing file fallback.
+pub fn save_session(scope: &str, path: &Path, doc: &Value) -> Result<(), String> {
+    let key = token_key(scope);
+    let raw = serde_json::to_string(doc).map_err(|e| format!("encode session: {e}"))?;
+    if put(&key, &raw).is_ok() {
+        match std::fs::remove_file(path) {
+            Ok(()) => {}
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) => return Err(format!("remove migrated session: {e}")),
+        }
+        return Ok(());
+    }
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| format!("create session directory: {e}"))?;
+    }
+    crate::accounts::write_json_atomic(path, raw)?;
+    // If a previous vault value is still readable, remove it before exposing
+    // the fallback file. Otherwise the next vault-first read could resurrect
+    // the old session and hide the newly rotated one.
+    if matches!(get(&key), Secret::Found(_)) {
+        if let Err(error) = backend::remove_checked(&key) {
+            let _ = std::fs::remove_file(path);
+            return Err(error);
+        }
+    }
+    Ok(())
+}
+
+pub fn load_session(scope: &str, path: &Path, max_bytes: u64) -> Option<Value> {
+    if let Secret::Found(raw) = get(&token_key(scope)) {
+        // Do not replace a corrupt vault entry with potentially stale disk data.
+        return serde_json::from_str(&raw).ok();
+    }
+    let file = std::fs::File::open(path).ok()?;
+    use std::io::Read;
+    let mut raw = String::new();
+    file.take(max_bytes.saturating_add(1)).read_to_string(&mut raw).ok()?;
+    if raw.len() as u64 > max_bytes { return None; }
+    let doc = serde_json::from_str(raw.trim_start_matches('\u{feff}')).ok()?;
+    let _ = save_session(scope, path, &doc);
+    Some(doc)
+}
+
+pub fn clear_session(scope: &str, path: &Path) -> Result<(), String> {
+    backend::remove_checked(&token_key(scope))?;
+    match std::fs::remove_file(path) {
+        Ok(()) => Ok(()),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(e) => Err(format!("remove session file: {e}")),
+    }
+}
+
 /// Keyring-first provider lookup with lazy plaintext migration. The file
 /// loses its `apiKey` only after the vault write succeeded; on any vault
 /// failure the plaintext file stays and keeps working as the fallback.
@@ -174,6 +227,11 @@ mod backend {
             map.remove(key);
         }
     }
+
+    pub fn remove_checked(key: &str) -> Result<(), String> {
+        remove(key);
+        Ok(())
+    }
 }
 
 /// Test-only failure injection (harness backend): puts whose key starts
@@ -220,6 +278,14 @@ mod backend {
             let _ = entry.delete_credential();
         }
     }
+
+    pub fn remove_checked(key: &str) -> Result<(), String> {
+        let entry = Entry::new(SERVICE, key).map_err(|e| format!("open session vault: {e}"))?;
+        match entry.delete_credential() {
+            Ok(()) | Err(Error::NoEntry) => Ok(()),
+            Err(e) => Err(format!("remove session vault entry: {e}")),
+        }
+    }
 }
 
 #[cfg(test)]
@@ -258,6 +324,62 @@ mod tests {
         std::fs::write(&bare, r#"{"apiKey":"sk-bare"}"#).unwrap();
         resolve_provider_key("moonshot", &bare).expect("key resolves");
         assert!(!bare.exists());
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    #[cfg(feature = "harness")]
+    fn failed_vault_migration_keeps_plaintext_fallback_intact() {
+        let base = std::env::temp_dir().join(format!("pane-secretstore-failure-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        std::fs::create_dir_all(&base).unwrap();
+        let path = base.join("failure-case.json");
+        std::fs::write(&path, r#"{"apiKey":"sk-stays","label":"fallback"}"#).unwrap();
+
+        fail_puts_for("provider:failure-case");
+        assert_eq!(resolve_provider_key("failure-case", &path).as_deref(), Some("sk-stays"));
+        clear_put_failures();
+
+        let left = std::fs::read_to_string(&path).expect("plaintext fallback remains");
+        assert!(left.contains("sk-stays"));
+        assert!(matches!(get(&provider_key("failure-case")), Secret::Missing));
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    #[cfg(feature = "harness")]
+    fn session_migration_rotation_and_clear_use_the_same_vault_slot() {
+        let base = std::env::temp_dir().join(format!("pane-session-{}", std::process::id()));
+        std::fs::create_dir_all(&base).unwrap();
+        let path = base.join("session.json");
+        let old = serde_json::json!({"cookie":"synthetic-cookie","enabled":true});
+        std::fs::write(&path, old.to_string()).unwrap();
+        assert_eq!(load_session("test/session-migration", &path, 1024), Some(old));
+        assert!(!path.exists());
+        let next = serde_json::json!({"cookie":"rotated","enabled":false});
+        save_session("test/session-migration", &path, &next).unwrap();
+        assert_eq!(load_session("test/session-migration", &path, 1024), Some(next));
+        clear_session("test/session-migration", &path).unwrap();
+        assert!(load_session("test/session-migration", &path, 1024).is_none());
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    #[cfg(feature = "harness")]
+    fn session_fallback_rotation_cannot_resurrect_an_old_vault_value() {
+        let base = std::env::temp_dir().join(format!("pane-session-fallback-{}", std::process::id()));
+        std::fs::create_dir_all(&base).unwrap();
+        let path = base.join("session.json");
+        let scope = "test/session-fallback";
+        put(&token_key(scope), r#"{"token":"old"}"#).unwrap();
+        fail_puts_for(&token_key(scope));
+        let next = serde_json::json!({"token":"new"});
+        let saved = save_session(scope, &path, &next);
+        clear_put_failures();
+        saved.unwrap();
+        assert!(matches!(get(&token_key(scope)), Secret::Missing));
+        assert_eq!(load_session(scope, &path, 1024), Some(next));
+        clear_session(scope, &path).unwrap();
         let _ = std::fs::remove_dir_all(&base);
     }
 }

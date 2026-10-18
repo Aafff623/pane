@@ -570,6 +570,7 @@ pub(crate) fn credits_face_metrics(face: &CreditsFace) -> Vec<Metric> {
             pct,
             Some(format!("{used:.0} of {:.0} credits used", face.total)),
         )
+        .with_usage(crate::usage_units::UsageUnit::Credits, used, Some(face.total))
         .with_reset(face.reset_ms, None);
         metrics.push(meter);
     } else if face.unlimited {

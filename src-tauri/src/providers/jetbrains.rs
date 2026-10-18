@@ -102,6 +102,7 @@ fn parse_quota_file(raw: &str) -> Result<Snapshot, String> {
                 .map(|d| d.timestamp_millis());
             metrics.push(
                 Metric::progress("Monthly credits", pct, Some(format!("{used:.0} of {total:.0} credits used")))
+                    .with_usage(crate::usage_units::UsageUnit::Credits, used, Some(total))
                     .with_reset(reset, None),
             );
         }

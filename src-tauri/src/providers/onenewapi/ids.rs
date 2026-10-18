@@ -4,7 +4,7 @@ use std::collections::HashSet;
 /// 16 OS-random bytes, URL-safe base64 without padding.
 pub fn new_id() -> Result<String, String> {
     let mut bytes = [0u8; 16];
-    fill_os_random(&mut bytes)?;
+    crate::platform::fill_random(&mut bytes)?;
     Ok(base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(bytes))
 }
 
@@ -16,72 +16,6 @@ pub fn new_id_avoiding(occupied: &HashSet<String>) -> Result<String, String> {
         }
     }
     Err("could not allocate a unique id".into())
-}
-
-fn fill_os_random(buf: &mut [u8]) -> Result<(), String> {
-    #[cfg(windows)]
-    {
-        if try_rtl_gen_random(buf) {
-            return Ok(());
-        }
-        if try_bcrypt_gen_random(buf) {
-            return Ok(());
-        }
-        return Err("OS RNG failed".into());
-    }
-    #[cfg(unix)]
-    {
-        use std::io::Read;
-        std::fs::File::open("/dev/urandom")
-            .and_then(|mut f| f.read_exact(buf))
-            .map_err(|e| format!("OS RNG failed: {e}"))
-    }
-    #[cfg(not(any(windows, unix)))]
-    {
-        let _ = buf;
-        Err("OS RNG failed".into())
-    }
-}
-
-#[cfg(windows)]
-#[link(name = "advapi32")]
-extern "system" {
-    fn SystemFunction036(random_buffer: *mut u8, random_buffer_length: u32) -> u8;
-}
-
-#[cfg(windows)]
-fn try_rtl_gen_random(buf: &mut [u8]) -> bool {
-    if buf.is_empty() {
-        return true;
-    }
-    unsafe { SystemFunction036(buf.as_mut_ptr(), buf.len() as u32) != 0 }
-}
-
-#[cfg(windows)]
-#[link(name = "bcrypt")]
-extern "system" {
-    fn BCryptGenRandom(
-        h_algorithm: *mut core::ffi::c_void,
-        pb_buffer: *mut u8,
-        cb_buffer: u32,
-        dw_flags: u32,
-    ) -> i32;
-}
-
-#[cfg(windows)]
-fn try_bcrypt_gen_random(buf: &mut [u8]) -> bool {
-    const BCRYPT_USE_SYSTEM_PREFERRED_RNG: u32 = 0x0000_0002;
-    if buf.is_empty() {
-        return true;
-    }
-    unsafe {
-        BCryptGenRandom(
-            std::ptr::null_mut(),
-            buf.as_mut_ptr(),
-            buf.len() as u32,
-            BCRYPT_USE_SYSTEM_PREFERRED_RNG,
-        ) == 0
-    }
 }
 
 #[cfg(test)]

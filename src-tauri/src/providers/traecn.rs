@@ -153,7 +153,8 @@ pub(crate) fn credit_metrics(usage: &Value) -> Result<Vec<Metric>, String> {
     // expiries, so any single date would misread. The per-pack rows below
     // own the expiry detail.
     let pct = if total > 0.0 { (consumed / total * 100.0).clamp(0.0, 100.0) } else { 0.0 };
-    let mut metrics = vec![Metric::progress("Credits", pct, Some(format!("{consumed:.2} of {total:.0} credits used")))];
+    let mut metrics = vec![Metric::progress("Credits", pct, Some(format!("{consumed:.2} of {total:.0} credits used")))
+        .with_usage(crate::usage_units::UsageUnit::Credits, consumed, Some(total))];
     metrics.extend(pack_rows(usage));
     Ok(metrics)
 }

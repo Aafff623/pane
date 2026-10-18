@@ -89,6 +89,10 @@ pub struct Metric {
     /// failure messages).
     #[serde(default)]
     pub available: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub usage: Option<crate::usage_units::UsageReading>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub daily_usage: Option<crate::usage_units::UsageDays>,
 }
 
 impl Metric {
@@ -107,6 +111,8 @@ impl Metric {
             resets_at: None,
             period_ms: None,
             available: None,
+            usage: None,
+            daily_usage: None,
         }
     }
 
@@ -121,6 +127,8 @@ impl Metric {
             resets_at: None,
             period_ms: None,
             available: None,
+            usage: None,
+            daily_usage: None,
         }
     }
 
@@ -134,6 +142,26 @@ impl Metric {
     /// (see `available`). Only those families call this.
     pub fn with_available(mut self, available: bool) -> Self {
         self.available = Some(available);
+        self
+    }
+
+    pub fn with_usage(mut self, unit: crate::usage_units::UsageUnit, used: f64, total: Option<f64>) -> Self {
+        let reading = crate::usage_units::UsageReading { unit, used, total, scope: String::new() };
+        if reading.valid() {
+            self.usage = Some(reading);
+        }
+        self
+    }
+
+    pub fn with_usage_scope(mut self, scope: String) -> Self {
+        if let Some(reading) = &mut self.usage {
+            reading.scope = scope;
+        }
+        self
+    }
+
+    pub fn with_daily_usage(mut self, usage: crate::usage_units::UsageDays) -> Self {
+        self.daily_usage = Some(usage);
         self
     }
 }
@@ -267,92 +295,6 @@ fn proxy_url() -> Option<&'static str> {
         .as_deref()
 }
 
-/// "127.0.0.1:7897" or "http=127.0.0.1:7897;https=127.0.0.1:7897" → one URL.
-/// https wins when both are listed (every vendor we talk to is https).
-fn parse_win_proxy(raw: &str) -> Option<String> {
-    let raw = raw.trim();
-    if raw.is_empty() {
-        return None;
-    }
-    let pick = |scheme: &str| {
-        raw.split(';')
-            .filter_map(|part| part.trim().split_once('='))
-            .find(|(key, _)| key.trim().eq_ignore_ascii_case(scheme))
-            .map(|(_, value)| value.trim().to_string())
-            .filter(|value| !value.is_empty())
-    };
-    let host = pick("https")
-        .or_else(|| pick("http"))
-        .or_else(|| (!raw.contains('=')).then(|| raw.to_string()))?;
-    if host.is_empty() {
-        return None;
-    }
-    Some(if host.contains("://") {
-        host
-    } else {
-        format!("http://{host}")
-    })
-}
-
-/// The Windows system proxy (HKCU → Internet Settings), which Clash-style
-/// tools flip whenever the user switches nodes or ports — following it keeps
-/// Pane in step with the OS without a config edit. PAC scripts are ignored
-/// (reqwest cannot execute them). Read once per app run, like the config
-/// proxy: a port change needs an app restart, not a config change.
-#[cfg(windows)]
-fn windows_system_proxy() -> Option<String> {
-    use windows::Win32::Foundation::ERROR_SUCCESS;
-    use windows::Win32::System::Registry::{
-        RegGetValueW, HKEY_CURRENT_USER, RRF_RT_REG_DWORD, RRF_RT_REG_SZ,
-    };
-    let wide = |s: &str| {
-        s.encode_utf16()
-            .chain(std::iter::once(0))
-            .collect::<Vec<u16>>()
-    };
-    let subkey = wide("Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings");
-    unsafe {
-        let mut enabled: u32 = 0;
-        let mut size = std::mem::size_of::<u32>() as u32;
-        let name = wide("ProxyEnable");
-        let status = RegGetValueW(
-            HKEY_CURRENT_USER,
-            windows::core::PCWSTR(subkey.as_ptr()),
-            windows::core::PCWSTR(name.as_ptr()),
-            RRF_RT_REG_DWORD,
-            None,
-            Some(&mut enabled as *mut u32 as *mut std::ffi::c_void),
-            Some(&mut size),
-        );
-        if status != ERROR_SUCCESS || enabled == 0 {
-            return None;
-        }
-        let mut buf = [0u16; 512];
-        let mut size = (buf.len() * 2) as u32;
-        let name = wide("ProxyServer");
-        let status = RegGetValueW(
-            HKEY_CURRENT_USER,
-            windows::core::PCWSTR(subkey.as_ptr()),
-            windows::core::PCWSTR(name.as_ptr()),
-            RRF_RT_REG_SZ,
-            None,
-            Some(buf.as_mut_ptr() as *mut std::ffi::c_void),
-            Some(&mut size),
-        );
-        if status != ERROR_SUCCESS {
-            return None;
-        }
-        let chars = (size as usize / 2).saturating_sub(1); // drop the NUL
-        let raw = String::from_utf16_lossy(&buf[..chars.min(buf.len())]);
-        parse_win_proxy(&raw)
-    }
-}
-
-#[cfg(not(windows))]
-fn windows_system_proxy() -> Option<String> {
-    None
-}
-
 /// The effective outbound proxy URL — the config's explicit choice first,
 /// then the Windows system proxy the OS and browsers already honor (Clash
 /// flips its port there when the user switches nodes) — or None for direct.
@@ -360,7 +302,7 @@ fn windows_system_proxy() -> Option<String> {
 /// traffic follows the same chain; reqwest's own env-var handling stays as
 /// the last resort when neither is set.
 pub(crate) fn outbound_proxy_url() -> Option<String> {
-    proxy_url().map(str::to_string).or_else(windows_system_proxy)
+    proxy_url().map(str::to_string).or_else(crate::platform::system_proxy)
 }
 
 fn http_builder() -> reqwest::ClientBuilder {
@@ -857,22 +799,22 @@ mod wall_tests {
     #[test]
     fn windows_proxy_string_parses_all_the_shapes() {
         assert_eq!(
-            parse_win_proxy("127.0.0.1:7897").as_deref(),
+            crate::platform::parse_win_proxy("127.0.0.1:7897").as_deref(),
             Some("http://127.0.0.1:7897")
         );
         assert_eq!(
-            parse_win_proxy("http=127.0.0.1:7892;https=127.0.0.1:7897").as_deref(),
+            crate::platform::parse_win_proxy("http=127.0.0.1:7892;https=127.0.0.1:7897").as_deref(),
             Some("http://127.0.0.1:7897")
         );
         assert_eq!(
-            parse_win_proxy("http=1.2.3.4:8080").as_deref(),
+            crate::platform::parse_win_proxy("http=1.2.3.4:8080").as_deref(),
             Some("http://1.2.3.4:8080")
         );
         assert_eq!(
-            parse_win_proxy("https://1.2.3.4:8080").as_deref(),
+            crate::platform::parse_win_proxy("https://1.2.3.4:8080").as_deref(),
             Some("https://1.2.3.4:8080")
         );
-        assert_eq!(parse_win_proxy(""), None);
-        assert_eq!(parse_win_proxy("http=;https="), None);
+        assert_eq!(crate::platform::parse_win_proxy(""), None);
+        assert_eq!(crate::platform::parse_win_proxy("http=;https="), None);
     }
 }

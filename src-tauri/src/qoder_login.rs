@@ -11,10 +11,7 @@
 //! skipped: the no-machine chain is the same flow without that header
 //! (cockpit's own fallback), so Pane needs nothing from the IDE install.
 
-use base64::Engine;
-use rand_core::{OsRng, RngCore};
 use serde_json::Value;
-use sha2::{Digest, Sha256};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
@@ -55,31 +52,6 @@ struct Pending {
 
 static PENDING: Mutex<Option<Pending>> = Mutex::new(None);
 
-fn b64url(bytes: &[u8]) -> String {
-    base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(bytes)
-}
-
-fn random_token() -> String {
-    let mut bytes = [0u8; 24];
-    OsRng.fill_bytes(&mut bytes);
-    b64url(&bytes)
-}
-
-fn code_challenge(verifier: &str) -> String {
-    b64url(&Sha256::digest(verifier.as_bytes()))
-}
-
-fn pct_encode(s: &str) -> String {
-    let mut out = String::new();
-    for b in s.bytes() {
-        match b {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => out.push(b as char),
-            _ => out.push_str(&format!("%{b:02X}")),
-        }
-    }
-    out
-}
-
 /// Qoder reports the expiry in epoch MILLISECONDS (its own device token
 /// shape) or occasionally RFC3339; the store keeps RFC3339.
 fn expiry_to_rfc3339(raw: Option<&str>) -> String {
@@ -98,14 +70,14 @@ fn expiry_to_rfc3339(raw: Option<&str>) -> String {
 }
 
 pub fn start() -> Result<LoginStart, String> {
-    let login_id = random_token();
-    let nonce = random_token();
-    let verifier = random_token();
+    let login_id = crate::oauth_util::random_b64url(24);
+    let nonce = crate::oauth_util::random_b64url(24);
+    let verifier = crate::oauth_util::random_b64url(24);
     let auth_url = format!(
         "{LOGIN_BASE_URL}?nonce={}&challenge={}&challenge_method={CHALLENGE_METHOD}&redirect_uri={}",
-        pct_encode(&nonce),
-        pct_encode(&code_challenge(&verifier)),
-        pct_encode(IDE_REDIRECT_URI),
+        crate::oauth_util::pct_encode(&nonce),
+        crate::oauth_util::pct_encode(&crate::oauth_util::code_challenge(&verifier)),
+        crate::oauth_util::pct_encode(IDE_REDIRECT_URI),
     );
     let mut guard = PENDING.lock().map_err(|_| "login state poisoned".to_string())?;
     *guard = Some(Pending {
@@ -289,7 +261,7 @@ mod tests {
     #[test]
     fn s256_challenge_matches_the_rfc_vector() {
         assert_eq!(
-            code_challenge("dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk"),
+            crate::oauth_util::code_challenge("dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk"),
             "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM"
         );
     }

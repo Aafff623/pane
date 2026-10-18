@@ -530,6 +530,17 @@ fn merge_data(target: &mut FileData, source: FileData) {
     }
 }
 
+/// A ledger pi day owns both destinations; its aggregate belongs to Claude.
+fn compose_pi_days(mut claude: FileData, mut codex: FileData, ledger: FileData) -> (FileData, FileData) {
+    if !ledger.days.is_empty() {
+        let owned = day_set(&ledger);
+        retain_days(&mut claude, |day| !owned.contains(&day));
+        retain_days(&mut codex, |day| !owned.contains(&day));
+        merge_data(&mut claude, ledger);
+    }
+    (claude, codex)
+}
+
 /// Ranked model list for one window: top models by cost, anything past the
 /// fifth name or under a 5% share folds into "Other".
 fn finalize_models(raw: HashMap<String, (f64, f64)>, window_cost: f64) -> Vec<ModelSpend> {
@@ -1489,26 +1500,6 @@ fn codex_dated_base(model: &str) -> String {
     re.replace(model, "").into_owned()
 }
 
-/// Codex priority/fast service-tier multipliers are provider-specific and
-/// intentionally not Cursor's `-fast` supplement multipliers. Unknown models
-/// use the supplement's multiplier when one exists, else 2x. Kimi/Moonshot
-/// slugs billed through a Codex router are not OpenAI-tiered — leave them
-/// at 1× so they merge with the Kimi CLI's own (unmultiplied) rows.
-fn codex_priority_multiplier(dated: &str, rate_model: &str) -> f64 {
-    let lower = rate_model.to_ascii_lowercase();
-    if lower.contains("kimi") || lower.contains("moonshot") {
-        return 1.0;
-    }
-    match dated {
-        "gpt-5.5" | "gpt-5.5-pro" => 2.5,
-        "gpt-5.4" | "gpt-5.4-pro" | "gpt-5.6-sol" | "gpt-5.6-terra" | "gpt-5.6-luna" => 2.0,
-        _ => {
-            let m = probe_fast_multiplier(rate_model);
-            if m == 1.0 { 2.0 } else { m }
-        }
-    }
-}
-
 /// OpenAI's published long-context rates (input, output, cache read $/MTok)
 /// for Codex models — the whole request switches tiers above 272k prompt
 /// tokens, not the 200k Anthropic uses.
@@ -1706,7 +1697,9 @@ fn codex_line(st: &mut CodexFileState, line: &str, data: &mut FileData) {
         p.cache_read_200k = p.input_200k;
     }
     let is_fast = if alias_fast { base_price.is_some() } else { st.fast_tier };
-    let mult = if is_fast { codex_priority_multiplier(&dated, &rate_model) } else { 1.0 };
+    let mult = if is_fast {
+        pricing::priority_multiplier_with(&dated, &rate_model, || probe_fast_multiplier(&rate_model))
+    } else { 1.0 };
 
     let cached = usage.cached.min(usage.input);
     let u = pricing::Usage {
@@ -4180,6 +4173,24 @@ mod tests {
         assert_eq!(target.unpriced.get("k3"), Some(&4));
         assert!(!target.unpriced.contains_key("absent-model"));
     }
+
+    #[test]
+    fn pi_ledger_owns_overlap_on_both_destinations_but_preserves_other_days() {
+        let mut claude = FileData::default();
+        claude.days.insert((100, "claude".into()), (1.0, 10.0));
+        claude.days.insert((99, "claude".into()), (2.0, 20.0));
+        let mut codex = FileData::default();
+        codex.days.insert((100, "gpt".into()), (3.0, 30.0));
+        codex.days.insert((101, "gpt".into()), (4.0, 40.0));
+        let mut ledger = FileData::default();
+        ledger.days.insert((100, "ledger-model".into()), (5.0, 50.0));
+        let (claude, codex) = compose_pi_days(claude, codex, ledger);
+        assert_eq!(claude.days.len(), 2);
+        assert_eq!(claude.days[&(100, "ledger-model".into())], (5.0, 50.0));
+        assert_eq!(claude.days[&(99, "claude".into())], (2.0, 20.0));
+        assert_eq!(codex.days.len(), 1);
+        assert_eq!(codex.days[&(101, "gpt".into())], (4.0, 40.0));
+    }
 }
 
 /// Minimal CSV field splitter with quoted-field support.
@@ -4628,7 +4639,7 @@ pub fn collect_daily(cursor_csv: Option<String>) -> (Vec<ProviderSpend>, Vec<Pro
     if let Ok(mut t) = touched().lock() {
         t.clear();
     }
-    let (mut pi_claude, mut pi_codex) = pi();
+    let (pi_claude, pi_codex) = pi();
     // cc-switch's ledger (proxy + session imports): Claude's primary source
     // (its proxy sees real tokens even where a relay zeroed the CLI logs),
     // a day-level gap filler for the tools Pane scans itself, and the only
@@ -4638,12 +4649,7 @@ pub fn collect_daily(cursor_csv: Option<String>) -> (Vec<ProviderSpend>, Vec<Pro
     // onto the Claude card (pi's dominant target). Where cc-switch covers
     // a pi day it owns it outright — Pane's own pi scan yields those days
     // on both destination cards, or they'd count twice.
-    if !cc.pi.days.is_empty() {
-        let cc_pi_days = day_set(&cc.pi);
-        retain_days(&mut pi_claude, |day| !cc_pi_days.contains(&day));
-        retain_days(&mut pi_codex, |day| !cc_pi_days.contains(&day));
-        merge_data(&mut pi_claude, cc.pi);
-    }
+    let (pi_claude, pi_codex) = compose_pi_days(pi_claude, pi_codex, cc.pi);
     let cc_claude_days = day_set(&cc.claude);
     let (claude_sp, mut minimax_extra, mut qwen_via_claude, mut kimi_routed) =
         claude(pi_claude, cc.claude, &cc_claude_days);
@@ -4689,10 +4695,7 @@ pub fn collect_daily(cursor_csv: Option<String>) -> (Vec<ProviderSpend>, Vec<Pro
     // (it records the same turns — verified ~910M vs cc's 913M — so days
     // cc owns are dropped from the backfill to avoid double counting).
     let mut mcode_data = cc.mcode;
-    let cc_mcode_days = day_set(&mcode_data);
-    let mut mcode_backfill = minimax_agent_v2_data();
-    retain_days(&mut mcode_backfill, |d| !cc_mcode_days.contains(&d));
-    merge_data(&mut mcode_data, mcode_backfill);
+    merge_missing_days(&mut mcode_data, minimax_agent_v2_data());
     list.push(build_spend("mcode", "MiniMax Code", mcode_data));
     // Qoder CN / Trae CN bill in credits, which cannot be converted into
     // tokens or dollars honestly — they are surfaced by the spend panel as a

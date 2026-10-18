@@ -175,24 +175,13 @@ pub fn save(family: &str, accounts: &[LoginAccount]) -> Result<(), String> {
 // FNV-1a lanes copied from accounts.rs: the store mints the SAME card-id
 // shape (`family@<32hex>`) the API-key lane uses, so every consumer
 // (cache filter, layout, usage history) treats both identically.
-fn fnv1a(bytes: &[u8], mut hash: u64) -> u64 {
-    for byte in bytes {
-        hash ^= u64::from(*byte);
-        hash = hash.wrapping_mul(0x1000_0000_01b3);
-    }
-    hash
-}
 
 /// Stable card id for one login account. The identity is the vendor's
 /// account id — never the label, never the rotating access token.
 pub fn card_id_for_account(family: &str, account: &LoginAccount) -> String {
     let mut material = account.account_id.trim().as_bytes().to_vec();
     material.push(0);
-    let left = fnv1a(&material, 0xcbf2_9ce4_8422_2325);
-    let mut second = b"pane-account-id-v1\0".to_vec();
-    second.extend_from_slice(&material);
-    let right = fnv1a(&second, 0x8422_2325_cbf2_9ce4);
-    format!("{family}@{left:016x}{right:016x}")
+    crate::identity::stable_card_id(family, b"pane-account-id-v1\0", &material)
 }
 
 /// "…abcd" style mask: recognizable tail, never the whole token.

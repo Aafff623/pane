@@ -15,6 +15,9 @@ pub mod alerts;
 #[path = "../../src-tauri/src/oauth.rs"]
 pub mod oauth;
 
+#[path = "../../src-tauri/src/oauth_util.rs"]
+pub mod oauth_util;
+
 #[path = "../../src-tauri/src/providers/mod.rs"]
 pub mod providers;
 
@@ -49,6 +52,9 @@ pub mod reset_wake;
 #[path = "../../src-tauri/src/usage_history.rs"]
 pub mod usage_history;
 
+#[path = "../../src-tauri/src/usage_units.rs"]
+pub mod usage_units;
+
 #[path = "../../src-tauri/src/spend_history.rs"]
 pub mod spend_history;
 
@@ -57,6 +63,9 @@ pub mod provider_catalog;
 
 #[path = "../../src-tauri/src/accounts.rs"]
 pub mod accounts;
+
+#[path = "../../src-tauri/src/identity.rs"]
+pub mod identity;
 
 #[path = "../../src-tauri/src/secretstore.rs"]
 pub mod secretstore;
@@ -108,4 +117,11 @@ pub mod telemetry;
 
 
 mod catalog_consistency;
+mod recovery_consistency;
 mod config_consistency;
+
+#[path = "../../src-tauri/src/snapshot_store.rs"]
+pub mod snapshot_store;
+
+#[path = "../../src-tauri/src/provider_dispatch.rs"]
+pub mod provider_dispatch;

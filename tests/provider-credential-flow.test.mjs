@@ -6,6 +6,7 @@ import ts from 'typescript';
 import { credentialFailure, accountFormReady, enabledAccountCount } from '../src/credentialPolicy.ts';
 import { providerCatalog } from '../src/providerCatalog.ts';
 import { MECHANISMS } from '../src/providerMechanisms.ts';
+import { RefreshState } from '../src/refreshState.ts';
 
 const source = readFileSync(new URL('../src/main.ts', import.meta.url), 'utf8');
 const ast = ts.createSourceFile('main.ts', source, ts.ScriptTarget.Latest, true);
@@ -37,6 +38,13 @@ test('network, credentials, permissions and exhaustion-like rate limits are dist
   assert.equal(credentialFailure('unexpected body'), 'unknown');
 });
 
+test('diagnostic ids and session field names do not prove credential failure', () => {
+  assert.equal(credentialFailure('unexpected response; request id 142903'), 'unknown');
+  assert.equal(credentialFailure('cookie field absent from quota response'), 'unknown');
+  assert.equal(credentialFailure('HTTP 503: access token check failed'), 'network');
+  assert.equal(credentialFailure('session expired'), 'credential');
+});
+
 for (const healthy of [true, false]) {
   test(`saving the eighth account immediately updates the real overview count (${healthy ? 'connected' : 'failed query'})`, async () => {
     const existing = Array.from({ length: 7 }, (_, i) => ({ id: `clinepass@${i}`, label: `Account ${i}` }));
@@ -47,14 +55,14 @@ for (const healthy of [true, false]) {
       config: { disabled: ['clinepass'], removedProviders: [], layout: { providers: {} } },
       accountsCache: new Map([['clinepass', existing]]),
       accountProbeSnapshots: new Map([['clinepass', { status: healthy ? 'ok' : 'error', metrics: [], error: healthy ? null : 'HTTP 401' }]]),
-      lastSnapshots: snapshots, recentlyKeyed: new Map(), refreshGeneration: 0, IS_PANEL_FORM: false,
+      lastSnapshots: snapshots, recentlyKeyed: new Map(), refreshState: new RefreshState(), IS_PANEL_FORM: false,
       enabledAccountCount, providerFamily: (id) => id.split('@')[0], providerDisplayName: (family) => family,
       patchConfig: async (patch) => Object.assign(context.config, patch),
       refreshSettingsProviderKey: async () => context.accountsCache.set('clinepass', [...existing, added]),
       reconcileAccountLayout: () => false, isCardDisabled: (id) => context.config.disabled.includes(id),
       isBareHintCard: () => false,
       accountHealthDot: (id) => context.lastSnapshots.find((snapshot) => snapshot.id === id)?.status === 'ok' ? 'green' : 'error',
-      renderIfVisible: () => { painted = context.accountAvailabilitySummary('clinepass'); },
+      requestRender: () => { painted = context.accountAvailabilitySummary('clinepass'); },
       forceUsageRefreshAttempt: async () => {}, requestTraySync: () => {}, t: (key) => key,
     });
     vm.runInContext(actualFunctions(['afterCredentialMutation', 'overviewAccountSnapshots', 'accountAvailabilitySummary']), context);

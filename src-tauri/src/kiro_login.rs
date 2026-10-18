@@ -15,10 +15,7 @@
 //! (login_accounts), keyed by the profileArn the auth payload carries —
 //! the same ARN the usage endpoint scopes to.
 
-use base64::Engine;
-use rand_core::{OsRng, RngCore};
 use serde_json::{json, Value};
-use sha2::{Digest, Sha256};
 use std::io::{Read, Write};
 use std::net::TcpListener;
 use std::sync::Mutex;
@@ -69,59 +66,6 @@ struct Pending {
 
 static PENDING: Mutex<Option<Pending>> = Mutex::new(None);
 
-fn b64url(bytes: &[u8]) -> String {
-    base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(bytes)
-}
-
-fn random_token() -> String {
-    let mut bytes = [0u8; 24];
-    OsRng.fill_bytes(&mut bytes);
-    b64url(&bytes)
-}
-
-fn code_challenge(verifier: &str) -> String {
-    b64url(&Sha256::digest(verifier.as_bytes()))
-}
-
-fn pct_encode(s: &str) -> String {
-    let mut out = String::new();
-    for b in s.bytes() {
-        match b {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => out.push(b as char),
-            _ => out.push_str(&format!("%{b:02X}")),
-        }
-    }
-    out
-}
-
-fn pct_decode(s: &str) -> String {
-    let bytes = s.as_bytes();
-    let mut out = Vec::with_capacity(bytes.len());
-    let mut i = 0;
-    while i < bytes.len() {
-        match bytes[i] {
-            b'%' if i + 2 < bytes.len() => {
-                if let Ok(v) = u8::from_str_radix(std::str::from_utf8(&bytes[i + 1..i + 3]).unwrap_or(""), 16) {
-                    out.push(v);
-                    i += 3;
-                    continue;
-                }
-                out.push(b'%');
-                i += 1;
-            }
-            b'+' => {
-                out.push(b' ');
-                i += 1;
-            }
-            b => {
-                out.push(b);
-                i += 1;
-            }
-        }
-    }
-    String::from_utf8_lossy(&out).into_owned()
-}
-
 /// The auth service wraps its payloads in `{ "data": { … } }`; unwrap when
 /// present (cockpit's `unwrap_token_response`).
 pub(crate) fn unwrap_data(mut doc: Value) -> Value {
@@ -156,13 +100,6 @@ pub(crate) fn ensure_expires_at(doc: &mut Value) {
     );
 }
 
-fn callback_html() -> &'static str {
-    "<!doctype html><html><head><meta charset=\"utf-8\"><title>Pane</title></head>\
-     <body style=\"font-family:sans-serif;background:#18181b;color:#f4f4f5;display:flex;\
-     align-items:center;justify-content:center;height:100vh;margin:0\">\
-     <p>Sign-in complete — you can close this tab and return to Pane.</p></body></html>"
-}
-
 pub fn start() -> Result<LoginStart, String> {
     let port = CALLBACK_PORT_CANDIDATES
         .into_iter()
@@ -171,15 +108,15 @@ pub fn start() -> Result<LoginStart, String> {
     let listener = TcpListener::bind(("127.0.0.1", port)).map_err(|e| format!("bind callback port: {e}"))?;
     listener.set_nonblocking(true).map_err(|e| format!("listener setup: {e}"))?;
 
-    let login_id = random_token();
-    let state = random_token();
-    let verifier = random_token();
+    let login_id = crate::oauth_util::random_b64url(24);
+    let state = crate::oauth_util::random_b64url(24);
+    let verifier = crate::oauth_util::random_b64url(24);
     let callback_url = format!("http://localhost:{port}");
     let auth_url = format!(
         "{AUTH_PORTAL_URL}?state={}&code_challenge={}&code_challenge_method=S256&redirect_uri={}&redirect_from=KiroIDE",
-        pct_encode(&state),
-        pct_encode(&code_challenge(&verifier)),
-        pct_encode(&callback_url),
+        crate::oauth_util::pct_encode(&state),
+        crate::oauth_util::pct_encode(&crate::oauth_util::code_challenge(&verifier)),
+        crate::oauth_util::pct_encode(&callback_url),
     );
     {
         let mut guard = PENDING.lock().map_err(|_| "login state poisoned".to_string())?;
@@ -209,7 +146,7 @@ pub fn start() -> Result<LoginStart, String> {
                 let read = stream.read(&mut buf).unwrap_or(0);
                 let req = String::from_utf8_lossy(&buf[..read]);
                 let line = req.lines().next().unwrap_or_default().to_string();
-                let html = callback_html();
+                let html = crate::oauth_util::callback_html(true);
                 let _ = stream.write_all(
                     format!(
                         "HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
@@ -231,7 +168,7 @@ pub fn start() -> Result<LoginStart, String> {
                 let mut params: Vec<(String, String)> = Vec::new();
                 for pair in query.split('&') {
                     let Some((key, value)) = pair.split_once('=') else { continue };
-                    params.push((pct_decode(key), pct_decode(value)));
+                    params.push((crate::oauth_util::pct_decode(key), crate::oauth_util::pct_decode(value)));
                 }
                 let get = |name: &str| {
                     params
@@ -287,7 +224,7 @@ async fn complete(callback: Callback, verifier: &str, callback_port: u16) -> Res
         })?;
     let redirect_uri = format!(
         "http://localhost:{callback_port}/oauth/callback?login_option={}",
-        pct_encode(&callback.login_option)
+        crate::oauth_util::pct_encode(&callback.login_option)
     );
     let resp = crate::providers::http()
         .post(TOKEN_ENDPOINT)
@@ -441,7 +378,7 @@ mod tests {
     fn s256_challenge_is_the_rfc_shape() {
         // RFC 7636 appendix B — the same vector codex_login asserts.
         assert_eq!(
-            code_challenge("dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk"),
+            crate::oauth_util::code_challenge("dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk"),
             "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM"
         );
     }
@@ -450,11 +387,11 @@ mod tests {
     fn auth_url_carries_the_portal_parameters() {
         let url = format!(
             "{AUTH_PORTAL_URL}?state=st&code_challenge=ch&code_challenge_method=S256&redirect_uri={}&redirect_from=KiroIDE",
-            pct_encode("http://localhost:3128")
+            crate::oauth_util::pct_encode("http://localhost:3128")
         );
         assert!(url.starts_with("https://app.kiro.dev/signin?"));
         assert!(url.contains("redirect_from=KiroIDE"));
-        assert!(url.contains(&pct_encode("http://localhost:3128")));
+        assert!(url.contains(&crate::oauth_util::pct_encode("http://localhost:3128")));
     }
 
     #[test]

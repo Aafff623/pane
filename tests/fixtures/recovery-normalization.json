@@ -1,0 +1,12 @@
+[
+  {"input":"o i-l","normalized":"011"},
+  {"input":"abc-def","normalized":"ABCDEF"},
+  {"input":"o\u0085i-l","normalized":"011"},
+  {"input":"\t\r\n\u00a0\u1680\u2000\u200a\u2028\u2029\u202f\u205f\u3000","normalized":""},
+  {"input":"ß","normalized":"ß"},
+  {"input":"ı","normalized":"ı"},
+  {"input":"\ufeff","normalized":"\ufeff"},
+  {"input":"\u200b","normalized":"\u200b"},
+  {"input":"Ｓ０","normalized":"Ｓ０"},
+  {"input":"u","normalized":"U"}
+]

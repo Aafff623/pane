@@ -62,24 +62,13 @@ pub fn save_slots(slots: &[AgSlot]) -> Result<(), String> {
     save_slots_to(&crate::providers::config_dir(), slots)
 }
 
-fn fnv1a(bytes: &[u8], mut hash: u64) -> u64 {
-    for byte in bytes {
-        hash ^= u64::from(*byte);
-        hash = hash.wrapping_mul(0x1000_0000_01b3);
-    }
-    hash
-}
 
 /// Stable card id for a slot: keyed on the refresh token (the identity
 /// that survives access-token rotation). Same two-lane FNV scheme as
 /// accounts.rs so ids look uniform and collisions stay vanishingly rare.
 pub fn card_id_for_slot(slot: &AgSlot) -> String {
-    let material = slot.refresh_token.trim().as_bytes().to_vec();
-    let left = fnv1a(&material, 0xcbf2_9ce4_8422_2325);
-    let mut second = b"pane-antigravity-slot-v1\0".to_vec();
-    second.extend_from_slice(&material);
-    let right = fnv1a(&second, 0x8422_2325_cbf2_9ce4);
-    format!("antigravity@{left:016x}{right:016x}")
+    let material = slot.refresh_token.trim().as_bytes();
+    crate::identity::stable_card_id("antigravity", b"pane-antigravity-slot-v1\0", material)
 }
 
 /// "ya29…abcd" style mask: a recognizable head, ellipsis, last 4 chars.

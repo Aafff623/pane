@@ -1,4 +1,5 @@
 mod accounts;
+mod identity;
 mod secretstore;
 mod antigravity_accounts;
 mod auth_center;
@@ -25,14 +26,18 @@ mod trae_login;
 mod zed_login;
 mod windsurf_login;
 mod oauth;
+mod oauth_util;
 mod platform;
 mod pricing;
 mod providers;
 pub(crate) mod provider_catalog;
+mod snapshot_store;
+mod provider_dispatch;
 mod spend;
 mod telemetry;
 mod tray_projection;
 mod usage_history;
+mod usage_units;
 mod spend_history;
 
 use platform::{hide_window_border, screen_is_being_shared, set_webview_memory_level};
@@ -52,12 +57,9 @@ use tauri::{
     Emitter, Manager, WindowEvent,
 };
 use provider_catalog::family_of;
-
-/// Last-good snapshots older than this are too misleading to show or to
-/// use as a stand-in for a live Moonshot card.
-const SNAPSHOT_CACHE_MS: i64 = 24 * 60 * 60 * 1000;
-/// One failed cycle isn't "Outdated": vendors hiccup routinely.
-const STALE_GRACE_MS: i64 = 3 * 60 * 1000;
+use provider_dispatch::{account_snapshot, key_snapshot_for};
+use snapshot_store::{CachedSnap, FailState, SNAPSHOT_CACHE_MS,
+    cached_kimi_ok_from, fold_moonshot_into_kimi, retain_rate_limited_benches};
 
 // ---------------------------------------------------------------------------
 // App settings, stored at %APPDATA%\Pane\config.json
@@ -140,7 +142,7 @@ fn config_with_defaults(mut cfg: Value) -> Value {
     // Existing configs already carry their own list — entry() never
     // overwrites it.
     obj.entry("disabled")
-        .or_insert(json!(DEFAULT_DISABLED_PROVIDERS));
+        .or_insert(json!(provider_catalog::default_disabled_families()));
     obj.entry("pinned").or_insert(Value::Null);
     obj.entry("trayProviders").or_insert(json!([]));
     obj.entry("notifyAlmostOut").or_insert(json!(true));
@@ -327,64 +329,6 @@ const CONFIG_KEYS: &[&str] = &[
 /// Providers hidden by default on a fresh install: everything outside the
 /// mainstream subscriptions (Claude / Codex / Cursor / Grok / GLM / MiniMax /
 /// Antigravity / Kimi). They stay one toggle away in Customize.
-const DEFAULT_DISABLED_PROVIDERS: &[&str] = &[
-    "opencode",
-    "copilot",
-    "devin",
-    "openrouter",
-    "deepseek",
-    "moonshot",
-    "elevenlabs",
-    "ollama",
-    "codebuff",
-    "kilo",
-    "aihubmix",
-    "onenewapi",
-    "qwen",
-    "hermes",
-    "stepfun",
-    "stepfun-plan",
-    "shandianshuo",
-    "siliconflow",
-    "novita",
-    "relaybalance",
-    "qodercn",
-    "traecn",
-    "commandcode",
-    "doubao",
-    "clawsgo",
-    "bocha",
-    "tavily",
-    "firecrawl",
-    "clinepass",
-    "sensenova",
-    "apigoto",
-    "giphy",
-    "brave",
-    "amp",
-    "bedrock",
-    "chutes",
-    "deepgram",
-    "kiro",
-    "openai-api",
-    "poe",
-    "venice",
-    "vertexai",
-    "warp",
-    "mimo",
-    "trae",
-    "qoder",
-    "zed",
-    "factory",
-    "jetbrains",
-    "groq",
-    "huggingface",
-    "longcat",
-    "sub2api",
-    "mistral",
-    "perplexity",
-    "volcengine",
-];
 
 static CONFIG_WRITE: Mutex<()> = Mutex::new(());
 static CONFIG_TMP_SEQ: AtomicU64 = AtomicU64::new(0);
@@ -915,71 +859,6 @@ struct StripEntry {
 /// strip ids are validated against this before becoming tray icon ids,
 /// including `family@account` cards. Stale family-level strip icons are
 /// removed for exactly this set.
-const STRIP_PROVIDER_IDS: [&str; 63] = [
-    "claude",
-    "codex",
-    "cursor",
-    "opencode",
-    "copilot",
-    "grok",
-    "devin",
-    "minimax",
-    "openrouter",
-    "zai",
-    "antigravity",
-    "deepseek",
-    "moonshot",
-    "elevenlabs",
-    "ollama",
-    "codebuff",
-    "kilo",
-    "aihubmix",
-    "qwen",
-    "hermes",
-    "kimi",
-    "onenewapi",
-    "stepfun",
-    "stepfun-plan",
-    "siliconflow",
-    "novita",
-    "relaybalance",
-    "qodercn",
-    "traecn",
-    "commandcode",
-    "doubao",
-    "clawsgo",
-    "shandianshuo",
-    "bocha",
-    "tavily",
-    "firecrawl",
-    "clinepass",
-    "sensenova",
-    "apigoto",
-    "brave",
-    "amp",
-    "bedrock",
-    "chutes",
-    "deepgram",
-    "kiro",
-    "openai-api",
-    "poe",
-    "venice",
-    "vertexai",
-    "warp",
-    "mimo",
-    "trae",
-    "qoder",
-    "zed",
-    "factory",
-    "jetbrains",
-    "groq",
-    "huggingface",
-    "longcat",
-    "sub2api",
-    "mistral",
-    "perplexity",
-    "volcengine",
-];
 
 async fn update_tray_strip(app: tauri::AppHandle, entries: Vec<StripEntry>) -> Result<(), String> {
     validate_strip_entries(&entries)?;
@@ -1030,9 +909,9 @@ fn strip_is_active(strip_ok: bool, entries: &[StripEntry]) -> bool {
 }
 
 fn strip_icon_ids_to_clear(known: &[StripEntry], attempted: &[StripEntry]) -> Vec<String> {
-    let mut ids: Vec<String> = STRIP_PROVIDER_IDS
+    let mut ids: Vec<String> = provider_catalog::provider_definitions()
         .iter()
-        .map(|id| (*id).to_string())
+        .map(|definition| definition.family_id.to_string())
         .collect();
     for entry in known.iter().chain(attempted) {
         if !ids.iter().any(|seen| seen == &entry.id) {
@@ -1068,7 +947,7 @@ fn validate_strip_entries(entries: &[StripEntry]) -> Result<(), String> {
         return Err("tray strip accepts at most 4 providers".into());
     }
     for (index, entry) in entries.iter().enumerate() {
-        if !strip_provider_id_is_allowed(&entry.id) {
+        if !provider_catalog::valid_card_id(&entry.id) {
             return Err(format!("invalid tray strip provider id: {}", entry.id));
         }
         if entries[..index].iter().any(|seen| seen.id == entry.id) {
@@ -1082,19 +961,6 @@ fn validate_strip_entries(entries: &[StripEntry]) -> Result<(), String> {
         }
     }
     Ok(())
-}
-
-fn strip_provider_id_is_allowed(id: &str) -> bool {
-    match id.split_once('@') {
-        None => STRIP_PROVIDER_IDS.contains(&id),
-        Some((family, account)) => {
-            STRIP_PROVIDER_IDS.contains(&family)
-                && !account.is_empty()
-                && account
-                    .chars()
-                    .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_'))
-        }
-    }
 }
 
 fn strip_tray_key(id: &str) -> String {
@@ -1163,7 +1029,8 @@ async fn apply_tray_strip(
         let result = (|| -> Result<(), String> {
             // Removal returns None when an icon is already absent; that is
             // the desired end state rather than an update failure.
-            for id in STRIP_PROVIDER_IDS {
+            for definition in provider_catalog::provider_definitions() {
+                let id = definition.family_id;
                 if !entries.iter().any(|entry| entry.id == id) {
                     handle.remove_tray_by_id(&format!("strip-logo-{id}"));
                     handle.remove_tray_by_id(&format!("strip-num-{id}"));
@@ -1259,34 +1126,13 @@ async fn apply_tray_strip(
 /// limits (hammering a 429 makes it worse — learned that the hard way).
 /// `rate_limited` benches survive a user-forced refresh; ordinary ones
 /// must not stand between the user's click and a real fetch.
-struct FailState {
-    until_ms: i64,
-    note: String,
-    rate_limited: bool,
-}
-
-/// Drops ordinary-error benches, keeping rate-limit cooldowns. Used when
-/// the user explicitly refreshes and when the background loop retries a
-/// total outage: a bench from our own failed pass must not swallow them.
 fn clear_soft_benches() {
-    retain_rate_limited_benches(&mut fail_state().lock().unwrap_or_else(|e| e.into_inner()));
-}
-
-/// Pure core of [`clear_soft_benches`] so tests exercise the policy on a
-/// local map instead of mutating the shared static mid-parallel-suite.
-fn retain_rate_limited_benches(map: &mut HashMap<String, FailState>) {
-    map.retain(|_, f| f.rate_limited);
+    retain_rate_limited_benches(&mut fail_state().lock().unwrap_or_else(|error| error.into_inner()));
 }
 
 fn fail_state() -> &'static Mutex<HashMap<String, FailState>> {
     static STATE: OnceLock<Mutex<HashMap<String, FailState>>> = OnceLock::new();
     STATE.get_or_init(Default::default)
-}
-
-#[derive(serde::Serialize, serde::Deserialize, Clone)]
-struct CachedSnap {
-    at: i64,
-    snap: providers::Snapshot,
 }
 
 fn last_ok() -> &'static Mutex<HashMap<String, CachedSnap>> {
@@ -1335,7 +1181,7 @@ fn persist_last_ok_at(
         .parent()
         .ok_or_else(|| "snapshot cache path has no parent".to_string())?;
     std::fs::create_dir_all(parent).map_err(|e| format!("create snapshot cache dir: {e}"))?;
-    std::fs::write(path, serialized).map_err(|e| format!("write snapshot cache: {e}"))
+    accounts::write_json_atomic(path, serialized)
 }
 
 fn persist_last_ok(map: &HashMap<String, CachedSnap>) -> Result<(), String> {
@@ -1772,48 +1618,10 @@ where
     apply_qoder_checkin(id, &mut snap).await;
     let mut map = fail_state().lock().unwrap_or_else(|e| e.into_inner());
     if snap.status == "error" {
-        let err = snap.error.clone().unwrap_or_default();
-        let rate_limited = err.contains("429");
-        // A vendor-stated Retry-After wins over our fixed backoff — bench
-        // for exactly that long (capped at an hour) instead of knocking on
-        // a door the server said stays shut.
-        let retry_after_ms = err
-            .split("retry_after_s=")
-            .nth(1)
-            .and_then(|rest| {
-                rest.chars()
-                    .take_while(|c| c.is_ascii_digit())
-                    .collect::<String>()
-                    .parse::<i64>()
-                    .ok()
-            })
-            .map(|s| (s * 1000).min(3_600_000));
-        // A 60s bench expires before the next auto-refresh (default 5 min)
-        // and the failing provider gets hammered every cycle. Hold at least
-        // one interval so the skip actually happens.
         let interval_ms = (refresh_minutes_from(&load_config()) as i64).saturating_mul(60_000);
-        let bench_ms = retry_after_ms.unwrap_or(if rate_limited {
-            interval_ms.max(300_000)
-        } else {
-            interval_ms.max(60_000)
-        });
-        map.insert(
-            id.to_string(),
-            FailState {
-                until_ms: now + bench_ms,
-                rate_limited,
-                note: if let Some(ms) = retry_after_ms {
-                    format!(
-                        "rate limited — the vendor asked to wait ~{}m",
-                        (ms / 60_000).max(1)
-                    )
-                } else if rate_limited {
-                    format!("rate limited — cooling down for a few minutes ({err})")
-                } else {
-                    err
-                },
-            },
-        );
+        map.insert(id.to_string(), snapshot_store::bench_after_error(
+            snap.error.as_deref().unwrap_or_default(), now, interval_ms,
+        ));
     } else {
         map.remove(id);
     }
@@ -1838,48 +1646,6 @@ fn cached_kimi_ok() -> bool {
     cached_kimi_ok_from(&doc, now_ms)
 }
 
-fn cached_kimi_ok_from(doc: &Value, now_ms: i64) -> bool {
-    if doc.pointer("/kimi/snap/status").and_then(Value::as_str) != Some("ok") {
-        return false;
-    }
-    let at = doc.pointer("/kimi/at").and_then(Value::as_i64).unwrap_or(0);
-    at > 0 && now_ms.saturating_sub(at) <= SNAPSHOT_CACHE_MS
-}
-
-fn fold_moonshot_into_kimi(all: &mut Vec<providers::Snapshot>) {
-    let Some(kimi) = all.iter().find(|s| s.id == "kimi" && s.status == "ok") else {
-        return;
-    };
-    // Don't throw away a freshly fetched wallet just because the plan
-    // card loaded. Fold only when Kimi already carries those rows, or
-    // when Moonshot has nothing to show (plan-only / no_credentials).
-    let kimi_has_wallet = kimi.metrics.iter().any(|m| is_kimi_wallet_label(&m.label));
-    let moonshot_has_rows = all
-        .iter()
-        .any(|s| s.id == "moonshot" && !s.metrics.is_empty());
-    if kimi_has_wallet || !moonshot_has_rows {
-        all.retain(|s| s.id != "moonshot");
-    }
-}
-
-fn is_kimi_wallet_label(label: &str) -> bool {
-    matches!(
-        label,
-        "API" | "Credits used" | "Balance" | "Vouchers" | "Cash"
-    )
-}
-
-fn restore_kimi_wallet_rows(current: &mut providers::Snapshot, previous: &providers::Snapshot) {
-    if current.metrics.iter().any(|m| m.label == "API") {
-        return;
-    }
-    for m in &previous.metrics {
-        if is_kimi_wallet_label(&m.label) && !current.metrics.iter().any(|x| x.label == m.label) {
-            current.metrics.push(m.clone());
-        }
-    }
-}
-
 /// Consecutive failed fetches per card id — the degrade threshold needs
 /// two in a row, so one network blip never paints ⚠ (the cache serves
 /// silently). A live result clears the entry.
@@ -1887,83 +1653,6 @@ fn failure_streaks() -> &'static std::sync::Mutex<std::collections::HashMap<Stri
     static STREAKS: std::sync::OnceLock<std::sync::Mutex<std::collections::HashMap<String, u32>>> =
         std::sync::OnceLock::new();
     STREAKS.get_or_init(|| std::sync::Mutex::new(std::collections::HashMap::new()))
-}
-
-fn bump_failure_streak(id: &str) -> u32 {
-    let mut map = failure_streaks()
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner);
-    let streak = map.entry(id.to_string()).and_modify(|c| *c += 1).or_insert(1);
-    *streak
-}
-
-fn clear_failure_streak(id: &str) {
-    if let Ok(mut map) = failure_streaks().lock() {
-        map.remove(id);
-    }
-}
-
-fn restore_last_success_after_error(
-    current: &mut providers::Snapshot,
-    previous: &providers::Snapshot,
-    age_ms: i64,
-    consecutive_failures: u32,
-) -> bool {
-    if current.status != "error" || age_ms > SNAPSHOT_CACHE_MS {
-        return false;
-    }
-    let warning = current.error.clone();
-    *current = previous.clone();
-    if providers::should_mark_stale(age_ms > STALE_GRACE_MS, consecutive_failures) {
-        current.stale = true;
-        current.warning = warning;
-    }
-    true
-}
-
-/// One extra account's snapshot, fetched through the same snapshot_with_key
-/// flow a pasted key uses (what test_api_key probes), with the account card's
-/// own id and display name passed into the provider adapter. Lives here
-/// rather than in accounts.rs because it dispatches into provider modules the
-/// parse-tests harness (which compiles accounts.rs) doesn't mirror.
-async fn account_snapshot(
-    family: String,
-    id: String,
-    name: String,
-    key: String,
-    base_url: Option<String>,
-) -> providers::Snapshot {
-    match family.as_str() {
-        "deepseek" => providers::deepseek::snapshot_with_key_as(&key, &id, &name).await,
-        "commandcode" => {
-            providers::commandcode::snapshot_with_key_as(&key, &id, &name).await
-        }
-        "kimi" => providers::kimi::snapshot_with_key_as(&key, &id, &name).await,
-        "stepfun" => providers::stepfun::snapshot_with_key_as(&key, &id, &name).await,
-        "siliconflow" => providers::siliconflow::snapshot_with_key_as(&key, &id, &name).await,
-        "novita" => providers::novita::snapshot_with_key_as(&key, &id, &name).await,
-        "clinepass" => providers::clinepass::snapshot_with_key_as(&key, &id, &name).await,
-        "relaybalance" => match base_url.as_deref().map(str::trim).filter(|u| !u.is_empty()) {
-            Some(url) => {
-                providers::relaybalance::snapshot_with_key_at(&key, url, &id, &name).await
-            }
-            None => providers::Snapshot::error(
-                &id,
-                &name,
-                "this account has no base URL — remove and re-add it".into(),
-            ),
-        },
-        // Every other key family fetches through the shared probe and is
-        // re-branded with this account's card id + display name.
-        _ => match key_snapshot_for(&family, &key, base_url).await {
-            Ok(mut snap) => {
-                snap.id = id.clone();
-                snap.name = name.clone();
-                snap
-            }
-            Err(e) => providers::Snapshot::error(&id, &name, e),
-        },
-    }
 }
 
 /// Default-account model migration, run once per family at fetch. A main
@@ -2375,71 +2064,8 @@ async fn fetch_provider_snapshot(provider_id: String, allow_disabled: bool) -> R
     }
     // No pasted default → the native provider path.
     if provider_id == family {
-        let snap = match family.as_str() {
-            "claude" => providers::claude::snapshot().await,
-            "codex" => providers::codex::snapshot().await,
-            "cursor" => providers::cursor::snapshot().await,
-            "opencode" => providers::opencode::snapshot().await,
-            "copilot" => providers::copilot::snapshot().await,
-            "grok" => providers::grok::snapshot().await,
-            "devin" => providers::devin::snapshot().await,
-            "minimax" => providers::minimax::snapshot().await,
-            "openrouter" => providers::openrouter::snapshot().await,
-            "zai" => providers::zai::snapshot().await,
-            "antigravity" => providers::antigravity::snapshot().await,
-            "deepseek" => providers::deepseek::snapshot().await,
-            "moonshot" => providers::moonshot::snapshot().await,
-            "elevenlabs" => providers::elevenlabs::snapshot().await,
-            "ollama" => providers::ollama::snapshot().await,
-            "codebuff" => providers::codebuff::snapshot().await,
-            "kilo" => providers::kilo::snapshot().await,
-            "aihubmix" => providers::aihubmix::snapshot().await,
-            "qwen" => providers::qwen::snapshot().await,
-            "hermes" => providers::hermes::snapshot().await,
-            "kimi" => providers::kimi::snapshot().await,
-            "stepfun" => providers::stepfun::snapshot().await,
-            "siliconflow" => providers::siliconflow::snapshot().await,
-            "novita" => providers::novita::snapshot().await,
-            "relaybalance" => providers::relaybalance::snapshot().await,
-            "qodercn" => providers::qodercn::snapshot().await,
-            "traecn" => providers::traecn::snapshot().await,
-            "commandcode" => providers::commandcode::snapshot().await,
-            "doubao" => providers::doubao::snapshot().await,
-            "clawsgo" => providers::clawsgo::snapshot().await,
-            "shandianshuo" => providers::shandianshuo::snapshot().await,
-            "bocha" => providers::searchquota::bocha_snapshot().await,
-            "tavily" => providers::searchquota::tavily_snapshot().await,
-            "firecrawl" => providers::searchquota::firecrawl_snapshot().await,
-            "brave" => providers::searchquota::brave_snapshot().await,
-            "giphy" => providers::giphy::snapshot().await,
-            "clinepass" => providers::clinepass::snapshot().await,
-            "sensenova" => providers::sensenova::snapshot().await,
-            "apigoto" => providers::apigoto::snapshot().await,
-            "amp" => providers::amp::snapshot().await,
-            "bedrock" => providers::bedrock::snapshot().await,
-            "chutes" => providers::chutes::snapshot().await,
-            "deepgram" => providers::deepgram::snapshot().await,
-            "kiro" => providers::kiro::snapshot().await,
-            "openai-api" => providers::openai_api::snapshot().await,
-            "poe" => providers::poe::snapshot().await,
-            "venice" => providers::venice::snapshot().await,
-            "vertexai" => providers::vertexai::snapshot().await,
-            "warp" => providers::warp::snapshot().await,
-            "mimo" => providers::mimo::snapshot().await,
-            "trae" => providers::trae::snapshot().await,
-            "qoder" => providers::qoder::snapshot().await,
-            "zed" => providers::zed::snapshot().await,
-            "factory" => providers::factory::snapshot().await,
-            "jetbrains" => providers::jetbrains::snapshot().await,
-            "groq" => providers::groq::snapshot().await,
-            "huggingface" => providers::huggingface::snapshot().await,
-            "longcat" => providers::longcat::snapshot().await,
-            "sub2api" => providers::sub2api::snapshot().await,
-            "mistral" => providers::mistral::snapshot().await,
-            "perplexity" => providers::perplexity::snapshot().await,
-            "volcengine" => providers::volcengine::snapshot().await,
-            _ => return Err(format!("no single-provider refresh for {family}")),
-        };
+        let snap = provider_dispatch::native_snapshot(&family)
+            .ok_or_else(|| format!("no single-provider refresh for {family}"))?.await;
         if provider_catalog::provider_definition(&family)
             .is_some_and(|p| p.supports_api_key && p.supports_extra_accounts)
             && !accounts_with_imported_main_key(&family).is_empty() {
@@ -2645,84 +2271,13 @@ async fn run_usage_fetch_inner_mode(
     // auto-updater downloaded a fresh installer to %TEMP% on every refresh
     // (gigabytes within days). Futures are lazy, so building and dropping
     // a disabled entry here runs none of its code.
-    let mut base: Vec<(&str, BoxedSnap)> = vec![
-        ("claude", Box::pin(guarded("claude".into(), "Claude".into(), providers::claude::snapshot()))),
-        ("codex", Box::pin(guarded("codex".into(), "Codex".into(), providers::codex::snapshot()))),
-        ("cursor", Box::pin(guarded("cursor".into(), "Cursor".into(), providers::cursor::snapshot()))),
-        ("opencode", Box::pin(guarded("opencode".into(), "OpenCode".into(), providers::opencode::snapshot()))),
-        ("copilot", Box::pin(guarded("copilot".into(), "Copilot".into(), providers::copilot::snapshot()))),
-        ("windsurf", Box::pin(guarded("windsurf".into(), "Windsurf".into(), providers::windsurf::snapshot()))),
-        ("grok", Box::pin(guarded("grok".into(), "Grok".into(), providers::grok::snapshot()))),
-        ("devin", Box::pin(guarded("devin".into(), "Devin".into(), providers::devin::snapshot()))),
-        ("minimax", Box::pin(guarded("minimax".into(), "MiniMax".into(), providers::minimax::snapshot()))),
-        ("openrouter", Box::pin(guarded("openrouter".into(), "OpenRouter".into(), providers::openrouter::snapshot()))),
-        ("zai", Box::pin(guarded("zai".into(), "Z.ai".into(), providers::zai::snapshot()))),
-        ("antigravity", Box::pin(guarded("antigravity".into(), "Antigravity".into(), providers::antigravity::snapshot()))),
-        ("deepseek", Box::pin(guarded("deepseek".into(), "DeepSeek".into(), providers::deepseek::snapshot()))),
-        ("moonshot", Box::pin(guarded("moonshot".into(), "Kimi API".into(), providers::moonshot::snapshot()))),
-        ("elevenlabs", Box::pin(guarded("elevenlabs".into(), "ElevenLabs".into(), providers::elevenlabs::snapshot()))),
-        ("ollama", Box::pin(guarded("ollama".into(), "Ollama".into(), providers::ollama::snapshot()))),
-        ("codebuff", Box::pin(guarded("codebuff".into(), "Codebuff".into(), providers::codebuff::snapshot()))),
-        ("kilo", Box::pin(guarded("kilo".into(), "Kilo".into(), providers::kilo::snapshot()))),
-        ("aihubmix", Box::pin(guarded("aihubmix".into(), "AihubMix".into(), providers::aihubmix::snapshot()))),
-        ("qwen", Box::pin(guarded("qwen".into(), "Qwen Code".into(), providers::qwen::snapshot()))),
-        ("hermes", Box::pin(guarded("hermes".into(), "Hermes".into(), providers::hermes::snapshot()))),
-        ("kimi", Box::pin(guarded("kimi".into(), "Kimi Code".into(), providers::kimi::snapshot()))),
-        ("stepfun", Box::pin(guarded("stepfun".into(), "StepFun".into(), providers::stepfun::snapshot()))),
-        ("stepfun-plan", Box::pin(guarded("stepfun-plan".into(), "StepFun Step Plan".into(), providers::stepfun_plan::snapshot()))),
-        ("siliconflow", Box::pin(guarded("siliconflow".into(), "SiliconFlow".into(), providers::siliconflow::snapshot()))),
-        ("novita", Box::pin(guarded("novita".into(), "Novita AI".into(), providers::novita::snapshot()))),
-        ("relaybalance", Box::pin(guarded("relaybalance".into(), "Custom Balance".into(), providers::relaybalance::snapshot()))),
-        ("qodercn", Box::pin(guarded("qodercn".into(), "Qoder CN".into(), providers::qodercn::snapshot()))),
-        ("traecn", Box::pin(guarded("traecn".into(), "Trae CN".into(), providers::traecn::snapshot()))),
-        ("commandcode", Box::pin(guarded("commandcode".into(), "Command Code".into(), providers::commandcode::snapshot()))),
-        ("doubao", Box::pin(guarded("doubao".into(), "Doubao".into(), providers::doubao::snapshot()))),
-        ("clawsgo", Box::pin(guarded("clawsgo".into(), "ClawsGO".into(), providers::clawsgo::snapshot()))),
-        ("shandianshuo", Box::pin(guarded("shandianshuo".into(), "闪电说".into(), providers::shandianshuo::snapshot()))),
-        ("bocha", Box::pin(guarded("bocha".into(), "BochaAI".into(), providers::searchquota::bocha_snapshot()))),
-        ("tavily", Box::pin(guarded("tavily".into(), "Tavily".into(), providers::searchquota::tavily_snapshot()))),
-        ("firecrawl", Box::pin(guarded("firecrawl".into(), "Firecrawl".into(), providers::searchquota::firecrawl_snapshot()))),
-        ("brave", Box::pin(guarded("brave".into(), "Brave Search".into(), providers::searchquota::brave_snapshot()))),
-        ("giphy", Box::pin(guarded("giphy".into(), "GIPHY".into(), providers::giphy::snapshot()))),
-        ("clinepass", Box::pin(guarded("clinepass".into(), "ClinePass".into(), providers::clinepass::snapshot()))),
-        ("sensenova", Box::pin(guarded("sensenova".into(), "SenseNova".into(), providers::sensenova::snapshot()))),
-        ("apigoto", Box::pin(guarded("apigoto".into(), "APIGOTO".into(), providers::apigoto::snapshot()))),
-        ("amp", Box::pin(guarded("amp".into(), "Amp".into(), providers::amp::snapshot()))),
-        ("bedrock", Box::pin(guarded("bedrock".into(), "AWS Bedrock".into(), providers::bedrock::snapshot()))),
-        ("chutes", Box::pin(guarded("chutes".into(), "Chutes".into(), providers::chutes::snapshot()))),
-        ("deepgram", Box::pin(guarded("deepgram".into(), "Deepgram".into(), providers::deepgram::snapshot()))),
-        ("kiro", Box::pin(guarded("kiro".into(), "Kiro".into(), providers::kiro::snapshot()))),
-        ("openai-api", Box::pin(guarded("openai-api".into(), "OpenAI API".into(), providers::openai_api::snapshot()))),
-        ("poe", Box::pin(guarded("poe".into(), "Poe".into(), providers::poe::snapshot()))),
-        ("venice", Box::pin(guarded("venice".into(), "Venice".into(), providers::venice::snapshot()))),
-        ("vertexai", Box::pin(guarded("vertexai".into(), "Vertex AI".into(), providers::vertexai::snapshot()))),
-        ("warp", Box::pin(guarded("warp".into(), "Warp".into(), providers::warp::snapshot()))),
-        ("mimo", Box::pin(guarded("mimo".into(), "MiMo".into(), providers::mimo::snapshot()))),
-        ("trae", Box::pin(guarded("trae".into(), "Trae".into(), providers::trae::snapshot()))),
-        ("qoder", Box::pin(guarded("qoder".into(), "Qoder".into(), providers::qoder::snapshot()))),
-        ("zed", Box::pin(guarded("zed".into(), "Zed".into(), providers::zed::snapshot()))),
-        ("factory", Box::pin(guarded("factory".into(), "Droid".into(), providers::factory::snapshot()))),
-        ("jetbrains", Box::pin(guarded("jetbrains".into(), "JetBrains AI".into(), providers::jetbrains::snapshot()))),
-        ("groq", Box::pin(guarded("groq".into(), "Groq".into(), providers::groq::snapshot()))),
-        ("huggingface", Box::pin(guarded("huggingface".into(), "Hugging Face".into(), providers::huggingface::snapshot()))),
-        ("longcat", Box::pin(guarded("longcat".into(), "LongCat".into(), providers::longcat::snapshot()))),
-        ("sub2api", Box::pin(guarded("sub2api".into(), "sub2api".into(), providers::sub2api::snapshot()))),
-        ("mistral", Box::pin(guarded("mistral".into(), "Mistral".into(), providers::mistral::snapshot()))),
-        ("perplexity", Box::pin(guarded("perplexity".into(), "Perplexity".into(), providers::perplexity::snapshot()))),
-        ("volcengine", Box::pin(guarded("volcengine".into(), "Volcengine Ark".into(), providers::volcengine::snapshot()))),
-    ];
-    // CodeBuddy family: one bare card per table row. Adding a member is a
-    // row in `codebuddy_login::FAMILIES`, never an edit here.
-    for f in codebuddy_login::FAMILIES {
-        base.push((
-            f.family_id,
-            Box::pin(guarded(
-                f.family_id.into(),
-                f.display_name.into(),
-                providers::codebuddy::snapshot(f),
-            )),
-        ));
-    }
+    let base: Vec<(&str, BoxedSnap)> = provider_dispatch::registrations().map(|definition| {
+        let future = provider_dispatch::native_snapshot(definition.family_id)
+            .expect("registered provider has a snapshot adapter");
+        (definition.family_id, Box::pin(guarded(
+            definition.family_id.into(), definition.display_name.into(), future,
+        )) as BoxedSnap)
+    }).collect();
     // Skip the leftover Moonshot fetch only when the last Kimi card
     // actually painted — a credentials file alone is not enough (expired
     // login / network blip would otherwise hide the wallet with nothing
@@ -3126,45 +2681,14 @@ async fn run_usage_fetch_inner_mode(
                 .and_then(|raw| serde_json::from_str(&raw).ok())
                 .unwrap_or_else(|| json!({}));
             let mut map = cache.lock().unwrap_or_else(|e| e.into_inner());
-            let mut removed = false;
-            let mut to_store = serde_json::Map::new();
-            for fam in ["claude", "codex"] {
-                let cur = current.get(fam).cloned().unwrap_or(Value::Null);
-                let old = stored.get(fam).cloned().unwrap_or(Value::Null);
-                // Only a KNOWN stored identity differing from a KNOWN
-                // current one is evidence of an account swap. A missing
-                // stamp (first launch after updating) or a momentarily
-                // unreadable identity file must not dump the last-good
-                // cache — that's the safety net, not a swap.
-                if !old.is_null() && !cur.is_null() && old != cur && map.remove(fam).is_some() {
-                    removed = true;
-                }
-                // And a transient null never OVERWRITES a known identity:
-                // erasing it would make a swap that happens before the next
-                // launch undetectable.
-                to_store.insert(
-                    fam.to_string(),
-                    if cur.is_null() && !old.is_null() {
-                        old
-                    } else {
-                        cur
-                    },
-                );
-            }
-            // Persist the PRUNED cache before the new stamp: if this
-            // refresh finds nothing ok (offline launch) the on-disk cache
-            // would otherwise keep the old account's entry while the stamp
-            // already claims the new one, resurrecting the wrong numbers
-            // next launch. Stamp last, so a failed write just re-prunes.
-            let cache_persisted = !removed || persist_last_ok(&map).is_ok();
-            drop(map);
-            let to_store = Value::Object(to_store);
-            if cache_persisted && to_store != stored {
-                let _ = std::fs::write(
-                    &stamp_file,
-                    serde_json::to_string_pretty(&to_store).unwrap_or_default(),
-                );
-            }
+            let _ = snapshot_store::reconcile_identities(
+                &mut map, &stored, &current, persist_last_ok, |stamp| {
+                    accounts::write_json_atomic(
+                        &stamp_file,
+                        serde_json::to_string_pretty(stamp).map_err(|error| error.to_string())?,
+                    )
+                },
+            );
         }
         let now_ms = SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -3173,7 +2697,9 @@ async fn run_usage_fetch_inner_mode(
         if let Ok(mut map) = cache.lock() {
             retain_current_key_accounts(&mut all, &expected_key_identities);
             let mut dirty = false;
-            let mut credit_samples: Vec<(String, f64)> = Vec::new();
+            let mut credit_samples = Vec::new();
+            let mut daily_samples = Vec::new();
+            let mut failures = failure_streaks().lock().unwrap_or_else(|error| error.into_inner());
             for s in all.iter_mut() {
                 if family_of(&s.id) == "onenewapi" {
                     let current = onenewapi_snapshot_generations([s.id.clone()]);
@@ -3181,53 +2707,19 @@ async fn run_usage_fetch_inner_mode(
                         continue;
                     }
                 }
-                // Plan bars can succeed while the folded Moonshot wallet
-                // call fails; keep last-known API/Balance rows so Almost
-                // Out and the tray pin don't blink off for one timeout.
-                // Do not re-cache the patched snapshot — that would reset
-                // `at` and keep serving the same balance forever.
-                let mut skip_cache = false;
-                if s.id == "kimi" && s.status == "ok" && s.warning.is_some() {
-                    if let Some(previous) = map.get("kimi") {
-                        let age = now_ms - previous.at;
-                        if age <= SNAPSHOT_CACHE_MS {
-                            let n = s.metrics.len();
-                            restore_kimi_wallet_rows(s, &previous.snap);
-                            if s.metrics.len() > n {
-                                skip_cache = true;
-                                if age > STALE_GRACE_MS {
-                                    s.stale = true;
-                                }
-                            }
-                        }
-                    }
-                }
-                if s.status == "ok" && !skip_cache {
-                    clear_failure_streak(&s.id);
-                    map.insert(
-                        s.id.clone(),
-                        CachedSnap {
-                            at: now_ms,
-                            snap: s.clone(),
-                        },
-                    );
-                    if let Some(credits) = usage_history::credits_used_from_metrics(&s.metrics) {
-                        credit_samples.push((s.id.clone(), credits));
-                    }
-                    dirty = true;
-                } else if s.status == "error" {
-                    let streak = bump_failure_streak(&s.id);
-                    if let Some(previous) = map.get(&s.id) {
-                        let age = now_ms - previous.at;
-                        restore_last_success_after_error(s, &previous.snap, age, streak);
-                    }
-                }
+                let (changed, credits, daily) = snapshot_store::merge_snapshot(
+                    s, &mut map, &mut failures, now_ms,
+                );
+                dirty |= changed;
+                credit_samples.extend(credits.into_iter().map(|reading| (s.id.clone(), reading)));
+                daily_samples.extend(daily.into_iter().map(|days| (s.id.clone(), days)));
             }
             if dirty {
                 if let Err(error) = persist_last_ok(&map) {
                     eprintln!("[pane] snapshot cache refresh: {error}");
                 }
-                usage_history::record_credit_samples(&credit_samples);
+                usage_history::record_meter_samples(&credit_samples);
+                usage_history::record_daily_samples(&daily_samples);
             }
         }
     }
@@ -3505,17 +2997,10 @@ fn cached_usage() -> Vec<providers::Snapshot> {
             .ok()
             .and_then(|raw| serde_json::from_str(&raw).ok())
             .unwrap_or_else(|| json!({}));
-    let swapped: Vec<&str> = [
-        ("claude", providers::claude::default_identity()),
-        ("codex", providers::codex::default_identity()),
-    ]
-    .into_iter()
-    .filter(|(fam, current)| {
-        let old = stored.get(fam).cloned().unwrap_or(Value::Null);
-        matches!((current, &old), (Some(cur), Value::String(o)) if cur != o)
-    })
-    .map(|(fam, _)| fam)
-    .collect();
+    let current = json!({
+        "claude": providers::claude::default_identity(),
+        "codex": providers::codex::default_identity(),
+    });
 
     let now_ms = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -3528,7 +3013,7 @@ fn cached_usage() -> Vec<providers::Snapshot> {
                 && !card_is_disabled(id, &disabled)
                 && cached_onenewapi_id_is_configured(id, &configured_onenewapi)
                 && cached_extra_account_id_is_configured(id, &configured_extra_accounts)
-                && !swapped.iter().any(|f| f == id)
+                && !snapshot_store::identity_changed(&stored, &current, id)
         })
         .map(|(_, c)| {
             let mut s = c.snap;
@@ -3589,6 +3074,11 @@ fn fetch_spend_sources() -> Vec<spend::SpendSourceStatus> {
 #[tauri::command]
 fn fetch_credit_history() -> std::collections::BTreeMap<String, Vec<Option<f64>>> {
     usage_history::credit_trend_map()
+}
+
+#[tauri::command]
+fn fetch_meter_history() -> Vec<usage_history::MeterTrend> {
+    usage_history::meter_trends()
 }
 
 /// Long-range spend from permanent daily rollups. `None` means all retained history.
@@ -3735,70 +3225,6 @@ fn get_base_url(provider: String) -> Option<String> {
 /// One family's live snapshot for a bare key — the shared probe behind
 /// the Settings test-before-save button and the generic extra-account
 /// fetch (which re-brands the result with the account's card id/name).
-async fn key_snapshot_for(
-    provider: &str,
-    key: &str,
-    base_url: Option<String>,
-) -> Result<providers::Snapshot, String> {
-    Ok(match provider {
-        "bocha" | "tavily" | "firecrawl" | "brave" => providers::searchquota::snapshot_with_key(provider, key).await,
-        "openrouter" => providers::openrouter::snapshot_with_key(key).await,
-        "zai" => providers::zai::snapshot_with_key(key).await,
-        "commandcode" => providers::commandcode::snapshot_with_key(key).await,
-        "clawsgo" => providers::clawsgo::snapshot_with_key(key).await,
-        "minimax" => providers::minimax::snapshot_with_key(key).await,
-        "deepseek" => providers::deepseek::snapshot_with_key(key).await,
-        "moonshot" => providers::moonshot::snapshot_with_key(key).await,
-        "elevenlabs" => providers::elevenlabs::snapshot_with_key(key).await,
-        "codebuff" => providers::codebuff::snapshot_with_key(key).await,
-        "kilo" => providers::kilo::snapshot_with_key(key).await,
-        "aihubmix" => providers::aihubmix::snapshot_with_key(key).await,
-        "qwen" => providers::qwen::snapshot_with_key(key).await,
-        "kimi" => providers::kimi::snapshot_with_key(key).await,
-        "opencode" => providers::opencode::snapshot_with_key(key).await,
-        "stepfun" => providers::stepfun::snapshot_with_key(key).await,
-        "stepfun-plan" => providers::stepfun_plan::snapshot_with_creds(key, "", "").await,
-        "clinepass" => providers::clinepass::snapshot_with_key(key).await,
-        "sensenova" => providers::sensenova::snapshot_with_key(key).await,
-        "apigoto" => providers::apigoto::snapshot_with_key(key).await,
-        "amp" => providers::amp::snapshot_with_key(key).await,
-        "chutes" => providers::chutes::snapshot_with_key(key).await,
-        "deepgram" => providers::deepgram::snapshot_with_key(key).await,
-        "openai-api" => providers::openai_api::snapshot_with_key(key).await,
-        "poe" => providers::poe::snapshot_with_key(key).await,
-        "venice" => providers::venice::snapshot_with_key(key).await,
-        "warp" => providers::warp::snapshot_with_key(key).await,
-        "mimo" => providers::mimo::snapshot_with_key(key).await,
-        "factory" => providers::factory::snapshot_with_key(key).await,
-        "groq" => providers::groq::snapshot_with_key(key).await,
-        "huggingface" => providers::huggingface::snapshot_with_key(key).await,
-        "longcat" => providers::longcat::snapshot_with_key(key).await,
-        "sub2api" => {
-            let url = base_url
-                .as_deref()
-                .map(str::trim)
-                .filter(|u| !u.is_empty())
-                .ok_or_else(|| "a base URL is required for sub2api".to_string())?;
-            providers::sub2api::snapshot_with_key_and_url(key, url).await
-        }
-        "mistral" => providers::mistral::snapshot_with_key(key).await,
-        "perplexity" => providers::perplexity::snapshot_with_key(key).await,
-        "volcengine" => providers::volcengine::snapshot_with_key(key).await,
-
-        "siliconflow" => providers::siliconflow::snapshot_with_key(key).await,
-        "novita" => providers::novita::snapshot_with_key(key).await,
-        "relaybalance" => {
-            let url = base_url
-                .as_deref()
-                .map(str::trim)
-                .filter(|u| !u.is_empty())
-                .ok_or_else(|| "a base URL is required for Custom Balance".to_string())?;
-            providers::relaybalance::snapshot_with_key(key, url).await
-        }
-        _ => return Err(format!("unknown provider: {provider}")),
-    })
-}
-
 /// Outcome of a live test_api_key probe, shown in the Customize ⚙ panel:
 /// the metric count on success, the backend's error verbatim on failure.
 #[derive(serde::Serialize)]
@@ -5584,6 +5010,7 @@ pub fn run() {
             fetch_spend,
             fetch_spend_sources,
             fetch_credit_history,
+            fetch_meter_history,
             get_boot_id,
             fetch_spend_history,
             fetch_credit_extras,
@@ -5761,10 +5188,11 @@ pub fn run() {
                 })
                 .build(app)?;
 
-            // The popover starts hidden, so start the webview in low-memory
-            // mode too; it flips to normal the first time it is shown.
+            // Leave the first WebView2 load at the normal memory target. Some
+            // WebView2 versions can paint a blank/black surface when the
+            // target is lowered before the hidden document finishes loading.
+            // Later hide transitions still lower it after a real paint.
             if let Some(wv) = app.get_webview_window("main") {
-                set_webview_memory_level(&wv, true);
                 hide_window_border(&wv);
             }
 
@@ -5831,21 +5259,19 @@ pub fn run() {
 #[cfg(test)]
 mod tests {
     use super::{
-        retain_rate_limited_benches,
-        cached_extra_account_id_is_configured, cached_kimi_ok_from,
+        cached_extra_account_id_is_configured,
         cached_onenewapi_id_is_configured, card_is_disabled,
         commit_strip_state_after_apply, fail_state, load_config_from, set_config_in,
-        fold_moonshot_into_kimi, forget_onenewapi_key_ids, forget_provider_snapshot,
-        is_kimi_wallet_label, last_ok, onenewapi_after_site_save,
+        forget_onenewapi_key_ids, forget_provider_snapshot,
+        last_ok, onenewapi_after_site_save,
         onenewapi_apply_zero_to_one_enable, onenewapi_snapshot_generations, persist_last_ok_at,
         onenewapi_purge_restore_patch, purge_onenewapi_cards, purge_onenewapi_cards_coordinated,
         purge_onenewapi_cards_with, purge_onenewapi_from_config,
         rename_cached_snapshot, rename_cached_snapshot_in, rename_cached_snapshots_in,
-        refresh_minutes_from, restore_kimi_wallet_rows,
-        restore_last_success_after_error,
+        refresh_minutes_from,
         retain_current_onenewapi_results, strip_entry_application_order, strip_icon_ids_to_clear,
         strip_is_active, strip_reset_ids, updater_endpoint_strings, CachedSnap, FailState,
-        OneNewApiMutationGuard, StripEntry, SNAPSHOT_CACHE_MS, STALE_GRACE_MS,
+        OneNewApiMutationGuard, StripEntry,
     };
     use crate::alerts;
     use crate::providers::{Metric, Snapshot};
@@ -5877,71 +5303,13 @@ mod tests {
         );
     }
 
-    #[test]
-    fn kimi_wallet_labels() {
-        assert!(is_kimi_wallet_label("API"));
-        assert!(is_kimi_wallet_label("Balance"));
-        assert!(!is_kimi_wallet_label("Session"));
-        assert!(!is_kimi_wallet_label("Weekly"));
-    }
 
-    #[test]
-    fn restore_wallet_rows_when_api_missing() {
-        let mut current = Snapshot::ok(
-            "kimi",
-            "Kimi Code",
-            None,
-            vec![Metric::progress("Session", 0.0, None)],
-        );
-        current.warning = Some("Moonshot API wallet couldn't refresh".into());
-        let previous = Snapshot::ok(
-            "kimi",
-            "Kimi Code",
-            None,
-            vec![
-                Metric::progress("Session", 10.0, None),
-                Metric::progress("API", 24.0, None),
-                Metric::text("Balance", "$152.00".into()),
-            ],
-        );
-        restore_kimi_wallet_rows(&mut current, &previous);
-        let labels: Vec<_> = current.metrics.iter().map(|m| m.label.as_str()).collect();
-        assert_eq!(labels, ["Session", "API", "Balance"]);
-    }
 
-    #[test]
-    fn restore_wallet_rows_skips_when_api_present() {
-        let mut current = Snapshot::ok(
-            "kimi",
-            "Kimi Code",
-            None,
-            vec![
-                Metric::progress("Session", 0.0, None),
-                Metric::progress("API", 1.0, None),
-            ],
-        );
-        let previous = Snapshot::ok(
-            "kimi",
-            "Kimi Code",
-            None,
-            vec![Metric::progress("API", 99.0, None)],
-        );
-        restore_kimi_wallet_rows(&mut current, &previous);
-        let api = current.metrics.iter().find(|m| m.label == "API").unwrap();
-        assert!((api.used_percent.unwrap() - 1.0).abs() < 0.01);
-    }
 
-    #[test]
-    fn cached_kimi_ok_ignores_stale_or_missing_entries() {
-        let now = 1_800_000_000_000i64;
-        let fresh = json!({"kimi": {"at": now - 60_000, "snap": {"status": "ok"}}});
-        assert!(cached_kimi_ok_from(&fresh, now));
-        let old = json!({"kimi": {"at": now - SNAPSHOT_CACHE_MS - 1, "snap": {"status": "ok"}}});
-        assert!(!cached_kimi_ok_from(&old, now));
-        let err = json!({"kimi": {"at": now, "snap": {"status": "error"}}});
-        assert!(!cached_kimi_ok_from(&err, now));
-        assert!(!cached_kimi_ok_from(&json!({}), now));
-    }
+
+
+
+
 
     #[test]
     fn refresh_interval_is_re_read_and_clamped_to_one_minute() {
@@ -6025,145 +5393,17 @@ mod tests {
         assert!(ids.contains(&"codex".into()));
     }
 
-    #[test]
-    fn recent_error_fallback_within_grace_is_not_marked_stale() {
-        let previous = Snapshot::ok(
-            "codex",
-            "Codex",
-            None,
-            vec![Metric::progress("Weekly", 25.0, None)],
-        );
-        let mut current = Snapshot::error("codex", "Codex", "timeout".into());
 
-        assert!(restore_last_success_after_error(
-            &mut current,
-            &previous,
-            1_000,
-            1,
-        ));
-        assert_eq!(current.status, "ok");
-        assert!(!current.stale);
-        assert_eq!(current.warning, None);
-        assert_eq!(current.metrics[0].used_percent, Some(25.0));
-    }
 
-    #[test]
-    fn recent_error_fallback_after_grace_is_marked_stale() {
-        let previous = Snapshot::ok(
-            "codex",
-            "Codex",
-            None,
-            vec![Metric::progress("Weekly", 25.0, None)],
-        );
-        let mut current = Snapshot::error("codex", "Codex", "timeout".into());
 
-        assert!(restore_last_success_after_error(
-            &mut current,
-            &previous,
-            STALE_GRACE_MS + 1,
-            2,
-        ));
-        assert_eq!(current.status, "ok");
-        assert!(current.stale);
-        assert_eq!(current.warning.as_deref(), Some("timeout"));
-        assert_eq!(current.metrics[0].used_percent, Some(25.0));
-    }
 
-    #[test]
-    fn one_consecutive_failure_past_the_grace_stays_silent() {
-        let previous = Snapshot::ok(
-            "codex",
-            "Codex",
-            None,
-            vec![Metric::progress("Weekly", 25.0, None)],
-        );
-        let mut current = Snapshot::error("codex", "Codex", "timeout".into());
 
-        assert!(restore_last_success_after_error(
-            &mut current,
-            &previous,
-            STALE_GRACE_MS + 1,
-            1,
-        ));
-        assert_eq!(current.status, "ok");
-        assert!(!current.stale, "the first failure never warns");
-        assert_eq!(current.warning, None);
-    }
 
-    #[test]
-    fn expired_error_fallback_is_not_restored() {
-        let previous = Snapshot::ok(
-            "codex",
-            "Codex",
-            None,
-            vec![Metric::progress("Weekly", 25.0, None)],
-        );
-        let mut current = Snapshot::error("codex", "Codex", "timeout".into());
 
-        assert!(!restore_last_success_after_error(
-            &mut current,
-            &previous,
-            SNAPSHOT_CACHE_MS + 1,
-            5,
-        ));
-        assert_eq!(current.status, "error");
-        assert!(!current.stale);
-    }
 
-    #[test]
-    fn fold_keeps_moonshot_when_kimi_has_no_wallet() {
-        let mut all = vec![
-            Snapshot::ok(
-                "kimi",
-                "Kimi Code",
-                None,
-                vec![Metric::progress("Session", 0.0, None)],
-            ),
-            Snapshot::ok(
-                "moonshot",
-                "Kimi API",
-                None,
-                vec![Metric::progress("Credits used", 24.0, None)],
-            ),
-        ];
-        fold_moonshot_into_kimi(&mut all);
-        assert!(all.iter().any(|s| s.id == "moonshot"));
-    }
 
-    #[test]
-    fn fold_hides_moonshot_when_kimi_has_wallet_or_moonshot_is_empty() {
-        let mut with_api = vec![
-            Snapshot::ok(
-                "kimi",
-                "Kimi Code",
-                None,
-                vec![
-                    Metric::progress("Session", 0.0, None),
-                    Metric::progress("API", 24.0, None),
-                ],
-            ),
-            Snapshot::ok(
-                "moonshot",
-                "Kimi API",
-                None,
-                vec![Metric::progress("Credits used", 24.0, None)],
-            ),
-        ];
-        fold_moonshot_into_kimi(&mut with_api);
-        assert!(!with_api.iter().any(|s| s.id == "moonshot"));
 
-        let mut empty_moon = vec![
-            Snapshot::ok(
-                "kimi",
-                "Kimi Code",
-                None,
-                vec![Metric::progress("Session", 0.0, None)],
-            ),
-            Snapshot::no_credentials("moonshot", "Kimi API", "paste a key"),
-        ];
-        fold_moonshot_into_kimi(&mut empty_moon);
-        assert!(!empty_moon.iter().any(|s| s.id == "moonshot"));
-    }
+
 
     #[test]
     fn card_is_disabled_onenewapi_family_gates_keys_not_claude() {
@@ -6352,29 +5592,7 @@ mod tests {
         assert!(!last_ok().lock().unwrap().contains_key(id));
     }
 
-    #[test]
-    fn clear_soft_benches_keeps_only_rate_limits() {
-        let mut map = HashMap::new();
-        map.insert(
-            "claude@bench-soft".to_string(),
-            FailState {
-                until_ms: i64::MAX,
-                note: "connection refused".into(),
-                rate_limited: false,
-            },
-        );
-        map.insert(
-            "codex@bench-hard".to_string(),
-            FailState {
-                until_ms: i64::MAX,
-                note: "rate limited — cooling down".into(),
-                rate_limited: true,
-            },
-        );
-        retain_rate_limited_benches(&mut map);
-        assert!(!map.contains_key("claude@bench-soft"), "ordinary bench must drop");
-        assert!(map.contains_key("codex@bench-hard"), "429 bench must survive");
-    }
+
 
     #[test]
     fn rename_cached_snapshot_updates_name_only() {

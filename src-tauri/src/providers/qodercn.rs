@@ -266,6 +266,7 @@ pub(crate) fn credit_metrics(
     }
 
     let mut metrics = vec![credit_row("Credits", used + pkg_used, total + pkg_total)
+        .with_usage(crate::usage_units::UsageUnit::Credits, used + pkg_used, Some(total + pkg_total))
         .with_reset(earliest_reset, None)];
     metrics.extend(package_rows);
 

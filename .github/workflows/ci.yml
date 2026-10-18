@@ -28,9 +28,10 @@ jobs:
           version: 10
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 24
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      - run: pnpm test
       # tsc --noEmit + vite build (the same command the release uses).
       - run: pnpm run build
 

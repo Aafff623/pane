@@ -10,7 +10,6 @@
 //! windsurf login store, keyed by the Firebase `sub`.
 
 use base64::Engine;
-use rand_core::{OsRng, RngCore};
 use serde_json::{json, Value};
 use std::io::{Read, Write};
 use std::net::TcpListener;
@@ -49,36 +48,6 @@ struct Pending {
 }
 
 static PENDING: Mutex<Option<Pending>> = Mutex::new(None);
-
-fn random_token() -> String {
-    let mut bytes = [0u8; 24];
-    OsRng.fill_bytes(&mut bytes);
-    base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(bytes)
-}
-
-fn pct_encode(s: &str) -> String {
-    let mut out = String::new();
-    for b in s.bytes() {
-        match b {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => out.push(b as char),
-            _ => out.push_str(&format!("%{b:02X}")),
-        }
-    }
-    out
-}
-
-fn callback_html(ok: bool) -> String {
-    let (bg, fg, text) = if ok {
-        ("#18181b", "#4ade80", "Sign-in complete — you can close this tab and return to Pane.")
-    } else {
-        ("#18181b", "#f87171", "Sign-in failed — return to Pane and try again.")
-    };
-    format!(
-        "<!doctype html><html><head><meta charset=\"utf-8\"><title>Pane</title></head>\
-         <body style=\"font-family:sans-serif;background:{bg};color:{fg};display:flex;\
-         align-items:center;justify-content:center;height:100vh;margin:0\"><p>{text}</p></body></html>"
-    )
-}
 
 /// The SeatManagement service path every Windsurf account call shares.
 pub fn seat_url(base: &str, method: &str) -> String {
@@ -126,13 +95,13 @@ pub fn start() -> Result<LoginStart, String> {
     let listener = TcpListener::bind(("127.0.0.1", port)).map_err(|e| format!("bind callback port: {e}"))?;
     listener.set_nonblocking(true).map_err(|e| format!("listener setup: {e}"))?;
 
-    let login_id = random_token();
-    let state = random_token();
+    let login_id = crate::oauth_util::random_b64url(24);
+    let state = crate::oauth_util::random_b64url(24);
     let redirect_uri = format!("http://127.0.0.1:{port}{CALLBACK_PATH}");
     let auth_url = format!(
         "{AUTH_BASE_URL}/windsurf/signin?response_type=token&client_id={CLIENT_ID}&redirect_uri={}&state={}&prompt=login&redirect_parameters_type=query&workflow=onboarding",
-        pct_encode(&redirect_uri),
-        pct_encode(&state),
+        crate::oauth_util::pct_encode(&redirect_uri),
+        crate::oauth_util::pct_encode(&state),
     );
     {
         let mut guard = PENDING.lock().map_err(|_| "login state poisoned".to_string())?;
@@ -165,7 +134,7 @@ pub fn start() -> Result<LoginStart, String> {
                 let mut params: Vec<(String, String)> = Vec::new();
                 for pair in query.split('&') {
                     if let Some((k, v)) = pair.split_once('=') {
-                        params.push((pct_decode(k), pct_decode(v)));
+                        params.push((crate::oauth_util::pct_decode(k), crate::oauth_util::pct_decode(v)));
                     }
                 }
                 let get = |name: &str| {
@@ -191,7 +160,7 @@ pub fn start() -> Result<LoginStart, String> {
                     })
                 };
                 let ok = outcome.as_ref().map(|r| r.is_ok()).unwrap_or(false);
-                let html = callback_html(ok);
+                let html = crate::oauth_util::callback_html(ok);
                 let _ = stream.write_all(
                     format!(
                         "HTTP/1.1 {} OK\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
@@ -223,34 +192,6 @@ pub fn start() -> Result<LoginStart, String> {
     });
 
     Ok(LoginStart { login_id, auth_url })
-}
-
-fn pct_decode(s: &str) -> String {
-    let bytes = s.as_bytes();
-    let mut out = Vec::with_capacity(bytes.len());
-    let mut i = 0;
-    while i < bytes.len() {
-        match bytes[i] {
-            b'%' if i + 2 < bytes.len() => {
-                if let Ok(v) = u8::from_str_radix(std::str::from_utf8(&bytes[i + 1..i + 3]).unwrap_or(""), 16) {
-                    out.push(v);
-                    i += 3;
-                    continue;
-                }
-                out.push(b'%');
-                i += 1;
-            }
-            b'+' => {
-                out.push(b' ');
-                i += 1;
-            }
-            b => {
-                out.push(b);
-                i += 1;
-            }
-        }
-    }
-    String::from_utf8_lossy(&out).into_owned()
 }
 
 /// Exchange the Firebase token for the API key + server, then store the

@@ -68,8 +68,8 @@ fn state_path() -> PathBuf {
     providers::config_dir().join("telemetry.json")
 }
 
-fn load_state() -> State {
-    let mut state: State = std::fs::read_to_string(state_path())
+fn load_state_at(path: &std::path::Path) -> State {
+    let mut state: State = std::fs::read_to_string(path)
         .ok()
         .and_then(|raw| serde_json::from_str(raw.trim_start_matches('\u{feff}')).ok())
         .unwrap_or_default();
@@ -79,8 +79,7 @@ fn load_state() -> State {
     state
 }
 
-fn save_state(state: &State) {
-    let path = state_path();
+fn save_state_at(path: &std::path::Path, state: &State) {
     let tmp = path.with_extension("json.tmp");
     if let Ok(raw) = serde_json::to_string(state) {
         if std::fs::write(&tmp, raw).is_ok() {
@@ -311,11 +310,21 @@ fn event(name: &str, uuid: &str, mut props: Value) -> Value {
 /// fetch_usage; every failure path is silent (telemetry must never affect
 /// the app) and undelivered events simply try again next cycle.
 pub async fn record(enabled: bool, snap: ConfigSnapshot, outcomes: Vec<Outcome>) {
+    record_at(enabled, snap, outcomes, &state_path(), ENDPOINT).await;
+}
+
+async fn record_at(
+    enabled: bool,
+    snap: ConfigSnapshot,
+    outcomes: Vec<Outcome>,
+    path: &std::path::Path,
+    endpoint: &str,
+) {
     if !enabled {
         // Hard stop: no counting, no state — and any previously stored
         // state (UUID included) is removed, so re-enabling later starts
         // over as a fresh anonymous install.
-        let _ = std::fs::remove_file(state_path());
+        let _ = std::fs::remove_file(path);
         return;
     }
 
@@ -325,7 +334,7 @@ pub async fn record(enabled: bool, snap: ConfigSnapshot, outcomes: Vec<Outcome>)
     // its "today" ping at 19:00 UTC — landing in the *previous* UTC day,
     // so its country read 0 all day on the dashboard.
     let today = chrono::Utc::now().format("%Y-%m-%d").to_string();
-    let mut state = load_state();
+    let mut state = load_state_at(path);
 
     let mut batch = accumulate(&mut state, &today, &outcomes);
     let daily = daily_active(&state, &today, &snap);
@@ -333,7 +342,7 @@ pub async fn record(enabled: bool, snap: ConfigSnapshot, outcomes: Vec<Outcome>)
     batch.extend(daily);
 
     if !batch.is_empty() {
-        let sent = send(&batch).await;
+        let sent = send_at(endpoint, &batch).await;
         if sent && has_daily {
             state.daily_sent = today.clone();
         }
@@ -341,12 +350,12 @@ pub async fn record(enabled: bool, snap: ConfigSnapshot, outcomes: Vec<Outcome>)
         // the counters they summarized are already reset, and a lossy
         // daily rollup beats building a persistent outbox for it.
     }
-    save_state(&state);
+    save_state_at(path, &state);
 }
 
-async fn send(batch: &[Value]) -> bool {
+async fn send_at(endpoint: &str, batch: &[Value]) -> bool {
     let body = json!({ "api_key": TOKEN, "batch": batch });
-    match providers::http().post(ENDPOINT).json(&body).send().await {
+    match providers::http().post(endpoint).json(&body).send().await {
         Ok(resp) => resp.status().is_success(),
         Err(_) => false,
     }
@@ -355,6 +364,42 @@ async fn send(batch: &[Value]) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn record_retries_failed_daily_delivery_and_opt_out_deletes_fixture_state() {
+        let path = std::env::temp_dir().join(format!("pane-telemetry-flow-{}.json", std::process::id()));
+        let server = tiny_http::Server::http("127.0.0.1:0").unwrap();
+        let endpoint = format!("http://{}/batch/", server.server_addr());
+        let worker = std::thread::spawn(move || {
+            for status in [500, 200] {
+                let mut request = server.recv_timeout(std::time::Duration::from_secs(5))
+                    .unwrap().expect("daily telemetry request");
+                let mut body = String::new();
+                request.as_reader().read_to_string(&mut body).unwrap();
+                assert!(!body.contains("synthetic-private-endpoint"));
+                let batch: Value = serde_json::from_str(&body).unwrap();
+                assert!(batch["batch"].as_array().unwrap().iter().any(|event| event["event"] == "app_daily_active"));
+                request.respond(tiny_http::Response::empty(status)).unwrap();
+            }
+        });
+        let config = || ConfigSnapshot {
+            app_version: "test".into(), enabled_providers: vec!["claude".into()],
+            starred_metrics: vec![], appearance: "auto".into(), density: "normal".into(),
+            refresh_minutes: 5,
+        };
+        let error = || vec![outcome("claude", "error", false, Some("https://synthetic-private-endpoint/path"))];
+        tauri::async_runtime::block_on(record_at(true, config(), error(), &path, &endpoint));
+        let failed = load_state_at(&path);
+        assert!(failed.daily_sent.is_empty());
+        tauri::async_runtime::block_on(record_at(true, config(), error(), &path, &endpoint));
+        let succeeded = load_state_at(&path);
+        assert_eq!(succeeded.daily_sent, chrono::Utc::now().format("%Y-%m-%d").to_string());
+        assert_eq!(succeeded.uuid, failed.uuid);
+        worker.join().unwrap();
+        // An invalid destination proves the opt-out branch does not need transport.
+        tauri::async_runtime::block_on(record_at(false, config(), error(), &path, "invalid://unused"));
+        assert!(!path.exists());
+    }
 
     fn outcome(id: &str, status: &str, stale: bool, error: Option<&str>) -> Outcome {
         Outcome {

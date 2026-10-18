@@ -6,9 +6,10 @@
 //! the WebView memory hint. Callers elsewhere in the crate stay
 //! platform-agnostic — no `#[cfg]`, no Win32 imports, no `ps` parsing.
 //!
-//! Every function degrades instead of failing: a platform that cannot
-//! answer returns `None`, an empty list, or `false`, and the caller falls
-//! through to its next source. That is what keeps a provider card honest
+//! Discovery functions degrade: a platform that cannot answer returns
+//! `None`, an empty list, or `false`, and the caller tries its next source.
+//! Private-file and randomness operations return errors rather than
+//! silently dropping security guarantees. That keeps a provider card honest
 //! ("not found on this PC") rather than broken on a platform whose
 //! credential store Pane cannot read.
 
@@ -17,6 +18,10 @@
 mod imp;
 
 use std::collections::BTreeMap;
+use std::path::Path;
+
+#[cfg(all(windows, test))]
+pub(crate) use imp::{current_user_sid, dacl_sddl, set_protected_dacl};
 
 /// One running process, with the full command line callers parse flags out
 /// of (Antigravity's language server publishes its port and CSRF token
@@ -296,6 +301,22 @@ mod tests {
         );
     }
 
+    #[test]
+    fn provider_modules_do_not_implement_os_calls() {
+        let root = source_root();
+        let mut files = Vec::new();
+        collect_rust_files(&root.join("providers"), &mut files);
+        let offenders: Vec<String> = files.iter().filter(|file| {
+            std::fs::read_to_string(file).is_ok_and(|source| {
+                source.contains("use windows::")
+                    || source.contains("extern \"system\"")
+                    || source.contains("std::os::windows::")
+                    || source.contains("Component::Prefix")
+            })
+        }).map(|file| file.strip_prefix(&root).unwrap().display().to_string()).collect();
+        assert!(offenders.is_empty(), "OS implementation must use the platform seam: {offenders:?}");
+    }
+
     /// Both spawn helpers must still run a real console child and capture its
     /// stdout: the window-suppression flag must not break the spawn itself.
     #[cfg(windows)]
@@ -351,4 +372,65 @@ mod tests {
         assert_eq!(language_tag_to_locale("C"), "en");
         assert_eq!(language_tag_to_locale(""), "en");
     }
+}
+
+/// "127.0.0.1:7897" or "http=127.0.0.1:7897;https=127.0.0.1:7897" → one URL.
+/// https wins when both are listed (every vendor we talk to is https).
+pub(crate) fn parse_win_proxy(raw: &str) -> Option<String> {
+    let raw = raw.trim();
+    if raw.is_empty() {
+        return None;
+    }
+    let pick = |scheme: &str| {
+        raw.split(';')
+            .filter_map(|part| part.trim().split_once('='))
+            .find(|(key, _)| key.trim().eq_ignore_ascii_case(scheme))
+            .map(|(_, value)| value.trim().to_string())
+            .filter(|value| !value.is_empty())
+    };
+    let host = pick("https")
+        .or_else(|| pick("http"))
+        .or_else(|| (!raw.contains('=')).then(|| raw.to_string()))?;
+    if host.is_empty() {
+        return None;
+    }
+    Some(if host.contains("://") {
+        host
+    } else {
+        format!("http://{host}")
+    })
+}
+
+
+/// Enabled system proxy, absent on hosts without a supported system setting.
+pub fn system_proxy() -> Option<String> { imp::system_proxy() }
+
+/// Owner/SYSTEM access on Windows, mode 0600 on Unix. Failures stay visible.
+pub(crate) fn restrict_owner_only(path: &Path) -> Result<(), String> { imp::restrict_owner_only(path) }
+
+/// Create a new private staging file without truncating an existing file.
+pub(crate) fn create_private_file(path: &Path) -> Result<(), String> {
+    let mut options = std::fs::OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    drop(options.open(path).map_err(|error| format!("create private file: {error}"))?);
+    Ok(())
+}
+
+/// Atomically replace an existing destination; Windows requests write-through.
+pub(crate) fn replace_file(replacement: &Path, destination: &Path) -> std::io::Result<()> {
+    imp::replace_file(replacement, destination)
+}
+
+/// Reject relative and Windows current-drive-root paths for credential homes.
+pub(crate) fn path_is_fully_absolute(path: &Path) -> bool { imp::path_is_fully_absolute(path) }
+
+/// Fallible OS randomness; never replace an unavailable CSPRNG with predictable ids.
+pub(crate) fn fill_random(bytes: &mut [u8]) -> Result<(), String> {
+    use rand_core::{OsRng, RngCore};
+    OsRng.try_fill_bytes(bytes).map_err(|error| format!("OS RNG failed: {error}"))
 }

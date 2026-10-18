@@ -72,24 +72,16 @@ fn creds_path() -> PathBuf {
 }
 
 fn load_creds() -> Creds {
-    std::fs::read_to_string(creds_path())
-        .ok()
-        .and_then(|s| serde_json::from_str(&s).ok())
+    crate::secretstore::load_session("web/stepfun-plan", &creds_path(), 256 * 1024)
+        .and_then(|doc| serde_json::from_value(doc).ok())
         .unwrap_or_default()
 }
 
 /// Atomic persist: sibling temp file + rename, so a crash mid-write can
 /// never leave a half credential file.
-fn save_creds(creds: &Creds) {
-    let path = creds_path();
-    let tmp = path.with_extension("json.tmp");
-    let ok = serde_json::to_string_pretty(creds)
-        .ok()
-        .and_then(|s| std::fs::write(&tmp, s).ok())
-        .is_some_and(|()| std::fs::rename(&tmp, &path).is_ok());
-    if !ok {
-        let _ = std::fs::remove_file(&tmp);
-    }
+fn save_creds(creds: &Creds) -> Result<(), String> {
+    let doc = serde_json::to_value(creds).map_err(|e| format!("encode session: {e}"))?;
+    crate::secretstore::save_session("web/stepfun-plan", &creds_path(), &doc)
 }
 
 /// Backoff for the entire renewal/login ladder. FETCH_LOCK serializes callers.
@@ -244,14 +236,14 @@ pub async fn save_creds_interactive(
             })?;
         creds.token = tok;
     }
-    save_creds(&creds);
+    save_creds(&creds)?;
     *renew_state() = Renew::default();
     Ok(())
 }
 
 pub async fn clear_creds() {
     let _flight = FETCH_LOCK.lock().await;
-    let _ = std::fs::remove_file(creds_path());
+    let _ = crate::secretstore::clear_session("web/stepfun-plan", &creds_path());
     *renew_state() = Renew::default();
 }
 
@@ -521,7 +513,7 @@ async fn renew(creds: &mut Creds) -> AuthResult<Option<String>> {
                 guard.next_attempt_ms = 0;
                 guard.last_error = None;
                 creds.token = pair.clone();
-                save_creds(creds);
+                let _ = save_creds(creds);
                 Ok(Some(pair))
             }
             Err(e) => {

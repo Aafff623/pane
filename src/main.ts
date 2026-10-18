@@ -18,6 +18,10 @@ import { MECHANISMS } from "./providerMechanisms";
 import { uiIcon, type UiIconName } from "./uiIcons";
 import { fitDashboardTypography, observeDashboardTypography } from "./responsiveTypography";
 import { overviewTextMetrics } from "./overviewTextMetrics";
+import { RefreshState } from "./refreshState";
+import { RenderScheduler } from "./renderScheduler";
+import { primaryMeterTrend, type MeterTrend, type UsageUnit } from "./usageUnits";
+import { extractRecoveryCode } from "./recoveryCode";
 import {
   applyStaticI18n,
   displayLinkLabel,
@@ -90,6 +94,7 @@ interface Metric {
   /// Set by the search/MCP families on their per-key rows only (null on
   /// headline/summary rows and for every other provider).
   available?: boolean | null;
+  usage?: { unit: UsageUnit; used: number; total?: number; scope?: string } | null;
 }
 
 interface Snapshot {
@@ -627,7 +632,7 @@ async function applySettingsAndReload(): Promise<void> {
   window.location.reload();
 }
 let lastFetch = 0;
-let refreshing = false;
+const refreshState = new RefreshState();
 /// True while the footer status line carries the idle "数据更新于…" text —
 /// the minute ticker may rewrite it; any transient message clears it.
 let statusShowsUpdated = false;
@@ -662,11 +667,6 @@ function renderIdleFooter(): void {
   statusIdleText = idleFooterText();
   status.textContent = statusIdleText;
 }
-// A forced refresh requested while one was already in flight (saving an
-// API key races the auto-refresh timer). Dropping it would leave the new
-// state unfetched and the status line stuck on the save message.
-let refreshQueued = false;
-let refreshQueuedUsageOnly = true;
 // A key saved while the first refresh is still in flight. First-run (and
 // "new provider") auto-disable keys off that fetch's no_credentials list,
 // which can predate the save and park the provider we just turned on.
@@ -691,10 +691,6 @@ function finishProviderEnable(id: string, generation: number): void {
   requestTraySync();
 }
 
-let refreshGeneration = 0;
-let completedRefreshGeneration = 0;
-const refreshAttemptWaiters: Array<{ generation: number; resolve: () => void }> = [];
-let lastAppliedSpendGen = 0;
 let refreshTimer: number | undefined;
 let footerTick: number | undefined;
 let lastSnapshots: Snapshot[] = [];
@@ -849,6 +845,7 @@ interface CreditWindows {
 }
 interface CreditExtra {
   id: string;
+  unit?: UsageUnit;
   windows: CreditWindows;
 }
 let lastCreditExtras: CreditExtra[] = [];
@@ -856,6 +853,7 @@ let spendLoaded = false;
 let spendDetailOpen = false;
 let spendDetailDay = "";
 let lastCreditTrend: Record<string, (number | null)[]> = {};
+let lastMeterTrend: MeterTrend[] = [];
 
 /// Tracks manual account-tab selections made by the user in the current view.
 /// Cleared on popover reopening or account mutations.
@@ -897,7 +895,7 @@ function resolveDisplayedAccount(family: string, defaultId: string, accountIds: 
   return accountIds.includes(defaultId) ? defaultId : accountIds[0] ?? defaultId;
 }
 
-type TrendSource = { id: string; trend: (number | null)[]; credits?: boolean; fmt: (v: number) => string };
+type TrendSource = { id: string; trend: (number | null)[]; credits?: boolean; unit?: UsageUnit; fmt: (v: number) => string };
 
 /// Credit counts are small whole numbers (38 of 2000), so no k/M suffix.
 const fmtCredits = (v: number): string => Math.round(v).toLocaleString(localeTag());
@@ -911,9 +909,18 @@ function trendSourceFor(id: string): TrendSource | undefined {
   const local = lastSpend.find((sp) => sp.id === id);
   const metricCost = config.spendMetric === "cost";
   if (local) return { id, trend: metricCost ? local.trend_cost : local.trend, fmt: metricCost ? fmtMoney : fmtTokens };
+  const meter = primaryMeterTrend(id, lastMeterTrend);
+  if (meter) return { ...meter, credits: true, fmt: value => formatUsageQuantity(value, meter.unit) };
   const credits = lastCreditTrend[id];
   if (credits?.some((v) => v != null && v > 0)) return { id, trend: credits, credits: true, fmt: fmtCredits };
   return undefined;
+}
+
+function formatUsageQuantity(value: number, unit: UsageUnit): string {
+  const amount = value.toLocaleString(localeTag(), { maximumFractionDigits: 2 });
+  const suffix = unit === "tokens" ? "tokens" : unit === "credits" ? t("spend.creditsUnit")
+    : unit === "minutes" ? t("usage.minutes") : t("usage.requests");
+  return `${amount} ${suffix}`;
 }
 let spendTab: SpendTab = "today";
 let rangeTab: RangeTab = "d30";
@@ -1036,7 +1043,7 @@ async function selectSkin(id: SkinId | null): Promise<void> {
     else localStorage.removeItem(SKIN_STORAGE_KEY);
   } catch { /* A successful native config save still takes precedence. */ }
   applySkin();
-  renderAll();
+  requestRender();
   document.querySelector("#status")!.textContent = id ? "" : t("skin.nativeApplied");
   requestAnimationFrame(fitProviderNames);
   for (const button of document.querySelectorAll<HTMLButtonElement>("[data-skin-select]")) {
@@ -1218,7 +1225,7 @@ async function reloadConfigFromBackend(): Promise<void> {
   const hideUnconfiguredChanged =
     (config.hideUnconfigured !== false) !== (fresh.hideUnconfigured !== false);
   config = fresh;
-  if (hideUnconfiguredChanged) renderAll();
+  if (hideUnconfiguredChanged) requestRender();
   pruneEmptyCardGroups();
   // The other window may have just handed us a "open this family" request.
   applyPanelIntent();
@@ -1784,7 +1791,7 @@ function setCardGroup(cardId: string, groupId: string): void {
   if (groupId) layout.providers[fam].group = groupId;
   else delete layout.providers[fam].group;
   void patchConfig({ layout });
-  renderAll();
+  requestRender();
 }
 
 /// Category a family renders under: the user's per-family override wins
@@ -1809,7 +1816,7 @@ function setFamilyCategory(family: string, category: OverviewCategory): void {
   if (providerCategory(family) === category) delete next[family];
   else next[family] = category;
   void patchConfig({ categoryOverrides: next });
-  renderAll();
+  requestRender();
 }
 
 /// The card's user note (custom display name). Unlike the group tag, notes
@@ -1870,7 +1877,7 @@ function setCardNote(cardId: string, note: string): void {
   if (note) config.layout.providers[cardId].note = note;
   else delete config.layout.providers[cardId].note;
   void patchConfig({ layout: config.layout });
-  renderAll();
+  requestRender();
 }
 
 /// Hides a provider card from the dashboard while keeping its credentials and
@@ -1889,7 +1896,7 @@ function removeProviderCard(cardId: string): void {
     }
     lastSnapshots = lastSnapshots.filter((s) => s.id !== cardId);
     void patchConfig({ disabled: config.disabled, layout: config.layout });
-    renderAll();
+    requestRender();
     return;
   }
   // Provider-level delete: gone from the Customize list AND every
@@ -1908,7 +1915,7 @@ function removeProviderCard(cardId: string): void {
   lastSnapshots = lastSnapshots.filter((s) => providerFamily(s.id) !== family);
   void patchConfig({ removedProviders: config.removedProviders, disabled: config.disabled, layout: config.layout });
   custConfigOpen = null;
-  renderAll();
+  requestRender();
   renderDrawerBody();
 }
 
@@ -1917,7 +1924,7 @@ function restoreProviderFamily(family: string): void {
   config.removedProviders = config.removedProviders.filter((id) => id !== family);
   config.disabled = config.disabled.filter((id) => id !== family);
   void patchConfig({ removedProviders: config.removedProviders, disabled: config.disabled });
-  renderAll();
+  requestRender();
   renderDrawerBody();
 }
 
@@ -1975,7 +1982,7 @@ function deleteCardGroup(id: string): boolean {
   if (!layout || cardGroupMemberCount(id) > 0) return false;
   layout.groups = (layout.groups ?? []).filter((g) => g.id !== id);
   void patchConfig({ layout });
-  renderAll();
+  requestRender();
   return true;
 }
 
@@ -2139,18 +2146,14 @@ function renderTrend(source: TrendSource): string {
     })
     .join("");
   const title = source.credits
-    ? t("spend.creditTrendTip", { from: dateOf(0), to: dateOf(29) })
+    ? t("usage.meterTrendTip", { from: dateOf(0), to: dateOf(29) })
     : t("spend.trendTip", {
         from: dateOf(0),
         to: dateOf(29),
         value: source.fmt(max),
         peak: dateOf(peakIdx),
       });
-  const trendLabel = source.credits
-    ? t("spend.creditTrend")
-    : config.spendMetric === "cost"
-      ? t("spend.costTrend")
-      : t("spend.tokenTrend");
+  const trendLabel = t("card.usageTrend");
   return `
     <div class="metric trend">
       <span class="metric-label" title="${escapeHtml(title)}">${escapeHtml(trendLabel)}</span>
@@ -2696,7 +2699,7 @@ function setPinnedAccount(family: string, accountId: string): void {
   layout.providers[family] = current;
   config.layout = layout;
   saveLayout(false);
-  renderAll();
+  requestRender();
 }
 
 function cardMetricRows(layout: ProviderLayout, metrics: Metric[]): { always: string[]; onDemand: string[] } {
@@ -3496,14 +3499,14 @@ function switchOverviewTab(tab: OverviewTab): void {
   if (overviewTab === tab) return;
   overviewTab = tab;
   void patchConfig({ overviewTab: tab });
-  renderIfVisible();
+  requestRender();
 }
 
 function switchOverviewCategory(category: OverviewCategory): void {
   if (overviewCategory === category) return;
   overviewCategory = category;
   void patchConfig({ overviewCategory: category });
-  renderIfVisible();
+  requestRender();
 }
 
 /// Tab switch morphs the existing arcs in place (identity-keyed per
@@ -3512,7 +3515,7 @@ function switchSpendTab(tab: SpendTab): void {
   spendTab = tab;
   rangeSelected = tab === "last30";
   void patchConfig({ spendTab });
-  renderAll();
+  requestRender();
 }
 
 function localDayKey(date: Date): string {
@@ -3752,10 +3755,10 @@ function renderTotalSpend(): string {
   // (an all-zero window hides the whole section).
   const creditRows = creditEntriesForRange(rangeSelected ? rangeTab : spendTab === "yesterday" ? "yesterday" : "today");
   const creditRow = creditRows.length
-    ? `<div class="spend-credits" title="${escapeHtml(t("spend.creditsTip"))}"><span class="spend-credits-label">${escapeHtml(t("spend.credits"))}</span>${creditRows
+    ? `<div class="spend-credits" title="${escapeHtml(t("usage.metersTip"))}"><span class="spend-credits-label">${escapeHtml(t("usage.meters"))}</span>${creditRows
         .map(
           (row) =>
-            `<span class="spend-credit-item"><span class="spend-credit-name">${escapeHtml(row.name)}</span><span class="spend-credit-value">${escapeHtml(fmtTokens(row.value))} ${escapeHtml(t("spend.creditsUnit"))}</span></span>`,
+            `<span class="spend-credit-item"><span class="spend-credit-name">${escapeHtml(row.name)}</span><span class="spend-credit-value">${escapeHtml(formatUsageQuantity(row.value, row.unit))}</span></span>`,
         )
         .join("")}</div>`
     : "";
@@ -4682,7 +4685,7 @@ async function checkForUpdate(): Promise<void> {
       updateVersion = v;
       // The Total Spend header carries the push indicator — repaint so the
       // green arrow appears the moment a version is announced.
-      renderIfVisible();
+      requestRender();
     }
   } catch {
     // Offline or GitHub unreachable — the stamp just returns; the
@@ -5086,7 +5089,7 @@ async function runProviderPicker(firstRun: boolean): Promise<void> {
   config.layout = layout;
   config.setupPicked = true;
   await patchConfig({ disabled: config.disabled, layout, setupPicked: true }).catch(() => {});
-  renderAll();
+  requestRender();
   void forceUsageRefreshAttempt(false).then(requestTraySync);
 }
 
@@ -5226,7 +5229,7 @@ function openGroupManagementPanel(): void {
     const target = event.target as HTMLElement;
     if (target.closest("[data-group-manage-add]")) {
       const name = await appPrompt({ title: t("overview.groupCreatePrompt"), confirmLabel: t("dialog.ok") });
-      if (name?.trim()) { upsertCardGroup(newGroupId(), name.trim()); renderAll(); openGroupManagementPanel(); }
+      if (name?.trim()) { upsertCardGroup(newGroupId(), name.trim()); requestRender(); openGroupManagementPanel(); }
       return;
     }
     const rename = target.closest<HTMLElement>("[data-group-manage-rename]");
@@ -5234,7 +5237,7 @@ function openGroupManagementPanel(): void {
       const g = cardGroup(rename.dataset.groupManageRename!);
       if (!g) return;
       const name = await appPrompt({ title: t("customize.groupRenamePrompt"), initial: g.name, confirmLabel: t("dialog.ok") });
-      if (name?.trim() && name.trim() !== g.name) { upsertCardGroup(g.id, name.trim()); renderAll(); openGroupManagementPanel(); }
+      if (name?.trim() && name.trim() !== g.name) { upsertCardGroup(g.id, name.trim()); requestRender(); openGroupManagementPanel(); }
       return;
     }
     const del = target.closest<HTMLElement>("[data-group-manage-delete]");
@@ -5247,7 +5250,7 @@ function openGroupManagementPanel(): void {
         return;
       }
       if (await appConfirm({ title: t("customize.groupDelete"), message: t("customize.groupDeleteConfirm", { name: g.name }), confirmLabel: t("customize.groupDelete"), danger: true })) {
-        deleteCardGroup(g.id); renderAll(); openGroupManagementPanel();
+        deleteCardGroup(g.id); requestRender(); openGroupManagementPanel();
       }
     }
   });
@@ -6297,9 +6300,10 @@ function envelopeEntries(range: ShareRange): DonutEntry[] {
   return byModel ? modelEntriesForRange(range) : donutEntriesForRange(range);
 }
 
-function creditEntriesForRange(range: ShareRange): { id: string; name: string; value: number }[] {
+function creditEntriesForRange(range: ShareRange): { id: string; name: string; value: number; unit: UsageUnit }[] {
   return lastCreditExtras.map((credit) => ({
     id: credit.id,
+    unit: credit.unit ?? "credits",
     name: notedName(credit.id, providerDisplayName(providerFamily(credit.id))),
     value: credit.windows[range === "all" ? "all" : range],
   })).filter((row) => row.value > 0).sort((a, b) => a.name.localeCompare(b.name, localeTag()));
@@ -6334,7 +6338,7 @@ async function shareSpendEnvelope(range: ShareRange): Promise<void> {
     const body = entries.length
       ? `${rows}${overflow > 0 ? `<div class="envelope-more">+${overflow}</div>` : ""}`
       : credits.length ? "" : `<div class="envelope-empty">${escapeHtml(t("spend.noUsage"))}</div>`;
-    const creditBody = credits.length ? `<div class="spend-credits"><span class="spend-credits-label">${escapeHtml(t("spend.credits"))}</span>${credits.map((row) => `<span class="spend-credit-item"><span class="spend-credit-name">${escapeHtml(row.name)}</span><span class="spend-credit-value">${escapeHtml(fmtCredits(row.value))} ${escapeHtml(t("spend.creditsUnit"))}</span></span>`).join("")}</div>` : "";
+    const creditBody = credits.length ? `<div class="spend-credits"><span class="spend-credits-label">${escapeHtml(t("usage.meters"))}</span>${credits.map((row) => `<span class="spend-credit-item"><span class="spend-credit-name">${escapeHtml(row.name)}</span><span class="spend-credit-value">${escapeHtml(formatUsageQuantity(row.value, row.unit))}</span></span>`).join("")}</div>` : "";
 
     const card = document.createElement("div");
     card.className = "envelope snap-card";
@@ -6878,7 +6882,7 @@ function undoLayout(): void {
   config.layout = JSON.parse(prev) as Layout;
   lastLayoutSnapshot = prev;
   void patchConfig({ layout: config.layout });
-  renderAll();
+  requestRender();
   requestTraySync();
   document.querySelector("#status")!.textContent = "Layout change undone";
 }
@@ -7512,7 +7516,7 @@ function resetAccountSaveButton(form: HTMLElement | null): void {
 // Every credential editor uses this same mutation path. List and quota
 // caches must change together, including while Customize remains open.
 async function afterCredentialMutation(family: string, savedId?: string, enable = true): Promise<void> {
-  if (enable) recentlyKeyed.set(family, refreshGeneration);
+  if (enable) recentlyKeyed.set(family, refreshState.generation);
   const layout = config.layout ?? { providerOrder: [], providers: {} };
   layout.providers[family] ??= { metricOrder: [], onDemand: [], hidden: [], starred: [], expanded: false };
   if (enable) await patchConfig({ disabled: config.disabled.filter((id) => id !== family),
@@ -7532,7 +7536,7 @@ async function afterCredentialMutation(family: string, savedId?: string, enable 
     } as Snapshot);
   }
   accountProbeSnapshots.delete(family);
-  renderIfVisible();
+  requestRender();
   if (IS_PANEL_FORM) {
     // fetch_usage broadcasts usage-updated to the popover as well.
     await invoke("fetch_usage", { clearBenches: true });
@@ -7588,7 +7592,7 @@ function refreshAccounts(family: string): void {
       // menu source immediately so a freshly archived account is offered in
       // Restore without requiring another quota refresh.
       if (customizeOpen) renderDrawerBody();
-      else if (lastSnapshots.length) renderIfVisible();
+      else if (lastSnapshots.length) requestRender();
     })
     .catch(() => {
       archivedAccountsCache.set(family, []);
@@ -7600,7 +7604,7 @@ function refreshAccounts(family: string): void {
       // The list feeds both the Customize child rows and the dashboard's
       // merged-card tabs, so both surfaces need the fresh labels.
       if (customizeOpen) renderDrawerBody();
-      if (layoutChanged || lastSnapshots.length) renderIfVisible();
+      if (layoutChanged || lastSnapshots.length) requestRender();
     })
     .catch(() => {
       accountsCache.set(family, []);
@@ -9177,7 +9181,7 @@ function renderCategoryCards(snaps: Snapshot[], groups: CardGroup[]): string {
   return sections.join("");
 }
 
-function renderAll(): void {
+function renderDashboard(): void {
   hideSpendPop();
   document.querySelector(".spend-detail-overlay")?.remove();
   const el = document.querySelector("#providers")!;
@@ -9194,9 +9198,18 @@ function renderAll(): void {
   requestAnimationFrame(fitProviderNames);
 }
 
+function requestRender(): void {
+  renderScheduler.request();
+}
+
+function flushRender(): void {
+  renderScheduler.request();
+  renderScheduler.flush();
+}
+
 /// Jumps from a quota-overview item to its real provider card. Grouped cards
 /// may live inside a hidden `.card-group-fold`; reveal that group first, then
-/// resolve the card again because renderAll() rebuilds the provider DOM.
+/// resolve the card again after the requested provider DOM rebuild.
 function jumpToProviderCard(providerId: string): void {
   const selector = `article.provider[data-provider="${CSS.escape(providerId)}"]`;
   const card = document.querySelector<HTMLElement>(selector);
@@ -9208,7 +9221,7 @@ function jumpToProviderCard(providerId: string): void {
     if (group) {
       group.collapsed = false;
       void patchConfig({ layout: config.layout });
-      renderAll();
+      requestRender();
       requestAnimationFrame(() => jumpToProviderCard(providerId));
       return;
     }
@@ -9575,10 +9588,11 @@ function updateTrailActive(): void {
 function showTrendTip(el: HTMLElement): void {
   const tip = document.querySelector<HTMLElement>("#model-tip")!;
   const [id, idxStr] = (el.dataset.trend ?? "").split("|");
+  const meter = primaryMeterTrend(id, lastMeterTrend);
   const spend = lastSpend.find((s) => s.id === id);
   // Mirror trendSourceFor's precedence: credits-billed cards render the
   // credit series, so the hover must read it too.
-  const credits = spend ? undefined : lastCreditTrend[id];
+  const credits = spend ? undefined : meter?.trend ?? lastCreditTrend[id];
   const useCredits = !spend && credits?.some((v) => v != null && v > 0);
   if (!spend && !useCredits) return;
   const i = Number(idxStr);
@@ -9602,7 +9616,7 @@ function showTrendTip(el: HTMLElement): void {
     const dayVal = credits![i];
     lines = `
     <div class="tip-line"><span class="tip-name">${escapeHtml(date)}</span><span>${
-      dayVal == null ? escapeHtml(t("spend.noDataDay")) : dayVal > 0 ? escapeHtml(t("spend.creditBarTip", { n: fmtCredits(dayVal) })) : escapeHtml(t("spend.noUsage"))
+      dayVal == null ? escapeHtml(t("spend.noDataDay")) : dayVal > 0 ? escapeHtml(meter ? formatUsageQuantity(dayVal, meter.unit) : t("spend.creditBarTip", { n: fmtCredits(dayVal) })) : escapeHtml(t("spend.noUsage"))
     }</span></div>`;
   }
   tip.innerHTML = lines;
@@ -9651,40 +9665,23 @@ function showModelTip(row: HTMLElement): void {
 /// Background refreshes must not pay DOM costs nobody can see: while the
 /// popover is hidden (99% of the time), rendering is deferred to the next
 /// open instead of rebuilding a filter-heavy DOM every refresh interval.
-let pendingRender = false;
-
-function renderIfVisible(): void {
-  if (document.hidden) {
-    pendingRender = true;
-    return;
-  }
-  pendingRender = false;
-  scheduleRender();
-}
-
-/// One refresh can ask to paint several times (usage, history, spend,
-/// each extra-account list). Coalesce those onto the next frame so the
-/// tree is built once.
-let renderFrame = 0;
-function scheduleRender(): void {
-  if (renderFrame) return;
-  renderFrame = requestAnimationFrame(() => {
-    renderFrame = 0;
-    if (document.hidden) {
-      pendingRender = true;
-      return;
-    }
-    renderAll();
+const renderScheduler = new RenderScheduler(
+  () => {
+    renderDashboard();
     populatePinnedOptions();
-  });
-}
+  },
+  () => !document.hidden,
+  callback => requestAnimationFrame(callback),
+  frame => cancelAnimationFrame(frame),
+);
 
-/// 30s tick: rewrite countdown text in place. A full `renderAll` would
+
+/// 30s tick: rewrite countdown text in place. A full `requestRender` would
 /// throw away the whole tree (scroll, hover, focus) just to change
 /// "Resets in 3h 41m" → "3h 40m".
 function tickCountdowns(): void {
   if (document.hidden) {
-    pendingRender = true;
+    renderScheduler.request();
     return;
   }
   if (customizeOpen || !lastSnapshots.length) return;
@@ -9706,7 +9703,7 @@ function tickCountdowns(): void {
     el.textContent = fmtDuration(remain);
   });
   // A window that just closed needs a real refresh — bars and tones change.
-  if (expired) renderIfVisible();
+  if (expired) requestRender();
 }
 
 function hideFoldedMoonshot(snapshots: Snapshot[]): Snapshot[] {
@@ -9735,33 +9732,20 @@ async function paintCachedSnapshots(): Promise<void> {
     if (!cached.length || lastSnapshots.length) return;
     lastSnapshots = cached;
     ensureLayout();
-    renderIfVisible();
+    requestRender();
     requestTraySync();
   } catch {
     // No cache readable — the live fetch paints, as before.
   }
 }
 
-function setRefreshLock(on: boolean): void {
-  refreshing = on;
-  document.body.classList.toggle("refreshing", on);
-  document.querySelector("#refresh")?.setAttribute("aria-busy", on ? "true" : "false");
-}
-
-function completeRefreshAttempt(generation: number): void {
-  completedRefreshGeneration = Math.max(completedRefreshGeneration, generation);
-  for (let index = refreshAttemptWaiters.length - 1; index >= 0; index -= 1) {
-    if (refreshAttemptWaiters[index].generation <= completedRefreshGeneration) {
-      refreshAttemptWaiters.splice(index, 1)[0].resolve();
-    }
-  }
+function paintRefreshState(): void {
+  document.body.classList.toggle("refreshing", refreshState.busy);
+  document.querySelector("#refresh")?.setAttribute("aria-busy", refreshState.busy ? "true" : "false");
 }
 
 async function forceUsageRefreshAttempt(usageOnly = true): Promise<void> {
-  const generation = refreshGeneration + 1;
-  const completed = new Promise<void>((resolve) => {
-    refreshAttemptWaiters.push({ generation, resolve });
-  });
+  const completed = refreshState.waitForNextAttempt();
   void refresh(true, usageOnly);
   await completed;
 }
@@ -9805,12 +9789,26 @@ function scheduleBackoffRetries(snapshots: Snapshot[]): void {
     const timer = window.setTimeout(async () => {
       const current = backoffRetries.get(s.id);
       if (current) current.timer = null;
+      // A per-card retry must not race the full refresh, which owns the
+      // authoritative snapshot generation for the dashboard.
+      if (refreshState.busy) {
+        scheduleBackoffRetries(lastSnapshots);
+        return;
+      }
+      const retryGeneration = refreshState.generation;
       try {
         const snap = await invoke<Snapshot>("refresh_provider", { providerId: s.id });
+        // A full refresh may have completed while this request was in flight.
+        // Its result is newer by contract, so discard this retry response and
+        // let the normal scheduler decide whether another retry is needed.
+        if (refreshState.busy || refreshState.generation !== retryGeneration) {
+          scheduleBackoffRetries(lastSnapshots);
+          return;
+        }
         const idx = lastSnapshots.findIndex((item) => item.id === s.id);
         if (idx >= 0) lastSnapshots[idx] = snap;
         else lastSnapshots.push(snap);
-        renderIfVisible();
+        requestRender();
         if (!snap.stale && snap.status === "ok") {
           clearBackoffRetry(s.id);
         } else {
@@ -9832,22 +9830,20 @@ async function refresh(
   usageOnly = false,
   interactive = false,
 ): Promise<void> {
-  if (refreshing) {
+  if (!refreshState.busy && !force && Date.now() - lastFetch < STALE_MS) return;
+  const myGen = refreshState.request(force, usageOnly, interactive);
+  if (myGen === null) {
     // Remember a forced request instead of dropping it: the in-flight
     // fetch may have started before whatever prompted this one (a saved
     // key, a toggle), so one more pass runs when it finishes.
     if (force) {
-      refreshQueuedUsageOnly = refreshQueued ? refreshQueuedUsageOnly && usageOnly : usageOnly;
-      refreshQueued = true;
       // The save message (or a stale "Updated") would otherwise sit on
       // the footer until the in-flight fetch ends, and Refresh looks dead.
       document.querySelector("#status")!.textContent = t("footer.refreshing");
     }
     return;
   }
-  if (!force && Date.now() - lastFetch < STALE_MS) return;
-  setRefreshLock(true);
-  const myGen = ++refreshGeneration;
+  paintRefreshState();
   const status = document.querySelector("#status")!;
   status.textContent = t("footer.refreshing");
   // The spend scan re-reads every session log on a cold start and can take
@@ -9876,6 +9872,7 @@ async function refresh(
   const creditTrendPromise = invoke<Record<string, (number | null)[]>>("fetch_credit_history").catch(
     () => null,
   );
+  const meterTrendPromise = invoke<MeterTrend[]>("fetch_meter_history").catch(() => null);
   try {
     await unparkRecentlyKeyed();
     let snapshots = await invoke<Snapshot[]>("fetch_usage", {
@@ -9967,7 +9964,7 @@ async function refresh(
     if (!lastLayoutSnapshot && config.layout) {
       lastLayoutSnapshot = JSON.stringify(config.layout);
     }
-    renderIfVisible();
+    requestRender();
     scheduleBackoffRetries(lastSnapshots);
     if (firstData && !customizeOpen && !document.hidden) playReveal();
     requestTraySync();
@@ -9982,34 +9979,31 @@ async function refresh(
       ? t("footer.configSaveFailed", { err: configSaveError })
       : t("footer.refreshFailed", { err: String(err) });
   } finally {
-    setRefreshLock(false);
-    completeRefreshAttempt(myGen);
-    if (refreshQueued) {
-      refreshQueued = false;
-      const queuedUsageOnly = refreshQueuedUsageOnly;
-      refreshQueuedUsageOnly = true;
-      void refresh(true, queuedUsageOnly);
-    }
+    const queued = refreshState.complete(myGen);
+    paintRefreshState();
+    if (queued) void refresh(true, queued.usageOnly, queued.interactive);
   }
   const spend = await spendPromise;
   const spendHistory = await spendHistoryPromise;
   const spendDaily = await spendDailyPromise;
   const creditTrend = await creditTrendPromise;
-  if (creditTrend) {
+  const meterTrend = await meterTrendPromise;
+  if (refreshState.acceptResult("meterTrend", myGen, meterTrend)) lastMeterTrend = meterTrend;
+  if (refreshState.acceptResult("creditTrend", myGen, creditTrend)) {
     lastCreditTrend = creditTrend;
     if (usageOnly && lastSnapshots.length) {
       ensureLayout();
-      if (!customizeOpen) renderIfVisible();
+      if (!customizeOpen) requestRender();
     }
   }
   if (usageOnly) return;
-  if (spendHistory && myGen >= lastAppliedSpendGen) {
+  if (refreshState.acceptResult("spendHistory", myGen, spendHistory)) {
     lastSpendHistory = {
       d7: normalizeHistory(spendHistory.d7),
       all: normalizeHistory(spendHistory.all),
     };
   }
-  if (spendDaily && myGen >= lastAppliedSpendGen) {
+  if (refreshState.acceptResult("spendDaily", myGen, spendDaily)) {
     lastSpendDaily = normalizeDaily(spendDaily);
   }
   spendLoaded = true;
@@ -10017,12 +10011,11 @@ async function refresh(
   // finishes. Keep the newest successful result — a later failed scan
   // (null) must not discard dollars an older pass already computed.
   const creditExtras = await creditExtrasPromise;
-  if (creditExtras && myGen >= lastAppliedSpendGen) {
+  if (refreshState.acceptResult("creditExtras", myGen, creditExtras)) {
     lastCreditExtras = creditExtras;
   }
-  if (spend && myGen >= lastAppliedSpendGen) {
+  if (refreshState.acceptResult("spend", myGen, spend)) {
     lastSpend = normalizeProviderSpend(spend);
-    lastAppliedSpendGen = myGen;
   }
   if (lastSnapshots.length) ensureLayout();
   // The merged account tabs on the dashboard need the account labels; load
@@ -10030,7 +10023,7 @@ async function refresh(
   for (const def of providerCatalog) {
     if (def.supportsExtraAccounts) fetchAccounts(def.familyId);
   }
-  if (!customizeOpen && lastSnapshots.length) renderIfVisible();
+  if (!customizeOpen && lastSnapshots.length) requestRender();
 }
 
 function scheduleAutoRefresh(): void {
@@ -10410,7 +10403,7 @@ async function handleCustomizeClick(target: HTMLElement): Promise<boolean> {
       });
       if (name && name !== g.name) {
         upsertCardGroup(gid, name);
-        renderAll(); // the name shows on dashboard banners + overview pills too
+        requestRender(); // the name shows on dashboard banners + overview pills too
       }
     }
     return true;
@@ -10431,7 +10424,7 @@ async function handleCustomizeClick(target: HTMLElement): Promise<boolean> {
         confirmLabel: t("customize.groupDelete"),
         danger: true,
       })) {
-        deleteCardGroup(gid); // its renderAll also refreshes the drawer body
+        deleteCardGroup(gid); // its requestRender also refreshes the drawer body
       }
     }
     return true;
@@ -10736,7 +10729,7 @@ async function handleCustomizeClick(target: HTMLElement): Promise<boolean> {
       false,
     );
     saveLayout();
-    renderAll();
+    requestRender();
     return true;
   }
   const star = target.closest<HTMLElement>("[data-star]");
@@ -10752,7 +10745,7 @@ async function handleCustomizeClick(target: HTMLElement): Promise<boolean> {
       L.starred.push(key);
     }
     saveLayout();
-    renderAll();
+    requestRender();
     return true;
   }
   return false;
@@ -10959,7 +10952,7 @@ async function handleCustomizeChange(target: HTMLInputElement): Promise<void> {
     if (!enable) pendingProviderEnables.delete(id);
     pendingToggles.push({ id, enable });
     config.disabled = withPendingToggles(config.disabled); // optimistic
-    renderAll(); // disabled cards vanish from the dashboard immediately
+    requestRender(); // disabled cards vanish from the dashboard immediately
     if (!enable) requestTraySync();
     disabledSaveQueue = disabledSaveQueue.then(async () => {
       // Fresh base at save time: includes server truth plus anything
@@ -11046,9 +11039,9 @@ function setupCustomizeDnD(providersEl: HTMLElement): void {
       if (tid === dragPayload.id && tkey !== dragPayload.key) moveRow(L, dragPayload.key, tkey);
     }
     saveLayout();
-    renderAll();
+    requestRender();
     dragPayload = null;
-    // renderAll() replaces the dragged node, so dragend may never bubble
+    // requestRender() replaces the dragged node, so dragend may never bubble
     // back up — clean the ghost here too.
     dragGhost?.remove();
     dragGhost = null;
@@ -11196,7 +11189,7 @@ function paintOneNewApiCardNames(site: OneNewApiSiteDto): void {
     const snap = lastSnapshots.find((s) => s.id === id);
     if (snap) snap.name = name;
   }
-  renderIfVisible();
+  requestRender();
   requestTraySync();
 }
 
@@ -11576,8 +11569,8 @@ async function deleteOneNewApiSite(id: string): Promise<void> {
 async function enableNewOneNewApiKey(keyId: string, wasZeroKeys: boolean): Promise<void> {
   const snapshotId = keyId ? onaSnapshotId(keyId) : "";
   // Mark before patch/refresh so first-run auto-disable cannot park them.
-  if (snapshotId) recentlyKeyed.set(snapshotId, refreshGeneration);
-  if (wasZeroKeys) recentlyKeyed.set(ONA_FAMILY, refreshGeneration);
+  if (snapshotId) recentlyKeyed.set(snapshotId, refreshState.generation);
+  if (wasZeroKeys) recentlyKeyed.set(ONA_FAMILY, refreshState.generation);
 
   const pending: Array<{ id: string; gen: number }> = [];
   if (wasZeroKeys) {
@@ -11769,7 +11762,7 @@ async function saveApiKey(
     } else {
       // Mark before any await so an in-flight first-run pass cannot park
       // this provider after our save returns.
-      recentlyKeyed.set(provider, refreshGeneration);
+      recentlyKeyed.set(provider, refreshState.generation);
       if (config.disabled.includes(provider)) {
         enableGeneration = markProviderEnablePending(provider);
       }
@@ -12412,35 +12405,6 @@ function showRecoveryCodePanel(printed: string): void {
   });
 }
 
-// ── v3 forgot-unlock-code reset (questions / typed code / TXT upload) ───────
-
-/// Fold a string the same way Rust's recovery_code_normalize does, then
-/// check it against the Crockford alphabet (no I, L, O, U).
-function looksLikeRecoveryCode(folded: string): boolean {
-  return /^[0-9A-HJKMNP-TV-Z]{34}$/.test(folded);
-}
-
-function foldRecoveryCodeLikeRust(s: string): string {
-  return s
-    .replace(/[\s-]/g, "")
-    .toUpperCase()
-    .replace(/O/g, "0")
-    .replace(/[IL]/g, "1");
-}
-
-/// Lift a code out of arbitrary text: whole-string fold first, then the
-/// first line that folds to a valid 34-char Crockford string (an exported
-/// TXT carries prose around the code).
-function extractRecoveryCode(text: string): string | null {
-  const whole = foldRecoveryCodeLikeRust(text);
-  if (looksLikeRecoveryCode(whole)) return whole;
-  for (const line of text.split(/\r?\n/)) {
-    const folded = foldRecoveryCodeLikeRust(line);
-    if (looksLikeRecoveryCode(folded)) return folded;
-  }
-  return null;
-}
-
 /// Modal shell shared by the vault dialogs. Returns null when a dialog with
 /// the same id is already open. The caller sets the submit button's label.
 function vaultModalShell(id: string, title: string): {
@@ -12744,6 +12708,9 @@ async function copySettingsKey(
       ? invoke<string>("reveal_account_key", { provider: family, id: entryId, password })
       : invoke<string>("reveal_provider_key", { provider: family, password });
   try {
+    if (vaultStatus?.has_password && !vaultStatus.unlocked) {
+      if (!(await unlockVault())) return;
+    }
     let raw: string;
     try {
       raw = await call("");
@@ -12796,6 +12763,9 @@ async function revealSettingsKey(
       ? invoke<string>("reveal_account_key", { provider: family, id: entryId, password })
       : invoke<string>("reveal_provider_key", { provider: family, password });
   try {
+    if (vaultStatus?.has_password && !vaultStatus.unlocked) {
+      if (!(await unlockVault())) return;
+    }
     let raw: string;
     try {
       raw = await call("");
@@ -13742,7 +13712,7 @@ function applyLocale(): void {
     const status = document.querySelector("#status");
     if (status) status.textContent = t("footer.starting");
   }
-  if (lastSnapshots.length) renderIfVisible();
+  if (lastSnapshots.length) requestRender();
   // Auth-center rows paint with t() at render time — re-render so a locale
   // switch retranslates them (static [data-i18n] is already handled above).
   if (IS_PANEL_FORM && authViewActive) renderAuthCenter();
@@ -13815,7 +13785,7 @@ async function initSettings(): Promise<void> {
   const timeFormat = document.querySelector<HTMLSelectElement>("#timeformat")!;
   timeFormat.value = config.timeFormat;
   timeFormat.addEventListener("change", () => {
-    void patchConfig({ timeFormat: timeFormat.value as Config["timeFormat"] }).then(renderAll);
+    void patchConfig({ timeFormat: timeFormat.value as Config["timeFormat"] }).then(requestRender);
   });
 
   const localeSel = document.querySelector<HTMLSelectElement>("#locale")!;
@@ -13853,7 +13823,7 @@ async function initSettings(): Promise<void> {
   const showSpend = document.querySelector<HTMLInputElement>("#show-total-spend")!;
   showSpend.checked = config.showTotalSpend;
   showSpend.addEventListener("change", () => {
-    void patchConfig({ showTotalSpend: showSpend.checked }).then(renderAll);
+    void patchConfig({ showTotalSpend: showSpend.checked }).then(requestRender);
   });
 
   // Spend-bolt tiers: built-in ladder or three custom daily thresholds (the
@@ -13877,14 +13847,14 @@ async function initSettings(): Promise<void> {
     const high = Math.max(medium, Number(tierInputs.high.value) || 250) * 1_000_000;
     const max = Math.max(high, Number(tierInputs.max.value) || 500) * 1_000_000;
     config.spendIconTiers = { medium, high, max };
-    void patchConfig({ spendIconTiers: config.spendIconTiers }).then(renderAll);
+    void patchConfig({ spendIconTiers: config.spendIconTiers }).then(requestRender);
   };
   tierMode.value = config.spendIconTiers ? "custom" : "builtin";
   paintTierInputs();
   tierMode.addEventListener("change", () => {
     if (tierMode.value === "builtin") {
       config.spendIconTiers = null;
-      void patchConfig({ spendIconTiers: null }).then(renderAll);
+      void patchConfig({ spendIconTiers: null }).then(requestRender);
       paintTierInputs();
     } else {
       paintTierInputs();
@@ -13925,7 +13895,7 @@ async function initSettings(): Promise<void> {
   catFull.checked = config.overviewCatFull === true;
   catFull.addEventListener("change", () => {
     config.overviewCatFull = catFull.checked;
-    void patchConfig({ overviewCatFull: catFull.checked }).then(renderAll);
+    void patchConfig({ overviewCatFull: catFull.checked }).then(requestRender);
   });
 
   // Qoder CN daily check-in: off by default — it claims benefits with the
@@ -14022,7 +13992,7 @@ async function initSettings(): Promise<void> {
   for (const manager of document.querySelectorAll<HTMLElement>(".reset-wake-manager")) {
     void mountResetWakeSettings(manager, () => appConfirm({
       title: t("settings.wake.title"), message: t("settings.wake.consent"), confirmLabel: t("dialog.ok"),
-    }), renderAll);
+    }), requestRender);
   }
 
   const density = document.querySelector<HTMLInputElement>("#density")!;
@@ -14077,7 +14047,7 @@ async function initSettings(): Promise<void> {
   const showTrendEl = document.querySelector<HTMLInputElement>("#show-trend")!;
   showTrendEl.checked = config.showTrend === true;
   showTrendEl.addEventListener("change", () => {
-    void patchConfig({ showTrend: showTrendEl.checked }).then(renderAll);
+    void patchConfig({ showTrend: showTrendEl.checked }).then(requestRender);
   });
 
   renderShortcutSettings();
@@ -14556,7 +14526,7 @@ function buildPanelShell(): void {
   hideUnconfigured.type = "checkbox";
   hideUnconfigured.checked = config.hideUnconfigured !== false;
   hideUnconfigured.addEventListener("change", () => {
-    void patchConfig({ hideUnconfigured: hideUnconfigured.checked }).then(renderAll);
+    void patchConfig({ hideUnconfigured: hideUnconfigured.checked }).then(requestRender);
   });
   generalCard.append(panelSwitchRow("settings.hideUnconfigured", "settings.hideUnconfiguredTip", hideUnconfigured));
   const redetect = document.createElement("button");
@@ -15665,7 +15635,7 @@ window.addEventListener("DOMContentLoaded", () => {
         config.layout.overviewCollapsed = false;
         saveLayout(false);
       }
-      renderAll();
+      flushRender();
       document
         .querySelector<HTMLElement>(".quota-overview")
         ?.scrollIntoView({ block: "nearest" });
@@ -15812,7 +15782,7 @@ document.querySelector("#settings-btn")!.addEventListener("click", () => {
   const toggleSpendMetric = (back = false) => {
     config.spendMetric = nextSpendMetric(back);
     void patchConfig({ spendMetric: config.spendMetric });
-    renderAll();
+    requestRender();
   };
   providersEl.addEventListener("click", (e) => {
     const button = (e.target as Element).closest<HTMLElement>("[data-spend-metric]");
@@ -15821,7 +15791,7 @@ document.querySelector("#settings-btn")!.addEventListener("click", () => {
       if (metric !== "cost" && metric !== "tokens") return;
       config.spendMetric = metric;
       void patchConfig({ spendMetric: metric });
-      renderAll();
+      requestRender();
       return;
     }
     const groupBtn = (e.target as Element).closest<HTMLElement>("[data-spend-group]");
@@ -15831,7 +15801,7 @@ document.querySelector("#settings-btn")!.addEventListener("click", () => {
       if (config.spendGrouping === grouping) return;
       config.spendGrouping = grouping;
       void patchConfig({ spendGrouping: grouping });
-      renderAll();
+      requestRender();
       return;
     }
     // Open the update confirmation; installation starts from its action.
@@ -15885,7 +15855,7 @@ document.querySelector("#settings-btn")!.addEventListener("click", () => {
       e.preventDefault();
       spendDetailOpen = true;
       spendDetailDay = spendDetailDay || localDayKey(new Date());
-      renderAll();
+      requestRender();
       return;
     }
     if (target.closest<HTMLElement>("[data-spend-detail-close]") || target.classList.contains("spend-detail-overlay")) {
@@ -15896,7 +15866,7 @@ document.querySelector("#settings-btn")!.addEventListener("click", () => {
     const day = target.closest<HTMLElement>("[data-spend-detail-day]");
     if (day && spendDetailOpen) {
       spendDetailDay = day.dataset.spendDetailDay ?? spendDetailDay;
-      renderAll();
+      requestRender();
     }
   });
 
@@ -15986,7 +15956,7 @@ document.querySelector("#settings-btn")!.addEventListener("click", () => {
       else expanded.push(family);
       config.overviewExpanded = expanded;
       void patchConfig({ overviewExpanded: expanded });
-      renderAll();
+      requestRender();
       return;
     }
 
@@ -16054,7 +16024,7 @@ document.querySelector("#settings-btn")!.addEventListener("click", () => {
     if (acctTab) {
       const [family, acctId] = acctTab.dataset.cardAccount!.split("|");
       userSelectedAccountFor.set(family, acctId);
-      renderAll();
+      requestRender();
       return;
     }
     const cardRefresh = target.closest<HTMLElement>("[data-card-refresh]");
@@ -16070,7 +16040,7 @@ document.querySelector("#settings-btn")!.addEventListener("click", () => {
           else lastSnapshots.push(snap);
           if (!snap.stale && snap.status === "ok") clearBackoffRetry(id);
           else scheduleBackoffRetries(lastSnapshots);
-          renderAll();
+          requestRender();
         })
         .catch(() => {
           // On failure the button just stops spinning; the card keeps
@@ -16089,7 +16059,7 @@ document.querySelector("#settings-btn")!.addEventListener("click", () => {
       // so the first click folds.
       L.collapsed = !isCardCollapsed(id);
       saveLayout(false);
-      renderAll();
+      requestRender();
       return;
     }
     const ovFold = target.closest<HTMLElement>("[data-overview-fold]");
@@ -16097,14 +16067,14 @@ document.querySelector("#settings-btn")!.addEventListener("click", () => {
       if (config.layout) {
         config.layout.overviewCollapsed = !isOverviewCollapsed();
         saveLayout(false);
-        renderAll();
+        requestRender();
       }
       return;
     }
     const uncfgToggle = target.closest<HTMLElement>("[data-unconfigured-toggle]");
     if (uncfgToggle) {
       unconfiguredFoldOpen = !unconfiguredFoldOpen;
-      renderAll();
+      requestRender();
       return;
     }
     if (target.closest<HTMLElement>("[data-board-empty-cta]")) {
@@ -16116,7 +16086,7 @@ document.querySelector("#settings-btn")!.addEventListener("click", () => {
       config.layout ??= { providerOrder: [], providers: {} };
       config.layout.spendCollapsed = !isSpendFolded();
       saveLayout(false);
-      renderAll();
+      requestRender();
       return;
     }
     const ovTab = target.closest<HTMLElement>("[data-overview-tab]");
@@ -16145,13 +16115,13 @@ document.querySelector("#settings-btn")!.addEventListener("click", () => {
       if (config.overviewStyle === style) return;
       config.overviewStyle = style;
       void patchConfig({ overviewStyle: style });
-      renderAll();
+      requestRender();
       return;
     }
     const ovExpiring = target.closest<HTMLElement>("[data-overview-expiring]");
     if (ovExpiring) {
       overviewExpiringOpen = !overviewExpiringOpen;
-      renderAll();
+      requestRender();
       return;
     }
     const groupManage = target.closest<HTMLElement>("[data-overview-group-manage]");
@@ -16191,7 +16161,7 @@ document.querySelector("#settings-btn")!.addEventListener("click", () => {
       if (g) {
         g.collapsed = !g.collapsed;
         void patchConfig({ layout: config.layout });
-        renderAll();
+        requestRender();
       }
       return;
     }
@@ -16219,7 +16189,7 @@ document.querySelector("#settings-btn")!.addEventListener("click", () => {
         if (next === "d7" || next === "d30" || next === "all") {
           rangeTab = next;
           rangeSelected = true;
-          renderAll();
+          requestRender();
         }
         return;
       }
@@ -16234,13 +16204,13 @@ document.querySelector("#settings-btn")!.addEventListener("click", () => {
     if (target.closest("[data-welcome-close]")) {
       config.welcomeDismissed = true;
       void patchConfig({ welcomeDismissed: true });
-      renderAll();
+      requestRender();
       return;
     }
     if (target.closest("[data-welcome-customize]")) {
       config.welcomeDismissed = true;
       void patchConfig({ welcomeDismissed: true });
-      renderAll();
+      requestRender();
       setDrawer(true);
       return;
     }
@@ -16281,7 +16251,7 @@ document.querySelector("#settings-btn")!.addEventListener("click", () => {
       if (next === "d7" || next === "d30" || next === "all") {
         rangeTab = next;
         rangeSelected = true;
-        renderAll();
+        requestRender();
       }
       return;
     }
@@ -16292,7 +16262,7 @@ document.querySelector("#settings-btn")!.addEventListener("click", () => {
       L.expanded = !L.expanded;
       saveLayout(true);
       animateExpandId = L.expanded ? id : null;
-      renderAll();
+      flushRender();
       animateExpandId = null;
       return;
     }
@@ -16305,7 +16275,7 @@ document.querySelector("#settings-btn")!.addEventListener("click", () => {
         config.resetExact = !config.resetExact;
         void patchConfig({ resetExact: config.resetExact });
       }
-      renderAll();
+      requestRender();
       return;
     }
     // Folded card: clicking anywhere outside its controls (fold chevron,
@@ -16318,7 +16288,7 @@ document.querySelector("#settings-btn")!.addEventListener("click", () => {
         const L = providerLayout(pid);
         L.collapsed = false;
         saveLayout(false);
-        renderAll();
+        requestRender();
         requestAnimationFrame(() => jumpToProviderCard(pid));
       }
     }
@@ -16375,7 +16345,7 @@ document.querySelector("#settings-btn")!.addEventListener("click", () => {
   // The 4-hourly background checker feeds the same footer button.
   void listen<string>("update-available", (e) => {
     updateVersion = e.payload;
-    renderIfVisible();
+    requestRender();
     renderBuildInfo();
   });
 
@@ -16400,10 +16370,10 @@ document.querySelector("#settings-btn")!.addEventListener("click", () => {
   });
   void listen<WakeStatus[]>("reset-wake-updated", ({ payload }) => {
     acceptWakeStatuses(payload);
-    renderIfVisible();
+    requestRender();
   });
   void listen("reset-wake-settings-updated", () => {
-    void loadResetWake().then(renderIfVisible).catch(() => {});
+    void loadResetWake().then(requestRender).catch(() => {});
   });
   void listen("font-packs-updated", () => {
     void loadFontPacks().then(() => {
@@ -16424,19 +16394,19 @@ document.querySelector("#settings-btn")!.addEventListener("click", () => {
 
   // The backend's background loop refreshes even while this window is
   // hidden (where setInterval is throttled dead). Adopt its results;
-  // rendering still defers to the next open via renderIfVisible().
+  // rendering still defers to the next open via requestRender().
   let usageEventGeneration = 0;
   void listen<Snapshot[]>("usage-updated", async (e) => {
     const generation = ++usageEventGeneration;
-    if (refreshing || !Array.isArray(e.payload)) return;
+    if (refreshState.busy || !Array.isArray(e.payload)) return;
     lastFetch = Date.now();
     const incoming = e.payload;
     await Promise.all([...new Set(incoming.map((snapshot) => providerFamily(snapshot.id)))]
       .filter(supportsExtraAccounts).map(refreshSettingsProviderKey));
-    if (refreshing || generation !== usageEventGeneration) return;
+    if (refreshState.busy || generation !== usageEventGeneration) return;
     lastSnapshots = hideFoldedMoonshot(incoming);
     ensureLayout();
-    renderIfVisible();
+    requestRender();
     scheduleBackoffRetries(lastSnapshots);
     requestTraySync();
     // Auth center: fresh quota columns and account lists (a login/import
@@ -16450,6 +16420,7 @@ document.querySelector("#settings-btn")!.addEventListener("click", () => {
   // this — it renders no cards, and usage-updated keeps its cache warm.
   document.addEventListener("visibilitychange", () => {
     if (document.hidden && pendingFontGuide !== "skip") dismissWhatsNew?.(true);
+    if (!document.hidden) renderScheduler.flush();
     if (!document.hidden && !IS_PANEL_FORM) void refresh(true);
   });
 
@@ -16469,12 +16440,8 @@ document.querySelector("#settings-btn")!.addEventListener("click", () => {
       pendingWhatsNew = null;
     }
     // Replay any renders skipped while hidden, before the reveal plays.
-    if (pendingRender) {
-      pendingRender = false;
-      renderAll();
-      populatePinnedOptions();
-    } else if (lastSnapshots.length) {
-      renderAll();
+    if (renderScheduler.pending || lastSnapshots.length) {
+      flushRender();
     }
     // Land where the user left off: the persisted scroll offset decides
     // whether the spend card or the quota overview is in view. Fold states
@@ -16506,7 +16473,7 @@ document.querySelector("#settings-btn")!.addEventListener("click", () => {
       void patchConfig({ tourPending: true });
     }
     void loadFontPacks().then(applyAppearance).catch(() => {});
-    void loadResetWake().then(renderIfVisible).catch(() => {});
+    void loadResetWake().then(requestRender).catch(() => {});
     // Capability probe runs in both window forms: overview jumps and trail
     // scrolls live in the popover, but the settings panel scrolls too.
     probeSmoothScroll();
@@ -16529,7 +16496,7 @@ document.querySelector("#settings-btn")!.addEventListener("click", () => {
     void refresh(true).finally(() => {
       // refresh() can queue its paint for the next animation frame. The
       // tour must discover anchors after that paint, including first boot.
-      if (lastSnapshots.length) renderAll();
+      if (lastSnapshots.length) flushRender();
       tourContentReady = true;
       if (!splashPlaying() && !document.hidden) maybeStartTour();
     });

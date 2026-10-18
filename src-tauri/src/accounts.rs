@@ -153,9 +153,17 @@ pub fn load_accounts_from(base: &std::path::Path, provider: &str) -> Vec<Account
 /// Temp file + rename so a crash mid-write can never truncate a store that
 /// holds plaintext credentials. Shared by the other token stores.
 pub(crate) fn write_json_atomic(path: &std::path::Path, contents: String) -> Result<(), String> {
-    let tmp = path.with_extension("json.tmp");
-    std::fs::write(&tmp, contents).map_err(|e| format!("write {}: {e}", tmp.display()))?;
-    std::fs::rename(&tmp, path).map_err(|e| format!("rename {}: {e}", tmp.display()))
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static SEQUENCE: AtomicU64 = AtomicU64::new(0);
+    let tmp = path.with_extension(format!(
+        "json.{}.{}.tmp", std::process::id(), SEQUENCE.fetch_add(1, Ordering::Relaxed)
+    ));
+    let result = std::fs::write(&tmp, contents)
+        .and_then(|()| std::fs::rename(&tmp, path));
+    if result.is_err() {
+        let _ = std::fs::remove_file(&tmp);
+    }
+    result.map_err(|e| format!("replace {}: {e}", path.display()))
 }
 
 pub fn save_accounts_to(
@@ -350,13 +358,6 @@ pub fn card_id(provider: &str, n: usize) -> String {
 // credential-hiding primitive, and the resulting fingerprint never crosses
 // the telemetry boundary. Two lanes make accidental collisions vanishingly
 // unlikely without adding a new hashing dependency to this small module.
-fn fnv1a(bytes: &[u8], mut hash: u64) -> u64 {
-    for byte in bytes {
-        hash ^= u64::from(*byte);
-        hash = hash.wrapping_mul(0x1000_0000_01b3);
-    }
-    hash
-}
 
 /// Stable instance id for an API-key account. Labels intentionally do not
 /// participate: renaming an account must not discard its cache or layout.
@@ -367,20 +368,10 @@ pub fn card_id_for_account(provider: &str, account: &AccountEntry) -> String {
     material.push(0);
     if crate::provider_catalog::takes_base_url(provider) {
         material.extend_from_slice(
-            account
-                .base_url
-                .as_deref()
-                .map(str::trim)
-                .map(|url| url.trim_end_matches('/'))
-                .unwrap_or("")
-                .as_bytes(),
+            account.base_url.as_deref().map(str::trim).map(|url| url.trim_end_matches('/')).unwrap_or("").as_bytes(),
         );
     }
-    let left = fnv1a(&material, 0xcbf2_9ce4_8422_2325);
-    let mut second = b"pane-account-id-v1\0".to_vec();
-    second.extend_from_slice(&material);
-    let right = fnv1a(&second, 0x8422_2325_cbf2_9ce4);
-    format!("{provider}@{left:016x}{right:016x}")
+    crate::identity::stable_card_id(provider, b"pane-account-id-v1\0", &material)
 }
 
 /// Inverse of the legacy positional `card_id`: the (family, n) behind an
@@ -450,6 +441,19 @@ pub fn display_label(stored: &str, n: usize, locale: &str) -> String {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn atomic_write_failure_keeps_destination_and_removes_secret_staging_file() {
+        let base = std::env::temp_dir().join(format!("pane-atomic-failure-{}", std::process::id()));
+        std::fs::create_dir_all(&base).unwrap();
+        let destination = base.join("occupied");
+        std::fs::create_dir_all(&destination).unwrap();
+        std::fs::write(destination.join("marker"), "previous").unwrap();
+        assert!(super::write_json_atomic(&destination, "synthetic-private-session".into()).is_err());
+        assert_eq!(std::fs::read_to_string(destination.join("marker")).unwrap(), "previous");
+        assert_eq!(std::fs::read_dir(&base).unwrap().count(), 1);
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
     use super::*;
 
     #[test]

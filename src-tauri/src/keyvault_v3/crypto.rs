@@ -356,6 +356,20 @@ pub fn recovery_code_normalize(input: &str) -> String {
         .collect()
 }
 
+/// Extract a shaped code from an exported text file; checksum validation
+/// remains the decoder's responsibility, not the text importer's.
+pub fn recovery_code_extract(input: &str) -> Option<String> {
+    std::iter::once(input)
+        .chain(input.split('\n').map(|line| line.strip_suffix('\r').unwrap_or(line)))
+        .map(recovery_code_normalize)
+        .find(|folded| {
+            folded.len() == 34
+                && folded
+                    .bytes()
+                    .all(|byte| b"0123456789ABCDEFGHJKMNPQRSTVWXYZ".contains(&byte))
+        })
+}
+
 /// Decode a normalized code back to the 20 bytes, verifying the 2-char
 /// check. Err on wrong length, illegal characters, or a mismatched checksum.
 pub fn recovery_code_decode(normalized: &str) -> Result<[u8; 20], String> {

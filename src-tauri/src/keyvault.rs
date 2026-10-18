@@ -574,7 +574,7 @@ fn write_atomic(path: &Path, contents: &str) -> Result<(), String> {
     std::fs::write(&tmp, contents)
         .and_then(|()| std::fs::rename(&tmp, &path))
         .map_err(|e| format!("write keyvault.json: {e}"))?;
-    let _ = crate::providers::onenewapi::store::restrict_owner_only(path);
+    let _ = crate::platform::restrict_owner_only(path);
     Ok(())
 }
 
@@ -899,21 +899,9 @@ fn vault_rows() -> Result<Vec<VaultRow>, String> {
             Ok(entries.into_iter().map(row_from_plain).collect())
         }
         ReadStore::SealedV2(file) => Ok(file.entries.iter().map(row_from_sealed).collect()),
-        ReadStore::SealedV3(file) => {
-            // v3 notes are sealed, so the locked listing shows public
-            // metadata only — same trust level as the v2 masked listing.
-            Ok(file
-                .entries
-                .iter()
-                .map(|e| VaultRow {
-                    id: e.id.clone(),
-                    service: e.service.clone(),
-                    label: e.label.clone(),
-                    masked: e.masked.clone(),
-                    note: e.public_note.clone().unwrap_or_default(),
-                })
-                .collect())
-        }
+        // v3 notes are sealed, so a locked listing shows public metadata
+        // only — same trust level as the v2 masked listing.
+        ReadStore::SealedV3(file) => rows_from_v3(&file, v3_session_for(&file).as_ref()),
         ReadStore::Corrupted(_) => Err(
             "keyvault.json is corrupted — Pane will not touch it; restore a backup or remove the file manually"
                 .into(),
@@ -991,7 +979,10 @@ pub fn change_password(old: &str, new: &str) -> Result<VaultStatus, String> {
         // v3: the DEK never changes — only the password wrap is re-created
         // (CR-21), so entries/questions/recovery stay byte-identical.
         ReadStore::SealedV3(file) => {
-            let dek = crate::keyvault_v3::unlock_with_password(&file, old)?;
+            // Callers match on the canonical wrong-password string, not v3's
+            // own wording, so a failed unlock is reported in that form.
+            let dek = crate::keyvault_v3::unlock_with_password(&file, old)
+                .map_err(|_| ERR_WRONG_PASSWORD.to_string())?;
             let changed = crate::keyvault_v3::change_unlock_code(&file, &dek, new)?;
             save_v3_to(&path, &changed)?;
             set_session_key(dek);
@@ -1013,7 +1004,11 @@ pub fn session_open() -> bool {
 /// face one password and one lock. Errors [`ERR_WRONG_PASSWORD`] on a
 /// mismatch; "no master password is set" when none exists yet.
 pub fn verify_for_reveal(password: &str) -> Result<(), String> {
-    match read_store_from(&vault_path()) {
+    verify_for_reveal_at(&vault_path(), password)
+}
+
+fn verify_for_reveal_at(path: &Path, password: &str) -> Result<(), String> {
+    match read_store_from(path) {
         ReadStore::Missing | ReadStore::LegacyV1(_) => Err("no master password is set".into()),
         ReadStore::SealedV2(file) => {
             let key = derive_key(password.trim(), &file.kdf)?;
@@ -1022,7 +1017,8 @@ pub fn verify_for_reveal(password: &str) -> Result<(), String> {
             Ok(())
         }
         ReadStore::SealedV3(file) => {
-            let dek = crate::keyvault_v3::unlock_with_password(&file, password)?;
+            let dek = crate::keyvault_v3::unlock_with_password(&file, password)
+                .map_err(|_| ERR_WRONG_PASSWORD.to_string())?;
             set_session_key(dek);
             Ok(())
         }
@@ -1215,18 +1211,8 @@ pub fn reset_unlock_code_v3(
 /// exported TXT carries prose around the code). Anything else falls through
 /// so the decoder produces the proper uniform error.
 fn lift_recovery_code(input: &str) -> String {
-    let fold = |s: &str| crate::keyvault_v3::crypto::recovery_code_normalize(s);
-    let whole = fold(input);
-    if whole.chars().count() == 34 {
-        return whole;
-    }
-    for line in input.lines() {
-        let folded = fold(line);
-        if folded.chars().count() == 34 {
-            return folded;
-        }
-    }
-    whole
+    crate::keyvault_v3::crypto::recovery_code_extract(input)
+        .unwrap_or_else(|| crate::keyvault_v3::crypto::recovery_code_normalize(input))
 }
 
 fn reset_unlock_code_v3_at(
@@ -1291,9 +1277,14 @@ pub fn add(service: &str, label: &str, key: &str, note: &str) -> Result<Vec<Vaul
         ReadStore::SealedV3(mut file) => {
             let dek = v3_session_for(&file).ok_or_else(|| ERR_LOCKED.to_string())?;
             let id = entry_id(service, key.trim());
-            if let Some(existing) = file.entries.iter_mut().find(|e| e.id == id) {
-                // Label is public metadata; the sealed payload is untouched.
-                existing.label = label.trim().to_string();
+            if file.entries.iter().any(|entry| entry.id == id) {
+                update_v3_entry(
+                    &mut file,
+                    &dek,
+                    &id,
+                    Some(label),
+                    (!note.is_empty()).then_some(note),
+                )?;
             } else {
                 let e = crate::keyvault_v3::PlainEntry {
                     id,
@@ -1305,21 +1296,14 @@ pub fn add(service: &str, label: &str, key: &str, note: &str) -> Result<Vec<Vaul
                 };
                 file.entries
                     .push(crate::keyvault_v3::seal_entry_v3(&dek, &vault_id_bytes_pub(&file), &e)?);
+                file.revision = file
+                    .revision
+                    .checked_add(1)
+                    .ok_or("vault revision overflow")?;
+                crate::keyvault_v3::reseal_integrity(&mut file, &dek)?;
             }
-            file.revision += 1;
-            crate::keyvault_v3::reseal_integrity(&mut file, &dek)?;
             save_v3_to(&path, &file)?;
-            Ok(file
-                .entries
-                .iter()
-                .map(|e| VaultRow {
-                    id: e.id.clone(),
-                    service: e.service.clone(),
-                    label: e.label.clone(),
-                    masked: e.masked.clone(),
-                    note: e.public_note.clone().unwrap_or_default(),
-                })
-                .collect())
+            rows_from_v3(&file, Some(&dek))
         }
         other => Err(problem_err(&other).unwrap_or_else(|| ERR_LOCKED.to_string())),
     }
@@ -1327,6 +1311,63 @@ pub fn add(service: &str, label: &str, key: &str, note: &str) -> Result<Vec<Vaul
 
 fn vault_id_bytes_pub(file: &crate::keyvault_v3::VaultFileV3) -> [u8; 16] {
     crate::keyvault_v3::vault_id_of(file)
+}
+
+/// v3 rows carry their note inside the sealed payload, so the decrypted note
+/// is only available with a session that verifies against this file.
+fn rows_from_v3(
+    file: &crate::keyvault_v3::VaultFileV3,
+    dek: Option<&[u8; 32]>,
+) -> Result<Vec<VaultRow>, String> {
+    let vault_id = vault_id_bytes_pub(file);
+    file.entries
+        .iter()
+        .map(|entry| {
+            let note = match dek {
+                Some(dek) => crate::keyvault_v3::open_entry_v3(dek, &vault_id, entry)?.note,
+                None => entry.public_note.clone().unwrap_or_default(),
+            };
+            Ok(VaultRow {
+                id: entry.id.clone(),
+                service: entry.service.clone(),
+                label: entry.label.clone(),
+                masked: entry.masked.clone(),
+                note,
+            })
+        })
+        .collect()
+}
+
+/// One v3 entry edit: open the sealed payload, apply the requested fields,
+/// re-seal with a fresh nonce, then re-MAC the whole manifest. An invalid
+/// session or missing entry leaves the file byte-identical.
+fn update_v3_entry(
+    file: &mut crate::keyvault_v3::VaultFileV3,
+    dek: &[u8; 32],
+    id: &str,
+    label: Option<&str>,
+    note: Option<&str>,
+) -> Result<(), String> {
+    crate::keyvault_v3::verify_integrity(file, dek)?;
+    let index = file
+        .entries
+        .iter()
+        .position(|entry| entry.id == id)
+        .ok_or("no such key")?;
+    let vault_id = vault_id_bytes_pub(file);
+    let mut opened = crate::keyvault_v3::open_entry_v3(dek, &vault_id, &file.entries[index])?;
+    if let Some(label) = label {
+        opened.label = label.trim().to_string();
+    }
+    if let Some(note) = note {
+        opened.note = note.to_string();
+    }
+    file.entries[index] = crate::keyvault_v3::seal_entry_v3(dek, &vault_id, &opened)?;
+    file.revision = file
+        .revision
+        .checked_add(1)
+        .ok_or("vault revision overflow")?;
+    crate::keyvault_v3::reseal_integrity(file, dek)
 }
 
 pub fn remove(id: &str) -> Result<Vec<VaultRow>, String> {
@@ -1367,24 +1408,14 @@ pub fn remove(id: &str) -> Result<Vec<VaultRow>, String> {
             file.revision += 1;
             crate::keyvault_v3::reseal_integrity(&mut file, &dek)?;
             save_v3_to(&path, &file)?;
-            Ok(file
-                .entries
-                .iter()
-                .map(|e| VaultRow {
-                    id: e.id.clone(),
-                    service: e.service.clone(),
-                    label: e.label.clone(),
-                    masked: e.masked.clone(),
-                    note: e.public_note.clone().unwrap_or_default(),
-                })
-                .collect())
+            rows_from_v3(&file, Some(&dek))
         }
         other => Err(problem_err(&other).unwrap_or_else(|| "no such key".into())),
     }
 }
 
-/// Metadata-only note edit — notes live outside the sealed section, so this
-/// works while locked too.
+/// v1/v2 notes are metadata and editable while locked; v3 notes are sealed
+/// payload, so an unlocked session is required and the manifest is re-MAC'd.
 pub fn set_note(id: &str, note: &str) -> Result<Vec<VaultRow>, String> {
     let path = vault_path();
     match read_store_from(&path) {
@@ -1405,9 +1436,12 @@ pub fn set_note(id: &str, note: &str) -> Result<Vec<VaultRow>, String> {
             save_sealed_to(&path, &file)?;
             Ok(file.entries.iter().map(row_from_sealed).collect())
         }
-        ReadStore::SealedV3(_) => Err(
-            "v3 notes are sealed with the key — unlock the vault before editing notes".into(),
-        ),
+        ReadStore::SealedV3(mut file) => {
+            let dek = v3_session_for(&file).ok_or_else(|| ERR_LOCKED.to_string())?;
+            update_v3_entry(&mut file, &dek, id, None, Some(note.trim()))?;
+            save_v3_to(&path, &file)?;
+            rows_from_v3(&file, Some(&dek))
+        }
         other => Err(problem_err(&other).unwrap_or_else(|| "no such key".into())),
     }
 }
@@ -1895,6 +1929,50 @@ mod tests {
             ("Q two?".into(), "pear".into()),
             ("Q three?".into(), "mochi".into()),
         ]
+    }
+
+    // A v3 unlock failure must surface as the canonical wrong-password
+    // string: the panel keys its master-password prompt off it, so any other
+    // wording makes 查看/复制 silently no-op.
+    #[test]
+    fn reveal_gate_reports_v3_failure_canonically() {
+        let p = temp_vault("v3reveal");
+        setup_v3_at(&p, "unlock-code-77", &v3_qa3()).unwrap();
+        assert_eq!(verify_for_reveal_at(&p, "not-the-code").unwrap_err(), ERR_WRONG_PASSWORD);
+        // No vault yet → guidance to set one, never a wrong-password error.
+        let none = temp_vault("v3reveal-none");
+        assert!(verify_for_reveal_at(&none, "x").unwrap_err().contains("no master password"));
+    }
+
+    // A v3 note edit must keep the key bytes, keep the note out of the
+    // plaintext file, and refuse to advance the manifest on a bad session.
+    #[test]
+    fn unlocked_v3_note_edit_preserves_key_and_keeps_the_note_sealed() {
+        let entry = crate::keyvault_v3::PlainEntry {
+            id: "synthetic-note".into(),
+            service: "synthetic".into(),
+            label: "Test".into(),
+            key: "fixture-key-only".into(),
+            note: "before".into(),
+            created_at: 1,
+        };
+        let (mut file, dek) =
+            crate::keyvault_v3::init_vault("note-unlock-code-77", &[entry], None).unwrap();
+        update_v3_entry(&mut file, &dek, "synthetic-note", None, Some("after-private-note"))
+            .unwrap();
+        crate::keyvault_v3::verify_integrity(&file, &dek).unwrap();
+        let opened = crate::keyvault_v3::open_all_v3(&dek, &file).unwrap();
+        assert_eq!(opened[0].key, "fixture-key-only");
+        assert_eq!(opened[0].note, "after-private-note");
+        assert_eq!(file.revision, 2);
+        assert!(!serde_json::to_string(&file).unwrap().contains("after-private-note"));
+        assert_eq!(rows_from_v3(&file, Some(&dek)).unwrap()[0].note, "after-private-note");
+        assert_eq!(rows_from_v3(&file, None).unwrap()[0].note, "");
+        let before = file.clone();
+        assert!(update_v3_entry(&mut file, &[0; 32], "synthetic-note", None, Some("denied")).is_err());
+        assert_eq!(file, before, "an invalid session must not alter the entry");
+        assert!(update_v3_entry(&mut file, &dek, "missing", None, Some("denied")).is_err());
+        assert_eq!(file, before, "missing entries must not advance the manifest");
     }
 
     #[test]

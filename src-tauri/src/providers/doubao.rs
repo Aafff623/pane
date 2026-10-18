@@ -15,7 +15,7 @@
 //! any successful extraction.
 
 use super::chromium::{decode_os_crypt, looks_like_text, os_crypt_key};
-use super::{config_dir, http, json_body, read_small_text, Metric, Snapshot};
+use super::{config_dir, http, json_body, Metric, Snapshot};
 use serde_json::Value;
 use std::path::PathBuf;
 use std::time::Duration;
@@ -50,7 +50,9 @@ pub async fn snapshot() -> Snapshot {
 /// Pure local probe for the Customize gear panel (no network): a cached
 /// session or an extractable Doubao sign-in exists on this machine.
 pub fn local_credential_hint() -> Option<String> {
-    if cookie_cache_path().is_file() {
+    if cookie_cache_path().is_file()
+        || matches!(crate::secretstore::get(&crate::secretstore::token_key("web/doubao")), crate::secretstore::Secret::Found(_))
+    {
         return Some("Doubao session cache".to_string());
     }
     cookies_path()
@@ -75,23 +77,21 @@ fn cookie_cache_path() -> PathBuf {
 /// [`invalidate_cookie_cache`] when the server rejects the session, so a
 /// dead login can never pin the card.
 fn cookie_header() -> Option<String> {
-    if let Ok(raw) = read_small_text(&cookie_cache_path(), MAX_CACHE_BYTES, "cookie cache") {
-        if let Ok(doc) = serde_json::from_str::<Value>(raw.trim_start_matches('\u{feff}')) {
+    if let Some(doc) = crate::secretstore::load_session("web/doubao", &cookie_cache_path(), MAX_CACHE_BYTES) {
             if let Some(cookie) = doc.get("cookie").and_then(Value::as_str) {
                 if cookie.contains("sessionid=") {
                     return Some(cookie.to_string());
                 }
             }
-        }
     }
     let header = extract_cookie_header()?;
-    let _ = std::fs::write(
-        cookie_cache_path(),
-        serde_json::to_string_pretty(&serde_json::json!({
+    let _ = crate::secretstore::save_session(
+        "web/doubao",
+        &cookie_cache_path(),
+        &serde_json::json!({
             "cookie": header,
             "savedAt": chrono::Utc::now().to_rfc3339(),
-        }))
-        .unwrap_or_default(),
+        }),
     );
     Some(header)
 }
@@ -100,7 +100,7 @@ fn cookie_header() -> Option<String> {
 /// Cookies (which requires Doubao to be quit) instead of replaying the
 /// rejected header forever.
 pub fn invalidate_cookie_cache() {
-    let _ = std::fs::remove_file(cookie_cache_path());
+    let _ = crate::secretstore::clear_session("web/doubao", &cookie_cache_path());
 }
 
 /// Deletes the snapshot on every exit path unless disarmed — a half-read

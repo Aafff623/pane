@@ -254,17 +254,25 @@ fn parse_usage(doc: &Value) -> Result<Snapshot, String> {
         let requests = t.get("requests").and_then(Value::as_i64);
         let tokens = t.get("total_tokens").and_then(Value::as_i64);
         if let Some(r) = requests {
-            metrics.push(Metric::text(&format!("{label} requests"), format!("{r}")));
+            let mut metric = Metric::text(&format!("{label} requests"), format!("{r}"));
+            if bucket == "total" {
+                metric = metric.with_usage(crate::usage_units::UsageUnit::Requests, r as f64, None);
+            }
+            metrics.push(metric);
         }
         if let Some(n) = tokens {
             let cost = t.get("actual_cost").and_then(Value::as_f64);
-            metrics.push(Metric::text(
+            let mut metric = Metric::text(
                 &format!("{label} tokens"),
                 match cost {
                     Some(c) => format!("{} (${c:.2})", fmt_tokens(n as f64)),
                     None => fmt_tokens(n as f64),
                 },
-            ));
+            );
+            if bucket == "total" {
+                metric = metric.with_usage(crate::usage_units::UsageUnit::Tokens, n as f64, None);
+            }
+            metrics.push(metric);
         }
     }
     if metrics.is_empty() {

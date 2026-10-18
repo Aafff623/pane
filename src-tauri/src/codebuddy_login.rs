@@ -8,8 +8,6 @@
 //! the tenant/domain headers the billing endpoints need riding in
 //! `extra` (see providers::codebuddy).
 
-use base64::Engine;
-use rand_core::{OsRng, RngCore};
 use serde_json::Value;
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
@@ -92,12 +90,6 @@ struct Pending {
 
 static PENDING: Mutex<Option<Pending>> = Mutex::new(None);
 
-fn random_token() -> String {
-    let mut bytes = [0u8; 16];
-    OsRng.fill_bytes(&mut bytes);
-    base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(bytes)
-}
-
 fn http() -> reqwest::Client {
     crate::providers::http()
 }
@@ -167,7 +159,7 @@ pub async fn start(family: &'static Family) -> Result<LoginStart, String> {
         .or_else(|| as_str(data, "url"))
         .unwrap_or_else(|| format!("{}/login?state={state}", family.api_endpoint));
 
-    let login_id = random_token();
+    let login_id = crate::oauth_util::random_b64url(16);
     let mut guard = PENDING.lock().map_err(|_| "login state poisoned".to_string())?;
     *guard = Some(Pending {
         login_id: login_id.clone(),

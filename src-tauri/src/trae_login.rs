@@ -12,7 +12,6 @@
 use base64::Engine;
 use rand_core::{OsRng, RngCore};
 use serde_json::{json, Value};
-use sha2::{Digest, Sha256};
 use std::io::{Read, Write};
 use std::net::TcpListener;
 use std::sync::Mutex;
@@ -55,7 +54,6 @@ struct Pending {
     login_id: String,
     state: String,
     verifier: String,
-    login_host: String,
     machine_id: String,
     device_id: String,
     captured: Option<Result<String, String>>,
@@ -64,29 +62,6 @@ struct Pending {
 }
 
 static PENDING: Mutex<Option<Pending>> = Mutex::new(None);
-
-fn random_token() -> String {
-    let mut bytes = [0u8; 16];
-    OsRng.fill_bytes(&mut bytes);
-    // UUID-ish: cockpit hands the vendor a v4 in these fields.
-    let hex: String = bytes.iter().map(|b| format!("{b:02x}")).collect();
-    format!(
-        "{}-{}-{}-{}-{}",
-        &hex[0..8],
-        &hex[8..12],
-        &hex[12..16],
-        &hex[16..20],
-        &hex[20..32]
-    )
-}
-
-fn b64url(bytes: &[u8]) -> String {
-    base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(bytes)
-}
-
-fn code_challenge(verifier: &str) -> String {
-    b64url(&Sha256::digest(verifier.as_bytes()))
-}
 
 fn pct(s: &str) -> String {
     let mut out = String::new();
@@ -121,23 +96,10 @@ fn b64_encode(bytes: &[u8]) -> String {
     base64::engine::general_purpose::STANDARD.encode(bytes)
 }
 
-fn callback_html(ok: bool) -> String {
-    let (fg, text) = if ok {
-        ("#4ade80", "Sign-in complete — you can close this tab and return to Pane.")
-    } else {
-        ("#f87171", "Sign-in failed — return to Pane and try again.")
-    };
-    format!(
-        "<!doctype html><html><head><meta charset=\"utf-8\"><title>Pane</title></head>\
-         <body style=\"font-family:sans-serif;background:#18181b;color:{fg};display:flex;\
-         align-items:center;justify-content:center;height:100vh;margin:0\"><p>{text}</p></body></html>"
-    )
-}
-
 /// Ask the vendor which host currently serves the login page; the first
 /// endpoint that answers wins (cockpit's candidate order).
 async fn login_host() -> Result<String, String> {
-    let trace = random_token();
+    let trace = crate::oauth_util::random_uuid_like();
     let mut errors: Vec<String> = Vec::new();
     for endpoint in GUIDANCE_ENDPOINTS {
         let resp = match crate::providers::http()
@@ -227,16 +189,16 @@ pub async fn start() -> Result<LoginStart, String> {
     let listener = TcpListener::bind(("127.0.0.1", port)).map_err(|e| format!("bind callback port: {e}"))?;
     listener.set_nonblocking(true).map_err(|e| format!("listener setup: {e}"))?;
 
-    let login_id = random_token();
-    let trace = random_token();
-    let state = random_token();
-    let verifier = b64url(&{
+    let login_id = crate::oauth_util::random_uuid_like();
+    let trace = crate::oauth_util::random_uuid_like();
+    let state = crate::oauth_util::random_uuid_like();
+    let verifier = crate::oauth_util::b64url(&{
         let mut bytes = [0u8; 48];
         OsRng.fill_bytes(&mut bytes);
         bytes
     });
-    let machine_id = random_token();
-    let device_id = random_token();
+    let machine_id = crate::oauth_util::random_uuid_like();
+    let device_id = crate::oauth_util::random_uuid_like();
     let callback_url = format!("http://127.0.0.1:{port}{CALLBACK_PATH}");
     let auth_url = build_auth_url(
         &host,
@@ -244,15 +206,14 @@ pub async fn start() -> Result<LoginStart, String> {
         &callback_url,
         &machine_id,
         &device_id,
-        &code_challenge(&verifier),
+        &crate::oauth_util::code_challenge(&verifier),
     );
     {
         let mut guard = PENDING.lock().map_err(|_| "login state poisoned".to_string())?;
         *guard = Some(Pending {
             login_id: login_id.clone(),
-            state,
+            state: state.clone(),
             verifier,
-            login_host: host,
             machine_id,
             device_id,
             captured: None,
@@ -287,39 +248,21 @@ pub async fn start() -> Result<LoginStart, String> {
                 let mut params: Vec<(String, String)> = Vec::new();
                 for pair in query.split('&') {
                     if let Some((k, v)) = pair.split_once('=') {
-                        params.push((pct_decode(k), pct_decode(v)));
+                        params.push((crate::oauth_util::pct_decode(k), crate::oauth_util::pct_decode(v)));
                     }
                 }
-                let get = |name: &str| {
-                    params
-                        .iter()
-                        .find(|(k, _)| k == name)
-                        .map(|(_, v)| v.trim().to_string())
-                        .filter(|v| !v.is_empty())
-                };
-                let code = ["authCode", "auth_code", "AuthCode", "authorization_code", "code"]
-                    .iter()
-                    .find_map(|k| get(k))
-                    .or_else(|| {
-                        ["authCodeInfo", "auth_code_info", "AuthCodeInfo"]
-                            .iter()
-                            .find_map(|k| get(k))
-                            .and_then(|raw| serde_json::from_str::<Value>(&raw).ok())
-                            .and_then(|v| {
-                                ["AuthCode", "authCode", "auth_code", "code"]
-                                    .iter()
-                                    .find_map(|f| v.get(*f).and_then(Value::as_str))
-                                    .map(str::to_string)
-                            })
-                    });
-                let error = get("error").or_else(|| get("error_description"));
-                let outcome = match (code, error) {
-                    (_, Some(err)) => Err(format!("authorization failed: {err}")),
-                    (Some(code), None) => Ok(code),
-                    _ => Err("callback carried no auth code".into()),
+                // Read the state from the pending entry itself: one source of
+                // truth, and a cancelled login cannot be completed by a late
+                // callback.
+                let outcome = {
+                    let guard = PENDING.lock().unwrap_or_else(|e| e.into_inner());
+                    match guard.as_ref().filter(|p| p.login_id == thread_login) {
+                        Some(pending) => callback_outcome(&params, &pending.state),
+                        None => Err("sign-in was cancelled".into()),
+                    }
                 };
                 let ok = outcome.is_ok();
-                let html = callback_html(ok);
+                let html = crate::oauth_util::callback_html(ok);
                 let _ = stream.write_all(
                     format!(
                         "HTTP/1.1 {} OK\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
@@ -346,32 +289,46 @@ pub async fn start() -> Result<LoginStart, String> {
     Ok(LoginStart { login_id, auth_url })
 }
 
-fn pct_decode(s: &str) -> String {
-    let bytes = s.as_bytes();
-    let mut out = Vec::with_capacity(bytes.len());
-    let mut i = 0;
-    while i < bytes.len() {
-        match bytes[i] {
-            b'%' if i + 2 < bytes.len() => {
-                if let Ok(v) = u8::from_str_radix(std::str::from_utf8(&bytes[i + 1..i + 3]).unwrap_or(""), 16) {
-                    out.push(v);
-                    i += 3;
-                    continue;
-                }
-                out.push(b'%');
-                i += 1;
-            }
-            b'+' => {
-                out.push(b' ');
-                i += 1;
-            }
-            b => {
-                out.push(b);
-                i += 1;
-            }
+/// Decode one loopback callback into the captured auth code.
+///
+/// The login binds a fresh loopback port per attempt, so the port already
+/// scopes the response to this sign-in. A `state` the vendor *does* echo must
+/// still match the pending login — a mismatch is rejected instead of silently
+/// accepted. A missing `state` is tolerated because Trae's echo is unverified
+/// and refusing it would break a working flow.
+fn callback_outcome(params: &[(String, String)], expected_state: &str) -> Result<String, String> {
+    let get = |name: &str| {
+        params
+            .iter()
+            .find(|(k, _)| k == name)
+            .map(|(_, v)| v.trim().to_string())
+            .filter(|v| !v.is_empty())
+    };
+    if let Some(state) = get("state") {
+        if state != expected_state {
+            return Err("sign-in state mismatch — start the sign-in again".into());
         }
     }
-    String::from_utf8_lossy(&out).into_owned()
+    let code = ["authCode", "auth_code", "AuthCode", "authorization_code", "code"]
+        .iter()
+        .find_map(|k| get(k))
+        .or_else(|| {
+            ["authCodeInfo", "auth_code_info", "AuthCodeInfo"]
+                .iter()
+                .find_map(|k| get(k))
+                .and_then(|raw| serde_json::from_str::<Value>(&raw).ok())
+                .and_then(|v| {
+                    ["AuthCode", "authCode", "auth_code", "code"]
+                        .iter()
+                        .find_map(|f| v.get(*f).and_then(Value::as_str))
+                        .map(str::to_string)
+                })
+        });
+    match (code, get("error").or_else(|| get("error_description"))) {
+        (_, Some(err)) => Err(format!("authorization failed: {err}")),
+        (Some(code), None) => Ok(code),
+        _ => Err("callback carried no auth code".into()),
+    }
 }
 
 fn pick_str(value: &Value, paths: &[&[&str]]) -> Option<String> {
@@ -643,5 +600,39 @@ mod tests {
         );
         assert_eq!(pick_str(&value, &[&["Result", "UserID"]]).as_deref(), Some("u-1"));
         assert!(pick_str(&value, &[&["data", "token"]]).is_none());
+    }
+
+    #[test]
+    fn callback_rejects_a_state_that_does_not_match_the_pending_login() {
+        let params = vec![
+            ("authCode".into(), "ac-1".into()),
+            ("state".into(), "wrong-state".into()),
+        ];
+        assert!(callback_outcome(&params, "expected-state").is_err());
+        let ok = vec![
+            ("authCode".into(), "ac-1".into()),
+            ("state".into(), "expected-state".into()),
+        ];
+        assert_eq!(callback_outcome(&ok, "expected-state").unwrap(), "ac-1");
+    }
+
+    #[test]
+    fn callback_tolerates_an_absent_state_but_still_requires_a_code() {
+        let no_state = vec![("authCode".into(), "ac-2".into())];
+        assert_eq!(callback_outcome(&no_state, "expected-state").unwrap(), "ac-2");
+        assert!(callback_outcome(&[], "expected-state").is_err());
+        let only_state = vec![("state".into(), "expected-state".into())];
+        assert!(callback_outcome(&only_state, "expected-state").is_err());
+    }
+
+    #[test]
+    fn callback_surfaces_vendor_errors_and_reads_nested_code_shapes() {
+        let denied = vec![("error".into(), "access_denied".into())];
+        assert!(callback_outcome(&denied, "s").unwrap_err().contains("access_denied"));
+        let nested = vec![(
+            "authCodeInfo".into(),
+            "{\"AuthCode\":\"nested-1\"}".into(),
+        )];
+        assert_eq!(callback_outcome(&nested, "s").unwrap(), "nested-1");
     }
 }

@@ -109,6 +109,27 @@ pub fn fast_multiplier(model: &str) -> f64 {
     s.fast_multipliers.get(model).copied().unwrap_or(1.0)
 }
 
+/// One owner for provider service-tier pricing. `dated` is the normalized
+/// Codex model name; `rate_model` is the model key used by the live catalog.
+pub(crate) fn priority_multiplier_with(
+    dated: &str,
+    rate_model: &str,
+    supplement: impl FnOnce() -> f64,
+) -> f64 {
+    let lower = rate_model.to_ascii_lowercase();
+    if lower.contains("kimi") || lower.contains("moonshot") {
+        return 1.0;
+    }
+    match dated {
+        "gpt-5.5" | "gpt-5.5-pro" => 2.5,
+        "gpt-5.4" | "gpt-5.4-pro" | "gpt-5.6-sol" | "gpt-5.6-terra" | "gpt-5.6-luna" => 2.0,
+        _ => {
+            let multiplier = supplement();
+            if multiplier == 1.0 { 2.0 } else { multiplier }
+        }
+    }
+}
+
 const SOURCES: [(&str, &str); 3] = [
     (
         "litellm",
@@ -166,7 +187,7 @@ pub fn generation() -> u64 {
 /// fingerprinted below — an app update that reprices the same files would
 /// otherwise leave history at the old dollars until upstream happens to
 /// rewrite a catalog.
-const CORRECTIONS_REV: u32 = 13; // 13: antigravity four-field decode + per-event day
+const CORRECTIONS_REV: u32 = 14; // 14: shared priority policy and supplement resolution
 
 /// The corrections revision on its own — the spend cache treats a changed
 /// revision as a hard discard (the *code* that prices changed), while a
@@ -175,7 +196,7 @@ const CORRECTIONS_REV: u32 = 13; // 13: antigravity four-field decode + per-even
 ///
 /// Bump this whenever baked rates *or* spend.rs's own pricing tables change
 /// (`claude_price`, `codex_price`, `grok_price`, `codex_long_context`,
-/// `codex_priority_multiplier` hardcoded arms, `codex_no_cache_discount`,
+/// `priority_multiplier_with` hardcoded arms, `codex_no_cache_discount`,
 /// `request_cost` thresholds). Probes only witness catalog lookups — they
 /// cannot vouch for that code. A forgotten bump used to get papered over
 /// within a day by catalog-stamp churn; it now leaves stale dollars until
@@ -633,8 +654,8 @@ fn resolve(s: &Store, model: &str, depth: u8) -> Option<Price> {
     // Priority processing tier: some CLIs (Devin) bake the service tier
     // into the slug itself ("gpt-5.6-luna-xhigh-priority") instead of
     // flagging it per turn the way Codex rollouts do. OpenAI bills
-    // priority at a per-model multiplier over the standard rate — keep
-    // this table in sync with spend.rs's codex_priority_multiplier.
+    // priority at a per-model multiplier over the standard rate. Resolve
+    // against this already-locked catalog, using the same policy as spend.
     if let Some(base) = canonical.strip_suffix("-priority") {
         let mut mkey = base;
         while let Some(next) = ["-xhigh", "-light", "-low", "-medium", "-high", "-max", "-ultra"]
@@ -643,7 +664,9 @@ fn resolve(s: &Store, model: &str, depth: u8) -> Option<Price> {
         {
             mkey = next;
         }
-        let m = if matches!(mkey, "gpt-5.5" | "gpt-5.5-pro") { 2.5 } else { 2.0 };
+        let m = priority_multiplier_with(mkey, mkey, || {
+            s.fast_multipliers.get(mkey).copied().unwrap_or(1.0)
+        });
         if let Some(p) = resolve(s, base, depth + 1) {
             return Some(scaled_price(&p, m));
         }
@@ -943,6 +966,21 @@ mod tests {
         store.supplement.insert("gpt-5.5".into(), super::Price::flat(10.0, 45.0, 1.0, 1.25));
         let p55 = super::resolve(&store, "gpt-5.5-priority", 0).unwrap();
         assert!((p55.input - 25.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn priority_resolution_uses_the_supplied_catalog_without_relocking() {
+        let _guard = super::store().lock().unwrap_or_else(|e| e.into_inner());
+        let mut catalog = super::Store::default();
+        catalog.supplement.insert("test-model".into(), super::Price::flat(2.0, 4.0, 0.2, 0.0));
+        catalog.fast_multipliers.insert("test-model".into(), 3.0);
+        let price = super::resolve(&catalog, "test-model-priority", 0).unwrap();
+        assert_eq!(price.input, 6.0);
+        assert_eq!(price.output, 12.0);
+        assert_eq!(
+            super::priority_multiplier_with("gpt-5.5", "gpt-5.5", || panic!("fixed tier consulted supplement")),
+            2.5
+        );
     }
 
     #[test]

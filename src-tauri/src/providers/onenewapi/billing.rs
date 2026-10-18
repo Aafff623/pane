@@ -210,6 +210,8 @@ fn expiry_metric(resets_at: i64) -> Metric {
         resets_at: Some(resets_at),
         period_ms: None,
         available: None,
+        usage: None,
+        daily_usage: None,
     }
 }
 

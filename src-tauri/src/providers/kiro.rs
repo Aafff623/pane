@@ -327,7 +327,9 @@ fn parse_usage(doc: &Value) -> Result<Snapshot, String> {
         format!("{plan_used:.1} of {plan_limit:.0} credits")
     };
     let mut metrics =
-        vec![Metric::progress("Credits", pct.clamp(0.0, 100.0), Some(detail)).with_reset(Some(resets_at), None)];
+        vec![Metric::progress("Credits", pct.clamp(0.0, 100.0), Some(detail))
+            .with_usage(crate::usage_units::UsageUnit::Credits, plan_used, Some(plan_limit))
+            .with_reset(Some(resets_at), None)];
 
     if overage_used > 0.0 || overage_cap.is_some() {
         match overage_cap.filter(|cap| *cap > 0.0) {

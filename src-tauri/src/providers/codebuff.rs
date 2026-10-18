@@ -115,12 +115,13 @@ async fn fetch_with_key(key: &str) -> Result<Snapshot, String> {
                 (u / t * 100.0).clamp(0.0, 100.0),
                 Some(format!("{u:.0} of {t:.0} credits used")),
             )
+            .with_usage(crate::usage_units::UsageUnit::Credits, u, Some(t))
             .with_reset(resets_at, None),
         ),
         (Some(u), _) => metrics.push(Metric::text(
             "Credits",
             format!("{u:.0} credits used · quota not reported"),
-        )),
+        ).with_usage(crate::usage_units::UsageUnit::Credits, u, None)),
         _ => {}
     }
     if let Some(remaining) = remaining {

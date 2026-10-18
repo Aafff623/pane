@@ -45,6 +45,9 @@ export default defineConfig(async () => ({
         "**/temp/**",
         "**/site/**",
         "**/.zcode/**",
+        // Local tool state (Mimosa hook baselines; tens of thousands of
+        // files). Not source input, but Vite would crawl it at every start.
+        "**/.mimosa/**",
       ],
     },
   },

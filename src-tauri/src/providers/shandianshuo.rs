@@ -1,6 +1,7 @@
 //! 闪电说 desktop membership usage.
 use super::{http, json_body, Metric, Snapshot};
 use serde_json::Value;
+use crate::usage_units::UsageUnit;
 
 const ID: &str = "shandianshuo";
 const NAME: &str = "闪电说";
@@ -85,8 +86,14 @@ fn usage_metric(
     used_key: &str,
     cap_key: &str,
     label: &str,
-    unit: &str,
+    unit: UsageUnit,
 ) -> Result<Metric, String> {
+    let display_unit = match unit {
+        UsageUnit::Minutes => "分钟",
+        UsageUnit::Credits => "积分",
+        UsageUnit::Tokens => "tokens",
+        UsageUnit::Requests => "次",
+    };
     let used = number_at(body, &[object, used_key])
         .ok_or_else(|| format!("缺少有效 {object}.{used_key}"))?;
     if body
@@ -97,19 +104,19 @@ fn usage_metric(
     {
         return Ok(Metric::text(
             label,
-            format!("已用 {used:.2} {unit} · 不限额"),
-        ));
+            format!("已用 {used:.2} {display_unit} · 不限额"),
+        ).with_usage(unit, used, None));
     }
     match number_at(body, &[object, cap_key]).filter(|v| *v > 0.0) {
         Some(cap) => Ok(Metric::progress(
             label,
             used / cap * 100.0,
-            Some(format!("{used:.2} / {cap:.0} {unit}")),
-        )),
+            Some(format!("{used:.2} / {cap:.0} {display_unit}")),
+        ).with_usage(unit, used, Some(cap))),
         None => Ok(Metric::text(
             label,
-            format!("已用 {used:.2} {unit} · 上限未返回"),
-        )),
+            format!("已用 {used:.2} {display_unit} · 上限未返回"),
+        ).with_usage(unit, used, None)),
     }
 }
 
@@ -133,7 +140,7 @@ fn parse_usage(body: &Value) -> Result<Snapshot, String> {
             "usedMinutes",
             "quotaMinutes",
             "直接说",
-            "分钟",
+            UsageUnit::Minutes,
         )?
         .with_reset(reset, None),
         usage_metric(
@@ -142,7 +149,7 @@ fn parse_usage(body: &Value) -> Result<Snapshot, String> {
             "usedCredits",
             "creditQuota",
             "Agent 执行积分",
-            "积分",
+            UsageUnit::Credits,
         )?
         .with_reset(reset, None),
     ];
@@ -171,6 +178,9 @@ mod tests {
         let paid = parse_usage(&serde_json::json!({"plan":"Enterprise","speech":{"usedMinutes":500,"quotaMinutes":10000},"assistant":{"usedCredits":50,"creditQuota":50000}})).unwrap();
         assert_eq!(paid.plan.as_deref(), Some("Enterprise"));
         assert_eq!(paid.metrics[0].used_percent, Some(5.0));
+        assert_eq!(paid.metrics[0].usage.as_ref().unwrap().unit, UsageUnit::Minutes);
+        assert_eq!(paid.metrics[0].usage.as_ref().unwrap().used, 500.0);
+        assert_eq!(paid.metrics[1].usage.as_ref().unwrap().unit, UsageUnit::Credits);
     }
 
     #[test]

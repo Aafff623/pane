@@ -145,24 +145,13 @@ pub fn save_accounts(accounts: &[CursorAccount]) -> Result<(), String> {
     save_accounts_to(&crate::providers::config_dir(), accounts)
 }
 
-fn fnv1a(bytes: &[u8], mut hash: u64) -> u64 {
-    for byte in bytes {
-        hash ^= u64::from(*byte);
-        hash = hash.wrapping_mul(0x1000_0000_01b3);
-    }
-    hash
-}
 
 /// Stable card id keyed on the access token (the identity Cursor mints per
 /// login; refresh rotation keeps the same access until re-login). Same
 /// two-lane FNV scheme as accounts.rs.
 pub fn card_id_for_account(account: &CursorAccount) -> String {
-    let material = account.access_token.trim().as_bytes().to_vec();
-    let left = fnv1a(&material, 0xcbf2_9ce4_8422_2325);
-    let mut second = b"pane-cursor-account-v1\0".to_vec();
-    second.extend_from_slice(&material);
-    let right = fnv1a(&second, 0x8422_2325_cbf2_9ce4);
-    format!("cursor@{left:016x}{right:016x}")
+    let material = account.access_token.trim().as_bytes();
+    crate::identity::stable_card_id("cursor", b"pane-cursor-account-v1\0", material)
 }
 
 /// "ya29…abcd" style mask: recognizable head, ellipsis, last 4 chars.

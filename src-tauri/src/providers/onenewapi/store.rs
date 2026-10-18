@@ -114,7 +114,7 @@ pub fn load(path: &Path) -> Result<StoreFile, String> {
         });
     }
     if path.is_file() {
-        let _ = restrict_owner_only(path);
+        let _ = crate::platform::restrict_owner_only(path);
     }
     let raw = super::super::read_small_text(path, 1_048_576, "onenewapi.json")?;
     let raw = raw.trim_start_matches('\u{feff}');
@@ -155,237 +155,15 @@ fn atomic_write(path: &Path, contents: &str) -> Result<(), String> {
 }
 
 fn write_private_then_replace(path: &Path, tmp: &Path, contents: &str) -> Result<(), String> {
-    create_empty(tmp)?;
-    restrict_owner_only(tmp)?;
+    crate::platform::create_private_file(tmp)?;
+    crate::platform::restrict_owner_only(tmp)?;
     std::fs::write(tmp, contents).map_err(|e| format!("write onenewapi.json: {e}"))?;
     if path.exists() {
-        replace_existing(tmp, path).map_err(|e| format!("replace onenewapi.json: {e}"))?;
+        crate::platform::replace_file(tmp, path).map_err(|e| format!("replace onenewapi.json: {e}"))?;
     } else {
         std::fs::rename(tmp, path).map_err(|e| format!("replace onenewapi.json: {e}"))?;
     }
-    restrict_owner_only(path)
-}
-
-fn create_empty(path: &Path) -> Result<(), String> {
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::OpenOptionsExt;
-        drop(
-            std::fs::OpenOptions::new()
-                .write(true)
-                .create_new(true)
-                .mode(0o600)
-                .open(path)
-                .map_err(|e| format!("write onenewapi.json: {e}"))?,
-        );
-        Ok(())
-    }
-    #[cfg(not(unix))]
-    {
-        drop(std::fs::File::create_new(path).map_err(|e| format!("write onenewapi.json: {e}"))?);
-        Ok(())
-    }
-}
-
-pub(crate) fn restrict_owner_only(path: &Path) -> Result<(), String> {
-    #[cfg(windows)]
-    {
-        let sid = current_user_sid()?;
-        set_protected_dacl(path, &format!("D:P(A;;FA;;;SY)(A;;FA;;;{sid})"))
-    }
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))
-            .map_err(|e| format!("restrict onenewapi.json: {e}"))
-    }
-    #[cfg(not(any(unix, windows)))]
-    {
-        let _ = path;
-        Ok(())
-    }
-}
-
-#[cfg(windows)]
-fn current_user_sid() -> Result<String, String> {
-    static SID: std::sync::OnceLock<String> = std::sync::OnceLock::new();
-    if let Some(s) = SID.get() {
-        return Ok(s.clone());
-    }
-    let s = query_current_user_sid()?;
-    Ok(SID.get_or_init(|| s).clone())
-}
-
-#[cfg(windows)]
-struct LocalAlloc(*mut core::ffi::c_void);
-
-#[cfg(windows)]
-impl Drop for LocalAlloc {
-    fn drop(&mut self) {
-        if !self.0.is_null() {
-            use windows::Win32::Foundation::{LocalFree, HLOCAL};
-            unsafe {
-                let _ = LocalFree(Some(HLOCAL(self.0)));
-            }
-        }
-    }
-}
-
-#[cfg(windows)]
-fn query_current_user_sid() -> Result<String, String> {
-    use windows::core::PWSTR;
-    use windows::Win32::Foundation::{CloseHandle, HANDLE};
-    use windows::Win32::Security::Authorization::ConvertSidToStringSidW;
-    use windows::Win32::Security::{GetTokenInformation, TokenUser, TOKEN_QUERY, TOKEN_USER};
-    use windows::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
-
-    unsafe {
-        let mut token = HANDLE::default();
-        OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &mut token)
-            .map_err(|e| format!("restrict onenewapi.json: {e}"))?;
-        let mut needed = 0u32;
-        let _ = GetTokenInformation(token, TokenUser, None, 0, &mut needed);
-        let mut buf = vec![0u8; needed as usize];
-        let info = GetTokenInformation(
-            token,
-            TokenUser,
-            Some(buf.as_mut_ptr().cast()),
-            needed,
-            &mut needed,
-        );
-        let _ = CloseHandle(token);
-        info.map_err(|e| format!("restrict onenewapi.json: {e}"))?;
-        let user = &*(buf.as_ptr() as *const TOKEN_USER);
-        let mut sid = PWSTR::null();
-        ConvertSidToStringSidW(user.User.Sid, &mut sid)
-            .map_err(|e| format!("restrict onenewapi.json: {e}"))?;
-        let _free = LocalAlloc(sid.0.cast());
-        sid.to_string()
-            .map_err(|e| format!("restrict onenewapi.json: {e}"))
-    }
-}
-
-#[cfg(windows)]
-fn set_protected_dacl(path: &Path, sddl: &str) -> Result<(), String> {
-    use windows::core::PCWSTR;
-    use windows::Win32::Foundation::ERROR_SUCCESS;
-    use windows::Win32::Security::Authorization::{
-        ConvertStringSecurityDescriptorToSecurityDescriptorW, SetNamedSecurityInfoW,
-        SDDL_REVISION_1, SE_FILE_OBJECT,
-    };
-    use windows::Win32::Security::{
-        GetSecurityDescriptorDacl, ACL, DACL_SECURITY_INFORMATION,
-        PROTECTED_DACL_SECURITY_INFORMATION, PSECURITY_DESCRIPTOR,
-    };
-
-    let path_w = path_wide(path);
-    let sddl_w: Vec<u16> = sddl.encode_utf16().chain(std::iter::once(0)).collect();
-    let mut sd = PSECURITY_DESCRIPTOR::default();
-    unsafe {
-        ConvertStringSecurityDescriptorToSecurityDescriptorW(
-            PCWSTR(sddl_w.as_ptr()),
-            SDDL_REVISION_1,
-            &mut sd,
-            None,
-        )
-        .map_err(|e| format!("restrict onenewapi.json: {e}"))?;
-        let _free = LocalAlloc(sd.0);
-        let mut present = windows::core::BOOL::default();
-        let mut defaulted = windows::core::BOOL::default();
-        let mut dacl: *mut ACL = std::ptr::null_mut();
-        GetSecurityDescriptorDacl(sd, &mut present, &mut dacl, &mut defaulted)
-            .map_err(|e| format!("restrict onenewapi.json: {e}"))?;
-        if !present.as_bool() || dacl.is_null() {
-            return Err("restrict onenewapi.json: missing DACL".into());
-        }
-        let err = SetNamedSecurityInfoW(
-            PCWSTR(path_w.as_ptr()),
-            SE_FILE_OBJECT,
-            DACL_SECURITY_INFORMATION | PROTECTED_DACL_SECURITY_INFORMATION,
-            None,
-            None,
-            Some(dacl),
-            None,
-        );
-        if err != ERROR_SUCCESS {
-            return Err(format!("restrict onenewapi.json: {err:?}"));
-        }
-    }
-    Ok(())
-}
-
-#[cfg(windows)]
-fn path_wide(path: &Path) -> Vec<u16> {
-    use std::os::windows::ffi::OsStrExt;
-    path.as_os_str()
-        .encode_wide()
-        .chain(std::iter::once(0))
-        .collect()
-}
-
-#[cfg(all(windows, test))]
-fn dacl_sddl(path: &Path) -> Result<String, String> {
-    use windows::core::{PCWSTR, PWSTR};
-    use windows::Win32::Foundation::ERROR_SUCCESS;
-    use windows::Win32::Security::Authorization::{
-        ConvertSecurityDescriptorToStringSecurityDescriptorW, GetNamedSecurityInfoW,
-        SDDL_REVISION_1, SE_FILE_OBJECT,
-    };
-    use windows::Win32::Security::{DACL_SECURITY_INFORMATION, PSECURITY_DESCRIPTOR};
-
-    let path_w = path_wide(path);
-    let mut sd = PSECURITY_DESCRIPTOR::default();
-    unsafe {
-        let err = GetNamedSecurityInfoW(
-            PCWSTR(path_w.as_ptr()),
-            SE_FILE_OBJECT,
-            DACL_SECURITY_INFORMATION,
-            None,
-            None,
-            None,
-            None,
-            &mut sd,
-        );
-        if err != ERROR_SUCCESS {
-            return Err(format!("read DACL: {err:?}"));
-        }
-        let _free_sd = LocalAlloc(sd.0);
-        let mut sddl = PWSTR::null();
-        ConvertSecurityDescriptorToStringSecurityDescriptorW(
-            sd,
-            SDDL_REVISION_1,
-            DACL_SECURITY_INFORMATION,
-            &mut sddl,
-            None,
-        )
-        .map_err(|e| format!("read DACL: {e}"))?;
-        let _free_sddl = LocalAlloc(sddl.0.cast());
-        sddl.to_string().map_err(|e| format!("read DACL: {e}"))
-    }
-}
-
-#[cfg(windows)]
-fn replace_existing(replacement: &Path, destination: &Path) -> std::io::Result<()> {
-    use windows::core::PCWSTR;
-    use windows::Win32::Storage::FileSystem::{
-        MoveFileExW, MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH,
-    };
-
-    let destination = path_wide(destination);
-    let replacement = path_wide(replacement);
-    unsafe {
-        MoveFileExW(
-            PCWSTR(replacement.as_ptr()),
-            PCWSTR(destination.as_ptr()),
-            MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH,
-        )
-    }
-    .map_err(std::io::Error::other)
-}
-
-#[cfg(not(windows))]
-fn replace_existing(replacement: &Path, destination: &Path) -> std::io::Result<()> {
-    std::fs::rename(replacement, destination)
+    crate::platform::restrict_owner_only(path)
 }
 
 fn occupied_ids(doc: &StoreFile) -> HashSet<String> {
@@ -821,10 +599,10 @@ mod tests {
     fn is_owner_only(path: &Path) -> bool {
         #[cfg(windows)]
         {
-            let Ok(sddl) = super::dacl_sddl(path) else {
+            let Ok(sddl) = crate::platform::dacl_sddl(path) else {
                 return false;
             };
-            let Ok(sid) = super::current_user_sid() else {
+            let Ok(sid) = crate::platform::current_user_sid() else {
                 return false;
             };
             // SDDL renders the built-in Administrator account (RID -500) as
@@ -855,7 +633,7 @@ mod tests {
     fn owner_only_debug(path: &Path) -> String {
         #[cfg(windows)]
         {
-            super::dacl_sddl(path).unwrap_or_else(|e| e)
+            crate::platform::dacl_sddl(path).unwrap_or_else(|e| e)
         }
         #[cfg(unix)]
         {
@@ -875,8 +653,8 @@ mod tests {
     fn make_inheritable_world_readable(dir: &Path) {
         #[cfg(windows)]
         {
-            let sid = super::current_user_sid().unwrap();
-            super::set_protected_dacl(
+            let sid = crate::platform::current_user_sid().unwrap();
+            crate::platform::set_protected_dacl(
                 dir,
                 &format!("D:P(A;OICI;FA;;;WD)(A;OICI;FA;;;SY)(A;OICI;FA;;;{sid})"),
             )
@@ -896,8 +674,8 @@ mod tests {
     fn make_world_readable_file(path: &Path) {
         #[cfg(windows)]
         {
-            let sid = super::current_user_sid().unwrap();
-            super::set_protected_dacl(path, &format!("D:P(A;;FA;;;WD)(A;;FA;;;SY)(A;;FA;;;{sid})"))
+            let sid = crate::platform::current_user_sid().unwrap();
+            crate::platform::set_protected_dacl(path, &format!("D:P(A;;FA;;;WD)(A;;FA;;;SY)(A;;FA;;;{sid})"))
                 .unwrap();
         }
         #[cfg(unix)]

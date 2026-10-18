@@ -128,21 +128,8 @@ fn env_code_home() -> Option<PathBuf> {
 }
 
 fn absolute_home(raw: &str) -> Option<PathBuf> {
-    let p = PathBuf::from(raw.trim());
-    if p.as_os_str().is_empty() || !p.is_absolute() {
-        return None;
-    }
-    #[cfg(windows)]
-    {
-        use std::path::Component;
-        // `\Windows\...` is "absolute" on Windows but drive-relative.
-        // Only honor a real drive/UNC prefix so a planted env can't aim
-        // credential writes at the current-drive root.
-        if !matches!(p.components().next(), Some(Component::Prefix(_))) {
-            return None;
-        }
-    }
-    Some(p)
+    let path = PathBuf::from(raw.trim());
+    crate::platform::path_is_fully_absolute(&path).then_some(path)
 }
 
 fn cred_candidates(kimi_home: Option<PathBuf>, user_home: Option<PathBuf>) -> Vec<PathBuf> {

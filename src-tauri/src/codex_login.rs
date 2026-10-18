@@ -31,8 +31,6 @@
 //! - Auth codes are single-use and a pending login expires after 5 minutes —
 //!   every failure means starting a fresh browser sign-in.
 
-use base64::Engine;
-use rand_core::{OsRng, RngCore};
 use serde::Serialize;
 use serde_json::Value;
 use std::io::{Read, Write};
@@ -80,101 +78,15 @@ pub struct LoginPoll {
     pub error: Option<String>,
 }
 
-fn b64url(bytes: &[u8]) -> String {
-    base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(bytes)
-}
-
-fn random_verifier() -> String {
-    let mut bytes = [0u8; 48];
-    OsRng.fill_bytes(&mut bytes);
-    b64url(&bytes)
-}
-
-fn random_state() -> String {
-    let mut bytes = [0u8; 16];
-    OsRng.fill_bytes(&mut bytes);
-    b64url(&bytes)
-}
-
-/// RFC 7636 S256: base64url(SHA-256(verifier)).
-pub fn code_challenge(verifier: &str) -> String {
-    use sha2::{Digest, Sha256};
-    b64url(&Sha256::digest(verifier.as_bytes()))
-}
-
-fn pct_encode(s: &str) -> String {
-    let mut out = String::new();
-    for b in s.bytes() {
-        match b {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => out.push(b as char),
-            _ => out.push_str(&format!("%{b:02X}")),
-        }
-    }
-    out
-}
-
-fn pct_decode(s: &str) -> String {
-    let bytes = s.as_bytes();
-    let mut out = Vec::with_capacity(bytes.len());
-    let mut i = 0;
-    while i < bytes.len() {
-        match bytes[i] {
-            b'%' if i + 2 < bytes.len() => {
-                let hex = std::str::from_utf8(&bytes[i + 1..i + 3]).unwrap_or("");
-                if let Ok(v) = u8::from_str_radix(hex, 16) {
-                    out.push(v);
-                    i += 3;
-                    continue;
-                }
-                out.push(b'%');
-                i += 1;
-            }
-            b'+' => {
-                out.push(b' ');
-                i += 1;
-            }
-            b => {
-                out.push(b);
-                i += 1;
-            }
-        }
-    }
-    String::from_utf8_lossy(&out).into_owned()
-}
-
 pub fn build_auth_url(state: &str, challenge: &str) -> String {
     format!(
         "{AUTH_ENDPOINT}?response_type=code&client_id={CLIENT_ID}&redirect_uri={}&scope={}&state={}&code_challenge={}&code_challenge_method=S256&id_token_add_organizations=true&codex_cli_simplified_flow=true&originator={}",
-        pct_encode(REDIRECT_URI),
-        pct_encode(SCOPES),
+        crate::oauth_util::pct_encode(REDIRECT_URI),
+        crate::oauth_util::pct_encode(SCOPES),
         state,
         challenge,
-        pct_encode(ORIGINATOR),
+        crate::oauth_util::pct_encode(ORIGINATOR),
     )
-}
-
-/// First request line of the loopback callback → (code, state).
-fn parse_callback_request(request_line: &str) -> Option<(String, String)> {
-    let path = request_line.split_whitespace().nth(1)?;
-    let query = path.split_once('?')?.1;
-    let mut code = None;
-    let mut state = None;
-    for pair in query.split('&') {
-        let Some((key, value)) = pair.split_once('=') else { continue };
-        match key {
-            "code" => code = Some(pct_decode(value)),
-            "state" => state = Some(pct_decode(value)),
-            _ => {}
-        }
-    }
-    Some((code?, state?))
-}
-
-fn callback_html() -> &'static str {
-    "<!doctype html><html><head><meta charset=\"utf-8\"><title>Pane</title></head>\
-     <body style=\"font-family:sans-serif;background:#18181b;color:#f4f4f5;display:flex;\
-     align-items:center;justify-content:center;height:100vh;margin:0\">\
-     <p>Sign-in complete — you can close this tab and return to Pane.</p></body></html>"
 }
 
 /// Bind the loopback port and wait for one callback. Errors with
@@ -184,10 +96,10 @@ pub fn start() -> Result<LoginStart, String> {
         TcpListener::bind(("127.0.0.1", CALLBACK_PORT)).map_err(|_| PORT_IN_USE.to_string())?;
     listener.set_nonblocking(true).map_err(|e| format!("listener setup: {e}"))?;
 
-    let login_id = random_state();
-    let state = random_state();
-    let verifier = random_verifier();
-    let auth_url = build_auth_url(&state, &code_challenge(&verifier));
+    let login_id = crate::oauth_util::random_b64url(16);
+    let state = crate::oauth_util::random_b64url(16);
+    let verifier = crate::oauth_util::random_b64url(48);
+    let auth_url = build_auth_url(&state, &crate::oauth_util::code_challenge(&verifier));
     {
         let mut guard = PENDING.lock().map_err(|_| "login state poisoned".to_string())?;
         *guard = Some(Pending {
@@ -218,7 +130,7 @@ pub fn start() -> Result<LoginStart, String> {
                     .next()
                     .unwrap_or_default()
                     .to_string();
-                let html = callback_html();
+                let html = crate::oauth_util::callback_html(true);
                 let _ = stream.write_all(
                     format!(
                         "HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
@@ -227,7 +139,7 @@ pub fn start() -> Result<LoginStart, String> {
                     )
                     .as_bytes(),
                 );
-                if let Some((code, got_state)) = parse_callback_request(&line) {
+                if let Some((code, got_state)) = crate::oauth_util::parse_callback_request(&line) {
                     if let Ok(mut guard) = PENDING.lock() {
                         if let Some(p) = guard.as_mut() {
                             if p.login_id == thread_login {
@@ -410,17 +322,17 @@ mod tests {
     fn s256_challenge_matches_the_rfc_vector() {
         // RFC 7636 appendix B.
         let verifier = "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk";
-        assert_eq!(code_challenge(verifier), "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM");
+        assert_eq!(crate::oauth_util::code_challenge(verifier), "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM");
     }
 
     #[test]
     fn callback_parsing_takes_code_and_state() {
         let line = "GET /auth/callback?code=ac%2F1&state=st-42 HTTP/1.1";
-        let (code, state) = parse_callback_request(line).unwrap();
+        let (code, state) = crate::oauth_util::parse_callback_request(line).unwrap();
         assert_eq!(code, "ac/1");
         assert_eq!(state, "st-42");
-        assert!(parse_callback_request("GET /auth/callback HTTP/1.1").is_none());
-        assert!(parse_callback_request("GET /auth/callback?code=only HTTP/1.1").is_none());
+        assert!(crate::oauth_util::parse_callback_request("GET /auth/callback HTTP/1.1").is_none());
+        assert!(crate::oauth_util::parse_callback_request("GET /auth/callback?code=only HTTP/1.1").is_none());
     }
 
     #[test]
@@ -428,7 +340,7 @@ mod tests {
         let url = build_auth_url("st", "ch");
         assert!(url.starts_with(AUTH_ENDPOINT));
         assert!(url.contains("code_challenge=ch&code_challenge_method=S256"));
-        assert!(url.contains(&format!("redirect_uri={}", pct_encode(REDIRECT_URI))));
+        assert!(url.contains(&format!("redirect_uri={}", crate::oauth_util::pct_encode(REDIRECT_URI))));
         assert!(url.contains("scope=openid%20profile%20email%20offline_access"));
         // The official client's simplified-flow parameters (cockpit parity).
         assert!(url.contains("id_token_add_organizations=true"));

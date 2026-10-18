@@ -492,6 +492,36 @@ fn route(method: &tiny_http::Method, url: &str) -> (u16, String) {
     }
 }
 
+fn respond(request: tiny_http::Request) {
+    // DNS-rebinding guard: a page can point its own hostname at
+    // 127.0.0.1, making this server "same-origin" in the victim's
+    // browser — CORS never applies then. Legitimate local clients
+    // address us by loopback names only; anything else is refused.
+    let host = request
+        .headers()
+        .iter()
+        .find(|h| h.field.equiv("Host"))
+        .map(|h| h.value.as_str().to_string());
+    let (status, body) = if host_ok(host.as_deref()) {
+        route(request.method(), request.url())
+    } else {
+        (403, json!({"error": "forbidden_host"}).to_string())
+    };
+    let mut response = tiny_http::Response::from_string(body).with_status_code(status);
+    // Deliberately NO Access-Control-Allow-Origin header: with
+    // permissive CORS, any website the user visits could silently
+    // read their usage data from this port. Browsers now block
+    // cross-origin reads; scripts, widgets, and curl are unaffected
+    // (CORS only constrains browsers). The Mac app allows "*" and
+    // discloses it — we chose the stricter default.
+    for (k, v) in [("Content-Type", "application/json")] {
+        if let Ok(h) = tiny_http::Header::from_bytes(k.as_bytes(), v.as_bytes()) {
+            response.add_header(h);
+        }
+    }
+    let _ = request.respond(response);
+}
+
 /// Binds 127.0.0.1:6736 and serves until the app exits. If the port is
 /// taken the API is silently unavailable this session (Mac parity).
 pub fn start() {
@@ -505,33 +535,7 @@ pub fn start() {
         };
         eprintln!("[pane] local API: http://127.0.0.1:6736/v1/usage");
         for request in server.incoming_requests() {
-            // DNS-rebinding guard: a page can point its own hostname at
-            // 127.0.0.1, making this server "same-origin" in the victim's
-            // browser — CORS never applies then. Legitimate local clients
-            // address us by loopback names only; anything else is refused.
-            let host = request
-                .headers()
-                .iter()
-                .find(|h| h.field.equiv("Host"))
-                .map(|h| h.value.as_str().to_string());
-            let (status, body) = if host_ok(host.as_deref()) {
-                route(request.method(), request.url())
-            } else {
-                (403, json!({"error": "forbidden_host"}).to_string())
-            };
-            let mut response = tiny_http::Response::from_string(body).with_status_code(status);
-            // Deliberately NO Access-Control-Allow-Origin header: with
-            // permissive CORS, any website the user visits could silently
-            // read their usage data from this port. Browsers now block
-            // cross-origin reads; scripts, widgets, and curl are unaffected
-            // (CORS only constrains browsers). The Mac app allows "*" and
-            // discloses it — we chose the stricter default.
-            for (k, v) in [("Content-Type", "application/json")] {
-                if let Ok(h) = tiny_http::Header::from_bytes(k.as_bytes(), v.as_bytes()) {
-                    response.add_header(h);
-                }
-            }
-            let _ = request.respond(response);
+            respond(request);
         }
     });
 }
@@ -541,6 +545,36 @@ mod tests {
     use super::{host_ok, provider_json, publish, route};
     use crate::providers::{Metric, Snapshot};
     use serde_json::json;
+
+    #[test]
+    fn real_http_requests_enforce_host_method_and_no_cors() {
+        use std::io::{Read, Write};
+        use std::time::Duration;
+        let server = tiny_http::Server::http("127.0.0.1:0").unwrap();
+        let address = server.server_addr().to_ip().unwrap();
+        let worker = std::thread::spawn(move || {
+            for _ in 0..3 {
+                let request = server.recv_timeout(Duration::from_secs(5)).unwrap().expect("request");
+                super::respond(request);
+            }
+        });
+        for (method, host, expected) in [
+            ("GET", "rebound.example", "403"),
+            ("POST", "127.0.0.1:6736", "405"),
+            ("GET", "127.0.0.1:6736", "200"),
+        ] {
+            let mut stream = std::net::TcpStream::connect(address).unwrap();
+            stream.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
+            write!(stream, "{method} /v1/usage HTTP/1.1\r\nHost: {host}\r\nConnection: close\r\n\r\n").unwrap();
+            let mut response = String::new();
+            stream.read_to_string(&mut response).unwrap();
+            assert!(response.lines().next().unwrap().contains(expected), "{response}");
+            assert!(!response.to_ascii_lowercase().contains("access-control-allow-origin"));
+            let body = response.split("\r\n\r\n").nth(1).unwrap();
+            assert!(serde_json::from_str::<serde_json::Value>(body).is_ok());
+        }
+        worker.join().unwrap();
+    }
 
     fn onenewapi_snap() -> Snapshot {
         let mut snap = Snapshot::ok(

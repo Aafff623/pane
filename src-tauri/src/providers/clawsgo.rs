@@ -164,6 +164,7 @@ fn metrics_from_docs(
                     grant / 1000.0
                 )),
             )
+            .with_usage(crate::usage_units::UsageUnit::Credits, spent / 1000.0, Some(grant / 1000.0))
             .with_reset(reset, Some(30 * DAY_MS)),
         );
     }

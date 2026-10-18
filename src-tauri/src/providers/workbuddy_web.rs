@@ -30,7 +30,7 @@
 //! degrade.
 
 use super::codebuddy::{credits_face_from_items, credits_face_metrics};
-use super::{config_dir, error_chain, http, read_small_text, Metric, Snapshot};
+use super::{config_dir, error_chain, http, Metric, Snapshot};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::path::PathBuf;
@@ -78,16 +78,15 @@ fn store_path() -> PathBuf {
 }
 
 fn load_store() -> Store {
-    let Ok(raw) = read_small_text(&store_path(), MAX_STORE_BYTES, "workbuddy web session") else {
-        return Store::default();
-    };
-    serde_json::from_str(raw.trim_start_matches('\u{feff}')).unwrap_or_default()
+    crate::secretstore::load_session("web/workbuddy", &store_path(), MAX_STORE_BYTES)
+        .and_then(|doc| serde_json::from_value(doc).ok())
+        .unwrap_or_default()
 }
 
 fn save_store(store: &Store) -> Result<(), String> {
     std::fs::create_dir_all(config_dir()).map_err(|e| format!("create config dir: {e}"))?;
-    let raw = serde_json::to_string_pretty(store).map_err(|e| format!("serialize session: {e}"))?;
-    std::fs::write(store_path(), raw).map_err(|e| format!("save session: {e}"))
+    let doc = serde_json::to_value(store).map_err(|e| format!("serialize session: {e}"))?;
+    crate::secretstore::save_session("web/workbuddy", &store_path(), &doc)
 }
 
 pub fn status() -> WebStatus {
@@ -107,8 +106,7 @@ pub fn set_enabled(enabled: bool) -> Result<(), String> {
 }
 
 pub fn clear() -> Result<(), String> {
-    let _ = std::fs::remove_file(store_path());
-    Ok(())
+    crate::secretstore::clear_session("web/workbuddy", &store_path())
 }
 
 /// Stores a pasted `name=value; …` header. The Chrome major is re-detected

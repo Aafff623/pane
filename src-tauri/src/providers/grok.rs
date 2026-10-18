@@ -627,6 +627,8 @@ fn metrics_from_tokens(tokens: Vec<ResetToken>) -> Vec<Metric> {
             resets_at,
             period_ms: None,
             available: None,
+            usage: None,
+            daily_usage: None,
         })
         .collect()
 }

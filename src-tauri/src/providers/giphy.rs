@@ -121,11 +121,13 @@ async fn fetch(token: Option<&str>) -> Result<Snapshot, String> {
     let today = chrono::Utc::now().date_naive();
     let (start, end) = window_dates(today);
     let mut stats: BTreeMap<i64, AppStats> = BTreeMap::new();
+    let mut daily = BTreeMap::new();
     for app in &apps {
         let id = app.id;
         let url =
             format!("{API_BASE}/apps/{id}/stats/api-calls-count?start_date={start}&end_date={end}");
         let doc = get_json(&url, token).await?;
+        daily.insert(id, completed_days(&doc, today));
         // The daily series already carries both numbers the card needs — the
         // 7-day sum and the newest completed day — so no second fetch.
         stats.insert(
@@ -136,7 +138,15 @@ async fn fetch(token: Option<&str>) -> Result<Snapshot, String> {
             },
         );
     }
-    let mut snap = Snapshot::ok(ID, NAME, plan_label(&apps), rows_from(&apps, &stats));
+    let mut metrics = rows_from(&apps, &stats);
+    for (app, rows) in apps.iter().zip(metrics.chunks_mut(2)) {
+        rows[0] = rows[0].clone().with_daily_usage(crate::usage_units::UsageDays {
+            unit: crate::usage_units::UsageUnit::Requests,
+            scope: format!("app:{}", app.id),
+            days: daily.remove(&app.id).unwrap_or_default(),
+        });
+    }
+    let mut snap = Snapshot::ok(ID, NAME, plan_label(&apps), metrics);
     snap.warning = Some(
         "GIPHY aggregates stats per day — today's calls appear after the daily rollup.".into(),
     );
@@ -217,6 +227,15 @@ fn last_day_bucket(doc: &Value, today: chrono::NaiveDate) -> Option<(String, u64
             Some((date.to_string(), count))
         })
         .max_by(|a, b| a.0.cmp(&b.0))
+}
+
+fn completed_days(doc: &Value, today: chrono::NaiveDate) -> BTreeMap<String, f64> {
+    doc.get("stats").and_then(Value::as_array).into_iter().flatten().filter_map(|row| {
+        let day = row.get("date")?.as_str()?;
+        let parsed = chrono::NaiveDate::parse_from_str(day, "%Y-%m-%d").ok()?;
+        if parsed >= today || parsed.format("%Y-%m-%d").to_string() != day { return None; }
+        Some((day.to_string(), row.get("count")?.as_u64()? as f64))
+    }).collect()
 }
 
 /// Used-percent against the DERIVED daily ceiling. Own function so the
@@ -371,6 +390,11 @@ mod tests {
             None
         );
         assert_eq!(last_day_bucket(&serde_json::json!({}), today()), None);
+        assert_eq!(
+            completed_days(&doc, today()),
+            BTreeMap::from([("2026-10-14".into(), 17.0)]),
+            "daily flow keeps only complete vendor buckets",
+        );
     }
 
     #[test]

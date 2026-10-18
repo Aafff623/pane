@@ -1,3 +1,5 @@
+use crate::usage_units::UsageUnit;
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum QueryKind {
     /// A provider-specific adapter produces a complete Snapshot.
@@ -34,6 +36,7 @@ pub struct ProviderDefinition {
     pub supports_extra_accounts: bool,
     pub icon_key: &'static str,
     pub category: ProviderCategory,
+    pub primary_unit: UsageUnit,
 }
 
 // Keep this list in the same stable order as the dashboard's provider list.
@@ -47,6 +50,7 @@ const PROVIDER_DEFINITIONS: &[ProviderDefinition] = &[
         supports_extra_accounts: false,
         icon_key: "claude",
         category: ProviderCategory::Coding,
+        primary_unit: UsageUnit::Tokens,
     },
     ProviderDefinition {
         family_id: "codex",
@@ -59,6 +63,7 @@ const PROVIDER_DEFINITIONS: &[ProviderDefinition] = &[
         supports_extra_accounts: true,
         icon_key: "codex",
         category: ProviderCategory::Coding,
+        primary_unit: UsageUnit::Tokens,
     },
     ProviderDefinition {
         family_id: "codebuddy",
@@ -69,6 +74,7 @@ const PROVIDER_DEFINITIONS: &[ProviderDefinition] = &[
         supports_extra_accounts: true,
         icon_key: "codebuddy",
         category: ProviderCategory::Coding,
+        primary_unit: UsageUnit::Tokens,
     },
     ProviderDefinition {
         family_id: "codebuddycn",
@@ -80,6 +86,7 @@ const PROVIDER_DEFINITIONS: &[ProviderDefinition] = &[
         supports_extra_accounts: true,
         icon_key: "codebuddy",
         category: ProviderCategory::Coding,
+        primary_unit: UsageUnit::Tokens,
     },
     ProviderDefinition {
         family_id: "workbuddy",
@@ -91,6 +98,7 @@ const PROVIDER_DEFINITIONS: &[ProviderDefinition] = &[
         supports_extra_accounts: true,
         icon_key: "workbuddy",
         category: ProviderCategory::Coding,
+        primary_unit: UsageUnit::Tokens,
     },
     ProviderDefinition {
         family_id: "cursor",
@@ -102,6 +110,7 @@ const PROVIDER_DEFINITIONS: &[ProviderDefinition] = &[
         supports_extra_accounts: true,
         icon_key: "cursor",
         category: ProviderCategory::Coding,
+        primary_unit: UsageUnit::Tokens,
     },
     ProviderDefinition {
         family_id: "opencode",
@@ -111,6 +120,7 @@ const PROVIDER_DEFINITIONS: &[ProviderDefinition] = &[
         supports_extra_accounts: true,
         icon_key: "opencode",
         category: ProviderCategory::Coding,
+        primary_unit: UsageUnit::Tokens,
     },
     ProviderDefinition {
         family_id: "copilot",
@@ -122,6 +132,7 @@ const PROVIDER_DEFINITIONS: &[ProviderDefinition] = &[
         supports_extra_accounts: true,
         icon_key: "copilot",
         category: ProviderCategory::Coding,
+        primary_unit: UsageUnit::Tokens,
     },
     ProviderDefinition {
         family_id: "grok",
@@ -133,6 +144,7 @@ const PROVIDER_DEFINITIONS: &[ProviderDefinition] = &[
         supports_extra_accounts: true,
         icon_key: "grok",
         category: ProviderCategory::Coding,
+        primary_unit: UsageUnit::Tokens,
     },
     ProviderDefinition {
         family_id: "devin",
@@ -142,6 +154,7 @@ const PROVIDER_DEFINITIONS: &[ProviderDefinition] = &[
         supports_extra_accounts: false,
         icon_key: "devin",
         category: ProviderCategory::Coding,
+        primary_unit: UsageUnit::Tokens,
     },
     ProviderDefinition {
         family_id: "minimax",
@@ -151,6 +164,7 @@ const PROVIDER_DEFINITIONS: &[ProviderDefinition] = &[
         supports_extra_accounts: true,
         icon_key: "minimax",
         category: ProviderCategory::Coding,
+        primary_unit: UsageUnit::Tokens,
     },
     ProviderDefinition {
         family_id: "openrouter",
@@ -160,6 +174,7 @@ const PROVIDER_DEFINITIONS: &[ProviderDefinition] = &[
         supports_extra_accounts: true,
         icon_key: "openrouter",
         category: ProviderCategory::Coding,
+        primary_unit: UsageUnit::Tokens,
     },
     ProviderDefinition {
         family_id: "zai",
@@ -169,6 +184,7 @@ const PROVIDER_DEFINITIONS: &[ProviderDefinition] = &[
         supports_extra_accounts: true,
         icon_key: "zai",
         category: ProviderCategory::Coding,
+        primary_unit: UsageUnit::Tokens,
     },
     ProviderDefinition {
         family_id: "antigravity",
@@ -181,6 +197,7 @@ const PROVIDER_DEFINITIONS: &[ProviderDefinition] = &[
         supports_extra_accounts: true,
         icon_key: "antigravity",
         category: ProviderCategory::Coding,
+        primary_unit: UsageUnit::Tokens,
     },
     ProviderDefinition {
         family_id: "deepseek",
@@ -190,6 +207,7 @@ const PROVIDER_DEFINITIONS: &[ProviderDefinition] = &[
         supports_extra_accounts: true,
         icon_key: "deepseek",
         category: ProviderCategory::Coding,
+        primary_unit: UsageUnit::Tokens,
     },
     ProviderDefinition {
         family_id: "moonshot",
@@ -199,6 +217,7 @@ const PROVIDER_DEFINITIONS: &[ProviderDefinition] = &[
         supports_extra_accounts: true,
         icon_key: "kimi",
         category: ProviderCategory::Coding,
+        primary_unit: UsageUnit::Tokens,
     },
     ProviderDefinition {
         family_id: "elevenlabs",
@@ -208,6 +227,7 @@ const PROVIDER_DEFINITIONS: &[ProviderDefinition] = &[
         supports_extra_accounts: true,
         icon_key: "elevenlabs",
         category: ProviderCategory::Coding,
+        primary_unit: UsageUnit::Tokens,
     },
     ProviderDefinition {
         family_id: "ollama",
@@ -217,6 +237,7 @@ const PROVIDER_DEFINITIONS: &[ProviderDefinition] = &[
         supports_extra_accounts: false,
         icon_key: "ollama",
         category: ProviderCategory::Coding,
+        primary_unit: UsageUnit::Tokens,
     },
     ProviderDefinition {
         family_id: "codebuff",
@@ -226,6 +247,7 @@ const PROVIDER_DEFINITIONS: &[ProviderDefinition] = &[
         supports_extra_accounts: true,
         icon_key: "codebuff",
         category: ProviderCategory::Coding,
+        primary_unit: UsageUnit::Tokens,
     },
     ProviderDefinition {
         family_id: "kilo",
@@ -235,6 +257,7 @@ const PROVIDER_DEFINITIONS: &[ProviderDefinition] = &[
         supports_extra_accounts: true,
         icon_key: "kilo",
         category: ProviderCategory::Coding,
+        primary_unit: UsageUnit::Tokens,
     },
     ProviderDefinition {
         family_id: "aihubmix",
@@ -244,6 +267,7 @@ const PROVIDER_DEFINITIONS: &[ProviderDefinition] = &[
         supports_extra_accounts: true,
         icon_key: "aihubmix",
         category: ProviderCategory::Coding,
+        primary_unit: UsageUnit::Tokens,
     },
     ProviderDefinition {
         family_id: "onenewapi",
@@ -255,6 +279,7 @@ const PROVIDER_DEFINITIONS: &[ProviderDefinition] = &[
         supports_extra_accounts: true,
         icon_key: "onenewapi",
         category: ProviderCategory::Coding,
+        primary_unit: UsageUnit::Tokens,
     },
     ProviderDefinition {
         family_id: "qwen",
@@ -264,6 +289,7 @@ const PROVIDER_DEFINITIONS: &[ProviderDefinition] = &[
         supports_extra_accounts: true,
         icon_key: "qwen",
         category: ProviderCategory::Coding,
+        primary_unit: UsageUnit::Tokens,
     },
     ProviderDefinition {
         family_id: "hermes",
@@ -273,6 +299,7 @@ const PROVIDER_DEFINITIONS: &[ProviderDefinition] = &[
         supports_extra_accounts: false,
         icon_key: "hermes",
         category: ProviderCategory::Coding,
+        primary_unit: UsageUnit::Tokens,
     },
     ProviderDefinition {
         family_id: "kimi",
@@ -282,6 +309,7 @@ const PROVIDER_DEFINITIONS: &[ProviderDefinition] = &[
         supports_extra_accounts: true,
         icon_key: "kimi",
         category: ProviderCategory::Coding,
+        primary_unit: UsageUnit::Tokens,
     },
     ProviderDefinition {
         family_id: "stepfun",
@@ -291,6 +319,7 @@ const PROVIDER_DEFINITIONS: &[ProviderDefinition] = &[
         supports_extra_accounts: true,
         icon_key: "stepfun",
         category: ProviderCategory::Coding,
+        primary_unit: UsageUnit::Tokens,
     },
     ProviderDefinition {
         family_id: "stepfun-plan",
@@ -300,6 +329,7 @@ const PROVIDER_DEFINITIONS: &[ProviderDefinition] = &[
         supports_extra_accounts: true,
         icon_key: "stepfun",
         category: ProviderCategory::Coding,
+        primary_unit: UsageUnit::Tokens,
     },
     ProviderDefinition {
         family_id: "shandianshuo",
@@ -309,6 +339,7 @@ const PROVIDER_DEFINITIONS: &[ProviderDefinition] = &[
         supports_extra_accounts: false,
         icon_key: "shandianshuo",
         category: ProviderCategory::Productivity,
+        primary_unit: UsageUnit::Minutes,
     },
     ProviderDefinition {
         family_id: "siliconflow",
@@ -318,6 +349,7 @@ const PROVIDER_DEFINITIONS: &[ProviderDefinition] = &[
         supports_extra_accounts: true,
         icon_key: "siliconflow",
         category: ProviderCategory::Coding,
+        primary_unit: UsageUnit::Tokens,
     },
     ProviderDefinition {
         family_id: "novita",
@@ -327,6 +359,7 @@ const PROVIDER_DEFINITIONS: &[ProviderDefinition] = &[
         supports_extra_accounts: true,
         icon_key: "novita",
         category: ProviderCategory::Coding,
+        primary_unit: UsageUnit::Tokens,
     },
     ProviderDefinition {
         family_id: "relaybalance",
@@ -336,6 +369,7 @@ const PROVIDER_DEFINITIONS: &[ProviderDefinition] = &[
         supports_extra_accounts: true,
         icon_key: "relaybalance",
         category: ProviderCategory::Coding,
+        primary_unit: UsageUnit::Tokens,
     },
     ProviderDefinition {
         family_id: "qodercn",
@@ -345,6 +379,7 @@ const PROVIDER_DEFINITIONS: &[ProviderDefinition] = &[
         supports_extra_accounts: false,
         icon_key: "qodercn",
         category: ProviderCategory::Coding,
+        primary_unit: UsageUnit::Credits,
     },
     ProviderDefinition {
         family_id: "traecn",
@@ -354,6 +389,7 @@ const PROVIDER_DEFINITIONS: &[ProviderDefinition] = &[
         supports_extra_accounts: false,
         icon_key: "traecn",
         category: ProviderCategory::Coding,
+        primary_unit: UsageUnit::Credits,
     },
     ProviderDefinition {
         family_id: "commandcode",
@@ -364,6 +400,7 @@ const PROVIDER_DEFINITIONS: &[ProviderDefinition] = &[
         supports_extra_accounts: true,
         icon_key: "commandcode",
         category: ProviderCategory::Coding,
+        primary_unit: UsageUnit::Tokens,
     },
     ProviderDefinition {
         family_id: "doubao",
@@ -375,6 +412,7 @@ const PROVIDER_DEFINITIONS: &[ProviderDefinition] = &[
         supports_extra_accounts: false,
         icon_key: "doubao",
         category: ProviderCategory::Coding,
+        primary_unit: UsageUnit::Tokens,
     },
     ProviderDefinition {
         family_id: "clawsgo",
@@ -386,6 +424,7 @@ const PROVIDER_DEFINITIONS: &[ProviderDefinition] = &[
         supports_extra_accounts: true,
         icon_key: "clawsgo",
         category: ProviderCategory::Coding,
+        primary_unit: UsageUnit::Tokens,
     },
     ProviderDefinition {
         family_id: "bocha",
@@ -395,6 +434,7 @@ const PROVIDER_DEFINITIONS: &[ProviderDefinition] = &[
         supports_extra_accounts: false,
         icon_key: "bocha",
         category: ProviderCategory::Mcp,
+        primary_unit: UsageUnit::Credits,
     },
     ProviderDefinition {
         family_id: "tavily",
@@ -404,6 +444,7 @@ const PROVIDER_DEFINITIONS: &[ProviderDefinition] = &[
         supports_extra_accounts: false,
         icon_key: "tavily",
         category: ProviderCategory::Mcp,
+        primary_unit: UsageUnit::Credits,
     },
     ProviderDefinition {
         family_id: "firecrawl",
@@ -413,6 +454,7 @@ const PROVIDER_DEFINITIONS: &[ProviderDefinition] = &[
         supports_extra_accounts: false,
         icon_key: "firecrawl",
         category: ProviderCategory::Mcp,
+        primary_unit: UsageUnit::Credits,
     },
     ProviderDefinition {
         family_id: "clinepass",
@@ -422,6 +464,7 @@ const PROVIDER_DEFINITIONS: &[ProviderDefinition] = &[
         supports_extra_accounts: true,
         icon_key: "clinepass",
         category: ProviderCategory::Coding,
+        primary_unit: UsageUnit::Tokens,
     },
     ProviderDefinition {
         family_id: "sensenova",
@@ -431,6 +474,7 @@ const PROVIDER_DEFINITIONS: &[ProviderDefinition] = &[
         supports_extra_accounts: false,
         icon_key: "sensenova",
         category: ProviderCategory::Coding,
+        primary_unit: UsageUnit::Tokens,
     },
     ProviderDefinition {
         family_id: "apigoto",
@@ -440,6 +484,7 @@ const PROVIDER_DEFINITIONS: &[ProviderDefinition] = &[
         supports_extra_accounts: true,
         icon_key: "apigoto",
         category: ProviderCategory::Coding,
+        primary_unit: UsageUnit::Tokens,
     },
     ProviderDefinition {
         family_id: "brave",
@@ -449,6 +494,7 @@ const PROVIDER_DEFINITIONS: &[ProviderDefinition] = &[
         supports_extra_accounts: false,
         icon_key: "brave",
         category: ProviderCategory::Mcp,
+        primary_unit: UsageUnit::Credits,
     },
     ProviderDefinition {
         family_id: "giphy",
@@ -460,6 +506,7 @@ const PROVIDER_DEFINITIONS: &[ProviderDefinition] = &[
         supports_extra_accounts: false,
         icon_key: "giphy",
         category: ProviderCategory::Mcp,
+        primary_unit: UsageUnit::Requests,
     },
     ProviderDefinition {
         family_id: "amp",
@@ -469,6 +516,7 @@ const PROVIDER_DEFINITIONS: &[ProviderDefinition] = &[
         supports_extra_accounts: true,
         icon_key: "amp",
         category: ProviderCategory::Coding,
+        primary_unit: UsageUnit::Tokens,
     },
     ProviderDefinition {
         family_id: "bedrock",
@@ -478,6 +526,7 @@ const PROVIDER_DEFINITIONS: &[ProviderDefinition] = &[
         supports_extra_accounts: false,
         icon_key: "bedrock",
         category: ProviderCategory::Coding,
+        primary_unit: UsageUnit::Tokens,
     },
     ProviderDefinition {
         family_id: "chutes",
@@ -487,6 +536,7 @@ const PROVIDER_DEFINITIONS: &[ProviderDefinition] = &[
         supports_extra_accounts: true,
         icon_key: "chutes",
         category: ProviderCategory::Coding,
+        primary_unit: UsageUnit::Tokens,
     },
     ProviderDefinition {
         family_id: "deepgram",
@@ -496,6 +546,7 @@ const PROVIDER_DEFINITIONS: &[ProviderDefinition] = &[
         supports_extra_accounts: true,
         icon_key: "deepgram",
         category: ProviderCategory::Coding,
+        primary_unit: UsageUnit::Tokens,
     },
     ProviderDefinition {
         family_id: "kiro",
@@ -507,6 +558,7 @@ const PROVIDER_DEFINITIONS: &[ProviderDefinition] = &[
         supports_extra_accounts: true,
         icon_key: "kiro",
         category: ProviderCategory::Coding,
+        primary_unit: UsageUnit::Tokens,
     },
     ProviderDefinition {
         family_id: "openai-api",
@@ -516,6 +568,7 @@ const PROVIDER_DEFINITIONS: &[ProviderDefinition] = &[
         supports_extra_accounts: true,
         icon_key: "openai",
         category: ProviderCategory::Coding,
+        primary_unit: UsageUnit::Tokens,
     },
     ProviderDefinition {
         family_id: "poe",
@@ -525,6 +578,7 @@ const PROVIDER_DEFINITIONS: &[ProviderDefinition] = &[
         supports_extra_accounts: true,
         icon_key: "poe",
         category: ProviderCategory::Coding,
+        primary_unit: UsageUnit::Tokens,
     },
     ProviderDefinition {
         family_id: "venice",
@@ -534,6 +588,7 @@ const PROVIDER_DEFINITIONS: &[ProviderDefinition] = &[
         supports_extra_accounts: true,
         icon_key: "venice",
         category: ProviderCategory::Coding,
+        primary_unit: UsageUnit::Tokens,
     },
     ProviderDefinition {
         family_id: "vertexai",
@@ -543,6 +598,7 @@ const PROVIDER_DEFINITIONS: &[ProviderDefinition] = &[
         supports_extra_accounts: false,
         icon_key: "vertexai",
         category: ProviderCategory::Coding,
+        primary_unit: UsageUnit::Tokens,
     },
     ProviderDefinition {
         family_id: "windsurf",
@@ -553,6 +609,7 @@ const PROVIDER_DEFINITIONS: &[ProviderDefinition] = &[
         supports_extra_accounts: true,
         icon_key: "windsurf",
         category: ProviderCategory::Coding,
+        primary_unit: UsageUnit::Tokens,
     },
     ProviderDefinition {
         family_id: "warp",
@@ -562,6 +619,7 @@ const PROVIDER_DEFINITIONS: &[ProviderDefinition] = &[
         supports_extra_accounts: true,
         icon_key: "warp",
         category: ProviderCategory::Coding,
+        primary_unit: UsageUnit::Tokens,
     },
     ProviderDefinition {
         family_id: "mimo",
@@ -571,6 +629,7 @@ const PROVIDER_DEFINITIONS: &[ProviderDefinition] = &[
         supports_extra_accounts: true,
         icon_key: "mimo",
         category: ProviderCategory::Coding,
+        primary_unit: UsageUnit::Tokens,
     },
     ProviderDefinition {
         family_id: "trae",
@@ -582,6 +641,7 @@ const PROVIDER_DEFINITIONS: &[ProviderDefinition] = &[
         supports_extra_accounts: true,
         icon_key: "trae",
         category: ProviderCategory::Coding,
+        primary_unit: UsageUnit::Tokens,
     },
     ProviderDefinition {
         family_id: "qoder",
@@ -593,6 +653,7 @@ const PROVIDER_DEFINITIONS: &[ProviderDefinition] = &[
         supports_extra_accounts: true,
         icon_key: "qoder",
         category: ProviderCategory::Coding,
+        primary_unit: UsageUnit::Tokens,
     },
     ProviderDefinition {
         family_id: "zed",
@@ -604,6 +665,7 @@ const PROVIDER_DEFINITIONS: &[ProviderDefinition] = &[
         supports_extra_accounts: true,
         icon_key: "zed",
         category: ProviderCategory::Coding,
+        primary_unit: UsageUnit::Tokens,
     },
     ProviderDefinition {
         family_id: "factory",
@@ -613,6 +675,7 @@ const PROVIDER_DEFINITIONS: &[ProviderDefinition] = &[
         supports_extra_accounts: true,
         icon_key: "factory",
         category: ProviderCategory::Coding,
+        primary_unit: UsageUnit::Tokens,
     },
     ProviderDefinition {
         family_id: "jetbrains",
@@ -622,6 +685,7 @@ const PROVIDER_DEFINITIONS: &[ProviderDefinition] = &[
         supports_extra_accounts: false,
         icon_key: "jetbrains",
         category: ProviderCategory::Coding,
+        primary_unit: UsageUnit::Tokens,
     },
     ProviderDefinition {
         family_id: "groq",
@@ -631,6 +695,7 @@ const PROVIDER_DEFINITIONS: &[ProviderDefinition] = &[
         supports_extra_accounts: true,
         icon_key: "groq",
         category: ProviderCategory::Coding,
+        primary_unit: UsageUnit::Tokens,
     },
     ProviderDefinition {
         family_id: "huggingface",
@@ -640,6 +705,7 @@ const PROVIDER_DEFINITIONS: &[ProviderDefinition] = &[
         supports_extra_accounts: true,
         icon_key: "huggingface",
         category: ProviderCategory::Coding,
+        primary_unit: UsageUnit::Tokens,
     },
     ProviderDefinition {
         family_id: "longcat",
@@ -649,6 +715,7 @@ const PROVIDER_DEFINITIONS: &[ProviderDefinition] = &[
         supports_extra_accounts: true,
         icon_key: "longcat",
         category: ProviderCategory::Coding,
+        primary_unit: UsageUnit::Tokens,
     },
     ProviderDefinition {
         family_id: "sub2api",
@@ -658,6 +725,7 @@ const PROVIDER_DEFINITIONS: &[ProviderDefinition] = &[
         supports_extra_accounts: true,
         icon_key: "sub2api",
         category: ProviderCategory::Coding,
+        primary_unit: UsageUnit::Tokens,
     },
     ProviderDefinition {
         family_id: "mistral",
@@ -667,6 +735,7 @@ const PROVIDER_DEFINITIONS: &[ProviderDefinition] = &[
         supports_extra_accounts: true,
         icon_key: "mistral",
         category: ProviderCategory::Coding,
+        primary_unit: UsageUnit::Tokens,
     },
     ProviderDefinition {
         family_id: "perplexity",
@@ -676,6 +745,7 @@ const PROVIDER_DEFINITIONS: &[ProviderDefinition] = &[
         supports_extra_accounts: true,
         icon_key: "perplexity",
         category: ProviderCategory::Coding,
+        primary_unit: UsageUnit::Tokens,
     },
     ProviderDefinition {
         family_id: "volcengine",
@@ -685,6 +755,7 @@ const PROVIDER_DEFINITIONS: &[ProviderDefinition] = &[
         supports_extra_accounts: true,
         icon_key: "volcengine",
         category: ProviderCategory::Coding,
+        primary_unit: UsageUnit::Tokens,
     },
 ];
 
@@ -704,6 +775,23 @@ pub fn supports_extra_accounts(family_id: &str) -> bool {
 
 pub fn supports_api_key(family_id: &str) -> bool {
     provider_definition(family_id).is_some_and(|definition| definition.supports_api_key)
+}
+
+pub fn default_disabled_families() -> Vec<&'static str> {
+    provider_definitions().iter().filter(|definition| {
+        !matches!(
+            definition.family_id,
+            "claude" | "codex" | "cursor" | "grok" | "zai" | "minimax"
+                | "antigravity" | "kimi" | "windsurf" | "codebuddy" | "codebuddycn" | "workbuddy"
+        )
+    }).map(|definition| definition.family_id).collect()
+}
+
+pub fn valid_card_id(id: &str) -> bool {
+    let (family, account) = id.split_once('@').map_or((id, None), |(family, account)| (family, Some(account)));
+    provider_definition(family).is_some() && account.is_none_or(|account| {
+        !account.is_empty() && account.chars().all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_'))
+    })
 }
 
 /// Families whose saved credential also carries a user-chosen relay base

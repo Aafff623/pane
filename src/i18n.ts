@@ -651,6 +651,12 @@ const en: Dict = {
   "spend.emptyPeriodTip": "No spend recorded in this period.",
   "spend.credits": "Credits",
   "spend.creditsUnit": "credits",
+  "usage.minutes": "minutes",
+  "usage.meters": "Measured usage",
+  "usage.metersTip": "Each provider and measurement unit is listed separately; quantities are never converted.",
+  "usage.meterTrendTip": "Observed daily usage, {from} – {to}; hover for the quantity and unit.",
+  "usage.requests": "requests",
+  "card.usageTrend": "Quota trend",
   "spend.creditsTip":
     "Qoder CN / Trae CN bill in credits, which cannot be converted into tokens or dollars honestly. Shown the same way as tokens: one row per account, following the selected period — an account that consumed nothing in it stays hidden.",
   "spend.info":
@@ -1823,6 +1829,12 @@ const zh: Dict = {
   "spend.emptyPeriodTip": "这段时间没有记录花费。",
   "spend.credits": "积分",
   "spend.creditsUnit": "积分",
+  "usage.minutes": "分钟",
+  "usage.meters": "计量用量",
+  "usage.metersTip": "各厂商、各计量单位分别列出，不换算、不合并总量。",
+  "usage.meterTrendTip": "每日观测用量（{from} – {to}），悬浮查看具体数值与单位。",
+  "usage.requests": "次",
+  "card.usageTrend": "额度趋势",
   "spend.creditsTip":
     "Qoder CN / Trae CN 以积分（credits）计费，无法折算为 token 或美元。与 token 行同口径：一账号一行、跟随所选时段；该时段没有消耗的账号不显示。",
   "spend.info": "数据来自：{names}。按各工具本地日志估算；本地不落 token 台账的工具（Trae CN、豆包）无法计入。",
@@ -2990,6 +3002,12 @@ const ru: Dict = {
   "spend.emptyPeriodTip": "За этот период траты не записаны.",
   "spend.credits": "Кредиты",
   "spend.creditsUnit": "кр.",
+  "usage.minutes": "мин.",
+  "usage.meters": "Измеренное использование",
+  "usage.metersTip": "Поставщики и единицы показаны отдельно, без пересчёта и общего итога.",
+  "usage.meterTrendTip": "Использование по дням, {from} – {to}; наведите курсор для количества и единицы.",
+  "usage.requests": "запросов",
+  "card.usageTrend": "История квоты",
   "spend.creditsTip":
     "Qoder CN / Trae CN тарифицируются в кредитах — их нельзя честно пересчитать в токены или доллары. Показаны так же, как токены: одна строка на аккаунт, следует выбранному периоду; аккаунты без расхода за период скрыты.",
   "spend.info":
