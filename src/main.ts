@@ -12642,7 +12642,10 @@ async function unlockVault(): Promise<boolean> {
   if (pw === null) return false;
   try {
     vaultStatus = await invoke<VaultStatus>("keyvault_unlock", { password: pw });
-    await loadKeyvault();
+    // Refresh only the lock banner. Re-listing the rows here would replace
+    // the button and masked-key nodes the caller is holding, so its reveal
+    // would write into a detached node and look like a dead click.
+    renderVaultBar();
     return true;
   } catch {
     const status = document.querySelector("#status");
