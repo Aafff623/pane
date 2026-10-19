@@ -101,6 +101,19 @@ const PROVIDER_DEFINITIONS: &[ProviderDefinition] = &[
         primary_unit: UsageUnit::Tokens,
     },
     ProviderDefinition {
+        family_id: "workbuddyai",
+        display_name: "WorkBuddy AI",
+        query_kind: QueryKind::NativeSnapshot,
+        supports_api_key: false,
+        // WorkBuddy's INTERNATIONAL build — a different product from
+        // CodeBuddy International (`.ai`): different host, OAuth platform,
+        // billing prefix and desktop auth file. Same brand mark.
+        supports_extra_accounts: true,
+        icon_key: "workbuddy",
+        category: ProviderCategory::Coding,
+        primary_unit: UsageUnit::Tokens,
+    },
+    ProviderDefinition {
         family_id: "cursor",
         display_name: "Cursor",
         query_kind: QueryKind::NativeSnapshot,
@@ -797,6 +810,7 @@ pub fn default_disabled_families() -> Vec<&'static str> {
             definition.family_id,
             "claude" | "codex" | "cursor" | "grok" | "zai" | "minimax"
                 | "antigravity" | "kimi" | "windsurf" | "codebuddy" | "codebuddycn" | "workbuddy"
+                | "workbuddyai"
         )
     }).map(|definition| definition.family_id).collect()
 }
@@ -845,6 +859,7 @@ mod tests {
             "codebuddy",
             "codebuddycn",
             "workbuddy",
+            "workbuddyai",
             "cursor",
             "opencode",
             "copilot",

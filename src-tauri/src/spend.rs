@@ -207,6 +207,9 @@ pub fn source_statuses() -> Vec<SpendSourceStatus> {
         source_status("qwen-jsonl", "Qwen Code", "JSONL token ledger", "qwen_line", &[qwen], &["qwen"]),
         source_status("kimi-jsonl", "Kimi Code", "JSONL wire ledger", "kimi_line", &[kimi], &["kimi"]),
         source_status("antigravity-sqlite", "Antigravity IDE / CLI", "SQLite protobuf conversation ledger", "decode_antigravity_call", &[home.join(".gemini").join("antigravity").join("conversations"), home.join(".gemini").join("antigravity-cli").join("conversations")], &["antigravity"]),
+        source_status("workbuddy-jsonl", "WorkBuddy (CN)", "JSONL session logs", "workbuddy_line", &[home.join(".workbuddy").join("projects")], &["workbuddy"]),
+        source_status("workbuddy-ai-jsonl", "WorkBuddy AI", "JSONL session logs", "workbuddy_line", &[home.join(".workbuddy-ai").join("projects"), home.join(".workbuddy-ai").join("sessions")], &["workbuddyai"]),
+        source_status("codebuddy-cli-jsonl", "CodeBuddy CLI", "JSONL session logs", "workbuddy_line", &[home.join(".codebuddy").join("projects")], &["codebuddy"]),
         SpendSourceStatus { id: "cursor-csv".into(), tool: "Cursor IDE".into(), form: "authenticated usage CSV".into(), collector: "providers::cursor::fetch_usage_csv".into(), state: "runtime".into(), feeds: vec!["cursor".into()] },
     ]
 }
@@ -2842,6 +2845,192 @@ fn qwen() -> ProviderSpend {
     build_spend("qwen", "Qwen Code", all)
 }
 
+// ---------------------------------------------------------------------------
+// WorkBuddy (CN / AI) and CodeBuddy CLI local token logs
+// ---------------------------------------------------------------------------
+
+/// JSON number or numeric string (both shapes appear in these logs).
+fn json_num(value: Option<&Value>) -> Option<f64> {
+    match value? {
+        Value::Number(n) => n.as_f64(),
+        Value::String(s) => s.trim().parse::<f64>().ok().filter(|v| v.is_finite()),
+        _ => None,
+    }
+}
+
+/// The usage object of one WorkBuddy / CodeBuddy CLI turn. Three locations
+/// exist in the wild (`message.usage` camelCase, `providerData.usage`
+/// snake_case, top-level `usage`); "has an input field" is the anchor — an
+/// input of 0 is legitimate, a missing one means no usage was recorded.
+fn workbuddy_usage(v: &Value) -> Option<&Value> {
+    ["/message/usage", "/providerData/usage", "/usage"]
+        .iter()
+        .find_map(|path| {
+            v.pointer(path).filter(|usage| {
+                ["input_tokens", "inputTokens", "prompt_tokens"]
+                    .iter()
+                    .any(|key| usage.get(*key).is_some())
+            })
+        })
+}
+
+/// Cache-read tokens can hide in a details array instead of a named field
+/// (`inputTokensDetails[].cached_tokens` — the real WorkBuddy shape).
+fn nested_cached_tokens(v: &Value) -> f64 {
+    for path in ["/message/usage/inputTokensDetails", "/providerData/usage/inputTokensDetails"] {
+        if let Some(items) = v.pointer(path).and_then(Value::as_array) {
+            let sum: f64 = items
+                .iter()
+                .filter_map(|item| json_num(item.get("cached_tokens")))
+                .sum();
+            if sum > 0.0 {
+                return sum;
+            }
+        }
+    }
+    for path in [
+        "/message/usage/prompt_tokens_details/cached_tokens",
+        "/providerData/usage/prompt_tokens_details/cached_tokens",
+        "/providerData/rawUsage/prompt_tokens_details/cached_tokens",
+    ] {
+        if let Some(value) = v.pointer(path).and_then(|value| json_num(Some(value))) {
+            return value;
+        }
+    }
+    0.0
+}
+
+/// One WorkBuddy / CodeBuddy CLI turn → spend event.
+///
+/// `input` INCLUDES the cache-read bucket in this vendor's logs (verified
+/// against real `~/.workbuddy` files on 2026-10-19: `inputTokens` 29751
+/// with `cached_tokens` 15744), so fresh input is `input - cache_read`.
+/// `completion_tokens` already contains reasoning (`reasoning_tokens` is a
+/// subset of it), so reasoning is NOT added again — the same total shape
+/// the upstream token statistics use.
+fn workbuddy_line(line: &str, data: &mut FileData, seen: &mut HashSet<String>) {
+    if !line.contains("\"usage\"") {
+        return;
+    }
+    let Ok(v) = serde_json::from_str::<Value>(line) else { return };
+    let Some(usage) = workbuddy_usage(&v) else { return };
+    let num = |keys: &[&str]| {
+        keys.iter()
+            .find_map(|key| json_num(usage.get(*key)))
+            .unwrap_or(0.0)
+    };
+    let input = num(&["input_tokens", "inputTokens", "prompt_tokens"]);
+    let output = num(&["output_tokens", "outputTokens", "completion_tokens"]);
+    let cache_read = {
+        let named = num(&[
+            "cache_read_input_tokens",
+            "cacheReadInputTokens",
+            "prompt_cache_hit_tokens",
+            "cached_tokens",
+        ]);
+        if named > 0.0 { named } else { nested_cached_tokens(&v) }
+    };
+    let cache_write = num(&[
+        "cache_write_input_tokens",
+        "cacheWriteInputTokens",
+        "cache_creation_input_tokens",
+        "prompt_cache_write_tokens",
+    ]);
+    let tokens = input + output + cache_write;
+    if tokens <= 0.0 {
+        return;
+    }
+    let Some(ts) = parse_ts(v.get("timestamp").or_else(|| v.get("ts"))) else { return };
+    let model = v
+        .pointer("/providerData/model")
+        .or_else(|| v.get("model"))
+        .and_then(Value::as_str)
+        .unwrap_or("unknown")
+        .to_string();
+
+    // A copied session log repeats every line byte-for-byte; one fingerprint
+    // per turn keeps a file from reporting the same request twice.
+    let fingerprint = format!("{ts}|{input}|{output}|{cache_read}|{cache_write}|{model}");
+    if !seen.insert(fingerprint) {
+        return;
+    }
+
+    let fresh_input = (input - cache_read).max(0.0);
+    match probe_lookup(&model) {
+        Some(price) => {
+            let usage = pricing::Usage {
+                input: fresh_input,
+                output,
+                cache_read,
+                cache_write_5m: cache_write,
+                cache_write_1h: 0.0,
+            };
+            add_event(data, ts, &model, pricing::request_cost(&price, &usage, true), tokens);
+        }
+        None => note_unpriced(data, ts, &model, tokens),
+    }
+}
+
+/// One local token source: every `*.jsonl` under the given roots, parsed
+/// with the shared WorkBuddy/CodeBuddy rule. `subagents` directories hold
+/// copies of a parent conversation and are excluded (upstream's rule).
+fn local_token_logs(id: &str, name: &str, roots: &[PathBuf]) -> ProviderSpend {
+    let mut files = Vec::new();
+    for root in roots {
+        recent_jsonl_files(root, &mut files);
+    }
+    files.retain(|path| {
+        !path
+            .components()
+            .any(|component| component.as_os_str() == "subagents")
+    });
+    let mut all = FileData::default();
+    for file in files {
+        let mut seen = HashSet::new();
+        let data = file_days(&file, &mut |line, data| workbuddy_line(line, data, &mut seen));
+        merge_data(&mut all, data);
+    }
+    build_spend(id, name, all)
+}
+
+fn workbuddy_data_root(family: &str) -> PathBuf {
+    let dir = crate::codebuddy_login::known_family(family)
+        .data_root
+        .unwrap_or(".workbuddy");
+    dirs::home_dir().unwrap_or_default().join(dir)
+}
+
+/// WorkBuddy CN — `~/.workbuddy/projects`.
+fn workbuddy_cn_tokens() -> ProviderSpend {
+    local_token_logs(
+        "workbuddy",
+        "WorkBuddy",
+        &[workbuddy_data_root("workbuddy").join("projects")],
+    )
+}
+
+/// WorkBuddy AI — `~/.workbuddy-ai/projects` and `sessions` (the AI build
+/// writes both; the CN build only projects).
+fn workbuddy_ai_tokens() -> ProviderSpend {
+    let root = workbuddy_data_root("workbuddyai");
+    local_token_logs(
+        "workbuddyai",
+        "WorkBuddy AI",
+        &[root.join("projects"), root.join("sessions")],
+    )
+}
+
+/// CodeBuddy CLI — `~/.codebuddy/projects`. The CLI and IDE share the
+/// account system but not this log format; the IDE's `history/index.json`
+/// is deliberately out of scope for this pass.
+fn codebuddy_cli_tokens() -> ProviderSpend {
+    local_token_logs(
+        "codebuddy",
+        "CodeBuddy CLI",
+        &[dirs::home_dir().unwrap_or_default().join(".codebuddy").join("projects")],
+    )
+}
+
 /// Kimi Code spend: CLI sessions under ~/.kimi-code/sessions — each
 /// agent's wire.jsonl logs one usage.record per turn. Files on the plan
 /// card when a login or pasted plan key exists *and* the card is on;
@@ -3706,6 +3895,59 @@ mod tests {
         assert_eq!(kimi_spend_target(false, false), ("moonshot", "Kimi API"));
         assert_eq!(kimi_spend_target(true, true), ("moonshot", "Kimi API"));
         assert_eq!(kimi_spend_target(false, true), ("moonshot", "Kimi API"));
+    }
+
+    #[test]
+    fn workbuddy_usage_reads_all_three_locations() {
+        let camel = json!({ "message": { "usage": { "inputTokens": 10, "outputTokens": 2 } } });
+        assert!(workbuddy_usage(&camel).is_some());
+        let snake = json!({ "providerData": { "usage": { "input_tokens": 10, "output_tokens": 2 } } });
+        assert!(workbuddy_usage(&snake).is_some());
+        let top = json!({ "usage": { "prompt_tokens": 10 } });
+        assert!(workbuddy_usage(&top).is_some());
+        // Without an input anchor the object is not usage.
+        assert!(workbuddy_usage(&json!({ "message": { "usage": { "outputTokens": 2 } } })).is_none());
+        assert!(workbuddy_usage(&json!({})).is_none());
+    }
+
+    #[test]
+    fn workbuddy_lines_split_cache_and_dedupe_one_turn() {
+        let mut data = FileData::default();
+        let mut seen = HashSet::new();
+        // message.usage: cache read hides in the details array; reasoning
+        // is already inside outputTokens and must not be added again.
+        workbuddy_line(
+            r#"{"timestamp":1760000000000,"message":{"usage":{"inputTokens":1000,"outputTokens":100,"inputTokensDetails":[{"cached_tokens":400}],"completion_tokens_details":{"reasoning_tokens":60}}},"providerData":{"model":"glm-5.2"}}"#,
+            &mut data,
+            &mut seen,
+        );
+        // providerData.usage: the SAME turn in the snake_case mirror.
+        workbuddy_line(
+            r#"{"timestamp":1760000000000,"providerData":{"model":"glm-5.2","usage":{"input_tokens":1000,"output_tokens":100,"cache_read_input_tokens":400}}}"#,
+            &mut data,
+            &mut seen,
+        );
+        let total: f64 = data.days.values().map(|(_, tokens)| tokens).sum();
+        assert_eq!(total, 1100.0, "input + output once; cache read is inside input; reasoning not re-added");
+        assert_eq!(seen.len(), 1);
+    }
+
+    #[test]
+    fn workbuddy_lines_keep_unpriced_tokens_as_facts() {
+        let mut data = FileData::default();
+        let mut seen = HashSet::new();
+        workbuddy_line(
+            r#"{"ts":1760000000000,"model":"a-model-no-catalog-knows","usage":{"input_tokens":100,"output_tokens":20,"cache_write_input_tokens":5}}"#,
+            &mut data,
+            &mut seen,
+        );
+        let total: f64 = data.days.values().map(|(_, tokens)| tokens).sum();
+        assert_eq!(total, 125.0);
+        assert_eq!(data.unpriced.get("a-model-no-catalog-knows"), Some(&1));
+        // A line with no usage is ignored entirely.
+        workbuddy_line(r#"{"type":"message","content":"hi"}"#, &mut data, &mut seen);
+        let total: f64 = data.days.values().map(|(_, tokens)| tokens).sum();
+        assert_eq!(total, 125.0);
     }
 
     /// Live diagnostic (ignored): what each spend source produced from
@@ -4880,6 +5122,9 @@ pub fn collect_daily(cursor_csv: Option<String>) -> (Vec<ProviderSpend>, Vec<Pro
         minimax(minimax_extra),
         kimi(kimi_routed),
         qwen(),
+        workbuddy_cn_tokens(),
+        workbuddy_ai_tokens(),
+        codebuddy_cli_tokens(),
         zcode(),
         antigravity(),
     ];

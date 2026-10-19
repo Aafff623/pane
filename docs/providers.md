@@ -503,54 +503,75 @@ Ground rules that apply to every provider:
   Feature-flag-only packs (e.g. 免费, no `credits_limit`) are skipped.
   Expired token → open Trae CN once and refresh.
 
-## CodeBuddy family (CodeBuddy / CodeBuddy CN / WorkBuddy)
+## CodeBuddy family (CodeBuddy / CodeBuddy CN / WorkBuddy / WorkBuddy AI)
 
-Three tenants of one Tencent CodeBuddy account system (one Keycloak realm,
-one `/v2/plugin` billing gateway). They differ only in **host** and the
-`platform` handshake parameter — the family table in
-`codebuddy_login::FAMILIES` is the single source of those three rows:
+Four members of one Tencent CodeBuddy account system (one Keycloak realm,
+one plugin billing gateway). They differ in **host**, the `platform`
+handshake parameter, and — for WorkBuddy AI — the billing path prefix and
+the desktop auth file. The family table in `codebuddy_login::FAMILIES` is
+the single source of those rows:
 
-| Card | Host | `platform` |
-|---|---|---|
-| CodeBuddy | `https://www.codebuddy.ai` | `ide` |
-| CodeBuddy CN | `https://www.codebuddy.cn` | `ide` |
-| WorkBuddy | `https://copilot.tencent.com` | `workbuddy` |
+| Card | Host | `platform` | Desktop auth file | Data root |
+|---|---|---|---|---|
+| CodeBuddy | `https://www.codebuddy.ai` | `ide` | — | — |
+| CodeBuddy CN | `https://www.codebuddy.cn` | `ide` | — | — |
+| WorkBuddy | `https://copilot.tencent.com` | `workbuddy` | `workbuddy-desktop.info` | `~/.workbuddy` |
+| WorkBuddy AI | `https://www.workbuddy.ai` | `workbuddy-ai` | `workbuddy-desktop-ai.info` | `~/.workbuddy-ai` |
+
+**WorkBuddy AI is not CodeBuddy International.** It is WorkBuddy's own
+international build: a different product with its own OAuth platform, its
+own billing prefix (`/billing/meter/...` first, `/v2/billing/meter/...`
+only as a 404 fallback) and its own desktop sign-in file. CN and AI
+credentials never cross: a scan whose token `domain` does not match the
+family is refused before it is stored.
 
 - **Reads:** the sign-in Pane manages itself in
-  `login-accounts/<family>.json` (QR scan via the auth center). Each tenant
+  `login-accounts/<family>.json` (QR scan via the auth center). Each member
   becomes its own card (`family@<hash>`), so disabling one never disables
-  another. WorkBuddy additionally reads two opt-in surfaces of the vendor's
-  own apps — see the two WorkBuddy-only routes below.
+  another. WorkBuddy also reads two opt-in surfaces of the vendor's own
+  apps — see the WorkBuddy-only routes below.
 - **Calls:** `POST {host}/v2/plugin/auth/state?platform={platform}` to
   start the QR handshake, `GET {host}/v2/plugin/auth/token?state=…` to poll
   it, and `POST {host}/v2/plugin/auth/token/refresh` (refresh token in the
-  `X-Refresh-Token` header) to renew. Usage comes from the same host:
+  `X-Refresh-Token` header, source in `X-Auth-Refresh-Source`: `ide-main`
+  for the IDE builds, `plugin` for WorkBuddy — the AI build answers
+  `invalid_grant` 12153 otherwise). Usage comes from the same host:
   `POST /v2/billing/meter/get-dosage-notify`,
   `POST /v2/billing/meter/get-payment-type` and
   `POST /v2/billing/meter/get-user-resource`. Every call carries a browser
   User-Agent: the billing gateway answers `403` / `code 10085` without one.
 - **Shows:** a credits meter (used/total, countdown to the earliest future
   cycle end, rendered in UTC+8), the plan name, and one text row per
-  resource pack the meter does not already aggregate. Packs count as
-  credits when `CapacityUnit` says so — and also when it is absent, since
-  the older shapes carried no unit at all. Unlimited plans read
-  "Unlimited"; with no total to meter against, the row degrades to plain
-  credits left. Enterprise members get an empty resource list from the
-  personal endpoint, so their usage is read from
+  resource pack when there are several live packs or one expires within
+  seven days (remaining / total / expiry / countdown; an unparseable
+  deadline reads `expiry unknown`). Packs count as credits when
+  `CapacityUnit` says so — and also when it is absent, since the older
+  shapes carried no unit at all. Unlimited plans read "Unlimited"; with no
+  total to meter against, the row degrades to plain credits left.
+  Enterprise members get an empty resource list from the personal endpoint,
+  so their usage is read from
   `POST /v2/billing/meter/get-enterprise-user-usage` — the same call the
   web dashboard's own `/profile/usage` page makes.
+- **Provenance:** a reading that did not come from a Pane-managed login
+  appends one `Source` row (`desktop app (read-only)` / `web session
+  (explicit import)`). Pane login cards stay clean.
 
 ### WorkBuddy desktop sign-in (tier 1 — automatic)
 
 - **Reads:** `%LOCALAPPDATA%\CodeBuddyExtension\Data\Public\auth\workbuddy-desktop.info`
-  — the WorkBuddy desktop app's shared sign-in file, read-only, only while
-  WorkBuddy is not running. Fields the app re-encrypted into
+  (CN) or `workbuddy-desktop-ai.info` (AI) — each variant reads only its own
+  file, read-only. Fields the app re-encrypted into
   `{ "$wbEncrypted": 1, "envelope": … }` envelopes are refused, never
   decrypted — an enveloped sign-in simply shows the sign-in hint instead.
-- **Calls:** the same `/v2/plugin` billing gateway as the scanned route,
-  with the desktop token.
+- **Calls:** the same billing gateway as the scanned route, with the
+  desktop token.
 - **Shows:** the same credits face as the scanned route (one shared row
-  builder, `codebuddy::credits_face_metrics`).
+  builder, `codebuddy::credits_face_metrics`) plus the `Source` row.
+- **Import:** the auth center offers "Import desktop sign-in", which copies
+  the plaintext session into Pane's own login store (OS-vault-first,
+  `extra.sourceKind = "desktop"`). The vendor file is never written. Once a
+  Pane login owns that uid, the desktop card is suppressed so one account
+  never yields two cards with the same id.
 
 ### WorkBuddy web-session cookie (tier 3 — explicit opt-in)
 

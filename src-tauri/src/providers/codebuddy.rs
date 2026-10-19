@@ -1,15 +1,20 @@
 //! CodeBuddy family (Tencent) — one module for every family member
-//! (CodeBuddy / CodeBuddy CN / WorkBuddy). They share the `copilot`
-//! account realm and the `/v2/plugin` billing gateway and differ only in
-//! host and the `platform` handshake parameter, so the family table in
-//! `codebuddy_login` parameterizes everything here: adding a member is a
+//! (CodeBuddy / CodeBuddy CN / WorkBuddy / WorkBuddy AI). They share the
+//! `copilot` account realm and the plugin billing gateway and differ in
+//! host, the `platform` handshake parameter, the billing path prefix and
+//! (for WorkBuddy) whether a desktop auth store exists, so the family table
+//! in `codebuddy_login` parameterizes everything here: adding a member is a
 //! row there, not a copy of this file.
 //!
-//! There is no local credential source in Pane: cards exist only through
-//! Pane-managed logins (codebuddy_login), one account card each. The card
-//! face is a credits meter (total/remaining, reset at the earliest future
-//! cycle end, frozen capacity as a Reserved row) plus the vendor's dosage
-//! notice — same three fields the web dashboard shows.
+//! Three quota sources exist, in this order:
+//!   1. Pane-managed login cards (`snapshot_with_login`) — one per account.
+//!   2. WorkBuddy only: the desktop app's own auth store, read-only.
+//!   3. WorkBuddy CN only: an explicitly imported web session.
+//! The card face is a credits meter (total/remaining, reset at the earliest
+//! future cycle end, frozen capacity as a Reserved row) plus the vendor's
+//! dosage notice — same three fields the web dashboard shows. A non-default
+//! source appends one `Source` row, so the user always knows where the
+//! numbers came from.
 
 use super::{http, Metric, Snapshot};
 use crate::codebuddy_login::Family;
@@ -27,27 +32,39 @@ const UA: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (
 /// encrypted at rest or absent the card falls back to the sign-in hint and
 /// the other routes stay the user's choice.
 pub async fn snapshot(f: &'static Family) -> Snapshot {
-    if f.family_id == "workbuddy" {
-        // Tier 1: the desktop app's own auth store, read straight off disk
-        // (`workbuddy_local`) — no ceremony, the route magpie takes.
-        let local_failure = match crate::providers::workbuddy_local::read() {
+    if f.local_auth_file.is_some() {
+        // Tier 1: the desktop app's own auth store for THIS variant, read
+        // straight off disk (`workbuddy_local`) — no ceremony, the route
+        // magpie takes. Skipped when the account is already managed by a
+        // Pane login, so the same uid never yields two cards with one id.
+        let local_failure = match crate::providers::workbuddy_local::read_for(f) {
             crate::providers::workbuddy_local::LocalRead::Session(session) => {
-                return snapshot_from_desktop(f, *session).await;
+                if !desktop_shadowed_by_login(f, &session.uid) {
+                    return snapshot_from_desktop(f, *session).await;
+                }
+                None
             }
-            crate::providers::workbuddy_local::LocalRead::Encrypted => Some(
-                "WorkBuddy's desktop sign-in is stored encrypted on this machine and Pane does not decrypt it. Sign in from the auth center instead.".to_string(),
-            ),
-            crate::providers::workbuddy_local::LocalRead::Unreadable(reason) => {
-                Some(format!("WorkBuddy desktop sign-in could not be read: {reason}"))
-            }
+            crate::providers::workbuddy_local::LocalRead::Encrypted => Some(format!(
+                "{}'s desktop sign-in is stored encrypted on this machine and Pane does not decrypt it. Sign in from the auth center instead.",
+                f.display_name
+            )),
+            crate::providers::workbuddy_local::LocalRead::Unreadable(reason) => Some(format!(
+                "{} desktop sign-in could not be read: {reason}",
+                f.display_name
+            )),
             crate::providers::workbuddy_local::LocalRead::Missing => None,
         };
-        // Tier 3: the explicitly-imported web session, when enabled. Off
-        // means not a single request leaves this machine.
-        if let Some(snap) =
-            crate::providers::workbuddy_web::snapshot(f.family_id, f.display_name).await
-        {
-            return snap;
+        // Tier 3 (CN only): the explicitly-imported web session, when
+        // enabled. Off means not a single request leaves this machine. The
+        // AI variant never borrows the CN web session — no cross-variant
+        // fallback.
+        if !f.intl {
+            if let Some(mut snap) =
+                crate::providers::workbuddy_web::snapshot(f.family_id, f.display_name).await
+            {
+                snap.metrics.push(source_row("web session (explicit import)"));
+                return snap;
+            }
         }
         // Tier 1 failed and no web session: the card states the specific
         // reason and offers the tier-2 jump to the auth center.
@@ -57,6 +74,21 @@ pub async fn snapshot(f: &'static Family) -> Snapshot {
     }
     let hint = format!("Sign in with {} from the auth center to see its quota.", f.display_name);
     Snapshot::no_credentials(f.family_id, f.display_name, &hint)
+}
+
+/// A non-default quota source gets one visible row, so a desk-top or cookie
+/// reading is never mistaken for a Pane-managed login.
+fn source_row(detail: &str) -> Metric {
+    Metric::text("Source", detail.to_string())
+}
+
+/// True when a Pane login already owns this uid — the login card renders it,
+/// and a second desktop-derived snapshot with the same card id would be a
+/// duplicate in the same refresh pass.
+fn desktop_shadowed_by_login(f: &Family, uid: &str) -> bool {
+    crate::login_accounts::load(f.family_id)
+        .iter()
+        .any(|account| account.account_id == uid)
 }
 
 /// The desktop app's session, shaped like a Pane login so it takes the same
@@ -78,8 +110,14 @@ async fn snapshot_from_desktop(
     };
     let login = crate::login_accounts::LoginAccount {
         account_id: session.uid.clone(),
-        email: String::new(),
-        label: format!("{} — desktop app", f.display_name),
+        email: session.email.clone(),
+        label: if !session.email.trim().is_empty() {
+            session.email.clone()
+        } else if !session.nickname.trim().is_empty() {
+            session.nickname.clone()
+        } else {
+            format!("{} — desktop app", f.display_name)
+        },
         access_token,
         refresh_token,
         id_token: String::new(),
@@ -89,13 +127,21 @@ async fn snapshot_from_desktop(
             .map(|t| t.to_rfc3339())
             .unwrap_or_default(),
         added_at: 0,
-        extra: json!({ "uid": session.uid, "domain": session.domain }),
+        extra: json!({
+            "uid": session.uid,
+            "domain": session.domain,
+            "sourceKind": "desktop",
+            "enterpriseId": session.enterprise_id,
+        }),
     };
     let id = crate::login_accounts::card_id_for_account(f.family_id, &login);
     let name = login_card_name(f, &login);
 
     match fetch_with_login(f, &login, false).await {
-        Ok(snapshot) => snapshot,
+        Ok(mut snapshot) => {
+            snapshot.metrics.push(source_row("desktop app (read-only)"));
+            snapshot
+        }
         Err(error) => Snapshot::error(&id, &name, error),
     }
 }
@@ -172,15 +218,15 @@ async fn desktop_fresh_tokens(
 /// Pure local probe for the Customize gear panel (no network): the desktop
 /// app's sign-in store, when it holds a readable session.
 pub fn local_credential_hint(f: &Family) -> Option<String> {
-    if f.family_id != "workbuddy" {
+    if f.local_auth_file.is_none() {
         return None;
     }
-    match crate::providers::workbuddy_local::read() {
+    match crate::providers::workbuddy_local::read_for(f) {
         crate::providers::workbuddy_local::LocalRead::Session(_) => {
-            Some("WorkBuddy desktop app sign-in (read-only)".to_string())
+            Some(format!("{} desktop app sign-in (read-only)", f.display_name))
         }
         crate::providers::workbuddy_local::LocalRead::Encrypted => {
-            Some("WorkBuddy desktop sign-in is encrypted at rest".to_string())
+            Some(format!("{} desktop sign-in is encrypted at rest", f.display_name))
         }
         _ => None,
     }
@@ -233,29 +279,12 @@ async fn fetch_with_login(
     // The vendor signals a dead session with 401/403 on the first call,
     // so the token is probed rather than pre-judged by its expiry stamp.
     let first = billing_post(f, &access, "/v2/billing/meter/get-dosage-notify", None).await?;
-    if first.rejected && allow_refresh && !access.refresh_token.trim().is_empty() {
-        let rotated = crate::codebuddy_login::refresh(
-            f,
-            &access.token,
-            &access.refresh_token,
-            access.tenant.domain.as_deref(),
-        )
-        .await?;
-        let new_token = rotated
-            .get("accessToken")
-            .or_else(|| rotated.get("access_token"))
-            .and_then(Value::as_str)
-            .map(str::trim)
-            .filter(|s| !s.is_empty())
-            .ok_or("token refresh returned no accessToken")?
-            .to_string();
-        let new_refresh = rotated
-            .get("refreshToken")
-            .or_else(|| rotated.get("refresh_token"))
-            .and_then(Value::as_str)
-            .unwrap_or(&access.refresh_token)
-            .to_string();
-        write_back(f.family_id, login, &new_token, &new_refresh, &rotated);
+    if first.rejected() {
+        if !allow_refresh || access.refresh_token.trim().is_empty() {
+            mark_relogin(f.family_id, &login.account_id, "unauthorized");
+            return Err(expired_message(f, &first));
+        }
+        let (new_token, new_refresh) = refresh_login(f, login, &access).await?;
         let updated = Access {
             token: new_token,
             refresh_token: new_refresh,
@@ -263,13 +292,121 @@ async fn fetch_with_login(
         };
         return Box::pin(finish(f, &updated, &id, &name)).await;
     }
-    if first.rejected {
-        return Err(format!(
-            "{} session expired — sign in again from the auth center",
-            f.display_name
-        ));
+    if !first.ok() {
+        return Err(billing_error("/v2/billing/meter/get-dosage-notify", &first));
     }
+    clear_relogin(f.family_id, &login.account_id);
     finish(f, &access, &id, &name).await
+}
+
+/// Refresh is single-flight per account: a second caller that queued behind
+/// the first reuses the rotated pair already written back instead of issuing
+/// its own refresh (which would spend the now-stale refresh token and could
+/// clobber the newer one in the store).
+async fn refresh_login(
+    f: &'static Family,
+    login: &crate::login_accounts::LoginAccount,
+    access: &Access,
+) -> Result<(String, String), String> {
+    let lock = crate::codebuddy_login::refresh_lock(format!(
+        "{}:{}",
+        f.family_id, login.account_id
+    ));
+    let _guard = lock.lock().await;
+
+    // Another task may have rotated the pair while this one waited.
+    if let Some(current) = crate::login_accounts::load(f.family_id)
+        .into_iter()
+        .find(|account| account.account_id == login.account_id)
+    {
+        if !current.access_token.trim().is_empty() && current.access_token != login.access_token {
+            clear_relogin(f.family_id, &login.account_id);
+            return Ok((current.access_token, current.refresh_token));
+        }
+    }
+
+    match crate::codebuddy_login::refresh(
+        f,
+        &access.token,
+        &access.refresh_token,
+        access.tenant.domain.as_deref(),
+    )
+    .await
+    {
+        Ok(rotated) => {
+            let new_token = rotated
+                .get("accessToken")
+                .or_else(|| rotated.get("access_token"))
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .ok_or("token refresh returned no accessToken")?
+                .to_string();
+            let new_refresh = rotated
+                .get("refreshToken")
+                .or_else(|| rotated.get("refresh_token"))
+                .and_then(Value::as_str)
+                .unwrap_or(&access.refresh_token)
+                .to_string();
+            write_back(f.family_id, login, &new_token, &new_refresh, &rotated);
+            clear_relogin(f.family_id, &login.account_id);
+            Ok((new_token, new_refresh))
+        }
+        Err(error) => {
+            mark_relogin(f.family_id, &login.account_id, refresh_error_kind(&error));
+            Err(error)
+        }
+    }
+}
+
+/// `needsRelogin` is a non-secret flag the auth center and card can show;
+/// it is cleared as soon as a range request succeeds again.
+fn mark_relogin(family_id: &str, account_id: &str, kind: &str) {
+    let mut accounts = crate::login_accounts::load(family_id);
+    let Some(entry) = accounts.iter_mut().find(|account| account.account_id == account_id) else {
+        return;
+    };
+    if !entry.extra.is_object() {
+        entry.extra = json!({});
+    }
+    let already = entry.extra.get("needsRelogin").and_then(Value::as_bool) == Some(true)
+        && entry.extra.get("lastErrorKind").and_then(Value::as_str) == Some(kind);
+    if already {
+        return;
+    }
+    entry.extra["needsRelogin"] = Value::Bool(true);
+    entry.extra["lastErrorKind"] = Value::String(kind.to_string());
+    let _ = crate::login_accounts::save(family_id, &accounts);
+}
+
+fn clear_relogin(family_id: &str, account_id: &str) {
+    let mut accounts = crate::login_accounts::load(family_id);
+    let Some(entry) = accounts.iter_mut().find(|account| account.account_id == account_id) else {
+        return;
+    };
+    let had = entry.extra.get("needsRelogin").and_then(Value::as_bool) == Some(true);
+    if !had {
+        return;
+    }
+    if let Some(map) = entry.extra.as_object_mut() {
+        map.remove("needsRelogin");
+        map.remove("lastErrorKind");
+    }
+    let _ = crate::login_accounts::save(family_id, &accounts);
+}
+
+/// Coarse, non-secret classification for the persisted relogin flag.
+fn refresh_error_kind(error: &str) -> &'static str {
+    let lower = error.to_ascii_lowercase();
+    if lower.contains("invalid_grant") || lower.contains("12153") {
+        "refresh_rejected"
+    } else if lower.contains("network") || lower.contains("request") || lower.contains("timeout") {
+        "network"
+    } else if lower.contains("code") || lower.contains("no data") {
+        "vendor"
+    } else {
+        "unknown"
+    }
 }
 
 fn write_back(
@@ -294,18 +431,67 @@ fn write_back(
                 .to_rfc3339();
         }
         if let Some(domain) = rotated.get("domain").and_then(Value::as_str) {
+            if !entry.extra.is_object() {
+                entry.extra = json!({});
+            }
             entry.extra["domain"] = Value::String(domain.to_string());
         }
     }
-    let _ = crate::login_accounts::save(family_id, &accounts);
+    if let Err(error) = crate::login_accounts::save(family_id, &accounts) {
+        // The refreshed token still serves this request; a failed write-back
+        // means the next refresh starts from the older pair, which the
+        // single-flight lock and the store re-read above will notice.
+        eprintln!("[pane] codebuddy token write-back failed: {error}");
+    }
 }
 
 struct Billing {
     body: Value,
-    rejected: bool,
+    status: u16,
+    code: Option<i64>,
+    message: Option<String>,
 }
 
+impl Billing {
+    /// A dead session: the refresh ladder may run.
+    fn rejected(&self) -> bool {
+        matches!(self.status, 401 | 403)
+    }
+
+    /// The vendor's envelope: code 0/200 means success; a body without a
+    /// code counts only when the transport was 2xx and data is present.
+    fn ok(&self) -> bool {
+        match self.code {
+            Some(0) | Some(200) => true,
+            None => self.status < 400 && self.body.get("data").is_some(),
+            Some(_) => false,
+        }
+    }
+}
+
+/// One logical billing call, with the variant's path candidates. Only a 404
+/// advances to the next candidate — 401, the WAF's 10085, and transport
+/// failures are call outcomes, not path problems.
 async fn billing_post(
+    f: &Family,
+    access: &Access,
+    path: &str,
+    body: Option<Value>,
+) -> Result<Billing, String> {
+    let candidates = f.billing_paths(path);
+    let mut last = None;
+    for candidate in &candidates {
+        let billing = billing_post_one(f, access, candidate, body.clone()).await?;
+        if billing.status == 404 && candidates.len() > 1 {
+            last = Some(billing);
+            continue;
+        }
+        return Ok(billing);
+    }
+    Ok(last.expect("billing_paths always yields a candidate"))
+}
+
+async fn billing_post_one(
     f: &Family,
     access: &Access,
     path: &str,
@@ -332,25 +518,48 @@ async fn billing_post(
         Some(body) => req.json(&body).send().await,
         None => req.send().await,
     }
-    .map_err(|e| format!("{path} request: {e}"))?;
-    let status = resp.status();
-    if status.as_u16() == 401 || status.as_u16() == 403 {
-        return Ok(Billing { body: Value::Null, rejected: true });
-    }
+    .map_err(|e| format!("{path} network: {e}"))?;
+    let status = resp.status().as_u16();
     let text = resp.text().await.map_err(|e| format!("{path} read: {e}"))?;
     let body: Value = serde_json::from_str(&text).unwrap_or(Value::Null);
-    // The vendor's envelope: code 0/200 means success, anything else is
-    // an application error (not a transport one).
-    let ok = matches!(body.get("code").and_then(Value::as_i64), Some(0) | Some(200));
-    if !ok && !body.get("data").is_some() {
-        let message = body
-            .get("message")
-            .or_else(|| body.get("msg"))
-            .and_then(Value::as_str)
-            .unwrap_or("no quota data");
-        return Err(format!("{path}: {message}"));
+    let code = body.get("code").and_then(Value::as_i64);
+    let message = body
+        .get("message")
+        .or_else(|| body.get("msg"))
+        .and_then(Value::as_str)
+        .map(str::to_string);
+    Ok(Billing { body, status, code, message })
+}
+
+fn billing_error(path: &str, billing: &Billing) -> String {
+    match billing.status {
+        401 => format!("{path}: session expired — sign in again"),
+        403 if billing.code == Some(10085) => {
+            format!("{path}: vendor rejected the request (browser UA required)")
+        }
+        403 => format!("{path}: access denied (HTTP 403)"),
+        404 => format!("{path}: endpoint not found"),
+        429 => format!("{path}: rate limited — try again later"),
+        status if status >= 500 => format!("{path}: vendor error (HTTP {status})"),
+        _ => billing
+            .message
+            .as_deref()
+            .map(|message| format!("{path}: {message}"))
+            .unwrap_or_else(|| format!("{path}: no quota data")),
     }
-    Ok(Billing { body, rejected: false })
+}
+
+fn expired_message(f: &Family, billing: &Billing) -> String {
+    match billing.status {
+        403 if billing.code == Some(10085) => format!(
+            "{} rejected the request (browser UA required) — sign in again from the auth center",
+            f.display_name
+        ),
+        _ => format!(
+            "{} session expired — sign in again from the auth center",
+            f.display_name
+        ),
+    }
 }
 
 async fn finish(f: &Family, access: &Access, id: &str, name: &str) -> Result<Snapshot, String> {
@@ -371,8 +580,19 @@ async fn finish(f: &Family, access: &Access, id: &str, name: &str) -> Result<Sna
         billing_post(f, access, "/v2/billing/meter/get-user-resource", Some(resource_body)),
     );
     let dosage = dosage?;
-    let payment = payment?;
+    if !dosage.ok() {
+        return Err(billing_error("get-dosage-notify", &dosage));
+    }
+    // The payment type and the resource list are optional enrichment: a
+    // successful session must not fail because one of them is unavailable.
+    let payment = payment.ok().filter(|billing| billing.ok());
     let resources = resources?;
+    if !resources.ok()
+        && resource_items(&resources.body).is_empty()
+        && access.tenant.enterprise_id.is_none()
+    {
+        return Err(billing_error("get-user-resource", &resources));
+    }
 
     let mut metrics = Vec::new();
     let dosage_data = dosage.body.get("data").cloned().unwrap_or(Value::Null);
@@ -382,13 +602,15 @@ async fn finish(f: &Family, access: &Access, id: &str, name: &str) -> Result<Sna
     if let Some(notice) = notice {
         metrics.push(Metric::text("Quota", notice.to_string()));
     }
-    let payment_type = payment
-        .body
-        .get("data")
-        .and_then(|d| d.as_str().or_else(|| d.get("paymentType").and_then(Value::as_str)))
-        .map(str::trim)
-        .filter(|s| !s.is_empty())
-        .map(str::to_string);
+    let payment_type = payment.as_ref().and_then(|payment| {
+        payment
+            .body
+            .get("data")
+            .and_then(|d| d.as_str().or_else(|| d.get("paymentType").and_then(Value::as_str)))
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(str::to_string)
+    });
 
     let now_ms = chrono::Utc::now().timestamp_millis();
     let packs = resource_items(&resources.body);
@@ -408,6 +630,10 @@ async fn finish(f: &Family, access: &Access, id: &str, name: &str) -> Result<Sna
         metrics.extend(credits_face_metrics(face));
         plan = face.plan.clone();
     }
+    // Per-package detail (expiry + remaining) only when it would say
+    // something the aggregate meter cannot: several live packs, or at
+    // least one expiring inside the 7-day window.
+    metrics.extend(package_detail_rows(&packs, now_ms));
     for pack in &packs {
         // A pack the meter already aggregates would only repeat it.
         if face.is_some() && is_credits_pack(pack) {
@@ -419,7 +645,7 @@ async fn finish(f: &Family, access: &Access, id: &str, name: &str) -> Result<Sna
     if metrics.is_empty() {
         return Err(format!("{} reported no quota data", f.display_name));
     }
-    metrics.truncate(6);
+    metrics.truncate(12);
     Ok(Snapshot::ok(id, name, plan.or(payment_type), metrics))
 }
 
@@ -493,7 +719,7 @@ async fn fetch_enterprise_usage(f: &Family, access: &Access) -> Result<Value, St
         Some(json!({})),
     )
     .await?;
-    if billing.rejected {
+    if billing.rejected() {
         return Err(format!("{} enterprise usage: session rejected", f.display_name));
     }
     Ok(billing.body)
@@ -655,6 +881,130 @@ pub(crate) fn credits_face_from_items(packs: &[&Value], now_ms: i64) -> Option<C
     seen.then_some(face)
 }
 
+/// A resource pack expiring inside this window is called out on the card.
+const EXPIRING_SOON_DAYS: i64 = 7;
+
+struct PackageDetail {
+    name: String,
+    remain: f64,
+    total: Option<f64>,
+    expire_ms: Option<i64>,
+}
+
+fn package_name(pack: &Value) -> String {
+    ["PackageName", "packageName", "resourceName", "name", "productName"]
+        .iter()
+        .find_map(|key| {
+            pack.get(*key)
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(str::to_string)
+        })
+        .unwrap_or_else(|| "Credits package".to_string())
+}
+
+/// The pack's own end instant. The vendor uses `DeductionEndTime` /
+/// `ExpiredTime` for the real deadline and `CycleEndTime` for the billing
+/// cycle; a deduction stamp more than a year past the cycle is a placeholder
+/// and the cycle wins. Anything further out than two years is treated as
+/// "no deadline" rather than a fake countdown.
+fn pack_expire_ms(pack: &Value, now_ms: i64) -> Option<i64> {
+    const YEAR_MS: i64 = 365 * 86_400_000;
+    let cycle = ["CycleEndTime", "cycleEndTime"]
+        .iter()
+        .filter_map(|key| pack.get(*key))
+        .filter_map(timestamp_ms)
+        .min();
+    let deduction = ["DeductionEndTime", "deductionEndTime", "ExpiredTime", "expiredTime"]
+        .iter()
+        .filter_map(|key| pack.get(*key))
+        .filter_map(timestamp_ms)
+        .min();
+    let chosen = match (cycle, deduction) {
+        (Some(cycle), Some(deduction)) if deduction > cycle + YEAR_MS => Some(cycle),
+        (_, Some(deduction)) => Some(deduction),
+        (Some(cycle), None) => Some(cycle),
+        (None, None) => None,
+    }?;
+    (chosen - now_ms <= 2 * YEAR_MS).then_some(chosen)
+}
+
+fn package_details(packs: &[&Value], now_ms: i64) -> Vec<PackageDetail> {
+    packs
+        .iter()
+        .filter(|pack| is_credits_pack(pack))
+        .filter_map(|pack| {
+            // Unlimited packs carry -1 placeholders: no meter, no deadline.
+            let unlimited = pack.get("Unlimited").and_then(Value::as_bool).unwrap_or(false)
+                || pack_num(pack, &["CycleCapacitySizePrecise", "CycleCapacitySize", "CycleTotalCapacity", "totalAmount", "total"]) == Some(-1.0);
+            if unlimited {
+                return None;
+            }
+            let remain = pack_num(
+                pack,
+                &["CycleCapacityRemainPrecise", "CycleCapacityRemain", "CycleRemainCapacity", "remainAmount", "remain"],
+            )?;
+            if !(remain > 0.0) {
+                return None;
+            }
+            let total = pack_num(
+                pack,
+                &["CycleCapacitySizePrecise", "CycleCapacitySize", "CycleTotalCapacity", "totalAmount", "total"],
+            )
+            .filter(|total| *total > 0.0);
+            Some(PackageDetail {
+                name: package_name(pack),
+                remain,
+                total,
+                expire_ms: pack_expire_ms(pack, now_ms),
+            })
+        })
+        .collect()
+}
+
+/// Per-package rows, emitted only when the aggregate meter would hide
+/// something: two or more live packs, or at least one expiring within a
+/// week. Rows are ordered by expiry (unknown deadlines last).
+fn package_detail_rows(packs: &[&Value], now_ms: i64) -> Vec<Metric> {
+    let mut details = package_details(packs, now_ms);
+    let soon = details.iter().any(|detail| {
+        detail
+            .expire_ms
+            .is_some_and(|expire| expire - now_ms <= EXPIRING_SOON_DAYS * 86_400_000)
+    });
+    if details.len() < 2 && !soon {
+        return Vec::new();
+    }
+    details.sort_by_key(|detail| detail.expire_ms.unwrap_or(i64::MAX));
+    details
+        .into_iter()
+        .map(|detail| {
+            let mut text = match detail.total {
+                Some(total) => format!("{:.0}/{:.0} left", detail.remain, total),
+                None => format!("{:.0} left", detail.remain),
+            };
+            match detail.expire_ms {
+                Some(expire) => {
+                    text.push_str(&format!(
+                        " · expires {}",
+                        chrono::DateTime::from_timestamp_millis(expire)
+                            .map(|at| at.with_timezone(&chrono::Local).format("%Y-%m-%d %H:%M").to_string())
+                            .unwrap_or_else(|| "unknown".to_string())
+                    ));
+                    let left_ms = expire - now_ms;
+                    if left_ms <= EXPIRING_SOON_DAYS * 86_400_000 {
+                        let days = (left_ms.max(0) as f64 / 86_400_000.0).ceil() as i64;
+                        text.push_str(&format!(" · expires in {days}d"));
+                    }
+                }
+                None => text.push_str(" · expiry unknown"),
+            }
+            Metric::text(&detail.name, text)
+        })
+        .collect()
+}
+
 /// One resource pack row: its name plus whatever remaining/expiry
 /// numbers the entry carries (keys vary per pack type).
 fn pack_row(pack: &Value) -> (String, String) {
@@ -696,6 +1046,9 @@ mod tests {
     fn desktop_session(expires_at_ms: Option<i64>, refresh_expires_at_ms: Option<i64>, refresh: &str) -> crate::providers::workbuddy_local::LocalSession {
         crate::providers::workbuddy_local::LocalSession {
             uid: "u-1".into(),
+            email: String::new(),
+            nickname: String::new(),
+            enterprise_id: String::new(),
             access_token: "at".into(),
             refresh_token: refresh.into(),
             domain: "www.workbuddy.cn".into(),
@@ -946,5 +1299,110 @@ mod tests {
         assert_eq!(face.reset_ms, Some(1_769_875_200_000));
         // No limit at all is not a face — the caller keeps its own reading.
         assert!(enterprise_face_from_body(&json!({ "credit": 5 }), NOW_MS).is_none());
+    }
+
+    fn billing(status: u16, code: Option<i64>) -> Billing {
+        Billing { body: Value::Null, status, code, message: None }
+    }
+
+    #[test]
+    fn billing_errors_are_distinct_and_readable() {
+        assert!(billing_error("/x", &billing(401, None)).contains("session expired"));
+        assert!(billing_error("/x", &billing(403, Some(10085))).contains("browser UA"));
+        assert!(billing_error("/x", &billing(403, None)).contains("access denied"));
+        assert!(billing_error("/x", &billing(429, None)).contains("rate limited"));
+        assert!(billing_error("/x", &billing(404, None)).contains("endpoint not found"));
+        assert!(billing_error("/x", &billing(503, None)).contains("HTTP 503"));
+        let with_message = Billing {
+            body: Value::Null,
+            status: 200,
+            code: Some(500),
+            message: Some("no entitlement".into()),
+        };
+        assert!(billing_error("/x", &with_message).contains("no entitlement"));
+    }
+
+    #[test]
+    fn billing_success_needs_a_success_code_or_data() {
+        assert!(billing(200, Some(0)).ok());
+        assert!(billing(200, Some(200)).ok());
+        assert!(!billing(200, Some(401)).ok());
+        assert!(!billing(401, None).ok());
+        assert!(!billing(401, None).ok());
+        let with_data = Billing { body: json!({ "data": {} }), status: 200, code: None, message: None };
+        assert!(with_data.ok());
+        let no_data = Billing { body: json!({}), status: 200, code: None, message: None };
+        assert!(!no_data.ok());
+        assert!(billing(403, None).rejected());
+        assert!(!billing(429, None).rejected());
+    }
+
+    #[test]
+    fn refresh_errors_are_classified_without_secrets() {
+        assert_eq!(refresh_error_kind("token refresh rejected (code): invalid_grant"), "refresh_rejected");
+        assert_eq!(refresh_error_kind("token refresh: network timeout"), "network");
+        assert_eq!(refresh_error_kind("token refresh rejected (code): expired"), "vendor");
+        assert_eq!(refresh_error_kind("something odd"), "unknown");
+    }
+
+    #[test]
+    fn pack_expiry_prefers_the_real_deadline_and_ignores_placeholders() {
+        // Deduction end within a year of the cycle wins.
+        let pack = json!({
+            "DeductionEndTime": "2026-02-01 00:00:00",
+            "CycleEndTime": "2026-03-01 00:00:00"
+        });
+        assert_eq!(pack_expire_ms(&pack, NOW_MS), Some(1_769_875_200_000));
+        // A deduction stamp more than a year past the cycle is a placeholder.
+        let placeholder = json!({
+            "DeductionEndTime": "2099-01-01 00:00:00",
+            "CycleEndTime": "2026-03-01 00:00:00"
+        });
+        assert_eq!(pack_expire_ms(&placeholder, NOW_MS), Some(1_772_294_400_000));
+        // Beyond two years from now reads as unknown, not a countdown.
+        assert_eq!(pack_expire_ms(&json!({ "CycleEndTime": "2099-01-01 00:00:00" }), NOW_MS), None);
+        assert_eq!(pack_expire_ms(&json!({}), NOW_MS), None);
+    }
+
+    #[test]
+    fn package_rows_appear_only_when_they_add_information() {
+        // One live pack, no deadline: the aggregate meter says it all.
+        let single_pack = json!({
+            "PackageName": "Pro", "CycleCapacitySize": 500.0, "CycleCapacityRemain": 450.0
+        });
+        let single = vec![&single_pack];
+        assert!(package_detail_rows(&single, NOW_MS).is_empty());
+
+        // Two live packs: one row each, ordered by expiry.
+        let later = json!({
+            "PackageName": "Later", "CycleCapacitySize": 100.0, "CycleCapacityRemain": 90.0,
+            "CycleEndTime": "2026-03-01 00:00:00"
+        });
+        let sooner = json!({
+            "PackageName": "Sooner", "CycleCapacitySize": 200.0, "CycleCapacityRemain": 20.0,
+            "CycleEndTime": "2026-02-01 00:00:00"
+        });
+        let rows = package_detail_rows(&[&later, &sooner], NOW_MS);
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0].label, "Sooner");
+        assert_eq!(rows[1].label, "Later");
+        assert!(rows[0].value.as_deref().unwrap_or("").contains("20/200 left"));
+
+        // A single pack expiring within 7 days gets a countdown.
+        let expiring_pack = json!({
+            "PackageName": "Expiring", "CycleCapacitySize": 50.0, "CycleCapacityRemain": 10.0,
+            "DeductionEndTime": 1_760_300_000_000i64 // ~3.5 days after NOW_MS
+        });
+        let soon = vec![&expiring_pack];
+        let rows = package_detail_rows(&soon, NOW_MS);
+        assert_eq!(rows.len(), 1);
+        assert!(rows[0].value.as_deref().unwrap_or("").contains("expires in"));
+
+        // A spent pack contributes nothing.
+        let spent_pack = json!({
+            "PackageName": "Spent", "CycleCapacitySize": 50.0, "CycleCapacityRemain": 0.0
+        });
+        let spent = vec![&spent_pack];
+        assert!(package_detail_rows(&spent, NOW_MS).is_empty());
     }
 }

@@ -9,19 +9,63 @@
 //! `extra` (see providers::codebuddy).
 
 use serde_json::Value;
-use std::sync::Mutex;
+use std::collections::HashMap;
+use std::sync::{Arc, LazyLock, Mutex};
 use std::time::{Duration, Instant};
 
 const API_PREFIX: &str = "/v2/plugin";
 
 /// One CodeBuddy-family product. The family shares the `copilot` Keycloak
-/// realm and the `/v2/plugin` billing gateway; members differ only in host
-/// and the `platform` handshake parameter.
+/// realm and the `/v2/plugin` billing gateway; members differ in host, the
+/// `platform` handshake parameter, and — for WorkBuddy AI — the billing
+/// path prefix and the refresh-source header.
 pub struct Family {
     pub family_id: &'static str,
     pub display_name: &'static str,
     pub api_endpoint: &'static str,
     pub platform: &'static str,
+    /// Value of `X-Auth-Refresh-Source` on the token-refresh call. The
+    /// WorkBuddy clients send `plugin`; the CodeBuddy IDE sends `ide-main`.
+    /// The AI variant answers `invalid_grant` (code 12153) without it.
+    pub refresh_source: &'static str,
+    /// WorkBuddy AI serves billing under `/billing/...` first and only
+    /// falls back to `/v2/billing/...` on a 404 — see `billing_paths`.
+    pub bare_billing_prefix: bool,
+    /// Product variant: AI-only billing/domain rules and desktop files.
+    pub intl: bool,
+    /// Official desktop auth store file name (both variants share the dir).
+    pub local_auth_file: Option<&'static str>,
+    /// Official desktop data root (`~/.workbuddy` / `~/.workbuddy-ai`).
+    pub data_root: Option<&'static str>,
+}
+
+impl Family {
+    /// Billing path candidates in try order. Only an HTTP 404 advances to
+    /// the next candidate; 401/10085/transport errors are never path issues.
+    pub fn billing_paths(&self, path: &str) -> Vec<String> {
+        if !self.bare_billing_prefix {
+            return vec![path.to_string()];
+        }
+        let primary = path.strip_prefix("/v2").unwrap_or(path).to_string();
+        let fallback = format!("/v2{primary}");
+        if fallback == primary {
+            vec![primary]
+        } else {
+            vec![primary, fallback]
+        }
+    }
+
+    /// The account's `domain` must belong to this variant. An empty domain
+    /// cannot be judged and is accepted (the caller's compatibility rule);
+    /// everything else is judged by suffix, never by substring.
+    pub fn matches_domain(&self, domain: &str) -> bool {
+        let domain = domain.trim().to_ascii_lowercase();
+        if domain.is_empty() {
+            return true;
+        }
+        let ai = domain == "workbuddy.ai" || domain.ends_with(".workbuddy.ai");
+        if self.intl { ai } else { !ai }
+    }
 }
 
 /// Adding a family member is adding one row here — the login flow, the
@@ -33,18 +77,44 @@ pub const FAMILIES: &[Family] = &[
         display_name: "CodeBuddy",
         api_endpoint: "https://www.codebuddy.ai",
         platform: "ide",
+        refresh_source: "ide-main",
+        bare_billing_prefix: false,
+        intl: false,
+        local_auth_file: None,
+        data_root: None,
     },
     Family {
         family_id: "codebuddycn",
         display_name: "CodeBuddy CN",
         api_endpoint: "https://www.codebuddy.cn",
         platform: "ide",
+        refresh_source: "ide-main",
+        bare_billing_prefix: false,
+        intl: false,
+        local_auth_file: None,
+        data_root: None,
     },
     Family {
         family_id: "workbuddy",
         display_name: "WorkBuddy",
         api_endpoint: "https://copilot.tencent.com",
         platform: "workbuddy",
+        refresh_source: "plugin",
+        bare_billing_prefix: false,
+        intl: false,
+        local_auth_file: Some("workbuddy-desktop.info"),
+        data_root: Some(".workbuddy"),
+    },
+    Family {
+        family_id: "workbuddyai",
+        display_name: "WorkBuddy AI",
+        api_endpoint: "https://www.workbuddy.ai",
+        platform: "workbuddy-ai",
+        refresh_source: "plugin",
+        bare_billing_prefix: true,
+        intl: true,
+        local_auth_file: Some("workbuddy-desktop-ai.info"),
+        data_root: Some(".workbuddy-ai"),
     },
 ];
 
@@ -88,7 +158,23 @@ struct Pending {
     done: bool,
 }
 
-static PENDING: Mutex<Option<Pending>> = Mutex::new(None);
+/// One pending sign-in per family. A second scan for the SAME family
+/// replaces its predecessor (the user restarted the flow); scans for two
+/// different families must not invalidate each other — the earlier single
+/// slot made a CN scan silently kill an AI scan.
+static PENDING: LazyLock<Mutex<HashMap<&'static str, Pending>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
+
+/// Per-account refresh locks (`family:account_id`), so two concurrent
+/// refreshes for one account run once and the later caller reuses the
+/// rotated token instead of clobbering it with its own read-modify-write.
+static REFRESH_LOCKS: LazyLock<Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
+
+pub fn refresh_lock(key: String) -> Arc<tokio::sync::Mutex<()>> {
+    let mut locks = REFRESH_LOCKS.lock().unwrap_or_else(|e| e.into_inner());
+    locks.entry(key).or_default().clone()
+}
 
 fn http() -> reqwest::Client {
     crate::providers::http()
@@ -161,14 +247,17 @@ pub async fn start(family: &'static Family) -> Result<LoginStart, String> {
 
     let login_id = crate::oauth_util::random_b64url(16);
     let mut guard = PENDING.lock().map_err(|_| "login state poisoned".to_string())?;
-    *guard = Some(Pending {
-        login_id: login_id.clone(),
-        family,
-        state,
-        next_remote_poll: Instant::now(),
-        deadline: Instant::now() + LOGIN_TIMEOUT,
-        done: false,
-    });
+    guard.insert(
+        family.family_id,
+        Pending {
+            login_id: login_id.clone(),
+            family,
+            state,
+            next_remote_poll: Instant::now(),
+            deadline: Instant::now() + LOGIN_TIMEOUT,
+            done: false,
+        },
+    );
     Ok(LoginStart { login_id, auth_url })
 }
 
@@ -177,7 +266,7 @@ pub async fn poll(login_id: &str) -> LoginPoll {
         let Ok(mut guard) = PENDING.lock() else {
             return LoginPoll { done: false, label: None, error: Some("login state poisoned".into()) };
         };
-        let Some(p) = guard.as_mut().filter(|p| p.login_id == login_id) else {
+        let Some(p) = guard.values_mut().find(|p| p.login_id == login_id) else {
             return LoginPoll { done: false, label: None, error: Some("no pending sign-in".into()) };
         };
         let too_soon = Instant::now() < p.next_remote_poll;
@@ -275,6 +364,7 @@ pub async fn poll(login_id: &str) -> LoginPoll {
 
     let mut extra = serde_json::Map::new();
     extra.insert("uid".into(), Value::String(uid));
+    extra.insert("sourceKind".into(), Value::String("qr".into()));
     if !enterprise_id.is_empty() {
         extra.insert("enterpriseId".into(), Value::String(enterprise_id));
     }
@@ -283,6 +373,22 @@ pub async fn poll(login_id: &str) -> LoginPoll {
     }
     if let Some(d) = &domain {
         extra.insert("domain".into(), Value::String(d.clone()));
+    }
+
+    // Cross-variant isolation: an AI scan must never store a CN credential
+    // (or the reverse). An empty domain cannot be judged and is accepted.
+    if let Some(domain) = domain.as_deref() {
+        if !family.matches_domain(domain) {
+            finish(login_id);
+            return LoginPoll {
+                done: false,
+                label: None,
+                error: Some(format!(
+                    "{} sign-in returned a credential for a different product ({domain}) — not saved",
+                    family.display_name
+                )),
+            };
+        }
     }
 
     let poll_label = label.clone();
@@ -341,7 +447,7 @@ pub async fn refresh(
         .header("User-Agent", UA)
         .header("Authorization", format!("Bearer {access_token}"))
         .header("X-Refresh-Token", refresh_token)
-        .header("X-Auth-Refresh-Source", "ide-main");
+        .header("X-Auth-Refresh-Source", family.refresh_source);
     if let Some(d) = domain {
         req = req.header("X-Domain", d);
     }
@@ -362,9 +468,7 @@ pub async fn refresh(
 
 fn finish(login_id: &str) {
     if let Ok(mut guard) = PENDING.lock() {
-        if guard.as_ref().is_some_and(|p| p.login_id == login_id) {
-            *guard = None;
-        }
+        guard.retain(|_, p| p.login_id != login_id);
     }
 }
 
@@ -420,5 +524,62 @@ mod tests {
                 "{} missing from the provider catalog", family.family_id
             );
         }
+    }
+
+    #[test]
+    fn billing_paths_only_fall_back_for_the_intl_variant() {
+        let cn = known_family("workbuddy");
+        assert_eq!(
+            cn.billing_paths("/v2/billing/meter/get-user-resource"),
+            vec!["/v2/billing/meter/get-user-resource"]
+        );
+        let ide = known_family("codebuddy");
+        assert_eq!(
+            ide.billing_paths("/v2/billing/meter/get-user-resource"),
+            vec!["/v2/billing/meter/get-user-resource"]
+        );
+        let ai = known_family("workbuddyai");
+        assert_eq!(
+            ai.billing_paths("/v2/billing/meter/get-user-resource"),
+            vec![
+                "/billing/meter/get-user-resource",
+                "/v2/billing/meter/get-user-resource"
+            ]
+        );
+        // The web-summary path already sits at the root — one candidate.
+        assert_eq!(
+            ai.billing_paths("/billing/meter/get-user-resource-summary"),
+            vec![
+                "/billing/meter/get-user-resource-summary",
+                "/v2/billing/meter/get-user-resource-summary"
+            ]
+        );
+    }
+
+    #[test]
+    fn domain_matching_is_suffix_only_and_per_variant() {
+        let cn = known_family("workbuddy");
+        let ai = known_family("workbuddyai");
+        // Empty domains cannot be judged.
+        assert!(cn.matches_domain(""));
+        assert!(ai.matches_domain("  "));
+        // The AI variant accepts only the .workbuddy.ai product domain.
+        assert!(ai.matches_domain("www.workbuddy.ai"));
+        assert!(ai.matches_domain(" WWW.WORKBUDDY.AI "));
+        assert!(!ai.matches_domain("www.codebuddy.cn"));
+        assert!(!ai.matches_domain("www.workbuddy.ai.evil.com"));
+        // The CN variant rejects the AI suffix and accepts its own domains.
+        assert!(cn.matches_domain("www.workbuddy.cn"));
+        assert!(cn.matches_domain("www.codebuddy.cn"));
+        assert!(!cn.matches_domain("www.workbuddy.ai"));
+    }
+
+    #[test]
+    fn desktop_files_are_split_per_variant() {
+        assert_eq!(known_family("workbuddy").local_auth_file, Some("workbuddy-desktop.info"));
+        assert_eq!(known_family("workbuddyai").local_auth_file, Some("workbuddy-desktop-ai.info"));
+        assert_eq!(known_family("workbuddy").data_root, Some(".workbuddy"));
+        assert_eq!(known_family("workbuddyai").data_root, Some(".workbuddy-ai"));
+        assert_eq!(known_family("codebuddy").local_auth_file, None);
     }
 }

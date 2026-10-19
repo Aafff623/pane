@@ -455,6 +455,54 @@ changes.
   community + star history, license. Banners and screenshot strips from the
   pre-2026-10-04 layout remain gone.
 
+## CodeBuddy family v2 — WorkBuddy AI, channel provenance, local tokens (2026-10-19)
+
+- **Four family members, one table** (`codebuddy_login::FAMILIES`):
+  `codebuddy` (codebuddy.ai, platform `ide`), `codebuddycn`
+  (codebuddy.cn, `ide`), `workbuddy` (copilot.tencent.com, `workbuddy`, CN
+  build), `workbuddyai` (**www.workbuddy.ai**, platform **`workbuddy-ai`**,
+  WorkBuddy's INTERNATIONAL build — NOT CodeBuddy International).
+  `tests in codebuddy_login` assert every row is in `LOGIN_FAMILIES` and the
+  provider catalog, so a half-added member fails the harness.
+- **Variant differences** (upstream `workbuddy-switch` v0.1.62
+  `variant.rs`, verified against its source): AI billing lives under
+  `/billing/meter/...` first and only falls back to `/v2/billing/meter/...`
+  on HTTP 404; AI refresh needs `X-Auth-Refresh-Source: plugin` (without it
+  the vendor answers `invalid_grant` 12153); desktop auth files are
+  `workbuddy-desktop.info` (CN) vs `workbuddy-desktop-ai.info` (AI) in the
+  same directory; data roots are `~/.workbuddy` vs `~/.workbuddy-ai`.
+- **Isolation is enforced, not assumed.** A scan whose token `domain` does
+  not belong to the family (`workbuddy.ai` suffix = AI, everything else =
+  CN) is refused before it is stored. The web-cookie fallback is CN-only;
+  the AI card never borrows it.
+- **Scan state is per family** (`PENDING: HashMap<family_id, Pending>`), so
+  a CN scan can no longer kill an AI scan. Token refresh is single-flight
+  per `family:account_id`; a queued caller re-reads the store and reuses the
+  rotated pair instead of refreshing twice.
+- **Quota provenance.** Only non-default sources append a `Source` row
+  (`desktop app (read-only)` / `web session (explicit import)`); a Pane
+  login card stays clean. Multi-package credits (or a pack expiring within
+  7 days) get one row per live pack with remaining, expiry and a countdown;
+  an unparseable deadline prints `expiry unknown` rather than inventing one.
+- **Desktop sign-in import** (`workbuddy_import_desktop`): reads the
+  variant's plaintext auth store, upserts by uid into Pane's login store
+  (OS-vault-first) with `extra.sourceKind = "desktop"`, and never writes the
+  vendor file. `$wbEncrypted` is reported, never decrypted. The desktop
+  card is suppressed when a Pane login already owns the same uid, so one
+  account cannot yield two snapshots with one card id.
+- **Local token sources** (`spend.rs`): `~/.workbuddy/projects`,
+  `~/.workbuddy-ai/{projects,sessions}`, `~/.codebuddy/projects` — one
+  `workbuddy_line` parser for all three (three usage locations, input
+  includes cache read, reasoning already inside completion; verified on
+  real files 2026-10-19). They stay separate cards and never blend with the
+  credits ledger. Known limit: dedupe is per file (fingerprint), so a
+  byte-identical copy of a session file in another file would count twice.
+- **Not implemented on purpose**: official `get-user-request-usage`
+  ledgers (needs a verifiable account — probe plan in
+  `.scratch/workbuddy-family-v2/issues/09-official-request-usage.md`),
+  CodeBuddy IDE `history/index.json`, account switching, session copies,
+  check-ins, hooks, Agent Companion.
+
 ## 待确认
 
 - Qoder 国际版 (family `qoder`) 的 Windows 配置目录按命名惯例取

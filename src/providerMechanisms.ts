@@ -90,6 +90,7 @@ export const MECHANISMS: Record<string, Mechanism> = {
   "codebuddy": { credential: "oauth", limitsKey: "provider.limit.general", provides: ["Credits", "Reserved", "Cycle reset"], kind: "local", reads: ["Pane auth center"], hosts: ["www.codebuddy.ai"] },
   "codebuddycn": { credential: "oauth", limitsKey: "provider.limit.general", provides: ["Credits", "Reserved", "Cycle reset"], kind: "local", reads: ["Pane auth center"], hosts: ["www.codebuddy.cn"] },
   "workbuddy": { credential: "local", limitsKey: "provider.limit.workbuddy", provides: ["Credits", "Reserved", "Resource usage"], kind: "mixed", reads: ["%LOCALAPPDATA%/CodeBuddyExtension/Data/Public/auth/workbuddy-desktop.info", "Explicit Chrome Cookies import or pasted Cookie"], hosts: ["www.workbuddy.cn"] },
+  "workbuddyai": { credential: "local", limitsKey: "provider.limit.workbuddy", provides: ["Credits", "Reserved", "Resource usage"], kind: "mixed", reads: ["%LOCALAPPDATA%/CodeBuddyExtension/Data/Public/auth/workbuddy-desktop-ai.info", "Pane auth center (scan sign-in)"], hosts: ["www.workbuddy.ai"] },
   "windsurf": { credential: "oauth", limitsKey: "provider.limit.general", provides: ["Daily", "Weekly", "Overage"], kind: "local", reads: ["Pane auth center"], hosts: ["server.codeium.com"] },
   "mcode": { credential: "local", limitsKey: "provider.limit.ledger", provides: ["Local tokens", "Local spend"], kind: "local", reads: ["~/.minimax/v2/sqlite/runtime-state.sqlite", "~/.cc-switch/cc-switch.db"] },
 };

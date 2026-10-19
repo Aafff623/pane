@@ -29,6 +29,9 @@
 | Kimi Code | Kimi code home 下 `sessions/**/*.jsonl` | `usage.record` turn 桶 | Moonshot 前缀归一化 |
 | Antigravity IDE / CLI | `~/.gemini/antigravity*/conversations/*.db` | SQLite `gen_metadata` 中的 protobuf usage（1=system/2=input/3=output/5=cacheRead） | 按事件时间戳归属日（`steps.metadata`，field 1 = Timestamp；缺省降级摘要日期→库 mtime） |
 | Cursor IDE | 认证后的 usage-events CSV | 远端 CSV 的已汇总 token | 需要 Cursor 可用认证；本地无日志时属于运行时来源 |
+| WorkBuddy CN | `~/.workbuddy/projects/**/*.jsonl` | `message.usage` / `providerData.usage` / 顶层 `usage`；input 含 cache read | `subagents/` 排除；同一文件内按请求指纹去重（2026-10-19） |
+| WorkBuddy AI | `~/.workbuddy-ai/projects` + `sessions` | 同上 | 与 CN 分开成卡，绝不合并（2026-10-19） |
+| CodeBuddy CLI | `~/.codebuddy/projects/**/*.jsonl` | 同上 | 与 WorkBuddy 分开成卡；IDE 的 `history/index.json` 暂不在本轮（2026-10-19） |
 
 订阅额度 API、网页余额和服务端百分比不属于 token spend ledger；它们继续走 quota provider，不能拿百分比反推 token。
 
@@ -59,6 +62,21 @@
 - `detected`：本机发现对应 ledger 或日志入口；
 - `not_detected`：代码支持，但本机没有发现入口；
 - `runtime`：需要认证或网络请求，不能用本地文件存在性判断。
+
+### WorkBuddy / CodeBuddy 口径（2026-10-19）
+
+- 三种 usage 位置并存（`message.usage` camelCase、`providerData.usage`
+  snake_case、顶层 `usage`），以「存在 input 字段」为锚；input 为 0 仍有效。
+- **input 已包含 cache read**（实测 `inputTokens` 29751 / `cached_tokens`
+  15744），所以计价用 `input - cache_read` 作为 fresh input；总量 =
+  input + output + cache_write。
+- **reasoning 已包含在 completion 内**（实测 `reasoning_tokens` 52 <
+  `completion_tokens` 66），不再二次相加。
+- 去重：同一文件内按 `(timestamp,input,output,cache_read,cache_write,model)`
+  指纹；**跨文件副本暂不去重**（上游 token_stats 会做，Pane 此处按文件缓存
+  取舍，`subagents/` 目录整体排除）。这是已知限制，不是静默行为。
+- 账号归属：日志里没有 uid/email，按 **family 级**归卡（CN / AI / CLI
+  三张卡），不伪造账号级归因。
 
 这个清单只报告覆盖证据，不生成 token，也不把“发现文件”宣称成“所有请求都已记录”。后续收到新的 OpenCode Desktop 调研后，应先把它映射到上面的形态和契约，再决定是否新增解析器。
 

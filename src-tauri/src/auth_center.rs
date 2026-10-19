@@ -15,9 +15,9 @@ use crate::{antigravity_accounts, cursor_accounts};
 
 /// The families the auth center groups, in display order. "grok" is the
 /// xAI family id (its device-code flow lives in oauth.rs under that name).
-pub const AUTH_FAMILIES: [&str; 13] = [
+pub const AUTH_FAMILIES: [&str; 14] = [
     "antigravity", "codebuddy", "codebuddycn", "codex", "copilot", "cursor", "grok", "kiro", "qoder",
-    "trae", "windsurf", "workbuddy", "zed",
+    "trae", "windsurf", "workbuddy", "workbuddyai", "zed",
 ];
 
 #[derive(Serialize, Clone, Debug, PartialEq)]
@@ -38,6 +38,14 @@ pub struct AuthAccountRow {
     /// "slot" (antigravity capture) | "account" (cursor import) |
     /// "oauth" (Pane device-code login).
     pub kind: &'static str,
+    /// How this credential entered Pane: "qr" (scan sign-in) or "desktop"
+    /// (imported from the official client's read-only auth store). Only the
+    /// login stores carry it; other families omit the field.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source: Option<String>,
+    /// The vendor's enterprise tenant name, when the credential carries one.
+    #[serde(rename = "enterpriseName", skip_serializing_if = "Option::is_none")]
+    pub enterprise_name: Option<String>,
 }
 
 #[derive(Serialize, Clone, Debug, PartialEq)]
@@ -46,8 +54,17 @@ pub struct AuthFamilyGroup {
     pub accounts: Vec<AuthAccountRow>,
 }
 
-fn rows_for_family_from(base: &Path, family: &str) -> Vec<AuthAccountRow> {
-    match family {
+/// One non-secret string from a login account's `extra` blob, or None.
+fn extra_text(extra: &serde_json::Value, key: &str) -> Option<String> {
+    extra
+        .get(key)
+        .and_then(serde_json::Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+}
+
+fn rows_for_family_from(base: &Path, family: &str) -> Vec<AuthAccountRow> {    match family {
         "antigravity" => antigravity_accounts::load_slots_from(base)
             .iter()
             .map(|slot| AuthAccountRow {
@@ -57,6 +74,8 @@ fn rows_for_family_from(base: &Path, family: &str) -> Vec<AuthAccountRow> {
                 masked_key: antigravity_accounts::mask_token(&slot.refresh_token),
                 captured_at: Some(slot.captured_at).filter(|ts| *ts > 0),
                 kind: "slot",
+                source: None,
+                enterprise_name: None,
             })
             .collect(),
         "cursor" => cursor_accounts::load_accounts_from(base)
@@ -68,6 +87,8 @@ fn rows_for_family_from(base: &Path, family: &str) -> Vec<AuthAccountRow> {
                 masked_key: cursor_accounts::mask_token(&acct.access_token),
                 captured_at: Some(acct.captured_at).filter(|ts| *ts > 0),
                 kind: "account",
+                source: None,
+                enterprise_name: None,
             })
             .collect(),
         "codex" => crate::codex_accounts::load_with_imported_single_login_from(base)
@@ -79,9 +100,11 @@ fn rows_for_family_from(base: &Path, family: &str) -> Vec<AuthAccountRow> {
                 masked_key: crate::codex_accounts::mask_token(&login.access_token),
                 captured_at: Some(login.added_at).filter(|ts| *ts > 0),
                 kind: "account",
+                source: None,
+                enterprise_name: None,
             })
             .collect(),
-        "codebuddy" | "codebuddycn" | "workbuddy" | "copilot" | "grok" | "kiro"
+        "codebuddy" | "codebuddycn" | "workbuddy" | "workbuddyai" | "copilot" | "grok" | "kiro"
         | "qoder" | "trae" | "windsurf" | "zed" => {
             crate::login_accounts::load_with_imported_single_login_from(base, family)
                 .iter()
@@ -92,6 +115,8 @@ fn rows_for_family_from(base: &Path, family: &str) -> Vec<AuthAccountRow> {
                     masked_key: crate::login_accounts::mask_token(&login.access_token),
                     captured_at: Some(login.added_at).filter(|ts| *ts > 0),
                     kind: "account",
+                    source: extra_text(&login.extra, "sourceKind"),
+                    enterprise_name: extra_text(&login.extra, "enterpriseName"),
                 })
                 .collect()
         }
@@ -158,7 +183,11 @@ mod tests {
                     id_token: String::new(),
                     expires_at: String::new(),
                     added_at: 1_700_000_000,
-                    extra: serde_json::json!({ "uid": "uid-1" }),
+                    extra: serde_json::json!({
+                        "uid": "uid-1",
+                        "sourceKind": "qr",
+                        "enterpriseName": "Tencent"
+                    }),
                 }],
             )
             .expect("seed login");
@@ -169,7 +198,12 @@ mod tests {
             assert_eq!(group.accounts.len(), 1, "{family} must list its login");
             assert_eq!(group.accounts[0].label, "1aaac1cc");
             assert_eq!(group.accounts[0].kind, "account");
+            assert_eq!(group.accounts[0].source.as_deref(), Some("qr"));
+            assert_eq!(group.accounts[0].enterprise_name.as_deref(), Some("Tencent"));
         }
+        // The key-API families carry no channel metadata.
+        let antigravity = groups.iter().find(|g| g.family == "antigravity").unwrap();
+        assert!(antigravity.accounts.iter().all(|row| row.source.is_none()));
         let _ = std::fs::remove_dir_all(&base);
     }
 

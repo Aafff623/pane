@@ -1921,6 +1921,89 @@ fn workbuddy_web_clear() -> Result<(), String> {
     providers::workbuddy_web::clear()
 }
 
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DesktopImport {
+    label: String,
+    already_existed: bool,
+}
+
+/// Import the official desktop client's CURRENT sign-in as a Pane-managed
+/// account (explicit user action). Read-only on the vendor side: Pane reads
+/// the plaintext auth store, upserts the account into its own login store
+/// (vault-first) and never writes the vendor file. An encrypted store, a
+/// missing file, or a credential that belongs to the other WorkBuddy
+/// variant all fail with a readable error and change nothing.
+#[tauri::command]
+fn workbuddy_import_desktop(family: String) -> Result<DesktopImport, String> {
+    let f = codebuddy_login::family(&family)
+        .ok_or_else(|| format!("{family} has no desktop sign-in import"))?;
+    if f.local_auth_file.is_none() {
+        return Err(format!("{} has no desktop sign-in store", f.display_name));
+    }
+    let session = match providers::workbuddy_local::read_for(f) {
+        providers::workbuddy_local::LocalRead::Session(session) => *session,
+        providers::workbuddy_local::LocalRead::Encrypted => {
+            return Err(format!(
+                "{}'s desktop sign-in is encrypted at rest — Pane does not decrypt it. Sign in from the auth center instead.",
+                f.display_name
+            ))
+        }
+        providers::workbuddy_local::LocalRead::Missing => {
+            return Err(format!(
+                "No {} desktop sign-in found on this machine",
+                f.display_name
+            ))
+        }
+        providers::workbuddy_local::LocalRead::Unreadable(reason) => {
+            return Err(format!("{} desktop sign-in could not be read: {reason}", f.display_name))
+        }
+    };
+    if !f.matches_domain(&session.domain) {
+        return Err(format!(
+            "This desktop sign-in belongs to the other WorkBuddy product ({}) — not imported into {}",
+            session.domain, f.display_name
+        ));
+    }
+    let label = if !session.email.trim().is_empty() {
+        session.email.clone()
+    } else if !session.nickname.trim().is_empty() {
+        session.nickname.clone()
+    } else {
+        format!("{} — desktop app", f.display_name)
+    };
+    let already_existed = login_accounts::load(f.family_id)
+        .iter()
+        .any(|account| account.account_id == session.uid);
+    let mut extra = serde_json::json!({
+        "uid": session.uid,
+        "domain": session.domain,
+        "sourceKind": "desktop",
+    });
+    if !session.enterprise_id.trim().is_empty() {
+        extra["enterpriseId"] = serde_json::Value::String(session.enterprise_id.clone());
+    }
+    login_accounts::record_login(
+        f.family_id,
+        login_accounts::LoginAccount {
+            account_id: session.uid,
+            email: session.email,
+            label: label.clone(),
+            access_token: session.access_token,
+            refresh_token: session.refresh_token,
+            id_token: String::new(),
+            expires_at: session
+                .expires_at_ms
+                .and_then(chrono::DateTime::from_timestamp_millis)
+                .map(|at| at.to_rfc3339())
+                .unwrap_or_default(),
+            added_at: chrono::Utc::now().timestamp(),
+            extra,
+        },
+    )?;
+    Ok(DesktopImport { label, already_existed })
+}
+
 /// 基元律动 (tokenrhythm.studio) web-session login surface. The console's
 /// money endpoints reject the API key (verified 2026-10-19), so the user
 /// signs in inside a Pane-hosted webview and the session persists in
@@ -4221,6 +4304,11 @@ async fn workbuddy_login_start() -> Result<codebuddy_login::LoginStart, String> 
 }
 
 #[tauri::command]
+async fn workbuddyai_login_start() -> Result<codebuddy_login::LoginStart, String> {
+    codebuddy_login::start(codebuddy_login::known_family("workbuddyai")).await
+}
+
+#[tauri::command]
 async fn codebuddy_login_poll(login_id: String) -> codebuddy_login::LoginPoll {
     codebuddy_login::poll(&login_id).await
 }
@@ -4236,6 +4324,11 @@ async fn workbuddy_login_poll(login_id: String) -> codebuddy_login::LoginPoll {
 }
 
 #[tauri::command]
+async fn workbuddyai_login_poll(login_id: String) -> codebuddy_login::LoginPoll {
+    codebuddy_login::poll(&login_id).await
+}
+
+#[tauri::command]
 fn codebuddy_login_cancel(login_id: String) {
     codebuddy_login::cancel(&login_id);
 }
@@ -4247,6 +4340,11 @@ fn codebuddycn_login_cancel(login_id: String) {
 
 #[tauri::command]
 fn workbuddy_login_cancel(login_id: String) {
+    codebuddy_login::cancel(&login_id);
+}
+
+#[tauri::command]
+fn workbuddyai_login_cancel(login_id: String) {
     codebuddy_login::cancel(&login_id);
 }
 
@@ -5082,6 +5180,7 @@ pub fn run() {
             workbuddy_web_import_chrome,
             workbuddy_web_save_cookie,
             workbuddy_web_clear,
+            workbuddy_import_desktop,
             tokenrhythm_login_status,
             tokenrhythm_login,
             tokenrhythm_login_clear,
@@ -5157,6 +5256,9 @@ pub fn run() {
             workbuddy_login_start,
             workbuddy_login_poll,
             workbuddy_login_cancel,
+            workbuddyai_login_start,
+            workbuddyai_login_poll,
+            workbuddyai_login_cancel,
             windsurf_login_start,
             windsurf_login_poll,
             windsurf_login_cancel,

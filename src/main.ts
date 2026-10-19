@@ -7583,6 +7583,7 @@ const BROWSER_LOGIN_PROVIDERS = new Set([
   "trae",
   "windsurf",
   "workbuddy",
+  "workbuddyai",
   "zed",
 ]);
 
@@ -15092,6 +15093,10 @@ interface AuthAccountRow {
   maskedKey: string;
   capturedAt?: number;
   kind: "slot" | "account" | "oauth";
+  /// How the credential entered Pane: "qr" (scan sign-in) or "desktop"
+  /// (imported from the official client's read-only auth store).
+  source?: string;
+  enterpriseName?: string;
 }
 
 interface AuthFamilyGroup {
@@ -15113,6 +15118,9 @@ interface AuthFlow {
   userCode: string;
   error: string | null;
   label: string | null;
+  /** "login" (default) or "import" — the success line differs. */
+  kind?: "login" | "import";
+  alreadyExisted?: boolean;
   timer?: number;
 }
 const authFlows = new Map<string, AuthFlow>();
@@ -15310,6 +15318,9 @@ function authRowHtml(family: string, acct: AuthAccountRow, index: number): strin
     sub = `<div class="auth-sub reauth" title="${escapeHtml(reauth)}">${escapeHtml(reauth)}</div>`;
   } else {
     const details: string[] = [];
+    if (acct.source === "desktop") details.push(t("auth.source.desktop"));
+    else if (acct.source === "qr") details.push(t("auth.source.qr"));
+    if (acct.enterpriseName) details.push(acct.enterpriseName);
     if (acct.capturedAt) {
       const date = new Date(acct.capturedAt * 1000).toLocaleDateString(localeTag(), {
         year: "numeric",
@@ -15347,8 +15358,14 @@ function authFlowHtml(family: string): string {
     </div>`;
   }
   if (flow.phase === "success") {
+    const message =
+      flow.kind === "import"
+        ? t(flow.alreadyExisted ? "auth.importDesktopExists" : "auth.importDesktopDone", {
+            label: flow.label ?? "",
+          })
+        : t("auth.flow.success", { label: flow.label ?? "" });
     return `<div class="auth-flow" role="status">
-      <div class="auth-flow-head"><span>${escapeHtml(t("auth.flow.success", { label: flow.label ?? "" }))}</span></div>
+      <div class="auth-flow-head"><span>${escapeHtml(message)}</span></div>
     </div>`;
   }
   if (flow.phase === "browser") {
@@ -15390,10 +15407,17 @@ function authGroupHtml(group: AuthFamilyGroup): string {
     group.accounts.length > 0
       ? `<button class="mini-btn" type="button" data-auth-add="${escapeHtml(family)}">${escapeHtml(t("auth.addAccount"))}</button>`
       : "";
+  // WorkBuddy's desktop build keeps its own sign-in file; importing it is a
+  // read-only, explicit action (Pane's card switches to a managed account).
+  const importBtn =
+    family === "workbuddy" || family === "workbuddyai"
+      ? `<button class="mini-btn" type="button" data-auth-import-desktop="${escapeHtml(family)}">${escapeHtml(t("auth.importDesktop"))}</button>`
+      : "";
   return `<section class="st-block" data-auth-group="${escapeHtml(family)}">
     <div class="st-block-head auth-group-head">
       <span class="auth-group-icon" aria-hidden="true">${icon}</span>
       <h2>${escapeHtml(name)}</h2>
+      ${importBtn}
       ${addBtn}
     </div>
     <div class="st-card">${rows}${empty}${authFlowHtml(family)}</div>
@@ -15409,6 +15433,11 @@ function handleAuthCenterClick(target: HTMLElement): void {
   const add = target.closest<HTMLElement>("[data-auth-add]");
   if (add) {
     authAddAccount(add.dataset.authAdd!);
+    return;
+  }
+  const importDesktop = target.closest<HTMLElement>("[data-auth-import-desktop]");
+  if (importDesktop) {
+    void authImportDesktop(importDesktop.dataset.authImportDesktop!);
     return;
   }
   const menu = target.closest<HTMLElement>("[data-auth-menu]");
@@ -15449,6 +15478,41 @@ function handleAuthCenterClick(target: HTMLElement): void {
 
 /// "Add account" per family, riding the existing login chains — nothing
 /// here re-implements an OAuth flow.
+/// Import WorkBuddy's own desktop sign-in as a Pane-managed account. The
+/// backend never writes the vendor file; a failure (encrypted store, no
+/// file, wrong variant) reports through the same four-state flow block.
+async function authImportDesktop(family: string): Promise<void> {
+  if (authFlowBusy()) return;
+  authFlows.set(family, { phase: "starting", deviceAuthId: "", userCode: "", error: null, label: null });
+  renderAuthCenter();
+  try {
+    const result = await invoke<{ label: string; alreadyExisted: boolean }>(
+      "workbuddy_import_desktop",
+      { family },
+    );
+    authFlows.set(family, {
+      phase: "success",
+      deviceAuthId: "",
+      userCode: "",
+      error: null,
+      label: result.label,
+      kind: "import",
+      alreadyExisted: result.alreadyExisted,
+    });
+    await loadAuthCenter();
+    void refresh();
+  } catch (err) {
+    authFlows.set(family, {
+      phase: "error",
+      deviceAuthId: "",
+      userCode: "",
+      error: String(err),
+      label: null,
+    });
+    renderAuthCenter();
+  }
+}
+
 function authAddAccount(family: string): void {
   if (authFlowBusy()) return;
   if (family === "antigravity") {
