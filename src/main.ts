@@ -10410,30 +10410,6 @@ async function handleCustomizeClick(target: HTMLElement): Promise<boolean> {
     renderDrawerBody();
     return true;
   }
-  // 基元律动 web-session login: the window is where the user clears the
-  // captcha and SMS code; the session then lives in Pane's WebView2 profile.
-  if (target.closest<HTMLElement>("[data-tr-login]")) {
-    document.querySelector("#status")!.textContent = t("settings.trLoginWaiting");
-    try {
-      await invoke("tokenrhythm_login");
-      document.querySelector("#status")!.textContent = t("settings.trLoginDone");
-    } catch (error) {
-      document.querySelector("#status")!.textContent = t("settings.trLoginFailed", {
-        reason: String(error),
-      });
-    }
-    await refreshTokenrhythmLoginStatus();
-    renderSettingsProviderKeys();
-    return true;
-  }
-  if (target.closest<HTMLElement>("[data-tr-clear]")) {
-    try {
-      await invoke("tokenrhythm_login_clear");
-    } catch { /* nothing stored is the same outcome */ }
-    await refreshTokenrhythmLoginStatus();
-    renderSettingsProviderKeys();
-    return true;
-  }
   // One/New API site manager (relocated from Settings): expand/edit/delete
   // actions live inside the family row's account section.
   const onaHandled = handleOneNewApiClick(target);
@@ -13147,7 +13123,9 @@ function settingsKeyRow(family: string): HTMLElement {
   // 基元律动: the credential IS the web session, so the row's action is
   // the login window (and a clear when a session is on file). Must sit
   // BEFORE the non-key early return below — that return would otherwise
-  // skip the only control this family has.
+  // skip the only control this family has. The buttons wire themselves
+  // here: the settings panel is a separate window with its own DOM, so the
+  // customize drawer's click dispatcher never sees these clicks.
   if (family === "tokenrhythm") {
     const login = document.createElement("button");
     login.type = "button";
@@ -13155,14 +13133,38 @@ function settingsKeyRow(family: string): HTMLElement {
     login.textContent = trLoginStatus?.signed_in
       ? t("settings.trLoginAgain")
       : t("settings.trLogin");
-    login.setAttribute("data-tr-login", "");
+    login.addEventListener("click", () => {
+      if (login.disabled) return;
+      // The command returns only after the login window closes, so the
+      // button stays disabled for the whole wait.
+      login.disabled = true;
+      login.textContent = t("settings.trLoginWaiting");
+      void (async () => {
+        try {
+          await invoke("tokenrhythm_login");
+          settingsToast(t("settings.trLoginDone"));
+        } catch (error) {
+          settingsToast(t("settings.trLoginFailed", { reason: String(error) }), true);
+        }
+        await refreshTokenrhythmLoginStatus();
+        renderSettingsProviderKeys();
+      })();
+    });
     actions.append(login);
     if (trLoginStatus?.signed_in) {
       const clear = document.createElement("button");
       clear.type = "button";
       clear.className = "mini-btn";
       clear.textContent = t("settings.trClear");
-      clear.setAttribute("data-tr-clear", "");
+      clear.addEventListener("click", () => {
+        void (async () => {
+          try {
+            await invoke("tokenrhythm_login_clear");
+          } catch { /* nothing stored is the same outcome */ }
+          await refreshTokenrhythmLoginStatus();
+          renderSettingsProviderKeys();
+        })();
+      });
       actions.append(clear);
     }
     return item;
