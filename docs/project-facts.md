@@ -12,7 +12,7 @@ Single authorities for the neighbouring concerns:
   tracker, see [`docs/agents/issue-tracker.md`](agents/issue-tracker.md).
 - **Startup / build / run / acceptance commands** — [`docs/dev-startup.md`](dev-startup.md).
 
-Last reconciled: 2026-10-18 (Pane 0.8.6).
+Last reconciled: 2026-10-19 (Pane 0.8.6 + unreleased tokenrhythm/popover work).
 
 ## Scope and boundaries
 
@@ -73,7 +73,7 @@ Last reconciled: 2026-10-18 (Pane 0.8.6).
   `cargo +stable-x86_64-pc-windows-gnu`. The full Tauri binary cannot link
   locally as a `cdylib` (167k-export DLL). The committed crate-type is
   `["rlib"]` (desktop only). Unit tests run from repo-root `parse-tests/`
-  (879 passing, 13 ignored as of 2026-10-19; run with
+  (885 passing, 13 ignored as of 2026-10-19; run with
   `cargo +stable-x86_64-pc-windows-gnu test` and no proxy).
 - Dev runtime needs both processes: Vite `:1420` + `pane.exe` `:6736`. Never
   serve the frontend with Python `http.server` (permanent WebView2 cache
@@ -119,7 +119,7 @@ Last reconciled: 2026-10-18 (Pane 0.8.6).
 - MinGW-linked full app fails at process start → expected on this machine;
   use the parse-tests harness instead of fighting the linker.
 
-## Provider credential semantics (2026-10-03, three handoff providers)
+## Provider credential semantics (2026-10-03, three handoff providers; tokenrhythm added 2026-10-19)
 
 - **ClinePass** (`clinepass`): sk_ key, no expiry, no session. `GET
   api.cline.bot/api/v1/users/me/plan/usage-limits` → three rolling windows
@@ -152,6 +152,68 @@ Last reconciled: 2026-10-18 (Pane 0.8.6).
   surfaced reset is `subscription.expires_at` (the metric's own death).
   Error mapping trusts numeric `code` (documented stability contract),
   never message text.
+- **基元律动 / tokenrhythm** (`tokenrhythm`): a WEB-SESSION provider —
+  the `sk_tr_…` key authenticates ONLY the `/v1` model namespace; every
+  console endpoint that reports money (`/api/wallet/summary`,
+  `/api/api-keys/usage`, `/api/call-logs`) answers **401 to the key**
+  (verified 2026-10-19 against the live site with a real key). The console
+  authenticates by login session only — production is **cookie-only**
+  (the Bearer branch in its bundle is mock-only; the CSRF value is read
+  from the `tr_csrf` cookie and sent as `X-CSRF-Token`). So Pane hosts the
+  login itself: a Pane-owned webview window (`tr-login`) opens
+  `https://tokenrhythm.studio/login`, the human clears the SMS captcha, and
+  the session then lives in Pane's OWN WebView2 profile (persists across
+  restarts like a browser staying signed in). **WebView2's cookie manager
+  is the only channel** (`platform::read_webview_cookies` →
+  `ICoreWebView2Profile5::CookieManager`): the browser process holds the
+  profile's `Cookies` SQLite **locked with no share flags** for as long as
+  the app runs, so a file read fails outright, and the session value is
+  **httpOnly** so page script cannot see it either. The session header is
+  cached in the OS vault (scope `web/tokenrhythm`) and the console API is
+  called with reqwest; no cookie or token is ever written to Pane's JSON
+  files or logs.
+  - **"已登录" must be site-confirmed, never cookie-present.** The login
+    page drops its own first-party cookies (`_c_WBKFRo`, `tr_csrf`) BEFORE
+    anyone authenticates, so a cookie jar is not a session. `login()` asks
+    `/api/auth/me` (200 + envelope `code` 0) before returning Ok, and
+    `cache_profile_session` refuses to store an unconfirmed session. A
+    401 from the wallet call drops the dead session, so the row stops
+    claiming "signed in" without waiting for the next refresh.
+  - Response shapes of `/api/wallet/summary` were captured from the live
+    site on 2026-10-19 (owner's first login): the envelope is
+    `{code, message, data}` and the balance rides as the decimal string
+    `data.availableBalanceCny`. The parser still fails honestly with
+    `待确认` on an unrecognized shape instead of inventing numbers.
+  - Login-completion detection is Rust-side polling of `/api/auth/me` — the
+    login window is a REMOTE origin, and Tauri refuses app commands from a
+    remote webview by default ("not allowed"); granting the capability
+    would need an `AppManifest` in build.rs, which turns on ACL gating for
+    every command in the app (an unrelated command gets refused at once).
+  - The `tokenrhythm` family is a **web-session family**: its Customize row
+    carries a jump button (`data-session-jump`) that opens the settings
+    panel on that family's key row, because the sign-in control lives on
+    the key row rather than in the drawer.
+
+## Popover window chrome (2026-10-19)
+
+- The popover's own chrome lives in the total-spend card's head, left of
+  the daily-detail button (that row is always the first thing in view);
+  the panel-form window has a real frame and gets none.
+- Three config keys, all defaulting in `config_with_defaults` (Rust) and
+  mirrored in `FRONTEND_CONFIG_KEYS` (frontend): `popoverPin` (default
+  `true` = always-on-top), `popoverLock` (default `true` = re-center on
+  every summon, no dragging), `popoverPos` (`{x, y}` or null = the
+  position the user dragged to). `lastView` (the surface to restore on the
+  next summon) sits alongside them.
+- `popoverPin` is a WINDOW property the OS forgets on restart, so it is
+  re-applied on every summon from config; the drag region must likewise be
+  re-armed on the fresh DOM — and the cards are rebuilt from scratch on
+  every render, so the card-reorder grips' drag opt-outs are re-armed in
+  `renderDashboard`.
+- The three window permissions the chrome needs
+  (`allow-set-always-on-top`, `allow-center`, `allow-start-dragging`) are
+  declared in `src-tauri/capabilities/default.json` for the `main` and
+  `panel` windows only.
 
 ## Search/MCP quota system (2026-10-03, searchquota + keyvault unification)
 
