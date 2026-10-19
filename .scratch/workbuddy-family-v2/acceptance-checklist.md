@@ -23,8 +23,8 @@
 
 - [ ] 桌面/网页渠道的卡片末尾出现 `Source` 行，内容为 `desktop app (read-only)` 或 `web session (explicit import)`
 - [ ] 扫码账号的卡片没有多余的 `Source` 行
-- [ ] 有 2 个以上有效 credits 包时，逐包显示 `剩余/总量 left · expires …`，按到期时间升序
-- [ ] 某包 7 天内到期时，该行尾部出现 `expires in Nd`
+- [ ] 有多个有效 credits 包时只出现一行 `Packages` 汇总（数量 / 总剩余 / 最近到期），逐包行不刷屏
+- [ ] 某包 7 天内到期时，该包单独一行并带 `expires in Nd`（最多三行）
 - [ ] 只有一个包且不临期时，不出现额外包行
 - [ ] 企业账号（个人接口空列表）仍显示企业额度；`limitNum = -1` 显示 Unlimited
 

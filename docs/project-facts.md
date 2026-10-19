@@ -481,9 +481,12 @@ changes.
   rotated pair instead of refreshing twice.
 - **Quota provenance.** Only non-default sources append a `Source` row
   (`desktop app (read-only)` / `web session (explicit import)`); a Pane
-  login card stays clean. Multi-package credits (or a pack expiring within
-  7 days) get one row per live pack with remaining, expiry and a countdown;
-  an unparseable deadline prints `expiry unknown` rather than inventing one.
+  login card stays clean. Package detail is deliberately compact: a pack
+  expiring within 7 days gets its own row (at most three), and the rest
+  collapse into one summary row. Measured on the owner's real account
+  (2026-10-19): 13 live packs would have produced 13 rows; the compact form
+  shows one `Packages` row beside the `Credits` meter. An unparseable
+  deadline prints `expiry unknown` rather than inventing one.
 - **Desktop sign-in import** (`workbuddy_import_desktop`): reads the
   variant's plaintext auth store, upserts by uid into Pane's login store
   (OS-vault-first) with `extra.sourceKind = "desktop"`, and never writes the

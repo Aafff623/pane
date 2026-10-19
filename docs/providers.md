@@ -541,15 +541,16 @@ family is refused before it is stored.
   `POST /v2/billing/meter/get-user-resource`. Every call carries a browser
   User-Agent: the billing gateway answers `403` / `code 10085` without one.
 - **Shows:** a credits meter (used/total, countdown to the earliest future
-  cycle end, rendered in UTC+8), the plan name, and one text row per
-  resource pack when there are several live packs or one expires within
-  seven days (remaining / total / expiry / countdown; an unparseable
-  deadline reads `expiry unknown`). Packs count as credits when
-  `CapacityUnit` says so — and also when it is absent, since the older
-  shapes carried no unit at all. Unlimited plans read "Unlimited"; with no
-  total to meter against, the row degrades to plain credits left.
-  Enterprise members get an empty resource list from the personal endpoint,
-  so their usage is read from
+  cycle end, rendered in UTC+8), the plan name, and package detail only
+  where it adds information: a pack expiring within seven days gets its own
+  row (at most three), and all remaining live packs collapse into **one**
+  summary row (`13 packages · 2295 credits left · next expiry …`). A real
+  account can hold a dozen near-identical packs, so one row per pack would
+  bury the meter. Packs count as credits when `CapacityUnit` says so — and
+  also when it is absent, since the older shapes carried no unit at all.
+  Unlimited plans read "Unlimited"; with no total to meter against, the row
+  degrades to plain credits left. Enterprise members get an empty resource
+  list from the personal endpoint, so their usage is read from
   `POST /v2/billing/meter/get-enterprise-user-usage` — the same call the
   web dashboard's own `/profile/usage` page makes.
 - **Provenance:** a reading that did not come from a Pane-managed login

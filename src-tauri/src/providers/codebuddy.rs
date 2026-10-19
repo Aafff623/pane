@@ -963,46 +963,72 @@ fn package_details(packs: &[&Value], now_ms: i64) -> Vec<PackageDetail> {
         .collect()
 }
 
-/// Per-package rows, emitted only when the aggregate meter would hide
-/// something: two or more live packs, or at least one expiring within a
-/// week. Rows are ordered by expiry (unknown deadlines last).
+/// Package rows. Individual rows are reserved for packs that need
+/// attention (expiring within a week, at most three); everything else is
+/// folded into ONE summary row. A real WorkBuddy account can hold a dozen
+/// near-identical packs, and eleven rows would bury the meter they belong
+/// to.
 fn package_detail_rows(packs: &[&Value], now_ms: i64) -> Vec<Metric> {
     let mut details = package_details(packs, now_ms);
-    let soon = details.iter().any(|detail| {
-        detail
-            .expire_ms
-            .is_some_and(|expire| expire - now_ms <= EXPIRING_SOON_DAYS * 86_400_000)
-    });
-    if details.len() < 2 && !soon {
+    if details.is_empty() {
         return Vec::new();
     }
     details.sort_by_key(|detail| detail.expire_ms.unwrap_or(i64::MAX));
-    details
-        .into_iter()
+    let soon_count = details
+        .iter()
+        .take_while(|detail| {
+            detail
+                .expire_ms
+                .is_some_and(|expire| expire - now_ms <= EXPIRING_SOON_DAYS * 86_400_000)
+        })
+        .count()
+        .min(3);
+    if soon_count == 0 && details.len() < 2 {
+        return Vec::new();
+    }
+
+    let mut rows: Vec<Metric> = details
+        .iter()
+        .take(soon_count)
         .map(|detail| {
             let mut text = match detail.total {
                 Some(total) => format!("{:.0}/{:.0} left", detail.remain, total),
                 None => format!("{:.0} left", detail.remain),
             };
-            match detail.expire_ms {
-                Some(expire) => {
-                    text.push_str(&format!(
-                        " · expires {}",
-                        chrono::DateTime::from_timestamp_millis(expire)
-                            .map(|at| at.with_timezone(&chrono::Local).format("%Y-%m-%d %H:%M").to_string())
-                            .unwrap_or_else(|| "unknown".to_string())
-                    ));
-                    let left_ms = expire - now_ms;
-                    if left_ms <= EXPIRING_SOON_DAYS * 86_400_000 {
-                        let days = (left_ms.max(0) as f64 / 86_400_000.0).ceil() as i64;
-                        text.push_str(&format!(" · expires in {days}d"));
-                    }
-                }
-                None => text.push_str(" · expiry unknown"),
+            if let Some(expire) = detail.expire_ms {
+                text.push_str(&format!(
+                    " · expires {}",
+                    chrono::DateTime::from_timestamp_millis(expire)
+                        .map(|at| at.with_timezone(&chrono::Local).format("%Y-%m-%d %H:%M").to_string())
+                        .unwrap_or_else(|| "unknown".to_string())
+                ));
+                let days = ((expire - now_ms).max(0) as f64 / 86_400_000.0).ceil() as i64;
+                text.push_str(&format!(" · expires in {days}d"));
+            } else {
+                text.push_str(" · expiry unknown");
             }
             Metric::text(&detail.name, text)
         })
-        .collect()
+        .collect();
+
+    let rest = &details[soon_count..];
+    if !rest.is_empty() {
+        let remain: f64 = rest.iter().map(|detail| detail.remain).sum();
+        let mut text = format!("{} packages · {:.0} credits left", rest.len(), remain);
+        match rest.iter().filter_map(|detail| detail.expire_ms).min() {
+            Some(expire) => {
+                if let Some(at) = chrono::DateTime::from_timestamp_millis(expire) {
+                    text.push_str(&format!(
+                        " · next expiry {}",
+                        at.with_timezone(&chrono::Local).format("%Y-%m-%d %H:%M")
+                    ));
+                }
+            }
+            None => text.push_str(" · expiry unknown"),
+        }
+        rows.push(Metric::text("Packages", text));
+    }
+    rows
 }
 
 /// One resource pack row: its name plus whatever remaining/expiry
@@ -1373,7 +1399,7 @@ mod tests {
         let single = vec![&single_pack];
         assert!(package_detail_rows(&single, NOW_MS).is_empty());
 
-        // Two live packs: one row each, ordered by expiry.
+        // Two live packs collapse into ONE summary row, never two.
         let later = json!({
             "PackageName": "Later", "CycleCapacitySize": 100.0, "CycleCapacityRemain": 90.0,
             "CycleEndTime": "2026-03-01 00:00:00"
@@ -1383,12 +1409,14 @@ mod tests {
             "CycleEndTime": "2026-02-01 00:00:00"
         });
         let rows = package_detail_rows(&[&later, &sooner], NOW_MS);
-        assert_eq!(rows.len(), 2);
-        assert_eq!(rows[0].label, "Sooner");
-        assert_eq!(rows[1].label, "Later");
-        assert!(rows[0].value.as_deref().unwrap_or("").contains("20/200 left"));
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].label, "Packages");
+        let text = rows[0].value.as_deref().unwrap_or("");
+        assert!(text.contains("2 packages"), "{text}");
+        assert!(text.contains("110 credits left"), "{text}");
+        assert!(text.contains("next expiry"), "{text}");
 
-        // A single pack expiring within 7 days gets a countdown.
+        // A pack expiring within 7 days gets its own countdown row.
         let expiring_pack = json!({
             "PackageName": "Expiring", "CycleCapacitySize": 50.0, "CycleCapacityRemain": 10.0,
             "DeductionEndTime": 1_760_300_000_000i64 // ~3.5 days after NOW_MS
@@ -1396,7 +1424,23 @@ mod tests {
         let soon = vec![&expiring_pack];
         let rows = package_detail_rows(&soon, NOW_MS);
         assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].label, "Expiring");
         assert!(rows[0].value.as_deref().unwrap_or("").contains("expires in"));
+
+        // A dozen identical packs stay one summary row plus the expiring one.
+        let mut many = vec![expiring_pack.clone()];
+        for index in 0..11 {
+            many.push(json!({
+                "PackageName": "Bulk", "CycleCapacitySize": 10.0, "CycleCapacityRemain": 5.0,
+                "CycleEndTime": "2026-06-01 00:00:00", "index": index
+            }));
+        }
+        let refs: Vec<&Value> = many.iter().collect();
+        let rows = package_detail_rows(&refs, NOW_MS);
+        assert_eq!(rows.len(), 2, "one expiring row + one summary row");
+        assert_eq!(rows[0].label, "Expiring");
+        assert_eq!(rows[1].label, "Packages");
+        assert!(rows[1].value.as_deref().unwrap_or("").contains("11 packages"));
 
         // A spent pack contributes nothing.
         let spent_pack = json!({
