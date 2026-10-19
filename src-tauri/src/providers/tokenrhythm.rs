@@ -153,15 +153,19 @@ async fn extract_session(_app: &tauri::AppHandle) -> Option<(String, String)> {
     None
 }
 
-/// Caches whatever the profile currently holds. Called right after a login
-/// completes, and at the start of a login attempt so a session established
-/// in an earlier app version (or after a cache clear) is picked up without
-/// asking the user to sign in again.
+/// Caches whatever the profile currently holds — but only once the site
+/// confirms it is a real session. The login page sets its own first-party
+/// cookies (`_c_WBKFRo`, `tr_csrf`) before anyone signs in, and caching
+/// those made "already signed in" true for a browser that never logged in:
+/// the login window never opened and every wallet call answered 401.
 #[cfg(not(feature = "harness"))]
 async fn cache_profile_session(app: &tauri::AppHandle) -> bool {
     let Some((cookie, csrf)) = extract_session(app).await else {
         return false;
     };
+    if !session_live(&cookie, &csrf).await {
+        return false;
+    }
     let store = Store {
         cookie,
         csrf,
@@ -322,9 +326,11 @@ pub async fn snapshot_for(family_id: &str, display_name: &str) -> Snapshot {
             ),
         },
         Err(CallErr::Auth) => {
-            // The cached session is stale and there is no way to re-read the
-            // browser from here (no AppHandle in the dispatch table), so the
-            // honest answer is "sign in again".
+            // The site rejected the cached session — it is dead, not just
+            // unreadable from here. Drop it so the row stops claiming
+            // "signed in" and the next login attempt opens the window
+            // instead of trusting the corpse.
+            let _ = clear();
             Snapshot::no_credentials(family_id, display_name, SIGNED_OUT_HINT.into())
         }
         Err(CallErr::Other(reason)) => Snapshot::error(
@@ -372,16 +378,31 @@ async fn session_live(cookie: &str, csrf: &str) -> bool {
 /// content reach app commands when a capability names them — which would
 /// have turned on ACL gating for every command in the app.
 ///
+/// "Already signed in" is a claim the SITE has to confirm, never the mere
+/// presence of a cookie jar: the login page drops its own first-party
+/// cookies before anyone authenticates, and a cached session can also have
+/// expired since it was saved. Both cases must fall through to the window.
+///
 /// App-only: the parse-tests harness's `tauri` stub has no window builder,
 /// and the login window is meaningless there.
 #[cfg(not(feature = "harness"))]
 pub async fn login(app: &tauri::AppHandle) -> Result<(), String> {
     use tauri::Manager as _;
-    if load_store().cookie.trim().is_empty() {
-        cache_profile_session(app).await;
+    // 1. A cached session counts only while the site still accepts it.
+    let cached = load_store();
+    if !cached.cookie.trim().is_empty() {
+        if session_live(&cached.cookie, &cached.csrf).await {
+            return Ok(());
+        }
+        // Dead weight: drop it here so the row the user is looking at stops
+        // claiming "signed in" the moment they try to sign in.
+        let _ = clear();
     }
-    if !load_store().cookie.trim().is_empty() {
-        return Ok(()); // already signed in
+    // 2. The browser profile may hold a live session Pane has not cached
+    //    (signed in through the window in an earlier run, or the cache was
+    //    cleared). Pick it up instead of asking the user to sign in again.
+    if cache_profile_session(app).await {
+        return Ok(());
     }
     if let Some(w) = app.get_webview_window(LOGIN_WINDOW) {
         let _ = w.set_focus();
