@@ -38,3 +38,19 @@
 - #5 未验证请求级去重可行性前不改计费口径；不重构 spend.rs 其它路径。
 - 不新增治理文件/文档体系。
 - 不 push、不打 tag、不发版——本地 commit 后停下等 owner Review（AGENTS.md 发布授权门）。
+
+## 第三轮验收（2026-10-19，GitHub 源码 + CI 级，GPT 执行）
+
+结论：主要实现全部落地，四条修复项已补：
+- Site CI 失败根因=#5 改了 main.ts 但 demo 产物未重建（source.json 哈希
+  陈旧）→ 已重跑 build-demo.mjs 并提交产物
+- SECURITY.md「vault 拥有一切 secret」绝对化表述 + login_accounts.rs
+  链接多一级 ../ → 已修；privacy.md 同步核对
+- #5 两处准确性问题：① 比较未剥除 MiniMax/qwen/kimi，跨厂商覆盖差异
+  会误报为 Claude 少计 → 两侧同剥后比较；② 徽章天数未按 UI 视图
+  （今/昨/7天/30天/全部）过滤 → 后端按视图分桶（SpendWindowDays），
+  前端三处调用点穿线
+- #6 测试注释仍称「文件轮询」→ 已改为 await JoinHandle 的实况描述
+
+遗留（未做，不阻塞）：billing_in_flight 极端并行负载 artifact（预先
+存在）；Windows 实机 UI 与真实 cc-switch 账单的端到端验收归 owner。

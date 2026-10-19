@@ -73,7 +73,7 @@ Last reconciled: 2026-10-18 (Pane 0.8.6).
   `cargo +stable-x86_64-pc-windows-gnu`. The full Tauri binary cannot link
   locally as a `cdylib` (167k-export DLL). The committed crate-type is
   `["rlib"]` (desktop only). Unit tests run from repo-root `parse-tests/`
-  (878 passing, 13 ignored as of 2026-10-19; run with
+  (879 passing, 13 ignored as of 2026-10-19; run with
   `cargo +stable-x86_64-pc-windows-gnu test` and no proxy).
 - Dev runtime needs both processes: Vite `:1420` + `pane.exe` `:6736`. Never
   serve the frontend with Python `http.server` (permanent WebView2 cache

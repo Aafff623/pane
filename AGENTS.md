@@ -125,7 +125,7 @@ facts, constraints and failure modes → [`docs/project-facts.md`](docs/project-
  $env:PATH = "D:\Tools\mingw64\bin;$env:PATH"
  cargo +stable-x86_64-pc-windows-gnu test
  ```
- The harness compiles the real `src-tauri/src` files via `#[path]` plus a `tauri-stub` crate (878 passing, 13 ignored as of 2026-10-19 — current counts live in [`docs/project-facts.md`](docs/project-facts.md), the engineering-facts authority). It used to live under `src-tauri/target/parse-tests`, where `cargo clean` eventually ate it; it is tracked at the repo root now.
+ The harness compiles the real `src-tauri/src` files via `#[path]` plus a `tauri-stub` crate (879 passing, 13 ignored as of 2026-10-19 — current counts live in [`docs/project-facts.md`](docs/project-facts.md), the engineering-facts authority). It used to live under `src-tauri/target/parse-tests`, where `cargo clean` eventually ate it; it is tracked at the repo root now.
 4. **UI acceptance is done by the user personally.** Agents deliver build/test evidence plus a short acceptance checklist — never claim "done and verified" from code reading alone.
 5. Non-trivial changes get a code-review pass plus a redundancy/simplifier scan before delivery, then re-test.
 6. **Release authorization gate** — local implementation and validation must finish first; the user must personally perform UI acceptance and give explicit authorization in the conversation. Until both conditions are present, do not create a release, tag, commit, or push. A build, port check, screenshot, or agent opinion is not user acceptance.
