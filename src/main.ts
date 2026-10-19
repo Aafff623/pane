@@ -133,8 +133,18 @@ interface ProviderSpend {
   unpriced: number;
   unpriced_models: string[];
   estimated?: boolean;
-  cc_sourced_days?: number;
-  likely_undercount_days?: number;
+  cc_sourced_days?: SpendWindowDays;
+  likely_undercount_days?: SpendWindowDays;
+}
+
+/// Day counts per spend view, so a marker never quotes a wider range than
+/// the numbers beside it (Today / Yesterday / 7d / 30d / all).
+interface SpendWindowDays {
+  today: number;
+  yesterday: number;
+  d7: number;
+  d30: number;
+  all: number;
 }
 
 interface HistorySpend {
@@ -206,19 +216,20 @@ type SpendTab = "today" | "yesterday" | "last30";
 /// blends (Qoder CN), "low? ×N" for days the local logs likely outcount the
 /// ledger (a suspected undercount), else "cc-switch ×N" for days taken from
 /// the cc-switch ledger alone (provenance — the local same-day rows are
-/// discarded so no request counts twice).
-function spendBadgesFor(id: string): string {
+/// discarded so no request counts twice). Counts are per spend view, so the
+/// number always matches the window the row belongs to.
+function spendBadgesFor(id: string, view: ShareRange): string {
   const sp = lastSpend.find((s) => s.id === id);
   if (!sp) return "";
   let out = "";
   if (sp.estimated) {
     out += `<span class="est-badge" title="${escapeHtml(t("spend.estimateTip"))}">${escapeHtml(t("spend.estimate"))}</span>`;
   }
-  const low = sp.likely_undercount_days ?? 0;
+  const low = sp.likely_undercount_days?.[view] ?? 0;
   if (low) {
     out += `<span class="est-badge low-badge" title="${escapeHtml(t("spend.undercountTip", { n: low }))}">${escapeHtml(t("spend.undercount"))} ×${low}</span>`;
   } else {
-    const n = sp.cc_sourced_days ?? 0;
+    const n = sp.cc_sourced_days?.[view] ?? 0;
     if (n) {
       out += `<span class="est-badge cc-badge" title="${escapeHtml(t("spend.ccSourcedTip", { n }))}">${escapeHtml(t("spend.ccSourced"))} ×${n}</span>`;
     }
@@ -3434,7 +3445,7 @@ function donutPop(g: { a0: number; a1: number }): { tx: string; ty: string } {
   return { tx: `${(2.5 * Math.sin(mid)).toFixed(2)}px`, ty: `${(-2.5 * Math.cos(mid)).toFixed(2)}px` };
 }
 
-function legendRowHtml(e: DonutEntry): string {
+function legendRowHtml(e: DonutEntry, view: ShareRange): string {
   const detail = e.activeDays === undefined ? "" : ` <span class="legend-detail">${escapeHtml(t("spend.activeDays", { n: e.activeDays }))}</span>`;
   const icon = providerVisual(e.s.id)?.iconSvg;
   const lead = icon
@@ -3443,7 +3454,7 @@ function legendRowHtml(e: DonutEntry): string {
   return `
         <div class="legend-row" data-pid="${e.s.id}">
           ${lead}
-          <span class="legend-name">${escapeHtml(e.s.name)}${spendBadgesFor(e.s.id)}${detail}</span>
+          <span class="legend-name">${escapeHtml(e.s.name)}${spendBadgesFor(e.s.id, view)}${detail}</span>
           <span class="legend-val">${fmtSpendVal(e.w)}</span>
         </div>`;
 }
@@ -3464,6 +3475,14 @@ function showSpendPop(anchor: HTMLElement): void {
   const live = byModel ? modelDonutEntries(spendTab) : donutEntries(spendTab);
   const ranged = byModel ? modelEntriesForRange(rangeTab) : donutEntriesForRange(rangeTab);
   const entry = (rangeSelected ? ranged : live).find((e) => e.s.id === pid);
+  // The popover mirrors whichever column the row lives in: the range
+  // column when a 7d/30d/all tab is active, else the left column (which
+  // falls back to today when last30 keeps the ring on the right).
+  const view: ShareRange = rangeSelected
+    ? rangeTab
+    : spendTab === "yesterday"
+      ? "yesterday"
+      : "today";
   hideSpendPop();
   if (!entry) return;
   const lead = (id: string, colorId = id) => {
@@ -3481,7 +3500,7 @@ function showSpendPop(anchor: HTMLElement): void {
   const el = document.createElement("div");
   el.className = "spend-pop";
   el.innerHTML = `
-    <div class="spend-pop-head">${lead(entry.s.id)}<span class="spend-pop-name">${escapeHtml(entry.s.name)}${spendBadgesFor(entry.s.id)}</span></div>
+    <div class="spend-pop-head">${lead(entry.s.id)}<span class="spend-pop-name">${escapeHtml(entry.s.name)}${spendBadgesFor(entry.s.id, view)}</span></div>
     <div class="spend-pop-val">${escapeHtml(fmtMoney(entry.w.cost))} · ${escapeHtml(fmtTokens(entry.w.tokens))}</div>
     ${parts ? `<div class="spend-pop-sep"></div>${parts}` : ""}`;
   document.body.appendChild(el);
@@ -3706,7 +3725,7 @@ function renderTotalSpend(): string {
         </div>
         ${colTotalHtml({ ...emptyWindow(), ...totals, models: [] })}
         <div class="legend">
-          ${shown.map((e) => legendRowHtml(e)).join("")}
+          ${shown.map((e) => legendRowHtml(e, rangeTab)).join("")}
           ${overflow > 0 ? `<div class="legend-row more">+${overflow}</div>` : ""}
         </div>
       </div>`;
@@ -3730,7 +3749,7 @@ function renderTotalSpend(): string {
         </div>
         ${colTotalHtml({ ...emptyWindow(), ...leftTotals, models: [] })}
         <div class="legend">
-          ${leftShown.map((e) => legendRowHtml(e)).join("")}
+          ${leftShown.map((e) => legendRowHtml(e, leftTab)).join("")}
           ${leftOverflow > 0 ? `<div class="legend-row more">+${leftOverflow}</div>` : ""}
         </div>
       </div>`;
@@ -6354,7 +6373,7 @@ async function shareSpendEnvelope(range: ShareRange): Promise<void> {
     const rows = shown
       .map((e) => {
         const pct = denom > 0 ? Math.max(2, Math.round((metricVal(e.w) / denom) * 100)) : 0;
-        return `<div class="envelope-row">${lead(e.s.id)}<span class="envelope-name">${escapeHtml(e.s.name)}${spendBadgesFor(e.s.id)}</span><span class="envelope-bar" aria-hidden="true"><i style="width:${pct}%;background:${spendColor(e.s.id)}"></i></span><span class="envelope-val">${escapeHtml(fmtSpendVal(e.w))}</span></div>`;
+        return `<div class="envelope-row">${lead(e.s.id)}<span class="envelope-name">${escapeHtml(e.s.name)}${spendBadgesFor(e.s.id, range)}</span><span class="envelope-bar" aria-hidden="true"><i style="width:${pct}%;background:${spendColor(e.s.id)}"></i></span><span class="envelope-val">${escapeHtml(fmtSpendVal(e.w))}</span></div>`;
       })
       .join("");
     const body = entries.length

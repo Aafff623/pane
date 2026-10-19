@@ -61,26 +61,58 @@ pub struct ProviderSpend {
     /// all-zero usage into its local session logs). The UI flags such rows.
     #[serde(default)]
     pub estimated: bool,
-    /// Days of THIS card's data whose numbers come from cc-switch alone.
-    /// On a day the ledger covers, the local scan's rows are discarded (the
-    /// day-granular cut) so no request counts twice — the two sources share
-    /// no row-level identity: cc-switch's `proxy_request_logs` carries its
-    /// own `request_id`/`session_id` (a session-granularity id cannot split
-    /// the direct/proxied mix inside one session), and the >30-day
-    /// `usage_daily_rollups` rows carry no id at all. The count is a
-    /// provenance fact (single-source days), NOT a claim that those days
-    /// are incomplete: cc-switch also imports the same local session logs
+    /// Days of THIS card's data whose numbers come from cc-switch alone,
+    /// per spend view (the UI's Today / Yesterday / 7d / 30d / all), so a
+    /// badge never quotes a wider range than the numbers beside it. On a
+    /// day the ledger covers, the local scan's rows are discarded (the
+    /// day-granular cut) so no request counts twice — the two sources
+    /// share no row-level identity: cc-switch's `proxy_request_logs`
+    /// carries its own `request_id`/`session_id` (a session-granularity id
+    /// cannot split the direct/proxied mix inside one session), and the
+    /// >30-day `usage_daily_rollups` rows carry no id at all. The count is
+    /// a provenance fact, NOT a claim that those days are incomplete:
+    /// cc-switch also imports the same local session logs
     /// (`data_source = session_log`), so overlap is its normal state
     /// (2026-10-19, GitHub #5 second review).
     #[serde(default)]
-    pub cc_sourced_days: u32,
+    pub cc_sourced_days: SpendWindowDays,
     /// Days where the local Claude scan holds more tokens than the
     /// cc-switch ledger shows for the same day — the cut keeps the ledger's
     /// (lower) number, so those days likely undercount what the local logs
     /// contain (see `likely_undercount_days`). A suspicion marker, not a
-    /// measurement; the UI badges it ahead of the provenance count.
+    /// measurement; per spend view like `cc_sourced_days`.
     #[serde(default)]
-    pub likely_undercount_days: u32,
+    pub likely_undercount_days: SpendWindowDays,
+}
+
+/// Day counts per spend view. The spend panel shows Today / Yesterday /
+/// 7d / 30d / all, and a marker that quoted a different range than the
+/// numbers beside it would mislead — so each view gets its own count.
+#[derive(Default, Clone, Serialize)]
+pub struct SpendWindowDays {
+    pub today: u32,
+    pub yesterday: u32,
+    pub d7: u32,
+    pub d30: u32,
+    pub all: u32,
+}
+
+impl SpendWindowDays {
+    /// Bucket a flagged-day set into the five views. `d7`/`d30` are
+    /// trailing windows ending today; `all` is the whole history.
+    fn of(days: &HashSet<i32>) -> Self {
+        let today = Local::now().date_naive().num_days_from_ce();
+        let between = |from: i32, to: i32| {
+            days.iter().filter(|d| **d >= from && **d <= to).count() as u32
+        };
+        SpendWindowDays {
+            today: between(today, today),
+            yesterday: between(today - 1, today - 1),
+            d7: between(today - 6, today),
+            d30: between(today - 29, today),
+            all: days.len() as u32,
+        }
+    }
 }
 
 impl ProviderSpend {
@@ -614,8 +646,8 @@ fn build_spend(id: impl Into<String>, name: impl Into<String>, data: FileData) -
         unpriced: data.unpriced.values().sum(),
         unpriced_models,
         estimated: false,
-        cc_sourced_days: 0,
-        likely_undercount_days: 0,
+        cc_sourced_days: SpendWindowDays::default(),
+        likely_undercount_days: SpendWindowDays::default(),
     };
     let mut models: [HashMap<String, (f64, f64)>; 3] =
         [HashMap::new(), HashMap::new(), HashMap::new()];
@@ -1144,18 +1176,17 @@ fn split_kimi_routed(all: &mut FileData) -> FileData {
 
 /// Distinct days of `data` that cc-switch covers — days this card takes
 /// from the ledger alone (the local scan's same-day rows were cut so no
-/// request counts twice). A provenance count, NOT a completeness claim:
+/// request counts twice). A provenance fact, NOT a completeness claim:
 /// the ledger also imports the same local session logs
 /// (`data_source = session_log`), so a covered day is cc-switch's normal
 /// state, not evidence of missed direct traffic. Distinct days only — the
 /// day map is keyed by (day, model).
-fn cc_sourced_days(data: &FileData, cc_days: &HashSet<i32>) -> u32 {
+fn cc_sourced_days(data: &FileData, cc_days: &HashSet<i32>) -> HashSet<i32> {
     data.days
         .keys()
         .map(|(day, _)| *day)
         .filter(|day| cc_days.contains(day))
-        .collect::<HashSet<_>>()
-        .len() as u32
+        .collect()
 }
 
 /// Per-day token totals (the day map is keyed by (day, model); both sides
@@ -1170,14 +1201,17 @@ fn day_token_totals(data: &FileData) -> HashMap<i32, f64> {
 }
 
 /// Days where the local Claude scan holds MORE tokens than the cc-switch
-/// ledger shows for the same day. The day-granular cut discards the local
-/// rows on ledger-covered days, so a shortfall means the card's number for
-/// that day is lower than the local logs contain — cc-switch's session
-/// import missing records, or its own session-dedup dropping them. A
-/// LIKELY-undercount marker, not proof, which is why the comparison is
-/// one-way: the ledger legitimately EXCEEDS the local scan when a relay
-/// zeroed the CLI logs (the whole reason the ledger is primary), and only
-/// the excess direction is flagged.
+/// ledger shows for the same day. Callers pass Claude-attributed data on
+/// BOTH sides (MiniMax/qwen/Kimi-routed rows stripped exactly as the
+/// card's final data will be) — otherwise another vendor's coverage gap
+/// would read as a Claude undercount. The day-granular cut discards the
+/// local rows on ledger-covered days, so a shortfall means the card's
+/// number for that day is lower than the local logs contain — cc-switch's
+/// session import missing records, or its own session-dedup dropping
+/// them. A LIKELY-undercount marker, not proof, which is why the
+/// comparison is one-way: the ledger legitimately EXCEEDS the local scan
+/// when a relay zeroed the CLI logs (the whole reason the ledger is
+/// primary), and only the excess direction is flagged.
 ///
 /// Thresholds are a judgment call (tunable, owner-adjustable at review):
 /// the relative margin absorbs rounding, in-flight session writes and
@@ -1186,7 +1220,7 @@ fn day_token_totals(data: &FileData) -> HashMap<i32, f64> {
 const UNDERCOUNT_RELATIVE_MARGIN: f64 = 0.10;
 const UNDERCOUNT_ABSOLUTE_FLOOR: f64 = 2_000.0;
 
-fn likely_undercount_days(local: &FileData, cc: &FileData) -> u32 {
+fn likely_undercount_days(local: &FileData, cc: &FileData) -> HashSet<i32> {
     let ledger = day_token_totals(cc);
     let mut flagged = HashSet::new();
     for (day, local_total) in day_token_totals(local) {
@@ -1199,7 +1233,7 @@ fn likely_undercount_days(local: &FileData, cc: &FileData) -> u32 {
             flagged.insert(day);
         }
     }
-    flagged.len() as u32
+    flagged
 }
 
 /// Claude Code writes one JSONL per session under ~/.claude/projects. Each
@@ -1233,12 +1267,19 @@ fn claude(extra: FileData, cc: FileData, cc_days: &HashSet<i32>) -> (ProviderSpe
         let data = file_days(&file, &mut |line, data| claude_line(&mut state, line, data));
         merge_data(&mut all, data);
     }
-    // On a cc-switch-covered day the local rows are discarded (the cut
-    // below), so the card's numbers for that day come from the ledger
-    // alone; the counts are recorded after the splits, on this card's final
-    // day set (GitHub #5). The undercount comparison must see the local
-    // rows before the cut removes them.
-    let undercount = likely_undercount_days(&all, &cc);
+    // Compare Claude-attributed usage only. The ledger logs MiniMax/qwen/
+    // Kimi-routed turns under the claude app too, and the local scan sees
+    // its own — if the two sides cover those other vendors differently, a
+    // day would flag on THEIR gap, not Claude's. Both sides are therefore
+    // stripped exactly the way the card's final data will be.
+    let mut local_claude = all.clone();
+    let mut cc_claude = cc.clone();
+    for side in [&mut local_claude, &mut cc_claude] {
+        split_models(side, "MiniMax");
+        split_models(side, "qwen");
+        split_kimi_routed(side);
+    }
+    let undercount = likely_undercount_days(&local_claude, &cc_claude);
     retain_days(&mut all, |day| !cc_days.contains(&day));
     // Usage from other scanners that belongs on this card (pi sessions
     // driving a Claude account) joins before the splits below, so it gets
@@ -1253,10 +1294,10 @@ fn claude(extra: FileData, cc: FileData, cc_days: &HashSet<i32>) -> (ProviderSpe
     // Kimi slugs likewise mean Moonshot billed the session (Anthropic-
     // compatible endpoint or a router) — Kimi's card owns those dollars.
     let kimi_routed = split_kimi_routed(&mut all);
-    let cc_days_on_card = cc_sourced_days(&all, cc_days);
+    let cc_days_on_card = SpendWindowDays::of(&cc_sourced_days(&all, cc_days));
     let mut sp = build_spend("claude", "Claude", all);
     sp.cc_sourced_days = cc_days_on_card;
-    sp.likely_undercount_days = undercount;
+    sp.likely_undercount_days = SpendWindowDays::of(&undercount);
     (sp, minimax, qwen_via_aihubmix, kimi_routed)
 }
 
@@ -4260,13 +4301,30 @@ mod tests {
         local.days.insert((101, "sonnet".into()), (3.0, 30.0));
         local.days.insert((102, "sonnet".into()), (4.0, 40.0)); // local-only day
         let cc_days: HashSet<i32> = [100, 101].into_iter().collect();
-        assert_eq!(cc_sourced_days(&local, &cc_days), 2);
+        assert_eq!(cc_sourced_days(&local, &cc_days).len(), 2);
         // A day only cc-switch covers never reaches this card's data (the
         // cut keeps it out until the ledger's own rows merge in), and an
         // empty scan flags nothing.
         let cc_elsewhere: HashSet<i32> = [103].into_iter().collect();
-        assert_eq!(cc_sourced_days(&local, &cc_elsewhere), 0);
-        assert_eq!(cc_sourced_days(&FileData::default(), &cc_days), 0);
+        assert_eq!(cc_sourced_days(&local, &cc_elsewhere).len(), 0);
+        assert_eq!(cc_sourced_days(&FileData::default(), &cc_days).len(), 0);
+    }
+
+    /// The badge's day count must match the spend view beside it: a wider
+    /// range quoted next to a narrow window misleads (2026-10-19 review).
+    #[test]
+    fn spend_window_days_buckets_a_flagged_set_by_view() {
+        let today = Local::now().date_naive().num_days_from_ce();
+        let days: HashSet<i32> = [today, today - 1, today - 3, today - 10, today - 40]
+            .into_iter()
+            .collect();
+        let w = SpendWindowDays::of(&days);
+        assert_eq!(w.today, 1);
+        assert_eq!(w.yesterday, 1);
+        assert_eq!(w.d7, 3); // today, -1, -3
+        assert_eq!(w.d30, 4); // + -10
+        assert_eq!(w.all, 5); // + -40 (outside the 30-day trend window)
+        assert_eq!(SpendWindowDays::of(&HashSet::new()).all, 0);
     }
 
     /// The likely-undercount marker fires only on a clear local excess over
@@ -4286,10 +4344,10 @@ mod tests {
         cc.days.insert((101, "sonnet".into()), (1.0, 40_000.0));
         cc.days.insert((102, "sonnet".into()), (1.0, 10_000.0));
         // Day 100: 18k local vs 10k ledger (excess 8k > 2k floor, > 10%) → flag.
-        assert_eq!(likely_undercount_days(&local, &cc), 1);
+        assert_eq!(likely_undercount_days(&local, &cc).len(), 1);
         // Empty either side flags nothing.
-        assert_eq!(likely_undercount_days(&local, &FileData::default()), 0);
-        assert_eq!(likely_undercount_days(&FileData::default(), &cc), 0);
+        assert_eq!(likely_undercount_days(&local, &FileData::default()).len(), 0);
+        assert_eq!(likely_undercount_days(&FileData::default(), &cc).len(), 0);
     }
 
     /// Codex/opencode/grok's merge rule: Pane stays primary — a cc-switch
