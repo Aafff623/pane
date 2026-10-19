@@ -125,6 +125,17 @@ pub fn load_from(base: &Path, family: &str) -> Vec<LoginAccount> {
 /// persisted JSON; entries the vault refused keep their plaintext (the
 /// fallback keeps working). Vault slots of cards that left the list are
 /// removed so a deleted account leaves nothing behind.
+///
+/// Ordering is the data-safety property (2026-10-18, GitHub #3): the old
+/// file's slot list is snapshotted before it is replaced, but the slots
+/// themselves are only dropped AFTER the new file is durably on disk. A
+/// failed write therefore leaves the old file and every old vault slot
+/// intact — the next load still returns every account with its tokens. A
+/// vault write that lands before a failed file write can leave a slot the
+/// file does not list yet; the next successful save reconciles it — that
+/// reconciliation assumes the same account list is retried, so a retry
+/// with a SMALLER list than the failed save leaves the dropped card's slot
+/// orphaned (an invisible credential in the OS vault — hygiene, not loss).
 pub fn save_to(base: &Path, family: &str, accounts: &[LoginAccount]) -> Result<(), String> {
     let mut rows: Vec<LoginAccount> = accounts.to_vec();
     let keep_scopes: Vec<String> = rows
@@ -146,22 +157,32 @@ pub fn save_to(base: &Path, family: &str, accounts: &[LoginAccount]) -> Result<(
             row.id_token.clear();
         }
     }
-    // GC: drop vault slots for cards no longer in the file.
-    for old in parse_accounts(
+    // Snapshot the slots the OLD file still owns while it is still readable;
+    // the GC below runs only once the replacement file is durable.
+    let stale_scopes: Vec<String> = parse_accounts(
         &std::fs::read_to_string(accounts_file(base, family)).unwrap_or_default(),
-    ) {
-        let scope = vault_scope(family, &old);
-        if !keep_scopes.contains(&scope) {
-            crate::secretstore::remove(&crate::secretstore::token_key(&scope));
-        }
-    }
+    )
+    .into_iter()
+    .map(|old| vault_scope(family, &old))
+    .filter(|scope| !keep_scopes.contains(scope))
+    .collect();
     std::fs::create_dir_all(base.join("login-accounts"))
         .map_err(|e| format!("create login-accounts dir: {e}"))?;
-    crate::accounts::write_json_atomic(
-        &accounts_file(base, family),
-        serde_json::to_string_pretty(&rows).unwrap_or_default(),
-    )
-    .map_err(|e| format!("write {family} login accounts: {e}"))
+    // A serialization failure must surface BEFORE anything is written: the
+    // old `unwrap_or_default()` would have persisted an empty file (every
+    // account gone from the file) and then let the GC below wipe the vault
+    // slots — total loss. Practically unreachable (all String/Value
+    // fields), but the failure mode is unacceptable, so it is a hard error.
+    let body = serde_json::to_string_pretty(&rows)
+        .map_err(|e| format!("serialize {family} login accounts: {e}"))?;
+    crate::accounts::write_json_atomic(&accounts_file(base, family), body)
+        .map_err(|e| format!("write {family} login accounts: {e}"))?;
+    // GC: drop vault slots for cards no longer in the file — only now that
+    // the new file is safely on disk.
+    for scope in stale_scopes {
+        crate::secretstore::remove(&crate::secretstore::token_key(&scope));
+    }
+    Ok(())
 }
 
 pub fn load(family: &str) -> Vec<LoginAccount> {
@@ -576,6 +597,53 @@ mod tests {
         let raw = std::fs::read_to_string(&file).unwrap();
         assert!(!raw.contains("gho_fallback"), "migrated file must be stripped: {raw}");
         crate::secretstore::remove(&scope);
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    /// A failed file write must not cost accounts (2026-10-18, GitHub #3):
+    /// the save surfaces the error, but the old file and every old vault
+    /// slot stay intact, so the next load still returns all accounts with
+    /// their tokens — and a retry then completes the removal for real.
+    /// Harness-gated: the write failure injection only exists in the
+    /// harness build, and only there is the vault an in-memory store.
+    #[cfg(feature = "harness")]
+    #[test]
+    fn failed_file_write_keeps_every_account_recoverable() {
+        let base = std::env::temp_dir().join(format!("pane-login-writefail-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        let a = account("7101", "Keep A");
+        let b = account("7102", "Drop B");
+        let scope_b = crate::secretstore::token_key(&format!(
+            "login/{}",
+            card_id_for_account("copilot", &b)
+        ));
+        crate::secretstore::remove(&scope_b);
+        save_to(&base, "copilot", &[a.clone(), b.clone()]).unwrap();
+        let file = base.join("login-accounts").join("copilot.json");
+
+        // Dropping B fails at the file write: B's vault slot must survive.
+        crate::accounts::fail_json_writes_for(&file);
+        let err = save_to(&base, "copilot", &[a.clone()]);
+        assert!(err.is_err(), "the injected write failure must surface");
+        crate::accounts::clear_json_write_failures();
+
+        // Old file untouched and B's slot alive: a load still returns both.
+        let during = load_from(&base, "copilot");
+        assert_eq!(during.len(), 2, "a failed save must not lose accounts");
+        assert!(during
+            .iter()
+            .any(|x| x.account_id == "7102" && x.access_token == "gho_token_value"));
+
+        // The retry completes the removal for real: one account, no residue.
+        save_to(&base, "copilot", &[a.clone()]).unwrap();
+        let after = load_from(&base, "copilot");
+        assert_eq!(after.len(), 1);
+        assert_eq!(after[0].account_id, "7101");
+        assert!(matches!(
+            crate::secretstore::get(&scope_b),
+            crate::secretstore::Secret::Missing
+        ));
+        crate::secretstore::remove(&scope_b);
         let _ = std::fs::remove_dir_all(&base);
     }
 }

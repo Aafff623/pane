@@ -12,6 +12,8 @@
 
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
+#[cfg(feature = "harness")]
+use std::sync::Mutex;
 
 /// One row of accounts/<provider>.json. `label` may be empty (the UI shows
 /// a localized "Account N"); `base_url` is only meaningful for
@@ -155,6 +157,19 @@ pub fn load_accounts_from(base: &std::path::Path, provider: &str) -> Vec<Account
 pub(crate) fn write_json_atomic(path: &std::path::Path, contents: String) -> Result<(), String> {
     use std::sync::atomic::{AtomicU64, Ordering};
     static SEQUENCE: AtomicU64 = AtomicU64::new(0);
+    #[cfg(feature = "harness")]
+    if let Some(fail) = FAIL_WRITE_PATH
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .as_deref()
+    {
+        if fail == path {
+            return Err(format!(
+                "replace {}: injected write failure (test)",
+                path.display()
+            ));
+        }
+    }
     let tmp = path.with_extension(format!(
         "json.{}.{}.tmp", std::process::id(), SEQUENCE.fetch_add(1, Ordering::Relaxed)
     ));
@@ -164,6 +179,31 @@ pub(crate) fn write_json_atomic(path: &std::path::Path, contents: String) -> Res
         let _ = std::fs::remove_file(&tmp);
     }
     result.map_err(|e| format!("replace {}: {e}", path.display()))
+}
+
+/// Test-only failure injection (harness build): atomic writes to this exact
+/// path fail so the "file write failed mid-save" data-safety paths are
+/// exercisable without touching the real filesystem state of a live store.
+/// One slot is deliberate (mirrors `secretstore::fail_puts_for`): it injects
+/// a DIFFERENT fault — file-write failure rather than vault-write failure —
+/// and is scoped by an exact, test-unique path, so parallel tests cannot
+/// collide. A new concurrent user of this seam needs the concurrency
+/// re-examined first.
+#[cfg(feature = "harness")]
+static FAIL_WRITE_PATH: Mutex<Option<PathBuf>> = Mutex::new(None);
+
+/// Fails every [`write_json_atomic`] call targeting exactly `path` until
+/// [`clear_json_write_failures`]. Other paths (and every other test) are
+/// unaffected.
+#[cfg(feature = "harness")]
+pub(crate) fn fail_json_writes_for(path: &std::path::Path) {
+    *FAIL_WRITE_PATH.lock().unwrap_or_else(|e| e.into_inner()) = Some(path.to_path_buf());
+}
+
+/// Undoes [`fail_json_writes_for`].
+#[cfg(feature = "harness")]
+pub(crate) fn clear_json_write_failures() {
+    *FAIL_WRITE_PATH.lock().unwrap_or_else(|e| e.into_inner()) = None;
 }
 
 pub fn save_accounts_to(
