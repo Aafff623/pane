@@ -5,7 +5,7 @@
 
 **Blocked by:** 02
 
-**Status:** implemented（2026-10-19；设置行「网页登录/重新登录/清除会话」+ 登录态、三语言 i18n、余额型卡片走通用渲染；首登实测出「可用额度 ¥142.31 / 冻结额度 ¥0.00」。**图标仍是波形占位标，待换正主标**。UI 验收待 owner）
+**Status:** resolved（2026-10-19；owner 实测验收通过——「基元律动这个我测试没什么问题了」。设置行「网页登录/重新登录/清除会话」+ 登录态、三语言 i18n、余额型卡片走通用渲染；首登实测出「可用额度 ¥142.31 / 冻结额度 ¥0.00」；**品牌标已换成正式「TR」标志**，随主题适配深浅色）
 
 ## 要点
 
@@ -26,6 +26,8 @@
   （初稿挂在定制抽屉的分发器上——那是另一个窗口，点击落不到任何地方）
 - [x] tsc/vite/i18n-pairing/node 测试全绿 —— tsc 无错、51 node、38 site 全绿
   （i18n-pairing 覆盖 en/zh/ru 键集一致）
-- [ ] **UI owner 实机验收待做**（登录态已清空，等首登后复验）
-- [ ] **图标待换正主标**：`src/assets/providers/tokenrhythm.svg` 目前是自绘的
-  波形占位标（24×24 viewBox、currentColor 填充），不是基元律动的正式品牌资产
+- [x] **UI owner 实机验收** —— 2026-10-19 owner 实测通过
+- [x] **品牌标**：`src/assets/providers/tokenrhythm.svg` 已换成基元律动的正式
+  「TR」标志。做法：对 owner 提供的 PNG 做轮廓提取（`cv2.findContours` +
+  `approxPolyDP`）得到 3 个多边形，与原图 **IoU 0.9897**（差异仅抗锯齿），
+  再归一化到 24×24 viewBox、`fill="currentColor"`，随主题自动适配深浅色

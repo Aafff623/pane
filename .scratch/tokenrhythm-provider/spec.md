@@ -1,6 +1,6 @@
 # 基元律动（tokenrhythm.studio）Provider：网页端登录态认证
 
-**Status:** implemented（3/3 票，2026-10-19；首登全链路实测通过——密码登录 → 2 秒内窗口自动关闭 → 按钮变「重新登录/清除会话」→ 卡片出「可用额度 ¥142.31 / 冻结额度 ¥0.00」，重启后仍在；parse-tests 885:0:13、tsc/vite、51 node、38 site 门禁全绿。**UI 验收待 owner**——本批收尾时登录态已清空，等 owner 首登后复验）
+**Status:** resolved（3/3 票，2026-10-19；owner 实测验收通过。首登全链路实测通过——密码登录 → 2 秒内窗口自动关闭 → 按钮变「重新登录/清除会话」→ 卡片出「可用额度 ¥142.31 / 冻结额度 ¥0.00」，重启后仍在；parse-tests 885:0:13、tsc/vite、51 node、38 site 门禁全绿；品牌标已换正式「TR」标志）
 **前置调研**：`temp/research/20261019-tokenrhythm-api-quota.md`（两轮深扒 + 真 key 实测）
 
 ## Problem Statement
@@ -94,7 +94,7 @@ webview 承载 cookie 做站内 fetch」。实装两处都改了，原因如下�
 - [x] 重启 Paine 后会话仍在（WebView2 配置持久化），无需重新登录——同上实测，重启后余额仍在
 - [x] 会话过期（24h 空闲）后卡片明确转「需重新登录」，一键重新登录——卡片请求吃到 401 时 `snapshot_for` 立即清掉死会话，行状态自纠正（不必等下一轮刷新）；`a_guest_or_error_body_is_not_signed_in` 覆盖访客/错误体不算已登录
 - [x] 取数全过程不把 cookie/token 写入任何 Paine 文件或日志——会话经 `secretstore::save_session` 落 OS 凭据库（scope `web/tokenrhythm`），仅在凭据库写失败时才回退到 `tokenrhythm_web.json`（与项目既有的三处明文例外同一约定）；日志与状态接口均不携带 cookie
-- [x] parse-tests 全绿 + tsc/vite/i18n 门禁过；UI 由 owner 实机验收——885:0:13、tsc 无错、51 node、38 site 全绿（2026-10-19 收尾实测）；**UI 验收仍待 owner**（登录态已清空，等首登后复验）
+- [x] parse-tests 全绿 + tsc/vite/i18n 门禁过；UI 由 owner 实机验收——885:0:13、tsc 无错、51 node、38 site 全绿（2026-10-19 收尾实测）；**owner 2026-10-19 实测验收通过**
 
 ## 已知边界 / 待确认
 
@@ -108,7 +108,6 @@ webview 承载 cookie 做站内 fetch」。实装两处都改了，原因如下�
 - 验证码：登录窗内真人过，Pane 不碰验证码逻辑。
 - 若站方改登录流程（如加设备验证），登录窗内仍可人工完成，Pane 只认
   `/api/auth/me` 的最终状态。
-- **卡片图标仍是波形占位标**，待换基元律动正主标。
-- **UI 验收待 owner**：本批收尾时登录态（会话缓存 + 浏览器 profile）已清空，
-  等 owner 首登后复验；「解锁后拖着走」等弹窗交互也需 owner 真鼠标确认
-  （agent 环境无法把按住的真实鼠标送进 WebView2）。
+- ~~卡片图标仍是波形占位标~~ —— **已换正主标**（2026-10-19，正式「TR」字形，`currentColor` 随主题适配）。
+- **弹窗交互仍需 owner 真鼠标确认**：「解锁后拖着走」agent 环境无法把按住的
+  真实鼠标送进 WebView2，只验证了接线（属性生效、拖拽脚本响应、权限放行）。
