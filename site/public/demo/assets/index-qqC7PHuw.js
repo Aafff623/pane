@@ -177,13 +177,10 @@ var dh=Object.defineProperty;var uh=(t,e,n)=>e in t?dh(t,e,{enumerable:!0,config
 <path d="M5 18V11" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" />\r
 <path d="M5 5L12 12L19 5V18" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" />\r
 </svg>\r
-`,Pm=`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none">
-  <g fill="currentColor">
-    <rect x="3" y="9" width="2.6" height="6" rx="1.3"/>
-    <rect x="8" y="5" width="2.6" height="14" rx="1.3"/>
-    <rect x="13" y="8" width="2.6" height="8" rx="1.3"/>
-    <rect x="18" y="11" width="2.6" height="2" rx="1"/>
-  </g>
+`,Pm=`<svg xmlns="http://www.w3.org/2000/svg" width="1em" height="1em" viewBox="0 0 24 24" fill="currentColor" style="flex:none;line-height:1"><title>TokenRhythm</title>
+  <path d="M6.613 5.333 4.48 5.333 1.067 8.32 6.613 8.32Z"/>
+  <path d="M7.467 5.333 7.467 18.56 10.453 15.68 10.56 10.56 18.453 18.453 22.827 18.453 12.8 8.427 17.28 8.32 20.693 5.333Z"/>
+  <path d="M21.227 5.76 16.107 10.56 18.24 12.8 21.227 9.813Z"/>
 </svg>
 `,Lm='<svg fill="currentColor" fill-rule="evenodd" height="1em" style="flex:none;line-height:1" viewBox="0 0 24 24" width="1em" xmlns="http://www.w3.org/2000/svg"><title>TRAE</title><path d="M24 20.541H3.428v-3.426H0V3.4h24V20.54zM3.428 17.115h17.144V6.827H3.428v10.288zm8.573-5.196l-2.425 2.424-2.424-2.424 2.424-2.424 2.425 2.424zm6.857-.001l-2.424 2.423-2.425-2.423 2.425-2.425 2.424 2.425z"></path></svg>',zm=`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">\r
   <path fill="black" d="M12 2.5c5.25 0 9.5 4.25 9.5 9.5s-4.25 9.5-9.5 9.5S2.5 17.25 2.5 12 6.75 2.5 12 2.5Zm0 3.2A6.3 6.3 0 1 0 12 18.3 6.3 6.3 0 0 0 12 5.7Zm0 2.8a3.5 3.5 0 0 1 3.5 3.5c0 .75-.23 1.44-.62 2.01l1.18 1.18-1.98 1.98-1.18-1.18A3.5 3.5 0 1 1 12 8.5Zm0 2.5a1 1 0 1 0 0 2 1 1 0 0 0 0-2Z"/>\r
@@ -269,6 +266,26 @@ Continue?`,"settings.agentSkillDone":"Skill installed — {path}","settings.qode
    <pattern id="ink-column-fibers" width="7" height="13" patternUnits="userSpaceOnUse">
     <path d="M1 1v5m3 2v4m2-11v2" stroke="var(--card)" stroke-width=".5" opacity=".5"/>
    </pattern>`,n.append(s),document.body.append(n)}if(document.documentElement.hasAttribute("data-ink")){for(const n of t.querySelectorAll(".donut-wrap")){if(n.querySelector(".ink-donut-art"))continue;const s=n.querySelector(":scope > svg");if(!s)continue;const o=document.createElement("div");o.className="ink-donut-art";const i=document.createElement("span");i.className="ink-koi",i.setAttribute("aria-hidden","true"),s.before(o),o.append(i,s)}for(const n of t.querySelectorAll(".trend-chart .trend-bar")){if((e=n.nextElementSibling)!=null&&e.classList.contains("ink-column-fiber"))continue;const s=n.cloneNode(!1);s.setAttribute("class","ink-column-fiber"),s.setAttribute("aria-hidden","true"),n.after(s)}}}function zg(t){for(const e of t.querySelectorAll(".ink-donut-art")){const n=e.querySelector("svg");n?e.replaceWith(n):e.remove()}t.querySelectorAll(".ink-column-fiber").forEach(e=>e.remove())}const Tg=`# Changelog\r
+\r
+## Unreleased\r
+\r
+基元律动接入 / 弹窗置顶与位置 / 用量来源标记\r
+\r
+## 新增\r
+\r
+- **基元律动额度卡片**：新增基元律动（tokenrhythm）provider，卡片显示可用额度与冻结额度（人民币）。凭据是网页登录态而非 API key——设置面板点「网页登录」在弹出的浏览器窗口里用手机号加验证码登录，会话存在本机，重启后仍有效。\r
+- **弹窗置顶与位置锁定**：总花费行新增置顶与锁定两个按钮。置顶让面板浮在其他窗口之上；锁定默认开启，此时每次唤出都居中且不可拖动，解锁后可把面板拖到任意位置，位置会被记住，下次唤出回到原处。\r
+- **弹窗记住上次的界面**：切到自定义看板、皮肤工坊或某个 provider 的配置页后关闭弹窗，再次唤出会回到那个界面而不是卡片列表；该 provider 已被删除时退回列表。\r
+- **定制面板的「去设置里登录」按钮**：基元律动这类网页登录型 provider，在定制面板的行内多一个地球图标按钮，点击直接打开设置面板并定位到该 provider 的密钥行。\r
+- **用量来源徽章**：Claude 卡上新增「疑少计 ×N」与「cc-switch ×N」两个徽章，说明当天的用量来自哪个数据源、以及哪些天可能少计。天数按当前视图（今日/昨日/7 天/30 天/全部）分别统计。\r
+\r
+## 修复\r
+\r
+- **「已登录」误判**：基元律动登录页在认证之前就会落下自己的 cookie，旧逻辑把这些访客 cookie 当成会话，导致点「网页登录」立刻显示已登录、登录窗口根本不弹、卡片也一直空白。现在「已登录」一律以网站回答为准；缓存的会话过期会被立即清除。\r
+- **登录态读取通道**：会话改从 WebView2 的 cookie manager 读取。原先读浏览器 Cookies 数据库文件，浏览器运行时该文件被独占锁定、读取必然失败；会话 cookie 本身也是 httpOnly，页面脚本同样读不到。登录完成检测改由 Rust 侧轮询，绕开远程来源的调用限制。\r
+- **设置面板的登录按钮无响应**：网页登录与清除会话按钮渲染在设置面板，但处理函数挂在定制面板的事件分发上——两者是不同的窗口，点击因此落不到任何地方。同时「网页登录」按钮被放在了「无 key 就提前返回」之后，非 key 场景下够不到。\r
+- **账号保存失败不再丢账号**：保存账号时若文件写入失败，旧逻辑已先删掉对应凭据，下次加载这个账号就消失了。改为文件写成功后才清理，写失败时旧账号与凭据全部可恢复。\r
+- **用量来源判定的准确性**：疑少计比较先按卡片最终归属剥除其他厂商的用量，跨厂商的覆盖差异不再被误算成 Claude 少计。\r
 \r
 ## 0.8.6 — 2026-10-18\r
 \r
