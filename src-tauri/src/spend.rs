@@ -61,6 +61,26 @@ pub struct ProviderSpend {
     /// all-zero usage into its local session logs). The UI flags such rows.
     #[serde(default)]
     pub estimated: bool,
+    /// Days of THIS card's data whose numbers come from cc-switch alone.
+    /// On a day the ledger covers, the local scan's rows are discarded (the
+    /// day-granular cut) so no request counts twice — the two sources share
+    /// no row-level identity: cc-switch's `proxy_request_logs` carries its
+    /// own `request_id`/`session_id` (a session-granularity id cannot split
+    /// the direct/proxied mix inside one session), and the >30-day
+    /// `usage_daily_rollups` rows carry no id at all. The count is a
+    /// provenance fact (single-source days), NOT a claim that those days
+    /// are incomplete: cc-switch also imports the same local session logs
+    /// (`data_source = session_log`), so overlap is its normal state
+    /// (2026-10-19, GitHub #5 second review).
+    #[serde(default)]
+    pub cc_sourced_days: u32,
+    /// Days where the local Claude scan holds more tokens than the
+    /// cc-switch ledger shows for the same day — the cut keeps the ledger's
+    /// (lower) number, so those days likely undercount what the local logs
+    /// contain (see `likely_undercount_days`). A suspicion marker, not a
+    /// measurement; the UI badges it ahead of the provenance count.
+    #[serde(default)]
+    pub likely_undercount_days: u32,
 }
 
 impl ProviderSpend {
@@ -594,6 +614,8 @@ fn build_spend(id: impl Into<String>, name: impl Into<String>, data: FileData) -
         unpriced: data.unpriced.values().sum(),
         unpriced_models,
         estimated: false,
+        cc_sourced_days: 0,
+        likely_undercount_days: 0,
     };
     let mut models: [HashMap<String, (f64, f64)>; 3] =
         [HashMap::new(), HashMap::new(), HashMap::new()];
@@ -1120,6 +1142,66 @@ fn split_kimi_routed(all: &mut FileData) -> FileData {
     out
 }
 
+/// Distinct days of `data` that cc-switch covers — days this card takes
+/// from the ledger alone (the local scan's same-day rows were cut so no
+/// request counts twice). A provenance count, NOT a completeness claim:
+/// the ledger also imports the same local session logs
+/// (`data_source = session_log`), so a covered day is cc-switch's normal
+/// state, not evidence of missed direct traffic. Distinct days only — the
+/// day map is keyed by (day, model).
+fn cc_sourced_days(data: &FileData, cc_days: &HashSet<i32>) -> u32 {
+    data.days
+        .keys()
+        .map(|(day, _)| *day)
+        .filter(|day| cc_days.contains(day))
+        .collect::<HashSet<_>>()
+        .len() as u32
+}
+
+/// Per-day token totals (the day map is keyed by (day, model); both sides
+/// normalize to the same five buckets — fresh input + output + cache read +
+/// cache writes — so day sums are comparable across sources).
+fn day_token_totals(data: &FileData) -> HashMap<i32, f64> {
+    let mut out: HashMap<i32, f64> = HashMap::new();
+    for ((day, _), (_, tokens)) in &data.days {
+        *out.entry(*day).or_insert(0.0) += *tokens;
+    }
+    out
+}
+
+/// Days where the local Claude scan holds MORE tokens than the cc-switch
+/// ledger shows for the same day. The day-granular cut discards the local
+/// rows on ledger-covered days, so a shortfall means the card's number for
+/// that day is lower than the local logs contain — cc-switch's session
+/// import missing records, or its own session-dedup dropping them. A
+/// LIKELY-undercount marker, not proof, which is why the comparison is
+/// one-way: the ledger legitimately EXCEEDS the local scan when a relay
+/// zeroed the CLI logs (the whole reason the ledger is primary), and only
+/// the excess direction is flagged.
+///
+/// Thresholds are a judgment call (tunable, owner-adjustable at review):
+/// the relative margin absorbs rounding, in-flight session writes and
+/// cc-switch's normalization slop; the absolute floor keeps a near-idle
+/// day from flipping on a handful of tokens.
+const UNDERCOUNT_RELATIVE_MARGIN: f64 = 0.10;
+const UNDERCOUNT_ABSOLUTE_FLOOR: f64 = 2_000.0;
+
+fn likely_undercount_days(local: &FileData, cc: &FileData) -> u32 {
+    let ledger = day_token_totals(cc);
+    let mut flagged = HashSet::new();
+    for (day, local_total) in day_token_totals(local) {
+        let Some(ledger_total) = ledger.get(&day) else {
+            continue; // a day the ledger doesn't cover keeps the local rows
+        };
+        let excess = local_total - ledger_total;
+        if excess > UNDERCOUNT_ABSOLUTE_FLOOR && excess > ledger_total * UNDERCOUNT_RELATIVE_MARGIN
+        {
+            flagged.insert(day);
+        }
+    }
+    flagged.len() as u32
+}
+
 /// Claude Code writes one JSONL per session under ~/.claude/projects. Each
 /// assistant line carries usage token counts and usually a precomputed
 /// costUSD, which we prefer over our own pricing table.
@@ -1151,6 +1233,12 @@ fn claude(extra: FileData, cc: FileData, cc_days: &HashSet<i32>) -> (ProviderSpe
         let data = file_days(&file, &mut |line, data| claude_line(&mut state, line, data));
         merge_data(&mut all, data);
     }
+    // On a cc-switch-covered day the local rows are discarded (the cut
+    // below), so the card's numbers for that day come from the ledger
+    // alone; the counts are recorded after the splits, on this card's final
+    // day set (GitHub #5). The undercount comparison must see the local
+    // rows before the cut removes them.
+    let undercount = likely_undercount_days(&all, &cc);
     retain_days(&mut all, |day| !cc_days.contains(&day));
     // Usage from other scanners that belongs on this card (pi sessions
     // driving a Claude account) joins before the splits below, so it gets
@@ -1165,7 +1253,11 @@ fn claude(extra: FileData, cc: FileData, cc_days: &HashSet<i32>) -> (ProviderSpe
     // Kimi slugs likewise mean Moonshot billed the session (Anthropic-
     // compatible endpoint or a router) — Kimi's card owns those dollars.
     let kimi_routed = split_kimi_routed(&mut all);
-    (build_spend("claude", "Claude", all), minimax, qwen_via_aihubmix, kimi_routed)
+    let cc_days_on_card = cc_sourced_days(&all, cc_days);
+    let mut sp = build_spend("claude", "Claude", all);
+    sp.cc_sourced_days = cc_days_on_card;
+    sp.likely_undercount_days = undercount;
+    (sp, minimax, qwen_via_aihubmix, kimi_routed)
 }
 
 /// Spend for each discovered extra Claude account, scanned from that
@@ -4154,6 +4246,50 @@ mod tests {
         assert_eq!(data.days.len(), 2);
         assert_eq!(data.unpriced.get("other"), Some(&2));
         assert!(!data.unpriced.contains_key("ghost"));
+    }
+
+    /// The card's cc-sourced-day count is a provenance fact (days taken
+    /// from the ledger alone), not a completeness claim: the ledger also
+    /// imports the same local session logs, so a covered day is its normal
+    /// state (2026-10-19 second review, GitHub #5).
+    #[test]
+    fn cc_sourced_days_counts_distinct_covered_days_only() {
+        let mut local = FileData::default();
+        local.days.insert((100, "sonnet".into()), (1.0, 10.0));
+        local.days.insert((100, "opus".into()), (2.0, 20.0)); // same day, 2nd model
+        local.days.insert((101, "sonnet".into()), (3.0, 30.0));
+        local.days.insert((102, "sonnet".into()), (4.0, 40.0)); // local-only day
+        let cc_days: HashSet<i32> = [100, 101].into_iter().collect();
+        assert_eq!(cc_sourced_days(&local, &cc_days), 2);
+        // A day only cc-switch covers never reaches this card's data (the
+        // cut keeps it out until the ledger's own rows merge in), and an
+        // empty scan flags nothing.
+        let cc_elsewhere: HashSet<i32> = [103].into_iter().collect();
+        assert_eq!(cc_sourced_days(&local, &cc_elsewhere), 0);
+        assert_eq!(cc_sourced_days(&FileData::default(), &cc_days), 0);
+    }
+
+    /// The likely-undercount marker fires only on a clear local excess over
+    /// the ledger (import gap); the ledger legitimately exceeding the local
+    /// scan (a relay zeroed the CLI logs) is the normal case and never
+    /// flags, and neither does noise inside the thresholds.
+    #[test]
+    fn likely_undercount_days_flags_only_clear_local_excess() {
+        let mut local = FileData::default();
+        local.days.insert((100, "sonnet".into()), (1.0, 13_000.0));
+        local.days.insert((100, "opus".into()), (2.0, 5_000.0)); // same day, 2nd model
+        local.days.insert((101, "sonnet".into()), (1.0, 5_000.0)); // local « ledger
+        local.days.insert((102, "sonnet".into()), (1.0, 10_500.0)); // noise above ledger
+        local.days.insert((103, "sonnet".into()), (1.0, 9_000.0)); // ledger doesn't cover
+        let mut cc = FileData::default();
+        cc.days.insert((100, "sonnet".into()), (1.0, 10_000.0));
+        cc.days.insert((101, "sonnet".into()), (1.0, 40_000.0));
+        cc.days.insert((102, "sonnet".into()), (1.0, 10_000.0));
+        // Day 100: 18k local vs 10k ledger (excess 8k > 2k floor, > 10%) → flag.
+        assert_eq!(likely_undercount_days(&local, &cc), 1);
+        // Empty either side flags nothing.
+        assert_eq!(likely_undercount_days(&local, &FileData::default()), 0);
+        assert_eq!(likely_undercount_days(&FileData::default(), &cc), 0);
     }
 
     /// Codex/opencode/grok's merge rule: Pane stays primary — a cc-switch

@@ -73,7 +73,7 @@ Last reconciled: 2026-10-18 (Pane 0.8.6).
   `cargo +stable-x86_64-pc-windows-gnu`. The full Tauri binary cannot link
   locally as a `cdylib` (167k-export DLL). The committed crate-type is
   `["rlib"]` (desktop only). Unit tests run from repo-root `parse-tests/`
-  (875 passing, 13 ignored as of 2026-10-18; run with
+  (878 passing, 13 ignored as of 2026-10-19; run with
   `cargo +stable-x86_64-pc-windows-gnu test` and no proxy).
 - Dev runtime needs both processes: Vite `:1420` + `pane.exe` `:6736`. Never
   serve the frontend with Python `http.server` (permanent WebView2 cache
@@ -212,7 +212,36 @@ Last reconciled: 2026-10-18 (Pane 0.8.6).
   base rates (no per-request long-context claim). Model splits
   (MiniMax/qwen→AihubMix/kimi-routed) also apply to cc-switch rows.
   Mid-iteration read errors abort to the last good parse — a truncated day
-  set would poison the day-diffing.
+  set would poison the day-diffing. **cc-sourced-days flag (2026-10-19,
+  GitHub #5 second review)** — the two sources share no row-level request
+  identity (`proxy_request_logs` carries cc-switch's own
+  `request_id`/`session_id`; a session-granularity id cannot split the
+  direct/proxied mix inside one session, and the >30-day
+  `usage_daily_rollups` rows carry no id at all), so a day the ledger
+  covers is taken from the ledger alone — the local same-day rows are cut
+  to avoid double-counting. `cc_sourced_days()` counts those days on the
+  card's final data and `ProviderSpend.cc_sourced_days` carries the count
+  to the UI ("cc-switch ×N"). The count is a PROVENANCE fact, not a
+  completeness claim: the ledger also imports the same local session logs
+  (`data_source = session_log` — measured 2026-10-19 on the author's db:
+  1903 session_log rows / 11 days vs 3545 proxy rows / 12 days for
+  claude), so a covered day is cc-switch's normal state. An earlier
+  revision flagged "days both sources cover" as proof of missed direct
+  traffic — disproved by that `data_source` column and removed. No numbers
+  change; the flag is additive.
+- **Likely-undercount marker (2026-10-19, ticket
+  `.scratch/cc-switch-undercount/`)** — `likely_undercount_days()` sums
+  per-day tokens on both sides (each normalized to the same five buckets:
+  fresh input + output + cache read + cache writes) and counts days where
+  the LOCAL scan holds more than the ledger shows; the cut keeps the
+  ledger's lower number, so those days likely miss records cc-switch's
+  session import didn't capture. One-way by design: the ledger
+  legitimately EXCEEDS the local scan when a relay zeroed the CLI logs
+  (the reason it is primary), so only the excess direction flags.
+  Thresholds (10% relative margin + 2 000-token absolute floor) are a
+  tunable judgment call. It marks suspicion and never auto-corrects —
+  adding the difference back would double-count. The UI badges
+  "low? ×N" ahead of the provenance badge.
 - **spend_history VERSION = 3** — v1→v2 cleared zcode cells (cache
   double-count fix), v2→v3 clears only bare `claude` cells (cc-switch source
   switch). Extra `claude@<fnv1a>` account cards keep their history: cc-switch

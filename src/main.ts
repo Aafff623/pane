@@ -133,6 +133,8 @@ interface ProviderSpend {
   unpriced: number;
   unpriced_models: string[];
   estimated?: boolean;
+  cc_sourced_days?: number;
+  likely_undercount_days?: number;
 }
 
 interface HistorySpend {
@@ -200,12 +202,28 @@ function staleHelp(s: Snapshot): string {
 
 type SpendTab = "today" | "yesterday" | "last30";
 
-/// Small tag for rows whose tokens are a credits-derived blend (Qoder CN),
-/// not measured facts.
-function estBadgeFor(id: string): string {
+/// Small tags appended to spend row names: "est." for credits-derived
+/// blends (Qoder CN), "low? ×N" for days the local logs likely outcount the
+/// ledger (a suspected undercount), else "cc-switch ×N" for days taken from
+/// the cc-switch ledger alone (provenance — the local same-day rows are
+/// discarded so no request counts twice).
+function spendBadgesFor(id: string): string {
   const sp = lastSpend.find((s) => s.id === id);
-  if (!sp?.estimated) return "";
-  return `<span class="est-badge" title="${escapeHtml(t("spend.estimateTip"))}">${escapeHtml(t("spend.estimate"))}</span>`;
+  if (!sp) return "";
+  let out = "";
+  if (sp.estimated) {
+    out += `<span class="est-badge" title="${escapeHtml(t("spend.estimateTip"))}">${escapeHtml(t("spend.estimate"))}</span>`;
+  }
+  const low = sp.likely_undercount_days ?? 0;
+  if (low) {
+    out += `<span class="est-badge low-badge" title="${escapeHtml(t("spend.undercountTip", { n: low }))}">${escapeHtml(t("spend.undercount"))} ×${low}</span>`;
+  } else {
+    const n = sp.cc_sourced_days ?? 0;
+    if (n) {
+      out += `<span class="est-badge cc-badge" title="${escapeHtml(t("spend.ccSourcedTip", { n }))}">${escapeHtml(t("spend.ccSourced"))} ×${n}</span>`;
+    }
+  }
+  return out;
 }
 type RangeTab = "d7" | "d30" | "all";
 const OVERVIEW_TABS = ["5h", "week", "month"] as const;
@@ -3425,7 +3443,7 @@ function legendRowHtml(e: DonutEntry): string {
   return `
         <div class="legend-row" data-pid="${e.s.id}">
           ${lead}
-          <span class="legend-name">${escapeHtml(e.s.name)}${estBadgeFor(e.s.id)}${detail}</span>
+          <span class="legend-name">${escapeHtml(e.s.name)}${spendBadgesFor(e.s.id)}${detail}</span>
           <span class="legend-val">${fmtSpendVal(e.w)}</span>
         </div>`;
 }
@@ -3463,7 +3481,7 @@ function showSpendPop(anchor: HTMLElement): void {
   const el = document.createElement("div");
   el.className = "spend-pop";
   el.innerHTML = `
-    <div class="spend-pop-head">${lead(entry.s.id)}<span class="spend-pop-name">${escapeHtml(entry.s.name)}${estBadgeFor(entry.s.id)}</span></div>
+    <div class="spend-pop-head">${lead(entry.s.id)}<span class="spend-pop-name">${escapeHtml(entry.s.name)}${spendBadgesFor(entry.s.id)}</span></div>
     <div class="spend-pop-val">${escapeHtml(fmtMoney(entry.w.cost))} · ${escapeHtml(fmtTokens(entry.w.tokens))}</div>
     ${parts ? `<div class="spend-pop-sep"></div>${parts}` : ""}`;
   document.body.appendChild(el);
@@ -6336,7 +6354,7 @@ async function shareSpendEnvelope(range: ShareRange): Promise<void> {
     const rows = shown
       .map((e) => {
         const pct = denom > 0 ? Math.max(2, Math.round((metricVal(e.w) / denom) * 100)) : 0;
-        return `<div class="envelope-row">${lead(e.s.id)}<span class="envelope-name">${escapeHtml(e.s.name)}${estBadgeFor(e.s.id)}</span><span class="envelope-bar" aria-hidden="true"><i style="width:${pct}%;background:${spendColor(e.s.id)}"></i></span><span class="envelope-val">${escapeHtml(fmtSpendVal(e.w))}</span></div>`;
+        return `<div class="envelope-row">${lead(e.s.id)}<span class="envelope-name">${escapeHtml(e.s.name)}${spendBadgesFor(e.s.id)}</span><span class="envelope-bar" aria-hidden="true"><i style="width:${pct}%;background:${spendColor(e.s.id)}"></i></span><span class="envelope-val">${escapeHtml(fmtSpendVal(e.w))}</span></div>`;
       })
       .join("");
     const body = entries.length

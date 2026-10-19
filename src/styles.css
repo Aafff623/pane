@@ -6997,6 +6997,28 @@ article.provider.card-highlight {
   color: #b45309;
   border-color: rgb(180 83 9 / .55);
 }
+
+/* Informational (blue) variant: cc-switch provenance marker, not a warning. */
+.cc-badge {
+  color: #60a5fa;
+  border-color: rgb(96 165 250 / .6);
+}
+
+:root[data-theme="light"] .cc-badge {
+  color: #1d4ed8;
+  border-color: rgb(29 78 216 / .55);
+}
+
+/* Caution (orange) variant: suspected undercount, outranks the cc-badge. */
+.low-badge {
+  color: #fb923c;
+  border-color: rgb(251 146 60 / .6);
+}
+
+:root[data-theme="light"] .low-badge {
+  color: #c2410c;
+  border-color: rgb(194 65 12 / .55);
+}
 .overview-account-meter b { font-weight: 600; color: var(--foreground); }
 
 @keyframes card-glow {

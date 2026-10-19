@@ -626,6 +626,12 @@ const en: Dict = {
   "spend.estimate": "est.",
   "spend.estimateTip":
     "Tokens estimated from Qoder CN credits (≈25k tokens per credit, blended). Official docs price credits per task, so this is a planning number, not a measurement.",
+  "spend.ccSourced": "cc-switch",
+  "spend.ccSourcedTip":
+    "On {n} day(s), this card's numbers come from the cc-switch ledger alone: Pane's own same-day records are discarded so no request counts twice. The two sources share no row-level request id, so days cannot be merged per request — this is a provenance note, not a claim that the numbers are incomplete.",
+  "spend.undercount": "low?",
+  "spend.undercountTip":
+    "On {n} day(s), the local Claude logs hold MORE tokens than the cc-switch ledger shows for the same day. The card keeps the ledger's (lower) number to avoid double-counting, so those days likely miss direct usage the ledger's import didn't capture — treat the total as a floor, not an exact figure.",
 
   "spend.title": "Total Spend",
     "spend.groupLabel": "Spend grouping",
@@ -1804,6 +1810,12 @@ const zh: Dict = {
   "spend.estimate": "估算",
   "spend.estimateTip":
     "tokens 由 Qoder CN 积分消耗折算（约 25k tokens/积分，混合口径）。官方按任务扣积分而非按 token，故此数字仅供估算。",
+  "spend.ccSourced": "cc-switch 单源",
+  "spend.ccSourcedTip":
+    "有 {n} 天该卡数字只来自 cc-switch 账本：Pane 自己的同日记录被丢弃，以避免同一请求双计。两个来源没有行级共享的请求 ID，无法按请求合并——这是来源说明，不代表数字不完整。",
+  "spend.undercount": "疑少计",
+  "spend.undercountTip":
+    "有 {n} 天本地 Claude 日志的 token 量高于 cc-switch 账本当天的数字。卡片保留账本（较低）的数字以避免双计，这些天很可能漏掉了账本导入没抓到的直连用量——请把总额视作下限，不是精确值。",
 
   "spend.title": "总花费",
     "spend.groupLabel": "统计维度",
@@ -2977,6 +2989,12 @@ const ru: Dict = {
   "spend.estimate": "оценка",
   "spend.estimateTip":
     "Токены оценены по расходу кредитов Qoder CN (≈25k токенов на кредит, усреднённо). Официально кредиты списываются за задачу, поэтому это оценка, а не замер.",
+  "spend.ccSourced": "cc-switch",
+  "spend.ccSourcedTip":
+    "За {n} дн. числа этой карточки взяты только из журнала cc-switch: собственные записи Pane за те же дни отброшены, чтобы один и тот же запрос не учёлся дважды. У источников нет общего id на уровне строки, поэтому дни нельзя слить по запросам — это примечание об источнике, а не утверждение, что числа неполные.",
+  "spend.undercount": "недоучёт?",
+  "spend.undercountTip":
+    "За {n} дн. в локальных журналах Claude токенов БОЛЬШЕ, чем показывает журнал cc-switch за тот же день. Карточка хранит (меньшие) числа журнала, чтобы не считать запросы дважды, — вероятно, в эти дни не попал прямой трафик, который импорт журнала не захватил. Считайте итог нижней границей, а не точной цифрой.",
 
   "spend.title": "Всего потрачено",
     "spend.groupLabel": "Группировка",
