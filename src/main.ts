@@ -9025,6 +9025,11 @@ function removedProvidersHtml(): string {
     </div>`;
 }
 
+/// Families whose credential is a browser session rather than a pasted key:
+/// their Customize row gets a jump button that opens the settings panel on
+/// the family's key row, where the sign-in control lives.
+const WEB_SESSION_FAMILIES: ReadonlySet<string> = new Set(["tokenrhythm"]);
+
 function renderCustomize(): string {
   if (skinMarketOpen) return renderSkinMarket();
   // A-Z by English display name, locale-independent. Card order is owned by
@@ -9154,6 +9159,7 @@ function renderCustomize(): string {
             <span class="spacer"></span>
             <button class="mini-btn cust-info-btn${custInfoOpen === id ? " on" : ""}" data-info="${id}" title="${escapeHtml(t("customize.credInfo"))}">${uiIcon("question")}</button>
             <button class="mini-btn cust-config-btn${custConfigOpen === id ? " on" : ""}" data-config="${id}" title="${escapeHtml(t("customize.configure"))}">${uiIcon("gear")}</button>
+            ${WEB_SESSION_FAMILIES.has(id) ? `<button class="mini-btn cust-session-btn" data-session-jump="${id}" title="${escapeHtml(t("customize.sessionJump"))}">${uiIcon("globe")}</button>` : ""}
             <button class="mini-btn icon-btn reset-layout-btn" data-reset="${id}" title="${escapeHtml(t("customize.resetLayoutTip"))}" aria-label="${escapeHtml(t("customize.resetLayoutTip"))}">${uiIcon("arrowsClockwise")}</button>
             <label class="toggle mini" title="${escapeHtml(t("customize.enable"))}"><input type="checkbox" data-enable="${id}"${enabled ? " checked" : ""} /></label>
           </div>
@@ -10670,6 +10676,16 @@ async function handleCustomizeClick(target: HTMLElement): Promise<boolean> {
   if (archivedRestore) {
     const [fam, cardId] = (archivedRestore.dataset.archivedRestore ?? "").split("|");
     void doAccountRestore(fam, cardId);
+    return true;
+  }
+  // Web-session families (基元律动): their credential is a browser sign-in,
+  // so the Customize row jumps straight to that family's row in Settings →
+  // 密钥与额度 instead of leaving the user to hunt for the page.
+  const sessionJump = target.closest<HTMLElement>("[data-session-jump]");
+  if (sessionJump) {
+    const family = sessionJump.dataset.sessionJump!;
+    await patchConfig({ panelIntent: { view: "settings", family, at: Date.now() } }).catch(() => {});
+    void invoke("open_panel_window").catch(() => {});
     return true;
   }
   const cfgBtn = target.closest<HTMLElement>("[data-config]");
@@ -15163,10 +15179,18 @@ function applyPanelIntent(): void {
     if (intent.family) void focusAuthFamily(intent.family);
   } else {
     setPanelView("settings");
-    if (intent.family && CORE_MCP_SERVICES.some((service) => service.id === intent.family)) {
-      document.querySelector<HTMLButtonElement>('.panel-tabs [data-settings-tab="usage"]')?.click();
+    document.querySelector<HTMLButtonElement>('.panel-tabs [data-settings-tab="usage"]')?.click();
+    if (!intent.family) return;
+    if (CORE_MCP_SERVICES.some((service) => service.id === intent.family)) {
       kvAddingForService.add(intent.family);
       void loadKeyvault().then(() => {
+        document.querySelector<HTMLElement>(`[data-skey-family="${CSS.escape(intent.family!)}"]`)
+          ?.scrollIntoView({ block: "start", behavior: scrollBehavior() });
+      });
+    } else if (ALL_PROVIDERS.some(([family]) => family === intent.family)) {
+      // A web-session family's sign-in control lives on its key row, so
+      // bring that row into view once the list has rendered.
+      void loadSettingsProviderKeys().then(() => {
         document.querySelector<HTMLElement>(`[data-skey-family="${CSS.escape(intent.family!)}"]`)
           ?.scrollIntoView({ block: "start", behavior: scrollBehavior() });
       });
