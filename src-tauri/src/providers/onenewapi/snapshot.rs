@@ -1180,14 +1180,14 @@ mod tests {
     /// The scheduled backfill must not block the Key-card read path, and it
     /// must eventually persist the probed display unit. Timing discipline
     /// (2026-10-18, GitHub #6): the probe's arrival is a channel receive —
-    /// a deterministic completion signal, not a timed poll. The final
-    /// persistence wait still observes the store by polling (the writer
-    /// lives inside the spawned task, so there is no latch to await), but
-    /// its bound is a hang-guard, not a scheduling budget: the 3 s bound it
-    /// replaces flaked under CI parallel load — reproduced locally at ~6%
-    /// (2/32 runs, all failing at the persistence stage after the gate
-    /// opened). The load-independent persistence property itself is
-    /// asserted in `backfill_persists_the_probed_unit_deterministically`.
+    /// a deterministic completion signal, not a timed poll — and the
+    /// persistence wait awaits the spawned task's JoinHandle, so the happy
+    /// path carries no scheduling budget at all; the guard only catches a
+    /// genuinely dead task. The 3 s poll-with-deadline this replaces flaked
+    /// under CI parallel load — reproduced locally at ~6% (2/32 runs, all
+    /// failing at the persistence stage after the gate opened). The
+    /// load-independent persistence property itself is asserted in
+    /// `backfill_persists_the_probed_unit_deterministically`.
     #[test]
     fn scheduled_backfill_does_not_block_key_cards() {
         let tmp = TempStore::new();
