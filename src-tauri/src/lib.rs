@@ -236,6 +236,9 @@ fn config_with_defaults(mut cfg: Value) -> Value {
     // also disables them, so they vanish from dashboards/tray; the drawer
     // footer offers restore.
     obj.entry("removedProviders").or_insert(json!([]));
+    // Which popover surface was open when it was dismissed: the next
+    // summon lands back on it instead of the card list.
+    obj.entry("lastView").or_insert(json!({ "kind": "main", "id": null }));
     cfg
 }
 
@@ -324,6 +327,7 @@ const CONFIG_KEYS: &[&str] = &[
     // (see applyPanelIntent in main.ts). Stored so the panel window can read
     // it on boot — the two windows share nothing else.
     "panelIntent",
+    "lastView",
 ];
 
 /// Providers hidden by default on a fresh install: everything outside the

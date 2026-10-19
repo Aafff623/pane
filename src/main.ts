@@ -368,6 +368,10 @@ interface Config {
   qoderCheckin: boolean;
   removedProviders: string[];
   panelIntent: PanelIntent | null;
+  // The popover surface to restore on the next summon (dismissing on the
+  // card list records "main"; Customize and the skin workshop record
+  // themselves, plus the provider whose config was open).
+  lastView: { kind: "main" | "customize" | "skin"; id: string | null };
 }
 
 const FRONTEND_CONFIG_KEYS = [
@@ -425,6 +429,7 @@ const FRONTEND_CONFIG_KEYS = [
   "panelIntent",
   "qoderCheckin",
   "removedProviders",
+  "lastView",
 ] as const satisfies readonly (keyof Config)[];
 type _AssertAllConfigKeys = Exclude<keyof Config, (typeof FRONTEND_CONFIG_KEYS)[number]> extends never
   ? true
@@ -640,6 +645,7 @@ let config: Config = {
   qoderCheckin: false,
   removedProviders: [],
   panelIntent: null,
+  lastView: { kind: "main", id: null },
 };
 let pendingJumpAnimation: "smooth" | "instant" | null = null;
 let settingsDirty = false;
@@ -9346,6 +9352,7 @@ function setDrawer(open: boolean): void {
   if (!open) {
     dismissAccountDialog?.();
     skinMarketOpen = false;
+    custConfigOpen = null;
     document.querySelector("#drawer")?.classList.remove("skin-workshop-open");
   }
   if (open) {
@@ -9355,6 +9362,44 @@ function setDrawer(open: boolean): void {
   }
   document.body.classList.toggle("drawer-open", open);
   document.querySelector("#customize-btn")?.classList.toggle("active", open);
+  rememberPopoverView();
+}
+
+/// Which popover surface the user is on, persisted so the next summon lands
+/// back here instead of the card list. Copying an API key elsewhere and
+/// coming back used to dump you on the main page with the drawer gone.
+function rememberPopoverView(): void {
+  if (IS_PANEL_FORM) return;
+  const kind: "main" | "customize" | "skin" = skinMarketOpen
+    ? "skin"
+    : customizeOpen
+      ? "customize"
+      : "main";
+  const id = kind === "customize" ? custConfigOpen : null;
+  const current = config.lastView ?? { kind: "main" as const, id: null };
+  if (current.kind === kind && (current.id ?? null) === id) return;
+  void patchConfig({ lastView: { kind, id } }).catch(() => {});
+}
+
+/// Restores the surface the popover was dismissed on. A provider that no
+/// longer exists (removed in Customize) falls back to the plain list.
+function restorePopoverView(): void {
+  if (IS_PANEL_FORM) return;
+  const view = config.lastView ?? { kind: "main" as const, id: null };
+  if (view.kind === "skin") {
+    skinMarketOpen = true;
+    custConfigOpen = null;
+    setDrawer(true);
+    return;
+  }
+  if (view.kind === "customize") {
+    skinMarketOpen = false;
+    const id = view.id && ALL_PROVIDERS.some(([family]) => family === view.id) ? view.id : null;
+    custConfigOpen = id;
+    setDrawer(true);
+    return;
+  }
+  setDrawer(false);
 }
 
 // ---------------------------------------------------------------------------
@@ -10307,6 +10352,7 @@ async function handleCustomizeClick(target: HTMLElement): Promise<boolean> {
     skinMarketFeedback = null;
     skinMarketOpen = true;
     renderDrawerBody();
+    rememberPopoverView();
     // Freshen the distribution index while the workshop is open; the
     // render arrives with whatever is newest.
     void refreshSkinIndex().then(() => {
@@ -10555,6 +10601,7 @@ async function handleCustomizeClick(target: HTMLElement): Promise<boolean> {
     custInfoOpen = null; // one panel at a time per row
     dismissAccountDialog?.();
     renderDrawerBody();
+    rememberPopoverView();
     if (custConfigOpen) {
       fetchCredStatus(id); // the status section's live chips
       fetchAccounts(providerFamily(id)); // the account section's saved list
@@ -16613,11 +16660,10 @@ document.querySelector("#settings-btn")!.addEventListener("click", () => {
 
   void listen("popover-shown", () => {
     void checkForUpdate();
-    // Always reopen on the main page, at the top — leftover Customize/
-    // Settings panels, a stale confirm dialog, or a stale scroll position
-    // from the previous visit feel like the app is stuck mid-page.
-    setDrawer(false);
-    setSettings(false);
+    // Land back on the surface the popover was dismissed on: copying an API
+    // key in another window and coming back should not cost the user their
+    // place. Stale dialogs still go — only the view is remembered.
+    restorePopoverView();
     dismissConfirm?.();
     dismissWhatsNew?.(pendingFontGuide !== "skip");
     userSelectedAccountFor.clear();
