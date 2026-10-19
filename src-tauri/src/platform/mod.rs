@@ -150,6 +150,16 @@ pub fn set_webview_memory_level(window: &tauri::WebviewWindow, low: bool) {
     imp::set_webview_memory_level(window, low);
 }
 
+/// Cookies a webview holds for `url`, read through the browser's own cookie
+/// manager. Empty on platforms that can't read them (the caller then has no
+/// web-session credential to work with).
+pub async fn read_webview_cookies(
+    window: &tauri::WebviewWindow,
+    url: &str,
+) -> Vec<(String, String)> {
+    imp::read_webview_cookies(window, url).await
+}
+
 /// Drops the Windows 11 focus hairline that DWM paints around a
 /// frameless window. No-op on macOS/Linux — they don't draw that stroke.
 pub fn hide_window_border(window: &tauri::WebviewWindow) {

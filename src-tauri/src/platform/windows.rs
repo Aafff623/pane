@@ -211,6 +211,147 @@ pub fn set_webview_memory_level(window: &tauri::WebviewWindow, low: bool) {
     }
 }
 
+/// Reads the cookies a webview holds for `url` through WebView2's own cookie
+/// manager. This is the only way to see the app's own profile cookies: the
+/// browser process keeps `Cookies` locked with no share flags for as long as
+/// the app runs, so a file read fails outright — and httpOnly values are
+/// never visible to page script either.
+///
+/// Empty when the window has no such webview or the manager reports none.
+pub async fn read_webview_cookies(
+    window: &tauri::WebviewWindow,
+    url: &str,
+) -> Vec<(String, String)> {
+    #[cfg(not(feature = "harness"))]
+    {
+        let (tx, rx) = std::sync::mpsc::channel::<Vec<(String, String)>>();
+        let window = window.clone();
+        let url = url.to_owned();
+        // with_webview dispatches onto the main thread and the cookie manager
+        // answers through a completed handler pumped by that same loop, so
+        // the wait has to happen off the runtime's worker threads.
+        let dispatched = tokio::task::spawn_blocking(move || {
+            let _ = window.with_webview(move |webview| {
+                read_cookies_via_manager(&webview, &url, tx);
+            });
+        })
+        .await;
+        if dispatched.is_err() {
+            return Vec::new();
+        }
+        rx.recv_timeout(std::time::Duration::from_secs(10))
+            .unwrap_or_default()
+    }
+    #[cfg(feature = "harness")]
+    {
+        let _ = (window, url);
+        Vec::new()
+    }
+}
+
+/// The COM half of [`read_webview_cookies`]: ask the manager, hand the list
+/// to the sender from inside the completed handler.
+#[cfg(not(feature = "harness"))]
+fn read_cookies_via_manager(
+    webview: &tauri::webview::PlatformWebview,
+    url: &str,
+    tx: std::sync::mpsc::Sender<Vec<(String, String)>>,
+) {
+    use webview2_com::Microsoft::Web::WebView2::Win32::{
+        ICoreWebView2_13, ICoreWebView2CookieList, ICoreWebView2GetCookiesCompletedHandler,
+        ICoreWebView2GetCookiesCompletedHandler_Impl, ICoreWebView2Profile5,
+    };
+    use windows_core::{Interface, Ref};
+    use windows_implement::implement;
+
+    /// Receives the cookie list WebView2 answers with.
+    #[implement(ICoreWebView2GetCookiesCompletedHandler)]
+    struct CookiesHandler {
+        tx: std::sync::mpsc::Sender<Vec<(String, String)>>,
+    }
+
+    impl ICoreWebView2GetCookiesCompletedHandler_Impl for CookiesHandler_Impl {
+        fn Invoke(
+            &self,
+            errorcode: windows_core::HRESULT,
+            result: Ref<'_, ICoreWebView2CookieList>,
+        ) -> windows::core::Result<()> {
+            let mut cookies = Vec::new();
+            if errorcode.is_ok() {
+                if let Some(list) = result.as_ref() {
+                    unsafe {
+                        let mut count = 0u32;
+                        if list.Count(&mut count).is_ok() {
+                            for index in 0..count {
+                                let Ok(cookie) = list.GetValueAtIndex(index) else {
+                                    continue;
+                                };
+                                let mut name = windows_core::PWSTR::null();
+                                let mut value = windows_core::PWSTR::null();
+                                let read = cookie.Name(&mut name).is_ok()
+                                    && cookie.Value(&mut value).is_ok();
+                                let (name, value) =
+                                    (pwstr_to_string(name), pwstr_to_string(value));
+                                if read && !name.is_empty() {
+                                    cookies.push((name, value));
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            let _ = self.tx.send(cookies);
+            Ok(())
+        }
+    }
+
+    unsafe {
+        let Ok(core) = webview.controller().CoreWebView2() else {
+            return;
+        };
+        // The cookie manager lives on the profile (v5+), not the webview.
+        let Ok(profile) = core.cast::<ICoreWebView2_13>() else {
+            return;
+        };
+        let Ok(profile) = profile.Profile() else {
+            return;
+        };
+        let Ok(profile5) = profile.cast::<ICoreWebView2Profile5>() else {
+            return;
+        };
+        let Ok(manager) = profile5.CookieManager() else {
+            return;
+        };
+        let uri: Vec<u16> = url.encode_utf16().chain(std::iter::once(0)).collect();
+        let handler: ICoreWebView2GetCookiesCompletedHandler =
+            CookiesHandler { tx: tx.clone() }.into();
+        if let Err(e) = manager.GetCookies(windows_core::PCWSTR(uri.as_ptr()), &handler) {
+            let _ = tx.send(Vec::new());
+            eprintln!("[pane] webview cookie manager: {e}");
+        }
+    }
+}
+
+/// Copies a COM-allocated wide string into a Rust `String` and frees the
+/// buffer. A null pointer is an empty string (webview2-com keeps its own
+/// helper private).
+#[cfg(not(feature = "harness"))]
+fn pwstr_to_string(value: windows_core::PWSTR) -> String {
+    use windows::Win32::System::Com::CoTaskMemFree;
+    if value.is_null() {
+        return String::new();
+    }
+    let mut len = 0usize;
+    unsafe {
+        while *value.0.add(len) != 0 {
+            len += 1;
+        }
+        let out = String::from_utf16_lossy(std::slice::from_raw_parts(value.0, len));
+        CoTaskMemFree(Some(value.0 as *const _));
+        out
+    }
+}
+
 /// Windows 11 draws a light focus stroke around a frameless HWND
 /// (`DWMWA_BORDER_COLOR` default). On this dark popover it reads as a
 /// thick white card frame. COLOR_NONE removes the stroke; the drop

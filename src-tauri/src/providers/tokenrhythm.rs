@@ -5,22 +5,26 @@
 //! money (`/api/wallet/summary`, `/api/api-keys/usage`, `/api/call-logs`)
 //! lives under `/api` and answers 401 to the key — verified 2026-10-19
 //! against the live site with a real key. The console authenticates with a
-//! login session (phone + SMS; production is cookie-only, the Bearer path
-//! in its bundle is mock-only), so Pane hosts the login itself.
+//! login session (phone + SMS, or the account password; production is
+//! cookie-only, the Bearer path in its bundle is mock-only), so Pane hosts
+//! the login itself.
 //!
 //! Flow: the user signs in inside a Pane-hosted webview (the captcha and
 //! the SMS code are theirs to clear); the session then lives in Pane's own
-//! WebView2 profile (`EBWebView`), which persists across restarts like a
-//! browser staying signed in. Refresh reads the session cookie straight
-//! out of that profile (the same Chromium cookie chain Doubao uses), caches
-//! the header in the OS vault, and calls the console API with reqwest. No
-//! cookie or token is ever written to Pane's JSON files or logs.
+//! WebView2 profile, which persists across restarts like a browser staying
+//! signed in. Pane reads the session cookie through WebView2's cookie
+//! manager — the profile's cookie DB is locked by the browser process while
+//! the app runs, and the session value is httpOnly, so neither a file read
+//! nor page script can see it — caches the header in the OS vault, and
+//! calls the console API with reqwest. No cookie or token is ever written
+//! to Pane's JSON files or logs.
 //!
-//! Response shapes of `/api/wallet/summary` are UNVERIFIED (needs the
-//! owner's first login) — the parser tries the plausible field names and
-//! otherwise fails honestly with `待确认` instead of inventing numbers.
+//! Response shapes of `/api/wallet/summary` were captured from the live
+//! site on 2026-10-19 (owner's first login): the envelope is
+//! `{code, message, data}` and the balance rides as the decimal string
+//! `data.availableBalanceCny`. The parser still fails honestly with
+//! `待确认` on an unrecognized shape instead of inventing numbers.
 
-use super::chromium;
 use super::{config_dir, error_chain, http, Metric, Snapshot};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -35,10 +39,6 @@ const VAULT_SCOPE: &str = "web/tokenrhythm";
 const STORE_FILE: &str = "tokenrhythm_web.json";
 const MAX_STORE_BYTES: u64 = 64 * 1024;
 const MAX_BODY_BYTES: usize = 256 * 1024;
-/// Pane's own WebView2 profile (the app's single browser profile).
-const EBWEBVIEW_DIR: &str = "EBWebView";
-const COOKIES_REL: &str = "Default/Network/Cookies";
-const LOCAL_STATE_REL: &str = "Local State";
 /// The console's CSRF cookie — its value rides as `X-CSRF-Token` on
 /// mutations and is harmless on the GETs Pane makes.
 const CSRF_COOKIE: &str = "tr_csrf";
@@ -98,84 +98,44 @@ pub fn clear() -> Result<(), String> {
 }
 
 // ---------------------------------------------------------------------------
-// Reading the session cookie out of Pane's own WebView2 profile
+// Reading the session out of Pane's own WebView2 profile
 // ---------------------------------------------------------------------------
 
-fn profile_dir() -> Option<PathBuf> {
-    dirs::data_local_dir()
-        .map(|d| d.join("com.jazii.pane"))
-        .map(|d| d.join(EBWEBVIEW_DIR))
-        .filter(|d| d.is_dir())
+/// The webview whose cookie manager sees the site's session. Every webview
+/// in the app shares one browser profile, so any of them answers; the login
+/// window is preferred while it is open because it is the one the user just
+/// signed in through.
+#[cfg(not(feature = "harness"))]
+fn session_window(app: &tauri::AppHandle) -> Option<tauri::WebviewWindow> {
+    use tauri::Manager as _;
+    app.get_webview_window(LOGIN_WINDOW)
+        .or_else(|| app.get_webview_window("main"))
+        .or_else(|| app.get_webview_window("panel"))
 }
 
-/// Deletes the copied Cookies DB on every exit path — a half-read copy of
-/// every site's encrypted cookies must not linger in Pane's config dir.
-struct SnapshotGuard(PathBuf);
-impl Drop for SnapshotGuard {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_file(&self.0);
-    }
-}
-
-/// All `tokenrhythm.studio` cookies from Pane's own profile, joined into a
-/// request header, plus the CSRF value. `None` when the profile holds no
-/// session for the site (the user never signed in, or the DB is locked).
-fn extract_profile_cookie() -> Option<(String, String)> {
-    let dir = profile_dir()?;
-    let src = dir.join(COOKIES_REL);
-    if !src.is_file() {
+/// The site's cookies as a request header, plus the CSRF value, read through
+/// the browser's own cookie manager. `None` when no webview holds a session
+/// for the site yet (the user never signed in, or the manager is
+/// unavailable).
+///
+/// The profile's cookie DB is NOT readable here: the browser process keeps
+/// it locked with no share flags for as long as the app runs, and the
+/// session value is httpOnly, so page script cannot see it either. The
+/// cookie manager is the only channel that reports it.
+#[cfg(not(feature = "harness"))]
+async fn extract_session(app: &tauri::AppHandle) -> Option<(String, String)> {
+    let window = session_window(app)?;
+    let cookies = crate::platform::read_webview_cookies(&window, SITE_ORIGIN).await;
+    if cookies.is_empty() {
         return None;
     }
-    let dst = config_dir().join("tokenrhythm_web_snapshot.db");
-    std::fs::create_dir_all(config_dir()).ok();
-    let _guard = SnapshotGuard(dst.clone());
-    let snapshot_ok = (|| -> Result<(), String> {
-        let src_conn =
-            rusqlite::Connection::open_with_flags(&src, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
-                .map_err(|e| e.to_string())?;
-        let mut dst_conn = rusqlite::Connection::open(&dst).map_err(|e| e.to_string())?;
-        let backup =
-            rusqlite::backup::Backup::new(&src_conn, &mut dst_conn).map_err(|e| e.to_string())?;
-        backup
-            .run_to_completion(5, Duration::from_millis(20), None)
-            .map_err(|e| e.to_string())
-    })()
-    .is_ok();
-    let snapshot_ok = snapshot_ok || std::fs::copy(&src, &dst).map(|_| ()).is_ok();
-    if !snapshot_ok {
-        return None;
-    }
-    let key = chromium::os_crypt_key(&dir).ok()?;
-    let conn =
-        rusqlite::Connection::open_with_flags(&dst, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
-            .ok()?;
-    let mut stmt = conn
-        .prepare(
-            "SELECT host_key, name, encrypted_value FROM cookies WHERE host_key LIKE '%tokenrhythm.studio'",
-        )
-        .ok()?;
-    let rows: Vec<(String, String, Vec<u8>)> = stmt
-        .query_map([], |row| {
-            Ok((
-                row.get::<_, String>(0)?,
-                row.get::<_, String>(1)?,
-                row.get::<_, Vec<u8>>(2)?,
-            ))
-        })
-        .ok()?
-        .flatten()
-        .collect();
     let mut jar: Vec<String> = Vec::new();
     let mut csrf = String::new();
-    for (_, name, blob) in rows {
-        let Some(value) = chromium::decode_os_crypt(&blob, &key)
-            .ok()
-            .and_then(|plain| String::from_utf8(plain).ok())
-            .map(|s| s.trim().to_string())
-            .filter(|s| !s.is_empty())
-        else {
+    for (name, value) in cookies {
+        let value = value.trim().to_string();
+        if value.is_empty() {
             continue;
-        };
+        }
         if name == CSRF_COOKIE {
             csrf = value.clone();
         }
@@ -187,11 +147,19 @@ fn extract_profile_cookie() -> Option<(String, String)> {
     Some((jar.join("; "), csrf))
 }
 
-/// Caches whatever the profile currently holds — called after the login
-/// window reports success and on demand when a refresh finds the cache
-/// empty.
-fn cache_profile_session() -> bool {
-    let Some((cookie, csrf)) = extract_profile_cookie() else {
+#[cfg(feature = "harness")]
+async fn extract_session(_app: &tauri::AppHandle) -> Option<(String, String)> {
+    // No webviews in the harness — the login window is meaningless there.
+    None
+}
+
+/// Caches whatever the profile currently holds. Called right after a login
+/// completes, and at the start of a login attempt so a session established
+/// in an earlier app version (or after a cache clear) is picked up without
+/// asking the user to sign in again.
+#[cfg(not(feature = "harness"))]
+async fn cache_profile_session(app: &tauri::AppHandle) -> bool {
+    let Some((cookie, csrf)) = extract_session(app).await else {
         return false;
     };
     let store = Store {
@@ -200,6 +168,11 @@ fn cache_profile_session() -> bool {
         saved_at: Some(chrono::Utc::now().to_rfc3339()),
     };
     save_store(&store).is_ok()
+}
+
+#[cfg(feature = "harness")]
+async fn cache_profile_session(_app: &tauri::AppHandle) -> bool {
+    false
 }
 
 // ---------------------------------------------------------------------------
@@ -321,15 +294,14 @@ pub async fn snapshot() -> Snapshot {
 
 /// The card's snapshot. Never `None` — the channel always reports
 /// something (the signed-out hint when there is no session).
+///
+/// The session comes from the vault cache only. Re-reading it from the
+/// browser needs a webview handle (and therefore an `AppHandle`), which the
+/// dispatch table does not pass; the login command does that recovery
+/// itself, so a cache miss here just means "sign in again" — the hint says
+/// exactly that.
 pub async fn snapshot_for(family_id: &str, display_name: &str) -> Snapshot {
-    let mut store = load_store();
-    if store.cookie.trim().is_empty() {
-        // The profile may hold a session Pane has not cached yet (first run
-        // after a web login in a previous app version, or a cache clear).
-        if cache_profile_session() {
-            store = load_store();
-        }
-    }
+    let store = load_store();
     if store.cookie.trim().is_empty() {
         return Snapshot::no_credentials(
             family_id,
@@ -350,33 +322,9 @@ pub async fn snapshot_for(family_id: &str, display_name: &str) -> Snapshot {
             ),
         },
         Err(CallErr::Auth) => {
-            // The cached session may merely be stale — try the profile once
-            // before declaring the session dead.
-            if cache_profile_session() {
-                let fresh = load_store();
-                if fresh.cookie != store.cookie {
-                    return match call_console(WALLET_PATH, &fresh.cookie, &fresh.csrf).await {
-                        Ok(doc) => match metrics_from_wallet(&doc) {
-                            Some(metrics) => {
-                                Snapshot::ok(family_id, display_name, None, metrics)
-                            }
-                            None => Snapshot::error(
-                                family_id,
-                                display_name,
-                                format!(
-                                    "基元律动钱包响应结构未识别（待确认）：{}",
-                                    wallet_key_digest(&doc)
-                                ),
-                            ),
-                        },
-                        Err(_) => Snapshot::no_credentials(
-                            family_id,
-                            display_name,
-                            SIGNED_OUT_HINT.into(),
-                        ),
-                    };
-                }
-            }
+            // The cached session is stale and there is no way to re-read the
+            // browser from here (no AppHandle in the dispatch table), so the
+            // honest answer is "sign in again".
             Snapshot::no_credentials(family_id, display_name, SIGNED_OUT_HINT.into())
         }
         Err(CallErr::Other(reason)) => Snapshot::error(
@@ -391,65 +339,38 @@ pub async fn snapshot_for(family_id: &str, display_name: &str) -> Snapshot {
 // Login window (async command surface — see lib.rs for the wrappers)
 // ---------------------------------------------------------------------------
 
-/// Set by the login window's in-page probe (server truth: `/api/auth/me`
-/// answered 200). Watched by `login` alongside the cookie fallback.
-#[allow(dead_code)]
-static LOGIN_READY: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
-
-/// Called from the login window's initialization script once the console
-/// reports a session. Rust closes the window from the `login` loop.
-#[allow(dead_code)]
-pub fn login_ready() {
-    LOGIN_READY.store(true, std::sync::atomic::Ordering::SeqCst);
+/// True when `/api/auth/me` answers with a real account: the envelope's
+/// `code` is 0 and `data.id` names a user. A guest or expired session
+/// answers 401 or a non-zero code.
+fn signed_in_response(doc: &Value) -> bool {
+    doc.get("code").and_then(Value::as_i64) == Some(0)
+        && doc
+            .get("data")
+            .and_then(|d| d.get("id"))
+            .and_then(Value::as_str)
+            .is_some_and(|id| !id.trim().is_empty())
 }
 
-/// Cookie NAMES the profile holds for the site — a new name appearing is
-/// the fallback signal when the in-page invoke channel is unavailable.
-fn profile_cookie_names() -> Vec<String> {
-    let Some(dir) = profile_dir() else {
-        return Vec::new();
-    };
-    let src = dir.join(COOKIES_REL);
-    if !src.is_file() {
-        return Vec::new();
+/// Whether a cookie jar carries a live session. Read straight from the
+/// site — the same truth the card's own refresh uses — so detection cannot
+/// be fooled by cookie names or timing.
+async fn session_live(cookie: &str, csrf: &str) -> bool {
+    match call_console(ME_PATH, cookie, csrf).await {
+        Ok(doc) => signed_in_response(&doc),
+        Err(_) => false,
     }
-    let dst = config_dir().join("tokenrhythm_names_snapshot.db");
-    std::fs::create_dir_all(config_dir()).ok();
-    let _guard = SnapshotGuard(dst.clone());
-    let ok = (|| -> Result<(), String> {
-        let src_conn =
-            rusqlite::Connection::open_with_flags(&src, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
-                .map_err(|e| e.to_string())?;
-        let mut dst_conn = rusqlite::Connection::open(&dst).map_err(|e| e.to_string())?;
-        let backup =
-            rusqlite::backup::Backup::new(&src_conn, &mut dst_conn).map_err(|e| e.to_string())?;
-        backup
-            .run_to_completion(5, Duration::from_millis(20), None)
-            .map_err(|e| e.to_string())
-    })()
-    .is_ok();
-    let ok = ok || std::fs::copy(&src, &dst).map(|_| ()).is_ok();
-    if !ok {
-        return Vec::new();
-    }
-    let Ok(conn) =
-        rusqlite::Connection::open_with_flags(&dst, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
-    else {
-        return Vec::new();
-    };
-    let Ok(mut stmt) = conn.prepare(
-        "SELECT name FROM cookies WHERE host_key LIKE '%tokenrhythm.studio'",
-    ) else {
-        return Vec::new();
-    };
-    stmt.query_map([], |row| row.get::<_, String>(0))
-        .map(|rows| rows.flatten().collect())
-        .unwrap_or_default()
 }
 
 /// Opens the sign-in window and waits until the console reports a session.
-/// The user clears the captcha and the SMS code inside the window; the
-/// session then lives in Pane's own WebView2 profile.
+/// The user clears the captcha and the SMS code (or signs in with the
+/// account password) inside the window; the session then lives in Pane's
+/// own WebView2 profile.
+///
+/// Completion is decided Rust-side by asking the site with whatever cookies
+/// the browser currently holds. An in-page probe was tried first and
+/// abandoned: the window loads a REMOTE origin, and Tauri only lets remote
+/// content reach app commands when a capability names them — which would
+/// have turned on ACL gating for every command in the app.
 ///
 /// App-only: the parse-tests harness's `tauri` stub has no window builder,
 /// and the login window is meaningless there.
@@ -457,7 +378,7 @@ fn profile_cookie_names() -> Vec<String> {
 pub async fn login(app: &tauri::AppHandle) -> Result<(), String> {
     use tauri::Manager as _;
     if load_store().cookie.trim().is_empty() {
-        cache_profile_session();
+        cache_profile_session(app).await;
     }
     if !load_store().cookie.trim().is_empty() {
         return Ok(()); // already signed in
@@ -467,68 +388,53 @@ pub async fn login(app: &tauri::AppHandle) -> Result<(), String> {
         return Ok(());
     }
     let url = tauri::Url::parse(LOGIN_URL).map_err(|e| format!("login url: {e}"))?;
-    LOGIN_READY.store(false, std::sync::atomic::Ordering::SeqCst);
     tauri::WebviewWindowBuilder::new(app, LOGIN_WINDOW, tauri::WebviewUrl::External(url))
         .title("登录基元律动")
         .inner_size(480.0, 720.0)
         .center()
-        .initialization_script(LOGIN_PROBE_JS)
         .build()
         .map_err(|e| e.to_string())?;
     // Let the login page settle so its own first-party cookies land before
-    // the fallback baseline is taken.
+    // the first check.
     tokio::time::sleep(Duration::from_secs(3)).await;
-    let baseline: std::collections::HashSet<String> =
-        profile_cookie_names().into_iter().collect();
     let deadline = std::time::Instant::now() + LOGIN_TIMEOUT;
-    loop {
-        if LOGIN_READY.load(std::sync::atomic::Ordering::SeqCst) {
-            break;
-        }
-        // Fallback: a cookie name the page did not have before.
-        if profile_cookie_names()
-            .into_iter()
-            .any(|n| !baseline.contains(&n))
-        {
-            break;
+    // The jar that answered with a live session — cached after the window
+    // closes, so no second read is needed.
+    let mut session: Option<(String, String)> = None;
+    while session.is_none() {
+        if let Some((cookie, csrf)) = extract_session(app).await {
+            if session_live(&cookie, &csrf).await {
+                session = Some((cookie, csrf));
+                break;
+            }
         }
         if app.get_webview_window(LOGIN_WINDOW).is_none() {
-            break; // the user closed it
+            return Err("登录未完成（窗口已关闭）".into()); // the user closed it
         }
         if std::time::Instant::now() > deadline {
-            break;
+            if let Some(w) = app.get_webview_window(LOGIN_WINDOW) {
+                let _ = w.close();
+            }
+            return Err("登录超时（窗口已关闭）".into());
         }
         tokio::time::sleep(LOGIN_POLL).await;
     }
     if let Some(w) = app.get_webview_window(LOGIN_WINDOW) {
         let _ = w.close();
     }
-    // The webview has released the cookie DB — read and cache the session.
-    if !cache_profile_session() {
+    let Some((cookie, csrf)) = session else {
         return Err("登录未完成（窗口已关闭）".into());
+    };
+    let store = Store {
+        cookie,
+        csrf,
+        saved_at: Some(chrono::Utc::now().to_rfc3339()),
+    };
+    if save_store(&store).is_err() {
+        return Err("登录态保存失败".into());
     }
     Ok(())
 }
-
-/// Injected into the login window: as soon as the console answers
-/// `/api/auth/me` with 200 the page tells Rust to close the window. Falls
-/// back to silence when the invoke channel is unavailable — the Rust-side
-/// cookie poll then decides.
-const LOGIN_PROBE_JS: &str = r#"
-(() => {
-  const done = () => {
-    try { window.__TAURI_INTERNALS__.invoke('tokenrhythm_login_ready', {}); } catch (e) {}
-  };
-  const tick = async () => {
-    try {
-      const r = await fetch('/api/auth/me', { credentials: 'include' });
-      if (r.ok) { done(); return; }
-    } catch (e) {}
-    setTimeout(tick, 1500);
-  };
-  tick();
-})();
-"#;
 
 #[cfg(test)]
 mod tests {
@@ -565,5 +471,52 @@ mod tests {
     #[test]
     fn a_body_without_numbers_yields_nothing() {
         assert!(metrics_from_wallet(&json!({"data":{}})).is_none());
+    }
+
+    #[test]
+    fn the_real_me_body_reads_as_signed_in() {
+        // Shape captured from the live site on 2026-10-19 (first login).
+        let doc = json!({
+            "code": 0,
+            "message": "ok",
+            "data": {
+                "id": "bcacd231-3fd9-4a5b-93c9-73f8256d6cfd",
+                "name": "17836372725",
+                "status": "active"
+            }
+        });
+        assert!(signed_in_response(&doc));
+    }
+
+    #[test]
+    fn a_guest_or_error_body_is_not_signed_in() {
+        assert!(!signed_in_response(&json!({"code": 401, "message": "unauthorized"})));
+        assert!(!signed_in_response(&json!({"code": 0, "data": null})));
+        assert!(!signed_in_response(&json!({"code": 0, "data": {"id": ""}})));
+    }
+
+    #[test]
+    fn the_real_wallet_body_yields_the_available_balance() {
+        // Shape captured from the live site on 2026-10-19 (first login).
+        let doc = json!({
+            "code": 0,
+            "message": "ok",
+            "data": {
+                "currency": "CNY",
+                "availableBalanceCny": "142.31105772",
+                "giftAvailableCny": "142.31105772",
+                "giftLockedCny": "0.00000000",
+                "rechargeBalanceCny": "0.00000000",
+                "debtBalanceCny": "0.00000000",
+                "frozenBalanceCny": "0.00000000",
+                "giftTotalCny": "142.31105772",
+                "giftStatus": "active",
+                "voidedGiftCny": "0.00000000",
+                "asOf": "2026-10-19T07:23:02.155Z"
+            }
+        });
+        let metrics = metrics_from_wallet(&doc).expect("rows");
+        assert_eq!(metrics[0].label, "可用额度");
+        assert_eq!(metrics[0].value.as_deref(), Some("¥142.31"));
     }
 }

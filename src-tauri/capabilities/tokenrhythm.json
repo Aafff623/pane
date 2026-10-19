@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "tokenrhythm-login",
-  "description": "基元律动 sign-in window: loads the remote site so the user can clear the captcha and SMS code; its in-page probe reports login completion through the tokenrhythm_login_ready command. No other surface is exposed to that origin.",
+  "description": "基元律动 sign-in window: loads the remote site so the user can clear the captcha and SMS code (or sign in with the account password). The window itself needs no IPC — Rust watches the browser's cookie manager and closes it when the console reports a session. No other surface is exposed to that origin.",
   "windows": ["tr-login"],
   "remote": {
     "urls": ["https://tokenrhythm.studio/*"]

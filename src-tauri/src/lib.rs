@@ -1922,13 +1922,6 @@ async fn tokenrhythm_login(app: tauri::AppHandle) -> Result<(), String> {
     providers::tokenrhythm::login(&app).await
 }
 
-/// Called from the login window's in-page probe once `/api/auth/me`
-/// answers 200 — the `login` loop watches this flag.
-#[tauri::command]
-fn tokenrhythm_login_ready() {
-    providers::tokenrhythm::login_ready()
-}
-
 #[tauri::command]
 fn tokenrhythm_login_clear() -> Result<(), String> {
     providers::tokenrhythm::clear()
@@ -5026,7 +5019,6 @@ pub fn run() {
             workbuddy_web_clear,
             tokenrhythm_login_status,
             tokenrhythm_login,
-            tokenrhythm_login_ready,
             tokenrhythm_login_clear,
             save_text_file,
             keyvault_v3_enable_recovery_code,

@@ -182,6 +182,16 @@ fn loopback_port(addr: &str) -> Option<u16> {
 /// both manage their own footprint when the window is hidden.
 pub fn set_webview_memory_level(_window: &tauri::WebviewWindow, _low: bool) {}
 
+/// WKWebView / WebKitGTK expose no cookie-manager equivalent that reaches
+/// httpOnly values from the app side, so a web-session credential has
+/// nothing to read here.
+pub async fn read_webview_cookies(
+    _window: &tauri::WebviewWindow,
+    _url: &str,
+) -> Vec<(String, String)> {
+    Vec::new()
+}
+
 pub fn hide_window_border(_window: &tauri::WebviewWindow) {}
 
 /// Linux answers with /proc/stat's btime; macOS with sysctl's kern.boottime.

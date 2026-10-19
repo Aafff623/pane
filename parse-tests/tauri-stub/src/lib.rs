@@ -47,3 +47,8 @@ pub mod async_runtime {
 /// Opaque in the harness: no provider code inspects it, it is only passed
 /// through to the platform layer's WebView memory hint.
 pub struct WebviewWindow;
+
+/// Opaque app handle. Providers that host their own windows (the 基元律动
+/// login) take it to reach the webview list; in the harness there are no
+/// windows, so the cookie-manager path reports an empty session.
+pub struct AppHandle;
