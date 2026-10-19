@@ -13,6 +13,7 @@ import {
   type ProviderCategory,
 } from "./providerCatalog";
 import { PEAK_RULES, isProviderInPeak, type PeakRule } from "./peakHours";
+import { onboardingFor, onboardingMethods, type AccountAction, type Onboarding } from "./providerOnboarding";
 import { providerVisual } from "./providerVisuals";
 import { MECHANISMS } from "./providerMechanisms";
 import { uiIcon, type UiIconName } from "./uiIcons";
@@ -7453,17 +7454,19 @@ const PROVIDER_CRED_INFO: Record<string, { auto: string; methods: CredMethod[] }
 /// provider can be read (local config file, API key, OAuth callback), not
 /// a config surface — all actions live in the ⚙ panel.
 function renderCustInfo(id: string): string {
-  const info = PROVIDER_CRED_INFO[providerFamily(id)];
-  const auto = info ? escapeHtml(t(info.auto)) : "";
-  const methods = info
-    ? info.methods
-        .map((m) => `<li>${escapeHtml(t(`customize.credMethod.${m}`))}</li>`)
-        .join("")
-    : `<li class="dim">${escapeHtml(t("customize.credMethodNone"))}</li>`;
-  return `<div class="cust-config cust-info">${mechanismFactsHtml(providerFamily(id))}
+  const family = providerFamily(id);
+  const info = PROVIDER_CRED_INFO[family];
+  // Families missing from the legacy table used to render "no credentials
+  // needed" — false for every login/read-only provider. The onboarding
+  // descriptor is the fallback: it can always say what the family needs.
+  const auto = escapeHtml(info ? t(info.auto) : t(onboardingFor(family).hintKey));
+  const methods = (info ? info.methods : onboardingMethods(family))
+    .map((m) => `<li>${escapeHtml(t(`customize.credMethod.${m}`))}</li>`)
+    .join("");
+  return `<div class="cust-config cust-info">${mechanismFactsHtml(family)}
       <p><span class="cust-info-label">${escapeHtml(t("customize.credAutoLabel"))}</span>${auto}</p>
       <ol class="cust-info-methods">
-        ${methods}
+        ${methods || `<li class="dim">${escapeHtml(t("customize.credMethodNone"))}</li>`}
       </ol>
       <p><span class="cust-info-label">${escapeHtml(t("customize.credStatusLabel"))}</span><span class="dim" data-cred-status="${escapeHtml(id)}">${escapeHtml(t("customize.credStatusLoading"))}</span></p>
     </div>`;
@@ -8647,7 +8650,7 @@ function renderCustConfig(id: string): string {
   // paste-key path (gear input + Test + Save) is gone — add via dialog.
   // Checked BEFORE the KEY_PROVIDERS gate so non-key families like
   // Antigravity (captured OAuth slots) land here too.
-  if (supportsExtraAccounts(id) && isFamilyRow) {
+  if (supportsExtraAccounts(id) && isFamilyRow && id !== "stepfun-plan") {
     // One/New API manages its sites in the family row's own account section
     // (onaFamilySection) — no generic add-account dialog here.
     if (id === ONA_FAMILY) {
@@ -8674,8 +8677,15 @@ function renderCustConfig(id: string): string {
       primary = `<button class="mini-btn cust-account-toggle" data-ag-capture="${id}">${escapeHtml(t("customize.agCapture"))}</button>`;
     } else if (id === "cursor") {
       primary = `<button class="mini-btn cust-account-toggle" data-cursor-account="${id}">${escapeHtml(t("customize.acctAdd"))}</button>`;
-    } else {
+    } else if (onboardingFor(id).actions.includes("pasteKey")) {
+      // A real key provider with the multi-account model (OpenCode, Z.ai,
+      // MiniMax …): the paste-key dialog is the right action here.
       primary = `<button class="mini-btn cust-account-toggle" data-acct-toggle="${id}">${escapeHtml(t("customize.acctAdd"))}</button>`;
+    } else {
+      // Login/read-only family: NEVER offer the paste-key dialog. The
+      // onboarding panel routes to the real scan / browser / device /
+      // desktop-import flow.
+      return renderOnboardingConfig(id, onboardingFor(id));
     }
     // The account list itself lives as child rows under the family row;
     // this panel is only the connection method + the add/get-key actions.
@@ -8763,9 +8773,11 @@ function renderCustConfig(id: string): string {
     if (id !== fam && supportsExtraAccounts(fam)) {
       return renderAccountConfig(id);
     }
-    const hintKey = `customize.loginHint.${providerFamily(id)}`;
-    const hint = t(hintKey) !== hintKey ? t(hintKey) : t("customize.cliLoginHint");
-    return `<div class="cust-config">${status}${renderOAuthBlock(id)}<p class="settings-note">${escapeHtml(hint)}</p>${custNoteField(id)}${custApplyHtml(id)}${groupPickerHtml(id)}</div>`;
+    // Non-key family: the onboarding descriptor owns the hint AND the
+    // actions (read-local, import cookie, jump to the keys page, …). The
+    // old generic "sign in with its CLI" sentence is gone — it was wrong
+    // for local-file, cookie and cloud providers.
+    return renderOnboardingConfig(id, onboardingFor(fam));
   }
   // Single-key providers: one stacked API-key form (DSH/cockpit style).
   const phKey = `settings.keyPh${id[0].toUpperCase()}${id.slice(1)}`;
@@ -8802,6 +8814,68 @@ function renderCustConfig(id: string): string {
       </div>
       ${custApplyHtml(id)}
       ${groupPickerHtml(id)}
+    </div>`;
+}
+
+/// One action button for a login/read-only family. Only actions that the
+/// backend can actually complete are rendered; an incompatible one would
+/// recreate the old "add account asks for an API key" bug.
+function onboardingActionHtml(id: string, action: AccountAction): string {
+  switch (action) {
+    case "addLogin":
+    case "openAuthCenter":
+      // Device-code families have their inline block below; everything
+      // else is driven from the auth center (one login UI, not two).
+      if (OAUTH_PROVIDERS.has(id)) return "";
+      return `<button class="mini-btn cust-account-toggle" data-login-family="${escapeHtml(id)}">${escapeHtml(t("onboarding.addLogin"))}</button>`;
+    case "importDesktop":
+      return `<button class="mini-btn" data-import-desktop="${escapeHtml(id)}">${escapeHtml(t("onboarding.importDesktop"))}</button>`;
+    case "importAccounts":
+      return `<button class="mini-btn cust-account-toggle" data-cursor-account="${escapeHtml(id)}">${escapeHtml(t("customize.acctAdd"))}</button>`;
+    case "captureSlots":
+      return `<button class="mini-btn cust-account-toggle" data-ag-capture="${escapeHtml(id)}">${escapeHtml(t("customize.agCapture"))}</button>`;
+    case "pasteKeyPage":
+      return `<button class="mini-btn cust-account-toggle" data-open-keys-page="${escapeHtml(id)}">${escapeHtml(t("onboarding.openKeysPage"))}</button>`;
+    case "importCookie":
+    case "pasteKey":
+      return "";
+  }
+}
+
+/// The configuration panel for families whose credential is a login or a
+/// local file: what it reads, how to complete it, and where to go next.
+/// Steps come from one i18n string, one line per step.
+function renderOnboardingConfig(id: string, onboard: Onboarding): string {
+  const actions = onboard.actions
+    .map((action) => onboardingActionHtml(id, action))
+    .filter(Boolean)
+    .join("");
+  const steps = onboard.stepsKey
+    ? `<ol class="onboarding-steps">${t(onboard.stepsKey)
+        .split("\n")
+        .filter(Boolean)
+        .map((step) => `<li>${escapeHtml(step)}</li>`)
+        .join("")}</ol>`
+    : "";
+  // WorkBuddy's explicit web-session import keeps its own block: it is a
+  // switch + two import paths, not a single action button.
+  const wbWeb = id === "workbuddy" ? wbWebSectionHtml() : "";
+  // Codex / Grok / Copilot use the device-code block in place: their flow
+  // shows a user code that the user must type in the browser.
+  const oauth = OAUTH_PROVIDERS.has(id) ? renderOAuthBlock(id) : "";
+  return `<div class="cust-config cust-form">
+      <div class="form-field">
+        <span class="form-label">${escapeHtml(t("customize.connLabel"))}</span>
+        <div data-cred-chips="${escapeHtml(id)}">${credChipsHtml(id)}</div>
+      </div>
+      <p class="settings-note">${escapeHtml(t(onboard.hintKey))}</p>
+      ${steps}
+      ${oauth}
+      ${actions ? `<div class="form-actions">${actions}</div>` : ""}
+      ${custNoteField(id)}
+      ${custApplyHtml(id)}
+      ${groupPickerHtml(id)}
+      ${wbWeb}
     </div>`;
 }
 
@@ -10765,6 +10839,21 @@ async function handleCustomizeClick(target: HTMLElement): Promise<boolean> {
     stopOauthFlow(family);
     oauthFlow.delete(family);
     paintOAuth(family);
+    return true;
+  }
+  const loginFamily = target.closest<HTMLElement>("[data-login-family]");
+  if (loginFamily) {
+    void openFamilyLogin(loginFamily.dataset.loginFamily!);
+    return true;
+  }
+  const importDesktop = target.closest<HTMLElement>("[data-import-desktop]");
+  if (importDesktop) {
+    void importDesktopFromDrawer(importDesktop.dataset.importDesktop!);
+    return true;
+  }
+  const openKeysPage = target.closest<HTMLElement>("[data-open-keys-page]");
+  if (openKeysPage) {
+    void openKeysPageFor(openKeysPage.dataset.openKeysPage!);
     return true;
   }
   const acctToggle = target.closest<HTMLElement>("[data-acct-toggle]");
@@ -13328,7 +13417,9 @@ function settingsKeyRow(family: string): HTMLElement {
     if (isOauth) {
       const add = button(t("customize.acctAdd"), "", "plus");
       add.addEventListener("click", () => {
-        void startOauthLogin(family);
+        // One login UI: the auth center drives every `<family>_login_start`
+        // and device-code flow and shows the user code / polling state.
+        void openFamilyLogin(family);
       });
       actions.append(add);
     } else {
@@ -15481,6 +15572,45 @@ function handleAuthCenterClick(target: HTMLElement): void {
 /// Import WorkBuddy's own desktop sign-in as a Pane-managed account. The
 /// backend never writes the vendor file; a failure (encrypted store, no
 /// file, wrong variant) reports through the same four-state flow block.
+/// Cross-window routing for a login-only family: the real scan / browser /
+/// device login lives in the auth center, so send the panel there. The two
+/// windows share only config + config-updated; the config IS the message.
+async function openFamilyLogin(family: string): Promise<void> {
+  await patchConfig({ panelIntent: { view: "auth", family, at: Date.now() } }).catch(() => {});
+  void invoke("open_panel_window").catch(() => {});
+}
+
+/// Search/MCP keys live in the key-vault card, not the provider key page.
+async function openKeysPageFor(family: string): Promise<void> {
+  await patchConfig({ panelIntent: { view: "settings", family, at: Date.now() } }).catch(() => {});
+  void invoke("open_panel_window").catch(() => {});
+}
+
+function setFooterStatus(text: string): void {
+  const status = document.querySelector<HTMLElement>("#status");
+  if (status) status.textContent = text;
+}
+
+/// Import WorkBuddy's desktop sign-in straight from the drawer. The backend
+/// is read-only on the vendor side; a failure (encrypted store, no file,
+/// wrong variant) is reported in the footer and changes nothing.
+async function importDesktopFromDrawer(family: string): Promise<void> {
+  try {
+    const result = await invoke<{ label: string; alreadyExisted: boolean }>(
+      "workbuddy_import_desktop",
+      { family },
+    );
+    setFooterStatus(
+      t(result.alreadyExisted ? "auth.importDesktopExists" : "auth.importDesktopDone", {
+        label: result.label,
+      }),
+    );
+    void refresh(false, true);
+  } catch (err) {
+    setFooterStatus(t("onboarding.importFailed", { err: String(err) }));
+  }
+}
+
 async function authImportDesktop(family: string): Promise<void> {
   if (authFlowBusy()) return;
   authFlows.set(family, { phase: "starting", deviceAuthId: "", userCode: "", error: null, label: null });

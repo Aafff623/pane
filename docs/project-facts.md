@@ -506,6 +506,35 @@ changes.
   CodeBuddy IDE `history/index.json`, account switching, session copies,
   check-ins, hooks, Agent Companion.
 
+## Provider onboarding descriptor (2026-10-19)
+
+- **One source of truth** for "how does this provider connect":
+  `src/providerOnboarding.ts` (`onboardingFor(family)` → credential kind +
+  ordered actions + hint/steps i18n keys). Defaults derive from the catalog;
+  `SPECIAL` overrides the families whose real flow differs from the flags.
+- The Customize ⚙ panel (`renderCustConfig`) renders those actions. A family
+  with no API key can never expose `pasteKey`: login/read-only families get
+  `renderOnboardingConfig` (hint + numbered steps + "Add account / Sign in"),
+  which routes to the auth center through the existing `panelIntent`
+  cross-window message. Key families keep the paste/test/save form.
+- **Fixed by this split** (all were live bugs before): 12 login-only families
+  opened the paste-key dialog — 11 of them really wrote a key into
+  `accounts/<family>.json` and then failed as `unknown provider`
+  (codex, codebuddy, codebuddycn, workbuddy, workbuddyai, copilot, grok,
+  kiro, windsurf, trae, qoder, zed); the settings page called `oauth_start`
+  for nine browser/scan families that only implement `<family>_login_start`;
+  `stepfun-plan`'s account/password panel was shadowed by the multi-account
+  branch; `get_credential_status` read `accounts/<family>.json` for login
+  families, so a signed-in CodeBuddy/WorkBuddy showed as unconfigured.
+- Login families now always land in the auth center (one login UI, not two);
+  Codex/Grok/Copilot keep the inline device-code block in the drawer.
+- **Not migrated from Magpie**: the plugin runtime, `migrations.json`, the
+  giant `Provider` struct, name-based stable ids, and risk-confirmation
+  dialogs. Magpie's `mechanism facts` equivalent is weaker than Pane's.
+- **Known limit**: opening one provider's ⚙ re-renders the whole 64-row
+  drawer synchronously (~7 s in the debug WebView). Pre-existing; optimizing
+  it is a separate ticket.
+
 ## 待确认
 
 - Qoder 国际版 (family `qoder`) 的 Windows 配置目录按命名惯例取

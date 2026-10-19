@@ -4058,8 +4058,13 @@ fn get_credential_status(provider: String) -> Value {
     let family = family_of(&provider);
     // Multi-account families: the account list is the key store now (the
     // old <provider>.json main key file was imported and removed), so
-    // "stored key" means "the accounts list has at least one entry".
-    let stored_key = if accounts::provider_takes_accounts(&family) {
+    // "stored key" means "the accounts list has at least one entry". Login
+    // families keep their accounts in login-accounts/<family>.json, NOT in
+    // accounts/<family>.json — reading the wrong store made a signed-in
+    // CodeBuddy/WorkBuddy look unconfigured.
+    let stored_key = if login_accounts::takes_login_accounts(&family) {
+        !login_accounts::load(&family).is_empty()
+    } else if accounts::provider_takes_accounts(&family) {
         !accounts::load_accounts(&family).is_empty()
     } else {
         providers::stored_key_file(&family).is_some()
