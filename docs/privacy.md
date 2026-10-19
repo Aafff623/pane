@@ -15,7 +15,7 @@ This is the complete list. Anything not listed here does not happen.
 | User-configured Custom Balance relay origins | Every refresh, only when Custom Balance is enabled | Subscription + usage requests send that account's API key as Bearer to the configured relay origin only; public origins must use HTTPS, and plaintext HTTP is limited to private, loopback, or link-local IP literals. The origin and key are never sent to Pane servers. |
 | User-configured One/New API origins | Status probe when saving/changing a site, plus one unauthenticated backfill if a stored site has no display unit; billing on every refresh for enabled keys | `/api/status` with no key. Subscription + usage send that site's key as Bearer, **only to that origin** — never to Pane servers. |
 | `raw.githubusercontent.com` (LiteLLM), `models.dev`, `robinebers.github.io` | ~Daily | Anonymous GET for public model price tables (no identifying data) |
-| `github.com/Aafff623/pane/releases/latest/download/latest.json` | On launch + every 4 h | Anonymous GET for this project's own update manifest, carrying no app data. GitHub may log the request as the host; Pane runs no counter. See "The update check" below. |
+| `pane.threetwoa.live/update/latest.json` (this project's own Cloudflare edge route), then `github.com/Aafff623/pane/releases/latest/download/latest.json` | On launch + every 4 h | Anonymous GET for this project's own update manifest, carrying no app data. The edge route serves the same manifest but rewrites the Windows installer URL to the Gitee mirror for CN clients; GitHub is the reachable-everywhere fallback. Cloudflare and GitHub may each log the request as the host; Pane runs no counter. See "The update check" below. |
 | `us.i.posthog.com` | Once per day (unless switched off) | The two anonymous daily-statistic events described in "Anonymous usage statistics" below — a random ID, version, enabled-provider list, and per-provider success/failure counts. Never usage amounts, spend, keys, or error text. |
 | `127.0.0.1:11434` (your own PC) | Every refresh, if Ollama is enabled | Local-only query of your Ollama server |
 
@@ -70,33 +70,55 @@ generation and the two documented POSTs (no SDK) live in
 ## The update check
 
 Pane has to ask *somewhere* "is there a newer version?" — that request
-existed from day one. Current builds ask exactly one endpoint: this
-project's own GitHub Releases manifest
-(`github.com/Aafff623/pane/releases/latest/download/latest.json`, also
-pinned in `tauri.conf.json`). The upstream `trypane.xyz` /
-`pane.jazii.dev` endpoints were dropped when the project detached — their
-builds are signed with a key this app no longer trusts, so querying them
-could only produce signature failures. Every update is
-signature-verified against the minisign key baked into the app.
+existed from day one. Current builds ask a short ladder of this
+project's own endpoints, tried in order (the updater only advances when
+a request fails or answers non-2xx, never for slowness):
+
+1. `pane.threetwoa.live/update/latest.json?source=gitee` — the project's
+   Cloudflare edge route, explicitly asked for the mirror. Used when a
+   proxy is configured: a CN user behind a global proxy exits abroad, so
+   the country-based branch would miss exactly the users who suffer most
+   from GitHub's slow release assets.
+2. `pane.threetwoa.live/update/latest.json` — the plain edge route; it
+   serves the same GitHub manifest, except CN clients (by request
+   country) get the Windows installer URL rewritten to the Gitee mirror.
+   The route probes that the mirror asset exists before offering it, so a
+   missing mirror falls back to the GitHub URL — it can cost speed, never
+   availability.
+3. `github.com/Aafff623/pane/releases/latest/download/latest.json` —
+   GitHub's own manifest, the reachable-everywhere fallback (also the URL
+   pinned in `tauri.conf.json`; the app overrides it with the ladder
+   above).
+
+The upstream `trypane.xyz` / `pane.jazii.dev` endpoints were dropped when
+the project detached — their builds are signed with a key this app no
+longer trusts, so querying them could only produce signature failures.
+Every update is signature-verified against the minisign key baked into
+the app.
 
 Pane itself operates no counting server and stores nothing about the
-check. GitHub, as the host of the manifest, may log the request (IP,
-timestamp) under [GitHub's own privacy
-statement](https://docs.github.com/site-policy/privacy-policies/github-general-privacy-statement);
-that logging is GitHub's, not Pane's, and Pane receives only the manifest
+check. Cloudflare and GitHub, as the hosts of the manifest, may log the
+request (IP, timestamp) under their own privacy statements
+([Cloudflare](https://www.cloudflare.com/privacypolicy/),
+[GitHub](https://docs.github.com/site-policy/privacy-policies/github-general-privacy-statement));
+that logging is theirs, not Pane's, and Pane receives only the manifest
 JSON. No machine ids, no usernames, no usage data — your quotas, spend,
 and provider data never leave your PC, same as always.
 
 ## What stays on your PC
 
 - **Credentials**: read from the files the official CLIs already maintain
-  (see [providers.md](providers.md)); pasted API keys live in the OS
-  credential vault (Windows Credential Manager / macOS Keychain / Linux
-  Secret Service), and the JSON files keep only non-secret fields — a row
-  whose vault write fails keeps its plaintext as the documented fallback.
-  Login-based accounts (OAuth / device-code) are different: their tokens
-  sit in `%APPDATA%\Pane\login-accounts\<family>.json` as plaintext JSON,
-  protected by your user profile ACL rather than the vault. One/New API
+  (see [providers.md](providers.md)); every secret Pane itself persists —
+  pasted API keys, multi-account keys, and Pane-managed login tokens
+  (OAuth / device-code) alike — lives in the OS credential vault
+  (Windows Credential Manager / macOS Keychain / Linux Secret Service),
+  and the JSON files keep only non-secret fields: a row whose vault write
+  fails keeps its plaintext as the documented fallback, and legacy
+  plaintext entries migrate on first read (the vault write must succeed
+  before the file loses them). The WorkBuddy web-session cookie you
+  explicitly import follows the same vault-first pattern through a session
+  slot (`token:web/workbuddy`); `workbuddy_web.json` is kept only while a
+  vault write fails. One/New API
   sites and keys use a
   nested `%APPDATA%\Pane\onenewapi.json`, written owner-only (Windows
   protected DACL / Unix `0600`) so a permissive Pane directory cannot

@@ -55,8 +55,10 @@ All of this is auditable in the source — links go to the exact code.
   [`src-tauri/src/telemetry.rs`](src-tauri/src/telemetry.rs)). Turning
   the statistic off is a hard stop and deletes the stored ID. The update
   check adds no reporting of its own: it is a plain GET for this
-  project's own GitHub Releases `latest.json` (GitHub may log the request
-  under GitHub's own privacy statement; Pane runs no counter and stores
+  project's own update manifest — served from the project's Cloudflare
+  edge route first, with this project's GitHub Releases `latest.json` as
+  the fallback (Cloudflare and GitHub may each log the request under
+  their own privacy statements; Pane runs no counter and stores
   nothing). The full list of network calls Pane can make is in
   [docs/privacy.md](docs/privacy.md).
 - **The local HTTP API is loopback-only, CORS-locked, and Host-checked.**
@@ -85,11 +87,21 @@ All of this is auditable in the source — links go to the exact code.
 - **API keys you paste** go into the OS credential vault (Windows
   Credential Manager, macOS Keychain, Linux Secret Service); the JSON
   files keep only non-secret fields, and a row whose vault write fails
-  keeps its plaintext as the documented fallback. Login-based accounts
-  (OAuth/device-code) keep their tokens in
-  `%APPDATA%\Pane\login-accounts\<family>.json` as plaintext JSON —
-  protected by your user profile ACL, not by the vault. One/New API sites
-  and keys use a nested owner-only store; Settings returns
+  keeps its plaintext as the documented fallback. **Login-based accounts
+  (OAuth/device-code) use the same vault**, one `token:login/<card-id>`
+  slot per account
+  ([`src-tauri/src/login_accounts.rs`](../src-tauri/src/login_accounts.rs));
+  their `login-accounts\<family>.json` keeps only labels, ids and expiry,
+  and legacy plaintext tokens migrate on first read — the vault write
+  must succeed before the file loses them, so a broken vault degrades to
+  the plaintext fallback instead of losing the credential. The save
+  order is a data-safety property: vault slots of removed accounts are
+  dropped only after the replacement file is durably on disk, so a failed
+  write can never cost an existing account. The WorkBuddy web-session
+  cookie you explicitly import follows the same vault-first pattern
+  through a session slot (`token:web/workbuddy`); `workbuddy_web.json`
+  is kept only while a vault write fails. One/New API
+  sites and keys use a nested owner-only store; Settings returns
   labels and origins after save, never secret values or fragments.
 
 ## Known limitations (honesty section)

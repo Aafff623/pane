@@ -12,7 +12,7 @@ Single authorities for the neighbouring concerns:
   tracker, see [`docs/agents/issue-tracker.md`](agents/issue-tracker.md).
 - **Startup / build / run / acceptance commands** — [`docs/dev-startup.md`](dev-startup.md).
 
-Last reconciled: 2026-10-11 (Pane 0.7.0).
+Last reconciled: 2026-10-18 (Pane 0.8.6).
 
 ## Scope and boundaries
 
@@ -28,10 +28,17 @@ Last reconciled: 2026-10-11 (Pane 0.7.0).
   project (detached from any upstream, 2026-09-06). A single branch `main`
   exists locally and on origin; feature work happens on `codex/<feature>`
   branches.
-- Version 0.7.0 (`package.json` + `src-tauri/tauri.conf.json`), identifier
+- Version 0.8.6 (`package.json` + `src-tauri/tauri.conf.json`), identifier
   `com.jazii.pane`, productName `Pane`.
 - Privacy boundary (asserted by tests in the code): tokens go only to their
-  own vendor's API; pasted keys live in `%APPDATA%\Pane`; the 6736 HTTP API is
+  own vendor's API; the secrets Pane itself persists — pasted API keys,
+  multi-account keys, Pane-managed login tokens — live in the OS credential
+  vault, with plaintext JSON only as the documented fallback while a vault
+  write fails or a legacy entry awaits migration. Three stores are
+  deliberately outside the OS vault: One/New API sites/keys (owner-only
+  plaintext `onenewapi.json`), the master-password key vault
+  (AES-256-GCM sealed in `keyvault.json`), and search/MCP keys (plaintext
+  `search-keys.json`, the 2026-10-11 search-keys cut). The 6736 HTTP API is
   loopback-only, no CORS, Host-checked, and redacts One/New API origins and
   secrets; telemetry is anonymous, opt-out, and must never affect the app
   (every failure path is silent; disabling deletes the state file).
@@ -66,7 +73,7 @@ Last reconciled: 2026-10-11 (Pane 0.7.0).
   `cargo +stable-x86_64-pc-windows-gnu`. The full Tauri binary cannot link
   locally as a `cdylib` (167k-export DLL). The committed crate-type is
   `["rlib"]` (desktop only). Unit tests run from repo-root `parse-tests/`
-  (673 passing, 13 ignored as of 2026-10-11; run with
+  (875 passing, 13 ignored as of 2026-10-18; run with
   `cargo +stable-x86_64-pc-windows-gnu test` and no proxy).
 - Dev runtime needs both processes: Vite `:1420` + `pane.exe` `:6736`. Never
   serve the frontend with Python `http.server` (permanent WebView2 cache
@@ -241,7 +248,11 @@ Last reconciled: 2026-10-11 (Pane 0.7.0).
   `<family>@<fnv1a>` ids, plus `token:<scope>` slots — `token:oauth/<provider>`
   for the device-flow single slots, `token:login/<card-id>`,
   `token:codex/<card-id>`, `token:cursor/<card-id>`,
-  `token:searchkey/<entry-id>`). JSON files keep only non-secret fields
+  `token:searchkey/<entry-id>`). *(Amended 2026-10-19: the
+  `token:searchkey/<entry-id>` slot is stale — the 2026-10-11 search-keys
+  cut (commit 961c50e) moved search/MCP keys back to the plaintext
+  `search-keys.json`, routed away from the vault entirely; see the
+  search/MCP section below.)* JSON files keep only non-secret fields
   (labels, ids, expiry; cursor rows carry a `cardId` snapshot because the
   card id hashes the access token). Reads lazily migrate old plaintext —
   the vault write must succeed before the field leaves the file, and a
@@ -249,9 +260,13 @@ Last reconciled: 2026-10-11 (Pane 0.7.0).
   "three deliberate plaintext exceptions" entry is superseded (owner 拍板
   A 案, analysis-hygiene batch, commit f73b4d1): search-keys.json,
   login-accounts/*.json, the oauth single slots and the cursor/codex
-  account stores all migrate on first read. Remaining deliberate plaintext
-  exception: `workbuddy_web.json` (the explicitly imported WorkBuddy
-  web-session cookie — not covered by the 2026-10-14 batch decision).
+  account stores all migrate on first read. *(Amended 2026-10-19: the
+  "remaining exception `workbuddy_web.json`" claim was itself stale —
+  since 53880db the WorkBuddy web-session cookie is vault-first through
+  `secretstore::save_session("web/workbuddy")` (slot
+  `token:web/workbuddy`), the JSON file only surviving a failed vault
+  write; SECURITY.md/privacy.md had copied the stale sentence and were
+  corrected in the same pass.)*
   `reveal_provider_key` / `reveal_account_key` demand
   the master password (same canary + session as the vault; "查看" in the
   panel) — the password gates human viewing, background refresh never needs
@@ -274,15 +289,21 @@ Last reconciled: 2026-10-11 (Pane 0.7.0).
   details: `docs/update-mechanism.md`.
 - Endpoints are tried in order and the updater only moves on when a request
   fails or answers non-2xx (tauri-plugin-updater 2.10 source), so the fast
-  source must be listed first. Since 2026-10-14 the list is
-  `[pane.threetwoa.live/update/latest.json, GitHub latest.json]`: the edge
-  route serves the same GitHub manifest but rewrites the Windows installer
-  URL to the Gitee mirror for CN clients (`request.cf.country`, with a
-  `?source=` override for debugging), after probing that the mirror asset
-  exists — a missing mirror falls back to the GitHub URL, so it can cost
-  speed but never availability. Measured 2026-10-14 on the author's machine:
-  GitHub release asset ~37–39 KB/s (direct and proxied), own CF domain
-  ~43 KB/s, Gitee release attachment ~315 KB/s.
+  source must be listed first. Since 2026-10-14 the ladder
+  (`updater_endpoint_strings()` in `lib.rs`, overriding the single URL
+  pinned in `tauri.conf.json`) is: **edge route with `?source=gitee`** when
+  a proxy is configured (a CN user behind a global proxy exits abroad, so
+  the geo branch would miss exactly the users who suffer most — a proxied
+  client therefore asks for the mirror explicitly), then the **plain edge
+  route** (geo by request country), then **GitHub latest.json** as the
+  reachable-everywhere fallback. The edge route serves the same GitHub
+  manifest but rewrites the Windows installer URL to the Gitee mirror for
+  CN clients, after probing that the mirror asset exists — a missing
+  mirror falls back to the GitHub URL, so it can cost speed but never
+  availability. `PANE_UPDATE_DEBUG=1` prints the resolved order to the
+  log. Measured 2026-10-14 on the author's machine: GitHub release asset
+  ~37–39 KB/s (direct and proxied), own CF domain ~43 KB/s, Gitee release
+  attachment ~315 KB/s.
 - The Gitee mirror is uploaded by the `gitee-mirror` job in `release.yml`
   (action `nICEnnnnnnnLee/action-gitee-release`, pinned) using the
   `GITEE_TOKEN` secret; the job fails loudly when the secret is missing. It
