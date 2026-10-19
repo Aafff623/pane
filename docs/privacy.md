@@ -108,14 +108,17 @@ and provider data never leave your PC, same as always.
 ## What stays on your PC
 
 - **Credentials**: read from the files the official CLIs already maintain
-  (see [providers.md](providers.md)); every secret Pane itself persists —
+  (see [providers.md](providers.md)); the secrets Pane itself persists —
   pasted API keys, multi-account keys, and Pane-managed login tokens
-  (OAuth / device-code) alike — lives in the OS credential vault
+  (OAuth / device-code) — live in the OS credential vault
   (Windows Credential Manager / macOS Keychain / Linux Secret Service),
   and the JSON files keep only non-secret fields: a row whose vault write
   fails keeps its plaintext as the documented fallback, and legacy
   plaintext entries migrate on first read (the vault write must succeed
-  before the file loses them). The WorkBuddy web-session cookie you
+  before the file loses them). Two further stores are deliberately
+  outside the OS vault, each with its own protection: the master-password
+  key vault (AES-256-GCM sealed file) and search/MCP keys (plaintext
+  `search-keys.json`). The WorkBuddy web-session cookie you
   explicitly import follows the same vault-first pattern through a session
   slot (`token:web/workbuddy`); `workbuddy_web.json` is kept only while a
   vault write fails. One/New API
