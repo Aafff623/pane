@@ -581,6 +581,20 @@ const PROVIDER_DEFINITIONS: &[ProviderDefinition] = &[
         primary_unit: UsageUnit::Tokens,
     },
     ProviderDefinition {
+        // Web-session only: the console's money endpoints reject the API
+        // key (verified 2026-10-19), so no key slot — the user signs in
+        // through Pane's login window and the session lives in Pane's own
+        // WebView2 profile.
+        family_id: "tokenrhythm",
+        display_name: "基元律动",
+        query_kind: QueryKind::NativeBalance,
+        supports_api_key: false,
+        supports_extra_accounts: false,
+        icon_key: "tokenrhythm",
+        category: ProviderCategory::Coding,
+        primary_unit: UsageUnit::Tokens,
+    },
+    ProviderDefinition {
         family_id: "venice",
         display_name: "Venice",
         query_kind: QueryKind::NativeBalance,

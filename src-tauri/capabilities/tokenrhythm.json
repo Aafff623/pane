@@ -1,0 +1,10 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "tokenrhythm-login",
+  "description": "基元律动 sign-in window: loads the remote site so the user can clear the captcha and SMS code; its in-page probe reports login completion through the tokenrhythm_login_ready command. No other surface is exposed to that origin.",
+  "windows": ["tr-login"],
+  "remote": {
+    "urls": ["https://tokenrhythm.studio/*"]
+  },
+  "permissions": ["core:default"]
+}

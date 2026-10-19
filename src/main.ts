@@ -968,6 +968,9 @@ let skinMarketSelected: SkinId | null = null;
 /// WorkBuddy's web-session status (ticket 06), loaded at boot and after
 /// every action; the cookie itself never leaves Rust.
 let wbWebStatus: { enabled: boolean; has_cookie: boolean; chrome_major: number | null; saved_at: string | null } | null = null;
+/// 基元律动 web-session login state (the console rejects API keys for
+/// quota, so the sign-in lives in Pane's own WebView2 profile).
+let trLoginStatus: { signed_in: boolean; saved_at: string | null } | null = null;
 /// Pack id while its download runs; blocks a second parallel download.
 let skinDownloading: string | null = null;
 let skinMarketFeedback: string | null = null;
@@ -8544,6 +8547,14 @@ async function refreshWorkbuddyWebStatus(): Promise<void> {
   }
 }
 
+async function refreshTokenrhythmLoginStatus(): Promise<void> {
+  try {
+    trLoginStatus = await invoke("tokenrhythm_login_status");
+  } catch {
+    trLoginStatus = null;
+  }
+}
+
 function renderCustConfig(id: string): string {
   const status = renderCustStatus(id);
   const fam = providerFamily(id);
@@ -10397,6 +10408,30 @@ async function handleCustomizeClick(target: HTMLElement): Promise<boolean> {
     } catch { /* nothing stored is the same outcome */ }
     await refreshWorkbuddyWebStatus();
     renderDrawerBody();
+    return true;
+  }
+  // 基元律动 web-session login: the window is where the user clears the
+  // captcha and SMS code; the session then lives in Pane's WebView2 profile.
+  if (target.closest<HTMLElement>("[data-tr-login]")) {
+    document.querySelector("#status")!.textContent = t("settings.trLoginWaiting");
+    try {
+      await invoke("tokenrhythm_login");
+      document.querySelector("#status")!.textContent = t("settings.trLoginDone");
+    } catch (error) {
+      document.querySelector("#status")!.textContent = t("settings.trLoginFailed", {
+        reason: String(error),
+      });
+    }
+    await refreshTokenrhythmLoginStatus();
+    renderSettingsProviderKeys();
+    return true;
+  }
+  if (target.closest<HTMLElement>("[data-tr-clear]")) {
+    try {
+      await invoke("tokenrhythm_login_clear");
+    } catch { /* nothing stored is the same outcome */ }
+    await refreshTokenrhythmLoginStatus();
+    renderSettingsProviderKeys();
     return true;
   }
   // One/New API site manager (relocated from Settings): expand/edit/delete
@@ -13074,8 +13109,17 @@ function settingsKeyRow(family: string): HTMLElement {
       : t("settings.keyNotSet");
     state.classList.toggle("ok", accounts.length > 0);
   } else if (!keyable) {
-    state.textContent = local ? t("settings.credConnected") : t("settings.credLocalMissing");
-    state.classList.toggle("ok", Boolean(local));
+    // 基元律动 has no key and no local CLI sign-in: its credential is a
+    // web session the user establishes through Pane's login window.
+    if (family === "tokenrhythm") {
+      state.textContent = trLoginStatus?.signed_in
+        ? t("settings.trSignedIn")
+        : t("settings.trNotSignedIn");
+      state.classList.toggle("ok", Boolean(trLoginStatus?.signed_in));
+    } else {
+      state.textContent = local ? t("settings.credConnected") : t("settings.credLocalMissing");
+      state.classList.toggle("ok", Boolean(local));
+    }
   } else if (configured) {
     state.textContent = status?.maskedKey || t("settings.keyConfigured");
   } else if (connected) {
@@ -13110,6 +13154,22 @@ function settingsKeyRow(family: string): HTMLElement {
     else b.textContent = label;
     return b;
   };
+
+  // 基元律动: the credential IS the web session, so the row's action is
+  // the login window (and a clear when a session is on file).
+  if (family === "tokenrhythm") {
+    const login = button(
+      trLoginStatus?.signed_in ? t("settings.trLoginAgain") : t("settings.trLogin"),
+    );
+    login.setAttribute("data-tr-login", "");
+    actions.append(login);
+    if (trLoginStatus?.signed_in) {
+      const clear = button(t("settings.trClear"));
+      clear.setAttribute("data-tr-clear", "");
+      actions.append(clear);
+    }
+    return item;
+  }
 
   if (multi) {
     const isOauth = providerDefinition(family)?.supportsOAuth && !keyable;
@@ -15620,6 +15680,10 @@ window.addEventListener("DOMContentLoaded", () => {
   // WorkBuddy's web-session block renders inside the Customize drawer.
   void refreshWorkbuddyWebStatus().then(() => {
     if (customizeOpen) renderDrawerBody();
+  });
+  // 基元律动's sign-in state feeds its Settings row.
+  void refreshTokenrhythmLoginStatus().then(() => {
+    renderSettingsProviderKeys();
   });
   setupFloatingSettingsTabs();
   // Party mode, the easy way: triple-click the logo. (The Konami code

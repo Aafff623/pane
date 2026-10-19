@@ -68,6 +68,7 @@ native_snapshots! {
     "kiro" => providers::kiro::snapshot(),
     "openai-api" => providers::openai_api::snapshot(),
     "poe" => providers::poe::snapshot(),
+    "tokenrhythm" => providers::tokenrhythm::snapshot(),
     "venice" => providers::venice::snapshot(),
     "vertexai" => providers::vertexai::snapshot(),
     "warp" => providers::warp::snapshot(),

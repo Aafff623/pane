@@ -1905,6 +1905,35 @@ fn workbuddy_web_clear() -> Result<(), String> {
     providers::workbuddy_web::clear()
 }
 
+/// 基元律动 (tokenrhythm.studio) web-session login surface. The console's
+/// money endpoints reject the API key (verified 2026-10-19), so the user
+/// signs in inside a Pane-hosted webview and the session persists in
+/// Pane's own WebView2 profile — the cookie never travels to the frontend.
+#[tauri::command]
+fn tokenrhythm_login_status() -> providers::tokenrhythm::LoginStatus {
+    providers::tokenrhythm::status()
+}
+
+/// Opens the sign-in window and waits for the console to report a session.
+/// Async: WebviewWindowBuilder::build() deadlocks inside synchronous
+/// commands on Windows (see ensure_panel_window).
+#[tauri::command]
+async fn tokenrhythm_login(app: tauri::AppHandle) -> Result<(), String> {
+    providers::tokenrhythm::login(&app).await
+}
+
+/// Called from the login window's in-page probe once `/api/auth/me`
+/// answers 200 — the `login` loop watches this flag.
+#[tauri::command]
+fn tokenrhythm_login_ready() {
+    providers::tokenrhythm::login_ready()
+}
+
+#[tauri::command]
+fn tokenrhythm_login_clear() -> Result<(), String> {
+    providers::tokenrhythm::clear()
+}
+
 #[tauri::command]
 fn keyvault_v3_setup(
     code: String,
@@ -4995,6 +5024,10 @@ pub fn run() {
             workbuddy_web_import_chrome,
             workbuddy_web_save_cookie,
             workbuddy_web_clear,
+            tokenrhythm_login_status,
+            tokenrhythm_login,
+            tokenrhythm_login_ready,
+            tokenrhythm_login_clear,
             save_text_file,
             keyvault_v3_enable_recovery_code,
             keyvault_v3_disable_recovery_code,

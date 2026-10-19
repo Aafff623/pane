@@ -53,6 +53,7 @@ pub mod siliconflow;
 pub mod stepfun;
 pub mod stepfun_plan;
 pub mod sub2api;
+pub mod tokenrhythm;
 pub mod trae;
 pub mod traecn;
 pub mod venice;
