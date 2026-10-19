@@ -10,6 +10,11 @@ pub mod async_runtime {
     use std::sync::OnceLock;
     use tokio::runtime::Runtime;
 
+    /// Real tauri re-exports tokio's JoinHandle under this path, and
+    /// provider code annotates it (`tauri::async_runtime::JoinHandle`); the
+    /// stub mirrors the alias so both builds accept the same signatures.
+    pub use tokio::task::JoinHandle;
+
     /// Tauri keeps one process-wide runtime; so does this, so tasks spawned
     /// by provider code outlive the `block_on` that started them exactly as
     /// they do in the app.

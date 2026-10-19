@@ -231,10 +231,14 @@ fn backfill_claimed() -> &'static Mutex<HashSet<(String, String)>> {
 }
 
 /// One unauthenticated status backfill per stored site, off the refresh path.
-pub fn schedule_backfill_missing_display_units(path: PathBuf) {
+/// Returns the task's join handle so callers that care (tests) can await
+/// completion deterministically; production callers simply drop it.
+pub fn schedule_backfill_missing_display_units(
+    path: PathBuf,
+) -> tauri::async_runtime::JoinHandle<()> {
     tauri::async_runtime::spawn(async move {
         backfill_missing_display_units(&path).await;
-    });
+    })
 }
 
 pub async fn backfill_missing_display_units(path: &Path) {
@@ -282,8 +286,14 @@ mod tests {
     use std::net::{TcpListener, TcpStream};
     use std::path::PathBuf;
     use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-    use std::sync::Arc;
+    use std::sync::{mpsc, Arc, Mutex};
     use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+
+    /// Hang-guard for the background-task waits in this module: far above
+    /// any scheduling delay a loaded CI runner can impose, far below a
+    /// suite-wedging hang. A dead task still fails; load-induced slowness
+    /// does not.
+    const HANG_GUARD: Duration = Duration::from_secs(30);
 
     struct TempStore {
         dir: PathBuf,
@@ -1167,12 +1177,23 @@ mod tests {
         assert_eq!(loaded.sites[0].display_unit, None);
     }
 
+    /// The scheduled backfill must not block the Key-card read path, and it
+    /// must eventually persist the probed display unit. Timing discipline
+    /// (2026-10-18, GitHub #6): the probe's arrival is a channel receive —
+    /// a deterministic completion signal, not a timed poll. The final
+    /// persistence wait still observes the store by polling (the writer
+    /// lives inside the spawned task, so there is no latch to await), but
+    /// its bound is a hang-guard, not a scheduling budget: the 3 s bound it
+    /// replaces flaked under CI parallel load — reproduced locally at ~6%
+    /// (2/32 runs, all failing at the persistence stage after the gate
+    /// opened). The load-independent persistence property itself is
+    /// asserted in `backfill_persists_the_probed_unit_deterministically`.
     #[test]
     fn scheduled_backfill_does_not_block_key_cards() {
         let tmp = TempStore::new();
         let release = Arc::new(AtomicBool::new(false));
-        let status_hits = Arc::new(AtomicUsize::new(0));
-        let hits = Arc::clone(&status_hits);
+        let (probe_tx, probe_rx) = mpsc::channel();
+        let probe_tx = Arc::new(Mutex::new(probe_tx));
         let gate = Arc::clone(&release);
         let body = json!({
             "success": true,
@@ -1181,7 +1202,15 @@ mod tests {
         .to_string();
         let (origin, join) = spawn_billing_server(1, move |_origin, req| {
             if path_of(req) == "/api/status" {
-                hits.fetch_add(1, Ordering::SeqCst);
+                // Deterministic arrival signal: the test blocks on the
+                // channel instead of polling a counter against a clock.
+                let _ = probe_tx
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .send(());
+                // Hold the response until the test opens the gate. The 5 s
+                // cap is a backstop so a stalled test cannot wedge the
+                // server thread; it is never on the assertion path.
                 let deadline = Instant::now() + Duration::from_secs(5);
                 while !gate.load(Ordering::SeqCst) {
                     if Instant::now() > deadline {
@@ -1213,29 +1242,76 @@ mod tests {
         )
         .unwrap();
         let started = Instant::now();
-        schedule_backfill_missing_display_units(tmp.path.clone());
+        let handle = schedule_backfill_missing_display_units(tmp.path.clone());
         let cards = key_cards_at(&tmp.path).unwrap();
+        // A cards path that waited on the backfill would sit here until the
+        // server gate opens (≥5 s); normal execution is local file I/O
+        // (<10 ms). The 500 ms bound separates the two regimes with room
+        // for scheduling noise — it held in every stress run.
         assert!(
             started.elapsed() < Duration::from_millis(500),
             "key card prepare waited on status backfill: {:?}",
             started.elapsed()
         );
         assert_eq!(cards[0].display, DisplayUnit::Usd);
-        let deadline = Instant::now() + Duration::from_secs(3);
-        while status_hits.load(Ordering::SeqCst) == 0 {
-            assert!(Instant::now() < deadline, "status probe never arrived");
-            std::thread::sleep(Duration::from_millis(10));
-        }
+        // Probe arrival: blocking receive, no clock on the assertion path.
+        probe_rx
+            .recv_timeout(HANG_GUARD)
+            .expect("status probe never arrived");
         release.store(true, Ordering::SeqCst);
-        let deadline = Instant::now() + Duration::from_secs(3);
-        loop {
-            let loaded = store::load(&tmp.path).unwrap();
-            if loaded.sites[0].quota_display() == DisplayUnit::Cny {
-                break;
+        // Persistence: await the spawned task itself — a deterministic
+        // completion signal. The 3 s poll-with-deadline this replaces was
+        // the CI flake: under parallel load the spawn→probe→write chain
+        // legitimately exceeded it (reproduced locally at ~6%). The guard
+        // only catches a genuinely dead task; the happy path has no
+        // scheduling budget. The load-independent persistence property is
+        // additionally asserted in
+        // `backfill_persists_the_probed_unit_deterministically`.
+        let finished = tauri::async_runtime::block_on(async {
+            tokio::time::timeout(HANG_GUARD, handle).await
+        });
+        assert!(finished.is_ok(), "background backfill never finished");
+        let loaded = store::load(&tmp.path).unwrap();
+        assert_eq!(loaded.sites[0].quota_display(), DisplayUnit::Cny);
+        let _ = join.join();
+    }
+
+    /// The same backfill's core property with zero timing dependence:
+    /// awaiting the future directly must land the probed display unit in
+    /// the store. The scheduling/non-blocking half lives in
+    /// `scheduled_backfill_does_not_block_key_cards`.
+    #[test]
+    fn backfill_persists_the_probed_unit_deterministically() {
+        let tmp = TempStore::new();
+        let body = json!({
+            "success": true,
+            "data": {"version": "1", "quota_display_type": "CNY"}
+        })
+        .to_string();
+        let (origin, join) = spawn_billing_server(1, move |_origin, req| {
+            if path_of(req) == "/api/status" {
+                return tiny_http::Response::from_string(body.clone()).with_status_code(200);
             }
-            assert!(Instant::now() < deadline, "background backfill never persisted");
-            std::thread::sleep(Duration::from_millis(10));
-        }
+            tiny_http::Response::from_string("nope").with_status_code(404)
+        });
+        fs::write(
+            &tmp.path,
+            json!({
+                "version": 1,
+                "sites": [{
+                    "id": "siteiddetermbackfill01",
+                    "name": "Panel",
+                    "baseUrl": origin,
+                    "nextKeyOrdinal": 1,
+                    "keys": []
+                }]
+            })
+            .to_string(),
+        )
+        .unwrap();
+        tauri::async_runtime::block_on(backfill_missing_display_units(&tmp.path));
+        let loaded = store::load(&tmp.path).unwrap();
+        assert_eq!(loaded.sites[0].quota_display(), DisplayUnit::Cny);
         let _ = join.join();
     }
 
