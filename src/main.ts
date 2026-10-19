@@ -368,6 +368,12 @@ interface Config {
   qoderCheckin: boolean;
   removedProviders: string[];
   panelIntent: PanelIntent | null;
+  // Popover chrome: pin (always-on-top) and the position lock. Locked is
+  // the default — centered on every summon, no dragging. Unlocked, the
+  // user drags the popover anywhere and popoverPos remembers where.
+  popoverPin: boolean;
+  popoverLock: boolean;
+  popoverPos: { x: number; y: number } | null;
   // The popover surface to restore on the next summon (dismissing on the
   // card list records "main"; Customize and the skin workshop record
   // themselves, plus the provider whose config was open).
@@ -429,6 +435,9 @@ const FRONTEND_CONFIG_KEYS = [
   "panelIntent",
   "qoderCheckin",
   "removedProviders",
+  "popoverPin",
+  "popoverLock",
+  "popoverPos",
   "lastView",
 ] as const satisfies readonly (keyof Config)[];
 type _AssertAllConfigKeys = Exclude<keyof Config, (typeof FRONTEND_CONFIG_KEYS)[number]> extends never
@@ -645,6 +654,9 @@ let config: Config = {
   qoderCheckin: false,
   removedProviders: [],
   panelIntent: null,
+  popoverPin: true,
+  popoverLock: true,
+  popoverPos: null,
   lastView: { kind: "main", id: null },
 };
 let pendingJumpAnimation: "smooth" | "instant" | null = null;
@@ -3663,6 +3675,68 @@ function renderSpendDetailOverlay(): string {
   </div>`;
 }
 
+/// The popover's own window chrome: pin (always-on-top) and the position
+/// lock. They live in the total-spend card's head, left of the daily-detail
+/// button, because that row is always the first thing in view. The panel
+/// form is a normal window — it has its own frame, so it gets none.
+function popoverChromeHtml(): string {
+  if (IS_PANEL_FORM) return "";
+  const pinned = config.popoverPin !== false;
+  const locked = config.popoverLock !== false;
+  const pin = `<button class="mini-btn chrome-btn${pinned ? " on" : ""}" data-popover-pin title="${escapeHtml(t("popover.pin" + (pinned ? "On" : "Off")))}" aria-label="${escapeHtml(t("popover.pin" + (pinned ? "On" : "Off")))}">${uiIcon("pushPin")}</button>`;
+  const lock = `<button class="mini-btn chrome-btn${locked ? " on" : ""}" data-popover-lock title="${escapeHtml(t("popover.lock" + (locked ? "On" : "Off")))}" aria-label="${escapeHtml(t("popover.lock" + (locked ? "On" : "Off")))}">${uiIcon(locked ? "lock" : "lockOpen")}</button>`;
+  return pin + lock;
+}
+
+/// Pin / unpin the popover (always-on-top). Persisted, and re-applied on
+/// every summon so a rebooted app comes back the way it was left.
+async function togglePopoverPin(): Promise<void> {
+  const next = !(config.popoverPin !== false);
+  await patchConfig({ popoverPin: next }).catch(() => {});
+  try {
+    await getCurrentWebviewWindow().setAlwaysOnTop(next);
+  } catch (err) {
+    console.error("set always on top failed:", err);
+  }
+  requestRender();
+}
+
+/// Lock / unlock the popover's position. Locked is the default: every
+/// summon re-centers it and dragging is off. Unlocked, the whole window
+/// becomes a drag region (buttons and inputs still swallow the drag) and
+/// the dragged position is remembered by Rust on dismiss.
+async function togglePopoverLock(): Promise<void> {
+  const next = !(config.popoverLock !== false);
+  const patch: Partial<Config> = next
+    ? { popoverLock: true, popoverPos: null }
+    : { popoverLock: false };
+  await patchConfig(patch).catch(() => {});
+  applyPopoverDragRegion(next);
+  if (next) {
+    // Re-locking snaps back to the default placement right away, so the
+    // click has a visible effect instead of waiting for the next summon.
+    try {
+      await getCurrentWebviewWindow().center();
+    } catch (err) {
+      console.error("center window failed:", err);
+    }
+  }
+  requestRender();
+}
+
+/// Adds / removes the drag region that lets an unlocked popover be moved.
+/// "deep" drags from anywhere in the subtree; the card-reorder grip opts
+/// out so reordering cards keeps working while unlocked.
+function applyPopoverDragRegion(locked: boolean): void {
+  if (IS_PANEL_FORM) return;
+  document.body.toggleAttribute("data-tauri-drag-region", !locked);
+  if (!locked) document.body.setAttribute("data-tauri-drag-region", "deep");
+  document.querySelectorAll<HTMLElement>(".drag-grip").forEach((grip) => {
+    if (locked) grip.removeAttribute("data-tauri-drag-region");
+    else grip.setAttribute("data-tauri-drag-region", "false");
+  });
+}
+
 function renderTotalSpend(): string {
   if (!config.showTotalSpend) return "";
   const isFolded = isSpendFolded();
@@ -3685,6 +3759,7 @@ function renderTotalSpend(): string {
         <div class="provider-head">
           <span class="provider-name">${escapeHtml(t("spend.title"))}</span>
           <span class="spacer"></span>
+          ${popoverChromeHtml()}
           <button class="mini-btn spend-detail-btn" data-spend-details title="${escapeHtml(t("spendDetail.open"))}" aria-label="${escapeHtml(t("spendDetail.open"))}">${uiIcon("rows")}</button>
           ${foldChevron}
         </div>
@@ -3855,6 +3930,7 @@ function renderTotalSpend(): string {
         ${isFolded ? "" : `<span class="info" title="${escapeHtml(t("spend.info", { names: contributors }))}">${uiIcon("info")}</span>`}
         <span class="spacer"></span>
         ${updateVersion ? `<button class="spend-update-btn${updatePushing ? " busy" : ""}" data-update-push${updatePushing && updatePct != null ? ` style="--pct:${updatePct}"` : ""} title="${escapeHtml(t("update.pushTip", { version: updateVersion }))}" aria-label="${escapeHtml(t("update.pushTip", { version: updateVersion }))}">${uiIcon("arrowUp")}</button>` : ""}
+        ${popoverChromeHtml()}
         <button class="mini-btn spend-detail-btn" data-spend-details title="${escapeHtml(t("spendDetail.open"))}" aria-label="${escapeHtml(t("spendDetail.open"))}">${uiIcon("rows")}</button>
         <button class="share-btn" data-share="__total__" title="${escapeHtml(t("card.share"))}">${uiIcon("shareNetwork")}</button>
         ${foldChevron}
@@ -9252,6 +9328,9 @@ function renderDashboard(): void {
   decorateInkSkin(el as HTMLElement);
   if (customizeOpen) renderDrawerBody();
   if (spendDetailOpen) document.body.insertAdjacentHTML("beforeend", renderSpendDetailOverlay());
+  // Cards are rebuilt from scratch, so an unlocked popover's drag opt-outs
+  // (the card-reorder grips) have to be re-armed on every render.
+  if (config.popoverLock === false) applyPopoverDragRegion(false);
   rebuildTrail();
   requestAnimationFrame(fitProviderNames);
 }
@@ -13962,6 +14041,15 @@ async function initSettings(): Promise<void> {
   config.localShortcuts = config.localShortcuts ?? {};
   pruneEmptyCardGroups();
   config.locale = normalizeLocalePref(config.locale);
+  // Popover chrome comes back the way it was left: the pin state is a
+  // window property the OS forgets on restart, and the drag region has to
+  // be re-armed (or kept off) on the fresh DOM.
+  if (!IS_PANEL_FORM) {
+    void getCurrentWebviewWindow()
+      .setAlwaysOnTop(config.popoverPin !== false)
+      .catch(() => {});
+    applyPopoverDragRegion(config.popoverLock !== false);
+  }
   // Panel form: build the settings shell after config lands (controls read
   // initial values from it) but before applyLocale, so applyStaticI18n
   // translates the new DOM in the same pass.
@@ -16090,6 +16178,18 @@ document.querySelector("#settings-btn")!.addEventListener("click", () => {
       spendDetailOpen = true;
       spendDetailDay = spendDetailDay || localDayKey(new Date());
       requestRender();
+      return;
+    }
+    // Popover chrome: pin (always-on-top) and the position lock. Both are
+    // popover-window concerns — the panel form has a real frame.
+    if (target.closest<HTMLElement>("[data-popover-pin]")) {
+      e.preventDefault();
+      void togglePopoverPin();
+      return;
+    }
+    if (target.closest<HTMLElement>("[data-popover-lock]")) {
+      e.preventDefault();
+      void togglePopoverLock();
       return;
     }
     if (target.closest<HTMLElement>("[data-spend-detail-close]") || target.classList.contains("spend-detail-overlay")) {

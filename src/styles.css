@@ -2639,6 +2639,24 @@ article.provider.is-folded:hover {
   padding: 0;
 }
 
+/* Popover window chrome (pin / position lock), sitting left of the daily
+   detail button in the Total Spend head. Same 26px mini-btn footprint;
+   the "on" state is the only difference from an idle mini button. */
+.chrome-btn {
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  opacity: 0.55;
+}
+
+.chrome-btn.on {
+  opacity: 1;
+  color: var(--accent, #22d3ee);
+}
+
 /* Update-push indicator in the Total Spend header — the mainstream quiet
    affordance (Cursor-style): a green circular up arrow that appears only
    while a version is announced. Clicking starts the download in place; the

@@ -236,6 +236,13 @@ fn config_with_defaults(mut cfg: Value) -> Value {
     // also disables them, so they vanish from dashboards/tray; the drawer
     // footer offers restore.
     obj.entry("removedProviders").or_insert(json!([]));
+    // Popover window chrome: pin (always-on-top) and the position lock.
+    // Locked is the default — the popover is centered on every summon and
+    // cannot be dragged. Unlocked, the user drags it anywhere and the
+    // position survives dismissals.
+    obj.entry("popoverPin").or_insert(json!(true));
+    obj.entry("popoverLock").or_insert(json!(true));
+    obj.entry("popoverPos").or_insert(Value::Null);
     // Which popover surface was open when it was dismissed: the next
     // summon lands back on it instead of the card list.
     obj.entry("lastView").or_insert(json!({ "kind": "main", "id": null }));
@@ -327,6 +334,11 @@ const CONFIG_KEYS: &[&str] = &[
     // (see applyPanelIntent in main.ts). Stored so the panel window can read
     // it on boot — the two windows share nothing else.
     "panelIntent",
+    // Popover window chrome (pin / position lock / dragged position) and the
+    // surface to restore on the next summon.
+    "popoverPin",
+    "popoverLock",
+    "popoverPos",
     "lastView",
 ];
 
@@ -4855,6 +4867,41 @@ fn now_ms() -> u64 {
         .unwrap_or(0)
 }
 
+/// The position the next summon should use: the one the user dragged the
+/// popover to, but only while the position lock is off. `None` means "place
+/// it the usual way" (tray anchor / monitor center).
+fn saved_popover_position() -> Option<tauri::PhysicalPosition<i32>> {
+    let cfg = load_config();
+    if cfg.get("popoverLock").and_then(Value::as_bool).unwrap_or(true) {
+        return None; // locked: the popover is always re-placed, never remembered
+    }
+    let pos = cfg.get("popoverPos")?;
+    let x = i32::try_from(pos.get("x")?.as_i64()?).ok()?;
+    let y = i32::try_from(pos.get("y")?.as_i64()?).ok()?;
+    Some(tauri::PhysicalPosition::new(x, y))
+}
+
+/// Remembers where the popover sits so an unlocked summon can put it back.
+/// Called on every dismiss path; a no-op while the lock is on, because a
+/// locked popover's position is not the user's to keep.
+fn remember_popover_position(window: &tauri::WebviewWindow) {
+    let cfg = load_config();
+    if cfg.get("popoverLock").and_then(Value::as_bool).unwrap_or(true) {
+        return;
+    }
+    let Ok(pos) = window.outer_position() else {
+        return;
+    };
+    let _ = set_config_inner(json!({ "popoverPos": { "x": pos.x, "y": pos.y } }));
+}
+
+/// Dismisses the popover, remembering its position first when unlocked.
+fn dismiss_popover(window: &tauri::WebviewWindow) {
+    remember_popover_position(window);
+    let _ = window.hide();
+    set_webview_memory_level(window, true);
+}
+
 fn toggle_popover(app: &tauri::AppHandle, click: tauri::PhysicalPosition<f64>) {
     let Some(window) = app.get_webview_window("main") else {
         return;
@@ -4866,8 +4913,7 @@ fn toggle_popover(app: &tauri::AppHandle, click: tauri::PhysicalPosition<f64>) {
     // could never be summoned again. Treat iconic as hidden.
     let minimized = window.is_minimized().unwrap_or(false);
     if window.is_visible().unwrap_or(false) && !minimized {
-        let _ = window.hide();
-        set_webview_memory_level(&window, true);
+        dismiss_popover(&window);
         return;
     }
 
@@ -4878,13 +4924,21 @@ fn toggle_popover(app: &tauri::AppHandle, click: tauri::PhysicalPosition<f64>) {
     set_webview_memory_level(&window, false);
 
     // Anchor the popover's bottom-right corner near the tray click,
-    // which sits next to the clock on a standard bottom taskbar.
+    // which sits next to the clock on a standard bottom taskbar — unless
+    // the user dragged it somewhere and left the lock off.
     let size = window
         .outer_size()
         .unwrap_or(tauri::PhysicalSize::new(380, 600));
-    let x = (click.x - f64::from(size.width)).max(0.0);
-    let y = (click.y - f64::from(size.height) - 8.0).max(0.0);
-    let _ = window.set_position(tauri::PhysicalPosition::new(x, y));
+    let placed = if let Some(pos) = saved_popover_position() {
+        window.set_position(tauri::PhysicalPosition::new(pos.x, pos.y)).is_ok()
+    } else {
+        false
+    };
+    if !placed {
+        let x = (click.x - f64::from(size.width)).max(0.0);
+        let y = (click.y - f64::from(size.height) - 8.0).max(0.0);
+        let _ = window.set_position(tauri::PhysicalPosition::new(x, y));
+    }
     // show() alone leaves an iconic window iconic (SW_SHOW does not restore),
     // so the restore must be explicit before focusing.
     let _ = window.unminimize();
@@ -4908,8 +4962,7 @@ fn toggle_popover_centered(app: &tauri::AppHandle) {
     // the Alt+2 / second-launch toggle in the hide branch forever.
     let minimized = window.is_minimized().unwrap_or(false);
     if window.is_visible().unwrap_or(false) && !minimized {
-        let _ = window.hide();
-        set_webview_memory_level(&window, true);
+        dismiss_popover(&window);
         return;
     }
 
@@ -4931,14 +4984,22 @@ fn toggle_popover_centered(app: &tauri::AppHandle) {
         .ok()
         .flatten()
         .or_else(|| window.primary_monitor().ok().flatten());
-    if let Some(m) = monitor {
-        let mon_pos = m.position();
-        let mon_size = m.size();
-        let x = mon_pos.x as f64
-            + ((mon_size.width as f64 - size.width as f64) / 2.0).max(0.0);
-        let y = mon_pos.y as f64
-            + ((mon_size.height as f64 - size.height as f64) / 2.0).max(0.0);
-        let _ = window.set_position(tauri::PhysicalPosition::new(x, y));
+    // A dragged position wins over centering while the lock is off.
+    let placed = if let Some(pos) = saved_popover_position() {
+        window.set_position(pos).is_ok()
+    } else {
+        false
+    };
+    if !placed {
+        if let Some(m) = monitor {
+            let mon_pos = m.position();
+            let mon_size = m.size();
+            let x = mon_pos.x as f64
+                + ((mon_size.width as f64 - size.width as f64) / 2.0).max(0.0);
+            let y = mon_pos.y as f64
+                + ((mon_size.height as f64 - size.height as f64) / 2.0).max(0.0);
+            let _ = window.set_position(tauri::PhysicalPosition::new(x, y));
+        }
     }
     let _ = window.unminimize();
     let _ = window.show();
@@ -5272,12 +5333,10 @@ pub fn run() {
                     if now_ms().saturating_sub(gained_at) < 500 {
                         return;
                     }
-                    if window.hide().is_ok() {
-                        LAST_AUTO_HIDE_MS.store(now_ms(), Ordering::Relaxed);
-                        if let Some(wv) = window.app_handle().get_webview_window("main") {
-                            set_webview_memory_level(&wv, true);
-                        }
+                    if let Some(wv) = window.app_handle().get_webview_window("main") {
+                        dismiss_popover(&wv);
                     }
+                    LAST_AUTO_HIDE_MS.store(now_ms(), Ordering::Relaxed);
                 }
             }
         })

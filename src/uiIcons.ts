@@ -35,8 +35,9 @@ import paintBrush from "./assets/icons/paint-brush-regular.svg?raw";
 import arrowCounterClockwise from "./assets/icons/arrow-counter-clockwise-regular.svg?raw";
 import checkCircle from "./assets/icons/check-circle-regular.svg?raw";
 import columns from "./assets/icons/columns-regular.svg?raw";
+import pushPin from "./assets/icons/push-pin-bold.svg?raw";
 
-const ICONS = { gear, arrowsClockwise, shareNetwork, star, info, question, x, caretUp, caretDown, lightning, microphone, circleNotch, rows, palette, key, magnifyingGlass, bell, shield, globe, keyboard, arrowUp, copy, trash, eye, eyeSlash, pencil, plus, lock, lockOpen, arrowLeft, sun, moon, paintBrush, arrowCounterClockwise, checkCircle, columns } as const;
+const ICONS = { gear, arrowsClockwise, shareNetwork, star, info, question, x, caretUp, caretDown, lightning, microphone, circleNotch, rows, palette, key, magnifyingGlass, bell, shield, globe, keyboard, arrowUp, copy, trash, eye, eyeSlash, pencil, plus, lock, lockOpen, arrowLeft, sun, moon, paintBrush, arrowCounterClockwise, checkCircle, columns, pushPin } as const;
 
 export type UiIconName = keyof typeof ICONS;
 

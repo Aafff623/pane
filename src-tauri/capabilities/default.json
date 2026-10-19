@@ -1,10 +1,13 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Capability for the main window and the panel window (dual-form). Only core IPC: the frontend talks to Rust exclusively through app commands (open_link, install_update, ...), so no plugin surface is exposed to the webview.",
+  "description": "Capability for the main window and the panel window (dual-form). Only core IPC: the frontend talks to Rust exclusively through app commands (open_link, install_update, ...), so no plugin surface is exposed to the webview. The three window permissions are the popover's own chrome — pin, re-center, and the drag region that moves an unlocked popover.",
   "windows": ["main", "panel"],
   "permissions": [
     "core:default",
-    "core:window:allow-set-theme"
+    "core:window:allow-set-theme",
+    "core:window:allow-set-always-on-top",
+    "core:window:allow-center",
+    "core:window:allow-start-dragging"
   ]
 }
