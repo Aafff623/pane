@@ -13144,6 +13144,29 @@ function settingsKeyRow(family: string): HTMLElement {
   help.setAttribute("aria-label", t("customize.helpMenu"));
   help.addEventListener("click", () => openProviderHelp(family));
   actions.append(help);
+  // 基元律动: the credential IS the web session, so the row's action is
+  // the login window (and a clear when a session is on file). Must sit
+  // BEFORE the non-key early return below — that return would otherwise
+  // skip the only control this family has.
+  if (family === "tokenrhythm") {
+    const login = document.createElement("button");
+    login.type = "button";
+    login.className = "mini-btn";
+    login.textContent = trLoginStatus?.signed_in
+      ? t("settings.trLoginAgain")
+      : t("settings.trLogin");
+    login.setAttribute("data-tr-login", "");
+    actions.append(login);
+    if (trLoginStatus?.signed_in) {
+      const clear = document.createElement("button");
+      clear.type = "button";
+      clear.className = "mini-btn";
+      clear.textContent = t("settings.trClear");
+      clear.setAttribute("data-tr-clear", "");
+      actions.append(clear);
+    }
+    return item;
+  }
   if (!keyable && !multi) return item;
 
   const button = (label: string, extraClass = "", iconName?: UiIconName) => {
@@ -13154,22 +13177,6 @@ function settingsKeyRow(family: string): HTMLElement {
     else b.textContent = label;
     return b;
   };
-
-  // 基元律动: the credential IS the web session, so the row's action is
-  // the login window (and a clear when a session is on file).
-  if (family === "tokenrhythm") {
-    const login = button(
-      trLoginStatus?.signed_in ? t("settings.trLoginAgain") : t("settings.trLogin"),
-    );
-    login.setAttribute("data-tr-login", "");
-    actions.append(login);
-    if (trLoginStatus?.signed_in) {
-      const clear = button(t("settings.trClear"));
-      clear.setAttribute("data-tr-clear", "");
-      actions.append(clear);
-    }
-    return item;
-  }
 
   if (multi) {
     const isOauth = providerDefinition(family)?.supportsOAuth && !keyable;
