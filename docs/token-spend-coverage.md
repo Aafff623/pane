@@ -80,13 +80,20 @@
 
 这个清单只报告覆盖证据，不生成 token，也不把“发现文件”宣称成“所有请求都已记录”。后续收到新的 OpenCode Desktop 调研后，应先把它映射到上面的形态和契约，再决定是否新增解析器。
 
-## Qoder CN — credits-derived token estimate (2026-10-07)
+## Qoder CN — local transcript ledger (2026-10-20, GitHub #28 phase 1)
 
-Qoder CN writes all-zero `usage` into its local session jsonl, so no measured
-tokens exist on this machine. Its credits ledger does move, so the spend panel
-shows a **flagged estimate**: daily credits diffs (the same ledger behind the
-qodercn card trend) × `QODER_CREDIT_TOKENS_ESTIMATE` (25 000 tokens/credit,
-blended). Official docs price credits per task (Ask ≈ 3-4, Agent ≈ 7-50 per
-request), not per token, so the constant is a planning assumption, editable in
-one place (`spend.rs`), and every row it feeds carries `estimated: true`
-(UI badge 「估算」). Dollars are never guessed for it.
+The earlier "all-zero usage" premise was wrong for `~/.qoder-cn/projects`:
+desktop transcripts carry real per-request `credits`, `original_credits` and
+`context_usage_ratio`; only `input_tokens` / `output_tokens` are zero.
+`src-tauri/src/qoder_sessions.rs` now scans the last 31 days (subagents under
+`<sessionId>/subagents/` fold into the parent and inherit its window) and
+exposes `fetch_qoder_spend`:
+
+- **Credits** are measured; **billed input tokens** are derived as
+  `Σ(context_usage_ratio × contextWindow in force at that request)`.
+- A missing window leaves credits intact and marks those trips' tokens
+  unavailable — never a silent 200K fallback.
+- Credits and derived tokens stay out of Total Spend and the dollar donut;
+  they render as a separate "Qoder CN · local" credits row plus a per-day
+  block in the daily-usage overlay.
+- No network requests, no conversation bodies, no credits→dollar conversion.

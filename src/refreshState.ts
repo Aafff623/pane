@@ -1,4 +1,4 @@
-export type RefreshDataset = "spend" | "spendHistory" | "spendDaily" | "creditExtras" | "creditTrend" | "meterTrend";
+export type RefreshDataset = "spend" | "spendHistory" | "spendDaily" | "creditExtras" | "creditTrend" | "meterTrend" | "qoder";
 
 interface RefreshRequest {
   usageOnly: boolean;

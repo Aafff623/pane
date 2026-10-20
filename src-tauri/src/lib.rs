@@ -33,6 +33,7 @@ mod providers;
 pub(crate) mod provider_catalog;
 mod snapshot_store;
 mod provider_dispatch;
+mod qoder_sessions;
 mod spend;
 mod telemetry;
 mod tray_projection;
@@ -3225,6 +3226,16 @@ fn fetch_spend_daily(range_days: Option<u32>) -> Result<Vec<spend_history::Daily
     spend_history::daily_spend(range_days)
 }
 
+/// Qoder CN local transcripts (GitHub #28): measured credits plus derived
+/// billed input tokens. Kept out of Total Spend and the dollar donut —
+/// credits are a separate unit and the derived tokens are not measured.
+#[tauri::command]
+async fn fetch_qoder_spend() -> qoder_sessions::QoderSpend {
+    tauri::async_runtime::spawn_blocking(qoder_sessions::collect)
+        .await
+        .unwrap_or_default()
+}
+
 /// Validates a relay base URL for a provider that takes one; the rejection
 /// message names the provider's own card, never the other relay family.
 fn validate_relay_base_url(provider: &str, url: &str) -> Result<(), String> {
@@ -5328,6 +5339,7 @@ pub fn run() {
             fetch_spend_history,
             fetch_credit_extras,
             fetch_spend_daily,
+            fetch_qoder_spend,
             antigravity_capture_account,
             cursor_oauth_start,
             cursor_oauth_poll,

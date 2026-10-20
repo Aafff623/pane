@@ -2824,6 +2824,16 @@ article.provider.is-folded:hover {
 .spend-detail-model + .spend-detail-model { border-top: 1px solid color-mix(in oklab, var(--border) 70%, transparent); }
 .spend-detail-empty { padding: 24px; color: var(--muted-foreground); text-align: center; font-size: 12px; }
 
+/* Qoder CN local-transcript block: credits are measured, billed tokens are
+   derived, so it sits beside the dollar rows instead of inside their totals. */
+.qoder-tool { border-color: color-mix(in srgb, var(--foreground) 14%, var(--border)); }
+.qoder-chip { margin-left: 6px; padding: 1px 6px; border: 1px solid var(--border); border-radius: 999px; font-size: 9px; font-weight: 500; color: var(--muted-foreground); vertical-align: 1px; }
+.qoder-meta { margin-top: 4px; color: var(--muted-foreground); font-size: 10px; }
+.qoder-key { margin-left: 6px; opacity: 0.55; font-size: 9px; }
+.qoder-sessions { margin-top: 6px; padding-top: 6px; border-top: 1px solid color-mix(in oklab, var(--border) 70%, transparent); }
+.qoder-session { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 2px 0; color: var(--muted-foreground); font-size: 10px; }
+.qoder-session-id { font-family: ui-monospace, Consolas, monospace; opacity: 0.75; }
+
 @media (max-width: 520px) {
   .spend-detail-overlay { padding: 8px; }
   .spend-detail-panel { padding: 14px; border-radius: 14px; }

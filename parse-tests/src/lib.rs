@@ -34,6 +34,9 @@ pub mod pricing;
 #[path = "../../src-tauri/src/spend.rs"]
 pub mod spend;
 
+#[path = "../../src-tauri/src/qoder_sessions.rs"]
+pub mod qoder_sessions;
+
 #[path = "../../src-tauri/src/httpapi.rs"]
 pub mod httpapi;
 

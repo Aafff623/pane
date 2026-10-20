@@ -170,6 +170,63 @@ interface DailySpendRow {
   models: DailyModelSpend[];
 }
 
+// Qoder CN local transcripts (GitHub #28): measured credits plus billed
+// input tokens derived from context_usage_ratio × the window in force. Kept
+// apart from the dollar/token totals — different unit, derived tokens.
+interface QoderModelSpend {
+  model: string;
+  label: string;
+  credits: number;
+  billed_tokens: number;
+  trips: number;
+  tokens_unavailable_trips: number;
+}
+
+interface QoderDaySpend {
+  day: string;
+  credits: number;
+  original_credits: number;
+  billed_tokens: number;
+  tokens_unavailable_trips: number;
+  trips: number;
+  sessions: number;
+  peak_ratio: number;
+  models: QoderModelSpend[];
+}
+
+interface QoderSessionSpend {
+  id: string;
+  started: string;
+  day: string;
+  credits: number;
+  billed_tokens: number;
+  tokens_unavailable_trips: number;
+  trips: number;
+  peak_ratio: number;
+  subagent_credits: number;
+  models: QoderModelSpend[];
+}
+
+interface QoderWindow {
+  credits: number;
+  original_credits: number;
+  billed_tokens: number;
+  tokens_unavailable_trips: number;
+  trips: number;
+  sessions: number;
+}
+
+interface QoderSpendReport {
+  today: QoderWindow;
+  yesterday: QoderWindow;
+  d7: QoderWindow;
+  d30: QoderWindow;
+  all: QoderWindow;
+  days: QoderDaySpend[];
+  sessions: QoderSessionSpend[];
+  source: { state: string; root: string; sessions: number; lite_sessions: number; tokens_unavailable_trips: number };
+}
+
 /// How to get each provider signed in again, for the ⚠ Outdated tooltip.
 const RELOGIN_KEYS: Record<string, string> = {
   claude: "stale.relogin.claude",
@@ -895,6 +952,7 @@ function normalizeDaily(rows: DailySpendRow[]): DailySpendRow[] {
 let lastSpend: ProviderSpend[] = [];
 let lastSpendHistory: { d7: HistorySpend[]; all: HistorySpend[] } = { d7: [], all: [] };
 let lastSpendDaily: DailySpendRow[] = [];
+let lastQoderSpend: QoderSpendReport | null = null;
 /** Credits consumed inside each panel window — the same five windows the
  * token rows use, so both surfaces always agree on the selected period. */
 interface CreditWindows {
@@ -3632,6 +3690,41 @@ function spendDetailDayRows(day: string): DailySpendRow[] {
     .sort((a, b) => spendDetailValue(b) - spendDetailValue(a));
 }
 
+/// Qoder CN's day block inside the daily-usage overlay. It sits beside the
+/// dollar rows rather than inside them: credits are measured, billed tokens
+/// are derived, and neither belongs in the donut or the $ totals.
+function qoderDayHtml(day: string): string {
+  const data = lastQoderSpend?.days.find((row) => row.day === day);
+  if (!data || (data.credits <= 0 && data.trips === 0)) return "";
+  const tokens = data.tokens_unavailable_trips > 0 && data.billed_tokens <= 0 ? "—" : fmtTokens(data.billed_tokens);
+  const models = data.models
+    .map((model) => {
+      const tokensText = model.tokens_unavailable_trips > 0 && model.billed_tokens <= 0 ? "—" : fmtTokens(model.billed_tokens);
+      return `<div class="spend-detail-model"><span>${escapeHtml(model.label)}${
+        model.label !== model.model ? `<span class="qoder-key">${escapeHtml(model.model)}</span>` : ""
+      }</span><span>${escapeHtml(fmtCredits(model.credits))} ${escapeHtml(t("qoder.creditsUnit"))} · ${escapeHtml(tokensText)} · ${model.trips}</span></div>`;
+    })
+    .join("");
+  const perCredit = data.credits > 0 && data.billed_tokens > 0 ? fmtTokens(data.billed_tokens / data.credits) : null;
+  const sessions = (lastQoderSpend?.sessions ?? [])
+    .filter((session) => session.day === day)
+    .slice(0, 3)
+    .map(
+      (session) =>
+        `<div class="qoder-session"><span class="qoder-session-id">${escapeHtml(session.id.slice(0, 8))}</span><span>${escapeHtml(fmtCredits(session.credits))} ${escapeHtml(t("qoder.creditsUnit"))} · ${escapeHtml(t("qoder.sessionTrips", { trips: session.trips }))}${session.subagent_credits > 0 ? ` · ${escapeHtml(t("qoder.subagentCredits", { credits: fmtCredits(session.subagent_credits) }))}` : ""}</span></div>`,
+    )
+    .join("");
+  return `<article class="spend-detail-tool qoder-tool" title="${escapeHtml(t("qoder.tokensTip"))}">
+    <div class="spend-detail-tool-head"><strong>Qoder CN <span class="qoder-chip">${escapeHtml(t("qoder.localBadge"))}</span></strong><span>${escapeHtml(fmtCredits(data.credits))} ${escapeHtml(t("qoder.creditsUnit"))} · ${escapeHtml(tokens)}</span></div>
+    <div class="qoder-meta">${escapeHtml(t("qoder.tripLine", { trips: data.trips, sessions: data.sessions }))}${
+      perCredit ? ` · ${escapeHtml(t("qoder.tokensPerCredit", { ratio: perCredit }))}` : ""
+    }${
+      data.tokens_unavailable_trips > 0 ? ` · ${escapeHtml(t("qoder.unavailable", { n: data.tokens_unavailable_trips }))}` : ""
+    }</div>
+    ${models}${sessions ? `<div class="qoder-sessions">${sessions}</div>` : ""}
+  </article>`;
+}
+
 function renderSpendDetailOverlay(): string {
   const today = new Date();
   const end = new Date(today.getFullYear(), today.getMonth(), today.getDate());
@@ -3697,11 +3790,12 @@ function renderSpendDetailOverlay(): string {
   const selectedDay = spendDetailDay || localDayKey(end);
   const rows = spendDetailDayRows(selectedDay);
   const selectedTotals = rows.reduce((sum, row) => ({ cost: sum.cost + row.cost, tokens: sum.tokens + row.tokens }), { cost: 0, tokens: 0 });
-  const detailRows = rows.length
-    ? rows.map((row) => {
+  const qoder = qoderDayHtml(selectedDay);
+  const detailRows = rows.length || qoder
+    ? `${rows.map((row) => {
         const models = row.models.map((model) => `<div class="spend-detail-model"><span>${escapeHtml(model.model)}</span><span>${escapeHtml(fmtSpendVal({ cost: model.cost, tokens: model.tokens, models: [] }))}</span></div>`).join("");
         return `<article class="spend-detail-tool"><div class="spend-detail-tool-head"><strong>${escapeHtml(providerNameForSpend(row.id))}</strong><span>${escapeHtml(fmtSpendVal({ cost: row.cost, tokens: row.tokens, models: [] }))}</span></div>${models || `<div class="spend-detail-model muted">${escapeHtml(t("spendDetail.noModelBreakdown"))}</div>`}</article>`;
-      }).join("")
+      }).join("")}${qoder}`
     : `<div class="spend-detail-empty">${escapeHtml(t("spendDetail.noUsage"))}</div>`;
   return `<div class="spend-detail-overlay" role="dialog" aria-modal="true" aria-labelledby="spend-detail-title">
     <section class="spend-detail-panel">
@@ -6599,13 +6693,28 @@ function envelopeEntries(range: ShareRange): DonutEntry[] {
   return byModel ? modelEntriesForRange(range) : donutEntriesForRange(range);
 }
 
+/// Qoder CN's local transcript ledger for one spend window. Credits are
+/// measured; billed tokens are derived and never join the token totals.
+function qoderWindowFor(range: ShareRange): QoderWindow | null {
+  return lastQoderSpend ? lastQoderSpend[range] : null;
+}
+
 function creditEntriesForRange(range: ShareRange): { id: string; name: string; value: number; unit: UsageUnit }[] {
-  return lastCreditExtras.map((credit) => ({
-    id: credit.id,
-    unit: credit.unit ?? "credits",
-    name: notedName(credit.id, providerDisplayName(providerFamily(credit.id))),
-    value: credit.windows[range === "all" ? "all" : range],
-  })).filter((row) => row.value > 0).sort((a, b) => a.name.localeCompare(b.name, localeTag()));
+  const qoder = qoderWindowFor(range);
+  // Online samples and local transcripts have different coverage (other
+  // devices / older history vs this machine), so both rows are kept apart.
+  const rows = lastCreditExtras
+    .map((credit) => ({
+      id: credit.id,
+      unit: credit.unit ?? "credits",
+      name: notedName(credit.id, providerDisplayName(providerFamily(credit.id))),
+      value: credit.windows[range === "all" ? "all" : range],
+    }))
+    .filter((row) => row.value > 0);
+  if (qoder && qoder.credits > 0) {
+    rows.push({ id: "qodercn-local", name: t("qoder.localName"), value: qoder.credits, unit: "credits" });
+  }
+  return rows.sort((a, b) => a.name.localeCompare(b.name, localeTag()));
 }
 
 async function shareSpendEnvelope(range: ShareRange): Promise<void> {
@@ -10303,6 +10412,12 @@ async function refresh(
   const spendDailyPromise = usageOnly
     ? Promise.resolve<DailySpendRow[] | null>(null)
     : spendPromise.then(() => invoke<DailySpendRow[]>("fetch_spend_daily", { rangeDays: 365 }).catch(() => []));
+  // Local Qoder CN transcripts are a separate ledger (credits + derived
+  // tokens), so this scan can run alongside the dollar spend without
+  // touching its numbers.
+  const qoderPromise = usageOnly
+    ? Promise.resolve<QoderSpendReport | null>(null)
+    : invoke<QoderSpendReport>("fetch_qoder_spend").catch(() => null);
   // Credits-billed cards (Qoder CN / Trae CN): daily credit consumption —
   // one tiny JSON read, fetched even for usage-only refreshes so their
   // trend bars stay fresh. Kept apart from any token totals.
@@ -10423,6 +10538,7 @@ async function refresh(
   const spend = await spendPromise;
   const spendHistory = await spendHistoryPromise;
   const spendDaily = await spendDailyPromise;
+  const qoder = await qoderPromise;
   const creditTrend = await creditTrendPromise;
   const meterTrend = await meterTrendPromise;
   if (refreshState.acceptResult("meterTrend", myGen, meterTrend)) lastMeterTrend = meterTrend;
@@ -10442,6 +10558,9 @@ async function refresh(
   }
   if (refreshState.acceptResult("spendDaily", myGen, spendDaily)) {
     lastSpendDaily = normalizeDaily(spendDaily);
+  }
+  if (refreshState.acceptResult("qoder", myGen, qoder)) {
+    lastQoderSpend = qoder;
   }
   spendLoaded = true;
   // Overlapping scans are allowed now that Refresh unlocks before spend
