@@ -3696,13 +3696,20 @@ article.provider.is-folded:hover {
 }
 
 /* Account child rows under a multi-account family row in Customize:
-   [label] [masked key] ... [★] [?] [⚙]. */
+   [label] [masked key] ... [★] [?] [⚙]. The block is a nested group
+   under the family row, not more flat drawer surface — it carries its
+   own blue-tinted panel plus a left rule, so a multi-account family
+   reads as "row + sub-list" at a glance instead of blending into the
+   uniform drawer background. */
 .cust-account-children {
   display: flex;
   flex-direction: column;
   gap: 4px;
   margin: -2px 0 8px;
-  padding: 0 0 0 10px;
+  padding: 6px 8px;
+  background: color-mix(in srgb, var(--chart-blue) 10%, transparent);
+  border-left: 2px solid color-mix(in srgb, var(--chart-blue) 55%, transparent);
+  border-radius: 0 8px 8px 0;
 }
 
 .cust-account-child {
@@ -3971,8 +3978,17 @@ article.provider.is-folded:hover {
 }
 
 .cust-search-wrap {
-  position: relative;
-  padding: 2px 2px 8px;
+  /* Sticky, not fixed: the bar rests under the Customize header at the
+     top of the list and floats there while the provider list scrolls
+     under it, instead of scrolling away with the content. */
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  padding: 6px 2px 8px;
+  /* Opaque so rows scroll behind the bar rather than through it; the
+     soft lower shadow reads as a floating bar in both states. */
+  background: var(--background);
+  box-shadow: 0 10px 14px -12px rgb(0 0 0 / 0.9);
 }
 .cust-search-icon {
   position: absolute;
@@ -4641,10 +4657,10 @@ body.refreshing .overview-refreshing svg {
   background: none;
   border: none;
   padding: 0;
-  width: 14px;
-  height: 13px;
-  font-size: 9px;
-  line-height: 13px;
+  width: 16px;
+  height: 15px;
+  font-size: 11px;
+  line-height: 15px;
   font-weight: 600;
   color: var(--foreground);
   cursor: pointer;
@@ -5516,12 +5532,12 @@ body.party .trail-tick.active {
 
 .cust-az button {
   min-width: 0;
-  width: 14px;
-  height: 13px;
+  width: 16px;
+  height: 15px;
   padding: 0;
   border-radius: 4px;
-  font-size: 9px;
-  line-height: 13px;
+  font-size: 11px;
+  line-height: 15px;
 }
 
 #drawer {
