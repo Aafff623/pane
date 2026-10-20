@@ -487,6 +487,9 @@ const en: Dict = {
   "settings.hideUnconfigured": "Hide unconfigured providers",
   "settings.hideUnconfiguredTip":
     "Bare \"no credentials\" cards fold into one collapsed section at the bottom of the board, and the overview skips them. Turn off to see every enabled provider in place.",
+  "settings.spendShowAll": "Show every provider in spend",
+  "settings.spendShowAllTip":
+    "The cost view folds providers under $5/day (or $10/month) into one \"Others\" wedge. Turn on to give every provider its own wedge and list its models on hover.",
   "board.unconfigured": "Unconfigured providers",
   "board.emptyTitle": "Nothing to watch yet",
   "board.emptyBody":
@@ -1734,6 +1737,8 @@ const zh: Dict = {
   "settings.redetectTip": "重新扫描本机带登录态的 AI 工具（设置完成后新装的工具会在这里出现）。",
   "settings.hideUnconfigured": "隐藏未配置的 Provider",
   "settings.hideUnconfiguredTip": "「未配置凭据」的卡片折叠为看板底部一个收起分组，总览也不再显示它们；关闭后按原样全部平铺。",
+  "settings.spendShowAll": "花费面板显示全部 Provider",
+  "settings.spendShowAllTip": "成本视图会把单日低于 $5（30 天低于 $10）的 Provider 折进「其他」楔形。开启后每家单独成块，悬浮可看各自的模型明细。",
   "board.unconfigured": "未配置的 Provider",
   "board.emptyTitle": "还没有可看的额度",
   "board.emptyBody": "看板上没有可用凭据的 Provider。给第一家配置密钥或登录，即可开始监控额度。",
@@ -2967,6 +2972,9 @@ const ru: Dict = {
   "settings.hideUnconfigured": "Скрыть неконфигурированные провайдеры",
   "settings.hideUnconfiguredTip":
     "Карточки «нет учётных данных» сворачиваются в одну секцию внизу доски и не показываются в обзоре; выключите, чтобы видеть всех как раньше.",
+  "settings.spendShowAll": "Показывать всех провайдеров в расходах",
+  "settings.spendShowAllTip":
+    "В режиме затрат провайдеры ниже $5 в день (или $10 за месяц) сворачиваются в один сектор «Другие». Включите, чтобы каждый получил свой сектор, а модели показывались при наведении.",
   "board.unconfigured": "Неконфигурированные провайдеры",
   "board.emptyTitle": "Пока нечего отслеживать",
   "board.emptyBody":

@@ -18,6 +18,7 @@ use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, SystemTime};
 
 use crate::pricing;
+use crate::provider_catalog;
 use crate::providers;
 
 pub const TREND_DAYS: usize = 30;
@@ -1951,6 +1952,130 @@ fn codex_extra_accounts() -> (Vec<ProviderSpend>, FileData) {
     (spends, kimi_extra)
 }
 
+/// ZCode validates model_usage.provider_id against its provider_config.json
+/// rules. A rule's API host names the endpoint, and only endpoints Pane has
+/// a family for may move a row off the ZCode card. One table so the host
+/// list, the routed family set and their tests can never drift apart.
+const ZCODE_HOST_FAMILIES: &[(&str, &str)] = &[
+    ("tokenrhythm.studio", "tokenrhythm"),
+    ("token.sensenova.cn", "sensenova"),
+    ("api.stepfun.com", "stepfun-plan"),
+    ("api.cline.bot", "clinepass"),
+    ("api.minimax.cn", "minimax"),
+    ("api.deepseek.com", "deepseek"),
+];
+
+fn zcode_family_for_host(host: &str) -> Option<&'static str> {
+    ZCODE_HOST_FAMILIES
+        .iter()
+        .find(|(known, _)| *known == host)
+        .map(|(_, family)| *family)
+}
+
+/// Template-based rules carry no baseUrl; for those the providerId is
+/// already the Pane family id.
+fn zcode_routed_family(provider_id: &str) -> Option<&'static str> {
+    ZCODE_HOST_FAMILIES
+        .iter()
+        .map(|(_, family)| *family)
+        .find(|family| *family == provider_id)
+}
+
+/// Host of a base URL without a URL crate: scheme, userinfo, port and path
+/// dropped, host case-folded.
+fn zcode_base_url_host(url: &str) -> Option<String> {
+    let rest = url.trim();
+    let rest = rest.split_once("://").map_or(rest, |(_, r)| r);
+    let authority = rest.split(['/', '?', '#']).next().unwrap_or("");
+    let host = authority.rsplit_once('@').map_or(authority, |(_, h)| h);
+    let host = host.split(':').next().unwrap_or("");
+    (!host.is_empty()).then(|| host.to_ascii_lowercase())
+}
+
+/// How ZCode's `model_usage.provider_id` maps onto Pane cards, built from
+/// `~/.zcode/v2/provider_config.json` → `config.providerConfigRules`.
+/// An empty router (missing or corrupt file) keeps every row on ZCode.
+#[derive(Default)]
+struct ZcodeRouter {
+    families: HashMap<String, &'static str>,
+    names: HashMap<String, String>,
+}
+
+impl ZcodeRouter {
+    fn from_json(raw: &str) -> Self {
+        let mut router = Self::default();
+        let Ok(v) = serde_json::from_str::<Value>(raw) else {
+            return router;
+        };
+        let Some(rules) = v
+            .pointer("/config/providerConfigRules/providerRules")
+            .and_then(Value::as_array)
+        else {
+            return router;
+        };
+        for rule in rules {
+            let Some(provider_id) = rule.get("providerId").and_then(Value::as_str) else {
+                continue;
+            };
+            if let Some(name) = rule.get("providerName").and_then(Value::as_str) {
+                if !name.is_empty() {
+                    router.names.insert(provider_id.to_string(), name.to_string());
+                }
+            }
+            // A baseUrl names the endpoint; an unmapped host keeps the row
+            // on ZCode even when the providerId looks like a family id.
+            let family = match rule.pointer("/config/api/baseUrl").and_then(Value::as_str) {
+                Some(url) => zcode_base_url_host(url).and_then(|host| zcode_family_for_host(&host)),
+                None => zcode_routed_family(provider_id),
+            };
+            if let Some(family) = family {
+                router.families.insert(provider_id.to_string(), family);
+            }
+        }
+        router
+    }
+
+    fn family(&self, provider_id: &str) -> Option<&'static str> {
+        self.families.get(provider_id).copied()
+    }
+
+    /// Routed rows keep the bare model id (the card already names the
+    /// provider); rows staying on ZCode carry the provider's own name so a
+    /// bare `deepseek-v4.1-flash-1017` is not mistaken for a ZCode model.
+    fn label(&self, provider_id: &str, model: &str) -> String {
+        match self.names.get(provider_id) {
+            Some(name) => format!("{name} · {model}"),
+            None => model.to_string(),
+        }
+    }
+}
+
+/// Put one ZCode db row on its card. Attribution only moves rows between
+/// cards — the caller's totals never change.
+#[allow(clippy::too_many_arguments)]
+fn zcode_place_row(
+    residual: &mut FileData,
+    routed: &mut HashMap<String, FileData>,
+    router: &ZcodeRouter,
+    provider_id: &str,
+    ts: DateTime<Utc>,
+    model: &str,
+    cost: Option<f64>,
+    tokens: f64,
+) {
+    let (target, label) = match router.family(provider_id) {
+        Some(family) => (
+            routed.entry(family.to_string()).or_default(),
+            model.to_string(),
+        ),
+        None => (residual, router.label(provider_id, model)),
+    };
+    match cost {
+        Some(cost) => add_event(target, ts, &label, cost, tokens),
+        None => note_unpriced(target, ts, &label, tokens),
+    }
+}
+
 // ---------------------------------------------------------------------------
 // ZCode CLI — its own model I/O rollout log
 // ---------------------------------------------------------------------------
@@ -1960,14 +2085,14 @@ fn codex_extra_accounts() -> (Vec<ProviderSpend>, FileData) {
 /// (`inputTokens`/`outputTokens`/`cacheReadTokens`/`cacheWriteTokens`)
 /// plus the model id and completion timestamp. Lines also carry the full
 /// request/response bodies, so the substring gate skips non-usage work.
-fn zcode() -> ProviderSpend {
+fn zcode() -> ZcodeScan {
     // The shared SQLite (the exact table ZCode's Settings → Usage page
     // reads) is authoritative: one row per model call with started_at and
     // the four billing buckets. The rollout jsonl dir only ever catches a
     // handful of CLI sessions, so it contributes exclusively days older
     // than the db's earliest row (the db prunes at 30 days) — a day the db
     // still covers is never mixed with jsonl, so no call counts twice.
-    let (db_data, db_min_day) = zcode_db_data();
+    let (db_data, db_routed, db_min_day) = zcode_db_data();
     let mut all = db_data;
     let min_day = db_min_day.unwrap_or(i32::MAX);
 
@@ -1990,6 +2115,7 @@ fn zcode() -> ProviderSpend {
         let data = file_days(&file, &mut |line, data| zcode_line(line, data));
         merge_data(&mut legacy, data);
     }
+    // Rollout lines carry no provider id, so all legacy rows stay on ZCode.
     for ((day, model), (cost, tokens)) in legacy.days {
         if day >= min_day {
             continue; // the db already owns every day it still keeps
@@ -1998,37 +2124,60 @@ fn zcode() -> ProviderSpend {
         entry.0 += cost;
         entry.1 += tokens;
     }
-    build_spend("zcode", "ZCode", all)
+    ZcodeScan { residual: all, routed: db_routed }
 }
 
-/// ZCode db parse, cached on (db, wal) stamps — the wal grows with every
-/// live call, so its stamp is what invalidates. A locked/busy db (CLI
-/// mid-write) serves the last good parse instead of dropping the slice.
-/// Returns the day-map plus the earliest local day the db still holds, so
-/// jsonl history older than the retention window can be layered on.
-fn zcode_db_data() -> (FileData, Option<i32>) {
-    use std::sync::Mutex;
-    static CACHE: Mutex<Option<((SystemTime, u64), (SystemTime, u64), FileData, Option<i32>)>> =
-        Mutex::new(None);
+/// Split db rows: routed families leave the ZCode card, everything else
+/// (including relay-only providers) stays behind.
+struct ZcodeScan {
+    residual: FileData,
+    routed: HashMap<String, FileData>,
+}
 
-    let Some(db_path) = dirs::home_dir().map(|h| h.join(".zcode").join("cli").join("db").join("db.sqlite"))
-    else {
-        return (FileData::default(), None);
+#[derive(Clone)]
+struct ZcodeDbScan {
+    data: FileData,
+    routed: HashMap<String, FileData>,
+    min_day: Option<i32>,
+}
+
+/// ZCode db parse, cached on (db, wal, provider-rules) stamps — the wal
+/// grows with every live call, so its stamp is what invalidates; the rules
+/// file invalidates the attribution when the user edits providers. A
+/// locked/busy db (CLI mid-write) serves the last good parse instead of
+/// dropping the slice. Returns the residual day-map, the rows routed to
+/// other Pane families, and the earliest local day the db still holds, so
+/// jsonl history older than the retention window can be layered on.
+type ZcodeDbStamps = ((SystemTime, u64), (SystemTime, u64), (SystemTime, u64));
+
+fn zcode_db_data() -> (FileData, HashMap<String, FileData>, Option<i32>) {
+    use std::sync::Mutex;
+    static CACHE: Mutex<Option<(ZcodeDbStamps, ZcodeDbScan)>> = Mutex::new(None);
+
+    let Some(home) = dirs::home_dir() else {
+        return (FileData::default(), HashMap::new(), None);
     };
+    let db_path = home.join(".zcode").join("cli").join("db").join("db.sqlite");
     if !db_path.exists() {
-        return (FileData::default(), None);
+        return (FileData::default(), HashMap::new(), None);
     }
     let db_stamp = stamp_of(&db_path);
     let wal_stamp = stamp_of(&db_path.with_extension("sqlite-wal"));
+    let rules_path = home.join(".zcode").join("v2").join("provider_config.json");
+    let rules_stamp = stamp_of(&rules_path);
     if let Ok(guard) = CACHE.lock() {
-        if let Some((d, w, data, min_day)) = guard.as_ref() {
-            if *d == db_stamp && *w == wal_stamp {
-                return (data.clone(), *min_day);
+        if let Some((stamps, scan)) = guard.as_ref() {
+            if *stamps == (db_stamp, wal_stamp, rules_stamp) {
+                return (scan.data.clone(), scan.routed.clone(), scan.min_day);
             }
         }
     }
 
-    let Some((data, min_day)) = (|| {
+    let router = fs::read_to_string(&rules_path)
+        .map(|raw| ZcodeRouter::from_json(&raw))
+        .unwrap_or_default();
+
+    let Some(scan) = (|| {
         let conn = rusqlite::Connection::open_with_flags(
             &db_path,
             rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
@@ -2037,7 +2186,7 @@ fn zcode_db_data() -> (FileData, Option<i32>) {
         let cutoff_ms = (Local::now() - chrono::Duration::days(32)).timestamp_millis();
         let mut stmt = conn
             .prepare(
-                "SELECT started_at, model_id, input_tokens, output_tokens,
+                "SELECT started_at, model_id, provider_id, input_tokens, output_tokens,
                         cache_creation_input_tokens, cache_read_input_tokens,
                         computed_total_tokens
                  FROM model_usage WHERE started_at >= ?",
@@ -2045,16 +2194,21 @@ fn zcode_db_data() -> (FileData, Option<i32>) {
             .ok()?;
         let mut rows = stmt.query([cutoff_ms]).ok()?;
         let mut data = FileData::default();
+        let mut routed: HashMap<String, FileData> = HashMap::new();
         let mut min_day: Option<i32> = None;
         while let Ok(Some(row)) = rows.next() {
             let Ok(ts_ms) = row.get::<_, i64>(0) else { break };
             let Ok(model) = row.get::<_, String>(1) else { break };
+            let provider = row
+                .get::<_, Option<String>>(2)
+                .unwrap_or_default()
+                .unwrap_or_default();
             let (Ok(input), Ok(output), Ok(cache_write), Ok(cache_read), Ok(computed)) = (
-                row.get::<_, f64>(2),
                 row.get::<_, f64>(3),
                 row.get::<_, f64>(4),
                 row.get::<_, f64>(5),
                 row.get::<_, f64>(6),
+                row.get::<_, f64>(7),
             ) else {
                 break;
             };
@@ -2066,35 +2220,33 @@ fn zcode_db_data() -> (FileData, Option<i32>) {
             if tokens <= 0.0 {
                 continue;
             }
-            match probe_lookup(&model) {
-                Some(p) => {
-                    let u = pricing::Usage {
-                        input: plain_input,
-                        output,
-                        cache_read,
-                        cache_write_5m: cache_write,
-                        cache_write_1h: 0.0,
-                    };
-                    add_event(&mut data, ts, &model, pricing::request_cost(&p, &u, true), tokens);
-                }
-                None => note_unpriced(&mut data, ts, &model, tokens),
-            }
+            let cost = probe_lookup(&model).map(|p| {
+                let u = pricing::Usage {
+                    input: plain_input,
+                    output,
+                    cache_read,
+                    cache_write_5m: cache_write,
+                    cache_write_1h: 0.0,
+                };
+                pricing::request_cost(&p, &u, true)
+            });
+            zcode_place_row(&mut data, &mut routed, &router, &provider, ts, &model, cost, tokens);
         }
-        Some((data, min_day))
+        Some(ZcodeDbScan { data, routed, min_day })
     })() else {
         // Unreadable this pass — serve the last good parse when one exists.
-        if let Ok(mut guard) = CACHE.lock() {
-            if let Some((_, _, data, min_day)) = guard.as_ref() {
-                return (data.clone(), *min_day);
+        if let Ok(guard) = CACHE.lock() {
+            if let Some((_, scan)) = guard.as_ref() {
+                return (scan.data.clone(), scan.routed.clone(), scan.min_day);
             }
         }
-        return (FileData::default(), None);
+        return (FileData::default(), HashMap::new(), None);
     };
 
     if let Ok(mut guard) = CACHE.lock() {
-        *guard = Some((db_stamp, wal_stamp, data.clone(), min_day));
+        *guard = Some(((db_stamp, wal_stamp, rules_stamp), scan.clone()));
     }
-    (data, min_day)
+    (scan.data, scan.routed, scan.min_day)
 }
 
 fn stamp_of(path: &Path) -> (SystemTime, u64) {
@@ -3279,6 +3431,104 @@ mod tests {
         // plain (priced) input is the non-cached remainder.
         assert_eq!(zcode_totals(30.0, 5.0, 10.0, 15.0, 0.0), (35.0, 5.0));
         assert_eq!(zcode_totals(30.0, 5.0, 0.0, 0.0, 0.0), (35.0, 30.0));
+    }
+
+    // ---- ZCode provider attribution --------------------------------------
+
+    /// Live shape of `~/.zcode/v2/provider_config.json`, API keys elided.
+    fn zcode_rules_sample() -> String {
+        json!({
+            "config": {"providerConfigRules": {"providerRules": [
+                {"providerId": "new-provider", "providerName": "🐑StepFun",
+                 "config": {"api": {"baseUrl": "https://api.stepfun.com/step_plan/v1"}}},
+                {"providerId": "new-provider-2", "providerName": "cline",
+                 "config": {"api": {"baseUrl": "https://api.cline.bot/api/v1"}}},
+                {"providerId": "new-provider-3", "providerName": "万象中转站",
+                 "config": {"api": {"baseUrl": "https://liufengzi.qd.je/v1"}}},
+                {"providerId": "deepseek", "providerName": "DeepSeek", "config": {}},
+                {"providerId": "minimax", "providerName": "MiniMax",
+                 "config": {"api": {"baseUrl": "https://api.minimax.cn/v1"}}}
+            ]}}
+        })
+        .to_string()
+    }
+
+    #[test]
+    fn zcode_provider_rules_route_known_hosts_and_keep_unmapped_providers() {
+        let router = ZcodeRouter::from_json(&zcode_rules_sample());
+        assert_eq!(router.family("new-provider"), Some("stepfun-plan"));
+        assert_eq!(router.family("new-provider-2"), Some("clinepass"));
+        assert_eq!(router.family("minimax"), Some("minimax"));
+        // No baseUrl in the live DeepSeek rule — its providerId is the family.
+        assert_eq!(router.family("deepseek"), Some("deepseek"));
+        // A relay has no Pane family: stays on the ZCode card, labelled.
+        assert_eq!(router.family("new-provider-3"), None);
+        assert_eq!(
+            router.label("new-provider-3", "deepseek-v4.1-flash-1017"),
+            "万象中转站 · deepseek-v4.1-flash-1017"
+        );
+        // An unknown provider id can only fall back to the bare model id.
+        assert_eq!(router.label("zai-api", "glm-5.3"), "glm-5.3");
+    }
+
+    #[test]
+    fn zcode_provider_rules_degrade_to_all_zcode_when_missing_or_corrupt() {
+        for raw in ["", "{not json", "null", "{\"config\":{}}"] {
+            let router = ZcodeRouter::from_json(raw);
+            assert_eq!(router.family("new-provider"), None, "input: {raw}");
+            assert_eq!(router.label("new-provider", "step-5-preview"), "step-5-preview");
+        }
+    }
+
+    #[test]
+    fn zcode_unmapped_base_url_keeps_a_family_shaped_provider_on_zcode() {
+        // The providerId fallback exists only for rules without a baseUrl;
+        // a host Pane has no family for must win over the familiar name.
+        let raw = json!({
+            "config": {"providerConfigRules": {"providerRules": [
+                {"providerId": "deepseek", "providerName": "万象中转站",
+                 "config": {"api": {"baseUrl": "https://relay.example.com/v1"}}}
+            ]}}
+        })
+        .to_string();
+        let router = ZcodeRouter::from_json(&raw);
+        assert_eq!(router.family("deepseek"), None);
+        assert_eq!(router.label("deepseek", "deepseek-v4.1"), "万象中转站 · deepseek-v4.1");
+    }
+
+    #[test]
+    fn zcode_base_url_host_ignores_scheme_case_port_and_path() {
+        assert_eq!(
+            zcode_base_url_host("HTTPS://API.StepFun.com:443/step_plan/v1").as_deref(),
+            Some("api.stepfun.com")
+        );
+        assert_eq!(zcode_base_url_host("api.deepseek.com").as_deref(), Some("api.deepseek.com"));
+        assert_eq!(zcode_base_url_host("   "), None);
+    }
+
+    #[test]
+    fn zcode_rows_split_between_family_bucket_and_residual_without_losing_tokens() {
+        let router = ZcodeRouter::from_json(&zcode_rules_sample());
+        let mut residual = FileData::default();
+        let mut routed = HashMap::new();
+        let ts = DateTime::parse_from_rfc3339("2026-10-20T10:00:00Z")
+            .unwrap()
+            .with_timezone(&Utc);
+
+        zcode_place_row(&mut residual, &mut routed, &router, "new-provider", ts, "step-5-preview", Some(1.5), 100.0);
+        zcode_place_row(&mut residual, &mut routed, &router, "new-provider-3", ts, "deepseek-v4.1-flash-1017", Some(0.25), 50.0);
+
+        let stepfun = &routed["stepfun-plan"];
+        assert_eq!(tokens_sum(stepfun), 100.0);
+        assert_eq!(cost_sum(stepfun), 1.5);
+        assert!(stepfun.days.contains_key(&(day_of_utc(ts), "step-5-preview".to_string())));
+        assert_eq!(tokens_sum(&residual), 50.0);
+        assert!(residual
+            .days
+            .keys()
+            .any(|(_, m)| m == "万象中转站 · deepseek-v4.1-flash-1017"));
+        // Attribution only moves rows between cards — never adds or removes.
+        assert_eq!(tokens_sum(stepfun) + tokens_sum(&residual), 150.0);
     }
 
     // ---- Log scan: bounded walk ------------------------------------------
@@ -5075,6 +5325,7 @@ pub fn collect_daily(cursor_csv: Option<String>) -> (Vec<ProviderSpend>, Vec<Pro
     if let Ok(mut t) = touched().lock() {
         t.clear();
     }
+    let zcode_scan = zcode();
     let (pi_claude, pi_codex) = pi();
     // cc-switch's ledger (proxy + session imports): Claude's primary source
     // (its proxy sees real tokens even where a relay zeroed the CLI logs),
@@ -5112,6 +5363,22 @@ pub fn collect_daily(cursor_csv: Option<String>) -> (Vec<ProviderSpend>, Vec<Pro
     merge_data(&mut kimi_routed, kimi_via_codex);
     let (extra_codex_spends, kimi_via_extra_codex) = codex_extra_accounts();
     merge_data(&mut kimi_routed, kimi_via_extra_codex);
+    // ZCode bills through other providers too. Rows whose endpoint maps to
+    // a Pane family move to that card; MiniMax already has a card (its own
+    // scan), the rest get theirs. The ZCode card keeps only the residual.
+    let mut zcode_routed_spends = Vec::new();
+    for (id, data) in zcode_scan.routed {
+        if id == "minimax" {
+            merge_data(&mut minimax_extra, data);
+            continue;
+        }
+        let name = provider_catalog::provider_definition(&id)
+            .map(|d| d.display_name)
+            .unwrap_or(id.as_str())
+            .to_string();
+        zcode_routed_spends.push(build_spend(id, name, data));
+    }
+    let zcode_sp = build_spend("zcode", "ZCode", zcode_scan.residual);
     let mut list = vec![
         claude_sp,
         codex_sp,
@@ -5125,9 +5392,10 @@ pub fn collect_daily(cursor_csv: Option<String>) -> (Vec<ProviderSpend>, Vec<Pro
         workbuddy_cn_tokens(),
         workbuddy_ai_tokens(),
         codebuddy_cli_tokens(),
-        zcode(),
+        zcode_sp,
         antigravity(),
     ];
+    list.extend(zcode_routed_spends);
     // cc-switch-only tools get their own cards (empty scans are filtered
     // out by has_data at the end). mcode: cc-switch's proxy ledger is
     // primary; the CLI's own v2 store backfills days the proxy never saw

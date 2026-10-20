@@ -2951,6 +2951,34 @@ article.provider.is-folded:hover {
   margin: 5px 0 2px;
 }
 
+.spend-pop-model {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin: 2px 0 0 17px;
+  color: var(--muted-foreground);
+  font-size: 9.5px;
+  font-variant-numeric: tabular-nums;
+}
+
+.spend-pop-model-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.spend-pop-model .spend-pop-val {
+  margin: 0;
+  font-size: 9.5px;
+}
+
+.spend-pop-model.more {
+  color: var(--muted-foreground);
+  opacity: 0.75;
+}
+
 .spend-metric-tabs {
   display: inline-flex;
   gap: 2px;

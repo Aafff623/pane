@@ -331,6 +331,7 @@ interface Config {
   categoryOverrides: Record<string, OverviewCategory>;
   spendMetric: "cost" | "tokens" | "mtok";
   spendGrouping: "tool" | "model";
+  spendShowAll: boolean;
   showUsed: boolean;
   showTrend: boolean;
   resetExact: boolean;
@@ -398,6 +399,7 @@ const FRONTEND_CONFIG_KEYS = [
   "categoryOverrides",
   "spendMetric",
   "spendGrouping",
+  "spendShowAll",
   "showUsed",
   "showTrend",
   "resetExact",
@@ -618,6 +620,7 @@ let config: Config = {
   categoryOverrides: {},
   spendMetric: "cost",
   spendGrouping: "tool",
+  spendShowAll: false,
   showUsed: false,
   showTrend: true,
   resetExact: false,
@@ -767,6 +770,15 @@ const SPEND_PRODUCT_NAME: Record<string, string> = {
   moonshot: "Kimi Code",
   mcode: "MiniMax Code",
 };
+// Sum aliases are keyed by target id here: by the time a second row of the
+// group arrives, `existing.id` is already the folded id, so looking the alias
+// table up by the *original* id would miss the sum intent and let the
+// larger-token row overwrite the merged dollars.
+const SPEND_SUM_GROUPS = new Set(
+  Object.values(SPEND_FOLD)
+    .filter((fold) => fold.sum)
+    .map((fold) => fold.into),
+);
 
 function foldSpendId(id: string): string {
   return SPEND_FOLD[id]?.into ?? id;
@@ -815,9 +827,10 @@ function foldRows<T extends { id: string }>(
       out.set(id, rename(row, id));
       continue;
     }
-    const sums = SPEND_FOLD[row.id]?.sum ?? SPEND_FOLD[existing.id]?.sum ?? false;
     // Sum only when the two rows are different ledgers (claude-desktop vs
-    // claude); same-ledger aliases keep the bigger row.
+    // claude); same-ledger aliases keep the bigger row. The group's sum flag
+    // must be read from the folded target id as well — see SPEND_SUM_GROUPS.
+    const sums = SPEND_FOLD[row.id]?.sum ?? SPEND_SUM_GROUPS.has(id);
     out.set(id, sums ? merge(existing, row) : weight(row) > weight(existing) ? rename(row, id) : existing);
   }
   return [...out.values()];
@@ -867,7 +880,7 @@ function normalizeDaily(rows: DailySpendRow[]): DailySpendRow[] {
       out.set(key, { ...row, id });
       continue;
     }
-    const sums = SPEND_FOLD[row.id]?.sum ?? false;
+    const sums = SPEND_FOLD[row.id]?.sum ?? SPEND_SUM_GROUPS.has(id);
     if (sums) {
       existing.cost += row.cost;
       existing.tokens += row.tokens;
@@ -3235,8 +3248,9 @@ function foldDonutEntries(all: DonutEntry[], tab: SpendTab): DonutEntry[] {
   // all-Others ring says nothing. The dollar threshold only applies to
   // the dollar view: in the token views every provider with tokens earns
   // its own row (a cheap model can move millions of tokens under $10,
-  // and hiding it would defeat the whole point of the view).
-  if (config.spendMetric !== "cost") return visible;
+  // and hiding it would defeat the whole point of the view). spendShowAll
+  // lifts the fold in cost mode too.
+  if (config.spendMetric !== "cost" || config.spendShowAll) return visible;
   const limit = othersFoldUsd(tab);
   const small = visible.filter((e) => e.w.cost < limit);
   if (small.length === 0 || small.length === visible.length) return visible;
@@ -3513,18 +3527,42 @@ function showSpendPop(anchor: HTMLElement): void {
       ? `<span class="legend-ico">${icon}</span>`
       : `<span class="dot" style="background:${spendColor(colorId)}"></span>`;
   };
+  // Top models by the active metric, so a wedge is explainable rather than
+  // a black box; the rest collapse into a count. Membership matches the
+  // ring: a $0 model row is noise in the dollar view (the backend's capped
+  // "Other" model has tokens but no priced cost), and an empty-token row is
+  // noise in the token view.
+  const modelRows = (models: ModelSpend[]): string => {
+    const visible = [...models]
+      .filter((m) => (config.spendMetric === "tokens" ? m.tokens > 0 : m.cost > 0.005))
+      .sort((a, b) => (config.spendMetric === "tokens" ? b.tokens - a.tokens : b.cost - a.cost));
+    const shown = visible.slice(0, 3);
+    const more = visible.length - shown.length;
+    const rows = shown
+      .map(
+        (m) =>
+          `<div class="spend-pop-model"><span class="spend-pop-model-name">${escapeHtml(m.model)}</span><span class="spend-pop-val">${escapeHtml(fmtSpendVal({ cost: m.cost, tokens: m.tokens, models: [] }))}</span></div>`,
+      )
+      .join("");
+    return rows + (more > 0 ? `<div class="spend-pop-model more">+${more}</div>` : "");
+  };
+  // Folded entries (the "Others" wedge, by-model slices) list each part
+  // with its own models; a plain provider wedge lists its own models.
   const parts = (entry.parts ?? [])
     .map(
       (p) =>
-        `<div class="spend-pop-row">${lead(p.id)}<span class="spend-pop-name">${escapeHtml(p.name)}</span><span class="spend-pop-val">${escapeHtml(fmtSpendVal(p.w))}</span></div>`,
+        `<div class="spend-pop-row">${lead(p.id)}<span class="spend-pop-name">${escapeHtml(p.name)}</span><span class="spend-pop-val">${escapeHtml(fmtSpendVal(p.w))}</span></div>${modelRows(p.w.models)}`,
     )
     .join("");
+  const detail = parts
+    ? `<div class="spend-pop-sep"></div>${parts}`
+    : modelRows(entry.w.models);
   const el = document.createElement("div");
   el.className = "spend-pop";
   el.innerHTML = `
     <div class="spend-pop-head">${lead(entry.s.id)}<span class="spend-pop-name">${escapeHtml(entry.s.name)}${spendBadgesFor(entry.s.id, view)}</span></div>
     <div class="spend-pop-val">${escapeHtml(fmtMoney(entry.w.cost))} · ${escapeHtml(fmtTokens(entry.w.tokens))}</div>
-    ${parts ? `<div class="spend-pop-sep"></div>${parts}` : ""}`;
+    ${detail}`;
   document.body.appendChild(el);
   spendPopEl = el;
   const r = anchor.getBoundingClientRect();
@@ -14636,6 +14674,7 @@ async function resetAllSettings(): Promise<void> {
     categoryOverrides: {},
     spendMetric: "cost",
     spendGrouping: "tool",
+    spendShowAll: false,
     showUsed: false,
     showTrend: true,
     resetExact: false,
@@ -14716,6 +14755,8 @@ function syncSettingsControls(): void {
   if (silentStart) silentStart.checked = config.silentStart === true;
   const hideUnconfiguredBox = document.querySelector<HTMLInputElement>("#st-hide-unconfigured");
   if (hideUnconfiguredBox) hideUnconfiguredBox.checked = config.hideUnconfigured !== false;
+  const spendShowAllBox = document.querySelector<HTMLInputElement>("#st-spend-show-all");
+  if (spendShowAllBox) spendShowAllBox.checked = config.spendShowAll === true;
   const form = config.windowForm === "panel" ? "panel" : "floating";
   const formRadio = document.querySelector<HTMLInputElement>(
     `input[name="window-form"][value="${form}"]`,
@@ -14973,6 +15014,14 @@ function buildPanelShell(): void {
     void patchConfig({ hideUnconfigured: hideUnconfigured.checked }).then(requestRender);
   });
   generalCard.append(panelSwitchRow("settings.hideUnconfigured", "settings.hideUnconfiguredTip", hideUnconfigured));
+  const spendShowAll = document.createElement("input");
+  spendShowAll.id = "st-spend-show-all";
+  spendShowAll.type = "checkbox";
+  spendShowAll.checked = config.spendShowAll === true;
+  spendShowAll.addEventListener("change", () => {
+    void patchConfig({ spendShowAll: spendShowAll.checked }).then(requestRender);
+  });
+  generalCard.append(panelSwitchRow("settings.spendShowAll", "settings.spendShowAllTip", spendShowAll));
   const redetect = document.createElement("button");
   redetect.type = "button";
   redetect.className = "mini-btn";

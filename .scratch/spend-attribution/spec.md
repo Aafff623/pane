@@ -40,6 +40,7 @@
   - `api.minimax.cn` → `minimax`
   - `api.deepseek.com` → `deepseek`
   - 其余 → ZCode 卡（但模型标签带 providerName）
+- 规则没有 baseUrl 时（模板化 provider，如 DeepSeek），若 `providerId` 恰好等于某个 Pane family id，同样归入该卡；host 映射优先。
 - 同一模型在 ZCode 卡与目标卡不得重复计数：ZCode 扫描器把这些行**移出** ZCode 卡。
 - 目标卡可能已有自己的 spend 源（如 MiniMax Agent 的 SQLite），两者是不同客户端，允许并存；本轮只做归因，不合并。
 

@@ -10,7 +10,11 @@ use std::collections::BTreeMap;
 use std::fs;
 use std::sync::{Mutex, OnceLock};
 
-const VERSION: u32 = 3;
+const VERSION: u32 = 4;
+
+/// How far back the ZCode scanner reads `model_usage`. Only days inside
+/// this window can be re-merged after a migration clears them.
+const ZCODE_SCAN_DAYS: i64 = 32;
 
 #[derive(Serialize, Deserialize, Clone, Default, PartialEq, Debug)]
 struct ModelDay {
@@ -79,6 +83,22 @@ fn migrate(mut file: HistoryFile) -> Result<HistoryFile, String> {
             // would erase history nothing re-merges.
         }
         file.version = 3;
+    }
+    if file.version == 3 {
+        // v3→v4: ZCode rows are now attributed to the provider that served
+        // them. A stored zcode cell inside the scan window still contains
+        // those routed tokens, and the next scan adds the family cells for
+        // the same days — keeping both would count them twice. Clear only
+        // the days the scan can re-merge; older zcode cells are history
+        // nothing can rebuild, so they stay.
+        let cutoff = Local::now().date_naive() - Duration::days(ZCODE_SCAN_DAYS);
+        for (day, providers) in file.days.iter_mut() {
+            let Ok(date) = NaiveDate::parse_from_str(day, "%Y-%m-%d") else { continue };
+            if date >= cutoff {
+                providers.remove("zcode");
+            }
+        }
+        file.version = 4;
     }
     file.days.retain(|_, providers| !providers.is_empty());
     if file.version != VERSION { return Err("unsupported spend history version".into()); }
@@ -468,7 +488,7 @@ mod tests {
     }
 
     #[test]
-    fn v2_to_v3_clears_only_claude() {
+    fn v2_migration_clears_claude_and_keeps_other_providers() {
         let mut file = HistoryFile { version: 2, ..HistoryFile::default() };
         file.days.insert("2026-10-01".to_string(), BTreeMap::from([
             ("claude".to_string(), cell(1.0, 10.0)),
@@ -487,7 +507,7 @@ mod tests {
     }
 
     #[test]
-    fn v1_migration_cascades_through_v3() {
+    fn v1_migration_cascades_through_v4() {
         let mut file = HistoryFile { version: 1, ..HistoryFile::default() };
         file.days.insert("2026-10-01".to_string(), BTreeMap::from([
             ("zcode".to_string(), cell(1.0, 10.0)),
@@ -500,6 +520,27 @@ mod tests {
         assert!(!day.contains_key("zcode"));
         assert!(!day.contains_key("claude"));
         assert_eq!(day["kimi"].cost, 3.0);
+    }
+
+    #[test]
+    fn v3_to_v4_clears_scanned_zcode_days_only() {
+        let today = Local::now().date_naive();
+        let recent = today - Duration::days(3);
+        let stale = today - Duration::days(ZCODE_SCAN_DAYS + 10);
+        let mut file = HistoryFile { version: 3, ..HistoryFile::default() };
+        file.days.insert(recent.format("%Y-%m-%d").to_string(), BTreeMap::from([
+            ("zcode".to_string(), cell(1.0, 10.0)),
+            ("claude".to_string(), cell(2.0, 20.0)),
+        ]));
+        file.days.insert(stale.format("%Y-%m-%d").to_string(), BTreeMap::from([
+            ("zcode".to_string(), cell(3.0, 30.0)),
+        ]));
+        let file = migrate(file).unwrap();
+        assert_eq!(file.version, VERSION);
+        let day = &file.days[&recent.format("%Y-%m-%d").to_string()];
+        assert!(!day.contains_key("zcode"), "recent zcode cell must be re-merged, not kept");
+        assert_eq!(day["claude"].cost, 2.0);
+        assert!(file.days[&stale.format("%Y-%m-%d").to_string()].contains_key("zcode"));
     }
 
     #[test]

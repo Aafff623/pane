@@ -156,6 +156,8 @@ fn config_with_defaults(mut cfg: Value) -> Value {
     obj.entry("categoryOverrides").or_insert(json!({}));
     obj.entry("spendMetric").or_insert(json!("cost"));
     obj.entry("spendGrouping").or_insert(json!("tool"));
+    // Cost view folds sub-threshold providers into "Others"; this lifts it.
+    obj.entry("spendShowAll").or_insert(json!(false));
     obj.entry("overviewStyle").or_insert(json!("bars"));
     obj.entry("showUsed").or_insert(json!(false));
     obj.entry("resetExact").or_insert(json!(false));
@@ -287,6 +289,7 @@ const CONFIG_KEYS: &[&str] = &[
     "notifyResetSoon",
     "spendMetric",
     "spendGrouping",
+    "spendShowAll",
     "overviewStyle",
     "spendTab",
     "overviewTab",

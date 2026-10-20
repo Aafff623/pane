@@ -18,7 +18,7 @@
 | cc-switch 聚合 ledger | `~/.cc-switch/cc-switch.db`（只读） | `proxy_request_logs` 明细（近 35 天，`created_at` 为秒）∪ `usage_daily_rollups`（永久，本地日 TEXT）；`input_token_semantics` CASE 归一 fresh input | claude 主源（自扫只补 cc 没有的日）；codex/opencode/grok 补缺日；mcode/gemini/claude-desktop 纯 cc 来源；成本走 Pane 自己的价目表，不采信 `total_cost_usd` |
 | Claude Code CLI | `~/.claude/projects/**/*.jsonl` | assistant `message.usage`，优先 `costUSD` | MiniMax、Qwen、Kimi 路由按模型拆出 |
 | Codex CLI / rollout | `~/.codex/sessions`、`archived_sessions` | `token_count`，累计值转单次增量 | 子 agent/fork 回放去重 |
-| ZCode CLI/Desktop | `~/.zcode/cli/db/db.sqlite` + rollout JSONL | SQLite `model_usage` 为主，旧日志补历史 | DB 覆盖日不再叠加 JSONL |
+| ZCode CLI/Desktop | `~/.zcode/cli/db/db.sqlite` + rollout JSONL + `~/.zcode/v2/provider_config.json` | SQLite `model_usage` 为主，旧日志补历史；`providerRules` 的 baseUrl host 决定归到哪张卡（tokenrhythm / sensenova / stepfun-plan / clinepass / minimax / deepseek） | DB 覆盖日不再叠加 JSONL；无 baseUrl 的规则按 providerId 同名兜底；host 未映射的留在 ZCode 卡，模型标签写 `providerName · modelId`（2026-10-20） |
 | Pi coding agent | `~/.pi/agent/sessions/**/*.jsonl` | assistant message usage | 折叠到它实际驱动的 Claude/Codex 卡 |
 | Grok CLI | `~/.grok/logs/unified.jsonl` | `inference_done` token 桶 + 进程模型映射 | 没有模型归属的行不计 |
 | OpenCode Desktop / CLI | `~/.local/share/opencode/opencode.db` | SQLite assistant message 的 token 与 cost | OpenCode gateway 行可归并到 AihubMix |
