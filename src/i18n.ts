@@ -372,6 +372,14 @@ const en: Dict = {
   "settings.tabPrivacy": "Privacy",
   "settings.tabNetwork": "Network",
   "settings.tabAbout": "About",
+  "panel.desc.general": "Language, appearance, refresh, and startup",
+  "panel.desc.usage": "Provider keys, allowances, and spend sources",
+  "panel.desc.shortcuts": "Global hotkey and per-action bindings",
+  "panel.desc.notifications": "Quota warnings and reset notices",
+  "panel.desc.privacy": "Telemetry and data that leaves this machine",
+  "panel.desc.network": "Proxy used for provider requests",
+  "panel.desc.about": "Version, updates, and changelog",
+  "panel.desc.auth": "Sign in to provider accounts",
   "settings.keyPlaceholder": "API key",
   "settings.keysProviders": "Provider keys",
   "settings.keysMcp": "MCP & search keys",
@@ -539,7 +547,13 @@ const en: Dict = {
   "dialog.ok": "OK",
   "dialog.gotIt": "Got it",
   "dialog.changelog": "Changelog",
-  "dialog.whatsNew": "What's new in v{version}",
+  "dialog.whatsNew": "Updated to v{version}",
+  "whatsNew.since": "Changes since v{version}",
+  "whatsNew.showEarlier": "Show {count} earlier versions",
+  "whatsNew.viewFull": "View full changelog",
+  "changelog.added": "Added",
+  "changelog.changed": "Changed",
+  "changelog.fixed": "Fixed",
 
   "card.notConnected": "Not connected",
   "card.signIn": "Sign in",
@@ -1625,6 +1639,14 @@ const zh: Dict = {
   "settings.tabPrivacy": "隐私",
   "settings.tabNetwork": "网络",
   "settings.tabAbout": "关于",
+  "panel.desc.general": "语言、外观、刷新与启动",
+  "panel.desc.usage": "服务商密钥、额度与消费来源",
+  "panel.desc.shortcuts": "全局热键与各操作绑定",
+  "panel.desc.notifications": "额度告警与重置提醒",
+  "panel.desc.privacy": "遥测与离开本机的数据",
+  "panel.desc.network": "服务商请求使用的代理",
+  "panel.desc.about": "版本、更新与更新日志",
+  "panel.desc.auth": "登录各服务商账号",
   "settings.keyPlaceholder": "API 密钥",
   "settings.keysProviders": "Provider 密钥",
   "settings.keysMcp": "MCP / 搜索密钥",
@@ -1787,7 +1809,13 @@ const zh: Dict = {
   "dialog.ok": "确定",
   "dialog.gotIt": "知道了",
   "dialog.changelog": "更新日志",
-  "dialog.whatsNew": "v{version} 有什么新内容",
+  "dialog.whatsNew": "已更新到 v{version}",
+  "whatsNew.since": "自 v{version} 以来的更新",
+  "whatsNew.showEarlier": "展开更早的 {count} 个版本",
+  "whatsNew.viewFull": "查看完整更新内容",
+  "changelog.added": "新增",
+  "changelog.changed": "变更",
+  "changelog.fixed": "修复",
 
   "card.notConnected": "未连接",
   "card.signIn": "去登录",
@@ -2857,6 +2885,14 @@ const ru: Dict = {
   "settings.tabPrivacy": "Приватность",
   "settings.tabNetwork": "Сеть",
   "settings.tabAbout": "О программе",
+  "panel.desc.general": "Язык, оформление, обновление и запуск",
+  "panel.desc.usage": "Ключи, квоты и источники расходов",
+  "panel.desc.shortcuts": "Глобальные сочетания и действия",
+  "panel.desc.notifications": "Предупреждения о квотах и сбросах",
+  "panel.desc.privacy": "Телеметрия и данные вне приложения",
+  "panel.desc.network": "Прокси для запросов провайдеров",
+  "panel.desc.about": "Версия, обновления и журнал",
+  "panel.desc.auth": "Вход в аккаунты провайдеров",
   "settings.keyPlaceholder": "Ключ API",
   "settings.keysProviders": "Ключи провайдеров",
   "settings.keysMcp": "Ключи MCP и поиска",
@@ -3021,7 +3057,13 @@ const ru: Dict = {
   "dialog.ok": "OK",
   "dialog.gotIt": "Понятно",
   "dialog.changelog": "Журнал изменений",
-  "dialog.whatsNew": "Что нового в v{version}",
+  "dialog.whatsNew": "Обновлено до v{version}",
+  "whatsNew.since": "Изменения с v{version}",
+  "whatsNew.showEarlier": "Показать ещё {count} версий",
+  "whatsNew.viewFull": "Полный журнал изменений",
+  "changelog.added": "Добавлено",
+  "changelog.changed": "Изменено",
+  "changelog.fixed": "Исправлено",
 
   "card.notConnected": "Не подключено",
   "card.signIn": "Войти",
@@ -3955,6 +3997,15 @@ export function applyStaticI18n(): void {
       el.title = t(key);
       delete el.dataset.tip;
     }
+  });
+  // Self-drawn hover tips (the panel rail) read dataset.tip in CSS; the same
+  // label is the accessible name for the icon-only buttons.
+  document.querySelectorAll<HTMLElement>("[data-i18n-tip]").forEach((el) => {
+    const key = el.dataset.i18nTip;
+    if (!key) return;
+    const label = t(key);
+    el.dataset.tip = label;
+    el.setAttribute("aria-label", label);
   });
   document.querySelectorAll<HTMLElement>("[data-i18n-placeholder]").forEach((el) => {
     const key = el.dataset.i18nPlaceholder;

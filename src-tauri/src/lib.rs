@@ -4850,6 +4850,113 @@ async fn sensenova_oauth_finish(input: String) -> Result<providers::Snapshot, St
     providers::sensenova::oauth_finish(&input).await
 }
 
+// ---------------------------------------------------------------------------
+// Panel window bounds — the desktop form remembers its last size/position.
+// Stored separately from config.json (pure local UI state, like a window
+// manager's session file), in physical pixels because that is exactly what
+// outer_position/inner_size report and restore.
+// ---------------------------------------------------------------------------
+
+const PANEL_DEFAULT_SIZE: (f64, f64) = (1350.0, 900.0);
+const PANEL_MIN_SIZE: (f64, f64) = (960.0, 640.0);
+
+fn panel_bounds_path() -> PathBuf {
+    providers::config_dir().join("panel-window.json")
+}
+
+fn load_panel_bounds() -> Option<(i32, i32, u32, u32)> {
+    let raw = std::fs::read_to_string(panel_bounds_path()).ok()?;
+    let value: Value = serde_json::from_str(&raw).ok()?;
+    Some((
+        i32::try_from(value.get("x")?.as_i64()?).ok()?,
+        i32::try_from(value.get("y")?.as_i64()?).ok()?,
+        u32::try_from(value.get("width")?.as_u64()?).ok()?,
+        u32::try_from(value.get("height")?.as_u64()?).ok()?,
+    ))
+}
+
+fn save_panel_bounds(window: &tauri::Window) {
+    // A minimized window reports an off-screen position — persisting that
+    // would restore the panel in the void on the next open.
+    if window.is_minimized().unwrap_or(false) {
+        return;
+    }
+    let (Ok(pos), Ok(size)) = (window.outer_position(), window.inner_size()) else {
+        return;
+    };
+    let bounds = json!({
+        "x": pos.x,
+        "y": pos.y,
+        "width": size.width,
+        "height": size.height,
+    });
+    let _ = std::fs::write(panel_bounds_path(), bounds.to_string());
+}
+
+/// Coalesces the resize/move stream into one write: a drag emits dozens of
+/// events per second, and every one of them would otherwise hit the disk.
+fn schedule_panel_bounds_save(window: tauri::Window) {
+    use std::sync::mpsc;
+    static TX: OnceLock<mpsc::Sender<tauri::Window>> = OnceLock::new();
+    let tx = TX.get_or_init(|| {
+        let (tx, rx) = mpsc::channel::<tauri::Window>();
+        std::thread::spawn(move || {
+            let mut latest = None;
+            while let Ok(window) = rx.recv() {
+                latest = Some(window);
+                while let Ok(window) = rx.recv_timeout(std::time::Duration::from_millis(350)) {
+                    latest = Some(window);
+                }
+                if let Some(window) = latest.take() {
+                    save_panel_bounds(&window);
+                }
+            }
+        });
+        tx
+    });
+    let _ = tx.send(window);
+}
+
+/// The saved rect is only usable while a meaningful piece of it still sits
+/// on a connected monitor — unplugging the display that held the panel must
+/// not strand the window off-screen. The result is clamped into that
+/// monitor, so a resolution change cannot leave it hanging off an edge.
+fn restorable_panel_bounds(
+    app: &tauri::AppHandle,
+) -> Option<(tauri::PhysicalPosition<i32>, tauri::PhysicalSize<u32>)> {
+    let (x, y, width, height) = load_panel_bounds()?;
+    if width < 320 || height < 240 {
+        return None;
+    }
+    let mut best: Option<(i64, i32, i32, u32, u32)> = None;
+    for monitor in app.available_monitors().ok()? {
+        let mp = monitor.position();
+        let ms = monitor.size();
+        let overlap_w = (i64::from(x) + i64::from(width))
+            .min(i64::from(mp.x) + i64::from(ms.width))
+            - i64::from(x).max(i64::from(mp.x));
+        let overlap_h = (i64::from(y) + i64::from(height))
+            .min(i64::from(mp.y) + i64::from(ms.height))
+            - i64::from(y).max(i64::from(mp.y));
+        let area = overlap_w.max(0) * overlap_h.max(0);
+        if area > best.map_or(0, |b| b.0) {
+            best = Some((area, mp.x, mp.y, ms.width, ms.height));
+        }
+    }
+    let (area, mx, my, mw, mh) = best?;
+    if area < 120 * 80 {
+        return None;
+    }
+    let width = width.min(mw);
+    let height = height.min(mh);
+    let max_x = (mx + mw as i32 - width as i32).max(mx);
+    let max_y = (my + mh as i32 - height as i32).max(my);
+    Some((
+        tauri::PhysicalPosition::new(x.clamp(mx, max_x), y.clamp(my, max_y)),
+        tauri::PhysicalSize::new(width, height),
+    ))
+}
+
 /// Shared panel-window opener: focus the existing window instead of stacking
 /// duplicates, build it otherwise. Used by the open_panel_window command and
 /// the tray menu ("Open main panel" / "Settings…").
@@ -4870,22 +4977,31 @@ async fn ensure_panel_window(app: &tauri::AppHandle) -> Result<(), String> {
         w.set_focus().map_err(|e| e.to_string())?;
         return Ok(());
     }
-    tauri::WebviewWindowBuilder::new(app, "panel", tauri::WebviewUrl::App("index.html".into()))
-        .title("Pane")
-        .inner_size(960.0, 640.0)
-        .center()
-        .resizable(true)
-        .decorations(true)
-        .always_on_top(false)
-        .skip_taskbar(false)
-        .visible(true)
-        .build()
-        .map_err(|e| e.to_string())?;
-    if let Some(w) = app.get_webview_window("panel") {
-        match w.url() {
-            Ok(url) => eprintln!("[pane] panel window opened, url={url}"),
-            Err(_) => eprintln!("[pane] panel window opened (url unreadable)"),
-        }
+    // Built hidden so restoring a saved rect happens before the first paint
+    // instead of flashing a centered window and then jumping.
+    let restored = restorable_panel_bounds(app);
+    let window =
+        tauri::WebviewWindowBuilder::new(app, "panel", tauri::WebviewUrl::App("index.html".into()))
+            .title("Pane")
+            .inner_size(PANEL_DEFAULT_SIZE.0, PANEL_DEFAULT_SIZE.1)
+            .min_inner_size(PANEL_MIN_SIZE.0, PANEL_MIN_SIZE.1)
+            .center()
+            .resizable(true)
+            .decorations(true)
+            .always_on_top(false)
+            .skip_taskbar(false)
+            .visible(false)
+            .build()
+            .map_err(|e| e.to_string())?;
+    if let Some((pos, size)) = restored {
+        let _ = window.set_size(size);
+        let _ = window.set_position(pos);
+    }
+    let _ = window.show();
+    let _ = window.set_focus();
+    match window.url() {
+        Ok(url) => eprintln!("[pane] panel window opened, url={url}"),
+        Err(_) => eprintln!("[pane] panel window opened (url unreadable)"),
     }
     Ok(())
 }
@@ -5426,6 +5542,16 @@ pub fn run() {
             Ok(())
         })
         .on_window_event(|window, event| {
+            if window.label() == "panel" {
+                match event {
+                    WindowEvent::Resized(_) | WindowEvent::Moved(_) => {
+                        schedule_panel_bounds_save(window.clone());
+                    }
+                    WindowEvent::CloseRequested { .. } => save_panel_bounds(window),
+                    _ => {}
+                }
+                return;
+            }
             if window.label() == "main" {
                 if let WindowEvent::Focused(gained) = event {
                     if *gained {

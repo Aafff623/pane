@@ -4849,6 +4849,7 @@ async function checkForUpdate(): Promise<void> {
     const v = await invoke<string | null>("check_update");
     if (v) {
       updateVersion = v;
+      syncPanelNavBadge();
       // The Total Spend header carries the push indicator — repaint so the
       // green arrow appears the moment a version is announced.
       requestRender();
@@ -6120,30 +6121,99 @@ function openPeakHelp(anchor: HTMLElement): void {
 // Changelog — "What's new" after an update + the Settings viewer
 // ---------------------------------------------------------------------------
 
+type ChangelogItemType = "added" | "changed" | "fixed" | "other";
+
+interface ChangelogItem {
+  type: ChangelogItemType;
+  /** Present for headings that are not one of the three known groups. */
+  label?: string;
+  text: string;
+}
+
 interface ChangelogSection {
   version: string;
   date: string;
+  /** The one-line theme under the version header ("架构深化 / …"). */
+  summary: string;
+  items: ChangelogItem[];
+  /** Raw markdown — hand-built sections (the font guide) render from this. */
   body: string;
 }
 
-/// CHANGELOG.md split into per-version sections, newest first. The
-/// "Unreleased" section is skipped — a shipped build's own notes carry its
-/// version header (release retitles Unreleased), so users only ever see
-/// released entries.
+const CHANGELOG_GROUPS: Record<string, ChangelogItemType> = {
+  "新增": "added",
+  "变更": "changed",
+  "修复": "fixed",
+  Added: "added",
+  Changed: "changed",
+  Fixed: "fixed",
+};
+
+/// CHANGELOG.md split into released versions, newest first. Versions are
+/// `## <version> — <date>`; their "新增/变更/修复" groups are ALSO `##`
+/// headings, so a group block is folded into the version above it instead of
+/// starting a section of its own — treating them as versions produced phantom
+/// "v新增" entries. Unreleased (and its groups) is skipped: a shipped build's
+/// own notes carry its version header (release retitles Unreleased).
 function parseChangelog(): ChangelogSection[] {
-  const sections: ChangelogSection[] = [];
+  const raw: Array<{ version: string; date: string; body: string }> = [];
+  let current: (typeof raw)[number] | null = null;
   for (const block of changelogRaw.split(/^## /m).slice(1)) {
     const nl = block.indexOf("\n");
     const header = block.slice(0, nl).trim();
-    if (/^unreleased$/i.test(header)) continue;
+    const body = block.slice(nl + 1).trim();
+    if (CHANGELOG_GROUPS[header]) {
+      if (current) current.body += `\n\n### ${header}\n${body}`;
+      continue;
+    }
+    if (/^unreleased$/i.test(header)) {
+      current = null;
+      continue;
+    }
     const m = header.match(/^([\d.]+)\s*—\s*(.+)$/);
-    sections.push({
-      version: m ? m[1] : header,
-      date: m ? m[2] : "",
-      body: block.slice(nl + 1).trim(),
-    });
+    current = m ? { version: m[1], date: m[2], body } : null;
+    if (current) raw.push(current);
   }
-  return sections;
+  return raw.map(({ version, date, body }) => ({
+    version,
+    date,
+    ...parseChangelogItems(body),
+    body,
+  }));
+}
+
+/// Group headings turn into item types; continuation lines are folded back
+/// into the bullet they belong to. Text before the first heading is the
+/// version's theme line.
+function parseChangelogItems(md: string): { summary: string; items: ChangelogItem[] } {
+  let summary = "";
+  let type: ChangelogItemType | null = null;
+  let label: string | undefined;
+  let current: ChangelogItem | null = null;
+  const items: ChangelogItem[] = [];
+  for (const line of md.split("\n")) {
+    if (line.startsWith("### ")) {
+      const heading = line.slice(4).trim();
+      type = CHANGELOG_GROUPS[heading] ?? "other";
+      label = type === "other" ? heading : undefined;
+      current = null;
+    } else if (line.startsWith("- ")) {
+      current = { type: type ?? "other", ...(label ? { label } : {}), text: line.slice(2) };
+      type ??= "other";
+      items.push(current);
+    } else if (/^\s+\S/.test(line) && current) {
+      current.text += " " + line.trim();
+    } else if (line.trim() && !items.length && !type) {
+      summary += (summary ? " " : "") + line.trim();
+    }
+  }
+  return { summary, items };
+}
+
+function changelogInline(s: string): string {
+  return escapeHtml(s)
+    .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
+    .replace(/`([^`]+)`/g, "<code>$1</code>");
 }
 
 /// Markdown-lite for changelog bodies: ### subheads, - bullets (with hanging
@@ -6151,16 +6221,9 @@ function parseChangelog(): ChangelogSection[] {
 /// paragraphs accumulate as raw markdown and are transformed only on flush,
 /// so a bold/code span wrapped across the file's ~70-column lines still
 /// matches. Input is escaped before any markup is applied, so the changelog
-/// can never inject HTML.
-/// Renders a changelog section for the What's-new dialog. `maxItems` caps
-/// each bullet list — the dialog is a glance, not the changelog: a long
-/// release reads as its first few lines plus an ellipsis row (the full text
-/// stays one click away in CHANGELOG.md).
+/// can never inject HTML. Used for hand-built sections (the font guide).
 function renderChangelogBody(md: string, maxItems = Number.POSITIVE_INFINITY): string {
-  const inline = (s: string) =>
-    escapeHtml(s)
-      .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
-      .replace(/`([^`]+)`/g, "<code>$1</code>");
+  const inline = changelogInline;
   let html = "";
   let items: string[] = [];
   let para = "";
@@ -6210,37 +6273,97 @@ function renderChangelogBody(md: string, maxItems = Number.POSITIVE_INFINITY): s
 /// stale dialog left behind by hide-on-focus-loss.
 let dismissWhatsNew: ((userAction?: boolean) => void) | null = null;
 
-/// Card-styled scrollable dialog listing changelog sections. Esc, backdrop
-/// clicks (anywhere outside the card), and the Got it button all dismiss.
-function showChangelogDialog(title: string, sections: ChangelogSection[], compact = false,
-  actions?: { confirm: string; cancel?: string; accept: () => void; dismiss: () => void }): void {
+/// One version block: version + date, the release's theme line, then items
+/// with a type chip (新增/变更/修复). Sections with no parsed items (legacy
+/// releases with a single paragraph, and the font guide) render their raw
+/// markdown instead — and skip the summary line, which the body already
+/// carries.
+function renderChangelogSection(section: ChangelogSection): string {
+  const head = `<div class="wn-version-head"><h4>v${escapeHtml(section.version)}</h4>${
+    section.date ? `<span class="wn-version-date">${escapeHtml(section.date)}</span>` : ""
+  }</div>`;
+  if (!section.items.length) return `${head}${renderChangelogBody(section.body)}`;
+  const summary = section.summary
+    ? `<p class="wn-summary">${changelogInline(section.summary)}</p>`
+    : "";
+  const rows = section.items
+    .map((item) => {
+      const chip = item.type === "other"
+        ? escapeHtml(item.label ?? "")
+        : escapeHtml(t(`changelog.${item.type}`));
+      return `<li>${chip ? `<span class="wn-chip ${item.type}">${chip}</span>` : ""}<span>${changelogInline(item.text)}</span></li>`;
+    })
+    .join("");
+  return `${head}${summary}<ul class="wn-items">${rows}</ul>`;
+}
+
+const WHATS_NEW_VERSIONS = 3;
+
+/// Changelog dialog with three shapes:
+/// - `update`: post-update notice — star, "updated to vX", subtitle "since
+///   vX", newest three versions with an expander, full-changelog footer link.
+/// - `browse`: every version (Settings → Changelog).
+/// - `plain`: markdown body + custom accept/decline buttons (font guide).
+/// Esc, backdrop clicks and the primary button all dismiss.
+function showChangelogDialog(
+  title: string,
+  sections: ChangelogSection[],
+  opts: {
+    kind?: "update" | "browse" | "plain";
+    since?: string;
+    actions?: { confirm: string; cancel?: string; accept: () => void; dismiss: () => void };
+  } = {},
+): void {
   dismissWhatsNew?.();
+  const kind = opts.kind ?? "browse";
+  const actions = opts.actions;
+  let visibleVersions = kind === "update" ? WHATS_NEW_VERSIONS : sections.length;
   const overlay = document.createElement("div");
   overlay.id = "whatsnew-overlay";
-  // The dialog covers the version that was just installed. A skipped
-  // release chain used to dump every section — long enough that nobody read
-  // it; the newest one is the "what changed for me" answer.
-  const list = (compact ? sections.slice(0, 1) : sections)
-    .map(
-      (s) =>
-        `<section><h4>v${escapeHtml(s.version)}${
-          s.date ? `<span>${escapeHtml(s.date)}</span>` : ""
-        }</h4>${renderChangelogBody(s.body, compact ? 4 : Number.POSITIVE_INFINITY)}</section>`,
-    )
-    .join("");
   overlay.innerHTML = `
-    <div id="whatsnew-box" role="dialog" aria-modal="true">
-      ${actions ? `<div class="account-dialog-head"><h3>${escapeHtml(title)}</h3><button id="whatsnew-close" class="account-dialog-close" type="button" aria-label="${escapeHtml(t("dialog.cancel"))}">${uiIcon("x")}</button></div>` : `<h3>${escapeHtml(title)}</h3>`}
-      <div id="whatsnew-body">${list}</div>
+    <div id="whatsnew-box" role="dialog" aria-modal="true" aria-labelledby="whatsnew-title">
+      <header class="wn-head">
+        <div class="wn-head-text">
+          <div class="wn-title-row">
+            ${kind === "update" ? `<span class="wn-spark">${uiIcon("star")}</span>` : ""}
+            <h3 id="whatsnew-title">${escapeHtml(title)}</h3>
+          </div>
+          ${opts.since ? `<p class="wn-sub">${escapeHtml(t("whatsNew.since", { version: opts.since }))}</p>` : ""}
+        </div>
+        <button id="whatsnew-close" class="wn-close" type="button" aria-label="${escapeHtml(t("dialog.cancel"))}">${uiIcon("x")}</button>
+      </header>
+      <div id="whatsnew-body"></div>
       <div id="whatsnew-actions">
-        ${actions?.cancel ? `<button id="whatsnew-cancel" type="button">${escapeHtml(actions.cancel)}</button>` : ""}<button id="whatsnew-ok" type="button">${escapeHtml(actions?.confirm ?? t("dialog.gotIt"))}</button>
+        ${kind === "update" ? `<button id="whatsnew-full" class="ghost" type="button">${escapeHtml(t("whatsNew.viewFull"))}</button>` : ""}
+        ${actions?.cancel ? `<button id="whatsnew-cancel" class="ghost" type="button">${escapeHtml(actions.cancel)}</button>` : ""}
+        <button id="whatsnew-ok" class="primary" type="button">${escapeHtml(actions?.confirm ?? t("dialog.gotIt"))}</button>
       </div>
     </div>`;
-  const done = (userAction = true, accepted = false) => {
-    if (userAction && actions) { if (accepted) actions.accept(); else actions.dismiss(); }
+  const body = overlay.querySelector<HTMLElement>("#whatsnew-body")!;
+  const renderBody = () => {
+    const shown = sections.slice(0, visibleVersions);
+    const hidden = sections.length - shown.length;
+    body.innerHTML =
+      shown.map((section) => `<section>${renderChangelogSection(section)}</section>`).join("") +
+      (hidden > 0
+        ? `<button id="whatsnew-earlier" class="wn-earlier" type="button">${uiIcon("caretDown")}<span>${escapeHtml(
+            t("whatsNew.showEarlier", { count: String(hidden) }),
+          )}</span></button>`
+        : "");
+    body.querySelector("#whatsnew-earlier")?.addEventListener("click", () => {
+      visibleVersions = sections.length;
+      renderBody();
+    });
+  };
+  renderBody();
+  const close = () => {
     dismissWhatsNew = null;
     document.removeEventListener("keydown", onKey, true);
     overlay.remove();
+  };
+  const done = (userAction = true, accepted = false) => {
+    if (userAction && actions) { if (accepted) actions.accept(); else actions.dismiss(); }
+    close();
   };
   dismissWhatsNew = (userAction = false) => done(userAction);
   const onKey = (e: KeyboardEvent) => {
@@ -6254,10 +6377,17 @@ function showChangelogDialog(title: string, sections: ChangelogSection[], compac
     if (e.target === overlay) done();
   });
   overlay.querySelector("#whatsnew-ok")!.addEventListener("click", () => done(true, true));
+  overlay.querySelector("#whatsnew-close")!.addEventListener("click", () => done());
   overlay.querySelector("#whatsnew-cancel")?.addEventListener("click", () => done());
-  overlay.querySelector("#whatsnew-close")?.addEventListener("click", () => done());
+  overlay.querySelector("#whatsnew-full")?.addEventListener("click", () => {
+    close();
+    // Pane's changelog lives in the app, so "full changelog" opens the
+    // browse shape instead of an external URL.
+    showChangelogDialog(t("dialog.changelog"), parseChangelog());
+  });
   document.addEventListener("keydown", onKey, true);
   document.body.appendChild(overlay);
+  overlay.querySelector<HTMLElement>("#whatsnew-ok")?.focus();
 }
 
 /// The sections a just-updated install hasn't seen yet (newest first,
@@ -6266,10 +6396,13 @@ function showChangelogDialog(title: string, sections: ChangelogSection[], compac
 /// version, even if it's dismissed by closing the popover.
 let appVersion = "";
 let pendingWhatsNew: ChangelogSection[] | null = null;
+/// The version the user actually came from — the dialog's "since vX" line.
+let pendingWhatsNewSince = "";
 
 function computeWhatsNew(version: string): ChangelogSection[] | null {
   const last = config.lastSeenVersion;
   if (last === version) return null;
+  pendingWhatsNewSince = last ?? "";
   void patchConfig({ lastSeenVersion: version });
   const all = parseChangelog();
   if (!last) {
@@ -6633,10 +6766,13 @@ function maybeShowFontGuide(): boolean {
     ? `${t("fontGuide.font", { font: config.uiFont || t("fontGuide.system") })}\n\n${t("fontGuide.theme", { theme: name, themes: marketEntries().map((entry) => entry.name).join(" / ") })}`
     : t("fontGuide.upgradeBody");
   showChangelogDialog(t(fresh ? "fontGuide.newTitle" : "fontGuide.upgradeTitle"),
-    [{ version: appVersion, date: "", body }], false, {
-      confirm: t(fresh ? "dialog.gotIt" : "fontGuide.accept"),
-      cancel: fresh ? undefined : t("fontGuide.decline"),
-      accept: () => complete(!fresh), dismiss: () => complete(false),
+    [{ version: appVersion, date: "", summary: "", items: [], body }], {
+      kind: "plain",
+      actions: {
+        confirm: t(fresh ? "dialog.gotIt" : "fontGuide.accept"),
+        cancel: fresh ? undefined : t("fontGuide.decline"),
+        accept: () => complete(!fresh), dismiss: () => complete(false),
+      },
     });
   return true;
 }
@@ -14831,6 +14967,7 @@ async function panelCheckForUpdate(btn: HTMLButtonElement): Promise<void> {
     const v = await invoke<string | null>("check_update");
     if (v) {
       updateVersion = v;
+      syncPanelNavBadge();
       maybePromptUpdate(v, true);
       btn.textContent = t("update.to", { version: v });
     } else {
@@ -14846,44 +14983,135 @@ async function panelCheckForUpdate(btn: HTMLButtonElement): Promise<void> {
   }
 }
 
+/// The panel's settings directory. The rail IS the navigation here (the
+/// horizontal tab bar it replaced is gone), so every page carries its own
+/// icon, label for the hover tip, and one-line description for the header.
+const PANEL_PAGES: ReadonlyArray<readonly [string, string, string, string, UiIconName]> = [
+  ["general", "st-general", "settings.tabGeneral", "panel.desc.general", "gear"],
+  ["usage", "st-keyvault", "settings.tabUsage", "panel.desc.usage", "key"],
+  ["shortcuts", "st-shortcuts", "settings.tabShortcuts", "panel.desc.shortcuts", "keyboard"],
+  ["notifications", "st-notifications", "settings.tabNotifications", "panel.desc.notifications", "bell"],
+  ["privacy", "st-privacy", "settings.tabPrivacy", "panel.desc.privacy", "shield"],
+  ["network", "st-network", "settings.tabNetwork", "panel.desc.network", "globe"],
+  ["about", "st-about", "settings.tabAbout", "panel.desc.about", "info"],
+];
+let activePanelPage = "general";
+
+const panelPageMeta = (id: string) =>
+  PANEL_PAGES.find((page) => page[0] === id) ?? PANEL_PAGES[0];
+
+/// Page switching only hides blocks — every control stays mounted so its
+/// wiring never re-runs. Also keeps the rail's active pill in sync.
+function activatePanelPage(pageId: string): void {
+  activePanelPage = pageId;
+  for (const [id, blockId] of PANEL_PAGES) {
+    const block = document.querySelector<HTMLElement>(`#${blockId}`);
+    if (block) block.hidden = id !== pageId;
+  }
+  document.querySelectorAll<HTMLButtonElement>("#panel-nav [data-settings-tab]").forEach((button) => {
+    const active = button.dataset.settingsTab === pageId;
+    button.classList.toggle("active", active);
+    button.setAttribute("aria-selected", String(active));
+    button.setAttribute("aria-current", active ? "page" : "false");
+  });
+  syncPanelHeader("settings");
+}
+
+/// Header title/description and the save button follow the active view.
+function syncPanelHeader(view: "settings" | "auth"): void {
+  const h1 = document.querySelector<HTMLElement>("#panel-head h1");
+  if (h1) {
+    const key = view === "auth" ? "auth.title" : "settings.title";
+    h1.dataset.i18n = key;
+    h1.textContent = t(key);
+  }
+  const sub = document.querySelector<HTMLElement>("#panel-head-sub");
+  if (sub) {
+    const key = view === "auth" ? "panel.desc.auth" : panelPageMeta(activePanelPage)[3];
+    sub.dataset.i18n = key;
+    sub.textContent = t(key);
+  }
+  const save = document.querySelector<HTMLButtonElement>("#panel-head .settings-save-all");
+  if (save) save.hidden = view === "auth";
+}
+
+/// The rail's About icon carries a dot while an update is waiting.
+function syncPanelNavBadge(): void {
+  const dot = document.querySelector<HTMLElement>("#panel-update-dot");
+  if (dot) dot.hidden = !updateVersion;
+}
+
 function buildPanelShell(): void {
   if (document.querySelector("#panel-shell")) return;
   const shell = document.createElement("div");
   shell.id = "panel-shell";
 
-  // Left icon nav — settings + auth center (M3); a Dashboard entry can
-  // join here later.
+  // Left rail doubles as the settings directory (cc-switch borrow): each
+  // page is an icon with a hover tip, and the auth center sits at the
+  // bottom behind a hairline like an account entry.
   const nav = document.createElement("nav");
   nav.id = "panel-nav";
   const logo = document.createElement("span");
   logo.id = "panel-logo";
   logo.className = "app-logo";
   logo.innerHTML = `<img src="${paneLogo}" alt="Pane" />`;
-  const settingsItem = document.createElement("button");
-  settingsItem.type = "button";
-  settingsItem.className = "panel-nav-item active";
-  settingsItem.title = t("settings.title");
-  settingsItem.dataset.i18nTitle = "settings.title";
-  settingsItem.dataset.panelView = "settings";
-  settingsItem.innerHTML = uiIcon("gear", t("settings.title"));
+  const pages = document.createElement("div");
+  pages.className = "panel-nav-group";
+  pages.setAttribute("role", "tablist");
+  pages.setAttribute("aria-label", t("settings.title"));
+  for (const [id, blockId, labelKey, , iconName] of PANEL_PAGES) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "panel-nav-item";
+    button.dataset.settingsTab = id;
+    button.dataset.i18nTip = labelKey;
+    button.dataset.tip = t(labelKey);
+    button.setAttribute("aria-label", t(labelKey));
+    button.setAttribute("aria-controls", blockId);
+    button.setAttribute("role", "tab");
+    button.innerHTML = uiIcon(iconName);
+    if (id === "about") {
+      const dot = document.createElement("span");
+      dot.id = "panel-update-dot";
+      dot.className = "panel-nav-dot";
+      dot.hidden = !updateVersion;
+      button.append(dot);
+    }
+    button.addEventListener("click", () => {
+      setPanelView("settings");
+      activatePanelPage(id);
+    });
+    pages.append(button);
+  }
+  const spacer = document.createElement("div");
+  spacer.className = "panel-nav-spacer";
+  const separator = document.createElement("div");
+  separator.className = "panel-nav-sep";
   const authItem = document.createElement("button");
   authItem.type = "button";
   authItem.className = "panel-nav-item";
-  authItem.title = t("auth.title");
-  authItem.dataset.i18nTitle = "auth.title";
   authItem.dataset.panelView = "auth";
-  authItem.innerHTML = uiIcon("key", t("auth.title"));
-  settingsItem.addEventListener("click", () => setPanelView("settings"));
+  authItem.dataset.i18nTip = "auth.title";
+  authItem.dataset.tip = t("auth.title");
+  authItem.setAttribute("aria-label", t("auth.title"));
+  authItem.innerHTML = uiIcon("lockOpen");
   authItem.addEventListener("click", () => setPanelView("auth"));
-  nav.append(logo, settingsItem, authItem);
+  nav.append(logo, pages, spacer, separator, authItem);
 
   const main = document.createElement("div");
   main.id = "panel-main";
   const head = document.createElement("header");
   head.id = "panel-head";
+  const headText = document.createElement("div");
+  headText.className = "panel-head-text";
   const h1 = document.createElement("h1");
   h1.dataset.i18n = "settings.title";
   h1.textContent = t("settings.title");
+  const sub = document.createElement("span");
+  sub.id = "panel-head-sub";
+  sub.dataset.i18n = "panel.desc.general";
+  sub.textContent = t("panel.desc.general");
+  headText.append(h1, sub);
   const save = document.createElement("button");
   save.type = "button";
   save.className = "mini-btn settings-save-all";
@@ -14891,7 +15119,7 @@ function buildPanelShell(): void {
   save.textContent = t("settings.save");
   save.disabled = true;
   save.addEventListener("click", () => void applySettingsAndReload());
-  head.append(h1, save);
+  head.append(headText, save);
   const scroll = document.createElement("div");
   scroll.id = "panel-scroll";
   main.append(head, scroll);
@@ -14908,47 +15136,7 @@ function buildPanelShell(): void {
   });
   scroll.append(settingsView, authView);
 
-  // Magpie-style top directory bar: one pill per settings category, shared
-  // vocabulary with the floating form's tabs. Switching pages only hides
-  // blocks — every control stays mounted so its wiring never re-runs.
-  const PANEL_PAGES: ReadonlyArray<readonly [string, string, string, UiIconName]> = [
-    ["general", "st-general", "settings.tabGeneral", "gear"],
-    ["usage", "st-keyvault", "settings.tabUsage", "key"],
-    ["shortcuts", "st-shortcuts", "settings.tabShortcuts", "keyboard"],
-    ["notifications", "st-notifications", "settings.tabNotifications", "bell"],
-    ["privacy", "st-privacy", "settings.tabPrivacy", "shield"],
-    ["network", "st-network", "settings.tabNetwork", "globe"],
-    ["about", "st-about", "settings.tabAbout", "info"],
-  ];
-  const panelTabs = document.createElement("div");
-  panelTabs.className = "settings-tabs panel-tabs";
-  panelTabs.setAttribute("role", "tablist");
-  panelTabs.setAttribute("aria-label", t("settings.title"));
-  const activatePanelPage = (pageId: string) => {
-    for (const [id, blockId] of PANEL_PAGES) {
-      const block = document.querySelector<HTMLElement>(`#${blockId}`);
-      if (block) block.hidden = id !== pageId;
-    }
-    panelTabs.querySelectorAll<HTMLButtonElement>("button").forEach((button) => {
-      const active = button.dataset.settingsTab === pageId;
-      button.classList.toggle("active", active);
-      button.setAttribute("aria-selected", String(active));
-    });
-  };
-  for (const [id, , labelKey, iconName] of PANEL_PAGES) {
-    const button = document.createElement("button");
-    button.type = "button";
-    button.dataset.settingsTab = id;
-    button.setAttribute("role", "tab");
-    const label = document.createElement("span");
-    label.dataset.i18n = labelKey;
-    label.textContent = t(labelKey);
-    button.innerHTML = uiIcon(iconName);
-    button.append(label);
-    button.addEventListener("click", () => activatePanelPage(id));
-    panelTabs.append(button);
-  }
-  settingsView.append(panelTabs);
+  // Pages are switched by the rail (PANEL_PAGES), not a horizontal tab bar.
 
   // Rows/notes moved from the popover markup (each window owns its own
   // document — the floating settings keeps its copy).
@@ -15302,13 +15490,13 @@ function authFlowBusy(): boolean {
 function setPanelView(view: "settings" | "auth"): void {
   authViewActive = view === "auth";
   document.querySelectorAll<HTMLElement>("#panel-nav .panel-nav-item").forEach((el) => {
-    el.classList.toggle("active", el.dataset.panelView === view);
+    const active = view === "auth"
+      ? el.dataset.panelView === "auth"
+      : el.dataset.settingsTab === activePanelPage;
+    el.classList.toggle("active", active);
+    el.setAttribute("aria-current", active ? "page" : "false");
   });
-  const h1 = document.querySelector<HTMLElement>("#panel-head h1");
-  if (h1) {
-    h1.dataset.i18n = view === "auth" ? "auth.title" : "settings.title";
-    h1.textContent = t(h1.dataset.i18n);
-  }
+  syncPanelHeader(view);
   const settingsView = document.querySelector<HTMLElement>("#panel-view-settings");
   const authView = document.querySelector<HTMLElement>("#panel-view-auth");
   if (settingsView) settingsView.hidden = view !== "settings";
@@ -15345,7 +15533,7 @@ function applyPanelIntent(): void {
     if (intent.family) void focusAuthFamily(intent.family);
   } else {
     setPanelView("settings");
-    document.querySelector<HTMLButtonElement>('.panel-tabs [data-settings-tab="usage"]')?.click();
+    document.querySelector<HTMLButtonElement>('#panel-nav [data-settings-tab="usage"]')?.click();
     if (!intent.family) return;
     if (CORE_MCP_SERVICES.some((service) => service.id === intent.family)) {
       kvAddingForService.add(intent.family);
@@ -16964,6 +17152,7 @@ document.querySelector("#settings-btn")!.addEventListener("click", () => {
   // The 4-hourly background checker feeds the same footer button.
   void listen<string>("update-available", (e) => {
     updateVersion = e.payload;
+    syncPanelNavBadge();
     requestRender();
     renderBuildInfo();
   });
@@ -17054,7 +17243,10 @@ document.querySelector("#settings-btn")!.addEventListener("click", () => {
     userSelectedAccountFor.clear();
     // A fresh update's notes present on the first open after launch.
     if (pendingWhatsNew && pendingFontGuide === "skip") {
-      showChangelogDialog(t("dialog.whatsNew", { version: appVersion }), pendingWhatsNew, true);
+      showChangelogDialog(t("dialog.whatsNew", { version: appVersion }), pendingWhatsNew, {
+        kind: "update",
+        since: pendingWhatsNewSince,
+      });
       pendingWhatsNew = null;
     }
     // Replay any renders skipped while hidden, before the reveal plays.

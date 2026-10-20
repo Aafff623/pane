@@ -31,14 +31,15 @@ const guideCode = ts.transpile(main.statements.filter((node) => ts.isFunctionDec
 for (const userClose of [true, false]) {
   test(`shown guide persists user dismissal but not programmatic replacement (${userClose})`, async () => {
     const handlers = new Map();
-    const overlay = { innerHTML: '', querySelector: (id) => ({ addEventListener: (event, fn) => handlers.set(id, fn) }), addEventListener() {}, remove() {} };
+    const overlay = { innerHTML: '', querySelector: (id) => ({ addEventListener: (event, fn) => handlers.set(id, fn), querySelector: () => null, focus() {} }), addEventListener() {}, remove() {} };
     const context = vm.createContext({
       pendingFontGuide: 'new', IS_PANEL_FORM: false, dismissWhatsNew: null,
-      config: { uiFont: 'MV Boli', welcomeDismissed: false }, appVersion: '0.8.5',
+      config: { uiFont: 'MV Boli', welcomeDismissed: false }, appVersion: '0.8.5', WHATS_NEW_VERSIONS: 3,
       document: { hidden: false, querySelector: () => null, createElement: () => overlay, addEventListener() {}, removeEventListener() {}, body: { appendChild() {} } },
       getVersion: async () => '0.8.5', patchConfig: async (patch) => Object.assign(context.config, patch),
       applyAppearance() {}, maybeStartTour() {}, activeSkin: () => null, marketEntries: () => [],
-      t: (key) => key, escapeHtml: (text) => text, renderChangelogBody: (body) => body, uiIcon: () => '',
+      t: (key) => key, escapeHtml: (text) => text, renderChangelogBody: (body) => body,
+      renderChangelogSection: (section) => section.body, uiIcon: () => '',
     });
     vm.runInContext(guideCode, context);
     context.maybeShowFontGuide();
