@@ -173,10 +173,14 @@ interface DailySpendRow {
 // Qoder CN local transcripts (GitHub #28): measured credits plus billed
 // input tokens derived from context_usage_ratio × the window in force. Kept
 // apart from the dollar/token totals — different unit, derived tokens.
+// `credits` is nominal (what a billable request would have cost); a
+// free/zero-rate model writes nominal credits but `charged_credits` stays 0.
 interface QoderModelSpend {
   model: string;
   label: string;
   credits: number;
+  charged_credits: number;
+  free_trips: number;
   billed_tokens: number;
   trips: number;
   tokens_unavailable_trips: number;
@@ -185,7 +189,9 @@ interface QoderModelSpend {
 interface QoderDaySpend {
   day: string;
   credits: number;
+  charged_credits: number;
   original_credits: number;
+  free_trips: number;
   billed_tokens: number;
   tokens_unavailable_trips: number;
   trips: number;
@@ -199,6 +205,8 @@ interface QoderSessionSpend {
   started: string;
   day: string;
   credits: number;
+  charged_credits: number;
+  free_trips: number;
   billed_tokens: number;
   tokens_unavailable_trips: number;
   trips: number;
@@ -209,7 +217,9 @@ interface QoderSessionSpend {
 
 interface QoderWindow {
   credits: number;
+  charged_credits: number;
   original_credits: number;
+  free_trips: number;
   billed_tokens: number;
   tokens_unavailable_trips: number;
   trips: number;
@@ -3692,36 +3702,60 @@ function spendDetailDayRows(day: string): DailySpendRow[] {
 
 /// Qoder CN's day block inside the daily-usage overlay. It sits beside the
 /// dollar rows rather than inside them: credits are measured, billed tokens
-/// are derived, and neither belongs in the donut or the $ totals.
+/// are derived, and neither belongs in the donut or the $ totals. Nominal
+/// credits and charged credits are shown apart because free/zero-rate models
+/// write the former while the platform quota only moves for the latter.
+const fmtCreditValue = (v: number): string => v.toLocaleString(localeTag(), { maximumFractionDigits: 2 });
+
+function qoderCreditSplit(credits: number, charged: number): string {
+  if (Math.abs(credits - charged) < 0.005) return `${fmtCreditValue(charged)} ${t("qoder.creditsUnit")}`;
+  return `${t("qoder.chargedCredits", { credits: fmtCreditValue(charged) })} · ${t("qoder.nominalCredits", { credits: fmtCreditValue(credits) })} ${t("qoder.creditsUnit")}`;
+}
+
 function qoderDayHtml(day: string): string {
   const data = lastQoderSpend?.days.find((row) => row.day === day);
   if (!data || (data.credits <= 0 && data.trips === 0)) return "";
   const tokens = data.tokens_unavailable_trips > 0 && data.billed_tokens <= 0 ? "—" : fmtTokens(data.billed_tokens);
+  const free = data.free_trips > 0;
+  const freeChip = free ? `<span class="qoder-chip qoder-free">${escapeHtml(t("qoder.freeBadge"))}</span>` : "";
   const models = data.models
     .map((model) => {
       const tokensText = model.tokens_unavailable_trips > 0 && model.billed_tokens <= 0 ? "—" : fmtTokens(model.billed_tokens);
       return `<div class="spend-detail-model"><span>${escapeHtml(model.label)}${
         model.label !== model.model ? `<span class="qoder-key">${escapeHtml(model.model)}</span>` : ""
-      }</span><span>${escapeHtml(fmtCredits(model.credits))} ${escapeHtml(t("qoder.creditsUnit"))} · ${escapeHtml(tokensText)} · ${model.trips}</span></div>`;
+      }${model.free_trips > 0 ? `<span class="qoder-chip qoder-free">${escapeHtml(t("qoder.freeBadge"))}</span>` : ""}</span><span>${escapeHtml(qoderCreditSplit(model.credits, model.charged_credits))} · ${escapeHtml(tokensText)} · ${model.trips}</span></div>`;
     })
     .join("");
-  const perCredit = data.credits > 0 && data.billed_tokens > 0 ? fmtTokens(data.billed_tokens / data.credits) : null;
-  const sessions = (lastQoderSpend?.sessions ?? [])
-    .filter((session) => session.day === day)
-    .slice(0, 3)
+  // A free window has charged 0; the per-credit rate then has to be labelled
+  // as nominal or it would imply a conversion of credits that were never paid.
+  const ratioBase = data.charged_credits > 0 ? data.charged_credits : data.credits;
+  const perCredit = ratioBase > 0 && data.billed_tokens > 0 ? fmtTokens(data.billed_tokens / ratioBase) : null;
+  const perCreditText = perCredit
+    ? t(data.charged_credits > 0 ? "qoder.tokensPerCredit" : "qoder.tokensPerCreditNominal", { ratio: perCredit })
+    : "";
+  const daySessions = (lastQoderSpend?.sessions ?? []).filter((session) => session.day === day);
+  const top = daySessions.sort((a, b) => b.credits - a.credits).slice(0, 10);
+  const sessionRows = top
     .map(
-      (session) =>
-        `<div class="qoder-session"><span class="qoder-session-id">${escapeHtml(session.id.slice(0, 8))}</span><span>${escapeHtml(fmtCredits(session.credits))} ${escapeHtml(t("qoder.creditsUnit"))} · ${escapeHtml(t("qoder.sessionTrips", { trips: session.trips }))}${session.subagent_credits > 0 ? ` · ${escapeHtml(t("qoder.subagentCredits", { credits: fmtCredits(session.subagent_credits) }))}` : ""}</span></div>`,
+      (session, index) =>
+        `<div class="qoder-session"><span class="qoder-session-id">#${index + 1} ${escapeHtml(session.id.slice(0, 8))}</span><span>${escapeHtml(qoderCreditSplit(session.credits, session.charged_credits))} · ${escapeHtml(t("qoder.sessionTrips", { trips: session.trips }))}${
+          session.subagent_credits > 0 ? ` · ${escapeHtml(t("qoder.subagentCredits", { credits: fmtCreditValue(session.subagent_credits) }))}` : ""
+        }${session.free_trips > 0 ? ` · ${escapeHtml(t("qoder.freeBadge"))}` : ""}</span></div>`,
     )
     .join("");
+  const sessions = sessionRows
+    ? `<div class="qoder-sessions"><div class="qoder-sessions-head">${escapeHtml(t("qoder.topSessions", { n: top.length }))}</div>${sessionRows}</div>`
+    : "";
   return `<article class="spend-detail-tool qoder-tool" title="${escapeHtml(t("qoder.tokensTip"))}">
-    <div class="spend-detail-tool-head"><strong>Qoder CN <span class="qoder-chip">${escapeHtml(t("qoder.localBadge"))}</span></strong><span>${escapeHtml(fmtCredits(data.credits))} ${escapeHtml(t("qoder.creditsUnit"))} · ${escapeHtml(tokens)}</span></div>
+    <div class="spend-detail-tool-head"><strong>Qoder CN <span class="qoder-chip">${escapeHtml(t("qoder.localBadge"))}</span>${freeChip}</strong><span>${escapeHtml(qoderCreditSplit(data.credits, data.charged_credits))} · ${escapeHtml(tokens)}</span></div>
     <div class="qoder-meta">${escapeHtml(t("qoder.tripLine", { trips: data.trips, sessions: data.sessions }))}${
-      perCredit ? ` · ${escapeHtml(t("qoder.tokensPerCredit", { ratio: perCredit }))}` : ""
+      perCreditText ? ` · ${escapeHtml(perCreditText)}` : ""
+    }${
+      free ? ` · ${escapeHtml(t("qoder.freeTrips", { n: data.free_trips.toLocaleString(localeTag()) }))}` : ""
     }${
       data.tokens_unavailable_trips > 0 ? ` · ${escapeHtml(t("qoder.unavailable", { n: data.tokens_unavailable_trips }))}` : ""
     }</div>
-    ${models}${sessions ? `<div class="qoder-sessions">${sessions}</div>` : ""}
+    ${models}${sessions}
   </article>`;
 }
 
@@ -4005,14 +4039,15 @@ function renderTotalSpend(): string {
   // Credits-denominated cards cannot be converted into tokens/dollars
   // honestly, so they keep their own rows — but they follow the SAME period
   // windows as the token rows (today / yesterday / 7d / 30d / all), one row
-  // per account, and a window with nothing consumed hides the row entirely
-  // (an all-zero window hides the whole section).
+  // per account. Local Qoder CN shows charged credits, so an all-free window
+  // stays visible at 0 with a nominal/free note. A window with no usage at
+  // all hides the row.
   const creditRows = creditEntriesForRange(rangeSelected ? rangeTab : spendTab === "yesterday" ? "yesterday" : "today");
   const creditRow = creditRows.length
     ? `<div class="spend-credits" title="${escapeHtml(t("usage.metersTip"))}"><span class="spend-credits-label">${escapeHtml(t("usage.meters"))}</span>${creditRows
         .map(
           (row) =>
-            `<span class="spend-credit-item"><span class="spend-credit-name">${escapeHtml(row.name)}</span><span class="spend-credit-value">${escapeHtml(formatUsageQuantity(row.value, row.unit))}</span></span>`,
+            `<span class="spend-credit-item"><span class="spend-credit-name">${escapeHtml(row.name)}</span><span class="spend-credit-value">${escapeHtml(formatUsageQuantity(row.value, row.unit))}</span>${row.note ? `<span class="spend-credit-note">${escapeHtml(row.note)}</span>` : ""}</span>`,
         )
         .join("")}</div>`
     : "";
@@ -6699,11 +6734,11 @@ function qoderWindowFor(range: ShareRange): QoderWindow | null {
   return lastQoderSpend ? lastQoderSpend[range] : null;
 }
 
-function creditEntriesForRange(range: ShareRange): { id: string; name: string; value: number; unit: UsageUnit }[] {
+function creditEntriesForRange(range: ShareRange): { id: string; name: string; value: number; unit: UsageUnit; note?: string }[] {
   const qoder = qoderWindowFor(range);
   // Online samples and local transcripts have different coverage (other
   // devices / older history vs this machine), so both rows are kept apart.
-  const rows = lastCreditExtras
+  const rows: { id: string; name: string; value: number; unit: UsageUnit; note?: string }[] = lastCreditExtras
     .map((credit) => ({
       id: credit.id,
       unit: credit.unit ?? "credits",
@@ -6711,8 +6746,22 @@ function creditEntriesForRange(range: ShareRange): { id: string; name: string; v
       value: credit.windows[range === "all" ? "all" : range],
     }))
     .filter((row) => row.value > 0);
-  if (qoder && qoder.credits > 0) {
-    rows.push({ id: "qodercn-local", name: t("qoder.localName"), value: qoder.credits, unit: "credits" });
+  if (qoder && (qoder.credits > 0 || qoder.charged_credits > 0)) {
+    // The local row reports what the platform actually charged. Free/zero-rate
+    // requests still write nominal credits, so they surface as a note instead
+    // of pretending the quota moved.
+    rows.push({
+      id: "qodercn-local",
+      name: t("qoder.localName"),
+      value: qoder.charged_credits,
+      unit: "credits",
+      note: qoder.free_trips > 0
+        ? t("qoder.freeNote", {
+            free: qoder.free_trips.toLocaleString(localeTag()),
+            nominal: fmtCreditValue(qoder.credits),
+          })
+        : undefined,
+    });
   }
   return rows.sort((a, b) => a.name.localeCompare(b.name, localeTag()));
 }
@@ -6746,7 +6795,7 @@ async function shareSpendEnvelope(range: ShareRange): Promise<void> {
     const body = entries.length
       ? `${rows}${overflow > 0 ? `<div class="envelope-more">+${overflow}</div>` : ""}`
       : credits.length ? "" : `<div class="envelope-empty">${escapeHtml(t("spend.noUsage"))}</div>`;
-    const creditBody = credits.length ? `<div class="spend-credits"><span class="spend-credits-label">${escapeHtml(t("usage.meters"))}</span>${credits.map((row) => `<span class="spend-credit-item"><span class="spend-credit-name">${escapeHtml(row.name)}</span><span class="spend-credit-value">${escapeHtml(formatUsageQuantity(row.value, row.unit))}</span></span>`).join("")}</div>` : "";
+    const creditBody = credits.length ? `<div class="spend-credits"><span class="spend-credits-label">${escapeHtml(t("usage.meters"))}</span>${credits.map((row) => `<span class="spend-credit-item"><span class="spend-credit-name">${escapeHtml(row.name)}</span><span class="spend-credit-value">${escapeHtml(formatUsageQuantity(row.value, row.unit))}</span>${row.note ? `<span class="spend-credit-note">${escapeHtml(row.note)}</span>` : ""}</span>`).join("")}</div>` : "";
 
     const card = document.createElement("div");
     card.className = "envelope snap-card";

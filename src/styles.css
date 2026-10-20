@@ -667,6 +667,14 @@ body.settings-open #settings {
   font-variant-numeric: tabular-nums;
 }
 
+/* Free/zero-rate note on the local Qoder row: kept beside the charged value
+   so 0 credits never hides that nominal usage happened. */
+.spend-credit-note {
+  flex: 0 0 auto;
+  font-size: 9.5px;
+  opacity: 0.75;
+}
+
 .kv-recovery-code {
   display: block;
   font-family: var(--mono-font, "Consolas", monospace);
@@ -2827,10 +2835,20 @@ article.provider.is-folded:hover {
 /* Qoder CN local-transcript block: credits are measured, billed tokens are
    derived, so it sits beside the dollar rows instead of inside their totals. */
 .qoder-tool { border-color: color-mix(in srgb, var(--foreground) 14%, var(--border)); }
-.qoder-chip { margin-left: 6px; padding: 1px 6px; border: 1px solid var(--border); border-radius: 999px; font-size: 9px; font-weight: 500; color: var(--muted-foreground); vertical-align: 1px; }
+.qoder-chip { margin-left: 6px; padding: 1px 6px; border: 1px solid var(--border); border-radius: 999px; font-size: 9px; font-weight: 500; color: var(--muted-foreground); vertical-align: 1px; white-space: nowrap; }
+.qoder-free { border-color: color-mix(in oklab, var(--accent) 45%, var(--border)); color: var(--accent); }
+/* The popover is narrow: let the long charged/nominal value drop to its own
+   line instead of squeezing the title or wrapping mid-phrase. */
+.qoder-tool .spend-detail-tool-head,
+.qoder-tool .spend-detail-model,
+.qoder-tool .qoder-session { flex-wrap: wrap; gap: 2px 10px; }
+.qoder-tool .spend-detail-tool-head > span,
+.qoder-tool .spend-detail-model > span:last-child,
+.qoder-tool .qoder-session > span:last-child { white-space: nowrap; }
 .qoder-meta { margin-top: 4px; color: var(--muted-foreground); font-size: 10px; }
 .qoder-key { margin-left: 6px; opacity: 0.55; font-size: 9px; }
 .qoder-sessions { margin-top: 6px; padding-top: 6px; border-top: 1px solid color-mix(in oklab, var(--border) 70%, transparent); }
+.qoder-sessions-head { margin-bottom: 2px; font-size: 9px; letter-spacing: 0.04em; text-transform: uppercase; opacity: 0.6; }
 .qoder-session { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 2px 0; color: var(--muted-foreground); font-size: 10px; }
 .qoder-session-id { font-family: ui-monospace, Consolas, monospace; opacity: 0.75; }
 

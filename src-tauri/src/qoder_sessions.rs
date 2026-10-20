@@ -31,8 +31,14 @@ const MAX_SESSIONS: usize = 50;
 
 #[derive(Serialize, Clone, Default)]
 pub struct QoderWindow {
+    /// Nominal credits written to the transcript. Kept for reference even
+    /// when a free/zero-rate request never charges them.
     pub credits: f64,
+    /// Credits actually charged (`billable != false`). A free model writes
+    /// nominal credits but leaves the platform quota untouched.
+    pub charged_credits: f64,
     pub original_credits: f64,
+    pub free_trips: u64,
     /// Sum of derived billed input tokens for the requests whose window is
     /// known. Trips without a window are counted separately.
     pub billed_tokens: f64,
@@ -46,6 +52,8 @@ pub struct QoderModelSpend {
     pub model: String,
     pub label: String,
     pub credits: f64,
+    pub charged_credits: f64,
+    pub free_trips: u64,
     pub billed_tokens: f64,
     pub trips: u64,
     pub tokens_unavailable_trips: u64,
@@ -55,7 +63,9 @@ pub struct QoderModelSpend {
 pub struct QoderDaySpend {
     pub day: String,
     pub credits: f64,
+    pub charged_credits: f64,
     pub original_credits: f64,
+    pub free_trips: u64,
     pub billed_tokens: f64,
     pub tokens_unavailable_trips: u64,
     pub trips: u64,
@@ -72,6 +82,8 @@ pub struct QoderSessionSpend {
     /// Local calendar day of the first request.
     pub day: String,
     pub credits: f64,
+    pub charged_credits: f64,
+    pub free_trips: u64,
     pub billed_tokens: f64,
     pub tokens_unavailable_trips: u64,
     pub trips: u64,
@@ -114,6 +126,9 @@ struct Event {
     ratio: Option<f64>,
     window: Option<f64>,
     request_id: String,
+    /// `usage.billable`; `Some(false)` means the request was free and its
+    /// nominal credits never hit the platform quota.
+    billable: Option<bool>,
 }
 
 #[derive(Clone, Default)]
@@ -243,6 +258,7 @@ fn parse_reader(reader: impl BufRead) -> ParsedFile {
             ratio: usage.get("context_usage_ratio").and_then(Value::as_f64),
             window,
             request_id,
+            billable: usage.get("billable").and_then(Value::as_bool),
         });
     }
     out
@@ -350,6 +366,8 @@ fn discover(root: &Path) -> (Vec<(String, PathBuf, bool)>, u64) {
 #[derive(Default)]
 struct ModelAgg {
     credits: f64,
+    charged: f64,
+    free: u64,
     tokens: f64,
     trips: u64,
     unavailable: u64,
@@ -359,6 +377,8 @@ struct ModelAgg {
 struct SessionAgg {
     started: Option<DateTime<Utc>>,
     credits: f64,
+    charged: f64,
+    free: u64,
     tokens: f64,
     unavailable: u64,
     trips: u64,
@@ -371,6 +391,8 @@ struct SessionAgg {
 struct DayAgg {
     day_idx: i32,
     credits: f64,
+    charged: f64,
+    free: u64,
     original_credits: f64,
     tokens: f64,
     unavailable: u64,
@@ -383,6 +405,11 @@ struct DayAgg {
 fn add_model(agg: &mut HashMap<String, ModelAgg>, event: &Event, tokens: Option<f64>) {
     let entry = agg.entry(event.model.clone()).or_default();
     entry.credits += event.credits;
+    if event.billable == Some(false) {
+        entry.free += 1;
+    } else {
+        entry.charged += event.credits;
+    }
     entry.trips += 1;
     match tokens {
         Some(t) => entry.tokens += t,
@@ -413,12 +440,18 @@ fn build_report(root: &Path, entries: Vec<(String, Event, bool)>, lite_sessions:
             continue;
         }
         let tokens = derive_tokens(event.ratio, event.window);
+        let free = event.billable == Some(false);
+        let charged = if free { 0.0 } else { event.credits };
         let (_, day_idx) = day_key(event.ts);
         let session = sessions.entry(session_id.clone()).or_default();
         if session.started.map_or(true, |s| event.ts < s) {
             session.started = Some(event.ts);
         }
         session.credits += event.credits;
+        session.charged += charged;
+        if free {
+            session.free += 1;
+        }
         session.trips += 1;
         if let Some(t) = tokens {
             session.tokens += t;
@@ -436,6 +469,10 @@ fn build_report(root: &Path, entries: Vec<(String, Event, bool)>, lite_sessions:
         let day_agg = days.entry(day_idx).or_default();
         day_agg.day_idx = day_idx;
         day_agg.credits += event.credits;
+        day_agg.charged += charged;
+        if free {
+            day_agg.free += 1;
+        }
         day_agg.original_credits += event.original_credits;
         day_agg.trips += 1;
         day_agg.sessions.insert(session_id.clone());
@@ -459,6 +496,8 @@ fn build_report(root: &Path, entries: Vec<(String, Event, bool)>, lite_sessions:
                 label: label_of(&model),
                 model,
                 credits: a.credits,
+                charged_credits: a.charged,
+                free_trips: a.free,
                 billed_tokens: a.tokens,
                 trips: a.trips,
                 tokens_unavailable_trips: a.unavailable,
@@ -484,7 +523,9 @@ fn build_report(root: &Path, entries: Vec<(String, Event, bool)>, lite_sessions:
             QoderDaySpend {
                 day,
                 credits: a.credits,
+                charged_credits: a.charged,
                 original_credits: a.original_credits,
+                free_trips: a.free,
                 billed_tokens: a.tokens,
                 tokens_unavailable_trips: a.unavailable,
                 trips: a.trips,
@@ -513,6 +554,8 @@ fn build_report(root: &Path, entries: Vec<(String, Event, bool)>, lite_sessions:
             }
             let w = &mut windows[reach];
             w.credits += agg.credits;
+            w.charged_credits += agg.charged_credits;
+            w.free_trips += agg.free_trips;
             w.original_credits += agg.original_credits;
             w.billed_tokens += agg.billed_tokens;
             w.tokens_unavailable_trips += agg.tokens_unavailable_trips;
@@ -548,6 +591,8 @@ fn build_report(root: &Path, entries: Vec<(String, Event, bool)>, lite_sessions:
                 started: started.to_rfc3339(),
                 day: day_key(started).0,
                 credits: a.credits,
+                charged_credits: a.charged,
+                free_trips: a.free,
                 billed_tokens: a.tokens,
                 tokens_unavailable_trips: a.unavailable,
                 trips: a.trips,
@@ -659,7 +704,7 @@ mod tests {
 
     fn usage_line(ts: &str, model: &str, credits: f64, ratio: f64, request: &str) -> String {
         format!(
-            r#"{{"type":"assistant","timestamp":"{ts}","message":{{"id":"m-{request}","model":"{model}","usage":{{"credits":{credits},"original_credits":{credits},"context_usage_ratio":{ratio},"request_id":"{request}"}}}}}}"#
+            r#"{{"type":"assistant","timestamp":"{ts}","message":{{"id":"m-{request}","model":"{model}","usage":{{"credits":{credits},"original_credits":{credits},"context_usage_ratio":{ratio},"request_id":"{request}","billable":true}}}}}}"#
         )
     }
 
@@ -704,6 +749,25 @@ mod tests {
     }
 
     #[test]
+    fn free_requests_keep_nominal_credits_but_charge_nothing() {
+        let line = r#"{"type":"assistant","timestamp":"2026-10-20T01:00:00Z","message":{"id":"m-a","model":"dfmodel","usage":{"credits":2.5,"original_credits":2.5,"context_usage_ratio":0.1,"request_id":"a","billable":false}}}"#.to_string();
+        let parsed = parse(&[line]);
+        assert_eq!(parsed.events[0].billable, Some(false));
+        let report = build_report(
+            Path::new("unused"),
+            vec![("s1".into(), parsed.events[0].clone(), false)],
+            0,
+        );
+        assert_eq!(report.all.credits, 2.5);
+        assert_eq!(report.all.charged_credits, 0.0);
+        assert_eq!(report.all.free_trips, 1);
+        assert_eq!(report.days[0].charged_credits, 0.0);
+        assert_eq!(report.days[0].models[0].charged_credits, 0.0);
+        assert_eq!(report.sessions[0].charged_credits, 0.0);
+        assert_eq!(report.sessions[0].free_trips, 1);
+    }
+
+    #[test]
     fn duplicate_request_ids_count_once_across_main_and_subagent() {
         let root = Path::new("unused");
         let event = Event {
@@ -714,6 +778,7 @@ mod tests {
             ratio: Some(0.1),
             window: Some(1000.0),
             request_id: "same".into(),
+            billable: Some(true),
         };
         let report = build_report(
             root,
@@ -739,6 +804,7 @@ mod tests {
             ratio: Some(0.25),
             window: None,
             request_id: "sub".into(),
+            billable: Some(true),
         };
         let mut parent = ParsedFile::default();
         parent.windows.insert("dfmodel".into(), 200_000.0);
@@ -767,6 +833,7 @@ mod tests {
             ratio: Some(0.1),
             window: Some(100_000.0),
             request_id: request.into(),
+            billable: Some(true),
         };
         let report = build_report(
             Path::new("unused"),
@@ -813,11 +880,13 @@ mod tests {
     fn real_machine_snapshot() {
         let report = collect();
         eprintln!(
-            "source={} sessions={} lite={} | today: {:.3} credits, {:.0} billed tokens, {} trips, {} sessions, {} unavailable",
+            "source={} sessions={} lite={} | today: nominal {:.3} / charged {:.3} credits ({} free trips), {:.0} billed tokens, {} trips, {} sessions, {} unavailable",
             report.source.state,
             report.source.sessions,
             report.source.lite_sessions,
             report.today.credits,
+            report.today.charged_credits,
+            report.today.free_trips,
             report.today.billed_tokens,
             report.today.trips,
             report.today.sessions,
@@ -859,6 +928,7 @@ mod tests {
             ratio: Some(0.1),
             window: None,
             request_id: "x".into(),
+            billable: Some(true),
         };
         let report = build_report(root, vec![("s1".into(), base, false)], 0);
         assert_eq!(report.all.tokens_unavailable_trips, 1);

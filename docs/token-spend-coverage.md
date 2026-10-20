@@ -91,9 +91,18 @@ exposes `fetch_qoder_spend`:
 
 - **Credits** are measured; **billed input tokens** are derived as
   `Σ(context_usage_ratio × contextWindow in force at that request)`.
+- **Nominal vs charged:** each request's usage also carries `billable`.
+  `billable: false` means a free/zero-rate model (observed for
+  DeepSeek-V4-Flash on 2026-10-20) — the transcript still records nominal
+  credits, but the platform quota never moves. The scanner therefore reports
+  `credits` (nominal) and `charged_credits` (Σ credits where
+  `billable != false`) separately, plus `free_trips`.
 - A missing window leaves credits intact and marks those trips' tokens
   unavailable — never a silent 200K fallback.
 - Credits and derived tokens stay out of Total Spend and the dollar donut;
   they render as a separate "Qoder CN · local" credits row plus a per-day
-  block in the daily-usage overlay.
+  block in the daily-usage overlay. The credits row shows **charged**
+  credits, so an all-free day is visible at `0` with a
+  `free N · nominal X` note instead of hiding. The day block shows
+  charged/nominal per model and the Top 10 sessions by nominal credits.
 - No network requests, no conversation bodies, no credits→dollar conversion.
