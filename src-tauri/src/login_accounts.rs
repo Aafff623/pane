@@ -589,7 +589,7 @@ mod tests {
         assert_eq!(during[0].access_token, "gho_fallback");
         let raw = std::fs::read_to_string(&file).unwrap();
         assert!(raw.contains("gho_fallback"), "fallback keeps the plaintext: {raw}");
-        crate::secretstore::clear_put_failures();
+        crate::secretstore::clear_put_failures(&scope);
         // A healthy vault migrates on the next read and strips the file.
         let after = load_from(&base, "copilot");
         assert_eq!(after.len(), 1);

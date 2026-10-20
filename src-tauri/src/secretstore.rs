@@ -193,9 +193,10 @@ mod backend {
 
     static MAP: Mutex<Option<HashMap<String, String>>> = Mutex::new(None);
     /// Failure injection for the "broken vault" path: puts whose key starts
-    /// with this prefix fail, everything else (and every other test) is
-    /// unaffected.
-    pub(super) static FAIL_PUT_PREFIX: Mutex<Option<String>> = Mutex::new(None);
+    /// with any registered prefix fail, everything else (and every other
+    /// test) is unaffected. One prefix per test, so parallel tests cannot
+    /// lift each other's injected fault when they clear their own.
+    pub(super) static FAIL_PUT_PREFIXES: Mutex<Vec<String>> = Mutex::new(Vec::new());
 
     pub fn get(key: &str) -> Secret {
         let guard = MAP.lock().unwrap_or_else(|e| e.into_inner());
@@ -206,14 +207,13 @@ mod backend {
     }
 
     pub fn put(key: &str, secret: &str) -> Result<(), String> {
-        if let Some(prefix) = FAIL_PUT_PREFIX
+        let failed = FAIL_PUT_PREFIXES
             .lock()
             .unwrap_or_else(|e| e.into_inner())
-            .as_ref()
-        {
-            if key.starts_with(prefix.as_str()) {
-                return Err("injected vault failure (test)".into());
-            }
+            .iter()
+            .any(|prefix| key.starts_with(prefix.as_str()));
+        if failed {
+            return Err("injected vault failure (test)".into());
         }
         MAP.lock()
             .unwrap_or_else(|e| e.into_inner())
@@ -238,13 +238,22 @@ mod backend {
 /// with `prefix` fail so the broken-vault fallback paths are exercisable.
 #[cfg(feature = "harness")]
 pub fn fail_puts_for(prefix: &str) {
-    *backend::FAIL_PUT_PREFIX.lock().unwrap_or_else(|e| e.into_inner()) = Some(prefix.to_string());
+    let mut prefixes = backend::FAIL_PUT_PREFIXES
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
+    if !prefixes.iter().any(|p| p == prefix) {
+        prefixes.push(prefix.to_string());
+    }
 }
 
-/// Undoes [`fail_puts_for`].
+/// Undoes [`fail_puts_for`] for `prefix` only — other tests' injected
+/// faults stay in force, so parallel tests cannot mask each other.
 #[cfg(feature = "harness")]
-pub fn clear_put_failures() {
-    *backend::FAIL_PUT_PREFIX.lock().unwrap_or_else(|e| e.into_inner()) = None;
+pub fn clear_put_failures(prefix: &str) {
+    backend::FAIL_PUT_PREFIXES
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .retain(|p| p != prefix);
 }
 
 #[cfg(not(feature = "harness"))]
@@ -303,6 +312,18 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "harness")]
+    fn put_failure_injection_is_scoped_per_prefix() {
+        fail_puts_for("test:scope-a:");
+        fail_puts_for("test:scope-b:");
+        clear_put_failures("test:scope-a:");
+        assert!(put("test:scope-a:key", "a").is_ok());
+        assert!(put("test:scope-b:key", "b").is_err());
+        clear_put_failures("test:scope-b:");
+        assert!(put("test:scope-b:key", "b").is_ok());
+    }
+
+    #[test]
     fn provider_migration_strips_the_file_only_after_the_vault_write() {
         let base = std::env::temp_dir().join(format!("pane-secretstore-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&base);
@@ -338,7 +359,7 @@ mod tests {
 
         fail_puts_for("provider:failure-case");
         assert_eq!(resolve_provider_key("failure-case", &path).as_deref(), Some("sk-stays"));
-        clear_put_failures();
+        clear_put_failures("provider:failure-case");
 
         let left = std::fs::read_to_string(&path).expect("plaintext fallback remains");
         assert!(left.contains("sk-stays"));
@@ -375,7 +396,7 @@ mod tests {
         fail_puts_for(&token_key(scope));
         let next = serde_json::json!({"token":"new"});
         let saved = save_session(scope, &path, &next);
-        clear_put_failures();
+        clear_put_failures(&token_key(scope));
         saved.unwrap();
         assert!(matches!(get(&token_key(scope)), Secret::Missing));
         assert_eq!(load_session(scope, &path, 1024), Some(next));

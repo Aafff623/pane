@@ -184,11 +184,11 @@ pub(crate) fn write_json_atomic(path: &std::path::Path, contents: String) -> Res
 /// Test-only failure injection (harness build): atomic writes to this exact
 /// path fail so the "file write failed mid-save" data-safety paths are
 /// exercisable without touching the real filesystem state of a live store.
-/// One slot is deliberate (mirrors `secretstore::fail_puts_for`): it injects
-/// a DIFFERENT fault — file-write failure rather than vault-write failure —
-/// and is scoped by an exact, test-unique path, so parallel tests cannot
-/// collide. A new concurrent user of this seam needs the concurrency
-/// re-examined first.
+/// The target is an exact, test-unique path rather than a key prefix
+/// (unlike `secretstore`'s per-prefix seam): this injects a DIFFERENT fault
+/// — file-write failure rather than vault-write failure — and an exact path
+/// already keeps parallel tests from colliding. A new concurrent user of
+/// this seam needs the concurrency re-examined first.
 #[cfg(feature = "harness")]
 static FAIL_WRITE_PATH: Mutex<Option<PathBuf>> = Mutex::new(None);
 
