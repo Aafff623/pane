@@ -2662,7 +2662,12 @@ article.provider.is-folded:hover {
 
 .chrome-btn.on {
   opacity: 1;
-  color: var(--accent, #22d3ee);
+  /* The zinc theme's --accent is a BACKGROUND token (#27272a dark /
+     #f4f4f5 light) — using it as the glyph color painted the icon in
+     the same value as the button's own --muted background, i.e.
+     invisible. The glyph takes the foreground token; the opacity step
+     (0.55 → 1) is the on/off signal, same as the sidebar buttons. */
+  color: var(--foreground);
 }
 
 /* Update-push indicator in the Total Spend header — the mainstream quiet
@@ -5926,7 +5931,10 @@ body.no-glass .cust-dock {
 
 .help-links a {
   font-size: 12px;
-  color: var(--accent, #4c8bf5);
+  /* Same accent-token trap as .chrome-btn.on: --accent is a background
+     token in the zinc theme, so links came out near-invisible on the
+     dialog surface. */
+  color: var(--foreground);
   text-decoration: none;
 }
 
