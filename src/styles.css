@@ -4668,7 +4668,12 @@ body.refreshing .overview-refreshing svg {
 }
 
 .cust-az button:hover {
-  background: var(--accent);
+  /* Emphasized hover: the zinc theme's --accent is a near-background
+     token, so the old hover was invisible against the strip. A solid
+     chart-blue pill with white text makes the letter under the cursor
+     unmistakable. */
+  background: var(--chart-blue);
+  color: #fff;
 }
 
 .trend-chart {
@@ -5443,8 +5448,8 @@ body.party .trail-tick.active {
 
 .cust-az button:hover,
 .cust-az button:focus-visible {
-  color: var(--foreground);
-  background: var(--accent);
+  color: #fff;
+  background: var(--chart-blue);
   outline: none;
 }
 
