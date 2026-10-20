@@ -99,10 +99,12 @@ exposes `fetch_qoder_spend`:
   `billable != false`) separately, plus `free_trips`.
 - A missing window leaves credits intact and marks those trips' tokens
   unavailable — never a silent 200K fallback.
-- Credits and derived tokens stay out of Total Spend and the dollar donut;
-  they render as a separate "Qoder CN · local" credits row plus a per-day
-  block in the daily-usage overlay. The credits row shows **charged**
-  credits, so an all-free day is visible at `0` with a
-  `free N · nominal X` note instead of hiding. The day block shows
+- Credits stay out of the dollar totals and the dollar donut, and are never
+  converted into dollars. The **derived tokens** now join the token views:
+  each spend window carries per-model totals, so Total Spend's by-model and
+  by-tool lists include Qoder CN's contributions (cost 0, merged by the same
+  normalized model name the other tools use) with an `est.` badge. The
+  credits row shows **charged** credits, so an all-free day is visible at `0`
+  with a `free N · nominal X` note instead of hiding. The day block shows
   charged/nominal per model and the Top 10 sessions by nominal credits.
 - No network requests, no conversation bodies, no credits→dollar conversion.

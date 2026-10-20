@@ -46,6 +46,10 @@ pub struct AuthAccountRow {
     /// The vendor's enterprise tenant name, when the credential carries one.
     #[serde(rename = "enterpriseName", skip_serializing_if = "Option::is_none")]
     pub enterprise_name: Option<String>,
+    /// Which local store an already-signed-in official client was found in.
+    /// Only "local" rows carry it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub hint: Option<String>,
 }
 
 #[derive(Serialize, Clone, Debug, PartialEq)]
@@ -76,6 +80,7 @@ fn rows_for_family_from(base: &Path, family: &str) -> Vec<AuthAccountRow> {    m
                 kind: "slot",
                 source: None,
                 enterprise_name: None,
+                hint: None,
             })
             .collect(),
         "cursor" => cursor_accounts::load_accounts_from(base)
@@ -89,6 +94,7 @@ fn rows_for_family_from(base: &Path, family: &str) -> Vec<AuthAccountRow> {    m
                 kind: "account",
                 source: None,
                 enterprise_name: None,
+                hint: None,
             })
             .collect(),
         "codex" => crate::codex_accounts::load_with_imported_single_login_from(base)
@@ -102,6 +108,7 @@ fn rows_for_family_from(base: &Path, family: &str) -> Vec<AuthAccountRow> {    m
                 kind: "account",
                 source: None,
                 enterprise_name: None,
+                hint: None,
             })
             .collect(),
         "codebuddy" | "codebuddycn" | "workbuddy" | "workbuddyai" | "copilot" | "grok" | "kiro"
@@ -117,6 +124,7 @@ fn rows_for_family_from(base: &Path, family: &str) -> Vec<AuthAccountRow> {    m
                     kind: "account",
                     source: extra_text(&login.extra, "sourceKind"),
                     enterprise_name: extra_text(&login.extra, "enterpriseName"),
+                    hint: None,
                 })
                 .collect()
         }
@@ -124,20 +132,66 @@ fn rows_for_family_from(base: &Path, family: &str) -> Vec<AuthAccountRow> {    m
     }
 }
 
+fn append_local_rows(rows: &mut Vec<AuthAccountRow>, candidates: Vec<crate::local_logins::LocalLogin>) {
+    for candidate in candidates {
+        // The same sign-in can be known twice: once as a Pane-managed
+        // account and once in the official client's store. Match emails
+        // first; a local row without an email is only a duplicate when the
+        // group already has a Pane-managed account. CN editions are separate
+        // products and always keep their own row.
+        let duplicate = if candidate.always_listed {
+            false
+        } else if let Some(email) = candidate.email.as_deref() {
+            rows.iter().any(|row| row.email.as_deref() == Some(email))
+        } else {
+            !rows.is_empty()
+        };
+        if duplicate {
+            continue;
+        }
+        rows.push(AuthAccountRow {
+            id: candidate.id.to_string(),
+            label: candidate.label,
+            email: candidate.email,
+            masked_key: "—".into(),
+            captured_at: None,
+            kind: "local",
+            source: None,
+            enterprise_name: None,
+            hint: Some(candidate.hint),
+        });
+    }
+}
+
 /// Every auth family with its rows, reading the stores under `base`
 /// (the `_from` convention keeps tests on a temp dir).
+#[cfg(test)]
 pub fn collect_from(base: &Path) -> Vec<AuthFamilyGroup> {
+    collect_with(base, |_| Vec::new())
+}
+
+/// Like [`collect_from`] but also lists sign-ins found in official clients'
+/// local stores, discovered through `local` (injected so tests stay off the
+/// real filesystem).
+pub fn collect_with<F>(base: &Path, local: F) -> Vec<AuthFamilyGroup>
+where
+    F: Fn(&str) -> Vec<crate::local_logins::LocalLogin>,
+{
     AUTH_FAMILIES
         .iter()
-        .map(|family| AuthFamilyGroup {
-            family: family.to_string(),
-            accounts: rows_for_family_from(base, family),
+        .map(|family| {
+            let mut accounts = rows_for_family_from(base, family);
+            append_local_rows(&mut accounts, local(family));
+            AuthFamilyGroup {
+                family: family.to_string(),
+                accounts,
+            }
         })
         .collect()
 }
 
 pub fn collect() -> Vec<AuthFamilyGroup> {
-    collect_from(&crate::providers::config_dir())
+    collect_with(&crate::providers::config_dir(), crate::local_logins::candidates)
 }
 
 #[cfg(test)]
@@ -332,5 +386,94 @@ mod tests {
                 "{family} is a login family but not an auth-center family"
             );
         }
+    }
+
+    fn local(
+        id: &'static str,
+        email: Option<&str>,
+        always: bool,
+    ) -> crate::local_logins::LocalLogin {
+        crate::local_logins::LocalLogin {
+            id,
+            label: id.to_string(),
+            email: email.map(str::to_string),
+            hint: format!("{id} local sign-in"),
+            always_listed: always,
+        }
+    }
+
+    #[test]
+    fn local_sign_ins_fold_into_their_group_as_read_only_rows() {
+        let base = temp_base("local-rows");
+        let groups = collect_with(&base, |family| match family {
+            "qoder" => vec![local("qoder", None, false), local("qodercn", None, true)],
+            "codex" => vec![local("codex", Some("me@example.com"), false)],
+            _ => Vec::new(),
+        });
+        let qoder = groups.iter().find(|g| g.family == "qoder").unwrap();
+        assert_eq!(qoder.accounts.len(), 2);
+        assert_eq!(qoder.accounts[0].id, "qoder");
+        assert_eq!(qoder.accounts[1].id, "qodercn");
+        assert_eq!(qoder.accounts[0].kind, "local");
+        assert_eq!(qoder.accounts[0].source, None);
+        assert_eq!(
+            qoder.accounts[1].hint.as_deref(),
+            Some("qodercn local sign-in")
+        );
+        let codex = groups.iter().find(|g| g.family == "codex").unwrap();
+        assert_eq!(codex.accounts[0].label, "codex");
+        assert_eq!(codex.accounts[0].email.as_deref(), Some("me@example.com"));
+
+        // Families with managed rows only keep hint=None.
+        let groups = collect_from(&base);
+        assert!(groups.iter().flat_map(|g| &g.accounts).all(|row| row.hint.is_none()));
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn managed_and_local_sign_ins_are_not_double_listed() {
+        let base = temp_base("local-dedupe");
+        crate::login_accounts::save_to(
+            &base,
+            "qoder",
+            &[crate::login_accounts::LoginAccount {
+                account_id: "uid-1".into(),
+                email: "q@example.com".into(),
+                label: String::new(),
+                access_token: "tok".into(),
+                refresh_token: String::new(),
+                id_token: String::new(),
+                expires_at: String::new(),
+                added_at: 1_700_000_000,
+                extra: serde_json::json!({}),
+            }],
+        )
+        .expect("seed login");
+
+        // Same email: the local row is the same sign-in, hide it.
+        let groups = collect_with(&base, |family| {
+            (family == "qoder").then(|| local("qoder", Some("q@example.com"), false)).into_iter().collect()
+        });
+        let qoder = groups.iter().find(|g| g.family == "qoder").unwrap();
+        assert_eq!(qoder.accounts.len(), 1);
+        assert_eq!(qoder.accounts[0].kind, "account");
+
+        // No local email: any managed account in the group masks it.
+        let groups = collect_with(&base, |family| {
+            (family == "qoder").then(|| local("qoder", None, false)).into_iter().collect()
+        });
+        assert_eq!(
+            groups.iter().find(|g| g.family == "qoder").unwrap().accounts.len(),
+            1
+        );
+
+        // The CN edition is a different product: it keeps its row.
+        let groups = collect_with(&base, |family| {
+            (family == "qoder").then(|| local("qodercn", None, true)).into_iter().collect()
+        });
+        let qoder = groups.iter().find(|g| g.family == "qoder").unwrap();
+        assert_eq!(qoder.accounts.len(), 2);
+        assert_eq!(qoder.accounts[1].id, "qodercn");
+        let _ = std::fs::remove_dir_all(&base);
     }
 }

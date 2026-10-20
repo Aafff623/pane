@@ -13,8 +13,8 @@
 //! Subagent transcripts (`<sessionId>/subagents/agent-*.jsonl`) carry usage
 //! but no runtime config; they inherit the parent session's window and are
 //! folded into the parent session. Requests are deduplicated by
-//! `request_id` across files. Nothing here is added to Total Spend or the
-//! dollar donut: credits are their own unit.
+//! `request_id` across files. Credits stay out of Total Spend and the dollar
+//! donut; the derived tokens join the token views as labelled estimates.
 
 use chrono::{DateTime, Datelike, Local, Utc};
 use serde::Serialize;
@@ -45,6 +45,9 @@ pub struct QoderWindow {
     pub tokens_unavailable_trips: u64,
     pub trips: u64,
     pub sessions: u64,
+    /// Per-model totals for this window. Tokens are the same derived
+    /// estimate as `billed_tokens`; credits stay exact.
+    pub models: Vec<QoderModelSpend>,
 }
 
 #[derive(Serialize, Clone)]
@@ -373,6 +376,17 @@ struct ModelAgg {
     unavailable: u64,
 }
 
+impl ModelAgg {
+    fn add_spend(&mut self, model: &QoderModelSpend) {
+        self.credits += model.credits;
+        self.charged += model.charged_credits;
+        self.free += model.free_trips;
+        self.tokens += model.billed_tokens;
+        self.trips += model.trips;
+        self.unavailable += model.tokens_unavailable_trips;
+    }
+}
+
 #[derive(Default)]
 struct SessionAgg {
     started: Option<DateTime<Utc>>,
@@ -540,6 +554,7 @@ fn build_report(root: &Path, entries: Vec<(String, Event, bool)>, lite_sessions:
     let today = Local::now().date_naive().num_days_from_ce();
     let mut windows: [QoderWindow; 5] = Default::default();
     let mut window_sessions: [HashSet<String>; 5] = Default::default();
+    let mut window_models: [HashMap<String, ModelAgg>; 5] = Default::default();
     for (reach, from) in [today, today - 1, today - 6, today - 29, i32::MIN]
         .into_iter()
         .enumerate()
@@ -560,6 +575,12 @@ fn build_report(root: &Path, entries: Vec<(String, Event, bool)>, lite_sessions:
             w.billed_tokens += agg.billed_tokens;
             w.tokens_unavailable_trips += agg.tokens_unavailable_trips;
             w.trips += agg.trips;
+            for model in &agg.models {
+                window_models[reach]
+                    .entry(model.model.clone())
+                    .or_default()
+                    .add_spend(model);
+            }
         }
     }
     // Sessions per window: a session belongs to every window that contains
@@ -580,6 +601,9 @@ fn build_report(root: &Path, entries: Vec<(String, Event, bool)>, lite_sessions:
     }
     for (w, set) in windows.iter_mut().zip(window_sessions.iter()) {
         w.sessions = set.len() as u64;
+    }
+    for (w, models) in windows.iter_mut().zip(window_models.into_iter()) {
+        w.models = model_list(models);
     }
 
     let mut sessions: Vec<QoderSessionSpend> = sessions
@@ -813,6 +837,36 @@ mod tests {
         let report = build_report(Path::new("unused"), vec![("s1".into(), event, true)], 0);
         assert_eq!(report.all.billed_tokens, 50_000.0);
         assert_eq!(report.all.tokens_unavailable_trips, 0);
+    }
+
+    #[test]
+    fn windows_carry_per_model_breakdown() {
+        let ts = Local::now().with_timezone(&Utc);
+        let event = |model: &str, credits: f64, ratio: f64, request: &str| Event {
+            ts,
+            model: model.into(),
+            credits,
+            original_credits: credits,
+            ratio: Some(ratio),
+            window: Some(100_000.0),
+            request_id: request.into(),
+            billable: Some(true),
+        };
+        let report = build_report(
+            Path::new("unused"),
+            vec![
+                ("s1".into(), event("alpha", 1.0, 0.1, "a"), false),
+                ("s1".into(), event("beta", 2.0, 0.5, "b"), false),
+            ],
+            0,
+        );
+        assert_eq!(report.today.models.len(), 2);
+        let alpha = report.today.models.iter().find(|m| m.model == "alpha").unwrap();
+        assert_eq!(alpha.credits, 1.0);
+        assert_eq!(alpha.billed_tokens, 10_000.0);
+        let beta = report.today.models.iter().find(|m| m.model == "beta").unwrap();
+        assert_eq!(beta.billed_tokens, 50_000.0);
+        assert_eq!(report.all.models.len(), 2);
     }
 
     #[test]

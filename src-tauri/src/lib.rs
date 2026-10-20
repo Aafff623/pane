@@ -21,6 +21,7 @@ mod httpapi;
 mod i18n;
 mod kiro_login;
 mod login_accounts;
+mod local_logins;
 mod qoder_login;
 mod trae_login;
 mod zed_login;

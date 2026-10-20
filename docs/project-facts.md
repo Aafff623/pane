@@ -12,7 +12,7 @@ Single authorities for the neighbouring concerns:
   tracker, see [`docs/agents/issue-tracker.md`](agents/issue-tracker.md).
 - **Startup / build / run / acceptance commands** — [`docs/dev-startup.md`](dev-startup.md).
 
-Last reconciled: 2026-10-19 (Pane 0.8.6 + unreleased tokenrhythm/popover work).
+Last reconciled: 2026-10-20 (Pane 0.8.7 + Qoder CN local usage/login recognition).
 
 ## Scope and boundaries
 
@@ -28,7 +28,7 @@ Last reconciled: 2026-10-19 (Pane 0.8.6 + unreleased tokenrhythm/popover work).
   project (detached from any upstream, 2026-09-06). A single branch `main`
   exists locally and on origin; feature work happens on `codex/<feature>`
   branches.
-- Version 0.8.6 (`package.json` + `src-tauri/tauri.conf.json`), identifier
+- Version 0.8.7 (`package.json` + `src-tauri/tauri.conf.json`), identifier
   `com.jazii.pane`, productName `Pane`.
 - Privacy boundary (asserted by tests in the code): tokens go only to their
   own vendor's API; the secrets Pane itself persists — pasted API keys,
@@ -73,7 +73,7 @@ Last reconciled: 2026-10-19 (Pane 0.8.6 + unreleased tokenrhythm/popover work).
   `cargo +stable-x86_64-pc-windows-gnu`. The full Tauri binary cannot link
   locally as a `cdylib` (167k-export DLL). The committed crate-type is
   `["rlib"]` (desktop only). Unit tests run from repo-root `parse-tests/`
-  (913 passing, 14 ignored as of 2026-10-20; run with
+  (919 passing, 14 ignored as of 2026-10-20; run with
   `cargo +stable-x86_64-pc-windows-gnu test` and no proxy).
 - Dev runtime needs both processes: Vite `:1420` + `pane.exe` `:6736`. Never
   serve the frontend with Python `http.server` (permanent WebView2 cache

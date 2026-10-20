@@ -25,6 +25,9 @@ build-latest.log
 # the whole temp/ tree is local-only — nothing under it is ever tracked
 temp/
 
+# Qoder credits inspector local report/canvas output
+.qoder-credits/
+
 # Local-only agent config (project MCP) and code index
 .agents/mcp.json
 .codegraph/

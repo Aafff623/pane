@@ -224,6 +224,7 @@ interface QoderWindow {
   tokens_unavailable_trips: number;
   trips: number;
   sessions: number;
+  models: QoderModelSpend[];
 }
 
 interface QoderSpendReport {
@@ -286,13 +287,13 @@ type SpendTab = "today" | "yesterday" | "last30";
 /// the cc-switch ledger alone (provenance — the local same-day rows are
 /// discarded so no request counts twice). Counts are per spend view, so the
 /// number always matches the window the row belongs to.
-function spendBadgesFor(id: string, view: ShareRange): string {
+function spendBadgesFor(id: string, view: ShareRange, estimated = false): string {
   const sp = lastSpend.find((s) => s.id === id);
-  if (!sp) return "";
   let out = "";
-  if (sp.estimated) {
+  if (estimated || sp?.estimated) {
     out += `<span class="est-badge" title="${escapeHtml(t("spend.estimateTip"))}">${escapeHtml(t("spend.estimate"))}</span>`;
   }
+  if (!sp) return out;
   const low = sp.likely_undercount_days?.[view] ?? 0;
   if (low) {
     out += `<span class="est-badge low-badge" title="${escapeHtml(t("spend.undercountTip", { n: low }))}">${escapeHtml(t("spend.undercount"))} ×${low}</span>`;
@@ -2052,12 +2053,12 @@ function removeProviderCard(cardId: string): void {
 }
 
 /// Undo a provider delete: back into the drawer and dashboards, enabled.
-function restoreProviderFamily(family: string): void {
+function restoreProviderFamily(family: string): Promise<void> {
   config.removedProviders = config.removedProviders.filter((id) => id !== family);
   config.disabled = config.disabled.filter((id) => id !== family);
-  void patchConfig({ removedProviders: config.removedProviders, disabled: config.disabled });
   requestRender();
   renderDrawerBody();
+  return patchConfig({ removedProviders: config.removedProviders, disabled: config.disabled });
 }
 
 /// Groups that actually have at least one card — empty groups don't render.
@@ -3258,12 +3259,17 @@ type DonutEntry = {
   s: ProviderSpend;
   w: SpendWindow;
   activeDays?: number;
+  /// Tokens in this entry are a credits/context-derived estimate (Qoder CN).
+  estimated?: boolean;
   /// Present on the synthetic "Others" entry: the folded-in providers,
   /// largest first, for the hover breakdown.
   parts?: { id: string; name: string; w: SpendWindow }[];
 };
 
 const OTHERS_ID = "__others__";
+/// Synthetic id for Qoder CN's derived-token spend row. Credits keep their
+/// own row in the meters section; this id is only for the token lists.
+const QODER_SPEND_ID = "qodercn";
 /// Providers under this many dollars (in the visible window) fold into
 /// one "Others" wedge; hovering it lists who spent what. The bar scales
 /// with the period — a day's ring earns a slice at $5, a month's at $10.
@@ -3277,7 +3283,7 @@ function providerNameForSpend(id: string): string {
 
 function historyEntries(range: Exclude<RangeTab, "d30">): DonutEntry[] {
   const rows = range === "d7" ? lastSpendHistory.d7 : lastSpendHistory.all;
-  const base = rows
+  const base: DonutEntry[] = rows
     .map((row) => ({
       s: {
         id: row.id,
@@ -3293,6 +3299,8 @@ function historyEntries(range: Exclude<RangeTab, "d30">): DonutEntry[] {
       w: { cost: row.cost, tokens: row.tokens, models: row.models },
       activeDays: range === "all" ? row.active_days : undefined,
     }));
+  const qoder = qoderSpendEntry(range);
+  if (qoder) base.push(qoder);
   return foldDonutEntries(base, "last30");
 }
 
@@ -3345,6 +3353,8 @@ function donutEntries(tab: SpendTab): DonutEntry[] {
   // spend, disabled or not (see normalizeProviderSpend).
   const all: DonutEntry[] = lastSpend
     .map((s) => ({ s, w: s[tab] }));
+  const qoder = qoderSpendEntry(tab);
+  if (qoder) all.push(qoder);
   return foldDonutEntries(all, tab);
 }
 
@@ -3366,12 +3376,13 @@ function normalizeModelKey(model: string): string {
 type ModelAgg = {
   name: string;
   w: SpendWindow;
+  estimated: boolean;
   parts: { id: string; name: string; w: SpendWindow }[];
 };
 
 /// Merge per-tool model rows into per-model entries. `parts` carries the
 /// per-tool breakdown so the hover card can show who burned what.
-function aggregateModels(rows: { id: string; name: string; models: ModelSpend[] }[]): Map<string, ModelAgg> {
+function aggregateModels(rows: { id: string; name: string; models: ModelSpend[]; estimated?: boolean }[]): Map<string, ModelAgg> {
   const acc = new Map<string, ModelAgg>();
   for (const row of rows) {
     for (const m of row.models) {
@@ -3379,11 +3390,12 @@ function aggregateModels(rows: { id: string; name: string; models: ModelSpend[] 
       const key = normalizeModelKey(m.model);
       let agg = acc.get(key);
       if (!agg) {
-        agg = { name: m.model, w: { cost: 0, tokens: 0, models: [] }, parts: [] };
+        agg = { name: m.model, w: { cost: 0, tokens: 0, models: [] }, estimated: false, parts: [] };
         acc.set(key, agg);
       }
       agg.w.cost += m.cost;
       agg.w.tokens += m.tokens;
+      agg.estimated = agg.estimated || row.estimated === true;
       let part = agg.parts.find((p) => p.id === row.id);
       if (!part) {
         part = { id: row.id, name: row.name, w: { cost: 0, tokens: 0, models: [] } };
@@ -3401,20 +3413,26 @@ function entriesFromModelAgg(acc: Map<string, ModelAgg>, tab: SpendTab): DonutEn
     s: { id: key, name: v.name } as ProviderSpend,
     w: v.w,
     parts: v.parts,
+    estimated: v.estimated,
   }));
   return foldDonutEntries(base, tab);
 }
 
 /// By-model slices for the live windows (today/yesterday/last30).
 function modelDonutEntries(tab: SpendTab): DonutEntry[] {
-  const rows = lastSpend
-    .map((s) => ({ id: s.id, name: s.name, models: s[tab].models }));
+  const rows = [
+    ...lastSpend.map((s) => ({ id: s.id, name: s.name, models: s[tab].models })),
+    ...qoderModelSource(tab),
+  ];
   return entriesFromModelAgg(aggregateModels(rows), tab);
 }
 
 function modelHistoryEntries(range: Exclude<RangeTab, "d30">): DonutEntry[] {
-  const rows = (range === "d7" ? lastSpendHistory.d7 : lastSpendHistory.all)
-    .map((row) => ({ id: row.id, name: providerNameForSpend(row.id), models: row.models }));
+  const rows = [
+    ...(range === "d7" ? lastSpendHistory.d7 : lastSpendHistory.all)
+      .map((row) => ({ id: row.id, name: providerNameForSpend(row.id), models: row.models })),
+    ...qoderModelSource(range),
+  ];
   return entriesFromModelAgg(aggregateModels(rows), "last30");
 }
 
@@ -3558,7 +3576,7 @@ function legendRowHtml(e: DonutEntry, view: ShareRange): string {
   return `
         <div class="legend-row" data-pid="${e.s.id}">
           ${lead}
-          <span class="legend-name">${escapeHtml(e.s.name)}${spendBadgesFor(e.s.id, view)}${detail}</span>
+          <span class="legend-name">${escapeHtml(e.s.name)}${spendBadgesFor(e.s.id, view, e.estimated === true)}${detail}</span>
           <span class="legend-val">${fmtSpendVal(e.w)}</span>
         </div>`;
 }
@@ -3628,7 +3646,7 @@ function showSpendPop(anchor: HTMLElement): void {
   const el = document.createElement("div");
   el.className = "spend-pop";
   el.innerHTML = `
-    <div class="spend-pop-head">${lead(entry.s.id)}<span class="spend-pop-name">${escapeHtml(entry.s.name)}${spendBadgesFor(entry.s.id, view)}</span></div>
+    <div class="spend-pop-head">${lead(entry.s.id)}<span class="spend-pop-name">${escapeHtml(entry.s.name)}${spendBadgesFor(entry.s.id, view, entry.estimated === true)}</span></div>
     <div class="spend-pop-val">${escapeHtml(fmtMoney(entry.w.cost))} · ${escapeHtml(fmtTokens(entry.w.tokens))}</div>
     ${detail}`;
   document.body.appendChild(el);
@@ -3917,7 +3935,12 @@ function renderTotalSpend(): string {
     ? `<button class="card-fold-toggle" data-spend-fold title="${escapeHtml(t("card.expand"))}">${uiIcon("caretDown")}</button>`
     : `<button class="card-fold-toggle" data-spend-fold title="${escapeHtml(t("card.collapse"))}">${uiIcon("caretUp")}</button>`;
   const entries = rangeSelected ? groupedEntriesForRange(rangeTab) : groupedEntries(spendTab);
-  if (lastSpend.length === 0 && lastSpendHistory.d7.length === 0 && lastSpendHistory.all.length === 0) {
+  if (
+    lastSpend.length === 0 &&
+    lastSpendHistory.d7.length === 0 &&
+    lastSpendHistory.all.length === 0 &&
+    !(config.spendMetric === "tokens" && lastQoderSpend && lastQoderSpend.all.trips > 0)
+  ) {
     // Quiet state instead of a missing card — on a fresh PC the donut only
     // appears after a CLI (Claude Code, Codex, Grok…) has logged some usage.
     const note = spendLoaded ? t("spend.emptyFirst") : t("spend.scanning");
@@ -4052,13 +4075,19 @@ function renderTotalSpend(): string {
         .join("")}</div>`
     : "";
 
-  const contributors = lastSpend.map((s) => s.name).join(", ");
+  const contributors = [
+    ...lastSpend.map((s) => s.name),
+    ...(lastQoderSpend && lastQoderSpend.all.trips > 0 ? [t("qoder.localName")] : []),
+  ].join(", ");
   // The ⚡ stamp mirrors the selected window below (today/yesterday/7d/30d/all)
   // — the old standalone head-range tabs duplicated that choice.
   const headRangeKey = rangeSelected
     ? rangeTab === "d7" ? "spend.days7" : rangeTab === "d30" ? "spend.days30" : "spend.rangeAll"
     : spendTab === "yesterday" ? "spend.yesterday" : "spend.today";
   const headTokens = entries.reduce((sum, e) => sum + e.w.tokens, 0);
+  const headTip =
+    t("spend.headTokens", { range: t(headRangeKey) }) +
+    (entries.some((e) => e.estimated) ? ` · ${t("spend.estimateTotal")}` : "");
   // ⚡ tier by daily-equivalent usage: the built-in ladder is 100M / 250M /
   // 500M tokens per day; the 7d/30d windows rescale by their day count
   // (700M/week reads "medium"). config.spendIconTiers overrides the ladder.
@@ -4094,7 +4123,7 @@ function renderTotalSpend(): string {
     <article class="provider total-spend${isFolded ? " is-folded" : ""}">
       <div class="provider-head">
         <span class="provider-name">${escapeHtml(t("spend.title"))}</span>
-        <span class="spend-head-value" title="${escapeHtml(t("spend.headTokens", { range: t(headRangeKey) }))}">${boltHtml}${escapeHtml(fmtTokens(headTokens))}</span>
+        <span class="spend-head-value" title="${escapeHtml(headTip)}">${boltHtml}${escapeHtml(fmtTokens(headTokens))}</span>
         ${isFolded ? "" : `<span class="info" title="${escapeHtml(t("spend.info", { names: contributors }))}">${uiIcon("info")}</span>`}
         <span class="spacer"></span>
         ${updateVersion ? `<button class="spend-update-btn${updatePushing ? " busy" : ""}" data-update-push${updatePushing && updatePct != null ? ` style="--pct:${updatePct}"` : ""} title="${escapeHtml(t("update.pushTip", { version: updateVersion }))}" aria-label="${escapeHtml(t("update.pushTip", { version: updateVersion }))}">${uiIcon("arrowUp")}</button>` : ""}
@@ -6729,9 +6758,51 @@ function envelopeEntries(range: ShareRange): DonutEntry[] {
 }
 
 /// Qoder CN's local transcript ledger for one spend window. Credits are
-/// measured; billed tokens are derived and never join the token totals.
+/// measured; billed tokens are derived and join the token views as
+/// estimates (`qoderModelRows`), never the dollar totals.
 function qoderWindowFor(range: ShareRange): QoderWindow | null {
   return lastQoderSpend ? lastQoderSpend[range] : null;
+}
+
+/// The same windows under the spend panel's tab names (`last30` is `d30`).
+function qoderSpendWindow(tab: SpendTab | RangeTab): QoderWindow | null {
+  if (!lastQoderSpend) return null;
+  return tab === "last30" ? lastQoderSpend.d30 : lastQoderSpend[tab];
+}
+
+/// Qoder writes no token counters; these are the same context-derived
+/// billed-input estimates the Qoder detail block shows, one row per model.
+function qoderModelRows(win: QoderWindow): ModelSpend[] {
+  return win.models
+    .filter((m) => m.billed_tokens > 0)
+    .map((m) => ({ model: m.label || m.model, cost: 0, tokens: m.billed_tokens }));
+}
+
+/// Qoder as a token-spend row for the by-tool list. Cost stays 0 — credits
+/// are not dollars — and the row carries the estimated flag everywhere it
+/// renders. Absent in cost/MTok views (foldDonutEntries filters it out).
+function qoderSpendEntry(tab: SpendTab | RangeTab): DonutEntry | null {
+  const win = qoderSpendWindow(tab);
+  const models = win ? qoderModelRows(win) : [];
+  if (!win || win.billed_tokens <= 0) return null;
+  return {
+    s: {
+      id: QODER_SPEND_ID,
+      name: t("qoder.localName"),
+      estimated: true,
+    } as ProviderSpend,
+    w: { cost: 0, tokens: win.billed_tokens, models },
+    estimated: true,
+  };
+}
+
+/// The by-model source row for the same numbers.
+function qoderModelSource(tab: SpendTab | RangeTab): { id: string; name: string; models: ModelSpend[]; estimated: boolean }[] {
+  const win = qoderSpendWindow(tab);
+  const models = win ? qoderModelRows(win) : [];
+  return models.length
+    ? [{ id: QODER_SPEND_ID, name: t("qoder.localName"), models, estimated: true }]
+    : [];
 }
 
 function creditEntriesForRange(range: ShareRange): { id: string; name: string; value: number; unit: UsageUnit; note?: string }[] {
@@ -6789,7 +6860,7 @@ async function shareSpendEnvelope(range: ShareRange): Promise<void> {
     const rows = shown
       .map((e) => {
         const pct = denom > 0 ? Math.max(2, Math.round((metricVal(e.w) / denom) * 100)) : 0;
-        return `<div class="envelope-row">${lead(e.s.id)}<span class="envelope-name">${escapeHtml(e.s.name)}${spendBadgesFor(e.s.id, range)}</span><span class="envelope-bar" aria-hidden="true"><i style="width:${pct}%;background:${spendColor(e.s.id)}"></i></span><span class="envelope-val">${escapeHtml(fmtSpendVal(e.w))}</span></div>`;
+        return `<div class="envelope-row">${lead(e.s.id)}<span class="envelope-name">${escapeHtml(e.s.name)}${spendBadgesFor(e.s.id, range, e.estimated === true)}</span><span class="envelope-bar" aria-hidden="true"><i style="width:${pct}%;background:${spendColor(e.s.id)}"></i></span><span class="envelope-val">${escapeHtml(fmtSpendVal(e.w))}</span></div>`;
       })
       .join("");
     const body = entries.length
@@ -11069,7 +11140,7 @@ async function handleCustomizeClick(target: HTMLElement): Promise<boolean> {
   }
   const restoreBtn = target.closest<HTMLElement>("[data-restore-provider]");
   if (restoreBtn) {
-    restoreProviderFamily(restoreBtn.dataset.restoreProvider!);
+    void restoreProviderFamily(restoreBtn.dataset.restoreProvider!);
     return true;
   }
   const removedToggle = target.closest<HTMLElement>("[data-removed-toggle]");
@@ -15606,11 +15677,13 @@ interface AuthAccountRow {
   email?: string;
   maskedKey: string;
   capturedAt?: number;
-  kind: "slot" | "account" | "oauth";
+  kind: "slot" | "account" | "oauth" | "local";
   /// How the credential entered Pane: "qr" (scan sign-in) or "desktop"
   /// (imported from the official client's read-only auth store).
   source?: string;
   enterpriseName?: string;
+  /// The local store a "local" row was discovered in (read-only row).
+  hint?: string;
 }
 
 interface AuthFamilyGroup {
@@ -15823,13 +15896,20 @@ function authQuotaHtml(snap: Snapshot | undefined, reauth: string | null): strin
 }
 
 function authRowHtml(family: string, acct: AuthAccountRow, index: number): string {
+  const local = acct.kind === "local";
   const snap = authRowSnapshot(acct);
-  const reauth = authNeedsReauth(snap);
+  // A local row mirrors the official client's own sign-in — never managed,
+  // so it can't need a re-login and has no remove menu.
+  const reauth = local ? null : authNeedsReauth(snap);
   const name = authRowName(family, acct);
   let sub: string;
   if (reauth) {
     // cc-switch swaps the second line for the reauth reason.
     sub = `<div class="auth-sub reauth" title="${escapeHtml(reauth)}">${escapeHtml(reauth)}</div>`;
+  } else if (local) {
+    const details = [t("auth.source.local"), acct.hint ?? "", t("auth.readOnly")];
+    details.push(snap ? t("auth.monitoring") : t("auth.noCard"));
+    sub = `<div class="auth-sub" title="${escapeHtml(details.join(" · "))}">${escapeHtml(details.filter(Boolean).join(" · "))}</div>`;
   } else {
     const details: string[] = [];
     if (acct.source === "desktop") details.push(t("auth.source.desktop"));
@@ -15847,17 +15927,29 @@ function authRowHtml(family: string, acct: AuthAccountRow, index: number): strin
     details.push(snap ? t("auth.monitoring") : t("auth.noCard"));
     sub = `<div class="auth-sub">${escapeHtml(details.join(" · "))}</div>`;
   }
+  const localPills = local
+    ? `<span class="auth-pill local">${escapeHtml(t("auth.source.local"))}</span>${
+        snap?.plan && snap.status === "ok"
+          ? `<span class="auth-pill plan">${escapeHtml(snap.plan)}</span>`
+          : ""
+      }`
+    : "";
+  const action = local
+    ? snap
+      ? ""
+      : `<button class="mini-btn" type="button" data-auth-enable="${escapeHtml(acct.id)}">${escapeHtml(t("auth.enableCard"))}</button>`
+    : `<button class="mini-btn" type="button" data-auth-menu="${escapeHtml(family)}|${index}" title="${escapeHtml(t("auth.more"))}" aria-label="${escapeHtml(t("auth.more"))}">⋯</button>`;
   return `<div class="auth-row" data-auth-row="${escapeHtml(acct.id)}">
     <span class="auth-avatar" aria-hidden="true">${escapeHtml(name.charAt(0) || "?")}</span>
     <div class="auth-id">
       <div class="auth-name-line">
         <span class="auth-name" title="${escapeHtml(name)}">${escapeHtml(name)}</span>
-        ${reauth ? `<span class="auth-pill reauth">${escapeHtml(t("auth.needsReauth"))}</span>` : ""}
+        ${reauth ? `<span class="auth-pill reauth">${escapeHtml(t("auth.needsReauth"))}</span>` : localPills}
       </div>
       ${sub}
     </div>
     ${authQuotaHtml(snap, reauth)}
-    <button class="mini-btn" type="button" data-auth-menu="${escapeHtml(family)}|${index}" title="${escapeHtml(t("auth.more"))}" aria-label="${escapeHtml(t("auth.more"))}">⋯</button>
+    ${action}
   </div>`;
 }
 
@@ -15952,6 +16044,20 @@ function handleAuthCenterClick(target: HTMLElement): void {
   const importDesktop = target.closest<HTMLElement>("[data-auth-import-desktop]");
   if (importDesktop) {
     void authImportDesktop(importDesktop.dataset.authImportDesktop!);
+    return;
+  }
+  const enable = target.closest<HTMLButtonElement>("[data-auth-enable]");
+  if (enable) {
+    const family = providerFamily(enable.dataset.authEnable!);
+    enable.disabled = true;
+    enable.textContent = t("auth.enabling");
+    void restoreProviderFamily(family)
+      .then(() => forceUsageRefreshAttempt(true))
+      .then(() => loadAuthCenter())
+      .catch(() => {
+        enable.disabled = false;
+        enable.textContent = t("auth.enableCard");
+      });
     return;
   }
   const menu = target.closest<HTMLElement>("[data-auth-menu]");

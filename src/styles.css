@@ -8201,6 +8201,16 @@ body.panel-form #drawer {
   color: var(--destructive, #dc2626);
 }
 
+.auth-pill.local {
+  border: none;
+  background: color-mix(in srgb, var(--chart-blue, #3b82f6) 16%, transparent);
+  color: color-mix(in srgb, var(--chart-blue, #3b82f6) 82%, var(--foreground));
+}
+
+.auth-pill.plan {
+  color: var(--secondary-foreground);
+}
+
 .auth-sub {
   min-width: 0;
   overflow: hidden;
