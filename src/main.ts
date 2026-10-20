@@ -4693,6 +4693,7 @@ function renderQuotaOverview(): string {
           </svg>
         </span>
         <span class="provider-name">${escapeHtml(t("overview.title"))}</span>
+        <span class="overview-refreshing">${uiIcon("circleNotch")}<span class="overview-refreshing-text">${escapeHtml(t("footer.refreshing"))}</span></span>
         <span class="overview-badges-tools">
           <span class="overview-badges">${badgeHtml}</span>
           <button type="button" class="card-refresh overview-group-manage" data-overview-group-manage title="${escapeHtml(t("overview.groupManage"))}">${uiIcon("gear")}</button>
@@ -7735,6 +7736,11 @@ function refreshAccounts(family: string): void {
       // merged-card tabs, so both surfaces need the fresh labels.
       if (customizeOpen) renderDrawerBody();
       if (layoutChanged || lastSnapshots.length) requestRender();
+      // The panel window's settings page lists the same accounts — repaint
+      // it when that page is the one on screen (the rows only exist there,
+      // so the popover window skips this for free).
+      const keyRows = document.querySelector("#settings-keys-rows");
+      if (keyRows && !keyRows.closest("[hidden]")) renderSettingsProviderKeys();
     })
     .catch(() => {
       accountsCache.set(family, []);
@@ -13413,21 +13419,33 @@ function settingsKeyRow(family: string): HTMLElement {
   };
 
   if (multi) {
-    const isOauth = providerDefinition(family)?.supportsOAuth && !keyable;
-    if (isOauth) {
+    // Same routing as the drawer's ⚙ panel (renderCustConfig): the
+    // onboarding descriptor decides what "add account" means. Cursor and
+    // Antigravity have their own import/capture flows; a paste-key family
+    // gets the inline editor; everything else signs in through the auth
+    // center. A family with no API key must never land on the key editor.
+    if (family === "cursor") {
       const add = button(t("customize.acctAdd"), "", "plus");
-      add.addEventListener("click", () => {
-        // One login UI: the auth center drives every `<family>_login_start`
-        // and device-code flow and shows the user code / polling state.
-        void openFamilyLogin(family);
-      });
+      add.addEventListener("click", () => openCursorAccountDialog());
       actions.append(add);
-    } else {
+    } else if (family === "antigravity") {
+      const add = button(t("customize.agCapture"), "", "plus");
+      add.addEventListener("click", () => void doAntigravityCapture(family));
+      actions.append(add);
+    } else if (onboardingFor(family).actions.includes("pasteKey")) {
       const open = skeyAddingAccount.has(family);
       const add = button(open ? t("dialog.cancel") : t("customize.acctAdd"), "", open ? undefined : "plus");
       add.addEventListener("click", () => {
         open ? skeyAddingAccount.delete(family) : skeyAddingAccount.add(family);
         renderSettingsProviderKeys();
+      });
+      actions.append(add);
+    } else {
+      const add = button(t("customize.acctAdd"), "", "plus");
+      add.addEventListener("click", () => {
+        // One login UI: the auth center drives every `<family>_login_start`
+        // and device-code flow and shows the user code / polling state.
+        void openFamilyLogin(family);
       });
       actions.append(add);
     }

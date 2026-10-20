@@ -377,6 +377,14 @@ body.refreshing #refresh {
   color: var(--foreground);
 }
 
+/* The tray Refresh spins while any refresh pass is in flight — the class
+   comes from paintRefreshState, so tray clicks, Ctrl+R, the overview
+   button and background passes all show the same motion. */
+body.refreshing #refresh .refresh-glyph {
+  display: inline-block;
+  animation: refresh-spin 0.8s linear infinite;
+}
+
 /* ---------------------------------------------------------------- settings */
 /* Full-window panel sliding in from the right, sections as an accordion. */
 
@@ -4226,6 +4234,29 @@ article.provider.is-folded:hover {
 @keyframes refresh-spin {
   from { transform: rotate(0deg); }
   to { transform: rotate(360deg); }
+}
+
+/* Board-level refresh state, sitting in the quota-overview head right
+   above the cards: while body.refreshing is on (any trigger), a spinning
+   notch plus "Refreshing…" tells the user the whole board — every card
+   below — is being refetched, not just the button they clicked. */
+.overview-refreshing {
+  display: none;
+  align-items: center;
+  gap: 5px;
+  margin-left: 7px;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--muted-foreground);
+  white-space: nowrap;
+}
+
+body.refreshing .overview-refreshing {
+  display: inline-flex;
+}
+
+body.refreshing .overview-refreshing svg {
+  animation: refresh-spin 0.8s linear infinite;
 }
 
 /* Provider-card fold: the chevron that toggles between collapsed and
