@@ -7940,7 +7940,12 @@ function refreshCredStatus(id: string): void {
     .then((status) => {
       credStatusCache.set(id, status);
       paintCredStatus(id);
-      if (custConfigOpen === id && !custKeyEditing.has(id)) renderDrawerBody();
+      if (
+        (custConfigOpen === id || (id === "qodercn" && custConfigOpen === "qoder")) &&
+        !custKeyEditing.has(id)
+      ) {
+        renderDrawerBody();
+      }
     })
     .catch(() => {
       credStatusCache.set(id, {
@@ -7951,7 +7956,12 @@ function refreshCredStatus(id: string): void {
         activeSource: null,
       });
       paintCredStatus(id);
-      if (custConfigOpen === id && !custKeyEditing.has(id)) renderDrawerBody();
+      if (
+        (custConfigOpen === id || (id === "qodercn" && custConfigOpen === "qoder")) &&
+        !custKeyEditing.has(id)
+      ) {
+        renderDrawerBody();
+      }
     });
 }
 
@@ -9240,6 +9250,7 @@ async function refreshTokenrhythmLoginStatus(): Promise<void> {
 }
 
 function renderCustConfig(id: string): string {
+  if (id === "qoder") fetchCredStatus("qodercn");
   const status = renderCustStatus(id);
   const fam = providerFamily(id);
   // The extra-account section only renders on the family's own row.
@@ -9461,6 +9472,17 @@ function renderOnboardingConfig(id: string, onboard: Onboarding): string {
   // Codex / Grok / Copilot use the device-code block in place: their flow
   // shows a user code that the user must type in the browser.
   const oauth = OAUTH_PROVIDERS.has(id) ? renderOAuthBlock(id) : "";
+  // Qoder (international) and Qoder CN are separate products. A local
+  // Qoder CN sign-in is not evidence for the international card; point the
+  // user at the CN panel instead of silently showing "unconfigured".
+  const qoderCnLocal = id === "qoder" ? credStatusCache.get("qodercn")?.localCli : null;
+  const qoderCnHint = qoderCnLocal
+    ? `<div class="cust-cross-hint">
+        <strong>${escapeHtml(t("customize.qoderCnDetected"))}</strong>
+        <span>${escapeHtml(t("customize.qoderCnDetectedBody", { x: qoderCnLocal }))}</span>
+        <button class="mini-btn" type="button" data-cust-open="qodercn">${escapeHtml(t("customize.openQoderCn"))}</button>
+      </div>`
+    : "";
   return `<div class="cust-config cust-form">
       <div class="form-field">
         <span class="form-label">${escapeHtml(t("customize.connLabel"))}</span>
@@ -9468,6 +9490,7 @@ function renderOnboardingConfig(id: string, onboard: Onboarding): string {
       </div>
       <p class="settings-note">${escapeHtml(t(onboard.hintKey))}</p>
       ${steps}
+      ${qoderCnHint}
       ${oauth}
       ${actions ? `<div class="form-actions">${actions}</div>` : ""}
       ${custNoteField(id)}
@@ -9853,7 +9876,6 @@ function renderCustomize(): string {
   const starCount = Object.values(config.layout?.providers ?? {}).reduce((n, l) => n + l.starred.length, 0);
   const skinEntry = `<div class="customize-skin-entry"><div><strong>${t("skin.market")}</strong><span>${t("skin.entry")}</span></div><button class="mini-btn" data-skin-open>${uiIcon("palette", t("skin.market"))}</button></div>`;
   return `
-    ${skinEntry}
     <div class="customize-bar glass-bar">
       <div class="customize-heading">
         <button class="dock-btn" data-customize-close>${escapeHtml(t("customize.done"))}</button>
@@ -9872,6 +9894,7 @@ function renderCustomize(): string {
       <input id="cust-search" class="cust-search" type="search" autocomplete="off"
         placeholder="${escapeHtml(t("customize.searchPlaceholder"))}" />
     </div>
+    ${skinEntry}
     ${blocksHtml}
     ${removedProvidersHtml()}`;
 }
@@ -11369,6 +11392,25 @@ async function handleCustomizeClick(target: HTMLElement): Promise<boolean> {
     const family = sessionJump.dataset.sessionJump!;
     await patchConfig({ panelIntent: { view: "settings", family, at: Date.now() } }).catch(() => {});
     void invoke("open_panel_window").catch(() => {});
+    return true;
+  }
+  const openProv = target.closest<HTMLElement>("[data-cust-open]");
+  if (openProv) {
+    const id = openProv.dataset.custOpen!;
+    custExpanded.add(id);
+    custConfigOpen = id;
+    custInfoOpen = null;
+    renderDrawerBody();
+    fetchCredStatus(id);
+    fetchAccounts(providerFamily(id));
+    rememberPopoverView();
+    requestAnimationFrame(() => {
+      document
+        .querySelector<HTMLElement>(
+          `#drawer-body [data-cust-provider="${CSS.escape(id)}"]`,
+        )
+        ?.scrollIntoView({ block: "start" });
+    });
     return true;
   }
   const cfgBtn = target.closest<HTMLElement>("[data-config]");

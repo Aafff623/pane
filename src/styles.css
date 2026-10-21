@@ -8261,6 +8261,28 @@ body.panel-form #drawer {
   color: var(--secondary-foreground);
 }
 
+.cust-cross-hint {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  padding: 10px 12px;
+  border: 1px solid color-mix(in srgb, var(--chart-blue, #3b82f6) 28%, var(--border));
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--chart-blue, #3b82f6) 8%, transparent);
+}
+
+.cust-cross-hint strong {
+  font-size: 12px;
+  color: var(--foreground);
+}
+
+.cust-cross-hint span {
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--muted-foreground);
+}
+
 .auth-sub {
   min-width: 0;
   overflow: hidden;
