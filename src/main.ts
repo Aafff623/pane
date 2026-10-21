@@ -13956,23 +13956,46 @@ async function loadSettingsProviderKeys(): Promise<void> {
   renderSettingsProviderKeys();
 }
 
+function skeyLetter(name: string): string {
+  const first = name.trim().charAt(0).toUpperCase();
+  return /[A-Z]/.test(first) ? first : "#";
+}
+
+function renderSkeyAz(): void {
+  const rail = document.querySelector<HTMLElement>("#skey-az");
+  const root = document.querySelector<HTMLElement>("#settings-keys-rows");
+  if (!rail || !root) return;
+  const present = new Set(
+    [...root.querySelectorAll<HTMLElement>("[data-skey-letter]")].map(
+      (row) => row.dataset.skeyLetter ?? "#",
+    ),
+  );
+  rail.replaceChildren();
+  for (const letter of "ABCDEFGHIJKLMNOPQRSTUVWXYZ#".split("")) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.textContent = letter;
+    button.dataset.skeyLetter = letter;
+    if (!present.has(letter)) {
+      button.dataset.empty = "1";
+      button.className = "empty";
+      button.disabled = true;
+    }
+    rail.append(button);
+  }
+  rail.hidden = root.children.length === 0;
+}
+
 function renderSettingsProviderKeys(): void {
   const root = document.querySelector<HTMLElement>("#settings-keys-rows");
   if (!root) return;
   root.replaceChildren();
-  // Configured rows first, then A–Z by display name.
-  const families = settingsCredentialFamilies().sort((a, b) => {
-    const configured = (f: string) =>
-      Number(
-        credStatusCache.get(f)?.storedKey === true ||
-          (accountsCache.get(f)?.length ?? 0) > 0,
-      );
-    return (
-      configured(b) - configured(a) ||
-      providerDisplayName(a).localeCompare(providerDisplayName(b), "en")
-    );
-  });
+  // A–Z by display name; the rail beside the list follows this exact order.
+  const families = settingsCredentialFamilies().sort((a, b) =>
+    providerDisplayName(a).localeCompare(providerDisplayName(b), "en"),
+  );
   for (const family of families) root.append(settingsKeyRow(family));
+  renderSkeyAz();
 }
 
 function settingsKeyRow(family: string): HTMLElement {
@@ -13984,6 +14007,7 @@ function settingsKeyRow(family: string): HTMLElement {
   const item = document.createElement("div");
   item.className = "skey-item";
   item.dataset.skeyFamily = family;
+  item.dataset.skeyLetter = skeyLetter(providerDisplayName(family));
 
   const head = document.createElement("div");
   head.className = "skey-head";
@@ -15823,6 +15847,20 @@ function buildPanelShell(): void {
     const el = document.querySelector<HTMLElement>(selector);
     if (el) kvHead.append(el);
   }
+  const azRail = document.createElement("nav");
+  azRail.id = "skey-az";
+  azRail.className = "skey-az";
+  azRail.hidden = true;
+  azRail.addEventListener("click", (event) => {
+    const button = (event.target as HTMLElement).closest<HTMLElement>("[data-skey-letter]");
+    if (!button || button.dataset.empty === "1") return;
+    const letter = button.dataset.skeyLetter!;
+    document
+      .querySelector<HTMLElement>(
+        `#settings-keys-rows [data-skey-letter="${CSS.escape(letter)}"]`,
+      )
+      ?.scrollIntoView({ block: "start", behavior: "smooth" });
+  });
   const providerKeys = panelBlock("st-kv-providers", "settings.keysProviders");
   const pkPad = document.createElement("div");
   pkPad.className = "st-pad";
@@ -15843,7 +15881,7 @@ function buildPanelShell(): void {
     if (el) kvPad.append(el);
   }
   mcpKeys.body.append(kvPad);
-  keyPage.append(kvHead, providerKeys.section, mcpKeys.section);
+  keyPage.append(kvHead, azRail, providerKeys.section, mcpKeys.section);
   settingsView.append(keyPage);
 
   // --- Shortcuts: wake + category + local bindings, moved in whole -------
