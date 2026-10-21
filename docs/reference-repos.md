@@ -127,7 +127,7 @@ Codex 会话工具；18 种语言。
    - 每账号记录 `scheduled_date` / `last_checked_date` 防止重复触发；
    - 失败指数退避（5 min → 上限 60 min）、单飞 guard、状态落盘
      （`wakeup_tasks.json`）。
-   **落在哪**：Pane 的 W8 自动触发 + 一个新的 scheduler 模块。**注意**：Pane 已决定
+   **落在哪**：Pane 的 W8 自动触发 + 一个新的 scheduler 模块（2026-10-21：W8 自动触发已整套移除，后续版本重新设计）。**注意**：Pane 已决定
    W8 **默认关闭、需用户明确同意**（会消耗一次真实请求）；cockpit 默认值不同，Pane
    要保持 opt-in，不能照抄默认开。
 

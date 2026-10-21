@@ -5761,7 +5761,7 @@ body.no-glass .cust-dock {
 /* First-run spotlight tour (ticket 082-05). The dimmer is the hole's own
    huge box-shadow, so the highlighted target stays crisp and interactive:
    the overlay passes clicks through, only the tip card takes them. */
-.font-pack-manager, .reset-wake-manager {
+.font-pack-manager {
   margin: 12px 0;
   padding: 12px;
   border: 1px solid var(--border);
@@ -5769,12 +5769,9 @@ body.no-glass .cust-dock {
   font-size: 12px;
   overflow-wrap: anywhere;
 }
-.font-pack-manager p, .reset-wake-manager p, .reset-wake-status { color: var(--muted-foreground); font-size: 11px; }
+.font-pack-manager p { color: var(--muted-foreground); font-size: 11px; }
 .font-pack-manager input { min-width: 0; max-width: 100%; flex: 1 1 120px; }
 .font-pack-manager button { flex-shrink: 0; }
-.wake-setting-row { display: flex; align-items: center; gap: 8px; margin: 8px 0; }
-.wake-setting-row select { margin-left: auto; max-width: 190px; }
-.reset-wake-status { margin: 8px 0 0; }
 #tour-overlay {
   position: fixed;
   inset: 0;

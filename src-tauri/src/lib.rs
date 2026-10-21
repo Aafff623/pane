@@ -14,7 +14,6 @@ mod keyvault_v3;
 mod search_keys;
 mod skin_packs;
 mod font_packs;
-mod reset_wake;
 mod agent_skill;
 mod alerts;
 mod httpapi;
@@ -1883,23 +1882,6 @@ async fn font_pack_remove(app: tauri::AppHandle, id: String) -> Result<(), Strin
     Ok(())
 }
 
-#[tauri::command]
-async fn reset_wake_settings() -> Result<reset_wake::Settings, String> {
-    reset_wake::settings().await
-}
-
-#[tauri::command]
-async fn reset_wake_set(app: tauri::AppHandle, settings: reset_wake::Settings, consent: bool) -> Result<(), String> {
-    reset_wake::set_settings(settings, consent).await?;
-    let _ = app.emit("reset-wake-settings-updated", ());
-    Ok(())
-}
-
-#[tauri::command]
-async fn reset_wake_status() -> Result<Vec<reset_wake::WakeStatus>, String> {
-    reset_wake::statuses().await
-}
-
 /// WorkBuddy's web-session fallback (ticket 06): the Customize panel's
 /// explicit enable / import / clear surface. The cookie itself never
 /// travels back to the frontend — only its presence does.
@@ -2883,9 +2865,6 @@ async fn run_usage_fetch_inner_mode(
     // wallet card whenever the plan card is actually showing.
     fold_moonshot_into_kimi(&mut all);
 
-    if let Ok(mut latest) = wake_snapshots().lock() {
-        *latest = all.clone();
-    }
     httpapi::publish(&all);
     // Anonymous daily-rollup telemetry (Settings → "Share anonymous usage
     // statistics"). Fire-and-forget: it must never delay or fail a refresh.
@@ -3037,26 +3016,6 @@ async fn fetch_and_broadcast_usage(app: &tauri::AppHandle) -> Vec<providers::Sna
 /// immediate live pass at launch — the webview's startup refresh dies with
 /// the network at boot), then sleeps refreshMinutes (re-read every cycle,
 /// so a Settings change applies without a restart).
-fn wake_snapshots() -> &'static Mutex<Vec<providers::Snapshot>> {
-    static LATEST: OnceLock<Mutex<Vec<providers::Snapshot>>> = OnceLock::new();
-    LATEST.get_or_init(|| Mutex::new(Vec::new()))
-}
-
-fn spawn_reset_wake(app: tauri::AppHandle) {
-    tauri::async_runtime::spawn(async move {
-        loop {
-            let snapshots = wake_snapshots().lock().map(|latest| latest.clone()).unwrap_or_default();
-            if let Ok(settings) = reset_wake::settings().await {
-                match reset_wake::tick(&settings, &snapshots).await {
-                    Ok(statuses) => { let _ = app.emit("reset-wake-updated", statuses); }
-                    Err(error) => eprintln!("[pane] automatic wake: {error}"),
-                }
-            }
-            tokio::time::sleep(std::time::Duration::from_secs(60)).await;
-        }
-    });
-}
-
 fn spawn_auto_refresh(app: tauri::AppHandle) {
     tauri::async_runtime::spawn(async move {
         let mut outage_retries = 0u32;
@@ -5319,9 +5278,6 @@ pub fn run() {
             font_pack_download,
             font_pack_install,
             font_pack_remove,
-            reset_wake_settings,
-            reset_wake_set,
-            reset_wake_status,
             workbuddy_web_status,
             workbuddy_web_set_enabled,
             workbuddy_web_import_chrome,
@@ -5446,7 +5402,6 @@ pub fn run() {
             spawn_update_checker(app.handle());
             spawn_share_watcher(app.handle().clone());
             spawn_auto_refresh(app.handle().clone());
-            spawn_reset_wake(app.handle().clone());
             let menu = build_tray_menu(app.handle())?;
 
             TrayIconBuilder::with_id("tray")

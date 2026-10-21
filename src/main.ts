@@ -72,7 +72,6 @@ import { fontOnboardingMode, type FontOnboarding } from "./fontOnboarding";
 import { credentialFailure, accountFormReady, enabledAccountCount } from "./credentialPolicy";
 import { keyAvailabilityCounts, keyAvailabilityRows, keyAvailabilitySummary, overviewFoldCount } from "./keyAvailability";
 import { loadFontPacks, fontPackFamilies, mountFontPackManager } from "./fontPacks";
-import { loadResetWake, mountResetWakeSettings, resetWakeBadge, acceptWakeStatuses, type WakeStatus } from "./resetWake";
 import { decorateInkSkin, clearInkSkin } from "./inkEffects";
 import "./inkSkin.css";
 import { postIcon } from "./skinIcons";
@@ -3061,7 +3060,7 @@ function renderCard(s: Snapshot): string {
     : cardCollapsed
       ? `<button class="card-fold-toggle" data-card-fold="${escapeHtml(s.id)}" title="${escapeHtml(t("card.expand"))}">${uiIcon("caretDown")}</button>`
       : `<button class="card-fold-toggle" data-card-fold="${escapeHtml(s.id)}" title="${escapeHtml(t("card.collapse"))}">${uiIcon("caretUp")}</button>`;
-  const finalBody = cardCollapsed ? "" : body + resetWakeBadge(shown.id);
+  const finalBody = cardCollapsed ? "" : body;
   // Hide the per-account tabs when folded — the head badge, the family
   // health dot and the fold line already summarise the whole family. The
   // badge itself stays: it is the folded card's account/key count.
@@ -15120,12 +15119,6 @@ async function initSettings(): Promise<void> {
     setDrawer(false);
     startTour();
   });
-  for (const manager of document.querySelectorAll<HTMLElement>(".reset-wake-manager")) {
-    void mountResetWakeSettings(manager, () => appConfirm({
-      title: t("settings.wake.title"), message: t("settings.wake.consent"), confirmLabel: t("dialog.ok"),
-    }), requestRender);
-  }
-
   const density = document.querySelector<HTMLInputElement>("#density")!;
   density.checked = config.density === "compact";
   density.addEventListener("change", () => {
@@ -15674,8 +15667,6 @@ function buildPanelShell(): void {
   moveRow("ui-font");
   const fontManager = document.querySelector<HTMLElement>(".font-pack-manager");
   if (fontManager) generalCard.append(fontManager);
-  const wakeManager = document.querySelector<HTMLElement>(".reset-wake-manager");
-  if (wakeManager) generalCard.append(wakeManager);
   document.querySelector("#tour-replay")?.closest(".setting-row")?.remove();
   moveRow("density");
   moveRow("glass");
@@ -17736,13 +17727,6 @@ document.querySelector("#settings-btn")!.addEventListener("click", () => {
     dismissConfirm?.();
     startTour();
   });
-  void listen<WakeStatus[]>("reset-wake-updated", ({ payload }) => {
-    acceptWakeStatuses(payload);
-    requestRender();
-  });
-  void listen("reset-wake-settings-updated", () => {
-    void loadResetWake().then(requestRender).catch(() => {});
-  });
   void listen("font-packs-updated", () => {
     void loadFontPacks().then(() => {
       applyAppearance();
@@ -17839,7 +17823,6 @@ document.querySelector("#settings-btn")!.addEventListener("click", () => {
       void patchConfig({ tourPending: true });
     }
     void loadFontPacks().then(applyAppearance).catch(() => {});
-    void loadResetWake().then(requestRender).catch(() => {});
     // Capability probe runs in both window forms: overview jumps and trail
     // scrolls live in the popover, but the settings panel scrolls too.
     probeSmoothScroll();
