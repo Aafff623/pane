@@ -211,6 +211,7 @@ pub fn source_statuses() -> Vec<SpendSourceStatus> {
         source_status("workbuddy-jsonl", "WorkBuddy (CN)", "JSONL session logs", "workbuddy_line", &[home.join(".workbuddy").join("projects")], &["workbuddy"]),
         source_status("workbuddy-ai-jsonl", "WorkBuddy AI", "JSONL session logs", "workbuddy_line", &[home.join(".workbuddy-ai").join("projects"), home.join(".workbuddy-ai").join("sessions")], &["workbuddyai"]),
         source_status("codebuddy-cli-jsonl", "CodeBuddy CLI", "JSONL session logs", "workbuddy_line", &[home.join(".codebuddy").join("projects")], &["codebuddy"]),
+        source_status("codebuddy-ide-index", "CodeBuddy IDE", "extension history index", "codebuddy_ide_data", &[codebuddy_ide_root()], &["codebuddy"]),
         SpendSourceStatus { id: "cursor-csv".into(), tool: "Cursor IDE".into(), form: "authenticated usage CSV".into(), collector: "providers::cursor::fetch_usage_csv".into(), state: "runtime".into(), feeds: vec!["cursor".into()] },
     ]
 }
@@ -3060,6 +3061,39 @@ fn nested_cached_tokens(v: &Value) -> f64 {
 /// `completion_tokens` already contains reasoning (`reasoning_tokens` is a
 /// subset of it), so reasoning is NOT added again — the same total shape
 /// the upstream token statistics use.
+/// One priced (or unpriced) usage event. Both the JSONL and IDE readers
+/// call this so their cache-read/cache-write semantics cannot drift apart.
+fn emit_usage(
+    data: &mut FileData,
+    ts: DateTime<Utc>,
+    model: &str,
+    fresh_input: f64,
+    output: f64,
+    cache_read: f64,
+    cache_write: f64,
+    tokens: f64,
+) {
+    match probe_lookup(model) {
+        Some(price) => {
+            let usage = pricing::Usage {
+                input: fresh_input,
+                output,
+                cache_read,
+                cache_write_5m: cache_write,
+                cache_write_1h: 0.0,
+            };
+            add_event(
+                data,
+                ts,
+                model,
+                pricing::request_cost(&price, &usage, true),
+                tokens,
+            );
+        }
+        None => note_unpriced(data, ts, model, tokens),
+    }
+}
+
 fn workbuddy_line(line: &str, data: &mut FileData, seen: &mut HashSet<String>) {
     if !line.contains("\"usage\"") {
         return;
@@ -3108,25 +3142,30 @@ fn workbuddy_line(line: &str, data: &mut FileData, seen: &mut HashSet<String>) {
     }
 
     let fresh_input = (input - cache_read).max(0.0);
-    match probe_lookup(&model) {
-        Some(price) => {
-            let usage = pricing::Usage {
-                input: fresh_input,
-                output,
-                cache_read,
-                cache_write_5m: cache_write,
-                cache_write_1h: 0.0,
-            };
-            add_event(data, ts, &model, pricing::request_cost(&price, &usage, true), tokens);
-        }
-        None => note_unpriced(data, ts, &model, tokens),
-    }
+    emit_usage(
+        data,
+        ts,
+        &model,
+        fresh_input,
+        output,
+        cache_read,
+        cache_write,
+        tokens,
+    );
 }
 
 /// One local token source: every `*.jsonl` under the given roots, parsed
 /// with the shared WorkBuddy/CodeBuddy rule. `subagents` directories hold
 /// copies of a parent conversation and are excluded (upstream's rule).
-fn local_token_logs(id: &str, name: &str, roots: &[PathBuf]) -> ProviderSpend {
+///
+/// Copied/forked sessions replay the parent history into a second file, so
+/// the fingerprint set is shared across files, oldest first (upstream's
+/// `token_stats` rule). The per-file spend cache only stores day totals, so
+/// it cannot subtract a duplicate after the fact; these three sources are
+/// therefore re-read on every scan instead of using `file_days`. Their logs
+/// are bounded by the 31-day window and are small compared with the global
+/// cache's thousands of session files.
+fn local_token_logs_data(roots: &[PathBuf]) -> FileData {
     let mut files = Vec::new();
     for root in roots {
         recent_jsonl_files(root, &mut files);
@@ -3136,13 +3175,28 @@ fn local_token_logs(id: &str, name: &str, roots: &[PathBuf]) -> ProviderSpend {
             .components()
             .any(|component| component.as_os_str() == "subagents")
     });
+    files.sort_by_key(|path| {
+        (
+            fs::metadata(path)
+                .and_then(|meta| meta.modified())
+                .unwrap_or(SystemTime::UNIX_EPOCH),
+            path.clone(),
+        )
+    });
     let mut all = FileData::default();
+    let mut seen = HashSet::new();
     for file in files {
-        let mut seen = HashSet::new();
-        let data = file_days(&file, &mut |line, data| workbuddy_line(line, data, &mut seen));
-        merge_data(&mut all, data);
+        let Ok(handle) = fs::File::open(&file) else { continue };
+        for line in BufReader::new(handle).lines() {
+            let Ok(line) = line else { continue };
+            workbuddy_line(&line, &mut all, &mut seen);
+        }
     }
-    build_spend(id, name, all)
+    all
+}
+
+fn local_token_logs(id: &str, name: &str, roots: &[PathBuf]) -> ProviderSpend {
+    build_spend(id, name, local_token_logs_data(roots))
 }
 
 fn workbuddy_data_root(family: &str) -> PathBuf {
@@ -3172,14 +3226,199 @@ fn workbuddy_ai_tokens() -> ProviderSpend {
     )
 }
 
-/// CodeBuddy CLI — `~/.codebuddy/projects`. The CLI and IDE share the
-/// account system but not this log format; the IDE's `history/index.json`
-/// is deliberately out of scope for this pass.
+/// CodeBuddy IDE does not write JSONL. Its per-conversation usage lives in
+/// `CodeBuddyExtension/Data/**/history/**/index.json` under
+/// `requests[].usage`; message bodies are never opened.
+fn codebuddy_ide_root() -> PathBuf {
+    dirs::data_local_dir()
+        .unwrap_or_default()
+        .join("CodeBuddyExtension")
+        .join("Data")
+}
+
+fn codebuddy_ide_index_files(root: &Path, out: &mut Vec<PathBuf>) {
+    let Ok(entries) = fs::read_dir(root) else { return };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let Ok(ftype) = entry.file_type() else { continue };
+        if ftype.is_dir() {
+            let name = path.file_name().and_then(|name| name.to_str());
+            // Message bodies, snapshots and the shared public bucket carry
+            // no usage and must not be read.
+            if matches!(name, Some("messages" | "check-point" | "backups" | "Public")) {
+                continue;
+            }
+            codebuddy_ide_index_files(&path, out);
+        } else if ftype.is_file()
+            && path.file_name().and_then(|name| name.to_str()) == Some("index.json")
+            && path
+                .components()
+                .any(|component| component.as_os_str() == "history")
+        {
+            out.push(path);
+        }
+    }
+}
+
+/// `requests[].usage` in one CodeBuddy IDE conversation index. Input is the
+/// anchor: a missing input means the request did not record usage, while a
+/// legitimate 0 is still a usable event.
+fn ide_usage(request: &Value) -> Option<(f64, f64, f64, f64)> {
+    let usage = request.get("usage")?.as_object()?;
+    if !["inputTokens", "input_tokens", "prompt_tokens"]
+        .iter()
+        .any(|key| usage.get(*key).is_some())
+    {
+        return None;
+    }
+    let field = |keys: &[&str]| {
+        keys.iter()
+            .find_map(|key| json_num(usage.get(*key)))
+            .unwrap_or(0.0)
+    };
+    Some((
+        field(&["inputTokens", "input_tokens", "prompt_tokens"]),
+        field(&["outputTokens", "output_tokens", "completion_tokens"]),
+        field(&["cacheTokens", "cacheReadInputTokens", "cache_read_input_tokens"]),
+        field(&[
+            "cachedWriteTokens",
+            "cacheWriteInputTokens",
+            "cache_write_input_tokens",
+            "cache_creation_input_tokens",
+        ]),
+    ))
+}
+
+/// IDE timestamps arrive as epoch numbers, RFC3339 strings, or numeric
+/// strings (`startedAt`). `parse_ts` handles the first two; the numeric
+/// string fallback mirrors upstream's `ide_request_timestamp`.
+fn ide_timestamp(request: &Value) -> Option<DateTime<Utc>> {
+    let raw = request
+        .get("timestamp")
+        .or_else(|| request.get("startedAt"))?;
+    if let Some(ts) = parse_ts(Some(raw)) {
+        return Some(ts);
+    }
+    let n = raw.as_str()?.trim().parse::<i64>().ok()?;
+    let ms = if n > 1_000_000_000_000 { n } else { n * 1000 };
+    DateTime::from_timestamp_millis(ms)
+}
+
+/// The model is stored on the workspace conversation entry, one level above
+/// the per-conversation index. Missing metadata is not guessed: those tokens
+/// still count, but as `unknown`/unpriced.
+fn ide_model(index: &Path) -> String {
+    let Some(workspace) = index
+        .parent()
+        .and_then(|parent| parent.parent())
+        .map(|parent| parent.join("index.json"))
+    else {
+        return "unknown".to_string();
+    };
+    let Ok(text) = fs::read_to_string(workspace) else { return "unknown".to_string() };
+    let Ok(value) = serde_json::from_str::<Value>(&text) else { return "unknown".to_string() };
+    let Some(conversations) = value.get("conversations").and_then(Value::as_array) else {
+        return "unknown".to_string();
+    };
+    let Some(id) = index
+        .parent()
+        .and_then(|parent| parent.file_name())
+        .and_then(|name| name.to_str())
+    else {
+        return "unknown".to_string();
+    };
+    conversations
+        .iter()
+        .find(|conversation| conversation.get("id").and_then(Value::as_str) == Some(id))
+        .and_then(|conversation| {
+            ["selectedModelId", "modelId", "model"]
+                .iter()
+                .find_map(|key| conversation.get(*key).and_then(Value::as_str))
+        })
+        .map(str::trim)
+        .filter(|model| !model.is_empty())
+        .unwrap_or("unknown")
+        .to_string()
+}
+
+fn codebuddy_ide_data(root: &Path) -> FileData {
+    let mut files = Vec::new();
+    codebuddy_ide_index_files(root, &mut files);
+    files.sort();
+    let mut all = FileData::default();
+    // Copies of a conversation replay the same requests; the fingerprint set
+    // is shared across every index file, so one request is counted once.
+    let mut seen = HashSet::new();
+    for file in files {
+        let fallback = fs::metadata(&file)
+            .and_then(|meta| meta.modified())
+            .ok()
+            .and_then(|time| time.duration_since(SystemTime::UNIX_EPOCH).ok())
+            .and_then(|duration| {
+                DateTime::from_timestamp(duration.as_secs() as i64, duration.subsec_nanos())
+            });
+        let Ok(text) = fs::read_to_string(&file) else { continue };
+        let Ok(value) = serde_json::from_str::<Value>(&text) else { continue };
+        let Some(requests) = value.get("requests").and_then(Value::as_array) else {
+            continue;
+        };
+        let model = ide_model(&file);
+        for request in requests {
+            let Some((input, output, read, write)) = ide_usage(request) else {
+                continue;
+            };
+            // The IDE's input bucket includes cache reads, exactly like the
+            // CLI logs (upstream's usage_total is input + output + write).
+            // Cache read is priced separately and must not be added again.
+            let tokens = input + output + write;
+            if tokens <= 0.0 {
+                continue;
+            }
+            let parsed_ts = ide_timestamp(request);
+            let Some(ts) = parsed_ts.or(fallback) else { continue };
+            let fingerprint = match parsed_ts {
+                Some(ts) => format!(
+                    "{}|{input}|{output}|{read}|{write}",
+                    ts.timestamp_millis()
+                ),
+                None => match request.get("id").and_then(Value::as_str) {
+                    Some(id) if !id.is_empty() => format!("id:{id}"),
+                    _ => continue,
+                },
+            };
+            if !seen.insert(fingerprint) {
+                continue;
+            }
+            emit_usage(
+                &mut all,
+                ts,
+                &model,
+                (input - read).max(0.0),
+                output,
+                read,
+                write,
+                tokens,
+            );
+        }
+    }
+    all
+}
+
+/// CodeBuddy CLI — `~/.codebuddy/projects`. The CLI and IDE share an
+/// account system but not a log format, so each keeps its own spend row.
 fn codebuddy_cli_tokens() -> ProviderSpend {
     local_token_logs(
         "codebuddy",
         "CodeBuddy CLI",
         &[dirs::home_dir().unwrap_or_default().join(".codebuddy").join("projects")],
+    )
+}
+
+fn codebuddy_ide_tokens() -> ProviderSpend {
+    build_spend(
+        "codebuddyide",
+        "CodeBuddy IDE",
+        codebuddy_ide_data(&codebuddy_ide_root()),
     )
 }
 
@@ -4198,6 +4437,73 @@ mod tests {
         workbuddy_line(r#"{"type":"message","content":"hi"}"#, &mut data, &mut seen);
         let total: f64 = data.days.values().map(|(_, tokens)| tokens).sum();
         assert_eq!(total, 125.0);
+    }
+
+    fn temp_root(tag: &str) -> PathBuf {
+        let root = std::env::temp_dir().join(format!("pane-spend-{tag}-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(&root).expect("temp root");
+        root
+    }
+
+    #[test]
+    fn local_token_logs_dedupe_copied_files_across_files() {
+        let root = temp_root("wb-cross-file");
+        let line = r#"{"timestamp":1760000000000,"providerData":{"model":"pane-dedupe-unpriced","usage":{"input_tokens":100,"output_tokens":20}}}"#;
+        fs::write(root.join("session-a.jsonl"), format!("{line}\n")).unwrap();
+        fs::write(root.join("session-b.jsonl"), format!("{line}\n")).unwrap();
+        let data = local_token_logs_data(&[root.clone()]);
+        assert_eq!(tokens_sum(&data), 120.0, "the copied turn counts once");
+        assert_eq!(data.unpriced.get("pane-dedupe-unpriced"), Some(&1));
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn codebuddy_ide_reads_requests_and_dedupes_copies() {
+        let root = temp_root("cb-ide");
+        let history = root.join("history");
+        fs::create_dir_all(history.join("conv-a")).unwrap();
+        fs::create_dir_all(history.join("conv-b")).unwrap();
+        let request = r#"{"timestamp":1760000000000,"id":"req-1","usage":{"inputTokens":1000,"outputTokens":100,"cacheTokens":400,"cachedWriteTokens":10}}"#;
+        let string_started = r#"{"startedAt":"1760000001000","id":"req-2","usage":{"inputTokens":100,"outputTokens":0}}"#;
+        let no_usage = r#"{"timestamp":1760000002000,"id":"req-no-usage"}"#;
+        let body = format!(r#"{{"requests":[{request},{string_started},{no_usage}]}}"#);
+        fs::write(history.join("conv-a").join("index.json"), &body).unwrap();
+        fs::write(history.join("conv-b").join("index.json"), &body).unwrap();
+        // A conversation with no workspace metadata still counts, as unknown.
+        fs::create_dir_all(history.join("orphan")).unwrap();
+        fs::write(
+            history.join("orphan").join("index.json"),
+            r#"{"requests":[{"timestamp":1760000003000,"id":"req-4","usage":{"inputTokens":50}}]}"#,
+        )
+        .unwrap();
+        fs::write(
+            history.join("index.json"),
+            r#"{"conversations":[{"id":"conv-a","selectedModelId":"pane-ide-unpriced"},{"id":"conv-b","selectedModelId":"pane-ide-unpriced"}]}"#,
+        )
+        .unwrap();
+        // A malformed conversation index must not abort the scan.
+        fs::create_dir_all(history.join("bad")).unwrap();
+        fs::write(history.join("bad").join("index.json"), "{not json").unwrap();
+        let data = codebuddy_ide_data(&root);
+        assert_eq!(
+            tokens_sum(&data),
+            1260.0,
+            "copied requests count once; the orphan's 50 tokens still count"
+        );
+        assert_eq!(data.unpriced.get("pane-ide-unpriced"), Some(&2));
+        assert_eq!(data.unpriced.get("unknown"), Some(&1));
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn source_inventory_includes_codebuddy_ide() {
+        let sources = source_statuses();
+        let ide = sources
+            .iter()
+            .find(|s| s.id == "codebuddy-ide-index")
+            .expect("IDE source registered");
+        assert!(ide.feeds.iter().any(|f| f == "codebuddy"));
     }
 
     /// Live diagnostic (ignored): what each spend source produced from
@@ -5392,6 +5698,7 @@ pub fn collect_daily(cursor_csv: Option<String>) -> (Vec<ProviderSpend>, Vec<Pro
         workbuddy_cn_tokens(),
         workbuddy_ai_tokens(),
         codebuddy_cli_tokens(),
+        codebuddy_ide_tokens(),
         zcode_sp,
         antigravity(),
     ];

@@ -50,6 +50,14 @@ pub struct AuthAccountRow {
     /// Only "local" rows carry it.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub hint: Option<String>,
+    /// A local row whose store exposed no reliable identity (email/uid).
+    /// It is shown with a "verify this is the same account" marker instead
+    /// of being silently folded into an unrelated managed account.
+    #[serde(
+        rename = "identityUnknown",
+        skip_serializing_if = "std::ops::Not::not"
+    )]
+    pub identity_unknown: bool,
 }
 
 #[derive(Serialize, Clone, Debug, PartialEq)]
@@ -81,6 +89,7 @@ fn rows_for_family_from(base: &Path, family: &str) -> Vec<AuthAccountRow> {    m
                 source: None,
                 enterprise_name: None,
                 hint: None,
+                identity_unknown: false,
             })
             .collect(),
         "cursor" => cursor_accounts::load_accounts_from(base)
@@ -95,6 +104,7 @@ fn rows_for_family_from(base: &Path, family: &str) -> Vec<AuthAccountRow> {    m
                 source: None,
                 enterprise_name: None,
                 hint: None,
+                identity_unknown: false,
             })
             .collect(),
         "codex" => crate::codex_accounts::load_with_imported_single_login_from(base)
@@ -109,6 +119,7 @@ fn rows_for_family_from(base: &Path, family: &str) -> Vec<AuthAccountRow> {    m
                 source: None,
                 enterprise_name: None,
                 hint: None,
+                identity_unknown: false,
             })
             .collect(),
         "codebuddy" | "codebuddycn" | "workbuddy" | "workbuddyai" | "copilot" | "grok" | "kiro"
@@ -125,6 +136,7 @@ fn rows_for_family_from(base: &Path, family: &str) -> Vec<AuthAccountRow> {    m
                     source: extra_text(&login.extra, "sourceKind"),
                     enterprise_name: extra_text(&login.extra, "enterpriseName"),
                     hint: None,
+                    identity_unknown: false,
                 })
                 .collect()
         }
@@ -132,33 +144,48 @@ fn rows_for_family_from(base: &Path, family: &str) -> Vec<AuthAccountRow> {    m
     }
 }
 
+/// A local store's email is only an identity when it actually looks like
+/// one. "unknown", a blank string, or a nickname that merely contains '@'
+/// must never be used to merge two accounts.
+fn reliable_local_email(email: Option<&str>) -> Option<&str> {
+    let email = email?.trim();
+    if email.is_empty() || !email.contains('@') || email.eq_ignore_ascii_case("unknown") {
+        return None;
+    }
+    Some(email)
+}
+
 fn append_local_rows(rows: &mut Vec<AuthAccountRow>, candidates: Vec<crate::local_logins::LocalLogin>) {
     for candidate in candidates {
         // The same sign-in can be known twice: once as a Pane-managed
-        // account and once in the official client's store. Match emails
-        // first; a local row without an email is only a duplicate when the
-        // group already has a Pane-managed account. CN editions are separate
-        // products and always keep their own row.
-        let duplicate = if candidate.always_listed {
-            false
-        } else if let Some(email) = candidate.email.as_deref() {
-            rows.iter().any(|row| row.email.as_deref() == Some(email))
-        } else {
-            !rows.is_empty()
-        };
+        // account and once in the official client's store. Merge only on a
+        // reliable identity (email today). A local row without one is NOT
+        // necessarily the managed account already in this group — keep it
+        // visible and mark it unverified instead of hiding a second account.
+        // CN editions are separate products and always keep their own row.
+        let email = reliable_local_email(candidate.email.as_deref());
+        let duplicate = !candidate.always_listed
+            && email.is_some_and(|email| {
+                rows.iter().any(|row| {
+                    row.email
+                        .as_deref()
+                        .is_some_and(|existing| existing.eq_ignore_ascii_case(email))
+                })
+            });
         if duplicate {
             continue;
         }
         rows.push(AuthAccountRow {
             id: candidate.id.to_string(),
             label: candidate.label,
-            email: candidate.email,
+            email: email.map(str::to_string),
             masked_key: "—".into(),
             captured_at: None,
             kind: "local",
             source: None,
             enterprise_name: None,
             hint: Some(candidate.hint),
+            identity_unknown: !candidate.always_listed && email.is_none(),
         });
     }
 }
@@ -416,6 +443,8 @@ mod tests {
         assert_eq!(qoder.accounts[1].id, "qodercn");
         assert_eq!(qoder.accounts[0].kind, "local");
         assert_eq!(qoder.accounts[0].source, None);
+        assert!(qoder.accounts[0].identity_unknown, "no email to match on");
+        assert!(!qoder.accounts[1].identity_unknown, "CN is always listed");
         assert_eq!(
             qoder.accounts[1].hint.as_deref(),
             Some("qodercn local sign-in")
@@ -458,14 +487,36 @@ mod tests {
         assert_eq!(qoder.accounts.len(), 1);
         assert_eq!(qoder.accounts[0].kind, "account");
 
-        // No local email: any managed account in the group masks it.
+        // No reliable local email: this is not evidence of the same identity.
+        // Keep both rows and mark the local one unverified instead of hiding
+        // a second account behind the managed one.
         let groups = collect_with(&base, |family| {
             (family == "qoder").then(|| local("qoder", None, false)).into_iter().collect()
         });
-        assert_eq!(
-            groups.iter().find(|g| g.family == "qoder").unwrap().accounts.len(),
-            1
-        );
+        let qoder = groups.iter().find(|g| g.family == "qoder").unwrap();
+        assert_eq!(qoder.accounts.len(), 2);
+        assert_eq!(qoder.accounts[0].kind, "account");
+        assert_eq!(qoder.accounts[1].kind, "local");
+        assert!(qoder.accounts[1].identity_unknown);
+        assert_eq!(qoder.accounts[1].email, None);
+
+        // A malformed or placeholder email is not an identity either.
+        for bad in ["unknown", "not-an-email", "  "] {
+            let groups = collect_with(&base, |family| {
+                (family == "qoder").then(|| local("qoder", Some(bad), false)).into_iter().collect()
+            });
+            let qoder = groups.iter().find(|g| g.family == "qoder").unwrap();
+            assert_eq!(qoder.accounts.len(), 2, "{bad:?} must not merge");
+            assert!(qoder.accounts[1].identity_unknown, "{bad:?}");
+        }
+
+        // Email identity is case-insensitive.
+        let groups = collect_with(&base, |family| {
+            (family == "qoder").then(|| local("qoder", Some("Q@EXAMPLE.COM"), false)).into_iter().collect()
+        });
+        let qoder = groups.iter().find(|g| g.family == "qoder").unwrap();
+        assert_eq!(qoder.accounts.len(), 1);
+        assert!(!qoder.accounts[0].identity_unknown);
 
         // The CN edition is a different product: it keeps its row.
         let groups = collect_with(&base, |family| {
@@ -474,6 +525,7 @@ mod tests {
         let qoder = groups.iter().find(|g| g.family == "qoder").unwrap();
         assert_eq!(qoder.accounts.len(), 2);
         assert_eq!(qoder.accounts[1].id, "qodercn");
+        assert!(!qoder.accounts[1].identity_unknown);
         let _ = std::fs::remove_dir_all(&base);
     }
 }

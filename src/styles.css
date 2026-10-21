@@ -3055,6 +3055,16 @@ article.provider.is-folded:hover {
   color: var(--muted-foreground);
 }
 
+.spend-head-value .spend-head-est {
+  color: #b45309;
+  font-size: 9.5px;
+  font-weight: 500;
+}
+
+:root[data-theme="dark"] .spend-head-value .spend-head-est {
+  color: #fbbf24;
+}
+
 /* Today / Week / Month switch for the header chip, left of the share
    button. */
 .spend-head-range-tabs {
@@ -5901,6 +5911,26 @@ body.no-glass .cust-dock {
   fill: var(--muted-foreground);
 }
 
+.donut-est {
+  fill: #b45309;
+  font-weight: 500;
+}
+
+:root[data-theme="dark"] .donut-est {
+  fill: #fbbf24;
+}
+
+.col-est {
+  margin-left: 4px;
+  font-size: 9px;
+  font-weight: 500;
+  color: #b45309;
+}
+
+:root[data-theme="dark"] .col-est {
+  color: #fbbf24;
+}
+
 /* ---------------------------------------------------------------------------
    In-app confirm dialog (replaces the native "localhost says" popup)
 --------------------------------------------------------------------------- */
@@ -8205,6 +8235,16 @@ body.panel-form #drawer {
   border: none;
   background: color-mix(in srgb, var(--chart-blue, #3b82f6) 16%, transparent);
   color: color-mix(in srgb, var(--chart-blue, #3b82f6) 82%, var(--foreground));
+}
+
+.auth-pill.unknown {
+  border: none;
+  background: color-mix(in srgb, #f59e0b 16%, transparent);
+  color: #b45309;
+}
+
+:root[data-theme="dark"] .auth-pill.unknown {
+  color: #fbbf24;
 }
 
 .auth-pill.plan {

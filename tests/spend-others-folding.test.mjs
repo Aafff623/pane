@@ -10,7 +10,7 @@ import ts from "typescript";
 
 const source = readFileSync(new URL("../src/main.ts", import.meta.url), "utf8");
 const ast = ts.createSourceFile("main.ts", source, ts.ScriptTarget.Latest, true);
-const names = ["foldDonutEntries", "othersFoldUsd", "spendVal"];
+const names = ["estimatedTokensFor", "foldDonutEntries", "othersFoldUsd", "spendVal"];
 const functions = ast.statements.filter(
   (node) => ts.isFunctionDeclaration(node) && names.includes(node.name?.text),
 );

@@ -12,7 +12,7 @@ Single authorities for the neighbouring concerns:
   tracker, see [`docs/agents/issue-tracker.md`](agents/issue-tracker.md).
 - **Startup / build / run / acceptance commands** — [`docs/dev-startup.md`](dev-startup.md).
 
-Last reconciled: 2026-10-20 (Pane 0.8.7 + Qoder CN local usage/login recognition).
+Last reconciled: 2026-10-21 (Pane 0.8.7 + identity dedup, estimated-token labels, CodeBuddy IDE tokens).
 
 ## Scope and boundaries
 
@@ -73,7 +73,7 @@ Last reconciled: 2026-10-20 (Pane 0.8.7 + Qoder CN local usage/login recognition
   `cargo +stable-x86_64-pc-windows-gnu`. The full Tauri binary cannot link
   locally as a `cdylib` (167k-export DLL). The committed crate-type is
   `["rlib"]` (desktop only). Unit tests run from repo-root `parse-tests/`
-  (919 passing, 14 ignored as of 2026-10-20; run with
+  (922 passing, 14 ignored as of 2026-10-21; run with
   `cargo +stable-x86_64-pc-windows-gnu test` and no proxy).
 - Dev runtime needs both processes: Vite `:1420` + `pane.exe` `:6736`. Never
   serve the frontend with Python `http.server` (permanent WebView2 cache
@@ -493,18 +493,19 @@ changes.
   vendor file. `$wbEncrypted` is reported, never decrypted. The desktop
   card is suppressed when a Pane login already owns the same uid, so one
   account cannot yield two snapshots with one card id.
-- **Local token sources** (`spend.rs`): `~/.workbuddy/projects`,
-  `~/.workbuddy-ai/{projects,sessions}`, `~/.codebuddy/projects` — one
-  `workbuddy_line` parser for all three (three usage locations, input
-  includes cache read, reasoning already inside completion; verified on
-  real files 2026-10-19). They stay separate cards and never blend with the
-  credits ledger. Known limit: dedupe is per file (fingerprint), so a
-  byte-identical copy of a session file in another file would count twice.
+- **Local token sources** (`spend.rs`): WorkBuddy CN/AI and CodeBuddy CLI
+  use one `workbuddy_line` parser (three usage locations, input includes
+  cache read, reasoning already inside completion; verified on real files
+  2026-10-19); CodeBuddy IDE reads `CodeBuddyExtension/Data/**/history/**/
+  index.json` (`requests[].usage`, model from the workspace index). All
+  four stay separate cards and never blend with the credits ledger. The
+  request fingerprint is shared across files (oldest first), so a copied/
+  forked session counts once; this bypasses the per-file day-total cache
+  and re-reads the 31-day window on every scan.
 - **Not implemented on purpose**: official `get-user-request-usage`
   ledgers (needs a verifiable account — probe plan in
   `.scratch/workbuddy-family-v2/issues/09-official-request-usage.md`),
-  CodeBuddy IDE `history/index.json`, account switching, session copies,
-  check-ins, hooks, Agent Companion.
+  account switching, session copies, check-ins, hooks, Agent Companion.
 
 ## Provider onboarding descriptor (2026-10-19)
 

@@ -281,6 +281,16 @@ function staleHelp(s: Snapshot): string {
 
 type SpendTab = "today" | "yesterday" | "last30";
 
+/// Tokens in this view that came from a derived (not measured) source.
+/// Kept separate from the headline total so the number can say how much of
+/// it is an estimate instead of presenting every token as equally exact.
+function estimatedTokensFor(entries: DonutEntry[]): number {
+  return entries.reduce(
+    (sum, e) => sum + (e.estTokens ?? (e.estimated ? e.w.tokens : 0)),
+    0,
+  );
+}
+
 /// Small tags appended to spend row names: "est." for credits-derived
 /// blends (Qoder CN), "low? ×N" for days the local logs likely outcount the
 /// ledger (a suspected undercount), else "cc-switch ×N" for days taken from
@@ -3261,6 +3271,9 @@ type DonutEntry = {
   activeDays?: number;
   /// Tokens in this entry are a credits/context-derived estimate (Qoder CN).
   estimated?: boolean;
+  /// How many of `w.tokens` are derived. Kept per-entry because a by-model
+  /// slice can merge measured and estimated tools under one model name.
+  estTokens?: number;
   /// Present on the synthetic "Others" entry: the folded-in providers,
   /// largest first, for the hover breakdown.
   parts?: { id: string; name: string; w: SpendWindow }[];
@@ -3341,6 +3354,8 @@ function foldDonutEntries(all: DonutEntry[], tab: SpendTab): DonutEntry[] {
       tokens: small.reduce((sum, e) => sum + e.w.tokens, 0),
       models: [],
     },
+    estimated: small.some((e) => e.estimated === true),
+    estTokens: estimatedTokensFor(small),
     parts: small.map((e) => ({ id: e.s.id, name: e.s.name, w: e.w })),
   };
   return [...visible.filter((e) => e.w.cost >= limit), others].sort(
@@ -3351,8 +3366,12 @@ function foldDonutEntries(all: DonutEntry[], tab: SpendTab): DonutEntry[] {
 function donutEntries(tab: SpendTab): DonutEntry[] {
   // T-0033 plan B: no enablement filter — the ledger shows every measured
   // spend, disabled or not (see normalizeProviderSpend).
-  const all: DonutEntry[] = lastSpend
-    .map((s) => ({ s, w: s[tab] }));
+  const all: DonutEntry[] = lastSpend.map((s) => ({
+    s,
+    w: s[tab],
+    estimated: s.estimated === true,
+    estTokens: s.estimated ? s[tab].tokens : 0,
+  }));
   const qoder = qoderSpendEntry(tab);
   if (qoder) all.push(qoder);
   return foldDonutEntries(all, tab);
@@ -3377,6 +3396,7 @@ type ModelAgg = {
   name: string;
   w: SpendWindow;
   estimated: boolean;
+  estTokens: number;
   parts: { id: string; name: string; w: SpendWindow }[];
 };
 
@@ -3390,12 +3410,19 @@ function aggregateModels(rows: { id: string; name: string; models: ModelSpend[];
       const key = normalizeModelKey(m.model);
       let agg = acc.get(key);
       if (!agg) {
-        agg = { name: m.model, w: { cost: 0, tokens: 0, models: [] }, estimated: false, parts: [] };
+        agg = {
+          name: m.model,
+          w: { cost: 0, tokens: 0, models: [] },
+          estimated: false,
+          estTokens: 0,
+          parts: [],
+        };
         acc.set(key, agg);
       }
       agg.w.cost += m.cost;
       agg.w.tokens += m.tokens;
       agg.estimated = agg.estimated || row.estimated === true;
+      if (row.estimated === true) agg.estTokens += m.tokens;
       let part = agg.parts.find((p) => p.id === row.id);
       if (!part) {
         part = { id: row.id, name: row.name, w: { cost: 0, tokens: 0, models: [] } };
@@ -3414,6 +3441,7 @@ function entriesFromModelAgg(acc: Map<string, ModelAgg>, tab: SpendTab): DonutEn
     w: v.w,
     parts: v.parts,
     estimated: v.estimated,
+    estTokens: v.estTokens,
   }));
   return foldDonutEntries(base, tab);
 }
@@ -3455,19 +3483,23 @@ function fmtRate(v: number): string {
 /// The ring's two-line center (and its hover text) for the active metric.
 /// Cost/MTok is the overall average — total dollars over total megatokens —
 /// not a sum of per-provider rates.
-function spendCenter(entries: DonutEntry[]): { primary: string; sub: string; exact: string } {
+function spendCenter(entries: DonutEntry[]): { primary: string; sub: string; exact: string; estNote: string } {
+  const estimated = estimatedTokensFor(entries);
+  const estNote = estimated > 0
+    ? t("spend.estimatedShort", { n: fmtTokens(estimated) })
+    : "";
   if (config.spendMetric === "mtok") {
     const cost = entries.reduce((s, e) => s + e.w.cost, 0);
     const mtok = entries.reduce((s, e) => s + e.w.tokens, 0) / 1e6;
     const rate = mtok > 0 ? cost / mtok : 0;
-    return { primary: fmtRate(rate), sub: "$/MTok", exact: `${fmtRate(rate)}/MTok average` };
+    return { primary: fmtRate(rate), sub: "$/MTok", exact: `${fmtRate(rate)}/MTok average`, estNote: "" };
   }
   if (config.spendMetric === "tokens") {
     const tokens = entries.reduce((s, e) => s + e.w.tokens, 0);
-    return { primary: fmtTokens(tokens), sub: t("spend.centerTokens"), exact: t("card.tokens", { n: fmtTokens(tokens) }) };
+    return { primary: fmtTokens(tokens), sub: t("spend.centerTokens"), exact: t("card.tokens", { n: fmtTokens(tokens) }), estNote };
   }
   const c = entries.reduce((s, e) => s + e.w.cost, 0);
-  return { primary: fmtMoney(c), sub: t("spend.metric.cost"), exact: `$${c.toFixed(2)}` };
+  return { primary: fmtMoney(c), sub: t("spend.metric.cost"), exact: `$${c.toFixed(2)}`, estNote: "" };
 }
 
 /// Shrink the ring's center number when it outgrows the hole: base size
@@ -3974,9 +4006,12 @@ function renderTotalSpend(): string {
   /// reuse the legend-row styles so wedge hover keeps lighting them up.
   /// Long totals shrink one step so wide numbers (e.g. "$1,234.56 · 12.3M")
   /// don't blow out the fixed-width column.
-  const colTotalHtml = (w: SpendWindow) => {
+  const colTotalHtml = (w: SpendWindow, estTokens = 0) => {
     const s = fmtSpendVal(w);
-    return `<div class="col-total${s.length > 10 ? " long" : ""}" title="${escapeHtml(s)}">${escapeHtml(s)}</div>`;
+    const est = estTokens > 0
+      ? `<span class="col-est">${escapeHtml(t("spend.estimatedShort", { n: fmtTokens(estTokens) }))}</span>`
+      : "";
+    return `<div class="col-total${s.length > 10 ? " long" : ""}" title="${escapeHtml(s)}">${escapeHtml(s)}${est}</div>`;
   };
 
   const periodControls = `
@@ -3997,7 +4032,7 @@ function renderTotalSpend(): string {
         <div class="col-head-row">
           ${periodControls}
         </div>
-        ${colTotalHtml({ ...emptyWindow(), ...totals, models: [] })}
+        ${colTotalHtml({ ...emptyWindow(), ...totals, models: [] }, estimatedTokensFor(colEntries))}
         <div class="legend">
           ${shown.map((e) => legendRowHtml(e, rangeTab)).join("")}
           ${overflow > 0 ? `<div class="legend-row more">+${overflow}</div>` : ""}
@@ -4016,12 +4051,13 @@ function renderTotalSpend(): string {
   );
   const leftShown = leftEntries.slice(0, 10);
   const leftOverflow = leftEntries.length - leftShown.length;
+  const leftEstTokens = estimatedTokensFor(leftEntries);
   const leftColHtml = `
       <div class="spend-col">
         <div class="col-head-row">
           ${periodControls}
         </div>
-        ${colTotalHtml({ ...emptyWindow(), ...leftTotals, models: [] })}
+        ${colTotalHtml({ ...emptyWindow(), ...leftTotals, models: [] }, leftEstTokens)}
         <div class="legend">
           ${leftShown.map((e) => legendRowHtml(e, leftTab)).join("")}
           ${leftOverflow > 0 ? `<div class="legend-row more">+${leftOverflow}</div>` : ""}
@@ -4042,6 +4078,7 @@ function renderTotalSpend(): string {
           ${segments}
           <text class="donut-total" x="48" y="50" text-anchor="middle" font-size="${fitFontSize(center.primary, 14, 7)}" font-weight="600">${center.primary}</text>
           <text class="donut-sub" x="48" y="62" text-anchor="middle" font-size="${fitFontSize(center.sub, 8, 12)}">${center.sub}</text>
+          ${center.estNote ? `<text class="donut-est" x="48" y="72" text-anchor="middle" font-size="6.5">${escapeHtml(center.estNote)}</text>` : ""}
         </svg>
         <div class="spend-cols">
           ${rangeSelected ? rangeCol() : leftColHtml}
@@ -4053,6 +4090,7 @@ function renderTotalSpend(): string {
           <path class="seg donut-zero" data-full="1" fill-rule="evenodd" d="${sectorPath(0, TAU)}"/>
           <text class="donut-total" x="48" y="50" text-anchor="middle" font-size="${fitFontSize(center.primary, 14, 7)}" font-weight="600">${center.primary}</text>
           <text class="donut-sub" x="48" y="62" text-anchor="middle" font-size="${fitFontSize(center.sub, 8, 12)}">${center.sub}</text>
+          ${center.estNote ? `<text class="donut-est" x="48" y="72" text-anchor="middle" font-size="6.5">${escapeHtml(center.estNote)}</text>` : ""}
         </svg>
         <div class="spend-cols">
           ${rangeSelected ? rangeCol() : leftColHtml}
@@ -4085,9 +4123,13 @@ function renderTotalSpend(): string {
     ? rangeTab === "d7" ? "spend.days7" : rangeTab === "d30" ? "spend.days30" : "spend.rangeAll"
     : spendTab === "yesterday" ? "spend.yesterday" : "spend.today";
   const headTokens = entries.reduce((sum, e) => sum + e.w.tokens, 0);
+  const estimatedTokens = estimatedTokensFor(entries);
   const headTip =
     t("spend.headTokens", { range: t(headRangeKey) }) +
-    (entries.some((e) => e.estimated) ? ` · ${t("spend.estimateTotal")}` : "");
+    (estimatedTokens > 0 ? ` · ${t("spend.estimateTotal")}` : "");
+  const headEstimate = estimatedTokens > 0
+    ? `<span class="spend-head-est" title="${escapeHtml(t("spend.estimateTotal"))}">${escapeHtml(t("spend.estimatedIncluded", { n: fmtTokens(estimatedTokens) }))}</span>`
+    : "";
   // ⚡ tier by daily-equivalent usage: the built-in ladder is 100M / 250M /
   // 500M tokens per day; the 7d/30d windows rescale by their day count
   // (700M/week reads "medium"). config.spendIconTiers overrides the ladder.
@@ -4123,7 +4165,7 @@ function renderTotalSpend(): string {
     <article class="provider total-spend${isFolded ? " is-folded" : ""}">
       <div class="provider-head">
         <span class="provider-name">${escapeHtml(t("spend.title"))}</span>
-        <span class="spend-head-value" title="${escapeHtml(headTip)}">${boltHtml}${escapeHtml(fmtTokens(headTokens))}</span>
+        <span class="spend-head-value" title="${escapeHtml(headTip)}">${boltHtml}${escapeHtml(fmtTokens(headTokens))}${headEstimate}</span>
         ${isFolded ? "" : `<span class="info" title="${escapeHtml(t("spend.info", { names: contributors }))}">${uiIcon("info")}</span>`}
         <span class="spacer"></span>
         ${updateVersion ? `<button class="spend-update-btn${updatePushing ? " busy" : ""}" data-update-push${updatePushing && updatePct != null ? ` style="--pct:${updatePct}"` : ""} title="${escapeHtml(t("update.pushTip", { version: updateVersion }))}" aria-label="${escapeHtml(t("update.pushTip", { version: updateVersion }))}">${uiIcon("arrowUp")}</button>` : ""}
@@ -6793,6 +6835,7 @@ function qoderSpendEntry(tab: SpendTab | RangeTab): DonutEntry | null {
     } as ProviderSpend,
     w: { cost: 0, tokens: win.billed_tokens, models },
     estimated: true,
+    estTokens: win.billed_tokens,
   };
 }
 
@@ -6846,6 +6889,10 @@ async function shareSpendEnvelope(range: ShareRange): Promise<void> {
       (acc, e) => ({ cost: acc.cost + e.w.cost, tokens: acc.tokens + e.w.tokens }),
       { cost: 0, tokens: 0 },
     );
+    const estimated = estimatedTokensFor(entries);
+    const estimateNote = estimated > 0
+      ? ` · ${t("spend.estimatedIncluded", { n: fmtTokens(estimated) })}`
+      : "";
     // Bars track the active metric so the visual matches the printed values.
     const metricVal = (w: SpendWindow) => spendVal(w);
     const denom = Math.max(...entries.map((e) => metricVal(e.w)), 0);
@@ -6872,7 +6919,7 @@ async function shareSpendEnvelope(range: ShareRange): Promise<void> {
     card.className = "envelope snap-card";
     card.innerHTML = `
       <div class="envelope-head"><span class="envelope-title">${escapeHtml(t("spend.title"))}</span><span class="envelope-chip">${escapeHtml(t(SHARE_RANGE_LABEL[range]))}</span></div>
-      <div class="envelope-total">${escapeHtml(fmtMoney(totals.cost))} · ${escapeHtml(t("card.tokens", { n: fmtTokens(totals.tokens) }))}</div>
+      <div class="envelope-total">${escapeHtml(fmtMoney(totals.cost))} · ${escapeHtml(t("card.tokens", { n: fmtTokens(totals.tokens) }))}${escapeHtml(estimateNote)}</div>
       <div class="envelope-rows">${body}</div>${creditBody}`;
     const live = document.querySelector<HTMLElement>("article.total-spend");
     const W = live ? Math.ceil(live.getBoundingClientRect().width) : 380;
@@ -15684,6 +15731,9 @@ interface AuthAccountRow {
   enterpriseName?: string;
   /// The local store a "local" row was discovered in (read-only row).
   hint?: string;
+  /// The local store exposed no reliable identity, so this row was kept
+  /// separate instead of being folded into a managed account.
+  identityUnknown?: boolean;
 }
 
 interface AuthFamilyGroup {
@@ -15929,6 +15979,10 @@ function authRowHtml(family: string, acct: AuthAccountRow, index: number): strin
   }
   const localPills = local
     ? `<span class="auth-pill local">${escapeHtml(t("auth.source.local"))}</span>${
+        acct.identityUnknown
+          ? `<span class="auth-pill unknown" title="${escapeHtml(t("auth.identityUnknownTip"))}">${escapeHtml(t("auth.identityUnknown"))}</span>`
+          : ""
+      }${
         snap?.plan && snap.status === "ok"
           ? `<span class="auth-pill plan">${escapeHtml(snap.plan)}</span>`
           : ""
