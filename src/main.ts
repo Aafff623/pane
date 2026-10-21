@@ -419,6 +419,7 @@ interface Config {
   density: "regular" | "compact";
   uiFont: string;
   uiFontPromptVersion: string;
+  configNoticeVersion: string;
   glassEffects: boolean;
   shortcut: string;
   categoryShortcut: string;
@@ -487,6 +488,7 @@ const FRONTEND_CONFIG_KEYS = [
   "density",
   "uiFont",
   "uiFontPromptVersion",
+  "configNoticeVersion",
   "glassEffects",
   "shortcut",
   "categoryShortcut",
@@ -708,6 +710,7 @@ let config: Config = {
   density: "regular",
   uiFont: "",
   uiFontPromptVersion: "",
+  configNoticeVersion: "",
   glassEffects: true,
   shortcut: "",
   categoryShortcut: "Shift+1",
@@ -3524,6 +3527,13 @@ function fmtSpendVal(w: SpendWindow): string {
   return fmtMoney(w.cost);
 }
 
+/// A secondary money reading for the token view, so a model row that shows
+/// tokens still tells the user what it cost. Cost view already shows the
+/// money; MTok/cost views do not need a second number.
+function spendCostNote(w: SpendWindow): string {
+  return config.spendMetric === "tokens" && w.cost > 0 ? ` · ${fmtMoney(w.cost)}` : "";
+}
+
 /// Angular extent per provider (slivers lifted to stay visible), shared by
 /// the initial render and the tab-switch morph. Angles run clockwise from
 /// 12 o'clock; the first gap straddles the top like the Mac's ring.
@@ -3659,7 +3669,7 @@ function showSpendPop(anchor: HTMLElement): void {
     const rows = shown
       .map(
         (m) =>
-          `<div class="spend-pop-model"><span class="spend-pop-model-name">${escapeHtml(m.model)}</span><span class="spend-pop-val">${escapeHtml(fmtSpendVal({ cost: m.cost, tokens: m.tokens, models: [] }))}</span></div>`,
+          `<div class="spend-pop-model"><span class="spend-pop-model-name">${escapeHtml(m.model)}</span><span class="spend-pop-val">${escapeHtml(fmtSpendVal({ cost: m.cost, tokens: m.tokens, models: [] }) + spendCostNote({ cost: m.cost, tokens: m.tokens, models: [] }))}</span></div>`,
       )
       .join("");
     return rows + (more > 0 ? `<div class="spend-pop-model more">+${more}</div>` : "");
@@ -3877,8 +3887,8 @@ function renderSpendDetailOverlay(): string {
   const qoder = qoderDayHtml(selectedDay);
   const detailRows = rows.length || qoder
     ? `${rows.map((row) => {
-        const models = row.models.map((model) => `<div class="spend-detail-model"><span>${escapeHtml(model.model)}</span><span>${escapeHtml(fmtSpendVal({ cost: model.cost, tokens: model.tokens, models: [] }))}</span></div>`).join("");
-        return `<article class="spend-detail-tool"><div class="spend-detail-tool-head"><strong>${escapeHtml(providerNameForSpend(row.id))}</strong><span>${escapeHtml(fmtSpendVal({ cost: row.cost, tokens: row.tokens, models: [] }))}</span></div>${models || `<div class="spend-detail-model muted">${escapeHtml(t("spendDetail.noModelBreakdown"))}</div>`}</article>`;
+        const models = row.models.map((model) => `<div class="spend-detail-model"><span>${escapeHtml(model.model)}</span><span>${escapeHtml(fmtSpendVal({ cost: model.cost, tokens: model.tokens, models: [] }) + spendCostNote({ cost: model.cost, tokens: model.tokens, models: [] }))}</span></div>`).join("");
+        return `<article class="spend-detail-tool"><div class="spend-detail-tool-head"><strong>${escapeHtml(providerNameForSpend(row.id))}</strong><span>${escapeHtml(fmtSpendVal({ cost: row.cost, tokens: row.tokens, models: [] }) + spendCostNote({ cost: row.cost, tokens: row.tokens, models: [] }))}</span></div>${models || `<div class="spend-detail-model muted">${escapeHtml(t("spendDetail.noModelBreakdown"))}</div>`}</article>`;
       }).join("")}${qoder}`
     : `<div class="spend-detail-empty">${escapeHtml(t("spendDetail.noUsage"))}</div>`;
   return `<div class="spend-detail-overlay" role="dialog" aria-modal="true" aria-labelledby="spend-detail-title">
@@ -3900,9 +3910,12 @@ function popoverChromeHtml(): string {
   if (IS_PANEL_FORM) return "";
   const pinned = config.popoverPin !== false;
   const locked = config.popoverLock !== false;
-  const pin = `<button class="mini-btn chrome-btn${pinned ? " on" : ""}" data-popover-pin title="${escapeHtml(t("popover.pin" + (pinned ? "On" : "Off")))}" aria-label="${escapeHtml(t("popover.pin" + (pinned ? "On" : "Off")))}">${uiIcon("pushPin")}</button>`;
+  const pin = `<button class="mini-btn chrome-btn pin-btn${pinned ? " on" : ""}" data-popover-pin title="${escapeHtml(t("popover.pin" + (pinned ? "On" : "Off")))}" aria-label="${escapeHtml(t("popover.pin" + (pinned ? "On" : "Off")))}">${uiIcon("pushPin")}</button>`;
   const lock = `<button class="mini-btn chrome-btn${locked ? " on" : ""}" data-popover-lock title="${escapeHtml(t("popover.lock" + (locked ? "On" : "Off")))}" aria-label="${escapeHtml(t("popover.lock" + (locked ? "On" : "Off")))}">${uiIcon(locked ? "lock" : "lockOpen")}</button>`;
-  return pin + lock;
+  const reset = locked
+    ? ""
+    : `<button class="mini-btn chrome-btn" data-popover-reset title="${escapeHtml(t("popover.resetTip"))}" aria-label="${escapeHtml(t("popover.reset"))}">${uiIcon("arrowCounterClockwise")}</button>`;
+  return pin + lock + reset;
 }
 
 /// Pin / unpin the popover (always-on-top). Persisted, and re-applied on
@@ -3932,11 +3945,29 @@ async function togglePopoverLock(): Promise<void> {
   if (next) {
     // Re-locking snaps back to the default placement right away, so the
     // click has a visible effect instead of waiting for the next summon.
-    try {
-      await getCurrentWebviewWindow().center();
-    } catch (err) {
-      console.error("center window failed:", err);
-    }
+    await centerPopover();
+  }
+  requestRender();
+}
+
+async function centerPopover(): Promise<void> {
+  try {
+    await getCurrentWebviewWindow().center();
+  } catch (err) {
+    console.error("center window failed:", err);
+  }
+}
+
+/// Unlocked-only reset: return to the default centered placement and keep
+/// that spot for the next summon, without changing the lock state.
+async function resetPopoverPosition(): Promise<void> {
+  await centerPopover();
+  try {
+    const pos = await getCurrentWebviewWindow().outerPosition();
+    await patchConfig({ popoverPos: { x: pos.x, y: pos.y } });
+  } catch (err) {
+    console.error("remember centered position failed:", err);
+    await patchConfig({ popoverPos: null }).catch(() => {});
   }
   requestRender();
 }
@@ -6478,26 +6509,30 @@ let dismissWhatsNew: ((userAction?: boolean) => void) | null = null;
 /// releases with a single paragraph, and the font guide) render their raw
 /// markdown instead — and skip the summary line, which the body already
 /// carries.
-function renderChangelogSection(section: ChangelogSection): string {
-  const head = `<div class="wn-version-head"><h4>v${escapeHtml(section.version)}</h4>${
-    section.date ? `<span class="wn-version-date">${escapeHtml(section.date)}</span>` : ""
-  }</div>`;
+function renderChangelogSection(section: ChangelogSection, maxItems = Number.POSITIVE_INFINITY): string {
+  const head = section.version
+    ? `<div class="wn-version-head"><h4>v${escapeHtml(section.version)}</h4>${
+        section.date ? `<span class="wn-version-date">${escapeHtml(section.date)}</span>` : ""
+      }</div>`
+    : "";
   if (!section.items.length) return `${head}${renderChangelogBody(section.body)}`;
   const summary = section.summary
     ? `<p class="wn-summary">${changelogInline(section.summary)}</p>`
     : "";
-  const rows = section.items
+  const shown = section.items.slice(0, maxItems);
+  const hidden = section.items.length - shown.length;
+  const rows = shown
     .map((item) => {
       const chip = item.type === "other"
         ? escapeHtml(item.label ?? "")
         : escapeHtml(t(`changelog.${item.type}`));
       return `<li>${chip ? `<span class="wn-chip ${item.type}">${chip}</span>` : ""}<span>${changelogInline(item.text)}</span></li>`;
     })
-    .join("");
+    .join("") + (hidden > 0 ? `<li class="whatsnew-more">…</li>` : "");
   return `${head}${summary}<ul class="wn-items">${rows}</ul>`;
 }
 
-const WHATS_NEW_VERSIONS = 3;
+const WHATS_NEW_VERSIONS = 1;
 
 /// Changelog dialog with three shapes:
 /// - `update`: post-update notice — star, "updated to vX", subtitle "since
@@ -6512,6 +6547,7 @@ function showChangelogDialog(
     kind?: "update" | "browse" | "plain";
     since?: string;
     actions?: { confirm: string; cancel?: string; accept: () => void; dismiss: () => void };
+    onClose?: () => void;
   } = {},
 ): void {
   dismissWhatsNew?.();
@@ -6544,7 +6580,7 @@ function showChangelogDialog(
     const shown = sections.slice(0, visibleVersions);
     const hidden = sections.length - shown.length;
     body.innerHTML =
-      shown.map((section) => `<section>${renderChangelogSection(section)}</section>`).join("") +
+      shown.map((section) => `<section>${renderChangelogSection(section, kind === "update" ? 4 : Number.POSITIVE_INFINITY)}</section>`).join("") +
       (hidden > 0
         ? `<button id="whatsnew-earlier" class="wn-earlier" type="button">${uiIcon("caretDown")}<span>${escapeHtml(
             t("whatsNew.showEarlier", { count: String(hidden) }),
@@ -6556,10 +6592,14 @@ function showChangelogDialog(
     });
   };
   renderBody();
-  const close = () => {
+  let closed = false;
+  const close = (runOnClose = true) => {
+    if (closed) return;
+    closed = true;
     dismissWhatsNew = null;
     document.removeEventListener("keydown", onKey, true);
     overlay.remove();
+    if (runOnClose) opts.onClose?.();
   };
   const done = (userAction = true, accepted = false) => {
     if (userAction && actions) { if (accepted) actions.accept(); else actions.dismiss(); }
@@ -6580,10 +6620,14 @@ function showChangelogDialog(
   overlay.querySelector("#whatsnew-close")!.addEventListener("click", () => done());
   overlay.querySelector("#whatsnew-cancel")?.addEventListener("click", () => done());
   overlay.querySelector("#whatsnew-full")?.addEventListener("click", () => {
-    close();
+    // Swap to the browse shape without letting the old dialog's onClose
+    // drain the notice queue underneath the replacement. The browse dialog
+    // carries the same onClose so the queue resumes when it closes.
+    const carryOnClose = opts.onClose;
+    close(false);
     // Pane's changelog lives in the app, so "full changelog" opens the
     // browse shape instead of an external URL.
-    showChangelogDialog(t("dialog.changelog"), parseChangelog());
+    showChangelogDialog(t("dialog.changelog"), parseChangelog(), { onClose: carryOnClose });
   });
   document.addEventListener("keydown", onKey, true);
   document.body.appendChild(overlay);
@@ -6606,12 +6650,11 @@ function computeWhatsNew(version: string): ChangelogSection[] | null {
   void patchConfig({ lastSeenVersion: version });
   const all = parseChangelog();
   if (!last) {
-    // First run with this feature. An install that already dismissed the
-    // welcome card is an *update* — show the new version's notes. A true
-    // fresh install gets the welcome card instead, not two popups. Guard
-    // the empty case (e.g. a build whose notes are still Unreleased) —
-    // an empty array is truthy and would present a blank dialog.
-    const own = config.welcomeDismissed ? all.filter((s) => s.version === version) : [];
+    // First run with this feature (fresh install or an install that never
+    // recorded a version): show the current release's notes, then the
+    // configuration notice. The welcome card/tour still follows; the
+    // notice queue keeps them from stacking.
+    const own = all.filter((s) => s.version === version);
     return own.length ? own : null;
   }
   const out: ChangelogSection[] = [];
@@ -7052,6 +7095,104 @@ function maybeShowFontGuide(): boolean {
     });
   return true;
 }
+/// One-at-a-time boot notices: release notes first, then the current
+/// configuration notice. The queue also keeps the first-run tour from
+/// opening underneath a dialog.
+let noticeOpen = false;
+let noticeQueue: (() => void)[] = [];
+let configNoticeQueued = false;
+
+function enqueueNotice(show: () => void): void {
+  noticeQueue.push(show);
+  drainNoticeQueue();
+}
+
+function drainNoticeQueue(): void {
+  if (noticeOpen || document.hidden || document.querySelector("#whatsnew-overlay")) return;
+  const next = noticeQueue.shift();
+  if (!next) return;
+  noticeOpen = true;
+  next();
+}
+
+function noticeClosed(): void {
+  noticeOpen = false;
+  drainNoticeQueue();
+  maybeStartTour();
+}
+
+/// Queue the release notes and the one-per-version configuration notice.
+/// Both are intentionally independent: fresh installs get the release
+/// notes too, and an old config with no recorded version is treated as a
+/// fresh install.
+function queueBootNotices(): void {
+  if (!appVersion || IS_PANEL_FORM) return;
+  // A notice or a queued notice already owns the surface; reopening the
+  // popover must not append a second copy.
+  if (noticeOpen || noticeQueue.length > 0) return;
+  if (pendingWhatsNew) {
+    const sections = pendingWhatsNew;
+    const since = pendingWhatsNewSince;
+    pendingWhatsNew = null;
+    enqueueNotice(() => {
+      showChangelogDialog(t("dialog.whatsNew", { version: appVersion }), sections, {
+        kind: "update",
+        since,
+        onClose: noticeClosed,
+      });
+    });
+  }
+  if (config.configNoticeVersion !== appVersion && !configNoticeQueued) {
+    configNoticeQueued = true;
+    enqueueNotice(() => {
+      configNoticeQueued = false;
+      showConfigNotice();
+    });
+  }
+}
+
+function showConfigNotice(): void {
+  if (config.configNoticeVersion === appVersion) {
+    noticeClosed();
+    return;
+  }
+  if (IS_PANEL_FORM) {
+    void patchConfig({ configNoticeVersion: appVersion });
+    noticeClosed();
+    return;
+  }
+  const font = config.uiFont.trim() || t("fontGuide.system");
+  const layout = t(config.overviewStyle === "bars" ? "overview.styleBars" : "overview.styleRings");
+  const body = [
+    t("configNotice.recommended"),
+    `- ${t("configNotice.english")}`,
+    `- ${t("configNotice.chinese")}`,
+    `- ${t("configNotice.layout")}`,
+    "",
+    t("configNotice.current", { font, layout }),
+  ].join("\n");
+  showChangelogDialog(t("configNotice.title"), [{ version: "", date: "", summary: "", items: [], body }], {
+    kind: "plain",
+    actions: {
+      confirm: t("configNotice.apply"),
+      cancel: t("configNotice.keep"),
+      accept: () => applyConfigDefaults(true),
+      dismiss: () => applyConfigDefaults(false),
+    },
+    onClose: () => { pendingFontGuide = "skip"; noticeClosed(); },
+  });
+}
+
+function applyConfigDefaults(apply: boolean): void {
+  const patch: Partial<Config> = { configNoticeVersion: appVersion, uiFontPromptVersion: appVersion };
+  if (apply) {
+    patch.uiFont = "MV Boli";
+    patch.overviewStyle = "bars";
+  }
+  pendingFontGuide = "skip";
+  void patchConfig(patch).then(() => { applyAppearance(); requestRender(); }).catch(() => {});
+}
+
 /// In flight while the first-run detection picker is open — the tour waits
 /// on it (see maybeStartTour).
 let firstRunPickerPending: Promise<void> | null = null;
@@ -7206,6 +7347,7 @@ function maybeStartTour(): void {
     return;
   }
   if (IS_PANEL_FORM || tourActive() || !tourContentReady) return;
+  if (noticeOpen || noticeQueue.length > 0) return;
   if (maybeShowFontGuide()) return;
   if (config.tourSeen || !freshInstallAtBoot) return;
   startTour();
@@ -16993,6 +17135,11 @@ document.querySelector("#settings-btn")!.addEventListener("click", () => {
       void togglePopoverLock();
       return;
     }
+    if (target.closest<HTMLElement>("[data-popover-reset]")) {
+      e.preventDefault();
+      void resetPopoverPosition();
+      return;
+    }
     if (target.closest<HTMLElement>("[data-spend-detail-close]") || target.classList.contains("spend-detail-overlay")) {
       spendDetailOpen = false;
       document.querySelector(".spend-detail-overlay")?.remove();
@@ -17569,14 +17716,10 @@ document.querySelector("#settings-btn")!.addEventListener("click", () => {
     dismissConfirm?.();
     dismissWhatsNew?.(pendingFontGuide !== "skip");
     userSelectedAccountFor.clear();
-    // A fresh update's notes present on the first open after launch.
-    if (pendingWhatsNew && pendingFontGuide === "skip") {
-      showChangelogDialog(t("dialog.whatsNew", { version: appVersion }), pendingWhatsNew, {
-        kind: "update",
-        since: pendingWhatsNewSince,
-      });
-      pendingWhatsNew = null;
-    }
+    // Release notes + configuration notice present on the first open after
+    // launch; the queue keeps them one at a time and ahead of the tour.
+    queueBootNotices();
+    drainNoticeQueue();
     // Replay any renders skipped while hidden, before the reveal plays.
     if (renderScheduler.pending || lastSnapshots.length) {
       flushRender();
@@ -17656,6 +17799,8 @@ document.querySelector("#settings-btn")!.addEventListener("click", () => {
       // empty means this is the first launch after installing, and only
       // then does the spotlight tour auto-present.
       pendingWhatsNew = computeWhatsNew(v);
+      queueBootNotices();
+      drainNoticeQueue();
     });
   });
 

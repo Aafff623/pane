@@ -187,7 +187,7 @@ pub fn generation() -> u64 {
 /// fingerprinted below — an app update that reprices the same files would
 /// otherwise leave history at the old dollars until upstream happens to
 /// rewrite a catalog.
-const CORRECTIONS_REV: u32 = 14; // 14: shared priority policy and supplement resolution
+const CORRECTIONS_REV: u32 = 15; // 15: Tencent Hy3 / Hy4 preview official prices
 
 /// The corrections revision on its own — the spend cache treats a changed
 /// revision as a hard discard (the *code* that prices changed), while a
@@ -827,6 +827,14 @@ fn builtin_price(canonical: &str) -> Option<Price> {
         return Some(p);
     }
     match canonical {
+        // Tencent Token Plan official CNY rates (per million tokens):
+        // Hy4 preview ¥6 in / ¥18 out / ¥0.3 cache hit; Hy3 ¥1 / ¥4 /
+        // ¥0.25. Converted at 7.1 CNY/USD; no cache-write rate is
+        // published, so writes bill at the input rate. WorkBuddy logs the
+        // bare aliases (`hy3`, `hy4-preview`), which previously fell
+        // through to unpriced/zero-dollar rows.
+        "hy3" => return Some(Price::flat(0.141, 0.563, 0.0352, 0.141)),
+        "hy4-preview" => return Some(Price::flat(0.845, 2.535, 0.04225, 0.845)),
         "aihubmix/hy4-preview" => return Some(Price::flat(0.845, 2.535, 0.04225, 0.845)),
         "aihubmix/qwen3.8-flash" => {
             return Some(Price::flat(0.1126, 0.380025, 0.014075, 0.175937));
@@ -1070,19 +1078,19 @@ mod tests {
     }
 
     #[test]
-    fn aihubmix_hy4_and_qwen38_flash_launch_prices_stay_scoped() {
+    fn tencent_hy_prices_cover_bare_aliases_and_gateway_spellings() {
         let store = super::Store::default();
-        for slug in [
-            "hy4-preview",
-            "tencent/hy4-preview",
-            "qwen3.8-flash",
-            "qwen/qwen3.8-flash",
-        ] {
+        let hy4 = super::resolve(&store, "hy4-preview", 0).unwrap();
+        assert_eq!((hy4.input, hy4.output, hy4.cache_read), (0.845, 2.535, 0.04225));
+        let hy3 = super::resolve(&store, "hy3", 0).unwrap();
+        assert_eq!((hy3.input, hy3.output, hy3.cache_read), (0.141, 0.563, 0.0352));
+        // The gateway SKU keeps the same official-rate card.
+        let gateway = super::resolve(&store, "aihubmix/hy4-preview", 0).unwrap();
+        assert_eq!((gateway.input, gateway.output, gateway.cache_read), (0.845, 2.535, 0.04225));
+        // Unknown vendor prefixes and unrelated models stay unpriced.
+        for slug in ["tencent/hy4-preview", "qwen3.8-flash", "qwen/qwen3.8-flash"] {
             assert!(super::resolve(&store, slug, 0).is_none(), "{slug}");
         }
-
-        let hy4 = super::resolve(&store, "aihubmix/hy4-preview", 0).unwrap();
-        assert_eq!((hy4.input, hy4.output, hy4.cache_read), (0.845, 2.535, 0.04225));
         let qwen = super::resolve(&store, "aihubmix/qwen3.8-flash", 0).unwrap();
         assert_eq!(
             (qwen.input, qwen.output, qwen.cache_read, qwen.cache_write),

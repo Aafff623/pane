@@ -2678,6 +2678,16 @@ article.provider.is-folded:hover {
   color: var(--foreground);
 }
 
+/* Pinned: the diagonal push-pin stands upright and turns gold. */
+.chrome-btn.pin-btn.on {
+  color: #eab308;
+}
+
+.chrome-btn.pin-btn.on .ui-icon {
+  transform: rotate(45deg);
+  transform-origin: center;
+}
+
 /* Update-push indicator in the Total Spend header — the mainstream quiet
    affordance (Cursor-style): a green circular up arrow that appears only
    while a version is announced. Clicking starts the download in place; the
