@@ -2136,6 +2136,10 @@ body:not(.panel-form).settings-open #settings {
 
 .provider-head .provider-name {
   min-width: 64px;
+  /* Script/italic faces (MV Boli) overhang their advance width on the last
+     glyph; the ellipsis clip would cut that tail off. Keep a little room
+     inside the clip box. */
+  padding-inline-end: 3px;
   overflow: hidden;
   text-overflow: ellipsis;
   flex: 0 1 auto;
@@ -2716,6 +2720,12 @@ body.position-adjust .popover {
 
 body.ui-scaled {
   zoom: var(--ui-scale, 1);
+}
+/* `100vh` is resolved before zoom, so the shell would shrink to
+   scale × viewport and leave a dead strip under the footer. Divide it back
+   out so the scaled shell still covers the whole window. */
+body.ui-scaled .popover {
+  height: calc(100vh / var(--ui-scale, 1));
 }
 
 .resize-handle {
