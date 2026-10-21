@@ -3679,6 +3679,40 @@ function hideSpendPop(): void {
   spendPopEl = null;
 }
 
+/// The floating window scales its whole UI with CSS zoom (`body.ui-scaled`).
+/// `getBoundingClientRect()` is in visual (zoomed) pixels while fixed
+/// `left/top` and `offsetWidth/Height` are in layout pixels — mixing them
+/// pushed tooltips away from their anchor at any scale ≠ 1.
+function currentUiScale(): number {
+  const raw = getComputedStyle(document.documentElement).getPropertyValue("--ui-scale").trim();
+  const scale = Number.parseFloat(raw);
+  return Number.isFinite(scale) && scale > 0 ? scale : 1;
+}
+
+function placeFixedTip(
+  el: HTMLElement,
+  anchor: DOMRect,
+  opts: { gap?: number; placement?: "above" | "below"; align?: "center" | "left"; offsetX?: number } = {},
+): void {
+  const scale = currentUiScale();
+  const gap = (opts.gap ?? 6) / scale;
+  const width = el.offsetWidth;
+  const height = el.offsetHeight;
+  const viewportW = window.innerWidth / scale;
+  const viewportH = window.innerHeight / scale;
+  const left = anchor.left / scale;
+  const top = anchor.top / scale;
+  const right = anchor.right / scale;
+  const bottom = anchor.bottom / scale;
+  let x = opts.align === "left" ? left + (opts.offsetX ?? 0) : (left + right) / 2 - width / 2;
+  x = Math.max(6, Math.min(x, viewportW - width - 6));
+  let y = opts.placement === "below" ? bottom + gap : top - height - gap;
+  if (opts.placement !== "below" && y < 6) y = bottom + gap;
+  y = Math.max(6, Math.min(y, viewportH - height - 6));
+  el.style.left = `${x}px`;
+  el.style.top = `${y}px`;
+}
+
 function showSpendPop(anchor: HTMLElement): void {
   const pid = anchor.dataset.pid ?? "";
   const byModel = config.spendGrouping === "model";
@@ -3739,13 +3773,7 @@ function showSpendPop(anchor: HTMLElement): void {
     ${detail}`;
   document.body.appendChild(el);
   spendPopEl = el;
-  const r = anchor.getBoundingClientRect();
-  let x = r.left + r.width / 2 - el.offsetWidth / 2;
-  x = Math.max(6, Math.min(x, window.innerWidth - el.offsetWidth - 6));
-  let y = r.top - el.offsetHeight - 6;
-  if (y < 6) y = r.bottom + 6;
-  el.style.left = `${x}px`;
-  el.style.top = `${y}px`;
+  placeFixedTip(el, anchor.getBoundingClientRect(), { gap: 6, placement: "above" });
 }
 
 /// Zeroed window so a column's summed totals can ride fmtSpendVal.
@@ -6122,10 +6150,6 @@ function openGroupMenu(
   const shownId = contextAccount ?? anchor.closest<HTMLElement>("[data-shown-account]")?.dataset.shownAccount ?? cardId;
   const accounts = accountsCache.get(fam) ?? [];
   const accountIndex = accounts.findIndex((entry, index) => entry.id === shownId || (shownId === fam && index === 0 && !isParallelAccountFamily(fam)));
-  // Archive/restore rows: the archive target is the account this menu was
-  // opened on (the ⚙ context or the card's shown account); the family's
-  // parked accounts follow below for one-click restore.
-  const familyArchived = includeGrouping ? [] : (archivedAccountsCache.get(fam) ?? []);
   const curCat = effectiveCategory(fam);
   const item = (gid: string, label: string, checked = false) =>
     `<button class="group-menu-item${checked ? " on" : ""}" data-group-pick="${escapeHtml(gid)}">
@@ -6158,20 +6182,14 @@ function openGroupMenu(
         <span class="group-menu-check">✎</span>${escapeHtml(t("customize.noteProviderMenu"))}
       </button>
       ${contextAccount ? `<button class="group-menu-item" data-card-acct-note="${escapeHtml(contextAccount)}">
-        <span class="group-menu-check">✎</span>${escapeHtml(t("customize.noteAccountMenu"))} · ${escapeHtml(labelForAccount(contextAccount, accounts))}
+        <span class="group-menu-check">✎</span><span class="group-menu-label">${escapeHtml(t("customize.noteAccountMenu"))} · ${escapeHtml(labelForAccount(contextAccount, accounts))}</span>
       </button>` : ""}
-      ${contextAccount ? `<button class="group-menu-item" data-card-pin-acct="${escapeHtml(contextAccount)}"><span class="group-menu-check">★</span>${escapeHtml(t(providerLayout(fam).pinnedAccount === contextAccount ? "customize.acctUnpin" : "customize.acctPin"))} · ${escapeHtml(labelForAccount(contextAccount, accounts))}</button>` : ""}
+      ${contextAccount ? `<button class="group-menu-item" data-card-pin-acct="${escapeHtml(contextAccount)}"><span class="group-menu-check">★</span><span class="group-menu-label">${escapeHtml(t(providerLayout(fam).pinnedAccount === contextAccount ? "customize.acctUnpin" : "customize.acctPin"))} · ${escapeHtml(labelForAccount(contextAccount, accounts))}</span></button>` : ""}
       ${includeGrouping ? "" : `<button class="group-menu-item" data-card-help="${escapeHtml(fam)}"><span class="group-menu-check">?</span>${escapeHtml(t("customize.helpMenu"))}</button><button class="group-menu-item" data-card-test="${escapeHtml(shownId)}"><span class="group-menu-check">⚡</span>${escapeHtml(t("customize.testConnection"))}</button>`}
       ${includeGrouping ? "" : `<div class="group-menu-sep"></div>
-      ${accountIndex >= 0 ? `<button class="group-menu-item" data-card-acct-archive="${accountIndex}"><span class="group-menu-check">⬇</span>${escapeHtml(t("customize.acctArchive"))} · ${escapeHtml(labelForAccount(shownId, accounts))}</button>` : ""}
-      ${familyArchived.length ? `${familyArchived
-          .map(
-            (entry) =>
-              `<button class="group-menu-item" data-card-acct-restore="${escapeHtml(fam)}|${escapeHtml(entry.card_id)}"><span class="group-menu-check">⤴</span>${escapeHtml(t("customize.acctRestore"))} · ${escapeHtml(entry.label || entry.card_id)}</button>`,
-          )
-          .join("")}<div class="group-menu-sep"></div>` : ""}
+      ${accountIndex >= 0 ? `<button class="group-menu-item" data-card-acct-archive="${accountIndex}"><span class="group-menu-check">⬇</span><span class="group-menu-label">${escapeHtml(t("customize.acctArchive"))} · ${escapeHtml(labelForAccount(shownId, accounts))}</span></button>` : ""}
       <div class="group-menu-sep"></div>
-      ${accountIndex >= 0 ? `<button class="group-menu-item danger" data-card-account-remove="${accountIndex}"><span class="group-menu-check">×</span>${escapeHtml(t("customize.acctDelete"))} · ${escapeHtml(labelForAccount(shownId, accounts))}</button>` : ""}
+      ${accountIndex >= 0 ? `<button class="group-menu-item danger" data-card-account-remove="${accountIndex}"><span class="group-menu-check">×</span><span class="group-menu-label">${escapeHtml(t("customize.acctDelete"))} · ${escapeHtml(labelForAccount(shownId, accounts))}</span></button>` : ""}
       <button class="group-menu-item danger" data-card-remove="${escapeHtml(cardId)}">
         <span class="group-menu-check">×</span>${escapeHtml(cardId.includes("@") ? t("customize.acctDelete") : t("customize.providerDelete"))}
       </button>`}
@@ -8972,7 +8990,15 @@ async function runAccountKeyTest(family: string): Promise<void> {
 /// missing a live snapshot.
 function reconcileAccountLayout(family: string, list: AccountEntry[]): boolean {
   if (!config.layout) return false;
-  const active = new Set(list.map((entry) => entry.id).filter((id): id is string => Boolean(id)));
+  // Index 0 publishes under the bare family id: its account-specific card
+  // folds into the main card. Parallel families (Antigravity/Cursor) do not
+  // have that fold — every account keeps its own card.
+  const defaultId = isParallelAccountFamily(family) ? undefined : list[0]?.id;
+  const active = new Set(
+    list
+      .map((entry) => entry.id)
+      .filter((id): id is string => Boolean(id) && id !== defaultId),
+  );
   const isFamilyAccount = (id: string): boolean =>
     id.includes("@") && providerFamily(id) === family;
   let changed = false;
@@ -8995,6 +9021,11 @@ function reconcileAccountLayout(family: string, list: AccountEntry[]): boolean {
   const prevSnapLen = lastSnapshots.length;
   lastSnapshots = lastSnapshots.filter((snap) => !isFamilyAccount(snap.id) || active.has(snap.id));
   if (lastSnapshots.length !== prevSnapLen) {
+    changed = true;
+  }
+  const prevSpendLen = lastSpend.length;
+  lastSpend = lastSpend.filter((sp) => !isFamilyAccount(sp.id) || active.has(sp.id));
+  if (lastSpend.length !== prevSpendLen) {
     changed = true;
   }
   if (changed) void patchConfig({ layout: config.layout, disabled: config.disabled }).catch(() => {});
@@ -9035,28 +9066,80 @@ async function doAccountAdd(family: string): Promise<void> {
   }
 }
 
-/// Deletes an account after a confirm; its card vanishes on the refresh
-/// this triggers (fetch_usage simply stops spawning it).
+/// Drop one account card from every local cache before the async refresh
+/// lands: snapshots, spend rows, layout order and the selected tab. When the
+/// removed row was index 0, the bare family snapshot/spend is cleared too,
+/// because the next account inherits the bare card.
+function forgetAccountFromBoard(
+  family: string,
+  cardId: string,
+  removedIndex: number | null,
+  dropArchived: boolean,
+): void {
+  accountsCache.set(family, (accountsCache.get(family) ?? []).filter((entry) => entry.id !== cardId));
+  if (dropArchived) {
+    archivedAccountsCache.set(
+      family,
+      (archivedAccountsCache.get(family) ?? []).filter((row) => row.card_id !== cardId),
+    );
+  }
+  const foldedDefault = !isParallelAccountFamily(family) && removedIndex === 0;
+  lastSnapshots = lastSnapshots.filter(
+    (snapshot) => snapshot.id !== cardId && !(foldedDefault && snapshot.id === family),
+  );
+  lastSpend = lastSpend.filter(
+    (spend) => spend.id !== cardId && !(foldedDefault && spend.id === family),
+  );
+  if (foldedDefault) accountProbeSnapshots.delete(family);
+  userSelectedAccountFor.delete(family);
+  reconcileAccountLayout(family, accountsCache.get(family) ?? []);
+  requestRender();
+  if (customizeOpen) renderDrawerBody();
+}
+
+/// Deletes an account by stable card id (active + archived twin) and removes
+/// its card immediately; the backend also clears the snapshot/layout and
+/// optionally the usage history.
 async function doAccountRemove(family: string, index: number): Promise<void> {
   const list = accountsCache.get(family) ?? [];
   const entry = list[index];
-  const label = entry?.label || t("customize.acctDefaultName", { n: index + 1 });
+  if (!entry?.id) return;
+  const label = entry.label || t("customize.acctDefaultName", { n: index + 1 });
   const res = await appConfirm({
     title: t("customize.acctDelTitle"),
-    message: `删除后，该账号的密钥与配置将无法找回。确定要删除 ${label} 吗？`,
+    message: t("customize.acctDeleteBody", { label }),
     confirmLabel: t("customize.acctDelConfirm"),
     danger: true,
-    checkboxLabel: "我已知晓，并且保存该账号的用量数据",
+    checkboxLabel: t("customize.acctDeleteKeep"),
     checkboxDefault: true,
   });
   if (!res.ok) return;
   const status = document.querySelector("#status")!;
-  try {
-    if (!res.checked && entry?.id) {
-      await invoke("remove_usage_history", { cardId: entry.id }).catch(() => {});
+  const def = providerCatalog.find((provider) => provider.familyId === family);
+  const identityDelete =
+    Boolean(def?.supportsApiKey && def.supportsExtraAccounts) || isParallelAccountFamily(family);
+  if (!identityDelete) {
+    // Login/OAuth families own their sign-in store; keep their existing
+    // remove path instead of the generic account-store delete.
+    try {
+      if (!res.checked) await invoke("remove_usage_history", { cardId: entry.id }).catch(() => {});
+      await invoke("account_remove", { provider: family, index });
+      userSelectedAccountFor.delete(family);
+      refreshAccounts(family);
+      status.textContent = t("customize.acctRemoved");
+      void forceUsageRefreshAttempt(false).then(requestTraySync);
+    } catch (err) {
+      status.textContent = t("customize.acctRemoveFailed", { err: String(err) });
     }
-    await invoke("account_remove", { provider: family, index });
-    userSelectedAccountFor.delete(family);
+    return;
+  }
+  try {
+    const removed = await invoke<number | null>("account_delete", {
+      provider: family,
+      cardId: entry.id,
+      keepUsage: res.checked,
+    });
+    forgetAccountFromBoard(family, entry.id, removed, true);
     refreshAccounts(family);
     status.textContent = t("customize.acctRemoved");
     void forceUsageRefreshAttempt(false).then(requestTraySync);
@@ -9067,17 +9150,19 @@ async function doAccountRemove(family: string, index: number): Promise<void> {
 
 async function doAccountArchive(family: string, index: number): Promise<void> {
   const list = accountsCache.get(family) ?? [];
-  const label = list[index]?.label || t("customize.acctDefaultName", { n: index + 1 });
+  const entry = list[index];
+  if (!entry?.id) return;
+  const label = entry.label || t("customize.acctDefaultName", { n: index + 1 });
   const ok = await appConfirm({
     title: t("customize.acctArchive"),
-    message: `确定要归档账号 ${label} 吗？已归档账号将停止日常轮询，您可以随时在“设置 -> 密钥与额度”中重新找回并恢复。`,
+    message: `确定要归档账号 ${label} 吗？归档后卡片会立即消失并停止轮询；凭据和历史会保留，可随时在“设置 -> 密钥与额度”中恢复。`,
     confirmLabel: t("customize.acctArchive"),
     danger: false,
   });
   if (!ok) return;
   try {
     await invoke("account_archive", { provider: family, index });
-    userSelectedAccountFor.delete(family);
+    forgetAccountFromBoard(family, entry.id, index, false);
     refreshAccounts(family);
     document.querySelector("#status")!.textContent = t("customize.acctArchived");
     void forceUsageRefreshAttempt(false).then(requestTraySync);
@@ -9099,6 +9184,35 @@ async function doAccountRestore(family: string, cardId: string): Promise<void> {
     void forceUsageRefreshAttempt(false).then(requestTraySync);
   } catch (err) {
     status.textContent = t("customize.acctAddFailed", { err: String(err) });
+  }
+}
+
+/// Deletes an archived tombstone (and any active twin) by card id. External
+/// parallel-card families hide this action until their own store gets the
+/// same lifecycle command.
+async function doArchivedDelete(family: string, cardId: string): Promise<void> {
+  const row = (archivedAccountsCache.get(family) ?? []).find((item) => item.card_id === cardId);
+  const label = row?.label || cardId.split("@")[1]?.slice(0, 8) || cardId;
+  const ok = await appConfirm({
+    title: t("customize.acctArchivedDeleteTitle"),
+    message: t("customize.acctArchivedDeleteBody", { label }),
+    confirmLabel: t("customize.acctDelConfirm"),
+    danger: true,
+  });
+  if (!ok) return;
+  const status = document.querySelector("#status")!;
+  try {
+    const removed = await invoke<number | null>("account_delete", {
+      provider: family,
+      cardId,
+      keepUsage: false,
+    });
+    forgetAccountFromBoard(family, cardId, removed, true);
+    refreshAccounts(family);
+    status.textContent = t("customize.acctArchivedDeleted");
+    void forceUsageRefreshAttempt(false).then(requestTraySync);
+  } catch (err) {
+    status.textContent = t("customize.acctRemoveFailed", { err: String(err) });
   }
 }
 
@@ -9835,6 +9949,7 @@ function accountChildRows(family: string): string {
           <span class="spacer"></span>
           <button class="mini-btn" data-archived-copy="${escapeHtml(family)}|${escapeHtml(item.card_id)}" title="${escapeHtml(t("settings.kvCopy"))}">${uiIcon("copy")}</button>
           <button class="mini-btn" data-archived-restore="${escapeHtml(family)}|${escapeHtml(item.card_id)}" title="恢复账号">恢复</button>
+          <button class="mini-btn danger" data-archived-delete="${escapeHtml(family)}|${escapeHtml(item.card_id)}" title="${escapeHtml(t("customize.acctArchivedDeleteTitle"))}">${escapeHtml(t("customize.acctDelConfirm"))}</button>
         </div>
       `).join("")}
     </div>` : ""}
@@ -10751,11 +10866,8 @@ function showTrendTip(el: HTMLElement): void {
   }
   tip.innerHTML = lines;
 
-  const rect = el.getBoundingClientRect();
   tip.hidden = false;
-  const top = Math.min(rect.bottom + 6, window.innerHeight - tip.offsetHeight - 8);
-  tip.style.top = `${Math.max(4, top)}px`;
-  tip.style.left = `${Math.max(8, Math.min(rect.left - 50, window.innerWidth - tip.offsetWidth - 8))}px`;
+  placeFixedTip(tip, el.getBoundingClientRect(), { gap: 6, placement: "below", align: "left", offsetX: -50 });
 }
 
 function showModelTip(row: HTMLElement): void {
@@ -10781,11 +10893,8 @@ function showModelTip(row: HTMLElement): void {
       .join("");
   }
 
-  const rect = row.getBoundingClientRect();
   tip.hidden = false;
-  const top = Math.min(rect.bottom + 4, window.innerHeight - tip.offsetHeight - 8);
-  tip.style.top = `${Math.max(4, top)}px`;
-  tip.style.left = `${Math.max(8, Math.min(rect.left + 20, window.innerWidth - tip.offsetWidth - 8))}px`;
+  placeFixedTip(tip, row.getBoundingClientRect(), { gap: 4, placement: "below", align: "left", offsetX: 20 });
 }
 
 // ---------------------------------------------------------------------------
@@ -11634,6 +11743,12 @@ async function handleCustomizeClick(target: HTMLElement): Promise<boolean> {
   if (archivedRestore) {
     const [fam, cardId] = (archivedRestore.dataset.archivedRestore ?? "").split("|");
     void doAccountRestore(fam, cardId);
+    return true;
+  }
+  const archivedDelete = target.closest<HTMLElement>("[data-archived-delete]");
+  if (archivedDelete) {
+    const [fam, cardId] = (archivedDelete.dataset.archivedDelete ?? "").split("|");
+    if (fam && cardId) void doArchivedDelete(fam, cardId);
     return true;
   }
   // Web-session families (基元律动): their credential is a browser sign-in,

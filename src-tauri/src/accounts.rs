@@ -251,6 +251,33 @@ pub fn save_accounts(provider: &str, entries: &[AccountEntry]) -> Result<(), Str
     save_accounts_to(&crate::providers::config_dir(), provider, entries)
 }
 
+/// Deletes one account by stable card id from the active store and both
+/// archive stores. Returns the removed active index when the id was active
+/// (so the caller can promote the next default and clear layout), or None
+/// when only an archived tombstone was reaped.
+pub fn delete_account_from(
+    base: &std::path::Path,
+    provider: &str,
+    card_id: &str,
+) -> Result<Option<usize>, String> {
+    let mut entries = load_accounts_from(base, provider);
+    let removed = entries
+        .iter()
+        .position(|entry| card_id_for_account(provider, entry) == card_id);
+    if let Some(index) = removed {
+        entries.remove(index);
+        // Save the active store first: if this fails, the archive is still
+        // untouched and the account remains fully active (never both).
+        save_accounts_to(base, provider, &entries)?;
+    }
+    remove_archived_from(base, card_id)?;
+    remove_archived_external_from(base, card_id)?;
+    // The JSON row is gone; the active credential must not linger in the OS
+    // vault. Archived slots are reaped by remove_archived_from above.
+    crate::secretstore::remove(&crate::secretstore::account_key(card_id));
+    Ok(removed)
+}
+
 /// A bare family snapshot belongs to the first key, not permanently to the
 /// family. Keep the queried identity alongside each in-flight result.
 pub fn snapshot_identities(provider: &str, entries: &[AccountEntry]) -> std::collections::HashMap<String, String> {
@@ -668,6 +695,88 @@ mod tests {
         // Nothing revealable under 4 characters.
         assert_eq!(mask_key("abc"), "…");
         assert_eq!(mask_key(""), "…");
+    }
+
+    #[test]
+    fn delete_by_card_id_reaps_active_and_archived_and_promotes_the_next_default() {
+        let base = std::env::temp_dir().join(format!("pane-account-lifecycle-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        let a = AccountEntry { label: "a".into(), api_key: "sk-a".into(), base_url: None };
+        let b = AccountEntry { label: "b".into(), api_key: "sk-b".into(), base_url: None };
+        let c = AccountEntry { label: "c".into(), api_key: "sk-c".into(), base_url: None };
+        save_accounts_to(&base, "minimax", &[a.clone(), b.clone(), c.clone()]).expect("seed active");
+        let a_id = card_id_for_account("minimax", &a);
+        let b_id = card_id_for_account("minimax", &b);
+        let c_id = card_id_for_account("minimax", &c);
+        archive_account_to(
+            &base,
+            ArchivedAccount {
+                provider: "minimax".into(),
+                card_id: a_id.clone(),
+                label: a.label.clone(),
+                archived_at: 1,
+                api_key: a.api_key.clone(),
+                base_url: None,
+            },
+        )
+        .expect("seed archive");
+
+        assert_eq!(delete_account_from(&base, "minimax", &a_id).expect("delete default"), Some(0));
+        let active = load_accounts_from(&base, "minimax");
+        assert_eq!(active.len(), 2);
+        assert_eq!(card_id_for_account("minimax", &active[0]), b_id, "next account becomes default");
+        assert!(load_archived_from(&base).is_empty(), "archived twin is gone");
+        assert!(
+            matches!(
+                crate::secretstore::get(&crate::secretstore::account_key(&a_id)),
+                crate::secretstore::Secret::Missing
+            ),
+            "the deleted account's vault slot must be reaped"
+        );
+        assert!(
+            matches!(
+                crate::secretstore::get(&crate::secretstore::archived_key(&a_id)),
+                crate::secretstore::Secret::Missing
+            ),
+            "the archived twin's vault slot must be reaped"
+        );
+
+        assert_eq!(delete_account_from(&base, "minimax", &c_id).expect("delete non-default"), Some(1));
+        let active = load_accounts_from(&base, "minimax");
+        assert_eq!(active.len(), 1);
+        assert_eq!(card_id_for_account("minimax", &active[0]), b_id, "default unchanged");
+
+        assert_eq!(delete_account_from(&base, "minimax", &b_id).expect("delete last"), Some(0));
+        assert!(load_accounts_from(&base, "minimax").is_empty());
+        assert_eq!(
+            delete_account_from(&base, "minimax", "minimax@deadbeef").expect("unknown no-op"),
+            None
+        );
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn delete_by_card_id_reaps_an_archived_tombstone_without_an_active_row() {
+        let base = std::env::temp_dir().join(format!("pane-account-tombstone-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        archive_account_to(
+            &base,
+            ArchivedAccount {
+                provider: "minimax".into(),
+                card_id: "minimax@tomb".into(),
+                label: "old".into(),
+                archived_at: 1,
+                api_key: "sk-old".into(),
+                base_url: None,
+            },
+        )
+        .expect("seed tombstone");
+        assert_eq!(
+            delete_account_from(&base, "minimax", "minimax@tomb").expect("delete tombstone"),
+            None
+        );
+        assert!(load_archived_from(&base).is_empty());
+        let _ = std::fs::remove_dir_all(&base);
     }
 
     #[test]

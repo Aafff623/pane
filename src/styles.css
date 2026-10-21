@@ -7798,10 +7798,13 @@ article.provider.card-highlight {
 
 .group-menu {
   position: fixed;
-  min-width: 150px;
-  max-width: 220px;
-  padding: 4px;
+  min-width: 140px;
+  max-width: 200px;
+  padding: 3px;
   border-radius: 10px;
+  max-height: calc(100vh - 24px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
   /* Theme-aware glass; enough opacity to keep underlying text from
      bleeding through the light menu. */
   background:
@@ -7815,25 +7818,39 @@ article.provider.card-highlight {
 }
 
 .group-menu-title {
-  padding: 4px 8px 2px;
-  font-size: 10px;
+  padding: 3px 7px 2px;
+  font-size: 9.5px;
   color: var(--muted-foreground);
 }
 
 .group-menu-item {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 5px;
   width: 100%;
-  padding: 5px 8px;
+  min-width: 0;
+  padding: 4px 7px;
   border: none;
-  border-radius: 6px;
+  border-radius: 5px;
   background: none;
   color: var(--foreground);
-  font-size: 12px;
+  font-size: 11px;
+  line-height: 1.3;
   text-align: left;
   cursor: pointer;
   font-family: inherit;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+/* Long account labels/card ids must ellipsize inside the menu instead of
+   stretching it past the screen edge. */
+.group-menu-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .group-menu-item:hover {
@@ -7849,14 +7866,14 @@ article.provider.card-highlight {
 }
 
 .group-menu-check {
-  width: 12px;
+  width: 11px;
   flex: none;
-  font-size: 11px;
+  font-size: 10.5px;
 }
 
 .group-menu-sep {
   height: 1px;
-  margin: 4px 6px;
+  margin: 3px 6px;
   background: var(--border);
 }
 

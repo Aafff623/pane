@@ -1244,6 +1244,38 @@ fn forget_provider_snapshot(id: &str) -> Result<(), String> {
     forget_provider_snapshots(&[id.to_string()])
 }
 
+/// Removes one account card from the persisted layout. The bare family card
+/// stays; only the `family@fingerprint` entry is reaped. Used when an account
+/// is deleted, archived, or folded into the bare card by becoming default.
+fn forget_account_layout(card_id: &str) -> Result<(), String> {
+    let dir = providers::config_dir();
+    let mut cfg = load_config_from(&dir);
+    let mut changed = false;
+    if let Some(order) = cfg
+        .pointer_mut("/layout/providerOrder")
+        .and_then(Value::as_array_mut)
+    {
+        let before = order.len();
+        order.retain(|id| id.as_str() != Some(card_id));
+        changed |= order.len() != before;
+    }
+    if let Some(providers) = cfg
+        .pointer_mut("/layout/providers")
+        .and_then(Value::as_object_mut)
+    {
+        changed |= providers.remove(card_id).is_some();
+    }
+    if let Some(disabled) = cfg.get_mut("disabled").and_then(Value::as_array_mut) {
+        let before = disabled.len();
+        disabled.retain(|id| id.as_str() != Some(card_id));
+        changed |= disabled.len() != before;
+    }
+    if changed {
+        persist_config_in(&dir, &cfg)?;
+    }
+    Ok(())
+}
+
 fn forget_onenewapi_key_ids(key_ids: impl IntoIterator<Item = String>) -> Result<(), String> {
     let snapshot_ids: Vec<String> = key_ids
         .into_iter()
@@ -3562,6 +3594,86 @@ fn account_remove(provider: String, index: usize) -> Result<(), String> {
     Ok(())
 }
 
+/// Deletes an account by stable card id. Removes the active row and every
+/// archived twin, clears the card cache/layout entry, and drops usage history
+/// unless the caller explicitly keeps it. Returns the removed active index so
+/// the UI can clear a promoted default immediately.
+#[tauri::command]
+fn account_delete(
+    provider: String,
+    card_id: String,
+    keep_usage: bool,
+) -> Result<Option<usize>, String> {
+    let base = crate::providers::config_dir();
+    if provider == "antigravity" {
+        let mut slots = antigravity_accounts::load_slots();
+        let index = slots
+            .iter()
+            .position(|slot| antigravity_accounts::card_id_for_slot(slot) == card_id);
+        if let Some(i) = index {
+            slots.remove(i);
+            antigravity_accounts::save_slots(&slots)?;
+        }
+        accounts::remove_archived_external_from(&base, &card_id)?;
+        let _ = forget_provider_snapshot(&card_id);
+        if !keep_usage {
+            usage_history::remove_card_history(&card_id);
+        }
+        let _ = forget_account_layout(&card_id);
+        return Ok(index);
+    }
+    if provider == "cursor" {
+        let mut entries = cursor_accounts::load_accounts();
+        let index = entries
+            .iter()
+            .position(|entry| cursor_accounts::card_id_for_account(entry) == card_id);
+        if let Some(i) = index {
+            entries.remove(i);
+            cursor_accounts::save_accounts(&entries)?;
+        }
+        accounts::remove_archived_external_from(&base, &card_id)?;
+        let _ = forget_provider_snapshot(&card_id);
+        if !keep_usage {
+            usage_history::remove_card_history(&card_id);
+        }
+        let _ = forget_account_layout(&card_id);
+        return Ok(index);
+    }
+    if provider == "codex" || login_accounts::takes_login_accounts(&provider) {
+        // Sign-in stores have their own remove path; the generic account
+        // store is empty here and must not reap an unrelated archive.
+        return Err("this family uses its own sign-in store; remove it from the account row".into());
+    }
+    if !accounts::provider_takes_accounts(&provider) {
+        return Err(format!("unknown multi-account provider: {provider}"));
+    }
+    let removed = accounts::delete_account_from(&base, &provider, &card_id)?;
+    let _ = forget_provider_snapshot(&card_id);
+    if removed == Some(0) {
+        let _ = forget_provider_snapshot(&provider);
+        let next_default = accounts::load_accounts(&provider)
+            .first()
+            .map(|entry| accounts::card_id_for_account(&provider, entry));
+        // The bare family id carries the default account's history. Move it
+        // to the removed identity when history is kept, and promote the next
+        // account's history onto the bare id so it cannot inherit the old
+        // account's numbers.
+        if keep_usage {
+            usage_history::migrate_card_id(&provider, &card_id);
+        } else {
+            usage_history::remove_card_history(&provider);
+            usage_history::remove_card_history(&card_id);
+        }
+        if let Some(next) = next_default {
+            usage_history::migrate_card_id(&next, &provider);
+        }
+    } else if !keep_usage {
+        usage_history::remove_card_history(&card_id);
+    }
+    let _ = forget_account_layout(&card_id);
+    Ok(removed)
+}
+
 /// Archives an account before removing it from the active cards. The stable
 /// card id is retained so credit history stays attached to this identity.
 #[tauri::command]
@@ -3577,10 +3689,19 @@ fn account_archive(provider: String, index: usize) -> Result<(), String> {
         let label = slot.label.clone();
         let payload = serde_json::to_value(&slot).map_err(|e| format!("archive antigravity slot: {e}"))?;
         accounts::archive_external_to(&base, accounts::ArchivedExternalAccount {
-            provider: provider.clone(), card_id, label, payload,
+            provider: provider.clone(), card_id: card_id.clone(), label, payload,
             archived_at: chrono::Utc::now().timestamp_millis(),
         })?;
-        return antigravity_accounts::save_slots(&slots);
+        if let Err(error) = antigravity_accounts::save_slots(&slots) {
+            let _ = accounts::remove_archived_external_from(&base, &card_id);
+            return Err(error);
+        }
+        let _ = forget_provider_snapshot(&card_id);
+        if index == 0 {
+            let _ = forget_provider_snapshot(&provider);
+        }
+        let _ = forget_account_layout(&card_id);
+        return Ok(());
     }
     if provider == "cursor" {
         let mut entries = cursor_accounts::load_accounts();
@@ -3592,10 +3713,19 @@ fn account_archive(provider: String, index: usize) -> Result<(), String> {
         let label = entry.label.clone();
         let payload = serde_json::to_value(&entry).map_err(|e| format!("archive cursor account: {e}"))?;
         accounts::archive_external_to(&base, accounts::ArchivedExternalAccount {
-            provider: provider.clone(), card_id, label, payload,
+            provider: provider.clone(), card_id: card_id.clone(), label, payload,
             archived_at: chrono::Utc::now().timestamp_millis(),
         })?;
-        return cursor_accounts::save_accounts(&entries);
+        if let Err(error) = cursor_accounts::save_accounts(&entries) {
+            let _ = accounts::remove_archived_external_from(&base, &card_id);
+            return Err(error);
+        }
+        let _ = forget_provider_snapshot(&card_id);
+        if index == 0 {
+            let _ = forget_provider_snapshot(&provider);
+        }
+        let _ = forget_account_layout(&card_id);
+        return Ok(());
     }
     if !accounts::provider_takes_accounts(&provider) {
         return Err(format!("unknown multi-account provider: {provider}"));
@@ -3612,18 +3742,35 @@ fn account_archive(provider: String, index: usize) -> Result<(), String> {
     }
     let entry = entries.remove(index);
     let card_id = accounts::card_id_for_account(&provider, &entry);
+    let had_tombstone = accounts::load_archived_from(&base)
+        .iter()
+        .any(|archived| archived.provider == provider && archived.card_id == card_id);
     accounts::archive_account(accounts::ArchivedAccount {
         provider: provider.clone(),
         label: entry.label.clone(),
         api_key: entry.api_key.clone(),
         base_url: entry.base_url.clone(),
-        card_id,
+        card_id: card_id.clone(),
         archived_at: chrono::Utc::now().timestamp_millis(),
     })?;
-    accounts::save_accounts(&provider, &entries)?;
+    if let Err(error) = accounts::save_accounts(&provider, &entries) {
+        // Never leave the account both archived and active: the archive
+        // write succeeded, so roll it back when the active save fails. Do not
+        // reap a tombstone that already existed before this operation.
+        if !had_tombstone {
+            let _ = accounts::remove_archived(&card_id);
+        }
+        return Err(error);
+    }
+    let _ = forget_provider_snapshot(&card_id);
     if index == 0 {
         let _ = forget_provider_snapshot(&provider);
+        if let Some(next) = accounts::load_accounts(&provider).first() {
+            let next_id = accounts::card_id_for_account(&provider, next);
+            usage_history::migrate_card_id(&next_id, &provider);
+        }
     }
+    let _ = forget_account_layout(&card_id);
     Ok(())
 }
 
@@ -3694,7 +3841,13 @@ fn account_restore(provider: String, card_id: String) -> Result<(), String> {
         }
         slots.push(slot);
         antigravity_accounts::save_slots(&slots)?;
-        return accounts::remove_archived_external_from(&base, &card_id);
+        if let Err(error) = accounts::remove_archived_external_from(&base, &card_id) {
+            slots.retain(|slot| antigravity_accounts::card_id_for_slot(slot) != card_id);
+            let _ = antigravity_accounts::save_slots(&slots);
+            return Err(error);
+        }
+        let _ = forget_provider_snapshot(&card_id);
+        return Ok(());
     }
     if provider == "cursor" {
         let archived = accounts::load_archived_external_from(&base)
@@ -3709,7 +3862,13 @@ fn account_restore(provider: String, card_id: String) -> Result<(), String> {
         }
         entries.push(entry);
         cursor_accounts::save_accounts(&entries)?;
-        return accounts::remove_archived_external_from(&base, &card_id);
+        if let Err(error) = accounts::remove_archived_external_from(&base, &card_id) {
+            entries.retain(|entry| cursor_accounts::card_id_for_account(entry) != card_id);
+            let _ = cursor_accounts::save_accounts(&entries);
+            return Err(error);
+        }
+        let _ = forget_provider_snapshot(&card_id);
+        return Ok(());
     }
     if !accounts::provider_takes_accounts(&provider) {
         return Err(format!("unknown multi-account provider: {provider}"));
@@ -3729,13 +3888,24 @@ fn account_restore(provider: String, card_id: String) -> Result<(), String> {
     {
         return Err(format!("account {card_id} already exists"));
     }
+    let restored_index = entries.len();
     entries.push(accounts::AccountEntry {
         label: archived.label,
         api_key: archived.api_key,
         base_url: archived.base_url,
     });
     accounts::save_accounts(&provider, &entries)?;
-    accounts::remove_archived(&card_id)?;
+    if let Err(error) = accounts::remove_archived(&card_id) {
+        // Roll back the active row so a failed restore cannot leave the
+        // same card id both active and archived.
+        entries.retain(|entry| accounts::card_id_for_account(&provider, entry) != card_id);
+        let _ = accounts::save_accounts(&provider, &entries);
+        return Err(error);
+    }
+    let _ = forget_provider_snapshot(&card_id);
+    if restored_index == 0 {
+        let _ = forget_provider_snapshot(&provider);
+    }
     Ok(())
 }
 
@@ -3767,6 +3937,13 @@ fn account_set_default(provider: String, index: usize) -> Result<(), String> {
     // account's last-good cache must not bleed onto the new one's card
     // if the next fetch fails.
     let _ = forget_provider_snapshot(&provider);
+    if index > 0 {
+        // The promoted account now publishes under the bare family id; its
+        // account-specific card folds away instead of leaving a duplicate.
+        let promoted = accounts::card_id_for_account(&provider, &entries[0]);
+        let _ = forget_provider_snapshot(&promoted);
+        let _ = forget_account_layout(&promoted);
+    }
     Ok(())
 }
 
@@ -5341,6 +5518,7 @@ pub fn run() {
             account_add,
             account_update,
             account_remove,
+            account_delete,
             account_archive,
             account_restore,
             remove_usage_history,
