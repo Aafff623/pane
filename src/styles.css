@@ -2684,8 +2684,14 @@ article.provider.is-folded:hover {
 }
 
 .chrome-btn.pin-btn.on .ui-icon {
-  transform: rotate(45deg);
+  transform: rotate(-45deg);
   transform-origin: center;
+}
+
+/* The open lock is the active/draggable state; the closed lock is the
+   resting state. Keep the active state gold so it reads at a glance. */
+.chrome-btn.lock-btn.on {
+  color: #eab308;
 }
 
 /* Update-push indicator in the Total Spend header — the mainstream quiet

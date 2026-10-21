@@ -739,7 +739,7 @@ let config: Config = {
   qoderCheckin: false,
   removedProviders: [],
   panelIntent: null,
-  popoverPin: true,
+  popoverPin: false,
   popoverLock: true,
   popoverPos: null,
   lastView: { kind: "main", id: null },
@@ -3911,7 +3911,7 @@ function popoverChromeHtml(): string {
   const pinned = config.popoverPin !== false;
   const locked = config.popoverLock !== false;
   const pin = `<button class="mini-btn chrome-btn pin-btn${pinned ? " on" : ""}" data-popover-pin title="${escapeHtml(t("popover.pin" + (pinned ? "On" : "Off")))}" aria-label="${escapeHtml(t("popover.pin" + (pinned ? "On" : "Off")))}">${uiIcon("pushPin")}</button>`;
-  const lock = `<button class="mini-btn chrome-btn${locked ? " on" : ""}" data-popover-lock title="${escapeHtml(t("popover.lock" + (locked ? "On" : "Off")))}" aria-label="${escapeHtml(t("popover.lock" + (locked ? "On" : "Off")))}">${uiIcon(locked ? "lock" : "lockOpen")}</button>`;
+  const lock = `<button class="mini-btn chrome-btn lock-btn${locked ? "" : " on"}" data-popover-lock title="${escapeHtml(t("popover.lock" + (locked ? "On" : "Off")))}" aria-label="${escapeHtml(t("popover.lock" + (locked ? "On" : "Off")))}">${uiIcon(locked ? "lock" : "lockOpen")}</button>`;
   const reset = locked
     ? ""
     : `<button class="mini-btn chrome-btn" data-popover-reset title="${escapeHtml(t("popover.resetTip"))}" aria-label="${escapeHtml(t("popover.reset"))}">${uiIcon("arrowCounterClockwise")}</button>`;

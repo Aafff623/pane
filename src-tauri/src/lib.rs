@@ -245,7 +245,7 @@ fn config_with_defaults(mut cfg: Value) -> Value {
     // Locked is the default — the popover is centered on every summon and
     // cannot be dragged. Unlocked, the user drags it anywhere and the
     // position survives dismissals.
-    obj.entry("popoverPin").or_insert(json!(true));
+    obj.entry("popoverPin").or_insert(json!(false));
     obj.entry("popoverLock").or_insert(json!(true));
     obj.entry("popoverPos").or_insert(Value::Null);
     // Which popover surface was open when it was dismissed: the next
@@ -5120,6 +5120,17 @@ fn saved_popover_position() -> Option<tauri::PhysicalPosition<i32>> {
 /// Remembers where the popover sits so an unlocked summon can put it back.
 /// Called on every dismiss path; a no-op while the lock is on, because a
 /// locked popover's position is not the user's to keep.
+/// Re-apply the pin preference on every summon. The window builder starts
+/// unpinned; the stored config is the only authority, so a prior
+/// always-on-top state cannot leak across hide/show.
+fn apply_popover_pin(window: &tauri::WebviewWindow) {
+    let pinned = load_config()
+        .get("popoverPin")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    let _ = window.set_always_on_top(pinned);
+}
+
 fn remember_popover_position(window: &tauri::WebviewWindow) {
     let cfg = load_config();
     if cfg.get("popoverLock").and_then(Value::as_bool).unwrap_or(true) {
@@ -5158,6 +5169,7 @@ fn toggle_popover(app: &tauri::AppHandle, click: tauri::PhysicalPosition<f64>) {
     }
 
     set_webview_memory_level(&window, false);
+    apply_popover_pin(&window);
 
     // Anchor the popover's bottom-right corner near the tray click,
     // which sits next to the clock on a standard bottom taskbar — unless
@@ -5207,6 +5219,7 @@ fn toggle_popover_centered(app: &tauri::AppHandle) {
     }
 
     set_webview_memory_level(&window, false);
+    apply_popover_pin(&window);
 
     let size = window
         .outer_size()
@@ -5254,6 +5267,7 @@ fn replay_tour(app: tauri::AppHandle) {
         return;
     };
     set_webview_memory_level(&window, false);
+    apply_popover_pin(&window);
     let _ = window.unminimize();
     let _ = window.show();
     let _ = window.set_focus();
@@ -5267,6 +5281,7 @@ fn hide_popover(app: tauri::AppHandle) {
     let Some(window) = app.get_webview_window("main") else {
         return;
     };
+    remember_popover_position(&window);
     let _ = window.hide();
     set_webview_memory_level(&window, true);
 }
