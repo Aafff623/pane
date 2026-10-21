@@ -202,6 +202,8 @@ fn config_with_defaults(mut cfg: Value) -> Value {
     // the popover already launches hidden, so the flag carries no extra
     // behavior until the panel form learns auto-open-at-login semantics.
     obj.entry("windowForm").or_insert(json!("floating"));
+    obj.entry("windowResizeEnabled").or_insert(json!(true));
+    obj.entry("popoverSize").or_insert(Value::Null);
     obj.entry("silentStart").or_insert(json!(false));
     // Board cleanliness: bare "no credentials" cards fold into one collapsed
     // section instead of flooding the dashboard (issue: fresh/legacy configs
@@ -325,6 +327,8 @@ const CONFIG_KEYS: &[&str] = &[
     "showTrend",
     "locale",
     "windowForm",
+    "windowResizeEnabled",
+    "popoverSize",
     "silentStart",
     "hideUnconfigured",
     "setupPicked",

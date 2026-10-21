@@ -1,7 +1,8 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getVersion } from "@tauri-apps/api/app";
-import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
+import { getCurrentWebviewWindow, WebviewWindow } from "@tauri-apps/api/webviewWindow";
+import { LogicalSize } from "@tauri-apps/api/dpi";
 import {
   CATALOG_CATEGORIES,
   providerCatalog,
@@ -435,6 +436,8 @@ interface Config {
   hideUsageWhileSharing: boolean;
   locale: LocalePref;
   windowForm: "floating" | "panel";
+  windowResizeEnabled: boolean;
+  popoverSize: { w: number; h: number } | null;
   silentStart: boolean;
   hideUnconfigured: boolean;
   setupPicked: boolean;
@@ -505,6 +508,8 @@ const FRONTEND_CONFIG_KEYS = [
   "hideUsageWhileSharing",
   "locale",
   "windowForm",
+  "windowResizeEnabled",
+  "popoverSize",
   "silentStart",
   "hideUnconfigured",
   "setupPicked",
@@ -728,6 +733,8 @@ let config: Config = {
   hideUsageWhileSharing: false,
   locale: "auto",
   windowForm: "floating",
+  windowResizeEnabled: true,
+  popoverSize: null,
   silentStart: false,
   hideUnconfigured: true,
   setupPicked: false,
@@ -1050,14 +1057,30 @@ const fmtCredits = (v: number): string => Math.round(v).toLocaleString(localeTag
 /// has one, else the credits ledger for credits-billed cards (Qoder CN /
 /// Trae CN). API-key and relay cards have no honest per-day quantity
 /// source, so they show no trend row at all.
+function localSpendFor(id: string): ProviderSpend | undefined {
+  return (
+    lastSpend.find((sp) => sp.id === id) ??
+    lastSpend.find((sp) => sp.id === providerFamily(id))
+  );
+}
+
 function trendSourceFor(id: string): TrendSource | undefined {
-  const local = lastSpend.find((sp) => sp.id === id);
+  const local = localSpendFor(id);
   const metricCost = config.spendMetric === "cost";
   if (local) return { id, trend: metricCost ? local.trend_cost : local.trend, fmt: metricCost ? fmtMoney : fmtTokens };
   const meter = primaryMeterTrend(id, lastMeterTrend);
-  if (meter) return { ...meter, credits: true, fmt: value => formatUsageQuantity(value, meter.unit) };
+  if (meter) {
+    return {
+      ...meter,
+      credits: meter.unit === "credits",
+      unit: meter.unit,
+      fmt: value => formatUsageQuantity(value, meter.unit),
+    };
+  }
   const credits = lastCreditTrend[id];
-  if (credits?.some((v) => v != null && v > 0)) return { id, trend: credits, credits: true, fmt: fmtCredits };
+  if (credits?.some((v) => v != null && v > 0)) {
+    return { id, trend: credits, credits: true, unit: "credits", fmt: fmtCredits };
+  }
   return undefined;
 }
 
@@ -2293,7 +2316,7 @@ function renderTrend(source: TrendSource): string {
       </g>`;
     })
     .join("");
-  const title = source.credits
+  const title = source.unit
     ? t("usage.meterTrendTip", { from: dateOf(0), to: dateOf(29) })
     : t("spend.trendTip", {
         from: dateOf(0),
@@ -2302,9 +2325,34 @@ function renderTrend(source: TrendSource): string {
         peak: dateOf(peakIdx),
       });
   const trendLabel = t("card.usageTrend");
+  // Numeric spend beside the chart: credits from the card's meter when
+  // available, tokens from the measured local ledger. WorkBuddy can have
+  // both; a card with neither keeps the chart-only row.
+  const snapshot =
+    lastSnapshots.find((s) => s.id === source.id) ??
+    lastSnapshots.find((s) => s.id === providerFamily(source.id));
+  const snapshotCredit = snapshot?.metrics.find(
+    (m) => m.usage?.unit === "credits" && (m.usage.used ?? 0) > 0,
+  )?.usage?.used;
+  const creditUsed =
+    snapshotCredit ??
+    (source.unit === "credits"
+      ? source.trend.reduce<number>((sum, v) => sum + (v ?? 0), 0)
+      : 0);
+  const localSpend = localSpendFor(source.id);
+  const tokenTotal = localSpend
+    ? localSpend.trend.reduce<number>((sum, v) => sum + (v ?? 0), 0)
+    : 0;
+  const spendBits: string[] = [];
+  if (creditUsed > 0) spendBits.push(t("card.creditsSpent", { n: fmtCredits(creditUsed) }));
+  if (tokenTotal > 0) spendBits.push(t("card.tokens", { n: fmtTokens(tokenTotal) }));
+  const spendSummary = spendBits.join(" · ");
   return `
     <div class="metric trend">
-      <span class="metric-label" title="${escapeHtml(title)}">${escapeHtml(trendLabel)}</span>
+      <div class="trend-head">
+        <span class="metric-label" title="${escapeHtml(title)}">${escapeHtml(trendLabel)}</span>
+        ${spendSummary ? `<span class="trend-spend">${escapeHtml(spendSummary)}</span>` : ""}
+      </div>
       <div class="trend-plot">
         <svg class="trend-chart" viewBox="0 0 297 32" preserveAspectRatio="none">${bars}</svg>
         <div class="trend-dates" aria-hidden="true">
@@ -6431,6 +6479,12 @@ const CHANGELOG_GROUPS: Record<string, ChangelogItemType> = {
 /// starting a section of its own — treating them as versions produced phantom
 /// "v新增" entries. Unreleased (and its groups) is skipped: a shipped build's
 /// own notes carry its version header (release retitles Unreleased).
+let changelogCache: ChangelogSection[] | null = null;
+
+function changelogSections(): ChangelogSection[] {
+  return (changelogCache ??= parseChangelog());
+}
+
 function parseChangelog(): ChangelogSection[] {
   const raw: Array<{ version: string; date: string; body: string }> = [];
   let current: (typeof raw)[number] | null = null;
@@ -6693,7 +6747,7 @@ function computeWhatsNew(version: string): ChangelogSection[] | null {
   if (last === version) return null;
   pendingWhatsNewSince = last ?? "";
   void patchConfig({ lastSeenVersion: version });
-  const all = parseChangelog();
+  const all = changelogSections();
   if (!last) {
     // First run with this feature (fresh install or an install that never
     // recorded a version): show the current release's notes, then the
@@ -7698,6 +7752,7 @@ function applyAppearance(): void {
     delete btn.dataset.tip;
   }
   applyUiFont();
+  applyWindowResize();
 }
 
 /// Settings font picker: a custom family replaces only the head of the
@@ -7725,6 +7780,126 @@ function applyUiFont(): void {
   );
   root.style.setProperty("--app-font", parts.join(", "));
   requestAnimationFrame(fitProviderNames);
+}
+
+const POPOVER_BASE = { w: 450, h: 640 };
+type ResizeDirection =
+  | "East"
+  | "North"
+  | "NorthEast"
+  | "NorthWest"
+  | "South"
+  | "SouthEast"
+  | "SouthWest"
+  | "West";
+const RESIZE_DIRECTIONS: Array<[string, ResizeDirection]> = [
+  ["nw", "NorthWest"],
+  ["ne", "NorthEast"],
+  ["sw", "SouthWest"],
+  ["se", "SouthEast"],
+];
+let popoverResizeHandles: HTMLElement[] = [];
+let popoverResizeTimer: number | null = null;
+let popoverResizeListenerBound = false;
+
+/// Scale the whole floating UI with the window instead of just changing the
+/// empty space. CSS zoom keeps the layout proportional; the corner handles
+/// live on body and scale with it.
+function applyWindowScale(): void {
+  if (IS_PANEL_FORM) return;
+  if (config.windowResizeEnabled === false) {
+    document.documentElement.style.removeProperty("--ui-scale");
+    document.body.classList.remove("ui-scaled");
+    return;
+  }
+  const scale = Math.max(
+    0.75,
+    Math.min(
+      2,
+      Math.min(window.innerWidth / POPOVER_BASE.w, window.innerHeight / POPOVER_BASE.h),
+    ),
+  );
+  document.documentElement.style.setProperty("--ui-scale", String(scale));
+  document.body.classList.toggle("ui-scaled", Math.abs(scale - 1) > 0.01);
+}
+
+function onPopoverResize(): void {
+  applyWindowScale();
+  if (config.windowResizeEnabled === false) return;
+  if (popoverResizeTimer != null) window.clearTimeout(popoverResizeTimer);
+  popoverResizeTimer = window.setTimeout(() => {
+    popoverResizeTimer = null;
+    void (async () => {
+      try {
+        const window = getCurrentWebviewWindow();
+        const [size, factor] = await Promise.all([window.innerSize(), window.scaleFactor()]);
+        await patchConfig({
+          popoverSize: {
+            w: Math.round(size.width / factor),
+            h: Math.round(size.height / factor),
+          },
+        });
+      } catch {
+        // A closing window can reject these; the next real resize retries.
+      }
+    })();
+  }, 350);
+}
+
+function applyWindowResize(): void {
+  if (IS_PANEL_FORM) return;
+  for (const handle of popoverResizeHandles) handle.remove();
+  popoverResizeHandles = [];
+  if (config.windowResizeEnabled === false) {
+    applyWindowScale();
+    return;
+  }
+  for (const [corner, direction] of RESIZE_DIRECTIONS) {
+    const handle = document.createElement("div");
+    handle.className = `resize-handle ${corner}`;
+    handle.title = t("popover.resizeTip");
+    handle.addEventListener("pointerdown", (event) => {
+      event.preventDefault();
+      void getCurrentWebviewWindow()
+        .startResizeDragging(direction)
+        .catch((err) => console.error("start resize failed:", err));
+    });
+    document.body.appendChild(handle);
+    popoverResizeHandles.push(handle);
+  }
+  if (!popoverResizeListenerBound) {
+    window.addEventListener("resize", onPopoverResize);
+    popoverResizeListenerBound = true;
+  }
+  applyWindowScale();
+}
+
+async function restorePopoverSize(): Promise<void> {
+  if (IS_PANEL_FORM) return;
+  const size = config.popoverSize;
+  if (!size || !Number.isFinite(size.w) || !Number.isFinite(size.h)) return;
+  try {
+    await getCurrentWebviewWindow().setSize(
+      new LogicalSize(Math.max(380, Math.round(size.w)), Math.max(560, Math.round(size.h))),
+    );
+  } catch (err) {
+    console.error("restore popover size failed:", err);
+  }
+  applyWindowScale();
+}
+
+async function resetPopoverSize(): Promise<void> {
+  await patchConfig({ popoverSize: null }).catch(() => {});
+  try {
+    // This button also lives in the panel window; always target "main".
+    const window = IS_PANEL_FORM
+      ? await WebviewWindow.getByLabel("main")
+      : getCurrentWebviewWindow();
+    await window?.setSize(new LogicalSize(POPOVER_BASE.w, POPOVER_BASE.h));
+  } catch (err) {
+    console.error("reset popover size failed:", err);
+  }
+  if (!IS_PANEL_FORM) applyWindowScale();
 }
 
 // Magpie-style top-level settings navigation for the floating window. The
@@ -10078,7 +10253,8 @@ function renderDashboard(): void {
     renderWelcome() +
     renderTotalSpend() +
     renderQuotaOverview() +
-    renderGroupedCards();
+    renderGroupedCards() +
+    renderChangelogTimeline();
   decorateInkSkin(el as HTMLElement);
   if (customizeOpen) renderDrawerBody();
   if (spendDetailOpen) document.body.insertAdjacentHTML("beforeend", renderSpendDetailOverlay());
@@ -10087,6 +10263,32 @@ function renderDashboard(): void {
   if (config.popoverLock === false) applyPopoverDragRegion(false);
   rebuildTrail();
   requestAnimationFrame(fitProviderNames);
+}
+
+/// Bottom-of-board release timeline. Colors encode the three changelog
+/// groups, so a glance shows whether a release was mostly fixes, changes or
+/// new features; the full dialog still lives behind the button.
+function renderChangelogTimeline(): string {
+  const sections = changelogSections().slice(0, 3);
+  if (!sections.length) return "";
+  const entries = sections
+    .map((section) => {
+      const items = section.items
+        .slice(0, 2)
+        .map(
+          (item) =>
+            `<li class="cl-item ${item.type}"><span class="cl-dot" aria-hidden="true"></span><span>${changelogInline(item.text)}</span></li>`,
+        )
+        .join("");
+      return `<article class="cl-entry"><span class="cl-marker" aria-hidden="true"></span><div class="cl-body"><div class="cl-head"><strong>v${escapeHtml(section.version)}</strong><span>${escapeHtml(section.date)}</span></div>${
+        section.summary ? `<p class="cl-summary">${changelogInline(section.summary)}</p>` : ""
+      }${items ? `<ul>${items}</ul>` : ""}</div></article>`;
+    })
+    .join("");
+  return `<section class="changelog-timeline">
+    <div class="cl-title-row"><h3>${escapeHtml(t("changelog.timelineTitle"))}</h3><button type="button" class="mini-btn" data-open-changelog>${escapeHtml(t("changelog.viewAll"))}</button></div>
+    <div class="cl-entries">${entries}</div>
+  </section>`;
 }
 
 function requestRender(): void {
@@ -14895,6 +15097,7 @@ async function initSettings(): Promise<void> {
       .setAlwaysOnTop(config.popoverPin !== false)
       .catch(() => {});
     applyPopoverDragRegion(config.popoverLock !== false);
+    void restorePopoverSize();
   }
   // Panel form: build the settings shell after config lands (controls read
   // initial values from it) but before applyLocale, so applyStaticI18n
@@ -15810,6 +16013,22 @@ function buildPanelShell(): void {
     else void invoke("close_panel_window").catch(() => {});
   });
   generalCard.append(panelRow("settings.windowForm", formGroup));
+  const resizeToggle = document.createElement("input");
+  resizeToggle.type = "checkbox";
+  resizeToggle.checked = config.windowResizeEnabled !== false;
+  resizeToggle.addEventListener("change", () => {
+    void patchConfig({ windowResizeEnabled: resizeToggle.checked }).then(applyWindowResize);
+  });
+  generalCard.append(
+    panelSwitchRow("settings.windowResize", "settings.windowResizeTip", resizeToggle),
+  );
+  const sizeReset = document.createElement("button");
+  sizeReset.type = "button";
+  sizeReset.className = "mini-btn";
+  sizeReset.dataset.i18n = "settings.windowSizeReset";
+  sizeReset.textContent = t("settings.windowSizeReset");
+  sizeReset.addEventListener("click", () => void resetPopoverSize());
+  generalCard.append(panelRow("settings.windowSize", sizeReset));
   // Replay the first-run spotlight tour on demand.
   const replayTour = document.createElement("button");
   replayTour.type = "button";
@@ -17096,6 +17315,10 @@ document.querySelector("#settings-btn")!.addEventListener("click", () => {
   document.querySelector("#settings-close")!.addEventListener("click", () => setSettings(false));
   document.querySelector("#changelog-btn")!.addEventListener("click", () => {
     setSettings(false);
+    showChangelogDialog(t("dialog.changelog"), parseChangelog());
+  });
+  document.addEventListener("click", (event) => {
+    if (!(event.target as HTMLElement).closest("[data-open-changelog]")) return;
     showChangelogDialog(t("dialog.changelog"), parseChangelog());
   });
   // Magpie-style settings: sections are static caption + card, always
