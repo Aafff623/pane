@@ -10100,7 +10100,6 @@ function renderCustomize(): string {
   // configuring always happens in one predictable alphabetical list.
   const blocksHtml = blocks.map((b) => b.html).join("");
 
-  const starCount = Object.values(config.layout?.providers ?? {}).reduce((n, l) => n + l.starred.length, 0);
   const skinEntry = `<div class="customize-skin-entry"><div><strong>${t("skin.market")}</strong><span>${t("skin.entry")}</span></div><button class="mini-btn" data-skin-open>${uiIcon("palette", t("skin.market"))}</button></div>`;
   return `
     <div class="customize-bar glass-bar">
@@ -10110,17 +10109,16 @@ function renderCustomize(): string {
           <strong>${escapeHtml(t("customize.title"))}</strong>
         </div>
       </div>
-      <span class="detail customize-summary">${escapeHtml(t("customize.starred", { n: starCount }))}</span>
+      <div class="customize-search-inline">
+        <span class="cust-search-icon">${uiIcon("magnifyingGlass")}</span>
+        <input id="cust-search" class="cust-search" type="search" autocomplete="off"
+          placeholder="${escapeHtml(t("customize.searchPlaceholder"))}" />
+      </div>
       <button class="dock-btn danger" data-reset-all title="${escapeHtml(t("customize.resetAllTip"))}">${escapeHtml(t("customize.resetAll"))}</button>
     </div>
     <nav class="cust-az">${letters
       .map((l) => `<button data-az="${l}">${l}</button>`)
       .join("")}</nav>
-    <div class="cust-search-wrap">
-      <span class="cust-search-icon">${uiIcon("magnifyingGlass")}</span>
-      <input id="cust-search" class="cust-search" type="search" autocomplete="off"
-        placeholder="${escapeHtml(t("customize.searchPlaceholder"))}" />
-    </div>
     ${skinEntry}
     ${blocksHtml}
     ${removedProvidersHtml()}`;

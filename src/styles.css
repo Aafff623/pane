@@ -4266,18 +4266,23 @@ body.ui-scaled {
   color: #a16207;
 }
 
-.cust-search-wrap {
-  /* Sticky, not fixed: the bar rests under the Customize header at the
-     top of the list and floats there while the provider list scrolls
-     under it, instead of scrolling away with the content. */
-  position: sticky;
-  top: 0;
-  z-index: 20;
-  padding: 6px 2px 8px;
-  /* Opaque so rows scroll behind the bar rather than through it; the
-     soft lower shadow reads as a floating bar in both states. */
-  background: var(--background);
-  box-shadow: 0 10px 14px -12px rgb(0 0 0 / 0.9);
+.customize-search-inline {
+  position: relative;
+  flex: 1 1 auto;
+  min-width: 90px;
+  max-width: 420px;
+  display: flex;
+  align-items: center;
+  margin: 0 6px;
+}
+.customize-search-inline .cust-search-icon {
+  left: 9px;
+  top: 50%;
+  translate: 0 -50%;
+}
+.customize-search-inline .cust-search {
+  padding: 5px 10px 5px 28px;
+  font-size: 11px;
 }
 .cust-search-icon {
   position: absolute;
