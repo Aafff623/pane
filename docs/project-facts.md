@@ -12,7 +12,7 @@ Single authorities for the neighbouring concerns:
   tracker, see [`docs/agents/issue-tracker.md`](agents/issue-tracker.md).
 - **Startup / build / run / acceptance commands** — [`docs/dev-startup.md`](dev-startup.md).
 
-Last reconciled: 2026-10-21 (Pane 0.8.7 + identity dedup, estimated-token labels, CodeBuddy IDE tokens).
+Last reconciled: 2026-10-21 (Pane 0.8.8 + timeline, window scaling, provider trends, settings layout).
 
 ## Scope and boundaries
 
@@ -28,7 +28,7 @@ Last reconciled: 2026-10-21 (Pane 0.8.7 + identity dedup, estimated-token labels
   project (detached from any upstream, 2026-09-06). A single branch `main`
   exists locally and on origin; feature work happens on `codex/<feature>`
   branches.
-- Version 0.8.7 (`package.json` + `src-tauri/tauri.conf.json`), identifier
+- Version 0.8.8 (`package.json` + `src-tauri/tauri.conf.json`), identifier
   `com.jazii.pane`, productName `Pane`.
 - Privacy boundary (asserted by tests in the code): tokens go only to their
   own vendor's API; the secrets Pane itself persists — pasted API keys,

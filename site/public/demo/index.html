@@ -4,8 +4,8 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Pane</title>
-  <link rel="stylesheet" href="/fonts/fonts.css"><link rel="stylesheet" href="/demo-frame.css?v=7"><link rel="stylesheet" href="/demo-target-cursor.css?v=1"><script defer src="/demo-target-cursor.js?v=2"></script><script>(function(){window.requestAnimationFrame=function(cb){return window.setTimeout(function(){cb(window.performance.now())},16)};window.cancelAnimationFrame=function(id){window.clearTimeout(id)};document.addEventListener("DOMContentLoaded",function(){setTimeout(function(){if(document.querySelector(".skeleton-card")){var b=document.querySelector("#refresh");if(b)b.click()}},900)})})()</script>  <script type="module" crossorigin src="/demo/assets/index-DGOoQmqE.js"></script>
-  <link rel="stylesheet" crossorigin href="/demo/assets/index-BWed0uzj.css">
+  <link rel="stylesheet" href="/fonts/fonts.css"><link rel="stylesheet" href="/demo-frame.css?v=7"><link rel="stylesheet" href="/demo-target-cursor.css?v=1"><script defer src="/demo-target-cursor.js?v=2"></script><script>(function(){window.requestAnimationFrame=function(cb){return window.setTimeout(function(){cb(window.performance.now())},16)};window.cancelAnimationFrame=function(id){window.clearTimeout(id)};document.addEventListener("DOMContentLoaded",function(){setTimeout(function(){if(document.querySelector(".skeleton-card")){var b=document.querySelector("#refresh");if(b)b.click()}},900)})})()</script>  <script type="module" crossorigin src="/demo/assets/index-wUJLNdf-.js"></script>
+  <link rel="stylesheet" crossorigin href="/demo/assets/index-Gjqm7I9r.css">
 </head>
 
   <body>
@@ -215,8 +215,12 @@
             <label for="ui-font" data-i18n="settings.font">Font</label>
             <input id="ui-font" type="text" spellcheck="false" autocomplete="off" placeholder="Type to filter installed fonts" data-i18n-placeholder="settings.fontPh" data-i18n-title="settings.fontTip" title="Applies to the whole interface. Clear to reset." />
           </div>
+          <div class="setting-row">
+            <label for="ui-font-cjk" data-i18n="settings.fontCjk">Chinese font</label>
+            <input id="ui-font-cjk" type="text" list="ui-font-cjk-list" spellcheck="false" autocomplete="off" placeholder="System Chinese font" data-i18n-placeholder="settings.fontCjkPh" data-i18n-title="settings.fontCjkTip" title="Applied after the Latin font, so Chinese text can use its own family. Clear for the system default." />
+            <datalist id="ui-font-cjk-list"></datalist>
+          </div>
           <div class="font-pack-manager"></div>
-          <div class="reset-wake-manager"></div>
           <div class="setting-row">
             <span data-i18n="settings.tourReplayLabel">Onboarding tour</span>
             <button class="mini-btn" id="tour-replay" data-i18n="settings.tourReplay">Replay</button>

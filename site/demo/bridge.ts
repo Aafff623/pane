@@ -265,6 +265,12 @@ export async function listen<T>(event: string, handler: (event: { payload: T }) 
   return () => { callbacks.delete(callback); };
 }
 export async function getVersion() { return version; }
+// The only caller is the panel-form reset-size button, which looks up the
+// "main" window. The web demo has no window manager, so there is nothing to
+// resize and the lookup resolves to null.
+export const WebviewWindow = {
+  getByLabel: async (_label: string): Promise<null> => null,
+};
 // The desktop settings surface is the "panel" window: the same bundle with
 // label=panel renders the large settings panel (IS_PANEL_FORM branch).
 export function getCurrentWebviewWindow() {
