@@ -46,7 +46,7 @@ let config: Record<string, any> = {
   glassEffects: true, shortcut: 'Alt+2', categoryShortcut: 'Shift+1', localShortcuts: {},
   // Sample accounts are already curated; visitors should land in the panel.
   proxy: { enabled: false, url: '' }, showTotalSpend: true, welcomeDismissed: true, setupPicked: true,
-  lastSeenVersion: version, reduceAnimations: matchMedia('(prefers-reduced-motion: reduce)').matches,
+  lastSeenVersion: version, configNoticeVersion: version, reduceAnimations: matchMedia('(prefers-reduced-motion: reduce)').matches,
   jumpAnimation: 'smooth', hideUsageWhileSharing: false, locale, windowForm: 'floating',
   silentStart: false, startupAnimation: false, lastStartupBootId: 1, overviewExpanded: [],
   experimentalFeatures: false, spendIconTiers: null, overviewCatFull: false,
@@ -281,6 +281,21 @@ export function getCurrentWebviewWindow() {
     // to its own theme. The demo has no native chrome, but the call must still
     // resolve — a missing method aborts the app's boot at "Starting…".
     setTheme: async (_theme?: string | null) => {},
+    // Window-manager calls the real app makes. The browser has no native
+    // window to pin, move or resize; every call must resolve so boot and the
+    // settings/screenshot interactions keep working.
+    setAlwaysOnTop: async (_on: boolean) => {},
+    outerPosition: async () => ({ x: 0, y: 0 }),
+    center: async () => {},
+    startDragging: async () => {},
+    startResizeDragging: async (_direction: string) => {},
+    innerSize: async () => ({ width: 450, height: 640 }),
+    scaleFactor: async () => 1,
+    setSize: async (_size: unknown) => {},
+    onFocusChanged: async (_handler: unknown) => () => {},
+    onResized: async (_handler: unknown) => () => {},
+    onMoved: async (_handler: unknown) => () => {},
+    onCloseRequested: async (_handler: unknown) => () => {},
   };
 }
 

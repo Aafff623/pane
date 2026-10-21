@@ -8,30 +8,26 @@
 
 **用量、额度、余额与重置时间 —— 一个桌面工作台全看清。**
 
-[![Release](https://img.shields.io/github/v/release/Aafff623/pane?style=flat-square&label=Release&color=2563EB&labelColor=172033)](https://github.com/Aafff623/pane/releases)
-[![Stars](https://img.shields.io/github/stars/Aafff623/pane?style=flat-square&color=2563EB&labelColor=172033)](https://github.com/Aafff623/pane/stargazers)
-[![License](https://img.shields.io/badge/License-MIT-10B981.svg?style=flat-square)](LICENSE)
-[![Tests](https://img.shields.io/badge/Tests-parse--tests-2563EB.svg?style=flat-square)](parse-tests/)
+[![Release](https://img.shields.io/github/v/release/Aafff623/pane?style=flat-square&label=Release&color=2563EB&labelColor=172033)](https://github.com/Aafff623/pane/releases) [![CI](https://img.shields.io/github/actions/workflow/status/Aafff623/pane/ci.yml?branch=main&style=flat-square&label=CI&color=2563EB&labelColor=172033)](https://github.com/Aafff623/pane/actions/workflows/ci.yml) [![Downloads](https://img.shields.io/github/downloads/Aafff623/pane/total?style=flat-square&label=Downloads&color=2563EB&labelColor=172033)](https://github.com/Aafff623/pane/releases) [![License](https://img.shields.io/badge/License-MIT-10B981.svg?style=flat-square)](LICENSE)
 
-[![Windows](https://img.shields.io/badge/Windows-10%20%7C%2011%20(x64)-0078D4.svg?style=flat-square&logo=windows&logoColor=white)](https://github.com/Aafff623/pane/releases/latest)
-[![macOS](https://img.shields.io/badge/macOS-dmg-8B5CF6.svg?style=flat-square&logo=apple&logoColor=white)](https://github.com/Aafff623/pane/releases)
-[![Linux](https://img.shields.io/badge/Linux-AppImage%20%7C%20.deb-172033.svg?style=flat-square&logo=linux&logoColor=white)](https://github.com/Aafff623/pane/releases)
-[![Providers](https://img.shields.io/badge/Providers-69-2563EB.svg?style=flat-square)](docs/providers.md)
-[![Tauri](https://img.shields.io/badge/Tauri-v2-24C8DB.svg?style=flat-square&logo=tauri&logoColor=white)](https://tauri.app/)
-[![Local First](https://img.shields.io/badge/Data-Local--First-10B981.svg?style=flat-square)](docs/privacy.md)
+[![Windows](https://img.shields.io/badge/Windows-10%20%7C%2011%20(x64)-0078D4.svg?style=flat-square&logo=windows&logoColor=white)](https://github.com/Aafff623/pane/releases/latest) [![macOS](https://img.shields.io/badge/macOS-dmg-8B5CF6.svg?style=flat-square&logo=apple&logoColor=white)](https://github.com/Aafff623/pane/releases) [![Linux](https://img.shields.io/badge/Linux-AppImage%20%7C%20.deb-172033.svg?style=flat-square&logo=linux&logoColor=white)](https://github.com/Aafff623/pane/releases) [![Providers](https://img.shields.io/badge/Providers-71-2563EB.svg?style=flat-square)](docs/providers.md)
 
-**[下载](#quickstart)** &nbsp;·&nbsp; **[文档](#docs)** &nbsp;·&nbsp; **[在线演示](https://pane.threetwoa.live)** &nbsp;·&nbsp; **[官网](https://pane.threetwoa.live)**
+**[下载](#quickstart)** &nbsp;·&nbsp; **[在线演示](https://pane.threetwoa.live)** &nbsp;·&nbsp; **[文档](#docs)** &nbsp;·&nbsp; **[参与](#community)**
 
 **[简体中文](README.md)** · **[English](README_EN.md)**
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="attachments/hero-dark.jpg">
-  <img src="attachments/hero-light.jpg" width="420" alt="Pane 悬浮面板：额度总览">
+  <img src="attachments/hero-light.jpg" width="100%" style="border-radius: 14px;" alt="Pane 悬浮面板与设置窗口：额度总览、用量、字体与密钥管理">
 </picture>
+
+<sub>悬浮面板 <kbd>Alt + 2</kbd> · 设置窗口 · v0.8.8</sub>
 
 </div>
 
 ---
+
+**目录** · [适合你吗](#intro) · [快速开始](#quickstart) · [它能做什么](#features) · [支持来源](#providers) · [它如何工作](#how) · [文档](#docs) · [隐私](#privacy) · [参与](#community)
 
 ## <a id="intro"></a>Pane 适合你吗？
 
@@ -42,6 +38,14 @@
 - **一处看清** —— 5 小时 / 7 天 / 每月额度、余额、重置倒计时与账户状态，`Shift` 一键换挡；
 - **本地优先** —— token、cookie 与 API key 只存在本机系统凭据库和用户目录，查询直连各厂商端点，Pane 没有中转后端；
 - **常驻不打扰** —— 托盘常驻、每 5 分钟自动刷新（可调），查询失败如实显示为错误状态，而不是灰掉的未知额度。
+
+| | 五个控制台 | **Pane** |
+| :-- | :-- | :-- |
+| 还剩多少 | 每个平台各看一遍 | 一个面板，5 小时 / 7 天 / 每月一键切换 |
+| 何时重置 | 自己算 | 卡面直接给倒计时 |
+| 多账号 | 手动切换 | 独立出卡，身份稳定 |
+| 花了多少 | 翻 CLI 日志 | 本地扫描，按模型 / 工具拆分 |
+| 数据去哪 | 上传云端 | 只在本机，没有中转后端 |
 
 如果上面有两条说的是你，Pane 值得一试。Pane 是 Windows 桌面工具（macOS / Linux 随 Release 提供构建）。
 
@@ -72,7 +76,7 @@ pnpm tauri build    # 完整桌面应用
 
 接入前可查看 [Provider 凭据与查询能力（三张表）](docs/provider-credentials.md)：分别说明 API key、Access Token／Cookie 等专用凭据、本地配置文件，以及套餐和账单权限边界。公开接口与推理协议的依据见 [API 核验记录](docs/provider-api-verification.md)。
 
-当前目录收录 **69 个来源**，三种读取形态：
+当前目录收录 **71 个来源**，三种读取形态：
 
 | 形态 | 覆盖 | 读取方式 |
 | --- | --- | --- |
@@ -83,9 +87,9 @@ pnpm tauri build    # 完整桌面应用
 同一服务商可以挂**多个账号**独立出卡（ClinePass、One/New API、Custom Relay 等），本地 CLI（Claude Code、Codex CLI、ZCode、OpenCode 等）的花费从日志直接扫描。开箱默认启用主流订阅家族（Claude、Codex、Cursor、Grok、Z.ai、MiniMax、Antigravity、Kimi 等），其余在设置中按需开启。
 
 <details>
-<summary><b>全部 69 个服务商一览</b>（与 <code>src/providerCatalog.ts</code> 一致）</summary>
+<summary><b>全部 71 个服务商一览</b>（与 <code>src/providerCatalog.ts</code> 一致）</summary>
 
-Claude、Codex、CodeBuddy、CodeBuddy CN、WorkBuddy、Cursor、OpenCode、Copilot、Grok、Devin、MiniMax、OpenRouter、Z.ai、Antigravity、DeepSeek、Kimi API、ElevenLabs、Ollama、Codebuff、Kilo、AihubMix、One/New API、Qwen Code、Hermes、Kimi Code、StepFun、StepFun Step Plan、闪电说、SiliconFlow、Novita AI、Custom Relay、Qoder CN、Trae CN、Command Code、Doubao、ClawsGO、BochaAI、Tavily、Firecrawl、Brave Search、GIPHY、ClinePass、SenseNova、APIGOTO、MiniMax Code、Amp、AWS Bedrock、Chutes、Deepgram、Kiro、OpenAI API、Poe、Venice、Vertex AI、Warp、Windsurf、MiMo、Trae、Qoder、Zed、Droid、JetBrains AI、Groq、Hugging Face、LongCat、sub2api、Mistral、Perplexity、Volcengine Ark
+Claude、Codex、CodeBuddy、CodeBuddy CN、WorkBuddy、WorkBuddy AI、Cursor、OpenCode、Copilot、Grok、Devin、MiniMax、OpenRouter、Z.ai、Antigravity、DeepSeek、Kimi API、ElevenLabs、Ollama、Codebuff、Kilo、AihubMix、One/New API、Qwen Code、Hermes、Kimi Code、StepFun、StepFun Step Plan、闪电说、SiliconFlow、Novita AI、Custom Relay、Qoder CN、Trae CN、Command Code、Doubao、ClawsGO、BochaAI、Tavily、Firecrawl、Brave Search、GIPHY、ClinePass、SenseNova、APIGOTO、MiniMax Code、Amp、AWS Bedrock、Chutes、Deepgram、Kiro、OpenAI API、Poe、基元律动、Venice、Vertex AI、Warp、Windsurf、MiMo、Trae、Qoder、Zed、Droid、JetBrains AI、Groq、Hugging Face、LongCat、sub2api、Mistral、Perplexity、Volcengine Ark
 
 </details>
 
@@ -94,7 +98,7 @@ Claude、Codex、CodeBuddy、CodeBuddy CN、WorkBuddy、Cursor、OpenCode、Copi
 <div align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="attachments/how-dark.png">
-    <img src="attachments/how-light.png" width="820" alt="Pane 架构：本地核心直连各厂商端点">
+    <img src="attachments/how-light.png" width="900" alt="Pane 架构：本地核心直连各厂商端点">
   </picture>
 </div>
 
@@ -102,11 +106,13 @@ Claude、Codex、CodeBuddy、CodeBuddy CN、WorkBuddy、Cursor、OpenCode、Copi
 
 ## <a id="features"></a>它能做什么
 
-### 任何额度，一处看清
+### 额度和花费，一处看清
 
 悬浮面板用一张总览回答「还剩多少、什么时候重置」：绿 / 黄 / 红三态区分可用、高峰和不可用，剩余额度与重置倒计时直接上卡面；`Shift` 在 5 小时 / 7 天 / 每月间切换。查询失败如实显示为错误状态，不伪装成灰色的未知额度；没有月额度的服务商在月视图回退到周额度并标注。
 
-0.8.5 起，新用户默认使用紧凑条形双列视图。账号可以在测试失败时保存；保存并开启后立即进入总览，查询异常会显示错误类型及修复入口。保存账号不代表已获得套餐或账单读取权限。
+同一张面板也能切到「按工具 / 美元」，看当天花费怎么分——额度与消费不用来回切窗口。
+
+新用户默认使用紧凑条形双列视图。账号可以在测试失败时保存；保存并开启后立即进入总览，查询异常会显示错误类型及修复入口。保存账号不代表已获得套餐或账单读取权限。
 
 <table>
   <tr>
@@ -119,10 +125,10 @@ Claude、Codex、CodeBuddy、CodeBuddy CN、WorkBuddy、Cursor、OpenCode、Copi
     </td>
     <td width="50%" align="center" valign="top">
       <picture>
-        <source media="(prefers-color-scheme: dark)" srcset="attachments/overview-week-dark.png">
-        <img src="attachments/overview-week-light.png" width="390" alt="额度总览 · 周视图">
+        <source media="(prefers-color-scheme: dark)" srcset="attachments/spend-tool-dollar-dark.png">
+        <img src="attachments/spend-tool-dollar-light.png" width="390" alt="花费拆分 · 按工具 / 美元">
       </picture><br/>
-      <sub>周视图 · 重置倒计时与分组</sub>
+      <sub>按工具 / 美元视图</sub>
     </td>
   </tr>
 </table>
@@ -131,7 +137,7 @@ Claude、Codex、CodeBuddy、CodeBuddy CN、WorkBuddy、Cursor、OpenCode、Copi
 
 ### 来源接入
 
-69 家按三种认证形态接入，每张卡都有「⚡ 测试连通性」（未启用也可测，状态栏显示 `连通正常 · N ms`）和「? 额度查询说明」（按认证形态给出 key / OAuth / 本地登录的步骤模板与控制台直链）。Customize 抽屉里就地搜索、自定义分组（🥚🐑）、两级备注，移除的 Provider 随时恢复：
+71 家按三种认证形态接入，每张卡都有「⚡ 测试连通性」（未启用也可测，状态栏显示 `连通正常 · N ms`）和「? 额度查询说明」（按认证形态给出 key / OAuth / 本地登录的步骤模板与控制台直链）。Customize 抽屉里就地搜索、自定义分组（🥚🐑）、两级备注，移除的 Provider 随时恢复：
 
 > 分类标签按 **Coding Agent / 生产力工具 / MCP 搜索**切换；已删除的 Provider 收进抽屉底部，一键找回。
 
@@ -142,13 +148,16 @@ Claude、Codex、CodeBuddy、CodeBuddy CN、WorkBuddy、Cursor、OpenCode、Copi
   </picture>
 </div>
 
-### 多账号池
+<details>
+<summary><b>多账号池</b> —— 每个账号独立出卡，右键归档 / 恢复</summary>
 
 - API key 类服务商可在设置中保存多个账号，各自独立出卡；
 - 每个账号有稳定的本地卡片身份，删除或重排不会串号；
 - 备注分两级：「Provider 名称」只改卡片标题，「子账号名称」只改该账号；
 - 右键账号胶囊可设为默认主账号、归档或恢复（凭据随档）；
 - 总览默认收起为「主账号环 + 用量条 + `N/M` 徽章」，点击展开。
+
+</details>
 
 ### 花费，有迹可循
 
@@ -158,21 +167,35 @@ Claude、Codex、CodeBuddy、CodeBuddy CN、WorkBuddy、Cursor、OpenCode、Copi
 | :--- | :--- |
 | 今日 / 昨日 / 近 30 天 | 按窗口汇总 token 与美元 |
 | 模型明细 | 按模型拆分花费与 token，未知价格保留事实并标注未计价 |
+| Provider 趋势 | 额度趋势旁显示该 Provider 的已消费 Credits 或实测 Tokens |
 | 365 天热力图 | 回看每日使用强度 |
 | 分档图标 | 花费卡图标按日 token 量渐变，阈值可自定义 |
 | 复制为图片 | 总花费卡先选时间范围（今天 / 昨天 / 7 天 / 30 天 / 全部）再生成分享图；provider 卡即时整卡快照 |
 
-<div align="center">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="attachments/spend-detail-heat-dark.png">
-    <img src="attachments/spend-detail-heat-light.png" width="680" alt="花费明细与 365 天热力图">
-  </picture>
-  <br/><sub>示例数据，不连接真实账户；各 CLI 计量口径见 <a href="docs/token-spend-coverage.md">Token 花费覆盖</a></sub>
-</div>
+各 CLI 的计量口径见 [Token 花费覆盖](docs/token-spend-coverage.md)。
 
 ### 皮肤工坊
 
-深浅主题一键切换（`Ctrl + L`）；**皮肤市场为实验性功能，默认隐藏**，需在设置中二次确认开启。工坊是画廊式布局：上方完整预览当前选中皮肤（以总花费面板为样张），下方缩略图浏览，底部「使用这款皮肤 / 恢复原生外观」常驻；日间 / 夜间 / 并排三种预览模式，切换时保留滚动位置与键盘焦点。
+深浅主题一键切换（`Ctrl + L`）；**皮肤市场为实验性功能，默认隐藏**，需在设置中二次确认开启。内置两套皮肤：**云端邮局**（手绘邮票、猫咪邮差）与**山水笺**（水墨、锦鲤、纸张纹理），都随深浅主题切换。工坊是画廊式布局：上方完整预览当前选中皮肤（以总花费面板为样张），下方缩略图浏览，底部「使用这款皮肤 / 恢复原生外观」常驻；日间 / 夜间 / 并排三种预览模式，切换时保留滚动位置与键盘焦点。
+
+<table>
+  <tr>
+    <td width="50%" align="center" valign="top">
+      <picture>
+        <source media="(prefers-color-scheme: dark)" srcset="attachments/skins-dark.png">
+        <img src="attachments/skins-light.png" width="390" alt="云端邮局皮肤：手绘邮票与猫咪邮差">
+      </picture><br/>
+      <sub>云端邮局 · 手绘邮票</sub>
+    </td>
+    <td width="50%" align="center" valign="top">
+      <picture>
+        <source media="(prefers-color-scheme: dark)" srcset="attachments/skins-ink-dark.png">
+        <img src="attachments/skins-ink-light.png" width="390" alt="山水笺皮肤：水墨锦鲤与纸张纹理">
+      </picture><br/>
+      <sub>山水笺 · 水墨锦鲤</sub>
+    </td>
+  </tr>
+</table>
 
 <details>
 <summary><b>资源包格式</b></summary>
@@ -181,16 +204,12 @@ Claude、Codex、CodeBuddy、CodeBuddy CN、WorkBuddy、Cursor、OpenCode、Copi
 
 </details>
 
-<div align="center">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="attachments/skins-dark.png">
-    <img src="attachments/skins-light.png" width="390" alt="皮肤工坊：画廊布局与总花费样张">
-  </picture>
-</div>
-
 ### 密钥，留在本机
 
 provider 主密钥、全部子账号密钥**以及登录类令牌**（OAuth / 登录刷新令牌、Cursor / Codex 账号令牌、检索 key）都存入**系统凭据库**（Windows 凭据管理器等），JSON 文件只留非机密字段；旧版本的明文条目在首次读取时自动迁移，钥匙串写入成功才删除明文。「密钥与额度」页每一行都需**主密码验证**才能查看明文，明文不上屏、可一键复制；本机登录类行内显示绿色「已连接」并写明读取来源。
+
+<details>
+<summary><b>凭据存储、明文查看与快捷键</b></summary>
 
 | | |
 | :--- | :--- |
@@ -205,7 +224,10 @@ provider 主密钥、全部子账号密钥**以及登录类令牌**（OAuth / �
   </picture>
 </div>
 
-### 让你的 AI Agent 自己排查 Pane
+</details>
+
+<details>
+<summary><b>让 AI Agent 自己排查 Pane</b> —— 只读诊断 API + 排查 Skill</summary>
 
 Pane 内置**只读诊断 API**（仅监听 `127.0.0.1`、无鉴权、**永不出凭据**，错误文本中的网址也打码）和一个排查 Skill。装上后直接对 coding agent（Claude Code / Codex / Cursor / ZCode 等）说「帮我查一下 Pane 哪个卡有问题」，它会自己定位原因并给出修复步骤——不用等发版：
 
@@ -218,12 +240,18 @@ curl -s --noproxy '*' http://127.0.0.1:6736/v1/sources    # 本机花费数据�
 
 Skill 三选一安装：`install.ps1` 安装器自动装入、设置 → 常规 → **AI Agent 排查 Skill → 安装**、或从仓库 [`skills/pane/`](skills/pane/) 获取（支持 `npx skills add Aafff623/pane`）。完整契约见 [本地 HTTP API](docs/local-http-api.md)。
 
-### 还有
+</details>
+
+<details>
+<summary><b>还有</b> —— 新手引导、临期清单、托盘、更新、设置与字体、缩放…</summary>
 
 - **新手引导** —— 首次安装自动播放 5 步聚光灯引导（上一步 / 下一步 / 跳过，`Esc` 退出），老用户不被打扰；设置 → 常规「重新演示」随时重看；
 - **临期清单** —— `T` 呼出，按重置时间排序，顶部就是「该行动」的部分；
 - **托盘直达** —— 右键直出各 provider 状态行（读本地快照，零网络请求）与设置入口；
 - **更新不打断** —— 检测到新版本时总花费横栏出现轻量 ↑ 指示器，点击原地下载，圆环按真实字节进度填充，完成后自动安装重启；
+- **设置与字体** —— 各设置页统一 940px 内容列并垂直居中；密钥与额度页按 A–Z 排列、左侧字母索引直达；英文与中文字体分开配置，字体栈按拉丁 → 中文 → 系统回退；
+- **四角等比缩放** —— 设置中开启四角手柄，拖动时窗口、字体与图标整体等比缩放，记住尺寸，可一键恢复默认大小；
+- **更新日志时间线** —— 主界面卡片列表下方按版本显示新增 / 变更 / 修复，点击查看完整日志；
 - **三语界面** —— 简体中文 / English / Русский，跟随系统或手动切换；
 - **开机动画** —— 弹出主窗时的品牌动画可开关、可重播，系统减动效时停格成片帧退场；
 - **字体资源包** —— 与皮肤包同一套 zip + manifest + sha256 校验，在设置字体附近按需下载安装，装完即进字体下拉；官方目录当前为空，推荐先用 Windows 自带的 MV Boli；
@@ -251,6 +279,8 @@ Skill 三选一安装：`install.ps1` 安装器自动装入、设置 → 常规 
     <img src="attachments/expiring-light.png" width="390" alt="临期清单">
   </picture>
 </div>
+
+</details>
 
 ## <a id="docs"></a>文档
 

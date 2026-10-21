@@ -8,30 +8,26 @@
 
 **Usage, quotas, balances and resets — one desktop workspace.**
 
-[![Release](https://img.shields.io/github/v/release/Aafff623/pane?style=flat-square&label=Release&color=2563EB&labelColor=172033)](https://github.com/Aafff623/pane/releases)
-[![Stars](https://img.shields.io/github/stars/Aafff623/pane?style=flat-square&color=2563EB&labelColor=172033)](https://github.com/Aafff623/pane/stargazers)
-[![License](https://img.shields.io/badge/License-MIT-10B981.svg?style=flat-square)](LICENSE)
-[![Tests](https://img.shields.io/badge/Tests-parse--tests-2563EB.svg?style=flat-square)](parse-tests/)
+[![Release](https://img.shields.io/github/v/release/Aafff623/pane?style=flat-square&label=Release&color=2563EB&labelColor=172033)](https://github.com/Aafff623/pane/releases) [![CI](https://img.shields.io/github/actions/workflow/status/Aafff623/pane/ci.yml?branch=main&style=flat-square&label=CI&color=2563EB&labelColor=172033)](https://github.com/Aafff623/pane/actions/workflows/ci.yml) [![Downloads](https://img.shields.io/github/downloads/Aafff623/pane/total?style=flat-square&label=Downloads&color=2563EB&labelColor=172033)](https://github.com/Aafff623/pane/releases) [![License](https://img.shields.io/badge/License-MIT-10B981.svg?style=flat-square)](LICENSE)
 
-[![Windows](https://img.shields.io/badge/Windows-10%20%7C%2011%20(x64)-0078D4.svg?style=flat-square&logo=windows&logoColor=white)](https://github.com/Aafff623/pane/releases/latest)
-[![macOS](https://img.shields.io/badge/macOS-dmg-8B5CF6.svg?style=flat-square&logo=apple&logoColor=white)](https://github.com/Aafff623/pane/releases)
-[![Linux](https://img.shields.io/badge/Linux-AppImage%20%7C%20.deb-172033.svg?style=flat-square&logo=linux&logoColor=white)](https://github.com/Aafff623/pane/releases)
-[![Providers](https://img.shields.io/badge/Providers-68-2563EB.svg?style=flat-square)](docs/providers.md)
-[![Tauri](https://img.shields.io/badge/Tauri-v2-24C8DB.svg?style=flat-square&logo=tauri&logoColor=white)](https://tauri.app/)
-[![Local First](https://img.shields.io/badge/Data-Local--First-10B981.svg?style=flat-square)](docs/privacy.md)
+[![Windows](https://img.shields.io/badge/Windows-10%20%7C%2011%20(x64)-0078D4.svg?style=flat-square&logo=windows&logoColor=white)](https://github.com/Aafff623/pane/releases/latest) [![macOS](https://img.shields.io/badge/macOS-dmg-8B5CF6.svg?style=flat-square&logo=apple&logoColor=white)](https://github.com/Aafff623/pane/releases) [![Linux](https://img.shields.io/badge/Linux-AppImage%20%7C%20.deb-172033.svg?style=flat-square&logo=linux&logoColor=white)](https://github.com/Aafff623/pane/releases) [![Providers](https://img.shields.io/badge/Providers-71-2563EB.svg?style=flat-square)](docs/providers.md)
 
-**[Download](#quickstart)** &nbsp;·&nbsp; **[Docs](#docs)** &nbsp;·&nbsp; **[Live demo](https://pane.threetwoa.live)** &nbsp;·&nbsp; **[Website](https://pane.threetwoa.live/en/)**
+**[Download](#quickstart)** &nbsp;·&nbsp; **[Live demo](https://pane.threetwoa.live)** &nbsp;·&nbsp; **[Docs](#docs)** &nbsp;·&nbsp; **[Community](#community)**
 
 **[English](README_EN.md)** · **[简体中文](README.md)**
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="attachments/hero-dark.jpg">
-  <img src="attachments/hero-light.jpg" width="420" alt="Pane floating panel: quota overview">
+  <img src="attachments/hero-light.jpg" width="100%" style="border-radius: 14px;" alt="Pane floating panel and settings window: quotas, usage, fonts and keys">
 </picture>
+
+<sub>Floating panel <kbd>Alt + 2</kbd> · settings window · v0.8.8</sub>
 
 </div>
 
 ---
+
+**Contents** · [Is Pane for you?](#intro) · [Quick start](#quickstart) · [What it does](#features) · [Supported sources](#providers) · [How it fits together](#how) · [Documentation](#docs) · [Privacy](#privacy) · [Community](#community)
 
 ## <a id="intro"></a>Is Pane for you?
 
@@ -42,6 +38,14 @@ Every AI tool keeps its quota in its own console: Claude counts 5-hour sessions,
 - **One overview** — 5-hour / 7-day / monthly quotas, balances, reset countdowns and account status; `Shift` cycles periods;
 - **Local first** — tokens, cookies and API keys stay in the OS credential store and your user directory; queries go straight to each provider's endpoint, with no Pane relay in between;
 - **Resident, not intrusive** — lives in the tray, auto-refreshes every 5 minutes (adjustable); failures surface as explicit error states instead of greyed-out unknowns.
+
+| | Five consoles | **Pane** |
+| :-- | :-- | :-- |
+| What's left | One tab per platform | One panel; 5-hour / 7-day / monthly at a keystroke |
+| When it resets | Do the math | Countdown on the card |
+| Multiple accounts | Switch by hand | Independent cards, stable identity |
+| What you spent | Dig through CLI logs | Local scan, split by model / tool |
+| Where data goes | Uploaded to a cloud | Stays on this machine; no relay backend |
 
 If two of those describe you, Pane is worth a try. Pane is a Windows desktop app first (macOS / Linux builds ship with each release).
 
@@ -70,7 +74,7 @@ Dev mode needs two processes: Vite serves the frontend on `127.0.0.1:1420` and `
 
 ## <a id="providers"></a>Supported sources
 
-The catalog currently holds **68 sources** in three auth shapes:
+The catalog currently holds **71 sources** in three auth shapes:
 
 | Shape | Coverage | How it reads |
 | --- | --- | --- |
@@ -81,9 +85,9 @@ The catalog currently holds **68 sources** in three auth shapes:
 Multiple accounts per provider each get an independent card (ClinePass, One/New API, Custom Relay, …), and local CLIs (Claude Code, Codex CLI, ZCode, OpenCode, …) contribute spend scanned straight from their logs. Fresh installs start with the mainstream subscription families enabled (Claude, Codex, Cursor, Grok, Z.ai, MiniMax, Antigravity, Kimi, …); everything else is one toggle away in settings.
 
 <details>
-<summary><b>All 68 providers</b> (mirrors <code>src/providerCatalog.ts</code>)</summary>
+<summary><b>All 71 providers</b> (mirrors <code>src/providerCatalog.ts</code>)</summary>
 
-Claude, Codex, CodeBuddy, CodeBuddy CN, WorkBuddy, Cursor, OpenCode, Copilot, Grok, Devin, MiniMax, OpenRouter, Z.ai, Antigravity, DeepSeek, Kimi API, ElevenLabs, Ollama, Codebuff, Kilo, AihubMix, One/New API, Qwen Code, Hermes, Kimi Code, StepFun, StepFun Step Plan, Shandianshuo, SiliconFlow, Novita AI, Custom Relay, Qoder CN, Trae CN, Command Code, Doubao, ClawsGO, BochaAI, Tavily, Firecrawl, Brave Search, ClinePass, SenseNova, APIGOTO, MiniMax Code, Amp, AWS Bedrock, Chutes, Deepgram, Kiro, OpenAI API, Poe, Venice, Vertex AI, Warp, Windsurf, MiMo, Trae, Qoder, Zed, Droid, JetBrains AI, Groq, Hugging Face, LongCat, sub2api, Mistral, Perplexity, Volcengine Ark
+Claude, Codex, CodeBuddy, CodeBuddy CN, WorkBuddy, WorkBuddy AI, Cursor, OpenCode, Copilot, Grok, Devin, MiniMax, OpenRouter, Z.ai, Antigravity, DeepSeek, Kimi API, ElevenLabs, Ollama, Codebuff, Kilo, AihubMix, One/New API, Qwen Code, Hermes, Kimi Code, StepFun, StepFun Step Plan, Shandianshuo, SiliconFlow, Novita AI, Custom Relay, Qoder CN, Trae CN, Command Code, Doubao, ClawsGO, BochaAI, Tavily, Firecrawl, Brave Search, GIPHY, ClinePass, SenseNova, APIGOTO, MiniMax Code, Amp, AWS Bedrock, Chutes, Deepgram, Kiro, OpenAI API, Poe, TokenRhythm, Venice, Vertex AI, Warp, Windsurf, MiMo, Trae, Qoder, Zed, Droid, JetBrains AI, Groq, Hugging Face, LongCat, sub2api, Mistral, Perplexity, Volcengine Ark
 
 </details>
 
@@ -92,7 +96,7 @@ Claude, Codex, CodeBuddy, CodeBuddy CN, WorkBuddy, Cursor, OpenCode, Copilot, Gr
 <div align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="attachments/how-dark.png">
-    <img src="attachments/how-light.png" width="820" alt="Pane architecture: local core querying provider endpoints directly">
+    <img src="attachments/how-light.png" width="900" alt="Pane architecture: local core querying provider endpoints directly">
   </picture>
 </div>
 
@@ -100,9 +104,11 @@ The Rust core schedules quota queries that **hit each provider's official endpoi
 
 ## <a id="features"></a>What it does
 
-### Any quota, one glance
+### Quotas and spend, one glance
 
 The floating panel answers "how much is left, when does it reset" in a single overview: green / yellow / red states tell available, peak and unavailable apart, with remaining quota and reset countdowns right on the card; `Shift` cycles 5-hour / 7-day / monthly periods. Failed queries surface as explicit error states, never as grey unknowns; providers without a monthly quota fall back to weekly in the month view, clearly labeled.
+
+The same panel switches to **By tool / Dollars**, so quota and spend never need separate windows.
 
 <table>
   <tr>
@@ -115,10 +121,10 @@ The floating panel answers "how much is left, when does it reset" in a single ov
     </td>
     <td width="50%" align="center" valign="top">
       <picture>
-        <source media="(prefers-color-scheme: dark)" srcset="attachments/overview-week-dark.png">
-        <img src="attachments/overview-week-light.png" width="390" alt="Quota overview · weekly view">
+        <source media="(prefers-color-scheme: dark)" srcset="attachments/spend-tool-dollar-dark.png">
+        <img src="attachments/spend-tool-dollar-light.png" width="390" alt="Spend breakdown · by tool / dollars">
       </picture><br/>
-      <sub>Weekly view · reset countdowns and groups</sub>
+      <sub>By tool / dollars</sub>
     </td>
   </tr>
 </table>
@@ -127,7 +133,7 @@ The floating panel answers "how much is left, when does it reset" in a single ov
 
 ### Providers
 
-68 sources connect through three auth shapes, and every card has a "⚡ test connectivity" action (works on unenabled cards too, reporting `connected · N ms` or the failure reason) plus a "? quota how-to" that explains the key / OAuth / local-login steps for its auth shape with console links. The Customize drawer adds in-place search, custom groups (🥚🐑) and two-level notes:
+71 sources connect through three auth shapes, and every card has a "⚡ test connectivity" action (works on unenabled cards too, reporting `connected · N ms` or the failure reason) plus a "? quota how-to" that explains the key / OAuth / local-login steps for its auth shape with console links. The Customize drawer adds in-place search, custom groups (🥚🐑) and two-level notes:
 
 > Category tabs switch between **Coding Agents / Productivity / MCP-search**; removed providers land in the drawer's footer and restore in one click.
 
@@ -138,13 +144,16 @@ The floating panel answers "how much is left, when does it reset" in a single ov
   </picture>
 </div>
 
-### Account pools
+<details>
+<summary><b>Account pools</b> — independent cards per account; right-click to archive or restore</summary>
 
 - API-key providers can hold multiple accounts in settings, each with its own card;
 - every account keeps a stable local card identity — deleting or reordering never shuffles them;
 - notes come in two levels: "Provider name" retitles the card, "sub-account name" only that account;
 - right-click an account pill to set it as the default, archive or restore (credentials follow the archive);
 - the overview folds a pool into "main account ring + usage bar + `N/M` badge", expanding on click.
+
+</details>
 
 ### Spend, fully traceable
 
@@ -154,21 +163,35 @@ Local CLI logs are scanned to compute spend — no cloud service involved; dolla
 | :--- | :--- |
 | Today / yesterday / last 30 days | Windowed token and dollar totals |
 | Model breakdown | Spend and tokens per model; unknown prices keep the facts and are marked unpriced |
+| Provider trend | The quota trend shows that provider's consumed credits or measured tokens |
 | 365-day heatmap | Daily intensity at a glance |
 | Tiered icons | Spend-card icons tier by daily token volume; thresholds customizable |
 | Copy as image | The total-spend card asks for a range first (today / yesterday / 7 days / 30 days / all) and then renders the share image; provider cards snapshot instantly |
 
-<div align="center">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="attachments/spend-detail-heat-dark.png">
-    <img src="attachments/spend-detail-heat-light.png" width="680" alt="Spend details and the 365-day heatmap">
-  </picture>
-  <br/><sub>Demo data, no real accounts; per-CLI metering in <a href="docs/token-spend-coverage.md">Token spend coverage</a></sub>
-</div>
+Per-CLI metering is documented in [Token spend coverage](docs/token-spend-coverage.md).
 
 ### Skin workshop
 
-Light / dark themes switch in one keystroke (`Ctrl + L`); **the skin market is experimental and hidden by default** — enable it with a second confirmation in settings. The workshop is a gallery layout: the selected skin's full preview (a total-spend panel sample) on top, thumbnails below, and "use this skin / restore native" pinned in the action bar; day / night / side-by-side preview modes retain scroll position and keyboard focus across switches.
+Light / dark themes switch in one keystroke (`Ctrl + L`); **the skin market is experimental and hidden by default** — enable it with a second confirmation in settings. Two skins ship built in: **Cloud Post Office** (hand-drawn stamps, a cat courier) and **Ink & Paper** (ink-wash mountains, red koi, paper grain); both follow light and dark. The workshop is a gallery layout: the selected skin's full preview (a total-spend panel sample) on top, thumbnails below, and "use this skin / restore native" pinned in the action bar; day / night / side-by-side preview modes retain scroll position and keyboard focus across switches.
+
+<table>
+  <tr>
+    <td width="50%" align="center" valign="top">
+      <picture>
+        <source media="(prefers-color-scheme: dark)" srcset="attachments/skins-dark.png">
+        <img src="attachments/skins-light.png" width="390" alt="Cloud Post Office skin: hand-drawn stamps and a cat courier">
+      </picture><br/>
+      <sub>Cloud Post Office · hand-drawn stamps</sub>
+    </td>
+    <td width="50%" align="center" valign="top">
+      <picture>
+        <source media="(prefers-color-scheme: dark)" srcset="attachments/skins-ink-dark.png">
+        <img src="attachments/skins-ink-light.png" width="390" alt="Ink & Paper skin: ink-wash koi and paper grain">
+      </picture><br/>
+      <sub>Ink &amp; Paper · ink-wash koi</sub>
+    </td>
+  </tr>
+</table>
 
 <details>
 <summary><b>Resource-pack format</b></summary>
@@ -177,16 +200,12 @@ Skins distribute as resource packs: a zip holding `manifest.json` (id, name, ver
 
 </details>
 
-<div align="center">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="attachments/skins-dark.png">
-    <img src="attachments/skins-light.png" width="390" alt="Skin workshop: gallery layout with the spend-panel sample">
-  </picture>
-</div>
-
 ### Keys stay on your machine
 
 Provider master keys, every sub-account key, **and all login tokens** (OAuth / login refresh tokens, Cursor / Codex account tokens, search keys) live in the **OS credential store** (Windows Credential Manager, …) — the JSON files keep non-secret fields only; legacy plaintext entries migrate automatically on first read, and the plaintext is dropped only after the store write succeeded. Each row on the "Keys & usage" page requires **master-password verification** to reveal, with plaintext never staying on screen and one-click copy; local-login rows show a green "connected" state naming where the credential is read from.
+
+<details>
+<summary><b>Credential storage, plaintext reveal and shortcuts</b></summary>
 
 | | |
 | :--- | :--- |
@@ -201,7 +220,10 @@ Provider master keys, every sub-account key, **and all login tokens** (OAuth / l
   </picture>
 </div>
 
-### Let your AI agent troubleshoot Pane itself
+</details>
+
+<details>
+<summary><b>Let your AI agent troubleshoot Pane itself</b> — read-only diagnostics API + troubleshooting skill</summary>
 
 Pane ships a **read-only diagnostics API** (loopback-only, unauthenticated, **credentials never leave the machine** — URLs in error text are scrubbed too) and a troubleshooting skill. With both in place you can just ask your coding agent (Claude Code / Codex / Cursor / ZCode, …) "figure out which Pane card is broken" — it locates the cause and proposes the fix, no release cycle needed:
 
@@ -214,16 +236,21 @@ curl -s --noproxy '*' http://127.0.0.1:6736/v1/sources    # local spend data sou
 
 Install the skill one of three ways: automatically via the `install.ps1` installer, in settings → General → **AI Agent troubleshooting skill → Install**, or from the repo ([`skills/pane/`](skills/pane/); `npx skills add Aafff623/pane` works too). Full contract: [local HTTP API](docs/local-http-api.md).
 
-### Also
+</details>
+
+<details>
+<summary><b>Also</b> — onboarding, expiring list, tray, updates, settings & fonts, resize…</summary>
 
 - **Onboarding tour** — a 5-step spotlight tour plays automatically on first install (back / next / skip, `Esc` exits); existing users are never interrupted, and settings → General → "Replay" runs it again on demand;
 - **Expiring list** — summon with `T`, sorted by reset time; the top is the "act now" part;
 - **Tray at hand** — right-click surfaces every provider's status row straight from the local snapshot (zero network) plus settings entries;
 - **Non-intrusive updates** — a lightweight ↑ indicator on the total-spend bar when a new version lands; clicking downloads in place with a byte-accurate progress ring, then installs and restarts;
+- **Settings & fonts** — every settings page shares one 940px content column and is vertically centered; the keys page gets an A–Z index; Latin and Chinese fonts are configured separately, with the stack ordered Latin → Chinese → system fallback;
+- **Proportional corner resize** — enable corner handles in settings; dragging scales the window, type and icons together, remembers the size, and restores the default in one click;
+- **Changelog timeline** — the bottom of the main card list shows each version's additions / changes / fixes in color, with the full log one click away;
 - **Three UI languages** — 简体中文 / English / Русский, following the system or set manually;
 - **Boot animation** — the brand animation when the panel opens can be turned off or replayed, freezing to a still frame under reduced-motion systems;
-- **Font packs** — the same zip + manifest + sha256 verification as skins, downloaded from settings near the font picker and applied straight into the font dropdown; the official catalog is currently empty, so the recommended pick is MV Boli, which ships with Windows;
-- **Auto-trigger at reset** — off by default: GLM / MiniMax style 5-hour plans can send one minimal request at the next reset to wake the billing window, enabled explicitly in settings, with a status badge on the card.
+- **Font packs** — the same zip + manifest + sha256 verification as skins, downloaded from settings near the font picker and applied straight into the font dropdown; the official catalog is currently empty, so the recommended pick is MV Boli, which ships with Windows.
 
 <details>
 <summary><b>All nine built-in shortcuts</b></summary>
@@ -248,6 +275,8 @@ Install the skill one of three ways: automatically via the `install.ps1` install
     <img src="attachments/expiring-light.png" width="390" alt="Expiring list">
   </picture>
 </div>
+
+</details>
 
 ## <a id="docs"></a>Documentation
 
