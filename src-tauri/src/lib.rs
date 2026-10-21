@@ -5103,23 +5103,18 @@ fn now_ms() -> u64 {
         .unwrap_or(0)
 }
 
-/// The position the next summon should use: the one the user dragged the
-/// popover to, but only while the position lock is off. `None` means "place
-/// it the usual way" (tray anchor / monitor center).
+/// The position the next summon should use. The lock freezes the window at
+/// `popoverPos`; it does not mean "re-center every time" (that old rule
+/// discarded the position the user had just dragged to). `None` means
+/// "place it the usual way" (tray anchor / monitor center) on first run.
 fn saved_popover_position() -> Option<tauri::PhysicalPosition<i32>> {
     let cfg = load_config();
-    if cfg.get("popoverLock").and_then(Value::as_bool).unwrap_or(true) {
-        return None; // locked: the popover is always re-placed, never remembered
-    }
     let pos = cfg.get("popoverPos")?;
     let x = i32::try_from(pos.get("x")?.as_i64()?).ok()?;
     let y = i32::try_from(pos.get("y")?.as_i64()?).ok()?;
     Some(tauri::PhysicalPosition::new(x, y))
 }
 
-/// Remembers where the popover sits so an unlocked summon can put it back.
-/// Called on every dismiss path; a no-op while the lock is on, because a
-/// locked popover's position is not the user's to keep.
 /// Re-apply the pin preference on every summon. The window builder starts
 /// unpinned; the stored config is the only authority, so a prior
 /// always-on-top state cannot leak across hide/show.
@@ -5131,11 +5126,10 @@ fn apply_popover_pin(window: &tauri::WebviewWindow) {
     let _ = window.set_always_on_top(pinned);
 }
 
+/// Remembers where the popover sits so the next summon can put it back.
+/// Locked or unlocked, the last position is the user's position; the lock
+/// only decides whether the window can still be dragged.
 fn remember_popover_position(window: &tauri::WebviewWindow) {
-    let cfg = load_config();
-    if cfg.get("popoverLock").and_then(Value::as_bool).unwrap_or(true) {
-        return;
-    }
     let Ok(pos) = window.outer_position() else {
         return;
     };
@@ -5173,7 +5167,7 @@ fn toggle_popover(app: &tauri::AppHandle, click: tauri::PhysicalPosition<f64>) {
 
     // Anchor the popover's bottom-right corner near the tray click,
     // which sits next to the clock on a standard bottom taskbar — unless
-    // the user dragged it somewhere and left the lock off.
+    // the user has a remembered position (the lock only controls dragging).
     let size = window
         .outer_size()
         .unwrap_or(tauri::PhysicalSize::new(380, 600));
@@ -5597,6 +5591,22 @@ pub fn run() {
                     // happens after focus was held for a noticeable time.
                     let gained_at = LAST_FOCUS_GAINED_MS.load(Ordering::Relaxed);
                     if now_ms().saturating_sub(gained_at) < 500 {
+                        return;
+                    }
+                    // A pinned window stays open above other apps; an
+                    // unlocked window is in position-adjust mode and must
+                    // stay put while the user drags it. Both exit through
+                    // Esc / Alt+2 / the tray, not an outside click.
+                    let cfg = load_config();
+                    let pinned = cfg
+                        .get("popoverPin")
+                        .and_then(Value::as_bool)
+                        .unwrap_or(false);
+                    let unlocked = !cfg
+                        .get("popoverLock")
+                        .and_then(Value::as_bool)
+                        .unwrap_or(true);
+                    if pinned || unlocked {
                         return;
                     }
                     if let Some(wv) = window.app_handle().get_webview_window("main") {

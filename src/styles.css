@@ -2694,6 +2694,32 @@ article.provider.is-folded:hover {
   color: #eab308;
 }
 
+body.position-adjust .popover {
+  outline: 1px dashed rgba(234, 179, 8, 0.55);
+  outline-offset: -2px;
+}
+
+.position-adjust-hint {
+  position: fixed;
+  top: 5px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 9999;
+  max-width: calc(100% - 16px);
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: #eab308;
+  color: #111;
+  font-size: 9px;
+  font-weight: 600;
+  line-height: 1.3;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  pointer-events: none;
+  box-shadow: 0 2px 8px rgb(0 0 0 / 0.25);
+}
+
 /* Update-push indicator in the Total Spend header — the mainstream quiet
    affordance (Cursor-style): a green circular up arrow that appears only
    while a version is announced. Clicking starts the download in place; the

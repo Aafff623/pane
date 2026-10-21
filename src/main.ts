@@ -3937,16 +3937,18 @@ async function togglePopoverPin(): Promise<void> {
 /// the dragged position is remembered by Rust on dismiss.
 async function togglePopoverLock(): Promise<void> {
   const next = !(config.popoverLock !== false);
-  const patch: Partial<Config> = next
-    ? { popoverLock: true, popoverPos: null }
-    : { popoverLock: false };
-  await patchConfig(patch).catch(() => {});
-  applyPopoverDragRegion(next);
-  if (next) {
-    // Re-locking snaps back to the default placement right away, so the
-    // click has a visible effect instead of waiting for the next summon.
-    await centerPopover();
+  // Lock = freeze the current position; unlock = adjust mode. Never
+  // re-center on lock: that used to discard the position the user had
+  // just dragged to before Alt+2 could use it.
+  let pos: { x: number; y: number } | null = null;
+  try {
+    const current = await getCurrentWebviewWindow().outerPosition();
+    pos = { x: current.x, y: current.y };
+  } catch (err) {
+    console.error("read popover position failed:", err);
   }
+  await patchConfig({ popoverLock: next, ...(pos ? { popoverPos: pos } : {}) }).catch(() => {});
+  applyPopoverDragRegion(next);
   requestRender();
 }
 
@@ -3972,17 +3974,67 @@ async function resetPopoverPosition(): Promise<void> {
   requestRender();
 }
 
-/// Adds / removes the drag region that lets an unlocked popover be moved.
-/// "deep" drags from anywhere in the subtree; the card-reorder grip opts
-/// out so reordering cards keeps working while unlocked.
+let popoverDragHandler: ((event: PointerEvent) => void) | null = null;
+
+function setAdjustHint(active: boolean): void {
+  document.body.classList.toggle("position-adjust", active);
+  const existing = document.querySelector<HTMLElement>(".position-adjust-hint");
+  if (!active) {
+    existing?.remove();
+    return;
+  }
+  if (existing) {
+    existing.textContent = t("popover.adjustHint");
+    return;
+  }
+  const hint = document.createElement("div");
+  hint.className = "position-adjust-hint";
+  hint.textContent = t("popover.adjustHint");
+  document.body.appendChild(hint);
+}
+
+/// Unlock = adjust mode. Rather than relying on data-tauri-drag-region
+/// (which the card content and nested WebView elements frequently shadow),
+/// a pointerdown on any non-interactive area starts the native window drag.
+/// The window itself is a normal Tauri window, so this works with the
+/// existing floating-window architecture; no second window is created.
 function applyPopoverDragRegion(locked: boolean): void {
   if (IS_PANEL_FORM) return;
-  document.body.toggleAttribute("data-tauri-drag-region", !locked);
-  if (!locked) document.body.setAttribute("data-tauri-drag-region", "deep");
+  setAdjustHint(!locked);
+  // The old attribute path fought the pointer handler (both tried to start
+  // the drag); use one explicit native drag path instead.
+  document.body.removeAttribute("data-tauri-drag-region");
   document.querySelectorAll<HTMLElement>(".drag-grip").forEach((grip) => {
-    if (locked) grip.removeAttribute("data-tauri-drag-region");
-    else grip.setAttribute("data-tauri-drag-region", "false");
+    grip.removeAttribute("data-tauri-drag-region");
   });
+  if (locked) {
+    if (popoverDragHandler) {
+      document.removeEventListener("pointerdown", popoverDragHandler, true);
+      popoverDragHandler = null;
+    }
+    return;
+  }
+  if (!popoverDragHandler) {
+    popoverDragHandler = (event: PointerEvent) => {
+      if (config.popoverLock !== false || event.button !== 0) return;
+      const target = event.target;
+      if (!(target instanceof Element)) return;
+      // Buttons, fields, rows and native-draggable elements keep their own
+      // pointer behaviour; everything else moves the window.
+      if (
+        target.closest(
+          "button, input, textarea, select, a, label, [contenteditable='true'], [data-no-drag]",
+        )
+      ) {
+        return;
+      }
+      event.preventDefault();
+      void getCurrentWebviewWindow().startDragging().catch((err) => {
+        console.error("start dragging failed:", err);
+      });
+    };
+    document.addEventListener("pointerdown", popoverDragHandler, true);
+  }
 }
 
 function renderTotalSpend(): string {
