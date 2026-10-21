@@ -168,6 +168,7 @@ fn config_with_defaults(mut cfg: Value) -> Value {
     obj.entry("density").or_insert(json!("compact"));
     // Empty = stock UI font stack; a family name replaces only the head of it.
     obj.entry("uiFont").or_insert(json!(""));
+    obj.entry("uiFontCjk").or_insert(json!(""));
     obj.entry("uiFontPromptVersion").or_insert(json!(""));
     obj.entry("configNoticeVersion").or_insert(json!(""));
     obj.entry("glassEffects").or_insert(json!(true));
@@ -304,6 +305,7 @@ const CONFIG_KEYS: &[&str] = &[
     "appearance",
     "density",
     "uiFont",
+    "uiFontCjk",
     "uiFontPromptVersion",
     "configNoticeVersion",
     "glassEffects",

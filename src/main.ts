@@ -417,6 +417,7 @@ interface Config {
   appearance: "system" | "light" | "dark";
   density: "regular" | "compact";
   uiFont: string;
+  uiFontCjk: string;
   uiFontPromptVersion: string;
   configNoticeVersion: string;
   glassEffects: boolean;
@@ -486,6 +487,7 @@ const FRONTEND_CONFIG_KEYS = [
   "appearance",
   "density",
   "uiFont",
+  "uiFontCjk",
   "uiFontPromptVersion",
   "configNoticeVersion",
   "glassEffects",
@@ -708,6 +710,7 @@ let config: Config = {
   appearance: "system",
   density: "regular",
   uiFont: "",
+  uiFontCjk: "",
   uiFontPromptVersion: "",
   configNoticeVersion: "",
   glassEffects: true,
@@ -7703,17 +7706,24 @@ function applyAppearance(): void {
 /// against a hand-edited config.json carrying a non-string uiFont.
 function applyUiFont(): void {
   const root = document.documentElement;
-  const font = String(config.uiFont ?? "").trim();
-  if (!font) {
+  const latin = String(config.uiFont ?? "").trim();
+  const cjk = String(config.uiFontCjk ?? "").trim();
+  if (!latin && !cjk) {
     root.style.removeProperty("--app-font");
     requestAnimationFrame(fitProviderNames);
     return;
   }
-  const safe = font.replace(/[\\"]/g, "\\$&");
-  root.style.setProperty(
-    "--app-font",
-    `"${safe}", "Segoe UI Variable", "Segoe UI", system-ui, sans-serif`,
+  const parts: string[] = [];
+  if (latin) parts.push(`"${latin.replace(/[\\"]/g, "\\$&")}"`);
+  if (cjk) parts.push(`"${cjk.replace(/[\\"]/g, "\\$&")}"`);
+  parts.push(
+    '"Segoe UI Variable"',
+    '"Segoe UI"',
+    '"Microsoft YaHei"',
+    "system-ui",
+    "sans-serif",
   );
+  root.style.setProperty("--app-font", parts.join(", "));
   requestAnimationFrame(fitProviderNames);
 }
 
@@ -15099,6 +15109,27 @@ async function initSettings(): Promise<void> {
     void patchConfig({ uiFont: uiFont.value.trim() }).then(applyAppearance);
   });
 
+  const uiFontCjk = document.querySelector<HTMLInputElement>("#ui-font-cjk");
+  if (uiFontCjk) {
+    uiFontCjk.value = String(config.uiFontCjk ?? "");
+    if (config.uiFontCjk) uiFontCjk.style.fontFamily = `"${config.uiFontCjk.replace(/[\\"]/g, "\\$&")}"`;
+    uiFontCjk.addEventListener("change", () => {
+      void patchConfig({ uiFontCjk: uiFontCjk.value.trim() }).then(applyAppearance);
+    });
+    const list = document.querySelector<HTMLDataListElement>("#ui-font-cjk-list");
+    void ensureSystemFonts().then(() => {
+      if (!list || list.options.length) return;
+      const families = [...new Set([...fontPackFamilies(), ...(systemFontFamilies ?? [])])]
+        .filter(Boolean)
+        .sort((a, b) => a.localeCompare(b));
+      for (const family of families) {
+        const option = document.createElement("option");
+        option.value = family;
+        list.append(option);
+      }
+    });
+  }
+
   for (const manager of document.querySelectorAll<HTMLElement>(".font-pack-manager")) {
     void mountFontPackManager(manager, {
       t,
@@ -15665,6 +15696,7 @@ function buildPanelShell(): void {
   moveRow("locale");
   moveRow("appearance");
   moveRow("ui-font");
+  moveRow("ui-font-cjk");
   const fontManager = document.querySelector<HTMLElement>(".font-pack-manager");
   if (fontManager) generalCard.append(fontManager);
   document.querySelector("#tour-replay")?.closest(".setting-row")?.remove();
