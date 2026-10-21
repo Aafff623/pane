@@ -3975,7 +3975,11 @@ fn retain_current_key_accounts(snapshots: &mut Vec<providers::Snapshot>, expecte
 /// and needs-reauth state come from the snapshot cache on the frontend.
 #[tauri::command]
 fn auth_center_list() -> Vec<auth_center::AuthFamilyGroup> {
-    auth_center::collect()
+    let mut groups = auth_center::collect();
+    if let Ok(map) = last_ok().lock() {
+        auth_center::attach_last_ok_at(&mut groups, |id| map.get(id).map(|entry| entry.at));
+    }
+    groups
 }
 
 /// Known env-var fallbacks per provider, for get_credential_status. The

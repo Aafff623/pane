@@ -35,6 +35,19 @@ pub struct AuthAccountRow {
     /// OAuth logins record no date, so the row omits the segment.
     #[serde(rename = "capturedAt", skip_serializing_if = "Option::is_none")]
     pub captured_at: Option<i64>,
+    /// Unix milliseconds of the last successful snapshot for this card id.
+    /// Filled by the command layer from last_snapshots.json; None means the
+    /// card was never queried (not "queried and empty").
+    #[serde(rename = "lastOkAt", skip_serializing_if = "Option::is_none")]
+    pub last_ok_at: Option<i64>,
+    /// Persisted by the CodeBuddy/WorkBuddy refresh path when a token
+    /// refresh is rejected. None means no flag — never a claim of health.
+    #[serde(rename = "needsRelogin", skip_serializing_if = "Option::is_none")]
+    pub needs_relogin: Option<bool>,
+    /// Coarse, non-secret class paired with needsRelogin
+    /// (refresh_rejected / network / vendor / unknown).
+    #[serde(rename = "lastErrorKind", skip_serializing_if = "Option::is_none")]
+    pub last_error_kind: Option<String>,
     /// "slot" (antigravity capture) | "account" (cursor import) |
     /// "oauth" (Pane device-code login).
     pub kind: &'static str,
@@ -85,6 +98,9 @@ fn rows_for_family_from(base: &Path, family: &str) -> Vec<AuthAccountRow> {    m
                 email: None,
                 masked_key: antigravity_accounts::mask_token(&slot.refresh_token),
                 captured_at: Some(slot.captured_at).filter(|ts| *ts > 0),
+                last_ok_at: None,
+                needs_relogin: None,
+                last_error_kind: None,
                 kind: "slot",
                 source: None,
                 enterprise_name: None,
@@ -100,6 +116,9 @@ fn rows_for_family_from(base: &Path, family: &str) -> Vec<AuthAccountRow> {    m
                 email: (!acct.email.trim().is_empty()).then(|| acct.email.clone()),
                 masked_key: cursor_accounts::mask_token(&acct.access_token),
                 captured_at: Some(acct.captured_at).filter(|ts| *ts > 0),
+                last_ok_at: None,
+                needs_relogin: None,
+                last_error_kind: None,
                 kind: "account",
                 source: None,
                 enterprise_name: None,
@@ -115,6 +134,9 @@ fn rows_for_family_from(base: &Path, family: &str) -> Vec<AuthAccountRow> {    m
                 email: (!login.email.trim().is_empty()).then(|| login.email.clone()),
                 masked_key: crate::codex_accounts::mask_token(&login.access_token),
                 captured_at: Some(login.added_at).filter(|ts| *ts > 0),
+                last_ok_at: None,
+                needs_relogin: None,
+                last_error_kind: None,
                 kind: "account",
                 source: None,
                 enterprise_name: None,
@@ -126,17 +148,28 @@ fn rows_for_family_from(base: &Path, family: &str) -> Vec<AuthAccountRow> {    m
         | "qoder" | "trae" | "windsurf" | "zed" => {
             crate::login_accounts::load_with_imported_single_login_from(base, family)
                 .iter()
-                .map(|login| AuthAccountRow {
-                    id: crate::login_accounts::card_id_for_account(family, login),
-                    label: login.label.clone(),
-                    email: (!login.email.trim().is_empty()).then(|| login.email.clone()),
-                    masked_key: crate::login_accounts::mask_token(&login.access_token),
-                    captured_at: Some(login.added_at).filter(|ts| *ts > 0),
-                    kind: "account",
-                    source: extra_text(&login.extra, "sourceKind"),
-                    enterprise_name: extra_text(&login.extra, "enterpriseName"),
-                    hint: None,
-                    identity_unknown: false,
+                .map(|login| {
+                    let needs_relogin = login
+                        .extra
+                        .get("needsRelogin")
+                        .and_then(serde_json::Value::as_bool)
+                        .filter(|flag| *flag);
+                    AuthAccountRow {
+                        id: crate::login_accounts::card_id_for_account(family, login),
+                        label: login.label.clone(),
+                        email: (!login.email.trim().is_empty()).then(|| login.email.clone()),
+                        masked_key: crate::login_accounts::mask_token(&login.access_token),
+                        captured_at: Some(login.added_at).filter(|ts| *ts > 0),
+                        last_ok_at: None,
+                        needs_relogin,
+                        last_error_kind: needs_relogin
+                            .and_then(|_| extra_text(&login.extra, "lastErrorKind")),
+                        kind: "account",
+                        source: extra_text(&login.extra, "sourceKind"),
+                        enterprise_name: extra_text(&login.extra, "enterpriseName"),
+                        hint: None,
+                        identity_unknown: false,
+                    }
                 })
                 .collect()
         }
@@ -181,12 +214,29 @@ fn append_local_rows(rows: &mut Vec<AuthAccountRow>, candidates: Vec<crate::loca
             email: email.map(str::to_string),
             masked_key: "—".into(),
             captured_at: None,
+            last_ok_at: None,
+            needs_relogin: None,
+            last_error_kind: None,
             kind: "local",
             source: None,
             enterprise_name: None,
             hint: Some(candidate.hint),
             identity_unknown: !candidate.always_listed && email.is_none(),
         });
+    }
+}
+
+/// Fill each row's last successful snapshot time by card id. The snapshot
+/// cache lives in lib.rs, so the command passes a lookup instead of this
+/// module reaching into Tauri state.
+pub fn attach_last_ok_at(
+    groups: &mut [AuthFamilyGroup],
+    at: impl Fn(&str) -> Option<i64>,
+) {
+    for group in groups {
+        for row in &mut group.accounts {
+            row.last_ok_at = at(&row.id);
+        }
     }
 }
 
@@ -526,6 +576,93 @@ mod tests {
         assert_eq!(qoder.accounts.len(), 2);
         assert_eq!(qoder.accounts[1].id, "qodercn");
         assert!(!qoder.accounts[1].identity_unknown);
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn login_health_flags_surface_on_the_row() {
+        let base = temp_base("login-health");
+        let account = |extra: serde_json::Value| crate::login_accounts::LoginAccount {
+            account_id: "uid-health".into(),
+            email: "h@example.com".into(),
+            label: "Health".into(),
+            access_token: "tok".into(),
+            refresh_token: "ref".into(),
+            id_token: String::new(),
+            expires_at: String::new(),
+            added_at: 1_700_000_000,
+            extra,
+        };
+        crate::login_accounts::save_to(
+            &base,
+            "workbuddy",
+            &[account(serde_json::json!({
+                "needsRelogin": true,
+                "lastErrorKind": "refresh_rejected"
+            }))],
+        )
+        .expect("seed relogin");
+        let groups = collect_from(&base);
+        let row = &groups.iter().find(|g| g.family == "workbuddy").unwrap().accounts[0];
+        assert_eq!(row.needs_relogin, Some(true));
+        assert_eq!(row.last_error_kind.as_deref(), Some("refresh_rejected"));
+        assert_eq!(row.last_ok_at, None);
+
+        crate::login_accounts::save_to(&base, "workbuddy", &[account(serde_json::json!({}))])
+            .expect("seed healthy");
+        let groups = collect_from(&base);
+        let row = &groups.iter().find(|g| g.family == "workbuddy").unwrap().accounts[0];
+        assert_eq!(row.needs_relogin, None);
+        assert_eq!(row.last_error_kind, None);
+
+        // A stale lastErrorKind without the flag is not a relogin state.
+        crate::login_accounts::save_to(
+            &base,
+            "workbuddy",
+            &[account(serde_json::json!({ "lastErrorKind": "network" }))],
+        )
+        .expect("seed stale kind");
+        let groups = collect_from(&base);
+        let row = &groups.iter().find(|g| g.family == "workbuddy").unwrap().accounts[0];
+        assert_eq!(row.needs_relogin, None);
+        assert_eq!(row.last_error_kind, None);
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn last_ok_at_attaches_by_card_id() {
+        let base = temp_base("last-ok");
+        crate::login_accounts::save_to(
+            &base,
+            "workbuddy",
+            &[crate::login_accounts::LoginAccount {
+                account_id: "uid-ok".into(),
+                email: String::new(),
+                label: "OK".into(),
+                access_token: "tok".into(),
+                refresh_token: String::new(),
+                id_token: String::new(),
+                expires_at: String::new(),
+                added_at: 1_700_000_000,
+                extra: serde_json::json!({}),
+            }],
+        )
+        .expect("seed");
+        let mut groups = collect_from(&base);
+        let id = groups
+            .iter()
+            .find(|g| g.family == "workbuddy")
+            .unwrap()
+            .accounts[0]
+            .id
+            .clone();
+        attach_last_ok_at(&mut groups, |card| (card == id).then_some(1_700_000_123_000));
+        let row = &groups.iter().find(|g| g.family == "workbuddy").unwrap().accounts[0];
+        assert_eq!(row.last_ok_at, Some(1_700_000_123_000));
+
+        attach_last_ok_at(&mut groups, |_| None);
+        let row = &groups.iter().find(|g| g.family == "workbuddy").unwrap().accounts[0];
+        assert_eq!(row.last_ok_at, None);
         let _ = std::fs::remove_dir_all(&base);
     }
 }

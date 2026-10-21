@@ -16239,6 +16239,13 @@ interface AuthAccountRow {
   /// The local store exposed no reliable identity, so this row was kept
   /// separate instead of being folded into a managed account.
   identityUnknown?: boolean;
+  /// Unix ms of the last successful snapshot for this row's card id.
+  lastOkAt?: number;
+  /// Persisted by the CodeBuddy/WorkBuddy refresh path when a token refresh
+  /// is rejected; absent means no flag, not a claim of health.
+  needsRelogin?: boolean;
+  /// Coarse, non-secret error class paired with needsRelogin.
+  lastErrorKind?: string;
 }
 
 interface AuthFamilyGroup {
@@ -16435,6 +16442,34 @@ function authNeedsReauth(snap: Snapshot | undefined): string | null {
     : null;
 }
 
+/// The persisted relogin flag carries a coarse, non-secret error class;
+/// show a readable reason instead of the raw enum.
+function authReloginReason(kind: string | undefined): string {
+  switch (kind) {
+    case "refresh_rejected":
+      return t("auth.reloginRejected");
+    case "network":
+      return t("auth.reloginNetwork");
+    case "vendor":
+      return t("auth.reloginVendor");
+    default:
+      return t("auth.reloginUnknown");
+  }
+}
+
+/// Last successful snapshot time — never the last attempt, so a stale card
+/// cannot look freshly checked.
+function authLastChecked(acct: AuthAccountRow): string | null {
+  if (!acct.lastOkAt) return null;
+  const date = new Date(acct.lastOkAt).toLocaleString(localeTag(), {
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+  return t("auth.lastChecked", { date });
+}
+
 function authQuotaHtml(snap: Snapshot | undefined, reauth: string | null): string {
   if (reauth || !snap || snap.status !== "ok") {
     return `<span class="auth-quota dim">—</span>`;
@@ -16455,14 +16490,26 @@ function authRowHtml(family: string, acct: AuthAccountRow, index: number): strin
   const snap = authRowSnapshot(acct);
   // A local row mirrors the official client's own sign-in — never managed,
   // so it can't need a re-login and has no remove menu.
-  const reauth = local ? null : authNeedsReauth(snap);
+  const reloginKind =
+    !local && acct.needsRelogin === true ? acct.lastErrorKind ?? "unknown" : null;
+  const reauth = local
+    ? null
+    : reloginKind
+      ? authReloginReason(reloginKind)
+      : authNeedsReauth(snap);
+  // A network failure is not a credential problem: show the reason without
+  // the "needs sign-in" pill.
+  const showReauthPill = !local && (reloginKind ? reloginKind !== "network" : reauth !== null);
+  const lastChecked = authLastChecked(acct);
   const name = authRowName(family, acct);
   let sub: string;
   if (reauth) {
     // cc-switch swaps the second line for the reauth reason.
-    sub = `<div class="auth-sub reauth" title="${escapeHtml(reauth)}">${escapeHtml(reauth)}</div>`;
+    const title = [reauth, lastChecked].filter(Boolean).join(" · ");
+    sub = `<div class="auth-sub reauth" title="${escapeHtml(title)}">${escapeHtml(reauth)}</div>`;
   } else if (local) {
     const details = [t("auth.source.local"), acct.hint ?? "", t("auth.readOnly")];
+    if (lastChecked) details.push(lastChecked);
     details.push(snap ? t("auth.monitoring") : t("auth.noCard"));
     sub = `<div class="auth-sub" title="${escapeHtml(details.join(" · "))}">${escapeHtml(details.filter(Boolean).join(" · "))}</div>`;
   } else {
@@ -16478,6 +16525,7 @@ function authRowHtml(family: string, acct: AuthAccountRow, index: number): strin
       });
       details.push(t("auth.captured", { date }));
     }
+    if (lastChecked) details.push(lastChecked);
     details.push(acct.maskedKey);
     details.push(snap ? t("auth.monitoring") : t("auth.noCard"));
     sub = `<div class="auth-sub">${escapeHtml(details.join(" · "))}</div>`;
@@ -16503,11 +16551,15 @@ function authRowHtml(family: string, acct: AuthAccountRow, index: number): strin
     <div class="auth-id">
       <div class="auth-name-line">
         <span class="auth-name" title="${escapeHtml(name)}">${escapeHtml(name)}</span>
-        ${reauth ? `<span class="auth-pill reauth">${escapeHtml(t("auth.needsReauth"))}</span>` : localPills}
+        ${
+          showReauthPill
+            ? `<span class="auth-pill reauth">${escapeHtml(t("auth.needsReauth"))}</span>`
+            : localPills
+        }
       </div>
       ${sub}
     </div>
-    ${authQuotaHtml(snap, reauth)}
+    ${authQuotaHtml(snap, showReauthPill ? reauth : null)}
     ${action}
   </div>`;
 }
