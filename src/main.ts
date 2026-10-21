@@ -3486,23 +3486,19 @@ function fmtRate(v: number): string {
 /// The ring's two-line center (and its hover text) for the active metric.
 /// Cost/MTok is the overall average — total dollars over total megatokens —
 /// not a sum of per-provider rates.
-function spendCenter(entries: DonutEntry[]): { primary: string; sub: string; exact: string; estNote: string } {
-  const estimated = estimatedTokensFor(entries);
-  const estNote = estimated > 0
-    ? t("spend.estimatedShort", { n: fmtTokens(estimated) })
-    : "";
+function spendCenter(entries: DonutEntry[]): { primary: string; sub: string; exact: string } {
   if (config.spendMetric === "mtok") {
     const cost = entries.reduce((s, e) => s + e.w.cost, 0);
     const mtok = entries.reduce((s, e) => s + e.w.tokens, 0) / 1e6;
     const rate = mtok > 0 ? cost / mtok : 0;
-    return { primary: fmtRate(rate), sub: "$/MTok", exact: `${fmtRate(rate)}/MTok average`, estNote: "" };
+    return { primary: fmtRate(rate), sub: "$/MTok", exact: `${fmtRate(rate)}/MTok average` };
   }
   if (config.spendMetric === "tokens") {
     const tokens = entries.reduce((s, e) => s + e.w.tokens, 0);
-    return { primary: fmtTokens(tokens), sub: t("spend.centerTokens"), exact: t("card.tokens", { n: fmtTokens(tokens) }), estNote };
+    return { primary: fmtTokens(tokens), sub: t("spend.centerTokens"), exact: t("card.tokens", { n: fmtTokens(tokens) }) };
   }
   const c = entries.reduce((s, e) => s + e.w.cost, 0);
-  return { primary: fmtMoney(c), sub: t("spend.metric.cost"), exact: `$${c.toFixed(2)}`, estNote: "" };
+  return { primary: fmtMoney(c), sub: t("spend.metric.cost"), exact: `$${c.toFixed(2)}` };
 }
 
 /// Shrink the ring's center number when it outgrows the hole: base size
@@ -4161,7 +4157,6 @@ function renderTotalSpend(): string {
           ${segments}
           <text class="donut-total" x="48" y="50" text-anchor="middle" font-size="${fitFontSize(center.primary, 14, 7)}" font-weight="600">${center.primary}</text>
           <text class="donut-sub" x="48" y="62" text-anchor="middle" font-size="${fitFontSize(center.sub, 8, 12)}">${center.sub}</text>
-          ${center.estNote ? `<text class="donut-est" x="48" y="72" text-anchor="middle" font-size="6.5">${escapeHtml(center.estNote)}</text>` : ""}
         </svg>
         <div class="spend-cols">
           ${rangeSelected ? rangeCol() : leftColHtml}
@@ -4173,7 +4168,6 @@ function renderTotalSpend(): string {
           <path class="seg donut-zero" data-full="1" fill-rule="evenodd" d="${sectorPath(0, TAU)}"/>
           <text class="donut-total" x="48" y="50" text-anchor="middle" font-size="${fitFontSize(center.primary, 14, 7)}" font-weight="600">${center.primary}</text>
           <text class="donut-sub" x="48" y="62" text-anchor="middle" font-size="${fitFontSize(center.sub, 8, 12)}">${center.sub}</text>
-          ${center.estNote ? `<text class="donut-est" x="48" y="72" text-anchor="middle" font-size="6.5">${escapeHtml(center.estNote)}</text>` : ""}
         </svg>
         <div class="spend-cols">
           ${rangeSelected ? rangeCol() : leftColHtml}
@@ -4210,9 +4204,6 @@ function renderTotalSpend(): string {
   const headTip =
     t("spend.headTokens", { range: t(headRangeKey) }) +
     (estimatedTokens > 0 ? ` · ${t("spend.estimateTotal")}` : "");
-  const headEstimate = estimatedTokens > 0
-    ? `<span class="spend-head-est" title="${escapeHtml(t("spend.estimateTotal"))}">${escapeHtml(t("spend.estimatedIncluded", { n: fmtTokens(estimatedTokens) }))}</span>`
-    : "";
   // ⚡ tier by daily-equivalent usage: the built-in ladder is 100M / 250M /
   // 500M tokens per day; the 7d/30d windows rescale by their day count
   // (700M/week reads "medium"). config.spendIconTiers overrides the ladder.
@@ -4248,7 +4239,7 @@ function renderTotalSpend(): string {
     <article class="provider total-spend${isFolded ? " is-folded" : ""}">
       <div class="provider-head">
         <span class="provider-name">${escapeHtml(t("spend.title"))}</span>
-        <span class="spend-head-value" title="${escapeHtml(headTip)}">${boltHtml}${escapeHtml(fmtTokens(headTokens))}${headEstimate}</span>
+        <span class="spend-head-value" title="${escapeHtml(headTip)}">${boltHtml}${escapeHtml(fmtTokens(headTokens))}</span>
         ${isFolded ? "" : `<span class="info" title="${escapeHtml(t("spend.info", { names: contributors }))}">${uiIcon("info")}</span>`}
         <span class="spacer"></span>
         ${updateVersion ? `<button class="spend-update-btn${updatePushing ? " busy" : ""}" data-update-push${updatePushing && updatePct != null ? ` style="--pct:${updatePct}"` : ""} title="${escapeHtml(t("update.pushTip", { version: updateVersion }))}" aria-label="${escapeHtml(t("update.pushTip", { version: updateVersion }))}">${uiIcon("arrowUp")}</button>` : ""}
