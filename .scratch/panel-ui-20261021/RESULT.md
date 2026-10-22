@@ -64,3 +64,14 @@ Status: awaiting-owner-acceptance
 - 最新完整设置截图位于 `temp/panel-readme-final/settings-*.png`；菜单截图和76项报告位于 `temp/panel-menu-final/`。已完成 Standards / Spec 两轴代码复核与冗余扫描，并修复发现项。
 
 追加 owner 验收：保留现有 Codex CLI 登录，依次 OAuth 添加两个不同订阅账号；检查两者均保留且额度对应，重登一个不影响另一个，自定义备注不变。分别取消浏览器/设备码流程，刷新后不应出现未完成授权的账号。完成基元律动两账号和 Codex 两账号验收后，再在对话明确授权目标版本的 tag / release。
+
+
+## 2026-10-22 Owner 现场反馈后的逻辑修复
+
+- 已按 owner 指令关闭安装版，运行仓库 debug exe 与 Vite。最终探活：两服务均 HTTP 200，进程为 `src-tauri/target/debug/pane.exe`。owner 明确认证、选择账号及回调验收由其本人操作；Agent 不再操作登录窗口或更改真实账号记录。
+- 实机复现授权中心标题已切换但设置列表仍显示。独立 headless 检查 red 为 `settingsHidden=true/settingsDisplay=flex`；精确限定两个 panel view 的 `[hidden]` 后 green 为 `settingsDisplay=none/authDisplay=block`。
+- MiniMax 默认账号备注由 bare 槽位转为 stable credential id；保留默认账号的 stable layout note，账号升为默认后不会继承已删除账号的备注。原生 CLI 仍使用 synthetic note key，与 provider 标题隔离。
+- 默认账号标签中文“置顶”改为“默认”，俄文同步校正。删除默认账号后同时清除该身份及旧 bare 槽位的 pin，保留其他账号的 pin；失效 stable pin 由 layout reconciliation 清理。
+- 修正 reconciliation 的 folding 边界：仅 API-key 池和基元律动折叠默认位，不误清首个托管 Codex 的快照。
+- 新增回归覆盖备注随身份迁移、默认账号 note 保留、CLI 两级备注隔离、删除后 pin 清理及 sibling pin 保留。前端最终75通过，网站36通过，`corepack pnpm build`通过；该轮无Rust改动，未重复Rust全量测试。两轴复核发现项已修复。
+- 日志：`temp/logs/owner-fixes-*.log`、`panel-auth-{red,green}.log`、`minimax-note-{red,green}.log`、`minimax-pin-red.log`。真实OAuth同意与双账号回调仍待owner本人验收。

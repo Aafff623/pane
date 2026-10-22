@@ -2,9 +2,9 @@
   "version": "0.8.8",
   "files": {
     "index.html": "a686abfed4ab1651367219661655d433ac0f207e0fd13fe5e5291cc98d579bb2",
-    "src/main.ts": "713b652ca0ffa96f06a1f9ac1d33f12c17200dd751a4964c5f6c46aed11e17ac",
-    "src/styles.css": "0567335897fcfac0d436b97e5394048bc9c326e9030b33a7b891f7ebf0f58402",
-    "src/i18n.ts": "ffe1303d97d65952f30641e4a51a5fbe41c219fc1c4d74c1a4009f169c6b8c3a",
+    "src/main.ts": "d573ee5350036178fa79a1624d06bfc3506301f1f16e88064ba4cfd59a503d91",
+    "src/styles.css": "832266630c29a9ffaee17167a66a1e004deaa3db0636eed6b1f99d2f239675b6",
+    "src/i18n.ts": "71c67bce4521bb09d072b5b73f4974adc27e9dca5f577dc206f90f5832b064b6",
     "src/providerCatalog.ts": "9b1ce82fa3b4cac73f4db0cdf456e3b38cd6af242e33f0bb56c602ed45b7bfdd"
   }
 }

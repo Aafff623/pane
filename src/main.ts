@@ -1998,12 +1998,14 @@ function notedName(cardId: string, fallback: string): string {
   return cardNote(cardId) || fallback;
 }
 
-/// Storage key for an account-level note. The default (bare) account shares
-/// the family card's id, so its note parks under a synthetic sibling key —
-/// otherwise renaming "account 1" would silently retitle the provider.
-/// The @-shape keeps the key valid through layout pruning.
+/// Account notes follow the managed credential identity, including the first
+/// account displayed on a bare family card. Native CLI sources without a
+/// managed @-identity keep a synthetic sibling key so their notes cannot
+/// retitle the provider.
 function accountNoteKey(accountId: string): string {
-  return accountId.includes("@") ? accountId : `${accountId}@__default__`;
+  if (accountId.includes("@")) return accountId;
+  const stableId = managedAccountForCard(accountId, accountId, accountsCache.get(accountId) ?? [])?.id;
+  return stableId?.includes("@") ? stableId : `${accountId}@__default__`;
 }
 
 /// An account's OWN note (never the provider's). Empty when unset.
@@ -2951,7 +2953,7 @@ function renderCard(s: Snapshot): string {
         .map((id, index) => {
           const isDefaultAcct = id === s.id || index === 0;
           const list = accountsCache.get(family) ?? [];
-          const entry = id === s.id ? list[0] : list.find((a) => a.id === id);
+          const entry = managedAccountForCard(family, id, list);
           const note = accountNote(id);
           const label = isDefaultAcct
             ? (note || entry?.label?.trim() || list[0]?.label?.trim() || t("customize.acctDefaultShort"))
@@ -8604,7 +8606,7 @@ function labelForAccount(id: string, list: AccountEntry[]): string {
   // the stored label — that's the whole point of renaming one capsule.
   const note = accountNote(id);
   if (note) return note;
-  const entry = list.find((e) => e.id === id);
+  const entry = managedAccountForCard(providerFamily(id), id, list);
   if (entry?.label) return entry.label;
   if (entry?.email) return entry.email;
   return id.split("@")[1]?.slice(0, 8) ?? id;
@@ -8992,16 +8994,14 @@ function reconcileAccountLayout(family: string, list: AccountEntry[]): boolean {
   // Index 0 publishes under the bare family id: its account-specific card
   // folds into the main card. Parallel families (Antigravity/Cursor) do not
   // have that fold — every account keeps its own card.
-  const defaultId = isParallelAccountFamily(family) ? undefined : list[0]?.id;
-  const active = new Set(
-    list
-      .map((entry) => entry.id)
-      .filter((id): id is string => Boolean(id) && id !== defaultId),
-  );
+  const foldsDefault = providerDefinition(family)?.supportsApiKey || family === "tokenrhythm";
+  const defaultId = foldsDefault ? list[0]?.id : undefined;
+  const active = new Set(list.map((entry) => entry.id).filter((id): id is string => Boolean(id)));
+  const separateCards = new Set([...active].filter((id) => id !== defaultId));
   const isFamilyAccount = (id: string): boolean =>
     id.includes("@") && providerFamily(id) === family;
   let changed = false;
-  const order = config.layout.providerOrder.filter((id) => !isFamilyAccount(id) || active.has(id));
+  const order = config.layout.providerOrder.filter((id) => !isFamilyAccount(id) || separateCards.has(id));
   if (order.length !== config.layout.providerOrder.length) {
     config.layout.providerOrder = order;
     changed = true;
@@ -9012,18 +9012,23 @@ function reconcileAccountLayout(family: string, list: AccountEntry[]): boolean {
       changed = true;
     }
   }
+  const pinned = config.layout.providers[family]?.pinnedAccount;
+  if (pinned && pinned !== family && !active.has(pinned)) {
+    delete config.layout.providers[family].pinnedAccount;
+    changed = true;
+  }
   const disabled = config.disabled.filter((id) => !isFamilyAccount(id) || active.has(id));
   if (disabled.length !== config.disabled.length) {
     config.disabled = disabled;
     changed = true;
   }
   const prevSnapLen = lastSnapshots.length;
-  lastSnapshots = lastSnapshots.filter((snap) => !isFamilyAccount(snap.id) || active.has(snap.id));
+  lastSnapshots = lastSnapshots.filter((snap) => !isFamilyAccount(snap.id) || separateCards.has(snap.id));
   if (lastSnapshots.length !== prevSnapLen) {
     changed = true;
   }
   const prevSpendLen = lastSpend.length;
-  lastSpend = lastSpend.filter((sp) => !isFamilyAccount(sp.id) || active.has(sp.id));
+  lastSpend = lastSpend.filter((sp) => !isFamilyAccount(sp.id) || separateCards.has(sp.id));
   if (lastSpend.length !== prevSpendLen) {
     changed = true;
   }
@@ -9090,6 +9095,12 @@ function forgetAccountFromBoard(
     (spend) => spend.id !== cardId && !(foldedDefault && spend.id === family),
   );
   if (foldedDefault) accountProbeSnapshots.delete(family);
+  const layout = config.layout;
+  const pinned = layout?.providers[family]?.pinnedAccount;
+  if (layout && (pinned === cardId || (foldedDefault && pinned === family))) {
+    delete layout.providers[family].pinnedAccount;
+    void patchConfig({ layout }).catch(() => {});
+  }
   userSelectedAccountFor.delete(family);
   reconcileAccountLayout(family, accountsCache.get(family) ?? []);
   requestRender();

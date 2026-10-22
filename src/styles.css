@@ -8327,6 +8327,11 @@ body.panel-form #drawer {
 }
 
 /* All settings tabs start at the same top edge. */
+#panel-view-settings[hidden],
+#panel-view-auth[hidden] {
+  display: none;
+}
+
 #panel-view-settings {
   display: flex;
   flex-direction: column;

@@ -47,6 +47,7 @@ test('removing a login row never erases an unrelated native login card', () => {
   for (const family of ['copilot', 'tokenrhythm', 'minimax']) {
     const id = `${family}@a`;
     const context = load(['forgetAccountFromBoard'], {
+      config: {}, patchConfig: async () => {},
       providerDefinition: family => providerCatalog.find(p => p.familyId === family),
       accountsCache: new Map([[family, [{ id }]]]), archivedAccountsCache: new Map(),
       lastSnapshots: [{ id: family }, { id }], lastSpend: [{ id: family }, { id }],
@@ -132,5 +133,57 @@ test('default card menus resolve and capture the managed stable identity', () =>
   }
   for (const family of ['codex', 'cursor', 'antigravity', 'copilot', 'grok']) {
     assert.equal(context.managedAccountForCard(family, family, [{ id: family + '@managed' }]), undefined);
+  }
+});
+
+
+test('default account notes follow credential identity after deletion and promotion', () => {
+  const accountsCache = new Map([['minimax', [{ id: 'minimax@a', label: '' }, { id: 'minimax@b', label: '11-4' }]]]);
+  const config = { layout: { providers: { 'minimax@a': { note: 'Old subscription' } } } };
+  const context = load(['managedAccountForCard', 'accountNoteKey', 'accountNote', 'cardNote'], {
+    accountsCache, config, providerDefinition: family => providerCatalog.find(p => p.familyId === family),
+  });
+  assert.equal(context.accountNoteKey('minimax'), 'minimax@a');
+  assert.equal(context.accountNote('minimax'), 'Old subscription');
+  accountsCache.set('minimax', [{ id: 'minimax@b', label: '11-4' }]);
+  assert.equal(context.accountNoteKey('minimax'), 'minimax@b');
+  assert.equal(context.accountNote('minimax'), '');
+});
+
+test('layout reconciliation keeps the default account note but prunes deleted identities and pins', () => {
+  const config = {disabled:[],layout:{providerOrder:['minimax','minimax@deleted'],providers:{
+    minimax:{pinnedAccount:'minimax@deleted'},'minimax@a':{note:'A'},'minimax@deleted':{note:'Deleted'},
+  }}};
+  const context = load(['reconcileAccountLayout'], {config,lastSnapshots:[],lastSpend:[],
+    providerDefinition:family=>providerCatalog.find(p=>p.familyId===family), providerFamily:id=>id.split('@')[0],patchConfig:async()=>{},
+  });
+  context.reconcileAccountLayout('minimax',[{id:'minimax@a'}]);
+  assert.equal(config.layout.providers['minimax@a'].note,'A');
+  assert.equal(config.layout.providers['minimax@deleted'],undefined);
+  assert.equal(config.layout.providers.minimax.pinnedAccount,undefined);
+});
+
+
+test('local CLI account notes remain separate from the provider title', () => {
+  const accountsCache = new Map([['codex', [{id:'codex',label:'CLI'}, {id:'codex@managed',label:'Managed'}]]]);
+  const context = load(['managedAccountForCard','accountNoteKey'], {
+    accountsCache,providerDefinition:family=>providerCatalog.find(p=>p.familyId===family),
+  });
+  assert.equal(context.accountNoteKey('codex'),'codex@__default__');
+  assert.equal(context.accountNoteKey('codex@managed'),'codex@managed');
+});
+
+
+test('deleting the folded default drops its pin without touching a sibling pin', () => {
+  for (const pinned of ['minimax', 'minimax@a', 'minimax@b']) {
+    const config = {layout:{providers:{minimax:{pinnedAccount:pinned}}}};
+    const context = load(['forgetAccountFromBoard'], {
+      config,patchConfig:async()=>{}, providerDefinition:family=>providerCatalog.find(p=>p.familyId===family),
+      accountsCache:new Map([['minimax',[{id:'minimax@a'},{id:'minimax@b'}]]]),archivedAccountsCache:new Map(),
+      lastSnapshots:[{id:'minimax'},{id:'minimax@b'}],lastSpend:[],accountProbeSnapshots:new Map(),userSelectedAccountFor:new Map(),
+      reconcileAccountLayout:()=>{},requestRender:()=>{},customizeOpen:false,
+    });
+    context.forgetAccountFromBoard('minimax','minimax@a',0,true);
+    assert.equal(config.layout.providers.minimax.pinnedAccount,pinned==='minimax@b'?pinned:undefined);
   }
 });
