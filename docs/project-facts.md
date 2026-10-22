@@ -50,6 +50,15 @@ Last reconciled: 2026-10-22 (Pane 0.8.8 + account lifecycle, legacy API-key reti
   removed One/New API keys, deleted accounts, and **account swaps**
   (`cache_identities.json` vs current claude/codex identity — a swapped
   family's old bare-id card is never repainted, not even briefly).
+- Local encrypted backup (`src-tauri/src/backup.rs`): Argon2id + AES-256-GCM;
+  account store files, their OS-vault secrets, the already-encrypted
+  `keyvault.json` and selected settings. Restore merges account arrays by
+  stable id instead of replacing the file, validates paths and secret-key
+  prefixes, and snapshots every file before writing.
+- Auth center (`auth_center.rs`) rows carry `lastOkAt` (last successful
+  query), `lastUsedAt` (latest day with positive usage; cumulative meters are
+  differenced so flat polling days do not count), and `current` (only when
+  exactly one official-client local sign-in is visible).
 - Moonshot (Kimi API) balances fold into the Kimi Code card
   (`fold_moonshot_into_kimi`).
 - OAuth: `oauth.rs` device-code flows — codex (OpenAI private flow), copilot
@@ -73,7 +82,8 @@ Last reconciled: 2026-10-22 (Pane 0.8.8 + account lifecycle, legacy API-key reti
   `cargo +stable-x86_64-pc-windows-gnu`. The full Tauri binary cannot link
   locally as a `cdylib` (167k-export DLL). The committed crate-type is
   `["rlib"]` (desktop only). Unit tests run from repo-root `parse-tests/`
-  (940 passing in the latest full run, 14 ignored as of 2026-10-22; run with
+  (959 passing in the latest serial proxy-free run, 14 ignored as of
+  2026-10-22; run with
   `cargo +stable-x86_64-pc-windows-gnu test` and no proxy).
 - Dev runtime needs both processes: Vite `:1420` + `pane.exe` `:6736`. Never
   serve the frontend with Python `http.server` (permanent WebView2 cache
@@ -584,9 +594,9 @@ changes.
   waiting for the next usage refresh left stale account pills visible.
 - Evidence: legacy-vault resurrection red/green, archive/delete repeated
   refresh and failed migration tests, relay retirement failure test, account
-  alias regression, and a headless Customize routing check. Latest full
-  Rust run: 940 passed/14 ignored after the archived-re-add and relay-recovery
-  regressions.
+  alias regression, and a headless Customize routing check. Latest serial
+  proxy-free Rust run: 959 passed/14 ignored after the backlog batch and
+  backup hardening.
 
 ## Codex managed accounts and callback semantics (2026-10-22)
 
