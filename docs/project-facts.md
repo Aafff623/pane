@@ -597,6 +597,13 @@ changes.
      and removed independently.
 - The legacy single slot (`%APPDATA%\Pane\oauth\codex.json`) is imported
   into the managed store and retired; it is not a third method.
+- “Add account” writes a cross-window `panelIntent`, but a write made *by
+  the panel itself* never echoes back as an event. `openFamilyLogin` must
+  apply the intent locally (switch to the auth view + `openAuthLoginDialog`);
+  relying on `applyPanelIntent` alone made the panel's add button a no-op.
+  The dialog shows the copyable authorization URL, falls back to the device
+  code when `:1455` is busy, auto-opens the browser, and cancels the backend
+  flow on close.
 - `account_list("codex")` puts the local CLI row first (id `codex`,
   `maskedKey: "CLI 登录"`) and then managed accounts, so a count of “1 个
   账号” can mean the CLI login alone.

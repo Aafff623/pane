@@ -389,6 +389,8 @@ interface PanelIntent {
   view: "auth" | "settings";
   family?: string;
   at: number;
+  /// The panel should also start/show this family's sign-in dialog.
+  login?: boolean;
 }
 
 interface Config {
@@ -16591,6 +16593,8 @@ interface AuthFlow {
   deviceAuthId: string;
   /** Codex browser login id (loopback flow); absent for device-code flows. */
   loginId?: string;
+  /** Authorization URL (browser PKCE) or verification URL (device code). */
+  url?: string;
   userCode: string;
   error: string | null;
   label: string | null;
@@ -16664,7 +16668,9 @@ function applyPanelIntent(): void {
   if (Date.now() - intent.at > PANEL_INTENT_TTL_MS) return;
   if (intent.view === "auth") {
     setPanelView("auth");
-    if (intent.family) void focusAuthFamily(intent.family);
+    if (!intent.family) return;
+    void focusAuthFamily(intent.family);
+    if (intent.login) openAuthLoginDialog(intent.family);
   } else {
     setPanelView("settings");
     document.querySelector<HTMLButtonElement>('#panel-nav [data-settings-tab="usage"]')?.click();
@@ -16745,6 +16751,7 @@ async function loadAuthCenter(): Promise<void> {
 
 function renderAuthCenter(): void {
   const container = document.querySelector<HTMLElement>("#panel-view-auth");
+  renderAuthLoginDialog();
   if (!container || !authGroups) return;
   container.innerHTML = authGroups.map(authGroupHtml).join("");
 }
@@ -16943,6 +16950,174 @@ function authFlowHtml(family: string): string {
   </div>`;
 }
 
+// ---------------------------------------------------------------------------
+// Sign-in dialog
+// ---------------------------------------------------------------------------
+// The auth center's inline block is easy to miss (and it never showed the
+// authorization URL). Every "add account" entry now opens this dialog: it
+// starts the same backend flow, shows the URL (and the device code when the
+// loopback port is taken), and keeps the URL copyable so a sign-in can be
+// finished in the right browser profile.
+
+let authDialogFamily: string | null = null;
+let authDialogSignature = "";
+
+function canSignInFromDialog(family: string): boolean {
+  return OAUTH_PROVIDERS.has(family) || BROWSER_LOGIN_PROVIDERS.has(family);
+}
+
+function openAuthLoginDialog(family: string): void {
+  if (!canSignInFromDialog(family)) return;
+  if (authDialogFamily && authDialogFamily !== family) closeAuthLoginDialog(true);
+  authDialogFamily = family;
+  if (IS_PANEL_FORM) {
+    setPanelView("auth");
+    void focusAuthFamily(family);
+  }
+  const flow = authFlows.get(family);
+  // An errored/finished flow has no live login; retry from a clean start.
+  if (!flow || flow.phase === "error") {
+    void startAuthOauthFlow(family);
+  } else {
+    renderAuthLoginDialog();
+  }
+}
+
+function closeAuthLoginDialog(cancel: boolean): void {
+  const family = authDialogFamily;
+  authDialogFamily = null;
+  authDialogSignature = "";
+  document.getElementById("auth-login-overlay")?.remove();
+  if (cancel && family) {
+    stopAuthFlow(family);
+    authFlows.delete(family);
+  }
+  if (family) renderAuthCenter();
+}
+
+function copyAuthDialogText(text: string, button: HTMLElement | null): void {
+  void navigator.clipboard.writeText(text).then(() => {
+    if (!button) return;
+    const label = button.textContent;
+    button.textContent = t("footer.copied");
+    window.setTimeout(() => {
+      if (button.isConnected) button.textContent = label;
+    }, 1200);
+  }).catch(() => {});
+}
+
+function renderAuthLoginDialog(): void {
+  const family = authDialogFamily;
+  if (!family) {
+    document.getElementById("auth-login-overlay")?.remove();
+    authDialogSignature = "";
+    return;
+  }
+  const flow = authFlows.get(family);
+  // Success is dropped from authFlows after a short beat; close with it
+  // rather than falling back to a fresh "starting" card.
+  if (!flow) {
+    closeAuthLoginDialog(false);
+    return;
+  }
+  const signature = [family, flow.phase, flow.url ?? "", flow.userCode, flow.error ?? "", flow.label ?? ""].join("|");
+  const existing = document.getElementById("auth-login-overlay");
+  if (existing && signature === authDialogSignature) return;
+  authDialogSignature = signature;
+
+  const name = providerDisplayName(family);
+  const url = flow.url ?? "";
+  const code = flow.userCode ?? "";
+  const status =
+    flow.phase === "starting"
+      ? t("auth.flow.starting")
+      : flow.phase === "browser"
+        ? t("auth.flow.browser")
+        : flow.phase === "polling"
+          ? t("auth.flow.waiting")
+          : flow.phase === "success"
+            ? t("auth.flow.success", { label: flow.label ?? name })
+            : t("auth.flow.failed", { err: flow.error ?? "" });
+  const hint = code ? t("auth.loginHintDevice") : t("auth.loginHint");
+  const link =
+    url && flow.phase !== "success" && flow.phase !== "error"
+      ? `<label class="auth-login-label">${escapeHtml(t("auth.loginLink"))}</label>
+         <textarea class="auth-login-url" readonly rows="3" spellcheck="false">${escapeHtml(url)}</textarea>`
+      : "";
+  const codeRow =
+    code && flow.phase !== "success" && flow.phase !== "error"
+      ? `<div class="auth-login-code-row"><span class="auth-login-label">${escapeHtml(t("auth.loginDeviceCode"))}</span><code class="auth-login-code">${escapeHtml(code)}</code><button type="button" class="mini-btn" data-auth-login-copy-code>${escapeHtml(t("auth.flow.copy"))}</button></div>`
+      : "";
+  const actions =
+    flow.phase === "success"
+      ? `<button type="button" data-auth-login-close>${escapeHtml(t("auth.flow.close"))}</button>`
+      : flow.phase === "error"
+        ? `<button type="button" data-auth-login-cancel>${escapeHtml(t("dialog.cancel"))}</button><button type="button" data-auth-login-retry>${escapeHtml(t("auth.retry"))}</button>`
+        : `<button type="button" data-auth-login-cancel>${escapeHtml(t("dialog.cancel"))}</button>${url ? `<button type="button" data-auth-login-copy-link>${escapeHtml(t("auth.loginCopyLink"))}</button><button type="button" data-auth-login-open>${escapeHtml(t("auth.loginOpen"))}</button>` : ""}`;
+
+  let box = existing;
+  if (!box) {
+    box = document.createElement("div");
+    box.id = "auth-login-overlay";
+    box.innerHTML = `<div id="auth-login-box" role="dialog" aria-modal="true" aria-labelledby="auth-login-title">
+      <h3 id="auth-login-title"></h3>
+      <p class="auth-login-hint" id="auth-login-hint"></p>
+      <div id="auth-login-body"></div>
+      <p class="auth-login-status" id="auth-login-status"></p>
+      <div id="auth-login-actions"></div>
+    </div>`;
+    box.addEventListener("click", (event) => {
+      const target = event.target as HTMLElement;
+      if (target === box) {
+        closeAuthLoginDialog(true);
+        return;
+      }
+      const current = authDialogFamily;
+      if (!current) return;
+      if (target.closest("[data-auth-login-cancel]")) {
+        closeAuthLoginDialog(true);
+        return;
+      }
+      if (target.closest("[data-auth-login-close]")) {
+        closeAuthLoginDialog(false);
+        return;
+      }
+      if (target.closest("[data-auth-login-retry]")) {
+        void startAuthOauthFlow(current);
+        return;
+      }
+      if (target.closest("[data-auth-login-open]")) {
+        const openUrl = authFlows.get(current)?.url;
+        if (openUrl) void invoke("open_link", { url: openUrl }).catch(() => {});
+        return;
+      }
+      if (target.closest("[data-auth-login-copy-link]")) {
+        const copyUrl = authFlows.get(current)?.url;
+        if (copyUrl) copyAuthDialogText(copyUrl, target.closest("button"));
+        return;
+      }
+      if (target.closest("[data-auth-login-copy-code]")) {
+        const copyCode = authFlows.get(current)?.userCode;
+        if (copyCode) copyAuthDialogText(copyCode, target.closest("button"));
+      }
+    });
+    box.addEventListener("keydown", (event) => {
+      if (event.key !== "Escape") return;
+      event.preventDefault();
+      event.stopPropagation();
+      closeAuthLoginDialog(true);
+    });
+    document.body.append(box);
+  }
+  box.querySelector("#auth-login-title")!.textContent = t("auth.loginTitle", { name });
+  box.querySelector("#auth-login-hint")!.textContent = hint;
+  box.querySelector("#auth-login-body")!.innerHTML = link + codeRow;
+  const statusEl = box.querySelector<HTMLElement>("#auth-login-status")!;
+  statusEl.textContent = status;
+  statusEl.className = `auth-login-status${flow.phase === "error" ? " error" : flow.phase === "success" ? " ok" : ""}`;
+  box.querySelector("#auth-login-actions")!.innerHTML = actions;
+}
+
 function authGroupHtml(group: AuthFamilyGroup): string {
   const family = group.family;
   const name = notedName(family, providerDisplayName(family));
@@ -17052,7 +17227,17 @@ function handleAuthCenterClick(target: HTMLElement): void {
 /// device login lives in the auth center, so send the panel there. The two
 /// windows share only config + config-updated; the config IS the message.
 async function openFamilyLogin(family: string): Promise<void> {
-  await patchConfig({ panelIntent: { view: "auth", family, at: Date.now() } }).catch(() => {});
+  const intent = { view: "auth" as const, family, login: true, at: Date.now() };
+  await patchConfig({ panelIntent: intent }).catch(() => {});
+  if (IS_PANEL_FORM) {
+    // The panel is already the target window: its own config write does not
+    // come back as a config-updated event, so apply the intent here.
+    appliedPanelIntentAt = intent.at;
+    void patchConfig({ panelIntent: null }).catch(() => {});
+    setPanelView("auth");
+    void focusAuthFamily(family);
+    openAuthLoginDialog(family);
+  }
   void invoke("open_panel_window").catch(() => {});
 }
 
@@ -17148,7 +17333,7 @@ function authAddAccount(family: string): void {
     return;
   }
   if (OAUTH_PROVIDERS.has(family) || BROWSER_LOGIN_PROVIDERS.has(family)) {
-    void startAuthOauthFlow(family);
+    openAuthLoginDialog(family);
   }
 }
 
@@ -17176,6 +17361,7 @@ async function startAuthOauthFlow(family: string): Promise<void> {
         phase: "browser",
         deviceAuthId: "",
         loginId: started.loginId,
+        url: started.authUrl,
         userCode: "",
         error: null,
         label: null,
@@ -17212,6 +17398,7 @@ async function startAuthOauthFlow(family: string): Promise<void> {
   const flow: AuthFlow = {
     phase: "polling",
     deviceAuthId: started.device_auth_id,
+    url: started.verify_url,
     userCode: started.user_code,
     error: null,
     label: null,
