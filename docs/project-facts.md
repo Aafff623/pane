@@ -583,6 +583,23 @@ changes.
 
 ## Codex managed accounts and callback semantics (2026-10-22)
 
+- Codex has exactly **two user-facing credential sources** (no pasted API
+  key, no ChatGPT Desktop import, no manual token import):
+  1. **Local CLI home(s)** — `CODEX_HOME`, otherwise `~/.codex/auth.json`.
+     The default home is the bare `codex` card and the read-only
+     `CLI 登录` row; extra discovered homes become `codex@<hash8>` cards
+     (OpenAI id_token provenance required). Refresh may renew and write
+     the token back to `auth.json` with a `.json.pane-bak` copy.
+  2. **Pane OAuth** — browser PKCE on `127.0.0.1:1455`; if the Codex CLI
+     holds the port, it automatically falls back to device code. Every
+     completed login is a managed `codex@<hash8>` account in
+     `codex-accounts.json` + the OS vault; accounts can be added, renamed
+     and removed independently.
+- The legacy single slot (`%APPDATA%\Pane\oauth\codex.json`) is imported
+  into the managed store and retired; it is not a third method.
+- `account_list("codex")` puts the local CLI row first (id `codex`,
+  `maskedKey: "CLI 登录"`) and then managed accounts, so a count of “1 个
+  账号” can mean the CLI login alone.
 - The local CLI login is read from its Codex home (`CODEX_HOME`, otherwise
   `~/.codex/auth.json`), including a UTF-8 BOM. Auth Center keeps this local
   source read-only even when a managed subscription uses the same email;
