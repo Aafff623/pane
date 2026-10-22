@@ -14666,9 +14666,10 @@ function settingsAccountRow(family: string, entry: AccountEntry, _index: number)
   const row = document.createElement("div");
   row.className = "skey-account";
   row.dataset.skeyAccount = entry.id ?? "";
+  const displayName = (entry.id ? accountNote(entry.id) : "") || entry.label || entry.email || entry.maskedKey;
   const label = document.createElement("span");
   label.className = "skey-acct-label";
-  label.textContent = entry.label || entry.email || entry.maskedKey;
+  label.textContent = displayName;
   const masked = document.createElement("span");
   masked.className = "skey-acct-masked";
   masked.textContent = entry.maskedKey;
@@ -14702,10 +14703,10 @@ function settingsAccountRow(family: string, entry: AccountEntry, _index: number)
   rename.addEventListener("click", () => {
     void appPrompt({
       title: t("settings.acctRename"),
-      initial: entry.label,
+      initial: displayName,
       confirmLabel: t("settings.save"),
     }).then(async (next) => {
-      if (next == null || next === entry.label) return;
+      if (next == null || next === displayName) return;
       try {
         await invoke("account_rename", { provider: family, cardId: entry.id, label: next });
         // An explicit rename replaces the Customize display-note override;

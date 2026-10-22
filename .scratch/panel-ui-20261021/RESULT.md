@@ -101,5 +101,5 @@ Status: awaiting-owner-acceptance
 ## 2026-10-22 备注跨窗口同步与授权入口收口
 
 - 真实现场：设置页改账号备注后，弹窗 Customize 仍显示旧备注。根因有两个：两个 WebView 各自缓存 `account_list`，设置窗口的改名没有通知弹窗；Customize 的“备注名”写 backend label，而卡片显示优先读 `config.layout` 的 note。
-- 修复：新增 `accounts-updated` 跨窗口事件，账号增删改归档恢复都会让两个窗口丢掉并重取各自缓存；Customize 账号备注统一写 `config.layout`；设置页改名会清理旧 override 并广播；`config-updated` 检测 layout 变化后重绘 Customize；Codex/Grok/Copilot/Kiro/Windsurf/Trae/Zed 在 Customize 只显示“去设置添加或认证”；账号行 `?`/⚙ 图标按钮缩到 24px。
+- 修复：新增 `accounts-updated` 跨窗口事件，账号增删改归档恢复都会让两个窗口丢掉并重取各自缓存；Customize 账号备注统一写 `config.layout`；设置页账号行也显示同一份显示备注，改名会清理旧 override 并广播；`config-updated` 检测 layout 变化后重绘 Customize；Codex/Grok/Copilot/Kiro/Windsurf/Trae/Zed 在 Customize 只显示“去设置添加或认证”；账号行 `?`/⚙ 图标按钮缩到 24px。
 - 验证：frontend 79 passed；`pnpm build` 通过；demo 重建成功且 provenance 2 passed。官网 agent 的 `site/` 静态改动未触碰、未纳入本轮提交。真实双账号认证仍待 owner。
