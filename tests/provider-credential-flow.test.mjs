@@ -65,6 +65,7 @@ for (const healthy of [true, false]) {
       accountHealthDot: (id) => context.lastSnapshots.find((snapshot) => snapshot.id === id)?.status === 'ok' ? 'green' : 'error',
       requestRender: () => { painted = context.accountAvailabilitySummary('clinepass'); },
       forceUsageRefreshAttempt: async () => {}, requestTraySync: () => {}, t: (key) => key,
+      notifyAccountsChanged: () => {},
     });
     vm.runInContext(actualFunctions(['afterCredentialMutation', 'overviewAccountSnapshots', 'accountAvailabilitySummary']), context);
     await context.afterCredentialMutation('clinepass', added.id);

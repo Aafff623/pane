@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import { listen } from "@tauri-apps/api/event";
+import { emit, listen } from "@tauri-apps/api/event";
 import { getVersion } from "@tauri-apps/api/app";
 import { getCurrentWebviewWindow, WebviewWindow } from "@tauri-apps/api/webviewWindow";
 import { LogicalSize } from "@tauri-apps/api/dpi";
@@ -1392,8 +1392,10 @@ async function reloadConfigFromBackend(): Promise<void> {
   fresh.skinId = normalizeSkin(fresh.skinId);
   const hideUnconfiguredChanged =
     (config.hideUnconfigured !== false) !== (fresh.hideUnconfigured !== false);
+  const layoutChanged = JSON.stringify(config.layout ?? null) !== JSON.stringify(fresh.layout ?? null);
   config = fresh;
-  if (hideUnconfiguredChanged) requestRender();
+  if (hideUnconfiguredChanged || layoutChanged) requestRender();
+  if (layoutChanged && customizeOpen) renderDrawerBody();
   pruneEmptyCardGroups();
   // The other window may have just handed us a "open this family" request.
   applyPanelIntent();
@@ -6238,7 +6240,8 @@ function openGroupMenu(
     const configure = (e.target as HTMLElement).closest<HTMLElement>("[data-card-config]");
     if (configure) {
       close();
-      if (fam === "cursor") openCursorAccountDialog();
+      if (SETTINGS_ONLY_AUTH.has(fam)) void openKeysPageFor(fam);
+      else if (fam === "cursor") openCursorAccountDialog();
       else {
         skinMarketOpen = false; custConfigOpen = fam; setDrawer(true); renderDrawerBody();
         document.querySelector<HTMLElement>(`#drawer-body [data-cust-provider="${CSS.escape(fam)}"]`)?.scrollIntoView({ block: "start" });
@@ -8423,6 +8426,9 @@ function credAccountsHtml(id: string): string {
 // Providers with a browser sign-in owned by Pane itself (Phase 3.1). The
 // backend stores tokens under %APPDATA%\Pane\oauth\<provider>.json.
 const OAUTH_PROVIDERS = new Set(["codex", "grok", "copilot"]);
+/// OAuth device/browser families whose sign-in is owned by Settings/Auth
+/// center. Customize only routes there; it never starts a second login UI.
+const SETTINGS_ONLY_AUTH = new Set(["codex", "grok", "copilot", "kiro", "windsurf", "trae", "zed"]);
 /// Browser-PKCE families (the backend runs the loopback callback and its
 /// own `<family>_login_*` commands).
 const BROWSER_LOGIN_PROVIDERS = new Set([
@@ -8493,6 +8499,13 @@ function resetAccountSaveButton(form: HTMLElement | null): void {
 
 // Every credential editor uses this same mutation path. List and quota
 // caches must change together, including while Customize remains open.
+/// Tell every window that this family's account list changed. The two
+/// webviews keep separate caches; Settings and Customize must converge
+/// immediately after add/rename/archive/restore/delete.
+function notifyAccountsChanged(family: string): void {
+  void emit("accounts-updated", family).catch(() => {});
+}
+
 async function afterCredentialMutation(family: string, savedId?: string, enable = true): Promise<void> {
   if (enable) recentlyKeyed.set(family, refreshState.generation);
   const layout = config.layout ?? { providerOrder: [], providers: {} };
@@ -8516,6 +8529,7 @@ async function afterCredentialMutation(family: string, savedId?: string, enable 
   }
   accountProbeSnapshots.delete(family);
   requestRender();
+  notifyAccountsChanged(family);
   if (IS_PANEL_FORM) {
     // fetch_usage broadcasts usage-updated to the popover as well.
     await invoke("fetch_usage", { clearBenches: true });
@@ -9179,6 +9193,7 @@ async function doAccountRestore(family: string, cardId: string): Promise<void> {
     await refreshSettingsProviderKey(family);
     renderSettingsProviderKeys();
     refreshAccounts(family);
+    notifyAccountsChanged(family);
     status.textContent = t("customize.acctRestored");
     void forceUsageRefreshAttempt(false).then(requestTraySync);
   } catch (err) {
@@ -9211,27 +9226,11 @@ async function doAccountSetDefault(family: string, index: number): Promise<void>
     await invoke("account_set_default", { provider: family, cardId });
     userSelectedAccountFor.delete(family);
     refreshAccounts(family);
+    notifyAccountsChanged(family);
     status.textContent = t("customize.acctDefaultSet", { name: providerDisplayName(family) });
     void forceUsageRefreshAttempt(false).then(requestTraySync);
   } catch (err) {
     status.textContent = t("customize.acctDefaultFailed", { err: String(err) });
-  }
-}
-
-/// Saves an edited note name. Labels are display-only, so no cache or
-/// layout churn — but the account card's title carries the label, so a
-/// non-default card needs the follow-up fetch to retitle.
-async function doAccountRename(family: string, index: number, label: string): Promise<void> {
-  const status = document.querySelector("#status")!;
-  try {
-    const cardId = accountsCache.get(family)?.[index]?.id;
-    if (!cardId) return;
-    await invoke("account_rename", { provider: family, cardId, label });
-    refreshAccounts(family);
-    status.textContent = t("customize.acctRenamed");
-    void forceUsageRefreshAttempt(false).then(requestTraySync);
-  } catch (err) {
-    status.textContent = t("customize.acctRenameFailed", { err: String(err) });
   }
 }
 
@@ -9597,6 +9596,7 @@ function renderCustConfig(id: string): string {
         ${groupPickerHtml(id)}
       </div>`;
     }
+    if (SETTINGS_ONLY_AUTH.has(id)) return renderSettingsAuthJump(id);
     const getKey = getApiKeyLink(id);
     const linkLink = getKey
       ? `<button class="mini-btn cust-get-key" data-link="${escapeHtml(getKey)}">${escapeHtml(t("customize.getApiKey"))}</button>`
@@ -9774,10 +9774,30 @@ function onboardingActionHtml(id: string, action: AccountAction): string {
   }
 }
 
+/// OAuth device/browser families are managed in Settings → Auth center.
+/// Customize keeps the credential state and a single route there instead of
+/// growing a second, divergent login UI.
+function renderSettingsAuthJump(id: string): string {
+  return `<div class="cust-config cust-form cust-auth-settings">
+      <div class="form-field">
+        <span class="form-label">${escapeHtml(t("customize.connLabel"))}</span>
+        <div data-cred-chips="${escapeHtml(id)}">${credChipsHtml(id)}</div>
+      </div>
+      <p class="settings-note">${escapeHtml(t("customize.authSettingsHint"))}</p>
+      <div class="form-actions">
+        <button class="mini-btn primary" data-open-keys-page="${escapeHtml(id)}">${escapeHtml(t("customize.authSettingsAction"))}</button>
+      </div>
+      ${custNoteField(id)}
+      ${custApplyHtml(id)}
+      ${groupPickerHtml(id)}
+    </div>`;
+}
+
 /// The configuration panel for families whose credential is a login or a
 /// local file: what it reads, how to complete it, and where to go next.
 /// Steps come from one i18n string, one line per step.
 function renderOnboardingConfig(id: string, onboard: Onboarding): string {
+  if (SETTINGS_ONLY_AUTH.has(id)) return renderSettingsAuthJump(id);
   const actions = onboard.actions
     .map((action) => onboardingActionHtml(id, action))
     .filter(Boolean)
@@ -9823,9 +9843,10 @@ function renderOnboardingConfig(id: string, onboard: Onboarding): string {
     </div>`;
 }
 
-/// The ⚙ panel for one account row: an editable note name (saved through
-/// account_rename), the masked key, the account's live connectivity as of
-/// the last fetch, and delete. The key itself never leaves the backend.
+/// The ⚙ panel for one account row: a display-note override (config.layout,
+/// the same value the card title reads), the masked key, the account's live
+/// connectivity as of the last fetch, and delete. The key itself never
+/// leaves the backend.
 function renderAccountConfig(id: string): string {
   const fam = providerFamily(id);
   const list = accountsCache.get(fam) ?? [];
@@ -9834,6 +9855,7 @@ function renderAccountConfig(id: string): string {
     return `<div class="cust-config"><p class="dim">${escapeHtml(t("customize.credStatusLoading"))}</p></div>`;
   }
   const entry = list[index];
+  const note = accountNote(id);
   // The default account publishes under the bare family id, so that's
   // where its live snapshot lives. Antigravity/Cursor accounts are
   // independent cards (the family card is the logged-in account), so
@@ -9857,7 +9879,8 @@ function renderAccountConfig(id: string): string {
   return `<div class="cust-config cust-form account-config">
       <div class="form-field">
         <span class="form-label">${escapeHtml(t("customize.acctNoteLabel"))}</span>
-        <input class="form-input" type="text" data-acct-label-edit="${escapeHtml(fam)}|${index}" value="${escapeHtml(entry.label)}" autocomplete="off" spellcheck="false" />
+        <input class="form-input" type="text" data-acct-note-edit="${escapeHtml(id)}" value="${escapeHtml(note)}" placeholder="${escapeHtml(entry.label || t("customize.notePh"))}" autocomplete="off" spellcheck="false" />
+        <div class="form-help">${escapeHtml(t("customize.notePh"))}</div>
       </div>
       <div class="form-field">
         <span class="form-label">${escapeHtml(t("customize.acctKeyLabel"))}</span>
@@ -9868,7 +9891,7 @@ function renderAccountConfig(id: string): string {
         <div class="form-help">${statusText}${stale}</div>
       </div>
       <div class="form-actions">
-        <button class="mini-btn" data-needs-setup="${escapeHtml(id)}">${escapeHtml(t("card.needsSetupAction"))}</button><button class="mini-btn" data-acct-rename="${escapeHtml(fam)}|${index}">${escapeHtml(t("settings.save"))}</button>
+        <button class="mini-btn" data-needs-setup="${escapeHtml(id)}">${escapeHtml(t("card.needsSetupAction"))}</button><button class="mini-btn" data-acct-note-save="${escapeHtml(id)}">${escapeHtml(t("settings.save"))}</button>
         <button class="mini-btn" data-acct-archive="${escapeHtml(fam)}|${index}" title="${escapeHtml(t("customize.acctArchive"))}">${escapeHtml(t("customize.acctArchive"))}</button>
         <button class="mini-btn danger" data-acct-del="${escapeHtml(fam)}|${index}" title="${escapeHtml(t("customize.acctDelete"))}">${escapeHtml(t("customize.acctDelete"))}</button>
       </div>
@@ -9881,6 +9904,9 @@ function renderAccountConfig(id: string): string {
 /// account's own API-key panel). The default account (index 0) shows a
 /// filled star; the others a hollow one that makes it default on click.
 function accountChildRows(family: string): string {
+  // Codex account management lives in Settings/Auth center. Customize shows
+  // the provider-level jump instead of a second account surface.
+  if (family === "codex") return "";
   const list = accountsCache.get(family);
   if (!list) {
     fetchAccounts(family);
@@ -9908,8 +9934,8 @@ function accountChildRows(family: string): string {
         <span class="dim acct-child-key">${escapeHtml(a.maskedKey)}</span>
         <span class="spacer"></span>
         ${star}
-        <button class="mini-btn" data-info="${escapeHtml(acctId) || escapeHtml(family)}" title="${escapeHtml(t("customize.credInfo"))}">${uiIcon("question")}</button>
-        <button class="mini-btn" data-config="${escapeHtml(acctId)}" title="${escapeHtml(t("customize.configure"))}">${uiIcon("gear")}</button>
+        <button class="mini-btn acct-icon-btn" data-info="${escapeHtml(acctId) || escapeHtml(family)}" title="${escapeHtml(t("customize.credInfo"))}">${uiIcon("question")}</button>
+        <button class="mini-btn acct-icon-btn" data-config="${escapeHtml(acctId)}" title="${escapeHtml(t("customize.configure"))}">${uiIcon("gear")}</button>
         ${custInfoOpen === acctId ? renderCustInfo(acctId) : ""}
         ${custConfigOpen === acctId ? renderAccountConfig(acctId) : ""}
       </div>`;
@@ -11881,15 +11907,17 @@ async function handleCustomizeClick(target: HTMLElement): Promise<boolean> {
     if (family && Number.isInteger(index)) void doAccountSetDefault(family, index);
     return true;
   }
-  const acctRename = target.closest<HTMLElement>("[data-acct-rename]");
-  if (acctRename) {
-    const [family, idxStr] = acctRename.dataset.acctRename!.split("|");
-    const index = Number(idxStr);
-    const input = acctRename
+  const acctNoteSave = target.closest<HTMLElement>("[data-acct-note-save]");
+  if (acctNoteSave) {
+    const id = acctNoteSave.dataset.acctNoteSave!;
+    const input = acctNoteSave
       .closest(".cust-config")
-      ?.querySelector<HTMLInputElement>("[data-acct-label-edit]");
-    if (family && Number.isInteger(index) && input) {
-      void doAccountRename(family, index, input.value);
+      ?.querySelector<HTMLInputElement>("[data-acct-note-edit]");
+    if (id && input) {
+      setCardNote(accountNoteKey(id), input.value.trim());
+      if (customizeOpen) renderDrawerBody();
+      const status = document.querySelector("#status");
+      if (status) status.textContent = t("customize.acctRenamed");
     }
     return true;
   }
@@ -14680,11 +14708,15 @@ function settingsAccountRow(family: string, entry: AccountEntry, _index: number)
       if (next == null || next === entry.label) return;
       try {
         await invoke("account_rename", { provider: family, cardId: entry.id, label: next });
+        // An explicit rename replaces the Customize display-note override;
+        // otherwise an old note would keep shadowing the new label.
+        if (entry.id) setCardNote(accountNoteKey(entry.id), "");
       } catch (e) {
         console.error("account rename failed:", e);
       }
       await refreshSettingsProviderKey(family);
       renderSettingsProviderKeys();
+      notifyAccountsChanged(family);
     });
   });
   const isCli = family === "codex" && (entry.id === "codex" || entry.maskedKey === "CLI 登录");
@@ -18221,6 +18253,16 @@ document.querySelector("#settings-btn")!.addEventListener("click", () => {
   // and re-apply (self-writes are filtered inside).
   void listen("config-updated", () => {
     void reloadConfigFromBackend();
+  });
+
+  // Account lists are backend state, not config: a rename/add/archive in the
+  // Settings window must invalidate the popover's separate accountsCache.
+  void listen<string>("accounts-updated", (event) => {
+    const family = typeof event.payload === "string" ? event.payload : "";
+    if (!family) return;
+    accountsCache.delete(family);
+    archivedAccountsCache.delete(family);
+    refreshAccounts(family);
   });
 
   // The backend's background loop refreshes even while this window is

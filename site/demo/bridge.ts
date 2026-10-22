@@ -264,6 +264,9 @@ export async function listen<T>(event: string, handler: (event: { payload: T }) 
   callbacks.add(callback); demoListeners.set(event, callbacks);
   return () => { callbacks.delete(callback); };
 }
+export async function emit<T>(event: string, payload?: T) {
+  emitDemo(event, payload);
+}
 export async function getVersion() { return version; }
 // The only caller is the panel-form reset-size button, which looks up the
 // "main" window. The web demo has no window manager, so there is nothing to

@@ -537,6 +537,13 @@ changes.
   row when `<provider>.json` was already deleted, and retirement matches by
   API key so a missing baseUrl cannot strand the old provider slot. Migration
   failures are logged instead of being swallowed.
+- Account lists are backend state, not config: frontend mutations emit
+  `accounts-updated` so the Settings panel and popover drop their separate
+  `accountsCache` entries. Display notes live in
+  `config.layout.providers[<card id>].note`; an explicit `account_rename`
+  clears that override so the stored label wins. OAuth device/browser
+  families (codex/grok/copilot/kiro/windsurf/trae/zed) route Customize to
+  Settings/Auth center instead of rendering a second login UI.
 - Evidence: legacy-vault resurrection red/green, archive/delete repeated
   refresh and failed migration tests, relay retirement failure test, account
   alias regression, and a headless Customize routing check. Latest full

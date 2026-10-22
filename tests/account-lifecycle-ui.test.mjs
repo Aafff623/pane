@@ -189,6 +189,36 @@ test('deleting the folded default drops its pin without touching a sibling pin',
 });
 
 
+test('the customize account note edits the same display note the card reads', () => {
+  const list = [{id:'tokenrhythm@a',label:'我'},{id:'tokenrhythm@b',label:'老马'}];
+  const accountsCache = new Map([['tokenrhythm',list]]);
+  const config = {layout:{providers:{}}};
+  const context = load(['managedAccountForCard','accountNoteKey','accountNote','labelForAccount','cardNote','setCardNote'], {
+    accountsCache,config,patchConfig:async()=>{},requestRender:()=>{},
+    providerDefinition:family=>providerCatalog.find(p=>p.familyId===family),
+    providerFamily:id=>id.split('@')[0],
+  });
+  assert.equal(context.labelForAccount('tokenrhythm@a', list), '我');
+  context.setCardNote(context.accountNoteKey('tokenrhythm@a'), '新备注');
+  assert.equal(config.layout.providers['tokenrhythm@a'].note, '新备注');
+  assert.equal(context.labelForAccount('tokenrhythm@a', list), '新备注');
+});
+
+
+test('OAuth device families route Customize to Settings instead of a second login UI', () => {
+  const context = load(['renderSettingsAuthJump'], {
+    t:key=>key, escapeHtml:value=>String(value), credChipsHtml:()=>'<chips>',
+    custNoteField:()=>'', custApplyHtml:()=>'', groupPickerHtml:()=>'',
+  });
+  for (const family of ['codex', 'grok', 'copilot', 'kiro', 'windsurf', 'trae', 'zed']) {
+    const html = context.renderSettingsAuthJump(family);
+    assert.match(html, new RegExp(`data-open-keys-page="${family}"`));
+    assert.ok(!html.includes('data-oauth-login'));
+    assert.ok(!html.includes('data-login-family'));
+  }
+});
+
+
 test('one saved key cannot become two tabs through a bare alias or deleted snapshot', () => {
   const context = load(['overviewAccountSnapshots'], {
     accountsCache:new Map([['minimax',[{id:'minimax@live'}]]]),
