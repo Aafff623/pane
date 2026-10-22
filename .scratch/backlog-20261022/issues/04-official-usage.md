@@ -30,3 +30,11 @@ Blocked by: verifiable WorkBuddy account
 - S1 tests cover pagination stall, page tail overlap, malformed timestamps,
   negative credit, dedupe and region isolation.
 - No UI or ledger change before S0.
+
+## Comments
+
+- 2026-10-22: checked the local Pane WorkBuddy CN store — one metadata
+  row, but no `token:login/workbuddy@...` in the OS vault (only tokenrhythm
+  login tokens exist), so the real probe still cannot run. The probe script
+  passed a local mock self-test (counts/field names/timestamps, no token or
+  row payload). S0 remains blocked on a usable account/reauth.
