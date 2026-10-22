@@ -10546,6 +10546,15 @@ function renderDashboard(): void {
   hideSpendPop();
   document.querySelector(".spend-detail-overlay")?.remove();
   const el = document.querySelector("#providers")!;
+  // Account-tab switches and data ticks both rebuild this list. Replacing
+  // innerHTML drops the scroll offset, which used to snap the popover to the
+  // top — a violent jump when switching an account near the bottom. Keep the
+  // scroll and the focused tab across the rebuild.
+  const scrollTop = el.scrollTop;
+  const focusedTab =
+    document.activeElement instanceof HTMLElement && document.activeElement.dataset.cardAccount
+      ? document.activeElement.dataset.cardAccount
+      : null;
   el.innerHTML =
     `<div class="post-banner"><strong>${escapeHtml(t("skin.signal"))}</strong><span class="post-mascot" aria-hidden="true"></span></div>` +
     renderWelcome() +
@@ -10553,6 +10562,10 @@ function renderDashboard(): void {
     renderQuotaOverview() +
     renderGroupedCards();
   decorateInkSkin(el as HTMLElement);
+  el.scrollTop = scrollTop;
+  if (focusedTab) {
+    el.querySelector<HTMLElement>(`[data-card-account="${CSS.escape(focusedTab)}"]`)?.focus({ preventScroll: true });
+  }
   if (customizeOpen) renderDrawerBody();
   if (spendDetailOpen) document.body.insertAdjacentHTML("beforeend", renderSpendDetailOverlay());
   // Cards are rebuilt from scratch, so an unlocked popover's drag opt-outs
@@ -17490,6 +17503,34 @@ async function pollAuthOauth(family: string): Promise<void> {
   void forceUsageRefreshAttempt(false).then(requestTraySync);
 }
 
+/// Rename/note a managed auth-center row. The note is the shared display
+/// name (settings, dashboard, Customize and this center all read it); the
+/// backend label is written too so a fresh window without the note still
+/// shows a sensible fallback. Local read-only rows have no menu entry.
+async function renameAuthAccount(family: string, id: string): Promise<void> {
+  const acct = authGroups?.find((g) => g.family === family)?.accounts.find((row) => row.id === id);
+  if (!acct || acct.kind === "local") return;
+  const current = authRowName(family, acct);
+  const next = await appPrompt({
+    title: t("auth.note"),
+    initial: current,
+    confirmLabel: t("settings.save"),
+  });
+  if (next == null || next === current) return;
+  setAccountNote(acct.id, next);
+  try {
+    await invoke("account_rename", { provider: family, cardId: acct.id, label: normalizeNote(next) });
+  } catch (error) {
+    // The note already drives every visible surface; the backend label is
+    // only the fallback, so a rejected label write must not lose the note.
+    console.error("account rename failed:", error);
+  }
+  await refreshSettingsProviderKey(family);
+  renderSettingsProviderKeys();
+  notifyAccountsChanged(family);
+  await loadAuthCenter();
+}
+
 /// The row's ⋯ menu, styled on the dashboard's group menu. Removing an
 /// account row drops just that login; signing in another account is the
 /// group's "add account" button. Copy-token is deliberately absent —
@@ -17506,6 +17547,8 @@ function openAuthRowMenu(family: string, index: number, anchor: HTMLElement): vo
   overlay.className = "group-menu-overlay";
   overlay.innerHTML = `<div class="group-menu" role="menu">
     <div class="group-menu-title">${escapeHtml(name)}</div>
+    <button class="group-menu-item" type="button" data-auth-menu-rename="${escapeHtml(family)}|${escapeHtml(acct.id)}"><span class="group-menu-check">✎</span>${escapeHtml(t("auth.note"))}</button>
+    <div class="group-menu-sep"></div>
     <button class="group-menu-item" type="button" data-auth-menu-archive="${escapeHtml(family)}|${index}"><span class="group-menu-check">↓</span>${escapeHtml(t("customize.acctArchive"))}</button>
     <button class="group-menu-item danger" type="button" data-auth-menu-remove="${escapeHtml(family)}|${index}"><span class="group-menu-check">×</span>${escapeHtml(t("auth.remove"))}</button>
   </div>`;
@@ -17522,6 +17565,13 @@ function openAuthRowMenu(family: string, index: number, anchor: HTMLElement): vo
   overlay.addEventListener("click", (e) => {
     if (e.target === overlay) {
       close();
+      return;
+    }
+    const rename = (e.target as HTMLElement).closest<HTMLElement>("[data-auth-menu-rename]");
+    if (rename) {
+      close();
+      const [fam, id] = rename.dataset.authMenuRename!.split("|");
+      void renameAuthAccount(fam, id);
       return;
     }
     const archive = (e.target as HTMLElement).closest<HTMLElement>("[data-auth-menu-archive]");
