@@ -21,3 +21,4 @@
 - 2026-10-21 本地实现更新：stable-id archive/default、external vault 归档事务、Cursor vault GC 顺序、login store 删除/归档/恢复、只读身份预览与旧查询过滤已完成。parse-tests 927 passed / 14 ignored；详见 [本轮结果](../../panel-ui-20261021/RESULT.md)。完整 Tauri command/IPC 联动和真实最后账号 UI 仍待 owner 验收，未将上方两项虚记为通过。
 
 - 2026-10-22 补充收口：Codex 取消/回调、直接多账号持久化、刷新版本保护和写失败 vault 保留均有回归；934 passed / 14 ignored，前端71 passed。真实UI和完整command/IPC联动仍不以持久化核心测试替代，保留上述未勾选项。Owner已明确授权本地commit，release/tag仍待本人双账号验收。
+- 2026-10-22 深度核实后补齐：已归档身份重复添加会被拒绝；`account_update` 与旧 `account_remove` 先退休匹配的 legacy provider 源；relay 家族按 API Key 恢复 baseUrl 并按 Key 退休。parse-tests 940 passed / 14 ignored；command/IPC 与真实 UI 仍待 owner 验收。

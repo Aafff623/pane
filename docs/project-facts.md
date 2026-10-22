@@ -73,7 +73,7 @@ Last reconciled: 2026-10-21 (Pane 0.8.8 + timeline, window scaling, provider tre
   `cargo +stable-x86_64-pc-windows-gnu`. The full Tauri binary cannot link
   locally as a `cdylib` (167k-export DLL). The committed crate-type is
   `["rlib"]` (desktop only). Unit tests run from repo-root `parse-tests/`
-  (937 passing in the latest full run, 14 ignored as of 2026-10-22; run with
+  (940 passing in the latest full run, 14 ignored as of 2026-10-22; run with
   `cargo +stable-x86_64-pc-windows-gnu test` and no proxy).
 - Dev runtime needs both processes: Vite `:1420` + `pane.exe` `:6736`. Never
   serve the frontend with Python `http.server` (permanent WebView2 cache
@@ -531,11 +531,17 @@ changes.
   valid native env/CLI bare snapshots still work with an empty saved list.
 - API-key card-menu Add account opens that provider in Customize, where the
   account form is added. Pinning is display preference, never a credential.
+- Re-adding an archived identity is rejected by `account_add`/`account_update`;
+  `account_update` and the legacy index-based `account_remove` retire the
+  matching legacy source first. Relay cards recover `baseUrl` from an active
+  row when `<provider>.json` was already deleted, and retirement matches by
+  API key so a missing baseUrl cannot strand the old provider slot. Migration
+  failures are logged instead of being swallowed.
 - Evidence: legacy-vault resurrection red/green, archive/delete repeated
   refresh and failed migration tests, relay retirement failure test, account
   alias regression, and a headless Customize routing check. Latest full
-  Rust run: 937 passed/14 ignored; the subsequently added relay failure
-  case also passed in the current-source targeted run.
+  Rust run: 940 passed/14 ignored after the archived-re-add and relay-recovery
+  regressions.
 
 ## Codex managed accounts and callback semantics (2026-10-22)
 

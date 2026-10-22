@@ -87,3 +87,11 @@ Status: awaiting-owner-acceptance
 - 重启后的实际验证：active MiniMax仅`11-4`一行，查询接口仅`providerId=minimax`一个MiniMax来源；旧归档身份不再查询。仅核对非秘密身份和数量，未操作认证窗口；认证与回调仍由owner本人完成。
 - 修复前相关本地数据备份位于Git忽略的`temp/secrets/minimax-20261022-before-legacy-retirement/`。本轮只恢复归档与活动状态的一致性，保留归档记录与使用历史，不把归档当作永久删除。
 - 日志：`minimax-resurrection-{red,green}.log`、`minimax-latest-{main-key-tests,retirement-tests,rust-build}.log`、`minimax-final-{rust-tests,frontend-tests,site-tests,build}.log`、`minimax-customize-check.log`，均位于本机`temp/logs/`。
+
+
+## 2026-10-22 深度核实后的残余收口
+
+- 独立复核 `85557c1`：根因修复有效；active MiniMax 仅 `11-4`，归档保留旧身份，live API 仅一个 MiniMax 来源。
+- 补齐残余：`account_add`/`account_update` 拒绝已归档身份；`account_update` 与旧 `account_remove` 先退休匹配 legacy provider 源；`relaybalance`/`sub2api` 在 `baseUrl` 元数据已丢失时从 active 行恢复，并按 API Key 退休旧源；迁移失败写运行日志。
+- 验证：parse-tests 940 passed / 14 ignored；frontend 77 passed；site 36 passed（在 `85557c1` 干净状态）；`pnpm build`、`cargo check` 通过。
+- 当前 `site/` 存在另一会话的未提交改动，本轮未触碰、未纳入账号提交。真实 Codex / 基元律动双账号认证与 UI 验收仍由 owner 完成；release/tag 仍待 owner 明确授权。

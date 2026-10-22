@@ -1726,8 +1726,13 @@ fn failure_streaks() -> &'static std::sync::Mutex<std::collections::HashMap<Stri
 fn accounts_with_imported_main_key(family: &str) -> Vec<accounts::AccountEntry> {
     if !provider_catalog::supports_api_key(family) { return Vec::new(); }
     let _mutation = account_lifecycle::mutation_lock().lock().unwrap_or_else(|e| e.into_inner());
-    accounts::load_with_imported_main_key_from(&providers::config_dir(), family)
-        .unwrap_or_else(|_| accounts::load_accounts(family))
+    match accounts::load_with_imported_main_key_from(&providers::config_dir(), family) {
+        Ok(list) => list,
+        Err(error) => {
+            eprintln!("[pane] {family} account migration failed: {error}");
+            accounts::load_accounts(family)
+        }
+    }
 }
 
 // ── Key vault commands: thin wrappers over keyvault.rs's plain API. ────────
@@ -3482,6 +3487,9 @@ fn account_add(
         base_url,
     };
     let candidate_id = accounts::card_id_for_account(&provider, &candidate);
+    if accounts::archived_id_exists(&providers::config_dir(), &provider, &candidate_id) {
+        return Err("this credential is archived; restore it from the archived list instead".into());
+    }
     if entries
         .iter()
         .any(|entry| accounts::card_id_for_account(&provider, entry) == candidate_id)
@@ -3513,9 +3521,15 @@ fn account_update(provider: String, card_id: String, label: String, api_key: Str
     } else if base_url.is_some() { return Err("this provider does not take a base URL".into()); }
     let candidate = accounts::AccountEntry { label: label.trim().into(), api_key: api_key.trim().into(), base_url };
     let new_id = accounts::card_id_for_account(&provider, &candidate);
+    if accounts::archived_id_exists(&providers::config_dir(), &provider, &new_id) {
+        return Err("this credential is archived; restore it from the archived list instead".into());
+    }
     if entries.iter().enumerate().any(|(i, entry)| i != index && accounts::card_id_for_account(&provider, entry) == new_id) {
         return Err("this credential is already added".into());
     }
+    // Rotating the key of the legacy account must retire its old provider
+    // source first; otherwise the next refresh re-imports the old identity.
+    accounts::retire_legacy_card_from(&providers::config_dir(), &provider, &card_id)?;
     entries[index] = candidate;
     accounts::save_accounts(&provider, &entries)?;
     let _ = forget_provider_snapshot(&card_id);
@@ -3595,6 +3609,8 @@ fn account_remove(provider: String, index: usize) -> Result<(), String> {
     // clear that id's cache so the promoted account doesn't inherit the
     // deleted one's numbers on a failed fetch.
     let removed_default = index == 0;
+    let removed_card_id = accounts::card_id_for_account(&provider, &entries[index]);
+    accounts::retire_legacy_card_from(&providers::config_dir(), &provider, &removed_card_id)?;
     entries.remove(index);
     accounts::save_accounts(&provider, &entries)?;
     if removed_default {

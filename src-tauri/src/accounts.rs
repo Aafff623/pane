@@ -273,19 +273,46 @@ pub(crate) fn load_with_imported_main_key_from(base: &std::path::Path, provider:
 
 fn legacy_main_entry_from(base: &std::path::Path, provider: &str) -> Option<AccountEntry> {
     let path = base.join(format!("{provider}.json"));
-    let base_url = if crate::provider_catalog::takes_base_url(provider) {
+    let file_base_url = if crate::provider_catalog::takes_base_url(provider) {
         std::fs::read_to_string(&path).ok().and_then(|raw| serde_json::from_str::<serde_json::Value>(raw.trim_start_matches('\u{feff}')).ok())
             .and_then(|doc| doc.get("baseUrl").and_then(serde_json::Value::as_str).map(str::trim).filter(|s| !s.is_empty()).map(str::to_string))
     } else { None };
-    crate::secretstore::resolve_provider_key(provider, &path).map(|api_key| AccountEntry {label: String::new(), api_key, base_url})
+    let api_key = crate::secretstore::resolve_provider_key(provider, &path)?;
+    let base_url = if crate::provider_catalog::takes_base_url(provider) {
+        // Old releases removed <provider>.json after migrating a relay key but
+        // left the vault slot behind. Recover the host from the active row
+        // with the same key so the legacy fingerprint still matches.
+        file_base_url.or_else(|| load_accounts_from(base, provider).into_iter()
+            .find(|row| row.api_key.trim() == api_key.trim())
+            .and_then(|row| row.base_url))
+    } else { None };
+    if crate::provider_catalog::takes_base_url(provider) && base_url.is_none() { return None; }
+    Some(AccountEntry { label: String::new(), api_key, base_url })
 }
 
 /// Clear only the matching legacy identity, preserving any unrelated key.
+/// Matching is by API key, not by the derived card id: a relay account whose
+/// metadata file is already gone can no longer reproduce its baseUrl-based id.
 pub(crate) fn retire_legacy_card_from(base: &std::path::Path, provider: &str, card_id: &str) -> Result<(), String> {
-    if legacy_main_entry_from(base, provider).is_some_and(|entry| card_id_for_account(provider, &entry) == card_id) {
+    let path = base.join(format!("{provider}.json"));
+    let Some(legacy_key) = crate::secretstore::resolve_provider_key(provider, &path) else { return Ok(()); };
+    let active_key = load_accounts_from(base, provider).into_iter()
+        .find(|row| card_id_for_account(provider, row) == card_id)
+        .map(|row| row.api_key);
+    let archived_key = load_archived_from(base).into_iter()
+        .find(|row| row.provider == provider && row.card_id == card_id)
+        .map(|row| row.api_key);
+    if active_key.or(archived_key).is_some_and(|key| key.trim() == legacy_key.trim()) {
         crate::providers::remove_stored_key_file_from(base, provider)?;
     }
     Ok(())
+}
+
+/// True when a credential identity remains in the generic archive store.
+/// `account_add`/`account_update` use this to refuse creating an active twin;
+/// the refresh migration would otherwise reap it on the next pass.
+pub(crate) fn archived_id_exists(base: &std::path::Path, provider: &str, card_id: &str) -> bool {
+    load_archived_from(base).iter().any(|row| row.provider == provider && row.card_id == card_id)
 }
 
 /// Deletes one account by stable card id from the active store and both
@@ -639,6 +666,50 @@ mod tests {
         assert!(crate::secretstore::resolve_provider_key(provider,&base.join(format!("{provider}.json"))).is_none());
         delete_account_from(&base,provider,&card_id_for_account(provider,&rows[0])).unwrap();
         let _=std::fs::remove_dir_all(base);
+    }
+
+    #[test]
+    fn archived_identity_blocks_re_adding_the_same_key() {
+        let provider = "archived-readd-regression";
+        let base = std::env::temp_dir().join(format!("pane-archived-readd-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        let entry = AccountEntry { label: "old".into(), api_key: "synthetic-archived-key".into(), base_url: None };
+        let id = card_id_for_account(provider, &entry);
+        archive_account_to(&base, ArchivedAccount {
+            provider: provider.into(), card_id: id.clone(), label: entry.label.clone(),
+            archived_at: 1, api_key: entry.api_key.clone(), base_url: None,
+        }).unwrap();
+        assert!(archived_id_exists(&base, provider, &id));
+        assert!(!archived_id_exists(&base, provider, "archived-readd-regression@other"));
+        let _ = std::fs::remove_dir_all(base);
+    }
+
+    #[test]
+    fn relay_legacy_key_recovers_base_url_and_retires_by_key() {
+        let provider = "relaybalance";
+        let base = std::env::temp_dir().join(format!("pane-relay-legacy-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        let entry = AccountEntry {
+            label: "relay".into(),
+            api_key: "synthetic-relay-legacy-key".into(),
+            base_url: Some("https://relay.example.test".into()),
+        };
+        let id = card_id_for_account(provider, &entry);
+        save_accounts_to(&base, provider, &[entry.clone()]).unwrap();
+        // Old bug: the metadata file is gone, but the provider vault slot survives.
+        crate::secretstore::put(&crate::secretstore::provider_key(provider), &entry.api_key).unwrap();
+        let rows = load_with_imported_main_key_from(&base, provider).unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].base_url.as_deref(), Some("https://relay.example.test"));
+        assert_eq!(card_id_for_account(provider, &rows[0]), id);
+        assert!(crate::secretstore::resolve_provider_key(provider, &base.join(format!("{provider}.json"))).is_none());
+        // A later recreation of the provider slot must still be retired by a
+        // key-based match even when the metadata file is absent.
+        crate::secretstore::put(&crate::secretstore::provider_key(provider), &entry.api_key).unwrap();
+        delete_account_from(&base, provider, &id).unwrap();
+        assert!(crate::secretstore::resolve_provider_key(provider, &base.join(format!("{provider}.json"))).is_none());
+        crate::secretstore::remove(&crate::secretstore::provider_key(provider));
+        let _ = std::fs::remove_dir_all(base);
     }
 
     #[test]
