@@ -563,7 +563,14 @@ changes.
   shows index entries as remote until installed, and a persisted shaped id
   survives boot (`readSkin`) while `migrateSkinFromIndex` downloads it.
   The index + zips must be deployed together before the flip; the demo's
-  pack loading path is separate (issue 08).
+  pack loading path is separate (issue 08). `node
+  site/scripts/check-skin-packs.mjs [--live]` is the mechanical gate: it
+  verifies local size/sha256 and, with `--live`, compares the deployed
+  index (expected to report STALE until the release deploy). 0.8.8 still
+  bundles signal/ink and `marketEntries` keeps bundled ids ahead of the
+  index, so a stale deployed index cannot reach released users; it matters
+  only for the unbundled build. Deploy from a clean tree — `site/` may
+  carry another session's WIP.
 - Deleting a One/New API key/site purges backend config/cache, and the
   frontend immediately drops the key card from `lastSnapshots`/`lastSpend`/
   `accountsCache` then refreshes accounts and broadcasts `accounts-updated`;
@@ -595,6 +602,12 @@ changes.
   second bare-card refresh of the same token. JSON persistence completes
   before deleted Codex vault slots are collected. Reset credits route to
   the managed account that owns the card.
+- `codex-accounts.json` keeps only non-secret metadata once tokens move to
+  the OS vault. If the vault lookup then misses, `read_accounts_from`
+  retains only rows with a non-empty access token, so that account silently
+  disappears from `account_list` (no re-login row). The local CLI row
+  (`~/.codex/auth.json`, marked `CLI 登录`) is separate and stays visible —
+  a ChatGPT Desktop sign-in is not a Codex CLI sign-in.
 - These paths have synthetic loopback, temp-store and frontend regression
   coverage. Real two-account OAuth and TokenRhythm login require owner UI
   acceptance; automated tests are not evidence of completed consent.
