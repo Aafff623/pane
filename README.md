@@ -21,7 +21,7 @@
   <img src="attachments/hero-light.jpg" width="100%" style="border-radius: 14px;" alt="Pane 悬浮面板与设置窗口：额度总览、用量、字体与密钥管理">
 </picture>
 
-<sub>悬浮面板 <kbd>Alt + 2</kbd> · 设置窗口 · v0.8.8</sub>
+<sub>悬浮面板 <kbd>Alt + 2</kbd> · 设置窗口 · v0.8.9</sub>
 
 </div>
 
