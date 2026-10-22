@@ -846,9 +846,6 @@ async function runBackupImport(): Promise<void> {
       keys,
       settings,
     });
-    if (Object.keys(result.settings).length) {
-      await invoke("set_config", { patch: result.settings });
-    }
     setBackupStatus(
       t("settings.backupApplied", { accounts: result.accountFiles, secrets: result.secrets }),
     );

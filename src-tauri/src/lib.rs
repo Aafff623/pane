@@ -1912,6 +1912,7 @@ fn backup_export_inner(
 }
 
 fn backup_apply_inner(
+    app: &tauri::AppHandle,
     path: &str,
     password: &str,
     accounts: bool,
@@ -1922,12 +1923,21 @@ fn backup_apply_inner(
     let _account_lock = account_lifecycle::mutation_lock()
         .lock()
         .unwrap_or_else(|error| error.into_inner());
-    let mut result = backup::apply(
+    let mut result = backup::apply_with(
         &providers::config_dir(),
         &bytes,
         password,
         backup_selection(accounts, keys, settings),
         &mut BackupSecretStore,
+        |settings| {
+            let sanitized = sanitized_backup_settings(settings.clone());
+            if sanitized.is_empty() {
+                return Ok(());
+            }
+            let cfg = set_config_inner(Value::Object(sanitized.into_iter().collect()))?;
+            apply_tray_locale(app, &cfg);
+            Ok(())
+        },
     )?;
     result.settings = sanitized_backup_settings(result.settings);
     Ok(result)
@@ -2001,6 +2011,7 @@ async fn backup_preview_dialog(
 
 #[tauri::command]
 async fn backup_apply_path(
+    app: tauri::AppHandle,
     path: String,
     password: String,
     accounts: bool,
@@ -2008,7 +2019,7 @@ async fn backup_apply_path(
     settings: bool,
 ) -> Result<backup::ApplyResult, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        backup_apply_inner(&path, &password, accounts, keys, settings)
+        backup_apply_inner(&app, &path, &password, accounts, keys, settings)
     })
     .await
     .map_err(|error| error.to_string())?
