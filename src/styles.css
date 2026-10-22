@@ -6275,14 +6275,26 @@ body.no-glass .cust-dock {
 
 
 .col-est {
-  margin-left: 4px;
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  margin-left: 5px;
   font-size: 9px;
   font-weight: 500;
-  color: #b45309;
+  color: var(--muted-foreground);
+  font-variant-numeric: tabular-nums;
+  cursor: help;
 }
 
-:root[data-theme="dark"] .col-est {
-  color: #fbbf24;
+.col-est-mark {
+  color: #b7791f;
+  font-size: 10px;
+  line-height: 1;
+  font-weight: 600;
+}
+
+:root[data-theme="dark"] .col-est-mark {
+  color: #d6a54a;
 }
 
 /* ---------------------------------------------------------------------------
@@ -7662,6 +7674,42 @@ article.provider.card-highlight {
 :root[data-theme="light"] .est-badge {
   color: #b45309;
   border-color: rgb(180 83 9 / .55);
+}
+
+/* Estimated values are a data-quality footnote, not an alert. Keep the
+   label quiet, with a single amber approximation mark and the tooltip. */
+.est-badge.est-estimate {
+  margin-left: 6px;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: none;
+  color: var(--muted-foreground);
+  font-size: 9.5px;
+  font-weight: 500;
+  letter-spacing: 0;
+  vertical-align: 1px;
+  cursor: help;
+}
+
+.est-badge.est-estimate::before {
+  content: "≈";
+  margin-right: 2px;
+  color: #b7791f;
+  font-size: 10px;
+  font-weight: 600;
+}
+
+:root[data-theme="light"] .est-badge.est-estimate {
+  color: #71717a;
+}
+
+:root[data-theme="dark"] .est-badge.est-estimate::before {
+  color: #d6a54a;
+}
+
+:root[data-theme="light"] .est-badge.est-estimate::before {
+  color: #9a6b20;
 }
 
 /* Informational (blue) variant: cc-switch provenance marker, not a warning. */

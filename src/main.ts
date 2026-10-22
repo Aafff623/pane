@@ -301,7 +301,7 @@ function spendBadgesFor(id: string, view: ShareRange, estimated = false): string
   const sp = lastSpend.find((s) => s.id === id);
   let out = "";
   if (estimated || sp?.estimated) {
-    out += `<span class="est-badge" title="${escapeHtml(t("spend.estimateTip"))}">${escapeHtml(t("spend.estimate"))}</span>`;
+    out += `<span class="est-badge est-estimate" title="${escapeHtml(t("spend.estimateTip"))}">${escapeHtml(t("spend.estimate"))}</span>`;
   }
   if (!sp) return out;
   const low = sp.likely_undercount_days?.[view] ?? 0;
@@ -4324,7 +4324,7 @@ function renderTotalSpend(): string {
   const colTotalHtml = (w: SpendWindow, estTokens = 0) => {
     const s = fmtSpendVal(w);
     const est = estTokens > 0
-      ? `<span class="col-est">${escapeHtml(t("spend.estimatedShort", { n: fmtTokens(estTokens) }))}</span>`
+      ? `<span class="col-est" title="${escapeHtml(t("spend.estimateTip"))}"><span class="col-est-mark" aria-hidden="true">≈</span>${escapeHtml(t("spend.estimatedShort", { n: fmtTokens(estTokens) }))}</span>`
       : "";
     return `<div class="col-total${s.length > 10 ? " long" : ""}" title="${escapeHtml(s)}">${escapeHtml(s)}${est}</div>`;
   };
