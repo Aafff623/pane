@@ -546,10 +546,17 @@ changes.
   `Account N` (never a fingerprint/masked token). Notes are single-line,
   capped at 48 code points, survive reconcile/archive/delete, and are shared
   by Settings, Customize, dashboard pills, overview/expiry details, spend
-  details and the auth center. Provider notes remain the card-title override.
+  details and the auth center. Auth-center rows edit that same note from
+  their `⋯` menu (`renameAuthAccount`: note first, backend label as the
+  fallback); local read-only rows keep no menu but still display a note set
+  elsewhere. Provider notes remain the card-title override.
   OAuth device/browser families (codex/grok/copilot/kiro/windsurf/trae/zed)
   route Customize to Settings/Auth center instead of rendering a second
   login UI.
+- `renderDashboard` replaces `#providers.innerHTML` wholesale. It must
+  capture/restore `scrollTop` (and the focused `[data-card-account]`) around
+  the rebuild; otherwise every account-tab switch resets the list to the top,
+  which reads as a violent window shake when the card is scrolled into view.
 - `body.ui-scaled` applies CSS `zoom`. `getBoundingClientRect()` is in visual
   pixels while fixed `left/top`, `offsetWidth` and the layout viewport are
   unscaled; every fixed menu/tooltip must go through `placeMenuAt` /
