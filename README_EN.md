@@ -145,13 +145,13 @@ The same panel switches to **By tool / Dollars**, so quota and spend never need 
 </div>
 
 <details>
-<summary><b>Account pools</b> — independent cards per account; right-click to archive or restore</summary>
+<summary><b>Multiple accounts</b> — add accounts for the same provider and inspect each quota</summary>
 
-- API-key providers can hold multiple accounts in settings, each with its own card;
-- every account keeps a stable local card identity — deleting or reordering never shuffles them;
-- notes come in two levels: "Provider name" retitles the card, "sub-account name" only that account;
-- right-click an account pill to set it as the default, archive or restore (credentials follow the archive);
-- the overview folds a pool into "main account ring + usage bar + `N/M` badge", expanding on click.
+- Add accounts in Settings → Usage through the provider's own entry point: supported API-key pools and login providers include Codex, Cursor and TokenRhythm;
+- Codex reads the local CLI login and can add other subscriptions through OAuth. The local login is a read-only source; Pane-managed accounts can be renamed, archived and deleted individually;
+- Each account keeps a stable local identity. The overview folds accounts under their provider and expands to let you switch between them;
+- Right-click to archive an account and restore it in Settings. Deletion offers an option to keep usage history;
+- "Provider name" retitles the card; "sub-account name" changes one account's note. API-key pools also support choosing a default account.
 
 </details>
 

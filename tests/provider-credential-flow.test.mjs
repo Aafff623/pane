@@ -56,6 +56,7 @@ for (const healthy of [true, false]) {
       accountsCache: new Map([['clinepass', existing]]),
       accountProbeSnapshots: new Map([['clinepass', { status: healthy ? 'ok' : 'error', metrics: [], error: healthy ? null : 'HTTP 401' }]]),
       lastSnapshots: snapshots, recentlyKeyed: new Map(), refreshState: new RefreshState(), IS_PANEL_FORM: false,
+      providerDefinition: (family) => providerCatalog.find((p) => p.familyId === family),
       enabledAccountCount, providerFamily: (id) => id.split('@')[0], providerDisplayName: (family) => family,
       patchConfig: async (patch) => Object.assign(context.config, patch),
       refreshSettingsProviderKey: async () => context.accountsCache.set('clinepass', [...existing, added]),

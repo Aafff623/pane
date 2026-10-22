@@ -34,7 +34,7 @@ fn dir_identity(dir: &std::path::Path) -> Option<(String, Option<String>)> {
 
 fn read_auth(dir: &std::path::Path) -> Option<Value> {
     let raw = std::fs::read_to_string(dir.join("auth.json")).ok()?;
-    serde_json::from_str(&raw).ok()
+    serde_json::from_str(raw.trim_start_matches('\u{feff}')).ok()
 }
 
 /// Proof a discovered auth.json actually belongs to OpenAI: its id_token
@@ -195,65 +195,47 @@ pub(crate) fn login_card_name(login: &crate::codex_accounts::CodexLogin) -> Stri
 /// written back into the account store so the next fetch starts fresh; the
 /// store is re-loaded right before the write so a concurrent rename or
 /// remove from the UI is not clobbered.
+fn login_refresh_lock(account_id: &str) -> std::sync::Arc<tokio::sync::Mutex<()>> {
+    use std::sync::{Arc, Mutex, OnceLock, Weak};
+    static LOCKS: OnceLock<Mutex<std::collections::HashMap<String, Weak<tokio::sync::Mutex<()>>>>> = OnceLock::new();
+    let mut locks = LOCKS.get_or_init(|| Mutex::new(Default::default())).lock().unwrap_or_else(|e| e.into_inner());
+    locks.retain(|_, lock| lock.strong_count() > 0);
+    if let Some(lock) = locks.get(account_id).and_then(Weak::upgrade) { return lock; }
+    let lock = Arc::new(tokio::sync::Mutex::new(()));
+    locks.insert(account_id.to_string(), Arc::downgrade(&lock));
+    lock
+}
+
 async fn login_access(login: &crate::codex_accounts::CodexLogin) -> Result<Access, String> {
-    let plan_claim = |id_token: &str| {
-        jwt_claims(id_token).and_then(|c| {
-            c.pointer("/https:~1~1api.openai.com~1auth/chatgpt_plan_type")
-                .and_then(Value::as_str)
-                .map(str::to_string)
-        })
-    };
-    let exp = jwt_claims(&login.access_token)
-        .and_then(|c| c.get("exp").and_then(Value::as_i64))
-        .unwrap_or(0);
-    let mut access = login.access_token.clone();
-    let mut refresh = login.refresh_token.clone();
-    let mut id_token = login.id_token.clone();
-    let mut plan = plan_claim(&id_token);
-    if access.is_empty() || exp <= Utc::now().timestamp() + 60 {
-        if refresh.trim().is_empty() {
-            return Err(
-                "Codex login expired and has no refresh token — sign in again from the auth center"
-                    .into(),
-            );
+    let refresh_lock = login_refresh_lock(&login.account_id);
+    let _refresh = refresh_lock.lock().await;
+    let base = crate::providers::config_dir();
+    let current = crate::codex_accounts::preview_single_login_from(&base).into_iter()
+        .find(|row| row.account_id == login.account_id).ok_or("Codex account no longer exists")?;
+    let exp = jwt_claims(&current.access_token).and_then(|c| c.get("exp").and_then(Value::as_i64))
+        .or_else(|| chrono::DateTime::parse_from_rfc3339(&current.expires_at).ok().map(|time| time.timestamp())).unwrap_or(0);
+    let mut ready = current.clone();
+    if ready.access_token.is_empty() || exp <= Utc::now().timestamp() + 60 {
+        if ready.refresh_token.trim().is_empty() {
+            return Err("Codex login expired and has no refresh token — sign in again from the auth center".into());
         }
-        let resp = crate::providers::send_with_direct_fallback(|client| {
-            client
-                .post("https://auth.openai.com/oauth/token")
-                .json(&json!({
-                    "client_id": CLIENT_ID,
-                    "grant_type": "refresh_token",
-                    "refresh_token": refresh,
-                    "scope": "openid profile email",
-                }))
-        })
-        .await
-        .map_err(|e| format!("token refresh: {e}"))?;
-        if !resp.status().is_success() {
-            return Err(format!("token refresh failed: HTTP {}", resp.status()));
-        }
+        let resp = crate::providers::send_with_direct_fallback(|client| client
+            .post("https://auth.openai.com/oauth/token").json(&json!({
+                "client_id": CLIENT_ID, "grant_type": "refresh_token",
+                "refresh_token": ready.refresh_token, "scope": "openid profile email",
+            }))).await.map_err(|e| format!("token refresh: {e}"))?;
+        if !resp.status().is_success() { return Err(format!("token refresh failed: HTTP {}", resp.status())); }
         let tok: Value = resp.json().await.map_err(|e| format!("token refresh parse: {e}"))?;
-        access = tok
-            .get("access_token")
-            .and_then(Value::as_str)
-            .ok_or("refresh response missing access_token")?
-            .to_string();
-        if let Some(r) = tok.get("refresh_token").and_then(Value::as_str) {
-            refresh = r.to_string();
-        }
-        if let Some(i) = tok.get("id_token").and_then(Value::as_str) {
-            id_token = i.to_string();
-            plan = plan_claim(&id_token);
-        }
-        let mut accounts = crate::codex_accounts::load_accounts();
-        if let Some(stored) = accounts.iter_mut().find(|a| a.account_id == login.account_id) {
-            stored.access_token = access.clone();
-            stored.refresh_token = refresh.clone();
-            stored.id_token = id_token.clone();
-            let _ = crate::codex_accounts::save_accounts(&accounts);
-        }
+        ready.access_token = tok.get("access_token").and_then(Value::as_str).filter(|s| !s.is_empty())
+            .ok_or("refresh response missing access_token")?.to_string();
+        if let Some(value) = tok.get("refresh_token").and_then(Value::as_str).filter(|s| !s.is_empty()) { ready.refresh_token = value.into(); }
+        if let Some(value) = tok.get("id_token").and_then(Value::as_str).filter(|s| !s.is_empty()) { ready.id_token = value.into(); }
+        ready.expires_at = (Utc::now() + chrono::Duration::seconds(tok.get("expires_in").and_then(Value::as_i64).unwrap_or(3600).max(1))).to_rfc3339();
+        ready = crate::codex_accounts::save_refreshed_from(&base, &current, &ready)?;
     }
-    Ok(Access { token: access, account_id: login.account_id.clone(), plan })
+    let plan = jwt_claims(&ready.id_token).and_then(|c| c.pointer("/https:~1~1api.openai.com~1auth/chatgpt_plan_type")
+        .and_then(Value::as_str).map(str::to_string));
+    Ok(Access { token: ready.access_token, account_id: ready.account_id, plan })
 }
 
 struct Access {
@@ -270,19 +252,9 @@ async fn default_card_access(dir: &std::path::Path) -> Result<Option<Access>, St
     if dir.join("auth.json").exists() {
         return load_access(dir).await.map(Some);
     }
-    match crate::oauth::valid_tokens(ID).await {
-        Ok(Some(t)) => Ok(Some(Access {
-            token: t.access_token,
-            account_id: t.account_id.unwrap_or_default(),
-            plan: t.id_token.as_deref().and_then(jwt_claims).and_then(|c| {
-                c.pointer("/https:~1~1api.openai.com~1auth/chatgpt_plan_type")
-                    .and_then(Value::as_str)
-                    .map(str::to_string)
-            }),
-        })),
-        Ok(None) => Ok(None),
-        Err(e) => Err(e),
-    }
+    // Pane OAuth subscriptions are queried only through codex_accounts.
+    // The bare card belongs exclusively to the user-designated local CLI.
+    Ok(None)
 }
 
 /// Loads (and if needed refreshes + writes back) the Codex OAuth access
@@ -290,7 +262,7 @@ async fn default_card_access(dir: &std::path::Path) -> Result<Option<Access>, St
 async fn load_access(dir: &std::path::Path) -> Result<Access, String> {
     let path = dir.join("auth.json");
     let raw = std::fs::read_to_string(&path).map_err(|e| format!("read auth.json: {e}"))?;
-    let mut doc: Value = serde_json::from_str(&raw).map_err(|e| format!("parse auth.json: {e}"))?;
+    let mut doc: Value = serde_json::from_str(raw.trim_start_matches('\u{feff}')).map_err(|e| format!("parse auth.json: {e}"))?;
     let tokens = doc
         .get("tokens")
         .cloned()
@@ -686,20 +658,14 @@ pub async fn redeem_credit(provider_id: &str, credit_id: &str) -> Result<String,
     // Route the redeem to the account whose card offered the credit — an
     // extra account's Use button must spend ITS credit, not the default
     // login's (upstream's CodexResetClaimRouter, in one lookup).
-    let dir = if provider_id == ID {
-        default_home()
-    } else {
-        discover_extra_accounts()
-            .into_iter()
-            .find(|a| a.id == provider_id)
-            .map(|a| a.dir)
-            .ok_or_else(|| format!("unknown Codex account: {provider_id}"))?
-    };
     let auth = if provider_id == ID {
-        default_card_access(&dir)
-            .await?
-            .ok_or("Codex sign-in not found")?
+        default_card_access(&default_home()).await?.ok_or("Codex sign-in not found")?
+    } else if let Some(login) = crate::codex_accounts::load_with_imported_single_login().into_iter()
+        .find(|login| crate::codex_accounts::card_id_for_account(login) == provider_id) {
+        login_access(&login).await?
     } else {
+        let dir = discover_extra_accounts().into_iter().find(|a| a.id == provider_id)
+            .map(|a| a.dir).ok_or_else(|| format!("unknown Codex account: {provider_id}"))?;
         load_access(&dir).await?
     };
     let redeem_request_id = format!(

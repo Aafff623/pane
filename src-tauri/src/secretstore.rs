@@ -87,6 +87,10 @@ pub fn remove(key: &str) {
     backend::remove(key)
 }
 
+pub fn remove_checked(key: &str) -> Result<(), String> {
+    backend::remove_checked(key)
+}
+
 /// Session documents share one vault slot so token/password rotations persist
 /// together. A failed vault write retains the existing file fallback.
 pub fn save_session(scope: &str, path: &Path, doc: &Value) -> Result<(), String> {

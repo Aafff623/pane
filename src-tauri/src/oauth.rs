@@ -165,6 +165,14 @@ fn vault_key(provider: &str) -> String {
 }
 
 pub fn load_from(dir: &Path, provider: &str) -> Option<StoredTokens> {
+    read_from(dir, provider, true)
+}
+
+pub(crate) fn peek_from(dir: &Path, provider: &str) -> Option<StoredTokens> {
+    read_from(dir, provider, false)
+}
+
+fn read_from(dir: &Path, provider: &str, migrate: bool) -> Option<StoredTokens> {
     // Vault first: the OS credential store owns the tokens; the legacy
     // plaintext file is read only when the vault has nothing (or is down).
     if let crate::secretstore::Secret::Found(raw) = crate::secretstore::get(&vault_key(provider)) {
@@ -176,7 +184,7 @@ pub fn load_from(dir: &Path, provider: &str) -> Option<StoredTokens> {
     let tokens: StoredTokens = serde_json::from_str(&raw).ok()?;
     // Lazy migration — the vault write must succeed BEFORE the plaintext
     // file is dropped, so a broken vault keeps the file working.
-    if crate::secretstore::put(&vault_key(provider), &raw).is_ok() {
+    if migrate && crate::secretstore::put(&vault_key(provider), &raw).is_ok() {
         let _ = std::fs::remove_file(file_path(dir, provider));
     }
     Some(tokens)
@@ -224,11 +232,25 @@ fn save(provider: &str, tokens: &StoredTokens) -> Result<(), String> {
 /// any legacy file) for the provider. The CLI's own credentials are
 /// untouched.
 pub fn logout(provider: &str) -> Result<(), String> {
+    logout_from(&oauth_dir(), provider)
+}
+
+pub fn logout_from(dir: &Path, provider: &str) -> Result<(), String> {
     check_provider(provider)?;
-    crate::secretstore::remove(&vault_key(provider));
-    let path = file_path(&oauth_dir(), provider);
+    let path = file_path(dir, provider);
     if path.exists() {
         std::fs::remove_file(&path).map_err(|e| format!("remove oauth file: {e}"))?;
+    }
+    crate::secretstore::remove_checked(&vault_key(provider))?;
+    Ok(())
+}
+
+/// Retire only the legacy slot for the identity being removed/archived.
+pub fn logout_matching_from(dir: &Path, provider: &str, account_id: &str, access_token: &str) -> Result<(), String> {
+    if load_from(dir, provider).is_some_and(|t|
+        t.account_id.as_deref().is_some_and(|id| !id.is_empty() && id == account_id)
+            || t.access_token == access_token) {
+        logout_from(dir, provider)?;
     }
     Ok(())
 }
@@ -536,6 +558,23 @@ fn register_pending(device_auth_id: String, flow: PendingFlow) {
 // poll
 // ---------------------------------------------------------------------------
 
+pub fn cancel(provider: &str, device_auth_id: &str) {
+    let mut pending = PENDING.lock().unwrap_or_else(|e| e.into_inner());
+    if pending.get(device_auth_id).is_some_and(|flow| flow.provider == provider) {
+        pending.remove(device_auth_id);
+    }
+}
+
+fn finish_pending_login(provider: &str, device_auth_id: &str, doc: &Value) -> Result<Option<String>, String> {
+    let mut pending = PENDING.lock().unwrap_or_else(|e| e.into_inner());
+    if !pending.get(device_auth_id).is_some_and(|flow| flow.provider == provider && flow.expires_at_ms > now_ms()) {
+        return Err("sign-in canceled or expired — start again".into());
+    }
+    let result = finish_login(provider, doc);
+    pending.remove(device_auth_id);
+    result
+}
+
 pub async fn poll(provider: &str, device_auth_id: &str) -> PollResponse {
     if check_provider(provider).is_err() {
         return PollResponse::failure(format!("OAuth sign-in is not available for {provider}"));
@@ -638,11 +677,8 @@ async fn poll_codex(device_auth_id: &str, flow: &PendingFlow) -> PollResponse {
         Ok(d) => d,
         Err(e) => return PollResponse::failure(e),
     };
-    match finish_login("codex", &doc) {
-        Ok(label) => {
-            PENDING.lock().unwrap_or_else(|e| e.into_inner()).remove(device_auth_id);
-            PollResponse::success(label)
-        }
+    match finish_pending_login("codex", device_auth_id, &doc) {
+        Ok(label) => PollResponse::success(label),
         Err(e) => PollResponse::failure(e),
     }
 }
@@ -692,11 +728,8 @@ async fn poll_xai(device_auth_id: &str, flow: &PendingFlow) -> PollResponse {
     if status != 200 {
         return PollResponse::failure(format!("poll request: HTTP {status}"));
     }
-    match finish_login("grok", &doc) {
-        Ok(label) => {
-            PENDING.lock().unwrap_or_else(|e| e.into_inner()).remove(device_auth_id);
-            PollResponse::success(label)
-        }
+    match finish_pending_login("grok", device_auth_id, &doc) {
+        Ok(label) => PollResponse::success(label),
         Err(e) => PollResponse::failure(e),
     }
 }
@@ -770,6 +803,10 @@ async fn poll_copilot(device_auth_id: &str, _flow: &PendingFlow) -> PollResponse
         account_id: user_id.map(|id| id.to_string()),
         id_token: None,
     };
+    let mut pending = PENDING.lock().unwrap_or_else(|e| e.into_inner());
+    if !pending.get(device_auth_id).is_some_and(|flow| flow.provider == "copilot" && flow.expires_at_ms > now_ms()) {
+        return PollResponse::failure("sign-in canceled or expired — start again".into());
+    }
     if let Err(e) = save("copilot", &tokens) {
         return PollResponse::failure(e);
     }
@@ -779,7 +816,7 @@ async fn poll_copilot(device_auth_id: &str, _flow: &PendingFlow) -> PollResponse
             return PollResponse::failure(e);
         }
     }
-    PENDING.lock().unwrap_or_else(|e| e.into_inner()).remove(device_auth_id);
+    pending.remove(device_auth_id);
     PollResponse::success(tokens.label.clone())
 }
 
@@ -895,6 +932,10 @@ fn finish_login(provider: &str, doc: &Value) -> Result<Option<String>, String> {
         account_id,
         id_token,
     };
+    if provider == "codex" {
+        crate::codex_accounts::record_login(&tokens)?;
+        return Ok(label);
+    }
     save(provider, &tokens)?;
     // Multi-account families (grok) record the completed sign-in into the
     // login-account store too — every login becomes its own card. A
@@ -1068,6 +1109,21 @@ fn parse_refreshed(doc: Value) -> Result<StoredTokens, String> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn canceled_device_flow_never_reaches_token_persistence() {
+        let id = "synthetic-canceled-device-regression";
+        super::register_pending(id.into(), super::PendingFlow {
+            provider: "codex".into(), user_code: "not-a-real-code".into(), token_endpoint: String::new(),
+            expires_at_ms: super::now_ms() + 10000, interval_secs: 3, next_poll_at_ms: 0,
+        });
+        super::cancel("copilot", id);
+        assert!(super::PENDING.lock().unwrap().contains_key(id));
+        super::cancel("codex", id);
+        let error = super::finish_pending_login("codex", id, &serde_json::json!({})).unwrap_err();
+        assert!(error.contains("canceled")); // Empty doc would fail parsing if persistence were reached.
+        assert!(!super::PENDING.lock().unwrap().contains_key(id));
+    }
+
     use super::*;
     use base64::Engine;
 

@@ -9,15 +9,12 @@
 //! cookie-only, the Bearer path in its bundle is mock-only), so Pane hosts
 //! the login itself.
 //!
-//! Flow: the user signs in inside a Pane-hosted webview (the captcha and
-//! the SMS code are theirs to clear); the session then lives in Pane's own
-//! WebView2 profile, which persists across restarts like a browser staying
-//! signed in. Pane reads the session cookie through WebView2's cookie
-//! manager — the profile's cookie DB is locked by the browser process while
-//! the app runs, and the session value is httpOnly, so neither a file read
-//! nor page script can see it — caches the header in the OS vault, and
-//! calls the console API with reqwest. No cookie or token is ever written
-//! to Pane's JSON files or logs.
+//! Each added account signs in through an isolated temporary WebView2
+//! window. The cookie manager supplies httpOnly cookies after /api/auth/me
+//! confirms the stable user id. Sessions are kept by login_accounts under
+//! per-account OS-vault slots, with the standard file fallback when the
+//! vault is unavailable; neither credentials nor response bodies are logged.
+//! The pre-multi-account web/tokenrhythm slot migrates once, save-first.
 //!
 //! Response shapes of `/api/wallet/summary` were captured from the live
 //! site on 2026-10-19 (owner's first login): the envelope is
@@ -79,16 +76,56 @@ fn load_store() -> Store {
         .unwrap_or_default()
 }
 
-fn save_store(store: &Store) -> Result<(), String> {
-    std::fs::create_dir_all(config_dir()).map_err(|e| format!("create config dir: {e}"))?;
-    let doc = serde_json::to_value(store).map_err(|e| format!("serialize session: {e}"))?;
-    crate::secretstore::save_session(VAULT_SCOPE, &store_path(), &doc)
+fn login_account(doc: &Value, cookie: String, csrf: String) -> Result<crate::login_accounts::LoginAccount, String> {
+    if !signed_in_response(doc) { return Err("登录响应缺少账号身份".into()); }
+    let data = &doc["data"];
+    Ok(crate::login_accounts::LoginAccount {
+        account_id: data["id"].as_str().unwrap().trim().to_string(),
+        email: data["name"].as_str().unwrap_or_default().to_string(),
+        label: String::new(),
+        access_token: cookie,
+        refresh_token: csrf,
+        id_token: String::new(),
+        expires_at: String::new(),
+        added_at: chrono::Utc::now().timestamp(),
+        extra: Value::Null,
+    })
+}
+
+async fn record_session(cookie: String, csrf: String) -> Result<(), String> {
+    let doc = call_console(ME_PATH, &cookie, &csrf).await
+        .map_err(|_| "无法验证基元律动账号，请重试".to_string())?;
+    let account = login_account(&doc, cookie, csrf)?;
+    save_verified_account(account)
+}
+
+fn save_verified_account(account: crate::login_accounts::LoginAccount) -> Result<(), String> {
+    let _mutation = crate::account_lifecycle::mutation_lock().lock().unwrap_or_else(|e| e.into_inner());
+    crate::login_accounts::record_login(FAMILY_ID, account)?;
+    // Save first, then retire the single-session source so deletion cannot
+    // resurrect it. No browser profile is imported automatically afterwards.
+    clear()
+}
+
+pub(crate) async fn migrate_legacy_session() -> Result<(), String> {
+    static MIGRATION: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+    let _guard = MIGRATION.lock().await;
+    let store = load_store();
+    if store.cookie.trim().is_empty() { return Ok(()); }
+    match call_console(ME_PATH, &store.cookie, &store.csrf).await {
+        Ok(doc) => {
+            let account = login_account(&doc, store.cookie, store.csrf)?;
+            save_verified_account(account)
+        }
+        Err(CallErr::Auth) => clear(),
+        Err(CallErr::Other(_)) => Err("原基元律动会话迁移暂时失败，请联网后重试".into()),
+    }
 }
 
 pub fn status() -> LoginStatus {
     let store = load_store();
     LoginStatus {
-        signed_in: !store.cookie.trim().is_empty(),
+        signed_in: !crate::login_accounts::load(FAMILY_ID).is_empty() || !store.cookie.trim().is_empty(),
         saved_at: store.saved_at,
     }
 }
@@ -101,16 +138,11 @@ pub fn clear() -> Result<(), String> {
 // Reading the session out of Pane's own WebView2 profile
 // ---------------------------------------------------------------------------
 
-/// The webview whose cookie manager sees the site's session. Every webview
-/// in the app shares one browser profile, so any of them answers; the login
-/// window is preferred while it is open because it is the one the user just
-/// signed in through.
+/// Only the isolated login window owns this login attempt's cookie jar.
 #[cfg(not(feature = "harness"))]
 fn session_window(app: &tauri::AppHandle) -> Option<tauri::WebviewWindow> {
     use tauri::Manager as _;
     app.get_webview_window(LOGIN_WINDOW)
-        .or_else(|| app.get_webview_window("main"))
-        .or_else(|| app.get_webview_window("panel"))
 }
 
 /// The site's cookies as a request header, plus the CSRF value, read through
@@ -151,32 +183,6 @@ async fn extract_session(app: &tauri::AppHandle) -> Option<(String, String)> {
 async fn extract_session(_app: &tauri::AppHandle) -> Option<(String, String)> {
     // No webviews in the harness — the login window is meaningless there.
     None
-}
-
-/// Caches whatever the profile currently holds — but only once the site
-/// confirms it is a real session. The login page sets its own first-party
-/// cookies (`_c_WBKFRo`, `tr_csrf`) before anyone signs in, and caching
-/// those made "already signed in" true for a browser that never logged in:
-/// the login window never opened and every wallet call answered 401.
-#[cfg(not(feature = "harness"))]
-async fn cache_profile_session(app: &tauri::AppHandle) -> bool {
-    let Some((cookie, csrf)) = extract_session(app).await else {
-        return false;
-    };
-    if !session_live(&cookie, &csrf).await {
-        return false;
-    }
-    let store = Store {
-        cookie,
-        csrf,
-        saved_at: Some(chrono::Utc::now().to_rfc3339()),
-    };
-    save_store(&store).is_ok()
-}
-
-#[cfg(feature = "harness")]
-async fn cache_profile_session(_app: &tauri::AppHandle) -> bool {
-    false
 }
 
 // ---------------------------------------------------------------------------
@@ -293,51 +299,39 @@ fn wallet_key_digest(doc: &Value) -> String {
 /// dispatch table expects (family id and display name are this module's
 /// own constants).
 pub async fn snapshot() -> Snapshot {
-    snapshot_for(FAMILY_ID, DISPLAY_NAME).await
+    if let Err(reason) = migrate_legacy_session().await {
+        return Snapshot::error(FAMILY_ID, DISPLAY_NAME, reason);
+    }
+    if let Some(login) = crate::login_accounts::load(FAMILY_ID).into_iter().next() {
+        snapshot_with_login_as(login, FAMILY_ID).await
+    } else {
+        Snapshot::no_credentials(FAMILY_ID, DISPLAY_NAME,
+            "尚未登录基元律动——在设置里添加账号并完成网页登录。".into())
+    }
 }
 
-/// The card's snapshot. Never `None` — the channel always reports
-/// something (the signed-out hint when there is no session).
-///
-/// The session comes from the vault cache only. Re-reading it from the
-/// browser needs a webview handle (and therefore an `AppHandle`), which the
-/// dispatch table does not pass; the login command does that recovery
-/// itself, so a cache miss here just means "sign in again" — the hint says
-/// exactly that.
-pub async fn snapshot_for(family_id: &str, display_name: &str) -> Snapshot {
-    let store = load_store();
-    if store.cookie.trim().is_empty() {
-        return Snapshot::no_credentials(
-            family_id,
-            display_name,
-            "尚未登录基元律动——在设置里完成网页登录。".into(),
-        );
-    }
-    match call_console(WALLET_PATH, &store.cookie, &store.csrf).await {
+pub fn login_card_name(login: &crate::login_accounts::LoginAccount) -> String {
+    let label = if login.label.trim().is_empty() { &login.email } else { &login.label };
+    if label.trim().is_empty() { DISPLAY_NAME.into() } else { format!("{DISPLAY_NAME} — {label}") }
+}
+
+pub async fn snapshot_with_login(login: crate::login_accounts::LoginAccount) -> Snapshot {
+    let id = crate::login_accounts::card_id_for_account(FAMILY_ID, &login);
+    snapshot_with_login_as(login, &id).await
+}
+
+pub async fn snapshot_with_login_as(login: crate::login_accounts::LoginAccount, id: &str) -> Snapshot {
+    let name = login_card_name(&login);
+    match call_console(WALLET_PATH, &login.access_token, &login.refresh_token).await {
         Ok(doc) => match metrics_from_wallet(&doc) {
-            Some(metrics) => Snapshot::ok(family_id, display_name, None, metrics),
-            None => Snapshot::error(
-                family_id,
-                display_name,
-                format!(
-                    "基元律动钱包响应结构未识别（待确认）：{}",
-                    wallet_key_digest(&doc)
-                ),
-            ),
+            Some(metrics) => Snapshot::ok(id, &name, None, metrics),
+            None => Snapshot::error(id, &name, format!(
+                "基元律动钱包响应结构未识别（待确认）：{}", wallet_key_digest(&doc))),
         },
-        Err(CallErr::Auth) => {
-            // The site rejected the cached session — it is dead, not just
-            // unreadable from here. Drop it so the row stops claiming
-            // "signed in" and the next login attempt opens the window
-            // instead of trusting the corpse.
-            let _ = clear();
-            Snapshot::no_credentials(family_id, display_name, SIGNED_OUT_HINT.into())
-        }
-        Err(CallErr::Other(reason)) => Snapshot::error(
-            family_id,
-            display_name,
-            format!("基元律动控制台: {reason}"),
-        ),
+        // Retain the account identity on expiry: the user can re-login or
+        // delete it explicitly. Never clear another account's session.
+        Err(CallErr::Auth) => Snapshot::no_credentials(id, &name, SIGNED_OUT_HINT.into()),
+        Err(CallErr::Other(reason)) => Snapshot::error(id, &name, format!("基元律动控制台: {reason}")),
     }
 }
 
@@ -367,50 +361,27 @@ async fn session_live(cookie: &str, csrf: &str) -> bool {
     }
 }
 
-/// Opens the sign-in window and waits until the console reports a session.
-/// The user clears the captcha and the SMS code (or signs in with the
-/// account password) inside the window; the session then lives in Pane's
-/// own WebView2 profile.
-///
-/// Completion is decided Rust-side by asking the site with whatever cookies
-/// the browser currently holds. An in-page probe was tried first and
-/// abandoned: the window loads a REMOTE origin, and Tauri only lets remote
-/// content reach app commands when a capability names them — which would
-/// have turned on ACL gating for every command in the app.
-///
-/// "Already signed in" is a claim the SITE has to confirm, never the mere
-/// presence of a cookie jar: the login page drops its own first-party
-/// cookies before anyone authenticates, and a cached session can also have
-/// expired since it was saved. Both cases must fall through to the window.
+/// Opens an isolated sign-in window for adding or reauthenticating an
+/// account. A verified server id upserts only that account; closing or
+/// timing out leaves every saved account intact. Completion is polled on
+/// the Rust side because remote content cannot invoke app commands.
 ///
 /// App-only: the parse-tests harness's `tauri` stub has no window builder,
 /// and the login window is meaningless there.
 #[cfg(not(feature = "harness"))]
 pub async fn login(app: &tauri::AppHandle) -> Result<(), String> {
     use tauri::Manager as _;
-    // 1. A cached session counts only while the site still accepts it.
-    let cached = load_store();
-    if !cached.cookie.trim().is_empty() {
-        if session_live(&cached.cookie, &cached.csrf).await {
-            return Ok(());
-        }
-        // Dead weight: drop it here so the row the user is looking at stops
-        // claiming "signed in" the moment they try to sign in.
-        let _ = clear();
-    }
-    // 2. The browser profile may hold a live session Pane has not cached
-    //    (signed in through the window in an earlier run, or the cache was
-    //    cleared). Pick it up instead of asking the user to sign in again.
-    if cache_profile_session(app).await {
-        return Ok(());
-    }
+    static LOGIN_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+    let _guard = LOGIN_LOCK.try_lock().map_err(|_| "基元律动登录正在进行，请先完成或关闭登录窗口".to_string())?;
+    migrate_legacy_session().await?;
     if let Some(w) = app.get_webview_window(LOGIN_WINDOW) {
         let _ = w.set_focus();
-        return Ok(());
+        return Err("基元律动登录窗口已打开，请先完成或关闭该窗口".into());
     }
     let url = tauri::Url::parse(LOGIN_URL).map_err(|e| format!("login url: {e}"))?;
     tauri::WebviewWindowBuilder::new(app, LOGIN_WINDOW, tauri::WebviewUrl::External(url))
         .title("登录基元律动")
+        .incognito(true)
         .inner_size(480.0, 720.0)
         .center()
         .build()
@@ -446,21 +417,37 @@ pub async fn login(app: &tauri::AppHandle) -> Result<(), String> {
     let Some((cookie, csrf)) = session else {
         return Err("登录未完成（窗口已关闭）".into());
     };
-    let store = Store {
-        cookie,
-        csrf,
-        saved_at: Some(chrono::Utc::now().to_rfc3339()),
-    };
-    if save_store(&store).is_err() {
-        return Err("登录态保存失败".into());
-    }
-    Ok(())
+    record_session(cookie, csrf).await
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn multiple_web_logins_use_server_identity_and_relogin_keeps_label() {
+        let me = json!({"code":0,"data":{"id":"synthetic-web-user","name":"User A"}});
+        let mut a = login_account(&me, "old-cookie".into(), "csrf-a".into()).unwrap();
+        a.label = "My account".into();
+        let id = crate::login_accounts::card_id_for_account(FAMILY_ID, &a);
+        let refreshed = login_account(&me, "rotated-cookie".into(), "csrf-b".into()).unwrap();
+        assert_eq!(id, crate::login_accounts::card_id_for_account(FAMILY_ID, &refreshed));
+        let mut rows = vec![a];
+        crate::login_accounts::upsert(&mut rows, refreshed);
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].label, "My account");
+        assert_eq!(rows[0].access_token, "rotated-cookie");
+        let other = login_account(&json!({"code":0,"data":{"id":"synthetic-web-other"}}),
+            "other-cookie".into(), "".into()).unwrap();
+        crate::login_accounts::upsert(&mut rows, other);
+        assert_eq!(rows.len(), 2);
+        assert_ne!(id, crate::login_accounts::card_id_for_account(FAMILY_ID, &rows[1]));
+        let public = serde_json::to_string(&crate::login_accounts::account_rows(FAMILY_ID, &rows)).unwrap();
+        assert!(!public.contains("rotated-cookie"));
+        assert!(!public.contains("other-cookie"));
+        assert!(login_account(&json!({"code":0,"data":{}}), "cookie".into(), "".into()).is_err());
+    }
 
     #[test]
     fn wallet_rows_come_from_the_plausible_field_names() {

@@ -1,3 +1,4 @@
+mod account_lifecycle;
 mod accounts;
 mod identity;
 mod secretstore;
@@ -2186,6 +2187,16 @@ async fn test_provider(provider_id: String) -> Result<String, String> {
 }
 
 async fn fetch_provider_snapshot(provider_id: String, allow_disabled: bool) -> Result<providers::Snapshot, String> {
+    if family_of(&provider_id) == "tokenrhythm" { providers::tokenrhythm::migrate_legacy_session().await?; }
+    let before = managed_snapshot_identities().remove(&provider_id);
+    let result = fetch_provider_snapshot_unchecked(provider_id.clone(), allow_disabled).await?;
+    if before != managed_snapshot_identities().remove(&provider_id) {
+        return Err("account changed while the query was running; retry".into());
+    }
+    Ok(result)
+}
+
+async fn fetch_provider_snapshot_unchecked(provider_id: String, allow_disabled: bool) -> Result<providers::Snapshot, String> {
     let family = family_of(&provider_id);
     let cfg = config_with_defaults(load_config());
     let disabled = effective_disabled_list(&cfg);
@@ -2298,6 +2309,7 @@ async fn fetch_provider_snapshot(provider_id: String, allow_disabled: bool) -> R
             .find(|l| login_accounts::card_id_for_account(&family, &l) == provider_id)
             .ok_or_else(|| format!("no {family} account {provider_id}"))?;
         return Ok(match family.as_str() {
+            "tokenrhythm" => providers::tokenrhythm::snapshot_with_login(login).await,
             "copilot" => providers::copilot::snapshot_with_login(login).await,
             "kiro" => providers::kiro::snapshot_with_login(login).await,
             "qoder" => providers::qoder::snapshot_with_login(login).await,
@@ -2407,6 +2419,10 @@ async fn run_usage_fetch_inner_mode(
         }
     }
 
+    if !disabled.iter().any(|family| family == "tokenrhythm") {
+        // One-time single-session migration must precede the identity stamp.
+        let _ = providers::tokenrhythm::migrate_legacy_session().await;
+    }
     // Each provider future is boxed onto the heap and spawned as its own
     // task. A single tokio::join! over 28 inlined futures builds one huge
     // combined state machine on the calling thread's stack — at 28 providers
@@ -2456,6 +2472,7 @@ async fn run_usage_fetch_inner_mode(
         .filter(|p| p.supports_api_key && p.supports_extra_accounts) {
         expected_key_identities.entry(definition.family_id.into()).or_default();
     }
+    expected_key_identities.extend(managed_snapshot_identities());
     let mut futs: Vec<(String, BoxedSnap)> = base
         .into_iter()
         .filter(|(id, _)| {
@@ -2535,7 +2552,9 @@ async fn run_usage_fetch_inner_mode(
             "qoder" => providers::qoder::default_identity().await.into_iter().collect(),
             _ => HashSet::new(),
         };
-        for login in login_accounts::load_with_imported_single_login(family) {
+        for (index, login) in login_accounts::load_with_imported_single_login(family).into_iter().enumerate() {
+            // The first web-session account is already the bare family card.
+            if family == "tokenrhythm" && index == 0 { continue; }
             if let Some((slot_acct, slot_tok)) = &slot {
                 let same_as_slot = (!slot_acct.is_empty() && slot_acct == &login.account_id)
                     || slot_tok == &login.access_token;
@@ -2551,6 +2570,10 @@ async fn run_usage_fetch_inner_mode(
                 String,
                 std::pin::Pin<Box<dyn std::future::Future<Output = providers::Snapshot> + Send>>,
             ) = match family {
+                "tokenrhythm" => (
+                    providers::tokenrhythm::login_card_name(&login),
+                    Box::pin(providers::tokenrhythm::snapshot_with_login(login)),
+                ),
                 "copilot" => (
                     providers::copilot::login_card_name(&login),
                     Box::pin(providers::copilot::snapshot_with_login(login)),
@@ -2811,6 +2834,7 @@ async fn run_usage_fetch_inner_mode(
     // cache is persisted to disk so it survives app restarts; entries older
     // than a day are too misleading to show and get skipped.
     {
+        let _account_mutation = account_lifecycle::mutation_lock().lock().unwrap_or_else(|e| e.into_inner());
         let cache = last_ok();
         // Cache identity stamp (upstream's Phase 1): if a DIFFERENT account
         // signed into a default home since the cache was written, that
@@ -3439,6 +3463,7 @@ fn account_add(
     api_key: String,
     base_url: Option<String>,
 ) -> Result<String, String> {
+    let _account_mutation = account_lifecycle::mutation_lock().lock().unwrap_or_else(|e| e.into_inner());
     if provider == "codex" {
         // Codex accounts are Pane sign-ins, not pasted keys — the store is
         // codex_accounts and the entry point is the auth center.
@@ -3448,6 +3473,9 @@ fn account_add(
     }
     if !accounts::provider_takes_accounts(&provider) {
         return Err(format!("unknown multi-account provider: {provider}"));
+    }
+    if !provider_catalog::provider_definition(&provider).is_some_and(|p| p.supports_api_key) {
+        return Err("this provider requires its own sign-in flow".into());
     }
     let key = api_key.trim();
     if key.is_empty() {
@@ -3492,6 +3520,7 @@ fn account_add(
 #[tauri::command]
 fn account_update(provider: String, card_id: String, label: String, api_key: String,
     base_url: Option<String>) -> Result<String, String> {
+    let _account_mutation = account_lifecycle::mutation_lock().lock().unwrap_or_else(|e| e.into_inner());
     if !provider_catalog::provider_definition(&provider).is_some_and(|p| p.supports_api_key && p.supports_extra_accounts) {
         return Err("this provider requires its own sign-in flow".into());
     }
@@ -3520,6 +3549,7 @@ fn account_update(provider: String, card_id: String, label: String, api_key: Str
 /// <provider>@<fingerprint> card disappears on the next fetch.
 #[tauri::command]
 fn account_remove(provider: String, index: usize) -> Result<(), String> {
+    let _account_mutation = account_lifecycle::mutation_lock().lock().unwrap_or_else(|e| e.into_inner());
     if provider == "antigravity" {
         let mut slots = antigravity_accounts::load_slots();
         if index >= slots.len() {
@@ -3537,7 +3567,7 @@ fn account_remove(provider: String, index: usize) -> Result<(), String> {
         return cursor_accounts::save_accounts(&accounts);
     }
     if provider == "codex" {
-        let mut logins = codex_accounts::load_with_imported_single_login();
+        let mut logins = codex_accounts::load_with_imported_single_login_from_unlocked(&providers::config_dir());
         let has_cli = providers::codex::default_account_info().is_some();
         let target_idx = if has_cli {
             if index == 0 {
@@ -3554,7 +3584,7 @@ fn account_remove(provider: String, index: usize) -> Result<(), String> {
         return codex_accounts::save_accounts(&logins);
     }
     if login_accounts::takes_login_accounts(&provider) {
-        let mut logins = login_accounts::load_with_imported_single_login(&provider);
+        let mut logins = login_accounts::load_with_imported_single_login_from_unlocked(&providers::config_dir(), &provider);
         if index >= logins.len() {
             return Err(format!("no {provider} account #{index}"));
         }
@@ -3604,6 +3634,8 @@ fn account_delete(
     card_id: String,
     keep_usage: bool,
 ) -> Result<Option<usize>, String> {
+    let _account_mutation = account_lifecycle::mutation_lock().lock().unwrap_or_else(|e| e.into_inner());
+    if family_of(&card_id) != provider { return Err("account does not belong to this provider".into()); }
     let base = crate::providers::config_dir();
     if provider == "antigravity" {
         let mut slots = antigravity_accounts::load_slots();
@@ -3639,10 +3671,11 @@ fn account_delete(
         let _ = forget_account_layout(&card_id);
         return Ok(index);
     }
-    if provider == "codex" || login_accounts::takes_login_accounts(&provider) {
-        // Sign-in stores have their own remove path; the generic account
-        // store is empty here and must not reap an unrelated archive.
-        return Err("this family uses its own sign-in store; remove it from the account row".into());
+    if account_lifecycle::manages(&provider) {
+        if card_id == "codex" { return Err("默认 CLI 账号由本地环境管理，无法在面板中删除".into()); }
+        let removed = account_lifecycle::delete_from(&base, &provider, &card_id)?;
+        finish_account_removal(&provider, &card_id, removed, keep_usage);
+        return Ok(removed);
     }
     if !accounts::provider_takes_accounts(&provider) {
         return Err(format!("unknown multi-account provider: {provider}"));
@@ -3674,11 +3707,47 @@ fn account_delete(
     Ok(removed)
 }
 
+fn finish_account_removal(provider: &str, card_id: &str, removed: Option<usize>, keep_usage: bool) {
+    let _ = forget_provider_snapshot(card_id);
+    let _ = forget_account_layout(card_id);
+    if provider == "tokenrhythm" && removed == Some(0) {
+        let _ = forget_provider_snapshot(provider);
+        if keep_usage { usage_history::migrate_card_id(provider, card_id); }
+        else { usage_history::remove_card_history(provider); }
+        if let Some(next) = login_accounts::load(provider).first() {
+            usage_history::migrate_card_id(&login_accounts::card_id_for_account(provider, next), provider);
+        }
+    }
+    if !keep_usage { usage_history::remove_card_history(card_id); }
+}
+
+/// Stable ids take precedence; index remains a compatibility fallback for
+/// existing callers. Resolve immediately before reading the owning store.
+fn account_action_index(provider: &str, index: Option<usize>, card_id: Option<&str>) -> Result<usize, String> {
+    if let Some(id) = card_id {
+        return account_list_unlocked(provider.to_string())?.iter()
+            .position(|row| row.get("id").and_then(Value::as_str) == Some(id))
+            .ok_or_else(|| "account no longer exists".into());
+    }
+    index.ok_or_else(|| "account identity is required".into())
+}
+
 /// Archives an account before removing it from the active cards. The stable
 /// card id is retained so credit history stays attached to this identity.
 #[tauri::command]
-fn account_archive(provider: String, index: usize) -> Result<(), String> {
+fn account_archive(provider: String, index: Option<usize>, card_id: Option<String>) -> Result<(), String> {
+    let _account_mutation = account_lifecycle::mutation_lock().lock().unwrap_or_else(|e| e.into_inner());
     let base = crate::providers::config_dir();
+    if account_lifecycle::manages(&provider) {
+        let index = account_action_index(&provider, index, card_id.as_deref())?;
+        let rows = account_list_unlocked(provider.clone())?;
+        let id = rows.get(index).and_then(|r| r["id"].as_str()).ok_or("account no longer exists")?;
+        if id == "codex" { return Err("默认 CLI 账号由本地环境管理，无法归档".into()); }
+        let removed = account_lifecycle::archive_from(&base, &provider, id)?;
+        finish_account_removal(&provider, id, Some(removed), true);
+        return Ok(());
+    }
+    let index = account_action_index(&provider, index, card_id.as_deref())?;
     if provider == "antigravity" {
         let mut slots = antigravity_accounts::load_slots();
         if index >= slots.len() {
@@ -3688,14 +3757,10 @@ fn account_archive(provider: String, index: usize) -> Result<(), String> {
         let card_id = antigravity_accounts::card_id_for_slot(&slot);
         let label = slot.label.clone();
         let payload = serde_json::to_value(&slot).map_err(|e| format!("archive antigravity slot: {e}"))?;
-        accounts::archive_external_to(&base, accounts::ArchivedExternalAccount {
+        accounts::archive_external_with(&base, accounts::ArchivedExternalAccount {
             provider: provider.clone(), card_id: card_id.clone(), label, payload,
             archived_at: chrono::Utc::now().timestamp_millis(),
-        })?;
-        if let Err(error) = antigravity_accounts::save_slots(&slots) {
-            let _ = accounts::remove_archived_external_from(&base, &card_id);
-            return Err(error);
-        }
+        }, || antigravity_accounts::save_slots(&slots))?;
         let _ = forget_provider_snapshot(&card_id);
         if index == 0 {
             let _ = forget_provider_snapshot(&provider);
@@ -3712,14 +3777,10 @@ fn account_archive(provider: String, index: usize) -> Result<(), String> {
         let card_id = cursor_accounts::card_id_for_account(&entry);
         let label = entry.label.clone();
         let payload = serde_json::to_value(&entry).map_err(|e| format!("archive cursor account: {e}"))?;
-        accounts::archive_external_to(&base, accounts::ArchivedExternalAccount {
+        accounts::archive_external_with(&base, accounts::ArchivedExternalAccount {
             provider: provider.clone(), card_id: card_id.clone(), label, payload,
             archived_at: chrono::Utc::now().timestamp_millis(),
-        })?;
-        if let Err(error) = cursor_accounts::save_accounts(&entries) {
-            let _ = accounts::remove_archived_external_from(&base, &card_id);
-            return Err(error);
-        }
+        }, || cursor_accounts::save_accounts(&entries))?;
         let _ = forget_provider_snapshot(&card_id);
         if index == 0 {
             let _ = forget_provider_snapshot(&provider);
@@ -3733,12 +3794,6 @@ fn account_archive(provider: String, index: usize) -> Result<(), String> {
     let mut entries = accounts::load_accounts(&provider);
     if index >= entries.len() {
         return Err(format!("no account #{index} for {provider}"));
-    }
-    if index == 0 {
-        if let Some(entry) = entries.first() {
-            let stable = accounts::card_id_for_account(&provider, entry);
-            usage_history::migrate_card_id(&provider, &stable);
-        }
     }
     let entry = entries.remove(index);
     let card_id = accounts::card_id_for_account(&provider, &entry);
@@ -3758,12 +3813,14 @@ fn account_archive(provider: String, index: usize) -> Result<(), String> {
         // write succeeded, so roll it back when the active save fails. Do not
         // reap a tombstone that already existed before this operation.
         if !had_tombstone {
-            let _ = accounts::remove_archived(&card_id);
+            accounts::remove_archived(&card_id)
+                .map_err(|rollback| format!("{error}; archive rollback failed: {rollback}"))?;
         }
         return Err(error);
     }
     let _ = forget_provider_snapshot(&card_id);
     if index == 0 {
+        usage_history::migrate_card_id(&provider, &card_id);
         let _ = forget_provider_snapshot(&provider);
         if let Some(next) = accounts::load_accounts(&provider).first() {
             let next_id = accounts::card_id_for_account(&provider, next);
@@ -3827,7 +3884,20 @@ fn remove_usage_history(card_id: String) {
 /// were kept have an empty key and are rejected (nothing to restore).
 #[tauri::command]
 fn account_restore(provider: String, card_id: String) -> Result<(), String> {
+    let _account_mutation = account_lifecycle::mutation_lock().lock().unwrap_or_else(|e| e.into_inner());
     let base = crate::providers::config_dir();
+    if account_lifecycle::manages(&provider) {
+        account_lifecycle::restore_from(&base, &provider, &card_id)?;
+        let _ = forget_provider_snapshot(&card_id);
+        if provider == "tokenrhythm" {
+            let _ = forget_provider_snapshot(&provider);
+            if login_accounts::load(&provider).first()
+                .is_some_and(|row| login_accounts::card_id_for_account(&provider, row) == card_id) {
+                usage_history::migrate_card_id(&card_id, &provider);
+            }
+        }
+        return Ok(());
+    }
     if provider == "antigravity" {
         let archived = accounts::load_archived_external_from(&base)
             .into_iter()
@@ -3843,7 +3913,8 @@ fn account_restore(provider: String, card_id: String) -> Result<(), String> {
         antigravity_accounts::save_slots(&slots)?;
         if let Err(error) = accounts::remove_archived_external_from(&base, &card_id) {
             slots.retain(|slot| antigravity_accounts::card_id_for_slot(slot) != card_id);
-            let _ = antigravity_accounts::save_slots(&slots);
+            antigravity_accounts::save_slots(&slots)
+                .map_err(|rollback| format!("{error}; restore rollback failed: {rollback}"))?;
             return Err(error);
         }
         let _ = forget_provider_snapshot(&card_id);
@@ -3864,7 +3935,8 @@ fn account_restore(provider: String, card_id: String) -> Result<(), String> {
         cursor_accounts::save_accounts(&entries)?;
         if let Err(error) = accounts::remove_archived_external_from(&base, &card_id) {
             entries.retain(|entry| cursor_accounts::card_id_for_account(entry) != card_id);
-            let _ = cursor_accounts::save_accounts(&entries);
+            cursor_accounts::save_accounts(&entries)
+                .map_err(|rollback| format!("{error}; restore rollback failed: {rollback}"))?;
             return Err(error);
         }
         let _ = forget_provider_snapshot(&card_id);
@@ -3899,7 +3971,8 @@ fn account_restore(provider: String, card_id: String) -> Result<(), String> {
         // Roll back the active row so a failed restore cannot leave the
         // same card id both active and archived.
         entries.retain(|entry| accounts::card_id_for_account(&provider, entry) != card_id);
-        let _ = accounts::save_accounts(&provider, &entries);
+        accounts::save_accounts(&provider, &entries)
+            .map_err(|rollback| format!("{error}; restore rollback failed: {rollback}"))?;
         return Err(error);
     }
     let _ = forget_provider_snapshot(&card_id);
@@ -3913,7 +3986,27 @@ fn account_restore(provider: String, card_id: String) -> Result<(), String> {
 /// publishes under the bare family id on the next fetch (its old
 /// <provider>@<fingerprint> card folds away into the main card).
 #[tauri::command]
-fn account_set_default(provider: String, index: usize) -> Result<(), String> {
+fn account_set_default(provider: String, index: Option<usize>, card_id: Option<String>) -> Result<(), String> {
+    let _account_mutation = account_lifecycle::mutation_lock().lock().unwrap_or_else(|e| e.into_inner());
+    let index = account_action_index(&provider, index, card_id.as_deref())?;
+    if provider == "tokenrhythm" {
+        let mut entries = login_accounts::load(&provider);
+        if index >= entries.len() { return Err("account no longer exists".into()); }
+        if index > 0 {
+            let old = login_accounts::card_id_for_account(&provider, &entries[0]);
+            let promoted = login_accounts::card_id_for_account(&provider, &entries[index]);
+            let entry = entries.remove(index);
+            entries.insert(0, entry);
+            login_accounts::save(&provider, &entries)?;
+            usage_history::migrate_card_id(&provider, &old);
+            usage_history::migrate_card_id(&promoted, &provider);
+            let _ = forget_provider_snapshot(&provider);
+            let _ = forget_provider_snapshot(&promoted);
+            let _ = forget_account_layout(&promoted);
+        }
+        return Ok(());
+    }
+    if account_lifecycle::manages(&provider) { return Err("this family has no default-account slot".into()); }
     if provider == "antigravity" || provider == "cursor" {
         return Err("该服务的账号是平行卡片，没有置顶概念".into());
     }
@@ -3924,15 +4017,15 @@ fn account_set_default(provider: String, index: usize) -> Result<(), String> {
     if index >= entries.len() {
         return Err(format!("no account #{index} for {provider}"));
     }
-    if index > 0 {
-        let old_default = accounts::card_id_for_account(&provider, &entries[0]);
-        usage_history::migrate_card_id(&provider, &old_default);
-        let promoted = accounts::card_id_for_account(&provider, &entries[index]);
-        usage_history::migrate_card_id(&promoted, &provider);
-    }
+    let old_default = accounts::card_id_for_account(&provider, &entries[0]);
+    let promoted = accounts::card_id_for_account(&provider, &entries[index]);
     let entry = entries.remove(index);
     entries.insert(0, entry);
     accounts::save_accounts(&provider, &entries)?;
+    if index > 0 {
+        usage_history::migrate_card_id(&provider, &old_default);
+        usage_history::migrate_card_id(&promoted, &provider);
+    }
     // The bare id's meaning changes with the default account; the old
     // account's last-good cache must not bleed onto the new one's card
     // if the next fetch fails.
@@ -3951,7 +4044,9 @@ fn account_set_default(provider: String, index: usize) -> Result<(), String> {
 /// fingerprint id never changes), so caches and layouts survive a rename;
 /// the account card's title picks the new label up on the next fetch.
 #[tauri::command]
-fn account_rename(provider: String, index: usize, label: String) -> Result<(), String> {
+fn account_rename(provider: String, index: Option<usize>, card_id: Option<String>, label: String) -> Result<(), String> {
+    let _account_mutation = account_lifecycle::mutation_lock().lock().unwrap_or_else(|e| e.into_inner());
+    let index = account_action_index(&provider, index, card_id.as_deref())?;
     if provider == "antigravity" {
         let mut slots = antigravity_accounts::load_slots();
         if index >= slots.len() {
@@ -3969,7 +4064,7 @@ fn account_rename(provider: String, index: usize, label: String) -> Result<(), S
         return cursor_accounts::save_accounts(&accounts);
     }
     if provider == "codex" {
-        let mut logins = codex_accounts::load_with_imported_single_login();
+        let mut logins = codex_accounts::load_with_imported_single_login_from_unlocked(&providers::config_dir());
         let has_cli = providers::codex::default_account_info().is_some();
         let target_idx = if has_cli {
             if index == 0 {
@@ -3986,7 +4081,7 @@ fn account_rename(provider: String, index: usize, label: String) -> Result<(), S
         return codex_accounts::save_accounts(&logins);
     }
     if login_accounts::takes_login_accounts(&provider) {
-        let mut logins = login_accounts::load_with_imported_single_login(&provider);
+        let mut logins = login_accounts::load_with_imported_single_login_from_unlocked(&providers::config_dir(), &provider);
         if index >= logins.len() {
             return Err(format!("no {provider} account #{index}"));
         }
@@ -4008,6 +4103,11 @@ fn account_rename(provider: String, index: usize, label: String) -> Result<(), S
 /// list. The key never leaves whole — only mask_key's "sk-…abcd" tail.
 #[tauri::command]
 fn account_list(provider: String) -> Result<Vec<Value>, String> {
+    let _mutation = account_lifecycle::mutation_lock().lock().unwrap_or_else(|e| e.into_inner());
+    account_list_unlocked(provider)
+}
+
+fn account_list_unlocked(provider: String) -> Result<Vec<Value>, String> {
     if provider == "onenewapi" {
         // Relay sites are the accounts: one entry per site key, or a single
         // token-only entry when the site carries just a dashboard access
@@ -4089,7 +4189,7 @@ fn account_list(provider: String) -> Result<Vec<Value>, String> {
                 "baseUrl": null,
             }));
         }
-        for login in codex_accounts::load_with_imported_single_login() {
+        for login in codex_accounts::load_with_imported_single_login_from_unlocked(&providers::config_dir()) {
             let id = codex_accounts::card_id_for_account(&login);
             if list.iter().any(|existing| existing.get("id").and_then(Value::as_str) == Some(&id)) {
                 continue;
@@ -4116,7 +4216,7 @@ fn account_list(provider: String) -> Result<Vec<Value>, String> {
     // store; the generic branch below reads the API-key store, which these
     // families never use (supports_api_key: false).
     if login_accounts::takes_login_accounts(&provider) {
-        let logins = login_accounts::load_with_imported_single_login(&provider);
+        let logins = login_accounts::load_with_imported_single_login_from_unlocked(&providers::config_dir(), &provider);
         return Ok(login_accounts::account_rows(&provider, &logins));
     }
     if !accounts::provider_takes_accounts(&provider) {
@@ -4135,15 +4235,52 @@ fn account_list(provider: String) -> Result<Vec<Value>, String> {
         .collect())
 }
 
+/// Identity stamps for login cards, including mutable bare default slots.
+fn managed_snapshot_identities() -> HashMap<String, String> {
+    let mut ids = HashMap::new();
+    for slot in antigravity_accounts::load_slots() {
+        let id = antigravity_accounts::card_id_for_slot(&slot);
+        ids.insert(id.clone(), id);
+    }
+    for account in cursor_accounts::preview_accounts_from(&providers::config_dir()) {
+        let id = cursor_accounts::card_id_for_account(&account);
+        ids.insert(id.clone(), id);
+    }
+    for family in login_accounts::LOGIN_FAMILIES {
+        let rows = login_accounts::preview_single_login_from(&providers::config_dir(), family);
+        for row in &rows {
+            let id = login_accounts::card_id_for_account(family, row);
+            ids.insert(id.clone(), id);
+        }
+        let bare = if family == "tokenrhythm" {
+            rows.first().map(|row| login_accounts::card_id_for_account(family, row))
+        } else {
+            oauth::peek_from(&providers::config_dir().join("oauth"), family).map(|slot| slot.account_id.filter(|id| !id.is_empty())
+                .unwrap_or_else(|| crate::identity::stable_card_id(family, b"oauth-slot", slot.access_token.as_bytes())))
+        };
+        ids.insert(family.to_string(), bare.unwrap_or_default());
+    }
+    for row in codex_accounts::preview_single_login_from(&providers::config_dir()) {
+        let id = codex_accounts::card_id_for_account(&row);
+        ids.insert(id.clone(), id);
+    }
+    let bare_codex = providers::codex::default_identity().or_else(|| oauth::peek_from(&providers::config_dir().join("oauth"), "codex").map(|slot|
+        slot.account_id.unwrap_or_else(|| crate::identity::stable_card_id("codex", b"oauth-slot", slot.access_token.as_bytes()))));
+    ids.insert("codex".into(), bare_codex.unwrap_or_default());
+    ids
+}
+
 fn retain_current_key_accounts(snapshots: &mut Vec<providers::Snapshot>, expected: &HashMap<String, String>) {
     let families: HashSet<String> = expected.keys().map(|id| family_of(id)).collect();
-    let current: HashMap<String, String> = families.iter().flat_map(|family| {
+    let mut current: HashMap<String, String> = families.iter().filter(|family|
+        provider_catalog::provider_definition(family).is_some_and(|p| p.supports_api_key))
+        .flat_map(|family| {
         let mut identities = accounts::snapshot_identities(family, &accounts_with_imported_main_key(family));
         identities.entry(family.clone()).or_default();
         identities
     }).collect();
-    snapshots.retain(|snapshot| expected.get(&snapshot.id)
-        .is_none_or(|identity| current.get(&snapshot.id) == Some(identity)));
+    current.extend(managed_snapshot_identities());
+    snapshot_store::retain_account_identities(snapshots, expected, &current);
 }
 
 /// The panel window's auth center (M3): every auth family with its account
@@ -4388,16 +4525,12 @@ fn cursor_import(json_content: String) -> Result<usize, String> {
 /// user is still authorizing — the `done`/`error` fields carry the state.
 #[tauri::command]
 async fn oauth_poll(provider: String, device_auth_id: String) -> oauth::PollResponse {
-    let response = oauth::poll(&provider, &device_auth_id).await;
-    // Every completed Codex sign-in becomes its own account in the store, so
-    // N ChatGPT subscriptions can be monitored side by side; the single
-    // oauth/codex.json slot stays as the default card's fallback.
-    if provider == "codex" && response.done {
-        if let Some(tokens) = oauth::load("codex") {
-            let _ = codex_accounts::record_login(&tokens);
-        }
-    }
-    response
+    oauth::poll(&provider, &device_auth_id).await
+}
+
+#[tauri::command]
+fn oauth_cancel(provider: String, device_auth_id: String) {
+    oauth::cancel(&provider, &device_auth_id);
 }
 
 /// Starts the Codex browser PKCE login (127.0.0.1:1455 loopback). Errors
@@ -5530,6 +5663,7 @@ pub fn run() {
             get_credential_status,
             oauth_start,
             oauth_poll,
+            oauth_cancel,
             codex_login_start,
             codex_login_poll,
             codex_login_cancel,

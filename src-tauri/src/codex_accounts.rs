@@ -6,8 +6,7 @@
 //! Card ids share the discovery scheme in `providers::codex`
 //! (`codex@<hash8>` of the account id), so a Pane login and a discovered
 //! CLI home for the SAME account never double-card, and the pre-multi-
-//! account single OAuth slot imports lazily (its file stays — the default
-//! card still falls back to it).
+//! account single OAuth slot imports lazily and retires after durable storage.
 //!
 //! Tokens live in the OS credential vault (one `token:codex/<card_id>`
 //! slot per account, see secretstore.rs); `%APPDATA%\Pane\codex-accounts.json`
@@ -55,19 +54,24 @@ fn vault_scope(account_id: &str) -> String {
 /// win, plaintext file entries migrate lazily, a broken vault falls back
 /// to the file.
 pub fn load_accounts_from(base: &Path) -> Vec<CodexLogin> {
+    read_accounts_from(base, true)
+}
+
+fn read_accounts_from(base: &Path, migrate: bool) -> Vec<CodexLogin> {
     let raw = std::fs::read_to_string(accounts_file(base)).unwrap_or_default();
     let mut out = parse_accounts(&raw);
     let mut strip_file: Vec<usize> = Vec::new();
     for (idx, account) in out.iter_mut().enumerate() {
         let scope = vault_scope(&account.account_id);
         if let Some(triple) = crate::secretstore::get_triple(&scope) {
+            let has_plaintext = !account.access_token.is_empty() || !account.refresh_token.is_empty() || !account.id_token.is_empty();
             account.access_token = triple.access_token;
             account.refresh_token = triple.refresh_token;
             account.id_token = triple.id_token;
-            strip_file.push(idx);
+            if migrate && has_plaintext { strip_file.push(idx); }
             continue;
         }
-        if !account.access_token.is_empty() {
+        if migrate && !account.access_token.is_empty() {
             let triple = crate::secretstore::TokenTriple {
                 access_token: account.access_token.clone(),
                 refresh_token: account.refresh_token.clone(),
@@ -119,20 +123,18 @@ pub fn save_accounts_to(base: &Path, accounts: &[CodexLogin]) -> Result<(), Stri
             row.id_token.clear();
         }
     }
-    for old in parse_accounts(
-        &std::fs::read_to_string(accounts_file(base)).unwrap_or_default(),
-    ) {
+    let previous = parse_accounts(&std::fs::read_to_string(accounts_file(base)).unwrap_or_default());
+    std::fs::create_dir_all(base).map_err(|e| format!("create config dir: {e}"))?;
+    crate::accounts::write_json_atomic(
+        &accounts_file(base), serde_json::to_string_pretty(&rows).unwrap_or_default(),
+    ).map_err(|e| format!("write codex accounts: {e}"))?;
+    for old in previous {
         let scope = vault_scope(&old.account_id);
         if !keep_scopes.contains(&scope) {
             crate::secretstore::remove(&crate::secretstore::token_key(&scope));
         }
     }
-    std::fs::create_dir_all(base).map_err(|e| format!("create config dir: {e}"))?;
-    crate::accounts::write_json_atomic(
-        &accounts_file(base),
-        serde_json::to_string_pretty(&rows).unwrap_or_default(),
-    )
-    .map_err(|e| format!("write codex accounts: {e}"))
+    Ok(())
 }
 
 pub fn load_accounts() -> Vec<CodexLogin> {
@@ -172,7 +174,7 @@ pub fn mask_token(token: &str) -> String {
 /// re-login never wipes a user-set name.
 pub fn upsert(accounts: &mut Vec<CodexLogin>, incoming: CodexLogin) {
     if let Some(existing) = accounts.iter_mut().find(|a| a.account_id == incoming.account_id) {
-        let label = if incoming.label.trim().is_empty() {
+        let label = if !existing.label.trim().is_empty() {
             std::mem::take(&mut existing.label)
         } else {
             incoming.label
@@ -221,15 +223,40 @@ pub fn from_stored(tokens: &crate::oauth::StoredTokens) -> Result<CodexLogin, St
 
 /// One completed Pane sign-in → the store (called from the OAuth poll).
 pub fn record_login(tokens: &crate::oauth::StoredTokens) -> Result<(), String> {
+    let _mutation = crate::account_lifecycle::mutation_lock().lock().unwrap_or_else(|e| e.into_inner());
+    record_login_from(&crate::providers::config_dir(), tokens)
+}
+
+pub(crate) fn record_login_from(base: &Path, tokens: &crate::oauth::StoredTokens) -> Result<(), String> {
     let login = from_stored(tokens)?;
-    let mut accounts = load_accounts();
-    upsert(&mut accounts, login);
-    save_accounts(&accounts)
+    let mut accounts = load_accounts_from(base);
+    upsert(&mut accounts, login.clone());
+    save_accounts_to(base, &accounts)?;
+    crate::oauth::logout_matching_from(&base.join("oauth"), "codex", &login.account_id, &login.access_token)
+}
+
+/// A refresh owns only the credential version it sent. Re-login/rename and
+/// deletion during the network wait must survive the eventual writeback.
+pub(crate) fn save_refreshed_from(base: &Path, expected: &CodexLogin, refreshed: &CodexLogin) -> Result<CodexLogin, String> {
+    let _mutation = crate::account_lifecycle::mutation_lock().lock().unwrap_or_else(|e| e.into_inner());
+    let mut rows = load_accounts_from(base);
+    let current = rows.iter_mut().find(|row| row.account_id == expected.account_id)
+        .ok_or("Codex account was removed while refreshing — retry after adding it again")?;
+    if current.access_token != expected.access_token || current.refresh_token != expected.refresh_token {
+        return Ok(current.clone());
+    }
+    current.access_token = refreshed.access_token.clone();
+    current.refresh_token = refreshed.refresh_token.clone();
+    current.id_token = refreshed.id_token.clone();
+    current.expires_at = refreshed.expires_at.clone();
+    let saved = current.clone();
+    save_accounts_to(base, &rows)?;
+    Ok(saved)
 }
 
 /// The store plus a lazy import of the pre-multi-account single OAuth slot:
 /// the old `%APPDATA%\Pane\oauth\codex.json` login becomes the first
-/// account, and the file stays put (the default card's fallback needs it).
+/// account, and the legacy slot is retired only after durable account storage.
 pub fn load_with_imported_single_login() -> Vec<CodexLogin> {
     load_with_imported_single_login_from(&crate::providers::config_dir())
 }
@@ -237,8 +264,23 @@ pub fn load_with_imported_single_login() -> Vec<CodexLogin> {
 /// The `_from` variant keeps tests on a temp dir (the auth-center
 /// convention).
 pub fn load_with_imported_single_login_from(base: &Path) -> Vec<CodexLogin> {
-    let mut accounts = load_accounts_from(base);
-    let Some(tokens) = crate::oauth::load_from(&base.join("oauth"), "codex") else {
+    let _mutation = crate::account_lifecycle::mutation_lock().lock().unwrap_or_else(|e| e.into_inner());
+    load_with_imported_single_login_from_unlocked(base)
+}
+
+/// Caller already owns the account transaction lock.
+pub(crate) fn load_with_imported_single_login_from_unlocked(base: &Path) -> Vec<CodexLogin> {
+    merged_single_login_from(base, true)
+}
+
+/// Identity checks must not write a captured account list back to disk.
+pub(crate) fn preview_single_login_from(base: &Path) -> Vec<CodexLogin> {
+    merged_single_login_from(base, false)
+}
+
+fn merged_single_login_from(base: &Path, persist: bool) -> Vec<CodexLogin> {
+    let mut accounts = read_accounts_from(base, persist);
+    let Some(tokens) = (if persist { crate::oauth::load_from(&base.join("oauth"), "codex") } else { crate::oauth::peek_from(&base.join("oauth"), "codex") }) else {
         return accounts;
     };
     let Ok(login) = from_stored(&tokens) else {
@@ -247,10 +289,14 @@ pub fn load_with_imported_single_login_from(base: &Path) -> Vec<CodexLogin> {
     if accounts.iter().any(|a| a.account_id == login.account_id) {
         // The store's copy wins: it is what cards read, and it may carry a
         // user label plus fresher rotated tokens.
+        if persist { let _ = crate::oauth::logout_matching_from(&base.join("oauth"), "codex", &login.account_id, &login.access_token); }
         return accounts;
     }
-    accounts.push(login);
-    let _ = save_accounts_to(base, &accounts);
+    accounts.push(login.clone());
+    if persist {
+        if save_accounts_to(base, &accounts).is_err() { accounts.pop(); return accounts; }
+        let _ = crate::oauth::logout_matching_from(&base.join("oauth"), "codex", &login.account_id, &login.access_token);
+    }
     accounts
 }
 
@@ -278,7 +324,7 @@ mod tests {
         assert_eq!(accounts.len(), 1);
         assert_eq!(accounts[0].label, "Work"); // empty incoming keeps stored
         upsert(&mut accounts, login("acct-1", "Renamed"));
-        assert_eq!(accounts[0].label, "Renamed");
+        assert_eq!(accounts[0].label, "Work"); // OAuth email never overwrites a custom label
         upsert(&mut accounts, login("acct-2", ""));
         assert_eq!(accounts.len(), 2);
     }
@@ -308,6 +354,64 @@ mod tests {
         // No account id and no id_token → no identity, never a card.
         tokens.account_id = None;
         assert!(from_stored(&tokens).is_err());
+    }
+
+    #[test]
+    fn refresh_writeback_preserves_newer_login_label_and_deletion() {
+        let base = std::env::temp_dir().join(format!("pane-codex-refresh-{}", std::process::id()));
+        let original = login("refresh-race-unique", "Work");
+        save_accounts_to(&base, &[original.clone()]).unwrap();
+        let mut refreshed = original.clone();
+        refreshed.access_token = "rotated-access".into();
+        refreshed.refresh_token = "rotated-refresh".into();
+        let mut renamed = original.clone(); renamed.label = "My subscription".into();
+        save_accounts_to(&base, &[renamed]).unwrap();
+        let saved = save_refreshed_from(&base, &original, &refreshed).unwrap();
+        assert_eq!(saved.label, "My subscription");
+        assert_eq!(saved.access_token, "rotated-access");
+        let mut relogged = saved.clone(); relogged.access_token = "new-login".into();
+        save_accounts_to(&base, &[relogged]).unwrap();
+        assert_eq!(save_refreshed_from(&base, &original, &refreshed).unwrap().access_token, "new-login");
+        save_accounts_to(&base, &[]).unwrap();
+        assert!(save_refreshed_from(&base, &original, &refreshed).is_err());
+        assert!(load_accounts_from(&base).is_empty());
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[cfg(feature = "harness")]
+    #[test]
+    fn failed_delete_save_keeps_the_previous_vault_credentials() {
+        let base = std::env::temp_dir().join(format!("pane-codex-failed-delete-{}", std::process::id()));
+        let account = login("failed-delete-unique", "Keep me");
+        save_accounts_to(&base, &[account]).unwrap();
+        crate::accounts::fail_json_writes_for(&accounts_file(&base));
+        let result = save_accounts_to(&base, &[]);
+        crate::accounts::clear_json_write_failure_for(&accounts_file(&base));
+        assert!(result.is_err());
+        let rows = load_accounts_from(&base);
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].refresh_token, "rt-1");
+        save_accounts_to(&base, &[]).unwrap();
+        let _ = std::fs::remove_dir_all(base);
+    }
+
+    #[test]
+    fn completed_login_updates_only_its_account_and_keeps_remarks() {
+        let base = std::env::temp_dir().join(format!("pane-codex-relogin-{}", std::process::id()));
+        save_accounts_to(&base, &[login("relogin-a", "Custom name"), login("relogin-b", "Other subscription")]).unwrap();
+        let tokens = crate::oauth::StoredTokens {
+            account_id: Some("relogin-a".into()), access_token: "new-access".into(),
+            refresh_token: "new-refresh".into(), id_token: None,
+            label: Some("mail@example.com".into()), expires_at: String::new(),
+        };
+        record_login_from(&base, &tokens).unwrap();
+        let rows = load_with_imported_single_login_from(&base);
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0].label, "Custom name");
+        assert_eq!(rows[0].refresh_token, "new-refresh");
+        assert_eq!(rows[1].label, "Other subscription");
+        save_accounts_to(&base, &[]).unwrap();
+        let _ = std::fs::remove_dir_all(base);
     }
 
     #[test]

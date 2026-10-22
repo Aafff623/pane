@@ -267,33 +267,17 @@ impl Snapshot {
 }
 
 /// Optional outbound proxy from config.json `proxy: { enabled, url }`.
-/// Loaded once per app run (Mac parity — a change needs a restart) and never
-/// applied to loopback, so the local Antigravity/HTTP-API traffic stays direct.
-fn proxy_url() -> Option<&'static str> {
-    static PROXY: std::sync::OnceLock<Option<String>> = std::sync::OnceLock::new();
-    PROXY
-        .get_or_init(|| {
-            let cfg: serde_json::Value = std::fs::read_to_string(config_dir().join("config.json"))
-                .ok()
-                .and_then(|raw| serde_json::from_str(raw.trim_start_matches('\u{feff}')).ok())?;
-            let proxy = cfg.get("proxy")?;
-            if !proxy
-                .get("enabled")
-                .and_then(serde_json::Value::as_bool)
-                .unwrap_or(false)
-            {
-                return None;
-            }
-            let url = proxy.get("url")?.as_str()?.trim().to_string();
-            let valid = ["http://", "https://", "socks5://"]
-                .iter()
-                .any(|s| url.starts_with(s));
-            if url.is_empty() || !valid {
-                return None;
-            }
-            Some(url)
-        })
-        .as_deref()
+/// Re-read for each client lookup; loopback requests stay direct.
+fn proxy_url() -> Option<String> {
+    let cfg: serde_json::Value = std::fs::read_to_string(config_dir().join("config.json"))
+        .ok().and_then(|raw| serde_json::from_str(raw.trim_start_matches('\u{feff}')).ok())?;
+    let proxy = cfg.get("proxy")?;
+    if !proxy.get("enabled").and_then(serde_json::Value::as_bool).unwrap_or(false) {
+        return None;
+    }
+    let url = proxy.get("url")?.as_str()?.trim();
+    ["http://", "https://", "socks5://"].iter()
+        .any(|scheme| url.starts_with(scheme)).then(|| url.to_string())
 }
 
 /// The effective outbound proxy URL — the config's explicit choice first,
@@ -303,10 +287,10 @@ fn proxy_url() -> Option<&'static str> {
 /// traffic follows the same chain; reqwest's own env-var handling stays as
 /// the last resort when neither is set.
 pub(crate) fn outbound_proxy_url() -> Option<String> {
-    proxy_url().map(str::to_string).or_else(crate::platform::system_proxy)
+    proxy_url().or_else(crate::platform::system_proxy)
 }
 
-fn http_builder() -> reqwest::ClientBuilder {
+fn http_builder(proxy_url: Option<&str>) -> reqwest::ClientBuilder {
     let mut builder = reqwest::Client::builder()
         .user_agent("Pane-Windows/0.3")
         .timeout(std::time::Duration::from_secs(20))
@@ -315,7 +299,7 @@ fn http_builder() -> reqwest::ClientBuilder {
         // waits on the slowest provider chain. Failing to connect in 5 s
         // is a dead network — fail fast, serve the cached snapshot.
         .connect_timeout(std::time::Duration::from_secs(5));
-    if let Some(url) = outbound_proxy_url() {
+    if let Some(url) = proxy_url {
         if let Ok(proxy) = reqwest::Proxy::all(url) {
             let proxy = proxy.no_proxy(reqwest::NoProxy::from_string("localhost,127.0.0.1,::1"));
             builder = builder.proxy(proxy);
@@ -324,11 +308,30 @@ fn http_builder() -> reqwest::ClientBuilder {
     builder
 }
 
+// Keep only the current pool per redirect policy. In-flight requests may
+// finish on the previous client; subsequent requests see the new proxy.
+#[derive(Default)]
+struct HttpClientCache {
+    current: Option<(Option<String>, reqwest::Client)>,
+}
+
+impl HttpClientCache {
+    fn get(&mut self, proxy: Option<String>, no_redirect: bool) -> reqwest::Client {
+        if let Some((key, client)) = &self.current {
+            if key == &proxy { return client.clone(); }
+        }
+        let mut builder = http_builder(proxy.as_deref());
+        if no_redirect { builder = builder.redirect(reqwest::redirect::Policy::none()); }
+        let client = builder.build().expect("failed to build http client");
+        self.current = Some((proxy, client.clone()));
+        client
+    }
+}
+
 pub fn http() -> reqwest::Client {
-    static CLIENT: std::sync::OnceLock<reqwest::Client> = std::sync::OnceLock::new();
-    CLIENT
-        .get_or_init(|| http_builder().build().expect("failed to build http client"))
-        .clone()
+    static CACHE: std::sync::Mutex<HttpClientCache> = std::sync::Mutex::new(HttpClientCache { current: None });
+    let proxy = outbound_proxy_url();
+    CACHE.lock().unwrap_or_else(|e| e.into_inner()).get(proxy, false)
 }
 
 /// Same timeouts as [`http`] but no proxy at all — neither the config's nor
@@ -339,7 +342,7 @@ pub fn http_direct() -> reqwest::Client {
     static CLIENT: std::sync::OnceLock<reqwest::Client> = std::sync::OnceLock::new();
     CLIENT
         .get_or_init(|| {
-            http_builder()
+            http_builder(None)
                 .no_proxy()
                 .build()
                 .expect("failed to build direct http client")
@@ -391,15 +394,9 @@ pub async fn send_with_direct_fallback(
 /// Same client as [`http`] but never follows redirects. One/New API status
 /// and billing calls must not be bounced onto another origin.
 pub fn http_no_redirect() -> reqwest::Client {
-    static CLIENT: std::sync::OnceLock<reqwest::Client> = std::sync::OnceLock::new();
-    CLIENT
-        .get_or_init(|| {
-            http_builder()
-                .redirect(reqwest::redirect::Policy::none())
-                .build()
-                .expect("failed to build http client")
-        })
-        .clone()
+    static CACHE: std::sync::Mutex<HttpClientCache> = std::sync::Mutex::new(HttpClientCache { current: None });
+    let proxy = outbound_proxy_url();
+    CACHE.lock().unwrap_or_else(|e| e.into_inner()).get(proxy, true)
 }
 
 /// JSON bodies from vendor APIs are tiny (quota + token responses). Cap
@@ -685,6 +682,46 @@ pub fn should_mark_stale(age_past_grace: bool, consecutive_failures: u32) -> boo
 #[cfg(test)]
 mod wall_tests {
     use super::*;
+
+    #[tokio::test]
+    async fn cached_clients_follow_proxy_changes_for_both_redirect_policies() {
+        use std::io::{Read, Write};
+        fn proxy(body: &'static str) -> (String, std::thread::JoinHandle<()>) {
+            let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+            let addr = listener.local_addr().unwrap();
+            listener.set_nonblocking(true).unwrap();
+            let worker = std::thread::spawn(move || {
+                let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+                let mut stream = loop {
+                    match listener.accept() {
+                        Ok((stream, _)) => break stream,
+                        Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                            assert!(std::time::Instant::now() < deadline, "client never used the proxy");
+                            std::thread::sleep(std::time::Duration::from_millis(10));
+                        }
+                        Err(error) => panic!("accept: {error}"),
+                    }
+                };
+                stream.set_read_timeout(Some(std::time::Duration::from_secs(3))).unwrap();
+                let mut request = [0; 4096];
+                let n = stream.read(&mut request).unwrap();
+                assert!(String::from_utf8_lossy(&request[..n]).contains("http://pane-proxy-test.invalid/"));
+                write!(stream, "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len()).unwrap();
+            });
+            (format!("http://{addr}"), worker)
+        }
+        for no_redirect in [false, true] {
+            let (first, worker1) = proxy("first");
+            let (second, worker2) = proxy("second");
+            let mut cache = HttpClientCache::default();
+            for (url, expected) in [(first, "first"), (second, "second")] {
+                let client = cache.get(Some(url), no_redirect);
+                let response = client.get("http://pane-proxy-test.invalid/").send().await.unwrap();
+                assert_eq!(response.text().await.unwrap(), expected);
+            }
+            worker1.join().unwrap(); worker2.join().unwrap();
+        }
+    }
 
     #[test]
     fn balance_only_sources_never_fabricate_a_quota_from_local_history() {

@@ -158,17 +158,8 @@ pub(crate) fn write_json_atomic(path: &std::path::Path, contents: String) -> Res
     use std::sync::atomic::{AtomicU64, Ordering};
     static SEQUENCE: AtomicU64 = AtomicU64::new(0);
     #[cfg(feature = "harness")]
-    if let Some(fail) = FAIL_WRITE_PATH
-        .lock()
-        .unwrap_or_else(|e| e.into_inner())
-        .as_deref()
-    {
-        if fail == path {
-            return Err(format!(
-                "replace {}: injected write failure (test)",
-                path.display()
-            ));
-        }
+    if FAIL_WRITE_PATH.lock().unwrap_or_else(|e| e.into_inner()).contains(&path.to_path_buf()) {
+        return Err(format!("replace {}: injected write failure (test)", path.display()));
     }
     let tmp = path.with_extension(format!(
         "json.{}.{}.tmp", std::process::id(), SEQUENCE.fetch_add(1, Ordering::Relaxed)
@@ -190,20 +181,20 @@ pub(crate) fn write_json_atomic(path: &std::path::Path, contents: String) -> Res
 /// already keeps parallel tests from colliding. A new concurrent user of
 /// this seam needs the concurrency re-examined first.
 #[cfg(feature = "harness")]
-static FAIL_WRITE_PATH: Mutex<Option<PathBuf>> = Mutex::new(None);
+static FAIL_WRITE_PATH: Mutex<Vec<PathBuf>> = Mutex::new(Vec::new());
 
 /// Fails every [`write_json_atomic`] call targeting exactly `path` until
-/// [`clear_json_write_failures`]. Other paths (and every other test) are
+/// [`clear_json_write_failure_for`]. Other paths (and every other test) are
 /// unaffected.
 #[cfg(feature = "harness")]
 pub(crate) fn fail_json_writes_for(path: &std::path::Path) {
-    *FAIL_WRITE_PATH.lock().unwrap_or_else(|e| e.into_inner()) = Some(path.to_path_buf());
+    FAIL_WRITE_PATH.lock().unwrap_or_else(|e| e.into_inner()).push(path.to_path_buf());
 }
 
 /// Undoes [`fail_json_writes_for`].
 #[cfg(feature = "harness")]
-pub(crate) fn clear_json_write_failures() {
-    *FAIL_WRITE_PATH.lock().unwrap_or_else(|e| e.into_inner()) = None;
+pub(crate) fn clear_json_write_failure_for(path: &std::path::Path) {
+    FAIL_WRITE_PATH.lock().unwrap_or_else(|e| e.into_inner()).retain(|p| p != path);
 }
 
 pub fn save_accounts_to(
@@ -295,42 +286,74 @@ fn external_archive_file(base: &std::path::Path) -> PathBuf {
     base.join("archived_external_accounts.json")
 }
 
+fn external_vault_key(card_id: &str) -> String {
+    crate::secretstore::token_key(&format!("archived-external/{card_id}"))
+}
+
 pub fn load_archived_external_from(base: &std::path::Path) -> Vec<ArchivedExternalAccount> {
     let raw = std::fs::read_to_string(external_archive_file(base)).unwrap_or_default();
-    serde_json::from_str(raw.trim_start_matches('\u{feff}')).unwrap_or_default()
+    let mut rows: Vec<ArchivedExternalAccount> = serde_json::from_str(raw.trim_start_matches('\u{feff}')).unwrap_or_default();
+    for row in &mut rows {
+        if row.payload.is_null() {
+            if let crate::secretstore::Secret::Found(raw) = crate::secretstore::get(&external_vault_key(&row.card_id)) {
+                row.payload = serde_json::from_str(&raw).unwrap_or_default();
+            }
+        }
+    }
+    rows
 }
 
-pub fn archive_external_to(
-    base: &std::path::Path,
-    account: ArchivedExternalAccount,
-) -> Result<(), String> {
+fn save_archived_external_to(base: &std::path::Path, mut list: Vec<ArchivedExternalAccount>) -> Result<(), String> {
     std::fs::create_dir_all(base).map_err(|e| format!("create config dir: {e}"))?;
-    let mut list = load_archived_external_from(base);
-    if !list.iter().any(|a| a.card_id == account.card_id) {
-        list.push(account);
+    for row in &mut list {
+        if !row.payload.is_null() {
+            let raw = serde_json::to_string(&row.payload).map_err(|e| e.to_string())?;
+            // Keep the established plaintext fallback if the OS vault is unavailable.
+            if crate::secretstore::put(&external_vault_key(&row.card_id), &raw).is_ok() {
+                row.payload = serde_json::Value::Null;
+            }
+        }
     }
-    write_json_atomic(
-        &external_archive_file(base),
-        serde_json::to_string_pretty(&list).unwrap_or_default(),
-    )
-    .map_err(|e| format!("write external archive: {e}"))
+    write_json_atomic(&external_archive_file(base),
+        serde_json::to_string_pretty(&list).map_err(|e| e.to_string())?)
 }
 
-pub fn remove_archived_external_from(
-    base: &std::path::Path,
-    card_id: &str,
-) -> Result<(), String> {
+pub fn archive_external_to(base: &std::path::Path, account: ArchivedExternalAccount) -> Result<(), String> {
     let mut list = load_archived_external_from(base);
-    let before = list.len();
-    list.retain(|a| a.card_id != card_id);
-    if list.len() == before {
-        return Ok(());
+    if !list.iter().any(|a| a.card_id == account.card_id) { list.push(account); }
+    save_archived_external_to(base, list)
+}
+
+/// Transaction seam shared by all external account commands. A failed
+/// active save removes only a newly-created archive; rollback failures surface.
+pub fn archive_external_with(base: &std::path::Path, account: ArchivedExternalAccount,
+    save_active: impl FnOnce() -> Result<(), String>) -> Result<(), String> {
+    let had_tombstone = load_archived_external_from(base).iter().any(|a| a.card_id == account.card_id);
+    let id = account.card_id.clone();
+    archive_external_to(base, account)?;
+    if let Err(error) = save_active() {
+        if !had_tombstone {
+            remove_archived_external_from(base, &id)
+                .map_err(|rollback| format!("{error}; archive rollback failed: {rollback}"))?;
+        }
+        return Err(error);
     }
-    write_json_atomic(
-        &external_archive_file(base),
-        serde_json::to_string_pretty(&list).unwrap_or_default(),
-    )
-    .map_err(|e| format!("write external archive: {e}"))
+    Ok(())
+}
+
+pub fn remove_archived_external_from(base: &std::path::Path, card_id: &str) -> Result<(), String> {
+    let original = load_archived_external_from(base);
+    let list: Vec<_> = original.iter().filter(|a| a.card_id != card_id).cloned().collect();
+    let changed = list.len() != original.len();
+    if changed { save_archived_external_to(base, list)?; }
+    if let Err(error) = crate::secretstore::remove_checked(&external_vault_key(card_id)) {
+        if changed {
+            save_archived_external_to(base, original)
+                .map_err(|rollback| format!("{error}; archive removal rollback failed: {rollback}"))?;
+        }
+        return Err(error);
+    }
+    Ok(())
 }
 
 pub fn load_archived_from(base: &std::path::Path) -> Vec<ArchivedAccount> {

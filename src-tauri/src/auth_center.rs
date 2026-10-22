@@ -15,9 +15,9 @@ use crate::{antigravity_accounts, cursor_accounts};
 
 /// The families the auth center groups, in display order. "grok" is the
 /// xAI family id (its device-code flow lives in oauth.rs under that name).
-pub const AUTH_FAMILIES: [&str; 14] = [
+pub const AUTH_FAMILIES: [&str; 15] = [
     "antigravity", "codebuddy", "codebuddycn", "codex", "copilot", "cursor", "grok", "kiro", "qoder",
-    "trae", "windsurf", "workbuddy", "workbuddyai", "zed",
+    "trae", "windsurf", "workbuddy", "workbuddyai", "zed", "tokenrhythm",
 ];
 
 #[derive(Serialize, Clone, Debug, PartialEq)]
@@ -145,7 +145,7 @@ fn rows_for_family_from(base: &Path, family: &str) -> Vec<AuthAccountRow> {    m
             })
             .collect(),
         "codebuddy" | "codebuddycn" | "workbuddy" | "workbuddyai" | "copilot" | "grok" | "kiro"
-        | "qoder" | "trae" | "windsurf" | "zed" => {
+        | "qoder" | "trae" | "windsurf" | "zed" | "tokenrhythm" => {
             crate::login_accounts::load_with_imported_single_login_from(base, family)
                 .iter()
                 .map(|login| {
@@ -258,7 +258,11 @@ where
         .iter()
         .map(|family| {
             let mut accounts = rows_for_family_from(base, family);
-            append_local_rows(&mut accounts, local(family));
+            let mut local_rows = local(family);
+            // Codex email can span multiple workspaces. Preserve the explicit
+            // read-only local source even when a Pane subscription shares it.
+            if *family == "codex" { for row in &mut local_rows { row.always_listed = true; } }
+            append_local_rows(&mut accounts, local_rows);
             AuthFamilyGroup {
                 family: family.to_string(),
                 accounts,
@@ -292,6 +296,21 @@ mod tests {
         assert!(groups.iter().any(|g| g.family == "grok"));
         assert!(groups.iter().all(|g| g.accounts.is_empty()));
         let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn tokenrhythm_group_reads_multiple_managed_web_sessions() {
+        let base = temp_base("tokenrhythm");
+        let rows: Vec<crate::login_accounts::LoginAccount> = ["web-a", "web-b"].iter().map(|id|
+            serde_json::from_value(serde_json::json!({
+                "account_id": id, "label": id, "access_token": format!("synthetic-{id}-cookie")
+            })).unwrap()).collect();
+        crate::login_accounts::save_to(&base, "tokenrhythm", &rows).unwrap();
+        let group = collect_from(&base).into_iter().find(|g| g.family == "tokenrhythm").unwrap();
+        assert_eq!(group.accounts.len(), 2);
+        assert_ne!(group.accounts[0].id, group.accounts[1].id);
+        let public = serde_json::to_string(&group).unwrap();
+        assert!(!public.contains("synthetic-web-a-cookie"));
     }
 
     #[test]
@@ -477,6 +496,23 @@ mod tests {
             hint: format!("{id} local sign-in"),
             always_listed: always,
         }
+    }
+
+    #[test]
+    fn codex_local_source_is_visible_beside_a_managed_account_with_the_same_email() {
+        let base = temp_base("codex-source-coexist");
+        crate::codex_accounts::save_accounts_to(&base, &[crate::codex_accounts::CodexLogin {
+            account_id: "workspace-other".into(), email: "same@example.com".into(), label: "Subscription".into(),
+            access_token: "synthetic-access".into(), refresh_token: "synthetic-refresh".into(),
+            id_token: String::new(), expires_at: String::new(), added_at: 0,
+        }]).unwrap();
+        let groups = collect_with(&base, |family| (family == "codex").then(|| local("codex", Some("same@example.com"), false)).into_iter().collect());
+        let rows = &groups.iter().find(|g| g.family == "codex").unwrap().accounts;
+        assert_eq!(rows.len(), 2);
+        assert!(rows.iter().any(|row| row.kind == "local" && row.id == "codex"));
+        assert!(rows.iter().any(|row| row.id.starts_with("codex@")));
+        crate::codex_accounts::save_accounts_to(&base, &[]).unwrap();
+        let _ = std::fs::remove_dir_all(base);
     }
 
     #[test]

@@ -50,9 +50,9 @@ pub struct LoginAccount {
 /// The families this store serves. Every entry has a login flow that
 /// records here on completion; the gate keeps stray family ids from
 /// minting files under `%APPDATA%\Pane\login-accounts\`.
-pub const LOGIN_FAMILIES: [&str; 11] = [
+pub const LOGIN_FAMILIES: [&str; 12] = [
     "codebuddy", "codebuddycn", "copilot", "grok", "kiro", "qoder", "trae", "windsurf", "workbuddy",
-    "workbuddyai", "zed",
+    "workbuddyai", "zed", "tokenrhythm",
 ];
 
 pub fn takes_login_accounts(family: &str) -> bool {
@@ -79,20 +79,25 @@ fn vault_scope(family: &str, account: &LoginAccount) -> String {
 /// first sight (vault write first, then the file keeps only non-secrets).
 /// A broken vault keeps the file working as the fallback.
 pub fn load_from(base: &Path, family: &str) -> Vec<LoginAccount> {
+    read_accounts_from(base, family, true)
+}
+
+fn read_accounts_from(base: &Path, family: &str, migrate: bool) -> Vec<LoginAccount> {
     let raw = std::fs::read_to_string(accounts_file(base, family)).unwrap_or_default();
     let mut out = parse_accounts(&raw);
     let mut strip_file: Vec<usize> = Vec::new();
     for (idx, account) in out.iter_mut().enumerate() {
         let scope = vault_scope(family, account);
         if let Some(triple) = crate::secretstore::get_triple(&scope) {
+            let has_plaintext = !account.access_token.is_empty() || !account.refresh_token.is_empty() || !account.id_token.is_empty();
             account.access_token = triple.access_token;
             account.refresh_token = triple.refresh_token;
             account.id_token = triple.id_token;
             // The file copy (if any tokens linger) is stale — strip it too.
-            strip_file.push(idx);
+            if migrate && has_plaintext { strip_file.push(idx); }
             continue;
         }
-        if !account.access_token.is_empty() {
+        if migrate && !account.access_token.is_empty() {
             let triple = crate::secretstore::TokenTriple {
                 access_token: account.access_token.clone(),
                 refresh_token: account.refresh_token.clone(),
@@ -334,8 +339,23 @@ pub fn load_with_imported_single_login(family: &str) -> Vec<LoginAccount> {
 
 /// The `_from` variant keeps tests on a temp dir.
 pub fn load_with_imported_single_login_from(base: &Path, family: &str) -> Vec<LoginAccount> {
-    let mut accounts = load_from(base, family);
-    let Some(tokens) = crate::oauth::load_from(&base.join("oauth"), family) else {
+    let _mutation = crate::account_lifecycle::mutation_lock().lock().unwrap_or_else(|e| e.into_inner());
+    load_with_imported_single_login_from_unlocked(base, family)
+}
+
+/// Caller already owns the account transaction lock.
+pub(crate) fn load_with_imported_single_login_from_unlocked(base: &Path, family: &str) -> Vec<LoginAccount> {
+    merged_single_login_from(base, family, true)
+}
+
+/// Identity checks must not write a captured account list back to disk.
+pub(crate) fn preview_single_login_from(base: &Path, family: &str) -> Vec<LoginAccount> {
+    merged_single_login_from(base, family, false)
+}
+
+fn merged_single_login_from(base: &Path, family: &str, persist: bool) -> Vec<LoginAccount> {
+    let mut accounts = read_accounts_from(base, family, persist);
+    let Some(tokens) = (if persist { crate::oauth::load_from(&base.join("oauth"), family) } else { crate::oauth::peek_from(&base.join("oauth"), family) }) else {
         return accounts;
     };
     let Ok(login) = from_stored(&tokens) else {
@@ -347,13 +367,29 @@ pub fn load_with_imported_single_login_from(base: &Path, family: &str) -> Vec<Lo
         return accounts;
     }
     accounts.push(login);
-    let _ = save_to(base, family, &accounts);
+    if persist { let _ = save_to(base, family, &accounts); }
     accounts
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn identity_preview_does_not_migrate_credentials_or_rewrite_account_files() {
+        let base = std::env::temp_dir().join(format!("pane-login-preview-{}", std::process::id()));
+        std::fs::create_dir_all(base.join("login-accounts")).unwrap();
+        let row = account("preview-readonly-only", "Preview");
+        let scope = crate::secretstore::token_key(&vault_scope("copilot", &row));
+        crate::secretstore::remove(&scope);
+        let raw = serde_json::to_string_pretty(&vec![row.clone()]).unwrap();
+        let path = accounts_file(&base, "copilot");
+        std::fs::write(&path, &raw).unwrap();
+        let rows = read_accounts_from(&base, "copilot", false);
+        assert_eq!(rows[0].access_token, row.access_token);
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), raw);
+        assert!(matches!(crate::secretstore::get(&scope), crate::secretstore::Secret::Missing));
+    }
 
     fn account(account_id: &str, label: &str) -> LoginAccount {
         LoginAccount {
@@ -459,6 +495,8 @@ mod tests {
         let imported = load_with_imported_single_login_from(&base, "copilot");
         assert_eq!(imported.len(), 1);
         assert_eq!(imported[0].account_id, "42");
+        assert_eq!(load_from(&base, "copilot").len(), 1,
+            "refresh-token writeback must find a durable account row");
 
         // A store copy of the SAME account wins over the slot import.
         save_to(&base, "copilot", &[account("42", "Named")]).unwrap();
@@ -625,7 +663,7 @@ mod tests {
         crate::accounts::fail_json_writes_for(&file);
         let err = save_to(&base, "copilot", &[a.clone()]);
         assert!(err.is_err(), "the injected write failure must surface");
-        crate::accounts::clear_json_write_failures();
+        crate::accounts::clear_json_write_failure_for(&file);
 
         // Old file untouched and B's slot alive: a load still returns both.
         let during = load_from(&base, "copilot");

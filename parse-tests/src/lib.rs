@@ -128,3 +128,6 @@ pub mod snapshot_store;
 
 #[path = "../../src-tauri/src/provider_dispatch.rs"]
 pub mod provider_dispatch;
+
+#[path = "../../src-tauri/src/account_lifecycle.rs"]
+pub mod account_lifecycle;

@@ -41,6 +41,14 @@ fn vault_scope(card_id: &str) -> String {
 /// win, plaintext rows migrate lazily, a broken vault keeps the file
 /// working. Rows whose tokens are gone everywhere are dropped, as before.
 pub fn load_accounts_from(base: &Path) -> Vec<CursorAccount> {
+    read_accounts_from(base, true)
+}
+
+pub(crate) fn preview_accounts_from(base: &Path) -> Vec<CursorAccount> {
+    read_accounts_from(base, false)
+}
+
+fn read_accounts_from(base: &Path, migrate: bool) -> Vec<CursorAccount> {
     let raw = std::fs::read_to_string(accounts_file(base)).unwrap_or_default();
     let mut rows = parse_rows(&raw);
     // `rows` keep the merged (usable) tokens for the caller; `disk_rows` is
@@ -59,13 +67,13 @@ pub fn load_accounts_from(base: &Path) -> Vec<CursorAccount> {
             if !triple.refresh_token.is_empty() {
                 row.account.refresh_token = Some(triple.refresh_token);
             }
-            if row.card_id.is_none() {
+            if migrate && row.card_id.is_none() {
                 disk.card_id = Some(card);
                 dirty = true;
             }
             continue;
         }
-        if !row.account.access_token.is_empty() {
+        if migrate && !row.account.access_token.is_empty() {
             let triple = crate::secretstore::TokenTriple {
                 access_token: row.account.access_token.clone(),
                 refresh_token: row.account.refresh_token.clone().unwrap_or_default(),
@@ -115,9 +123,14 @@ pub fn save_accounts_to(base: &Path, accounts: &[CursorAccount]) -> Result<(), S
             row.account.refresh_token = None;
         }
     }
-    for old in parse_rows(
-        &std::fs::read_to_string(accounts_file(base)).unwrap_or_default(),
-    ) {
+    let old_rows = parse_rows(&std::fs::read_to_string(accounts_file(base)).unwrap_or_default());
+    std::fs::create_dir_all(base).map_err(|e| format!("create config dir: {e}"))?;
+    crate::accounts::write_json_atomic(
+        &accounts_file(base),
+        serde_json::to_string_pretty(&rows).unwrap_or_default(),
+    )
+    .map_err(|e| format!("write cursor accounts: {e}"))?;
+    for old in old_rows {
         // A pre-snapshot legacy row with tokens still names its card (via
         // the token); a stripped row without a snapshot can't — its slot
         // stays behind, inert.
@@ -129,12 +142,7 @@ pub fn save_accounts_to(base: &Path, accounts: &[CursorAccount]) -> Result<(), S
         }
         crate::secretstore::remove(&crate::secretstore::token_key(&vault_scope(&card)));
     }
-    std::fs::create_dir_all(base).map_err(|e| format!("create config dir: {e}"))?;
-    crate::accounts::write_json_atomic(
-        &accounts_file(base),
-        serde_json::to_string_pretty(&rows).unwrap_or_default(),
-    )
-    .map_err(|e| format!("write cursor accounts: {e}"))
+    Ok(())
 }
 
 pub fn load_accounts() -> Vec<CursorAccount> {
@@ -315,6 +323,26 @@ pub fn import_from_json(json_content: &str) -> Result<Vec<CursorAccount>, String
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    #[cfg(feature = "harness")]
+    fn a_failed_active_save_does_not_delete_the_cursor_vault_slot() {
+        let base = std::env::temp_dir().join(format!("pane-cursor-write-failure-{}", std::process::id()));
+        let account = CursorAccount {
+            label: "Synthetic".into(), email: "synthetic@example.test".into(), auth_id: None,
+            access_token: "synthetic-cursor-write-failure".into(),
+            refresh_token: Some("synthetic-refresh".into()), membership: None, captured_at: 0,
+        };
+        save_accounts_to(&base, &[account.clone()]).unwrap();
+        let path = accounts_file(&base);
+        crate::accounts::fail_json_writes_for(&path);
+        let result = save_accounts_to(&base, &[]);
+        crate::accounts::clear_json_write_failure_for(&path);
+        assert!(result.is_err());
+        let rows = load_accounts_from(&base);
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].access_token, account.access_token);
+    }
 
     #[test]
     fn json_import_accepts_cockpit_shapes() {

@@ -1107,9 +1107,6 @@ let skinMarketSelected: SkinId | null = null;
 /// WorkBuddy's web-session status (ticket 06), loaded at boot and after
 /// every action; the cookie itself never leaves Rust.
 let wbWebStatus: { enabled: boolean; has_cookie: boolean; chrome_major: number | null; saved_at: string | null } | null = null;
-/// 基元律动 web-session login state (the console rejects API keys for
-/// quota, so the sign-in lives in Pane's own WebView2 profile).
-let trLoginStatus: { signed_in: boolean; saved_at: string | null } | null = null;
 /// Pack id while its download runs; blocks a second parallel download.
 let skinDownloading: string | null = null;
 let skinMarketFeedback: string | null = null;
@@ -4740,8 +4737,9 @@ function renderQuotaOverview(): string {
   const overviewCountBadge = (total: number, available: number, title: string): string => {
     const ratio = total > 0 ? available / total : 0;
     const availClass = available <= 0 || ratio <= 0.5 ? "is-low" : "is-ok";
-    const emptyClass = available === 0 ? " is-empty" : "";
-    return `<span class="overview-account-count${emptyClass}" title="${escapeHtml(title)}"><b class="acct-count-avail ${availClass}">${available}</b><span class="acct-count-sep">/</span><b class="acct-count-total">${total}</b></span>`;
+    const stateClass =
+      available === 0 ? " is-empty" : available === total ? " is-ready" : " is-partial";
+    return `<span class="overview-account-count${stateClass}" title="${escapeHtml(title)}"><b class="acct-count-avail ${availClass}">${available}</b><span class="acct-count-sep">/</span><b class="acct-count-total">${total}</b></span>`;
   };
 
   const overviewAccountBadgeHtml = (accountCount: number, accountSummary: { total: number; available: number; unavailable: number }): string => {
@@ -6134,6 +6132,10 @@ function groupMenuPosition(rect: DOMRect, width: number, height: number, side: "
   };
 }
 
+function managedAccountForCard(family: string, cardId: string, accounts: AccountEntry[]): AccountEntry | undefined {
+  return accounts.find((entry, index) => entry.id === cardId || (cardId === family && index === 0 && (providerDefinition(family)?.supportsApiKey || family === "tokenrhythm")));
+}
+
 function openGroupMenu(
   cardId: string,
   anchor: HTMLElement,
@@ -6149,7 +6151,8 @@ function openGroupMenu(
     ?? contextTarget?.dataset.cardPin?.split("|")[1];
   const shownId = contextAccount ?? anchor.closest<HTMLElement>("[data-shown-account]")?.dataset.shownAccount ?? cardId;
   const accounts = accountsCache.get(fam) ?? [];
-  const accountIndex = accounts.findIndex((entry, index) => entry.id === shownId || (shownId === fam && index === 0 && !isParallelAccountFamily(fam)));
+  const targetAccount = managedAccountForCard(fam, shownId, accounts);
+  const accountIndex = targetAccount ? accounts.indexOf(targetAccount) : -1;
   const curCat = effectiveCategory(fam);
   const item = (gid: string, label: string, checked = false) =>
     `<button class="group-menu-item${checked ? " on" : ""}" data-group-pick="${escapeHtml(gid)}">
@@ -6205,20 +6208,15 @@ function openGroupMenu(
     }
     const accountRemove = (e.target as HTMLElement).closest<HTMLElement>("[data-card-account-remove]");
     if (accountRemove) {
-      close(); void doAccountRemove(fam, Number(accountRemove.dataset.cardAccountRemove)); return;
+      close();
+      void deleteAccountById(fam, targetAccount!.id!, labelForAccount(shownId, accounts)).catch((error) => settingsToast(String(error), true));
+      return;
     }
     const accountArchive = (e.target as HTMLElement).closest<HTMLElement>("[data-card-acct-archive]");
     if (accountArchive) {
       close();
-      const idx = Number(accountArchive.dataset.cardAcctArchive);
-      const name = labelForAccount(shownId, accounts);
-      void appConfirm({
-        title: t("customize.acctArchive"),
-        message: `确定要归档账号 ${name} 吗？已归档账号将停止日常轮询，您可以随时在“设置 -> 密钥与额度”中重新找回并恢复。`,
-        confirmLabel: t("customize.acctArchive"),
-      }).then((ok) => {
-        if (ok) void doAccountArchive(fam, idx);
-      });
+      void archiveAccountById(fam, targetAccount!.id!, labelForAccount(shownId, accounts))
+        .catch((error) => settingsToast(String(error), true));
       return;
     }
     const accountRestore = (e.target as HTMLElement).closest<HTMLElement>("[data-card-acct-restore]");
@@ -6456,7 +6454,7 @@ function openPeakHelp(anchor: HTMLElement): void {
   const mw = menu.offsetWidth;
   const x = Math.max(8, Math.min(rect.left + rect.width / 2 - mw / 2, window.innerWidth - mw - 8));
   menu.style.left = `${x}px`;
-  menu.style.top = `${Math.min(rect.bottom + 6, window.innerHeight - menu.offsetHeight - 8)}px`;
+  menu.style.top = `${Math.max(8, Math.min(rect.bottom + 6, window.innerHeight - menu.offsetHeight - 8))}px`;
 }
 
 // ---------------------------------------------------------------------------
@@ -8063,8 +8061,8 @@ function openFontMenu(): void {
   document.body.appendChild(menu);
   fontMenu = menu;
   const rect = input.getBoundingClientRect();
-  menu.style.left = `${rect.left}px`;
-  menu.style.top = `${rect.bottom + 4}px`;
+  menu.style.left = `${Math.max(8, Math.min(rect.left, window.innerWidth - menu.offsetWidth - 8))}px`;
+  menu.style.top = `${Math.max(8, Math.min(rect.bottom + 4, window.innerHeight - menu.offsetHeight - 8))}px`;
   menu.style.width = `${Math.max(rect.width, 220)}px`;
   void ensureSystemFonts().then(() => renderFontOptions(input.value));
   document.addEventListener("pointerdown", onFontMenuOutside);
@@ -8506,7 +8504,8 @@ async function afterCredentialMutation(family: string, savedId?: string, enable 
   reconcileAccountLayout(family, current);
   const probe = accountProbeSnapshots.get(family);
   for (const [index, entry] of (accountsCache.get(family) ?? []).entries()) {
-    const id = index === 0 ? family : entry.id!;
+    const foldsDefault = providerDefinition(family)?.supportsApiKey || family === "tokenrhythm";
+    const id = foldsDefault && index === 0 ? family : entry.id!;
     if (!id || lastSnapshots.some((snapshot) => snapshot.id === id)) continue;
     lastSnapshots.push(probe && entry.id === savedId ? { ...probe, id, name: providerDisplayName(family) } : {
       id, name: providerDisplayName(family), plan: null, status: "error", metrics: [],
@@ -9083,7 +9082,7 @@ function forgetAccountFromBoard(
       (archivedAccountsCache.get(family) ?? []).filter((row) => row.card_id !== cardId),
     );
   }
-  const foldedDefault = !isParallelAccountFamily(family) && removedIndex === 0;
+  const foldedDefault = (providerDefinition(family)?.supportsApiKey || family === "tokenrhythm") && removedIndex === 0;
   lastSnapshots = lastSnapshots.filter(
     (snapshot) => snapshot.id !== cardId && !(foldedDefault && snapshot.id === family),
   );
@@ -9100,74 +9099,61 @@ function forgetAccountFromBoard(
 /// Deletes an account by stable card id (active + archived twin) and removes
 /// its card immediately; the backend also clears the snapshot/layout and
 /// optionally the usage history.
-async function doAccountRemove(family: string, index: number): Promise<void> {
-  const list = accountsCache.get(family) ?? [];
-  const entry = list[index];
-  if (!entry?.id) return;
-  const label = entry.label || t("customize.acctDefaultName", { n: index + 1 });
+async function deleteAccountById(family: string, cardId: string, label: string, archived = false): Promise<boolean> {
   const res = await appConfirm({
-    title: t("customize.acctDelTitle"),
+    title: t(archived ? "customize.acctArchivedDeleteTitle" : "customize.acctDelTitle"),
     message: t("customize.acctDeleteBody", { label }),
     confirmLabel: t("customize.acctDelConfirm"),
     danger: true,
     checkboxLabel: t("customize.acctDeleteKeep"),
     checkboxDefault: true,
   });
-  if (!res.ok) return;
-  const status = document.querySelector("#status")!;
-  const def = providerCatalog.find((provider) => provider.familyId === family);
-  const identityDelete =
-    Boolean(def?.supportsApiKey && def.supportsExtraAccounts) || isParallelAccountFamily(family);
-  if (!identityDelete) {
-    // Login/OAuth families own their sign-in store; keep their existing
-    // remove path instead of the generic account-store delete.
-    try {
-      if (!res.checked) await invoke("remove_usage_history", { cardId: entry.id }).catch(() => {});
-      await invoke("account_remove", { provider: family, index });
-      userSelectedAccountFor.delete(family);
-      refreshAccounts(family);
-      status.textContent = t("customize.acctRemoved");
-      void forceUsageRefreshAttempt(false).then(requestTraySync);
-    } catch (err) {
-      status.textContent = t("customize.acctRemoveFailed", { err: String(err) });
-    }
-    return;
-  }
+  if (!res.ok) return false;
+  const removed = await invoke<number | null>("account_delete", {
+    provider: family, cardId, keepUsage: res.checked,
+  });
+  forgetAccountFromBoard(family, cardId, removed, true);
+  await afterCredentialMutation(family, undefined, false);
+  renderSettingsProviderKeys();
+  return true;
+}
+
+async function doAccountRemove(family: string, index: number): Promise<void> {
+  const entry = accountsCache.get(family)?.[index];
+  if (!entry?.id) return;
   try {
-    const removed = await invoke<number | null>("account_delete", {
-      provider: family,
-      cardId: entry.id,
-      keepUsage: res.checked,
-    });
-    forgetAccountFromBoard(family, entry.id, removed, true);
-    refreshAccounts(family);
-    status.textContent = t("customize.acctRemoved");
-    void forceUsageRefreshAttempt(false).then(requestTraySync);
+    if (await deleteAccountById(family, entry.id, entry.label || t("customize.acctDefaultName", { n: index + 1 }))) {
+      document.querySelector("#status")!.textContent = t("customize.acctRemoved");
+    }
   } catch (err) {
-    status.textContent = t("customize.acctRemoveFailed", { err: String(err) });
+    document.querySelector("#status")!.textContent = t("customize.acctRemoveFailed", { err: String(err) });
   }
 }
 
-async function doAccountArchive(family: string, index: number): Promise<void> {
-  const list = accountsCache.get(family) ?? [];
-  const entry = list[index];
-  if (!entry?.id) return;
-  const label = entry.label || t("customize.acctDefaultName", { n: index + 1 });
+async function archiveAccountById(family: string, cardId: string, label: string): Promise<boolean> {
   const ok = await appConfirm({
     title: t("customize.acctArchive"),
-    message: `确定要归档账号 ${label} 吗？归档后卡片会立即消失并停止轮询；凭据和历史会保留，可随时在“设置 -> 密钥与额度”中恢复。`,
+    message: t("settings.acctArchiveBody", { label }),
     confirmLabel: t("customize.acctArchive"),
-    danger: false,
   });
-  if (!ok) return;
+  if (!ok) return false;
+  const index = accountsCache.get(family)?.findIndex((entry) => entry.id === cardId) ?? -1;
+  await invoke("account_archive", { provider: family, cardId });
+  forgetAccountFromBoard(family, cardId, index < 0 ? null : index, false);
+  await afterCredentialMutation(family, undefined, false);
+  renderSettingsProviderKeys();
+  return true;
+}
+
+async function doAccountArchive(family: string, index: number): Promise<void> {
+  const entry = accountsCache.get(family)?.[index];
+  if (!entry?.id) return;
   try {
-    await invoke("account_archive", { provider: family, index });
-    forgetAccountFromBoard(family, entry.id, index, false);
-    refreshAccounts(family);
-    document.querySelector("#status")!.textContent = t("customize.acctArchived");
-    void forceUsageRefreshAttempt(false).then(requestTraySync);
+    if (await archiveAccountById(family, entry.id, entry.label || t("customize.acctDefaultName", { n: index + 1 }))) {
+      document.querySelector("#status")!.textContent = t("customize.acctArchived");
+    }
   } catch (err) {
-    document.querySelector("#status")!.textContent = t("customize.acctAddFailed", { err: String(err) });
+    settingsToast(t("customize.acctRemoveFailed", { err: String(err) }), true);
   }
 }
 
@@ -9179,6 +9165,8 @@ async function doAccountRestore(family: string, cardId: string): Promise<void> {
   try {
     await invoke("account_restore", { provider: family, cardId });
     userSelectedAccountFor.delete(family);
+    await refreshSettingsProviderKey(family);
+    renderSettingsProviderKeys();
     refreshAccounts(family);
     status.textContent = t("customize.acctRestored");
     void forceUsageRefreshAttempt(false).then(requestTraySync);
@@ -9191,28 +9179,13 @@ async function doAccountRestore(family: string, cardId: string): Promise<void> {
 /// parallel-card families hide this action until their own store gets the
 /// same lifecycle command.
 async function doArchivedDelete(family: string, cardId: string): Promise<void> {
-  const row = (archivedAccountsCache.get(family) ?? []).find((item) => item.card_id === cardId);
-  const label = row?.label || cardId.split("@")[1]?.slice(0, 8) || cardId;
-  const ok = await appConfirm({
-    title: t("customize.acctArchivedDeleteTitle"),
-    message: t("customize.acctArchivedDeleteBody", { label }),
-    confirmLabel: t("customize.acctDelConfirm"),
-    danger: true,
-  });
-  if (!ok) return;
-  const status = document.querySelector("#status")!;
+  const row = archivedAccountsCache.get(family)?.find((item) => item.card_id === cardId);
   try {
-    const removed = await invoke<number | null>("account_delete", {
-      provider: family,
-      cardId,
-      keepUsage: false,
-    });
-    forgetAccountFromBoard(family, cardId, removed, true);
-    refreshAccounts(family);
-    status.textContent = t("customize.acctArchivedDeleted");
-    void forceUsageRefreshAttempt(false).then(requestTraySync);
+    if (await deleteAccountById(family, cardId, row?.label || cardId, true)) {
+      document.querySelector("#status")!.textContent = t("customize.acctRemoved");
+    }
   } catch (err) {
-    status.textContent = t("customize.acctRemoveFailed", { err: String(err) });
+    settingsToast(t("customize.acctRemoveFailed", { err: String(err) }), true);
   }
 }
 
@@ -9222,7 +9195,9 @@ async function doArchivedDelete(family: string, cardId: string): Promise<void> {
 async function doAccountSetDefault(family: string, index: number): Promise<void> {
   const status = document.querySelector("#status")!;
   try {
-    await invoke("account_set_default", { provider: family, index });
+    const cardId = accountsCache.get(family)?.[index]?.id;
+    if (!cardId) return;
+    await invoke("account_set_default", { provider: family, cardId });
     userSelectedAccountFor.delete(family);
     refreshAccounts(family);
     status.textContent = t("customize.acctDefaultSet", { name: providerDisplayName(family) });
@@ -9238,7 +9213,9 @@ async function doAccountSetDefault(family: string, index: number): Promise<void>
 async function doAccountRename(family: string, index: number, label: string): Promise<void> {
   const status = document.querySelector("#status")!;
   try {
-    await invoke("account_rename", { provider: family, index, label });
+    const cardId = accountsCache.get(family)?.[index]?.id;
+    if (!cardId) return;
+    await invoke("account_rename", { provider: family, cardId, label });
     refreshAccounts(family);
     status.textContent = t("customize.acctRenamed");
     void forceUsageRefreshAttempt(false).then(requestTraySync);
@@ -9582,13 +9559,7 @@ async function refreshWorkbuddyWebStatus(): Promise<void> {
   }
 }
 
-async function refreshTokenrhythmLoginStatus(): Promise<void> {
-  try {
-    trLoginStatus = await invoke("tokenrhythm_login_status");
-  } catch {
-    trLoginStatus = null;
-  }
-}
+
 
 function renderCustConfig(id: string): string {
   if (id === "qoder") fetchCredStatus("qodercn");
@@ -9907,7 +9878,7 @@ function accountChildRows(family: string): string {
   if (!list.length) return "";
   // Pin (置顶) controls exist only with 2+ accounts — a single account has
   // nothing to order against. Applies to EVERY multi-account family.
-  const showPin = list.length >= 2;
+  const showPin = list.length >= 2 && (providerDefinition(family)?.supportsApiKey || family === "tokenrhythm");
   const children = list
     .map((a, i) => {
       const acctId = a.id ?? "";
@@ -9947,7 +9918,7 @@ function accountChildRows(family: string): string {
           <span class="acct-child-label">${escapeHtml(item.label || item.card_id)}</span>
           <span class="dim acct-child-key">${escapeHtml(item.masked_key || "***")}</span>
           <span class="spacer"></span>
-          <button class="mini-btn" data-archived-copy="${escapeHtml(family)}|${escapeHtml(item.card_id)}" title="${escapeHtml(t("settings.kvCopy"))}">${uiIcon("copy")}</button>
+          ${providerDefinition(family)?.supportsApiKey ? `<button class="mini-btn" data-archived-copy="${escapeHtml(family)}|${escapeHtml(item.card_id)}" title="${escapeHtml(t("settings.kvCopy"))}">${uiIcon("copy")}</button>` : ""}
           <button class="mini-btn" data-archived-restore="${escapeHtml(family)}|${escapeHtml(item.card_id)}" title="恢复账号">恢复</button>
           <button class="mini-btn danger" data-archived-delete="${escapeHtml(family)}|${escapeHtml(item.card_id)}" title="${escapeHtml(t("customize.acctArchivedDeleteTitle"))}">${escapeHtml(t("customize.acctDelConfirm"))}</button>
         </div>
@@ -10366,8 +10337,7 @@ function renderDashboard(): void {
     renderWelcome() +
     renderTotalSpend() +
     renderQuotaOverview() +
-    renderGroupedCards() +
-    renderChangelogTimeline();
+    renderGroupedCards();
   decorateInkSkin(el as HTMLElement);
   if (customizeOpen) renderDrawerBody();
   if (spendDetailOpen) document.body.insertAdjacentHTML("beforeend", renderSpendDetailOverlay());
@@ -10378,9 +10348,10 @@ function renderDashboard(): void {
   requestAnimationFrame(fitProviderNames);
 }
 
-/// Bottom-of-board release timeline. Colors encode the three changelog
-/// groups, so a glance shows whether a release was mostly fixes, changes or
-/// new features; the full dialog still lives behind the button.
+/// Compact release timeline for Settings → About. It used to sit under the
+/// dashboard cards; the board is for live quota, so release history now
+/// lives next to the version it describes. Colors still encode the three
+/// changelog groups; the full dialog stays behind "view all".
 function renderChangelogTimeline(): string {
   const sections = changelogSections().slice(0, 3);
   if (!sections.length) return "";
@@ -10398,7 +10369,7 @@ function renderChangelogTimeline(): string {
       }${items ? `<ul>${items}</ul>` : ""}</div></article>`;
     })
     .join("");
-  return `<section class="changelog-timeline">
+  return `<section class="changelog-timeline is-about">
     <div class="cl-title-row"><h3>${escapeHtml(t("changelog.timelineTitle"))}</h3><button type="button" class="mini-btn" data-open-changelog>${escapeHtml(t("changelog.viewAll"))}</button></div>
     <div class="cl-entries">${entries}</div>
   </section>`;
@@ -14256,10 +14227,12 @@ async function refreshSettingsProviderKey(family: string): Promise<void> {
   }
   if (supportsExtraAccounts(family)) {
     try {
-      accountsCache.set(
-        family,
-        await invoke<AccountEntry[]>("account_list", { provider: family }),
-      );
+      const [active, archived] = await Promise.all([
+        invoke<AccountEntry[]>("account_list", { provider: family }),
+        invoke<ArchivedAccountRow[]>("archived_accounts", { provider: family }),
+      ]);
+      accountsCache.set(family, active);
+      archivedAccountsCache.set(family, archived);
     } catch {
       // Keep the previous list on failure.
     }
@@ -14358,17 +14331,8 @@ function settingsKeyRow(family: string): HTMLElement {
       : t("settings.keyNotSet");
     state.classList.toggle("ok", accounts.length > 0);
   } else if (!keyable) {
-    // 基元律动 has no key and no local CLI sign-in: its credential is a
-    // web session the user establishes through Pane's login window.
-    if (family === "tokenrhythm") {
-      state.textContent = trLoginStatus?.signed_in
-        ? t("settings.trSignedIn")
-        : t("settings.trNotSignedIn");
-      state.classList.toggle("ok", Boolean(trLoginStatus?.signed_in));
-    } else {
-      state.textContent = local ? t("settings.credConnected") : t("settings.credLocalMissing");
-      state.classList.toggle("ok", Boolean(local));
-    }
+    state.textContent = local ? t("settings.credConnected") : t("settings.credLocalMissing");
+    state.classList.toggle("ok", Boolean(local));
   } else if (configured) {
     state.textContent = status?.maskedKey || t("settings.keyConfigured");
   } else if (connected) {
@@ -14393,55 +14357,6 @@ function settingsKeyRow(family: string): HTMLElement {
   help.setAttribute("aria-label", t("customize.helpMenu"));
   help.addEventListener("click", () => openProviderHelp(family));
   actions.append(help);
-  // 基元律动: the credential IS the web session, so the row's action is
-  // the login window (and a clear when a session is on file). Must sit
-  // BEFORE the non-key early return below — that return would otherwise
-  // skip the only control this family has. The buttons wire themselves
-  // here: the settings panel is a separate window with its own DOM, so the
-  // customize drawer's click dispatcher never sees these clicks.
-  if (family === "tokenrhythm") {
-    const login = document.createElement("button");
-    login.type = "button";
-    login.className = "mini-btn";
-    login.textContent = trLoginStatus?.signed_in
-      ? t("settings.trLoginAgain")
-      : t("settings.trLogin");
-    login.addEventListener("click", () => {
-      if (login.disabled) return;
-      // The command returns only after the login window closes, so the
-      // button stays disabled for the whole wait.
-      login.disabled = true;
-      login.textContent = t("settings.trLoginWaiting");
-      void (async () => {
-        try {
-          await invoke("tokenrhythm_login");
-          settingsToast(t("settings.trLoginDone"));
-        } catch (error) {
-          settingsToast(t("settings.trLoginFailed", { reason: String(error) }), true);
-        }
-        await refreshTokenrhythmLoginStatus();
-        renderSettingsProviderKeys();
-      })();
-    });
-    actions.append(login);
-    if (trLoginStatus?.signed_in) {
-      const clear = document.createElement("button");
-      clear.type = "button";
-      clear.className = "mini-btn";
-      clear.textContent = t("settings.trClear");
-      clear.addEventListener("click", () => {
-        void (async () => {
-          try {
-            await invoke("tokenrhythm_login_clear");
-          } catch { /* nothing stored is the same outcome */ }
-          await refreshTokenrhythmLoginStatus();
-          renderSettingsProviderKeys();
-        })();
-      });
-      actions.append(clear);
-    }
-    return item;
-  }
   if (!keyable && !multi) return item;
 
   const button = (label: string, extraClass = "", iconName?: UiIconName) => {
@@ -14459,7 +14374,11 @@ function settingsKeyRow(family: string): HTMLElement {
     // Antigravity have their own import/capture flows; a paste-key family
     // gets the inline editor; everything else signs in through the auth
     // center. A family with no API key must never land on the key editor.
-    if (family === "cursor") {
+    if (family === "tokenrhythm") {
+      const add = button(t("customize.acctAdd"), "", "plus");
+      add.addEventListener("click", () => void addTokenrhythmAccount(add));
+      actions.append(add);
+    } else if (family === "cursor") {
       const add = button(t("customize.acctAdd"), "", "plus");
       add.addEventListener("click", () => openCursorAccountDialog());
       actions.append(add);
@@ -14543,8 +14462,55 @@ function settingsKeyRow(family: string): HTMLElement {
       item.append(list);
     }
     if (skeyAddingAccount.has(family)) item.append(settingsAccountEditor(family));
+    const archived = archivedAccountsCache.get(family) ?? [];
+    if (archived.length) item.append(settingsArchivedAccounts(family, archived));
   }
   return item;
+}
+
+async function addTokenrhythmAccount(button: HTMLButtonElement): Promise<void> {
+  if (button.disabled) return;
+  const label = button.textContent;
+  button.disabled = true;
+  button.textContent = t("settings.trLoginWaiting");
+  try {
+    await invoke("tokenrhythm_login");
+    await afterCredentialMutation("tokenrhythm");
+    settingsToast(t("settings.trLoginDone"));
+    renderSettingsProviderKeys();
+  } catch (error) {
+    settingsToast(t("settings.trLoginFailed", { reason: String(error) }), true);
+  } finally {
+    button.disabled = false;
+    button.textContent = label;
+  }
+}
+
+function settingsArchivedAccounts(family: string, archived: ArchivedAccountRow[]): HTMLElement {
+  const details = document.createElement("details");
+  details.className = "skey-archives";
+  const summary = document.createElement("summary");
+  summary.textContent = t("settings.acctArchivedCount", { n: archived.length });
+  details.append(summary);
+  for (const account of archived) {
+    const row = document.createElement("div");
+    row.className = "skey-account";
+    const name = document.createElement("span");
+    name.className = "skey-acct-label";
+    name.textContent = account.label || account.card_id;
+    const actions = document.createElement("span");
+    actions.className = "skey-account-actions";
+    const restore = document.createElement("button");
+    restore.type = "button"; restore.className = "mini-btn";
+    restore.textContent = t("settings.acctRestore");
+    restore.addEventListener("click", () => void doAccountRestore(family, account.card_id));
+    const remove = document.createElement("button");
+    remove.type = "button"; remove.className = "mini-btn danger";
+    remove.textContent = t("customize.acctDelConfirm");
+    remove.addEventListener("click", () => void doArchivedDelete(family, account.card_id));
+    actions.append(restore, remove); row.append(name, actions); details.append(row);
+  }
+  return details;
 }
 
 /// Test-first save gate for the key editors: key-based families talk to
@@ -14657,7 +14623,7 @@ function settingsKeyEditor(family: string): HTMLElement {
   return form;
 }
 
-function settingsAccountRow(family: string, entry: AccountEntry, index: number): HTMLElement {
+function settingsAccountRow(family: string, entry: AccountEntry, _index: number): HTMLElement {
   const row = document.createElement("div");
   row.className = "skey-account";
   row.dataset.skeyAccount = entry.id ?? "";
@@ -14702,7 +14668,7 @@ function settingsAccountRow(family: string, entry: AccountEntry, index: number):
     }).then(async (next) => {
       if (next == null || next === entry.label) return;
       try {
-        await invoke("account_rename", { provider: family, index, label: next });
+        await invoke("account_rename", { provider: family, cardId: entry.id, label: next });
       } catch (e) {
         console.error("account rename failed:", e);
       }
@@ -14725,21 +14691,25 @@ function settingsAccountRow(family: string, entry: AccountEntry, index: number):
     remove.className = "mini-btn danger";
     remove.innerHTML = uiIcon("trash") + escapeHtml(t("settings.kvRemove"));
     remove.addEventListener("click", () => {
-      void appConfirm({
-        title: t("settings.acctRemoveConfirm", { name: entry.label || entry.maskedKey }),
-        message: t("settings.acctRemoveHint"),
-        confirmLabel: t("customize.acctDelete"),
-      }).then(async (ok) => {
-        if (!ok) return;
-        try {
-          await invoke("account_remove", { provider: family, index });
-        } catch (e) {
-          console.error("account remove failed:", e);
-        }
-        await afterCredentialMutation(family, undefined, false);
-        renderSettingsProviderKeys();
-      });
+      if (!entry.id) return;
+      void deleteAccountById(family, entry.id, entry.label || entry.email || entry.maskedKey)
+        .catch((error) => settingsToast(t("customize.acctRemoveFailed", { err: String(error) }), true));
     });
+    const archive = document.createElement("button");
+    archive.type = "button"; archive.className = "mini-btn";
+    archive.textContent = t("customize.acctArchive");
+    archive.addEventListener("click", () => {
+      if (entry.id) void archiveAccountById(family, entry.id, entry.label || entry.maskedKey)
+        .catch((error) => settingsToast(String(error), true));
+    });
+    actions.append(archive);
+    if (family === "tokenrhythm") {
+      const relogin = document.createElement("button");
+      relogin.type = "button"; relogin.className = "mini-btn";
+      relogin.textContent = t("settings.trLoginAgain");
+      relogin.addEventListener("click", () => void addTokenrhythmAccount(relogin));
+      actions.append(relogin);
+    }
     actions.append(remove);
   }
   row.append(label, masked, actions);
@@ -16242,13 +16212,13 @@ function buildPanelShell(): void {
     void panelCheckForUpdate(checkBtn);
   });
   about.body.append(panelRow("settings.update", checkBtn));
-  const changelogBtn = document.querySelector<HTMLElement>("#changelog-btn");
-  if (changelogBtn) {
-    const row = document.createElement("div");
-    row.className = "setting-row";
-    row.append(changelogBtn);
-    about.body.append(row);
-  }
+  // Release history belongs with the version it describes, not on the live
+  // quota board. The delegated [data-open-changelog] handler below still
+  // opens the full dialog from "view all".
+  const changelog = document.createElement("div");
+  changelog.className = "about-changelog";
+  changelog.innerHTML = renderChangelogTimeline();
+  if (changelog.firstElementChild) about.body.append(changelog);
   const resetBtn = document.querySelector<HTMLElement>("#reset-all-settings");
   if (resetBtn) {
     const row = document.createElement("div");
@@ -16294,9 +16264,9 @@ function buildPanelShell(): void {
   moveToCard(network.body, "#proxy-enabled", "#proxy-url", '[data-i18n="settings.networkNote"]');
   settingsView.append(network.section);
 
-  // About also takes the entries the floating sheet keeps outside its
-  // groups: changelog + reset.
-  moveToCard(about.body, "#changelog-btn", "#reset-all-settings");
+  // About also takes the reset entry the floating sheet keeps outside its
+  // groups. Changelog is rendered by renderChangelogTimeline above.
+  moveToCard(about.body, "#reset-all-settings");
 
   // General rows that joined the floating sheet after this shell was first
   // written — keep the two forms at parity.
@@ -16386,12 +16356,16 @@ interface AuthFlow {
   kind?: "login" | "import";
   alreadyExisted?: boolean;
   timer?: number;
+  polling?: boolean;
 }
 const authFlows = new Map<string, AuthFlow>();
 
 function stopAuthFlow(family: string): void {
   const flow = authFlows.get(family);
   if (flow?.timer !== undefined) window.clearInterval(flow.timer);
+  if (flow?.deviceAuthId) {
+    void invoke("oauth_cancel", { provider: family, deviceAuthId: flow.deviceAuthId }).catch(() => {});
+  }
   if (flow?.loginId) {
     // Every browser-login family (codex/kiro) has its own cancel command.
     void invoke(`${family}_login_cancel`, { loginId: flow.loginId }).catch(() => {});
@@ -16709,6 +16683,9 @@ function authFlowHtml(family: string): string {
       <div class="auth-note">${escapeHtml(t("auth.flow.browserNote"))}</div>
     </div>`;
   }
+  if (family === "tokenrhythm" && flow.phase === "starting") {
+    return `<div class="auth-flow" role="status"><div class="auth-flow-head"><span>${escapeHtml(t("auth.flow.webWindow"))}</span></div></div>`;
+  }
   const codeRow = flow.userCode
     ? `<div class="auth-flow-row"><span>${escapeHtml(t("auth.flow.enterCode"))}</span>
         <code class="auth-flow-code">${escapeHtml(flow.userCode)}</code>
@@ -16802,7 +16779,7 @@ function handleAuthCenterClick(target: HTMLElement): void {
   }
   const retry = target.closest<HTMLElement>("[data-auth-flow-retry]");
   if (retry) {
-    void startAuthOauthFlow(retry.dataset.authFlowRetry!);
+    authAddAccount(retry.dataset.authFlowRetry!);
     return;
   }
   const close = target.closest<HTMLElement>("[data-auth-flow-close]");
@@ -16900,6 +16877,22 @@ async function authImportDesktop(family: string): Promise<void> {
 
 function authAddAccount(family: string): void {
   if (authFlowBusy()) return;
+  if (family === "tokenrhythm") {
+    const flow: AuthFlow = { phase: "starting", deviceAuthId: "", userCode: "", error: null, label: null };
+    authFlows.set(family, flow);
+    renderAuthCenter();
+    void invoke("tokenrhythm_login").then(async () => {
+      if (authFlows.get(family) !== flow) return;
+      authFlows.set(family, { phase: "success", deviceAuthId: "", userCode: "", error: null, label: null });
+      await afterCredentialMutation(family);
+      await loadAuthCenter();
+    }).catch((error) => {
+      if (authFlows.get(family) !== flow) return;
+      authFlows.set(family, { phase: "error", deviceAuthId: "", userCode: "", error: String(error), label: null });
+      renderAuthCenter();
+    });
+    return;
+  }
   if (family === "antigravity") {
     void doAntigravityCapture(family).then(() => loadAuthCenter());
     return;
@@ -16921,14 +16914,19 @@ function authAddAccount(family: string): void {
 /// ride oauth_start/oauth_poll.
 async function startAuthOauthFlow(family: string): Promise<void> {
   stopAuthFlow(family);
+  const starting: AuthFlow = { phase: "starting", deviceAuthId: "", userCode: "", error: null, label: null };
+  authFlows.set(family, starting);
   if (BROWSER_LOGIN_PROVIDERS.has(family)) {
     // Browser PKCE first (the IDEs' own loopback flows). Codex's CLI owns
     // port 1455 while it runs, so a busy port falls through to device code;
     // kiro has no device-code ladder and stops on failure.
-    authFlows.set(family, { phase: "starting", deviceAuthId: "", userCode: "", error: null, label: null });
     renderAuthCenter();
     try {
       const started = await invoke<{ loginId: string; authUrl: string }>(`${family}_login_start`);
+      if (authFlows.get(family) !== starting) {
+        void invoke(`${family}_login_cancel`, { loginId: started.loginId });
+        return;
+      }
       void invoke("open_link", { url: started.authUrl }).catch(() => {});
       const flow: AuthFlow = {
         phase: "browser",
@@ -16943,7 +16941,8 @@ async function startAuthOauthFlow(family: string): Promise<void> {
       flow.timer = window.setInterval(() => void pollBrowserLogin(family), 2000);
       return;
     } catch (err) {
-      if (family !== "codex") {
+      if (authFlows.get(family) !== starting) return;
+      if (family !== "codex" || !String(err).includes("CODEX_OAUTH_PORT_IN_USE")) {
         authFlows.set(family, { phase: "error", deviceAuthId: "", userCode: "", error: String(err), label: null });
         renderAuthCenter();
         return;
@@ -16951,14 +16950,18 @@ async function startAuthOauthFlow(family: string): Promise<void> {
       // Port busy or unavailable — fall through to the device-code flow.
     }
   }
-  authFlows.set(family, { phase: "starting", deviceAuthId: "", userCode: "", error: null, label: null });
   renderAuthCenter();
   let started: { device_auth_id: string; user_code: string; verify_url: string };
   try {
     started = await invoke("oauth_start", { provider: family });
   } catch (err) {
+    if (authFlows.get(family) !== starting) return;
     authFlows.set(family, { phase: "error", deviceAuthId: "", userCode: "", error: String(err), label: null });
     renderAuthCenter();
+    return;
+  }
+  if (authFlows.get(family) !== starting) {
+    void invoke("oauth_cancel", { provider: family, deviceAuthId: started.device_auth_id }).catch(() => {});
     return;
   }
   void invoke("open_link", { url: started.verify_url }).catch(() => {});
@@ -16980,16 +16983,22 @@ async function startAuthOauthFlow(family: string): Promise<void> {
 async function pollBrowserLogin(family: string): Promise<void> {
   const flow = authFlows.get(family);
   if (!flow || flow.phase !== "browser" || !flow.loginId) return;
+  if (flow.polling) return;
+  flow.polling = true;
   let r: { done: boolean; label: string | null; error: string | null };
   try {
     r = await invoke(`${family}_login_poll`, { loginId: flow.loginId });
   } catch (err) {
+    flow.polling = false;
+    if (authFlows.get(family) !== flow) return;
     stopAuthFlow(family);
     flow.phase = "error";
     flow.error = String(err);
     renderAuthCenter();
     return;
   }
+  flow.polling = false;
+  if (authFlows.get(family) !== flow) return;
   if (!r.done && !r.error) return; // still waiting for the callback
   stopAuthFlow(family);
   if (r.error) {
@@ -17014,16 +17023,22 @@ async function pollBrowserLogin(family: string): Promise<void> {
 async function pollAuthOauth(family: string): Promise<void> {
   const flow = authFlows.get(family);
   if (!flow || flow.phase !== "polling" || !flow.deviceAuthId) return;
+  if (flow.polling) return;
+  flow.polling = true;
   let r: { done: boolean; label: string | null; error: string | null };
   try {
     r = await invoke("oauth_poll", { provider: family, deviceAuthId: flow.deviceAuthId });
   } catch (err) {
+    flow.polling = false;
+    if (authFlows.get(family) !== flow) return;
     stopAuthFlow(family);
     flow.phase = "error";
     flow.error = String(err);
     renderAuthCenter();
     return;
   }
+  flow.polling = false;
+  if (authFlows.get(family) !== flow) return;
   if (!r.done && !r.error) return; // still waiting for the user
   stopAuthFlow(family);
   if (r.error) {
@@ -17060,6 +17075,7 @@ function openAuthRowMenu(family: string, index: number, anchor: HTMLElement): vo
   overlay.className = "group-menu-overlay";
   overlay.innerHTML = `<div class="group-menu" role="menu">
     <div class="group-menu-title">${escapeHtml(name)}</div>
+    <button class="group-menu-item" type="button" data-auth-menu-archive="${escapeHtml(family)}|${index}"><span class="group-menu-check">↓</span>${escapeHtml(t("customize.acctArchive"))}</button>
     <button class="group-menu-item danger" type="button" data-auth-menu-remove="${escapeHtml(family)}|${index}"><span class="group-menu-check">×</span>${escapeHtml(t("auth.remove"))}</button>
   </div>`;
   const close = () => {
@@ -17077,11 +17093,17 @@ function openAuthRowMenu(family: string, index: number, anchor: HTMLElement): vo
       close();
       return;
     }
+    const archive = (e.target as HTMLElement).closest<HTMLElement>("[data-auth-menu-archive]");
+    if (archive) {
+      close();
+      void archiveAccountById(family, acct.id, name).then(async (changed) => { if (changed) await loadAuthCenter(); })
+        .catch((error) => settingsToast(String(error), true));
+      return;
+    }
     const remove = (e.target as HTMLElement).closest<HTMLElement>("[data-auth-menu-remove]");
     if (remove) {
-      const [fam, idx] = remove.dataset.authMenuRemove!.split("|");
       close();
-      void authRemoveAccount(fam, Number(idx));
+      void authRemoveAccount(family, index, acct);
     }
   });
   document.addEventListener("keydown", onKey, true);
@@ -17099,24 +17121,16 @@ function openAuthRowMenu(family: string, index: number, anchor: HTMLElement): vo
 
 /// Remove rides the existing account_remove chain for every family (slot,
 /// import, and login-store families alike).
-async function authRemoveAccount(family: string, index: number): Promise<void> {
-  const acct = authGroups?.find((g) => g.family === family)?.accounts[index];
+async function authRemoveAccount(family: string, index: number, captured?: AuthAccountRow): Promise<void> {
+  const acct = captured ?? authGroups?.find((g) => g.family === family)?.accounts[index];
   if (!acct) return;
   const name = authRowName(family, acct);
-  const ok = await appConfirm({
-    title: t("auth.removeTitle"),
-    message: t("auth.removeBody", { label: name }),
-    confirmLabel: t("auth.remove").replace(/…$/, ""),
-    danger: true,
-  });
-  if (!ok) return;
   const status = document.querySelector("#status");
   try {
-    await invoke("account_remove", { provider: family, index });
+    if (!await deleteAccountById(family, acct.id, name)) return;
     credStatusCache.delete(family);
     if (status) status.textContent = t("auth.removed");
     await loadAuthCenter();
-    void forceUsageRefreshAttempt(false).then(requestTraySync);
   } catch (err) {
     if (status) status.textContent = t("auth.removeFailed", { err: String(err) });
   }
@@ -17297,10 +17311,6 @@ window.addEventListener("DOMContentLoaded", () => {
   // WorkBuddy's web-session block renders inside the Customize drawer.
   void refreshWorkbuddyWebStatus().then(() => {
     if (customizeOpen) renderDrawerBody();
-  });
-  // 基元律动's sign-in state feeds its Settings row.
-  void refreshTokenrhythmLoginStatus().then(() => {
-    renderSettingsProviderKeys();
   });
   setupFloatingSettingsTabs();
   // Party mode, the easy way: triple-click the logo. (The Konami code

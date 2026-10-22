@@ -5,6 +5,43 @@ use crate::providers::Snapshot;
 use serde_json::Value;
 use std::collections::HashMap;
 
+/// Discard results whose account disappeared or whose default slot changed
+/// while the request was in flight. Unknown families retain native behavior.
+pub(crate) fn retain_account_identities(
+    snapshots: &mut Vec<Snapshot>,
+    expected: &HashMap<String, String>,
+    current: &HashMap<String, String>,
+) {
+    snapshots.retain(|snapshot| expected.get(&snapshot.id)
+        .is_none_or(|identity| current.get(&snapshot.id) == Some(identity)));
+}
+
+#[cfg(test)]
+mod account_identity_tests {
+    use super::*;
+
+    #[test]
+    fn a_removed_login_and_a_changed_default_cannot_repopulate_cache_or_history() {
+        let expected = HashMap::from([
+            ("tokenrhythm".into(), "account-a".into()),
+            ("copilot@removed".into(), "account-c".into()),
+        ]);
+        let current = HashMap::from([("tokenrhythm".into(), "account-b".into())]);
+        let mut rows = vec![
+            Snapshot::ok("tokenrhythm", "A", None, vec![]),
+            Snapshot::ok("copilot@removed", "C", None, vec![]),
+            Snapshot::ok("unrelated", "Other", None, vec![]),
+        ];
+        retain_account_identities(&mut rows, &expected, &current);
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].id, "unrelated");
+        let empty = HashMap::from([("tokenrhythm".into(), String::new())]);
+        rows.push(Snapshot::no_credentials("tokenrhythm", "No account", "Add account".into()));
+        retain_account_identities(&mut rows, &empty, &empty);
+        assert_eq!(rows[1].status, "no_credentials");
+    }
+}
+
 /// Last-good snapshots older than this are too misleading to show or to
 /// use as a stand-in for a live Moonshot card.
 pub(crate) const SNAPSHOT_CACHE_MS: i64 = 24 * 60 * 60 * 1000;

@@ -59,6 +59,8 @@ struct Pending {
     captured: Option<Result<String, String>>,
     deadline: Instant,
     done: bool,
+    exchanging: bool,
+    result: Option<Result<Option<String>, String>>,
 }
 
 static PENDING: Mutex<Option<Pending>> = Mutex::new(None);
@@ -109,59 +111,78 @@ pub fn start() -> Result<LoginStart, String> {
             captured: None,
             deadline: Instant::now() + LOGIN_TIMEOUT,
             done: false,
+            exchanging: false,
+            result: None,
         });
     }
 
     let thread_login = login_id.clone();
-    std::thread::spawn(move || loop {
+    std::thread::spawn(move || serve_callback(listener, thread_login, &PENDING));
+
+    Ok(LoginStart { login_id, auth_url })
+}
+
+fn serve_callback(listener: TcpListener, login_id: String, pending: &Mutex<Option<Pending>>) {
+    use std::io::BufRead;
+    loop {
         {
-            let guard = PENDING.lock().unwrap_or_else(|e| e.into_inner());
-            match guard.as_ref() {
-                Some(p) if p.login_id == thread_login && !p.done && Instant::now() <= p.deadline => {}
-                _ => return, // cancelled, superseded, done or expired
-            }
+            let guard = pending.lock().unwrap_or_else(|e| e.into_inner());
+            if !guard.as_ref().is_some_and(|p| p.login_id == login_id && !p.done && Instant::now() <= p.deadline) { return; }
         }
         match listener.accept() {
             Ok((mut stream, _)) => {
-                let mut buf = [0u8; 4096];
-                let read = stream.read(&mut buf).unwrap_or(0);
-                let line = String::from_utf8_lossy(&buf[..read])
-                    .lines()
-                    .next()
-                    .unwrap_or_default()
-                    .to_string();
-                let html = crate::oauth_util::callback_html(true);
-                let _ = stream.write_all(
-                    format!(
-                        "HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
-                        html.len(),
-                        html
-                    )
-                    .as_bytes(),
-                );
-                if let Some((code, got_state)) = crate::oauth_util::parse_callback_request(&line) {
-                    if let Ok(mut guard) = PENDING.lock() {
-                        if let Some(p) = guard.as_mut() {
-                            if p.login_id == thread_login {
-                                p.captured = Some(if got_state == p.state {
-                                    Ok(code)
-                                } else {
-                                    Err("sign-in state mismatch — start again".into())
-                                });
+                // Browsers may preconnect without sending a request. Bound both
+                // reads and writes so an idle connection cannot consume the login.
+                let _ = stream.set_read_timeout(Some(Duration::from_secs(1)));
+                let _ = stream.set_write_timeout(Some(Duration::from_secs(1)));
+                let mut line = String::new();
+                let read = std::io::BufReader::new((&mut stream).take(8192)).read_line(&mut line);
+                if read.is_err() || line.len() >= 8192 || !line.ends_with('\n') { continue; }
+                let mut request = line.split_whitespace();
+                let method = request.next().unwrap_or_default();
+                let target = request.next().unwrap_or_default();
+                let url = reqwest::Url::parse(&format!("http://localhost{target}"));
+                let mut status = "404 Not Found";
+                let mut text = "Not found.";
+                let mut outcome = None;
+                if method == "GET" && target.starts_with('/') {
+                    if let Some(url) = url.ok().filter(|url| url.path() == "/auth/callback") {
+                        let params: Vec<_> = url.query_pairs().collect();
+                        let one = |key: &str| {
+                            let mut values = params.iter().filter(|(k, _)| k == key).map(|(_, v)| v.as_ref());
+                            let value = values.next().filter(|v| !v.is_empty())?;
+                            values.next().is_none().then_some(value)
+                        };
+                        let expected = pending.lock().unwrap_or_else(|e| e.into_inner()).as_ref()
+                            .filter(|p| p.login_id == login_id && !p.done).map(|p| p.state.clone());
+                        status = "400 Bad Request";
+                        text = "Invalid callback. Return to Pane and finish the current sign-in.";
+                        if one("state").is_some_and(|state| expected.as_deref() == Some(state)) {
+                            if one("error").is_some() {
+                                outcome = Some(Err("sign-in was canceled or denied — start again".into()));
+                                text = "Sign-in was canceled or denied. Return to Pane to try again.";
+                            } else if let Some(code) = one("code") {
+                                status = "200 OK";
+                                text = "Authorization response received. Return to Pane to confirm sign-in finished.";
+                                outcome = Some(Ok(code.to_string()));
                             }
                         }
                     }
                 }
-                return;
+                if let Some(result) = outcome {
+                    let mut guard = pending.lock().unwrap_or_else(|e| e.into_inner());
+                    if let Some(p) = guard.as_mut().filter(|p| p.login_id == login_id && !p.done && Instant::now() <= p.deadline) {
+                        p.captured = Some(result);
+                    } else { return; }
+                }
+                let terminal = status == "200 OK" || text.starts_with("Sign-in was canceled");
+                let _ = write!(stream, "HTTP/1.1 {status}\r\nContent-Type: text/plain; charset=utf-8\r\nCache-Control: no-store\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{text}", text.len());
+                if terminal { return; }
             }
-            Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {
-                std::thread::sleep(Duration::from_millis(200));
-            }
+            Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => std::thread::sleep(Duration::from_millis(25)),
             Err(_) => return,
         }
-    });
-
-    Ok(LoginStart { login_id, auth_url })
+    }
 }
 
 /// The token exchange for one captured code.
@@ -239,70 +260,55 @@ async fn exchange_code(code: &str, verifier: &str) -> Result<crate::oauth::Store
 }
 
 /// One poll tick: nothing yet, the account's label when done, or the error.
-pub async fn poll(login_id: &str) -> LoginPoll {
-    enum Take {
-        Waiting,
-        Done,
-        Failed(String),
-        Ready(String, String),
+fn outcome_poll(result: Result<Option<String>, String>) -> LoginPoll {
+    match result {
+        Ok(label) => LoginPoll { done: true, label, error: None },
+        Err(error) => LoginPoll { done: false, label: None, error: Some(error) },
     }
-    let take = {
-        let Ok(mut guard) = PENDING.lock() else {
-            return LoginPoll { done: false, label: None, error: Some("login state poisoned".into()) };
+}
+
+/// Commit only the still-current flow. Cancellation and completion are
+/// serialized by the pending-state mutex; persistence never crosses an await.
+fn finish_login(pending: &Mutex<Option<Pending>>, login_id: &str,
+    result: Result<crate::oauth::StoredTokens, String>,
+    save: impl FnOnce(&crate::oauth::StoredTokens) -> Result<(), String>) -> LoginPoll {
+    let mut guard = pending.lock().unwrap_or_else(|e| e.into_inner());
+    let Some(p) = guard.as_mut().filter(|p| p.login_id == login_id && !p.done && Instant::now() <= p.deadline) else {
+        return outcome_poll(Err("sign-in canceled or superseded — start again".into()));
+    };
+    let result = result.and_then(|tokens| { save(&tokens)?; Ok(tokens.label) });
+    p.done = true;
+    p.exchanging = false;
+    p.result = Some(result.clone());
+    outcome_poll(result)
+}
+
+pub async fn poll(login_id: &str) -> LoginPoll {
+    let ready = {
+        let mut guard = PENDING.lock().unwrap_or_else(|e| e.into_inner());
+        let Some(p) = guard.as_mut().filter(|p| p.login_id == login_id) else {
+            return outcome_poll(Err("no pending sign-in".into()));
         };
-        match guard.as_mut() {
-            Some(p) if p.login_id == login_id => {
-                if p.done {
-                    Take::Done
-                } else if Instant::now() > p.deadline {
-                    p.done = true;
-                    Take::Failed("sign-in timed out — start again".into())
-                } else {
-                    match p.captured.take() {
-                        Some(Ok(code)) => Take::Ready(code, p.verifier.clone()),
-                        Some(Err(e)) => {
-                            p.done = true;
-                            Take::Failed(e)
-                        }
-                        None => Take::Waiting,
-                    }
-                }
+        if let Some(result) = &p.result { return outcome_poll(result.clone()); }
+        if Instant::now() > p.deadline {
+            p.done = true;
+            let result = Err("sign-in timed out — start again".into());
+            p.result = Some(result.clone());
+            return outcome_poll(result);
+        }
+        if p.exchanging { return LoginPoll { done: false, label: None, error: None }; }
+        match p.captured.take() {
+            Some(Ok(code)) => { p.exchanging = true; Some((code, p.verifier.clone())) }
+            Some(Err(error)) => {
+                p.done = true; p.result = Some(Err(error.clone()));
+                return outcome_poll(Err(error));
             }
-            _ => Take::Failed("no pending sign-in".into()),
+            None => None,
         }
     };
-    match take {
-        Take::Waiting => LoginPoll { done: false, label: None, error: None },
-        Take::Done => LoginPoll { done: true, label: None, error: None },
-        Take::Failed(error) => LoginPoll { done: false, label: None, error: Some(error) },
-        Take::Ready(code, verifier) => match exchange_code(&code, &verifier).await {
-            Ok(tokens) => {
-                let label = tokens.label.clone();
-                if let Err(e) = crate::codex_accounts::record_login(&tokens) {
-                    if let Ok(mut guard) = PENDING.lock() {
-                        if let Some(p) = guard.as_mut().filter(|p| p.login_id == login_id) {
-                            p.done = true;
-                        }
-                    }
-                    return LoginPoll { done: false, label: None, error: Some(e) };
-                }
-                if let Ok(mut guard) = PENDING.lock() {
-                    if let Some(p) = guard.as_mut().filter(|p| p.login_id == login_id) {
-                        p.done = true;
-                    }
-                }
-                LoginPoll { done: true, label, error: None }
-            }
-            Err(e) => {
-                if let Ok(mut guard) = PENDING.lock() {
-                    if let Some(p) = guard.as_mut().filter(|p| p.login_id == login_id) {
-                        p.done = true;
-                    }
-                }
-                LoginPoll { done: false, label: None, error: Some(e) }
-            }
-        },
-    }
+    let Some((code, verifier)) = ready else { return LoginPoll { done: false, label: None, error: None }; };
+    let result = exchange_code(&code, &verifier).await;
+    finish_login(&PENDING, login_id, result, crate::codex_accounts::record_login)
 }
 
 /// Drops the pending login (the listener thread notices and exits).
@@ -317,6 +323,63 @@ pub fn cancel(login_id: &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn loopback_ignores_unrelated_requests_before_the_real_callback() {
+        let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        listener.set_nonblocking(true).unwrap();
+        let addr = listener.local_addr().unwrap();
+        let pending = std::sync::Arc::new(Mutex::new(Some(Pending {
+            login_id: "synthetic-login".into(), state: "expected-state".into(),
+            verifier: "synthetic-verifier".into(), captured: None,
+            deadline: Instant::now() + Duration::from_secs(3), done: false, exchanging: false, result: None,
+        })));
+        let state = pending.clone();
+        let worker = std::thread::spawn(move || serve_callback(listener, "synthetic-login".into(), &state));
+        let request = |path: &str| {
+            let mut stream = std::net::TcpStream::connect(addr).unwrap();
+            stream.set_read_timeout(Some(Duration::from_secs(1))).unwrap();
+            write!(stream, "GET {path} HTTP/1.1\r\nHost: localhost\r\n\r\n").unwrap();
+            let mut response = String::new(); stream.read_to_string(&mut response).unwrap();
+            response
+        };
+        let unrelated = request("/favicon.ico");
+        assert!(unrelated.starts_with("HTTP/1.1 404"), "unrelated request must not complete sign-in");
+        assert!(request("/auth/callback?code=bad&state=wrong").starts_with("HTTP/1.1 400"));
+        assert!(request("/auth/callback?code=a&code=b&state=expected-state").starts_with("HTTP/1.1 400"));
+        assert!(request("/other?code=bad&state=expected-state").starts_with("HTTP/1.1 404"));
+        let callback = request("/auth/callback?code=synthetic-code&state=expected-state");
+        assert!(callback.starts_with("HTTP/1.1 200"));
+        worker.join().unwrap();
+        let guard = pending.lock().unwrap();
+        assert_eq!(guard.as_ref().unwrap().captured.as_ref().unwrap().as_ref().unwrap(), "synthetic-code");
+    }
+
+    #[test]
+    fn canceled_or_superseded_exchange_cannot_save_accounts() {
+        let mut current = Pending {
+            login_id: "new-flow".into(), state: "state".into(), verifier: "v".into(),
+            captured: None, deadline: Instant::now() + Duration::from_secs(3),
+            done: false, exchanging: true, result: None,
+        };
+        let tokens = || crate::oauth::StoredTokens {
+            access_token: "synthetic-access".into(), refresh_token: "synthetic-refresh".into(),
+            expires_at: String::new(), label: Some("Synthetic".into()),
+            account_id: Some("synthetic-account".into()), id_token: None,
+        };
+        let pending = Mutex::new(None);
+        let result = finish_login(&pending, "old-flow", Ok(tokens()), |_| panic!("canceled flow saved"));
+        assert!(result.error.is_some());
+        current.exchanging = false;
+        *pending.lock().unwrap() = Some(current);
+        let result = finish_login(&pending, "old-flow", Ok(tokens()), |_| panic!("superseded flow saved"));
+        assert!(result.error.is_some());
+        assert!(!pending.lock().unwrap().as_ref().unwrap().done);
+        let result = finish_login(&pending, "new-flow", Err("exchange failed".into()), |_| panic!("failed exchange saved"));
+        assert_eq!(result.error.as_deref(), Some("exchange failed"));
+        assert!(!result.done);
+        assert!(pending.lock().unwrap().as_ref().unwrap().result.as_ref().unwrap().is_err());
+    }
 
     #[test]
     fn s256_challenge_matches_the_rfc_vector() {

@@ -1318,7 +1318,9 @@ select:focus-visible {
 /* Custom font picker (Settings → Font). The native datalist popup renders
    in WebView2's default white and can't be themed or per-option styled, so
    the menu is a body-level fixed layer positioned under the input. */
-#ui-font {
+#ui-font,
+#ui-font-cjk,
+.font-pack-manager input {
   flex: 1;
   min-width: 0;
   background: var(--background);
@@ -1331,7 +1333,9 @@ select:focus-visible {
   outline: none;
 }
 
-#ui-font:focus-visible {
+#ui-font:focus-visible,
+#ui-font-cjk:focus-visible,
+.font-pack-manager input:focus-visible {
   border-color: #52525b;
   box-shadow: 0 0 0 3px rgb(212 212 216 / 0.12);
 }
@@ -3461,11 +3465,47 @@ body.ui-scaled .popover {
   white-space: nowrap;
 }
 
-/* Bottom-of-board release timeline. */
+/* Release timeline (Settings → About). */
 .changelog-timeline {
   margin: 18px 4px 8px;
   padding-top: 14px;
   border-top: 1px solid var(--border);
+}
+
+/* Inside the About card the section is one row of that card: no second
+   top rule or outer margin, and prose sized for a settings page rather
+   than the old narrow dashboard footer. */
+.about-changelog {
+  padding: 14px 16px 4px;
+}
+.about-changelog .changelog-timeline {
+  margin: 0;
+  padding: 0;
+  border-top: 0;
+}
+.about-changelog .cl-entries {
+  max-width: 820px;
+  margin-top: 12px;
+}
+.about-changelog .cl-entry {
+  margin-bottom: 14px;
+}
+.about-changelog .cl-entry:last-child {
+  margin-bottom: 4px;
+}
+.about-changelog .cl-head strong {
+  font-size: 13px;
+}
+.about-changelog .cl-head span {
+  font-size: 11px;
+}
+.about-changelog .cl-summary {
+  font-size: 12.5px;
+  line-height: 1.55;
+}
+.about-changelog .cl-item {
+  font-size: 12px;
+  line-height: 1.55;
 }
 .cl-title-row {
   display: flex;
@@ -4344,33 +4384,46 @@ body.ui-scaled .popover {
   background: rgb(212 212 216 / 0.08);
 }
 
-/* Multi-account family marker: a neutral blue signal sits beside the provider
-   name so the dashboard communicates account pooling before the user opens
-   the tabs. The glyph reads as a small linked cluster rather than a second
-   status dot; the number is the count of visible account snapshots. */
+/* Multi-account family marker: a quiet neutral capsule with one state dot.
+   The saturated state backgrounds this replaced turned a partial pool into
+   an amber block whose green/white numerals vanished in dark mode. State
+   belongs on the dot; the numbers stay foreground-on-surface in both
+   themes, with the denominator one step quieter than the numerator. */
 .provider-account-badge {
+  --acct-tone: #94a3b8;
   display: inline-flex;
   align-items: center;
-  gap: 3px;
+  gap: 5px;
   flex: none;
-  min-width: 25px;
-  height: 19px;
-  padding: 0 5px 0 4px;
-  border: 1px solid rgb(96 165 250 / .65);
+  min-width: 30px;
+  height: 18px;
+  padding: 0 6px;
+  border: 1px solid color-mix(in srgb, var(--foreground) 16%, transparent);
   border-radius: 999px;
-  color: #fff;
-  background: linear-gradient(135deg, #1d4ed8, #2563eb);
-  box-shadow: 0 3px 10px rgb(37 99 235 / .16);
+  color: var(--foreground);
+  background: color-mix(in srgb, var(--foreground) 7%, transparent);
+  box-shadow: none;
   font-size: 10px;
-  font-weight: 750;
+  font-weight: 650;
   line-height: 1;
-  letter-spacing: .01em;
+  letter-spacing: 0;
 }
+.provider-account-badge.is-ready { --acct-tone: #22c55e; }
+.provider-account-badge.is-partial { --acct-tone: #f59e0b; }
+.provider-account-badge.is-empty { --acct-tone: #ef4444; }
 .provider-account-glyph {
-  font-size: 14px;
-  line-height: 1;
-  transform: rotate(-18deg);
-  opacity: .85;
+  width: 5px;
+  height: 5px;
+  flex: none;
+  overflow: hidden;
+  border-radius: 50%;
+  background: var(--acct-tone);
+  color: transparent;
+  font-size: 0;
+  line-height: 0;
+  transform: none;
+  opacity: 1;
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--acct-tone) 18%, transparent);
 }
 .provider-account-numbers {
   display: inline-flex;
@@ -4379,40 +4432,26 @@ body.ui-scaled .popover {
   line-height: 1;
 }
 .acct-count-total {
-  color: #cbd5e1;
-  font-weight: 700;
+  color: var(--muted-foreground);
+  font-weight: 600;
 }
 .acct-count-sep {
-  color: rgb(255 255 255 / .4);
+  color: var(--muted-foreground);
   margin: 0 1px;
   font-weight: 500;
   font-size: 9px;
 }
 .acct-count-avail {
-  font-weight: 800;
+  color: var(--foreground);
+  font-weight: 750;
 }
-.acct-count-avail.is-ok {
-  color: #4ade80 !important;
-  text-shadow: 0 0 6px rgb(74 222 128 / .35);
+:root[data-theme="light"] .provider-account-badge {
+  background: #f4f4f5;
+  border-color: #e4e4e7;
 }
-.acct-count-avail.is-low {
-  color: #f87171 !important;
-  text-shadow: 0 0 6px rgb(248 113 113 / .35);
-}
-:root[data-theme="light"] .acct-count-total {
-  color: #64748b;
-}
-:root[data-theme="light"] .acct-count-sep {
-  color: rgb(0 0 0 / .35);
-}
-:root[data-theme="light"] .acct-count-avail.is-ok {
-  color: #16a34a !important;
-  text-shadow: none;
-}
-:root[data-theme="light"] .acct-count-avail.is-low {
-  color: #dc2626 !important;
-  text-shadow: none;
-}
+:root[data-theme="light"] .provider-account-badge.is-ready { --acct-tone: #16a34a; }
+:root[data-theme="light"] .provider-account-badge.is-partial { --acct-tone: #d97706; }
+:root[data-theme="light"] .provider-account-badge.is-empty { --acct-tone: #dc2626; }
 
 /* Health dot after the account label: red = a window maxed out (waiting
    for reset), green = room left everywhere, gray = no data yet. */
@@ -5967,7 +6006,17 @@ body.no-glass .cust-dock {
 }
 .font-pack-manager p { color: var(--muted-foreground); font-size: 11px; }
 .font-pack-manager input { min-width: 0; max-width: 100%; flex: 1 1 120px; }
-.font-pack-manager button { flex-shrink: 0; }
+.font-pack-manager button {
+  flex-shrink: 0;
+  padding: 5px 9px;
+  border: 1px solid var(--input);
+  border-radius: 7px;
+  background: var(--background);
+  color: var(--foreground);
+  font: inherit;
+  cursor: pointer;
+}
+.font-pack-manager button:disabled { opacity: .5; cursor: default; }
 #tour-overlay {
   position: fixed;
   inset: 0;
@@ -6863,7 +6912,7 @@ body.no-glass .group-menu {
   display: flex;
   align-items: center;
   gap: 7px;
-  padding: 4px 7px;
+  padding: 6px 8px;
   border-radius: 8px;
   font-size: 11px;
   cursor: pointer;
@@ -6891,7 +6940,8 @@ body.no-glass .group-menu {
 .expiring-row .expiring-name {
   overflow: hidden;
   text-overflow: ellipsis;
-  white-space: nowrap;
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 
 .expiring-row .expiring-win {
@@ -7249,98 +7299,74 @@ body.no-glass .group-menu {
   flex: 0 1 auto;
 }
 
-/* Informational multi-account marker; health remains encoded by the dot. */
+/* Informational multi-account marker: same quiet capsule and state dot as
+   the card badge, one size smaller for the overview tile. */
 .overview-account-count {
+  --acct-tone: #94a3b8;
   display: inline-flex;
-  align-items: baseline;
-  gap: 2px;
+  align-items: center;
+  gap: 4px;
   flex: none;
-  padding: 1px 4px;
-  border: 1px solid color-mix(in oklab, #60a5fa 42%, transparent);
+  padding: 1px 5px 1px 4px;
+  border: 1px solid color-mix(in srgb, var(--foreground) 14%, transparent);
   border-radius: 999px;
-  background: color-mix(in oklab, #2563eb 22%, transparent);
-  color: #bfdbfe;
+  background: color-mix(in srgb, var(--foreground) 6%, transparent);
+  color: var(--foreground);
   font-size: 8px;
   font-weight: 700;
   line-height: 1.2;
   font-variant-numeric: tabular-nums;
-  letter-spacing: -0.02em;
+  letter-spacing: 0;
 }
 
-/* Light theme: pale blue/red text on a translucent tint washed out to
-   unreadable — switch to the deep end of the same hue. */
-:root[data-theme="light"] .overview-account-count {
-  color: #1d4ed8;
-  border-color: color-mix(in oklab, #2563eb 45%, transparent);
-  background: color-mix(in oklab, #2563eb 10%, transparent);
+.overview-account-count::before {
+  content: "";
+  width: 4px;
+  height: 4px;
+  flex: none;
+  border-radius: 50%;
+  background: var(--acct-tone);
 }
+
+.overview-account-count.is-ready { --acct-tone: #22c55e; }
+.overview-account-count.is-partial { --acct-tone: #f59e0b; }
+.overview-account-count.is-empty { --acct-tone: #ef4444; }
 
 .overview-account-count b {
   font-size: 9px;
-  font-weight: 800;
+  font-weight: 700;
   line-height: 1;
 }
 
 .overview-account-count .acct-count-total {
-  color: #cbd5e1;
-  font-weight: 750;
+  color: var(--muted-foreground);
+  font-weight: 600;
 }
 
 .overview-account-count .acct-count-sep {
-  color: rgb(255 255 255 / .45);
+  color: var(--muted-foreground);
   font-size: 8px;
   font-weight: 500;
   margin: 0 1px;
 }
 
 .overview-account-count .acct-count-avail {
-  font-weight: 850;
+  color: var(--foreground);
+  font-weight: 750;
 }
 
-.overview-account-count .acct-count-avail.is-ok {
-  color: #4ade80 !important;
-  text-shadow: 0 0 6px rgb(74 222 128 / .4);
+:root[data-theme="light"] .overview-account-count {
+  background: #f4f4f5;
+  border-color: #e4e4e7;
 }
-
-.overview-account-count .acct-count-avail.is-low {
-  color: #f87171 !important;
-  text-shadow: 0 0 6px rgb(248 113 113 / .4);
-}
-
-:root[data-theme="light"] .overview-account-count .acct-count-total {
-  color: #64748b;
-}
-
-:root[data-theme="light"] .overview-account-count .acct-count-sep {
-  color: rgb(0 0 0 / .35);
-}
-
-:root[data-theme="light"] .overview-account-count .acct-count-avail.is-ok {
-  color: #16a34a !important;
-  text-shadow: none;
-}
-
-:root[data-theme="light"] .overview-account-count .acct-count-avail.is-low {
-  color: #dc2626 !important;
-  text-shadow: none;
-}
+:root[data-theme="light"] .overview-account-count.is-ready { --acct-tone: #16a34a; }
+:root[data-theme="light"] .overview-account-count.is-partial { --acct-tone: #d97706; }
+:root[data-theme="light"] .overview-account-count.is-empty { --acct-tone: #dc2626; }
 
 .overview-account-count i {
   font-size: 7px;
   font-style: normal;
   opacity: .9;
-}
-
-.overview-account-count.is-empty {
-  border-color: color-mix(in oklab, #ef4444 48%, transparent);
-  background: color-mix(in oklab, #991b1b 24%, transparent);
-  color: #fecaca;
-}
-
-:root[data-theme="light"] .overview-account-count.is-empty {
-  color: #b91c1c;
-  border-color: color-mix(in oklab, #dc2626 45%, transparent);
-  background: color-mix(in oklab, #dc2626 10%, transparent);
 }
 
 .overview-dot {
@@ -7403,7 +7429,9 @@ body.no-glass .group-menu {
 }
 
 .overview-ring .ring-text.is-maxed {
-  font-size: 9.5px;
+  font-size: 11px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
   font-weight: 700;
   fill: #ef4444;
 }
@@ -7441,32 +7469,6 @@ article.provider.card-highlight {
   outline-offset: -2px;
   animation: card-glow 1.2s ease;
 }
-
-.provider-account-badge.is-empty {
-  border-color: rgb(239 68 68 / .65);
-  background: linear-gradient(135deg, #991b1b, #dc2626);
-}
-
-.provider-account-badge.is-ready {
-  border-color: rgb(16 185 129 / .65);
-  background: linear-gradient(135deg, #047857, #10b981);
-}
-
-.provider-account-badge.is-partial {
-  border-color: rgb(245 158 11 / .7);
-  background: linear-gradient(135deg, #b45309, #f59e0b);
-}
-
-/* Dark numerals in light mode need a light badge as well; changing only
-   the text leaves green/gray account counts on saturated dark gradients. */
-:root[data-theme="light"] .provider-account-badge {
-  color:var(--foreground);
-  background:#eff6ff;
-  border-color:#93c5fd;
-}
-:root[data-theme="light"] .provider-account-badge.is-empty { background:#fef2f2; border-color:#fca5a5; }
-:root[data-theme="light"] .provider-account-badge.is-ready { background:#f0fdf4; border-color:#86efac; }
-:root[data-theme="light"] .provider-account-badge.is-partial { background:#fffbeb; border-color:#fcd34d; }
 
 .provider-account-availability {
   font-size: 8px;
@@ -7798,8 +7800,10 @@ article.provider.card-highlight {
 
 .group-menu {
   position: fixed;
-  min-width: 140px;
-  max-width: 200px;
+  min-width: min(180px, calc(100vw - 16px));
+  max-width: min(260px, calc(100vw - 16px));
+  box-sizing: border-box;
+  overflow-x: hidden;
   padding: 3px;
   border-radius: 10px;
   max-height: calc(100vh - 24px);
@@ -7819,7 +7823,9 @@ article.provider.card-highlight {
 
 .group-menu-title {
   padding: 3px 7px 2px;
-  font-size: 9.5px;
+  font-size: 11px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
   color: var(--muted-foreground);
 }
 
@@ -7829,13 +7835,13 @@ article.provider.card-highlight {
   gap: 5px;
   width: 100%;
   min-width: 0;
-  padding: 4px 7px;
+  padding: 6px 8px;
   border: none;
   border-radius: 5px;
   background: none;
   color: var(--foreground);
-  font-size: 11px;
-  line-height: 1.3;
+  font-size: 12px;
+  line-height: 1.45;
   text-align: left;
   cursor: pointer;
   font-family: inherit;
@@ -7871,6 +7877,8 @@ article.provider.card-highlight {
   font-size: 10.5px;
 }
 
+.group-menu-sep + .group-menu-sep { display: none; }
+
 .group-menu-sep {
   height: 1px;
   margin: 3px 6px;
@@ -7888,15 +7896,15 @@ article.provider.card-highlight {
 
 .overview-move-menu .group-menu-title {
   padding: 3px 6px;
-  font-size: 9px;
-  line-height: 1.2;
+  font-size: 11px;
+  line-height: 1.45;
 }
 
 .overview-move-menu .group-menu-item {
-  padding: 3px 6px;
+  padding: 5px 7px;
   gap: 4px;
-  font-size: 10px;
-  line-height: 1.3;
+  font-size: 12px;
+  line-height: 1.45;
   min-height: 0;
   border-radius: 4px;
 }
@@ -8315,22 +8323,13 @@ body.panel-form #drawer {
      share the same content width (otherwise the centered column shifts
      ~4px each time the page changes). */
   scrollbar-gutter: stable;
-  padding: 28px 36px 48px;
+  padding: 44px 36px 48px;
 }
 
-/* Center the active settings page vertically when it fits; when it grows
-   past the viewport the flexible spacers collapse to zero and the scroll
-   container behaves normally (no clipped top). */
+/* All settings tabs start at the same top edge. */
 #panel-view-settings {
   display: flex;
   flex-direction: column;
-  min-height: calc(100vh - 132px);
-}
-#panel-view-settings::before,
-#panel-view-settings::after {
-  content: "";
-  flex: 1 1 0;
-  min-height: 0;
 }
 /* Auto cross-axis margins on a flex item suppress stretching, so every page
    would shrink to its own content width (940 for Network, ~620 for Privacy).

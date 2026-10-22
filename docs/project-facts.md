@@ -73,7 +73,7 @@ Last reconciled: 2026-10-21 (Pane 0.8.8 + timeline, window scaling, provider tre
   `cargo +stable-x86_64-pc-windows-gnu`. The full Tauri binary cannot link
   locally as a `cdylib` (167k-export DLL). The committed crate-type is
   `["rlib"]` (desktop only). Unit tests run from repo-root `parse-tests/`
-  (913 passing, 14 ignored as of 2026-10-21; run with
+  (934 passing, 14 ignored as of 2026-10-22; run with
   `cargo +stable-x86_64-pc-windows-gnu test` and no proxy).
 - Dev runtime needs both processes: Vite `:1420` + `pane.exe` `:6736`. Never
   serve the frontend with Python `http.server` (permanent WebView2 cache
@@ -162,23 +162,27 @@ Last reconciled: 2026-10-21 (Pane 0.8.8 + timeline, window scaling, provider tre
   from the `tr_csrf` cookie and sent as `X-CSRF-Token`). So Pane hosts the
   login itself: a Pane-owned webview window (`tr-login`) opens
   `https://tokenrhythm.studio/login`, the human clears the SMS captcha, and
-  the session then lives in Pane's OWN WebView2 profile (persists across
-  restarts like a browser staying signed in). **WebView2's cookie manager
-  is the only channel** (`platform::read_webview_cookies` →
-  `ICoreWebView2Profile5::CookieManager`): the browser process holds the
-  profile's `Cookies` SQLite **locked with no share flags** for as long as
-  the app runs, so a file read fails outright, and the session value is
-  **httpOnly** so page script cannot see it either. The session header is
-  cached in the OS vault (scope `web/tokenrhythm`) and the console API is
-  called with reqwest; no cookie or token is ever written to Pane's JSON
-  files or logs.
-  - **"已登录" must be site-confirmed, never cookie-present.** The login
-    page drops its own first-party cookies (`_c_WBKFRo`, `tr_csrf`) BEFORE
-    anyone authenticates, so a cookie jar is not a session. `login()` asks
-    `/api/auth/me` (200 + envelope `code` 0) before returning Ok, and
-    `cache_profile_session` refuses to store an unconfirmed session. A
-    401 from the wallet call drops the dead session, so the row stops
-    claiming "signed in" without waiting for the next refresh.
+  each add/relogin uses an **incognito WebView2 session**, so the next
+  account does not silently reuse the previous browser login. The
+  cookie manager (`platform::read_webview_cookies`) reads httpOnly cookies;
+  `/api/auth/me` must confirm `code:0` plus a non-empty `data.id` before
+  persistence. Multi-account sessions use `login-accounts/tokenrhythm.json`
+  and per-account `token:login/tokenrhythm@…` vault slots. Cookie/CSRF ride
+  the existing access/refresh secret fields; public account rows expose
+  labels and masked values only. The standard plaintext file fallback
+  applies when the OS vault is unavailable. The old `web/tokenrhythm`
+  single-session slot is migrated save-first and then retired.
+  - Account identity comes from the server user id, never the cookie or
+    label: re-login updates the original account and keeps its label.
+    The first account publishes as `tokenrhythm`; later accounts publish
+    stable `tokenrhythm@…` cards and share the merged account tabs.
+  - An expired wallet session keeps the account row with `no_credentials`
+    and a re-login hint; it never clears a sibling account. Deletion removes
+    the selected account and matching archive; archiving retains credentials
+    for restore in Settings → Keys & quota.
+  - Login and legacy migration are single-flight. Global and single-card
+    refreshes check login/default identities before accepting results, so
+    deleting or promoting an account cannot publish its older in-flight read.
   - Response shapes of `/api/wallet/summary` were captured from the live
     site on 2026-10-19 (owner's first login): the envelope is
     `{code, message, data}` and the balance rides as the decimal string
@@ -507,6 +511,31 @@ changes.
   `.scratch/workbuddy-family-v2/issues/09-official-request-usage.md`),
   account switching, session copies, check-ins, hooks, Agent Companion.
 
+## Codex managed accounts and callback semantics (2026-10-22)
+
+- The local CLI login is read from its Codex home (`CODEX_HOME`, otherwise
+  `~/.codex/auth.json`), including a UTF-8 BOM. Auth Center keeps this local
+  source read-only even when a managed subscription uses the same email;
+  email alone cannot identify a ChatGPT workspace.
+- Browser PKCE accepts only a GET to `/auth/callback` with the current,
+  unique nonempty state and code. Unrelated requests and invalid state do
+  not end the listener. Reads/writes are bounded, and the response tells
+  users to confirm completion in Pane rather than claiming token storage
+  already succeeded. A busy loopback port falls back to device code.
+- Both PKCE and device-code completion save directly to `codex-accounts`.
+  Cancellation/supersession checks precede persistence; frontend poll
+  responses cannot overwrite a replacement flow. Re-login keeps custom
+  labels, while per-account refresh serialization and credential-version
+  checks prevent stale writeback after re-login or deletion.
+- The old single OAuth slot is retired after durable account storage;
+  managed OAuth accounts are queried from their own records, avoiding a
+  second bare-card refresh of the same token. JSON persistence completes
+  before deleted Codex vault slots are collected. Reset credits route to
+  the managed account that owns the card.
+- These paths have synthetic loopback, temp-store and frontend regression
+  coverage. Real two-account OAuth and TokenRhythm login require owner UI
+  acceptance; automated tests are not evidence of completed consent.
+
 ## Provider onboarding descriptor (2026-10-19)
 
 - **One source of truth** for "how does this provider connect":
@@ -622,3 +651,16 @@ changes.
   whole remaining pool. getTeams discovers teamId; getSubscription +
   getUsageStats feed the card. 0.4.51 shipped earlier today; the reset-card
   expiry (`e987f8e`) and ClawsGO ride 0.4.52.
+
+## Local panel/account validation (2026-10-21)
+
+- Proxy clients (`http` / `http_no_redirect`) re-read the effective proxy
+  and replace the current pool when its URL changes. Direct fallback keeps
+  `no_proxy()`. A loopback mock-proxy regression checks both redirect modes;
+  real system-proxy switching still belongs to owner acceptance.
+- Settings tabs share a top-aligned reading column. Release history lives
+  in Settings → About; the popover dashboard no longer contains a timeline.
+- Managed login lifecycle commands share `account_lifecycle.rs`; the parsing
+  harness exercises real persistence, archive/restore failure rollback,
+  same-account re-login, and last-account deletion. This is not an end-to-end
+  test of Tauri IPC or browser login.
