@@ -40,6 +40,16 @@ pub struct AuthAccountRow {
     /// card was never queried (not "queried and empty").
     #[serde(rename = "lastOkAt", skip_serializing_if = "Option::is_none")]
     pub last_ok_at: Option<i64>,
+    /// Unix ms of the latest local day with recorded usage. Derived from the
+    /// meter history; None means no positive reading was ever recorded (not
+    /// "used today").
+    #[serde(rename = "lastUsedAt", skip_serializing_if = "Option::is_none")]
+    pub last_used_at: Option<i64>,
+    /// True only when this family exposes exactly one official-client local
+    /// sign-in, so the row is the client's current account. Multiple local
+    /// rows stay unclaimed instead of guessing which one is current.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub current: bool,
     /// Persisted by the CodeBuddy/WorkBuddy refresh path when a token
     /// refresh is rejected. None means no flag — never a claim of health.
     #[serde(rename = "needsRelogin", skip_serializing_if = "Option::is_none")]
@@ -99,6 +109,8 @@ fn rows_for_family_from(base: &Path, family: &str) -> Vec<AuthAccountRow> {    m
                 masked_key: antigravity_accounts::mask_token(&slot.refresh_token),
                 captured_at: Some(slot.captured_at).filter(|ts| *ts > 0),
                 last_ok_at: None,
+                last_used_at: None,
+                current: false,
                 needs_relogin: None,
                 last_error_kind: None,
                 kind: "slot",
@@ -117,6 +129,8 @@ fn rows_for_family_from(base: &Path, family: &str) -> Vec<AuthAccountRow> {    m
                 masked_key: cursor_accounts::mask_token(&acct.access_token),
                 captured_at: Some(acct.captured_at).filter(|ts| *ts > 0),
                 last_ok_at: None,
+                last_used_at: None,
+                current: false,
                 needs_relogin: None,
                 last_error_kind: None,
                 kind: "account",
@@ -135,6 +149,8 @@ fn rows_for_family_from(base: &Path, family: &str) -> Vec<AuthAccountRow> {    m
                 masked_key: crate::codex_accounts::mask_token(&login.access_token),
                 captured_at: Some(login.added_at).filter(|ts| *ts > 0),
                 last_ok_at: None,
+                last_used_at: None,
+                current: false,
                 needs_relogin: None,
                 last_error_kind: None,
                 kind: "account",
@@ -161,6 +177,8 @@ fn rows_for_family_from(base: &Path, family: &str) -> Vec<AuthAccountRow> {    m
                         masked_key: crate::login_accounts::mask_token(&login.access_token),
                         captured_at: Some(login.added_at).filter(|ts| *ts > 0),
                         last_ok_at: None,
+                        last_used_at: None,
+                        current: false,
                         needs_relogin,
                         last_error_kind: needs_relogin
                             .and_then(|_| extra_text(&login.extra, "lastErrorKind")),
@@ -215,6 +233,8 @@ fn append_local_rows(rows: &mut Vec<AuthAccountRow>, candidates: Vec<crate::loca
             masked_key: "—".into(),
             captured_at: None,
             last_ok_at: None,
+            last_used_at: None,
+            current: false,
             needs_relogin: None,
             last_error_kind: None,
             kind: "local",
@@ -236,6 +256,19 @@ pub fn attach_last_ok_at(
     for group in groups {
         for row in &mut group.accounts {
             row.last_ok_at = at(&row.id);
+        }
+    }
+}
+
+/// Fill each row's last recorded usage time by card id. Kept separate from
+/// last_ok_at: a successful refresh is "checked", not "used".
+pub fn attach_last_used_at(
+    groups: &mut [AuthFamilyGroup],
+    at: impl Fn(&str) -> Option<i64>,
+) {
+    for group in groups {
+        for row in &mut group.accounts {
+            row.last_used_at = at(&row.id);
         }
     }
 }
@@ -263,6 +296,11 @@ where
             // read-only local source even when a Pane subscription shares it.
             if *family == "codex" { for row in &mut local_rows { row.always_listed = true; } }
             append_local_rows(&mut accounts, local_rows);
+            if accounts.iter().filter(|row| row.kind == "local").count() == 1 {
+                if let Some(row) = accounts.iter_mut().find(|row| row.kind == "local") {
+                    row.current = true;
+                }
+            }
             AuthFamilyGroup {
                 family: family.to_string(),
                 accounts,
@@ -538,6 +576,12 @@ mod tests {
         let codex = groups.iter().find(|g| g.family == "codex").unwrap();
         assert_eq!(codex.accounts[0].label, "codex");
         assert_eq!(codex.accounts[0].email.as_deref(), Some("me@example.com"));
+        assert!(codex.accounts[0].current, "the only local sign-in is the current one");
+
+        // Qoder exposed two local rows (global + CN), so neither is claimed
+        // as "current" — a guess would hide which client edition is live.
+        assert!(!qoder.accounts[0].current);
+        assert!(!qoder.accounts[1].current);
 
         // Families with managed rows only keep hint=None.
         let groups = collect_from(&base);
@@ -662,6 +706,37 @@ mod tests {
         let row = &groups.iter().find(|g| g.family == "workbuddy").unwrap().accounts[0];
         assert_eq!(row.needs_relogin, None);
         assert_eq!(row.last_error_kind, None);
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn last_used_at_attaches_without_reusing_last_ok_at() {
+        let base = temp_base("last-used");
+        crate::login_accounts::save_to(
+            &base,
+            "workbuddy",
+            &[crate::login_accounts::LoginAccount {
+                account_id: "uid-used".into(),
+                email: String::new(),
+                label: "Used".into(),
+                access_token: "tok".into(),
+                refresh_token: String::new(),
+                id_token: String::new(),
+                expires_at: String::new(),
+                added_at: 1_700_000_000,
+                extra: serde_json::json!({}),
+            }],
+        )
+        .expect("seed");
+        let mut groups = collect_from(&base);
+        let id = groups.iter().find(|g| g.family == "workbuddy").unwrap().accounts[0]
+            .id
+            .clone();
+        attach_last_ok_at(&mut groups, |card| (card == id).then_some(1_700_000_123_000));
+        attach_last_used_at(&mut groups, |card| (card == id).then_some(1_699_000_123_000));
+        let row = &groups.iter().find(|g| g.family == "workbuddy").unwrap().accounts[0];
+        assert_eq!(row.last_ok_at, Some(1_700_000_123_000));
+        assert_eq!(row.last_used_at, Some(1_699_000_123_000));
         let _ = std::fs::remove_dir_all(&base);
     }
 

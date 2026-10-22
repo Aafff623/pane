@@ -16583,6 +16583,10 @@ interface AuthAccountRow {
   identityUnknown?: boolean;
   /// Unix ms of the last successful snapshot for this row's card id.
   lastOkAt?: number;
+  /// Unix ms of the latest local day with recorded usage; absent = unknown.
+  lastUsedAt?: number;
+  /// The only official-client local sign-in for this family (read-only).
+  current?: boolean;
   /// Persisted by the CodeBuddy/WorkBuddy refresh path when a token refresh
   /// is rejected; absent means no flag, not a claim of health.
   needsRelogin?: boolean;
@@ -16597,6 +16601,9 @@ interface AuthFamilyGroup {
 
 let authGroups: AuthFamilyGroup[] | null = null;
 let authViewActive = false;
+let authSelectMode = false;
+const authSelected = new Set<string>();
+let authSortExpiry = false;
 
 /// A device-code login between "Add account" and completion/cancel,
 /// rendered as the four-state block inside the family card (starting →
@@ -16766,7 +16773,52 @@ function renderAuthCenter(): void {
   const container = document.querySelector<HTMLElement>("#panel-view-auth");
   renderAuthLoginDialog();
   if (!container || !authGroups) return;
-  container.innerHTML = authGroups.map(authGroupHtml).join("");
+  container.innerHTML = authToolbarHtml() + authGroups.map(authGroupHtml).join("");
+}
+
+function authToolbarHtml(): string {
+  if (!authGroups) return "";
+  const selected = authSelected.size;
+  return `<div class="auth-toolbar">
+    <button class="mini-btn${authSelectMode ? " on" : ""}" type="button" data-auth-select>${escapeHtml(t(authSelectMode ? "auth.selectCancel" : "auth.select"))}</button>
+    <button class="mini-btn" type="button" data-auth-sort>${escapeHtml(t(authSortExpiry ? "auth.sortDefault" : "auth.sortExpiry"))}</button>
+    ${
+      authSelectMode
+        ? `<span class="auth-selected">${escapeHtml(t("auth.selected", { n: selected }))}</span>
+           <button class="mini-btn danger" type="button" data-auth-batch-remove ${selected ? "" : "disabled"}>${escapeHtml(t("auth.removeSelected"))}</button>`
+        : ""
+    }
+  </div>`;
+}
+
+function authLastUsed(acct: AuthAccountRow): string | null {
+  if (!acct.lastUsedAt) return null;
+  const date = new Date(acct.lastUsedAt).toLocaleDateString(localeTag(), {
+    month: "short",
+    day: "numeric",
+  });
+  return t("auth.lastUsed", { date });
+}
+
+/// Nearest upcoming reset for this card, used only as a stable ordering
+/// hint. Unknown stays at the end; it is never rendered as a date.
+function authNextExpiry(acct: AuthAccountRow): number {
+  const snap = authRowSnapshot(acct);
+  if (!snap) return Number.POSITIVE_INFINITY;
+  const now = Date.now();
+  const upcoming = snap.metrics
+    .map((metric) => metric.resets_at)
+    .filter((value): value is number => typeof value === "number" && value > now);
+  return upcoming.length ? Math.min(...upcoming) : Number.POSITIVE_INFINITY;
+}
+
+function authExpirySort(a: AuthAccountRow, b: AuthAccountRow): number {
+  if (a.kind === "local" && b.kind !== "local") return 1;
+  if (b.kind === "local" && a.kind !== "local") return -1;
+  const left = authNextExpiry(a);
+  const right = authNextExpiry(b);
+  if (left !== right) return left < right ? -1 : 1;
+  return a.label.localeCompare(b.label);
 }
 
 function authRowName(family: string, acct: AuthAccountRow): string {
@@ -16854,19 +16906,25 @@ function authRowHtml(family: string, acct: AuthAccountRow, index: number): strin
   // the "needs sign-in" pill.
   const showReauthPill = !local && (reloginKind ? reloginKind !== "network" : reauth !== null);
   const lastChecked = authLastChecked(acct);
+  const lastUsed = authLastUsed(acct);
   const name = authRowName(family, acct);
   let sub: string;
   if (reauth) {
     // cc-switch swaps the second line for the reauth reason.
-    const title = [reauth, lastChecked].filter(Boolean).join(" · ");
+    const title = [reauth, lastUsed, lastChecked].filter(Boolean).join(" · ");
     sub = `<div class="auth-sub reauth" title="${escapeHtml(title)}">${escapeHtml(reauth)}</div>`;
   } else if (local) {
-    const details = [t("auth.source.local"), acct.hint ?? "", t("auth.readOnly")];
+    const details = [
+      acct.current ? t("auth.source.current") : t("auth.source.local"),
+      acct.hint ?? "",
+      t("auth.readOnly"),
+    ];
+    if (lastUsed) details.push(lastUsed);
     if (lastChecked) details.push(lastChecked);
     details.push(snap ? t("auth.monitoring") : t("auth.noCard"));
     sub = `<div class="auth-sub" title="${escapeHtml(details.join(" · "))}">${escapeHtml(details.filter(Boolean).join(" · "))}</div>`;
   } else {
-    const details: string[] = [];
+    const details: string[] = [t("auth.source.managed")];
     if (acct.source === "desktop") details.push(t("auth.source.desktop"));
     else if (acct.source === "qr") details.push(t("auth.source.qr"));
     if (acct.enterpriseName) details.push(acct.enterpriseName);
@@ -16878,13 +16936,14 @@ function authRowHtml(family: string, acct: AuthAccountRow, index: number): strin
       });
       details.push(t("auth.captured", { date }));
     }
+    if (lastUsed) details.push(lastUsed);
     if (lastChecked) details.push(lastChecked);
     details.push(acct.maskedKey);
     details.push(snap ? t("auth.monitoring") : t("auth.noCard"));
     sub = `<div class="auth-sub">${escapeHtml(details.join(" · "))}</div>`;
   }
   const localPills = local
-    ? `<span class="auth-pill local">${escapeHtml(t("auth.source.local"))}</span>${
+    ? `<span class="auth-pill local">${escapeHtml(t(acct.current ? "auth.source.current" : "auth.source.local"))}</span>${
         acct.identityUnknown
           ? `<span class="auth-pill unknown" title="${escapeHtml(t("auth.identityUnknownTip"))}">${escapeHtml(t("auth.identityUnknown"))}</span>`
           : ""
@@ -16894,12 +16953,20 @@ function authRowHtml(family: string, acct: AuthAccountRow, index: number): strin
           : ""
       }`
     : "";
+  const selector = authSelectMode
+    ? local
+      ? `<span class="auth-select-spacer" aria-hidden="true"></span>`
+      : `<input class="auth-select-box" type="checkbox" data-auth-check="${escapeHtml(acct.id)}" ${
+          authSelected.has(acct.id) ? "checked" : ""
+        } aria-label="${escapeHtml(name)}">`
+    : "";
   const action = local
     ? snap
       ? ""
       : `<button class="mini-btn" type="button" data-auth-enable="${escapeHtml(acct.id)}">${escapeHtml(t("auth.enableCard"))}</button>`
     : `<button class="mini-btn" type="button" data-auth-menu="${escapeHtml(family)}|${index}" title="${escapeHtml(t("auth.more"))}" aria-label="${escapeHtml(t("auth.more"))}">⋯</button>`;
   return `<div class="auth-row" data-auth-row="${escapeHtml(acct.id)}">
+    ${selector}
     <span class="auth-avatar" aria-hidden="true">${escapeHtml([...name][0] || "?")}</span>
     <div class="auth-id">
       <div class="auth-name-line">
@@ -17138,7 +17205,11 @@ function authGroupHtml(group: AuthFamilyGroup): string {
   // Every OAuth family (codex/copilot/grok) accumulates one account per
   // completed sign-in in its own store, so they all behave like the
   // multi-account families here: rows + an "add account" (login) button.
-  const rows = group.accounts.map((acct, i) => authRowHtml(family, acct, i)).join("");
+  // Sort a copy but keep the original index for the row menu commands.
+  const ordered = authSortExpiry ? [...group.accounts].sort(authExpirySort) : group.accounts;
+  const rows = ordered
+    .map((acct) => authRowHtml(family, acct, group.accounts.indexOf(acct)))
+    .join("");
   const empty =
     group.accounts.length === 0
       ? `<div class="auth-empty"><span>${escapeHtml(t("auth.empty"))}</span>
@@ -17169,6 +17240,28 @@ function handleAuthCenterClick(target: HTMLElement): void {
   if (target.closest("[data-auth-retry]")) {
     authGroups = null;
     void loadAuthCenter();
+    return;
+  }
+  if (target.closest("[data-auth-select]")) {
+    authSelectMode = !authSelectMode;
+    authSelected.clear();
+    renderAuthCenter();
+    return;
+  }
+  if (target.closest("[data-auth-sort]")) {
+    authSortExpiry = !authSortExpiry;
+    renderAuthCenter();
+    return;
+  }
+  const check = target.closest<HTMLInputElement>("[data-auth-check]");
+  if (check) {
+    if (check.checked) authSelected.add(check.dataset.authCheck!);
+    else authSelected.delete(check.dataset.authCheck!);
+    renderAuthCenter();
+    return;
+  }
+  if (target.closest("[data-auth-batch-remove]")) {
+    void removeSelectedAuthAccounts();
     return;
   }
   const add = target.closest<HTMLElement>("[data-auth-add]");
@@ -17593,6 +17686,53 @@ function openAuthRowMenu(family: string, index: number, anchor: HTMLElement): vo
   // window's bottom edge, same recipe as the card context menu.
   const menu = overlay.querySelector<HTMLElement>(".group-menu")!;
   placeMenuAt(menu, anchor.getBoundingClientRect(), { align: "right", gap: 4 });
+}
+
+/// Batch removal keeps stable identities and confirms once. It deliberately
+/// calls the backend per card instead of holding the mutation lock across a
+/// loop; a failed item is reported and the rest still complete.
+async function removeSelectedAuthAccounts(): Promise<void> {
+  const selected = [...authSelected];
+  if (!selected.length) return;
+  const ok = await appConfirm({
+    title: t("auth.removeTitle"),
+    message: t("auth.removeSelectedBody", { n: selected.length }),
+    confirmLabel: t("auth.removeSelected"),
+    danger: true,
+  });
+  if (!ok) return;
+  let removed = 0;
+  let failed = 0;
+  const families = new Set<string>();
+  for (const group of authGroups ?? []) {
+    for (const acct of group.accounts) {
+      if (!selected.includes(acct.id) || acct.kind === "local") continue;
+      try {
+        const count = await invoke<number | null>("account_delete", {
+          provider: group.family,
+          cardId: acct.id,
+          keepUsage: true,
+        });
+        forgetAccountFromBoard(group.family, acct.id, count, true);
+        families.add(group.family);
+        removed++;
+      } catch {
+        failed++;
+      }
+    }
+  }
+  authSelected.clear();
+  authSelectMode = false;
+  for (const family of families) await afterCredentialMutation(family, undefined, false);
+  renderSettingsProviderKeys();
+  requestRender();
+  await loadAuthCenter();
+  const status = document.querySelector("#status");
+  if (status) {
+    status.textContent = failed
+      ? t("auth.batchRemoveFailed", { n: failed })
+      : t("auth.batchRemoved", { n: removed });
+  }
 }
 
 /// Remove rides the existing account_remove chain for every family (slot,

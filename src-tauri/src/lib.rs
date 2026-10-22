@@ -4289,6 +4289,8 @@ fn auth_center_list() -> Vec<auth_center::AuthFamilyGroup> {
     if let Ok(map) = last_ok().lock() {
         auth_center::attach_last_ok_at(&mut groups, |id| map.get(id).map(|entry| entry.at));
     }
+    let last_used = usage_history::last_used_map();
+    auth_center::attach_last_used_at(&mut groups, |id| last_used.get(id).copied());
     groups
 }
 

@@ -4,7 +4,7 @@
 
 use crate::providers::Metric;
 use crate::usage_units::{UsageReading, UsageUnit};
-use chrono::{Duration, Local, NaiveDate};
+use chrono::{Duration, Local, NaiveDate, TimeZone};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::fs;
@@ -477,6 +477,46 @@ fn credit_trend_for(
             }
         })
         .collect()
+}
+
+/// Latest local day with a positive recorded reading per card id, as Unix ms
+/// at local noon. A zero-only history is unknown, not "used today" — callers
+/// must render the absence instead of inventing a date.
+pub fn last_used_map() -> BTreeMap<String, i64> {
+    let store = credit_store().lock().unwrap_or_else(|e| e.into_inner());
+    let Ok(file) = &store.file else {
+        return BTreeMap::new();
+    };
+    let mut out = BTreeMap::new();
+    for meter in &file.meters {
+        let Some(day) = latest_used_day(&meter.samples) else {
+            continue;
+        };
+        let Some(timestamp) = day_noon_ms(day) else {
+            continue;
+        };
+        out.entry(meter.id.clone())
+            .and_modify(|current: &mut i64| *current = (*current).max(timestamp))
+            .or_insert(timestamp);
+    }
+    out
+}
+
+fn latest_used_day(samples: &[DaySample]) -> Option<&str> {
+    samples
+        .iter()
+        .filter(|sample| sample.used > 0.0 || sample.last.is_some_and(|value| value > 0.0))
+        .map(|sample| sample.day.as_str())
+        .max()
+}
+
+fn day_noon_ms(day: &str) -> Option<i64> {
+    let date = NaiveDate::parse_from_str(day, "%Y-%m-%d").ok()?;
+    let naive = date.and_hms_opt(12, 0, 0)?;
+    Local
+        .from_local_datetime(&naive)
+        .single()
+        .map(|value| value.timestamp_millis())
 }
 
 /// card id → 30-day credit-consumption trend, for the frontend.
@@ -1064,6 +1104,18 @@ mod tests {
             credit_trend_for(&entries, "qodercn", "2026-10-30")[0],
             Some(35.0)
         );
+    }
+
+    #[test]
+    fn last_used_day_ignores_zero_only_days_and_takes_the_latest_positive() {
+        let samples = vec![
+            DaySample { day: "2026-10-01".into(), used: 0.0, last: Some(0.0) },
+            DaySample { day: "2026-10-02".into(), used: 12.0, last: Some(12.0) },
+            DaySample { day: "2026-10-03".into(), used: 0.0, last: None },
+        ];
+        assert_eq!(latest_used_day(&samples), Some("2026-10-02"));
+        assert!(day_noon_ms("2026-10-02").is_some());
+        assert_eq!(latest_used_day(&samples[..1]), None);
     }
 
     #[test]

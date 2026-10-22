@@ -3570,6 +3570,18 @@ mod tests {
         assert!(sources.iter().any(|s| s.id == "cursor-csv" && s.state == "runtime"));
     }
 
+    #[test]
+    fn missing_source_paths_are_not_detected_not_zero() {
+        let missing = std::env::temp_dir().join("pane-spend-source-that-does-not-exist");
+        let absent = source_status("probe", "Probe", "log", "scan", &[missing], &["ledger"]);
+        assert_eq!(absent.state, "not_detected");
+        assert_eq!(absent.feeds, vec!["ledger".to_string()]);
+
+        let existing = std::env::current_exe().expect("test executable path");
+        let present = source_status("probe", "Probe", "log", "scan", &[existing], &[]);
+        assert_eq!(present.state, "detected");
+    }
+
     fn tokens_sum(d: &FileData) -> f64 {
         d.days.values().map(|v| v.1).sum()
     }
