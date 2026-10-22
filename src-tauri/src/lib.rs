@@ -1,5 +1,6 @@
 mod account_lifecycle;
 mod accounts;
+mod backup;
 mod identity;
 mod secretstore;
 mod antigravity_accounts;
@@ -1809,6 +1810,184 @@ fn keyvault_recovery_reset(
     new_password: String,
 ) -> Result<keyvault::VaultStatus, String> {
     keyvault::recovery_reset(&answers, &new_password)
+}
+
+const BACKUP_SETTINGS_EXCLUDE: &[&str] = &[
+    "proxy",
+    "layout",
+    "localShortcuts",
+    "skinId",
+    "popoverPos",
+    "popoverPin",
+    "popoverLock",
+    "panelIntent",
+    "lastStartupBootId",
+    "mainScrollTop",
+    "pinned",
+    "windowForm",
+    "popoverSize",
+    "lastView",
+];
+
+struct BackupSecretStore;
+
+impl backup::BackupSecrets for BackupSecretStore {
+    fn get(&self, key: &str) -> Result<Option<String>, String> {
+        match secretstore::get(key) {
+            secretstore::Secret::Found(value) => Ok(Some(value)),
+            secretstore::Secret::Missing => Ok(None),
+            secretstore::Secret::Unavailable => Err("credential vault unavailable".into()),
+        }
+    }
+
+    fn put(&mut self, key: &str, value: &str) -> Result<(), String> {
+        secretstore::put(key, value)
+    }
+
+    fn remove(&mut self, key: &str) {
+        secretstore::remove(key)
+    }
+}
+
+fn sanitized_backup_settings(settings: std::collections::BTreeMap<String, Value>) -> std::collections::BTreeMap<String, Value> {
+    settings
+        .into_iter()
+        .filter(|(key, _)| {
+            CONFIG_KEYS.contains(&key.as_str()) && !BACKUP_SETTINGS_EXCLUDE.contains(&key.as_str())
+        })
+        .collect()
+}
+
+fn backup_settings_from(cfg: &Value) -> std::collections::BTreeMap<String, Value> {
+    let all = cfg
+        .as_object()
+        .map(|object| {
+            object
+                .iter()
+                .map(|(key, value)| (key.clone(), value.clone()))
+                .collect()
+        })
+        .unwrap_or_default();
+    sanitized_backup_settings(all)
+}
+
+fn backup_selection(accounts: bool, keys: bool, settings: bool) -> backup::Selection {
+    backup::Selection { accounts, keys, settings }
+}
+
+fn write_backup_file(path: &str, bytes: &[u8]) -> Result<(), String> {
+    std::fs::write(path, bytes).map_err(|error| format!("write {path}: {error}"))
+}
+
+fn backup_export_inner(
+    path: &str,
+    password: &str,
+    accounts: bool,
+    keys: bool,
+    settings: bool,
+) -> Result<(), String> {
+    let selection = backup_selection(accounts, keys, settings);
+    let settings_map = backup_settings_from(&get_config());
+    let bytes = backup::export_with_password(
+        &providers::config_dir(),
+        settings_map,
+        selection,
+        &BackupSecretStore,
+        password,
+    )?;
+    write_backup_file(path, &bytes)
+}
+
+fn backup_apply_inner(
+    path: &str,
+    password: &str,
+    accounts: bool,
+    keys: bool,
+    settings: bool,
+) -> Result<backup::ApplyResult, String> {
+    let bytes = std::fs::read(path).map_err(|error| format!("read {path}: {error}"))?;
+    let mut result = backup::apply(
+        &providers::config_dir(),
+        &bytes,
+        password,
+        backup_selection(accounts, keys, settings),
+        &mut BackupSecretStore,
+    )?;
+    result.settings = sanitized_backup_settings(result.settings);
+    Ok(result)
+}
+
+#[tauri::command]
+async fn backup_export_dialog(
+    app: tauri::AppHandle,
+    password: String,
+    accounts: bool,
+    keys: bool,
+    settings: bool,
+) -> Result<Option<String>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        use tauri_plugin_dialog::DialogExt;
+        let picked = app
+            .dialog()
+            .file()
+            .set_file_name(&format!(
+                "pane-backup-{}.pane-backup",
+                chrono::Local::now().format("%Y%m%d-%H%M")
+            ))
+            .add_filter("Pane backup", &["pane-backup", "json"])
+            .blocking_save_file();
+        let Some(picked) = picked else {
+            return Ok(None);
+        };
+        let path = picked.into_path().map_err(|error| error.to_string())?;
+        let path_text = path.display().to_string();
+        backup_export_inner(&path_text, &password, accounts, keys, settings)?;
+        Ok(Some(path_text))
+    })
+    .await
+    .map_err(|error| error.to_string())?
+}
+
+#[tauri::command]
+async fn backup_preview_dialog(
+    app: tauri::AppHandle,
+    password: String,
+) -> Result<Option<backup::PreviewFile>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        use tauri_plugin_dialog::DialogExt;
+        let picked = app
+            .dialog()
+            .file()
+            .add_filter("Pane backup", &["pane-backup", "json"])
+            .blocking_pick_file();
+        let Some(picked) = picked else {
+            return Ok(None);
+        };
+        let path = picked.into_path().map_err(|error| error.to_string())?;
+        let bytes = std::fs::read(&path).map_err(|error| format!("read {}: {error}", path.display()))?;
+        let preview = backup::preview(&providers::config_dir(), &bytes, &password)?;
+        Ok(Some(backup::PreviewFile {
+            path: path.display().to_string(),
+            preview,
+        }))
+    })
+    .await
+    .map_err(|error| error.to_string())?
+}
+
+#[tauri::command]
+async fn backup_apply_path(
+    path: String,
+    password: String,
+    accounts: bool,
+    keys: bool,
+    settings: bool,
+) -> Result<backup::ApplyResult, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        backup_apply_inner(&path, &password, accounts, keys, settings)
+    })
+    .await
+    .map_err(|error| error.to_string())?
 }
 
 /// Native "Save as…" for an exported text file (recovery-code TXT). The
@@ -5606,6 +5785,9 @@ pub fn run() {
             tokenrhythm_login,
             tokenrhythm_login_clear,
             save_text_file,
+            backup_export_dialog,
+            backup_preview_dialog,
+            backup_apply_path,
             keyvault_v3_enable_recovery_code,
             keyvault_v3_disable_recovery_code,
             keyvault_v3_reset_unlock_code,

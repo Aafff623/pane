@@ -773,6 +773,95 @@ async function applySettingsAndReload(): Promise<void> {
   setSettingsDirty(false);
   window.location.reload();
 }
+
+function backupSectionChecked(selector: string): boolean {
+  return document.querySelector<HTMLInputElement>(selector)?.checked ?? true;
+}
+
+function setBackupStatus(message: string): void {
+  const status = document.querySelector("#status");
+  if (status) status.textContent = message;
+}
+
+async function backupPassword(title: string): Promise<string | null> {
+  const password = await appPrompt({
+    title,
+    confirmLabel: t("settings.backupContinue"),
+    secret: true,
+  });
+  if (password == null) return null;
+  if (password.length < 8) {
+    setBackupStatus(t("settings.backupPasswordShort"));
+    return null;
+  }
+  return password;
+}
+
+async function runBackupExport(): Promise<void> {
+  const password = await backupPassword(t("settings.backupExportTitle"));
+  if (!password) return;
+  try {
+    const path = await invoke<string | null>("backup_export_dialog", {
+      password,
+      accounts: backupSectionChecked("[data-backup-accounts]"),
+      keys: backupSectionChecked("[data-backup-keys]"),
+      settings: backupSectionChecked("[data-backup-settings]"),
+    });
+    setBackupStatus(path ? t("settings.backupExported", { path }) : t("settings.backupCancelled"));
+  } catch (err) {
+    setBackupStatus(t("settings.backupFailed", { err: String(err) }));
+  }
+}
+
+async function runBackupImport(): Promise<void> {
+  const password = await backupPassword(t("settings.backupImportTitle"));
+  if (!password) return;
+  try {
+    const picked = await invoke<{ path: string; preview: BackupPreview } | null>(
+      "backup_preview_dialog",
+      { password },
+    );
+    if (!picked) return;
+    const preview = picked.preview;
+    const accounts = backupSectionChecked("[data-backup-accounts]");
+    const keys = backupSectionChecked("[data-backup-keys]");
+    const settings = backupSectionChecked("[data-backup-settings]");
+    const ok = await appConfirm({
+      title: t("settings.backupPreviewTitle"),
+      message: t("settings.backupPreviewBody", {
+        settings: preview.settingKeys.length,
+        accounts: preview.addedAccounts + preview.conflictingAccounts,
+        conflicts: preview.conflictingAccounts,
+        secrets: preview.secretCount,
+        vault: preview.hasKeyvault ? "✓" : "—",
+      }),
+      confirmLabel: t("settings.backupApply"),
+      danger: preview.conflictingAccounts > 0 || preview.keyvaultConflict,
+    });
+    if (!ok) return;
+    const result = await invoke<BackupApplyResult>("backup_apply_path", {
+      path: picked.path,
+      password,
+      accounts,
+      keys,
+      settings,
+    });
+    if (Object.keys(result.settings).length) {
+      await invoke("set_config", { patch: result.settings });
+    }
+    setBackupStatus(
+      t("settings.backupApplied", { accounts: result.accountFiles, secrets: result.secrets }),
+    );
+    await loadAuthCenter();
+    requestRender();
+    void forceUsageRefreshAttempt(false).then(requestTraySync);
+    if (Object.keys(result.settings).length) {
+      window.setTimeout(() => window.location.reload(), 900);
+    }
+  } catch (err) {
+    setBackupStatus(t("settings.backupFailed", { err: String(err) }));
+  }
+}
 let lastFetch = 0;
 const refreshState = new RefreshState();
 /// True while the footer status line carries the idle "数据更新于…" text —
@@ -16388,6 +16477,46 @@ function buildPanelShell(): void {
     startTour();
   });
   generalCard.append(panelRow("settings.tourReplayLabel", replayTour));
+
+  // Local-only encrypted backup. The password is never stored; the backend
+  // allowlist excludes proxy and window-layout keys from the snapshot.
+  const backupTitle = document.createElement("div");
+  backupTitle.className = "backup-title";
+  backupTitle.dataset.i18n = "settings.backup";
+  backupTitle.textContent = t("settings.backup");
+  generalCard.append(backupTitle);
+  const backupAccounts = document.createElement("input");
+  backupAccounts.type = "checkbox";
+  backupAccounts.checked = true;
+  backupAccounts.dataset.backupAccounts = "";
+  const backupKeys = document.createElement("input");
+  backupKeys.type = "checkbox";
+  backupKeys.checked = true;
+  backupKeys.dataset.backupKeys = "";
+  const backupSettings = document.createElement("input");
+  backupSettings.type = "checkbox";
+  backupSettings.checked = true;
+  backupSettings.dataset.backupSettings = "";
+  generalCard.append(
+    panelRow("settings.backupAccounts", backupAccounts),
+    panelRow("settings.backupKeys", backupKeys),
+    panelRow("settings.backupSettings", backupSettings),
+  );
+  const backupActions = document.createElement("div");
+  backupActions.className = "backup-actions";
+  const backupExport = document.createElement("button");
+  backupExport.type = "button";
+  backupExport.className = "mini-btn";
+  backupExport.textContent = t("settings.backupExport");
+  backupExport.addEventListener("click", () => void runBackupExport());
+  const backupImport = document.createElement("button");
+  backupImport.type = "button";
+  backupImport.className = "mini-btn";
+  backupImport.textContent = t("settings.backupImport");
+  backupImport.addEventListener("click", () => void runBackupImport());
+  backupActions.append(backupExport, backupImport);
+  generalCard.append(backupActions);
+
   settingsView.append(general.section);
 
   // --- Keys page: provider credentials + the MCP/search vault ------------
@@ -16597,6 +16726,26 @@ interface AuthAccountRow {
 interface AuthFamilyGroup {
   family: string;
   accounts: AuthAccountRow[];
+}
+
+interface BackupPreview {
+  createdAt: number;
+  settingKeys: string[];
+  accountFiles: number;
+  accountIds: string[];
+  addedAccounts: number;
+  conflictingAccounts: number;
+  secretCount: number;
+  hasKeyvault: boolean;
+  keyvaultBytes: number;
+  keyvaultConflict: boolean;
+}
+
+interface BackupApplyResult {
+  settings: Record<string, unknown>;
+  accountFiles: number;
+  secrets: number;
+  keyvaultWritten: boolean;
 }
 
 let authGroups: AuthFamilyGroup[] | null = null;

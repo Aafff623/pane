@@ -64,6 +64,9 @@ pub mod provider_catalog;
 #[path = "../../src-tauri/src/accounts.rs"]
 pub mod accounts;
 
+#[path = "../../src-tauri/src/backup.rs"]
+pub mod backup;
+
 #[path = "../../src-tauri/src/identity.rs"]
 pub mod identity;
 
