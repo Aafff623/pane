@@ -550,6 +550,43 @@ mod tests {
     }
 
     #[test]
+    fn official_packs_inline_assets_for_the_frontend() {
+        // `skin_pack_list` serves self-contained CSS. A relative asset URL
+        // would resolve against the webview origin instead of the pack and
+        // silently lose the ink landscape/koi or signal atlas.
+        let _root = TestSkinsDir::new();
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../site/public/skins");
+        for name in ["pane-skin-signal-1.0.0.zip", "pane-skin-ink-1.0.0.zip"] {
+            let bytes = std::fs::read(dir.join(name)).unwrap_or_else(|e| panic!("{name}: {e}"));
+            let manifest = install_bytes(&bytes).unwrap_or_else(|e| panic!("{name}: {e}"));
+            let pack = read_installed(&manifest.id).unwrap_or_else(|e| panic!("{name}: {e}"));
+            assert!(
+                pack.entry_css.contains("data:image/webp;base64"),
+                "{name}: image asset was not inlined"
+            );
+            if manifest.id == "ink" {
+                assert!(
+                    pack.entry_css.contains("data:font/ttf"),
+                    "{name}: font asset was not inlined"
+                );
+            }
+            assert!(
+                !pack.entry_css.contains("url('assets/") && !pack.entry_css.contains("url(assets/"),
+                "{name}: relative pack asset URL survived in the served CSS"
+            );
+            // Chromium silently drops declarations carrying multi-megabyte
+            // data URLs once the served stylesheet grows large — the ink
+            // landscape and koi vanished from the preview at 16 MB. Keep the
+            // inlined sheet modest so oversized artwork fails here instead.
+            assert!(
+                pack.entry_css.len() < 4 * 1024 * 1024,
+                "{name}: inlined CSS is {} bytes; recompress the artwork",
+                pack.entry_css.len()
+            );
+        }
+    }
+
+    #[test]
     fn sha256_hex_matches_the_known_vector() {
         assert_eq!(
             sha256_hex(b"abc"),

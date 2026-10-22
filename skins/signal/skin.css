@@ -1,8 +1,8 @@
 /* Cloud Post Office skin (pack source). Assets are pack-relative; the
    pack builder rewrites ./assets/skins/cloud-post/ to assets/. */
 /* Cloud Post Office. Removing data-skin restores the native appearance. */
-[data-skin="signal"][data-theme="light"]{--background:#e7f1f7;--foreground:#26364b;--card:#fffdf4;--border:#65778a;--input:#8398ac;--muted:#e0eaf1;--muted-foreground:#4d6075;--secondary-foreground:#354e67;--primary:#225e91;--primary-foreground:#fffdf4;--accent:#d9ebf7;--destructive:#b52d3b;--chart-blue:#326f9f;--signal-surface:#fffdf4;--signal-inset:#f7f8ef;--signal-hover:#dfedf5;--signal-focus:#225e91;--signal-warning:#a85b08;--signal-success:#18753f;--signal-error-bg:#ffe4da;--signal-display:#ffe1ad;--signal-display-foreground:#26364b;--signal-display-muted:#51462d;--signal-shadow:#33496620;--post-ink:#3e5872;--post-paper:#fffdf4;--post-stitch:#8999a9;--post-wall:url('./assets/skins/cloud-post/day.png')}
-[data-skin="signal"][data-theme="dark"]{--background:#141f36;--foreground:#fff3d8;--card:#243652;--border:#8295ad;--input:#8196b0;--muted:#354867;--muted-foreground:#c0cee0;--secondary-foreground:#d0dceb;--primary:#ffe1ad;--primary-foreground:#23344c;--accent:#354d6a;--destructive:#ff7278;--chart-blue:#9bd5ea;--signal-surface:#243652;--signal-inset:#203049;--signal-hover:#3b526e;--signal-focus:#ffd48e;--signal-warning:#ffb547;--signal-success:#43d78b;--signal-error-bg:#513d4b;--signal-display:#f3c990;--signal-display-foreground:#25334b;--signal-display-muted:#51462d;--signal-shadow:#020a1c60;--post-ink:#acbfd1;--post-paper:#243652;--post-stitch:#8fabc5;--post-wall:url('./assets/skins/cloud-post/night.png')}
+[data-skin="signal"][data-theme="light"]{--background:#e7f1f7;--foreground:#26364b;--card:#fffdf4;--border:#65778a;--input:#8398ac;--muted:#e0eaf1;--muted-foreground:#4d6075;--secondary-foreground:#354e67;--primary:#225e91;--primary-foreground:#fffdf4;--accent:#d9ebf7;--destructive:#b52d3b;--chart-blue:#326f9f;--signal-surface:#fffdf4;--signal-inset:#f7f8ef;--signal-hover:#dfedf5;--signal-focus:#225e91;--signal-warning:#a85b08;--signal-success:#18753f;--signal-error-bg:#ffe4da;--signal-display:#ffe1ad;--signal-display-foreground:#26364b;--signal-display-muted:#51462d;--signal-shadow:#33496620;--post-ink:#3e5872;--post-paper:#fffdf4;--post-stitch:#8999a9;--post-wall:url('./assets/skins/cloud-post/day.webp')}
+[data-skin="signal"][data-theme="dark"]{--background:#141f36;--foreground:#fff3d8;--card:#243652;--border:#8295ad;--input:#8196b0;--muted:#354867;--muted-foreground:#c0cee0;--secondary-foreground:#d0dceb;--primary:#ffe1ad;--primary-foreground:#23344c;--accent:#354d6a;--destructive:#ff7278;--chart-blue:#9bd5ea;--signal-surface:#243652;--signal-inset:#203049;--signal-hover:#3b526e;--signal-focus:#ffd48e;--signal-warning:#ffb547;--signal-success:#43d78b;--signal-error-bg:#513d4b;--signal-display:#f3c990;--signal-display-foreground:#25334b;--signal-display-muted:#51462d;--signal-shadow:#020a1c60;--post-ink:#acbfd1;--post-paper:#243652;--post-stitch:#8fabc5;--post-wall:url('./assets/skins/cloud-post/night.webp')}
 [data-skin="signal"] { --radius: 14px; --signal-fast: 160ms; --signal-enter: 320ms; }
 :root[data-skin="signal"] { --floating-surface:var(--signal-surface); --field-surface:var(--signal-inset); --control-hover:var(--signal-hover); }
 :root[data-skin="signal"] body, .skin-sample { background:var(--background); color:var(--foreground); }
@@ -156,7 +156,7 @@
 :root[data-skin="signal"] :is(.settings-tabs,.mini-btn) .post-icon{width:21px;height:21px;margin:0}
 :root[data-skin="signal"] :is(.mini-btn,.group-menu-item,.auth-row-menu button):has(.post-icon){display:inline-flex;align-items:center;gap:4px}
 :root[data-skin="signal"] :is(.provider-icon,.overview-icon,.overview-item-icon,.post-brand-stamp){padding:3px;background:var(--signal-inset);outline:1px dashed var(--post-stitch);outline-offset:2px;border-radius:4px;box-sizing:content-box}
-:root[data-skin="signal"] .post-mascot{display:block;width:72px;height:72px;background-image:url('./assets/skins/cloud-post/mascot.png');background-size:200% 200%;background-repeat:no-repeat;pointer-events:none}
+:root[data-skin="signal"] .post-mascot{display:block;width:72px;height:72px;background-image:url('./assets/skins/cloud-post/mascot.webp');background-size:200% 200%;background-repeat:no-repeat;pointer-events:none}
 :root[data-skin="signal"] .post-corner{position:absolute;right:5px;bottom:0;width:55px;height:55px;opacity:.18}
 :root[data-skin="signal"] .post-nav-mascot{position:absolute;bottom:14px;left:2px;width:47px;height:47px}
 :root[data-skin="signal"] .post-empty-mascot{margin:16px auto 0;width:88px;height:88px}
@@ -202,8 +202,8 @@
 [data-skin="signal"] .overview-ring :is(.ring-progress.is-maxed,.ring-progress.is-error) { stroke:var(--destructive); filter:none; }
 [data-skin="signal"] .overview-ring :is(.ring-text.is-maxed,.ring-text.is-error) { fill:var(--destructive); }
 [data-skin="signal"] :is(.provider-icon,.overview-icon,.overview-item-icon,.brand-icon,.overview-logo,.provider-logo,.cust-brand-icon,.auth-family-icon) { background:var(--signal-inset); outline:1px dashed var(--post-stitch); outline-offset:2px; border-radius:4px; }
-[data-skin="signal"] .skin-sample[data-skin="signal"] { background-image:linear-gradient(color-mix(in srgb,var(--post-paper) 92%,transparent),color-mix(in srgb,var(--post-paper) 92%,transparent)),var(--post-wall); background-size:cover; background-position:center; border:1px solid var(--post-ink); }
-[data-skin="signal"] .skin-sample[data-skin="signal"] .provider { background:var(--post-paper); padding:12px; border:1px dashed var(--post-stitch); border-radius:12px; }
+[data-skin="signal"].skin-sample,[data-skin="signal"] .skin-sample[data-skin="signal"] { background-image:linear-gradient(color-mix(in srgb,var(--post-paper) 92%,transparent),color-mix(in srgb,var(--post-paper) 92%,transparent)),var(--post-wall); background-size:cover; background-position:center; border:1px solid var(--post-ink); }
+[data-skin="signal"].skin-sample .provider,[data-skin="signal"] .skin-sample[data-skin="signal"] .provider { background:var(--post-paper); padding:12px; border:1px dashed var(--post-stitch); border-radius:12px; }
 
 /* The warm ledger is a separate surface in both modes. Its hover and all
    child text must use that surface's palette, not the surrounding navy. */
@@ -253,9 +253,9 @@
   :root[data-skin="signal"] .provider-head .provider-account-badge span:last-child { display:inline-flex; }
 }
 :root[data-skin="signal"] :is(.total-spend,.auth-empty,#panel-nav) { position:relative; }
-:root[data-skin="signal"] .total-spend::after { content:""; position:absolute; right:8px; bottom:6px; width:48px; height:48px; pointer-events:none; opacity:.16; background:url('./assets/skins/cloud-post/mascot.png') 0 0 / 200% 200% no-repeat; }
-:root[data-skin="signal"] .auth-empty::after { content:""; display:block; margin:16px auto 0; width:88px; height:88px; background:url('./assets/skins/cloud-post/mascot.png') 100% 0 / 200% 200% no-repeat; }
-:root[data-skin="signal"] #panel-nav::after { content:""; display:block; margin:14px auto; width:60px; height:60px; pointer-events:none; background:url('./assets/skins/cloud-post/mascot.png') 0 0 / 200% 200% no-repeat; }
+:root[data-skin="signal"] .total-spend::after { content:""; position:absolute; right:8px; bottom:6px; width:48px; height:48px; pointer-events:none; opacity:.16; background:url('./assets/skins/cloud-post/mascot.webp') 0 0 / 200% 200% no-repeat; }
+:root[data-skin="signal"] .auth-empty::after { content:""; display:block; margin:16px auto 0; width:88px; height:88px; background:url('./assets/skins/cloud-post/mascot.webp') 100% 0 / 200% 200% no-repeat; }
+:root[data-skin="signal"] #panel-nav::after { content:""; display:block; margin:14px auto; width:60px; height:60px; pointer-events:none; background:url('./assets/skins/cloud-post/mascot.webp') 0 0 / 200% 200% no-repeat; }
 /* Snapshot export retains the paper frame but omits the window wallpaper. */
 [data-skin="signal"] .snap-card { border:1px solid var(--post-ink); border-radius:16px; }
 [data-skin="signal"] .post-banner { background:color-mix(in srgb,var(--post-paper) 94%,transparent); border:1px dashed var(--post-stitch); border-radius:12px; }
@@ -274,4 +274,4 @@
 :root[data-skin="signal"] .spend-update-btn .ui-icon { display:block; width:16px; height:16px; }
 :root[data-skin="signal"] .spend-update-btn .post-icon { display:none; }
 @media (prefers-reduced-motion:reduce){[data-skin="signal"] *{transition:none !important}}
-[data-skin="signal"]{--post-atlas:url('assets/icons.png');--post-atlas-extra:url('assets/extra.png')}
+[data-skin="signal"]{--post-atlas:url('assets/icons.webp');--post-atlas-extra:url('assets/extra.webp')}

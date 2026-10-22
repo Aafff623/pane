@@ -73,7 +73,7 @@ import { fontOnboardingMode, type FontOnboarding } from "./fontOnboarding";
 import { credentialFailure, accountFormReady, enabledAccountCount } from "./credentialPolicy";
 import { keyAvailabilityCounts, keyAvailabilityRows, keyAvailabilitySummary, overviewFoldCount } from "./keyAvailability";
 import { loadFontPacks, fontPackFamilies, mountFontPackManager } from "./fontPacks";
-import { decorateInkSkin, clearInkSkin } from "./inkEffects";
+import { decorateInkSkin, clearInkSkin, ensureInkDefs } from "./inkEffects";
 import { postIcon } from "./skinIcons";
 // The repo's changelog ships inside the bundle, so the "What's new" dialog
 // and the Settings changelog viewer read the exact file releases maintain.
@@ -10626,6 +10626,8 @@ function renderDrawerBody(): void {
   const focusValue = focusAttr ? focused!.getAttribute(focusAttr) : null;
   document.querySelector("#drawer")?.classList.toggle("skin-workshop-open", skinMarketOpen);
   body.innerHTML = renderCustomize();
+  // The ink sample references paint servers even when the app is native.
+  if (skinMarketOpen && body.querySelector(".skin-sample[data-ink]")) ensureInkDefs();
   const scroller = body.querySelector(".skin-market-body");
   if (scroller) scroller.scrollTop = scrollTop;
   if (focusAttr) {

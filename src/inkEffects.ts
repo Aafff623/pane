@@ -1,4 +1,6 @@
-export function decorateInkSkin(host: HTMLElement): void {
+/// The preview renders ink art while the app itself may be native, so the
+/// paint servers must exist independently of the applied skin.
+export function ensureInkDefs(): void {
     if (!document.getElementById('ink-graph-paint')) {
         const defs = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
         defs.setAttribute('aria-hidden', 'true');
@@ -28,6 +30,10 @@ export function decorateInkSkin(host: HTMLElement): void {
         defs.append(graphDefs);
         document.body.append(defs);
     }
+}
+
+export function decorateInkSkin(host: HTMLElement): void {
+    ensureInkDefs();
     if (!document.documentElement.hasAttribute('data-ink'))
         return;
     for (const chart of host.querySelectorAll('.donut-wrap')) {
