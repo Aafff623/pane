@@ -929,6 +929,10 @@ const en: Dict = {
   "customize.customRelayHint":
     "Your own OpenAI-compatible relay: add it with a name, base URL and sk- key. Custom entries can be edited or deleted any time; built-in providers can only be enabled or disabled, never removed.",
   "customize.title": "Customize dashboard",
+  "customize.filterLabel": "Filter providers",
+  "customize.filterAll": "All",
+  "customize.filterConfigured": "Configured",
+  "customize.filterEmpty": "No configured providers yet.",
   "customize.subtitle": "Choose what appears and how it is ordered",
   "customize.noteLabel": "Display name",
   "customize.noteHelp": "This name is shown on the main dashboard only.",
@@ -2229,6 +2233,10 @@ const zh: Dict = {
   "customize.customRelayHint":
     "自己的 OpenAI 兼容中继：填名称、Base URL 和 sk- 密钥即可接入。自定义条目随时可编辑/删除；内置 provider 只能启用/停用，不可删除。",
   "customize.title": "自定义看板",
+  "customize.filterLabel": "筛选 Provider",
+  "customize.filterAll": "全部",
+  "customize.filterConfigured": "已配置",
+  "customize.filterEmpty": "还没有已配置的 Provider。",
   "customize.subtitle": "选择显示内容，并调整卡片顺序",
   "customize.noteLabel": "显示备注",
   "customize.noteHelp": "只改变主看板上的显示名称，不会修改 Provider 账号信息。",
@@ -3533,6 +3541,10 @@ const ru: Dict = {
   "customize.customRelayHint":
     "Свой OpenAI-совместимый релей: имя, base URL и sk-ключ. Свои записи можно редактировать и удалять; встроенные провайдеры только включаются/выключаются, не удаляются.",
   "customize.title": "Настройка панели",
+  "customize.filterLabel": "Фильтр провайдеров",
+  "customize.filterAll": "Все",
+  "customize.filterConfigured": "Настроенные",
+  "customize.filterEmpty": "Настроенных провайдеров пока нет.",
   "customize.subtitle": "Выберите элементы и порядок карточек",
   "customize.noteLabel": "Название",
   "customize.noteHelp": "Меняет только имя на главной панели.",

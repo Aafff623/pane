@@ -3655,6 +3655,45 @@ body.ui-scaled .popover {
   padding: 2px 2px 4px;
 }
 
+.cust-filter-tabs {
+  display: inline-flex;
+  gap: 2px;
+  width: fit-content;
+  margin: 8px 2px 4px;
+  padding: 2px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--muted);
+}
+
+.cust-filter-tab {
+  border: none;
+  background: transparent;
+  color: var(--muted-foreground);
+  font: inherit;
+  font-size: 11.5px;
+  line-height: 1.4;
+  padding: 3px 12px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.cust-filter-tab:hover {
+  color: var(--foreground);
+}
+
+.cust-filter-tab.active {
+  color: var(--foreground);
+  background: var(--background);
+  box-shadow: 0 1px 2px rgb(0 0 0 / .18);
+}
+
+.cust-filter-empty {
+  margin: 10px 4px;
+  color: var(--muted-foreground);
+  font-size: 12px;
+}
+
 .mini-btn {
   display: inline-flex;
   align-items: center;
@@ -4317,6 +4356,7 @@ body.ui-scaled .popover {
 .card-account-tabs {
   display: flex;
   flex-wrap: wrap;
+  justify-content: center;
   gap: 4px;
   margin: -2px 0 8px;
 }
@@ -4326,6 +4366,10 @@ body.ui-scaled .popover {
 }
 
 .card-account-tab {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
   font: inherit;
   font-size: 11px;
   padding: 3px 9px;
@@ -4334,6 +4378,12 @@ body.ui-scaled .popover {
   background: transparent;
   color: var(--muted-foreground);
   cursor: pointer;
+}
+
+/* Skins may stack the dot above the label; the gap handles both axes, so
+   the dot stays centered instead of inheriting the horizontal margin. */
+.card-account-tab .acct-dot {
+  margin-right: 0;
 }
 
 .card-account-pin-head.on {

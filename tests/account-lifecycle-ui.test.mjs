@@ -274,3 +274,20 @@ test('an env or CLI backed bare provider remains visible with no saved accounts'
   });
   assert.deepEqual(Array.from(context.overviewAccountSnapshots('minimax'),row=>row.id),['minimax']);
 });
+
+
+test('deleting a One/New API key removes its live card immediately', () => {
+  const accountsCache = new Map([['onenewapi', [{ id: 'onenewapi@api1' }, { id: 'onenewapi@api2' }]]]);
+  const lastSpend = [{ id: 'onenewapi@api1' }, { id: 'onenewapi@api2' }];
+  const context = load(['forgetOneNewApiCards', 'onaSnapshotId'], {
+    ONA_FAMILY: 'onenewapi',
+    lastSnapshots: [{ id: 'onenewapi@api1' }, { id: 'onenewapi@api2' }],
+    lastSpend, accountsCache, userSelectedAccountFor: new Map([['onenewapi', 'onenewapi@api2']]),
+    requestRender: () => {}, customizeOpen: false, renderDrawerBody: () => {},
+  });
+  context.forgetOneNewApiCards(['api2']);
+  assert.deepEqual(context.lastSnapshots.map((row) => row.id), ['onenewapi@api1']);
+  assert.deepEqual(context.lastSpend.map((row) => row.id), ['onenewapi@api1']);
+  assert.deepEqual(accountsCache.get('onenewapi').map((row) => row.id), ['onenewapi@api1']);
+  assert.equal(context.userSelectedAccountFor.has('onenewapi'), false);
+});

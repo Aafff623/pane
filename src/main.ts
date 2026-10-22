@@ -3777,6 +3777,76 @@ function currentUiScale(): number {
   return Number.isFinite(scale) && scale > 0 ? scale : 1;
 }
 
+interface UiRect {
+  left: number;
+  top: number;
+  right: number;
+  bottom: number;
+  width: number;
+  height: number;
+}
+
+/// CSS-zoom-safe viewport rect. `getBoundingClientRect` reports visual
+/// pixels; fixed `left/top`, `offsetWidth` and the layout viewport are
+/// unscaled. Every menu/tooltip must convert before clamping.
+function scaledUiRect(rect: DOMRect): UiRect {
+  const scale = currentUiScale();
+  return {
+    left: rect.left / scale,
+    top: rect.top / scale,
+    right: rect.right / scale,
+    bottom: rect.bottom / scale,
+    width: rect.width / scale,
+    height: rect.height / scale,
+  };
+}
+
+function uiViewport(): { width: number; height: number } {
+  const scale = currentUiScale();
+  return { width: window.innerWidth / scale, height: window.innerHeight / scale };
+}
+
+function placeMenuAt(
+  menu: HTMLElement,
+  anchor: UiRect | { x: number; y: number },
+  opts: { align?: "left" | "center" | "right"; prefer?: "below" | "above"; gap?: number; margin?: number } = {},
+): void {
+  const scale = currentUiScale();
+  const viewport = uiViewport();
+  const width = menu.offsetWidth;
+  const height = menu.offsetHeight;
+  const margin = opts.margin ?? 8;
+  const gap = opts.gap ?? 4;
+  let x: number;
+  let y: number;
+  if ("x" in anchor) {
+    x = anchor.x / scale;
+    y = anchor.y / scale;
+    x = Math.max(margin, Math.min(x, viewport.width - width - margin));
+    const below = y + gap;
+    const above = y - height - gap;
+    y = below + height <= viewport.height - margin ? below : Math.max(margin, above);
+  } else {
+    const rect = scaledUiRect(anchor as DOMRect);
+    const align = opts.align ?? "right";
+    x = align === "left"
+      ? rect.left
+      : align === "center"
+        ? (rect.left + rect.right) / 2 - width / 2
+        : rect.right - width;
+    x = Math.max(margin, Math.min(x, viewport.width - width - margin));
+    const below = rect.bottom + gap;
+    const above = rect.top - height - gap;
+    const prefer = opts.prefer ?? "below";
+    y = prefer === "above"
+      ? (above >= margin ? above : below)
+      : (below + height <= viewport.height - margin ? below : above);
+    y = Math.max(margin, Math.min(y, viewport.height - height - margin));
+  }
+  menu.style.left = `${x}px`;
+  menu.style.top = `${y}px`;
+}
+
 function placeFixedTip(
   el: HTMLElement,
   anchor: DOMRect,
@@ -6113,8 +6183,7 @@ function setupOverviewGroupDrag(root: HTMLElement): void {
   };
   const moveGhost = (x: number, y: number) => {
     if (!ghost) return;
-    ghost.style.left = `${Math.max(0, Math.min(x + 12, window.innerWidth - ghost.offsetWidth))}px`;
-    ghost.style.top = `${Math.max(0, Math.min(y + 12, window.innerHeight - ghost.offsetHeight))}px`;
+    placeMenuAt(ghost, { x, y }, { gap: 12, margin: 0 });
   };
   const targetAt = (x: number, y: number) => document.elementFromPoint(x, y)?.closest<HTMLElement>(
     "[data-overview-cat], [data-overview-drop-group]",
@@ -6215,7 +6284,7 @@ function overviewMenuSide(tile: HTMLElement): "left" | "middle" | "right" {
   return fraction < 1 / 3 ? "left" : fraction > 2 / 3 ? "right" : "middle";
 }
 
-function groupMenuPosition(rect: DOMRect, width: number, height: number, side: "left" | "middle" | "right", viewportWidth: number, viewportHeight: number): { x: number; y: number } {
+function groupMenuPosition(rect: UiRect, width: number, height: number, side: "left" | "middle" | "right", viewportWidth: number, viewportHeight: number): { x: number; y: number } {
   const desiredX = side === "left" ? rect.right + 4 : side === "right" ? rect.left - width - 4 : (rect.left + rect.right - width) / 2;
   return {
     x: Math.max(8, Math.min(desiredX, viewportWidth - width - 8)),
@@ -6445,32 +6514,20 @@ function openGroupMenu(
   const tile = includeGrouping ? anchor.closest<HTMLElement>(".overview-item, .overview-bar-item, .expiring-row") : null;
   const accountAnchor = contextPoint?.target?.closest<HTMLElement>("[data-card-account], [data-card-pin]");
   const rect = (accountAnchor ?? tile ?? anchor).getBoundingClientRect();
+  const uiRect = scaledUiRect(rect);
   if (contextPoint?.atCursor) {
-    // Right-click menus belong at the pointer. Drop below the cursor, flip
-    // above when the menu would overflow the bottom, clamp inside the window.
-    const belowY = contextPoint.y + 6;
-    const aboveY = contextPoint.y - menu.offsetHeight - 6;
-    const desiredY = belowY + menu.offsetHeight <= window.innerHeight - 8 ? belowY : aboveY;
-    menu.style.left = `${Math.max(8, Math.min(contextPoint.x, window.innerWidth - menu.offsetWidth - 8))}px`;
-    menu.style.top = `${Math.max(8, Math.min(desiredY, window.innerHeight - menu.offsetHeight - 8))}px`;
+    placeMenuAt(menu, { x: contextPoint.x, y: contextPoint.y }, { gap: 6 });
   } else if (tile) {
-    const { x, y } = groupMenuPosition(rect, menu.offsetWidth, menu.offsetHeight, overviewMenuSide(tile), window.innerWidth, window.innerHeight);
+    const viewport = uiViewport();
+    const { x, y } = groupMenuPosition(uiRect, menu.offsetWidth, menu.offsetHeight, overviewMenuSide(tile), viewport.width, viewport.height);
     menu.style.left = `${x}px`;
     menu.style.top = `${y}px`;
   } else if (contextPoint) {
-    // Context menus belong to the card that was pressed. Pick a lower corner
-    // based on the press side, then flip above the card only when its bottom
-    // would leave the viewport. This avoids menus detached at the window edge.
+    // Pick the corner nearest the press; flip above only when needed.
     const rightSide = contextPoint.x <= rect.left + rect.width / 2;
-    const desiredX = rightSide ? rect.right - menu.offsetWidth : rect.left;
-    const belowY = rect.bottom + 4;
-    const aboveY = rect.top - menu.offsetHeight - 4;
-    const desiredY = belowY + menu.offsetHeight <= window.innerHeight - 8 ? belowY : aboveY;
-    menu.style.left = `${Math.max(8, Math.min(desiredX, window.innerWidth - menu.offsetWidth - 8))}px`;
-    menu.style.top = `${Math.max(8, Math.min(desiredY, window.innerHeight - menu.offsetHeight - 8))}px`;
+    placeMenuAt(menu, rect, { align: rightSide ? "right" : "left", gap: 4 });
   } else {
-    menu.style.left = `${Math.max(8, Math.min(rect.right - menu.offsetWidth, window.innerWidth - menu.offsetWidth - 8))}px`;
-    menu.style.top = `${Math.max(8, Math.min(rect.bottom + 4, window.innerHeight - menu.offsetHeight - 8))}px`;
+    placeMenuAt(menu, rect, { align: "right", gap: 4 });
   }
 }
 
@@ -6539,11 +6596,7 @@ function openPeakHelp(anchor: HTMLElement): void {
   document.body.appendChild(overlay);
   // Anchor under the ? button, clamped into the viewport.
   const menu = overlay.querySelector<HTMLElement>(".peak-help")!;
-  const rect = anchor.getBoundingClientRect();
-  const mw = menu.offsetWidth;
-  const x = Math.max(8, Math.min(rect.left + rect.width / 2 - mw / 2, window.innerWidth - mw - 8));
-  menu.style.left = `${x}px`;
-  menu.style.top = `${Math.max(8, Math.min(rect.bottom + 6, window.innerHeight - menu.offsetHeight - 8))}px`;
+  placeMenuAt(menu, anchor.getBoundingClientRect(), { align: "center", gap: 6 });
 }
 
 // ---------------------------------------------------------------------------
@@ -7218,9 +7271,7 @@ function openShareRangeMenu(anchor: HTMLElement): void {
   document.body.appendChild(overlay);
   // Drop the menu under the button's right edge, clamped inside the window.
   const menu = overlay.querySelector<HTMLElement>(".group-menu")!;
-  const rect = anchor.getBoundingClientRect();
-  menu.style.left = `${Math.max(8, Math.min(rect.right - menu.offsetWidth, window.innerWidth - menu.offsetWidth - 8))}px`;
-  menu.style.top = `${Math.max(8, Math.min(rect.bottom + 4, window.innerHeight - menu.offsetHeight - 8))}px`;
+  placeMenuAt(menu, anchor.getBoundingClientRect(), { align: "right", gap: 4 });
 }
 
 // ---------------------------------------------------------------------------
@@ -7479,12 +7530,13 @@ function positionTour(): void {
   if (!target) return;
   const hole = tourOverlay.querySelector<HTMLElement>(".tour-hole")!;
   const tip = tourOverlay.querySelector<HTMLElement>(".tour-tip")!;
-  const r = target.getBoundingClientRect();
+  const r = scaledUiRect(target.getBoundingClientRect());
+  const viewport = uiViewport();
   const pad = 6;
-  const left = Math.min(window.innerWidth - 2, Math.max(2, r.left - pad));
-  const top = Math.min(window.innerHeight - 2, Math.max(2, r.top - pad));
-  const width = Math.max(0, Math.min(window.innerWidth - 2, r.right + pad) - left);
-  const height = Math.max(0, Math.min(window.innerHeight - 2, r.bottom + pad) - top);
+  const left = Math.min(viewport.width - 2, Math.max(2, r.left - pad));
+  const top = Math.min(viewport.height - 2, Math.max(2, r.top - pad));
+  const width = Math.max(0, Math.min(viewport.width - 2, r.right + pad) - left);
+  const height = Math.max(0, Math.min(viewport.height - 2, r.bottom + pad) - top);
   hole.style.left = `${left}px`;
   hole.style.top = `${top}px`;
   hole.style.width = `${width}px`;
@@ -7494,8 +7546,8 @@ function positionTour(): void {
   const tipW = tip.offsetWidth;
   const tipH = tip.offsetHeight;
   let tipTop = top + height + 10;
-  if (tipTop + tipH > window.innerHeight - 8) tipTop = Math.max(8, top - tipH - 10);
-  const tipLeft = Math.max(8, Math.min(left + width / 2 - tipW / 2, window.innerWidth - tipW - 8));
+  if (tipTop + tipH > viewport.height - 8) tipTop = Math.max(8, top - tipH - 10);
+  const tipLeft = Math.max(8, Math.min(left + width / 2 - tipW / 2, viewport.width - tipW - 8));
   tip.style.left = `${tipLeft}px`;
   tip.style.top = `${tipTop}px`;
 }
@@ -7774,14 +7826,7 @@ function setupTooltips(): void {
       if (anchor !== el || !document.contains(el)) return;
       tip.textContent = el.dataset.tip ?? "";
       tip.hidden = false;
-      const r = el.getBoundingClientRect();
-      const w = tip.offsetWidth;
-      const h = tip.offsetHeight;
-      const x = Math.max(6, Math.min(r.left + r.width / 2 - w / 2, window.innerWidth - w - 6));
-      let y = r.top - h - 8;
-      if (y < 6) y = r.bottom + 8;
-      tip.style.left = `${x}px`;
-      tip.style.top = `${y}px`;
+      placeFixedTip(tip, el.getBoundingClientRect(), { gap: 8, placement: "above" });
     }, 400);
   });
   document.addEventListener("mouseout", (e) => {
@@ -8149,11 +8194,13 @@ function openFontMenu(): void {
   });
   document.body.appendChild(menu);
   fontMenu = menu;
-  const rect = input.getBoundingClientRect();
-  menu.style.left = `${Math.max(8, Math.min(rect.left, window.innerWidth - menu.offsetWidth - 8))}px`;
-  menu.style.top = `${Math.max(8, Math.min(rect.bottom + 4, window.innerHeight - menu.offsetHeight - 8))}px`;
+  const rect = scaledUiRect(input.getBoundingClientRect());
   menu.style.width = `${Math.max(rect.width, 220)}px`;
-  void ensureSystemFonts().then(() => renderFontOptions(input.value));
+  placeMenuAt(menu, input.getBoundingClientRect(), { align: "left", gap: 4 });
+  void ensureSystemFonts().then(() => {
+    renderFontOptions(input.value);
+    placeMenuAt(menu, input.getBoundingClientRect(), { align: "left", gap: 4 });
+  });
   document.addEventListener("pointerdown", onFontMenuOutside);
 }
 
@@ -8231,6 +8278,7 @@ const custExpanded = new Set<string>();
 // Which provider's inline config panel is open (one at a time).
 // Session-only, like custExpanded.
 let custConfigOpen: string | null = null;
+let customizeFilter: "all" | "configured" = "all";
 /// Whether the drawer footer's removed-provider list is expanded.
 let custRemovedOpen = false;
 // Single-key providers show the saved credential as a compact account row.
@@ -9578,9 +9626,7 @@ function openGroupPicker(cardId: string, anchor: HTMLElement): void {
   });
   document.body.appendChild(overlay);
   const menu = overlay.querySelector<HTMLElement>(".group-menu")!;
-  const rect = anchor.getBoundingClientRect();
-  menu.style.left = `${Math.max(8, Math.min(rect.left, window.innerWidth - menu.offsetWidth - 8))}px`;
-  menu.style.top = `${Math.max(8, Math.min(rect.bottom + 4, window.innerHeight - menu.offsetHeight - 8))}px`;
+  placeMenuAt(menu, anchor.getBoundingClientRect(), { align: "left", gap: 4 });
 }
 
 function renderCompactKeySummary(id: string): string {
@@ -10179,6 +10225,22 @@ function renderCustomize(): string {
       id;
     return notedName(id, fallback);
   };
+  const isConfiguredProvider = (id: string): boolean => {
+    const fam = providerFamily(id);
+    if (accountsCache.get(fam)?.length) return true;
+    if (fam === ONA_FAMILY && onaSites.some((site) => site.keys.length > 0 || site.has_access_token)) return true;
+    if (lastSnapshots.some((snap) =>
+      providerFamily(snap.id) === fam && snap.status !== "no_credentials" && !isBareHintCard(snap))) return true;
+    const status = credStatusCache.get(fam);
+    return Boolean(status?.storedKey || status?.oauth || status?.localCli || status?.membership);
+  };
+  if (customizeFilter === "configured") {
+    // Account lists may not be loaded until a row is opened; fetch them once
+    // so the configured filter can include account-backed families.
+    for (const [family] of ALL_PROVIDERS) {
+      if (supportsExtraAccounts(family) && !accountsCache.has(family)) fetchAccounts(family);
+    }
+  }
   const ids = [...(config.layout?.providerOrder ?? ALL_PROVIDERS.map(([id]) => id))]
     .filter((id) => {
       const snapshot = lastSnapshots.find((s) => s.id === id);
@@ -10224,6 +10286,7 @@ function renderCustomize(): string {
       }
       return !(id.includes("@") && !snapshot && !config.disabled.includes(id));
     })
+    .filter((id) => customizeFilter === "all" || isConfiguredProvider(id))
     .sort((a, b) => nameOf(a).localeCompare(nameOf(b), "en"));
   // A-Z index strip: only the letters that actually have a provider.
   const letters = [
@@ -10316,7 +10379,13 @@ function renderCustomize(): string {
   // configuring always happens in one predictable alphabetical list.
   const blocksHtml = blocks.map((b) => b.html).join("");
 
-  const skinEntry = `<div class="customize-skin-entry"><div><strong>${t("skin.market")}</strong><span>${t("skin.entry")}</span></div><button class="mini-btn" data-skin-open>${uiIcon("palette", t("skin.market"))}</button></div>`;
+  const filterTabs = `<div class="cust-filter-tabs" role="tablist" aria-label="${escapeHtml(t("customize.filterLabel"))}">
+    <button type="button" class="cust-filter-tab${customizeFilter === "all" ? " active" : ""}" data-cust-filter="all" role="tab" aria-selected="${customizeFilter === "all"}">${escapeHtml(t("customize.filterAll"))}</button>
+    <button type="button" class="cust-filter-tab${customizeFilter === "configured" ? " active" : ""}" data-cust-filter="configured" role="tab" aria-selected="${customizeFilter === "configured"}">${escapeHtml(t("customize.filterConfigured"))}</button>
+  </div>`;
+  const filterEmpty = customizeFilter === "configured" && ids.length === 0
+    ? `<p class="cust-filter-empty">${escapeHtml(t("customize.filterEmpty"))}</p>`
+    : "";
   return `
     <div class="customize-bar glass-bar">
       <div class="customize-heading">
@@ -10332,10 +10401,11 @@ function renderCustomize(): string {
       </div>
       <button class="dock-btn danger" data-reset-all title="${escapeHtml(t("customize.resetAllTip"))}">${escapeHtml(t("customize.resetAll"))}</button>
     </div>
+    ${filterTabs}
     <nav class="cust-az">${letters
       .map((l) => `<button data-az="${l}">${l}</button>`)
       .join("")}</nav>
-    ${skinEntry}
+    ${filterEmpty}
     ${blocksHtml}
     ${removedProvidersHtml()}`;
 }
@@ -11587,6 +11657,15 @@ function moveRow(L: ProviderLayout, key: string, target: string): void {
 }
 
 async function handleCustomizeClick(target: HTMLElement): Promise<boolean> {
+  const filter = target.closest<HTMLElement>("[data-cust-filter]");
+  if (filter) {
+    const next = filter.dataset.custFilter === "configured" ? "configured" : "all";
+    if (next !== customizeFilter) {
+      customizeFilter = next;
+      renderDrawerBody();
+    }
+    return true;
+  }
   const skinMode = target.closest<HTMLElement>("[data-skin-mode]")?.dataset.skinMode;
   if (skinMode === "light" || skinMode === "dark" || skinMode === "both") {
     skinPreviewMode = skinMode;
@@ -11598,19 +11677,6 @@ async function handleCustomizeClick(target: HTMLElement): Promise<boolean> {
     skinMarketFeedback = null;
     skinMarketSelected = skinPick as SkinId;
     renderDrawerBody();
-    return true;
-  }
-  const skinOpen = target.closest<HTMLElement>("[data-skin-open]");
-  if (skinOpen) {
-    skinMarketFeedback = null;
-    skinMarketOpen = true;
-    renderDrawerBody();
-    rememberPopoverView();
-    // Freshen the distribution index while the workshop is open; the
-    // render arrives with whatever is newest.
-    void refreshSkinIndex().then(() => {
-      if (skinMarketOpen) renderDrawerBody();
-    });
     return true;
   }
   const skinClose = target.closest<HTMLElement>("[data-skin-close]");
@@ -12942,6 +13008,21 @@ async function clearOneNewApiToken(siteId: string): Promise<void> {
   }
 }
 
+/// Drop deleted One/New API key cards from the live view immediately. The
+/// backend purge removes config + cache, but waiting for the next refresh
+/// leaves stale account pills on screen when a fetch is busy or disabled.
+function forgetOneNewApiCards(ids: string[]): void {
+  const drop = new Set(ids.filter(Boolean).map(onaSnapshotId));
+  if (!drop.size) return;
+  lastSnapshots = lastSnapshots.filter((snapshot) => !drop.has(snapshot.id));
+  lastSpend = lastSpend.filter((spend) => !drop.has(spend.id));
+  const cached = accountsCache.get(ONA_FAMILY);
+  if (cached) accountsCache.set(ONA_FAMILY, cached.filter((entry) => !entry.id || !drop.has(entry.id)));
+  userSelectedAccountFor.delete(ONA_FAMILY);
+  requestRender();
+  if (customizeOpen) renderDrawerBody();
+}
+
 async function deleteOneNewApiSite(id: string): Promise<void> {
   if (onaBusy) return;
   const site = onaSites.find((s) => s.id === id);
@@ -12960,7 +13041,10 @@ async function deleteOneNewApiSite(id: string): Promise<void> {
     if (onaEditingId === id) onaEditingId = null;
     if (site.keys.some((k) => k.id === onaEditingKeyId)) onaEditingKeyId = null;
     setOneNewApiStatus("footer.onenewapiDeleted");
+    forgetOneNewApiCards([site.id, ...site.keys.map((key) => key.id)]);
     await loadOneNewApiSites();
+    refreshAccounts(ONA_FAMILY);
+    notifyAccountsChanged(ONA_FAMILY);
     await forceUsageRefreshAttempt();
     requestTraySync();
   } catch (err) {
@@ -13074,7 +13158,10 @@ async function deleteOneNewApiKey(siteId: string, keyId: string): Promise<void> 
     applyOneNewApiSite(site);
     if (onaEditingKeyId === keyId) onaEditingKeyId = null;
     onaExpanded.add(siteId);
+    forgetOneNewApiCards([keyId]);
     await loadOneNewApiSites();
+    refreshAccounts(ONA_FAMILY);
+    notifyAccountsChanged(ONA_FAMILY);
     await forceUsageRefreshAttempt();
     requestTraySync();
   } catch (err) {
@@ -17254,12 +17341,7 @@ function openAuthRowMenu(family: string, index: number, anchor: HTMLElement): vo
   // Anchor to the ⋯ button, opening below-right and flipping up at the
   // window's bottom edge, same recipe as the card context menu.
   const menu = overlay.querySelector<HTMLElement>(".group-menu")!;
-  const rect = anchor.getBoundingClientRect();
-  const belowY = rect.bottom + 4;
-  const aboveY = rect.top - menu.offsetHeight - 4;
-  const desiredY = belowY + menu.offsetHeight <= window.innerHeight - 8 ? belowY : aboveY;
-  menu.style.left = `${Math.max(8, Math.min(rect.right - menu.offsetWidth, window.innerWidth - menu.offsetWidth - 8))}px`;
-  menu.style.top = `${Math.max(8, desiredY)}px`;
+  placeMenuAt(menu, anchor.getBoundingClientRect(), { align: "right", gap: 4 });
 }
 
 /// Remove rides the existing account_remove chain for every family (slot,

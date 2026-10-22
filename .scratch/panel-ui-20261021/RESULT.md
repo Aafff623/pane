@@ -112,3 +112,12 @@ Status: awaiting-owner-acceptance
 - 详情/概览：概览 tile、条形视图、到期提醒、spend 明细改为按实际展示账号解析备注；账号胶囊最低字号提高到 10px，账号子行、到期名称、设置 Provider 名统一 ellipsis；备注单行化并限制 48 个码点。
 - 保留：`reconcileAccountLayout` 不再删除带 note 的账号条目，归档/删除/刷新不会丢备注。
 - 验证：frontend 82 passed；`pnpm build`、demo provenance 通过。真实 UI 验收仍由 owner 完成。
+
+
+## 2026-10-22 自定义看板筛选、弹层定位与 One/New API 删除残留
+
+- Customize 顶部移除皮肤工坊入口（侧边栏 palette 入口保留），改为“全部 / 已配置”分段 Tab；已配置筛选按 A-Z 排列，账号型 Provider 会先补拉账号列表再筛选。
+- One/New API 删除 key/site 后立即从 `lastSnapshots`、`lastSpend`、`accountsCache` 移除对应卡片，并 `refreshAccounts + notifyAccountsChanged`，不再等下一轮刷新；修复删除 api2 后仍显示旧胶囊。
+- 弹层漂移：根因是 `body.ui-scaled` 的 CSS zoom 下，`getBoundingClientRect()` 是视觉坐标，而 fixed 菜单/提示用布局坐标。新增 `scaledUiRect / uiViewport / placeMenuAt`，统一改造分组菜单、卡片右键、分享范围、字体菜单、授权中心菜单、Peak 帮助、Tour、拖拽 ghost 与通用 title tooltip；`placeFixedTip` 继续用于消费趋势 tooltip。
+- 账号状态条：`.card-account-tabs` 居中，账号 tab 用 `gap` 替代 dot 的右边距，竖向主题下圆点不再偏左。
+- 验证：frontend 85 passed（新增 ONA 删除与 CSS zoom 定位回归），`pnpm build`、demo provenance 通过；官网 agent 的 `site/` 静态改动未触碰。真实 UI 验收仍由 owner 完成。

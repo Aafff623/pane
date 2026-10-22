@@ -550,6 +550,15 @@ changes.
   OAuth device/browser families (codex/grok/copilot/kiro/windsurf/trae/zed)
   route Customize to Settings/Auth center instead of rendering a second
   login UI.
+- `body.ui-scaled` applies CSS `zoom`. `getBoundingClientRect()` is in visual
+  pixels while fixed `left/top`, `offsetWidth` and the layout viewport are
+  unscaled; every fixed menu/tooltip must go through `placeMenuAt` /
+  `placeFixedTip` (or `scaledUiRect` + `uiViewport`). Raw
+  `rect + window.innerWidth` positioning is a drift bug at any scale ≠ 1.
+- Deleting a One/New API key/site purges backend config/cache, and the
+  frontend immediately drops the key card from `lastSnapshots`/`lastSpend`/
+  `accountsCache` then refreshes accounts and broadcasts `accounts-updated`;
+  waiting for the next usage refresh left stale account pills visible.
 - Evidence: legacy-vault resurrection red/green, archive/delete repeated
   refresh and failed migration tests, relay retirement failure test, account
   alias regression, and a headless Customize routing check. Latest full
