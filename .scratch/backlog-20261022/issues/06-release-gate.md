@@ -20,7 +20,9 @@ Blocked by: skin pack deploy + owner authorization + owner acceptance
 - Release reconciliation is prepared on the isolated branch
   `codex/release-reconcile` in `D:/code/pane-release-reconcile`:
   `c09d666` cherry-picks the v0.8.9 release commit, `be6e001` rebuilds the site
-  demo from the reconciled source. Version files are 0.8.9, CHANGELOG has a
-  clean Unreleased section plus 0.8.9, and `node --test site/site.test.mjs`
-  passes 15/15. No merge to main, no push, no deploy.
+  demo from the reconciled source, `7c8bcae` brings the final restore
+  transaction, and `310dc36` rebuilds the demo again. Version files are 0.8.9,
+  CHANGELOG has a clean Unreleased section plus 0.8.9, and
+  `node --test site/site.test.mjs` passes 15/15 after the final rebuild. No
+  merge to main, no push, no deploy.
 - v0.8.9 tag is not an ancestor of main; main still reports 0.8.8.
