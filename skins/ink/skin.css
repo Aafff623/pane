@@ -120,3 +120,9 @@
 :root[data-ink] .snap-card{background-color:var(--card);padding:17px 14px 22px;border-radius:3px}
 :root[data-ink] .snap-card .provider-head{padding:0 0 6px}
 
+
+/* Theme intro assets travel with the ink pack; the app keeps the
+   composition and the pack supplies the paper, mountains and koi. */
+.theme-intro.ink{background-image:url('assets/paper-grain.svg')}
+.theme-intro.ink .intro-mountains{background:url('assets/mountains-v4.png') center bottom/cover no-repeat}
+.theme-intro.ink .intro-koi{background:url('assets/koi-red-v4.png') center/contain no-repeat}

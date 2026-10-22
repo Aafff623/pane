@@ -101,6 +101,7 @@ const en: Dict = {
   "skin.nativeApplied": "Native appearance restored",
   "skin.saveFailed": "Could not save skin selection",
   "skin.back": "Back",
+  "skin.indexUnavailable": "The skin index is unavailable right now. Check your connection and reopen the workshop.",
 
   "sidebar.theme": "Light / dark mode",
   "sidebar.themeToDark": "Switch to dark mode",
@@ -1423,6 +1424,7 @@ const zh: Dict = {
   "skin.nativeApplied": "已恢复原生外观",
   "skin.saveFailed": "皮肤选择未能保存",
   "skin.back": "返回",
+  "skin.indexUnavailable": "暂时无法获取皮肤索引。请检查网络后重新打开工坊。",
 
   "sidebar.theme": "浅色 / 深色模式",
   "sidebar.themeToDark": "切换到深色模式",
@@ -2719,6 +2721,7 @@ const ru: Dict = {
   "skin.nativeApplied": "Стандартный вид восстановлен",
   "skin.saveFailed": "Не удалось сохранить оформление",
   "skin.back": "Назад",
+  "skin.indexUnavailable": "Индекс skins сейчас недоступен. Проверьте соединение и откройте мастерскую снова.",
 
   "sidebar.theme": "Светлая / тёмная тема",
   "sidebar.themeToDark": "Переключить на тёмную тему",

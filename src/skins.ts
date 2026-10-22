@@ -1,29 +1,24 @@
-/** Built-in skins own appearance only. Provider data and user fonts stay intact. */
+/** Skin appearance only. Provider data and user fonts stay intact. */
 import { invoke } from "@tauri-apps/api/core";
-import day from "./assets/skins/cloud-post/day.png";
-import night from "./assets/skins/cloud-post/night.png";
-import icons from "./assets/skins/cloud-post/icons.png";
-import extra from "./assets/skins/cloud-post/extra.png";
-import mascot from "./assets/skins/cloud-post/mascot.png";
-import koi from "./assets/skins/ink-wash/koi-red-v4.png";
-import mountains from "./assets/skins/ink-wash/mountains-v4.png";
-import grain from "./assets/skins/ink-wash/paper-grain.svg";
-import brush from "./assets/skins/ink-wash/brush-mask.svg";
-import chineseBrush from "./assets/skins/ink-wash/fonts/MaShanZheng-ui.ttf?url";
-import latinBrush from "./assets/skins/ink-wash/fonts/PermanentMarker-Regular.ttf?url";
-/// A skin id: the two built-ins, or any installed resource-pack id.
-export type SkinId = "signal" | "ink" | (string & {});
-export const SKIN_STORAGE_KEY = "pane.skin.id";
-export const SKINS = [
-  { id: "signal" as const, nameKey: "skin.signal" as const, taglineKey: "skin.signalTagline" as const },
-  { id: "ink" as const, nameKey: "skin.ink" as const, taglineKey: "skin.inkTagline" as const },
-];
 
-/// Installed resource-pack skins (workshop). Built-ins ship with the app;
-/// packs arrive through the workshop and hot-load without a restart. The
-/// entry CSS arrives fully self-contained from Rust (assets inlined as
-/// data URLs), so injecting one <style> is the whole install — and the
-/// share-PNG pipeline needs no pack awareness.
+/// A skin id: any installed resource-pack id. `signal` / `ink` are ordinary
+/// official packs now — they ship through the workshop, not the app bundle.
+export type SkinId = string;
+export const SKIN_STORAGE_KEY = "pane.skin.id";
+
+/// Shape check shared with Rust `valid_skin_id`: a pack id may be persisted
+/// before the pack exists locally (the index migration installs it).
+const SKIN_ID_RE = /^[a-z0-9][a-z0-9-]{0,31}$/;
+
+export function validSkinId(id: unknown): id is string {
+  return typeof id === "string" && SKIN_ID_RE.test(id);
+}
+
+/// Installed resource-pack skins (workshop). Packs arrive through the
+/// workshop and hot-load without a restart. The entry CSS arrives fully
+/// self-contained from Rust (assets inlined as data URLs), so injecting one
+/// <style> is the whole install — and the share-PNG pipeline needs no pack
+/// awareness beyond URL-valued custom properties.
 export interface PackSkin {
   id: string;
   name: string;
@@ -32,7 +27,6 @@ export interface PackSkin {
 }
 
 let packSkins: PackSkin[] = [];
-let packsLoaded = false;
 
 /// The official distribution index (static file beside the site deploy —
 /// same origin, same pipeline, no extra infrastructure). Last good copy
@@ -58,7 +52,7 @@ export async function refreshSkinIndex(): Promise<void> {
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const doc = (await res.json()) as { packs?: RemotePackEntry[] };
     remoteIndex = (doc.packs ?? []).filter(
-      (p) => typeof p.id === "string" && typeof p.url === "string" && typeof p.sha256 === "string",
+      (p) => validSkinId(p.id) && typeof p.url === "string" && typeof p.sha256 === "string",
     );
     try {
       localStorage.setItem("pane.skins.index", JSON.stringify(remoteIndex));
@@ -68,7 +62,7 @@ export async function refreshSkinIndex(): Promise<void> {
       try {
         const cached = localStorage.getItem("pane.skins.index");
         if (cached) remoteIndex = JSON.parse(cached) as RemotePackEntry[];
-      } catch { /* nothing cached — workshop just shows built-ins. */ }
+      } catch { /* nothing cached — workshop falls back to the empty state. */ }
     }
   }
 }
@@ -91,7 +85,7 @@ function injectPackCss(p: PackSkin): void {
 
 /// Loads the installed pack registry and injects each pack's stylesheet.
 /// Safe to call twice; safe when the command surface is missing (browser
-/// demo) — built-ins only, then.
+/// demo) — the workshop then shows only index entries.
 export async function refreshInstalledPacks(): Promise<void> {
   let packs: { id: string; name: string; version: string; entry_css: string }[];
   try {
@@ -103,58 +97,38 @@ export async function refreshInstalledPacks(): Promise<void> {
     document.querySelector(`style[data-skin-pack="${old.id}"]`)?.remove();
   }
   packSkins = packs.map((p) => ({ id: p.id, name: p.name, version: p.version, entryCss: p.entry_css }));
-  packsLoaded = true;
   for (const p of packSkins) injectPackCss(p);
 }
 
 export function normalizeSkin(id: unknown): SkinId | null {
-  if (id === "signal" || id === "ink") return id;
-  return typeof id === "string" && packSkins.some((p) => p.id === id) ? id : null;
+  return validSkinId(id) ? id : null;
 }
 
+/// Early-paint cache only; config.json is authoritative. A shaped id is kept
+/// even before the pack registry settles (the migration downloads it), so an
+/// installed skin never flashes native on boot.
 export function readSkin(storage: Pick<Storage, "getItem" | "removeItem">): SkinId | null {
   try {
     const id = storage.getItem(SKIN_STORAGE_KEY);
-    const known = normalizeSkin(id);
-    if (known) return known;
-    // Retired built-ins must never reappear after an upgrade. An id that
-    // could be a pack keeps its early-paint cache until the pack registry
-    // settles — config.json stays authoritative either way.
-    if (id && packsLoaded && !isPackSkin(id)) storage.removeItem(SKIN_STORAGE_KEY);
+    if (!id) return null;
+    if (validSkinId(id)) return id;
+    storage.removeItem(SKIN_STORAGE_KEY);
   } catch { /* Storage unavailable: keep the native appearance. */ }
   return null;
 }
 
-const embeddedImages = new Map<string, Promise<string>>();
-
-// SVG foreignObject rasterization cannot fetch external CSS images. Embed only
-// the bundled theme assets, never provider URLs or account data. Cache successes
-// across shares and allow a failed local read to be retried on the next share.
+/// Installed pack CSS arrives with every asset already inlined by Rust, so
+/// there is nothing external left to embed. Signal's post-icon crop reads
+/// URL-valued custom properties at use sites; Chromium's SVG rasterizer does
+/// not resolve those reliably, so inline the computed values into the clone.
 export async function embedSkinImages(markup: string, skin: SkinId): Promise<string> {
-  const assets = skin === "ink"
-    ? [koi, mountains, grain, brush, chineseBrush, latinBrush]
-    : [day, night, icons, extra, mascot];
-  for (const asset of assets) {
-    // CSSOM resolves stylesheet URLs to absolute URLs, while Vite imports
-    // remain root-relative. Replace the whole absolute URL first, otherwise
-    // the origin would be left before the data URI (http://…data:image/…).
-    const urls = [...new Set([new URL(asset, document.baseURI).href, asset])];
-    if (!urls.some(url => markup.includes(url))) continue;
-    let data = embeddedImages.get(asset);
-    if (!data) {
-      data = fetch(asset).then(async response => {
-        if (!response.ok) throw new Error("Could not read bundled skin image");
-        const blob = await response.blob();
-        return new Promise<string>((resolve, reject) => {
-          const reader = new FileReader();
-          reader.onload = () => resolve(String(reader.result));
-          reader.onerror = () => reject(new Error("Could not embed bundled skin image"));
-          reader.readAsDataURL(blob);
-        });
-      }).catch(error => { embeddedImages.delete(asset); throw error; });
-      embeddedImages.set(asset, data);
+  if (skin !== "signal") return markup;
+  try {
+    const style = getComputedStyle(document.documentElement);
+    for (const name of ["--post-atlas", "--post-atlas-extra"]) {
+      const value = style.getPropertyValue(name).trim();
+      if (value) markup = markup.split(`var(${name})`).join(value);
     }
-    for (const url of urls) markup = markup.split(url).join(await data);
-  }
+  } catch { /* Native appearance: no pack variables to inline. */ }
   return markup;
 }

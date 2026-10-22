@@ -1,5 +1,5 @@
 :root[data-theme-intro] #splash{display:none!important}
-.theme-intro{--intro-paper:#f3f2ec;--intro-ink:#30342f;--intro-muted:#73796e;--intro-red:#a14032;position:fixed;inset:0;z-index:2500;overflow:hidden;background:var(--intro-paper);color:var(--intro-ink);background-image:url('./assets/skins/ink-wash/paper-grain.svg');display:flex;flex-direction:column;align-items:center;justify-content:center;}
+.theme-intro{--intro-paper:#f3f2ec;--intro-ink:#30342f;--intro-muted:#73796e;--intro-red:#a14032;position:fixed;inset:0;z-index:2500;overflow:hidden;background:var(--intro-paper);color:var(--intro-ink);display:flex;flex-direction:column;align-items:center;justify-content:center;}
 :root[data-theme=dark] .theme-intro{--intro-paper:#171a1b;--intro-ink:#e0e2d8;--intro-muted:#a2aa9c;--intro-red:#df9383}
 .theme-intro.post{--intro-paper:#f5e8d2;--intro-ink:#3f565e;--intro-muted:#71838a;--intro-red:#b05b43}
 :root[data-theme=dark] .theme-intro.post{--intro-paper:#203049;--intro-ink:#f3d4a8;--intro-muted:#acbfd1;--intro-red:#e8a586}
@@ -13,9 +13,9 @@
 .intro-skip{position:absolute;bottom:28px;color:var(--intro-muted);z-index:5}
 .intro-skip:focus-visible{outline:2px solid currentColor;outline-offset:4px}
 .intro-inkdrop{position:absolute;width:120px;height:110px;left:80px;top:65px;background:radial-gradient(ellipse,#30342f30 0%,#30342f17 40%,transparent 70%);border-radius:45% 55% 60% 40%;filter:blur(5px);}
-.intro-mountains{position:fixed;inset:0;pointer-events:none;background:url('./assets/skins/ink-wash/mountains-v4.png') center bottom/cover no-repeat;opacity:.23;}
+.intro-mountains{position:fixed;inset:0;pointer-events:none;opacity:.23;}
 :root[data-theme=dark] .intro-mountains{filter:invert(1);opacity:.2}
-.intro-koi{position:absolute;inset:12px;background:url('./assets/skins/ink-wash/koi-red-v4.png') center/contain no-repeat;}
+.intro-koi{position:absolute;inset:12px;}
 .intro-ink-seal{position:absolute;right:-4px;bottom:18px;border:1px solid var(--intro-red);color:var(--intro-red);font:17px/1.25 var(--ink-display-font,'KaiTi',serif);padding:6px 4px;transform:rotate(-5deg);}
 .intro-envelope{position:absolute;width:244px;height:158px;left:18px;top:88px;perspective:700px;}
 .intro-letter{position:absolute;inset:0 15px;background:var(--intro-paper);border:1px solid var(--intro-muted);padding:22px 20px;box-sizing:border-box;box-shadow:0 8px 24px #0002;transform:translateY(-78px);height:185px;}

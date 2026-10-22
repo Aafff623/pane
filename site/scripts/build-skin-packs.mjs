@@ -19,9 +19,12 @@ const repo = resolve(site, "..");
 const origin = "https://pane.threetwoa.live";
 const outDir = join(site, "public", "skins");
 
+// Pack sources live outside the app bundle: `skins/<id>/skin.css` plus its
+// own `assets/` tree. Signal uses app-relative asset tokens that this script
+// rewrites; ink's stylesheet already carries the dual root/sample scope.
 const SKINS = [
-  { id: "signal", name: "Cloud Post Office", css: "src/skins.css", assets: "src/assets/skins/cloud-post" },
-  { id: "ink", name: "山水笺 Ink Wash", css: "src/inkSkin.css", assets: "src/assets/skins/ink-wash" },
+  { id: "signal", name: "Cloud Post Office", css: "skins/signal/skin.css", assets: "skins/signal/assets", assetPrefix: "cloud-post" },
+  { id: "ink", name: "山水笺 Ink Wash", css: "skins/ink/skin.css", assets: "skins/ink/assets", assetPrefix: "ink-wash" },
 ];
 
 const sha256 = (bytes) => createHash("sha256").update(bytes).digest("hex");
@@ -37,8 +40,8 @@ function dualScope(css, id) {
 }
 
 // App-relative asset URLs become pack-relative ("assets/…").
-function rewriteUrls(css, id) {
-  return css.split(`./assets/skins/${id}/`).join("assets/").split(`assets/skins/${id}/`).join("assets/");
+function rewriteUrls(css, assetPrefix) {
+  return css.split(`./assets/skins/${assetPrefix}/`).join("assets/").split(`assets/skins/${assetPrefix}/`).join("assets/");
 }
 
 async function collect(dir, base = dir) {
@@ -62,7 +65,7 @@ for (const skin of SKINS) {
 
   let css = await readFile(resolve(repo, skin.css), "utf8");
   if (skin.id === "signal") css = dualScope(css, skin.id);
-  css = rewriteUrls(css, skin.id);
+  css = rewriteUrls(css, skin.assetPrefix);
   await writeFile(join(packDir, "skin.css"), css);
 
   for (const rel of await collect(resolve(repo, skin.assets))) {

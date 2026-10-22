@@ -1,8 +1,7 @@
-import icons from "./assets/skins/cloud-post/icons.png";
-import extra from "./assets/skins/cloud-post/extra.png";
-
-// Crop the original hand-drawn atlas in CSS. Its rows are not perfectly uniform;
-// measured bounds keep neighbouring drawings out of small controls.
+// Crop the hand-drawn atlas in CSS. Its rows are not perfectly uniform;
+// measured bounds keep neighbouring drawings out of small controls. The atlas
+// itself belongs to the signal pack: pack CSS supplies `--post-atlas` /
+// `--post-atlas-extra` as inlined data URLs, the app owns only the geometry.
 export function postIcon(index: number, supplement = false, label?: string): string {
   const cols = supplement ? 4 : 6;
   const col = index % cols, row = Math.floor(index / cols);
@@ -13,7 +12,8 @@ export function postIcon(index: number, supplement = false, label?: string): str
   const height = supplement ? 288 : [244, 233, 204, 232][row];
   const size = Math.max(width, height);
   const aria = label ? `role="img" aria-label="${label.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;")}"` : 'aria-hidden="true"';
-  return `<span class="post-icon" ${aria} style="--post-w:${width / size};--post-h:${height / size};--post-size:${imageWidth / width * 100}% ${imageHeight / height * 100}%;--post-position:${x / (imageWidth - width) * 100}% ${y / (imageHeight - height) * 100}%"><span class="post-icon-art" aria-hidden="true" style="background-image:url('${supplement ? extra : icons}')"></span></span>`;
+  const atlas = supplement ? "var(--post-atlas-extra)" : "var(--post-atlas)";
+  return `<span class="post-icon" ${aria} style="--post-w:${width / size};--post-h:${height / size};--post-size:${imageWidth / width * 100}% ${imageHeight / height * 100}%;--post-position:${x / (imageWidth - width) * 100}% ${y / (imageHeight - height) * 100}%"><span class="post-icon-art" aria-hidden="true" style="background-image:${atlas}"></span></span>`;
 }
 
 export const POST_ICON_MAP: Record<string, readonly [number, boolean?]> = {

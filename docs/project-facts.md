@@ -555,6 +555,15 @@ changes.
   unscaled; every fixed menu/tooltip must go through `placeMenuAt` /
   `placeFixedTip` (or `scaledUiRect` + `uiViewport`). Raw
   `rect + window.innerWidth` positioning is a drift bug at any scale ≠ 1.
+- Skin packs: official sources live in `skins/<id>/` (`skin.css` + `assets/`)
+  and are zipped into `site/public/skins/` with a sha256 manifest; the app
+  bundle must never import them. Runtime packs live in
+  `%APPDATA%\Pane\skins\<id>\`, and Rust serves each entry CSS with assets
+  inlined as data URLs. `signal` / `ink` are ordinary packs: the workshop
+  shows index entries as remote until installed, and a persisted shaped id
+  survives boot (`readSkin`) while `migrateSkinFromIndex` downloads it.
+  The index + zips must be deployed together before the flip; the demo's
+  pack loading path is separate (issue 08).
 - Deleting a One/New API key/site purges backend config/cache, and the
   frontend immediately drops the key card from `lastSnapshots`/`lastSpend`/
   `accountsCache` then refreshes accounts and broadcasts `accounts-updated`;

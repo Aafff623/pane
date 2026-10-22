@@ -66,7 +66,7 @@ if (IS_PANEL_FORM) document.body.classList.add("panel-form");
 import { gsap } from "gsap";
 import paneLogo from "./assets/pane-logo.png?inline";
 import paneIcon from "./assets/pane-icon.png?inline";
-import { SKINS, SKIN_STORAGE_KEY, readSkin, normalizeSkin, embedSkinImages, packSkinList, isPackSkin, refreshInstalledPacks, remotePackIndex, refreshSkinIndex, type SkinId } from "./skins";
+import { SKIN_STORAGE_KEY, readSkin, normalizeSkin, embedSkinImages, packSkinList, isPackSkin, refreshInstalledPacks, remotePackIndex, refreshSkinIndex, type SkinId } from "./skins";
 import { playThemeStartup } from "./themeStartup";
 import { initialTourPending } from "./onboardingState";
 import { fontOnboardingMode, type FontOnboarding } from "./fontOnboarding";
@@ -74,7 +74,6 @@ import { credentialFailure, accountFormReady, enabledAccountCount } from "./cred
 import { keyAvailabilityCounts, keyAvailabilityRows, keyAvailabilitySummary, overviewFoldCount } from "./keyAvailability";
 import { loadFontPacks, fontPackFamilies, mountFontPackManager } from "./fontPacks";
 import { decorateInkSkin, clearInkSkin } from "./inkEffects";
-import "./inkSkin.css";
 import { postIcon } from "./skinIcons";
 // The repo's changelog ships inside the bundle, so the "What's new" dialog
 // and the Settings changelog viewer read the exact file releases maintain.
@@ -1126,12 +1125,8 @@ function marketEntries(): MarketEntry[] {
   const selected = activeSkin()?.id;
   const index = remotePackIndex();
   const entries: MarketEntry[] = [];
-  for (const s of SKINS) {
-    entries.push({
-      id: s.id, name: t(s.nameKey), tagline: t(s.taglineKey),
-      state: selected === s.id ? "applied" : "installed", updateAvailable: false,
-    });
-  }
+  // Installed packs first: a saved/offline pack stays usable even when the
+  // distribution index is unreachable.
   for (const p of packSkinList()) {
     const remote = index.find((r) => r.id === p.id);
     entries.push({
@@ -1141,8 +1136,9 @@ function marketEntries(): MarketEntry[] {
       remote: remote ? { url: remote.url, sha256: remote.sha256 } : undefined,
     });
   }
+  // Uninstalled index entries are the download list — signal/ink included
+  // now that they are ordinary official packs.
   for (const r of index) {
-    // Bundled skins outrank the index while both exist (pre-flip overlap).
     if (entries.some((e) => e.id === r.id)) continue;
     entries.push({
       id: r.id, name: r.name, tagline: `v${r.version}`, state: "remote",
@@ -1156,23 +1152,24 @@ function activeSkin() {
   try {
     const id = config.skinId === undefined ? readSkin(window.localStorage) : normalizeSkin(config.skinId);
     if (!id) return undefined;
-    return SKINS.find((skin) => skin.id === id) ?? packSkinList().find((p) => p.id === id);
+    return packSkinList().find((p) => p.id === id);
   } catch { return undefined; }
 }
 
-/// Ticket 05 migration: a saved skin id that is neither bundled nor
-/// installed but IS in the distribution index (the bundled→pack flip)
-/// auto-downloads once so the user's theme survives the switch. A failure
-/// leaves the native appearance up; the workshop offers the download.
+/// Index migration: a saved skin id that is not installed but IS in the
+/// distribution index auto-downloads once, so `signal` / `ink` selections
+/// survive the bundled→pack switch. A failure keeps the native appearance
+/// and leaves the workshop download available; the config id is preserved.
 async function migrateSkinFromIndex(): Promise<void> {
-  const wanted = config.skinId;
-  if (!wanted || wanted === "signal" || wanted === "ink" || isPackSkin(wanted)) return;
+  const wanted = normalizeSkin(config.skinId);
+  if (!wanted || isPackSkin(wanted)) return;
   const remote = remotePackIndex().find((r) => r.id === wanted);
   if (!remote) return;
   try {
     await invoke("skin_pack_download", { url: remote.url, sha256: remote.sha256 });
     await refreshInstalledPacks();
     applySkin();
+    requestRender();
   } catch { /* native appearance holds; the workshop offers the download. */ }
 }
 
@@ -6991,11 +6988,16 @@ async function copyElementSnapshot(el: HTMLElement, W: number): Promise<void> {
   // document is the <svg>, so the attributes are mirrored there for the
   // :root[data-…] rules to keep matching.
   const root = document.documentElement;
-  if (root.hasAttribute("data-ink")) {
+  const urlVars = root.hasAttribute("data-ink")
+    ? ["--ink-koi", "--ink-landscape", "--ink-grain"]
+    : root.dataset.skin === "signal"
+      ? ["--post-wall", "--post-atlas", "--post-atlas-extra"]
+      : [];
+  if (urlVars.length) {
     const appearance = getComputedStyle(root);
     // Chromium's SVG-image renderer does not reliably resolve URL-valued
     // custom properties across SVG/XHTML. Put the URL at its CSS use site.
-    for (const name of ["--ink-koi", "--ink-landscape", "--ink-grain"]) {
+    for (const name of urlVars) {
       css = css.split(`var(${name})`).join(appearance.getPropertyValue(name));
     }
   }
@@ -7335,7 +7337,7 @@ function maybeShowFontGuide(): boolean {
     })).then(() => { applyAppearance(); maybeStartTour(); });
   };
   const theme = activeSkin();
-  const name = theme ? ("nameKey" in theme ? t(theme.nameKey) : theme.name) : t("skin.nativeName");
+  const name = theme ? theme.name : t("skin.nativeName");
   const body = fresh
     ? `${t("fontGuide.font", { font: config.uiFont || t("fontGuide.system") })}\n\n${t("fontGuide.theme", { theme: name, themes: marketEntries().map((entry) => entry.name).join(" / ") })}`
     : t("fontGuide.upgradeBody");
@@ -10142,6 +10144,12 @@ function renderSkinSample(mode: "light" | "dark", skinId: SkinId = "signal", com
 
 function renderSkinMarket(): string {
   const entries = marketEntries();
+  if (!entries.length) {
+    return `<section class="skin-market" aria-label="${t("skin.market")}">
+      <div class="skin-market-head"><h2>${t("skin.market")}</h2><button class="mini-btn skin-back-btn" type="button" data-skin-close>${uiIcon("arrowLeft")}<span>${t("skin.back")}</span></button></div>
+      <div class="skin-market-body"><p class="skin-market-preview-note">${t("skin.indexUnavailable")}</p></div>
+    </section>`;
+  }
   const current = skinMarketSelected ?? activeSkin()?.id ?? entries[0].id;
   const skin = entries.find((s) => s.id === current) ?? entries[0];
   const previewMode = skinPreviewMode === "both" && window.matchMedia("(max-width:640px)").matches ? "light" : skinPreviewMode;
@@ -10175,12 +10183,10 @@ function skinActionHtml(skin: MarketEntry): string {
     return `<button class="mini-btn primary" type="button" data-skin-download="${skin.id}" ${busy ? "disabled" : ""}>${busy ? t("skin.downloading") : t("skin.download")}</button>`;
   }
   const applied = skin.state === "applied";
-  // Any installed pack can be removed (re-downloadable); the two bundled
-  // skins cannot.
-  const isPack = skin.id !== "signal" && skin.id !== "ink";
-  const removeBtn = isPack
-    ? `<button class="mini-btn" data-skin-remove="${skin.id}" ${applied ? "disabled" : ""}>${t("skin.remove")}</button>`
-    : "";
+  // Every installed entry is re-downloadable, official packs included; remove
+  // stays disabled while the pack is applied so the surface never vanishes
+  // before the user returns to native.
+  const removeBtn = `<button class="mini-btn" data-skin-remove="${skin.id}" ${applied ? "disabled" : ""}>${t("skin.remove")}</button>`;
   return `<button class="mini-btn primary" data-skin-select="${skin.id}" ${applied ? "disabled" : ""}>${uiIcon(applied ? "checkCircle" : "paintBrush")}<span>${t(applied ? "skin.applied" : "skin.use")}</span></button><button class="mini-btn skin-reset-btn" data-skin-reset ${activeSkin() ? "" : "disabled"}>${uiIcon("arrowCounterClockwise")}<span>${t("skin.native")}</span></button>${removeBtn}`;
 }
 
@@ -17405,10 +17411,10 @@ function playSplash(): void {
   if (skin) {
     hideSplash();
     stopThemeStartup = playThemeStartup(skin.id, reduceMotion(), {
-      name: "nameKey" in skin ? t(skin.nameKey) : skin.name,
-      tagline: "taglineKey" in skin ? t(skin.taglineKey) : `v${skin.version}`,
+      name: skin.name,
+      tagline: `v${skin.version}`,
       skip: t("splash.skipHint"),
-      aria: t("theme.introAria", { theme: "nameKey" in skin ? t(skin.nameKey) : skin.name }),
+      aria: t("theme.introAria", { theme: skin.name }),
     });
     return;
   }
