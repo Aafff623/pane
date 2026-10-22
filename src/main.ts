@@ -108,6 +108,7 @@ interface Snapshot {
   boot_cache?: boolean;
   warning: string | null;
   dashboard_url?: string | null;
+  auth_pack_expiry?: number | null;
 }
 
 interface ModelSpend {
@@ -16949,6 +16950,8 @@ function authNextExpiry(acct: AuthAccountRow): number {
   const snap = authRowSnapshot(acct);
   if (!snap) return Number.POSITIVE_INFINITY;
   const now = Date.now();
+  const pack = snap.auth_pack_expiry;
+  if (typeof pack === "number" && pack > now) return pack;
   const upcoming = snap.metrics
     .map((metric) => metric.resets_at)
     .filter((value): value is number => typeof value === "number" && value > now);

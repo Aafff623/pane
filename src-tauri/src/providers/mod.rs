@@ -188,6 +188,10 @@ pub struct Snapshot {
     pub warning: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub dashboard_url: Option<String>,
+    /// Earliest resource-pack expiry for the auth center's ordering. It is
+    /// not rendered on the card; pack rows already carry their own text.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub auth_pack_expiry: Option<i64>,
 }
 
 impl Snapshot {
@@ -203,6 +207,7 @@ impl Snapshot {
             boot_cache: false,
             warning: None,
             dashboard_url: None,
+            auth_pack_expiry: None,
         }
     }
 
@@ -218,6 +223,7 @@ impl Snapshot {
             boot_cache: false,
             warning: None,
             dashboard_url: None,
+            auth_pack_expiry: None,
         }
     }
 
@@ -233,6 +239,7 @@ impl Snapshot {
             boot_cache: false,
             warning: None,
             dashboard_url: None,
+            auth_pack_expiry: None,
         }
     }
 
@@ -263,6 +270,7 @@ impl Snapshot {
             boot_cache: false,
             warning: None,
             dashboard_url: None,
+            auth_pack_expiry: None,
         }
     }
 }
