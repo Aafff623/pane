@@ -1,6 +1,6 @@
 # 02 — Multi-account center residuals (#29)
 
-Status: ready-for-agent
+Status: first slice landed; owner acceptance pending
 Blocked by: None
 
 ## Slices

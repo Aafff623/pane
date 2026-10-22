@@ -1,6 +1,6 @@
 # 03 — Encrypted backup export/import (#25)
 
-Status: ready-for-agent
+Status: implemented; owner acceptance pending
 Blocked by: None
 
 ## Shape

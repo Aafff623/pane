@@ -1,6 +1,6 @@
 # 04 — Official WorkBuddy usage (#31)
 
-Status: blocked on account (S0); S1 ready
+Status: S1 done; S0 blocked on account
 Blocked by: verifiable WorkBuddy account
 
 ## S0 — probe

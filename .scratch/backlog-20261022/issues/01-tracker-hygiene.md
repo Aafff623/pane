@@ -1,6 +1,6 @@
 # 01 — Tracker hygiene
 
-Status: in-progress
+Status: done
 Blocked by: None
 
 ## Scope

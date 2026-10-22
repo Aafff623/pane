@@ -1,6 +1,6 @@
 # 05 — Four-platform plan (#36)
 
-Status: in-progress
+Status: done (planning only)
 Blocked by: None
 
 ## Deliverable

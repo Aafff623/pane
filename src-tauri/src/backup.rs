@@ -319,13 +319,29 @@ pub fn export_with_password(
     if selection.keys {
         let path = base.join("keyvault.json");
         let keyvault = match std::fs::read(&path) {
-            Ok(bytes) => Some(b64().encode(bytes)),
+            Ok(bytes) => {
+                validate_vault_bytes(&bytes)?;
+                Some(b64().encode(bytes))
+            }
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
             Err(error) => return Err(format!("read {}: {error}", path.display())),
         };
         data.keys = Some(KeysBackup { keyvault });
     }
     encode_envelope(&data, password)
+}
+
+fn validate_vault_bytes(bytes: &[u8]) -> Result<(), String> {
+    let value: Value =
+        serde_json::from_slice(bytes).map_err(|_| "vault payload is not valid JSON".to_string())?;
+    let version = value
+        .get("version")
+        .and_then(Value::as_u64)
+        .ok_or("vault payload has no version")?;
+    if version != 2 && version != 3 {
+        return Err(format!("unsupported vault version {version}"));
+    }
+    Ok(())
 }
 
 pub fn open(bytes: &[u8], password: &str) -> Result<BackupData, String> {
@@ -433,16 +449,20 @@ pub fn apply(
 
     // Refuse to start if the OS vault cannot take a secret. A one-key probe
     // is removed immediately; this is the only way to keep a half-applied
-    // import from silently writing plaintext fallbacks.
-    if accounts.is_some_and(|section| !section.secrets.is_empty()) {
+    // import from silently writing plaintext fallbacks, even when the backup
+    // itself carries no OS-vault secrets.
+    if accounts.is_some() {
         preflight_secret_store(secrets)?;
     }
 
     let vault_bytes = keys
         .and_then(|section| section.keyvault.as_ref())
         .map(|encoded| {
-            b64().decode(encoded)
-                .map_err(|_| "malformed vault payload".to_string())
+            let bytes = b64()
+                .decode(encoded)
+                .map_err(|_| "malformed vault payload".to_string())?;
+            validate_vault_bytes(&bytes)?;
+            Ok::<Vec<u8>, String>(bytes)
         })
         .transpose()?;
 
@@ -655,6 +675,15 @@ mod tests {
         text.push('A');
         *sealed = Value::String(text);
         assert!(open(&serde_json::to_vec(&value).unwrap(), "pw").is_err());
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn corrupt_or_unknown_vault_payload_is_rejected() {
+        let base = temp_base("vault-validation");
+        let secrets = seed(&base);
+        std::fs::write(base.join("keyvault.json"), r#"{"version":99}"#).unwrap();
+        assert!(export_with_password(&base, settings(), Selection::all(), &secrets, "pw").is_err());
         let _ = std::fs::remove_dir_all(&base);
     }
 
