@@ -75,3 +75,15 @@ Status: awaiting-owner-acceptance
 - 修正 reconciliation 的 folding 边界：仅 API-key 池和基元律动折叠默认位，不误清首个托管 Codex 的快照。
 - 新增回归覆盖备注随身份迁移、默认账号 note 保留、CLI 两级备注隔离、删除后 pin 清理及 sibling pin 保留。前端最终75通过，网站36通过，`corepack pnpm build`通过；该轮无Rust改动，未重复Rust全量测试。两轴复核发现项已修复。
 - 日志：`temp/logs/owner-fixes-*.log`、`panel-auth-{red,green}.log`、`minimax-note-{red,green}.log`、`minimax-pin-red.log`。真实OAuth同意与双账号回调仍待owner本人验收。
+
+
+## 2026-10-22 MiniMax 归档后复活的根因修复
+
+- 现场只读核对发现同一旧身份既在archive又在active。根因是`remove_stored_key_file`只移除文件，`provider:<family>`凭据仍存活，每轮`accounts_with_imported_main_key`将它重新插到index 0。已用真实secretstore/harness复现red。
+- 迁移与CRUD共用mutation锁；归档身份优先修复旧active副本；先持久化active，再退休provider vault/file，再回收旧active副本。永久删除/归档同步退休匹配legacy源。最终snapshot验收不再执行迁移，避免递归锁。
+- vault退休失败时保留relay baseUrl文件，迁移写失败保留来源；均有当前源码定向回归。三条main_key回归和两条retirement回归通过（有一条交集）；完整Rust回归937通过/14忽略是在追加relay失败用例前运行，未虚报为全量938。
+- 总览与卡片tabs共用真实账号过滤，默认bare与首个stable副本只计一次；单账号隐藏badge/tabs；空saved列表的有效env/CLI bare来源保留。前端77通过、site36通过、frontend/GNU debug构建通过。
+- 新增API-key账号从卡片菜单进入对应Customize看板；headless结果`drawer=true/provider=true/directModal=false`。
+- 重启后的实际验证：active MiniMax仅`11-4`一行，查询接口仅`providerId=minimax`一个MiniMax来源；旧归档身份不再查询。仅核对非秘密身份和数量，未操作认证窗口；认证与回调仍由owner本人完成。
+- 修复前相关本地数据备份位于Git忽略的`temp/secrets/minimax-20261022-before-legacy-retirement/`。本轮只恢复归档与活动状态的一致性，保留归档记录与使用历史，不把归档当作永久删除。
+- 日志：`minimax-resurrection-{red,green}.log`、`minimax-latest-{main-key-tests,retirement-tests,rust-build}.log`、`minimax-final-{rust-tests,frontend-tests,site-tests,build}.log`、`minimax-customize-check.log`，均位于本机`temp/logs/`。

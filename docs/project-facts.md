@@ -73,7 +73,7 @@ Last reconciled: 2026-10-21 (Pane 0.8.8 + timeline, window scaling, provider tre
   `cargo +stable-x86_64-pc-windows-gnu`. The full Tauri binary cannot link
   locally as a `cdylib` (167k-export DLL). The committed crate-type is
   `["rlib"]` (desktop only). Unit tests run from repo-root `parse-tests/`
-  (934 passing, 14 ignored as of 2026-10-22; run with
+  (937 passing in the latest full run, 14 ignored as of 2026-10-22; run with
   `cargo +stable-x86_64-pc-windows-gnu test` and no proxy).
 - Dev runtime needs both processes: Vite `:1420` + `pane.exe` `:6736`. Never
   serve the frontend with Python `http.server` (permanent WebView2 cache
@@ -510,6 +510,32 @@ changes.
   ledgers (needs a verifiable account — probe plan in
   `.scratch/workbuddy-family-v2/issues/09-official-request-usage.md`),
   account switching, session copies, check-ins, hooks, Agent Companion.
+
+## API-key migration and folded-account identity (2026-10-22)
+
+- Legacy provider keys live in both `<provider>.json` metadata and the
+  `provider:<family>` secret slot. Removing only the file leaves a key
+  resolvable from the vault; the next refresh can import it again.
+- API-key account migration holds the same mutation lock as CRUD. It saves
+  active accounts before retiring the provider vault slot and metadata file.
+  Vault removal happens first so relay `baseUrl` survives a vault failure.
+  Final snapshot identity acceptance only reads the current account list;
+  it does not enter the migration lock a second time.
+- An archived identity wins over an active duplicate created by the old
+  migration bug. Durable active-list repair precedes collecting that
+  duplicate's active vault slot. Permanent deletion and archive retire a
+  matching legacy source without touching another identity's source.
+- Folded account tabs and overview counts share one filter: account index
+  zero publishes once under the bare family id, and only other active
+  identities publish under `family@...`. One account has no tabs/ratio;
+  valid native env/CLI bare snapshots still work with an empty saved list.
+- API-key card-menu Add account opens that provider in Customize, where the
+  account form is added. Pinning is display preference, never a credential.
+- Evidence: legacy-vault resurrection red/green, archive/delete repeated
+  refresh and failed migration tests, relay retirement failure test, account
+  alias regression, and a headless Customize routing check. Latest full
+  Rust run: 937 passed/14 ignored; the subsequently added relay failure
+  case also passed in the current-source targeted run.
 
 ## Codex managed accounts and callback semantics (2026-10-22)
 

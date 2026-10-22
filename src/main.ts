@@ -2869,11 +2869,17 @@ function isFoldableHintCard(s: Snapshot): boolean {
 let unconfiguredFoldOpen = false;
 
 function overviewAccountSnapshots(family: string): Snapshot[] {
+  const accounts = accountsCache.get(family);
+  const foldsDefault = providerDefinition(family)?.supportsApiKey || family === "tokenrhythm";
+  const activeIds = accounts?.length && foldsDefault
+    ? new Set(accounts.map((entry, index) => index === 0 ? family : entry.id))
+    : undefined;
   return lastSnapshots.filter((snapshot) =>
     providerFamily(snapshot.id) === family &&
     !isCardDisabled(snapshot.id) &&
     !isBareHintCard(snapshot) &&
-    (!snapshot.id.includes("@") || !accountsCache.has(family) || accountsCache.get(family)?.some((entry) => entry.id === snapshot.id)),
+    (activeIds ? activeIds.has(snapshot.id) :
+      !snapshot.id.includes("@") || !accounts || accounts.some((entry) => entry.id === snapshot.id)),
   );
 }
 
@@ -2923,12 +2929,7 @@ function renderCard(s: Snapshot): string {
   let accountTabs = "";
   let accountIds: string[] = [];
   if (s.id === family && supportsExtraAccounts(family) && !isParallelAccountFamily(family)) {
-    accountIds = lastSnapshots
-      .filter((snap) => providerFamily(snap.id) === family && !isCardDisabled(snap.id))
-      // A bare family card that is a pure hint is not an account (see
-      // isBareHintCard) — counting it produced the phantom "1/2" badge.
-      .filter((snap) => !isBareHintCard(snap))
-      .map((snap) => snap.id);
+    accountIds = overviewAccountSnapshots(family).map((snapshot) => snapshot.id);
     if (accountIds.length >= 1) {
       // Families whose bare card IS an account (kimi) default to it; One/New
       // API has no bare snapshot at all, so the default tab is the first
@@ -6238,7 +6239,6 @@ function openGroupMenu(
     if (configure) {
       close();
       if (fam === "cursor") openCursorAccountDialog();
-      else if (supportsExtraAccounts(fam) && supportsApiKey(fam)) openAccountDialog(fam);
       else {
         skinMarketOpen = false; custConfigOpen = fam; setDrawer(true); renderDrawerBody();
         document.querySelector<HTMLElement>(`#drawer-body [data-cust-provider="${CSS.escape(fam)}"]`)?.scrollIntoView({ block: "start" });

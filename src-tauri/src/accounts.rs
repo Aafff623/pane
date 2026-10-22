@@ -242,6 +242,52 @@ pub fn save_accounts(provider: &str, entries: &[AccountEntry]) -> Result<(), Str
     save_accounts_to(&crate::providers::config_dir(), provider, entries)
 }
 
+/// One-shot migration under the caller's account mutation lock. Archived
+/// identities are authoritative: old releases may have re-imported their
+/// surviving provider-vault slot into the active list after archive.
+pub(crate) fn load_with_imported_main_key_from(base: &std::path::Path, provider: &str) -> Result<Vec<AccountEntry>, String> {
+    let mut list = load_accounts_from(base, provider);
+    let archived = load_archived_from(base);
+    let archived_ids: std::collections::HashSet<_> = archived.iter()
+        .filter(|row| row.provider == provider).map(|row| row.card_id.as_str()).collect();
+    let before = list.len();
+    let mut reaped = Vec::new();
+    list.retain(|row| {
+        let id = card_id_for_account(provider, row);
+        if archived_ids.contains(id.as_str()) { reaped.push(id); false } else { true }
+    });
+    let legacy = legacy_main_entry_from(base, provider);
+    if let Some(entry) = &legacy {
+        let id = card_id_for_account(provider, entry);
+        if !archived_ids.contains(id.as_str()) && !list.iter().any(|row| card_id_for_account(provider, row) == id) {
+            list.insert(0, entry.clone());
+        }
+    }
+    if legacy.is_some() || list.len() != before {
+        save_accounts_to(base, provider, &list)?;
+    }
+    if legacy.is_some() { crate::providers::remove_stored_key_file_from(base, provider)?; }
+    for id in reaped { crate::secretstore::remove_checked(&crate::secretstore::account_key(&id))?; }
+    Ok(list)
+}
+
+fn legacy_main_entry_from(base: &std::path::Path, provider: &str) -> Option<AccountEntry> {
+    let path = base.join(format!("{provider}.json"));
+    let base_url = if crate::provider_catalog::takes_base_url(provider) {
+        std::fs::read_to_string(&path).ok().and_then(|raw| serde_json::from_str::<serde_json::Value>(raw.trim_start_matches('\u{feff}')).ok())
+            .and_then(|doc| doc.get("baseUrl").and_then(serde_json::Value::as_str).map(str::trim).filter(|s| !s.is_empty()).map(str::to_string))
+    } else { None };
+    crate::secretstore::resolve_provider_key(provider, &path).map(|api_key| AccountEntry {label: String::new(), api_key, base_url})
+}
+
+/// Clear only the matching legacy identity, preserving any unrelated key.
+pub(crate) fn retire_legacy_card_from(base: &std::path::Path, provider: &str, card_id: &str) -> Result<(), String> {
+    if legacy_main_entry_from(base, provider).is_some_and(|entry| card_id_for_account(provider, &entry) == card_id) {
+        crate::providers::remove_stored_key_file_from(base, provider)?;
+    }
+    Ok(())
+}
+
 /// Deletes one account by stable card id from the active store and both
 /// archive stores. Returns the removed active index when the id was active
 /// (so the caller can promote the next default and clear layout), or None
@@ -251,6 +297,7 @@ pub fn delete_account_from(
     provider: &str,
     card_id: &str,
 ) -> Result<Option<usize>, String> {
+    retire_legacy_card_from(base, provider, card_id)?;
     let mut entries = load_accounts_from(base, provider);
     let removed = entries
         .iter()
@@ -545,6 +592,54 @@ mod tests {
     }
 
     use super::*;
+
+    #[test]
+    fn main_key_refresh_does_not_resurrect_an_archived_or_deleted_account() {
+        let provider = "minimax-main-key-lifecycle-regression";
+        let base = std::env::temp_dir().join(format!("pane-main-key-lifecycle-{}", std::process::id()));
+        let old = AccountEntry {label: "Old".into(),api_key: "synthetic-expired".into(),base_url: None};
+        let live = AccountEntry {label: "11-4".into(),api_key: "synthetic-live".into(),base_url: None};
+        let old_id = card_id_for_account(provider, &old);
+        let live_id = card_id_for_account(provider, &live);
+        save_accounts_to(&base, provider, &[old.clone(),live.clone()]).unwrap();
+        archive_account_to(&base, ArchivedAccount {provider:provider.into(),card_id:old_id.clone(),label:old.label.clone(),
+            archived_at:1,api_key:old.api_key.clone(),base_url:None}).unwrap();
+        // Actual legacy bug: archived A is also active and still in the provider vault.
+        crate::secretstore::put(&crate::secretstore::provider_key(provider), &old.api_key).unwrap();
+        for _ in 0..3 {
+            let rows=load_with_imported_main_key_from(&base,provider).unwrap();
+            assert_eq!(rows.len(),1);
+            assert_eq!(card_id_for_account(provider,&rows[0]),live_id);
+        }
+        assert_eq!(load_archived_from(&base).len(),1);
+        assert!(crate::secretstore::resolve_provider_key(provider,&base.join(format!("{provider}.json"))).is_none());
+        // Even a surviving legacy twin must be reaped by permanent archive deletion.
+        crate::secretstore::put(&crate::secretstore::provider_key(provider),&old.api_key).unwrap();
+        assert_eq!(delete_account_from(&base,provider,&old_id).unwrap(),None);
+        assert!(load_archived_from(&base).is_empty());
+        assert_eq!(load_with_imported_main_key_from(&base,provider).unwrap().len(),1);
+        delete_account_from(&base,provider,&live_id).unwrap();
+        assert!(load_with_imported_main_key_from(&base,provider).unwrap().is_empty());
+        let _=std::fs::remove_dir_all(base);
+    }
+
+    #[cfg(feature="harness")]
+    #[test]
+    fn main_key_migration_failure_keeps_the_source_for_retry() {
+        let provider="main-key-save-failure-regression";
+        let base=std::env::temp_dir().join(format!("pane-main-key-save-failure-{}",std::process::id()));
+        crate::secretstore::put(&crate::secretstore::provider_key(provider),"synthetic-import-key").unwrap();
+        fail_json_writes_for(&accounts_file(&base,provider));
+        let failed=load_with_imported_main_key_from(&base,provider);
+        clear_json_write_failure_for(&accounts_file(&base,provider));
+        assert!(failed.is_err());
+        assert!(crate::secretstore::resolve_provider_key(provider,&base.join(format!("{provider}.json"))).is_some());
+        let rows=load_with_imported_main_key_from(&base,provider).unwrap();
+        assert_eq!(rows.len(),1);
+        assert!(crate::secretstore::resolve_provider_key(provider,&base.join(format!("{provider}.json"))).is_none());
+        delete_account_from(&base,provider,&card_id_for_account(provider,&rows[0])).unwrap();
+        let _=std::fs::remove_dir_all(base);
+    }
 
     #[test]
     fn accounts_file_roundtrips_through_a_temp_dir() {

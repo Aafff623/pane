@@ -187,3 +187,24 @@ test('deleting the folded default drops its pin without touching a sibling pin',
     assert.equal(config.layout.providers.minimax.pinnedAccount,pinned==='minimax@b'?pinned:undefined);
   }
 });
+
+
+test('one saved key cannot become two tabs through a bare alias or deleted snapshot', () => {
+  const context = load(['overviewAccountSnapshots'], {
+    accountsCache:new Map([['minimax',[{id:'minimax@live'}]]]),
+    lastSnapshots:[{id:'minimax'},{id:'minimax@live'},{id:'minimax@deleted'}],
+    providerDefinition:family=>providerCatalog.find(p=>p.familyId===family),
+    providerFamily:id=>id.split('@')[0], isCardDisabled:()=>false,isBareHintCard:()=>false,
+  });
+  assert.deepEqual(Array.from(context.overviewAccountSnapshots('minimax'),row=>row.id),['minimax']);
+});
+
+
+test('an env or CLI backed bare provider remains visible with no saved accounts', () => {
+  const context = load(['overviewAccountSnapshots'], {
+    accountsCache:new Map([['minimax',[]]]),lastSnapshots:[{id:'minimax',status:'ok'},{id:'minimax@deleted',status:'ok'}],
+    providerDefinition:family=>providerCatalog.find(p=>p.familyId===family),providerFamily:id=>id.split('@')[0],
+    isCardDisabled:()=>false,isBareHintCard:()=>false,
+  });
+  assert.deepEqual(Array.from(context.overviewAccountSnapshots('minimax'),row=>row.id),['minimax']);
+});

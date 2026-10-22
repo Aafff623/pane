@@ -594,9 +594,19 @@ pub fn stored_base_url(provider: &str) -> Option<String> {
 /// migration after the key is imported into accounts/<provider>.json, so
 /// deleting the imported account actually deletes the key (no zombie file
 /// that would re-import it on the next fetch).
-pub fn remove_stored_key_file(provider: &str) {
-    let path = config_dir().join(format!("{provider}.json"));
-    let _ = std::fs::remove_file(path);
+pub(crate) fn remove_stored_key_file_from(base: &std::path::Path, provider: &str) -> Result<(), String> {
+    remove_stored_key_file_with(base, provider, || crate::secretstore::remove_checked(&crate::secretstore::provider_key(provider)))
+}
+
+fn remove_stored_key_file_with(base: &std::path::Path, provider: &str, remove_vault: impl FnOnce() -> Result<(), String>) -> Result<(), String> {
+    // Relay identity includes baseUrl: keep that file if vault retirement fails.
+    remove_vault()?;
+    let path = base.join(format!("{provider}.json"));
+    match std::fs::remove_file(path) {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(format!("retire legacy credential file: {error}")),
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -854,5 +864,34 @@ mod wall_tests {
         );
         assert_eq!(crate::platform::parse_win_proxy(""), None);
         assert_eq!(crate::platform::parse_win_proxy("http=;https="), None);
+    }
+}
+
+
+#[cfg(test)]
+mod legacy_key_retirement_tests {
+    #[test]
+    fn retirement_failure_keeps_the_relay_identity_file() {
+        let base=std::env::temp_dir().join(format!("pane-retire-relay-{}",std::process::id()));
+        std::fs::create_dir_all(&base).unwrap();
+        let path=base.join("relay-failure-regression.json");
+        let metadata=r#"{"baseUrl":"https://relay.example.test"}"#;
+        std::fs::write(&path,metadata).unwrap();
+        assert!(super::remove_stored_key_file_with(&base,"relay-failure-regression",||Err("vault unavailable".into())).is_err());
+        assert_eq!(std::fs::read_to_string(&path).unwrap(),metadata);
+        let _=std::fs::remove_dir_all(base);
+    }
+
+    #[test]
+    fn retired_main_key_cannot_resolve_from_the_vault_on_the_next_refresh() {
+        let family = "retired-main-key-regression-unique";
+        let base = std::env::temp_dir().join(format!("pane-retire-main-{}", std::process::id()));
+        std::fs::create_dir_all(&base).unwrap();
+        crate::secretstore::put(&crate::secretstore::provider_key(family), "synthetic-old-key").unwrap();
+        super::remove_stored_key_file_from(&base, family).unwrap();
+        let after = crate::secretstore::resolve_provider_key(family, &base.join(format!("{family}.json")));
+        crate::secretstore::remove(&crate::secretstore::provider_key(family));
+        assert!(after.is_none(), "retired legacy key was re-imported from its surviving vault slot");
+        let _ = std::fs::remove_dir_all(base);
     }
 }

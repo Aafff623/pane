@@ -1724,31 +1724,10 @@ fn failure_streaks() -> &'static std::sync::Mutex<std::collections::HashMap<Stri
 /// identical fingerprint — nothing is written, and the stored file is
 /// removed too: the account card IS that key now.
 fn accounts_with_imported_main_key(family: &str) -> Vec<accounts::AccountEntry> {
-    let mut list = accounts::load_accounts(family);
-    let base_url = if provider_catalog::takes_base_url(family) {
-        providers::stored_base_url(family)
-    } else {
-        None
-    };
-    if let Some(key) = providers::stored_key_file(family) {
-        let entry = accounts::AccountEntry {
-            label: String::new(),
-            api_key: key,
-            base_url,
-        };
-        let id = accounts::card_id_for_account(family, &entry);
-        let already_present = list.iter().any(|a| accounts::card_id_for_account(family, a) == id);
-        if !already_present {
-            list.insert(0, entry);
-        }
-        // One-shot: drop the migrated source. If the import errored, keep
-        // the file so the next fetch retries.
-        let saved = accounts::save_accounts(family, &list).is_ok();
-        if saved {
-            providers::remove_stored_key_file(family);
-        }
-    }
-    list
+    if !provider_catalog::supports_api_key(family) { return Vec::new(); }
+    let _mutation = account_lifecycle::mutation_lock().lock().unwrap_or_else(|e| e.into_inner());
+    accounts::load_with_imported_main_key_from(&providers::config_dir(), family)
+        .unwrap_or_else(|_| accounts::load_accounts(family))
 }
 
 // ── Key vault commands: thin wrappers over keyvault.rs's plain API. ────────
@@ -3797,6 +3776,7 @@ fn account_archive(provider: String, index: Option<usize>, card_id: Option<Strin
     }
     let entry = entries.remove(index);
     let card_id = accounts::card_id_for_account(&provider, &entry);
+    accounts::retire_legacy_card_from(&base, &provider, &card_id)?;
     let had_tombstone = accounts::load_archived_from(&base)
         .iter()
         .any(|archived| archived.provider == provider && archived.card_id == card_id);
@@ -4275,7 +4255,7 @@ fn retain_current_key_accounts(snapshots: &mut Vec<providers::Snapshot>, expecte
     let mut current: HashMap<String, String> = families.iter().filter(|family|
         provider_catalog::provider_definition(family).is_some_and(|p| p.supports_api_key))
         .flat_map(|family| {
-        let mut identities = accounts::snapshot_identities(family, &accounts_with_imported_main_key(family));
+        let mut identities = accounts::snapshot_identities(family, &accounts::load_accounts(family));
         identities.entry(family.clone()).or_default();
         identities
     }).collect();
