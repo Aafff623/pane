@@ -646,7 +646,9 @@ async fn finish(f: &Family, access: &Access, id: &str, name: &str) -> Result<Sna
         return Err(format!("{} reported no quota data", f.display_name));
     }
     metrics.truncate(12);
-    Ok(Snapshot::ok(id, name, plan.or(payment_type), metrics))
+    let mut snapshot = Snapshot::ok(id, name, plan.or(payment_type), metrics);
+    snapshot.auth_pack_expiry = earliest_pack_expiry(&packs, now_ms);
+    Ok(snapshot)
 }
 
 /// The packs array, wherever the gateway decided to nest it this quarter.
@@ -928,6 +930,13 @@ fn pack_expire_ms(pack: &Value, now_ms: i64) -> Option<i64> {
         (None, None) => None,
     }?;
     (chosen - now_ms <= 2 * YEAR_MS).then_some(chosen)
+}
+
+fn earliest_pack_expiry(packs: &[&Value], now_ms: i64) -> Option<i64> {
+    package_details(packs, now_ms)
+        .into_iter()
+        .filter_map(|detail| detail.expire_ms)
+        .min()
 }
 
 fn package_details(packs: &[&Value], now_ms: i64) -> Vec<PackageDetail> {
@@ -1411,6 +1420,11 @@ mod tests {
         let rows = package_detail_rows(&[&later, &sooner], NOW_MS);
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0].label, "Packages");
+        assert_eq!(
+            earliest_pack_expiry(&[&later, &sooner], NOW_MS),
+            Some(1_769_875_200_000),
+            "the sooner pack drives auth-center ordering"
+        );
         let text = rows[0].value.as_deref().unwrap_or("");
         assert!(text.contains("2 packages"), "{text}");
         assert!(text.contains("110 credits left"), "{text}");
