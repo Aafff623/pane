@@ -83,8 +83,9 @@ Slices:
    `Pane 托管` / `本机登录` / `当前登录` labels.
 2. last used: persist a non-secret `lastUsedAt` per stable card id, update on
    account selection; keep `lastOkAt` as "last checked".
-3. batch remove: backend resolves stable card ids once, takes the mutation lock
-   once, returns per-item results; frontend selection mode with confirm.
+3. batch remove: the frontend resolves stable card ids and calls the existing
+   single-delete command per item (one mutation lock per item), reporting
+   per-item results. No cross-account atomicity claim.
 4. cross-account pack ordering: expose nearest pack expiry from snapshots
    (add structured expiry to WorkBuddy/CodeBuddy pack rows where missing) and
    add a stable "expiry" sort.

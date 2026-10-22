@@ -1816,6 +1816,8 @@ const BACKUP_SETTINGS_EXCLUDE: &[&str] = &[
     "proxy",
     "layout",
     "localShortcuts",
+    "shortcut",
+    "categoryShortcut",
     "skinId",
     "popoverPos",
     "popoverPin",
@@ -1879,6 +1881,14 @@ fn write_backup_file(path: &str, bytes: &[u8]) -> Result<(), String> {
     std::fs::write(path, bytes).map_err(|error| format!("write {path}: {error}"))
 }
 
+fn read_backup_file(path: &str) -> Result<Vec<u8>, String> {
+    let metadata = std::fs::metadata(path).map_err(|error| format!("read {path}: {error}"))?;
+    if metadata.len() > backup::MAX_BACKUP_BYTES as u64 {
+        return Err("backup file is too large".into());
+    }
+    std::fs::read(path).map_err(|error| format!("read {path}: {error}"))
+}
+
 fn backup_export_inner(
     path: &str,
     password: &str,
@@ -1888,6 +1898,9 @@ fn backup_export_inner(
 ) -> Result<(), String> {
     let selection = backup_selection(accounts, keys, settings);
     let settings_map = backup_settings_from(&get_config());
+    let _account_lock = account_lifecycle::mutation_lock()
+        .lock()
+        .unwrap_or_else(|error| error.into_inner());
     let bytes = backup::export_with_password(
         &providers::config_dir(),
         settings_map,
@@ -1905,7 +1918,10 @@ fn backup_apply_inner(
     keys: bool,
     settings: bool,
 ) -> Result<backup::ApplyResult, String> {
-    let bytes = std::fs::read(path).map_err(|error| format!("read {path}: {error}"))?;
+    let bytes = read_backup_file(path)?;
+    let _account_lock = account_lifecycle::mutation_lock()
+        .lock()
+        .unwrap_or_else(|error| error.into_inner());
     let mut result = backup::apply(
         &providers::config_dir(),
         &bytes,
@@ -1952,6 +1968,9 @@ async fn backup_export_dialog(
 async fn backup_preview_dialog(
     app: tauri::AppHandle,
     password: String,
+    accounts: bool,
+    keys: bool,
+    settings: bool,
 ) -> Result<Option<backup::PreviewFile>, String> {
     tauri::async_runtime::spawn_blocking(move || {
         use tauri_plugin_dialog::DialogExt;
@@ -1964,8 +1983,13 @@ async fn backup_preview_dialog(
             return Ok(None);
         };
         let path = picked.into_path().map_err(|error| error.to_string())?;
-        let bytes = std::fs::read(&path).map_err(|error| format!("read {}: {error}", path.display()))?;
-        let preview = backup::preview(&providers::config_dir(), &bytes, &password)?;
+        let bytes = read_backup_file(&path.display().to_string())?;
+        let preview = backup::preview(
+            &providers::config_dir(),
+            &bytes,
+            &password,
+            backup_selection(accounts, keys, settings),
+        )?;
         Ok(Some(backup::PreviewFile {
             path: path.display().to_string(),
             preview,

@@ -138,10 +138,16 @@ fn now_ms() -> i64 {
         .unwrap_or(0)
 }
 
-fn encode_envelope(data: &BackupData, password: &str) -> Result<Vec<u8>, String> {
-    if password.is_empty() {
-        return Err("backup password must not be empty".into());
+fn normalize_backup_password(password: &str) -> Result<String, String> {
+    let password = crate::keyvault_v3::crypto::normalize_password_v3(password);
+    if password.chars().count() < 8 {
+        return Err("backup password must be at least 8 characters".into());
     }
+    Ok(password)
+}
+
+fn encode_envelope(data: &BackupData, password: &str) -> Result<Vec<u8>, String> {
+    let password = normalize_backup_password(password)?;
     let payload = serde_json::to_vec(data).map_err(|error| format!("serialize backup: {error}"))?;
     let salt = fresh_random::<16>();
     let base = argon2id_frozen(password.as_bytes(), &salt)?;
@@ -167,6 +173,10 @@ fn encode_envelope(data: &BackupData, password: &str) -> Result<Vec<u8>, String>
 fn decode_envelope(bytes: &[u8], password: &str) -> Result<BackupData, String> {
     if bytes.len() > MAX_BACKUP_BYTES {
         return Err("backup file is too large".into());
+    }
+    let password = crate::keyvault_v3::crypto::normalize_password_v3(password);
+    if password.chars().count() < 8 {
+        return Err("wrong password or tampered backup".into());
     }
     let envelope: Envelope =
         serde_json::from_slice(bytes).map_err(|_| "backup file is not valid JSON".to_string())?;
@@ -219,6 +229,7 @@ fn known_top_level_files() -> &'static [&'static str] {
         "antigravity-accounts.json",
         "archived_accounts.json",
         "archived_external_accounts.json",
+        "antigravity-token.json",
         "onenewapi.json",
         "search-keys.json",
     ]
@@ -257,10 +268,20 @@ fn collect_files(base: &Path) -> Result<BTreeMap<String, String>, String> {
 fn secret_keys(files: &BTreeMap<String, String>) -> Result<BTreeSet<String>, String> {
     let mut keys = BTreeSet::new();
     for (relative, text) in files {
-        let Ok(rows) = serde_json::from_str::<Value>(text.trim_start_matches('\u{feff}')) else {
+        let Ok(value) = serde_json::from_str::<Value>(text.trim_start_matches('\u{feff}')) else {
             continue;
         };
-        let Some(rows) = rows.as_array() else {
+        if relative == "search-keys.json" {
+            if let Some(entries) = value.get("keys").and_then(Value::as_array) {
+                for row in entries {
+                    if let Some(id) = row.get("id").and_then(Value::as_str).filter(|id| !id.is_empty()) {
+                        keys.insert(crate::secretstore::token_key(&format!("searchkey/{id}")));
+                    }
+                }
+            }
+            continue;
+        }
+        let Some(rows) = value.as_array() else {
             continue;
         };
         if let Some(provider) = relative.strip_prefix("accounts/").and_then(|name| name.strip_suffix(".json")) {
@@ -294,9 +315,36 @@ fn secret_keys(files: &BTreeMap<String, String>) -> Result<BTreeSet<String>, Str
                     keys.insert(crate::secretstore::token_key(&format!("cursor/{card}")));
                 }
             }
+        } else if relative == "archived_accounts.json" {
+            for row in rows {
+                if let Some(card) = row.get("card_id").and_then(Value::as_str) {
+                    keys.insert(crate::secretstore::archived_key(card));
+                }
+            }
+        } else if relative == "archived_external_accounts.json" {
+            for row in rows {
+                if let Some(card) = row.get("card_id").and_then(Value::as_str) {
+                    keys.insert(crate::secretstore::token_key(&format!("archived-external/{card}")));
+                }
+            }
         }
     }
     Ok(keys)
+}
+
+fn allowed_secret_key(key: &str) -> bool {
+    [
+        "account:",
+        "provider:",
+        "token:login/",
+        "token:codex/",
+        "token:cursor/",
+        "token:searchkey/",
+        "token:archived-external/",
+        "archived:",
+    ]
+    .iter()
+    .any(|prefix| key.starts_with(prefix))
 }
 
 pub fn export_with_password(
@@ -348,23 +396,31 @@ pub fn open(bytes: &[u8], password: &str) -> Result<BackupData, String> {
     decode_envelope(bytes, password)
 }
 
-pub fn preview(base: &Path, bytes: &[u8], password: &str) -> Result<BackupPreview, String> {
+pub fn preview(
+    base: &Path,
+    bytes: &[u8],
+    password: &str,
+    selection: Selection,
+) -> Result<BackupPreview, String> {
     let data = decode_envelope(bytes, password)?;
     let local_files = collect_files(base).unwrap_or_default();
+    let settings = data.settings.as_ref().filter(|_| selection.settings);
+    let keys = data.keys.as_ref().filter(|_| selection.keys);
+    let has_keyvault = keys.and_then(|keys| keys.keyvault.as_ref()).is_some();
     let mut preview = BackupPreview {
         created_at: data.created_at,
-        setting_keys: data.settings.as_ref().map(|settings| settings.keys().cloned().collect()).unwrap_or_default(),
-        has_keyvault: data.keys.as_ref().and_then(|keys| keys.keyvault.as_ref()).is_some(),
-        keyvault_bytes: data
-            .keys
-            .as_ref()
+        setting_keys: settings
+            .map(|settings| settings.keys().cloned().collect())
+            .unwrap_or_default(),
+        has_keyvault,
+        keyvault_bytes: keys
             .and_then(|keys| keys.keyvault.as_ref())
             .map(|encoded| b64().decode(encoded).map(|bytes| bytes.len()).unwrap_or(0))
             .unwrap_or(0),
-        keyvault_conflict: base.join("keyvault.json").exists(),
+        keyvault_conflict: has_keyvault && base.join("keyvault.json").exists(),
         ..BackupPreview::default()
     };
-    if let Some(accounts) = &data.accounts {
+    if let Some(accounts) = data.accounts.as_ref().filter(|_| selection.accounts) {
         preview.account_files = accounts.files.len();
         preview.secret_count = accounts.secrets.len();
         let incoming = identities(&accounts.files);
@@ -418,6 +474,87 @@ fn write_bytes_atomic(path: &Path, bytes: &[u8]) -> Result<(), String> {
             let _ = std::fs::remove_file(&tmp);
             format!("replace {}: {error}", path.display())
         })
+}
+
+fn snapshot_file(path: &Path) -> Result<Option<Vec<u8>>, String> {
+    match std::fs::read(path) {
+        Ok(bytes) => Ok(Some(bytes)),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(error) => Err(format!("read {}: {error}", path.display())),
+    }
+}
+
+fn row_identity(row: &Value) -> Option<String> {
+    ["card_id", "cardId", "id", "account_id", "accountId"]
+        .iter()
+        .find_map(|key| row.get(*key).and_then(Value::as_str))
+        .filter(|id| !id.is_empty())
+        .map(str::to_string)
+        .or_else(|| {
+            row.get("label")
+                .and_then(Value::as_str)
+                .filter(|label| !label.is_empty())
+                .map(|label| format!("label:{label}"))
+        })
+}
+
+fn merge_rows(local: &[Value], incoming: &[Value]) -> Vec<Value> {
+    let mut merged = local.to_vec();
+    let mut index = BTreeMap::new();
+    for (position, row) in merged.iter().enumerate() {
+        if let Some(id) = row_identity(row) {
+            index.insert(id, position);
+        }
+    }
+    for row in incoming {
+        if let Some(id) = row_identity(row) {
+            if let Some(&position) = index.get(&id) {
+                merged[position] = row.clone();
+                continue;
+            }
+            index.insert(id, merged.len());
+        }
+        merged.push(row.clone());
+    }
+    merged
+}
+
+/// Restore merges into the existing store instead of replacing the whole
+/// file: accounts added locally after the backup was taken must survive.
+fn merge_file(local: Option<&str>, incoming: &str) -> Result<String, String> {
+    let incoming_value: Value = serde_json::from_str(incoming.trim_start_matches('\u{feff}'))
+        .map_err(|error| format!("parse backup file: {error}"))?;
+    let local_value = local.and_then(|text| {
+        serde_json::from_str::<Value>(text.trim_start_matches('\u{feff}')).ok()
+    });
+    if let (Some(local_value), Value::Array(incoming_rows)) = (&local_value, &incoming_value) {
+        if let Some(local_rows) = local_value.as_array() {
+            let merged = merge_rows(local_rows, incoming_rows);
+            return serde_json::to_string_pretty(&Value::Array(merged))
+                .map_err(|error| error.to_string());
+        }
+    }
+    if let (Some(Value::Object(local_object)), Value::Object(incoming_object)) =
+        (&local_value, &incoming_value)
+    {
+        let mut merged = local_object.clone();
+        for (key, incoming_value) in incoming_object {
+            if let (Some(local_rows), Some(incoming_rows)) = (
+                merged.get(key).and_then(Value::as_array),
+                incoming_value.as_array(),
+            ) {
+                merged.insert(
+                    key.clone(),
+                    Value::Array(merge_rows(local_rows, incoming_rows)),
+                );
+            } else {
+                merged.insert(key.clone(), incoming_value.clone());
+            }
+        }
+        return serde_json::to_string_pretty(&Value::Object(merged))
+            .map_err(|error| error.to_string());
+    }
+    serde_json::to_string_pretty(&incoming_value).map_err(|error| error.to_string())
 }
 
 /// Apply the selected sections. Settings are returned for the command layer
@@ -474,17 +611,28 @@ pub fn apply(
 
     let outcome = (|| -> Result<(), String> {
         if let Some(accounts) = accounts {
+            if accounts.secrets.len() > 2_000 {
+                return Err("backup contains too many secrets".into());
+            }
             for (relative, text) in &accounts.files {
                 let path = backup_path(base, relative)?;
-                old_files.insert(path.clone(), std::fs::read(&path).ok());
+                let old = snapshot_file(&path)?;
+                let local_text = old
+                    .as_deref()
+                    .and_then(|bytes| std::str::from_utf8(bytes).ok());
+                let merged = merge_file(local_text, text)?;
+                old_files.insert(path.clone(), old);
                 if let Some(parent) = path.parent() {
                     std::fs::create_dir_all(parent)
                         .map_err(|error| format!("create {}: {error}", parent.display()))?;
                 }
-                crate::accounts::write_json_atomic(&path, text.clone())?;
+                crate::accounts::write_json_atomic(&path, merged)?;
                 account_files += 1;
             }
             for (key, value) in &accounts.secrets {
+                if !allowed_secret_key(key) {
+                    return Err("backup contains an unsupported secret key".into());
+                }
                 old_secrets.insert(key.clone(), secrets.get(key)?);
                 secrets.put(key, value)?;
                 secret_count += 1;
@@ -492,15 +640,20 @@ pub fn apply(
         }
         if let Some(vault) = &vault_bytes {
             let path = base.join("keyvault.json");
-            old_vault = Some(std::fs::read(&path).ok());
+            old_vault = Some(snapshot_file(&path)?);
             write_bytes_atomic(&path, vault)?;
         }
         Ok(())
     })();
 
     if let Err(error) = outcome {
-        rollback(&old_files, &old_secrets, &old_vault, base, secrets);
-        return Err(error);
+        let rollback_errors = rollback(&old_files, &old_secrets, &old_vault, base, secrets);
+        let suffix = if rollback_errors.is_empty() {
+            String::new()
+        } else {
+            format!("; rollback failed: {}", rollback_errors.join("; "))
+        };
+        return Err(format!("{error}{suffix}"));
     }
 
     Ok(ApplyResult {
@@ -524,36 +677,46 @@ fn rollback(
     old_vault: &Option<Option<Vec<u8>>>,
     base: &Path,
     secrets: &mut dyn BackupSecrets,
-) {
+) -> Vec<String> {
+    let mut errors = Vec::new();
     for (path, old) in old_files {
-        match old {
-            Some(bytes) => {
-                let _ = std::fs::write(path, bytes);
-            }
-            None => {
-                let _ = std::fs::remove_file(path);
-            }
+        let result = match old {
+            Some(bytes) => write_bytes_atomic(path, bytes),
+            None => match std::fs::remove_file(path) {
+                Ok(()) => Ok(()),
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+                Err(error) => Err(format!("remove {}: {error}", path.display())),
+            },
+        };
+        if let Err(error) = result {
+            errors.push(error);
         }
     }
     for (key, old) in old_secrets {
         match old {
             Some(value) => {
-                let _ = secrets.put(key, value);
+                if let Err(error) = secrets.put(key, value) {
+                    errors.push(format!("restore secret {key}: {error}"));
+                }
             }
             None => secrets.remove(key),
         }
     }
     if let Some(old) = old_vault {
         let path = base.join("keyvault.json");
-        match old {
-            Some(bytes) => {
-                let _ = std::fs::write(path, bytes);
-            }
-            None => {
-                let _ = std::fs::remove_file(path);
-            }
+        let result = match old {
+            Some(bytes) => write_bytes_atomic(&path, bytes),
+            None => match std::fs::remove_file(&path) {
+                Ok(()) => Ok(()),
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+                Err(error) => Err(format!("remove {}: {error}", path.display())),
+            },
+        };
+        if let Err(error) = result {
+            errors.push(error);
         }
     }
+    errors
 }
 
 #[cfg(test)]
@@ -632,27 +795,28 @@ mod tests {
     fn roundtrip_carries_files_secrets_settings_and_vault() {
         let base = temp_base("roundtrip");
         let secrets = seed(&base);
-        let bytes = export_with_password(&base, settings(), Selection::all(), &secrets, "pw").unwrap();
+        let bytes = export_with_password(&base, settings(), Selection::all(), &secrets, "backup-pass-123").unwrap();
         let encoded = String::from_utf8_lossy(&bytes);
         assert!(!encoded.contains("secret-key"));
         assert!(!encoded.contains("token-triple"));
 
-        let preview = preview(&base, &bytes, "pw").unwrap();
+        let preview = preview(&base, &bytes, "backup-pass-123", Selection::all()).unwrap();
         assert_eq!(preview.setting_keys, vec!["theme"]);
         assert!(preview.has_keyvault);
         assert!(preview.keyvault_conflict);
 
         let target = temp_base("roundtrip-target");
         let mut target_secrets = MapSecrets(BTreeMap::new(), true);
-        let applied = apply(&target, &bytes, "pw", Selection::all(), &mut target_secrets).unwrap();
+        let applied = apply(&target, &bytes, "backup-pass-123", Selection::all(), &mut target_secrets).unwrap();
         assert_eq!(applied.settings, settings());
         assert_eq!(applied.account_files, 2);
         assert_eq!(applied.secrets, 2);
         assert!(applied.keyvault_written);
-        assert_eq!(
-            std::fs::read_to_string(target.join("accounts").join("workbuddy.json")).unwrap(),
-            r#"[{"id":"workbuddy@abc","label":"Work"}]"#
-        );
+        let restored: Value = serde_json::from_str(
+            &std::fs::read_to_string(target.join("accounts").join("workbuddy.json")).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(restored, serde_json::json!([{"id": "workbuddy@abc", "label": "Work"}]));
         assert_eq!(
             target_secrets.0.get("account:workbuddy@abc").map(String::as_str),
             Some("secret-key")
@@ -666,7 +830,7 @@ mod tests {
     fn wrong_password_and_tamper_are_rejected() {
         let base = temp_base("tamper");
         let secrets = seed(&base);
-        let bytes = export_with_password(&base, settings(), Selection::all(), &secrets, "pw").unwrap();
+        let bytes = export_with_password(&base, settings(), Selection::all(), &secrets, "backup-pass-123").unwrap();
         assert!(open(&bytes, "wrong").is_err());
 
         let mut value: Value = serde_json::from_slice(&bytes).unwrap();
@@ -674,8 +838,75 @@ mod tests {
         let mut text = sealed.as_str().unwrap().to_string();
         text.push('A');
         *sealed = Value::String(text);
-        assert!(open(&serde_json::to_vec(&value).unwrap(), "pw").is_err());
+        assert!(open(&serde_json::to_vec(&value).unwrap(), "backup-pass-123").is_err());
         let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn restore_merges_local_only_accounts_instead_of_dropping_them() {
+        let source = temp_base("merge-source");
+        let secrets = seed(&source);
+        let bytes = export_with_password(&source, settings(), Selection::all(), &secrets, "backup-pass-123").unwrap();
+
+        let target = temp_base("merge-target");
+        std::fs::create_dir_all(target.join("accounts")).unwrap();
+        std::fs::write(
+            target.join("accounts").join("workbuddy.json"),
+            r#"[{"id":"workbuddy@local","label":"Local only"}]"#,
+        )
+        .unwrap();
+        let mut target_secrets = MapSecrets(BTreeMap::new(), true);
+        apply(&target, &bytes, "backup-pass-123", Selection::all(), &mut target_secrets).unwrap();
+
+        let merged: Value = serde_json::from_str(
+            &std::fs::read_to_string(target.join("accounts").join("workbuddy.json")).unwrap(),
+        )
+        .unwrap();
+        let ids: Vec<&str> = merged
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter_map(|row| row.get("id").and_then(Value::as_str))
+            .collect();
+        assert!(ids.contains(&"workbuddy@local"));
+        assert!(ids.contains(&"workbuddy@abc"));
+        let _ = std::fs::remove_dir_all(&source);
+        let _ = std::fs::remove_dir_all(&target);
+    }
+
+    #[test]
+    fn unsafe_paths_and_secret_keys_are_rejected() {
+        let data = BackupData {
+            format: PAYLOAD_FORMAT.into(),
+            created_at: now_ms(),
+            settings: None,
+            accounts: Some(AccountBackup {
+                files: BTreeMap::from([("accounts/../../config.json".into(), "{}".into())]),
+                secrets: BTreeMap::new(),
+            }),
+            keys: None,
+        };
+        let bytes = encode_envelope(&data, "backup-pass-123").unwrap();
+        let target = temp_base("unsafe-path");
+        let mut secrets = MapSecrets(BTreeMap::new(), true);
+        assert!(apply(&target, &bytes, "backup-pass-123", Selection { accounts: true, keys: false, settings: false }, &mut secrets).is_err());
+        let _ = std::fs::remove_dir_all(&target);
+
+        let data = BackupData {
+            format: PAYLOAD_FORMAT.into(),
+            created_at: now_ms(),
+            settings: None,
+            accounts: Some(AccountBackup {
+                files: BTreeMap::new(),
+                secrets: BTreeMap::from([("token:master".into(), "x".into())]),
+            }),
+            keys: None,
+        };
+        let bytes = encode_envelope(&data, "backup-pass-123").unwrap();
+        let target = temp_base("bad-secret");
+        let mut secrets = MapSecrets(BTreeMap::new(), true);
+        assert!(apply(&target, &bytes, "backup-pass-123", Selection { accounts: true, keys: false, settings: false }, &mut secrets).is_err());
+        let _ = std::fs::remove_dir_all(&target);
     }
 
     #[test]
@@ -683,7 +914,7 @@ mod tests {
         let base = temp_base("vault-validation");
         let secrets = seed(&base);
         std::fs::write(base.join("keyvault.json"), r#"{"version":99}"#).unwrap();
-        assert!(export_with_password(&base, settings(), Selection::all(), &secrets, "pw").is_err());
+        assert!(export_with_password(&base, settings(), Selection::all(), &secrets, "backup-pass-123").is_err());
         let _ = std::fs::remove_dir_all(&base);
     }
 
@@ -692,15 +923,15 @@ mod tests {
         let base = temp_base("selection");
         let secrets = seed(&base);
         let selection = Selection { accounts: true, keys: false, settings: false };
-        let bytes = export_with_password(&base, settings(), selection, &secrets, "pw").unwrap();
-        let data = open(&bytes, "pw").unwrap();
+        let bytes = export_with_password(&base, settings(), selection, &secrets, "backup-pass-123").unwrap();
+        let data = open(&bytes, "backup-pass-123").unwrap();
         assert!(data.accounts.is_some());
         assert!(data.keys.is_none());
         assert!(data.settings.is_none());
 
         let target = temp_base("selection-target");
         let mut target_secrets = MapSecrets(BTreeMap::new(), true);
-        let applied = apply(&target, &bytes, "pw", selection, &mut target_secrets).unwrap();
+        let applied = apply(&target, &bytes, "backup-pass-123", selection, &mut target_secrets).unwrap();
         assert_eq!(applied.account_files, 2);
         assert!(!applied.keyvault_written);
         assert!(applied.settings.is_empty());
@@ -713,7 +944,7 @@ mod tests {
         let base = temp_base("unavailable");
         let mut secrets = seed(&base);
         secrets.1 = false;
-        assert!(export_with_password(&base, settings(), Selection::all(), &secrets, "pw").is_err());
+        assert!(export_with_password(&base, settings(), Selection::all(), &secrets, "backup-pass-123").is_err());
         let _ = std::fs::remove_dir_all(&base);
     }
 
@@ -721,8 +952,8 @@ mod tests {
     fn import_preview_counts_existing_accounts_as_conflicts() {
         let base = temp_base("conflict");
         let secrets = seed(&base);
-        let bytes = export_with_password(&base, settings(), Selection::all(), &secrets, "pw").unwrap();
-        let preview = preview(&base, &bytes, "pw").unwrap();
+        let bytes = export_with_password(&base, settings(), Selection::all(), &secrets, "backup-pass-123").unwrap();
+        let preview = preview(&base, &bytes, "backup-pass-123", Selection::all()).unwrap();
         assert_eq!(preview.conflicting_accounts, 2);
         assert_eq!(preview.added_accounts, 0);
         let _ = std::fs::remove_dir_all(&base);

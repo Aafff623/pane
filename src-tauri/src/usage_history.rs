@@ -489,7 +489,11 @@ pub fn last_used_map() -> BTreeMap<String, i64> {
     };
     let mut out = BTreeMap::new();
     for meter in &file.meters {
-        let Some(day) = latest_used_day(&meter.samples) else {
+        let latest = match meter.shape {
+            UsageShape::Daily => latest_used_day(&meter.samples),
+            UsageShape::Cumulative => latest_cumulative_use_day(&meter.samples),
+        };
+        let Some(day) = latest else {
             continue;
         };
         let Some(timestamp) = day_noon_ms(day) else {
@@ -508,6 +512,26 @@ fn latest_used_day(samples: &[DaySample]) -> Option<&str> {
         .filter(|sample| sample.used > 0.0 || sample.last.is_some_and(|value| value > 0.0))
         .map(|sample| sample.day.as_str())
         .max()
+}
+
+/// Cumulative meters store the day's max absolute reading, so a day where
+/// the reading did not move is not usage. Diff consecutive days and treat a
+/// drop as a reset (the new lower reading is post-reset consumption).
+fn latest_cumulative_use_day(samples: &[DaySample]) -> Option<&str> {
+    let mut latest = None;
+    let mut previous: Option<f64> = None;
+    for sample in samples {
+        let consumed = match previous {
+            Some(prev) if sample.used >= prev => sample.used - prev,
+            Some(_) => sample.used,
+            None => sample.used,
+        };
+        if consumed > 0.0 {
+            latest = Some(sample.day.as_str());
+        }
+        previous = Some(sample.used);
+    }
+    latest
 }
 
 fn day_noon_ms(day: &str) -> Option<i64> {
@@ -1116,6 +1140,23 @@ mod tests {
         assert_eq!(latest_used_day(&samples), Some("2026-10-02"));
         assert!(day_noon_ms("2026-10-02").is_some());
         assert_eq!(latest_used_day(&samples[..1]), None);
+    }
+
+    #[test]
+    fn cumulative_last_used_ignores_flat_days_and_counts_the_reset() {
+        let samples = vec![
+            DaySample { day: "2026-10-01".into(), used: 100.0, last: Some(100.0) },
+            DaySample { day: "2026-10-02".into(), used: 100.0, last: Some(100.0) },
+            DaySample { day: "2026-10-03".into(), used: 0.0, last: Some(0.0) },
+            DaySample { day: "2026-10-04".into(), used: 5.0, last: Some(5.0) },
+        ];
+        assert_eq!(latest_cumulative_use_day(&samples), Some("2026-10-04"));
+        assert_eq!(latest_cumulative_use_day(&samples[..2]), Some("2026-10-01"));
+        let flat = vec![
+            DaySample { day: "2026-10-01".into(), used: 0.0, last: Some(0.0) },
+            DaySample { day: "2026-10-02".into(), used: 0.0, last: Some(0.0) },
+        ];
+        assert_eq!(latest_cumulative_use_day(&flat), None);
     }
 
     #[test]

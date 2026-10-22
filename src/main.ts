@@ -817,15 +817,15 @@ async function runBackupImport(): Promise<void> {
   const password = await backupPassword(t("settings.backupImportTitle"));
   if (!password) return;
   try {
-    const picked = await invoke<{ path: string; preview: BackupPreview } | null>(
-      "backup_preview_dialog",
-      { password },
-    );
-    if (!picked) return;
-    const preview = picked.preview;
     const accounts = backupSectionChecked("[data-backup-accounts]");
     const keys = backupSectionChecked("[data-backup-keys]");
     const settings = backupSectionChecked("[data-backup-settings]");
+    const picked = await invoke<{ path: string; preview: BackupPreview } | null>(
+      "backup_preview_dialog",
+      { password, accounts, keys, settings },
+    );
+    if (!picked) return;
+    const preview = picked.preview;
     const ok = await appConfirm({
       title: t("settings.backupPreviewTitle"),
       message: t("settings.backupPreviewBody", {
@@ -852,12 +852,9 @@ async function runBackupImport(): Promise<void> {
     setBackupStatus(
       t("settings.backupApplied", { accounts: result.accountFiles, secrets: result.secrets }),
     );
-    await loadAuthCenter();
-    requestRender();
-    void forceUsageRefreshAttempt(false).then(requestTraySync);
-    if (Object.keys(result.settings).length) {
-      window.setTimeout(() => window.location.reload(), 900);
-    }
+    // A reload is the only reliable way to drop every account/snapshot/layout
+    // cache after a restore; refreshAccounts alone leaves stale cards around.
+    window.setTimeout(() => window.location.reload(), 900);
   } catch (err) {
     setBackupStatus(t("settings.backupFailed", { err: String(err) }));
   }

@@ -26,6 +26,9 @@ pub struct OfficialUsageRow {
 #[derive(Clone, Debug, PartialEq)]
 pub struct OfficialUsagePage {
     pub rows: Vec<OfficialUsageRow>,
+    /// Rows the server actually returned, including malformed ones that were
+    /// skipped. Pagination must use this, not `rows.len()`.
+    pub raw_rows: usize,
     /// Server-reported total. It is known to be capped by the server, so it
     /// must never drive pagination or a completeness claim.
     pub total: Option<u64>,
@@ -62,7 +65,8 @@ pub fn parse_page(value: &Value, page_size: usize) -> Result<OfficialUsagePage, 
         (total, rows)
     };
     let rows = rows_value.as_array().ok_or("data.data is not an array")?;
-    let mut parsed = Vec::with_capacity(rows.len());
+    let raw_rows = rows.len();
+    let mut parsed = Vec::with_capacity(raw_rows);
     for row in rows {
         if let Some(row) = parse_row(row) {
             parsed.push(row);
@@ -70,6 +74,7 @@ pub fn parse_page(value: &Value, page_size: usize) -> Result<OfficialUsagePage, 
     }
     Ok(OfficialUsagePage {
         rows: parsed,
+        raw_rows,
         total,
         page_size,
     })
@@ -155,7 +160,7 @@ fn number_ms(value: i64) -> Option<i64> {
 /// Advance `startTime` inclusively to the newest timestamp instead; a short
 /// page means done, and no timestamp advance means stalled.
 pub fn decide_next(page: &OfficialUsagePage, previous_start_ms: i64) -> SweepDecision {
-    if page.rows.len() < page.page_size {
+    if page.raw_rows < page.page_size {
         return SweepDecision::Complete;
     }
     let Some(newest) = page.rows.iter().map(|row| row.request_ts_ms).max() else {
@@ -192,6 +197,10 @@ pub fn merge_pages(pages: &[OfficialUsagePage]) -> Vec<OfficialUsageRow> {
 pub fn detail_rows(rows: &[OfficialUsageRow]) -> &[OfficialUsageRow] {
     let start = rows.len().saturating_sub(MAX_DETAIL_ROWS);
     &rows[start..]
+}
+
+pub fn sweep_round_limit_reached(rounds: usize) -> bool {
+    rounds >= MAX_SWEEP_ROUNDS
 }
 
 pub fn aggregate(rows: &[OfficialUsageRow]) -> OfficialUsageSummary {
@@ -284,6 +293,7 @@ mod tests {
     fn full_page_advances_short_page_completes_and_no_advance_stalls() {
         let full = OfficialUsagePage {
             rows: vec![official("r1", 10, 1.0), official("r2", 20, 1.0)],
+            raw_rows: 2,
             total: Some(2),
             page_size: 2,
         };
@@ -292,6 +302,7 @@ mod tests {
 
         let short = OfficialUsagePage {
             rows: vec![official("r1", 20, 1.0)],
+            raw_rows: 1,
             total: Some(2),
             page_size: 2,
         };
@@ -299,14 +310,33 @@ mod tests {
     }
 
     #[test]
+    fn a_dropped_row_does_not_turn_a_full_page_into_complete() {
+        let value = page(
+            json!([
+                row("r1", json!(1_700_000_000), json!(1)),
+                json!({ "requestId": "bad", "requestTime": "nope", "credit": 1 })
+            ]),
+            Some(2),
+        );
+        let parsed = parse_page(&value, 2).unwrap();
+        assert_eq!(parsed.rows.len(), 1);
+        assert_eq!(parsed.raw_rows, 2);
+        assert_eq!(decide_next(&parsed, 0), SweepDecision::Continue { start_ms: 1_700_000_000_000 });
+        assert!(sweep_round_limit_reached(MAX_SWEEP_ROUNDS));
+        assert!(!sweep_round_limit_reached(MAX_SWEEP_ROUNDS - 1));
+    }
+
+    #[test]
     fn boundary_rows_are_deduped_and_detail_keeps_the_newest() {
         let first = OfficialUsagePage {
             rows: vec![official("r1", 10, 1.0), official("r2", 20, 1.0)],
+            raw_rows: 2,
             total: None,
             page_size: 2,
         };
         let second = OfficialUsagePage {
             rows: vec![official("r2", 20, 1.0), official("r3", 30, 1.0)],
+            raw_rows: 2,
             total: None,
             page_size: 2,
         };
