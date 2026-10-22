@@ -386,8 +386,20 @@ fn validate_vault_bytes(bytes: &[u8]) -> Result<(), String> {
         .get("version")
         .and_then(Value::as_u64)
         .ok_or("vault payload has no version")?;
-    if version != 2 && version != 3 {
-        return Err(format!("unsupported vault version {version}"));
+    match version {
+        3 => {
+            crate::keyvault_v3::parse_v3_value(value.clone())
+                .map_err(|error| format!("invalid v3 vault: {error}"))?;
+        }
+        2 => {
+            if value.get("kdf").and_then(Value::as_object).is_none() {
+                return Err("v2 vault has no kdf".into());
+            }
+            if value.get("entries").and_then(Value::as_array).is_none() {
+                return Err("v2 vault has no entries".into());
+            }
+        }
+        other => return Err(format!("unsupported vault version {other}")),
     }
     Ok(())
 }
@@ -567,6 +579,23 @@ pub fn apply(
     selection: Selection,
     secrets: &mut dyn BackupSecrets,
 ) -> Result<ApplyResult, String> {
+    apply_with(base, bytes, password, selection, secrets, |_| Ok(()))
+}
+
+/// Same as [`apply`], but the settings section is handed to `apply_settings`
+/// inside the same transaction. If that callback fails, account files, OS
+/// secrets and the vault file are rolled back before returning.
+pub fn apply_with<F>(
+    base: &Path,
+    bytes: &[u8],
+    password: &str,
+    selection: Selection,
+    secrets: &mut dyn BackupSecrets,
+    apply_settings: F,
+) -> Result<ApplyResult, String>
+where
+    F: FnOnce(&BTreeMap<String, Value>) -> Result<(), String>,
+{
     let data = decode_envelope(bytes, password)?;
     let settings = if selection.settings {
         data.settings.clone().ok_or("backup has no settings section")?
@@ -642,6 +671,9 @@ pub fn apply(
             let path = base.join("keyvault.json");
             old_vault = Some(snapshot_file(&path)?);
             write_bytes_atomic(&path, vault)?;
+        }
+        if selection.settings {
+            apply_settings(&settings)?;
         }
         Ok(())
     })();
@@ -769,7 +801,7 @@ mod tests {
         .unwrap();
         std::fs::write(
             base.join("keyvault.json"),
-            r#"{"version":3,"sealed":"already-encrypted"}"#,
+            r#"{"version":2,"kdf":{},"canary_nonce_b64":"","canary_b64":"","entries":[]}"#,
         )
         .unwrap();
         let mut secrets = MapSecrets(BTreeMap::new(), true);
@@ -906,6 +938,58 @@ mod tests {
         let target = temp_base("bad-secret");
         let mut secrets = MapSecrets(BTreeMap::new(), true);
         assert!(apply(&target, &bytes, "backup-pass-123", Selection { accounts: true, keys: false, settings: false }, &mut secrets).is_err());
+        let _ = std::fs::remove_dir_all(&target);
+    }
+
+    #[test]
+    fn settings_failure_rolls_back_accounts_secrets_and_vault() {
+        let source = temp_base("settings-rollback-source");
+        let secrets = seed(&source);
+        let bytes = export_with_password(&source, settings(), Selection::all(), &secrets, "backup-pass-123").unwrap();
+
+        let target = temp_base("settings-rollback-target");
+        std::fs::create_dir_all(target.join("accounts")).unwrap();
+        std::fs::write(
+            target.join("accounts").join("workbuddy.json"),
+            r#"[{"id":"local","label":"Keep"}]"#,
+        )
+        .unwrap();
+        std::fs::write(
+            target.join("keyvault.json"),
+            r#"{"version":2,"kdf":{},"canary_nonce_b64":"","canary_b64":"","entries":[]}"#,
+        )
+        .unwrap();
+        let mut target_secrets = MapSecrets(
+            BTreeMap::from([("account:workbuddy@abc".to_string(), "old".to_string())]),
+            true,
+        );
+        let error = apply_with(
+            &target,
+            &bytes,
+            "backup-pass-123",
+            Selection::all(),
+            &mut target_secrets,
+            |_| Err("config write failed".into()),
+        )
+        .unwrap_err();
+        assert!(error.contains("config write failed"));
+        let restored: Value = serde_json::from_str(
+            &std::fs::read_to_string(target.join("accounts").join("workbuddy.json")).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(restored.as_array().unwrap().len(), 1);
+        assert_eq!(restored[0]["id"], "local");
+        assert_eq!(
+            target_secrets.0.get("account:workbuddy@abc").map(String::as_str),
+            Some("old")
+        );
+        let vault: Value = serde_json::from_str(
+            &std::fs::read_to_string(target.join("keyvault.json")).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(vault.get("version").and_then(Value::as_u64), Some(2));
+        assert_eq!(vault.get("entries").and_then(Value::as_array).map(Vec::len), Some(0));
+        let _ = std::fs::remove_dir_all(&source);
         let _ = std::fs::remove_dir_all(&target);
     }
 
