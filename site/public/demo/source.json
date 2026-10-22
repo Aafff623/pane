@@ -3,7 +3,7 @@
   "files": {
     "index.html": "a686abfed4ab1651367219661655d433ac0f207e0fd13fe5e5291cc98d579bb2",
     "src/main.ts": "e8da83cdbeed2494c40b7a1f06951541c7737cd9c191991abc0fc32fc9dcb387",
-    "src/styles.css": "57fde1fa955c521218d1bb30a764c81ae6c7cf19aa39f792b4e2a58c43d7e0d9",
+    "src/styles.css": "5afbc0206e2157bf4a7a298f3d6b48724ef52fd6d01eca5d40f56ebfc37587f8",
     "src/i18n.ts": "c4250dffda029853e20fe0cdce86d24dde7238e42da0e966dde7a24f4f792c1d",
     "src/providerCatalog.ts": "9b1ce82fa3b4cac73f4db0cdf456e3b38cd6af242e33f0bb56c602ed45b7bfdd"
   }

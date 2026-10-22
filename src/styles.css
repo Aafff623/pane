@@ -6278,9 +6278,14 @@ body.no-glass .cust-dock {
   display: inline-flex;
   align-items: center;
   gap: 2px;
-  margin-left: 5px;
-  font-size: 9px;
+  margin-left: 6px;
+  padding: 1px 6px;
+  border: 1px solid color-mix(in srgb, var(--foreground) 10%, transparent);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--foreground) 4%, transparent);
+  font-size: 8.5px;
   font-weight: 500;
+  line-height: 1.4;
   color: var(--muted-foreground);
   font-variant-numeric: tabular-nums;
   cursor: help;
@@ -7679,14 +7684,19 @@ article.provider.card-highlight {
 /* Estimated values are a data-quality footnote, not an alert. Keep the
    label quiet, with a single amber approximation mark and the tooltip. */
 .est-badge.est-estimate {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  height: 15px;
   margin-left: 6px;
-  padding: 0;
-  border: 0;
-  border-radius: 0;
-  background: none;
+  padding: 0 6px;
+  border: 1px solid color-mix(in srgb, var(--foreground) 10%, transparent);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--foreground) 4%, transparent);
   color: var(--muted-foreground);
-  font-size: 9.5px;
+  font-size: 9px;
   font-weight: 500;
+  line-height: 1;
   letter-spacing: 0;
   vertical-align: 1px;
   cursor: help;
