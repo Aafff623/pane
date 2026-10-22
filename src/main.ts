@@ -1395,7 +1395,12 @@ async function reloadConfigFromBackend(): Promise<void> {
   const layoutChanged = JSON.stringify(config.layout ?? null) !== JSON.stringify(fresh.layout ?? null);
   config = fresh;
   if (hideUnconfiguredChanged || layoutChanged) requestRender();
-  if (layoutChanged && customizeOpen) renderDrawerBody();
+  if (layoutChanged) {
+    if (customizeOpen) renderDrawerBody();
+    if (IS_PANEL_FORM && authViewActive) renderAuthCenter();
+    const keyRows = document.querySelector("#settings-keys-rows");
+    if (keyRows && !keyRows.closest("[hidden]")) renderSettingsProviderKeys();
+  }
   pruneEmptyCardGroups();
   // The other window may have just handed us a "open this family" request.
   applyPanelIntent();
@@ -1989,10 +1994,19 @@ function setFamilyCategory(family: string, category: OverviewCategory): void {
   requestRender();
 }
 
+const NOTE_MAX_CODE_POINTS = 48;
+
+/// One display-note format for every writer: a single line, sliced by code
+/// points (never splitting an emoji/surrogate), capped so a pill cannot grow
+/// without bound. Empty means "fall back to the account/provider name".
+function normalizeNote(note: string): string {
+  return [...note.replace(/\s+/g, " ").trim()].slice(0, NOTE_MAX_CODE_POINTS).join("");
+}
+
 /// The card's user note (custom display name). Unlike the group tag, notes
 /// live on the exact card id — parallel-account siblings stay independent.
 function cardNote(cardId: string): string {
-  return (config.layout?.providers[cardId]?.note ?? "").trim();
+  return normalizeNote(config.layout?.providers[cardId]?.note ?? "");
 }
 
 /// Display name for a card: its note when set, otherwise the fallback.
@@ -2000,10 +2014,25 @@ function notedName(cardId: string, fallback: string): string {
   return cardNote(cardId) || fallback;
 }
 
-/// Account notes follow the managed credential identity, including the first
-/// account displayed on a bare family card. Native CLI sources without a
-/// managed @-identity keep a synthetic sibling key so their notes cannot
-/// retitle the provider.
+/// Every key a display note for this account may live under: the stable id,
+/// the legacy synthetic default slot, or (for a bare family id) the first
+/// managed account. Reading through aliases keeps notes written before the
+/// account cache was populated visible after it arrives.
+function accountNoteKeys(accountId: string): string[] {
+  const family = providerFamily(accountId);
+  const list = accountsCache.get(family) ?? [];
+  if (accountId.includes("@")) {
+    const keys = [accountId];
+    if (list[0]?.id === accountId) keys.push(`${family}@__default__`);
+    return keys;
+  }
+  const first = list[0]?.id;
+  return [first, `${accountId}@__default__`].filter((key): key is string => Boolean(key));
+}
+
+/// Canonical write key: prefer the stable managed identity, then the legacy
+/// synthetic default slot. Readers use accountNoteKeys so either placement is
+/// visible while the account list is still loading.
 function accountNoteKey(accountId: string): string {
   if (accountId.includes("@")) return accountId;
   const stableId = managedAccountForCard(accountId, accountId, accountsCache.get(accountId) ?? [])?.id;
@@ -2012,7 +2041,61 @@ function accountNoteKey(accountId: string): string {
 
 /// An account's OWN note (never the provider's). Empty when unset.
 function accountNote(accountId: string): string {
-  return cardNote(accountNoteKey(accountId));
+  for (const key of accountNoteKeys(accountId)) {
+    const note = cardNote(key);
+    if (note) return note;
+  }
+  return "";
+}
+
+function emitNoteUpdate(keys: string[], note: string): void {
+  void emit("account-note-updated", { keys, note }).catch(() => {});
+}
+
+function setAccountNote(accountId: string, note: string): void {
+  const canonical = accountNoteKey(accountId);
+  const normalized = normalizeNote(note);
+  const keys = [canonical, ...accountNoteKeys(accountId).filter((key) => key !== canonical)];
+  config.layout ??= { providerOrder: [], providers: {} };
+  config.layout.providers[canonical] ??= {
+    metricOrder: [], onDemand: [], hidden: [], starred: [], expanded: false,
+  };
+  if (normalized) config.layout.providers[canonical].note = normalized;
+  else delete config.layout.providers[canonical].note;
+  for (const alias of keys.slice(1)) {
+    const row = config.layout.providers[alias];
+    if (row?.note) delete row.note;
+  }
+  void patchConfig({ layout: config.layout });
+  emitNoteUpdate(keys, normalized);
+  requestRender();
+  if (customizeOpen) renderDrawerBody();
+}
+
+/// Change one account's display name everywhere. The config note is the
+/// cross-window source; the backend label is kept in sync (best effort) so
+/// auth-center/settings readers that only know the stored account agree.
+function syncAccountName(accountId: string, name: string): void {
+  const normalized = normalizeNote(name);
+  setAccountNote(accountId, normalized);
+  if (!normalized || !accountId.includes("@")) return;
+  const family = providerFamily(accountId);
+  void invoke("account_rename", { provider: family, cardId: accountId, label: normalized })
+    .then(() => notifyAccountsChanged(family))
+    .catch(() => {});
+}
+
+/// The name an overview/detail row should show for the account it actually
+/// presents. A stable account id resolves its own note; a bare default card
+/// uses the default account's note when one exists, otherwise the provider
+/// note/title. This keeps account notes visible in overview/expiry details
+/// without renaming the provider card itself.
+function shownDisplayName(cardSnap: Snapshot, shownSnap: Snapshot, family: string, fallback: string): string {
+  const list = accountsCache.get(family) ?? [];
+  if (shownSnap.id.includes("@")) return labelForAccount(shownSnap.id, list) || fallback;
+  const first = list[0]?.id;
+  if (first && accountNote(first)) return labelForAccount(first, list) || fallback;
+  return notedName(cardSnap.id, fallback);
 }
 
 // Keep compact labels readable without letting a long custom note stretch a
@@ -2036,6 +2119,7 @@ function fitProviderNames(): void {
 }
 
 function setCardNote(cardId: string, note: string): void {
+  const normalized = normalizeNote(note);
   config.layout ??= { providerOrder: [], providers: {} };
   if (!config.layout.providers[cardId]) {
     config.layout.providers[cardId] = {
@@ -2046,9 +2130,10 @@ function setCardNote(cardId: string, note: string): void {
       expanded: false,
     };
   }
-  if (note) config.layout.providers[cardId].note = note;
+  if (normalized) config.layout.providers[cardId].note = normalized;
   else delete config.layout.providers[cardId].note;
   void patchConfig({ layout: config.layout });
+  emitNoteUpdate([cardId], normalized);
   requestRender();
 }
 
@@ -2956,10 +3041,10 @@ function renderCard(s: Snapshot): string {
         .map((id, index) => {
           const isDefaultAcct = id === s.id || index === 0;
           const list = accountsCache.get(family) ?? [];
-          const entry = managedAccountForCard(family, id, list);
+          const entry = managedAccountForCard(family, id, list) ?? (id === family ? list[0] : undefined);
           const note = accountNote(id);
           const label = isDefaultAcct
-            ? (note || entry?.label?.trim() || list[0]?.label?.trim() || t("customize.acctDefaultShort"))
+            ? (note || entry?.label?.trim() || entry?.email?.trim() || t("customize.acctDefaultShort"))
             : labelForAccount(id, list);
           const on = id === shown.id;
           const dot = peakTintedDot(family, accountHealthDot(id));
@@ -2973,7 +3058,7 @@ function renderCard(s: Snapshot): string {
           const isNamed = isDefaultAcct || hasCustomName;
           const tabLabel = compactTabs && !isNamed ? String(index + 1) : label;
           const tabTitle = `${label} · ${dotTitle}`;
-          return `<button type="button" class="card-account-tab${on ? " on" : ""}${compactTabs && !isNamed ? " compact" : ""}${compactTabs && isNamed ? " compact-noted" : ""}" data-card-account="${family}|${escapeHtml(id)}" title="${escapeHtml(tabTitle)}" aria-label="${escapeHtml(label)}"><span class="acct-dot ${dot}"></span><span class="card-account-tab-label" ${compactLabelStyle(tabLabel, 10.5, 8)}>${escapeHtml(tabLabel)}</span></button>`;
+          return `<button type="button" class="card-account-tab${on ? " on" : ""}${compactTabs && !isNamed ? " compact" : ""}${compactTabs && isNamed ? " compact-noted" : ""}" data-card-account="${family}|${escapeHtml(id)}" title="${escapeHtml(tabTitle)}" aria-label="${escapeHtml(label)}"><span class="acct-dot ${dot}"></span><span class="card-account-tab-label" ${compactLabelStyle(tabLabel, 10.5, 10)}>${escapeHtml(tabLabel)}</span></button>`;
         })
         .join("")}</div>`;
       if (accountIds.length <= 1) {
@@ -3346,7 +3431,8 @@ function othersFoldUsd(tab: SpendTab): number {
 }
 
 function providerNameForSpend(id: string): string {
-  return lastSpend.find((s) => s.id === id)?.name || providerDisplayName(providerFamily(id)) || id;
+  const fallback = lastSpend.find((s) => s.id === id)?.name || providerDisplayName(providerFamily(id)) || id;
+  return id.includes("@") ? (accountNote(id) || fallback) : notedName(id, fallback);
 }
 
 function historyEntries(range: Exclude<RangeTab, "d30">): DonutEntry[] {
@@ -4780,7 +4866,7 @@ function renderQuotaOverview(): string {
       const origin = shownSnap.dashboard_url ?? undefined;
       const visual = providerVisual(jumpId || family, origin);
       const icon = visual?.iconSvg ?? `<span class="icon-fallback">${escapeHtml(cardSnap.name.slice(0, 2))}</span>`;
-      const displayName = notedName(jumpId, providerDisplayName(family) || cardSnap.name);
+      const displayName = shownDisplayName(cardSnap, shownSnap, family, providerDisplayName(family) || cardSnap.name);
       const accountCount = overviewAccountCount(family);
       const accountBadge = overviewKeyBadgeHtml(shownSnap) || overviewAccountBadgeHtml(accountCount, accountSummary);
       // Accounts or api-keys, whichever this family folds (never both).
@@ -4915,8 +5001,8 @@ function renderQuotaOverview(): string {
     const origin = shownSnap.dashboard_url ?? undefined;
     const visual = providerVisual(jumpId || family, origin);
     const icon = visual?.iconSvg ?? `<span class="icon-fallback">${escapeHtml(cardSnap.name.slice(0, 2))}</span>`;
-    const displayName = notedName(jumpId, providerDisplayName(family) || cardSnap.name);
-    const nameClass = cardNote(jumpId) ? " is-note" : "";
+    const displayName = shownDisplayName(cardSnap, shownSnap, family, providerDisplayName(family) || cardSnap.name);
+    const nameClass = accountNote(shownSnap.id) || cardNote(jumpId) ? " is-note" : "";
     const accountCount = overviewAccountCount(family);
     const accountBadge = overviewKeyBadgeHtml(shownSnap) || overviewAccountBadgeHtml(accountCount, accountSummary);
     // Accounts or api-keys, whichever this family folds (never both).
@@ -5031,7 +5117,7 @@ function renderQuotaOverview(): string {
     const origin = shownSnap.dashboard_url ?? undefined;
     const visual = providerVisual(jumpId || family, origin);
     const icon = visual?.iconSvg ?? `<span class="icon-fallback">${escapeHtml(cardSnap.name.slice(0, 2))}</span>`;
-    const displayName = notedName(jumpId, providerDisplayName(family) || cardSnap.name);
+    const displayName = shownDisplayName(cardSnap, shownSnap, family, providerDisplayName(family) || cardSnap.name);
     // A derived ceiling has no window; the chip states that instead of a
     // bare "Quota" that would imply a measured period.
     const win = quota.window === null
@@ -6290,22 +6376,20 @@ function openGroupMenu(
     }
     const acctNoteBtn = (e.target as HTMLElement).closest<HTMLElement>("[data-card-acct-note]");
     if (acctNoteBtn) {
-      // Account-level note: rides the account's own key — the default (bare)
-      // account parks under family@__default__ so it never retitles the
-      // provider (see accountNoteKey).
+      // Account-level note: one canonical display name, read through aliases
+      // so a note written before the account cache loaded is not orphaned.
       const acctId = acctNoteBtn.dataset.cardAcctNote!;
-      const key = accountNoteKey(acctId);
       const name = labelForAccount(acctId, accountsCache.get(fam) ?? []);
       close();
       void appPrompt({
         title: t("customize.notePrompt", { name }),
         placeholder: t("customize.notePh"),
-        initial: cardNote(key),
+        initial: accountNote(acctId),
         confirmLabel: t("settings.save"),
         allowEmpty: true,
       }).then((note) => {
         if (note === null) return;
-        setCardNote(key, note);
+        syncAccountName(acctId, note);
       });
       return;
     }
@@ -8611,19 +8695,21 @@ function refreshAccounts(family: string): void {
 }
 
 /// Returns the display label for an account id. Priority:
-/// 1. saved label (user-set name)
-/// 2. email (for imported accounts with a known email)
-/// 3. fingerprint suffix (id after the @)
-/// 4. bare id as last resort
+/// 1. display note (the shared config.layout value)
+/// 2. saved backend label
+/// 3. email (for imported accounts with a known email)
+/// 4. localized "Account N" — never a hash/masked token, which reads as
+///    garbled text and leaks more identity than the user asked for.
 function labelForAccount(id: string, list: AccountEntry[]): string {
-  // A per-account note (renamed from the account's own context menu) beats
-  // the stored label — that's the whole point of renaming one capsule.
   const note = accountNote(id);
   if (note) return note;
-  const entry = managedAccountForCard(providerFamily(id), id, list);
+  const family = providerFamily(id);
+  const entry = managedAccountForCard(family, id, list) ?? list.find((row) => row.id === id);
   if (entry?.label) return entry.label;
   if (entry?.email) return entry.email;
-  return id.split("@")[1]?.slice(0, 8) ?? id;
+  const index = list.findIndex((row) => row.id === id);
+  if (index >= 0) return t("customize.acctDefaultName", { n: index + 1 });
+  return providerDisplayName(family) || t("customize.acctDefaultShort");
 }
 
 /// Cursor add-account dialog: three tabs mirroring cockpit's import paths —
@@ -9022,6 +9108,10 @@ function reconcileAccountLayout(family: string, list: AccountEntry[]): boolean {
   }
   for (const id of Object.keys(config.layout.providers)) {
     if (isFamilyAccount(id) && !active.has(id)) {
+      // A display note is identity-bound and must survive archive/restore,
+      // deletion, or a transiently empty account_list. Only drop the stale
+      // row when it carries no note.
+      if (config.layout.providers[id]?.note) continue;
       delete config.layout.providers[id];
       changed = true;
     }
@@ -9879,7 +9969,7 @@ function renderAccountConfig(id: string): string {
   return `<div class="cust-config cust-form account-config">
       <div class="form-field">
         <span class="form-label">${escapeHtml(t("customize.acctNoteLabel"))}</span>
-        <input class="form-input" type="text" data-acct-note-edit="${escapeHtml(id)}" value="${escapeHtml(note)}" placeholder="${escapeHtml(entry.label || t("customize.notePh"))}" autocomplete="off" spellcheck="false" />
+        <input class="form-input" type="text" data-acct-note-edit="${escapeHtml(id)}" value="${escapeHtml(note)}" placeholder="${escapeHtml(entry.label || t("customize.notePh"))}" maxlength="${NOTE_MAX_CODE_POINTS}" autocomplete="off" spellcheck="false" />
         <div class="form-help">${escapeHtml(t("customize.notePh"))}</div>
       </div>
       <div class="form-field">
@@ -10081,10 +10171,14 @@ function renderCustomize(): string {
   // A-Z by English display name, locale-independent. Card order is owned by
   // dragging cards on the main view; the drawer is for enabling,
   // configuring and per-row management, so a stable sorted list reads best.
-  const nameOf = (id: string): string =>
-    ALL_PROVIDERS.find(([pid]) => pid === id)?.[1] ??
-    lastSnapshots.find((s) => s.id === id)?.name ??
-    id;
+  const nameOf = (id: string): string => {
+    const fallback =
+      ALL_PROVIDERS.find(([pid]) => pid === id)?.[1] ??
+      lastSnapshots.find((s) => s.id === id)?.name ??
+      onaCardName(id) ??
+      id;
+    return notedName(id, fallback);
+  };
   const ids = [...(config.layout?.providerOrder ?? ALL_PROVIDERS.map(([id]) => id))]
     .filter((id) => {
       const snapshot = lastSnapshots.find((s) => s.id === id);
@@ -10149,8 +10243,7 @@ function renderCustomize(): string {
       // there's no way to stop those calls.
       // Dynamic account cards carry their name in the snapshot
       // ("Claude — Org"); static providers come from the fixed list.
-      const name =
-        ALL_PROVIDERS.find(([pid]) => pid === id)?.[1] ?? snapshot?.name ?? onaCardName(id) ?? id;
+      const name = nameOf(id);
       const L = providerLayout(id);
       // Per-row checkbox is exact-id only: family `onenewapi` stays its
       // own toggle, and key cards keep independent enable state while
@@ -11914,7 +12007,7 @@ async function handleCustomizeClick(target: HTMLElement): Promise<boolean> {
       .closest(".cust-config")
       ?.querySelector<HTMLInputElement>("[data-acct-note-edit]");
     if (id && input) {
-      setCardNote(accountNoteKey(id), input.value.trim());
+      syncAccountName(id, input.value);
       if (customizeOpen) renderDrawerBody();
       const status = document.querySelector("#status");
       if (status) status.textContent = t("customize.acctRenamed");
@@ -14319,7 +14412,7 @@ function renderSettingsProviderKeys(): void {
   root.replaceChildren();
   // A–Z by display name; the rail beside the list follows this exact order.
   const families = settingsCredentialFamilies().sort((a, b) =>
-    providerDisplayName(a).localeCompare(providerDisplayName(b), "en"),
+    notedName(a, providerDisplayName(a)).localeCompare(notedName(b, providerDisplayName(b)), "en"),
   );
   for (const family of families) root.append(settingsKeyRow(family));
   renderSkeyAz();
@@ -14331,10 +14424,11 @@ function settingsKeyRow(family: string): HTMLElement {
   const multi = supportsExtraAccounts(family);
   const configured = multi ? accounts.length > 0 : status?.storedKey === true;
 
+  const providerName = notedName(family, providerDisplayName(family));
   const item = document.createElement("div");
   item.className = "skey-item";
   item.dataset.skeyFamily = family;
-  item.dataset.skeyLetter = skeyLetter(providerDisplayName(family));
+  item.dataset.skeyLetter = skeyLetter(providerName);
 
   const head = document.createElement("div");
   head.className = "skey-head";
@@ -14343,7 +14437,7 @@ function settingsKeyRow(family: string): HTMLElement {
   icon.innerHTML = providerVisual(family)?.iconSvg ?? uiIcon("key");
   const name = document.createElement("span");
   name.className = "skey-name";
-  name.textContent = providerDisplayName(family);
+  name.textContent = providerName;
   const state = document.createElement("span");
   state.className = `skey-state${configured ? " ok" : ""}`;
   // Families without a key are read from a local sign-in (Claude Code,
@@ -14666,7 +14760,10 @@ function settingsAccountRow(family: string, entry: AccountEntry, _index: number)
   const row = document.createElement("div");
   row.className = "skey-account";
   row.dataset.skeyAccount = entry.id ?? "";
-  const displayName = (entry.id ? accountNote(entry.id) : "") || entry.label || entry.email || entry.maskedKey;
+  const familyAccounts = accountsCache.get(family) ?? [];
+  const displayName = entry.id
+    ? labelForAccount(entry.id, familyAccounts.some((row) => row.id === entry.id) ? familyAccounts : [entry])
+    : (entry.label || entry.email || entry.maskedKey);
   const label = document.createElement("span");
   label.className = "skey-acct-label";
   label.textContent = displayName;
@@ -14707,11 +14804,11 @@ function settingsAccountRow(family: string, entry: AccountEntry, _index: number)
       confirmLabel: t("settings.save"),
     }).then(async (next) => {
       if (next == null || next === displayName) return;
+      // Write the shared display note first so both windows update even if
+      // the backend label write is rejected; the label stays the fallback.
+      if (entry.id) setAccountNote(entry.id, next);
       try {
-        await invoke("account_rename", { provider: family, cardId: entry.id, label: next });
-        // An explicit rename replaces the Customize display-note override;
-        // otherwise an old note would keep shadowing the new label.
-        if (entry.id) setCardNote(accountNoteKey(entry.id), "");
+        await invoke("account_rename", { provider: family, cardId: entry.id, label: normalizeNote(next) });
       } catch (e) {
         console.error("account rename failed:", e);
       }
@@ -16552,10 +16649,12 @@ function renderAuthCenter(): void {
 }
 
 function authRowName(family: string, acct: AuthAccountRow): string {
+  // Same display-note resolver as the dashboard/settings; never show a
+  // fingerprint fragment as a person's account name.
   return (
+    accountNote(acct.id) ||
     acct.label.trim() ||
     acct.email ||
-    acct.id.split("@")[1]?.slice(0, 8) ||
     providerDisplayName(family)
   );
 }
@@ -16680,7 +16779,7 @@ function authRowHtml(family: string, acct: AuthAccountRow, index: number): strin
       : `<button class="mini-btn" type="button" data-auth-enable="${escapeHtml(acct.id)}">${escapeHtml(t("auth.enableCard"))}</button>`
     : `<button class="mini-btn" type="button" data-auth-menu="${escapeHtml(family)}|${index}" title="${escapeHtml(t("auth.more"))}" aria-label="${escapeHtml(t("auth.more"))}">⋯</button>`;
   return `<div class="auth-row" data-auth-row="${escapeHtml(acct.id)}">
-    <span class="auth-avatar" aria-hidden="true">${escapeHtml(name.charAt(0) || "?")}</span>
+    <span class="auth-avatar" aria-hidden="true">${escapeHtml([...name][0] || "?")}</span>
     <div class="auth-id">
       <div class="auth-name-line">
         <span class="auth-name" title="${escapeHtml(name)}">${escapeHtml(name)}</span>
@@ -16745,7 +16844,7 @@ function authFlowHtml(family: string): string {
 
 function authGroupHtml(group: AuthFamilyGroup): string {
   const family = group.family;
-  const name = providerDisplayName(family);
+  const name = notedName(family, providerDisplayName(family));
   const icon = providerVisual(family)?.iconSvg ?? "";
   // Every OAuth family (codex/copilot/grok) accumulates one account per
   // completed sign-in in its own store, so they all behave like the
@@ -18264,6 +18363,32 @@ document.querySelector("#settings-btn")!.addEventListener("click", () => {
     accountsCache.delete(family);
     archivedAccountsCache.delete(family);
     refreshAccounts(family);
+    if (IS_PANEL_FORM && authViewActive && !authFlowBusy()) void loadAuthCenter();
+  });
+
+  // Notes travel separately from the full config snapshot. A direct event
+  // updates the other webview even while its config write queue is inside the
+  // echo-suppression window, and clears any old legacy alias key.
+  void listen<{ keys?: string[]; note?: string }>("account-note-updated", (event) => {
+    const keys = (event.payload?.keys ?? []).filter((key): key is string => typeof key === "string" && Boolean(key));
+    if (!keys.length) return;
+    const [canonical, ...aliases] = keys;
+    const note = normalizeNote(event.payload?.note ?? "");
+    config.layout ??= { providerOrder: [], providers: {} };
+    config.layout.providers[canonical] ??= {
+      metricOrder: [], onDemand: [], hidden: [], starred: [], expanded: false,
+    };
+    if (note) config.layout.providers[canonical].note = note;
+    else delete config.layout.providers[canonical].note;
+    for (const alias of aliases) {
+      const row = config.layout.providers[alias];
+      if (row?.note) delete row.note;
+    }
+    requestRender();
+    if (customizeOpen) renderDrawerBody();
+    if (IS_PANEL_FORM && authViewActive) renderAuthCenter();
+    const keyRows = document.querySelector("#settings-keys-rows");
+    if (keyRows && !keyRows.closest("[hidden]")) renderSettingsProviderKeys();
   });
 
   // The backend's background loop refreshes even while this window is

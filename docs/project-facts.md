@@ -540,10 +540,16 @@ changes.
 - Account lists are backend state, not config: frontend mutations emit
   `accounts-updated` so the Settings panel and popover drop their separate
   `accountsCache` entries. Display notes live in
-  `config.layout.providers[<card id>].note`; an explicit `account_rename`
-  clears that override so the stored label wins. OAuth device/browser
-  families (codex/grok/copilot/kiro/windsurf/trae/zed) route Customize to
-  Settings/Auth center instead of rendering a second login UI.
+  `config.layout.providers[<card id>].note`; `accountNote` reads the stable
+  id plus the legacy `@__default__` alias, writes through `setAccountNote`
+  to one canonical key, and falls back to label → email → localized
+  `Account N` (never a fingerprint/masked token). Notes are single-line,
+  capped at 48 code points, survive reconcile/archive/delete, and are shared
+  by Settings, Customize, dashboard pills, overview/expiry details, spend
+  details and the auth center. Provider notes remain the card-title override.
+  OAuth device/browser families (codex/grok/copilot/kiro/windsurf/trae/zed)
+  route Customize to Settings/Auth center instead of rendering a second
+  login UI.
 - Evidence: legacy-vault resurrection red/green, archive/delete repeated
   refresh and failed migration tests, relay retirement failure test, account
   alias regression, and a headless Customize routing check. Latest full

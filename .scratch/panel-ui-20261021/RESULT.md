@@ -103,3 +103,12 @@ Status: awaiting-owner-acceptance
 - 真实现场：设置页改账号备注后，弹窗 Customize 仍显示旧备注。根因有两个：两个 WebView 各自缓存 `account_list`，设置窗口的改名没有通知弹窗；Customize 的“备注名”写 backend label，而卡片显示优先读 `config.layout` 的 note。
 - 修复：新增 `accounts-updated` 跨窗口事件，账号增删改归档恢复都会让两个窗口丢掉并重取各自缓存；Customize 账号备注统一写 `config.layout`；设置页账号行也显示同一份显示备注，改名会清理旧 override 并广播；`config-updated` 检测 layout 变化后重绘 Customize；Codex/Grok/Copilot/Kiro/Windsurf/Trae/Zed 在 Customize 只显示“去设置添加或认证”；账号行 `?`/⚙ 图标按钮缩到 24px。
 - 验证：frontend 79 passed；`pnpm build` 通过；demo 重建成功且 provenance 2 passed。官网 agent 的 `site/` 静态改动未触碰、未纳入本轮提交。真实双账号认证仍待 owner。
+
+
+## 2026-10-22 备注解析、截断与全表面同步
+
+- 审计发现三个结构性问题：provider note 与 account note 两套 key；账号缓存未就绪时写入 `@__default__` 后读不到；渲染回退到 fingerprint / masked key，长备注又没有统一截断。
+- 修复：账号显示名统一为“稳定 id note → 旧 `@__default__` 别名 → backend label → email → 本地化账号 N”；`setAccountNote` 归一到稳定 id 并清理旧别名；设置改名、Customize 备注、卡片右键备注、授权中心共用同一解析器；provider note 继续只负责 Provider/卡片标题。
+- 详情/概览：概览 tile、条形视图、到期提醒、spend 明细改为按实际展示账号解析备注；账号胶囊最低字号提高到 10px，账号子行、到期名称、设置 Provider 名统一 ellipsis；备注单行化并限制 48 个码点。
+- 保留：`reconcileAccountLayout` 不再删除带 note 的账号条目，归档/删除/刷新不会丢备注。
+- 验证：frontend 82 passed；`pnpm build`、demo provenance 通过。真实 UI 验收仍由 owner 完成。

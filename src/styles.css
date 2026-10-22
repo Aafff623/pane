@@ -1062,12 +1062,14 @@ body.settings-open #settings {
 }
 
 .skey-name {
-  /* Provider names are short; never truncate the final glyph ("DeepSeek",
-     "Codex"). The state text on the right is the flexible column. */
-  flex: 0 0 auto;
-  min-width: max-content;
-  overflow: visible;
-  text-overflow: clip;
+  /* Provider names are usually short, but a display note can be longer;
+     keep the row intact with ellipsis instead of letting the name push the
+     state/actions out of the panel. */
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 46%;
+  overflow: hidden;
+  text-overflow: ellipsis;
   white-space: nowrap;
   font-size: 12.5px;
   font-weight: 600;
@@ -4279,10 +4281,21 @@ body.ui-scaled .popover {
 }
 
 .cust-account-child .acct-child-label {
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: min(100%, 240px);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   font-weight: 600;
 }
 
 .cust-account-child .acct-child-key {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   color: var(--muted-foreground);
 }
 
@@ -6953,10 +6966,11 @@ body.no-glass .group-menu {
 }
 
 .expiring-row .expiring-name {
+  flex: 1 1 auto;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
-  white-space: normal;
-  overflow-wrap: anywhere;
+  white-space: nowrap;
 }
 
 .expiring-row .expiring-win {
@@ -7301,12 +7315,13 @@ body.no-glass .group-menu {
 }
 
 .overview-item-name {
+  min-width: 0;
+  max-width: 100%;
   font-size: var(--compact-label-size, 10.5px);
   font-weight: 500;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  max-width: none;
 }
 
 .overview-item-head .overview-item-name {
@@ -7550,7 +7565,7 @@ article.provider.card-highlight {
   align-items: center;
   gap: 4px;
   min-width: 0;
-  font-size: 8px;
+  font-size: 9px;
   color: var(--muted-foreground);
 }
 
@@ -8966,12 +8981,14 @@ body.reduce-anim .spend-bolt.tier-3 svg {
    fixed number cell, with auto-shrinking label (minimum 8px, then clip). */
 .card-account-tab.compact-noted {
   width: auto;
-  max-width: 72px;
-  padding: 3px 7px;
-  font-size: 10px;
+  max-width: 108px;
+  padding: 3px 8px;
+  font-size: 10.5px;
   text-align: left;
 }
 .card-account-tab-label {
+  display: block;
+  max-width: 100%;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;

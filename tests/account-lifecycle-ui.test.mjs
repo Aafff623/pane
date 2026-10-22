@@ -140,8 +140,9 @@ test('default card menus resolve and capture the managed stable identity', () =>
 test('default account notes follow credential identity after deletion and promotion', () => {
   const accountsCache = new Map([['minimax', [{ id: 'minimax@a', label: '' }, { id: 'minimax@b', label: '11-4' }]]]);
   const config = { layout: { providers: { 'minimax@a': { note: 'Old subscription' } } } };
-  const context = load(['managedAccountForCard', 'accountNoteKey', 'accountNote', 'cardNote'], {
+  const context = load(['normalizeNote', 'managedAccountForCard', 'accountNoteKeys', 'accountNoteKey', 'accountNote', 'cardNote'], {
     accountsCache, config, providerDefinition: family => providerCatalog.find(p => p.familyId === family),
+    providerFamily: id => id.split('@')[0], NOTE_MAX_CODE_POINTS: 48,
   });
   assert.equal(context.accountNoteKey('minimax'), 'minimax@a');
   assert.equal(context.accountNote('minimax'), 'Old subscription');
@@ -150,7 +151,7 @@ test('default account notes follow credential identity after deletion and promot
   assert.equal(context.accountNote('minimax'), '');
 });
 
-test('layout reconciliation keeps the default account note but prunes deleted identities and pins', () => {
+test('layout reconciliation keeps account notes and prunes pins', () => {
   const config = {disabled:[],layout:{providerOrder:['minimax','minimax@deleted'],providers:{
     minimax:{pinnedAccount:'minimax@deleted'},'minimax@a':{note:'A'},'minimax@deleted':{note:'Deleted'},
   }}};
@@ -159,7 +160,8 @@ test('layout reconciliation keeps the default account note but prunes deleted id
   });
   context.reconcileAccountLayout('minimax',[{id:'minimax@a'}]);
   assert.equal(config.layout.providers['minimax@a'].note,'A');
-  assert.equal(config.layout.providers['minimax@deleted'],undefined);
+  // Notes are identity-bound: archive/delete/restore must not lose them.
+  assert.equal(config.layout.providers['minimax@deleted'].note,'Deleted');
   assert.equal(config.layout.providers.minimax.pinnedAccount,undefined);
 });
 
@@ -192,16 +194,50 @@ test('deleting the folded default drops its pin without touching a sibling pin',
 test('the customize account note edits the same display note the card reads', () => {
   const list = [{id:'tokenrhythm@a',label:'我'},{id:'tokenrhythm@b',label:'老马'}];
   const accountsCache = new Map([['tokenrhythm',list]]);
-  const config = {layout:{providers:{}}};
-  const context = load(['managedAccountForCard','accountNoteKey','accountNote','labelForAccount','cardNote','setCardNote'], {
-    accountsCache,config,patchConfig:async()=>{},requestRender:()=>{},
+  const config = {layout:{providers:{'tokenrhythm@__default__':{note:'旧备注'}}}};
+  const context = load(['normalizeNote','managedAccountForCard','accountNoteKeys','accountNoteKey','accountNote','labelForAccount','cardNote','setAccountNote'], {
+    accountsCache,config,patchConfig:async()=>{},requestRender:()=>{},customizeOpen:false,renderDrawerBody:()=>{},NOTE_MAX_CODE_POINTS:48,emitNoteUpdate:()=>{},
     providerDefinition:family=>providerCatalog.find(p=>p.familyId===family),
-    providerFamily:id=>id.split('@')[0],
+    providerFamily:id=>id.split('@')[0], t:(key,{n})=>`${key}:${n}`, providerDisplayName:()=>'基元律动',
   });
-  assert.equal(context.labelForAccount('tokenrhythm@a', list), '我');
-  context.setCardNote(context.accountNoteKey('tokenrhythm@a'), '新备注');
+  // A note written before the stable id existed is still readable.
+  assert.equal(context.accountNote('tokenrhythm@a'), '旧备注');
+  context.setAccountNote('tokenrhythm@a', '新备注');
   assert.equal(config.layout.providers['tokenrhythm@a'].note, '新备注');
+  assert.equal(config.layout.providers['tokenrhythm@__default__'].note, undefined);
   assert.equal(context.labelForAccount('tokenrhythm@a', list), '新备注');
+});
+
+
+test('missing account names never fall back to a hash or masked token', () => {
+  const list = [{id:'minimax@a',label:'',email:''}];
+  const context = load(['normalizeNote','managedAccountForCard','accountNoteKeys','accountNote','cardNote','labelForAccount'], {
+    accountsCache:new Map([['minimax',list]]),config:{layout:{providers:{}}}, NOTE_MAX_CODE_POINTS:48,
+    providerDefinition:family=>providerCatalog.find(p=>p.familyId===family),
+    providerFamily:id=>id.split('@')[0], t:(key,{n})=>`${key}:${n}`, providerDisplayName:()=>'MiniMax',
+  });
+  assert.equal(context.labelForAccount('minimax@a', list), 'customize.acctDefaultName:1');
+});
+
+
+test('overview detail names prefer the shown account note', () => {
+  const list = [{id:'minimax@a',label:''},{id:'minimax@b',label:''}];
+  const accountsCache = new Map([['minimax',list]]);
+  const config = {layout:{providers:{'minimax@a':{note:'主账号'}}}};
+  const context = load(['normalizeNote','shownDisplayName','labelForAccount','accountNote','accountNoteKeys','managedAccountForCard','cardNote','notedName'], {
+    accountsCache,config,NOTE_MAX_CODE_POINTS:48,providerDefinition:family=>providerCatalog.find(p=>p.familyId===family),
+    providerFamily:id=>id.split('@')[0], t:(key,{n})=>`${key}:${n}`, providerDisplayName:()=>'MiniMax',
+  });
+  const card = {id:'minimax'};
+  assert.equal(context.shownDisplayName(card, {id:'minimax'}, 'minimax', 'MiniMax'), '主账号');
+  assert.equal(context.shownDisplayName(card, {id:'minimax@b'}, 'minimax', 'MiniMax'), 'customize.acctDefaultName:2');
+});
+
+
+test('display notes are single-line and capped by code points', () => {
+  const context = load(['normalizeNote'], {NOTE_MAX_CODE_POINTS:48});
+  assert.equal(context.normalizeNote('  新   备注\n第二行  '), '新 备注 第二行');
+  assert.equal([...context.normalizeNote('好'.repeat(60))].length, 48);
 });
 
 
