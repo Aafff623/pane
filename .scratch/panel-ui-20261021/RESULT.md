@@ -95,3 +95,4 @@ Status: awaiting-owner-acceptance
 - 补齐残余：`account_add`/`account_update` 拒绝已归档身份；`account_update` 与旧 `account_remove` 先退休匹配 legacy provider 源；`relaybalance`/`sub2api` 在 `baseUrl` 元数据已丢失时从 active 行恢复，并按 API Key 退休旧源；迁移失败写运行日志。
 - 验证：parse-tests 940 passed / 14 ignored；frontend 77 passed；site 36 passed（在 `85557c1` 干净状态）；`pnpm build`、`cargo check` 通过。
 - 当前 `site/` 存在另一会话的未提交改动，本轮未触碰、未纳入账号提交。真实 Codex / 基元律动双账号认证与 UI 验收仍由 owner 完成；release/tag 仍待 owner 明确授权。
+- 2026-10-22：账号改动已合并到 `main` 并推送 `origin/main`（`b57864e`），本地与远端分支均只保留 `main`；`site/` 的并发改动仍在工作区，未提交。

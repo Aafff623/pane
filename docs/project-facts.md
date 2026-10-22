@@ -12,7 +12,7 @@ Single authorities for the neighbouring concerns:
   tracker, see [`docs/agents/issue-tracker.md`](agents/issue-tracker.md).
 - **Startup / build / run / acceptance commands** — [`docs/dev-startup.md`](dev-startup.md).
 
-Last reconciled: 2026-10-21 (Pane 0.8.8 + timeline, window scaling, provider trends, settings layout).
+Last reconciled: 2026-10-22 (Pane 0.8.8 + account lifecycle, legacy API-key retirement, relay identity recovery).
 
 ## Scope and boundaries
 
