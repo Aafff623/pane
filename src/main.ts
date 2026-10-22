@@ -6941,8 +6941,14 @@ async function copyElementSnapshot(el: HTMLElement, W: number): Promise<void> {
       } else css += rule.cssText + "\n";
     }
   };
+  // Installed packs inject their whole (self-contained) stylesheet, artwork
+  // included. A snapshot only needs the pack it was taken under; carrying the
+  // others would bloat the SVG data URL by megabytes for no visible effect.
+  const snapshotPack = activeSkin()?.id ?? "";
   for (const sheet of Array.from(document.styleSheets)) {
     try {
+      const owner = sheet.ownerNode as HTMLElement | null;
+      if (owner?.dataset.skinPack && owner.dataset.skinPack !== snapshotPack) continue;
       appendRules(sheet.cssRules);
     } catch {
       // Inaccessible sheet (shouldn't happen — all styles are bundled).

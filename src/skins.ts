@@ -121,13 +121,18 @@ export function readSkin(storage: Pick<Storage, "getItem" | "removeItem">): Skin
 /// there is nothing external left to embed. Signal's post-icon crop reads
 /// URL-valued custom properties at use sites; Chromium's SVG rasterizer does
 /// not resolve those reliably, so inline the computed values into the clone.
+/// The computed value quotes its data URL with `"`; the clone carries these in
+/// `style="…"` attributes, so emit single quotes or the attribute (and the
+/// whole snapshot SVG) becomes malformed.
 export async function embedSkinImages(markup: string, skin: SkinId): Promise<string> {
   if (skin !== "signal") return markup;
   try {
     const style = getComputedStyle(document.documentElement);
     for (const name of ["--post-atlas", "--post-atlas-extra"]) {
       const value = style.getPropertyValue(name).trim();
-      if (value) markup = markup.split(`var(${name})`).join(value);
+      if (!value) continue;
+      const url = value.replace(/^url\((.*)\)$/s, "$1").trim().replace(/^["']|["']$/g, "");
+      markup = markup.split(`var(${name})`).join(`url('${url}')`);
     }
   } catch { /* Native appearance: no pack variables to inline. */ }
   return markup;
