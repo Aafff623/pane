@@ -48,7 +48,7 @@ Status: awaiting-owner-acceptance
 
 调试服务使用仓库 debug exe 和 Vite；启动器已完成 API 探活，但报告窗口 hidden，桌面可见性/托盘/快捷键仍需 owner 本人确认。
 
-用户已在对话中明确授权本地 commit；完成验证后提交。尚未 push、tag、合并或发布。分发侧旧 winget PR、token 轮换和客户端安装不在本地 UI 实现范围内，本轮未操作。
+用户已在对话中明确授权本地 commit；实现已提交为 `f549357`（`fix(accounts): complete multi-account lifecycle and Codex OAuth`）。尚未 push、tag、合并或发布。分发侧旧 winget PR、token 轮换和客户端安装不在本地 UI 实现范围内，本轮未操作。
 
 
 ## 2026-10-22 Codex / UI 收口
