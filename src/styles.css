@@ -2486,6 +2486,15 @@ article.provider.is-folded:hover {
   background: var(--destructive);
 }
 
+.pace-mark {
+  position: absolute;
+  top: -2px;
+  bottom: -2px;
+  width: 1px;
+  background: color-mix(in srgb, var(--foreground) 55%, transparent);
+  pointer-events: auto;
+}
+
 .metric-foot {
   display: flex;
   justify-content: space-between;
