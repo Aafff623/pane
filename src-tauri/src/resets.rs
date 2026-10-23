@@ -50,6 +50,33 @@ mod tests {
     }
 
     #[test]
+    fn reset_shift_jitter_below_the_window_tenth_is_ignored() {
+        // One-hour window: a 5-minute jitter is not a rollover; 6 minutes
+        // (the 1/10 threshold) is.
+        let period = 3_600_000;
+        assert!(!is_reset(
+            read(90.0, Some(1_000_000), Some(period)),
+            read(10.0, Some(1_000_000 + 5 * 60_000), Some(period)),
+            true
+        ));
+        assert!(is_reset(
+            read(90.0, Some(1_000_000), Some(period)),
+            read(10.0, Some(1_000_000 + 6 * 60_000), Some(period)),
+            true
+        ));
+    }
+
+    #[test]
+    fn a_top_up_with_an_unchanged_reset_is_not_a_reset() {
+        // Credit top-ups can drop used% without moving the window.
+        assert!(!is_reset(
+            read(95.0, Some(1_000_000), Some(3_600_000)),
+            read(20.0, Some(1_000_000), Some(3_600_000)),
+            true
+        ));
+    }
+
+    #[test]
     fn small_drops_do_not_qualify() {
         assert!(!is_reset(read(50.0, Some(1_000_000), Some(3_600_000)), read(45.0, Some(1_200_000), Some(3_600_000)), true));
     }

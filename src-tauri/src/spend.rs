@@ -8,11 +8,12 @@
 //! only files that changed since the last refresh are re-parsed.
 
 use chrono::{DateTime, Datelike, Local, Utc};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::{HashMap, HashSet};
 use std::fs;
-use std::io::{BufRead, BufReader};
+use std::hash::{Hash, Hasher};
+use std::io::{BufRead, BufReader, Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, SystemTime};
@@ -21,6 +22,9 @@ use crate::pricing;
 use crate::provider_catalog;
 use crate::providers;
 
+#[path = "spend/sources/mod.rs"]
+pub mod sources;
+
 pub const TREND_DAYS: usize = 30;
 
 #[derive(Serialize, Clone)]
@@ -28,6 +32,13 @@ pub struct ModelSpend {
     pub model: String,
     pub cost: f64,
     pub tokens: f64,
+    /// Dollars the source itself recorded (log costUSD / cost_usd / gateway
+    /// cost) rather than Pane's price catalog. `None` means catalog-priced.
+    #[serde(default)]
+    pub stored_cost: Option<f64>,
+    /// At least one event for this model had no price; `cost` is a floor.
+    #[serde(default)]
+    pub missing_pricing: bool,
 }
 
 #[derive(Serialize, Clone, Default)]
@@ -220,6 +231,16 @@ fn source_status(
                         }
                     }
                 },
+                Ok(meta) if meta.is_file() => {
+                    if meta.len() == 0 {
+                        ("empty", root, Some("file is empty".into()))
+                    } else {
+                        match fs::File::open(path) {
+                            Ok(_) => ("detected", root, None),
+                            Err(error) => ("unreadable", root, Some(error.to_string())),
+                        }
+                    }
+                }
                 Ok(_) => ("detected", root, None),
             }
         }
@@ -241,49 +262,7 @@ fn source_status(
 /// every turn was persisted by the tool. Network-only sources are marked
 /// `runtime` because their local presence cannot prove account access.
 pub fn source_statuses() -> Vec<SpendSourceStatus> {
-    let home = dirs::home_dir().unwrap_or_default();
-    let claude = std::env::var("CLAUDE_CONFIG_DIR")
-        .map(PathBuf::from)
-        .unwrap_or_else(|_| home.join(".claude"));
-    let codex = std::env::var("CODEX_HOME")
-        .map(PathBuf::from)
-        .unwrap_or_else(|_| home.join(".codex"));
-    let pi = pi_sessions_dir();
-    let grok = std::env::var("GROK_HOME")
-        .map(PathBuf::from)
-        .unwrap_or_else(|_| home.join(".grok"));
-    let qwen = home.join(".qwen").join("usage");
-    let kimi = providers::kimi::code_home().join("sessions");
-    let zcode = home.join(".zcode").join("cli");
-    let ccswitch = home.join(".cc-switch");
-    let dsh_home = std::env::var("DSH_HOME")
-        .map(PathBuf::from)
-        .unwrap_or_else(|_| home.join(".dsh"));
-    let local = dirs::data_local_dir().unwrap_or_default();
-    vec![
-        source_status("claude-jsonl", "Claude Code", "JSONL session logs", "claude_line", &[claude.join("projects")], &["claude", "minimax", "aihubmix", "kimi"]),
-        source_status("codex-jsonl", "Codex", "JSONL rollout logs", "codex_line", &[codex.join("sessions"), codex.join("archived_sessions")], &["codex", "kimi"]),
-        source_status("zcode-sqlite", "ZCode", "SQLite + JSONL fallback", "zcode_db_data + zcode_line", &[zcode.join("db").join("db.sqlite"), zcode.join("rollout")], &["zcode"]),
-        source_status("ccswitch-sqlite", "cc-switch", "SQLite proxy + session-import ledger", "ccswitch_db_data", &[ccswitch.join("cc-switch.db")], &["claude", "codex", "opencode", "grok", "mcode", "gemini", "claude-desktop"]),
-        source_status("pi-jsonl", "Pi coding agent", "JSONL session logs", "pi_line", &[pi], &["claude", "codex"]),
-        source_status("grok-jsonl", "Grok CLI", "JSONL unified log", "grok", &[grok.join("logs").join("unified.jsonl")], &["grok"]),
-        source_status("opencode-sqlite", "OpenCode Desktop / CLI", "SQLite message ledger", "providers::opencode::collect_cost_events", &[providers::opencode::data_dir().join("opencode.db")], &["opencode", "aihubmix"]),
-        source_status("qodercn-credits", "Qoder CN", "credits ledger (credits cannot be converted to tokens — shown as a separate credits list)", "usage_history::credit_extras", &[crate::providers::config_dir().join("credit_history.json")], &["qodercn", "traecn"]),
-        source_status("devin-sqlite", "Devin", "SQLite sessions ledger", "providers::devin::collect_usage_events", &[crate::platform::config_home().map(|d| d.join("devin").join("cli").join("sessions.db")).unwrap_or_default()], &["devin"]),
-        source_status("minimax-sqlite", "MiniMax Agent", "SQLite token_usage ledger", "providers::minimax::collect_usage_events", &[home.join(".minimax").join("sqlite.db"), home.join(".minimax").join("v2").join("sqlite").join("runtime-state.sqlite")], &["minimax", "mcode"]),
-        source_status("dsh-jsonl-zstd", "DeepSeek Harness", "multi-frame zstd session logs", "spend::dsh", &[dsh_home.join("sessions")], &["dsh"]),
-        source_status("hermes-sqlite", "Hermes Desktop", "SQLite session_model_usage ledger", "providers::hermes::collect_usage_events", &[local.join("hermes").join("state.db")], &["hermes", "minimax", "openrouter"]),
-        source_status("qwen-jsonl", "Qwen Code", "JSONL token ledger", "qwen_line", &[qwen], &["qwen"]),
-        source_status("kimi-jsonl", "Kimi Code", "JSONL wire ledger", "kimi_line", &[kimi], &["kimi"]),
-        source_status("antigravity-sqlite", "Antigravity IDE / CLI", "SQLite protobuf conversation ledger", "decode_antigravity_call", &[home.join(".gemini").join("antigravity").join("conversations"), home.join(".gemini").join("antigravity-cli").join("conversations")], &["antigravity"]),
-        source_status("workbuddy-jsonl", "WorkBuddy (CN)", "JSONL session logs", "workbuddy_line", &[home.join(".workbuddy").join("projects")], &["workbuddy"]),
-        source_status("workbuddy-ai-jsonl", "WorkBuddy AI", "JSONL session logs", "workbuddy_line", &[home.join(".workbuddy-ai").join("projects"), home.join(".workbuddy-ai").join("sessions")], &["workbuddyai"]),
-        source_status("codebuddy-cli-jsonl", "CodeBuddy CLI", "JSONL session logs", "workbuddy_line", &[home.join(".codebuddy").join("projects")], &["codebuddy"]),
-        source_status("codebuddy-ide-index", "CodeBuddy IDE", "extension history index", "codebuddy_ide_data", &[codebuddy_ide_root()], &["codebuddy"]),
-        source_status("gemini-jsonl", "Gemini CLI", "JSON/JSONL chat logs", "gemini_line (pending parser)", &[home.join(".gemini").join("tmp")], &["gemini"]),
-        source_status("copilot-local", "GitHub Copilot CLI", "session-state events", "copilot_local (pending parser)", &[home.join(".copilot").join("session-state")], &["copilot"]),
-        SpendSourceStatus { id: "cursor-csv".into(), tool: "Cursor IDE".into(), form: "authenticated usage CSV".into(), collector: "providers::cursor::fetch_usage_csv".into(), state: "runtime".into(), root: String::new(), reason: None, feeds: vec!["cursor".into()] },
-    ]
+    sources::statuses()
 }
 
 /// Everything one file contributes: priced per-day totals plus the tally of
@@ -293,8 +272,11 @@ pub fn source_statuses() -> Vec<SpendSourceStatus> {
 struct FileData {
     days: DayMap,
     unpriced: HashMap<String, u64>,
+    /// Per-model dollars carried by the source itself (see `ModelSpend`).
+    stored: HashMap<String, f64>,
 }
 
+#[derive(Clone)]
 struct FileEntry {
     mtime: SystemTime,
     size: u64,
@@ -304,6 +286,20 @@ struct FileEntry {
     gen: u64,
     probes: Vec<PriceProbe>,
     data: FileData,
+    /// Resume point for append-only files whose parser state is small
+    /// enough to persist (Claude/Codex). `None` means a changed file is
+    /// re-read in full.
+    checkpoint: Option<AppendCheckpoint>,
+}
+
+/// A byte offset plus the parser state at that offset. `boundary_hash`
+/// covers the 4 KiB before the offset so an in-place rewrite that happens
+/// to grow the file is not mistaken for an append.
+#[derive(Clone, Serialize, Deserialize)]
+struct AppendCheckpoint {
+    offset: u64,
+    boundary_hash: u64,
+    state: Value,
 }
 
 /// One pricing question a file's parse asked, together with the answer it
@@ -327,6 +323,9 @@ enum PriceProbe {
     Lookup { key: String, price: Option<pricing::Price> },
     /// `pricing::fast_multiplier(key)` returned `mult`.
     FastMult { key: String, mult: f64 },
+    /// `pricing::lookup_at(ts_ms, key)` returned `price` — a time-window
+    /// answer must revalidate against the same timestamp, not "now".
+    LookupAt { key: String, ts_ms: i64, price: Option<pricing::Price> },
     /// The file asked more unique questions than `MAX_PROBES_PER_FILE`,
     /// or a model string longer than `MAX_PROBE_KEY`. A truncated list
     /// cannot vouch for prices we didn't record.
@@ -338,6 +337,9 @@ impl PriceProbe {
         match self {
             PriceProbe::Lookup { key, price } => pricing::lookup(key) == *price,
             PriceProbe::FastMult { key, mult } => pricing::fast_multiplier(key) == *mult,
+            PriceProbe::LookupAt { key, ts_ms, price } => {
+                pricing::lookup_at(*ts_ms, key) == *price
+            }
             PriceProbe::Overflow => false,
         }
     }
@@ -389,6 +391,18 @@ fn probe_lookup(model: &str) -> Option<pricing::Price> {
     price
 }
 
+/// Time-aware `pricing::lookup_at`, recorded with the timestamp so a cached
+/// file is never revalidated against a different price window.
+fn probe_lookup_at(ts_ms: i64, model: &str) -> Option<pricing::Price> {
+    let price = pricing::lookup_at(ts_ms, model);
+    if model.len() > MAX_PROBE_KEY {
+        record_probe(PriceProbe::Overflow);
+    } else {
+        record_probe(PriceProbe::LookupAt { key: model.to_string(), ts_ms, price });
+    }
+    price
+}
+
 /// `pricing::fast_multiplier`, recorded — see `probe_lookup`.
 fn probe_fast_multiplier(model: &str) -> f64 {
     let mult = pricing::fast_multiplier(model);
@@ -428,7 +442,7 @@ fn cache() -> &'static Mutex<HashMap<PathBuf, FileEntry>> {
 // "Scanning session logs…" every day.
 // ---------------------------------------------------------------------------
 
-const PERSIST_VERSION: u32 = 4; // bump on cache format *or* parser-logic changes
+const PERSIST_VERSION: u32 = 5; // bump on cache format *or* parser-logic changes
 // v3→v4: zcode stopped double-counting cache buckets (input already
 // contains them, AI SDK v6), so cached v3 day-totals are ~1.96x inflated.
 
@@ -453,11 +467,16 @@ struct PersistEntry {
     size: u64,
     days: Vec<(i32, String, f64, f64)>,
     unpriced: Vec<(String, u64)>,
+    /// Per-model source-recorded dollars (v5). Older caches default empty.
+    #[serde(default)]
+    stored: Vec<(String, f64)>,
     /// Pricing questions this file's parse asked (see `PriceProbe`).
     /// Older caches without the field deserialize as empty — safe, because
     /// they can only load through the exact-stamp fast path.
     #[serde(default)]
     probes: Vec<PriceProbe>,
+    #[serde(default)]
+    checkpoint: Option<AppendCheckpoint>,
 }
 
 #[derive(serde::Serialize, serde::Deserialize)]
@@ -504,12 +523,13 @@ fn load_persisted_cache() {
                 data.days.insert((day, model), (cost, tokens));
             }
             data.unpriced = e.unpriced.into_iter().collect();
+            data.stored = e.stored.into_iter().collect();
             if !stamp_matches && !probes_still_vouch(&e.probes, &data) {
                 continue; // a price this file used changed — re-parse it
             }
             let mtime = SystemTime::UNIX_EPOCH
                 + std::time::Duration::new(e.mtime_secs, e.mtime_nanos);
-            map.insert(e.path, FileEntry { mtime, size: e.size, gen, probes: e.probes, data });
+            map.insert(e.path, FileEntry { mtime, size: e.size, gen, probes: e.probes, data, checkpoint: e.checkpoint });
         }
     });
 }
@@ -546,7 +566,9 @@ fn save_persisted_cache() {
                     .map(|((day, model), (cost, tokens))| (*day, model.clone(), *cost, *tokens))
                     .collect(),
                 unpriced: e.data.unpriced.iter().map(|(m, c)| (m.clone(), *c)).collect(),
+                stored: e.data.stored.iter().map(|(m, c)| (m.clone(), *c)).collect(),
                 probes: e.probes.clone(),
+                checkpoint: e.checkpoint.clone(),
             }
         })
         .collect();
@@ -574,6 +596,14 @@ fn add_event(data: &mut FileData, ts: DateTime<Utc>, model: &str, cost: f64, tok
         .or_insert((0.0, 0.0));
     entry.0 += cost;
     entry.1 += tokens;
+}
+
+/// `add_event` for dollars the log/gateway recorded itself. The distinction
+/// survives into `ModelSpend.stored_cost` so the UI can say "vendor cost"
+/// instead of implying Pane's catalog computed it.
+fn add_stored_event(data: &mut FileData, ts: DateTime<Utc>, model: &str, cost: f64, tokens: f64) {
+    add_event(data, ts, model, cost, tokens);
+    *data.stored.entry(model.to_string()).or_insert(0.0) += cost;
 }
 
 /// Tally an event no catalog can price: its tokens still count (they're
@@ -618,6 +648,7 @@ fn retain_days(data: &mut FileData, keep: impl Fn(i32) -> bool) {
     data.days.retain(|(day, _), _| keep(*day));
     let live: HashSet<&str> = data.days.keys().map(|(_, m)| m.as_str()).collect();
     data.unpriced.retain(|model, _| live.contains(model.as_str()));
+    data.stored.retain(|model, _| live.contains(model.as_str()));
 }
 
 /// Layer in only the days `target` lacks: a day with any target row stays
@@ -644,6 +675,11 @@ fn merge_missing_days(target: &mut FileData, source: FileData) {
             *target.unpriced.entry(model).or_insert(0) += count;
         }
     }
+    for (model, cost) in source.stored {
+        if moved.contains(&model) {
+            *target.stored.entry(model).or_insert(0.0) += cost;
+        }
+    }
 }
 
 fn merge_data(target: &mut FileData, source: FileData) {
@@ -654,6 +690,9 @@ fn merge_data(target: &mut FileData, source: FileData) {
     }
     for (model, count) in source.unpriced {
         *target.unpriced.entry(model).or_insert(0) += count;
+    }
+    for (model, cost) in source.stored {
+        *target.stored.entry(model).or_insert(0.0) += cost;
     }
 }
 
@@ -670,25 +709,44 @@ fn compose_pi_days(mut claude: FileData, mut codex: FileData, ledger: FileData) 
 
 /// Ranked model list for one window: top models by cost, anything past the
 /// fifth name or under a 5% share folds into "Other".
-fn finalize_models(raw: HashMap<String, (f64, f64)>, window_cost: f64) -> Vec<ModelSpend> {
+fn finalize_models(
+    raw: HashMap<String, (f64, f64)>,
+    window_cost: f64,
+    unpriced: &HashMap<String, u64>,
+    stored: &HashMap<String, f64>,
+) -> Vec<ModelSpend> {
     let mut list: Vec<ModelSpend> = raw
         .into_iter()
-        .map(|(model, (cost, tokens))| ModelSpend { model, cost, tokens })
+        .map(|(model, (cost, tokens))| {
+            let missing_pricing = unpriced.get(&model).copied().unwrap_or(0) > 0;
+            let stored_cost = stored.get(&model).copied().filter(|c| *c > 0.0);
+            ModelSpend { model, cost, tokens, stored_cost, missing_pricing }
+        })
         .collect();
     list.sort_by(|a, b| b.cost.partial_cmp(&a.cost).unwrap_or(std::cmp::Ordering::Equal));
 
     let mut named = Vec::new();
-    let mut other = ModelSpend { model: "Other".into(), cost: 0.0, tokens: 0.0 };
+    let mut other = ModelSpend {
+        model: "Other".into(),
+        cost: 0.0,
+        tokens: 0.0,
+        stored_cost: None,
+        missing_pricing: false,
+    };
     for (i, m) in list.into_iter().enumerate() {
         let share = if window_cost > 0.0 { m.cost / window_cost } else { 0.0 };
-        if i < 5 && (share >= 0.05 || i == 0) {
+        if i < 5 && (share >= 0.05 || i == 0 || m.missing_pricing) {
             named.push(m);
         } else {
             other.cost += m.cost;
             other.tokens += m.tokens;
+            if let Some(c) = m.stored_cost {
+                *other.stored_cost.get_or_insert(0.0) += c;
+            }
+            other.missing_pricing |= m.missing_pricing;
         }
     }
-    if other.cost > 0.001 || other.tokens > 0.0 {
+    if other.cost > 0.001 || other.tokens > 0.0 || other.missing_pricing {
         named.push(other);
     }
     named
@@ -705,12 +763,12 @@ fn build_spend(id: impl Into<String>, name: impl Into<String>, data: FileData) -
     let id = id.into();
     let name = name.into();
     let today = Local::now().date_naive().num_days_from_ce();
-    let mut unpriced_models: Vec<String> = data.unpriced.keys().cloned().collect();
+    let FileData { days, unpriced, stored } = data;
+    let mut unpriced_models: Vec<String> = unpriced.keys().cloned().collect();
     unpriced_models.sort();
     unpriced_models.truncate(5);
-    let days = data.days;
     let billing_mode = billing_mode_for(&id);
-    let pricing_mode = pricing_mode_for(&id, false, data.unpriced.values().sum());
+    let pricing_mode = pricing_mode_for(&id, false, unpriced.values().sum());
     let mut sp = ProviderSpend {
         days: days.clone(),
         id,
@@ -720,7 +778,7 @@ fn build_spend(id: impl Into<String>, name: impl Into<String>, data: FileData) -
         last30: Window::default(),
         trend: vec![0.0; TREND_DAYS],
         trend_cost: vec![0.0; TREND_DAYS],
-        unpriced: data.unpriced.values().sum(),
+        unpriced: unpriced.values().sum(),
         unpriced_models,
         estimated: false,
         billing_mode,
@@ -756,9 +814,9 @@ fn build_spend(id: impl Into<String>, name: impl Into<String>, data: FileData) -
     }
 
     let [m0, m1, m2] = models;
-    sp.today.models = finalize_models(m0, sp.today.cost);
-    sp.yesterday.models = finalize_models(m1, sp.yesterday.cost);
-    sp.last30.models = finalize_models(m2, sp.last30.cost);
+    sp.today.models = finalize_models(m0, sp.today.cost, &unpriced, &stored);
+    sp.yesterday.models = finalize_models(m1, sp.yesterday.cost, &unpriced, &stored);
+    sp.last30.models = finalize_models(m2, sp.last30.cost, &unpriced, &stored);
     sp
 }
 
@@ -780,7 +838,22 @@ const MAX_SCAN_DIRS: usize = 20_000;
 /// Because links are followed, the walk is iterative and bounded: it stops at
 /// `MAX_SCAN_DEPTH` levels, visits at most `MAX_SCAN_DIRS` directories, and
 /// skips canonical paths already seen, so a link cycle can't spin forever.
+fn is_log_file(path: &Path, include_zst: bool) -> bool {
+    if path.extension().is_some_and(|e| e == "jsonl") {
+        return true;
+    }
+    include_zst
+        && path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .is_some_and(|n| n.ends_with(".jsonl.zst"))
+}
+
 fn recent_jsonl_files(root: &Path, out: &mut Vec<PathBuf>) {
+    recent_log_files(root, out, false);
+}
+
+fn recent_log_files(root: &Path, out: &mut Vec<PathBuf>, include_zst: bool) {
     let cutoff = SystemTime::now() - Duration::from_secs(31 * 86_400);
     // Canonical paths of link targets already entered. Cycles and aliases can
     // only form through links, so plain directories skip the canonicalize —
@@ -832,7 +905,7 @@ fn recent_jsonl_files(root: &Path, out: &mut Vec<PathBuf>) {
                         followed_link = true;
                         stack.push((path, depth + 1));
                     }
-                } else if path.extension().is_some_and(|e| e == "jsonl")
+                } else if is_log_file(&path, include_zst)
                     && meta.modified().map(|m| m >= cutoff).unwrap_or(true)
                 {
                     // Target metadata, so a link's own ancient mtime can't
@@ -840,7 +913,7 @@ fn recent_jsonl_files(root: &Path, out: &mut Vec<PathBuf>) {
                     followed_link = true;
                     out.push(path);
                 }
-            } else if path.extension().is_some_and(|e| e == "jsonl") {
+            } else if is_log_file(&path, include_zst) {
                 let Ok(meta) = entry.metadata() else { continue };
                 if meta.modified().map(|m| m >= cutoff).unwrap_or(true) {
                     out.push(path);
@@ -926,7 +999,214 @@ fn file_days(path: &Path, parse: &mut dyn FnMut(&str, &mut FileData)) -> FileDat
     if let Ok(mut map) = cache().lock() {
         map.insert(
             path.to_path_buf(),
-            FileEntry { mtime, size, gen, probes, data: data.clone() },
+            FileEntry { mtime, size, gen, probes, data: data.clone(), checkpoint: None },
+        );
+    }
+    CACHE_DIRTY.store(true, std::sync::atomic::Ordering::Relaxed);
+    data
+}
+
+/// Persisted parser state is capped so one enormous rollout cannot turn the
+/// spend cache into a multi-megabyte file. Overflow still returns the parsed
+/// data; the next append simply re-reads the whole file.
+const CHECKPOINT_MAX_BYTES: usize = 4 * 1024 * 1024;
+/// Bytes hashed on each side of a resume offset. A resize in place that
+/// rewrites the prefix but keeps the last 4 KiB intact is indistinguishable
+/// from an append without hashing the whole prefix; the size check plus this
+/// boundary makes that accident unlikely while staying O(4 KiB).
+const CHECKPOINT_BOUNDARY: u64 = 4096;
+
+fn boundary_hash(path: &Path, end: u64) -> Option<u64> {
+    let start = end.saturating_sub(CHECKPOINT_BOUNDARY);
+    let mut file = fs::File::open(path).ok()?;
+    file.seek(SeekFrom::Start(start)).ok()?;
+    let mut buf = Vec::with_capacity((end - start) as usize);
+    file.take(end - start).read_to_end(&mut buf).ok()?;
+    if buf.len() as u64 != end - start {
+        return None;
+    }
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    buf.hash(&mut hasher);
+    Some(hasher.finish())
+}
+
+fn is_zstd(path: &Path) -> bool {
+    path.file_name()
+        .and_then(|n| n.to_str())
+        .is_some_and(|n| n.ends_with(".jsonl.zst") || n.ends_with(".jsonl.zstd"))
+}
+
+/// Parse complete newline-terminated lines from `start`. A half-written
+/// trailing line is left for the next refresh so a resumed parse can never
+/// lose its completion.
+fn parse_lines_from<St>(
+    path: &Path,
+    start: u64,
+    state: &mut St,
+    data: &mut FileData,
+    parse: &mut dyn FnMut(&mut St, &str, &mut FileData),
+) -> Option<u64> {
+    let mut file = fs::File::open(path).ok()?;
+    file.seek(SeekFrom::Start(start)).ok()?;
+    let mut reader = BufReader::new(file);
+    let mut buf = Vec::new();
+    let mut offset = start;
+    loop {
+        buf.clear();
+        let n = reader.read_until(b'\n', &mut buf).ok()?;
+        if n == 0 {
+            break;
+        }
+        if buf.last() != Some(&b'\n') {
+            break;
+        }
+        let line = String::from_utf8_lossy(&buf[..buf.len() - 1]);
+        parse(state, &line, data);
+        offset += n as u64;
+    }
+    Some(offset)
+}
+
+fn parse_zstd_file<St>(
+    path: &Path,
+    state: &mut St,
+    data: &mut FileData,
+    parse: &mut dyn FnMut(&mut St, &str, &mut FileData),
+) -> Option<u64> {
+    let raw = fs::read(path).ok()?;
+    let bytes = zstd::stream::decode_all(&raw[..]).ok()?;
+    let text = String::from_utf8(bytes).ok()?;
+    for line in text.lines() {
+        parse(state, line, data);
+    }
+    Some(0)
+}
+
+fn take_probes() -> Vec<PriceProbe> {
+    PROBES.with(|p| p.borrow_mut().take()).unwrap_or_default()
+}
+
+fn merge_probes(mut old: Vec<PriceProbe>, new: Vec<PriceProbe>) -> Vec<PriceProbe> {
+    if old.iter().any(|p| matches!(p, PriceProbe::Overflow)) {
+        return old;
+    }
+    for probe in new {
+        if !old.contains(&probe) {
+            old.push(probe);
+        }
+        if old.len() > MAX_PROBES_PER_FILE {
+            return vec![PriceProbe::Overflow];
+        }
+    }
+    old
+}
+
+fn checkpoint_for<St: Serialize>(path: &Path, offset: u64, state: &St) -> Option<AppendCheckpoint> {
+    let state = serde_json::to_value(state).ok()?;
+    if serde_json::to_vec(&state).ok()?.len() > CHECKPOINT_MAX_BYTES {
+        return None;
+    }
+    Some(AppendCheckpoint {
+        offset,
+        boundary_hash: boundary_hash(path, offset)?,
+        state,
+    })
+}
+
+/// Stateful sibling of [`file_days`] for append-only logs. Unchanged files
+/// use the cached summary; a grown file resumes at its saved offset and
+/// merges only the new events; every anomaly (shrink, catalog change,
+/// boundary mismatch, unreadable checkpoint, partial last line) falls back
+/// to a full re-read. `zstd` inputs are always decompressed in full because
+/// a byte offset inside a compressed stream is not a reliable resume point.
+fn file_days_with_state<St>(
+    path: &Path,
+    parse: &mut dyn FnMut(&mut St, &str, &mut FileData),
+) -> FileData
+where
+    St: Default + Serialize + serde::de::DeserializeOwned,
+{
+    let Ok(meta) = fs::metadata(path) else { return FileData::default() };
+    let mtime = meta.modified().unwrap_or(SystemTime::UNIX_EPOCH);
+    let size = meta.len();
+    if let Ok(mut t) = touched().lock() {
+        t.insert(path.to_path_buf());
+    }
+    let gen = pricing::generation();
+    if let Ok(mut map) = cache().lock() {
+        if let Some(entry) = map.get_mut(path) {
+            if entry.mtime == mtime && entry.size == size {
+                if entry.gen == gen {
+                    return entry.data.clone();
+                }
+                if probes_still_vouch(&entry.probes, &entry.data) {
+                    entry.gen = gen;
+                    CACHE_DIRTY.store(true, std::sync::atomic::Ordering::Relaxed);
+                    return entry.data.clone();
+                }
+            }
+        }
+    }
+
+    if !is_zstd(path) {
+        let cached = cache().lock().ok().and_then(|map| map.get(path).cloned());
+        if let Some(entry) = cached {
+            if entry.gen == gen && size > entry.size {
+                if let Some(cp) = entry.checkpoint.clone() {
+                    if cp.offset <= entry.size
+                        && boundary_hash(path, cp.offset) == Some(cp.boundary_hash)
+                    {
+                        if let Ok(mut state) = serde_json::from_value::<St>(cp.state) {
+                            let mut data = entry.data.clone();
+                            PROBES.with(|p| *p.borrow_mut() = Some(Vec::new()));
+                            if let Some(offset) =
+                                parse_lines_from(path, cp.offset, &mut state, &mut data, parse)
+                            {
+                                let probes = merge_probes(entry.probes, take_probes());
+                                let checkpoint = checkpoint_for(path, offset, &state);
+                                if let Ok(mut map) = cache().lock() {
+                                    map.insert(
+                                        path.to_path_buf(),
+                                        FileEntry {
+                                            mtime,
+                                            size,
+                                            gen,
+                                            probes,
+                                            data: data.clone(),
+                                            checkpoint,
+                                        },
+                                    );
+                                }
+                                CACHE_DIRTY.store(true, std::sync::atomic::Ordering::Relaxed);
+                                return data;
+                            }
+                            PROBES.with(|p| {
+                                p.borrow_mut().take();
+                            });
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    let mut state = St::default();
+    let mut data = FileData::default();
+    PROBES.with(|p| *p.borrow_mut() = Some(Vec::new()));
+    let offset = if is_zstd(path) {
+        parse_zstd_file(path, &mut state, &mut data, parse)
+    } else {
+        parse_lines_from(path, 0, &mut state, &mut data, parse)
+    };
+    let probes = take_probes();
+    let Some(offset) = offset else {
+        return data;
+    };
+    let checkpoint = if is_zstd(path) { None } else { checkpoint_for(path, offset, &state) };
+    if let Ok(mut map) = cache().lock() {
+        map.insert(
+            path.to_path_buf(),
+            FileEntry { mtime, size, gen, probes, data: data.clone(), checkpoint },
         );
     }
     CACHE_DIRTY.store(true, std::sync::atomic::Ordering::Relaxed);
@@ -1087,7 +1367,7 @@ fn claude_cost(model: &str, t: &ClaudeTokens) -> Option<f64> {
 }
 
 /// Per-file dedup state for the Claude scanner.
-#[derive(Default)]
+#[derive(Default, Serialize, Deserialize)]
 struct ClaudeFileState {
     /// (message id, request id) pairs already counted.
     seen: HashSet<String>,
@@ -1146,7 +1426,7 @@ fn claude_line(st: &mut ClaudeFileState, line: &str, data: &mut FileData) {
         Some(c) => {
             let name = if synthetic { "unattributed" } else { model.as_str() };
             if t.total() > 0.0 || c > 0.0 {
-                add_event(data, ts, name, c, t.total());
+                add_stored_event(data, ts, name, c, t.total());
             }
         }
         None if synthetic => {}
@@ -1216,6 +1496,12 @@ fn split_models(data: &mut FileData, prefix: &str) -> FileData {
             out.unpriced.insert(m, c);
         }
     }
+    let moved: Vec<String> = data.stored.keys().filter(|m| matches(m)).cloned().collect();
+    for m in moved {
+        if let Some(c) = data.stored.remove(&m) {
+            out.stored.insert(m, c);
+        }
+    }
     out
 }
 
@@ -1249,6 +1535,9 @@ fn split_kimi_routed(all: &mut FileData) -> FileData {
     }
     for (model, count) in moved.unpriced {
         *out.unpriced.entry(strip_kimi_prefix(&model)).or_insert(0) += count;
+    }
+    for (model, cost) in moved.stored {
+        *out.stored.entry(strip_kimi_prefix(&model)).or_insert(0.0) += cost;
     }
     out
 }
@@ -1342,8 +1631,9 @@ fn claude(extra: FileData, cc: FileData, cc_days: &HashSet<i32>) -> (ProviderSpe
     recent_jsonl_files(&root, &mut files);
     let mut all = FileData::default();
     for file in files {
-        let mut state = ClaudeFileState::default();
-        let data = file_days(&file, &mut |line, data| claude_line(&mut state, line, data));
+        let data = file_days_with_state::<ClaudeFileState>(&file, &mut |state, line, data| {
+            claude_line(state, line, data)
+        });
         merge_data(&mut all, data);
     }
     // Compare Claude-attributed usage only. The ledger logs MiniMax/qwen/
@@ -1396,8 +1686,9 @@ fn claude_extra_accounts() -> (Vec<ProviderSpend>, FileData, FileData, FileData)
         recent_jsonl_files(&root, &mut files);
         let mut all = FileData::default();
         for file in files {
-            let mut state = ClaudeFileState::default();
-            let data = file_days(&file, &mut |line, data| claude_line(&mut state, line, data));
+            let data = file_days_with_state::<ClaudeFileState>(&file, &mut |state, line, data| {
+                claude_line(state, line, data)
+            });
             merge_data(&mut all, data);
         }
         merge_data(&mut minimax_extra, split_models(&mut all, "MiniMax"));
@@ -1425,7 +1716,7 @@ fn merge_agent_events(data: &mut FileData, events: Vec<providers::minimax::Usage
         // all use.
         let model = ev.model.strip_prefix("minimax/").unwrap_or(&ev.model).to_string();
         if ev.cost_usd > 0.0 {
-            add_event(data, ts, &model, ev.cost_usd, tokens);
+            add_stored_event(data, ts, &model, ev.cost_usd, tokens);
             continue;
         }
         match pricing::lookup(&model) {
@@ -1484,7 +1775,7 @@ fn dsh_data() -> FileData {
             }
         }
     }
-    let mut data = FileData::default();
+    let data = FileData::default();
     let Some(home) = dirs::home_dir() else {
         return data;
     };
@@ -1591,7 +1882,7 @@ fn hermes() -> Vec<(&'static str, &'static str, FileData)> {
             }
         };
         if ev.cost_usd > 0.0 {
-            add_event(data, ts, &ev.model, ev.cost_usd, tokens);
+            add_stored_event(data, ts, &ev.model, ev.cost_usd, tokens);
             continue;
         }
         match pricing::lookup(&providers::hermes::price_lookup_slug(
@@ -1620,10 +1911,11 @@ fn hermes() -> Vec<(&'static str, &'static str, FileData)> {
 
 /// One `token_count` usage object, tolerating the older field spellings
 /// (`prompt_tokens`, `cache_read_input_tokens`, …) the Mac scanner accepts.
-#[derive(Clone, PartialEq)]
+#[derive(Clone, PartialEq, Serialize, Deserialize)]
 struct CodexRaw {
     input: f64,
     cached: f64,
+    cache_write: f64,
     output: f64,
     reasoning: f64,
     total: f64,
@@ -1637,17 +1929,26 @@ fn codex_raw(v: &Value) -> CodexRaw {
     };
     let input = num(&["input_tokens", "prompt_tokens", "input"]);
     let cached = num(&["cached_input_tokens", "cache_read_input_tokens", "cached_tokens"]);
+    let cache_write = num(&[
+        "cache_write_input_tokens",
+        "cache_creation_input_tokens",
+        "cache_write_tokens",
+    ]);
     let output = num(&["output_tokens", "completion_tokens", "output"]);
     let reasoning = num(&["reasoning_output_tokens", "reasoning_tokens"]);
     let reported = num(&["total_tokens"]);
     let recomputed = input + output + reasoning;
     let total = if reported > 0.0 || recomputed == 0.0 { reported } else { recomputed };
-    CodexRaw { input, cached, output, reasoning, total }
+    CodexRaw { input, cached, cache_write, output, reasoning, total }
 }
 
 impl CodexRaw {
     fn any_tokens(&self) -> bool {
-        self.input > 0.0 || self.cached > 0.0 || self.output > 0.0 || self.reasoning > 0.0
+        self.input > 0.0
+            || self.cached > 0.0
+            || self.cache_write > 0.0
+            || self.output > 0.0
+            || self.reasoning > 0.0
     }
 
     /// Recover a turn delta from cumulative totals (when `last_token_usage`
@@ -1657,6 +1958,7 @@ impl CodexRaw {
         CodexRaw {
             input: (self.input - p(|r| r.input)).max(0.0),
             cached: (self.cached - p(|r| r.cached)).max(0.0),
+            cache_write: (self.cache_write - p(|r| r.cache_write)).max(0.0),
             output: (self.output - p(|r| r.output)).max(0.0),
             reasoning: (self.reasoning - p(|r| r.reasoning)).max(0.0),
             total: (self.total - p(|r| r.total)).max(0.0),
@@ -1684,6 +1986,7 @@ fn codex_child_meta(payload: &Value) -> bool {
 
 /// How a child session's replayed parent history is gated until its first
 /// live turn.
+#[derive(Serialize, Deserialize)]
 enum CodexReplayGate {
     /// Clear when `task_started.started_at` is at/after the child's creation
     /// epoch (replayed task_started lines carry the parent's older one).
@@ -1695,13 +1998,20 @@ enum CodexReplayGate {
 }
 
 /// Per-file parse state for one Codex rollout.
-#[derive(Default)]
+#[derive(Default, Serialize, Deserialize)]
 struct CodexFileState {
     model: String,
     saw_meta: bool,
     gate: Option<CodexReplayGate>,
     fast_tier: bool,
     prev_totals: Option<CodexRaw>,
+    /// Once a per-response `token_usage_record` appears, that file's
+    /// `token_count` rows duplicate it (verified: same timestamp and
+    /// totals) — records own the rest of the file.
+    saw_usage_record: bool,
+    /// Response ids already counted, so a replayed record cannot double
+    /// count after a resume or compaction rewrite.
+    seen_records: HashSet<String>,
 }
 
 /// Date-stamped snapshots ("gpt-5.6-sol-2026-06-01" / "-20260601") map to
@@ -1750,6 +2060,7 @@ fn codex_no_cache_discount(dated: &str) -> bool {
 /// event.
 fn codex_line(st: &mut CodexFileState, line: &str, data: &mut FileData) {
     if !(line.contains("token_count")
+        || line.contains("token_usage_record")
         || line.contains("turn_context")
         || line.contains("session_meta")
         || line.contains("task_started")
@@ -1776,6 +2087,32 @@ fn codex_line(st: &mut CodexFileState, line: &str, data: &mut FileData) {
                 }
             }
         }
+        return;
+    }
+
+    // Newer Codex builds write one record per response. When present it is
+    // the authoritative delta; the `token_count` row emitted immediately
+    // afterwards repeats the same usage (same timestamp/totals) and is
+    // ignored from here on.
+    if v.get("type").and_then(Value::as_str) == Some("token_usage_record") {
+        let Some(p) = v.get("payload") else { return };
+        let id = p.get("response_id").and_then(Value::as_str).unwrap_or("");
+        if !id.is_empty() && !st.seen_records.insert(id.to_string()) {
+            return;
+        }
+        let usage = p
+            .get("usage")
+            .map(codex_raw)
+            .filter(|u| u.any_tokens())
+            .or_else(|| {
+                p.get("turn_token_usage")
+                    .map(codex_raw)
+                    .filter(|u| u.any_tokens())
+            });
+        let Some(usage) = usage else { return };
+        let Some(ts) = parse_ts(v.get("timestamp")) else { return };
+        st.saw_usage_record = true;
+        codex_emit(st, ts, &usage, data);
         return;
     }
 
@@ -1815,6 +2152,11 @@ fn codex_line(st: &mut CodexFileState, line: &str, data: &mut FileData) {
             }
             return;
         }
+    }
+
+    // Records own this file; a later token_count is its duplicate.
+    if st.saw_usage_record {
+        return;
     }
 
     // token_count from here on. A model on the line itself wins.
@@ -1859,6 +2201,13 @@ fn codex_line(st: &mut CodexFileState, line: &str, data: &mut FileData) {
         return;
     }
 
+    codex_emit(st, ts, &usage, data);
+}
+
+/// Price and append one Codex usage delta. Shared by `token_count` and the
+/// newer per-response `token_usage_record` rows so both paths bill the same
+/// way (including the cache-write bucket).
+fn codex_emit(st: &CodexFileState, ts: DateTime<Utc>, usage: &CodexRaw, data: &mut FileData) {
     let model = if st.model.is_empty() { "gpt-5".to_string() } else { st.model.clone() };
     let tokens = usage.total;
 
@@ -1878,9 +2227,10 @@ fn codex_line(st: &mut CodexFileState, line: &str, data: &mut FileData) {
         _ => (rate_source.clone(), false),
     };
     let lower = rate_source.to_lowercase();
-    let base_price = probe_lookup(&rate_model);
+    let ts_ms = ts.timestamp_millis();
+    let base_price = probe_lookup_at(ts_ms, &rate_model);
     let price = base_price
-        .or_else(|| if alias_fast { probe_lookup(&rate_source) } else { None })
+        .or_else(|| if alias_fast { probe_lookup_at(ts_ms, &rate_source) } else { None })
         .or_else(|| {
             // The static gpt-5 table only for recognizably Codex-family
             // models; anything else is excluded.
@@ -1913,12 +2263,14 @@ fn codex_line(st: &mut CodexFileState, line: &str, data: &mut FileData) {
         pricing::priority_multiplier_with(&dated, &rate_model, || probe_fast_multiplier(&rate_model))
     } else { 1.0 };
 
+    // `input_tokens` is the whole prompt; cache buckets are a subset.
     let cached = usage.cached.min(usage.input);
+    let cache_write = usage.cache_write.min((usage.input - cached).max(0.0));
     let u = pricing::Usage {
-        input: usage.input - cached,
+        input: (usage.input - cached - cache_write).max(0.0),
         output: usage.output,
         cache_read: cached,
-        cache_write_5m: 0.0,
+        cache_write_5m: cache_write,
         cache_write_1h: 0.0,
     };
     add_event(data, ts, &model, pricing::request_cost_at(&p, &u, threshold) * mult, tokens);
@@ -1969,13 +2321,13 @@ fn codex_session_files(home: &Path) -> Vec<PathBuf> {
     let sessions_root = home.join("sessions");
     let archived_root = home.join("archived_sessions");
     let mut files = Vec::new();
-    recent_jsonl_files(&sessions_root, &mut files);
+    recent_log_files(&sessions_root, &mut files, true);
     let live_rel: HashSet<PathBuf> = files
         .iter()
         .filter_map(|f| f.strip_prefix(&sessions_root).ok().map(Path::to_path_buf))
         .collect();
     let mut archived = Vec::new();
-    recent_jsonl_files(&archived_root, &mut archived);
+    recent_log_files(&archived_root, &mut archived, true);
     files.extend(archived.into_iter().filter(|f| {
         f.strip_prefix(&archived_root)
             .map(|rel| !live_rel.contains(rel))
@@ -1987,8 +2339,9 @@ fn codex_session_files(home: &Path) -> Vec<PathBuf> {
 fn codex_scan(home: &Path) -> FileData {
     let mut all = FileData::default();
     for file in codex_session_files(home) {
-        let mut state = CodexFileState::default();
-        let data = file_days(&file, &mut |line, data| codex_line(&mut state, line, data));
+        let data = file_days_with_state::<CodexFileState>(&file, &mut |state, line, data| {
+            codex_line(state, line, data)
+        });
         merge_data(&mut all, data);
     }
     all
@@ -2726,7 +3079,7 @@ fn pi_line(seen: &mut HashSet<String>, line: &str, data: &mut FileData) {
         .unwrap_or("unknown");
     let tagged = format!("{card}{PI_SEP}{model}");
     if let Some(c) = carried.filter(|c| *c > 0.0) {
-        add_event(data, ts, &tagged, c, tokens);
+        add_stored_event(data, ts, &tagged, c, tokens);
         return;
     }
     match probe_lookup(model) {
@@ -2760,6 +3113,13 @@ fn take_tagged(data: &mut FileData, card: &str) -> FileData {
     for m in unpriced {
         if let Some(c) = data.unpriced.remove(&m) {
             out.unpriced.insert(m[prefix.len()..].to_string(), c);
+        }
+    }
+    let stored: Vec<String> =
+        data.stored.keys().filter(|m| m.starts_with(&prefix)).cloned().collect();
+    for m in stored {
+        if let Some(c) = data.stored.remove(&m) {
+            out.stored.insert(m[prefix.len()..].to_string(), c);
         }
     }
     out
@@ -2889,7 +3249,7 @@ fn opencode(cc: FileData) -> (ProviderSpend, FileData) {
     for (ts_ms, cost, tokens, model, provider) in providers::opencode::collect_cost_events() {
         if let Some(ts) = DateTime::from_timestamp_millis(ts_ms as i64) {
             let target = if provider == "aihubmix" { &mut aihubmix } else { &mut oc };
-            add_event(target, ts, &model, cost, tokens);
+            add_stored_event(target, ts, &model, cost, tokens);
         }
     }
     merge_missing_days(&mut oc, cc);
@@ -3634,6 +3994,7 @@ fn parse_csv_date(s: &str) -> Option<DateTime<Utc>> {
 mod tests {
     use super::*;
     use serde_json::json;
+    use std::io::Write;
 
 
     #[test]
@@ -3642,6 +4003,25 @@ mod tests {
         assert!(sources.iter().any(|s| s.id == "opencode-sqlite" && s.form.contains("SQLite")));
         assert!(sources.iter().any(|s| s.id == "antigravity-sqlite" && s.form.contains("protobuf")));
         assert!(sources.iter().any(|s| s.id == "cursor-csv" && s.state == "runtime"));
+    }
+
+    #[test]
+    fn source_registry_is_the_single_inventory_and_marks_unprobed_sources() {
+        let registry = sources::registry();
+        let mut ids: Vec<&str> = registry.iter().map(|s| s.id).collect();
+        ids.sort_unstable();
+        let unique = ids.len();
+        ids.dedup();
+        assert_eq!(ids.len(), unique, "duplicate source id in registry");
+
+        let statuses = source_statuses();
+        assert_eq!(statuses.len(), registry.len());
+        let gemini = statuses.iter().find(|s| s.id == "gemini-jsonl").expect("gemini row");
+        assert_eq!(gemini.state, "needs_probe");
+        assert!(gemini.reason.as_deref().unwrap_or("").contains("parser pending"));
+        let copilot = statuses.iter().find(|s| s.id == "copilot-local").expect("copilot row");
+        assert_eq!(copilot.collector, "spend::sources::copilot");
+        assert!(copilot.feeds.iter().any(|f| f == "copilot"));
     }
 
     #[test]
@@ -3654,6 +4034,56 @@ mod tests {
         let existing = std::env::current_exe().expect("test executable path");
         let present = source_status("probe", "Probe", "log", "scan", &[existing], &[]);
         assert_eq!(present.state, "detected");
+
+        let root = temp_root("source-status");
+        let empty = root.join("empty.jsonl");
+        fs::write(&empty, "").unwrap();
+        let empty = source_status("probe", "Probe", "log", "scan", &[empty], &[]);
+        assert_eq!(empty.state, "empty");
+        assert_eq!(empty.reason.as_deref(), Some("file is empty"));
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn stored_cost_and_missing_pricing_survive_finalize() {
+        let ts = Local::now().with_timezone(&Utc);
+        let mut data = FileData::default();
+        add_stored_event(&mut data, ts, "stored-model", 1.25, 100.0);
+        note_unpriced(&mut data, ts, "unpriced-model", 200.0);
+        let sp = build_spend("claude", "Claude", data);
+
+        let stored = sp
+            .last30
+            .models
+            .iter()
+            .find(|m| m.model == "stored-model")
+            .expect("stored model row");
+        assert_eq!(stored.stored_cost, Some(1.25));
+        assert!(!stored.missing_pricing);
+        assert_eq!(stored.tokens, 100.0);
+
+        let missing = sp
+            .last30
+            .models
+            .iter()
+            .find(|m| m.model == "unpriced-model")
+            .expect("unpriced model row");
+        assert!(missing.missing_pricing);
+        assert_eq!(missing.cost, 0.0);
+        assert_eq!(missing.tokens, 200.0);
+        assert_eq!(sp.unpriced, 1);
+    }
+
+    #[test]
+    fn split_models_carries_stored_cost_with_the_rows() {
+        let ts = Local::now().with_timezone(&Utc);
+        let mut data = FileData::default();
+        add_stored_event(&mut data, ts, "MiniMax-M3", 0.5, 10.0);
+        add_stored_event(&mut data, ts, "claude-fable-5", 2.0, 20.0);
+        let moved = split_models(&mut data, "minimax");
+        assert_eq!(moved.stored.get("MiniMax-M3"), Some(&0.5));
+        assert_eq!(data.stored.get("claude-fable-5"), Some(&2.0));
+        assert!(!data.stored.contains_key("MiniMax-M3"));
     }
 
     fn tokens_sum(d: &FileData) -> f64 {
@@ -3925,6 +4355,7 @@ mod tests {
                 size: 4096,
                 days: vec![(739_000, "claude-fable-5".into(), 1.25, 40_000.0)],
                 unpriced: vec![("mystery-model".into(), 3)],
+                stored: vec![],
                 probes: vec![
                     PriceProbe::Lookup {
                         key: "claude-fable-5".into(),
@@ -3933,6 +4364,7 @@ mod tests {
                     PriceProbe::Lookup { key: "mystery-model".into(), price: None },
                     PriceProbe::FastMult { key: "claude-fable-5".into(), mult: 2.0 },
                 ],
+                checkpoint: None,
             }],
         };
         let json = serde_json::to_string(&doc).unwrap();
@@ -4190,6 +4622,89 @@ mod tests {
             token_count_line("2026-07-10T10:00:02Z", Some((1_000.0, 100.0)), (1_000.0, 100.0)),
         ];
         assert_eq!(tokens_sum(&codex_run(&lines)), 1_100.0);
+    }
+
+    fn usage_record_line(
+        ts: &str,
+        response_id: &str,
+        input: f64,
+        cached: f64,
+        cache_write: f64,
+        output: f64,
+    ) -> String {
+        json!({"timestamp": ts, "type": "token_usage_record",
+               "payload": {"response_id": response_id,
+                   "usage": {"input_tokens": input, "cached_input_tokens": cached,
+                             "cache_write_input_tokens": cache_write, "output_tokens": output,
+                             "reasoning_output_tokens": 0,
+                             "total_tokens": input + output}}})
+        .to_string()
+    }
+
+    #[test]
+    fn codex_usage_record_wins_over_its_duplicate_token_count() {
+        let lines = vec![
+            json!({"timestamp": "2026-07-10T10:00:00Z", "type": "turn_context",
+                   "payload": {"model": "gpt-5.6-terra"}})
+            .to_string(),
+            usage_record_line("2026-07-10T10:00:01Z", "resp-1", 1_000.0, 200.0, 300.0, 100.0),
+            // Newer Codex emits the same usage again as a cumulative
+            // token_count; it must not count twice.
+            token_count_line("2026-07-10T10:00:01Z", Some((1_000.0, 100.0)), (1_000.0, 100.0)),
+        ];
+        let data = codex_run(&lines);
+        assert_eq!(tokens_sum(&data), 1_100.0);
+        assert!(cost_sum(&data) > 0.0);
+        assert!(data.unpriced.is_empty());
+    }
+
+    #[test]
+    fn codex_usage_record_dedupes_by_response_id() {
+        let record = usage_record_line("2026-07-10T10:00:01Z", "resp-1", 1_000.0, 0.0, 0.0, 100.0);
+        let lines = vec![
+            json!({"timestamp": "2026-07-10T10:00:00Z", "type": "turn_context",
+                   "payload": {"model": "gpt-5.6-terra"}})
+            .to_string(),
+            record.clone(),
+            record,
+        ];
+        assert_eq!(tokens_sum(&codex_run(&lines)), 1_100.0);
+    }
+
+    #[test]
+    fn codex_compaction_does_not_double_count() {
+        let lines = vec![
+            json!({"timestamp": "2026-07-10T10:00:00Z", "type": "turn_context",
+                   "payload": {"model": "gpt-5.6-terra"}})
+            .to_string(),
+            usage_record_line("2026-07-10T10:00:01Z", "resp-1", 1_000.0, 0.0, 0.0, 100.0),
+            json!({"timestamp": "2026-07-10T10:00:02Z", "type": "compacted",
+                   "payload": {"message": "", "replacement_history": []}})
+            .to_string(),
+            usage_record_line("2026-07-10T10:00:03Z", "resp-2", 2_000.0, 0.0, 0.0, 200.0),
+            token_count_line("2026-07-10T10:00:03Z", Some((2_000.0, 200.0)), (2_000.0, 200.0)),
+        ];
+        // 1100 + 2200; the post-compaction token_count duplicate is ignored.
+        assert_eq!(tokens_sum(&codex_run(&lines)), 3_300.0);
+    }
+
+    #[test]
+    fn codex_zstd_rollout_is_scanned() {
+        let root = temp_root("codex-zst");
+        let dir = root.join("sessions").join("2026").join("07").join("10");
+        fs::create_dir_all(&dir).unwrap();
+        let lines = [
+            json!({"timestamp": "2026-07-10T10:00:00Z", "type": "turn_context",
+                   "payload": {"model": "gpt-5.6-terra"}})
+            .to_string(),
+            token_count_line("2026-07-10T10:00:01Z", Some((1_000.0, 100.0)), (1_000.0, 100.0)),
+        ]
+        .join("\n")
+            + "\n";
+        let compressed = zstd::stream::encode_all(lines.as_bytes(), 3).unwrap();
+        fs::write(dir.join("rollout-test.jsonl.zst"), compressed).unwrap();
+        assert_eq!(tokens_sum(&codex_scan(&root)), 1_100.0);
+        let _ = fs::remove_dir_all(&root);
     }
 
     #[test]
@@ -4530,6 +5045,72 @@ mod tests {
         let _ = fs::remove_dir_all(&root);
         fs::create_dir_all(&root).expect("temp root");
         root
+    }
+
+    #[derive(Default, Serialize, Deserialize)]
+    struct IncrementalState {
+        seen: u64,
+    }
+
+    fn incremental_parse(state: &mut IncrementalState, line: &str, data: &mut FileData) {
+        let Ok(v) = serde_json::from_str::<Value>(line) else { return };
+        let n = v.get("n").and_then(Value::as_u64).unwrap_or(0);
+        state.seen += 1;
+        let ts = DateTime::parse_from_rfc3339("2026-10-20T10:00:00Z")
+            .unwrap()
+            .with_timezone(&Utc);
+        add_event(data, ts, "incremental-test", 0.0, n as f64);
+    }
+
+    #[test]
+    fn stateful_scanner_resumes_at_the_saved_offset() {
+        let root = temp_root("incremental");
+        let file = root.join("log.jsonl");
+        fs::write(&file, "{\"n\":1}\n").unwrap();
+        let parsed = std::cell::Cell::new(0usize);
+        let mut parse = |state: &mut IncrementalState, line: &str, data: &mut FileData| {
+            parsed.set(parsed.get() + 1);
+            incremental_parse(state, line, data);
+        };
+
+        let first = file_days_with_state::<IncrementalState>(&file, &mut parse);
+        assert_eq!(parsed.get(), 1);
+        assert_eq!(tokens_sum(&first), 1.0);
+
+        // Unchanged file: served from cache, no parser call.
+        let cached = file_days_with_state::<IncrementalState>(&file, &mut parse);
+        assert_eq!(parsed.get(), 1);
+        assert_eq!(tokens_sum(&cached), 1.0);
+
+        // Append: only the new line is parsed and merged into the summary.
+        let mut f = fs::OpenOptions::new().append(true).open(&file).unwrap();
+        f.write_all(b"{\"n\":2}\n").unwrap();
+        drop(f);
+        let appended = file_days_with_state::<IncrementalState>(&file, &mut parse);
+        assert_eq!(parsed.get(), 2, "the already-seen line must not be re-parsed");
+        assert_eq!(tokens_sum(&appended), 3.0);
+
+        // A half-written trailing line waits for its newline.
+        let mut f = fs::OpenOptions::new().append(true).open(&file).unwrap();
+        f.write_all(b"{\"n\":4").unwrap();
+        drop(f);
+        let partial = file_days_with_state::<IncrementalState>(&file, &mut parse);
+        assert_eq!(parsed.get(), 2);
+        assert_eq!(tokens_sum(&partial), 3.0);
+        let mut f = fs::OpenOptions::new().append(true).open(&file).unwrap();
+        f.write_all(b"}\n").unwrap();
+        drop(f);
+        let completed = file_days_with_state::<IncrementalState>(&file, &mut parse);
+        assert_eq!(parsed.get(), 3);
+        assert_eq!(tokens_sum(&completed), 7.0);
+
+        // A rewrite that shrinks the file falls back to a full parse.
+        fs::write(&file, "{\"n\":9}\n").unwrap();
+        let rewritten = file_days_with_state::<IncrementalState>(&file, &mut parse);
+        assert_eq!(parsed.get(), 4);
+        assert_eq!(tokens_sum(&rewritten), 9.0);
+
+        let _ = fs::remove_dir_all(&root);
     }
 
     #[test]
@@ -5558,7 +6139,7 @@ fn cached_parse(path: &Path, parse: impl FnOnce() -> Option<FileData>) -> FileDa
     if let Ok(mut map) = cache().lock() {
         map.insert(
             path.to_path_buf(),
-            FileEntry { mtime, size, gen, probes, data: data.clone() },
+            FileEntry { mtime, size, gen, probes, data: data.clone(), checkpoint: None },
         );
     }
     CACHE_DIRTY.store(true, std::sync::atomic::Ordering::Relaxed);
@@ -5774,6 +6355,7 @@ pub fn collect_daily(cursor_csv: Option<String>) -> (Vec<ProviderSpend>, Vec<Pro
     let mut list = vec![
         claude_sp,
         codex_sp,
+        sources::copilot::spend(),
         grok(cc.grok),
         opencode_sp,
         aihubmix_sp,

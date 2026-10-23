@@ -54,8 +54,12 @@ Ground rules that apply to every provider:
   merely looks similar is never picked up. Cards are identified by
   `tokens.account_id` (or the id_token's ChatGPT account claim) and
   named by the account email; a dir that can't name its account is
-  skipped. Reset-credit redemption always uses the
-  account whose card offered the credit.
+  skipped. Pane also merges its own web-OAuth logins
+  (`%APPDATA%\Pane\codex-accounts.json`) and `auth.json.pane-bak`
+  backups by ChatGPT account id, so the desktop config and web logins
+  appear as one card without double-counting; a backup whose token is
+  dead shows an error row instead of disappearing. Reset-credit
+  redemption always uses the account whose card offered the credit.
 - **Calls:** `chatgpt.com/backend-api/wham/usage` (limits, Spark windows,
   credits); `.../wham/rate-limit-reset-credits` (reset credits, and
   `/consume` only when you click Use on a credit); OpenAI token refresh.
@@ -217,6 +221,27 @@ Ground rules that apply to every provider:
   balance Pane has seen locally (top-ups raise it; feeds the Almost Out
   notification). Saving a key in Settings turns that provider on if
   Customize had it off.
+
+## APIGOTO (RouterCode)
+
+- **Reads:** a pasted `sk-` API key from Pane's credential store, or
+  `APIGOTO_API_KEY`. The key is used only for the vendor's read-only
+  usage endpoint — Pane never sends it to a model.
+- **Calls:** `GET https://api.apigoto.com/v1/usage` (Bearer). No
+  chat/completions or other model traffic, so the free-tier `40204`
+  model gate is never exercised or bypassed.
+- **Shows:** Plan, the subscription's largest window (RPMCredits
+  `used`/`limit` and `window_sec`), the USD `remaining` equivalent and
+  the subscription expiry. When the subscription is absent or expired
+  the card shows `none (payg)` / `expired` plus the balance or points;
+  it never paints a 0% healthy bar from payg fallback numbers.
+- **Quotas:** RouterCode Free is about 25M TCredits/week with a 100M
+  total; RouterCode PLUS is about 100M/week with a 400M total
+  (¥29.90/month). `/v1/usage` returns only the largest window, not the
+  monthly total, so Pane deliberately omits a total it cannot verify.
+  Plan name, limit, window and expiry all come from the response.
+- **Errors:** 401 means the key was rejected; 503 is a transient config
+  store failure and the last-good snapshot stays visible.
 
 ## Kimi Code
 

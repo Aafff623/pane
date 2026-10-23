@@ -549,7 +549,145 @@ pub fn ensure_fresh() {
 
 /// USD per million tokens for `model`, or None if no source prices it.
 /// Memoized; disk-cache only (call ensure_fresh() beforehand to update).
+/// A price that applies only inside a timestamp window. Empty in
+/// production until a vendor publishes an official historical schedule;
+/// the mechanism is exercised by tests and by the override file.
+#[derive(Clone, Copy, Debug)]
+pub struct PriceWindow {
+    pub model_prefix: &'static str,
+    pub start_ms: i64,
+    pub end_ms: i64,
+    pub price: Price,
+}
+
+static SCHEDULES: Mutex<Vec<PriceWindow>> = Mutex::new(Vec::new());
+
+/// Replace the in-memory schedule table (tests / future official data).
+pub fn set_schedules(windows: Vec<PriceWindow>) {
+    *SCHEDULES.lock().unwrap_or_else(|e| e.into_inner()) = windows;
+}
+
+/// Per-model user overrides, USD per million tokens. Loaded once from
+/// `%APPDATA%\Pane\pricing_overrides.json`; stored costs still win.
+static OVERRIDES: OnceLock<Mutex<HashMap<String, Price>>> = OnceLock::new();
+static OVERRIDES_LOADED: OnceLock<()> = OnceLock::new();
+
+fn overrides() -> &'static Mutex<HashMap<String, Price>> {
+    OVERRIDES.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+pub fn set_overrides(map: HashMap<String, Price>) {
+    *overrides().lock().unwrap_or_else(|e| e.into_inner()) = map;
+    // A saved override must take effect without a restart; memoized catalog
+    // answers may be from before the override existed.
+    if let Ok(mut store) = store().lock() {
+        store.memo.clear();
+    }
+}
+
+/// Raw JSON for the Settings editor. Missing file = an empty object.
+pub fn overrides_text() -> String {
+    std::fs::read_to_string(providers::config_dir().join("pricing_overrides.json"))
+        .unwrap_or_else(|_| "{
+}
+".into())
+}
+
+/// Validate and save the Settings editor's JSON, then apply it in memory.
+/// Strict on purpose: a typo in a model name or a negative rate should fail
+/// before the file replaces a working override.
+fn parsed_overrides(text: &str) -> Result<(Value, HashMap<String, Price>), String> {
+    let doc: Value = serde_json::from_str(text).map_err(|e| format!("JSON: {e}"))?;
+    let obj = doc.as_object().ok_or("expected a JSON object of model -> rates")?;
+    let mut map = HashMap::new();
+    for (model, v) in obj {
+        let num = |key: &str| v.get(key).and_then(Value::as_f64);
+        let input = num("input").ok_or_else(|| format!("{model}: input is required"))?;
+        let output = num("output").ok_or_else(|| format!("{model}: output is required"))?;
+        if input < 0.0 || output < 0.0 {
+            return Err(format!("{model}: prices cannot be negative"));
+        }
+        let cache_read = num("cache_read").unwrap_or(input);
+        let cache_write = num("cache_write").unwrap_or(input);
+        map.insert(model.clone(), Price::flat(input, output, cache_read, cache_write));
+    }
+    Ok((doc, map))
+}
+
+pub fn save_overrides_text(text: &str) -> Result<(), String> {
+    let (doc, map) = parsed_overrides(text)?;
+    let path = providers::config_dir().join("pricing_overrides.json");
+    let pretty = serde_json::to_string_pretty(&doc).map_err(|e| e.to_string())?;
+    let tmp = path.with_extension("json.tmp");
+    std::fs::write(&tmp, pretty).map_err(|e| format!("write overrides: {e}"))?;
+    std::fs::rename(&tmp, &path).map_err(|e| format!("replace overrides: {e}"))?;
+    set_overrides(map);
+    Ok(())
+}
+
+fn override_for(model: &str) -> Option<Price> {
+    overrides()
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .get(model)
+        .copied()
+}
+
+/// Load `pricing_overrides.json` once. The file is optional; malformed
+/// entries are ignored rather than poisoning the whole catalog.
+fn load_overrides_from_disk() {
+    OVERRIDES_LOADED.get_or_init(|| {
+        let path = providers::config_dir().join("pricing_overrides.json");
+        let Ok(raw) = std::fs::read_to_string(&path) else { return };
+        let Ok(doc) = serde_json::from_str::<Value>(&raw) else { return };
+        let Some(obj) = doc.as_object() else { return };
+        let mut map = HashMap::new();
+        for (model, v) in obj {
+            let num = |key: &str| v.get(key).and_then(Value::as_f64);
+            let (Some(input), Some(output)) = (num("input"), num("output")) else { continue };
+            if input < 0.0 || output < 0.0 {
+                continue;
+            }
+            let cache_read = num("cache_read").unwrap_or(input);
+            let cache_write = num("cache_write").unwrap_or(input);
+            map.insert(model.clone(), Price::flat(input, output, cache_read, cache_write));
+        }
+        if !map.is_empty() {
+            set_overrides(map);
+        }
+    });
+}
+
+/// Time-aware lookup: user override > timestamp window > live catalog.
+/// The schedule table is empty by default, so this is identical to
+/// [`lookup`] unless an official historical schedule is installed.
+pub fn lookup_at(timestamp_ms: i64, model: &str) -> Option<Price> {
+    load_overrides_from_disk();
+    if let Some(p) = override_for(model) {
+        return Some(p);
+    }
+    let hit = SCHEDULES
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .iter()
+        .rev()
+        .find(|w| {
+            model.starts_with(w.model_prefix)
+                && timestamp_ms >= w.start_ms
+                && timestamp_ms < w.end_ms
+        })
+        .map(|w| w.price);
+    if hit.is_some() {
+        return hit;
+    }
+    lookup(model)
+}
+
 pub fn lookup(model: &str) -> Option<Price> {
+    load_overrides_from_disk();
+    if let Some(p) = override_for(model) {
+        return Some(p);
+    }
     let mut s = store().lock().unwrap_or_else(|e| e.into_inner());
     if !s.loaded_from_disk {
         load_from_disk(&mut s);
@@ -1349,5 +1487,41 @@ mod tests {
                 None => eprintln!("{model}: UNPRICED"),
             }
         }
+    }
+
+    #[test]
+    fn override_editor_validates_required_rates() {
+        assert!(super::parsed_overrides(r#"{"m":{"input":1,"output":2}}"#).is_ok());
+        assert!(super::parsed_overrides(r#"{"m":{"input":1}}"#).is_err());
+        assert!(super::parsed_overrides(r#"{"m":{"input":-1,"output":2}}"#).is_err());
+        assert!(super::parsed_overrides("not json").is_err());
+        assert!(super::parsed_overrides("[]").is_err());
+    }
+
+    #[test]
+    fn lookup_at_prefers_override_then_window_then_catalog() {
+        let window = super::Price::flat(3.0, 4.0, 0.2, 3.0);
+        let over = super::Price::flat(5.0, 6.0, 0.3, 5.0);
+        super::set_schedules(vec![super::PriceWindow {
+            model_prefix: "pane-sched-",
+            start_ms: 1_000,
+            end_ms: 2_000,
+            price: window,
+        }]);
+        super::set_overrides(
+            [("pane-sched-override".to_string(), over)]
+                .into_iter()
+                .collect(),
+        );
+
+        assert_eq!(super::lookup_at(1_500, "pane-sched-model"), Some(window));
+        assert_eq!(super::lookup_at(500, "pane-sched-model"), None);
+        assert_eq!(super::lookup_at(1_500, "pane-sched-other"), Some(window));
+        assert_eq!(super::lookup_at(1_500, "pane-sched-override"), Some(over));
+        assert_eq!(super::lookup("pane-sched-override"), Some(over));
+        assert_eq!(super::lookup_at(1_500, "pane-not-in-catalog"), None);
+
+        super::set_schedules(Vec::new());
+        super::set_overrides(std::collections::HashMap::new());
     }
 }

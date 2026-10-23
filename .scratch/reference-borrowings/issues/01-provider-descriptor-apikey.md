@@ -1,6 +1,6 @@
 # 01 — Provider descriptor + 通用 API-key 额度适配器
 
-Status: in progress — units, generic adapter and pilot descriptors landed; full catalog/fixtures pending
+Status: done (2026-10-23) — catalog descriptor contract, three sanitized fixture sets and SSRF/body/HTML tests landed; Currency deferred
 GitHub: #39
 Priority: P0
 Blocked by: None
@@ -65,3 +65,11 @@ cargo +stable-x86_64-pc-windows-gnu test
 Security review: SSRF/redirect/body-size/secret redaction。UI 验收：owner 看三张卡的单位/重置/空态。
 
 - 2026-10-23：`ApiKeySpec` 增加 auth/probe/scope/reset/pace 描述符并暴露 `descriptor()`；三家试点共用固定 host/path/auth，无用户 URL。70 条目录能力位、真实 fixture 和 SSRF fixture 测试仍未做。
+
+- 2026-10-23（主对话接手）：Rust `ProviderDefinition::descriptor()` 输出 `auth_kind`/`probe_kind`/`quota_scope`/`reset_semantics`/`pace_capability`；TS 增加 `descriptorFor()` + `providerDescriptors` 镜像；`catalog_consistency` 新增 descriptor 一致性测试，并校验 TS OAuth 家族都在 Rust `OAUTH_FAMILIES`。字段由现有 capability 派生，不批量塞无意义默认值，解析器仍是额度形状的权威。
+- `parse-tests/fixtures/{deepl,serpapi,stability}/` 各 6 份脱敏 fixture（200/401/402/429/empty/HTML 200）；`apikey.rs` 增加 status 映射、固定 HTTPS host、fixture golden 测试。
+- 安全：`http_no_redirect` 的 302 不跟随 + `json_body` 的 HTML 200/超限 body 测试；`ApiKeySpec` 只接受固定 HTTPS host/path，没有 user-controlled URL。
+- 测试：`cargo test apikey` 9 passed、`descriptor_contract` 通过；`pnpm build` 通过；全量 parse-tests 已跑（1013 passed + 1 个既有 productivity 断言已修，修后定向通过；最终全量重跑见本轮收尾）。
+- 全量 `parse-tests` 最终：1017 passed / 0 failed / 14 ignored（串行、去代理，444.95s）。
+
+- 未验证/待 owner：fixture 是按官方字段契约构造的脱敏样本，不是带真实 key 的线上抓包；三张卡的单位/重置/空态视觉验收待 owner。Currency 仍按 owner 决定延后，未偷偷加入。

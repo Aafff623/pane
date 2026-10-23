@@ -575,7 +575,8 @@ fn build_report(root: &Path, entries: Vec<(String, Event, bool)>, lite_sessions:
     let mut windows: [QoderWindow; 5] = Default::default();
     let mut window_sessions: [HashSet<String>; 5] = Default::default();
     let mut window_models: [HashMap<String, ModelAgg>; 5] = Default::default();
-    for (reach, from) in [today, today - 1, today - 6, today - 29, i32::MIN]
+    let ranges = [(today, today), (today - 1, today - 1), (today - 6, today), (today - 29, today), (i32::MIN, today)];
+    for (reach, (from, to)) in ranges
         .into_iter()
         .enumerate()
     {
@@ -584,7 +585,7 @@ fn build_report(root: &Path, entries: Vec<(String, Event, bool)>, lite_sessions:
                 .ok()
                 .map(|d| (d.num_days_from_ce(), day))
         }) {
-            if idx < from || idx > today {
+            if idx < from || idx > to {
                 continue;
             }
             let w = &mut windows[reach];
@@ -607,14 +608,8 @@ fn build_report(root: &Path, entries: Vec<(String, Event, bool)>, lite_sessions:
     // at least one of its requests.
     for (session, indices) in &session_days {
         for (reach, slot) in window_sessions.iter_mut().enumerate() {
-            let from = match reach {
-                0 => today,
-                1 => today - 1,
-                2 => today - 6,
-                3 => today - 29,
-                _ => i32::MIN,
-            };
-            if indices.iter().any(|idx| *idx >= from && *idx <= today) {
+            let (from, to) = ranges[reach];
+            if indices.iter().any(|idx| *idx >= from && *idx <= to) {
                 slot.insert(session.clone());
             }
         }
@@ -1288,6 +1283,48 @@ mod tests {
             );
         }
         assert_eq!(report.source.state, "detected");
+    }
+
+    #[test]
+    fn yesterday_is_one_local_calendar_day_not_yesterday_plus_today() {
+        let today=Local::now().date_naive();
+        let yesterday=today.pred_opt().unwrap();
+        let ts=|day: chrono::NaiveDate, h, m, sec| day.and_hms_opt(h,m,sec).unwrap()
+            .and_local_timezone(Local).single().unwrap().with_timezone(&Utc);
+        let event=|ts, id: &str, ratio| Event {ts,model:"dfmodel".into(),credits:1.0,original_credits:2.0,
+            ratio:Some(ratio),window:Some(1_000_000.0),request_id:id.into(),billable:Some(true)};
+        let entries=vec![
+            ("yesterday-start".into(),event(ts(yesterday,0,0,0),"ys",0.1),false),
+            ("yesterday-end".into(),event(ts(yesterday,23,59,59),"ye",0.2),false),
+            ("today".into(),event(ts(today,0,0,0),"t",0.8),false),
+            ("older".into(),event(ts(yesterday.pred_opt().unwrap(),23,59,59),"o",0.9),false),
+        ];
+        let report=build_report(Path::new("unused"),entries,0);
+        assert_eq!(report.yesterday.billed_tokens,300_000.0);
+        assert_eq!(report.yesterday.trips,2);
+        assert_eq!(report.yesterday.sessions,2);
+        assert_eq!(report.yesterday.credits,2.0);
+        assert_eq!(report.yesterday.original_credits,4.0);
+        assert_eq!(report.yesterday.models[0].billed_tokens,300_000.0);
+        assert_eq!(report.today.billed_tokens,800_000.0);
+        assert_eq!(report.d7.billed_tokens,2_000_000.0);
+    }
+
+    #[test]
+    #[ignore = "read-only owner-authorized audit of local Qoder usage metadata"]
+    fn real_machine_yesterday_audit() {
+        let report=collect();
+        eprintln!("window today tokens={:.0} trips={} yesterday tokens={:.0} trips={}",
+            report.today.billed_tokens,report.today.trips,report.yesterday.billed_tokens,report.yesterday.trips);
+        for day in report.days.iter().rev().take(3) {
+            eprintln!("day={} tokens={:.0} credits={:.3} trips={}",day.day,day.billed_tokens,day.credits,day.trips);
+            for model in &day.models {
+                eprintln!("  model={} tokens={:.0} trips={} unavailable={}",model.label,model.billed_tokens,model.trips,model.tokens_unavailable_trips);
+            }
+        }
+        for model in &report.yesterday.models {
+            eprintln!("yesterday-model={} tokens={:.0} trips={}",model.label,model.billed_tokens,model.trips);
+        }
     }
 
     #[test]

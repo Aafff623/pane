@@ -1,6 +1,6 @@
 # 04 — Spend SourceAdapter、probe/doctor 与增量扫描
 
-Status: in progress — probe reasons/new source inventory landed; SourceAdapter trait and incremental offsets pending
+Status: done (2026-10-23) — registry, byte-offset resume, Copilot parser, zstd/token_usage_record/compaction tests landed; Gemini remains needs-probe
 GitHub: #42
 Priority: P1
 Blocked by: None
@@ -56,3 +56,14 @@ cargo +stable-x86_64-pc-windows-gnu test
 ## Comments
 
 - 2026-10-23：`SpendSourceStatus` 增加 `root/reason`，`source_status` 区分 missing/empty/unreadable/detected；新增 Gemini CLI 与 Copilot local 的探测行（解析器待接）。`/v1/sources` schema 向后兼容并带原因。SourceAdapter trait、byte-offset checkpoint 和 20 源迁移未完成。
+
+- 2026-10-23（主对话接手）：把 `source_statuses()` 收口为 `spend/sources/mod.rs` 注册表（id/tool/form/collector/roots/feeds/runtime/needs_probe/parse_probe）；`/v1/sources` 新增 `empty`、`unreadable`、`parse_error`、`needs_probe` 状态。
+- 新增 `spend/sources/copilot.rs`：`~/.copilot/session-store.db` 的 `assistant_usage_events` 逐调用解析（input_tokens 含 cache；tokens=prompt+output；cache read/write 分开计价），`session-state/*/events.jsonl` 的 `session.shutdown.modelMetrics` 仅补 DB 缺的 session。DB 先连 WAL/SHM 复制再只读打开。Gemini 没有本机真实样本，按要求明确为 `needs_probe`，没有猜解析器。
+- Codex/Claude 改为 `file_days_with_state`：`(mtime,size,4 KiB boundary hash)` + 字节 offset 断点；追加只读新行并合并摘要，缩短/边界哈希不符/价格目录换代/状态损坏/末行未写完都回退整文件。Codex `.jsonl.zst` 走完整解压；`token_usage_record` 按 `response_id` 去重并优先于紧随其后的重复 `token_count`；compaction 行不改写累计基准。
+- 测试：`cargo test spend::` 83 passed；新增 stateful offset、Codex record/zstd/compaction、Copilot DB/事件兜底、registry 状态测试。前端 `node --test tests/*.test.mjs` 96 passed；`corepack pnpm build` 通过（155 modules）。
+- 实测扫描：`spend_live_dump` 首跑 16.93s、二跑 14.62s（同一台机器、缓存已落盘；改造前基线未保存，因此不宣称提速百分比）。
+- 全量 `parse-tests`：1017 passed / 0 failed / 14 ignored（串行、去代理，444.95s）。
+
+- 未验证/待 owner：设置页“来源”诊断的视觉呈现（当前只有 `/v1/sources` 数据）；Gemini 解析器；20 个既有来源没有逐源 golden fixture，回归依赖现有单测与全量 scan，不是逐源字节级对账。
+- 2026-10-23（收尾）：设置页来源诊断已补到浮窗和面板的 General 页，调用 `fetch_spend_sources`，按 `parse_error > unreadable > empty > needs_probe > detected > not_detected > runtime` 排序显示状态、原因和路径 tooltip；`pnpm build` 通过。Gemini 仍未实现，仍是 `needs_probe`。
+- 技术冒烟（2026-10-23）：面板 Settings → 通用实际渲染“花费来源”，可见 Gemini CLI `待校准`、Antigravity/cc-switch/Claude Code/CodeBuddy IDE `已检测`，刷新按钮存在；浮窗同一 mount 代码。owner 视觉验收仍待做。

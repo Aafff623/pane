@@ -140,3 +140,6 @@ pub mod provider_dispatch;
 
 #[path = "../../src-tauri/src/account_lifecycle.rs"]
 pub mod account_lifecycle;
+
+#[path = "../../src-tauri/src/popover_geometry.rs"]
+pub mod popover_geometry;

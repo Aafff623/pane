@@ -198,6 +198,10 @@ pub struct Snapshot {
     /// not rendered on the card; pack rows already carry their own text.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub auth_pack_expiry: Option<i64>,
+    /// When a reset event was detected (ms). The UI keeps the marker for
+    /// ten minutes; a failed later refresh carries it rather than erasing it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub just_reset_at: Option<i64>,
 }
 
 impl Snapshot {
@@ -215,6 +219,7 @@ impl Snapshot {
             warning: None,
             dashboard_url: None,
             auth_pack_expiry: None,
+            just_reset_at: None,
         }
     }
 
@@ -231,6 +236,7 @@ impl Snapshot {
             warning: None,
             dashboard_url: None,
             auth_pack_expiry: None,
+            just_reset_at: None,
         }
     }
 
@@ -247,6 +253,7 @@ impl Snapshot {
             warning: None,
             dashboard_url: None,
             auth_pack_expiry: None,
+            just_reset_at: None,
         }
     }
 
@@ -278,6 +285,7 @@ impl Snapshot {
             warning: None,
             dashboard_url: None,
             auth_pack_expiry: None,
+            just_reset_at: None,
         }
     }
 }
@@ -747,6 +755,64 @@ mod wall_tests {
             }
             worker1.join().unwrap(); worker2.join().unwrap();
         }
+    }
+
+    fn serve_once(
+        status_line: &'static str,
+        headers: Vec<(String, String)>,
+        body: &'static str,
+    ) -> (String, std::thread::JoinHandle<()>) {
+        use std::io::{Read, Write};
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let worker = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            stream
+                .set_read_timeout(Some(std::time::Duration::from_secs(3)))
+                .unwrap();
+            let mut request = [0; 4096];
+            let _ = stream.read(&mut request);
+            let mut head = format!("HTTP/1.1 {status_line}\r\nContent-Length: {}\r\nConnection: close\r\n", body.len());
+            for (name, value) in headers {
+                head.push_str(&format!("{name}: {value}\r\n"));
+            }
+            head.push_str("\r\n");
+            stream.write_all(head.as_bytes()).unwrap();
+            stream.write_all(body.as_bytes()).unwrap();
+        });
+        (format!("http://{addr}/"), worker)
+    }
+
+    #[tokio::test]
+    async fn no_redirect_client_stops_at_a_302() {
+        let (source, source_worker) = serve_once(
+            "302 Found",
+            vec![("Location".into(), "http://127.0.0.1:9/never".into())],
+            "",
+        );
+        let response = http_no_redirect().get(&source).send().await.unwrap();
+        assert_eq!(response.status().as_u16(), 302);
+        source_worker.join().unwrap();
+    }
+
+    #[tokio::test]
+    async fn json_body_rejects_html_200_and_oversized_bodies() {
+        let (html, html_worker) = serve_once(
+            "200 OK",
+            vec![("Content-Type".into(), "text/html".into())],
+            "<!doctype html><html>login</html>",
+        );
+        let response = http_no_redirect().get(&html).send().await.unwrap();
+        assert!(json_body(response, 1024, "quota").await.is_err());
+        html_worker.join().unwrap();
+
+        let (json, json_worker) = serve_once("200 OK", Vec::new(), "{}");
+        let response = http_no_redirect().get(&json).send().await.unwrap();
+        assert!(json_body(response, 1, "quota")
+            .await
+            .unwrap_err()
+            .contains("too large"));
+        json_worker.join().unwrap();
     }
 
     #[test]

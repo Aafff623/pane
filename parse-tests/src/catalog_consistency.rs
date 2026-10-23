@@ -26,6 +26,10 @@ mod tests {
         query_kind: String,
         supports_api_key: bool,
         supports_extra_accounts: bool,
+        #[serde(rename = "supportsOAuth", default)]
+        supports_oauth: Option<bool>,
+        #[serde(rename = "webSession", default)]
+        web_session: Option<bool>,
         icon_key: String,
         category: Option<String>,
         primary_unit: crate::usage_units::UsageUnit,
@@ -141,6 +145,72 @@ mod tests {
                 "shared catalog fields differ for `{}`",
                 rust.family_id
             );
+        }
+    }
+
+    #[test]
+    fn descriptor_contract_matches_frontend_capabilities() {
+        let frontend = ts_definitions();
+        for rust in provider_catalog::provider_definitions() {
+            let ts = frontend
+                .iter()
+                .find(|row| row.family_id == rust.family_id)
+                .unwrap();
+            let d = rust.descriptor();
+            let auth = if ts.supports_api_key {
+                "api_key"
+            } else if ts.supports_oauth == Some(true) {
+                "oauth"
+            } else if ts.web_session == Some(true) {
+                "web_session"
+            } else if ts.query_kind == "localOnly" {
+                "local"
+            } else {
+                "none"
+            };
+            assert_eq!(d.auth_kind.as_str(), auth, "auth_kind differs for {}", rust.family_id);
+
+            let counter = ts.query_kind == "localOnly";
+            assert_eq!(
+                d.probe_kind.as_str(),
+                if counter { "local_counter" } else { "active_get" },
+                "probe_kind differs for {}",
+                rust.family_id
+            );
+
+            let scope = if ts.supports_api_key {
+                "key"
+            } else if auth == "oauth" || auth == "web_session" || ts.supports_extra_accounts {
+                "account"
+            } else {
+                "unknown"
+            };
+            assert_eq!(d.quota_scope.as_str(), scope, "quota_scope differs for {}", rust.family_id);
+
+            let timestamped = matches!(
+                ts.query_kind.as_str(),
+                "nativeCodingPlan" | "nativeSnapshot" | "composite"
+            );
+            assert_eq!(
+                d.reset_semantics.as_str(),
+                if timestamped { "api_timestamp" } else { "none" },
+                "reset_semantics differs for {}",
+                rust.family_id
+            );
+            assert_eq!(
+                d.pace_capability, timestamped,
+                "pace_capability differs for {}",
+                rust.family_id
+            );
+        }
+        for ts in &frontend {
+            if ts.supports_oauth == Some(true) {
+                assert!(
+                    provider_catalog::OAUTH_FAMILIES.contains(&ts.family_id.as_str()),
+                    "frontend OAuth family `{}` missing from Rust OAUTH_FAMILIES",
+                    ts.family_id
+                );
+            }
         }
     }
 

@@ -1,10 +1,11 @@
 # Reference borrowings — MCP/生产力扩圈与额度可观测性
 
-Status: ready-for-agent
-Branch: `codex/reference-borrowings` (new; do not work on `main`)
+Status: in progress — partial slices landed on `main`; next round order written 2026-10-23 14:31
+Branch: `main` only (local; 51 commits ahead of `origin/main`, not pushed; no feature worktrees)
 Source: owner instruction 2026-10-23; reference repos cloned under `temp/repos/`
 Synthesis: `temp/research/20261023-reference-borrowings-synthesis.md`
 Reference scan: `temp/research/20261023-reference-repo-clone-shortlist.md`
+Next: `temp/handoff/20261023-1431-reference-borrowings-next-round.md`
 
 ## Objective
 
@@ -51,16 +52,28 @@ Reference scan: `temp/research/20261023-reference-repo-clone-shortlist.md`
 
 ## Priority and issue map
 
-| 优先级 | Issue | 方向 | 主要参考 | 依赖 |
-|---|---|---|---|---|
-| P0 | `01-provider-descriptor-apikey` | descriptor + 通用 API-key 额度适配器 + 单位扩展 | CodexBar | None |
-| P0 | `02-pane-mcp-server` | Pane MCP server over 6736，只读工具 + asOf | agentsview / codeburn | None（可与 01 并行；共享 payload 抽取需协调） |
-| P1 | `03-pace-reset-heat` | pace 四态、重置事件、统一热度色 | QuotaBar / Claude monitor | 01 的 descriptor 能力位可后置 |
-| P1 | `04-spend-source-adapter` | SourceAdapter + probe/doctor + 增量扫描 + 新源 | ccusage / TokenTracker / codeburn | None |
-| P2 | `05-cost-provenance-attribution` | billing/provenance、时间感知定价、项目/分支归因 | ccusage / codeburn | 04 |
-| P2 | `06-tray-ambient` | 托盘严重度染色、系统字体、投影缓存 | TokenTracker / codeburn / QuotaBar | None |
+| 优先级 | Issue | 方向 | 主要参考 | 依赖 | 现状（2026-10-23） |
+|---|---|---|---|---|---|
+| P0 | `01-provider-descriptor-apikey` | descriptor + 通用 API-key 额度适配器 + 单位扩展 | CodexBar | None | **部分**：adapter + 3 家试点 + Characters/Pages 已落；70 条目录能力位、脱敏 fixture、SSRF 测试待补 |
+| P0 | `02-pane-mcp-server` | Pane MCP server over 6736，只读工具 + asOf | agentsview / codeburn | None | **完成**：`mcp/pane-mcp/` Node stdio shim，6 个只读 tool + 6 tests；Phase 2 `api_payload.rs` 未做；客户端接入待 owner 验 |
+| P1 | `03-pace-reset-heat` | pace 四态、重置事件、统一热度色 | QuotaBar / Claude monitor | 01 的 descriptor 能力位可后置 | **部分**：pace/reset 检测/热度阈值/even-pace 竖线已落；just-reset、到点刷新、总览统一待补 |
+| P1 | `04-spend-source-adapter` | SourceAdapter + probe/doctor + 增量扫描 + 新源 | ccusage / TokenTracker / codeburn | None | **部分**：`root/reason` 与 Gemini/Copilot 探测行已落；SourceAdapter、byte-offset、20 源迁移、真正解析器待做 |
+| P2 | `05-cost-provenance-attribution` | billing/provenance、时间感知定价、项目/分支归因 | ccusage / codeburn | 04 | **部分**：billing/pricing mode + badge 已落；时间感知、stored/missing、override、归因待做 |
+| P2 | `06-tray-ambient` | 托盘严重度染色、系统字体、投影缓存 | TokenTracker / codeburn / QuotaBar | None | **部分**：severity + 内存 last-good 已落；系统字体、磁盘持久化、125%/150% 验收待做 |
 
 GitHub issues（2026-10-23 创建）：[#39](https://github.com/Aafff623/pane/issues/39)、[#40](https://github.com/Aafff623/pane/issues/40)、[#41](https://github.com/Aafff623/pane/issues/41)、[#42](https://github.com/Aafff623/pane/issues/42)、[#43](https://github.com/Aafff623/pane/issues/43)、[#44](https://github.com/Aafff623/pane/issues/44)。
+
+## Current status and next order
+
+执行顺序（owner 2026-10-23 确认，交主对话执行）：**04 (#42) → 05 (#43) → 01 (#39) → 03 (#41) → 06 (#44) → owner UI 验收 → release gate**。
+
+- 04 → 05 是硬依赖：先稳定 SourceAdapter/pricing 结构，再做成本口径，避免迁移两遍。
+- 01 不堵任何人：只碰 provider 层和 fixture，排第三顺手补完。
+- 03/06 代码先收尾，UI 验收必须 owner 亲自做（远程会话不能签收）。
+- 02 已完成，保持现状；#45 已记录扩展面决策（HTTP 6736 是事实源、MCP 薄适配、不做完整 Skill、CLI 暂缓），不要擅自扩写。
+- push/tag/release/skin 线上部署均未授权；owner 验收前不合并、不发布。
+
+每张 ticket 的剩余项、文件起点、验证命令和验收门在对应 `issues/*.md` 与交接件里。
 
 ## Workstream notes
 
@@ -122,4 +135,5 @@ GitHub issues（2026-10-23 创建）：[#39](https://github.com/Aafff623/pane/is
 
 ## Handoff
 
-`temp/handoff/20261023-reference-borrowings-handoff.md` — 冷启动状态、已克隆仓库、未提交状态、按 issue 的执行顺序、验证命令、边界。
+- **当前有效**：`temp/handoff/20261023-1431-reference-borrowings-next-round.md` — 冷启动事实、逐 ticket 剩余项、执行顺序、文件起点、验证命令、owner 验收门、可直接粘贴的主对话启动 prompt。
+- **历史**：`temp/handoff/20261023-reference-borrowings-handoff.md` — 调研阶段的原始交接；其中“独立 worktree / 基于 origin/main”的建议已被 2026-10-23 的 main 合并覆盖，读现状以新件为准。

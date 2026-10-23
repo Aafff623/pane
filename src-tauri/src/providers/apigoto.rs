@@ -1,8 +1,9 @@
 //! APIGOTO (www.apigoto.com) subscription quota — the official read-only
 //! `GET /v1/usage` endpoint (built exactly for client balance displays
 //! like CC Switch). Bearer sk- key, no session, no rotation. Facts and
-//! schema verified live 2026-10-03; see
-//! temp/handoff/20261003-153737-apigoto-provider-impl.md.
+//! schema verified live 2026-10-03; rechecked 2026-10-23 through Pane's
+//! stored account key (RouterCode Free, 7d window, expiry 2026-11-03).
+//! See temp/handoff/20261003-153737-apigoto-provider-impl.md.
 //!
 //! Semantics that shape this parser:
 //! - `is_active` reflects the KEY+user status, NOT the subscription. After
@@ -64,19 +65,23 @@ async fn fetch_with_key(key: &str) -> Result<Snapshot, String> {
         .send()
         .await
         .map_err(|e| format!("APIGOTO request: {e}"))?;
-    if resp.status().as_u16() == 401 {
-        // 40101 = key not found/deleted; 40001 = malformed auth header.
-        // Either way it is a credential problem, decided by status + code,
-        // never by the message text.
-        return Err("APIGOTO API key was rejected — check it in Settings".into());
-    }
-    if !resp.status().is_success() {
-        // 503 = config store briefly unavailable: transient, the next
-        // refresh cycle retries and the stale-snapshot layer covers it.
-        return Err(format!("APIGOTO endpoint: HTTP {}", resp.status()));
+    if let Some(error) = status_error(resp.status().as_u16()) {
+        return Err(error);
     }
     let doc = json_body(resp, MAX_BODY_BYTES, "APIGOTO").await?;
     parse_snapshot(&doc)
+}
+
+/// 40101 = key not found/deleted; 40001 = malformed auth header. Either
+/// way it is a credential problem, decided by status, never by body text.
+/// 503 = config store briefly unavailable: transient, the next refresh
+/// cycle retries and the stale-snapshot layer covers it.
+fn status_error(status: u16) -> Option<String> {
+    match status {
+        401 => Some("APIGOTO API key was rejected — check it in Settings".into()),
+        s if !(200..300).contains(&s) => Some(format!("APIGOTO endpoint: HTTP {s}")),
+        _ => None,
+    }
 }
 
 /// Numbers arrive mixed: `used/limit/points` as JSON numbers, balance
@@ -85,8 +90,20 @@ fn num(v: Option<&Value>) -> Option<f64> {
     v?.as_f64().or_else(|| v?.as_str()?.trim().parse().ok())
 }
 
+/// Non-zero decimal string for display (the ¥ bucket keeps its original
+/// precision; only presence and zero-ness are judged here).
+fn decimal_string(v: Option<&Value>) -> Option<String> {
+    let s = v?.as_str()?.trim();
+    if s.is_empty() || s.parse::<f64>().ok()? == 0.0 {
+        return None;
+    }
+    Some(s.to_string())
+}
+
 fn parse_snapshot(doc: &Value) -> Result<Snapshot, String> {
-    if doc.get("is_active").and_then(Value::as_bool) == Some(false) {
+    let active = doc.get("is_active").and_then(Value::as_bool);
+    let valid = doc.get("isValid").and_then(Value::as_bool);
+    if active == Some(false) || valid == Some(false) {
         return Err("APIGOTO key or account is disabled".into());
     }
 
@@ -104,10 +121,9 @@ fn parse_snapshot(doc: &Value) -> Result<Snapshot, String> {
         // fresh 0% card off the payg fallback numbers. Diagnostics only.
         let mode = doc.get("mode").and_then(Value::as_str).unwrap_or("payg");
         let points = num(doc.get("points")).unwrap_or(0.0);
-        let balance = doc
-            .get("balance")
-            .and_then(Value::as_str)
-            .filter(|s| !s.trim().is_empty() && num(doc.get("balance")).unwrap_or(0.0) != 0.0);
+        let remaining = num(doc.get("remaining")).filter(|v| *v > 0.0);
+        let balance = decimal_string(doc.get("balance"));
+        let balance_usd = num(doc.get("balance_usd")).filter(|v| *v > 0.0);
         let mut rows = vec![Metric::text(
             "Subscription",
             if sub.is_some() {
@@ -116,8 +132,12 @@ fn parse_snapshot(doc: &Value) -> Result<Snapshot, String> {
                 format!("none ({mode})")
             },
         )];
-        if let Some(b) = balance {
+        if let Some(r) = remaining {
+            rows.push(Metric::text("Remaining", format!("${r:.2}")));
+        } else if let Some(b) = balance {
             rows.push(Metric::text("Balance", format!("¥{b}")));
+        } else if let Some(b) = balance_usd {
+            rows.push(Metric::text("Balance", format!("${b:.2}")));
         } else if points > 0.0 {
             rows.push(Metric::text("Points", format!("{points:.0}")));
         }
@@ -151,7 +171,11 @@ fn parse_snapshot(doc: &Value) -> Result<Snapshot, String> {
     let mut detail = String::new();
     if let Some(rem) = num(doc.get("remaining")).filter(|r| *r > 0.0) {
         let unit = doc.get("unit").and_then(Value::as_str).unwrap_or("USD");
-        detail = format!("${rem:.2} {unit} left");
+        detail = if unit.eq_ignore_ascii_case("USD") {
+            format!("${rem:.2} left")
+        } else {
+            format!("{rem:.2} {unit} left")
+        };
     }
     if window_sec > 0.0 {
         let days = (window_sec / 86_400.0).round() as i64;
@@ -267,5 +291,45 @@ mod tests {
     fn disabled_key_is_an_error() {
         let doc = serde_json::json!({"is_active": false, "isValid": false});
         assert!(parse_snapshot(&doc).is_err());
+    }
+
+    #[test]
+    fn is_valid_false_is_an_error_even_when_is_active_is_true() {
+        let doc = serde_json::json!({"is_active": true, "isValid": false, "mode": "payg"});
+        assert!(parse_snapshot(&doc).is_err());
+    }
+
+    #[test]
+    fn http_statuses_map_to_distinct_errors() {
+        assert!(status_error(401).unwrap().contains("rejected"));
+        assert_eq!(status_error(503).as_deref(), Some("APIGOTO endpoint: HTTP 503"));
+        assert!(status_error(429).unwrap().contains("HTTP 429"));
+        assert!(status_error(200).is_none());
+        assert!(status_error(204).is_none());
+    }
+
+    #[test]
+    fn payg_prefers_remaining_over_balance_buckets() {
+        let doc = serde_json::json!({
+            "is_active": true, "mode": "payg",
+            "remaining": 5.8, "unit": "USD",
+            "points": 1250000, "balance": "3.20000000", "balance_usd": "0.45000000"
+        });
+        let snap = parse_snapshot(&doc).expect("parse");
+        assert!(snap.metrics.iter().any(|m| m.label == "Remaining"
+            && m.value.as_deref() == Some("$5.80")));
+        assert!(!snap.metrics.iter().any(|m| m.label == "Balance"));
+    }
+
+    #[test]
+    fn payg_falls_back_to_usd_balance_when_yuan_bucket_is_empty() {
+        // The official example ships balance=0 with a non-zero balance_usd.
+        let doc = serde_json::json!({
+            "is_active": true, "mode": "payg", "remaining": 0,
+            "points": 0, "balance": "0.00000000", "balance_usd": "3.20000000"
+        });
+        let snap = parse_snapshot(&doc).expect("parse");
+        assert!(snap.metrics.iter().any(|m| m.label == "Balance"
+            && m.value.as_deref() == Some("$3.20")));
     }
 }

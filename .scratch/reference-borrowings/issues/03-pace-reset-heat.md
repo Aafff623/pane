@@ -1,6 +1,6 @@
 # 03 — Pace 四态、重置事件与统一热度色
 
-Status: in progress — shared pace API/UI landed; resets/heat unification pending
+Status: done (2026-10-23) — just-reset marker, one-shot grace refresh, overview pace tooltip and edge tests landed; owner UI acceptance pending
 GitHub: #41
 Priority: P1
 Blocked by: None（01 的 `pace_capability` 可后置）
@@ -60,3 +60,11 @@ Owner UI 目检：年轻窗口、临近重置、刚重置、耗尽四种状态�
 - 2026-10-23：新增 `pace.rs`（ahead/close/over/spent/unknown、settled 门、`run_out_at`）并在 `Snapshot::ok` 统一附加到 progress metric；`/v1/providers` 输出 `pace`，卡片显示 compact chip。`cargo check`、pace/alerts 定向测试、前端 94 tests 通过。重置事件、just-reset、统一热度函数和 even-pace 竖线尚未集成。
 
 - 2026-10-23：卡片进度条增加 even-pace 竖线与 hover 说明，统一 50/90 热度阈值；`resets.rs` 纯检测测试通过。just-reset/到点刷新/总览统一仍未接。
+
+- 2026-10-23（主对话接手）：`Snapshot.just_reset_at` + `httpapi::apply_reset_marks`；`resets::is_reset` 在 publish 时比较前后 progress 读数，要求 id/plan 未变、跌幅≥10 点、reset 前移≥10 分钟或窗口 1/10；标记保留 10 分钟，stale/失败刷新不清除也不新检测。`/v1/usage` 与 `/v1/providers` 输出 `justResetAt`。
+- 前端：卡片 plan 旁显示 10 分钟 just-reset 标记；countdown 到点后按 `providerId:resetAt` 去重，20 秒宽限触发一次 `refresh_provider`，不循环。总览 hover 现在带同一 `pace.state` + projected%（卡片 chip/API pace 同源）。
+- 热度：卡片/总览共用 `usageHeatTone` 50/90；托盘中 50/90 锚点已在 #44 对齐。
+- 测试：`resets::` 6 passed（正常重置、换号、充值、抖动、跌幅不足、窗口 1/10 边界）；`reset_marker` 2 passed（10 分钟过期、plan/stale 否决）；`spend::` 83 passed；node 96 passed；`pnpm build` 通过。
+- 全量 `parse-tests` 最终：1017 passed / 0 failed / 14 ignored（串行、去代理，444.95s）。
+
+- 未验证/待 owner：真实 provider 的 just-reset 事件、20 秒刷新计时器、年轻窗口/临近重置/耗尽四态的视觉验收；`alerts.rs` 已跑全量 parse-tests（见收尾），但没有针对本轮做额外通知行为对比。

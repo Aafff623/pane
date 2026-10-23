@@ -42,7 +42,7 @@ fn read_auth(dir: &std::path::Path) -> Option<Value> {
 /// is not an OpenAI-specific shape — broad scanning could otherwise
 /// misclassify another tool's credential file as a Codex login and send
 /// its tokens to OpenAI endpoints (refresh could even write back into it).
-fn openai_provenance(doc: &Value) -> bool {
+pub(crate) fn openai_provenance(doc: &Value) -> bool {
     doc.pointer("/tokens/id_token")
         .and_then(Value::as_str)
         .and_then(jwt_claims)
@@ -52,7 +52,7 @@ fn openai_provenance(doc: &Value) -> bool {
 /// (account id, email label) from a parsed auth.json: tokens.account_id
 /// first, the id_token's ChatGPT account claim as the fallback; a file
 /// that names neither has no identity and never becomes a card.
-fn identity_from(doc: &Value) -> Option<(String, Option<String>)> {
+pub(crate) fn identity_from(doc: &Value) -> Option<(String, Option<String>)> {
     let tokens = doc.get("tokens")?;
     let claims = tokens
         .get("id_token")
@@ -82,7 +82,10 @@ fn identity_from(doc: &Value) -> Option<(String, Option<String>)> {
 /// Extra Codex logins beyond the default home — same scan roots, identity
 /// rules, and dedup-by-account as the Claude discovery.
 pub fn discover_extra_accounts() -> Vec<CodexAccount> {
-    let default = default_home();
+    discover_extra_accounts_at(default_home(), super::account_scan_roots())
+}
+
+pub(crate) fn discover_extra_accounts_at(default: PathBuf, roots: Vec<PathBuf>) -> Vec<CodexAccount> {
     let default_identity = dir_identity(&default);
     // Same conservative rule as Claude: a default login that can't name
     // its account voids the dedup guarantee — discover nothing.
@@ -92,7 +95,7 @@ pub fn discover_extra_accounts() -> Vec<CodexAccount> {
     let mut seen: Vec<String> = default_identity.map(|(a, _)| a).into_iter().collect();
 
     let mut out = Vec::new();
-    for dir in super::account_scan_roots() {
+    for dir in roots {
         if dir == default {
             continue;
         }
@@ -116,6 +119,58 @@ pub fn discover_extra_accounts() -> Vec<CodexAccount> {
         out.push(CodexAccount { id: format!("codex@{hash8}"), name, dir });
     }
     out.sort_by(|a, b| a.id.cmp(&b.id));
+    out
+}
+
+/// Pane's own `auth.json.pane-bak` backups in the default and extra Codex
+/// homes. These are local configuration sources like `auth.json`; callers
+/// use them to surface accounts that are otherwise invisible (for example a
+/// desktop login whose live `auth.json` was renamed during a rotation).
+/// Only OpenAI-provenance files become logins; identities are deduped later
+/// against the current default and the Pane-managed account store.
+pub(crate) fn backup_auth_logins() -> Vec<crate::codex_accounts::CodexLogin> {
+    let mut roots = super::account_scan_roots();
+    let default = default_home();
+    if !roots.iter().any(|dir| dir == &default) {
+        roots.push(default);
+    }
+    let mut out = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+    for dir in roots {
+        let path = dir.join("auth.json.pane-bak");
+        let Ok(raw) = std::fs::read_to_string(&path) else { continue };
+        let Ok(doc) = serde_json::from_str::<Value>(raw.trim_start_matches('\u{feff}')) else {
+            continue;
+        };
+        if !openai_provenance(&doc) {
+            continue;
+        }
+        let Some((account_id, email)) = identity_from(&doc) else { continue };
+        if !seen.insert(account_id.clone()) {
+            continue;
+        }
+        let Some(tokens) = doc.get("tokens") else { continue };
+        let get = |key: &str| tokens.get(key).and_then(Value::as_str).unwrap_or_default();
+        let access_token = get("access_token");
+        if access_token.trim().is_empty() {
+            continue;
+        }
+        let label = email
+            .as_ref()
+            .map(|value| format!("{value} · 本机"))
+            .unwrap_or_else(|| format!("Codex @{}", crate::codex_accounts::hash8(&account_id)));
+        out.push(crate::codex_accounts::CodexLogin {
+            account_id,
+            email: email.unwrap_or_default(),
+            label,
+            access_token: access_token.to_string(),
+            refresh_token: get("refresh_token").to_string(),
+            id_token: get("id_token").to_string(),
+            expires_at: String::new(),
+            added_at: Utc::now().timestamp_millis(),
+            imported_from_backup: true,
+        });
+    }
     out
 }
 
@@ -540,6 +595,32 @@ mod tests {
         let payload = base64::engine::general_purpose::URL_SAFE_NO_PAD
             .encode(serde_json::to_vec(&claims).unwrap());
         format!("x.{payload}.y")
+    }
+
+    #[test]
+    fn multi_source_local_discovery_dedupes_default_and_extra_homes() {
+        for family in ["codex", "claude"] {
+            let base = std::env::temp_dir().join(format!("pane-local-sources-{family}-{}", std::process::id()));
+            let roots: Vec<_> = ["default", "same-default", "extra", "same-extra"].iter().map(|name| base.join(name)).collect();
+            for (index, dir) in roots.iter().enumerate() {
+                std::fs::create_dir_all(dir).unwrap();
+                let id = if index < 2 { "default-id" } else { "extra-id" };
+                if family == "codex" {
+                    let token = fake_id_token(json!({"email":"synthetic@example.com", "https://api.openai.com/auth":{"chatgpt_account_id":id}}));
+                    std::fs::write(dir.join("auth.json"), json!({"tokens":{"account_id":id,"id_token":token,"access_token":"synthetic"}}).to_string()).unwrap();
+                } else {
+                    std::fs::write(dir.join(".credentials.json"), r#"{"claudeAiOauth":{}}"#).unwrap();
+                    std::fs::write(dir.join(".claude.json"), json!({"oauthAccount":{"accountUuid":id,"emailAddress":"synthetic@example.com"}}).to_string()).unwrap();
+                }
+            }
+            let ids: Vec<String> = if family == "codex" {
+                super::discover_extra_accounts_at(roots[0].clone(), roots.clone()).into_iter().map(|a|a.id).collect()
+            } else {
+                crate::providers::claude::discover_extra_accounts_at(roots[0].clone(), roots.clone()).into_iter().map(|a|a.id).collect()
+            };
+            assert_eq!(ids, vec![format!("{family}@extraid")], "{family}: one account across repeated sources");
+            std::fs::remove_dir_all(base).unwrap();
+        }
     }
 
     #[test]

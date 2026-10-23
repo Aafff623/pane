@@ -32,6 +32,7 @@ mod windsurf_login;
 mod oauth;
 mod oauth_util;
 mod platform;
+mod popover_geometry;
 mod pricing;
 mod providers;
 pub(crate) mod provider_catalog;
@@ -55,7 +56,9 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use rand_core::RngCore;
 
+use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
+use std::fs;
 use tauri::{
     menu::{CheckMenuItem, IsMenuItem, Menu, MenuItem, PredefinedMenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
@@ -208,6 +211,9 @@ fn config_with_defaults(mut cfg: Value) -> Value {
     obj.entry("windowForm").or_insert(json!("floating"));
     obj.entry("windowResizeEnabled").or_insert(json!(true));
     obj.entry("popoverSize").or_insert(Value::Null);
+    popover_geometry::migrate_scale_settings(obj);
+    obj.entry("windowScale").or_insert(json!(1.0));
+    obj.entry("uiTextSize").or_insert(json!("small"));
     obj.entry("silentStart").or_insert(json!(false));
     // Board cleanliness: bare "no credentials" cards fold into one collapsed
     // section instead of flooding the dashboard (issue: fresh/legacy configs
@@ -333,6 +339,9 @@ const CONFIG_KEYS: &[&str] = &[
     "windowForm",
     "windowResizeEnabled",
     "popoverSize",
+    "windowScale",
+    "windowScaleVersion",
+    "uiTextSize",
     "silentStart",
     "hideUnconfigured",
     "setupPicked",
@@ -654,7 +663,258 @@ const DIGIT_FONT: [[u8; 6]; 10] = [
 /// two rows mimic the Mac menu bar's "100% / 36%" pair. White digits with a
 /// black outline so they read on both light and dark taskbars.
 fn draw_tray_numbers(values: &[u32]) -> Vec<u8> {
-    draw_tray_numbers_colored(values, [255, 255, 255])
+    draw_tray_numbers_system_font(values, [255, 255, 255])
+        .unwrap_or_else(|| draw_tray_numbers_colored(values, [255, 255, 255]))
+}
+
+/// Same numbers through the system sans-serif at 32px. The old 4x6 pixel
+/// font turns into blocks at 125%/150%; the system face keeps counters and
+/// stroke weight, and still falls back to the pixel font if loading fails.
+///
+/// Glyphs are flattened to line segments and filled at 4x, then box-filtered
+/// down. That is deliberately small (no image/font crates beyond font-kit)
+/// and gives clean anti-aliasing at both 100% and scaled taskbars.
+fn draw_tray_numbers_system_font(values: &[u32], color: [u8; 3]) -> Option<Vec<u8>> {
+    use font_kit::family_name::FamilyName;
+    use font_kit::outline::PointFlags;
+    use font_kit::properties::Properties;
+
+    const SIZE: usize = 32;
+    const SS: usize = 4;
+    let font = font_kit::source::SystemSource::new()
+        .select_best_match(&[FamilyName::SansSerif], &Properties::new())
+        .ok()?
+        .load()
+        .ok()?;
+    let units = font.metrics().units_per_em as f32;
+    if !(units.is_finite() && units > 0.0) {
+        return None;
+    }
+    let font_size = if values.len() >= 2 { 12.0 } else { 20.0 };
+    let scale = font_size / units * SS as f32;
+    let rows: &[f32] = if values.len() >= 2 { &[1.0, 16.0] } else { &[4.0] };
+    let hi_size = SIZE * SS;
+    let mut hi = vec![false; hi_size * hi_size];
+
+    for (value, y0) in values.iter().zip(rows) {
+        let text = value.to_string();
+        let glyphs: Vec<(u32, f32)> = text
+            .chars()
+            .map(|ch| {
+                let gid = font.glyph_for_char(ch)?;
+                let adv = font.advance(gid).ok()?.x() * scale;
+                Some((gid, adv))
+            })
+            .collect::<Option<Vec<_>>>()?;
+        if glyphs.is_empty() {
+            return None;
+        }
+        let total: f32 = glyphs.iter().map(|(_, adv)| *adv).sum();
+        let mut pen_x = (hi_size as f32 - total) / 2.0;
+        let baseline = (y0 + font_size) * SS as f32;
+
+        for (gid, adv) in glyphs {
+            let mut builder = font_kit::outline::OutlineBuilder::new();
+            font.outline(gid, font_kit::hinting::HintingOptions::None, &mut builder)
+                .ok()?;
+            let outline = builder.into_outline();
+            let mut edges: Vec<((f32, f32), (f32, f32))> = Vec::new();
+            for contour in &outline.contours {
+                let mut first: Option<(f32, f32)> = None;
+                let mut current: Option<(f32, f32)> = None;
+                let mut ctrl0: Option<(f32, f32)> = None;
+                let mut ctrl1: Option<(f32, f32)> = None;
+                fn push_line(
+                    a: (f32, f32),
+                    b: (f32, f32),
+                    edges: &mut Vec<((f32, f32), (f32, f32))>,
+                ) {
+                    if (a.0 - b.0).abs() > f32::EPSILON || (a.1 - b.1).abs() > f32::EPSILON {
+                        edges.push((a, b));
+                    }
+                }
+                fn flatten_quad(
+                    a: (f32, f32),
+                    c: (f32, f32),
+                    b: (f32, f32),
+                    edges: &mut Vec<((f32, f32), (f32, f32))>,
+                ) {
+                    let steps = 8;
+                    let mut prev = a;
+                    for i in 1..=steps {
+                        let t = i as f32 / steps as f32;
+                        let u = 1.0 - t;
+                        let p = (
+                            u * u * a.0 + 2.0 * u * t * c.0 + t * t * b.0,
+                            u * u * a.1 + 2.0 * u * t * c.1 + t * t * b.1,
+                        );
+                        push_line(prev, p, edges);
+                        prev = p;
+                    }
+                }
+                fn flatten_cubic(
+                    a: (f32, f32),
+                    c0: (f32, f32),
+                    c1: (f32, f32),
+                    b: (f32, f32),
+                    edges: &mut Vec<((f32, f32), (f32, f32))>,
+                ) {
+                    let steps = 10;
+                    let mut prev = a;
+                    for i in 1..=steps {
+                        let t = i as f32 / steps as f32;
+                        let u = 1.0 - t;
+                        let p = (
+                            u * u * u * a.0
+                                + 3.0 * u * u * t * c0.0
+                                + 3.0 * u * t * t * c1.0
+                                + t * t * t * b.0,
+                            u * u * u * a.1
+                                + 3.0 * u * u * t * c0.1
+                                + 3.0 * u * t * t * c1.1
+                                + t * t * t * b.1,
+                        );
+                        push_line(prev, p, edges);
+                        prev = p;
+                    }
+                }
+                for (pos, flags) in contour.positions.iter().zip(contour.flags.iter()) {
+                    let p = (pos.x(), pos.y());
+                    if flags.contains(PointFlags::CONTROL_POINT_0) {
+                        ctrl0 = Some(p);
+                        continue;
+                    }
+                    if flags.contains(PointFlags::CONTROL_POINT_1) {
+                        ctrl1 = Some(p);
+                        continue;
+                    }
+                    if let Some(start) = current {
+                        if let (Some(c0), Some(c1)) = (ctrl0, ctrl1) {
+                            flatten_cubic(start, c0, c1, p, &mut edges);
+                        } else if let Some(c0) = ctrl0 {
+                            flatten_quad(start, c0, p, &mut edges);
+                        } else {
+                            push_line(start, p, &mut edges);
+                        }
+                    } else {
+                        first = Some(p);
+                    }
+                    current = Some(p);
+                    ctrl0 = None;
+                    ctrl1 = None;
+                }
+                if let (Some(a), Some(b)) = (current, first) {
+                    push_line(a, b, &mut edges);
+                }
+            }
+            // Font units -> supersampled pixels (font y grows up).
+            let edges: Vec<((f32, f32), (f32, f32))> = edges
+                .into_iter()
+                .map(|(a, b)| {
+                    (
+                        (pen_x + a.0 * scale, baseline - a.1 * scale),
+                        (pen_x + b.0 * scale, baseline - b.1 * scale),
+                    )
+                })
+                .collect();
+            for py in 0..hi_size {
+                let y = py as f32 + 0.5;
+                let mut xs: Vec<f32> = Vec::new();
+                for &(a, b) in &edges {
+                    let (y1, y2) = (a.1, b.1);
+                    if (y1 <= y && y2 > y) || (y2 <= y && y1 > y) {
+                        let t = (y - y1) / (y2 - y1);
+                        xs.push(a.0 + t * (b.0 - a.0));
+                    }
+                }
+                xs.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+                for pair in xs.chunks(2) {
+                    if pair.len() < 2 {
+                        break;
+                    }
+                    let x0 = pair[0].max(0.0);
+                    let x1 = pair[1].min(hi_size as f32);
+                    let mut x = x0.floor() as i32;
+                    while (x as f32) < x1 {
+                        if x >= 0 && (x as usize) < hi_size {
+                            hi[py * hi_size + x as usize] = true;
+                        }
+                        x += 1;
+                    }
+                }
+            }
+            pen_x += adv;
+        }
+    }
+
+    let mut coverage = vec![0u8; SIZE * SIZE];
+    for y in 0..SIZE {
+        for x in 0..SIZE {
+            let mut on = 0u32;
+            for dy in 0..SS {
+                for dx in 0..SS {
+                    if hi[(y * SS + dy) * hi_size + x * SS + dx] {
+                        on += 1;
+                    }
+                }
+            }
+            coverage[y * SIZE + x] = (on * 255 / (SS * SS) as u32) as u8;
+        }
+    }
+    if coverage.iter().all(|c| *c == 0) {
+        return None;
+    }
+
+    // Outline first, then anti-aliased color over it.
+    let mut rgba = vec![0u8; SIZE * SIZE * 4];
+    for y in 0..SIZE {
+        for x in 0..SIZE {
+            let idx = y * SIZE + x;
+            if coverage[idx] > 0 {
+                continue;
+            }
+            let near = (-1i32..=1).any(|dy| {
+                (-1i32..=1).any(|dx| {
+                    let nx = x as i32 + dx;
+                    let ny = y as i32 + dy;
+                    nx >= 0
+                        && ny >= 0
+                        && (nx as usize) < SIZE
+                        && (ny as usize) < SIZE
+                        && coverage[ny as usize * SIZE + nx as usize] > 128
+                })
+            });
+            if near {
+                let p = idx * 4;
+                rgba[p..p + 4].copy_from_slice(&[0, 0, 0, 230]);
+            }
+        }
+    }
+    for (idx, &cov) in coverage.iter().enumerate() {
+        if cov == 0 {
+            continue;
+        }
+        let src_a = cov as f32 / 255.0;
+        let p = idx * 4;
+        let dst_a = rgba[p + 3] as f32 / 255.0;
+        let out_a = src_a + dst_a * (1.0 - src_a);
+        if out_a <= 0.0 {
+            continue;
+        }
+        for channel in 0..3 {
+            let src = color[channel] as f32;
+            let dst = rgba[p + channel] as f32;
+            rgba[p + channel] = ((src * src_a + dst * dst_a * (1.0 - src_a)) / out_a) as u8;
+        }
+        rgba[p + 3] = (out_a * 255.0) as u8;
+    }
+    Some(rgba)
+}
+
+fn draw_tray_numbers_for(values: &[u32], severity: tray_projection::TraySeverity) -> Vec<u8> {
+    let color = tray_severity_color(severity);
+    draw_tray_numbers_system_font(values, color)
+        .unwrap_or_else(|| draw_tray_numbers_colored(values, color))
 }
 
 fn draw_tray_numbers_colored(values: &[u32], color: [u8; 3]) -> Vec<u8> {
@@ -734,7 +994,9 @@ fn draw_tray_numbers_colored(values: &[u32], color: [u8; 3]) -> Vec<u8> {
 fn tray_severity_color(severity: tray_projection::TraySeverity) -> [u8; 3] {
     match severity {
         tray_projection::TraySeverity::Close => [245, 158, 11],
-        tray_projection::TraySeverity::Maxed | tray_projection::TraySeverity::Error => [239, 68, 68],
+        tray_projection::TraySeverity::Maxed => [239, 68, 68],
+        // Overview uses orange for a failed card, red for a maxed bar.
+        tray_projection::TraySeverity::Error => [249, 115, 22],
         tray_projection::TraySeverity::Stale => [156, 163, 175],
         tray_projection::TraySeverity::Ok => [255, 255, 255],
     }
@@ -769,9 +1031,9 @@ fn apply_main_tray_projection(
             }
             tray_projection::MainTrayIconMode::Numbers => {
                 let icon = tauri::image::Image::new_owned(
-                    draw_tray_numbers_colored(
+                    draw_tray_numbers_for(
                         &projection.remaining_percentages,
-                        tray_severity_color(projection.severity),
+                        projection.severity,
                     ),
                     32,
                     32,
@@ -781,11 +1043,16 @@ fn apply_main_tray_projection(
             }
         }
     }
+    let saved = LastMainTray {
+        lefts: projection.remaining_percentages.clone(),
+        tooltip: projection.tooltip.clone(),
+        severity: projection.severity,
+        saved_at: chrono::Utc::now().timestamp_millis(),
+    };
     if let Ok(mut slot) = last_main_tray().lock() {
-        slot.lefts = projection.remaining_percentages.clone();
-        slot.tooltip = projection.tooltip.clone();
-        slot.severity = projection.severity;
+        *slot = saved.clone();
     }
+    save_persisted_main_tray(&saved);
     Ok(())
 }
 
@@ -800,10 +1067,64 @@ fn apply_main_tray_projection(
 static HIDE_WANT: AtomicBool = AtomicBool::new(false);
 static HIDE_STRIP: AtomicBool = AtomicBool::new(false);
 
+#[derive(Clone, Serialize, Deserialize)]
 struct LastMainTray {
     lefts: Vec<u32>,
     tooltip: String,
     severity: tray_projection::TraySeverity,
+    saved_at: i64,
+}
+
+#[derive(Serialize, Deserialize)]
+struct PersistedMainTray {
+    lefts: Vec<u32>,
+    tooltip: String,
+    severity: tray_projection::TraySeverity,
+    #[serde(default)]
+    saved_at: i64,
+}
+
+fn tray_projection_path() -> PathBuf {
+    providers::config_dir().join("tray_projection.json")
+}
+
+/// Last successfully painted projection, including the age of the paint.
+/// A boot paint older than 15 minutes is tinted stale instead of pretending
+/// it is live; the next successful fetch replaces it.
+fn load_persisted_main_tray() -> Option<LastMainTray> {
+    let raw = fs::read_to_string(tray_projection_path()).ok()?;
+    let doc = serde_json::from_str::<PersistedMainTray>(&raw).ok()?;
+    let now = chrono::Utc::now().timestamp_millis();
+    let old = doc.saved_at <= 0 || now - doc.saved_at > 15 * 60_000;
+    let tray = LastMainTray {
+        lefts: doc.lefts,
+        tooltip: doc.tooltip,
+        severity: if old {
+            tray_projection::TraySeverity::Stale
+        } else {
+            doc.severity
+        },
+        saved_at: doc.saved_at,
+    };
+    if let Ok(mut slot) = last_main_tray().lock() {
+        *slot = tray.clone();
+    }
+    Some(tray)
+}
+
+fn save_persisted_main_tray(tray: &LastMainTray) {
+    let doc = PersistedMainTray {
+        lefts: tray.lefts.clone(),
+        tooltip: tray.tooltip.clone(),
+        severity: tray.severity,
+        saved_at: tray.saved_at,
+    };
+    let Ok(json) = serde_json::to_string(&doc) else { return };
+    let path = tray_projection_path();
+    let tmp = path.with_extension("json.tmp");
+    if fs::write(&tmp, json).is_ok() {
+        let _ = fs::rename(&tmp, &path);
+    }
 }
 
 fn last_main_tray() -> &'static Mutex<LastMainTray> {
@@ -813,6 +1134,7 @@ fn last_main_tray() -> &'static Mutex<LastMainTray> {
             lefts: Vec::new(),
             tooltip: String::from("Pane"),
             severity: tray_projection::TraySeverity::Ok,
+            saved_at: 0,
         })
     })
 }
@@ -861,7 +1183,7 @@ fn paint_cached_main_tray(app: &tauri::AppHandle) {
         return;
     }
     let icon = tauri::image::Image::new_owned(
-        draw_tray_numbers_colored(&cached.0, tray_severity_color(cached.2)),
+        draw_tray_numbers_for(&cached.0, cached.2),
         32,
         32,
     );
@@ -3384,6 +3706,16 @@ fn fetch_spend_sources() -> Vec<spend::SpendSourceStatus> {
     spend::source_statuses()
 }
 
+#[tauri::command]
+fn get_pricing_overrides() -> String {
+    pricing::overrides_text()
+}
+
+#[tauri::command]
+fn save_pricing_overrides(text: String) -> Result<(), String> {
+    pricing::save_overrides_text(&text)
+}
+
 /// Daily credit consumption per card id. Qoder CN / Trae CN bill in credits,
 /// not tokens — this series is theirs alone and never feeds token or
 /// dollar totals.
@@ -4369,16 +4701,20 @@ fn account_list_unlocked(provider: String) -> Result<Vec<Value>, String> {
     }
     if provider == "codex" {
         let mut list = Vec::new();
-        if let Some((_account_id, email)) = providers::codex::default_account_info() {
+        let default_info = providers::codex::default_account_info();
+        if let Some((_account_id, email)) = &default_info {
             list.push(json!({
                 "id": "codex",
-                "label": email.clone().unwrap_or_else(|| "默认 (CLI)".into()),
+                "label": email.as_ref().map(|value| format!("{value} · 桌面")).unwrap_or_else(|| "默认 (CLI)".into()),
                 "email": email,
                 "maskedKey": "CLI 登录",
                 "baseUrl": null,
             }));
         }
         for login in codex_accounts::load_with_imported_single_login_from_unlocked(&providers::config_dir()) {
+            if default_info.as_ref().is_some_and(|(id, _)| id == &login.account_id) {
+                continue;
+            }
             let id = codex_accounts::card_id_for_account(&login);
             if list.iter().any(|existing| existing.get("id").and_then(Value::as_str) == Some(&id)) {
                 continue;
@@ -5490,6 +5826,37 @@ async fn ensure_panel_window(app: &tauri::AppHandle) -> Result<(), String> {
     Ok(())
 }
 
+/// One physical-coordinate path for restore, summon, reset and scale.
+/// The work area excludes the taskbar; oversized levels stay reachable.
+fn place_popover(window: &tauri::WebviewWindow, width: u32, height: u32, saved: Option<(i32, i32)>, locked: bool) -> Result<(), String> {
+    let monitor = window.current_monitor().map_err(|e| e.to_string())?
+        .or_else(|| window.primary_monitor().ok().flatten())
+        .ok_or("popover monitor is unavailable")?;
+    let work = monitor.work_area();
+    let rect = popover_geometry::placement(popover_geometry::Rect {
+        x: work.position.x, y: work.position.y, w: work.size.width, h: work.size.height,
+    }, width, height, saved, locked);
+    #[cfg(windows)]
+    {
+        use windows::Win32::UI::WindowsAndMessaging::{SetWindowPos, SWP_NOACTIVATE, SWP_NOZORDER};
+        let hwnd = window.hwnd().map_err(|e| e.to_string())?;
+        unsafe { SetWindowPos(hwnd, None, rect.x, rect.y, rect.w as i32, rect.h as i32, SWP_NOZORDER | SWP_NOACTIVATE) }
+            .map_err(|e| e.to_string())
+    }
+    #[cfg(not(windows))]
+    {
+        window.set_size(tauri::PhysicalSize::new(rect.w, rect.h)).map_err(|e| e.to_string())?;
+        window.set_position(tauri::PhysicalPosition::new(rect.x, rect.y)).map_err(|e| e.to_string())
+    }
+}
+
+#[tauri::command]
+fn center_popover(app: tauri::AppHandle) -> Result<(), String> {
+    let window = app.get_webview_window("main").ok_or("main window is unavailable")?;
+    let size = window.outer_size().map_err(|e| e.to_string())?;
+    place_popover(&window, size.width, size.height, None, true)
+}
+
 /// Panel-form PoC (dual-form product work): a second window over the same
 /// frontend bundle — resizable, decorated, taskbar-visible, not always-on-top.
 /// Must stay an ASYNC command — see ensure_panel_window for the deadlock note.
@@ -5573,16 +5940,43 @@ fn now_ms() -> u64 {
         .unwrap_or(0)
 }
 
-/// The position the next summon should use. The lock freezes the window at
-/// `popoverPos`; it does not mean "re-center every time" (that old rule
-/// discarded the position the user had just dragged to). `None` means
-/// "place it the usual way" (tray anchor / monitor center) on first run.
+/// Locked is the default centered placement. Only unlocked adjustment mode
+/// restores a custom position; old automatic offsets must not win.
+fn popover_locked() -> bool {
+    load_config().get("popoverLock").and_then(Value::as_bool).unwrap_or(true)
+}
+
 fn saved_popover_position() -> Option<tauri::PhysicalPosition<i32>> {
+    if popover_locked() { return None; }
     let cfg = load_config();
     let pos = cfg.get("popoverPos")?;
     let x = i32::try_from(pos.get("x")?.as_i64()?).ok()?;
     let y = i32::try_from(pos.get("y")?.as_i64()?).ok()?;
     Some(tauri::PhysicalPosition::new(x, y))
+}
+
+fn restore_popover_placement(window: &tauri::WebviewWindow) -> Result<(), String> {
+    let cfg = config_with_defaults(load_config());
+    let factor = cfg.get("windowScale").and_then(Value::as_f64).unwrap_or(1.0);
+    apply_popover_scale(window, factor)
+}
+
+fn apply_popover_scale(window: &tauri::WebviewWindow, factor: f64) -> Result<(), String> {
+    let monitor = window.current_monitor().map_err(|e| e.to_string())?
+        .or_else(|| window.primary_monitor().ok().flatten()).ok_or("popover monitor is unavailable")?;
+    let work = monitor.work_area();
+    let area = popover_geometry::Rect { x: work.position.x, y: work.position.y, w: work.size.width, h: work.size.height };
+    let (w,h) = popover_geometry::scaled_size(area, factor);
+    let saved = saved_popover_position().map(|p| (p.x,p.y));
+    place_popover(window, w, h, saved, popover_locked())?;
+    Ok(())
+}
+
+#[tauri::command]
+fn set_popover_scale(app: tauri::AppHandle, factor: f64) -> Result<(), String> {
+    if !factor.is_finite() || !(0.8..=1.75).contains(&factor) { return Err("popover scale is out of range".into()); }
+    let window = app.get_webview_window("main").ok_or("main window is unavailable")?;
+    apply_popover_scale(&window, factor)
 }
 
 /// Re-apply the pin preference on every summon. The window builder starts
@@ -5596,68 +5990,26 @@ fn apply_popover_pin(window: &tauri::WebviewWindow) {
     let _ = window.set_always_on_top(pinned);
 }
 
-/// Remembers where the popover sits so the next summon can put it back.
-/// Locked or unlocked, the last position is the user's position; the lock
-/// only decides whether the window can still be dragged.
+/// Remember custom placement only in unlocked adjustment mode. Default
+/// centered placement and minimized parking coordinates are never persisted.
 fn remember_popover_position(window: &tauri::WebviewWindow) {
+    if popover_locked() || window.is_minimized().unwrap_or(false) { return; }
     let Ok(pos) = window.outer_position() else {
         return;
     };
     let _ = set_config_inner(json!({ "popoverPos": { "x": pos.x, "y": pos.y } }));
 }
 
-/// Dismisses the popover, remembering its position first when unlocked.
+/// Dismisses the popover, remembering only an unlocked custom position.
 fn dismiss_popover(window: &tauri::WebviewWindow) {
     remember_popover_position(window);
     let _ = window.hide();
     set_webview_memory_level(window, true);
 }
 
-fn toggle_popover(app: &tauri::AppHandle, click: tauri::PhysicalPosition<f64>) {
-    let Some(window) = app.get_webview_window("main") else {
-        return;
-    };
-
-    // A minimized window still reports is_visible() == true: Win+D / "show
-    // desktop" iconifies without clearing WS_VISIBLE, so the naive check
-    // would keep routing every toggle into the hide branch and the popover
-    // could never be summoned again. Treat iconic as hidden.
-    let minimized = window.is_minimized().unwrap_or(false);
-    if window.is_visible().unwrap_or(false) && !minimized {
-        dismiss_popover(&window);
-        return;
-    }
-
-    if now_ms().saturating_sub(LAST_AUTO_HIDE_MS.load(Ordering::Relaxed)) < 300 {
-        return;
-    }
-
-    set_webview_memory_level(&window, false);
-    apply_popover_pin(&window);
-
-    // Anchor the popover's bottom-right corner near the tray click,
-    // which sits next to the clock on a standard bottom taskbar — unless
-    // the user has a remembered position (the lock only controls dragging).
-    let size = window
-        .outer_size()
-        .unwrap_or(tauri::PhysicalSize::new(380, 600));
-    let placed = if let Some(pos) = saved_popover_position() {
-        window.set_position(tauri::PhysicalPosition::new(pos.x, pos.y)).is_ok()
-    } else {
-        false
-    };
-    if !placed {
-        let x = (click.x - f64::from(size.width)).max(0.0);
-        let y = (click.y - f64::from(size.height) - 8.0).max(0.0);
-        let _ = window.set_position(tauri::PhysicalPosition::new(x, y));
-    }
-    // show() alone leaves an iconic window iconic (SW_SHOW does not restore),
-    // so the restore must be explicit before focusing.
-    let _ = window.unminimize();
-    let _ = window.show();
-    let _ = window.set_focus();
-    hide_window_border(&window);
-    let _ = window.emit("popover-shown", ());
+fn toggle_popover(app: &tauri::AppHandle, _click: tauri::PhysicalPosition<f64>) {
+    // Tray, shortcut and second-instance activation use the same placement.
+    toggle_popover_centered(app);
 }
 
 /// Popover entry point with no anchor: show centered on the primary monitor.
@@ -5685,36 +6037,11 @@ fn toggle_popover_centered(app: &tauri::AppHandle) {
     set_webview_memory_level(&window, false);
     apply_popover_pin(&window);
 
-    let size = window
-        .outer_size()
-        .unwrap_or(tauri::PhysicalSize::new(380, 600));
-    // Primary monitor = the one whose work-area origin is closest to (0, 0).
-    // On a single-monitor setup this is just that monitor. With multiples
-    // we still want the popover on the screen where the user is reading
-    // (the taskbar monitor), which is the one most apps consider "primary".
-    let monitor = window
-        .current_monitor()
-        .ok()
-        .flatten()
-        .or_else(|| window.primary_monitor().ok().flatten());
-    // A dragged position wins over centering while the lock is off.
-    let placed = if let Some(pos) = saved_popover_position() {
-        window.set_position(pos).is_ok()
-    } else {
-        false
-    };
-    if !placed {
-        if let Some(m) = monitor {
-            let mon_pos = m.position();
-            let mon_size = m.size();
-            let x = mon_pos.x as f64
-                + ((mon_size.width as f64 - size.width as f64) / 2.0).max(0.0);
-            let y = mon_pos.y as f64
-                + ((mon_size.height as f64 - size.height as f64) / 2.0).max(0.0);
-            let _ = window.set_position(tauri::PhysicalPosition::new(x, y));
-        }
-    }
+    // Restore out of the minimized parking position BEFORE computing geometry.
     let _ = window.unminimize();
+    if let Err(error) = restore_popover_placement(&window) {
+        eprintln!("[pane] popover placement: {error}");
+    }
     let _ = window.show();
     let _ = window.set_focus();
     hide_window_border(&window);
@@ -5814,6 +6141,8 @@ pub fn run() {
             cached_usage,
             fetch_spend,
             fetch_spend_sources,
+            get_pricing_overrides,
+            save_pricing_overrides,
             fetch_credit_history,
             fetch_meter_history,
             get_boot_id,
@@ -5904,6 +6233,8 @@ pub fn run() {
             codex_redeem_credit,
             install_update,
             check_update,
+            set_popover_scale,
+            center_popover,
             open_panel_window,
             close_panel_window,
             get_window_form,
@@ -5919,10 +6250,24 @@ pub fn run() {
             spawn_share_watcher(app.handle().clone());
             spawn_auto_refresh(app.handle().clone());
             let menu = build_tray_menu(app.handle())?;
+            let cached_tray = load_persisted_main_tray();
+            let cached_tooltip = cached_tray
+                .as_ref()
+                .map(|tray| tray.tooltip.as_str())
+                .unwrap_or("Pane");
+            let cached_icon = cached_tray.as_ref().and_then(|tray| {
+                (!tray.lefts.is_empty()).then(|| {
+                    tauri::image::Image::new_owned(
+                        draw_tray_numbers_for(&tray.lefts, tray.severity),
+                        32,
+                        32,
+                    )
+                })
+            });
 
             TrayIconBuilder::with_id("tray")
-                .icon(app.default_window_icon().unwrap().clone())
-                .tooltip("Pane")
+                .icon(cached_icon.unwrap_or_else(|| app.default_window_icon().unwrap().clone()))
+                .tooltip(cached_tooltip)
                 .menu(&menu)
                 .show_menu_on_left_click(false)
                 .on_menu_event(|app, event| {

@@ -25,7 +25,7 @@
 | Firecrawl（MCP） | `GET https://api.firecrawl.dev/v2/team/credit-usage`，Bearer Firecrawl key | 团队 `remainingCredits`、`planCredits`、账期起止。剩余包括其他 credits 时可能高于套餐量；旧 v1 路径本轮未证明已废弃 | [Credit Usage](https://docs.firecrawl.dev/api-reference/endpoint/credit-usage) |
 | Brave Search（MCP） | `GET https://api.search.brave.com/res/v1/web/search?q=...`，`X-Subscription-Token` | 官方响应 headers 提供秒窗口和月窗口额度。**成功探测是一笔真实搜索，会计费／消耗额度**；使用缓存降低消耗，并向用户说明 | [认证和请求](https://api-dashboard.search.brave.com/api-reference/web/search/get)、[Rate Limiting](https://api-dashboard.search.brave.com/documentation/guides/rate-limiting) |
 | sub2api | 自部署 Base URL + API key，`GET /v1/usage` | 上游源码明确该路由只验证身份，允许过期／耗尽 key 查询自身用量，跳过推理计费执行检查。具体套餐、钱包和限速字段取决于部署版本 | [第一方鉴权源码](https://github.com/Wei-Shaw/sub2api/blob/main/backend/internal/server/middleware/api_key_auth.go) |
-| APIGOTO | `GET https://api.apigoto.com/v1/usage`，Bearer APIGOTO key | 第一方集成页公开了查询脚本及 `remaining`／`quota.remaining`／`balance`、`is_active`。套餐窗口仍以实际响应为准 | [官方 CC Switch 集成](https://apigoto.com/apidoc/guide-ccswitch.html) |
+| APIGOTO | `GET https://api.apigoto.com/v1/usage`，Bearer APIGOTO key | 官方额度查询页明确：`remaining` 固定 USD；`subscription.used`／`limit` 为 RPMCredits 最大窗口档，`window_sec` 为窗口秒数；`subscription` 只在有效订阅时返回，payg 时省略；401／503 是唯一定义的错误码。Free／PLUS 的月度总额不在响应里 | [额度查询 /v1/usage](https://www.apigoto.com/apidoc/api-usage.html)、[CC Switch 集成](https://apigoto.com/apidoc/guide-ccswitch.html) |
 
 ## 已接入但必须保留的边界
 

@@ -1,5 +1,5 @@
 use crate::providers;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 #[derive(Clone, Debug, Deserialize)]
@@ -26,7 +26,8 @@ pub(crate) struct PinnedMetric {
     pub label: String,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub(crate) enum TraySeverity {
     Ok,
     Close,
@@ -199,10 +200,13 @@ fn tray_severity(provider: &providers::Snapshot, metrics: &[&providers::Metric])
     let mut severity = TraySeverity::Ok;
     for metric in metrics {
         let Some(used) = metric.used_percent else { continue };
-        if used >= 99.5 {
+        // Same anchors as the card/overview heat scale: >=90 is the red
+        // band, >=50 amber. "Maxed" is the red tray tone, not a claim that
+        // the quota is literally at 100%.
+        if used >= 90.0 {
             return TraySeverity::Maxed;
         }
-        if used >= 90.0 {
+        if used >= 50.0 {
             severity = TraySeverity::Close;
         }
     }
@@ -866,10 +870,12 @@ mod tests {
     fn tray_severity_uses_the_same_used_percent_scale() {
         let ok = project_main_tray(&[snapshot("p", "P", vec![progress("Usage", 10.0)])], &config(&["p"]), false);
         assert_eq!(ok.severity, TraySeverity::Ok);
-        let close = project_main_tray(&[snapshot("p", "P", vec![progress("Usage", 92.0)])], &config(&["p"]), false);
+        let close = project_main_tray(&[snapshot("p", "P", vec![progress("Usage", 60.0)])], &config(&["p"]), false);
         assert_eq!(close.severity, TraySeverity::Close);
-        let maxed = project_main_tray(&[snapshot("p", "P", vec![progress("Usage", 100.0)])], &config(&["p"]), false);
+        let maxed = project_main_tray(&[snapshot("p", "P", vec![progress("Usage", 92.0)])], &config(&["p"]), false);
         assert_eq!(maxed.severity, TraySeverity::Maxed);
+        let full = project_main_tray(&[snapshot("p", "P", vec![progress("Usage", 100.0)])], &config(&["p"]), false);
+        assert_eq!(full.severity, TraySeverity::Maxed);
         let mut stale = snapshot("p", "P", vec![progress("Usage", 10.0)]);
         stale.stale = true;
         assert_eq!(project_main_tray(&[stale], &config(&["p"]), false).severity, TraySeverity::Stale);

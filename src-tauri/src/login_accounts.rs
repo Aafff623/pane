@@ -406,6 +406,33 @@ mod tests {
     }
 
     #[test]
+    fn multi_source_import_preserves_managed_identity_and_fresh_credentials_per_family() {
+        for family in ["copilot", "grok", "kiro"] {
+            let base = std::env::temp_dir().join(format!("pane-source-order-{family}-{}", std::process::id()));
+            std::fs::create_dir_all(base.join("oauth")).unwrap();
+            // OAuth slots are provider-scoped even for a temp directory.
+            // Clear the harness's in-memory slot left by earlier tests.
+            let slot_key = crate::secretstore::token_key(&format!("oauth/{family}"));
+            crate::secretstore::remove(&slot_key);
+            let id = format!("source-order-{family}");
+            save_to(&base, family, &[account(&id, "Managed")]).unwrap();
+            std::fs::write(base.join("oauth").join(format!("{family}.json")), serde_json::to_string(&crate::oauth::StoredTokens {
+                account_id: Some(id), access_token: "stale-slot".into(), refresh_token: "stale-refresh".into(),
+                id_token: None, label: Some("Old slot".into()), expires_at: String::new(),
+            }).unwrap()).unwrap();
+            for _ in 0..2 {
+                let rows = load_with_imported_single_login_from(&base, family);
+                assert_eq!(rows.len(), 1, "{family}: duplicate source");
+                assert_eq!(rows[0].label, "Managed");
+                assert_eq!(rows[0].access_token, "gho_token_value");
+            }
+            save_to(&base, family, &[]).unwrap();
+            crate::secretstore::remove(&slot_key);
+            std::fs::remove_dir_all(base).unwrap();
+        }
+    }
+
+    #[test]
     fn upsert_dedupes_by_account_and_keeps_user_labels() {
         let mut accounts = vec![account("12345", "Work")];
         upsert(&mut accounts, account("12345", ""));

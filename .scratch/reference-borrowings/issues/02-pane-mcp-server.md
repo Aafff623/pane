@@ -60,4 +60,4 @@ $env:PATH = "D:\Tools\mingw64\bin;$env:PATH"
 cargo +stable-x86_64-pc-windows-gnu test
 ```
 
-手工：启动 Pane + MCP client，验证 5 个 tools；断网/6736 未启动/空 provider 三种错误态。security review：redaction + loopback。
+手工：启动 Pane + MCP client，验证 6 个 tools；断网/6736 未启动/空 provider 三种错误态。security review：redaction + loopback。

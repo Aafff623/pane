@@ -107,7 +107,10 @@ mod tests {
 /// account is just another source of it — skipped, so duplicate cards are
 /// structurally impossible.
 pub fn discover_extra_accounts() -> Vec<ClaudeAccount> {
-    let default = default_dir();
+    discover_extra_accounts_at(default_dir(), super::account_scan_roots())
+}
+
+pub(crate) fn discover_extra_accounts_at(default: PathBuf, roots: Vec<PathBuf>) -> Vec<ClaudeAccount> {
     let default_identity = dir_identity(&default);
     // If the default dir HAS a login but can't name its account, the
     // duplicate-card guarantee is gone (a candidate holding that same
@@ -118,7 +121,7 @@ pub fn discover_extra_accounts() -> Vec<ClaudeAccount> {
     let mut seen: Vec<String> = default_identity.map(|(u, _)| u).into_iter().collect();
 
     let mut out = Vec::new();
-    for dir in super::account_scan_roots() {
+    for dir in roots {
         if dir == default {
             continue;
         }

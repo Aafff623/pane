@@ -1,6 +1,6 @@
 # 05 — 成本口径与归因：billing、stored/missing、项目/分支
 
-Status: in progress — billing/pricing modes and badges landed; time-aware/override/attribution pending
+Status: in progress (2026-10-23) — stored/missing provenance, override file, time-aware lookup and unpriced UI landed; project/branch attribution and Currency still pending
 GitHub: #43
 Priority: P2
 Blocked by: 04
@@ -55,3 +55,13 @@ Owner 目检：总额 tooltip/分享图的四态徽标；关闭归因时无变�
 ## Comments
 
 - 2026-10-23：`ProviderSpend` 增加 `billing_mode`（subscription/api/local/payg/unknown）和 `pricing_mode`，按 family/API-key 能力派生；spend 行显示口径 badge。时间感知定价、stored/missing 细节、用户 override、project/branch 归因尚未做。
+
+- 2026-10-23（主对话接手）：`ModelSpend` 增加 `stored_cost` / `missing_pricing`；`FileData` 增加 per-model `stored`，Claude costUSD、Pi、OpenCode、MiniMax/Hermes `cost_usd` 走 `add_stored_event`；未定价模型不再被 top-5 折叠隐藏，美元显示为 `unpriced` 而不是 `$0`，spend 行增加 unpriced 徽标。
+- `pricing::lookup_at(timestamp_ms, model)` + `PriceProbe::LookupAt` 已接 Codex/Copilot 计价；缓存按同一时间戳复验。时间窗表默认为空：没有第一方历史价目，不编造 DeepSeek 时段价、web search 或 flex/priority 费用。
+- 用户 override：`%APPDATA%\Pane\pricing_overrides.json`，USD/百万 token，优先级 `stored > override > catalog > unknown`；`lookup()` 与 `lookup_at()` 都会先查 override。没有做设置页编辑器，文件是当前入口（需重启生效）。
+- 测试：`pricing::tests::lookup_at_prefers_override_then_window_then_catalog`、`spend::tests::stored_cost_and_missing_pricing_survive_finalize`、`split_models_carries_stored_cost_with_the_rows` 通过；node 96 passed；`pnpm build` 通过。
+- 全量 `parse-tests` 最终：1017 passed / 0 failed / 14 ignored（串行、去代理，444.95s）。
+
+- 未做/待 owner：project/branch/session 归因（opt-in、不读 prompt）尚无 UI 与数据面，保持关闭；Currency 按 ADR 0003/owner 决定继续延后；设置页 override 编辑器、真实 key 的成本对比、四态徽标视觉验收均未验证。
+- 2026-10-23（收尾）：设置页模型价格覆盖编辑器已补到浮窗和面板 General 页；新增 `get_pricing_overrides` / `save_pricing_overrides`，严格校验 JSON（input/output 必填、不能为负），保存即写 `pricing_overrides.json` 并清空定价 memo，无需重启。`override_editor_validates_required_rates` 通过，`pnpm build` 通过。剩余仍是 project/branch 归因、Currency、真实历史价目表。
+- 技术冒烟（2026-10-23）：面板 Settings → 通用实际渲染“模型价格覆盖”，textarea 读到 `{}`，点保存返回“已保存，新价格立即生效。”；后端 `parsed_overrides` 校验测试通过。owner 视觉验收仍待做。

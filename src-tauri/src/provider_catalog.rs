@@ -27,6 +27,107 @@ pub enum ProviderCategory {
     Productivity,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AuthKind {
+    ApiKey,
+    OAuth,
+    WebSession,
+    Local,
+    None,
+}
+
+impl AuthKind {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::ApiKey => "api_key",
+            Self::OAuth => "oauth",
+            Self::WebSession => "web_session",
+            Self::Local => "local",
+            Self::None => "none",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ProbeKind {
+    ActiveGet,
+    PassiveHeader,
+    Static,
+    LocalCounter,
+}
+
+impl ProbeKind {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::ActiveGet => "active_get",
+            Self::PassiveHeader => "passive_header",
+            Self::Static => "static",
+            Self::LocalCounter => "local_counter",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum QuotaScope {
+    Key,
+    Account,
+    Team,
+    Unknown,
+}
+
+impl QuotaScope {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Key => "key",
+            Self::Account => "account",
+            Self::Team => "team",
+            Self::Unknown => "unknown",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ResetSemantics {
+    ApiTimestamp,
+    MonthlyInferred,
+    None,
+}
+
+impl ResetSemantics {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::ApiTimestamp => "api_timestamp",
+            Self::MonthlyInferred => "monthly_inferred",
+            Self::None => "none",
+        }
+    }
+}
+
+/// Coarse descriptor derived from the catalog's existing capability flags.
+/// Provider parsers remain authoritative for the exact quota shape; this
+/// record exists so UI/refresh/doctor can ask the same questions without a
+/// per-provider match.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize)]
+pub struct ProviderDescriptor {
+    pub family_id: &'static str,
+    pub auth_kind: AuthKind,
+    pub probe_kind: ProbeKind,
+    pub quota_scope: QuotaScope,
+    pub reset_semantics: ResetSemantics,
+    pub pace_capability: bool,
+}
+
+/// Login-style families whose credential is a Pane OAuth/Hosted login.
+/// Keep in sync with `supportsOAuth: true` in src/providerCatalog.ts.
+pub const OAUTH_FAMILIES: &[&str] = &[
+    "codex", "codebuddy", "codebuddycn", "workbuddy", "workbuddyai", "copilot", "grok",
+    "kiro", "windsurf", "trae", "qoder", "zed",
+];
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ProviderDefinition {
     pub family_id: &'static str,
@@ -37,6 +138,51 @@ pub struct ProviderDefinition {
     pub icon_key: &'static str,
     pub category: ProviderCategory,
     pub primary_unit: UsageUnit,
+}
+
+impl ProviderDefinition {
+    pub fn descriptor(&self) -> ProviderDescriptor {
+        let auth_kind = if self.supports_api_key {
+            AuthKind::ApiKey
+        } else if OAUTH_FAMILIES.contains(&self.family_id) {
+            AuthKind::OAuth
+        } else if WEB_SESSION_FAMILIES.contains(&self.family_id) {
+            AuthKind::WebSession
+        } else if self.query_kind == QueryKind::LocalOnly {
+            AuthKind::Local
+        } else {
+            AuthKind::None
+        };
+        let probe_kind = if self.query_kind == QueryKind::LocalOnly {
+            ProbeKind::LocalCounter
+        } else {
+            ProbeKind::ActiveGet
+        };
+        let quota_scope = if self.supports_api_key {
+            QuotaScope::Key
+        } else if auth_kind == AuthKind::OAuth
+            || auth_kind == AuthKind::WebSession
+            || self.supports_extra_accounts
+        {
+            QuotaScope::Account
+        } else {
+            QuotaScope::Unknown
+        };
+        let (reset_semantics, pace_capability) = match self.query_kind {
+            QueryKind::NativeCodingPlan | QueryKind::NativeSnapshot | QueryKind::Composite => {
+                (ResetSemantics::ApiTimestamp, true)
+            }
+            QueryKind::NativeBalance | QueryKind::LocalOnly => (ResetSemantics::None, false),
+        };
+        ProviderDescriptor {
+            family_id: self.family_id,
+            auth_kind,
+            probe_kind,
+            quota_scope,
+            reset_semantics,
+            pace_capability,
+        }
+    }
 }
 
 // Keep this list in the same stable order as the dashboard's provider list.
@@ -833,6 +979,15 @@ pub fn provider_definitions() -> &'static [ProviderDefinition] {
     PROVIDER_DEFINITIONS
 }
 
+/// Every catalog row's coarse descriptor, in catalog order.
+pub fn provider_descriptors() -> Vec<ProviderDescriptor> {
+    provider_definitions().iter().map(ProviderDefinition::descriptor).collect()
+}
+
+pub fn descriptor(family_id: &str) -> Option<ProviderDescriptor> {
+    provider_definition(family_id).map(ProviderDefinition::descriptor)
+}
+
 pub fn provider_definition(family_id: &str) -> Option<&'static ProviderDefinition> {
     PROVIDER_DEFINITIONS
         .iter()
@@ -1108,10 +1263,16 @@ mod tests {
         // when a visible provider carries it.
         let sd = provider_definition("shandianshuo").expect("shandianshuo in catalog");
         assert_eq!(sd.category, ProviderCategory::Productivity);
-        let extras: Vec<_> = provider_definitions()
+        let mut extras: Vec<&str> = provider_definitions()
             .iter()
             .filter(|d| d.category == ProviderCategory::Productivity && d.family_id != "shandianshuo")
+            .map(|d| d.family_id)
             .collect();
-        assert!(extras.is_empty(), "unexpected productivity families: {extras:?}");
+        extras.sort_unstable();
+        assert_eq!(
+            extras,
+            vec!["deepl", "stability"],
+            "DeepL/Stability are the API-key pilot productivity cards"
+        );
     }
 }

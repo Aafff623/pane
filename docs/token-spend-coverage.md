@@ -11,6 +11,26 @@
 5. **来源与计费方分开。** Pi、Hermes、OpenCode gateway、Claude 的兼容端点可能把请求转给另一家服务；扫描器先读来源，再按目标计费方归并到对应卡片。
 6. **美元不确定时显式标记。** 未定价模型的 token 仍进入总量和趋势，美元留空并记录 `unpriced`，不伪造价格。
 
+## 成本口径（2026-10-23）
+
+- **谁记的钱**：日志/网关自带 `costUSD` / `cost_usd` / `cost` 的行标记为
+  `stored_cost`；其余走 Pane 的价格目录。模型行同时带 `missing_pricing`，
+  未定价的 token 仍进趋势，美元显示为空并标 `unpriced`，绝不伪造 `$0`。
+- **优先级**：`stored > override > catalog > unknown`。override 文件是
+  `%APPDATA%\Pane\pricing_overrides.json`，单位 USD / 百万 token：
+  `{"model-slug":{"input":3,"output":15,"cache_read":0.3,"cache_write":3.75}}`。
+  设置 → 通用里有“模型价格覆盖”编辑器，保存时严格校验 JSON 并立即生效；
+  直接改文件也可以，进程启动后首次查询会读取。
+- **时间感知**：`pricing::lookup_at(timestamp, model)` 已接 Codex/Copilot 的
+  计价路径，并用带时间戳的 probe 保护每文件缓存。时间窗表默认为空——
+  没有第一方历史价目就不编造；DeepSeek 时段价、web search、flex/priority
+  费用同理，只有官方依据才启用。
+- **来源诊断**：设置 → 通用里的“花费来源”面板显示
+  `detected / not_detected / empty / unreadable / parse_error / needs_probe / runtime`
+  及原因，路径在悬停 tooltip 里；数据来自 `/v1/sources` 的同一注册表。
+- **归因**：project/branch/session 归因仍是 opt-in 待办，当前不读 cwd、
+  不读 prompt；关闭时行为与之前完全一致。Currency 仍按 ADR 0003 延后。
+
 ## 已覆盖的工具形态
 
 | 形态 | 当前入口 | 计量方式 | 归并/限制 |
@@ -33,6 +53,7 @@
 | WorkBuddy AI | `~/.workbuddy-ai/projects` + `sessions` | 同上 | 与 CN 分开成卡，绝不合并（2026-10-19） |
 | CodeBuddy CLI | `~/.codebuddy/projects/**/*.jsonl` | 同上 | 与 WorkBuddy 分开成卡；跨文件共享请求指纹（2026-10-21） |
 | CodeBuddy IDE | `CodeBuddyExtension/Data/**/history/**/index.json` | `requests[].usage`（camelCase；input 含 cache read） | 与 CLI 分开成卡；跨文件共享请求指纹（2026-10-21） |
+| GitHub Copilot CLI | `~/.copilot/session-store.db` → `assistant_usage_events`；`~/.copilot/session-state/*/events.jsonl` 兜底 | 逐调用 token 桶：`input_tokens` 是整段 prompt（含 cache），tokens = prompt + output；cache read/write 分开计价 | DB 优先，按 session 去重；DB 无该 session 时才用 `session.shutdown.modelMetrics`；`total_nano_aiu` 是 AI credits，不折美元 |
 
 订阅额度 API、网页余额和服务端百分比不属于 token spend ledger；它们继续走 quota provider，不能拿百分比反推 token。
 
@@ -58,11 +79,24 @@
 
 ## 本轮新增的来源层
 
-`spend::source_statuses()` 和 Tauri 命令 `fetch_spend_sources` 提供运行时来源盘点：
+`spend::source_statuses()` 和 Tauri 命令 `fetch_spend_sources` 由
+`src-tauri/src/spend/sources/mod.rs` 的注册表生成（新增来源 = 模块 + fixture + 一行注册），
+提供运行时来源盘点：
 
-- `detected`：本机发现对应 ledger 或日志入口；
+- `detected`：本机发现对应 ledger 或日志入口，且文件可读；
 - `not_detected`：代码支持，但本机没有发现入口；
+- `empty`：入口存在但是空文件/空目录；
+- `unreadable`：入口存在但读不了（权限、锁、损坏）；
+- `parse_error`：入口可读但解析器连 schema 都打不开（例如缺表）；
+- `needs_probe`：代码尚未针对真实样本校准（当前是 Gemini CLI）；
 - `runtime`：需要认证或网络请求，不能用本地文件存在性判断。
+
+Codex 与 Claude 的 JSONL 扫描使用 `(mtime, size, 4 KiB boundary hash)` + 字节 offset
+断点：追加时只读新增行并合并摘要；文件缩短、边界哈希不符、价格目录换代、状态损坏
+或最后一行未写完都会回退整文件重读，宁可慢不可漏。Codex `.jsonl.zst` 每次完整解压，
+因为压缩流内的字节 offset 不是可靠断点。Codex 新版的 `token_usage_record` 按
+`response_id` 去重并优先于紧随其后的重复 `token_count`；compaction 行不改写累计
+基准，已被现有“相同累计值不重复计数”规则覆盖。
 
 ### WorkBuddy / CodeBuddy 口径（2026-10-21）
 

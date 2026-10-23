@@ -1,8 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { emit, listen } from "@tauri-apps/api/event";
 import { getVersion } from "@tauri-apps/api/app";
-import { getCurrentWebviewWindow, WebviewWindow } from "@tauri-apps/api/webviewWindow";
-import { LogicalSize } from "@tauri-apps/api/dpi";
+import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
 import {
   CATALOG_CATEGORIES,
   providerCatalog,
@@ -111,12 +110,26 @@ interface Snapshot {
   warning: string | null;
   dashboard_url?: string | null;
   auth_pack_expiry?: number | null;
+  just_reset_at?: number | null;
 }
 
 interface ModelSpend {
   model: string;
   cost: number;
   tokens: number;
+  stored_cost?: number | null;
+  missing_pricing?: boolean;
+}
+
+interface SpendSourceStatusRow {
+  id: string;
+  tool: string;
+  form: string;
+  collector: string;
+  state: string;
+  root: string;
+  reason?: string | null;
+  feeds: string[];
 }
 
 interface SpendWindow {
@@ -321,6 +334,9 @@ function spendBadgesFor(id: string, view: ShareRange, estimated = false): string
   if (billing !== "unknown") {
     out += `<span class="est-badge billing-badge" title="${escapeHtml(t("spend.billingTip"))}">${escapeHtml(t(`spend.billing.${billing}`))}</span>`;
   }
+  if ((sp.unpriced ?? 0) > 0) {
+    out += `<span class="est-badge unpriced-badge" title="${escapeHtml(t("unpriced.tip", { n: sp.unpriced, models: (sp.unpriced_models ?? []).join(", ") || "?" }))}">${escapeHtml(t("spend.unpriced"))}</span>`;
+  }
   const low = sp.likely_undercount_days?.[view] ?? 0;
   if (low) {
     out += `<span class="est-badge low-badge" title="${escapeHtml(t("spend.undercountTip", { n: low }))}">${escapeHtml(t("spend.undercount"))} ×${low}</span>`;
@@ -457,6 +473,9 @@ interface Config {
   windowForm: "floating" | "panel";
   windowResizeEnabled: boolean;
   popoverSize: { w: number; h: number } | null;
+  windowScale: number;
+  windowScaleVersion: number;
+  uiTextSize: "small" | "medium" | "large";
   silentStart: boolean;
   hideUnconfigured: boolean;
   setupPicked: boolean;
@@ -529,6 +548,9 @@ const FRONTEND_CONFIG_KEYS = [
   "windowForm",
   "windowResizeEnabled",
   "popoverSize",
+  "windowScale",
+  "windowScaleVersion",
+  "uiTextSize",
   "silentStart",
   "hideUnconfigured",
   "setupPicked",
@@ -754,6 +776,9 @@ let config: Config = {
   windowForm: "floating",
   windowResizeEnabled: true,
   popoverSize: null,
+  windowScale: 1,
+  windowScaleVersion: 2,
+  uiTextSize: "small",
   silentStart: false,
   hideUnconfigured: true,
   setupPicked: false,
@@ -937,6 +962,7 @@ function finishProviderEnable(id: string, generation: number): void {
 let refreshTimer: number | undefined;
 let footerTick: number | undefined;
 let lastSnapshots: Snapshot[] = [];
+let spendSourceStatuses: SpendSourceStatusRow[] = [];
 // ── T-0033: spend-ledger normalization ─────────────────────────────────────
 // The spend panels are a ledger of what local CLIs actually wrote — card
 // enablement is a quota-tracking concern, not a spend concern (a disabled or
@@ -987,6 +1013,8 @@ function mergeModelSpends(a: ModelSpend[], b: ModelSpend[]): ModelSpend[] {
     if (cur) {
       cur.cost += m.cost;
       cur.tokens += m.tokens;
+      if (m.stored_cost != null) cur.stored_cost = (cur.stored_cost ?? 0) + m.stored_cost;
+      cur.missing_pricing = cur.missing_pricing === true || m.missing_pricing === true;
     } else {
       byModel.set(m.model, { ...m });
     }
@@ -2388,7 +2416,7 @@ function usageHeatTone(used: number): "" | "warn" | "low" {
   return "";
 }
 
-function renderMetric(m: Metric, _providerId?: string): string {
+function renderMetric(m: Metric, providerId?: string): string {
   if (m.kind === "progress" && m.used_percent !== null) {
     const used = clampPercent(m.used_percent);
     const left = Math.round(100 - used);
@@ -2431,7 +2459,7 @@ function renderMetric(m: Metric, _providerId?: string): string {
         const exact = t("card.resetsAt", { when: fmtExact(m.resets_at) });
         const [text, alt] = config.resetExact ? [exact, countdown] : [countdown, exact];
         resetPlain = text;
-        resetHtml = `<span class="clickable" data-flip="reset" data-reset-at="${m.resets_at}" title="${escapeHtml(alt)}">${escapeHtml(text)}</span>`;
+        resetHtml = `<span class="clickable" data-flip="reset" data-reset-at="${m.resets_at}" data-reset-provider="${escapeHtml(providerId ?? "")}" title="${escapeHtml(alt)}">${escapeHtml(text)}</span>`;
       }
     }
     // Countdown leads the foot: on a narrow card the detail side shrinks
@@ -2962,7 +2990,11 @@ function formatHoverReset(m: Metric): string {
 function formatHoverMetric(m: Metric, label = displayMetricLabel(m.label)): string {
   const pct = Math.round(m.used_percent ?? 0);
   const reset = formatHoverReset(m);
-  return reset ? `${label} ${pct}% · ${reset}` : `${label} ${pct}%`;
+  const pace =
+    m.pace && m.pace.settled && m.pace.state !== "unknown"
+      ? ` · ${t(`pace.${m.pace.state}`)} ${Math.round(m.pace.projected_used ?? 0)}%`
+      : "";
+  return reset ? `${label} ${pct}% · ${reset}${pace}` : `${label} ${pct}%${pace}`;
 }
 
 /// Tip next to the ring: weekly for ordinary 5h cards, the ring window
@@ -3225,7 +3257,13 @@ function renderCard(s: Snapshot): string {
       keyCounts.available === 0 ? "is-empty" : keyCounts.available === keyCounts.total ? "is-ready" : "is-partial";
     accountCount = `<span class="provider-account-badge ${state}" title="${escapeHtml(t("card.keySummary", { available: keyCounts.available, total: keyCounts.total }))}"><span class="provider-account-glyph" aria-hidden="true">●</span><span class="provider-account-numbers"><span class="acct-count-avail ${availClass}">${keyCounts.available}</span><span class="acct-count-sep">/</span><span class="acct-count-total">${keyCounts.total}</span></span></span>`;
   }
-  const plan = shown.plan ? `<span class="plan" title="${escapeHtml(shown.plan)}">${escapeHtml(shown.plan)}</span>` : "";
+  const justReset =
+    shown.just_reset_at && Date.now() - shown.just_reset_at < 10 * 60_000
+      ? `<span class="just-reset" title="${escapeHtml(t("card.justResetTip"))}">${escapeHtml(t("card.justReset"))}</span>`
+      : "";
+  const plan = shown.plan
+    ? `<span class="plan" title="${escapeHtml(shown.plan)}">${escapeHtml(shown.plan)}</span>${justReset}`
+    : justReset;
   // Peak-hours marker on the head: expanded standalone cards carry no
   // health dot, so the yellow peak state needs its own spot (next to the
   // plan badge). Same predicate as the dot tint: available AND in peak.
@@ -3941,7 +3979,7 @@ function placeMenuAt(
   const gap = opts.gap ?? 4;
   let x: number;
   let y: number;
-  if ("x" in anchor) {
+  if (!("bottom" in anchor)) {
     x = anchor.x / scale;
     y = anchor.y / scale;
     x = Math.max(margin, Math.min(x, viewport.width - width - margin));
@@ -4022,14 +4060,21 @@ function showSpendPop(anchor: HTMLElement): void {
   // noise in the token view.
   const modelRows = (models: ModelSpend[]): string => {
     const visible = [...models]
-      .filter((m) => (config.spendMetric === "tokens" ? m.tokens > 0 : m.cost > 0.005))
+      .filter((m) =>
+        config.spendMetric === "tokens" ? m.tokens > 0 : m.cost > 0.005 || m.missing_pricing === true,
+      )
       .sort((a, b) => (config.spendMetric === "tokens" ? b.tokens - a.tokens : b.cost - a.cost));
     const shown = visible.slice(0, 3);
     const more = visible.length - shown.length;
     const rows = shown
       .map(
         (m) =>
-          `<div class="spend-pop-model"><span class="spend-pop-model-name">${escapeHtml(m.model)}</span><span class="spend-pop-val">${escapeHtml(fmtSpendVal({ cost: m.cost, tokens: m.tokens, models: [] }) + spendCostNote({ cost: m.cost, tokens: m.tokens, models: [] }))}</span></div>`,
+          `<div class="spend-pop-model"><span class="spend-pop-model-name">${escapeHtml(m.model)}</span><span class="spend-pop-val">${escapeHtml(
+            m.missing_pricing
+              ? `${fmtTokens(m.tokens)} · ${t("spend.unpriced")}`
+              : fmtSpendVal({ cost: m.cost, tokens: m.tokens, models: [] }) +
+                  spendCostNote({ cost: m.cost, tokens: m.tokens, models: [] }),
+          )}</span></div>`,
       )
       .join("");
     return rows + (more > 0 ? `<div class="spend-pop-model more">+${more}</div>` : "");
@@ -4301,14 +4346,7 @@ function renderSpendDetailOverlay(): string {
 /// form is a normal window — it has its own frame, so it gets none.
 function popoverChromeHtml(): string {
   if (IS_PANEL_FORM) return "";
-  const pinned = config.popoverPin !== false;
-  const locked = config.popoverLock !== false;
-  const pin = `<button class="mini-btn chrome-btn pin-btn${pinned ? " on" : ""}" data-popover-pin title="${escapeHtml(t("popover.pin" + (pinned ? "On" : "Off")))}" aria-label="${escapeHtml(t("popover.pin" + (pinned ? "On" : "Off")))}">${uiIcon("pushPin")}</button>`;
-  const lock = `<button class="mini-btn chrome-btn lock-btn${locked ? "" : " on"}" data-popover-lock title="${escapeHtml(t("popover.lock" + (locked ? "On" : "Off")))}" aria-label="${escapeHtml(t("popover.lock" + (locked ? "On" : "Off")))}">${uiIcon(locked ? "lock" : "lockOpen")}</button>`;
-  const reset = locked
-    ? ""
-    : `<button class="mini-btn chrome-btn" data-popover-reset title="${escapeHtml(t("popover.resetTip"))}" aria-label="${escapeHtml(t("popover.reset"))}">${uiIcon("arrowCounterClockwise")}</button>`;
-  return pin + lock + reset;
+  return `<button class="mini-btn chrome-btn settings-chrome" data-popover-settings title="${escapeHtml(t("popover.settingsTip"))}" aria-label="${escapeHtml(t("popover.settingsTip"))}">${uiIcon("gear")}</button>`;
 }
 
 /// Pin / unpin the popover (always-on-top). Persisted, and re-applied on
@@ -4330,24 +4368,15 @@ async function togglePopoverPin(): Promise<void> {
 /// the dragged position is remembered by Rust on dismiss.
 async function togglePopoverLock(): Promise<void> {
   const next = !(config.popoverLock !== false);
-  // Lock = freeze the current position; unlock = adjust mode. Never
-  // re-center on lock: that used to discard the position the user had
-  // just dragged to before Alt+2 could use it.
-  let pos: { x: number; y: number } | null = null;
-  try {
-    const current = await getCurrentWebviewWindow().outerPosition();
-    pos = { x: current.x, y: current.y };
-  } catch (err) {
-    console.error("read popover position failed:", err);
-  }
-  await patchConfig({ popoverLock: next, ...(pos ? { popoverPos: pos } : {}) }).catch(() => {});
+  await patchConfig({ popoverLock: next, ...(next ? { popoverPos: null } : {}) }).catch(() => {});
+  if (next) await centerPopover();
   applyPopoverDragRegion(next);
   requestRender();
 }
 
 async function centerPopover(): Promise<void> {
   try {
-    await getCurrentWebviewWindow().center();
+    await invoke("center_popover");
   } catch (err) {
     console.error("center window failed:", err);
   }
@@ -4357,13 +4386,7 @@ async function centerPopover(): Promise<void> {
 /// that spot for the next summon, without changing the lock state.
 async function resetPopoverPosition(): Promise<void> {
   await centerPopover();
-  try {
-    const pos = await getCurrentWebviewWindow().outerPosition();
-    await patchConfig({ popoverPos: { x: pos.x, y: pos.y } });
-  } catch (err) {
-    console.error("remember centered position failed:", err);
-    await patchConfig({ popoverPos: null }).catch(() => {});
-  }
+  await patchConfig({ popoverPos: null }).catch(() => {});
   requestRender();
 }
 
@@ -7886,22 +7909,26 @@ function scrollBehavior(): ScrollBehavior {
 }
 
 function overviewJumpBehavior(): ScrollBehavior {
-  return config.jumpAnimation === "instant" ? "auto" : "smooth";
+  return config.jumpAnimation === "instant" || reduceMotion() ? "auto" : "smooth";
 }
 
 let overviewJumpFrame = 0;
-function scrollOverviewCard(card: HTMLElement): void {
-  const scroller = document.querySelector<HTMLElement>("#providers");
+function scrollOverviewCard(card: HTMLElement, scroller = document.querySelector<HTMLElement>("#providers"), onArrival = () => {}): void {
   if (!scroller) return;
   const scrollerRect = scroller.getBoundingClientRect();
   const cardRect = card.getBoundingClientRect();
-  const target = Math.max(
+  // DOMRects include CSS zoom; scrollTop/clientHeight remain layout pixels.
+  const zoom = scrollerRect.height / scroller.offsetHeight || 1;
+  const visibleHeight = Math.min(cardRect.height / zoom, scroller.clientHeight * 0.6);
+  const target = Math.min(Math.max(0, scroller.scrollHeight - scroller.clientHeight), Math.max(
     0,
-    scroller.scrollTop + cardRect.top - scrollerRect.top - (scroller.clientHeight - cardRect.height) / 2,
-  );
+    scroller.scrollTop + (cardRect.top - scrollerRect.top) / zoom - scroller.clientTop
+      - (scroller.clientHeight - visibleHeight) / 2,
+  ));
   cancelAnimationFrame(overviewJumpFrame);
   if (overviewJumpBehavior() === "auto") {
     scroller.scrollTop = target;
+    onArrival();
     return;
   }
   const start = scroller.scrollTop;
@@ -7915,8 +7942,39 @@ function scrollOverviewCard(card: HTMLElement): void {
       : 1 - Math.pow(-2 * progress + 2, 3) / 2;
     scroller.scrollTop = start + distance * eased;
     if (progress < 1) overviewJumpFrame = requestAnimationFrame(tick);
+    else onArrival();
   };
   overviewJumpFrame = requestAnimationFrame(tick);
+}
+
+let navigationFocusCleanup = () => {};
+let navigationFocusRoom: HTMLElement | null = null;
+function focusNavigationTarget(selector: string, scrollerSelector: string): void {
+  navigationFocusCleanup();
+  const target = document.querySelector<HTMLElement>(selector);
+  const scroller = document.querySelector<HTMLElement>(scrollerSelector);
+  if (!target || !scroller) return;
+  // Leave enough scroll range to center even the first/last settings entry.
+  navigationFocusRoom = scroller;
+  scroller.classList.add("navigation-focus-room");
+  let expiry = 0;
+  let observer: MutationObserver | undefined;
+  const paint = () => document.querySelector<HTMLElement>(selector)?.classList.add("navigation-focus-target");
+  navigationFocusCleanup = () => {
+    cancelAnimationFrame(overviewJumpFrame);
+    window.clearTimeout(expiry);
+    observer?.disconnect();
+    document.querySelectorAll(".navigation-focus-target").forEach((el) => el.classList.remove("navigation-focus-target"));
+    navigationFocusRoom?.classList.remove("navigation-focus-room");
+    navigationFocusRoom = null;
+  };
+  scrollOverviewCard(target, scroller, () => {
+    paint();
+    // Usage ticks replace card DOM; keep the cue for its full lifetime.
+    observer = new MutationObserver(paint);
+    observer.observe(scroller, { childList: true, subtree: true });
+    expiry = window.setTimeout(navigationFocusCleanup, 3000);
+  });
 }
 
 function applyReduceMotion(): void {
@@ -8104,7 +8162,8 @@ function applyUiFont(): void {
   requestAnimationFrame(fitProviderNames);
 }
 
-const POPOVER_BASE = { w: 450, h: 640 };
+// Layout coordinates only; native window dimensions come from monitor work area.
+const POPOVER_LAYOUT_WIDTH = 560;
 type ResizeDirection =
   | "East"
   | "North"
@@ -8121,51 +8180,229 @@ const RESIZE_DIRECTIONS: Array<[string, ResizeDirection]> = [
   ["se", "SouthEast"],
 ];
 let popoverResizeHandles: HTMLElement[] = [];
-let popoverResizeTimer: number | null = null;
 let popoverResizeListenerBound = false;
 
 /// Scale the whole floating UI with the window instead of just changing the
 /// empty space. CSS zoom keeps the layout proportional; the corner handles
 /// live on body and scale with it.
+/// Percent-level precision, with guide ticks but no snapping to those ticks.
+function normalizedWindowScale(raw: number): number {
+  return Math.round(Math.max(0.8, Math.min(1.75, Number.isFinite(raw) ? raw : 1)) * 100) / 100;
+}
+
+function configuredWindowScale(): number {
+  return normalizedWindowScale(Number(config.windowScale));
+}
+
+type TextSize = "small" | "medium" | "large";
+
+function textScaleFactor(): number {
+  switch (config.uiTextSize) {
+    case "large":
+      return 1.16;
+    case "medium":
+      return 1.08;
+    default:
+      return 1;
+  }
+}
+
 function applyWindowScale(): void {
   if (IS_PANEL_FORM) return;
-  if (config.windowResizeEnabled === false) {
-    document.documentElement.style.removeProperty("--ui-scale");
-    document.body.classList.remove("ui-scaled");
-    return;
-  }
-  const scale = Math.max(
-    0.75,
-    Math.min(
-      2,
-      Math.min(window.innerWidth / POPOVER_BASE.w, window.innerHeight / POPOVER_BASE.h),
-    ),
-  );
+  // Window scale is the layout contract; text size adds a small multiplier
+  // on top. Components scale with the same zoom, which is why "large" is a
+  // modest step rather than a second independent layout system.
+  const scale = Math.max(0.35, window.innerWidth / POPOVER_LAYOUT_WIDTH) * textScaleFactor();
+  document.body.classList.toggle("popover-wide", configuredWindowScale() >= 1.5);
   document.documentElement.style.setProperty("--ui-scale", String(scale));
   document.body.classList.toggle("ui-scaled", Math.abs(scale - 1) > 0.01);
+  repositionPopoverSettings?.();
+}
+
+function syncAppearanceSettingsControls(): void {
+  const scale = document.querySelector<HTMLInputElement>("#popover-scale-select");
+  if (scale) scale.value = String(Math.round(configuredWindowScale() * 100));
+  const output = document.querySelector<HTMLElement>("#popover-scale-value");
+  if (output) output.textContent = `${Math.round(configuredWindowScale() * 100)}%`;
+  const font = document.querySelector<HTMLSelectElement>("#popover-font-select");
+  if (font) font.value = config.uiTextSize ?? "small";
+}
+
+function setUiTextSize(size: TextSize): void {
+  config.uiTextSize = size;
+  applyWindowScale();
+  void patchConfig({ uiTextSize: size }).catch(() => {});
+  syncAppearanceSettingsControls();
+  repositionPopoverSettings?.();
+}
+
+/// Coalesce rapid input to the latest scale, never overlap native resizes.
+/// Preview updates stay in memory; only gesture completion writes settings.
+let popoverScaleRequest: { factor: number; persist: boolean } | null = null;
+let popoverScaleJob: Promise<void> | null = null;
+let repositionPopoverSettings: (() => void) | null = null;
+let disposePopoverSettings: (() => void) | null = null;
+
+function setPopoverScale(factor: number, persist = true): Promise<void> {
+  popoverScaleRequest = { factor: normalizedWindowScale(factor), persist: persist || (popoverScaleRequest?.persist ?? false) };
+  if (!popoverScaleJob) {
+    popoverScaleJob = (async () => {
+      let shouldPersist = false;
+      try {
+        while (popoverScaleRequest) {
+          const request = popoverScaleRequest;
+          popoverScaleRequest = null;
+          shouldPersist ||= request.persist;
+          await invoke("set_popover_scale", { factor: request.factor });
+          config.windowScale = request.factor;
+          applyWindowScale();
+          if (shouldPersist && !popoverScaleRequest) {
+            await patchConfig({ windowScale: request.factor, windowScaleVersion: 2, popoverSize: null });
+            syncAppearanceSettingsControls();
+          }
+        }
+      } finally {
+        popoverScaleJob = null;
+      }
+    })();
+  }
+  return popoverScaleJob;
+}
+
+/// Keep the slider stationary during a gesture: preview color/value locally,
+/// then apply native geometry once at change/close.
+function bindPopoverScaleSlider(range: HTMLInputElement, readout: HTMLElement | null, status?: HTMLElement): () => void {
+  let dirty = false;
+  const apply = (persist: boolean) => {
+    if (persist) dirty = false;
+    const factor = normalizedWindowScale(Number(range.value) / 100);
+    if (readout) readout.textContent = `${Math.round(factor * 100)}%`;
+    void setPopoverScale(factor, persist).then(() => { if (status) status.textContent = ""; })
+      .catch((error: unknown) => { if (status) status.textContent = String(error); });
+  };
+  const onInput = () => {
+    dirty = true;
+    if (readout) readout.textContent = `${range.value}%`;
+    const progress = Math.max(0, Math.min(1, (Number(range.value) - 80) / 95));
+    const hue = 190 + progress * 95;
+    range.style.setProperty("--scale-fill", `${progress * 100}%`);
+    range.style.setProperty("--scale-color", `hsl(${hue} 78% 62%)`);
+    if (readout) readout.style.color = `hsl(${hue} 78% 62%)`;
+  };
+  const onChange = () => apply(true);
+  range.addEventListener("input", onInput);
+  range.addEventListener("change", onChange);
+  onInput();
+  dirty = false;
+  return () => {
+    range.removeEventListener("input", onInput);
+    range.removeEventListener("change", onChange);
+    if (dirty) apply(true);
+  };
+}
+
+function hidePopoverScale(): void {
+  disposePopoverSettings?.();
+  disposePopoverSettings = null;
+  repositionPopoverSettings = null;
+  document.querySelector(".popover-settings-pop")?.remove();
+}
+
+function settingsFontButtons(): string {
+  const current = config.uiTextSize ?? "small";
+  return (["small", "medium", "large"] as const)
+    .map(
+      (size) =>
+        `<button type="button" class="mini-btn settings-font-btn${current === size ? " active" : ""}" data-font-size="${size}">${escapeHtml(
+          t(`popover.font${size[0].toUpperCase()}${size.slice(1)}`),
+        )}</button>`,
+    )
+    .join("");
+}
+
+/// One floating-window settings entry in the Total Spend head. Keeping pin,
+/// lock, scale and text size behind one gear avoids a growing row of
+/// chrome buttons as more per-window options land.
+function openPopoverSettings(anchor: HTMLElement): void {
+  hidePopoverScale();
+  const current = Math.round(configuredWindowScale() * 100);
+  const pop = document.createElement("div");
+  pop.className = "popover-settings-pop";
+  pop.innerHTML = `
+    <div class="settings-pop-title">${escapeHtml(t("popover.settingsTitle"))}</div>
+    <div class="settings-pop-section">
+      <div class="settings-pop-line"><span>${escapeHtml(t("popover.scale"))}</span><b id="scale-readout">${current}%</b></div>
+      <input id="scale-range" type="range" min="80" max="175" step="1" value="${current}" aria-label="${escapeHtml(t("popover.scale"))}" />
+      <div class="scale-ticks"><span>80%</span><span>100%</span><span>125%</span><span>150%</span><span>175%</span></div>
+      <p id="settings-scale-status" class="scale-status"></p>
+    </div>
+    <div class="settings-pop-section">
+      <div class="settings-pop-line"><span>${escapeHtml(t("popover.fontSize"))}</span></div>
+      <div class="settings-font-row">${settingsFontButtons()}</div>
+    </div>
+    <div class="settings-pop-section settings-pop-actions">
+      <button type="button" class="mini-btn" data-settings-pin>${uiIcon("pushPin")}<span>${escapeHtml(t("popover.pinLabel"))}</span></button>
+      <button type="button" class="mini-btn" data-settings-lock>${uiIcon(config.popoverLock !== false ? "lock" : "lockOpen")}<span>${escapeHtml(t("popover.lockLabel"))}</span></button>
+      ${
+        config.popoverLock === false
+          ? `<button type="button" class="mini-btn" data-settings-reset>${uiIcon("arrowCounterClockwise")}<span>${escapeHtml(t("popover.resetPosition"))}</span></button>`
+          : ""
+      }
+    </div>`;
+  document.body.appendChild(pop);
+  const reposition = () => {
+    // Rendering can replace the original gear; resolve the current anchor.
+    const gear = anchor.isConnected ? anchor : document.querySelector<HTMLElement>("[data-popover-settings]");
+    if (!gear) { hidePopoverScale(); return; }
+    const rect = gear.getBoundingClientRect();
+    if (rect.bottom <= 0 || rect.top >= window.innerHeight) { hidePopoverScale(); return; }
+    const viewport = uiViewport();
+    pop.style.maxWidth = `${Math.max(120, viewport.width - 16)}px`;
+    pop.style.maxHeight = `${Math.max(80, viewport.height - 16)}px`;
+    placeMenuAt(pop, rect, { align: "right", prefer: "below", gap: 8 });
+  };
+  repositionPopoverSettings = reposition;
+  // Capture scroll from the content scroller; inner menu scrolling stays local.
+  const onScroll = (event: Event) => { if (!(event.target instanceof Node) || !pop.contains(event.target)) reposition(); };
+  document.addEventListener("scroll", onScroll, true);
+  window.addEventListener("resize", reposition);
+  disposePopoverSettings = () => {
+    document.removeEventListener("scroll", onScroll, true);
+    window.removeEventListener("resize", reposition);
+  };
+  reposition();
+
+  const range = pop.querySelector<HTMLInputElement>("#scale-range")!;
+  const readout = pop.querySelector<HTMLElement>("#scale-readout")!;
+  const status = pop.querySelector<HTMLElement>("#settings-scale-status")!;
+  const disposeSlider = bindPopoverScaleSlider(range, readout, status);
+  const disposeAnchor = disposePopoverSettings;
+  disposePopoverSettings = () => { disposeSlider(); disposeAnchor?.(); };
+  range.focus();
+
+  pop.querySelectorAll<HTMLElement>("[data-font-size]").forEach((button) => {
+    button.addEventListener("click", () => {
+      setUiTextSize(button.dataset.fontSize as TextSize);
+      pop.querySelectorAll("[data-font-size]").forEach((row) => {
+        row.classList.toggle("active", row === button);
+      });
+    });
+  });
+  pop.querySelector("[data-settings-pin]")?.addEventListener("click", () => {
+    void togglePopoverPin().then(() => hidePopoverScale());
+  });
+  pop.querySelector("[data-settings-lock]")?.addEventListener("click", () => {
+    void togglePopoverLock().then(() => hidePopoverScale());
+  });
+  pop.querySelector("[data-settings-reset]")?.addEventListener("click", () => {
+    void resetPopoverPosition().then(() => hidePopoverScale());
+  });
 }
 
 function onPopoverResize(): void {
   applyWindowScale();
-  if (config.windowResizeEnabled === false) return;
-  if (popoverResizeTimer != null) window.clearTimeout(popoverResizeTimer);
-  popoverResizeTimer = window.setTimeout(() => {
-    popoverResizeTimer = null;
-    void (async () => {
-      try {
-        const window = getCurrentWebviewWindow();
-        const [size, factor] = await Promise.all([window.innerSize(), window.scaleFactor()]);
-        await patchConfig({
-          popoverSize: {
-            w: Math.round(size.width / factor),
-            h: Math.round(size.height / factor),
-          },
-        });
-      } catch {
-        // A closing window can reject these; the next real resize retries.
-      }
-    })();
-  }, 350);
+  // Native scale previews must not race a resize listener writing old
+  // absolute pixel sizes back into the screen-relative setting.
 }
 
 function applyWindowResize(): void {
@@ -8198,30 +8435,12 @@ function applyWindowResize(): void {
 
 async function restorePopoverSize(): Promise<void> {
   if (IS_PANEL_FORM) return;
-  const size = config.popoverSize;
-  if (!size || !Number.isFinite(size.w) || !Number.isFinite(size.h)) return;
-  try {
-    await getCurrentWebviewWindow().setSize(
-      new LogicalSize(Math.max(380, Math.round(size.w)), Math.max(560, Math.round(size.h))),
-    );
-  } catch (err) {
-    console.error("restore popover size failed:", err);
-  }
-  applyWindowScale();
+  try { await setPopoverScale(configuredWindowScale(), false); }
+  catch (err) { console.error("restore popover size failed:", err); }
 }
 
 async function resetPopoverSize(): Promise<void> {
-  await patchConfig({ popoverSize: null }).catch(() => {});
-  try {
-    // This button also lives in the panel window; always target "main".
-    const window = IS_PANEL_FORM
-      ? await WebviewWindow.getByLabel("main")
-      : getCurrentWebviewWindow();
-    await window?.setSize(new LogicalSize(POPOVER_BASE.w, POPOVER_BASE.h));
-  } catch (err) {
-    console.error("reset popover size failed:", err);
-  }
-  if (!IS_PANEL_FORM) applyWindowScale();
+  await setPopoverScale(1);
 }
 
 // Magpie-style top-level settings navigation for the floating window. The
@@ -8921,6 +9140,12 @@ function refreshAccounts(family: string): void {
 /// 4. localized "Account N" — never a hash/masked token, which reads as
 ///    garbled text and leaks more identity than the user asked for.
 function labelForAccount(id: string, list: AccountEntry[]): string {
+  // The bare CLI slot changes owner when the desktop login changes. Never
+  // let a slot-bound note hide the current Codex identity.
+  if (providerFamily(id) === "codex") {
+    const identity = list.find((row) => row.id === id);
+    if (identity?.email?.trim()) return identity.email.trim();
+  }
   const note = accountNote(id);
   if (note) return note;
   const family = providerFamily(id);
@@ -10786,9 +11011,7 @@ function jumpToProviderCard(providerId: string): void {
     }
   }
 
-  scrollOverviewCard(card);
-  card.classList.add("card-highlight");
-  setTimeout(() => card.classList.remove("card-highlight"), 1200);
+  focusNavigationTarget(selector, "#providers");
 }
 
 function renderDrawerBody(): void {
@@ -11270,6 +11493,28 @@ const renderScheduler = new RenderScheduler(
 );
 
 
+const resetRefreshSeen = new Set<string>();
+
+/// One provider refresh 20s after a reset countdown reaches zero. The
+/// provider id + reset timestamp key makes this a one-shot: the 30s tick
+/// cannot schedule the same window twice, and the call never loops.
+function scheduleResetRefresh(providerId: string): void {
+  window.setTimeout(async () => {
+    if (refreshState.busy) return;
+    try {
+      const snap = await invoke<Snapshot>("refresh_provider", { providerId });
+      if (refreshState.busy) return;
+      const idx = lastSnapshots.findIndex((item) => item.id === providerId);
+      if (idx >= 0) lastSnapshots[idx] = snap;
+      else lastSnapshots.push(snap);
+      requestRender();
+      requestTraySync();
+    } catch {
+      // The next scheduled refresh owns recovery; never spin on this timer.
+    }
+  }, 20_000);
+}
+
 /// 30s tick: rewrite countdown text in place. A full `requestRender` would
 /// throw away the whole tree (scroll, hover, focus) just to change
 /// "Resets in 3h 41m" → "3h 40m".
@@ -11287,6 +11532,14 @@ function tickCountdowns(): void {
     const remain = at - now;
     if (remain <= 0) {
       expired = true;
+      const providerId = el.dataset.resetProvider;
+      if (providerId) {
+        const key = `${providerId}:${at}`;
+        if (!resetRefreshSeen.has(key)) {
+          resetRefreshSeen.add(key);
+          scheduleResetRefresh(providerId);
+        }
+      }
       return;
     }
     if (el.dataset.flip === "reset") {
@@ -12064,7 +12317,9 @@ async function handleCustomizeClick(target: HTMLElement): Promise<boolean> {
   }
   const restoreBtn = target.closest<HTMLElement>("[data-restore-provider]");
   if (restoreBtn) {
-    void restoreProviderFamily(restoreBtn.dataset.restoreProvider!);
+    void restoreProviderFamily(restoreBtn.dataset.restoreProvider!).then(() =>
+      forceUsageRefreshAttempt(true),
+    );
     return true;
   }
   const removedToggle = target.closest<HTMLElement>("[data-removed-toggle]");
@@ -14637,6 +14892,273 @@ async function refreshSettingsProviderKey(family: string): Promise<void> {
   }
 }
 
+const SPEND_SOURCE_STATE_ORDER = [
+  "parse_error",
+  "unreadable",
+  "empty",
+  "needs_probe",
+  "detected",
+  "not_detected",
+  "runtime",
+];
+
+function spendSourceStateRank(state: string): number {
+  const index = SPEND_SOURCE_STATE_ORDER.indexOf(state);
+  return index < 0 ? 99 : index;
+}
+
+function renderSpendSourceRows(): void {
+  const list = document.querySelector<HTMLElement>("#spend-sources-list");
+  if (!list) return;
+  if (!spendSourceStatuses.length) {
+    list.innerHTML = `<p class="settings-note">${escapeHtml(t("settings.sourcesEmpty"))}</p>`;
+    return;
+  }
+  const rows = [...spendSourceStatuses].sort(
+    (a, b) =>
+      spendSourceStateRank(a.state) - spendSourceStateRank(b.state) ||
+      a.tool.localeCompare(b.tool),
+  );
+  list.innerHTML = rows
+    .map((source) => {
+      const detail = `${source.form}${source.reason ? ` · ${source.reason}` : ""}`;
+      return `<div class="source-row state-${escapeHtml(source.state)}" title="${escapeHtml(source.root || source.collector)}">
+        <span class="source-dot"></span>
+        <span class="source-name">${escapeHtml(source.tool)}</span>
+        <span class="source-state">${escapeHtml(t(`settings.sourceState.${source.state}`))}</span>
+        <span class="source-reason">${escapeHtml(detail)}</span>
+      </div>`;
+    })
+    .join("");
+}
+
+async function loadSpendSourceStatuses(): Promise<void> {
+  const list = document.querySelector<HTMLElement>("#spend-sources-list");
+  if (!list) return;
+  try {
+    spendSourceStatuses = await invoke<SpendSourceStatusRow[]>("fetch_spend_sources");
+    renderSpendSourceRows();
+  } catch (error) {
+    list.innerHTML = `<p class="settings-note">${escapeHtml(
+      t("settings.sourcesError", { error: String(error) }),
+    )}</p>`;
+  }
+}
+
+async function loadPricingOverridesEditor(): Promise<void> {
+  const textarea = document.querySelector<HTMLTextAreaElement>("#pricing-overrides-text");
+  if (!textarea) return;
+  try {
+    textarea.value = await invoke<string>("get_pricing_overrides");
+  } catch (error) {
+    textarea.value = "{}";
+    const msg = document.querySelector<HTMLElement>("#pricing-overrides-msg");
+    if (msg) msg.textContent = String(error);
+  }
+}
+
+async function savePricingOverridesEditor(): Promise<void> {
+  const textarea = document.querySelector<HTMLTextAreaElement>("#pricing-overrides-text");
+  const msg = document.querySelector<HTMLElement>("#pricing-overrides-msg");
+  const button = document.querySelector<HTMLButtonElement>("#pricing-overrides-save");
+  if (!textarea || !msg) return;
+  if (button) button.disabled = true;
+  msg.textContent = "";
+  msg.classList.remove("is-error");
+  try {
+    await invoke("save_pricing_overrides", { text: textarea.value });
+    msg.textContent = t("settings.pricingOverridesSaved");
+  } catch (error) {
+    msg.textContent = String(error);
+    msg.classList.add("is-error");
+  } finally {
+    if (button) button.disabled = false;
+  }
+}
+
+type PreviewPaceState = "ahead" | "close" | "over" | "spent" | "unknown";
+
+function previewMetric(
+  used: number,
+  resetInMs: number,
+  periodMs: number,
+  paceState: PreviewPaceState,
+  projected: number | null,
+): Metric {
+  return {
+    label: "额度",
+    kind: "progress",
+    used_percent: used,
+    detail: t("settings.previewSynthetic"),
+    value: null,
+    resets_at: Date.now() + resetInMs,
+    period_ms: periodMs,
+    pace: {
+      state: paceState,
+      projected_used: projected,
+      run_out_at: null,
+      settled: paceState !== "unknown",
+      elapsed_percent: paceState === "unknown" ? null : 60,
+    },
+  };
+}
+
+function openStatePreview(): void {
+  document.querySelector(".state-preview-overlay")?.remove();
+  const hour = 3_600_000;
+  const day = 24 * hour;
+  const cards = [
+    {
+      title: t("settings.previewYoung"),
+      desc: t("settings.previewYoungNote"),
+      metric: previewMetric(20, 4 * hour + 55 * 60_000, 5 * hour, "unknown", null),
+      justReset: false,
+    },
+    {
+      title: t("settings.previewNear"),
+      desc: t("settings.previewNearNote"),
+      metric: previewMetric(92, 10 * 60_000, 5 * hour, "close", 96),
+      justReset: false,
+    },
+    {
+      title: t("settings.previewJustReset"),
+      desc: t("settings.previewJustResetNote"),
+      metric: previewMetric(2, 7 * day, 7 * day, "ahead", 2.1),
+      justReset: true,
+    },
+    {
+      title: t("settings.previewSpent"),
+      desc: t("settings.previewSpentNote"),
+      metric: previewMetric(100, 2 * hour, 5 * hour, "spent", 100),
+      justReset: false,
+    },
+  ];
+  const tray = [
+    ["ok", "#ffffff", "98", t("settings.trayStateOk")],
+    ["close", "#f59e0b", "76", t("settings.trayStateClose")],
+    ["maxed", "#ef4444", "100", t("settings.trayStateMaxed")],
+    ["error", "#f97316", "!", t("settings.trayStateError")],
+    ["stale", "#9ca3af", "—", t("settings.trayStateStale")],
+  ] as const;
+  const overlay = document.createElement("div");
+  overlay.className = "state-preview-overlay";
+  overlay.innerHTML = `
+    <section class="state-preview-panel" role="dialog" aria-modal="true" aria-label="${escapeHtml(t("settings.statePreviewTitle"))}">
+      <header class="state-preview-header">
+        <div><h2>${escapeHtml(t("settings.statePreviewTitle"))}</h2><p>${escapeHtml(t("settings.statePreviewHint"))}</p></div>
+        <button type="button" class="mini-btn" data-state-preview-close>${escapeHtml(t("settings.previewClose"))}</button>
+      </header>
+      <div class="state-preview-grid">${cards
+        .map(
+          (card) => `<article class="state-preview-card">
+            <div class="state-preview-card-head"><span>${escapeHtml(card.title)}</span>${card.justReset ? `<span class="just-reset">${escapeHtml(t("card.justReset"))}</span>` : ""}</div>
+            ${renderMetric(card.metric)}
+            <p>${escapeHtml(card.desc)}</p>
+          </article>`,
+        )
+        .join("")}</div>
+      <div class="state-preview-tray">
+        <div class="state-preview-card-head"><span>${escapeHtml(t("settings.previewTrayTitle"))}</span></div>
+        <div class="tray-preview-strip">${tray
+          .map(
+            ([key, color, value, label]) => `<div class="tray-preview-item" data-severity="${key}">
+              <span class="tray-preview-icon" style="color:${color}">${escapeHtml(value)}</span>
+              <span>${escapeHtml(label)}</span>
+            </div>`,
+          )
+          .join("")}</div>
+        <p>${escapeHtml(t("settings.previewTrayNote"))}</p>
+        <div class="tray-preview-scales">
+          <div class="tray-preview-item"><span class="tray-preview-icon" style="font-size:12px">98</span><span>100%</span></div>
+          <div class="tray-preview-item"><span class="tray-preview-icon" style="font-size:15px">98</span><span>125%</span></div>
+          <div class="tray-preview-item"><span class="tray-preview-icon" style="font-size:18px">98</span><span>150%</span></div>
+        </div>
+        <p>${escapeHtml(t("settings.previewTrayScaleNote"))}</p>
+      </div>
+    </section>`;
+  document.body.appendChild(overlay);
+  overlay.addEventListener("click", (event) => {
+    const target = event.target as HTMLElement;
+    if (target === overlay || target.closest("[data-state-preview-close]")) overlay.remove();
+  });
+  const onKey = (event: KeyboardEvent) => {
+    if (event.key !== "Escape") return;
+    overlay.remove();
+    document.removeEventListener("keydown", onKey, true);
+  };
+  document.addEventListener("keydown", onKey, true);
+}
+
+/// Mounted into both Settings surfaces (floating general group and the panel
+/// general card). The panel shell is built dynamically, so sharing one
+/// builder avoids a second copy of the markup drifting.
+function mountSpendSettingsBlocks(container: HTMLElement | null): void {
+  if (!container || container.querySelector("#spend-settings-blocks")) return;
+  const block = document.createElement("div");
+  block.id = "spend-settings-blocks";
+  block.innerHTML = `
+    <div class="settings-subblock" id="appearance-scale-block">
+      <div class="settings-subhead"><span data-i18n="settings.displayTitle">Window & text</span></div>
+      <div class="setting-row">
+        <label for="popover-scale-select" data-i18n="settings.windowScale">Window scale</label>
+        <input id="popover-scale-select" type="range" min="80" max="175" step="1" value="100" />
+        <output id="popover-scale-value">100%</output>
+      </div>
+      <div class="setting-row">
+        <label for="popover-font-select" data-i18n="settings.textSize">Text size</label>
+        <select id="popover-font-select">
+          <option value="small" data-i18n="settings.textSmall">Small</option>
+          <option value="medium" data-i18n="settings.textMedium">Medium</option>
+          <option value="large" data-i18n="settings.textLarge">Large</option>
+        </select>
+      </div>
+    </div>
+    <div class="settings-subblock" id="spend-sources-block">
+      <div class="settings-subhead">
+        <span data-i18n="settings.sourcesTitle">Spend sources</span>
+        <button type="button" class="mini-btn" id="spend-sources-refresh" data-i18n="settings.sourcesRefresh">Refresh</button>
+      </div>
+      <p class="settings-note" data-i18n="settings.sourcesHint">Why a local spend source is missing or has no data.</p>
+      <div id="spend-sources-list" class="source-list"></div>
+    </div>
+    <div class="settings-subblock" id="state-preview-block">
+      <div class="settings-subhead">
+        <span data-i18n="settings.statePreviewTitle">State preview</span>
+        <button type="button" class="mini-btn" id="state-preview-open" data-i18n="settings.statePreviewOpen">Open</button>
+      </div>
+      <p class="settings-note" data-i18n="settings.statePreviewHint">Synthetic states for visual acceptance.</p>
+    </div>
+    <div class="settings-subblock" id="pricing-overrides-block">
+      <div class="settings-subhead"><span data-i18n="settings.pricingOverridesTitle">Model price overrides</span></div>
+      <p class="settings-note" data-i18n="settings.pricingOverridesHint">USD per million tokens. Stored log costs still win.</p>
+      <textarea id="pricing-overrides-text" spellcheck="false" autocomplete="off" placeholder='{"model-slug": {"input": 1, "output": 2}}'></textarea>
+      <div class="settings-row pricing-overrides-actions">
+        <span id="pricing-overrides-msg" class="settings-note"></span>
+        <button type="button" class="mini-btn" id="pricing-overrides-save" data-i18n="settings.pricingOverridesSave">Save</button>
+      </div>
+    </div>`;
+  container.append(block);
+  block
+    .querySelector("#spend-sources-refresh")
+    ?.addEventListener("click", () => void loadSpendSourceStatuses());
+  block
+    .querySelector("#pricing-overrides-save")
+    ?.addEventListener("click", () => void savePricingOverridesEditor());
+  block
+    .querySelector("#state-preview-open")
+    ?.addEventListener("click", () => openStatePreview());
+  const scaleSelect = block.querySelector<HTMLInputElement>("#popover-scale-select");
+  if (scaleSelect) bindPopoverScaleSlider(scaleSelect, block.querySelector<HTMLElement>("#popover-scale-value"));
+  const fontSelect = block.querySelector<HTMLSelectElement>("#popover-font-select");
+  fontSelect?.addEventListener("change", () => {
+    setUiTextSize(fontSelect.value as TextSize);
+  });
+  syncAppearanceSettingsControls();
+  applyStaticI18n();
+  void loadSpendSourceStatuses();
+  void loadPricingOverridesEditor();
+}
+
 async function loadSettingsProviderKeys(): Promise<void> {
   await Promise.all(settingsCredentialFamilies().map((family) => refreshSettingsProviderKey(family)));
   renderSettingsProviderKeys();
@@ -15551,6 +16073,7 @@ function applyLocale(): void {
   }
   setActiveLocale(resolveLocale(config.locale));
   applyStaticI18n();
+  if (document.querySelector("#spend-sources-list")) renderSpendSourceRows();
   renderOneNewApiSettings();
   if (document.body.classList.contains("settings-open") || IS_PANEL_FORM) void loadKeyvault();
   applyAppearance();
@@ -15568,8 +16091,17 @@ function applyLocale(): void {
   renderBuildInfo();
 }
 
+async function loadStartupPreferences(): Promise<Config> {
+  const [settings, sys] = await Promise.all([
+    invoke<Config>("get_config"),
+    invoke<string>("system_ui_locale").catch(() => null),
+  ]);
+  if (sys != null) setSystemLocale(sys === "zh" || sys === "ru" ? sys : "en");
+  return settings;
+}
+
 async function initSettings(): Promise<void> {
-  config = await invoke<Config>("get_config");
+  config = await loadStartupPreferences();
   if (config.skinId === undefined) {
     const legacy = readSkin(window.localStorage);
     try { await patchConfig({ skinId: legacy }); } catch { config.skinId = legacy; }
@@ -15594,18 +16126,17 @@ async function initSettings(): Promise<void> {
   // initial values from it) but before applyLocale, so applyStaticI18n
   // translates the new DOM in the same pass.
   if (IS_PANEL_FORM) initPanelForm();
+  mountSpendSettingsBlocks(
+    IS_PANEL_FORM
+      ? document.querySelector<HTMLElement>("#st-general .st-card")
+      : document.querySelector<HTMLElement>("#settings .acc-group .acc-inner"),
+  );
   // The shell exists now, so an intent the popover wrote before opening this
   // window can land (see applyPanelIntent).
   applyPanelIntent();
   document.querySelector<HTMLButtonElement>("#settings-save-all")?.addEventListener("click", () => {
     void applySettingsAndReload();
   });
-  try {
-    const sys = await invoke<string>("system_ui_locale");
-    setSystemLocale(sys === "zh" || sys === "ru" ? sys : "en");
-  } catch {
-    // Dev / missing command — fall back to navigator.language.
-  }
   applyLocale();
   document.documentElement.classList.remove("i18n-boot");
   markConfigLoaded();
@@ -16853,7 +17384,10 @@ function authFlowBusy(): boolean {
   return false;
 }
 
+let panelNavigationRevision = 0;
 function setPanelView(view: "settings" | "auth"): void {
+  panelNavigationRevision++;
+  navigationFocusCleanup();
   authViewActive = view === "auth";
   document.querySelectorAll<HTMLElement>("#panel-nav .panel-nav-item").forEach((el) => {
     const active = view === "auth"
@@ -16902,19 +17436,20 @@ function applyPanelIntent(): void {
   } else {
     setPanelView("settings");
     document.querySelector<HTMLButtonElement>('#panel-nav [data-settings-tab="usage"]')?.click();
+    const revision = panelNavigationRevision;
     if (!intent.family) return;
     if (CORE_MCP_SERVICES.some((service) => service.id === intent.family)) {
       kvAddingForService.add(intent.family);
       void loadKeyvault().then(() => {
-        document.querySelector<HTMLElement>(`[data-skey-family="${CSS.escape(intent.family!)}"]`)
-          ?.scrollIntoView({ block: "start", behavior: scrollBehavior() });
+        if (revision !== panelNavigationRevision) return;
+        focusNavigationTarget(`[data-skey-family="${CSS.escape(intent.family!)}"]`, "#panel-scroll");
       });
     } else if (ALL_PROVIDERS.some(([family]) => family === intent.family)) {
       // A web-session family's sign-in control lives on its key row, so
       // bring that row into view once the list has rendered.
       void loadSettingsProviderKeys().then(() => {
-        document.querySelector<HTMLElement>(`[data-skey-family="${CSS.escape(intent.family!)}"]`)
-          ?.scrollIntoView({ block: "start", behavior: scrollBehavior() });
+        if (revision !== panelNavigationRevision) return;
+        focusNavigationTarget(`[data-skey-family="${CSS.escape(intent.family!)}"]`, "#panel-scroll");
       });
     }
   }
@@ -16924,12 +17459,10 @@ function applyPanelIntent(): void {
 /// highlight so the eye lands on it. The center renders asynchronously, so
 /// wait for its rows first.
 async function focusAuthFamily(family: string): Promise<void> {
+  const revision = panelNavigationRevision;
   await loadAuthCenter();
-  const section = document.querySelector<HTMLElement>(`[data-auth-group="${CSS.escape(family)}"]`);
-  if (!section) return;
-  section.scrollIntoView({ block: "start", behavior: scrollBehavior() });
-  section.classList.add("auth-jump-target");
-  window.setTimeout(() => section.classList.remove("auth-jump-target"), 1600);
+  if (revision !== panelNavigationRevision) return;
+  focusNavigationTarget(`[data-auth-group="${CSS.escape(family)}"]`, "#panel-scroll");
 }
 
 /// Open the panel on this family's auth-center block: write the intent (the
@@ -16954,7 +17487,15 @@ function authJumpHtml(snap: Snapshot): string {
   return `<button class="mini-btn auth-jump" type="button" data-auth-jump="${escapeHtml(family)}">${escapeHtml(t("card.signIn"))}</button>`;
 }
 
-async function loadAuthCenter(): Promise<void> {
+let authCenterLoading: Promise<void> | null = null;
+function loadAuthCenter(): Promise<void> {
+  if (!authCenterLoading) {
+    authCenterLoading = loadAuthCenterNow().finally(() => { authCenterLoading = null; });
+  }
+  return authCenterLoading;
+}
+
+async function loadAuthCenterNow(): Promise<void> {
   const container = document.querySelector<HTMLElement>("#panel-view-auth");
   if (!container) return;
   if (!authGroups) {
@@ -18414,6 +18955,13 @@ document.querySelector("#settings-btn")!.addEventListener("click", () => {
 
   document.addEventListener("click", (e) => {
     const target = e.target as HTMLElement;
+    if (
+      document.querySelector(".popover-settings-pop") &&
+      !target.closest(".popover-settings-pop") &&
+      !target.closest("[data-popover-settings]")
+    ) {
+      hidePopoverScale();
+    }
     const details = target.closest<HTMLElement>("[data-spend-details]");
     if (details) {
       e.preventDefault();
@@ -18424,19 +18972,11 @@ document.querySelector("#settings-btn")!.addEventListener("click", () => {
     }
     // Popover chrome: pin (always-on-top) and the position lock. Both are
     // popover-window concerns — the panel form has a real frame.
-    if (target.closest<HTMLElement>("[data-popover-pin]")) {
+    if (target.closest<HTMLElement>("[data-popover-settings]")) {
       e.preventDefault();
-      void togglePopoverPin();
-      return;
-    }
-    if (target.closest<HTMLElement>("[data-popover-lock]")) {
-      e.preventDefault();
-      void togglePopoverLock();
-      return;
-    }
-    if (target.closest<HTMLElement>("[data-popover-reset]")) {
-      e.preventDefault();
-      void resetPopoverPosition();
+      const button = target.closest<HTMLElement>("[data-popover-settings]")!;
+      if (document.querySelector(".popover-settings-pop")) hidePopoverScale();
+      else openPopoverSettings(button);
       return;
     }
     if (target.closest<HTMLElement>("[data-qoder-rescan]")) {

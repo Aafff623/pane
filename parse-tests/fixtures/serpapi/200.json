@@ -1,0 +1,7 @@
+{
+  "account_email": "user@example.invalid",
+  "plan_id": "dev",
+  "searches_per_month": 250,
+  "plan_searches_left": 25,
+  "this_month_usage": 225
+}

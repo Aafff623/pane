@@ -223,7 +223,7 @@ fn range_from(file: &HistoryFile, range_days: Option<u32>, today: NaiveDate) -> 
         .map(|(id, (cost, tokens, active_days, models))| {
             let mut models: Vec<_> = models
                 .into_iter()
-                .map(|(model, (cost, tokens))| crate::spend::ModelSpend { model, cost, tokens })
+                .map(|(model, (cost, tokens))| crate::spend::ModelSpend { model, cost, tokens, stored_cost: None, missing_pricing: false })
                 .collect();
             models.sort_by(|a, b| b.cost.partial_cmp(&a.cost).unwrap_or(std::cmp::Ordering::Equal));
             models.truncate(20);

@@ -13,6 +13,12 @@
     <!-- Independent of the module bundle: a failed resource load must leave
          visible recovery guidance instead of a permanently hidden body. -->
     <div id="boot-fallback" role="status" aria-live="polite">
+      <svg class="boot-meter" viewBox="0 0 64 64" width="64" height="64" aria-hidden="true">
+        <path class="boot-meter-track" d="M12 47a25 25 0 1 1 40 0" />
+        <path class="boot-meter-signal" d="M12 47a25 25 0 1 1 40 0" />
+        <g class="boot-meter-needle"><path d="M32 32l15-12"/><circle cx="32" cy="32" r="3"/></g>
+      </svg>
+      <strong class="boot-name">Pane</strong>
       <p>正在加载 Pane… / Loading Pane…</p>
       <div class="boot-recovery">
         <p>加载仍未完成，请重新加载。 / Still loading. Please reload.</p>

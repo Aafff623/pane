@@ -49,7 +49,13 @@ fn started_ms() -> i64 {
 /// Called after each usage fetch with the enabled providers' snapshots.
 pub fn publish(snapshots: &[Snapshot]) {
     let fetched_at = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
-    let arr: Vec<Value> = snapshots
+    let previous = latest_full()
+        .lock()
+        .map(|v| v.clone())
+        .unwrap_or_default();
+    let mut marked = snapshots.to_vec();
+    apply_reset_marks(&previous, &mut marked, now_ms());
+    let arr: Vec<Value> = marked
         .iter()
         .map(|s| provider_json(s, &fetched_at))
         .collect();
@@ -57,10 +63,44 @@ pub fn publish(snapshots: &[Snapshot]) {
         *v = Value::Array(arr);
     }
     if let Ok(mut full) = latest_full().lock() {
-        *full = snapshots.to_vec();
+        *full = marked;
     }
     if let Ok(mut t) = last_publish_ms().lock() {
         *t = now_ms();
+    }
+}
+
+fn reset_reading(s: &Snapshot) -> Option<crate::resets::Reading> {
+    let metric = s.metrics.iter().find(|m| m.kind == "progress")?;
+    Some(crate::resets::Reading {
+        used_percent: metric.used_percent?,
+        resets_at: metric.resets_at,
+        period_ms: metric.period_ms,
+    })
+}
+
+/// Pure core of the just-reset marker: a drop must pass `resets::is_reset`
+/// (same id/plan, ≥10-point drop, reset timestamp moved) and the marker
+/// survives a failed/stale refresh for ten minutes.
+pub(crate) fn apply_reset_marks(previous: &[Snapshot], snapshots: &mut [Snapshot], now: i64) {
+    const MARKER_MS: i64 = 10 * 60_000;
+    for s in snapshots.iter_mut() {
+        let prev = previous.iter().find(|p| p.id == s.id);
+        let carried = prev
+            .and_then(|p| p.just_reset_at)
+            .filter(|at| now - *at < MARKER_MS);
+        if s.stale || s.status != "ok" {
+            s.just_reset_at = carried;
+            continue;
+        }
+        let detected = match (prev.and_then(reset_reading), reset_reading(s)) {
+            (Some(old), Some(new)) => {
+                let same_identity = prev.is_some_and(|p| p.plan == s.plan);
+                crate::resets::is_reset(old, new, same_identity)
+            }
+            _ => false,
+        };
+        s.just_reset_at = if detected { Some(now) } else { carried };
     }
 }
 
@@ -71,6 +111,7 @@ pub(crate) fn provider_json(s: &Snapshot, fetched_at: &str) -> Value {
         "plan": s.plan,
         "lines": metric_lines(&s.metrics),
         "fetchedAt": fetched_at,
+        "justResetAt": s.just_reset_at.map(iso8601),
     })
 }
 
@@ -192,6 +233,7 @@ pub(crate) fn provider_full_json(s: &Snapshot, fetched_at: &str) -> Value {
         "warning": s.warning.as_deref().map(sanitize_text),
         "lines": metric_lines(&s.metrics),
         "fetchedAt": fetched_at,
+        "justResetAt": s.just_reset_at.map(iso8601),
     })
 }
 
@@ -543,7 +585,7 @@ pub fn start() {
 
 #[cfg(test)]
 mod tests {
-    use super::{host_ok, provider_json, publish, route};
+    use super::{apply_reset_marks, host_ok, provider_json, publish, route};
     use crate::providers::{Metric, Snapshot};
     use serde_json::json;
 
@@ -793,6 +835,68 @@ mod tests {
                 assert!(s.get(field).is_some(), "source missing {field}");
             }
         }
+    }
+
+    fn mark_snap(
+        id: &str,
+        plan: &str,
+        used: f64,
+        reset_at: i64,
+        period: i64,
+        stale: bool,
+    ) -> Snapshot {
+        let mut snap = Snapshot::ok(
+            id,
+            "Test",
+            Some(plan.into()),
+            vec![Metric::progress("Quota", used, None).with_reset(Some(reset_at), Some(period))],
+        );
+        snap.stale = stale;
+        snap
+    }
+
+    #[test]
+    fn reset_marker_is_detected_once_and_expires_after_ten_minutes() {
+        let old = mark_snap("p", "Free", 90.0, 1_000_000, 3_600_000, false);
+        let now = 2_000_000;
+        let mut fresh = vec![mark_snap("p", "Free", 10.0, 1_000_000 + 20 * 60_000, 3_600_000, false)];
+        apply_reset_marks(&[old], &mut fresh, now);
+        assert_eq!(fresh[0].just_reset_at, Some(now));
+
+        let mut nine = vec![mark_snap("p", "Free", 10.0, 1_000_000 + 20 * 60_000, 3_600_000, false)];
+        apply_reset_marks(&fresh, &mut nine, now + 9 * 60_000);
+        assert_eq!(nine[0].just_reset_at, Some(now));
+
+        let mut ten = vec![mark_snap("p", "Free", 10.0, 1_000_000 + 20 * 60_000, 3_600_000, false)];
+        apply_reset_marks(&nine, &mut ten, now + 10 * 60_000);
+        assert_eq!(ten[0].just_reset_at, None);
+    }
+
+    #[test]
+    fn plan_change_or_stale_snapshot_vetoes_the_reset_marker() {
+        let old = mark_snap("p", "Free", 90.0, 1_000_000, 3_600_000, false);
+        let now = 2_000_000;
+        let mut changed = vec![mark_snap(
+            "p",
+            "PLUS",
+            10.0,
+            1_000_000 + 20 * 60_000,
+            3_600_000,
+            false,
+        )];
+        apply_reset_marks(&[old.clone()], &mut changed, now);
+        assert_eq!(changed[0].just_reset_at, None);
+
+        let mut stale = vec![mark_snap(
+            "p",
+            "Free",
+            10.0,
+            1_000_000 + 20 * 60_000,
+            3_600_000,
+            true,
+        )];
+        apply_reset_marks(&[old], &mut stale, now);
+        assert_eq!(stale[0].just_reset_at, None);
     }
 
     #[test]

@@ -132,3 +132,52 @@ export function supportsExtraAccounts(familyId: string): boolean {
 export function isWebSessionFamily(familyId: string): boolean {
   return providerDefinition(familyId)?.webSession === true;
 }
+
+export type AuthKind = "api_key" | "oauth" | "web_session" | "local" | "none";
+export type ProbeKind = "active_get" | "passive_header" | "static" | "local_counter";
+export type QuotaScope = "key" | "account" | "team" | "unknown";
+export type ResetSemantics = "api_timestamp" | "monthly_inferred" | "none";
+
+export interface ProviderDescriptor {
+  familyId: string;
+  authKind: AuthKind;
+  probeKind: ProbeKind;
+  quotaScope: QuotaScope;
+  resetSemantics: ResetSemantics;
+  paceCapability: boolean;
+}
+
+/** Coarse, catalog-derived contract. The provider parser stays authoritative
+ *  for the exact quota shape; this exists so new surfaces can ask the same
+ *  questions without another per-provider match. Mirrors
+ *  `ProviderDefinition::descriptor()` in src-tauri/src/provider_catalog.rs. */
+export function descriptorFor(def: ProviderDefinition): ProviderDescriptor {
+  const authKind: AuthKind = def.supportsApiKey
+    ? "api_key"
+    : def.supportsOAuth
+      ? "oauth"
+      : def.webSession
+        ? "web_session"
+        : def.queryKind === "localOnly"
+          ? "local"
+          : "none";
+  const quotaScope: QuotaScope = def.supportsApiKey
+    ? "key"
+    : authKind === "oauth" || authKind === "web_session" || def.supportsExtraAccounts
+      ? "account"
+      : "unknown";
+  const timestamped =
+    def.queryKind === "nativeCodingPlan" ||
+    def.queryKind === "nativeSnapshot" ||
+    def.queryKind === "composite";
+  return {
+    familyId: def.familyId,
+    authKind,
+    probeKind: def.queryKind === "localOnly" ? "local_counter" : "active_get",
+    quotaScope,
+    resetSemantics: timestamped ? "api_timestamp" : "none",
+    paceCapability: timestamped,
+  };
+}
+
+export const providerDescriptors: readonly ProviderDescriptor[] = providerCatalog.map(descriptorFor);

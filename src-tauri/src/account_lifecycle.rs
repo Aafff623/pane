@@ -56,6 +56,9 @@ pub fn delete_from(base: &Path, family: &str, id: &str) -> Result<Option<usize>,
         // Removing the source before replacing the active list prevents lazy
         // import from resurrecting the row. A failed save retains the active row.
         retire_legacy(base, family, &rows[index])?;
+        if family == "codex" {
+            codex_accounts::suppress_backup_import_from(base, &rows[index].account_id)?;
+        }
         rows.remove(index);
         save(base, family, &rows)?;
     }
@@ -76,6 +79,9 @@ pub fn archive_from(base: &Path, family: &str, id: &str) -> Result<usize, String
     };
     accounts::archive_external_with(base, archived, || {
         retire_legacy(base, family, &row)?;
+        if family == "codex" {
+            codex_accounts::suppress_backup_import_from(base, &row.account_id)?;
+        }
         save(base, family, &rows)
     })?;
     Ok(index)
@@ -135,6 +141,17 @@ mod tests {
         delete_from(&base, "tokenrhythm", &other).unwrap();
         assert!(load(&base, "tokenrhythm").unwrap().is_empty(), "last account stays deleted");
         assert!(matches!(crate::secretstore::get(&crate::secretstore::token_key(&format!("login/{id}"))), crate::secretstore::Secret::Missing));
+    }
+
+    #[test]
+    fn codex_delete_suppresses_the_local_backup_fallback_from_returning() {
+        let (base, row, _) = fixture("codex-suppress");
+        let id = card_id("codex", &row);
+        save(&base, "codex", &[row.clone()]).unwrap();
+        assert_eq!(delete_from(&base, "codex", &id).unwrap(), Some(0));
+        assert!(codex_accounts::suppressed_ids(&base).contains(&row.account_id),
+            "a deliberate delete must tombstone the .pane-bak import");
+        let _ = std::fs::remove_dir_all(&base);
     }
 
     #[test]

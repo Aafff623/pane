@@ -595,8 +595,17 @@ changes.
 - Evidence: legacy-vault resurrection red/green, archive/delete repeated
   refresh and failed migration tests, relay retirement failure test, account
   alias regression, and a headless Customize routing check. Latest serial
-  proxy-free Rust run: 959 passed/14 ignored after the backlog batch and
-  backup hardening.
+  proxy-free Rust run: **1036 passed / 15 ignored** (2026-10-23, after the
+  Codex backup-retirement and slot-retention corrections).
+- Codex credential-source precedence is **live default > managed web store >
+  `.pane-bak` fallback**. A backup import is marked `imported_from_backup`
+  and is retired once a live default identity appears; retirement persists
+  into `codex-backup-suppressed.json`, including backups not imported yet, so
+  a temporarily missing `auth.json` cannot revive them. Tombstones are written
+  ONLY by deliberate delete/archive (`account_lifecycle`) — an incidental list
+  shrink, such as the vault-miss drop above, must never suppress the fallback.
+  The legacy single OAuth slot is retired only after the account list is
+  durably written.
 
 ## Codex managed accounts and callback semantics (2026-10-22)
 

@@ -218,17 +218,8 @@ pub async fn snapshot_with_key_as(
         Err(error) => return Snapshot::error(card_id, card_name, format!("{} request failed: {error}", spec.display)),
     };
     let status = response.status().as_u16();
-    if status == 401 {
-        return Snapshot::error(card_id, card_name, format!("{} rejected this key", spec.display));
-    }
-    if status == 402 {
-        return Snapshot::error(card_id, card_name, format!("{} says this account needs payment", spec.display));
-    }
-    if status == 429 {
-        return Snapshot::error(card_id, card_name, format!("{} rate-limited the quota check", spec.display));
-    }
-    if !(200..300).contains(&status) {
-        return Snapshot::error(card_id, card_name, format!("{} quota endpoint: HTTP {status}", spec.display));
+    if let Some(error) = status_error(spec, status) {
+        return Snapshot::error(card_id, card_name, error);
     }
     let doc = match json_body(response, MAX_BODY_BYTES, "quota").await {
         Ok(doc) => doc,
@@ -237,6 +228,18 @@ pub async fn snapshot_with_key_as(
     match metrics_from(spec, &doc) {
         Ok(metrics) => Snapshot::ok(card_id, card_name, None, metrics),
         Err(error) => Snapshot::error(card_id, card_name, error),
+    }
+}
+
+fn status_error(spec: &ApiKeySpec, status: u16) -> Option<String> {
+    match status {
+        401 => Some(format!("{} rejected this key", spec.display)),
+        402 => Some(format!("{} says this account needs payment", spec.display)),
+        429 => Some(format!("{} rate-limited the quota check", spec.display)),
+        s if !(200..300).contains(&s) => {
+            Some(format!("{} quota endpoint: HTTP {s}", spec.display))
+        }
+        _ => None,
     }
 }
 
@@ -296,5 +299,60 @@ mod tests {
         assert_eq!(deepl.reset_semantics, "monthly_inferred");
         assert!(!deepl.pace_capability);
         assert!(descriptor("stability").is_some());
+    }
+
+    #[test]
+    fn http_statuses_are_distinct_and_never_echo_the_key() {
+        let deepl = spec("deepl").unwrap();
+        assert!(status_error(deepl, 401).unwrap().contains("rejected"));
+        assert!(status_error(deepl, 402).unwrap().contains("needs payment"));
+        assert!(status_error(deepl, 429).unwrap().contains("rate-limited"));
+        assert_eq!(status_error(deepl, 503).as_deref(), Some("DeepL quota endpoint: HTTP 503"));
+        assert!(status_error(deepl, 200).is_none());
+        assert!(status_error(deepl, 204).is_none());
+    }
+
+    #[test]
+    fn every_spec_is_a_fixed_https_origin_with_no_user_url() {
+        for spec in SPECS {
+            assert!(spec.host.starts_with("https://"), "{} host is not HTTPS", spec.family);
+            assert!(!spec.host.contains(' '));
+            assert!(spec.path.starts_with('/'));
+            assert!(!spec.path.contains("://"));
+        }
+    }
+
+    #[test]
+    fn sanitized_fixtures_cover_ok_empty_and_html() {
+        let deepl: Value =
+            serde_json::from_str(include_str!("../../../parse-tests/fixtures/deepl/200.json"))
+                .unwrap();
+        assert!(metrics_from(spec("deepl").unwrap(), &deepl).is_ok());
+        assert_eq!(
+            metrics_from(spec("deepl").unwrap(), &deepl).unwrap()[0]
+                .usage.as_ref().unwrap().unit,
+            UsageUnit::Characters
+        );
+
+        let serpapi: Value =
+            serde_json::from_str(include_str!("../../../parse-tests/fixtures/serpapi/200.json"))
+                .unwrap();
+        let metrics = metrics_from(spec("serpapi").unwrap(), &serpapi).unwrap();
+        assert_eq!(metrics[0].usage.as_ref().unwrap().unit, UsageUnit::Requests);
+        assert_eq!(metrics[0].usage.as_ref().unwrap().used, 225.0);
+
+        let stability: Value =
+            serde_json::from_str(include_str!("../../../parse-tests/fixtures/stability/200.json"))
+                .unwrap();
+        let metrics = metrics_from(spec("stability").unwrap(), &stability).unwrap();
+        assert_eq!(metrics[0].label, "Balance");
+        assert!(metrics[0].usage.is_none());
+
+        let empty: Value =
+            serde_json::from_str(include_str!("../../../parse-tests/fixtures/deepl/empty.json"))
+                .unwrap();
+        assert!(metrics_from(spec("deepl").unwrap(), &empty).is_err());
+        let html = include_str!("../../../parse-tests/fixtures/deepl/html-200.html");
+        assert!(serde_json::from_str::<Value>(html).is_err(), "HTML 200 must not parse as JSON");
     }
 }
