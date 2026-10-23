@@ -571,6 +571,9 @@ const en: Dict = {
   "card.hintWbWebExpired": "WorkBuddy web session expired — import a fresh cookie in Customize, or sign in from the auth center.",
   "card.hintWbWebError": "WorkBuddy web session: {reason}",
   "card.hintWbWebNoData": "WorkBuddy web session returned no quota data",
+  "card.hintXfyunSignIn": "Sign in to the Spark web console from the auth center to see its free quota.",
+  "card.hintXfyunExpired": "Spark web session expired — sign in again from the auth center.",
+  "card.hintXfyunNoClaim": "No Spark-X2.6 free quota claimed yet — claim it in the iFlytek console, then refresh.",
   "card.outdated": "⚠ Outdated",
   "card.needsSetupFallback": "Credentials are saved, but the usage API needs one more step.",
   "card.needsSetupAction": "How to fix",
@@ -1317,6 +1320,7 @@ const en: Dict = {
 
   "detail.unlimited": "Unlimited",
   "detail.weekendNotStarted": "Weekend not started",
+  "detail.unconfirmed": "Unconfirmed",
   "detail.moneyOfLeft": "{a} of {b} left",
   "detail.moneyOfLeftCredits": "{a} of {b} left · {n} credits",
   "detail.moneyLeftOf": "{a} left of {b}",
@@ -1890,6 +1894,9 @@ const zh: Dict = {
   "card.hintWbWebExpired": "WorkBuddy 网页会话已过期——请在自定义面板重新导入 Cookie，或从授权中心登录。",
   "card.hintWbWebError": "WorkBuddy 网页会话：{reason}",
   "card.hintWbWebNoData": "WorkBuddy 网页会话没有返回额度数据",
+  "card.hintXfyunSignIn": "请从授权中心登录讯飞星火网页控制台，以读取免费额度。",
+  "card.hintXfyunExpired": "讯飞星火网页会话已过期——请从授权中心重新登录。",
+  "card.hintXfyunNoClaim": "尚未领取 Spark-X2.6 免费额度——请先在讯飞控制台领取，再刷新。",
   "card.outdated": "⚠ 数据过时",
   "card.needsSetupFallback": "凭据已保存，但用量接口还差一步。",
   "card.needsSetupAction": "怎么补",
@@ -2617,6 +2624,7 @@ const zh: Dict = {
 
   "detail.unlimited": "无限制",
   "detail.weekendNotStarted": "周末未开始",
+  "detail.unconfirmed": "待确认",
   "detail.moneyOfLeft": "{a} / {b} 剩余",
   "detail.moneyOfLeftCredits": "{a} / {b} 剩余 · {n} 额度",
   "detail.moneyLeftOf": "{a} / {b} 剩余",
@@ -3195,6 +3203,9 @@ const ru: Dict = {
   "card.hintWbWebExpired": "Веб-сеанс WorkBuddy истёк — импортируйте новый cookie в разделе настройки или войдите через центр авторизации.",
   "card.hintWbWebError": "Веб-сеанс WorkBuddy: {reason}",
   "card.hintWbWebNoData": "Веб-сеанс WorkBuddy не вернул данных о лимитах",
+  "card.hintXfyunSignIn": "Войдите в веб-консоль Spark через центр авторизации, чтобы увидеть бесплатную квоту.",
+  "card.hintXfyunExpired": "Веб-сеанс Spark истёк — войдите снова через центр авторизации.",
+  "card.hintXfyunNoClaim": "Бесплатная квота Spark-X2.6 ещё не получена — получите её в консоли iFlytek и обновите.",
   "card.outdated": "⚠ Данные устарели",
   "card.needsSetupFallback": "Учётные данные сохранены, но API использования требует ещё одного шага.",
   "card.needsSetupAction": "Как исправить",
@@ -3936,6 +3947,7 @@ const ru: Dict = {
 
   "detail.unlimited": "Без лимита",
   "detail.weekendNotStarted": "Выходные ещё не начались",
+  "detail.unconfirmed": "Не подтверждено",
   "detail.moneyOfLeft": "{a} / {b} осталось",
   "detail.moneyOfLeftCredits": "{a} / {b} осталось · {n} кредитов",
   "detail.moneyLeftOf": "{a} / {b} осталось",
@@ -4081,6 +4093,15 @@ export function displayCardHint(text: string): string {
   const stepPlanKey = ["card.stepPlanRejected", "card.stepPlanPair", "card.stepPlanApiKey", "card.stepPlanEmpty"]
     .find((key) => en[key] === text);
   if (stepPlanKey) return t(stepPlanKey);
+  if (text === "Sign in to the Spark web console from the auth center to see its free quota.") {
+    return t("card.hintXfyunSignIn");
+  }
+  if (text === "Spark web session expired — sign in again from the auth center.") {
+    return t("card.hintXfyunExpired");
+  }
+  if (text === "No Spark-X2.6 free quota claimed yet — claim it in the iFlytek console, then refresh.") {
+    return t("card.hintXfyunNoClaim");
+  }
   const generic = text.match(/^Sign in with (.+) from the auth center to see its quota\.$/);
   if (generic) return t("card.hintSignIn", { name: generic[1] });
   if (
@@ -4141,6 +4162,7 @@ export function displayMetricDetail(text: string): string {
   if (m) return t("detail.countOfLeft", { a: m[1], b: m[2] });
   if (/^available$/i.test(text.trim())) return t("card.available");
   if (/^weekend not started$/i.test(text.trim())) return t("detail.weekendNotStarted");
+  if (/^unconfirmed$/i.test(text.trim())) return t("detail.unconfirmed");
   if (/^unlimited$/i.test(text.trim())) return t("detail.unlimited");
   // GIPHY. The bar's denominator comes from GIPHY's *documented* 100/hour
   // beta cap, not from any readable quota, and the numerator is the newest

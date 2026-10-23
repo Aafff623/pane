@@ -32,9 +32,9 @@ const LOGIN_POLL: Duration = Duration::from_secs(2);
 const MAX_BODY_BYTES: usize = 256 * 1024;
 
 const SIGNED_OUT_HINT: &str =
-    "讯飞星火网页会话已过期——在设置里重新网页登录。";
+    "Spark web session expired — sign in again from the auth center.";
 const NO_CLAIM_HINT: &str =
-    "尚未领取 Spark-X2.6 免费额度——请先在讯飞控制台领取，再刷新。";
+    "No Spark-X2.6 free quota claimed yet — claim it in the iFlytek console, then refresh.";
 
 #[derive(Debug, PartialEq)]
 enum Quota {
@@ -87,7 +87,7 @@ pub async fn snapshot() -> Snapshot {
         None => Snapshot::no_credentials(
             FAMILY_ID,
             DISPLAY_NAME,
-            "尚未登录讯飞星火——在设置里添加账号并完成网页登录。".into(),
+            "Sign in to the Spark web console from the auth center to see its free quota.".into(),
         ),
     }
 }
@@ -154,7 +154,7 @@ async fn snapshot_with_login_as(login: LoginAccount, id: &str) -> Snapshot {
         },
         Err(CallErr::Auth) => Snapshot::no_credentials(id, &name, SIGNED_OUT_HINT.into()),
         Err(CallErr::Other(reason)) => {
-            Snapshot::error(id, &name, format!("讯飞星火控制台: {reason}"))
+            Snapshot::error(id, &name, format!("Spark console: {reason}"))
         }
     }
 }
@@ -281,14 +281,14 @@ pub async fn login(app: &tauri::AppHandle) -> Result<(), String> {
     static LOGIN_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
     let _guard = LOGIN_LOCK
         .try_lock()
-        .map_err(|_| "讯飞星火登录正在进行，请先完成或关闭登录窗口".to_string())?;
+        .map_err(|_| "An iFlytek Spark sign-in is already in progress".to_string())?;
     if let Some(window) = app.get_webview_window(LOGIN_WINDOW) {
         let _ = window.set_focus();
-        return Err("讯飞星火登录窗口已打开，请先完成或关闭该窗口".into());
+        return Err("The iFlytek Spark sign-in window is already open".into());
     }
     let url = tauri::Url::parse(LOGIN_URL).map_err(|e| format!("login url: {e}"))?;
     tauri::WebviewWindowBuilder::new(app, LOGIN_WINDOW, tauri::WebviewUrl::External(url))
-        .title("登录讯飞星火")
+        .title("iFlytek Spark sign-in")
         .incognito(true)
         .inner_size(520.0, 760.0)
         .center()
@@ -307,13 +307,13 @@ pub async fn login(app: &tauri::AppHandle) -> Result<(), String> {
             }
         }
         if app.get_webview_window(LOGIN_WINDOW).is_none() {
-            return Err("登录未完成（窗口已关闭）".into());
+            return Err("Sign-in did not finish (window closed)".into());
         }
         if std::time::Instant::now() > deadline {
             if let Some(window) = app.get_webview_window(LOGIN_WINDOW) {
                 let _ = window.close();
             }
-            return Err("登录超时（窗口已关闭）".into());
+            return Err("Sign-in timed out (window closed)".into());
         }
         tokio::time::sleep(LOGIN_POLL).await;
     }
@@ -321,7 +321,7 @@ pub async fn login(app: &tauri::AppHandle) -> Result<(), String> {
         let _ = window.close();
     }
     let Some((cookie, uid, label)) = verified else {
-        return Err("登录未完成（窗口已关闭）".into());
+        return Err("Sign-in did not finish (window closed)".into());
     };
     let account = LoginAccount {
         account_id: uid,
@@ -342,7 +342,7 @@ pub async fn login(app: &tauri::AppHandle) -> Result<(), String> {
 
 #[cfg(feature = "harness")]
 pub async fn login(_app: &tauri::AppHandle) -> Result<(), String> {
-    Err("讯飞星火登录窗口在测试构建中不可用".into())
+    Err("iFlytek Spark sign-in is unavailable in the test harness".into())
 }
 
 fn parse_num(value: Option<&Value>) -> Option<f64> {
