@@ -654,6 +654,10 @@ const DIGIT_FONT: [[u8; 6]; 10] = [
 /// two rows mimic the Mac menu bar's "100% / 36%" pair. White digits with a
 /// black outline so they read on both light and dark taskbars.
 fn draw_tray_numbers(values: &[u32]) -> Vec<u8> {
+    draw_tray_numbers_colored(values, [255, 255, 255])
+}
+
+fn draw_tray_numbers_colored(values: &[u32], color: [u8; 3]) -> Vec<u8> {
     const SIZE: usize = 32;
     let scale = 2usize;
     let glyph_w = 4 * scale;
@@ -720,11 +724,20 @@ fn draw_tray_numbers(values: &[u32]) -> Vec<u8> {
         for x in 0..SIZE {
             if mask[y * SIZE + x] {
                 let p = (y * SIZE + x) * 4;
-                rgba[p..p + 4].copy_from_slice(&[255, 255, 255, 255]);
+                rgba[p..p + 4].copy_from_slice(&[color[0], color[1], color[2], 255]);
             }
         }
     }
     rgba
+}
+
+fn tray_severity_color(severity: tray_projection::TraySeverity) -> [u8; 3] {
+    match severity {
+        tray_projection::TraySeverity::Close => [245, 158, 11],
+        tray_projection::TraySeverity::Maxed | tray_projection::TraySeverity::Error => [239, 68, 68],
+        tray_projection::TraySeverity::Stale => [156, 163, 175],
+        tray_projection::TraySeverity::Ok => [255, 255, 255],
+    }
 }
 
 fn apply_main_tray_projection(
@@ -756,7 +769,10 @@ fn apply_main_tray_projection(
             }
             tray_projection::MainTrayIconMode::Numbers => {
                 let icon = tauri::image::Image::new_owned(
-                    draw_tray_numbers(&projection.remaining_percentages),
+                    draw_tray_numbers_colored(
+                        &projection.remaining_percentages,
+                        tray_severity_color(projection.severity),
+                    ),
                     32,
                     32,
                 );
@@ -768,6 +784,7 @@ fn apply_main_tray_projection(
     if let Ok(mut slot) = last_main_tray().lock() {
         slot.lefts = projection.remaining_percentages.clone();
         slot.tooltip = projection.tooltip.clone();
+        slot.severity = projection.severity;
     }
     Ok(())
 }
@@ -786,6 +803,7 @@ static HIDE_STRIP: AtomicBool = AtomicBool::new(false);
 struct LastMainTray {
     lefts: Vec<u32>,
     tooltip: String,
+    severity: tray_projection::TraySeverity,
 }
 
 fn last_main_tray() -> &'static Mutex<LastMainTray> {
@@ -794,6 +812,7 @@ fn last_main_tray() -> &'static Mutex<LastMainTray> {
         Mutex::new(LastMainTray {
             lefts: Vec::new(),
             tooltip: String::from("Pane"),
+            severity: tray_projection::TraySeverity::Ok,
         })
     })
 }
@@ -829,8 +848,8 @@ fn paint_cached_main_tray(app: &tauri::AppHandle) {
     }
     let cached = last_main_tray()
         .lock()
-        .map(|g| (g.lefts.clone(), g.tooltip.clone()))
-        .unwrap_or_else(|_| (Vec::new(), String::from("Pane")));
+        .map(|g| (g.lefts.clone(), g.tooltip.clone(), g.severity))
+        .unwrap_or_else(|_| (Vec::new(), String::from("Pane"), tray_projection::TraySeverity::Ok));
     let Some(tray) = app.tray_by_id("tray") else {
         return;
     };
@@ -841,7 +860,11 @@ fn paint_cached_main_tray(app: &tauri::AppHandle) {
         }
         return;
     }
-    let icon = tauri::image::Image::new_owned(draw_tray_numbers(&cached.0), 32, 32);
+    let icon = tauri::image::Image::new_owned(
+        draw_tray_numbers_colored(&cached.0, tray_severity_color(cached.2)),
+        32,
+        32,
+    );
     let _ = tray.set_icon(Some(icon));
 }
 

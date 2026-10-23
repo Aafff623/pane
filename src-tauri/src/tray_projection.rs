@@ -26,6 +26,15 @@ pub(crate) struct PinnedMetric {
     pub label: String,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum TraySeverity {
+    Ok,
+    Close,
+    Maxed,
+    Stale,
+    Error,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum MainTrayIconMode {
     Logo,
@@ -37,6 +46,7 @@ pub(crate) struct MainTrayProjection {
     pub icon_mode: MainTrayIconMode,
     pub remaining_percentages: Vec<u32>,
     pub tooltip: String,
+    pub severity: TraySeverity,
 }
 
 /// One/New API is two-level: family id `onenewapi` hides every key card.
@@ -93,6 +103,7 @@ pub(crate) fn project_main_tray(
             icon_mode: MainTrayIconMode::Logo,
             remaining_percentages: Vec::new(),
             tooltip: "Pane".into(),
+            severity: TraySeverity::Ok,
         };
     };
     let mut icon_metrics = ordinary_metrics(icon_provider, config.providers.get(&icon_provider.id));
@@ -158,6 +169,7 @@ pub(crate) fn project_main_tray(
         .any(|(provider_id, _)| *provider_id == icon_provider.id.as_str());
     let show_numbers = !strip_active && icon_explained;
 
+    let severity = tray_severity(icon_provider, &icon_metrics);
     MainTrayProjection {
         icon_mode: if show_numbers {
             MainTrayIconMode::Numbers
@@ -173,7 +185,28 @@ pub(crate) fn project_main_tray(
             Vec::new()
         },
         tooltip,
+        severity,
     }
+}
+
+fn tray_severity(provider: &providers::Snapshot, metrics: &[&providers::Metric]) -> TraySeverity {
+    if provider.stale {
+        return TraySeverity::Stale;
+    }
+    if provider.status == "error" {
+        return TraySeverity::Error;
+    }
+    let mut severity = TraySeverity::Ok;
+    for metric in metrics {
+        let Some(used) = metric.used_percent else { continue };
+        if used >= 99.5 {
+            return TraySeverity::Maxed;
+        }
+        if used >= 90.0 {
+            severity = TraySeverity::Close;
+        }
+    }
+    severity
 }
 
 fn tooltip_from_lines(lines: &[(&str, String)]) -> String {
@@ -827,5 +860,18 @@ mod tests {
 
         assert_eq!(result.tooltip.encode_utf16().count(), 126);
         assert!(result.tooltip.ends_with("Usage: 50% left"));
+    }
+
+    #[test]
+    fn tray_severity_uses_the_same_used_percent_scale() {
+        let ok = project_main_tray(&[snapshot("p", "P", vec![progress("Usage", 10.0)])], &config(&["p"]), false);
+        assert_eq!(ok.severity, TraySeverity::Ok);
+        let close = project_main_tray(&[snapshot("p", "P", vec![progress("Usage", 92.0)])], &config(&["p"]), false);
+        assert_eq!(close.severity, TraySeverity::Close);
+        let maxed = project_main_tray(&[snapshot("p", "P", vec![progress("Usage", 100.0)])], &config(&["p"]), false);
+        assert_eq!(maxed.severity, TraySeverity::Maxed);
+        let mut stale = snapshot("p", "P", vec![progress("Usage", 10.0)]);
+        stale.stale = true;
+        assert_eq!(project_main_tray(&[stale], &config(&["p"]), false).severity, TraySeverity::Stale);
     }
 }

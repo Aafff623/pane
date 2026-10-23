@@ -1,6 +1,6 @@
 # 06 — 托盘 ambient：严重度染色、系统字体与投影缓存
 
-Status: ready-for-agent
+Status: in progress — severity tint and last-good in-memory paint landed; font/persistent cache pending
 GitHub: #44
 Priority: P2
 Blocked by: None
@@ -47,3 +47,7 @@ cargo +stable-x86_64-pc-windows-gnu test
 ```
 
 Owner 目检：五种状态 × 三种缩放 × 深浅任务栏；重启/断网 last-good。
+
+## Comments
+
+- 2026-10-23：新增 `TraySeverity`（ok/close/maxed/stale/error）到 main tray projection，数字图标按同一 used-percent 热度染色；`LastMainTray` 保存 severity，刷新失败/重绘时先画 last-good。27 个 tray projection 测试通过。系统字体/125–150% 缩放验收和磁盘持久化投影尚未完成。
