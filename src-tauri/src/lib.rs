@@ -3244,6 +3244,16 @@ async fn fetch_qoder_spend() -> qoder_sessions::QoderSpend {
         .unwrap_or_default()
 }
 
+/// Explicit rescan after a parser fix: clears the in-memory transcript cache,
+/// recomputes credits/tokens and reports how many archived/deleted sessions
+/// still have a transcript. Read-only on Qoder's files and database.
+#[tauri::command]
+async fn rescan_qoder_sessions() -> Result<qoder_sessions::QoderRescan, String> {
+    tauri::async_runtime::spawn_blocking(qoder_sessions::rescan)
+        .await
+        .map_err(|error| error.to_string())
+}
+
 /// Validates a relay base URL for a provider that takes one; the rejection
 /// message names the provider's own card, never the other relay family.
 fn validate_relay_base_url(provider: &str, url: &str) -> Result<(), String> {
@@ -5624,6 +5634,7 @@ pub fn run() {
             fetch_credit_extras,
             fetch_spend_daily,
             fetch_qoder_spend,
+            rescan_qoder_sessions,
             antigravity_capture_account,
             cursor_oauth_start,
             cursor_oauth_poll,

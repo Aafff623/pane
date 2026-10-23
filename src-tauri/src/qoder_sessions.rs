@@ -29,6 +29,9 @@ use std::time::SystemTime;
 
 const SCAN_DAYS: i64 = 31;
 const MAX_SESSIONS: usize = 50;
+/// Bump when the parser's interpretation changes so an in-process cache from
+/// an older build cannot keep serving events with missing windows.
+const CACHE_VERSION: u32 = 2;
 
 #[derive(Serialize, Clone, Default)]
 pub struct QoderWindow {
@@ -108,6 +111,17 @@ pub struct QoderSource {
 }
 
 #[derive(Serialize, Clone, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct QoderRescan {
+    pub spend: QoderSpend,
+    pub stats_available: bool,
+    pub archived_total: u64,
+    pub archived_readable: u64,
+    pub deleted_total: u64,
+    pub deleted_readable: u64,
+}
+
+#[derive(Serialize, Clone, Default)]
 pub struct QoderSpend {
     pub today: QoderWindow,
     pub yesterday: QoderWindow,
@@ -144,10 +158,16 @@ struct ParsedFile {
 
 /// Cache entries keyed by (mtime, size): a session log is append-only, so an
 /// unchanged file cannot contribute new requests.
-type CacheKey = (SystemTime, u64);
+type CacheKey = (u32, SystemTime, u64);
 fn cache() -> &'static Mutex<HashMap<PathBuf, (CacheKey, ParsedFile)>> {
     static CACHE: OnceLock<Mutex<HashMap<PathBuf, (CacheKey, ParsedFile)>>> = OnceLock::new();
     CACHE.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn clear_cache() {
+    if let Ok(mut cache) = cache().lock() {
+        cache.clear();
+    }
 }
 
 fn qoder_home() -> PathBuf {
@@ -162,7 +182,7 @@ fn projects_root() -> PathBuf {
 
 fn stamp(path: &Path) -> Option<CacheKey> {
     let meta = fs::metadata(path).ok()?;
-    Some((meta.modified().ok()?, meta.len()))
+    Some((CACHE_VERSION, meta.modified().ok()?, meta.len()))
 }
 
 fn cached_parse(path: &Path) -> ParsedFile {
@@ -734,6 +754,84 @@ fn collect_with_db(root: &Path, db: Option<&Path>) -> QoderSpend {
     report
 }
 
+/// Read-only counts for the rescan dialog. "Readable" means Pane's own
+/// 31-day discovery would see a main transcript for that session id. A
+/// deleted session whose file is already gone is reported, never invented.
+fn archive_stats_from(root: &Path, db: Option<&Path>) -> (bool, u64, u64, u64, u64) {
+    let Some(db) = db else {
+        return (false, 0, 0, 0, 0);
+    };
+    let Ok(connection) = Connection::open_with_flags(db, OpenFlags::SQLITE_OPEN_READ_ONLY) else {
+        return (false, 0, 0, 0, 0);
+    };
+    let cutoff = Utc::now().timestamp_millis() - SCAN_DAYS * 86_400_000;
+    let Ok(mut statement) = connection.prepare(
+        "SELECT session_id, archived, (deleted_at IS NOT NULL)
+           FROM chat_sessions
+          WHERE updated_at > ?1",
+    ) else {
+        return (false, 0, 0, 0, 0);
+    };
+    let Ok(rows) = statement.query_map([cutoff], |row| {
+        Ok((
+            row.get::<_, String>(0)?,
+            row.get::<_, i64>(1).unwrap_or(0),
+            row.get::<_, i64>(2).unwrap_or(0),
+        ))
+    }) else {
+        return (false, 0, 0, 0, 0);
+    };
+    let readable: HashSet<String> = discover(root)
+        .0
+        .into_iter()
+        .filter(|(_, _, subagent)| !subagent)
+        .map(|(id, _, _)| id)
+        .collect();
+    let mut archived_total = 0;
+    let mut archived_readable = 0;
+    let mut deleted_total = 0;
+    let mut deleted_readable = 0;
+    for (id, archived, deleted) in rows.flatten() {
+        if deleted != 0 {
+            deleted_total += 1;
+            if readable.contains(&id) {
+                deleted_readable += 1;
+            }
+        } else if archived != 0 {
+            archived_total += 1;
+            if readable.contains(&id) {
+                archived_readable += 1;
+            }
+        }
+    }
+    (
+        true,
+        archived_total,
+        archived_readable,
+        deleted_total,
+        deleted_readable,
+    )
+}
+
+/// Force a fresh Qoder scan (cache clear + reparse) and return both the
+/// recomputed credits/tokens and the archived/deleted transcript coverage.
+pub fn rescan() -> QoderRescan {
+    clear_cache();
+    let root = projects_root();
+    let db = qoder_db_path();
+    let spend = collect_with_db(&root, db.as_deref());
+    let (stats_available, archived_total, archived_readable, deleted_total, deleted_readable) =
+        archive_stats_from(&root, db.as_deref());
+    QoderRescan {
+        spend,
+        stats_available,
+        archived_total,
+        archived_readable,
+        deleted_total,
+        deleted_readable,
+    }
+}
+
 fn model_label(model: &str) -> String {
     static LABELS: OnceLock<HashMap<String, String>> = OnceLock::new();
     let labels = LABELS.get_or_init(|| {
@@ -914,6 +1012,55 @@ mod tests {
         let empty = collect_with_db(&root, Some(&empty_db));
         assert_eq!(empty.all.billed_tokens, 0.0);
         assert_eq!(empty.all.tokens_unavailable_trips, 1);
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn archive_stats_separate_readable_archived_and_deleted_sessions() {
+        let root = temp_root("archive-stats");
+        write_session(
+            &root,
+            "s1.jsonl",
+            &[usage_line("2026-10-20T01:00:00Z", "dfmodel", 1.0, 0.1, "a")],
+        );
+        write_session(
+            &root,
+            "s2.jsonl",
+            &[usage_line("2026-10-20T01:01:00Z", "dfmodel", 1.0, 0.1, "b")],
+        );
+        let db = root.join("main.sqlite");
+        let connection = Connection::open(&db).unwrap();
+        connection
+            .execute_batch(
+                "CREATE TABLE chat_sessions (
+                    session_id TEXT,
+                    archived INTEGER,
+                    deleted_at TEXT,
+                    updated_at INTEGER
+                );",
+            )
+            .unwrap();
+        let now = Utc::now().timestamp_millis();
+        for (id, archived, deleted) in [
+            ("s1", 1, None),
+            ("s2", 0, Some("2026-10-22T00:00:00Z")),
+            ("s3", 1, None),
+            ("s4", 0, Some("2026-10-22T00:00:00Z")),
+        ] {
+            connection
+                .execute(
+                    "INSERT INTO chat_sessions (session_id, archived, deleted_at, updated_at)
+                     VALUES (?1, ?2, ?3, ?4)",
+                    rusqlite::params![id, archived, deleted, now],
+                )
+                .unwrap();
+        }
+        drop(connection);
+        assert_eq!(
+            archive_stats_from(&root, Some(&db)),
+            (true, 2, 1, 2, 1),
+            "s1 archived+readable; s3 archived+missing; s2 deleted+readable; s4 deleted+missing"
+        );
         let _ = fs::remove_dir_all(&root);
     }
 

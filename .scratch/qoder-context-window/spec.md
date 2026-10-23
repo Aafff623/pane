@@ -1,6 +1,6 @@
 # Qoder 0.4.9 窗口回退（qoder-context-window）
 
-Status: 01/02 implemented; 03 awaiting owner decision
+Status: 01/02/04 implemented; 03 awaiting owner decision
 Source: GitHub #37（回归自 #28）；owner request 2026-10-22
 Branch: `codex/qoder-context-window`（计划，尚未创建）
 
@@ -62,6 +62,8 @@ Pane 继续以 Qoder CN 本地转录为唯一账本，但把“窗口解析”�
 ## Out of Scope
 
 - 重新启用 Qoder CN 额度卡；它当前在 Pane 配置里被禁用/移除，是独立问题。
+- 04 只做当前 31 天扫描窗口内的重新计算；不重写旧转录、不迁移数据，
+  已删除且没有转录的会话仍不可恢复。
 - 修复 `token-usage` 或 `qoder-credit-watch` 插件自己的数据源；Pane 不读取它们的输出。
 - 写入 Qoder 数据库、配置或登录态；不向上游提交补丁。
 - 任何全局或固定 200K 窗口回退；任何跨模型窗口借用。

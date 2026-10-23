@@ -238,6 +238,15 @@ interface QoderSpendReport {
   source: { state: string; root: string; sessions: number; lite_sessions: number; tokens_unavailable_trips: number };
 }
 
+interface QoderRescan {
+  spend: QoderSpendReport;
+  statsAvailable: boolean;
+  archivedTotal: number;
+  archivedReadable: number;
+  deletedTotal: number;
+  deletedReadable: number;
+}
+
 /// How to get each provider signed in again, for the ⚠ Outdated tooltip.
 const RELOGIN_KEYS: Record<string, string> = {
   claude: "stale.relogin.claude",
@@ -986,6 +995,7 @@ let lastSpend: ProviderSpend[] = [];
 let lastSpendHistory: { d7: HistorySpend[]; all: HistorySpend[] } = { d7: [], all: [] };
 let lastSpendDaily: DailySpendRow[] = [];
 let lastQoderSpend: QoderSpendReport | null = null;
+let qoderRescanBusy = false;
 /** Credits consumed inside each panel window — the same five windows the
  * token rows use, so both surfaces always agree on the selected period. */
 interface CreditWindows {
@@ -3881,7 +3891,7 @@ function qoderDayHtml(day: string): string {
     ? `<div class="qoder-sessions"><div class="qoder-sessions-head">${escapeHtml(t("qoder.topSessions", { n: top.length }))}</div>${sessionRows}</div>`
     : "";
   return `<article class="spend-detail-tool qoder-tool" title="${escapeHtml(t("qoder.tokensTip"))}">
-    <div class="spend-detail-tool-head"><strong>Qoder CN <span class="qoder-chip">${escapeHtml(t("qoder.localBadge"))}</span>${freeChip}</strong><span>${escapeHtml(qoderCreditSplit(data.credits, data.charged_credits))} · ${escapeHtml(tokens)}</span></div>
+    <div class="spend-detail-tool-head"><strong>Qoder CN <span class="qoder-chip">${escapeHtml(t("qoder.localBadge"))}</span>${freeChip}</strong><div class="qoder-head-right"><span>${escapeHtml(qoderCreditSplit(data.credits, data.charged_credits))} · ${escapeHtml(tokens)}</span><button class="mini-btn" type="button" data-qoder-rescan>${escapeHtml(t("qoder.rescan"))}</button></div></div>
     <div class="qoder-meta">${escapeHtml(t("qoder.tripLine", { trips: data.trips, sessions: data.sessions }))}${
       perCreditText ? ` · ${escapeHtml(perCreditText)}` : ""
     }${
@@ -3891,6 +3901,45 @@ function qoderDayHtml(day: string): string {
     }</div>
     ${models}${sessions}
   </article>`;
+}
+
+async function rescanQoderUsage(): Promise<void> {
+  if (qoderRescanBusy) return;
+  qoderRescanBusy = true;
+  try {
+    const result = await invoke<QoderRescan>("rescan_qoder_sessions");
+    lastQoderSpend = result.spend;
+    if (spendDetailOpen) {
+      document.querySelector(".spend-detail-overlay")?.remove();
+      document.body.insertAdjacentHTML("beforeend", renderSpendDetailOverlay());
+    }
+    requestRender();
+    const sessions = result.spend.source.sessions;
+    const trips = result.spend.all.trips;
+    const message = result.statsAvailable
+      ? t("qoder.rescanBody", {
+          sessions,
+          trips,
+          archivedReadable: result.archivedReadable,
+          archived: result.archivedTotal,
+          deleted: result.deletedTotal,
+          deletedReadable: result.deletedReadable,
+        })
+      : t("qoder.rescanBodyNoStats", { sessions, trips });
+    await appConfirm({
+      title: t("qoder.rescanTitle"),
+      message,
+      confirmLabel: t("qoder.rescanOk"),
+    });
+  } catch (err) {
+    await appConfirm({
+      title: t("qoder.rescanTitle"),
+      message: t("qoder.rescanFailed", { err: String(err) }),
+      confirmLabel: t("qoder.rescanOk"),
+    });
+  } finally {
+    qoderRescanBusy = false;
+  }
 }
 
 function renderSpendDetailOverlay(): string {
@@ -17693,6 +17742,11 @@ document.querySelector("#settings-btn")!.addEventListener("click", () => {
     if (target.closest<HTMLElement>("[data-popover-reset]")) {
       e.preventDefault();
       void resetPopoverPosition();
+      return;
+    }
+    if (target.closest<HTMLElement>("[data-qoder-rescan]")) {
+      e.preventDefault();
+      void rescanQoderUsage();
       return;
     }
     if (target.closest<HTMLElement>("[data-spend-detail-close]") || target.classList.contains("spend-detail-overlay")) {

@@ -2982,8 +2982,11 @@ body.ui-scaled .popover {
 .qoder-tool .spend-detail-model,
 .qoder-tool .qoder-session { flex-wrap: wrap; gap: 2px 10px; }
 .qoder-tool .spend-detail-tool-head > span,
+.qoder-tool .qoder-head-right > span,
 .qoder-tool .spend-detail-model > span:last-child,
 .qoder-tool .qoder-session > span:last-child { white-space: nowrap; }
+.qoder-head-right { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+.qoder-head-right .mini-btn { flex: none; }
 .qoder-meta { margin-top: 4px; color: var(--muted-foreground); font-size: 10px; }
 .qoder-key { margin-left: 6px; opacity: 0.55; font-size: 9px; }
 .qoder-sessions { margin-top: 6px; padding-top: 6px; border-top: 1px solid color-mix(in oklab, var(--border) 70%, transparent); }
