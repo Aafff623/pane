@@ -1,0 +1,16 @@
+{
+  "name": "pane-mcp",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Read-only MCP stdio shim over Pane's 127.0.0.1:6736 usage API",
+  "bin": {
+    "pane-mcp": "./server.mjs"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "start": "node server.mjs"
+  }
+}
