@@ -568,11 +568,10 @@ family is refused before it is stored.
   desktop token.
 - **Shows:** the same credits face as the scanned route (one shared row
   builder, `codebuddy::credits_face_metrics`) plus the `Source` row.
-- **Import:** the auth center offers "Import desktop sign-in", which copies
-  the plaintext session into Pane's own login store (OS-vault-first,
-  `extra.sourceKind = "desktop"`). The vendor file is never written. Once a
-  Pane login owns that uid, the desktop card is suppressed so one account
-  never yields two cards with the same id.
+- **No import:** Pane does not copy this session into its own login store.
+  The old "Import desktop sign-in" button and `workbuddy_import_desktop`
+  command were removed on 2026-10-23; use the auth-center web login instead.
+  The automatic tier-1 usage read above remains read-only.
 
 ### WorkBuddy web-session cookie (tier 3 — explicit opt-in)
 

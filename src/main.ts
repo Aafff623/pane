@@ -9990,8 +9990,6 @@ function onboardingActionHtml(id: string, action: AccountAction): string {
       // else is driven from the auth center (one login UI, not two).
       if (OAUTH_PROVIDERS.has(id)) return "";
       return `<button class="mini-btn cust-account-toggle" data-login-family="${escapeHtml(id)}">${escapeHtml(t("onboarding.addLogin"))}</button>`;
-    case "importDesktop":
-      return `<button class="mini-btn" data-import-desktop="${escapeHtml(id)}">${escapeHtml(t("onboarding.importDesktop"))}</button>`;
     case "importAccounts":
       return `<button class="mini-btn cust-account-toggle" data-cursor-account="${escapeHtml(id)}">${escapeHtml(t("customize.acctAdd"))}</button>`;
     case "captureSlots":
@@ -12141,11 +12139,6 @@ async function handleCustomizeClick(target: HTMLElement): Promise<boolean> {
   const loginFamily = target.closest<HTMLElement>("[data-login-family]");
   if (loginFamily) {
     void openFamilyLogin(loginFamily.dataset.loginFamily!);
-    return true;
-  }
-  const importDesktop = target.closest<HTMLElement>("[data-import-desktop]");
-  if (importDesktop) {
-    void importDesktopFromDrawer(importDesktop.dataset.importDesktop!);
     return true;
   }
   const openKeysPage = target.closest<HTMLElement>("[data-open-keys-page]");
@@ -16762,9 +16755,6 @@ interface AuthFlow {
   userCode: string;
   error: string | null;
   label: string | null;
-  /** "login" (default) or "import" — the success line differs. */
-  kind?: "login" | "import";
-  alreadyExisted?: boolean;
   timer?: number;
   polling?: boolean;
 }
@@ -17141,12 +17131,7 @@ function authFlowHtml(family: string): string {
     </div>`;
   }
   if (flow.phase === "success") {
-    const message =
-      flow.kind === "import"
-        ? t(flow.alreadyExisted ? "auth.importDesktopExists" : "auth.importDesktopDone", {
-            label: flow.label ?? "",
-          })
-        : t("auth.flow.success", { label: flow.label ?? "" });
+    const message = t("auth.flow.success", { label: flow.label ?? "" });
     return `<div class="auth-flow" role="status">
       <div class="auth-flow-head"><span>${escapeHtml(message)}</span></div>
     </div>`;
@@ -17365,17 +17350,10 @@ function authGroupHtml(group: AuthFamilyGroup): string {
     group.accounts.length > 0
       ? `<button class="mini-btn" type="button" data-auth-add="${escapeHtml(family)}">${escapeHtml(t("auth.addAccount"))}</button>`
       : "";
-  // WorkBuddy's desktop build keeps its own sign-in file; importing it is a
-  // read-only, explicit action (Pane's card switches to a managed account).
-  const importBtn =
-    family === "workbuddy" || family === "workbuddyai"
-      ? `<button class="mini-btn" type="button" data-auth-import-desktop="${escapeHtml(family)}">${escapeHtml(t("auth.importDesktop"))}</button>`
-      : "";
   return `<section class="st-block" data-auth-group="${escapeHtml(family)}">
     <div class="st-block-head auth-group-head">
       <span class="auth-group-icon" aria-hidden="true">${icon}</span>
       <h2>${escapeHtml(name)}</h2>
-      ${importBtn}
       ${addBtn}
     </div>
     <div class="st-card">${rows}${empty}${authFlowHtml(family)}</div>
@@ -17413,11 +17391,6 @@ function handleAuthCenterClick(target: HTMLElement): void {
   const add = target.closest<HTMLElement>("[data-auth-add]");
   if (add) {
     authAddAccount(add.dataset.authAdd!);
-    return;
-  }
-  const importDesktop = target.closest<HTMLElement>("[data-auth-import-desktop]");
-  if (importDesktop) {
-    void authImportDesktop(importDesktop.dataset.authImportDesktop!);
     return;
   }
   const enable = target.closest<HTMLButtonElement>("[data-auth-enable]");
@@ -17497,63 +17470,6 @@ async function openFamilyLogin(family: string): Promise<void> {
 async function openKeysPageFor(family: string): Promise<void> {
   await patchConfig({ panelIntent: { view: "settings", family, at: Date.now() } }).catch(() => {});
   void invoke("open_panel_window").catch(() => {});
-}
-
-function setFooterStatus(text: string): void {
-  const status = document.querySelector<HTMLElement>("#status");
-  if (status) status.textContent = text;
-}
-
-/// Import WorkBuddy's desktop sign-in straight from the drawer. The backend
-/// is read-only on the vendor side; a failure (encrypted store, no file,
-/// wrong variant) is reported in the footer and changes nothing.
-async function importDesktopFromDrawer(family: string): Promise<void> {
-  try {
-    const result = await invoke<{ label: string; alreadyExisted: boolean }>(
-      "workbuddy_import_desktop",
-      { family },
-    );
-    setFooterStatus(
-      t(result.alreadyExisted ? "auth.importDesktopExists" : "auth.importDesktopDone", {
-        label: result.label,
-      }),
-    );
-    void refresh(false, true);
-  } catch (err) {
-    setFooterStatus(t("onboarding.importFailed", { err: String(err) }));
-  }
-}
-
-async function authImportDesktop(family: string): Promise<void> {
-  if (authFlowBusy()) return;
-  authFlows.set(family, { phase: "starting", deviceAuthId: "", userCode: "", error: null, label: null });
-  renderAuthCenter();
-  try {
-    const result = await invoke<{ label: string; alreadyExisted: boolean }>(
-      "workbuddy_import_desktop",
-      { family },
-    );
-    authFlows.set(family, {
-      phase: "success",
-      deviceAuthId: "",
-      userCode: "",
-      error: null,
-      label: result.label,
-      kind: "import",
-      alreadyExisted: result.alreadyExisted,
-    });
-    await loadAuthCenter();
-    void refresh();
-  } catch (err) {
-    authFlows.set(family, {
-      phase: "error",
-      deviceAuthId: "",
-      userCode: "",
-      error: String(err),
-      label: null,
-    });
-    renderAuthCenter();
-  }
 }
 
 function authAddAccount(family: string): void {

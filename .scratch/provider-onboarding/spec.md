@@ -106,3 +106,11 @@ interface Onboarding {
 
 - 真实扫码/OAuth 需要 owner 用各账号验收；本轮只保证按钮指向正确命令。
 - Qoder CN 多账号需要新 device flow，未在本轮实施。
+
+## 7. 2026-10-23 update
+
+- WorkBuddy / WorkBuddy AI 的桌面端登录导入已移除：授权中心和 Customize
+  不再显示 `importDesktop`，后端 `workbuddy_import_desktop` 命令与相关
+  三语文案一并删除。账号创建只走网页/扫码登录回调。
+- `workbuddy_local` 仍保留给卡片读取桌面端的只读 usage fallback；不再
+  复制桌面会话到 Pane 的账号库。

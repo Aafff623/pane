@@ -29,7 +29,6 @@ export type AccountAction =
   | "pasteKey"
   | "captureSlots"
   | "importAccounts"
-  | "importDesktop"
   | "importCookie"
   | "openAuthCenter"
   | "pasteKeyPage";
@@ -149,9 +148,9 @@ const SPECIAL: Record<string, Onboarding> = {
   },
 };
 
-/** WorkBuddy's extra, explicitly-imported surfaces. */
-SPECIAL.workbuddy.actions = ["addLogin", "importDesktop", "importCookie"];
-SPECIAL.workbuddyai.actions = ["addLogin", "importDesktop"];
+/** WorkBuddy's extra web-session surface. */
+SPECIAL.workbuddy.actions = ["addLogin", "importCookie"];
+SPECIAL.workbuddyai.actions = ["addLogin"];
 
 const SEARCH_SPECIAL: Record<string, Onboarding> = Object.fromEntries(
   SEARCH_KEYS.map((family) => [
