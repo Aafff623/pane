@@ -4,7 +4,7 @@
 
 **Blocked by:** 03
 
-**Status:** ready-for-agent
+**Status:** done (real usage response calibration pending owner login)
 
 ## 要点
 
@@ -17,7 +17,11 @@
 
 ## 验收
 
-- [ ] 卡片显示最近 7 天用量摘要，数字与网页控制台/usage API 对得上。
-- [ ] 用量接口失败时额度卡片仍正常。
-- [ ] 三语言文案、图标、主题正常；相关文档更新。
+- [ ] 卡片显示最近 7 天用量摘要，数字与网页控制台/usage API 对得上（需真实登录校准）。
+- [x] 用量接口失败时额度卡片仍正常（usage 失败被忽略，额度快照照常返回）。
+- [x] 三语言文案、图标、主题正常；相关文档更新。
 - [ ] 全量门禁绿；owner 实机验收。
+
+## Comments
+
+- 2026-10-23：用量摘要实现为 7 天 `usage` 接口的分页聚合文本行（`inputTokens + cacheTokens + outputTokens`），失败不影响额度；新图标、机制表、onboarding 和三语文案已补。真实 usage 响应结构尚未登录校准，数字以 API 为准。

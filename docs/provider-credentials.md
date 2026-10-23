@@ -103,6 +103,7 @@
 | 编程 | Command Code（`commandcode`） | `~/.commandcode/auth.json` | 复用本地 key 后联网查窗口与 Credits；没有文件时可手工填 key |
 | 编程 | Amp（`amp`） | 执行已经安装并登录的 `amp usage` | 由 CLI 查询 Free／个人／工作区 Credits；**不是直接解析某个配置文件**，需命令可用且登录有效 |
 | 编程 | Qoder CN（`qodercn`） | `%APPDATA%/com.qodercn.app.stable/auth.v1.dat` + 同目录 `Local State` | 使用本机加密材料解密会话后联网查 Credits／模型包／到期；国内外 token 不通用 |
+| 编程 | 讯飞星火（`xfyun`） | Pane 自己的隔离 WebView2 登录窗，cookie 存 `login-accounts/xfyun.json` + OS vault | 只读网页登录态后查 Spark-X2.6 免费额度；不提供 API Key 输入槽（API Key 只能推理） |
 | 编程 | Qoder 国际版（`qoder`） | `%APPDATA%/com.qoder.app.stable/auth.v1.dat` + 同目录 `Local State` | 原理同国内版；路径是当前适配器候选，本轮未以所有国际版安装实测，也可用 Pane 登录 |
 | 编程 | Trae CN（`traecn`） | `%APPDATA%/Trae CN/User/globalStorage/storage.json` | 解开本地登录数据后联网查 Credits／Plan；不与 IDE 争抢 token 刷新，过期需打开原应用登录 |
 | 编程 | Trae 国际版（`trae`） | `%APPDATA%/Trae/User/globalStorage/storage.json` | 读取国际版登录后联网查询；返回主机可随区域不同，不能拿国内版文件代替 |

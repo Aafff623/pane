@@ -1,6 +1,6 @@
 # 讯飞星火（Spark-X2.6）Provider：网页登录态额度与用量
 
-**Status:** ready-for-agent（4 张票；真实 `free-quota` 响应待 owner 登录后校准，解析器先按防御式实现）
+**Status:** implemented on `codex/spark-xfyun-provider` (01–04 code complete; real `free-quota`/usage response and UI acceptance pending owner login)
 **GitHub:** [#38](https://github.com/Aafff623/pane/issues/38)
 **前置调研:** `temp/xfyun-maas-analysis-20261023.md`
 

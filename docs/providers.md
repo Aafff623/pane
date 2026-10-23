@@ -596,3 +596,19 @@ Provider request formats were researched from two MIT-licensed macOS
 projects: [robinebers/openusage](https://github.com/robinebers/openusage)
 and [steipete/CodexBar](https://github.com/steipete/CodexBar) — both
 credited in [LICENSE](../LICENSE).
+
+## 讯飞星火 (Spark-X2.6)
+
+- **Reads:** Pane's isolated WebView2 login window for `maas.xfyun.cn`; the
+  signed-in cookie jar is stored in `login-accounts/xfyun.json` plus the
+  per-account OS-vault slot. Pane never reads a browser profile's
+  SQLite/Cookies database, and there is no API-key input slot.
+- **Calls:** `maas.xfyun.cn/api/v1/gpt-finetune/user` (login identity and
+  `uid`), `/api/v1/gpt-finetune/api-services/free-quota?channel=spark-x2.6`
+  (Spark-X2.6 free grant), and `/api/v1/gpt-finetune/api-services/usage`
+  (last 7 days, text summary only).
+- **Shows:** free-quota total / used / remaining / expiry and status;
+  `claim=null` is a setup hint, not 0%; `EXHAUSTED` / `EXPIRED` keep their
+  raw status; `code:4001` asks for a fresh web login. The real free-quota
+  response is still awaiting the owner's first signed-in calibration, so
+  unknown fields fail honestly instead of inventing numbers.

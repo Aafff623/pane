@@ -25,6 +25,7 @@ const LOGIN_URL: &str = "https://maas.xfyun.cn/";
 const USER_PATH: &str = "/api/v1/gpt-finetune/user";
 const QUOTA_PATH: &str =
     "/api/v1/gpt-finetune/api-services/free-quota?channel=spark-x2.6";
+const USAGE_PATH: &str = "/api/v1/gpt-finetune/api-services/usage";
 const LOGIN_WINDOW: &str = "xfyun-login";
 const LOGIN_TIMEOUT: Duration = Duration::from_secs(600);
 const LOGIN_POLL: Duration = Duration::from_secs(2);
@@ -137,6 +138,12 @@ async fn snapshot_with_login_as(login: LoginAccount, id: &str) -> Snapshot {
                 if !active {
                     metrics.push(Metric::text("Status", status));
                 }
+                if let Some((usage_total, rows)) = fetch_usage_7d(&login.access_token).await {
+                    metrics.push(Metric::text(
+                        "Usage (7d)",
+                        format!("{} tokens · {rows} rows", fmt_tokens(usage_total)),
+                    ));
+                }
                 let plan = app_id
                     .filter(|app| !app.trim().is_empty())
                     .map(|_| "Spark-X2.6".to_string())
@@ -195,6 +202,43 @@ fn signed_in_user(doc: &Value) -> Option<(String, String)> {
         .trim()
         .to_string();
     Some((uid, label))
+}
+
+fn usage_total(doc: &Value) -> Option<(f64, usize)> {
+    let rows = doc.get("data")?.get("rows")?.as_array()?;
+    let mut total = 0.0;
+    for row in rows {
+        for key in ["inputTokens", "cacheTokens", "outputTokens"] {
+            total += parse_num(row.get(key)).unwrap_or(0.0);
+        }
+    }
+    Some((total, rows.len()))
+}
+
+async fn fetch_usage_7d(cookie: &str) -> Option<(f64, usize)> {
+    let end = chrono::Local::now().date_naive();
+    let start = end - chrono::Duration::days(6);
+    let mut total = 0.0;
+    let mut count = 0;
+    for page in 1..=5 {
+        let path = format!(
+            "{USAGE_PATH}?page={page}&size=100&startDate={}&endDate={}",
+            start.format("%Y-%m-%d"),
+            end.format("%Y-%m-%d")
+        );
+        let doc = call_console(&path, cookie).await.ok()?;
+        let (page_total, page_rows) = usage_total(&doc)?;
+        total += page_total;
+        count += page_rows;
+        let reported = doc
+            .pointer("/data/total")
+            .and_then(Value::as_u64)
+            .unwrap_or(0) as usize;
+        if page_rows == 0 || (reported > 0 && count >= reported) {
+            break;
+        }
+    }
+    Some((total, count))
 }
 
 async fn call_console(path: &str, cookie: &str) -> Result<Value, CallErr> {
@@ -472,5 +516,26 @@ mod tests {
     fn auth_code_4001_is_recognized_from_a_200_body() {
         let doc = json!({"code":4001,"message":"用户未登录"});
         assert!(!signed_in_user(&doc).is_some());
+    }
+
+    #[test]
+    fn usage_rows_accept_numbers_and_strings() {
+        let doc = json!({
+            "code": 0,
+            "data": {
+                "rows": [
+                    {"inputTokens": 10, "cacheTokens": "3", "outputTokens": 4},
+                    {"inputTokens": "5", "cacheTokens": 0, "outputTokens": "6"}
+                ],
+                "total": 2
+            }
+        });
+        assert_eq!(usage_total(&doc), Some((28.0, 2)));
+    }
+
+    #[test]
+    fn malformed_usage_returns_none_instead_of_zero() {
+        assert_eq!(usage_total(&json!({"data":{}})), None);
+        assert_eq!(usage_total(&json!({"data":{"rows":null}})), None);
     }
 }

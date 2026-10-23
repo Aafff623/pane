@@ -87,9 +87,9 @@ pnpm tauri build    # 完整桌面应用
 同一服务商可以挂**多个账号**独立出卡（ClinePass、One/New API、Custom Relay 等），本地 CLI（Claude Code、Codex CLI、ZCode、OpenCode 等）的花费从日志直接扫描。开箱默认启用主流订阅家族（Claude、Codex、Cursor、Grok、Z.ai、MiniMax、Antigravity、Kimi 等），其余在设置中按需开启。
 
 <details>
-<summary><b>全部 71 个服务商一览</b>（与 <code>src/providerCatalog.ts</code> 一致）</summary>
+<summary><b>全部 72 个服务商一览</b>（与 <code>src/providerCatalog.ts</code> 一致）</summary>
 
-Claude、Codex、CodeBuddy、CodeBuddy CN、WorkBuddy、WorkBuddy AI、Cursor、OpenCode、Copilot、Grok、Devin、MiniMax、OpenRouter、Z.ai、Antigravity、DeepSeek、Kimi API、ElevenLabs、Ollama、Codebuff、Kilo、AihubMix、One/New API、Qwen Code、Hermes、Kimi Code、StepFun、StepFun Step Plan、闪电说、SiliconFlow、Novita AI、Custom Relay、Qoder CN、Trae CN、Command Code、Doubao、ClawsGO、BochaAI、Tavily、Firecrawl、Brave Search、GIPHY、ClinePass、SenseNova、APIGOTO、MiniMax Code、Amp、AWS Bedrock、Chutes、Deepgram、Kiro、OpenAI API、Poe、基元律动、Venice、Vertex AI、Warp、Windsurf、MiMo、Trae、Qoder、Zed、Droid、JetBrains AI、Groq、Hugging Face、LongCat、sub2api、Mistral、Perplexity、Volcengine Ark
+Claude、Codex、CodeBuddy、CodeBuddy CN、WorkBuddy、WorkBuddy AI、Cursor、OpenCode、Copilot、Grok、Devin、MiniMax、OpenRouter、Z.ai、Antigravity、DeepSeek、Kimi API、ElevenLabs、Ollama、Codebuff、Kilo、AihubMix、One/New API、Qwen Code、Hermes、Kimi Code、StepFun、StepFun Step Plan、闪电说、SiliconFlow、Novita AI、Custom Relay、Qoder CN、Trae CN、Command Code、Doubao、ClawsGO、BochaAI、Tavily、Firecrawl、Brave Search、GIPHY、ClinePass、SenseNova、APIGOTO、MiniMax Code、Amp、AWS Bedrock、Chutes、Deepgram、Kiro、OpenAI API、Poe、基元律动、讯飞星火、Venice、Vertex AI、Warp、Windsurf、MiMo、Trae、Qoder、Zed、Droid、JetBrains AI、Groq、Hugging Face、LongCat、sub2api、Mistral、Perplexity、Volcengine Ark
 
 </details>
 
