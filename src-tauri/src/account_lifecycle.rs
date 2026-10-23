@@ -43,7 +43,7 @@ fn card_id(family: &str, row: &LoginAccount) -> String {
 }
 
 fn retire_legacy(base: &Path, family: &str, row: &LoginAccount) -> Result<(), String> {
-    if family != "tokenrhythm" {
+    if !crate::provider_catalog::is_web_session(family) {
         oauth::logout_matching_from(&base.join("oauth"), family, &row.account_id, &row.access_token)?;
     }
     Ok(())

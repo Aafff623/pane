@@ -16,6 +16,8 @@ export interface ProviderDefinition {
   supportsExtraAccounts: boolean;
   /** Pane's own device-flow OAuth sign-in (gear panel "Sign in with browser"). */
   supportsOAuth: boolean;
+  /** Credentials come from Pane's hosted web-login window, not an API key. */
+  webSession?: boolean;
   iconKey: string;
   /** Dashboard category. Absent = coding agent (the historical default). */
   category?: "coding" | "mcp" | "productivity";
@@ -81,7 +83,7 @@ export const providerCatalog: readonly ProviderDefinition[] = [
   { familyId: "kiro", displayName: "Kiro", primaryUnit: "tokens", queryKind: "nativeCodingPlan", supportsApiKey: false, supportsExtraAccounts: true, supportsOAuth: true, iconKey: "kiro" },
   { familyId: "openai-api", displayName: "OpenAI API", primaryUnit: "tokens", queryKind: "nativeBalance", supportsApiKey: true, supportsExtraAccounts: true, supportsOAuth: false, iconKey: "openai" },
   { familyId: "poe", displayName: "Poe", primaryUnit: "tokens", queryKind: "nativeBalance", supportsApiKey: true, supportsExtraAccounts: true, supportsOAuth: false, iconKey: "poe" },
-  { familyId: "tokenrhythm", displayName: "基元律动", primaryUnit: "tokens", queryKind: "nativeBalance", supportsApiKey: false, supportsExtraAccounts: true, supportsOAuth: false, iconKey: "tokenrhythm" },
+  { familyId: "tokenrhythm", displayName: "基元律动", primaryUnit: "tokens", queryKind: "nativeBalance", supportsApiKey: false, supportsExtraAccounts: true, supportsOAuth: false, webSession: true, iconKey: "tokenrhythm" },
   { familyId: "venice", displayName: "Venice", primaryUnit: "tokens", queryKind: "nativeBalance", supportsApiKey: true, supportsExtraAccounts: true, supportsOAuth: false, iconKey: "venice" },
   { familyId: "vertexai", displayName: "Vertex AI", primaryUnit: "tokens", queryKind: "localOnly", supportsApiKey: false, supportsExtraAccounts: false, supportsOAuth: false, iconKey: "vertexai" },
   { familyId: "warp", displayName: "Warp", primaryUnit: "tokens", queryKind: "nativeCodingPlan", supportsApiKey: true, supportsExtraAccounts: true, supportsOAuth: false, iconKey: "warp" },
@@ -121,4 +123,8 @@ export function supportsApiKey(familyId: string): boolean {
 
 export function supportsExtraAccounts(familyId: string): boolean {
   return providerDefinition(familyId)?.supportsExtraAccounts ?? false;
+}
+
+export function isWebSessionFamily(familyId: string): boolean {
+  return providerDefinition(familyId)?.webSession === true;
 }
