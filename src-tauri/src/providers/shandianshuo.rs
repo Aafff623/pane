@@ -93,6 +93,8 @@ fn usage_metric(
         UsageUnit::Credits => "积分",
         UsageUnit::Tokens => "tokens",
         UsageUnit::Requests => "次",
+        UsageUnit::Characters => "字符",
+        UsageUnit::Pages => "页",
     };
     let used = number_at(body, &[object, used_key])
         .ok_or_else(|| format!("缺少有效 {object}.{used_key}"))?;

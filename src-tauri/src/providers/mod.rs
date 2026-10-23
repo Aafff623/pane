@@ -2,6 +2,7 @@ pub mod aihubmix;
 pub mod amp;
 pub mod antigravity;
 pub mod apigoto;
+pub mod apikey;
 pub mod bedrock;
 pub mod chromium;
 pub mod chutes;

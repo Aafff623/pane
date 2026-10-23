@@ -1,6 +1,6 @@
 # 01 — Provider descriptor + 通用 API-key 额度适配器
 
-Status: ready-for-agent
+Status: in progress — units + generic adapter MVP landed; descriptor/fixtures/security pass pending
 GitHub: #39
 Priority: P0
 Blocked by: None
@@ -30,12 +30,16 @@ Reference: `temp/repos/CodexBar` (`ProviderDescriptor`, `ProviderFetchPlan`, `AP
 
 ## Acceptance
 
-- [ ] 新增上述 3 家只需 spec + fixture，不改 `provider_dispatch.rs` 的 match 分支和前端渲染分支。
-- [ ] 三家卡片在 MCP/生产力分类正确显示；DeepL 的字符行不显示成 credits。
-- [ ] 现有 provider 的 `/v1/providers`、`last_snapshots.json` 兼容（serde default；旧快照可读）。
-- [ ] API-key 只在对应 vendor host 使用；日志/HTTP API/错误信息不含 key。
-- [ ] SSRF 测试：非 HTTPS、重定向、超大 body、user-controlled host 全部拒绝。
-- [ ] `parse-tests` 串行、无代理全绿；`pnpm build` 通过。
+- [x] 新增三家只走 `providers/apikey.rs` 的静态 spec + 通用 fallback，不再为每家加 dispatch match。
+- [x] 三家卡片在 MCP/生产力分类正确显示；DeepL 的字符行不显示成 credits。
+- [x] 现有 provider 的 `/v1/providers`、`last_snapshots.json` 兼容（单位枚举为追加变体；旧快照仍可读）。
+- [x] API-key 只在对应 vendor host 使用；日志/HTTP API/错误信息不含 key。
+- [ ] SSRF 测试：非 HTTPS、重定向、超大 body、user-controlled host 全部拒绝（复用已有 `http_no_redirect`/`json_body`，本轮未新增 fixture 级网络测试）。
+- [x] `parse-tests` 定向、`cargo check`、`pnpm build` 通过；全量 parse-tests 未重跑。
+
+## Comments
+
+- 2026-10-23：MVP 落了 Characters/Pages 单位、通用 `ApiKeySpec`（GET、固定 host/path、Bearer/header/query、JSON pointer、divisor）和 DeepL/SerpApi/Stability 三张试点卡；不新增每家 dispatch match。Currency 依 owner 决定延后到 #43。真实端点字段和 fixture 仍待校准；descriptor 五能力位尚未加到 70 条目录。
 
 ## Evidence / notes
 

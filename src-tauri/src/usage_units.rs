@@ -7,6 +7,8 @@ pub enum UsageUnit {
     Credits,
     Minutes,
     Requests,
+    Characters,
+    Pages,
 }
 
 /// An observed cumulative counter, never a balance or a percentage.

@@ -747,6 +747,8 @@ const en: Dict = {
   "usage.metersTip": "Each provider and measurement unit is listed separately; quantities are never converted.",
   "usage.meterTrendTip": "Observed daily usage, {from} – {to}; hover for the quantity and unit.",
   "usage.requests": "requests",
+  "usage.characters": "characters",
+  "usage.pages": "pages",
   "card.usageTrend": "Quota trend",
   "card.creditsSpent": "Credits {n}",
   "spend.creditsTip":
@@ -2110,6 +2112,8 @@ const zh: Dict = {
   "usage.metersTip": "各厂商、各计量单位分别列出，不换算、不合并总量。",
   "usage.meterTrendTip": "每日观测用量（{from} – {to}），悬浮查看具体数值与单位。",
   "usage.requests": "次",
+  "usage.characters": "字符",
+  "usage.pages": "页",
   "card.usageTrend": "额度趋势",
   "card.creditsSpent": "Credits {n}",
   "spend.creditsTip":
@@ -3469,6 +3473,8 @@ const ru: Dict = {
   "usage.metersTip": "Поставщики и единицы показаны отдельно, без пересчёта и общего итога.",
   "usage.meterTrendTip": "Использование по дням, {from} – {to}; наведите курсор для количества и единицы.",
   "usage.requests": "запросов",
+  "usage.characters": "символов",
+  "usage.pages": "страниц",
   "card.usageTrend": "История квоты",
   "card.creditsSpent": "Кредиты {n}",
   "spend.creditsTip":

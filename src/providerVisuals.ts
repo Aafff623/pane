@@ -49,6 +49,9 @@ import ampIcon from "./assets/providers/amp.svg?raw";
 import bedrockIcon from "./assets/providers/bedrock.svg?raw";
 import chutesIcon from "./assets/providers/chutes.svg?raw";
 import deepgramIcon from "./assets/providers/deepgram.svg?raw";
+import deeplIcon from "./assets/providers/deepl.svg?raw";
+import serpapiIcon from "./assets/providers/serpapi.svg?raw";
+import stabilityIcon from "./assets/providers/stability.svg?raw";
 import kiroIcon from "./assets/providers/kiro.svg?raw";
 import openaiIcon from "./assets/providers/openai.svg?raw";
 import poeIcon from "./assets/providers/poe.svg?raw";
@@ -140,6 +143,9 @@ const VISUALS: Readonly<Record<string, ProviderVisual>> = {
   bedrock: { iconKey: "bedrock", iconSvg: bedrockIcon },
   chutes: { iconKey: "chutes", iconSvg: chutesIcon },
   deepgram: { iconKey: "deepgram", iconSvg: deepgramIcon },
+  deepl: { iconKey: "deepl", iconSvg: deeplIcon },
+  serpapi: { iconKey: "serpapi", iconSvg: serpapiIcon },
+  stability: { iconKey: "stability", iconSvg: stabilityIcon },
   kiro: { iconKey: "kiro", iconSvg: kiroIcon },
   "openai-api": { iconKey: "openai", iconSvg: openaiIcon },
   poe: { iconKey: "poe", iconSvg: poeIcon },

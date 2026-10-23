@@ -1182,8 +1182,12 @@ function trendSourceFor(id: string): TrendSource | undefined {
 
 function formatUsageQuantity(value: number, unit: UsageUnit): string {
   const amount = value.toLocaleString(localeTag(), { maximumFractionDigits: 2 });
-  const suffix = unit === "tokens" ? "tokens" : unit === "credits" ? t("spend.creditsUnit")
-    : unit === "minutes" ? t("usage.minutes") : t("usage.requests");
+  const suffix = unit === "tokens" ? "tokens"
+    : unit === "credits" ? t("spend.creditsUnit")
+    : unit === "minutes" ? t("usage.minutes")
+    : unit === "characters" ? t("usage.characters")
+    : unit === "pages" ? t("usage.pages")
+    : t("usage.requests");
   return `${amount} ${suffix}`;
 }
 let spendTab: SpendTab = "today";

@@ -13,7 +13,9 @@ macro_rules! native_snapshots {
             match family {
                 $($family => Some(Box::pin($snapshot)),)*
                 _ => codebuddy_login::family(family).map(|definition|
-                    Box::pin(providers::codebuddy::snapshot(definition)) as SnapshotFuture),
+                    Box::pin(providers::codebuddy::snapshot(definition)) as SnapshotFuture)
+                    .or_else(|| providers::apikey::supports(family).then(||
+                        Box::pin(providers::apikey::snapshot_owned(family)) as SnapshotFuture)),
             }
         }
     };
@@ -89,11 +91,11 @@ native_snapshots! {
 }
 
 pub(crate) fn registered_families() -> impl Iterator<Item = &'static str> {
-    NATIVE_FAMILIES.iter().copied().chain(
-        codebuddy_login::FAMILIES
-            .iter()
-            .map(|family| family.family_id),
-    )
+    NATIVE_FAMILIES
+        .iter()
+        .copied()
+        .chain(codebuddy_login::FAMILIES.iter().map(|family| family.family_id))
+        .chain(providers::apikey::FAMILIES.iter().copied())
 }
 
 pub(crate) fn registrations() -> impl Iterator<Item = &'static ProviderDefinition> {
@@ -164,6 +166,9 @@ pub(crate) async fn key_snapshot_for(
                 .filter(|u| !u.is_empty())
                 .ok_or_else(|| "a base URL is required for Custom Relay".to_string())?;
             providers::relaybalance::snapshot_with_key(key, url).await
+        }
+        _ if providers::apikey::supports(provider) => {
+            providers::apikey::snapshot_with_key(provider, key).await
         }
         _ => return Err(format!("unknown provider: {provider}")),
     })
