@@ -1,6 +1,6 @@
 # 04 — Official WorkBuddy usage (#31)
 
-Status: S1 done; S0 blocked on account
+Status: S0 passed; S1 done; S2/S3 next
 Blocked by: verifiable WorkBuddy account
 
 ## S0 — probe
@@ -38,3 +38,11 @@ Blocked by: verifiable WorkBuddy account
   login tokens exist), so the real probe still cannot run. The probe script
   passed a local mock self-test (counts/field names/timestamps, no token or
   row payload). S0 remains blocked on a usable account/reauth.
+- 2026-10-23: after a fresh web login, S0 passed against the real CN
+  endpoint: 200 / code 0, 26 requests in the 30-day window
+  (2026-10-12 21:44 → 2026-10-22 17:25), `pageSize=1` reports `total=26`
+  with one row, and a continuation returns one boundary row without
+  advancing. Fields match the port plan. The token currently sits in the
+  plaintext `login-accounts/workbuddy.json` fallback (no OS-vault entry);
+  that is a separate vault-write issue to investigate. S2/S3 is next; UI and
+  ledger remain untouched.
