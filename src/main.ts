@@ -2373,6 +2373,15 @@ function saveLayout(syncTray = true): void {
 // Dashboard rendering
 // ---------------------------------------------------------------------------
 
+/// Single used-percent heat scale for cards and the overview. Alert
+/// thresholds stay independent in the notification settings.
+function usageHeatTone(used: number): "" | "warn" | "low" {
+  if (!Number.isFinite(used)) return "";
+  if (used >= 90) return "low";
+  if (used >= 50) return "warn";
+  return "";
+}
+
 function renderMetric(m: Metric, _providerId?: string): string {
   if (m.kind === "progress" && m.used_percent !== null) {
     const used = clampPercent(m.used_percent);
@@ -2380,7 +2389,7 @@ function renderMetric(m: Metric, _providerId?: string): string {
     // Usage-tier coloring (user spec, uniform for every provider):
     // 0-60% used → blue, 60-75% → amber, 75-100% → red. The bar's width
     // already IS the used percent, so the thresholds compare `used`.
-    const level = used >= 75 ? "low" : used >= 60 ? "warn" : "";
+    const level = usageHeatTone(used);
     // Detail card metrics uniformly display remaining percentage
     // per user specification; token usage is not displayed here.
     const headline = config.showUsed ? t("card.pctUsed", { n: Math.round(used) }) : t("card.pctLeft", { n: left });
@@ -5122,7 +5131,7 @@ function renderQuotaOverview(): string {
         const pct = Math.round(quota.usedPercent);
         const dashoffset = circumference * (1 - pct / 100);
 
-        if (pct >= 80) {
+        if (usageHeatTone(pct) !== "") {
           itemTone = "warn";
           statusDot = "green";
           strokeColor = "#f59e0b";
@@ -5238,7 +5247,7 @@ function renderQuotaOverview(): string {
       pctClass = "is-maxed";
     } else if (quota.window !== null) {
       pct = Math.round(quota.usedPercent);
-      if (pct >= 80) itemTone = "warn";
+      if (usageHeatTone(pct) !== "") itemTone = "warn";
     }
 
     const meta = quota.status === "error" || quota.status === "needs_setup"

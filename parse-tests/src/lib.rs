@@ -15,6 +15,9 @@ pub mod alerts;
 #[path = "../../src-tauri/src/pace.rs"]
 pub mod pace;
 
+#[path = "../../src-tauri/src/resets.rs"]
+pub mod resets;
+
 #[path = "../../src-tauri/src/oauth.rs"]
 pub mod oauth;
 
