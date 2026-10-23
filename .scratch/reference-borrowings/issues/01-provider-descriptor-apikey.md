@@ -1,6 +1,6 @@
 # 01 — Provider descriptor + 通用 API-key 额度适配器
 
-Status: in progress — units + generic adapter MVP landed; descriptor/fixtures/security pass pending
+Status: in progress — units, generic adapter and pilot descriptors landed; full catalog/fixtures pending
 GitHub: #39
 Priority: P0
 Blocked by: None
@@ -63,3 +63,5 @@ cargo +stable-x86_64-pc-windows-gnu test
 ```
 
 Security review: SSRF/redirect/body-size/secret redaction。UI 验收：owner 看三张卡的单位/重置/空态。
+
+- 2026-10-23：`ApiKeySpec` 增加 auth/probe/scope/reset/pace 描述符并暴露 `descriptor()`；三家试点共用固定 host/path/auth，无用户 URL。70 条目录能力位、真实 fixture 和 SSRF fixture 测试仍未做。

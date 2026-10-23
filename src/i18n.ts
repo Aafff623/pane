@@ -918,6 +918,7 @@ const en: Dict = {
   "pace.over": "over pace",
   "pace.spent": "spent",
   "pace.tip": "Projected ~{n}% by reset (estimate)",
+  "pace.evenTip": "Window elapsed {elapsed}% · used {used}% · projected ~{projected}% by reset (estimate)",
   "metric.modelWeekly": "{model} weekly",
 
   "link.Status": "Status",
@@ -2291,6 +2292,7 @@ const zh: Dict = {
   "pace.over": "将超",
   "pace.spent": "已用尽",
   "pace.tip": "按当前速度预计重置时约 {n}%（估算）",
+  "pace.evenTip": "窗口已过 {elapsed}% · 已用 {used}% · 按均速到重置约 {projected}%（估算）",
   "metric.modelWeekly": "{model} 每周",
 
   "link.Status": "状态",
@@ -3664,6 +3666,7 @@ const ru: Dict = {
   "pace.over": "превышение",
   "pace.spent": "исчерпано",
   "pace.tip": "Прогноз к сбросу: ~{n}% (оценка)",
+  "pace.evenTip": "Прошло {elapsed}% окна · использовано {used}% · прогноз к сбросу ~{projected}% (оценка)",
   "metric.modelWeekly": "{model} за неделю",
 
   "link.Status": "Статус",

@@ -32,6 +32,11 @@ struct ApiKeySpec {
     remaining: Option<&'static str>,
     label: &'static str,
     unit_text: &'static str,
+    auth_kind: &'static str,
+    probe_kind: &'static str,
+    quota_scope: &'static str,
+    reset_semantics: &'static str,
+    pace_capability: bool,
 }
 
 const SPECS: &[ApiKeySpec] = &[
@@ -47,6 +52,11 @@ const SPECS: &[ApiKeySpec] = &[
         remaining: None,
         label: "Usage",
         unit_text: "characters",
+        auth_kind: "api_key",
+        probe_kind: "active_get",
+        quota_scope: "account",
+        reset_semantics: "monthly_inferred",
+        pace_capability: false,
     },
     ApiKeySpec {
         family: "serpapi",
@@ -60,6 +70,11 @@ const SPECS: &[ApiKeySpec] = &[
         remaining: Some("/plan_searches_left"),
         label: "Requests this month",
         unit_text: "requests",
+        auth_kind: "api_key",
+        probe_kind: "active_get",
+        quota_scope: "account",
+        reset_semantics: "monthly_inferred",
+        pace_capability: false,
     },
     ApiKeySpec {
         family: "stability",
@@ -73,6 +88,11 @@ const SPECS: &[ApiKeySpec] = &[
         remaining: Some("/credits"),
         label: "Balance",
         unit_text: "credits",
+        auth_kind: "api_key",
+        probe_kind: "active_get",
+        quota_scope: "account",
+        reset_semantics: "none",
+        pace_capability: false,
     },
 ];
 
@@ -84,6 +104,27 @@ fn spec(family: &str) -> Option<&'static ApiKeySpec> {
 
 pub fn supports(family: &str) -> bool {
     spec(family).is_some()
+}
+
+#[derive(serde::Serialize)]
+pub struct Descriptor {
+    pub family: &'static str,
+    pub auth_kind: &'static str,
+    pub probe_kind: &'static str,
+    pub quota_scope: &'static str,
+    pub reset_semantics: &'static str,
+    pub pace_capability: bool,
+}
+
+pub fn descriptor(family: &str) -> Option<Descriptor> {
+    spec(family).map(|spec| Descriptor {
+        family: spec.family,
+        auth_kind: spec.auth_kind,
+        probe_kind: spec.probe_kind,
+        quota_scope: spec.quota_scope,
+        reset_semantics: spec.reset_semantics,
+        pace_capability: spec.pace_capability,
+    })
 }
 
 pub fn snapshot_owned(family: &str) -> impl std::future::Future<Output = Snapshot> + Send + 'static {
@@ -245,5 +286,15 @@ mod tests {
     #[test]
     fn unknown_families_have_no_spec() {
         assert!(spec("unknown").is_none());
+    }
+
+    #[test]
+    fn descriptors_name_the_fetch_contract_without_a_user_url() {
+        let deepl = descriptor("deepl").unwrap();
+        assert_eq!(deepl.auth_kind, "api_key");
+        assert_eq!(deepl.probe_kind, "active_get");
+        assert_eq!(deepl.reset_semantics, "monthly_inferred");
+        assert!(!deepl.pace_capability);
+        assert!(descriptor("stability").is_some());
     }
 }

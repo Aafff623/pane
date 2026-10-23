@@ -58,3 +58,5 @@ Owner UI 目检：年轻窗口、临近重置、刚重置、耗尽四种状态�
 ## Comments
 
 - 2026-10-23：新增 `pace.rs`（ahead/close/over/spent/unknown、settled 门、`run_out_at`）并在 `Snapshot::ok` 统一附加到 progress metric；`/v1/providers` 输出 `pace`，卡片显示 compact chip。`cargo check`、pace/alerts 定向测试、前端 94 tests 通过。重置事件、just-reset、统一热度函数和 even-pace 竖线尚未集成。
+
+- 2026-10-23：卡片进度条增加 even-pace 竖线与 hover 说明，统一 50/90 热度阈值；`resets.rs` 纯检测测试通过。just-reset/到点刷新/总览统一仍未接。

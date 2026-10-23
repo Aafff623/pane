@@ -2445,6 +2445,9 @@ function renderMetric(m: Metric, _providerId?: string): string {
     const pace = m.pace && m.pace.settled && m.pace.state !== "unknown"
       ? `<span class="pace-chip pace-${m.pace.state}" title="${escapeHtml(t("pace.tip", { n: Math.round(m.pace.projected_used ?? used) }))}">${escapeHtml(t(`pace.${m.pace.state}`))}</span>`
       : "";
+    const paceMark = m.pace && m.pace.settled && m.pace.elapsed_percent !== null
+      ? `<span class="pace-mark" style="left:${clampPercent(m.pace.elapsed_percent)}%" title="${escapeHtml(t("pace.evenTip", { elapsed: Math.round(m.pace.elapsed_percent), used: Math.round(used), projected: Math.round(m.pace.projected_used ?? used) }))}"></span>`
+      : "";
     return `
       <div class="metric" style="--skin-meter:${config.showUsed ? used : left}%">
         <div class="metric-head">
@@ -2454,6 +2457,7 @@ function renderMetric(m: Metric, _providerId?: string): string {
         </div>
         <div class="bar">
           <div class="fill ${level}" style="width:${used}%"></div>
+          ${paceMark}
         </div>
         <span class="skin-meter-caption">${escapeHtml(headlineAlt)}</span>
         <div class="metric-foot">
