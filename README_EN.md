@@ -21,7 +21,7 @@
   <img src="attachments/hero-light.jpg" width="100%" style="border-radius: 14px;" alt="Pane floating panel and settings window: quotas, usage, fonts and keys">
 </picture>
 
-<sub>Floating panel <kbd>Alt + 2</kbd> · settings window · v0.8.8</sub>
+<sub>Floating panel <kbd>Alt + 2</kbd> · settings window · v0.8.9</sub>
 
 </div>
 
