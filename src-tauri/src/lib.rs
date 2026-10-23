@@ -19,6 +19,7 @@ mod font_packs;
 mod agent_skill;
 mod alerts;
 mod httpapi;
+mod pace;
 mod i18n;
 mod kiro_login;
 mod login_accounts;

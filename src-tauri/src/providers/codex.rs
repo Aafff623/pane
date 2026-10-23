@@ -488,6 +488,7 @@ async fn fetch_with_access(auth: Access, id: &str, name: &str) -> Result<Snapsho
                     available: None,
                     usage: None,
                     daily_usage: None,
+                    pace: None,
                 });
             }
         }

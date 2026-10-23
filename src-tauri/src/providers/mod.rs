@@ -97,6 +97,8 @@ pub struct Metric {
     pub usage: Option<crate::usage_units::UsageReading>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub daily_usage: Option<crate::usage_units::UsageDays>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pace: Option<crate::pace::Pace>,
 }
 
 impl Metric {
@@ -117,6 +119,7 @@ impl Metric {
             available: None,
             usage: None,
             daily_usage: None,
+            pace: None,
         }
     }
 
@@ -133,6 +136,7 @@ impl Metric {
             available: None,
             usage: None,
             daily_usage: None,
+            pace: None,
         }
     }
 
@@ -197,7 +201,8 @@ pub struct Snapshot {
 }
 
 impl Snapshot {
-    pub fn ok(id: &str, name: &str, plan: Option<String>, metrics: Vec<Metric>) -> Self {
+    pub fn ok(id: &str, name: &str, plan: Option<String>, mut metrics: Vec<Metric>) -> Self {
+        crate::pace::attach(&mut metrics, chrono::Utc::now().timestamp_millis());
         Self {
             id: id.into(),
             name: name.into(),

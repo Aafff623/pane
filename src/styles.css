@@ -2354,6 +2354,20 @@ article.provider.is-folded:hover {
   text-overflow: ellipsis;
 }
 
+.pace-chip {
+  flex: 0 0 auto;
+  border: 1px solid color-mix(in srgb, currentColor 35%, transparent);
+  border-radius: 999px;
+  padding: 0 5px;
+  font-size: 9px;
+  line-height: 1.5;
+  color: var(--muted-foreground);
+  white-space: nowrap;
+}
+.pace-chip.pace-close { color: #d99a2b; }
+.pace-chip.pace-over,
+.pace-chip.pace-spent { color: #d45b5b; }
+
 .detail {
   color: var(--muted-foreground);
   font-size: 11px;

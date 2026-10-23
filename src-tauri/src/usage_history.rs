@@ -893,6 +893,7 @@ mod tests {
             available: None,
             usage: None,
             daily_usage: None,
+            pace: None,
         }
     }
 
@@ -1061,6 +1062,7 @@ mod tests {
                 scope: String::new(),
             }),
             daily_usage: None,
+            pace: None,
         };
         assert_eq!(readings_from_metrics(&[credits])[0].used, 38.0);
         // A "Credits" label without the credits detail is not a credit row.
@@ -1075,6 +1077,7 @@ mod tests {
             available: None,
             usage: None,
             daily_usage: None,
+            pace: None,
         };
         assert!(readings_from_metrics(&[lookalike]).is_empty());
         assert!(readings_from_metrics(&[metric("progress", Some(10.0))]).is_empty());

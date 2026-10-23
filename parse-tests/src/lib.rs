@@ -12,6 +12,9 @@ pub mod i18n;
 #[path = "../../src-tauri/src/alerts.rs"]
 pub mod alerts;
 
+#[path = "../../src-tauri/src/pace.rs"]
+pub mod pace;
+
 #[path = "../../src-tauri/src/oauth.rs"]
 pub mod oauth;
 

@@ -1,6 +1,6 @@
 # 03 — Pace 四态、重置事件与统一热度色
 
-Status: ready-for-agent
+Status: in progress — shared pace API/UI landed; resets/heat unification pending
 GitHub: #41
 Priority: P1
 Blocked by: None（01 的 `pace_capability` 可后置）
@@ -25,7 +25,7 @@ Pane 的 `alerts.rs` 已有线性投影，但只服务通知；卡片/总览看�
 
 ## Acceptance
 
-- [ ] 同一 provider 的 pace 数字在卡片、总览、`/v1/usage` 三处一致。
+- [ ] 同一 provider 的 pace 数字在卡片、总览、`/v1/usage` 三处一致（API + 卡片 chip 已接；总览/even-pace 竖线待补）。
 - [ ] 窗口开始 5 分钟内/15 分钟内不报 Close/RunOut；`unknown` 有明确文案。
 - [ ] 重置检测测试：正常重置、换号、充值、重置时间抖动、读数下跌但未重置。
 - [ ] just-reset 只出现 10 分钟；到点刷新只打一次，不循环。
@@ -54,3 +54,7 @@ cargo +stable-x86_64-pc-windows-gnu test
 ```
 
 Owner UI 目检：年轻窗口、临近重置、刚重置、耗尽四种状态；确认 tick/tooltip 不误导。
+
+## Comments
+
+- 2026-10-23：新增 `pace.rs`（ahead/close/over/spent/unknown、settled 门、`run_out_at`）并在 `Snapshot::ok` 统一附加到 progress metric；`/v1/providers` 输出 `pace`，卡片显示 compact chip。`cargo check`、pace/alerts 定向测试、前端 94 tests 通过。重置事件、just-reset、统一热度函数和 even-pace 竖线尚未集成。

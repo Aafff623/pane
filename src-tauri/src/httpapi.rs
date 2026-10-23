@@ -162,6 +162,7 @@ fn metric_lines(metrics: &[crate::providers::Metric]) -> Vec<Value> {
                     "format": { "kind": "percent" },
                     "resetsAt": m.resets_at.map(iso8601),
                     "periodDurationMs": m.period_ms,
+                    "pace": m.pace,
                     "color": Value::Null,
                 })
             } else {

@@ -91,6 +91,7 @@ interface Metric {
   detail: string | null;
   value: string | null;
   resets_at: number | null;
+  pace?: { state: "ahead" | "close" | "over" | "spent" | "unknown"; projected_used: number | null; run_out_at: number | null; settled: boolean; elapsed_percent: number | null } | null;
   period_ms: number | null;
   /// Set by the search/MCP families on their per-key rows only (null on
   /// headline/summary rows and for every other provider).
@@ -2426,10 +2427,14 @@ function renderMetric(m: Metric, _providerId?: string): string {
     const detailHtml = [resetHtml, detailText ? escapeHtml(detailText) : ""].filter(Boolean).join(" · ");
     const footTitle = [resetPlain, detailText].filter(Boolean).join(" · ");
     const metricLabel = displayMetricLabel(m.label);
+    const pace = m.pace && m.pace.settled && m.pace.state !== "unknown"
+      ? `<span class="pace-chip pace-${m.pace.state}" title="${escapeHtml(t("pace.tip", { n: Math.round(m.pace.projected_used ?? used) }))}">${escapeHtml(t(`pace.${m.pace.state}`))}</span>`
+      : "";
     return `
       <div class="metric" style="--skin-meter:${config.showUsed ? used : left}%">
         <div class="metric-head">
           <span class="metric-label" title="${escapeHtml(metricLabel)}">${escapeHtml(metricLabel)}</span>
+          ${pace}
           ${m.period_ms !== null && m.period_ms > 0 ? `<span class="skin-period">${escapeHtml(fmtDuration(m.period_ms))}</span>` : ""}
         </div>
         <div class="bar">
