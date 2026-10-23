@@ -17,6 +17,7 @@
 //! donut; the derived tokens join the token views as labelled estimates.
 
 use chrono::{DateTime, Datelike, Local, Utc};
+use rusqlite::{Connection, OpenFlags};
 use serde::Serialize;
 use serde_json::Value;
 use std::collections::{HashMap, HashSet};
@@ -139,9 +140,6 @@ struct ParsedFile {
     events: Vec<Event>,
     /// Last known window per model, for subagent transcripts that carry none.
     windows: HashMap<String, f64>,
-    /// Last window in force regardless of model. Only used to resolve a
-    /// subagent request whose model was never named in a runtime-config.
-    last_window: Option<f64>,
 }
 
 /// Cache entries keyed by (mtime, size): a session log is append-only, so an
@@ -215,9 +213,12 @@ fn parse_reader(reader: impl BufRead) -> ParsedFile {
                 .filter(|w| *w > 0.0);
             if let Some(w) = window {
                 out.windows.insert(model.to_string(), w);
-                out.last_window = Some(w);
             }
-            current = Some((model.to_string(), window));
+            // A null config means "this round carried no window", not
+            // "forget the window this model already had". Keep the model's
+            // last non-null window; never borrow another model's window.
+            let effective = window.or_else(|| out.windows.get(model).copied());
+            current = Some((model.to_string(), effective));
             continue;
         }
         let Some(message) = value.get("message") else {
@@ -284,11 +285,10 @@ fn parse_ts(value: Option<&Value>) -> Option<DateTime<Utc>> {
 /// The window a subagent request ran under: the parent's window for the same
 /// model when it named one, else the parent's most recent window.
 fn inherited_window(event: &Event, parent: &ParsedFile) -> Option<f64> {
-    parent
-        .windows
-        .get(&event.model)
-        .copied()
-        .or(parent.last_window)
+    // Same-model only. A subagent for a model the parent never named must
+    // fall through to the Qoder model preference (or unavailable), never
+    // borrow another model's window.
+    parent.windows.get(&event.model).copied()
 }
 
 fn day_key(ts: DateTime<Utc>) -> (String, i32) {
@@ -649,10 +649,49 @@ fn build_report(root: &Path, entries: Vec<(String, Event, bool)>, lite_sessions:
     }
 }
 
+fn qoder_db_path() -> Option<PathBuf> {
+    Some(
+        dirs::data_dir()?
+            .join("com.qodercn.app.stable")
+            .join("main.sqlite"),
+    )
+}
+
+/// Read-only model preference windows. A missing database, a locked WAL, a
+/// missing table/column or a malformed row all degrade to an empty map; this
+/// adapter never writes to the Qoder database and never guesses a window.
+fn model_windows_from(path: &Path) -> HashMap<String, f64> {
+    let mut out = HashMap::new();
+    let Ok(connection) = Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_ONLY) else {
+        return out;
+    };
+    let Ok(mut statement) = connection.prepare(
+        "SELECT model_key, context_window
+           FROM chat_model_preferences
+          WHERE context_window IS NOT NULL AND context_window > 0",
+    ) else {
+        return out;
+    };
+    let Ok(rows) = statement.query_map([], |row| {
+        Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)? as f64))
+    }) else {
+        return out;
+    };
+    for (model, window) in rows.flatten() {
+        out.insert(model, window);
+    }
+    out
+}
+
 /// Collect all Qoder CN sessions modified in the last 31 days.
 pub fn collect() -> QoderSpend {
-    let root = projects_root();
-    let (files, lite) = discover(&root);
+    let db = qoder_db_path();
+    collect_with_db(&projects_root(), db.as_deref())
+}
+
+fn collect_with_db(root: &Path, db: Option<&Path>) -> QoderSpend {
+    let db_windows = db.map(model_windows_from).unwrap_or_default();
+    let (files, lite) = discover(root);
     let mut parents: HashMap<String, ParsedFile> = HashMap::new();
     for (id, path, is_subagent) in &files {
         if !is_subagent {
@@ -676,10 +715,21 @@ pub fn collect() -> QoderSpend {
             } else {
                 event
             };
+            // Last resort: Qoder's own per-model preference window. This is
+            // deliberately keyed by the event's model; no global or 200K
+            // fallback and no cross-model borrowing.
+            let event = if event.window.is_none() {
+                Event {
+                    window: db_windows.get(&event.model).copied(),
+                    ..event
+                }
+            } else {
+                event
+            };
             entries.push((id.clone(), event, is_subagent));
         }
     }
-    let mut report = build_report(&root, entries, lite);
+    let mut report = build_report(root, entries, lite);
     report.source.sessions = parents.len() as u64;
     report
 }
@@ -725,6 +775,7 @@ fn model_label(model: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rusqlite::Connection;
 
     fn usage_line(ts: &str, model: &str, credits: f64, ratio: f64, request: &str) -> String {
         format!(
@@ -758,6 +809,112 @@ mod tests {
         assert_eq!(events[1].window, Some(200_000.0));
         assert_eq!(derive_tokens(events[0].ratio, events[0].window), Some(100_000.0));
         assert_eq!(derive_tokens(events[1].ratio, events[1].window), Some(100_000.0));
+    }
+
+    #[test]
+    fn null_config_keeps_same_model_window_and_never_crosses_models() {
+        let lines = vec![
+            config_line(1, "dfmodel", Some(1_000_000)),
+            usage_line("2026-10-20T01:00:00Z", "dfmodel", 1.0, 0.1, "a"),
+            config_line(2, "dfmodel", None),
+            usage_line("2026-10-20T02:00:00Z", "dfmodel", 1.0, 0.2, "b"),
+            config_line(3, "qfmodel", None),
+            usage_line("2026-10-20T03:00:00Z", "qfmodel", 1.0, 0.3, "c"),
+        ];
+        let parsed = parse(&lines);
+        assert_eq!(parsed.events[0].window, Some(1_000_000.0));
+        assert_eq!(parsed.events[1].window, Some(1_000_000.0), "null must not clear the same model's window");
+        assert_eq!(parsed.events[2].window, None, "a new model must not borrow dfmodel's window");
+        let report = build_report(
+            Path::new("unused"),
+            parsed.events.into_iter().map(|event| ("s1".into(), event, false)).collect(),
+            0,
+        );
+        assert_eq!(report.all.billed_tokens, 300_000.0);
+        assert_eq!(report.all.tokens_unavailable_trips, 1);
+    }
+
+    fn temp_root(tag: &str) -> PathBuf {
+        let root = std::env::temp_dir().join(format!("qoder-{tag}-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(root.join("proj")).unwrap();
+        root
+    }
+
+    fn write_session(root: &Path, name: &str, lines: &[String]) {
+        fs::write(root.join("proj").join(name), lines.join("\n") + "\n").unwrap();
+    }
+
+    fn make_preferences(path: &Path, rows: &[(&str, Option<i64>)]) {
+        let connection = Connection::open(path).unwrap();
+        connection
+            .execute_batch(
+                "CREATE TABLE chat_model_preferences (
+                    model_key TEXT PRIMARY KEY,
+                    visible INTEGER,
+                    context_window INTEGER,
+                    reasoning_effort TEXT,
+                    updated_at INTEGER
+                );",
+            )
+            .unwrap();
+        for (model, window) in rows {
+            connection
+                .execute(
+                    "INSERT INTO chat_model_preferences (model_key, context_window) VALUES (?1, ?2)",
+                    rusqlite::params![model, window],
+                )
+                .unwrap();
+        }
+    }
+
+    #[test]
+    fn model_preferences_fill_a_null_only_new_session_and_stay_per_model() {
+        let root = temp_root("db-window");
+        let db = root.join("main.sqlite");
+        make_preferences(&db, &[("dfmodel", Some(1_000_000)), ("qfmodel", None)]);
+        write_session(
+            &root,
+            "s1.jsonl",
+            &[
+                config_line(1, "dfmodel", None),
+                usage_line("2026-10-20T01:00:00Z", "dfmodel", 1.0, 0.25, "a"),
+                usage_line("2026-10-20T01:01:00Z", "qfmodel", 1.0, 0.5, "b"),
+            ],
+        );
+        let report = collect_with_db(&root, Some(&db));
+        assert_eq!(report.all.billed_tokens, 250_000.0);
+        assert_eq!(report.all.tokens_unavailable_trips, 1);
+        assert_eq!(report.all.credits, 2.0);
+        let df = report.all.models.iter().find(|model| model.model == "dfmodel").unwrap();
+        assert_eq!(df.billed_tokens, 250_000.0);
+        let qf = report.all.models.iter().find(|model| model.model == "qfmodel").unwrap();
+        assert_eq!(qf.billed_tokens, 0.0);
+        assert_eq!(qf.tokens_unavailable_trips, 1);
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn missing_database_or_table_degrades_to_unavailable() {
+        let root = temp_root("db-missing");
+        write_session(
+            &root,
+            "s1.jsonl",
+            &[
+                config_line(1, "dfmodel", None),
+                usage_line("2026-10-20T01:00:00Z", "dfmodel", 1.0, 0.25, "a"),
+            ],
+        );
+        let missing = collect_with_db(&root, Some(&root.join("missing.sqlite")));
+        assert_eq!(missing.all.billed_tokens, 0.0);
+        assert_eq!(missing.all.tokens_unavailable_trips, 1);
+
+        let empty_db = root.join("empty.sqlite");
+        let _ = Connection::open(&empty_db).unwrap();
+        let empty = collect_with_db(&root, Some(&empty_db));
+        assert_eq!(empty.all.billed_tokens, 0.0);
+        assert_eq!(empty.all.tokens_unavailable_trips, 1);
+        let _ = fs::remove_dir_all(&root);
     }
 
     #[test]
@@ -832,11 +989,27 @@ mod tests {
         };
         let mut parent = ParsedFile::default();
         parent.windows.insert("dfmodel".into(), 200_000.0);
-        parent.last_window = Some(200_000.0);
         let event = Event { window: inherited_window(&event, &parent), ..event };
         let report = build_report(Path::new("unused"), vec![("s1".into(), event, true)], 0);
         assert_eq!(report.all.billed_tokens, 50_000.0);
         assert_eq!(report.all.tokens_unavailable_trips, 0);
+    }
+
+    #[test]
+    fn subagent_does_not_borrow_another_models_window() {
+        let event = Event {
+            ts: DateTime::parse_from_rfc3339("2026-10-20T02:00:00Z").unwrap().with_timezone(&Utc),
+            model: "qfmodel".into(),
+            credits: 0.5,
+            original_credits: 0.5,
+            ratio: Some(0.25),
+            window: None,
+            request_id: "sub-other".into(),
+            billable: Some(true),
+        };
+        let mut parent = ParsedFile::default();
+        parent.windows.insert("dfmodel".into(), 1_000_000.0);
+        assert_eq!(inherited_window(&event, &parent), None);
     }
 
     #[test]
