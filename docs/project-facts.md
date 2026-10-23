@@ -501,12 +501,12 @@ changes.
   (2026-10-19): 13 live packs would have produced 13 rows; the compact form
   shows one `Packages` row beside the `Credits` meter. An unparseable
   deadline prints `expiry unknown` rather than inventing one.
-- **Desktop sign-in import** (`workbuddy_import_desktop`): reads the
-  variant's plaintext auth store, upserts by uid into Pane's login store
-  (OS-vault-first) with `extra.sourceKind = "desktop"`, and never writes the
-  vendor file. `$wbEncrypted` is reported, never decrypted. The desktop
-  card is suppressed when a Pane login already owns the same uid, so one
-  account cannot yield two snapshots with one card id.
+- **Desktop sign-in is read-only for usage.** The old
+  `workbuddy_import_desktop` command and auth-center button were removed on
+  2026-10-23; Pane no longer copies a desktop session into its login store.
+  The provider may still read the plaintext desktop store as an automatic
+  tier-1 usage fallback; `$wbEncrypted` is reported, never decrypted. Web
+  login is the only account-creation path.
 - **Local token sources** (`spend.rs`): WorkBuddy CN/AI and CodeBuddy CLI
   use one `workbuddy_line` parser (three usage locations, input includes
   cache read, reasoning already inside completion; verified on real files
