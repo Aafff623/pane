@@ -1,6 +1,6 @@
 # 05 — 成本口径与归因：billing、stored/missing、项目/分支
 
-Status: ready-for-agent
+Status: in progress — billing/pricing modes and badges landed; time-aware/override/attribution pending
 GitHub: #43
 Priority: P2
 Blocked by: 04
@@ -51,3 +51,7 @@ cargo +stable-x86_64-pc-windows-gnu test
 ```
 
 Owner 目检：总额 tooltip/分享图的四态徽标；关闭归因时无变化。
+
+## Comments
+
+- 2026-10-23：`ProviderSpend` 增加 `billing_mode`（subscription/api/local/payg/unknown）和 `pricing_mode`，按 family/API-key 能力派生；spend 行显示口径 badge。时间感知定价、stored/missing 细节、用户 override、project/branch 归因尚未做。

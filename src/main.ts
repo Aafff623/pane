@@ -136,6 +136,8 @@ interface ProviderSpend {
   unpriced: number;
   unpriced_models: string[];
   estimated?: boolean;
+  billing_mode?: "subscription" | "api" | "local" | "payg" | "unknown";
+  pricing_mode?: "display" | "auto" | "calculate" | "unknown";
   cc_sourced_days?: SpendWindowDays;
   likely_undercount_days?: SpendWindowDays;
 }
@@ -315,6 +317,10 @@ function spendBadgesFor(id: string, view: ShareRange, estimated = false): string
     out += `<span class="est-badge est-estimate" title="${escapeHtml(t("spend.estimateTip"))}">${escapeHtml(t("spend.estimate"))}</span>`;
   }
   if (!sp) return out;
+  const billing = sp.billing_mode ?? "unknown";
+  if (billing !== "unknown") {
+    out += `<span class="est-badge billing-badge" title="${escapeHtml(t("spend.billingTip"))}">${escapeHtml(t(`spend.billing.${billing}`))}</span>`;
+  }
   const low = sp.likely_undercount_days?.[view] ?? 0;
   if (low) {
     out += `<span class="est-badge low-badge" title="${escapeHtml(t("spend.undercountTip", { n: low }))}">${escapeHtml(t("spend.undercount"))} ×${low}</span>`;

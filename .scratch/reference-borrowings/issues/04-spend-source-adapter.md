@@ -1,6 +1,6 @@
 # 04 — Spend SourceAdapter、probe/doctor 与增量扫描
 
-Status: ready-for-agent
+Status: in progress — probe reasons/new source inventory landed; SourceAdapter trait and incremental offsets pending
 GitHub: #42
 Priority: P1
 Blocked by: None
@@ -52,3 +52,7 @@ cargo +stable-x86_64-pc-windows-gnu test
 ```
 
 回归：现有 20 源各一份 fixture，比较改造前后的日/模型总量；记录扫描耗时。Owner 目检设置页“来源”诊断。
+
+## Comments
+
+- 2026-10-23：`SpendSourceStatus` 增加 `root/reason`，`source_status` 区分 missing/empty/unreadable/detected；新增 Gemini CLI 与 Copilot local 的探测行（解析器待接）。`/v1/sources` schema 向后兼容并带原因。SourceAdapter trait、byte-offset checkpoint 和 20 源迁移未完成。

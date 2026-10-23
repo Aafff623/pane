@@ -37,6 +37,50 @@ pub struct Window {
     pub models: Vec<ModelSpend>,
 }
 
+#[derive(Serialize, Clone, Copy, Debug, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum BillingMode {
+    Subscription,
+    Api,
+    Local,
+    Payg,
+    Unknown,
+}
+
+#[derive(Serialize, Clone, Copy, Debug, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum PricingMode {
+    Display,
+    Auto,
+    Calculate,
+    Unknown,
+}
+
+fn billing_mode_for(id: &str) -> BillingMode {
+    let family = id.split('@').next().unwrap_or(id);
+    if matches!(family, "claude" | "codex" | "copilot" | "cursor" | "grok" | "kiro" | "windsurf" | "antigravity" | "trae" | "qodercn" | "traecn" | "workbuddy" | "workbuddyai" | "codebuddy" | "codebuddycn") {
+        BillingMode::Subscription
+    } else if provider_catalog::supports_api_key(family) {
+        BillingMode::Api
+    } else if matches!(family, "zcode" | "dsh" | "qwen" | "kimi" | "mcode" | "opencode") {
+        BillingMode::Local
+    } else {
+        BillingMode::Unknown
+    }
+}
+
+fn pricing_mode_for(id: &str, estimated: bool, unpriced: u64) -> PricingMode {
+    if estimated {
+        PricingMode::Display
+    } else if unpriced > 0 {
+        PricingMode::Auto
+    } else if matches!(billing_mode_for(id), BillingMode::Local) {
+        PricingMode::Calculate
+    } else {
+        PricingMode::Auto
+    }
+}
+
 #[derive(Serialize, Clone)]
 pub struct ProviderSpend {
     /// Internal daily facts, moved into the rollup response after collection.
@@ -62,6 +106,8 @@ pub struct ProviderSpend {
     /// all-zero usage into its local session logs). The UI flags such rows.
     #[serde(default)]
     pub estimated: bool,
+    pub billing_mode: BillingMode,
+    pub pricing_mode: PricingMode,
     /// Days of THIS card's data whose numbers come from cc-switch alone,
     /// per spend view (the UI's Today / Yesterday / 7d / 30d / all), so a
     /// badge never quotes a wider range than the numbers beside it. On a
@@ -143,6 +189,9 @@ pub struct SpendSourceStatus {
     pub form: String,
     pub collector: String,
     pub state: String,
+    pub root: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
     pub feeds: Vec<String>,
 }
 
@@ -154,16 +203,35 @@ fn source_status(
     paths: &[PathBuf],
     feeds: &[&str],
 ) -> SpendSourceStatus {
+    let existing = paths.iter().find(|p| p.exists());
+    let (state, root, reason) = match existing {
+        None => ("not_detected", String::new(), Some("path missing".into())),
+        Some(path) => {
+            let root = path.display().to_string();
+            match fs::metadata(path) {
+                Err(error) => ("unreadable", root, Some(error.to_string())),
+                Ok(meta) if meta.is_dir() => match fs::read_dir(path) {
+                    Err(error) => ("unreadable", root, Some(error.to_string())),
+                    Ok(mut entries) => {
+                        if entries.next().is_none() {
+                            ("empty", root, Some("directory is empty".into()))
+                        } else {
+                            ("detected", root, None)
+                        }
+                    }
+                },
+                Ok(_) => ("detected", root, None),
+            }
+        }
+    };
     SpendSourceStatus {
         id: id.into(),
         tool: tool.into(),
         form: form.into(),
         collector: collector.into(),
-        state: if paths.iter().any(|p| p.exists()) {
-            "detected".into()
-        } else {
-            "not_detected".into()
-        },
+        state: state.into(),
+        root,
+        reason,
         feeds: feeds.iter().map(|s| (*s).into()).collect(),
     }
 }
@@ -212,7 +280,9 @@ pub fn source_statuses() -> Vec<SpendSourceStatus> {
         source_status("workbuddy-ai-jsonl", "WorkBuddy AI", "JSONL session logs", "workbuddy_line", &[home.join(".workbuddy-ai").join("projects"), home.join(".workbuddy-ai").join("sessions")], &["workbuddyai"]),
         source_status("codebuddy-cli-jsonl", "CodeBuddy CLI", "JSONL session logs", "workbuddy_line", &[home.join(".codebuddy").join("projects")], &["codebuddy"]),
         source_status("codebuddy-ide-index", "CodeBuddy IDE", "extension history index", "codebuddy_ide_data", &[codebuddy_ide_root()], &["codebuddy"]),
-        SpendSourceStatus { id: "cursor-csv".into(), tool: "Cursor IDE".into(), form: "authenticated usage CSV".into(), collector: "providers::cursor::fetch_usage_csv".into(), state: "runtime".into(), feeds: vec!["cursor".into()] },
+        source_status("gemini-jsonl", "Gemini CLI", "JSON/JSONL chat logs", "gemini_line (pending parser)", &[home.join(".gemini").join("tmp")], &["gemini"]),
+        source_status("copilot-local", "GitHub Copilot CLI", "session-state events", "copilot_local (pending parser)", &[home.join(".copilot").join("session-state")], &["copilot"]),
+        SpendSourceStatus { id: "cursor-csv".into(), tool: "Cursor IDE".into(), form: "authenticated usage CSV".into(), collector: "providers::cursor::fetch_usage_csv".into(), state: "runtime".into(), root: String::new(), reason: None, feeds: vec!["cursor".into()] },
     ]
 }
 
@@ -639,6 +709,8 @@ fn build_spend(id: impl Into<String>, name: impl Into<String>, data: FileData) -
     unpriced_models.sort();
     unpriced_models.truncate(5);
     let days = data.days;
+    let billing_mode = billing_mode_for(&id);
+    let pricing_mode = pricing_mode_for(&id, false, data.unpriced.values().sum());
     let mut sp = ProviderSpend {
         days: days.clone(),
         id,
@@ -651,6 +723,8 @@ fn build_spend(id: impl Into<String>, name: impl Into<String>, data: FileData) -
         unpriced: data.unpriced.values().sum(),
         unpriced_models,
         estimated: false,
+        billing_mode,
+        pricing_mode,
         cc_sourced_days: SpendWindowDays::default(),
         likely_undercount_days: SpendWindowDays::default(),
     };

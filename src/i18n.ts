@@ -677,6 +677,11 @@ const en: Dict = {
   "unpriced.tip":
     "{n} requests ran on models with no public pricing ({models}). Their tokens are included, but they can't be turned into dollars — so the real cost is a little higher than shown.",
   "spend.estimate": "est.",
+  "spend.billingTip": "What the dollar figures represent",
+  "spend.billing.subscription": "subscription",
+  "spend.billing.api": "API",
+  "spend.billing.local": "local",
+  "spend.billing.payg": "pay-as-you-go",
   "spend.estimateTip":
     "Tokens estimated from Qoder CN's local transcripts. Qoder writes no token counters, so billed input = Σ(context ratio × context window); model output is not included and this is not a credits-to-token rate. Credits stay exact in the meters row.",
   "spend.ccSourced": "cc-switch",
@@ -2047,6 +2052,11 @@ const zh: Dict = {
   "unpriced.tip":
     "有 {n} 次请求用了没有公开定价的模型（{models}）。tokens 已计入，但无法换成美元 — 所以真实花费会比显示的略高。",
   "spend.estimate": "估算",
+  "spend.billingTip": "美元数字的口径",
+  "spend.billing.subscription": "订阅内",
+  "spend.billing.api": "API",
+  "spend.billing.local": "本地",
+  "spend.billing.payg": "按量",
   "spend.estimateTip":
     "这里的 token 根据 Qoder CN 本地转录测算：Qoder 不写 token 计数，计费输入量 = Σ(上下文占比 × 上下文窗口)，不含模型输出，也不是 credits 的兑换率；credits 仍以准确值单独显示。",
   "spend.ccSourced": "cc-switch 单源",
@@ -3413,6 +3423,11 @@ const ru: Dict = {
   "unpriced.tip":
     "{n} запросов шли на модели без публичных цен ({models}). Токены учтены, но в доллары их не перевести — реальная стоимость чуть выше, чем на экране.",
   "spend.estimate": "оценка",
+  "spend.billingTip": "Что означают суммы в долларах",
+  "spend.billing.subscription": "подписка",
+  "spend.billing.api": "API",
+  "spend.billing.local": "локально",
+  "spend.billing.payg": "по мере использования",
   "spend.estimateTip":
     "Токены оценены по локальным журналам Qoder CN: счётчиков токенов нет, поэтому биллинговый вход = Σ(доля контекста × окно контекста), без выхода модели; это не курс credits→токены. Кредиты показаны точно отдельной строкой.",
   "spend.ccSourced": "cc-switch",
