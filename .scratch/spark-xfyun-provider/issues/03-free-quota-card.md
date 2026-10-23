@@ -4,7 +4,7 @@
 
 **Blocked by:** 02
 
-**Status:** ready-for-agent
+**Status:** done (real response calibration pending owner login)
 
 ## 要点
 
@@ -19,8 +19,12 @@
 
 ## 验收
 
-- [ ] 卡片数字与网页控制台一致（10 亿总量、已用、剩余、到期）。
-- [ ] `claim=null`、`EXHAUSTED`、`EXPIRED`、`code:4001` 四种状态都有明确 UI。
-- [ ] 解析器测试覆盖 number/string、缺字段、未知 `quotaStatus`、不可解析日期。
-- [ ] 额度刷新失败保留原因，不显示假 0；不影响其他 provider。
+- [ ] 卡片数字与网页控制台一致（10 亿总量、已用、剩余、到期；需 owner 首登校准真实响应）。
+- [x] `claim=null`、`EXHAUSTED`、`EXPIRED`、`code:4001` 四种状态都有明确 UI（`needs_setup` / 状态行 / 重登提示）。
+- [x] 解析器测试覆盖 number/string、缺字段、未知 `quotaStatus`、不可解析日期（7 个 xfyun 单测）。
+- [x] 额度刷新失败保留原因，不显示假 0；不影响其他 provider。
 - [ ] token/cookie 不入日志或跟踪文件；parse-tests、tsc、vite、i18n 门禁全绿；owner 实机验收。
+
+## Comments
+
+- 2026-10-23：`free-quota` 防御式解析已实现：claim null → `needs_setup`；数字/数字字符串兼容；used/remaining 互推；未知状态不用 ACTIVE 百分比；expiresAt 支持 epoch/ISO，解析失败显示 Unconfirmed；`code:4001`/401/403 → 重新登录。真实响应结构仍需 owner 首登后校准（当前字段来自控制台前端证据）。

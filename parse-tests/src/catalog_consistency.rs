@@ -195,8 +195,8 @@ mod tests {
         let disabled = provider_catalog::default_disabled_families();
         assert_eq!(
             disabled.len(),
-            57,
-            "preserve the existing fresh-install defaults (+ tokenrhythm, 2026-10-19)"
+            58,
+            "preserve the existing fresh-install defaults (+ tokenrhythm, 2026-10-19; + xfyun, 2026-10-23)"
         );
         for family in [
             "claude",

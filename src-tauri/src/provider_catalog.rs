@@ -608,6 +608,19 @@ const PROVIDER_DEFINITIONS: &[ProviderDefinition] = &[
         primary_unit: UsageUnit::Tokens,
     },
     ProviderDefinition {
+        // Web-session only: the API key authenticates inference, not the
+        // console quota endpoints. The Spark-X2.6 free grant is read from
+        // the signed-in MaaS console.
+        family_id: "xfyun",
+        display_name: "讯飞星火",
+        query_kind: QueryKind::NativeBalance,
+        supports_api_key: false,
+        supports_extra_accounts: true,
+        icon_key: "xfyun",
+        category: ProviderCategory::Coding,
+        primary_unit: UsageUnit::Tokens,
+    },
+    ProviderDefinition {
         family_id: "venice",
         display_name: "Venice",
         query_kind: QueryKind::NativeBalance,
@@ -806,7 +819,7 @@ pub fn supports_api_key(family_id: &str) -> bool {
 
 /// Families whose credential is a Pane-hosted browser session rather than a
 /// pasted API key. Keep in sync with the frontend catalog's `webSession` flag.
-pub const WEB_SESSION_FAMILIES: &[&str] = &["tokenrhythm"];
+pub const WEB_SESSION_FAMILIES: &[&str] = &["tokenrhythm", "xfyun"];
 
 pub fn is_web_session(family_id: &str) -> bool {
     WEB_SESSION_FAMILIES.contains(&family_id)
@@ -860,6 +873,7 @@ mod tests {
     #[test]
     fn catalog_marks_web_session_families() {
         assert!(is_web_session("tokenrhythm"));
+        assert!(is_web_session("xfyun"));
         assert!(!is_web_session("deepseek"));
         assert!(!is_web_session("unknown"));
     }
@@ -909,6 +923,7 @@ mod tests {
             "openai-api",
             "poe",
             "tokenrhythm",
+            "xfyun",
             "venice",
             "windsurf",
             "warp",

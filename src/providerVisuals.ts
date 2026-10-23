@@ -57,6 +57,7 @@ import vertexaiIcon from "./assets/providers/vertexai.svg?raw";
 import warpIcon from "./assets/providers/warp.svg?raw";
 import mimoIcon from "./assets/providers/mimo.svg?raw";
 import tokenrhythmIcon from "./assets/providers/tokenrhythm.svg?raw";
+import xfyunIcon from "./assets/providers/xfyun.svg?raw";
 import traeIcon from "./assets/providers/trae.svg?raw";
 import qoderIcon from "./assets/providers/qoder.svg?raw";
 import zedIcon from "./assets/providers/zed.svg?raw";
@@ -143,6 +144,7 @@ const VISUALS: Readonly<Record<string, ProviderVisual>> = {
   "openai-api": { iconKey: "openai", iconSvg: openaiIcon },
   poe: { iconKey: "poe", iconSvg: poeIcon },
   tokenrhythm: { iconKey: "tokenrhythm", iconSvg: tokenrhythmIcon },
+  xfyun: { iconKey: "xfyun", iconSvg: xfyunIcon },
   venice: { iconKey: "venice", iconSvg: veniceIcon },
   vertexai: { iconKey: "vertexai", iconSvg: vertexaiIcon },
   warp: { iconKey: "warp", iconSvg: warpIcon },

@@ -16474,12 +16474,15 @@ async function jumpToAuthCenter(family: string): Promise<void> {
 
 /// A card with no data because it needs a Pane sign-in gets a button that
 /// lands on its row in the auth center — the journey its hint describes,
-/// without making the user go find the page. Families Pane can sign in for
-/// are the ones the catalog marks as OAuth; a key-only family is pointed at
+/// without making the user go find the page. OAuth families and Pane-hosted
+/// web-session families both use this route; a key-only family is pointed at
 /// its own key field by its hint instead.
 function authJumpHtml(snap: Snapshot): string {
   const family = providerFamily(snap.id);
-  if (snap.status !== "no_credentials" || providerDefinition(family)?.supportsOAuth !== true) return "";
+  if (
+    snap.status !== "no_credentials" ||
+    (providerDefinition(family)?.supportsOAuth !== true && !isWebSessionFamily(family))
+  ) return "";
   return `<button class="mini-btn auth-jump" type="button" data-auth-jump="${escapeHtml(family)}">${escapeHtml(t("card.signIn"))}</button>`;
 }
 
@@ -17843,7 +17846,10 @@ document.querySelector("#settings-btn")!.addEventListener("click", () => {
         void patchConfig({ panelIntent: { view: "settings", family: fam, at: Date.now() } }).then(() => invoke("open_panel_window"));
         return;
       }
-      if (providerDefinition(fam)?.supportsOAuth) { void jumpToAuthCenter(fam); return; }
+      if (providerDefinition(fam)?.supportsOAuth || isWebSessionFamily(fam)) {
+        void jumpToAuthCenter(fam);
+        return;
+      }
       custKeyEditing.add(fam);
       skinMarketOpen = false;
       custConfigOpen = fam;

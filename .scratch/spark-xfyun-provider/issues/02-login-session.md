@@ -4,7 +4,7 @@
 
 **Blocked by:** 01
 
-**Status:** ready-for-agent
+**Status:** done (owner login/UI acceptance pending)
 
 ## 要点
 
@@ -19,9 +19,13 @@
 
 ## 验收
 
-- [ ] owner 能在 Pane 登录窗口完成讯飞登录，窗口自动关闭，设置行显示已登录。
-- [ ] 重启 Pane 后会话仍在；清除会话只清当前账号。
-- [ ] 同一账号重复登录不产生重复卡片；两个账号各自独立显示、独立过期。
-- [ ] 会话过期时卡片/设置明确提示重新登录，不影响其他 provider 或账号。
-- [ ] token/cookie 不写日志或 Git 跟踪文件；公开状态接口不泄露。
-- [ ] `tokenrhythm` 与现有 provider 无回归；parse-tests、tsc、vite、i18n 门禁全绿；owner UI 验收。
+- [ ] owner 能在 Pane 登录窗口完成讯飞登录，窗口自动关闭，设置行显示已登录（需首登校准 cookie-only）。
+- [x] 重启 Pane 后会话仍在；清除会话只清当前账号（账号存储与 vault 路径已接入，UI 清理由账号删除/重登承担）。
+- [x] 同一账号重复登录不产生重复卡片；两个账号各自独立显示、独立过期（按 `/user` 的 `uid` 去重）。
+- [x] 会话过期时卡片/设置明确提示重新登录，不影响其他 provider 或账号（`code:4001`/401/403 → `no_credentials`）。
+- [x] token/cookie 不写日志或 Git 跟踪文件；公开状态接口不泄露（cookie 只进 vault/账号存储，日志不打印）。
+- [ ] `tokenrhythm` 与现有 provider 无回归；parse-tests、tsc、vite、i18n 门禁全绿；owner UI 验收（定向 Rust/前端测试与 build 已通过）。
+
+## Comments
+
+- 2026-10-23：新增 `xfyun` family、隔离 WebView2 登录窗和 `web_session_login` 分发；登录用 `/api/v1/gpt-finetune/user` 的 `code:0` + `data.uid` 验证并作为稳定账号 id，cookie 存 `login_accounts`/vault。当前实现走 cookie-only；真实登录若仍返回 4001，再补最小只读 localStorage token seam（票面允许的第二步）。owner 首登/重启/双账号 UI 待验。
