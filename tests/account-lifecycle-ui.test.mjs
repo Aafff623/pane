@@ -9,7 +9,10 @@ const source = ts.createSourceFile('main.ts', readFileSync(new URL('../src/main.
 function load(names, bindings) {
   const functions = source.statements.filter(n => ts.isFunctionDeclaration(n) && names.includes(n.name?.text));
   assert.equal(functions.length, names.length);
-  const context = vm.createContext(bindings);
+  const context = vm.createContext({
+    isWebSessionFamily: family => providerCatalog.find(p => p.familyId === family)?.webSession === true,
+    ...bindings,
+  });
   vm.runInContext(ts.transpile(functions.map(n => n.getText(source)).join('\n'), { target: ts.ScriptTarget.ES2020 }), context);
   return context;
 }
@@ -62,13 +65,14 @@ test('removing a login row never erases an unrelated native login card', () => {
 
 test('a canceled web sign-in restores its add button and keeps existing accounts', async () => {
   const calls = [];
-  const context = load(['addTokenrhythmAccount'], {
-    t: key => key, invoke: async command => { calls.push(command); throw new Error('window closed'); },
+  const context = load(['addWebSessionAccount'], {
+    t: key => key, invoke: async (command, args) => { calls.push({ command, ...args }); throw new Error('window closed'); },
     settingsToast: () => {}, afterCredentialMutation: async () => assert.fail('failed login must not mutate accounts'),
+    providerDisplayName: family => family,
   });
   const button = { textContent: 'Add account', disabled: false };
-  await context.addTokenrhythmAccount(button);
-  assert.deepEqual(calls, ['tokenrhythm_login']);
+  await context.addWebSessionAccount(button, 'tokenrhythm');
+  assert.deepEqual(calls, [{ command: 'web_session_login', family: 'tokenrhythm' }]);
   assert.equal(button.disabled, false);
   assert.equal(button.textContent, 'Add account');
 });
@@ -102,7 +106,7 @@ test('TokenRhythm retries use the dedicated web login and ignore obsolete outcom
   const calls = [];
   const context = load(['authAddAccount'], {
     authFlows, authFlowBusy: () => false, renderAuthCenter: () => {},
-    invoke: command => { calls.push(command); return new Promise(resolve => { settle = resolve; }); },
+    invoke: (command, args) => { calls.push({ command, ...args }); return new Promise(resolve => { settle = resolve; }); },
     afterCredentialMutation: async () => {}, loadAuthCenter: async () => {},
   });
   context.authAddAccount('tokenrhythm');
@@ -114,7 +118,10 @@ test('TokenRhythm retries use the dedicated web login and ignore obsolete outcom
   assert.equal(authFlows.get('tokenrhythm'), replacement);
   assert.notEqual(first, replacement);
   context.authAddAccount('tokenrhythm');
-  assert.deepEqual(calls, ['tokenrhythm_login', 'tokenrhythm_login']);
+  assert.deepEqual(calls, [
+    { command: 'web_session_login', family: 'tokenrhythm' },
+    { command: 'web_session_login', family: 'tokenrhythm' },
+  ]);
   settle();
   await new Promise(setImmediate);
   assert.equal(authFlows.get('tokenrhythm').phase, 'success');

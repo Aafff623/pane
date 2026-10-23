@@ -423,6 +423,9 @@ const en: Dict = {
   "settings.trLoginWaiting": "Waiting for the 基元律动 sign-in to finish…",
   "settings.trLoginDone": "基元律动 signed in",
   "settings.trLoginFailed": "基元律动 sign-in did not finish: {reason}",
+  "settings.webLoginWaiting": "Waiting for the {name} sign-in to finish…",
+  "settings.webLoginDone": "{name} signed in",
+  "settings.webLoginFailed": "{name} sign-in did not finish: {reason}",
   "settings.keyEnv": "from environment",
   "settings.keyConfigured": "Configured",
   "settings.keyEdit": "Add key",
@@ -586,6 +589,9 @@ const en: Dict = {
   "card.hintWbWebExpired": "WorkBuddy web session expired — import a fresh cookie in Customize, or sign in from the auth center.",
   "card.hintWbWebError": "WorkBuddy web session: {reason}",
   "card.hintWbWebNoData": "WorkBuddy web session returned no quota data",
+  "card.hintXfyunSignIn": "Sign in to the Spark web console from the auth center to see its free quota.",
+  "card.hintXfyunExpired": "Spark web session expired — sign in again from the auth center.",
+  "card.hintXfyunNoClaim": "No Spark-X2.6 free quota claimed yet — claim it in the iFlytek console, then refresh.",
   "card.outdated": "⚠ Outdated",
   "card.needsSetupFallback": "Credentials are saved, but the usage API needs one more step.",
   "card.needsSetupAction": "How to fix",
@@ -895,6 +901,11 @@ const en: Dict = {
   "metric.via": "Via",
   "metric.sessions": "Sessions",
   "metric.expiry": "Expiry",
+  "metric.freeQuota": "Free quota",
+  "metric.usage7d": "Usage (7d)",
+  "metric.remaining": "Remaining",
+  "metric.expires": "Expires",
+  "metric.status": "Status",
   "metric.modelWeekly": "{model} weekly",
 
   "link.Status": "Status",
@@ -1234,6 +1245,7 @@ const en: Dict = {
   "customize.loginHint.brave": "API key: add it on the Keys page (search-service card).",
   "customize.loginHint.bedrock": "AWS credentials: set AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY or AWS_PROFILE.",
   "customize.loginHint.tokenrhythm": "Web-session sign-in: use the Login button on the tokenrhythm row in Settings.",
+  "customize.loginHint.xfyun": "Web-session sign-in: use the Login button on the Spark row in Settings.",
   "customize.loginHint.vertexai": "gcloud credentials: run gcloud auth application-default login first.",
   "customize.loginHint.jetbrains": "Sign in to AI Assistant inside JetBrains — Pane reads its local quota file.",
   "customize.loginHint.shandianshuo": "Sign in to the Shandianshuo desktop app first.",
@@ -1247,6 +1259,7 @@ const en: Dict = {
   "customize.onboarding.trae": "Open the auth center and click Add account\nComplete the browser sign-in\nCome back to Pane",
   "customize.onboarding.zed": "Open the auth center and click Add account\nComplete the browser sign-in\nCome back to Pane",
   "customize.onboarding.tokenrhythm": "Open Settings and click Login on the tokenrhythm row\nFinish the phone + code sign-in in the window\nCome back and refresh the card",
+  "customize.onboarding.xfyun": "Open Settings and click Login on the Spark row\nFinish the iFlytek sign-in in the window\nCome back and refresh the card",
   "customize.onboarding.apiKey": "Paste the API key from the vendor console; test before saving.",
   "customize.onboarding.localRead": "Reads the sign-in already present in the local client/CLI; Pane stores no extra secret.",
   "customize.onboarding.onenewapi": "Add One/New API sites and keys in the site manager.",
@@ -1352,6 +1365,7 @@ const en: Dict = {
 
   "detail.unlimited": "Unlimited",
   "detail.weekendNotStarted": "Weekend not started",
+  "detail.unconfirmed": "Unconfirmed",
   "detail.moneyOfLeft": "{a} of {b} left",
   "detail.moneyOfLeftCredits": "{a} of {b} left · {n} credits",
   "detail.moneyLeftOf": "{a} left of {b}",
@@ -1782,6 +1796,9 @@ const zh: Dict = {
   "settings.trLoginWaiting": "等待基元律动登录完成…",
   "settings.trLoginDone": "基元律动已登录",
   "settings.trLoginFailed": "基元律动登录未完成：{reason}",
+  "settings.webLoginWaiting": "等待{name}登录完成…",
+  "settings.webLoginDone": "{name}已登录",
+  "settings.webLoginFailed": "{name}登录未完成：{reason}",
   "settings.keyEnv": "来自环境变量",
   "settings.keyConfigured": "已配置",
   "settings.keyEdit": "添加密钥",
@@ -1940,6 +1957,9 @@ const zh: Dict = {
   "card.hintWbWebExpired": "WorkBuddy 网页会话已过期——请在自定义面板重新导入 Cookie，或从授权中心登录。",
   "card.hintWbWebError": "WorkBuddy 网页会话：{reason}",
   "card.hintWbWebNoData": "WorkBuddy 网页会话没有返回额度数据",
+  "card.hintXfyunSignIn": "请从授权中心登录讯飞星火网页控制台，以读取免费额度。",
+  "card.hintXfyunExpired": "讯飞星火网页会话已过期——请从授权中心重新登录。",
+  "card.hintXfyunNoClaim": "尚未领取 Spark-X2.6 免费额度——请先在讯飞控制台领取，再刷新。",
   "card.outdated": "⚠ 数据过时",
   "card.needsSetupFallback": "凭据已保存，但用量接口还差一步。",
   "card.needsSetupAction": "怎么补",
@@ -2242,6 +2262,11 @@ const zh: Dict = {
   "metric.via": "经由",
   "metric.sessions": "会话数",
   "metric.expiry": "到期",
+  "metric.freeQuota": "免费额度",
+  "metric.usage7d": "近 7 天用量",
+  "metric.remaining": "剩余",
+  "metric.expires": "到期",
+  "metric.status": "状态",
   "metric.modelWeekly": "{model} 每周",
 
   "link.Status": "状态",
@@ -2574,6 +2599,7 @@ const zh: Dict = {
   "customize.loginHint.brave": "API 密钥：在「设置 → 密钥与额度」的搜索服务卡片中添加。",
   "customize.loginHint.bedrock": "AWS 凭据：设置 AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY，或使用 AWS_PROFILE。",
   "customize.loginHint.tokenrhythm": "网页会话登录：在「设置 → 密钥与额度」的基元律动行点「网页登录」。",
+  "customize.loginHint.xfyun": "网页会话登录：在「设置 → 密钥与额度」的讯飞星火行点「网页登录」。",
   "customize.loginHint.vertexai": "gcloud 凭据：先运行 gcloud auth application-default login。",
   "customize.loginHint.jetbrains": "先在 JetBrains IDE 内登录 AI Assistant — Pane 读取本地配额文件。",
   "customize.loginHint.shandianshuo": "先打开闪电说桌面客户端并登录。",
@@ -2587,6 +2613,7 @@ const zh: Dict = {
   "customize.onboarding.trae": "在授权中心点「添加账号」\n在浏览器完成登录\n完成后回到 Pane",
   "customize.onboarding.zed": "在授权中心点「添加账号」\n在浏览器完成登录\n完成后回到 Pane",
   "customize.onboarding.tokenrhythm": "打开设置，在基元律动行点「网页登录」\n在弹出窗口用手机号+验证码登录\n回来刷新卡片",
+  "customize.onboarding.xfyun": "打开设置，在讯飞星火行点「网页登录」\n在弹出窗口完成讯飞账号登录\n回来刷新卡片",
   "customize.onboarding.apiKey": "粘贴服务商控制台生成的 API key，保存前可先测试连接。",
   "customize.onboarding.localRead": "读取本机客户端/CLI 已有的登录态，Pane 不额外保存密钥。",
   "customize.onboarding.onenewapi": "在站点管理中逐个添加 One/New API 站点与密钥。",
@@ -2687,6 +2714,7 @@ const zh: Dict = {
 
   "detail.unlimited": "无限制",
   "detail.weekendNotStarted": "周末未开始",
+  "detail.unconfirmed": "待确认",
   "detail.moneyOfLeft": "{a} / {b} 剩余",
   "detail.moneyOfLeftCredits": "{a} / {b} 剩余 · {n} 额度",
   "detail.moneyLeftOf": "{a} / {b} 剩余",
@@ -3120,6 +3148,9 @@ const ru: Dict = {
   "settings.trLoginWaiting": "Ожидание завершения входа в 基元律动…",
   "settings.trLoginDone": "基元律动: вход выполнен",
   "settings.trLoginFailed": "基元律动: вход не завершён: {reason}",
+  "settings.webLoginWaiting": "Ожидание завершения входа в {name}…",
+  "settings.webLoginDone": "{name}: вход выполнен",
+  "settings.webLoginFailed": "{name}: вход не завершён: {reason}",
   "settings.keyEnv": "из окружения",
   "settings.keyConfigured": "Настроен",
   "settings.keyEdit": "Добавить ключ",
@@ -3280,6 +3311,9 @@ const ru: Dict = {
   "card.hintWbWebExpired": "Веб-сеанс WorkBuddy истёк — импортируйте новый cookie в разделе настройки или войдите через центр авторизации.",
   "card.hintWbWebError": "Веб-сеанс WorkBuddy: {reason}",
   "card.hintWbWebNoData": "Веб-сеанс WorkBuddy не вернул данных о лимитах",
+  "card.hintXfyunSignIn": "Войдите в веб-консоль Spark через центр авторизации, чтобы увидеть бесплатную квоту.",
+  "card.hintXfyunExpired": "Веб-сеанс Spark истёк — войдите снова через центр авторизации.",
+  "card.hintXfyunNoClaim": "Бесплатная квота Spark-X2.6 ещё не получена — получите её в консоли iFlytek и обновите.",
   "card.outdated": "⚠ Данные устарели",
   "card.needsSetupFallback": "Учётные данные сохранены, но API использования требует ещё одного шага.",
   "card.needsSetupAction": "Как исправить",
@@ -3589,6 +3623,11 @@ const ru: Dict = {
   "metric.via": "Через",
   "metric.sessions": "Сессии",
   "metric.expiry": "Срок действия",
+  "metric.freeQuota": "Бесплатная квота",
+  "metric.usage7d": "Использование (7 дн.)",
+  "metric.remaining": "Остаток",
+  "metric.expires": "Истекает",
+  "metric.status": "Статус",
   "metric.modelWeekly": "{model} за неделю",
 
   "link.Status": "Статус",
@@ -3924,6 +3963,7 @@ const ru: Dict = {
   "customize.loginHint.brave": "API-ключ: добавьте на странице «Ключи» (карточка поискового сервиса).",
   "customize.loginHint.bedrock": "AWS-учётные данные: задайте AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY или AWS_PROFILE.",
   "customize.loginHint.tokenrhythm": "Веб-сеанс: нажмите «Войти» в строке tokenrhythm в настройках.",
+  "customize.loginHint.xfyun": "Веб-сеанс: нажмите «Войти» в строке Spark в настройках.",
   "customize.loginHint.vertexai": "Учётные данные gcloud: сначала выполните gcloud auth application-default login.",
   "customize.loginHint.jetbrains": "Войдите в AI Assistant внутри JetBrains — Pane читает локальный файл квот.",
   "customize.loginHint.shandianshuo": "Сначала войдите в настольное приложение Shandianshuo.",
@@ -3937,6 +3977,7 @@ const ru: Dict = {
   "customize.onboarding.trae": "Откройте центр авторизации и нажмите «Добавить аккаунт»\nЗавершите вход в браузере\nВернитесь в Pane",
   "customize.onboarding.zed": "Откройте центр авторизации и нажмите «Добавить аккаунт»\nЗавершите вход в браузере\nВернитесь в Pane",
   "customize.onboarding.tokenrhythm": "Откройте настройки и нажмите «Войти» в строке tokenrhythm\nЗавершите вход по телефону и коду в окне\nВернитесь и обновите карточку",
+  "customize.onboarding.xfyun": "Откройте настройки и нажмите «Войти» в строке Spark\nЗавершите вход iFlytek в окне\nВернитесь и обновите карточку",
   "customize.onboarding.apiKey": "Вставьте API-ключ из консоли провайдера; перед сохранением можно проверить.",
   "customize.onboarding.localRead": "Читает вход, уже существующий в локальном клиенте/CLI; Pane не хранит дополнительный секрет.",
   "customize.onboarding.onenewapi": "Добавьте сайты и ключи One/New API в менеджере сайтов.",
@@ -4041,6 +4082,7 @@ const ru: Dict = {
 
   "detail.unlimited": "Без лимита",
   "detail.weekendNotStarted": "Выходные ещё не начались",
+  "detail.unconfirmed": "Не подтверждено",
   "detail.moneyOfLeft": "{a} / {b} осталось",
   "detail.moneyOfLeftCredits": "{a} / {b} осталось · {n} кредитов",
   "detail.moneyLeftOf": "{a} / {b} осталось",
@@ -4090,6 +4132,11 @@ const METRIC_KEYS: Record<string, string> = {
   Sessions: "metric.sessions",
   Expiry: "metric.expiry",
   "Daily check-in": "metric.checkin",
+  "Free quota": "metric.freeQuota",
+  "Usage (7d)": "metric.usage7d",
+  Remaining: "metric.remaining",
+  Expires: "metric.expires",
+  Status: "metric.status",
   "Usage Trend": "spend.trend",
   Today: "spend.today",
   Yesterday: "spend.yesterday",
@@ -4181,6 +4228,15 @@ export function displayCardHint(text: string): string {
   const stepPlanKey = ["card.stepPlanRejected", "card.stepPlanPair", "card.stepPlanApiKey", "card.stepPlanEmpty"]
     .find((key) => en[key] === text);
   if (stepPlanKey) return t(stepPlanKey);
+  if (text === "Sign in to the Spark web console from the auth center to see its free quota.") {
+    return t("card.hintXfyunSignIn");
+  }
+  if (text === "Spark web session expired — sign in again from the auth center.") {
+    return t("card.hintXfyunExpired");
+  }
+  if (text === "No Spark-X2.6 free quota claimed yet — claim it in the iFlytek console, then refresh.") {
+    return t("card.hintXfyunNoClaim");
+  }
   const generic = text.match(/^Sign in with (.+) from the auth center to see its quota\.$/);
   if (generic) return t("card.hintSignIn", { name: generic[1] });
   if (
@@ -4241,6 +4297,7 @@ export function displayMetricDetail(text: string): string {
   if (m) return t("detail.countOfLeft", { a: m[1], b: m[2] });
   if (/^available$/i.test(text.trim())) return t("card.available");
   if (/^weekend not started$/i.test(text.trim())) return t("detail.weekendNotStarted");
+  if (/^unconfirmed$/i.test(text.trim())) return t("detail.unconfirmed");
   if (/^unlimited$/i.test(text.trim())) return t("detail.unlimited");
   // GIPHY. The bar's denominator comes from GIPHY's *documented* 100/hour
   // beta cap, not from any readable quota, and the numerator is the newest

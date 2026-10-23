@@ -9,6 +9,7 @@ import {
   providerCategory,
   providerDefinition,
   providerFamily,
+  isWebSessionFamily,
   supportsApiKey,
   supportsExtraAccounts,
   type ProviderCategory,
@@ -3050,7 +3051,7 @@ let unconfiguredFoldOpen = false;
 
 function overviewAccountSnapshots(family: string): Snapshot[] {
   const accounts = accountsCache.get(family);
-  const foldsDefault = providerDefinition(family)?.supportsApiKey || family === "tokenrhythm";
+  const foldsDefault = providerDefinition(family)?.supportsApiKey || isWebSessionFamily(family);
   const activeIds = accounts?.length && foldsDefault
     ? new Set(accounts.map((entry, index) => index === 0 ? family : entry.id))
     : undefined;
@@ -6425,7 +6426,7 @@ function groupMenuPosition(rect: UiRect, width: number, height: number, side: "l
 }
 
 function managedAccountForCard(family: string, cardId: string, accounts: AccountEntry[]): AccountEntry | undefined {
-  return accounts.find((entry, index) => entry.id === cardId || (cardId === family && index === 0 && (providerDefinition(family)?.supportsApiKey || family === "tokenrhythm")));
+  return accounts.find((entry, index) => entry.id === cardId || (cardId === family && index === 0 && (providerDefinition(family)?.supportsApiKey || isWebSessionFamily(family))));
 }
 
 function openGroupMenu(
@@ -8794,7 +8795,7 @@ async function afterCredentialMutation(family: string, savedId?: string, enable 
   reconcileAccountLayout(family, current);
   const probe = accountProbeSnapshots.get(family);
   for (const [index, entry] of (accountsCache.get(family) ?? []).entries()) {
-    const foldsDefault = providerDefinition(family)?.supportsApiKey || family === "tokenrhythm";
+    const foldsDefault = providerDefinition(family)?.supportsApiKey || isWebSessionFamily(family);
     const id = foldsDefault && index === 0 ? family : entry.id!;
     if (!id || lastSnapshots.some((snapshot) => snapshot.id === id)) continue;
     lastSnapshots.push(probe && entry.id === savedId ? { ...probe, id, name: providerDisplayName(family) } : {
@@ -9285,7 +9286,7 @@ function reconcileAccountLayout(family: string, list: AccountEntry[]): boolean {
   // Index 0 publishes under the bare family id: its account-specific card
   // folds into the main card. Parallel families (Antigravity/Cursor) do not
   // have that fold — every account keeps its own card.
-  const foldsDefault = providerDefinition(family)?.supportsApiKey || family === "tokenrhythm";
+  const foldsDefault = providerDefinition(family)?.supportsApiKey || isWebSessionFamily(family);
   const defaultId = foldsDefault ? list[0]?.id : undefined;
   const active = new Set(list.map((entry) => entry.id).filter((id): id is string => Boolean(id)));
   const separateCards = new Set([...active].filter((id) => id !== defaultId));
@@ -9382,7 +9383,7 @@ function forgetAccountFromBoard(
       (archivedAccountsCache.get(family) ?? []).filter((row) => row.card_id !== cardId),
     );
   }
-  const foldedDefault = (providerDefinition(family)?.supportsApiKey || family === "tokenrhythm") && removedIndex === 0;
+  const foldedDefault = (providerDefinition(family)?.supportsApiKey || isWebSessionFamily(family)) && removedIndex === 0;
   lastSnapshots = lastSnapshots.filter(
     (snapshot) => snapshot.id !== cardId && !(foldedDefault && snapshot.id === family),
   );
@@ -10192,7 +10193,7 @@ function accountChildRows(family: string): string {
   if (!list.length) return "";
   // Pin (置顶) controls exist only with 2+ accounts — a single account has
   // nothing to order against. Applies to EVERY multi-account family.
-  const showPin = list.length >= 2 && (providerDefinition(family)?.supportsApiKey || family === "tokenrhythm");
+  const showPin = list.length >= 2 && (providerDefinition(family)?.supportsApiKey || isWebSessionFamily(family));
   const children = list
     .map((a, i) => {
       const acctId = a.id ?? "";
@@ -10352,11 +10353,6 @@ function removedProvidersHtml(): string {
     </div>`;
 }
 
-/// Families whose credential is a browser session rather than a pasted key:
-/// their Customize row gets a jump button that opens the settings panel on
-/// the family's key row, where the sign-in control lives.
-const WEB_SESSION_FAMILIES: ReadonlySet<string> = new Set(["tokenrhythm"]);
-
 function renderCustomize(): string {
   if (skinMarketOpen) return renderSkinMarket();
   // A-Z by English display name, locale-independent. Card order is owned by
@@ -10506,7 +10502,7 @@ function renderCustomize(): string {
             <span class="spacer"></span>
             <button class="mini-btn cust-info-btn${custInfoOpen === id ? " on" : ""}" data-info="${id}" title="${escapeHtml(t("customize.credInfo"))}">${uiIcon("question")}</button>
             <button class="mini-btn cust-config-btn${custConfigOpen === id ? " on" : ""}" data-config="${id}" title="${escapeHtml(t("customize.configure"))}">${uiIcon("gear")}</button>
-            ${WEB_SESSION_FAMILIES.has(id) ? `<button class="mini-btn cust-session-btn" data-session-jump="${id}" title="${escapeHtml(t("customize.sessionJump"))}">${uiIcon("globe")}</button>` : ""}
+            ${isWebSessionFamily(id) ? `<button class="mini-btn cust-session-btn" data-session-jump="${id}" title="${escapeHtml(t("customize.sessionJump"))}">${uiIcon("globe")}</button>` : ""}
             <button class="mini-btn icon-btn reset-layout-btn" data-reset="${id}" title="${escapeHtml(t("customize.resetLayoutTip"))}" aria-label="${escapeHtml(t("customize.resetLayoutTip"))}">${uiIcon("arrowsClockwise")}</button>
             <label class="toggle mini" title="${escapeHtml(t("customize.enable"))}"><input type="checkbox" data-enable="${id}"${enabled ? " checked" : ""} /></label>
           </div>
@@ -14749,9 +14745,9 @@ function settingsKeyRow(family: string): HTMLElement {
     // Antigravity have their own import/capture flows; a paste-key family
     // gets the inline editor; everything else signs in through the auth
     // center. A family with no API key must never land on the key editor.
-    if (family === "tokenrhythm") {
+    if (isWebSessionFamily(family)) {
       const add = button(t("customize.acctAdd"), "", "plus");
-      add.addEventListener("click", () => void addTokenrhythmAccount(add));
+      add.addEventListener("click", () => void addWebSessionAccount(add, family));
       actions.append(add);
     } else if (family === "cursor") {
       const add = button(t("customize.acctAdd"), "", "plus");
@@ -14843,18 +14839,19 @@ function settingsKeyRow(family: string): HTMLElement {
   return item;
 }
 
-async function addTokenrhythmAccount(button: HTMLButtonElement): Promise<void> {
+async function addWebSessionAccount(button: HTMLButtonElement, family: string): Promise<void> {
   if (button.disabled) return;
   const label = button.textContent;
+  const name = providerDisplayName(family);
   button.disabled = true;
-  button.textContent = t("settings.trLoginWaiting");
+  button.textContent = t("settings.webLoginWaiting", { name });
   try {
-    await invoke("tokenrhythm_login");
-    await afterCredentialMutation("tokenrhythm");
-    settingsToast(t("settings.trLoginDone"));
+    await invoke("web_session_login", { family });
+    await afterCredentialMutation(family);
+    settingsToast(t("settings.webLoginDone", { name }));
     renderSettingsProviderKeys();
   } catch (error) {
-    settingsToast(t("settings.trLoginFailed", { reason: String(error) }), true);
+    settingsToast(t("settings.webLoginFailed", { name, reason: String(error) }), true);
   } finally {
     button.disabled = false;
     button.textContent = label;
@@ -15086,11 +15083,11 @@ function settingsAccountRow(family: string, entry: AccountEntry, _index: number)
         .catch((error) => settingsToast(String(error), true));
     });
     actions.append(archive);
-    if (family === "tokenrhythm") {
+    if (isWebSessionFamily(family)) {
       const relogin = document.createElement("button");
       relogin.type = "button"; relogin.className = "mini-btn";
       relogin.textContent = t("settings.trLoginAgain");
-      relogin.addEventListener("click", () => void addTokenrhythmAccount(relogin));
+      relogin.addEventListener("click", () => void addWebSessionAccount(relogin, family));
       actions.append(relogin);
     }
     actions.append(remove);
@@ -16917,12 +16914,15 @@ async function jumpToAuthCenter(family: string): Promise<void> {
 
 /// A card with no data because it needs a Pane sign-in gets a button that
 /// lands on its row in the auth center — the journey its hint describes,
-/// without making the user go find the page. Families Pane can sign in for
-/// are the ones the catalog marks as OAuth; a key-only family is pointed at
+/// without making the user go find the page. OAuth families and Pane-hosted
+/// web-session families both use this route; a key-only family is pointed at
 /// its own key field by its hint instead.
 function authJumpHtml(snap: Snapshot): string {
   const family = providerFamily(snap.id);
-  if (snap.status !== "no_credentials" || providerDefinition(family)?.supportsOAuth !== true) return "";
+  if (
+    snap.status !== "no_credentials" ||
+    (providerDefinition(family)?.supportsOAuth !== true && !isWebSessionFamily(family))
+  ) return "";
   return `<button class="mini-btn auth-jump" type="button" data-auth-jump="${escapeHtml(family)}">${escapeHtml(t("card.signIn"))}</button>`;
 }
 
@@ -17194,7 +17194,7 @@ function authFlowHtml(family: string): string {
       <div class="auth-note">${escapeHtml(t("auth.flow.browserNote"))}</div>
     </div>`;
   }
-  if (family === "tokenrhythm" && flow.phase === "starting") {
+  if (isWebSessionFamily(family) && flow.phase === "starting") {
     return `<div class="auth-flow" role="status"><div class="auth-flow-head"><span>${escapeHtml(t("auth.flow.webWindow"))}</span></div></div>`;
   }
   const codeRow = flow.userCode
@@ -17523,11 +17523,11 @@ async function openKeysPageFor(family: string): Promise<void> {
 
 function authAddAccount(family: string): void {
   if (authFlowBusy()) return;
-  if (family === "tokenrhythm") {
+  if (isWebSessionFamily(family)) {
     const flow: AuthFlow = { phase: "starting", deviceAuthId: "", userCode: "", error: null, label: null };
     authFlows.set(family, flow);
     renderAuthCenter();
-    void invoke("tokenrhythm_login").then(async () => {
+    void invoke("web_session_login", { family }).then(async () => {
       if (authFlows.get(family) !== flow) return;
       authFlows.set(family, { phase: "success", deviceAuthId: "", userCode: "", error: null, label: null });
       await afterCredentialMutation(family);
@@ -18567,7 +18567,10 @@ document.querySelector("#settings-btn")!.addEventListener("click", () => {
         void patchConfig({ panelIntent: { view: "settings", family: fam, at: Date.now() } }).then(() => invoke("open_panel_window"));
         return;
       }
-      if (providerDefinition(fam)?.supportsOAuth) { void jumpToAuthCenter(fam); return; }
+      if (providerDefinition(fam)?.supportsOAuth || isWebSessionFamily(fam)) {
+        void jumpToAuthCenter(fam);
+        return;
+      }
       custKeyEditing.add(fam);
       skinMarketOpen = false;
       custConfigOpen = fam;

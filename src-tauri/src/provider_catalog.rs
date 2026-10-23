@@ -608,6 +608,19 @@ const PROVIDER_DEFINITIONS: &[ProviderDefinition] = &[
         primary_unit: UsageUnit::Tokens,
     },
     ProviderDefinition {
+        // Web-session only: the API key authenticates inference, not the
+        // console quota endpoints. The Spark-X2.6 free grant is read from
+        // the signed-in MaaS console.
+        family_id: "xfyun",
+        display_name: "讯飞星火",
+        query_kind: QueryKind::NativeBalance,
+        supports_api_key: false,
+        supports_extra_accounts: true,
+        icon_key: "xfyun",
+        category: ProviderCategory::Coding,
+        primary_unit: UsageUnit::Tokens,
+    },
+    ProviderDefinition {
         family_id: "venice",
         display_name: "Venice",
         query_kind: QueryKind::NativeBalance,
@@ -804,6 +817,14 @@ pub fn supports_api_key(family_id: &str) -> bool {
     provider_definition(family_id).is_some_and(|definition| definition.supports_api_key)
 }
 
+/// Families whose credential is a Pane-hosted browser session rather than a
+/// pasted API key. Keep in sync with the frontend catalog's `webSession` flag.
+pub const WEB_SESSION_FAMILIES: &[&str] = &["tokenrhythm", "xfyun"];
+
+pub fn is_web_session(family_id: &str) -> bool {
+    WEB_SESSION_FAMILIES.contains(&family_id)
+}
+
 pub fn default_disabled_families() -> Vec<&'static str> {
     provider_definitions().iter().filter(|definition| {
         !matches!(
@@ -844,9 +865,18 @@ pub fn query_kind_for_instance(id: &str) -> Option<QueryKind> {
 #[cfg(test)]
 mod tests {
     use super::{
-        family_of, provider_definition, provider_definitions, query_kind_for_instance,
-        supports_extra_accounts, takes_base_url, ProviderCategory, QueryKind,
+        family_of, is_web_session, provider_definition, provider_definitions,
+        query_kind_for_instance, supports_extra_accounts, takes_base_url, ProviderCategory,
+        QueryKind,
     };
+
+    #[test]
+    fn catalog_marks_web_session_families() {
+        assert!(is_web_session("tokenrhythm"));
+        assert!(is_web_session("xfyun"));
+        assert!(!is_web_session("deepseek"));
+        assert!(!is_web_session("unknown"));
+    }
 
     #[test]
     fn catalog_marks_the_multi_account_families() {
@@ -893,6 +923,7 @@ mod tests {
             "openai-api",
             "poe",
             "tokenrhythm",
+            "xfyun",
             "venice",
             "windsurf",
             "warp",

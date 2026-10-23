@@ -2147,26 +2147,45 @@ fn workbuddy_web_clear() -> Result<(), String> {
     providers::workbuddy_web::clear()
 }
 
-/// 基元律动 (tokenrhythm.studio) web-session login surface. The console's
-/// money endpoints reject the API key (verified 2026-10-19), so the user
-/// signs in inside a Pane-hosted webview and the session persists in
-/// Pane's own WebView2 profile — the cookie never travels to the frontend.
+async fn migrate_web_session(family: &str) -> Result<(), String> {
+    match family {
+        "tokenrhythm" => providers::tokenrhythm::migrate_legacy_session().await,
+        "xfyun" => providers::xfyun::migrate_legacy_session().await,
+        _ => Ok(()),
+    }
+}
+
+/// Generic web-session login surface. Each family owns its login window and
+/// session reader; this command face only routes by family so the frontend
+/// does not grow another `<family>_login` branch for every provider.
 #[tauri::command]
-fn tokenrhythm_login_status() -> providers::tokenrhythm::LoginStatus {
-    providers::tokenrhythm::status()
+fn web_session_login_status(family: String) -> Result<providers::tokenrhythm::LoginStatus, String> {
+    match family.as_str() {
+        "tokenrhythm" => Ok(providers::tokenrhythm::status()),
+        "xfyun" => Ok(providers::xfyun::status()),
+        _ => Err(format!("{family} is not a web-session provider")),
+    }
 }
 
 /// Opens the sign-in window and waits for the console to report a session.
 /// Async: WebviewWindowBuilder::build() deadlocks inside synchronous
 /// commands on Windows (see ensure_panel_window).
 #[tauri::command]
-async fn tokenrhythm_login(app: tauri::AppHandle) -> Result<(), String> {
-    providers::tokenrhythm::login(&app).await
+async fn web_session_login(family: String, app: tauri::AppHandle) -> Result<(), String> {
+    match family.as_str() {
+        "tokenrhythm" => providers::tokenrhythm::login(&app).await,
+        "xfyun" => providers::xfyun::login(&app).await,
+        _ => Err(format!("{family} is not a web-session provider")),
+    }
 }
 
 #[tauri::command]
-fn tokenrhythm_login_clear() -> Result<(), String> {
-    providers::tokenrhythm::clear()
+fn web_session_login_clear(family: String) -> Result<(), String> {
+    match family.as_str() {
+        "tokenrhythm" => providers::tokenrhythm::clear(),
+        "xfyun" => providers::xfyun::clear(),
+        _ => Err(format!("{family} is not a web-session provider")),
+    }
 }
 
 #[tauri::command]
@@ -2302,7 +2321,8 @@ async fn test_provider(provider_id: String) -> Result<String, String> {
 }
 
 async fn fetch_provider_snapshot(provider_id: String, allow_disabled: bool) -> Result<providers::Snapshot, String> {
-    if family_of(&provider_id) == "tokenrhythm" { providers::tokenrhythm::migrate_legacy_session().await?; }
+    let family = family_of(&provider_id);
+    if provider_catalog::is_web_session(&family) { migrate_web_session(&family).await?; }
     let before = managed_snapshot_identities().remove(&provider_id);
     let result = fetch_provider_snapshot_unchecked(provider_id.clone(), allow_disabled).await?;
     if before != managed_snapshot_identities().remove(&provider_id) {
@@ -2425,6 +2445,7 @@ async fn fetch_provider_snapshot_unchecked(provider_id: String, allow_disabled: 
             .ok_or_else(|| format!("no {family} account {provider_id}"))?;
         return Ok(match family.as_str() {
             "tokenrhythm" => providers::tokenrhythm::snapshot_with_login(login).await,
+            "xfyun" => providers::xfyun::snapshot_with_login(login).await,
             "copilot" => providers::copilot::snapshot_with_login(login).await,
             "kiro" => providers::kiro::snapshot_with_login(login).await,
             "qoder" => providers::qoder::snapshot_with_login(login).await,
@@ -2534,9 +2555,11 @@ async fn run_usage_fetch_inner_mode(
         }
     }
 
-    if !disabled.iter().any(|family| family == "tokenrhythm") {
-        // One-time single-session migration must precede the identity stamp.
-        let _ = providers::tokenrhythm::migrate_legacy_session().await;
+    for family in provider_catalog::WEB_SESSION_FAMILIES {
+        if !disabled.iter().any(|disabled_family| disabled_family.as_str() == *family) {
+            // One-time single-session migration must precede the identity stamp.
+            let _ = migrate_web_session(family).await;
+        }
     }
     // Each provider future is boxed onto the heap and spawned as its own
     // task. A single tokio::join! over 28 inlined futures builds one huge
@@ -2669,7 +2692,7 @@ async fn run_usage_fetch_inner_mode(
         };
         for (index, login) in login_accounts::load_with_imported_single_login(family).into_iter().enumerate() {
             // The first web-session account is already the bare family card.
-            if family == "tokenrhythm" && index == 0 { continue; }
+            if provider_catalog::is_web_session(family) && index == 0 { continue; }
             if let Some((slot_acct, slot_tok)) = &slot {
                 let same_as_slot = (!slot_acct.is_empty() && slot_acct == &login.account_id)
                     || slot_tok == &login.access_token;
@@ -2688,6 +2711,10 @@ async fn run_usage_fetch_inner_mode(
                 "tokenrhythm" => (
                     providers::tokenrhythm::login_card_name(&login),
                     Box::pin(providers::tokenrhythm::snapshot_with_login(login)),
+                ),
+                "xfyun" => (
+                    providers::xfyun::login_card_name(&login),
+                    Box::pin(providers::xfyun::snapshot_with_login(login)),
                 ),
                 "copilot" => (
                     providers::copilot::login_card_name(&login),
@@ -3846,7 +3873,7 @@ fn account_delete(
 fn finish_account_removal(provider: &str, card_id: &str, removed: Option<usize>, keep_usage: bool) {
     let _ = forget_provider_snapshot(card_id);
     let _ = forget_account_layout(card_id);
-    if provider == "tokenrhythm" && removed == Some(0) {
+    if provider_catalog::is_web_session(provider) && removed == Some(0) {
         let _ = forget_provider_snapshot(provider);
         if keep_usage { usage_history::migrate_card_id(provider, card_id); }
         else { usage_history::remove_card_history(provider); }
@@ -4026,7 +4053,7 @@ fn account_restore(provider: String, card_id: String) -> Result<(), String> {
     if account_lifecycle::manages(&provider) {
         account_lifecycle::restore_from(&base, &provider, &card_id)?;
         let _ = forget_provider_snapshot(&card_id);
-        if provider == "tokenrhythm" {
+        if provider_catalog::is_web_session(&provider) {
             let _ = forget_provider_snapshot(&provider);
             if login_accounts::load(&provider).first()
                 .is_some_and(|row| login_accounts::card_id_for_account(&provider, row) == card_id) {
@@ -4126,7 +4153,7 @@ fn account_restore(provider: String, card_id: String) -> Result<(), String> {
 fn account_set_default(provider: String, index: Option<usize>, card_id: Option<String>) -> Result<(), String> {
     let _account_mutation = account_lifecycle::mutation_lock().lock().unwrap_or_else(|e| e.into_inner());
     let index = account_action_index(&provider, index, card_id.as_deref())?;
-    if provider == "tokenrhythm" {
+    if provider_catalog::is_web_session(&provider) {
         let mut entries = login_accounts::load(&provider);
         if index >= entries.len() { return Err("account no longer exists".into()); }
         if index > 0 {
@@ -4389,7 +4416,7 @@ fn managed_snapshot_identities() -> HashMap<String, String> {
             let id = login_accounts::card_id_for_account(family, row);
             ids.insert(id.clone(), id);
         }
-        let bare = if family == "tokenrhythm" {
+        let bare = if provider_catalog::is_web_session(family) {
             rows.first().map(|row| login_accounts::card_id_for_account(family, row))
         } else {
             oauth::peek_from(&providers::config_dir().join("oauth"), family).map(|slot| slot.account_id.filter(|id| !id.is_empty())
@@ -5742,9 +5769,9 @@ pub fn run() {
             workbuddy_web_import_chrome,
             workbuddy_web_save_cookie,
             workbuddy_web_clear,
-            tokenrhythm_login_status,
-            tokenrhythm_login,
-            tokenrhythm_login_clear,
+            web_session_login_status,
+            web_session_login,
+            web_session_login_clear,
             save_text_file,
             backup_export_dialog,
             backup_preview_dialog,

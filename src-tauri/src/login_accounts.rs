@@ -50,9 +50,9 @@ pub struct LoginAccount {
 /// The families this store serves. Every entry has a login flow that
 /// records here on completion; the gate keeps stray family ids from
 /// minting files under `%APPDATA%\Pane\login-accounts\`.
-pub const LOGIN_FAMILIES: [&str; 12] = [
+pub const LOGIN_FAMILIES: [&str; 13] = [
     "codebuddy", "codebuddycn", "copilot", "grok", "kiro", "qoder", "trae", "windsurf", "workbuddy",
-    "workbuddyai", "zed", "tokenrhythm",
+    "workbuddyai", "zed", "tokenrhythm", "xfyun",
 ];
 
 pub fn takes_login_accounts(family: &str) -> bool {

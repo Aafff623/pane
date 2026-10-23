@@ -131,6 +131,12 @@ const SPECIAL: Record<string, Onboarding> = {
     hintKey: "customize.loginHint.tokenrhythm",
     stepsKey: "customize.onboarding.tokenrhythm",
   },
+  xfyun: {
+    kind: "cookie",
+    actions: ["addLogin"],
+    hintKey: "customize.loginHint.xfyun",
+    stepsKey: "customize.onboarding.xfyun",
+  },
   bedrock: {
     kind: "cloud",
     actions: [],
