@@ -4378,7 +4378,11 @@ function renderSpendDetailOverlay(): string {
 /// form is a normal window — it has its own frame, so it gets none.
 function popoverChromeHtml(): string {
   if (IS_PANEL_FORM) return "";
-  return `<button class="mini-btn chrome-btn settings-chrome" data-popover-settings title="${escapeHtml(t("popover.settingsTip"))}" aria-label="${escapeHtml(t("popover.settingsTip"))}">${uiIcon("gear")}</button>`;
+  // Pin sits on its own, left of the gear: it is a one-click window state, not
+  // a setting, and the gear menu is about scale/type. The gold, upright pin is
+  // the only "on" signal here (see .chrome-btn.pin-btn.on).
+  const pinned = config.popoverPin !== false;
+  return `<button class="mini-btn chrome-btn pin-btn${pinned ? " on" : ""}" data-popover-pin aria-pressed="${pinned}" title="${escapeHtml(t("popover.pinLabel"))}" aria-label="${escapeHtml(t("popover.pinLabel"))}">${uiIcon("pushPin")}</button><button class="mini-btn chrome-btn settings-chrome" data-popover-settings title="${escapeHtml(t("popover.settingsTip"))}" aria-label="${escapeHtml(t("popover.settingsTip"))}">${uiIcon("gear")}</button>`;
 }
 
 /// Pin / unpin the popover (always-on-top). Persisted, and re-applied on
@@ -8384,7 +8388,6 @@ function openPopoverSettings(anchor: HTMLElement): void {
       <div class="settings-font-row">${settingsFontButtons()}</div>
     </div>
     <div class="settings-pop-section settings-pop-actions">
-      <button type="button" class="mini-btn" data-settings-pin>${uiIcon("pushPin")}<span>${escapeHtml(t("popover.pinLabel"))}</span></button>
       <button type="button" class="mini-btn" data-settings-lock>${uiIcon(config.popoverLock !== false ? "lock" : "lockOpen")}<span>${escapeHtml(t("popover.lockLabel"))}</span></button>
       ${
         config.popoverLock === false
@@ -8430,9 +8433,6 @@ function openPopoverSettings(anchor: HTMLElement): void {
         row.classList.toggle("active", row === button);
       });
     });
-  });
-  pop.querySelector("[data-settings-pin]")?.addEventListener("click", () => {
-    void togglePopoverPin().then(() => hidePopoverScale());
   });
   pop.querySelector("[data-settings-lock]")?.addEventListener("click", () => {
     void togglePopoverLock().then(() => hidePopoverScale());
@@ -19139,6 +19139,11 @@ document.querySelector("#settings-btn")!.addEventListener("click", () => {
     }
     // Popover chrome: pin (always-on-top) and the position lock. Both are
     // popover-window concerns — the panel form has a real frame.
+    if (target.closest<HTMLElement>("[data-popover-pin]")) {
+      e.preventDefault();
+      void togglePopoverPin();
+      return;
+    }
     if (target.closest<HTMLElement>("[data-popover-settings]")) {
       e.preventDefault();
       const button = target.closest<HTMLElement>("[data-popover-settings]")!;
