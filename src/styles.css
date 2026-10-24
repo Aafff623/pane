@@ -5282,6 +5282,25 @@ footer {
 /* Entrance animations play only when the popover opens (the .reveal class
    is added for one pass), never on background re-renders or 30s ticks. */
 
+/* One short pass when an account tab switches the shown snapshot: a
+   content-level fade/slide, never a card move. */
+@keyframes acct-switch-in {
+  from { opacity: 0.35; transform: translateY(3px); }
+  to { opacity: 1; transform: none; }
+}
+
+.card-panel.acct-switch {
+  animation: acct-switch-in 0.18s ease-out both;
+}
+
+body.reduce-anim .card-panel.acct-switch {
+  animation: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .card-panel.acct-switch { animation: none; }
+}
+
 @keyframes card-in {
   from {
     opacity: 0;

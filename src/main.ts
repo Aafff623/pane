@@ -1389,9 +1389,21 @@ window.addEventListener("storage", (event) => {
 
 let revealTimer = 0;
 let animateExpandId: string | null = null;
+/// Account-tab switches: keep the clicked card where the eye left it (a few
+/// pixels of overview reflow above it read as a violent jump), and give the
+/// panel one short switch animation instead of a hard content swap.
+let accountSwitchAnchor: { family: string; top: number } | null = null;
+let animateAccountSwitchId: string | null = null;
 
 /// One pass of entrance animations (cards slide in, bars fill) — played when
 /// the popover opens or the first data lands, never on background re-renders.
+/// A card's visual move converts to layout pixels for the scroller: rects
+/// carry the body zoom, `scrollTop` does not.
+function switchScrollCorrection(cardTop: number, anchorTop: number, zoom: number): number {
+  const safe = Number.isFinite(zoom) && zoom > 0 ? zoom : 1;
+  return (cardTop - anchorTop) / safe;
+}
+
 function playReveal(): void {
   if (reduceMotion()) return;
   const el = document.querySelector<HTMLElement>("#providers");
@@ -3495,7 +3507,7 @@ function renderCard(s: Snapshot): string {
         </span>
         <span class="provider-icon">${icon}</span>
       </div>
-      ${cardCollapsed ? foldLine : `<div class="card-panel">
+      ${cardCollapsed ? foldLine : `<div class="card-panel${animateAccountSwitchId && animateAccountSwitchId === s.id ? " acct-switch" : ""}">
         ${finalAccountTabs}
         ${finalBody}
         ${linksRow}
@@ -11061,7 +11073,7 @@ function renderCategoryCards(snaps: Snapshot[], groups: CardGroup[]): string {
 function renderDashboard(): void {
   hideSpendPop();
   document.querySelector(".spend-detail-overlay")?.remove();
-  const el = document.querySelector("#providers")!;
+  const el = document.querySelector<HTMLElement>("#providers")!;
   el.setAttribute("aria-busy", boardLoadPhase === "pending" && !lastSnapshots.length ? "true" : "false");
   // Account-tab switches and data ticks both rebuild this list. Replacing
   // innerHTML drops the scroll offset, which used to snap the popover to the
@@ -11080,6 +11092,25 @@ function renderDashboard(): void {
     renderGroupedCards();
   decorateInkSkin(el as HTMLElement);
   el.scrollTop = scrollTop;
+  if (accountSwitchAnchor) {
+    // Overview/spend cards above the clicked one may reflow by a few pixels
+    // when the shown account changes; move the scroll by that delta so the
+    // card the owner touched does not jump under the pointer.
+    const card = el.querySelector<HTMLElement>(
+      `article[data-provider="${CSS.escape(accountSwitchAnchor.family)}"]`,
+    );
+    if (card) {
+      const rect = el.getBoundingClientRect();
+      const zoom = rect.height / el.offsetHeight;
+      el.scrollTop += switchScrollCorrection(
+        card.getBoundingClientRect().top,
+        accountSwitchAnchor.top,
+        zoom,
+      );
+    }
+    accountSwitchAnchor = null;
+  }
+  animateAccountSwitchId = null;
   if (focusedTab) {
     el.querySelector<HTMLElement>(`[data-card-account="${CSS.escape(focusedTab)}"]`)?.focus({ preventScroll: true });
   }
@@ -19326,6 +19357,12 @@ document.querySelector("#settings-btn")!.addEventListener("click", () => {
     if (acctTab) {
       const [family, acctId] = acctTab.dataset.cardAccount!.split("|");
       userSelectedAccountFor.set(family, acctId);
+      const card = acctTab.closest("article");
+      const scroller = document.querySelector<HTMLElement>("#providers");
+      if (card && scroller && scroller.contains(card)) {
+        accountSwitchAnchor = { family, top: card.getBoundingClientRect().top };
+        animateAccountSwitchId = family;
+      }
       requestRender();
       return;
     }
