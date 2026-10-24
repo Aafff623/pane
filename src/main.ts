@@ -2663,9 +2663,10 @@ function isCoreQuotaMetric(m: Metric): boolean {
   // On-demand is a paid overflow pool, not the plan quota. A spent
   // overflow must not paint the whole card (or its overview ring) red.
   if (label.includes("on-demand")) return false;
-  // ZCode Weekend is a bonus token grant beside the plan itself; once it
-  // is spent the plan still serves requests, so it rides like an
-  // auxiliary row (same reasoning as Web Searches above).
+  // A gift-plan row (any campaign: weekend, Dev Day, a model trial) is a
+  // bonus beside the subscription itself; once it is spent the plan still
+  // serves requests, so it rides like an auxiliary row (same reasoning as
+  // Web Searches above). Plan-name fallbacks keep "weekend" in the check.
   if (label.includes("weekend")) return false;
   return true;
 }

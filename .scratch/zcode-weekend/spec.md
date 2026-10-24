@@ -130,3 +130,11 @@ owner 指出：Z.ai 卡走官方 token plan（API key），ZCode 的 Start Plan 
   「No gift in this period」；有计划未发放 → 「held · not granted」领取行；有赠送 → 每 bucket 一行；
   请求失败 → `error`（不再跨账号复用旧行）。
 - `zai.rs` 回归纯 key 口径：不再拼 Start Plan 行，无 key 时仍然提示填 key。
+
+## 2026-10-24 amendment 3：这个 provider 专管「羊毛」
+
+- 活动名只作证据、不作过滤：任何 plan/entitlement 都出一行，未来 618、新模型 trial 都不用改代码。
+  已见：`ZCode Weekend Build`（3 亿，2026-10-12）、`ZCode 1024 Dev Day`（Flash 3 亿 + GLM-5.3 2 亿，
+  2026-10-23）、`ZCode Trust Build`（magpie changelog 提到，金额待确认）、模型 trial 桶（如 GLM-5.3-Trial）。
+- 去掉全部 weekend 专属文案：空态由快照状态表达（无会话 → 去登录；无 Start Plan → needs_setup；
+  有计划无赠送 → Start Plan 行「本期暂无赠送」），前端补三语映射；行渲染器不再自带活动名占位。

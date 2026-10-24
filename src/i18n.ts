@@ -1446,7 +1446,9 @@ const en: Dict = {
   "tray.left": "{label}: {n}% left",
 
   "detail.unlimited": "Unlimited",
-  "detail.weekendNotStarted": "Weekend not started",
+  "detail.noGift": "No gift in this period",
+  "detail.heldNotGranted": "Held, not granted — claim it in ZCode",
+  "detail.moreGrants": "+{n} more grants",
   "detail.unconfirmed": "Unconfirmed",
   "detail.moneyOfLeft": "{a} of {b} left",
   "detail.moneyOfLeftCredits": "{a} of {b} left · {n} credits",
@@ -2876,7 +2878,9 @@ const zh: Dict = {
   "tray.left": "{label}：剩余 {n}%",
 
   "detail.unlimited": "无限制",
-  "detail.weekendNotStarted": "周末未开始",
+  "detail.noGift": "本期暂无赠送",
+  "detail.heldNotGranted": "已持有但未发放——去 ZCode 领取",
+  "detail.moreGrants": "另有 {n} 项赠送",
   "detail.unconfirmed": "待确认",
   "detail.moneyOfLeft": "{a} / {b} 剩余",
   "detail.moneyOfLeftCredits": "{a} / {b} 剩余 · {n} 额度",
@@ -4325,7 +4329,9 @@ const ru: Dict = {
   "tray.left": "{label}: осталось {n}%",
 
   "detail.unlimited": "Без лимита",
-  "detail.weekendNotStarted": "Выходные ещё не начались",
+  "detail.noGift": "В этом периоде подарков нет",
+  "detail.heldNotGranted": "Есть, но не выдано — получите в ZCode",
+  "detail.moreGrants": "Ещё подарков: {n}",
   "detail.unconfirmed": "Не подтверждено",
   "detail.moneyOfLeft": "{a} / {b} осталось",
   "detail.moneyOfLeftCredits": "{a} / {b} осталось · {n} кредитов",
@@ -4540,7 +4546,10 @@ export function displayMetricDetail(text: string): string {
   m = text.match(new RegExp(`^(${num}) of (${num}) left$`, "i"));
   if (m) return t("detail.countOfLeft", { a: m[1], b: m[2] });
   if (/^available$/i.test(text.trim())) return t("card.available");
-  if (/^weekend not started$/i.test(text.trim())) return t("detail.weekendNotStarted");
+  if (/^no gift in this period$/i.test(text.trim())) return t("detail.noGift");
+  if (/^held · not granted \(open zcode to claim\)$/i.test(text.trim())) return t("detail.heldNotGranted");
+  const moreGrants = text.trim().match(/^\+(\d+) more grants$/i);
+  if (moreGrants) return t("detail.moreGrants", { n: moreGrants[1] });
   if (/^unconfirmed$/i.test(text.trim())) return t("detail.unconfirmed");
   if (/^unlimited$/i.test(text.trim())) return t("detail.unlimited");
   // GIPHY. The bar's denominator comes from GIPHY's *documented* 100/hour

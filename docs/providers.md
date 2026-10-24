@@ -721,6 +721,19 @@ the Z.ai API key**: the key path cannot see them at all.
     with no grant at all keeps the historical "Weekend not started" row; no
     local session renders no row. A failed request holds the last verdict so
     rows never flicker between refreshes.
+  - **Known campaigns so far** (names are evidence, never filters — any plan or
+    entitlement the session reports becomes a row, so a future campaign needs no
+    code change):
+    - `ZCode Weekend Build` — the weekend token grant (measured 2026-10-12:
+      `GLM-5.3-Flash`, 300,000,000).
+    - `ZCode 1024 Dev Day` — 2026-10-23: `GLM-5.3-Flash` 300,000,000 plus
+      `GLM-5.3` 200,000,000.
+    - `ZCode Trust Build` — a gift window named in magpie's changelog; amount and
+      dates 待确认.
+    - model trials shipped with new models (e.g. `GLM-5.3-Trial` buckets).
+  - **States:** no session / expired → sign-in hint; no Start Plan → `needs_setup`;
+    a valid plan with no gift → one "No gift in this period" row; a held plan
+    with nothing granted → the claim line; live grants → one row each.
   - **Caching:** rows are cached only for the session that fetched them (a
     hashed token tag) and for five minutes, so switching ZCode accounts or
     letting the session expire cannot paint one account's gifts on another's

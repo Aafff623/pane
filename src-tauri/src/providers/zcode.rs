@@ -28,10 +28,6 @@ use sha2::{Digest, Sha256};
 const ZCODE_API: &str = "https://zcode.z.ai";
 /// The ZCode build whose requests we mirror; the endpoint only sanity-checks it.
 const APP_VERSION: &str = "3.14.3";
-const LABEL: &str = "ZCode Weekend";
-/// Canonical English caption for the no-live-grant placeholder; the
-/// frontend translates it at paint time (detail.weekendNotStarted).
-const NOT_STARTED: &str = "Weekend not started";
 
 /// One row's worth of grant, already summed across buckets that share a name.
 #[derive(Clone)]
@@ -105,7 +101,7 @@ pub fn snapshot_from_doc(doc: &Value, now_s: i64) -> super::Snapshot {
     let plan_label = plans.join(" · ");
     let (grants, ungranted) = parse_start_grants(doc, now_s);
     let rows = if grants.is_empty() && ungranted.is_empty() {
-        vec![super::Metric::text(NO_GIFT, String::new())]
+        vec![super::Metric::text("Start Plan", NO_GIFT.into())]
     } else {
         render_rows(&grants, &ungranted)
     };
@@ -147,7 +143,7 @@ pub fn active_plan_names(doc: &Value, now_s: i64) -> Vec<String> {
 /// keeps the weekend placeholder, which is the copy this row has always used.
 pub fn render_rows(grants: &[StartGrant], ungranted: &[String]) -> Vec<super::Metric> {
     if grants.is_empty() && ungranted.is_empty() {
-        return vec![super::Metric::text(LABEL, NOT_STARTED.into())];
+        return Vec::new();
     }
     // Claim lines are the actionable part; they get their slots first, and the
     // bar count yields to them instead of the other way round.
@@ -179,8 +175,8 @@ pub fn render_rows(grants: &[StartGrant], ungranted: &[String]) -> Vec<super::Me
 }
 
 /// One gift bucket: usage bar + used/total detail + its own window. The label
-/// is the bucket's `show_name` (GLM-5.3, GLM-5.3-Flash …), never a generic
-/// "ZCode Weekend" that hides which model the grant belongs to.
+/// is the bucket's `show_name` (GLM-5.3, GLM-5.3-Flash …), so a new campaign
+/// needs no code change — names are evidence, never filters.
 fn grant_metric(grant: &StartGrant) -> super::Metric {
     let w = &grant.allowance;
     let percent = if w.total > 0.0 {
@@ -264,7 +260,7 @@ pub fn parse_start_grants(doc: &Value, fallback_now_s: i64) -> (Vec<StartGrant>,
                 if !shown.is_empty() {
                     shown
                 } else if plan_name.is_empty() {
-                    LABEL.to_string()
+                    "Start Plan".to_string()
                 } else {
                     plan_name.clone()
                 }
@@ -875,7 +871,7 @@ mod tests {
         assert_eq!(snap.plan.as_deref(), Some("ZCode Start Plan"));
         // The plan is held but nothing is granted this period: one explicit
         // line, not an empty card and not a fake zero bar.
-        assert!(snap.metrics.iter().any(|m| m.label == NO_GIFT));
+        assert!(snap.metrics.iter().any(|m| m.value.as_deref() == Some(NO_GIFT)));
     }
 
     #[test]
@@ -904,6 +900,26 @@ mod tests {
         let snap = snapshot_from_doc(&json!({"code": 3001, "msg": "parameter error"}), NOW);
         assert_eq!(snap.status, "error");
         assert!(snap.metrics.is_empty());
+    }
+
+    #[test]
+    fn any_campaign_name_is_a_gift_row_without_code_changes() {
+        // Names are evidence, not filters: a weekend build, a 618 build or the
+        // next model trial all arrive as plans/entitlements.
+        let doc = balance_doc(
+            json!([{"plan_id": "p-next", "user_plan_id": "up-1", "name": "ZCode 618 Build",
+                    "status": "active", "ends_at": NOW + 50_000,
+                    "entitlements": [{"show_name": "GLM-5.4-Trial"}]}]),
+            json!([{"plan_id": "p-next", "user_plan_id": "up-1", "show_name": "GLM-5.4-Trial",
+                    "total_units": 100_000_000, "used_units": 0, "period_end": NOW + 10_000}]),
+            NOW,
+        );
+        let snap = snapshot_from_doc(&doc, NOW);
+        assert_eq!(snap.status, "ok");
+        assert_eq!(snap.plan.as_deref(), Some("ZCode 618 Build"));
+        assert_eq!(snap.metrics.len(), 1);
+        assert_eq!(snap.metrics[0].label, "GLM-5.4-Trial");
+        assert_eq!(snap.metrics[0].kind, "progress");
     }
 
     #[test]
@@ -993,9 +1009,9 @@ mod tests {
         let (grants, ungranted) = parse_start_grants(&doc, NOW);
         assert!(grants.is_empty());
         assert!(ungranted.is_empty(), "a dead plan is not something to claim");
-        let rows = render_rows(&grants, &ungranted);
-        assert_eq!(rows.len(), 1);
-        assert_eq!(rows[0].value.as_deref(), Some(NOT_STARTED));
+        // With nothing left the card says so through the snapshot state.
+        let snap = snapshot_from_doc(&doc, NOW);
+        assert!(snap.metrics.iter().all(|m| m.value.as_deref() != Some(NO_GIFT)));
     }
 
     #[test]
@@ -1262,13 +1278,10 @@ mod tests {
     }
 
     #[test]
-    fn a_session_with_no_grant_keeps_the_weekend_placeholder() {
-        let rows = render_rows(&[], &[]);
-        assert_eq!(rows.len(), 1);
-        assert_eq!(rows[0].kind, "text");
-        assert_eq!(rows[0].label, "ZCode Weekend");
-        assert_eq!(rows[0].value.as_deref(), Some("Weekend not started"));
-        assert_eq!(rows[0].used_percent, None);
+    fn an_empty_grant_set_renders_nothing_for_the_caller_to_invent() {
+        // The snapshot supplies the "no gift" line; the row renderer must not
+        // own a campaign-specific placeholder of its own.
+        assert!(render_rows(&[], &[]).is_empty());
     }
 
     #[test]
