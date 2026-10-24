@@ -17350,7 +17350,9 @@ function buildPanelShell(): void {
   minBtn.setAttribute("aria-label", t("settings.minimize"));
   minBtn.textContent = "−";
   minBtn.addEventListener("click", () => {
-    void getCurrentWebviewWindow().minimize().catch(() => {});
+    void invoke("minimize_panel_window").catch((error) => {
+      document.querySelector("#status")?.replaceChildren(String(error));
+    });
   });
   const closeBtn = document.createElement("button");
   closeBtn.type = "button";
@@ -17359,7 +17361,9 @@ function buildPanelShell(): void {
   closeBtn.setAttribute("aria-label", t("settings.close"));
   closeBtn.innerHTML = uiIcon("x");
   closeBtn.addEventListener("click", () => {
-    void getCurrentWebviewWindow().close().catch(() => {});
+    void invoke("close_panel_window").catch((error) => {
+      document.querySelector("#status")?.replaceChildren(String(error));
+    });
   });
   windowControls.append(minBtn, closeBtn);
   head.append(headText, search, save, windowControls);

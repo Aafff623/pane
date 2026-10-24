@@ -5902,6 +5902,14 @@ async fn close_panel_window(app: tauri::AppHandle) -> Result<(), String> {
 }
 
 #[tauri::command]
+async fn minimize_panel_window(app: tauri::AppHandle) -> Result<(), String> {
+    if let Some(w) = app.get_webview_window("panel") {
+        w.minimize().map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
+#[tauri::command]
 fn get_window_form() -> String {
     config_with_defaults(load_config())
         .get("windowForm")
@@ -6277,6 +6285,7 @@ pub fn run() {
             center_popover,
             open_panel_window,
             close_panel_window,
+            minimize_panel_window,
             get_window_form,
             set_window_form,
             stepfun_plan_test,

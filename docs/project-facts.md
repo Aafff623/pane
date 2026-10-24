@@ -219,6 +219,13 @@ Last reconciled: 2026-10-22 (Pane 0.8.9 + account lifecycle, legacy API-key reti
 - The popover's own chrome lives in the total-spend card's head, left of
   the daily-detail button (that row is always the first thing in view);
   the panel-form window has a real frame and gets none.
+- The panel-form settings chrome (`minimize` / `close`) must call the backend
+  `minimize_panel_window` / `close_panel_window` commands, not
+  `getCurrentWebviewWindow().minimize()/close()`. The WebView-window calls can
+  fail under the panel capability set, and the old empty `.catch()` made the
+  red close button appear completely inert. A static test now locks the
+  backend-command path and checks every rendered `close/cancel/dismiss`
+  control has a delegated handler.
 - Three config keys, all defaulting in `config_with_defaults` (Rust) and
   mirrored in `FRONTEND_CONFIG_KEYS` (frontend): `popoverPin` (default
   `true` = always-on-top), `popoverLock` (default `true` = re-center on
