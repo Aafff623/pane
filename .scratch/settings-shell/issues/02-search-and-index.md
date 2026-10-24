@@ -1,7 +1,7 @@
 # 02 — 设置索引与跨页搜索
 
 Type: task
-Status: ready-for-agent
+Status: done (2026-10-24, implementation); owner UI acceptance pending
 Blocked by: 01
 
 ## What to build

@@ -1,7 +1,7 @@
 # 06 — 密钥与额度页适配新骨架，并淘汰旧 sheet
 
 Type: task
-Status: ready-for-agent
+Status: done (2026-10-24, implementation); owner UI acceptance pending
 Blocked by: 01, 04
 
 ## What to build

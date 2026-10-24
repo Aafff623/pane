@@ -1,7 +1,7 @@
 # 03 — 外壳改造：无边框窗口、Header、200px 文字侧栏（含皮肤兼容层）
 
 Type: task
-Status: ready-for-agent
+Status: done (2026-10-24, implementation); owner UI acceptance pending
 Blocked by: 01
 
 ## What to build

@@ -1,7 +1,7 @@
 # 05 — 关于页重做为四段式
 
 Type: task
-Status: ready-for-agent
+Status: done (2026-10-24, implementation); owner UI acceptance pending
 Blocked by: 01
 
 ## What to build
