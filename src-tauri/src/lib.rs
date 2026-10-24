@@ -5816,21 +5816,29 @@ async fn ensure_panel_window(app: &tauri::AppHandle) -> Result<(), String> {
     // Built hidden so restoring a saved rect happens before the first paint
     // instead of flashing a centered window and then jumping.
     let restored = restorable_panel_bounds(app);
-    let window =
+    #[allow(unused_mut)]
+    let mut builder =
         tauri::WebviewWindowBuilder::new(app, "panel", tauri::WebviewUrl::App("index.html".into()))
             .title("Pane")
             .inner_size(PANEL_DEFAULT_SIZE.0, PANEL_DEFAULT_SIZE.1)
             .min_inner_size(PANEL_MIN_SIZE.0, PANEL_MIN_SIZE.1)
             .center()
             .resizable(true)
-            .decorations(false)
-            .transparent(true)
-            .maximizable(false)
-            .always_on_top(false)
-            .skip_taskbar(false)
-            .visible(false)
-            .build()
-            .map_err(|e| e.to_string())?;
+            .decorations(false);
+    // `transparent` is gated behind tauri's macOS private API; the Windows and
+    // Linux builds support it directly. macOS keeps the borderless window with
+    // an opaque frame instead of failing the whole release build.
+    #[cfg(not(target_os = "macos"))]
+    {
+        builder = builder.transparent(true);
+    }
+    let window = builder
+        .maximizable(false)
+        .always_on_top(false)
+        .skip_taskbar(false)
+        .visible(false)
+        .build()
+        .map_err(|e| e.to_string())?;
     if let Some((pos, size)) = restored {
         let _ = window.set_size(size);
         let _ = window.set_position(pos);
