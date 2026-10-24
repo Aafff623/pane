@@ -796,6 +796,19 @@ const PROVIDER_DEFINITIONS: &[ProviderDefinition] = &[
         category: ProviderCategory::Coding,
         primary_unit: UsageUnit::Tokens,
     },
+    // The open platform's speech resource packs: a different domain, a
+    // different credential (console web session, not a MaaS API key) and a
+    // different envelope than #38, so it is its own family and card.
+    ProviderDefinition {
+        family_id: "xfyun-speech",
+        display_name: "讯飞开放平台语音",
+        query_kind: QueryKind::NativeSnapshot,
+        supports_api_key: false,
+        supports_extra_accounts: true,
+        icon_key: "xfyun-speech",
+        category: ProviderCategory::Productivity,
+        primary_unit: UsageUnit::Requests,
+    },
     ProviderDefinition {
         family_id: "venice",
         display_name: "Venice",
@@ -1004,7 +1017,7 @@ pub fn supports_api_key(family_id: &str) -> bool {
 
 /// Families whose credential is a Pane-hosted browser session rather than a
 /// pasted API key. Keep in sync with the frontend catalog's `webSession` flag.
-pub const WEB_SESSION_FAMILIES: &[&str] = &["tokenrhythm", "xfyun"];
+pub const WEB_SESSION_FAMILIES: &[&str] = &["tokenrhythm", "xfyun", "xfyun-speech"];
 
 pub fn is_web_session(family_id: &str) -> bool {
     WEB_SESSION_FAMILIES.contains(&family_id)
@@ -1112,6 +1125,7 @@ mod tests {
             "poe",
             "tokenrhythm",
             "xfyun",
+            "xfyun-speech",
             "venice",
             "windsurf",
             "warp",
@@ -1271,8 +1285,8 @@ mod tests {
         extras.sort_unstable();
         assert_eq!(
             extras,
-            vec!["deepl", "stability"],
-            "DeepL/Stability are the API-key pilot productivity cards"
+            vec!["deepl", "stability", "xfyun-speech"],
+            "DeepL/Stability are the API-key pilot productivity cards; xfyun-speech is the console speech-pack card"
         );
     }
 }

@@ -4,7 +4,7 @@
 
 **Blocked by:** 无（复用 #38 已落地的通用 web-session 机制）
 
-**Status:** ready-for-agent
+**Status:** implemented (code) — 真实登录与多账号去重待 owner 实机
 
 ## 要点
 
@@ -29,3 +29,22 @@
 ## Comments
 
 - 2026-10-23：接口与登录态判定已在真实登录态实测，证据见 `temp/xfyun-console-quota-analysis-20261023.md`。owner 已完成个人实名认证并领取全部五个语音资源包，登录即可校准。
+
+## Comments
+
+- 2026-10-23 实现（主对话）：family 定为 `xfyun-speech`，显示名「讯飞开放平台语音」，
+  `query_kind: NativeSnapshot`（一卡多行）、`category: Productivity`、`primary_unit: Requests`、
+  `supports_api_key: false`、`supports_extra_accounts: true`，落进 `default_disabled_families()`
+  保持默认关闭（`catalog_consistency` 的 disabled-count 按实际 61→62 更新，没有放开任何默认启用）。
+- 登录实现照 `xfyun.rs`：incognito WebView2 开 `console.xfyun.cn`，**只从 Pane 自己的窗口取 cookie**，
+  登录判定走 `user/profile/get` 的 `flag && code`（不是「有 cookie 就算登录」）；
+  uid 只取 `account_id` cookie 且必须是纯数字，`certification/get` 全程不调用（同响应含姓名/证件号/手机号）。
+- 接线实测：`lib.rs` 的 web-session 命令面是**六处硬编码 match**（migrate / status / login / clear /
+  snapshot_with_login / 多账号取名），无注册表可走，本票六处都加了分支；
+  另加 `provider_catalog.rs`、`providers/mod.rs`、`auth_center.rs`（AUTH_FAMILIES 16→17 + 分支）、
+  `login_accounts.rs`（LOGIN_FAMILIES 13→14）与前端五个文件 + 图标 + 三语。
+  成本与 #38 同量级（实测 #38 主提交 17 文件 +573、tokenrhythm 20 文件 +904）。
+- 未验证：真实登录、会话重启后是否仍在、两个 uid 各自独立成卡。这三条只有 owner 实机能勾。
+- 记录：`WEB_SESSION_FAMILIES` 仍是常量列表（已由 `is_web_session()` 单一入口消费，不构成重复判断）；
+  真正的重复是上面那六处命令臂。**把它们收成一张注册表另开票**，不在本票偷偷做——
+  它要改 `lib.rs` 且涉及异步签名，属于独立可验证的一次重构。

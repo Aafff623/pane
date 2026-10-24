@@ -4,7 +4,7 @@
 
 **Blocked by:** 01
 
-**Status:** ready-for-agent
+**Status:** implemented (fixtures) — 控制台数字对照待 owner
 
 ## 要点
 
@@ -33,3 +33,20 @@
 ## Comments
 
 - 2026-10-23：全部响应样本与字段语义推断来自本轮真实登录态实测，见 `temp/xfyun-console-quota-analysis-20261023.md`；其中列了 7 条待确认（试用池划分、时区、`status/convertStatus/connectType/timeType/isDel` 含义、其余渠道 id、多张包消费顺序）。限流方面：并发 12 次无异常，但官方无承诺。
+
+## Comments
+
+- 2026-10-23 实现（主对话）：`providers/xfyun_speech.rs`。信封判定单列成
+  `envelope_error()`，四种形态各自明确：`flag:false+80000`→Auth、`flag:false+20003`→我们参数错、
+  `flag:true+data:null`→正常空态；`code:4001`（#38 的信号）**在本 family 不解释为登出**，
+  反向也不成立，测试把这条钉住。
+- 解析：`parse_apps` / `parse_count_meter` / `parse_hour_packs` / `parse_realtime` +
+  `parse_console_time`（三种编码，解析不出就不显示日期）。试用池与套餐包在数据层是两行，
+  测试断言 total 是 `left+used`（10009）而**不是** `10509`；路数是独立 text 行。
+  单位换算全部 `round`，负数与 NaN 收敛为 0 /「—」。
+- 7 项夹具回归通过（`xfyun_speech::`），不打真实网络：`call_get` 在 test cfg 下直接返回错误，
+  网络路径根本不进测试进程。
+- 渠道清单按实测锁死为 `tts/iat/ise`，其余留在代码注释的「未实测不要外推」里；
+  `lfasr/rta` 走各自的专用端点。多应用：枚举全部 app 并逐渠道探测，每张包的标签带 app 名。
+- 待 owner：与控制台逐项对照数字；多应用是分行还是聚合、多张同类时长包是分行还是合并，
+  本票按「分行」实现，若要聚合需你确认口径。

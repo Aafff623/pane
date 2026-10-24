@@ -15,9 +15,9 @@ use crate::{antigravity_accounts, cursor_accounts};
 
 /// The families the auth center groups, in display order. "grok" is the
 /// xAI family id (its device-code flow lives in oauth.rs under that name).
-pub const AUTH_FAMILIES: [&str; 16] = [
+pub const AUTH_FAMILIES: [&str; 17] = [
     "antigravity", "codebuddy", "codebuddycn", "codex", "copilot", "cursor", "grok", "kiro", "qoder",
-    "trae", "windsurf", "workbuddy", "workbuddyai", "zed", "tokenrhythm", "xfyun",
+    "trae", "windsurf", "workbuddy", "workbuddyai", "zed", "tokenrhythm", "xfyun", "xfyun-speech",
 ];
 
 #[derive(Serialize, Clone, Debug, PartialEq)]
@@ -161,7 +161,7 @@ fn rows_for_family_from(base: &Path, family: &str) -> Vec<AuthAccountRow> {    m
             })
             .collect(),
         "codebuddy" | "codebuddycn" | "workbuddy" | "workbuddyai" | "copilot" | "grok" | "kiro"
-        | "qoder" | "trae" | "windsurf" | "zed" | "tokenrhythm" | "xfyun" => {
+        | "qoder" | "trae" | "windsurf" | "zed" | "tokenrhythm" | "xfyun" | "xfyun-speech" => {
             crate::login_accounts::load_with_imported_single_login_from(base, family)
                 .iter()
                 .map(|login| {

@@ -1,6 +1,6 @@
 # 讯飞开放平台（语音资源包）Provider：console 网页登录态余量
 
-**Status:** ready-for-agent（接口已实测，owner 已领取全部套餐，等待实现）
+**Status:** implemented (code + fixtures) — 待 owner 实登与控制台数字对照（GitHub #47）
 **GitHub:** [#47](https://github.com/Aafff623/pane/issues/47)
 **前置调研:** `temp/xfyun-console-quota-analysis-20261023.md`（2026-10-23 真实登录态实测，含响应样本与待确认清单）
 **相关:** #38 / `.scratch/spark-xfyun-provider/`（星辰 MaaS 星火 provider，另一个域名，不重复）
@@ -109,3 +109,14 @@ owner 在**讯飞开放平台**（`www.xfyun.cn` / `console.xfyun.cn`）领到�
 - 03：卡片呈现 + i18n/图标/文档 + 门禁与 owner 验收
 
 阻塞关系：01 → 02 → 03。02 是本需求主价值票。
+
+## 实现期的判断记录（2026-10-23，主对话）
+
+- 工单顺序改为 **02 → 01 → 03**：解析器与失败态用合成 JSON 就能全部验完，唯一需要人类动作的是「实登」，
+  把它往后推可以避免整批等人。票面原顺序 01→02→03 的阻塞关系（02 依赖 01）在夹具层其实不成立。
+- `web_session` 字段化的问题被重新定性：`is_web_session()` 已经是单一入口，真正的重复是 `lib.rs`
+  的六处命令臂。收一张注册表是独立重构，另开票，不在本需求里顺手做。
+- 成本实测校准：新增一个 web-session family 的真实接线面是 ~13 个代码文件 + 一个 400–500 行
+  adapter（#38 主提交 17 文件 +573；tokenrhythm 20 文件 +904 且还需一次 387 行重写才落到
+  `platform::read_webview_cookies`）。`web-session × NativeSnapshot` 这个组合本仓没有先例，
+  reset/pace/趋势这条链只能在实登后观察。

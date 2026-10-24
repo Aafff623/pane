@@ -137,6 +137,12 @@ const SPECIAL: Record<string, Onboarding> = {
     hintKey: "customize.loginHint.xfyun",
     stepsKey: "customize.onboarding.xfyun",
   },
+  "xfyun-speech": {
+    kind: "cookie",
+    actions: ["addLogin"],
+    hintKey: "customize.loginHint.xfyun-speech",
+    stepsKey: "customize.onboarding.xfyun-speech",
+  },
   bedrock: {
     kind: "cloud",
     actions: [],

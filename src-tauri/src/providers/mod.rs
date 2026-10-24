@@ -66,6 +66,7 @@ pub mod workbuddy_local;
 pub mod workbuddy_official_usage;
 pub mod workbuddy_web;
 pub mod xfyun;
+pub mod xfyun_speech;
 pub mod zai;
 pub mod zcode_weekend;
 pub mod zed;

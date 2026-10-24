@@ -72,6 +72,7 @@ native_snapshots! {
     "poe" => providers::poe::snapshot(),
     "tokenrhythm" => providers::tokenrhythm::snapshot(),
     "xfyun" => providers::xfyun::snapshot(),
+    "xfyun-speech" => providers::xfyun_speech::snapshot(),
     "venice" => providers::venice::snapshot(),
     "vertexai" => providers::vertexai::snapshot(),
     "warp" => providers::warp::snapshot(),

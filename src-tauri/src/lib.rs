@@ -2498,6 +2498,7 @@ async fn migrate_web_session(family: &str) -> Result<(), String> {
     match family {
         "tokenrhythm" => providers::tokenrhythm::migrate_legacy_session().await,
         "xfyun" => providers::xfyun::migrate_legacy_session().await,
+        "xfyun-speech" => providers::xfyun_speech::migrate_legacy_session().await,
         _ => Ok(()),
     }
 }
@@ -2510,6 +2511,7 @@ fn web_session_login_status(family: String) -> Result<providers::tokenrhythm::Lo
     match family.as_str() {
         "tokenrhythm" => Ok(providers::tokenrhythm::status()),
         "xfyun" => Ok(providers::xfyun::status()),
+        "xfyun-speech" => Ok(providers::xfyun_speech::status()),
         _ => Err(format!("{family} is not a web-session provider")),
     }
 }
@@ -2522,6 +2524,7 @@ async fn web_session_login(family: String, app: tauri::AppHandle) -> Result<(), 
     match family.as_str() {
         "tokenrhythm" => providers::tokenrhythm::login(&app).await,
         "xfyun" => providers::xfyun::login(&app).await,
+        "xfyun-speech" => providers::xfyun_speech::login(&app).await,
         _ => Err(format!("{family} is not a web-session provider")),
     }
 }
@@ -2531,6 +2534,7 @@ fn web_session_login_clear(family: String) -> Result<(), String> {
     match family.as_str() {
         "tokenrhythm" => providers::tokenrhythm::clear(),
         "xfyun" => providers::xfyun::clear(),
+        "xfyun-speech" => providers::xfyun_speech::clear(),
         _ => Err(format!("{family} is not a web-session provider")),
     }
 }
@@ -2793,6 +2797,7 @@ async fn fetch_provider_snapshot_unchecked(provider_id: String, allow_disabled: 
         return Ok(match family.as_str() {
             "tokenrhythm" => providers::tokenrhythm::snapshot_with_login(login).await,
             "xfyun" => providers::xfyun::snapshot_with_login(login).await,
+            "xfyun-speech" => providers::xfyun_speech::snapshot_with_login(login).await,
             "copilot" => providers::copilot::snapshot_with_login(login).await,
             "kiro" => providers::kiro::snapshot_with_login(login).await,
             "qoder" => providers::qoder::snapshot_with_login(login).await,
@@ -3062,6 +3067,10 @@ async fn run_usage_fetch_inner_mode(
                 "xfyun" => (
                     providers::xfyun::login_card_name(&login),
                     Box::pin(providers::xfyun::snapshot_with_login(login)),
+                ),
+                "xfyun-speech" => (
+                    providers::xfyun_speech::login_card_name(&login),
+                    Box::pin(providers::xfyun_speech::snapshot_with_login(login)),
                 ),
                 "copilot" => (
                     providers::copilot::login_card_name(&login),

@@ -636,3 +636,48 @@ credited in [LICENSE](../LICENSE).
   raw status; `code:4001` asks for a fresh web login. The real free-quota
   response is still awaiting the owner's first signed-in calibration, so
   unknown fields fail honestly instead of inventing numbers.
+
+## 讯飞开放平台语音 (console.xfyun.cn speech packs)
+
+- **Reads:** Pane's isolated incognito WebView2 on `console.xfyun.cn`; the
+  cookie jar goes to `login-accounts/xfyun-speech.json` plus the OS vault, and
+  the stable account id is the numeric `account_id` cookie (the value equals
+  the message API's uid). `certification/get` also returns a uid but the same
+  body carries name / ID-card / mobile, so that endpoint is never called for
+  identity and no PII is ever stored or logged.
+- **No official quota API exists.** The MaaS gateway answers 404 on
+  `/v1|v2/usage|quota|balance|account`, so this reads the console's own
+  dashboard endpoints: `user/profile/get` (session), `app/list` (enumerate
+  every app), `meter/api-use-count/get`, `lfasr/getlfasrInfo`,
+  `lfasr/get-rtasr-app-auth`. `Referer` / `Origin` / `User-Agent` do not
+  affect the answer — only `Cookie` is required.
+- **Envelope differs from Spark and must not be shared.** These endpoints
+  always return HTTP 200; a logged-out session is `flag:false` +
+  `code:80000`, which maps to "sign in again" and never to a 0% card.
+  `code:20003` means we built the request wrong. `flag:true, data:null` is a
+  normal "this channel has no such meter" state.
+- **Params:** `app/list` takes exactly `currPage` / `keyword` / `type`;
+  adding `pageSize` makes the console answer 20003. `app/default` is only the
+  default app and must not stand in for the account. `serviceList` comes back
+  `null`, so enabled services per app cannot be read — every channel is
+  probed instead.
+- **Units never merge.** Interaction counts (`tts` / `iat` / `ise` measured)
+  map to `Requests`; 录音转写 packs are hours → `Minutes` ×60; 实时转写
+  `leftCount` is **seconds** → `Minutes` ÷60 (rounded, never the 300.0166
+  decimal), and `maxConnection` (lanes) is a separate capacity row, never a
+  usage bar. A pack's `left` (purchased balance) and its `threshold` /
+  `remainCount` (500-call trial pool) stay two rows: summing them would claim
+  the trial makes the pack bigger.
+- **Three time encodings:** naive `YYYY-MM-DD HH:[:SS]` strings, and unix
+  seconds for `expireTime`. Unparsable values yield no date at all rather
+  than a guessed one; expiry never enters `resets_at` (one-off packs, not a
+  periodic window).
+- **Forbidden calls:** `webapi/getInfo/v1` and `app/getHttpSign` return the
+  plaintext APIKey/APISecret. This provider does not need them and must never
+  request them.
+- **待确认:** `status` / `convertStatus` / `connectType` / `timeType` / `isDel`
+  meanings; the timezone behind the naive strings; the trial-pool split rule
+  beyond tts/iat/ise; other channels' ids; which pack is consumed first when
+  several hour packs are live; whether multiple apps should be aggregated or
+  listed per app. Card numbers are accepted only against the console by the
+  owner.
