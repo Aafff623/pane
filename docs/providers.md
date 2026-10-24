@@ -437,6 +437,10 @@ Ground rules that apply to every provider:
   session) or a pasted Oasis session-token pair. Reads the console
   `QueryStepPlanRateLimit` / `GetStepPlanStatus` RPCs and shows the real
   window or Credit pool — the only way to see the remaining balance.
+  The Credit row prefers the exact `credit_buckets` total/residual and
+  the subscription expiry over the percentage field, so the expanded
+  card says e.g. `6.66B of 8.00B credits left` and counts down to the
+  expiry instead of showing a 1970 reset.
 - **Limited API-key mode:** the provider is a web-session integration and
   the console RPC rejects an ordinary/Step Plan API key. Selecting
   **API Key** in Settings → StepFun Step Plan (with an explicit warning)
@@ -453,8 +457,12 @@ Ground rules that apply to every provider:
     itemised. The row is always badged **estimated**.
   - A question-mark next to the plan explains why the balance is missing
     and that web login is required for exact quota/reset.
-  - Saving an API key clears any stored web account/password; saving a
-    complete web login clears an old key, so the two ladders never mix.
+  - The two channels coexist in one credential file. Saving an API key
+    keeps the stored web session; saving a web login keeps the key. The
+    card uses the web session whenever it can read the exact quota and
+    falls back to the API-key estimate only when no web session is
+    stored or it has expired. Older `{apiKey}` files are migrated to the
+    key slot on load, so they can never be mistaken for a session pair.
 - **Credential hint:** the same snapshot shape supports future
   web-session providers: return `limited` from the provider and the card
   renders only the trend + help; no frontend per-provider branch.

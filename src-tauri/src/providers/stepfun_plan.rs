@@ -64,8 +64,13 @@ const STEP_PLAN_MODELS_URL: &str = "https://api.stepfun.com/step_plan/v1/models"
 /// Settings paste-box always wrote keeps working untouched.
 #[derive(Clone, Default, Serialize, Deserialize)]
 struct Creds {
+    /// Web session pair. Legacy `{apiKey}` files are migrated to `api_key`
+    /// by `normalize_creds`, so a pasted key can never masquerade as a session.
     #[serde(default, alias = "apiKey")]
     token: String,
+    /// Open-Platform/Step Plan API key, kept alongside the web session.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    api_key: String,
     #[serde(default, skip_serializing_if = "String::is_empty")]
     username: String,
     #[serde(default, skip_serializing_if = "String::is_empty")]
@@ -77,9 +82,23 @@ fn creds_path() -> PathBuf {
 }
 
 fn load_creds() -> Creds {
-    crate::secretstore::load_session("web/stepfun-plan", &creds_path(), 256 * 1024)
+    let creds = crate::secretstore::load_session("web/stepfun-plan", &creds_path(), 256 * 1024)
         .and_then(|doc| serde_json::from_value(doc).ok())
-        .unwrap_or_default()
+        .unwrap_or_default();
+    normalize_creds(creds)
+}
+
+/// Older files put an Open-Platform key in `token` (the paste-box used to be
+/// the only channel). Move it to `api_key` once, without touching a real
+/// session pair or destroying the key.
+fn normalize_creds(mut creds: Creds) -> Creds {
+    if !creds.token.trim().is_empty() && token_shape(&creds.token) == TokenShape::NotAJwt {
+        if creds.api_key.is_empty() {
+            creds.api_key = creds.token.trim().to_string();
+        }
+        creds.token.clear();
+    }
+    creds
 }
 
 /// Atomic persist: sibling temp file + rename, so a crash mid-write can
@@ -138,19 +157,19 @@ pub async fn snapshot() -> Snapshot {
 /// The "credential present, one more step needed" card: hint + whatever the
 /// stored key can already read.
 async fn needs_setup_snapshot() -> Snapshot {
-    needs_setup_for(&load_creds().token).await
+    needs_setup_for(load_creds()).await
 }
 
-async fn needs_setup_for(token: &str) -> Snapshot {
-    let shape = if token.trim().is_empty() {
+async fn needs_setup_for(creds: Creds) -> Snapshot {
+    let shape = if creds.token.trim().is_empty() {
         TokenShape::Empty
     } else {
-        token_shape(token)
+        token_shape(&creds.token)
     };
     // The wallet read is the same Open-Platform endpoint the `stepfun`
     // family uses; a Step Plan session token cannot read it, an API key can.
     let mut metrics = Vec::new();
-    let plan = if let Some(wallet) = wallet_snapshot(token).await {
+    let plan = if let Some(wallet) = wallet_snapshot(&creds.api_key).await {
         metrics = wallet.metrics;
         wallet.plan
     } else {
@@ -246,29 +265,23 @@ fn describe_fetch(e: FetchErr) -> String {
     }
 }
 
-/// Merge one Settings save into the stored credential without ever mixing
-/// an API key and a web session: an API key clears the account/password; a
-/// complete web login clears an old key. An empty field keeps the stored
-/// value, so a note-only edit cannot erase the session.
+/// Merge one Settings save into the stored credential. The two channels are
+/// independent: saving an API key keeps the web session (and vice versa), so
+/// a monitoring key no longer erases the detailed-quota login. An empty
+/// field keeps the stored value; there is no implicit clear.
 fn merge_creds(mut creds: Creds, token: &str, username: &str, password: &str) -> Creds {
     if !token.trim().is_empty() {
-        let shape = token_shape(token);
-        creds.token = token.trim().to_string();
-        if shape == TokenShape::NotAJwt {
-            creds.username.clear();
-            creds.password.clear();
+        if token_shape(token) == TokenShape::NotAJwt {
+            creds.api_key = token.trim().to_string();
+        } else {
+            creds.token = token.trim().to_string();
         }
-    } else if !username.trim().is_empty() && !password.is_empty() {
-        creds.token.clear();
+    }
+    if !username.trim().is_empty() {
         creds.username = username.trim().to_string();
+    }
+    if !password.is_empty() {
         creds.password = password.to_string();
-    } else {
-        if !username.trim().is_empty() {
-            creds.username = username.trim().to_string();
-        }
-        if !password.is_empty() {
-            creds.password = password.to_string();
-        }
     }
     creds
 }
@@ -368,7 +381,7 @@ fn setup_hint(shape: &TokenShape) -> String {
         TokenShape::NotAJwt => {
             "This is an Open-Platform API key, not a Step Plan session. An API key can only read the pay-as-you-go wallet, never the plan quota. To read Step Plan usage, open platform.stepfun.com → DevTools → Application → Cookies → copy the Oasis-Token value, or save your StepFun account + password in Settings (Pane then renews the session itself).".into()
         }
-        TokenShape::Empty => "Save your StepFun Step Plan session or account+password in Settings.".into(),
+        TokenShape::Empty => "Step Plan web session is missing or expired. An API key can only estimate tokens; save your StepFun account + password (or the Oasis-Token pair) in Settings to read the exact quota and reset times.".into(),
     }
 }
 
@@ -494,17 +507,28 @@ async fn fetch() -> Result<Snapshot, String> {
         ));
     }
 
-    // An API-key-shaped credential is a deliberate fallback mode: the
-    // console quota RPC only accepts an Oasis session pair, so never walk
-    // the refresh/login ladder for it. Prove connectivity on the key's own
-    // endpoints, then return the limited snapshot the UI knows how to draw.
-    if token_shape(&creds.token) == TokenShape::NotAJwt {
-        return Ok(api_key_limited_snapshot(&creds.token).await);
+    // A key-only credential is the deliberate fallback mode: the console
+    // quota RPC only accepts an Oasis session pair, so never walk the
+    // refresh/login ladder for it. The web session and the key can coexist;
+    // the web session wins because it carries the exact quota/reset rows.
+    let has_web_session = !creds.token.trim().is_empty()
+        || (!creds.username.is_empty() && !creds.password.is_empty());
+    if !has_web_session {
+        if !creds.api_key.trim().is_empty() {
+            return Ok(api_key_limited_snapshot(&creds.api_key).await);
+        }
+        return Ok(Snapshot::no_credentials(
+            ID,
+            NAME,
+            "Sign in to StepFun Step Plan in Settings (account + password keeps you signed in).",
+        ));
     }
 
     // L0: locally-valid access JWT → straight to the quota endpoint. A 401
     // despite a valid local exp (revoked, clock skew) falls through.
-    if access_expires_in_ms(&creds.token).is_some_and(|ms| ms > 60_000) {
+    if !creds.token.is_empty()
+        && access_expires_in_ms(&creds.token).is_some_and(|ms| ms > 60_000)
+    {
         match fetch_with(&creds.token).await {
             Ok(s) => return Ok(s),
             Err(FetchErr::Auth) => {}
@@ -512,14 +536,15 @@ async fn fetch() -> Result<Snapshot, String> {
         }
     }
 
-    // L1: rotate the pair via RefreshToken (single-flight + backoff).
+    // L1: rotate the pair via RefreshToken (single-flight + backoff); an
+    // account+password-only store goes straight to the login step inside
+    // `renew`.
     let refreshed = renew(&mut creds).await.map_err(|e| describe_login(&e))?;
     let token = match refreshed {
         Some(t) => t,
         None => {
-            // A credential is on file but the plan endpoint refuses it
-            // (typical: an Open-Platform API key, or a session without
-            // its refresh half). Keep the card and say what to provide.
+            // The web login is missing/expired. Keep the card and say what to
+            // provide; any saved API key still powers the wallet rows.
             return Ok(needs_setup_snapshot().await);
         }
     };
@@ -823,6 +848,18 @@ fn num(v: Option<&Value>) -> Option<f64> {
     v.and_then(|x| x.as_f64().or_else(|| x.as_str()?.parse().ok()))
 }
 
+fn short_credits(value: f64) -> String {
+    if value >= 1_000_000_000.0 {
+        format!("{:.2}B", value / 1_000_000_000.0)
+    } else if value >= 1_000_000.0 {
+        format!("{:.2}M", value / 1_000_000.0)
+    } else if value >= 1_000.0 {
+        format!("{:.1}K", value / 1_000.0)
+    } else {
+        format!("{value:.0}")
+    }
+}
+
 fn ts(v: Option<&Value>) -> Option<i64> {
     num(v).map(|s| {
         let secs = s as i64;
@@ -865,7 +902,47 @@ fn parse_snapshot(rate: &Value, status: Option<&Value>) -> Result<Snapshot, Stri
             );
         }
     } else if let Some(c) = rate.get("plan_credit_rate_limit") {
-        if let Some(left) = num(c.get("subscription_credit_left_rate")) {
+        // Prefer the bucket ledger: it carries the exact total/residual and
+        // the subscription expiry, while the percentage field is only an
+        // approximation and its reset_time is often "0".
+        let buckets = c
+            .get("credit_buckets")
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_default();
+        let mut total = 0.0;
+        let mut residual = 0.0;
+        let mut reset = None::<i64>;
+        for bucket in &buckets {
+            let bucket_total = num(bucket.get("credit_total")).unwrap_or(0.0);
+            let bucket_left = num(bucket.get("credit_residual")).unwrap_or(0.0);
+            if bucket_total > 0.0 {
+                total += bucket_total;
+                residual += bucket_left.clamp(0.0, bucket_total);
+            }
+            let next = ts(bucket.get("next_reset_at")).filter(|ms| *ms > 0);
+            let expiry = ts(bucket.get("expire_at")).filter(|ms| *ms > 0);
+            for candidate in [next, expiry].into_iter().flatten() {
+                if reset.is_none_or(|current| candidate < current) {
+                    reset = Some(candidate);
+                }
+            }
+        }
+        if total > 0.0 {
+            let used = (1.0 - residual / total) * 100.0;
+            let detail = format!(
+                "{} of {} credits left",
+                short_credits(residual),
+                short_credits(total)
+            );
+            let reset = ts(c.get("subscription_credit_reset_time"))
+                .filter(|ms| *ms > 0)
+                .or(reset);
+            m.push(
+                Metric::progress("Credit", used.clamp(0.0, 100.0), Some(detail))
+                    .with_reset(reset, Some(30 * 86_400_000)),
+            );
+        } else if let Some(left) = num(c.get("subscription_credit_left_rate")) {
             m.push(
                 Metric::progress(
                     "Credit",
@@ -873,7 +950,7 @@ fn parse_snapshot(rate: &Value, status: Option<&Value>) -> Result<Snapshot, Stri
                     Some(format!("{:.1}% remaining", left * 100.0)),
                 )
                 .with_reset(
-                    ts(c.get("subscription_credit_reset_time")),
+                    ts(c.get("subscription_credit_reset_time")).filter(|ms| *ms > 0),
                     Some(30 * 86_400_000),
                 ),
             );
@@ -902,24 +979,27 @@ mod tests {
     use super::*;
 
     #[test]
-    fn api_key_and_web_credentials_never_mix() {
+    fn api_key_and_web_credentials_coexist() {
         let stored = Creds {
             token: "a.b.c...d.e.f".into(),
+            api_key: String::new(),
             username: "old-user".into(),
             password: "old-pass".into(),
         };
         let keyed = merge_creds(stored, "sk-test-key", "", "");
-        assert_eq!(keyed.token, "sk-test-key");
-        assert!(keyed.username.is_empty(), "an API key clears the web account");
-        assert!(keyed.password.is_empty(), "an API key clears the web password");
+        assert_eq!(keyed.api_key, "sk-test-key");
+        assert_eq!(keyed.token, "a.b.c...d.e.f", "the web session survives a key save");
+        assert_eq!(keyed.username, "old-user", "the web account survives a key save");
+        assert_eq!(keyed.password, "old-pass");
 
         let web = merge_creds(keyed, "", "new-user", "new-pass");
-        assert!(web.token.is_empty(), "a complete web login clears the old key");
+        assert_eq!(web.api_key, "sk-test-key", "the key survives a web save");
         assert_eq!(web.username, "new-user");
 
         let kept = merge_creds(web.clone(), "", "", "");
         assert_eq!(kept.username, "new-user", "an empty save keeps the session");
         assert_eq!(kept.password, "new-pass");
+        assert_eq!(kept.api_key, "sk-test-key");
     }
 
     #[test]
@@ -1052,6 +1132,10 @@ mod tests {
         assert!((c.used_percent.unwrap() - 3.589).abs() < 0.01);
         assert_eq!(c.resets_at, Some(1786288293 * 1000));
         assert_eq!(c.period_ms, Some(30 * 86_400_000));
+        assert_eq!(
+            c.detail.as_deref(),
+            Some("385.64M of 400.00M credits left")
+        );
     }
 
     #[test]
@@ -1066,6 +1150,19 @@ mod tests {
         let snap = parse_snapshot(&doc, None).expect("parse");
         let labels: Vec<&str> = snap.metrics.iter().map(|m| m.label.as_str()).collect();
         assert_eq!(labels, vec!["Credit", "Top-up"]);
+    }
+
+    #[test]
+    fn zero_credit_reset_is_omitted_not_1970() {
+        let doc = serde_json::json!({
+            "plan_credit_rate_limit": {
+                "subscription_credit_left_rate": 0.83,
+                "subscription_credit_reset_time": 0
+            }
+        });
+        let snap = parse_snapshot(&doc, None).expect("parse");
+        assert_eq!(snap.metrics[0].label, "Credit");
+        assert_eq!(snap.metrics[0].resets_at, None);
     }
 
     #[test]
@@ -1141,14 +1238,17 @@ mod tests {
     }
 
     #[test]
-    fn legacy_api_key_blob_reads_as_token() {
+    fn legacy_api_key_blob_migrates_to_api_key() {
         let json = r#"{"apiKey":"HEADER.payload.sig"}"#;
         let creds: Creds = serde_json::from_str(json).unwrap();
-        assert_eq!(creds.token, "HEADER.payload.sig");
+        let creds = normalize_creds(creds);
+        assert!(creds.token.is_empty(), "an API key is not a web session");
+        assert_eq!(creds.api_key, "HEADER.payload.sig");
         assert!(creds.username.is_empty() && creds.password.is_empty());
         // The new shape round-trips and omits empty secrets.
         let c = Creds {
             token: "t".into(),
+            api_key: String::new(),
             username: "u".into(),
             password: String::new(),
         };
