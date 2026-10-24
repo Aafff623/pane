@@ -22,9 +22,13 @@ const outDir = join(site, "public", "skins");
 // Pack sources live outside the app bundle: `skins/<id>/skin.css` plus its
 // own `assets/` tree. Signal uses app-relative asset tokens that this script
 // rewrites; ink's stylesheet already carries the dual root/sample scope.
+// comic-pixel is authored already dual-scoped (`:root[data-skin]` + the
+// workshop's `.skin-sample[data-skin]`) and pack-relative (`assets/fonts/…`),
+// so it needs neither dualScope() nor rewriteUrls().
 const SKINS = [
   { id: "signal", name: "Cloud Post Office", css: "skins/signal/skin.css", assets: "skins/signal/assets", assetPrefix: "cloud-post" },
   { id: "ink", name: "山水笺 Ink Wash", css: "skins/ink/skin.css", assets: "skins/ink/assets", assetPrefix: "ink-wash" },
+  { id: "comic-pixel", name: "像素分镜 Comic Pixel", css: "skins/comic-pixel/skin.css", assets: "skins/comic-pixel/assets", assetPrefix: "comic-pixel" },
 ];
 
 const sha256 = (bytes) => createHash("sha256").update(bytes).digest("hex");

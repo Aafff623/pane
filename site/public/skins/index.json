@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-10-22T09:45:05.493Z",
+  "generatedAt": "2026-10-23T16:53:21.624Z",
   "packs": [
     {
       "id": "signal",
@@ -16,6 +16,14 @@
       "size": 945416,
       "sha256": "9c3adaded4f8cdab5a5864d9e675f6e7802f4a5804be023bee8c1b5386e36bae",
       "url": "https://pane.threetwoa.live/skins/pane-skin-ink-1.0.0.zip"
+    },
+    {
+      "id": "comic-pixel",
+      "name": "像素分镜 Comic Pixel",
+      "version": "1.0.0",
+      "size": 97947,
+      "sha256": "2505ca342ddb37e9ed298ab703b359eb19b00b57f61ef4f0a9ab0e18fe8fd398",
+      "url": "https://pane.threetwoa.live/skins/pane-skin-comic-pixel-1.0.0.zip"
     }
   ]
 }
