@@ -1389,21 +1389,18 @@ window.addEventListener("storage", (event) => {
 
 let revealTimer = 0;
 let animateExpandId: string | null = null;
-/// Account-tab switches: keep the clicked card where the eye left it (a few
-/// pixels of overview reflow above it read as a violent jump), and give the
-/// panel one short switch animation instead of a hard content swap.
-let accountSwitchAnchor: { family: string; top: number } | null = null;
-let animateAccountSwitchId: string | null = null;
+/// Account-tab switches re-render ONLY the card that was clicked. A full
+/// dashboard render let the quota overview above it reflow by a few pixels for
+/// the newly shown account; near the bottom of the list the scroller is already
+/// clamped, so scroll compensation could not absorb that, and the card under
+/// the pointer slid down on every click. Swapping one card removes the reflow
+/// at the source; the panel plays one short switch animation (`.acct-switch`)
+/// so the content change reads as motion rather than a hiccup. The overview
+/// keeps the previous account's numbers until the next data tick — a stabler
+/// trade than a page that moves under the finger.
 
 /// One pass of entrance animations (cards slide in, bars fill) — played when
 /// the popover opens or the first data lands, never on background re-renders.
-/// A card's visual move converts to layout pixels for the scroller: rects
-/// carry the body zoom, `scrollTop` does not.
-function switchScrollCorrection(cardTop: number, anchorTop: number, zoom: number): number {
-  const safe = Number.isFinite(zoom) && zoom > 0 ? zoom : 1;
-  return (cardTop - anchorTop) / safe;
-}
-
 function playReveal(): void {
   if (reduceMotion()) return;
   const el = document.querySelector<HTMLElement>("#providers");
@@ -3507,13 +3504,55 @@ function renderCard(s: Snapshot): string {
         </span>
         <span class="provider-icon">${icon}</span>
       </div>
-      ${cardCollapsed ? foldLine : `<div class="card-panel${animateAccountSwitchId && animateAccountSwitchId === s.id ? " acct-switch" : ""}">
+      ${cardCollapsed ? foldLine : `<div class="card-panel">
         ${finalAccountTabs}
         ${finalBody}
         ${linksRow}
         ${caret}
       </div>`}
     </article>`;
+}
+
+/// Swap one merged card for its new account without touching the rest of the
+/// board. Falls back to a full render only when the family has no anchor
+/// snapshot to rebuild from (synthesized One/New API card).
+function switchAccountCard(family: string, acctId: string, tab: HTMLElement): void {
+  const scroller = document.querySelector<HTMLElement>("#providers");
+  const card = tab.closest("article");
+  const anchor = lastSnapshots.find((snap) => snap.id === family);
+  if (!scroller || !card || !scroller.contains(card) || !anchor) {
+    requestRender();
+    return;
+  }
+  const template = document.createElement("template");
+  template.innerHTML = renderCard(anchor).trim();
+  const next = template.content.firstElementChild as HTMLElement | null;
+  if (!next) {
+    requestRender();
+    return;
+  }
+  // Only the clicked card changes, so nothing above it reflows: keeping the
+  // scroller's offset keeps the card exactly where the owner clicked. A
+  // shorter new card shrinks the scroll range, so the browser would clamp the
+  // offset and slide the card down; a spacer at the end restores exactly the
+  // missing range. Drop the previous switch's spacer first so the tail never
+  // accumulates across clicks — a full render drops it too.
+  const scrollBefore = scroller.scrollTop;
+  scroller.querySelectorAll<HTMLElement>(":scope > .acct-switch-spacer").forEach((el) => el.remove());
+  card.replaceWith(next);
+  const max = scroller.scrollHeight - scroller.clientHeight;
+  if (scrollBefore > max + 0.5) {
+    const spacer = document.createElement("div");
+    spacer.className = "acct-switch-spacer";
+    spacer.setAttribute("aria-hidden", "true");
+    spacer.style.height = `${Math.ceil(scrollBefore - max)}px`;
+    scroller.appendChild(spacer);
+  }
+  scroller.scrollTop = scrollBefore;
+  next.querySelector(".card-panel")?.classList.add("acct-switch");
+  next
+    .querySelector<HTMLElement>(`[data-card-account="${CSS.escape(`${family}|${acctId}`)}"]`)
+    ?.focus({ preventScroll: true });
 }
 
 function orderedSnapshots(): Snapshot[] {
@@ -7973,18 +8012,23 @@ function overviewJumpBehavior(): ScrollBehavior {
 }
 
 let overviewJumpFrame = 0;
-function scrollOverviewCard(card: HTMLElement, scroller = document.querySelector<HTMLElement>("#providers"), onArrival = () => {}): void {
-  if (!scroller) return;
+/// Scroll offset that puts `card`'s centre (or 60% of a tall card) in the
+/// middle of the scroller's viewport. DOMRects include CSS zoom; scrollTop
+/// and clientHeight stay in layout pixels, hence the zoom division.
+function overviewScrollTarget(card: HTMLElement, scroller: HTMLElement): number {
   const scrollerRect = scroller.getBoundingClientRect();
   const cardRect = card.getBoundingClientRect();
-  // DOMRects include CSS zoom; scrollTop/clientHeight remain layout pixels.
   const zoom = scrollerRect.height / scroller.offsetHeight || 1;
   const visibleHeight = Math.min(cardRect.height / zoom, scroller.clientHeight * 0.6);
-  const target = Math.min(Math.max(0, scroller.scrollHeight - scroller.clientHeight), Math.max(
-    0,
-    scroller.scrollTop + (cardRect.top - scrollerRect.top) / zoom - scroller.clientTop
-      - (scroller.clientHeight - visibleHeight) / 2,
-  ));
+  return Math.max(0, scroller.scrollTop
+    + (cardRect.top - scrollerRect.top) / zoom
+    - scroller.clientTop
+    - (scroller.clientHeight - visibleHeight) / 2);
+}
+
+function scrollOverviewCard(card: HTMLElement, scroller = document.querySelector<HTMLElement>("#providers"), onArrival = () => {}): void {
+  if (!scroller) return;
+  const target = Math.min(Math.max(0, scroller.scrollHeight - scroller.clientHeight), overviewScrollTarget(card, scroller));
   cancelAnimationFrame(overviewJumpFrame);
   if (overviewJumpBehavior() === "auto") {
     scroller.scrollTop = target;
@@ -8009,14 +8053,40 @@ function scrollOverviewCard(card: HTMLElement, scroller = document.querySelector
 
 let navigationFocusCleanup = () => {};
 let navigationFocusRoom: HTMLElement | null = null;
+/// Extra scroll range the provider list currently carries for centering:
+/// the ::after spacer plus the one flex gap it introduces.
+function focusRoomHeight(scroller: HTMLElement): number {
+  if (!scroller.classList.contains("navigation-focus-room")) return 0;
+  const spacer = parseFloat(getComputedStyle(scroller, "::after").height) || 0;
+  const gap = parseFloat(getComputedStyle(scroller).rowGap) || 0;
+  return spacer + gap;
+}
 function focusNavigationTarget(selector: string, scrollerSelector: string): void {
   navigationFocusCleanup();
   const target = document.querySelector<HTMLElement>(selector);
   const scroller = document.querySelector<HTMLElement>(scrollerSelector);
   if (!target || !scroller) return;
   // Leave enough scroll range to center even the first/last settings entry.
+  // The provider list is a flex column whose cards can sit right against the
+  // end of a short window; give it exactly the shortfall for this target.
+  // Growing before the scroll is safe; the shrink happens on arrival, when
+  // scrollTop is already inside the remaining range, so nothing is clamped.
+  // The room then stays put after the highlight expires — collapsing it on
+  // the 3s timer clamped scrollTop and slid the card up under the user.
+  const providerList = scroller.id === "providers";
+  let neededRoom = 0;
   navigationFocusRoom = scroller;
-  scroller.classList.add("navigation-focus-room");
+  if (providerList) {
+    const roomNow = focusRoomHeight(scroller);
+    const naturalMax = scroller.scrollHeight - scroller.clientHeight - roomNow;
+    neededRoom = Math.max(0, Math.ceil(overviewScrollTarget(target, scroller) - naturalMax));
+    if (neededRoom > 0 || roomNow > 0) {
+      scroller.style.setProperty("--provider-focus-room", `${Math.max(neededRoom, roomNow)}px`);
+      scroller.classList.add("navigation-focus-room");
+    }
+  } else {
+    scroller.classList.add("navigation-focus-room");
+  }
   let expiry = 0;
   let observer: MutationObserver | undefined;
   const paint = () => document.querySelector<HTMLElement>(selector)?.classList.add("navigation-focus-target");
@@ -8025,10 +8095,21 @@ function focusNavigationTarget(selector: string, scrollerSelector: string): void
     window.clearTimeout(expiry);
     observer?.disconnect();
     document.querySelectorAll(".navigation-focus-target").forEach((el) => el.classList.remove("navigation-focus-target"));
-    navigationFocusRoom?.classList.remove("navigation-focus-room");
+    // The provider room outlives its highlight on purpose (see above).
+    if (navigationFocusRoom && navigationFocusRoom.id !== "providers") {
+      navigationFocusRoom.classList.remove("navigation-focus-room");
+    }
     navigationFocusRoom = null;
   };
   scrollOverviewCard(target, scroller, () => {
+    if (providerList) {
+      if (neededRoom > 0) {
+        scroller.style.setProperty("--provider-focus-room", `${neededRoom}px`);
+      } else {
+        scroller.classList.remove("navigation-focus-room");
+        scroller.style.removeProperty("--provider-focus-room");
+      }
+    }
     paint();
     // Usage ticks replace card DOM; keep the cue for its full lifetime.
     observer = new MutationObserver(paint);
@@ -11092,25 +11173,6 @@ function renderDashboard(): void {
     renderGroupedCards();
   decorateInkSkin(el as HTMLElement);
   el.scrollTop = scrollTop;
-  if (accountSwitchAnchor) {
-    // Overview/spend cards above the clicked one may reflow by a few pixels
-    // when the shown account changes; move the scroll by that delta so the
-    // card the owner touched does not jump under the pointer.
-    const card = el.querySelector<HTMLElement>(
-      `article[data-provider="${CSS.escape(accountSwitchAnchor.family)}"]`,
-    );
-    if (card) {
-      const rect = el.getBoundingClientRect();
-      const zoom = rect.height / el.offsetHeight;
-      el.scrollTop += switchScrollCorrection(
-        card.getBoundingClientRect().top,
-        accountSwitchAnchor.top,
-        zoom,
-      );
-    }
-    accountSwitchAnchor = null;
-  }
-  animateAccountSwitchId = null;
   if (focusedTab) {
     el.querySelector<HTMLElement>(`[data-card-account="${CSS.escape(focusedTab)}"]`)?.focus({ preventScroll: true });
   }
@@ -19357,13 +19419,7 @@ document.querySelector("#settings-btn")!.addEventListener("click", () => {
     if (acctTab) {
       const [family, acctId] = acctTab.dataset.cardAccount!.split("|");
       userSelectedAccountFor.set(family, acctId);
-      const card = acctTab.closest("article");
-      const scroller = document.querySelector<HTMLElement>("#providers");
-      if (card && scroller && scroller.contains(card)) {
-        accountSwitchAnchor = { family, top: card.getBoundingClientRect().top };
-        animateAccountSwitchId = family;
-      }
-      requestRender();
+      switchAccountCard(family, acctId, acctTab);
       return;
     }
     const cardRefresh = target.closest<HTMLElement>("[data-card-refresh]");
@@ -19684,7 +19740,10 @@ document.querySelector("#settings-btn")!.addEventListener("click", () => {
     const idx = entry.indices[entry.cursor % entry.indices.length];
     entry.cursor = (entry.cursor + 1) % entry.indices.length;
     trailCursorMemory.set(entry.key, entry.cursor);
-    trailCards()[idx]?.scrollIntoView({ behavior: reduceMotion() ? "auto" : scrollBehavior(), block: "start" });
+    // Same landing as an overview jump: centered with a short highlight, not
+    // pinned to the top of the list.
+    const card = trailCards()[idx];
+    if (card?.dataset.provider) jumpToProviderCard(card.dataset.provider);
   });
 
   // The 4-hourly background checker feeds the same footer button.

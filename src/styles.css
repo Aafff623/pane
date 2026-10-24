@@ -2609,6 +2609,15 @@ article.provider.is-folded:hover {
   pointer-events: none;
 }
 
+/* #providers is a column flex box, so the pseudo spacer is a flex item and
+   the default flex-shrink:1 collapses its height to zero — the room that
+   lets the last card reach the viewport centre never existed. The height is
+   set per target to just the shortfall so no long blank tail appears. */
+#providers.navigation-focus-room::after {
+  flex: none;
+  height: var(--provider-focus-room, 50vh);
+}
+
 .provider.muted {
   padding: 7px 13px;
   opacity: 0.7;
@@ -5287,6 +5296,10 @@ footer {
 @keyframes acct-switch-in {
   from { opacity: 0.35; transform: translateY(3px); }
   to { opacity: 1; transform: none; }
+}
+
+.acct-switch-spacer {
+  flex: none;
 }
 
 .card-panel.acct-switch {

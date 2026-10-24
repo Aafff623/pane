@@ -11,7 +11,7 @@ test('navigation frames use explicit blue for overview and yellow for settings, 
  assert.match(styles,/outline:\s*2px solid var\(--navigation-focus-color/);
 });
 const ast=ts.createSourceFile('main.ts',source,ts.ScriptTarget.Latest,true);
-const names=['scrollOverviewCard'];
+const names=['scrollOverviewCard','overviewScrollTarget'];
 const code=ts.transpile(ast.statements.filter(n=>ts.isFunctionDeclaration(n)&&names.includes(n.name?.text)).map(n=>n.getText(ast)).join('\n'),{target:ts.ScriptTarget.ES2020});
 for(const zoom of [0.64,0.8,1,1.16,1.47,2.03]) {
  test(`overview jump centers in layout coordinates at zoom ${zoom}`,()=>{
@@ -97,4 +97,47 @@ test('leaving auth during its pending load cancels the old family jump',async()=
  ctx.panelNavigationRevision++;resolve();await load;
  assert.equal(focuses,0);
  await ctx.focusAuthFamily('codex');assert.equal(focuses,1);
+});
+
+test('the provider rail lands a card in the middle, with the shared highlight',()=>{
+ const source=readFileSync(new URL('../src/main.ts',import.meta.url),'utf8');
+ const trail=source.slice(source.indexOf('document.querySelector("#trail")!.addEventListener("click"'),source.indexOf('// The 4-hourly background checker'));
+ assert.ok(trail.includes('jumpToProviderCard(card.dataset.provider)'), 'rail ticks reuse the centered jump');
+ assert.doesNotMatch(trail, /scrollIntoView\(/, 'a rail tick must not pin the card to the top');
+ const jump=source.slice(source.indexOf('function jumpToProviderCard'),source.indexOf('function renderDrawerBody'));
+ assert.ok(jump.includes('focusNavigationTarget(selector, "#providers")'));
+});
+
+test('the provider list keeps a per-target centering room after the highlight expires',()=>{
+ const classes=new Set();const targetClasses=new Set();const styleMap=new Map();let expiry,arrival;
+ const scroller={
+  id:'providers',scrollTop:0,scrollHeight:1000,clientHeight:600,offsetHeight:600,clientTop:0,
+  getBoundingClientRect:()=>({top:0,height:600}),
+  classList:{add:c=>classes.add(c),remove:c=>classes.delete(c),contains:c=>classes.has(c)},
+  style:{setProperty:(k,v)=>styleMap.set(k,v),removeProperty:k=>styleMap.delete(k),getPropertyValue:k=>styleMap.get(k)??''},
+ };
+ const target={classList:{add:c=>targetClasses.add(c),remove:c=>targetClasses.delete(c)},
+  getBoundingClientRect:()=>({top:1400,height:200})};
+ const ctx=vm.createContext({overviewJumpFrame:0,cancelAnimationFrame(){},
+  document:{querySelector:s=>s==='#providers'?scroller:target,querySelectorAll:()=>[target]},
+  window:{clearTimeout(){},setTimeout(fn){expiry=fn;return 1}},
+  MutationObserver:class{observe(){}disconnect(){}},
+  scrollOverviewCard(_target,_scroller,done){arrival=done},
+  getComputedStyle:()=>({rowGap:'20px'})});
+ vm.runInContext('let navigationFocusCleanup=()=>{};'+functions('focusRoomHeight','overviewScrollTarget','focusNavigationTarget'),ctx);
+ ctx.focusNavigationTarget('article.provider','#providers');
+ // 1200px centre target against a 400px natural range → 800px room.
+ assert.equal(styleMap.get('--provider-focus-room'),'800px');
+ assert.ok(classes.has('navigation-focus-room'));
+ arrival();
+ assert.ok(targetClasses.has('navigation-focus-target'));
+ expiry();
+ assert.ok(classes.has('navigation-focus-room'),'a 3s timer must not collapse the range under the user');
+ assert.equal(styleMap.get('--provider-focus-room'),'800px');
+ assert.ok(!targetClasses.has('navigation-focus-target'));
+});
+
+test('the provider flex spacer cannot be shrunk away',()=>{
+ assert.match(styles,/#providers\.navigation-focus-room::after\s*\{[^}]*flex:\s*none/);
+ assert.match(styles,/#providers\.navigation-focus-room::after\s*\{[^}]*height:\s*var\(--provider-focus-room/);
 });
