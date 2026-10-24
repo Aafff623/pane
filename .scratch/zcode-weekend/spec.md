@@ -1,6 +1,6 @@
 # ZCode Weekend 额度行（智谱 / GLM 卡片）
 
-**Status:** implemented（2026-10-12 落地于 main）＋ amendment：02 票把"静默隐藏"改为**登录态内常驻+占位话术**（见 issues/02-weekend-placeholder.md，同日用户拍板）
+**Status:** implemented（2026-10-12 落地于 main）＋ 2026-10-24 amendment：从「只认 weekend」泛化为 Start Plan 全部赠送 bucket（见文末）
 **Feature dir:** `.scratch/zcode-weekend/`
 **Date:** 2026-10-12
 **接口配方:** 已实测拉通（见下"已核实事实"），非推测
@@ -104,3 +104,16 @@ data.balances[] → { plan_id, user_plan_id, entitlement_id, show_name,
 
 - ~~第二个 ZCode 账号来源~~ → 用户确认：**ZCode 账号来源就一个，就第一个账号**。截图里那两组读数不来自本机登录态，本次不处理。
 
+## 2026-10-24 amendment：Start Plan 不止 weekend
+
+owner 要求把智谱 Start Plan 的活动福利说清楚。用本机真实 ZCode 会话复核后确认：
+
+- 这些福利挂在 **ZCode 账号会话（Start Plan）** 上，和 Z.ai API key 无关；payload 是
+  `data.plans[].entitlements[]` + `data.balances[]` 的 bucket 结构，不只是 weekend 那一条。
+- 实测（2026-10-23）：plan `ZCode 1024 Dev Day`，两个 entitlement/bucket：
+  `GLM-5.3-Flash` 300,000,000、`GLM-5.3` 200,000,000，窗口 1792760927→1792976400。
+- 因此把 `weekend_row()` 泛化为 `start_plan_rows()`：每个已发放 bucket 一行（label 取
+  `show_name`），有 plan 无 bucket → 「held · not granted」领取提示；全部为空才回落到
+  「Weekend not started」占位。窗口过期的 plan/bucket 一律丢弃。
+- 单测从 7 条扩到 9 条（含 1024 形状、未领取、关闭窗口、跨 plan 不串数），并保留一条
+  ignored 的真实机盘点 `real_machine_start_plan_inventory` 供以后校准。

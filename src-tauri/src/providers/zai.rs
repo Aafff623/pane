@@ -129,20 +129,19 @@ pub async fn snapshot_with_key(key: &str) -> Snapshot {
 async fn fetch() -> Result<Snapshot, String> {
     match find_key() {
         Some(key) => fetch_with_key(&key).await,
-        // No Z.ai key. The ZCode weekend row is tied to the local ZCode
-        // session, not to that key — with a session on record the card
-        // shows the row (live grant or not-started placeholder) alone
-        // instead of the paste-a-key hint (.scratch/zcode-weekend).
-        None => {
-            Ok(match zcode_weekend::weekend_row().await {
-                Some(row) => Snapshot::ok(ID, NAME, None, vec![row]),
-                None => Snapshot::no_credentials(
-                    ID,
-                    NAME,
-                    "Paste a Z.ai API key in Settings (gear icon).",
-                ),
-            })
-        }
+        // No Z.ai key. The Start Plan rows are tied to the local ZCode
+        // session, not to that key — with a session on record the card shows
+        // every granted gift bucket (GLM-5.3, GLM-5.3-Flash, weekend builds,
+        // 1024 Dev Day) or the not-started placeholder alone, instead of the
+        // paste-a-key hint (.scratch/zcode-weekend).
+        None => match zcode_weekend::start_plan_rows().await {
+            Some(rows) if !rows.is_empty() => Ok(Snapshot::ok(ID, NAME, None, rows)),
+            _ => Ok(Snapshot::no_credentials(
+                ID,
+                NAME,
+                "Paste a Z.ai API key in Settings (gear icon).",
+            )),
+        },
     }
 }
 
@@ -151,7 +150,7 @@ async fn fetch_with_key(key: &str) -> Result<Snapshot, String> {
     let mut empty = 0usize;
     for ep in &ENDPOINTS {
         match fetch_from(ep, key).await {
-            Ok(snapshot) => return Ok(attach_weekend(snapshot).await),
+            Ok(snapshot) => return Ok(attach_start_plan(snapshot).await),
             Err(DomainErr::Auth) => rejected += 1,
             Err(DomainErr::Empty) => empty += 1,
             Err(DomainErr::Other(e)) => return Err(e),
@@ -164,7 +163,7 @@ async fn fetch_with_key(key: &str) -> Result<Snapshot, String> {
         );
     }
     if let Some(snap) = no_plan_setup(ENDPOINTS.len(), empty) {
-        return Ok(attach_weekend(snap).await);
+        return Ok(attach_start_plan(snap).await);
     }
     Err("unexpected quota response shape (endpoint is undocumented)".into())
 }
@@ -186,12 +185,13 @@ fn no_plan_setup(endpoints: usize, empty: usize) -> Option<Snapshot> {
     })
 }
 
-/// The ZCode weekend row rides along as the card's last row: live grant →
-/// usage bar, session without a grant → not-started placeholder, no local
-/// session → no row.
-async fn attach_weekend(mut snap: Snapshot) -> Snapshot {
-    if let Some(row) = zcode_weekend::weekend_row().await {
-        snap.metrics.push(row);
+/// Every Start Plan gift rides along as the card's last rows: one bar per
+/// granted bucket, a claim line for a held-but-ungranted plan, the not-started
+/// placeholder when a session has no grant at all, and nothing when the machine
+/// has no local ZCode session.
+async fn attach_start_plan(mut snap: Snapshot) -> Snapshot {
+    if let Some(rows) = zcode_weekend::start_plan_rows().await {
+        snap.metrics.extend(rows);
     }
     snap
 }
