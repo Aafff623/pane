@@ -431,6 +431,34 @@ Ground rules that apply to every provider:
   against the highest balance Pane has seen locally (top-ups raise it;
   feeds the Almost Out notification).
 
+## StepFun Step Plan
+
+- **Full mode:** account + password (Pane renews the 30-minute Oasis
+  session) or a pasted Oasis session-token pair. Reads the console
+  `QueryStepPlanRateLimit` / `GetStepPlanStatus` RPCs and shows the real
+  window or Credit pool — the only way to see the remaining balance.
+- **Limited API-key mode:** the provider is a web-session integration and
+  the console RPC rejects an ordinary/Step Plan API key. Selecting
+  **API Key** in Settings → StepFun Step Plan (with an explicit warning)
+  stores the key instead and marks the snapshot `limited:
+  "api_key_estimate"`.
+  - No balance or progress/quota row is drawn.
+  - Pane monitors local token usage only and shows the usage trend.
+  - A Credits figure is estimated from the official StepFun CNY prices
+    (1M Credits = ¥1; Step 5 Preview 7/0.7/20, Step 3.7 Flash
+    1.35/0.27/8.1, Step 3.5 Flash 0.7/0.14/2.1 per 1M input/cache/output
+    tokens). Because local rows lack the input/output/cache split, the
+    estimate assumes 70% input / 30% output and charges input at the
+    cache-miss rate; cache hits and Step 5 peak hours (2×) are not
+    itemised. The row is always badged **estimated**.
+  - A question-mark next to the plan explains why the balance is missing
+    and that web login is required for exact quota/reset.
+  - Saving an API key clears any stored web account/password; saving a
+    complete web login clears an old key, so the two ladders never mix.
+- **Credential hint:** the same snapshot shape supports future
+  web-session providers: return `limited` from the provider and the card
+  renders only the trend + help; no frontend per-provider branch.
+
 ## SiliconFlow
 
 - **Reads:** pasted key (Settings) or `SILICONFLOW_API_KEY`.

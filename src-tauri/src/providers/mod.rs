@@ -203,6 +203,11 @@ pub struct Snapshot {
     /// ten minutes; a failed later refresh carries it rather than erasing it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub just_reset_at: Option<i64>,
+    /// Set when the account is connected through a fallback credential that
+    /// cannot read the vendor's quota. The card renders only the local
+    /// token trend and a help popover; no balance/progress row is shown.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub limited: Option<String>,
 }
 
 impl Snapshot {
@@ -221,6 +226,7 @@ impl Snapshot {
             dashboard_url: None,
             auth_pack_expiry: None,
             just_reset_at: None,
+            limited: None,
         }
     }
 
@@ -238,6 +244,7 @@ impl Snapshot {
             dashboard_url: None,
             auth_pack_expiry: None,
             just_reset_at: None,
+            limited: None,
         }
     }
 
@@ -255,6 +262,7 @@ impl Snapshot {
             dashboard_url: None,
             auth_pack_expiry: None,
             just_reset_at: None,
+            limited: None,
         }
     }
 
@@ -287,7 +295,16 @@ impl Snapshot {
             dashboard_url: None,
             auth_pack_expiry: None,
             just_reset_at: None,
+            limited: None,
         }
+    }
+
+    /// Mark a snapshot as a fallback mode: the account is connected, but
+    /// this credential cannot read the vendor's quota. The UI must not draw
+    /// balance/progress rows for it.
+    pub fn with_limited(mut self, kind: &str) -> Self {
+        self.limited = Some(kind.to_string());
+        self
     }
 }
 

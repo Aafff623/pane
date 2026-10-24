@@ -75,6 +75,7 @@ import { keyAvailabilityCounts, keyAvailabilityRows, keyAvailabilitySummary, ove
 import { loadFontPacks, fontPackFamilies, mountFontPackManager } from "./fontPacks";
 import { decorateInkSkin, clearInkSkin, ensureInkDefs } from "./inkEffects";
 import { postIcon } from "./skinIcons";
+import { estimateStepfunCredits } from "./stepfunEstimate";
 // The repo's changelog ships inside the bundle, so the "What's new" dialog
 // and the Settings changelog viewer read the exact file releases maintain.
 import changelogRaw from "../CHANGELOG.md?raw";
@@ -111,6 +112,9 @@ interface Snapshot {
   dashboard_url?: string | null;
   auth_pack_expiry?: number | null;
   just_reset_at?: number | null;
+  /// Fallback credential mode (e.g. an API key on a web-session provider):
+  /// no quota rows, only the local token trend + the estimated figure.
+  limited?: string;
 }
 
 interface ModelSpend {
@@ -1196,7 +1200,17 @@ function resolveDisplayedAccount(family: string, defaultId: string, accountIds: 
   return accountIds.includes(defaultId) ? defaultId : accountIds[0] ?? defaultId;
 }
 
-type TrendSource = { id: string; trend: (number | null)[]; credits?: boolean; unit?: UsageUnit; fmt: (v: number) => string };
+type TrendSource = {
+  id: string;
+  trend: (number | null)[];
+  credits?: boolean;
+  unit?: UsageUnit;
+  fmt: (v: number) => string;
+  /// A local-only estimate, never a vendor reading. The row carries the
+  /// "estimated" badge and the help popover explains the assumptions.
+  estimated?: boolean;
+  estimateCredits?: number;
+};
 
 /// Credit counts are small whole numbers (38 of 2000), so no k/M suffix.
 const fmtCredits = (v: number): string => Math.round(v).toLocaleString(localeTag());
@@ -1231,6 +1245,19 @@ function trendSourceFor(id: string): TrendSource | undefined {
     return { id, trend: credits, credits: true, unit: "credits", fmt: fmtCredits };
   }
   return undefined;
+}
+
+/// A fallback-mode card has no vendor quota; its trend comes from local
+/// token facts. StepFun additionally gets an estimated Credits figure from
+/// the official rates; the badge says "estimated" so it can never be read as
+/// a vendor balance.
+function limitedTrendSource(shown: Snapshot): TrendSource | undefined {
+  const base = trendSourceFor(shown.id);
+  if (!base) return undefined;
+  if (providerFamily(shown.id) !== "stepfun-plan") return { ...base, estimated: true };
+  const spend = localSpendFor(shown.id);
+  const estimate = spend ? estimateStepfunCredits(spend.last30.models) : null;
+  return { ...base, estimated: true, estimateCredits: estimate?.credits ?? 0 };
 }
 
 function formatUsageQuantity(value: number, unit: UsageUnit): string {
@@ -2618,6 +2645,9 @@ function renderTrend(source: TrendSource): string {
     ? localSpend.trend.reduce<number>((sum, v) => sum + (v ?? 0), 0)
     : 0;
   const spendBits: string[] = [];
+  if (source.estimated && (source.estimateCredits ?? 0) > 0) {
+    spendBits.push(t("card.estimatedCredits", { n: fmtTokens(source.estimateCredits!) }));
+  }
   if (source.unit === "percent") {
     spendBits.push(t("card.quotaPeak", { n: formatUsageQuantity(
       Math.max(...source.trend.map((value) => value ?? 0)),
@@ -2631,6 +2661,7 @@ function renderTrend(source: TrendSource): string {
     <div class="metric trend">
       <div class="trend-head">
         <span class="metric-label" title="${escapeHtml(title)}">${escapeHtml(trendLabel)}</span>
+        ${source.estimated ? `<span class="trend-estimated">${escapeHtml(t("card.estimated"))}</span>` : ""}
         ${spendSummary ? `<span class="trend-spend">${escapeHtml(spendSummary)}</span>` : ""}
       </div>
       <div class="trend-plot">
@@ -2725,6 +2756,9 @@ function peakCoreProgress(s: Snapshot): number | null {
 function accountHealthDot(id: string): "red" | "green" | "gray" | "yellow" | "error" {
   const snap = lastSnapshots.find((s) => s.id === id);
   if (!snap) return "gray";
+  // A fallback credential is connected but cannot read the quota: neutral,
+  // never a green "all good" or a red "exhausted".
+  if (snap.limited) return "gray";
   // A rejected key is actionable, not an account with no data. Keep the
   // gray dot for accounts that have not produced a snapshot yet.
   if (snap.status === "error") return "error";
@@ -3316,9 +3350,14 @@ function renderCard(s: Snapshot): string {
     shown.just_reset_at && Date.now() - shown.just_reset_at < 10 * 60_000
       ? `<span class="just-reset" title="${escapeHtml(t("card.justResetTip"))}">${escapeHtml(t("card.justReset"))}</span>`
       : "";
-  const plan = shown.plan
-    ? `<span class="plan" title="${escapeHtml(shown.plan)}">${escapeHtml(shown.plan)}</span>${justReset}`
-    : justReset;
+  const limitedHelp = shown.limited
+    ? `<button type="button" class="limited-help" data-limited-help="${escapeHtml(shown.id)}" title="${escapeHtml(t("card.limitedHelpTitle"))}" aria-label="${escapeHtml(t("card.limitedHelpTitle"))}">?</button>`
+    : "";
+  const plan = shown.limited
+    ? `<span class="plan" title="${escapeHtml(t("card.limitedPlan"))}">${escapeHtml(t("card.limitedPlan"))}</span>${limitedHelp}${justReset}`
+    : shown.plan
+      ? `<span class="plan" title="${escapeHtml(shown.plan)}">${escapeHtml(shown.plan)}</span>${justReset}`
+      : justReset;
   // Peak-hours marker on the head: expanded standalone cards carry no
   // health dot, so the yellow peak state needs its own spot (next to the
   // plan badge). Same predicate as the dot tint: available AND in peak.
@@ -3337,7 +3376,15 @@ function renderCard(s: Snapshot): string {
 
   let body: string;
   let caret = "";
-  if (shown.status === "needs_setup") {
+  if (shown.limited) {
+    // Fallback credential mode: no balance/progress rows at all. The local
+    // usage trend is the only card body; the question mark explains why and
+    // how to unlock the exact quota.
+    const trend = limitedTrendSource(shown);
+    body = trend
+      ? renderTrend(trend)
+      : `<p class="settings-note limited-empty">${escapeHtml(t("card.limitedNoUsage"))}</p>`;
+  } else if (shown.status === "needs_setup") {
     // Credential present, quota not readable: show whatever the credential
     // CAN report, then spell out the missing step. The card must never
     // collapse into a bare "failed" shell (user rule 2026-10-15).
@@ -10333,24 +10380,42 @@ function renderCustConfig(id: string): string {
       </div>`;
   }
   if (id === "stepfun-plan") {
-    return `<div class="cust-config cust-form">
+    // Web login is the full-fidelity route; API key is the explicitly
+    // limited fallback. Default to whichever mode the live snapshot says is
+    // active, so reopening the form does not pretend a key is a session.
+    const limitedActive = Boolean(lastSnapshots.find((snap) => snap.id === "stepfun-plan")?.limited);
+    const mode = limitedActive ? "key" : "web";
+    return `<div class="cust-config cust-form" data-stepfun-mode="${mode}">
       ${status}
-      <div class="form-actions">
-        <button class="mini-btn" data-stepfun-login="https://platform.stepfun.com/account-overview">${escapeHtml(t("customize.stepfunPlanLogin"))}</button>
+      <div class="cred-mode-switch" role="tablist" aria-label="${escapeHtml(t("customize.connLabel"))}">
+        <button type="button" class="cred-mode-btn${mode === "web" ? " on" : ""}" data-stepfun-mode-btn="web" role="tab" aria-selected="${mode === "web"}">${escapeHtml(t("customize.webLoginMode"))}</button>
+        <button type="button" class="cred-mode-btn${mode === "key" ? " on" : ""}" data-stepfun-mode-btn="key" role="tab" aria-selected="${mode === "key"}">${escapeHtml(t("customize.apiKeyMode"))}</button>
       </div>
-      <p class="settings-note">${escapeHtml(t("customize.stepfunPlanLoginHelp"))}</p>
-      <div class="form-field">
-        <span class="form-label">${escapeHtml(t("customize.stepfunPlanUserLabel"))}</span>
-        <input class="form-input" type="text" data-cust-user="${id}" placeholder="${escapeHtml(t("customize.stepfunPlanUserPh"))}" autocomplete="username" spellcheck="false" />
+      <div data-stepfun-pane="web" ${mode === "key" ? "hidden" : ""}>
+        <div class="form-actions">
+          <button class="mini-btn" data-stepfun-login="https://platform.stepfun.com/account-overview">${escapeHtml(t("customize.stepfunPlanLogin"))}</button>
+        </div>
+        <p class="settings-note">${escapeHtml(t("customize.stepfunPlanLoginHelp"))}</p>
+        <div class="form-field">
+          <span class="form-label">${escapeHtml(t("customize.stepfunPlanUserLabel"))}</span>
+          <input class="form-input" type="text" data-cust-user="${id}" placeholder="${escapeHtml(t("customize.stepfunPlanUserPh"))}" autocomplete="username" spellcheck="false" />
+        </div>
+        <div class="form-field">
+          <span class="form-label">${escapeHtml(t("customize.stepfunPlanPassLabel"))}</span>
+          <input class="form-input" type="password" data-cust-pass="${id}" placeholder="${escapeHtml(t("customize.stepfunPlanPassPh"))}" autocomplete="new-password" spellcheck="false" />
+        </div>
+        <div class="form-field">
+          <span class="form-label">${escapeHtml(t("customize.stepfunPlanTokenLabel"))}</span>
+          <input class="form-input" type="password" data-cust-key="${id}" placeholder="${escapeHtml(t("customize.stepfunPlanTokenPh"))}" autocomplete="new-password" spellcheck="false" />
+          <div class="form-help">${escapeHtml(t("customize.formKeyHelp"))}</div>
+        </div>
       </div>
-      <div class="form-field">
-        <span class="form-label">${escapeHtml(t("customize.stepfunPlanPassLabel"))}</span>
-        <input class="form-input" type="password" data-cust-pass="${id}" placeholder="${escapeHtml(t("customize.stepfunPlanPassPh"))}" autocomplete="new-password" spellcheck="false" />
-      </div>
-      <div class="form-field">
-        <span class="form-label">${escapeHtml(t("customize.stepfunPlanTokenLabel"))}</span>
-        <input class="form-input" type="password" data-cust-key="${id}" placeholder="${escapeHtml(t("customize.stepfunPlanTokenPh"))}" autocomplete="new-password" spellcheck="false" />
-        <div class="form-help">${escapeHtml(t("customize.formKeyHelp"))}</div>
+      <div data-stepfun-pane="key" ${mode === "web" ? "hidden" : ""}>
+        <div class="form-field">
+          <span class="form-label">${escapeHtml(t("customize.apiKeyFieldLabel"))}</span>
+          <input class="form-input" type="password" data-cust-api-key="${id}" placeholder="sk-…" autocomplete="new-password" spellcheck="false" />
+        </div>
+        <p class="settings-note">${escapeHtml(t("customize.apiKeyApproxNote"))}</p>
       </div>
       <div class="form-actions">
         <button class="mini-btn" data-cust-test="${id}">${escapeHtml(t("customize.test"))}</button>
@@ -11696,6 +11761,19 @@ function showTrendTip(el: HTMLElement): void {
   placeFixedTip(tip, el.getBoundingClientRect(), { gap: 6, placement: "below", align: "left", offsetX: -50 });
 }
 
+/// Hover help for a fallback-mode card: why the balance is missing and how
+/// to unlock it. Reuses the shared fixed tooltip surface.
+function showLimitedHelpTip(el: HTMLElement): void {
+  const tip = document.querySelector<HTMLElement>("#model-tip")!;
+  tip.innerHTML = `<div class="tip-help">
+    <strong>${escapeHtml(t("card.limitedHelpTitle"))}</strong>
+    <p>${escapeHtml(t("card.limitedHelpBody"))}</p>
+    <p class="tip-help-action">${escapeHtml(t("card.limitedHelpAction"))}</p>
+  </div>`;
+  tip.hidden = false;
+  placeFixedTip(tip, el.getBoundingClientRect(), { gap: 6, placement: "below", align: "left" });
+}
+
 function showModelTip(row: HTMLElement): void {
   const tip = document.querySelector<HTMLElement>("#model-tip")!;
   const [id, key] = (row.dataset.spend ?? "").split("|");
@@ -12700,6 +12778,28 @@ async function handleCustomizeClick(target: HTMLElement): Promise<boolean> {
     void runCustKeyTest(custTest.dataset.custTest!);
     return true;
   }
+  const stepfunModeBtn = target.closest<HTMLElement>("[data-stepfun-mode-btn]");
+  if (stepfunModeBtn) {
+    const panel = stepfunModeBtn.closest<HTMLElement>("[data-stepfun-mode]");
+    const next = stepfunModeBtn.dataset.stepfunModeBtn === "key" ? "key" : "web";
+    if (panel) {
+      if (next === "key" && panel.dataset.stepfunMode !== "key") {
+        // Never let the limited mode be entered without saying what is lost.
+        void appConfirm({
+          title: t("customize.apiKeyModeTitle"),
+          message: t("customize.apiKeyModeAlert"),
+          confirmLabel: t("customize.apiKeyModeContinue"),
+        }).then((ok) => {
+          if (!ok || !panel.isConnected) return;
+          setStepfunCredentialMode(panel, "key");
+          panel.querySelector<HTMLInputElement>("[data-cust-api-key]")?.focus();
+        });
+      } else if (next === "web") {
+        setStepfunCredentialMode(panel, "web");
+      }
+    }
+    return true;
+  }
   const stepfunLogin = target.closest<HTMLElement>("[data-stepfun-login]");
   if (stepfunLogin) {
     void invoke("open_link", { url: stepfunLogin.dataset.stepfunLogin! }).catch((err) => {
@@ -12800,12 +12900,21 @@ async function handleCustomizeClick(target: HTMLElement): Promise<boolean> {
   if (custSave) {
     const id = custSave.dataset.custSave!;
     const panel = custSave.closest(".cust-config");
-    const keyInp = panel?.querySelector<HTMLInputElement>("[data-cust-key]");
+    const stepfunMode = id === "stepfun-plan"
+      ? (panel as HTMLElement | null)?.dataset.stepfunMode ?? "web"
+      : "web";
+    const keyInp = panel?.querySelector<HTMLInputElement>(
+      stepfunMode === "key" ? "[data-cust-api-key]" : "[data-cust-key]",
+    );
     if (id === "stepfun-plan") {
       // Triple-credential save: the command validates the account with a
       // real login before storing, so a typo fails here, not later.
-      const username = panel?.querySelector<HTMLInputElement>("[data-cust-user]")?.value.trim() ?? "";
-      const password = panel?.querySelector<HTMLInputElement>("[data-cust-pass]")?.value ?? "";
+      const username = stepfunMode === "web"
+        ? panel?.querySelector<HTMLInputElement>("[data-cust-user]")?.value.trim() ?? ""
+        : "";
+      const password = stepfunMode === "web"
+        ? panel?.querySelector<HTMLInputElement>("[data-cust-pass]")?.value ?? ""
+        : "";
       const result = panel?.querySelector<HTMLElement>("[data-cust-result]");
       void invoke("stepfun_plan_save", {
         token: keyInp?.value.trim() ?? "",
@@ -12820,7 +12929,10 @@ async function handleCustomizeClick(target: HTMLElement): Promise<boolean> {
           }
           const passInp = panel?.querySelector<HTMLInputElement>("[data-cust-pass]");
           if (passInp) passInp.value = ""; // never leave the password in the DOM
-          void forceUsageRefreshAttempt(false).then(requestTraySync);
+          void forceUsageRefreshAttempt(false).then(() => {
+            requestTraySync();
+            if (customizeOpen) renderDrawerBody();
+          });
         })
         .catch((err: unknown) => {
           if (result) {
@@ -12973,6 +13085,21 @@ async function runSensenovaOauthFinish(): Promise<void> {
   }
 }
 
+/// Switch the StepFun credential form between web login and the limited API
+/// key mode. The pane visibility and tab state live in one place so a
+/// re-render cannot leave the wrong section open.
+function setStepfunCredentialMode(panel: HTMLElement, mode: "web" | "key"): void {
+  panel.dataset.stepfunMode = mode;
+  panel.querySelectorAll<HTMLElement>("[data-stepfun-pane]").forEach((pane) => {
+    pane.hidden = pane.dataset.stepfunPane !== mode;
+  });
+  panel.querySelectorAll<HTMLElement>("[data-stepfun-mode-btn]").forEach((button) => {
+    const on = button.dataset.stepfunModeBtn === mode;
+    button.classList.toggle("on", on);
+    button.setAttribute("aria-selected", String(on));
+  });
+}
+
 /// "Test connection" behind the ⚙ panel: validates the pasted key through
 /// test_api_key (a live probe that never writes anything) and only a
 /// passing test enables Save. The result line shows the metric count on
@@ -12981,7 +13108,10 @@ async function runCustKeyTest(id: string): Promise<void> {
   const panel = document.querySelector<HTMLElement>(
     `#drawer-body [data-cust-provider="${CSS.escape(id)}"] .cust-config`,
   );
-  const keyInp = panel?.querySelector<HTMLInputElement>("[data-cust-key]");
+  const stepfunMode = id === "stepfun-plan" ? (panel?.dataset.stepfunMode ?? "web") : "web";
+  const keyInp = panel?.querySelector<HTMLInputElement>(
+    stepfunMode === "key" ? "[data-cust-api-key]" : "[data-cust-key]",
+  );
   const result = panel?.querySelector<HTMLElement>("[data-cust-result]");
   const saveBtn = panel?.querySelector<HTMLButtonElement>("[data-cust-save]");
   if (!keyInp || !result) return;
@@ -12995,8 +13125,12 @@ async function runCustKeyTest(id: string): Promise<void> {
   if (id === "stepfun-plan") {
     // Step Plan takes account+password (auto-renewing session) or a pasted
     // token pair — the generic single-key probe doesn't apply.
-    const username = panel?.querySelector<HTMLInputElement>("[data-cust-user]")?.value.trim() ?? "";
-    const password = panel?.querySelector<HTMLInputElement>("[data-cust-pass]")?.value ?? "";
+    const username = stepfunMode === "web"
+      ? panel?.querySelector<HTMLInputElement>("[data-cust-user]")?.value.trim() ?? ""
+      : "";
+    const password = stepfunMode === "web"
+      ? panel?.querySelector<HTMLInputElement>("[data-cust-pass]")?.value ?? ""
+      : "";
     if (!key && !(username && password)) {
       show(t("customize.testEmpty"), false);
       if (saveBtn) saveBtn.disabled = false;
@@ -13005,7 +13139,7 @@ async function runCustKeyTest(id: string): Promise<void> {
     if (saveBtn) saveBtn.disabled = true;
     show(t("customize.testing"), null);
     try {
-      const r = await invoke<{ ok: boolean; status: string; metrics: number; message: string }>("stepfun_plan_test", {
+      const r = await invoke<{ ok: boolean; status: string; metrics: number; message: string; limited?: string | null }>("stepfun_plan_test", {
         token: key,
         username,
         password,
@@ -13015,7 +13149,12 @@ async function runCustKeyTest(id: string): Promise<void> {
         show(t("card.testNeedsSetup", { err: displayCardHint(r.message) }), null);
         if (saveBtn) saveBtn.disabled = false;
       } else if (r.ok) {
-        show(t("customize.testOk", { n: r.metrics }), true);
+        show(
+          r.limited
+            ? t("customize.testOkLimited")
+            : t("customize.testOk", { n: r.metrics }),
+          true,
+        );
         if (saveBtn) saveBtn.disabled = false;
       } else {
         show(`${t("customize.testFailed")}: ${r.message}`, false);
@@ -19720,6 +19859,11 @@ document.querySelector("#settings-btn")!.addEventListener("click", () => {
   providersEl.addEventListener("mouseover", (e) => {
     if (customizeOpen) return;
     const target = e.target as HTMLElement;
+    const help = target.closest<HTMLElement>("[data-limited-help]");
+    if (help) {
+      showLimitedHelpTip(help);
+      return;
+    }
     const bar = target.closest<HTMLElement>("[data-trend]");
     if (bar) {
       showTrendTip(bar);
@@ -19730,7 +19874,7 @@ document.querySelector("#settings-btn")!.addEventListener("click", () => {
   });
   providersEl.addEventListener("mouseout", (e) => {
     const target = e.target as HTMLElement;
-    const hovered = target.closest<HTMLElement>("[data-spend], [data-trend]");
+    const hovered = target.closest<HTMLElement>("[data-spend], [data-trend], [data-limited-help]");
     const to = e.relatedTarget as HTMLElement | null;
     if (hovered && (!to || !hovered.contains(to))) tip.hidden = true;
   });

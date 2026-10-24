@@ -54,6 +54,11 @@ const BROWSER_UA: &str = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleW
 const MAX_BODY_BYTES: usize = 64 * 1024;
 
 const BACKOFFS_MS: [i64; 3] = [30_000, 5 * 60_000, 30 * 60_000];
+/// Fallback mode: an Open-Platform/Step Plan API key is connected, but the
+/// console-only quota endpoint cannot read it. The card shows local token
+/// usage + an estimated credit figure, never a fake balance bar.
+const LIMITED_KIND: &str = "api_key_estimate";
+const STEP_PLAN_MODELS_URL: &str = "https://api.stepfun.com/step_plan/v1/models";
 
 /// Stored credential triple. `apiKey` is read as `token` so the file the
 /// Settings paste-box always wrote keeps working untouched.
@@ -169,6 +174,9 @@ async fn wallet_snapshot(token: &str) -> Option<Snapshot> {
 pub async fn snapshot_with_creds(token: &str, username: &str, password: &str) -> Snapshot {
     let token = token.trim();
     if !token.is_empty() {
+        if token_shape(token) == TokenShape::NotAJwt {
+            return api_key_limited_snapshot(token).await;
+        }
         return match fetch_with(token).await {
             Ok(s) => s,
             Err(FetchErr::Auth) => pasted_token_fallback(token, wallet_snapshot(token).await),
@@ -189,6 +197,38 @@ pub async fn snapshot_with_creds(token: &str, username: &str, password: &str) ->
     }
 }
 
+/// The limited card for an API-key credential. Only connectivity is proved:
+/// the console quota RPC cannot read a key, so the card shows no balance or
+/// progress row. Local token usage and the estimated credit figure are
+/// rendered by the frontend.
+async fn api_key_limited_snapshot(key: &str) -> Snapshot {
+    match step_plan_key_works(key).await {
+        Ok(()) => Snapshot::ok(ID, NAME, Some("API key mode".into()), vec![])
+            .with_limited(LIMITED_KIND),
+        Err(message) => Snapshot::error(ID, NAME, message),
+    }
+}
+
+/// A standard Open-Platform key proves itself on the wallet endpoint; a
+/// Step Plan key proves itself on its own model list. Either is enough —
+/// this mode never claims to read the plan quota.
+async fn step_plan_key_works(key: &str) -> Result<(), String> {
+    if crate::providers::stepfun::snapshot_with_key(key).await.status == "ok" {
+        return Ok(());
+    }
+    let response = http()
+        .get(STEP_PLAN_MODELS_URL)
+        .bearer_auth(key)
+        .send()
+        .await
+        .map_err(|error| format!("StepFun API key check failed: {error}"))?;
+    if response.status().is_success() {
+        Ok(())
+    } else {
+        Err("StepFun API key was rejected — check it in Settings.".into())
+    }
+}
+
 // A pasted key must prove connectivity before Test can say "connected".
 // Stored cards may remain visible with guidance even when that proof fails.
 fn pasted_token_fallback(token: &str, wallet: Option<Snapshot>) -> Snapshot {
@@ -206,6 +246,33 @@ fn describe_fetch(e: FetchErr) -> String {
     }
 }
 
+/// Merge one Settings save into the stored credential without ever mixing
+/// an API key and a web session: an API key clears the account/password; a
+/// complete web login clears an old key. An empty field keeps the stored
+/// value, so a note-only edit cannot erase the session.
+fn merge_creds(mut creds: Creds, token: &str, username: &str, password: &str) -> Creds {
+    if !token.trim().is_empty() {
+        let shape = token_shape(token);
+        creds.token = token.trim().to_string();
+        if shape == TokenShape::NotAJwt {
+            creds.username.clear();
+            creds.password.clear();
+        }
+    } else if !username.trim().is_empty() && !password.is_empty() {
+        creds.token.clear();
+        creds.username = username.trim().to_string();
+        creds.password = password.to_string();
+    } else {
+        if !username.trim().is_empty() {
+            creds.username = username.trim().to_string();
+        }
+        if !password.is_empty() {
+            creds.password = password.to_string();
+        }
+    }
+    creds
+}
+
 /// Settings "Save": persist the triple. Account+password alone triggers one
 /// real login so the stored token pair is born here (and any typo in the
 /// password is caught at save time, not at the next refresh).
@@ -215,18 +282,7 @@ pub async fn save_creds_interactive(
     password: &str,
 ) -> Result<(), String> {
     let _flight = FETCH_LOCK.lock().await;
-    let mut creds = load_creds();
-    // Non-empty fields overwrite; an empty field keeps whatever is stored —
-    // filling only the account must not wipe the token pair (and vice versa).
-    if !token.trim().is_empty() {
-        creds.token = token.trim().to_string();
-    }
-    if !username.trim().is_empty() {
-        creds.username = username.trim().to_string();
-    }
-    if !password.is_empty() {
-        creds.password = password.to_string();
-    }
+    let mut creds = merge_creds(load_creds(), token, username, password);
     if creds.token.is_empty() && (!creds.username.is_empty() && !creds.password.is_empty()) {
         let tok = full_login(&creds.username, &creds.password)
             .await
@@ -436,6 +492,14 @@ async fn fetch() -> Result<Snapshot, String> {
             NAME,
             "Sign in to StepFun Step Plan in Settings (account + password keeps you signed in).",
         ));
+    }
+
+    // An API-key-shaped credential is a deliberate fallback mode: the
+    // console quota RPC only accepts an Oasis session pair, so never walk
+    // the refresh/login ladder for it. Prove connectivity on the key's own
+    // endpoints, then return the limited snapshot the UI knows how to draw.
+    if token_shape(&creds.token) == TokenShape::NotAJwt {
+        return Ok(api_key_limited_snapshot(&creds.token).await);
     }
 
     // L0: locally-valid access JWT → straight to the quota endpoint. A 401
@@ -836,6 +900,56 @@ fn parse_snapshot(rate: &Value, status: Option<&Value>) -> Result<Snapshot, Stri
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn api_key_and_web_credentials_never_mix() {
+        let stored = Creds {
+            token: "a.b.c...d.e.f".into(),
+            username: "old-user".into(),
+            password: "old-pass".into(),
+        };
+        let keyed = merge_creds(stored, "sk-test-key", "", "");
+        assert_eq!(keyed.token, "sk-test-key");
+        assert!(keyed.username.is_empty(), "an API key clears the web account");
+        assert!(keyed.password.is_empty(), "an API key clears the web password");
+
+        let web = merge_creds(keyed, "", "new-user", "new-pass");
+        assert!(web.token.is_empty(), "a complete web login clears the old key");
+        assert_eq!(web.username, "new-user");
+
+        let kept = merge_creds(web.clone(), "", "", "");
+        assert_eq!(kept.username, "new-user", "an empty save keeps the session");
+        assert_eq!(kept.password, "new-pass");
+    }
+
+    #[test]
+    fn limited_mode_has_no_balance_rows() {
+        let snap = Snapshot::ok(ID, NAME, Some("API key mode".into()), vec![])
+            .with_limited(LIMITED_KIND);
+        assert_eq!(snap.status, "ok");
+        assert_eq!(snap.limited.as_deref(), Some(LIMITED_KIND));
+        assert!(snap.metrics.is_empty(), "no fake balance/progress row");
+    }
+
+    /// Read-only live probe for the limited API-key mode. It never prints
+    /// the key; it only checks that a stored Open-Platform/Step Plan key is
+    /// accepted and produces an `ok` snapshot with no quota rows.
+    #[tokio::test]
+    #[ignore = "real-machine StepFun API key; needs a key stored by the stepfun card"]
+    async fn real_machine_api_key_mode_is_limited() {
+        let Some(key) = crate::providers::stored_api_key("stepfun", &["STEPFUN_API_KEY"]) else {
+            eprintln!("no StepFun API key stored");
+            return;
+        };
+        let snap = api_key_limited_snapshot(&key).await;
+        eprintln!(
+            "status={} limited={:?} metrics={} error={:?}",
+            snap.status,
+            snap.limited,
+            snap.metrics.len(),
+            snap.error
+        );
+    }
 
     #[test]
     fn account_identity_rejects_null_zero_and_conflicting_halves() {

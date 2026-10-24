@@ -5648,6 +5648,7 @@ async fn stepfun_plan_test(
         "ok": snap.status == "ok",
         "status": snap.status,
         "metrics": snap.metrics.len(),
+        "limited": snap.limited,
         "message": snap.error.unwrap_or_default(),
     }))
 }

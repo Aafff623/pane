@@ -2118,6 +2118,92 @@ body:not(.panel-form).settings-open #settings {
   white-space: nowrap;
 }
 
+.trend-estimated {
+  flex: none;
+  padding: 0 5px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--muted-foreground);
+  font-size: 9.5px;
+  letter-spacing: 0.02em;
+  line-height: 16px;
+}
+
+/* Fallback credential mode: a neutral question-mark next to the plan. */
+.limited-help {
+  flex: none;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 50%;
+  background: transparent;
+  color: var(--muted-foreground);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 16px;
+  cursor: help;
+}
+.limited-help:hover,
+.limited-help:focus-visible {
+  color: var(--foreground);
+  border-color: var(--foreground);
+}
+.limited-empty {
+  margin: 6px 0 2px;
+}
+
+/* The hover card behind [data-limited-help]. */
+.tip-help {
+  max-width: 310px;
+  white-space: normal;
+  line-height: 1.45;
+}
+.tip-help strong {
+  display: block;
+  margin-bottom: 4px;
+  color: var(--foreground);
+  font-size: 11.5px;
+}
+.tip-help p {
+  margin: 0 0 6px;
+  color: var(--muted-foreground);
+  font-size: 11px;
+}
+.tip-help .tip-help-action {
+  margin-bottom: 0;
+  color: var(--foreground);
+}
+
+/* Credential form mode switch: web login vs limited API key. */
+.cred-mode-switch {
+  display: inline-flex;
+  gap: 3px;
+  margin-bottom: 10px;
+  padding: 3px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--muted);
+}
+.cred-mode-btn {
+  padding: 4px 10px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--muted-foreground);
+  font-size: 11.5px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.cred-mode-btn:hover {
+  color: var(--foreground);
+}
+.cred-mode-btn.on {
+  background: var(--primary);
+  color: var(--primary-foreground);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.18);
+}
+
 .metric.trend .trend-plot {
   flex: 1;
   min-width: 0;

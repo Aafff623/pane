@@ -52,7 +52,7 @@
 
 | 分组 | Provider（family ID） | 需要什么、如何取得 | 可查询项与主要边界 |
 |---|---|---|---|
-| 编程 | StepFun Step Plan（`stepfun-plan`） | 控制台完整 `Oasis-Token` 会话令牌对；或账号密码供 Pane 登录／续期 | 会话／周窗口、Credit、Top-up，取决于套餐代际。控制台 RPC 兼容适配未公开验证；推理 API key 无法替代 |
+| 编程 | StepFun Step Plan（`stepfun-plan`） | 控制台完整 `Oasis-Token` 会话令牌对；或账号密码供 Pane 登录／续期；或 API Key（受限模式） | 网页登录读会话／周窗口、Credit、Top-up；API Key 只监控本地 Token 并估算 Credits，不显示余额/进度条，精确额度必须网页登录。控制台 RPC 兼容适配未公开验证 |
 | 编程 | SenseNova（`sensenova`） | 控制台 `access_token`，最好同时有 `refresh_token`；浏览器 PKCE 流程 | 默认池／Flash-Lite 池的 5 小时／7 天额度与 Grants；普通推理 `sk-` key 不够，控制台兼容接口未公开验证 |
 | 编程 | ClawsGO（`clawsgo`） | 网页 localStorage 中的 `clawsgo_token` | 团队 Credits、月额度与 30 天用量；不是普通模型 API key，网页会话兼容适配未公开验证 |
 | 编程 | LongCat（`longcat`） | `longcat.chat` 完整 Cookie 或受支持的会话 token | Token 包、使用量、待生效包；不是 LongCat 推理 key，网站会话接口兼容适配未公开验证 |
