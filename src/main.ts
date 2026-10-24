@@ -200,6 +200,60 @@ interface DailySpendRow {
   models: DailyModelSpend[];
 }
 
+/// RTK command-output savings. Independent of the spend ledger: estimated
+/// tokens, never billable cost or quota.
+interface RtkDay {
+  date: string;
+  savedTokens: number;
+  commands: number;
+  compressionPct: number | null;
+}
+
+interface RtkProject {
+  name: string;
+  savedTokens: number;
+  commands: number;
+}
+
+interface RtkChannel {
+  name: string;
+  savedTokens: number;
+  commands: number;
+}
+
+interface RtkWindow {
+  savedTokens: number;
+  commands: number;
+  compressionPct: number | null;
+  channels: RtkChannel[];
+  otherChannelsSaved: number;
+  otherChannelsCommands: number;
+  unattributedChannelSaved: number;
+  unattributedChannelCommands: number;
+  projects: RtkProject[];
+  otherSaved: number;
+  otherCommands: number;
+  unattributedSaved: number;
+  unattributedCommands: number;
+}
+
+interface RtkSavings {
+  status: "ok" | "missing" | "unreadable";
+  error: string | null;
+  capturedAt: number;
+  windows: { today: RtkWindow; d7: RtkWindow; d30: RtkWindow; all: RtkWindow };
+  daily: RtkDay[];
+  projectsError: string | null;
+}
+
+interface RtkIntegrationTarget {
+  id: string;
+  label: string;
+  iconKey: string;
+  detected: boolean;
+  matchKind: "exact" | "fuzzy" | "none";
+}
+
 // Qoder CN local transcripts (GitHub #28): measured credits plus billed
 // input tokens derived from context_usage_ratio × the window in force. Kept
 // apart from the dollar/token totals — different unit, derived tokens.
@@ -468,7 +522,7 @@ interface Config {
   overviewCategory: OverviewCategory;
   overviewStyle: "rings" | "bars";
   categoryOverrides: Record<string, OverviewCategory>;
-  spendMetric: "cost" | "tokens" | "mtok";
+  spendMetric: "cost" | "tokens" | "mtok" | "rtk";
   spendGrouping: "tool" | "model";
   spendShowAll: boolean;
   showUsed: boolean;
@@ -1147,6 +1201,18 @@ function normalizeDaily(rows: DailySpendRow[]): DailySpendRow[] {
 }
 
 let lastSpend: ProviderSpend[] = [];
+let lastRtkSavings: RtkSavings | null = null;
+let rtkLoaded = false;
+/// Selected RTK window is a view preference, not a data slice: it is not
+/// persisted, so a fresh window opens on today like the spend card does.
+let rtkWindowTab: "today" | "d7" | "d30" | "all" = "today";
+let rtkSetupOpen = false;
+let rtkTargets: RtkIntegrationTarget[] = [];
+let rtkTargetsLoading = false;
+let rtkInstallBusy = false;
+let rtkIntegrationBusy: string | null = null;
+let rtkSetupNotice: { ok: boolean; text: string } | null = null;
+const rtkIntegratedTargets = new Set<string>();
 let lastSpendHistory: { d7: HistorySpend[]; all: HistorySpend[] } = { d7: [], all: [] };
 let lastSpendDaily: DailySpendRow[] = [];
 let lastQoderSpend: QoderSpendReport | null = null;
@@ -3934,6 +4000,7 @@ function modelEntriesForRange(range: RangeTab): DonutEntry[] {
 function spendVal(w: SpendWindow): number {
   if (config.spendMetric === "tokens") return w.tokens;
   if (config.spendMetric === "mtok") return w.tokens > 0 ? w.cost / (w.tokens / 1e6) : 0;
+  if (config.spendMetric === "rtk") return 0;
   return w.cost;
 }
 
@@ -3970,15 +4037,22 @@ function fitFontSize(text: string, base: number, maxChars: number): number {
 /// menu's order: Cost, Cost/MTok, Tokens.
 function nextSpendMetric(back: boolean): "cost" | "tokens" {
   const order: ("cost" | "tokens")[] = ["cost", "tokens"];
-  const i = order.indexOf(config.spendMetric as "cost" | "tokens");
+  const current = config.spendMetric === "tokens" ? "tokens" : "cost";
+  const i = order.indexOf(current);
   return order[(i + (back ? order.length - 1 : 1)) % order.length];
 }
 
-const METRIC_NAMES = { cost: "spend.metric.cost", mtok: "spend.metric.mtok", tokens: "spend.metric.tokens" } as const;
+const METRIC_NAMES = {
+  cost: "spend.metric.cost",
+  mtok: "spend.metric.mtok",
+  tokens: "spend.metric.tokens",
+  rtk: "spend.metric.rtk",
+} as const;
 
 function fmtSpendVal(w: SpendWindow): string {
   if (config.spendMetric === "tokens") return fmtTokens(w.tokens);
   if (config.spendMetric === "mtok") return `${fmtRate(spendVal(w))}/MTok`;
+  if (config.spendMetric === "rtk") return "—";
   return fmtMoney(w.cost);
 }
 
@@ -4627,6 +4701,11 @@ function applyPopoverDragRegion(locked: boolean): void {
 function renderTotalSpend(): string {
   if (!config.showTotalSpend) return "";
   const isFolded = isSpendFolded();
+  const rtkMode = config.spendMetric === "rtk";
+  const metricTabsHtml = `<div class="spend-metric-tabs" role="group" aria-label="${escapeHtml(t("spend.metricLabel"))}">
+    ${(["cost", "tokens"] as const).map((metric) => `<button class="tab spend-metric-tab${config.spendMetric === metric ? " active" : ""}" data-spend-metric="${metric}">${escapeHtml(t(METRIC_NAMES[metric]))}</button>`).join("")}
+    ${rtkMetricTabHtml()}
+  </div>`;
   /// Grouping-aware entry sources: by tool (default) or by model, where
   /// the same model through different tools merges into one slice.
   const groupedEntries = (tab: SpendTab): DonutEntry[] =>
@@ -4637,12 +4716,12 @@ function renderTotalSpend(): string {
     ? `<button class="card-fold-toggle" data-spend-fold title="${escapeHtml(t("card.expand"))}">${uiIcon("caretDown")}</button>`
     : `<button class="card-fold-toggle" data-spend-fold title="${escapeHtml(t("card.collapse"))}">${uiIcon("caretUp")}</button>`;
   const entries = rangeSelected ? groupedEntriesForRange(rangeTab) : groupedEntries(spendTab);
-  if (
+  if (!rtkMode && (
     lastSpend.length === 0 &&
     lastSpendHistory.d7.length === 0 &&
     lastSpendHistory.all.length === 0 &&
     !(config.spendMetric === "tokens" && lastQoderSpend && lastQoderSpend.all.trips > 0)
-  ) {
+  )) {
     // Quiet state instead of a missing card — on a fresh PC the donut only
     // appears after a CLI (Claude Code, Codex, Grok…) has logged some usage.
     const note = spendLoaded ? t("spend.emptyFirst") : t("spend.scanning");
@@ -4655,7 +4734,14 @@ function renderTotalSpend(): string {
           <button class="mini-btn spend-detail-btn" data-spend-details title="${escapeHtml(t("spendDetail.open"))}" aria-label="${escapeHtml(t("spendDetail.open"))}">${uiIcon("rows")}</button>
           ${foldChevron}
         </div>
-        ${isFolded ? "" : `<div class="card-panel"><p class="placeholder" style="margin:4px 0">${note}</p></div>`}
+        ${isFolded ? "" : `<div class="spend-filter-row">
+          <div class="tabs spend-group-tabs" role="group" aria-label="${escapeHtml(t("spend.groupLabel"))}">
+            <button class="tab spend-group-tab active" data-spend-group="tool">${escapeHtml(t("spend.byTool"))}</button>
+            <button class="tab spend-group-tab" data-spend-group="model">${escapeHtml(t("spend.byModel"))}</button>
+          </div>
+          ${metricTabsHtml}
+        </div>
+        <div class="card-panel"><p class="placeholder" style="margin:4px 0">${note}</p></div>`}
       </article>`;
   }
 
@@ -4741,7 +4827,9 @@ function renderTotalSpend(): string {
   });
   // An empty window still draws the ring — a zeroed track with $0.00 in the
   // center — so the card doesn't collapse to bare text between periods.
-  const body = entries.length
+  const body = rtkMode
+    ? renderRtkModeBody()
+    : entries.length
     ? `
       <div class="donut-wrap" title="${escapeHtml(exact)}">
         <svg width="96" height="96" viewBox="0 0 96 96">
@@ -4772,7 +4860,7 @@ function renderTotalSpend(): string {
   // stays visible at 0 with a nominal/free note. A window with no usage at
   // all hides the row.
   const creditRows = creditEntriesForRange(rangeSelected ? rangeTab : spendTab === "yesterday" ? "yesterday" : "today");
-  const creditRow = creditRows.length
+  const creditRow = !rtkMode && creditRows.length
     ? `<div class="spend-credits" title="${escapeHtml(t("usage.metersTip"))}"><span class="spend-credits-label">${escapeHtml(t("usage.meters"))}</span>${creditRows
         .map(
           (row) =>
@@ -4792,9 +4880,11 @@ function renderTotalSpend(): string {
     : spendTab === "yesterday" ? "spend.yesterday" : "spend.today";
   const headTokens = entries.reduce((sum, e) => sum + e.w.tokens, 0);
   const estimatedTokens = estimatedTokensFor(entries);
-  const headTip =
-    t("spend.headTokens", { range: t(headRangeKey) }) +
-    (estimatedTokens > 0 ? ` · ${t("spend.estimateTotal")}` : "");
+  const rtkWin = lastRtkSavings?.windows[rtkWindowTab] ?? null;
+  const headTip = rtkMode
+    ? t("rtk.metricTip")
+    : t("spend.headTokens", { range: t(headRangeKey) }) +
+      (estimatedTokens > 0 ? ` · ${t("spend.estimateTotal")}` : "");
   // ⚡ tier by daily-equivalent usage: the built-in ladder is 100M / 250M /
   // 500M tokens per day; the 7d/30d windows rescale by their day count
   // (700M/week reads "medium"). config.spendIconTiers overrides the ladder.
@@ -4826,34 +4916,408 @@ function renderTotalSpend(): string {
     ? t(`spend.boltTier${boltTier}` as "spend.boltTier1", { n: fmtTokens((boltTier === 1 ? tiers.medium : boltTier === 2 ? tiers.high : tiers.max) * windowDays) })
     : "";
   const boltHtml = `<span class="spend-bolt tier-${boltTier}"${boltTip ? ` title="${escapeHtml(boltTip)}"` : ""}>${boltSvg(boltTier)}</span>`;
+  const rtkHeadValue = lastRtkSavings?.status === "ok" ? fmtRtkSaved(rtkWin?.savedTokens ?? 0) : "—";
+  const headValueHtml = rtkMode
+    ? `<span class="spend-head-value rtk-head-value" title="${escapeHtml(headTip)}"><span class="rtk-head-icon">${uiIcon("terminal")}</span>${escapeHtml(rtkHeadValue)}</span>`
+    : `<span class="spend-head-value" title="${escapeHtml(headTip)}">${boltHtml}${escapeHtml(fmtTokens(headTokens))}</span>`;
   return `
     <article class="provider total-spend${isFolded ? " is-folded" : ""}">
       <div class="provider-head">
         <span class="provider-name">${escapeHtml(t("spend.title"))}</span>
-        <span class="spend-head-value" title="${escapeHtml(headTip)}">${boltHtml}${escapeHtml(fmtTokens(headTokens))}</span>
-        ${isFolded ? "" : `<span class="info" title="${escapeHtml(t("spend.info", { names: contributors }))}">${uiIcon("info")}</span>`}
+        ${headValueHtml}
+        ${isFolded ? "" : `<span class="info" title="${escapeHtml(rtkMode ? t("rtk.help") : t("spend.info", { names: contributors }))}">${uiIcon("info")}</span>`}
         <span class="spacer"></span>
         ${updateVersion ? `<button class="spend-update-btn${updatePushing ? " busy" : ""}" data-update-push${updatePushing && updatePct != null ? ` style="--pct:${updatePct}"` : ""} title="${escapeHtml(t("update.pushTip", { version: updateVersion }))}" aria-label="${escapeHtml(t("update.pushTip", { version: updateVersion }))}">${uiIcon("arrowUp")}</button>` : ""}
         ${popoverChromeHtml()}
-        <button class="mini-btn spend-detail-btn" data-spend-details title="${escapeHtml(t("spendDetail.open"))}" aria-label="${escapeHtml(t("spendDetail.open"))}">${uiIcon("rows")}</button>
-        <button class="share-btn" data-share="__total__" title="${escapeHtml(t("card.share"))}">${uiIcon("shareNetwork")}</button>
+        ${rtkMode ? "" : `<button class="mini-btn spend-detail-btn" data-spend-details title="${escapeHtml(t("spendDetail.open"))}" aria-label="${escapeHtml(t("spendDetail.open"))}">${uiIcon("rows")}</button>
+        <button class="share-btn" data-share="__total__" title="${escapeHtml(t("card.share"))}">${uiIcon("shareNetwork")}</button>`}
         ${foldChevron}
       </div>
       ${isFolded ? "" : `
       <div class="spend-filter-row">
-        <div class="tabs spend-group-tabs" role="group" aria-label="${escapeHtml(t("spend.groupLabel"))}">
+        ${rtkMode ? "" : `<div class="tabs spend-group-tabs" role="group" aria-label="${escapeHtml(t("spend.groupLabel"))}">
           <button class="tab spend-group-tab${config.spendGrouping === "tool" ? " active" : ""}" data-spend-group="tool">${escapeHtml(t("spend.byTool"))}</button>
           <button class="tab spend-group-tab${config.spendGrouping === "model" ? " active" : ""}" data-spend-group="model">${escapeHtml(t("spend.byModel"))}</button>
-        </div>
-        <div class="spend-metric-tabs" role="group" aria-label="${escapeHtml(t("spend.metricLabel"))}">
-          ${(["cost", "tokens"] as const).map((metric) => `<button class="tab spend-metric-tab${config.spendMetric === metric ? " active" : ""}" data-spend-metric="${metric}">${escapeHtml(t(METRIC_NAMES[metric]))}</button>`).join("")}
-        </div>
+        </div>`}
+        ${metricTabsHtml}
       </div>`}
       ${isFolded ? "" : `<div class="card-panel">
-        ${body}
-        ${creditRow}
+        ${rtkMode ? body : body + creditRow}
       </div>`}
     </article>`;
+}
+
+// ---------------------------------------------------------------------------
+// RTK command-output savings
+// The third Total Spend metric. `saved_tokens` is RTK's byte/4 estimate of
+// compressed command output — never a bill and never a quota, so nothing here
+// feeds the donut, spend history or usage meters.
+// ---------------------------------------------------------------------------
+
+const RTK_WINDOWS = ["today", "d7", "d30", "all"] as const;
+type RtkWindowKey = (typeof RTK_WINDOWS)[number];
+
+function rtkWindowLabel(key: RtkWindowKey): string {
+  return t(
+    key === "today" ? "spend.today"
+      : key === "d7" ? "spend.days7"
+        : key === "d30" ? "spend.days30"
+          : "spend.rangeAll",
+  );
+}
+
+/// Project rows carry two-digit commands unless the count gets big enough
+/// that the exact number would crowd the row.
+function fmtRtkCount(v: number): string {
+  if (v >= 1_000_000) return fmtTokens(v);
+  return Math.round(v).toLocaleString(localeTag());
+}
+
+/// RTK savings move in small increments. One decimal "M" would hide them for
+/// a long time on a mature install, so the primary reading keeps two decimals.
+function fmtRtkSaved(v: number): string {
+  if (v >= 1_000_000_000) return `${(v / 1_000_000_000).toFixed(2)}B`;
+  if (v >= 1_000_000) return `${(v / 1_000_000).toFixed(2)}M`;
+  if (v >= 1_000) return `${(v / 1_000).toFixed(1)}K`;
+  return Math.round(v).toLocaleString(localeTag());
+}
+
+function rtkDayLabel(day: string): string {
+  const [year, month, date] = day.split("-").map(Number);
+  if (!year || !month || !date) return day;
+  return new Date(year, month - 1, date).toLocaleDateString(localeTag(), {
+    month: "short",
+    day: "numeric",
+  });
+}
+
+function rtkInstalled(): boolean {
+  return lastRtkSavings?.status === "ok" || lastRtkSavings?.status === "unreadable";
+}
+
+function rtkMetricTabHtml(): string {
+  const missing = lastRtkSavings?.status === "missing";
+  const active = config.spendMetric === "rtk";
+  const tip = missing ? t("rtk.missingTabTip") : t("rtk.metricTip");
+  return `<button class="tab spend-metric-tab rtk-metric-tab${active ? " active" : ""}${missing ? " is-unavailable" : ""}" data-spend-metric="rtk" title="${escapeHtml(tip)}">${uiIcon("terminal")}<span>${escapeHtml(t("spend.metric.rtk"))}</span></button>`;
+}
+
+function rtkHint(title: string, body: string, tip?: string | null): string {
+  return `<div class="rtk-hint-card">
+    <p class="rtk-hint"${tip ? ` title="${escapeHtml(tip)}"` : ""}>${escapeHtml(title)}</p>
+    <p class="rtk-hint-sub">${escapeHtml(body)}</p>
+    ${rtkInstalled() || rtkLoaded ? `<div><button class="rtk-link" data-rtk-setup>${escapeHtml(t("rtk.manage"))}</button></div>` : ""}
+  </div>`;
+}
+
+function rtkSetupNoticeHtml(): string {
+  if (!rtkSetupNotice) return "";
+  return `<p class="rtk-setup-notice ${rtkSetupNotice.ok ? "ok" : "error"}">${escapeHtml(rtkSetupNotice.text)}</p>`;
+}
+
+function rtkTargetIcon(target: RtkIntegrationTarget): string {
+  return providerVisual(target.iconKey)?.iconSvg ?? uiIcon("terminal");
+}
+
+function renderRtkSetup(): string {
+  const installed = rtkInstalled();
+  const targetButtons = rtkTargets.length
+    ? rtkTargets
+        .map((target) => {
+          const detected = target.detected || rtkIntegratedTargets.has(target.id);
+          const matchKind = rtkIntegratedTargets.has(target.id) ? "exact" : target.matchKind;
+          const busy = rtkIntegrationBusy === target.id;
+          const disabled = !installed || busy || (rtkIntegrationBusy !== null && !busy);
+          const stateText = busy
+            ? t("rtk.integrationBusy")
+            : detected
+              ? t(matchKind === "fuzzy" ? "rtk.detectedFuzzy" : "rtk.detectedExact")
+              : t("rtk.notDetected");
+          return `<button class="rtk-harness${detected ? " is-detected" : " is-missing"}${busy ? " is-busy" : ""}" data-rtk-target="${escapeHtml(target.id)}"${disabled ? " disabled" : ""}>
+            <span class="rtk-harness-icon" aria-hidden="true">${rtkTargetIcon(target)}</span>
+            <span class="rtk-harness-copy">
+              <span class="rtk-harness-name">${escapeHtml(target.label)}</span>
+              <span class="rtk-harness-state"><i class="rtk-status-dot"></i>${escapeHtml(stateText)}</span>
+            </span>
+            <span class="rtk-harness-action">${uiIcon(detected ? "arrowCounterClockwise" : "plus")}<span>${escapeHtml(detected ? t("rtk.reconnect") : t("rtk.integrationInstall"))}</span></span>
+          </button>`;
+        })
+        .join("")
+    : `<p class="rtk-projects-note">${escapeHtml(t("rtk.targetsLoading"))}</p>`;
+  return `<div class="rtk-setup-overlay" data-rtk-setup-overlay>
+    <section class="rtk-setup-dialog" role="dialog" aria-modal="true" aria-labelledby="rtk-setup-title">
+      <div class="rtk-setup-head">
+        <div class="rtk-dialog-title">
+          <span class="rtk-dialog-mark" aria-hidden="true">${uiIcon("terminal")}</span>
+          <div>
+            <h2 id="rtk-setup-title">${escapeHtml(t("rtk.configureTitle"))}</h2>
+            <span class="rtk-setup-status ${installed ? "ok" : "missing"}">${escapeHtml(installed ? t("rtk.detected") : t("rtk.notInstalled"))}</span>
+          </div>
+        </div>
+        <button class="rtk-dialog-close" data-rtk-setup-close title="${escapeHtml(t("settings.close"))}" aria-label="${escapeHtml(t("settings.close"))}">${uiIcon("x")}</button>
+      </div>
+      <div class="rtk-dialog-body">
+        <div class="rtk-setup-intro">
+          <p class="rtk-hint">${escapeHtml(t("rtk.setupIntro"))}</p>
+          <p class="rtk-scope-note">${uiIcon("info")}<span>${escapeHtml(t("rtk.bashScopeNote"))}</span></p>
+        </div>
+        ${installed ? "" : `<div class="rtk-install">
+          <p class="rtk-hint-sub">${escapeHtml(t("rtk.installNote"))}</p>
+          <div class="rtk-install-actions">
+            <button class="rtk-install-btn" data-rtk-install${rtkInstallBusy ? " disabled" : ""}>${uiIcon("terminal")}<span>${escapeHtml(rtkInstallBusy ? t("rtk.installing") : t("rtk.install"))}</span></button>
+            <button class="rtk-link" data-rtk-site>${uiIcon("globe")}<span>${escapeHtml(t("rtk.openSite"))}</span></button>
+          </div>
+        </div>`}
+        ${rtkSetupNoticeHtml()}
+        <div class="rtk-harness-card">
+          <div class="rtk-harness-head">
+            <span class="rtk-section-title">${escapeHtml(t("rtk.integrationsTitle"))}</span>
+            <span class="rtk-projects-note">${escapeHtml(installed ? t("rtk.integrationsHint") : t("rtk.integrationsLocked"))}</span>
+          </div>
+          <div class="rtk-harness-grid">${targetButtons}</div>
+        </div>
+      </div>
+    </section>
+  </div>`;
+}
+
+function renderRtkSavingsBody(): string {
+  const data = lastRtkSavings;
+  if (!data) {
+    return rtkLoaded
+      ? rtkHint(t("rtk.loadFailed"), t("rtk.loadFailedHint"))
+      : rtkHint(t("rtk.scanning"), t("rtk.help"));
+  }
+  if (data.status === "missing") {
+    return `<div class="rtk-panel"><div class="rtk-hint-card">
+      <p class="rtk-hint">${escapeHtml(t("rtk.notInstalled"))}</p>
+      <p class="rtk-hint-sub">${escapeHtml(t("rtk.installNote"))}</p>
+      <div><button class="rtk-install-btn" data-rtk-setup>${uiIcon("terminal")}<span>${escapeHtml(t("rtk.configure"))}</span></button></div>
+    </div></div>`;
+  }
+  if (data.status !== "ok") {
+    return rtkHint(t("rtk.unreadable"), t("rtk.unreadableHint"), data.error);
+  }
+
+  const win = data.windows[rtkWindowTab];
+  const compression = win.compressionPct == null ? "—" : `${win.compressionPct.toFixed(1)}%`;
+  const headTip = t("rtk.headTip", { window: rtkWindowLabel(rtkWindowTab) });
+
+  const tabs = RTK_WINDOWS.map(
+    (key) => `<button class="tab rtk-tab${rtkWindowTab === key ? " active" : ""}" data-rtk-window="${key}">${escapeHtml(rtkWindowLabel(key))}</button>`,
+  ).join("");
+
+  // 30 daily bars, oldest → newest. Only shown when the window has any
+  // measured savings; an all-zero chart would imply data RTK never saw.
+  const days = data.daily;
+  const maxSaved = Math.max(0, ...days.map((day) => day.savedTokens));
+  let spark = "";
+  if (days.length > 0 && maxSaved > 0) {
+    const step = 300 / days.length;
+    const barWidth = Math.max(2, Math.min(7, step - 3));
+    const bars = days
+      .map((day, index) => {
+        const height = day.savedTokens > 0 ? Math.max(2, (day.savedTokens / maxSaved) * 26) : 1;
+        const x = index * step + (step - barWidth) / 2;
+        const cls = day.savedTokens > 0
+          ? `rtk-bar${index === days.length - 1 ? " rtk-bar-today" : ""}`
+          : "rtk-bar-zero";
+        const title = t("rtk.barTip", { date: rtkDayLabel(day.date), n: fmtTokens(day.savedTokens) });
+        return `<g><title>${escapeHtml(title)}</title><rect class="${cls}" x="${x.toFixed(2)}" y="${(30 - height).toFixed(2)}" width="${barWidth.toFixed(2)}" height="${height.toFixed(2)}" rx="1.2"/></g>`;
+      })
+      .join("");
+    const mid = Math.floor((days.length - 1) / 2);
+    spark = `
+      <div class="rtk-trend" title="${escapeHtml(t("rtk.trendTip", { from: rtkDayLabel(days[0].date), to: rtkDayLabel(days[days.length - 1].date) }))}">
+        <svg class="rtk-spark" viewBox="0 0 300 32" preserveAspectRatio="none" role="img" aria-label="${escapeHtml(t("rtk.saved"))}">
+          <line class="rtk-spark-base" x1="0" y1="30.5" x2="300" y2="30.5"/>
+          ${bars}
+        </svg>
+        <div class="rtk-trend-dates" aria-hidden="true">
+          <span>${escapeHtml(rtkDayLabel(days[0].date))}</span>
+          <span>${escapeHtml(rtkDayLabel(days[mid].date))}</span>
+          <span>${escapeHtml(rtkDayLabel(days[days.length - 1].date))}</span>
+        </div>
+      </div>`;
+  }
+
+  const share = (value: number) =>
+    win.savedTokens > 0 ? Math.min(100, Math.max(0, (value / win.savedTokens) * 100)) : 0;
+  const channelRow = (name: string, value: number, commands: number | null, noise = false): string => {
+    const tip = commands == null
+      ? t("rtk.unattributedChannelTip")
+      : t("rtk.channelTip", { name, n: fmtTokens(value), commands: fmtRtkCount(commands) });
+    return `
+      <div class="rtk-project${noise ? " is-noise" : ""}" title="${escapeHtml(tip)}">
+        <span class="rtk-project-name">${escapeHtml(name)}</span>
+        <span class="rtk-project-bar" aria-hidden="true"><i style="width:${share(value).toFixed(1)}%"></i></span>
+        <span class="rtk-project-value">${escapeHtml(fmtTokens(value))}</span>
+      </div>`;
+  };
+  const channelRows = win.channels
+    .map((channel) => channelRow(channel.name, channel.savedTokens, channel.commands))
+    .join("");
+  const otherChannelRow = win.otherChannelsSaved > 0
+    ? channelRow(t("rtk.otherChannels"), win.otherChannelsSaved, win.otherChannelsCommands, true)
+    : "";
+  const unattributedChannelRow = win.unattributedChannelSaved > 0
+    ? channelRow(t("rtk.unattributedChannel"), win.unattributedChannelSaved, null, true)
+    : "";
+  const channelsBody = channelRows || otherChannelRow || unattributedChannelRow
+    ? channelRows + otherChannelRow + unattributedChannelRow
+    : `<p class="rtk-projects-note">${escapeHtml(t("rtk.noChannels"))}</p>`;
+  const projectRow = (name: string, value: number, commands: number | null, noise = false): string => {
+    const tip = commands == null
+      ? t("rtk.unattributedTip")
+      : t("rtk.projectTip", { name, n: fmtTokens(value), commands: fmtRtkCount(commands) });
+    return `
+      <div class="rtk-project${noise ? " is-noise" : ""}" title="${escapeHtml(tip)}">
+        <span class="rtk-project-name">${escapeHtml(name)}</span>
+        <span class="rtk-project-bar" aria-hidden="true"><i style="width:${share(value).toFixed(1)}%"></i></span>
+        <span class="rtk-project-value">${escapeHtml(fmtTokens(value))}</span>
+      </div>`;
+  };
+  const projectRows = win.projects
+    .map((project) => projectRow(project.name, project.savedTokens, project.commands))
+    .join("");
+  // Projects below the Top-5 cut keep their own row: shoving them into
+  // "unattributed" would mislabel identifiable savings as temp-dir noise.
+  const otherRow = win.otherSaved > 0
+    ? `<div class="rtk-project is-noise" title="${escapeHtml(t("rtk.otherProjectsTip"))}">
+        <span class="rtk-project-name">${escapeHtml(t("rtk.otherProjects"))}</span>
+        <span class="rtk-project-bar" aria-hidden="true"><i style="width:${share(win.otherSaved).toFixed(1)}%"></i></span>
+        <span class="rtk-project-value">${escapeHtml(fmtTokens(win.otherSaved))}</span>
+      </div>`
+    : "";
+  const noiseRow = win.unattributedSaved > 0
+    ? projectRow(t("rtk.unattributed"), win.unattributedSaved, null, true)
+    : "";
+  const projectsBody = data.projectsError
+    ? `<p class="rtk-projects-note" title="${escapeHtml(data.projectsError)}">${escapeHtml(t("rtk.projectsError"))}</p>`
+    : projectRows || otherRow || noiseRow
+      ? projectRows + otherRow + noiseRow
+      : `<p class="rtk-projects-note">${escapeHtml(t("rtk.noProjects"))}</p>`;
+  // The CLI side stays usable when only Pane's own snapshot failed; say so
+  // instead of hiding the failure in a title nobody hovers.
+  const historyNote = data.error
+    ? `<p class="rtk-projects-note" title="${escapeHtml(data.error)}">${escapeHtml(t("rtk.historyDegraded"))}</p>`
+    : "";
+
+  return `<div class="rtk-panel">
+    <div class="rtk-mode-head">
+      <div class="rtk-tabs" role="group" aria-label="${escapeHtml(t("rtk.windowsLabel"))}">${tabs}</div>
+      <div class="rtk-mode-actions">
+        <span class="rtk-est" title="${escapeHtml(t("rtk.estimateTip"))}">${escapeHtml(t("rtk.estimate"))}</span>
+        <span class="info rtk-info" title="${escapeHtml(headTip)}">${uiIcon("question")}</span>
+        <button class="rtk-config-btn" data-rtk-setup>${uiIcon("gear")}<span>${escapeHtml(t("rtk.configure"))}</span></button>
+      </div>
+    </div>
+    <div class="rtk-stats">
+      <div class="rtk-stat rtk-stat-main">
+        <span class="rtk-stat-value" title="${escapeHtml(win.savedTokens.toLocaleString(localeTag()))}">${escapeHtml(fmtRtkSaved(win.savedTokens))}</span>
+        <span class="rtk-stat-label">${escapeHtml(t("rtk.saved"))}</span>
+      </div>
+      <div class="rtk-stat">
+        <span class="rtk-stat-value">${escapeHtml(fmtRtkCount(win.commands))}</span>
+        <span class="rtk-stat-label">${escapeHtml(t("rtk.commandsLabel"))}</span>
+      </div>
+      <div class="rtk-stat" title="${escapeHtml(t("rtk.compressionTip"))}">
+        <span class="rtk-stat-value">${escapeHtml(compression)}</span>
+        <span class="rtk-stat-label">${escapeHtml(t("rtk.compressionLabel"))}</span>
+      </div>
+    </div>
+    ${spark}
+    ${historyNote}
+    <div class="rtk-projects">
+      <div class="rtk-section-head">
+        <span class="rtk-section-title" title="${escapeHtml(t("rtk.channelHint"))}">${escapeHtml(t("rtk.channels"))}</span>
+      </div>
+      ${channelsBody}
+    </div>
+    <div class="rtk-projects">
+      <div class="rtk-section-head">
+        <span class="rtk-section-title" title="${escapeHtml(t("rtk.sourceHint"))}">${escapeHtml(t("rtk.sources"))}</span>
+      </div>
+      ${projectsBody}
+    </div>
+  </div>`;
+}
+
+function renderRtkModeBody(): string {
+  return renderRtkSavingsBody();
+}
+
+async function refreshRtkNow(): Promise<void> {
+  try {
+    const fresh = await invoke<RtkSavings>("fetch_rtk_savings", { force: true });
+    if (fresh) {
+      lastRtkSavings = fresh;
+      rtkLoaded = true;
+      if (fresh.status === "missing" && config.spendMetric === "rtk") rtkSetupOpen = true;
+      requestRender();
+    }
+  } catch {
+    rtkLoaded = true;
+    requestRender();
+  }
+}
+
+function ensureRtkTargets(force = false): void {
+  if (!force && rtkTargets.length > 0) return;
+  if (rtkTargetsLoading) return;
+  rtkTargetsLoading = true;
+  void invoke<RtkIntegrationTarget[]>("rtk_integration_targets")
+    .then((targets) => {
+      rtkTargets = targets;
+    })
+    .catch((error) => {
+      rtkSetupNotice = { ok: false, text: t("rtk.targetsFailed", { err: String(error) }) };
+    })
+    .finally(() => {
+      rtkTargetsLoading = false;
+      requestRender();
+    });
+}
+
+async function installRtk(): Promise<void> {
+  if (rtkInstallBusy) return;
+  rtkInstallBusy = true;
+  rtkSetupNotice = null;
+  requestRender();
+  try {
+    await invoke("install_rtk");
+    rtkSetupNotice = { ok: true, text: t("rtk.installSuccess") };
+    await refreshRtkNow();
+  } catch (error) {
+    rtkSetupNotice = { ok: false, text: t("rtk.installFailed", { err: String(error) }) };
+  } finally {
+    rtkInstallBusy = false;
+    requestRender();
+  }
+}
+
+async function installRtkIntegration(id: string): Promise<void> {
+  if (rtkIntegrationBusy) return;
+  const target = rtkTargets.find((item) => item.id === id);
+  if (!target) return;
+  rtkIntegrationBusy = id;
+  rtkSetupNotice = null;
+  requestRender();
+  try {
+    await invoke("install_rtk_integration", { target: id });
+    rtkIntegratedTargets.add(id);
+    target.detected = true;
+    target.matchKind = "exact";
+    rtkSetupNotice = { ok: true, text: t("rtk.integrationSuccess", { name: target.label }) };
+  } catch (error) {
+    rtkSetupNotice = {
+      ok: false,
+      text: t("rtk.integrationFailed", { name: target.label, err: String(error) }),
+    };
+  } finally {
+    rtkIntegrationBusy = null;
+    requestRender();
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -11223,7 +11687,8 @@ function renderDashboard(): void {
     renderWelcome() +
     renderTotalSpend() +
     renderQuotaOverview() +
-    renderGroupedCards();
+    renderGroupedCards() +
+    (rtkSetupOpen ? renderRtkSetup() : "");
   decorateInkSkin(el as HTMLElement);
   el.scrollTop = scrollTop;
   if (focusedTab) {
@@ -12022,6 +12487,22 @@ async function refresh(
   const qoderPromise = usageOnly
     ? Promise.resolve<QoderSpendReport | null>(null)
     : invoke<QoderSpendReport>("fetch_qoder_spend").catch(() => null);
+  // RTK savings are a separate, read-only ledger. The CLI is cached for
+  // 60 seconds server-side, so this rides alongside spend. Publish it the
+  // moment it lands: the spend scan can take tens of seconds on a cold start
+  // and must not keep the savings card stuck on "reading".
+  if (!usageOnly) {
+    ensureRtkTargets();
+    void invoke<RtkSavings>("fetch_rtk_savings", { force })
+      .catch(() => null)
+      .then((rtk) => {
+        if (refreshState.acceptResult("rtk", myGen, rtk ?? false)) {
+          lastRtkSavings = rtk;
+          rtkLoaded = true;
+          requestRender();
+        }
+      });
+  }
   // Credits-billed cards (Qoder CN / Trae CN): daily credit consumption —
   // one tiny JSON read, fetched even for usage-only refreshes so their
   // trend bars stay fresh. Kept apart from any token totals.
@@ -19608,6 +20089,12 @@ document.querySelector("#settings-btn")!.addEventListener("click", () => {
   // Group banners are focusable (role="button") — Enter/Space folds them
   // like a click would. The "未配置" fold head behaves the same.
   providersEl.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && rtkSetupOpen) {
+      rtkSetupOpen = false;
+      rtkSetupNotice = null;
+      requestRender();
+      return;
+    }
     if (e.key !== "Enter" && e.key !== " ") return;
     const banner = (e.target as HTMLElement).closest<HTMLElement>(
       "[data-group-toggle], [data-unconfigured-toggle]",
@@ -19627,7 +20114,15 @@ document.querySelector("#settings-btn")!.addEventListener("click", () => {
     const button = (e.target as Element).closest<HTMLElement>("[data-spend-metric]");
     if (button) {
       const metric = button.dataset.spendMetric;
-      if (metric !== "cost" && metric !== "tokens") return;
+      if (metric !== "cost" && metric !== "tokens" && metric !== "rtk") return;
+      if (metric === "rtk") {
+        ensureRtkTargets(true);
+        void refreshRtkNow();
+        rtkSetupOpen = lastRtkSavings?.status === "missing";
+        rtkSetupNotice = null;
+      } else {
+        rtkSetupOpen = false;
+      }
       config.spendMetric = metric;
       void patchConfig({ spendMetric: metric });
       requestRender();
@@ -19961,6 +20456,47 @@ document.querySelector("#settings-btn")!.addEventListener("click", () => {
       config.layout.spendCollapsed = !isSpendFolded();
       saveLayout(false);
       requestRender();
+      return;
+    }
+    const rtkSetup = target.closest<HTMLElement>("[data-rtk-setup]");
+    if (rtkSetup) {
+      ensureRtkTargets(true);
+      rtkSetupOpen = true;
+      rtkSetupNotice = null;
+      requestRender();
+      return;
+    }
+    if (
+      target.closest<HTMLElement>("[data-rtk-setup-close]") ||
+      target.matches?.("[data-rtk-setup-overlay]")
+    ) {
+      rtkSetupOpen = false;
+      rtkSetupNotice = null;
+      requestRender();
+      return;
+    }
+    if (target.closest<HTMLElement>("[data-rtk-install]")) {
+      void installRtk();
+      return;
+    }
+    if (target.closest<HTMLElement>("[data-rtk-site]")) {
+      void invoke("open_link", { url: "https://www.rtk-ai.app/" }).catch((err) => {
+        document.querySelector("#status")!.textContent = t("footer.openLinkFailed", { err: String(err) });
+      });
+      return;
+    }
+    const rtkTarget = target.closest<HTMLElement>("[data-rtk-target]");
+    if (rtkTarget) {
+      void installRtkIntegration(rtkTarget.dataset.rtkTarget ?? "");
+      return;
+    }
+    const rtkWindow = target.closest<HTMLElement>("[data-rtk-window]");
+    if (rtkWindow) {
+      const next = rtkWindow.dataset.rtkWindow;
+      if (next === "today" || next === "d7" || next === "d30" || next === "all") {
+        rtkWindowTab = next;
+        requestRender();
+      }
       return;
     }
     const ovTab = target.closest<HTMLElement>("[data-overview-tab]");

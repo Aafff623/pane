@@ -25,7 +25,7 @@ function refreshWindow(invoke) {
     lastCreditTrend: null,
     refreshState: new RefreshState(),
     unparkRecentlyKeyed: async () => {}, hideFoldedMoonshot: value => value,
-    ensureLayout: () => {}, requestRender: () => {}, scheduleBackoffRetries: () => {},
+    ensureLayout: () => {}, ensureRtkTargets: () => {}, requestRender: () => {}, scheduleBackoffRetries: () => {},
     requestTraySync: () => {}, writeIdleFooter: () => {}, paintRefreshState: () => {},
     normalizeHistory: value => value, normalizeDaily: value => value,
     normalizeProviderSpend: value => value, providerCatalog: [],

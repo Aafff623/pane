@@ -3714,6 +3714,554 @@ body.ui-scaled .popover {
   cursor: default;
 }
 
+/* ---------------------------------------------------------- RTK savings ---
+   A third Total Spend metric. RTK never enters the donut, spend ledger or
+   quota rows; only this panel swaps in when its metric tab is selected. */
+.rtk-metric-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+.rtk-metric-tab .ui-icon {
+  width: 12px;
+  height: 12px;
+  color: var(--primary);
+}
+.rtk-metric-tab.is-unavailable {
+  color: var(--muted-foreground);
+  opacity: .72;
+}
+.rtk-metric-tab.is-unavailable .ui-icon {
+  color: var(--muted-foreground);
+}
+.rtk-head-icon {
+  display: inline-flex;
+  margin-right: 4px;
+  color: var(--primary);
+  vertical-align: -2px;
+}
+.rtk-head-icon .ui-icon {
+  width: 13px;
+  height: 13px;
+}
+.rtk-est {
+  flex: 0 0 auto;
+  margin-left: 6px;
+  padding: 0 5px;
+  border: 1px solid color-mix(in srgb, var(--primary) 32%, var(--border));
+  border-radius: 999px;
+  color: color-mix(in srgb, var(--primary) 74%, var(--foreground));
+  font-size: 9px;
+  line-height: 15px;
+  letter-spacing: .02em;
+  white-space: nowrap;
+}
+.rtk-head-value {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.rtk-info {
+  display: inline-flex;
+  align-items: center;
+  flex: 0 0 auto;
+}
+.rtk-info .ui-icon {
+  width: 12px;
+  height: 12px;
+}
+.rtk-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+}
+.rtk-mode-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+}
+.rtk-mode-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex: none;
+}
+.rtk-mode-actions .mini-btn {
+  padding: 2px;
+}
+.rtk-config-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 7px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: color-mix(in oklab, var(--foreground) 4%, transparent);
+  color: var(--secondary-foreground);
+  font: inherit;
+  font-size: 10px;
+  cursor: pointer;
+}
+.rtk-config-btn:hover {
+  border-color: color-mix(in srgb, var(--primary) 45%, var(--border));
+}
+.rtk-config-btn .ui-icon {
+  width: 12px;
+  height: 12px;
+}
+.rtk-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px;
+  padding: 2px;
+  border-radius: 8px;
+  background: var(--muted);
+  width: fit-content;
+}
+.rtk-tab {
+  flex: none;
+  margin: 0;
+  padding: 3px 9px;
+  border-radius: 6px;
+  font-size: 10.5px;
+}
+.rtk-stats {
+  display: grid;
+  grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr) minmax(0, 1fr);
+  gap: 6px;
+}
+.rtk-stat {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+  padding: 6px 8px;
+  border-radius: 8px;
+  background: color-mix(in oklab, var(--foreground) 4%, transparent);
+}
+.rtk-stat-main {
+  background: color-mix(in srgb, var(--primary) 8%, transparent);
+}
+.rtk-stat-value {
+  overflow: hidden;
+  color: var(--secondary-foreground);
+  font-size: 15px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.rtk-stat-main .rtk-stat-value {
+  color: color-mix(in srgb, var(--primary) 72%, var(--foreground));
+}
+.rtk-stat-label {
+  overflow: hidden;
+  color: var(--muted-foreground);
+  font-size: 9.5px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.rtk-trend {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.rtk-spark {
+  display: block;
+  width: 100%;
+  height: 30px;
+}
+.rtk-spark .rtk-bar {
+  fill: color-mix(in srgb, var(--primary) 62%, transparent);
+}
+.rtk-spark .rtk-spark-base {
+  stroke: color-mix(in oklab, var(--foreground) 12%, transparent);
+  stroke-width: 1;
+  vector-effect: non-scaling-stroke;
+}
+.rtk-spark .rtk-bar-today {
+  fill: var(--primary);
+}
+.rtk-spark .rtk-bar-zero {
+  fill: color-mix(in oklab, var(--foreground) 12%, transparent);
+}
+.rtk-trend-dates {
+  display: flex;
+  justify-content: space-between;
+  color: var(--muted-foreground);
+  font-size: 9px;
+}
+.rtk-projects {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.rtk-section-title {
+  color: var(--muted-foreground);
+  font-size: 9.5px;
+  font-weight: 600;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+}
+.rtk-project {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 56px auto;
+  align-items: center;
+  gap: 6px;
+  font-size: 10.5px;
+}
+.rtk-project-name {
+  overflow: hidden;
+  font-size: 12.5px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.rtk-project-bar {
+  height: 3px;
+  border-radius: 2px;
+  background: color-mix(in oklab, var(--foreground) 7%, transparent);
+  overflow: hidden;
+}
+.rtk-project-bar i {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: color-mix(in srgb, var(--primary) 58%, transparent);
+}
+.rtk-project-value {
+  color: var(--secondary-foreground);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.rtk-project.is-noise .rtk-project-name {
+  color: var(--muted-foreground);
+}
+.rtk-project.is-noise .rtk-project-bar i {
+  background: color-mix(in oklab, var(--foreground) 22%, transparent);
+}
+.rtk-projects-note {
+  margin: 1px 0 0;
+  color: var(--muted-foreground);
+  font-size: 10px;
+}
+.rtk-hint-card {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.rtk-hint {
+  margin: 0;
+  color: var(--secondary-foreground);
+  font-size: 11.5px;
+}
+.rtk-hint-sub {
+  margin: 0;
+  color: var(--muted-foreground);
+  font-size: 10px;
+}
+.rtk-setup-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 140;
+  display: grid;
+  place-items: center;
+  padding: 14px;
+  background: rgb(0 0 0 / .58);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+}
+.rtk-setup-dialog {
+  width: min(620px, 100%);
+  max-height: min(760px, 92vh);
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  background: var(--floating-surface);
+  box-shadow: 0 22px 70px rgb(0 0 0 / .46);
+}
+.rtk-setup-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 18px 20px 14px;
+  border-bottom: 1px solid var(--border);
+}
+.rtk-dialog-title {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+.rtk-dialog-mark {
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  flex: none;
+  border: 1px solid color-mix(in srgb, var(--primary) 22%, var(--border));
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--primary) 9%, var(--floating-surface));
+  color: var(--primary);
+}
+.rtk-dialog-mark .ui-icon {
+  width: 23px;
+  height: 23px;
+}
+.rtk-dialog-body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 16px 20px 20px;
+}
+.rtk-setup-head h2 {
+  margin: 0 0 4px;
+  font-size: 17px;
+  line-height: 1.2;
+}
+.rtk-setup-intro,
+.rtk-harness-card {
+  padding: 13px 14px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: color-mix(in oklab, var(--foreground) 2%, var(--floating-surface));
+}
+.rtk-setup-dialog .rtk-hint {
+  font-size: 12.5px;
+}
+.rtk-setup-dialog .rtk-hint-sub {
+  font-size: 11.5px;
+}
+.rtk-setup-dialog .rtk-section-title {
+  font-size: 10.5px;
+}
+.rtk-scope-note {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  margin: 8px 0 0;
+  padding: 7px 9px;
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--primary) 7%, transparent);
+  color: var(--muted-foreground);
+  font-size: 10.5px;
+  line-height: 1.45;
+}
+.rtk-scope-note .ui-icon {
+  width: 12px;
+  height: 12px;
+  flex: none;
+  margin-top: 1px;
+  color: var(--primary);
+}
+.rtk-dialog-close {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--muted-foreground);
+  cursor: pointer;
+}
+.rtk-dialog-close:hover {
+  color: var(--foreground);
+}
+.rtk-dialog-close .ui-icon {
+  width: 13px;
+  height: 13px;
+}
+.rtk-setup-status {
+  display: inline-flex;
+  margin-bottom: 4px;
+  padding: 2px 7px;
+  border-radius: 999px;
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: .02em;
+}
+.rtk-setup-status.ok {
+  color: var(--primary);
+  background: color-mix(in srgb, var(--primary) 12%, transparent);
+}
+.rtk-setup-status.missing {
+  color: var(--muted-foreground);
+  background: color-mix(in oklab, var(--foreground) 7%, transparent);
+}
+.rtk-install {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  padding: 13px 14px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: color-mix(in oklab, var(--foreground) 2%, var(--floating-surface));
+}
+.rtk-install-actions {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  flex-wrap: wrap;
+}
+.rtk-install-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 6px 10px;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  background: var(--primary);
+  color: var(--primary-foreground);
+  font: inherit;
+  font-size: 11.5px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.rtk-install-btn:disabled {
+  opacity: .6;
+  cursor: wait;
+}
+.rtk-install-btn .ui-icon {
+  width: 13px;
+  height: 13px;
+}
+.rtk-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 0;
+  border: 0;
+  background: none;
+  color: var(--primary);
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+.rtk-link .ui-icon {
+  width: 12px;
+  height: 12px;
+}
+.rtk-link:hover {
+  text-decoration: underline;
+}
+.rtk-harness-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 7px;
+  margin-top: 10px;
+}
+.rtk-harness-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+}
+.rtk-harness {
+  display: grid;
+  grid-template-columns: 22px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  padding: 8px 9px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: color-mix(in oklab, var(--foreground) 3%, transparent);
+  color: var(--secondary-foreground);
+  font: inherit;
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+.rtk-harness:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--primary) 45%, var(--border));
+}
+.rtk-harness:disabled {
+  opacity: .55;
+  cursor: default;
+}
+.rtk-harness.is-detected {
+  border-color: color-mix(in srgb, #22c55e 38%, var(--border));
+}
+.rtk-harness.is-missing {
+  border-color: color-mix(in srgb, #ef4444 26%, var(--border));
+}
+.rtk-harness-icon {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--floating-surface);
+  color: var(--secondary-foreground);
+}
+.rtk-harness-icon svg {
+  width: 19px;
+  height: 19px;
+}
+.rtk-harness-copy {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 2px;
+}
+.rtk-harness-name {
+  overflow: hidden;
+  font-size: 12.5px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.rtk-harness-state {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--muted-foreground);
+  font-size: 10px;
+  white-space: nowrap;
+}
+.rtk-status-dot {
+  width: 7px;
+  height: 7px;
+  flex: none;
+  border-radius: 50%;
+  background: #ef4444;
+  box-shadow: 0 0 0 2px color-mix(in srgb, #ef4444 14%, transparent);
+}
+.rtk-harness.is-detected .rtk-status-dot {
+  background: #22c55e;
+  box-shadow: 0 0 0 2px color-mix(in srgb, #22c55e 16%, transparent);
+}
+.rtk-harness-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  color: var(--primary);
+  font-size: 10.5px;
+  white-space: nowrap;
+}
+.rtk-harness-action .ui-icon {
+  width: 11px;
+  height: 11px;
+}
+.rtk-setup-notice {
+  margin: 0;
+  margin-top: 10px;
+  padding: 7px 9px;
+  border-radius: 7px;
+  font-size: 11px;
+}
+.rtk-setup-notice.ok {
+  color: var(--primary);
+  background: color-mix(in srgb, var(--primary) 10%, transparent);
+}
+.rtk-setup-notice.error {
+  color: var(--destructive);
+  background: color-mix(in srgb, var(--destructive) 10%, transparent);
+}
+
 /* ---------------------------------------------------------------- customize */
 
 .card-caret {

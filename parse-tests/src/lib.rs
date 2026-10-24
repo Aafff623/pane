@@ -64,6 +64,9 @@ pub mod usage_units;
 #[path = "../../src-tauri/src/spend_history.rs"]
 pub mod spend_history;
 
+#[path = "../../src-tauri/src/rtk_savings.rs"]
+pub mod rtk_savings;
+
 #[path = "../../src-tauri/src/provider_catalog.rs"]
 pub mod provider_catalog;
 

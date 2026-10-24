@@ -189,6 +189,69 @@ const maskDemo = (key: unknown) => {
   return s.length > 6 ? `${s.slice(0, 4)}…${s.slice(-4)}` : 'sk-…demo';
 };
 
+const rtkProjects = [
+  { name: 'pane', savedTokens: 1_200_000, commands: 508 },
+  { name: 'site', savedTokens: 42_000, commands: 18 },
+  { name: 'notes', savedTokens: 8_400, commands: 12 },
+];
+const rtkChannels = [
+  { name: 'grep', savedTokens: 38_400_000, commands: 502 },
+  { name: 'read', savedTokens: 4_800_000, commands: 64 },
+  { name: 'git', savedTokens: 1_600_000, commands: 86 },
+];
+const rtkWindow = (savedTokens: number, commands: number) => ({
+  savedTokens,
+  commands,
+  compressionPct: 99.4,
+  channels: rtkChannels,
+  otherChannelsSaved: 720_000,
+  otherChannelsCommands: 121,
+  unattributedChannelSaved: Math.max(0, savedTokens - rtkChannels.reduce((n, c) => n + c.savedTokens, 0) - 720_000),
+  unattributedChannelCommands: Math.max(0, commands - rtkChannels.reduce((n, c) => n + c.commands, 0) - 121),
+  projects: rtkProjects,
+  otherSaved: 6_600,
+  otherCommands: 9,
+  unattributedSaved: Math.max(0, savedTokens - rtkProjects.reduce((n, p) => n + p.savedTokens, 0) - 6_600),
+  unattributedCommands: Math.max(0, commands - rtkProjects.reduce((n, p) => n + p.commands, 0) - 9),
+});
+const demoRtkSavings = {
+  status: 'ok',
+  error: null,
+  capturedAt: Date.now(),
+  windows: {
+    today: rtkWindow(46_200_000, 818),
+    d7: rtkWindow(52_800_000, 942),
+    d30: rtkWindow(61_400_000, 1_120),
+    all: rtkWindow(74_900_000, 1_388),
+  },
+  daily: Array.from({ length: 30 }, (_, i) => ({
+    date: new Date(Date.now() - (29 - i) * 86_400_000).toISOString().slice(0, 10),
+    savedTokens: i < 24 ? 0 : (i - 23) * 6_200_000,
+    commands: i < 24 ? 0 : (i - 23) * 100,
+    compressionPct: i < 24 ? null : 99.4,
+  })),
+  projectsError: null,
+};
+const demoRtkTargets = [
+  ['codex', 'Codex', 'codex', true, 'exact'],
+  ['claude', 'Claude Code', 'claude', true, 'fuzzy'],
+  ['cursor', 'Cursor', 'cursor', false, 'none'],
+  ['trae', 'Trae', 'traecn', false, 'none'],
+  ['windsurf', 'Windsurf', 'windsurf', false, 'none'],
+  ['cline', 'Cline', 'clinepass', false, 'none'],
+  ['kilocode', 'Kilo Code', 'kilo', false, 'none'],
+  ['antigravity', 'Antigravity', 'antigravity', false, 'none'],
+  ['kimi', 'Kimi Code', 'kimi', false, 'none'],
+  ['copilot', 'GitHub Copilot', 'copilot', false, 'none'],
+  ['gemini', 'Gemini CLI', 'gemini', false, 'none'],
+  ['opencode', 'OpenCode', 'opencode', false, 'none'],
+  ['droid', 'Factory Droid', 'factory', false, 'none'],
+  ['vibe', 'Mistral Vibe', 'mistral', false, 'none'],
+  ['hermes', 'Hermes', 'hermes', false, 'none'],
+  ['pi', 'Pi', 'pi', false, 'none'],
+  ['omp', 'Oh My Pi', 'omp', false, 'none'],
+].map(([id, label, iconKey, detected, matchKind]) => ({ id, label, iconKey, detected, matchKind }));
+
 export async function invoke<T>(command: string, args: Record<string, any> = {}): Promise<T> {
   let result: unknown;
   switch (command) {
@@ -205,6 +268,9 @@ export async function invoke<T>(command: string, args: Record<string, any> = {})
     case 'fetch_spend': result = spend; break;
     case 'fetch_spend_history': result = spend.map(s => ({ id: s.id, ...s.last30, active_days: 24 })); break;
     case 'fetch_spend_daily': result = daily; break;
+    case 'fetch_rtk_savings': result = demoRtkSavings; break;
+    case 'rtk_integration_targets': result = demoRtkTargets; break;
+    case 'install_rtk': case 'install_rtk_integration': result = null; break;
     case 'fetch_credit_history': result = Object.fromEntries(['qodercn', 'traecn'].map((id, i) => [id, Array.from({length:30}, (_,day) => day < 3 ? null : (day * 31 + i * 17) % 300)])); break;
     case 'font_pack_list': result = []; break;
     case 'reset_wake_settings': result = wakeSettings; break;

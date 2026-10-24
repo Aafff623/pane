@@ -45,6 +45,7 @@ mod tray_projection;
 mod usage_history;
 mod usage_units;
 mod spend_history;
+mod rtk_savings;
 
 use platform::{hide_window_border, screen_is_being_shared, set_webview_memory_level};
 
@@ -3714,6 +3715,28 @@ async fn fetch_spend() -> Vec<spend::ProviderSpend> {
     result
 }
 
+/// Read-only RTK command-output savings. Independent of Total Spend and the
+/// quota ledger; never touches `spend`, `usage_history` or config.
+#[tauri::command]
+async fn fetch_rtk_savings(force: Option<bool>) -> rtk_savings::RtkSavings {
+    rtk_savings::fetch(force.unwrap_or(false)).await
+}
+
+#[tauri::command]
+fn rtk_integration_targets() -> Vec<rtk_savings::RtkIntegrationTarget> {
+    rtk_savings::integration_targets()
+}
+
+#[tauri::command]
+async fn install_rtk() -> Result<(), String> {
+    rtk_savings::install_rtk().await
+}
+
+#[tauri::command]
+async fn install_rtk_integration(target: String) -> Result<(), String> {
+    rtk_savings::install_integration(&target).await
+}
+
 /// Returns the local token-ledger inventory without scanning or contacting
 /// providers. Used by diagnostics and future coverage UI.
 #[tauri::command]
@@ -6189,6 +6212,10 @@ pub fn run() {
             cached_usage,
             fetch_spend,
             fetch_spend_sources,
+            fetch_rtk_savings,
+            rtk_integration_targets,
+            install_rtk,
+            install_rtk_integration,
             get_pricing_overrides,
             save_pricing_overrides,
             fetch_credit_history,

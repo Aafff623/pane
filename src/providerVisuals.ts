@@ -74,6 +74,9 @@ import sub2apiIcon from "./assets/providers/sub2api.svg?raw";
 import mistralIcon from "./assets/providers/mistral.svg?raw";
 import perplexityIcon from "./assets/providers/perplexity.svg?raw";
 import volcengineIcon from "./assets/providers/volcengine.svg?raw";
+import geminiIcon from "./assets/providers/gemini.svg?raw";
+import piIcon from "./assets/providers/pi.svg?raw";
+import ompIcon from "./assets/providers/omp.svg?raw";
 
 export interface ProviderVisual {
   iconKey: string;
@@ -169,6 +172,9 @@ const VISUALS: Readonly<Record<string, ProviderVisual>> = {
   mistral: { iconKey: "mistral", iconSvg: mistralIcon },
   perplexity: { iconKey: "perplexity", iconSvg: perplexityIcon },
   volcengine: { iconKey: "volcengine", iconSvg: volcengineIcon },
+  gemini: { iconKey: "gemini", iconSvg: geminiIcon },
+  pi: { iconKey: "pi", iconSvg: piIcon },
+  omp: { iconKey: "omp", iconSvg: ompIcon },
 };
 
 /// Known One/New API hosts that ship their own colorful mark.  Keyed by hostname
