@@ -1,0 +1,134 @@
+/* Comic Pixel startup — three panels, the wordmark, then the seal.
+   Colours come from the applied pack's tokens, with paper/ink fallbacks for
+   the light theme. Motion is owned by the GSAP timeline; CSS only composes
+   the static frame (which is also the whole reduced-motion version). */
+.cm-intro {
+  --cm-paper: var(--background, #fffdf0);
+  --cm-ink: var(--foreground, #0b0d0b);
+  --cm-card: var(--card, #fffef7);
+  --cm-muted: var(--muted-foreground, #4a534a);
+  --cm-yellow: var(--cp-yellow, #e9ff1f);
+  position: fixed;
+  inset: 0;
+  z-index: 2500;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  background: var(--cm-paper);
+  color: var(--cm-ink);
+  isolation: isolate;
+}
+.cm-intro *,
+.cm-intro *::before,
+.cm-intro *::after { box-sizing: border-box; }
+
+.cm-intro .cm-intro-art { position: relative; flex: none; width: min(286px, 76vw); height: 232px; }
+.cm-intro .cm-intro-panel {
+  position: absolute;
+  overflow: hidden;
+  border: 3px solid var(--cm-ink);
+  border-radius: 2px;
+  background: var(--cm-card);
+  box-shadow: 4px 4px 0 var(--cm-ink);
+}
+.cm-intro .cm-intro-panel-one { top: 0; left: 0; width: 41%; height: 39%; transform: rotate(-2deg); }
+.cm-intro .cm-intro-panel-two { top: 0; right: 0; width: 55%; height: 39%; transform: rotate(1deg); }
+.cm-intro .cm-intro-panel-three {
+  right: 0;
+  bottom: 0;
+  left: 0;
+  display: grid;
+  place-items: center;
+  height: 57%;
+  border-color: var(--cm-ink);
+  box-shadow: 5px 5px 0 var(--cm-ink);
+  transform: rotate(-1deg);
+}
+.cm-intro .cm-intro-rays {
+  position: absolute;
+  inset: -65%;
+  background: repeating-conic-gradient(from 8deg at 62% 64%, transparent 0deg 13deg, var(--cm-yellow) 13deg 16deg, transparent 16deg 25deg);
+}
+.cm-intro .cm-intro-dots {
+  position: absolute;
+  inset: 0;
+  background-image: radial-gradient(var(--cm-ink) 1px, transparent 1.3px);
+  background-size: 5px 5px;
+  opacity: .55;
+  -webkit-mask-image: linear-gradient(125deg, #000, transparent 85%);
+  mask-image: linear-gradient(125deg, #000, transparent 85%);
+}
+.cm-intro .cm-intro-wordmark {
+  font-family: 'Pane Comic Display', 'Bangers', Impact, "Arial Black", sans-serif;
+  font-size: clamp(50px, 17vw, 76px);
+  font-style: italic;
+  font-weight: 400;
+  letter-spacing: -.015em;
+  line-height: 1;
+  text-shadow: 4px 4px 0 var(--cm-yellow);
+  transform: skew(-5deg);
+}
+.cm-intro .cm-intro-seal {
+  position: absolute;
+  right: -12px;
+  bottom: -14px;
+  display: grid;
+  place-items: center;
+  width: 53px;
+  height: 53px;
+  border: 3px solid var(--cm-ink);
+  outline: 1px solid var(--cm-ink);
+  outline-offset: -7px;
+  background: var(--cm-yellow);
+  color: var(--cm-ink);
+  font-family: 'Pane Pixel 2P', Georgia, serif;
+  font-size: 27px;
+  line-height: 1;
+  transform: rotate(-9deg);
+}
+.cm-intro .cm-intro-caption { max-width: 100%; margin-top: 35px; padding: 0 24px; text-align: center; }
+.cm-intro .cm-intro-name {
+  margin: 0;
+  font-family: 'Pane Comic Display', 'Bangers', Impact, var(--app-font, sans-serif);
+  font-size: 24px;
+  font-weight: 400;
+  line-height: 1.4;
+  letter-spacing: .12em;
+  overflow-wrap: anywhere;
+}
+.cm-intro .cm-intro-tagline {
+  margin: 9px 0 0;
+  color: var(--cm-muted);
+  font-size: 13px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+.cm-intro .cm-intro-skip {
+  position: absolute;
+  bottom: 26px;
+  padding: 9px 14px;
+  border: 2px solid var(--cm-ink);
+  border-radius: 0;
+  background: var(--cm-card);
+  box-shadow: 2px 2px 0 var(--cm-ink);
+  color: var(--cm-ink);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.cm-intro .cm-intro-skip:active { transform: translate(2px, 2px); box-shadow: none; }
+.cm-intro .cm-intro-skip:focus-visible { outline: 2px solid var(--cm-ink); outline-offset: 3px; }
+
+@media (max-height: 500px) {
+  .cm-intro .cm-intro-art { width: min(230px, 65vw); height: 175px; }
+  .cm-intro .cm-intro-caption { margin-top: 22px; }
+  .cm-intro .cm-intro-name { font-size: 20px; }
+  .cm-intro .cm-intro-skip { bottom: 16px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .cm-intro, .cm-intro * { animation: none !important; transition: none !important; }
+}
+body.reduce-anim .cm-intro, body.reduce-anim .cm-intro * { animation: none !important; transition: none !important; }

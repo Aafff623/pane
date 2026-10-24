@@ -1,13 +1,27 @@
 import { gsap } from 'gsap';
+import { hasComicStartup, playComicStartup } from './comicStartup';
 import type { SkinId } from './skins';
 import './themeStartup.css';
+/// The single startup entry. Pack skins with their own sequence take it over;
+/// everything else keeps the ink/post composition. Returns undefined when the
+/// override cannot start, so the caller can fall back to the native splash.
 export function playThemeStartup(skin: SkinId, reduced: boolean, labels: {
     name: string;
     tagline: string;
     skip: string;
     /** Localized overlay description for screen readers. */
     aria: string;
-}): () => void {
+}): (() => void) | undefined {
+    if (hasComicStartup(skin)) {
+        try {
+            return playComicStartup(reduced, labels);
+        } catch {
+            // Silent degrade: leave no half-built overlay behind.
+            document.querySelector('.cm-intro')?.remove();
+            document.documentElement.removeAttribute('data-theme-intro');
+            return undefined;
+        }
+    }
     const theme = skin === 'ink' ? 'ink' : 'post';
     let overlay: HTMLElement | null = null, timer: ReturnType<typeof setTimeout> | undefined, timeline: gsap.core.Timeline | null = null;
     const escape = (e: KeyboardEvent) => { if (e.key === 'Escape' && !e.isComposing) {

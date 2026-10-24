@@ -21,6 +21,7 @@ function refreshWindow(invoke) {
     lastFetch: 0, STALE_MS: 0,
     lastSnapshots: [], recentlyKeyed: new Map(), firstRunPickerPending: false,
     lastLayoutSnapshot: null, configSaveError: null, customizeOpen: false,
+    boardLoadPhase: 'ready',
     lastCreditTrend: null,
     refreshState: new RefreshState(),
     unparkRecentlyKeyed: async () => {}, hideFoldedMoonshot: value => value,

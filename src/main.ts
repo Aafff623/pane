@@ -975,6 +975,11 @@ function finishProviderEnable(id: string, generation: number): void {
 let refreshTimer: number | undefined;
 let footerTick: number | undefined;
 let lastSnapshots: Snapshot[] = [];
+/// First-paint read state for the board. index.html ships the skeleton cards;
+/// a re-render before the first answer must keep that loading state instead of
+/// claiming "nothing configured" (issue 03: pending and empty are exclusive).
+type BoardLoadPhase = "pending" | "ready" | "failed";
+let boardLoadPhase: BoardLoadPhase = "pending";
 let spendSourceStatuses: SpendSourceStatusRow[] = [];
 // ── T-0033: spend-ledger normalization ─────────────────────────────────────
 // The spend panels are a ledger of what local CLIs actually wrote — card
@@ -1250,6 +1255,13 @@ let overviewExpiringOpen = false;
 let customizeOpen = false;
 let skinMarketOpen = false;
 let skinPreviewMode: "light" | "dark" | "both" = "both";
+/// Workshop sample page. Every installed pack renders the same real-control
+/// samples under its own `data-skin`; a demo page never reads live data.
+type SkinPreviewPage = "quota" | "spend" | "settings";
+let skinPreviewPage: SkinPreviewPage = "quota";
+/// Gate for installed-pack CSS: first paint and the startup sequence must not
+/// run before the saved pack's stylesheet (and its fonts) are in the document.
+let installedSkinLoad: Promise<void> = Promise.resolve();
 /// Which sidebar entry the workshop is showing; null = the applied skin.
 let skinMarketSelected: SkinId | null = null;
 /// WorkBuddy's web-session status (ticket 06), loaded at boot and after
@@ -10528,9 +10540,11 @@ function accountChildRows(family: string): string {
   return `<div class="cust-account-children" data-accounts-children="${escapeHtml(family)}">${children}${archivedHtml}</div>`;
 }
 
-// The spend preview uses the dashboard's card, donut geometry and legend
-// classes with fixed data. It never reads account spend or changes live tabs.
-function renderSkinSample(mode: "light" | "dark", skinId: SkinId = "signal", compact = false): string {
+// Workshop samples use the dashboard's own card, metric, donut and settings
+// classes with fixed demo data. They never read accounts, spend or snapshots,
+// and every sample carries the id of the skin it previews so one pack can
+// never repaint another pack's sample.
+function renderSpendSkinSampleBody(skinId: SkinId): string {
   const rows = [
     { id: "claude", name: "Claude", cost: 18.4 },
     { id: "codex", name: "Codex", cost: 9.6 },
@@ -10544,9 +10558,7 @@ function renderSkinSample(mode: "light" | "dark", skinId: SkinId = "signal", com
     return `<path class="seg" fill-rule="evenodd" d="${sectorPath(start + 0.025, angle - 0.025)}" style="fill:${spendColor(row.id)}"></path>`;
   }).join("");
   const ring = `<svg width="96" height="96" viewBox="0 0 96 96" aria-hidden="true">${segments}<text class="donut-total" x="48" y="49" text-anchor="middle" font-size="13" font-weight="600">$32.80</text><text class="donut-sub" x="48" y="61" text-anchor="middle" font-size="8">${t("spend.today")}</text></svg>`;
-  return `<div class="skin-sample" data-skin="${skinId}" ${skinId === "ink" ? "data-ink" : ""} data-theme="${mode}" role="img" aria-label="${escapeHtml(t("skin.spendPreview"))}">
-    ${compact ? "" : `<div class="skin-sample-head"><span>${uiIcon(mode === "light" ? "sun" : "moon")}${t(mode === "light" ? "skin.light" : "skin.dark")}</span></div>`}
-    <article class="provider total-spend" inert>
+  return `<article class="provider total-spend" inert>
       <div class="provider-head">
         <span class="provider-name">${t("spend.title")}</span>
         <span class="spacer"></span>
@@ -10562,7 +10574,64 @@ function renderSkinSample(mode: "light" | "dark", skinId: SkinId = "signal", com
           </div></div>
         </div>
       </div>
-    </article>
+    </article>`;
+}
+
+/// Quota page: two real provider cards, one healthy and one inside the
+/// low-quota warning tier, plus the account switcher tabs. Fixed literals
+/// only — 93% used is what paints `.fill.low`, so no fake styling is needed.
+function renderQuotaSkinSampleBody(): string {
+  const HOUR = 3_600_000;
+  const rows = [
+    { name: "Codex", plan: "Pro", used: 32, resetIn: 2.25 * HOUR },
+    { name: "Claude", plan: "Max", used: 93, resetIn: 0.4 * HOUR },
+  ];
+  const accountTabs = `<div class="card-account-tabs"><button type="button" class="card-account-tab on" tabindex="-1"><span class="acct-dot green"></span><span class="card-account-tab-label">${escapeHtml(t("customize.acctDefaultShort"))}</span></button><button type="button" class="card-account-tab" tabindex="-1"><span class="acct-dot yellow"></span><span class="card-account-tab-label">2</span></button></div>`;
+  return rows.map((row, index) => `<article class="provider" inert>
+      <div class="provider-head"><span class="provider-name">${row.name}</span><span class="spacer"></span><span class="plan">${row.plan}</span></div>
+      <div class="card-panel">${index === 0 ? accountTabs : ""}${renderMetric({
+        label: "Session",
+        kind: "progress",
+        used_percent: row.used,
+        detail: null,
+        value: null,
+        resets_at: Date.now() + row.resetIn,
+        period_ms: 5 * HOUR,
+      })}</div>
+    </article>`).join("");
+}
+
+/// Settings page: the same rows the settings surface renders — a select, the
+/// real self-drawn `.toggle input` switches and a plain field/button pair.
+function renderSettingsSkinSampleBody(): string {
+  return `<article class="provider" inert>
+      <div class="provider-head"><span class="provider-name">${escapeHtml(t("settings.title"))}</span></div>
+      <div class="st-card">
+        <div class="setting-row"><label>${escapeHtml(t("settings.appearance"))}</label><select tabindex="-1" aria-hidden="true"><option>${escapeHtml(t("settings.appearSystem"))}</option></select></div>
+        <div class="setting-row"><label>${escapeHtml(t("settings.font"))}</label><input type="text" value="Segoe UI" readonly tabindex="-1" aria-hidden="true" /></div>
+        <div class="setting-row"><label class="toggle"><input type="checkbox" checked tabindex="-1" /><span>${escapeHtml(t("settings.compact"))}</span></label></div>
+        <div class="setting-row"><label class="toggle"><input type="checkbox" tabindex="-1" /><span>${escapeHtml(t("settings.reduceAnim"))}</span></label></div>
+        <div class="setting-row"><label>${escapeHtml(t("settings.startupAnim"))}</label><button class="mini-btn" type="button" tabindex="-1">${escapeHtml(t("settings.startupAnimReplay"))}</button></div>
+      </div>
+    </article>`;
+}
+
+/// Capability-driven: any installed pack gets all three pages, each in its own
+/// `data-skin` scope. Compact gallery thumbnails stay on the spend card so the
+/// gallery reads as one comparable row.
+function renderSkinSample(mode: "light" | "dark", skinId: SkinId = "signal", compact = false): string {
+  const page: SkinPreviewPage = compact ? "spend" : skinPreviewPage;
+  const body = page === "quota"
+    ? renderQuotaSkinSampleBody()
+    : page === "settings"
+      ? renderSettingsSkinSampleBody()
+      : renderSpendSkinSampleBody(skinId);
+  const label = page === "spend"
+    ? t("skin.spendPreview")
+    : `${t(`skin.page.${page}`)} · ${t(mode === "light" ? "skin.light" : "skin.dark")}`;
+  return `<div class="skin-sample" data-skin="${skinId}" ${skinId === "ink" ? "data-ink" : ""} data-theme="${mode}" role="img" aria-label="${escapeHtml(label)}">
+    ${compact ? "" : `<div class="skin-sample-head"><span>${uiIcon(mode === "light" ? "sun" : "moon")}${t(mode === "light" ? "skin.light" : "skin.dark")}</span></div>`}
+    ${body}
   </div>`;
 }
 
@@ -10586,6 +10655,7 @@ function renderSkinMarket(): string {
       <div class="skin-market-main" id="skin-market-detail">
         <div class="skin-detail-head"><div><h3>${escapeHtml(skin.name)}</h3><p class="skin-market-copy">${escapeHtml(skin.tagline)}${skin.updateAvailable ? ` · ${t("skin.updateAvailable")}` : ""}</p></div><span class="skin-preview-label">${t("skin.preview")}</span></div>
         <div class="skin-preview-toolbar" role="group" aria-label="${t("skin.previewMode")}">${(["light", "dark", "both"] as const).map((mode) => `<button class="skin-mode-btn" type="button" data-skin-mode="${mode}" aria-pressed="${previewMode === mode}">${uiIcon(mode === "light" ? "sun" : mode === "dark" ? "moon" : "columns")}<span>${t(mode === "light" ? "skin.light" : mode === "dark" ? "skin.dark" : "skin.both")}</span></button>`).join("")}</div>
+        ${skin.state === "remote" ? "" : `<div class="skin-preview-toolbar skin-preview-pages" role="group" aria-label="${t("skin.preview")}">${(["quota", "spend", "settings"] as const).map((page) => `<button class="skin-mode-btn" type="button" data-skin-page="${page}" aria-pressed="${skinPreviewPage === page}">${t(`skin.page.${page}`)}</button>`).join("")}</div>`}
         ${pair}
       </div>
       <div class="skin-market-gallery" role="group" aria-label="${t("skin.choose")}">
@@ -10861,7 +10931,7 @@ function renderWelcome(): string {
 /// cards render nothing.
 function renderGroupedCards(): string {
   const snaps = orderedSnapshots();
-  if (snaps.length === 0) return renderBoardEmptyState();
+  if (snaps.length === 0) return renderEmptyBoard();
   // Board cleanliness (issue: fresh/legacy configs flooded the dashboard
   // with "未配置凭据" cards): bare hint cards fold into one collapsed
   // section; the claude/codex starter cards stay out front.
@@ -10897,6 +10967,40 @@ function renderGroupedCards(): string {
         .join("")
     : "";
   return sections + guide + fold;
+}
+
+/// No cards yet: the loading state is exclusive with the empty state.
+/// - pending: keep the skeleton cards index.html shipped (a re-render must
+///   not claim "nothing configured" while the first read is still running);
+/// - failed, or an enabled provider returned no snapshot at all: "couldn't
+///   read", never the add-provider CTA (unreadable ≠ 0 ≠ unconfigured);
+/// - ready with nothing enabled: the genuine first-run empty state.
+function renderEmptyBoard(): string {
+  if (boardLoadPhase === "pending") return renderBoardLoadingState();
+  if (boardLoadPhase === "failed" || enabledProviderCount() > 0) return renderBoardReadFailedState();
+  return renderBoardEmptyState();
+}
+
+/// The number of catalog providers the config still enables (family level —
+/// account-scoped disabled ids do not disable the whole family). Read-only:
+/// it answers "did the read cover anything?" without inventing data.
+function enabledProviderCount(): number {
+  return ALL_PROVIDERS.filter(([id]) => !isCardDisabled(id)).length;
+}
+
+/// Same three skeleton cards as index.html's first paint.
+function renderBoardLoadingState(): string {
+  const card = `<div class="skeleton-card"><div class="skeleton-line title"></div><div class="skeleton-line bar"></div><div class="skeleton-line short"></div></div>`;
+  return card.repeat(3);
+}
+
+function renderBoardReadFailedState(): string {
+  return `<div class="board-empty board-read-failed">
+    <span class="board-empty-icon" aria-hidden="true">${uiIcon("info")}</span>
+    <div class="board-empty-title">${escapeHtml(t("board.readFailedTitle"))}</div>
+    <div class="board-empty-body">${escapeHtml(t("board.readFailedBody"))}</div>
+    <button class="mini-btn board-empty-cta" data-board-retry>${escapeHtml(t("board.retry"))}</button>
+  </div>`;
 }
 
 /// The friendly guide when the board has nothing to show (everything
@@ -10957,6 +11061,7 @@ function renderDashboard(): void {
   hideSpendPop();
   document.querySelector(".spend-detail-overlay")?.remove();
   const el = document.querySelector("#providers")!;
+  el.setAttribute("aria-busy", boardLoadPhase === "pending" && !lastSnapshots.length ? "true" : "false");
   // Account-tab switches and data ticks both rebuild this list. Replacing
   // innerHTML drops the scroll offset, which used to snap the popover to the
   // top — a violent jump when switching an account near the bottom. Keep the
@@ -11051,7 +11156,7 @@ function renderDrawerBody(): void {
   const scrollTop = body.querySelector(".skin-market-body")?.scrollTop ?? 0;
   const focused = document.activeElement;
   const focusAttr = focused instanceof HTMLElement && body.contains(focused)
-    ? ["data-skin-pick", "data-skin-mode", "data-skin-select", "data-skin-reset", "data-skin-download", "data-skin-remove", "data-skin-close"].find((attr) => focused.hasAttribute(attr))
+    ? ["data-skin-pick", "data-skin-mode", "data-skin-page", "data-skin-select", "data-skin-reset", "data-skin-download", "data-skin-remove", "data-skin-close"].find((attr) => focused.hasAttribute(attr))
     : undefined;
   const focusValue = focusAttr ? focused!.getAttribute(focusAttr) : null;
   document.querySelector("#drawer")?.classList.toggle("skin-workshop-open", skinMarketOpen);
@@ -11609,6 +11714,7 @@ async function paintCachedSnapshots(): Promise<void> {
     // The live fetch may have already landed — never paint over it.
     if (!cached.length || lastSnapshots.length) return;
     lastSnapshots = cached;
+    boardLoadPhase = "ready";
     ensureLayout();
     requestRender();
     requestTraySync();
@@ -11722,6 +11828,12 @@ async function refresh(
     return;
   }
   paintRefreshState();
+  // A retry after a failed first read goes back to loading instead of
+  // leaving the "couldn't read" state up while the answer is in flight.
+  if (!lastSnapshots.length && boardLoadPhase !== "pending") {
+    boardLoadPhase = "pending";
+    requestRender();
+  }
   const status = document.querySelector("#status")!;
   status.textContent = t("footer.refreshing");
   // The spend scan re-reads every session log on a cold start and can take
@@ -11844,6 +11956,9 @@ async function refresh(
     const firstData = lastSnapshots.length === 0;
     lastFetch = Date.now();
     lastSnapshots = snapshots;
+    // The read finished: an empty list now means "nothing enabled", not
+    // "still loading". Render-failed vs add-provider is decided in renderEmptyBoard.
+    boardLoadPhase = "ready";
     ensureLayout();
     if (!lastLayoutSnapshot && config.layout) {
       lastLayoutSnapshot = JSON.stringify(config.layout);
@@ -11862,6 +11977,11 @@ async function refresh(
     status.textContent = configSaveError
       ? t("footer.configSaveFailed", { err: configSaveError })
       : t("footer.refreshFailed", { err: String(err) });
+    // No snapshots at all: this is a read failure, not an empty board.
+    if (!lastSnapshots.length) {
+      boardLoadPhase = "failed";
+      requestRender();
+    }
   } finally {
     const queued = refreshState.complete(myGen);
     paintRefreshState();
@@ -12137,6 +12257,12 @@ async function handleCustomizeClick(target: HTMLElement): Promise<boolean> {
   const skinMode = target.closest<HTMLElement>("[data-skin-mode]")?.dataset.skinMode;
   if (skinMode === "light" || skinMode === "dark" || skinMode === "both") {
     skinPreviewMode = skinMode;
+    renderDrawerBody();
+    return true;
+  }
+  const skinPage = target.closest<HTMLElement>("[data-skin-page]")?.dataset.skinPage;
+  if (skinPage === "quota" || skinPage === "spend" || skinPage === "settings") {
+    skinPreviewPage = skinPage;
     renderDrawerBody();
     return true;
   }
@@ -16137,6 +16263,9 @@ async function initSettings(): Promise<void> {
     const legacy = readSkin(window.localStorage);
     try { await patchConfig({ skinId: legacy }); } catch { config.skinId = legacy; }
   } else config.skinId = normalizeSkin(config.skinId);
+  // Keep the first-paint and intro gate behind local pack CSS (fonts!), never
+  // the network index: a saved pack skin must be styled before it is shown.
+  if (config.skinId) await installedSkinLoad;
   applyAppearance();
   applyReduceMotion();
   applySkin();
@@ -18505,14 +18634,20 @@ function splashPlaying(): boolean {
 function playSplash(): void {
   const skin = activeSkin();
   if (skin) {
-    hideSplash();
-    stopThemeStartup = playThemeStartup(skin.id, reduceMotion(), {
+    // Build the pack intro before dismissing the native splash: when a pack's
+    // sequence cannot start, playThemeStartup returns undefined and the
+    // existing splash stays on screen — startup never stalls on the skin.
+    const stop = playThemeStartup(skin.id, reduceMotion(), {
       name: skin.name,
       tagline: `v${skin.version}`,
       skip: t("splash.skipHint"),
       aria: t("theme.introAria", { theme: skin.name }),
     });
-    return;
+    if (stop) {
+      hideSplash();
+      stopThemeStartup = stop;
+      return;
+    }
   }
   const splash = document.querySelector<HTMLElement>("#splash");
   if (!splash) return;
@@ -18630,11 +18765,12 @@ window.addEventListener("DOMContentLoaded", () => {
   // Installed resource-pack skins arrive async (Rust reads + inlines their
   // CSS); re-apply once the registry settles so a saved pack skin lights up
   // after first paint, and the workshop lists them.
-  void Promise.all([refreshInstalledPacks(), refreshSkinIndex()]).then(() => {
+  installedSkinLoad = refreshInstalledPacks().then(() => {
     applySkin();
+    requestRender();
     if (skinMarketOpen) renderDrawerBody();
-    void migrateSkinFromIndex();
   });
+  void Promise.all([installedSkinLoad, refreshSkinIndex()]).then(() => migrateSkinFromIndex());
   // WorkBuddy's web-session block renders inside the Customize drawer.
   void refreshWorkbuddyWebStatus().then(() => {
     if (customizeOpen) renderDrawerBody();
@@ -19241,6 +19377,12 @@ document.querySelector("#settings-btn")!.addEventListener("click", () => {
       setDrawer(true);
       return;
     }
+    if (target.closest<HTMLElement>("[data-board-retry]")) {
+      boardLoadPhase = "pending";
+      requestRender();
+      void refresh(true);
+      return;
+    }
     const spendFold = target.closest<HTMLElement>("[data-spend-fold]");
     if (spendFold) {
       config.layout ??= { providerOrder: [], providers: {} };
@@ -19595,6 +19737,7 @@ document.querySelector("#settings-btn")!.addEventListener("click", () => {
       .filter(supportsExtraAccounts).map(refreshSettingsProviderKey));
     if (refreshState.busy || generation !== usageEventGeneration) return;
     lastSnapshots = hideFoldedMoonshot(incoming);
+    boardLoadPhase = "ready";
     ensureLayout();
     requestRender();
     scheduleBackoffRetries(lastSnapshots);
