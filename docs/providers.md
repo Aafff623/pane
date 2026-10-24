@@ -661,23 +661,38 @@ credited in [LICENSE](../LICENSE).
   default app and must not stand in for the account. `serviceList` comes back
   `null`, so enabled services per app cannot be read — every channel is
   probed instead.
-- **Units never merge.** Interaction counts (`tts` / `iat` / `ise` measured)
-  map to `Requests`; 录音转写 packs are hours → `Minutes` ×60; 实时转写
-  `leftCount` is **seconds** → `Minutes` ÷60 (rounded, never the 300.0166
-  decimal), and `maxConnection` (lanes) is a separate capacity row, never a
-  usage bar. A pack's `left` (purchased balance) and its `threshold` /
-  `remainCount` (500-call trial pool) stay two rows: summing them would claim
-  the trial makes the pack bigger.
-- **Three time encodings:** naive `YYYY-MM-DD HH:[:SS]` strings, and unix
-  seconds for `expireTime`. Unparsable values yield no date at all rather
-  than a guessed one; expiry never enters `resets_at` (one-off packs, not a
-  periodic window).
+- **Remaining is the headline, and it matches the console.** Verified against
+  the live page on 2026-10-23: the console's single "剩余服务量" is
+  `left` (purchased pack remaining) **plus** `remainCount` (trial remaining) —
+  `left 10000 + remainCount 500` rendered as 10500, and the page's
+  "购买服务量" slot is empty. So the card shows that same sum and names the trial
+  share (`10500 left · 500 trial`); it does not fabricate a percentage, because
+  no total is published anywhere in these payloads ("cent" packs such as
+  录音转写 do publish `count`, so only those keep a progress bar).
+- **Units:** interaction counts map to plain numbers (`Requests`); 录音转写
+  packs are hours → `Minutes` ×60; 实时转写 `leftCount` is **seconds** — shown as
+  rounded minutes with the raw seconds in the text (never the 300.0166 decimal).
+  `maxConnection` (lanes) is a separate capacity row, never a usage bar.
+- **Three time encodings, all confirmed live:** `expireDate` is
+  `YYYY-MM-DD HH:MM` (no zone), `dueDate` is `YYYY-MM-DD HH:MM:SS`, and
+  `expireTime` is unix **seconds** (1824307199 ↔ 2027-10-23, matching the same
+  pack's `dueDate`). Unparsable values yield no date at all rather than a
+  guessed one; expiry never enters `resets_at` (one-off packs, not a periodic
+  window).
 - **Forbidden calls:** `webapi/getInfo/v1` and `app/getHttpSign` return the
   plaintext APIKey/APISecret. This provider does not need them and must never
   request them.
+- **Calibrated against the live console on 2026-10-23** (read-only replay with
+  the owner's own session): `tts`/`iat`/`ise` all `flag:true, code:0`,
+  `usedCount 0`, `left 10000`, `threshold 500`, `remainCount 500`,
+  `expireDate` 2027-01-21 (three separate claim times); `lfasr` one pack
+  `count 5 / leftCount 5 / dueDate 2027-10-23`; `rtasr leftCount 18000` s,
+  `maxConnection 1`, `expireTime` 2027-10-23. `lfasr`/`rta`/`rtasr`/`spark` on
+  the count endpoint all answer `data:null`, as documented.
 - **待确认:** `status` / `convertStatus` / `connectType` / `timeType` / `isDel`
-  meanings; the timezone behind the naive strings; the trial-pool split rule
-  beyond tts/iat/ise; other channels' ids; which pack is consumed first when
-  several hour packs are live; whether multiple apps should be aggregated or
-  listed per app. Card numbers are accepted only against the console by the
-  owner.
+  meanings; the timezone behind the naive strings; which pack is consumed first
+  when several hour packs are live; whether multiple apps should be aggregated
+  or listed per app. (The earlier handoff's `usedCount 9 / remainCount 491`
+  reading no longer matches this account — the three packs now read 0/500,
+  i.e. they were re-claimed or reset; that is account history, not an API
+  change.)

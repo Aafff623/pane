@@ -461,7 +461,13 @@ async fn snapshot_with_login_as(login: LoginAccount, id: String) -> Snapshot {
     Snapshot::ok(&id, &login_card_name(&login), None, metrics)
 }
 
-/// Count packs: balance row, then the trial pool as its own row when present.
+/// Count channels: the console renders ONE number, "剩余服务量", computed as
+/// the purchased pack's remaining (`left`) plus the trial pool's remaining
+/// (`remainCount`). Verified against the live console on 2026-10-23: left
+/// 10000 + remainCount 500 showed 10500, and the "购买服务量" slot was empty —
+/// no total is published anywhere in these payloads. So the card shows the same
+/// sum the owner sees on the web, names the trial share, and never invents a
+/// percentage from a guessed total.
 fn count_metrics(app: &str, channel: &str, meter: &CountMeter) -> Vec<Metric> {
     let name = CHANNEL_NAMES
         .iter()
@@ -469,49 +475,32 @@ fn count_metrics(app: &str, channel: &str, meter: &CountMeter) -> Vec<Metric> {
         .map(|(_, label)| *label)
         .unwrap_or(channel);
     let mut out = Vec::new();
-    if let (Some(left), Some(used)) = (meter.left, meter.used) {
-        let total = left + used;
-        let percent = if total > 0.0 { (used / total) * 100.0 } else { 0.0 };
-        out.push(
-            Metric::progress(
-                &format!("{name} ({app})"),
-                percent.clamp(0.0, 100.0),
-                Some(format!(
-                    "{} of {} interactions used",
-                    fmt_count(used),
-                    fmt_count(total)
-                )),
+    let pack_left = meter.left.unwrap_or_default().max(0.0);
+    let trial_left = meter
+        .trial_remaining
+        .or_else(|| match (meter.trial_total, meter.used) {
+            // Only derive when the trial is the one moving; a missing
+            // remainCount must not turn a paid pack into trial credit.
+            (Some(_), Some(used)) => Some((meter.trial_total.unwrap_or_default() - used).max(0.0)),
+            _ => None,
+        })
+        .unwrap_or_default()
+        .max(0.0);
+    if meter.left.is_some() || meter.trial_remaining.is_some() {
+        let value = if trial_left > 0.0 {
+            format!(
+                "{} left · {} trial",
+                fmt_count(pack_left + trial_left),
+                fmt_count(trial_left)
             )
-            .with_usage(UsageUnit::Requests, used, Some(total)),
-        );
-    } else if let Some(left) = meter.left {
-        out.push(
-            Metric::text(
-                &format!("{name} ({app})"),
-                format!("{} interactions left", fmt_count(left)),
-            )
-            .with_usage(UsageUnit::Requests, left, None),
-        );
-    }
-    if let (Some(total), Some(remaining)) = (meter.trial_total, meter.trial_remaining) {
-        let used = (total - remaining).max(0.0);
-        let percent = if total > 0.0 { (used / total) * 100.0 } else { 0.0 };
-        out.push(
-            Metric::progress(
-                &format!("{name} trial ({app})"),
-                percent.clamp(0.0, 100.0),
-                Some(format!(
-                    "{} of {} trial interactions left",
-                    fmt_count(remaining),
-                    fmt_count(total)
-                )),
-            )
-            .with_usage(UsageUnit::Requests, used, Some(total)),
-        );
+        } else {
+            format!("{} left", fmt_count(pack_left))
+        };
+        out.push(Metric::text(&format!("{name} ({app})"), value));
     }
     if let Some(raw) = meter.expires.as_deref() {
         let value = match parse_console_time(Some(raw)) {
-            Some(ms) => format!("{raw} ({}", fmt_expiry(ms)),
+            Some(ms) => format!("{raw} ({})", fmt_expiry(ms)),
             None => raw.to_string(),
         };
         out.push(Metric::text("Expires", value));
@@ -542,31 +531,19 @@ fn hour_pack_metric(app: &str, pack: &HourPack) -> Metric {
 fn realtime_metrics(app: &str, row: &RealtimeAuth) -> Vec<Metric> {
     let mut out = Vec::new();
     if let Some(left) = row.left_seconds {
-        let total = left + row.used_seconds.unwrap_or_default();
-        let percent = if total > 0.0 {
-            (row.used_seconds.unwrap_or_default() / total * 100.0).clamp(0.0, 100.0)
-        } else {
-            0.0
-        };
-        out.push(
-            Metric::progress(
-                &format!("Realtime transcription ({app})"),
-                percent,
-                Some(format!(
-                    "{} min left of {} min",
-                    fmt_count(minutes_from_seconds(left)),
-                    fmt_count(minutes_from_seconds(total))
-                )),
-            )
-            .with_usage(
-                UsageUnit::Minutes,
-                minutes_from_seconds(left),
-                Some(minutes_from_seconds(total)),
+        // Seconds are the vendor unit and the purchase size is not published,
+        // so this is a remaining figure, not a bar over an invented total.
+        out.push(Metric::text(
+            &format!("Realtime transcription ({app})"),
+            format!(
+                "{} min left ({} s)",
+                fmt_count(minutes_from_seconds(left)),
+                fmt_count(left)
             ),
-        );
+        ));
     }
     if let Some(lanes) = row.max_connection {
-        // Capacity, not consumption: never folded into a usage bar.
+        // Capacity, not consumption: never folded into a usage number.
         out.push(Metric::text("Max connections", format!("{:.0} lanes", lanes)));
     }
     if let Some(unix_secs) = row.expire_at.filter(|value| *value > 0) {
@@ -750,7 +727,7 @@ mod tests {
     }
 
     #[test]
-    fn trial_pool_and_purchased_balance_stay_two_facts() {
+    fn console_remaining_is_pack_left_plus_trial_and_never_invents_a_total() {
         let doc = json!({"flag": true, "code": 0, "data": {
             "usedCount": 9, "threshold": 500, "remainCount": 491,
             "left": 10000, "expireDate": "2026-11-03 23:59:59", "conc": 5}});
@@ -760,15 +737,16 @@ mod tests {
         assert_eq!(meter.trial_remaining, Some(491.0));
         assert_eq!(meter.used, Some(9.0));
 
+        // The console's single number is left + trial remaining: 10000 + 491
+        // here. Live check 2026-10-23 confirmed that sum (10500 at 500/500)
+        // and that no total is published.
         let rows = count_metrics("localdev", "tts", &meter);
-        assert_eq!(rows.len(), 3, "balance + trial + expiry, never one merged bar");
-        let balance = rows.iter().find(|m| m.label.starts_with("Online TTS") && !m.label.contains("trial")).unwrap();
-        assert_eq!(balance.usage.as_ref().unwrap().total, Some(10009.0));
-        let trial = rows.iter().find(|m| m.label.contains("trial")).unwrap();
-        assert_eq!(trial.usage.as_ref().unwrap().total, Some(500.0));
-        assert_eq!(trial.usage.as_ref().unwrap().used, 9.0);
-        assert_ne!(balance.usage.as_ref().unwrap().total, Some(10509.0),
-            "trial must not inflate the purchased pack");
+        assert_eq!(rows.len(), 2, "one remaining row plus expiry — no fabricated total");
+        assert_eq!(rows[0].kind, "text");
+        assert_eq!(rows[0].value.as_deref(), Some("10491 left · 491 trial"));
+        assert!(rows[0].usage.is_none(), "no invented used/total pair");
+        assert_eq!(rows[1].label, "Expires");
+        assert!(rows[1].value.as_deref().unwrap_or_default().starts_with("2026-11-03 23:59:59"));
     }
 
     #[test]
@@ -798,11 +776,9 @@ mod tests {
         let row = parse_realtime(&doc).expect("realtime");
         assert_eq!(row.left_seconds, Some(18000.0));
         let rows = realtime_metrics("localdev", &row);
-        let usage = rows[0].usage.as_ref().unwrap();
-        // 18000 s → 300 min; never the 18001/60 = 300.0166… ugly decimal.
-        assert_eq!(usage.used, 300.0);
-        assert_eq!(usage.total, Some(310.0));
-        assert_eq!(usage.unit, UsageUnit::Minutes);
+        assert_eq!(rows[0].kind, "text");
+        assert_eq!(rows[0].value.as_deref(), Some("300 min left (18000 s)"));
+        assert!(rows[0].usage.is_none(), "purchase size is unpublished — no bar over a guess");
         let lanes = rows.iter().find(|m| m.label == "Max connections").unwrap();
         assert_eq!(lanes.value.as_deref(), Some("1 lanes"), "capacity stays its own fact");
         assert!(rows.iter().any(|m| m.label == "Expires" && !m.value.as_deref().unwrap_or_default().is_empty()));
