@@ -597,7 +597,7 @@ changes.
   alias regression, and a headless Customize routing check. Latest serial
   proxy-free Rust run: **1051 passed / 0 failed / 15 ignored** (2026-10-23, after
   the dashboard-correctness batch, the xfyun-speech provider and the Qoder
-  telemetry probe). Node suite: 129 passed. Frontend build + skin-pack local
+  telemetry probe). Node suite: **142 passed**. Frontend build + skin-pack local
   check pass. The Codex backup-retirement and slot-retention corrections from
   the same day are covered by that run.
 - Codex credential-source precedence is **live default > managed web store >

@@ -5,7 +5,7 @@
 
 **Blocked by:** 无（但与 02 同区，建议同批做）
 
-**Status:** open
+**Status:** done (code + fixture) — 与 02 同批落地
 
 ## 复现（不依赖瞬时状态）
 
@@ -22,3 +22,12 @@
 ## Comments
 
 - 2026-10-23：属现存渲染状态逻辑，不是 `comic-pixel` 皮肤引入的问题；皮肤票里没顺手改。
+
+## Comments
+
+- 2026-10-23 修复：`renderGroupedCards` 只要快照为空就渲染「去添加」是根因——它没有 pending/failed 概念。
+  现在 `boardLoadPhase` 三态驱动：pending → skeleton（`aria-busy`），failed 或「有启用 provider 但零快照」
+  → 「读不到」+ 重试，只有真正全部禁用/未配置才给添加 CTA；重试会把状态翻回 pending，
+  不让失败文案压在飞行中的请求上。
+- 顺带清掉三处 `typeof boardLoadPhase !== 'undefined'` 防御：改为让 `tests/refresh-state.test.mjs`
+  的沙箱显式声明该状态（与 window-appearance 夹具同一做法），生产代码不留测试兼容分支。

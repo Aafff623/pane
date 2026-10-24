@@ -5,7 +5,7 @@
 
 **Blocked by:** 01；以及主对话 `src/main.ts` / `src/i18n.ts` 那批改动落地提交
 
-**Status:** pending-tree（被未提交工作树挡住，本轮按禁改清单没动前端）
+**Status:** done (code + browser fixture) — owner 实机与动效手感待验
 
 ## 要点
 
@@ -25,3 +25,13 @@
 - [ ] 应用皮肤 → 开场播放 → 跳过按钮/Escape/点击都能终止；减少动画时退化为静态构图
 - [ ] 重启与双窗口下皮肤选择保持；分享 PNG 导出在该皮肤下版式不塌
 - [ ] 真实动效速度手感由 owner 本人判定（自动化无法代替；此前两轮独立评审都播不了录像）
+
+## Comments
+
+- 2026-10-23 实现：样张走**能力驱动**（`skinId + page`，三页共用模板），开场**复用** `themeStartup`
+  唯一入口而不是并行（并行会双层 overlay），失败返回 `undefined` 让原生 splash 留下；
+  `document.fonts` 就绪后再导出分享 PNG。
+- 验证：`tsc`/`vite build` 通过；Node 142 通过（新增 13 条）；ego-lite 夹具用「永不返回的 fetch_usage」
+  证明 pending 只有 skeleton、无「添加服务」，拒绝态显示「读不到」+ 重试；三页样张的账号页签/
+  低额度 `.fill.low`/自绘开关/六段 donut/像素字体在夹具里成立；`signal` 皮肤仍走原开场。
+- 未验：真机 WebView2 的分享 PNG 导出、开机门禁、动效手感（需 owner 本人）。

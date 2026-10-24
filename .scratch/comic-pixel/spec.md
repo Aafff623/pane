@@ -1,6 +1,6 @@
 # Comic Pixel — 漫画×像素皮肤（进应用）
 
-**Status:** P0 皮肤本体 + P1 本地打包已完成并过校验；P2 工坊预览/开场/分享接入等 `src/main.ts` 空闲
+**Status:** P0/P1/P2 均已实现并通过门禁 — owner 实机目检与动效手感待验
 **GitHub:** 无（owner 2026-10-23 口头立项；方向由 owner 选定）
 **分支:** 建议 `codex/comic-pixel`
 
@@ -48,7 +48,7 @@
   `check-skin-packs.mjs`（不带 --live）三个包 size/sha 全 ok；`skin_packs` Rust 测试 9 通过。
 - 上架**没做**：`site/public/skins/index.json` 只加了本地生成条目，线上发布是独立授权动作。
 
-## 待做（P2，全部要动 `src/main.ts`）
+## P2（已落地，2026-10-23）
 
 - 工坊三页样张预览（额度/花费/设置真实控件）、`comicStartup` 接入（三分镜→字标→印章，
   3.3s 可跳过、减少动画降级）、分享 PNG 导出回归。起点用 `dc520c2` 的 +45/−6，
