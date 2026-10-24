@@ -59,3 +59,6 @@ printf '\xff' | dd of=/tmp/zst-probe/rollout-x.jsonl.zst bs=1 seek=<中间偏移
 
 - 2026-10-23：立项。Pane 自有缺陷，#48 对照时翻出。排 P2 是因为它需要文件损坏才触发，
   但触发后表现为「某家某天静默归零」，属于看板瞎一格。
+- 2026-10-23 实现：两处严格解码统一成与明文路径同口径 —— `parse_zstd_file` 用 `String::from_utf8_lossy` 后逐行交给各家 parser（坏行照旧被认不出的行挡掉），`dsh_files_data` 同样改 lossy。一个坏字节不再让整文件返回 `None`。
+- **明确不做**（票面选择「只统一容错」）：让压缩文件参与增量续读。现在调用处是 `checkpoint = if is_zstd { None }`，即压缩日志每次全量重读、不进增量；改成进增量要一并定义 `Some(0)` 的返回值语义与多帧截断时的续读点，属于另一件事，留在此处不跟进。
+- 回归：`spend::tests::corrupt_byte_in_zstd_log_keeps_the_good_lines` —— 一个好行 + 一行非 UTF-8 垃圾 + 一个好行压成 `.jsonl.zst`，修复前整文件归零（tokens 0），修复后仍拿到 1100。既有 `parse_lines_from` 的明文容错测试未动。

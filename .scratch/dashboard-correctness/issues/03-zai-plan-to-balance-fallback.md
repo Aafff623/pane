@@ -60,3 +60,6 @@
 ## Comments
 
 - 2026-10-23：立项，证据来自 #48 与 `temp/research/20261023-ccswitch-usage-gap.md` §9.1-3。
+- 2026-10-23 **只做兜底（D3 决定）**：`fetch_with_key` 原来把 `DomainErr::Empty` 空吞，两个端点都没套餐行时落到 `unexpected quota response shape` → 红点。现在 `no_plan_setup(endpoints, empty)` 在全空时返回已有的 `needs_setup`（黄态，零新状态、零新 UI），周末行照旧附上。
+- 仍未做：按量余额回落。缺两样外部材料 —— 一个「只有按量付费、无 Coding Plan」的智谱 key，以及官方余额端点（上游 #8465 证明存在但需自探）。票保持 open，验收里真实账号那格**未验证**，不以夹具冒充。
+- 回归：`zai::tests::key_without_a_coding_plan_reports_setup_not_a_broken_reading`（全空→needs_setup；混合→仍走原错误；零端点不能证明缺失）。

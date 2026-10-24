@@ -22,10 +22,21 @@ pub struct Pace {
     pub run_out_at: Option<i64>,
     pub settled: bool,
     pub elapsed_percent: Option<f64>,
+    /// The vendor echoed a whole untouched window: nothing spent and the
+    /// reset instant is exactly one period ahead. That is not a countdown, and
+    /// every surface (card foot, overview ring, collapsed badge, hover and the
+    /// local API) has to say the same thing about it, so the call is made once
+    /// here instead of being re-derived per consumer. Measured on this machine:
+    /// Antigravity reports the same full-window shape at 168 h as at 5 h.
+    #[serde(default)]
+    pub not_started: bool,
 }
 
 const MIN_SETTLED_MS: i64 = 15 * 60_000;
 const MIN_SETTLED_FRACTION: f64 = 0.05;
+/// A vendor-computed reset instant lands within a minute of `now + period` on
+/// an untouched window; the card-side grace used to be `period / 100`.
+const FULL_WINDOW_TOLERANCE_MS: i64 = 60_000;
 
 pub fn compute(used_percent: f64, resets_at: Option<i64>, period_ms: Option<i64>, now_ms: i64) -> Pace {
     let used = used_percent.clamp(0.0, 100.0);
@@ -36,6 +47,7 @@ pub fn compute(used_percent: f64, resets_at: Option<i64>, period_ms: Option<i64>
             run_out_at: Some(now_ms),
             settled: true,
             elapsed_percent: Some(100.0),
+            not_started: false,
         };
     }
     let (Some(resets_at), Some(period_ms)) = (resets_at, period_ms) else {
@@ -43,6 +55,16 @@ pub fn compute(used_percent: f64, resets_at: Option<i64>, period_ms: Option<i64>
     };
     if period_ms <= 0 {
         return unknown();
+    }
+    // Keys on the window being full-length rather than on a zero the backend
+    // no longer fabricates (Codex floors percentages and reports 1% on an
+    // untouched window). A genuinely mid-flight window that happens to be at
+    // 0% — Antigravity's weekly reset hours after it started, SenseNova with
+    // 70 of 168 hours left — stays a real countdown.
+    if used <= 1.0 && (resets_at - now_ms - period_ms).abs() <= FULL_WINDOW_TOLERANCE_MS {
+        let mut pace = unknown();
+        pace.not_started = true;
+        return pace;
     }
     let remain = (resets_at - now_ms).max(0);
     let elapsed = period_ms - remain;
@@ -77,6 +99,7 @@ pub fn compute(used_percent: f64, resets_at: Option<i64>, period_ms: Option<i64>
         run_out_at,
         settled: true,
         elapsed_percent: Some(frac * 100.0),
+        not_started: false,
     }
 }
 
@@ -87,6 +110,7 @@ fn unknown() -> Pace {
         run_out_at: None,
         settled: false,
         elapsed_percent: None,
+        not_started: false,
     }
 }
 
@@ -102,6 +126,33 @@ mod tests {
     use super::*;
 
     const HOUR: i64 = 3_600_000;
+
+    /// Measured on this machine: Antigravity echoes `now + a full period` at
+    /// 168 h with nothing spent, exactly as it does at 5 h. The flag therefore
+    /// cannot stop at the short window, or the same card row shows a countdown
+    /// in one surface and "未起步" in another.
+    #[test]
+    fn untouched_window_is_flagged_at_any_length() {
+        let now = 1_000_000_000_000;
+        for period in [5 * HOUR, 24 * HOUR, 168 * HOUR, 720 * HOUR] {
+            let pace = compute(0.0, Some(now + period), Some(period), now);
+            assert!(pace.not_started, "{period} ms untouched window must not count down");
+            assert_eq!(pace.state, PaceState::Unknown);
+        }
+        // Codex floors the percentage and reports 1% on an untouched window.
+        assert!(compute(1.0, Some(now + 5 * HOUR), Some(5 * HOUR), now).not_started);
+    }
+
+    /// A zero-percent window that is genuinely mid-flight keeps its countdown:
+    /// SenseNova reports 0 % used with 98 of 168 hours already spent, and
+    /// hiding that remaining time would be the same lie in the other direction.
+    #[test]
+    fn mid_flight_zero_usage_window_stays_a_countdown() {
+        let now = 1_000_000_000_000;
+        let week = 168 * HOUR;
+        let pace = compute(0.0, Some(now + week - 98 * HOUR), Some(week), now);
+        assert!(!pace.not_started, "a real remaining time is not an untouched window");
+    }
 
     #[test]
     fn young_windows_stay_unknown() {

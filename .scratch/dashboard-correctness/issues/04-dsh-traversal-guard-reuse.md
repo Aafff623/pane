@@ -67,3 +67,6 @@ DSH_HOME=/tmp/dsh-loop  # 对应 spend.rs:1782
 
 - 2026-10-23：立项。这条与上游无关，是 #48 对照过程中顺手翻出的 Pane 自有缺陷；
   之所以排 P1，是因为 Pane 是常驻看板，挂死等于全盲。
+- 2026-10-23 实现：删掉 `dsh_data` 内嵌的手写 `scan()`。护栏遍历需要一个**文件谓词**参数而不是复用 `is_log_file`：共享的 `is_log_file(..., include_zst)` 只认 `.jsonl.zst`，而 dsh 的文件是 `.jsonl.zstd`，直接塞 `include_zst=true` 会一家都扫不到、还会让 codex 那边开始吞 `.zstd`。于是把 `recent_log_files` 拆成 `recent_files_matching(root, out, accept)` + 原来的薄封装，dsh 用自己的 `is_dsh_session_log`（`session*.jsonl.zstd`）走同一套深度 16 / 目录数 20000 / canonical 去环护栏。
+- **行为变化（有意，写清）**：dsh 从此也吃 31 天 mtime 窗口（与所有来源一致），旧会话文件不再每次刷新全量重读。这是本票的副作用，不是回归。
+- 回归：`spend::tests::dsh_scan_does_not_recurse_forever_through_a_junction_cycle` —— 临时目录里用 `mklink /J` 造 `a/b/loop → a` 的自指 junction（本机实测 mklink 可用，测试没走跳过分支），断言文件被找到且**只找到一次**，同时确认 `.jsonl.zst` 不会被 dsh 谓词误收。清理只用 `cmd /c rmdir`，不用 `rm -rf`。

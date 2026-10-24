@@ -1,9 +1,20 @@
 # 看板当场可见的错算与误报（dashboard-correctness）
 
-**Status:** ready-for-agent（2026-10-23 立项，等待当前 reference-borrowings 批次收尾后开工）
+**Status:** 01 / 02 / 04 / 05 已实现并过回归；03 只做兜底（余额回落缺外部账号，票保持 open）
 **GitHub:** [#48](https://github.com/Aafff623/pane/issues/48)
 **前置调研:** `temp/research/20261023-ccswitch-usage-gap.md` §9（本地不入库，含上游 release notes 原文摘录与逐条对质证据）
 **分支:** 建议 `codex/dashboard-correctness`
+
+## 决策记录（2026-10-23，主对话拍板）
+
+- **D1 不折进 #41/#42/#43**：核对时票 01/02/04/05 的落点全部压在未提交 diff 的函数本体上，折进去会把「未验收改动」和「新缺陷修复」搅在一批，验收边界糊掉。改成先把 reference-borrowings 那批提交、再在干净树上独立执行；「同一判断只写一遍」由各票的实现约束达成（01 共享 `normalize_model_key`、02 判定落 `pace::compute`、04 复用护栏遍历），不共用票号。
+- **D2 已取证并结掉**：本机 `last_snapshots.json` 里 `antigravity / Claude Weekly`（168h）用量 0% 时 `resets_at − now = 168.0h`，与 5h 档同形 → 扩到所有窗口长度成立。同文件里 `sensenova / Credits Weekly` 用量 0% 却只剩 70.3h（已走 98h）→ 判定必须额外要求「resets_at ≈ now + 整窗」，否则会把真倒计时藏掉。这条反例改变了实现，不只是确认结论。
+- **D6 认**，并补一条反证不成立的理由（按调研方要求写进 Out of Scope，不靠沉默改范围）：#43 的项目/分支归因只改变「这笔钱摊到哪个项目/分支」，消费面仍是按天累积的消耗曲线，单条请求的 token 误差在其中不可见，因此不会抬高精度基线。
+- **D5 未跑**：`upstream-scan` 带 `update_docs: true` 会开 PR，属 owner 单独授权动作；`docs/reference-repos.md` 基线落后 8 个 release 挂账待批。
+
+## 验收流程补充
+
+- 全量 `parse-tests` 若在 dev 应用（pane.exe + Vite）同时在跑时执行，`providers::onenewapi::snapshot::tests::billing_in_flight_capped_at_eight` 会因端口/线程争用出现 `usage transport` 假失败（本机实测：整套 927s 且该条红；单独复跑 0.68s 通过；停掉 pane.exe 后重跑为准）。验证的人遇到这条先停 dev 应用复跑，不要改断言。
 
 ## Problem Statement
 

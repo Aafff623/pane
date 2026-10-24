@@ -90,7 +90,7 @@ interface Metric {
   detail: string | null;
   value: string | null;
   resets_at: number | null;
-  pace?: { state: "ahead" | "close" | "over" | "spent" | "unknown"; projected_used: number | null; run_out_at: number | null; settled: boolean; elapsed_percent: number | null } | null;
+  pace?: { state: "ahead" | "close" | "over" | "spent" | "unknown"; projected_used: number | null; run_out_at: number | null; settled: boolean; elapsed_percent: number | null; not_started?: boolean } | null;
   period_ms: number | null;
   /// Set by the search/MCP families on their per-key rows only (null on
   /// headline/summary rows and for every other provider).
@@ -253,6 +253,19 @@ interface QoderSpendReport {
   days: QoderDaySpend[];
   sessions: QoderSessionSpend[];
   source: { state: string; root: string; sessions: number; lite_sessions: number; tokens_unavailable_trips: number };
+  // What the local Qoder data can support right now: an update can remove the
+  // context windows this estimate multiplies by, and Qoder ships no measured
+  // token counts at all. The caption states the basis instead of letting the
+  // number's meaning change silently.
+  telemetry?: {
+    dbFound: boolean;
+    dbPath: string;
+    schemaVersion: number | null;
+    modelsTotal: number;
+    modelsWithWindow: number;
+    exactTokenCounts: boolean;
+    estimateBasis: string;
+  };
 }
 
 interface QoderRescan {
@@ -2439,18 +2452,11 @@ function renderMetric(m: Metric, providerId?: string): string {
       resetPlain = t("card.notStarted");
       resetHtml = `<span title="${escapeHtml(t("card.notStartedTip"))}">${escapeHtml(t("card.notStarted"))}</span>`;
     } else if (m.resets_at !== null && m.resets_at > Date.now()) {
-      // A rolling session window (≤6h period) that is still full-length
-      // hasn't begun — its clock starts on the first message, so a
-      // countdown would lie. Codex floors percentages and reports 1% on an
-      // untouched window, so the label keys on the window being fresh
-      // (with a grace for server-side reset staleness), not on a zero the
-      // backend no longer fabricates.
-      let notStarted = false;
-      if (m.period_ms !== null && m.period_ms <= 6 * 3_600_000 && used <= 1) {
-        const grace = Math.max(60_000, m.period_ms / 100);
-        notStarted = m.resets_at - Date.now() >= m.period_ms - grace;
-      }
-      if (notStarted) {
+      // The backend already decided whether this window has begun (nothing
+      // spent AND the vendor's reset instant is a full period ahead). Reading
+      // that one answer keeps the card, the ring, the badge, the hover and
+      // /v1/usage telling the same story at 5h, 24h, a week or a month.
+      if (metricNotStarted(m)) {
         resetPlain = t("card.notStarted");
         resetHtml = `<span title="${escapeHtml(t("card.notStartedTip"))}">${escapeHtml(t("card.notStarted"))}</span>`;
       } else {
@@ -2779,6 +2785,14 @@ function isCardCollapsed(cardId: string): boolean {
 /// When collapsed, returns the nearest reset across relevant snapshots for
 /// this card. Prioritizes the reset countdown of metrics that are actually
 /// maxed out (so a 0% session window does not hide a weekly exhaustion).
+/// A window the vendor reported as untouched: nothing spent and the reset
+/// instant is exactly one full period ahead. Decided once in `pace::compute`
+/// so no surface has to re-derive it — and so a week-long untouched window
+/// cannot show a countdown where the short one shows 未起步.
+function metricNotStarted(m: Metric): boolean {
+  return m.pace?.not_started === true;
+}
+
 function nearestResetSeconds(cardId: string): number {
   const family = providerFamily(cardId);
   const isMerged =
@@ -2805,9 +2819,9 @@ function nearestResetSeconds(cardId: string): number {
     const pool =
       maxed.length > 0
         ? maxed
-        : s.metrics.filter((m) => isCoreQuotaMetric(m) && m.resets_at !== null);
+        : s.metrics.filter((m) => isCoreQuotaMetric(m) && m.resets_at !== null && !metricNotStarted(m));
     for (const m of pool) {
-      if (m.resets_at === null) continue;
+      if (m.resets_at === null || metricNotStarted(m)) continue;
       const secs = Math.max(0, m.resets_at - Date.now()) / 1000;
       if (secs < nearest) nearest = secs;
     }
@@ -2980,10 +2994,10 @@ function metricWindow(m: Metric): QuotaWindow {
 }
 
 function formatHoverReset(m: Metric): string {
+  if (metricNotStarted(m)) return t("card.notStarted");
   if (m.resets_at !== null && m.resets_at > Date.now()) {
     return t("overview.resetsIn", { time: fmtDuration(m.resets_at - Date.now()) });
   }
-  if (metricWindow(m) === "5h") return t("card.notStarted");
   return "";
 }
 
@@ -3059,11 +3073,11 @@ function overviewHoverTip(s: Snapshot, quota: OverviewQuota, displayName: string
 
   const win = overviewWindowLabel(quota);
   const pct = Math.round(quota.usedPercent);
+  if (quota.notStarted) {
+    return `${displayName}: ${win} ${pct}% · ${t("card.notStarted")}`;
+  }
   if (quota.resetsAt && quota.resetsAt > Date.now()) {
     return `${displayName}: ${win} ${pct}% · ${t("overview.resetsIn", { time: fmtDuration(quota.resetsAt - Date.now()) })}`;
-  }
-  if (quota.window === "5h") {
-    return `${displayName}: ${win} ${pct}% · ${t("card.notStarted")}`;
   }
   return `${displayName}: ${win} ${pct}%`;
 }
@@ -4213,7 +4227,13 @@ function qoderDayHtml(day: string): string {
       free ? ` · ${escapeHtml(t("qoder.freeTrips", { n: data.free_trips.toLocaleString(localeTag()) }))}` : ""
     }${
       data.tokens_unavailable_trips > 0 ? ` · ${escapeHtml(t("qoder.unavailable", { n: data.tokens_unavailable_trips }))}` : ""
-    }</div>
+    }${(() => {
+      const telemetry = lastQoderSpend?.telemetry;
+      if (!telemetry || !telemetry.modelsTotal) return "";
+      return ` · ${escapeHtml(telemetry.modelsWithWindow > 0
+        ? t("qoder.basisPartial", { n: telemetry.modelsWithWindow, total: telemetry.modelsTotal })
+        : t("qoder.basisNone"))}`;
+    })()}</div>
     ${models}${sessions}
   </article>`;
 }
@@ -4711,6 +4731,10 @@ interface OverviewQuota {
   window: QuotaWindow | null;
   usedPercent: number;
   resetsAt: number | null;
+  /// The shown window is untouched (vendor echoed a full period ahead): the
+  /// ring, the collapsed badge and the summary line must read this instead of
+  /// deciding again from resetsAt or a window length.
+  notStarted: boolean;
   metricLabel: string;
   // The shown metric's own "x / y" line, surfaced on overview tiles so a
   // bare 0% still reads with its total (MCP/search cards).
@@ -4733,6 +4757,7 @@ function extractOverviewQuota(s: Snapshot, cardIsMaxed = false, cardId = ""): Ov
       window: null,
       usedPercent: 0,
       resetsAt: null,
+      notStarted: false,
       metricLabel: "",
       metricDetail: null,
       derivedCeiling: false,
@@ -4811,6 +4836,7 @@ function extractOverviewQuota(s: Snapshot, cardIsMaxed = false, cardId = ""): Ov
       window: metricWindow(best),
       usedPercent,
       resetsAt,
+      notStarted: metricNotStarted(best),
       metricLabel: best.label,
       metricDetail: best.detail ?? null,
       derivedCeiling: isDerivedCeilingDetail(best.detail),
@@ -4829,6 +4855,7 @@ function extractOverviewQuota(s: Snapshot, cardIsMaxed = false, cardId = ""): Ov
       window: null,
       usedPercent: 0,
       resetsAt: textMetric.resets_at,
+      notStarted: false,
       metricLabel: textMetric.label,
       metricDetail: textMetric.detail ?? null,
       derivedCeiling: false,
@@ -4843,6 +4870,7 @@ function extractOverviewQuota(s: Snapshot, cardIsMaxed = false, cardId = ""): Ov
     window: null,
     usedPercent: 0,
     resetsAt: null,
+    notStarted: false,
     metricLabel: "",
     metricDetail: null,
     derivedCeiling: false,
@@ -5229,16 +5257,16 @@ function renderQuotaOverview(): string {
           ${overviewAcctFolded(family, foldCount) ? "" : accountMetersHtml(family)}
           ${overviewAcctFolded(family, foldCount) ? "" : overviewKeyListHtml(shownSnap)}
           <div class="overview-item-foot">
-            <span class="overview-item-meta ${quota.isMaxed ? 'meta-maxed' : ''}"${quota.resetsAt && quota.window !== null ? ` data-reset-at="${quota.resetsAt}"` : ""}>
+            <span class="overview-item-meta ${quota.isMaxed ? 'meta-maxed' : ''}"${quota.resetsAt && quota.window !== null && !quota.notStarted ? ` data-reset-at="${quota.resetsAt}"` : ""}>
               ${quota.status === "text" ? (textHeadline && quota.metricLabel ? escapeHtml(displayMetricLabel(quota.metricLabel)) : overviewTextValuesHtml(shownSnap)) : quota.status === "error" || quota.status === "needs_setup" ? escapeHtml(overviewFailureLabel(shownSnap)) : quota.isMaxed
                 ? (quota.resetsAt
                     ? escapeHtml(fmtDuration(Math.max(0, quota.resetsAt - Date.now())))
                     : escapeHtml(t("overview.maxedBadge", { n: "" }).trim()))
                 : quota.window !== null
-                  ? (quota.resetsAt
-                      ? escapeHtml(fmtDuration(Math.max(0, quota.resetsAt - Date.now())))
-                      : quota.window === "5h"
-                        ? escapeHtml(t("card.notStarted"))
+                  ? (quota.notStarted
+                      ? escapeHtml(t("card.notStarted"))
+                      : quota.resetsAt
+                        ? escapeHtml(fmtDuration(Math.max(0, quota.resetsAt - Date.now())))
                         : escapeHtml(overviewWindowLabel(quota)))
                   : escapeHtml(t("overview.noData"))}
             </span>
@@ -5285,10 +5313,10 @@ function renderQuotaOverview(): string {
 
     const meta = quota.status === "error" || quota.status === "needs_setup"
       ? overviewFailureLabel(shownSnap)
-      : quota.resetsAt
-        ? fmtDuration(Math.max(0, quota.resetsAt - Date.now()))
-        : quota.window === "5h"
-          ? t("card.notStarted")
+      : quota.notStarted
+        ? t("card.notStarted")
+        : quota.resetsAt
+          ? fmtDuration(Math.max(0, quota.resetsAt - Date.now()))
           : quota.window !== null
             ? overviewWindowLabel(quota)
             : t("overview.noData");
@@ -5401,7 +5429,10 @@ function renderQuotaOverview(): string {
         if (isSnapshotMaxed(it.shownSnap)) {
           return expiringRow(it, escapeHtml(t("overview.pendingReset")), " urgent");
         }
-        if (it.quota.window === "5h") {
+        if (it.quota.notStarted || it.quota.window === "5h") {
+          // The flag covers an echoed window at any length; the length clause
+          // is only the fallback for a row that carries no reset instant at
+          // all, where there is nothing to echo-test.
           return expiringRow(it, escapeHtml(t("card.notStarted")), " muted");
         }
         return expiringRow(it, escapeHtml(t("overview.noReset")), " muted");

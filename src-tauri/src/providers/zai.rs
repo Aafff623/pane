@@ -148,11 +148,12 @@ async fn fetch() -> Result<Snapshot, String> {
 
 async fn fetch_with_key(key: &str) -> Result<Snapshot, String> {
     let mut rejected = 0usize;
+    let mut empty = 0usize;
     for ep in &ENDPOINTS {
         match fetch_from(ep, key).await {
             Ok(snapshot) => return Ok(attach_weekend(snapshot).await),
             Err(DomainErr::Auth) => rejected += 1,
-            Err(DomainErr::Empty) => {}
+            Err(DomainErr::Empty) => empty += 1,
             Err(DomainErr::Other(e)) => return Err(e),
         }
     }
@@ -162,7 +163,27 @@ async fn fetch_with_key(key: &str) -> Result<Snapshot, String> {
                 .into(),
         );
     }
+    if let Some(snap) = no_plan_setup(ENDPOINTS.len(), empty) {
+        return Ok(attach_weekend(snap).await);
+    }
     Err("unexpected quota response shape (endpoint is undocumented)".into())
+}
+
+/// A valid key that simply has no Coding Plan is a state, not a broken
+/// reading. Answering "unexpected response shape" turned a working
+/// pay-as-you-go account into a red card; this routes it to the shared
+/// yellow `needs_setup` instead. Balance fallback stays out of scope until
+/// an official pay-as-you-go endpoint is confirmed (待确认).
+fn no_plan_setup(endpoints: usize, empty: usize) -> Option<Snapshot> {
+    (endpoints > 0 && empty == endpoints).then(|| {
+        Snapshot::needs_setup(
+            ID,
+            NAME,
+            None,
+            vec![],
+            "This key has no Coding Plan. Pay-as-you-go balance has no confirmed endpoint (待确认).",
+        )
+    })
 }
 
 /// The ZCode weekend row rides along as the card's last row: live grant →
@@ -432,6 +453,17 @@ mod tests {
 
     const SESSION_MS: i64 = 5 * 3_600_000;
     const WEEK_MS: i64 = 7 * 86_400_000;
+
+    /// A pay-as-you-go-only key used to land on "unexpected quota response
+    /// shape": a red card claiming a working account was broken.
+    #[test]
+    fn key_without_a_coding_plan_reports_setup_not_a_broken_reading() {
+        let snap = no_plan_setup(2, 2).expect("every endpoint empty reads as needs_setup");
+        assert_eq!(snap.status, "needs_setup");
+        assert_eq!(snap.id, ID);
+        assert!(no_plan_setup(2, 1).is_none(), "a mixed answer is not an absent plan");
+        assert!(no_plan_setup(0, 0).is_none(), "no endpoints cannot prove absence");
+    }
 
     /// The same pipeline fetch() runs: walk, stage, finalize.
     fn metrics_from_quota(data: &Value) -> Vec<Metric> {

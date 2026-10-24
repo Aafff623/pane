@@ -3,7 +3,7 @@
 **What to build:** 把「拿模型名当键去查」这件事收敛成一个共享的归一化，定价侧与来源侧共用，修掉
 带大写的模型名静默算未定价（金额算少）的缺陷。
 **Blocked by:** 无
-**Status:** ready-for-agent
+**Status:** done (code + regression) — owner 目检：带大写的模型名出金额
 **GitHub:** [#48](https://github.com/Aafff623/pane/issues/48) §1 · **Priority:** P1 · **量:** 小
 
 ## 为什么要做成共享机制而不是打补丁
@@ -71,3 +71,6 @@
 ## Comments
 
 - 2026-10-23：立项，证据来自 #48 与 `temp/research/20261023-ccswitch-usage-gap.md` §9.1-1。
+- 2026-10-23 实现：加了共享的 `pricing::normalize_model_key`（trim + 小写），并把**所有**键入口收过去 —— catalog ingest（litellm/modelsdev/supplement/fast_multipliers）、alias（`RegexBuilder::case_insensitive` 且 alias 目标本身也折叠）、用户 override（`set_overrides` 落键时折叠，`override_for` 查询时折叠）、`SCHEDULES` 前缀（折叠比较，`&'static str` 不动）、memo（在 `lookup`/`lookup_at` 入口折叠后作键）。`spend.rs::split_models` 原本自己写了一份 `to_ascii_lowercase`，现在改为调用同一个函数，规则只留一处。
+- 范围比票面写的更宽：核对时发现我自己那批未提交的 override 工作**新增了 3 处原样键查表**（`override_for`、`SCHEDULES.starts_with`、memo）。只修定价查表会留下洞，所以按「同一缺陷类要核完所有实例」扩到全部键入口。
+- 回归：`pricing::tests::model_key_spelling_does_not_change_the_price`（同一族大小写两种拼法必须同价；先测 override 再测 catalog）。定价全套 22 通过。

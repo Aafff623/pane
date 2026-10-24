@@ -7,7 +7,7 @@ import ts from 'typescript';
 // Evaluate the real pure functions without starting Tauri or the DOM entrypoint.
 const source = readFileSync(new URL('../src/main.ts', import.meta.url), 'utf8');
 const ast = ts.createSourceFile('main.ts', source, ts.ScriptTarget.Latest, true);
-const names = ['cardMetricRows', 'isCoreQuotaMetric', 'isDerivedCeilingDetail', 'isSnapshotMaxed', 'extractOverviewQuota', 'healthDotTitle', 'scheduleBackoffRetries'];
+const names = ['cardMetricRows', 'isCoreQuotaMetric', 'isDerivedCeilingDetail', 'isSnapshotMaxed', 'extractOverviewQuota', 'healthDotTitle', 'scheduleBackoffRetries', 'metricNotStarted'];
 const functions = ast.statements.filter((node) => ts.isFunctionDeclaration(node) && names.includes(node.name?.text));
 assert.equal(functions.length, names.length);
 const context = vm.createContext({

@@ -267,7 +267,7 @@ fn parse_litellm(doc: &Value) -> HashMap<String, Price> {
         };
         let per_m = |key: &str| per_tok(key).map(|v| v * 1e6);
         out.insert(
-            model.clone(),
+            normalize_model_key(model),
             Price {
                 input: input * 1e6,
                 output: output * 1e6,
@@ -333,7 +333,7 @@ fn apply_supplement(store: &mut Store, doc: &Value) {
                 continue;
             };
             store.supplement.insert(
-                model.clone(),
+                normalize_model_key(model),
                 Price::flat(
                     input,
                     output,
@@ -347,7 +347,7 @@ fn apply_supplement(store: &mut Store, doc: &Value) {
     if let Some(mults) = doc.get("fast_multipliers").and_then(Value::as_object) {
         for (model, v) in mults {
             if let Some(m) = v.as_f64() {
-                store.fast_multipliers.insert(model.clone(), m);
+                store.fast_multipliers.insert(normalize_model_key(model), m);
             }
         }
     }
@@ -389,9 +389,12 @@ fn apply_supplement(store: &mut Store, doc: &Value) {
             }
             if let Ok(re) = regex::RegexBuilder::new(pattern)
                 .size_limit(1 << 20)
+                // Third-party alias rules meet logs whose casing varies by
+                // vendor; the folded-key rule applies to matchers too.
+                .case_insensitive(true)
                 .build()
             {
-                store.alias_rules.push((re, canonical.to_string()));
+                store.alias_rules.push((re, normalize_model_key(&canonical)));
             }
         }
     }
@@ -577,6 +580,10 @@ fn overrides() -> &'static Mutex<HashMap<String, Price>> {
 }
 
 pub fn set_overrides(map: HashMap<String, Price>) {
+    let map: HashMap<String, Price> = map
+        .into_iter()
+        .map(|(model, price)| (normalize_model_key(&model), price))
+        .collect();
     *overrides().lock().unwrap_or_else(|e| e.into_inner()) = map;
     // A saved override must take effect without a restart; memoized catalog
     // answers may be from before the override existed.
@@ -629,8 +636,17 @@ fn override_for(model: &str) -> Option<Price> {
     overrides()
         .lock()
         .unwrap_or_else(|e| e.into_inner())
-        .get(model)
+        .get(&normalize_model_key(model))
         .copied()
+}
+
+/// One spelling rule for every model key the pricing layer touches: catalog
+/// tables, alias targets, user overrides, historical schedules, the memo, and
+/// the log side's `spend::split_models`. Upstream feeds report the same family
+/// two ways (`qwen3.8-max` and `Qwen/Qwen3-235B`), and an un-folded key does not
+/// look "unknown" — it silently prices at zero, which is what a real log pays.
+pub fn normalize_model_key(model: &str) -> String {
+    model.trim().to_lowercase()
 }
 
 /// Load `pricing_overrides.json` once. The file is optional; malformed
@@ -662,6 +678,8 @@ fn load_overrides_from_disk() {
 /// The schedule table is empty by default, so this is identical to
 /// [`lookup`] unless an official historical schedule is installed.
 pub fn lookup_at(timestamp_ms: i64, model: &str) -> Option<Price> {
+    let model = normalize_model_key(model);
+    let model = model.as_str();
     load_overrides_from_disk();
     if let Some(p) = override_for(model) {
         return Some(p);
@@ -672,7 +690,11 @@ pub fn lookup_at(timestamp_ms: i64, model: &str) -> Option<Price> {
         .iter()
         .rev()
         .find(|w| {
-            model.starts_with(w.model_prefix)
+            // Folded compare: the table keeps `&'static str` prefixes as
+            // published, the incoming key is already normalized.
+            model
+                .get(..w.model_prefix.len())
+                .is_some_and(|head| head.eq_ignore_ascii_case(w.model_prefix))
                 && timestamp_ms >= w.start_ms
                 && timestamp_ms < w.end_ms
         })
@@ -684,6 +706,8 @@ pub fn lookup_at(timestamp_ms: i64, model: &str) -> Option<Price> {
 }
 
 pub fn lookup(model: &str) -> Option<Price> {
+    let model = normalize_model_key(model);
+    let model = model.as_str();
     load_overrides_from_disk();
     if let Some(p) = override_for(model) {
         return Some(p);
@@ -731,6 +755,9 @@ fn resolve(s: &Store, model: &str, depth: u8) -> Option<Price> {
         .find(|(re, _)| re.is_match(model))
         .map(|(_, c)| c.clone())
         .unwrap_or_else(|| model.to_string());
+    // Every table below is keyed by the folded spelling, so an alias target
+    // that arrives with capitals has to be folded too.
+    let canonical = normalize_model_key(&canonical);
 
     // A catalog row with zero input AND output rates is ambiguous: brand-new
     // slugs often land as 0/0 placeholders (qwen3.8-max), but free-tier and
@@ -1055,6 +1082,33 @@ mod tests {
 
     fn usage(input: f64, output: f64, cache_read: f64, w5m: f64, w1h: f64) -> Usage {
         Usage { input, output, cache_read, cache_write_5m: w5m, cache_write_1h: w1h }
+    }
+
+    /// Upstream feeds spell one family two ways. An un-folded key does not
+    /// report "unknown" — it prices that row at zero, which is what the real
+    /// log pays. One folded rule now covers catalog ingest, user overrides,
+    /// historical schedules, alias targets and the log-side prefix match.
+    #[test]
+    fn model_key_spelling_does_not_change_the_price() {
+        use std::collections::HashMap;
+        let price = super::Price::flat(0.8, 2.4, 0.1, 0.8);
+        let mut overrides = HashMap::new();
+        overrides.insert("GLM-4.6".to_string(), price);
+        super::set_overrides(overrides);
+        assert_eq!(super::override_for("glm-4.6"), Some(price));
+
+        let mut store = super::store().lock().unwrap_or_else(|e| e.into_inner());
+        store.supplement.insert(super::normalize_model_key("MiniMax-M3"), price);
+        store.memo.clear();
+        drop(store);
+        assert_eq!(super::lookup("minimax-m3"), Some(price));
+        assert_eq!(super::lookup("MiniMax-M3"), Some(price));
+
+        let mut store = super::store().lock().unwrap_or_else(|e| e.into_inner());
+        store.supplement.remove("minimax-m3");
+        store.memo.clear();
+        drop(store);
+        super::set_overrides(HashMap::new());
     }
 
     #[test]

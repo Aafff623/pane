@@ -854,6 +854,18 @@ fn recent_jsonl_files(root: &Path, out: &mut Vec<PathBuf>) {
 }
 
 fn recent_log_files(root: &Path, out: &mut Vec<PathBuf>, include_zst: bool) {
+    recent_files_matching(root, out, |path| is_log_file(path, include_zst));
+}
+
+/// Walk `root` with the shared guards (depth, directory budget, canonical
+/// seen-set) and collect the files `accept` names. The 31-day window applies
+/// to every source, so a log family that wants older data needs its own path,
+/// not a second hand-written recursion.
+fn recent_files_matching<F: Fn(&Path) -> bool>(
+    root: &Path,
+    out: &mut Vec<PathBuf>,
+    accept: F,
+) {
     let cutoff = SystemTime::now() - Duration::from_secs(31 * 86_400);
     // Canonical paths of link targets already entered. Cycles and aliases can
     // only form through links, so plain directories skip the canonicalize —
@@ -905,7 +917,7 @@ fn recent_log_files(root: &Path, out: &mut Vec<PathBuf>, include_zst: bool) {
                         followed_link = true;
                         stack.push((path, depth + 1));
                     }
-                } else if is_log_file(&path, include_zst)
+                } else if accept(&path)
                     && meta.modified().map(|m| m >= cutoff).unwrap_or(true)
                 {
                     // Target metadata, so a link's own ancient mtime can't
@@ -913,7 +925,7 @@ fn recent_log_files(root: &Path, out: &mut Vec<PathBuf>, include_zst: bool) {
                     followed_link = true;
                     out.push(path);
                 }
-            } else if is_log_file(&path, include_zst) {
+            } else if accept(&path) {
                 let Ok(meta) = entry.metadata() else { continue };
                 if meta.modified().map(|m| m >= cutoff).unwrap_or(true) {
                     out.push(path);
@@ -1075,7 +1087,11 @@ fn parse_zstd_file<St>(
 ) -> Option<u64> {
     let raw = fs::read(path).ok()?;
     let bytes = zstd::stream::decode_all(&raw[..]).ok()?;
-    let text = String::from_utf8(bytes).ok()?;
+    // Same tolerance as the plain-text path: one corrupt byte must not void
+    // the whole file. Each line parser below still rejects junk it cannot
+    // recognize, so lossy decoding only widens how much gets read, not what
+    // counts.
+    let text = String::from_utf8_lossy(&bytes);
     for line in text.lines() {
         parse(state, line, data);
     }
@@ -1478,8 +1494,8 @@ fn claude_line(st: &mut ClaudeFileState, line: &str, data: &mut FileData) {
 /// ways ("qwen3.8-max", "Qwen/Qwen3-235B") and a case miss would leave
 /// rows on the wrong card.
 fn split_models(data: &mut FileData, prefix: &str) -> FileData {
-    let prefix = prefix.to_ascii_lowercase();
-    let matches = |m: &str| m.to_ascii_lowercase().starts_with(&prefix);
+    let prefix = pricing::normalize_model_key(prefix);
+    let matches = |m: &str| pricing::normalize_model_key(m).starts_with(&prefix);
     let mut out = FileData::default();
     data.days.retain(|(day, model), v| {
         if matches(model) {
@@ -1762,31 +1778,31 @@ fn dsh() -> ProviderSpend {
 }
 
 fn dsh_data() -> FileData {
-    fn scan(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
-        let Ok(entries) = std::fs::read_dir(dir) else { return };
-        for entry in entries.flatten() {
-            let path = entry.path();
-            if path.is_dir() {
-                scan(&path, out);
-            } else if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
-                if name.starts_with("session") && name.ends_with(".jsonl.zstd") {
-                    out.push(path);
-                }
-            }
-        }
-    }
-    let data = FileData::default();
     let Some(home) = dirs::home_dir() else {
-        return data;
+        return FileData::default();
     };
     let root = std::env::var("DSH_HOME")
         .map(std::path::PathBuf::from)
         .unwrap_or_else(|_| home.join(".dsh"))
         .join("sessions");
+    dsh_files_data(&dsh_session_files(&root))
+}
+
+/// dsh names its logs `session*.jsonl.zstd`, a spelling the shared `.jsonl.zst`
+/// filter does not accept. The name rule stays here; the walk guards (depth,
+/// directory budget, canonical cycle dedup) come from `recent_files_matching`,
+/// so this source cannot grow a second hand-written recursion to fall over on
+/// a junction loop.
+fn is_dsh_session_log(path: &Path) -> bool {
+    path.file_name().and_then(|n| n.to_str())
+        .is_some_and(|n| n.starts_with("session") && n.ends_with(".jsonl.zstd"))
+}
+
+fn dsh_session_files(root: &Path) -> Vec<PathBuf> {
     let mut files = Vec::new();
-    scan(&root, &mut files);
+    recent_files_matching(root, &mut files, is_dsh_session_log);
     files.sort();
-    dsh_files_data(&files)
+    files
 }
 
 /// Pure core of [`dsh_data`] — takes explicit files so tests can feed a
@@ -1797,8 +1813,10 @@ fn dsh_files_data(files: &[std::path::PathBuf]) -> FileData {
         let Ok(raw) = std::fs::read(path) else { continue };
         // Multi-frame zstd: a one-shot decompress only yields the first
         // frame (~200 bytes here). The streaming Decoder drains all frames.
-        let Ok(text) = zstd::stream::decode_all(&raw[..]) else { continue };
-        let Ok(text) = String::from_utf8(text) else { continue };
+        let Ok(bytes) = zstd::stream::decode_all(&raw[..]) else { continue };
+        // Lossy like every other log family: a stray byte inside one frame
+        // must not erase the whole session file.
+        let text = String::from_utf8_lossy(&bytes);
         let events: Vec<serde_json::Value> = text
             .lines()
             .filter_map(|line| serde_json::from_str(line).ok())
@@ -4340,6 +4358,42 @@ mod tests {
         assert_eq!(hits, 1, "aliased log counted {hits} times: {out:?}");
     }
 
+    /// dsh's own recursion followed a directory junction back into its parent
+    /// and walked forever (a deep tree would have overflowed the stack).
+    /// The name rule is dsh's; the guards now come from the shared walker.
+    #[test]
+    #[cfg(windows)]
+    fn dsh_scan_does_not_recurse_forever_through_a_junction_cycle() {
+        let base = std::env::temp_dir()
+            .join(format!("pane-dsh-cycle-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&base);
+        let sessions = base.join("sessions");
+        let a = sessions.join("a");
+        fs::create_dir_all(a.join("b")).unwrap();
+        fs::write(a.join("session-one.jsonl.zstd"), "{}").unwrap();
+        fs::write(a.join("session-two.jsonl.zst"), "{}").unwrap();
+        let link = a.join("b").join("loop");
+        let status = std::process::Command::new("cmd")
+            .args(["/C", "mklink", "/J"])
+            .arg(&link)
+            .arg(&a)
+            .status();
+        if !status.map(|s| s.success()).unwrap_or(false) {
+            let _ = fs::remove_dir_all(&base);
+            return; // mklink unavailable in this environment — skip
+        }
+
+        let files = dsh_session_files(&sessions);
+        // Remove the junction itself; rm -rf would follow it into the target.
+        let _ = std::process::Command::new("cmd").args(["/C", "rmdir"]).arg(&link).status();
+        let _ = fs::remove_dir_all(&base);
+
+        let hits = files.iter().filter(|p| p.ends_with("session-one.jsonl.zstd")).count();
+        assert_eq!(hits, 1, "cycled or lost dsh log: {files:?}");
+        assert!(files.iter().all(|p| !p.ends_with("session-two.jsonl.zst")),
+            "dsh must keep its own .jsonl.zstd name rule: {files:?}");
+    }
+
     // ---- Persistent cache: serialization roundtrip -----------------------
 
     #[test]
@@ -4702,6 +4756,34 @@ mod tests {
         .join("\n")
             + "\n";
         let compressed = zstd::stream::encode_all(lines.as_bytes(), 3).unwrap();
+        fs::write(dir.join("rollout-test.jsonl.zst"), compressed).unwrap();
+        assert_eq!(tokens_sum(&codex_scan(&root)), 1_100.0);
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    /// One stray non-UTF-8 byte used to void an entire compressed log, so a
+    /// provider silently fell to zero for that file's whole contribution. The
+    /// plain-text path skips bad lines; the compressed path must match it.
+    #[test]
+    fn corrupt_byte_in_zstd_log_keeps_the_good_lines() {
+        let root = temp_root("codex-zst-corrupt");
+        let dir = root.join("sessions").join("2026").join("07").join("10");
+        fs::create_dir_all(&dir).unwrap();
+        let mut bytes: Vec<u8> = Vec::new();
+        bytes.extend_from_slice(
+            json!({"timestamp": "2026-07-10T10:00:00Z", "type": "turn_context",
+                   "payload": {"model": "gpt-5.6-terra"}})
+            .to_string()
+            .as_bytes(),
+        );
+        bytes.push(b'\n');
+        bytes.extend_from_slice(b"\xff\xfe not json and not utf-8\n");
+        bytes.extend_from_slice(
+            token_count_line("2026-07-10T10:00:01Z", Some((1_000.0, 100.0)), (1_000.0, 100.0))
+                .as_bytes(),
+        );
+        bytes.push(b'\n');
+        let compressed = zstd::stream::encode_all(&bytes[..], 3).unwrap();
         fs::write(dir.join("rollout-test.jsonl.zst"), compressed).unwrap();
         assert_eq!(tokens_sum(&codex_scan(&root)), 1_100.0);
         let _ = fs::remove_dir_all(&root);

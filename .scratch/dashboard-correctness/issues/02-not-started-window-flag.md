@@ -3,7 +3,7 @@
 **What to build:** 让「这一档压根没用过」在卡片、概览环、折叠卡徽标、悬停提示和 `/v1/usage` 五处给出
 **同一个**结论，并且覆盖 weekly/monthly 档，修掉未使用窗口每次刷新倒计时跳回满窗的误导显示。
 **Blocked by:** 无
-**Status:** needs-triage（先做下面「开工前先取证」一节，取证结果决定 weekly/monthly 是否纳入）
+**Status:** done (取证已完成，代码与回归已落) — owner 目检：未使用的长窗口四处不显示倒计时
 **GitHub:** [#48](https://github.com/Aafff623/pane/issues/48) §2 · **Priority:** P1 · **量:** 中
 
 ## 要点
@@ -66,3 +66,7 @@
 ## Comments
 
 - 2026-10-23：立项，证据来自 #48 与 `temp/research/20261023-ccswitch-usage-gap.md` §9.1-2。
+- 2026-10-23 **取证完成（D2 结掉）**：读本机 `%APPDATA%\Pane\last_snapshots.json`，`antigravity / Claude Weekly`（period 168h）在 `used_percent = 0` 时 `resets_at − now = 168.0h`，与同卡 5h 档同形 —— 长窗口确实会回满窗倒计时，扩到所有档有实测依据，不再是外推。反例同样存在：`sensenova / Credits Weekly` 用量 0% 但只剩 70.3h（168h 档已走 98h），这类真在窗口中途的行**必须继续显示倒计时**。
+- 2026-10-23 实现：判定收进 `pace::compute`，条件是「用量 ≤1% **且** `|resets_at − now − period| ≤ 60s`」——比上游 #8631 的「用量为 0 就隐藏重置时间」多一道回声识别，正是上面那条反例逼出来的。结论落在 `Pace::not_started`（序列化随 pace 走，`/v1/usage` 自动同结论）。前端删掉卡片脚上那条自己写的 `period_ms <= 6h && used <= 1` 回声算式，`nearestResetSeconds`、`formatHoverReset`、概览环 meta、折叠徽标 meta、汇总行、待重置列表、以及 `data-reset-at` 实时计数钩子，全部改读 `metricNotStarted(m)` / `quota.notStarted`。
+- 保留的一处长度比较：`resets_at === null` 的分支（厂商压根没给重置时刻）仍按窗口类型回落到「未起步 / 无重置时间」，那是缺数据的兜底，不是同一判断，已在代码里注明。
+- 回归：`pace::tests::untouched_window_is_flagged_at_any_length`（5h/24h/168h/720h 全档 + Codex 下限 1%）、`pace::tests::mid_flight_zero_usage_window_stays_a_countdown`（本机反例形状）、`tests/not-started-window.test.mjs`（禁止本地回声算式复活 + 消费点计数 ≥8）。顺带给 `tests/card-review-regressions.test.mjs` 的函数沙箱补了 `metricNotStarted`，否则抽出的 `extractOverviewQuota` 取不到该符号。Node 全套 129 通过。
