@@ -10,7 +10,7 @@
 
 [![Release](https://img.shields.io/github/v/release/Aafff623/pane?style=flat-square&label=Release&color=2563EB&labelColor=172033)](https://github.com/Aafff623/pane/releases) [![CI](https://img.shields.io/github/actions/workflow/status/Aafff623/pane/ci.yml?branch=main&style=flat-square&label=CI&color=2563EB&labelColor=172033)](https://github.com/Aafff623/pane/actions/workflows/ci.yml) [![Downloads](https://img.shields.io/github/downloads/Aafff623/pane/total?style=flat-square&label=Downloads&color=2563EB&labelColor=172033)](https://github.com/Aafff623/pane/releases) [![License](https://img.shields.io/badge/License-MIT-10B981.svg?style=flat-square)](LICENSE)
 
-[![Windows](https://img.shields.io/badge/Windows-10%20%7C%2011%20(x64)-0078D4.svg?style=flat-square&logo=windows&logoColor=white)](https://github.com/Aafff623/pane/releases/latest) [![macOS](https://img.shields.io/badge/macOS-dmg-8B5CF6.svg?style=flat-square&logo=apple&logoColor=white)](https://github.com/Aafff623/pane/releases) [![Linux](https://img.shields.io/badge/Linux-AppImage%20%7C%20.deb-172033.svg?style=flat-square&logo=linux&logoColor=white)](https://github.com/Aafff623/pane/releases) [![Providers](https://img.shields.io/badge/Providers-77-2563EB.svg?style=flat-square)](docs/providers.md)
+[![Windows](https://img.shields.io/badge/Windows-10%20%7C%2011%20(x64)-0078D4.svg?style=flat-square&logo=windows&logoColor=white)](https://github.com/Aafff623/pane/releases/latest) [![macOS](https://img.shields.io/badge/macOS-dmg-8B5CF6.svg?style=flat-square&logo=apple&logoColor=white)](https://github.com/Aafff623/pane/releases) [![Linux](https://img.shields.io/badge/Linux-AppImage%20%7C%20.deb-172033.svg?style=flat-square&logo=linux&logoColor=white)](https://github.com/Aafff623/pane/releases) [![Providers](https://img.shields.io/badge/Providers-78-2563EB.svg?style=flat-square)](docs/providers.md)
 
 **[下载](#quickstart)** &nbsp;·&nbsp; **[在线演示](https://pane.threetwoa.live)** &nbsp;·&nbsp; **[文档](#docs)** &nbsp;·&nbsp; **[参与](#community)**
 
@@ -76,7 +76,7 @@ pnpm tauri build    # 完整桌面应用
 
 接入前可查看 [Provider 凭据与查询能力（三张表）](docs/provider-credentials.md)：分别说明 API key、Access Token／Cookie 等专用凭据、本地配置文件，以及套餐和账单权限边界。公开接口与推理协议的依据见 [API 核验记录](docs/provider-api-verification.md)。
 
-当前目录收录 **77 个来源**，三种读取形态：
+当前目录收录 **78 个来源**，三种读取形态：
 
 | 形态 | 覆盖 | 读取方式 |
 | --- | --- | --- |
@@ -137,7 +137,7 @@ Claude、Codex、CodeBuddy、CodeBuddy CN、WorkBuddy、WorkBuddy AI、Cursor、
 
 ### 来源接入
 
-77 家按三种认证形态接入，每张卡都有「⚡ 测试连通性」（未启用也可测，状态栏显示 `连通正常 · N ms`）和「? 额度查询说明」（按认证形态给出 key / OAuth / 本地登录的步骤模板与控制台直链）。Customize 抽屉里就地搜索、自定义分组（🥚🐑）、两级备注，移除的 Provider 随时恢复：
+78 家按三种认证形态接入，每张卡都有「⚡ 测试连通性」（未启用也可测，状态栏显示 `连通正常 · N ms`）和「? 额度查询说明」（按认证形态给出 key / OAuth / 本地登录的步骤模板与控制台直链）。Customize 抽屉里就地搜索、自定义分组（🥚🐑）、两级备注，移除的 Provider 随时恢复：
 
 > 分类标签按 **Coding Agent / 生产力工具 / MCP 搜索**切换；已删除的 Provider 收进抽屉底部，一键找回。
 

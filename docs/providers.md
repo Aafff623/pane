@@ -19,6 +19,21 @@ Ground rules that apply to every provider:
 
 ---
 
+## Tencent Cloud OrcaTerm
+
+- **Reads:** `%APPDATA%\com.orcaterm-desktop.app\data.bin`, the official
+  desktop client's local session. Pane never writes this file.
+- **Calls:** `https://api.orcaterm.com/cgi/api` with
+  `DescribeUserBillingStatus`; `OAuthRefreshToken` only when the token
+  expires within 60 seconds. Refreshed tokens stay in memory and are
+  discarded when the disk token changes.
+- **Shows:** the returned plan, AI request quota and monthly reset,
+  storage in GB, credential count and shared sessions (`-1` means
+  Unlimited). There are no fixed plan limits and no automatic claims.
+- **Unverified:** whether refreshing a still-valid token invalidates the
+  desktop client's token. The owner must test this before release.
+- **Icon:** a local terminal symbol, not an official OrcaTerm brand asset.
+
 ## Claude (Claude Code)
 
 - **Reads:** `%USERPROFILE%\.claude\.credentials.json` (honors

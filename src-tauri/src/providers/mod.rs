@@ -41,6 +41,7 @@ pub mod onenewapi;
 pub mod openai_api;
 pub mod opencode;
 pub mod openrouter;
+pub mod orcaterm;
 pub mod perplexity;
 pub mod poe;
 pub mod qoder;

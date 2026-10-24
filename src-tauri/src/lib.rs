@@ -4984,6 +4984,7 @@ fn get_credential_status(provider: String) -> Value {
         "novita" => providers::novita::local_credential_hint(),
         "relaybalance" => providers::relaybalance::local_credential_hint(),
         "qodercn" => providers::qodercn::local_credential_hint(),
+        "orcaterm" => providers::orcaterm::local_credential_hint(),
         "traecn" => providers::traecn::local_credential_hint(),
         "commandcode" => providers::commandcode::local_credential_hint(),
         "doubao" => providers::doubao::local_credential_hint(),

@@ -50,6 +50,7 @@ native_snapshots! {
     "novita" => providers::novita::snapshot(),
     "relaybalance" => providers::relaybalance::snapshot(),
     "qodercn" => providers::qodercn::snapshot(),
+    "orcaterm" => providers::orcaterm::snapshot(),
     "traecn" => providers::traecn::snapshot(),
     "commandcode" => providers::commandcode::snapshot(),
     "doubao" => providers::doubao::snapshot(),

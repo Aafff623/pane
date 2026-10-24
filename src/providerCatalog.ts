@@ -63,6 +63,7 @@ export const providerCatalog: readonly ProviderDefinition[] = [
   { familyId: "novita", displayName: "Novita AI", primaryUnit: "tokens", queryKind: "nativeBalance", supportsApiKey: true, supportsExtraAccounts: true, supportsOAuth: false, iconKey: "novita" },
   { familyId: "relaybalance", displayName: "Custom Relay", primaryUnit: "tokens", queryKind: "nativeBalance", supportsApiKey: true, supportsExtraAccounts: true, supportsOAuth: false, iconKey: "relaybalance" },
   { familyId: "qodercn", displayName: "Qoder CN", primaryUnit: "credits", queryKind: "nativeSnapshot", supportsApiKey: false, supportsExtraAccounts: false, supportsOAuth: false, iconKey: "qodercn" },
+  { familyId: "orcaterm", displayName: "腾讯云 OrcaTerm", primaryUnit: "requests", queryKind: "nativeSnapshot", supportsApiKey: false, supportsExtraAccounts: false, supportsOAuth: false, iconKey: "orcaterm" },
   { familyId: "traecn", displayName: "Trae CN", primaryUnit: "credits", queryKind: "nativeSnapshot", supportsApiKey: false, supportsExtraAccounts: false, supportsOAuth: false, iconKey: "traecn" },
   { familyId: "commandcode", displayName: "Command Code", primaryUnit: "tokens", queryKind: "nativeCodingPlan", supportsApiKey: true, supportsExtraAccounts: true, supportsOAuth: false, iconKey: "commandcode" },
   { familyId: "doubao", displayName: "Doubao", primaryUnit: "tokens", queryKind: "nativeCodingPlan", supportsApiKey: false, supportsExtraAccounts: false, supportsOAuth: false, iconKey: "doubao" },

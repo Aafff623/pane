@@ -22,7 +22,7 @@ project language (reconsider) or it is a real gap to settle.
 - **本机登录行 (local sign-in row)** — 授权中心按官方客户端本地凭据文件识别出的只读账号行（`kind: "local"`）。它只做展示与启用入口，不复制、不写入官方登录态；与 Pane 管理的账号行（`account`/`slot`/`oauth`）分开。
 - **估算 tokens (estimated tokens)** — Qoder CN 不写 token 计数，其计费输入量按 `Σ(上下文占比 × 上下文窗口)` 测算，并在用量面板标「估算」；credits 仍是精确值，二者不是固定汇率，也不折美元。
 - **family** — one provider identity shared by all its cards: `claude`,
-  `codex`, `cursor`, `kimi`, `onenewapi`, … 28 families in
+  `codex`, `cursor`, `kimi`, `onenewapi`, … the full family set in
   `src-tauri/src/provider_catalog.rs`, mirrored in `src/providerCatalog.ts`
   (keep both in sync).
 - **card** — one UI card. Id is either the bare family id (`claude`) or an

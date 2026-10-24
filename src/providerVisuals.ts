@@ -28,6 +28,7 @@ import ollamaIcon from "./assets/providers/ollama.svg?raw";
 import onenewapiIcon from "./assets/providers/onenewapi.svg?raw";
 import opencodeIcon from "./assets/providers/opencode.svg?raw";
 import openrouterIcon from "./assets/providers/openrouter.svg?raw";
+import orcatermIcon from "./assets/providers/orcaterm.svg?raw";
 import qwenIcon from "./assets/providers/qwen.svg?raw";
 import qodercnIcon from "./assets/providers/qodercn.svg?raw";
 import relaybalanceIcon from "./assets/providers/relaybalance.svg?raw";
@@ -95,6 +96,7 @@ const lightSilhouette = (svg: string): string => svg.replace(/<svg\b/i, '<svg cl
 
 
 const VISUALS: Readonly<Record<string, ProviderVisual>> = {
+  orcaterm: { iconKey: "orcaterm", iconSvg: orcatermIcon, iconColor: "#1677ff" },
   antigravity: { iconKey: "antigravity", iconSvg: antigravityIcon },
   aihubmix: { iconKey: "aihubmix", iconSvg: aihubmixIcon },
   claude: { iconKey: "claude", iconSvg: claudeIcon },

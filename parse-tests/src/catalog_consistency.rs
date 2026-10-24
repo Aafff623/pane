@@ -265,8 +265,8 @@ mod tests {
         let disabled = provider_catalog::default_disabled_families();
         assert_eq!(
             disabled.len(),
-            63,
-            "preserve the existing fresh-install defaults (+ tokenrhythm, 2026-10-19; + xfyun, 2026-10-23; + api-key pilots, 2026-10-23; + xfyun-speech and zcode, 2026-10-24)"
+            64,
+            "preserve the existing fresh-install defaults (+ tokenrhythm, 2026-10-19; + xfyun, 2026-10-23; + api-key pilots, 2026-10-23; + xfyun-speech, zcode and orcaterm, 2026-10-24)"
         );
         for family in [
             "claude",
@@ -278,7 +278,7 @@ mod tests {
         ] {
             assert!(!disabled.contains(&family), "{family}");
         }
-        for family in ["giphy", "stepfun-plan", "onenewapi", "deepseek"] {
+        for family in ["giphy", "stepfun-plan", "onenewapi", "deepseek", "orcaterm"] {
             assert!(disabled.contains(&family), "{family}");
         }
     }

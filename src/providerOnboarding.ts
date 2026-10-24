@@ -50,6 +50,7 @@ const QR_SCAN = ["codebuddy", "codebuddycn", "workbuddy", "workbuddyai"] as cons
 const SEARCH_KEYS = ["bocha", "tavily", "firecrawl", "brave"] as const;
 
 const LOCAL_HINTS: Record<string, string> = {
+  orcaterm: "customize.loginHint.orcaterm",
   claude: "customize.loginHint.claude",
   devin: "customize.loginHint.devin",
   ollama: "customize.loginHint.ollama",

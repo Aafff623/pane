@@ -531,6 +531,16 @@ const PROVIDER_DEFINITIONS: &[ProviderDefinition] = &[
         primary_unit: UsageUnit::Tokens,
     },
     ProviderDefinition {
+        family_id: "orcaterm",
+        display_name: "腾讯云 OrcaTerm",
+        query_kind: QueryKind::NativeSnapshot,
+        supports_api_key: false,
+        supports_extra_accounts: false,
+        icon_key: "orcaterm",
+        category: ProviderCategory::Coding,
+        primary_unit: UsageUnit::Requests,
+    },
+    ProviderDefinition {
         family_id: "qodercn",
         display_name: "Qoder CN",
         query_kind: QueryKind::NativeSnapshot,
