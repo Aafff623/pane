@@ -607,7 +607,7 @@ changes.
   alias regression, and a headless Customize routing check. Latest serial
   proxy-free Rust run: **1065 passed / 0 failed / 16 ignored** (2026-10-24, after
   the dashboard-correctness batch, the xfyun-speech provider, the Qoder
-  telemetry probe and the ZCode Start Plan provider). Node suite: **142 passed**. Frontend build + skin-pack local
+  telemetry probe and the ZCode Start Plan provider). Node suite: **173 passed**. Frontend build + skin-pack local
   check pass. The Codex backup-retirement and slot-retention corrections from
   the same day are covered by that run.
 - Codex credential-source precedence is **live default > managed web store >
@@ -819,3 +819,46 @@ changes.
   harness exercises real persistence, archive/restore failure rollback,
   same-account re-login, and last-account deletion. This is not an end-to-end
   test of Tauri IPC or browser login.
+
+## Settings shell and official WorkBuddy requests (2026-10-24)
+
+- The settings panel (`panel` window) is borderless/transparent, non-maximizable,
+  default 980×700 logical (min 860×620), remembers `%APPDATA%\Pane\panel-window.json`.
+  On this dev machine Tauri's 150% scale and WebView2's 169.5% DPR make that a
+  ~868×620 CSS viewport; the 200px rail collapses to 170px at ≤1024 CSS.
+- `index.html` no longer contains `<aside id="settings">`. Every legacy control
+  lives in `src/settings/controls.ts`; `mountSettingsControls()` appends it as an
+  inert hidden source and the panel moves each node into the skeleton. The
+  popover keeps the source but never shows a settings sheet — `#settings-btn`
+  opens the panel.
+- Skeleton classes: `.set-section` (18/600 tab title + 12/400 description),
+  `.set-section__card`, `.set-row` (14/600 label + optional 12/400 description),
+  `.set-shell__nav/__head/__scroll/__frame`. Search indexes every rendered
+  `[data-setting-anchor]`; coverage is checked at runtime and in
+  `tests/settings-search.test.mjs`.
+- `updateCheckHours` is a real config key (4/24/168/0, default 4). The Rust
+  background checker re-reads it every 30 minutes; manual checks never wait.
+- WorkBuddy CN's card adds one text-only `Official requests (30d)` row from
+  `get-user-request-usage` (probe verified 2026-10-24, 26 rows). It never writes
+  `record_meter_samples` and is never summed with `credit_history`; a truncated
+  sweep says `· partial`.
+- Gemini CLI spend now has a native parser (`spend::gemini`) for
+  `~/.gemini/tmp/<project>/chats/session-*.json(l)`. cc-switch proxy days win;
+  native rows only fill missing days. No local Gemini CLI sample exists on this
+  machine, so `/v1/sources` still reports `needs_probe`.
+
+
+## Default theme and skins (2026-10-24, 0.9.0)
+
+- Default light/dark now use VS Code Dark+/Light+ neutrals: dark `#1e1e1e`
+  background, `#252526` cards, `#3c3c3c` borders, `#d4d4d4` text, `#007acc`
+  accent; light `#f3f3f3` workbench, `#ffffff` cards, `#d4d4d4` borders,
+  `#333333` text, `#0066b8` accent. Tokens stay `--background/--card/...`; no
+  second palette.
+- signal / ink / comic-pixel keep their own token blocks. The settings shell's
+  active-nav rule is class-only (`.set-shell__nav .panel-nav-item.active`) so a
+  skin's four-class rule can own the colour. Under skins the `.set-section`
+  wrapper has no border/background, because the section head + card already
+  paint the skin frame (otherwise comic/ink showed double frames).
+- Comic Pixel's installable pack is `site/public/skins/pane-skin-comic-pixel-1.0.0.zip`
+  (manifest + CSS + two fonts); installed locally at `%APPDATA%\Pane\skins\comic-pixel`.

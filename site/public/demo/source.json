@@ -1,10 +1,10 @@
 {
-  "version": "0.8.9",
+  "version": "0.9.0",
   "files": {
-    "index.html": "a686abfed4ab1651367219661655d433ac0f207e0fd13fe5e5291cc98d579bb2",
-    "src/main.ts": "4365711c141ff6c37f46c8e320ac686c1220520207deb1ae520a874df096bebd",
-    "src/styles.css": "9bce9ab494666aef3edfdac8f32ebf10e981d6d019928cf32feaf83fbecd0725",
-    "src/i18n.ts": "9800456cf72fb1361ab540dde89ee8a2e1b93a6238d1222fd771e8f1dadd6ddd",
-    "src/providerCatalog.ts": "9b1ce82fa3b4cac73f4db0cdf456e3b38cd6af242e33f0bb56c602ed45b7bfdd"
+    "index.html": "fcf00a66cd5aa092b3ffeff199e20f168eae462fc4c69e3b39e3ec966b77bbb0",
+    "src/main.ts": "c3baa27ea90771f5e70e8fe573365eb25ca95b5d210661e20d188aac4b9d3ca1",
+    "src/styles.css": "6fd9b212e7b23feb903e0ab3b83f6e8daa2a26c4dcf138d0d6cb4728b13752ed",
+    "src/i18n.ts": "937ee3f4103c57d26db1d417812a830b20c5334a9ea770826abce6faf23b39c8",
+    "src/providerCatalog.ts": "b27ed7d5bb67970988f49e53e624d5da30b0ba8f20b72b262b5975719b305b6f"
   }
 }
