@@ -644,6 +644,8 @@ const en: Dict = {
   "card.hintXfyunNoClaim": "No Spark-X2.6 free quota claimed yet — claim it in the iFlytek console, then refresh.",
   "card.outdated": "⚠ Outdated",
   "card.needsSetupFallback": "Credentials are saved, but the usage API needs one more step.",
+  "card.hintNoStartPlan": "This ZCode account has no Start Plan on record.",
+  "card.hintStartPlanEnded": "The Start Plan gift has ended — open ZCode for the next campaign.",
   "card.needsSetupAction": "How to fix",
   "card.bootCache": "Cached data · refreshing",
   "card.showMore": "Show more",
@@ -1449,6 +1451,10 @@ const en: Dict = {
 
   "detail.unlimited": "Unlimited",
   "detail.noGift": "No gift in this period",
+  "detail.noStartPlan": "None",
+  "detail.expired": "Expired",
+  "detail.expiredDetail": "Expired · {detail}",
+  "detail.pastCampaigns": "{n} past Start Plan campaigns",
   "detail.heldNotGranted": "Held, not granted — claim it in ZCode",
   "detail.moreGrants": "+{n} more grants",
   "detail.unconfirmed": "Unconfirmed",
@@ -2097,6 +2103,8 @@ const zh: Dict = {
   "card.hintXfyunNoClaim": "尚未领取 Spark-X2.6 免费额度——请先在讯飞控制台领取，再刷新。",
   "card.outdated": "⚠ 数据过时",
   "card.needsSetupFallback": "凭据已保存，但用量接口还差一步。",
+  "card.hintNoStartPlan": "这个 ZCode 账号没有 Start Plan。",
+  "card.hintStartPlanEnded": "Start Plan 的赠送已结束，打开 ZCode 等下一期活动。",
   "card.needsSetupAction": "怎么补",
   "card.bootCache": "缓存数据 · 刷新中",
   "card.showMore": "显示更多",
@@ -2883,6 +2891,10 @@ const zh: Dict = {
 
   "detail.unlimited": "无限制",
   "detail.noGift": "本期暂无赠送",
+  "detail.noStartPlan": "没有",
+  "detail.expired": "已结束",
+  "detail.expiredDetail": "已结束 · {detail}",
+  "detail.pastCampaigns": "{n} 个历史 Start Plan 活动",
   "detail.heldNotGranted": "已持有但未发放——去 ZCode 领取",
   "detail.moreGrants": "另有 {n} 项赠送",
   "detail.unconfirmed": "待确认",
@@ -3536,6 +3548,8 @@ const ru: Dict = {
   "card.hintXfyunNoClaim": "Бесплатная квота Spark-X2.6 ещё не получена — получите её в консоли iFlytek и обновите.",
   "card.outdated": "⚠ Данные устарели",
   "card.needsSetupFallback": "Учётные данные сохранены, но API использования требует ещё одного шага.",
+  "card.hintNoStartPlan": "У этой учётной записи ZCode нет Start Plan.",
+  "card.hintStartPlanEnded": "Подарок Start Plan закончился — откройте ZCode для следующей кампании.",
   "card.needsSetupAction": "Как исправить",
   "card.bootCache": "Кэшированные данные · обновляем",
   "card.showMore": "Ещё",
@@ -4336,6 +4350,10 @@ const ru: Dict = {
 
   "detail.unlimited": "Без лимита",
   "detail.noGift": "В этом периоде подарков нет",
+  "detail.noStartPlan": "Нет",
+  "detail.expired": "Истекло",
+  "detail.expiredDetail": "Истекло · {detail}",
+  "detail.pastCampaigns": "Прошлых кампаний Start Plan: {n}",
   "detail.heldNotGranted": "Есть, но не выдано — получите в ZCode",
   "detail.moreGrants": "Ещё подарков: {n}",
   "detail.unconfirmed": "Не подтверждено",
@@ -4470,6 +4488,8 @@ export function displayMetricLabel(label: string): string {
   // otherwise stay English forever.
   const appDays = label.match(/^(.+) · last (\d+) days$/);
   if (appDays) return t("metric.appLastNDays", { app: appDays[1], n: appDays[2] });
+  const pastPlans = label.match(/^\+(\d+) past Start Plan campaigns$/i);
+  if (pastPlans) return t("detail.pastCampaigns", { n: pastPlans[1] });
   return label;
 }
 
@@ -4489,6 +4509,12 @@ export function displayCardHint(text: string): string {
   }
   if (text === "Spark web session expired — sign in again from the auth center.") {
     return t("card.hintXfyunExpired");
+  }
+  if (text === "This ZCode account has no Start Plan on record.") {
+    return t("card.hintNoStartPlan");
+  }
+  if (text === "The Start Plan gift has ended — open ZCode for the next campaign.") {
+    return t("card.hintStartPlanEnded");
   }
   if (text === "No Spark-X2.6 free quota claimed yet — claim it in the iFlytek console, then refresh.") {
     return t("card.hintXfyunNoClaim");
@@ -4553,6 +4579,10 @@ export function displayMetricDetail(text: string): string {
   if (m) return t("detail.countOfLeft", { a: m[1], b: m[2] });
   if (/^available$/i.test(text.trim())) return t("card.available");
   if (/^no gift in this period$/i.test(text.trim())) return t("detail.noGift");
+  if (/^no start plan$/i.test(text.trim())) return t("detail.noStartPlan");
+  if (/^expired$/i.test(text.trim())) return t("detail.expired");
+  m = text.match(/^expired · (.+)$/i);
+  if (m) return t("detail.expiredDetail", { detail: displayMetricDetail(m[1]) });
   if (/^held · not granted \(open zcode to claim\)$/i.test(text.trim())) return t("detail.heldNotGranted");
   const moreGrants = text.trim().match(/^\+(\d+) more grants$/i);
   if (moreGrants) return t("detail.moreGrants", { n: moreGrants[1] });

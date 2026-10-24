@@ -854,7 +854,7 @@ pub(crate) fn credits_face_from_items(packs: &[&Value], now_ms: i64) -> Option<C
             face.frozen += frozen;
         }
         if face.plan.is_none() {
-            face.plan = ["PackageName", "SubscriptionPackageName", "resourceName", "name", "productName", "packageName"]
+            let raw = ["PackageName", "SubscriptionPackageName", "resourceName", "name", "productName", "packageName"]
                 .iter()
                 .find_map(|k| {
                     pack.get(*k)
@@ -863,6 +863,13 @@ pub(crate) fn credits_face_from_items(packs: &[&Value], now_ms: i64) -> Option<C
                         .filter(|s| !s.is_empty())
                         .map(str::to_string)
                 });
+            if let Some(raw) = raw {
+                // "CodeBuddy个人版国内运营裂变包" is a product + campaign.
+                // Keep the tier stable and put the campaign in parentheses;
+                // a new promotion must not rename the plan.
+                let (base, campaign) = super::split_plan_campaign(&raw);
+                face.plan = Some(super::plan_with_campaign(&base, campaign.as_deref()));
+            }
         }
         for key in ["CycleEndTime", "cycleEndTime", "endTime", "packageEndTime"] {
             if let Some(raw) = pack
@@ -1183,6 +1190,25 @@ mod tests {
         assert_eq!(face.plan.as_deref(), Some("体验版"));
         // 2026-01-31 00:00:00 UTC+8 = 1769788800000.
         assert_eq!(face.reset_ms, Some(1_769_788_800_000));
+    }
+
+    #[test]
+    fn a_promotional_package_keeps_its_product_name() {
+        let face = credits_face(
+            &resource_body(json!([{
+                "PackageName": "CodeBuddy个人版国内运营裂变包",
+                "CycleCapacitySize": 2500.0,
+                "CycleCapacityRemain": 2495.0,
+                "CapacityUnit": "credits"
+            }])),
+            NOW_MS,
+        )
+        .expect("face");
+        assert_eq!(
+            face.plan.as_deref(),
+            Some("CodeBuddy个人版 (国内运营裂变包)"),
+            "a campaign must not rename the stable product"
+        );
     }
 
     #[test]

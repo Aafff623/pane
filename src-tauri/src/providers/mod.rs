@@ -978,3 +978,92 @@ mod legacy_key_retirement_tests {
         let _ = std::fs::remove_dir_all(base);
     }
 }
+
+/// A stable plan name with the campaign in parentheses. Vendors rename the
+/// whole plan string for every promotion (`ZCode 1024 Dev Day`,
+/// `ZCode Weekend Build`, `CodeBuddy个人版国内运营裂变包`); the product
+/// identity must not move with the campaign.
+pub fn plan_with_campaign(base: &str, campaign: Option<&str>) -> String {
+    let base = base.trim();
+    let campaign = campaign.map(str::trim).filter(|value| !value.is_empty());
+    match campaign {
+        Some(campaign) if !campaign.eq_ignore_ascii_case(base) => {
+            format!("{base} ({campaign})")
+        }
+        _ => base.to_string(),
+    }
+}
+
+/// Split a vendor product string that appends a campaign to a stable tier
+/// name. The longest known tier marker wins, so `个人版` inside a longer name
+/// is never mistaken for the tier. No marker means the string is already the
+/// product name.
+pub fn split_plan_campaign(raw: &str) -> (String, Option<String>) {
+    let raw = raw.trim();
+    const MARKERS: [&str; 6] = ["个人版", "企业版", "团队版", "专业版", "标准版", "旗舰版"];
+    let mut best: Option<(usize, &str)> = None;
+    for marker in MARKERS {
+        if let Some(start) = raw.find(marker) {
+            let end = start + marker.len();
+            if best.is_none_or(|(best_end, _)| end > best_end) {
+                best = Some((end, marker));
+            }
+        }
+    }
+    let Some((end, _)) = best else {
+        return (raw.to_string(), None);
+    };
+    let base = raw[..end].trim().to_string();
+    let campaign = raw[end..]
+        .trim()
+        .trim_matches(|ch: char| matches!(ch, '·' | '-' | '_' | '—' | ' '))
+        .to_string();
+    (
+        base,
+        (!campaign.is_empty()).then_some(campaign),
+    )
+}
+
+#[cfg(test)]
+mod plan_label_tests {
+    use super::{plan_with_campaign, split_plan_campaign};
+
+    #[test]
+    fn campaigns_live_in_parentheses_not_in_the_plan_identity() {
+        assert_eq!(
+            plan_with_campaign("Start Plan", Some("1024 Dev Day")),
+            "Start Plan (1024 Dev Day)"
+        );
+        assert_eq!(
+            plan_with_campaign("Start Plan", Some("Weekend Build")),
+            "Start Plan (Weekend Build)"
+        );
+        assert_eq!(plan_with_campaign("Start Plan", None), "Start Plan");
+        assert_eq!(plan_with_campaign("Start Plan", Some(" ")), "Start Plan");
+        assert_eq!(
+            plan_with_campaign("Start Plan", Some("start plan")),
+            "Start Plan",
+            "a campaign equal to the base must not repeat"
+        );
+    }
+
+    #[test]
+    fn vendor_product_strings_split_without_losing_the_tier() {
+        assert_eq!(
+            split_plan_campaign("CodeBuddy个人版国内运营裂变包"),
+            ("CodeBuddy个人版".to_string(), Some("国内运营裂变包".to_string()))
+        );
+        assert_eq!(
+            split_plan_campaign("CodeBuddy企业版 · 运营活动"),
+            ("CodeBuddy企业版".to_string(), Some("运营活动".to_string()))
+        );
+        assert_eq!(
+            split_plan_campaign("WorkBuddy 个人版"),
+            ("WorkBuddy 个人版".to_string(), None)
+        );
+        assert_eq!(
+            split_plan_campaign("Plain plan"),
+            ("Plain plan".to_string(), None)
+        );
+    }
+}

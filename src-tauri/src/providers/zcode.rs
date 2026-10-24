@@ -60,6 +60,10 @@ const SESSION_EXPIRED_HINT: &str =
 const NO_PLAN_HINT: &str =
     "This ZCode account has no Start Plan on record.";
 const NO_GIFT: &str = "No gift in this period";
+const START_PLAN_BASE: &str = "Start Plan";
+const NO_START_PLAN: &str = "No Start Plan";
+const START_PLAN_ENDED_HINT: &str =
+    "The Start Plan gift has ended — open ZCode for the next campaign.";
 
 /// The card snapshot: one call, one honest state.
 pub async fn snapshot() -> super::Snapshot {
@@ -92,55 +96,70 @@ pub fn snapshot_from_doc(doc: &Value, now_s: i64) -> super::Snapshot {
             .to_string();
         return super::Snapshot::error(FAMILY_ID, DISPLAY_NAME, message);
     }
-    let plans = active_plan_names(doc, now_s);
-    if plans.is_empty() {
-        // A signed-in account without a Start Plan is a setup state, not a
-        // broken reading and not an empty card.
-        return super::Snapshot::needs_setup(FAMILY_ID, DISPLAY_NAME, None, vec![], NO_PLAN_HINT);
+    let state = parse_start_plan_state(doc, now_s);
+    if !state.found {
+        return super::Snapshot::needs_setup(
+            FAMILY_ID,
+            DISPLAY_NAME,
+            Some(START_PLAN_BASE.into()),
+            vec![super::Metric::text(START_PLAN_BASE, NO_START_PLAN.into())],
+            NO_PLAN_HINT,
+        );
     }
-    let plan_label = plans.join(" · ");
-    let (grants, ungranted) = parse_start_grants(doc, now_s);
-    let rows = if grants.is_empty() && ungranted.is_empty() {
-        vec![super::Metric::text("Start Plan", NO_GIFT.into())]
+    // The plan identity is always Start Plan; the campaign is a parenthetical
+    // so a new promotion never renames the card.
+    let campaigns: Vec<&str> = if state.has_active {
+        state.active_campaigns.iter().map(String::as_str).collect()
     } else {
-        render_rows(&grants, &ungranted)
+        state.expired_campaigns.iter().map(String::as_str).collect()
     };
-    super::Snapshot::ok(FAMILY_ID, DISPLAY_NAME, Some(plan_label), rows)
+    let campaign_label = (!campaigns.is_empty()).then(|| campaigns.join(" · "));
+    let plan_label = super::plan_with_campaign(START_PLAN_BASE, campaign_label.as_deref());
+    let mut rows = if !state.grants.is_empty() || !state.ungranted.is_empty() {
+        render_rows(&state.grants, &state.ungranted)
+    } else if state.has_active {
+        vec![super::Metric::text(START_PLAN_BASE, NO_GIFT.into())]
+    } else {
+        Vec::new()
+    };
+    append_expired_rows(&mut rows, &state.expired);
+    if state.has_active {
+        super::Snapshot::ok(FAMILY_ID, DISPLAY_NAME, Some(plan_label), rows)
+    } else {
+        // No live gift, but past campaigns stay visible instead of vanishing.
+        super::Snapshot::needs_setup(
+            FAMILY_ID,
+            DISPLAY_NAME,
+            Some(plan_label),
+            rows,
+            START_PLAN_ENDED_HINT,
+        )
+    }
 }
 
-/// Every non-expired plan name, in payload order, deduplicated.
-pub fn active_plan_names(doc: &Value, now_s: i64) -> Vec<String> {
-    let Some(data) = doc.get("data") else {
-        return Vec::new();
-    };
-    let now_s = num(data.get("server_time"))
-        .filter(|t| *t > 0.0)
-        .unwrap_or(now_s as f64) as i64;
-    let mut names: Vec<String> = Vec::new();
-    for plan in data
-        .get("plans")
-        .and_then(Value::as_array)
-        .unwrap_or(&Vec::new())
-    {
-        if plan_expired(plan, now_s) {
-            continue;
-        }
-        let name = plan
-            .get("name")
-            .and_then(Value::as_str)
-            .unwrap_or("")
-            .trim()
-            .to_string();
-        if !name.is_empty() && !names.contains(&name) {
-            names.push(name);
-        }
-    }
-    names
+/// One expired Start Plan campaign: its final bucket totals are history the
+/// owner asked to keep, not live quota.
+#[derive(Clone)]
+pub struct ExpiredPlan {
+    pub label: String,
+    pub used: f64,
+    pub total: f64,
+}
+
+/// Everything one balance response says about Start Plan, active or past.
+#[derive(Default, Clone)]
+pub struct StartPlanState {
+    pub grants: Vec<StartGrant>,
+    pub ungranted: Vec<String>,
+    pub expired: Vec<ExpiredPlan>,
+    pub active_campaigns: Vec<String>,
+    pub expired_campaigns: Vec<String>,
+    pub has_active: bool,
+    pub found: bool,
 }
 
 /// The card rows: one usage bar per granted bucket, then one claim line per
-/// plan that exists without a granted bucket. A session with nothing at all
-/// keeps the weekend placeholder, which is the copy this row has always used.
+/// plan that exists without a granted bucket.
 pub fn render_rows(grants: &[StartGrant], ungranted: &[String]) -> Vec<super::Metric> {
     if grants.is_empty() && ungranted.is_empty() {
         return Vec::new();
@@ -174,6 +193,41 @@ pub fn render_rows(grants: &[StartGrant], ungranted: &[String]) -> Vec<super::Me
     rows
 }
 
+/// Past campaigns are evidence, not live quota: they follow the active rows
+/// with their final used/total and never invent a countdown.
+fn append_expired_rows(rows: &mut Vec<super::Metric>, expired: &[ExpiredPlan]) {
+    if expired.is_empty() {
+        return;
+    }
+    let room = MAX_ROWS.saturating_sub(rows.len());
+    if room == 0 {
+        rows.push(super::Metric::text(
+            &format!("+{} past Start Plan campaigns", expired.len()),
+            "expired".into(),
+        ));
+        return;
+    }
+    let shown = expired.len().min(room);
+    for entry in expired.iter().take(shown) {
+        let value = if entry.total > 0.0 {
+            format!(
+                "expired · {} of {} used",
+                with_thousands(entry.used),
+                with_thousands(entry.total)
+            )
+        } else {
+            "expired".into()
+        };
+        rows.push(super::Metric::text(&entry.label, value));
+    }
+    if expired.len() > shown {
+        rows.push(super::Metric::text(
+            &format!("+{} past Start Plan campaigns", expired.len() - shown),
+            "expired".into(),
+        ));
+    }
+}
+
 /// One gift bucket: usage bar + used/total detail + its own window. The label
 /// is the bucket's `show_name` (GLM-5.3, GLM-5.3-Flash …), so a new campaign
 /// needs no code change — names are evidence, never filters.
@@ -188,28 +242,24 @@ fn grant_metric(grant: &StartGrant) -> super::Metric {
         &grant.label,
         percent,
         Some(format!(
-            "{} of {} used · {}",
+            "{} of {} used",
             with_thousands(w.used),
             with_thousands(w.total),
-            grant.plan
         )),
     )
     .with_reset(w.resets_at_ms, w.period_ms)
 }
 
-/// Split a balance response into granted buckets and plans held without one.
-/// A plan past its `ends_at` is over even while it still reports `active`
-/// (measured 2026-10-12), and its buckets go with it. Bucket ids repeat across
-/// users, so `plan_id` decides the pairing; `user_plan_id` is only the
-/// fallback for a payload that carries no plan ids at all.
-pub fn parse_start_grants(doc: &Value, fallback_now_s: i64) -> (Vec<StartGrant>, Vec<String>) {
-    let mut grants: Vec<StartGrant> = Vec::new();
-    let mut ungranted: Vec<String> = Vec::new();
+/// Split a balance response into active Start Plan grants/claims and the
+/// expired campaigns that should remain visible as history. Only Start Plan
+/// plans qualify: a Coding Plan entry shares `plans[]` and is not a gift.
+pub fn parse_start_plan_state(doc: &Value, fallback_now_s: i64) -> StartPlanState {
+    let mut state = StartPlanState::default();
     if doc.get("code").and_then(Value::as_i64) != Some(0) {
-        return (grants, ungranted);
+        return state;
     }
     let Some(data) = doc.get("data") else {
-        return (grants, ungranted);
+        return state;
     };
     let now_s = num(data.get("server_time"))
         .filter(|t| *t > 0.0)
@@ -218,114 +268,242 @@ pub fn parse_start_grants(doc: &Value, fallback_now_s: i64) -> (Vec<StartGrant>,
         data.get("plans").and_then(Value::as_array),
         data.get("balances").and_then(Value::as_array),
     ) else {
-        return (grants, ungranted);
-    };
-    let text_field = |v: &Value, key: &str| -> String {
-        v.get(key)
-            .and_then(Value::as_str)
-            .unwrap_or("")
-            .trim()
-            .to_string()
+        return state;
     };
     for plan in plans {
-        if plan_expired(plan, now_s) {
+        if !is_start_plan_plan(plan) {
             continue;
         }
+        state.found = true;
         let plan_name = text_field(plan, "name");
-        let plan_user = text_field(plan, "user_plan_id");
-        let plan_id = text_field(plan, "plan_id");
-        let mut plan_rows: Vec<StartGrant> = Vec::new();
-        let mut saw_bucket = false;
-        for bucket in balances {
-            if !bucket_matches(
-                &plan_user,
-                &plan_id,
-                &text_field(bucket, "user_plan_id"),
-                &text_field(bucket, "plan_id"),
-            ) {
-                continue;
-            }
-            saw_bucket = true;
-            if bucket_expired(bucket, now_s) {
-                continue;
-            }
-            let Some(total) = num(bucket.get("total_units")).filter(|t| *t > 0.0) else {
-                continue;
-            };
-            let used = num(bucket.get("used_units"))
-                .unwrap_or(0.0)
-                .clamp(0.0, total);
-            let label = {
-                let shown = text_field(bucket, "show_name");
-                if !shown.is_empty() {
-                    shown
-                } else if plan_name.is_empty() {
-                    "Start Plan".to_string()
-                } else {
-                    plan_name.clone()
+        let campaign = campaign_name(&plan_name);
+        let label = super::plan_with_campaign(START_PLAN_BASE, campaign.as_deref());
+        if plan_expired(plan, now_s) {
+            if let Some(campaign) = &campaign {
+                if !state.expired_campaigns.contains(campaign) {
+                    state.expired_campaigns.push(campaign.clone());
                 }
-            };
-            let end = bucket_deadline(bucket);
-            let start = num(bucket.get("period_start")).filter(|t| *t > 0.0);
-            // Buckets that share a name (top-ups, split windows) sum into one
-            // row and keep the latest end, exactly like the weekend row did.
-            if let Some(existing) = plan_rows.iter_mut().find(|row| row.label == label) {
-                existing.allowance.used += used;
-                existing.allowance.total += total;
-                if let Some(end) = end {
-                    if existing
-                        .allowance
-                        .resets_at_ms
-                        .is_none_or(|cur| end * 1000.0 > cur as f64)
-                    {
-                        existing.allowance.resets_at_ms = Some((end * 1000.0) as i64);
-                        existing.allowance.period_ms = start
-                            .filter(|s| *s < end)
-                            .map(|s| ((end - s) * 1000.0) as i64);
-                    }
-                }
-                continue;
             }
-            plan_rows.push(StartGrant {
-                label,
-                plan: plan_name.clone(),
-                allowance: WeekendAllowance {
-                    used,
-                    total,
-                    resets_at_ms: end.map(|t| (t * 1000.0) as i64),
-                    period_ms: match (start, end) {
-                        (Some(s), Some(e)) if e > s => Some(((e - s) * 1000.0) as i64),
-                        _ => None,
-                    },
-                },
-            });
+            let (used, total) = plan_usage(plan, balances, now_s);
+            if let Some(existing) = state.expired.iter_mut().find(|row| row.label == label) {
+                existing.used += used;
+                existing.total += total;
+            } else {
+                state.expired.push(ExpiredPlan { label, used, total });
+            }
+            continue;
         }
-        if plan_rows.is_empty() {
+        state.has_active = true;
+        if let Some(campaign) = &campaign {
+            if !state.active_campaigns.contains(campaign) {
+                state.active_campaigns.push(campaign.clone());
+            }
+        }
+        let (rows, saw_bucket) = plan_buckets(plan, balances, now_s, false);
+        if rows.is_empty() {
             // Only a plan that declares entitlements is a gift ZCode could
             // hand out; a coding-plan entry shares plans[] and must not be
             // presented as something to claim.
-            let gift = plan
-                .get("entitlements")
-                .and_then(Value::as_array)
-                .is_some_and(|list| !list.is_empty());
-            if gift && !saw_bucket && !plan_name.is_empty() && !ungranted.contains(&plan_name) {
-                ungranted.push(plan_name);
+            if has_entitlements(plan) && !saw_bucket && !state.ungranted.contains(&label) {
+                state.ungranted.push(label);
             }
         } else {
-            grants.extend(plan_rows);
+            state.grants.extend(rows);
         }
     }
     // Soonest deadline first; a grant without a window sorts last.
-    grants.sort_by(|a, b| {
+    state.grants.sort_by(|a, b| {
         let key = |g: &StartGrant| g.allowance.resets_at_ms.unwrap_or(i64::MAX);
         key(a).cmp(&key(b)).then_with(|| {
             (a.plan.as_str(), a.label.as_str()).cmp(&(b.plan.as_str(), b.label.as_str()))
         })
     });
-    ungranted.sort();
-    grants.truncate(MAX_ROWS);
-    ungranted.truncate(MAX_ROWS);
-    (grants, ungranted)
+    state.expired.sort_by(|a, b| a.label.cmp(&b.label));
+    state.ungranted.sort();
+    state.grants.truncate(MAX_ROWS);
+    state.ungranted.truncate(MAX_ROWS);
+    state.expired.truncate(MAX_ROWS);
+    state
+}
+
+/// Backwards-compatible view used by tests and callers that only need live
+/// rows. Expired history comes from [`parse_start_plan_state`].
+pub fn parse_start_grants(doc: &Value, fallback_now_s: i64) -> (Vec<StartGrant>, Vec<String>) {
+    let state = parse_start_plan_state(doc, fallback_now_s);
+    (state.grants, state.ungranted)
+}
+
+fn plan_usage(plan: &Value, balances: &[Value], now_s: i64) -> (f64, f64) {
+    let (rows, _) = plan_buckets(plan, balances, now_s, true);
+    (
+        rows.iter().map(|row| row.allowance.used).sum(),
+        rows.iter().map(|row| row.allowance.total).sum(),
+    )
+}
+
+fn plan_buckets(
+    plan: &Value,
+    balances: &[Value],
+    now_s: i64,
+    include_expired: bool,
+) -> (Vec<StartGrant>, bool) {
+    let plan_name = text_field(plan, "name");
+    let campaign = campaign_name(&plan_name);
+    let plan_label = campaign.clone().unwrap_or_else(|| START_PLAN_BASE.to_string());
+    let plan_user = text_field(plan, "user_plan_id");
+    let plan_id = text_field(plan, "plan_id");
+    let mut plan_rows: Vec<StartGrant> = Vec::new();
+    let mut saw_bucket = false;
+    for bucket in balances {
+        if !bucket_matches(
+            &plan_user,
+            &plan_id,
+            &text_field(bucket, "user_plan_id"),
+            &text_field(bucket, "plan_id"),
+        ) {
+            continue;
+        }
+        saw_bucket = true;
+        if !include_expired && bucket_expired(bucket, now_s) {
+            continue;
+        }
+        let Some(total) = num(bucket.get("total_units")).filter(|t| *t > 0.0) else {
+            continue;
+        };
+        let used = num(bucket.get("used_units"))
+            .unwrap_or(0.0)
+            .clamp(0.0, total);
+        let label = {
+            let shown = text_field(bucket, "show_name");
+            if !shown.is_empty() {
+                shown
+            } else {
+                plan_label.clone()
+            }
+        };
+        let end = bucket_deadline(bucket);
+        let start = num(bucket.get("period_start")).filter(|t| *t > 0.0);
+        // Buckets that share a name (top-ups, split windows) sum into one row
+        // and keep the latest end, exactly like the weekend row did.
+        if let Some(existing) = plan_rows.iter_mut().find(|row| row.label == label) {
+            existing.allowance.used += used;
+            existing.allowance.total += total;
+            if let Some(end) = end {
+                if existing
+                    .allowance
+                    .resets_at_ms
+                    .is_none_or(|cur| end * 1000.0 > cur as f64)
+                {
+                    existing.allowance.resets_at_ms = Some((end * 1000.0) as i64);
+                    existing.allowance.period_ms = start
+                        .filter(|s| *s < end)
+                        .map(|s| ((end - s) * 1000.0) as i64);
+                }
+            }
+            continue;
+        }
+        plan_rows.push(StartGrant {
+            label,
+            plan: plan_label.clone(),
+            allowance: WeekendAllowance {
+                used,
+                total,
+                resets_at_ms: end.map(|t| (t * 1000.0) as i64),
+                period_ms: match (start, end) {
+                    (Some(s), Some(e)) if e > s => Some(((e - s) * 1000.0) as i64),
+                    _ => None,
+                },
+            },
+        });
+    }
+    (plan_rows, saw_bucket)
+}
+
+fn text_field(v: &Value, key: &str) -> String {
+    v.get(key)
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .trim()
+        .to_string()
+}
+
+fn has_entitlements(plan: &Value) -> bool {
+    plan.get("entitlements")
+        .and_then(Value::as_array)
+        .is_some_and(|list| !list.is_empty())
+}
+
+fn is_coding_plan(plan: &Value) -> bool {
+    let name = text_field(plan, "name").to_lowercase();
+    let id = text_field(plan, "plan_id").to_lowercase();
+    name.contains("coding plan")
+        || id.contains("coding-plan")
+        || id.contains("coding_plan")
+}
+
+fn is_marked_start_plan(plan: &Value) -> bool {
+    if text_field(plan, "name")
+        .to_lowercase()
+        .contains("start plan")
+    {
+        return true;
+    }
+    let plan_id = text_field(plan, "plan_id").to_lowercase();
+    if plan_id.contains("start-plan") || plan_id.contains("start_plan") {
+        return true;
+    }
+    plan.get("entitlements")
+        .and_then(Value::as_array)
+        .is_some_and(|list| {
+            list.iter().any(|entitlement| {
+                let id = text_field(entitlement, "entitlement_id").to_lowercase();
+                id.contains("start-plan") || id.contains("start_plan")
+            })
+        })
+}
+
+/// A Start Plan campaign, never a Coding Plan entry. The endpoint is Start
+/// Plan billing, so an unmarked gift plan (a future campaign with an opaque
+/// name) still qualifies; a coding plan is excluded by name regardless.
+fn is_start_plan_plan(plan: &Value) -> bool {
+    if is_coding_plan(plan) {
+        return false;
+    }
+    is_marked_start_plan(plan)
+        || has_entitlements(plan)
+        || text_field(plan, "name").to_lowercase().starts_with("zcode")
+}
+
+fn is_plan_separator(ch: char) -> bool {
+    ch.is_whitespace() || matches!(ch, '·' | '-' | '_' | ':' | '—')
+}
+
+/// Turn a campaign plan name ("ZCode 1024 Dev Day", "ZCode Weekend Build")
+/// into its campaign part. The stable base is always Start Plan.
+fn campaign_name(raw: &str) -> Option<String> {
+    let mut text = raw.trim();
+    for prefix in ["ZCode", "Z.AI", "Zhipu", "BigModel"] {
+        if text
+            .get(..prefix.len())
+            .is_some_and(|head| head.eq_ignore_ascii_case(prefix))
+        {
+            text = text[prefix.len()..].trim_start_matches(is_plan_separator);
+            break;
+        }
+    }
+    let lower = text.to_lowercase();
+    if lower == "start plan" {
+        return None;
+    }
+    if lower.starts_with("start plan") {
+        text = text["start plan".len()..].trim_start_matches(is_plan_separator);
+    }
+    let text = text.trim_matches(is_plan_separator);
+    if text.is_empty() || text.eq_ignore_ascii_case(START_PLAN_BASE) {
+        None
+    } else {
+        Some(text.to_string())
+    }
 }
 
 fn plan_expired(plan: &Value, now_s: i64) -> bool {
@@ -853,8 +1031,10 @@ mod tests {
         let doc = json!({"code": 0, "data": {"server_time": NOW, "plans": [], "balances": []}});
         let snap = snapshot_from_doc(&doc, NOW);
         assert_eq!(snap.status, "needs_setup");
-        assert!(snap.metrics.is_empty());
-        assert_eq!(snap.plan, None);
+        assert_eq!(snap.plan.as_deref(), Some("Start Plan"));
+        assert_eq!(snap.metrics.len(), 1);
+        assert_eq!(snap.metrics[0].label, "Start Plan");
+        assert_eq!(snap.metrics[0].value.as_deref(), Some(NO_START_PLAN));
     }
 
     #[test]
@@ -868,7 +1048,7 @@ mod tests {
         );
         let snap = snapshot_from_doc(&doc, NOW);
         assert_eq!(snap.status, "ok");
-        assert_eq!(snap.plan.as_deref(), Some("ZCode Start Plan"));
+        assert_eq!(snap.plan.as_deref(), Some("Start Plan"));
         // The plan is held but nothing is granted this period: one explicit
         // line, not an empty card and not a fake zero bar.
         assert!(snap.metrics.iter().any(|m| m.value.as_deref() == Some(NO_GIFT)));
@@ -890,7 +1070,7 @@ mod tests {
         );
         let snap = snapshot_from_doc(&doc, NOW);
         assert_eq!(snap.status, "ok");
-        assert_eq!(snap.plan.as_deref(), Some("ZCode 1024 Dev Day"));
+        assert_eq!(snap.plan.as_deref(), Some("Start Plan (1024 Dev Day)"));
         assert_eq!(snap.metrics.len(), 2);
         assert!(snap.metrics.iter().all(|m| m.kind == "progress"));
     }
@@ -916,7 +1096,7 @@ mod tests {
         );
         let snap = snapshot_from_doc(&doc, NOW);
         assert_eq!(snap.status, "ok");
-        assert_eq!(snap.plan.as_deref(), Some("ZCode 618 Build"));
+        assert_eq!(snap.plan.as_deref(), Some("Start Plan (618 Build)"));
         assert_eq!(snap.metrics.len(), 1);
         assert_eq!(snap.metrics[0].label, "GLM-5.4-Trial");
         assert_eq!(snap.metrics[0].kind, "progress");
@@ -955,12 +1135,12 @@ mod tests {
         assert_eq!(rows[0].used_percent, Some(25.0));
         assert_eq!(
             rows[0].detail.as_deref(),
-            Some("50,000,000 of 200,000,000 used · ZCode 1024 Dev Day")
+            Some("50,000,000 of 200,000,000 used")
         );
         assert_eq!(rows[0].resets_at, Some((NOW + 10_000) * 1000));
         assert_eq!(rows[1].label, "GLM-5.3-Flash");
         assert_eq!(rows[1].used_percent, Some(0.0));
-        assert_eq!(rows[1].detail.as_deref(), Some("0 of 300,000,000 used · ZCode 1024 Dev Day"));
+        assert_eq!(rows[1].detail.as_deref(), Some("0 of 300,000,000 used"));
     }
 
     #[test]
@@ -983,7 +1163,7 @@ mod tests {
         );
         let (grants, _) = parse_start_grants(&doc, NOW);
         assert_eq!(grants.len(), 1, "same label merges into one row");
-        assert_eq!(grants[0].label, "ZCode Weekend Build");
+        assert_eq!(grants[0].label, "Weekend Build");
         assert_eq!(grants[0].allowance.used, 60.0);
         assert_eq!(grants[0].allowance.total, 300.0);
         assert_eq!(grants[0].allowance.resets_at_ms, Some((NOW + 9_000) * 1000));
@@ -1009,9 +1189,46 @@ mod tests {
         let (grants, ungranted) = parse_start_grants(&doc, NOW);
         assert!(grants.is_empty());
         assert!(ungranted.is_empty(), "a dead plan is not something to claim");
-        // With nothing left the card says so through the snapshot state.
+        let state = parse_start_plan_state(&doc, NOW);
+        assert!(!state.has_active);
+        assert_eq!(state.expired_campaigns, vec!["Weekend Build".to_string()]);
+        assert_eq!(state.expired.len(), 1);
+        // The ended campaign stays visible as history, with its final usage.
         let snap = snapshot_from_doc(&doc, NOW);
-        assert!(snap.metrics.iter().all(|m| m.value.as_deref() != Some(NO_GIFT)));
+        assert_eq!(snap.status, "needs_setup");
+        assert_eq!(snap.plan.as_deref(), Some("Start Plan (Weekend Build)"));
+        assert_eq!(snap.metrics.len(), 1);
+        assert_eq!(snap.metrics[0].label, "Start Plan (Weekend Build)");
+        assert_eq!(
+            snap.metrics[0].value.as_deref(),
+            Some("expired · 1 of 300 used")
+        );
+    }
+
+    #[test]
+    fn a_coding_plan_never_becomes_a_start_plan_gift() {
+        let doc = balance_doc(
+            json!([{"plan_id": "coding-plan-p", "user_plan_id": "up-1", "name": "GLM Coding Plan",
+                    "status": "active", "ends_at": NOW + 50_000}]),
+            json!([{"plan_id": "coding-plan-p", "user_plan_id": "up-1", "show_name": "GLM-5.3",
+                    "total_units": 9_000_000, "used_units": 8_000_000, "period_end": NOW + 10_000}]),
+            NOW,
+        );
+        let state = parse_start_plan_state(&doc, NOW);
+        assert!(!state.found, "the coding plan is not a Start Plan campaign");
+        assert!(state.grants.is_empty());
+        let snap = snapshot_from_doc(&doc, NOW);
+        assert_eq!(snap.status, "needs_setup");
+        assert_eq!(snap.metrics[0].value.as_deref(), Some(NO_START_PLAN));
+    }
+
+    #[test]
+    fn campaign_names_never_repeat_the_plan_identity() {
+        assert_eq!(campaign_name("ZCode 1024 Dev Day").as_deref(), Some("1024 Dev Day"));
+        assert_eq!(campaign_name("ZCode Weekend Build").as_deref(), Some("Weekend Build"));
+        assert_eq!(campaign_name("ZCode Start Plan"), None);
+        assert_eq!(campaign_name("Start Plan"), None);
+        assert_eq!(campaign_name("  "), None);
     }
 
     #[test]
@@ -1039,11 +1256,11 @@ mod tests {
         );
         let (grants, ungranted) = parse_start_grants(&doc, NOW);
         assert!(grants.is_empty());
-        assert_eq!(ungranted, vec!["ZCode 1024 Dev Day".to_string()]);
+        assert_eq!(ungranted, vec!["Start Plan (1024 Dev Day)".to_string()]);
         let rows = render_rows(&grants, &ungranted);
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0].kind, "text");
-        assert_eq!(rows[0].label, "ZCode 1024 Dev Day");
+        assert_eq!(rows[0].label, "Start Plan (1024 Dev Day)");
         assert_eq!(rows[0].value.as_deref(), Some(CLAIM_HINT));
     }
 
@@ -1068,12 +1285,12 @@ mod tests {
         );
         let (grants, ungranted) = parse_start_grants(&doc, NOW);
         assert!(ungranted.is_empty());
-        assert_eq!(grants.len(), 2, "both plans contribute their own rows");
-        let labels: Vec<&str> = grants.iter().map(|g| g.label.as_str()).collect();
-        assert!(labels.contains(&"GLM-5.3"));
-        assert!(labels.contains(&"Coding Plan"));
-        let gift = grants.iter().find(|g| g.label == "GLM-5.3").unwrap();
-        assert_eq!(gift.allowance.total, 200.0, "the coding plan's 9M must not inflate the gift");
+        assert_eq!(grants.len(), 1, "a coding plan is not a Start Plan gift");
+        assert_eq!(grants[0].label, "GLM-5.3");
+        assert_eq!(
+            grants[0].allowance.total, 200.0,
+            "the coding plan's 9M must not inflate the gift"
+        );
     }
 
     #[test]
@@ -1184,8 +1401,8 @@ mod tests {
         assert!(ungranted.is_empty());
         assert_eq!(grants.len(), 2, "one bucket per plan, not two per plan");
         let by_plan = |name: &str| grants.iter().find(|g| g.plan == name).unwrap();
-        assert_eq!(by_plan("ZCode 1024 Dev Day").allowance.total, 200.0);
-        assert_eq!(by_plan("ZCode Weekend Build").allowance.total, 300.0);
+        assert_eq!(by_plan("1024 Dev Day").allowance.total, 200.0);
+        assert_eq!(by_plan("Weekend Build").allowance.total, 300.0);
     }
 
     #[test]

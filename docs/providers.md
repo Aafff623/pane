@@ -692,12 +692,16 @@ credited in [LICENSE](../LICENSE).
 
 A separate provider from Z.ai above: Z.ai reads the official token plan with an
 API key, while this card reads the **ZCode desktop client's account session**.
-Every Start Plan gift arrives as a bucket on that session, so the card shows
-one row per granted bucket — weekend builds, the 1024 Dev Day grants, and the
-model-scoped trials handed out with new models (measured 2026-10-23: plan
-`ZCode 1024 Dev Day` carried `GLM-5.3-Flash` 300,000,000 and `GLM-5.3`
-200,000,000 tokens). These gifts belong to the **ZCode account session, never to
-the Z.ai API key**: the key path cannot see them at all.
+It manages only the **Start Plan gift quota** (the free/promotional buckets);
+the paid Coding Plan belongs to Z.ai, not here.
+
+The plan identity is always **Start Plan**; the campaign is a parenthetical so
+a new promotion never renames the card (`Start Plan (1024 Dev Day)`,
+`Start Plan (Weekend Build)`). The campaign is stripped from the vendor plan
+name (`ZCode 1024 Dev Day` → `1024 Dev Day`); a plan whose entitlements carry a
+`start-plan` id is recognized even when the campaign name is unknown. A Coding
+Plan entry shares `plans[]` but is excluded by name/id and never becomes a gift
+row.
   - **Reads:** `~/.zcode/v2/credentials.json` — the ZCode CLI's AES-256-GCM
     encrypted session JWT, decrypted locally; the first entry that decrypts to
     a JWT wins.
@@ -706,24 +710,30 @@ the Z.ai API key**: the key path cannot see them at all.
     UUID beside config.json.
   - **Payload:** `data.plans[]` (`name`, `status`, `starts_at`, `ends_at`,
     `entitlements[]` with `show_name` / `capabilities` / `grant_units` /
-    `period: one_time`) and `data.balances[]` mirroring each entitlement
-    (`show_name`, `total_units`, `used_units`, `remaining_units`,
+    `period: one_time` and `entitlement_id`) and `data.balances[]` mirroring
+    each entitlement (`show_name`, `total_units`, `used_units`, `remaining_units`,
     `available_units`, `period_start`, `period_end`, `expires_at`, unix
     seconds). A bucket is paired to its plan by `plan_id` first — one account
-    can hold several plans at once (a gift beside the coding plan) and they
-    share `user_plan_id`, so matching on the user would fan every bucket out to
-    every plan; the user id is only the fallback when a payload omits plan ids. A plan past `ends_at` is dead even while it still says `active`,
-    and a bucket past its own window stops counting.
+    can hold several plans at once and they share `user_plan_id`, so matching
+    on the user would fan every bucket out to every plan; the user id is only
+    the fallback when a payload omits plan ids. A plan past `ends_at` is dead
+    even while it still says `active`, and a bucket past its own window stops
+    counting.
   - **Rows:** label = the bucket's `show_name` (so `GLM-5.3` and
-    `GLM-5.3-Flash` stay distinguishable), bar = used/total, detail names the
-    plan, expiring-soonest first, capped at six. A plan held without a granted
-    bucket renders a "held · not granted (open ZCode to claim)" line; a session
-    with no grant at all keeps the historical "Weekend not started" row; no
-    local session renders no row. A failed request holds the last verdict so
-    rows never flicker between refreshes.
-  - **Known campaigns so far** (names are evidence, never filters — any plan or
-    entitlement the session reports becomes a row, so a future campaign needs no
-    code change):
+    `GLM-5.3-Flash` stay distinguishable), bar = used/total, detail is the
+    used/total only (the plan title already carries the campaign),
+    expiring-soonest first, capped at six. A plan held without a granted
+    bucket renders a "held · not granted (open ZCode to claim)" line; an active
+    plan with no gift renders one "No gift in this period" row.
+  - **Past campaigns stay visible:** an expired Start Plan campaign is not
+    dropped. Its final bucket totals render as a history row
+    (`Start Plan (Weekend Build)` · `expired · used of total used`) after the
+    active rows. When only expired campaigns remain, the card is `needs_setup`
+    (yellow) with those rows and a "gift has ended" hint — past gifts never
+    masquerade as never granted.
+  - **No Start Plan:** `needs_setup` with the plan title **Start Plan** and one
+    row `Start Plan` → `No Start Plan` (zh: 没有), plus the sign-in/setup hint.
+  - **Known campaigns so far** (names are evidence, never filters):
     - `ZCode Weekend Build` — the weekend token grant (measured 2026-10-12:
       `GLM-5.3-Flash`, 300,000,000).
     - `ZCode 1024 Dev Day` — 2026-10-23: `GLM-5.3-Flash` 300,000,000 plus
@@ -731,18 +741,9 @@ the Z.ai API key**: the key path cannot see them at all.
     - `ZCode Trust Build` — a gift window named in magpie's changelog; amount and
       dates 待确认.
     - model trials shipped with new models (e.g. `GLM-5.3-Trial` buckets).
-  - **States:** no session / expired → sign-in hint; no Start Plan → `needs_setup`;
-    a valid plan with no gift → one "No gift in this period" row; a held plan
-    with nothing granted → the claim line; live grants → one row each.
   - **Caching:** rows are cached only for the session that fetched them (a
     hashed token tag) and for five minutes, so switching ZCode accounts or
     letting the session expire cannot paint one account's gifts on another's
     card.
   - **待确认:** the meaning of every `status` value and the timezone/unit of the
-    naive timestamps; a gift whose `total_units` is 0 renders no row at all; when
-    every grant has expired the card falls back to the historical "Weekend not
-    started" copy, which reads as "never granted" rather than "ended"; and when a
-    Z.ai API key and the local ZCode session belong to **different accounts**,
-    the gift rows still attach to the key's card because the key path carries no
-    account identity to compare — an account-scoped split is still to be
-    decided.
+    naive timestamps; a gift whose `total_units` is 0 renders no row at all.
