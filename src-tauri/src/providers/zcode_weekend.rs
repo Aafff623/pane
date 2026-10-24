@@ -87,29 +87,53 @@ pub async fn start_plan_rows() -> Option<Vec<super::Metric>> {
         Some(doc) => {
             let (grants, ungranted) = parse_start_grants(&doc, now_s);
             let rows = render_rows(&grants, &ungranted);
-            store_last(&rows);
+            store_last(token_tag(&jwt), &rows);
             Some(rows)
         }
         // Transient failure: hold this run's last verdict so rows do not
         // flicker on a blip; a cold-start miss shows nothing this cycle.
-        None => cached_last(),
+        None => cached_last(token_tag(&jwt)),
     }
 }
 
-fn last_state() -> &'static std::sync::Mutex<Option<Vec<super::Metric>>> {
-    static LAST: std::sync::OnceLock<std::sync::Mutex<Option<Vec<super::Metric>>>> =
+/// Rows cached for the exact session that fetched them, briefly. Reusing them
+/// across a ZCode account switch would paint one account's gifts on another's
+/// card, and an old verdict must not outlive the session it describes.
+struct CachedRows {
+    token_tag: u64,
+    at: std::time::Instant,
+    rows: Vec<super::Metric>,
+}
+
+const CACHE_TTL: std::time::Duration = std::time::Duration::from_secs(300);
+
+fn token_tag(jwt: &str) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    jwt.hash(&mut hasher);
+    hasher.finish()
+}
+
+fn last_state() -> &'static std::sync::Mutex<Option<CachedRows>> {
+    static LAST: std::sync::OnceLock<std::sync::Mutex<Option<CachedRows>>> =
         std::sync::OnceLock::new();
     LAST.get_or_init(|| std::sync::Mutex::new(None))
 }
 
-fn store_last(rows: &[super::Metric]) {
+fn store_last(tag: u64, rows: &[super::Metric]) {
     if let Ok(mut slot) = last_state().lock() {
-        *slot = Some(rows.to_vec());
+        *slot = Some(CachedRows {
+            token_tag: tag,
+            at: std::time::Instant::now(),
+            rows: rows.to_vec(),
+        });
     }
 }
 
-fn cached_last() -> Option<Vec<super::Metric>> {
-    last_state().lock().ok().and_then(|slot| slot.clone())
+fn cached_last(tag: u64) -> Option<Vec<super::Metric>> {
+    let slot = last_state().lock().ok()?;
+    let cached = slot.as_ref()?;
+    (cached.token_tag == tag && cached.at.elapsed() <= CACHE_TTL).then(|| cached.rows.clone())
 }
 
 /// The card rows: one usage bar per granted bucket, then one claim line per
@@ -119,11 +143,32 @@ pub fn render_rows(grants: &[StartGrant], ungranted: &[String]) -> Vec<super::Me
     if grants.is_empty() && ungranted.is_empty() {
         return vec![super::Metric::text(LABEL, NOT_STARTED.into())];
     }
-    let mut rows: Vec<super::Metric> = grants.iter().map(grant_metric).collect();
-    for plan in ungranted {
+    // Claim lines are the actionable part; they get their slots first, and the
+    // bar count yields to them instead of the other way round.
+    let claims: Vec<String> = if ungranted.len() <= 2 {
+        ungranted.to_vec()
+    } else {
+        vec![
+            ungranted[0].clone(),
+            format!("+{} more held plans", ungranted.len() - 1),
+        ]
+    };
+    let bar_cap = MAX_ROWS.saturating_sub(claims.len());
+    let mut rows: Vec<super::Metric> = if grants.len() > bar_cap {
+        // One slot names what did not fit, so a hidden grant is never silent.
+        let shown = grants.len().min(bar_cap.saturating_sub(1));
+        let mut rows: Vec<super::Metric> = grants.iter().take(shown).map(grant_metric).collect();
+        rows.push(super::Metric::text(
+            &format!("+{} more grants", grants.len() - shown),
+            CLAIM_HINT.into(),
+        ));
+        rows
+    } else {
+        grants.iter().map(grant_metric).collect()
+    };
+    for plan in &claims {
         rows.push(super::Metric::text(plan, CLAIM_HINT.into()));
     }
-    rows.truncate(MAX_ROWS);
     rows
 }
 
@@ -153,7 +198,8 @@ fn grant_metric(grant: &StartGrant) -> super::Metric {
 /// Split a balance response into granted buckets and plans held without one.
 /// A plan past its `ends_at` is over even while it still reports `active`
 /// (measured 2026-10-12), and its buckets go with it. Bucket ids repeat across
-/// users, so `user_plan_id` decides the pairing when both sides carry one.
+/// users, so `plan_id` decides the pairing; `user_plan_id` is only the
+/// fallback for a payload that carries no plan ids at all.
 pub fn parse_start_grants(doc: &Value, fallback_now_s: i64) -> (Vec<StartGrant>, Vec<String>) {
     let mut grants: Vec<StartGrant> = Vec::new();
     let mut ungranted: Vec<String> = Vec::new();
@@ -187,16 +233,18 @@ pub fn parse_start_grants(doc: &Value, fallback_now_s: i64) -> (Vec<StartGrant>,
         let plan_user = text_field(plan, "user_plan_id");
         let plan_id = text_field(plan, "plan_id");
         let mut plan_rows: Vec<StartGrant> = Vec::new();
+        let mut saw_bucket = false;
         for bucket in balances {
-            if bucket_expired(bucket, now_s) {
-                continue;
-            }
             if !bucket_matches(
                 &plan_user,
                 &plan_id,
                 &text_field(bucket, "user_plan_id"),
                 &text_field(bucket, "plan_id"),
             ) {
+                continue;
+            }
+            saw_bucket = true;
+            if bucket_expired(bucket, now_s) {
                 continue;
             }
             let Some(total) = num(bucket.get("total_units")).filter(|t| *t > 0.0) else {
@@ -215,9 +263,7 @@ pub fn parse_start_grants(doc: &Value, fallback_now_s: i64) -> (Vec<StartGrant>,
                     plan_name.clone()
                 }
             };
-            let end = num(bucket.get("period_end"))
-                .or_else(|| num(bucket.get("expires_at")))
-                .filter(|t| *t > 0.0);
+            let end = bucket_deadline(bucket);
             let start = num(bucket.get("period_start")).filter(|t| *t > 0.0);
             // Buckets that share a name (top-ups, split windows) sum into one
             // row and keep the latest end, exactly like the weekend row did.
@@ -253,7 +299,14 @@ pub fn parse_start_grants(doc: &Value, fallback_now_s: i64) -> (Vec<StartGrant>,
             });
         }
         if plan_rows.is_empty() {
-            if !plan_name.is_empty() && !ungranted.contains(&plan_name) {
+            // Only a plan that declares entitlements is a gift ZCode could
+            // hand out; a coding-plan entry shares plans[] and must not be
+            // presented as something to claim.
+            let gift = plan
+                .get("entitlements")
+                .and_then(Value::as_array)
+                .is_some_and(|list| !list.is_empty());
+            if gift && !saw_bucket && !plan_name.is_empty() && !ungranted.contains(&plan_name) {
                 ungranted.push(plan_name);
             }
         } else {
@@ -287,10 +340,7 @@ fn plan_expired(plan: &Value, now_s: i64) -> bool {
 /// A bucket whose own window has closed contributes nothing, whatever its
 /// parent plan still claims.
 fn bucket_expired(bucket: &Value, now_s: i64) -> bool {
-    let deadline = num(bucket.get("period_end"))
-        .or_else(|| num(bucket.get("expires_at")))
-        .unwrap_or(0.0) as i64;
-    deadline > 0 && deadline <= now_s
+    bucket_deadline(bucket).is_some_and(|deadline| deadline <= now_s as f64)
 }
 
 // ---------------------------------------------------------------------------
@@ -508,17 +558,30 @@ fn num(v: Option<&Value>) -> Option<f64> {
     }
 }
 
-/// True when a balance bucket belongs to a plan. `user_plan_id` decides
-/// when both sides carry one (plan ids repeat across users), plan id
-/// otherwise — magpie's pairing.
+/// True when a balance bucket belongs to a plan. `plan_id` decides whenever
+/// both sides carry one: one account can hold several plans (a 1024 gift beside
+/// the coding plan), and they share `user_plan_id` — matching on the user first
+/// attached every bucket to every plan. User id is only the fallback for a
+/// payload that omits plan ids on one side.
 fn bucket_matches(plan_user: &str, plan_id: &str, bucket_user: &str, bucket_id: &str) -> bool {
-    if !plan_user.is_empty() && !bucket_user.is_empty() {
-        return plan_user == bucket_user;
+    if !plan_id.is_empty() || !bucket_id.is_empty() {
+        // One side names a plan, so plan identity is the only proof of
+        // ownership: a bucket without one must not fall back to the user id,
+        // or it would be claimed by every plan that account holds.
+        return !plan_id.is_empty() && plan_id == bucket_id;
     }
-    if plan_user.is_empty() || bucket_user.is_empty() {
-        return plan_id == bucket_id;
-    }
-    false
+    !plan_user.is_empty() && plan_user == bucket_user
+}
+
+/// A bucket's real deadline: the earlier of its window end and its own
+/// expiry. Two fields can disagree; taking one and ignoring the other showed
+/// expired grants as usable.
+fn bucket_deadline(bucket: &Value) -> Option<f64> {
+    [num(bucket.get("period_end")), num(bucket.get("expires_at"))]
+        .into_iter()
+        .flatten()
+        .filter(|t| *t > 0.0)
+        .reduce(f64::min)
 }
 
 /// The weekend grant out of a successful balance response: the one
@@ -682,7 +745,7 @@ mod tests {
             return;
         };
         let data = &doc["data"];
-        eprintln!("code={:?}", doc.get("code"));
+        eprintln!("code={:?} server_time={:?}", doc.get("code"), data.get("server_time"));
         eprintln!(
             "data keys={:?}",
             data.as_object().map(|o| o.keys().cloned().collect::<Vec<_>>())
@@ -696,7 +759,7 @@ mod tests {
                     plan.get("starts_at"),
                     plan.get("ends_at"),
                     plan.get("description"),
-                    plan.get("entitlements").map(|v| v.to_string().chars().take(400).collect::<String>())
+                    plan.get("entitlements").map(|v| format!("len={} {}", v.as_array().map(|a| a.len()).unwrap_or(0), v.to_string().chars().take(240).collect::<String>()))
                 );
             }
         }
@@ -886,14 +949,15 @@ mod tests {
         );
         let (grants, ungranted) = parse_start_grants(&doc, NOW);
         assert!(grants.is_empty(), "a closed window is not a live gift");
-        assert_eq!(ungranted, vec!["ZCode Weekend Build".to_string()], "still worth claiming");
+        assert!(ungranted.is_empty(), "an expired grant is not something to claim");
     }
 
     #[test]
     fn a_plan_held_without_a_bucket_renders_a_claim_line() {
         let doc = balance_doc(
             json!([{"plan_id": "p-1024", "user_plan_id": "up-1", "name": "ZCode 1024 Dev Day",
-                    "status": "active", "ends_at": NOW + 50_000}]),
+                    "status": "active", "ends_at": NOW + 50_000,
+                    "entitlements": [{"show_name": "GLM-5.3"}]}]),
             json!([]),
             NOW,
         );
@@ -959,6 +1023,182 @@ mod tests {
         // Without the named entry the scan falls back to file order.
         store.remove("zcodejwttoken");
         assert_eq!(pick_jwt(&store, &key).as_deref(), Some("aaa.bbb.ccc"));
+    }
+
+    #[test]
+    fn a_plan_without_entitlements_is_not_a_gift_to_claim() {
+        // The coding-plan entry shares plans[] but declares no entitlements;
+        // calling it "held · not granted" would ask the owner to claim it in
+        // ZCode, where no such gift exists.
+        let doc = balance_doc(
+            json!([{"plan_id": "p-coding", "user_plan_id": "up-1", "name": "GLM Coding Plan",
+                    "status": "active", "ends_at": NOW + 50_000, "entitlements": []}]),
+            json!([]),
+            NOW,
+        );
+        let (grants, ungranted) = parse_start_grants(&doc, NOW);
+        assert!(grants.is_empty());
+        assert!(ungranted.is_empty(), "a non-gift plan is not claimable");
+    }
+
+    #[test]
+    fn claim_lines_are_never_truncated_away_by_the_bar_cap() {
+        // Six live buckets plus two ungranted plans: the rows must keep both
+        // claim lines, so the bars yield two slots instead of pushing claims
+        // past MAX_ROWS.
+        let mut balances = Vec::new();
+        for i in 0..6 {
+            balances.push(json!({
+                "plan_id": "p-gift", "user_plan_id": "up-1",
+                "show_name": format!("MODEL-{i}"), "total_units": 100, "used_units": 0,
+                "period_end": NOW + 10_000
+            }));
+        }
+        let doc = balance_doc(
+            json!([
+                {"plan_id": "p-gift", "user_plan_id": "up-1", "name": "ZCode 1024 Dev Day",
+                 "status": "active", "ends_at": NOW + 50_000,
+                 "entitlements": [{"show_name": "GLM-5.3"}]},
+                {"plan_id": "p-1", "user_plan_id": "up-1", "name": "Held One",
+                 "status": "active", "ends_at": NOW + 50_000,
+                 "entitlements": [{"show_name": "GLM-5.3-Flash"}]},
+                {"plan_id": "p-2", "user_plan_id": "up-1", "name": "Held Two",
+                 "status": "active", "ends_at": NOW + 50_000,
+                 "entitlements": [{"show_name": "GLM-5.3"}]}
+            ]),
+            json!(balances),
+            NOW,
+        );
+        let (grants, ungranted) = parse_start_grants(&doc, NOW);
+        assert_eq!(grants.len(), 6);
+        assert_eq!(ungranted.len(), 2);
+        let rows = render_rows(&grants, &ungranted);
+        assert_eq!(rows.len(), MAX_ROWS, "the card stays bounded");
+        let claim_lines = rows
+            .iter()
+            .filter(|r| r.value.as_deref() == Some(CLAIM_HINT))
+            .count();
+        // Two claim lines, one "+3 more grants" summary; the rest are bars.
+        assert_eq!(claim_lines, 3, "claims and the overflow line survive");
+        assert!(rows.iter().any(|r| r.label.starts_with("+3 more grants")));
+    }
+
+    #[test]
+    fn one_accounts_plans_do_not_share_each_others_buckets() {
+        // One account (same user_plan_id) holding two plans: matching on the
+        // user first fanned every bucket out to both plans.
+        let doc = balance_doc(
+            json!([
+                {"plan_id": "p-1024", "user_plan_id": "up-1", "name": "ZCode 1024 Dev Day",
+                 "status": "active", "ends_at": NOW + 50_000,
+                 "entitlements": [{"show_name": "GLM-5.3"}]},
+                {"plan_id": "p-weekend", "user_plan_id": "up-1", "name": "ZCode Weekend Build",
+                 "status": "active", "ends_at": NOW + 60_000,
+                 "entitlements": [{"show_name": "GLM-5.3-Flash"}]}
+            ]),
+            json!([
+                {"plan_id": "p-1024", "user_plan_id": "up-1", "show_name": "GLM-5.3",
+                 "total_units": 200, "used_units": 0, "period_end": NOW + 10_000},
+                {"plan_id": "p-weekend", "user_plan_id": "up-1", "show_name": "GLM-5.3-Flash",
+                 "total_units": 300, "used_units": 0, "period_end": NOW + 20_000}
+            ]),
+            NOW,
+        );
+        let (grants, ungranted) = parse_start_grants(&doc, NOW);
+        assert!(ungranted.is_empty());
+        assert_eq!(grants.len(), 2, "one bucket per plan, not two per plan");
+        let by_plan = |name: &str| grants.iter().find(|g| g.plan == name).unwrap();
+        assert_eq!(by_plan("ZCode 1024 Dev Day").allowance.total, 200.0);
+        assert_eq!(by_plan("ZCode Weekend Build").allowance.total, 300.0);
+    }
+
+    #[test]
+    fn a_bucket_pairs_on_plan_id_when_only_one_side_carries_user_plan_id() {
+        let doc = balance_doc(
+            json!([{"plan_id": "p-1024", "name": "ZCode 1024 Dev Day",
+                    "status": "active", "ends_at": NOW + 50_000,
+                    "entitlements": [{"show_name": "GLM-5.3"}]}]),
+            json!([{"plan_id": "p-1024", "user_plan_id": "up-1", "show_name": "GLM-5.3",
+                    "total_units": 200, "used_units": 0, "period_end": NOW + 10_000}]),
+            NOW,
+        );
+        let (grants, ungranted) = parse_start_grants(&doc, NOW);
+        assert_eq!(grants.len(), 1, "same plan_id is enough to pair");
+        assert_eq!(grants[0].label, "GLM-5.3");
+        assert!(ungranted.is_empty(), "a paired bucket is not a held plan");
+    }
+
+    #[test]
+    fn a_bucket_without_a_plan_id_is_not_claimed_by_every_plan() {
+        // A top-up bucket that names no plan must not fall back to the shared
+        // user id, or each plan of that account would show it.
+        let doc = balance_doc(
+            json!([
+                {"plan_id": "p-1024", "user_plan_id": "up-1", "name": "ZCode 1024 Dev Day",
+                 "status": "active", "ends_at": NOW + 50_000, "entitlements": [{"show_name": "GLM-5.3"}]},
+                {"plan_id": "p-weekend", "user_plan_id": "up-1", "name": "ZCode Weekend Build",
+                 "status": "active", "ends_at": NOW + 60_000, "entitlements": [{"show_name": "GLM-5.3-Flash"}]}
+            ]),
+            json!([{"user_plan_id": "up-1", "show_name": "GLM-5.3",
+                    "total_units": 200, "used_units": 0, "period_end": NOW + 10_000}]),
+            NOW,
+        );
+        let (grants, ungranted) = parse_start_grants(&doc, NOW);
+        assert!(grants.is_empty(), "an unowned bucket is not any plan's");
+        assert_eq!(ungranted.len(), 2, "both plans are still held");
+    }
+
+    #[test]
+    fn a_payload_without_plan_ids_still_pairs_by_user() {
+        let doc = balance_doc(
+            json!([{"user_plan_id": "up-1", "name": "ZCode Weekend Build",
+                    "status": "active", "ends_at": NOW + 50_000, "entitlements": [{"show_name": "GLM-5.3"}]}]),
+            json!([{"user_plan_id": "up-1", "show_name": "GLM-5.3",
+                    "total_units": 200, "used_units": 0, "period_end": NOW + 10_000}]),
+            NOW,
+        );
+        let (grants, ungranted) = parse_start_grants(&doc, NOW);
+        assert_eq!(grants.len(), 1);
+        assert!(ungranted.is_empty());
+        assert_eq!(grants[0].allowance.total, 200.0);
+    }
+
+    #[test]
+    fn the_earlier_of_two_deadlines_wins() {
+        // period_end in the future, expires_at already past: the grant is over.
+        let doc = balance_doc(
+            json!([{"plan_id": "p-1", "user_plan_id": "up-1", "name": "ZCode Weekend Build",
+                    "status": "active", "ends_at": NOW + 50_000, "entitlements": [{"show_name": "GLM-5.3"}]}]),
+            json!([{"plan_id": "p-1", "user_plan_id": "up-1", "show_name": "GLM-5.3",
+                    "total_units": 200, "used_units": 0,
+                    "period_end": NOW + 10_000, "expires_at": NOW - 1}]),
+            NOW,
+        );
+        let (grants, _) = parse_start_grants(&doc, NOW);
+        assert!(grants.is_empty(), "the earlier deadline closed the bucket");
+    }
+
+    #[test]
+    fn a_merged_window_never_keeps_a_stale_period() {
+        // The later end arrives without a start: the old window's length must
+        // not be attached to the new deadline.
+        let doc = balance_doc(
+            json!([{"plan_id": "p-1", "user_plan_id": "up-1", "name": "ZCode Weekend Build",
+                    "status": "active", "ends_at": NOW + 90_000,
+                    "entitlements": [{"show_name": "GLM-5.3"}]}]),
+            json!([
+                {"plan_id": "p-1", "user_plan_id": "up-1", "show_name": "GLM-5.3",
+                 "total_units": 100, "used_units": 0,
+                 "period_start": NOW - 5_000, "period_end": NOW + 3_000},
+                {"plan_id": "p-1", "user_plan_id": "up-1", "show_name": "GLM-5.3",
+                 "total_units": 100, "used_units": 0, "period_end": NOW + 9_000}
+            ]),
+            NOW,
+        );
+        let (grants, _) = parse_start_grants(&doc, NOW);
+        assert_eq!(grants.len(), 1);
+        assert_eq!(grants[0].allowance.resets_at_ms, Some((NOW + 9_000) * 1000));
+        assert_eq!(grants[0].allowance.period_ms, None, "no stale length from the earlier window");
     }
 
     #[test]

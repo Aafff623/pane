@@ -205,7 +205,10 @@ Ground rules that apply to every provider:
     `period: one_time`) and `data.balances[]` mirroring each entitlement
     (`show_name`, `total_units`, `used_units`, `remaining_units`,
     `available_units`, `period_start`, `period_end`, `expires_at`, unix
-    seconds). A plan past `ends_at` is dead even while it still says `active`,
+    seconds). A bucket is paired to its plan by `plan_id` first — one account
+    can hold several plans at once (a gift beside the coding plan) and they
+    share `user_plan_id`, so matching on the user would fan every bucket out to
+    every plan; the user id is only the fallback when a payload omits plan ids. A plan past `ends_at` is dead even while it still says `active`,
     and a bucket past its own window stops counting.
   - **Rows:** label = the bucket's `show_name` (so `GLM-5.3` and
     `GLM-5.3-Flash` stay distinguishable), bar = used/total, detail names the
@@ -214,6 +217,18 @@ Ground rules that apply to every provider:
     with no grant at all keeps the historical "Weekend not started" row; no
     local session renders no row. A failed request holds the last verdict so
     rows never flicker between refreshes.
+  - **Caching:** rows are cached only for the session that fetched them (a
+    hashed token tag) and for five minutes, so switching ZCode accounts or
+    letting the session expire cannot paint one account's gifts on another's
+    card.
+  - **待确认:** the meaning of every `status` value and the timezone/unit of the
+    naive timestamps; a gift whose `total_units` is 0 renders no row at all; when
+    every grant has expired the card falls back to the historical "Weekend not
+    started" copy, which reads as "never granted" rather than "ended"; and when a
+    Z.ai API key and the local ZCode session belong to **different accounts**,
+    the gift rows still attach to the key's card because the key path carries no
+    account identity to compare — an account-scoped split is still to be
+    decided.
 
 ## Antigravity
 

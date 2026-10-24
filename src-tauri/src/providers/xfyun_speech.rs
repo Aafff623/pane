@@ -476,16 +476,10 @@ fn count_metrics(app: &str, channel: &str, meter: &CountMeter) -> Vec<Metric> {
         .unwrap_or(channel);
     let mut out = Vec::new();
     let pack_left = meter.left.unwrap_or_default().max(0.0);
-    let trial_left = meter
-        .trial_remaining
-        .or_else(|| match (meter.trial_total, meter.used) {
-            // Only derive when the trial is the one moving; a missing
-            // remainCount must not turn a paid pack into trial credit.
-            (Some(_), Some(used)) => Some((meter.trial_total.unwrap_or_default() - used).max(0.0)),
-            _ => None,
-        })
-        .unwrap_or_default()
-        .max(0.0);
+    // Only the reported trial balance is shown. Deriving it from
+    // `threshold − usedCount` when `remainCount` is missing invented a trial
+    // the payload never mentioned (and inflated the console's total).
+    let trial_left = meter.trial_remaining.unwrap_or_default().max(0.0);
     if meter.left.is_some() || meter.trial_remaining.is_some() {
         let value = if trial_left > 0.0 {
             format!(
