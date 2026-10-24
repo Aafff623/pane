@@ -354,6 +354,7 @@ const CONFIG_KEYS: &[&str] = &[
     "overviewCatFull",
     "mainScrollTop",
     "qoderCheckin",
+    "updateCheckHours",
     "removedProviders",
     // Frontend-owned: the popover's one-shot "open the panel here" request
     // (see applyPanelIntent in main.ts). Stored so the panel window can read
@@ -5692,8 +5693,8 @@ async fn sensenova_oauth_finish(input: String) -> Result<providers::Snapshot, St
 // outer_position/inner_size report and restore.
 // ---------------------------------------------------------------------------
 
-const PANEL_DEFAULT_SIZE: (f64, f64) = (1350.0, 900.0);
-const PANEL_MIN_SIZE: (f64, f64) = (960.0, 640.0);
+const PANEL_DEFAULT_SIZE: (f64, f64) = (980.0, 700.0);
+const PANEL_MIN_SIZE: (f64, f64) = (860.0, 620.0);
 
 fn panel_bounds_path() -> PathBuf {
     providers::config_dir().join("panel-window.json")
@@ -5822,7 +5823,9 @@ async fn ensure_panel_window(app: &tauri::AppHandle) -> Result<(), String> {
             .min_inner_size(PANEL_MIN_SIZE.0, PANEL_MIN_SIZE.1)
             .center()
             .resizable(true)
-            .decorations(true)
+            .decorations(false)
+            .transparent(true)
+            .maximizable(false)
             .always_on_top(false)
             .skip_taskbar(false)
             .visible(false)
@@ -5914,23 +5917,37 @@ async fn set_window_form(app: tauri::AppHandle, form: String) -> Result<(), Stri
     Ok(())
 }
 
-/// Startup + every 4 h: quiet update check; a hit emits "update-available"
-/// with the new version so the frontend can show its banner. 404 (no
-/// releases yet) and offline are non-events.
+/// Startup + the user's chosen interval: quiet update check; a hit emits
+/// "update-available" with the new version so the frontend can show its
+/// banner. 404 (no releases yet) and offline are non-events. The interval is
+/// re-read every half hour so a change in Settings takes effect without a
+/// restart; 0 turns the automatic check off.
 fn spawn_update_checker(app: &tauri::AppHandle) {
     let handle = app.clone();
     tauri::async_runtime::spawn(async move {
+        let mut last_check: Option<std::time::Instant> = None;
         loop {
-            if let Ok(updater) = build_updater(&handle) {
-                match updater.check().await {
-                    Ok(Some(update)) => {
-                        let _ = handle.emit("update-available", update.version.clone());
+            let hours = config_with_defaults(load_config())
+                .get("updateCheckHours")
+                .and_then(Value::as_u64)
+                .unwrap_or(4);
+            let due = hours > 0
+                && last_check.is_none_or(|at| {
+                    at.elapsed() >= std::time::Duration::from_secs(hours * 3600)
+                });
+            if due {
+                last_check = Some(std::time::Instant::now());
+                if let Ok(updater) = build_updater(&handle) {
+                    match updater.check().await {
+                        Ok(Some(update)) => {
+                            let _ = handle.emit("update-available", update.version.clone());
+                        }
+                        Ok(None) => {}
+                        Err(e) => eprintln!("[pane] update check: {e}"),
                     }
-                    Ok(None) => {}
-                    Err(e) => eprintln!("[pane] update check: {e}"),
                 }
             }
-            tokio::time::sleep(std::time::Duration::from_secs(4 * 3600)).await;
+            tokio::time::sleep(std::time::Duration::from_secs(30 * 60)).await;
         }
     });
 }

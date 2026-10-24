@@ -66,7 +66,7 @@
   outline: 2px solid var(--signal-focus); outline-offset: 2px;
 }
 /* Body-mounted menus, rails, settings and independent panel share the palette. */
-[data-skin="signal"] :is(.group-menu, .font-menu, #model-tip, .sidebar, .glass-bar, #settings, #drawer, .st-card, #confirm-box, #update-box, #whatsnew-box, .spend-detail-panel) {
+[data-skin="signal"] :is(.group-menu, .font-menu, #model-tip, .sidebar, .glass-bar, #drawer, .st-card, #confirm-box, #update-box, #whatsnew-box, .spend-detail-panel) {
   background: var(--signal-surface); color: var(--foreground); border-color: var(--border);
 }
 [data-skin="signal"] :is(.group-menu button, .font-option):hover { background-color: var(--signal-hover); }
@@ -275,3 +275,19 @@
 :root[data-skin="signal"] .spend-update-btn .post-icon { display:none; }
 @media (prefers-reduced-motion:reduce){[data-skin="signal"] *{transition:none !important}}
 [data-skin="signal"]{--post-atlas:url('assets/icons.webp');--post-atlas-extra:url('assets/extra.webp')}
+
+/* Settings skeleton (2026-10): the new .set-* classes ride the same skin
+   tokens as the legacy panel, with no native-blue leak. */
+:root[data-skin="signal"] .set-shell__nav{background:var(--post-paper);border-right:1px solid var(--post-ink)}
+:root[data-skin="signal"] .set-shell__head{background:var(--post-paper);border-color:var(--post-ink)}
+:root[data-skin="signal"] .set-section__head,
+:root[data-skin="signal"] .set-section__card{background:var(--signal-surface);border-color:var(--border)}
+:root[data-skin="signal"] .set-row,
+:root[data-skin="signal"] .set-section__card>.setting-row{border-color:color-mix(in srgb,var(--border) 55%,transparent)}
+:root[data-skin="signal"] .panel-nav-item.active{background:var(--primary);color:var(--primary-foreground);box-shadow:0 1px 2px var(--signal-shadow)}
+:root[data-skin="signal"] .panel-nav-item:hover{background:var(--signal-hover);color:var(--foreground)}
+
+/* The new section wrapper is layout only; the head + card already paint the
+   skin frame. Without this the skin's legacy .st-block border wraps both and
+   reads as a double/triple frame. */
+:root[data-skin="signal"] .set-section{border:0!important;background:transparent!important;box-shadow:none!important;border-radius:0;padding:0}

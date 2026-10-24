@@ -75,6 +75,15 @@ import { keyAvailabilityCounts, keyAvailabilityRows, keyAvailabilitySummary, ove
 import { loadFontPacks, fontPackFamilies, mountFontPackManager } from "./fontPacks";
 import { decorateInkSkin, clearInkSkin, ensureInkDefs } from "./inkEffects";
 import { postIcon } from "./skinIcons";
+import { renderSection } from "./settings/section";
+import { renderItem as renderSettingItem } from "./settings/item";
+import {
+  filterSearchEntries,
+  searchCoverage,
+  stepSelection,
+  type SettingsSearchEntry,
+} from "./settings/search";
+import { mountSettingsControls } from "./settings/controls";
 import { estimateStepfunCredits } from "./stepfunEstimate";
 // The repo's changelog ships inside the bundle, so the "What's new" dialog
 // and the Settings changelog viewer read the exact file releases maintain.
@@ -505,6 +514,7 @@ interface Config {
   overviewCatFull: boolean;
   mainScrollTop: number;
   qoderCheckin: boolean;
+  updateCheckHours: number;
   removedProviders: string[];
   panelIntent: PanelIntent | null;
   // Popover chrome: pin (always-on-top) and the position lock. Locked is
@@ -581,6 +591,7 @@ const FRONTEND_CONFIG_KEYS = [
   "mainScrollTop",
   "panelIntent",
   "qoderCheckin",
+  "updateCheckHours",
   "removedProviders",
   "popoverPin",
   "popoverLock",
@@ -807,6 +818,7 @@ let config: Config = {
   overviewCatFull: false,
   mainScrollTop: 0,
   qoderCheckin: false,
+  updateCheckHours: 4,
   removedProviders: [],
   panelIntent: null,
   popoverPin: false,
@@ -1539,7 +1551,7 @@ function applyConfigEcho(sent: Config, echoed: Config): void {
 
 async function patchConfig(patch: Partial<Config>): Promise<void> {
   Object.assign(config, patch);
-  if (document.body.classList.contains("settings-open") || IS_PANEL_FORM) setSettingsDirty(true);
+  if (IS_PANEL_FORM) setSettingsDirty(true);
   // Send a full current snapshot. If an earlier serialized write failed,
   // the next save retries that still-live in-memory state as well.
   const payload = snapshotConfig();
@@ -1562,6 +1574,11 @@ async function patchConfig(patch: Partial<Config>): Promise<void> {
     configSaveError = String(err);
     const status = document.querySelector("#status");
     if (status) status.textContent = t("footer.configSaveFailed", { err: configSaveError });
+    // The panel has no visible footer (body.panel-form hides it), so a
+    // rejected write must land somewhere the user can actually see.
+    if (IS_PANEL_FORM) {
+      settingsToast(t("footer.configSaveFailed", { err: configSaveError }), true);
+    }
     throw err;
   }
 }
@@ -1593,7 +1610,7 @@ async function reloadConfigFromBackend(): Promise<void> {
   if (layoutChanged) {
     if (customizeOpen) renderDrawerBody();
     if (IS_PANEL_FORM && authViewActive) renderAuthCenter();
-    const keyRows = document.querySelector("#settings-keys-rows");
+    const keyRows = document.querySelector("#panel-keys-rows");
     if (keyRows && !keyRows.closest("[hidden]")) renderSettingsProviderKeys();
   }
   pruneEmptyCardGroups();
@@ -8541,7 +8558,7 @@ function openPopoverSettings(anchor: HTMLElement): void {
       <div class="settings-pop-line"><span>${escapeHtml(t("popover.scale"))}</span><b id="scale-readout">${current}%</b></div>
       <input id="scale-range" type="range" min="80" max="175" step="1" value="${current}" aria-label="${escapeHtml(t("popover.scale"))}" />
       <div class="scale-ticks"><span>80%</span><span>100%</span><span>125%</span><span>150%</span><span>175%</span></div>
-      <p id="settings-scale-status" class="scale-status"></p>
+      <p id="scale-status" class="scale-status"></p>
     </div>
     <div class="settings-pop-section">
       <div class="settings-pop-line"><span>${escapeHtml(t("popover.fontSize"))}</span></div>
@@ -8580,7 +8597,7 @@ function openPopoverSettings(anchor: HTMLElement): void {
 
   const range = pop.querySelector<HTMLInputElement>("#scale-range")!;
   const readout = pop.querySelector<HTMLElement>("#scale-readout")!;
-  const status = pop.querySelector<HTMLElement>("#settings-scale-status")!;
+  const status = pop.querySelector<HTMLElement>("#scale-status")!;
   const disposeSlider = bindPopoverScaleSlider(range, readout, status);
   const disposeAnchor = disposePopoverSettings;
   disposePopoverSettings = () => { disposeSlider(); disposeAnchor?.(); };
@@ -8644,53 +8661,6 @@ async function restorePopoverSize(): Promise<void> {
 
 async function resetPopoverSize(): Promise<void> {
   await setPopoverScale(1);
-}
-
-// Magpie-style top-level settings navigation for the floating window. The
-// existing accordion markup remains the source of truth; tabs only switch
-// which section is visible, so no setting control or listener is duplicated.
-function setupFloatingSettingsTabs(): void {
-  const settings = document.querySelector<HTMLElement>("#settings");
-  const head = settings?.querySelector<HTMLElement>(".panel-head");
-  if (!settings || !head || settings.querySelector(".settings-tabs")) return;
-  const definitions = [
-    ["general", "settings.tabGeneral"],
-    ["usage", "settings.tabUsage"],
-    ["shortcuts", "settings.tabShortcuts"],
-    ["notifications", "settings.tabNotifications"],
-    ["privacy", "settings.tabPrivacy"],
-    ["network", "settings.tabNetwork"],
-    ["about", "settings.tabAbout"],
-  ] as const;
-  const groups = Array.from(settings.querySelectorAll<HTMLElement>(".acc-group"));
-  const tabs = document.createElement("div");
-  tabs.className = "settings-tabs";
-  tabs.setAttribute("role", "tablist");
-  tabs.setAttribute("aria-label", t("settings.title"));
-  const activate = (id: string) => {
-    groups.forEach((group, index) => {
-      const section = definitions[index]?.[0] ?? "general";
-      group.hidden = section !== id;
-    });
-    tabs.querySelectorAll<HTMLButtonElement>("button").forEach((button) => {
-      const active = button.dataset.settingsTab === id;
-      button.classList.toggle("active", active);
-      button.setAttribute("aria-selected", String(active));
-    });
-  };
-  definitions.forEach(([id, labelKey], index) => {
-    const button = document.createElement("button");
-    button.type = "button";
-    button.dataset.settingsTab = id;
-    button.dataset.i18n = labelKey;
-    button.textContent = t(labelKey);
-    button.setAttribute("role", "tab");
-    button.addEventListener("click", () => activate(id));
-    tabs.append(button);
-    if (groups[index]) groups[index].dataset.settingsSection = id;
-  });
-  head.after(tabs);
-  activate("general");
 }
 
 /// Settings font picker internals. The menu is a body-level fixed layer (the
@@ -9327,7 +9297,7 @@ function refreshAccounts(family: string): void {
       // The panel window's settings page lists the same accounts — repaint
       // it when that page is the one on screen (the rows only exist there,
       // so the popover window skips this for free).
-      const keyRows = document.querySelector("#settings-keys-rows");
+      const keyRows = document.querySelector("#panel-keys-rows");
       if (keyRows && !keyRows.closest("[hidden]")) renderSettingsProviderKeys();
     })
     .catch(() => {
@@ -12425,7 +12395,7 @@ let dragPayload: DragPayload | null = null;
 /// Rebuilds order + On-Demand membership after a row drop. The sequence is
 /// [always..., DIVIDER, onDemand...]; where the row lands relative to the
 /// divider decides which side it lives on.
-function moveRow(L: ProviderLayout, key: string, target: string): void {
+function moveLayoutRow(L: ProviderLayout, key: string, target: string): void {
   const always = L.metricOrder.filter((k) => !L.onDemand.includes(k));
   const onDemand = L.metricOrder.filter((k) => L.onDemand.includes(k));
   const seq = [...always, DIVIDER, ...onDemand].filter((k) => k !== key);
@@ -13348,10 +13318,10 @@ function setupCustomizeDnD(providersEl: HTMLElement): void {
     const divider = target.closest<HTMLElement>("[data-divider]");
     const row = target.closest<HTMLElement>("[data-cust-row]");
     if (divider && divider.dataset.divider === dragPayload.id) {
-      moveRow(L, dragPayload.key, DIVIDER);
+      moveLayoutRow(L, dragPayload.key, DIVIDER);
     } else if (row) {
       const [tid, tkey] = row.dataset.custRow!.split("|");
-      if (tid === dragPayload.id && tkey !== dragPayload.key) moveRow(L, dragPayload.key, tkey);
+      if (tid === dragPayload.id && tkey !== dragPayload.key) moveLayoutRow(L, dragPayload.key, tkey);
     }
     saveLayout();
     requestRender();
@@ -14965,10 +14935,10 @@ async function submitRecoveryChallenge(shell: VaultShell): Promise<void> {
 /// Small in-panel feedback line for vault actions. The settings window has
 /// no footer status area, so failures would otherwise be invisible.
 function settingsToast(message: string, isError = false): void {
-  let toast = document.querySelector<HTMLElement>("#settings-toast");
+  let toast = document.querySelector<HTMLElement>("#panel-toast");
   if (!toast) {
     toast = document.createElement("div");
-    toast.id = "settings-toast";
+    toast.id = "panel-toast";
     document.body.append(toast);
   }
   toast.textContent = message;
@@ -15582,7 +15552,7 @@ function skeyLetter(name: string): string {
 
 function renderSkeyAz(): void {
   const rail = document.querySelector<HTMLElement>("#skey-az");
-  const root = document.querySelector<HTMLElement>("#settings-keys-rows");
+  const root = document.querySelector<HTMLElement>("#panel-keys-rows");
   if (!rail || !root) return;
   const present = new Set(
     [...root.querySelectorAll<HTMLElement>("[data-skey-letter]")].map(
@@ -15606,7 +15576,7 @@ function renderSkeyAz(): void {
 }
 
 function renderSettingsProviderKeys(): void {
-  const root = document.querySelector<HTMLElement>("#settings-keys-rows");
+  const root = document.querySelector<HTMLElement>("#panel-keys-rows");
   if (!root) return;
   root.replaceChildren();
   // A–Z by display name; the rail beside the list follows this exact order.
@@ -16486,7 +16456,7 @@ function applyLocale(): void {
   applyStaticI18n();
   if (document.querySelector("#spend-sources-list")) renderSpendSourceRows();
   renderOneNewApiSettings();
-  if (document.body.classList.contains("settings-open") || IS_PANEL_FORM) void loadKeyvault();
+  if (IS_PANEL_FORM) void loadKeyvault();
   applyAppearance();
   if (lastSnapshots.length) {
     writeIdleFooter();
@@ -16494,6 +16464,9 @@ function applyLocale(): void {
     const status = document.querySelector("#status");
     if (status) status.textContent = t("footer.starting");
   }
+  // Search labels are captured text, not data-i18n nodes; a language switch
+  // must rebuild them or the dropdown keeps matching the old language.
+  if (IS_PANEL_FORM && settingsSearchIndex.length) rebuildSettingsSearchIndex();
   if (lastSnapshots.length) requestRender();
   // Auth-center rows paint with t() at render time — re-render so a locale
   // switch retranslates them (static [data-i18n] is already handled above).
@@ -16538,20 +16511,23 @@ async function initSettings(): Promise<void> {
   }
   // Panel form: build the settings shell after config lands (controls read
   // initial values from it) but before applyLocale, so applyStaticI18n
-  // translates the new DOM in the same pass.
+  // translates the new DOM in the same pass. The control source is inert and
+  // hidden; the panel adopts each node into its skeleton.
+  mountSettingsControls();
   if (IS_PANEL_FORM) initPanelForm();
   mountSpendSettingsBlocks(
     IS_PANEL_FORM
       ? document.querySelector<HTMLElement>("#st-general .st-card")
-      : document.querySelector<HTMLElement>("#settings .acc-group .acc-inner"),
+      : null,
   );
+  // Spend blocks mount after the shell was built; give their rows the same
+  // skeleton anchor treatment before the search index is rebuilt.
+  if (IS_PANEL_FORM) decoratePanelRows();
   // The shell exists now, so an intent the popover wrote before opening this
   // window can land (see applyPanelIntent).
   applyPanelIntent();
-  document.querySelector<HTMLButtonElement>("#settings-save-all")?.addEventListener("click", () => {
-    void applySettingsAndReload();
-  });
   applyLocale();
+  if (IS_PANEL_FORM) rebuildSettingsSearchIndex();
   document.documentElement.classList.remove("i18n-boot");
   markConfigLoaded();
   if (["today", "yesterday", "last30"].includes(config.spendTab)) {
@@ -16632,7 +16608,7 @@ async function initSettings(): Promise<void> {
   // Spend-bolt tiers: built-in ladder or three custom daily thresholds (the
   // inputs hold M tokens; config stores raw token counts).
   const tierMode = document.querySelector<HTMLSelectElement>("#spend-tier-mode")!;
-  const tierCustom = document.querySelector<HTMLElement>("#spend-tier-custom")!;
+  const tierCustom = document.querySelector<HTMLElement>("#st-spend-tier-custom");
   const tierInputs = {
     medium: document.querySelector<HTMLInputElement>("#spend-tier-medium")!,
     high: document.querySelector<HTMLInputElement>("#spend-tier-high")!,
@@ -16643,7 +16619,7 @@ async function initSettings(): Promise<void> {
     tierInputs.medium.value = String(Math.round(current.medium / 1_000_000));
     tierInputs.high.value = String(Math.round(current.high / 1_000_000));
     tierInputs.max.value = String(Math.round(current.max / 1_000_000));
-    tierCustom.hidden = tierMode.value !== "custom";
+    if (tierCustom) tierCustom.hidden = tierMode.value !== "custom";
   };
   const saveTierInputs = () => {
     const medium = Math.max(1, Number(tierInputs.medium.value) || 100) * 1_000_000;
@@ -16808,11 +16784,6 @@ async function initSettings(): Promise<void> {
       onChange: () => { if (fontMenu) renderFontOptions(uiFont.value); },
     }).catch(() => {});
   }
-  document.querySelector("#tour-replay")?.addEventListener("click", () => {
-    document.querySelector<HTMLElement>("#settings-close")?.click();
-    setDrawer(false);
-    startTour();
-  });
   const density = document.querySelector<HTMLInputElement>("#density")!;
   density.checked = config.density === "compact";
   density.addEventListener("change", () => {
@@ -16839,10 +16810,6 @@ async function initSettings(): Promise<void> {
     void patchConfig({ startupAnimation: startupAnim.checked });
   });
   document.querySelector("#splash-replay")?.addEventListener("click", () => {
-    // Close the settings panel so the splash is actually visible. Mirrors
-    // setSettings(false) — that helper is scoped to the boot wiring below.
-    document.body.classList.remove("settings-open");
-    document.querySelector("#settings-btn")?.classList.remove("active");
     if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
     playSplash();
   });
@@ -17032,6 +16999,7 @@ async function resetAllSettings(): Promise<void> {
     silentStart: false,
     hideUnconfigured: true,
     setupPicked: false,
+    updateCheckHours: 4,
   }).catch(() => {});
   spendTab = "today";
   rangeSelected = false;
@@ -17047,8 +17015,6 @@ async function resetAllSettings(): Promise<void> {
   applyAppearance();
   applyGlass();
   applyReduceMotion();
-  document.body.classList.remove("settings-open");
-  document.querySelector("#settings-btn")?.classList.remove("active");
   void forceUsageRefreshAttempt(false).then(requestTraySync);
 }
 
@@ -17068,6 +17034,7 @@ function syncSettingsControls(): void {
   setNum("#interval", String(config.refreshMinutes));
   setSelect("#timeformat", config.timeFormat);
   setSelect("#locale", config.locale);
+  setSelect("#update-frequency", String(config.updateCheckHours ?? 4));
   setCheck("#notify-almost", config.notifyAlmostOut);
   setCheck("#notify-close", config.notifyCuttingClose);
   setCheck("#notify-runout", config.notifyWillRunOut);
@@ -17118,49 +17085,77 @@ function syncSettingsControls(): void {
 // display:none in this window; the main window's own DOM is unaffected.
 
 function panelRow(labelKey: string, ...controls: HTMLElement[]): HTMLElement {
-  const row = document.createElement("div");
-  row.className = "setting-row";
-  const label = document.createElement("label");
-  label.dataset.i18n = labelKey;
-  label.textContent = t(labelKey);
-  row.append(label, ...controls);
+  return panelRowDesc(labelKey, null, ...controls);
+}
+
+/// A skeleton row with a visible 12/400 description. `descKey` keeps the
+/// description translatable alongside its label.
+function panelRowDesc(
+  labelKey: string,
+  descKey: string | null,
+  ...controls: HTMLElement[]
+): HTMLElement {
+  const template = document.createElement("template");
+  template.innerHTML = renderSettingItem({
+    label: t(labelKey),
+    labelKey,
+    desc: descKey ? t(descKey) : "",
+    descKey: descKey ?? undefined,
+    control: "",
+  });
+  const row = template.content.firstElementChild as HTMLElement;
+  const controlHost = row.querySelector<HTMLElement>(".set-row__control");
+  for (const control of controls) {
+    if (
+      ["INPUT", "SELECT", "TEXTAREA"].includes(control.tagName) &&
+      !control.getAttribute("aria-label")
+    ) {
+      control.setAttribute("aria-label", t(labelKey));
+    }
+  }
+  controlHost?.append(...controls);
   return row;
 }
 
 function panelSwitchRow(labelKey: string, tipKey: string, input: HTMLInputElement): HTMLElement {
-  const row = document.createElement("div");
-  row.className = "setting-row";
+  input.setAttribute("aria-label", t(labelKey));
   const toggle = document.createElement("label");
   toggle.className = "toggle";
   toggle.title = t(tipKey);
   toggle.dataset.i18nTitle = tipKey;
-  const span = document.createElement("span");
-  span.dataset.i18n = labelKey;
-  span.textContent = t(labelKey);
-  toggle.append(input, span);
-  row.append(toggle);
-  return row;
+  toggle.append(input);
+  return panelRowDesc(labelKey, tipKey, toggle);
 }
 
-function panelBlock(id: string, titleKey: string): { section: HTMLElement; body: HTMLElement } {
-  const section = document.createElement("section");
-  section.className = "st-block";
-  section.id = id;
-  const head = document.createElement("div");
-  head.className = "st-block-head";
-  const h2 = document.createElement("h2");
-  h2.dataset.i18n = titleKey;
-  h2.textContent = t(titleKey);
-  head.append(h2);
-  const body = document.createElement("div");
-  body.className = "st-card";
-  section.append(head, body);
+function panelBlock(
+  id: string,
+  titleKey: string,
+  descKey?: string,
+): { section: HTMLElement; body: HTMLElement } {
+  const template = document.createElement("template");
+  template.innerHTML = renderSection({
+    id,
+    title: t(titleKey),
+    titleKey,
+    desc: descKey ? t(descKey) : "",
+    descKey,
+    className: "st-block",
+    children: "",
+  });
+  const section = template.content.firstElementChild as HTMLElement;
+  const body = section.querySelector<HTMLElement>(".set-section__card") as HTMLElement;
+  body.classList.add("st-card");
   return { section, body };
 }
 
 async function panelCheckForUpdate(btn: HTMLButtonElement): Promise<void> {
+  const setText = (text: string) => {
+    const span = btn.querySelector<HTMLElement>("span");
+    if (span) span.textContent = text;
+    else btn.textContent = text;
+  };
   btn.disabled = true;
-  btn.textContent = t("update.check");
+  setText(t("update.check"));
   try {
     // Same command the footer's update entry uses; a hit goes through the
     // existing prompt + install_update chain.
@@ -17169,16 +17164,16 @@ async function panelCheckForUpdate(btn: HTMLButtonElement): Promise<void> {
       updateVersion = v;
       syncPanelNavBadge();
       maybePromptUpdate(v, true);
-      btn.textContent = t("update.to", { version: v });
+      setText(t("update.to", { version: v }));
     } else {
-      btn.textContent = t("settings.updateLatest");
+      setText(t("settings.updateLatest"));
     }
   } catch (err) {
-    btn.textContent = t("footer.updateFailed", { err: String(err) });
+    setText(t("footer.updateFailed", { err: String(err) }));
   } finally {
     btn.disabled = false;
     window.setTimeout(() => {
-      if (!updateVersion) btn.textContent = t("settings.checkUpdate");
+      if (!updateVersion) setText(t("settings.checkUpdate"));
     }, 2600);
   }
 }
@@ -17208,6 +17203,8 @@ function activatePanelPage(pageId: string): void {
     const block = document.querySelector<HTMLElement>(`#${blockId}`);
     if (block) block.hidden = id !== pageId;
   }
+  const scroll = document.querySelector<HTMLElement>("#panel-scroll");
+  if (scroll) scroll.scrollTop = 0;
   document.querySelectorAll<HTMLButtonElement>("#panel-nav [data-settings-tab]").forEach((button) => {
     const active = button.dataset.settingsTab === pageId;
     button.classList.toggle("active", active);
@@ -17230,6 +17227,10 @@ function syncPanelHeader(view: "settings" | "auth"): void {
     const key = view === "auth" ? "panel.desc.auth" : panelPageMeta(activePanelPage)[3];
     sub.dataset.i18n = key;
     sub.textContent = t(key);
+    // Settings pages already carry the same line in their section head;
+    // showing it twice in one viewport is noise. The auth view has no
+    // section head, so it keeps the subtitle.
+    sub.hidden = view === "settings";
   }
   const save = document.querySelector<HTMLButtonElement>("#panel-head .settings-save-all");
   if (save) save.hidden = view === "auth";
@@ -17245,12 +17246,14 @@ function buildPanelShell(): void {
   if (document.querySelector("#panel-shell")) return;
   const shell = document.createElement("div");
   shell.id = "panel-shell";
+  shell.className = "set-shell";
 
   // Left rail doubles as the settings directory (cc-switch borrow): each
   // page is an icon with a hover tip, and the auth center sits at the
   // bottom behind a hairline like an account entry.
   const nav = document.createElement("nav");
   nav.id = "panel-nav";
+  nav.className = "set-shell__nav";
   const logo = document.createElement("span");
   logo.id = "panel-logo";
   logo.className = "app-logo";
@@ -17270,6 +17273,11 @@ function buildPanelShell(): void {
     button.setAttribute("aria-controls", blockId);
     button.setAttribute("role", "tab");
     button.innerHTML = uiIcon(iconName);
+    const buttonLabel = document.createElement("span");
+    buttonLabel.className = "panel-nav-label";
+    buttonLabel.dataset.i18n = labelKey;
+    buttonLabel.textContent = t(labelKey);
+    button.append(buttonLabel);
     if (id === "about") {
       const dot = document.createElement("span");
       dot.id = "panel-update-dot";
@@ -17295,6 +17303,11 @@ function buildPanelShell(): void {
   authItem.dataset.tip = t("auth.title");
   authItem.setAttribute("aria-label", t("auth.title"));
   authItem.innerHTML = uiIcon("lockOpen");
+  const authLabel = document.createElement("span");
+  authLabel.className = "panel-nav-label";
+  authLabel.dataset.i18n = "auth.title";
+  authLabel.textContent = t("auth.title");
+  authItem.append(authLabel);
   authItem.addEventListener("click", () => setPanelView("auth"));
   nav.append(logo, pages, spacer, separator, authItem);
 
@@ -17302,8 +17315,14 @@ function buildPanelShell(): void {
   main.id = "panel-main";
   const head = document.createElement("header");
   head.id = "panel-head";
+  head.className = "set-shell__head";
+  head.setAttribute("data-tauri-drag-region", "");
   const headText = document.createElement("div");
   headText.className = "panel-head-text";
+  const gear = document.createElement("span");
+  gear.className = "panel-head-gear";
+  gear.setAttribute("aria-hidden", "true");
+  gear.innerHTML = uiIcon("gear");
   const h1 = document.createElement("h1");
   h1.dataset.i18n = "settings.title";
   h1.textContent = t("settings.title");
@@ -17311,7 +17330,7 @@ function buildPanelShell(): void {
   sub.id = "panel-head-sub";
   sub.dataset.i18n = "panel.desc.general";
   sub.textContent = t("panel.desc.general");
-  headText.append(h1, sub);
+  headText.append(gear, h1, sub);
   const save = document.createElement("button");
   save.type = "button";
   save.className = "mini-btn settings-save-all";
@@ -17319,9 +17338,34 @@ function buildPanelShell(): void {
   save.textContent = t("settings.save");
   save.disabled = true;
   save.addEventListener("click", () => void applySettingsAndReload());
-  head.append(headText, save);
+  const search = document.createElement("div");
+  search.id = "panel-search-wrap";
+  search.innerHTML = `<span class="panel-search-icon" aria-hidden="true">${uiIcon("magnifyingGlass")}</span><input id="panel-search" class="form-input" type="search" spellcheck="false" autocomplete="off" data-i18n-placeholder="settings.searchPlaceholder" placeholder="${escapeHtml(t("settings.searchPlaceholder"))}" aria-controls="panel-search-results" /><div id="panel-search-results" role="listbox" hidden></div>`;
+  const windowControls = document.createElement("div");
+  windowControls.className = "set-window-controls";
+  const minBtn = document.createElement("button");
+  minBtn.type = "button";
+  minBtn.className = "set-window-btn";
+  minBtn.title = t("settings.minimize");
+  minBtn.setAttribute("aria-label", t("settings.minimize"));
+  minBtn.textContent = "−";
+  minBtn.addEventListener("click", () => {
+    void getCurrentWebviewWindow().minimize().catch(() => {});
+  });
+  const closeBtn = document.createElement("button");
+  closeBtn.type = "button";
+  closeBtn.className = "set-window-btn close";
+  closeBtn.title = t("settings.close");
+  closeBtn.setAttribute("aria-label", t("settings.close"));
+  closeBtn.innerHTML = uiIcon("x");
+  closeBtn.addEventListener("click", () => {
+    void getCurrentWebviewWindow().close().catch(() => {});
+  });
+  windowControls.append(minBtn, closeBtn);
+  head.append(headText, search, save, windowControls);
   const scroll = document.createElement("div");
   scroll.id = "panel-scroll";
+  scroll.className = "set-shell__scroll";
   main.append(head, scroll);
 
   // Two switchable views share the scroll area (M3): settings and the auth
@@ -17338,38 +17382,87 @@ function buildPanelShell(): void {
 
   // Pages are switched by the rail (PANEL_PAGES), not a horizontal tab bar.
 
-  // Rows/notes moved from the popover markup (each window owns its own
-  // document — the floating settings keeps its copy).
-  const moveToCard = (card: HTMLElement, ...selectors: string[]) => {
-    for (const selector of selectors) {
-      const el = document.querySelector<HTMLElement>(selector);
-      if (!el) continue;
-      const row = el.closest<HTMLElement>(".setting-row") ?? el;
-      card.append(row);
-    }
-  };
-
-  // --- General: re-parented popover rows + the new dual-form controls ----
-  const general = panelBlock("st-general", "settings.general");
+  // --- General: adopted controls + the new dual-form controls --------------
+  const general = panelBlock("st-general", "settings.general", "panel.desc.general");
   const generalCard = general.body;
-  const moveRow = (controlId: string) => {
-    const row = document.querySelector(`#${controlId}`)?.closest<HTMLElement>(".setting-row");
-    if (row) generalCard.append(row);
+  const adoptControl = (
+    controlId: string,
+    labelKey: string,
+    descKey: string | null,
+    extras: HTMLElement[] = [],
+    card: HTMLElement = generalCard,
+  ): void => {
+    const control = document.querySelector<HTMLElement>(`#${controlId}`);
+    if (!control) return;
+    if (
+      ["INPUT", "SELECT", "TEXTAREA"].includes(control.tagName) &&
+      !control.getAttribute("aria-label")
+    ) {
+      control.setAttribute("aria-label", t(labelKey));
+    }
+    control.closest<HTMLElement>(".setting-row")?.remove();
+    card.append(panelRowDesc(labelKey, descKey, control, ...extras));
   };
-  moveRow("locale");
-  moveRow("appearance");
-  moveRow("ui-font");
-  moveRow("ui-font-cjk");
+  const adoptSwitch = (
+    controlId: string,
+    labelKey: string,
+    descKey: string,
+    card: HTMLElement,
+  ): void => {
+    const input = document.querySelector<HTMLInputElement>(`#${controlId}`);
+    if (!input) return;
+    input.closest<HTMLElement>(".setting-row")?.remove();
+    card.append(panelSwitchRow(labelKey, descKey, input));
+  };
+  adoptControl("locale", "settings.language", "settings.desc.language");
+  adoptControl("appearance", "settings.appearance", "settings.desc.appearance");
+  adoptControl("ui-font", "settings.font", "settings.fontTip");
+  adoptControl("ui-font-cjk", "settings.fontCjk", "settings.fontCjkTip", [
+    document.querySelector<HTMLElement>("#ui-font-cjk-list") as HTMLElement,
+  ].filter(Boolean));
   const fontManager = document.querySelector<HTMLElement>(".font-pack-manager");
   if (fontManager) generalCard.append(fontManager);
   document.querySelector("#tour-replay")?.closest(".setting-row")?.remove();
-  moveRow("density");
-  moveRow("glass");
-  moveRow("reduce-anim");
-  moveRow("jump-animation");
-  moveRow("interval");
-  moveRow("pinned");
-  moveRow("timeformat");
+  adoptControl("density", "settings.compact", "settings.desc.density");
+  adoptControl("glass", "settings.glass", "settings.glassTip");
+  adoptControl("reduce-anim", "settings.reduceAnim", "settings.reduceAnimTip");
+  adoptControl("startup-anim", "settings.startupAnim", "settings.startupAnimTip", [
+    document.querySelector<HTMLElement>("#splash-replay") as HTMLElement,
+  ].filter(Boolean));
+  adoptControl("jump-animation", "settings.jumpAnimation", "settings.desc.jumpAnimation");
+  const intervalUnit = document.createElement("span");
+  intervalUnit.className = "unit";
+  intervalUnit.dataset.i18n = "settings.min";
+  intervalUnit.textContent = t("settings.min");
+  adoptControl("interval", "settings.refreshEvery", "settings.desc.refresh", [intervalUnit]);
+  adoptControl("pinned", "settings.trayShows", "settings.desc.pinned");
+  adoptControl("timeformat", "settings.timeFormat", "settings.desc.timeFormat");
+  adoptControl("show-total-spend", "settings.showSpend", "settings.desc.showSpend");
+  const tierModeControl = document.querySelector<HTMLElement>("#spend-tier-mode");
+  if (tierModeControl) {
+    const modeRow = panelRowDesc("settings.spendTiers", "settings.desc.spendTiers", tierModeControl);
+    generalCard.append(modeRow);
+    tierModeControl.closest<HTMLElement>(".setting-row")?.remove();
+    const customRow = document.querySelector<HTMLElement>("#spend-tier-custom");
+    if (customRow) {
+      const inputs = Array.from(customRow.querySelectorAll<HTMLElement>("input"));
+      const wrap = document.createElement("div");
+      wrap.className = "set-row__inline-fields";
+      wrap.append(...inputs);
+      const customTierRow = panelRowDesc(
+        "settings.spendTiersLevels",
+        "settings.desc.spendTiersLevels",
+        wrap,
+      );
+      customTierRow.id = "st-spend-tier-custom";
+      generalCard.append(customTierRow);
+      customRow.remove();
+    }
+  }
+  adoptControl("experimental-features", "settings.experimental", "settings.experimentalTip");
+  adoptControl("overview-cat-full", "settings.overviewCatFull", "settings.overviewCatFullTip");
+  adoptControl("qoder-checkin", "settings.qoderCheckin", "settings.qoderCheckinTip");
+  adoptControl("install-agent-skill", "settings.agentSkill", "settings.agentSkillTip");
   const shortcutEntry = document.createElement("button");
   shortcutEntry.type = "button";
   shortcutEntry.className = "mini-btn";
@@ -17381,7 +17474,7 @@ function buildPanelShell(): void {
       ?.scrollIntoView({ behavior: reduceMotion() ? "auto" : scrollBehavior() });
   });
   generalCard.append(panelRow("settings.shortcutManage", shortcutEntry));
-  moveRow("autostart");
+  adoptControl("autostart", "settings.startWithWindows", "settings.desc.autostart");
   // Stored-only for now: the popover already launches hidden, so the flag
   // carries no extra behavior until the panel form grows auto-open-at-login
   // semantics. The tooltip says exactly that.
@@ -17417,7 +17510,7 @@ function buildPanelShell(): void {
     // Same flow as first run, but defaults follow the current choice.
     void runProviderPicker(false);
   });
-  generalCard.append(panelRow("settings.redetectTip", redetect));
+  generalCard.append(panelRowDesc("settings.redetectTip", "settings.redetectTip", redetect));
   const formGroup = document.createElement("div");
   formGroup.className = "st-radio-group";
   for (const value of ["floating", "panel"] as const) {
@@ -17448,7 +17541,7 @@ function buildPanelShell(): void {
     if (value === "panel") void invoke("open_panel_window").catch(() => {});
     else void invoke("close_panel_window").catch(() => {});
   });
-  generalCard.append(panelRow("settings.windowForm", formGroup));
+  generalCard.append(panelRowDesc("settings.windowForm", "settings.desc.windowForm", formGroup));
   const resizeToggle = document.createElement("input");
   resizeToggle.type = "checkbox";
   resizeToggle.checked = config.windowResizeEnabled !== false;
@@ -17464,7 +17557,7 @@ function buildPanelShell(): void {
   sizeReset.dataset.i18n = "settings.windowSizeReset";
   sizeReset.textContent = t("settings.windowSizeReset");
   sizeReset.addEventListener("click", () => void resetPopoverSize());
-  generalCard.append(panelRow("settings.windowSize", sizeReset));
+  generalCard.append(panelRowDesc("settings.windowSize", "settings.desc.windowSize", sizeReset));
   // Replay the first-run spotlight tour on demand.
   const replayTour = document.createElement("button");
   replayTour.type = "button";
@@ -17472,18 +17565,11 @@ function buildPanelShell(): void {
   replayTour.dataset.i18n = "settings.tourReplay";
   replayTour.textContent = t("settings.tourReplay");
   replayTour.addEventListener("click", () => {
-    // The tour lives in the popover's document. From the panel form, ask
-    // the backend to surface the popover and replay there; in the popover
-    // itself, just close the panels over it and start.
-    if (IS_PANEL_FORM) {
-      void invoke("replay_tour").catch(() => {});
-      return;
-    }
-    document.querySelector<HTMLElement>("#settings-close")?.click();
-    setDrawer(false);
-    startTour();
+    // The tour lives in the popover's document; the panel asks the backend to
+    // surface the popover and replay there.
+    void invoke("replay_tour").catch(() => {});
   });
-  generalCard.append(panelRow("settings.tourReplayLabel", replayTour));
+  generalCard.append(panelRowDesc("settings.tourReplayLabel", "settings.desc.tour", replayTour));
 
   // Local-only encrypted backup. The password is never stored; the backend
   // allowlist excludes proxy and window-layout keys from the snapshot.
@@ -17552,11 +17638,11 @@ function buildPanelShell(): void {
     const letter = button.dataset.skeyLetter!;
     document
       .querySelector<HTMLElement>(
-        `#settings-keys-rows [data-skey-letter="${CSS.escape(letter)}"]`,
+        `#panel-keys-rows [data-skey-letter="${CSS.escape(letter)}"]`,
       )
       ?.scrollIntoView({ block: "start", behavior: "smooth" });
   });
-  const providerKeys = panelBlock("st-kv-providers", "settings.keysProviders");
+  const providerKeys = panelBlock("st-kv-providers", "settings.keysProviders", "panel.desc.usage");
   const pkPad = document.createElement("div");
   pkPad.className = "st-pad";
   const pkNote = document.createElement("p");
@@ -17564,11 +17650,11 @@ function buildPanelShell(): void {
   pkNote.dataset.i18n = "settings.keysProvidersHint";
   pkNote.textContent = t("settings.keysProvidersHint");
   const pkRows = document.createElement("div");
-  pkRows.id = "settings-keys-rows";
+  pkRows.id = "panel-keys-rows";
   pkRows.className = "skey-list";
   pkPad.append(pkNote, pkRows);
   providerKeys.body.append(pkPad);
-  const mcpKeys = panelBlock("st-kv-mcp", "settings.keysMcp");
+  const mcpKeys = panelBlock("st-kv-mcp", "settings.keysMcp", "settings.desc.keysMcp");
   const kvPad = document.createElement("div");
   kvPad.className = "st-pad";
   for (const selector of ["#keyvault-rows", ".kv-add-row", ".kv-hint"]) {
@@ -17580,7 +17666,7 @@ function buildPanelShell(): void {
   settingsView.append(keyPage);
 
   // --- Shortcuts: wake + category + local bindings, moved in whole -------
-  const shortcuts = panelBlock("st-shortcuts", "settings.shortcutManage");
+  const shortcuts = panelBlock("st-shortcuts", "settings.shortcutManage", "panel.desc.shortcuts");
   const scPad = document.createElement("div");
   scPad.className = "st-pad";
   const shortcutInner = document.querySelector("#local-shortcuts")?.closest(".acc-inner");
@@ -17590,90 +17676,334 @@ function buildPanelShell(): void {
   shortcuts.body.append(scPad);
   settingsView.append(shortcuts.section);
 
-  // --- About ---------------------------------------------------------------
-  const about = panelBlock("st-about", "settings.about");
-  const versionValue = document.createElement("span");
+  // --- About: brand → actions → update policy → ecosystem -----------------
+  // One page wrapper keeps the three cards on the same rail page; the
+  // changelog and reset entry close the page instead of mixing with the
+  // brand block.
+  const aboutPage = document.createElement("div");
+  aboutPage.id = "st-about";
+  const about = panelBlock("st-about-brand", "settings.about", "panel.desc.about");
+  const brand = document.createElement("div");
+  brand.className = "about-brand";
+  const brandMark = document.createElement("span");
+  brandMark.className = "about-brand-mark";
+  brandMark.innerHTML = `<img src="${paneLogo}" alt="Pane" />`;
+  const brandName = document.createElement("div");
+  brandName.className = "about-brand-name";
+  brandName.textContent = "Pane";
+  const versionValue = document.createElement("button");
+  versionValue.type = "button";
   versionValue.id = "st-version";
-  versionValue.className = "st-version-foot";
-  versionValue.textContent = "…";
+  versionValue.className = "about-version";
+  versionValue.title = t("settings.copyVersion");
+  versionValue.innerHTML = `<span>…</span>${uiIcon("copy")}`;
+  versionValue.addEventListener("click", () => {
+    if (!appVersion) return;
+    void navigator.clipboard.writeText(appVersion).then(() => {
+      settingsToast(t("settings.versionCopied"));
+    }).catch((err) => settingsToast(String(err), true));
+  });
+  const tagline = document.createElement("p");
+  tagline.className = "about-tagline";
+  tagline.dataset.i18n = "settings.aboutTagline";
+  tagline.textContent = t("settings.aboutTagline");
+  brand.append(brandMark, brandName, versionValue, tagline);
+
+  const actions = document.createElement("div");
+  actions.className = "about-actions";
+  const linkAction = (labelKey: string, url: string, iconName: UiIconName): HTMLButtonElement => {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "mini-btn about-action";
+    const text = document.createElement("span");
+    text.dataset.i18n = labelKey;
+    text.textContent = t(labelKey);
+    btn.innerHTML = uiIcon(iconName);
+    btn.append(text);
+    btn.addEventListener("click", () => {
+      void invoke("open_link", { url }).catch((err) => settingsToast(String(err), true));
+    });
+    return btn;
+  };
   const checkBtn = document.createElement("button");
   checkBtn.type = "button";
-  checkBtn.className = "mini-btn";
-  checkBtn.dataset.i18n = "settings.checkUpdate";
-  checkBtn.textContent = t("settings.checkUpdate");
+  checkBtn.className = "mini-btn primary about-action";
+  const checkText = document.createElement("span");
+  checkText.dataset.i18n = "settings.checkUpdate";
+  checkText.textContent = t("settings.checkUpdate");
+  checkBtn.innerHTML = uiIcon("arrowsClockwise");
+  checkBtn.append(checkText);
   checkBtn.addEventListener("click", () => {
     void panelCheckForUpdate(checkBtn);
   });
-  about.body.append(panelRow("settings.update", checkBtn));
-  // Release history belongs with the version it describes, not on the live
-  // quota board. The delegated [data-open-changelog] handler below still
-  // opens the full dialog from "view all".
+  actions.append(
+    checkBtn,
+    linkAction("settings.github", "https://github.com/Aafff623/pane", "star"),
+    linkAction("settings.website", "https://pane.threetwoa.live", "globe"),
+    linkAction("settings.feedback", "https://github.com/Aafff623/pane/issues/new", "info"),
+  );
+  const aboutCardHead = document.createElement("div");
+  aboutCardHead.className = "about-hero";
+  aboutCardHead.append(brand, actions);
+  about.body.append(aboutCardHead);
+
+  // Update policy card: the frequency is a real backend preference; manual
+  // checks never wait for it. No prerelease or popup switches are shown until
+  // they actually exist.
+  const updates = panelBlock("st-about-updates", "settings.update", "settings.desc.updatePolicy");
+  const updateFreq = document.createElement("select");
+  updateFreq.id = "update-frequency";
+  for (const [value, key] of [
+    [4, "settings.updateEvery4h"],
+    [24, "settings.updateDaily"],
+    [168, "settings.updateWeekly"],
+    [0, "settings.updateNever"],
+  ] as const) {
+    const option = document.createElement("option");
+    option.value = String(value);
+    option.dataset.i18n = key;
+    option.textContent = t(key);
+    updateFreq.append(option);
+  }
+  updateFreq.value = String(config.updateCheckHours ?? 4);
+  updateFreq.addEventListener("change", () => {
+    config.updateCheckHours = Number(updateFreq.value) || 0;
+    void patchConfig({ updateCheckHours: config.updateCheckHours }).catch((err) =>
+      settingsToast(String(err), true),
+    );
+  });
+  updates.body.append(
+    panelRowDesc("settings.updateFrequency", "settings.desc.updateFrequency", updateFreq),
+  );
+  aboutPage.append(about.section, updates.section);
+
+  // Ecosystem + release history: links open externally, sharing copies the
+  // public URL, and the changelog keeps living beside the version it explains.
+  const ecosystem = panelBlock("st-about-ecosystem", "settings.ecosystem", "settings.desc.ecosystem");
+  const shareBtn = document.createElement("button");
+  shareBtn.type = "button";
+  shareBtn.className = "mini-btn";
+  shareBtn.dataset.i18n = "settings.shareLink";
+  shareBtn.textContent = t("settings.shareLink");
+  shareBtn.addEventListener("click", () => {
+    void navigator.clipboard.writeText("https://github.com/Aafff623/pane").then(() => {
+      settingsToast(t("settings.linkCopied"));
+    }).catch((err) => settingsToast(String(err), true));
+  });
+  ecosystem.body.append(
+    panelRowDesc("settings.ecosystemStar", "settings.desc.starRepo", linkAction("settings.open", "https://github.com/Aafff623/pane", "star")),
+    panelRowDesc("settings.ecosystemFeedback", "settings.desc.feedback", linkAction("settings.open", "https://github.com/Aafff623/pane/issues/new", "info")),
+    panelRowDesc("settings.ecosystemShare", "settings.desc.share", shareBtn),
+  );
   const changelog = document.createElement("div");
   changelog.className = "about-changelog";
   changelog.innerHTML = renderChangelogTimeline();
-  if (changelog.firstElementChild) about.body.append(changelog);
+  if (changelog.firstElementChild) ecosystem.body.append(changelog);
   const resetBtn = document.querySelector<HTMLElement>("#reset-all-settings");
   if (resetBtn) {
-    const row = document.createElement("div");
-    row.className = "setting-row";
-    row.append(resetBtn);
-    about.body.append(row);
+    resetBtn.closest<HTMLElement>(".setting-row")?.remove();
+    ecosystem.body.append(panelRow("settings.resetAll", resetBtn));
   }
   const ack = document.createElement("p");
   ack.className = "settings-note st-pad";
   ack.dataset.i18n = "settings.ackBody";
   ack.textContent = t("settings.ackBody");
-  about.body.append(ack);
-  // Version is a quiet footer in the blank area under the last rows —
-  // the user asked for it not to be a standalone setting row.
-  about.body.append(versionValue);
-  settingsView.append(about.section);
+  ecosystem.body.append(ack);
+  aboutPage.append(ecosystem.section);
+  settingsView.append(aboutPage);
 
-  // --- Notifications / Privacy / Network: re-parented 1:1 from the popover
-  // markup, so the panel window carries the same seven pages as the
-  // floating sheet instead of a subset.
-  const notifications = panelBlock("st-notifications", "settings.notifications");
-  moveToCard(
-    notifications.body,
-    '[data-i18n="settings.notifyNote"]',
-    "#notify-almost",
-    "#notify-close",
-    "#notify-runout",
-    "#notify-resetsoon",
-  );
+  // --- Notifications / Privacy / Network: controls adopted from the legacy
+  // sheet into skeleton rows, so these pages share the 18/14/12 rhythm. -----
+  const notifications = panelBlock("st-notifications", "settings.notifications", "panel.desc.notifications");
+  const notifyNote = document.querySelector<HTMLElement>('[data-i18n="settings.notifyNote"]');
+  if (notifyNote) {
+    notifyNote.classList.add("st-pad", "settings-note");
+    notifications.body.append(notifyNote);
+  }
+  adoptSwitch("notify-almost", "settings.notifyAlmost", "settings.desc.notifyAlmost", notifications.body);
+  adoptSwitch("notify-close", "settings.notifyClose", "settings.desc.notifyClose", notifications.body);
+  adoptSwitch("notify-runout", "settings.notifyRunout", "settings.desc.notifyRunout", notifications.body);
+  adoptSwitch("notify-resetsoon", "settings.notifyResetSoon", "settings.desc.notifyResetSoon", notifications.body);
   settingsView.append(notifications.section);
 
-  const privacy = panelBlock("st-privacy", "settings.privacy");
-  moveToCard(
-    privacy.body,
-    '[data-i18n="settings.privacyNote"]',
-    "#telemetry",
-    "#hide-while-sharing",
-    "#show-trend",
-  );
+  const privacy = panelBlock("st-privacy", "settings.privacy", "panel.desc.privacy");
+  const privacyNote = document.querySelector<HTMLElement>('[data-i18n="settings.privacyNote"]');
+  if (privacyNote) {
+    privacyNote.classList.add("st-pad", "settings-note");
+    privacy.body.append(privacyNote);
+  }
+  adoptSwitch("telemetry", "settings.telemetry", "settings.desc.telemetry", privacy.body);
+  adoptSwitch("hide-while-sharing", "settings.hideSharing", "settings.hideSharingTip", privacy.body);
+  adoptSwitch("show-trend", "settings.showTrend", "settings.showTrendTip", privacy.body);
   settingsView.append(privacy.section);
 
-  const network = panelBlock("st-network", "settings.network");
-  moveToCard(network.body, "#proxy-enabled", "#proxy-url", '[data-i18n="settings.networkNote"]');
+  const network = panelBlock("st-network", "settings.network", "panel.desc.network");
+  adoptSwitch("proxy-enabled", "settings.useProxy", "settings.desc.useProxy", network.body);
+  adoptControl("proxy-url", "settings.proxyUrl", "settings.desc.proxyUrl", [], network.body);
+  const networkNote = document.querySelector<HTMLElement>('[data-i18n="settings.networkNote"]');
+  if (networkNote) {
+    networkNote.classList.add("st-pad", "settings-note");
+    network.body.append(networkNote);
+  }
   settingsView.append(network.section);
 
-  // About also takes the reset entry the floating sheet keeps outside its
-  // groups. Changelog is rendered by renderChangelogTimeline above.
-  moveToCard(about.body, "#reset-all-settings");
-
-  // General rows that joined the floating sheet after this shell was first
-  // written — keep the two forms at parity.
-  moveRow("startup-anim");
-  moveRow("show-total-spend");
-  moveRow("spend-tier-mode");
-  moveRow("spend-tier-custom");
-  moveRow("experimental-features");
-  moveRow("overview-cat-full");
-
-  activatePanelPage("general");
-
-  shell.append(nav, main);
+  const frame = document.createElement("div");
+  frame.className = "set-shell__frame";
+  frame.append(nav, main);
+  shell.append(frame);
   document.body.appendChild(shell);
+  // Page switching and the rail's active pill both need the shell to be in
+  // the document; doing it before the append silently found nothing.
+  decoratePanelRows();
+  activatePanelPage("general");
+  setPanelView("settings");
+  rebuildSettingsSearchIndex();
+  setupPanelSearch();
+}
+
+/// One searchable row: the rendered anchor, its visible label, the section
+/// title and the panel page that owns it. Built from the DOM after every
+/// render so a moved row cannot be silently omitted from search.
+let settingsSearchIndex: SettingsSearchEntry[] = [];
+
+function rebuildSettingsSearchIndex(): void {
+  const pageForBlock = new Map(PANEL_PAGES.map(([page, blockId]) => [blockId, page]));
+  const pageOf = (section: HTMLElement): string | undefined => {
+    let el: HTMLElement | null = section;
+    while (el && el.id !== "panel-view-settings") {
+      const page = pageForBlock.get(el.id);
+      if (page) return page;
+      el = el.parentElement;
+    }
+    return undefined;
+  };
+  const entries: SettingsSearchEntry[] = [];
+  document.querySelectorAll<HTMLElement>("#panel-scroll .set-section").forEach((section) => {
+    const page = pageOf(section);
+    const sectionTitle = section.querySelector<HTMLElement>(".set-section__title")?.textContent?.trim() ?? "";
+    section.querySelectorAll<HTMLElement>("[data-setting-anchor]").forEach((row) => {
+      const label =
+        row.querySelector<HTMLElement>(".set-row__label")?.textContent?.trim()
+        ?? row.querySelector<HTMLElement>("label")?.textContent?.trim()
+        ?? "";
+      const anchor = row.dataset.settingAnchor;
+      if (page && anchor && label) entries.push({ anchor, label, section: sectionTitle, page });
+    });
+  });
+  settingsSearchIndex = entries;
+  // Two-way guard: the searchable set and the rendered rows must be the same
+  // set. A mismatch is a wiring bug, not a user-facing state, so keep the
+  // index (search still works) but leave evidence in the console.
+  const rendered = [...document.querySelectorAll<HTMLElement>("#panel-scroll [data-setting-anchor]")]
+    .map((row) => row.dataset.settingAnchor ?? "")
+    .filter(Boolean);
+  const { missing, orphaned } = searchCoverage(entries, rendered);
+  if (missing.length || orphaned.length) {
+    console.warn("[pane] settings search coverage", { missing, orphaned });
+  }
+}
+
+function findSettingRow(anchor: string): HTMLElement | undefined {
+  return Array.from(document.querySelectorAll<HTMLElement>("#panel-scroll [data-setting-anchor]"))
+    .find((row) => row.dataset.settingAnchor === anchor);
+}
+
+function setupPanelSearch(): void {
+  const input = document.querySelector<HTMLInputElement>("#panel-search");
+  const results = document.querySelector<HTMLElement>("#panel-search-results");
+  if (!input || !results) return;
+  let selected = -1;
+  let matches: SettingsSearchEntry[] = [];
+  const hide = () => {
+    results.hidden = true;
+    results.innerHTML = "";
+    selected = -1;
+  };
+  const render = () => {
+    results.innerHTML = matches
+      .map((entry, index) => `<button type="button" role="option" aria-selected="${index === selected}" class="set-search-hit${index === selected ? " on" : ""}" data-search-hit="${escapeHtml(entry.anchor)}"><span>${escapeHtml(entry.label)}</span><span class="set-search-section">${escapeHtml(entry.section)}</span></button>`)
+      .join("");
+    results.hidden = matches.length === 0;
+  };
+  const query = () => input.value.trim().toLowerCase();
+  const filter = () => {
+    const q = query();
+    if (!q) {
+      matches = [];
+      hide();
+      return;
+    }
+    matches = filterSearchEntries(settingsSearchIndex, q);
+    selected = matches.length ? 0 : -1;
+    render();
+  };
+  const jump = (entry: SettingsSearchEntry) => {
+    activatePanelPage(entry.page);
+    const row = findSettingRow(entry.anchor);
+    if (!row) return;
+    input.value = "";
+    hide();
+    focusNavigationTarget(`#panel-scroll [data-setting-anchor="${CSS.escape(entry.anchor)}"]`, "#panel-scroll");
+  };
+  input.addEventListener("input", filter);
+  input.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      input.value = "";
+      hide();
+      input.blur();
+      return;
+    }
+    if (!matches.length) return;
+    if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+      event.preventDefault();
+      selected = stepSelection(selected, matches.length, event.key === "ArrowDown" ? 1 : -1);
+      render();
+      results.querySelector<HTMLElement>(".set-search-hit.on")?.scrollIntoView({ block: "nearest" });
+    } else if (event.key === "Enter") {
+      event.preventDefault();
+      const entry = matches[selected] ?? matches[0];
+      if (entry) jump(entry);
+    }
+  });
+  results.addEventListener("click", (event) => {
+    const hit = (event.target as HTMLElement).closest<HTMLElement>("[data-search-hit]");
+    if (!hit) return;
+    const entry = matches.find((row) => row.anchor === hit.dataset.searchHit);
+    if (entry) jump(entry);
+  });
+  document.addEventListener("click", (event) => {
+    if (!(event.target as HTMLElement).closest("#panel-search-wrap")) hide();
+  });
+}
+
+/// Give moved legacy rows the shared skeleton class and a unique search
+/// anchor. Pure row builders already carry one; this also resolves collisions
+/// across pages (two rows may legitimately share a label).
+function decoratePanelRows(): void {
+  const used = new Set<string>();
+  const unique = (base: string): string => {
+    let anchor = base || "row";
+    let n = 2;
+    while (used.has(anchor)) anchor = `${base}-${n++}`;
+    used.add(anchor);
+    return anchor;
+  };
+  document.querySelectorAll<HTMLElement>("#panel-scroll [data-setting-anchor]").forEach((row) => {
+    const base = row.dataset.settingAnchor ?? "";
+    const anchor = unique(base);
+    if (anchor !== base) row.dataset.settingAnchor = anchor;
+  });
+  document.querySelectorAll<HTMLElement>("#panel-scroll .setting-row").forEach((row) => {
+    if (row.dataset.settingAnchor) return;
+    const label = row.querySelector<HTMLElement>("label:first-child, span[data-i18n], .cust-label");
+    const text = (label?.textContent ?? "").trim();
+    // A row with no visible label (the raw key form) is not searchable; giving
+    // it a "row" anchor would put noise in the dropdown.
+    if (!text) return;
+    row.classList.add("set-row");
+    row.dataset.settingAnchor = unique(encodeURIComponent(text));
+  });
 }
 
 function initPanelForm(): void {
@@ -17684,7 +18014,10 @@ function initPanelForm(): void {
   void loadSettingsProviderKeys();
   void getVersion().then((v) => {
     const el = document.querySelector("#st-version");
-    if (el) el.textContent = `v${v} · build ${__BUILD_STAMP__}`;
+    if (el) {
+      const label = el.querySelector("span") ?? el;
+      label.textContent = `v${v} · build ${__BUILD_STAMP__}`;
+    }
   });
 }
 
@@ -19028,7 +19361,6 @@ window.addEventListener("DOMContentLoaded", () => {
   void refreshWorkbuddyWebStatus().then(() => {
     if (customizeOpen) renderDrawerBody();
   });
-  setupFloatingSettingsTabs();
   // Party mode, the easy way: triple-click the logo. (The Konami code
   // still works, for the culture.)
   let logoClicks = 0;
@@ -19053,7 +19385,6 @@ window.addEventListener("DOMContentLoaded", () => {
   // wake shortcut is registered by Rust as the sole global shortcut.
   let shiftAlone = false;
   const canCyclePeriod = () => isDashboardActive() && !customizeOpen &&
-    !document.body.classList.contains("settings-open") &&
     !document.querySelector(".group-menu-overlay, #confirm-overlay") &&
     !isTypingTarget(document.activeElement);
   window.addEventListener("keydown", (e) => {
@@ -19066,7 +19397,7 @@ window.addEventListener("DOMContentLoaded", () => {
     konamiListen(e);
     if (!e.repeat && !e.isComposing && !isTypingTarget(document.activeElement) && isDashboardActive()) {
       if (shortcutMatches(e, localShortcut("customize"))) {
-        e.preventDefault(); setSettings(false); setDrawer(!customizeOpen); return;
+        e.preventDefault(); setDrawer(!customizeOpen); return;
       }
       if (shortcutMatches(e, localShortcut("theme"))) {
         e.preventDefault(); document.querySelector<HTMLElement>("#theme-btn")?.click(); return;
@@ -19080,7 +19411,6 @@ window.addEventListener("DOMContentLoaded", () => {
       shortcutMatches(e, config.categoryShortcut) &&
       !e.repeat &&
       !customizeOpen &&
-      !document.body.classList.contains("settings-open") &&
       !e.isComposing &&
       e.keyCode !== 229 &&
       !isTypingTarget(document.activeElement)
@@ -19109,9 +19439,8 @@ window.addEventListener("DOMContentLoaded", () => {
         renderDrawerBody();
         return;
       }
-      if (customizeOpen || document.body.classList.contains("settings-open")) {
+      if (customizeOpen) {
         setDrawer(false);
-        setSettings(false);
         return;
       }
       void invoke("hide_popover").catch(() => {});
@@ -19179,17 +19508,6 @@ window.addEventListener("DOMContentLoaded", () => {
   });
   document.querySelector("#refresh")!.addEventListener("click", () => void refresh(true, false, true));
 
-  const setSettings = (open: boolean) => {
-    document.body.classList.toggle("settings-open", open);
-    document.querySelector("#settings-btn")?.classList.toggle("active", open);
-    if (!open && document.activeElement instanceof HTMLElement) {
-      // Native <select> popups can outlive the sliding panel in WebView2;
-      // blur the control before hiding the surface so it cannot remain over
-      // the dashboard or steal the next click.
-      document.activeElement.blur();
-    }
-    if (open) void loadKeyvault();
-  };
   // Settings is one system: the popover ⚙ opens the same standalone panel
   // window the tray's 设置 entry opens — no in-popover sheet anymore.
 /// Open the standalone panel on the settings view. The intent doubles as the
@@ -19197,32 +19515,24 @@ window.addEventListener("DOMContentLoaded", () => {
 /// center instead of merely being focused on whatever view it last showed.
 async function openSettingsPanel(): Promise<void> {
   await patchConfig({ panelIntent: { view: "settings", at: Date.now() } }).catch(() => {});
-  void invoke("open_panel_window").catch(() => {});
+  try {
+    await invoke("open_panel_window");
+  } catch (err) {
+    settingsToast(t("settings.panelOpenFailed", { err: String(err) }), true);
+  }
 }
 document.querySelector("#settings-btn")!.addEventListener("click", () => {
   setDrawer(false);
   void openSettingsPanel();
 });
-  document.querySelector("#settings-close")!.addEventListener("click", () => setSettings(false));
-  document.querySelector("#changelog-btn")!.addEventListener("click", () => {
-    setSettings(false);
-    showChangelogDialog(t("dialog.changelog"), parseChangelog());
-  });
   document.addEventListener("click", (event) => {
     if (!(event.target as HTMLElement).closest("[data-open-changelog]")) return;
     showChangelogDialog(t("dialog.changelog"), parseChangelog());
   });
-  // Magpie-style settings: sections are static caption + card, always
-  // expanded — the top pill tabs switch pages, nothing folds anymore.
-  document.querySelectorAll<HTMLElement>(".acc-group").forEach((group) => {
-    group.classList.add("open");
-  });
   document.querySelector("#customize-btn")!.addEventListener("click", () => {
-    setSettings(false);
     setDrawer(!customizeOpen);
   });
   document.querySelector("#skin-btn")!.addEventListener("click", () => {
-    setSettings(false);
     skinMarketOpen = true;
     setDrawer(true);
   });
@@ -19933,7 +20243,6 @@ document.querySelector("#settings-btn")!.addEventListener("click", () => {
   // the popover and routed the request here.
   void listen("tour-replay", () => {
     setDrawer(false);
-    setSettings(false);
     dismissConfirm?.();
     startTour();
   });
@@ -19986,7 +20295,7 @@ document.querySelector("#settings-btn")!.addEventListener("click", () => {
     requestRender();
     if (customizeOpen) renderDrawerBody();
     if (IS_PANEL_FORM && authViewActive) renderAuthCenter();
-    const keyRows = document.querySelector("#settings-keys-rows");
+    const keyRows = document.querySelector("#panel-keys-rows");
     if (keyRows && !keyRows.closest("[hidden]")) renderSettingsProviderKeys();
   });
 

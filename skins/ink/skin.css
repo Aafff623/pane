@@ -126,3 +126,15 @@
 .theme-intro.ink{background-image:url('assets/paper-grain.svg')}
 .theme-intro.ink .intro-mountains{background:url('assets/mountains-v4.webp') center bottom/cover no-repeat}
 .theme-intro.ink .intro-koi{background:url('assets/koi-red-v4.webp') center/contain no-repeat}
+
+/* Settings skeleton (2026-10): paper cards and hairline dividers. The
+   active nav keeps the skin's own brush-mark state from the rules above. */
+:is(:root[data-ink],.skin-sample[data-ink]) .set-section__card:where(:not(.skin-sample:not([data-ink]),.skin-sample:not([data-ink]) *)){background:var(--card);background-image:var(--ink-grain),radial-gradient(ellipse at 100% 100%,var(--ink-field-wash),transparent 64%);border:1px solid color-mix(in srgb,var(--border) 60%,transparent);border-radius:3px;box-shadow:0 3px 12px var(--ink-shadow)}
+:is(:root[data-ink],.skin-sample[data-ink]) .set-section__head:where(:not(.skin-sample:not([data-ink]),.skin-sample:not([data-ink]) *)){background:var(--card);border-color:color-mix(in srgb,var(--border) 60%,transparent)}
+:is(:root[data-ink],.skin-sample[data-ink]) .set-row:where(:not(.skin-sample:not([data-ink]),.skin-sample:not([data-ink]) *)){border-color:var(--ink-divider)}
+:is(:root[data-ink],.skin-sample[data-ink]) .set-shell__nav:where(:not(.skin-sample:not([data-ink]),.skin-sample:not([data-ink]) *)){background:var(--glass-surface);background-image:var(--ink-grain);border-color:var(--border)}
+
+/* The new section wrapper is layout only; the head + card already paint the
+   skin frame. Without this the skin's legacy .st-block border wraps both and
+   reads as a double/triple frame. */
+:is(:root[data-ink],.skin-sample[data-ink]) .set-section:where(:not(.skin-sample:not([data-ink]),.skin-sample:not([data-ink]) *)){border:0!important;background:transparent!important;box-shadow:none!important;border-radius:0;padding:0}
