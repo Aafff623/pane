@@ -595,8 +595,11 @@ changes.
 - Evidence: legacy-vault resurrection red/green, archive/delete repeated
   refresh and failed migration tests, relay retirement failure test, account
   alias regression, and a headless Customize routing check. Latest serial
-  proxy-free Rust run: **1036 passed / 15 ignored** (2026-10-23, after the
-  Codex backup-retirement and slot-retention corrections).
+  proxy-free Rust run: **1051 passed / 0 failed / 15 ignored** (2026-10-23, after
+  the dashboard-correctness batch, the xfyun-speech provider and the Qoder
+  telemetry probe). Node suite: 129 passed. Frontend build + skin-pack local
+  check pass. The Codex backup-retirement and slot-retention corrections from
+  the same day are covered by that run.
 - Codex credential-source precedence is **live default > managed web store >
   `.pane-bak` fallback**. A backup import is marked `imported_from_backup`
   and is retired once a live default identity appears; retirement persists
@@ -695,6 +698,18 @@ changes.
 
 - Qoder 国际版 (family `qoder`) 的 Windows 配置目录按命名惯例取
   `com.qoder.app.stable`（CN 版为 `com.qodercn.app.stable`），备选 `Qoder`；
+- **Qoder CN 本机读数（`qoder_sessions.rs`）不依赖任何版本号。** 数据库位置靠发现：
+  `%APPDATA%\com.qodercn.app*` 里最近更新过的 `main.sqlite` 才算候选，安装目录
+  `.qoder-versions/<版本>` 从不参与解析。
+- **厂商本地不存实测 token 数**（2026-10-23 在 0.4.11 实测）：
+  `chat_session_context_usage` 自己声明 `tokenCountsAvailable=false`、
+  `chat_session_messages.payload_json` 内 0 处数字型 `*_tokens`、转录
+  `runtime-config.contextWindow=null`。因此 token 总量只能是
+  `context_usage_ratio × 窗口` 的推导值，`credits` 才是远端实测的钱。窗口本身会被升级打掉：
+  本机 12 个模型只有 3 个还发布非空 `context_window`。`QoderSpend.telemetry` 把
+  「模型总数 / 有窗口数 / schema 版本 / 是否有实测 token / 估算基数」一起吐出去，
+  卡片必须显示基数；缺窗口只计入 `tokens_unavailable_trips` 并显示「—」，
+  **绝不代填默认窗口**（升级后自检：`node temp/scripts/verify-qoder-drift.mjs`）。
   端点 `openapi.qoder.sh` 与 API 路径 (`/api/v2/user/plan`、
   `/api/v2/quota/usage`) 已由参考源证实，但目录名待真实装机核验 (2026-10-08，Batch 2)。
 - Trae 国际版 (family `trae`) 的用量端点先试 v2 再回退 v1

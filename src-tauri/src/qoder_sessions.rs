@@ -133,6 +133,32 @@ pub struct QoderSpend {
     /// Newest first, capped for the UI.
     pub sessions: Vec<QoderSessionSpend>,
     pub source: QoderSource,
+    /// What the local data can support right now. Qoder 0.4.11 ships no exact
+    /// token counts anywhere on the machine, and an app update can null the
+    /// context windows that the estimate multiplies by — so a token figure is
+    /// only meaningful next to this. Without it a silent basis change looks
+    /// like a change in usage.
+    #[serde(default)]
+    pub telemetry: QoderTelemetry,
+}
+
+/// Read-only capability probe of the local Qoder CN telemetry. Never guesses:
+/// when the basis is gone the token column is reported as unmeasurable rather
+/// than padded with a default window (see the module docs).
+#[derive(Serialize, Clone, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct QoderTelemetry {
+    pub db_found: bool,
+    pub db_path: String,
+    pub schema_version: Option<i64>,
+    pub models_total: u64,
+    pub models_with_window: u64,
+    /// True only when Qoder itself stores measured token counts. Today the
+    /// official context-usage snapshot answers `tokenCountsAvailable: false`.
+    pub exact_token_counts: bool,
+    /// "database" | "none": which source currently supplies the window the
+    /// estimate multiplies by.
+    pub estimate_basis: String,
 }
 
 #[derive(Clone)]
@@ -654,6 +680,7 @@ fn build_report(root: &Path, entries: Vec<(String, Event, bool)>, lite_sessions:
         all,
         days,
         sessions,
+        telemetry: QoderTelemetry::default(),
         source: QoderSource {
             state: if root.exists() { "detected" } else { "not_detected" }.into(),
             root: root.display().to_string(),
@@ -665,37 +692,93 @@ fn build_report(root: &Path, entries: Vec<(String, Event, bool)>, lite_sessions:
 }
 
 fn qoder_db_path() -> Option<PathBuf> {
-    Some(
-        dirs::data_dir()?
-            .join("com.qodercn.app.stable")
-            .join("main.sqlite"),
-    )
+    dirs::data_dir().and_then(|dir| qoder_db_from(&dir))
 }
 
-/// Read-only model preference windows. A missing database, a locked WAL, a
-/// missing table/column or a malformed row all degrade to an empty map; this
-/// adapter never writes to the Qoder database and never guesses a window.
+/// Read-only model preference windows plus the capability facts around them.
+/// A missing database, a locked WAL, a missing table/column or a malformed row
+/// all degrade to "nothing known"; this adapter never writes to the Qoder
+/// database and never guesses a window.
 fn model_windows_from(path: &Path) -> HashMap<String, f64> {
-    let mut out = HashMap::new();
+    read_window_facts(Some(path)).windows
+}
+
+#[derive(Clone, Default)]
+struct WindowFacts {
+    windows: HashMap<String, f64>,
+    models_total: u64,
+    models_with_window: u64,
+    schema_version: Option<i64>,
+    exact_token_counts: bool,
+}
+
+fn read_window_facts(path: Option<&Path>) -> WindowFacts {
+    let mut facts = WindowFacts::default();
+    let Some(path) = path else { return facts };
     let Ok(connection) = Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_ONLY) else {
-        return out;
+        return facts;
     };
-    let Ok(mut statement) = connection.prepare(
-        "SELECT model_key, context_window
-           FROM chat_model_preferences
-          WHERE context_window IS NOT NULL AND context_window > 0",
-    ) else {
-        return out;
-    };
-    let Ok(rows) = statement.query_map([], |row| {
-        Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)? as f64))
-    }) else {
-        return out;
-    };
-    for (model, window) in rows.flatten() {
-        out.insert(model, window);
+    facts.schema_version = connection
+        .query_row("SELECT MAX(version) FROM schema_migrations", [], |row| row.get::<_, Option<i64>>(0))
+        .unwrap_or(None);
+    // Every row is counted, not just the usable ones: "3 of 12 models publish a
+    // window" is the number that tells an owner an update removed the basis.
+    if let Ok(mut statement) = connection.prepare(
+        "SELECT model_key, context_window FROM chat_model_preferences",
+    ) {
+        if let Ok(rows) = statement.query_map([], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, Option<i64>>(1)?))
+        }) {
+            for (model, window) in rows.flatten() {
+                facts.models_total += 1;
+                if let Some(window) = window.filter(|value| *value > 0) {
+                    facts.models_with_window += 1;
+                    facts.windows.insert(model, window as f64);
+                }
+            }
+        }
     }
-    out
+    // The official per-session context snapshot declares whether token counts
+    // exist at all; reading the newest row is enough to answer that.
+    if let Ok(latest) = connection.query_row(
+        "SELECT snapshot_json FROM chat_session_context_usage ORDER BY updated_at DESC LIMIT 1",
+        [],
+        |row| row.get::<_, String>(0),
+    ) {
+        if let Ok(doc) = serde_json::from_str::<Value>(&latest) {
+            facts.exact_token_counts = doc
+                .get("tokenCountsAvailable")
+                .and_then(Value::as_bool)
+                .unwrap_or(false)
+                || doc.get("totalTokens").and_then(Value::as_f64).unwrap_or(0.0) > 0.0;
+        }
+    }
+    facts
+}
+
+/// Version-agnostic discovery of the Qoder CN account database. An update moves
+/// the install (`.qoder-versions/<version>`) and can rename its data container,
+/// so nothing here hardcodes either: every `com.qodercn.app*` directory under
+/// app data that holds a `main.sqlite` is a candidate and the most recently
+/// written one wins.
+fn qoder_db_from(data_dir: &Path) -> Option<PathBuf> {
+    let Ok(entries) = std::fs::read_dir(data_dir) else {
+        return None;
+    };
+    let mut candidates: Vec<(std::time::SystemTime, PathBuf)> = Vec::new();
+    for entry in entries.flatten() {
+        if !entry.file_name().to_string_lossy().starts_with("com.qodercn.app") {
+            continue;
+        }
+        let db = entry.path().join("main.sqlite");
+        if let Ok(meta) = std::fs::metadata(&db) {
+            if let Ok(mtime) = meta.modified() {
+                candidates.push((mtime, db));
+            }
+        }
+    }
+    candidates.sort_by(|a, b| b.0.cmp(&a.0));
+    candidates.into_iter().next().map(|(_, path)| path)
 }
 
 /// Collect all Qoder CN sessions modified in the last 31 days.
@@ -705,7 +788,8 @@ pub fn collect() -> QoderSpend {
 }
 
 fn collect_with_db(root: &Path, db: Option<&Path>) -> QoderSpend {
-    let db_windows = db.map(model_windows_from).unwrap_or_default();
+    let facts = read_window_facts(db);
+    let db_windows = facts.windows.clone();
     let (files, lite) = discover(root);
     let mut parents: HashMap<String, ParsedFile> = HashMap::new();
     for (id, path, is_subagent) in &files {
@@ -746,6 +830,15 @@ fn collect_with_db(root: &Path, db: Option<&Path>) -> QoderSpend {
     }
     let mut report = build_report(root, entries, lite);
     report.source.sessions = parents.len() as u64;
+    report.telemetry = QoderTelemetry {
+        db_found: db.is_some(),
+        db_path: db.map(|path| path.display().to_string()).unwrap_or_default(),
+        schema_version: facts.schema_version,
+        models_total: facts.models_total,
+        models_with_window: facts.models_with_window,
+        exact_token_counts: facts.exact_token_counts,
+        estimate_basis: if facts.models_with_window > 0 { "database" } else { "none" }.into(),
+    };
     report
 }
 
@@ -869,6 +962,72 @@ fn model_label(model: &str) -> String {
 mod tests {
     use super::*;
     use rusqlite::Connection;
+
+    /// An update moves the install and can rename the data container, so the
+    /// durable rule is "newest `com.qodercn.app*/main.sqlite`" — never a
+    /// hardcoded version or container name that breaks the next bump.
+    #[test]
+    fn db_discovery_follows_the_newest_container() {
+        let base = std::env::temp_dir().join(format!("pane-qoder-discovery-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        std::fs::create_dir_all(base.join("Pane")).unwrap();
+        std::fs::create_dir_all(base.join("com.qodercn.app.other")).unwrap();
+        std::fs::create_dir_all(base.join("com.qodercn.app.stable")).unwrap();
+        std::fs::create_dir_all(base.join("com.qodercn.app.stable2")).unwrap();
+        let older = base.join("com.qodercn.app.stable").join("main.sqlite");
+        let newer = base.join("com.qodercn.app.stable2").join("main.sqlite");
+        std::fs::write(&older, "x").unwrap();
+        std::fs::write(&newer, "x").unwrap();
+        let future = std::time::SystemTime::now() + std::time::Duration::from_secs(120);
+        std::fs::OpenOptions::new().write(true).open(&newer).unwrap().set_modified(future).unwrap();
+
+        assert_eq!(qoder_db_from(&base), Some(newer.clone()));
+        // A container without a database is not a candidate.
+        std::fs::remove_file(&newer).unwrap();
+        assert_eq!(qoder_db_from(&base), Some(older));
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    /// The probe must be able to tell "no usage today" apart from "the update
+    /// took the windows away", so null windows are counted, not filtered out
+    /// before the tally, and a missing table degrades to "nothing known".
+    #[test]
+    fn window_facts_count_null_windows_and_report_the_official_token_flag() {
+        let base = std::env::temp_dir().join(format!("pane-qoder-facts-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        std::fs::create_dir_all(&base).unwrap();
+        let path = base.join("main.sqlite");
+        {
+            let db = Connection::open(&path).unwrap();
+            db.execute_batch(
+                "CREATE TABLE schema_migrations (version INTEGER);
+                 CREATE TABLE chat_model_preferences (model_key TEXT, context_window INTEGER);
+                 CREATE TABLE chat_session_context_usage (session_id TEXT, snapshot_json TEXT, updated_at INTEGER);
+                 INSERT INTO schema_migrations VALUES (83), (84);
+                 INSERT INTO chat_model_preferences VALUES
+                     ('dfmodel', 1000000), ('gmodel', NULL), ('kmodel', 0);
+                 INSERT INTO chat_session_context_usage VALUES
+                     ('old', '{\"tokenCountsAvailable\":true,\"totalTokens\":50000}', 1),
+                     ('new', '{\"tokenCountsAvailable\":false,\"totalTokens\":0}', 2);",
+            ).unwrap();
+        }
+        let facts = read_window_facts(Some(&path));
+        assert_eq!(facts.schema_version, Some(84));
+        assert_eq!(facts.models_total, 3);
+        assert_eq!(facts.models_with_window, 1);
+        assert!(!facts.exact_token_counts, "the newest snapshot declares no token counts");
+        assert_eq!(model_windows_from(&path).get("dfmodel"), Some(&1_000_000.0));
+
+        // A database without those tables is "nothing known", never a guess.
+        let bare = base.join("bare.sqlite");
+        Connection::open(&bare).unwrap();
+        let facts = read_window_facts(Some(&bare));
+        assert_eq!(facts.models_total, 0);
+        assert_eq!(facts.models_with_window, 0);
+        assert_eq!(facts.schema_version, None);
+        assert!(read_window_facts(None).windows.is_empty());
+        let _ = std::fs::remove_dir_all(&base);
+    }
 
     fn usage_line(ts: &str, model: &str, credits: f64, ratio: f64, request: &str) -> String {
         format!(
