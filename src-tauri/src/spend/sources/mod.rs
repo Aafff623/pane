@@ -290,7 +290,7 @@ pub fn registry() -> Vec<SourceSpec> {
             id: "gemini-jsonl",
             tool: "Gemini CLI",
             form: "JSON/JSONL chat logs",
-            collector: "gemini (needs-probe)",
+            collector: "gemini",
             roots: || vec![p(&[".gemini", "tmp"])],
             feeds: &["gemini"],
             runtime: false,
@@ -351,7 +351,10 @@ fn status_of(spec: &SourceSpec) -> SpendSourceStatus {
             collector: spec.collector.into(),
             state: "needs_probe".into(),
             root: existing_root(),
-            reason: Some("parser pending — no verified local sample yet".into()),
+            reason: Some(
+                "parser built from the upstream session schema; waiting for a verified local sample"
+                    .into(),
+            ),
             feeds: feeds(),
         };
     }

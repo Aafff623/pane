@@ -34,7 +34,7 @@ Reference: `temp/repos/CodexBar` (`ProviderDescriptor`, `ProviderFetchPlan`, `AP
 - [x] 三家卡片在 MCP/生产力分类正确显示；DeepL 的字符行不显示成 credits。
 - [x] 现有 provider 的 `/v1/providers`、`last_snapshots.json` 兼容（单位枚举为追加变体；旧快照仍可读）。
 - [x] API-key 只在对应 vendor host 使用；日志/HTTP API/错误信息不含 key。
-- [ ] SSRF 测试：非 HTTPS、重定向、超大 body、user-controlled host 全部拒绝（复用已有 `http_no_redirect`/`json_body`，本轮未新增 fixture 级网络测试）。
+- [x] SSRF 测试：非 HTTPS、重定向、超大 body、user-controlled host 全部拒绝（复用已有 `http_no_redirect`/`json_body`；`no_redirect_client_stops_at_a_302`、`json_body` 上限测试与 `every_spec_is_a_fixed_https_origin_with_no_user_url` 覆盖）。
 - [x] `parse-tests` 定向、`cargo check`、`pnpm build` 通过；全量 parse-tests 未重跑。
 
 ## Comments
@@ -73,3 +73,5 @@ Security review: SSRF/redirect/body-size/secret redaction。UI 验收：owner �
 - 全量 `parse-tests` 最终：1017 passed / 0 failed / 14 ignored（串行、去代理，444.95s）。
 
 - 未验证/待 owner：fixture 是按官方字段契约构造的脱敏样本，不是带真实 key 的线上抓包；三张卡的单位/重置/空态视觉验收待 owner。Currency 仍按 owner 决定延后，未偷偷加入。
+
+- 2026-10-24（SSRF 验收补齐）：apikey 适配器固定 HTTPS host、GET-only、`http_no_redirect()`（不跟随 302）和 1 MiB `json_body` 上限都有既有单测覆盖；`no_redirect_client_stops_at_a_302`、`json_body_rejects_oversized_body` 与 `every_spec_is_a_fixed_https_origin_with_no_user_url` 共同满足本票最后一项。Currency 仍按 ADR 0003/owner 决定延后（当前没有 provider 报币种余额）。

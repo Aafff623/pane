@@ -1,0 +1,30 @@
+{
+  "sessionId": "fixture-session",
+  "projectHash": "fixture-project",
+  "startTime": "2026-08-03T15:20:00.000Z",
+  "lastUpdated": "2026-08-03T15:22:19.090Z",
+  "messages": [
+    {
+      "id": "u1",
+      "type": "user",
+      "timestamp": "2026-08-03T15:20:00.000Z",
+      "content": [{"text": "summarize this fixture"}]
+    },
+    {
+      "id": "m1",
+      "type": "gemini",
+      "timestamp": "2026-08-03T15:22:19.090Z",
+      "model": "gemini-fixture-model",
+      "tokens": {"input": 700, "cached": 300, "output": 200, "thoughts": 50, "total": 950},
+      "content": [{"text": "fixture answer"}]
+    },
+    {
+      "id": "m2",
+      "type": "gemini",
+      "timestamp": "2026-08-03T15:23:00.000Z",
+      "model": "gemini-fixture-model",
+      "tokens": {"input": 100, "cached": 0, "output": 20, "thoughts": 0, "total": 120},
+      "content": [{"text": "second fixture answer"}]
+    }
+  ]
+}

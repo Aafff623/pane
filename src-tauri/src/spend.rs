@@ -3451,6 +3451,131 @@ fn qwen() -> ProviderSpend {
 }
 
 // ---------------------------------------------------------------------------
+// Gemini CLI local chat logs
+// ---------------------------------------------------------------------------
+
+/// Native Gemini CLI usage from `~/.gemini/tmp/<project>/chats/session-*`.
+///
+/// The CLI records a `ConversationRecord` (one JSON object) or an append-only
+/// JSONL stream: partial metadata, message records, `$set` checkpoints and
+/// `$patch` records. Only `type: "gemini"` messages carry `tokens`
+/// (`input` includes `cached`, `output` excludes `thoughts`). Rewinds and
+/// patches never remove billed turns, so earlier messages still count.
+/// cc-switch can also hold proxy rows for the same calls, so the caller
+/// merges native data only into days cc-switch never saw.
+fn gemini() -> FileData {
+    let root = dirs::home_dir().unwrap_or_default().join(".gemini").join("tmp");
+    let mut files = Vec::new();
+    recent_files_matching(&root, &mut files, |path| {
+        let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+        let chat = path.components().any(|part| part.as_os_str() == "chats");
+        (chat || name.starts_with("gemini-session-"))
+            && (name.ends_with(".json") || name.ends_with(".jsonl"))
+            && (name.starts_with("session-") || name.starts_with("gemini-session-"))
+    });
+    let mut all = FileData::default();
+    for file in files {
+        merge_data(&mut all, gemini_file(&file));
+    }
+    all
+}
+
+fn gemini_file(path: &Path) -> FileData {
+    let Ok(meta) = fs::metadata(path) else { return FileData::default() };
+    if meta.len() > 16 * 1024 * 1024 {
+        return FileData::default();
+    }
+    let Ok(text) = fs::read_to_string(path) else { return FileData::default() };
+    gemini_text(&text)
+}
+
+fn gemini_text(text: &str) -> FileData {
+    let mut data = FileData::default();
+    let mut seen: HashSet<String> = HashSet::new();
+    // A pretty-printed ConversationRecord is one object; an append-only log
+    // is one record per line. Try the whole file first so indentation does
+    // not silently drop every message.
+    if let Ok(doc) = serde_json::from_str::<Value>(text) {
+        if let Some(messages) = doc.get("messages").and_then(Value::as_array) {
+            let fallback = doc.get("startTime");
+            for message in messages {
+                gemini_message(message, fallback, &mut data, &mut seen);
+            }
+            return data;
+        }
+    }
+    for line in text.lines() {
+        let Ok(record) = serde_json::from_str::<Value>(line) else { continue };
+        if let Some(messages) = record
+            .pointer("/$set/messages")
+            .and_then(Value::as_array)
+        {
+            let fallback = record.pointer("/$set/startTime");
+            for message in messages {
+                gemini_message(message, fallback, &mut data, &mut seen);
+            }
+        } else if record.get("type").and_then(Value::as_str) == Some("gemini") {
+            gemini_message(&record, record.get("startTime"), &mut data, &mut seen);
+        }
+    }
+    data
+}
+
+fn gemini_message(
+    message: &Value,
+    fallback_ts: Option<&Value>,
+    data: &mut FileData,
+    seen: &mut HashSet<String>,
+) {
+    if message.get("type").and_then(Value::as_str) != Some("gemini") {
+        return;
+    }
+    if let Some(id) = message.get("id").and_then(Value::as_str) {
+        if !seen.insert(id.to_string()) {
+            return;
+        }
+    }
+    let Some(tokens) = message.get("tokens").filter(|v| v.is_object()) else { return };
+    let num = |key: &str| tokens.get(key).and_then(Value::as_f64).unwrap_or(0.0);
+    let raw_input = num("input");
+    let cache_read = num("cached").clamp(0.0, raw_input.max(0.0));
+    let input = (raw_input - cache_read).max(0.0);
+    let mut output = num("output");
+    // Gemini bills thoughts as output tokens; total is authoritative when it
+    // exceeds input+output (the qwen/gemini-cli ancestry shape).
+    if num("total") > raw_input + output + 0.5 {
+        output += num("thoughts");
+    }
+    let tokens = input + cache_read + output;
+    if tokens <= 0.0 {
+        return;
+    }
+    let Some(ts) = parse_ts(message.get("timestamp")).or_else(|| parse_ts(fallback_ts)) else {
+        return;
+    };
+    let model = message
+        .get("model")
+        .and_then(Value::as_str)
+        .unwrap_or("unknown")
+        .to_string();
+    let price = probe_lookup_at(ts.timestamp_millis(), &model)
+        .or_else(|| probe_lookup(&format!("google/{model}")));
+    match price {
+        Some(p) => {
+            let usage = pricing::Usage {
+                input,
+                output,
+                cache_read,
+                cache_write_5m: 0.0,
+                cache_write_1h: 0.0,
+            };
+            add_event(data, ts, &model, pricing::request_cost(&p, &usage, true), tokens);
+        }
+        None => note_unpriced(data, ts, &model, tokens),
+    }
+}
+
+// ---------------------------------------------------------------------------
 // WorkBuddy (CN / AI) and CodeBuddy CLI local token logs
 // ---------------------------------------------------------------------------
 
@@ -4036,7 +4161,7 @@ mod tests {
         assert_eq!(statuses.len(), registry.len());
         let gemini = statuses.iter().find(|s| s.id == "gemini-jsonl").expect("gemini row");
         assert_eq!(gemini.state, "needs_probe");
-        assert!(gemini.reason.as_deref().unwrap_or("").contains("parser pending"));
+        assert!(gemini.reason.as_deref().unwrap_or("").contains("verified local sample"));
         let copilot = statuses.iter().find(|s| s.id == "copilot-local").expect("copilot row");
         assert_eq!(copilot.collector, "spend::sources::copilot");
         assert!(copilot.feeds.iter().any(|f| f == "copilot"));
@@ -5340,8 +5465,43 @@ mod tests {
     }
 
     #[test]
-    fn split_models_reroutes_minimax_usage() {
+    fn gemini_session_messages_count_cached_and_thoughts_once() {
         let mut data = FileData::default();
+        let mut seen = HashSet::new();
+        let message = json!({
+            "id": "m1",
+            "type": "gemini",
+            "timestamp": "2026-08-03T15:22:19.090Z",
+            "model": "gemini-test-model",
+            "tokens": {"input": 700.0, "cached": 300.0, "output": 200.0,
+                       "thoughts": 50.0, "total": 950.0}
+        });
+        gemini_message(&message, None, &mut data, &mut seen);
+        // Same id in a later $set checkpoint must not double count.
+        gemini_message(&message, None, &mut data, &mut seen);
+        // User messages carry no tokens and must be ignored.
+        gemini_message(
+            &json!({"id": "u1", "type": "user", "timestamp": "2026-08-03T15:20:00Z"}),
+            None,
+            &mut data,
+            &mut seen,
+        );
+        // fresh input 400 + cached 300 + output 250 (thoughts outside output).
+        assert_eq!(data.days.values().map(|v| v.1).sum::<f64>(), 950.0);
+        assert_eq!(data.unpriced.get("gemini-test-model"), Some(&1));
+    }
+
+    #[test]
+    fn gemini_fixture_conversation_parses_once() {
+        let text = include_str!("../../parse-tests/fixtures/gemini/session.json");
+        let data = gemini_text(text);
+        // u1 is ignored; m1 950 + m2 120 tokens, both unpriced in tests.
+        assert_eq!(data.days.values().map(|v| v.1).sum::<f64>(), 1070.0);
+        assert_eq!(data.unpriced.get("gemini-fixture-model"), Some(&2));
+    }
+
+    #[test]
+    fn split_models_reroutes_minimax_usage() {        let mut data = FileData::default();
         data.days.insert((1000, "claude-fable-5".into()), (5.0, 100.0));
         data.days.insert((1000, "MiniMax-M3".into()), (0.5, 50.0));
         data.days.insert((1001, "MiniMax-M2.7".into()), (0.2, 20.0));
@@ -6465,7 +6625,12 @@ pub fn collect_daily(cursor_csv: Option<String>) -> (Vec<ProviderSpend>, Vec<Pro
     // tokens or dollars honestly — they are surfaced by the spend panel as a
     // separate credits list (fetch_credit_extras), never blended into these
     // totals.
-    list.push(build_spend("gemini", "Gemini", cc.gemini));
+    // cc-switch proxy rows own the days they saw; the CLI's own chat logs
+    // backfill only the missing days (same rule as mcode), so the same turn
+    // cannot be counted twice.
+    let mut gemini_data = cc.gemini;
+    merge_missing_days(&mut gemini_data, gemini());
+    list.push(build_spend("gemini", "Gemini", gemini_data));
     list.push(build_spend("claude-desktop", "Claude Desktop", cc.claude_desktop));
     list.push(dsh());
     list.extend(extra_claude_spends);

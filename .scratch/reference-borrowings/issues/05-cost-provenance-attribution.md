@@ -65,3 +65,5 @@ Owner 目检：总额 tooltip/分享图的四态徽标；关闭归因时无变�
 - 未做/待 owner：project/branch/session 归因（opt-in、不读 prompt）尚无 UI 与数据面，保持关闭；Currency 按 ADR 0003/owner 决定继续延后；设置页 override 编辑器、真实 key 的成本对比、四态徽标视觉验收均未验证。
 - 2026-10-23（收尾）：设置页模型价格覆盖编辑器已补到浮窗和面板 General 页；新增 `get_pricing_overrides` / `save_pricing_overrides`，严格校验 JSON（input/output 必填、不能为负），保存即写 `pricing_overrides.json` 并清空定价 memo，无需重启。`override_editor_validates_required_rates` 通过，`pnpm build` 通过。剩余仍是 project/branch 归因、Currency、真实历史价目表。
 - 技术冒烟（2026-10-23）：面板 Settings → 通用实际渲染“模型价格覆盖”，textarea 读到 `{}`，点保存返回“已保存，新价格立即生效。”；后端 `parsed_overrides` 校验测试通过。owner 视觉验收仍待做。
+
+- 2026-10-24（尾巴裁决）：project/branch/session 归因需要新的数据面 + opt-in UI，且默认假名化后展示价值要重新定义；本机日志没有稳定 cwd→展示名映射，未在未确认的情况下新增。Currency 继续按 ADR 0003 与 owner 既有决定延后。真实 key 的成本对比也没有可复核的第一方价目，不编造。此票保持 partial，不标 done。

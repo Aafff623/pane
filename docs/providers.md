@@ -775,3 +775,13 @@ row.
     card.
   - **待确认:** the meaning of every `status` value and the timezone/unit of the
     naive timestamps; a gift whose `total_units` is 0 renders no row at all.
+
+### WorkBuddy official request ledger (2026-10-24)
+
+WorkBuddy CN's card adds one read-only text row, `Official requests (30d)`,
+from `POST /billing/meter/get-user-request-usage` (30-day window, pageSize
+3000, `startTime` advanced to the newest row). It reports the request count and
+credit sum only; it is not a meter sample and is never added to the credits
+balance or `credit_history`. Pagination, parsing and aggregation live in
+`providers/workbuddy_official_usage.rs`. WorkBuddy AI was not probed, so its
+card does not call this endpoint.

@@ -1,6 +1,6 @@
 # 04 — Spend SourceAdapter、probe/doctor 与增量扫描
 
-Status: done (2026-10-23) — registry, byte-offset resume, Copilot parser, zstd/token_usage_record/compaction tests landed; Gemini remains needs-probe
+Status: done (2026-10-24) — registry, byte-offset resume, Copilot parser, zstd/token_usage_record/compaction tests, native Gemini parser + fixture landed; Gemini source keeps needs-probe until a real local session is available
 GitHub: #42
 Priority: P1
 Blocked by: None
@@ -67,3 +67,5 @@ cargo +stable-x86_64-pc-windows-gnu test
 - 未验证/待 owner：设置页“来源”诊断的视觉呈现（当前只有 `/v1/sources` 数据）；Gemini 解析器；20 个既有来源没有逐源 golden fixture，回归依赖现有单测与全量 scan，不是逐源字节级对账。
 - 2026-10-23（收尾）：设置页来源诊断已补到浮窗和面板的 General 页，调用 `fetch_spend_sources`，按 `parse_error > unreadable > empty > needs_probe > detected > not_detected > runtime` 排序显示状态、原因和路径 tooltip；`pnpm build` 通过。Gemini 仍未实现，仍是 `needs_probe`。
 - 技术冒烟（2026-10-23）：面板 Settings → 通用实际渲染“花费来源”，可见 Gemini CLI `待校准`、Antigravity/cc-switch/Claude Code/CodeBuddy IDE `已检测`，刷新按钮存在；浮窗同一 mount 代码。owner 视觉验收仍待做。
+
+- 2026-10-24（Gemini 收尾）：新增原生 Gemini CLI 解析器（`spend::gemini`），读取 `~/.gemini/tmp/<project>/chats/session-*.json(l)` 的 `ConversationRecord`/append-only 记录，按 `type:"gemini"` 的 `tokens` 计价（`input` 含 cached，`thoughts` 在 total 超出时并入 output），`$set` 检查点按 message id 去重。口径与 mcode 相同：cc-switch 代理行拥有的日期优先，原生日志只补缺失日期，避免同一 turn 双计。fixture `parse-tests/fixtures/gemini/session.json` + 两个单测通过。来源状态仍为 `needs_probe`（本机没有 Gemini CLI 真实会话，只有 Antigravity 数据），解析器以官方 session schema 为准，等真实样本后即可去掉该标记。

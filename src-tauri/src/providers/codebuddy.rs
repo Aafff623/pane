@@ -574,10 +574,11 @@ async fn finish(f: &Family, access: &Access, id: &str, name: &str) -> Result<Sna
             .format("%Y-%m-%d %H:%M:%S")
             .to_string(),
     });
-    let (dosage, payment, resources) = tokio::join!(
+    let (dosage, payment, resources, official) = tokio::join!(
         billing_post(f, access, "/v2/billing/meter/get-dosage-notify", None),
         billing_post(f, access, "/v2/billing/meter/get-payment-type", None),
         billing_post(f, access, "/v2/billing/meter/get-user-resource", Some(resource_body)),
+        official_usage(f, access),
     );
     let dosage = dosage?;
     if !dosage.ok() {
@@ -645,15 +646,145 @@ async fn finish(f: &Family, access: &Access, id: &str, name: &str) -> Result<Sna
     if metrics.is_empty() {
         return Err(format!("{} reported no quota data", f.display_name));
     }
+    // Official request ledger: a separate, text-only reading. It is never
+    // recorded as a meter sample and never summed with the credits face, so
+    // the 30-day request count cannot corrupt the balance history. Added
+    // after the empty guard so it can never make an empty quota look "ok".
+    if let Some(official) = official.filter(|row| row.requests > 0) {
+        metrics.push(super::Metric::text("Official requests (30d)", official.detail()));
+    }
     metrics.truncate(12);
     let mut snapshot = Snapshot::ok(id, name, plan.or(payment_type), metrics);
     snapshot.auth_pack_expiry = earliest_pack_expiry(&packs, now_ms);
     Ok(snapshot)
 }
 
+/// One 30-day official request ledger. `requests`/`credits` are read from the
+/// vendor's `get-user-request-usage` rows; they are deliberately kept out of
+/// `Metric::usage` so the credits meter history never adds them.
+#[derive(Default, Debug, PartialEq)]
+struct OfficialUsage {
+    requests: usize,
+    credits: f64,
+    /// The sweep stopped on an error, a stalled cursor or the round cap, so
+    /// the count is a lower bound rather than the whole 30-day window.
+    partial: bool,
+}
+
+impl OfficialUsage {
+    fn detail(&self) -> String {
+        let credits = if (self.credits.fract()).abs() < 0.005 {
+            format!("{:.0}", self.credits)
+        } else {
+            format!("{:.2}", self.credits)
+        };
+        format!(
+            "{} requests · {} credits{}",
+            self.requests,
+            credits,
+            if self.partial { " · partial" } else { "" }
+        )
+    }
+}
+
+/// WorkBuddy CN's official request ledger. Verified live 2026-10-24 on the
+/// CN host (200 / code 0, 26 rows in the 30-day window). Other variants were
+/// not probed and return `None` rather than guessing their host behaviour.
+/// Parsing, pagination and aggregation are the pure helpers in
+/// `workbuddy_official_usage`, so the card only owns the request loop.
+async fn official_usage(f: &Family, access: &Access) -> Option<OfficialUsage> {
+    use super::workbuddy_official_usage as official;
+    if f.family_id != "workbuddy" {
+        return None;
+    }
+    let now = chrono::Local::now();
+    let mut start = (now - chrono::Duration::days(30))
+        .format("%Y-%m-%d 00:00:00")
+        .to_string();
+    let end = now.format("%Y-%m-%d 23:59:59").to_string();
+    let mut pages = Vec::new();
+    let mut partial = false;
+    let mut complete = false;
+    for round in 0..official::MAX_SWEEP_ROUNDS {
+        if official::sweep_round_limit_reached(round) {
+            partial = true;
+            break;
+        }
+        let previous_start_ms = chrono::NaiveDateTime::parse_from_str(
+            &start,
+            "%Y-%m-%d %H:%M:%S",
+        )
+        .ok()
+        .map(|value| value.and_utc().timestamp_millis())
+        .unwrap_or(0);
+        let body = serde_json::json!({
+            "startTime": start,
+            "endTime": end,
+            "pageNum": 1,
+            "pageSize": 3000,
+        });
+        let billing = match billing_post(
+            f,
+            access,
+            "/billing/meter/get-user-request-usage",
+            Some(body),
+        )
+        .await
+        {
+            Ok(billing) => billing,
+            Err(_) => {
+                partial = true;
+                break;
+            }
+        };
+        if !billing.ok() {
+            partial = true;
+            break;
+        }
+        let page = match official::parse_page(&billing.body, 3000) {
+            Ok(page) => page,
+            Err(_) => {
+                partial = true;
+                break;
+            }
+        };
+        let decision = official::decide_next(&page, previous_start_ms);
+        pages.push(page);
+        match decision {
+            official::SweepDecision::Complete => {
+                complete = true;
+                break;
+            }
+            official::SweepDecision::Stalled => {
+                partial = true;
+                break;
+            }
+            official::SweepDecision::Continue { start_ms } => {
+                let Some(next) = chrono::DateTime::from_timestamp_millis(start_ms) else {
+                    partial = true;
+                    break;
+                };
+                start = next.format("%Y-%m-%d %H:%M:%S").to_string();
+            }
+        }
+    }
+    if !complete && !pages.is_empty() && !partial {
+        partial = true;
+    }
+    let rows = official::merge_pages(&pages);
+    if rows.is_empty() {
+        return None;
+    }
+    let summary = official::aggregate(&rows);
+    Some(OfficialUsage {
+        requests: rows.len(),
+        credits: summary.total_credit,
+        partial,
+    })
+}
+
 /// The packs array, wherever the gateway decided to nest it this quarter.
-fn resource_items(body: &Value) -> Vec<&Value> {
-    [
+fn resource_items(body: &Value) -> Vec<&Value> {    [
         "/data/resources",
         "/data/data/resources",
         "/data/Response/Data/Accounts",
@@ -1488,5 +1619,27 @@ mod tests {
         });
         let spent = vec![&spent_pack];
         assert!(package_detail_rows(&spent, NOW_MS).is_empty());
+    }
+
+    #[test]
+    fn official_usage_detail_says_requests_and_credits() {
+        let summary = OfficialUsage {
+            requests: 26,
+            credits: 12.5,
+            partial: false,
+        };
+        assert_eq!(summary.detail(), "26 requests · 12.50 credits");
+        let whole = OfficialUsage {
+            requests: 3,
+            credits: 8.0,
+            partial: false,
+        };
+        assert_eq!(whole.detail(), "3 requests · 8 credits");
+        let partial = OfficialUsage {
+            requests: 3000,
+            credits: 1.0,
+            partial: true,
+        };
+        assert!(partial.detail().ends_with("· partial"));
     }
 }

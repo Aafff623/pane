@@ -27,3 +27,5 @@
 ## Comments
 
 - 2026-10-19 出自 spec D10；上游 `official_usage.rs:24-49,393-527`。
+
+- 2026-10-24：重新用本机 CN 登录态跑 `probe-workbuddy-request-usage.mjs`，S0 五项全部可验证（200/code 0；26 条 30 天；字段齐全；pageSize=3000 全量、pageNum=2 边界不前进；total 与行为 26）。按 spec 判定可以进入实施。已复用 `workbuddy_official_usage` 的纯解析/分页/聚合模块，在 WorkBuddy CN 卡片追加只读 `Official requests (30d)` 文本行（请求数 + credits 合计），不写 meter、不与 credit_history 相加。AI 档未探测，保持不启用；账号筛选与每日趋势另票。
