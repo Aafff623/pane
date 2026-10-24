@@ -1,10 +1,10 @@
 {
-  "version": "0.9.0",
+  "version": "0.9.1",
   "files": {
     "index.html": "fcf00a66cd5aa092b3ffeff199e20f168eae462fc4c69e3b39e3ec966b77bbb0",
     "src/main.ts": "c3baa27ea90771f5e70e8fe573365eb25ca95b5d210661e20d188aac4b9d3ca1",
     "src/styles.css": "6fd9b212e7b23feb903e0ab3b83f6e8daa2a26c4dcf138d0d6cb4728b13752ed",
-    "src/i18n.ts": "937ee3f4103c57d26db1d417812a830b20c5334a9ea770826abce6faf23b39c8",
+    "src/i18n.ts": "b6222a7a90886cb37d76095f78ce2b4cf6425adf67e52fd71dfc7f17b8b71056",
     "src/providerCatalog.ts": "b27ed7d5bb67970988f49e53e624d5da30b0ba8f20b72b262b5975719b305b6f"
   }
 }

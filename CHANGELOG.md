@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.9.1 — 2026-10-24
+
+StepFun 双通道 / 精确额度 / 重置时间
+
+## 变更
+
+- **StepFun 双通道并存**：Step Plan 的网页会话与 API Key 现在分别保存，互不覆盖。网页会话可用时优先读取真实额度；只有网页会话缺失或过期时才回落到 API Key 的本地 token 估算。
+- **StepFun 精确余额**：Credit 行优先使用 `credit_buckets` 的 `credit_total` / `credit_residual`，展开卡显示 `6.66B of 8.00B credits left`，并倒计时到订阅到期时间。
+
+## 修复
+
+- **StepFun 重置时间 1970**：接口把 `subscription_credit_reset_time` 返回为 `0` 时不再当成有效时间，改用订阅/资源包的 `expire_at`。
+- **旧凭据迁移**：历史 `{apiKey}` 文件在加载时自动归入 API Key 槽，不再被误判成网页会话。
+
 ## 0.9.0 — 2026-10-24
 
 设置骨架 / VS Code 灰 / 三皮肤适配 / 官方用量
