@@ -799,6 +799,18 @@ const PROVIDER_DEFINITIONS: &[ProviderDefinition] = &[
     // The open platform's speech resource packs: a different domain, a
     // different credential (console web session, not a MaaS API key) and a
     // different envelope than #38, so it is its own family and card.
+    // ZCode's own Start Plan: a local account session (the ZCode desktop
+    // client's encrypted JWT), not the Z.ai API key the card above uses.
+    ProviderDefinition {
+        family_id: "zcode",
+        display_name: "ZCode",
+        query_kind: QueryKind::NativeSnapshot,
+        supports_api_key: false,
+        supports_extra_accounts: false,
+        icon_key: "zcode",
+        category: ProviderCategory::Coding,
+        primary_unit: UsageUnit::Tokens,
+    },
     ProviderDefinition {
         family_id: "xfyun-speech",
         display_name: "讯飞开放平台语音",

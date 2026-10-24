@@ -1,28 +1,20 @@
-//! ZCode (Zhipu's desktop client) hands its signed-in accounts a series of
-//! token gifts: weekend builds, the 1024 Dev Day grant, and the model-scoped
-//! trials that ship with new models (GLM-5.3, GLM-5.3-Flash, …). They all
-//! belong to the **ZCode Start Plan**, i.e. the account session — a different
-//! credential than the Z.ai API key this card is built around. The session JWT
-//! is stored AES-256-GCM-encrypted in ~/.zcode/v2/credentials.json and the
-//! balance is served by zcode.z.ai/api/v1/zcode-plan/billing/balance, whose
-//! `plans[].entitlements[]` and `balances[]` describe every grant as a bucket
-//! with its own `show_name`, total/used units and window.
+//! ZCode — the Zhipu coding client's own **Start Plan** card.
 //!
-//! Each granted bucket is its own row on the Z.ai card (2026-10-24 amendment:
-//! the earlier weekend-only filter hid every other gift). A plan held without a
-//! bucket renders a claim line; a session with no grant renders the historical
-//! "Weekend not started" row; a machine without a local session shows no row at
-//! all. A failed request holds this run's last verdict so rows never flicker
-//! (`.scratch/zcode-weekend/spec.md`).
+//! This is a separate provider from `zai` on purpose. `zai` reads the official
+//! token-plan quota with an API key; ZCode's Start Plan (and every gift it
+//! hands out: weekend builds, the 1024 Dev Day grant, the model-scoped trials
+//! shipped with GLM-5.3 / GLM-5.3-Flash) belongs to the **ZCode account
+//! session** instead. The session JWT is stored AES-256-GCM-encrypted in
+//! `~/.zcode/v2/credentials.json`; the balance endpoint mirrors each
+//! entitlement as a bucket with its own `show_name`, total/used units and
+//! window.
 //!
-//! Crypto and endpoint semantics mirror magpie's Go implementation
-//! (zcode.go zcodeSecret/zcodeDecrypt, zcode_start.go zcodeStartBalance):
-//! `ends_at` and the period bounds are unix SECONDS, numbers-or-strings;
-//! a plan still "active" past its `ends_at` is over, and its buckets are
-//! dropped. The header contract is asymmetric: the endpoint refuses a
-//! request without X-Device-Mid (400, code 3001) yet only checks that the
-//! header exists, so Pane keeps a UUID of its own, made once beside
-//! config.json — never ZCode's, never magpie's.
+//! The card distinguishes the states an owner actually meets:
+//! no local session / expired session (`no_credentials`), a session without any
+//! Start Plan (`needs_setup`), a valid plan with no gift this period (one text
+//! row), a held plan with nothing granted (a claim line), and live grants (one
+//! usage row per bucket). A failed request is an error — rows are never carried
+//! over from a previous account.
 
 use super::{config_dir, json_body, read_small_text, send_with_direct_fallback};
 use aes_gcm::aead::{Aead, KeyInit};
@@ -63,77 +55,91 @@ pub struct StartGrant {
 const CLAIM_HINT: &str = "held · not granted (open ZCode to claim)";
 const MAX_ROWS: usize = 6;
 
-/// Every live gift row for the Z.ai card.
-///
-/// The Start Plan is the **ZCode session's own plan** (the JWT in
-/// `~/.zcode/v2/credentials.json`), not the Z.ai API key. Its `plans[]` carry
-/// `entitlements[]` (model-scoped grants such as `GLM-5.3` 2亿 /
-/// `GLM-5.3-Flash` 3亿, weekend builds, 1024 Dev Day) and `balances[]` mirror
-/// them as buckets. So each granted bucket is a row — the old weekend-only
-/// filter hid every other gift.
-///
-/// `None` when this machine has no local ZCode session: the card shows nothing
-/// rather than a lying placeholder. A session with no grant at all renders the
-/// established "Weekend not started" row.
-pub async fn start_plan_rows() -> Option<Vec<super::Metric>> {
-    let jwt = read_local_jwt()?;
+const FAMILY_ID: &str = "zcode";
+const DISPLAY_NAME: &str = "ZCode";
+const NO_SESSION_HINT: &str =
+    "Sign in to the ZCode app on this machine, then refresh.";
+const SESSION_EXPIRED_HINT: &str =
+    "The local ZCode session expired — open ZCode and sign in again.";
+const NO_PLAN_HINT: &str =
+    "This ZCode account has no Start Plan on record.";
+const NO_GIFT: &str = "No gift in this period";
+
+/// The card snapshot: one call, one honest state.
+pub async fn snapshot() -> super::Snapshot {
+    let Some(jwt) = read_local_jwt() else {
+        return super::Snapshot::no_credentials(FAMILY_ID, DISPLAY_NAME, NO_SESSION_HINT);
+    };
     let now_s = chrono::Utc::now().timestamp();
-    // An expired session is a logged-out machine as far as these rows are
-    // concerned; skip the dead call until the user signs in again.
     if jwt_expired(&jwt, now_s) {
-        return None;
+        return super::Snapshot::no_credentials(FAMILY_ID, DISPLAY_NAME, SESSION_EXPIRED_HINT);
     }
     match fetch_balance(&jwt, &device_mid()).await {
-        Some(doc) => {
-            let (grants, ungranted) = parse_start_grants(&doc, now_s);
-            let rows = render_rows(&grants, &ungranted);
-            store_last(token_tag(&jwt), &rows);
-            Some(rows)
+        Some(doc) => snapshot_from_doc(&doc, now_s),
+        None => super::Snapshot::error(
+            FAMILY_ID,
+            DISPLAY_NAME,
+            "ZCode balance request failed — check the ZCode session and try again".into(),
+        ),
+    }
+}
+
+/// Pure state machine over a balance response, so every status is testable
+/// without a session or a network call.
+pub fn snapshot_from_doc(doc: &Value, now_s: i64) -> super::Snapshot {
+    if doc.get("code").and_then(Value::as_i64) != Some(0) {
+        let message = doc
+            .get("msg")
+            .or_else(|| doc.get("message"))
+            .and_then(Value::as_str)
+            .unwrap_or("unexpected balance response")
+            .to_string();
+        return super::Snapshot::error(FAMILY_ID, DISPLAY_NAME, message);
+    }
+    let plans = active_plan_names(doc, now_s);
+    if plans.is_empty() {
+        // A signed-in account without a Start Plan is a setup state, not a
+        // broken reading and not an empty card.
+        return super::Snapshot::needs_setup(FAMILY_ID, DISPLAY_NAME, None, vec![], NO_PLAN_HINT);
+    }
+    let plan_label = plans.join(" · ");
+    let (grants, ungranted) = parse_start_grants(doc, now_s);
+    let rows = if grants.is_empty() && ungranted.is_empty() {
+        vec![super::Metric::text(NO_GIFT, String::new())]
+    } else {
+        render_rows(&grants, &ungranted)
+    };
+    super::Snapshot::ok(FAMILY_ID, DISPLAY_NAME, Some(plan_label), rows)
+}
+
+/// Every non-expired plan name, in payload order, deduplicated.
+pub fn active_plan_names(doc: &Value, now_s: i64) -> Vec<String> {
+    let Some(data) = doc.get("data") else {
+        return Vec::new();
+    };
+    let now_s = num(data.get("server_time"))
+        .filter(|t| *t > 0.0)
+        .unwrap_or(now_s as f64) as i64;
+    let mut names: Vec<String> = Vec::new();
+    for plan in data
+        .get("plans")
+        .and_then(Value::as_array)
+        .unwrap_or(&Vec::new())
+    {
+        if plan_expired(plan, now_s) {
+            continue;
         }
-        // Transient failure: hold this run's last verdict so rows do not
-        // flicker on a blip; a cold-start miss shows nothing this cycle.
-        None => cached_last(token_tag(&jwt)),
+        let name = plan
+            .get("name")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .trim()
+            .to_string();
+        if !name.is_empty() && !names.contains(&name) {
+            names.push(name);
+        }
     }
-}
-
-/// Rows cached for the exact session that fetched them, briefly. Reusing them
-/// across a ZCode account switch would paint one account's gifts on another's
-/// card, and an old verdict must not outlive the session it describes.
-struct CachedRows {
-    token_tag: u64,
-    at: std::time::Instant,
-    rows: Vec<super::Metric>,
-}
-
-const CACHE_TTL: std::time::Duration = std::time::Duration::from_secs(300);
-
-fn token_tag(jwt: &str) -> u64 {
-    use std::hash::{Hash, Hasher};
-    let mut hasher = std::collections::hash_map::DefaultHasher::new();
-    jwt.hash(&mut hasher);
-    hasher.finish()
-}
-
-fn last_state() -> &'static std::sync::Mutex<Option<CachedRows>> {
-    static LAST: std::sync::OnceLock<std::sync::Mutex<Option<CachedRows>>> =
-        std::sync::OnceLock::new();
-    LAST.get_or_init(|| std::sync::Mutex::new(None))
-}
-
-fn store_last(tag: u64, rows: &[super::Metric]) {
-    if let Ok(mut slot) = last_state().lock() {
-        *slot = Some(CachedRows {
-            token_tag: tag,
-            at: std::time::Instant::now(),
-            rows: rows.to_vec(),
-        });
-    }
-}
-
-fn cached_last(tag: u64) -> Option<Vec<super::Metric>> {
-    let slot = last_state().lock().ok()?;
-    let cached = slot.as_ref()?;
-    (cached.token_tag == tag && cached.at.elapsed() <= CACHE_TTL).then(|| cached.rows.clone())
+    names
 }
 
 /// The card rows: one usage bar per granted bucket, then one claim line per
@@ -845,6 +851,60 @@ mod tests {
     }
 
     const NOW: i64 = 1_760_100_000; // inside the measured grant window
+
+    #[test]
+    fn a_session_without_a_start_plan_is_a_setup_state() {
+        let doc = json!({"code": 0, "data": {"server_time": NOW, "plans": [], "balances": []}});
+        let snap = snapshot_from_doc(&doc, NOW);
+        assert_eq!(snap.status, "needs_setup");
+        assert!(snap.metrics.is_empty());
+        assert_eq!(snap.plan, None);
+    }
+
+    #[test]
+    fn a_valid_plan_without_a_gift_says_so_instead_of_showing_nothing() {
+        let doc = balance_doc(
+            json!([{"plan_id": "p-start", "user_plan_id": "up-1", "name": "ZCode Start Plan",
+                    "status": "active", "ends_at": NOW + 50_000,
+                    "entitlements": []}]),
+            json!([]),
+            NOW,
+        );
+        let snap = snapshot_from_doc(&doc, NOW);
+        assert_eq!(snap.status, "ok");
+        assert_eq!(snap.plan.as_deref(), Some("ZCode Start Plan"));
+        // The plan is held but nothing is granted this period: one explicit
+        // line, not an empty card and not a fake zero bar.
+        assert!(snap.metrics.iter().any(|m| m.label == NO_GIFT));
+    }
+
+    #[test]
+    fn live_grants_render_one_row_each_and_name_the_plan() {
+        let doc = balance_doc(
+            json!([{"plan_id": "p-1024", "user_plan_id": "up-1", "name": "ZCode 1024 Dev Day",
+                    "status": "active", "ends_at": NOW + 50_000,
+                    "entitlements": [{"show_name": "GLM-5.3"}, {"show_name": "GLM-5.3-Flash"}]}]),
+            json!([
+                {"plan_id": "p-1024", "user_plan_id": "up-1", "show_name": "GLM-5.3-Flash",
+                 "total_units": 300, "used_units": 0, "period_end": NOW + 10_000},
+                {"plan_id": "p-1024", "user_plan_id": "up-1", "show_name": "GLM-5.3",
+                 "total_units": 200, "used_units": 0, "period_end": NOW + 10_000}
+            ]),
+            NOW,
+        );
+        let snap = snapshot_from_doc(&doc, NOW);
+        assert_eq!(snap.status, "ok");
+        assert_eq!(snap.plan.as_deref(), Some("ZCode 1024 Dev Day"));
+        assert_eq!(snap.metrics.len(), 2);
+        assert!(snap.metrics.iter().all(|m| m.kind == "progress"));
+    }
+
+    #[test]
+    fn a_rejected_envelope_is_an_error_not_an_empty_plan() {
+        let snap = snapshot_from_doc(&json!({"code": 3001, "msg": "parameter error"}), NOW);
+        assert_eq!(snap.status, "error");
+        assert!(snap.metrics.is_empty());
+    }
 
     #[test]
     fn a_dev_day_plan_lists_each_gift_bucket_by_its_own_name() {

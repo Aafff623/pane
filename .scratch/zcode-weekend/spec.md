@@ -117,3 +117,16 @@ owner 要求把智谱 Start Plan 的活动福利说清楚。用本机真实 ZCod
   「Weekend not started」占位。窗口过期的 plan/bucket 一律丢弃。
 - 单测从 7 条扩到 9 条（含 1024 形状、未领取、关闭窗口、跨 plan 不串数），并保留一条
   ignored 的真实机盘点 `real_machine_start_plan_inventory` 供以后校准。
+
+## 2026-10-24 amendment 2：拆成独立 provider `zcode`
+
+owner 指出：Z.ai 卡走官方 token plan（API key），ZCode 的 Start Plan 是另一套凭据，
+不应挂在同一张卡上。因此：
+
+- 新建 family `zcode`（显示名 ZCode，`NativeSnapshot`、无 API key、无 Pane 登录、Coding、Tokens），
+  模块从 `providers/zcode_weekend.rs` 改名为 `providers/zcode.rs`。
+- 卡片状态细分：无本地会话 / 会话过期 → `no_credentials`（提示去 ZCode 登录）；
+  有会话但没有 Start Plan → `needs_setup`（该账号无订阅）；有计划但本期无赠送 → 一行
+  「No gift in this period」；有计划未发放 → 「held · not granted」领取行；有赠送 → 每 bucket 一行；
+  请求失败 → `error`（不再跨账号复用旧行）。
+- `zai.rs` 回归纯 key 口径：不再拼 Start Plan 行，无 key 时仍然提示填 key。

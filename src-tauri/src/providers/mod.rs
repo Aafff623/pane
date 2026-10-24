@@ -68,7 +68,7 @@ pub mod workbuddy_web;
 pub mod xfyun;
 pub mod xfyun_speech;
 pub mod zai;
-pub mod zcode_weekend;
+pub mod zcode;
 pub mod zed;
 
 use serde::{Deserialize, Serialize};

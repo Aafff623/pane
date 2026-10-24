@@ -88,6 +88,7 @@ export const providerCatalog: readonly ProviderDefinition[] = [
   { familyId: "poe", displayName: "Poe", primaryUnit: "tokens", queryKind: "nativeBalance", supportsApiKey: true, supportsExtraAccounts: true, supportsOAuth: false, iconKey: "poe" },
   { familyId: "tokenrhythm", displayName: "基元律动", primaryUnit: "tokens", queryKind: "nativeBalance", supportsApiKey: false, supportsExtraAccounts: true, supportsOAuth: false, webSession: true, iconKey: "tokenrhythm" },
   { familyId: "xfyun", displayName: "讯飞星火", primaryUnit: "tokens", queryKind: "nativeBalance", supportsApiKey: false, supportsExtraAccounts: true, supportsOAuth: false, webSession: true, iconKey: "xfyun" },
+  { familyId: "zcode", displayName: "ZCode", primaryUnit: "tokens", queryKind: "nativeSnapshot", supportsApiKey: false, supportsExtraAccounts: false, supportsOAuth: false, iconKey: "zcode" },
   { familyId: "xfyun-speech", displayName: "讯飞开放平台语音", primaryUnit: "requests", queryKind: "nativeSnapshot", supportsApiKey: false, supportsExtraAccounts: true, supportsOAuth: false, webSession: true, category: "productivity", iconKey: "xfyun-speech" },
   { familyId: "venice", displayName: "Venice", primaryUnit: "tokens", queryKind: "nativeBalance", supportsApiKey: true, supportsExtraAccounts: true, supportsOAuth: false, iconKey: "venice" },
   { familyId: "vertexai", displayName: "Vertex AI", primaryUnit: "tokens", queryKind: "localOnly", supportsApiKey: false, supportsExtraAccounts: false, supportsOAuth: false, iconKey: "vertexai" },

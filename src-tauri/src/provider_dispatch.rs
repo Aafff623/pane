@@ -73,6 +73,7 @@ native_snapshots! {
     "tokenrhythm" => providers::tokenrhythm::snapshot(),
     "xfyun" => providers::xfyun::snapshot(),
     "xfyun-speech" => providers::xfyun_speech::snapshot(),
+    "zcode" => providers::zcode::snapshot(),
     "venice" => providers::venice::snapshot(),
     "vertexai" => providers::vertexai::snapshot(),
     "warp" => providers::warp::snapshot(),

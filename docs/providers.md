@@ -187,48 +187,7 @@ Ground rules that apply to every provider:
   counting on first use, so it shows as "not started". Older
   subscriptions report a single token window and show just the Session
   row.
-- **Start Plan gifts (auxiliary rows):** a machine with a local ZCode desktop
-  session gets one row **per granted gift bucket** — weekend builds, the 1024
-  Dev Day grants, and the model-scoped trial grants handed out with new models
-  (measured 2026-10-23: plan `ZCode 1024 Dev Day` carried `GLM-5.3-Flash`
-  300,000,000 and `GLM-5.3` 200,000,000 tokens). These gifts belong to the
-  **ZCode account session, never to the Z.ai API key**: the key path cannot see
-  them at all.
-  - **Reads:** `~/.zcode/v2/credentials.json` — the ZCode CLI's AES-256-GCM
-    encrypted session JWT, decrypted locally; the first entry that decrypts to
-    a JWT wins.
-  - **Calls:** `zcode.z.ai/api/v1/zcode-plan/billing/balance`, which requires an
-    `X-Device-Mid` header but only checks that it exists — Pane keeps its own
-    UUID beside config.json.
-  - **Payload:** `data.plans[]` (`name`, `status`, `starts_at`, `ends_at`,
-    `entitlements[]` with `show_name` / `capabilities` / `grant_units` /
-    `period: one_time`) and `data.balances[]` mirroring each entitlement
-    (`show_name`, `total_units`, `used_units`, `remaining_units`,
-    `available_units`, `period_start`, `period_end`, `expires_at`, unix
-    seconds). A bucket is paired to its plan by `plan_id` first — one account
-    can hold several plans at once (a gift beside the coding plan) and they
-    share `user_plan_id`, so matching on the user would fan every bucket out to
-    every plan; the user id is only the fallback when a payload omits plan ids. A plan past `ends_at` is dead even while it still says `active`,
-    and a bucket past its own window stops counting.
-  - **Rows:** label = the bucket's `show_name` (so `GLM-5.3` and
-    `GLM-5.3-Flash` stay distinguishable), bar = used/total, detail names the
-    plan, expiring-soonest first, capped at six. A plan held without a granted
-    bucket renders a "held · not granted (open ZCode to claim)" line; a session
-    with no grant at all keeps the historical "Weekend not started" row; no
-    local session renders no row. A failed request holds the last verdict so
-    rows never flicker between refreshes.
-  - **Caching:** rows are cached only for the session that fetched them (a
-    hashed token tag) and for five minutes, so switching ZCode accounts or
-    letting the session expire cannot paint one account's gifts on another's
-    card.
-  - **待确认:** the meaning of every `status` value and the timezone/unit of the
-    naive timestamps; a gift whose `total_units` is 0 renders no row at all; when
-    every grant has expired the card falls back to the historical "Weekend not
-    started" copy, which reads as "never granted" rather than "ended"; and when a
-    Z.ai API key and the local ZCode session belong to **different accounts**,
-    the gift rows still attach to the key's card because the key path carries no
-    account identity to compare — an account-scoped split is still to be
-    decided.
+
 
 ## Antigravity
 
@@ -728,3 +687,49 @@ credited in [LICENSE](../LICENSE).
   reading no longer matches this account — the three packs now read 0/500,
   i.e. they were re-claimed or reset; that is account history, not an API
   change.)
+
+## ZCode (Start Plan)
+
+A separate provider from Z.ai above: Z.ai reads the official token plan with an
+API key, while this card reads the **ZCode desktop client's account session**.
+Every Start Plan gift arrives as a bucket on that session, so the card shows
+one row per granted bucket — weekend builds, the 1024 Dev Day grants, and the
+model-scoped trials handed out with new models (measured 2026-10-23: plan
+`ZCode 1024 Dev Day` carried `GLM-5.3-Flash` 300,000,000 and `GLM-5.3`
+200,000,000 tokens). These gifts belong to the **ZCode account session, never to
+the Z.ai API key**: the key path cannot see them at all.
+  - **Reads:** `~/.zcode/v2/credentials.json` — the ZCode CLI's AES-256-GCM
+    encrypted session JWT, decrypted locally; the first entry that decrypts to
+    a JWT wins.
+  - **Calls:** `zcode.z.ai/api/v1/zcode-plan/billing/balance`, which requires an
+    `X-Device-Mid` header but only checks that it exists — Pane keeps its own
+    UUID beside config.json.
+  - **Payload:** `data.plans[]` (`name`, `status`, `starts_at`, `ends_at`,
+    `entitlements[]` with `show_name` / `capabilities` / `grant_units` /
+    `period: one_time`) and `data.balances[]` mirroring each entitlement
+    (`show_name`, `total_units`, `used_units`, `remaining_units`,
+    `available_units`, `period_start`, `period_end`, `expires_at`, unix
+    seconds). A bucket is paired to its plan by `plan_id` first — one account
+    can hold several plans at once (a gift beside the coding plan) and they
+    share `user_plan_id`, so matching on the user would fan every bucket out to
+    every plan; the user id is only the fallback when a payload omits plan ids. A plan past `ends_at` is dead even while it still says `active`,
+    and a bucket past its own window stops counting.
+  - **Rows:** label = the bucket's `show_name` (so `GLM-5.3` and
+    `GLM-5.3-Flash` stay distinguishable), bar = used/total, detail names the
+    plan, expiring-soonest first, capped at six. A plan held without a granted
+    bucket renders a "held · not granted (open ZCode to claim)" line; a session
+    with no grant at all keeps the historical "Weekend not started" row; no
+    local session renders no row. A failed request holds the last verdict so
+    rows never flicker between refreshes.
+  - **Caching:** rows are cached only for the session that fetched them (a
+    hashed token tag) and for five minutes, so switching ZCode accounts or
+    letting the session expire cannot paint one account's gifts on another's
+    card.
+  - **待确认:** the meaning of every `status` value and the timezone/unit of the
+    naive timestamps; a gift whose `total_units` is 0 renders no row at all; when
+    every grant has expired the card falls back to the historical "Weekend not
+    started" copy, which reads as "never granted" rather than "ended"; and when a
+    Z.ai API key and the local ZCode session belong to **different accounts**,
+    the gift rows still attach to the key's card because the key path carries no
+    account identity to compare — an account-scoped split is still to be
+    decided.

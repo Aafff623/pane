@@ -58,6 +58,7 @@ const LOCAL_HINTS: Record<string, string> = {
   qodercn: "customize.loginHint.qodercn",
   traecn: "customize.loginHint.traecn",
   jetbrains: "customize.loginHint.jetbrains",
+  zcode: "customize.loginHint.zcode",
 };
 
 const SPECIAL: Record<string, Onboarding> = {
