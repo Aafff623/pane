@@ -914,7 +914,10 @@ mod tests {
         let max_in_flight = Arc::new(AtomicUsize::new(0));
         let n_keys = 9;
         let n_requests = n_keys * 2;
-        let (origin, join) = spawn_slow_billing_server(
+        // Use the chunked server here too: tiny_http's accept loop occasionally
+        // dropped one of the queued connections on CI, which looked like a
+        // product error even though the cap was correct.
+        let (origin, join) = spawn_chunked_slow_billing_server(
             n_requests,
             Duration::from_millis(200),
             Arc::clone(&in_flight),
