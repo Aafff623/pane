@@ -164,6 +164,112 @@ pub(crate) fn reconcile_identities(
     Ok(())
 }
 
+/// Pick the one progress bar that best represents a card's quota when no
+/// absolute counter exists: the longest declared window (monthly > weekly >
+/// 5-hour session), preferring a bar with a known reset time when windows
+/// tie, else the first headline bar. The value becomes today's high-water
+/// sample under a `percent` meter; older samples in the same day are maxed by
+/// usage_history, not overwritten.
+fn quota_percent_days(metrics: &[providers::Metric], today: &str) -> Option<crate::usage_units::UsageDays> {
+    let mut chosen: Option<(&str, f64, i64, bool)> = None;
+    for metric in metrics {
+        if metric.kind != "progress" {
+            continue;
+        }
+        let Some(percent) = metric.used_percent.filter(|value| value.is_finite()) else {
+            continue;
+        };
+        let period = metric.period_ms.unwrap_or(0);
+        let has_reset = metric.resets_at.is_some();
+        let replace = match chosen {
+            None => true,
+            Some((_, _, best_period, best_reset)) => (period, has_reset) > (best_period, best_reset),
+        };
+        if replace {
+            chosen = Some((&metric.label, percent.clamp(0.0, 100.0), period, has_reset));
+        }
+    }
+    let (label, percent, period, _) = chosen?;
+    // A window length is a stable identity across copy changes; bar labels
+    // are not (a renamed row would restart a 30-day trend). Bars without a
+    // declared window keep their label.
+    let scope = if period > 0 {
+        format!("period:{period}")
+    } else {
+        label.to_string()
+    };
+    Some(crate::usage_units::UsageDays {
+        unit: crate::usage_units::UsageUnit::Percent,
+        scope,
+        days: std::collections::BTreeMap::from([(today.to_string(), percent)]),
+    })
+}
+
+#[cfg(test)]
+mod quota_trend_tests {
+    use super::*;
+    use crate::providers::Metric;
+    use crate::usage_units::UsageUnit;
+
+    #[test]
+    fn percent_fallback_tracks_the_longest_window_not_the_session_bar() {
+        let metrics = vec![
+            Metric::progress("Session", 66.0, None).with_reset(None, Some(18_000_000)),
+            Metric::progress("Weekly", 12.5, None).with_reset(None, Some(604_800_000)),
+            Metric::text("Weekly", "Unlimited".into()),
+        ];
+        let sample = quota_percent_days(&metrics, "2026-10-24").expect("percent sample");
+        assert_eq!(sample.unit, UsageUnit::Percent);
+        assert_eq!(sample.scope, "period:604800000", "the window is the stable series identity");
+        assert_eq!(sample.days["2026-10-24"], 12.5);
+
+        let windowless = vec![Metric::progress("Firecrawl", 0.0, None)];
+        assert_eq!(
+            quota_percent_days(&windowless, "2026-10-24").unwrap().scope,
+            "Firecrawl",
+            "a bar with no declared window keeps its label"
+        );
+    }
+
+    #[test]
+    fn percent_fallback_needs_a_real_progress_bar() {
+        let text_only = vec![Metric::text("Balance", "¥0.00".into())];
+        assert!(quota_percent_days(&text_only, "2026-10-24").is_none());
+        let invalid = vec![Metric::progress("Session", f64::NAN, None)];
+        assert!(quota_percent_days(&invalid, "2026-10-24").is_none());
+    }
+
+    #[test]
+    fn a_quantity_meter_suppresses_the_percent_fallback_in_the_merge() {
+        let mut cache = HashMap::new();
+        let mut failures = HashMap::new();
+        let mut percent_only = Snapshot::ok(
+            "minimax",
+            "MiniMax",
+            None,
+            vec![Metric::progress("Session", 66.0, None).with_reset(None, Some(18_000_000))],
+        );
+        let (_, readings, daily) = merge_snapshot(&mut percent_only, &mut cache, &mut failures, 1_000);
+        assert!(readings.is_empty());
+        assert!(daily.iter().any(|sample| sample.unit == UsageUnit::Percent));
+
+        let mut quantity = Snapshot::ok(
+            "tavily",
+            "Tavily",
+            None,
+            vec![
+                Metric::progress("Key 1", 45.5, None)
+                    .with_reset(None, None)
+                    .with_usage(UsageUnit::Credits, 455.0, Some(1000.0)),
+                Metric::progress("Session", 40.0, None),
+            ],
+        );
+        let (_, readings, daily) = merge_snapshot(&mut quantity, &mut cache, &mut failures, 1_001);
+        assert_eq!(readings.len(), 1);
+        assert!(daily.iter().all(|sample| sample.unit != UsageUnit::Percent));
+    }
+}
+
 /// Returns whether the cache changed and valid observed meter readings.
 /// A restored wallet never refreshes its original timestamp.
 pub(crate) fn merge_snapshot(
@@ -199,15 +305,23 @@ pub(crate) fn merge_snapshot(
                 snap: snapshot.clone(),
             },
         );
-        return (
-            true,
-            crate::usage_history::readings_from_metrics(&snapshot.metrics),
-            snapshot
-                .metrics
-                .iter()
-                .filter_map(|metric| metric.daily_usage.clone())
-                .collect(),
-        );
+        let readings = crate::usage_history::readings_from_metrics(&snapshot.metrics);
+        let mut daily: Vec<crate::usage_units::UsageDays> = snapshot
+            .metrics
+            .iter()
+            .filter_map(|metric| metric.daily_usage.clone())
+            .collect();
+        // Percentage-only quotas (MiniMax, Brave, Firecrawl, …) have no
+        // absolute counter to difference; record today's strongest bar as a
+        // daily sample so the card still gets a trend. A real quantity
+        // series always wins — one judgment, one sample per card.
+        if readings.is_empty() {
+            let today = chrono::Local::now().format("%Y-%m-%d").to_string();
+            if let Some(sample) = quota_percent_days(&snapshot.metrics, &today) {
+                daily.push(sample);
+            }
+        }
+        return (true, readings, daily);
     }
     if snapshot.status == "error" {
         let streak = failures.entry(snapshot.id.clone()).or_default();

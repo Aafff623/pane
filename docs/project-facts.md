@@ -57,8 +57,14 @@ Last reconciled: 2026-10-22 (Pane 0.8.9 + account lifecycle, legacy API-key reti
   prefixes, and snapshots every file before writing.
 - Auth center (`auth_center.rs`) rows carry `lastOkAt` (last successful
   query), `lastUsedAt` (latest day with positive usage; cumulative meters are
-  differenced so flat polling days do not count), and `current` (only when
+  differenced so flat polling days do not count; percent quota samples are
+  excluded because occupancy is not activity), and `current` (only when
   exactly one official-client local sign-in is visible).
+- Quota trends: a card with no absolute usage counter records its
+  longest-window progress bar as a per-day percent high-water sample in
+  `usage_history`; `meter_trends` serves it to the card trend only after
+  every real quantity unit. Percent samples never enter credit totals or
+  `lastUsedAt`, and a renamed bar replaces the card's old percent series.
 - Moonshot (Kimi API) balances fold into the Kimi Code card
   (`fold_moonshot_into_kimi`).
 - OAuth: `oauth.rs` device-code flows — codex (OpenAI private flow), copilot
@@ -551,9 +557,13 @@ changes.
   `accounts-updated` so the Settings panel and popover drop their separate
   `accountsCache` entries. Display notes live in
   `config.layout.providers[<card id>].note`; `accountNote` reads the stable
-  id plus the legacy `@__default__` alias, writes through `setAccountNote`
-  to one canonical key, and falls back to label → email → localized
-  `Account N` (never a fingerprint/masked token). Notes are single-line,
+  id plus the legacy `@__default__` alias and writes through `setAccountNote`
+  to one canonical key. The bare family id IS the provider card's layout key:
+  its note is the card title, never an account name, so a bare default
+  account reads/writes `family@__default__` instead. Codex accounts default
+  to the ChatGPT/Google email before the backend label; every other account
+  falls back to label → email → localized `Account N` (never the provider
+  name, a fingerprint, or a masked token). Notes are single-line,
   capped at 48 code points, survive reconcile/archive/delete, and are shared
   by Settings, Customize, dashboard pills, overview/expiry details, spend
   details and the auth center. Auth-center rows edit that same note from
@@ -636,6 +646,10 @@ changes.
 - `account_list("codex")` puts the local CLI row first (id `codex`,
   `maskedKey: "CLI 登录"`) and then managed accounts, so a count of “1 个
   账号” can mean the CLI login alone.
+- The boot cache applies the same fingerprint dedupe as the live fan-out:
+  `configured_extra_account_ids` drops the stored `codex@<hash8>` that
+  matches the current default CLI account id, so that account cannot paint
+  twice until the fetch lands.
 - The local CLI login is read from its Codex home (`CODEX_HOME`, otherwise
   `~/.codex/auth.json`), including a UTF-8 BOM. Auth Center keeps this local
   source read-only even when a managed subscription uses the same email;

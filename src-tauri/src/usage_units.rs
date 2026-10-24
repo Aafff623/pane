@@ -9,9 +9,15 @@ pub enum UsageUnit {
     Requests,
     Characters,
     Pages,
+    /// Quota occupancy in percent, only recorded from progress bars when a
+    /// card exposes no absolute counter. One sample per day is the day's
+    /// high-water mark, not a cumulative counter — see usage_history.
+    Percent,
 }
 
-/// An observed cumulative counter, never a balance or a percentage.
+/// An observed cumulative counter, never a balance. `Percent` is the one
+/// exception: a per-day high-water mark, stored as a daily sample rather
+/// than differenced like a counter.
 /// Scopes identify independent meters on the same card (for example key
 /// counters); a missing scope is the card's primary meter.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

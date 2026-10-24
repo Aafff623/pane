@@ -200,6 +200,16 @@ pub fn card_id_for_account(login: &CodexLogin) -> String {
     card_id_for_account_id(&login.account_id)
 }
 
+/// Drop a cached extra-account card whose fingerprint is the account the
+/// bare `codex` card already renders. Live fan-out dedupes default versus
+/// store by account id; the first-paint cache must apply the same rule or
+/// one ChatGPT account shows as two cards until the fetch lands.
+pub fn remove_default_identity_card(ids: &mut HashSet<String>, default_account_id: Option<&str>) {
+    if let Some(account_id) = default_account_id {
+        ids.remove(&card_id_for_account_id(account_id));
+    }
+}
+
 /// "sk-…abcd" style mask: recognizable tail, never the whole token.
 pub fn mask_token(token: &str) -> String {
     let token = token.trim();
@@ -700,6 +710,22 @@ mod tests {
         assert_eq!(rows[1].label, "Other subscription");
         save_accounts_to(&base, &[]).unwrap();
         let _ = std::fs::remove_dir_all(base);
+    }
+
+    #[test]
+    fn cached_extra_card_for_the_default_identity_is_removed() {
+        let mut ids: HashSet<String> = [
+            card_id_for_account_id("97fa8404-8e34-49ea-90f1-86d48d06f9c0"),
+            card_id_for_account_id("3581686f-4744-4c2b-8ffb-87e8f8321371"),
+        ]
+        .into_iter()
+        .collect();
+        remove_default_identity_card(&mut ids, Some("97fa8404-8e34-49ea-90f1-86d48d06f9c0"));
+        assert_eq!(ids.len(), 1);
+        assert!(ids.contains("codex@3581686f"));
+        // No default identity (missing/broken auth.json) removes nothing.
+        remove_default_identity_card(&mut ids, None);
+        assert_eq!(ids.len(), 1);
     }
 
     #[test]

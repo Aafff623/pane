@@ -1679,6 +1679,11 @@ fn configured_extra_account_ids() -> HashSet<String> {
             .iter()
             .map(codex_accounts::card_id_for_account),
     );
+    // ... except the one the bare `codex` card already renders. The live
+    // fan-out dedupes by ChatGPT account id; without the same fingerprint
+    // here, the boot cache paints that account twice until the fetch lands.
+    let codex_default = providers::codex::default_identity();
+    codex_accounts::remove_default_identity_card(&mut ids, codex_default.as_deref());
     // Pane-managed Copilot/Grok logins (login_accounts stores, same deal).
     for family in login_accounts::LOGIN_FAMILIES {
         ids.extend(

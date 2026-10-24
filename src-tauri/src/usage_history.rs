@@ -209,51 +209,75 @@ pub fn record_daily_samples(samples: &[(String, crate::usage_units::UsageDays)])
     };
     let mut next = file.clone();
     for (id, days) in samples {
-        for (day, amount) in &days.days {
-            if !amount.is_finite() || *amount < 0.0 {
-                continue;
-            }
-            let index = next.meters.iter().position(|meter| {
-                meter.id == *id
-                    && meter.unit == days.unit
-                    && meter.scope == days.scope
-                    && meter.shape == UsageShape::Daily
-            });
-            let index = index.unwrap_or_else(|| {
-                next.meters.push(MeterSeries {
-                    id: id.clone(),
-                    unit: days.unit,
-                    scope: days.scope.clone(),
-                    shape: UsageShape::Daily,
-                    samples: Vec::new(),
-                });
-                next.meters.len() - 1
-            });
-            let samples = &mut next.meters[index].samples;
-            match samples.iter_mut().find(|sample| sample.day == *day) {
-                Some(sample) => {
-                    *sample = DaySample {
-                        day: day.clone(),
-                        used: *amount,
-                        last: None,
-                    }
-                }
-                None => {
-                    samples.push(DaySample {
-                        day: day.clone(),
-                        used: *amount,
-                        last: None,
-                    });
-                    samples.sort_by(|left, right| left.day.cmp(&right.day));
-                }
-            }
-        }
+        upsert_daily_samples(&mut next, id, days);
     }
     prune_daily_meters(&mut next, &today_string());
     if let Err(error) = persist_credits_at(&credit_persist_path(), &next) {
         eprintln!("[pane] usage history: {error}");
     } else {
         store.file = Ok(next);
+    }
+}
+
+/// Vendor daily buckets replace the day's value; the percent fallback is a
+/// high-water mark and only ever moves up within a day.
+fn upsert_daily_samples(file: &mut CreditFile, id: &str, days: &crate::usage_units::UsageDays) {
+    if days.unit == UsageUnit::Percent {
+        // One percent series per card: when the chosen bar is renamed, the
+        // previous series stops being the quota we monitor. Keeping both
+        // would leave meter_trends guessing which one is current.
+        file.meters
+            .retain(|meter| !(meter.id == id && meter.unit == UsageUnit::Percent && meter.scope != days.scope));
+    }
+    for (day, amount) in &days.days {
+        if !amount.is_finite() || *amount < 0.0 {
+            continue;
+        }
+        let index = file.meters.iter().position(|meter| {
+            meter.id == id
+                && meter.unit == days.unit
+                && meter.scope == days.scope
+                && meter.shape == UsageShape::Daily
+        });
+        let index = index.unwrap_or_else(|| {
+            file.meters.push(MeterSeries {
+                id: id.to_string(),
+                unit: days.unit,
+                scope: days.scope.clone(),
+                shape: UsageShape::Daily,
+                samples: Vec::new(),
+            });
+            file.meters.len() - 1
+        });
+        let samples = &mut file.meters[index].samples;
+        match samples.iter_mut().find(|sample| sample.day == *day) {
+            Some(sample) => {
+                if days.unit == UsageUnit::Percent {
+                    // Percent samples are a daily high-water mark, not a
+                    // vendor bucket: a mid-day drop (window reset) must not
+                    // erase the morning's peak.
+                    sample.used = sample.used.max((*amount).clamp(0.0, 100.0));
+                } else {
+                    *sample = DaySample {
+                        day: day.clone(),
+                        used: *amount,
+                        last: None,
+                    };
+                }
+            }
+            None => {
+                samples.push(DaySample {
+                    day: day.clone(),
+                    used: if days.unit == UsageUnit::Percent {
+                        (*amount).clamp(0.0, 100.0)
+                    } else {
+                        *amount
+                    },
+                    last: None,
+                });
+                samples.sort_by(|left, right| left.day.cmp(&right.day));
+            }
+        }
     }
 }
 
@@ -396,8 +420,15 @@ pub fn credit_extras() -> Vec<CreditExtra> {
     let Ok(file) = &store.file else {
         return Vec::new();
     };
+    credit_extras_for(file, &today)
+}
+
+fn credit_extras_for(file: &CreditFile, today: &str) -> Vec<CreditExtra> {
     let mut out: Vec<CreditExtra> = Vec::new();
-    for meter in &file.meters {
+    // Percent samples are daily peaks, not additive quantities: summing them
+    // over a 7-day window would report "400% used". They belong in the card
+    // trend (meter_trends), never in the measured-usage totals.
+    for meter in file.meters.iter().filter(|meter| meter.unit != UsageUnit::Percent) {
         let days = if meter.shape == UsageShape::Daily {
             meter
                 .samples
@@ -410,7 +441,7 @@ pub fn credit_extras() -> Vec<CreditExtra> {
         } else {
             credit_day_series(&meter.samples)
         };
-        let windows = credit_window_totals(&days, &today);
+        let windows = credit_window_totals(&days, today);
         if let Some(existing) = out
             .iter_mut()
             .find(|row| row.id == meter.id && row.unit == meter.unit)
@@ -487,8 +518,14 @@ pub fn last_used_map() -> BTreeMap<String, i64> {
     let Ok(file) = &store.file else {
         return BTreeMap::new();
     };
+    last_used_map_for(file)
+}
+
+fn last_used_map_for(file: &CreditFile) -> BTreeMap<String, i64> {
     let mut out = BTreeMap::new();
-    for meter in &file.meters {
+    // Percent samples are quota occupancy, not proof of activity: a stored
+    // 24% weekly bar would read as "used today" every day it is refreshed.
+    for meter in file.meters.iter().filter(|meter| meter.unit != UsageUnit::Percent) {
         let latest = match meter.shape {
             UsageShape::Daily => latest_used_day(&meter.samples),
             UsageShape::Cumulative => latest_cumulative_use_day(&meter.samples),
@@ -565,13 +602,17 @@ pub fn meter_trends() -> Vec<MeterTrend> {
     let Ok(file) = &store.file else {
         return Vec::new();
     };
+    meter_trends_for(file, &today)
+}
+
+fn meter_trends_for(file: &CreditFile, today: &str) -> Vec<MeterTrend> {
     let mut out: Vec<MeterTrend> = Vec::new();
-    for meter in &file.meters {
+    for meter in file.meters.iter().filter(|meter| meter.unit != UsageUnit::Percent) {
         let entries = BTreeMap::from([(meter.id.clone(), meter.samples.clone())]);
         let trend = if meter.shape == UsageShape::Daily {
-            credit_trend_for_daily(&meter.samples, &today)
+            credit_trend_for_daily(&meter.samples, today)
         } else {
-            credit_trend_for(&entries, &meter.id, &today)
+            credit_trend_for(&entries, &meter.id, today)
         };
         if let Some(existing) = out
             .iter_mut()
@@ -591,6 +632,32 @@ pub fn meter_trends() -> Vec<MeterTrend> {
                 trend,
             });
         }
+    }
+    // One percent series per card: a renamed bar starts a new scope and the
+    // old one stops updating. Show the series with the newest sample (then
+    // the longest one) rather than summing unrelated percentages.
+    fn newest_day(meter: &MeterSeries) -> Option<&str> {
+        meter.samples.last().map(|sample| sample.day.as_str())
+    }
+    let mut best_percent: BTreeMap<&str, &MeterSeries> = BTreeMap::new();
+    for meter in file.meters.iter().filter(|meter| meter.unit == UsageUnit::Percent) {
+        let replace = match best_percent.get(meter.id.as_str()) {
+            None => true,
+            Some(current) => {
+                newest_day(meter) > newest_day(current)
+                    || (newest_day(meter) == newest_day(current) && meter.samples.len() > current.samples.len())
+            }
+        };
+        if replace {
+            best_percent.insert(meter.id.as_str(), meter);
+        }
+    }
+    for (id, meter) in best_percent {
+        out.push(MeterTrend {
+            id: id.to_string(),
+            unit: UsageUnit::Percent,
+            trend: credit_trend_for_daily(&meter.samples, today),
+        });
     }
     out
 }
@@ -1199,5 +1266,101 @@ mod tests {
         let trend = credit_trend_for_daily(&reloaded.meters[0].samples, "2026-10-16");
         assert_eq!(trend[28], Some(4.0));
         assert_eq!(trend[29], Some(9.0));
+    }
+
+    #[test]
+    fn percent_samples_keep_the_day_peak_when_a_quota_resets_midday() {
+        let mut file = CreditFile {
+            version: CREDIT_VERSION,
+            ..CreditFile::default()
+        };
+        let sample = |scope: &str, value: f64| crate::usage_units::UsageDays {
+            unit: UsageUnit::Percent,
+            scope: scope.into(),
+            days: BTreeMap::from([("2026-10-24".into(), value)]),
+        };
+        upsert_daily_samples(&mut file, "minimax", &sample("Session", 66.0));
+        upsert_daily_samples(&mut file, "minimax", &sample("Session", 18.0));
+        assert_eq!(file.meters[0].samples[0].used, 66.0);
+        upsert_daily_samples(&mut file, "minimax", &sample("Session", 81.0));
+        assert_eq!(file.meters[0].samples[0].used, 81.0);
+        assert!(matches!(file.meters[0].shape, UsageShape::Daily));
+        // A renamed bar is a different quota: it replaces the old series
+        // instead of leaving two percent rows for the same card.
+        upsert_daily_samples(&mut file, "minimax", &sample("Weekly", 30.0));
+        assert_eq!(file.meters.len(), 1);
+        assert_eq!(file.meters[0].scope, "Weekly");
+        assert_eq!(file.meters[0].samples[0].used, 30.0);
+    }
+
+    #[test]
+    fn percent_trends_pick_the_newest_scope_instead_of_summing_bars() {
+        let series = |scope: &str, days: &[(&str, f64)]| MeterSeries {
+            id: "brave".into(),
+            unit: UsageUnit::Percent,
+            scope: scope.into(),
+            shape: UsageShape::Daily,
+            samples: days
+                .iter()
+                .map(|(day, used)| DaySample {
+                    day: (*day).into(),
+                    used: *used,
+                    last: None,
+                })
+                .collect(),
+        };
+        let file = CreditFile {
+            version: CREDIT_VERSION,
+            meters: vec![
+                series("Monthly", &[("2026-10-20", 10.0), ("2026-10-21", 11.0)]),
+                series("Weekly", &[("2026-10-22", 40.0), ("2026-10-23", 45.0)]),
+            ],
+            ..CreditFile::default()
+        };
+        let trends = meter_trends_for(&file, "2026-10-23");
+        let percent: Vec<_> = trends.iter().filter(|row| row.unit == UsageUnit::Percent).collect();
+        assert_eq!(percent.len(), 1, "one percent series per card, never summed");
+        assert_eq!(percent[0].trend[29], Some(45.0));
+    }
+
+    #[test]
+    fn percent_samples_stay_out_of_credit_totals_and_last_used() {
+        let daily = |id: &str, unit: UsageUnit, scope: &str, shape: UsageShape, samples: &[(&str, f64)]| MeterSeries {
+            id: id.into(),
+            unit,
+            scope: scope.into(),
+            shape,
+            samples: samples
+                .iter()
+                .map(|(day, used)| DaySample {
+                    day: (*day).into(),
+                    used: *used,
+                    last: Some(*used),
+                })
+                .collect(),
+        };
+        let file = CreditFile {
+            version: CREDIT_VERSION,
+            meters: vec![
+                daily("minimax", UsageUnit::Percent, "period:18000000", UsageShape::Daily, &[("2026-10-24", 66.0)]),
+                daily(
+                    "workbuddy",
+                    UsageUnit::Credits,
+                    "",
+                    UsageShape::Cumulative,
+                    &[("2026-10-23", 0.0), ("2026-10-24", 5.0)],
+                ),
+            ],
+            ..CreditFile::default()
+        };
+        let extras = credit_extras_for(&file, "2026-10-24");
+        assert_eq!(extras.len(), 1, "percent must not become a measured-usage row");
+        assert_eq!(extras[0].id, "workbuddy");
+        assert_eq!(extras[0].windows.today, 5.0);
+        let last = last_used_map_for(&file);
+        assert!(!last.contains_key("minimax"), "quota occupancy is not activity");
+        assert!(last.contains_key("workbuddy"));
+        let trends = meter_trends_for(&file, "2026-10-24");
+        assert!(trends.iter().any(|row| row.id == "minimax" && row.unit == UsageUnit::Percent));
     }
 }

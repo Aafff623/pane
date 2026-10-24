@@ -234,6 +234,7 @@ test('overview detail names prefer the shown account note', () => {
   const context = load(['normalizeNote','shownDisplayName','labelForAccount','accountNote','accountNoteKeys','managedAccountForCard','cardNote','notedName'], {
     accountsCache,config,NOTE_MAX_CODE_POINTS:48,providerDefinition:family=>providerCatalog.find(p=>p.familyId===family),
     providerFamily:id=>id.split('@')[0], t:(key,{n})=>`${key}:${n}`, providerDisplayName:()=>'MiniMax',
+    supportsExtraAccounts:()=>true,
   });
   const card = {id:'minimax'};
   assert.equal(context.shownDisplayName(card, {id:'minimax'}, 'minimax', 'MiniMax'), '主账号');

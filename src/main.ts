@@ -1235,6 +1235,7 @@ function trendSourceFor(id: string): TrendSource | undefined {
 
 function formatUsageQuantity(value: number, unit: UsageUnit): string {
   const amount = value.toLocaleString(localeTag(), { maximumFractionDigits: 2 });
+  if (unit === "percent") return `${amount}%`;
   const suffix = unit === "tokens" ? "tokens"
     : unit === "credits" ? t("spend.creditsUnit")
     : unit === "minutes" ? t("usage.minutes")
@@ -2181,10 +2182,11 @@ function notedName(cardId: string, fallback: string): string {
   return cardNote(cardId) || fallback;
 }
 
-/// Every key a display note for this account may live under: the stable id,
-/// the legacy synthetic default slot, or (for a bare family id) the first
-/// managed account. Reading through aliases keeps notes written before the
-/// account cache was populated visible after it arrives.
+/// Every key a display note for this account may live under. A bare family
+/// id is ALSO the provider card's layout key, so its note is the provider
+/// title (e.g. "ChatGPT") and must never be read as an account name: bare
+/// accounts resolve through the stable @-id when one exists, else the legacy
+/// synthetic `family@__default__` slot.
 function accountNoteKeys(accountId: string): string[] {
   const family = providerFamily(accountId);
   const list = accountsCache.get(family) ?? [];
@@ -2193,13 +2195,16 @@ function accountNoteKeys(accountId: string): string[] {
     if (list[0]?.id === accountId) keys.push(`${family}@__default__`);
     return keys;
   }
+  const keys: string[] = [];
   const first = list[0]?.id;
-  return [first, `${accountId}@__default__`].filter((key): key is string => Boolean(key));
+  if (first?.includes("@")) keys.push(first);
+  keys.push(`${accountId}@__default__`);
+  return keys;
 }
 
 /// Canonical write key: prefer the stable managed identity, then the legacy
-/// synthetic default slot. Readers use accountNoteKeys so either placement is
-/// visible while the account list is still loading.
+/// synthetic default slot. Never the bare family id — writing there would
+/// rename the provider card instead of the account.
 function accountNoteKey(accountId: string): string {
   if (accountId.includes("@")) return accountId;
   const stableId = managedAccountForCard(accountId, accountId, accountsCache.get(accountId) ?? [])?.id;
@@ -2253,15 +2258,16 @@ function syncAccountName(accountId: string, name: string): void {
 }
 
 /// The name an overview/detail row should show for the account it actually
-/// presents. A stable account id resolves its own note; a bare default card
-/// uses the default account's note when one exists, otherwise the provider
-/// note/title. This keeps account notes visible in overview/expiry details
-/// without renaming the provider card itself.
+/// presents. Stable ids resolve their own note/label/email. A bare default
+/// card only borrows the first account's name when that account has an
+/// explicit note; otherwise it keeps the provider title — a generated
+/// "Account N" is not a better overview name than "ClinePass".
 function shownDisplayName(cardSnap: Snapshot, shownSnap: Snapshot, family: string, fallback: string): string {
   const list = accountsCache.get(family) ?? [];
-  if (shownSnap.id.includes("@")) return labelForAccount(shownSnap.id, list) || fallback;
+  if (shownSnap.id.includes("@")) return labelForAccount(shownSnap.id, list, fallback);
+  if (!supportsExtraAccounts(family)) return notedName(cardSnap.id, fallback);
   const first = list[0]?.id;
-  if (first && accountNote(first)) return labelForAccount(first, list) || fallback;
+  if (first && accountNote(first)) return labelForAccount(first, list, fallback);
   return notedName(cardSnap.id, fallback);
 }
 
@@ -2557,8 +2563,11 @@ function renderMetric(m: Metric, providerId?: string): string {
 }
 
 function renderTrend(source: TrendSource): string {
-  if (!source.trend.some((v) => v != null && v > 0)) return "";
-  const max = Math.max(...source.trend.map((v) => v ?? 0));
+  // A percent series may be a truthful all-zero row (Firecrawl before its
+  // first call). Quantity series still hide when every sampled day is 0 —
+  // an empty chart would imply a measurement the card never reported.
+  if (!source.trend.some((v) => v != null && (v > 0 || source.unit === "percent"))) return "";
+  const max = source.unit === "percent" ? 100 : Math.max(...source.trend.map((v) => v ?? 0));
   const peakIdx = source.trend.indexOf(max);
   const dayMs = 86_400_000;
   const dateOf = (i: number, weekday = false) =>
@@ -2579,14 +2588,16 @@ function renderTrend(source: TrendSource): string {
       </g>`;
     })
     .join("");
-  const title = source.unit
-    ? t("usage.meterTrendTip", { from: dateOf(0), to: dateOf(29) })
-    : t("spend.trendTip", {
-        from: dateOf(0),
-        to: dateOf(29),
-        value: source.fmt(max),
-        peak: dateOf(peakIdx),
-      });
+  const title = source.unit === "percent"
+    ? t("usage.quotaTrendTip", { from: dateOf(0), to: dateOf(29) })
+    : source.unit
+      ? t("usage.meterTrendTip", { from: dateOf(0), to: dateOf(29) })
+      : t("spend.trendTip", {
+          from: dateOf(0),
+          to: dateOf(29),
+          value: source.fmt(max),
+          peak: dateOf(peakIdx),
+        });
   const trendLabel = t("card.usageTrend");
   // Numeric spend beside the chart: credits from the card's meter when
   // available, tokens from the measured local ledger. WorkBuddy can have
@@ -2607,6 +2618,12 @@ function renderTrend(source: TrendSource): string {
     ? localSpend.trend.reduce<number>((sum, v) => sum + (v ?? 0), 0)
     : 0;
   const spendBits: string[] = [];
+  if (source.unit === "percent") {
+    spendBits.push(t("card.quotaPeak", { n: formatUsageQuantity(
+      Math.max(...source.trend.map((value) => value ?? 0)),
+      "percent",
+    ) }));
+  }
   if (creditUsed > 0) spendBits.push(t("card.creditsSpent", { n: fmtCredits(creditUsed) }));
   if (tokenTotal > 0) spendBits.push(t("card.tokens", { n: fmtTokens(tokenTotal) }));
   const spendSummary = spendBits.join(" · ");
@@ -3233,9 +3250,11 @@ function renderCard(s: Snapshot): string {
           const list = accountsCache.get(family) ?? [];
           const entry = managedAccountForCard(family, id, list) ?? (id === family ? list[0] : undefined);
           const note = accountNote(id);
-          const label = isDefaultAcct
-            ? (note || entry?.label?.trim() || entry?.email?.trim() || t("customize.acctDefaultShort"))
-            : labelForAccount(id, list);
+          // One resolver for every tab: account note → email → backend
+          // label. The provider note never leaks into an account name — the
+          // old default branch read the bare card note and titled the
+          // default ChatGPT account "ChatGPT".
+          const label = labelForAccount(id, list, t("customize.acctDefaultShort"));
           const on = id === shown.id;
           const dot = peakTintedDot(family, accountHealthDot(id));
           const dotTitle = healthDotTitle(dot, id);
@@ -5114,7 +5133,7 @@ function renderQuotaOverview(): string {
     if (accounts.length <= 1) return "";
     return `<div class="overview-account-meters">${accounts.map((account) => {
       const q = extractOverviewQuota(account, isSnapshotMaxed(account), account.id);
-      const label = labelForAccount(account.id, accountsCache.get(family) ?? []);
+      const label = labelForAccount(account.id, accountsCache.get(family) ?? [], account.name);
       const tone = accountHealthDot(account.id);
       const pct = q.status === "maxed" ? 100 : q.window !== null ? Math.round(q.usedPercent) : 0;
       return `<div class="overview-account-meter" title="${escapeHtml(label)} · ${pct}%"><span class="acct-dot ${tone}"></span><span class="overview-account-meter-label">${escapeHtml(label)}</span><span class="overview-account-meter-track"><i class="${tone}" style="width:${pct}%"></i></span><b>${pct}%</b></div>`;
@@ -5129,7 +5148,7 @@ function renderQuotaOverview(): string {
       const q = extractOverviewQuota(account, isSnapshotMaxed(account), account.id);
       const tone = accountHealthDot(account.id);
       const pct = q.status === "maxed" ? 100 : q.window !== null ? Math.round(q.usedPercent) : 0;
-      const label = labelForAccount(account.id, accountsCache.get(family) ?? []);
+      const label = labelForAccount(account.id, accountsCache.get(family) ?? [], account.name);
       const stroke = tone === "red" ? "#ef4444" : tone === "error" ? "#f97316" : tone === "gray" ? "var(--muted-foreground)" : "#10b981";
       const offset = circumference * (1 - pct / 100);
       return `<div class="overview-account-ring" title="${escapeHtml(label)} · ${pct}%"><svg viewBox="0 0 28 28" aria-hidden="true"><circle cx="14" cy="14" r="10" class="ring-track" stroke-width="2.4" fill="none"/><circle cx="14" cy="14" r="10" stroke="${stroke}" stroke-width="2.4" fill="none" stroke-linecap="round" stroke-dasharray="${circumference.toFixed(2)}" stroke-dashoffset="${offset.toFixed(2)}" transform="rotate(-90 14 14)"/></svg><span>${escapeHtml(label)}</span></div>`;
@@ -9271,27 +9290,26 @@ function refreshAccounts(family: string): void {
 }
 
 /// Returns the display label for an account id. Priority:
-/// 1. display note (the shared config.layout value)
-/// 2. saved backend label
-/// 3. email (for imported accounts with a known email)
-/// 4. localized "Account N" — never a hash/masked token, which reads as
-///    garbled text and leaks more identity than the user asked for.
-function labelForAccount(id: string, list: AccountEntry[]): string {
-  // The bare CLI slot changes owner when the desktop login changes. Never
-  // let a slot-bound note hide the current Codex identity.
-  if (providerFamily(id) === "codex") {
-    const identity = list.find((row) => row.id === id);
-    if (identity?.email?.trim()) return identity.email.trim();
-  }
+/// 1. account display note (never the provider card note)
+/// 2. for Codex, the Google/ChatGPT email — the owner's default account name
+/// 3. saved backend label
+/// 4. email (imported accounts)
+/// 5. localized "Account N" — never the provider name, a hash, or a masked
+///    token; those read as if a different account were selected.
+function labelForAccount(id: string, list: AccountEntry[], fallback = ""): string {
   const note = accountNote(id);
   if (note) return note;
   const family = providerFamily(id);
   const entry = managedAccountForCard(family, id, list) ?? list.find((row) => row.id === id);
-  if (entry?.label) return entry.label;
-  if (entry?.email) return entry.email;
+  if (family === "codex") {
+    const email = entry?.email?.trim();
+    if (email) return email;
+  }
+  if (entry?.label?.trim()) return entry.label;
+  if (entry?.email?.trim()) return entry.email.trim();
   const index = list.findIndex((row) => row.id === id);
   if (index >= 0) return t("customize.acctDefaultName", { n: index + 1 });
-  return providerDisplayName(family) || t("customize.acctDefaultShort");
+  return fallback;
 }
 
 /// Cursor add-account dialog: three tabs mirroring cockpit's import paths —
@@ -11635,9 +11653,9 @@ function updateTrailActive(): void {
 // Spend row model tooltip
 // ---------------------------------------------------------------------------
 
-/// Tooltip for one Usage Trend bar: date + the day's quantity — dollars or
-/// tokens for local-log spends (follows the metric toggle), credits for
-/// credits-billed cards, "no data" for unsampled days. Never percentages.
+/// Tooltip for one Usage Trend bar: date + the day's quantity — dollars,
+/// tokens or credits for measured series, or the day's quota percentage when
+/// percent is the only series the card exposes. Never mixes the two.
 function showTrendTip(el: HTMLElement): void {
   const tip = document.querySelector<HTMLElement>("#model-tip")!;
   const [id, idxStr] = (el.dataset.trend ?? "").split("|");
@@ -11646,8 +11664,8 @@ function showTrendTip(el: HTMLElement): void {
   // Mirror trendSourceFor's precedence: credits-billed cards render the
   // credit series, so the hover must read it too.
   const credits = spend ? undefined : meter?.trend ?? lastCreditTrend[id];
-  const useCredits = !spend && credits?.some((v) => v != null && v > 0);
-  if (!spend && !useCredits) return;
+  const hasSeries = !spend && credits?.some((v) => v != null);
+  if (!spend && !hasSeries) return;
   const i = Number(idxStr);
   if (Number.isNaN(i)) return;
   const date = new Date(Date.now() - (29 - i) * 86_400_000).toLocaleDateString(localeTag(), {
@@ -11962,7 +11980,6 @@ async function refresh(
   const creditTrendPromise = invoke<Record<string, (number | null)[]>>("fetch_credit_history").catch(
     () => null,
   );
-  const meterTrendPromise = invoke<MeterTrend[]>("fetch_meter_history").catch(() => null);
   try {
     await unparkRecentlyKeyed();
     let snapshots = await invoke<Snapshot[]>("fetch_usage", {
@@ -11971,6 +11988,12 @@ async function refresh(
       // clear ordinary-error benches; timer/refocus passes stay polite.
       clearBenches: interactive,
     });
+    // fetch_usage has just merged this round into the meter ledger, so read
+    // it back before layout: a pre-fetch read lagged one tick and left
+    // percentage-only cards (MiniMax, Brave, Firecrawl) without a trend row
+    // until the next refresh.
+    const meterTrend = await invoke<MeterTrend[]>("fetch_meter_history").catch(() => null);
+    if (refreshState.acceptResult("meterTrend", myGen, meterTrend)) lastMeterTrend = meterTrend;
     // First launch ever (no layout yet): start with only the providers that
     // actually have credentials on this PC, like the Mac app's first-run
     // detection. The rest stay available in Customize. Skipped while the
@@ -12086,8 +12109,6 @@ async function refresh(
   const spendDaily = await spendDailyPromise;
   const qoder = await qoderPromise;
   const creditTrend = await creditTrendPromise;
-  const meterTrend = await meterTrendPromise;
-  if (refreshState.acceptResult("meterTrend", myGen, meterTrend)) lastMeterTrend = meterTrend;
   if (refreshState.acceptResult("creditTrend", myGen, creditTrend)) {
     lastCreditTrend = creditTrend;
     if (usageOnly && lastSnapshots.length) {
@@ -15802,7 +15823,7 @@ function settingsAccountRow(family: string, entry: AccountEntry, _index: number)
   row.dataset.skeyAccount = entry.id ?? "";
   const familyAccounts = accountsCache.get(family) ?? [];
   const displayName = entry.id
-    ? labelForAccount(entry.id, familyAccounts.some((row) => row.id === entry.id) ? familyAccounts : [entry])
+    ? labelForAccount(entry.id, familyAccounts.some((row) => row.id === entry.id) ? familyAccounts : [entry], entry.label || entry.email || entry.maskedKey)
     : (entry.label || entry.email || entry.maskedKey);
   const label = document.createElement("span");
   label.className = "skey-acct-label";
@@ -17831,13 +17852,12 @@ function authExpirySort(a: AuthAccountRow, b: AuthAccountRow): number {
 
 function authRowName(family: string, acct: AuthAccountRow): string {
   // Same display-note resolver as the dashboard/settings; never show a
-  // fingerprint fragment as a person's account name.
-  return (
-    accountNote(acct.id) ||
-    acct.label.trim() ||
-    acct.email ||
-    providerDisplayName(family)
-  );
+  // fingerprint fragment as a person's account name. Codex defaults to the
+  // Google/ChatGPT email when the user has not renamed the account.
+  const note = accountNote(acct.id);
+  if (note) return note;
+  if (providerFamily(acct.id) === "codex" && acct.email?.trim()) return acct.email.trim();
+  return acct.label.trim() || acct.email || providerDisplayName(family);
 }
 
 /// The snapshot behind a row: the account's own card id, which for OAuth
