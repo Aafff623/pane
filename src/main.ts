@@ -3159,13 +3159,14 @@ function formatHoverReset(m: Metric): string {
 }
 
 function formatHoverMetric(m: Metric, label = displayMetricLabel(m.label)): string {
-  const pct = Math.round(m.used_percent ?? 0);
+  // No ratio (text rows, unsettled meters) reads as unknown "—", never 0%.
+  const pctText = m.used_percent == null ? "—" : `${Math.round(m.used_percent)}%`;
   const reset = formatHoverReset(m);
   const pace =
     m.pace && m.pace.settled && m.pace.state !== "unknown"
       ? ` · ${t(`pace.${m.pace.state}`)} ${Math.round(m.pace.projected_used ?? 0)}%`
       : "";
-  return reset ? `${label} ${pct}% · ${reset}${pace}` : `${label} ${pct}%${pace}`;
+  return reset ? `${label} ${pctText} · ${reset}${pace}` : `${label} ${pctText}${pace}`;
 }
 
 /// Tip next to the ring: weekly for ordinary 5h cards, the ring window
@@ -5672,8 +5673,10 @@ function renderQuotaOverview(): string {
       const q = extractOverviewQuota(account, isSnapshotMaxed(account), account.id);
       const label = labelForAccount(account.id, accountsCache.get(family) ?? [], account.name);
       const tone = accountHealthDot(account.id);
-      const pct = q.status === "maxed" ? 100 : q.window !== null ? Math.round(q.usedPercent) : 0;
-      return `<div class="overview-account-meter" title="${escapeHtml(label)} · ${pct}%"><span class="acct-dot ${tone}"></span><span class="overview-account-meter-label">${escapeHtml(label)}</span><span class="overview-account-meter-track"><i class="${tone}" style="width:${pct}%"></i></span><b>${pct}%</b></div>`;
+      const known = q.status === "maxed" || q.window !== null;
+      const pct = q.status === "maxed" ? 100 : known ? Math.round(q.usedPercent) : 0;
+      const pctText = known ? `${pct}%` : "—";
+      return `<div class="overview-account-meter" title="${escapeHtml(label)} · ${pctText}"><span class="acct-dot ${tone}"></span><span class="overview-account-meter-label">${escapeHtml(label)}</span><span class="overview-account-meter-track"><i class="${tone}" style="width:${pct}%"></i></span><b>${pctText}</b></div>`;
     }).join("")}</div>`;
   };
 
@@ -5684,11 +5687,13 @@ function renderQuotaOverview(): string {
     return `<div class="overview-account-rings">${accounts.map((account) => {
       const q = extractOverviewQuota(account, isSnapshotMaxed(account), account.id);
       const tone = accountHealthDot(account.id);
-      const pct = q.status === "maxed" ? 100 : q.window !== null ? Math.round(q.usedPercent) : 0;
+      const known = q.status === "maxed" || q.window !== null;
+      const pct = q.status === "maxed" ? 100 : known ? Math.round(q.usedPercent) : 0;
+      const pctText = known ? `${pct}%` : "—";
       const label = labelForAccount(account.id, accountsCache.get(family) ?? [], account.name);
       const stroke = tone === "red" ? "#ef4444" : tone === "error" ? "#f97316" : tone === "gray" ? "var(--muted-foreground)" : "#10b981";
       const offset = circumference * (1 - pct / 100);
-      return `<div class="overview-account-ring" title="${escapeHtml(label)} · ${pct}%"><svg viewBox="0 0 28 28" aria-hidden="true"><circle cx="14" cy="14" r="10" class="ring-track" stroke-width="2.4" fill="none"/><circle cx="14" cy="14" r="10" stroke="${stroke}" stroke-width="2.4" fill="none" stroke-linecap="round" stroke-dasharray="${circumference.toFixed(2)}" stroke-dashoffset="${offset.toFixed(2)}" transform="rotate(-90 14 14)"/></svg><span>${escapeHtml(label)}</span></div>`;
+      return `<div class="overview-account-ring" title="${escapeHtml(label)} · ${pctText}"><svg viewBox="0 0 28 28" aria-hidden="true"><circle cx="14" cy="14" r="10" class="ring-track" stroke-width="2.4" fill="none"/><circle cx="14" cy="14" r="10" stroke="${stroke}" stroke-width="2.4" fill="none" stroke-linecap="round" stroke-dasharray="${circumference.toFixed(2)}" stroke-dashoffset="${offset.toFixed(2)}" transform="rotate(-90 14 14)"/></svg><span>${escapeHtml(label)}</span></div>`;
     }).join("")}</div>`;
   };
 
@@ -17558,6 +17563,7 @@ function syncSettingsControls(): void {
   const setSelect = (sel: string, v: string) => {
     const el = document.querySelector<HTMLSelectElement>(sel);
     if (el) el.value = v;
+    syncSelectPill(el);
   };
   setNum("#interval", String(config.refreshMinutes));
   setSelect("#timeformat", config.timeFormat);
@@ -17616,6 +17622,73 @@ function panelRow(labelKey: string, ...controls: HTMLElement[]): HTMLElement {
   return panelRowDesc(labelKey, null, ...controls);
 }
 
+/// Static-select segment pills (Magpie-style): a .tabs/.tab group that
+/// mirrors and drives a hidden <select>. The select keeps its id and
+/// listeners and stays the only value source — a pill click sets
+/// select.value and fires a real change event, so every existing save path
+/// runs unchanged (#jump-animation's dirty flag, #spend-tier-mode's tier
+/// repaint, the locale switch's retranslation). #pinned is excluded on
+/// purpose: its options are rebuilt at runtime (1 + N providers), which a
+/// fixed segment group cannot mirror.
+const PILL_SELECT_IDS = [
+  "locale",
+  "appearance",
+  "timeformat",
+  "jump-animation",
+  "spend-tier-mode",
+  "update-frequency",
+] as const;
+
+function syncSelectPill(select: HTMLSelectElement | null): void {
+  if (!select) return;
+  const pill = select.parentElement?.querySelector<HTMLDivElement>(
+    `:scope > .tabs[data-pill-for="${select.id}"]`,
+  );
+  if (!pill) return;
+  for (const seg of pill.querySelectorAll<HTMLButtonElement>(".tab")) {
+    const active = seg.dataset.value === select.value;
+    seg.classList.toggle("active", active);
+    seg.setAttribute("aria-pressed", String(active));
+  }
+}
+
+function mountSelectPill(select: HTMLSelectElement): void {
+  if (select.parentElement?.querySelector(`:scope > .tabs[data-pill-for="${select.id}"]`)) {
+    syncSelectPill(select);
+    return;
+  }
+  const pill = document.createElement("div");
+  pill.className = "tabs";
+  pill.dataset.pillFor = select.id;
+  pill.setAttribute("role", "group");
+  pill.setAttribute("aria-label", select.getAttribute("aria-label") ?? select.id);
+  for (const option of Array.from(select.options)) {
+    const seg = document.createElement("button");
+    seg.type = "button";
+    seg.className = "tab";
+    seg.dataset.value = option.value;
+    if (option.dataset.i18n) seg.dataset.i18n = option.dataset.i18n;
+    seg.textContent = option.textContent;
+    seg.addEventListener("click", () => {
+      if (select.value === option.value) return;
+      select.value = option.value;
+      select.dispatchEvent(new Event("change", { bubbles: true }));
+      syncSelectPill(select);
+    });
+    pill.append(seg);
+  }
+  select.after(pill);
+  select.hidden = true;
+  syncSelectPill(select);
+}
+
+function mountStaticSelectPills(): void {
+  for (const id of PILL_SELECT_IDS) {
+    const select = document.querySelector<HTMLSelectElement>(`#${id}`);
+    if (select) mountSelectPill(select);
+  }
+}
+
 /// A skeleton row with a visible 12/400 description. `descKey` keeps the
 /// description translatable alongside its label.
 function panelRowDesc(
@@ -17649,8 +17722,6 @@ function panelSwitchRow(labelKey: string, tipKey: string, input: HTMLInputElemen
   input.setAttribute("aria-label", t(labelKey));
   const toggle = document.createElement("label");
   toggle.className = "toggle";
-  toggle.title = t(tipKey);
-  toggle.dataset.i18nTitle = tipKey;
   toggle.append(input);
   return panelRowDesc(labelKey, tipKey, toggle);
 }
@@ -17952,6 +18023,15 @@ function buildPanelShell(): void {
   adoptControl("ui-font-cjk", "settings.fontCjk", "settings.fontCjkTip", [
     document.querySelector<HTMLElement>("#ui-font-cjk-list") as HTMLElement,
   ].filter(Boolean));
+  // The rows show these hints as visible descriptions already; a hover
+  // tooltip on top of that would say the same thing twice.
+  for (const id of ["ui-font", "ui-font-cjk"]) {
+    const input = document.querySelector<HTMLElement>(`#${id}`);
+    if (input) {
+      input.removeAttribute("title");
+      delete input.dataset.i18nTitle;
+    }
+  }
   const fontManager = document.querySelector<HTMLElement>(".font-pack-manager");
   if (fontManager) generalCard.append(fontManager);
   document.querySelector("#tour-replay")?.closest(".setting-row")?.remove();
@@ -18393,6 +18473,10 @@ function buildPanelShell(): void {
   frame.append(nav, main);
   shell.append(frame);
   document.body.appendChild(shell);
+  // Pills mount here, after the shell is attached: the build assembles the
+  // whole settings tree in DETACHED nodes, so a document.querySelector
+  // inside the build (before this line) finds none of the selects.
+  mountStaticSelectPills();
   // Page switching and the rail's active pill both need the shell to be in
   // the document; doing it before the append silently found nothing.
   decoratePanelRows();
