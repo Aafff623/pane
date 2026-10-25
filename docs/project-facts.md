@@ -979,3 +979,39 @@ changes.
   paint the skin frame (otherwise comic/ink showed double frames).
 - Comic Pixel's installable pack is `site/public/skins/pane-skin-comic-pixel-1.0.0.zip`
   (manifest + CSS + two fonts); installed locally at `%APPDATA%\Pane\skins\comic-pixel`.
+
+## Forward-only pricing pins and refresh single-flight (2026-10-25, #56/#54)
+
+- **Observation timeline** — `%APPDATA%\Pane\pricing\schedules.json` stores
+  every price Pane ever charged as an append-only `Observation` list
+  (`scope`, normalized `model`, `tier`, `observed_at`, `pin`, `basis`). The
+  file wraps the serialized list in a `payload` string with an FNV-1a
+  `checksum` and `count`; any byte edited outside Pane is quarantined as
+  `schedules.json.corrupt-<ms>` and cached dollars stay vouched until the
+  owner runs the explicit rebuild. Writes use a process-unique temp file
+  (overlapping dev instances must not share one `.tmp`).
+- **Resolution** — `pricing_timeline::resolve(scope, model, tier, ts)` returns
+  the last observation with `observed_at <= ts`; events before the first
+  observation use it with `estimated = true`. All spend scanners price through
+  `probe_price`/`effective_price` (`src-tauri/src/spend.rs`) at the event
+  timestamp (day-granular sources use local 23:59:59.999). A later catalog
+  change, price rise/cut, override or corrections bump only appends a new
+  observation at "now" — never rewrites history.
+- **Cache** — `PERSIST_VERSION` is 6 (v5 caches are discarded once and
+  re-parsed). Probes are `Pin { scope, key, tier, ts_ms, pin }`; replay is
+  exact against the immutable timeline, so a catalog refresh no longer
+  re-reads history. `CORRECTIONS_REV` changes keep the cache and append one
+  `basis:"correction"` observation pass. Unpriced first sightings write no
+  entry (the later fill happens once, marked estimated).
+- **UI/commands** — `rebuild_spend_pricing` (Settings → price overrides →
+  重建花费历史, double-confirmed) drops `spend_cache.json` and forces a full
+  reparse; unchanged days come back identical. `save_pricing_overrides` now
+  appends forward-only `basis:"override"` observations. Estimated cells render
+  `≈`/`≈Nd` (`ProviderDays.estimated` → `spend_history.ModelDay.estimated` →
+  `RangeSpend.estimated_days` / `DailyModelSpend.estimated`).
+- **Refresh gate** — `refresh_gate::run(id, kind, op)` is per-card
+  single-flight (leader + waiter fan-out, 120 s leader timeout, panic →
+  error). `refresh_provider` and the periodic per-provider spawn both use it;
+  `usage_fetch_lock` still serializes whole cycles. Frontend card refreshes
+  use `RefreshState.requestCard/finishCard/acceptCardResult`, and
+  `usage-updated` merges per card instead of dropping the whole payload.
