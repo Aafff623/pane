@@ -42,6 +42,13 @@ Last reconciled: 2026-10-25 (Pane 0.9.1 + account lifecycle, RTK savings, OrcaTe
   loopback-only, no CORS, Host-checked, and redacts One/New API origins and
   secrets; telemetry is anonymous, opt-out, and must never affect the app
   (every failure path is silent; disabling deletes the state file).
+- Vendor HTTP rides a transport ladder (`providers::send_with_direct_fallback`,
+  shared by Codex and — since 2026-10-25 — the CN-facing key/login providers):
+  proxied first, and a connect/timeout failure jumps straight to a direct
+  attempt, so a dead machine proxy cannot take domestic endpoints down with
+  it (measured 2026-10-25: an env proxy breaking reqwest while curl worked).
+  Every call still starts on the proxy path, so a recovered proxy is used
+  again on the next request; a rate-limited log line reports the rescue.
 
 ## Key code paths and relationships
 

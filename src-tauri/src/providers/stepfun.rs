@@ -3,7 +3,7 @@
 //! newer one — both serve the same response, so we try them in turn.
 //! Key sources: our Settings pane or STEPFUN_API_KEY.
 
-use super::{http, stored_api_key, Metric, Snapshot};
+use super::{send_with_direct_fallback, stored_api_key, Metric, Snapshot};
 use serde_json::Value;
 
 const ID: &str = "stepfun";
@@ -56,7 +56,9 @@ async fn fetch() -> Result<Snapshot, String> {
 async fn fetch_with_key(key: &str, card_id: &str, card_name: &str) -> Result<Snapshot, String> {
     let mut last_error = String::from("balance endpoint unreachable");
     for endpoint in ENDPOINTS {
-        let resp = match http().get(endpoint).bearer_auth(key).send().await {
+        let resp =
+            match send_with_direct_fallback(|client| client.get(endpoint).bearer_auth(key)).await
+            {
             Ok(r) => r,
             Err(e) => {
                 last_error = format!("balance request: {e}");

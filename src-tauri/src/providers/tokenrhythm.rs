@@ -22,7 +22,7 @@
 //! `data.availableBalanceCny`. The parser still fails honestly with
 //! `待确认` on an unrecognized shape instead of inventing numbers.
 
-use super::{config_dir, error_chain, http, Metric, Snapshot};
+use super::{config_dir, send_with_direct_fallback, Metric, Snapshot};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::path::PathBuf;
@@ -196,16 +196,20 @@ enum CallErr {
 }
 
 async fn call_console(path: &str, cookie: &str, csrf: &str) -> Result<Value, CallErr> {
-    let mut req = http()
-        .get(format!("{SITE_ORIGIN}{path}"))
-        .header("Cookie", cookie)
-        .header("Referer", format!("{SITE_ORIGIN}/account"))
-        .header("Origin", SITE_ORIGIN)
-        .header("Accept", "application/json");
-    if !csrf.is_empty() {
-        req = req.header("X-CSRF-Token", csrf);
-    }
-    let resp = req.send().await.map_err(|e| CallErr::Other(error_chain(&e)))?;
+    let resp = send_with_direct_fallback(|client| {
+        let mut req = client
+            .get(format!("{SITE_ORIGIN}{path}"))
+            .header("Cookie", cookie)
+            .header("Referer", format!("{SITE_ORIGIN}/account"))
+            .header("Origin", SITE_ORIGIN)
+            .header("Accept", "application/json");
+        if !csrf.is_empty() {
+            req = req.header("X-CSRF-Token", csrf);
+        }
+        req
+    })
+    .await
+    .map_err(CallErr::Other)?;
     let status = resp.status().as_u16();
     let bytes = resp
         .bytes()

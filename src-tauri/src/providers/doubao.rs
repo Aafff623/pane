@@ -15,7 +15,7 @@
 //! any successful extraction.
 
 use super::chromium::{decode_os_crypt, looks_like_text, os_crypt_key};
-use super::{config_dir, http, json_body, Metric, Snapshot};
+use super::{config_dir, json_body, send_with_direct_fallback, Metric, Snapshot};
 use serde_json::Value;
 use std::path::PathBuf;
 use std::time::Duration;
@@ -251,19 +251,20 @@ async fn fetch_with_cookie(cookie: &str) -> Result<Snapshot, String> {
 }
 
 async fn post_json(url: &str, cookie: &str, what: &str) -> Result<reqwest::Response, String> {
-    http()
-        .post(url)
-        .header("Cookie", cookie)
-        .header("Content-Type", "application/json")
-        .header(
-            "User-Agent",
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/131.0.0.0 Safari/537.36",
-        )
-        .json(&serde_json::json!({}))
-        .timeout(Duration::from_secs(12))
-        .send()
-        .await
-        .map_err(|e| format!("{what} request: {e}"))
+    send_with_direct_fallback(|client| {
+        client
+            .post(url)
+            .header("Cookie", cookie)
+            .header("Content-Type", "application/json")
+            .header(
+                "User-Agent",
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/131.0.0.0 Safari/537.36",
+            )
+            .json(&serde_json::json!({}))
+            .timeout(Duration::from_secs(12))
+    })
+    .await
+    .map_err(|e| format!("{what} request: {e}"))
 }
 
 /// The parse pipeline fetch() runs, kept pure for the unit tests below.

@@ -102,12 +102,13 @@ async fn fetch() -> Result<Snapshot, String> {
 async fn fetch_with_key(key: &str) -> Result<Snapshot, String> {
     let mut last_error = String::from("quota endpoint unreachable");
     for endpoint in ENDPOINTS {
-        let resp = match super::http()
-            .get(endpoint)
-            .header("Authorization", format!("Bearer {key}"))
-            .header("Content-Type", "application/json")
-            .send()
-            .await
+        let resp = match super::send_with_direct_fallback(|client| {
+            client
+                .get(endpoint)
+                .header("Authorization", format!("Bearer {key}"))
+                .header("Content-Type", "application/json")
+        })
+        .await
         {
             Ok(r) => r,
             Err(e) => {

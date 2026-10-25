@@ -11,6 +11,13 @@ Ground rules that apply to every provider:
 - A credential is only ever sent to **its own vendor's API**, over HTTPS
   (One/New API sites and Custom Balance relays may use `http://` only with
   private, loopback, or link-local IP addresses).
+- Vendor requests ride a transport ladder
+  (`providers::send_with_direct_fallback`, Codex plus the CN-facing
+  key/login providers): the proxy-respecting client first, and when that
+  path fails to connect or times out, the same request goes out direct —
+  a dead machine proxy cannot take domestic endpoints down with it. Every
+  call still starts on the proxy path, so a recovered proxy is used again
+  on the very next request.
 - If no credential is found, the provider shows a "connect me" hint (new
   installs auto-disable everything undetected except Claude and Codex).
 - Expired OAuth tokens are refreshed against the vendor's own token

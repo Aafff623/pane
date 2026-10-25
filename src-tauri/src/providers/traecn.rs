@@ -16,7 +16,7 @@
 //! `Cloud-IDE-JWT` authorization header. `usage_summary` aggregates every
 //! credit pack; the pay-status call beside it only names the tier (Free/Pro).
 
-use super::{http, Metric, Snapshot};
+use super::{send_with_direct_fallback, Metric, Snapshot};
 use serde_json::Value;
 use std::time::Duration;
 
@@ -112,16 +112,17 @@ fn storage_path() -> Option<std::path::PathBuf> {
 /// `trae` card (host is a parameter, token format is the same JWT).
 pub(crate) async fn fetch_json(host: &str, path: &str, what: &str, token: &str) -> Result<Value, String> {
     let url = format!("{host}{path}");
-    let resp = http()
-        .post(&url)
-        .header("Accept", "application/json")
-        .header("Content-Type", "application/json")
-        .header("Authorization", format!("Cloud-IDE-JWT {token}"))
-        .body("{\"require_usage\":true}")
-        .timeout(Duration::from_secs(8))
-        .send()
-        .await
-        .map_err(|e| format!("request {what}: {e}"))?;
+    let resp = send_with_direct_fallback(|client| {
+        client
+            .post(&url)
+            .header("Accept", "application/json")
+            .header("Content-Type", "application/json")
+            .header("Authorization", format!("Cloud-IDE-JWT {token}"))
+            .body("{\"require_usage\":true}")
+            .timeout(Duration::from_secs(8))
+    })
+    .await
+    .map_err(|e| format!("request {what}: {e}"))?;
     let status = resp.status();
     if !status.is_success() {
         if status.as_u16() == 401 || status.as_u16() == 403 {

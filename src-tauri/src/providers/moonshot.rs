@@ -1,4 +1,4 @@
-use super::{http, stored_api_key, Metric, Snapshot};
+use super::{send_with_direct_fallback, stored_api_key, Metric, Snapshot};
 use serde_json::Value;
 use std::time::Duration;
 
@@ -84,12 +84,10 @@ async fn fetch_balance(api_label: bool) -> Result<Vec<Metric>, String> {
 async fn fetch_balance_with_key(key: &str, api_label: bool) -> Result<Vec<Metric>, String> {
     let mut last_err = String::from("no endpoint reachable");
     for url in ENDPOINTS {
-        let resp = match http()
-            .get(url)
-            .bearer_auth(&key)
-            .timeout(Duration::from_secs(8))
-            .send()
-            .await
+        let resp = match send_with_direct_fallback(|client| {
+            client.get(url).bearer_auth(&key).timeout(Duration::from_secs(8))
+        })
+        .await
         {
             Ok(r) => r,
             Err(e) => {

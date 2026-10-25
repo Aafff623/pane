@@ -418,20 +418,61 @@ pub async fn send_with_direct_fallback(
     build: impl Fn(&reqwest::Client) -> reqwest::RequestBuilder,
 ) -> Result<reqwest::Response, String> {
     let mut last = String::new();
-    for attempt in 0..3 {
-        let client = if attempt < 2 { http() } else { http_direct() };
+    let mut attempt = 0;
+    while attempt < 3 {
+        let direct = attempt == 2;
+        let client = if direct { http_direct() } else { http() };
         match build(&client).send().await {
             Ok(resp) => {
-                if resp.status().as_u16() == 403 && attempt < 2 {
+                if resp.status().as_u16() == 403 && !direct {
                     last = "HTTP 403 over the proxy path".into();
+                    attempt += 1;
                     continue;
+                }
+                if direct && !last.is_empty() {
+                    note_fallback_rescue();
                 }
                 return Ok(resp);
             }
-            Err(err) => last = error_chain(&err),
+            Err(err) => {
+                last = error_chain(&err);
+                if attempt == 2 {
+                    // The direct attempt failed too — the ladder is done.
+                    attempt = 3;
+                } else if err.is_connect() || err.is_timeout() {
+                    // A connect or timeout failure means the transport is
+                    // dead or black-holing — a second back-to-back proxied
+                    // attempt cannot heal it, so jump straight to the
+                    // direct client.
+                    attempt = 2;
+                } else {
+                    attempt += 1;
+                }
+            }
         }
     }
     Err(format!("request failed after retries ({last})"))
+}
+
+/// One log line per minute at most: a dead proxy makes every vendor request
+/// fall back, and a line per request would drown the log.
+fn note_fallback_rescue() {
+    use std::sync::atomic::{AtomicI64, Ordering};
+    static LAST: AtomicI64 = AtomicI64::new(0);
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as i64)
+        .unwrap_or(0);
+    let prev = LAST.load(Ordering::Relaxed);
+    if now.saturating_sub(prev) < 60_000 {
+        return;
+    }
+    if LAST
+        .compare_exchange(prev, now, Ordering::Relaxed, Ordering::Relaxed)
+        .is_ok()
+    {
+        eprintln!("[pane] http: proxy path failing — requests rescued over the direct client");
+    }
 }
 
 /// Same client as [`http`] but never follows redirects. One/New API status

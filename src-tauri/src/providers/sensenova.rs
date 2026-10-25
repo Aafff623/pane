@@ -23,7 +23,7 @@
 //! HTTP 429 (TPM/RPM throttling) is a NORMAL state and never touches the
 //! ladder; only authentication rejection does.
 
-use super::{http, json_body, Metric, Snapshot};
+use super::{json_body, send_with_direct_fallback, Metric, Snapshot};
 use base64::Engine;
 use serde_json::Value;
 use sha2::{Digest, Sha256};
@@ -245,16 +245,15 @@ enum RefreshError {
 }
 
 async fn refresh_via_oauth(refresh: &str) -> Result<(String, Option<String>), RefreshError> {
-    let resp = http()
-        .post(TOKEN_URL)
-        .form(&[
+    let resp = send_with_direct_fallback(|client| {
+        client.post(TOKEN_URL).form(&[
             ("grant_type", "refresh_token"),
             ("client_id", CLIENT_ID),
             ("refresh_token", refresh),
         ])
-        .send()
-        .await
-        .map_err(|e| RefreshError::Transient(format!("network: {e}")))?;
+    })
+    .await
+    .map_err(|e| RefreshError::Transient(format!("network: {e}")))?;
     // Hydra-family stacks answer invalid_grant with 400 + that code —
     // and a dead refresh token must not be retried, so treat it as final.
     if resp.status().as_u16() == 400 {
@@ -418,9 +417,8 @@ async fn exchange_code(code: &str, state: Option<&str>) -> Result<String, String
             return Err("authorization state mismatch — start the sign-in again".into());
         }
     }
-    let resp = http()
-        .post(TOKEN_URL)
-        .form(&[
+    let resp = send_with_direct_fallback(|client| {
+        client.post(TOKEN_URL).form(&[
             ("grant_type", "authorization_code"),
             ("client_id", CLIENT_ID),
             ("code", code),
@@ -428,9 +426,9 @@ async fn exchange_code(code: &str, state: Option<&str>) -> Result<String, String
             ("code_verifier", pending.verifier.as_str()),
             ("state", pending.state.as_str()),
         ])
-        .send()
-        .await
-        .map_err(|e| format!("token request: {e}"))?;
+    })
+    .await
+    .map_err(|e| format!("token request: {e}"))?;
     if !resp.status().is_success() {
         return Err(format!("token endpoint: HTTP {}", resp.status()));
     }
@@ -467,13 +465,14 @@ pub async fn oauth_finish(input: &str) -> Result<Snapshot, String> {
 }
 
 async fn fetch_pools(token: &str) -> Result<Snapshot, FetchErr> {
-    let resp = http()
-        .get(POOL_URL)
-        .bearer_auth(token)
-        .header("Accept-Language", "zh-CN")
-        .send()
-        .await
-        .map_err(|e| FetchErr::Other(format!("SenseNova request: {e}")))?;
+    let resp = send_with_direct_fallback(|client| {
+        client
+            .get(POOL_URL)
+            .bearer_auth(token)
+            .header("Accept-Language", "zh-CN")
+    })
+    .await
+    .map_err(|e| FetchErr::Other(format!("SenseNova request: {e}")))?;
     if resp.status().as_u16() == 429 {
         return Err(FetchErr::RateLimited);
     }

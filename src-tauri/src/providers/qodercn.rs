@@ -11,7 +11,7 @@
 //! and `/api/v2/quota/usage` reports the credit pool plus any dedicated
 //! model packages (e.g. Qwen-only credits) with their own expiry.
 
-use super::{http, Metric, Snapshot};
+use super::{send_with_direct_fallback, Metric, Snapshot};
 use serde_json::Value;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -144,14 +144,15 @@ fn decode_os_crypt(raw: &[u8], key: &[u8; 32]) -> Result<Vec<u8>, String> {
 /// site rejects the other's tokens). A rejected session token is the IDE's
 /// sign-in dying — surface it as guidance instead of a raw HTTP code.
 pub(crate) async fn fetch_api(base: &str, token: &str, path: &str, what: &str) -> Result<Value, String> {
-    let resp = http()
-        .get(format!("{base}{path}"))
-        .bearer_auth(token)
-        .header("Accept", "application/json")
-        .timeout(Duration::from_secs(8))
-        .send()
-        .await
-        .map_err(|e| format!("{what} request: {e}"))?;
+    let resp = send_with_direct_fallback(|client| {
+        client
+            .get(format!("{base}{path}"))
+            .bearer_auth(token)
+            .header("Accept", "application/json")
+            .timeout(Duration::from_secs(8))
+    })
+    .await
+    .map_err(|e| format!("{what} request: {e}"))?;
     let status = resp.status();
     if !status.is_success() {
         if status.as_u16() == 401 || status.as_u16() == 403 {
@@ -536,24 +537,23 @@ async fn run_checkin(token: &str) -> Result<(String, f64, i64), String> {
 /// One /sash/ call with the header set the growth API expects
 /// (Cosy-ClientType + a plain "Qoder" UA, same as the reference client).
 async fn checkin_request(token: &str, path: &str, post: bool) -> Result<Value, String> {
-    let mut req = if post {
-        http()
-            .post(format!("{OPENAPI_BASE}{path}"))
-            .header("Content-Type", "application/json")
-            .body("{}".to_string())
-    } else {
-        http().get(format!("{OPENAPI_BASE}{path}"))
-    };
-    req = req
-        .bearer_auth(token)
-        .header("Accept", "application/json")
-        .header("Cosy-ClientType", "10")
-        .header("User-Agent", "Qoder");
-    let resp = req
-        .timeout(Duration::from_secs(8))
-        .send()
-        .await
-        .map_err(|e| format!("check-in request: {e}"))?;
+    let resp = send_with_direct_fallback(|client| {
+        let req = if post {
+            client
+                .post(format!("{OPENAPI_BASE}{path}"))
+                .header("Content-Type", "application/json")
+                .body("{}".to_string())
+        } else {
+            client.get(format!("{OPENAPI_BASE}{path}"))
+        };
+        req.bearer_auth(token)
+            .header("Accept", "application/json")
+            .header("Cosy-ClientType", "10")
+            .header("User-Agent", "Qoder")
+            .timeout(Duration::from_secs(8))
+    })
+    .await
+    .map_err(|e| format!("check-in request: {e}"))?;
     let status = resp.status();
     if !status.is_success() {
         if status.as_u16() == 401 || status.as_u16() == 403 {

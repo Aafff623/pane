@@ -16,7 +16,7 @@
 //! source appends one `Source` row, so the user always knows where the
 //! numbers came from.
 
-use super::{http, Metric, Snapshot};
+use super::{send_with_direct_fallback, Metric, Snapshot};
 use crate::codebuddy_login::Family;
 use serde_json::{json, Value};
 use std::time::Duration;
@@ -499,25 +499,28 @@ async fn billing_post_one(
 ) -> Result<Billing, String> {
     // The billing gateway rejects requests without a browser User-Agent
     // (403 / code 10085), so UA is mandatory on every call.
-    let mut req = http()
-        .post(format!("{}{path}", f.api_endpoint))
-        .timeout(Duration::from_secs(30))
-        .header("User-Agent", UA)
-        .header("Accept", "application/json, text/plain, */*")
-        .header("Authorization", format!("Bearer {}", access.token));
-    if let Some(uid) = &access.tenant.uid {
-        req = req.header("X-User-Id", uid);
-    }
-    if let Some(eid) = &access.tenant.enterprise_id {
-        req = req.header("X-Enterprise-Id", eid).header("X-Tenant-Id", eid);
-    }
-    if let Some(d) = &access.tenant.domain {
-        req = req.header("X-Domain", d);
-    }
-    let resp = match body {
-        Some(body) => req.json(&body).send().await,
-        None => req.send().await,
-    }
+    let resp = send_with_direct_fallback(|client| {
+        let mut req = client
+            .post(format!("{}{path}", f.api_endpoint))
+            .timeout(Duration::from_secs(30))
+            .header("User-Agent", UA)
+            .header("Accept", "application/json, text/plain, */*")
+            .header("Authorization", format!("Bearer {}", access.token));
+        if let Some(uid) = &access.tenant.uid {
+            req = req.header("X-User-Id", uid);
+        }
+        if let Some(eid) = &access.tenant.enterprise_id {
+            req = req.header("X-Enterprise-Id", eid).header("X-Tenant-Id", eid);
+        }
+        if let Some(d) = &access.tenant.domain {
+            req = req.header("X-Domain", d);
+        }
+        match &body {
+            Some(body) => req.json(body),
+            None => req,
+        }
+    })
+    .await
     .map_err(|e| format!("{path} network: {e}"))?;
     let status = resp.status().as_u16();
     let text = resp.text().await.map_err(|e| format!("{path} read: {e}"))?;

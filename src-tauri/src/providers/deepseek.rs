@@ -1,4 +1,4 @@
-use super::{http, stored_api_key, Metric, Snapshot};
+use super::{send_with_direct_fallback, stored_api_key, Metric, Snapshot};
 use serde_json::Value;
 
 const ID: &str = "deepseek";
@@ -43,12 +43,11 @@ async fn fetch() -> Result<Snapshot, String> {
 }
 
 async fn fetch_with_key(key: &str, card_id: &str, card_name: &str) -> Result<Snapshot, String> {
-    let resp = http()
-        .get("https://api.deepseek.com/user/balance")
-        .bearer_auth(key)
-        .send()
-        .await
-        .map_err(|e| format!("balance request: {e}"))?;
+    let resp = send_with_direct_fallback(|client| {
+        client.get("https://api.deepseek.com/user/balance").bearer_auth(key)
+    })
+    .await
+    .map_err(|e| format!("balance request: {e}"))?;
     if resp.status().as_u16() == 401 {
         return Err("key was rejected — paste a fresh key in Settings (gear icon)".into());
     }

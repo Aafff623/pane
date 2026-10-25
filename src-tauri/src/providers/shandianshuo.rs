@@ -1,5 +1,5 @@
 //! 闪电说 desktop membership usage.
-use super::{http, json_body, Metric, Snapshot};
+use super::{json_body, send_with_direct_fallback, Metric, Snapshot};
 use serde_json::Value;
 use crate::usage_units::UsageUnit;
 
@@ -64,10 +64,7 @@ fn find_text(root: &Value, keys: &[&str]) -> Option<String> {
 ///   "assistant":{"usedCredits":7.53,"creditQuota":1000,"isUnlimited":false},
 ///   "booster":{...},"resetDate":"2026-10-03T05:54:42.000Z"}`
 async fn fetch(token: &str) -> Result<Snapshot, String> {
-    let response = http()
-        .get(URL)
-        .bearer_auth(token.trim())
-        .send()
+    let response = send_with_direct_fallback(|client| client.get(URL).bearer_auth(token.trim()))
         .await
         .map_err(|e| format!("闪电说请求失败: {e}"))?;
     if matches!(response.status().as_u16(), 401 | 403) {

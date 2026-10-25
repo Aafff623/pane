@@ -31,7 +31,7 @@
 //! - Refresh runs every 5 minutes; the stats change daily at best, so a
 //!   30-minute TTL keeps the partner-hub traffic negligible.
 
-use super::{http, json_body, stored_api_key, Metric, Snapshot};
+use super::{json_body, send_with_direct_fallback, stored_api_key, Metric, Snapshot};
 use serde_json::Value;
 use std::collections::BTreeMap;
 use std::sync::Mutex;
@@ -291,13 +291,14 @@ fn window_dates(today: chrono::NaiveDate) -> (String, String) {
 }
 
 async fn get_json(url: &str, token: &str) -> Result<Value, String> {
-    let resp = http()
-        .get(url)
-        .header("Authorization", format!("Bearer {token}"))
-        .timeout(Duration::from_secs(20))
-        .send()
-        .await
-        .map_err(|e| format!("GIPHY stats: {e}"))?;
+    let resp = send_with_direct_fallback(|client| {
+        client
+            .get(url)
+            .header("Authorization", format!("Bearer {token}"))
+            .timeout(Duration::from_secs(20))
+    })
+    .await
+    .map_err(|e| format!("GIPHY stats: {e}"))?;
     let status = resp.status();
     if status == reqwest::StatusCode::UNAUTHORIZED || status == reqwest::StatusCode::FORBIDDEN {
         return Err(

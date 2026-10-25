@@ -20,7 +20,7 @@
 //! - Nothing is hardcoded: limit/window/plan/expiry all come from the
 //!   response (plan upgrades change all three server-side).
 
-use super::{http, json_body, stored_api_key, Metric, Snapshot};
+use super::{json_body, send_with_direct_fallback, stored_api_key, Metric, Snapshot};
 use serde_json::Value;
 
 const ID: &str = "apigoto";
@@ -138,10 +138,7 @@ async fn fetch() -> Result<Snapshot, String> {
 }
 
 async fn fetch_with_key(key: &str) -> Result<Snapshot, String> {
-    let resp = http()
-        .get(USAGE_URL)
-        .bearer_auth(key.trim())
-        .send()
+    let resp = send_with_direct_fallback(|client| client.get(USAGE_URL).bearer_auth(key.trim()))
         .await
         .map_err(|e| format!("APIGOTO request: {e}"))?;
     if let Some(error) = status_error(resp.status().as_u16()) {
