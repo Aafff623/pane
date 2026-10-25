@@ -113,7 +113,8 @@
 :root[data-skin="signal"] :is(.auth-row-menu,.auth-group,.panel-tabs,.spend-detail-toolbar,.kv-recovery-panel,.group-manage-box,.account-dialog-box) { background:var(--signal-surface); border-color:var(--border); }
 :root[data-skin="signal"] :is(.auth-sub,.auth-quota.dim,.st-tip,.skey-caption,.kv-masked,.kv-vault-state,.auth-empty) { color:var(--muted-foreground); }
 :root[data-skin="signal"] input[type="checkbox"] { accent-color:var(--primary); }
-:root[data-skin="signal"] :is(#confirm-ok.danger,.danger-btn) { background:var(--destructive); color:var(--background); }
+:root[data-skin="signal"] :is(#confirm-ok.danger,.danger-btn) { background:var(--signal-inset); color:var(--foreground); border-color:var(--border); }
+:root[data-skin="signal"] :is(#confirm-ok.danger,.danger-btn):hover { background:var(--destructive); color:var(--background); border-color:var(--destructive); }
 :root[data-skin="signal"] :is(#vault-setup-box,#vault-reset-box) input { color:var(--foreground); background:var(--signal-inset); border-color:var(--input); }
 :root[data-skin="signal"] :is(#vault-setup-box,#vault-reset-box) :is(.kv-hint,.kv-recovery-hint) { color:var(--muted-foreground); font-size:13px; }
 :root[data-skin="signal"] :is(.trail-tick.trail-icon,.provider.muted,#st-version) { opacity:1; }
@@ -145,7 +146,7 @@
 :root[data-skin="signal"] :is(.mini-btn,.redeem-btn,.tab,.auth-row-menu button,.group-menu button){border:1px solid var(--post-ink);border-radius:9px 7px 10px 6px;box-shadow:1px 2px 0 color-mix(in srgb,var(--post-ink) 20%,transparent)}
 :root[data-skin="signal"] :is(.mini-btn,.redeem-btn){background:var(--accent)}
 :root[data-skin="signal"] :is(.tab.active,.settings-tabs button.active,.panel-nav-item.active){background:var(--signal-display);color:var(--signal-display-foreground);border-color:var(--post-ink)}
-:root[data-skin="signal"] :is(.settings-tabs,.overview-tabs){border:1px dashed var(--post-stitch);border-radius:10px;background:var(--signal-inset)}
+:root[data-skin="signal"] :is(.settings-tabs,.overview-tabs,.set-row__control .tabs){border:1px dashed var(--post-stitch);border-radius:10px;background:var(--signal-inset)}
 :root[data-skin="signal"] :is(input:not([type=checkbox]),select,textarea){border:1px solid var(--post-ink);border-radius:8px 5px 7px 6px;background:var(--signal-inset);box-shadow:inset 0 2px 0 color-mix(in srgb,var(--post-ink) 10%,transparent)}
 :root[data-skin="signal"] :is(.st-card,.auth-group,.auth-row,.ona-site,.spend-detail-panel,.account-dialog-box,.group-manage-box,#confirm-box,#vault-setup-box,#vault-reset-box,#whatsnew-box,#update-box){border:1.5px solid var(--post-ink)!important;border-radius:16px 11px 17px 12px!important;box-shadow:3px 4px 0 color-mix(in srgb,var(--post-ink) 20%,transparent)!important;background:var(--post-paper)!important}
 :root[data-skin="signal"] :is(.auth-row,.skey-item,.ona-key,.spend-detail-model){border-bottom-style:dashed}
