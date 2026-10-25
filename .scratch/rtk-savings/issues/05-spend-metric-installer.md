@@ -11,8 +11,10 @@ Status: implemented (2026-10-24) - automated green; owner visual acceptance pend
   - the official Windows `winget` package `rtk-ai.rtk`;
   - the RTK website link;
   - the full supported harness list, disabled until RTK is installed.
-- Run harness setup only through a fixed backend whitelist mapped to
-  `rtk init -g ... --auto-patch`.
+- Run harness setup only through a fixed backend whitelist. Global targets use
+  `rtk init -g ... --auto-patch`, except Codex (`--codex` rejects
+  `--auto-patch` in RTK 0.50.0). Cline, Kilo Code, Antigravity and Kimi Code
+  are project-scoped and get a native folder picker before the command runs.
 - Follow `showTotalSpend`: hiding Total Spend also hides RTK.
 - Configure RTK in a popup dialog with larger text and each harness's brand
   icon. Show a green status dot for detected integrations and red for missing.
@@ -43,7 +45,8 @@ this machine; winget currently offers 1.0.1).
 
 ## Verification
 
-- Rust: fixed target list and command arguments, no arbitrary target strings.
+- Rust: fixed target list, scope flags and command arguments; no arbitrary
+  target strings or working directories.
 - Frontend: build and all Node tests.
 - Live: installed state, selected RTK metric, project breakdown, management
   panel with 17 targets, and missing state with muted tab and install guide.

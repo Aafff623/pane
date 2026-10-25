@@ -127,6 +127,8 @@ pub struct RtkIntegrationTarget {
     pub id: &'static str,
     pub label: &'static str,
     pub icon_key: &'static str,
+    /// global | project
+    pub scope: &'static str,
     pub detected: bool,
     /// exact | fuzzy | none
     pub match_kind: &'static str,
@@ -490,6 +492,7 @@ pub fn integration_targets() -> Vec<RtkIntegrationTarget> {
                 id: spec.id,
                 label: spec.label,
                 icon_key: spec.icon_key,
+                scope: integration_scope(spec.id).unwrap_or("global"),
                 detected,
                 match_kind,
             }
@@ -497,9 +500,30 @@ pub fn integration_targets() -> Vec<RtkIntegrationTarget> {
         .collect()
 }
 
+pub fn integration_scope(id: &str) -> Option<&'static str> {
+    match id {
+        "cline" | "kilocode" | "antigravity" | "kimi" => Some("project"),
+        "codex"
+        | "claude"
+        | "cursor"
+        | "trae"
+        | "windsurf"
+        | "copilot"
+        | "gemini"
+        | "opencode"
+        | "droid"
+        | "vibe"
+        | "hermes"
+        | "pi"
+        | "omp" => Some("global"),
+        _ => None,
+    }
+}
+
 fn integration_args(id: &str) -> Option<Vec<&'static str>> {
     match id {
-        "codex" => Some(vec!["init", "-g", "--codex", "--auto-patch"]),
+        // `rtk init --codex` rejects --auto-patch (rtk 0.50.0).
+        "codex" => Some(vec!["init", "-g", "--codex"]),
         "copilot" => Some(vec!["init", "-g", "--copilot", "--auto-patch"]),
         "gemini" => Some(vec!["init", "-g", "--gemini", "--auto-patch"]),
         "opencode" => Some(vec!["init", "-g", "--opencode", "--auto-patch"]),
@@ -507,10 +531,10 @@ fn integration_args(id: &str) -> Option<Vec<&'static str>> {
         "cursor" => Some(vec!["init", "-g", "--agent", "cursor", "--auto-patch"]),
         "trae" => Some(vec!["init", "-g", "--agent", "trae", "--auto-patch"]),
         "windsurf" => Some(vec!["init", "-g", "--agent", "windsurf", "--auto-patch"]),
-        "cline" => Some(vec!["init", "-g", "--agent", "cline", "--auto-patch"]),
-        "kilocode" => Some(vec!["init", "-g", "--agent", "kilocode", "--auto-patch"]),
-        "antigravity" => Some(vec!["init", "-g", "--agent", "antigravity", "--auto-patch"]),
-        "kimi" => Some(vec!["init", "-g", "--agent", "kimi", "--auto-patch"]),
+        "cline" => Some(vec!["init", "--agent", "cline", "--auto-patch"]),
+        "kilocode" => Some(vec!["init", "--agent", "kilocode", "--auto-patch"]),
+        "antigravity" => Some(vec!["init", "--agent", "antigravity", "--auto-patch"]),
+        "kimi" => Some(vec!["init", "--agent", "kimi", "--auto-patch"]),
         "droid" => Some(vec!["init", "-g", "--agent", "droid", "--auto-patch"]),
         "vibe" => Some(vec!["init", "-g", "--agent", "vibe", "--auto-patch"]),
         "hermes" => Some(vec!["init", "-g", "--agent", "hermes", "--auto-patch"]),
@@ -563,7 +587,8 @@ pub async fn install_rtk() -> Result<(), String> {
     }
 }
 
-pub async fn install_integration(id: &str) -> Result<(), String> {
+pub async fn install_integration(id: &str, project_dir: Option<&Path>) -> Result<(), String> {
+    let scope = integration_scope(id).ok_or_else(|| "unknown RTK integration target".to_string())?;
     let args = integration_args(id).ok_or_else(|| "unknown RTK integration target".to_string())?;
     let binary = rtk_binary().ok_or_else(|| "RTK is not installed".to_string())?;
     let mut command = crate::platform::hidden_command(&binary.to_string_lossy());
@@ -571,6 +596,12 @@ pub async fn install_integration(id: &str) -> Result<(), String> {
         .args(args)
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped());
+    if scope == "project" {
+        let project_dir = project_dir
+            .filter(|path| path.is_dir())
+            .ok_or_else(|| "Choose an existing project folder first".to_string())?;
+        command.current_dir(project_dir);
+    }
     let output = tokio::time::timeout(INTEGRATION_TIMEOUT, command.output())
         .await
         .map_err(|_| "RTK integration timed out".to_string())?
@@ -1416,17 +1447,29 @@ mod tests {
         assert_eq!(targets.len(), 17);
         for target in &targets {
             let args = integration_args(target.id).expect("known target");
-            assert_eq!(&args[..2], ["init", "-g"]);
-            assert!(args.contains(&"--auto-patch"));
+            if target.scope == "project" {
+                assert_eq!(args[0], "init");
+                assert!(!args.contains(&"-g"));
+                assert!(args.contains(&"--auto-patch"));
+            } else {
+                assert_eq!(&args[..2], ["init", "-g"]);
+                assert_eq!(args.contains(&"--auto-patch"), target.id != "codex");
+            }
         }
         assert_eq!(
             integration_args("codex"),
-            Some(vec!["init", "-g", "--codex", "--auto-patch"]),
+            Some(vec!["init", "-g", "--codex"]),
         );
         assert_eq!(
             integration_args("cursor"),
             Some(vec!["init", "-g", "--agent", "cursor", "--auto-patch"]),
         );
+        assert_eq!(
+            integration_args("kilocode"),
+            Some(vec!["init", "--agent", "kilocode", "--auto-patch"]),
+        );
+        assert_eq!(integration_scope("kilocode"), Some("project"));
+        assert_eq!(integration_scope("cursor"), Some("global"));
         assert!(integration_args("arbitrary-command").is_none());
     }
 

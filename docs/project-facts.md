@@ -388,10 +388,13 @@ Last reconciled: 2026-10-25 (Pane 0.9.1 + account lifecycle, RTK savings, OrcaTe
   harness setup is available for Codex, Claude Code, Cursor, Trae, Windsurf,
   Cline, Kilo Code, Antigravity, Kimi Code, GitHub Copilot, Gemini CLI,
   OpenCode, Factory Droid, Mistral Vibe, Hermes, Pi and Oh My Pi.
-- Harness setup runs `rtk init -g ... --auto-patch` from a fixed Rust
-  allowlist; the frontend cannot pass arbitrary flags. Setup buttons stay
-  disabled until RTK is installed. Detection checks known user/project config
-  paths in two passes: an exact `rtk hook <tool>` marker first, then a bounded
+- Harness setup uses a fixed Rust allowlist; the webview cannot pass arbitrary
+  flags. Global targets run `rtk init -g ... --auto-patch`, except Codex, whose
+  `--codex` mode rejects `--auto-patch` in RTK 0.50.0. Cline, Kilo Code,
+  Antigravity and Kimi Code are project-scoped: Pane opens a native folder
+  picker and runs RTK with that folder as its working directory. Setup buttons
+  stay disabled until RTK is installed. Detection checks known user/project
+  config paths in two passes: an exact `rtk hook <tool>` marker first, then a bounded
   fuzzy scan for RTK plugin/rules filenames or content inside only those known
   paths. Detected rows are green (`exact` or `fuzzy`), missing rows are red.
   The configuration dialog follows CC Switch's card hierarchy, neutral bordered
@@ -702,7 +705,7 @@ changes.
   proxy-free Rust run: **1105 passed / 0 failed / 18 ignored** (2026-10-25, after
   the dashboard-correctness batch, the xfyun-speech provider, the Qoder
   telemetry probe, the ZCode Start Plan provider, RTK savings and OrcaTerm).
-  Node suite: **175 passed**. Frontend build + skin-pack local
+  Node suite: **176 passed**. Frontend build + skin-pack local
   check pass. The Codex backup-retirement and slot-retention corrections from
   the same day are covered by that run.
 - Codex credential-source precedence is **live default > managed web store >

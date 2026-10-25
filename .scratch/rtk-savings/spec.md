@@ -58,4 +58,4 @@ RTK 已经在本机节省了约 45.9M token，但 Pane 看不到。用户需要�
 - 坏历史文件改名为 `.json.bad`，卡片显示一行「本地快照不可用」，不静默覆盖旧快照。
 - 项目过滤与 `unattributed` 的口径：临时/应用数据/工具内部目录，加上历史库没有项目信息的旧记录；两者共用一行「未归属」，tooltip 写清。
 - 2026-10-24 设计修订：移除独立 RTK 卡与独立折叠状态；RTK 跟随 `showTotalSpend`，因此关闭总花费时不会留下孤立卡。
-- Windows 一键安装使用官方 winget 包 `rtk-ai.rtk`；Harness 接入执行固定白名单中的 `rtk init -g ... --auto-patch`，不接受前端任意参数。
+- Windows 一键安装使用官方 winget 包 `rtk-ai.rtk`；Harness 接入执行固定白名单中的命令，不接受前端任意参数。全局目标使用 `rtk init -g ... --auto-patch`，Codex 除外（RTK 0.50.0 拒绝 `--codex` 与 `--auto-patch` 组合）；Cline、Kilo Code、Antigravity、Kimi Code 为项目级目标，先由原生目录选择器选定项目目录。

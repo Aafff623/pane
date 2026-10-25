@@ -3733,8 +3733,25 @@ async fn install_rtk() -> Result<(), String> {
 }
 
 #[tauri::command]
-async fn install_rtk_integration(target: String) -> Result<(), String> {
-    rtk_savings::install_integration(&target).await
+async fn install_rtk_integration(app: tauri::AppHandle, target: String) -> Result<bool, String> {
+    let scope = rtk_savings::integration_scope(&target)
+        .ok_or_else(|| "unknown RTK integration target".to_string())?;
+    if scope != "project" {
+        rtk_savings::install_integration(&target, None).await?;
+        return Ok(true);
+    }
+    let picked = tauri::async_runtime::spawn_blocking(move || {
+        use tauri_plugin_dialog::DialogExt;
+        app.dialog().file().blocking_pick_folder()
+    })
+    .await
+    .map_err(|error| error.to_string())?;
+    let Some(picked) = picked else {
+        return Ok(false);
+    };
+    let project = picked.into_path().map_err(|error| error.to_string())?;
+    rtk_savings::install_integration(&target, Some(&project)).await?;
+    Ok(true)
 }
 
 /// Returns the local token-ledger inventory without scanning or contacting

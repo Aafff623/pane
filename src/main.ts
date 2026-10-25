@@ -250,6 +250,7 @@ interface RtkIntegrationTarget {
   id: string;
   label: string;
   iconKey: string;
+  scope: "global" | "project";
   detected: boolean;
   matchKind: "exact" | "fuzzy" | "none";
 }
@@ -5027,19 +5028,26 @@ function renderRtkSetup(): string {
           const detected = target.detected || rtkIntegratedTargets.has(target.id);
           const matchKind = rtkIntegratedTargets.has(target.id) ? "exact" : target.matchKind;
           const busy = rtkIntegrationBusy === target.id;
+          const projectScope = target.scope === "project";
           const disabled = !installed || busy || (rtkIntegrationBusy !== null && !busy);
           const stateText = busy
             ? t("rtk.integrationBusy")
             : detected
               ? t(matchKind === "fuzzy" ? "rtk.detectedFuzzy" : "rtk.detectedExact")
               : t("rtk.notDetected");
-          return `<button class="rtk-harness${detected ? " is-detected" : " is-missing"}${busy ? " is-busy" : ""}" data-rtk-target="${escapeHtml(target.id)}"${disabled ? " disabled" : ""}>
+          const actionText = detected
+            ? t("rtk.reconnect")
+            : projectScope
+              ? t("rtk.integrationProject")
+              : t("rtk.integrationInstall");
+          const scopeText = projectScope ? ` · ${t("rtk.projectScopeShort")}` : "";
+          return `<button class="rtk-harness${detected ? " is-detected" : " is-missing"}${busy ? " is-busy" : ""}" data-rtk-target="${escapeHtml(target.id)}"${disabled ? " disabled" : ""} title="${escapeHtml(projectScope ? t("rtk.projectScope") : t("rtk.integrationsHint"))}">
             <span class="rtk-harness-icon" aria-hidden="true">${rtkTargetIcon(target)}</span>
             <span class="rtk-harness-copy">
               <span class="rtk-harness-name">${escapeHtml(target.label)}</span>
-              <span class="rtk-harness-state"><i class="rtk-status-dot"></i>${escapeHtml(stateText)}</span>
+              <span class="rtk-harness-state"><i class="rtk-status-dot"></i>${escapeHtml(stateText + scopeText)}</span>
             </span>
-            <span class="rtk-harness-action">${uiIcon(detected ? "arrowCounterClockwise" : "plus")}<span>${escapeHtml(detected ? t("rtk.reconnect") : t("rtk.integrationInstall"))}</span></span>
+            <span class="rtk-harness-action">${uiIcon(detected ? "arrowCounterClockwise" : "plus")}<span>${escapeHtml(actionText)}</span></span>
           </button>`;
         })
         .join("")
@@ -5304,7 +5312,8 @@ async function installRtkIntegration(id: string): Promise<void> {
   rtkSetupNotice = null;
   requestRender();
   try {
-    await invoke("install_rtk_integration", { target: id });
+    const installed = await invoke<boolean>("install_rtk_integration", { target: id });
+    if (!installed) return;
     rtkIntegratedTargets.add(id);
     target.detected = true;
     target.matchKind = "exact";
