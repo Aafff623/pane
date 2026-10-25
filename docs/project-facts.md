@@ -28,7 +28,7 @@ Last reconciled: 2026-10-25 (Pane 0.9.1 + account lifecycle, RTK savings, OrcaTe
   project (detached from any upstream, 2026-09-06). A single branch `main`
   exists locally and on origin; feature work happens on `codex/<feature>`
   branches.
-- Version 0.8.9 (`package.json` + `src-tauri/tauri.conf.json`), identifier
+- Version 0.9.1 (`package.json` + `src-tauri/tauri.conf.json`), identifier
   `com.jazii.pane`, productName `Pane`.
 - Privacy boundary (asserted by tests in the code): tokens go only to their
   own vendor's API; the secrets Pane itself persists — pasted API keys,
