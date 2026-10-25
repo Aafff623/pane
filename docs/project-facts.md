@@ -12,7 +12,7 @@ Single authorities for the neighbouring concerns:
   tracker, see [`docs/agents/issue-tracker.md`](agents/issue-tracker.md).
 - **Startup / build / run / acceptance commands** — [`docs/dev-startup.md`](dev-startup.md).
 
-Last reconciled: 2026-10-22 (Pane 0.8.9 + account lifecycle, legacy API-key retirement, relay identity recovery).
+Last reconciled: 2026-10-25 (Pane 0.9.1 + account lifecycle, RTK savings, OrcaTerm quota card and panel-window controls).
 
 ## Scope and boundaries
 
@@ -345,6 +345,90 @@ Last reconciled: 2026-10-22 (Pane 0.8.9 + account lifecycle, legacy API-key reti
   count, clicking a day opens per-tool/per-model cards; Esc/backdrop closes.
   The panel is `overflow-x: hidden` — nothing inside may force a min width.
 
+## RTK command-output savings (2026-10-24)
+
+- RTK savings is the third Total Spend metric beside dollars and tokens; it is
+  deliberately outside `lastSpend`, the donut, spend history, quotas and daily
+  notes. `saved_tokens` is RTK's bytes ÷ 4 estimate — never billable tokens,
+  never subtracted from spend, never added to quota. There is intentionally no
+  `--quota` metric. Because it lives inside Total Spend, `showTotalSpend`
+  hides it too.
+- Global source: `rtk gain --all --format json` (`summary` + `daily`), 10 s
+  timeout via `platform::hidden_command`, 60 s in-memory cache in
+  `rtk_savings.rs`. A manual Pane refresh sends `force: true` and bypasses that
+  cache. Missing binary, non-zero exit, invalid JSON and timeouts return
+  `status` (`missing` / `unreadable`) instead of panicking.
+- Project attribution: `%LOCALAPPDATA%\rtk\history.db` (+ `-wal`/`-shm`) is
+  copied to a temp folder and opened read-only; rows bucket by local RFC3339
+  date and `project_path`. Paths lose the `\\?\` prefix; temp, AppData,
+  `.qoder-cn`, `resources/app`, user-root, date-shaped and GUID-shaped
+  directories are filtered. Only basenames reach the UI — never raw commands
+  or full paths.
+- Windows: today/7d/30d sum merged daily rows; `all` uses `summary`. `daily`
+  merges RTK's rows with `%APPDATA%\Pane\rtk_savings_history.json` (same-day
+  replace, 400-day retain, atomic tmp + rename; an unreadable file is kept as
+  `.json.bad`). `otherSaved` holds identifiable projects below the Top-5 cut;
+  `unattributedSaved` holds temp/noise rows and old rows without a project,
+  so Top + other + unattributed reconstructs the window total. The history DB
+  is read before the CLI summary; if a command still lands mid-read and the DB
+  briefly leads by a few bytes, rows are scaled into the CLI budget so the
+  breakdown stays visible instead of being replaced by an error.
+- Every history row is also grouped by RTK command channel (`rtk_cmd` second
+  token: grep, git, read, cargo…) and project source (`project_path`). The
+  channel section shows Top 5 + other channels + unclassified channels, while
+  the source section shows Top 5 projects + other + unattributed, so both
+  breakdowns close to the CLI window total. RTK's schema does not record the
+  invoking harness, so harness provenance cannot be inferred honestly.
+- UI states: installed RTK gets an accent-coloured terminal icon. `missing`
+  mutes the metric tab and opens setup guidance with the official Winget
+  package `rtk-ai.rtk` plus a website link. The installer is Windows-only;
+  harness setup is available for Codex, Claude Code, Cursor, Trae, Windsurf,
+  Cline, Kilo Code, Antigravity, Kimi Code, GitHub Copilot, Gemini CLI,
+  OpenCode, Factory Droid, Mistral Vibe, Hermes, Pi and Oh My Pi.
+- Harness setup runs `rtk init -g ... --auto-patch` from a fixed Rust
+  allowlist; the frontend cannot pass arbitrary flags. Setup buttons stay
+  disabled until RTK is installed. Detection checks known user/project config
+  paths in two passes: an exact `rtk hook <tool>` marker first, then a bounded
+  fuzzy scan for RTK plugin/rules filenames or content inside only those known
+  paths. Detected rows are green (`exact` or `fuzzy`), missing rows are red.
+  The configuration dialog follows CC Switch's card hierarchy, neutral bordered
+  controls, brand-icon tiles and generous whitespace, with larger type.
+  The primary savings figure keeps two decimal places in `M` so small new
+  savings do not disappear behind one-decimal rounding.
+  Codex currently registers only a `Bash` matcher; PowerShell commands do not
+  pass through RTK and therefore do not increase its counters. The dialog says
+  this explicitly rather than implying that a green Codex row means every shell
+  is covered.
+  RTK's `unreadable`, invoke-failure and `scanning` states are hints, never a
+  fake zero. Project-only failure degrades the list while the CLI windows stay
+  live.
+- Tests: unit tests in `parse-tests`; the live probe is `#[ignore]`
+  (`real_machine_rtk_savings_is_readable`).
+
+## Tencent Cloud OrcaTerm quota card (2026-10-24)
+
+- Reads only `%APPDATA%\com.orcaterm-desktop.app\data.bin`, the official
+  desktop client's JSON session. Pane never writes it. The local token is
+  `oauth_access_token`; `oauth_expires_at` is milliseconds.
+- Calls `https://api.orcaterm.com/cgi/api` with the `orcaterm` product header:
+  `DescribeUserBillingStatus` for quota rows and `OAuthRefreshToken` only
+  when the disk token expires within 60 seconds. A refreshed token stays in
+  memory and is bound to its source disk token, so switching accounts in the
+  client discards the old cached token immediately.
+- The billing card shows `roleType`, the monthly `hunyuan_ai` request window,
+  `space` in GB, `secret` count and `session_share`; `-1` renders as
+  Unlimited. Missing or non-numeric usage is an error, not zero usage, and no
+  plan limit is hardcoded.
+- 401/403 become `no_credentials`; transport and parse failures become
+  `error`. A concurrent snapshot uses one fetch mutex so two expired-token
+  reads cannot race the refresh.
+- 2026-10-24 local observation: Basic plan, AI requests 0/1,000 with a
+  monthly window, storage 0/10 GB, credentials 0/5 and shared sessions
+  Unlimited. These values are calibration only, not product constants.
+- Pending owner test: refreshing a still-valid token may revoke the desktop
+  client's own token. The 60-second margin limits exposure but does not prove
+  the vendor behavior.
+
 ## Key vault and credential storage (2026-10-05 → 2026-10-08)
 
 - **Key vault encryption** — `keyvault.json` v2: per-entry metadata
@@ -612,9 +696,10 @@ changes.
 - Evidence: legacy-vault resurrection red/green, archive/delete repeated
   refresh and failed migration tests, relay retirement failure test, account
   alias regression, and a headless Customize routing check. Latest serial
-  proxy-free Rust run: **1065 passed / 0 failed / 16 ignored** (2026-10-24, after
+  proxy-free Rust run: **1105 passed / 0 failed / 18 ignored** (2026-10-25, after
   the dashboard-correctness batch, the xfyun-speech provider, the Qoder
-  telemetry probe and the ZCode Start Plan provider). Node suite: **173 passed**. Frontend build + skin-pack local
+  telemetry probe, the ZCode Start Plan provider, RTK savings and OrcaTerm).
+  Node suite: **175 passed**. Frontend build + skin-pack local
   check pass. The Codex backup-retirement and slot-retention corrections from
   the same day are covered by that run.
 - Codex credential-source precedence is **live default > managed web store >
