@@ -3294,6 +3294,13 @@ async fn run_usage_fetch_inner_mode(
     retain_current_key_accounts(&mut all, &expected_key_identities);
     // Before the history/cache section: keys of one APIGOTO account must
     // not record credit/daily samples twice, so fold duplicates first.
+    // Remember which ids entered this cycle so fold-dropped ones can be
+    // evicted from the snapshot cache after the late pass below.
+    let apigoto_ids_in_cycle: HashSet<String> = all
+        .iter()
+        .filter(|s| s.id == "apigoto" || s.id.starts_with("apigoto@"))
+        .map(|s| s.id.clone())
+        .collect();
     providers::apigoto::fold_same_account_keys(&mut all);
     let current_onenewapi_generations = onenewapi_snapshot_generations(
         all.iter()
@@ -3438,6 +3445,30 @@ async fn run_usage_fetch_inner_mode(
     // error back to its last good snapshot, resurrecting a same-account
     // duplicate this late pass folds away again.
     providers::apigoto::fold_same_account_keys(&mut all);
+    // A fold-dropped APIGOTO id is a dead card; its cached last-good entry
+    // would repaint as a duplicate on the next boot, so evict exactly the
+    // ids this cycle's folds removed (a disabled family dropped nothing
+    // and keeps its cache).
+    let folded_away: Vec<String> = apigoto_ids_in_cycle
+        .iter()
+        .filter(|id| !all.iter().any(|s| s.id == **id))
+        .cloned()
+        .collect();
+    if !folded_away.is_empty() {
+        let _account_mutation =
+            account_lifecycle::mutation_lock().lock().unwrap_or_else(|e| e.into_inner());
+        if let Ok(mut map) = last_ok().lock() {
+            let removed = folded_away
+                .iter()
+                .filter(|id| map.remove(id.as_str()).is_some())
+                .count();
+            if removed > 0 {
+                if let Err(error) = persist_last_ok(&map) {
+                    eprintln!("[pane] snapshot cache evict: {error}");
+                }
+            }
+        }
+    }
 
     httpapi::publish(&all);
     // Anonymous daily-rollup telemetry (Settings → "Share anonymous usage

@@ -240,7 +240,9 @@ Ground rules that apply to every provider:
   `API keys: N · one account` row. A key whose request fails keeps its
   own card — a rejected key needs separate visibility. Two genuinely
   different accounts fold only if their whole payloads match (same plan
-  bought in the same second with the same balance).
+  bought in the same second with the same balance). Fold-dropped ids are
+  evicted from the last-good cache, so a restart cannot flash a duplicate
+  card before the first refresh.
 - **Calls:** `GET https://api.apigoto.com/v1/usage` (Bearer). No
   chat/completions or other model traffic, so the free-tier `40204`
   model gate is never exercised or bypassed.

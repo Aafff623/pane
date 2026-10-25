@@ -95,16 +95,17 @@ pub fn fold_same_account_keys(all: &mut Vec<Snapshot>) {
         }
     }
     for (index, snap) in all.iter_mut().enumerate() {
-        let is_family_card = snap.id == ID || snap.id.starts_with(&format!("{ID}@"));
-        if !is_family_card || account_signature(snap).is_none() {
+        let keys = folded[index];
+        if keys == 0 {
+            // Not a fold target in THIS call. The refresh pipeline invokes
+            // fold twice; a card whose row an earlier pass already wrote
+            // must keep it here, or the second pass would strip it.
             continue;
         }
+        // Rewrite (never stack) the count row.
         snap.metrics.retain(|metric| metric.label != KEYS_ROW);
-        if folded[index] > 0 {
-            let keys = folded[index] + 1;
-            snap.metrics
-                .push(Metric::text(KEYS_ROW, format!("{keys} · one account")));
-        }
+        snap.metrics
+            .push(Metric::text(KEYS_ROW, format!("{} · one account", keys + 1)));
     }
     let mut index = 0;
     *all = all
@@ -466,6 +467,25 @@ mod tests {
         fold_same_account_keys(&mut all);
         assert_eq!(all.len(), 2, "a failing key keeps its own visible card");
         assert!(!all[0].metrics.iter().any(|m| m.label == "API keys"));
+    }
+
+    #[test]
+    fn folding_twice_keeps_the_count_row() {
+        // The refresh pipeline calls fold twice (before the cache section
+        // and after the stale-restore pass); the second pass must not
+        // strip the row the first pass just wrote.
+        let doc: Value = serde_json::from_str(REAL_200).unwrap();
+        let mut all = vec![
+            account_card("apigoto", "APIGOTO", &doc),
+            account_card("apigoto@24758b90", "APIGOTO — 2", &doc),
+        ];
+        fold_same_account_keys(&mut all);
+        fold_same_account_keys(&mut all);
+        assert_eq!(all.len(), 1);
+        assert_eq!(
+            all[0].metrics.iter().find(|m| m.label == "API keys").unwrap().value.as_deref(),
+            Some("2 · one account"),
+        );
     }
 
     #[test]

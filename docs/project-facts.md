@@ -133,7 +133,11 @@ Last reconciled: 2026-10-25 (Pane 0.9.1 + account lifecycle, RTK savings, OrcaTe
   `temp/scripts/restart-pane-dev.ps1` does kill → port-wait → launch →
   probe → summon in one shot.
 - MinGW-linked full app fails at process start → expected on this machine;
-  use the parse-tests harness instead of fighting the linker.
+  use the parse-tests harness instead of fighting the linker. The harness
+  does NOT compile the command layer in `lib.rs` (verified 2026-10-25: a
+  type error in `run_usage_fetch_inner_mode` passed parse-tests green and
+  failed the real `cargo build`) — changes there need a real
+  `cargo +stable-x86_64-pc-windows-gnu build` as their gate.
 
 ## Provider credential semantics (2026-10-03, three handoff providers; tokenrhythm added 2026-10-19)
 
@@ -172,7 +176,10 @@ Last reconciled: 2026-10-25 (Pane 0.9.1 + account lifecycle, RTK savings, OrcaTe
   (run twice per refresh — before the history/cache section and after the
   stale-restore pass) collapses same-account cards into the default
   account's card with an `API keys: N · one account` row. Error cards are
-  never folded (a rejected key needs its own visibility).
+  never folded (a rejected key needs its own visibility), and the row
+  write is idempotent across the two passes. Ids a cycle's folds dropped
+  are evicted from the last-good cache so a boot paint cannot flash a
+  duplicate; a disabled family drops nothing and keeps its cache.
 - **基元律动 / tokenrhythm** (`tokenrhythm`): a WEB-SESSION provider —
   the `sk_tr_…` key authenticates ONLY the `/v1` model namespace; every
   console endpoint that reports money (`/api/wallet/summary`,
