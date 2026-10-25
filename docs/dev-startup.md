@@ -59,6 +59,16 @@ API on `127.0.0.1:6736` responds, and the debug Pane appears with its tray icon
 on the interactive desktop. Press `Alt+2` (or the configured global shortcut)
 to summon the popover. A port-only `200` response is not UI acceptance.
 
+The restart script guarantees the whole stack (2026-10-25): if Vite is not
+listening on `1420` — e.g. after a reboot — the script starts it as a detached
+hidden process (`temp/logs/vite-dev.log`) and waits for readiness before
+touching pane. As a second net, the debug build carries a dev-origin watcher:
+when the panel's WebView lands on the connection-refused page because Vite is
+down (at startup or a mid-session restart), it navigates every webview back to
+`127.0.0.1:1420` the moment the server answers again, logging
+`dev origin down` / `Vite is back — panel reloaded`. Installed releases bundle
+the frontend and cannot hit either path.
+
 Do not
 replace the WMI launcher with a bare `Start-Process` or `& pane.exe`: those can
 place the window on a non-interactive station or attach stdout to a transient

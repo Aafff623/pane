@@ -6381,6 +6381,60 @@ pub fn run() {
             spawn_update_checker(app.handle());
             spawn_share_watcher(app.handle().clone());
             spawn_auto_refresh(app.handle().clone());
+            // Dev-build resilience: every window's WebView loads from the
+            // Vite dev server on :1420. When pane starts before Vite is up
+            // — or Vite is restarted while pane runs — the window sits on
+            // the browser's connection-refused page and the panel looks
+            // dead. Watch the dev origin and navigate every webview back
+            // the moment it answers again. Installed builds bundle the
+            // frontend and never take this path.
+            #[cfg(debug_assertions)]
+            {
+                let dev_handle = app.handle().clone();
+                tauri::async_runtime::spawn(async move {
+                    const DEV_ORIGIN: &str = "http://127.0.0.1:1420/";
+                    let probe = reqwest::Client::builder()
+                        .no_proxy()
+                        .timeout(std::time::Duration::from_secs(2))
+                        .build()
+                        .expect("dev-origin probe client");
+                    let up = || async {
+                        probe
+                            .get(DEV_ORIGIN)
+                            .send()
+                            .await
+                            .map(|resp| resp.status().as_u16() < 500)
+                            .unwrap_or(false)
+                    };
+                    let mut was_down = false;
+                    loop {
+                        let now_up = up().await;
+                        if !now_up {
+                            if !was_down {
+                                eprintln!(
+                                    "[pane] dev origin down — the panel will reload when Vite returns"
+                                );
+                                was_down = true;
+                            }
+                            tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+                        } else {
+                            if was_down {
+                                let Ok(url) = DEV_ORIGIN.parse::<tauri::Url>() else {
+                                    return;
+                                };
+                                for (_, window) in dev_handle.webview_windows() {
+                                    if let Err(error) = window.navigate(url.clone()) {
+                                        eprintln!("[pane] dev-origin reload: {error}");
+                                    }
+                                }
+                                eprintln!("[pane] Vite is back — panel reloaded");
+                                was_down = false;
+                            }
+                            tokio::time::sleep(std::time::Duration::from_secs(30)).await;
+                        }
+                    }
+                });
+            }
             let menu = build_tray_menu(app.handle())?;
             let cached_tray = load_persisted_main_tray();
             let cached_tooltip = cached_tray
