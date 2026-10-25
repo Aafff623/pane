@@ -11,6 +11,12 @@ test("panel settings chrome uses backend window commands", () => {
   assert.doesNotMatch(source, /getCurrentWebviewWindow\(\)\.minimize\(\)/);
 });
 
+test("panel window action failures are visible, not swallowed", () => {
+  assert.doesNotMatch(source, /invoke\("close_panel_window"\)\.catch\(\(\) => \{\}\)/);
+  assert.doesNotMatch(source, /invoke\("minimize_panel_window"\)\.catch\(\(\) => \{\}\)/);
+  assert.match(source, /settingsToast\(t\("settings\.windowActionFailed"/);
+});
+
 test("every rendered dismiss/close control has a delegated handler", () => {
   const counts = new Map();
   for (const [attribute] of source.matchAll(/data-[a-z0-9-]*(?:close|cancel|dismiss)[a-z0-9-]*/g)) {

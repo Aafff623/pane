@@ -19,4 +19,10 @@ with an empty `.catch()`. Minimize used the same direct WebView path.
 ## Verification
 
 - Frontend build and Node suite.
+- Debug Pane via CDP: clicking the rendered close control removed the `panel`
+  page target; clicking minimize made
+  `plugin:window|is_minimized {label:"panel"}` return `true`; reopening the
+  settings panel returned it to `false`.
+- The installed `0.9.1` executable still carries the pre-fix bundle; it cannot
+  demonstrate this change until a new build is installed.
 - Owner must click close/minimize in the real panel window.

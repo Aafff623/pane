@@ -13165,7 +13165,7 @@ async function handleCustomizeClick(target: HTMLElement): Promise<boolean> {
   if (sessionJump) {
     const family = sessionJump.dataset.sessionJump!;
     await patchConfig({ panelIntent: { view: "settings", family, at: Date.now() } }).catch(() => {});
-    void invoke("open_panel_window").catch(() => {});
+    openPanelWindowSafely();
     return true;
   }
   const openProv = target.closest<HTMLElement>("[data-cust-open]");
@@ -15429,6 +15429,12 @@ function settingsToast(message: string, isError = false): void {
   (settingsToast as unknown as { timer?: number }).timer = window.setTimeout(() => {
     toast!.hidden = true;
   }, 3200);
+}
+
+function openPanelWindowSafely(): void {
+  void invoke("open_panel_window").catch((error) => {
+    settingsToast(t("settings.panelOpenFailed", { err: String(error) }), true);
+  });
 }
 
 /// Returns true when the vault ended up unlocked (so callers can retry the
@@ -17832,7 +17838,7 @@ function buildPanelShell(): void {
   minBtn.textContent = "−";
   minBtn.addEventListener("click", () => {
     void invoke("minimize_panel_window").catch((error) => {
-      document.querySelector("#status")?.replaceChildren(String(error));
+      settingsToast(t("settings.windowActionFailed", { err: String(error) }), true);
     });
   });
   const closeBtn = document.createElement("button");
@@ -17843,7 +17849,7 @@ function buildPanelShell(): void {
   closeBtn.innerHTML = uiIcon("x");
   closeBtn.addEventListener("click", () => {
     void invoke("close_panel_window").catch((error) => {
-      document.querySelector("#status")?.replaceChildren(String(error));
+      settingsToast(t("settings.windowActionFailed", { err: String(error) }), true);
     });
   });
   windowControls.append(minBtn, closeBtn);
@@ -18020,11 +18026,20 @@ function buildPanelShell(): void {
     // set_window_form persists; the local mirror keeps the next patchConfig
     // snapshot from writing the old value back.
     config.windowForm = value;
-    void invoke("set_window_form", { form: value }).catch(() => {});
+    void invoke("set_window_form", { form: value }).catch((error) => {
+      settingsToast(t("settings.windowActionFailed", { err: String(error) }), true);
+    });
     // Immediate effect: "panel" focuses (or opens) the panel window;
     // "floating" closes it — a self-close when picked from inside it.
-    if (value === "panel") void invoke("open_panel_window").catch(() => {});
-    else void invoke("close_panel_window").catch(() => {});
+    if (value === "panel") {
+      void invoke("open_panel_window").catch((error) => {
+        settingsToast(t("settings.windowActionFailed", { err: String(error) }), true);
+      });
+    } else {
+      void invoke("close_panel_window").catch((error) => {
+        settingsToast(t("settings.windowActionFailed", { err: String(error) }), true);
+      });
+    }
   });
   generalCard.append(panelRowDesc("settings.windowForm", "settings.desc.windowForm", formGroup));
   const resizeToggle = document.createElement("input");
@@ -18702,7 +18717,7 @@ async function focusAuthFamily(family: string): Promise<void> {
 /// already open), then ask for the window.
 async function jumpToAuthCenter(family: string): Promise<void> {
   await patchConfig({ panelIntent: { view: "auth", family, at: Date.now() } }).catch(() => {});
-  void invoke("open_panel_window").catch(() => {});
+  openPanelWindowSafely();
 }
 
 /// A card with no data because it needs a Pane sign-in gets a button that
@@ -19312,13 +19327,13 @@ async function openFamilyLogin(family: string): Promise<void> {
     void focusAuthFamily(family);
     openAuthLoginDialog(family);
   }
-  void invoke("open_panel_window").catch(() => {});
+  openPanelWindowSafely();
 }
 
 /// Search/MCP keys live in the key-vault card, not the provider key page.
 async function openKeysPageFor(family: string): Promise<void> {
   await patchConfig({ panelIntent: { view: "settings", family, at: Date.now() } }).catch(() => {});
-  void invoke("open_panel_window").catch(() => {});
+  openPanelWindowSafely();
 }
 
 function authAddAccount(family: string): void {
@@ -19948,7 +19963,7 @@ window.addEventListener("DOMContentLoaded", () => {
       !e.repeat && !isTypingTarget(document.activeElement)
     ) {
       e.preventDefault();
-      void invoke("open_panel_window").catch(() => {});
+      openPanelWindowSafely();
     }
     // Bare T flips the Quota Overview to its soonest-reset (expiring)
     // list — the follow-up key after the global popover shortcut (Alt+2

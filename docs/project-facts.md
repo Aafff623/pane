@@ -225,7 +225,10 @@ Last reconciled: 2026-10-25 (Pane 0.9.1 + account lifecycle, RTK savings, OrcaTe
   fail under the panel capability set, and the old empty `.catch()` made the
   red close button appear completely inert. A static test now locks the
   backend-command path and checks every rendered `close/cancel/dismiss`
-  control has a delegated handler.
+  control has a delegated handler. Debug CDP verification: close removed the
+  `panel` page target, minimize made `is_minimized(label="panel")` true, and
+  reopening the panel made it false. The installed `0.9.1` binary predates
+  this fix.
 - Three config keys, all defaulting in `config_with_defaults` (Rust) and
   mirrored in `FRONTEND_CONFIG_KEYS` (frontend): `popoverPin` (default
   `true` = always-on-top), `popoverLock` (default `true` = re-center on
