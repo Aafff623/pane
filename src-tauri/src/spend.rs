@@ -10,7 +10,7 @@
 use chrono::{DateTime, Datelike, Local, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fs;
 use std::hash::{Hash, Hasher};
 use std::io::{BufRead, BufReader, Read, Seek, SeekFrom};
@@ -5652,7 +5652,7 @@ mod tests {
         assert_eq!(call.input, 5368);
         assert_eq!(call.output, 161);
         assert_eq!(call.cache_read, 40_782);
-        assert_eq!(call.model, "gemini-3.8-flash");
+        assert_eq!(call.model.as_deref(), Some("gemini-3.8-flash"));
         assert_eq!(call.ts, None);
     }
 
@@ -5684,7 +5684,7 @@ mod tests {
             input: 5368,
             output: 161,
             cache_read: 40_782,
-            model: "gemini-3.8-flash".into(),
+            model: Some("gemini-3.8-flash".into()),
             ts: None,
         };
         let (u, tokens) = antigravity_usage(&call);
@@ -5695,11 +5695,114 @@ mod tests {
     }
 
     #[test]
-    fn antigravity_drops_rows_without_model_or_usage() {
-        // No model string (field 19) — not a model call.
-        let usage = pb_msg(&[]);
+    fn antigravity_model_resolution_19_first_21_fallback() {
+        let usage = pb_varint_field(2, 10);
+        // Both present: field 19 wins.
+        let info = pb_msg(&[
+            (4, usage.clone()),
+            (19, b"gemini-3.8-flash".to_vec()),
+            (21, b"field-21-label".to_vec()),
+        ]);
+        let call = decode_antigravity_call(&pb_msg(&[(1, info)])).expect("decodes");
+        assert_eq!(call.model.as_deref(), Some("gemini-3.8-flash"));
+        // Only 21: it carries the model.
+        let info = pb_msg(&[(4, usage.clone()), (21, b"gemini-3.7-flash".to_vec())]);
+        let call = decode_antigravity_call(&pb_msg(&[(1, info)])).expect("decodes");
+        assert_eq!(call.model.as_deref(), Some("gemini-3.7-flash"));
+        // Placeholder spellings of 19 fall through to 21.
+        for placeholder in ["unknown", "gemini-3.8-flash-default"] {
+            let info = pb_msg(&[
+                (4, usage.clone()),
+                (19, placeholder.as_bytes().to_vec()),
+                (21, b"gemini-3.6-flash".to_vec()),
+            ]);
+            let call = decode_antigravity_call(&pb_msg(&[(1, info)])).expect("decodes");
+            assert_eq!(call.model.as_deref(), Some("gemini-3.6-flash"), "{placeholder}");
+        }
+        // A varint field 21 is a different wire shape: it must not shadow a
+        // usable 19, and it does not become a model on its own either.
+        let info = pb_msg(&[
+            (4, usage.clone()),
+            (19, b"gemini-3.8-flash".to_vec()),
+            (21, vec![0x08, 0x01]), // inner bytes parse as field-1 varint
+        ]);
+        // field 21 here is length-delimited but its text is not utf8-meaningful
+        // model material — the 19 still wins because it is usable.
+        let call = decode_antigravity_call(&pb_msg(&[(1, info)])).expect("decodes");
+        assert_eq!(call.model.as_deref(), Some("gemini-3.8-flash"));
+        // Neither field: model None, row survives decode (ledger filter is
+        // a separate decision — antigravity_is_ledger_row).
         let info = pb_msg(&[(4, usage)]);
-        assert!(decode_antigravity_call(&pb_msg(&[(1, info)])).is_none());
+        let call = decode_antigravity_call(&pb_msg(&[(1, info)])).expect("decodes");
+        assert_eq!(call.model, None);
+        assert!(!antigravity_is_ledger_row(&call), "has input tokens");
+    }
+
+    #[test]
+    fn antigravity_ledger_rows_and_unknown_placeholder() {
+        // No model + only the system prompt moved: the IDE's ledger row.
+        let usage = pb_varint_field(1, 1318);
+        let info = pb_msg(&[(4, usage)]);
+        let call = decode_antigravity_call(&pb_msg(&[(1, info)])).expect("decodes");
+        assert_eq!(call.model, None);
+        assert!(antigravity_is_ledger_row(&call));
+        // No model but tokens were generated: kept, priced under "unknown".
+        let usage = pb_varint_field(3, 500);
+        let info = pb_msg(&[(4, usage)]);
+        let call = decode_antigravity_call(&pb_msg(&[(1, info)])).expect("decodes");
+        assert_eq!(call.model, None);
+        assert!(!antigravity_is_ledger_row(&call));
+        assert_eq!(antigravity_model_label(&call), None);
+        // -tiered is stripped for pricing; -n stays (distinct sku).
+        let call = AntigravityCall {
+            system: 0,
+            input: 1,
+            output: 0,
+            cache_read: 0,
+            model: Some("gemini-3.8-flash-tiered".into()),
+            ts: None,
+        };
+        assert_eq!(antigravity_model_label(&call).as_deref(), Some("gemini-3.8-flash"));
+        let call = AntigravityCall {
+            system: 0,
+            input: 1,
+            output: 0,
+            cache_read: 0,
+            model: Some("gemini-3.8-flash-n".into()),
+            ts: None,
+        };
+        assert_eq!(antigravity_model_label(&call).as_deref(), Some("gemini-3.8-flash-n"));
+    }
+
+    #[test]
+    fn antigravity_gen_jump_table_and_neighbor_interpolation() {
+        // steps.metadata carrying field 20 -> { 3 = gen idx } beside the
+        // field-1 Timestamp.
+        let step_md = |secs: u64, gen_idx: u64| {
+            let link = pb_varint_field(3, gen_idx);
+            let mut md = antigravity_step_md(secs);
+            md.extend_from_slice(&pb_msg(&[(20, link)]));
+            md
+        };
+        let md = step_md(1_791_366_967, 7);
+        assert_eq!(antigravity_gen_idx_from_step(&md), Some(7));
+        assert_eq!(antigravity_ts_from_step(&md), Some(1_791_366_967));
+        assert_eq!(antigravity_gen_idx_from_step(&antigravity_step_md(5)), None);
+
+        // Exact hit, backward neighbor, forward neighbor, empty map.
+        let mut map = BTreeMap::new();
+        map.insert(3, 1_000);
+        map.insert(7, 2_000);
+        map.insert(11, 3_000);
+        assert_eq!(antigravity_gen_ts(&map, 7), Some(2_000));
+        assert_eq!(antigravity_gen_ts(&map, 9), Some(2_000), "between -> previous");
+        assert_eq!(antigravity_gen_ts(&map, 1), Some(1_000), "before all -> first");
+        assert_eq!(antigravity_gen_ts(&map, 99), Some(3_000), "after all -> last");
+        assert_eq!(antigravity_gen_ts(&BTreeMap::new(), 5), None);
+    }
+
+    #[test]
+    fn antigravity_drops_rows_without_usage_block() {
         // No usage block (field 4) — nothing to count.
         let info = pb_msg(&[(19, b"gemini-3.8-flash".to_vec())]);
         assert!(decode_antigravity_call(&pb_msg(&[(1, info)])).is_none());
@@ -6195,7 +6298,9 @@ struct AntigravityCall {
     input: u64,
     output: u64,
     cache_read: u64,
-    model: String,
+    /// Field 19 (internal model id) when usable, else field 21, else None
+    /// (a ledger row or an unpriced call — see antigravity_model_label).
+    model: Option<String>,
     /// Embedded event time (unix seconds). Present in the schema but empty
     /// on every local row — the scanner falls back to `steps.metadata`.
     ts: Option<i64>,
@@ -6213,19 +6318,36 @@ fn decode_antigravity_call(blob: &[u8]) -> Option<AntigravityCall> {
     let (_, PbField::Len(usage)) = fields.iter().find(|(f, _)| *f == 4)? else {
         return None;
     };
-    let (_, PbField::Len(model)) = fields.iter().find(|(f, _)| *f == 19)? else {
-        return None;
-    };
-    let model = std::str::from_utf8(model).ok()?;
-    if model.is_empty() {
-        return None;
-    }
+    // Model id: field 19 (internal id) is authoritative at 99.5% presence
+    // (103-store survey, 2026-10-25); "unknown" and "-default" spellings are
+    // placeholders to skip. Field 21 appears 0 times locally but the wire
+    // shape exists: accept it only as a length-delimited value — a varint
+    // there is a different field shape and must not shadow a usable 19.
+    let field_19 = fields
+        .iter()
+        .find(|(f, _)| *f == 19)
+        .and_then(|(_, v)| match v {
+            PbField::Len(bytes) => std::str::from_utf8(bytes).ok(),
+            _ => None,
+        })
+        .map(str::trim)
+        .filter(|m| !m.is_empty() && *m != "unknown" && !m.ends_with("-default"));
+    let field_21 = fields
+        .iter()
+        .find(|(f, _)| *f == 21)
+        .and_then(|(_, v)| match v {
+            PbField::Len(bytes) => std::str::from_utf8(bytes).ok(),
+            _ => None,
+        })
+        .map(str::trim)
+        .filter(|m| !m.is_empty());
+    let model = field_19.or(field_21).map(str::to_string);
     let mut call = AntigravityCall {
         system: 0,
         input: 0,
         output: 0,
         cache_read: 0,
-        model: model.to_string(),
+        model,
         ts: None,
     };
     for (f, v) in pb_fields(usage) {
@@ -6283,6 +6405,56 @@ fn antigravity_ts_from_step(step_metadata: &[u8]) -> Option<i64> {
             _ => None,
         })
         .and_then(antigravity_ts_from_message)
+}
+
+/// `steps.metadata` field 20 -> field 3 = the gen index this step belongs
+/// to. The steps.idx = gen_metadata.idx assumption failed on real data (0%
+/// same idx, median 195s apart): field 20 is the jump table that makes the
+/// correlation exact (98.9% coverage over 8865 field-19 rows).
+fn antigravity_gen_idx_from_step(step_metadata: &[u8]) -> Option<i64> {
+    pb_fields(step_metadata)
+        .into_iter()
+        .find(|(f, _)| *f == 20)
+        .and_then(|(_, v)| match v {
+            PbField::Len(link) => pb_fields(link)
+                .into_iter()
+                .find(|(f, _)| *f == 3)
+                .and_then(|(_, v)| match v {
+                    PbField::Varint(idx) => i64::try_from(idx).ok(),
+                    _ => None,
+                }),
+            _ => None,
+        })
+}
+
+/// Day timestamp for one gen row: the field-20 jump table first, then
+/// neighbor interpolation over the referenced gens (a gen no step points at
+/// sits between two that do), so an unreferenced first gen lands on the
+/// next known time instead of the file's coarse anchor.
+fn antigravity_gen_ts(map: &BTreeMap<i64, i64>, gen_idx: i64) -> Option<i64> {
+    if let Some(secs) = map.get(&gen_idx) {
+        return Some(*secs);
+    }
+    map.range(..gen_idx)
+        .next_back()
+        .map(|(_, secs)| *secs)
+        .or_else(|| map.range(gen_idx..).next().map(|(_, secs)| *secs))
+}
+
+/// The pricing key for a call: the decoded model with the openusage-style
+/// `-tiered` suffix stripped (`-n` stays — pricing.rs treats it as a
+/// distinct sku). None means no model at all.
+fn antigravity_model_label(call: &AntigravityCall) -> Option<String> {
+    call.model
+        .as_deref()
+        .map(|m| m.trim().trim_end_matches("-tiered").to_string())
+}
+
+/// A row with no model and only the system-prompt token moved nothing a
+/// price could apply to — the IDE's own ledger rows (48/8913 locally).
+/// Kept rows without a model still count tokens via note_unpriced.
+fn antigravity_is_ledger_row(call: &AntigravityCall) -> bool {
+    call.model.is_none() && call.input == 0 && call.output == 0 && call.cache_read == 0
 }
 
 /// Token → pricing mapping for one event: system prompt + user input bill
@@ -6419,6 +6591,14 @@ fn antigravity() -> ProviderSpend {
         })
         .collect();
     base_dirs.sort();
+    // Symlinked editions would scan the same store twice; canonical
+    // paths collapse them.
+    {
+        let mut seen: HashSet<PathBuf> = HashSet::new();
+        base_dirs.retain(|p| {
+            p.canonicalize().map(|c| seen.insert(c)).unwrap_or(true)
+        });
+    }
     for base_dir in base_dirs {
         let conv_dir = base_dir.join("conversations");
         let Ok(entries) = fs::read_dir(&conv_dir) else { continue };
@@ -6465,29 +6645,39 @@ fn antigravity() -> ProviderSpend {
                     rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
                 )
                 .ok()?;
+                // A live writer can hold the db exclusively; zero wait
+                // keeps a refresh fast instead of blocking on the IDE.
+                let _ = conn.busy_timeout(std::time::Duration::ZERO);
                 // Per-event wall-clock times live in `steps.metadata`
-                // (field 1 = Timestamp), keyed by the correlated index. A
-                // missing table just means no per-event times on this
-                // edition — the anchor falls back per row.
-                let mut step_ts: HashMap<i64, i64> = HashMap::new();
-                if let Ok(mut stmt) = conn.prepare("SELECT idx, metadata FROM steps") {
+                // (field 1 = Timestamp); the step's field 20 names the gen
+                // row it belongs to, which is the only exact correlation
+                // (steps.idx is NOT the gen idx on real data). A missing
+                // table means the anchor falls back per row.
+                let mut gen_ts: BTreeMap<i64, i64> = BTreeMap::new();
+                if let Ok(mut stmt) = conn.prepare("SELECT metadata FROM steps") {
                     if let Ok(mut rows) = stmt.query([]) {
                         while let Ok(Some(row)) = rows.next() {
-                            let (Ok(idx), Ok(md)) =
-                                (row.get::<_, i64>(0), row.get::<_, Vec<u8>>(1))
-                            else {
+                            let Ok(md) = row.get::<_, Vec<u8>>(0) else {
                                 break;
                             };
                             if md.len() > MAX_ANTIGRAVITY_STEP_BYTES {
                                 continue;
                             }
-                            if let Some(secs) = antigravity_ts_from_step(&md) {
-                                step_ts.insert(idx, secs);
+                            if let (Some(gen_idx), Some(secs)) = (
+                                antigravity_gen_idx_from_step(&md),
+                                antigravity_ts_from_step(&md),
+                            ) {
+                                gen_ts.insert(gen_idx, secs);
                             }
                         }
                     }
                 }
-                let mut stmt = conn.prepare("SELECT idx, data FROM gen_metadata ORDER BY idx").ok()?;
+                let mut stmt = conn
+                    .prepare(
+                        "SELECT idx, data FROM gen_metadata \
+                         WHERE length(data) <= 1048576 ORDER BY idx",
+                    )
+                    .ok()?;
                 let mut rows = stmt.query([]).ok()?;
                 let mut d = FileData::default();
                 while let Ok(Some(row)) = rows.next() {
@@ -6496,29 +6686,34 @@ fn antigravity() -> ProviderSpend {
                         break;
                     };
                     let Some(call) = decode_antigravity_call(&blob) else { continue };
+                    if antigravity_is_ledger_row(&call) {
+                        continue;
+                    }
                     let (u, tokens) = antigravity_usage(&call);
                     if tokens <= 0.0 {
                         continue;
                     }
                     let at = call
                         .ts
-                        .or_else(|| step_ts.get(&idx).copied())
+                        .or_else(|| antigravity_gen_ts(&gen_ts, idx))
                         .and_then(|secs| DateTime::from_timestamp(secs, 0))
                         .unwrap_or(fallback_anchor);
                     // probe_lookup (not bare pricing::lookup): the question
                     // must be recorded so a catalog refresh re-prices an
                     // unchanged conversation db via probes_still_vouch.
-                    match probe_lookup(&call.model) {
+                    let model = antigravity_model_label(&call)
+                        .unwrap_or_else(|| "unknown".to_string());
+                    match probe_lookup(&model) {
                         Some(p) => {
                             add_event(
                                 &mut d,
                                 at,
-                                &call.model,
+                                &model,
                                 pricing::request_cost(&p, &u, true),
                                 tokens,
                             );
                         }
-                        None => note_unpriced(&mut d, at, &call.model, tokens),
+                        None => note_unpriced(&mut d, at, &model, tokens),
                     }
                 }
                 Some(d)

@@ -556,7 +556,7 @@ mod tests {
         // silently lose the ink landscape/koi or signal atlas.
         let _root = TestSkinsDir::new();
         let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../site/public/skins");
-        for name in ["pane-skin-signal-1.0.0.zip", "pane-skin-ink-1.0.0.zip"] {
+        for name in ["pane-skin-signal-1.0.1.zip", "pane-skin-ink-1.0.1.zip"] {
             let bytes = std::fs::read(dir.join(name)).unwrap_or_else(|e| panic!("{name}: {e}"));
             let manifest = install_bytes(&bytes).unwrap_or_else(|e| panic!("{name}: {e}"));
             let pack = read_installed(&manifest.id).unwrap_or_else(|e| panic!("{name}: {e}"));
