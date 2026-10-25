@@ -1,7 +1,7 @@
 # 03 — 三皮肤、亮暗模式与实际资源包
 
 Type: task
-Status: ready-for-agent
+Status: implemented (2026-10-25) - automated green; owner visual acceptance pending
 Blocked by: 01
 Spec: ../spec.md
 Issue: #51 — https://github.com/Aafff623/pane/issues/51
@@ -23,3 +23,4 @@ Issue: #51 — https://github.com/Aafff623/pane/issues/51
 ## Comments
 
 - 2026-10-24：现有三皮肤已有外壳覆盖，任务是补齐完整设计，不能简单宣称“此前没有适配”。
+- 2026-10-25：已实施。沿用三皮肤既有外壳选择器（signal 错位阴影 / ink 水墨 grain / comic-pixel 硬边框），新内部结构继承主题变量；.wn-details 纳入 comic-pixel 前景色覆盖。未新建平行主题系统。

@@ -1,6 +1,6 @@
 # 更新完成摘要弹窗：CC Switch 还原与主题适配
 
-Status: ready-for-agent
+Status: implemented (2026-10-25) - automated green; owner visual acceptance pending
 Type: feature
 Date: 2026-10-24
 Issue: #51 — https://github.com/Aafff623/pane/issues/51

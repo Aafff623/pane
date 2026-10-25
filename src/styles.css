@@ -7312,38 +7312,33 @@ body.no-glass .cust-dock {
   animation: confirm-fade 0.16s ease;
 }
 
-/* Liquid glass — the sidebar/footer/dock recipe, plus a soft top sheen. */
+/* Opaque surface, light border, soft outer shadow — the CC Switch
+   reference look. No glass gradient, no layered inset highlights, no
+   badge-style star chip. Header and footer are fixed; the body scrolls. */
 #whatsnew-box {
   display: flex;
   flex-direction: column;
-  width: min(94%, 560px);
+  width: min(94%, 448px);
   max-height: min(84vh, 760px);
   overflow: hidden;
   padding: 0;
-  background:
-    linear-gradient(180deg, var(--glass-sheen), transparent 38%),
-    var(--glass-surface);
-  backdrop-filter: blur(24px) saturate(1.5) brightness(1.04);
-  -webkit-backdrop-filter: blur(24px) saturate(1.5) brightness(1.04);
+  background: var(--card);
   color: var(--foreground);
-  border: 1px solid var(--glass-border);
-  border-radius: 16px;
-  box-shadow:
-    0 24px 60px var(--floating-shadow),
-    inset 0 1px 1.5px rgba(255, 255, 255, 0.35),
-    inset 0 -1px 1px rgba(255, 255, 255, 0.08),
-    inset 1.5px 0 1.5px rgba(255, 255, 255, 0.06),
-    inset -1.5px 0 1.5px rgba(255, 255, 255, 0.06);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  box-shadow: 0 24px 60px var(--floating-shadow);
   animation: confirm-pop 0.18s cubic-bezier(0.2, 0.8, 0.3, 1);
 }
 
-/* Header — icon + title, optional "since vX" line, quiet close button. */
+/* Header — bare line star (20px) + 16/24 title, optional "since vX"
+   line aligned under the title, quiet close button. 24px horizontal
+   padding, 12px below the header. */
 .wn-head {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
   gap: 12px;
-  padding: 20px 20px 12px;
+  padding: 24px 24px 12px;
 }
 
 .wn-head-text {
@@ -7356,38 +7351,34 @@ body.no-glass .cust-dock {
 .wn-title-row {
   display: flex;
   align-items: center;
-  gap: 9px;
+  gap: 8px;
   min-width: 0;
 }
 
 .wn-title-row h3 {
   margin: 0;
-  font-size: 15px;
-  font-weight: 650;
-  letter-spacing: -0.01em;
+  font-size: 16px;
+  font-weight: 600;
+  line-height: 24px;
 }
 
 .wn-spark {
   display: grid;
   place-items: center;
   flex: none;
-  width: 26px;
-  height: 26px;
-  border-radius: 8px;
   color: var(--foreground);
-  background: color-mix(in srgb, var(--primary) 10%, transparent);
-  border: 1px solid color-mix(in srgb, var(--primary) 14%, transparent);
 }
 
 .wn-spark svg {
-  width: 14px;
-  height: 14px;
+  width: 20px;
+  height: 20px;
 }
 
 .wn-sub {
   margin: 0;
-  padding-left: 35px;
-  font-size: 12px;
+  padding-left: 28px;
+  font-size: 13px;
+  line-height: 20px;
   color: var(--muted-foreground);
 }
 
@@ -7425,7 +7416,7 @@ body.no-glass .cust-dock {
 #whatsnew-body {
   overflow-y: auto;
   min-height: 0;
-  padding: 2px 20px 10px;
+  padding: 16px 24px;
 }
 
 #whatsnew-body::-webkit-scrollbar {
@@ -7457,7 +7448,7 @@ body.no-glass .cust-dock {
 .wn-version-head h4 {
   margin: 0;
   font-size: 13px;
-  font-weight: 650;
+  font-weight: 600;
 }
 
 .wn-version-date {
@@ -7466,10 +7457,28 @@ body.no-glass .cust-dock {
   color: var(--muted-foreground);
 }
 
+/* Low-interference per-version details entry: right edge lines up with
+   the footer's confirm button, both inside the same 24px padding. */
+.wn-details {
+  margin-left: auto;
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--muted-foreground);
+  cursor: pointer;
+}
+
+.wn-details:hover {
+  color: var(--foreground);
+}
+
 .wn-summary {
   margin: 0 0 10px;
-  font-size: 12.5px;
-  line-height: 1.6;
+  font-size: 13px;
+  line-height: 20px;
   color: var(--secondary-foreground);
 }
 
@@ -7482,21 +7491,31 @@ body.no-glass .cust-dock {
   list-style: none;
 }
 
+/* The generic legacy-list rule below outranks a bare class selector;
+   restate the structured list's own padding at ID level so summary
+   lists keep their layout while old markdown keeps its indent. */
+#whatsnew-body ul.wn-items {
+  padding-left: 0;
+}
+
 .wn-items li {
   display: flex;
   align-items: flex-start;
   gap: 8px;
-  font-size: 12.5px;
-  line-height: 1.6;
+  font-size: 13px;
+  line-height: 20px;
   color: var(--secondary-foreground);
 }
 
+/* Neutral labels: no strong green/blue/amber outline. The type keeps a
+   faint tint in its text for scannability, nothing more. */
 .wn-chip {
   flex: none;
   margin-top: 2px;
   padding: 0 7px;
   border-radius: 999px;
-  border: 1px solid transparent;
+  border: 1px solid var(--border);
+  background: var(--accent);
   font-size: 10.5px;
   font-weight: 600;
   line-height: 1.6;
@@ -7504,27 +7523,19 @@ body.no-glass .cust-dock {
 }
 
 .wn-chip.added {
-  color: color-mix(in srgb, #22c55e 72%, var(--foreground));
-  background: color-mix(in srgb, #22c55e 12%, transparent);
-  border-color: color-mix(in srgb, #22c55e 24%, transparent);
+  color: color-mix(in srgb, #22c55e 55%, var(--muted-foreground));
 }
 
 .wn-chip.changed {
-  color: color-mix(in srgb, #3b82f6 78%, var(--foreground));
-  background: color-mix(in srgb, #3b82f6 12%, transparent);
-  border-color: color-mix(in srgb, #3b82f6 26%, transparent);
+  color: color-mix(in srgb, #3b82f6 55%, var(--muted-foreground));
 }
 
 .wn-chip.fixed {
-  color: color-mix(in srgb, #f59e0b 74%, var(--foreground));
-  background: color-mix(in srgb, #f59e0b 12%, transparent);
-  border-color: color-mix(in srgb, #f59e0b 26%, transparent);
+  color: color-mix(in srgb, #f59e0b 55%, var(--muted-foreground));
 }
 
 .wn-chip.other {
   color: var(--muted-foreground);
-  background: var(--accent);
-  border-color: var(--border);
 }
 
 .wn-earlier {
@@ -7566,7 +7577,7 @@ body.no-glass .cust-dock {
   margin: 10px 0 4px;
 }
 
-#whatsnew-body ul {
+#whatsnew-body ul:not(.wn-items) {
   margin: 0;
   padding-left: 16px;
 }
@@ -7591,21 +7602,25 @@ body.no-glass .cust-dock {
   padding: 0 4px;
 }
 
+/* Footer is continuous with the panel: no divider line, no separate
+   tint. 32px buttons with 6px control radius. */
 #whatsnew-actions {
   display: flex;
   justify-content: flex-end;
   gap: 8px;
-  padding: 12px 20px 16px;
-  border-top: 1px solid var(--border);
-  background: color-mix(in srgb, var(--background) 30%, transparent);
+  padding: 12px 24px;
 }
 
 #whatsnew-actions button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 32px;
   font-family: inherit;
   font-size: 12px;
   font-weight: 600;
-  border-radius: 8px;
-  padding: 6px 14px;
+  border-radius: 6px;
+  padding: 0 14px;
   cursor: pointer;
   transition: background 0.12s ease, opacity 0.12s ease, transform 0.1s ease;
 }
@@ -7637,7 +7652,8 @@ body.no-glass .cust-dock {
 
 #whatsnew-actions button:focus-visible,
 .wn-close:focus-visible,
-.wn-earlier:focus-visible {
+.wn-earlier:focus-visible,
+.wn-details:focus-visible {
   outline: none;
   box-shadow: 0 0 0 3px rgb(212 212 216 / 0.18);
 }

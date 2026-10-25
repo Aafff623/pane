@@ -1,7 +1,7 @@
 # 01 — 默认主题布局还原与样式隔离
 
 Type: task
-Status: ready-for-agent
+Status: implemented (2026-10-25) - automated green; owner visual acceptance pending
 Blocked by: None
 Spec: ../spec.md
 Issue: #51 — https://github.com/Aafff623/pane/issues/51
@@ -23,3 +23,4 @@ Issue: #51 — https://github.com/Aafff623/pane/issues/51
 ## Comments
 
 - 2026-10-24：已规格化，尚未实施或验收。执行前领取，不覆盖主对话已有 WIP。
+- 2026-10-25：已实施。不透明 --card 表面、448px/14px、24px 横内边距、16/24/600 标题、20px 裸星光、13/20 正文、中性标签、32px/6px 按钮、页脚连续；ul 特异性已修（ul:not(.wn-items) + ID 级 ul.wn-items 复位）。pnpm build 与 176 项 Node 测试通过。

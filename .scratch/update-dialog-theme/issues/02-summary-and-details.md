@@ -1,7 +1,7 @@
 # 02 — 摘要、版本与真实详情入口
 
 Type: task
-Status: ready-for-agent
+Status: implemented (2026-10-25) - automated green; owner visual acceptance pending
 Blocked by: 01
 Spec: ../spec.md
 Issue: #51 — https://github.com/Aafff623/pane/issues/51
@@ -23,3 +23,4 @@ Issue: #51 — https://github.com/Aafff623/pane/issues/51
 ## Comments
 
 - 2026-10-24：已规格化，尚未实施。若摘要呈现与现有发布结构存在冲突，先报告最小取舍。
+- 2026-10-25：已实施。版本行新增右对齐「详情」入口（whatsNew.details 三语），事件委托打开本地 changelog 浏览形态并定位该版本，onClose 随 carrying 恢复通知队列；多版本范围与展开器保持原契约。

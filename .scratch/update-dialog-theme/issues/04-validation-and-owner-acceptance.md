@@ -1,7 +1,7 @@
 # 04 — 集成验证、截图与用户验收
 
 Type: task
-Status: ready-for-agent
+Status: pending-owner (2026-10-25) - automated checks green; owner acceptance not run
 Blocked by: 01, 02, 03
 Spec: ../spec.md
 Issue: #51 — https://github.com/Aafff623/pane/issues/51
@@ -25,3 +25,4 @@ Issue: #51 — https://github.com/Aafff623/pane/issues/51
 ## Comments
 
 - 2026-10-24：未实施，未运行构建或 UI 验收。用户确认需求不等于验收实现。
+- 2026-10-25：实现完成、pnpm build 与 Node 176/176 通过、站点测试与演示包同步通过。八组合真实截图与 UI 验收未运行，等待 owner；安装版 0.9.1 早于本次改动。

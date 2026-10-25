@@ -7605,10 +7605,18 @@ let dismissWhatsNew: ((userAction?: boolean) => void) | null = null;
 /// releases with a single paragraph, and the font guide) render their raw
 /// markdown instead — and skip the summary line, which the body already
 /// carries.
-function renderChangelogSection(section: ChangelogSection, maxItems = Number.POSITIVE_INFINITY): string {
+function renderChangelogSection(
+  section: ChangelogSection,
+  maxItems = Number.POSITIVE_INFINITY,
+  withDetails = false,
+): string {
   const head = section.version
     ? `<div class="wn-version-head"><h4>v${escapeHtml(section.version)}</h4>${
         section.date ? `<span class="wn-version-date">${escapeHtml(section.date)}</span>` : ""
+      }${
+        withDetails
+          ? `<button class="wn-details" type="button" data-version="${escapeHtml(section.version)}">${escapeHtml(t("whatsNew.details"))}</button>`
+          : ""
       }</div>`
     : "";
   if (!section.items.length) return `${head}${renderChangelogBody(section.body)}`;
@@ -7676,7 +7684,15 @@ function showChangelogDialog(
     const shown = sections.slice(0, visibleVersions);
     const hidden = sections.length - shown.length;
     body.innerHTML =
-      shown.map((section) => `<section>${renderChangelogSection(section, kind === "update" ? 4 : Number.POSITIVE_INFINITY)}</section>`).join("") +
+      shown
+        .map((section) =>
+          `<section>${renderChangelogSection(
+            section,
+            kind === "update" ? 4 : Number.POSITIVE_INFINITY,
+            kind === "update",
+          )}</section>`,
+        )
+        .join("") +
       (hidden > 0
         ? `<button id="whatsnew-earlier" class="wn-earlier" type="button">${uiIcon("caretDown")}<span>${escapeHtml(
             t("whatsNew.showEarlier", { count: String(hidden) }),
@@ -7687,6 +7703,22 @@ function showChangelogDialog(
       renderBody();
     });
   };
+  // Per-version details entry, delegated so re-renders need no re-wiring:
+  // Pane's changelog is local, so it reopens the browse shape scoped to
+  // that version — no external link, and the notice queue resumes
+  // through the carried onClose.
+  body.addEventListener("click", (event) => {
+    const button = (event.target as Element | null)?.closest?.(".wn-details");
+    if (!(button instanceof HTMLElement)) return;
+    const version = button.dataset.version ?? "";
+    const carryOnClose = opts.onClose;
+    close(false);
+    showChangelogDialog(
+      t("dialog.changelog"),
+      sections.filter((section) => section.version === version),
+      { onClose: carryOnClose },
+    );
+  });
   renderBody();
   let closed = false;
   const close = (runOnClose = true) => {
