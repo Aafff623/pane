@@ -3120,6 +3120,7 @@ body.ui-scaled .popover {
 .spend-range-col .col-head-row { gap: 1px; }
 .spend-range-col .col-head { padding-inline: 3px; white-space: nowrap; }
 .legend-detail { display: block; font-size: 9px; color: var(--muted-foreground); }
+.spend-est { color: var(--muted-foreground); cursor: help; border-bottom: 1px dotted color-mix(in oklab, var(--muted-foreground) 55%, transparent); }
 
 .spend-col .col-head {
   font-size: 10.5px;
@@ -5805,6 +5806,14 @@ body.refreshing .overview-refreshing svg {
 .tip-line.detail {
   color: var(--muted-foreground);
   font-size: 10.5px;
+}
+
+.tip-reason {
+  margin-top: 3px;
+  font-size: 10px;
+  color: var(--muted-foreground);
+  max-width: 220px;
+  line-height: 1.35;
 }
 
 .tip-name {

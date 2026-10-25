@@ -109,3 +109,38 @@ test('a saved-key waiter waits for the next attempt and late completions cannot 
   assert.equal(completed, true);
   assert.equal(state.busy, false);
 });
+
+test('card requests are single-flight per card and leave other cards alone', () => {
+  const state = new RefreshState();
+  assert.equal(state.requestCard('claude'), true);
+  assert.equal(state.requestCard('claude'), false);
+  assert.equal(state.cardBusy('claude'), true);
+  assert.equal(state.requestCard('codex'), true);
+  assert.equal(state.cardBusy('codex'), true);
+  assert.equal(state.acceptCardResult('claude', { id: 'claude' }), true);
+  state.finishCard('claude');
+  assert.equal(state.cardBusy('claude'), false);
+  // A result arriving after finish is stale, not an update.
+  assert.equal(state.acceptCardResult('claude', { id: 'claude' }), false);
+  state.finishCard('codex');
+});
+
+test('a global refresh completing first invalidates an in-flight card result', () => {
+  const state = new RefreshState();
+  assert.equal(state.requestCard('claude'), true);
+  const full = state.request(true, false, false);
+  assert.ok(full !== null);
+  assert.equal(state.acceptCardResult('claude', { id: 'claude' }), false);
+  state.finishCard('claude');
+  state.complete(full);
+  assert.equal(state.busy, false);
+});
+
+test('a card result stays valid when no full refresh intervened', () => {
+  const state = new RefreshState();
+  const full = state.request(true, false, false);
+  state.complete(full);
+  assert.equal(state.requestCard('claude'), true);
+  assert.equal(state.acceptCardResult('claude', { id: 'claude', ok: true }), true);
+  state.finishCard('claude');
+});

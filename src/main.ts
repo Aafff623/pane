@@ -100,7 +100,7 @@ interface Metric {
   detail: string | null;
   value: string | null;
   resets_at: number | null;
-  pace?: { state: "ahead" | "close" | "over" | "spent" | "unknown"; projected_used: number | null; run_out_at: number | null; settled: boolean; elapsed_percent: number | null; not_started?: boolean } | null;
+  pace?: { state: "ahead" | "close" | "over" | "spent" | "unknown"; projected_used: number | null; run_out_at: number | null; settled: boolean; elapsed_percent: number | null; tempo?: "slow_down" | "on_track" | "speed_up" | null; not_started?: boolean } | null;
   period_ms: number | null;
   /// Set by the search/MCP families on their per-key rows only (null on
   /// headline/summary rows and for every other provider).
@@ -184,12 +184,14 @@ interface HistorySpend {
   tokens: number;
   active_days: number;
   models: ModelSpend[];
+  estimated_days?: number;
 }
 
 interface DailyModelSpend {
   model: string;
   cost: number;
   tokens: number;
+  estimated?: boolean;
 }
 
 interface DailySpendRow {
@@ -2614,9 +2616,32 @@ function renderMetric(m: Metric, providerId?: string): string {
     const detailHtml = [resetHtml, detailText ? escapeHtml(detailText) : ""].filter(Boolean).join(" · ");
     const footTitle = [resetPlain, detailText].filter(Boolean).join(" · ");
     const metricLabel = displayMetricLabel(m.label);
-    const pace = m.pace && m.pace.settled && m.pace.state !== "unknown"
-      ? `<span class="pace-chip pace-${m.pace.state}" title="${escapeHtml(t("pace.tip", { n: Math.round(m.pace.projected_used ?? used) }))}">${escapeHtml(t(`pace.${m.pace.state}`))}</span>`
-      : "";
+    const pace = (() => {
+      if (!m.pace || !m.pace.settled) return "";
+      const projected = Math.round(m.pace.projected_used ?? used);
+      const elapsed = Math.round(m.pace.elapsed_percent ?? 0);
+      const tipCore = t("pace.evenTip", { elapsed, used: Math.round(used), projected });
+      const tempoText = m.pace.tempo ? t(`pace.tempo.${m.pace.tempo}`) : "";
+      const tip = tempoText
+        ? `${t(`pace.${m.pace.state}`)} · ${tempoText} — ${tipCore}`
+        : `${t(`pace.${m.pace.state}`)} — ${tipCore}`;
+      if (m.pace.state === "over") {
+        const runs = m.pace.run_out_at
+          ? t("pace.runsOut", { time: fmtDuration(Math.max(0, m.pace.run_out_at - Date.now())) })
+          : t("pace.over");
+        return `<span class="pace-chip pace-over" title="${escapeHtml(tip)}">${escapeHtml(runs)}</span>`;
+      }
+      if (m.pace.state === "close") {
+        const leftAtReset = Math.max(0, 100 - projected);
+        return `<span class="pace-chip pace-close" title="${escapeHtml(tip)}">${escapeHtml(t("pace.leftAtReset", { n: leftAtReset }))}</span>`;
+      }
+      if (m.pace.state === "spent") {
+        return `<span class="pace-chip pace-spent" title="${escapeHtml(tip)}">${escapeHtml(t("pace.spent"))}</span>`;
+      }
+      // Ahead stays quiet: the bar and the even-pace mark already say it, and
+      // a badge on every healthy row is noise (QuotaBar's rule).
+      return "";
+    })();
     const paceMark = m.pace && m.pace.settled && m.pace.elapsed_percent !== null
       ? `<span class="pace-mark" style="left:${clampPercent(m.pace.elapsed_percent)}%" title="${escapeHtml(t("pace.evenTip", { elapsed: Math.round(m.pace.elapsed_percent), used: Math.round(used), projected: Math.round(m.pace.projected_used ?? used) }))}"></span>`
       : "";
@@ -2666,10 +2691,12 @@ function renderMetric(m: Metric, providerId?: string): string {
   }
   const textValue = displayMetricDetail(m.value ?? "");
   const metricLabel = displayMetricLabel(m.label);
+  const reasonTitle =
+    m.kind === "progress" && m.used_percent === null ? t("usage.noPercentReason") : textValue;
   return `
     <div class="metric-text">
       <span title="${escapeHtml(metricLabel)}">${escapeHtml(metricLabel)}</span>
-      <span class="detail" title="${escapeHtml(textValue)}">${escapeHtml(textValue)}</span>
+      <span class="detail" title="${escapeHtml(reasonTitle)}">${escapeHtml(textValue)}</span>
     </div>`;
 }
 
@@ -3798,6 +3825,8 @@ type DonutEntry = {
   s: ProviderSpend;
   w: SpendWindow;
   activeDays?: number;
+  /// Days in this slice priced from a backfilled observation (History).
+  estimatedDays?: number;
   /// Tokens in this entry are a credits/context-derived estimate (Qoder CN).
   estimated?: boolean;
   /// How many of `w.tokens` are derived. Kept per-entry because a by-model
@@ -3841,6 +3870,7 @@ function historyEntries(range: Exclude<RangeTab, "d30">): DonutEntry[] {
       } as ProviderSpend,
       w: { cost: row.cost, tokens: row.tokens, models: row.models },
       activeDays: range === "all" ? row.active_days : undefined,
+      estimatedDays: row.estimated_days,
     }));
   const qoder = qoderSpendEntry(range);
   if (qoder) base.push(qoder);
@@ -4142,6 +4172,9 @@ function donutPop(g: { a0: number; a1: number }): { tx: string; ty: string } {
 
 function legendRowHtml(e: DonutEntry, view: ShareRange): string {
   const detail = e.activeDays === undefined ? "" : ` <span class="legend-detail">${escapeHtml(t("spend.activeDays", { n: e.activeDays }))}</span>`;
+  const approx = (e.estimatedDays ?? 0) > 0
+    ? ` <span class="legend-detail spend-est" title="${escapeHtml(t("spend.estimatedTip"))}">≈${e.estimatedDays}d</span>`
+    : "";
   const icon = providerVisual(e.s.id)?.iconSvg;
   const lead = icon
     ? `<span class="legend-ico">${icon}</span>`
@@ -4149,7 +4182,7 @@ function legendRowHtml(e: DonutEntry, view: ShareRange): string {
   return `
         <div class="legend-row" data-pid="${e.s.id}">
           ${lead}
-          <span class="legend-name">${escapeHtml(e.s.name)}${spendBadgesFor(e.s.id, view, e.estimated === true)}${detail}</span>
+          <span class="legend-name">${escapeHtml(e.s.name)}${spendBadgesFor(e.s.id, view, e.estimated === true)}${detail}${approx}</span>
           <span class="legend-val">${fmtSpendVal(e.w)}</span>
         </div>`;
 }
@@ -4568,7 +4601,12 @@ function renderSpendDetailOverlay(): string {
   const qoder = qoderDayHtml(selectedDay);
   const detailRows = rows.length || qoder
     ? `${rows.map((row) => {
-        const models = row.models.map((model) => `<div class="spend-detail-model"><span>${escapeHtml(model.model)}</span><span>${escapeHtml(fmtSpendVal({ cost: model.cost, tokens: model.tokens, models: [] }) + spendCostNote({ cost: model.cost, tokens: model.tokens, models: [] }))}</span></div>`).join("");
+        const models = row.models.map((model) => {
+          const approx = model.estimated
+            ? `<span class="spend-est" title="${escapeHtml(t("spend.estimatedTip"))}">≈ </span>`
+            : "";
+          return `<div class="spend-detail-model"><span>${escapeHtml(model.model)}</span><span>${approx}${escapeHtml(fmtSpendVal({ cost: model.cost, tokens: model.tokens, models: [] }) + spendCostNote({ cost: model.cost, tokens: model.tokens, models: [] }))}</span></div>`;
+        }).join("");
         return `<article class="spend-detail-tool"><div class="spend-detail-tool-head"><strong>${escapeHtml(providerNameForSpend(row.id))}</strong><span>${escapeHtml(fmtSpendVal({ cost: row.cost, tokens: row.tokens, models: [] }) + spendCostNote({ cost: row.cost, tokens: row.tokens, models: [] }))}</span></div>${models || `<div class="spend-detail-model muted">${escapeHtml(t("spendDetail.noModelBreakdown"))}</div>`}</article>`;
       }).join("")}${qoder}`
     : `<div class="spend-detail-empty">${escapeHtml(t("spendDetail.noUsage"))}</div>`;
@@ -12221,20 +12259,30 @@ function showTrendTip(el: HTMLElement): void {
   });
 
   let lines: string;
+  // Missing days say WHY, not just "no data": before the first reading the
+  // window had not started; a gap after readings exist is the vendor not
+  // reporting (or, for the local ledger, no usage that day).
+  const series = spend ? (config.spendMetric === "cost" ? spend.trend_cost : spend.trend) : credits ?? [];
+  const firstReading = series.findIndex((v) => v != null);
+  const reasonForGap = () =>
+    firstReading < 0 || i < firstReading
+      ? t("spend.noDataWindow")
+      : spend
+        ? t("spend.noDataSpend")
+        : t("spend.noDataVendor");
   if (spend) {
     const metricCost = config.spendMetric === "cost";
-    const series = metricCost ? spend.trend_cost : spend.trend;
-    const dayVal = series[i] ?? 0;
+    const dayVal = (metricCost ? spend.trend_cost : spend.trend)[i] ?? 0;
     lines = `
     <div class="tip-line"><span class="tip-name">${escapeHtml(date)}</span><span>${
       dayVal > 0 ? escapeHtml(metricCost ? fmtMoney(dayVal) : t("card.tokens", { n: fmtTokens(dayVal) })) : escapeHtml(t("spend.noUsage"))
-    }</span></div>`;
+    }</span></div>${dayVal > 0 ? "" : `<div class="tip-reason">${escapeHtml(reasonForGap())}</div>`}`;
   } else {
     const dayVal = credits![i];
     lines = `
     <div class="tip-line"><span class="tip-name">${escapeHtml(date)}</span><span>${
       dayVal == null ? escapeHtml(t("spend.noDataDay")) : dayVal > 0 ? escapeHtml(meter ? formatUsageQuantity(dayVal, meter.unit) : t("spend.creditBarTip", { n: fmtCredits(dayVal) })) : escapeHtml(t("spend.noUsage"))
-    }</span></div>`;
+    }</span></div>${dayVal == null || dayVal <= 0 ? `<div class="tip-reason">${escapeHtml(reasonForGap())}</div>` : ""}`;
   }
   tip.innerHTML = lines;
 
@@ -12307,10 +12355,10 @@ const resetRefreshSeen = new Set<string>();
 /// cannot schedule the same window twice, and the call never loops.
 function scheduleResetRefresh(providerId: string): void {
   window.setTimeout(async () => {
-    if (refreshState.busy) return;
+    if (!refreshState.requestCard(providerId)) return;
     try {
       const snap = await invoke<Snapshot>("refresh_provider", { providerId });
-      if (refreshState.busy) return;
+      if (!refreshState.acceptCardResult(providerId, snap)) return;
       const idx = lastSnapshots.findIndex((item) => item.id === providerId);
       if (idx >= 0) lastSnapshots[idx] = snap;
       else lastSnapshots.push(snap);
@@ -12318,6 +12366,8 @@ function scheduleResetRefresh(providerId: string): void {
       requestTraySync();
     } catch {
       // The next scheduled refresh owns recovery; never spin on this timer.
+    } finally {
+      refreshState.finishCard(providerId);
     }
   }, 20_000);
 }
@@ -12444,19 +12494,15 @@ function scheduleBackoffRetries(snapshots: Snapshot[]): void {
     const timer = window.setTimeout(async () => {
       const current = backoffRetries.get(s.id);
       if (current) current.timer = null;
-      // A per-card retry must not race the full refresh, which owns the
-      // authoritative snapshot generation for the dashboard.
-      if (refreshState.busy) {
+      // A per-card retry joins/owns only its own card. A full refresh keeps
+      // running; the card result is dropped if that refresh completed first.
+      if (!refreshState.requestCard(s.id)) {
         scheduleBackoffRetries(lastSnapshots);
         return;
       }
-      const retryGeneration = refreshState.generation;
       try {
         const snap = await invoke<Snapshot>("refresh_provider", { providerId: s.id });
-        // A full refresh may have completed while this request was in flight.
-        // Its result is newer by contract, so discard this retry response and
-        // let the normal scheduler decide whether another retry is needed.
-        if (refreshState.busy || refreshState.generation !== retryGeneration) {
+        if (!refreshState.acceptCardResult(s.id, snap)) {
           scheduleBackoffRetries(lastSnapshots);
           return;
         }
@@ -12473,6 +12519,8 @@ function scheduleBackoffRetries(snapshots: Snapshot[]): void {
       } catch {
         if (current) current.attempts += 1;
         scheduleBackoffRetries(lastSnapshots);
+      } finally {
+        refreshState.finishCard(s.id);
       }
     }, delayMs);
 
@@ -15890,6 +15938,32 @@ async function savePricingOverridesEditor(): Promise<void> {
   }
 }
 
+/// Double-confirmed escape hatch: drop the per-file parse cache and re-price
+/// from the immutable observation timeline. Without a timeline change the
+/// dollars come back identical — this does not "fix" history by itself.
+async function rebuildSpendPricing(): Promise<void> {
+  const msg = document.querySelector<HTMLElement>("#rebuild-spend-msg");
+  const button = document.querySelector<HTMLButtonElement>("#rebuild-spend-pricing");
+  if (!window.confirm(t("settings.rebuildSpendConfirm"))) return;
+  if (button) button.disabled = true;
+  if (msg) {
+    msg.textContent = "";
+    msg.classList.remove("is-error");
+  }
+  try {
+    await invoke("rebuild_spend_pricing");
+    if (msg) msg.textContent = t("settings.rebuildSpendDone");
+    await refresh(true);
+  } catch (error) {
+    if (msg) {
+      msg.textContent = String(error);
+      msg.classList.add("is-error");
+    }
+  } finally {
+    if (button) button.disabled = false;
+  }
+}
+
 type PreviewPaceState = "ahead" | "close" | "over" | "spent" | "unknown";
 
 function previewMetric(
@@ -16050,6 +16124,11 @@ function mountSpendSettingsBlocks(container: HTMLElement | null): void {
         <span id="pricing-overrides-msg" class="settings-note"></span>
         <button type="button" class="mini-btn" id="pricing-overrides-save" data-i18n="settings.pricingOverridesSave">Save</button>
       </div>
+      <p class="settings-note" data-i18n="settings.rebuildSpendHint">A saved price change only applies from now on; already-recorded spend keeps the price it was charged.</p>
+      <div class="settings-row pricing-overrides-actions">
+        <span id="rebuild-spend-msg" class="settings-note"></span>
+        <button type="button" class="mini-btn" id="rebuild-spend-pricing" data-i18n="settings.rebuildSpendButton">Rebuild spend history</button>
+      </div>
     </div>`;
   container.append(block);
   block
@@ -16058,6 +16137,9 @@ function mountSpendSettingsBlocks(container: HTMLElement | null): void {
   block
     .querySelector("#pricing-overrides-save")
     ?.addEventListener("click", () => void savePricingOverridesEditor());
+  block
+    .querySelector("#rebuild-spend-pricing")
+    ?.addEventListener("click", () => void rebuildSpendPricing());
   block
     .querySelector("#state-preview-open")
     ?.addEventListener("click", () => openStatePreview());
@@ -20535,9 +20617,11 @@ document.querySelector("#settings-btn")!.addEventListener("click", () => {
       const id = cardRefresh.dataset.cardRefresh!;
       const btn = cardRefresh;
       if (btn.classList.contains("spinning")) return;
+      if (!refreshState.requestCard(id)) return;
       btn.classList.add("spinning");
       void invoke<Snapshot>("refresh_provider", { providerId: id })
         .then((snap) => {
+          if (!refreshState.acceptCardResult(id, snap)) return;
           const idx = lastSnapshots.findIndex((s) => s.id === id);
           if (idx >= 0) lastSnapshots[idx] = snap;
           else lastSnapshots.push(snap);
@@ -20550,6 +20634,7 @@ document.querySelector("#settings-btn")!.addEventListener("click", () => {
           // showing its last-known values (or stale badge if cached).
         })
         .finally(() => {
+          refreshState.finishCard(id);
           btn.classList.remove("spinning");
         });
       return;
@@ -20985,13 +21070,25 @@ document.querySelector("#settings-btn")!.addEventListener("click", () => {
   let usageEventGeneration = 0;
   void listen<Snapshot[]>("usage-updated", async (e) => {
     const generation = ++usageEventGeneration;
-    if (refreshState.busy || !Array.isArray(e.payload)) return;
+    if (!Array.isArray(e.payload)) return;
     lastFetch = Date.now();
     const incoming = e.payload;
     await Promise.all([...new Set(incoming.map((snapshot) => providerFamily(snapshot.id)))]
       .filter(supportsExtraAccounts).map(refreshSettingsProviderKey));
-    if (refreshState.busy || generation !== usageEventGeneration) return;
-    lastSnapshots = hideFoldedMoonshot(incoming);
+    if (generation !== usageEventGeneration) return;
+    const hidden = hideFoldedMoonshot(incoming);
+    // Merge per card: a card with its own ⟳ in flight keeps the local value
+    // until that request returns; every other card adopts the broadcast.
+    const existing = new Map(lastSnapshots.map((snapshot) => [snapshot.id, snapshot]));
+    const hiddenIds = new Set(hidden.map((snapshot) => snapshot.id));
+    lastSnapshots = [
+      ...hidden.map((snapshot) =>
+        refreshState.cardBusy(snapshot.id) ? (existing.get(snapshot.id) ?? snapshot) : snapshot,
+      ),
+      ...lastSnapshots.filter(
+        (snapshot) => refreshState.cardBusy(snapshot.id) && !hiddenIds.has(snapshot.id),
+      ),
+    ];
     boardLoadPhase = "ready";
     ensureLayout();
     requestRender();
