@@ -764,12 +764,16 @@ row.
     `period: one_time` and `entitlement_id`) and `data.balances[]` mirroring
     each entitlement (`show_name`, `total_units`, `used_units`, `remaining_units`,
     `available_units`, `period_start`, `period_end`, `expires_at`, unix
-    seconds). A bucket is paired to its plan by `plan_id` first — one account
-    can hold several plans at once and they share `user_plan_id`, so matching
-    on the user would fan every bucket out to every plan; the user id is only
-    the fallback when a payload omits plan ids. A plan past `ends_at` is dead
-    even while it still says `active`, and a bucket past its own window stops
-    counting.
+  seconds). A bucket is paired to its plan by `plan_id` first — one account
+  can hold several plans at once and they share `user_plan_id`, so a user-id
+  match may never fan one bucket out to every plan. When one side omits the
+  id, the bucket falls back to the shared `user_plan_id` on exactly one
+  fleet (an id-carrying one), or pairs by the campaign token inside the plan
+  name (`1024` in `ZCode 1024 Dev Day`) — a response can mix ids on the two
+  sides (measured 2026-10-25: the campaign plan omits `plan_id`, its buckets
+  carry one, and the base plan carries a different id). A plan past
+  `ends_at` is dead even while it still says `active`, and a bucket past its
+  own window stops counting.
   - **Rows:** label = the bucket's `show_name` (so `GLM-5.3` and
     `GLM-5.3-Flash` stay distinguishable), bar = used/total, detail is the
     used/total only (the plan title already carries the campaign),

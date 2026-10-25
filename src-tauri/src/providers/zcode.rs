@@ -115,8 +115,9 @@ pub fn snapshot_from_doc(doc: &Value, now_s: i64) -> super::Snapshot {
     };
     let campaign_label = (!campaigns.is_empty()).then(|| campaigns.join(" · "));
     let plan_label = super::plan_with_campaign(START_PLAN_BASE, campaign_label.as_deref());
+    let grouped = state.active_plans.len() > 1;
     let mut rows = if !state.grants.is_empty() || !state.ungranted.is_empty() {
-        render_rows(&state.grants, &state.ungranted)
+        render_rows_with_plan(&state.grants, &state.ungranted, grouped)
     } else if state.has_active {
         vec![super::Metric::text(START_PLAN_BASE, NO_GIFT.into())]
     } else {
@@ -152,6 +153,7 @@ pub struct StartPlanState {
     pub grants: Vec<StartGrant>,
     pub ungranted: Vec<String>,
     pub expired: Vec<ExpiredPlan>,
+    pub active_plans: Vec<String>,
     pub active_campaigns: Vec<String>,
     pub expired_campaigns: Vec<String>,
     pub has_active: bool,
@@ -161,6 +163,14 @@ pub struct StartPlanState {
 /// The card rows: one usage bar per granted bucket, then one claim line per
 /// plan that exists without a granted bucket.
 pub fn render_rows(grants: &[StartGrant], ungranted: &[String]) -> Vec<super::Metric> {
+    render_rows_with_plan(grants, ungranted, false)
+}
+
+fn render_rows_with_plan(
+    grants: &[StartGrant],
+    ungranted: &[String],
+    show_plan: bool,
+) -> Vec<super::Metric> {
     if grants.is_empty() && ungranted.is_empty() {
         return Vec::new();
     }
@@ -178,14 +188,21 @@ pub fn render_rows(grants: &[StartGrant], ungranted: &[String]) -> Vec<super::Me
     let mut rows: Vec<super::Metric> = if grants.len() > bar_cap {
         // One slot names what did not fit, so a hidden grant is never silent.
         let shown = grants.len().min(bar_cap.saturating_sub(1));
-        let mut rows: Vec<super::Metric> = grants.iter().take(shown).map(grant_metric).collect();
+        let mut rows: Vec<super::Metric> = grants
+            .iter()
+            .take(shown)
+            .map(|grant| grant_metric(grant, show_plan))
+            .collect();
         rows.push(super::Metric::text(
             &format!("+{} more grants", grants.len() - shown),
             CLAIM_HINT.into(),
         ));
         rows
     } else {
-        grants.iter().map(grant_metric).collect()
+        grants
+            .iter()
+            .map(|grant| grant_metric(grant, show_plan))
+            .collect()
     };
     for plan in &claims {
         rows.push(super::Metric::text(plan, CLAIM_HINT.into()));
@@ -231,15 +248,20 @@ fn append_expired_rows(rows: &mut Vec<super::Metric>, expired: &[ExpiredPlan]) {
 /// One gift bucket: usage bar + used/total detail + its own window. The label
 /// is the bucket's `show_name` (GLM-5.3, GLM-5.3-Flash …), so a new campaign
 /// needs no code change — names are evidence, never filters.
-fn grant_metric(grant: &StartGrant) -> super::Metric {
+fn grant_metric(grant: &StartGrant, show_plan: bool) -> super::Metric {
     let w = &grant.allowance;
     let percent = if w.total > 0.0 {
         (w.used / w.total * 100.0).clamp(0.0, 100.0)
     } else {
         0.0
     };
+    let label = if show_plan && grant.plan != grant.label {
+        format!("{} · {}", grant.plan, grant.label)
+    } else {
+        grant.label.clone()
+    };
     super::Metric::progress(
-        &grant.label,
+        &label,
         percent,
         Some(format!(
             "{} of {} used",
@@ -270,6 +292,7 @@ pub fn parse_start_plan_state(doc: &Value, fallback_now_s: i64) -> StartPlanStat
     ) else {
         return state;
     };
+    let mut claimed = vec![false; balances.len()];
     for plan in plans {
         if !is_start_plan_plan(plan) {
             continue;
@@ -294,12 +317,22 @@ pub fn parse_start_plan_state(doc: &Value, fallback_now_s: i64) -> StartPlanStat
             continue;
         }
         state.has_active = true;
+        if !state.active_plans.contains(&label) {
+            state.active_plans.push(label.clone());
+        }
         if let Some(campaign) = &campaign {
             if !state.active_campaigns.contains(campaign) {
                 state.active_campaigns.push(campaign.clone());
             }
         }
-        let (rows, saw_bucket) = plan_buckets(plan, balances, now_s, false);
+        let (rows, saw_bucket) = plan_buckets(
+            plan,
+            balances,
+            now_s,
+            false,
+            Some(&mut claimed),
+            allow_user_fallback(plan, plans, now_s),
+        );
         if rows.is_empty() {
             // Only a plan that declares entitlements is a gift ZCode could
             // hand out; a coding-plan entry shares plans[] and must not be
@@ -311,6 +344,46 @@ pub fn parse_start_plan_state(doc: &Value, fallback_now_s: i64) -> StartPlanStat
             state.grants.extend(rows);
         }
     }
+    // A response can mix plan ids on the two sides (the classmate payload
+    // measured 2026-10-25 does): the campaign plan omits `plan_id`, its
+    // buckets carry one, and the base plan carries a different id. Do not
+    // silently drop those unmatched buckets when two Start Plan fleets are
+    // present; attach them to the plan whose campaign token they name.
+    if state.active_plans.len() > 1 {
+        let known_plan_ids: Vec<String> = plans
+            .iter()
+            .map(|plan| text_field(plan, "plan_id"))
+            .filter(|id| !id.is_empty())
+            .collect();
+        for (index, bucket) in balances.iter().enumerate() {
+            if claimed[index] || bucket_expired(bucket, now_s) {
+                continue;
+            }
+            let bucket_id = text_field(bucket, "plan_id");
+            if bucket_id.is_empty() || known_plan_ids.contains(&bucket_id) {
+                continue;
+            }
+            let label = plans
+                .iter()
+                .filter(|plan| {
+                    is_start_plan_plan(plan)
+                        && !plan_expired(plan, now_s)
+                        && plan_token_matches(&text_field(plan, "name"), &bucket_id)
+                })
+                .filter_map(|plan| {
+                    let campaign = campaign_name(&text_field(plan, "name"));
+                    Some(campaign.unwrap_or_else(|| START_PLAN_BASE.to_string()))
+                })
+                .next()
+                .unwrap_or_else(|| START_PLAN_BASE.to_string());
+            if let Some(grant) = bucket_grant(bucket, &label) {
+                state.grants.push(grant);
+            }
+        }
+    }
+    state
+        .ungranted
+        .retain(|label| !state.grants.iter().any(|grant| grant.plan == *label));
     // Soonest deadline first; a grant without a window sorts last.
     state.grants.sort_by(|a, b| {
         let key = |g: &StartGrant| g.allowance.resets_at_ms.unwrap_or(i64::MAX);
@@ -334,7 +407,7 @@ pub fn parse_start_grants(doc: &Value, fallback_now_s: i64) -> (Vec<StartGrant>,
 }
 
 fn plan_usage(plan: &Value, balances: &[Value], now_s: i64) -> (f64, f64) {
-    let (rows, _) = plan_buckets(plan, balances, now_s, true);
+    let (rows, _) = plan_buckets(plan, balances, now_s, true, None, true);
     (
         rows.iter().map(|row| row.allowance.used).sum(),
         rows.iter().map(|row| row.allowance.total).sum(),
@@ -346,6 +419,8 @@ fn plan_buckets(
     balances: &[Value],
     now_s: i64,
     include_expired: bool,
+    mut claimed: Option<&mut [bool]>,
+    allow_user_fallback: bool,
 ) -> (Vec<StartGrant>, bool) {
     let plan_name = text_field(plan, "name");
     let campaign = campaign_name(&plan_name);
@@ -354,18 +429,36 @@ fn plan_buckets(
     let plan_id = text_field(plan, "plan_id");
     let mut plan_rows: Vec<StartGrant> = Vec::new();
     let mut saw_bucket = false;
-    for bucket in balances {
-        if !bucket_matches(
+    for (index, bucket) in balances.iter().enumerate() {
+        if claimed
+            .as_deref()
+            .is_some_and(|flags| flags.get(index).copied().unwrap_or(false))
+        {
+            continue;
+        }
+        if !bucket_matches_for_plan(
             &plan_user,
             &plan_id,
+            &plan_name,
             &text_field(bucket, "user_plan_id"),
             &text_field(bucket, "plan_id"),
+            allow_user_fallback,
         ) {
             continue;
         }
         saw_bucket = true;
         if !include_expired && bucket_expired(bucket, now_s) {
+            if let Some(flags) = claimed.as_deref_mut() {
+                if let Some(slot) = flags.get_mut(index) {
+                    *slot = true;
+                }
+            }
             continue;
+        }
+        if let Some(flags) = claimed.as_deref_mut() {
+            if let Some(slot) = flags.get_mut(index) {
+                *slot = true;
+            }
         }
         let Some(total) = num(bucket.get("total_units")).filter(|t| *t > 0.0) else {
             continue;
@@ -417,6 +510,36 @@ fn plan_buckets(
         });
     }
     (plan_rows, saw_bucket)
+}
+
+/// One balance bucket as a renderable grant. Kept beside `plan_buckets` so
+/// the fallback path below uses exactly the same window and label semantics.
+fn bucket_grant(bucket: &Value, plan_label: &str) -> Option<StartGrant> {
+    let total = num(bucket.get("total_units")).filter(|t| *t > 0.0)?;
+    let used = num(bucket.get("used_units"))
+        .unwrap_or(0.0)
+        .clamp(0.0, total);
+    let shown = text_field(bucket, "show_name");
+    let label = if shown.is_empty() {
+        plan_label.to_string()
+    } else {
+        shown
+    };
+    let end = bucket_deadline(bucket);
+    let start = num(bucket.get("period_start")).filter(|t| *t > 0.0);
+    Some(StartGrant {
+        label,
+        plan: plan_label.to_string(),
+        allowance: WeekendAllowance {
+            used,
+            total,
+            resets_at_ms: end.map(|t| (t * 1000.0) as i64),
+            period_ms: match (start, end) {
+                (Some(s), Some(e)) if e > s => Some(((e - s) * 1000.0) as i64),
+                _ => None,
+            },
+        },
+    })
 }
 
 fn text_field(v: &Value, key: &str) -> String {
@@ -751,6 +874,74 @@ fn bucket_matches(plan_user: &str, plan_id: &str, bucket_user: &str, bucket_id: 
         return !plan_id.is_empty() && plan_id == bucket_id;
     }
     !plan_user.is_empty() && plan_user == bucket_user
+}
+
+/// Plan/bucket pairing used by the Start Plan reader. Exact plan ids win;
+/// when a response omits one side, the caller may fall back to the account's
+/// user-plan id. A missing campaign id is also paired by the campaign token
+/// in its plan name (for example `1024`), which keeps older fleet records
+/// visible without fanning the same bucket into every plan.
+fn bucket_matches_for_plan(
+    plan_user: &str,
+    plan_id: &str,
+    plan_name: &str,
+    bucket_user: &str,
+    bucket_id: &str,
+    allow_user_fallback: bool,
+) -> bool {
+    let user_matches = !plan_user.is_empty() && plan_user == bucket_user;
+    if !plan_id.is_empty() && !bucket_id.is_empty() {
+        return plan_id == bucket_id;
+    }
+    if !plan_id.is_empty() {
+        return allow_user_fallback && user_matches;
+    }
+    if !bucket_id.is_empty() {
+        return (user_matches || plan_user.is_empty())
+            && plan_token_matches(plan_name, bucket_id);
+    }
+    allow_user_fallback && user_matches
+}
+
+fn plan_token_matches(plan_name: &str, bucket_id: &str) -> bool {
+    let bucket = bucket_id.to_ascii_lowercase();
+    plan_name
+        .split(|ch: char| !ch.is_ascii_alphanumeric())
+        .map(str::to_ascii_lowercase)
+        .filter(|token| {
+            token.len() >= 3
+                && !matches!(
+                    token.as_str(),
+                    "zcode" | "start" | "plan" | "dev" | "day" | "build"
+                )
+        })
+        .any(|token| bucket.contains(&token))
+}
+
+/// Multiple Start Plan fleets share one user_plan_id. Only let the user-id
+/// fallback claim an id-less bucket on the plan that carries an explicit id,
+/// unless every fleet on that user lacks an id.
+fn allow_user_fallback(plan: &Value, plans: &[Value], now_s: i64) -> bool {
+    let user = text_field(plan, "user_plan_id");
+    if user.is_empty() {
+        return false;
+    }
+    let candidates: Vec<&Value> = plans
+        .iter()
+        .filter(|candidate| {
+            is_start_plan_plan(candidate)
+                && !plan_expired(candidate, now_s)
+                && text_field(candidate, "user_plan_id") == user
+        })
+        .collect();
+    if candidates.len() <= 1 {
+        return true;
+    }
+    let plan_id = text_field(plan, "plan_id");
+    !plan_id.is_empty()
+        || !candidates
+            .iter()
+            .any(|candidate| !text_field(candidate, "plan_id").is_empty())
 }
 
 /// A bucket's real deadline: the earlier of its window end and its own
@@ -1406,6 +1597,96 @@ mod tests {
     }
 
     #[test]
+    fn two_start_plan_fleets_render_both_names_and_their_own_buckets() {
+        let doc = balance_doc(
+            json!([
+                {"plan_id": "p-1024", "user_plan_id": "up-1", "name": "ZCode 1024 Dev Day",
+                 "status": "active", "ends_at": NOW + 50_000,
+                 "entitlements": [{"show_name": "GLM-5.3"}, {"show_name": "GLM-5.3-Flash"}]},
+                {"plan_id": "p-start", "user_plan_id": "up-1", "name": "ZCode Start Plan",
+                 "status": "active", "ends_at": NOW + 60_000,
+                 "entitlements": [{"show_name": "GLM-5.3"}, {"show_name": "GLM-5.3-Flash"}]}
+            ]),
+            json!([
+                {"plan_id": "p-1024", "user_plan_id": "up-1", "show_name": "GLM-5.3-Flash",
+                 "total_units": 300_000_000, "used_units": 0, "period_end": NOW + 10_000},
+                {"plan_id": "p-1024", "user_plan_id": "up-1", "show_name": "GLM-5.3",
+                 "total_units": 200_000_000, "used_units": 0, "period_end": NOW + 10_000},
+                {"plan_id": "p-start", "user_plan_id": "up-1", "show_name": "GLM-5.3-Flash",
+                 "total_units": 5_000_000, "used_units": 2_269_745, "period_end": NOW + 60_000},
+                {"plan_id": "p-start", "user_plan_id": "up-1", "show_name": "GLM-5.3",
+                 "total_units": 3_000_000, "used_units": 0, "period_end": NOW + 60_000}
+            ]),
+            NOW,
+        );
+        let state = parse_start_plan_state(&doc, NOW);
+        assert_eq!(state.active_plans.len(), 2);
+        assert!(state.ungranted.is_empty());
+        assert_eq!(state.grants.len(), 4);
+        let totals: f64 = state.grants.iter().map(|g| g.allowance.total).sum();
+        assert_eq!(totals, 508_000_000.0);
+        let snap = snapshot_from_doc(&doc, NOW);
+        assert_eq!(snap.status, "ok");
+        assert_eq!(snap.plan.as_deref(), Some("Start Plan (1024 Dev Day)"));
+        assert_eq!(snap.metrics.len(), 4);
+        assert!(snap
+            .metrics
+            .iter()
+            .any(|m| m.label == "1024 Dev Day · GLM-5.3-Flash"));
+        assert!(snap
+            .metrics
+            .iter()
+            .any(|m| m.label == "Start Plan · GLM-5.3-Flash"));
+    }
+
+    #[test]
+    fn mixed_plan_ids_still_render_every_start_plan_fleet() {
+        // Classmate payload shape (2026-10-25): the campaign plan carries no
+        // plan_id while its buckets do, and the base plan carries an id while
+        // its buckets rely on user_plan_id. Matching only one direction hid
+        // the 300M/200M Dev Day buckets and mislabelled the 3M/5M base rows.
+        let doc = balance_doc(
+            json!([
+                {"user_plan_id": "up-1", "name": "ZCode 1024 Dev Day",
+                 "status": "active", "ends_at": NOW + 50_000,
+                 "entitlements": [{"show_name": "GLM-5.3"}, {"show_name": "GLM-5.3-Flash"}]},
+                {"plan_id": "p-start", "user_plan_id": "up-1", "name": "ZCode Start Plan",
+                 "status": "active", "ends_at": NOW + 60_000,
+                 "entitlements": [{"show_name": "GLM-5.3"}, {"show_name": "GLM-5.3-Flash"}]}
+            ]),
+            json!([
+                {"plan_id": "p-1024", "user_plan_id": "up-1", "show_name": "GLM-5.3-Flash",
+                 "total_units": 300_000_000, "used_units": 0, "period_end": NOW + 10_000},
+                {"plan_id": "p-1024", "user_plan_id": "up-1", "show_name": "GLM-5.3",
+                 "total_units": 200_000_000, "used_units": 0, "period_end": NOW + 10_000},
+                {"user_plan_id": "up-1", "show_name": "GLM-5.3-Flash",
+                 "total_units": 5_000_000, "used_units": 2_269_745, "period_end": NOW + 60_000},
+                {"user_plan_id": "up-1", "show_name": "GLM-5.3",
+                 "total_units": 3_000_000, "used_units": 0, "period_end": NOW + 60_000}
+            ]),
+            NOW,
+        );
+        let state = parse_start_plan_state(&doc, NOW);
+        assert_eq!(state.active_plans.len(), 2);
+        assert!(state.ungranted.is_empty(), "both plans have live buckets");
+        assert_eq!(state.grants.len(), 4, "no bucket may be dropped");
+        assert_eq!(
+            state.grants.iter().map(|g| g.allowance.total).sum::<f64>(),
+            508_000_000.0
+        );
+        let snap = snapshot_from_doc(&doc, NOW);
+        assert_eq!(snap.metrics.len(), 4);
+        assert!(snap
+            .metrics
+            .iter()
+            .any(|m| m.label == "1024 Dev Day · GLM-5.3-Flash"));
+        assert!(snap
+            .metrics
+            .iter()
+            .any(|m| m.label == "Start Plan · GLM-5.3-Flash"));
+    }
+
+    #[test]
     fn a_bucket_pairs_on_plan_id_when_only_one_side_carries_user_plan_id() {
         let doc = balance_doc(
             json!([{"plan_id": "p-1024", "name": "ZCode 1024 Dev Day",
@@ -1422,9 +1703,10 @@ mod tests {
     }
 
     #[test]
-    fn a_bucket_without_a_plan_id_is_not_claimed_by_every_plan() {
-        // A top-up bucket that names no plan must not fall back to the shared
-        // user id, or each plan of that account would show it.
+    fn a_bucket_without_a_plan_id_is_claimed_once_not_by_every_plan() {
+        // A top-up bucket that names no plan must not fan out to each plan
+        // of that account: the user-id fallback attaches it to exactly one
+        // fleet (an id-carrying one), and the rest stay held.
         let doc = balance_doc(
             json!([
                 {"plan_id": "p-1024", "user_plan_id": "up-1", "name": "ZCode 1024 Dev Day",
@@ -1437,8 +1719,10 @@ mod tests {
             NOW,
         );
         let (grants, ungranted) = parse_start_grants(&doc, NOW);
-        assert!(grants.is_empty(), "an unowned bucket is not any plan's");
-        assert_eq!(ungranted.len(), 2, "both plans are still held");
+        assert_eq!(grants.len(), 1, "an id-less bucket is claimed exactly once");
+        assert_eq!(grants[0].plan, "1024 Dev Day", "the id-carrying fleet wins it");
+        assert_eq!(ungranted.len(), 1, "the fleet that did not win it stays held");
+        assert_eq!(ungranted[0], "Start Plan (Weekend Build)");
     }
 
     #[test]
