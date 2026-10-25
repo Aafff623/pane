@@ -43,11 +43,11 @@ export const SETTINGS_CONTROLS_HTML = `<div class="acc-group open">
           </div>
           <div class="setting-row">
             <label for="ui-font" data-i18n="settings.font">Font</label>
-            <input id="ui-font" type="text" spellcheck="false" autocomplete="off" placeholder="Type to filter installed fonts" data-i18n-placeholder="settings.fontPh" data-i18n-title="settings.fontTip" title="Applies to the whole interface. Clear to reset." />
+            <input id="ui-font" type="text" spellcheck="false" autocomplete="off" placeholder="Type to filter installed fonts" data-i18n-placeholder="settings.fontPh" />
           </div>
           <div class="setting-row">
             <label for="ui-font-cjk" data-i18n="settings.fontCjk">Chinese font</label>
-            <input id="ui-font-cjk" type="text" list="ui-font-cjk-list" spellcheck="false" autocomplete="off" placeholder="System Chinese font" data-i18n-placeholder="settings.fontCjkPh" data-i18n-title="settings.fontCjkTip" title="Applied after the Latin font, so Chinese text can use its own family. Clear for the system default." />
+            <input id="ui-font-cjk" type="text" list="ui-font-cjk-list" spellcheck="false" autocomplete="off" placeholder="System Chinese font" data-i18n-placeholder="settings.fontCjkPh" />
             <datalist id="ui-font-cjk-list"></datalist>
           </div>
           <div class="font-pack-manager"></div>

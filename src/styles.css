@@ -77,6 +77,9 @@ html.i18n-boot #boot-fallback {
   --glass-border: rgba(255, 255, 255, 0.1);
   --floating-shadow: rgb(0 0 0 / 0.45);
   --destructive: #f14c4c;
+  /* Row separators are one step lighter than card borders (Magpie's
+     --line vs --line-2): a card reads as one card, rows breathe. */
+  --row-line: color-mix(in srgb, var(--border) 55%, var(--card));
   --chart-blue: #3794ff;
   /* Cursor's brand black flips to light grey on the dark theme (like the
      Mac ring and our recolored Cursor mark) — pure black vanishes on a dark
@@ -113,7 +116,20 @@ html.i18n-boot #boot-fallback {
   --glass-border: rgba(0, 0, 0, 0.12);
   --floating-shadow: rgb(0 0 0 / 0.18);
   --spend-cursor: #18181b;
+  --row-line: color-mix(in srgb, var(--border) 60%, var(--card));
   color-scheme: light;
+}
+
+/* Skin-brand DOM stays in the tree on every install (the storage-event skin
+   switch must not re-render), so the app itself hides it. A fresh install
+   with zero skin packs has no pack CSS to do that, which leaked the bare
+   "云端邮局" banner text. Enabled skins override this with their
+   [data-skin] rules. */
+.post-banner,
+.post-icon,
+.skin-period,
+.post-mascot {
+  display: none;
 }
 
 /* Compact density: tighter rows, smaller type, thinner meters. */
@@ -4382,6 +4398,10 @@ body.ui-scaled .popover {
 }
 
 .mini-btn.danger {
+  color: var(--secondary-foreground);
+}
+
+.mini-btn.danger:hover {
   color: #fca5a5;
   background: rgba(239, 68, 68, 0.15);
 }
@@ -7670,11 +7690,13 @@ body.no-glass .cust-dock {
   padding: 6px 14px;
   cursor: pointer;
   background: transparent;
-  border: 1px solid color-mix(in srgb, var(--destructive, #ef4444) 55%, var(--border));
-  color: var(--destructive, #ef4444);
+  border: 1px solid var(--border);
+  color: var(--secondary-foreground);
 }
 
 #reset-all-settings:hover {
+  border-color: color-mix(in srgb, var(--destructive, #ef4444) 55%, var(--border));
+  color: var(--destructive, #ef4444);
   background: color-mix(in srgb, var(--destructive, #ef4444) 12%, transparent);
 }
 
@@ -10257,7 +10279,7 @@ body.reduce-anim .spend-bolt.tier-3 svg {
   gap: 24px;
   min-width: 0;
   padding: 13px 0;
-  border-bottom: 1px solid var(--border);
+  border-bottom: 1px solid var(--row-line);
 }
 .set-row:last-child {
   border-bottom: 0;
@@ -10274,14 +10296,22 @@ body.reduce-anim .spend-bolt.tier-3 svg {
   font-size: 14px;
   font-weight: 600;
   line-height: 1.35;
-  overflow-wrap: anywhere;
+  overflow-wrap: break-word;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
 }
 .set-row__desc {
   color: var(--muted-foreground);
   font-size: 12px;
   font-weight: 400;
   line-height: 1.4;
-  overflow-wrap: anywhere;
+  overflow-wrap: break-word;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
 }
 .set-row__control {
   display: flex;
@@ -10318,7 +10348,7 @@ body.reduce-anim .spend-bolt.tier-3 svg {
 }
 .backup-title {
   padding: 16px 0 4px;
-  border-bottom: 1px solid var(--border);
+  border-bottom: 1px solid var(--row-line);
   color: var(--muted-foreground);
   font-size: 11px;
   font-weight: 600;
@@ -10328,11 +10358,41 @@ body.reduce-anim .spend-bolt.tier-3 svg {
 .backup-title + .set-row {
   border-top: 0;
 }
+
+/* Segment pills (Magpie-style) for static selects. The hidden <select>
+   stays the single source of truth (id and listeners intact); the pill
+   group only sets select.value and fires change. Riding on .tabs/.tab
+   keeps every skin pack styling these without new classes. */
+.set-row__control .tabs {
+  padding: 2px;
+  gap: 2px;
+  border-radius: 7px;
+  margin: 0;
+  flex: none;
+}
+.set-row__control .tab {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 22px;
+  padding: 0 10px;
+  border-radius: 5px;
+  font-size: 12px;
+  white-space: nowrap;
+  flex: 0 0 auto;
+}
+.set-row__control .tab.active {
+  background: var(--card);
+  box-shadow: 0 1px 2px rgb(0 0 0 / 0.12), 0 0 0 0.5px rgb(0 0 0 / 0.06);
+}
+.set-row__control .tab:not(.active):hover {
+  color: var(--foreground);
+}
 /* The moved legacy rows keep their own label/control shape; these rules make
    them read as one skeleton row instead of double-stacking a label. */
 .set-section__card > .setting-row {
   padding: 13px 0;
-  border-bottom: 1px solid var(--border);
+  border-bottom: 1px solid var(--row-line);
   min-height: 0;
 }
 .set-section__card > .setting-row:last-child {
@@ -10397,7 +10457,7 @@ body.reduce-anim .spend-bolt.tier-3 svg {
   gap: 10px;
   padding: 8px 12px;
   border-radius: 6px;
-  transition: background-color 0.15s ease, color 0.15s ease, transform 0.15s ease;
+  transition: background-color 0.15s ease, color 0.15s ease;
 }
 #panel-nav.set-shell__nav .panel-nav-item .ui-icon {
   width: 18px;
@@ -10415,7 +10475,6 @@ body.reduce-anim .spend-bolt.tier-3 svg {
 .set-shell__nav .panel-nav-item:hover {
   background: color-mix(in srgb, var(--accent) 70%, transparent);
   color: var(--foreground);
-  transform: translateX(2px);
 }
 .set-shell__nav .panel-nav-item.active:hover {
   background: var(--primary);
