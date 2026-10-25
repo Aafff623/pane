@@ -233,6 +233,14 @@ Ground rules that apply to every provider:
 - **Reads:** a pasted `sk-` API key from Pane's credential store, or
   `APIGOTO_API_KEY`. The key is used only for the vendor's read-only
   usage endpoint — Pane never sends it to a model.
+- **One account, many keys:** `/v1/usage` reports the ACCOUNT's
+  subscription, not the key's, so every key of one account returns the
+  same payload. A key is a credential, not an identity: same-account
+  cards fold into one (the default account's card), which grows an
+  `API keys: N · one account` row. A key whose request fails keeps its
+  own card — a rejected key needs separate visibility. Two genuinely
+  different accounts fold only if their whole payloads match (same plan
+  bought in the same second with the same balance).
 - **Calls:** `GET https://api.apigoto.com/v1/usage` (Bearer). No
   chat/completions or other model traffic, so the free-tier `40204`
   model gate is never exercised or bypassed.

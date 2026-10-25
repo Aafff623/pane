@@ -3292,6 +3292,9 @@ async fn run_usage_fetch_inner_mode(
         }
     }
     retain_current_key_accounts(&mut all, &expected_key_identities);
+    // Before the history/cache section: keys of one APIGOTO account must
+    // not record credit/daily samples twice, so fold duplicates first.
+    providers::apigoto::fold_same_account_keys(&mut all);
     let current_onenewapi_generations = onenewapi_snapshot_generations(
         all.iter()
             .filter(|snapshot| family_of(&snapshot.id) == "onenewapi")
@@ -3431,6 +3434,10 @@ async fn run_usage_fetch_inner_mode(
     // One Kimi card: Session / Weekly / API. Hide the leftover Moonshot
     // wallet card whenever the plan card is actually showing.
     fold_moonshot_into_kimi(&mut all);
+    // Second APIGOTO fold: the cache section above may restore a transient
+    // error back to its last good snapshot, resurrecting a same-account
+    // duplicate this late pass folds away again.
+    providers::apigoto::fold_same_account_keys(&mut all);
 
     httpapi::publish(&all);
     // Anonymous daily-rollup telemetry (Settings → "Share anonymous usage

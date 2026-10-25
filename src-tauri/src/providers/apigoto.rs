@@ -39,6 +39,84 @@ pub async fn snapshot() -> Snapshot {
     }
 }
 
+/// The label of the fold-count row `fold_same_account_keys` appends.
+const KEYS_ROW: &str = "API keys";
+
+/// Content signature identifying the ACCOUNT a snapshot describes. The
+/// vendor reports the account's subscription, not the key's, so every key
+/// of one account returns the same `/v1/usage` payload and the rendered
+/// rows match exactly (plan + expiry to the second + window + amounts).
+/// `pace` is excluded — it projects from fetch time, not account state.
+/// Cards that are not fresh `ok` readings return None: there is no account
+/// fingerprint in an error, and a rejected key must keep its own card.
+fn account_signature(snap: &Snapshot) -> Option<String> {
+    if snap.status != "ok" {
+        return None;
+    }
+    let mut metrics = snap.metrics.clone();
+    for metric in &mut metrics {
+        metric.pace = None;
+        metric.available = None;
+    }
+    // The fold-count row itself is not account state — a restored
+    // last-good card may carry it while its fresh twin does not.
+    metrics.retain(|metric| metric.label != KEYS_ROW);
+    let metrics = serde_json::to_string(&metrics).ok()?;
+    Some(format!("{}|{metrics}", snap.plan.as_deref().unwrap_or("")))
+}
+
+/// One APIGOTO account may hold many API keys, and each key used to paint
+/// its own card showing the same account numbers — a key is a credential,
+/// not an identity. Snapshots are collected in account order (the default
+/// account publishes under the bare family id), so the FIRST card per
+/// signature wins and later same-account snapshots are dropped; the kept
+/// card gains an "API keys: N · one account" row so the fold is visible.
+/// Two genuinely different accounts collide only when their whole payloads
+/// match — same plan bought in the same second with the same balance.
+pub fn fold_same_account_keys(all: &mut Vec<Snapshot>) {
+    let mut kept: Vec<(String, usize)> = Vec::new();
+    let mut folded: Vec<usize> = vec![0; all.len()];
+    let mut drop_at: Vec<bool> = vec![false; all.len()];
+    for (index, snap) in all.iter().enumerate() {
+        let is_family_card = snap.id == ID || snap.id.starts_with(&format!("{ID}@"));
+        if !is_family_card {
+            continue;
+        }
+        // A restored last-good snapshot may still carry the count row from
+        // an earlier cycle; strip it so re-folding cannot stack rows.
+        let Some(signature) = account_signature(snap) else {
+            continue;
+        };
+        if let Some(&(_, kept_index)) = kept.iter().find(|(seen, _)| *seen == signature) {
+            drop_at[index] = true;
+            folded[kept_index] += 1;
+        } else {
+            kept.push((signature, index));
+        }
+    }
+    for (index, snap) in all.iter_mut().enumerate() {
+        let is_family_card = snap.id == ID || snap.id.starts_with(&format!("{ID}@"));
+        if !is_family_card || account_signature(snap).is_none() {
+            continue;
+        }
+        snap.metrics.retain(|metric| metric.label != KEYS_ROW);
+        if folded[index] > 0 {
+            let keys = folded[index] + 1;
+            snap.metrics
+                .push(Metric::text(KEYS_ROW, format!("{keys} · one account")));
+        }
+    }
+    let mut index = 0;
+    *all = all
+        .drain(..)
+        .filter(|_| {
+            let drop = drop_at[index];
+            index += 1;
+            !drop
+        })
+        .collect();
+}
+
 /// Live test of a pasted key (Customize "Test"); never saved here.
 pub async fn snapshot_with_key(key: &str) -> Snapshot {
     match fetch_with_key(key).await {
@@ -324,12 +402,91 @@ mod tests {
     #[test]
     fn payg_falls_back_to_usd_balance_when_yuan_bucket_is_empty() {
         // The official example ships balance=0 with a non-zero balance_usd.
-        let doc = serde_json::json!({
+        let doc: Value = serde_json::json!({
             "is_active": true, "mode": "payg", "remaining": 0,
             "points": 0, "balance": "0.00000000", "balance_usd": "3.20000000"
         });
         let snap = parse_snapshot(&doc).expect("parse");
         assert!(snap.metrics.iter().any(|m| m.label == "Balance"
             && m.value.as_deref() == Some("$3.20")));
+    }
+
+    /// One account's /v1/usage payload, re-branded as the Nth stored key
+    /// would render it (only id and name differ).
+    fn account_card(id: &str, name: &str, doc: &Value) -> Snapshot {
+        let mut snap = parse_snapshot(doc).expect("parse");
+        snap.id = id.into();
+        snap.name = name.into();
+        snap
+    }
+
+    #[test]
+    fn keys_of_one_account_fold_into_a_single_card() {
+        let doc: Value = serde_json::from_str(REAL_200).unwrap();
+        let mut all = vec![
+            account_card("apigoto", "APIGOTO", &doc),
+            account_card("apigoto@24758b90", "APIGOTO — 2", &doc),
+            account_card("apigoto@d4caeb8d", "APIGOTO — 3", &doc),
+            Snapshot::ok("deepseek", "DeepSeek", None, vec![]),
+        ];
+        fold_same_account_keys(&mut all);
+        let ids: Vec<&str> = all.iter().map(|s| s.id.as_str()).collect();
+        assert_eq!(ids, vec!["apigoto", "deepseek"]);
+        let card = &all[0];
+        let keys_row = card.metrics.iter().find(|m| m.label == "API keys");
+        assert_eq!(
+            keys_row.and_then(|m| m.value.as_deref()),
+            Some("3 · one account"),
+        );
+    }
+
+    #[test]
+    fn distinct_accounts_keep_their_own_cards() {
+        let base: Value = serde_json::from_str(REAL_200).unwrap();
+        let mut other = base.clone();
+        // A different account: its subscription ends at another instant.
+        other["subscription"]["expires_at"] =
+            Value::String("2999-12-25T00:00:00Z".into());
+        let mut all = vec![
+            account_card("apigoto", "APIGOTO", &base),
+            account_card("apigoto@24758b90", "APIGOTO — 2", &other),
+        ];
+        fold_same_account_keys(&mut all);
+        assert_eq!(all.len(), 2);
+        assert!(all.iter().all(|s| !s.metrics.iter().any(|m| m.label == "API keys")));
+    }
+
+    #[test]
+    fn rejected_keys_are_never_folded_away() {
+        let doc: Value = serde_json::from_str(REAL_200).unwrap();
+        let mut all = vec![
+            account_card("apigoto", "APIGOTO", &doc),
+            Snapshot::error("apigoto@0f1d072d", "APIGOTO — 2", "key rejected".into()),
+        ];
+        fold_same_account_keys(&mut all);
+        assert_eq!(all.len(), 2, "a failing key keeps its own visible card");
+        assert!(!all[0].metrics.iter().any(|m| m.label == "API keys"));
+    }
+
+    #[test]
+    fn a_restored_card_with_a_stale_count_row_still_folds() {
+        let doc: Value = serde_json::from_str(REAL_200).unwrap();
+        let mut restored = account_card("apigoto", "APIGOTO", &doc);
+        // Last cycle folded 4 keys onto this card; the cache restored it.
+        restored
+            .metrics
+            .push(Metric::text("API keys", "4 · one account".into()));
+        restored.stale = true;
+        let mut all = vec![
+            restored,
+            account_card("apigoto@24758b90", "APIGOTO — 2", &doc),
+        ];
+        fold_same_account_keys(&mut all);
+        assert_eq!(all.len(), 1);
+        assert_eq!(
+            all[0].metrics.iter().find(|m| m.label == "API keys").unwrap().value.as_deref(),
+            Some("2 · one account"),
+            "the stale count is recomputed, never stacked",
+        );
     }
 }

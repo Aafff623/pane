@@ -167,7 +167,12 @@ Last reconciled: 2026-10-25 (Pane 0.9.1 + account lifecycle, RTK savings, OrcaTe
   card. No window reset instant exists by design (anchor-rolling); the
   surfaced reset is `subscription.expires_at` (the metric's own death).
   Error mapping trusts numeric `code` (documented stability contract),
-  never message text.
+  never message text. `/v1/usage` reports the ACCOUNT, not the key: keys
+  of one account return identical payloads, and `fold_same_account_keys`
+  (run twice per refresh — before the history/cache section and after the
+  stale-restore pass) collapses same-account cards into the default
+  account's card with an `API keys: N · one account` row. Error cards are
+  never folded (a rejected key needs its own visibility).
 - **基元律动 / tokenrhythm** (`tokenrhythm`): a WEB-SESSION provider —
   the `sk_tr_…` key authenticates ONLY the `/v1` model namespace; every
   console endpoint that reports money (`/api/wallet/summary`,
