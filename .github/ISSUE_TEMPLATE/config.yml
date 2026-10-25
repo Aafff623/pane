@@ -1,3 +1,9 @@
-# Discussions is not enabled on this repository, so there is no contact
-# link: the generated link would 404 (see the tta-init template note).
+# Blank issues are off; the guide link points at the contributing doc,
+# which itself links the engineering-facts page (docs/project-facts.md).
+# Discussions is disabled on this repository, so there is no Discussions
+# link (it would 404 — see the tta-init template note).
 blank_issues_enabled: false
+contact_links:
+  - name: 📖 报障与提问前请读
+    url: https://github.com/Aafff623/pane/blob/main/CONTRIBUTING.md
+    about: 贡献与报障指南；已验证的工程事实与硬约束见 docs/project-facts.md。
