@@ -19,6 +19,7 @@ use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, SystemTime};
 
 use crate::pricing;
+use crate::pricing_timeline;
 use crate::provider_catalog;
 use crate::providers;
 
@@ -97,6 +98,9 @@ pub struct ProviderSpend {
     /// Internal daily facts, moved into the rollup response after collection.
     #[serde(skip)]
     days: DayMap,
+    /// (day, model) cells priced from a post-dated observation.
+    #[serde(skip)]
+    estimated_cells: HashSet<(i32, String)>,
     pub id: String,
     pub name: String,
     pub today: Window,
@@ -141,6 +145,9 @@ pub struct ProviderSpend {
     /// measurement; per spend view like `cc_sourced_days`.
     #[serde(default)]
     pub likely_undercount_days: SpendWindowDays,
+    /// Days whose dollars come from an estimated (backfilled) price pin.
+    #[serde(default)]
+    pub estimated_days: SpendWindowDays,
 }
 
 /// Day counts per spend view. The spend panel shows Today / Yesterday /
@@ -187,6 +194,7 @@ pub struct ProviderDays {
     pub id: String,
     pub name: String,
     pub days: DayMap,
+    pub estimated: HashSet<(i32, String)>,
 }
 
 /// Runtime inventory of token-usage sources. This is deliberately separate
@@ -274,6 +282,9 @@ struct FileData {
     unpriced: HashMap<String, u64>,
     /// Per-model dollars carried by the source itself (see `ModelSpend`).
     stored: HashMap<String, f64>,
+    /// (day, model) cells priced from an observation that postdates them —
+    /// first-install backfill. They render with a "≈" and freeze once priced.
+    estimated: HashSet<(i32, String)>,
 }
 
 #[derive(Clone)]
@@ -312,20 +323,27 @@ struct AppendCheckpoint {
 /// Unique pricing questions stored per file. A log that named thousands
 /// of distinct models must not grow the persist file without bound —
 /// overflowing this cap forces a re-parse on the next catalog change.
-const MAX_PROBES_PER_FILE: usize = 64;
+const MAX_PROBES_PER_FILE: usize = 256;
 /// Same bound as catalog canonicals. A log with a huge model string must
 /// not inflate spend_cache.json; overflow forces a re-parse instead.
 const MAX_PROBE_KEY: usize = 128;
 
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 enum PriceProbe {
-    /// `pricing::lookup(key)` returned `price`.
-    Lookup { key: String, price: Option<pricing::Price> },
-    /// `pricing::fast_multiplier(key)` returned `mult`.
-    FastMult { key: String, mult: f64 },
-    /// `pricing::lookup_at(ts_ms, key)` returned `price` — a time-window
-    /// answer must revalidate against the same timestamp, not "now".
-    LookupAt { key: String, ts_ms: i64, price: Option<pricing::Price> },
+    /// A price resolved from the observation timeline at `ts_ms`. The pin is
+    /// the effective rate this file was charged (tier multiplier and
+    /// long-context/cache adjustments already folded in). Replaying at the
+    /// same timestamp under an unchanged timeline reproduces it exactly;
+    /// a later catalog change appends a NEW observation and leaves this one
+    /// untouched, which is what makes price rises and cuts forward-only.
+    Pin {
+        scope: String,
+        key: String,
+        #[serde(default)]
+        tier: String,
+        ts_ms: i64,
+        pin: Option<pricing::Price>,
+    },
     /// The file asked more unique questions than `MAX_PROBES_PER_FILE`,
     /// or a model string longer than `MAX_PROBE_KEY`. A truncated list
     /// cannot vouch for prices we didn't record.
@@ -334,11 +352,24 @@ enum PriceProbe {
 
 impl PriceProbe {
     fn still_valid(&self) -> bool {
+        // A timeline corrupted outside Pane must not silently reprice
+        // history: keep the cached dollars until the owner runs the
+        // explicit rebuild (which acknowledges the quarantine).
+        if pricing_timeline::tampered() {
+            return !matches!(self, PriceProbe::Overflow);
+        }
         match self {
-            PriceProbe::Lookup { key, price } => pricing::lookup(key) == *price,
-            PriceProbe::FastMult { key, mult } => pricing::fast_multiplier(key) == *mult,
-            PriceProbe::LookupAt { key, ts_ms, price } => {
-                pricing::lookup_at(*ts_ms, key) == *price
+            PriceProbe::Pin { scope, key, tier, ts_ms, pin: Some(pin) } => {
+                pricing_timeline::resolve(scope, key, tier, *ts_ms)
+                    .map(|r| r.pin)
+                    .flatten()
+                    == Some(*pin)
+            }
+            // Unpriced when parsed: valid only while the model is still
+            // unpriced. The moment a catalog learns it, this probe fails and
+            // the file re-parses exactly once to fill the gap (spec #56 ②.5).
+            PriceProbe::Pin { scope, key, tier, pin: None, .. } => {
+                effective_price(scope, key, tier).is_none()
             }
             PriceProbe::Overflow => false,
         }
@@ -380,34 +411,135 @@ fn record_probe(probe: PriceProbe) {
     });
 }
 
-/// `pricing::lookup` with the question/answer recorded for cache
-/// revalidation. Every parser that runs under `file_days` must use this
-/// (and `probe_fast_multiplier`) instead of calling pricing directly —
-/// an unrecorded call would make the cached entry look valid after that
-/// price changed.
-fn probe_lookup(model: &str) -> Option<pricing::Price> {
-    let price = pricing::lookup(model);
-    record_model_probe(model, |key| PriceProbe::Lookup { key, price });
-    price
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct Priced {
+    pub price: Option<pricing::Price>,
+    /// The event predates the first observation of this pin — the classic
+    /// first-install backfill. Rendered as "≈" and frozen once priced.
+    pub estimated: bool,
 }
 
-/// Time-aware `pricing::lookup_at`, recorded with the timestamp so a cached
-/// file is never revalidated against a different price window.
-fn probe_lookup_at(ts_ms: i64, model: &str) -> Option<pricing::Price> {
-    let price = pricing::lookup_at(ts_ms, model);
+/// Effective rate for a (scope, model, tier) right now: the live catalog
+/// chain plus every code-level adjustment the parsers used to apply after
+/// lookup. Storing the adjusted card in the timeline is what lets a probe
+/// replay byte-for-byte without re-running parser code.
+fn effective_price(scope: &str, model: &str, tier: &str) -> Option<pricing::Price> {
+    // Codex peels its `-fast` suffix for catalog lookup but keeps the full
+    // slug as a fallback for third-party fast-only models.
+    let (lookup_key, alias_fast) = if tier.starts_with("codex") {
+        match model.strip_suffix("-fast") {
+            Some(base) if !base.is_empty() => (base, true),
+            _ => (model, false),
+        }
+    } else {
+        (model, false)
+    };
+    let catalog = |key: &str| pricing::lookup(key);
+    let base = match scope {
+        "claude" => catalog(lookup_key)
+            .or_else(|| claude_price(lookup_key).map(|(i, o, cr, cw)| pricing::Price::flat(i, o, cr, cw))),
+        "codex" => {
+            let found = catalog(lookup_key)
+                .or_else(|| if alias_fast { catalog(model) } else { None });
+            found.or_else(|| {
+                let lower = model.to_lowercase();
+                if lower.contains("gpt") || lower.contains("codex") {
+                    let (i, o, cr) = codex_price(lookup_key);
+                    Some(pricing::Price::flat(i, o, cr, i))
+                } else {
+                    None
+                }
+            })
+        }
+        "grok" => catalog(lookup_key).or_else(|| {
+            if model.to_lowercase().contains("grok") {
+                let (i, o) = grok_price(model);
+                Some(pricing::Price::flat(i, o, i, i))
+            } else {
+                None
+            }
+        }),
+        "kimi" => catalog(lookup_key).or_else(|| catalog(&format!("moonshot/{lookup_key}"))),
+        "qwen" => catalog(lookup_key).or_else(|| catalog(&format!("qwen/{lookup_key}"))),
+        "gemini" => catalog(lookup_key).or_else(|| catalog(&format!("google/{lookup_key}"))),
+        _ => catalog(lookup_key),
+    };
+    match tier {
+        "fast" => base.map(|p| pricing::scaled_price(&p, pricing::fast_multiplier(model))),
+        "codex" => base.map(|p| codex_effective_price(p, lookup_key, false, alias_fast)),
+        "codex-fast" => base.map(|p| codex_effective_price(p, lookup_key, true, alias_fast)),
+        _ => base,
+    }
+}
+
+/// Fold Codex's baked long-context tier, cache-discount rule and service-tier
+/// multiplier into a price card. Deterministic for a given model + tier.
+fn codex_effective_price(
+    mut p: pricing::Price,
+    rate_model: &str,
+    fast: bool,
+    alias_fast: bool,
+) -> pricing::Price {
+    let dated = codex_dated_base(&rate_model.to_lowercase());
+    if let Some((i, o, cr)) = codex_long_context(&dated) {
+        p.input_200k = Some(i);
+        p.output_200k = Some(o);
+        p.cache_read_200k = Some(cr);
+    }
+    if codex_no_cache_discount(&dated) {
+        p.cache_read = p.input;
+        p.cache_read_200k = p.input_200k;
+    }
+    // A third-party "-fast" slug whose base is not in the catalog already
+    // carries its scaled rate; the service multiplier applies only when the
+    // base actually resolved (Mac parity with the old post-cost multiply).
+    if fast && (!alias_fast || pricing::lookup(rate_model).is_some()) {
+        let mult = pricing::priority_multiplier_with(&dated, rate_model, || {
+            pricing::fast_multiplier(rate_model)
+        });
+        p = pricing::scaled_price(&p, mult);
+    }
+    p
+}
+
+/// Resolve a price for one event through the observation timeline. First
+/// sighting of a key records an observation at the catalog epoch, so every
+/// event in this refresh shares one price instant.
+pub(crate) fn probe_price(scope: &str, model: &str, tier: &str, ts_ms: i64) -> Priced {
+    let priced = match pricing_timeline::resolve(scope, model, tier, ts_ms) {
+        Some(resolved) => Priced { price: resolved.pin, estimated: resolved.estimated },
+        None => {
+            let live = effective_price(scope, model, tier);
+            let at = pricing::catalog_epoch_ms();
+            // An unpriced first sighting writes nothing: a timeline entry of
+            // `None` would freeze the gap and block the one-time fill when a
+            // catalog later learns the model. Priced sightings are pinned;
+            // a later "lost its price" transition is appended by
+            // `record_observations`, where the key already exists.
+            if live.is_some() {
+                let basis = if pricing::has_override(model) { "override" } else { "catalog" };
+                pricing_timeline::append(scope, model, tier, at, live, basis);
+            }
+            Priced { price: live, estimated: ts_ms < at }
+        }
+    };
     if model.len() > MAX_PROBE_KEY {
         record_probe(PriceProbe::Overflow);
     } else {
-        record_probe(PriceProbe::LookupAt { key: model.to_string(), ts_ms, price });
+        record_probe(PriceProbe::Pin {
+            scope: scope.to_string(),
+            key: model.to_string(),
+            tier: tier.to_string(),
+            ts_ms,
+            pin: priced.price,
+        });
     }
-    price
+    priced
 }
 
-/// `pricing::fast_multiplier`, recorded — see `probe_lookup`.
-fn probe_fast_multiplier(model: &str) -> f64 {
-    let mult = pricing::fast_multiplier(model);
-    record_model_probe(model, |key| PriceProbe::FastMult { key, mult });
-    mult
+/// Request-level convenience: one event at `ts`.
+fn probe_lookup(scope: &str, model: &str, ts_ms: i64) -> Priced {
+    probe_price(scope, model, "std", ts_ms)
 }
 
 fn record_model_probe(model: &str, make: impl FnOnce(String) -> PriceProbe) {
@@ -416,6 +548,34 @@ fn record_model_probe(model: &str, make: impl FnOnce(String) -> PriceProbe) {
     } else {
         record_probe(make(model.to_string()));
     }
+}
+
+/// Re-observe every key in the timeline from the live catalog. Appends only
+/// what changed; identical pins are no-ops, so a 304 refresh or a failing
+/// fetch adds nothing. Called after an ingest, an override save, and a
+/// corrections-revision bump — all forward-only.
+pub fn record_observations(basis: &str) {
+    let at = chrono::Utc::now().timestamp_millis();
+    for (scope, model, tier) in pricing_timeline::keys() {
+        let pin = effective_price(&scope, &model, &tier);
+        pricing_timeline::append(&scope, &model, &tier, at, pin, basis);
+    }
+}
+
+/// Drop the persisted per-file cache and every in-memory summary. The
+/// observation timeline is intentionally untouched: a rebuild re-prices the
+/// same events from the same immutable pins, so unchanged days come back
+/// byte-identical and only a deliberate timeline change moves dollars.
+pub fn reset_spend_cache() {
+    pricing_timeline::acknowledge_rebuild();
+    let _ = fs::remove_file(persist_path());
+    if let Ok(mut map) = cache().lock() {
+        map.clear();
+    }
+    if let Ok(mut t) = touched().lock() {
+        t.clear();
+    }
+    CACHE_DIRTY.store(false, std::sync::atomic::Ordering::Relaxed);
 }
 
 fn cache() -> &'static Mutex<HashMap<PathBuf, FileEntry>> {
@@ -442,9 +602,17 @@ fn cache() -> &'static Mutex<HashMap<PathBuf, FileEntry>> {
 // "Scanning session logs…" every day.
 // ---------------------------------------------------------------------------
 
-const PERSIST_VERSION: u32 = 5; // bump on cache format *or* parser-logic changes
+const PERSIST_VERSION: u32 = 6; // bump on cache format *or* parser-logic changes
 // v3→v4: zcode stopped double-counting cache buckets (input already
 // contains them, AI SDK v6), so cached v3 day-totals are ~1.96x inflated.
+// v5→v6 (#56): probes are timestamp-pinned observation lookups; the old
+// lookup-now probes cannot vouch for historical dollars. One full reparse
+// prices history from the earliest observation and marks it estimated.
+
+/// A corrections-revision bump no longer discards the cache (that would
+/// reprice history). It queues one forward-only observation pass instead.
+static CORRECTIONS_PENDING: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
 
 /// Set when any file was (re)parsed this run — nothing changed, nothing saved.
 static CACHE_DIRTY: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
@@ -470,6 +638,9 @@ struct PersistEntry {
     /// Per-model source-recorded dollars (v5). Older caches default empty.
     #[serde(default)]
     stored: Vec<(String, f64)>,
+    /// (day, model) priced from an observation that postdates the event.
+    #[serde(default)]
+    estimated: Vec<(i32, String)>,
     /// Pricing questions this file's parse asked (see `PriceProbe`).
     /// Older caches without the field deserialize as empty — safe, because
     /// they can only load through the exact-stamp fast path.
@@ -506,8 +677,11 @@ fn load_persisted_cache() {
     ONCE.get_or_init(|| {
         let Ok(raw) = fs::read_to_string(persist_path()) else { return };
         let Ok(doc) = serde_json::from_str::<PersistFile>(&raw) else { return };
-        if doc.version != PERSIST_VERSION || doc.corrections != pricing::corrections_rev() {
+        if doc.version != PERSIST_VERSION {
             return;
+        }
+        if doc.corrections != pricing::corrections_rev() {
+            CORRECTIONS_PENDING.store(true, std::sync::atomic::Ordering::Relaxed);
         }
         let stamp_matches = doc.pricing_stamp == pricing::catalog_stamp();
         if !stamp_matches {
@@ -524,6 +698,7 @@ fn load_persisted_cache() {
             }
             data.unpriced = e.unpriced.into_iter().collect();
             data.stored = e.stored.into_iter().collect();
+            data.estimated = e.estimated.into_iter().collect();
             if !stamp_matches && !probes_still_vouch(&e.probes, &data) {
                 continue; // a price this file used changed — re-parse it
             }
@@ -567,6 +742,11 @@ fn save_persisted_cache() {
                     .collect(),
                 unpriced: e.data.unpriced.iter().map(|(m, c)| (m.clone(), *c)).collect(),
                 stored: e.data.stored.iter().map(|(m, c)| (m.clone(), *c)).collect(),
+                estimated: {
+                    let mut estimated: Vec<(i32, String)> = e.data.estimated.iter().cloned().collect();
+                    estimated.sort();
+                    estimated
+                },
                 probes: e.probes.clone(),
                 checkpoint: e.checkpoint.clone(),
             }
@@ -598,6 +778,33 @@ fn add_event(data: &mut FileData, ts: DateTime<Utc>, model: &str, cost: f64, tok
     entry.1 += tokens;
 }
 
+/// add_event plus the "this price was observed after the fact" marker.
+pub(crate) fn add_event_est(
+    data: &mut FileData,
+    ts: DateTime<Utc>,
+    model: &str,
+    cost: f64,
+    tokens: f64,
+    estimated: bool,
+) {    add_event(data, ts, model, cost, tokens);
+    if estimated {
+        data.estimated.insert((day_of_utc(ts), model.to_string()));
+    }
+}
+
+/// Local end of a calendar day (23:59:59.999) as epoch ms — the moment a
+/// day-granular source is considered to have observed its whole day.
+fn day_end_ms(day: i32) -> i64 {
+    let Some(date) = chrono::NaiveDate::from_num_days_from_ce_opt(day) else { return 0 };
+    let next = date + chrono::Duration::days(1);
+    let local = next
+        .and_hms_opt(0, 0, 0)
+        .and_then(|dt| dt.and_local_timezone(Local).single())
+        .map(|dt| dt.timestamp_millis())
+        .unwrap_or(0);
+    local - 1
+}
+
 /// `add_event` for dollars the log/gateway recorded itself. The distinction
 /// survives into `ModelSpend.stored_cost` so the UI can say "vendor cost"
 /// instead of implying Pane's catalog computed it.
@@ -625,6 +832,20 @@ fn add_day_event(data: &mut FileData, day: i32, model: &str, cost: f64, tokens: 
         .or_insert((0.0, 0.0));
     entry.0 += cost;
     entry.1 += tokens;
+}
+
+fn add_day_event_est(
+    data: &mut FileData,
+    day: i32,
+    model: &str,
+    cost: f64,
+    tokens: f64,
+    estimated: bool,
+) {
+    add_day_event(data, day, model, cost, tokens);
+    if estimated {
+        data.estimated.insert((day, model.to_string()));
+    }
 }
 
 /// note_unpriced with the local day already resolved — see `add_day_event`.
@@ -680,6 +901,11 @@ fn merge_missing_days(target: &mut FileData, source: FileData) {
             *target.stored.entry(model).or_insert(0.0) += cost;
         }
     }
+    for (day, model) in source.estimated {
+        if !have.contains(&day) {
+            target.estimated.insert((day, model));
+        }
+    }
 }
 
 fn merge_data(target: &mut FileData, source: FileData) {
@@ -694,6 +920,7 @@ fn merge_data(target: &mut FileData, source: FileData) {
     for (model, cost) in source.stored {
         *target.stored.entry(model).or_insert(0.0) += cost;
     }
+    target.estimated.extend(source.estimated);
 }
 
 /// A ledger pi day owns both destinations; its aggregate belongs to Claude.
@@ -763,7 +990,8 @@ fn build_spend(id: impl Into<String>, name: impl Into<String>, data: FileData) -
     let id = id.into();
     let name = name.into();
     let today = Local::now().date_naive().num_days_from_ce();
-    let FileData { days, unpriced, stored } = data;
+    let FileData { days, unpriced, stored, estimated } = data;
+    let estimated_day_set: HashSet<i32> = estimated.iter().map(|(day, _)| *day).collect();
     let mut unpriced_models: Vec<String> = unpriced.keys().cloned().collect();
     unpriced_models.sort();
     unpriced_models.truncate(5);
@@ -771,6 +999,7 @@ fn build_spend(id: impl Into<String>, name: impl Into<String>, data: FileData) -
     let pricing_mode = pricing_mode_for(&id, false, unpriced.values().sum());
     let mut sp = ProviderSpend {
         days: days.clone(),
+        estimated_cells: estimated,
         id,
         name,
         today: Window::default(),
@@ -785,6 +1014,7 @@ fn build_spend(id: impl Into<String>, name: impl Into<String>, data: FileData) -
         pricing_mode,
         cc_sourced_days: SpendWindowDays::default(),
         likely_undercount_days: SpendWindowDays::default(),
+        estimated_days: SpendWindowDays::of(&estimated_day_set),
     };
     let mut models: [HashMap<String, (f64, f64)>; 3] =
         [HashMap::new(), HashMap::new(), HashMap::new()];
@@ -1364,13 +1594,13 @@ fn claude_tokens(u: &Value) -> Option<ClaudeTokens> {
     })
 }
 
-/// Price one Claude entry: live catalog → static family fallback → None
-/// (excluded, never a guessed $0). Fast-flagged requests scale by the
-/// supplement's multiplier.
-fn claude_cost(model: &str, t: &ClaudeTokens) -> Option<f64> {
-    let price = probe_lookup(model).or_else(|| {
-        claude_price(model).map(|(i, o, cr, cw)| pricing::Price::flat(i, o, cr, cw))
-    })?;
+/// Price one Claude entry at its event time: observation pin (live catalog
+/// fallback) → None (excluded, never a guessed $0). Fast-flagged requests
+/// resolve on their own "fast" tier, whose multiplier is frozen in the pin.
+fn claude_cost(model: &str, t: &ClaudeTokens, ts_ms: i64) -> Option<(f64, bool)> {
+    let tier = if t.fast { "fast" } else { "std" };
+    let priced = probe_price("claude", model, tier, ts_ms);
+    let price = priced.price?;
     let u = pricing::Usage {
         input: t.input,
         output: t.output,
@@ -1378,8 +1608,7 @@ fn claude_cost(model: &str, t: &ClaudeTokens) -> Option<f64> {
         cache_write_5m: t.w5m,
         cache_write_1h: t.w1h,
     };
-    let mult = if t.fast { probe_fast_multiplier(model) } else { 1.0 };
-    Some(pricing::request_cost(&price, &u, true) * mult)
+    Some((pricing::request_cost(&price, &u, true), priced.estimated))
 }
 
 /// Per-file dedup state for the Claude scanner.
@@ -1446,10 +1675,10 @@ fn claude_line(st: &mut ClaudeFileState, line: &str, data: &mut FileData) {
             }
         }
         None if synthetic => {}
-        None => match claude_cost(&model, &t) {
-            Some(c) => {
+        None => match claude_cost(&model, &t, ts.timestamp_millis()) {
+            Some((c, estimated)) => {
                 if t.total() > 0.0 || c > 0.0 {
-                    add_event(data, ts, &model, c, t.total());
+                    add_event_est(data, ts, &model, c, t.total(), estimated);
                 }
             }
             None => {
@@ -1480,8 +1709,8 @@ fn claude_line(st: &mut ClaudeFileState, line: &str, data: &mut FileData) {
         if at.total() <= 0.0 {
             continue;
         }
-        match claude_cost(advisor, &at) {
-            Some(c) => add_event(data, ts, advisor, c, at.total()),
+        match claude_cost(advisor, &at, ts.timestamp_millis()) {
+            Some((c, estimated)) => add_event_est(data, ts, advisor, c, at.total(), estimated),
             None => note_unpriced(data, ts, advisor, at.total()),
         }
     }
@@ -1517,6 +1746,12 @@ fn split_models(data: &mut FileData, prefix: &str) -> FileData {
         if let Some(c) = data.stored.remove(&m) {
             out.stored.insert(m, c);
         }
+    }
+    let moved: Vec<(i32, String)> =
+        data.estimated.iter().filter(|(_, m)| matches(m)).cloned().collect();
+    for cell in moved {
+        data.estimated.remove(&cell);
+        out.estimated.insert(cell);
     }
     out
 }
@@ -1735,7 +1970,8 @@ fn merge_agent_events(data: &mut FileData, events: Vec<providers::minimax::Usage
             add_stored_event(data, ts, &model, ev.cost_usd, tokens);
             continue;
         }
-        match pricing::lookup(&model) {
+        let priced = probe_lookup("minimax", &model, ts.timestamp_millis());
+        match priced.price {
             Some(p) => {
                 let u = pricing::Usage {
                     input: ev.input,
@@ -1744,7 +1980,14 @@ fn merge_agent_events(data: &mut FileData, events: Vec<providers::minimax::Usage
                     cache_write_5m: ev.cache_write,
                     cache_write_1h: 0.0,
                 };
-                add_event(data, ts, &model, pricing::request_cost(&p, &u, true), tokens);
+                add_event_est(
+                    data,
+                    ts,
+                    &model,
+                    pricing::request_cost(&p, &u, true),
+                    tokens,
+                    priced.estimated,
+                );
             }
             None => note_unpriced(data, ts, &model, tokens),
         }
@@ -1853,7 +2096,8 @@ fn dsh_files_data(files: &[std::path::PathBuf]) -> FileData {
                 .and_then(|m| m.as_str())
                 .unwrap_or_default();
             let model = if own.is_empty() { model_hint.as_str() } else { own };
-            match pricing::lookup(model) {
+            let priced = probe_lookup("dsh", model, ts.timestamp_millis());
+            match priced.price {
                 Some(p) if !model.is_empty() => {
                     let u = pricing::Usage {
                         input,
@@ -1862,7 +2106,14 @@ fn dsh_files_data(files: &[std::path::PathBuf]) -> FileData {
                         cache_write_5m: 0.0,
                         cache_write_1h: 0.0,
                     };
-                    add_event(&mut data, ts, model, pricing::request_cost(&p, &u, true), tokens);
+                    add_event_est(
+                        &mut data,
+                        ts,
+                        model,
+                        pricing::request_cost(&p, &u, true),
+                        tokens,
+                        priced.estimated,
+                    );
                 }
                 _ => note_unpriced(&mut data, ts, if model.is_empty() { "dsh" } else { model }, tokens),
             }
@@ -1903,11 +2154,13 @@ fn hermes() -> Vec<(&'static str, &'static str, FileData)> {
             add_stored_event(data, ts, &ev.model, ev.cost_usd, tokens);
             continue;
         }
-        match pricing::lookup(&providers::hermes::price_lookup_slug(
+        let slug = providers::hermes::price_lookup_slug(
             &ev.model,
             &ev.billing_provider,
             &ev.billing_base_url,
-        )) {
+        );
+        let priced = probe_lookup("hermes", &slug, ts.timestamp_millis());
+        match priced.price {
             Some(p) => {
                 let u = pricing::Usage {
                     input: ev.input,
@@ -2244,42 +2497,17 @@ fn codex_emit(st: &CodexFileState, ts: DateTime<Utc>, usage: &CodexRaw, data: &m
         Some(base) if !base.is_empty() => (base.to_string(), true),
         _ => (rate_source.clone(), false),
     };
-    let lower = rate_source.to_lowercase();
     let ts_ms = ts.timestamp_millis();
-    let base_price = probe_lookup_at(ts_ms, &rate_model);
-    let price = base_price
-        .or_else(|| if alias_fast { probe_lookup_at(ts_ms, &rate_source) } else { None })
-        .or_else(|| {
-            // The static gpt-5 table only for recognizably Codex-family
-            // models; anything else is excluded.
-            if lower.contains("gpt") || lower.contains("codex") {
-                let (i, o, cr) = codex_price(&rate_model);
-                Some(pricing::Price::flat(i, o, cr, i))
-            } else {
-                None
-            }
-        });
-    let Some(mut p) = price else {
+    let tier = if alias_fast || st.fast_tier { "codex-fast" } else { "codex" };
+    let priced = probe_price("codex", &rate_source, tier, ts_ms);
+    let Some(p) = priced.price else {
         note_unpriced(data, ts, &model, tokens);
         return;
     };
-
+    // `dated` still decides the long-context threshold at request time; the
+    // tier rates and multiplier are already folded into the pin.
     let dated = codex_dated_base(&rate_model.to_lowercase());
-    let mut threshold = 200_000.0;
-    if let Some((i, o, cr)) = codex_long_context(&dated) {
-        p.input_200k = Some(i);
-        p.output_200k = Some(o);
-        p.cache_read_200k = Some(cr);
-        threshold = 272_000.0;
-    }
-    if codex_no_cache_discount(&dated) {
-        p.cache_read = p.input;
-        p.cache_read_200k = p.input_200k;
-    }
-    let is_fast = if alias_fast { base_price.is_some() } else { st.fast_tier };
-    let mult = if is_fast {
-        pricing::priority_multiplier_with(&dated, &rate_model, || probe_fast_multiplier(&rate_model))
-    } else { 1.0 };
+    let threshold = if codex_long_context(&dated).is_some() { 272_000.0 } else { 200_000.0 };
 
     // `input_tokens` is the whole prompt; cache buckets are a subset.
     let cached = usage.cached.min(usage.input);
@@ -2291,7 +2519,14 @@ fn codex_emit(st: &CodexFileState, ts: DateTime<Utc>, usage: &CodexRaw, data: &m
         cache_write_5m: cache_write,
         cache_write_1h: 0.0,
     };
-    add_event(data, ts, &model, pricing::request_cost_at(&p, &u, threshold) * mult, tokens);
+    add_event_est(
+        data,
+        ts,
+        &model,
+        pricing::request_cost_at(&p, &u, threshold),
+        tokens,
+        priced.estimated,
+    );
 }
 
 /// `codex-auto-review` release timeline (newest first), from ccusage's
@@ -2507,6 +2742,7 @@ fn zcode_place_row(
     ts: DateTime<Utc>,
     model: &str,
     cost: Option<f64>,
+    estimated: bool,
     tokens: f64,
 ) {
     let (target, label) = match router.family(provider_id) {
@@ -2517,7 +2753,7 @@ fn zcode_place_row(
         None => (residual, router.label(provider_id, model)),
     };
     match cost {
-        Some(cost) => add_event(target, ts, &label, cost, tokens),
+        Some(cost) => add_event_est(target, ts, &label, cost, tokens, estimated),
         None => note_unpriced(target, ts, &label, tokens),
     }
 }
@@ -2666,7 +2902,8 @@ fn zcode_db_data() -> (FileData, HashMap<String, FileData>, Option<i32>) {
             if tokens <= 0.0 {
                 continue;
             }
-            let cost = probe_lookup(&model).map(|p| {
+            let priced = probe_lookup("zcode", &model, ts.timestamp_millis());
+            let cost = priced.price.map(|p| {
                 let u = pricing::Usage {
                     input: plain_input,
                     output,
@@ -2676,7 +2913,17 @@ fn zcode_db_data() -> (FileData, HashMap<String, FileData>, Option<i32>) {
                 };
                 pricing::request_cost(&p, &u, true)
             });
-            zcode_place_row(&mut data, &mut routed, &router, &provider, ts, &model, cost, tokens);
+            zcode_place_row(
+                &mut data,
+                &mut routed,
+                &router,
+                &provider,
+                ts,
+                &model,
+                cost,
+                priced.estimated,
+                tokens,
+            );
         }
         Some(ZcodeDbScan { data, routed, min_day })
     })() else {
@@ -2750,7 +2997,8 @@ fn zcode_line(line: &str, data: &mut FileData) {
     if total <= 0.0 {
         return;
     }
-    let cost = probe_lookup(model).map(|price| {
+    let priced = probe_lookup("zcode", model, ts.timestamp_millis());
+    let cost = priced.price.map(|price| {
         pricing::request_cost(
             &price,
             &pricing::Usage {
@@ -2764,7 +3012,7 @@ fn zcode_line(line: &str, data: &mut FileData) {
         )
     });
     match cost {
-        Some(c) => add_event(data, ts, model, c, total),
+        Some(c) => add_event_est(data, ts, model, c, total, priced.estimated),
         None => note_unpriced(data, ts, model, total),
     }
 }
@@ -2868,7 +3116,8 @@ fn ccswitch_add(
     if tokens <= 0.0 {
         return;
     }
-    match probe_lookup(model) {
+    let priced = probe_price(app, model, "day", day_end_ms(day));
+    match priced.price {
         Some(p) => {
             let u = pricing::Usage {
                 input: fresh,
@@ -2877,7 +3126,14 @@ fn ccswitch_add(
                 cache_write_5m: cache_creation,
                 cache_write_1h: 0.0,
             };
-            add_day_event(bucket, day, model, pricing::request_cost(&p, &u, per_request), tokens);
+            add_day_event_est(
+                bucket,
+                day,
+                model,
+                pricing::request_cost(&p, &u, per_request),
+                tokens,
+                priced.estimated,
+            );
         }
         None => note_unpriced_day(bucket, day, model, tokens),
     }
@@ -3100,7 +3356,8 @@ fn pi_line(seen: &mut HashSet<String>, line: &str, data: &mut FileData) {
         add_stored_event(data, ts, &tagged, c, tokens);
         return;
     }
-    match probe_lookup(model) {
+    let priced = probe_lookup("pi", model, ts.timestamp_millis());
+    match priced.price {
         Some(p) => {
             let u = pricing::Usage {
                 input,
@@ -3109,7 +3366,14 @@ fn pi_line(seen: &mut HashSet<String>, line: &str, data: &mut FileData) {
                 cache_write_5m: (cache_write - cache_write_1h).max(0.0),
                 cache_write_1h,
             };
-            add_event(data, ts, &tagged, pricing::request_cost(&p, &u, true), tokens);
+            add_event_est(
+                data,
+                ts,
+                &tagged,
+                pricing::request_cost(&p, &u, true),
+                tokens,
+                priced.estimated,
+            );
         }
         None => note_unpriced(data, ts, &tagged, tokens),
     }
@@ -3223,15 +3487,8 @@ fn grok(cc: FileData) -> ProviderSpend {
             // Static backstop only for recognizably Grok-family models
             // (catalog down); it has no cache rate, so cached tokens are
             // conservatively priced as fresh input there.
-            let price = probe_lookup(&model).or_else(|| {
-                if model.to_lowercase().contains("grok") {
-                    let (i, o) = grok_price(&model);
-                    Some(pricing::Price::flat(i, o, i, i))
-                } else {
-                    None
-                }
-            });
-            let Some(p) = price else {
+            let priced = probe_lookup("grok", &model, ts.timestamp_millis());
+            let Some(p) = priced.price else {
                 note_unpriced(data, ts, &model, tokens);
                 return;
             };
@@ -3242,7 +3499,14 @@ fn grok(cc: FileData) -> ProviderSpend {
                 cache_write_5m: 0.0,
                 cache_write_1h: 0.0,
             };
-            add_event(data, ts, &model, pricing::request_cost(&p, &u, true), tokens);
+            add_event_est(
+                data,
+                ts,
+                &model,
+                pricing::request_cost(&p, &u, true),
+                tokens,
+                priced.estimated,
+            );
         });
         merge_data(&mut all, data);
     }
@@ -3287,7 +3551,8 @@ fn devin() -> ProviderSpend {
             continue;
         }
         let model = devin_model(&ev.model);
-        match pricing::lookup(&model) {
+        let priced = probe_lookup("devin", &model, ts.timestamp_millis());
+        match priced.price {
             Some(p) => {
                 let u = pricing::Usage {
                     input: ev.input,
@@ -3296,7 +3561,14 @@ fn devin() -> ProviderSpend {
                     cache_write_5m: ev.cache_write,
                     cache_write_1h: 0.0,
                 };
-                add_event(&mut data, ts, &model, pricing::request_cost(&p, &u, true), tokens);
+                add_event_est(
+                    &mut data,
+                    ts,
+                    &model,
+                    pricing::request_cost(&p, &u, true),
+                    tokens,
+                    priced.estimated,
+                );
             }
             None => note_unpriced(&mut data, ts, &model, tokens),
         }
@@ -3371,8 +3643,8 @@ fn kimi_line(line: &str, data: &mut FileData) {
     }
     // Catalogs key Kimi models as "moonshot/<slug>"; try the bare slug
     // first (alias/fuzzy chain), then the prefixed spelling.
-    let price = probe_lookup(&model).or_else(|| probe_lookup(&format!("moonshot/{model}")));
-    match price {
+    let priced = probe_lookup("kimi", &model, ts.timestamp_millis());
+    match priced.price {
         Some(p) => {
             let usage = pricing::Usage {
                 input,
@@ -3381,7 +3653,14 @@ fn kimi_line(line: &str, data: &mut FileData) {
                 cache_write_5m: cache_write,
                 cache_write_1h: 0.0,
             };
-            add_event(data, ts, &model, pricing::request_cost(&p, &usage, true), tokens);
+            add_event_est(
+                data,
+                ts,
+                &model,
+                pricing::request_cost(&p, &usage, true),
+                tokens,
+                priced.estimated,
+            );
         }
         None => note_unpriced(data, ts, &model, tokens),
     }
@@ -3413,8 +3692,8 @@ fn qwen_line(line: &str, data: &mut FileData) {
         return;
     }
     // Catalogs key these as bare slugs ("qwen3.8-max") or provider-prefixed.
-    let price = probe_lookup(&model).or_else(|| probe_lookup(&format!("qwen/{model}")));
-    match price {
+    let priced = probe_lookup("qwen", &model, ts.timestamp_millis());
+    match priced.price {
         Some(p) => {
             let usage = pricing::Usage {
                 input,
@@ -3423,7 +3702,14 @@ fn qwen_line(line: &str, data: &mut FileData) {
                 cache_write_5m: 0.0,
                 cache_write_1h: 0.0,
             };
-            add_event(data, ts, &model, pricing::request_cost(&p, &usage, true), tokens);
+            add_event_est(
+                data,
+                ts,
+                &model,
+                pricing::request_cost(&p, &usage, true),
+                tokens,
+                priced.estimated,
+            );
         }
         None => note_unpriced(data, ts, &model, tokens),
     }
@@ -3558,9 +3844,8 @@ fn gemini_message(
         .and_then(Value::as_str)
         .unwrap_or("unknown")
         .to_string();
-    let price = probe_lookup_at(ts.timestamp_millis(), &model)
-        .or_else(|| probe_lookup(&format!("google/{model}")));
-    match price {
+    let priced = probe_lookup("gemini", &model, ts.timestamp_millis());
+    match priced.price {
         Some(p) => {
             let usage = pricing::Usage {
                 input,
@@ -3569,7 +3854,14 @@ fn gemini_message(
                 cache_write_5m: 0.0,
                 cache_write_1h: 0.0,
             };
-            add_event(data, ts, &model, pricing::request_cost(&p, &usage, true), tokens);
+            add_event_est(
+                data,
+                ts,
+                &model,
+                pricing::request_cost(&p, &usage, true),
+                tokens,
+                priced.estimated,
+            );
         }
         None => note_unpriced(data, ts, &model, tokens),
     }
@@ -3650,7 +3942,8 @@ fn emit_usage(
     cache_write: f64,
     tokens: f64,
 ) {
-    match probe_lookup(model) {
+    let priced = probe_lookup("workbuddy", model, ts.timestamp_millis());
+    match priced.price {
         Some(price) => {
             let usage = pricing::Usage {
                 input: fresh_input,
@@ -3659,12 +3952,13 @@ fn emit_usage(
                 cache_write_5m: cache_write,
                 cache_write_1h: 0.0,
             };
-            add_event(
+            add_event_est(
                 data,
                 ts,
                 model,
                 pricing::request_cost(&price, &usage, true),
                 tokens,
+                priced.estimated,
             );
         }
         None => note_unpriced(data, ts, model, tokens),
@@ -4090,7 +4384,8 @@ pub fn cursor_from_csv(csv: &str) -> ProviderSpend {
         if explicit_cost > 0.0 {
             add_event(&mut data, ts, &model, explicit_cost, tokens);
         } else if tokens > 0.0 {
-            match pricing::lookup(&model) {
+            let priced = probe_lookup("cursor", &model, ts.timestamp_millis());
+            match priced.price {
                 Some(p) => {
                     let u = pricing::Usage {
                         input: input_wo,
@@ -4101,7 +4396,14 @@ pub fn cursor_from_csv(csv: &str) -> ProviderSpend {
                     };
                     // CSV rows aggregate requests, so no single-request
                     // long-context call can be proven — stay on base rates.
-                    add_event(&mut data, ts, &model, pricing::request_cost(&p, &u, false), tokens);
+                    add_event_est(
+                        &mut data,
+                        ts,
+                        &model,
+                        pricing::request_cost(&p, &u, false),
+                        tokens,
+                        priced.estimated,
+                    );
                 }
                 None => note_unpriced(&mut data, ts, &model, tokens),
             }
@@ -4413,8 +4715,8 @@ mod tests {
             .unwrap()
             .with_timezone(&Utc);
 
-        zcode_place_row(&mut residual, &mut routed, &router, "new-provider", ts, "step-5-preview", Some(1.5), 100.0);
-        zcode_place_row(&mut residual, &mut routed, &router, "new-provider-3", ts, "deepseek-v4.1-flash-1017", Some(0.25), 50.0);
+        zcode_place_row(&mut residual, &mut routed, &router, "new-provider", ts, "step-5-preview", Some(1.5), false, 100.0);
+        zcode_place_row(&mut residual, &mut routed, &router, "new-provider-3", ts, "deepseek-v4.1-flash-1017", Some(0.25), false, 50.0);
 
         let stepfun = &routed["stepfun-plan"];
         assert_eq!(tokens_sum(stepfun), 100.0);
@@ -4535,13 +4837,29 @@ mod tests {
                 days: vec![(739_000, "claude-fable-5".into(), 1.25, 40_000.0)],
                 unpriced: vec![("mystery-model".into(), 3)],
                 stored: vec![],
+                estimated: vec![(739_000, "claude-fable-5".into())],
                 probes: vec![
-                    PriceProbe::Lookup {
+                    PriceProbe::Pin {
+                        scope: "claude".into(),
                         key: "claude-fable-5".into(),
-                        price: Some(pricing::Price::flat(3.0, 15.0, 0.3, 3.75)),
+                        tier: "std".into(),
+                        ts_ms: 1_784_600_000_000,
+                        pin: Some(pricing::Price::flat(3.0, 15.0, 0.3, 3.75)),
                     },
-                    PriceProbe::Lookup { key: "mystery-model".into(), price: None },
-                    PriceProbe::FastMult { key: "claude-fable-5".into(), mult: 2.0 },
+                    PriceProbe::Pin {
+                        scope: "claude".into(),
+                        key: "mystery-model".into(),
+                        tier: "std".into(),
+                        ts_ms: 1_784_600_000_000,
+                        pin: None,
+                    },
+                    PriceProbe::Pin {
+                        scope: "claude".into(),
+                        key: "claude-fable-5".into(),
+                        tier: "fast".into(),
+                        ts_ms: 1_784_600_000_000,
+                        pin: Some(pricing::Price::flat(6.0, 30.0, 0.6, 7.5)),
+                    },
                 ],
                 checkpoint: None,
             }],
@@ -4556,6 +4874,7 @@ mod tests {
         assert_eq!((a.mtime_secs, a.mtime_nanos, a.size), (b.mtime_secs, b.mtime_nanos, b.size));
         assert_eq!(a.days, b.days);
         assert_eq!(a.unpriced, b.unpriced);
+        assert_eq!(a.estimated, b.estimated);
         assert_eq!(a.probes, b.probes);
     }
 
@@ -4575,29 +4894,27 @@ mod tests {
     /// None still answers None (valid); pretending it had a price fails
     /// validation (that file would re-parse).
     #[test]
-    fn price_probes_replay_against_the_catalog() {
-        let absent = PriceProbe::Lookup {
+    fn price_probes_replay_against_the_timeline() {
+        let absent = PriceProbe::Pin {
+            scope: "claude".into(),
             key: "pane-test-model-that-cannot-exist".into(),
-            price: None,
+            tier: "std".into(),
+            ts_ms: 1_784_600_000_000,
+            pin: None,
         };
         assert!(absent.still_valid());
-        let phantom = PriceProbe::Lookup {
+        let phantom = PriceProbe::Pin {
+            scope: "claude".into(),
             key: "pane-test-model-that-cannot-exist".into(),
-            price: Some(pricing::Price::flat(1.0, 2.0, 0.1, 1.0)),
+            tier: "std".into(),
+            ts_ms: 1_784_600_000_000,
+            pin: Some(pricing::Price::flat(1.0, 2.0, 0.1, 1.0)),
         };
+        // No observation exists for that key, so a remembered Some pin
+        // cannot be reproduced — the file must re-parse.
         assert!(!phantom.still_valid());
-        // fast_multiplier returns 1.0 for models the supplement doesn't
-        // publish a multiplier for.
-        let mult = PriceProbe::FastMult {
-            key: "pane-test-model-that-cannot-exist".into(),
-            mult: 1.0,
-        };
-        assert!(mult.still_valid());
-        let wrong_mult = PriceProbe::FastMult {
-            key: "pane-test-model-that-cannot-exist".into(),
-            mult: 3.5,
-        };
-        assert!(!wrong_mult.still_valid());
+        let overflow = PriceProbe::Overflow;
+        assert!(!overflow.still_valid());
     }
 
     /// file_days records the pricing questions a parse asked, so the entry
@@ -4625,8 +4942,8 @@ mod tests {
         assert!(
             probes
                 .iter()
-                .any(|p| matches!(p, PriceProbe::Lookup { key, .. } if key == "k3")),
-            "expected a k3 lookup probe, got {} probes",
+                .any(|p| matches!(p, PriceProbe::Pin { key, .. } if key == "k3")),
+            "expected a k3 pin probe, got {} probes",
             probes.len()
         );
         // Everything just recorded replays valid against the same catalog.
@@ -6195,6 +6512,158 @@ mod tests {
         assert_eq!(codex.days.len(), 1);
         assert_eq!(codex.days[&(101, "gpt".into())], (4.0, 40.0));
     }
+
+    // ---- #56: observation-timeline pinning --------------------------------
+
+    fn pin_price(input: f64) -> pricing::Price {
+        pricing::Price::flat(input, input * 4.0, input * 0.1, input)
+    }
+
+    /// The design invariant: a price observed later never rewrites dollars
+    /// already charged. Covers a rise and a cut (the historically buggy one).
+    #[test]
+    fn later_price_moves_never_rewrite_history() {
+        let model = "pane-test-forward-only";
+        let t1 = 1_800_000_000_000i64;
+        let before = pin_price(1.0);
+        let raised = pin_price(5.0);
+        pricing_timeline::append("claude", model, "std", t1, Some(before), "catalog");
+
+        let event = t1 + 1_000;
+        assert_eq!(probe_price("claude", model, "std", event).price, Some(before));
+
+        pricing_timeline::append("claude", model, "std", t1 + 10_000, Some(raised), "catalog");
+        assert_eq!(
+            probe_price("claude", model, "std", event).price,
+            Some(before),
+            "a rise must not rewrite an earlier event"
+        );
+        assert_eq!(
+            probe_price("claude", model, "std", t1 + 20_000).price,
+            Some(raised)
+        );
+
+        // Mirror: a cut is equally forward-only.
+        let cut = pin_price(0.5);
+        pricing_timeline::append("claude", model, "std", t1 + 30_000, Some(cut), "catalog");
+        assert_eq!(
+            probe_price("claude", model, "std", event).price,
+            Some(before),
+            "a price cut must not rewrite an earlier event"
+        );
+        assert_eq!(probe_price("claude", model, "std", t1 + 40_000).price, Some(cut));
+    }
+
+    /// Intraday change: a 10:00 event bills the morning pin, a 15:00 event
+    /// bills the pin observed at noon. Day totals are the sum of the two.
+    #[test]
+    fn intraday_change_splits_at_the_observation() {
+        let model = "pane-test-intraday";
+        let base = 1_800_000_000_000i64;
+        let morning = pin_price(2.0);
+        let evening = pin_price(3.0);
+        pricing_timeline::append("codex", model, "std", base - 1_000, Some(morning), "catalog");
+        pricing_timeline::append("codex", model, "std", base + 3_600_000, Some(evening), "catalog");
+        let usage = pricing::Usage {
+            input: 1_000_000.0,
+            output: 0.0,
+            cache_read: 0.0,
+            cache_write_5m: 0.0,
+            cache_write_1h: 0.0,
+        };
+        let early = probe_price("codex", model, "std", base).price.unwrap();
+        let late = probe_price("codex", model, "std", base + 5_400_000).price.unwrap();
+        let total =
+            pricing::request_cost(&early, &usage, false) + pricing::request_cost(&late, &usage, false);
+        assert_eq!(pricing::request_cost(&early, &usage, false), 2.0);
+        assert_eq!(pricing::request_cost(&late, &usage, false), 3.0);
+        assert_eq!(total, 5.0);
+    }
+
+    /// Day-granular sources price at local day end, so an observation in the
+    /// middle of the day governs the whole day (documented approximation).
+    #[test]
+    fn day_granular_sources_resolve_at_day_end() {
+        let model = "pane-test-day-granular";
+        let day = 739_000;
+        let end = day_end_ms(day);
+        assert!(end > 0);
+        pricing_timeline::append("claude", model, "day", end - 1, Some(pin_price(4.0)), "catalog");
+        let priced = probe_price("claude", model, "day", end);
+        assert_eq!(priced.price, Some(pin_price(4.0)));
+        assert!(!priced.estimated);
+    }
+
+    /// First-install backfill: an event older than the first observation is
+    /// priced from it but flagged estimated, and the flag lands on the
+    /// (day, model) cell so History can render "≈".
+    #[test]
+    fn events_before_the_first_observation_are_estimated() {
+        let model = "pane-test-estimated";
+        let first = 1_800_000_000_000i64;
+        pricing_timeline::append("claude", model, "std", first, Some(pin_price(2.0)), "catalog");
+        let old = probe_price("claude", model, "std", first - 86_400_000);
+        assert!(old.estimated);
+        let mut data = FileData::default();
+        let ts = DateTime::from_timestamp_millis(first - 86_400_000).unwrap();
+        add_event_est(&mut data, ts, model, 1.0, 10.0, old.estimated);
+        assert!(data.estimated.contains(&(day_of_utc(ts), model.to_string())));
+    }
+
+    /// An unpriced probe starts valid; once the model gains a price the probe
+    /// fails so the file re-parses exactly once and freezes the fill.
+    #[test]
+    fn unpriced_probe_fills_once_when_a_price_appears() {
+        let model = "pane-test-late-priced";
+        let probe = PriceProbe::Pin {
+            scope: "claude".into(),
+            key: model.into(),
+            tier: "std".into(),
+            ts_ms: 1_800_000_000_000,
+            pin: None,
+        };
+        assert!(probe.still_valid());
+        let mut overrides = HashMap::new();
+        overrides.insert(model.to_string(), pin_price(3.0));
+        pricing::set_overrides(overrides);
+        assert!(!probe.still_valid(), "a newly learned price must trigger one fill");
+        pricing::set_overrides(HashMap::new());
+        assert!(probe.still_valid());
+    }
+
+    /// A model no catalog knows must not leave a `None` pin behind: that
+    /// would freeze the gap and block the later one-time fill.
+    #[test]
+    fn unpriced_first_sight_writes_no_timeline_entry() {
+        let model = "pane-test-never-priced";
+        let priced = probe_price("claude", model, "std", 1_800_000_000_000);
+        assert!(priced.price.is_none());
+        assert!(!pricing_timeline::has_observations("claude", model, "std"));
+    }
+
+    /// An override is appended as a forward-only observation: old events keep
+    /// their pin, later events see the override.
+    #[test]
+    fn overrides_apply_only_forward() {
+        let model = "pane-test-override-forward";
+        let t1 = 1_800_000_000_000i64;
+        let old = pin_price(1.0);
+        let over = pin_price(9.0);
+        pricing_timeline::append("claude", model, "std", t1, Some(old), "catalog");
+        let mut overrides = HashMap::new();
+        overrides.insert(model.to_string(), over);
+        pricing::set_overrides(overrides.clone());
+        assert_eq!(effective_price("claude", model, "std"), Some(over));
+        let now = t1 + 60_000;
+        pricing_timeline::append("claude", model, "std", now, Some(over), "override");
+        assert_eq!(
+            probe_price("claude", model, "std", t1 + 1).price,
+            Some(old),
+            "the override must not rewrite the earlier pin"
+        );
+        assert_eq!(probe_price("claude", model, "std", now + 1).price, Some(over));
+        pricing::set_overrides(HashMap::new());
+    }
 }
 
 /// Minimal CSV field splitter with quoted-field support.
@@ -6703,14 +7172,16 @@ fn antigravity() -> ProviderSpend {
                     // unchanged conversation db via probes_still_vouch.
                     let model = antigravity_model_label(&call)
                         .unwrap_or_else(|| "unknown".to_string());
-                    match probe_lookup(&model) {
+                    let priced = probe_lookup("antigravity", &model, at.timestamp_millis());
+                    match priced.price {
                         Some(p) => {
-                            add_event(
+                            add_event_est(
                                 &mut d,
                                 at,
                                 &model,
                                 pricing::request_cost(&p, &u, true),
                                 tokens,
+                                priced.estimated,
                             );
                         }
                         None => note_unpriced(&mut d, at, &model, tokens),
@@ -6729,9 +7200,20 @@ pub fn collect(cursor_csv: Option<String>) -> Vec<ProviderSpend> {
 }
 
 pub fn collect_daily(cursor_csv: Option<String>) -> (Vec<ProviderSpend>, Vec<ProviderDays>) {
+    let generation_before = pricing::generation();
     pricing::ensure_fresh();
+    let ingested = pricing::generation() != generation_before;
 
     load_persisted_cache();
+    // Forward-only price maintenance, in this order: a corrections bump from
+    // an app update, then a catalog ingest from this refresh. Each appends
+    // observations at "now", so events already priced keep their old pins.
+    if CORRECTIONS_PENDING.swap(false, std::sync::atomic::Ordering::Relaxed) {
+        record_observations("correction");
+    }
+    if ingested {
+        record_observations("catalog");
+    }
     if let Ok(mut t) = touched().lock() {
         t.clear();
     }
@@ -6840,6 +7322,11 @@ pub fn collect_daily(cursor_csv: Option<String>) -> (Vec<ProviderSpend>, Vec<Pro
         pricing::note_unpriced();
     }
     save_persisted_cache();
-    let daily = list.iter_mut().map(|sp| ProviderDays { id: sp.id.clone(), name: sp.name.clone(), days: std::mem::take(&mut sp.days) }).collect();
+    let daily = list.iter_mut().map(|sp| ProviderDays {
+        id: sp.id.clone(),
+        name: sp.name.clone(),
+        days: std::mem::take(&mut sp.days),
+        estimated: std::mem::take(&mut sp.estimated_cells),
+    }).collect();
     (list.into_iter().filter(ProviderSpend::has_data).collect(), daily)
 }

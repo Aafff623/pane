@@ -37,6 +37,12 @@ pub mod search_keys;
 #[path = "../../src-tauri/src/pricing.rs"]
 pub mod pricing;
 
+#[path = "../../src-tauri/src/pricing_timeline.rs"]
+pub mod pricing_timeline;
+
+#[path = "../../src-tauri/src/refresh_gate.rs"]
+pub mod refresh_gate;
+
 #[path = "../../src-tauri/src/spend.rs"]
 pub mod spend;
 

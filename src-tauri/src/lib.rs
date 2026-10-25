@@ -34,6 +34,8 @@ mod oauth_util;
 mod platform;
 mod popover_geometry;
 mod pricing;
+mod pricing_timeline;
+mod refresh_gate;
 mod providers;
 pub(crate) mod provider_catalog;
 mod snapshot_store;
@@ -2047,6 +2049,33 @@ where
 /// Last-good Kimi snapshot on disk. Used to skip the leftover Moonshot
 /// fetch only when that card has actually painted *recently* — a
 /// credentials file, or a day-old cache entry, must not hide the wallet.
+/// Display name for a card id, used when a gate failure has no snapshot.
+fn snapshot_name_for(id: &str) -> String {
+    provider_catalog::provider_definition(&family_of(id))
+        .map(|definition| definition.display_name.to_string())
+        .unwrap_or_else(|| id.to_string())
+}
+
+/// Keep the error bench truthful when a background waiter consumed a Manual
+/// leader's result (the Manual path does not run `guarded`'s bench tail).
+fn settle_bench_after(snap: &providers::Snapshot) {
+    let now = now_ms() as i64;
+    let mut map = fail_state().lock().unwrap_or_else(|e| e.into_inner());
+    if snap.status == "error" {
+        let interval_ms = (refresh_minutes_from(&load_config()) as i64).saturating_mul(60_000);
+        map.insert(
+            snap.id.clone(),
+            snapshot_store::bench_after_error(
+                snap.error.as_deref().unwrap_or_default(),
+                now,
+                interval_ms,
+            ),
+        );
+    } else {
+        map.remove(&snap.id);
+    }
+}
+
 fn cached_kimi_ok() -> bool {
     let path = providers::config_dir().join("last_snapshots.json");
     let Ok(raw) = std::fs::read_to_string(path) else {
@@ -2646,11 +2675,30 @@ async fn fetch_usage(
 /// frontend's `lastSnapshots` by the caller.
 #[tauri::command]
 async fn refresh_provider(provider_id: String) -> Result<providers::Snapshot, String> {
-    let mut snap = fetch_provider_snapshot(provider_id.clone(), false).await?;
-    // Same long-wall mirroring the global cycle applies in guarded() — a
-    // manual ⟳ must not paint the green mirage back over the wall.
-    providers::mirror_week_wall(&provider_id, &mut snap);
-    apply_qoder_checkin(&provider_id, &mut snap).await;
+    // One fetch per card: a second ⟳ while the periodic scan is already
+    // asking this provider joins that result instead of doubling the request
+    // (qoder check-in is a network side effect — a duplicate is not free).
+    let id = provider_id.clone();
+    let name = snapshot_name_for(&id);
+    let gate_id = id.clone();
+    let snap = refresh_gate::run(&gate_id, refresh_gate::Kind::Manual, async move {
+        let mut snap = match fetch_provider_snapshot(id.clone(), false).await {
+            Ok(snap) => snap,
+            Err(error) => providers::Snapshot::error(&id, &name, error),
+        };
+        if snap.status == "error" {
+            return snap;
+        }
+        // Same long-wall mirroring the global cycle applies in guarded() — a
+        // manual ⟳ must not paint the green mirage back over the wall.
+        providers::mirror_week_wall(&id, &mut snap);
+        apply_qoder_checkin(&id, &mut snap).await;
+        snap
+    })
+    .await?;
+    if snap.status == "error" {
+        return Err(snap.error.unwrap_or_else(|| "refresh failed".into()));
+    }
     Ok(snap)
 }
 
@@ -3283,7 +3331,16 @@ async fn run_usage_fetch_inner_mode(
     };
     let handles: Vec<_> = futs
         .into_iter()
-        .map(|(_, fut)| tauri::async_runtime::spawn(fut))
+        .map(|(id, fut)| {
+            let name = snapshot_name_for(&id);
+            tauri::async_runtime::spawn(async move {
+                let snap = refresh_gate::run(&id, refresh_gate::Kind::Background, fut)
+                    .await
+                    .unwrap_or_else(|error| providers::Snapshot::error(&id, &name, error));
+                settle_bench_after(&snap);
+                snap
+            })
+        })
         .collect();
     let mut all = Vec::with_capacity(handles.len());
     for h in handles {
@@ -3806,7 +3863,20 @@ fn get_pricing_overrides() -> String {
 
 #[tauri::command]
 fn save_pricing_overrides(text: String) -> Result<(), String> {
-    pricing::save_overrides_text(&text)
+    pricing::save_overrides_text(&text)?;
+    // Overrides are forward-only observations: append the new effective pins
+    // at "now" for every model the timeline has seen. History is untouched.
+    spend::record_observations("override");
+    Ok(())
+}
+
+/// Explicit "re-price everything" escape hatch. The observation timeline is
+/// immutable, so a rebuild reproduces byte-identical dollars unless the
+/// caller deliberately changed a pin; only the per-file cache is dropped.
+#[tauri::command]
+fn rebuild_spend_pricing() -> Result<(), String> {
+    spend::reset_spend_cache();
+    Ok(())
 }
 
 /// Daily credit consumption per card id. Qoder CN / Trae CN bill in credits,
@@ -6274,6 +6344,7 @@ pub fn run() {
             install_rtk_integration,
             get_pricing_overrides,
             save_pricing_overrides,
+            rebuild_spend_pricing,
             fetch_credit_history,
             fetch_meter_history,
             get_boot_id,

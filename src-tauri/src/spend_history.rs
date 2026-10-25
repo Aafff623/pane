@@ -10,7 +10,7 @@ use std::collections::BTreeMap;
 use std::fs;
 use std::sync::{Mutex, OnceLock};
 
-const VERSION: u32 = 4;
+const VERSION: u32 = 5;
 
 /// How far back the ZCode scanner reads `model_usage`. Only days inside
 /// this window can be re-merged after a migration clears them.
@@ -20,6 +20,10 @@ const ZCODE_SCAN_DAYS: i64 = 32;
 struct ModelDay {
     cost: f64,
     tokens: f64,
+    /// Priced from an observation that postdates the day (first-install
+    /// backfill). v4 records default to false.
+    #[serde(default)]
+    estimated: bool,
 }
 
 #[derive(Serialize, Deserialize, Clone, Default, PartialEq, Debug)]
@@ -100,6 +104,11 @@ fn migrate(mut file: HistoryFile) -> Result<HistoryFile, String> {
         }
         file.version = 4;
     }
+    if file.version == 4 {
+        // v4→v5: per-model estimated flags. No cells are dropped — old
+        // records simply default to false until a scan re-merges them.
+        file.version = 5;
+    }
     file.days.retain(|_, providers| !providers.is_empty());
     if file.version != VERSION { return Err("unsupported spend history version".into()); }
     Ok(file)
@@ -126,6 +135,7 @@ fn day_key(day_ce: i32) -> Option<String> {
 fn merge_into(file: &mut HistoryFile, daily: &[crate::spend::ProviderDays]) {
     let mut grouped: BTreeMap<String, BTreeMap<String, BTreeMap<String, ModelDay>>> = BTreeMap::new();
     for provider in daily {
+        let estimated: std::collections::HashSet<(i32, String)> = provider.estimated.iter().cloned().collect();
         for ((day_ce, model), (cost, tokens)) in &provider.days {
             let Some(day) = day_key(*day_ce) else { continue };
             grouped
@@ -133,7 +143,14 @@ fn merge_into(file: &mut HistoryFile, daily: &[crate::spend::ProviderDays]) {
                 .or_default()
                 .entry(provider.id.clone())
                 .or_default()
-                .insert(model.clone(), ModelDay { cost: *cost, tokens: *tokens });
+                .insert(
+                    model.clone(),
+                    ModelDay {
+                        cost: *cost,
+                        tokens: *tokens,
+                        estimated: estimated.contains(&(*day_ce, model.clone())),
+                    },
+                );
         }
     }
 
@@ -169,6 +186,9 @@ pub struct RangeSpend {
     pub tokens: f64,
     pub active_days: u32,
     pub models: Vec<crate::spend::ModelSpend>,
+    /// Days in this range with at least one estimated model price.
+    #[serde(default)]
+    pub estimated_days: u32,
 }
 
 /// Historical scanner aliases: the Kimi scanner switched its output id from
@@ -201,7 +221,7 @@ fn fold_day_aliases<'a>(
 
 fn range_from(file: &HistoryFile, range_days: Option<u32>, today: NaiveDate) -> Vec<RangeSpend> {
     let cutoff = range_days.map(|days| today - Duration::days(days.saturating_sub(1) as i64));
-    let mut by_provider: BTreeMap<String, (f64, f64, u32, BTreeMap<String, (f64, f64)>)> = BTreeMap::new();
+    let mut by_provider: BTreeMap<String, (f64, f64, u32, BTreeMap<String, (f64, f64)>, u32)> = BTreeMap::new();
     for (day_key, providers) in &file.days {
         let Ok(day) = NaiveDate::parse_from_str(day_key, "%Y-%m-%d") else { continue };
         if cutoff.is_some_and(|start| day < start || day > today) { continue; }
@@ -210,6 +230,7 @@ fn range_from(file: &HistoryFile, range_days: Option<u32>, today: NaiveDate) -> 
             entry.0 += cell.cost;
             entry.1 += cell.tokens;
             if cell.tokens > 0.0 || cell.cost > 0.004 { entry.2 += 1; }
+            if cell.models.values().any(|m| m.estimated) { entry.4 += 1; }
             for (model, usage) in &cell.models {
                 let model_total = entry.3.entry(model.clone()).or_default();
                 model_total.0 += usage.cost;
@@ -219,15 +240,15 @@ fn range_from(file: &HistoryFile, range_days: Option<u32>, today: NaiveDate) -> 
     }
     by_provider
         .into_iter()
-        .filter(|(_, (cost, tokens, _, _))| *cost > 0.004 || *tokens > 0.0)
-        .map(|(id, (cost, tokens, active_days, models))| {
+        .filter(|(_, (cost, tokens, _, _, _))| *cost > 0.004 || *tokens > 0.0)
+        .map(|(id, (cost, tokens, active_days, models, estimated_days))| {
             let mut models: Vec<_> = models
                 .into_iter()
                 .map(|(model, (cost, tokens))| crate::spend::ModelSpend { model, cost, tokens, stored_cost: None, missing_pricing: false })
                 .collect();
             models.sort_by(|a, b| b.cost.partial_cmp(&a.cost).unwrap_or(std::cmp::Ordering::Equal));
             models.truncate(20);
-            RangeSpend { id, cost, tokens, active_days, models }
+            RangeSpend { id, cost, tokens, active_days, models, estimated_days }
         })
         .collect()
 }
@@ -245,6 +266,8 @@ pub struct DailyModelSpend {
     pub model: String,
     pub cost: f64,
     pub tokens: f64,
+    #[serde(default)]
+    pub estimated: bool,
 }
 
 #[derive(Serialize, Clone)]
@@ -280,6 +303,7 @@ fn daily_rows_from(file: &HistoryFile, range_days: Option<u32>, today: NaiveDate
                     model: model.clone(),
                     cost: usage.cost,
                     tokens: usage.tokens,
+                    estimated: usage.estimated,
                 })
                 .filter(|usage| usage.cost > 0.0 || usage.tokens > 0.0)
                 .collect();
@@ -309,7 +333,12 @@ mod tests {
     fn days(day: NaiveDate, id: &str, model: &str, cost: f64, tokens: f64) -> crate::spend::ProviderDays {
         let mut data = HashMap::new();
         data.insert((day.num_days_from_ce(), model.to_string()), (cost, tokens));
-        crate::spend::ProviderDays { id: id.to_string(), name: id.to_string(), days: data }
+        crate::spend::ProviderDays {
+            id: id.to_string(),
+            name: id.to_string(),
+            days: data,
+            estimated: std::collections::HashSet::new(),
+        }
     }
 
     // ── T-0033: kimi ⇄ moonshot alias folding ─────────────────────────────

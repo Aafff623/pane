@@ -21,8 +21,8 @@ use chrono::{DateTime, Duration, Utc};
 use serde_json::Value;
 
 use super::super::{
-    add_event, build_spend, merge_data, note_unpriced, parse_ts, probe_lookup_at, recent_jsonl_files,
-    FileData, ProviderSpend,
+    add_event_est, build_spend, merge_data, note_unpriced, parse_ts, probe_price,
+    recent_jsonl_files, FileData, ProviderSpend,
 };
 use super::{copilot_db, copilot_session_state};
 
@@ -202,13 +202,15 @@ fn add_usage(
         cache_write_5m: cache_write,
         cache_write_1h: 0.0,
     };
-    match probe_lookup_at(ts.timestamp_millis(), model) {
-        Some(price) => add_event(
+    let priced = probe_price("copilot", model, "std", ts.timestamp_millis());
+    match priced.price {
+        Some(price) => add_event_est(
             data,
             ts,
             model,
             crate::pricing::request_cost_at(&price, &usage, 200_000.0),
             tokens,
+            priced.estimated,
         ),
         None => note_unpriced(data, ts, model, tokens),
     }

@@ -15,6 +15,31 @@ pub enum PaceState {
     Unknown,
 }
 
+/// Independent "how fast am I burning" reading: used% minus elapsed%. The
+/// Ahead/Close/Over axis projects a finish; this one says whether to ease off
+/// (`SlowDown`), keep going (`OnTrack`) or push (`SpeedUp`). A ±10-point band
+/// keeps ordinary jitter quiet (QuotaBar's rule).
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum PaceTempo {
+    SlowDown,
+    OnTrack,
+    SpeedUp,
+}
+
+const TEMPO_BAND_PP: f64 = 10.0;
+
+fn tempo(used_percent: f64, elapsed_percent: f64) -> PaceTempo {
+    let delta = used_percent - elapsed_percent;
+    if delta > TEMPO_BAND_PP {
+        PaceTempo::SlowDown
+    } else if delta < -TEMPO_BAND_PP {
+        PaceTempo::SpeedUp
+    } else {
+        PaceTempo::OnTrack
+    }
+}
+
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub struct Pace {
     pub state: PaceState,
@@ -22,6 +47,10 @@ pub struct Pace {
     pub run_out_at: Option<i64>,
     pub settled: bool,
     pub elapsed_percent: Option<f64>,
+    /// Used-vs-elapsed reading; None whenever the projection itself is
+    /// unknown, spent, or before the window has started.
+    #[serde(default)]
+    pub tempo: Option<PaceTempo>,
     /// The vendor echoed a whole untouched window: nothing spent and the
     /// reset instant is exactly one period ahead. That is not a countdown, and
     /// every surface (card foot, overview ring, collapsed badge, hover and the
@@ -47,6 +76,7 @@ pub fn compute(used_percent: f64, resets_at: Option<i64>, period_ms: Option<i64>
             run_out_at: Some(now_ms),
             settled: true,
             elapsed_percent: Some(100.0),
+            tempo: None,
             not_started: false,
         };
     }
@@ -99,6 +129,7 @@ pub fn compute(used_percent: f64, resets_at: Option<i64>, period_ms: Option<i64>
         run_out_at,
         settled: true,
         elapsed_percent: Some(frac * 100.0),
+        tempo: Some(tempo(used, frac * 100.0)),
         not_started: false,
     }
 }
@@ -110,6 +141,7 @@ fn unknown() -> Pace {
         run_out_at: None,
         settled: false,
         elapsed_percent: None,
+        tempo: None,
         not_started: false,
     }
 }
@@ -187,5 +219,38 @@ mod tests {
     fn missing_reset_metadata_is_unknown() {
         assert_eq!(compute(50.0, None, Some(HOUR), 1).state, PaceState::Unknown);
         assert_eq!(compute(50.0, Some(2), None, 1).state, PaceState::Unknown);
+    }
+
+    #[test]
+    fn tempo_uses_a_ten_point_band_and_stays_quiet_when_unknown() {
+        let now = 10_000_000;
+        let period = 5 * HOUR;
+        // 50% elapsed (2.5h in), used 65% → 15 points ahead of the clock.
+        let slow = compute(65.0, Some(now + period / 2), Some(period), now);
+        assert_eq!(slow.tempo, Some(PaceTempo::SlowDown));
+        // 50% elapsed, used 52% → inside the ±10 band.
+        let on = compute(52.0, Some(now + period / 2), Some(period), now);
+        assert_eq!(on.tempo, Some(PaceTempo::OnTrack));
+        // 50% elapsed, used 35% → 15 points behind.
+        let fast = compute(35.0, Some(now + period / 2), Some(period), now);
+        assert_eq!(fast.tempo, Some(PaceTempo::SpeedUp));
+        // Boundaries are inclusive: exactly 10 points either way stays on track.
+        assert_eq!(
+            compute(60.0, Some(now + period / 2), Some(period), now).tempo,
+            Some(PaceTempo::OnTrack)
+        );
+        assert_eq!(
+            compute(40.0, Some(now + period / 2), Some(period), now).tempo,
+            Some(PaceTempo::OnTrack)
+        );
+        // A window younger than 15 minutes has no tempo reading either.
+        assert_eq!(
+            compute(0.0, Some(now + period - 60_000), Some(period), now).tempo,
+            None
+        );
+        assert_eq!(compute(100.0, Some(now + HOUR), Some(period), now).tempo, None);
+        assert_eq!(compute(50.0, None, Some(period), now).tempo, None);
+        let untouched = compute(0.0, Some(now + period), Some(period), now);
+        assert_eq!(untouched.tempo, None);
     }
 }

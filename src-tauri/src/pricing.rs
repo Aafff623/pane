@@ -172,6 +172,10 @@ static UNPRICED_HINT: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicB
 /// Bumped whenever a source ingests a new document; spend's per-file cache
 /// keys on it so already-parsed logs re-price under the new catalog.
 static GENERATION: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+/// When the live catalog last changed (a successful non-304 ingest). Scan-time
+/// first sightings of a model are recorded at this moment, not at `now`, so a
+/// whole refresh observes one price instant. 0 = derive from state.json.
+static LAST_INGEST_MS: std::sync::atomic::AtomicI64 = std::sync::atomic::AtomicI64::new(0);
 
 pub fn note_unpriced() {
     UNPRICED_HINT.store(true, std::sync::atomic::Ordering::Relaxed);
@@ -179,6 +183,39 @@ pub fn note_unpriced() {
 
 pub fn generation() -> u64 {
     GENERATION.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+/// Moment the live catalog was last observed to change. First sightings use
+/// it as `observed_at`; when it is unknown (fresh install, catalogs already
+/// cached), the newest `fetchedAt` in state.json stands in, then wall clock.
+pub fn catalog_epoch_ms() -> i64 {
+    let set = LAST_INGEST_MS.load(std::sync::atomic::Ordering::Relaxed);
+    if set > 0 {
+        return set;
+    }
+    let fetched = load_state()
+        .as_object()
+        .map(|sources| {
+            sources
+                .values()
+                .filter_map(|v| v.get("fetchedAt").and_then(Value::as_i64))
+                .max()
+                .unwrap_or(0)
+        })
+        .unwrap_or(0);
+    let epoch = if fetched > 0 { fetched } else { now_ms() };
+    let _ = LAST_INGEST_MS.compare_exchange(
+        0,
+        epoch,
+        std::sync::atomic::Ordering::Relaxed,
+        std::sync::atomic::Ordering::Relaxed,
+    );
+    LAST_INGEST_MS.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+/// Test/boot seam: pin the catalog epoch (0 = derive from state.json again).
+pub fn set_catalog_epoch_ms(ms: i64) {
+    LAST_INGEST_MS.store(ms, std::sync::atomic::Ordering::Relaxed);
 }
 
 /// Bump whenever the baked-in pricing behavior changes (stale-catalog
@@ -529,6 +566,7 @@ pub fn ensure_fresh() {
                     ingest(&mut store().lock().unwrap_or_else(|e| e.into_inner()), source, &doc);
                     state[source] = json!({ "etag": new_etag, "fetchedAt": now, "failedAt": 0 });
                     GENERATION.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                    LAST_INGEST_MS.store(now, std::sync::atomic::Ordering::Relaxed);
                     UNPRICED_HINT.store(false, std::sync::atomic::Ordering::Relaxed);
                     eprintln!("[pane] pricing: refreshed {source}");
                 }
@@ -640,6 +678,12 @@ fn override_for(model: &str) -> Option<Price> {
         .copied()
 }
 
+/// Whether a user override currently prices this model (observation basis).
+pub fn has_override(model: &str) -> bool {
+    load_overrides_from_disk();
+    override_for(model).is_some()
+}
+
 /// One spelling rule for every model key the pricing layer touches: catalog
 /// tables, alias targets, user overrides, historical schedules, the memo, and
 /// the log side's `spend::split_models`. Upstream feeds report the same family
@@ -674,16 +718,15 @@ fn load_overrides_from_disk() {
     });
 }
 
-/// Time-aware lookup: user override > timestamp window > live catalog.
-/// The schedule table is empty by default, so this is identical to
-/// [`lookup`] unless an official historical schedule is installed.
+/// Time-aware lookup: timestamp window > live catalog. Retained for the
+/// legacy schedule table (tests and any vendor-published historical window);
+/// production pricing goes through `pricing_timeline` pins instead. A user
+/// override is deliberately NOT consulted here — overrides are forward-only
+/// observations now, so a saved override can never rewrite old dollars.
 pub fn lookup_at(timestamp_ms: i64, model: &str) -> Option<Price> {
     let model = normalize_model_key(model);
     let model = model.as_str();
     load_overrides_from_disk();
-    if let Some(p) = override_for(model) {
-        return Some(p);
-    }
     let hit = SCHEDULES
         .lock()
         .unwrap_or_else(|e| e.into_inner())
@@ -726,7 +769,7 @@ pub fn lookup(model: &str) -> Option<Price> {
 
 /// Every rate in `p` multiplied by `m` — service tiers (fast, priority)
 /// bill at a multiple of the base model's whole rate card.
-fn scaled_price(p: &Price, m: f64) -> Price {
+pub(crate) fn scaled_price(p: &Price, m: f64) -> Price {
     let scale = |v: Option<f64>| v.map(|x| x * m);
     Price {
         input: p.input * m,
@@ -1552,8 +1595,11 @@ mod tests {
         assert!(super::parsed_overrides("[]").is_err());
     }
 
+    /// Windows stay historical; overrides are forward-only observations now,
+    /// so they no longer rewrite an in-window historical lookup. `lookup()`
+    /// still prefers the override for new pins.
     #[test]
-    fn lookup_at_prefers_override_then_window_then_catalog() {
+    fn lookup_at_prefers_window_over_override() {
         let window = super::Price::flat(3.0, 4.0, 0.2, 3.0);
         let over = super::Price::flat(5.0, 6.0, 0.3, 5.0);
         super::set_schedules(vec![super::PriceWindow {
@@ -1571,8 +1617,10 @@ mod tests {
         assert_eq!(super::lookup_at(1_500, "pane-sched-model"), Some(window));
         assert_eq!(super::lookup_at(500, "pane-sched-model"), None);
         assert_eq!(super::lookup_at(1_500, "pane-sched-other"), Some(window));
-        assert_eq!(super::lookup_at(1_500, "pane-sched-override"), Some(over));
+        assert_eq!(super::lookup_at(1_500, "pane-sched-override"), Some(window));
         assert_eq!(super::lookup("pane-sched-override"), Some(over));
+        // Outside any window the catalog path still honours the override.
+        assert_eq!(super::lookup_at(500, "pane-sched-override"), Some(over));
         assert_eq!(super::lookup_at(1_500, "pane-not-in-catalog"), None);
 
         super::set_schedules(Vec::new());
