@@ -1,4 +1,4 @@
-Status: ready
+Status: partial (2026-10-26) — Copilot GitHub avatar + fallback + auto-empty copy shipped; Codex/Kimi avatars need vendor user-info calls.
 Type: task
 Blocked by: —
 

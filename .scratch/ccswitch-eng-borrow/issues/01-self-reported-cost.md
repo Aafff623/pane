@@ -1,4 +1,4 @@
-Status: ready
+Status: done (2026-10-26) — Claude/MiniMax already prefer log cost; local Grok unified.jsonl audit found no cost field, so that source is skipped per spec.
 Type: task
 Blocked by: —
 

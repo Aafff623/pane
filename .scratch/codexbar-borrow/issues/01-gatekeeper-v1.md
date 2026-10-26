@@ -1,4 +1,4 @@
-Status: ready
+Status: partial (2026-10-26) — changed-lines gatekeeper + CI + tests shipped; full baseline/triage not needed for v1.
 Type: task
 Blocked by: —
 
