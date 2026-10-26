@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Privacy · Pane</title>
+<meta name="description" content="Pane's privacy summary: no Pane account, credentials and usage stay on your machine, and the only outbound calls are provider APIs, public price tables, the update check and an optional status probe.">
+<link rel="canonical" href="https://pane.threetwoa.live/en/privacy">
+<link rel="icon" href="/brand-logo.png?v=2"><link rel="stylesheet" href="/site.css?v=58">
+<style>
+.legal{max-width:820px;padding-top:72px;padding-bottom:80px}
+.legal h1{font-size:clamp(28px,4vw,42px);letter-spacing:-.04em;margin:0 0 8px}
+.legal .updated{color:var(--faint);font-size:12px;margin:0 0 32px}
+.legal h2{font-size:18px;margin:32px 0 8px}
+.legal p,.legal li{color:var(--muted);font-size:13.5px;line-height:1.85}
+.legal ul{padding-left:20px}
+.legal a{color:var(--accent);text-decoration:underline;text-underline-offset:3px}
+.legal code{padding:1px 5px;border:1px solid var(--line);border-radius:5px;background:var(--surface);font-size:12px}
+</style>
+</head>
+<body>
+<a class="skip-link" href="#main-content">Skip to main content</a>
+<header class="site-header"><nav class="wrap nav" aria-label="Main navigation"><a href="/en/" class="brand"><img src="/brand-logo.png?v=2" width="20" height="20" alt="">Pane</a><div class="nav-actions"><a class="button" data-variant="primary" data-size="sm" href="/download/windows">Download</a></div></nav></header>
+<main id="main-content" class="legal wrap">
+  <h1>Privacy</h1>
+  <p class="updated">Last updated: 2026-10-26 · Authoritative version: <a href="https://github.com/Aafff623/pane/blob/main/docs/privacy.md">docs/privacy.md</a> · <a href="/privacy.html">中文</a></p>
+  <p>Pane is built on one rule: your data is nobody's business, including ours. There is no Pane account, and no Pane backend receives your quotas, spend, keys or provider data.</p>
+  <h2>Every request that leaves your machine</h2>
+  <ul>
+    <li><strong>A provider's own API</strong>: only for providers you enabled, sending that account's token/key exactly as its official tool would.</li>
+    <li><strong>Public price tables</strong>: LiteLLM, models.dev and the OpenUsage supplement — anonymous GET, no identifying data.</li>
+    <li><strong>Update check</strong>: this project's <code>update/latest.json</code> with a GitHub Releases fallback — anonymous GET, carrying no app data.</li>
+    <li><strong>Status page</strong>: only when a Claude card is stale or failed and the status probe is on — an anonymous GET of the public incident summary at <code>status.claude.com</code>.</li>
+    <li><strong>Your own Ollama</strong>: <code>127.0.0.1</code>, only when enabled.</li>
+  </ul>
+  <p>No session recording, no event streams, no A/B flags, no autocapture and no telemetry. The app sends no statistics to anyone.</p>
+  <h2>What is stored locally</h2>
+  <p>Configuration, accounts, snapshots, the spend ledger, skins and font packs live in <code>%APPDATA%\PaneAafff623</code>. Secrets go to the OS credential store first and fall back to a protected local file only when that store is unavailable. Deleting those files erases Pane's local memory.</p>
+  <h2>Telemetry</h2>
+  <p>This build has no telemetry and therefore no toggle to switch off. If any reporting is ever added, it lands in the list above first and ships with an explicit control.</p>
+  <h2>Contact</h2>
+  <p>Questions and data requests: <a href="https://github.com/Aafff623/pane/issues">GitHub Issues</a>.</p>
+</main>
+<footer class="site-footer ruled"><div class="wrap footer-content"><div><a href="/en/">Home</a><a href="/en/terms">Terms</a><a href="https://github.com/Aafff623/pane">Source</a><a href="https://github.com/Aafff623/pane/blob/main/LICENSE">MIT license</a><span>© 2026 Pane</span></div></div></footer>
+</body>
+</html>

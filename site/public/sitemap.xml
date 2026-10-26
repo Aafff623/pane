@@ -12,6 +12,28 @@
     <xhtml:link rel="alternate" hreflang="en" href="https://pane.threetwoa.live/en/"/>
     <xhtml:link rel="alternate" hreflang="x-default" href="https://pane.threetwoa.live/"/>
   </url>
-  <url><loc>https://pane.threetwoa.live/privacy.html</loc></url>
-  <url><loc>https://pane.threetwoa.live/terms.html</loc></url>
+  <url>
+    <loc>https://pane.threetwoa.live/privacy.html</loc>
+    <xhtml:link rel="alternate" hreflang="zh-CN" href="https://pane.threetwoa.live/privacy.html"/>
+    <xhtml:link rel="alternate" hreflang="en" href="https://pane.threetwoa.live/en/privacy"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://pane.threetwoa.live/privacy.html"/>
+  </url>
+  <url>
+    <loc>https://pane.threetwoa.live/en/privacy</loc>
+    <xhtml:link rel="alternate" hreflang="zh-CN" href="https://pane.threetwoa.live/privacy.html"/>
+    <xhtml:link rel="alternate" hreflang="en" href="https://pane.threetwoa.live/en/privacy"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://pane.threetwoa.live/privacy.html"/>
+  </url>
+  <url>
+    <loc>https://pane.threetwoa.live/terms.html</loc>
+    <xhtml:link rel="alternate" hreflang="zh-CN" href="https://pane.threetwoa.live/terms.html"/>
+    <xhtml:link rel="alternate" hreflang="en" href="https://pane.threetwoa.live/en/terms"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://pane.threetwoa.live/terms.html"/>
+  </url>
+  <url>
+    <loc>https://pane.threetwoa.live/en/terms</loc>
+    <xhtml:link rel="alternate" hreflang="zh-CN" href="https://pane.threetwoa.live/terms.html"/>
+    <xhtml:link rel="alternate" hreflang="en" href="https://pane.threetwoa.live/en/terms"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://pane.threetwoa.live/terms.html"/>
+  </url>
 </urlset>

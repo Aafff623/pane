@@ -29,6 +29,7 @@
     <li><strong>服务商自己的 API</strong>：只在你启用该服务商时，按其官方工具相同的方式发送该账号的 token/key。</li>
     <li><strong>公开价格表</strong>：LiteLLM、models.dev、OpenUsage supplement，匿名 GET，无身份信息。</li>
     <li><strong>更新检查</strong>：本项目的 <code>update/latest.json</code> 与 GitHub Releases 兜底，匿名 GET，不携带 App 数据。</li>
+    <li><strong>状态页</strong>：仅当 Claude 卡片处于 stale/失败且状态探测开启时，匿名 GET <code>status.claude.com</code> 的公开事件摘要，不携带 App 数据。</li>
     <li><strong>本机 Ollama</strong>：仅当启用时访问 <code>127.0.0.1</code>。</li>
   </ul>
   <p>没有会话录制、事件流、A/B 标记、自动捕获或遥测。应用不发送任何统计，也不向上游作者的统计项目发送数据。</p>
@@ -39,6 +40,6 @@
   <h2>联系</h2>
   <p>问题与数据请求：<a href="https://github.com/Aafff623/pane/issues">GitHub Issues</a>。</p>
 </main>
-<footer class="site-footer ruled"><div class="wrap footer-content"><div><a href="/">首页</a><a href="/terms.html">条款</a><a href="https://github.com/Aafff623/pane">源代码</a><span>© 2026 Pane</span></div></div></footer>
+<footer class="site-footer ruled"><div class="wrap footer-content"><div><a href="/">首页</a><a href="/terms.html">条款</a><a href="https://github.com/Aafff623/pane">源代码</a><a href="https://github.com/Aafff623/pane/blob/main/LICENSE">MIT 许可</a><span>© 2026 Pane</span></div></div></footer>
 </body>
 </html>
