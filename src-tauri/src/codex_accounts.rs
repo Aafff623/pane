@@ -37,6 +37,14 @@ pub struct CodexLogin {
     /// Lowest-priority fallback; retired permanently when a live default appears.
     #[serde(default)]
     pub imported_from_backup: bool,
+    /// Bumped on every credential rotation (refresh writeback, re-login).
+    /// A task waiting on the per-account refresh lock compares the
+    /// generation it observed before waiting with the stored one after: an
+    /// advanced generation plus a valid token means another task already
+    /// rotated the pair, so the waiter reuses instead of burning the
+    /// refreshed refresh_token a second time (#63-05).
+    #[serde(default)]
+    pub generation: u64,
 }
 
 fn accounts_file(base: &Path) -> PathBuf {
@@ -232,7 +240,10 @@ pub fn upsert(accounts: &mut Vec<CodexLogin>, incoming: CodexLogin) {
             incoming.label
         };
         let added_at = existing.added_at;
-        *existing = CodexLogin { label, added_at, ..incoming };
+        // A re-login replaces the credential pair outright; advance the
+        // generation so a concurrent refresh waiter sees the rotation (#63-05).
+        let generation = existing.generation.saturating_add(1);
+        *existing = CodexLogin { label, added_at, generation, ..incoming };
         return;
     }
     accounts.push(incoming);
@@ -271,6 +282,7 @@ pub fn from_stored(tokens: &crate::oauth::StoredTokens) -> Result<CodexLogin, St
         expires_at: tokens.expires_at.clone(),
         added_at: chrono::Utc::now().timestamp(),
         imported_from_backup: false,
+        generation: 0,
     })
 }
 
@@ -302,6 +314,10 @@ pub(crate) fn save_refreshed_from(base: &Path, expected: &CodexLogin, refreshed:
     current.refresh_token = refreshed.refresh_token.clone();
     current.id_token = refreshed.id_token.clone();
     current.expires_at = refreshed.expires_at.clone();
+    // The credential pair rotated: advance the generation so any task that
+    // observed the old one before waiting on the refresh lock reuses this
+    // result instead of consuming the rotated refresh_token again (#63-05).
+    current.generation = current.generation.saturating_add(1);
     let saved = current.clone();
     save_accounts_to(base, &rows)?;
     Ok(saved)
@@ -462,6 +478,7 @@ mod tests {
             expires_at: String::new(),
             added_at: 1,
             imported_from_backup: false,
+            generation: 0,
         }
     }
 
@@ -647,6 +664,31 @@ mod tests {
         save_accounts_to(&base, &[]).unwrap();
         assert!(save_refreshed_from(&base, &original, &refreshed).is_err());
         assert!(load_accounts_from(&base).is_empty());
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn credential_rotation_advances_the_generation() {
+        let base = std::env::temp_dir().join(format!("pane-codex-generation-{}", std::process::id()));
+        let original = login("generation-unique", "Work");
+        save_accounts_to(&base, &[original.clone()]).unwrap();
+        let mut refreshed = original.clone();
+        refreshed.access_token = "rotated-access".into();
+        refreshed.refresh_token = "rotated-refresh".into();
+        // A successful refresh writeback rotates the pair → generation moves.
+        let saved = save_refreshed_from(&base, &original, &refreshed).unwrap();
+        assert_eq!(saved.generation, original.generation + 1);
+        // A stale writeback (CAS on the already-rotated tokens) must not
+        // move the generation a second time.
+        let stale = save_refreshed_from(&base, &original, &refreshed).unwrap();
+        assert_eq!(stale.generation, saved.generation);
+        // A re-login replaces the credential pair too → generation moves.
+        let mut relogin = saved.clone();
+        relogin.access_token = "relogin-access".into();
+        let mut rows = load_accounts_from(&base);
+        upsert(&mut rows, relogin);
+        assert_eq!(rows[0].generation, saved.generation + 1);
+        save_accounts_to(&base, &[]).unwrap();
         let _ = std::fs::remove_dir_all(&base);
     }
 

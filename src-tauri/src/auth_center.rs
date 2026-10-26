@@ -561,6 +561,7 @@ mod tests {
             account_id: "workspace-other".into(), email: "same@example.com".into(), label: "Subscription".into(),
             access_token: "synthetic-access".into(), refresh_token: "synthetic-refresh".into(),
             id_token: String::new(), expires_at: String::new(), added_at: 0, imported_from_backup: false,
+            generation: 0,
         }]).unwrap();
         let groups = collect_with(&base, |family| (family == "codex").then(|| local("codex", Some("same@example.com"), false)).into_iter().collect());
         let rows = &groups.iter().find(|g| g.family == "codex").unwrap().accounts;
