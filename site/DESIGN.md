@@ -130,6 +130,29 @@ add a font; the display face stays Manrope.
 - The license and privacy facts mirror `LICENSE` and `docs/privacy.md`; the
   site pages are human summaries, those files are authoritative.
 
+## 10. Legal pages (#82)
+
+Single source of truth: **`docs/privacy.md`**. The repository-root
+`PRIVACY.md` is a pointer plus a short version — it never carries a fact that
+`docs/privacy.md` does not, and a disagreement is resolved in favour of
+`docs/privacy.md`.
+
+The website keeps one canonical markup per language:
+
+| Route | File | Language |
+|---|---|---|
+| `/privacy.html` | `site/public/privacy.html` | Chinese (canonical) |
+| `/terms.html` | `site/public/terms.html` | Chinese (canonical) |
+| `/en/privacy` | `site/public/en/privacy.html` | English summary |
+| `/en/terms` | `site/public/en/terms.html` | English summary |
+
+Rules: the English pages state the same facts and add no new promise; every
+legal page links `LICENSE`; the outbound-request list on both language
+versions must match the table in `docs/privacy.md` (a new endpoint is added to
+the doc first). The worker serves `/en/*` legal routes with
+`content-language: en` and falls through to the 404 page when the file is
+missing.
+
 ## 9. Motion and type tiers (#86)
 
 **Entrance order.** Hero copy rises in one CSS animation; the two mono chip

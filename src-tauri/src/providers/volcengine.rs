@@ -6,6 +6,11 @@
 //! pasted as `AK:SK` in one slot (or VOLC_ACCESS_KEY / VOLC_SECRET_KEY).
 //! Both plan surfaces are probed: GetAgentPlanAFPUsage (AFP 5h/weekly/
 //! monthly windows) and GetCodingPlanUsage (per-level Percent windows).
+//!
+//! A credential or signature rejection is a setup state, not a broken card:
+//! the pasted value is the wrong credential type (an Ark API key instead of
+//! an AK:SK pair) or the pair does not match. Network trouble, throttling and
+//! 5xx are real failures and keep the red card.
 
 use super::{http, stored_api_key, Metric, Snapshot};
 use serde_json::Value;
@@ -16,10 +21,45 @@ const HOST: &str = "open.volcengineapi.com";
 const REGION: &str = "cn-beijing";
 const SERVICE: &str = "ark";
 
+/// Stable English hint (translated by `displayCardHint`): what to paste and
+/// where the pair lives. Every credential/signature verdict lands here.
+const CREDENTIAL_HINT: &str = "Volcengine rejected this credential. Paste the pair as AK:SK — AccessKeyId:SecretAccessKey from the ark.volcengine.com console (API Key account). An Ark API key on its own is not accepted.";
+
+/// What a failed OpenAPI call means for the card.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum CallFailure {
+    /// The credential or its signature was rejected — a setup state.
+    Auth,
+    /// Network, throttling, 5xx, unreadable body or no plan — a real failure.
+    Other,
+}
+
+#[derive(Clone, Debug)]
+struct CallErr {
+    failure: CallFailure,
+    message: String,
+}
+
+impl CallErr {
+    fn other(message: impl Into<String>) -> Self {
+        Self {
+            failure: CallFailure::Other,
+            message: message.into(),
+        }
+    }
+
+    fn auth(message: impl Into<String>) -> Self {
+        Self {
+            failure: CallFailure::Auth,
+            message: message.into(),
+        }
+    }
+}
+
 pub async fn snapshot() -> Snapshot {
     match fetch().await {
         Ok(s) => s,
-        Err(e) => Snapshot::error(ID, NAME, e),
+        Err(e) => failed_snapshot(e),
     }
 }
 
@@ -31,11 +71,21 @@ pub fn local_credential_hint() -> Option<String> {
 pub async fn snapshot_with_key(key: &str) -> Snapshot {
     match fetch_with_credential(key).await {
         Ok(s) => s,
-        Err(e) => Snapshot::error(ID, NAME, e),
+        Err(e) => failed_snapshot(e),
     }
 }
 
-async fn fetch() -> Result<Snapshot, String> {
+/// A rejection the user can fix becomes the yellow `needs_setup` card with
+/// the AK:SK + console hint; everything else keeps the red error card.
+fn failed_snapshot(err: CallErr) -> Snapshot {
+    if err.failure == CallFailure::Auth {
+        Snapshot::needs_setup(ID, NAME, None, vec![], CREDENTIAL_HINT)
+    } else {
+        Snapshot::error(ID, NAME, err.message)
+    }
+}
+
+async fn fetch() -> Result<Snapshot, CallErr> {
     let (env_ak, env_sk) = (
         std::env::var("VOLC_ACCESS_KEY")
             .ok()
@@ -58,23 +108,27 @@ async fn fetch() -> Result<Snapshot, String> {
 }
 
 /// The stored slot carries `AK:SK` together (one paste, one secret store).
-fn split_credential(cred: &str) -> Result<(String, String), String> {
-    let (ak, sk) = cred.trim().split_once(':').ok_or(
-        "paste the credential as AK:SK — AccessKeyId:SecretAccessKey from ark.volcengine.com",
-    )?;
+/// A paste without the pair is the classic wrong credential type (an Ark API
+/// key alone), so it classifies as auth and lands on the setup hint.
+fn split_credential(cred: &str) -> Result<(String, String), CallErr> {
+    let (ak, sk) = cred.trim().split_once(':').ok_or_else(|| {
+        CallErr::auth(
+            "paste the credential as AK:SK — AccessKeyId:SecretAccessKey from ark.volcengine.com",
+        )
+    })?;
     let (ak, sk) = (ak.trim(), sk.trim());
     if ak.is_empty() || sk.is_empty() {
-        return Err("AK:SK paste is missing one half".into());
+        return Err(CallErr::auth("AK:SK paste is missing one half"));
     }
     Ok((ak.into(), sk.into()))
 }
 
-async fn fetch_with_credential(cred: &str) -> Result<Snapshot, String> {
+async fn fetch_with_credential(cred: &str) -> Result<Snapshot, CallErr> {
     let (ak, sk) = split_credential(cred)?;
     fetch_with(&ak, &sk).await
 }
 
-async fn call(ak: &str, sk: &str, action: &str) -> Result<Value, String> {
+async fn call(ak: &str, sk: &str, action: &str) -> Result<Value, CallErr> {
     let query = norm_query(&[("Action", action), ("Version", "2024-01-01")]);
     let body = "{}";
     let headers = sign(ak, sk, "POST", "/", &query, body);
@@ -87,51 +141,120 @@ async fn call(ak: &str, sk: &str, action: &str) -> Result<Value, String> {
     let resp = req
         .send()
         .await
-        .map_err(|e| format!("{action} request: {e}"))?;
+        .map_err(|e| CallErr::other(format!("{action} request: {e}")))?;
     let status = resp.status();
-    let doc: Value = resp
-        .json()
+    let text = resp
+        .text()
         .await
-        .map_err(|e| format!("{action} parse: {e}"))?;
+        .map_err(|e| CallErr::other(format!("{action} read: {e}")))?;
+    // An error can arrive as HTML (a gateway page), so parse failure is only
+    // fatal on a success status — an HTTP error still carries its verdict.
+    let doc: Value = match serde_json::from_str(&text) {
+        Ok(doc) => doc,
+        Err(e) if status.is_success() => {
+            return Err(CallErr::other(format!("{action} parse: {e}")));
+        }
+        Err(_) => Value::Null,
+    };
     if !status.is_success() {
-        // Volcengine errors carry a message under ResponseMetadata.
-        let msg = doc
-            .pointer("/ResponseMetadata/Error/Message")
-            .or_else(|| doc.pointer("/ResponseMetadata/Error/Code"))
+        // Volcengine errors carry a code and message under ResponseMetadata.
+        let error = doc
+            .pointer("/ResponseMetadata/Error")
+            .or_else(|| doc.get("Error"));
+        let code = error
+            .and_then(|e| e.get("Code"))
             .and_then(Value::as_str)
             .unwrap_or("");
-        return Err(format!("{action}: HTTP {status} {msg}"));
+        let msg = error
+            .and_then(|e| e.get("Message"))
+            .and_then(Value::as_str)
+            .unwrap_or("");
+        let detail: Vec<&str> = [code, msg].into_iter().filter(|s| !s.is_empty()).collect();
+        let suffix = if detail.is_empty() {
+            String::new()
+        } else {
+            format!(" {}", detail.join(" "))
+        };
+        return Err(CallErr {
+            failure: classify_failure(status.as_u16(), code),
+            message: format!("{action}: HTTP {status}{suffix}"),
+        });
     }
     Ok(doc)
 }
 
-async fn fetch_with(ak: &str, sk: &str) -> Result<Snapshot, String> {
+/// Volcengine rejects a bad key or a bad signature with 401/403, or names it
+/// in the body (`InvalidCredential`, `SignatureDoesNotMatch`, …). Throttling
+/// and upstream faults are not verdicts on the credential: 429, 5xx and
+/// unexplained codes keep the red card.
+fn classify_failure(status: u16, code: &str) -> CallFailure {
+    if matches!(status, 401 | 403) {
+        return CallFailure::Auth;
+    }
+    if status == 429 || status >= 500 {
+        return CallFailure::Other;
+    }
+    let code = code.to_ascii_lowercase();
+    let signed = [
+        "credential",
+        "signature",
+        "accesskey",
+        "secretkey",
+        "authentication",
+        "authorization",
+    ]
+    .iter()
+    .any(|needle| code.contains(needle));
+    if signed || code == "accessdenied" {
+        CallFailure::Auth
+    } else {
+        CallFailure::Other
+    }
+}
+
+/// Which failure explains an empty result. A rejection outranks an upstream
+/// fault because it is the actionable one and the same AK:SK is the fix;
+/// otherwise the real error (network, 5xx, throttling) surfaces untouched.
+fn pick_failure(afp: &Result<Value, CallErr>, coding: &Result<Value, CallErr>) -> CallErr {
+    let errors: Vec<&CallErr> = [afp, coding]
+        .iter()
+        .filter_map(|result| result.as_ref().err())
+        .collect();
+    if let Some(auth) = errors.iter().find(|e| e.failure == CallFailure::Auth) {
+        return (*auth).clone();
+    }
+    if let Some(other) = errors.first() {
+        return (*other).clone();
+    }
+    CallErr::other("no plan quota found for this AK/SK")
+}
+
+async fn fetch_with(ak: &str, sk: &str) -> Result<Snapshot, CallErr> {
     let afp = call(ak, sk, "GetAgentPlanAFPUsage").await;
     let coding = call(ak, sk, "GetCodingPlanUsage").await;
+    assemble(&afp, &coding)
+}
 
+/// The pure decision once both plan surfaces have answered: the first
+/// non-empty metric set wins; two empty answers are a failure the caller
+/// turns into either the yellow setup card or the red error card.
+fn assemble(
+    afp: &Result<Value, CallErr>,
+    coding: &Result<Value, CallErr>,
+) -> Result<Snapshot, CallErr> {
     let mut metrics = Vec::new();
-    if let Ok(doc) = &afp {
+    if let Ok(doc) = afp {
         metrics = afp_metrics(doc);
     }
     if metrics.is_empty() {
-        if let Ok(doc) = &coding {
+        if let Ok(doc) = coding {
             metrics = coding_metrics(doc);
         }
     }
     if metrics.is_empty() {
-        // Surface whichever call actually failed — both empty means the key
-        // likely has no plan at all.
-        let err = |r: &Result<Value, String>| r.as_ref().err().cloned().unwrap_or_default();
-        let afp_err = err(&afp);
-        let detail = if afp_err.is_empty() {
-            err(&coding)
-        } else {
-            afp_err
-        };
-        if detail.is_empty() {
-            return Err("no plan quota found for this AK/SK".into());
-        }
-        return Err(detail);
+        // Both surfaces came up empty: an auth rejection outranks any other
+        // failure, and two clean-but-empty answers mean no plan at all.
+        return Err(pick_failure(afp, coding));
     }
     Ok(Snapshot::ok(ID, NAME, None, metrics))
 }
@@ -398,5 +521,103 @@ mod tests {
         assert_eq!(metrics[0].label, "free_5h");
         assert_eq!(metrics[0].used_percent, Some(42.0)); // ratio scaled
         assert_eq!(metrics[1].used_percent, Some(61.0)); // raw percent kept
+    }
+
+    // ── #48-3: a credential/signature rejection is a setup state, not a
+    //    broken card; network, throttling and 5xx keep the red error. ──────
+
+    #[test]
+    fn credential_rejection_becomes_needs_setup_with_the_pair_hint() {
+        let snap = failed_snapshot(CallErr::auth(
+            "GetCodingPlanUsage: HTTP 401 InvalidCredential",
+        ));
+        assert_eq!(snap.status, "needs_setup");
+        assert_eq!(snap.id, ID);
+        assert_eq!(snap.error.as_deref(), Some(CREDENTIAL_HINT));
+    }
+
+    #[test]
+    fn network_and_upstream_failures_stay_red_with_their_own_detail() {
+        let snap = failed_snapshot(CallErr::other(
+            "GetAgentPlanAFPUsage request: connection reset",
+        ));
+        assert_eq!(snap.status, "error");
+        assert_eq!(
+            snap.error.as_deref(),
+            Some("GetAgentPlanAFPUsage request: connection reset")
+        );
+    }
+
+    #[test]
+    fn failure_classification_splits_verdicts_from_transport() {
+        // Status-level rejections.
+        assert_eq!(classify_failure(401, ""), CallFailure::Auth);
+        assert_eq!(classify_failure(403, "AccessDenied"), CallFailure::Auth);
+        // Named in the body even on another status.
+        assert_eq!(classify_failure(400, "SignatureDoesNotMatch"), CallFailure::Auth);
+        assert_eq!(classify_failure(400, "InvalidAccessKeyId"), CallFailure::Auth);
+        // Transport, throttling and upstream faults are not credential verdicts.
+        assert_eq!(classify_failure(429, "Throttling"), CallFailure::Other);
+        assert_eq!(classify_failure(500, "InternalError"), CallFailure::Other);
+        assert_eq!(classify_failure(503, ""), CallFailure::Other);
+        assert_eq!(classify_failure(400, "QuotaExceeded"), CallFailure::Other);
+    }
+
+    #[test]
+    fn wrong_credential_type_is_an_auth_verdict_before_any_network_call() {
+        // An Ark API key pasted alone has no ':' — the classic wrong-type
+        // mistake must land on the setup hint, not a red parse error.
+        let err = split_credential("ark-key-without-a-colon").unwrap_err();
+        assert_eq!(err.failure, CallFailure::Auth);
+        assert_eq!(failed_snapshot(err).status, "needs_setup");
+    }
+
+    #[test]
+    fn auth_rejection_outranks_transport_in_a_split_pair() {
+        let auth = Err(CallErr::auth("GetCodingPlanUsage: HTTP 403 SignatureDoesNotMatch"));
+        let net = Err(CallErr::other("GetAgentPlanAFPUsage request: timeout"));
+        assert_eq!(pick_failure(&net, &auth).failure, CallFailure::Auth);
+        // No verdict anywhere: the real error surfaces untouched, AFP first.
+        let picked = pick_failure(&net, &Err(CallErr::other("GetCodingPlanUsage: HTTP 500 boom")));
+        assert_eq!(picked.failure, CallFailure::Other);
+        assert_eq!(picked.message, "GetAgentPlanAFPUsage request: timeout");
+        // Two clean-but-empty answers keep the existing no-plan detail.
+        let empty = Ok(json!({}));
+        let picked = pick_failure(&empty, &empty);
+        assert_eq!(picked.failure, CallFailure::Other);
+        assert_eq!(picked.message, "no plan quota found for this AK/SK");
+    }
+
+    #[test]
+    fn valid_pair_produces_the_same_ok_snapshot_as_before() {
+        let doc = json!({"Result": {"AFPFiveHour": {"Quota": 100, "Used": 40}}});
+        let snap = assemble(&Ok(doc), &Err(CallErr::other("ignored"))).unwrap();
+        assert_eq!(snap.status, "ok");
+        assert_eq!(snap.error, None);
+        assert_eq!(snap.metrics.len(), 1);
+        assert_eq!(snap.metrics[0].used_percent, Some(40.0));
+        // Coding-plan answer wins when AFP is empty.
+        let coding = json!({"Result": {"QuotaUsage": [{"Level": "WEEK", "Percent": 61.0}]}});
+        let snap = assemble(&Ok(json!({})), &Ok(coding)).unwrap();
+        assert_eq!(snap.status, "ok");
+        assert_eq!(snap.metrics[0].label, "week");
+    }
+
+    #[test]
+    fn existing_detail_strings_stay_byte_identical() {
+        let err = split_credential("no-separator").unwrap_err();
+        assert_eq!(
+            err.message,
+            "paste the credential as AK:SK — AccessKeyId:SecretAccessKey from ark.volcengine.com"
+        );
+        assert_eq!(
+            split_credential(":onlysk").unwrap_err().message,
+            "AK:SK paste is missing one half"
+        );
+        let empty = Ok(json!({}));
+        assert_eq!(
+            pick_failure(&empty, &empty).message,
+            "no plan quota found for this AK/SK"
+        );
     }
 }

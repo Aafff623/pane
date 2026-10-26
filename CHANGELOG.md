@@ -1,5 +1,19 @@
 # Changelog
 
+## Unreleased
+
+官网口径 / 法务英文版
+
+### 新增
+
+- **官网法务英文版**：`/en/privacy`、`/en/terms` 提供英文摘要（事实与中文版一致，不新增承诺）；页脚与下载区补 LICENSE 链接；根目录 `PRIVACY.md` 只做指针，权威仍是 `docs/privacy.md`。
+- **免费口径规格行**：下载区把「全功能免费 / 无 Pro 或订阅 / 无需注册账号」从平台长句里抽成三行规格。
+
+### 变更
+
+- **版本与 provider 计数单一来源**：新增 `site/scripts/sync-site-version.mjs`，从 `package.json` 与前端目录生成 `site-meta.json` 并回写页面 fallback；计数链 Rust 77 家 + spend-only 白名单（`mcode`）= 站点 78 张卡由脚本与测试双向锁定，CI 增加 `--check` 门。
+- **隐私口径同步**：官网隐私页补 `status.claude.com` 状态探测一行；条款页数据目录改为 `%APPDATA%\PaneAafff623`；英文访问自动指向英文法务路由。
+
 ## 0.11.0 — 2026-10-26
 
 独立身份 / 数据迁移 / 站点与收尾

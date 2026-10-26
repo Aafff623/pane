@@ -68,7 +68,11 @@ function applyEnglishCopy() {
   document.querySelectorAll('.faq-group').forEach((group, gi) => { const set = (node, key) => { if (node && isEnglish && en[key]) node.textContent = en[key]; }; set(group.querySelector('.faq-group-title'), `faq.g${gi + 1}`); group.querySelectorAll('.faq-item').forEach((item, ii) => { const n = gi * 3 + ii + 1; set(item.querySelector('summary'), `faq.q${n}`); set(item.querySelector('.faq-body p'), `faq.a${n}`); }); });
   setText('.faq-section .section-head p', 'faqCopy');
   setText('.faq-contact span', 'faq.contactPrompt'); setText('.faq-contact a', 'faq.cta');
-  setTexts('.bottom-actions .chip__label',['coming','coming']); setText('.bottom-actions .button[data-variant=secondary]','tryDemo'); setText('.platforms','downloadNote'); setText('[data-release-prefix]','releasePrefix'); setTexts('.site-footer .footer-content>div a',['source','docs','feedback']);
+  setTexts('.bottom-actions .chip__label',['coming','coming']); setText('.bottom-actions .button[data-variant=secondary]','tryDemo'); setText('.platforms','downloadNote'); setText('[data-release-prefix]','releasePrefix');
+  setTexts('.free-spec b',['freeSpec1Title','freeSpec2Title','freeSpec3Title']); setTexts('.free-spec span',['freeSpec1Copy','freeSpec2Copy','freeSpec3Copy']);
+  setTexts('.platforms:nth-of-type(2) a',['cnMirror','source','footerLicense']);
+  document.querySelector('[data-free-spec]')?.setAttribute('aria-label',en.freeSpecLabel);
+  setTexts('.site-footer .footer-content>div a',['source','docs','feedback','footerPrivacy','footerTerms','footerLicense']);
   setText('#design .section-index','designIndex'); setText('#design .section-head h2','designTitle'); setText('#design .section-head p','designCopy'); setTexts('#design .design-card h3',['designCard1','designCard2']); setTexts('#design .design-card p',['designCard1Copy','designCard2Copy']); setTexts('#design .design-open',['designOpen','designOpen']);
   setText('.signal-section .section-index','signalsIndex'); setText('#signals-title','signalsTitle'); setText('.signal-section .section-head p','signalsCopy');
   setText('.signal-beam .signal-card-tag','sigRefreshTag'); setText('.signal-beam .signal-caption h3','sigRefreshTitle'); setText('.signal-beam .signal-caption p','sigRefreshCopy'); setTexts('.signal-beam .sig-node>span',['sigNodeTimer','sigNodeManual','sigNodeLaunch','sigNodeSnapshot','sigNodePanel']); setText('.signal-beam .sig-node--hub b','sigNodeGate');
@@ -77,6 +81,17 @@ function applyEnglishCopy() {
   setText('.signal-keys .signal-card-tag','sigKeysTag'); setText('.signal-keys .signal-card-alt','sigSystemHotkey'); setText('.signal-keys .signal-caption h3','sigKeysTitle'); setText('.signal-keys .signal-caption p','sigKeysCopy'); setText('.sig-command b','sigKeysPanel');
 }
 applyEnglishCopy();
+// One canonical markup per language (#82): the static footer/boundary links
+// point at the Chinese legal pages, so an English visit gets the English
+// routes instead. Runs after applyEnglishCopy because that injects one of the
+// links as HTML.
+function localizeLegalLinks(){
+  if(!isEnglish)return;
+  for(const [from,to] of [['/privacy.html','/en/privacy'],['/terms.html','/en/terms']]){
+    for(const a of document.querySelectorAll(`a[href="${from}"]`))a.setAttribute('href',to);
+  }
+}
+localizeLegalLinks();
 initUsageFlow(isEnglish,en);
 initProviderOrbits();
 initProviderMarquee();

@@ -1,4 +1,4 @@
-Status: blocked (owner login)
+Status: blocked (owner login) — capture harness shipped: `PANE_CONSOLE_PROBE=1` writes shape-only logs (no cookie/PII) for both families. Owner steps: `.scratch/011-closeout/12-calibration-steps.md`.
 Type: task
 Blocked by: owner #38/#47 login
 

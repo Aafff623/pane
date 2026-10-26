@@ -1,4 +1,4 @@
-Status: pending
+Status: done (2026-10-26) — version/count generated + CI `--check` gate + chain assertion (Rust 77 + `mcode` whitelist = site 78); free-facts spec row; root `PRIVACY.md` pointer; `/en/privacy` + `/en/terms` routes with LICENSE links and sitemap alternates. Site tests 25/25.
 Type: task
 Blocked by: 01
 

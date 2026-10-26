@@ -1,4 +1,4 @@
-Status: pending
+Status: in progress — license recorded (`.scratch/site-oil-ui-cards/license.md`), `check-skin-packs.mjs` green (signal/ink/comic-pixel 1.0.2, size+sha ok); deploy and #58-05 screenshots remain.
 Type: task
 Blocked by: 01
 

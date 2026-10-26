@@ -43,7 +43,7 @@
 
 ## 已知限制（不是缺陷）
 
-- 官方 `get-user-request-usage` 流水未接入（缺可验证账号，见 issues/09）。
-- CodeBuddy IDE `history/index.json` 未接入（本轮只做 CLI JSONL）。
+- 官方 `get-user-request-usage` 流水：CN 已接入（卡片一行汇总 + 纯函数分页/去重/聚合，见 `providers/workbuddy_official_usage.rs`）；30 天用量面板（账号筛选/每日趋势/模型明细）仍在 #31，见 `.scratch/011-closeout/issues/08-workbuddy.md`。AI 档未探测（无账号）。
+- CodeBuddy IDE `history/index.json` 已接入（#32 已关闭；`source_status` 区分 detected/not_detected）。
 - 本地 JSONL 的跨文件整份副本可能重复计数（逐文件去重；见 issues/07 comments）。
 - 国际版真实 OAuth / 账单路径来自上游已发布代码，Pane 侧尚未有真机账号验证。

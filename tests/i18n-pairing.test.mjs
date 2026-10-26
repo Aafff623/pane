@@ -108,3 +108,21 @@ test("i18n: every METRIC_KEYS target exists in all three dictionaries", () => {
     assert.deepEqual(missing, [], `METRIC_KEYS targets missing from ${dict}`);
   }
 });
+
+test("i18n: volcengine CREDENTIAL_HINT matches card.hintVolcCredential byte-for-byte", async () => {
+  // displayCardHint recognizes the backend hint by exact English text; if the
+  // Rust constant drifts from the en dictionary the zh/ru card silently falls
+  // back to a raw English sentence.
+  const rust = await readFile(
+    new URL("../src-tauri/src/providers/volcengine.rs", import.meta.url),
+    "utf8",
+  );
+  const m = rust.match(/const CREDENTIAL_HINT: &str = "((?:[^"\\]|\\.)*)";/);
+  assert.ok(m, "CREDENTIAL_HINT not found in volcengine.rs");
+  const hint = m[1].replace(/\\"/g, '"').replace(/\\n/g, "\n");
+  assert.equal(
+    dictEntries("en").get("card.hintVolcCredential"),
+    hint,
+    "en card.hintVolcCredential must equal the Rust CREDENTIAL_HINT constant",
+  );
+});
