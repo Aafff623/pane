@@ -1,8 +1,9 @@
-//! Per-account token-refresh lock (#63-05). Pane reads local credentials and
-//! has no multi-account refresh worker yet, so this module supplies the exact
-//! double-check semantics a future worker must use, plus the in-process
-//! registry keyed by (family, account). No cross-process file lock: Pane has
-//! no shared credential directory.
+//! Per-account token-refresh lock (#63-05). The registry is keyed by
+//! (family, account); production callers hold the lock across the token
+//! exchange's network await, so it is a `tokio::sync::Mutex` — a std guard
+//! held across an await would make the refresh future non-Send and could
+//! stall the executor. No cross-process file lock: Pane has no shared
+//! credential directory.
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, OnceLock};
@@ -34,18 +35,18 @@ pub fn lock_key(family: &str, account_id: &str) -> String {
     format!("{}::{account_id}", family.trim().to_lowercase())
 }
 
-fn registry() -> &'static Mutex<HashMap<String, Arc<Mutex<()>>>> {
-    static REGISTRY: OnceLock<Mutex<HashMap<String, Arc<Mutex<()>>>>> = OnceLock::new();
+fn registry() -> &'static Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>> {
+    static REGISTRY: OnceLock<Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>> = OnceLock::new();
     REGISTRY.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
-pub fn account_lock(family: &str, account_id: &str) -> Arc<Mutex<()>> {
+pub fn account_lock(family: &str, account_id: &str) -> Arc<tokio::sync::Mutex<()>> {
     let key = lock_key(family, account_id);
     registry()
         .lock()
         .unwrap_or_else(|error| error.into_inner())
         .entry(key)
-        .or_insert_with(|| Arc::new(Mutex::new(())))
+        .or_insert_with(|| Arc::new(tokio::sync::Mutex::new(())))
         .clone()
 }
 
@@ -85,7 +86,8 @@ mod tests {
             let refreshes = refreshes.clone();
             let generation = generation.clone();
             handles.push(std::thread::spawn(move || {
-                let _guard = lock.lock().unwrap();
+                // Plain std threads (no tokio runtime here) → blocking_lock.
+                let _guard = lock.blocking_lock();
                 let current = generation.load(Ordering::SeqCst) as u64;
                 let token_valid = current > observed;
                 if decide_after_lock(observed, current, token_valid) == RefreshDecision::Refresh {

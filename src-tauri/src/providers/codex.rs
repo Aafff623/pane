@@ -169,6 +169,7 @@ pub(crate) fn backup_auth_logins() -> Vec<crate::codex_accounts::CodexLogin> {
             expires_at: String::new(),
             added_at: Utc::now().timestamp_millis(),
             imported_from_backup: true,
+            generation: 0,
         });
     }
     out
@@ -246,55 +247,166 @@ pub(crate) fn login_card_name(login: &crate::codex_accounts::CodexLogin) -> Stri
     format!("Codex @{}", crate::codex_accounts::hash8(&login.account_id))
 }
 
-/// Resolve (and if needed refresh) a stored login. The refreshed pair is
+/// Resolve (and if needed refresh) a stored login under the shared
+/// per-account refresh lock (#63-05). The generation observed BEFORE waiting
+/// decides, after the reload, whether another task already rotated the pair
+/// (reuse) or the token still has to be exchanged once. The refreshed pair is
 /// written back into the account store so the next fetch starts fresh; the
 /// store is re-loaded right before the write so a concurrent rename or
-/// remove from the UI is not clobbered.
-fn login_refresh_lock(account_id: &str) -> std::sync::Arc<tokio::sync::Mutex<()>> {
-    use std::sync::{Arc, Mutex, OnceLock, Weak};
-    static LOCKS: OnceLock<Mutex<std::collections::HashMap<String, Weak<tokio::sync::Mutex<()>>>>> = OnceLock::new();
-    let mut locks = LOCKS.get_or_init(|| Mutex::new(Default::default())).lock().unwrap_or_else(|e| e.into_inner());
-    locks.retain(|_, lock| lock.strong_count() > 0);
-    if let Some(lock) = locks.get(account_id).and_then(Weak::upgrade) { return lock; }
-    let lock = Arc::new(tokio::sync::Mutex::new(()));
-    locks.insert(account_id.to_string(), Arc::downgrade(&lock));
-    lock
-}
-
+/// remove from the UI is not clobbered. The resolved credential then passes
+/// the identity guard (#63-02) before any quota is fetched with it.
 async fn login_access(login: &crate::codex_accounts::CodexLogin) -> Result<Access, String> {
-    let refresh_lock = login_refresh_lock(&login.account_id);
-    let _refresh = refresh_lock.lock().await;
     let base = crate::providers::config_dir();
-    let current = crate::codex_accounts::preview_single_login_from(&base).into_iter()
-        .find(|row| row.account_id == login.account_id).ok_or("Codex account no longer exists")?;
-    let exp = jwt_claims(&current.access_token).and_then(|c| c.get("exp").and_then(Value::as_i64))
-        .or_else(|| chrono::DateTime::parse_from_rfc3339(&current.expires_at).ok().map(|time| time.timestamp())).unwrap_or(0);
-    let mut ready = current.clone();
-    if ready.access_token.is_empty() || exp <= Utc::now().timestamp() + 60 {
-        if ready.refresh_token.trim().is_empty() {
-            return Err("Codex login expired and has no refresh token — sign in again from the auth center".into());
-        }
-        let resp = crate::providers::send_with_direct_fallback(|client| client
-            .post("https://auth.openai.com/oauth/token").json(&json!({
-                "client_id": CLIENT_ID, "grant_type": "refresh_token",
-                "refresh_token": ready.refresh_token, "scope": "openid profile email",
-            }))).await.map_err(|e| format!("token refresh: {e}"))?;
-        if !resp.status().is_success() { return Err(format!(
-            "token refresh failed: HTTP {}{}",
-            resp.status(),
-            super::retry_hint(&resp)
-        )); }
-        let tok: Value = resp.json().await.map_err(|e| format!("token refresh parse: {e}"))?;
-        ready.access_token = tok.get("access_token").and_then(Value::as_str).filter(|s| !s.is_empty())
-            .ok_or("refresh response missing access_token")?.to_string();
-        if let Some(value) = tok.get("refresh_token").and_then(Value::as_str).filter(|s| !s.is_empty()) { ready.refresh_token = value.into(); }
-        if let Some(value) = tok.get("id_token").and_then(Value::as_str).filter(|s| !s.is_empty()) { ready.id_token = value.into(); }
-        ready.expires_at = (Utc::now() + chrono::Duration::seconds(tok.get("expires_in").and_then(Value::as_i64).unwrap_or(3600).max(1))).to_rfc3339();
-        ready = crate::codex_accounts::save_refreshed_from(&base, &current, &ready)?;
-    }
+    let observed_generation = login.generation;
+    let refresh_base = base.clone();
+    let refresh = move |current: crate::codex_accounts::CodexLogin| -> BoxRefresh<'static> {
+        Box::pin(async move { refresh_login_token(&refresh_base, current).await })
+    };
+    let ready =
+        resolve_login_under_lock(&base, &login.account_id, observed_generation, refresh).await?;
+    verify_login_identity(&ready)?;
     let plan = jwt_claims(&ready.id_token).and_then(|c| c.pointer("/https:~1~1api.openai.com~1auth/chatgpt_plan_type")
         .and_then(Value::as_str).map(str::to_string));
     Ok(Access { token: ready.access_token, account_id: ready.account_id, plan })
+}
+
+/// One boxed refresh attempt; injectable so the lock semantics are testable
+/// without touching the network.
+type BoxRefresh<'a> = std::pin::Pin<
+    Box<dyn std::future::Future<Output = Result<crate::codex_accounts::CodexLogin, String>> + Send + 'a>,
+>;
+
+/// The per-account critical section: wait on the shared `account_token_lock`
+/// registry, reload the row, then apply the `decide_after_lock` generation
+/// double-check — an advanced generation plus a valid token means the winner
+/// of the race already rotated the pair, so the waiter reuses it instead of
+/// consuming the rotated refresh_token a second time.
+async fn resolve_login_under_lock<F>(
+    base: &std::path::Path,
+    account_id: &str,
+    observed_generation: u64,
+    refresh: F,
+) -> Result<crate::codex_accounts::CodexLogin, String>
+where
+    F: FnOnce(crate::codex_accounts::CodexLogin) -> BoxRefresh<'static>,
+{
+    let lock = crate::account_token_lock::account_lock("codex", account_id);
+    let _guard = lock.lock().await;
+    let current = crate::codex_accounts::preview_single_login_from(base)
+        .into_iter()
+        .find(|row| row.account_id == account_id)
+        .ok_or("Codex account no longer exists")?;
+    let token_valid = login_token_valid(&current);
+    use crate::account_token_lock::{decide_after_lock, RefreshDecision};
+    match decide_after_lock(observed_generation, current.generation, token_valid) {
+        // Another task refreshed while this one waited: reuse its result.
+        RefreshDecision::Reuse => Ok(current),
+        // Nobody raced, but the reloaded token does not need a refresh.
+        RefreshDecision::Refresh if token_valid => Ok(current),
+        RefreshDecision::Refresh => refresh(current).await,
+    }
+}
+
+/// The stored pair is usable when an access token exists and its expiry
+/// (JWT `exp` claim, else the RFC3339 `expires_at` the store keeps) is more
+/// than a minute away — the same rule the refresh trigger always used.
+fn login_token_valid(login: &crate::codex_accounts::CodexLogin) -> bool {
+    if login.access_token.trim().is_empty() {
+        return false;
+    }
+    let exp = jwt_claims(&login.access_token)
+        .and_then(|c| c.get("exp").and_then(Value::as_i64))
+        .or_else(|| {
+            chrono::DateTime::parse_from_rfc3339(&login.expires_at)
+                .ok()
+                .map(|time| time.timestamp())
+        })
+        .unwrap_or(0);
+    exp > Utc::now().timestamp() + 60
+}
+
+/// The real token exchange for one stored login. Failures log the credential
+/// fingerprint (#63-02) — never the secret itself. The rotated triple is
+/// written back through the CAS-guarded store helper, which advances the
+/// row's generation for the next lock waiter.
+async fn refresh_login_token(
+    base: &std::path::Path,
+    current: crate::codex_accounts::CodexLogin,
+) -> Result<crate::codex_accounts::CodexLogin, String> {
+    if current.refresh_token.trim().is_empty() {
+        return Err("Codex login expired and has no refresh token — sign in again from the auth center".into());
+    }
+    let resp = crate::providers::send_with_direct_fallback(|client| client
+        .post("https://auth.openai.com/oauth/token").json(&json!({
+            "client_id": CLIENT_ID, "grant_type": "refresh_token",
+            "refresh_token": current.refresh_token, "scope": "openid profile email",
+        }))).await.map_err(|e| format!("token refresh: {e}"))?;
+    if !resp.status().is_success() {
+        eprintln!(
+            "[pane] codex token refresh failed for {}: HTTP {}, credential {}",
+            crate::codex_accounts::card_id_for_account(&current),
+            resp.status(),
+            crate::identity_guard::credential_fingerprint(
+                &current.access_token,
+                Some(&current.expires_at)
+            ),
+        );
+        return Err(format!(
+            "token refresh failed: HTTP {}{}",
+            resp.status(),
+            super::retry_hint(&resp)
+        ));
+    }
+    let tok: Value = resp.json().await.map_err(|e| format!("token refresh parse: {e}"))?;
+    let mut ready = current.clone();
+    ready.access_token = tok.get("access_token").and_then(Value::as_str).filter(|s| !s.is_empty())
+        .ok_or("refresh response missing access_token")?.to_string();
+    if let Some(value) = tok.get("refresh_token").and_then(Value::as_str).filter(|s| !s.is_empty()) { ready.refresh_token = value.into(); }
+    if let Some(value) = tok.get("id_token").and_then(Value::as_str).filter(|s| !s.is_empty()) { ready.id_token = value.into(); }
+    ready.expires_at = (Utc::now() + chrono::Duration::seconds(tok.get("expires_in").and_then(Value::as_i64).unwrap_or(3600).max(1))).to_rfc3339();
+    crate::codex_accounts::save_refreshed_from(base, &current, &ready)
+}
+
+/// Codex identity guard (#63-02): the credential's own claims must name the
+/// SAME ChatGPT account as the stored row before its quota may publish under
+/// this card. Both sides need a value — an older token without the claim is
+/// never treated as a mismatch. The account id is authoritative; the email
+/// claim only decides when the account claim is absent (a same-account email
+/// change must not alert). Failure logs the credential fingerprint, never
+/// the secret.
+pub(crate) fn verify_login_identity(
+    login: &crate::codex_accounts::CodexLogin,
+) -> Result<(), String> {
+    use crate::identity_guard::{check_identity, IdentityVerdict};
+    let claims = jwt_claims(&login.id_token).or_else(|| jwt_claims(&login.access_token));
+    let token_account = claims
+        .as_ref()
+        .and_then(|c| c.pointer("/https:~1~1api.openai.com~1auth/chatgpt_account_id"))
+        .and_then(Value::as_str);
+    let token_email = claims
+        .as_ref()
+        .and_then(|c| c.get("email"))
+        .and_then(Value::as_str);
+    let stored_email = Some(login.email.as_str()).filter(|s| !s.trim().is_empty());
+    let account = check_identity(Some(login.account_id.as_str()), token_account);
+    let mismatch = account == IdentityVerdict::Mismatch
+        || (account == IdentityVerdict::Missing
+            && check_identity(stored_email, token_email) == IdentityVerdict::Mismatch);
+    if mismatch {
+        eprintln!(
+            "[pane] codex identity mismatch on {}: credential {}",
+            crate::codex_accounts::card_id_for_account(login),
+            crate::identity_guard::credential_fingerprint(
+                &login.access_token,
+                Some(&login.expires_at)
+            ),
+        );
+        return Err(
+            "Codex identity mismatch: this credential belongs to a different ChatGPT account, so its quota was blocked instead of publishing under this card — remove the account and sign in again from the auth center"
+                .into(),
+        );
+    }
+    Ok(())
 }
 
 struct Access {
@@ -686,6 +798,132 @@ mod tests {
         assert_eq!(credits_balance(&none), Some(0.0));
         // No credits object at all → no row.
         assert_eq!(credits_balance(&json!({})), None);
+    }
+
+    fn login_with(
+        account_id: &str,
+        email: &str,
+        claims: Option<serde_json::Value>,
+    ) -> crate::codex_accounts::CodexLogin {
+        crate::codex_accounts::CodexLogin {
+            account_id: account_id.into(),
+            email: email.into(),
+            label: String::new(),
+            access_token: "synthetic-access".into(),
+            refresh_token: "rt".into(),
+            id_token: claims.map(fake_id_token).unwrap_or_default(),
+            expires_at: String::new(),
+            added_at: 0,
+            imported_from_backup: false,
+            generation: 0,
+        }
+    }
+
+    #[test]
+    fn identity_guard_hit_miss_and_missing_field() {
+        // HIT: the credential's chatgpt_account_id equals the stored card id.
+        let matched = login_with(
+            "acct-1",
+            "me@corp.com",
+            Some(json!({"email": "me@corp.com",
+                "https://api.openai.com/auth": {"chatgpt_account_id": "acct-1"}})),
+        );
+        assert!(super::verify_login_identity(&matched).is_ok());
+        // MISS: a rebound credential names a different account → alert, and
+        // the secret never appears in the message.
+        let rebound = login_with(
+            "acct-1",
+            "me@corp.com",
+            Some(json!({"email": "me@corp.com",
+                "https://api.openai.com/auth": {"chatgpt_account_id": "acct-2"}})),
+        );
+        let err = super::verify_login_identity(&rebound).unwrap_err();
+        assert!(err.contains("identity mismatch"));
+        assert!(!err.contains("synthetic-access"), "secret leaked into the alert");
+        // MISSING field: an older token without the account claim is never a
+        // mismatch when the email still agrees.
+        let no_claim = login_with(
+            "acct-1",
+            "me@corp.com",
+            Some(json!({"email": "me@corp.com"})),
+        );
+        assert!(super::verify_login_identity(&no_claim).is_ok());
+        // No account claim AND a different email → the email decides: alert.
+        let email_only = login_with(
+            "acct-1",
+            "me@corp.com",
+            Some(json!({"email": "someone@else.com"})),
+        );
+        assert!(super::verify_login_identity(&email_only).is_err());
+        // No identity claims at all → both sides missing → not a mismatch.
+        let no_token = login_with("acct-1", "me@corp.com", None);
+        assert!(super::verify_login_identity(&no_token).is_ok());
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn two_racing_login_refreshes_do_exactly_one_refresh() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        use std::sync::Arc;
+        let base = std::env::temp_dir()
+            .join(format!("pane-codex-lock-race-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        std::fs::create_dir_all(&base).unwrap();
+        let account_id = "lock-race-unique";
+        let seed = crate::codex_accounts::CodexLogin {
+            account_id: account_id.into(),
+            email: "race@example.com".into(),
+            label: "Race".into(),
+            // Non-empty but expired (the store filters empty tokens out):
+            // both racers see a row that needs a refresh.
+            access_token: "expired-token".into(),
+            refresh_token: "rt-race".into(),
+            id_token: String::new(),
+            expires_at: (chrono::Utc::now() - chrono::Duration::seconds(120)).to_rfc3339(),
+            added_at: 0,
+            imported_from_backup: false,
+            generation: 0,
+        };
+        crate::codex_accounts::save_accounts_to(&base, &[seed]).unwrap();
+        let counter = Arc::new(AtomicUsize::new(0));
+        let mut handles = Vec::new();
+        for _ in 0..2 {
+            let base = base.clone();
+            let counter = counter.clone();
+            handles.push(tokio::spawn(async move {
+                let refresh_base = base.clone();
+                let refresh_counter = counter.clone();
+                let refresh = move |current: crate::codex_accounts::CodexLogin| {
+                    Box::pin(async move {
+                        refresh_counter.fetch_add(1, Ordering::SeqCst);
+                        // A little latency so the loser genuinely queues behind
+                        // the per-account lock instead of trailing by luck.
+                        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+                        let mut refreshed = current.clone();
+                        refreshed.access_token = "refreshed-token".into();
+                        refreshed.refresh_token = "rt-rotated".into();
+                        refreshed.expires_at =
+                            (chrono::Utc::now() + chrono::Duration::seconds(3600)).to_rfc3339();
+                        crate::codex_accounts::save_refreshed_from(
+                            &refresh_base,
+                            &current,
+                            &refreshed,
+                        )
+                    }) as super::BoxRefresh<'static>
+                };
+                // Both racers observed generation 0 before waiting.
+                super::resolve_login_under_lock(&base, account_id, 0, refresh).await
+            }));
+        }
+        for handle in handles {
+            handle.await.unwrap().unwrap();
+        }
+        assert_eq!(counter.load(Ordering::SeqCst), 1, "exactly one real refresh");
+        let stored = crate::codex_accounts::load_accounts_from(&base);
+        let row = stored.iter().find(|r| r.account_id == account_id).unwrap();
+        assert_eq!(row.generation, 1, "generation advanced once");
+        assert_eq!(row.access_token, "refreshed-token");
+        crate::codex_accounts::save_accounts_to(&base, &[]).unwrap();
+        let _ = std::fs::remove_dir_all(&base);
     }
 }
 
