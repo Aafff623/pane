@@ -832,6 +832,9 @@ changes.
 
 ## 待确认
 
+- Z.ai (family `zai`) 的 pay-as-you-go 余额端点没有官方确认：无 Coding Plan
+  的 key 保持 `needs_setup` 的「待确认」文案（`no_plan_setup`），余额回退
+  在确认端点前不实现、不猜端点、不造 0%（#48-3，2026-10-26）。
 - Qoder 国际版 (family `qoder`) 的 Windows 配置目录按命名惯例取
   `com.qoder.app.stable`（CN 版为 `com.qodercn.app.stable`），备选 `Qoder`；
 - **Qoder CN 本机读数（`qoder_sessions.rs`）不依赖任何版本号。** 数据库位置靠发现：
