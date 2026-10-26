@@ -23,6 +23,20 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # Changed-lines architecture gate (#65): shared files may not gain a new
+  # provider literal without delegating to providers::<family>:: or carrying
+  # an explicit `// provider-specific: <reason>` marker.
+  family-gatekeeper:
+    if: github.event_name == 'pull_request' || github.event_name == 'push'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - run: node scripts/family-gatekeeper.mjs "${{ github.event.pull_request.base.sha || github.event.before }}"
+
   frontend:
     runs-on: ubuntu-latest
     steps:

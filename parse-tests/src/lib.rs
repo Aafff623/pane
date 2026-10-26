@@ -49,6 +49,9 @@ pub mod adaptive_interval;
 #[path = "../../src-tauri/src/account_token_lock.rs"]
 pub mod account_token_lock;
 
+#[path = "../../src-tauri/src/error.rs"]
+pub mod error;
+
 #[path = "../../src-tauri/src/fetch_strategy.rs"]
 pub mod fetch_strategy;
 

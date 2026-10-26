@@ -2,6 +2,7 @@ mod account_lifecycle;
 mod accounts;
 mod adaptive_interval;
 mod account_token_lock;
+mod error;
 mod fetch_strategy;
 mod identity_guard;
 mod limits;
@@ -643,13 +644,60 @@ fn build_tray_menu(app: &tauri::AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
     Menu::with_items(app, &items)
 }
 
+/// FNV-1a over the menu's visible state: provider rows (including the left
+/// percentage), popover visibility, autostart and locale. An unchanged
+/// signature means rebuild would produce the same native menu, so skip it.
+fn tray_menu_signature(
+    rows: &[(String, String)],
+    popover_visible: bool,
+    autostart: bool,
+    locale: &str,
+) -> u64 {
+    let mut hash = 0x811c_9dc5u64;
+    let mut feed = |value: &str| {
+        for byte in value.as_bytes() {
+            hash ^= u64::from(*byte);
+            hash = hash.wrapping_mul(0x0100_0193);
+        }
+        hash ^= 0xff;
+        hash = hash.wrapping_mul(0x0100_0193);
+    };
+    for (id, label) in rows {
+        feed(id);
+        feed(label);
+    }
+    feed(if popover_visible { "visible" } else { "hidden" });
+    feed(if autostart { "autostart" } else { "manual" });
+    feed(locale);
+    hash
+}
+
+static LAST_TRAY_MENU_SIG: std::sync::Mutex<Option<u64>> = std::sync::Mutex::new(None);
+
 fn rebuild_tray_menu(app: &tauri::AppHandle) {
     let Some(tray) = app.tray_by_id("tray") else {
         return;
     };
+    let cfg = config_with_defaults(load_config());
+    let signature = tray_menu_signature(
+        &cached_tray_provider_rows(&cfg),
+        main_popover_visible(app),
+        autostart_now_enabled(app),
+        cfg.get("locale").and_then(Value::as_str).unwrap_or("auto"),
+    );
+    if *LAST_TRAY_MENU_SIG
+        .lock()
+        .unwrap_or_else(|error| error.into_inner())
+        == Some(signature)
+    {
+        return;
+    }
     match build_tray_menu(app) {
         Ok(menu) => {
             let _ = tray.set_menu(Some(menu));
+            *LAST_TRAY_MENU_SIG
+                .lock()
+                .unwrap_or_else(|error| error.into_inner()) = Some(signature);
         }
         Err(e) => eprintln!("[pane] rebuild tray menu: {e}"),
     }
@@ -6855,12 +6903,28 @@ mod tests {
         rename_cached_snapshot, rename_cached_snapshot_in, rename_cached_snapshots_in,
         refresh_minutes_from,
         retain_current_onenewapi_results, strip_entry_application_order, strip_icon_ids_to_clear,
-        strip_is_active, strip_reset_ids, updater_endpoint_strings, CachedSnap, FailState,
+        strip_is_active, strip_reset_ids, tray_menu_signature, updater_endpoint_strings,
+        CachedSnap, FailState,
         OneNewApiMutationGuard, StripEntry,
     };
     use crate::alerts;
     use crate::providers::{Metric, Snapshot};
     use serde_json::{json, Value};
+
+    #[test]
+    fn tray_signature_changes_only_with_visible_menu_state() {
+        let rows = vec![("claude".to_string(), "Claude · 42% left".to_string())];
+        let first = tray_menu_signature(&rows, true, false, "zh");
+        assert_eq!(first, tray_menu_signature(&rows, true, false, "zh"));
+        assert_ne!(first, tray_menu_signature(&rows, false, false, "zh"));
+        assert_ne!(first, tray_menu_signature(&rows, true, true, "zh"));
+        assert_ne!(
+            first,
+            tray_menu_signature(&rows, true, false, "en")
+        );
+        let changed = vec![("claude".to_string(), "Claude · 41% left".to_string())];
+        assert_ne!(first, tray_menu_signature(&changed, true, false, "zh"));
+    }
     use std::collections::{HashMap, HashSet};
 
     fn strip_entry(id: &str, value: u32) -> StripEntry {
