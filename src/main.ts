@@ -556,12 +556,24 @@ interface PanelIntent {
   login?: boolean;
 }
 
+// Bumped when a config.json migration needs to run exactly once. The field is
+// a marker, not a behavior switch: startup writes the current number so the
+// next migration can tell an old file from a new one without guessing.
+const CONFIG_VERSION = 1;
+
+interface ProxyStatus {
+  manual: string | null;
+  system: string | null;
+  effective: string | null;
+  source: "manual" | "system" | "direct";
+}
+
 interface Config {
+  configVersion: number;
   refreshMinutes: number;
   disabled: string[];
   pinned: { provider: string; label: string } | null;
   trayProviders: string[];
-  telemetry: boolean;
   notifyAlmostOut: boolean;
   notifyCuttingClose: boolean;
   notifyWillRunOut: boolean;
@@ -640,11 +652,11 @@ interface Config {
 }
 
 const FRONTEND_CONFIG_KEYS = [
+  "configVersion",
   "refreshMinutes",
   "disabled",
   "pinned",
   "trayProviders",
-  "telemetry",
   "notifyAlmostOut",
   "notifyCuttingClose",
   "notifyWillRunOut",
@@ -877,10 +889,10 @@ const DIVIDER = "__ondemand__";
 const STALE_MS = 60 * 1000;
 let config: Config = {
   refreshMinutes: 5,
+  configVersion: CONFIG_VERSION,
   disabled: [],
   pinned: null,
   trayProviders: [],
-  telemetry: true,
   notifyAlmostOut: false,
   notifyCuttingClose: false,
   notifyWillRunOut: false,
@@ -1115,6 +1127,7 @@ function finishProviderEnable(id: string, generation: number): void {
 let refreshTimer: number | undefined;
 let footerTick: number | undefined;
 let lastSnapshots: Snapshot[] = [];
+let zcodeClaimTimer: number | null = null;
 /// First-paint read state for the board. index.html ships the skeleton cards;
 /// a re-render before the first answer must keep that loading state instead of
 /// claiming "nothing configured" (issue 03: pending and empty are exclusive).
@@ -3638,7 +3651,7 @@ function renderCard(s: Snapshot): string {
       ? `<span class="just-reset" title="${escapeHtml(t("card.justResetTip"))}">${escapeHtml(t("card.justReset"))}</span>`
       : "";
   const limitedHelp = shown.limited
-    ? `<button type="button" class="limited-help" data-limited-help="${escapeHtml(shown.id)}" title="${escapeHtml(t("card.limitedHelpTitle"))}" aria-label="${escapeHtml(t("card.limitedHelpTitle"))}">?</button>`
+    ? `<button type="button" class="limited-help" data-help-title="${escapeHtml(t("card.limitedHelpTitle"))}" data-help-body="${escapeHtml(`${t("card.limitedHelpBody")} ${t("card.limitedHelpAction")}`)}" aria-label="${escapeHtml(t("card.limitedHelpTitle"))}">?</button>`
     : "";
   const plan = shown.limited
     ? `<span class="plan" title="${escapeHtml(t("card.limitedPlan"))}">${escapeHtml(t("card.limitedPlan"))}</span>${limitedHelp}${justReset}`
@@ -6001,8 +6014,9 @@ function renderRtkSavingsBody(): string {
   const unattributedChannelRow = win.unattributedChannelSaved > 0
     ? channelRow(t("rtk.unattributedChannel"), win.unattributedChannelSaved, null, true)
     : "";
-  const channelsBody = channelRows || otherChannelRow || unattributedChannelRow
-    ? channelRows + otherChannelRow + unattributedChannelRow
+  const channelList = channelRows + otherChannelRow + unattributedChannelRow;
+  const channelsBody = channelList
+    ? `<div class="rtk-project-list">${channelList}</div>`
     : `<p class="rtk-projects-note">${escapeHtml(t("rtk.noChannels"))}</p>`;
   const projectRow = (name: string, value: number, commands: number | null, noise = false): string => {
     const tip = commands == null
@@ -6030,10 +6044,11 @@ function renderRtkSavingsBody(): string {
   const noiseRow = win.unattributedSaved > 0
     ? projectRow(t("rtk.unattributed"), win.unattributedSaved, null, true)
     : "";
+  const projectList = projectRows + otherRow + noiseRow;
   const projectsBody = data.projectsError
     ? `<p class="rtk-projects-note" title="${escapeHtml(data.projectsError)}">${escapeHtml(t("rtk.projectsError"))}</p>`
-    : projectRows || otherRow || noiseRow
-      ? projectRows + otherRow + noiseRow
+    : projectList
+      ? `<div class="rtk-project-list">${projectList}</div>`
       : `<p class="rtk-projects-note">${escapeHtml(t("rtk.noProjects"))}</p>`;
   // The CLI side stays usable when only Pane's own snapshot failed; say so
   // instead of hiding the failure in a title nobody hovers.
@@ -6065,6 +6080,7 @@ function renderRtkSavingsBody(): string {
       </div>
     </div>
     ${spark}
+    <p class="rtk-scope-note"><span>${escapeHtml(t("rtk.scopeNote"))}</span><button type="button" class="help-tip" data-help-title="${escapeHtml(t("rtk.scopeTitle"))}" data-help-body="${escapeHtml(t("rtk.scopeTip"))}" aria-label="${escapeHtml(t("rtk.scopeTitle"))}">?</button></p>
     ${historyNote}
     <div class="rtk-projects">
       <div class="rtk-section-head">
@@ -6842,7 +6858,7 @@ function renderQuotaOverview(): string {
             <span class="overview-chip-dot yellow"></span>
             <span class="overview-chip-text">${peakItems.length} ${escapeHtml(t("overview.peakShort"))}</span>
           </span>
-          <button type="button" class="overview-peak-help" data-overview-peak-help title="${escapeHtml(t("peak.helpTitle"))}">${uiIcon("question")}</button>
+          <button type="button" class="overview-peak-help" data-overview-peak-help data-help-title="${escapeHtml(t("peak.helpTitle"))}" data-help-body="${escapeHtml(t("peak.helpBody"))}" aria-label="${escapeHtml(t("peak.helpTitle"))}">${uiIcon("question")}</button>
         </span>`;
 
   // Reset-sorted reminder rows. Window label rides each quota; remaining
@@ -6969,6 +6985,8 @@ function renderQuotaOverview(): string {
 
 let buildText = "";
 let updateVersion: string | null = null;
+let updateNotes: string | null = null;
+let updateNotesFor: string | null = null;
 let aboutUpdateSync: (() => void) | null = null;
 /// In-flight push state for the spend-header indicator. Module-level so a
 /// dashboard re-render mid-download keeps the ring (the button element is
@@ -6982,6 +7000,7 @@ let updateSeen = 0;
 /// fills with byte progress; the footer button must stop offering (and
 /// silently ignoring clicks for) an update that is already in flight.
 function syncPushProgress(): void {
+  aboutUpdateSync?.();
   const btn = document.querySelector<HTMLElement>("[data-update-push]");
   if (btn) {
     btn.classList.toggle("busy", updatePushing);
@@ -7022,6 +7041,24 @@ function renderBuildInfo(): void {
     el.replaceChildren(btn);
   } else {
     el.textContent = checkingUpdate ? t("update.check") : buildText;
+  }
+}
+
+/// The updater already parses the release body; ask for it once per version
+/// so the About page can show a short summary without a second network API.
+async function loadAboutUpdateNotes(version: string): Promise<void> {
+  if (updateNotesFor === version) return;
+  updateNotesFor = version;
+  try {
+    const info = await invoke<{ version: string; notes: string | null } | null>(
+      "check_update_details",
+    );
+    if (info?.version === version) {
+      updateNotes = info.notes?.trim() || null;
+      aboutUpdateSync?.();
+    }
+  } catch {
+    // The version line and update button are still usable without notes.
   }
 }
 
@@ -9926,6 +9963,107 @@ function initLiquidLens(): void {
 // Tooltip bubbles: every `title` attribute is silently upgraded to a custom
 // bubble — 400ms deliberate dwell, balanced wrapping, anchored to the item.
 // ---------------------------------------------------------------------------
+
+/// Rich help cards for `?` buttons: title + body, 300 ms hover dwell,
+/// 200 ms leave delay, click to pin, focus-visible immediate, Escape or an
+/// outside click to close. One delegated implementation instead of one
+/// tooltip per rendered card.
+function setupHelpTips(): void {
+  const card = document.createElement("div");
+  card.className = "help-card";
+  card.hidden = true;
+  card.setAttribute("role", "tooltip");
+  document.body.appendChild(card);
+  let active: HTMLElement | null = null;
+  let pinned = false;
+  let openTimer = 0;
+  let closeTimer = 0;
+
+  const cancelClose = () => window.clearTimeout(closeTimer);
+  const close = (force = false) => {
+    if (pinned && !force) return;
+    card.hidden = true;
+    active = null;
+    pinned = false;
+  };
+  const open = (el: HTMLElement) => {
+    const title = el.dataset.helpTitle ?? "";
+    const body = el.dataset.helpBody ?? "";
+    if (!title && !body) return;
+    card.replaceChildren();
+    if (title) {
+      const strong = document.createElement("strong");
+      strong.textContent = title;
+      card.appendChild(strong);
+    }
+    if (body) {
+      const p = document.createElement("p");
+      p.textContent = body;
+      card.appendChild(p);
+    }
+    active = el;
+    card.hidden = false;
+    placeFixedTip(card, el.getBoundingClientRect(), { gap: 8, placement: "below" });
+  };
+  const scheduleOpen = (el: HTMLElement) => {
+    cancelClose();
+    window.clearTimeout(openTimer);
+    if (el === active && !card.hidden) return;
+    openTimer = window.setTimeout(() => open(el), 300);
+  };
+  const scheduleClose = () => {
+    cancelClose();
+    closeTimer = window.setTimeout(() => close(), 200);
+  };
+
+  card.addEventListener("mouseenter", cancelClose);
+  card.addEventListener("mouseleave", scheduleClose);
+  document.addEventListener("mouseover", (e) => {
+    const el = (e.target as HTMLElement).closest<HTMLElement>("[data-help-title]");
+    if (!el) return;
+    scheduleOpen(el);
+  });
+  document.addEventListener("mouseout", (e) => {
+    const el = (e.target as HTMLElement).closest<HTMLElement>("[data-help-title]");
+    if (!el) return;
+    const to = e.relatedTarget as Node | null;
+    if (to && (el.contains(to) || card.contains(to))) return;
+    scheduleClose();
+  });
+  document.addEventListener("focusin", (e) => {
+    const el = (e.target as HTMLElement).closest<HTMLElement>("[data-help-title]");
+    if (el) open(el);
+  });
+  document.addEventListener("focusout", (e) => {
+    const el = (e.target as HTMLElement).closest<HTMLElement>("[data-help-title]");
+    if (!el) return;
+    const to = e.relatedTarget as Node | null;
+    if (to && (el.contains(to) || card.contains(to))) return;
+    scheduleClose();
+  });
+  document.addEventListener("click", (e) => {
+    const el = (e.target as HTMLElement).closest<HTMLElement>("[data-help-title]");
+    // The peak button already opens a full schedule dialog on click; its
+    // card is hover/focus only so the two interactions do not fight.
+    if (el && !el.hasAttribute("data-overview-peak-help")) {
+      e.preventDefault();
+      if (pinned && active === el) close(true);
+      else {
+        pinned = true;
+        open(el);
+      }
+      return;
+    }
+    if (!card.contains(e.target as Node)) close(true);
+  });
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && !card.hidden) {
+      e.stopPropagation();
+      close(true);
+    }
+  }, true);
+  document.addEventListener("scroll", () => close(true), true);
+}
 
 function setupTooltips(): void {
   const tip = document.createElement("div");
@@ -12977,6 +13115,55 @@ function renderChangelogTimeline(): string {
   </section>`;
 }
 
+// ZCode gifts become a balance bucket only after the owner claims in the
+// ZCode app; the plan can sit in "held, not granted" for hours. A 60s
+// card-only poll catches the transition without making every provider poll
+// that often. It stops by itself when the claim line disappears.
+function hasPendingZcodeClaim(): boolean {
+  return lastSnapshots.some(
+    (snapshot) =>
+      snapshot.id === "zcode" &&
+      snapshot.metrics.some(
+        (metric) => {
+          const value = (metric.value ?? "").toLowerCase();
+          return (
+            value.includes("held · not granted (open zcode to claim)") ||
+            value.includes("activates at ") ||
+            value.includes("effective, waiting for zcode to sync")
+          );
+        },
+      ),
+  );
+}
+function syncZcodeClaimPoll(): void {
+  if (!hasPendingZcodeClaim()) {
+    if (zcodeClaimTimer !== null) {
+      window.clearInterval(zcodeClaimTimer);
+      zcodeClaimTimer = null;
+    }
+    return;
+  }
+  if (zcodeClaimTimer !== null) return;
+  zcodeClaimTimer = window.setInterval(() => {
+    if (!hasPendingZcodeClaim()) {
+      syncZcodeClaimPoll();
+      return;
+    }
+    if (document.hidden || !refreshState.requestCard("zcode")) return;
+    void invoke<Snapshot>("refresh_provider", { providerId: "zcode" })
+      .then((snapshot) => {
+        if (!refreshState.acceptCardResult("zcode", snapshot)) return;
+        const index = lastSnapshots.findIndex((item) => item.id === "zcode");
+        if (index >= 0) lastSnapshots[index] = snapshot;
+        else lastSnapshots.push(snapshot);
+        requestRender();
+        syncZcodeClaimPoll();
+      })
+      .catch(() => {})
+      .finally(() => refreshState.finishCard("zcode"));
+  }, 60_000);
+}
+
 function requestRender(): void {
   renderScheduler.request();
 }
@@ -13453,19 +13640,6 @@ function showTrendTip(el: HTMLElement): void {
   placeFixedTip(tip, el.getBoundingClientRect(), { gap: 6, placement: "below", align: "left", offsetX: -50 });
 }
 
-/// Hover help for a fallback-mode card: why the balance is missing and how
-/// to unlock it. Reuses the shared fixed tooltip surface.
-function showLimitedHelpTip(el: HTMLElement): void {
-  const tip = document.querySelector<HTMLElement>("#model-tip")!;
-  tip.innerHTML = `<div class="tip-help">
-    <strong>${escapeHtml(t("card.limitedHelpTitle"))}</strong>
-    <p>${escapeHtml(t("card.limitedHelpBody"))}</p>
-    <p class="tip-help-action">${escapeHtml(t("card.limitedHelpAction"))}</p>
-  </div>`;
-  tip.hidden = false;
-  placeFixedTip(tip, el.getBoundingClientRect(), { gap: 6, placement: "below", align: "left" });
-}
-
 function showModelTip(row: HTMLElement): void {
   const tip = document.querySelector<HTMLElement>("#model-tip")!;
   const [id, key] = (row.dataset.spend ?? "").split("|");
@@ -13598,6 +13772,7 @@ async function paintCachedSnapshots(): Promise<void> {
     // The live fetch may have already landed — never paint over it.
     if (!cached.length || lastSnapshots.length) return;
     lastSnapshots = cached;
+    syncZcodeClaimPoll();
     boardLoadPhase = "ready";
     ensureLayout();
     requestRender();
@@ -13859,6 +14034,7 @@ async function refresh(
     const firstData = lastSnapshots.length === 0;
     lastFetch = Date.now();
     lastSnapshots = snapshots;
+    syncZcodeClaimPoll();
     // The read finished: an empty list now means "nothing enabled", not
     // "still loading". Render-failed vs add-provider is decided in renderEmptyBoard.
     boardLoadPhase = "ready";
@@ -18237,6 +18413,26 @@ async function copyKeyvaultEntry(id: string, button: HTMLButtonElement): Promise
   }
 }
 
+/// The settings page must say which proxy is actually in force: a filled URL
+/// beats the system, and an empty URL still follows the OS (static or PAC
+/// fallback in platform::system_proxy). Never guess from the toggle alone.
+async function renderProxyStatus(): Promise<void> {
+  const node = document.querySelector<HTMLElement>("#proxy-status");
+  if (!node) return;
+  try {
+    const status = await invoke<ProxyStatus>("proxy_status");
+    node.dataset.source = status.source;
+    node.textContent =
+      status.source === "manual" && status.effective
+        ? t("settings.proxyStatusManual", { url: status.effective })
+        : status.source === "system" && status.effective
+          ? t("settings.proxyStatusSystem", { url: status.effective })
+          : t("settings.proxyStatusDirect");
+  } catch {
+    node.textContent = "";
+  }
+}
+
 function applyLocale(): void {
   config.locale = normalizeLocalePref(config.locale);
   try {
@@ -18279,6 +18475,10 @@ async function loadStartupPreferences(): Promise<Config> {
 
 async function initSettings(): Promise<void> {
   config = await loadStartupPreferences();
+  if (config.configVersion !== CONFIG_VERSION) {
+    config.configVersion = CONFIG_VERSION;
+    void patchConfig({ configVersion: CONFIG_VERSION }).catch(() => {});
+  }
   if (config.skinId === undefined) {
     const legacy = readSkin(window.localStorage);
     try { await patchConfig({ skinId: legacy }); } catch { config.skinId = legacy; }
@@ -18375,7 +18575,6 @@ async function initSettings(): Promise<void> {
     ["#notify-close", "notifyCuttingClose"],
     ["#notify-runout", "notifyWillRunOut"],
     ["#notify-resetsoon", "notifyResetSoon"],
-    ["#telemetry", "telemetry"],
   ];
   for (const [selector, key] of notifyToggles) {
     const box = document.querySelector<HTMLInputElement>(selector)!;
@@ -18635,14 +18834,40 @@ async function initSettings(): Promise<void> {
   proxyEnabled.checked = config.proxy?.enabled ?? false;
   proxyUrl.value = config.proxy?.url ?? "";
   const saveProxy = () => {
-    void patchConfig({ proxy: { enabled: proxyEnabled.checked, url: proxyUrl.value.trim() } }).then(
-      () => {
-        document.querySelector("#status")!.textContent = t("footer.proxySaved");
-      },
-    );
+    const url = proxyUrl.value.trim();
+    if (proxyEnabled.checked && url && !/^(https?|socks5):\/\/[^/\s]+(:\d+)?$/i.test(url)) {
+      const status = document.querySelector<HTMLElement>("#proxy-status");
+      if (status) status.textContent = t("settings.proxyInvalid");
+      return;
+    }
+    void patchConfig({ proxy: { enabled: proxyEnabled.checked, url } }).then(() => {
+      document.querySelector("#status")!.textContent = t("footer.proxySaved");
+      void renderProxyStatus();
+    });
   };
   proxyEnabled.addEventListener("change", saveProxy);
   proxyUrl.addEventListener("change", saveProxy);
+  document.querySelector("#proxy-detect")?.addEventListener("click", () => {
+    void (async () => {
+      try {
+        const status = await invoke<ProxyStatus>("proxy_status");
+        if (!status.system) {
+          const node = document.querySelector<HTMLElement>("#proxy-status");
+          if (node) node.textContent = t("settings.proxyNone");
+          return;
+        }
+        proxyUrl.value = status.system;
+        proxyEnabled.checked = true;
+        void patchConfig({ proxy: { enabled: true, url: status.system } }).then(() => {
+          document.querySelector("#status")!.textContent = t("footer.proxySaved");
+          void renderProxyStatus();
+        });
+      } catch {
+        /* the status line above the note already explains the fallback */
+      }
+    })();
+  });
+  void renderProxyStatus();
 
   populatePinnedOptions();
 
@@ -18759,7 +18984,6 @@ async function resetAllSettings(): Promise<void> {
     disabled: [],
     pinned: null,
     trayProviders: [],
-    telemetry: true,
     notifyAlmostOut: true,
     notifyCuttingClose: true,
     notifyWillRunOut: true,
@@ -18836,7 +19060,6 @@ function syncSettingsControls(): void {
   setCheck("#notify-close", config.notifyCuttingClose);
   setCheck("#notify-runout", config.notifyWillRunOut);
   setCheck("#notify-resetsoon", config.notifyResetSoon === true);
-  setCheck("#telemetry", config.telemetry);
   setCheck("#hide-while-sharing", config.hideUsageWhileSharing === true);
   setCheck("#show-trend", config.showTrend === true);
   setCheck("#show-total-spend", config.showTotalSpend);
@@ -18848,6 +19071,7 @@ function syncSettingsControls(): void {
   renderShortcutSettings();
   setCheck("#proxy-enabled", config.proxy?.enabled ?? false);
   setNum("#proxy-url", config.proxy?.url ?? "");
+  void renderProxyStatus();
   const autostart = document.querySelector<HTMLInputElement>("#autostart");
   if (autostart) autostart.checked = true;
   // Panel-form controls (absent in the popover window).
@@ -19513,11 +19737,16 @@ function buildPanelShell(): void {
     labelKey: string,
     descKey: string,
     card: HTMLElement,
+    extras: HTMLElement[] = [],
   ): void => {
     const input = document.querySelector<HTMLInputElement>(`#${controlId}`);
     if (!input) return;
-    input.closest<HTMLElement>(".setting-row")?.remove();
-    card.append(panelSwitchRow(labelKey, descKey, input));
+    const row = input.closest<HTMLElement>(".setting-row");
+    const switchRow = panelSwitchRow(labelKey, descKey, input);
+    const host = switchRow.querySelector<HTMLElement>(".set-row__control");
+    if (host && extras.length) host.append(...extras);
+    row?.remove();
+    card.append(switchRow);
   };
   adoptControl("locale", "settings.language", "settings.desc.language");
   adoptControl("appearance", "settings.appearance", "settings.desc.appearance");
@@ -19636,12 +19865,11 @@ function buildPanelShell(): void {
   const fontManager = document.querySelector<HTMLElement>(".font-pack-manager");
   if (fontManager) generalCard.append(fontManager);
   document.querySelector("#tour-replay")?.closest(".setting-row")?.remove();
-  adoptControl("density", "settings.compact", "settings.desc.density");
-  adoptControl("glass", "settings.glass", "settings.glassTip");
-  adoptControl("reduce-anim", "settings.reduceAnim", "settings.reduceAnimTip");
-  adoptControl("startup-anim", "settings.startupAnim", "settings.startupAnimTip", [
-    document.querySelector<HTMLElement>("#splash-replay") as HTMLElement,
-  ].filter(Boolean));
+  adoptSwitch("density", "settings.compact", "settings.desc.density", generalCard);
+  adoptSwitch("glass", "settings.glass", "settings.glassTip", generalCard);
+  adoptSwitch("reduce-anim", "settings.reduceAnim", "settings.reduceAnimTip", generalCard);
+  const splashReplay = document.querySelector<HTMLElement>("#splash-replay");
+  adoptSwitch("startup-anim", "settings.startupAnim", "settings.startupAnimTip", generalCard, splashReplay ? [splashReplay] : []);
   adoptControl("jump-animation", "settings.jumpAnimation", "settings.desc.jumpAnimation");
   const intervalUnit = document.createElement("span");
   intervalUnit.className = "unit";
@@ -19650,7 +19878,7 @@ function buildPanelShell(): void {
   adoptControl("interval", "settings.refreshEvery", "settings.desc.refresh", [intervalUnit]);
   adoptControl("pinned", "settings.trayShows", "settings.desc.pinned");
   adoptControl("timeformat", "settings.timeFormat", "settings.desc.timeFormat");
-  adoptControl("show-total-spend", "settings.showSpend", "settings.desc.showSpend");
+  adoptSwitch("show-total-spend", "settings.showSpend", "settings.desc.showSpend", generalCard);
   const tierModeControl = document.querySelector<HTMLElement>("#spend-tier-mode");
   if (tierModeControl) {
     const modeRow = panelRowDesc("settings.spendTiers", "settings.desc.spendTiers", tierModeControl);
@@ -19672,9 +19900,9 @@ function buildPanelShell(): void {
       customRow.remove();
     }
   }
-  adoptControl("experimental-features", "settings.experimental", "settings.experimentalTip");
-  adoptControl("overview-cat-full", "settings.overviewCatFull", "settings.overviewCatFullTip");
-  adoptControl("qoder-checkin", "settings.qoderCheckin", "settings.qoderCheckinTip");
+  adoptSwitch("experimental-features", "settings.experimental", "settings.experimentalTip", generalCard);
+  adoptSwitch("overview-cat-full", "settings.overviewCatFull", "settings.overviewCatFullTip", generalCard);
+  adoptSwitch("qoder-checkin", "settings.qoderCheckin", "settings.qoderCheckinTip", generalCard);
   adoptControl("install-agent-skill", "settings.agentSkill", "settings.agentSkillTip");
   const shortcutEntry = document.createElement("button");
   shortcutEntry.type = "button";
@@ -19687,7 +19915,7 @@ function buildPanelShell(): void {
       ?.scrollIntoView({ behavior: reduceMotion() ? "auto" : scrollBehavior() });
   });
   generalCard.append(panelRow("settings.shortcutManage", shortcutEntry));
-  adoptControl("autostart", "settings.startWithWindows", "settings.desc.autostart");
+  adoptSwitch("autostart", "settings.startWithWindows", "settings.desc.autostart", generalCard);
   // Stored-only for now: the popover already launches hidden, so the flag
   // carries no extra behavior until the panel form grows auto-open-at-login
   // semantics. The tooltip says exactly that.
@@ -20045,12 +20273,21 @@ function buildPanelShell(): void {
   const syncAboutUpdate = (): void => {
     const ready = Boolean(updateVersion);
     checkBtn.classList.toggle("update-ready", ready);
-    checkText.textContent = ready
-      ? t("settings.updateTo", { version: updateVersion ?? "" })
-      : t("settings.checkUpdate");
+    checkBtn.disabled = updatePushing;
+    checkText.textContent = updatePushing
+      ? t("update.installing")
+      : ready
+        ? t("settings.updateTo", { version: updateVersion ?? "" })
+        : t("settings.checkUpdate");
     checkText.dataset.i18n = "";
     updateLine.hidden = !ready;
-    if (ready) updateLine.textContent = t("settings.updateAvailable", { version: updateVersion ?? "" });
+    if (ready) {
+      updateLine.textContent = t("settings.updateAvailable", { version: updateVersion ?? "" });
+      if (updateNotesFor !== updateVersion) void loadAboutUpdateNotes(updateVersion!);
+    }
+    updateNotesEl.hidden = !ready || !updateNotes;
+    updateNotesEl.textContent = updateNotes ?? "";
+    releaseLink.hidden = !ready;
   };
   checkBtn.addEventListener("click", () => {
     if (updateVersion) {
@@ -20068,10 +20305,59 @@ function buildPanelShell(): void {
   const updateLine = document.createElement("p");
   updateLine.className = "about-update-line";
   updateLine.hidden = true;
+  const updateNotesEl = document.createElement("p");
+  updateNotesEl.className = "about-update-notes";
+  updateNotesEl.hidden = true;
+  const releaseLink = document.createElement("button");
+  releaseLink.type = "button";
+  releaseLink.className = "about-release-link";
+  releaseLink.textContent = t("settings.releaseNotes");
+  releaseLink.hidden = true;
+  releaseLink.addEventListener("click", () => {
+    if (!updateVersion) return;
+    void invoke("open_link", {
+      url: `https://github.com/Aafff623/pane/releases/tag/v${updateVersion}`,
+    }).catch((err) => settingsToast(String(err), true));
+  });
   const aboutCardHead = document.createElement("div");
   aboutCardHead.className = "about-hero";
   aboutCardHead.append(brand, actions);
-  about.body.append(aboutCardHead, updateLine);
+
+  // A light invitation, not a modal: one line, remembered after dismissal.
+  const starBanner = document.createElement("div");
+  starBanner.className = "about-star-banner";
+  const starIcon = document.createElement("span");
+  starIcon.className = "about-star-icon";
+  starIcon.innerHTML = uiIcon("star");
+  const starText = document.createElement("span");
+  starText.className = "about-star-text";
+  starText.textContent = t("settings.starBanner");
+  const starGo = document.createElement("button");
+  starGo.type = "button";
+  starGo.className = "mini-btn about-star-go";
+  starGo.textContent = t("settings.starCta");
+  starGo.addEventListener("click", () => {
+    void invoke("open_link", { url: "https://github.com/Aafff623/pane" }).catch((err) =>
+      settingsToast(String(err), true),
+    );
+  });
+  const starClose = document.createElement("button");
+  starClose.type = "button";
+  starClose.className = "about-star-close";
+  starClose.title = t("settings.close");
+  starClose.setAttribute("aria-label", t("settings.close"));
+  starClose.innerHTML = uiIcon("x");
+  starClose.addEventListener("click", () => {
+    try {
+      localStorage.setItem("pane:about:starDismissed", "1");
+    } catch {
+      // Private storage / quota: dismissal still applies to this view.
+    }
+    starBanner.remove();
+  });
+  starBanner.append(starIcon, starText, starGo, starClose);
+  about.body.append(aboutCardHead, starBanner, updateLine, updateNotesEl, releaseLink);
+  if (localStorage.getItem("pane:about:starDismissed") === "1") starBanner.remove();
   syncAboutUpdate();
   aboutUpdateSync = syncAboutUpdate;
 
@@ -20160,7 +20446,6 @@ function buildPanelShell(): void {
     privacyNote.classList.add("st-pad", "settings-note");
     privacy.body.append(privacyNote);
   }
-  adoptSwitch("telemetry", "settings.telemetry", "settings.desc.telemetry", privacy.body);
   adoptSwitch("hide-while-sharing", "settings.hideSharing", "settings.hideSharingTip", privacy.body);
   adoptSwitch("show-trend", "settings.showTrend", "settings.showTrendTip", privacy.body);
   settingsView.append(privacy.section);
@@ -20168,6 +20453,8 @@ function buildPanelShell(): void {
   const network = panelBlock("st-network", "settings.network", "panel.desc.network");
   adoptSwitch("proxy-enabled", "settings.useProxy", "settings.desc.useProxy", network.body);
   adoptControl("proxy-url", "settings.proxyUrl", "settings.desc.proxyUrl", [], network.body);
+  const proxyTools = document.querySelector<HTMLElement>("#proxy-tools");
+  if (proxyTools) network.body.append(proxyTools);
   const networkNote = document.querySelector<HTMLElement>('[data-i18n="settings.networkNote"]');
   if (networkNote) {
     networkNote.classList.add("st-pad", "settings-note");
@@ -21844,6 +22131,7 @@ window.addEventListener("DOMContentLoaded", () => {
   setupTrailFisheye();
   setupTrailScroll();
   setupTooltips();
+  setupHelpTips();
   // No lens init here: applyGlass() (via initSettings, after the saved
   // config arrives) owns it — a fixed timer raced the config load and
   // built the maps even for users who turned glass off.
@@ -22688,11 +22976,6 @@ document.querySelector("#settings-btn")!.addEventListener("click", (event) => {
   providersEl.addEventListener("mouseover", (e) => {
     if (customizeOpen) return;
     const target = e.target as HTMLElement;
-    const help = target.closest<HTMLElement>("[data-limited-help]");
-    if (help) {
-      showLimitedHelpTip(help);
-      return;
-    }
     const bar = target.closest<HTMLElement>("[data-trend]");
     if (bar) {
       showTrendTip(bar);
@@ -22703,7 +22986,7 @@ document.querySelector("#settings-btn")!.addEventListener("click", (event) => {
   });
   providersEl.addEventListener("mouseout", (e) => {
     const target = e.target as HTMLElement;
-    const hovered = target.closest<HTMLElement>("[data-spend], [data-trend], [data-limited-help]");
+    const hovered = target.closest<HTMLElement>("[data-spend], [data-trend]");
     const to = e.relatedTarget as HTMLElement | null;
     if (hovered && (!to || !hovered.contains(to))) tip.hidden = true;
   });

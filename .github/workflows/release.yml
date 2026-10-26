@@ -241,7 +241,7 @@ jobs:
                   return "arm64"
               return "x86_64"
 
-          # Pane bundles are already named Pane_<ver>_<os-arch>.<ext>, so the
+          # Pane-Aafff623 bundles are named Pane-Aafff623_<ver>_<os-arch>.<ext>, so the
           # architecture comes straight from the filename.
           BASE = f"https://github.com/{repo}/releases/download/{tag}"
           cells = {"Windows": {}, "macOS": {}, "Linux": {}}

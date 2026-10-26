@@ -81,6 +81,7 @@ html.i18n-boot #boot-fallback {
      --line vs --line-2): a card reads as one card, rows breathe. */
   --row-line: color-mix(in srgb, var(--border) 55%, var(--card));
   --chart-blue: #3794ff;
+  --star-amber: #f5a623;
   /* Cursor's brand black flips to light grey on the dark theme (like the
      Mac ring and our recolored Cursor mark) — pure black vanishes on a dark
      card. */
@@ -500,6 +501,25 @@ body.refreshing #refresh .refresh-glyph {
   font-size: 11px;
   color: var(--muted-foreground);
   line-height: 1.45;
+}
+
+.proxy-tools {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin: 0 0 8px;
+}
+
+.proxy-status {
+  margin: 0;
+  font-size: 11px;
+  color: var(--muted-foreground);
+  line-height: 1.45;
+}
+
+.proxy-status[data-source="manual"] {
+  color: var(--primary);
 }
 
 .setting-row {
@@ -2608,6 +2628,64 @@ article.provider.is-folded:hover {
   color: var(--chart-blue);
   font-size: 11.5px;
 }
+.about-update-notes {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  overflow: hidden;
+  margin: 4px 0 0;
+  color: var(--muted-foreground);
+  font-size: 11px;
+  line-height: 1.55;
+  white-space: pre-line;
+}
+.about-release-link {
+  align-self: flex-start;
+  margin-top: 6px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--chart-blue);
+  font-size: 11.5px;
+  cursor: pointer;
+}
+.about-release-link:hover { text-decoration: underline; }
+.about-star-banner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 4px 0 8px;
+  padding: 7px 9px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--accent);
+  color: var(--foreground);
+  font-size: 11.5px;
+  line-height: 1.45;
+}
+.about-star-icon {
+  display: inline-flex;
+  flex: none;
+  color: var(--star-amber);
+}
+.about-star-icon .ui-icon { width: 15px; height: 15px; }
+.about-star-text { min-width: 0; }
+.about-star-go { flex: none; }
+.about-star-close {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--muted-foreground);
+  cursor: pointer;
+}
+.about-star-close:hover { background: var(--card); color: var(--foreground); }
+.about-star-close .ui-icon { width: 12px; height: 12px; }
 .mini-btn.update-ready {
   background: var(--chart-blue);
   border-color: var(--chart-blue);
@@ -6448,6 +6526,59 @@ body.drawer-open #drawer {
 }
 
 :root[data-theme="light"] #hover-tip {
+  box-shadow: 0 8px 24px rgb(0 0 0 / 0.12);
+}
+
+/* Rich help card behind `?` buttons: title + body, pin on click. */
+.help-tip {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  width: 18px;
+  height: 18px;
+  margin: -2px 0;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 50%;
+  background: transparent;
+  color: var(--muted-foreground);
+  font-size: 10.5px;
+  font-weight: 600;
+  line-height: 1;
+  cursor: help;
+}
+.help-tip:hover,
+.help-tip:focus-visible {
+  color: var(--accent-foreground, var(--foreground));
+  border-color: var(--accent-foreground, var(--foreground));
+}
+.help-card {
+  position: fixed;
+  z-index: 91;
+  max-width: 300px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--card);
+  color: var(--secondary-foreground);
+  box-shadow: 0 8px 24px rgb(0 0 0 / 0.35);
+  font-size: 11px;
+  line-height: 1.5;
+  pointer-events: auto;
+  animation: fade-in 0.12s ease both;
+}
+.help-card strong {
+  display: block;
+  margin-bottom: 3px;
+  color: var(--foreground);
+  font-size: 11.5px;
+  font-weight: 600;
+}
+.help-card p {
+  margin: 0;
+  color: var(--muted-foreground);
+}
+:root[data-theme="light"] .help-card {
   box-shadow: 0 8px 24px rgb(0 0 0 / 0.12);
 }
 
@@ -11466,4 +11597,95 @@ body.colorblind .trend-bar{stroke:currentColor;stroke-width:1;stroke-dasharray:2
 .window-estimate{
   color:var(--muted-foreground);cursor:help;
   border-bottom:1px dotted color-mix(in srgb,var(--muted-foreground) 55%,transparent);
+}
+
+/* Settings rail hierarchy: the four group names are level 1, so they must
+   read larger and stronger than the pages inside them. Rows get more air
+   (the rail had room to spare), and the fold/hover use a slightly springier
+   curve than the global --ease so opening a group feels like Magpie's rail
+   rather than a hard show/hide. */
+#panel-nav.set-shell__nav{
+  --nav-ease:cubic-bezier(.22,1,.36,1);
+  width:216px;padding:14px 12px;gap:4px;
+}
+#panel-nav.set-shell__nav .panel-nav-group{gap:4px}
+#panel-nav.set-shell__nav .panel-nav-section{display:flex;flex-direction:column;gap:3px}
+#panel-nav.set-shell__nav .panel-nav-section:not(:first-child){
+  margin-top:12px;padding-top:8px;
+  border-top:1px solid color-mix(in srgb,var(--border) 55%,transparent);
+}
+#panel-nav.set-shell__nav .panel-nav-parent{
+  min-height:38px;padding:9px 10px;
+  font-size:16px;font-weight:700;letter-spacing:0;text-transform:none;
+  color:var(--foreground);
+  transition:background-color .2s var(--nav-ease),color .2s var(--nav-ease);
+}
+#panel-nav.set-shell__nav .panel-nav-parent:hover{background:color-mix(in srgb,var(--accent) 55%,transparent)}
+#panel-nav.set-shell__nav .panel-nav-parent .ui-icon{
+  width:14px;height:14px;opacity:.55;
+  transition:transform .24s var(--nav-ease),opacity .2s var(--nav-ease);
+}
+#panel-nav.set-shell__nav .panel-nav-parent:hover .ui-icon{opacity:.85}
+#panel-nav.set-shell__nav .panel-nav-item{
+  min-height:42px;padding:9px 12px;gap:11px;border-radius:8px;
+  transition:background-color .2s var(--nav-ease),color .2s var(--nav-ease),transform .2s var(--nav-ease),box-shadow .2s var(--nav-ease);
+}
+#panel-nav.set-shell__nav .panel-nav-item .ui-icon{
+  width:19px;height:19px;
+  transition:transform .2s var(--nav-ease);
+}
+#panel-nav.set-shell__nav .panel-nav-item:hover{transform:translateX(2px)}
+#panel-nav.set-shell__nav .panel-nav-item:hover .ui-icon{transform:scale(1.06)}
+#panel-nav.set-shell__nav .panel-nav-item.active{transform:none}
+#panel-nav.set-shell__nav .panel-nav-label{font-size:14px;font-weight:500}
+#panel-nav.set-shell__nav .panel-nav-child{margin-left:8px}
+#panel-nav.set-shell__nav .panel-nav-children{transition:grid-template-rows .34s var(--nav-ease)}
+#panel-nav.set-shell__nav .panel-nav-children.open .panel-nav-child{
+  animation-duration:.26s;animation-timing-function:var(--nav-ease);
+  animation-delay:calc(var(--i,0)*18ms);
+}
+@media (prefers-reduced-motion:reduce){
+  #panel-nav.set-shell__nav .panel-nav-item,
+  #panel-nav.set-shell__nav .panel-nav-item .ui-icon,
+  #panel-nav.set-shell__nav .panel-nav-parent,
+  #panel-nav.set-shell__nav .panel-nav-parent .ui-icon{transition:none}
+  #panel-nav.set-shell__nav .panel-nav-item:hover{transform:none}
+  #panel-nav.set-shell__nav .panel-nav-item:hover .ui-icon{transform:none}
+}
+
+/* RTK breakdown: two columns in the normal 125% window, three when the
+   reading column gets wider, one only on a genuinely narrow panel. The old
+   single column made the RTK card twice as tall as the spend card. */
+.rtk-panel { container-type: inline-size; }
+.rtk-project-list {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: start;
+  gap: 5px 18px;
+}
+@container (min-width: 620px) {
+  .rtk-project-list { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+@container (max-width: 619px) {
+  /* Two columns are only ~186px wide here; keep the name readable and put
+     the bar underneath instead of squeezing name + bar + value side by side. */
+  .rtk-project {
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-rows: auto 3px;
+    column-gap: 8px;
+    row-gap: 3px;
+    min-width: 0;
+  }
+  .rtk-project-name { grid-column: 1; grid-row: 1; min-width: 0; }
+  .rtk-project-value { grid-column: 2; grid-row: 1; }
+  .rtk-project-bar { grid-column: 1 / -1; grid-row: 2; height: 3px; }
+}
+@container (max-width: 380px) {
+  .rtk-project-list { grid-template-columns: 1fr; }
+}
+.rtk-scope-note {
+  margin: 6px 0 2px;
+  color: var(--muted-foreground);
+  font-size: 10px;
+  line-height: 1.5;
 }

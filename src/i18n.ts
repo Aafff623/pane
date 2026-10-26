@@ -452,11 +452,10 @@ const en: Dict = {
 
   "settings.privacy": "Privacy",
   "settings.privacyNote":
-    'One anonymous "alive today" ping and per-provider success/failure counts, once a day, under a random ID attached to nothing. No usage amounts, no spend, no IPs stored. Full details in docs/privacy.md.',
-  "settings.telemetry": "Share anonymous usage statistics",
+    'Pane has no telemetry, no analytics SDK, and no crash reporter. Everything it reads stays on this machine; the full network-call list is in docs/privacy.md.',
   "settings.hideSharing": "Hide tray numbers while screen sharing",
   "settings.hideSharingTip":
-    "During Presentation Settings, exclusive fullscreen, or remote control, tray percentages hide. The Pane icon and starred provider logos stay. A Teams/Zoom window share is not detected. Off by default.",
+    "During Presentation Settings, exclusive fullscreen, or remote control, tray percentages hide and the Pane windows are excluded from window capture. A full-screen/display share cannot be excluded by an app — Pane may still appear there. Off by default.",
   "settings.showTrend": "Show usage trend on cards",
   "settings.showTrendTip":
     "Show the Usage Trend bar on provider cards that log token usage. Off by default — enable this to see quota history on cards that record it.",
@@ -464,8 +463,14 @@ const en: Dict = {
   "settings.network": "Network",
   "settings.useProxy": "Use proxy",
   "settings.proxyUrl": "Proxy URL",
+  "settings.proxyDetect": "Read from system",
+  "settings.proxyStatusManual": "Now: manual proxy {url}",
+  "settings.proxyStatusSystem": "Now: following system proxy {url}",
+  "settings.proxyStatusDirect": "Now: direct (no system proxy detected)",
+  "settings.proxyNone": "No system proxy found; enter one manually",
+  "settings.proxyInvalid": "Use http://, https:// or socks5:// with a host and port",
   "settings.networkNote":
-    "Applies after the app restarts. Off (default): follows the Windows system proxy. On: forces the proxy below, overriding the system proxy. Overseas services (Claude, Codex, Cursor, Grok, …) need a proxy on mainland networks; mainland services are best left direct. Local usage API always runs at http://127.0.0.1:6736/v1/usage",
+    "Applies after the app restarts. Off or an empty URL follows the Windows system proxy (static or PAC); on with a URL forces the proxy below. Overseas services (Claude, Codex, Cursor, Grok, …) need a proxy on mainland networks; mainland services are best left direct. Local usage API always runs at http://127.0.0.1:6736/v1/usage",
 
   "settings.relayBalance": "Custom balance",
   "settings.relayBalanceNote":
@@ -563,6 +568,9 @@ const en: Dict = {
   "settings.checkUpdate": "Check for updates",
   "settings.updateTo": "Update to v{version}",
   "settings.updateAvailable": "Pane v{version} is available.",
+  "settings.releaseNotes": "View release notes",
+  "settings.starBanner": "If Pane saves you a few tab switches, a star helps others find it.",
+  "settings.starCta": "Star on GitHub",
   "settings.panelOpenFailed": "Could not open the settings panel: {err}",
   "settings.windowActionFailed": "Could not change the settings window: {err}",
   "settings.updateLatest": "You're up to date",
@@ -644,8 +652,7 @@ const en: Dict = {
   "settings.desc.notifyClose": "Warn when a reset is close and the remaining amount is still low.",
   "settings.desc.notifyRunout": "Warn when current usage would exhaust the quota before it resets.",
   "settings.desc.notifyResetSoon": "Warn shortly before a 5-hour window resets.",
-  "settings.desc.telemetry": "One anonymous daily ping and per-provider success/failure counts. No usage, spend or IP data.",
-  "settings.desc.useProxy": "Route provider requests through the proxy below. Takes effect after a restart.",
+  "settings.desc.useProxy": "Off or empty follows the Windows system proxy (static or PAC); a filled URL overrides it. Takes effect after a restart.",
   "settings.desc.proxyUrl": "socks5://host:port or http://host:port.",
   "settings.aboutTagline": "Local-first AI usage, quotas and spend in one glance.",
   "settings.copyVersion": "Copy version",
@@ -1041,6 +1048,9 @@ const en: Dict = {
   "rtk.projectTip": "{name} · {n} tokens saved · {commands} commands",
   "rtk.headTip": "{window} saved tokens — an estimate, kept out of Total Spend and quotas.",
   "rtk.metricTip": "RTK measures token savings from compressed command output. It is an estimate, separate from provider spend and quotas.",
+  "rtk.scopeNote": "Scope: RTK-rewritten Bash output only — not total model tokens. Native Read/Grep, MCP and model context are not counted.",
+  "rtk.scopeTitle": "How this number is counted",
+  "rtk.scopeTip": "Only commands the hook rewrote through rtk (read/cat, grep/rg, ls, git, cargo, find, …) are measured. Native Read/Grep tools and unsupported shell commands (npm, sed, pip, curl, heredocs) never enter this total; RTK also cannot reduce system prompts, tool schemas or repeated context. That is why this is much smaller than a model's total token usage.",
   "rtk.missingTabTip": "RTK is not installed. Open setup to install it and connect a harness.",
   "rtk.detected": "RTK detected",
   "rtk.notInstalled": "RTK not installed",
@@ -1510,6 +1520,7 @@ const en: Dict = {
   "peak.daily": "Daily",
   "peak.nowTag": "in peak",
   "peak.helpTitle": "Peak-hour windows",
+  "peak.helpBody": "Yellow marks a provider currently inside its peak window. Click this button for the full schedule.",
   "peak.helpEmpty": "No enabled providers bill by peak hours.",
   "customize.noteMenu": "Display name…",
   "customize.noteProviderMenu": "Provider display name…",
@@ -1777,6 +1788,8 @@ const en: Dict = {
   "detail.expiredDetail": "Expired · {detail}",
   "detail.pastCampaigns": "{n} past Start Plan campaigns",
   "detail.heldNotGranted": "Held, not granted — claim it in ZCode",
+  "detail.activatesAt": "pending · activates at {time}",
+  "detail.awaitingBalance": "effective · waiting for ZCode to sync",
   "detail.moreGrants": "+{n} more grants",
   "detail.unconfirmed": "Unconfirmed",
   "detail.moneyOfLeft": "{a} of {b} left",
@@ -2237,11 +2250,10 @@ const zh: Dict = {
 
   "settings.privacy": "隐私",
   "settings.privacyNote":
-    "每天一次匿名的“今天还活着”心跳，以及各服务成功/失败次数，使用一个不绑定任何身份的随机 ID。不上传用量、花费或 IP。详情见 docs/privacy.md。",
-  "settings.telemetry": "分享匿名使用统计",
+    "Pane 不含遥测、统计 SDK 或崩溃上报。读取的数据都留在本机；完整网络请求清单见 docs/privacy.md。",
   "settings.hideSharing": "共享屏幕时隐藏托盘数字",
   "settings.hideSharingTip":
-    "演示设置、独占全屏或远程控制时，托盘百分比会隐藏。Pane 图标和已加星的服务标志仍在。检测不到 Teams/Zoom 的窗口共享。默认关闭。",
+    "演示设置、独占全屏或远程控制时，托盘百分比会隐藏，Pane 窗口也会被系统排除出窗口捕获。共享整个屏幕/显示器时应用级排除无法生效，Pane 仍可能入镜。默认关闭。",
 
   "settings.showTrend": "在卡片上显示用量趋势",
   "settings.showTrendTip":
@@ -2250,8 +2262,14 @@ const zh: Dict = {
   "settings.network": "网络",
   "settings.useProxy": "使用代理",
   "settings.proxyUrl": "代理地址",
+  "settings.proxyDetect": "从系统读取",
+  "settings.proxyStatusManual": "当前：手动代理 {url}",
+  "settings.proxyStatusSystem": "当前：跟随系统代理 {url}",
+  "settings.proxyStatusDirect": "当前：直连（未检测到系统代理）",
+  "settings.proxyNone": "未检测到可用的系统代理，请手动填写地址",
+  "settings.proxyInvalid": "代理地址格式不正确，应为 http://、https:// 或 socks5:// 加主机和端口",
   "settings.networkNote":
-    "重启应用后生效。默认关着时跟随 Windows 系统代理；开启则强制走下方指定的代理（覆盖系统代理）。海外服务（Claude、Codex、Cursor、Grok 等）在境内网络需要代理才能读取；国内服务建议保持直连。本机用量接口始终运行在 http://127.0.0.1:6736/v1/usage",
+    "重启应用后生效。关闭或地址留空时跟随 Windows 系统代理（含 PAC 模式）；开启并填写地址则强制走手动代理（覆盖系统代理）。海外服务（Claude、Codex、Cursor、Grok 等）在境内网络需要代理才能读取；国内服务建议保持直连。本机用量接口始终运行在 http://127.0.0.1:6736/v1/usage",
 
   "settings.relayBalance": "自定义余额",
   "settings.relayBalanceNote":
@@ -2349,6 +2367,9 @@ const zh: Dict = {
   "settings.checkUpdate": "检查更新",
   "settings.updateTo": "更新到 v{version}",
   "settings.updateAvailable": "发现新版本 Pane v{version}。",
+  "settings.releaseNotes": "查看更新日志",
+  "settings.starBanner": "如果 Pane 帮你少切了几个页面，给个 Star 让更多人发现它。",
+  "settings.starCta": "去 GitHub 点星",
   "settings.panelOpenFailed": "打不开设置面板：{err}",
   "settings.windowActionFailed": "设置窗口操作失败：{err}",
   "settings.updateLatest": "已是最新版本",
@@ -2424,8 +2445,7 @@ const zh: Dict = {
   "settings.desc.notifyClose": "临近重置而剩余额度仍然偏低时提醒。",
   "settings.desc.notifyRunout": "按当前用量推算会在重置前用完时提醒。",
   "settings.desc.notifyResetSoon": "5 小时窗口即将重置时提前提醒。",
-  "settings.desc.telemetry": "每天一次匿名存活上报与各服务商成功/失败计数，不含用量、消费与 IP。",
-  "settings.desc.useProxy": "让服务商请求走下方代理，重启后生效。",
+  "settings.desc.useProxy": "关闭或留空时跟随 Windows 系统代理（含 PAC）；填写地址则覆盖系统代理。重启后生效。",
   "settings.desc.proxyUrl": "socks5://主机:端口 或 http://主机:端口。",
   "settings.aboutTagline": "本地优先的 AI 用量、额度与花费，一屏看全。",
   "settings.copyVersion": "复制版本号",
@@ -2810,6 +2830,9 @@ const zh: Dict = {
   "rtk.projectTip": "{name} · 节省 {n} tokens · {commands} 条命令",
   "rtk.headTip": "{window} · 节省 token——估算值，不计入总花费与额度。",
   "rtk.metricTip": "RTK 统计命令输出被压缩后节省的 token，属于估算，不进入服务商花费和额度。",
+  "rtk.scopeNote": "口径：仅统计 RTK 改写后的 Bash 命令输出，不是模型总 token；原生 Read/Grep、MCP 与上下文不计入。",
+  "rtk.scopeTitle": "这个数字怎么统计的",
+  "rtk.scopeTip": "只有 hook 经 rtk 改写的命令（read/cat、grep/rg、ls、git、cargo、find 等）会被统计。原生 Read/Grep、npm/sed/pip/curl、heredoc 等未改写命令不会进入这个总数；RTK 也不能压缩系统提示词、工具 schema 或反复发送的上下文。所以它远小于模型的总 token 用量。",
   "rtk.missingTabTip": "尚未安装 RTK。打开接入设置可安装并连接 Harness。",
   "rtk.detected": "已检测到 RTK",
   "rtk.notInstalled": "未安装 RTK",
@@ -3270,6 +3293,7 @@ const zh: Dict = {
   "peak.daily": "每天",
   "peak.nowTag": "高峰中",
   "peak.helpTitle": "高峰时段对照",
+  "peak.helpBody": "黄色表示该服务商当前处于高峰时段。点这个按钮查看完整时段表。",
   "peak.helpEmpty": "启用的 provider 中没有分时计费的。",
   "customize.noteMenu": "备注名称…",
   "customize.noteProviderMenu": "备注 Provider 名称…",
@@ -3532,6 +3556,8 @@ const zh: Dict = {
   "detail.expiredDetail": "已结束 · {detail}",
   "detail.pastCampaigns": "{n} 个历史 Start Plan 活动",
   "detail.heldNotGranted": "已持有但未发放——去 ZCode 领取",
+  "detail.activatesAt": "待生效 · {time}",
+  "detail.awaitingBalance": "已生效 · 等待 ZCode 同步余额",
   "detail.moreGrants": "另有 {n} 项赠送",
   "detail.unconfirmed": "待确认",
   "detail.moneyOfLeft": "{a} / {b} 剩余",
@@ -3995,11 +4021,10 @@ const ru: Dict = {
 
   "settings.privacy": "Конфиденциальность",
   "settings.privacyNote":
-    'Один анонимный сигнал «сегодня жив» и счётчики успеха/сбоя по сервисам, раз в день, под случайным ID без привязки. Без объёмов, трат и IP. Подробности в docs/privacy.md.',
-  "settings.telemetry": "Делиться анонимной статистикой",
+    'В Pane нет телеметрии, аналитических SDK и отчётов о сбоях. Все прочитанные данные остаются на этом компьютере; полный список сетевых запросов — в docs/privacy.md.',
   "settings.hideSharing": "Скрывать цифры в трее при демонстрации экрана",
   "settings.hideSharingTip":
-    "В режиме презентации, полноэкранном режиме или удалённом управлении проценты в трее скрываются. Значок Pane и логотипы со звёздами остаются. Демонстрация окна в Teams/Zoom не определяется. По умолчанию выключено.",
+    "В режиме презентации, полноэкранном режиме или удалённом управлении проценты в трее скрываются, а окна Pane исключаются из захвата окон. При демонстрации всего экрана/дисплея приложение не может исключить себя — Pane может попасть в кадр. По умолчанию выключено.",
 
   "settings.showTrend": "Показывать тренд использования на карточках",
   "settings.showTrendTip":
@@ -4008,8 +4033,14 @@ const ru: Dict = {
   "settings.network": "Сеть",
   "settings.useProxy": "Использовать прокси",
   "settings.proxyUrl": "Адрес прокси",
+  "settings.proxyDetect": "Взять из системы",
+  "settings.proxyStatusManual": "Сейчас: ручной прокси {url}",
+  "settings.proxyStatusSystem": "Сейчас: системный прокси {url}",
+  "settings.proxyStatusDirect": "Сейчас: прямое подключение (системный прокси не найден)",
+  "settings.proxyNone": "Системный прокси не найден; укажите адрес вручную",
+  "settings.proxyInvalid": "Укажите http://, https:// или socks5:// с хостом и портом",
   "settings.networkNote":
-    "Применяется после перезапуска. Выкл. (по умолчанию): используется системный прокси Windows. Вкл.: принудительно указанный ниже прокси (перекрывает системный). Зарубежные сервисы (Claude, Codex, Cursor, Grok и др.) в материковом Китае требуют прокси; китайские сервисы лучше не проксировать. Локальный API всегда на http://127.0.0.1:6736/v1/usage",
+    "Применяется после перезапуска. Выкл. или пустой адрес: используется системный прокси Windows (статический или PAC). Вкл. с адресом: принудительно указанный ниже прокси. Зарубежные сервисы (Claude, Codex, Cursor, Grok и др.) в материковом Китае требуют прокси; китайские сервисы лучше не проксировать. Локальный API всегда на http://127.0.0.1:6736/v1/usage",
 
   "settings.relayBalance": "Свой баланс",
   "settings.relayBalanceNote":
@@ -4107,6 +4138,9 @@ const ru: Dict = {
   "settings.checkUpdate": "Проверить обновления",
   "settings.updateTo": "Обновить до v{version}",
   "settings.updateAvailable": "Доступна Pane v{version}.",
+  "settings.releaseNotes": "Смотреть примечания к выпуску",
+  "settings.starBanner": "Если Pane экономит вам несколько переключений вкладок, звезда поможет другим найти его.",
+  "settings.starCta": "Поставить звезду на GitHub",
   "settings.panelOpenFailed": "Не удалось открыть панель настроек: {err}",
   "settings.windowActionFailed": "Не удалось изменить окно настроек: {err}",
   "settings.updateLatest": "У вас последняя версия",
@@ -4187,8 +4221,7 @@ const ru: Dict = {
   "settings.desc.notifyClose": "Предупредить, когда сброс близко, а остаток всё ещё мал.",
   "settings.desc.notifyRunout": "Предупредить, если текущий расход исчерпает квоту до сброса.",
   "settings.desc.notifyResetSoon": "Предупредить незадолго до сброса 5-часового окна.",
-  "settings.desc.telemetry": "Один анонимный сигнал в день и счётчики успехов/ошибок по провайдерам. Без расхода, трат и IP.",
-  "settings.desc.useProxy": "Направлять запросы провайдеров через прокси ниже. Действует после перезапуска.",
+  "settings.desc.useProxy": "Выкл. или пустой адрес: системный прокси Windows (статический или PAC); заполненный адрес перекрывает его. Действует после перезапуска.",
   "settings.desc.proxyUrl": "socks5://хост:порт или http://хост:порт.",
   "settings.aboutTagline": "Локальные данные об ИИ: квоты и расходы одним взглядом.",
   "settings.copyVersion": "Скопировать версию",
@@ -4581,6 +4614,9 @@ const ru: Dict = {
   "rtk.projectTip": "{name} · сохранено {n} токенов · команд: {commands}",
   "rtk.headTip": "{window} · сэкономленные токены — оценка, не входит в расходы и квоты.",
   "rtk.metricTip": "RTK оценивает экономию токенов за счёт сжатия вывода команд. Это оценка, отдельная от расходов и квот провайдеров.",
+  "rtk.scopeNote": "Охват: только вывод Bash-команд, переписанных RTK, а не все токены модели. Нативные Read/Grep, MCP и контекст не учитываются.",
+  "rtk.scopeTitle": "Как считается это число",
+  "rtk.scopeTip": "Учитываются только команды, переписанные hook через rtk (read/cat, grep/rg, ls, git, cargo, find и т. п.). Нативные Read/Grep, npm/sed/pip/curl и heredoc не попадают в сумму; RTK также не сжимает системный промпт, схемы инструментов и повторяемый контекст. Поэтому число намного меньше общего расхода токенов модели.",
   "rtk.missingTabTip": "RTK не установлен. Откройте настройку, чтобы установить его и подключить harness.",
   "rtk.detected": "RTK обнаружен",
   "rtk.notInstalled": "RTK не установлен",
@@ -5046,6 +5082,7 @@ const ru: Dict = {
   "peak.daily": "ежедневно",
   "peak.nowTag": "в пик",
   "peak.helpTitle": "Часы пик",
+  "peak.helpBody": "Жёлтый означает, что провайдер сейчас в окне пиковых часов. Нажмите кнопку, чтобы увидеть полное расписание.",
   "peak.helpEmpty": "Среди активных провайдеров нет тарификации по часам пик.",
   "customize.noteMenu": "Отображаемое имя…",
   "customize.noteProviderMenu": "Имя провайдера…",
@@ -5312,6 +5349,8 @@ const ru: Dict = {
   "detail.expiredDetail": "Истекло · {detail}",
   "detail.pastCampaigns": "Прошлых кампаний Start Plan: {n}",
   "detail.heldNotGranted": "Есть, но не выдано — получите в ZCode",
+  "detail.activatesAt": "ожидание · активируется в {time}",
+  "detail.awaitingBalance": "активно · ждём синхронизации ZCode",
   "detail.moreGrants": "Ещё подарков: {n}",
   "detail.unconfirmed": "Не подтверждено",
   "detail.moneyOfLeft": "{a} / {b} осталось",
@@ -5544,6 +5583,22 @@ export function displayMetricDetail(text: string): string {
   if (/^expired$/i.test(text.trim())) return t("detail.expired");
   m = text.match(/^expired · (.+)$/i);
   if (m) return t("detail.expiredDetail", { detail: displayMetricDetail(m[1]) });
+  const pendingActivation = text.match(/^(.+) · activates at (\d{10})$/i);
+  if (pendingActivation) {
+    const at = new Date(Number(pendingActivation[2]) * 1000);
+    const sameDay = at.toDateString() === new Date().toDateString();
+    const time = at.toLocaleString(
+      localeTag(),
+      sameDay
+        ? { hour: "2-digit", minute: "2-digit" }
+        : { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" },
+    );
+    return `${pendingActivation[1]} · ${t("detail.activatesAt", { time })}`;
+  }
+  const waiting = text.match(/^(.+) · effective, waiting for ZCode to sync$/i);
+  if (waiting) return `${waiting[1]} · ${t("detail.awaitingBalance")}`;
+  const held = text.match(/^(.+) · held · not granted \(open zcode to claim\)$/i);
+  if (held) return `${held[1]} · ${t("detail.heldNotGranted")}`;
   if (/^held · not granted \(open zcode to claim\)$/i.test(text.trim())) return t("detail.heldNotGranted");
   const moreGrants = text.trim().match(/^\+(\d+) more grants$/i);
   if (moreGrants) return t("detail.moreGrants", { n: moreGrants[1] });

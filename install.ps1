@@ -17,7 +17,7 @@ Write-Host ''
 Write-Host '> Finding the latest release...'
 $release = Invoke-RestMethod 'https://api.github.com/repos/Aafff623/pane/releases/latest' `
     -Headers @{ 'User-Agent' = 'pane-installer' } -UseBasicParsing
-$asset = $release.assets | Where-Object { $_.name -match '^Pane_.+_x64-setup\.exe$' } | Select-Object -First 1
+$asset = $release.assets | Where-Object { $_.name -match '-setup\.exe$' } | Select-Object -First 1
 if (-not $asset) { throw 'No installer found in the latest release - please report this at https://github.com/Aafff623/pane/issues' }
 
 $dest = Join-Path $env:TEMP $asset.name

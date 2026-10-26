@@ -26,6 +26,7 @@ grid rhythm and one GSAP clock.
 | Accent | `--accent` | `#64d7c2` | `#087d6d` | primary action, live state |
 | Accent | `--blue` | `#78a9ff` | `#2866c7` | quota/limit semantics |
 | Domain | `--domain-1..4` | mint / blue / violet / amber | darker equivalents | topology directions |
+| Comic | `--comic-shadow` / `--comic-border` / `--comic-highlight` / `--comic-dot` | derived from `--accent` + `--ink` | same derivation, darker | #89 only, under `html[data-site-skin=comic-pixel]` |
 
 Typography: Manrope variable (200–800) + system CJK fallback
 (`Noto Sans SC`, `Microsoft YaHei`, `PingFang SC`). Display sizes use
@@ -82,7 +83,44 @@ stops under `prefers-reduced-motion: reduce` and when the tab is hidden.
 - [ ] Chinese and English routes show the same facts and version.
 - [ ] `node --test site/*.test.mjs` green after any UI change.
 
-## 6. Cross-surface anchors
+## 6. Signal cards (#88)
+
+`#signals` is the one section adapted from the oil-ui-pro card prototypes. The
+section skeleton is approved because each card shows a real, verifiable
+mechanism instead of a generic icon + heading:
+
+- **Refresh path** (beam-graph): timer / manual / launch → single-flight gate
+  → snapshot → panel.
+- **30-day metric** (metric): median-day projection with the sample-data label
+  visible; no projection in the first seven days.
+- **Local API** (terminal): the real `openusage.limits.v1` envelope served on
+  `127.0.0.1:6736/v1/limits`.
+- **Shortcut** (keycaps): Alt + 2 summon, Esc dismiss, Shift period.
+
+Card rules: only the §2 tokens (no prototype palette); one finite entrance per
+card, started when the section enters the viewport; no ambient loop; no nested
+cards; the visual stage is `aria-hidden` and every claim also appears in the
+caption. Prototype `--card-*` variables are not imported.
+
+## 7. Comic site skin (#89)
+
+The site previews the in-app comic-pixel skin behind an opt-in
+`html[data-site-skin=comic-pixel]` attribute (header palette button, stored in
+`pane-site-skin`, or `?skin=comic-pixel`). Native visitors parse none of it.
+
+Seven-piece subset, all CSS and scoped to the attribute: uneven hand-drawn
+borders (`2px 2.5px 3px 2px`, uneven radii), 4px hard shadows, Ben-Day dots on
+cards (150×96 patch, masked, opacity ≤ .55), a highlighter swipe on section and
+card titles (`width:fit-content`, lower half of the text), a burst badge on the
+sample-data label, and sticker provider badges (border + 2px shadow +
+alternating tilt). The outline-text item is deliberately omitted — at 10px
+labels it hurts readability more than it adds character.
+
+This is the only place where the §3 “one hairline / no shadows” card rule is
+relaxed, and it never leaks outside the attribute. Comic typography does not
+add a font; the display face stays Manrope.
+
+## 8. Cross-surface anchors
 
 - Palette and domain colors mirror the app's usage topology (#60).
 - GSAP is the only animation runtime on the site and in the workshop; do not
@@ -91,3 +129,24 @@ stops under `prefers-reduced-motion: reduce` and when the tab is hidden.
   catalog, never from hand-maintained copy.
 - The license and privacy facts mirror `LICENSE` and `docs/privacy.md`; the
   site pages are human summaries, those files are authoritative.
+
+## 9. Motion and type tiers (#86)
+
+**Entrance order.** Hero copy rises in one CSS animation; the two mono chip
+labels type in after it (`.35s`, second label `.55s`). Section reveals start
+when their element is 8% inside the viewport (`.14` threshold), with a
+`--reveal-delay` capped at 180ms. Count-up figures start at 45% visibility and
+run 1.4s once. Signal cards start only when their section is 18% visible; the
+beam then runs its finite CSS timeline. There is no ambient loop on the page
+except the provider belt and the topology flow, both behind the shared pause
+switch.
+
+**Weight tiers.** Display/headline: Manrope 650–750 with negative tracking.
+Body: 400 at 13–14px. Labels and chips: 500, uppercase only for mono
+kickers. Numerals: `tabular-nums`; never synthetic bold. This is three tiers,
+not a per-section type scale.
+
+**Footer.** The footer is a solid brand field (`--footer-field`) with the
+scalable wordmark; the download CTA carries the only ambient wash. No second
+glow was added to the footer because it would compete with the wordmark and
+break the one-primary-surface rule.

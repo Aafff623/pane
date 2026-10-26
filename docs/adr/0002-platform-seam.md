@@ -32,9 +32,10 @@ Win32 UI language，Antigravity 用 PowerShell 扫进程和端口，WebView 内�
 - 正面：Linux/macOS 能编过；Win32 不再泄漏到 provider。
 - 代价：托盘点击坐标、menubar、AppIndicator 仍按 Windows 假设工作，
   另两端的窗口位置和自动启动文案会暂时别扭。
-- 不做：不为了「看起来跨平台」改 `com.jazii.pane` 数据目录，也不在本机
-  GNU 工具链上假装能签官方 Windows 包——官方包仍由 GitHub Actions 的
-  MSVC runner 出。
+- 不做：不为了「看起来跨平台」改数据目录（2026-10-26 #105 的
+  `com.aafff623.pane` / `PaneAafff623` 迁移是身份分离，不是跨平台装饰），
+  也不在本机 GNU 工具链上假装能签官方 Windows 包——官方包仍由 GitHub
+  Actions 的 MSVC runner 出。
 
 ## 否决的替代
 

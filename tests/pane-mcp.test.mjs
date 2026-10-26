@@ -50,6 +50,39 @@ test("initialize and tools/list expose the read-only tool set", async () => {
   }
 });
 
+test("tool schemas are a stable read-only contract", () => {
+  const expected = {
+    list_providers: [],
+    get_usage: ["provider_id"],
+    get_provider_quota: ["provider_id"],
+    list_sources: [],
+    get_status: [],
+    list_resets: [],
+  };
+  assert.deepEqual(
+    TOOLS.map((tool) => tool.name),
+    Object.keys(expected),
+  );
+  for (const tool of TOOLS) {
+    assert.equal(tool.inputSchema.type, "object", tool.name);
+    assert.equal(tool.inputSchema.additionalProperties, false, tool.name);
+    assert.deepEqual(tool.inputSchema.required ?? [], expected[tool.name], tool.name);
+    assert.deepEqual(
+      Object.keys(tool.inputSchema.properties ?? {}),
+      expected[tool.name],
+      tool.name,
+    );
+    assert.equal(typeof tool.description, "string", tool.name);
+    assert.ok(tool.description.length > 20, tool.name);
+    assert.deepEqual(tool.annotations, {
+      readOnlyHint: true,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: false,
+    });
+  }
+});
+
 test("get_usage returns asOf/ageSecs and does not leak PII or credentials", async () => {
   const api = createPaneApi({
     baseUrl: "http://127.0.0.1:6736",

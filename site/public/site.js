@@ -1,18 +1,18 @@
-import { en } from '/i18n.js';
+import { en } from '/i18n.js?v=2';
 import { initSiteEffects } from '/effects.js?v=11';
 import { initThemeSwap } from '/theme-swap.js?v=4';
 import { initUsageFlow } from '/usage-flow.js?v=5';
 import { paneMotion } from '/motion.js?v=1';
 import { initHeroReactions } from '/hero-reactions.js?v=3';
 import { initLineSidebar } from '/line-sidebar.js?v=2';
-import { initHeaderNav } from '/header-nav.js?v=1';
+import { initHeaderNav } from '/header-nav.js?v=2';
 import { formatByKind, warmHover, isHoverWarm, onLongPress, moveRovingFocus, bindMotionToggle } from '/ui.js?v=1';
 const frame=document.querySelector('#pane-demo'),settingsFrame=document.querySelector('#pane-settings'),root=document.documentElement;let selected='overview',refreshTimer; let demoTheme='dark';
 root.classList.add('motion-ready');
 // Older copy retained for the text-node translations below.
 const legacyTranslations = {
   '示例数据 · 交互体验':'Sample data · Interactive preview','这是一组示例数据':'Sample data, real interaction','额度、花费与账户均用于演示。':'Quotas, spend and accounts are sample data.','可以操作，不会连接真实账户。':'Explore freely. No real accounts are connected.','按真实项目分类':'Categories from Pane','边缘轻触，侧栏浮现':'Hover the edge to reveal','服务导航，按需出现':'Provider navigation on demand','桌面端 AI 用量面板':'Your desktop AI usage monitor',
-  '功能':'Features','下载':'Download','文档':'Docs','常见问题':'FAQ','立即体验':'Try it','所有 AI 工具的用量':'AI usage for every tool','一个悬浮窗，一眼看清':'One floating window. Everything clear.','连接你的 AI 编程工具 — 查看额度、追踪花费、掌握重置时间，让每一次使用都心中有数。':'Connect your AI coding tools — see quotas, track spend and know when limits reset.','下载 Windows 版':'Download for Windows','支持你的常用工具':'Works with your tools','交互体验':'Interactive preview','重置':'Reset','你的 AI 用量，随时在手边':'Your AI usage, always within reach','点击圆环、切换周期':'Click a ring or change the period','或打开花费详情':'or open spend details','额度总览':'Quota overview','花费详情':'Spend details','设置':'Settings','刷新用量':'Refresh usage','为每天都在用 AI 的你而设计。Pane 把分散的用量信息，变成随时可看的桌面面板。':'Designed for people who use AI every day. Pane turns scattered usage data into a desktop panel you can always see.','额度，一处看清':'Quotas in one view','多个工具、多组账户，汇集到一个总览。会话、周度与月度额度，点击即可切换。':'Bring multiple tools and accounts into one overview. Switch between session, weekly and monthly limits.','花费，有迹可循':'Spend, with a trail','从本地 CLI 日志汇总 Token 与花费。用热力图回看每一天，按工具和模型查看明细。':'Aggregate tokens and spend from local CLI logs. Review every day on a heatmap, by tool and model.','重置，不再猜测':'Resets, without guessing','额度还剩多少、什么时候恢复，一眼可见。接近上限与重置时，桌面提醒帮你留意。':'See what remains and when it resets. Desktop alerts call out limits and upcoming resets.','密钥，留在本机':'Keys stay local','密钥存储在你的电脑上，查询直连对应厂商。开源代码可审阅，匿名遥测可关闭。':'Keys stay on your computer and queries go directly to each provider. The code is open to review and anonymous telemetry is optional.','你可能想知道':'Questions, answered','你的 AI 用量，现在尽在眼前。':'Your AI usage, right in front of you.','下载 Pane':'Download Pane','先体验一下':'Try the demo','源代码':'Source','反馈':'Feedback'
+  '功能':'Features','下载':'Download','文档':'Docs','常见问题':'FAQ','立即体验':'Try it','所有 AI 工具的用量':'AI usage for every tool','一个悬浮窗，一眼看清':'One floating window. Everything clear.','连接你的 AI 编程工具 — 查看额度、追踪花费、掌握重置时间，让每一次使用都心中有数。':'Connect your AI coding tools — see quotas, track spend and know when limits reset.','下载 Windows 版':'Download for Windows','支持你的常用工具':'Works with your tools','交互体验':'Interactive preview','重置':'Reset','你的 AI 用量，随时在手边':'Your AI usage, always within reach','点击圆环、切换周期':'Click a ring or change the period','或打开花费详情':'or open spend details','额度总览':'Quota overview','花费详情':'Spend details','设置':'Settings','刷新用量':'Refresh usage','为每天都在用 AI 的你而设计。Pane 把分散的用量信息，变成随时可看的桌面面板。':'Designed for people who use AI every day. Pane turns scattered usage data into a desktop panel you can always see.','额度，一处看清':'Quotas in one view','多个工具、多组账户，汇集到一个总览。会话、周度与月度额度，点击即可切换。':'Bring multiple tools and accounts into one overview. Switch between session, weekly and monthly limits.','花费，有迹可循':'Spend, with a trail','从本地 CLI 日志汇总 Token 与花费。用热力图回看每一天，按工具和模型查看明细。':'Aggregate tokens and spend from local CLI logs. Review every day on a heatmap, by tool and model.','重置，不再猜测':'Resets, without guessing','额度还剩多少、什么时候恢复，一眼可见。接近上限与重置时，桌面提醒帮你留意。':'See what remains and when it resets. Desktop alerts call out limits and upcoming resets.','密钥，留在本机':'Keys stay local','密钥存储在你的电脑上，查询直连对应厂商。开源代码可审阅，应用不含遥测。':'Keys stay on your computer and queries go directly to each provider. The code is open to review and the app sends no telemetry.','你可能想知道':'Questions, answered','你的 AI 用量，现在尽在眼前。':'Your AI usage, right in front of you.','下载 Pane':'Download Pane','先体验一下':'Try the demo','源代码':'Source','反馈':'Feedback'
 };
 
 const isEnglish = location.pathname === '/en' || location.pathname.startsWith('/en/') || new URLSearchParams(location.search).get('lang') === 'en';
@@ -45,6 +45,11 @@ function applyEnglishCopy() {
   setText('.why-kicker','whyKicker'); setText('#why-pane-title','whyTitle'); setText('.why-copy p','whyCopy'); setText('.why-link','whyLink'); setText('.why-destination small','whyDestination');
   setText('.why-work b','whyWork'); setText('.why-work small','whyFocus'); setText('.why-flow-label','whyFlowLabel'); setText('.why-pause','whyPause'); setText('.why-flow-caption','whyFlowCaption'); setText('.why-flow-note','whyFlowNote'); setText('.why-flow-count small','whyFlowCount'); setTexts('.why-source small',['whyClaude','whyCodex','whyCursor','whyRouter','whyTavily']);
   setText('.ecosystem-intro', 'ecosystemIntro');
+  setText('#boundaries .section-index','boundariesIndex'); setText('#boundaries-title','boundariesTitle'); setText('#boundaries .section-head p','boundariesCopy');
+  setTexts('#boundaries .boundary-card h3',['boundary1Title','boundary2Title','boundary3Title']);
+  setTexts('#boundaries .boundary-card p',['boundary1Copy','boundary2Copy','boundary3Copy'],true);
+  setTexts('#boundaries .boundary-stat span',['boundaryStatProviders','boundaryStatAccounts','boundaryStatLicense']);
+  setText('#boundaries .boundary-stat .why-link','boundaryStatLink',true);
   const ecosystemCopy={'.ecosystem-copy .why-kicker':'PANE ECOSYSTEM / AVAILABLE TODAY','#ecosystem-title':'Usage from your everyday tools. One place to check.','.ecosystem-art-foot>span':'Different services. One entry point.','.ecosystem-core>span':'Connect scattered usage','.ecosystem-outlook':'4 ecosystem directions, 13 candidate fields. These are expansion ideas, not currently supported integrations; availability depends on provider interfaces.','.ecosystem-copy .why-link':'Explore current services ↘'};
   for(const [selector,value] of Object.entries(ecosystemCopy)){const node=document.querySelector(selector);if(node)node.textContent=value}
   const domains=[['AI & content creation','Models & agents · Images & video · Voice & translation · Search & crawling'],['Productivity & business','Workflow automation · Office & design SaaS · Commerce & logistics · Marketing & communication'],['Digital resources & infrastructure','Cloud & compute · Databases & analytics · Storage & backups · Networks & traffic'],['Personal digital memberships','Consumer tools, knowledge & education memberships']];
@@ -63,14 +68,31 @@ function applyEnglishCopy() {
   document.querySelectorAll('.faq-group').forEach((group, gi) => { const set = (node, key) => { if (node && isEnglish && en[key]) node.textContent = en[key]; }; set(group.querySelector('.faq-group-title'), `faq.g${gi + 1}`); group.querySelectorAll('.faq-item').forEach((item, ii) => { const n = gi * 3 + ii + 1; set(item.querySelector('summary'), `faq.q${n}`); set(item.querySelector('.faq-body p'), `faq.a${n}`); }); });
   setText('.faq-section .section-head p', 'faqCopy');
   setText('.faq-contact span', 'faq.contactPrompt'); setText('.faq-contact a', 'faq.cta');
-  setTexts('.bottom-actions .chip__label',['coming','coming']); setText('.bottom-actions .button[data-variant=secondary]','tryDemo'); setText('.platforms','downloadNote'); setTexts('.site-footer .footer-content>div a',['source','docs','feedback']);
+  setTexts('.bottom-actions .chip__label',['coming','coming']); setText('.bottom-actions .button[data-variant=secondary]','tryDemo'); setText('.platforms','downloadNote'); setText('[data-release-prefix]','releasePrefix'); setTexts('.site-footer .footer-content>div a',['source','docs','feedback']);
   setText('#design .section-index','designIndex'); setText('#design .section-head h2','designTitle'); setText('#design .section-head p','designCopy'); setTexts('#design .design-card h3',['designCard1','designCard2']); setTexts('#design .design-card p',['designCard1Copy','designCard2Copy']); setTexts('#design .design-open',['designOpen','designOpen']);
+  setText('.signal-section .section-index','signalsIndex'); setText('#signals-title','signalsTitle'); setText('.signal-section .section-head p','signalsCopy');
+  setText('.signal-beam .signal-card-tag','sigRefreshTag'); setText('.signal-beam .signal-caption h3','sigRefreshTitle'); setText('.signal-beam .signal-caption p','sigRefreshCopy'); setTexts('.signal-beam .sig-node>span',['sigNodeTimer','sigNodeManual','sigNodeLaunch','sigNodeSnapshot','sigNodePanel']); setText('.signal-beam .sig-node--hub b','sigNodeGate');
+  setText('.signal-metric .signal-card-tag','sigMetricTag'); setText('.signal-metric .signal-card-alt','sigSample'); setText('.signal-metric .signal-caption h3','sigMetricTitle'); setText('.signal-metric .signal-caption p','sigMetricCopy'); setText('.sig-metric-label','sigMetricLabel'); setText('.sig-metric-delta>span','sigMetricMedian');
+  setText('.signal-terminal .signal-card-tag','sigTermTag'); setText('.signal-terminal .signal-caption h3','sigTermTitle'); setText('.signal-terminal .signal-caption p','sigTermCopy'); setText('.sig-term-note','sigTermNote');
+  setText('.signal-keys .signal-card-tag','sigKeysTag'); setText('.signal-keys .signal-card-alt','sigSystemHotkey'); setText('.signal-keys .signal-caption h3','sigKeysTitle'); setText('.signal-keys .signal-caption p','sigKeysCopy'); setText('.sig-command b','sigKeysPanel');
 }
 applyEnglishCopy();
 initUsageFlow(isEnglish,en);
 initProviderOrbits();
 initProviderMarquee();
 initDataDisplay();
+
+// Headline text reveal (#86). CSS owns the end state; this only flips the
+// class when the heading enters the viewport. A missing IntersectionObserver
+// reveals everything immediately instead of leaving a blurred heading.
+document.querySelectorAll('.reveal-text').forEach(node=>{
+  if(!('IntersectionObserver' in window)){node.classList.add('is-revealed');return}
+  const observer=new IntersectionObserver(entries=>{
+    if(!entries[0].isIntersecting)return;
+    observer.disconnect();node.classList.add('is-revealed');
+  },{threshold:.25});
+  observer.observe(node);
+});
 
 // The provider belt is the one self-moving surface that had no switch of its
 // own; it now shares the page-wide one, which is also what makes the belt
@@ -88,10 +110,37 @@ function initProviderMarquee(){
 // the five source rows get a real accessible name built from their own parts
 // instead of the run-on flattened text a button would otherwise announce.
 function initDataDisplay(){
+  const reduced=window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
   for(const node of document.querySelectorAll('[data-number]')){
     const value=Number(node.dataset.number);
     if(!Number.isFinite(value))continue;
-    node.textContent=formatByKind(node.dataset.format,value)+(node.dataset.unit||'');
+    const final=formatByKind(node.dataset.format,value)+(node.dataset.unit||'');
+    node.textContent=final;
+    if(reduced||value===0)continue;
+    // One 1.4s count-up per figure, started when the figure is actually on
+    // screen. The final string is already in place for assistive tech and for
+    // a page whose observer never fires; only sighted viewers see the ticks.
+    const format=(v)=>formatByKind(node.dataset.format,v)+(node.dataset.unit||'');
+    let started=false;
+    const start=()=>{
+      if(started)return;
+      started=true;
+      const began=performance.now();
+      const tick=(now)=>{
+        const t=Math.min(1,(now-began)/1400);
+        const eased=1-Math.pow(1-t,3);
+        node.textContent=t<1?format(value*eased):final;
+        if(t<1)requestAnimationFrame(tick);
+      };
+      requestAnimationFrame(tick);
+    };
+    if('IntersectionObserver' in window){
+      const io=new IntersectionObserver(entries=>{
+        if(!entries[0].isIntersecting)return;
+        io.disconnect();start();
+      },{threshold:.45});
+      io.observe(node);
+    }else start();
   }
   const joiner=isEnglish?', ':'，';
   for(const row of document.querySelectorAll('.why-source')){
@@ -364,7 +413,22 @@ settingsWrap.addEventListener('keydown',event=>{
   const first=focusables[0],last=focusables[focusables.length-1];
   if(event.shiftKey&&document.activeElement===first){event.preventDefault();last.focus()}
   else if(!event.shiftKey&&document.activeElement===last){event.preventDefault();first.focus()}
-});settingsButton.addEventListener('click',()=>setSettingsOverlay(settingsWrap.hidden));document.querySelector('#pane-settings-close').addEventListener('click',()=>setSettingsOverlay(false));function send(action){frame.contentWindow?.postMessage({type:'pane-demo',action},location.origin)}function loadDemo(){frame.src=`/demo/index.html?lang=${demoLang}&theme=${demoTheme}`;settingsWrap.hidden=true;settingsFrame.removeAttribute('src');delete settingsFrame.dataset.loaded;selected='overview';desktop.dataset.mode='auto';syncDemoControls()}loadDemo();document.querySelector('#reset-demo').addEventListener('click',loadDemo);document.querySelectorAll('[data-demo]').forEach(b=>b.addEventListener('click',()=>{const a=b.dataset.demo;if(a==='settings'){desktop.dataset.mode='settings';updateNoteAct();return}if(a!=='refresh')setSettingsOverlay(false);if(a==='refresh'){desktop.dataset.mode='refresh';updateNoteAct();b.disabled=true;send(a);clearTimeout(refreshTimer);refreshTimer=setTimeout(()=>b.disabled=false,650);return}selected=a;desktop.dataset.mode=a;send(a);syncDemoControls();updateNoteAct()}));// One panel open per FAQ group. `<details>` stays because it is the more
+});settingsButton.addEventListener('click',()=>setSettingsOverlay(settingsWrap.hidden));document.querySelector('#pane-settings-close').addEventListener('click',()=>setSettingsOverlay(false));function send(action){frame.contentWindow?.postMessage({type:'pane-demo',action},location.origin)}function loadDemo(){frame.src=`/demo/index.html?lang=${demoLang}&theme=${demoTheme}`;settingsWrap.hidden=true;settingsFrame.removeAttribute('src');delete settingsFrame.dataset.loaded;selected='overview';desktop.dataset.mode='auto';syncDemoControls()}
+// The iframe is the page's heaviest request; keep it out of first paint and
+// load it once the demo section is within 700px. loading="lazy" alone was not
+// enough — this script called loadDemo() immediately, so the browser fetched
+// the whole demo before the hero had painted.
+let demoBooted=false;
+function bootDemo(){if(demoBooted)return;demoBooted=true;loadDemo()}
+const demoSection=document.querySelector('#demo');
+if(demoSection&&'IntersectionObserver' in window){
+  const demoBoot=new IntersectionObserver(entries=>{
+    if(!entries[0].isIntersecting)return;
+    demoBoot.disconnect();bootDemo();
+  },{rootMargin:'700px 0px'});
+  demoBoot.observe(demoSection);
+}else bootDemo();
+document.querySelector('#reset-demo').addEventListener('click',loadDemo);document.querySelectorAll('[data-demo]').forEach(b=>b.addEventListener('click',()=>{const a=b.dataset.demo;if(a==='settings'){desktop.dataset.mode='settings';updateNoteAct();return}if(a!=='refresh')setSettingsOverlay(false);if(a==='refresh'){desktop.dataset.mode='refresh';updateNoteAct();b.disabled=true;send(a);clearTimeout(refreshTimer);refreshTimer=setTimeout(()=>b.disabled=false,650);return}selected=a;desktop.dataset.mode=a;send(a);syncDemoControls();updateNoteAct()}));// One panel open per FAQ group. `<details>` stays because it is the more
 // accessible primitive — the FAQ keeps working with no script at all — so the
 // accordion keeps its disclosure list and only gains what the primitive lacks.
 document.querySelectorAll('.faq-group').forEach(group=>{
@@ -470,6 +534,35 @@ if (gsap && !matchMedia('(prefers-reduced-motion: reduce)').matches) {
     document.addEventListener('visibilitychange', syncFragIdles);
     paneMotion.subscribe(syncFragIdles);
     syncFragIdles();
+    // Signal cards enter once, when the section reaches the viewport. The beam
+    // keeps its CSS timeline (finite) and this block only adds the class that
+    // starts it, so a throttled tab still renders every card in its end state.
+    const signalSection = document.querySelector('.signal-section');
+    if (signalSection) {
+      const signalReveal = new IntersectionObserver(entries => {
+        if (!entries[0].isIntersecting) return;
+        signalReveal.disconnect();
+        signalSection.classList.add('is-live');
+        gsap.timeline({ defaults: { ease: 'power3.out' } })
+          .fromTo(signalSection.querySelectorAll('.sig-node'), { opacity: 0 }, { opacity: 1, duration: .35, stagger: .05 }, 0)
+          .fromTo(signalSection.querySelectorAll('.sig-metric-chart i'), { scaleY: 0 }, { scaleY: 1, duration: .6, stagger: .022, transformOrigin: 'bottom center' }, .05)
+          .fromTo(signalSection.querySelectorAll('.sig-metric-value, .sig-metric-delta'), { opacity: 0, y: 6 }, { opacity: 1, y: 0, duration: .45, stagger: .08 }, .15)
+          .fromTo(signalSection.querySelectorAll('.sig-term-line'), { opacity: 0, y: 5 }, { opacity: 1, y: 0, duration: .24, stagger: .09 }, .2)
+          .fromTo(signalSection.querySelectorAll('.sig-keycap, .sig-command'), { opacity: 0 }, { opacity: 1, duration: .35, stagger: .1 }, .25);
+      }, { threshold: .18 });
+      signalReveal.observe(signalSection);
+    }
+    // Section indices pop in once, with a small overshoot. They are the page's
+    // only numbering system, so the motion points at the structure rather
+    // than decorating every chip on the page.
+    const indexPop = new IntersectionObserver(entries => {
+      for (const entry of entries) {
+        if (!entry.isIntersecting) continue;
+        indexPop.unobserve(entry.target);
+        gsap.fromTo(entry.target, { scale: .72, opacity: 0 }, { scale: 1, opacity: 1, duration: .5, ease: 'back.out(2)' });
+      }
+    }, { threshold: .6 });
+    document.querySelectorAll('.section-index').forEach(node => indexPop.observe(node));
     document.querySelectorAll('[data-tilt-card]').forEach(card => {
       card.addEventListener('pointermove', event => { const r = card.getBoundingClientRect(); gsap.to(card, { rotateY: ((event.clientX-r.left)/r.width-.5)*4, rotateX: -((event.clientY-r.top)/r.height-.5)*4, duration: .25, overwrite: true }); });
       card.addEventListener('pointerleave', () => gsap.to(card, { rotateX: 0, rotateY: 0, duration: .45, ease: 'power2.out' }));

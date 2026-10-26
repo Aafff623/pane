@@ -1,5 +1,5 @@
 // Browser transport for the real Pane frontend. No native IPC, vendor requests,
-// account files, API keys, telemetry or loopback connections are used here.
+// account files, API keys, analytics or loopback connections are used here.
 // 'pane-source/providerCatalog' is aliased by build-demo.mjs to the catalog of
 // the project passed on the command line, so the demo always mirrors it.
 import { providerCatalog } from 'pane-source/providerCatalog';
@@ -30,7 +30,7 @@ const GROUPS: Record<string, string> = { antigravity: 'g6', codex: 'g6', command
 
 let config: Record<string, any> = {
   refreshMinutes: 5, disabled: [...DISABLED],
-  pinned: null, trayProviders: [], telemetry: false,
+  pinned: null, trayProviders: [],
   notifyAlmostOut: false, notifyCuttingClose: false, notifyWillRunOut: false, notifyResetSoon: true,
   spendTab: 'today', overviewTab: '5h', overviewCategory: 'coding', overviewStyle: 'bars',
   categoryOverrides: {}, spendMetric: 'tokens', spendGrouping: 'model', showUsed: false, showTrend: false,

@@ -32,3 +32,27 @@ jobs:
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+
+      # A deploy is not done when wrangler exits; the edge route and the
+      # installer redirect must answer from the live domain. Retry while
+      # Cloudflare propagates, then fail the job instead of leaving a broken
+      # site behind a green deploy.
+      - name: Smoke test the live site
+        run: |
+          set -euo pipefail
+          base="https://pane.threetwoa.live"
+          check() {
+            path="$1"; want="$2"; tries=0
+            until code=$(curl -sS -o /dev/null -w "%{http_code}" --max-time 20 "$base$path"); [ "$code" = "$want" ]; do
+              tries=$((tries + 1))
+              if [ "$tries" -ge 12 ]; then
+                echo "$path returned $code (want $want) after $tries tries" >&2
+                exit 1
+              fi
+              sleep 5
+            done
+            echo "$path -> $code"
+          }
+          check / 200
+          check /download/windows 302
+          check /skins/index.json 200

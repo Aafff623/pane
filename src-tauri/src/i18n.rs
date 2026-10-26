@@ -54,6 +54,14 @@ pub fn tray_left_label(cfg: &Value, n: i64) -> String {
     }
 }
 
+pub fn tray_more_label(cfg: &Value, n: usize) -> String {
+    match resolved_locale(cfg) {
+        "zh" => format!("还有 {n} 个供应商…"),
+        "ru" => format!("ещё {n} поставщиков…"),
+        _ => format!("{n} more providers…"),
+    }
+}
+
 pub fn settings_label(cfg: &Value) -> &'static str {
     match resolved_locale(cfg) {
         "zh" => "设置…",

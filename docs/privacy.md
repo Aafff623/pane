@@ -1,9 +1,9 @@
 # Privacy
 
 Pane is built on one rule: **your data is nobody's business, including
-ours.** There is no Pane account, and no Pane backend receives your quotas,
-spend, keys, or provider data. The Pane-hosted update endpoint and the
-minimal, anonymous, opt-out daily statistic are described in full below.
+ours.** There is no Pane account, no Pane backend receives your quotas,
+spend, keys, or provider data, and this build sends no analytics or
+telemetry. The Pane-hosted update endpoint is described in full below.
 
 ## Every network call Pane can make
 
@@ -16,56 +16,38 @@ This is the complete list. Anything not listed here does not happen.
 | User-configured One/New API origins | Status probe when saving/changing a site, plus one unauthenticated backfill if a stored site has no display unit; billing on every refresh for enabled keys | `/api/status` with no key. Subscription + usage send that site's key as Bearer, **only to that origin** — never to Pane servers. |
 | `raw.githubusercontent.com` (LiteLLM), `models.dev`, `robinebers.github.io` | ~Daily | Anonymous GET for public model price tables (no identifying data) |
 | `pane.threetwoa.live/update/latest.json` (this project's own Cloudflare edge route), then `github.com/Aafff623/pane/releases/latest/download/latest.json` | On launch + every 4 h | Anonymous GET for this project's own update manifest, carrying no app data. The edge route serves the same manifest but rewrites the Windows installer URL to the Gitee mirror for CN clients; GitHub is the reachable-everywhere fallback. Cloudflare and GitHub may each log the request as the host; Pane runs no counter. See "The update check" below. |
-| `us.i.posthog.com` | Once per day (unless switched off) | The two anonymous daily-statistic events described in "Anonymous usage statistics" below — a random ID, version, enabled-provider list, and per-provider success/failure counts. Never usage amounts, spend, keys, or error text. |
+| `status.claude.com` | Only when a Claude card is stale or failed, and the status probe is on | Anonymous GET for the public Statuspage incident summary; no app data. |
 | `127.0.0.1:11434` (your own PC) | Every refresh, if Ollama is enabled | Local-only query of your Ollama server |
 
 Notably absent: session recording, event streams, A/B flags, autocapture
-of any kind — none of it exists in the codebase, and the daily statistic
-above is the entire analytics surface.
+of any kind — none of it exists in the codebase. There is no analytics
+SDK, no crash reporter, and no telemetry endpoint.
 
-## Anonymous usage statistics
+## The never-sent list
 
-Settings → Privacy → **"Share anonymous usage statistics"** (on by
-default; turning it off is a hard stop — nothing is counted, nothing is
-written, and the stored random ID is deleted so re-enabling starts over
-as a brand-new anonymous install).
+The following never leaves the machine through Pane, on any setting, in
+any payload, log or crash report:
 
-When on, Pane sends at most two kinds of event per day to PostHog (the
-same disclosed-and-toggleable approach as the Mac app Pane is a port of):
+- credentials, API keys, OAuth tokens, cookies, vault contents and master
+  passwords;
+- quotas, usage percentages, spend amounts, token counts, balances and
+  reset times;
+- model names read from session logs, prompts, completions, tool arguments,
+  file contents, file paths and project names;
+- account identities, labels, site ids, relay origins and configured
+  counts;
+- window titles, screenshots, clipboard contents and keystrokes.
 
-- **`app_daily_active`** — once per day: "this install was alive today",
-  the app version, which providers are enabled, which metrics you
-  starred (stable IDs only), appearance/density/refresh settings.
-  Multi-account installs report only the plain provider family
-  ("claude", once) — account-scoped card ids are derived from your
-  account identity and never leave the machine, on any field of either
-  event.
-- **`provider_refresh_daily`** — per provider, summarizing the previous
-  day: how many refreshes succeeded, went stale, or failed, with failure
-  *categories* only (auth / rate-limit / server / network / other).
-  The raw error text never leaves your machine — it can contain paths
-  or account details, so only the category enum is sent.
-  One/New API (`onenewapi`) is reported as that family id at most once
-  per refresh. Site ids, key ids, configured counts, labels, and origins
-  never leave the machine.
-  This rollup is deliberately lossy: if a send fails, that day's
-  summary is dropped — there is no retry queue, nothing is persisted
-  waiting to be sent later.
+Pane has no analytics payload. If a future feature needs to send
+something new, it must be added to the network table first and called out
+in this list if it changes the boundary.
 
-The identity attached to these events is a **random UUID** generated on
-your machine — derived from nothing (not your hardware, not your IP, not
-your account), linked to nothing, stored in `%APPDATA%\Pane\telemetry.json`.
-Every event also instructs PostHog not to build a person profile, and the
-PostHog project is configured to **discard client IP addresses** at
-ingestion (country-level GeoIP resolves first, then the IP is dropped).
+## No usage statistics
 
-What is *never* sent, with this toggle on or off: your quotas, usage
-percentages, spend amounts, model names from your logs, tokens, keys,
-file paths, or any free-form text. The implementation is fully auditable
-in two places: the payload assembly lives next to the refresh
-orchestration in `src-tauri/src/lib.rs`, and the constants, UUID
-generation and the two documented POSTs (no SDK) live in
-[`src-tauri/src/telemetry.rs`](../src-tauri/src/telemetry.rs).
+The fork previously forwarded the upstream project's anonymous daily
+rollup to PostHog. That channel was removed in 0.11.0 so this build no
+longer sends any data to the upstream author's analytics project, and
+there is no telemetry setting because there is nothing to toggle.
 
 ## The update check
 
@@ -123,7 +105,7 @@ and provider data never leave your PC, same as always.
   slot (`token:web/workbuddy`); `workbuddy_web.json` is kept only while a
   vault write fails. One/New API
   sites and keys use a
-  nested `%APPDATA%\Pane\onenewapi.json`, written owner-only (Windows
+  nested `%APPDATA%\PaneAafff623\onenewapi.json`, written owner-only (Windows
   protected DACL / Unix `0600`) so a permissive Pane directory cannot
   expose the secrets; Settings lists names, URLs, and
   key labels only — never secrets or fragments. Sent only to their own
@@ -140,7 +122,7 @@ and provider data never leave your PC, same as always.
 - **Refreshed OAuth tokens**: written back to the CLIs' own credential
   files so your tools stay signed in — same behavior as the CLIs
   themselves.
-- **Usage snapshots & spend cache**: `%APPDATA%\Pane\` — cached locally so
+- **Usage snapshots & spend cache**: `%APPDATA%\PaneAafff623\` — cached locally so
   the app opens instantly; never uploaded.
 - **Spend accounting**: computed by reading the CLIs' local log files on
   your disk. The logs never leave your machine; only the public price
@@ -160,8 +142,7 @@ Details: [local-http-api.md](local-http-api.md).
 ## Verifying all of this
 
 Pane is MIT-licensed and this repository is the entire codebase. Search
-it: there is no analytics SDK import, and every `http` call site lives
-in a provider module ([`src-tauri/src/providers/`](../src-tauri/src/providers/)),
+it: there is no analytics SDK or telemetry module, and every `http` call
+site lives in a provider module ([`src-tauri/src/providers/`](../src-tauri/src/providers/)),
 the pricing engine ([`src-tauri/src/pricing.rs`](../src-tauri/src/pricing.rs)),
-the updater registration ([`src-tauri/src/lib.rs`](../src-tauri/src/lib.rs)),
-or the one-file statistics module ([`src-tauri/src/telemetry.rs`](../src-tauri/src/telemetry.rs)).
+or the updater registration ([`src-tauri/src/lib.rs`](../src-tauri/src/lib.rs)).

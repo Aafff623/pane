@@ -283,7 +283,8 @@ pub fn set_catalog_epoch_ms(ms: i64) {
 /// fingerprinted below — an app update that reprices the same files would
 /// otherwise leave history at the old dollars until upstream happens to
 /// rewrite a catalog.
-const CORRECTIONS_REV: u32 = 15; // 15: Tencent Hy3 / Hy4 preview official prices
+const CORRECTIONS_REV: u32 = 16; // 16: gemini-4-argon baked card (2026-12-01 aware)
+                                  // 15: Tencent Hy3 / Hy4 preview official prices
 
 /// The corrections revision on its own — the spend cache treats a changed
 /// revision as a hard discard (the *code* that prices changed), while a
@@ -1128,6 +1129,31 @@ fn kimi_vendor_tail(canonical: &str) -> Option<&str> {
     }
 }
 
+/// Antigravity's `gemini-4-argon` rate card. Google's published change takes
+/// effect 2026-12-01: $2 in / $0.10 cache read / $10 out becomes
+/// $4 / $0.20 / $20 per MTok. No cache-write rate is published, so writes
+/// bill at input. The date check keeps the baked fallback correct even when
+/// no catalog ships the new row; spend records the new pin on the timeline at
+/// the change instant, so the rise is forward-only rather than retroactive.
+const ARGON_CHANGE_RFC3339: &str = "2026-12-01T00:00:00Z";
+
+pub fn argon_price_change_ms() -> i64 {
+    static MS: OnceLock<i64> = OnceLock::new();
+    *MS.get_or_init(|| {
+        chrono::DateTime::parse_from_rfc3339(ARGON_CHANGE_RFC3339)
+            .expect("valid Argon change date")
+            .timestamp_millis()
+    })
+}
+
+pub fn argon_price_at(ts_ms: i64) -> Price {
+    if ts_ms >= argon_price_change_ms() {
+        Price::flat(4.0, 20.0, 0.20, 4.0)
+    } else {
+        Price::flat(2.0, 10.0, 0.10, 2.0)
+    }
+}
+
 fn builtin_price(canonical: &str) -> Option<Price> {
     // Gateways prefix the vendor slug (`xai/grok-4.6`, `deepseek/…`,
     // `accounts/fireworks/models/deepseek-v4-pro`). Peel to the last
@@ -1175,6 +1201,10 @@ fn builtin_price(canonical: &str) -> Option<Price> {
         // retry, so a catalog that learns the base slug outranks them.
         "deepseek-v4-pro" => Some(Price::flat(0.464, 0.928, 0.004, 0.464)),
         "deepseek-v4-flash" => Some(Price::flat(0.154, 0.308, 0.003, 0.154)),
+        // Google Antigravity `gemini-4-argon` (#103, openusage + cockpit
+        // verified). Date-aware: launch card until 2026-12-01, then Google's
+        // announced $4/$0.20/$20 card. Catalogs/supplement still outrank this.
+        "gemini-4-argon" => Some(argon_price_at(now_ms())),
         // AihubMix GLM-5.3 preview (aihubmix.com/model/coding-glm-5.3):
         // $0.060 in / $0.220 out per MTok. No cache rate is published, so
         // reads/writes bill at the input rate. Only this gateway SKU is
@@ -1255,6 +1285,28 @@ mod tests {
         store.memo.clear();
         drop(store);
         super::set_overrides(HashMap::new());
+    }
+
+    #[test]
+    fn argon_price_changes_on_december_first() {
+        let change = super::argon_price_change_ms();
+        let before = super::argon_price_at(change - 1);
+        assert_eq!(
+            (before.input, before.output, before.cache_read, before.cache_write),
+            (2.0, 10.0, 0.10, 2.0),
+            "launch card must stay in force through 2026-11-30"
+        );
+        let after = super::argon_price_at(change);
+        assert_eq!(
+            (after.input, after.output, after.cache_read, after.cache_write),
+            (4.0, 20.0, 0.20, 4.0),
+            "Google's 2026-12-01 card"
+        );
+        assert_eq!(
+            super::builtin_price("gemini-4-argon").map(|p| p.input),
+            Some(super::argon_price_at(super::now_ms()).input),
+            "the baked fallback follows the calendar"
+        );
     }
 
     #[test]

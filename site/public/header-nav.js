@@ -23,7 +23,12 @@ export function initHeaderNav() {
   const readY = () => Math.min(Math.max(0, scrollY), Math.max(0, document.documentElement.scrollHeight - innerHeight));
   const track = createHeaderTracker(readY(), header.offsetHeight);
   let frame = 0;
-  const sync = () => { frame = 0; header.classList.toggle('is-hidden', track(readY())); };
+  const sync = () => {
+    frame = 0;
+    const y = readY();
+    header.classList.toggle('is-hidden', track(y));
+    header.classList.toggle('is-scrolled', y > 8);
+  };
   const onScroll = () => { if (!frame) frame = requestAnimationFrame(sync); };
   window.addEventListener('scroll', onScroll, { passive:true });
   window.addEventListener('pageshow', sync);

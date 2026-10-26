@@ -1,6 +1,6 @@
 # Spec: 代理链收拢
 
-**Status:** ready · **Priority:** P2 · **Area:** Network
+**Status:** implemented (2026-10-26) — ticket 01 shipped; optional three-mode `proxy.mode` remains deferred.
 **Issue:** https://github.com/Aafff623/pane/issues/74
 **Evidence:** temp/research/20261025-final-sweep-7repos.md §1-0（推翻过程+缺口+不能开特性的理由）
 

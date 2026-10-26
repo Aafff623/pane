@@ -1,6 +1,6 @@
 # Spec: /v1/limits 本地 API 契约
 
-**Status:** ready · **Priority:** P2 · **Area:** API
+**Status:** implemented (2026-10-26) — typed readings are the opt-in gate; the per-label descriptor table was superseded because free-text rows cannot carry a quota by construction. Family lookup, balance units, untouched-window reset omission and docs landed.
 **Issue:** https://github.com/Aafff623/pane/issues/73
 **Evidence:** temp/research/20261025-final-sweep-7repos.md §1-7（信封/投影/描述符/:id/脱敏/测试全设）
 

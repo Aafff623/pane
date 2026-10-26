@@ -519,8 +519,8 @@ pub fn card_id(provider: &str, n: usize) -> String {
 }
 
 // FNV-1a is used only to derive a stable local card identity. It is not a
-// credential-hiding primitive, and the resulting fingerprint never crosses
-// the telemetry boundary. Two lanes make accidental collisions vanishingly
+// credential-hiding primitive, and the resulting fingerprint never leaves
+// the machine. Two lanes make accidental collisions vanishingly
 // unlikely without adding a new hashing dependency to this small module.
 
 /// Stable instance id for an API-key account. Labels intentionally do not

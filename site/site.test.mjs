@@ -18,6 +18,7 @@ import { LANGS } from "./i18n.js";
 
 const html = await readFile(new URL("./public/index.html", import.meta.url), "utf8");
 const siteScript = await readFile(new URL("./public/site.js", import.meta.url), "utf8");
+const usageFlowScript = await readFile(new URL("./public/usage-flow.js", import.meta.url), "utf8");
 const RELEASES_PAGE = "https://github.com/Aafff623/pane/releases/latest";
 
 test("site content: Pane landing page includes the product sections", () => {
@@ -32,19 +33,31 @@ test("site content: Pane landing page includes the product sections", () => {
   // applied by site.js), so the vacuous early return was hiding every
   // dictionary gap. Lock the keys site.js actually calls instead.
   const used = new Set();
-  for (const [, key] of siteScript.matchAll(/setText\([^,]+,\s*['"]([^'"]+)['"]/g)) used.add(key);
-  for (const [, list] of siteScript.matchAll(/setTexts\([^,]+,\s*\[([^\]]+)\]/g)) {
+  for (const [, key] of siteScript.matchAll(/setText\(\s*['"][^'"]+['"]\s*,\s*['"]([^'"]+)['"]/g)) used.add(key);
+  for (const [, list] of siteScript.matchAll(/setTexts\(\s*['"][^'"]+['"]\s*,\s*\[([^\]]+)\]/g)) {
     for (const [, key] of list.matchAll(/['"]([^'"]+)['"]/g)) used.add(key);
   }
+  // The annotation table is [selector, key] pairs consumed in a loop.
+  for (const [, key] of siteScript.matchAll(/\[['"]\.[^'"]+['"],\s*['"]([A-Za-z0-9_.]+)['"]\]/g)) used.add(key);
   assert.ok(used.size >= 40, `expected site.js to use its dictionary, saw ${used.size}`);
+  // `en.key` property reads (usage-flow, meta, FAQ helpers) are real uses too.
+  const direct = new Set();
+  for (const source of [siteScript, usageFlowScript]) {
+    for (const [, key] of source.matchAll(/\ben\.([A-Za-z0-9_]+)/g)) direct.add(key);
+  }
   for (const [lang, { dict }] of Object.entries(LANGS)) {
     const missing = [...used].filter((key) => !(key in dict));
     assert.deepEqual(missing, [], `${lang} lacks site.js keys`);
-  }
-  if (keys.size === 0) return;
-  for (const [lang, { dict }] of Object.entries(LANGS)) {
-    assert.deepEqual([...keys].filter((k) => !(k in dict)), [], `${lang} lacks`);
-    assert.deepEqual(Object.keys(dict).filter((k) => !keys.has(k)), [], `${lang} has unused`);
+    if (keys.size) {
+      assert.deepEqual([...keys].filter((k) => !(k in dict)), [], `${lang} lacks data-i18n keys`);
+    }
+    // A key nobody reads is stale copy. FAQ keys are assembled from group/item
+    // indices, so they are exempt from the flat scan but still checked above
+    // through the `used` set and the structure test below.
+    const unused = Object.keys(dict).filter(
+      (key) => !used.has(key) && !direct.has(key) && !key.startsWith("faq."),
+    );
+    assert.deepEqual(unused, [], `${lang} has unused dictionary keys`);
   }
 });
 
@@ -85,8 +98,9 @@ test("links: GitHub goes to Aafff623/pane, download buttons use the edge route",
   // No client script and no CORS: the button carries a stable same-origin
   // route and the worker does the GitHub lookup.
   const wired = [...html.matchAll(/<a[^>]*data-latest-installer[^>]*>/g)];
-  assert.equal(wired.length, 3, "download buttons");
+  assert.equal(wired.length, 2, "primary download buttons");
   for (const [tag] of wired) assert.ok(tag.includes('href="/download/windows"'), tag);
+  assert.match(html, /data-platform="windows" href="\/download\/windows"/, "the Windows card keeps its edge route");
 });
 
 test("theme: host and embedded panel themes stay isolated", () => {
@@ -101,6 +115,73 @@ test("demo: bundled frontend matches the current app sources", async () => {
     const current = createHash("sha256").update((await readFile(new URL(`../${file}`, import.meta.url), "utf8")).replaceAll("\r\n", "\n")).digest("hex");
     assert.equal(current, expected, `${file} changed; run node site/scripts/build-demo.mjs`);
   }
+});
+
+// 4b. The signal cards (#88) are the one section adapted from the oil-ui-pro
+//     prototypes. They must stay on the site's token palette and keep naming
+//     mechanisms the app actually ships, not decorative mock data.
+test("signals: four instrument cards use design tokens and real endpoints", async () => {
+  const start = html.indexOf('id="signals"');
+  const end = html.indexOf('<section id="design"');
+  assert.ok(start > 0 && end > start, "signals section sits before design");
+  const section = html.slice(start, end);
+  assert.equal([...section.matchAll(/<article class="signal-card/g)].length, 4);
+  assert.doesNotMatch(section, /#[0-9a-fA-F]{3,8}\b/, "no raw colours in the section");
+  assert.match(section, /openusage\.limits\.v1/);
+  assert.match(section, /data-number="12400000"/);
+  const css = await readFile(new URL("./public/site.css", import.meta.url), "utf8");
+  const block = css.slice(css.indexOf("/* Signals (#88)"));
+  assert.ok(block.length > 1000, "signal styles exist");
+  assert.doesNotMatch(
+    block.slice(0, block.indexOf("@media(prefers-reduced-motion")),
+    /#[0-9a-fA-F]{3,8}\b/,
+    "signal styles use tokens only",
+  );
+});
+
+// 4c. The comic preview (#89) is opt-in: it must stay behind the
+//     data-site-skin attribute, keep its own tokens, and never restyle a
+//     native visitor's page.
+test("comic skin: opt-in attribute, scoped styles, persisted toggle", async () => {
+  const skinScript = await readFile(new URL("./public/site-skin.js", import.meta.url), "utf8");
+  assert.match(html, /id="site-skin"/);
+  assert.match(html, /site-skin\.js/);
+  assert.match(skinScript, /pane-site-skin/);
+  assert.match(skinScript, /data-site-skin/);
+  const css = await readFile(new URL("./public/site.css", import.meta.url), "utf8");
+  const start = css.indexOf("/* Comic-pixel site skin");
+  assert.ok(start > 0, "comic block exists");
+  const block = css.slice(start);
+  assert.match(block, /:root\[data-site-skin=comic-pixel\]/);
+  assert.match(block, /--comic-shadow/);
+  assert.doesNotMatch(css.slice(0, start), /comic-shadow|comic-border/, "native styles never use comic tokens");
+});
+
+// 4c2. The demo iframe is the heaviest request on the page. It must start
+//      without a src and only receive one when the demo section approaches;
+//      `loading="lazy"` alone is too eager on wide viewports (#85).
+test("demo: iframe starts blank and loads near the section", () => {
+  const tag = html.match(/<iframe id="pane-demo"[^>]*>/)?.[0];
+  assert.ok(tag, "demo iframe present");
+  assert.match(tag, /loading="lazy"/);
+  assert.doesNotMatch(tag, /\bsrc=/, "no first-paint demo request");
+  assert.match(siteScript, /rootMargin:'700px 0px'/);
+  assert.match(siteScript, /demoBooted/);
+});
+
+// 4d. The motion pack (#86) is trigger-only: one count-up per figure, a
+//     frosted header after the top, and a reduced-motion end state for every
+//     entrance. Ambient looping on content would violate the design contract.
+test("motion: count-up, frosted header and reduced-motion end states", async () => {
+  const css = await readFile(new URL("./public/site.css", import.meta.url), "utf8");
+  assert.match(siteScript, /Math\.pow\(1-t,3\)/, "count-up easing");
+  assert.match(siteScript, /1500|1400/, "count-up duration");
+  assert.match(siteScript, /is-revealed/, "text reveal class");
+  assert.match(siteScript, /indexPop/, "section index pop");
+  assert.match(css, /\.site-header\.is-scrolled/, "frosted header");
+  assert.match(css, /@keyframes label-type/, "typewriter label");
+  assert.match(css, /prefers-reduced-motion:reduce\)\{\.motion-ready \.reveal-text/, "reveal has a reduced-motion end state");
+  assert.equal([...html.matchAll(/class="reveal-text"/g)].length, 2, "two headline reveals");
 });
 
 // 5. The hero copy carries two numbers the app owns: the release version
@@ -121,11 +202,15 @@ test("copy: hero numbers match package.json and the provider catalog", async () 
   const providerCount = [...catalog.matchAll(/familyId:\s*"[^"]+"/g)].length;
   assert.ok(providerCount > 0, "catalog entries found");
   assert.ok(html.includes(`桌面伴侣 · v${pkg.version}`), `hero meta shows v${pkg.version}`);
-  assert.match(html, new RegExp(`<b>${providerCount}</b><span>服务商</span>`), "hero stats show the catalog size");
+  assert.match(html, new RegExp(`<b[^>]*>${providerCount}</b><span>服务商</span>`), "hero stats show the catalog size");
   const zhCounts = [...html.matchAll(/(\d+) 个服务商/g)].map((m) => Number(m[1]));
   assert.ok(zhCounts.length >= 2, "zh body mentions the provider count");
   assert.deepEqual([...new Set(zhCounts)], [providerCount], `every zh mention says ${providerCount}, saw ${zhCounts}`);
   assert.ok(LANGS.en.dict.heroMetaRight.endsWith(`v${pkg.version}`), "English hero shows the current version");
+  assert.ok(html.includes(`data-latest-version>v${pkg.version}</b>`), "release fallback shows the package version");
+  assert.match(html, /download-routing\.js/, "platform routing is wired");
+  assert.match(html, /data-platform="windows"/);
+  assert.match(html, /data-platform="macos"/);
   const servedEnglish = await import("./public/i18n.js");
   assert.deepEqual(servedEnglish.en, LANGS.en.dict, "Worker and browser English dictionaries stay in sync");
   const enCopy = `${LANGS.en.dict.providersCopy} ${LANGS.en.dict.ecosystemIntro}`;
@@ -135,8 +220,9 @@ test("copy: hero numbers match package.json and the provider catalog", async () 
 });
 
 test("English downloads: both Windows labels have a translation target without replacing their icons", () => {
-  const windowsLinks = [...html.matchAll(/<a\b[^>]*data-latest-installer[^>]*>([\s\S]*?)<\/a>/g)]
-    .map((match) => match[1]).filter((body) => body.includes("windows-logo.svg"));
+  const windowsLinks = [...html.matchAll(/<a\b[^>]*>([\s\S]*?)<\/a>/g)]
+    .map((match) => match[1])
+    .filter((body) => body.includes("windows-logo.svg") && body.includes("data-download-label"));
   assert.equal(windowsLinks.length, 2);
   for (const body of windowsLinks) assert.match(body, /<span data-download-label>下载 Windows 版<\/span>/);
   assert.match(siteScript, /setTexts\('\[data-download-label\]', \['heroDownload','heroDownload'\]\)/);
@@ -227,8 +313,8 @@ test("download/windows: newest installer, else the releases page", async () => {
       new Response(
         JSON.stringify({
           assets: [
-            { name: "Pane_9.9.9_aarch64.dmg", browser_download_url: "https://example.test/mac.dmg" },
-            { name: "Pane_9.9.9_x64-setup.exe", browser_download_url: "https://example.test/win.exe" },
+            { name: "Pane-Aafff623_9.9.9_aarch64.dmg", browser_download_url: "https://example.test/mac.dmg" },
+            { name: "Pane-Aafff623_9.9.9_x64-setup.exe", browser_download_url: "https://example.test/win.exe" },
           ],
         }),
         { status: 200 },
@@ -242,6 +328,42 @@ test("download/windows: newest installer, else the releases page", async () => {
       throw new Error("offline");
     };
     assert.equal(await at(), RELEASES_PAGE, "network failure falls back");
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+});
+
+test("api/latest: version and asset list for platform routing", async () => {
+  const env = { ASSETS: { fetch: async () => new Response("assets") } };
+  const realFetch = globalThis.fetch;
+  try {
+    globalThis.fetch = async () =>
+      new Response(
+        JSON.stringify({
+          tag_name: "v9.9.9",
+          html_url: "https://example.test/releases/tag/v9.9.9",
+          published_at: "2026-10-26T00:00:00Z",
+          assets: [
+            { name: "Pane-Aafff623_9.9.9_x64-setup.exe", browser_download_url: "https://example.test/win.exe", size: 100 },
+            { name: "Pane-Aafff623_9.9.9_aarch64.dmg", browser_download_url: "https://example.test/mac.dmg", size: 200 },
+          ],
+        }),
+        { status: 200 },
+      );
+    const res = await worker.fetch(new Request("https://pane.local/api/latest"), env);
+    assert.equal(res.status, 200);
+    assert.match(res.headers.get("cache-control"), /max-age=300/);
+    const body = await res.json();
+    assert.equal(body.version, "9.9.9");
+    assert.equal(body.tag, "v9.9.9");
+    assert.equal(body.assets.length, 2);
+    assert.equal(body.assets[1].size, 200);
+
+    globalThis.fetch = async () => new Response("rate limited", { status: 403 });
+    const failed = await worker.fetch(new Request("https://pane.local/api/latest"), env);
+    assert.equal(failed.status, 502);
+    assert.equal((await failed.json()).error, "unavailable");
+    assert.equal(failed.headers.get("cache-control"), "no-store");
   } finally {
     globalThis.fetch = realFetch;
   }
@@ -278,7 +400,7 @@ test("update/latest.json: CN clients get the Gitee-mirrored installer", async ()
     const body = await cn.json();
     assert.equal(
       body.platforms["windows-x86_64"].url,
-      "https://gitee.com/fan-tengda/pane/releases/download/v9.9.9/Pane_9.9.9_x64-setup.exe",
+      "https://gitee.com/fan-tengda/pane/releases/download/v9.9.9/Pane-Aafff623_9.9.9_x64-setup.exe",
       "windows URL rewritten to the mirror",
     );
     assert.equal(body.platforms["windows-x86_64"].signature, "SIG", "signature untouched");

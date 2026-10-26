@@ -116,8 +116,8 @@ pub fn snapshot_from_doc(doc: &Value, now_s: i64) -> super::Snapshot {
     let campaign_label = (!campaigns.is_empty()).then(|| campaigns.join(" · "));
     let plan_label = super::plan_with_campaign(START_PLAN_BASE, campaign_label.as_deref());
     let grouped = state.active_plans.len() > 1;
-    let mut rows = if !state.grants.is_empty() || !state.ungranted.is_empty() {
-        render_rows_with_plan(&state.grants, &state.ungranted, grouped)
+    let mut rows = if !state.grants.is_empty() || !state.ungranted.is_empty() || !state.held.is_empty() {
+        render_rows_with_plan(&state.grants, &state.ungranted, &state.held, grouped, now_s)
     } else if state.has_active {
         vec![super::Metric::text(START_PLAN_BASE, NO_GIFT.into())]
     } else {
@@ -138,6 +138,20 @@ pub fn snapshot_from_doc(doc: &Value, now_s: i64) -> super::Snapshot {
     }
 }
 
+/// A held entitlement with no balance bucket yet: the owner must claim it in
+/// ZCode. The plan payload already carries the model and grant amount, so the
+/// card can name what is waiting instead of only saying "held".
+#[derive(Clone, Debug)]
+pub struct HeldGrant {
+    pub label: String,
+    pub amount: f64,
+    pub unit: String,
+    /// Entitlement activation instant (epoch seconds). ZCode shows a claimed
+    /// one-time gift as "pending until 23:00" and creates the balance bucket
+    /// only after this point; without it Pane would keep asking to claim.
+    pub effective_at: Option<i64>,
+}
+
 /// One expired Start Plan campaign: its final bucket totals are history the
 /// owner asked to keep, not live quota.
 #[derive(Clone)]
@@ -151,6 +165,7 @@ pub struct ExpiredPlan {
 #[derive(Default, Clone)]
 pub struct StartPlanState {
     pub grants: Vec<StartGrant>,
+    pub held: Vec<HeldGrant>,
     pub ungranted: Vec<String>,
     pub expired: Vec<ExpiredPlan>,
     pub active_plans: Vec<String>,
@@ -163,27 +178,49 @@ pub struct StartPlanState {
 /// The card rows: one usage bar per granted bucket, then one claim line per
 /// plan that exists without a granted bucket.
 pub fn render_rows(grants: &[StartGrant], ungranted: &[String]) -> Vec<super::Metric> {
-    render_rows_with_plan(grants, ungranted, false)
+    render_rows_with_plan(grants, ungranted, &[], false, 0)
 }
 
 fn render_rows_with_plan(
     grants: &[StartGrant],
     ungranted: &[String],
+    held: &[HeldGrant],
     show_plan: bool,
+    now_s: i64,
 ) -> Vec<super::Metric> {
-    if grants.is_empty() && ungranted.is_empty() {
+    if grants.is_empty() && ungranted.is_empty() && held.is_empty() {
         return Vec::new();
     }
     // Claim lines are the actionable part; they get their slots first, and the
-    // bar count yields to them instead of the other way round.
-    let claims: Vec<String> = if ungranted.len() <= 2 {
-        ungranted.to_vec()
-    } else {
-        vec![
-            ungranted[0].clone(),
-            format!("+{} more held plans", ungranted.len() - 1),
-        ]
-    };
+    // bar count yields to them instead of the other way round. Entitlements
+    // that are not granted yet still carry the model and the grant amount, so
+    // name them instead of collapsing everything into "held".
+    let mut claims: Vec<(String, String)> = held
+        .iter()
+        .map(|entry| {
+            let unit = match entry.unit.as_str() {
+                "" | "token" => "tokens",
+                other => other,
+            };
+            let state = match entry.effective_at {
+                Some(at) if at > now_s => format!("activates at {at}"),
+                Some(_) => "effective, waiting for ZCode to sync".to_string(),
+                None => CLAIM_HINT.to_string(),
+            };
+            (
+                entry.label.clone(),
+                format!("{} {} · {}", with_thousands(entry.amount), unit, state),
+            )
+        })
+        .collect();
+    for plan in ungranted {
+        claims.push((plan.clone(), CLAIM_HINT.into()));
+    }
+    if claims.len() > 2 {
+        let extra = claims.len() - 1;
+        claims.truncate(1);
+        claims.push((format!("+{extra} more held plans"), CLAIM_HINT.into()));
+    }
     let bar_cap = MAX_ROWS.saturating_sub(claims.len());
     let mut rows: Vec<super::Metric> = if grants.len() > bar_cap {
         // One slot names what did not fit, so a hidden grant is never silent.
@@ -204,8 +241,8 @@ fn render_rows_with_plan(
             .map(|grant| grant_metric(grant, show_plan))
             .collect()
     };
-    for plan in &claims {
-        rows.push(super::Metric::text(plan, CLAIM_HINT.into()));
+    for (label, value) in &claims {
+        rows.push(super::Metric::text(label, value.clone()));
     }
     rows
 }
@@ -337,8 +374,13 @@ pub fn parse_start_plan_state(doc: &Value, fallback_now_s: i64) -> StartPlanStat
             // Only a plan that declares entitlements is a gift ZCode could
             // hand out; a coding-plan entry shares plans[] and must not be
             // presented as something to claim.
-            if has_entitlements(plan) && !saw_bucket && !state.ungranted.contains(&label) {
-                state.ungranted.push(label);
+            if has_entitlements(plan) && !saw_bucket {
+                let details = entitlement_grants(plan, &label);
+                if !details.is_empty() {
+                    state.held.extend(details);
+                } else if !state.ungranted.contains(&label) {
+                    state.ungranted.push(label);
+                }
             }
         } else {
             state.grants.extend(rows);
@@ -394,9 +436,37 @@ pub fn parse_start_plan_state(doc: &Value, fallback_now_s: i64) -> StartPlanStat
     state.expired.sort_by(|a, b| a.label.cmp(&b.label));
     state.ungranted.sort();
     state.grants.truncate(MAX_ROWS);
+    state.held.truncate(MAX_ROWS);
     state.ungranted.truncate(MAX_ROWS);
     state.expired.truncate(MAX_ROWS);
     state
+}
+
+/// The model/amount an ungranted entitlement declares. A plan without usable
+/// entitlement details keeps the older plan-level claim line instead.
+fn entitlement_grants(plan: &Value, plan_label: &str) -> Vec<HeldGrant> {
+    let Some(list) = plan.get("entitlements").and_then(Value::as_array) else {
+        return Vec::new();
+    };
+    list.iter()
+        .filter_map(|entry| {
+            let amount = num(entry.get("grant_units")).filter(|value| *value > 0.0)?;
+            let shown = text_field(entry, "show_name");
+            Some(HeldGrant {
+                label: if shown.is_empty() {
+                    plan_label.to_string()
+                } else {
+                    shown
+                },
+                amount,
+                unit: text_field(entry, "unit_type"),
+                effective_at: num(entry.get("effective_at"))
+                    .filter(|value| *value > 0.0)
+                    .map(|value| value as i64),
+            })
+        })
+        .take(MAX_ROWS)
+        .collect()
 }
 
 /// Backwards-compatible view used by tests and callers that only need live
@@ -1453,6 +1523,78 @@ mod tests {
         assert_eq!(rows[0].kind, "text");
         assert_eq!(rows[0].label, "Start Plan (1024 Dev Day)");
         assert_eq!(rows[0].value.as_deref(), Some(CLAIM_HINT));
+    }
+
+    #[test]
+    fn a_held_entitlement_names_the_model_and_amount() {
+        let doc = balance_doc(
+            json!([{"plan_id": "p-global", "user_plan_id": "up-1", "name": "ZCODE GLOBAL BUILD",
+                    "status": "active", "ends_at": NOW + 50_000,
+                    "entitlements": [{
+                        "entitlement_id": "ent-global-1",
+                        "show_name": "GLM-5.3-Flash",
+                        "unit_type": "token",
+                        "grant_units": 300000000,
+                        "period": "one_time"
+                    }]}]),
+            json!([]),
+            NOW,
+        );
+        let state = parse_start_plan_state(&doc, NOW);
+        assert!(state.grants.is_empty());
+        assert_eq!(state.held.len(), 1);
+        assert_eq!(state.held[0].label, "GLM-5.3-Flash");
+        assert_eq!(state.held[0].amount, 300000000.0);
+        assert!(state.ungranted.is_empty(), "the entitlement detail replaces the generic claim line");
+        let snap = snapshot_from_doc(&doc, NOW);
+        let row = snap
+            .metrics
+            .iter()
+            .find(|metric| metric.label == "GLM-5.3-Flash")
+            .expect("held entitlement row");
+        let value = row.value.as_deref().unwrap_or_default();
+        assert!(value.contains("300,000,000 tokens"), "{value}");
+        assert!(value.contains(CLAIM_HINT), "{value}");
+    }
+
+    #[test]
+    fn a_held_entitlement_moves_from_pending_to_waiting_to_live() {
+        let plan = json!([{"plan_id": "p-global", "user_plan_id": "up-1", "name": "ZCODE GLOBAL BUILD",
+                "status": "active", "ends_at": NOW + 50_000,
+                "entitlements": [{
+                    "entitlement_id": "ent-global-1",
+                    "show_name": "GLM-5.3-Flash",
+                    "unit_type": "token",
+                    "grant_units": 300000000,
+                    "effective_at": NOW + 3_600,
+                    "period": "one_time"
+                }]}]);
+        let pending = snapshot_from_doc(&balance_doc(plan.clone(), json!([]), NOW), NOW);
+        let pending_row = pending.metrics.iter().find(|m| m.label == "GLM-5.3-Flash").unwrap();
+        assert!(pending_row.value.as_deref().unwrap_or("").contains("activates at"));
+        assert!(!pending_row.value.as_deref().unwrap_or("").contains(CLAIM_HINT));
+
+        let waiting = snapshot_from_doc(&balance_doc(plan.clone(), json!([]), NOW + 4_000), NOW + 4_000);
+        let waiting_row = waiting.metrics.iter().find(|m| m.label == "GLM-5.3-Flash").unwrap();
+        assert!(waiting_row.value.as_deref().unwrap_or("").contains("effective, waiting for ZCode to sync"));
+
+        let live = snapshot_from_doc(
+            &balance_doc(
+                plan,
+                json!([{"plan_id": "p-global", "user_plan_id": "up-1", "show_name": "GLM-5.3-Flash",
+                        "total_units": 300000000, "used_units": 0, "period_end": NOW + 50_000}]),
+                NOW + 4_000,
+            ),
+            NOW + 4_000,
+        );
+        assert!(live
+            .metrics
+            .iter()
+            .any(|m| m.label == "GLM-5.3-Flash" && m.kind == "progress"));
+        assert!(!live
+            .metrics
+            .iter()
+            .any(|m| m.value.as_deref().unwrap_or("").contains("effective, waiting")));
     }
 
     #[test]

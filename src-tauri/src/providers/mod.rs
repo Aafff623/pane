@@ -327,7 +327,7 @@ impl Snapshot {
 
 /// Optional outbound proxy from config.json `proxy: { enabled, url }`.
 /// Re-read for each client lookup; loopback requests stay direct.
-fn proxy_url() -> Option<String> {
+pub(crate) fn configured_proxy_url() -> Option<String> {
     let cfg: serde_json::Value = std::fs::read_to_string(config_dir().join("config.json"))
         .ok().and_then(|raw| serde_json::from_str(raw.trim_start_matches('\u{feff}')).ok())?;
     let proxy = cfg.get("proxy")?;
@@ -346,7 +346,7 @@ fn proxy_url() -> Option<String> {
 /// traffic follows the same chain; reqwest's own env-var handling stays as
 /// the last resort when neither is set.
 pub(crate) fn outbound_proxy_url() -> Option<String> {
-    proxy_url().or_else(crate::platform::system_proxy)
+    configured_proxy_url().or_else(crate::platform::system_proxy)
 }
 
 fn http_builder(proxy_url: Option<&str>) -> reqwest::ClientBuilder {
@@ -612,26 +612,69 @@ pub(crate) fn read_small_bytes(
     std::fs::read(path).map_err(|e| format!("read {what}: {e}"))
 }
 
+/// The app's own roaming directory. The historical name was `Pane`; the
+/// fork moved to `PaneAafff623` so it no longer shares an identity with the
+/// original app (#105). The old directory is copied once, never deleted, so
+/// both apps can still read their own data.
+pub const CONFIG_DIR_NAME: &str = "PaneAafff623";
+
+fn copy_dir_all(src: &std::path::Path, dst: &std::path::Path) -> std::io::Result<()> {
+    std::fs::create_dir_all(dst)?;
+    for entry in std::fs::read_dir(src)? {
+        let entry = entry?;
+        let file_type = entry.file_type()?;
+        let target = dst.join(entry.file_name());
+        if file_type.is_dir() {
+            copy_dir_all(&entry.path(), &target)?;
+        } else if file_type.is_file() {
+            std::fs::copy(entry.path(), target)?;
+        }
+    }
+    Ok(())
+}
+
+fn migrate_config_dir_at(base: &std::path::Path) -> PathBuf {
+    let new = base.join(CONFIG_DIR_NAME);
+    let old = base.join("Pane");
+    let legacy = base.join("OpenUsage");
+    if new.exists() {
+        return new;
+    }
+    // Copy through a staging directory: a half-written migration must not
+    // look like a complete new config on the next launch.
+    let staging = base.join(format!("{CONFIG_DIR_NAME}.migrating"));
+    let _ = std::fs::remove_dir_all(&staging);
+    if old.exists() && copy_dir_all(&old, &staging).is_ok() {
+        if std::fs::rename(&staging, &new).is_ok() {
+            return new;
+        }
+        let _ = std::fs::remove_dir_all(&staging);
+    }
+    if !new.exists() && legacy.exists() && std::fs::rename(&legacy, &new).is_ok() {
+        return new;
+    }
+    if new.exists() {
+        new
+    } else if old.exists() {
+        // Copy failed (disk full, locked file): keep serving the old data
+        // rather than silently starting fresh. The next launch retries.
+        old
+    } else {
+        new
+    }
+}
+
 /// Where Pane keeps its own settings, e.g. saved API keys:
-/// C:\Users\you\AppData\Roaming\Pane
+/// C:\Users\you\AppData\Roaming\PaneAafff623
 ///
-/// The app shipped as "OpenUsage" before the rename — on first call, an
-/// existing %APPDATA%\OpenUsage is moved over so nobody loses their config,
-/// keys, or caches. If the move fails but the old dir is usable, keep using
-/// the old dir rather than silently starting fresh.
+/// The app shipped as "OpenUsage" before the rename; the fork previously
+/// used `Pane`. Both are migrated (copy first, legacy rename fallback) so
+/// nobody loses config, keys, or caches.
 pub fn config_dir() -> PathBuf {
     static DIR: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
     DIR.get_or_init(|| {
         let base = dirs::config_dir().unwrap_or_default();
-        let new = base.join("Pane");
-        let old = base.join("OpenUsage");
-        if !new.exists() && old.exists() {
-            let _ = std::fs::rename(&old, &new);
-            if !new.exists() {
-                return old;
-            }
-        }
-        new
+        migrate_config_dir_at(&base)
     })
     .clone()
 }
@@ -655,10 +698,25 @@ pub fn balance_metric(
     if !balance.is_finite() || balance < 0.0 {
         return None;
     }
-    Some(Metric::text(
+    let mut metric = Metric::text(
         label,
         format!("{sign}{balance:.2} left{caption_suffix}"),
-    ))
+    );
+    // The display string stays byte-identical; the structured reading lets
+    // /v1/limits expose the same balance without parsing free text.
+    let unit = match sign {
+        "$" => "usd",
+        "¥" | "￥" => "cny",
+        "€" => "eur",
+        "£" => "gbp",
+        other => other,
+    };
+    metric.quota = Some(crate::usage_units::QuotaReading {
+        unit: unit.into(),
+        used: balance,
+        limit: None,
+    });
+    Some(metric)
 }
 
 /// Candidate roots where a second account's CLI config dir may live:
@@ -964,6 +1022,10 @@ mod wall_tests {
         assert_eq!(row.kind, "text");
         assert_eq!(row.used_percent, None);
         assert_eq!(row.value.as_deref(), Some("$7.50 left"));
+        let quota = row.quota.expect("balance carries a structured reading");
+        assert_eq!(quota.unit, "usd");
+        assert_eq!(quota.used, 7.5);
+        assert!(quota.limit.is_none());
         assert!(balance_metric("$", f64::NAN, "Extra credits", "").is_none());
     }
 
@@ -1210,5 +1272,81 @@ mod plan_label_tests {
             split_plan_campaign("Plain plan"),
             ("Plain plan".to_string(), None)
         );
+    }
+}
+
+#[cfg(test)]
+mod identity_tests {
+    use super::*;
+    use std::fs;
+
+    fn temp_base(tag: &str) -> PathBuf {
+        let stamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0);
+        let path = std::env::temp_dir().join(format!(
+            "pane-identity-{tag}-{}-{stamp}",
+            std::process::id()
+        ));
+        fs::create_dir_all(&path).unwrap();
+        path
+    }
+
+    #[test]
+    fn identity_migration_copies_old_pane_once() {
+        let base = temp_base("copy");
+        let old = base.join("Pane");
+        fs::create_dir_all(old.join("accounts")).unwrap();
+        fs::write(old.join("config.json"), "{\"refreshMinutes\":5}").unwrap();
+        fs::write(old.join("accounts").join("claude.json"), "[]").unwrap();
+
+        let migrated = migrate_config_dir_at(&base);
+        assert_eq!(migrated, base.join(CONFIG_DIR_NAME));
+        assert_eq!(
+            fs::read_to_string(migrated.join("config.json")).unwrap(),
+            "{\"refreshMinutes\":5}"
+        );
+        assert!(migrated.join("accounts").join("claude.json").exists());
+        assert!(old.exists(), "the old app's directory is never deleted");
+
+        fs::write(old.join("config.json"), "{\"changed\":true}").unwrap();
+        assert_eq!(migrate_config_dir_at(&base), migrated);
+        assert_eq!(
+            fs::read_to_string(migrated.join("config.json")).unwrap(),
+            "{\"refreshMinutes\":5}",
+            "a second launch must not copy over the new directory"
+        );
+        let _ = fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn identity_migration_falls_back_to_legacy_open_usage() {
+        let base = temp_base("legacy");
+        let legacy = base.join("OpenUsage");
+        fs::create_dir_all(&legacy).unwrap();
+        fs::write(legacy.join("config.json"), "{}").unwrap();
+        let migrated = migrate_config_dir_at(&base);
+        assert_eq!(migrated, base.join(CONFIG_DIR_NAME));
+        assert!(migrated.join("config.json").exists());
+        assert!(!legacy.exists(), "the pre-rename directory is moved");
+        let _ = fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn identity_migration_prefers_an_existing_new_directory() {
+        let base = temp_base("new");
+        let new = base.join(CONFIG_DIR_NAME);
+        fs::create_dir_all(&new).unwrap();
+        fs::write(new.join("config.json"), "{\"new\":true}").unwrap();
+        let old = base.join("Pane");
+        fs::create_dir_all(&old).unwrap();
+        fs::write(old.join("config.json"), "{\"old\":true}").unwrap();
+        assert_eq!(migrate_config_dir_at(&base), new);
+        assert_eq!(
+            fs::read_to_string(new.join("config.json")).unwrap(),
+            "{\"new\":true}"
+        );
+        let _ = fs::remove_dir_all(&base);
     }
 }

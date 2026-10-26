@@ -196,7 +196,7 @@ Light / dark themes switch in one keystroke (`Ctrl + L`); **the skin market is e
 <details>
 <summary><b>Resource-pack format</b></summary>
 
-Skins distribute as resource packs: a zip holding `manifest.json` (id, name, version, minAppVersion, entry CSS, per-file sha256) plus assets. Installing means unzip + per-file verification + manifest validation — any failure rejects the whole pack with no leftovers; installed packs live under `%APPDATA%\Pane\skins\<id>\` and reload from disk after restart. Wallpaper, mascot and exit interactions change as a set; turning it off hot-swaps back to the native skin. Design notes: [skin market design](docs/skin-market-design.md).
+Skins distribute as resource packs: a zip holding `manifest.json` (id, name, version, minAppVersion, entry CSS, per-file sha256) plus assets. Installing means unzip + per-file verification + manifest validation — any failure rejects the whole pack with no leftovers; installed packs live under `%APPDATA%\PaneAafff623\skins\<id>\` and reload from disk after restart. Wallpaper, mascot and exit interactions change as a set; turning it off hot-swaps back to the native skin. Design notes: [skin market design](docs/skin-market-design.md).
 
 </details>
 
@@ -291,7 +291,7 @@ Install the skill one of three ways: automatically via the `install.ps1` install
 
 ## <a id="privacy"></a>Privacy
 
-Pane is a local-first tool: tokens, cookies and API keys live in the OS credential store and your user directory — never committed to Git, never uploaded; queries go only to the provider's own endpoint, and Pane has no central backend relaying your quotas; the local HTTP API listens on loopback only and redacts sensitive fields; telemetry never carries quotas, spend or provider credentials by default and can be turned off in settings. Details in [`docs/privacy.md`](docs/privacy.md); disclosure process in [`SECURITY.md`](SECURITY.md).
+Pane is a local-first tool: tokens, cookies and API keys live in the OS credential store and your user directory — never committed to Git, never uploaded; queries go only to the provider's own endpoint, and Pane has no central backend relaying your quotas; the local HTTP API listens on loopback only and redacts sensitive fields; the app sends no telemetry or analytics. Details in [`docs/privacy.md`](docs/privacy.md); disclosure process in [`SECURITY.md`](SECURITY.md).
 
 ## <a id="community"></a>Community
 

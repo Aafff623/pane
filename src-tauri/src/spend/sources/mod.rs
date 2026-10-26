@@ -32,9 +32,9 @@ fn home() -> PathBuf {
 }
 
 fn env_home(var: &str, fallback: &str) -> PathBuf {
-    std::env::var(var)
-        .map(PathBuf::from)
-        .unwrap_or_else(|_| home().join(fallback))
+    // Share the scanner's quote/whitespace handling so /v1/sources reports
+    // the same root the collector actually reads.
+    super::env_path(var).unwrap_or_else(|| home().join(fallback))
 }
 
 pub fn claude_projects_root() -> PathBuf {

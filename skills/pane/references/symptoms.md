@@ -55,7 +55,7 @@ hide branch and the popover never comes back.
 
 WebView2 caches assets aggressively.
 
-**Fix:** close Pane, delete `%LOCALAPPDATA%\com.jazii.pane\EBWebView`, restart.
+**Fix:** close Pane, delete `%LOCALAPPDATA%\com.aafff623.pane\EBWebView`, restart.
 
 ---
 

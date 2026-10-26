@@ -200,7 +200,7 @@ Claude、Codex、CodeBuddy、CodeBuddy CN、WorkBuddy、WorkBuddy AI、Cursor、
 <details>
 <summary><b>资源包格式</b></summary>
 
-皮肤以资源包分发：zip 内含 `manifest.json`（id、名称、版本、minAppVersion、入口 CSS、逐文件 sha256）+ 资产文件。安装 = 解压 + 逐文件校验 + manifest 合法性检查，任何一项不过整包拒装不留残骸；已装包落在 `%APPDATA%\Pane\skins\<id>\`，重启后仍从磁盘恢复。壁纸、吉祥物和退出交互成套换装，关闭即热切回原生皮肤。设计文档见 [皮肤市场设计](docs/skin-market-design.md)。
+皮肤以资源包分发：zip 内含 `manifest.json`（id、名称、版本、minAppVersion、入口 CSS、逐文件 sha256）+ 资产文件。安装 = 解压 + 逐文件校验 + manifest 合法性检查，任何一项不过整包拒装不留残骸；已装包落在 `%APPDATA%\PaneAafff623\skins\<id>\`，重启后仍从磁盘恢复。壁纸、吉祥物和退出交互成套换装，关闭即热切回原生皮肤。设计文档见 [皮肤市场设计](docs/skin-market-design.md)。
 
 </details>
 
@@ -295,7 +295,7 @@ Skill 三选一安装：`install.ps1` 安装器自动装入、设置 → 常规 
 
 ## <a id="privacy"></a>隐私
 
-Pane 是 local-first 工具：token、cookie 和 API key 保存在系统凭据库与 Windows 用户目录，不提交到 Git、不上传；查询请求只发送到对应 provider 的端点，Pane 没有中心后端替你转发额度；本地 HTTP API 只监听 loopback 并对敏感字段脱敏；遥测默认不承载额度、消费或 provider 凭据，可在设置中关闭。详见 [`docs/privacy.md`](docs/privacy.md)，安全披露流程见 [`SECURITY.md`](SECURITY.md)。
+Pane 是 local-first 工具：token、cookie 和 API key 保存在系统凭据库与 Windows 用户目录，不提交到 Git、不上传；查询请求只发送到对应 provider 的端点，Pane 没有中心后端替你转发额度；本地 HTTP API 只监听 loopback 并对敏感字段脱敏；应用不发送遥测或统计。详见 [`docs/privacy.md`](docs/privacy.md)，安全披露流程见 [`SECURITY.md`](SECURITY.md)。
 
 ## <a id="community"></a>参与
 

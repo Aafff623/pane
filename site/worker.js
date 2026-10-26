@@ -46,7 +46,7 @@ const INSTALLER = /-setup\.exe$/;
 const GITEE_REPO = "fan-tengda/pane";
 const MANIFEST_URL = `https://github.com/${REPO}/releases/latest/download/latest.json`;
 const GITEE_ASSET = (version) =>
-  `https://gitee.com/${GITEE_REPO}/releases/download/v${version}/Pane_${version}_x64-setup.exe`;
+  `https://gitee.com/${GITEE_REPO}/releases/download/v${version}/Pane-Aafff623_${version}_x64-setup.exe`;
 
 // Serve English metadata in the initial HTML so search and sharing clients
 // receive the right title and canonical URL without executing site.js.
@@ -66,18 +66,57 @@ async function englishMetadata(response) {
   return new Response(html, { status: response.status, statusText: response.statusText, headers });
 }
 
-// latestWindowsInstaller asks GitHub for the newest release's Windows
-// installer. The cf.cacheTtl keeps the API call off the request path for
-// repeat visitors (GitHub allows 60 anonymous calls an hour per IP).
-async function latestWindowsInstaller() {
+// latestRelease asks GitHub for the newest release. The cf.cacheTtl keeps the
+// API call off the request path for repeat visitors (GitHub allows 60
+// anonymous calls an hour per IP). Both /download/windows and /api/latest
+// read it, so the two surfaces never disagree about "latest".
+async function latestRelease() {
   const res = await fetch(`https://api.github.com/repos/${REPO}/releases/latest`, {
     headers: { Accept: "application/vnd.github+json", "User-Agent": "pane-site" },
     cf: { cacheTtl: 600, cacheEverything: true },
   });
   if (!res.ok) return null;
-  const release = await res.json();
-  const asset = (release.assets || []).find((item) => INSTALLER.test(item.name || ""));
+  try {
+    return await res.json();
+  } catch {
+    return null;
+  }
+}
+
+async function latestWindowsInstaller() {
+  const release = await latestRelease();
+  const asset = (release?.assets || []).find((item) => INSTALLER.test(item.name || ""));
   return asset?.browser_download_url ?? null;
+}
+
+// /api/latest — the release facts the landing page needs for platform
+// routing: version, tag, release page and the asset list. The page picks the
+// asset that matches the visitor (os + arch); unknown shapes just leave the
+// static download links in place.
+async function latestJson() {
+  const release = await latestRelease();
+  if (!release || typeof release.tag_name !== "string") {
+    return new Response(JSON.stringify({ error: "unavailable" }), {
+      status: 502,
+      headers: { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" },
+    });
+  }
+  const assets = (release.assets || [])
+    .filter((item) => item?.name && item?.browser_download_url)
+    .map((item) => ({ name: item.name, url: item.browser_download_url, size: item.size ?? null }));
+  return new Response(
+    JSON.stringify({
+      version: release.tag_name.replace(/^v/, ""),
+      tag: release.tag_name,
+      url: release.html_url ?? null,
+      publishedAt: release.published_at ?? null,
+      assets,
+    }),
+    {
+      status: 200,
+      headers: { "content-type": "application/json; charset=utf-8", "cache-control": "public, max-age=300" },
+    },
+  );
 }
 
 // updateManifest serves the updater manifest, pointing CN clients at the
@@ -183,6 +222,9 @@ async function notFound(env, req) {
 
 async function handle(req, env) {
     const url = new URL(req.url);
+    if (url.pathname === "/api/latest") {
+      return latestJson();
+    }
     if (url.pathname === "/download/windows") {
       let target = RELEASES_PAGE;
       try {

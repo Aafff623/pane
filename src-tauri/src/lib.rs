@@ -51,7 +51,6 @@ mod snapshot_store;
 mod provider_dispatch;
 mod qoder_sessions;
 mod spend;
-mod telemetry;
 mod tray_projection;
 mod usage_history;
 mod usage_units;
@@ -220,11 +219,6 @@ fn config_with_defaults(mut cfg: Value) -> Value {
     // Empty = "never recorded": the frontend uses it to tell a fresh
     // install (no What's-new popup) from an update (popup with the notes).
     obj.entry("lastSeenVersion").or_insert(json!(""));
-    // Telemetry defaults ON and must SAY so: without this default the
-    // Settings toggle read `undefined` (rendered off) while the sender's
-    // own default kept transmitting — a switch that displays off while
-    // data flows is the one state a privacy control must never be in.
-    obj.entry("telemetry").or_insert(json!(true));
     obj.entry("reduceAnimations").or_insert(json!(false));
     obj.entry("jumpAnimation").or_insert(json!("smooth"));
     obj.entry("hideUsageWhileSharing").or_insert(json!(false));
@@ -307,6 +301,22 @@ fn get_boot_id() -> Option<u64> {
     platform::boot_id()
 }
 
+/// Effective proxy for the settings page: manual URL first, then the Windows
+/// system proxy (static or PAC-mode fallback), then direct. This is read-only
+/// and exists so the UI can say which path is actually in force instead of
+/// leaving `enabled + empty URL` ambiguous.
+#[tauri::command]
+fn proxy_status() -> Value {
+    let manual = providers::configured_proxy_url();
+    let system = crate::platform::system_proxy();
+    let (effective, source) = match (&manual, &system) {
+        (Some(url), _) => (Some(url.clone()), "manual"),
+        (None, Some(url)) => (Some(url.clone()), "system"),
+        _ => (None, "direct"),
+    };
+    json!({ "manual": manual, "system": system, "effective": effective, "source": source })
+}
+
 #[tauri::command]
 fn get_config() -> Value {
     config_with_defaults(load_config())
@@ -316,6 +326,9 @@ fn get_config() -> Value {
 /// set_config drops anything else so a compromised frontend can't stash
 /// arbitrary data in the config file.
 const CONFIG_KEYS: &[&str] = &[
+    // Migration marker for config.json (#104); the frontend writes it once
+    // when the file predates the current schema.
+    "configVersion",
     // Not seeded by config_with_defaults (the autostart plugin is the
     // source of truth at runtime) but persisted here so setup() can apply
     // the user's choice on launch.
@@ -364,7 +377,6 @@ const CONFIG_KEYS: &[&str] = &[
     "onboardingDismissed",
     "upstreamStatusProbe",
     "lastSeenVersion",
-    "telemetry",
     "reduceAnimations",
     "jumpAnimation",
     "hideUsageWhileSharing",
@@ -556,7 +568,17 @@ fn effective_disabled_list(cfg: &Value) -> Vec<String> {
     out
 }
 
-/// built from Pane's last-good snapshot cache, so opening the native menu does
+/// Win32 (and Tauri's Windows menu) treats `&` as a mnemonic marker; a
+/// provider called "A&B" would otherwise render as "AB" with B underlined.
+fn menu_label(label: String) -> String {
+    if cfg!(windows) {
+        label.replace('&', "&&")
+    } else {
+        label
+    }
+}
+
+/// Built from Pane's last-good snapshot cache, so opening the native menu does
 /// not wait on network requests or the WebView. A click on one of these rows
 /// returns to the live floating dashboard; the full management surface lives
 /// behind the separate Settings… item below.
@@ -587,11 +609,17 @@ fn cached_tray_provider_rows(cfg: &Value) -> Vec<(String, String)> {
             .unwrap_or_default();
         rows.push((
             format!("tray_provider:{id}"),
-            format!("{}{}", cached.snap.name, suffix),
+            menu_label(format!("{}{}", cached.snap.name, suffix)),
         ));
     }
     rows.sort_by(|a, b| a.1.to_lowercase().cmp(&b.1.to_lowercase()));
+    let hidden = rows.len().saturating_sub(MAX_ROWS);
     rows.truncate(MAX_ROWS);
+    // Silence was the old behaviour: the ninth provider simply vanished.
+    // A last row keeps the list honest and opens the dashboard on click.
+    if hidden > 0 {
+        rows.push(("tray_more".into(), menu_label(i18n::tray_more_label(cfg, hidden))));
+    }
     rows
 }
 
@@ -1273,6 +1301,17 @@ fn paint_cached_main_tray(app: &tauri::AppHandle) {
         32,
     );
     let _ = tray.set_icon(Some(icon));
+}
+
+/// Re-apply the capture exclusion the moment a window becomes visible, so a
+/// window opened mid-share is covered before the 3 s watcher tick.
+fn apply_capture_exclusion_now(app: &tauri::AppHandle) {
+    let hide = HIDE_WANT.load(Ordering::Relaxed) && screen_is_being_shared();
+    for label in ["main", "panel"] {
+        if let Some(window) = app.get_webview_window(label) {
+            platform::set_capture_excluded(&window, hide);
+        }
+    }
 }
 
 fn spawn_share_watcher(app: tauri::AppHandle) {
@@ -2757,6 +2796,34 @@ fn keyvault_set_note(id: String, note: String) -> Result<Vec<keyvault::VaultRow>
 /// The disabled argument is accepted for compatibility but ignored:
 /// config.json is the single source of truth, so the background refresh
 /// loop and the UI can never disagree about who is enabled.
+/// Coalesce usage-updated broadcasts: a refresh burst (timer + focus + a
+/// manual click) must not repaint every open window three times. The last
+/// payload wins; the first subscriber sees it ~200 ms later.
+fn emit_usage_coalesced(app: &tauri::AppHandle, snapshots: &[providers::Snapshot]) {
+    static PENDING: OnceLock<Mutex<Option<Vec<providers::Snapshot>>>> = OnceLock::new();
+    static SCHEDULED: AtomicBool = AtomicBool::new(false);
+    *PENDING
+        .get_or_init(|| Mutex::new(None))
+        .lock()
+        .unwrap_or_else(|error| error.into_inner()) = Some(snapshots.to_vec());
+    if SCHEDULED.swap(true, Ordering::SeqCst) {
+        return;
+    }
+    let app = app.clone();
+    tauri::async_runtime::spawn(async move {
+        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+        SCHEDULED.store(false, Ordering::SeqCst);
+        let payload = PENDING
+            .get_or_init(|| Mutex::new(None))
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .take();
+        if let Some(payload) = payload {
+            let _ = app.emit("usage-updated", &payload);
+        }
+    });
+}
+
 #[tauri::command]
 async fn fetch_usage(
     app: tauri::AppHandle,
@@ -2772,13 +2839,13 @@ async fn fetch_usage(
         clear_soft_benches();
     }
     let snapshots = run_usage_fetch_inner_mode(&app, disabled, probe_all.unwrap_or(false)).await;
-    let _ = app.emit("usage-updated", &snapshots);
+    emit_usage_coalesced(&app, &snapshots);
     snapshots
 }
 
 /// Refreshes ONE provider card on demand (the ⟳ button in the card head).
 /// Dispatches to the same snapshot function the full refresh cycle uses,
-/// but skips alert checking, telemetry, and the snapshot cache — those
+/// but skips alert checking and the snapshot cache — those
 /// belong to the global cycle. The returned snapshot is merged into the
 /// frontend's `lastSnapshots` by the caller.
 #[tauri::command]
@@ -3422,21 +3489,6 @@ async fn run_usage_fetch_inner_mode(
         .into_iter()
         .filter(|(id, _)| !card_is_disabled(id, &disabled))
         .collect();
-    // Telemetry never learns account-scoped ids — an API-key fingerprint
-    // must never leave the machine. Report families,
-    // deduplicated, so a multi-account install looks like "claude" once.
-    // (family_of is applied at EVERY telemetry boundary: enabled ids here,
-    // refresh outcomes, and starred-metric prefixes.)
-    let mut enabled_ids: Vec<String> = {
-        let mut fams: Vec<String> = Vec::new();
-        for (id, _) in &futs {
-            let fam = family_of(id);
-            if !fams.contains(&fam) {
-                fams.push(fam);
-            }
-        }
-        fams
-    };
     let handles: Vec<_> = futs
         .into_iter()
         .map(|(id, fut)| {
@@ -3478,12 +3530,6 @@ async fn run_usage_fetch_inner_mode(
         &current_onenewapi_generations,
     );
     if !stale_onenewapi_ids.is_empty() {
-        if !all
-            .iter()
-            .any(|snapshot| family_of(&snapshot.id) == "onenewapi")
-        {
-            enabled_ids.retain(|id| id != "onenewapi");
-        }
         let mut failures = fail_state().lock().unwrap_or_else(|e| e.into_inner());
         for id in stale_onenewapi_ids {
             failures.remove(&id);
@@ -3580,7 +3626,7 @@ async fn run_usage_fetch_inner_mode(
     retain_current_key_accounts(&mut all, &expected_key_identities);
     // A mutation can begin after the first post-request check. Recheck after
     // the cache critical section so an old result is neither published nor
-    // included in alerts/telemetry while its replacement is being saved.
+    // included in alerts while its replacement is being saved.
     let current_onenewapi_generations = onenewapi_snapshot_generations(
         all.iter()
             .filter(|snapshot| family_of(&snapshot.id) == "onenewapi")
@@ -3592,12 +3638,6 @@ async fn run_usage_fetch_inner_mode(
         &current_onenewapi_generations,
     );
     if !stale_onenewapi_ids.is_empty() {
-        if !all
-            .iter()
-            .any(|snapshot| family_of(&snapshot.id) == "onenewapi")
-        {
-            enabled_ids.retain(|id| id != "onenewapi");
-        }
         let mut failures = fail_state().lock().unwrap_or_else(|e| e.into_inner());
         for id in stale_onenewapi_ids {
             failures.remove(&id);
@@ -3637,90 +3677,6 @@ async fn run_usage_fetch_inner_mode(
     }
 
     httpapi::publish(&all);
-    // Anonymous daily-rollup telemetry (Settings → "Share anonymous usage
-    // statistics"). Fire-and-forget: it must never delay or fail a refresh.
-    {
-        let enabled = cfg
-            .get("telemetry")
-            .and_then(Value::as_bool)
-            .unwrap_or(true);
-        let starred_metrics: Vec<String> = cfg
-            .pointer("/layout/providers")
-            .and_then(Value::as_object)
-            .map(|provs| {
-                provs
-                    .iter()
-                    .flat_map(|(pid, entry)| {
-                        entry
-                            .get("starred")
-                            .and_then(Value::as_array)
-                            .map(|a| {
-                                a.iter()
-                                    .filter_map(Value::as_str)
-                                    // Family prefix only — an account-scoped
-                                    // pid would ship an account-derived hash.
-                                    // Qoder CN package rows carry vendor
-                                    // free text as their label; the telemetry
-                                    // contract is stable IDs only, so they
-                                    // fold into one bucket.
-                                    .map(|m| {
-                                        if family_of(pid) == "qodercn" && m != "Credits" {
-                                            "qodercn/<package>".to_string()
-                                        } else {
-                                            format!("{}/{m}", family_of(pid))
-                                        }
-                                    })
-                                    .collect::<Vec<_>>()
-                            })
-                            .unwrap_or_default()
-                    })
-                    .collect::<Vec<String>>()
-            })
-            .unwrap_or_default();
-        // Two accounts starring the same metric collapse to one entry.
-        let starred_metrics: Vec<String> = {
-            let mut out: Vec<String> = Vec::new();
-            for m in starred_metrics {
-                if !out.contains(&m) {
-                    out.push(m);
-                }
-            }
-            out
-        };
-        let snap = telemetry::ConfigSnapshot {
-            app_version: app.package_info().version.to_string(),
-            enabled_providers: enabled_ids,
-            starred_metrics,
-            appearance: cfg
-                .get("appearance")
-                .and_then(Value::as_str)
-                .unwrap_or("system")
-                .to_string(),
-            density: cfg
-                .get("density")
-                .and_then(Value::as_str)
-                .unwrap_or("regular")
-                .to_string(),
-            refresh_minutes: cfg
-                .get("refreshMinutes")
-                .and_then(Value::as_u64)
-                .unwrap_or(5),
-        };
-        let outcomes: Vec<telemetry::Outcome> = all
-            .iter()
-            .map(|s| telemetry::Outcome {
-                // Family only: account-scoped ids never leave the machine.
-                // Multiple accounts fold into one family row (accumulate
-                // sums same-key counters).
-                id: family_of(&s.id),
-                status: s.status.clone(),
-                stale: s.stale,
-                error: s.error.clone().or_else(|| s.warning.clone()),
-            })
-            .collect();
-        let outcomes = telemetry::collapse_onenewapi_outcomes(outcomes);
-        tauri::async_runtime::spawn(telemetry::record(enabled, snap, outcomes));
-    }
 
     for alert in alerts::evaluate(&all, &cfg) {
         use tauri_plugin_notification::NotificationExt;
@@ -3784,7 +3740,7 @@ async fn fetch_and_broadcast_usage(app: &tauri::AppHandle) -> Vec<providers::Sna
     // while it is opening causes the white flash / immediate dismissal seen
     // when `set_menu` runs from MouseButtonState::Down.
     rebuild_tray_menu(&app);
-    let _ = app.emit("usage-updated", &snapshots);
+    emit_usage_coalesced(&app, &snapshots);
     snapshots
 }
 
@@ -5941,8 +5897,21 @@ async fn install_update(app: tauri::AppHandle) -> Result<(), String> {
     let updater = build_updater(&app)?;
     match updater.check().await.map_err(|e| e.to_string())? {
         Some(update) => {
+            // Hide the tray before NSIS runs: the installer replacing a
+            // running shell can leave a ghost icon behind, and the update
+            // itself is the last thing this process does. Restore it only
+            // when the install fails and we stay alive.
+            let tray = app.tray_by_id("tray");
+            if let Some(tray) = &tray {
+                let _ = tray.set_visible(false);
+            }
+            // cc-switch's NSIS finding: the updater can inherit a pending
+            // reboot and stall the silent install. ReallySuppress is NSIS's
+            // documented "finish without asking to reboot" switch.
+            #[cfg(windows)]
+            std::env::set_var("REBOOT", "ReallySuppress");
             let handle = app.clone();
-            update
+            let result = update
                 .download_and_install(
                     move |chunk_len, content_len| {
                         let _ = handle.emit(
@@ -5952,8 +5921,15 @@ async fn install_update(app: tauri::AppHandle) -> Result<(), String> {
                     },
                     || {},
                 )
-                .await
-                .map_err(|e| e.to_string())?;
+                .await;
+            #[cfg(windows)]
+            std::env::remove_var("REBOOT");
+            if let Err(error) = result {
+                if let Some(tray) = &tray {
+                    let _ = tray.set_visible(true);
+                }
+                return Err(error.to_string());
+            }
             app.restart();
         }
         // The update the button promised is gone (yanked release, CDN
@@ -5972,6 +5948,29 @@ async fn check_update(app: tauri::AppHandle) -> Result<Option<String>, String> {
         .check()
         .await
         .map(|u| u.map(|u| u.version.clone()))
+        .map_err(|e| e.to_string())
+}
+
+#[derive(Serialize)]
+struct UpdateInfo {
+    version: String,
+    notes: Option<String>,
+}
+
+/// Same check as `check_update`, plus the release body the updater already
+/// parsed. The About page uses it for the notes summary; no extra request.
+#[tauri::command]
+async fn check_update_details(app: tauri::AppHandle) -> Result<Option<UpdateInfo>, String> {
+    let updater = build_updater(&app)?;
+    updater
+        .check()
+        .await
+        .map(|u| {
+            u.map(|u| UpdateInfo {
+                version: u.version.clone(),
+                notes: u.body.clone(),
+            })
+        })
         .map_err(|e| e.to_string())
 }
 
@@ -6149,6 +6148,7 @@ async fn ensure_panel_window(app: &tauri::AppHandle) -> Result<(), String> {
         // recover the existing panel instead of flashing and disappearing.
         let _ = w.unminimize();
         let _ = w.show();
+        apply_capture_exclusion_now(app);
         w.set_focus().map_err(|e| e.to_string())?;
         return Ok(());
     }
@@ -6183,6 +6183,7 @@ async fn ensure_panel_window(app: &tauri::AppHandle) -> Result<(), String> {
         let _ = window.set_position(pos);
     }
     let _ = window.show();
+    apply_capture_exclusion_now(app);
     let _ = window.set_focus();
     match window.url() {
         Ok(url) => eprintln!("[pane] panel window opened, url={url}"),
@@ -6430,6 +6431,7 @@ fn toggle_popover_centered(app: &tauri::AppHandle) {
         eprintln!("[pane] popover placement: {error}");
     }
     let _ = window.show();
+    apply_capture_exclusion_now(app);
     let _ = window.set_focus();
     hide_window_border(&window);
     let _ = window.emit("popover-shown", ());
@@ -6448,6 +6450,7 @@ fn replay_tour(app: tauri::AppHandle) {
     apply_popover_pin(&window);
     let _ = window.unminimize();
     let _ = window.show();
+    apply_capture_exclusion_now(&app);
     let _ = window.set_focus();
     let _ = window.emit("tour-replay", ());
 }
@@ -6617,6 +6620,7 @@ pub fn run() {
             zed_login_cancel,
             oauth_logout,
             get_config,
+            proxy_status,
             set_config,
             system_ui_locale,
             list_system_fonts,
@@ -6631,6 +6635,7 @@ pub fn run() {
             codex_redeem_credit,
             install_update,
             check_update,
+            check_update_details,
             set_popover_scale,
             center_popover,
             open_panel_window,
@@ -6645,6 +6650,30 @@ pub fn run() {
             sensenova_oauth_finish
         ])
         .setup(|app| {
+            // Identity migration (#105): the old app's autostart entry is
+            // registered under the old product name. Carry the preference
+            // over and point the entry at the executable that is running;
+            // recording its path means a later install replaces a dev-build
+            // entry instead of trusting a bare "already enabled" bit.
+            let marker = providers::config_dir().join("identity-migrated");
+            let current_exe = std::env::current_exe()
+                .map(|path| path.display().to_string())
+                .unwrap_or_default();
+            let migrated_exe = std::fs::read_to_string(&marker)
+                .map(|raw| raw.trim().to_string())
+                .unwrap_or_default();
+            if migrated_exe != current_exe {
+                let cfg = config_with_defaults(load_config());
+                if cfg
+                    .get("autostart")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false)
+                {
+                    use tauri_plugin_autostart::ManagerExt;
+                    let _ = app.autolaunch().enable();
+                }
+                let _ = std::fs::write(marker, &current_exe);
+            }
             spawn_update_checker(app.handle());
             spawn_share_watcher(app.handle().clone());
             spawn_auto_refresh(app.handle().clone());
@@ -6729,7 +6758,7 @@ pub fn run() {
                         // Menu callbacks are synchronous main-thread code —
                         // building a window here deadlocks (see
                         // ensure_panel_window), so hop to the async runtime.
-                        "open_panel" | "open_settings" => {
+                        "open_panel" | "open_settings" | "tray_more" => {
                             let handle = app.clone();
                             tauri::async_runtime::spawn(async move {
                                 if let Err(e) = ensure_panel_window(&handle).await {
