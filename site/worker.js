@@ -134,6 +134,14 @@ function manifestHeaders(via) {
   };
 }
 
+function skinCorsHeaders() {
+  return {
+    "access-control-allow-origin": "*",
+    "access-control-allow-methods": "GET, HEAD, OPTIONS",
+    "access-control-max-age": "86400",
+  };
+}
+
 export default {
   async fetch(req, env) {
     const url = new URL(req.url);
@@ -149,6 +157,21 @@ export default {
     }
     if (url.pathname === "/update/latest.json") {
       return updateManifest(req);
+    }
+    // The in-app workshop fetches the index through Rust, but the static
+    // files still carry no CORS header — a browser/demo or a future web
+    // client must be able to read the index and the packs. GET/HEAD only;
+    // OPTIONS is answered directly so preflights never touch the asset store.
+    if (url.pathname.startsWith("/skins/")) {
+      if (req.method === "OPTIONS") {
+        return new Response(null, { status: 204, headers: skinCorsHeaders() });
+      }
+      const res = await env.ASSETS.fetch(req);
+      const headers = new Headers(res.headers);
+      headers.set("access-control-allow-origin", "*");
+      headers.set("access-control-allow-methods", "GET, HEAD, OPTIONS");
+      headers.set("access-control-max-age", "86400");
+      return new Response(res.body, { status: res.status, statusText: res.statusText, headers });
     }
     // Keep one canonical markup source. The English route is selected by the
     // host page script, while the asset request itself still resolves to the

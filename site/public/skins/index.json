@@ -1,29 +1,29 @@
 {
-  "generatedAt": "2026-10-25T12:04:52.703Z",
+  "generatedAt": "2026-10-26T00:40:59.249Z",
   "packs": [
     {
       "id": "signal",
       "name": "Cloud Post Office",
-      "version": "1.0.1",
-      "size": 1526730,
-      "sha256": "966bd91967633a93aa943000bc8de15996ab1c4538bc60b4833d60255d83da6c",
-      "url": "https://pane.threetwoa.live/skins/pane-skin-signal-1.0.1.zip"
+      "version": "1.0.2",
+      "size": 1528012,
+      "sha256": "88d97d67d0f96f559cdea6cfc8aec4828e7a6fb1a705f3d057f200a88136680d",
+      "url": "https://pane.threetwoa.live/skins/pane-skin-signal-1.0.2.zip"
     },
     {
       "id": "ink",
       "name": "山水笺 Ink Wash",
-      "version": "1.0.1",
-      "size": 945658,
-      "sha256": "09b4b5300e8007ae2f4e97c5632f3896ae5719386f5c4e784c7eac891462df8d",
-      "url": "https://pane.threetwoa.live/skins/pane-skin-ink-1.0.1.zip"
+      "version": "1.0.2",
+      "size": 946684,
+      "sha256": "61a375b7c4ba30ed07b754d0bca3ab89e29d606f3e3cca923de25d77d14888d1",
+      "url": "https://pane.threetwoa.live/skins/pane-skin-ink-1.0.2.zip"
     },
     {
       "id": "comic-pixel",
       "name": "像素分镜 Comic Pixel",
-      "version": "1.0.1",
-      "size": 98252,
-      "sha256": "5f93d93140da8f52ce9f44d97b9992909c0dac2a25a18e910ffb41d750ed7647",
-      "url": "https://pane.threetwoa.live/skins/pane-skin-comic-pixel-1.0.1.zip"
+      "version": "1.0.2",
+      "size": 109652,
+      "sha256": "a9376c70ec29b33086e173edb28875e717d866a17deeeeca048bbb98b7031425",
+      "url": "https://pane.threetwoa.live/skins/pane-skin-comic-pixel-1.0.2.zip"
     }
   ]
 }

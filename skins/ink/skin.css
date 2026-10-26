@@ -3,7 +3,7 @@
 /* Each preview owns its materials, even when the current app uses another skin. */
 .skin-sample[data-ink]{--ink-landscape:url('./assets/skins/ink-wash/mountains-v4.webp');--ink-koi:url('./assets/skins/ink-wash/koi-red-v4.webp');--ink-grain:url('./assets/skins/ink-wash/paper-grain.svg');--ink-display-font:'Pane Ink Brush','STXingkai','KaiTi',serif;background-image:var(--ink-grain),var(--ink-landscape);background-position:center,right bottom;background-size:140px 140px,100% auto;background-repeat:repeat,no-repeat}
 /* 山水笺 / 墨白: grayscale materials, real data, decorative paint below text. */
-:is(:root[data-ink],.skin-sample[data-ink]):where(:not(.skin-sample:not([data-ink]),.skin-sample:not([data-ink]) *)),:is(:root[data-ink],.skin-sample[data-ink])[data-theme=light]:where(:not(.skin-sample:not([data-ink]),.skin-sample:not([data-ink]) *)),[data-skin=ink][data-theme=light]:where(:not(.skin-sample:not([data-ink]),.skin-sample:not([data-ink]) *)),:is(:root[data-ink],.skin-sample[data-ink]) .skin-sample[data-theme=light]:where(:not(.skin-sample:not([data-ink]),.skin-sample:not([data-ink]) *)){--background:#f3f2ef;--foreground:#222322;--secondary-foreground:#454643;--muted-foreground:#696b67;--card:#fafaf7;--glass-surface:#f5f5f1;--floating-surface:#fafaf7;--field-surface:#efefeb;--input:#c6c7c1;--border:#cccdc7;--muted:#e9e9e4;--accent:#e6e6df;--primary:#292b29;--primary-foreground:#fafaf7;--ink-stroke:#323532;--ink-soft:#858780;--ink-warm:#a1a39b;--ink-divider:#d1d2cb;--ink-field-wash:#555b5712;--ink-shadow:#1111110b;--floating-shadow:#15151520;--ink-danger-wash:#9c40310d;--destructive:#a14032;--ink-art-filter:none;--ink-landscape:url('./assets/skins/ink-wash/mountains-v4.webp');--ink-koi:url('./assets/skins/ink-wash/koi-red-v4.webp');--ink-grain:url('./assets/skins/ink-wash/paper-grain.svg');--ink-display-font:'STKaiti','KaiTi','Kaiti SC',serif}
+:is(:root[data-ink],.skin-sample[data-ink]):where(:not(.skin-sample:not([data-ink]),.skin-sample:not([data-ink]) *)),:is(:root[data-ink],.skin-sample[data-ink])[data-theme=light]:where(:not(.skin-sample:not([data-ink]),.skin-sample:not([data-ink]) *)),[data-skin=ink][data-theme=light]:where(:not(.skin-sample:not([data-ink]),.skin-sample:not([data-ink]) *)),:is(:root[data-ink],.skin-sample[data-ink]) .skin-sample[data-theme=light]:where(:not(.skin-sample:not([data-ink]),.skin-sample:not([data-ink]) *)){--background:#f3f2ef;--foreground:#222322;--secondary-foreground:#454643;--muted-foreground:#696b67;--card:#fafaf7;--glass-surface:#f5f5f1;--floating-surface:#fafaf7;--field-surface:#efefeb;--input:#c6c7c1;--border:#cccdc7;--muted:#e9e9e4;--accent:#e6e6df;--primary:#292b29;--primary-foreground:#fafaf7;--ink-stroke:#323532;--ink-soft:#858780;--ink-warm:#a1a39b;--ink-divider:#d1d2cb;--ink-field-wash:#555b5712;--ink-shadow:#1111110b;--floating-shadow:#15151520;--ink-danger-wash:#9c40310d;--destructive:#a14032;--ink-art-filter:none;--ink-landscape:url('./assets/skins/ink-wash/mountains-v4.webp');--ink-koi:url('./assets/skins/ink-wash/koi-red-v4.webp');--ink-grain:url('./assets/skins/ink-wash/paper-grain.svg');--ink-display-font:'STKaiti','KaiTi','Kaiti SC',serif;--ink-readable-font:"Segoe UI Variable Text","Microsoft YaHei UI","PingFang SC","Segoe UI",sans-serif}
 :is(:root[data-ink],.skin-sample[data-ink])[data-theme=dark]:where(:not(.skin-sample:not([data-ink]),.skin-sample:not([data-ink]) *)),[data-skin=ink][data-theme=dark]:where(:not(.skin-sample:not([data-ink]),.skin-sample:not([data-ink]) *)),:is(:root[data-ink],.skin-sample[data-ink]) .skin-sample[data-theme=dark]:where(:not(.skin-sample:not([data-ink]),.skin-sample:not([data-ink]) *)){--background:#111213;--foreground:#eeeee8;--secondary-foreground:#d0d1ca;--muted-foreground:#a8aaa3;--card:#1b1d1e;--glass-surface:#161819;--floating-surface:#202223;--field-surface:#252728;--input:#555854;--border:#414541;--muted:#2b2e2d;--accent:#323632;--primary:#e5e6dd;--primary-foreground:#171918;--ink-stroke:#d8dcd3;--ink-soft:#979d92;--ink-warm:#777e73;--ink-divider:#414741;--ink-field-wash:#ced1c215;--ink-shadow:#00000020;--floating-shadow:#00000060;--ink-danger-wash:#a34a3526;--destructive:#e4a698;--ink-art-filter:invert(1)}
 :is(:root[data-ink],.skin-sample[data-ink]) body:where(:not(.skin-sample:not([data-ink]),.skin-sample:not([data-ink]) *)){background:var(--background);background-image:var(--ink-grain);background-size:140px 140px}
 :is(:root[data-ink],.skin-sample[data-ink]) :is(.provider,.total-spend,.quota-overview,.st-card,.auth-group,.ona-site,.kv-item,.skey-item,.spend-detail-panel,.skin-sample):where(:not(.skin-sample:not([data-ink]),.skin-sample:not([data-ink]) *)){position:relative;isolation:isolate;overflow:visible;background:var(--card);background-image:var(--ink-grain),radial-gradient(ellipse at 100% 100%,var(--ink-field-wash),transparent 64%);border:1px solid color-mix(in srgb,var(--border) 60%,transparent);border-radius:3px;box-shadow:0 3px 12px var(--ink-shadow)}
@@ -76,8 +76,8 @@
 :is(:root[data-ink],.skin-sample[data-ink]) .spend-bolt:where(:not(.skin-sample:not([data-ink]),.skin-sample:not([data-ink]) *)){color:var(--ink-stroke);background:none;filter:none;text-shadow:none;box-shadow:none}
 :is(:root[data-ink],.skin-sample[data-ink]) .donut-wrap path.seg:where(:not(.skin-sample:not([data-ink]),.skin-sample:not([data-ink]) *)){display:none!important}
 :is(:root[data-ink],.skin-sample[data-ink]) .ink-donut-art>svg:where(:not(.skin-sample:not([data-ink]),.skin-sample:not([data-ink]) *)){filter:none;box-shadow:none;background:none}
-:is(:root[data-ink],.skin-sample[data-ink]) :is(.overview-item-name,.ovbar-pct,.ovbar-meta,.metric-pct,.metric-label,.legend-name,.legend-val,.donut-total,.donut-sub,.col-total):where(:not(.skin-sample:not([data-ink]),.skin-sample:not([data-ink]) *)){font-family:var(--app-font,'Segoe UI Variable','Segoe UI','Microsoft YaHei',system-ui,sans-serif);letter-spacing:normal}
-:is(:root[data-ink],.skin-sample[data-ink]) .provider:not(.total-spend):not(.quota-overview) .provider-name:where(:not(.skin-sample:not([data-ink]),.skin-sample:not([data-ink]) *)){font-family:var(--app-font,'Segoe UI Variable','Segoe UI','Microsoft YaHei',system-ui,sans-serif);letter-spacing:normal}
+:is(:root[data-ink],.skin-sample[data-ink]) :is(.overview-item-name,.ovbar-pct,.ovbar-meta,.metric-pct,.metric-label,.legend-name,.legend-val,.donut-total,.donut-sub,.col-total):where(:not(.skin-sample:not([data-ink]),.skin-sample:not([data-ink]) *)){font-family:var(--ink-readable-font);letter-spacing:normal}
+:is(:root[data-ink],.skin-sample[data-ink]) .provider:not(.total-spend):not(.quota-overview) .provider-name:where(:not(.skin-sample:not([data-ink]),.skin-sample:not([data-ink]) *)){font-family:var(--ink-readable-font);letter-spacing:normal}
 :is(:root[data-ink],.skin-sample[data-ink]) .overview-cat-tabs:where(:not(.skin-sample:not([data-ink]),.skin-sample:not([data-ink]) *)){background:none;border:0;box-shadow:none}
 :is(:root[data-ink],.skin-sample[data-ink]) .overview-cat-tabs .tab:where(:not(.skin-sample:not([data-ink]),.skin-sample:not([data-ink]) *)){font-family:var(--ink-display-font);font-size:11px;letter-spacing:0;max-width:none;white-space:nowrap;overflow:visible;flex:none}
 /* Quota rings keep the original circumference/dash data; paint never touches the label. */
@@ -86,7 +86,7 @@
 :is(:root[data-ink],.skin-sample[data-ink]) .overview-ring .ring-track:where(:not(.skin-sample:not([data-ink]),.skin-sample:not([data-ink]) *)){stroke:var(--ink-soft)!important;stroke-width:3.5;opacity:.24;filter:url('#ink-graph-paint')}
 :is(:root[data-ink],.skin-sample[data-ink]) .overview-ring .ring-progress:where(:not(.skin-sample:not([data-ink]),.skin-sample:not([data-ink]) *)){stroke:var(--ink-stroke)!important;stroke-width:4.2;filter:url('#ink-graph-paint');stroke-linecap:butt}
 :is(:root[data-ink],.skin-sample[data-ink]) .overview-ring :is(.ring-progress.is-maxed,.ring-progress.is-error):where(:not(.skin-sample:not([data-ink]),.skin-sample:not([data-ink]) *)){stroke:var(--destructive)!important;filter:url('#ink-graph-paint')}
-:is(:root[data-ink],.skin-sample[data-ink]) .overview-ring .ring-text:where(:not(.skin-sample:not([data-ink]),.skin-sample:not([data-ink]) *)){font-family:var(--app-font,'Segoe UI',sans-serif);fill:var(--foreground);filter:none}
+:is(:root[data-ink],.skin-sample[data-ink]) .overview-ring .ring-text:where(:not(.skin-sample:not([data-ink]),.skin-sample:not([data-ink]) *)){font-family:var(--ink-readable-font);fill:var(--foreground);filter:none}
 :is(:root[data-ink],.skin-sample[data-ink]) .overview-ring :is(.ring-text.is-maxed,.ring-text.is-error):where(:not(.skin-sample:not([data-ink]),.skin-sample:not([data-ink]) *)){fill:var(--destructive)}
 :is(:root[data-ink],.skin-sample[data-ink]) .overview-item-meta.meta-maxed:where(:not(.skin-sample:not([data-ink]),.skin-sample:not([data-ink]) *)){color:var(--destructive);text-shadow:none}
 /* Same brush treatment for credit, quota and spend daily columns. Preserve hit areas and geometry. */
@@ -97,7 +97,7 @@
 :is(:root[data-ink],.skin-sample[data-ink]) .trend-nodata:where(:not(.skin-sample:not([data-ink]),.skin-sample:not([data-ink]) *)){fill:var(--ink-soft)!important;opacity:.18}
 :is(:root[data-ink],.skin-sample[data-ink]) .trend-hit:where(:not(.skin-sample:not([data-ink]),.skin-sample:not([data-ink]) *)){fill:transparent;filter:none}
 :is(:root[data-ink],.skin-sample[data-ink]) .trend .metric-label:where(:not(.skin-sample:not([data-ink]),.skin-sample:not([data-ink]) *)){font-family:var(--ink-display-font);font-weight:400;font-size:14px;letter-spacing:.02em}
-:is(:root[data-ink],.skin-sample[data-ink]) .trend-dates:where(:not(.skin-sample:not([data-ink]),.skin-sample:not([data-ink]) *)){font-family:var(--app-font,'Segoe UI',sans-serif);color:var(--muted-foreground)}
+:is(:root[data-ink],.skin-sample[data-ink]) .trend-dates:where(:not(.skin-sample:not([data-ink]),.skin-sample:not([data-ink]) *)){font-family:var(--ink-readable-font);color:var(--muted-foreground)}
 @media(prefers-reduced-motion:reduce){:is(:root[data-ink],.skin-sample[data-ink]) *{transition:none!important;animation:none!important}}
 
 
@@ -138,3 +138,76 @@
    skin frame. Without this the skin's legacy .st-block border wraps both and
    reads as a double/triple frame. */
 :is(:root[data-ink],.skin-sample[data-ink]) .set-section:where(:not(.skin-sample:not([data-ink]),.skin-sample:not([data-ink]) *)){border:0!important;background:transparent!important;box-shadow:none!important;border-radius:0;padding:0}
+/* --- Rail, settings and workshop coverage (#57): paper slips and brush marks
+   where the shell previously inherited a flat native surface. --- */
+:is(:root[data-ink],.skin-sample[data-ink]) .sidebar-buttons button:is(#theme-btn,#refresh,#skin-btn,#customize-btn,#settings-btn):where(:not(.skin-sample:not([data-ink]),.skin-sample:not([data-ink]) *)){
+  position:relative;width:34px;height:34px;min-width:34px;padding:0;
+  display:inline-flex;align-items:center;justify-content:center;
+  background:var(--glass-surface);background-image:var(--ink-grain);
+  border:1px solid var(--border);border-bottom:2px solid var(--ink-divider);
+  border-radius:2px 5px 3px 4px;color:var(--foreground);
+}
+:is(:root[data-ink],.skin-sample[data-ink]) .sidebar-buttons button:is(#theme-btn,#refresh,#skin-btn,#customize-btn,#settings-btn):hover:where(:not(.skin-sample:not([data-ink]),.skin-sample:not([data-ink]) *)){background:var(--accent);border-color:var(--ink-stroke)}
+:is(:root[data-ink],.skin-sample[data-ink]) #panel-nav .panel-nav-item > .ui-icon:where(:not(.skin-sample:not([data-ink]),.skin-sample:not([data-ink]) *)){
+  flex:none;padding:3px;border:1px solid var(--ink-divider);border-radius:42% 55% 44% 51%;
+  background:var(--field-surface);color:var(--secondary-foreground);
+}
+:is(:root[data-ink],.skin-sample[data-ink]) .skin-market:where(:not(.skin-sample:not([data-ink]),.skin-sample:not([data-ink]) *)){
+  position:relative;isolation:isolate;background:var(--card)!important;background-image:var(--ink-grain)!important;
+  border:1px solid var(--border)!important;border-top:2px solid var(--ink-stroke)!important;
+  border-radius:3px!important;box-shadow:0 12px 38px var(--floating-shadow)!important;padding:12px;
+}
+:is(:root[data-ink],.skin-sample[data-ink]) .skin-market::before:where(:not(.skin-sample:not([data-ink]),.skin-sample:not([data-ink]) *)){content:'';position:absolute;inset:0;z-index:-1;background:var(--ink-landscape) right bottom/100% auto no-repeat;filter:var(--ink-art-filter);opacity:.16;pointer-events:none}
+:is(:root[data-ink],.skin-sample[data-ink]) .skin-market-head:where(:not(.skin-sample:not([data-ink]),.skin-sample:not([data-ink]) *)){border-bottom:1px solid var(--ink-divider)}
+:is(:root[data-ink],.skin-sample[data-ink]) .skin-market-head h2:where(:not(.skin-sample:not([data-ink]),.skin-sample:not([data-ink]) *)){font-family:var(--ink-display-font);font-weight:400;letter-spacing:.08em}
+:is(:root[data-ink],.skin-sample[data-ink]) .skin-side-item:where(:not(.skin-sample:not([data-ink]),.skin-sample:not([data-ink]) *)){
+  position:relative;background:var(--field-surface);background-image:var(--ink-grain);
+  border:1px solid var(--border);border-bottom:2px solid var(--ink-divider);
+  border-radius:2px 5px 3px 4px;color:var(--foreground);
+}
+:is(:root[data-ink],.skin-sample[data-ink]) .skin-side-item.active:where(:not(.skin-sample:not([data-ink]),.skin-sample:not([data-ink]) *)){border-color:var(--ink-stroke);background:var(--accent)}
+:is(:root[data-ink],.skin-sample[data-ink]) .skin-side-item.active:where(:not(.skin-sample:not([data-ink]),.skin-sample:not([data-ink]) *))::after{content:'';position:absolute;left:8%;bottom:2px;width:84%;height:2px;background:var(--ink-stroke);mask:url('./assets/skins/ink-wash/brush-mask.svg') center/100% 100% no-repeat}
+:is(:root[data-ink],.skin-sample[data-ink]) .skin-preview-toolbar:where(:not(.skin-sample:not([data-ink]),.skin-sample:not([data-ink]) *)){border:1px solid var(--ink-divider);border-radius:3px;background:var(--field-surface);padding:3px}
+:is(:root[data-ink],.skin-sample[data-ink]) .skin-mode-btn:where(:not(.skin-sample:not([data-ink]),.skin-sample:not([data-ink]) *)){border-radius:2px 4px 3px 2px}
+:is(:root[data-ink],.skin-sample[data-ink]) .skin-mode-btn[aria-pressed="true"]:where(:not(.skin-sample:not([data-ink]),.skin-sample:not([data-ink]) *)){background:var(--accent);color:var(--foreground);border-color:var(--ink-stroke)}
+:is(:root[data-ink],.skin-sample[data-ink]) .skin-market-feedback:where(:not(.skin-sample:not([data-ink]),.skin-sample:not([data-ink]) *)){color:var(--destructive);border-top:1px solid var(--ink-divider);padding-top:8px}
+:is(:root[data-ink],.skin-sample[data-ink]) .skin-market-preview-note:where(:not(.skin-sample:not([data-ink]),.skin-sample:not([data-ink]) *)){
+  border-left:2px solid var(--ink-stroke);background:var(--field-surface);background-image:var(--ink-grain);
+  padding:9px 11px;color:var(--muted-foreground);
+}
+:is(:root[data-ink],.skin-sample[data-ink]) .skin-detail-actions:where(:not(.skin-sample:not([data-ink]),.skin-sample:not([data-ink]) *)){border-top:1px solid var(--ink-divider);padding-top:8px}
+:is(:root[data-ink],.skin-sample[data-ink]) .skin-detail-head h3:where(:not(.skin-sample:not([data-ink]),.skin-sample:not([data-ink]) *)){font-family:var(--ink-display-font);font-weight:400;letter-spacing:.08em}
+
+/* Data legibility (#57): provider/quota/form text uses the fixed UI stack;
+   brush faces stay on headings, tabs and the spend headline. */
+:is(:root[data-ink],.skin-sample[data-ink]) :is(
+  .set-row,.settings-note,.settings-subhead,.source-state,.source-reason,
+  .source-row,.kv-hint,.form-help,.account-dialog-help,.placeholder,
+  .needs-setup-text,.board-empty-title,.board-empty-body,
+  .skin-market-copy,.skin-side-item,.skin-action-context,.skin-market-feedback,
+  .skin-preview-label,.skin-current-label,.skin-market-preview-note,
+  .spend-detail-kicker,.spend-detail-model
+):where(:not(.skin-sample:not([data-ink]),.skin-sample:not([data-ink]) *)){
+  font-family:var(--ink-readable-font);font-style:normal;letter-spacing:normal;
+}
+:is(:root[data-ink],.skin-sample[data-ink]) :is(input,textarea,select,button,.mini-btn):where(:not(.skin-sample:not([data-ink]),.skin-sample:not([data-ink]) *)){
+  font-family:var(--ink-readable-font);font-style:normal;
+}
+
+/* Keep the brush face on navigation tabs/headings: the readable-control rule
+   above must not flatten the skin's own direction. */
+:is(:root[data-ink],.skin-sample[data-ink]) :is(.spend-group-tab,.spend-metric-tab,.col-head-row .tab,.overview-tabs .tab,.overview-cat-tabs .tab,.settings-tabs button,.panel-nav-item,.card-group-head):where(:not(.skin-sample:not([data-ink]),.skin-sample:not([data-ink]) *)){
+  font-family:var(--ink-display-font);font-weight:400;letter-spacing:.025em;
+}
+
+/* New settings skeleton controls (#57). */
+:is(:root[data-ink],.skin-sample[data-ink]) .set-row__control input[type="checkbox"]:where(:not(.skin-sample:not([data-ink]),.skin-sample:not([data-ink]) *)){
+  appearance:none;-webkit-appearance:none;width:18px;height:18px;margin:0;
+  border:1px solid var(--border);border-radius:42% 55% 44% 51%;
+  background:var(--field-surface);background-image:var(--ink-grain);
+  display:inline-grid;place-content:center;cursor:pointer;filter:url('#ink-pigment');
+}
+:is(:root[data-ink],.skin-sample[data-ink]) .set-row__control input[type="checkbox"]:checked:where(:not(.skin-sample:not([data-ink]),.skin-sample:not([data-ink]) *)){background:var(--ink-stroke);border-color:var(--ink-stroke)}
+:is(:root[data-ink],.skin-sample[data-ink]) .set-row__control input[type="checkbox"]:where(:not(.skin-sample:not([data-ink]),.skin-sample:not([data-ink]) *)):checked::after{content:"";width:10px;height:10px;background:var(--card);clip-path:polygon(14% 45%,40% 70%,86% 18%,100% 30%,42% 90%,0 55%)}
+:is(:root[data-ink],.skin-sample[data-ink]) .set-row__control input[type="checkbox"]:focus-visible:where(:not(.skin-sample:not([data-ink]),.skin-sample:not([data-ink]) *)){outline:2px solid var(--ink-stroke);outline-offset:3px}
+:is(:root[data-ink],.skin-sample[data-ink]) #panel-head .settings-save-all:where(:not(.skin-sample:not([data-ink]),.skin-sample:not([data-ink]) *)){background:var(--field-surface);background-image:var(--ink-grain);color:var(--foreground);border:1px solid var(--border);border-bottom:2px solid var(--ink-stroke);border-radius:2px 5px 3px 4px;box-shadow:none}
