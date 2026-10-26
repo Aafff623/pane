@@ -302,6 +302,11 @@ interface QoderModelSpend {
   billed_tokens: number;
   trips: number;
   tokens_unavailable_trips: number;
+  /// #37-03: where this model's context window came from — "db" (real
+  /// context_window), "same_model" (carried over from another request of the
+  /// same model) or "unknown". Optional: reports from an older backend
+  /// predate the field and simply show no tooltip.
+  window_source?: string;
 }
 
 interface QoderDaySpend {
@@ -5327,6 +5332,16 @@ function qoderCreditSplit(credits: number, charged: number): string {
   return `${t("qoder.chargedCredits", { credits: fmtCreditValue(charged) })} · ${t("qoder.nominalCredits", { credits: fmtCreditValue(credits) })} ${t("qoder.creditsUnit")}`;
 }
 
+/// #37-03: the window provenance lives in a tooltip on the model row — it
+/// explains the token basis without taking space on the main line. Reports
+/// from an older backend carry no `window_source` and get no tooltip.
+function qoderWindowSourceTip(model: QoderModelSpend): string {
+  if (model.window_source === "db") return t("qoder.windowSourceDb");
+  if (model.window_source === "same_model") return t("qoder.windowSourceSameModel");
+  if (model.window_source === "unknown") return t("qoder.windowSourceUnknown");
+  return "";
+}
+
 function qoderDayHtml(day: string): string {
   const data = lastQoderSpend?.days.find((row) => row.day === day);
   if (!data || (data.credits <= 0 && data.trips === 0)) return "";
@@ -5336,7 +5351,8 @@ function qoderDayHtml(day: string): string {
   const models = data.models
     .map((model) => {
       const tokensText = model.tokens_unavailable_trips > 0 && model.billed_tokens <= 0 ? "—" : fmtTokens(model.billed_tokens);
-      return `<div class="spend-detail-model"><span>${escapeHtml(model.label)}${
+      const sourceTip = qoderWindowSourceTip(model);
+      return `<div class="spend-detail-model"${sourceTip ? ` title="${escapeHtml(sourceTip)}"` : ""}><span>${escapeHtml(model.label)}${
         model.label !== model.model ? `<span class="qoder-key">${escapeHtml(model.model)}</span>` : ""
       }${model.free_trips > 0 ? `<span class="qoder-chip qoder-free">${escapeHtml(t("qoder.freeBadge"))}</span>` : ""}</span><span>${escapeHtml(qoderCreditSplit(model.credits, model.charged_credits))} · ${escapeHtml(tokensText)} · ${model.trips}</span></div>`;
     })

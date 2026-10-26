@@ -744,6 +744,7 @@ const en: Dict = {
   "card.outdated": "⚠ Outdated",
   "card.needsSetupFallback": "Credentials are saved, but the usage API needs one more step.",
   "card.hintNoStartPlan": "This ZCode account has no Start Plan on record.",
+  "card.hintVolcCredential": "Volcengine rejected this credential. Paste the pair as AK:SK — AccessKeyId:SecretAccessKey from the ark.volcengine.com console (API Key account). An Ark API key on its own is not accepted.",
   "card.hintStartPlanEnded": "The Start Plan gift has ended — open ZCode for the next campaign.",
   "card.needsSetupAction": "How to fix",
   "card.bootCache": "Cached data · refreshing",
@@ -930,6 +931,9 @@ const en: Dict = {
     "qoder.freeBadge": "free",
     "qoder.basisPartial": "token totals derived — window published for {n} of {total} models",
     "qoder.basisNone": "token totals unmeasurable — no model publishes a context window, and Qoder keeps no counted tokens locally",
+    "qoder.windowSourceDb": "Window source: this model's real context window (db)",
+    "qoder.windowSourceSameModel": "Window source: carried over from another request of the same model",
+    "qoder.windowSourceUnknown": "Window source: unknown — no window published, tokens not derived",
     "qoder.freeTrips": "{n} free round-trips",
     "qoder.freeNote": "{free} free · nominal {nominal}",
     "qoder.chargedCredits": "charged {credits}",
@@ -2537,6 +2541,7 @@ const zh: Dict = {
   "card.outdated": "⚠ 数据过时",
   "card.needsSetupFallback": "凭据已保存，但用量接口还差一步。",
   "card.hintNoStartPlan": "这个 ZCode 账号没有 Start Plan。",
+  "card.hintVolcCredential": "火山方舟拒绝了该凭据。请以 AK:SK 形式粘贴——ark.volcengine.com 控制台（API Key 账号）里的 AccessKeyId:SecretAccessKey；单独的 Ark API key 不被接受。",
   "card.hintStartPlanEnded": "Start Plan 的赠送已结束，打开 ZCode 等下一期活动。",
   "card.needsSetupAction": "怎么补",
   "card.bootCache": "缓存数据 · 刷新中",
@@ -2718,6 +2723,9 @@ const zh: Dict = {
     "qoder.freeBadge": "免费",
     "qoder.basisPartial": "token 为推导值：{total} 个模型中 {n} 个给出了上下文窗口",
     "qoder.basisNone": "token 不可估：没有模型给出上下文窗口，且 Qoder 本机不存实测 token 数",
+    "qoder.windowSourceDb": "窗口来源：该模型的真实上下文窗口（db）",
+    "qoder.windowSourceSameModel": "窗口来源：沿用同模型其他请求记录的窗口",
+    "qoder.windowSourceUnknown": "窗口来源：未知 —— 没有窗口记录，token 未估算",
     "qoder.freeTrips": "{n} 次免费往返",
     "qoder.freeNote": "免费 {free} 次 · 名义 {nominal}",
     "qoder.chargedCredits": "实扣 {credits}",
@@ -4310,6 +4318,7 @@ const ru: Dict = {
   "card.outdated": "⚠ Данные устарели",
   "card.needsSetupFallback": "Учётные данные сохранены, но API использования требует ещё одного шага.",
   "card.hintNoStartPlan": "У этой учётной записи ZCode нет Start Plan.",
+  "card.hintVolcCredential": "Volcengine отклонил эти учётные данные. Вставьте пару как AK:SK — AccessKeyId:SecretAccessKey из консоли ark.volcengine.com (аккаунт API Key). Отдельный Ark API key не принимается.",
   "card.hintStartPlanEnded": "Подарок Start Plan закончился — откройте ZCode для следующей кампании.",
   "card.needsSetupAction": "Как исправить",
   "card.bootCache": "Кэшированные данные · обновляем",
@@ -4496,6 +4505,9 @@ const ru: Dict = {
     "qoder.freeBadge": "бесплатно",
     "qoder.basisPartial": "токены вычислены: окно указано для {n} из {total} моделей",
     "qoder.basisNone": "токены неизмеримы: ни одна модель не публикует окно контекста, точные токены локально не хранятся",
+    "qoder.windowSourceDb": "Источник окна: реальное контекстное окно этой модели (БД)",
+    "qoder.windowSourceSameModel": "Источник окна: взято из другого запроса той же модели",
+    "qoder.windowSourceUnknown": "Источник окна: неизвестно — окно не опубликовано, токены не выведены",
     "qoder.freeTrips": "{n} бесплатных запросов",
     "qoder.freeNote": "{free} бесплатно · номинал {nominal}",
     "qoder.chargedCredits": "списано {credits}",
@@ -5504,6 +5516,9 @@ export function displayCardHint(text: string): string {
   const stepPlanKey = ["card.stepPlanRejected", "card.stepPlanPair", "card.stepPlanApiKey", "card.stepPlanEmpty"]
     .find((key) => en[key] === text);
   if (stepPlanKey) return t(stepPlanKey);
+  if (text === en["card.hintVolcCredential"]) {
+    return t("card.hintVolcCredential");
+  }
   if (text === "Sign in to the Spark web console from the auth center to see its free quota.") {
     return t("card.hintXfyunSignIn");
   }
