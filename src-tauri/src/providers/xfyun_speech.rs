@@ -51,6 +51,19 @@ const RTASR_PATH: &str = "/dashboard/lfasr/get-rtasr-app-auth";
 const SIGNED_OUT_HINT: &str =
     "iFlytek console session expired — sign in again from the auth center.";
 
+/// Quota-semantic keys recorded verbatim under `PANE_CONSOLE_PROBE=1` (#47
+/// calibration). The profile endpoint also carries name / ID-card / mobile, so
+/// none of those keys are allowlisted — they land in the log as a type only.
+const PROBE_ALLOW: &[&str] = &[
+    "code", "flag", "status", "state", "unit", "unitType", "total", "used", "left", "trial",
+    "remaining", "surplus", "serviceType", "expiresAt", "expireTime", "beginTime", "endTime",
+    "apiUseCount", "totalCount", "usedCount", "leftCount",
+];
+
+fn probe_log_path() -> std::path::PathBuf {
+    super::config_dir().join("xfyun_speech_probe_log.json")
+}
+
 /// The business ids that actually answer the interaction-count endpoint.
 /// Measured 2026-10-23: `tts` / `iat` / `ise` return a body; `lfasr`, `rta` and
 /// friends return `flag:true, data:null` (a normal empty state, not an error).
@@ -167,6 +180,26 @@ async fn call_get(path: &str, cookie: &str) -> Result<Value, CallErr> {
     }
     let doc: Value = serde_json::from_slice(&bytes)
         .map_err(|e| CallErr::Other(format!("response parse: {e}")))?;
+    // Calibration capture (#47): opt-in, local, shape-only. The signed-out
+    // branch is recorded because this family's envelope answers HTTP 200 with
+    // `flag:false` — the mapping is exactly what needs confirming.
+    if super::response_shape::enabled() {
+        let outcome = match envelope_error(&doc) {
+            Some(CallErr::Auth) => "signed_out",
+            Some(_) => "rejected",
+            None => "ok",
+        };
+        super::response_shape::note(
+            &probe_log_path(),
+            serde_json::json!({
+                "at": chrono::Utc::now().timestamp_millis(),
+                "path": path,
+                "status": status,
+                "outcome": outcome,
+                "shape": super::response_shape::skeleton(&doc, PROBE_ALLOW, 0),
+            }),
+        );
+    }
     if envelope_error(&doc).is_some() {
         return Err(envelope_error(&doc).unwrap());
     }
