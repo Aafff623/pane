@@ -58,6 +58,10 @@ pub struct AuthAccountRow {
     /// (refresh_rejected / network / vendor / unknown).
     #[serde(rename = "lastErrorKind", skip_serializing_if = "Option::is_none")]
     pub last_error_kind: Option<String>,
+    /// Public avatar URL when the vendor exposes one; frontend falls back to
+    /// the letter tile. Never carries a token or a private URL.
+    #[serde(rename = "avatarUrl", skip_serializing_if = "Option::is_none")]
+    pub avatar_url: Option<String>,
     /// "slot" (antigravity capture) | "account" (cursor import) |
     /// "oauth" (Pane device-code login).
     pub kind: &'static str,
@@ -99,6 +103,15 @@ fn extra_text(extra: &serde_json::Value, key: &str) -> Option<String> {
         .map(str::to_string)
 }
 
+/// Copilot logs in with GitHub, whose numeric user id has a public avatar
+/// endpoint. Other families store no avatar URL, so they keep the letter tile.
+fn copilot_avatar(family: &str, account_id: &str) -> Option<String> {
+    (family == "copilot"
+        && !account_id.is_empty()
+        && account_id.chars().all(|c| c.is_ascii_digit()))
+        .then(|| format!("https://avatars.githubusercontent.com/u/{account_id}?s=64"))
+}
+
 fn rows_for_family_from(base: &Path, family: &str) -> Vec<AuthAccountRow> {    match family {
         "antigravity" => antigravity_accounts::load_slots_from(base)
             .iter()
@@ -118,6 +131,7 @@ fn rows_for_family_from(base: &Path, family: &str) -> Vec<AuthAccountRow> {    m
                 enterprise_name: None,
                 hint: None,
                 identity_unknown: false,
+                avatar_url: None,
             })
             .collect(),
         "cursor" => cursor_accounts::load_accounts_from(base)
@@ -138,6 +152,7 @@ fn rows_for_family_from(base: &Path, family: &str) -> Vec<AuthAccountRow> {    m
                 enterprise_name: None,
                 hint: None,
                 identity_unknown: false,
+                avatar_url: None,
             })
             .collect(),
         "codex" => crate::codex_accounts::load_with_imported_single_login_from(base)
@@ -158,6 +173,7 @@ fn rows_for_family_from(base: &Path, family: &str) -> Vec<AuthAccountRow> {    m
                 enterprise_name: None,
                 hint: None,
                 identity_unknown: false,
+                avatar_url: None,
             })
             .collect(),
         "codebuddy" | "codebuddycn" | "workbuddy" | "workbuddyai" | "copilot" | "grok" | "kiro"
@@ -187,6 +203,7 @@ fn rows_for_family_from(base: &Path, family: &str) -> Vec<AuthAccountRow> {    m
                         enterprise_name: extra_text(&login.extra, "enterpriseName"),
                         hint: None,
                         identity_unknown: false,
+                        avatar_url: copilot_avatar(family, &login.account_id),
                     }
                 })
                 .collect()
@@ -242,6 +259,7 @@ fn append_local_rows(rows: &mut Vec<AuthAccountRow>, candidates: Vec<crate::loca
             enterprise_name: None,
             hint: Some(candidate.hint),
             identity_unknown: !candidate.always_listed && email.is_none(),
+            avatar_url: None,
         });
     }
 }

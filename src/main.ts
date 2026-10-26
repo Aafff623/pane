@@ -1726,6 +1726,19 @@ async function patchConfig(patch: Partial<Config>): Promise<void> {
     if (IS_PANEL_FORM) {
       settingsToast(t("footer.configSaveFailed", { err: configSaveError }), true);
     }
+    // A failed write must not leave the UI claiming a value the backend never
+    // stored. Reload the canonical file once the queue is idle, then
+    // re-apply the surfaces that follow config (tray, skin, scale).
+    if (configWritesInFlight === 0) {
+      void reloadConfigFromBackend(true).then(() => {
+        applyAppearance();
+        applyWindowScale();
+        applySkin();
+        requestTraySync();
+        requestRender();
+        if (IS_PANEL_FORM) settingsToast(t("footer.configSaveReverted"), true);
+      });
+    }
     throw err;
   }
 }
@@ -1735,10 +1748,11 @@ async function patchConfig(patch: Partial<Config>): Promise<void> {
 /// file and re-apply everything the boot/reset paths apply. Without this
 /// the other window keeps its stale in-memory config and its next
 /// patchConfig would write the old values back over this write.
-async function reloadConfigFromBackend(): Promise<void> {
+async function reloadConfigFromBackend(force = false): Promise<void> {
   // Our own write's echo, or a write still queued/in flight here: the local
-  // snapshot is newer (or about to be), so the event is not news.
-  if (configWritesInFlight > 0 || Date.now() - lastLocalConfigWriteAt < 800) return;
+  // snapshot is newer (or about to be), so the event is not news. `force` is
+  // only for the failure rollback after the queue went idle.
+  if (!force && (configWritesInFlight > 0 || Date.now() - lastLocalConfigWriteAt < 800)) return;
   let fresh: Config;
   try {
     fresh = await invoke<Config>("get_config");
@@ -1746,7 +1760,7 @@ async function reloadConfigFromBackend(): Promise<void> {
     return;
   }
   // A local write that started while get_config was in flight wins.
-  if (configWritesInFlight > 0) return;
+  if (!force && configWritesInFlight > 0) return;
   fresh.localShortcuts = fresh.localShortcuts ?? {};
   fresh.shortcutBindings = fresh.shortcutBindings ?? {};
   fresh.shortcutBindingsMigrated = fresh.shortcutBindingsMigrated === true;
@@ -19457,6 +19471,18 @@ function buildPanelShell(): void {
   authView.addEventListener("click", (e) => {
     void handleAuthCenterClick(e.target as HTMLElement);
   });
+  // Broken/offline avatar URLs fall back to the letter tile already behind
+  // the image; remove the img so the alt text never renders.
+  document.addEventListener(
+    "error",
+    (event) => {
+      const target = event.target;
+      if (target instanceof HTMLImageElement && target.dataset.authAvatar !== undefined) {
+        target.remove();
+      }
+    },
+    true,
+  );
   scroll.append(settingsView, authView);
 
   // Pages are switched by the rail (PANEL_PAGES), not a horizontal tab bar.
@@ -20367,6 +20393,8 @@ interface AuthAccountRow {
   needsRelogin?: boolean;
   /// Coarse, non-secret error class paired with needsRelogin.
   lastErrorKind?: string;
+  /// Public vendor avatar (currently GitHub for Copilot).
+  avatarUrl?: string;
 }
 
 interface AuthFamilyGroup {
@@ -20855,7 +20883,7 @@ function authRowHtml(family: string, acct: AuthAccountRow, index: number): strin
     : `<button class="mini-btn" type="button" data-auth-menu="${escapeHtml(family)}|${index}" title="${escapeHtml(t("auth.more"))}" aria-label="${escapeHtml(t("auth.more"))}"${busy ? " disabled" : ""}>⋯</button>`;
   return `<div class="auth-row${busy ? " busy" : ""}" data-auth-row="${escapeHtml(acct.id)}" aria-busy="${busy}">
     ${selector}
-    <span class="auth-avatar" aria-hidden="true">${escapeHtml([...name][0] || "?")}</span>
+    <span class="auth-avatar${acct.avatarUrl ? " has-img" : ""}" aria-hidden="true">${acct.avatarUrl ? `<img src="${escapeHtml(acct.avatarUrl)}" alt="" loading="lazy" referrerpolicy="no-referrer" data-auth-avatar>` : ""}<span>${escapeHtml([...name][0] || "?")}</span></span>
     <div class="auth-id">
       <div class="auth-name-line">
         <span class="auth-name" title="${escapeHtml(name)}">${escapeHtml(name)}</span>
@@ -21114,9 +21142,10 @@ function authGroupHtml(group: AuthFamilyGroup): string {
   const rows = ordered
     .map((acct) => authRowHtml(family, acct, group.accounts.indexOf(acct)))
     .join("");
+  const autoDiscovered = ["antigravity", "kimi", "codex", "claude"].includes(family);
   const empty =
     group.accounts.length === 0
-      ? `<div class="auth-empty"><span>${escapeHtml(t("auth.empty"))}</span>
+      ? `<div class="auth-empty"><span>${escapeHtml(t(autoDiscovered ? "auth.emptyAuto" : "auth.empty"))}</span>
         <button class="mini-btn" type="button" data-auth-add="${escapeHtml(family)}">${escapeHtml(t("auth.addAccount"))}</button></div>`
       : "";
   const familyBusy = (() => {

@@ -10028,6 +10028,8 @@ body.panel-form #drawer {
 @media (prefers-reduced-motion: reduce) { .auth-row.busy .auth-avatar { animation: none; } }
 
 .auth-avatar {
+  position: relative;
+  overflow: hidden;
   flex: none;
   width: 28px;
   height: 28px;
@@ -10041,6 +10043,14 @@ body.panel-form #drawer {
   font-weight: 600;
   text-transform: uppercase;
   user-select: none;
+}
+.auth-avatar.has-img img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  border-radius: inherit;
 }
 
 .auth-id {
