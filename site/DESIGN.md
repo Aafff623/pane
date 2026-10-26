@@ -213,22 +213,42 @@ intersects: scrolling back up never replays an entrance.
 
 **Scrub.** `#why-pane`, `#demo` and `#ecosystem` carry `data-scrub`; their copy
 blocks carry `data-scrub-fade`. `public/scroll-scrub.js` writes a unitless
-`--scrub` on the section — 1 while it holds the screen, dipping toward 0 as it
-crosses either boundary over half a viewport — and CSS turns that into
-`opacity: calc(.55 + .45 * var(--scrub, 1))`.
+`--scrub` **on each fade block** — 1 while its section holds the screen, dipping
+toward 0 as it crosses either boundary over half a viewport — and CSS turns that
+into `opacity: calc(.55 + .45 * var(--scrub, 1))`.
 
-Two rules are load-bearing:
+Three rules are load-bearing:
 
-- **No per-frame layout reads.** Document offsets are measured on init, resize,
-  font load, `<details>` toggle and IO entry, then cached. A scroll frame reads
-  `scrollY` and writes a custom property. Reading `getBoundingClientRect()` per
-  frame is what turns a scrub into jank.
+- **No per-frame layout reads.** Document offsets are cached and re-measured
+  only when something can move them: resize, `load`, late web fonts, a
+  `<details>` toggle, and a `ResizeObserver` on each section plus `body`. The
+  observer is not optional — the demo iframe loads lazily and roughly doubles
+  `#demo`'s height after init, which silently invalidated the first cached
+  measurement. A scroll frame reads `scrollY` and writes custom properties.
+- **Write on the element that uses the variable.** An inherited custom property
+  dirties the whole subtree, and `#demo` contains the embedded panel; publishing
+  on the section would recalculate style for all of it on every frame of a
+  boundary crossing.
 - **Opacity only, never transform.** `#why-pane-title` and `#ecosystem-title`
   already carry `.reveal-text`, which owns `transform`; a second transform on
   the same element would fight the reveal. Scrub therefore stays on the
   unoccupied copy blocks.
 
-The scrub obeys the shared pause switch: pausing settles every section at
+There is **no IntersectionObserver gate** on the scrub. An earlier draft only
+painted sections the observer had marked "near"; measured on a loaded machine,
+the observer lagged far enough behind the scroll position that a section already
+on screen still carried its CSS fallback (fully opaque) and then dimmed in one
+jump. Painting every section is cheaper than that bug, because a section away
+from a boundary is saturated at 0 or 1 and the epsilon check writes nothing.
+
+The scrub obeys the shared pause switch: pausing settles every block at
 `--scrub: 1` and stops the loop rather than freezing it mid-dip. Reduced motion
-never starts it, and CSS pins the fade to `1` so the copy is legible with
-script off too (the `var(--scrub, 1)` fallback does the same for no-JS).
+never starts it, and CSS pins the fade to `1` so the copy is legible with script
+off too (the `var(--scrub, 1)` fallback does the same for no-JS).
+
+**Known cost, not ours.** Measured with a receiver-attributed
+`getBoundingClientRect` counter over a 17-step walk of the narrative: the scrub
+made **zero** layout reads, and `line-sidebar.js` made 75 on the same three
+sections. That is the reading-progress rail, which predates this ticket and
+coalesces to one read per scroll event; it is recorded here so the next person
+profiling this page starts in the right file.

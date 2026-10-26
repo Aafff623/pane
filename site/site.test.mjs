@@ -708,6 +708,19 @@ test("motion: the scroll scrub caches offsets and settles at the boundaries", as
   assert.match(scrub, /prefers-reduced-motion/, "reduced motion never starts the loop");
   assert.match(siteScript, /initScrollScrub\(\)/, "site.js wires it up");
 
+  // Both of these were measured failures, not style choices. The demo iframe
+  // loads lazily and roughly doubles #demo's height after init, so a cache that
+  // is only refreshed on resize/font/details drifts. And an IntersectionObserver
+  // gate lagged behind the scroll position on a loaded machine, leaving a
+  // section that was already on screen at its opaque CSS fallback and then
+  // dimming it in one jump.
+  assert.match(scrub, /ResizeObserver/, "a growing section invalidates the cached offsets");
+  assert.match(scrub, /observe\(document\.body\)|document\?\.body/, "content above the sections is watched too");
+  assert.ok(!/new IntersectionObserver/.test(scrub), "no observer gate between the scroll position and the paint");
+  assert.match(scrub, /target\.style\.setProperty/, "the variable is written on the block that uses it");
+  assert.ok(!/section\.style\.setProperty\('--scrub'/.test(scrub),
+    "not on the section — an inherited custom property would dirty the embedded panel's subtree");
+
   for (const id of ["why-pane", "demo", "ecosystem"]) {
     assert.match(html, new RegExp(`<section id="${id}"[^>]*data-scrub`), `${id} is a scrub boundary`);
   }

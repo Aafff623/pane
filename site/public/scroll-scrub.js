@@ -1,21 +1,37 @@
 // Scroll-scrub for the three narrative boundaries (#87): why-pane → demo →
-// ecosystem. Each section carries a `--scrub` number that dips toward 0 as it
-// crosses into or out of the viewport and rests at 1 while it holds the screen,
-// so the copy hands over to the next section instead of both being fully lit.
+// ecosystem. Each section's copy blocks carry a `--scrub` number that dips
+// toward 0 as the section crosses into or out of the viewport and rests at 1
+// while it holds the screen, so the copy hands over to the next section instead
+// of both being fully lit at once.
 //
-// Two rules shape the implementation:
-//   * No per-frame layout reads. Document offsets are measured once and cached;
-//     a scroll frame only reads `scrollY` and writes a custom property. Asking
-//     the browser for a section's box on every frame is what turns a scrub into
-//     jank, because the read forces the previous frame's write to lay out.
-//   * The shared switch is authoritative. Pausing motion settles every section
-//     at 1 and stops the loop rather than freezing it mid-dip, and reduced
-//     motion never starts it at all.
+// Three rules shape the implementation:
+//   * No per-frame layout reads. Document offsets are cached and re-measured
+//     only when something can actually move them — resize, late web fonts, a
+//     `<details>` opening, or an observed box changing size. A scroll frame
+//     reads `scrollY` and writes custom properties. Asking the browser for a
+//     box every frame is what turns a scrub into jank, because the read forces
+//     the previous frame's write to lay out.
+//   * Write on the element that uses the variable, not on the section. An
+//     inherited custom property dirties the whole subtree, and `#demo` contains
+//     the embedded panel — publishing there would recalculate style for all of
+//     it on every frame of a boundary crossing.
+//   * The shared switch is authoritative. Pausing settles every block at 1 and
+//     stops the loop rather than freezing it mid-dip, and reduced motion never
+//     starts it at all.
+//
+// There is deliberately no IntersectionObserver gate here. An earlier draft only
+// painted sections the observer had marked "near", and on a loaded machine the
+// observer lagged far enough behind the scroll position that a section already
+// on screen still carried its CSS fallback (fully opaque) and then dimmed in one
+// jump. Painting every section costs less than that bug: a section away from a
+// boundary is saturated at 0 or 1, so the epsilon check writes nothing.
 
 import { paneMotion } from '/motion.js?v=2';
 import { subscribe as subscribeTicker } from '/ticker.js?v=1';
 import { scrubValue } from './scrub-curve.js?v=1';
 
+// Below this change nothing is written. Three decimals is already finer than an
+// 8-bit opacity channel can express.
 const EPSILON = 0.002;
 
 // `offsetTop` is relative to the offset parent, so walk the chain to get a
@@ -27,19 +43,37 @@ function documentOffset(node) {
 }
 
 export function initScrollScrub() {
-  const sections = [...globalThis.document?.querySelectorAll('[data-scrub]') ?? []];
-  if (!sections.length) return null;
+  const document = globalThis.document;
+  const sections = [...(document?.querySelectorAll('[data-scrub]') ?? [])];
+  const entries = sections
+    .map((section) => ({
+      section,
+      targets: [...section.querySelectorAll('[data-scrub-fade]')],
+      top: 0,
+      height: 0,
+      last: Number.NaN,
+    }))
+    .filter((entry) => entry.targets.length);
+  if (!entries.length) return null;
+
   const reduce = globalThis.matchMedia?.('(prefers-reduced-motion: reduce)');
-  const entries = sections.map((section) => ({ section, top: 0, height: 0, near: false, last: -1 }));
+  const still = () => paneMotion.paused || Boolean(reduce?.matches);
 
   let unsubscribe = null;
   let dirty = false;
-  let observer = null;
+  let resizer = null;
 
+  function write(entry, value) {
+    const text = value.toFixed(3);
+    for (const target of entry.targets) target.style.setProperty('--scrub', text);
+  }
+
+  /// Park every block at its settled state. Used for reduced motion and for the
+  /// shared pause switch, where freezing mid-dip would leave the page dimmed.
   function settle() {
     for (const entry of entries) {
       entry.last = 1;
-      entry.section.style.setProperty('--scrub', '1');
+      write(entry, 1);
     }
   }
 
@@ -47,22 +81,23 @@ export function initScrollScrub() {
     const y = globalThis.scrollY ?? 0;
     const viewport = globalThis.innerHeight ?? 0;
     for (const entry of entries) {
-      if (!entry.near) continue;
       const next = scrubValue(y, viewport, entry.top, entry.height);
       if (Math.abs(next - entry.last) < EPSILON) continue;
       entry.last = next;
-      entry.section.style.setProperty('--scrub', next.toFixed(3));
+      write(entry, next);
     }
   }
 
   function frame() {
+    // One idle frame after the last scroll event the loop drops itself, so a
+    // visitor who stops reading costs nothing until they move again.
     if (!dirty) { sleep(); return; }
     dirty = false;
     paint();
   }
 
   function wake() {
-    if (paneMotion.paused || reduce?.matches) return;
+    if (still()) return;
     dirty = true;
     if (!unsubscribe) unsubscribe = subscribeTicker(frame);
   }
@@ -73,56 +108,45 @@ export function initScrollScrub() {
     off?.();
   }
 
-  // Re-measure whenever anything can move the sections: the viewport, the web
-  // fonts, the demo iframe booting, or a `<details>` inside a scrubbed section
-  // opening. Measuring is the only place a layout read is allowed.
+  // Measuring is the only place a layout read is allowed.
   function measure() {
     for (const entry of entries) {
       entry.top = documentOffset(entry.section);
       entry.height = entry.section.offsetHeight;
-      entry.last = -1;
+      entry.last = Number.NaN;
     }
-    if (paneMotion.paused || reduce?.matches) settle();
+    if (still()) settle();
     else paint();
   }
 
   function refresh() {
     measure();
-    if (entries.some((entry) => entry.near)) wake();
+    wake();
   }
 
-  if (globalThis.IntersectionObserver) {
-    observer = new IntersectionObserver((records) => {
-      for (const record of records) {
-        const entry = entries.find((candidate) => candidate.section === record.target);
-        if (!entry || entry.near === record.isIntersecting) continue;
-        entry.near = record.isIntersecting;
-        // A section arriving on screen may not have been measured since the
-        // last layout change, so re-measure it before the first painted frame.
-        if (entry.near) {
-          entry.top = documentOffset(entry.section);
-          entry.height = entry.section.offsetHeight;
-          entry.last = -1;
-        }
-      }
-      if (entries.some((candidate) => candidate.near)) wake();
-      else sleep();
-    }, { rootMargin: '30% 0px' });
-    for (const entry of entries) observer.observe(entry.section);
-  } else {
-    for (const entry of entries) entry.near = true;
+  // The page keeps growing after init: the demo iframe loads lazily and roughly
+  // doubles `#demo`'s height when it arrives, web fonts land late, and the
+  // ecosystem roadmap is a `<details>` the visitor can open. Any of those
+  // silently invalidates a cached offset, so watch the boxes rather than guess
+  // which events matter. ResizeObserver already delivers at most once per frame.
+  if (globalThis.ResizeObserver) {
+    resizer = new ResizeObserver(() => { if (!still()) measure(); });
+    for (const entry of entries) resizer.observe(entry.section);
+    if (document?.body) resizer.observe(document.body);
   }
 
   globalThis.addEventListener?.('scroll', wake, { passive: true });
   globalThis.addEventListener?.('resize', refresh);
-  globalThis.addEventListener?.('pagehide', () => { sleep(); observer?.disconnect(); }, { once: true });
-  globalThis.document?.addEventListener('visibilitychange', () => (globalThis.document.hidden ? sleep() : refresh()));
+  globalThis.addEventListener?.('load', measure);
+  globalThis.addEventListener?.('pagehide', () => { sleep(); resizer?.disconnect(); }, { once: true });
+  document?.addEventListener('visibilitychange', () => (document.hidden ? sleep() : refresh()));
   reduce?.addEventListener?.('change', refresh);
   paneMotion.subscribe(refresh);
-  globalThis.document?.fonts?.ready?.then(refresh);
-  for (const section of sections) {
-    for (const details of section.querySelectorAll('details')) details.addEventListener('toggle', refresh);
+  document?.fonts?.ready?.then(measure);
+  for (const entry of entries) {
+    for (const details of entry.section.querySelectorAll('details')) details.addEventListener('toggle', measure);
   }
 
+  measure();
   return { measure, settle, paint, entries };
 }
