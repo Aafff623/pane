@@ -438,12 +438,18 @@ mod tests {
     const WEEK_MS: i64 = 7 * 86_400_000;
 
     /// A pay-as-you-go-only key used to land on "unexpected quota response
-    /// shape": a red card claiming a working account was broken.
+    /// shape": a red card claiming a working account was broken. The balance
+    /// fallback stays unimplemented until an official endpoint is confirmed
+    /// (待确认) — the hint text below is the agreed wording and must not drift.
     #[test]
     fn key_without_a_coding_plan_reports_setup_not_a_broken_reading() {
         let snap = no_plan_setup(2, 2).expect("every endpoint empty reads as needs_setup");
         assert_eq!(snap.status, "needs_setup");
         assert_eq!(snap.id, ID);
+        assert_eq!(
+            snap.error.as_deref(),
+            Some("This key has no Coding Plan. Pay-as-you-go balance has no confirmed endpoint (待确认).")
+        );
         assert!(no_plan_setup(2, 1).is_none(), "a mixed answer is not an absent plan");
         assert!(no_plan_setup(0, 0).is_none(), "no endpoints cannot prove absence");
     }
