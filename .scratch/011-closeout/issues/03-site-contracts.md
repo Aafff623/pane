@@ -1,4 +1,4 @@
-Status: pending
+Status: claimed (implementer subagent, worktree)
 Type: task
 Blocked by: 01
 
