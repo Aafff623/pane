@@ -1,4 +1,4 @@
-Status: pending
+Status: done (2026-10-26) — no grounded counterfactual model; see `.scratch/011-closeout/59-spike.md`.
 Type: research
 Blocked by: 01
 

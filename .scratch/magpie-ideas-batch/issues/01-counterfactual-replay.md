@@ -1,4 +1,4 @@
-Status: blocked (2026-10-26) — data audit: no grounded compression-size model in current logs; did not ship a fabricated savings estimate.
+Status: done (2026-10-26) — data audit conclusively found no grounded counterfactual model; 01 is not shipping. Evidence: `.scratch/011-closeout/59-spike.md`. 02/03 stay shipped.
 Type: task
 Blocked by: —
 
