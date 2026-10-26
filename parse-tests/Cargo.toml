@@ -57,7 +57,7 @@ rusqlite = { version = "0.32", features = ["bundled", "backup"] }
 zstd = "0.13"
 toml = "0.8"
 regex = "1"
-prost = "0.13"
+prost = "0.14"
 tiny_http = "0.12" # mock relay servers in the One/New API tests
 
 [target.'cfg(windows)'.dependencies]
