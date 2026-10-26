@@ -13,6 +13,8 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { createHash } from "node:crypto";
+import { execFileSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
 import worker from "./worker.js";
 import { LANGS } from "./i18n.js";
 
@@ -465,4 +467,128 @@ test("basic contracts: security headers, 404 fallback, robots/sitemap/OG/skip-li
   const missing = await worker.fetch(new Request("https://pane.threetwoa.live/nope"), env("nf", 404));
   assert.equal(missing.status, 404);
   assert.match(await missing.text(), /这个页面不存在/);
+});
+
+// #79 — the two numbers marketing copy must not hand-maintain. The sync script
+// is the single writer; --check is the CI gate, and the chain
+// Rust catalog → frontend mirror (+ whitelist) → site copy is asserted here so
+// a new spend-only card cannot silently desync the website.
+test("copy: version and provider count come from one generated source", async () => {
+  const script = fileURLToPath(new URL("./scripts/sync-site-version.mjs", import.meta.url));
+  let stderr = "";
+  try {
+    execFileSync(process.execPath, [script, "--check"], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
+  } catch (error) {
+    stderr = String(error.stderr || error.message);
+  }
+  assert.equal(stderr, "", `site version/count drift — run: node site/scripts/sync-site-version.mjs\n${stderr}`);
+
+  const meta = JSON.parse(await readFile(new URL("./public/site-meta.json", import.meta.url), "utf8"));
+  const pkg = JSON.parse(await readFile(new URL("../package.json", import.meta.url), "utf8"));
+  const mirror = await readFile(new URL("../src/providerCatalog.ts", import.meta.url), "utf8");
+  const catalog = await readFile(new URL("../src-tauri/src/provider_catalog.rs", import.meta.url), "utf8");
+  const consistency = await readFile(new URL("../parse-tests/src/catalog_consistency.rs", import.meta.url), "utf8");
+
+  assert.equal(meta.version, pkg.version, "meta version tracks package.json");
+  const mirrorCount = [...mirror.matchAll(/familyId:\s*"[^"]+"/g)].length;
+  assert.equal(meta.providerCount, mirrorCount, "meta count tracks the frontend mirror");
+  const rsStart = catalog.indexOf("const PROVIDER_DEFINITIONS");
+  const rustCount = [...catalog.slice(rsStart, catalog.indexOf("\n];", rsStart)).matchAll(/^\s*family_id:\s*"/gm)].length;
+  const whitelist = [...consistency.match(/TS_ONLY_WHITELIST[^=]*=\s*&\[([^\]]*)\]/)[1].matchAll(/"([^"]+)"/g)].map((m) => m[1]);
+  assert.deepEqual(meta.spendOnlyFamilies, whitelist, "meta whitelist mirrors catalog_consistency");
+  assert.equal(meta.providerCount, rustCount + whitelist.length, "mirror = Rust quota families + spend-only whitelist");
+  assert.ok(html.includes(`桌面伴侣 · v${meta.version}`), "hero meta shows the generated version");
+  assert.match(html, new RegExp(`<b[^>]*>${meta.providerCount}</b><span>服务商</span>`), "hero stat shows the generated count");
+});
+
+// #79 — "free" used to ride inside the platform sentence, where a visitor
+// scanning for pricing could miss it. It is now its own three-row spec block,
+// and the MIT license is one click from both the download line and the footer.
+test("download: the free facts are their own spec row and the license is linked", async () => {
+  assert.match(html, /class="free-spec" data-free-spec/, "free-spec row exists");
+  const freeBlock = html.slice(html.indexOf('class="free-spec"'), html.indexOf("</ul>", html.indexOf('class="free-spec"')));
+  assert.equal((freeBlock.match(/<li>/g) || []).length, 3, "three free facts");
+  for (const fact of ["全功能免费", "无 Pro / 无订阅", "无需注册账号"]) {
+    assert.ok(freeBlock.includes(fact), `free fact present: ${fact}`);
+  }
+  assert.ok(!/全功能免费 · 无 Pro/.test(html), "the facts are no longer buried in the platform sentence");
+  assert.match(html, /blob\/main\/LICENSE/, "download line links the license");
+
+  for (const page of ["index.html", "privacy.html", "terms.html"]) {
+    const body = await readFile(new URL(`./public/${page}`, import.meta.url), "utf8");
+    const footer = body.slice(body.indexOf("<footer"));
+    assert.match(footer, /blob\/main\/LICENSE/, `${page} footer links the license`);
+  }
+
+  for (const key of ["freeSpec1Title", "freeSpec1Copy", "freeSpec2Title", "freeSpec2Copy", "freeSpec3Title", "freeSpec3Copy", "footerPrivacy", "footerTerms", "footerLicense", "cnMirror"]) {
+    assert.ok(key in LANGS.en.dict, `English copy for ${key}`);
+  }
+  assert.match(siteScript, /\.free-spec b/, "free-spec titles are translated");
+  assert.match(siteScript, /'footerPrivacy','footerTerms','footerLicense'/, "footer links are translated");
+});
+
+// #82 — one canonical markup per language, and the English legal routes must
+// actually serve English (not the Chinese file with a rewritten <html lang>).
+test("legal: English privacy/terms routes serve English summaries", async () => {
+  const asset = async (pathname) => {
+    const files = {
+      "/en/privacy.html": await readFile(new URL("./public/en/privacy.html", import.meta.url), "utf8"),
+      "/en/terms.html": await readFile(new URL("./public/en/terms.html", import.meta.url), "utf8"),
+      "/privacy.html": await readFile(new URL("./public/privacy.html", import.meta.url), "utf8"),
+      "/terms.html": await readFile(new URL("./public/terms.html", import.meta.url), "utf8"),
+    };
+    const body = files[pathname];
+    return body === undefined
+      ? new Response("nope", { status: 404 })
+      : new Response(body, { status: 200, headers: { "content-type": "text/html" } });
+  };
+  const env = { ASSETS: { fetch: async (r) => asset(new URL(r.url).pathname) } };
+
+  for (const path of ["/en/privacy", "/en/terms"]) {
+    const res = await worker.fetch(new Request(`https://pane.threetwoa.live${path}`), env);
+    assert.equal(res.status, 200, `${path} serves`);
+    assert.equal(res.headers.get("content-language"), "en", `${path} declares English`);
+    const body = await res.text();
+    assert.match(body, /<html lang="en"/, `${path} is an English document`);
+    assert.match(body, /blob\/main\/LICENSE/, `${path} links the license`);
+    assert.ok(!/隐私说明|条款与许可/.test(body), `${path} carries no untranslated heading`);
+  }
+  // Trailing slash is the same page.
+  const slash = await worker.fetch(new Request("https://pane.threetwoa.live/en/privacy/"), env);
+  assert.equal(slash.status, 200, "trailing slash tolerated");
+  // A missing English legal page falls through to the 404 document.
+  const gone = await worker.fetch(new Request("https://pane.threetwoa.live/en/nope"), env);
+  assert.equal(gone.status, 404);
+
+  // The outbound-request lists must agree between languages and with the
+  // authoritative doc: every endpoint named in docs/privacy.md's table that a
+  // visitor can act on appears on both legal pages.
+  const doc = await readFile(new URL("../docs/privacy.md", import.meta.url), "utf8");
+  const zh = await readFile(new URL("./public/privacy.html", import.meta.url), "utf8");
+  const en = await readFile(new URL("./public/en/privacy.html", import.meta.url), "utf8");
+  assert.match(doc, /status\.claude\.com/, "doc lists the status probe");
+  assert.match(zh, /status\.claude\.com/, "Chinese page lists the status probe");
+  assert.match(en, /status\.claude\.com/, "English page lists the status probe");
+  for (const page of [zh, en]) {
+    assert.ok(!/posthog|遥测默认开启|telemetry can be turned off/i.test(page), "no stale telemetry claim");
+    assert.match(page, /PaneAafff623/, "current data directory");
+  }
+
+  // Root PRIVACY.md is a pointer, not a second authority.
+  const rootPrivacy = await readFile(new URL("../PRIVACY.md", import.meta.url), "utf8");
+  assert.match(rootPrivacy, /docs\/privacy\.md/, "root PRIVACY.md points at the authority");
+  assert.match(rootPrivacy, /authoritative|wins/i, "root PRIVACY.md states which file wins");
+});
+
+// #82 — an English visit must not land on the Chinese legal pages: the static
+// links are rewritten at runtime and the injected boundary-card link already
+// carries the English route.
+test("legal: English visits get English legal links", () => {
+  assert.match(siteScript, /function localizeLegalLinks\(\)/, "runtime rewrite exists");
+  assert.match(siteScript, /'\/privacy\.html','\/en\/privacy'/, "privacy link is rewritten");
+  assert.match(siteScript, /'\/terms\.html','\/en\/terms'/, "terms link is rewritten");
+  assert.ok(siteScript.indexOf("localizeLegalLinks();") > siteScript.indexOf("applyEnglishCopy();"),
+    "rewrite runs after English copy is injected");
+  assert.match(LANGS.en.dict.boundary3Copy, /href="\/en\/privacy"/, "injected boundary link is English");
+  assert.ok(!/href="\/privacy\.html"/.test(LANGS.en.dict.boundary3Copy), "no Chinese route in English copy");
 });

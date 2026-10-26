@@ -12,7 +12,7 @@
 //! reports a structure we do not recognize honestly. The real response is
 //! calibrated on the first owner login; see ticket 03.
 
-use super::{error_chain, http, Metric, Snapshot};
+use super::{error_chain, http, response_shape, Metric, Snapshot};
 use crate::login_accounts::LoginAccount;
 use crate::usage_units::UsageUnit;
 use serde_json::Value;
@@ -28,6 +28,19 @@ const QUOTA_PATH: &str =
 const USAGE_PATH: &str = "/api/v1/gpt-finetune/api-services/usage";
 const LOGIN_WINDOW: &str = "xfyun-login";
 const LOGIN_TIMEOUT: Duration = Duration::from_secs(600);
+
+/// Quota-semantic keys recorded verbatim when `PANE_CONSOLE_PROBE=1` (#38
+/// calibration). Identity keys (`uid`, `name`, `mobile`) are deliberately
+/// absent, so the shape log cannot carry PII.
+const PROBE_ALLOW: &[&str] = &[
+    "code", "flag", "status", "quotaStatus", "state", "channel", "unit", "unitType", "total",
+    "used", "left", "trial", "remaining", "surplus", "totalQuota", "expiresAt", "expireTime",
+    "beginTime", "endTime", "claim",
+];
+
+fn probe_log_path() -> std::path::PathBuf {
+    super::config_dir().join("xfyun_probe_log.json")
+}
 const LOGIN_POLL: Duration = Duration::from_secs(2);
 const MAX_BODY_BYTES: usize = 256 * 1024;
 
@@ -241,8 +254,7 @@ async fn fetch_usage_7d(cookie: &str) -> Option<(f64, usize)> {
     Some((total, count))
 }
 
-async fn call_console(path: &str, cookie: &str) -> Result<Value, CallErr> {
-    let resp = http()
+async fn call_console(path: &str, cookie: &str) -> Result<Value, CallErr> {    let resp = http()
         .get(format!("{SITE_ORIGIN}{path}"))
         .header("Cookie", cookie)
         .header("Referer", format!("{SITE_ORIGIN}/"))
@@ -269,6 +281,22 @@ async fn call_console(path: &str, cookie: &str) -> Result<Value, CallErr> {
     }
     let doc: Value = serde_json::from_slice(&bytes)
         .map_err(|e| CallErr::Other(format!("response parse: {e}")))?;
+    // Calibration capture (#38): opt-in, local, shape-only. Recording the
+    // 4001 branch matters because "cookie-only is not enough" is one of the
+    // open questions this log exists to answer.
+    if response_shape::enabled() {
+        let rejected = doc.get("code").and_then(Value::as_i64) == Some(4001);
+        response_shape::note(
+            &probe_log_path(),
+            serde_json::json!({
+                "at": chrono::Utc::now().timestamp_millis(),
+                "path": path,
+                "status": status,
+                "outcome": if rejected { "auth4001" } else { "ok" },
+                "shape": response_shape::skeleton(&doc, PROBE_ALLOW, 0),
+            }),
+        );
+    }
     if doc.get("code").and_then(Value::as_i64) == Some(4001) {
         return Err(CallErr::Auth);
     }

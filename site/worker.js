@@ -253,6 +253,18 @@ async function handle(req, env) {
       headers.set("access-control-max-age", "86400");
       return new Response(res.body, { status: res.status, statusText: res.statusText, headers });
     }
+    // English legal pages: the Chinese files stay canonical, and the English
+    // route serves a static translation with the same facts (no new promises).
+    const legalEn = url.pathname.replace(/\/$/, "");
+    if (legalEn === "/en/privacy" || legalEn === "/en/terms") {
+      const assetUrl = new URL(url);
+      assetUrl.pathname = `${legalEn}.html`;
+      const res = await env.ASSETS.fetch(new Request(assetUrl, req));
+      if (res.status === 404) return notFound(env, req);
+      const headers = new Headers(res.headers);
+      headers.set("content-language", "en");
+      return new Response(res.body, { status: res.status, statusText: res.statusText, headers });
+    }
     // Keep one canonical markup source. The English route is selected by the
     // host page script, while the asset request itself still resolves to the
     // same index document.

@@ -48,6 +48,7 @@ pub mod qoder;
 pub mod qodercn;
 pub mod qwen;
 pub mod relaybalance;
+pub mod response_shape;
 pub mod searchquota;
 pub mod sensenova;
 pub mod shandianshuo;
