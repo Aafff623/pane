@@ -43,6 +43,30 @@ pub mod pricing_timeline;
 #[path = "../../src-tauri/src/refresh_gate.rs"]
 pub mod refresh_gate;
 
+#[path = "../../src-tauri/src/adaptive_interval.rs"]
+pub mod adaptive_interval;
+
+#[path = "../../src-tauri/src/account_token_lock.rs"]
+pub mod account_token_lock;
+
+#[path = "../../src-tauri/src/fetch_strategy.rs"]
+pub mod fetch_strategy;
+
+#[path = "../../src-tauri/src/identity_guard.rs"]
+pub mod identity_guard;
+
+#[path = "../../src-tauri/src/meter_samples.rs"]
+pub mod meter_samples;
+
+#[path = "../../src-tauri/src/limits.rs"]
+pub mod limits;
+
+#[path = "../../src-tauri/src/skill_usage.rs"]
+pub mod skill_usage;
+
+#[path = "../../src-tauri/src/wsl.rs"]
+pub mod wsl;
+
 #[path = "../../src-tauri/src/spend.rs"]
 pub mod spend;
 

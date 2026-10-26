@@ -1,4 +1,4 @@
-Status: ready
+Status: done (2026-10-26)
 Type: task
 Blocked by: 01, 02
 

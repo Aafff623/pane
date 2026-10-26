@@ -18,7 +18,7 @@ function refreshWindow(invoke) {
   const state = {
     document: { hidden: true, querySelector: () => ({ textContent: '' }) },
     config: { layout: null, disabled: [], removedProviders: [] },
-    lastFetch: 0, STALE_MS: 0,
+    lastFetch: 0, STALE_MS: 0, topologyOpen: false,
     lastSnapshots: [], recentlyKeyed: new Map(), firstRunPickerPending: false,
     lastLayoutSnapshot: null, configSaveError: null, customizeOpen: false,
     boardLoadPhase: 'ready',

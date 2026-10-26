@@ -106,7 +106,11 @@ async fn fetch_with_login(
         return Err("token was rejected — sign in again from the auth center".into());
     }
     if !resp.status().is_success() {
-        return Err(format!("GetUsageLimits: HTTP {}", resp.status()));
+        return Err(format!(
+            "GetUsageLimits: HTTP {}{}",
+            resp.status(),
+            super::retry_hint(&resp)
+        ));
     }
     let doc: Value = resp.json().await.map_err(|e| format!("GetUsageLimits parse: {e}"))?;
     parse_usage(&doc).map(|mut s| {
@@ -241,7 +245,11 @@ async fn fetch() -> Result<Snapshot, String> {
         return Err("token was rejected — run `kiro-cli login` again".into());
     }
     if !resp.status().is_success() {
-        return Err(format!("GetUsageLimits: HTTP {}", resp.status()));
+        return Err(format!(
+            "GetUsageLimits: HTTP {}{}",
+            resp.status(),
+            super::retry_hint(&resp)
+        ));
     }
     let doc: Value = resp.json().await.map_err(|e| format!("GetUsageLimits parse: {e}"))?;
     parse_usage(&doc)

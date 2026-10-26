@@ -213,7 +213,11 @@ async fn fetch_official(key: &str) -> Result<Vec<Metric>, String> {
         .await
         .map_err(|e| format!("usage request: {e}"))?;
     if !resp.status().is_success() {
-        return Err(format!("usage endpoint: HTTP {}", resp.status()));
+        return Err(format!(
+            "usage endpoint: HTTP {}{}",
+            resp.status(),
+            super::retry_hint(&resp)
+        ));
     }
     let doc: Value = resp.json().await.map_err(|e| format!("usage parse: {e}"))?;
     parse_official(&doc).ok_or_else(|| "no recognizable usage windows in response".into())

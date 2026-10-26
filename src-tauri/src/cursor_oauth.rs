@@ -105,6 +105,27 @@ fn generate_uuid() -> String {
 /// Starts a Cursor login: builds the PKCE challenge URL and registers the
 /// pending state for the poll phase.
 pub fn start_login() -> Result<CursorOAuthStart, String> {
+    // One flow at a time: reopening the dialog must return the existing URL
+    // instead of replacing the verifier the in-flight poll still needs.
+    if let Some(existing) = pending()
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .as_ref()
+        .filter(|state| state.expires_at > now_secs())
+    {
+        let verification_uri = format!(
+            "{}?challenge={}&uuid={}&mode=login",
+            CURSOR_LOGIN_URL,
+            generate_code_challenge(&existing.code_verifier),
+            existing.uuid
+        );
+        return Ok(CursorOAuthStart {
+            login_id: existing.login_id.clone(),
+            verification_uri,
+            expires_in: (existing.expires_at - now_secs()).max(1) as u64,
+            interval_seconds: OAUTH_POLL_INTERVAL_SECS,
+        });
+    }
     let code_verifier = generate_code_verifier();
     let code_challenge = generate_code_challenge(&code_verifier);
     let login_uuid = generate_uuid();
@@ -183,10 +204,10 @@ pub async fn poll_login(login_id: &str) -> CursorOAuthPoll {
         "{}?uuid={}&verifier={}",
         CURSOR_POLL_ENDPOINT, uuid, code_verifier
     );
-    let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(15))
-        .build()
-        .unwrap_or_else(|_| crate::providers::http());
+    // Follow the same config/system/env proxy chain as every provider fetch;
+    // the poll target is a public endpoint, and a bare builder silently
+    // ignored the user's proxy (the 2026-10-09 system-proxy work).
+    let client = crate::providers::http();
 
     let resp = match client
         .get(&poll_url)

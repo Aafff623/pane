@@ -112,6 +112,34 @@ pub fn screen_is_being_shared() -> bool {
     false
 }
 
+/// OS-level capture exclusion for a Pane window (#75). WDA_EXCLUDEFROMCAPTURE
+/// hides the window from OBS/Teams window capture even when QUNS does not
+/// report a share; old Win10 builds without the API fail silently.
+pub fn set_capture_excluded(window: &tauri::WebviewWindow, exclude: bool) {
+    #[cfg(not(feature = "harness"))]
+    {
+        use windows::Win32::Foundation::HWND;
+        use windows::Win32::UI::WindowsAndMessaging::{
+            SetWindowDisplayAffinity, WINDOW_DISPLAY_AFFINITY,
+        };
+        let Ok(hwnd) = window.hwnd() else { return };
+        let hwnd = HWND(hwnd.0 as *mut core::ffi::c_void);
+        let affinity = if exclude {
+            // WDA_EXCLUDEFROMCAPTURE
+            WINDOW_DISPLAY_AFFINITY(0x0000_0011)
+        } else {
+            WINDOW_DISPLAY_AFFINITY(0)
+        };
+        unsafe {
+            let _ = SetWindowDisplayAffinity(hwnd, affinity);
+        }
+    }
+    #[cfg(feature = "harness")]
+    {
+        let _ = (window, exclude);
+    }
+}
+
 pub fn list_processes(name_prefixes: &[&str]) -> Vec<ProcessInfo> {
     // The prefixes are compiled-in constants, but they land inside a
     // PowerShell regex literal — keep anything that could close the quote

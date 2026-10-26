@@ -103,7 +103,11 @@ async fn fetch_with_key(key: &str) -> Result<Snapshot, String> {
         );
     }
     if !resp.status().is_success() {
-        return Err(format!("billing endpoint: HTTP {}", resp.status()));
+        return Err(format!(
+            "billing endpoint: HTTP {}{}",
+            resp.status(),
+            super::retry_hint(&resp)
+        ));
     }
     let doc: Value = resp
         .json()

@@ -45,6 +45,16 @@ export const TOOLS = [
   },
 ];
 
+// Every tool is a read-only GET; the protocol's annotations let a client
+// skip approval prompts without guessing from descriptions.
+export const READONLY_ANNOTATIONS = Object.freeze({
+  readOnlyHint: true,
+  destructiveHint: false,
+  idempotentHint: true,
+  openWorldHint: false,
+});
+for (const tool of TOOLS) tool.annotations = READONLY_ANNOTATIONS;
+
 const MAX_BODY_BYTES = 2 * 1024 * 1024;
 const DEFAULT_BASE = "http://127.0.0.1:6736";
 

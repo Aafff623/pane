@@ -36,6 +36,67 @@ test("i18n: en/zh/ru carry identical key sets", () => {
   assert.deepEqual([...ru].filter((k) => !en.has(k)), [], "keys in ru missing from en");
 });
 
+function dictEntries(name) {
+  const start = src.indexOf(`const ${name}: Dict`);
+  assert.ok(start >= 0, `dictionary ${name} not found`);
+  const bounds = ["en", "zh", "ru"]
+    .filter((n) => n !== name)
+    .map((n) => src.indexOf(`const ${n}:`, start + 10))
+    .concat([src.indexOf("const METRIC_KEYS")])
+    .filter((i) => i > start);
+  const block = src.slice(start, bounds.length ? Math.min(...bounds) : src.length);
+  return new Map(
+    [...block.matchAll(/"([^"]+)":\s*"((?:[^"\\]|\\.)*)"/gs)].map((m) => [
+      m[1],
+      m[2].replace(/\\"/g, '"').replace(/\\n/g, "\n"),
+    ]),
+  );
+}
+
+function placeholders(value) {
+  // Only t()'s named placeholders count; literal JSON examples in help text
+  // (e.g. `{ "accounts": [...] }`) are not substitution variables.
+  return [...value.matchAll(/\{([A-Za-z][A-Za-z0-9_]*)\}/g)]
+    .map((m) => m[1])
+    .sort()
+    .join("\0");
+}
+
+test("i18n: interpolation variables match per key across all three dictionaries", () => {
+  const en = dictEntries("en");
+  for (const name of ["zh", "ru"]) {
+    const other = dictEntries(name);
+    for (const [key, value] of en) {
+      if (!other.has(key)) continue;
+      assert.equal(
+        placeholders(other.get(key)),
+        placeholders(value),
+        `${name} placeholders drift for ${key}`,
+      );
+    }
+  }
+});
+
+test("i18n: product brand words survive zh/ru translations", () => {
+  // Pane itself is often implicit in Chinese/Russian sentences; vendor and
+  // product names must survive verbatim.
+  const brands = ["Codex", "Claude", "Copilot", "Cursor", "GLM", "ZCode"];
+  const en = dictEntries("en");
+  for (const name of ["zh", "ru"]) {
+    const other = dictEntries(name);
+    for (const [key, value] of en) {
+      if (!other.has(key)) continue;
+      const expected = brands.filter((brand) => value.includes(brand));
+      for (const brand of expected) {
+        assert.ok(
+          other.get(key).includes(brand),
+          `${name} drops brand ${brand} in ${key}`,
+        );
+      }
+    }
+  }
+});
+
 test("i18n: every METRIC_KEYS target exists in all three dictionaries", () => {
   const start = src.indexOf("const METRIC_KEYS");
   const end = src.indexOf("\n};", start);

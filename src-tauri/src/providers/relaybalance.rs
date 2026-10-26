@@ -176,7 +176,11 @@ async fn fetch_with_key(
             ));
         }
         if !sub_resp.status().is_success() {
-            last_error = format!("subscription endpoint: HTTP {}", sub_resp.status());
+            last_error = format!(
+            "subscription endpoint: HTTP {}{}",
+            sub_resp.status(),
+            super::retry_hint(&sub_resp)
+        );
             continue;
         }
         let sub = super::json_body(sub_resp, MAX_BODY_BYTES, "subscription").await?;
@@ -227,12 +231,21 @@ fn billing_metrics(sub: &Value, usage: Option<&Value>) -> Option<Vec<Metric>> {
     match used {
         Some(used) => {
             let pct = (used / limit * 100.0).clamp(0.0, 100.0);
-            metrics.push(Metric::progress(
-                "Usage",
-                pct,
-                Some(format!("${used:.2} of ${limit:.2}")),
-            ));
-            metrics.push(Metric::text("Balance", format!("${:.2}", limit - used)));
+            let mut progress =
+                Metric::progress("Usage", pct, Some(format!("${used:.2} of ${limit:.2}")));
+            progress.quota = Some(crate::usage_units::QuotaReading {
+                unit: "usd".into(),
+                used,
+                limit: Some(limit),
+            });
+            metrics.push(progress);
+            let mut balance = Metric::text("Balance", format!("${:.2}", limit - used));
+            balance.quota = Some(crate::usage_units::QuotaReading {
+                unit: "usd".into(),
+                used: (limit - used).max(0.0),
+                limit: None,
+            });
+            metrics.push(balance);
         }
         None => {
             metrics.push(Metric::text("Limit", format!("${limit:.2}")));

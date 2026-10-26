@@ -74,7 +74,11 @@ async fn rpc(key: &str, method: &str, params: Value) -> Result<Value, String> {
         );
     }
     if !resp.status().is_success() {
-        return Err(format!("{method} endpoint: HTTP {}", resp.status()));
+        return Err(format!(
+            "{method} endpoint: HTTP {}{}",
+            resp.status(),
+            super::retry_hint(&resp)
+        ));
     }
     let doc: Value = super::json_body(resp, MAX_BODY, method).await?;
     if let Some(err) = doc.get("error").filter(|e| !e.is_null()) {

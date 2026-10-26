@@ -260,7 +260,11 @@ async fn refresh_via_oauth(refresh: &str) -> Result<(String, Option<String>), Re
         return Err(RefreshError::Invalid);
     }
     if !resp.status().is_success() {
-        return Err(RefreshError::Transient(format!("HTTP {}", resp.status())));
+        return Err(RefreshError::Transient(format!(
+            "HTTP {}{}",
+            resp.status(),
+            super::retry_hint(&resp)
+        )));
     }
     let doc: Value = resp
         .json()
@@ -430,7 +434,11 @@ async fn exchange_code(code: &str, state: Option<&str>) -> Result<String, String
     .await
     .map_err(|e| format!("token request: {e}"))?;
     if !resp.status().is_success() {
-        return Err(format!("token endpoint: HTTP {}", resp.status()));
+        return Err(format!(
+            "token endpoint: HTTP {}{}",
+            resp.status(),
+            super::retry_hint(&resp)
+        ));
     }
     let doc = json_body(resp, MAX_BODY_BYTES, "SenseNova token").await?;
     let (access, refresh) =
@@ -480,7 +488,11 @@ async fn fetch_pools(token: &str) -> Result<Snapshot, FetchErr> {
         return Err(FetchErr::Auth);
     }
     if !resp.status().is_success() {
-        return Err(FetchErr::Other(format!("SenseNova endpoint: HTTP {}", resp.status())));
+        return Err(FetchErr::Other(format!(
+            "SenseNova endpoint: HTTP {}{}",
+            resp.status(),
+            super::retry_hint(&resp)
+        )));
     }
     let doc = json_body(resp, MAX_BODY_BYTES, "SenseNova")
         .await

@@ -117,7 +117,11 @@ async fn fetch_with_key(key: &str) -> Result<Snapshot, String> {
             }
         };
         if !resp.status().is_success() {
-            last_error = format!("quota endpoint: HTTP {}", resp.status());
+            last_error = format!(
+            "quota endpoint: HTTP {}{}",
+            resp.status(),
+            super::retry_hint(&resp)
+        );
             continue;
         }
         let doc: Value = match resp.json().await {

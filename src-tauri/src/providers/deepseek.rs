@@ -52,7 +52,11 @@ async fn fetch_with_key(key: &str, card_id: &str, card_name: &str) -> Result<Sna
         return Err("key was rejected — paste a fresh key in Settings (gear icon)".into());
     }
     if !resp.status().is_success() {
-        return Err(format!("balance endpoint: HTTP {}", resp.status()));
+        return Err(format!(
+            "balance endpoint: HTTP {}{}",
+            resp.status(),
+            super::retry_hint(&resp)
+        ));
     }
     let doc: Value = resp
         .json()

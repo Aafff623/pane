@@ -166,6 +166,11 @@ pub fn hide_window_border(window: &tauri::WebviewWindow) {
     imp::hide_window_border(window);
 }
 
+/// OS-level screen-capture exclusion (Windows WDA; no-op elsewhere).
+pub fn set_capture_excluded(window: &tauri::WebviewWindow, exclude: bool) {
+    imp::set_capture_excluded(window, exclude);
+}
+
 /// Per-user config / roaming directory (`%APPDATA%` on Windows,
 /// `~/Library/Application Support` on macOS, `~/.config` on Linux).
 pub fn config_home() -> Option<std::path::PathBuf> {
@@ -199,6 +204,15 @@ pub(crate) fn run_hidden(program: &str, args: &[&str]) -> Option<String> {
     hide_window(&mut cmd);
     let out = cmd.output().ok()?;
     Some(String::from_utf8_lossy(&out.stdout).into_owned())
+}
+
+/// Raw stdout for commands that do not speak UTF-8 on the pipe (notably
+/// `wsl.exe -l`, which emits UTF-16LE). Same window suppression contract.
+pub(crate) fn run_hidden_bytes(program: &str, args: &[&str]) -> Option<Vec<u8>> {
+    let mut cmd = std::process::Command::new(program);
+    cmd.args(args);
+    hide_window(&mut cmd);
+    Some(cmd.output().ok()?.stdout)
 }
 
 /// The async twin of [`run_hidden`], for callers inside a tokio task (the

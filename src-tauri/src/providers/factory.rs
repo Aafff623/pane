@@ -55,7 +55,11 @@ async fn fetch_with_key(key: &str) -> Result<Snapshot, String> {
         return Err("key was rejected — paste a fresh Factory API key in Settings (gear icon)".into());
     }
     if !resp.status().is_success() {
-        return Err(format!("billing/limits endpoint: HTTP {}", resp.status()));
+        return Err(format!(
+            "billing/limits endpoint: HTTP {}{}",
+            resp.status(),
+            super::retry_hint(&resp)
+        ));
     }
     let doc: Value = resp.json().await.map_err(|e| format!("billing/limits parse: {e}"))?;
 
@@ -72,7 +76,11 @@ async fn fetch_with_key(key: &str) -> Result<Snapshot, String> {
         .await
         .map_err(|e| format!("subscription/usage request: {e}"))?;
     if !resp.status().is_success() {
-        return Err(format!("subscription/usage endpoint: HTTP {}", resp.status()));
+        return Err(format!(
+            "subscription/usage endpoint: HTTP {}{}",
+            resp.status(),
+            super::retry_hint(&resp)
+        ));
     }
     let doc: Value = resp.json().await.map_err(|e| format!("subscription/usage parse: {e}"))?;
     parse_usage(&doc)

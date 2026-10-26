@@ -165,7 +165,11 @@ async fn fetch() -> Result<Snapshot, String> {
         return Err("Devin credentials were rejected — sign in with the Devin CLI again".into());
     }
     if !resp.status().is_success() {
-        return Err(format!("status endpoint: HTTP {}", resp.status()));
+        return Err(format!(
+            "status endpoint: HTTP {}{}",
+            resp.status(),
+            super::retry_hint(&resp)
+        ));
     }
     let body: Value = resp
         .json()

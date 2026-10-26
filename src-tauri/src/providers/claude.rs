@@ -288,28 +288,31 @@ async fn fetch(dir: &std::path::Path, id: &str, name: &str) -> Result<Snapshot, 
         // can trigger a ~25-minute one); carry it so the fetch guard can
         // bench for exactly that long instead of knocking every 5 minutes.
         if resp.status().as_u16() == 429 {
-            if let Some(secs) = resp
-                .headers()
-                .get("retry-after")
-                .and_then(|v| v.to_str().ok())
-                .and_then(|v| v.parse::<u64>().ok())
-            {
+            if let Some(secs) = crate::providers::retry_after_secs(
+                resp.headers(),
+                chrono::Utc::now().timestamp_millis(),
+            ) {
                 return Err(format!(
                     "usage endpoint: HTTP 429 (retry_after_s={secs})"
                 ));
             }
         }
-        return Err(format!("usage endpoint: HTTP {}", resp.status()));
+        return Err(format!(
+            "usage endpoint: HTTP {}{}",
+            resp.status(),
+            super::retry_hint(&resp)
+        ));
     }
     let usage: Value = resp.json().await.map_err(|e| format!("usage parse: {e}"))?;
 
     const HOUR: i64 = 3_600_000;
     const DAY: i64 = 86_400_000;
+    let now_ms = chrono::Utc::now().timestamp_millis();
     let mut metrics = Vec::new();
-    push_window(&mut metrics, usage.get("five_hour"), "Session", 5 * HOUR);
-    push_window(&mut metrics, usage.get("seven_day"), "Weekly", 7 * DAY);
-    push_window(&mut metrics, usage.get("seven_day_sonnet"), "Sonnet weekly", 7 * DAY);
-    push_window(&mut metrics, usage.get("seven_day_opus"), "Opus weekly", 7 * DAY);
+    push_window(&mut metrics, usage.get("five_hour"), "Session", 5 * HOUR, now_ms);
+    push_window(&mut metrics, usage.get("seven_day"), "Weekly", 7 * DAY, now_ms);
+    push_window(&mut metrics, usage.get("seven_day_sonnet"), "Sonnet weekly", 7 * DAY, now_ms);
+    push_window(&mut metrics, usage.get("seven_day_opus"), "Opus weekly", 7 * DAY, now_ms);
 
     // Newer per-model weeklies (Fable era) live in a `limits` array instead of
     // legacy `seven_day_<model>` keys. Add any we don't already show.
@@ -320,14 +323,16 @@ async fn fetch(dir: &std::path::Path, id: &str, name: &str) -> Result<Snapshot, 
         let Some(name) = entry.pointer("/scope/model/display_name").and_then(Value::as_str) else {
             continue;
         };
-        let Some(percent) = entry.get("percent").and_then(Value::as_f64) else { continue };
         let label = format!("{name} weekly");
         if metrics.iter().any(|m| m.label == label) {
             continue;
         }
+        let percent = entry
+            .get("percent")
+            .and_then(Value::as_f64)
+            .and_then(normalize_utilization);
         let resets_at = parse_reset(entry.get("resets_at"));
-        metrics
-            .push(Metric::progress(&label, percent, None).with_reset(resets_at, Some(7 * DAY)));
+        metrics.push(window_metric(&label, percent, resets_at, 7 * DAY, now_ms));
     }
 
     // Extra Usage: pay-as-you-go overage spend, in cents. Bounded meter when
@@ -374,9 +379,90 @@ fn parse_reset(v: Option<&Value>) -> Option<i64> {
     }
 }
 
-fn push_window(metrics: &mut Vec<Metric>, node: Option<&Value>, label: &str, period_ms: i64) {
+/// Claude's utilization is a 0–100 percent. The (0,1) open interval is the
+/// only legacy fraction shape still accepted (1.0 stays 1%, not 100%);
+/// negative, non-finite and >101 values are leaks, not "100% used".
+pub(crate) fn normalize_utilization(raw: f64) -> Option<f64> {
+    if !raw.is_finite() || raw < 0.0 || raw > 101.0 {
+        return None;
+    }
+    if raw > 0.0 && raw < 1.0 {
+        return Some(raw * 100.0);
+    }
+    Some(raw)
+}
+
+fn window_metric(
+    label: &str,
+    usage: Option<f64>,
+    resets_at: Option<i64>,
+    period_ms: i64,
+    now_ms: i64,
+) -> Metric {
+    match usage {
+        None => Metric::text(label, "Usage unavailable".into()),
+        Some(_) if resets_at.is_some_and(|at| at <= now_ms) => {
+            Metric::text(label, "Window expired — awaiting refresh".into())
+        }
+        Some(used) => Metric::progress(label, used, None).with_reset(resets_at, Some(period_ms)),
+    }
+}
+
+fn push_window(
+    metrics: &mut Vec<Metric>,
+    node: Option<&Value>,
+    label: &str,
+    period_ms: i64,
+    now_ms: i64,
+) {
     let Some(node) = node else { return };
-    let Some(used) = node.get("utilization").and_then(Value::as_f64) else { return };
+    let used = node
+        .get("utilization")
+        .and_then(Value::as_f64)
+        .and_then(normalize_utilization);
     let resets_at = parse_reset(node.get("resets_at"));
-    metrics.push(Metric::progress(label, used, None).with_reset(resets_at, Some(period_ms)));
+    metrics.push(window_metric(label, used, resets_at, period_ms, now_ms));
+}
+
+#[cfg(test)]
+mod window_tests {
+    use super::{normalize_utilization, parse_reset, window_metric};
+    use crate::providers::Metric;
+    use serde_json::json;
+
+    #[test]
+    fn utilization_normalization_rejects_leaks_and_accepts_both_contracts() {
+        assert_eq!(normalize_utilization(0.0), Some(0.0));
+        assert_eq!(normalize_utilization(0.5), Some(50.0));
+        assert_eq!(normalize_utilization(1.0), Some(1.0));
+        assert_eq!(normalize_utilization(42.5), Some(42.5));
+        assert_eq!(normalize_utilization(101.0), Some(101.0));
+        assert_eq!(normalize_utilization(101.5), None);
+        assert_eq!(normalize_utilization(-1.0), None);
+        assert_eq!(normalize_utilization(f64::NAN), None);
+        assert_eq!(normalize_utilization(f64::INFINITY), None);
+    }
+
+    #[test]
+    fn expired_and_invalid_windows_become_text_not_fake_percentages() {
+        let expired = window_metric("Weekly", Some(42.0), Some(1_000), 7, 2_000);
+        assert_eq!(expired.kind, "text");
+        assert_eq!(expired.value.as_deref(), Some("Window expired — awaiting refresh"));
+        let invalid = window_metric("Weekly", None, None, 7, 2_000);
+        assert_eq!(invalid.kind, "text");
+        assert_eq!(invalid.value.as_deref(), Some("Usage unavailable"));
+        let live = window_metric("Weekly", Some(42.0), Some(9_000), 7, 2_000);
+        assert_eq!(live.kind, "progress");
+        assert_eq!(live.used_percent, Some(42.0));
+    }
+
+    #[test]
+    fn parse_reset_accepts_iso_seconds_and_milliseconds() {
+        assert_eq!(parse_reset(Some(&json!("1970-01-01T00:00:02Z"))), Some(2_000));
+        assert_eq!(parse_reset(Some(&json!(2))), Some(2_000));
+        // Values below 1e10 are epoch seconds; a real millisecond timestamp
+        // (>= 1e10) is passed through unchanged.
+        assert_eq!(parse_reset(Some(&json!(42_000_000_000i64))), Some(42_000_000_000));
+        assert_eq!(parse_reset(None), None);
+    }
 }

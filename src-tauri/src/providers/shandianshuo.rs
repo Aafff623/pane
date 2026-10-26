@@ -71,7 +71,11 @@ async fn fetch(token: &str) -> Result<Snapshot, String> {
         return Err("闪电说登录已过期，请重新登录桌面端".into());
     }
     if !response.status().is_success() {
-        return Err(format!("闪电说接口返回 HTTP {}", response.status()));
+        return Err(format!(
+            "闪电说接口返回 HTTP {}{}",
+            response.status(),
+            super::retry_hint(&response)
+        ));
     }
     let body = json_body(response, 128 * 1024, "闪电说").await?;
     parse_usage(&body)

@@ -130,7 +130,11 @@ async fn fetch_with_key(key: &str) -> Result<Snapshot, String> {
         return Err("token was rejected — paste a fresh key in Settings (gear icon)".into());
     }
     if !resp.status().is_success() {
-        return Err(format!("balance endpoint: HTTP {}", resp.status()));
+        return Err(format!(
+            "balance endpoint: HTTP {}{}",
+            resp.status(),
+            super::retry_hint(&resp)
+        ));
     }
     let doc: Value = resp.json().await.map_err(|e| format!("balance parse: {e}"))?;
     if doc.pointer("/error/code").and_then(Value::as_str) == Some("auth-required") {

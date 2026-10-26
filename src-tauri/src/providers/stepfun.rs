@@ -70,7 +70,11 @@ async fn fetch_with_key(key: &str, card_id: &str, card_name: &str) -> Result<Sna
             return Err("API key was rejected — check it in Settings".into());
         }
         if !resp.status().is_success() {
-            last_error = format!("balance endpoint: HTTP {}", resp.status());
+            last_error = format!(
+            "balance endpoint: HTTP {}{}",
+            resp.status(),
+            super::retry_hint(&resp)
+        );
             continue;
         }
         let doc = match super::json_body(resp, MAX_BODY_BYTES, "balance").await {

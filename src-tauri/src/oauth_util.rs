@@ -98,6 +98,48 @@ pub fn callback_html(ok: bool) -> String {
     )
 }
 
+/// Host to advertise for a loopback callback. `localhost` can resolve to
+/// either family, so it is only safe when both listeners bound; a single
+/// stack advertises its literal address instead of a name that may miss.
+pub fn advertised_callback_host(ipv6_ok: bool, ipv4_ok: bool) -> &'static str {
+    match (ipv6_ok, ipv4_ok) {
+        (true, true) => "localhost",
+        (false, true) => "127.0.0.1",
+        (true, false) => "[::1]",
+        (false, false) => "",
+    }
+}
+
+/// A pasted deep link, path or bare query → (code, state). This is the
+/// fallback when the browser cannot hand the callback to the app: the user
+/// can copy the whole failed URL, just its path, or only the query string.
+pub fn parse_pasted_callback(input: &str) -> Option<(String, String)> {
+    let trimmed = input.trim();
+    let query = if let Some((_, rest)) = trimmed.split_once('?') {
+        rest
+    } else if let Some(rest) = trimmed.strip_prefix('?') {
+        rest
+    } else if trimmed.contains('=') && !trimmed.contains('/') {
+        trimmed
+    } else {
+        return None;
+    };
+    let query = query.split('#').next().unwrap_or(query);
+    let mut code = None;
+    let mut state = None;
+    for pair in query.split('&') {
+        let Some((key, value)) = pair.split_once('=') else {
+            continue;
+        };
+        match key {
+            "code" => code = Some(pct_decode(value)),
+            "state" => state = Some(pct_decode(value)),
+            _ => {}
+        }
+    }
+    Some((code?, state?))
+}
+
 /// First request line of a loopback callback → (code, state).
 pub fn parse_callback_request(request_line: &str) -> Option<(String, String)> {
     let path = request_line.split_whitespace().nth(1)?;
@@ -122,6 +164,14 @@ mod tests {
     use super::*;
 
     #[test]
+    fn callback_host_only_says_localhost_when_both_families_bound() {
+        assert_eq!(advertised_callback_host(true, true), "localhost");
+        assert_eq!(advertised_callback_host(false, true), "127.0.0.1");
+        assert_eq!(advertised_callback_host(true, false), "[::1]");
+        assert_eq!(advertised_callback_host(false, false), "");
+    }
+
+    #[test]
     fn pkce_challenge_matches_the_rfc_7636_vector() {
         assert_eq!(
             code_challenge("dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk"),
@@ -143,6 +193,26 @@ mod tests {
     fn callback_parsing_needs_both_code_and_state() {
         let (code, state) =
             parse_callback_request("GET /auth/callback?code=ac%2F1&state=st-42 HTTP/1.1").unwrap();
+            assert_eq!(
+                parse_pasted_callback(
+                    "http://localhost:1455/auth/callback?code=ac%2F1&state=st-42#frag"
+                )
+                .unwrap(),
+                ("ac/1".into(), "st-42".into())
+            );
+            assert_eq!(
+                parse_pasted_callback("/auth/callback?code=c&state=s").unwrap(),
+                ("c".into(), "s".into())
+            );
+            assert_eq!(
+                parse_pasted_callback("?code=c&state=s").unwrap(),
+                ("c".into(), "s".into())
+            );
+            assert_eq!(
+                parse_pasted_callback("code=c&state=s").unwrap(),
+                ("c".into(), "s".into())
+            );
+            assert!(parse_pasted_callback("https://example.com/no-query").is_none());
         assert_eq!(code, "ac/1");
         assert_eq!(state, "st-42");
         assert!(parse_callback_request("GET /auth/callback HTTP/1.1").is_none());

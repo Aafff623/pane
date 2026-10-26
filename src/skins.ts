@@ -41,30 +41,90 @@ export interface RemotePackEntry {
   url: string;
 }
 let remoteIndex: RemotePackEntry[] = [];
+/// Why the last index refresh failed, for a short, honest workshop reason.
+/// `null` = the last attempt succeeded.
+let remoteIndexError: "network" | "http" | "format" | null = null;
 
 export function remotePackIndex(): RemotePackEntry[] {
   return remoteIndex;
 }
 
-export async function refreshSkinIndex(): Promise<void> {
+export function remoteIndexErrorClass(): typeof remoteIndexError {
+  return remoteIndexError;
+}
+
+/// True only when `candidate` is a real upgrade. The workshop must never
+/// offer a downgrade just because the local pack is newer than the deployed
+/// index (the normal state between a pack rebuild and its deployment).
+export function isNewerVersion(candidate: string, installed: string): boolean {
+  const parts = (value: string) =>
+    value.split(/[.+-]/).map((piece) => {
+      const number = Number.parseInt(piece, 10);
+      return Number.isFinite(number) ? number : 0;
+    });
+  const a = parts(candidate);
+  const b = parts(installed);
+  for (let i = 0; i < Math.max(a.length, b.length); i += 1) {
+    const left = a[i] ?? 0;
+    const right = b[i] ?? 0;
+    if (left !== right) return left > right;
+  }
+  return false;
+}
+
+function classifyIndexError(error: unknown): "network" | "http" | "format" {
+  const text = String(error ?? "");
+  if (text.includes("HTTP")) return "http";
+  if (text.includes("network") || text.includes("Failed to fetch") || text.includes("error sending request")) {
+    return "network";
+  }
+  return "format";
+}
+
+function loadCachedIndex(): void {
+  if (remoteIndex.length) return;
   try {
-    const res = await fetch(SKINS_INDEX_URL, { cache: "no-store" });
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const doc = (await res.json()) as { packs?: RemotePackEntry[] };
-    remoteIndex = (doc.packs ?? []).filter(
+    const cached = localStorage.getItem("pane.skins.index");
+    if (cached) remoteIndex = JSON.parse(cached) as RemotePackEntry[];
+  } catch { /* nothing cached — workshop falls back to the empty state. */ }
+}
+
+export async function refreshSkinIndex(): Promise<void> {
+  remoteIndexError = null;
+  const inTauri = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
+  let entries: RemotePackEntry[] | null = null;
+  let failure: unknown = null;
+  if (inTauri) {
+    // Rust owns the request: the static host sends no CORS header, and the
+    // WebView fetch is blocked on a fresh install with no local pack.
+    try {
+      entries = await invoke<RemotePackEntry[]>("skin_pack_index");
+    } catch (error) {
+      failure = error;
+    }
+  }
+  if (entries === null && !inTauri) {
+    // Browser demo only. The installed app must never depend on this path.
+    try {
+      const res = await fetch(SKINS_INDEX_URL, { cache: "no-store" });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const doc = (await res.json()) as { packs?: RemotePackEntry[] };
+      entries = doc.packs ?? [];
+    } catch (error) {
+      failure = error;
+    }
+  }
+  if (entries) {
+    remoteIndex = entries.filter(
       (p) => validSkinId(p.id) && typeof p.url === "string" && typeof p.sha256 === "string",
     );
     try {
       localStorage.setItem("pane.skins.index", JSON.stringify(remoteIndex));
     } catch { /* private mode — memory copy is enough for the session. */ }
-  } catch {
-    if (!remoteIndex.length) {
-      try {
-        const cached = localStorage.getItem("pane.skins.index");
-        if (cached) remoteIndex = JSON.parse(cached) as RemotePackEntry[];
-      } catch { /* nothing cached — workshop falls back to the empty state. */ }
-    }
+    return;
   }
+  remoteIndexError = classifyIndexError(failure);
+  loadCachedIndex();
 }
 
 export function packSkinList(): PackSkin[] {

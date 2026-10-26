@@ -64,8 +64,16 @@ pub fn probe_error() -> Option<String> {
 }
 
 fn data() -> FileData {
-    let mut db = scan_db().unwrap_or_default();
-    merge_data(&mut db.data, scan_events(&db.sessions));
+    let db_roots = crate::wsl::roots_for(".copilot/session-store.db");
+    let mut db = DbScan::default();
+    for path in db_roots {
+        if let Some(scan) = scan_db_at(&path) {
+            merge_data(&mut db.data, scan.data);
+            db.sessions.extend(scan.sessions);
+        }
+    }
+    let event_roots = crate::wsl::roots_for(".copilot/session-state");
+    merge_data(&mut db.data, scan_events_roots(&event_roots, &db.sessions));
     db.data
 }
 
@@ -127,11 +135,23 @@ fn scan_events(known_sessions: &HashSet<String>) -> FileData {
 }
 
 fn scan_events_at(root: &Path, known_sessions: &HashSet<String>) -> FileData {
+    scan_events_roots(std::slice::from_ref(&root.to_path_buf()), known_sessions)
+}
+
+fn scan_events_roots(roots: &[PathBuf], known_sessions: &HashSet<String>) -> FileData {
     let mut files = Vec::new();
-    recent_jsonl_files(root, &mut files);
+    for root in roots {
+        recent_jsonl_files(root, &mut files);
+    }
     let mut out = FileData::default();
-    let mut seen = HashSet::new();
     let floor = cutoff();
+    // A resumed session writes one shutdown per process, each carrying the
+    // session's TOTAL modelMetrics. Keeping only the first (the old `seen`
+    // rule) silently dropped every post-resume increment. Collect all
+    // cumulative snapshots, then add per (session, model) deltas in time
+    // order; a shrinking counter is an upstream reset, so its full value is
+    // the new baseline.
+    let mut snapshots: Vec<(String, DateTime<Utc>, Vec<(String, [i64; 4])>)> = Vec::new();
     for path in files {
         let Ok(text) = std::fs::read_to_string(&path) else { continue };
         for line in text.lines() {
@@ -153,23 +173,49 @@ fn scan_events_at(root: &Path, known_sessions: &HashSet<String>) -> FileData {
                 .map(str::to_string)
                 .or_else(|| path.parent().and_then(Path::file_name).map(|s| s.to_string_lossy().into_owned()))
                 .unwrap_or_default();
-            if known_sessions.contains(&session) || !seen.insert(session) {
+            if known_sessions.contains(&session) {
                 continue;
             }
             let Some(metrics) = data.get("modelMetrics").and_then(Value::as_object) else { continue };
+            let mut models = Vec::new();
             for (model, metric) in metrics {
                 let Some(usage) = metric.get("usage") else { continue };
                 let num = |key: &str| usage.get(key).and_then(Value::as_f64).unwrap_or(0.0);
-                add_usage(
-                    &mut out,
-                    ts,
-                    if model.trim().is_empty() { "unknown" } else { model },
-                    num("inputTokens") as i64,
-                    num("outputTokens") as i64,
-                    num("cacheReadTokens") as i64,
-                    num("cacheWriteTokens") as i64,
-                );
+                models.push((
+                    if model.trim().is_empty() { "unknown".to_string() } else { model.clone() },
+                    [
+                        num("inputTokens") as i64,
+                        num("outputTokens") as i64,
+                        num("cacheReadTokens") as i64,
+                        num("cacheWriteTokens") as i64,
+                    ],
+                ));
             }
+            if !models.is_empty() {
+                snapshots.push((session, ts, models));
+            }
+        }
+    }
+    snapshots.sort_by_key(|(_, ts, _)| *ts);
+    let mut last: std::collections::HashMap<(String, String), [i64; 4]> =
+        std::collections::HashMap::new();
+    for (session, ts, models) in snapshots {
+        for (model, current) in models {
+            let key = (session.clone(), model.clone());
+            let previous = last.get(&key).copied().unwrap_or([0; 4]);
+            let reset = current.iter().zip(previous.iter()).any(|(cur, prev)| cur < prev);
+            let delta = if reset {
+                current
+            } else {
+                [
+                    current[0] - previous[0],
+                    current[1] - previous[1],
+                    current[2] - previous[2],
+                    current[3] - previous[3],
+                ]
+            };
+            last.insert(key, current);
+            add_usage(&mut out, ts, &model, delta[0], delta[1], delta[2], delta[3]);
         }
     }
     out
@@ -275,6 +321,25 @@ mod tests {
         assert_eq!(tokens, 1_100.0);
         let known: HashSet<String> = ["sess-1".to_string()].into_iter().collect();
         assert!(scan_events_at(&dir, &known).days.is_empty());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn resumed_session_counts_only_the_cumulative_increment() {
+        let dir = root("resume");
+        let session = dir.join("session-1");
+        std::fs::create_dir_all(&session).unwrap();
+        std::fs::write(
+            session.join("events.jsonl"),
+            r#"{"type":"session.shutdown","timestamp":"2026-10-20T10:00:00Z","data":{"sessionId":"sess-r","modelMetrics":{"gpt-5.6-terra":{"usage":{"inputTokens":1000,"outputTokens":100,"cacheReadTokens":200,"cacheWriteTokens":300}}}}}
+{"type":"session.shutdown","timestamp":"2026-10-20T11:00:00Z","data":{"sessionId":"sess-r","modelMetrics":{"gpt-5.6-terra":{"usage":{"inputTokens":2000,"outputTokens":200,"cacheReadTokens":200,"cacheWriteTokens":300}}}}}
+{"type":"session.shutdown","timestamp":"2026-10-20T12:00:00Z","data":{"sessionId":"sess-r","modelMetrics":{"gpt-5.6-terra":{"usage":{"inputTokens":500,"outputTokens":50,"cacheReadTokens":0,"cacheWriteTokens":0}}}}}"#,
+        )
+        .unwrap();
+        let data = scan_events_at(&dir, &HashSet::new());
+        let tokens: f64 = data.days.values().map(|(_, t)| t).sum();
+        // 1100 first + 1100 increment + reset to 550 = 2750, never double-counted.
+        assert_eq!(tokens, 2_750.0);
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

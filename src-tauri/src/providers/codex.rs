@@ -279,7 +279,11 @@ async fn login_access(login: &crate::codex_accounts::CodexLogin) -> Result<Acces
                 "client_id": CLIENT_ID, "grant_type": "refresh_token",
                 "refresh_token": ready.refresh_token, "scope": "openid profile email",
             }))).await.map_err(|e| format!("token refresh: {e}"))?;
-        if !resp.status().is_success() { return Err(format!("token refresh failed: HTTP {}", resp.status())); }
+        if !resp.status().is_success() { return Err(format!(
+            "token refresh failed: HTTP {}{}",
+            resp.status(),
+            super::retry_hint(&resp)
+        )); }
         let tok: Value = resp.json().await.map_err(|e| format!("token refresh parse: {e}"))?;
         ready.access_token = tok.get("access_token").and_then(Value::as_str).filter(|s| !s.is_empty())
             .ok_or("refresh response missing access_token")?.to_string();
@@ -379,7 +383,11 @@ async fn load_access(dir: &std::path::Path) -> Result<Access, String> {
         .await
         .map_err(|e| format!("token refresh: {e}"))?;
         if !resp.status().is_success() {
-            return Err(format!("token refresh failed: HTTP {}", resp.status()));
+            return Err(format!(
+            "token refresh failed: HTTP {}{}",
+            resp.status(),
+            super::retry_hint(&resp)
+        ));
         }
         let tok: Value = resp.json().await.map_err(|e| format!("token refresh parse: {e}"))?;
         let new_access = tok
@@ -461,7 +469,11 @@ async fn fetch_with_access(auth: Access, id: &str, name: &str) -> Result<Snapsho
     // bare reqwest URL and looking like a missing sign-in.
     .map_err(|e| format!("网络连接失败：无法访问 chatgpt.com（已自动重试代理与直连）— {e}"))?;
     if !resp.status().is_success() {
-        return Err(format!("usage endpoint: HTTP {}", resp.status()));
+        return Err(format!(
+            "usage endpoint: HTTP {}{}",
+            resp.status(),
+            super::retry_hint(&resp)
+        ));
     }
     let usage: Value = resp.json().await.map_err(|e| format!("usage parse: {e}"))?;
 
@@ -543,6 +555,7 @@ async fn fetch_with_access(auth: Access, id: &str, name: &str) -> Result<Snapsho
                     available: None,
                     usage: None,
                     daily_usage: None,
+                    quota: None,
                     pace: None,
                 });
             }

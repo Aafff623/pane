@@ -279,6 +279,93 @@ pub struct DailySpendRow {
     pub models: Vec<DailyModelSpend>,
 }
 
+#[derive(Serialize, Clone, Debug, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct SpendProjection {
+    pub projected_total: f64,
+    pub month_to_date: f64,
+    pub median_daily: f64,
+    pub remaining_days: u32,
+    pub sample_days: u32,
+    pub sample_span_days: u32,
+}
+
+/// Straight-line month projection from the median of the last seven
+/// effective days (cost > $0.004; zero/unpriced days never enter). "Today"
+/// is explicit so the function is deterministic and cross-month resets are
+/// just a new `today`, not hidden state.
+pub fn project_month_from_series(
+    days: &[(NaiveDate, f64)],
+    today: NaiveDate,
+) -> Option<SpendProjection> {
+    use chrono::Datelike;
+    let month_start = NaiveDate::from_ymd_opt(today.year(), today.month(), 1)?;
+    let lookback = today - Duration::days(30);
+    let month_to_date: f64 = days
+        .iter()
+        .filter(|(day, _)| *day >= month_start && *day <= today)
+        .map(|(_, cost)| cost)
+        .sum();
+    let mut sample: Vec<(NaiveDate, f64)> = days
+        .iter()
+        .filter(|(day, cost)| *day >= lookback && *day <= today && *cost > 0.004)
+        .copied()
+        .collect();
+    sample.sort_by_key(|(day, _)| *day);
+    sample.dedup_by_key(|(day, _)| *day);
+    if sample.len() < 3 {
+        return None;
+    }
+    let recent: Vec<f64> = sample.iter().rev().take(7).map(|(_, cost)| *cost).collect();
+    if recent.len() < 3 {
+        return None;
+    }
+    let mut sorted = recent.clone();
+    sorted.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    let median = if sorted.len() % 2 == 0 {
+        (sorted[sorted.len() / 2 - 1] + sorted[sorted.len() / 2]) / 2.0
+    } else {
+        sorted[sorted.len() / 2]
+    };
+    let (next_year, next_month) = if today.month() == 12 {
+        (today.year() + 1, 1)
+    } else {
+        (today.year(), today.month() + 1)
+    };
+    let next_month = NaiveDate::from_ymd_opt(next_year, next_month, 1)?;
+    // Calendar days after today (today is already partly in month_to_date).
+    let remaining_days = (next_month - month_start).num_days() - today.day() as i64;
+    if remaining_days <= 0 || !median.is_finite() {
+        return None;
+    }
+    let span = (sample[sample.len() - 1].0 - sample[0].0).num_days() + 1;
+    Some(SpendProjection {
+        projected_total: month_to_date + median * remaining_days as f64,
+        month_to_date,
+        median_daily: median,
+        remaining_days: remaining_days as u32,
+        sample_days: recent.len() as u32,
+        sample_span_days: span.max(1) as u32,
+    })
+}
+
+pub fn month_projection() -> Result<Option<SpendProjection>, String> {
+    let rows = daily_spend(Some(31))?;
+    let mut by_day: BTreeMap<String, f64> = BTreeMap::new();
+    for row in rows {
+        *by_day.entry(row.day).or_default() += row.cost;
+    }
+    let series: Vec<(NaiveDate, f64)> = by_day
+        .into_iter()
+        .filter_map(|(day, cost)| {
+            NaiveDate::parse_from_str(&day, "%Y-%m-%d")
+                .ok()
+                .map(|date| (date, cost))
+        })
+        .collect();
+    Ok(project_month_from_series(&series, Local::now().date_naive()))
+}
+
 /// Day/provider/model grain for the spend-detail heatmap. Read-only, served
 /// from the same cached store the merger keeps fresh.
 pub fn daily_spend(range_days: Option<u32>) -> Result<Vec<DailySpendRow>, String> {
@@ -570,6 +657,48 @@ mod tests {
         assert!(!day.contains_key("zcode"), "recent zcode cell must be re-merged, not kept");
         assert_eq!(day["claude"].cost, 2.0);
         assert!(file.days[&stale.format("%Y-%m-%d").to_string()].contains_key("zcode"));
+    }
+
+    #[test]
+    fn month_projection_uses_median_and_skips_idle_days() {
+        let today = NaiveDate::from_ymd_opt(2026, 10, 26).unwrap();
+        let mut series = Vec::new();
+        for offset in 1..=6 {
+            series.push((today - Duration::days(offset), 1.0));
+        }
+        series.push((today - Duration::days(7), 50.0));
+        // An idle day and a zero-cost day never enter the sample.
+        series.push((today - Duration::days(8), 0.0));
+        let projection = project_month_from_series(&series, today).unwrap();
+        assert_eq!(projection.sample_days, 7);
+        assert!((projection.median_daily - 1.0).abs() < 1e-9);
+        assert_eq!(projection.remaining_days, 5);
+        assert!((projection.month_to_date - 56.0).abs() < 1e-9);
+        assert!((projection.projected_total - 61.0).abs() < 1e-9);
+
+        let sparse = &series[..2];
+        assert!(project_month_from_series(sparse, today).is_none());
+        let last_day = NaiveDate::from_ymd_opt(2026, 10, 31).unwrap();
+        assert!(project_month_from_series(&series, last_day).is_none());
+    }
+
+    #[test]
+    fn even_sample_takes_the_middle_average() {
+        let today = NaiveDate::from_ymd_opt(2026, 10, 10).unwrap();
+        let series: Vec<(NaiveDate, f64)> = [1.0, 3.0]
+            .into_iter()
+            .enumerate()
+            .map(|(index, cost)| (today - Duration::days(index as i64 + 1), cost))
+            .collect();
+        // Only two effective days → no projection.
+        assert!(project_month_from_series(&series, today).is_none());
+        let four: Vec<(NaiveDate, f64)> = [1.0, 2.0, 3.0, 4.0]
+            .into_iter()
+            .enumerate()
+            .map(|(index, cost)| (today - Duration::days(index as i64 + 1), cost))
+            .collect();
+        let projection = project_month_from_series(&four, today).unwrap();
+        assert!((projection.median_daily - 2.5).abs() < 1e-9);
     }
 
     #[test]

@@ -98,7 +98,11 @@ async fn fetch_with_key(key: &str, card_id: &str, card_name: &str) -> Result<Sna
         return Err("API key was rejected — check it in Settings".into());
     }
     if !credits_resp.status().is_success() {
-        return Err(format!("credits endpoint: HTTP {}", credits_resp.status()));
+        return Err(format!(
+            "credits endpoint: HTTP {}{}",
+            credits_resp.status(),
+            super::retry_hint(&credits_resp)
+        ));
     }
     let credits: Value = super::json_body(credits_resp, 64 * 1024, "credits").await?;
 

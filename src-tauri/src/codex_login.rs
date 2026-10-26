@@ -185,6 +185,30 @@ fn serve_callback(listener: TcpListener, login_id: String, pending: &Mutex<Optio
     }
 }
 
+/// Manual fallback when the browser cannot hand the callback back to Pane:
+/// accept the full URL, its path, or the bare query the user pasted. The
+/// state must belong to the pending login; a mismatched paste is rejected
+/// instead of exchanging someone else's code.
+pub fn submit_callback(login_id: &str, input: &str) -> Result<(), String> {
+    let (code, state) = crate::oauth_util::parse_pasted_callback(input)
+        .ok_or_else(|| "paste the full callback URL (it must contain code and state)".to_string())?;
+    let mut guard = PENDING.lock().unwrap_or_else(|e| e.into_inner());
+    let Some(pending) = guard
+        .as_mut()
+        .filter(|pending| pending.login_id == login_id)
+    else {
+        return Err("no pending sign-in — start again".into());
+    };
+    if pending.done || Instant::now() > pending.deadline {
+        return Err("this sign-in expired — start again".into());
+    }
+    if pending.state != state {
+        return Err("callback state does not match this sign-in — start again".into());
+    }
+    pending.captured = Some(Ok(code));
+    Ok(())
+}
+
 /// The token exchange for one captured code.
 async fn exchange_code(code: &str, verifier: &str) -> Result<crate::oauth::StoredTokens, String> {
     // Direct-retry on transport failure: a machine's environment proxy can

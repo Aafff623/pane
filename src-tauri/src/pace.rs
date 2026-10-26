@@ -69,6 +69,12 @@ const FULL_WINDOW_TOLERANCE_MS: i64 = 60_000;
 
 pub fn compute(used_percent: f64, resets_at: Option<i64>, period_ms: Option<i64>, now_ms: i64) -> Pace {
     let used = used_percent.clamp(0.0, 100.0);
+    // An expired reset means the vendor has not published the next window
+    // yet; projecting "Ahead" from an old percentage is worse than admitting
+    // we don't know. A 100% meter without any reset stays Spent (a real cap).
+    if resets_at.is_some_and(|at| at <= now_ms) {
+        return unknown();
+    }
     if used >= 99.5 {
         return Pace {
             state: PaceState::Spent,
@@ -219,6 +225,15 @@ mod tests {
     fn missing_reset_metadata_is_unknown() {
         assert_eq!(compute(50.0, None, Some(HOUR), 1).state, PaceState::Unknown);
         assert_eq!(compute(50.0, Some(2), None, 1).state, PaceState::Unknown);
+    }
+
+    #[test]
+    fn expired_reset_is_unknown_even_at_full_usage() {
+        let now = 10_000;
+        assert_eq!(compute(26.0, Some(now - 1), Some(HOUR), now).state, PaceState::Unknown);
+        assert_eq!(compute(100.0, Some(now - 1), Some(HOUR), now).state, PaceState::Unknown);
+        // A 100% cap with no reset metadata is still a real "spent".
+        assert_eq!(compute(100.0, None, Some(HOUR), now).state, PaceState::Spent);
     }
 
     #[test]

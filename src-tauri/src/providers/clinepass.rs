@@ -66,7 +66,11 @@ async fn fetch_with_key(key: &str) -> Result<Snapshot, String> {
         return Err("ClinePass API key was rejected — check it in Settings".into());
     }
     if !resp.status().is_success() {
-        return Err(format!("ClinePass endpoint: HTTP {}", resp.status()));
+        return Err(format!(
+            "ClinePass endpoint: HTTP {}{}",
+            resp.status(),
+            super::retry_hint(&resp)
+        ));
     }
     let doc = json_body(resp, MAX_BODY_BYTES, "ClinePass").await?;
     parse_snapshot(&doc)

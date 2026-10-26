@@ -25,7 +25,7 @@ function harness(panel) {
   const classes = new Map();
   const ctx = vm.createContext({IS_PANEL_FORM: panel, window:{innerWidth:560,innerHeight:800}, POPOVER_LAYOUT_WIDTH: 560, config:{windowScale:1,uiTextSize:'small'}, Number, Math,getComputedStyle:()=>({getPropertyValue:()=> '1'}),
     document:{documentElement:{style:{setProperty(){}}},body:{classList:{toggle(name,value){classes.set(name,value);}},dataset:{}},querySelector(){return null;}},
-    invoke:async (cmd,args)=>calls.push([cmd,args]),patchConfig:async p=>calls.push(['patch',p]),requestRender(){},applyPopoverDragRegion(){},syncAppearanceSettingsControls(){}});
+    invoke:async (cmd,args)=>calls.push([cmd,args]),patchConfig:async p=>calls.push(['patch',p]),emitUiPrefs(){},requestRender(){},applyPopoverDragRegion(){},syncAppearanceSettingsControls(){}});
   vm.runInContext('let popoverScaleRequest=null; let popoverScaleJob=null; let repositionPopoverSettings=null;\n'+code,ctx);return {ctx,calls,classes};
 }
 for (const panel of [false,true]) {

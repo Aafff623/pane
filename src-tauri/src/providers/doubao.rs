@@ -229,7 +229,11 @@ async fn fetch_with_cookie(cookie: &str) -> Result<Snapshot, String> {
         );
     }
     if !quota_resp.status().is_success() {
-        return Err(format!("quota endpoint: HTTP {}", quota_resp.status()));
+        return Err(format!(
+            "quota endpoint: HTTP {}{}",
+            quota_resp.status(),
+            super::retry_hint(&quota_resp)
+        ));
     }
     let quota: Value = json_body(quota_resp, MAX_QUOTA_BYTES, "quota").await?;
     if quota.get("code").and_then(Value::as_i64).unwrap_or(0) != 0 {

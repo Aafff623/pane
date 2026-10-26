@@ -189,8 +189,9 @@ async fn fetch_from(ep: &Endpoint, key: &str) -> Result<Snapshot, DomainErr> {
     }
     if !quota_resp.status().is_success() {
         return Err(DomainErr::Other(format!(
-            "quota endpoint: HTTP {}",
-            quota_resp.status()
+            "quota endpoint: HTTP {}{}",
+            quota_resp.status(),
+            super::retry_hint(&quota_resp)
         )));
     }
     let quota: Value = quota_resp

@@ -149,11 +149,70 @@ const RETRY_MS: i64 = 30 * 60 * 1000;
 /// leaves room to grow while still bounding the damage.
 const MAX_CATALOG_BYTES: usize = 32 * 1024 * 1024;
 
+#[derive(Clone, PartialEq, Eq)]
+struct ModelsdevTrust {
+    owners: std::collections::HashSet<String>,
+    resellers: std::collections::HashSet<String>,
+}
+
+/// Official first-party providers in models.dev. Its entries carry no owner
+/// field (232 providers, verified), so Pane maintains the list. Unknown
+/// providers stay at tier 2 and explicit resellers drop to tier 1.
+const MODELSDEV_OWNERS: &[&str] = &[
+    "anthropic",
+    "openai",
+    "google",
+    "google-vertex",
+    "azure",
+    "amazon",
+    "meta",
+    "mistralai",
+    "cohere",
+    "ai21",
+    "xai",
+    "deepseek",
+    "moonshotai",
+    "zhipuai",
+    "zai",
+    "alibaba",
+    "minimax",
+    "stepfun",
+    "volcengine",
+    "bytedance",
+    "baidu",
+    "tencent",
+    "nvidia",
+    "microsoft",
+];
+
+impl Default for ModelsdevTrust {
+    fn default() -> Self {
+        Self {
+            owners: MODELSDEV_OWNERS.iter().map(|name| name.to_string()).collect(),
+            resellers: std::collections::HashSet::new(),
+        }
+    }
+}
+
+impl ModelsdevTrust {
+    fn tier(&self, provider: &str) -> u8 {
+        let key = provider.to_ascii_lowercase();
+        if self.owners.contains(&key) {
+            3
+        } else if self.resellers.contains(&key) {
+            1
+        } else {
+            2
+        }
+    }
+}
+
 #[derive(Default)]
 struct Store {
     litellm: HashMap<String, Price>,
     modelsdev: HashMap<String, Price>,
     supplement: HashMap<String, Price>,
+    modelsdev_trust: ModelsdevTrust,
     fast_multipliers: HashMap<String, f64>,
     alias_rules: Vec<(regex::Regex, String)>,
     memo: HashMap<String, Option<Price>>,
@@ -322,14 +381,15 @@ fn parse_litellm(doc: &Value) -> HashMap<String, Price> {
     out
 }
 
-fn parse_modelsdev(doc: &Value) -> HashMap<String, Price> {
-    // models.dev repeats ids across resellers with varying completeness —
-    // the entry documenting the most cache fields wins (ties: first seen),
-    // so a reseller stub with no cache rates can't default a $0.30 cache
-    // hit to the $3.00 input price.
-    let mut out: HashMap<String, (Price, u8)> = HashMap::new();
+fn parse_modelsdev(doc: &Value, trust: &ModelsdevTrust) -> HashMap<String, Price> {
+    // models.dev repeats ids across resellers with varying completeness.
+    // Arbitration is (trust, score): an official owner remains above a more
+    // complete reseller, and an explicit reseller stays below unknown
+    // providers. Equal ranks keep the first entry.
+    let mut out: HashMap<String, (Price, u8, u8)> = HashMap::new();
     let Some(providers) = doc.as_object() else { return HashMap::new() };
-    for provider in providers.values() {
+    for (provider_key, provider) in providers {
+        let tier = trust.tier(provider_key);
         let Some(models) = provider.get("models").and_then(Value::as_object) else { continue };
         for (id, m) in models {
             let Some(cost) = m.get("cost") else { continue };
@@ -345,22 +405,47 @@ fn parse_modelsdev(doc: &Value) -> HashMap<String, Price> {
             );
             match out.entry(id.clone()) {
                 std::collections::hash_map::Entry::Vacant(e) => {
-                    e.insert((price, score));
+                    e.insert((price, tier, score));
                 }
-                std::collections::hash_map::Entry::Occupied(mut e) if score > e.get().1 => {
-                    e.insert((price, score));
+                std::collections::hash_map::Entry::Occupied(mut e) => {
+                    let current = e.get();
+                    if (tier, score) > (current.1, current.2) {
+                        e.insert((price, tier, score));
+                    }
                 }
-                _ => {}
             }
         }
     }
-    out.into_iter().map(|(k, (p, _))| (k, p)).collect()
+    out.into_iter().map(|(k, (p, _, _))| (k, p)).collect()
 }
 
 fn apply_supplement(store: &mut Store, doc: &Value) {
     store.supplement.clear();
     store.fast_multipliers.clear();
     store.alias_rules.clear();
+    store.modelsdev_trust = ModelsdevTrust::default();
+    // An optional supplement key can add resellers or override the baked
+    // owner list; absence keeps the default tiers.
+    if let Some(trust) = doc.get("modelsdev_trust") {
+        store.modelsdev_trust.owners.clear();
+        let cap = 64;
+        let mut read = |key: &str| -> std::collections::HashSet<String> {
+            trust
+                .get(key)
+                .and_then(Value::as_array)
+                .map(|rows| {
+                    rows.iter()
+                        .filter_map(Value::as_str)
+                        .filter(|row| !row.trim().is_empty())
+                        .take(cap)
+                        .map(|row| row.trim().to_ascii_lowercase())
+                        .collect()
+                })
+                .unwrap_or_default()
+        };
+        store.modelsdev_trust.owners = read("owners");
+        store.modelsdev_trust.resellers = read("resellers");
+    }
     if let Some(pricing) = doc.get("pricing").and_then(Value::as_object) {
         for (model, entry) in pricing {
             let get = |key: &str| entry.get(key).and_then(Value::as_f64);
@@ -440,8 +525,26 @@ fn apply_supplement(store: &mut Store, doc: &Value) {
 fn ingest(store: &mut Store, source: &str, doc: &Value) {
     match source {
         "litellm" => store.litellm = parse_litellm(doc),
-        "modelsdev" => store.modelsdev = parse_modelsdev(doc),
-        "supplement" => apply_supplement(store, doc),
+        "modelsdev" => store.modelsdev = parse_modelsdev(doc, &store.modelsdev_trust),
+        "supplement" => {
+            let before = store.modelsdev_trust.clone();
+            apply_supplement(store, doc);
+            if before != store.modelsdev_trust {
+                // The cached models.dev document is still valid; only the
+                // arbitration changed. Reparse it now instead of waiting for
+                // the 24h refresh, then invalidate memo + spend caches.
+                if let Ok(raw) = std::fs::read_to_string(dir().join("modelsdev.json")) {
+                    if let Ok(doc) = serde_json::from_str::<Value>(&raw) {
+                        store.modelsdev = parse_modelsdev(&doc, &store.modelsdev_trust);
+                    }
+                }
+                GENERATION.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                LAST_INGEST_MS.store(
+                    chrono::Utc::now().timestamp_millis(),
+                    std::sync::atomic::Ordering::Relaxed,
+                );
+            }
+        }
         _ => {}
     }
     store.memo.clear();
@@ -1165,9 +1268,44 @@ mod tests {
                 "cost": { "input": 3.0, "output": 15.0, "cache_read": 0.3, "cache_write": 3.0 }
             } } },
         });
-        let map = super::parse_modelsdev(&doc);
+        let map = super::parse_modelsdev(&doc, &super::ModelsdevTrust::default());
         let p = map.get("kimi-k3").expect("kimi-k3 parsed");
         assert_eq!((p.input, p.output, p.cache_read, p.cache_write), (3.0, 15.0, 0.3, 3.0));
+    }
+
+    #[test]
+    fn owner_trust_outranks_a_more_complete_reseller() {
+        let doc = serde_json::json!({
+            "reseller-x": { "models": { "kimi-k3": {
+                "cost": { "input": 4.0, "output": 20.0, "cache_read": 0.4, "cache_write": 4.0 }
+            } } },
+            "moonshotai": { "models": { "kimi-k3": {
+                "cost": { "input": 3.0, "output": 15.0 }
+            } } },
+        });
+        let mut trust = super::ModelsdevTrust::default();
+        trust.owners.insert("moonshotai".into());
+        trust.resellers.insert("reseller-x".into());
+        let map = super::parse_modelsdev(&doc, &trust);
+        assert_eq!(map.get("kimi-k3").unwrap().input, 3.0);
+    }
+
+    #[test]
+    fn supplement_parses_and_folds_the_trust_lists() {
+        let mut store = super::Store::default();
+        super::apply_supplement(
+            &mut store,
+            &serde_json::json!({
+                "modelsdev_trust": {
+                    "owners": ["MoonshotAI", " anthropic "],
+                    "resellers": ["Reseller-X"]
+                }
+            }),
+        );
+        assert_eq!(store.modelsdev_trust.tier("moonshotai"), 3);
+        assert_eq!(store.modelsdev_trust.tier("anthropic"), 3);
+        assert_eq!(store.modelsdev_trust.tier("reseller-x"), 1);
+        assert_eq!(store.modelsdev_trust.tier("unknown"), 2);
     }
 
     #[test]

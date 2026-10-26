@@ -843,7 +843,11 @@ async fn summary_fetch(token: &str) -> Result<Snapshot, String> {
         .await
         .map_err(|e| format!("usage-summary request: {e}"))?;
     if !resp.status().is_success() {
-        return Err(format!("usage-summary: HTTP {}", resp.status()));
+        return Err(format!(
+            "usage-summary: HTTP {}{}",
+            resp.status(),
+            super::retry_hint(&resp)
+        ));
     }
     let doc: Value = resp
         .json()
@@ -1039,7 +1043,11 @@ async fn legacy_fetch(token: &str) -> Result<Snapshot, String> {
         return Err("Cursor session expired — open Cursor once to refresh it".into());
     }
     if !usage_resp.status().is_success() {
-        return Err(format!("usage endpoint: HTTP {}", usage_resp.status()));
+        return Err(format!(
+            "usage endpoint: HTTP {}{}",
+            usage_resp.status(),
+            super::retry_hint(&usage_resp)
+        ));
     }
     let usage: Value = usage_resp
         .json()

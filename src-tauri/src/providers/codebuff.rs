@@ -86,7 +86,11 @@ async fn fetch_with_key(key: &str) -> Result<Snapshot, String> {
         return Err("token was rejected — run `codebuff login` again".into());
     }
     if !usage_resp.status().is_success() {
-        return Err(format!("usage endpoint: HTTP {}", usage_resp.status()));
+        return Err(format!(
+            "usage endpoint: HTTP {}{}",
+            usage_resp.status(),
+            super::retry_hint(&usage_resp)
+        ));
     }
     let doc: Value = usage_resp
         .json()

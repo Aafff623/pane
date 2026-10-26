@@ -38,6 +38,27 @@ pub struct UsageDays {
     pub days: std::collections::BTreeMap<String, f64>,
 }
 
+/// A structured balance/consumption reading used only by the local
+/// `/v1/limits` API. Deliberately separate from [`UsageReading`]: a balance
+/// is stock, not a flow, and must never enter the cumulative meter ledger.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct QuotaReading {
+    pub unit: String,
+    pub used: f64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub limit: Option<f64>,
+}
+
+impl QuotaReading {
+    pub fn valid(&self) -> bool {
+        self.used.is_finite()
+            && self.used >= 0.0
+            && self
+                .limit
+                .is_none_or(|limit| limit.is_finite() && limit >= 0.0)
+    }
+}
+
 impl UsageReading {
     pub fn valid(&self) -> bool {
         self.used.is_finite()

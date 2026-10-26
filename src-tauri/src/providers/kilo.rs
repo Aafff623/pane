@@ -80,7 +80,11 @@ async fn fetch_with_key(key: &str) -> Result<Snapshot, String> {
         return Err("token was rejected — sign in with the Kilo CLI again".into());
     }
     if !resp.status().is_success() {
-        return Err(format!("trpc endpoint: HTTP {}", resp.status()));
+        return Err(format!(
+            "trpc endpoint: HTTP {}{}",
+            resp.status(),
+            super::retry_hint(&resp)
+        ));
     }
     let doc: Value = resp.json().await.map_err(|e| format!("trpc parse: {e}"))?;
     let batch = doc.as_array().ok_or("unexpected trpc response shape")?;

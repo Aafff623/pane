@@ -73,6 +73,8 @@ pub mod zcode;
 pub mod zed;
 
 use serde::{Deserialize, Serialize};
+
+pub mod upstream_status;
 use std::path::PathBuf;
 
 /// One row inside a provider card, e.g. "Session ▓▓▓░░ 43% left · Resets in 2h".
@@ -99,15 +101,20 @@ pub struct Metric {
     pub usage: Option<crate::usage_units::UsageReading>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub daily_usage: Option<crate::usage_units::UsageDays>,
+    /// Structured balance/consumption value for `/v1/limits`, attached at
+    /// parse time where the raw numbers exist (never derived from `detail`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub quota: Option<crate::usage_units::QuotaReading>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pace: Option<crate::pace::Pace>,
 }
 
 impl Metric {
     pub fn progress(label: &str, used_percent: f64, detail: Option<String>) -> Self {
-        // Unknown/invalid arithmetic must never masquerade as an empty quota
-        // or reach JSON serialization as NaN/Infinity.
-        if !used_percent.is_finite() {
+        // NaN/Infinity and epoch-scale leaks (statusline bugs have emitted
+        // 1.7e12) must not clamp into a truthful-looking 100% "run out" row.
+        // 101 leaves room for a vendor's legitimate rounding over 100.
+        if !used_percent.is_finite() || used_percent > 101.0 {
             return Self::text(label, "Usage unavailable".into());
         }
         Self {
@@ -121,6 +128,7 @@ impl Metric {
             available: None,
             usage: None,
             daily_usage: None,
+            quota: None,
             pace: None,
         }
     }
@@ -138,6 +146,7 @@ impl Metric {
             available: None,
             usage: None,
             daily_usage: None,
+            quota: None,
             pace: None,
         }
     }
@@ -209,6 +218,9 @@ pub struct Snapshot {
     /// token trend and a help popover; no balance/progress row is shown.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub limited: Option<String>,
+    /// Vendor incident attribution for a failed/stale card (#70).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub upstream_status: Option<upstream_status::UpstreamStatus>,
 }
 
 impl Snapshot {
@@ -228,6 +240,7 @@ impl Snapshot {
             auth_pack_expiry: None,
             just_reset_at: None,
             limited: None,
+            upstream_status: None,
         }
     }
 
@@ -246,6 +259,7 @@ impl Snapshot {
             auth_pack_expiry: None,
             just_reset_at: None,
             limited: None,
+            upstream_status: None,
         }
     }
 
@@ -264,6 +278,7 @@ impl Snapshot {
             auth_pack_expiry: None,
             just_reset_at: None,
             limited: None,
+            upstream_status: None,
         }
     }
 
@@ -297,6 +312,7 @@ impl Snapshot {
             auth_pack_expiry: None,
             just_reset_at: None,
             limited: None,
+            upstream_status: None,
         }
     }
 
@@ -414,6 +430,73 @@ pub fn error_chain(err: &dyn std::error::Error) -> String {
 /// blocks track the transport — but a DIRECT 403 is returned as-is: it is
 /// usually a final answer (e.g. OpenAI's unsupported-country block, which
 /// retrying can never fix).
+/// Retry-After in seconds (RFC 7231 delta-seconds or HTTP-date), capped at
+/// one hour. Shared by every provider so a 429/503 bench follows the vendor
+/// hint instead of a fixed guess.
+pub fn retry_after_secs(headers: &reqwest::header::HeaderMap, now_ms: i64) -> Option<u64> {
+    let raw = headers.get("retry-after")?.to_str().ok()?.trim().to_string();
+    if let Ok(seconds) = raw.parse::<u64>() {
+        return Some(seconds.min(3600));
+    }
+    let target = chrono::DateTime::parse_from_rfc2822(&raw)
+        .ok()
+        .map(|dt| dt.timestamp_millis())
+        .or_else(|| {
+            chrono::NaiveDateTime::parse_from_str(&raw, "%A, %d-%b-%y %H:%M:%S GMT")
+                .ok()
+                .map(|dt| dt.and_utc().timestamp_millis())
+        })?;
+    Some(((target - now_ms).max(0) as u64 / 1000).min(3600))
+}
+
+/// Suffix for a provider error string: empty when the vendor sent no hint, so
+/// existing messages stay byte-identical on ordinary failures.
+pub fn retry_hint(resp: &reqwest::Response) -> String {
+    retry_after_secs(resp.headers(), chrono::Utc::now().timestamp_millis())
+        .map(|seconds| format!(" retry_after_s={seconds}"))
+        .unwrap_or_default()
+}
+
+#[cfg(test)]
+mod retry_after_tests {
+    use super::retry_after_secs;
+    use reqwest::header::{HeaderMap, HeaderValue};
+
+    #[test]
+    fn parses_delta_seconds_and_http_date_and_caps_at_one_hour() {
+        let mut headers = HeaderMap::new();
+        headers.insert("retry-after", HeaderValue::from_static("120"));
+        assert_eq!(retry_after_secs(&headers, 0), Some(120));
+        headers.insert("retry-after", HeaderValue::from_static("7200"));
+        assert_eq!(retry_after_secs(&headers, 0), Some(3600));
+        headers.insert(
+            "retry-after",
+            HeaderValue::from_static("Wed, 21 Oct 2015 07:28:00 GMT"),
+        );
+        let now_ms = chrono::DateTime::parse_from_rfc2822("Wed, 21 Oct 2015 07:27:00 GMT")
+            .unwrap()
+            .timestamp_millis();
+        assert_eq!(retry_after_secs(&headers, now_ms), Some(60));
+        // A past date clamps to zero instead of wrapping.
+        assert_eq!(retry_after_secs(&headers, now_ms + 120_000), Some(0));
+        headers.remove("retry-after");
+        assert_eq!(retry_after_secs(&headers, 0), None);
+    }
+
+    #[test]
+    fn progress_rejects_leaks_instead_of_clamping_to_full() {
+        use super::Metric;
+        assert_eq!(Metric::progress("x", 1.7e12, None).kind, "text");
+        assert_eq!(Metric::progress("x", 101.1, None).kind, "text");
+        assert_eq!(Metric::progress("x", f64::NAN, None).kind, "text");
+        assert_eq!(Metric::progress("x", 100.9, None).kind, "progress");
+        assert_eq!(
+            Metric::progress("x", 100.9, None).used_percent,
+            Some(100.0)
+        );
+    }
+}
+
 pub async fn send_with_direct_fallback(
     build: impl Fn(&reqwest::Client) -> reqwest::RequestBuilder,
 ) -> Result<reqwest::Response, String> {
@@ -892,10 +975,13 @@ mod wall_tests {
             assert_eq!(row.used_percent, None);
             assert!(serde_json::to_value(row).is_ok());
         }
+        // A legitimate rounding drift still clamps; an epoch-scale leak is a
+        // text row, never a fake 100% "run out".
         assert_eq!(
-            Metric::progress("Quota", 120.0, None).used_percent,
+            Metric::progress("Quota", 100.9, None).used_percent,
             Some(100.0)
         );
+        assert_eq!(Metric::progress("Quota", 120.0, None).kind, "text");
     }
 
     const HOUR_MS: i64 = 3600_000;

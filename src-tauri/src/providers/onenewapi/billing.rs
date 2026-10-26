@@ -30,6 +30,11 @@ pub fn metrics_from(
                 progress.resets_at = Some(resets_at);
                 progress.period_ms = Some(period_ms);
             }
+            progress.quota = Some(crate::usage_units::QuotaReading {
+                unit: unit.to_store().0.unwrap_or_else(|| "custom".into()),
+                used,
+                limit: Some(limit),
+            });
             metrics.push(progress);
         }
         (Some(limit), None) => {
@@ -212,6 +217,7 @@ fn expiry_metric(resets_at: i64) -> Metric {
         available: None,
         usage: None,
         daily_usage: None,
+        quota: None,
         pace: None,
     }
 }

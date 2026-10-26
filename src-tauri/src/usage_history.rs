@@ -960,6 +960,7 @@ mod tests {
             available: None,
             usage: None,
             daily_usage: None,
+            quota: None,
             pace: None,
         }
     }
@@ -1129,6 +1130,7 @@ mod tests {
                 scope: String::new(),
             }),
             daily_usage: None,
+            quota: None,
             pace: None,
         };
         assert_eq!(readings_from_metrics(&[credits])[0].used, 38.0);
@@ -1144,6 +1146,7 @@ mod tests {
             available: None,
             usage: None,
             daily_usage: None,
+            quota: None,
             pace: None,
         };
         assert!(readings_from_metrics(&[lookalike]).is_empty());

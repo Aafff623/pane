@@ -87,7 +87,11 @@ async fn get(key: &str, path: &str) -> Result<Value, String> {
         return Err("key was rejected — paste a fresh key in Settings (gear icon)".into());
     }
     if !resp.status().is_success() {
-        return Err(format!("{path}: HTTP {}", resp.status()));
+        return Err(format!(
+            "{path}: HTTP {}{}",
+            resp.status(),
+            super::retry_hint(&resp)
+        ));
     }
     resp.json().await.map_err(|e| format!("{path} parse: {e}"))
 }

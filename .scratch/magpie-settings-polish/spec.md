@@ -1,11 +1,11 @@
 # 设置面板细节微调：参照 Magpie 的精髓点
 
-**Status:** implemented 01-04 (2026-10-25) - 05 screenshots + owner acceptance pending
+**Status:** implemented 01-04 (2026-10-25) - 05 screenshots + owner acceptance pending; **第二轮扩展（06-09）见 `spec-round2.md`（2026-10-25 用户追加）**
 **Type:** polish
-**GitHub:** 待提（正文见 `issue-body.md`）
+**GitHub:** [#58](https://github.com/Aafff623/pane/issues/58)（正文 `issue-body.md` + 第二轮扩展评论区）
 **Feature dir:** `.scratch/magpie-settings-polish/`
-**Date:** 2026-10-25
-**Owner decisions:** 抄精髓不大改；范围锁定 A+B+C+D；pill 复用 `.tabs/.tab`；布尔保留现有 switch；皮肤包改动是否重新打包由 owner 在第 4 票前单独授权。
+**Date:** 2026-10-25（第二轮追加同日晚）
+**Owner decisions:** 抄精髓不大改；范围锁定 A+B+C+D；pill 复用 `.tabs/.tab`；布尔保留现有 switch；皮肤包改动是否重新打包由 owner 在第 4 票前单独授权。**第二轮追加**：侧栏二级菜单、文字大小/代码字体/色盲、pill 推广、全局丝滑基座（见 spec-round2.md）。
 
 ## 1. 用户需求
 

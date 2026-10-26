@@ -43,6 +43,11 @@ test("initialize and tools/list expose the read-only tool set", async () => {
   assert.equal(init.result.capabilities.tools !== undefined, true);
   const list = await handleMessage({ jsonrpc: "2.0", id: 2, method: "tools/list" }, mockApi());
   assert.deepEqual(list.result.tools.map((t) => t.name), TOOLS.map((t) => t.name));
+  assert.equal(list.result.tools.length, 6);
+  for (const tool of list.result.tools) {
+    assert.equal(tool.annotations?.readOnlyHint, true, `${tool.name} readOnlyHint`);
+    assert.equal(tool.annotations?.destructiveHint, false, `${tool.name} destructiveHint`);
+  }
 });
 
 test("get_usage returns asOf/ageSecs and does not leak PII or credentials", async () => {

@@ -224,7 +224,11 @@ async fn bocha_fetch_key(key: &str) -> Result<f64, String> {
         return Err("key 无效".into());
     }
     if !resp.status().is_success() {
-        return Err(format!("HTTP {}", resp.status()));
+        return Err(format!(
+            "HTTP {}{}",
+            resp.status(),
+            super::retry_hint(&resp)
+        ));
     }
     let body = json_body(resp, 64 * 1024, "BochaAI").await?;
     body.pointer("/data/remaining")
@@ -339,7 +343,11 @@ async fn tavily_fetch_key(key: &str) -> Result<TavilyKeyUsage, String> {
         return Err("key 无效".into());
     }
     if !resp.status().is_success() {
-        return Err(format!("HTTP {}", resp.status()));
+        return Err(format!(
+            "HTTP {}{}",
+            resp.status(),
+            super::retry_hint(&resp)
+        ));
     }
     parse_tavily_usage(&json_body(resp, 64 * 1024, "Tavily").await?)
 }
@@ -532,7 +540,11 @@ async fn firecrawl_fetch_key(key: &str) -> Result<FirecrawlKeyUsage, String> {
         return Err("key 无效".into());
     }
     if !resp.status().is_success() {
-        return Err(format!("HTTP {}", resp.status()));
+        return Err(format!(
+            "HTTP {}{}",
+            resp.status(),
+            super::retry_hint(&resp)
+        ));
     }
     let body = json_body(resp, 64 * 1024, "Firecrawl").await?;
     let data = body.pointer("/data").ok_or("返回中没有 data")?;

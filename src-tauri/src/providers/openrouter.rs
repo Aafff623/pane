@@ -63,7 +63,11 @@ async fn fetch_with_key(key: &str, source: &str) -> Result<Snapshot, String> {
 
 async fn quota_document(response: Result<reqwest::Response, reqwest::Error>, label: &str) -> Result<Value, String> {
     let response = response.map_err(|error| format!("{label} network: {error}"))?;
-    if !response.status().is_success() { return Err(format!("{label} HTTP {}", response.status())); }
+    if !response.status().is_success() { return Err(format!(
+            "{label} HTTP {}{}",
+            response.status(),
+            super::retry_hint(&response)
+        )); }
     super::json_body(response, 256 * 1024, label).await
 }
 

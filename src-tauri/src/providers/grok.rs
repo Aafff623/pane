@@ -269,7 +269,11 @@ async fn fetch_with_token(token: &str, id: &str, name: &str) -> Result<Snapshot,
         return Err("Grok session expired — run the Grok CLI once to refresh it".into());
     }
     if !billing_resp.status().is_success() {
-        return Err(format!("billing endpoint: HTTP {}", billing_resp.status()));
+        return Err(format!(
+            "billing endpoint: HTTP {}{}",
+            billing_resp.status(),
+            super::retry_hint(&billing_resp)
+        ));
     }
     let billing: Value = billing_resp.json().await.map_err(|e| format!("billing parse: {e}"))?;
 
@@ -629,6 +633,7 @@ fn metrics_from_tokens(tokens: Vec<ResetToken>) -> Vec<Metric> {
             available: None,
             usage: None,
             daily_usage: None,
+            quota: None,
             pace: None,
         })
         .collect()

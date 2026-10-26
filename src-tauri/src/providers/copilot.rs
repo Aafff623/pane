@@ -200,7 +200,11 @@ async fn fetch_with_token(token: &str, id: &str, name: &str) -> Result<Snapshot,
         return Err("GitHub token was rejected — sign in to Copilot again".into());
     }
     if !resp.status().is_success() {
-        return Err(format!("usage endpoint: HTTP {}", resp.status()));
+        return Err(format!(
+            "usage endpoint: HTTP {}{}",
+            resp.status(),
+            super::retry_hint(&resp)
+        ));
     }
     let user: Value = resp.json().await.map_err(|e| format!("usage parse: {e}"))?;
 
@@ -218,7 +222,14 @@ async fn fetch_with_token(token: &str, id: &str, name: &str) -> Result<Snapshot,
 
     let mut metrics = Vec::new();
     if let Some(snapshots) = user.get("quota_snapshots") {
-        push_quota(&mut metrics, snapshots.get("premium_interactions"), "Credits", resets_at);
+        if let Some(premium) = premium_quota_node(snapshots) {
+            push_quota(
+                &mut metrics,
+                Some(premium),
+                premium_quota_label(premium),
+                resets_at,
+            );
+        }
         push_quota(&mut metrics, snapshots.get("chat"), "Chat", resets_at);
         push_quota(&mut metrics, snapshots.get("completions"), "Completions", resets_at);
     }
@@ -230,7 +241,25 @@ async fn fetch_with_token(token: &str, id: &str, name: &str) -> Result<Snapshot,
 
 #[cfg(test)]
 mod tests {
-    use super::{copilot_json_token, hosts_yml_token};
+    use super::{
+        copilot_json_token, hosts_yml_token, premium_quota_label, premium_quota_node,
+    };
+    use serde_json::json;
+
+    #[test]
+    fn premium_bucket_accepts_both_names_and_tier_labels() {
+        let renamed = json!({
+            "premium_interactions": {"remaining": 1400.0, "entitlement": 1500.0},
+        });
+        let legacy = json!({
+            "premium_models": {"remaining": 20.0, "entitlement": 50.0},
+        });
+        let renamed_node = premium_quota_node(&renamed).unwrap();
+        let legacy_node = premium_quota_node(&legacy).unwrap();
+        assert_eq!(premium_quota_label(renamed_node), "Premium requests");
+        assert_eq!(premium_quota_label(legacy_node), "Credits");
+        assert!(premium_quota_node(&json!({})).is_none());
+    }
 
     #[test]
     fn copilot_json_is_host_scoped() {
@@ -287,6 +316,27 @@ mod tests {
         for m in &snap.metrics {
             eprintln!("  {}: used={:?} value={:?}", m.label, m.used_percent, m.value);
         }
+    }
+}
+
+/// GitHub renamed the premium bucket from `premium_models` to
+/// `premium_interactions`; both names appear in the wild, so whichever the
+/// response carries owns the premium row.
+fn premium_quota_node(snapshots: &Value) -> Option<&Value> {
+    snapshots
+        .get("premium_interactions")
+        .or_else(|| snapshots.get("premium_models"))
+}
+
+/// An entitlement of 1500 or more is the high-tier allowance (Business/
+/// Enterprise-era premium requests); the lower tier is shown as generic
+/// credits.
+fn premium_quota_label(node: &Value) -> &'static str {
+    let entitlement = node.get("entitlement").and_then(Value::as_f64).unwrap_or(0.0);
+    if entitlement >= 1500.0 {
+        "Premium requests"
+    } else {
+        "Credits"
     }
 }
 

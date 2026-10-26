@@ -1,5 +1,24 @@
 export type CredentialFailure = "network" | "rateLimit" | "credential" | "permission" | "unsupported" | "unknown";
 
+export type CredentialFinality = "revoked" | "transient";
+
+/// Only an explicit revocation makes a credential dead. A generic 401/403,
+/// a timeout or a proxy failure is recoverable and must not send the user
+/// through a re-login flow (cockpit lesson: transient failures were being
+/// promoted to dead accounts).
+export function credentialFinality(
+  message: string,
+  authMode: "oauth" | "api_key" | "local" | "unknown" = "unknown",
+): CredentialFinality {
+  if (authMode === "api_key" || authMode === "local") return "transient";
+  if (/network|timeout|timed out|dns|failed to connect|connection (?:reset|refused|closed|error)|error sending request|transport|proxy|tls|HTTP 5\d\d|429|rate.?limit|网络|超时|连接失败/i.test(message)) {
+    return "transient";
+  }
+  return /token_revoked|token_invalidated|invalid_grant|refresh[_ -]?token.*(?:revoked|invalidated|invalid)|(?:revoked|invalidated).*(?:token|grant)/i.test(message)
+    ? "revoked"
+    : "transient";
+}
+
 // Unknown responses stay unknown. A failed quota read alone never proves
 // that an inference key is invalid or that the subscription is exhausted.
 export function credentialFailure(message: string, status = "error"): CredentialFailure {

@@ -46,6 +46,16 @@ struct Entry {
     waiters: Vec<oneshot::Sender<BoxedResult>>,
     generation: u64,
     kind: Kind,
+    epoch: u64,
+}
+
+/// A manual refresh advances the epoch; background entries that have not
+/// started yet are deferred instead of re-fetching what the manual pass is
+/// about to cover. Running background work is never aborted.
+static BACKGROUND_EPOCH: AtomicU64 = AtomicU64::new(0);
+
+fn background_deferred(entry_epoch: u64, current_epoch: u64) -> bool {
+    entry_epoch != current_epoch
 }
 
 fn gate() -> &'static Mutex<HashMap<String, Entry>> {
@@ -97,9 +107,18 @@ where
     F: Future<Output = T> + Send + 'static,
 {
     let (tx, rx) = oneshot::channel();
+    if kind == Kind::Manual {
+        BACKGROUND_EPOCH.fetch_add(1, Ordering::SeqCst);
+    }
+    let epoch = BACKGROUND_EPOCH.load(Ordering::SeqCst);
     {
         let mut map = gate().lock().unwrap_or_else(|e| e.into_inner());
         if let Some(entry) = map.get_mut(id) {
+            // A manual caller joining a queued background entry promotes it:
+            // it must run for this caller, not be deferred by its own epoch.
+            if kind == Kind::Manual {
+                entry.kind = Kind::Manual;
+            }
             if entry.waiters.len() >= MAX_WAITERS {
                 return Err(format!("too many waiters for {id}"));
             }
@@ -111,9 +130,32 @@ where
             entry.waiters.push(tx);
         } else {
             let generation = next_generation();
-            map.insert(id.to_string(), Entry { waiters: vec![tx], generation, kind });
+            map.insert(
+                id.to_string(),
+                Entry { waiters: vec![tx], generation, kind, epoch },
+            );
             let owned_id = id.to_string();
             tokio::spawn(async move {
+                // Give a manual caller scheduled in the same tick a chance to
+                // bump the epoch before this queued background work starts.
+                if kind == Kind::Background {
+                    tokio::task::yield_now().await;
+                    let still_background = gate()
+                        .lock()
+                        .unwrap_or_else(|e| e.into_inner())
+                        .get(&owned_id)
+                        .is_some_and(|entry| entry.generation == generation && entry.kind == Kind::Background);
+                    if still_background
+                        && background_deferred(epoch, BACKGROUND_EPOCH.load(Ordering::SeqCst))
+                    {
+                        fan_out(
+                            &owned_id,
+                            generation,
+                            &Err::<T, String>("deferred by newer manual refresh".into()),
+                        );
+                        return;
+                    }
+                }
                 let mut handle = tokio::spawn(op);
                 let result = match tokio::time::timeout(
                     Duration::from_millis(timeout_ms()),
@@ -166,6 +208,12 @@ mod tests {
 
     // One sequential test: the timeout budget is process-global, so parallel
     // tests would race each other's `set_timeouts_for_test`.
+    #[test]
+    fn epoch_decision_defers_only_stale_background_entries() {
+        assert!(!background_deferred(4, 4));
+        assert!(background_deferred(4, 5));
+    }
+
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
     async fn gate_semantics() {
         // 10 callers, one network call.
@@ -204,12 +252,15 @@ mod tests {
         set_timeouts_for_test(2_000, 2_500);
         let first = tokio::spawn(async {
             run::<u32, _>("pane-gate-panic", Kind::Manual, async {
-                tokio::time::sleep(Duration::from_millis(5)).await;
+                // Long enough that the waiter below reliably joins before the
+                // panic: a 5 ms leader already finished on a busy full-suite
+                // run, so the waiter became a new leader and returned Ok(99).
+                tokio::time::sleep(Duration::from_millis(200)).await;
                 panic!("boom");
             })
             .await
         });
-        tokio::time::sleep(Duration::from_millis(10)).await;
+        tokio::time::sleep(Duration::from_millis(20)).await;
         let second = tokio::spawn(async {
             run::<u32, _>("pane-gate-panic", Kind::Background, async { 99u32 }).await
         });

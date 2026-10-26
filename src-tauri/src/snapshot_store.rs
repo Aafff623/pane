@@ -351,8 +351,14 @@ pub(crate) fn bench_after_error(error: &str, now_ms: i64, interval_ms: i64) -> F
                 .ok()
         })
         .map(|seconds| seconds.saturating_mul(1000).min(3_600_000));
+    // Vendor hint and the local floor both apply: a 30s hint must not cut a
+    // 429 cooldown below the 5-minute floor, and a long hint wins over it.
+    let floor_ms = if rate_limited { 300_000 } else { 60_000 };
+    let base_ms = interval_ms.max(floor_ms);
     let bench_ms = retry_after_ms
-        .unwrap_or_else(|| interval_ms.max(if rate_limited { 300_000 } else { 60_000 }));
+        .unwrap_or(base_ms)
+        .max(base_ms)
+        .min(3_600_000);
     FailState {
         until_ms: now_ms.saturating_add(bench_ms),
         rate_limited,

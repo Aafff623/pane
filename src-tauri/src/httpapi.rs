@@ -222,12 +222,22 @@ fn metric_lines(metrics: &[crate::providers::Metric]) -> Vec<Value> {
 
 /// One provider row for `/v1/providers` — the usage wire format plus the
 /// diagnostic fields, with every provider-supplied string URL-stripped.
+fn status_code(status: &str) -> u16 {
+    match status {
+        "ok" => 200,
+        "no_credentials" => 401,
+        "needs_setup" => 424,
+        _ => 503,
+    }
+}
+
 pub(crate) fn provider_full_json(s: &Snapshot, fetched_at: &str) -> Value {
     json!({
         "providerId": s.id,
         "displayName": s.name,
         "plan": s.plan,
         "status": s.status,
+        "statusCode": status_code(&s.status),
         "stale": s.stale,
         "error": s.error.as_deref().map(sanitize_text),
         "warning": s.warning.as_deref().map(sanitize_text),
@@ -258,6 +268,8 @@ pub(crate) fn providers_payload_from(
     let removed = config_id_list(cfg, "removedProviders");
     let by_status = |want: &str| snaps.iter().filter(|s| s.status == want).count();
     json!({
+        "schemaVersion": 1,
+        "generatedAt": fetched_at,
         "providers": providers,
         "disabled": disabled,
         "removed": removed,
@@ -292,6 +304,7 @@ fn status_payload(cfg: &Value, fetched_at: &str) -> Value {
         "none"
     };
     json!({
+        "schemaVersion": 1,
         "app": "pane",
         "version": env!("CARGO_PKG_VERSION"),
         "api": { "port": 6736, "bound": true },
@@ -478,6 +491,7 @@ fn doctor_payload(cfg: &Value, fetched_at: &str) -> Value {
         .filter(|c| c.get("classification").and_then(Value::as_str) == Some("failed"))
         .count();
     json!({
+        "schemaVersion": 1,
         "app": "pane",
         "version": env!("CARGO_PKG_VERSION"),
         "healthy": failed == 0,
@@ -487,10 +501,12 @@ fn doctor_payload(cfg: &Value, fetched_at: &str) -> Value {
     })
 }
 
-fn sources_payload() -> Value {
+fn sources_payload(generated_at: &str) -> Value {
     let sources = crate::spend::source_statuses();
     let detected = sources.iter().filter(|s| s.state == "detected").count();
     json!({
+        "schemaVersion": 1,
+        "generatedAt": generated_at,
         "sources": sources,
         "detected": detected,
         "total": sources.len(),
@@ -514,7 +530,44 @@ fn route(method: &tiny_http::Method, url: &str) -> (u16, String) {
             } else if path == "/v1/doctor" {
                 (200, doctor_payload(&read_config(), &now_iso()).to_string())
             } else if path == "/v1/sources" {
-                (200, sources_payload().to_string())
+                (200, sources_payload(&now_iso()).to_string())
+            } else if path == "/v1/limits" {
+                let snaps = latest_full()
+                    .lock()
+                    .map(|v| v.clone())
+                    .unwrap_or_default();
+                (200, crate::limits::limits_payload(&snaps, &now_iso()).to_string())
+            } else if let Some(id) = path.strip_prefix("/v1/limits/") {
+                let snaps = latest_full()
+                    .lock()
+                    .map(|v| v.clone())
+                    .unwrap_or_default();
+                let payload = crate::limits::limits_payload(&snaps, &now_iso());
+                let found = payload["providers"].get(id).cloned().or_else(|| {
+                    snaps
+                        .iter()
+                        .find(|snapshot| snapshot.id == id)
+                        .map(|snapshot| {
+                            crate::limits::limits_payload(
+                                std::slice::from_ref(snapshot),
+                                &now_iso(),
+                            )["providers"][id]
+                                .clone()
+                        })
+                });
+                match found {
+                    Some(provider) => (
+                        200,
+                        json!({
+                            "schema": crate::limits::SCHEMA,
+                            "generatedAt": now_iso(),
+                            "providers": { id: provider },
+                            "errors": [],
+                        })
+                        .to_string(),
+                    ),
+                    None => (404, json!({"error": "provider_not_found"}).to_string()),
+                }
             } else if let Some(id) = path.strip_prefix("/v1/usage/") {
                 match latest().lock() {
                     Ok(v) => v
@@ -567,12 +620,24 @@ fn respond(request: tiny_http::Request) {
 
 /// Binds 127.0.0.1:6736 and serves until the app exits. If the port is
 /// taken the API is silently unavailable this session (Mac parity).
-pub fn start() {
-    std::thread::spawn(|| {
+pub fn start(app: tauri::AppHandle) {
+    std::thread::spawn(move || {
         let server = match tiny_http::Server::http("127.0.0.1:6736") {
             Ok(s) => s,
             Err(e) => {
                 eprintln!("[pane] local API: port 6736 unavailable ({e}) — API off");
+                #[cfg(feature = "harness")]
+                let _ = &app;
+                #[cfg(not(feature = "harness"))]
+                {
+                    use tauri_plugin_notification::NotificationExt;
+                    let _ = app
+                        .notification()
+                        .builder()
+                        .title("Pane local API")
+                        .body("Port 6736 is in use — the local API is off for this session.")
+                        .show();
+                }
                 return;
             }
         };
@@ -825,7 +890,7 @@ mod tests {
 
     #[test]
     fn sources_payload_shape() {
-        let payload = super::sources_payload();
+        let payload = super::sources_payload("2026-10-26T00:00:00Z");
         let list = payload["sources"].as_array().unwrap();
         assert!(!list.is_empty());
         assert_eq!(payload["total"].as_u64().unwrap() as usize, list.len());

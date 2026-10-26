@@ -194,6 +194,8 @@ pub async fn read_webview_cookies(
 
 pub fn hide_window_border(_window: &tauri::WebviewWindow) {}
 
+pub fn set_capture_excluded(_window: &tauri::WebviewWindow, _exclude: bool) {}
+
 /// Linux answers with /proc/stat's btime; macOS with sysctl's kern.boottime.
 /// Both are boot-session-stable unix timestamps.
 #[cfg(target_os = "linux")]

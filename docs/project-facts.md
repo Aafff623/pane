@@ -1015,3 +1015,172 @@ changes.
   `usage_fetch_lock` still serializes whole cycles. Frontend card refreshes
   use `RefreshState.requestCard/finishCard/acceptCardResult`, and
   `usage-updated` merges per card instead of dropping the whole payload.
+
+## Skin system: market transport, legibility and transitions (2026-10-26, #57)
+
+- **Market transport** — `skin_pack_index` in `src-tauri/src/skin_packs.rs` fetches
+  `https://pane.threetwoa.live/skins/index.json` through
+  `send_with_direct_fallback`, validates id/version/https URL/sha256/size and
+  rejects duplicates. `src/skins.ts::refreshSkinIndex()` uses `invoke` whenever
+  `__TAURI_INTERNALS__` exists; browser `fetch` remains only for the web demo.
+  The last good index still caches in `localStorage`. `site/worker.js` adds
+  `Access-Control-Allow-Origin: *` for `/skins/*` (GET/HEAD/OPTIONS) — local
+  code only until the site is deployed.
+- **Pack state** — source changes are invisible until the packs are rebuilt and
+  reinstalled. Local 1.0.2 zips are in `site/public/skins/`; the live index is
+  still 1.0.0 with no CORS header, so `check-skin-packs --live` reports stale
+  until deployment. `marketEntries` compares versions numerically; a local pack
+  newer than the index is never offered as a downgrade.
+- **Comic legibility** — `--cp-yellow-ink:#080a0d`, `--cp-cyan-ink:#03231f`,
+  `--cp-purple-ink:#ffffff`; every yellow/cyan background uses its ink pair
+  (the three 1.09:1 spots are gone). Data/numeric readouts use
+  `--cp-readable-font` at >=12px; display faces remain only on hero/module
+  headings, settings section heads and workshop detail titles. Signal/Ink also
+  lock data and form text to the readable stack while keeping their brush /
+  post display faces.
+- **Icon and material layers** — 26 original 16px SVGs live in
+  `skins/comic-pixel/assets/icons/pixel/` and are used as pack-local CSS masks
+  (inlined by Rust into the served CSS) for the rail, settings rail, card tools
+  and workshop actions. Hero cards keep 3px frames + hard shadow; data cards
+  use 1px soft lines; controls keep the sticker frame; states get side bars.
+  Signal uses postage frames; Ink uses paper slips/brush marks.
+- **Transitions** — `src/skinTransitionPlan.ts` maps skin → timeline
+  (comic pixel grid 22px, signal stamp, ink blobs) and enforces a 350–650ms
+  budget; `src/skinTransition.ts` runs one GSAP overlay, applies once,
+  interrupts cleanly and falls back to an instant switch under
+  `reduceAnimations`/`prefers-reduced-motion`. Wired to the Settings and
+  workshop entries only.
+
+## Settings round 2, usage topology and per-source cache revisions (2026-10-26)
+
+- **Settings rail** — the panel nav is a 4-group tree (General / Data &
+  allowances / Network & privacy / About) with `grid-template-rows: 0fr→1fr`
+  folding, `aria-expanded`, localStorage memory and ArrowUp/Down/Left/Right
+  navigation. The owner approved absorbing the window-form radio group into a
+  segmented pill; all select-backed pills and the new pills share a sliding
+  thumb (underline for existing select pills, filled thumb for `.set-pill`).
+- **Appearance prefs** — text size is four steps (100/110/125/150%) on the
+  existing window-scale multiplier; code font + weight apply only when set
+  (`body.code-font-custom`, `--code-font`), and colorblind mode adds
+  dash/pattern cues without changing hues. The settings panel emits
+  `ui-prefs-changed` so the popover applies these immediately across webviews.
+- **Usage topology (#60)** — a read-only page opened from the button beside the
+  Quota Overview title. Rows come from `orderedSnapshots()` and each row's
+  endpoints from `ProviderSpend.last30.models`; empty-model rows are hidden.
+  `usage-updated` marks rows live for 12s; wires are hand-built S beziers into
+  an SVG layer, recomputed by a ResizeObserver. Motion is CSS-only (hub
+  breathing only while a row is live; flow lines while live) and stops under
+  reduced motion. No routing, no configuration, no proxying.
+- **Window token estimate (#59-02)** — vendor-reported token allowances show
+  exact remaining tokens; otherwise a `≈` estimate appears only for windows
+  >=24h whose start is covered by full local spend days, with `p` outside
+  (1,99) or missing local tokens suppressing the line. Sub-day windows are
+  deliberately not extrapolated.
+- **Per-source parser revisions (#59-03)** — `PersistEntry` carries
+  `source` + `parser_rev`; `parser_rev_for(source)` bumps one scanner family
+  and drops only that family's cached files. `PERSIST_VERSION` remains for
+  cross-source/cache-format changes. Entries without a source are re-parsed
+  once.
+
+## ZCode borrow (#64) and cockpit semantics (#63) (2026-10-26)
+
+- **Usage stats page** — new settings page id `stats` (block `st-stats`; `usage`
+  is still the keys page). It owns the 52-week token heatmap (daily / weekly /
+  cumulative), the 365-day KPI strip, a self-drawn SVG top-6 model trend and
+  donut, and the per-day provider/model detail. `renderSpendDetailOverlay`,
+  `data-spend-details` buttons and `spendDetailOpen` are gone; the popover
+  cards keep only share/fold. Pure chart rules live in `src/statsMath.ts` and
+  are covered by `tests/stats-math.test.mjs`.
+- **ZCode metrics** — `fetch_zcode_usage_metrics` reads `turn_usage` and
+  `tool_usage` from `~/.zcode/cli/db/db.sqlite` over the same 32-day window as
+  the model scan. Semantics match ZCode's Settings → Usage page: sessions =
+  distinct session ids, longest session = max completed-turn duration sum,
+  tool calls = `tool_usage` rows. Missing tables return `None` (KPI “—”).
+- **Onboarding** — config `onboardingSeen` / `onboardingDismissed`; the
+  three-step wizard only auto-opens from a fresh-install gate
+  (`initialTourPending`) and replaces the old spotlight tour for new users.
+  Settings → General has a replay entry. Escape and Skip record dismissed;
+  neither path changes on replay.
+- **Shortcut kernel** — `src/shortcutKernel.ts` (Apache-2.0 ZCode semantic
+  attribution in `LICENSE`) owns canonicalization, platform-aware CmdOrCtrl,
+  `event.code` fallback, IME/repeat filtering, reserved keys, conflicts,
+  takeover and legacy migration. Config `shortcutBindings: Record<id, string[]>`
+  is the new store; an explicit empty array means cleared. `localShortcuts`
+  migrates once and remains only for legacy compatibility. A single capture
+  dispatcher routes the command table; recording and onboarding short-circuit
+  it.
+- **Adaptive cadence** — `adaptive_interval` shortens the background loop to
+  60 s when any healthy card is under 20% remaining or a reset is within
+  30 minutes. Any active provider backoff suppresses acceleration. No session
+  file activity probe (deliberate decision).
+- **Cockpit mechanisms** — `identity_guard` (three-valued match + SHA-256
+  fingerprint), `account_token_lock` (per-account double-check; no refresh
+  worker exists in Pane yet), `retry_after_secs` (delta + HTTP-date, capped at
+  1 h; claude and apikey quota paths write `retry_after_s=`). The auth center
+  now shows cached quota on failed refreshes, locks rows while a flow runs,
+  auto-dismisses success after 1.6 s, aggregates status into the row title and
+  has a local-only identity mask. A discovery banner surfaces a changed local
+  account identity from a folded baseline; it never imports credentials.
+- **Cockpit runtime notes** — all provider HTTP status errors append
+  `retry_after_s=` when the vendor sends the header. Quota responses in the
+  field expose no account id; the identity guard's Missing branch is therefore
+  the normal path, and Codex/Grok/Copilot fetches reload the account by id
+  under their own account lock. Codex is the only browser callback flow Pane
+  owns: its login dialog now accepts a pasted callback URL/path/query and
+  validates `state`; the dual-stack advertising rule is unit-tested, while the
+  vendor-registered redirect URIs remain `http://localhost:1455` and are not
+  rewired. Pending OAuth state is memory-only, so disk quarantine is not
+  applicable. Codex's `login_refresh_lock` already provides the per-account
+  refresh lock + reload double-check; `account_token_lock.rs` generalizes it
+  for future workers.
+
+## Correctness, data and API sweep (#66–#76) (2026-10-26)
+
+- **Claude windows** — `utilization` is normalized (0–100; only the open
+  (0,1) legacy fraction is converted), >101/negative/non-finite is a text
+  “Usage unavailable”, and an expired `resets_at` becomes “Window expired —
+  awaiting refresh”. Pace returns unknown for an expired reset, and alerts
+  check expiry before the 100% run-out shortcut. New tests live in
+  `claude::window_tests`, `pace` and `alerts`.
+- **Leak guard** — `Metric::progress` rejects >101 as text instead of clamping
+  an epoch-scale leak into a fake 100%. Copilot's JSONL fallback now computes
+  per-(session, model) deltas across resume shutdowns; the DB source is
+  unchanged.
+- **Pricing trust** — models.dev arbitration is (trust, score). `pricing.rs`
+  carries a baked official-owner list, an optional supplement
+  `modelsdev_trust` override, and re-parses the cached models.dev document when
+  the trust set changes (bumping GENERATION + LAST_INGEST_MS).
+- **Upstream status** — `providers/upstream_status.rs` probes only Claude's
+  Statuspage endpoint for stale/error cards, 5-minute TTL, 30-minute last-good,
+  6s timeout, no credentials; `Snapshot.upstream_status` feeds the stale
+  tooltip. Other vendors need their own evidence before adding endpoints.
+- **Burn curve** — `meter_samples.rs` keeps 45 days of 5-minute remaining-%
+  samples per (card, metric), dedupes flat values, starts a new series when the
+  window moves, and least-squares-fits an ETA only after 3 points / 1 hour.
+  `fetch_meter_samples` feeds the per-card SVG.
+- **Month projection** — `spend_history::project_month_from_series` uses the
+  median of the last 7 effective days (> $0.004), excludes today from the
+  remaining-day count, and is exposed via `fetch_spend_projection`; the range
+  column shows it only for the cost metric.
+- **/v1/limits** — `limits.rs` emits `openusage.limits.v1` with progress/usage/
+  quota projections and errors; `/v1/usage` is byte-shape unchanged. Balance
+  quotas are attached at the onenewapi/relaybalance/aihubmix parse points.
+- **Skill usage** — `skill_usage.rs` scans Claude transcripts for Skill
+  tool_use only, dedupes (message id, request), sums the row's token buckets
+  and `costUSD`, never stores args, caches 5 minutes and exposes
+  `fetch_skill_usage`; the General settings page renders the list.
+- **WSL** — `wsl.rs` discovers distros (`wsl.exe -l -q` UTF-16LE) and their
+  homes, returns native + `\\wsl.localhost\…` roots, and is wired into the
+  Claude/Codex/Copilot scanners. `spend.wsl_mode` / `wslMode` defaults to both;
+  native-only is available for scans that must not touch WSL.
+- **API hygiene** — providers/status/doctor/sources carry `schemaVersion: 1`;
+  provider rows carry `statusCode` (ok 200, no_credentials 401, needs_setup
+  424, error 503); MCP tools advertise read-only annotations; a failed port
+  6736 bind raises a system notification.
+- **WDA** — `platform::set_capture_excluded` applies
+  `WDA_EXCLUDEFROMCAPTURE` to main/panel while share detection is active,
+  re-reads the setting each 3s tick and clears on stop.
+- **Not done in this sweep** — #65 architecture remains at the FetchStrategy
+  skeleton only (no family migration/gatekeeper/capability typing); #61-03/04
+  auth avatars and rich help tips, #62-03/04/05 transactional settings/CI
+  release gate/error struct, and #58-05 native screenshots remain open.

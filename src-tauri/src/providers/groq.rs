@@ -49,7 +49,11 @@ async fn fetch_with_key(key: &str) -> Result<Snapshot, String> {
         return Err("key was rejected — paste a fresh Groq API key in Settings (gear icon)".into());
     }
     if !resp.status().is_success() {
-        return Err(format!("models endpoint: HTTP {}", resp.status()));
+        return Err(format!(
+            "models endpoint: HTTP {}{}",
+            resp.status(),
+            super::retry_hint(&resp)
+        ));
     }
     let headers: Vec<(String, String)> = resp
         .headers()

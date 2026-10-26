@@ -1,5 +1,13 @@
 mod account_lifecycle;
 mod accounts;
+mod adaptive_interval;
+mod account_token_lock;
+mod fetch_strategy;
+mod identity_guard;
+mod limits;
+mod meter_samples;
+mod skill_usage;
+mod wsl;
 mod backup;
 mod identity;
 mod secretstore;
@@ -185,6 +193,13 @@ fn config_with_defaults(mut cfg: Value) -> Value {
     obj.entry("shortcut").or_insert(json!("Alt+2"));
     obj.entry("categoryShortcut").or_insert(json!("Shift+1"));
     obj.entry("localShortcuts").or_insert(json!({}));
+    // Multi-binding command overrides (#64-02): id -> array. An explicit
+    // empty array means the user cleared the row and must NOT fall back to
+    // the default; absence means "use defaults".
+    obj.entry("shortcutBindings").or_insert(json!({}));
+    // One-shot marker: an empty override map after migration is a real user
+    // state and must not re-import localShortcuts on the next launch.
+    obj.entry("shortcutBindingsMigrated").or_insert(json!(false));
     obj.entry("proxy")
         .or_insert(json!({ "enabled": false, "url": "" }));
     obj.entry("showTotalSpend").or_insert(json!(true));
@@ -194,6 +209,13 @@ fn config_with_defaults(mut cfg: Value) -> Value {
     // key survives a config rewrite and the Settings row reads a real value.
     obj.entry("tourSeen").or_insert(json!(false));
     obj.entry("tourPending").or_insert(json!(false));
+    // First-run three-step guide (ZCode borrow, #64-01). Two booleans keep
+    // "finished" and "dismissed" distinct, so Settings can offer a replay
+    // without asking a returning user again.
+    obj.entry("onboardingSeen").or_insert(json!(false));
+    obj.entry("onboardingDismissed").or_insert(json!(false));
+    // Anonymous Statuspage attribution for failed/stale cards (#70).
+    obj.entry("upstreamStatusProbe").or_insert(json!(true));
     // Empty = "never recorded": the frontend uses it to tell a fresh
     // install (no What's-new popup) from an update (popup with the notes).
     obj.entry("lastSeenVersion").or_insert(json!(""));
@@ -217,6 +239,9 @@ fn config_with_defaults(mut cfg: Value) -> Value {
     popover_geometry::migrate_scale_settings(obj);
     obj.entry("windowScale").or_insert(json!(1.0));
     obj.entry("uiTextSize").or_insert(json!("small"));
+    obj.entry("codeFont").or_insert(json!(""));
+    obj.entry("codeFontWeight").or_insert(json!("400"));
+    obj.entry("colorblindMode").or_insert(json!(false));
     obj.entry("silentStart").or_insert(json!(false));
     // Board cleanliness: bare "no credentials" cards fold into one collapsed
     // section instead of flooding the dashboard (issue: fresh/legacy configs
@@ -327,11 +352,16 @@ const CONFIG_KEYS: &[&str] = &[
     "shortcut",
     "categoryShortcut",
     "localShortcuts",
+    "shortcutBindings",
+    "shortcutBindingsMigrated",
     "proxy",
     "showTotalSpend",
     "welcomeDismissed",
     "tourSeen",
     "tourPending",
+    "onboardingSeen",
+    "onboardingDismissed",
+    "upstreamStatusProbe",
     "lastSeenVersion",
     "telemetry",
     "reduceAnimations",
@@ -345,6 +375,9 @@ const CONFIG_KEYS: &[&str] = &[
     "windowScale",
     "windowScaleVersion",
     "uiTextSize",
+    "codeFont",
+    "codeFontWeight",
+    "colorblindMode",
     "silentStart",
     "hideUnconfigured",
     "setupPicked",
@@ -1203,8 +1236,23 @@ fn spawn_share_watcher(app: tauri::AppHandle) {
         let mut was_hidden = false;
         loop {
             tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+            // Re-read the setting every tick so flipping it applies without a
+            // restart (the old code captured it once at spawn).
+            HIDE_WANT.store(
+                hide_usage_flag(&config_with_defaults(load_config())),
+                Ordering::Relaxed,
+            );
             let hide = HIDE_WANT.load(Ordering::Relaxed) && screen_is_being_shared();
             HIDE_STRIP.store(hide, Ordering::Relaxed);
+            // WDA is OS-level: exclude both visible Pane windows while sharing,
+            // including a panel opened mid-share. Cheap enough to re-apply.
+            if hide {
+                for label in ["main", "panel"] {
+                    if let Some(window) = app.get_webview_window(label) {
+                        platform::set_capture_excluded(&window, true);
+                    }
+                }
+            }
             if hide == was_hidden {
                 continue;
             }
@@ -1220,6 +1268,11 @@ fn spawn_share_watcher(app: tauri::AppHandle) {
                 let handle = app.clone();
                 let _ = app.run_on_main_thread(move || set_main_tray_logo(&handle));
             } else {
+                for label in ["main", "panel"] {
+                    if let Some(window) = app.get_webview_window(label) {
+                        platform::set_capture_excluded(&window, false);
+                    }
+                }
                 let handle = app.clone();
                 let _ = app.run_on_main_thread(move || paint_cached_main_tray(&handle));
                 let _ = app.emit("tray-strip-restore", ());
@@ -2471,6 +2524,13 @@ async fn skin_pack_list() -> Result<Vec<skin_packs::InstalledPack>, String> {
     skin_packs::skin_pack_list().await
 }
 
+/// Official skin index through Rust (no WebView CORS). The workshop falls
+/// back to browser fetch only in the web demo.
+#[tauri::command]
+async fn skin_pack_index() -> Result<Vec<skin_packs::RemotePackEntry>, String> {
+    skin_packs::skin_pack_index().await
+}
+
 #[tauri::command]
 async fn skin_pack_remove(id: String) -> Result<(), String> {
     skin_packs::skin_pack_remove(id).await
@@ -3458,6 +3518,7 @@ async fn run_usage_fetch_inner_mode(
                 credit_samples.extend(credits.into_iter().map(|reading| (s.id.clone(), reading)));
                 daily_samples.extend(daily.into_iter().map(|days| (s.id.clone(), days)));
             }
+            meter_samples::record(&all, now_ms);
             if dirty {
                 if let Err(error) = persist_last_ok(&map) {
                     eprintln!("[pane] snapshot cache refresh: {error}");
@@ -3653,11 +3714,16 @@ fn refresh_minutes_from(cfg: &Value) -> u64 {
 /// the fresh snapshots. Shared by the background loop and the tray menu's
 /// "Refresh all quotas".
 async fn fetch_and_broadcast_usage(app: &tauri::AppHandle) -> Vec<providers::Snapshot> {
-    let snapshots = run_usage_fetch(app).await;
+    let mut snapshots = run_usage_fetch(app).await;
     // The tray strip's provider logos are rasterized by the webview,
     // so the background loop only refreshes the main tray icon and
     // treats the last applied strip as the strip state.
     let cfg = config_with_defaults(load_config());
+    providers::upstream_status::attach(
+        &mut snapshots,
+        cfg.get("upstreamStatusProbe").and_then(serde_json::Value::as_bool).unwrap_or(true),
+    )
+    .await;
     if let Some(projection_cfg) = tray_projection_config_from(&cfg) {
         let strip_active = last_strip().lock().map(|s| !s.is_empty()).unwrap_or(false);
         let projection =
@@ -3678,6 +3744,38 @@ async fn fetch_and_broadcast_usage(app: &tauri::AppHandle) -> Vec<providers::Sna
 /// immediate live pass at launch — the webview's startup refresh dies with
 /// the network at boot), then sleeps refreshMinutes (re-read every cycle,
 /// so a Settings change applies without a restart).
+/// Lowest remaining percentage and nearest future reset across healthy
+/// cards; the adaptive cadence consumes both (#63-03).
+fn quota_urgency(snapshots: &[providers::Snapshot]) -> (Option<f64>, Option<i64>) {
+    let now = chrono::Utc::now().timestamp_millis();
+    let mut remaining: Option<f64> = None;
+    let mut reset: Option<i64> = None;
+    for snapshot in snapshots.iter().filter(|snapshot| snapshot.status == "ok") {
+        for metric in &snapshot.metrics {
+            if let Some(used) = metric.used_percent {
+                let left = 100.0 - used.clamp(0.0, 100.0);
+                remaining = Some(remaining.map_or(left, |value: f64| value.min(left)));
+            }
+            if let Some(at) = metric.resets_at.filter(|at| *at > now) {
+                reset = Some(reset.map_or(at, |value: i64| value.min(at)));
+            }
+        }
+    }
+    (remaining, reset.map(|at| at - now))
+}
+
+/// A provider in cooldown pauses acceleration for every card; the loop must
+/// not poll a 429 bench just because another quota is nearly spent.
+fn max_backoff_until_ms() -> i64 {
+    fail_state()
+        .lock()
+        .unwrap_or_else(|error| error.into_inner())
+        .values()
+        .map(|state| state.until_ms)
+        .max()
+        .unwrap_or(0)
+}
+
 fn spawn_auto_refresh(app: tauri::AppHandle) {
     tauri::async_runtime::spawn(async move {
         let mut outage_retries = 0u32;
@@ -3698,10 +3796,20 @@ fn spawn_auto_refresh(app: tauri::AppHandle) {
                 tokio::time::sleep(std::time::Duration::from_secs(15)).await;
             } else {
                 outage_retries = 0;
+                let now_ms = chrono::Utc::now().timestamp_millis();
+                let (remaining, to_reset) = quota_urgency(&snapshots);
+                let base_ms = (minutes as i64).saturating_mul(60_000);
+                let cadence_ms = adaptive_interval::adaptive_interval_ms(
+                    base_ms,
+                    remaining,
+                    to_reset,
+                    max_backoff_until_ms(),
+                    now_ms,
+                );
                 // ±10% jitter on the cadence so a fleet of providers never
                 // lines up against one rate-limit window on every tick.
                 let jitter = 90 + (rand_core::OsRng.next_u64() % 21) as u64;
-                let seconds = (minutes as u64).saturating_mul(60).saturating_mul(jitter) / 100;
+                let seconds = (cadence_ms as u64).saturating_mul(jitter) / 100;
                 tokio::time::sleep(std::time::Duration::from_secs(seconds.max(60))).await;
             }
         }
@@ -3892,6 +4000,12 @@ fn fetch_meter_history() -> Vec<usage_history::MeterTrend> {
     usage_history::meter_trends()
 }
 
+/// Window-level burn-curve samples + an optional straight-line run-out ETA.
+#[tauri::command]
+fn fetch_meter_samples() -> Vec<meter_samples::MeterSeries> {
+    meter_samples::series()
+}
+
 /// Long-range spend from permanent daily rollups. `None` means all retained history.
 #[tauri::command]
 fn fetch_spend_history(range_days: Option<u32>) -> Result<Vec<spend_history::RangeSpend>, String> {
@@ -3910,6 +4024,27 @@ fn fetch_credit_extras() -> Vec<usage_history::CreditExtra> {
 #[tauri::command]
 fn fetch_spend_daily(range_days: Option<u32>) -> Result<Vec<spend_history::DailySpendRow>, String> {
     spend_history::daily_spend(range_days)
+}
+
+/// Claude Skill usage side ledger (#71); independent of spend.
+#[tauri::command]
+async fn fetch_skill_usage(force: bool) -> Vec<skill_usage::SkillRow> {
+    tauri::async_runtime::spawn_blocking(move || skill_usage::collect(force))
+        .await
+        .unwrap_or_default()
+}
+
+/// Median-of-seven-days month projection for the spend range column (#72).
+#[tauri::command]
+fn fetch_spend_projection() -> Result<Option<spend_history::SpendProjection>, String> {
+    spend_history::month_projection()
+}
+
+/// ZCode-only turn/tool metrics for the stats KPI (#64-06). Read-only on the
+/// CLI database; None when the tables or database are absent.
+#[tauri::command]
+fn fetch_zcode_usage_metrics() -> Option<spend::ZcodeUsageMetrics> {
+    spend::zcode_usage_metrics()
 }
 
 /// Qoder CN local transcripts (GitHub #28): measured credits plus derived
@@ -5232,6 +5367,13 @@ fn codex_login_start() -> Result<codex_login::LoginStart, String> {
     codex_login::start()
 }
 
+/// Manual callback fallback for the loopback login (#63-04): the pasted text
+/// may be a full URL, a path with query, or only the query.
+#[tauri::command]
+fn codex_paste_callback(login_id: String, input: String) -> Result<(), String> {
+    codex_login::submit_callback(&login_id, &input)
+}
+
 #[tauri::command]
 async fn codex_login_poll(login_id: String) -> codex_login::LoginPoll {
     codex_login::poll(&login_id).await
@@ -6308,6 +6450,7 @@ pub fn run() {
             skin_pack_install,
             skin_pack_download,
             skin_pack_list,
+            skin_pack_index,
             skin_pack_remove,
             font_pack_list,
             font_pack_download,
@@ -6347,10 +6490,14 @@ pub fn run() {
             rebuild_spend_pricing,
             fetch_credit_history,
             fetch_meter_history,
+            fetch_meter_samples,
             get_boot_id,
             fetch_spend_history,
             fetch_credit_extras,
             fetch_spend_daily,
+            fetch_spend_projection,
+            fetch_skill_usage,
+            fetch_zcode_usage_metrics,
             fetch_qoder_spend,
             rescan_qoder_sessions,
             antigravity_capture_account,
@@ -6392,6 +6539,7 @@ pub fn run() {
             codex_login_start,
             codex_login_poll,
             codex_login_cancel,
+            codex_paste_callback,
             kiro_login_start,
             kiro_login_poll,
             kiro_login_cancel,
@@ -6609,7 +6757,7 @@ pub fn run() {
                 hide_window_border(&wv);
             }
 
-            httpapi::start();
+            httpapi::start(app.handle().clone());
 
             let saved_shortcut = load_config()
                 .get("shortcut")

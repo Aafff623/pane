@@ -679,8 +679,9 @@ async fn get_ingress_cookie() -> AuthResult<String> {
         .map_err(|e| AuthErr::Transient(format!("network: {e}")))?;
     if !resp.status().is_success() {
         return Err(AuthErr::Transient(format!(
-            "homepage HTTP {}",
-            resp.status()
+            "homepage HTTP {}{}",
+            resp.status(),
+            super::retry_hint(&resp)
         )));
     }
     for value in resp.headers().get_all("set-cookie") {
@@ -711,8 +712,9 @@ async fn register_device(ingress: &str) -> AuthResult<String> {
         .map_err(|e| AuthErr::Transient(format!("network: {e}")))?;
     if !resp.status().is_success() {
         return Err(AuthErr::Transient(format!(
-            "device registration HTTP {}",
-            resp.status()
+            "device registration HTTP {}{}",
+            resp.status(),
+            super::retry_hint(&resp)
         )));
     }
     let doc: Value = resp
@@ -829,8 +831,9 @@ async fn post_usage(token: &str, url: &str) -> Result<Value, FetchErr> {
     }
     if !r.status().is_success() {
         return Err(FetchErr::Other(format!(
-            "Step Plan endpoint: HTTP {}",
-            r.status()
+            "Step Plan endpoint: HTTP {}{}",
+            r.status(),
+            super::retry_hint(&r)
         )));
     }
     json_body(r, MAX_BODY_BYTES, "Step Plan")

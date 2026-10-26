@@ -218,7 +218,15 @@ pub async fn snapshot_with_key_as(
         Err(error) => return Snapshot::error(card_id, card_name, format!("{} request failed: {error}", spec.display)),
     };
     let status = response.status().as_u16();
+    let retry_after = super::retry_after_secs(
+        response.headers(),
+        chrono::Utc::now().timestamp_millis(),
+    );
     if let Some(error) = status_error(spec, status) {
+        let error = match retry_after {
+            Some(seconds) => format!("{error} retry_after_s={seconds}"),
+            None => error,
+        };
         return Snapshot::error(card_id, card_name, error);
     }
     let doc = match json_body(response, MAX_BODY_BYTES, "quota").await {

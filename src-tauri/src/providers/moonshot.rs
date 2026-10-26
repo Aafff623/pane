@@ -100,7 +100,11 @@ async fn fetch_balance_with_key(key: &str, api_label: bool) -> Result<Vec<Metric
             continue; // a .ai key 401s on .cn and vice versa — try the other
         }
         if !resp.status().is_success() {
-            last_err = format!("balance endpoint: HTTP {}", resp.status());
+            last_err = format!(
+            "balance endpoint: HTTP {}{}",
+            resp.status(),
+            super::retry_hint(&resp)
+        );
             continue;
         }
         let doc: Value = match super::json_body(resp, MAX_BALANCE_BYTES, "balance").await {

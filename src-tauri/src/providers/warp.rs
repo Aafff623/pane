@@ -67,7 +67,11 @@ async fn fetch_with_key(key: &str) -> Result<Snapshot, String> {
         return Err("key was rejected — paste a fresh key in Settings (gear icon)".into());
     }
     if !resp.status().is_success() {
-        return Err(format!("graphql endpoint: HTTP {}", resp.status()));
+        return Err(format!(
+            "graphql endpoint: HTTP {}{}",
+            resp.status(),
+            super::retry_hint(&resp)
+        ));
     }
     let doc: Value = resp
         .json()

@@ -14,7 +14,7 @@ const main = ts.createSourceFile(
   ts.ScriptTarget.ES2020,
   true,
 );
-const wanted = ['syncSelectPill', 'mountSelectPill'];
+const wanted = ['syncSelectPill', 'positionTabThumb', 'mountSelectPill'];
 const code = ts.transpile(
   main.statements
     .filter((node) => ts.isFunctionDeclaration(node) && wanted.includes(node.name?.text))
@@ -32,6 +32,9 @@ function fakeElement(tag) {
     type: '',
     textContent: '',
     hidden: false,
+    offsetWidth: 10,
+    offsetLeft: 0,
+    style: {},
     dataset: {},
     attrs: {},
     children,
@@ -42,6 +45,15 @@ function fakeElement(tag) {
     addEventListener(ev, fn) { listeners.set(ev, fn); },
     dispatchEvent(ev) { listeners.get(ev.type)?.(); return true; },
     append(child) { children.push(child); },
+    querySelector(selector) {
+      if (selector === ':scope > .tab-thumb') {
+        return children.find((child) => child.className === 'tab-thumb') ?? null;
+      }
+      if (selector === ':scope > .tab.active') {
+        return children.find((child) => child.className === 'tab active') ?? null;
+      }
+      return null;
+    },
     querySelectorAll(selector) {
       return children.filter((child) =>
         selector === '.tab' ? child.className === 'tab' : false);
@@ -94,11 +106,12 @@ test('mounts a pill per option and hides the select as the value source', () => 
   assert.equal(pill.className, 'tabs');
   assert.equal(pill.attrs.role, 'group');
   assert.ok(pill.attrs['aria-label'], 'the pill carries the group label');
-  assert.equal(pill.children.length, 2);
+  assert.equal(pill.children.length, 3, 'thumb + two segments');
+  assert.equal(pill.children[0].className, 'tab-thumb');
   assert.equal(select.hidden, true, 'the select stays in the DOM but hidden');
-  assert.ok(pill.children[0].classList.states.has('active'), 'current value is active');
-  assert.equal(pill.children[0].attrs['aria-pressed'], 'true');
-  assert.equal(pill.children[1].attrs['aria-pressed'], 'false');
+  assert.ok(pill.children[1].classList.states.has('active'), 'current value is active');
+  assert.equal(pill.children[1].attrs['aria-pressed'], 'true');
+  assert.equal(pill.children[2].attrs['aria-pressed'], 'false');
 });
 
 test('a pill click sets select.value and fires a real change event', () => {
@@ -108,13 +121,13 @@ test('a pill click sets select.value and fires a real change event', () => {
   select.addEventListener('change', () => { changeEvents += 1; });
   context.mountSelectPill(select);
   const pill = select.insertedAfter;
-  pill.children[1].listeners.get('click')();
+  pill.children[2].listeners.get('click')();
   assert.equal(select.value, 'b', 'the hidden select is the value source');
   assert.equal(changeEvents, 1, 'exactly one change event reaches the listeners');
-  assert.ok(pill.children[1].classList.states.has('active'));
-  assert.equal(pill.children[0].attrs['aria-pressed'], 'false');
+  assert.ok(pill.children[2].classList.states.has('active'));
+  assert.equal(pill.children[1].attrs['aria-pressed'], 'false');
   // Clicking the already-active segment is a no-op.
-  pill.children[1].listeners.get('click')();
+  pill.children[2].listeners.get('click')();
   assert.equal(changeEvents, 1);
 });
 
@@ -126,8 +139,8 @@ test('syncSelectPill follows programmatic setSelect writes', () => {
   // setSelect writes select.value directly, then calls syncSelectPill.
   select.value = 'b';
   context.syncSelectPill(select);
-  assert.ok(pill.children[1].classList.states.has('active'));
-  assert.equal(pill.children[0].attrs['aria-pressed'], 'false');
+  assert.ok(pill.children[2].classList.states.has('active'));
+  assert.equal(pill.children[1].attrs['aria-pressed'], 'false');
 });
 
 test('mounting twice never stacks a second pill', () => {
@@ -135,5 +148,5 @@ test('mounting twice never stacks a second pill', () => {
   const select = fakeSelect([['a', 'A'], ['b', 'B']], 'a');
   context.mountSelectPill(select);
   context.mountSelectPill(select);
-  assert.equal(select.insertedAfter.children.length, 2, 'still one group, two segments');
+  assert.equal(select.insertedAfter.children.length, 3, 'still one group, thumb + two segments');
 });

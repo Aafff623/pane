@@ -49,7 +49,11 @@ pub async fn snapshot_with_login(login: crate::login_accounts::LoginAccount) -> 
         return Snapshot::error(&id, &name, "Zed session expired — sign in again from the auth center".into());
     }
     if !resp.status().is_success() {
-        return Snapshot::error(&id, &name, format!("Zed profile: HTTP {}", resp.status()));
+        return Snapshot::error(&id, &name, format!(
+            "Zed profile: HTTP {}{}",
+            resp.status(),
+            super::retry_hint(&resp)
+        ));
     }
     let user: Value = match resp.json().await {
         Ok(v) => v,

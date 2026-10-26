@@ -66,11 +66,29 @@ if (IS_PANEL_FORM) document.body.classList.add("panel-form");
 import { gsap } from "gsap";
 import paneLogo from "./assets/pane-logo.png?inline";
 import paneIcon from "./assets/pane-icon.png?inline";
-import { SKIN_STORAGE_KEY, readSkin, normalizeSkin, embedSkinImages, packSkinList, isPackSkin, refreshInstalledPacks, remotePackIndex, refreshSkinIndex, type SkinId } from "./skins";
+import { SKIN_STORAGE_KEY, readSkin, normalizeSkin, embedSkinImages, packSkinList, isPackSkin, refreshInstalledPacks, remotePackIndex, remoteIndexErrorClass, isNewerVersion, refreshSkinIndex, type SkinId } from "./skins";
+import { playSkinTransition } from "./skinTransition";
 import { playThemeStartup } from "./themeStartup";
 import { initialTourPending } from "./onboardingState";
+import { fingerprintIdentity, reconcileDiscovery, type DiscoveryBaseline } from "./accountDiscovery";
+import {
+  SHORTCUT_COMMANDS,
+  canonicalBinding,
+  currentShortcutPlatform,
+  effectiveBindings,
+  filterShortcutCommands,
+  findBindingConflict,
+  isImeNoise,
+  isModifierOnly,
+  matchesBinding,
+  migrateLegacyShortcuts,
+  recordBinding,
+  takeoverBinding,
+  type LegacyShortcutFields,
+  type ShortcutCommand,
+} from "./shortcutKernel";
 import { fontOnboardingMode, type FontOnboarding } from "./fontOnboarding";
-import { credentialFailure, accountFormReady, enabledAccountCount } from "./credentialPolicy";
+import { credentialFailure, credentialFinality, accountFormReady, enabledAccountCount } from "./credentialPolicy";
 import { keyAvailabilityCounts, keyAvailabilityRows, keyAvailabilitySummary, overviewFoldCount } from "./keyAvailability";
 import { loadFontPacks, fontPackFamilies, mountFontPackManager } from "./fontPacks";
 import { decorateInkSkin, clearInkSkin, ensureInkDefs } from "./inkEffects";
@@ -85,6 +103,14 @@ import {
 } from "./settings/search";
 import { mountSettingsControls } from "./settings/controls";
 import { estimateStepfunCredits } from "./stepfunEstimate";
+import {
+  aggregateModelDayTokens,
+  aggregateModelTotals,
+  foldDonutSlices,
+  statsAxisIndexes,
+  statsChartPeak,
+  type StatsModelTotal,
+} from "./statsMath";
 // The repo's changelog ships inside the bundle, so the "What's new" dialog
 // and the Settings changelog viewer read the exact file releases maintain.
 import changelogRaw from "../CHANGELOG.md?raw";
@@ -124,6 +150,11 @@ interface Snapshot {
   /// Fallback credential mode (e.g. an API key on a web-session provider):
   /// no quota rows, only the local token trend + the estimated figure.
   limited?: string;
+  upstream_status?: {
+    indicator: "none" | "minor" | "major" | "critical";
+    description: string;
+    updated_at?: number | null;
+  } | null;
 }
 
 interface ModelSpend {
@@ -385,7 +416,22 @@ function staleHelp(s: Snapshot): string {
   } else if (/error sending request|timed? ?out|connect|network|dns|proxy/.test(lw)) {
     fix = t("stale.fixNet");
   }
-  return `${w}.\n${fix}\n${t("stale.tail")}`;
+  const upstream = s.upstream_status;
+  const upstreamLine =
+    upstream && upstream.indicator !== "none"
+      ? `\n${t("upstream.line", {
+          name: providerDisplayName(providerFamily(s.id)),
+          state: t(`upstream.${upstream.indicator}` as "upstream.minor"),
+          when: upstream.updated_at
+            ? new Date(upstream.updated_at).toLocaleTimeString(localeTag(), {
+                hour: "2-digit",
+                minute: "2-digit",
+              })
+            : "",
+          description: upstream.description,
+        })}`
+      : "";
+  return `${w}.\n${upstreamLine ? `${upstreamLine}\n` : ""}${fix}\n${t("stale.tail")}`;
 }
 
 type SpendTab = "today" | "yesterday" | "last30";
@@ -543,11 +589,15 @@ interface Config {
   shortcut: string;
   categoryShortcut: string;
   localShortcuts: Record<string, string>;
+  shortcutBindings: Record<string, string[]>;
+  shortcutBindingsMigrated: boolean;
   proxy: { enabled: boolean; url: string };
   showTotalSpend: boolean;
   welcomeDismissed: boolean;
   tourSeen: boolean;
   tourPending: boolean;
+  onboardingSeen: boolean;
+  onboardingDismissed: boolean;
   lastSeenVersion: string;
   reduceAnimations: boolean;
   jumpAnimation: "smooth" | "instant";
@@ -558,7 +608,10 @@ interface Config {
   popoverSize: { w: number; h: number } | null;
   windowScale: number;
   windowScaleVersion: number;
-  uiTextSize: "small" | "medium" | "large";
+  uiTextSize: "small" | "medium" | "large" | "xlarge";
+  codeFont: string;
+  codeFontWeight: "400" | "500" | "600" | "700";
+  colorblindMode: boolean;
   silentStart: boolean;
   hideUnconfigured: boolean;
   setupPicked: boolean;
@@ -619,11 +672,15 @@ const FRONTEND_CONFIG_KEYS = [
   "shortcut",
   "categoryShortcut",
   "localShortcuts",
+  "shortcutBindings",
+  "shortcutBindingsMigrated",
   "proxy",
   "showTotalSpend",
   "welcomeDismissed",
   "tourSeen",
   "tourPending",
+  "onboardingSeen",
+  "onboardingDismissed",
   "lastSeenVersion",
   "reduceAnimations",
   "jumpAnimation",
@@ -635,6 +692,9 @@ const FRONTEND_CONFIG_KEYS = [
   "windowScale",
   "windowScaleVersion",
   "uiTextSize",
+  "codeFont",
+  "codeFontWeight",
+  "colorblindMode",
   "silentStart",
   "hideUnconfigured",
   "setupPicked",
@@ -848,11 +908,15 @@ let config: Config = {
   shortcut: "",
   categoryShortcut: "Shift+1",
   localShortcuts: {},
+  shortcutBindings: {},
+  shortcutBindingsMigrated: false,
   proxy: { enabled: false, url: "" },
   showTotalSpend: true,
   welcomeDismissed: false,
   tourSeen: false,
   tourPending: false,
+  onboardingSeen: false,
+  onboardingDismissed: false,
   lastSeenVersion: "",
   reduceAnimations: false,
   jumpAnimation: "smooth",
@@ -864,6 +928,9 @@ let config: Config = {
   windowScale: 1,
   windowScaleVersion: 2,
   uiTextSize: "small",
+  codeFont: "",
+  codeFontWeight: "400",
+  colorblindMode: false,
   silentStart: false,
   hideUnconfigured: true,
   setupPicked: false,
@@ -1218,6 +1285,15 @@ let rtkSetupNotice: { ok: boolean; text: string } | null = null;
 const rtkIntegratedTargets = new Set<string>();
 let lastSpendHistory: { d7: HistorySpend[]; all: HistorySpend[] } = { d7: [], all: [] };
 let lastSpendDaily: DailySpendRow[] = [];
+interface SpendProjection {
+  projectedTotal: number;
+  monthToDate: number;
+  medianDaily: number;
+  remainingDays: number;
+  sampleDays: number;
+  sampleSpanDays: number;
+}
+let lastSpendProjection: SpendProjection | null = null;
 let lastQoderSpend: QoderSpendReport | null = null;
 let qoderRescanBusy = false;
 /** Credits consumed inside each panel window — the same five windows the
@@ -1236,10 +1312,12 @@ interface CreditExtra {
 }
 let lastCreditExtras: CreditExtra[] = [];
 let spendLoaded = false;
-let spendDetailOpen = false;
-let spendDetailDay = "";
 let lastCreditTrend: Record<string, (number | null)[]> = {};
 let lastMeterTrend: MeterTrend[] = [];
+interface BurnPoint { at: number; left: number; start: number; resets_at: number; }
+interface BurnFit { etaMs: number | null; slopePerHour: number; points: number; spanMs: number; }
+interface MeterSampleSeries { id: string; label: string; points: BurnPoint[]; fit: BurnFit | null; }
+let lastMeterSamples: MeterSampleSeries[] = [];
 
 /// Tracks manual account-tab selections made by the user in the current view.
 /// Cleared on popover reopening or account mutations.
@@ -1402,7 +1480,7 @@ function marketEntries(): MarketEntry[] {
     entries.push({
       id: p.id, name: p.name, tagline: `v${p.version}`,
       state: selected === p.id ? "applied" : "installed",
-      updateAvailable: !!remote && remote.version !== p.version,
+      updateAvailable: !!remote && isNewerVersion(remote.version, p.version),
       remote: remote ? { url: remote.url, sha256: remote.sha256 } : undefined,
     });
   }
@@ -1670,6 +1748,8 @@ async function reloadConfigFromBackend(): Promise<void> {
   // A local write that started while get_config was in flight wins.
   if (configWritesInFlight > 0) return;
   fresh.localShortcuts = fresh.localShortcuts ?? {};
+  fresh.shortcutBindings = fresh.shortcutBindings ?? {};
+  fresh.shortcutBindingsMigrated = fresh.shortcutBindingsMigrated === true;
   fresh.skinId = normalizeSkin(fresh.skinId);
   const hideUnconfiguredChanged =
     (config.hideUnconfigured !== false) !== (fresh.hideUnconfigured !== false);
@@ -2569,6 +2649,80 @@ function usageHeatTone(used: number): "" | "warn" | "low" {
   return "";
 }
 
+/// Window absolute usage (#59-02): exact only when the vendor reports a token
+/// allowance; otherwise an estimate only for windows whose start is covered
+/// by full local days. Sub-day windows are deliberately not extrapolated.
+function windowTokenEstimate(
+  m: Metric,
+  providerId?: string,
+): { text: string; tip: string } | null {
+  if (m.usage && m.usage.unit === "tokens" && typeof m.usage.total === "number" && m.usage.total > 0) {
+    const left = Math.max(0, m.usage.total - m.usage.used);
+    return { text: t("spend.windowExact", { n: fmtTokens(left) }), tip: t("spend.windowExactTip") };
+  }
+  if (!providerId || !m.period_ms || m.period_ms < 86_400_000 || m.resets_at == null) return null;
+  const percent = m.used_percent;
+  if (percent == null || percent <= 1 || percent >= 99) return null;
+  const spend =
+    lastSpend.find((row) => row.id === providerId) ??
+    lastSpend.find((row) => providerFamily(row.id) === providerFamily(providerId));
+  if (!spend) return null;
+  const start = m.resets_at - m.period_ms;
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  if (start >= today.getTime()) return null;
+  const firstFull = new Date(start);
+  firstFull.setHours(24, 0, 0, 0);
+  const covered = Math.max(
+    0,
+    Math.floor((today.getTime() - firstFull.getTime()) / 86_400_000) + 1,
+  );
+  if (covered <= 0) return null;
+  let tokens = 0;
+  let days = 0;
+  for (let k = 0; k < Math.min(covered, 29); k += 1) {
+    const value = spend.trend[29 - k] ?? 0;
+    if (value > 0) {
+      tokens += value;
+      days += 1;
+    }
+  }
+  if (tokens <= 0 || days <= 0) return null;
+  const left = tokens * ((100 - percent) / percent);
+  if (!Number.isFinite(left) || left <= 0) return null;
+  return {
+    text: t("spend.windowEstimate", { n: fmtTokens(left) }),
+    tip: t("spend.windowEstimateTip", { days, used: Math.round(percent) }),
+  };
+}
+
+/// A 28px sparkline of the current window's remaining percentage plus the
+/// straight-line ETA. Data comes from Rust (5-minute samples, 45 days); the
+/// card never invents a slope when fewer than three points exist.
+function burnCurveHtml(id: string, m: Metric): string {
+  const row = lastMeterSamples.find((series) => series.id === id && series.label === m.label);
+  if (!row || row.points.length < 2) return "";
+  const points = row.points.slice(-120);
+  const first = points[0];
+  const last = points[points.length - 1];
+  const span = Math.max(1, last.at - first.at);
+  const x = (at: number) => Math.min(99, Math.max(1, 1 + ((at - first.at) / span) * 98));
+  const y = (left: number) => 2 + ((100 - clampPercent(left)) / 100) * 24;
+  const path = points
+    .map((point, index) => `${index ? "L" : "M"}${x(point.at).toFixed(1)},${y(point.left).toFixed(1)}`)
+    .join(" ");
+  const evenX1 = x(Math.max(first.start, first.at));
+  const evenX2 = x(first.resets_at);
+  const eta = row.fit?.etaMs ?? null;
+  const text = eta
+    ? t("burn.runsOut", { time: fmtDuration(Math.max(0, eta - Date.now())) })
+    : row.fit
+      ? t("burn.lasts")
+      : t("burn.collecting");
+  const tip = `${m.label} · ${t("burn.tip", { n: row.fit?.points ?? points.length })}`;
+  return `<div class="burn-curve" title="${escapeHtml(tip)}"><svg viewBox="0 0 100 28" preserveAspectRatio="none" aria-hidden="true"><line class="burn-even" x1="${evenX1.toFixed(1)}" y1="${y(100).toFixed(1)}" x2="${evenX2.toFixed(1)}" y2="${y(0).toFixed(1)}"/><path class="burn-line" d="${path}"/><line class="burn-now" x1="${x(last.at).toFixed(1)}" y1="1" x2="${x(last.at).toFixed(1)}" y2="27"/></svg><span class="burn-eta${eta ? "" : " quiet"}">${escapeHtml(text)}</span></div>`;
+}
+
 function renderMetric(m: Metric, providerId?: string): string {
   if (m.kind === "progress" && m.used_percent !== null) {
     const used = clampPercent(m.used_percent);
@@ -2613,8 +2767,14 @@ function renderMetric(m: Metric, providerId?: string): string {
     // first — the used figure is already backed by the percentage on the
     // left. The full foot text rides on the title for hover.
     const detailText = m.detail ? displayMetricDetail(m.detail) : "";
-    const detailHtml = [resetHtml, detailText ? escapeHtml(detailText) : ""].filter(Boolean).join(" · ");
-    const footTitle = [resetPlain, detailText].filter(Boolean).join(" · ");
+    const windowEstimate = windowTokenEstimate(m, providerId);
+    const estimateHtml = windowEstimate
+      ? `<span class="window-estimate" title="${escapeHtml(windowEstimate.tip)}">${escapeHtml(windowEstimate.text)}</span>`
+      : "";
+    const detailHtml = [resetHtml, detailText ? escapeHtml(detailText) : "", estimateHtml]
+      .filter(Boolean)
+      .join(" · ");
+    const footTitle = [resetPlain, detailText, windowEstimate?.text].filter(Boolean).join(" · ");
     const metricLabel = displayMetricLabel(m.label);
     const pace = (() => {
       if (!m.pace || !m.pace.settled) return "";
@@ -2656,6 +2816,7 @@ function renderMetric(m: Metric, providerId?: string): string {
           <div class="fill ${level}" style="width:${used}%"></div>
           ${paceMark}
         </div>
+        ${providerId ? burnCurveHtml(providerId, m) : ""}
         <span class="skin-meter-caption">${escapeHtml(headlineAlt)}</span>
         <div class="metric-foot">
           <span class="left-val clickable" data-flip="usage" title="${escapeHtml(headlineAlt)}">${headline}</span>
@@ -3758,6 +3919,212 @@ function orderedSnapshots(): Snapshot[] {
     });
 }
 
+
+// ---------------------------------------------------------------------------
+// Usage topology (#60): a read-only provider → model map opened from Overview.
+// Static base = card snapshots + ModelSpend; activity = usage-updated events
+// with a 12 s linger. Wires are hand-built S beziers; motion is CSS-only.
+// ---------------------------------------------------------------------------
+interface TopologyRow {
+  id: string;
+  name: string;
+  status: string;
+  color: string;
+  models: { name: string; tokens: number }[];
+}
+
+const TOPOLOGY_LINGER_MS = 12_000;
+const topologyActiveUntil = new Map<string, number>();
+let topologyOpen = false;
+let topologyOverlay: HTMLElement | null = null;
+let topologyResize: ResizeObserver | null = null;
+let topologyExpiryTimer: number | undefined;
+let topologyPaintQueued = false;
+
+function topologyRows(): TopologyRow[] {
+  return orderedSnapshots()
+    .filter((snapshot) => snapshot.status !== "disabled")
+    .map((snapshot) => {
+      const spend = lastSpend.find((row) => row.id === snapshot.id);
+      const models = (spend?.last30.models ?? [])
+        .filter((model) => model.tokens > 0 || model.cost > 0)
+        .sort((a, b) => b.tokens - a.tokens)
+        .slice(0, 5)
+        .map((model) => ({ name: model.model, tokens: model.tokens }));
+      return {
+        id: snapshot.id,
+        name: snapshot.name,
+        status: snapshot.status,
+        color: providerVisual(snapshot.id)?.iconColor ?? "var(--primary)",
+        models,
+      };
+    })
+    .filter((row) => row.models.length > 0);
+}
+
+/// Called from the usage-updated listener: every snapshot in the payload was
+/// just touched, so its row glows for the linger window.
+function topologyNoteActivity(snapshots: Snapshot[]): void {
+  if (!snapshots.length) return;
+  const until = Date.now() + TOPOLOGY_LINGER_MS;
+  for (const snapshot of snapshots) topologyActiveUntil.set(snapshot.id, until);
+  if (!topologyOpen) return;
+  window.clearTimeout(topologyExpiryTimer);
+  topologyExpiryTimer = window.setTimeout(() => {
+    if (topologyOpen) topologySchedulePaint();
+  }, TOPOLOGY_LINGER_MS + 100);
+  topologySchedulePaint();
+}
+
+function topologySchedulePaint(): void {
+  if (topologyPaintQueued) return;
+  topologyPaintQueued = true;
+  requestAnimationFrame(() => {
+    topologyPaintQueued = false;
+    paintTopology();
+  });
+}
+
+function topologyRowHtml(row: TopologyRow): string {
+  const active = (topologyActiveUntil.get(row.id) ?? 0) > Date.now();
+  const models = row.models.length
+    ? row.models
+        .map(
+          (model) =>
+            `<span class="topology-model" title="${escapeHtml(model.name)}"><i></i>${escapeHtml(model.name)}</span>`,
+        )
+        .join("")
+    : `<span class="topology-model is-empty">${escapeHtml(t("topology.noModels"))}</span>`;
+  return `<div class="topology-row${active ? " live" : ""}" data-topology-row="${escapeHtml(row.id)}" style="--wire:${row.color}">
+    <span class="topology-dot" aria-hidden="true"></span>
+    <span class="topology-name">${escapeHtml(row.name)}</span>
+    <div class="topology-models">${models}</div>
+  </div>`;
+}
+
+function paintTopology(): void {
+  if (!topologyOpen) return;
+  if (!topologyOverlay) {
+    const overlay = document.createElement("div");
+    overlay.id = "topology-page";
+    overlay.className = "topology-page";
+    overlay.setAttribute("role", "dialog");
+    overlay.setAttribute("aria-modal", "true");
+    overlay.setAttribute("aria-labelledby", "topology-title");
+    overlay.addEventListener("pointerdown", (event) => {
+      if (event.target === overlay) closeTopology();
+    });
+    document.body.append(overlay);
+    topologyOverlay = overlay;
+  }
+  const rows = topologyRows();
+  topologyOverlay.innerHTML = `<div class="topology-sheet">
+    <header class="topology-head">
+      <div class="topology-head-text">
+        <p class="topology-kicker">${escapeHtml(t("topology.kicker"))}</p>
+        <h2 id="topology-title">${escapeHtml(t("topology.title"))}</h2>
+        <p class="topology-subtitle">${escapeHtml(t("topology.subtitle"))}</p>
+      </div>
+      <div class="topology-actions">
+        <button type="button" class="mini-btn topology-refresh" data-topology-refresh>${uiIcon("arrowsClockwise")}<span>${escapeHtml(t("topology.refresh"))}</span></button>
+        <button type="button" class="mini-btn topology-close" data-topology-close>${uiIcon("arrowLeft")}<span>${escapeHtml(t("topology.close"))}</span></button>
+      </div>
+    </header>
+    <div class="topology-stage" data-topology-stage>
+      <svg class="topology-wires" aria-hidden="true"></svg>
+      <div class="topology-hub" data-topology-hub>
+        <img src="${paneLogo}" alt="" />
+        <strong>Pane</strong>
+        <span>${escapeHtml(t("topology.readonly"))}</span>
+      </div>
+      <div class="topology-rows" data-topology-rows>
+        ${rows.length ? rows.map(topologyRowHtml).join("") : `<p class="topology-empty">${escapeHtml(t("topology.empty"))}</p>`}
+      </div>
+    </div>
+    <footer class="topology-foot">${escapeHtml(t("topology.foot"))}</footer>
+  </div>`;
+  topologyOverlay
+    .querySelector<HTMLElement>("[data-topology-close]")
+    ?.addEventListener("click", () => closeTopology());
+  topologyOverlay
+    .querySelector<HTMLElement>("[data-topology-refresh]")
+    ?.addEventListener("click", (event) => {
+      const button = event.currentTarget as HTMLButtonElement;
+      if (button.disabled) return;
+      button.disabled = true;
+      void refresh(true, false, true).finally(() => {
+        button.disabled = false;
+      });
+    });
+  const stage = topologyOverlay.querySelector<HTMLElement>("[data-topology-stage]");
+  if (stage) {
+    topologyResize?.disconnect();
+    topologyResize = new ResizeObserver(() => layoutTopologyWires());
+    topologyResize.observe(stage);
+  }
+  requestAnimationFrame(() => layoutTopologyWires());
+}
+
+function layoutTopologyWires(): void {
+  if (!topologyOpen || !topologyOverlay) return;
+  const stage = topologyOverlay.querySelector<HTMLElement>("[data-topology-stage]");
+  const hub = topologyOverlay.querySelector<HTMLElement>("[data-topology-hub]");
+  const wires = topologyOverlay.querySelector<SVGSVGElement>(".topology-wires");
+  if (!stage || !hub || !wires) return;
+  const stageRect = stage.getBoundingClientRect();
+  if (stageRect.width <= 0 || stageRect.height <= 0) return;
+  const hubRect = hub.getBoundingClientRect();
+  const sx = hubRect.right - stageRect.left;
+  const sy = hubRect.top + hubRect.height / 2 - stageRect.top;
+  const paths: string[] = [];
+  for (const row of topologyOverlay.querySelectorAll<HTMLElement>("[data-topology-row]")) {
+    const rect = row.getBoundingClientRect();
+    const tx = rect.left - stageRect.left;
+    const ty = rect.top + rect.height / 2 - stageRect.top;
+    const mx = sx + (tx - sx) / 2;
+    const live = row.classList.contains("live");
+    const d = `M ${sx} ${sy} C ${mx} ${sy} ${mx} ${ty} ${tx} ${ty}`;
+    const color = getComputedStyle(row).getPropertyValue("--wire").trim() || "var(--primary)";
+    paths.push(
+      `<path class="topology-wire${live ? " live" : ""}" d="${d}" style="--wire:${escapeHtml(color)}" vector-effect="non-scaling-stroke"></path>`,
+    );
+    paths.push(
+      `<circle class="topology-joint${live ? " live" : ""}" cx="${tx}" cy="${ty}" r="2.6" style="--wire:${escapeHtml(color)}"></circle>`,
+    );
+  }
+  wires.setAttribute("viewBox", `0 0 ${Math.ceil(stageRect.width)} ${Math.ceil(stageRect.height)}`);
+  wires.setAttribute("width", String(Math.ceil(stageRect.width)));
+  wires.setAttribute("height", String(Math.ceil(stageRect.height)));
+  wires.innerHTML = paths.join("");
+}
+
+function topologyEscape(event: KeyboardEvent): void {
+  if (event.key !== "Escape" || event.isComposing) return;
+  event.preventDefault();
+  event.stopImmediatePropagation();
+  closeTopology();
+}
+
+function openTopology(): void {
+  if (topologyOpen) return;
+  topologyOpen = true;
+  document.body.classList.add("topology-open");
+  paintTopology();
+  document.addEventListener("keydown", topologyEscape, true);
+}
+
+function closeTopology(): void {
+  if (!topologyOpen) return;
+  topologyOpen = false;
+  document.body.classList.remove("topology-open");
+  document.removeEventListener("keydown", topologyEscape, true);
+  window.clearTimeout(topologyExpiryTimer);
+  topologyResize?.disconnect();
+  topologyResize = null;
+  topologyOverlay?.remove();
+  topologyOverlay = null;
+}
+
 /// Overview is one ring per family. Parallel extra cards stay on the
 /// dashboard, but repeating the same truncated name in the grid looks
 /// like a duplicate (two "Antig..." tiles).
@@ -4429,7 +4796,499 @@ function spendDetailDayRows(day: string): DailySpendRow[] {
     .sort((a, b) => spendDetailValue(b) - spendDetailValue(a));
 }
 
-/// Qoder CN's day block inside the daily-usage overlay. It sits beside the
+// --- Usage statistics page (#64-04/05) -------------------------------------
+// ZCode's board measures token activity; Pane already keeps a 365-day daily
+// ledger (`fetch_spend_daily`, per provider and model), so every figure here
+// is derived in the panel from that one ledger. The old popover overlay could
+// not fit more than a 26-week texture; this page owns the full year.
+type StatsRange = "7d" | "30d";
+type StatsHeatMode = "daily" | "weekly" | "cumulative";
+let statsRange: StatsRange = "7d";
+let statsHeatMode: StatsHeatMode = "daily";
+let statsSelectedDay = "";
+let statsLoading = false;
+let statsLoaded = false;
+let statsError = "";
+
+/// ZCode's own turn/tool tables (ticket 06). Null until the first load or on
+/// a database without them, in which case the KPI cell reads "—" instead of
+/// inventing a duration.
+interface StatsMetrics {
+  longestSessionMs: number | null;
+  sessions: number;
+  turns: number;
+  toolCalls: number;
+}
+let lastStatsMetrics: StatsMetrics | null = null;
+
+const STATS_HEAT_WEEKS = 52;
+const STATS_CHART_WIDTH = 600;
+const STATS_CHART_HEIGHT = 150;
+
+interface StatsDayTotal {
+  day: string;
+  tokens: number;
+  cost: number;
+  providers: number;
+}
+
+function statsToday(): string {
+  return localDayKey(new Date());
+}
+
+function statsDayDate(day: string): Date {
+  const [year, month, date] = day.split("-").map(Number);
+  return new Date(year || 1970, (month || 1) - 1, date || 1);
+}
+
+function statsShiftDay(day: string, delta: number): string {
+  const date = statsDayDate(day);
+  date.setDate(date.getDate() + delta);
+  return localDayKey(date);
+}
+
+function statsDayTotals(): Map<string, StatsDayTotal> {
+  const out = new Map<string, StatsDayTotal>();
+  for (const row of lastSpendDaily) {
+    const cell = out.get(row.day) ?? { day: row.day, tokens: 0, cost: 0, providers: 0 };
+    cell.tokens += row.tokens;
+    cell.cost += row.cost;
+    cell.providers += 1;
+    out.set(row.day, cell);
+  }
+  return out;
+}
+
+/// Current streak walks back from today (a zero day breaks it, as ZCode's
+/// builder does); the longest streak scans the whole persisted window.
+function statsStreaks(totals: Map<string, StatsDayTotal>): { current: number; longest: number } {
+  const today = statsToday();
+  let current = 0;
+  let cursor = today;
+  while ((totals.get(cursor)?.tokens ?? 0) > 0) {
+    current += 1;
+    cursor = statsShiftDay(cursor, -1);
+  }
+  const known = [...totals.keys()].filter((day) => (totals.get(day)?.tokens ?? 0) > 0).sort();
+  let longest = 0;
+  let run = 0;
+  if (known.length) {
+    for (let day = known[0]; day <= today; day = statsShiftDay(day, 1)) {
+      if ((totals.get(day)?.tokens ?? 0) > 0) {
+        run += 1;
+        longest = Math.max(longest, run);
+      } else {
+        run = 0;
+      }
+    }
+  }
+  return { current, longest };
+}
+
+function statsPercent(share: number): string {
+  return `${share.toLocaleString(localeTag(), {
+    maximumFractionDigits: share >= 10 ? 0 : 1,
+  })}%`;
+}
+
+function statsDayLabel(day: string): string {
+  return statsDayDate(day).toLocaleDateString(localeTag(), { month: "short", day: "numeric" });
+}
+
+function statsPillHtml(kind: "heat" | "range"): string {
+  const options: Array<[string, string]> = kind === "heat"
+    ? [
+        ["daily", t("stats.heatDaily")],
+        ["weekly", t("stats.heatWeekly")],
+        ["cumulative", t("stats.heatCumulative")],
+      ]
+    : [
+        ["7d", t("stats.range7")],
+        ["30d", t("stats.range30")],
+      ];
+  const current = kind === "heat" ? statsHeatMode : statsRange;
+  const attr = kind === "heat" ? "data-stats-heat-mode" : "data-stats-range";
+  return `<div class="tabs set-pill stats-pill" role="group"><i class="tab-thumb" aria-hidden="true"></i>${options
+    .map(
+      ([value, label]) =>
+        `<button type="button" class="tab${value === current ? " active" : ""}" ${attr}="${value}" aria-pressed="${value === current}">${escapeHtml(label)}</button>`,
+    )
+    .join("")}</div>`;
+}
+
+function statsEmptyHtml(title: string, hint: string): string {
+  return `<div class="stats-empty"><strong>${escapeHtml(title)}</strong><span>${escapeHtml(hint)}</span></div>`;
+}
+
+function statsKpiHtml(totals: Map<string, StatsDayTotal>): string {
+  const active = [...totals.values()].filter((row) => row.tokens > 0);
+  const totalTokens = active.reduce((sum, row) => sum + row.tokens, 0);
+  const peak = active.reduce<StatsDayTotal | null>(
+    (best, row) => (!best || row.tokens > best.tokens ? row : best),
+    null,
+  );
+  const { current, longest } = statsStreaks(totals);
+  const metrics = lastStatsMetrics;
+  const cells: Array<{ label: string; value: string; sub: string }> = [
+    {
+      label: t("stats.kpiTokens"),
+      value: fmtTokens(totalTokens),
+      sub: t("stats.windowHint"),
+    },
+    {
+      label: t("stats.kpiPeak"),
+      value: peak ? fmtTokens(peak.tokens) : "—",
+      sub: peak ? peak.day : t("stats.noData"),
+    },
+    {
+      label: t("stats.kpiLongestSession"),
+      value: metrics && metrics.longestSessionMs && metrics.longestSessionMs > 0
+        ? fmtDuration(metrics.longestSessionMs)
+        : "—",
+      sub: metrics ? "" : t("stats.pending"),
+    },
+    {
+      label: t("stats.kpiCurrentStreak"),
+      value: t("stats.days", { n: current }),
+      sub: t("stats.activeDays", { n: active.length }),
+    },
+    {
+      label: t("stats.kpiLongestStreak"),
+      value: t("stats.days", { n: longest }),
+      sub: "",
+    },
+  ];
+  if (metrics) {
+    cells.push(
+      {
+        label: t("stats.kpiSessions"),
+        value: metrics.sessions.toLocaleString(localeTag()),
+        sub: t("stats.turns", { n: metrics.turns.toLocaleString(localeTag()) }),
+      },
+      {
+        label: t("stats.kpiToolCalls"),
+        value: metrics.toolCalls.toLocaleString(localeTag()),
+        sub: "",
+      },
+    );
+  }
+  return `<div class="stats-kpi" role="list">${cells
+    .map(
+      (cell) =>
+        `<div class="stats-kpi-cell" role="listitem"><span class="stats-kpi-label">${escapeHtml(cell.label)}</span><strong class="stats-kpi-value">${escapeHtml(cell.value)}</strong>${cell.sub ? `<span class="stats-kpi-sub">${escapeHtml(cell.sub)}</span>` : ""}</div>`,
+    )
+    .join("")}</div>`;
+}
+
+function statsHeatHtml(totals: Map<string, StatsDayTotal>): string {
+  const today = statsToday();
+  const end = new Date();
+  const start = new Date(end.getFullYear(), end.getMonth(), end.getDate());
+  // 52 Sunday-aligned columns ending with the current week. Column-major flow
+  // keeps weekdays on the same row, as in ZCode's heatmap.
+  start.setDate(start.getDate() - (STATS_HEAT_WEEKS * 7 - 1) - start.getDay());
+  const dayKeys: string[] = [];
+  for (let index = 0; index < STATS_HEAT_WEEKS * 7; index += 1) {
+    const date = new Date(start);
+    date.setDate(start.getDate() + index);
+    dayKeys.push(localDayKey(date));
+  }
+  const dailyValues = dayKeys.map((day) => totals.get(day)?.tokens ?? 0);
+  const weekStarts: string[] = [];
+  const weekEnds: string[] = [];
+  const weekValues: number[] = [];
+  for (let week = 0; week < STATS_HEAT_WEEKS; week += 1) {
+    weekStarts.push(dayKeys[week * 7]);
+    weekEnds.push(dayKeys[week * 7 + 6]);
+    weekValues.push(
+      dailyValues.slice(week * 7, week * 7 + 7).reduce((sum, value) => sum + value, 0),
+    );
+  }
+  const cumulative: number[] = [];
+  let running = 0;
+  for (const value of weekValues) {
+    running += value;
+    cumulative.push(running);
+  }
+  const levelFor = (value: number, max: number): number =>
+    value <= 0 ? 0 : Math.min(4, Math.max(1, Math.ceil((value / max) * 4)));
+  const cells: string[] = [];
+  if (statsHeatMode === "daily") {
+    const max = Math.max(...dailyValues, 1);
+    dayKeys.forEach((day) => {
+      const total = totals.get(day);
+      const value = total?.tokens ?? 0;
+      const outside = day > today;
+      const title = total
+        ? `${day}\n${t("stats.dayTokens")} ${fmtTokens(value)} · ${t("stats.dayCost")} ${fmtMoney(total.cost)}\n${t("stats.tools", { n: total.providers })}`
+        : `${day}\n${t("stats.noUsage")}`;
+      cells.push(
+        `<button type="button" class="stats-heat-cell level-${levelFor(value, max)}${outside ? " outside" : ""}${day === statsSelectedDay ? " selected" : ""}"${outside ? " disabled" : ""} data-stats-day="${day}" title="${escapeHtml(title)}" aria-label="${escapeHtml(title)}"></button>`,
+      );
+    });
+  } else {
+    const values = statsHeatMode === "weekly" ? weekValues : cumulative;
+    const max = Math.max(...values, 1);
+    for (let week = 0; week < STATS_HEAT_WEEKS; week += 1) {
+      const value = values[week];
+      const level = levelFor(value, max);
+      const filled = value <= 0 ? 0 : Math.min(7, Math.max(1, Math.ceil((value / max) * 7)));
+      const outside = weekStarts[week] > today;
+      const target = weekEnds[week] > today ? today : weekEnds[week];
+      const selected = statsSelectedDay >= weekStarts[week] && statsSelectedDay <= weekEnds[week];
+      const title = statsHeatMode === "weekly"
+        ? t("stats.heatWeekTip", {
+            date: weekEnds[week],
+            tokens: fmtTokens(value),
+            cost: fmtMoney(weekValues[week]),
+          })
+        : t("stats.heatCumulativeTip", { date: weekEnds[week], tokens: fmtTokens(value) });
+      for (let offset = 0; offset < 7; offset += 1) {
+        const isFilled = offset >= 7 - filled;
+        cells.push(
+          `<button type="button" class="stats-heat-cell${isFilled ? ` level-${level}` : ""}${outside ? " outside" : ""}${isFilled && selected ? " selected" : ""}"${outside ? " disabled" : ""} data-stats-day="${target}" title="${escapeHtml(title)}" aria-label="${escapeHtml(title)}"></button>`,
+        );
+      }
+    }
+  }
+  // Month labels follow ZCode: a column containing the 1st belongs to the new
+  // month, and only the latest twelve labels stay legible (older spans keep
+  // their width so the grid does not drift).
+  const monthParts: Array<{ text: string; span: number }> = [];
+  let monthKey = "";
+  for (let week = 0; week < STATS_HEAT_WEEKS; week += 1) {
+    let labelDate = new Date(start);
+    labelDate.setDate(start.getDate() + week * 7);
+    for (let offset = 0; offset < 7; offset += 1) {
+      const date = new Date(start);
+      date.setDate(start.getDate() + week * 7 + offset);
+      if (date.getDate() === 1) {
+        labelDate = date;
+        break;
+      }
+    }
+    const key = `${labelDate.getFullYear()}-${labelDate.getMonth()}`;
+    if (key === monthKey) {
+      monthParts[monthParts.length - 1].span += 1;
+    } else {
+      monthKey = key;
+      monthParts.push({
+        text: labelDate.toLocaleDateString(localeTag(), { month: "short" }),
+        span: 1,
+      });
+    }
+  }
+  const hidden = Math.max(0, monthParts.length - 12);
+  const months = monthParts
+    .map(
+      (part, index) =>
+        `<span style="grid-column: span ${part.span}">${index < hidden ? "" : escapeHtml(part.text)}</span>`,
+    )
+    .join("");
+  return `<div class="stats-heat-block"><div class="stats-heat-grid" data-stats-heat-mode="${statsHeatMode}">${cells.join("")}</div><div class="stats-heat-months">${months}</div></div>`;
+}
+
+function statsRangeDays(): string[] {
+  const count = statsRange === "7d" ? 7 : 30;
+  const end = new Date();
+  const days: string[] = [];
+  for (let index = count - 1; index >= 0; index -= 1) {
+    const date = new Date(end.getFullYear(), end.getMonth(), end.getDate());
+    date.setDate(date.getDate() - index);
+    days.push(localDayKey(date));
+  }
+  return days;
+}
+
+function statsRangeRows(days: string[]): DailySpendRow[] {
+  const wanted = new Set(days);
+  return lastSpendDaily.filter((row) => wanted.has(row.day));
+}
+
+function statsLineChartHtml(
+  days: string[],
+  dayModels: Map<string, Map<string, number>>,
+  models: StatsModelTotal[],
+): string {
+  const top = models.slice(0, 6);
+  if (!top.length || top.every((model) => model.tokens <= 0)) {
+    return statsEmptyHtml(t("stats.noTrend"), t("stats.noTrendHint"));
+  }
+  // The chart is a set of independent lines, not a stack: the Y range follows
+  // the largest single visible point, so a good model is not flattened by the
+  // sum of every model on a busy day.
+  const max = Math.max(1, statsChartPeak(days, dayModels, top));
+  const left = 8;
+  const right = 8;
+  const topPad = 8;
+  const bottom = 8;
+  const innerW = STATS_CHART_WIDTH - left - right;
+  const innerH = STATS_CHART_HEIGHT - topPad - bottom;
+  const step = days.length > 1 ? innerW / (days.length - 1) : 0;
+  const xAt = (index: number) =>
+    days.length > 1 ? left + index * step : left + innerW / 2;
+  const yAt = (value: number) => topPad + innerH - (value / max) * innerH;
+  const lines = top
+    .map((model, seriesIndex) => {
+      const points = days
+        .map(
+          (day, index) =>
+            `${xAt(index).toFixed(2)},${yAt(dayModels.get(day)?.get(model.model) ?? 0).toFixed(2)}`,
+        )
+        .join(" ");
+      return `<polyline class="stats-line" style="stroke:var(--stats-c${seriesIndex + 1})" points="${points}" fill="none" stroke-width="1.75" vector-effect="non-scaling-stroke" stroke-linejoin="round" stroke-linecap="round"/>`;
+    })
+    .join("");
+  const hitWidth = days.length ? innerW / days.length : innerW;
+  const hits = days
+    .map((day, index) => {
+      const values = top
+        .map((model) => ({ label: model.model, value: dayModels.get(day)?.get(model.model) ?? 0 }))
+        .filter((entry) => entry.value > 0);
+      const dayTotal = [...(dayModels.get(day)?.values() ?? [])].reduce(
+        (sum, value) => sum + value,
+        0,
+      );
+      const tip = values.length
+        ? `${day} · ${t("stats.total")} ${fmtTokens(dayTotal)}\n${values.map((entry) => `${entry.label}: ${fmtTokens(entry.value)}`).join("\n")}`
+        : `${day} · ${t("stats.noUsage")}`;
+      return `<rect class="stats-line-hit" x="${(left + index * hitWidth).toFixed(2)}" y="0" width="${hitWidth.toFixed(2)}" height="${STATS_CHART_HEIGHT}" fill="transparent"><title>${escapeHtml(tip)}</title></rect>`;
+    })
+    .join("");
+  const labels = statsAxisIndexes(days.length)
+    .map((index) => {
+      const position = days.length > 1 ? index / (days.length - 1) : 0.5;
+      const edge = index === 0 ? " start" : index === days.length - 1 ? " end" : "";
+      return `<span class="stats-axis-label${edge ? ` align${edge}` : ""}" style="left:${(position * 100).toFixed(2)}%">${escapeHtml(statsDayLabel(days[index]))}</span>`;
+    })
+    .join("");
+  const legend = top
+    .map(
+      (model, index) =>
+        `<span class="stats-legend-item" title="${escapeHtml(model.model)}"><i style="background:var(--stats-c${index + 1})"></i><span>${escapeHtml(model.model)}</span></span>`,
+    )
+    .join("");
+  return `<div class="stats-legend" role="list">${legend}</div><div class="stats-line-wrap"><svg class="stats-line-svg" viewBox="0 0 ${STATS_CHART_WIDTH} ${STATS_CHART_HEIGHT}" preserveAspectRatio="none" role="img" aria-label="${escapeHtml(t("stats.trendTitle"))}">${lines}${hits}</svg><div class="stats-axis">${labels}</div></div>`;
+}
+
+function statsDonutHtml(models: StatsModelTotal[]): string {
+  const slices = foldDonutSlices(models, t("stats.other"));
+  const total = slices.reduce((sum, slice) => sum + slice.tokens, 0);
+  if (!slices.length || total <= 0) {
+    return statsEmptyHtml(t("stats.noModels"), t("stats.noModelsHint"));
+  }
+  let start = 0;
+  const arcs = slices
+    .map((slice, index) => {
+      const share = slice.share * 100;
+      const visible = Math.max(0, share - (slices.length > 1 ? 0.8 : 0));
+      const arc = `<circle class="stats-donut-slice" cx="60" cy="60" r="40" pathLength="100" fill="none" stroke="var(--stats-c${index + 1})" stroke-width="23" stroke-dasharray="${visible.toFixed(2)} ${(100 - visible).toFixed(2)}" stroke-dashoffset="${(-start).toFixed(2)}"/>`;
+      start += share;
+      return arc;
+    })
+    .join("");
+  const rows = slices
+    .map(
+      (slice, index) =>
+        `<div class="stats-donut-row" role="listitem"><i style="background:var(--stats-c${index + 1})"></i><span class="stats-donut-name" title="${escapeHtml(slice.label)}">${escapeHtml(slice.label)}</span><span class="stats-donut-share">${escapeHtml(statsPercent(slice.share * 100))}</span><span class="stats-donut-tokens">${escapeHtml(fmtTokens(slice.tokens))}</span></div>`,
+    )
+    .join("");
+  return `<div class="stats-donut-block"><svg class="stats-donut" viewBox="0 0 120 120" role="img" aria-label="${escapeHtml(t("stats.donutTitle"))}"><g transform="rotate(-90 60 60)">${arcs}</g><text x="60" y="58" text-anchor="middle" class="stats-donut-total">${escapeHtml(fmtTokens(total))}</text><text x="60" y="72" text-anchor="middle" class="stats-donut-unit">${escapeHtml(t("stats.tokenUnit"))}</text></svg><div class="stats-donut-list" role="list">${rows}</div></div>`;
+}
+
+function statsDayDetailHtml(day: string): string {
+  const rows = spendDetailDayRows(day);
+  const totals = rows.reduce(
+    (sum, row) => ({ cost: sum.cost + row.cost, tokens: sum.tokens + row.tokens }),
+    { cost: 0, tokens: 0 },
+  );
+  const qoder = qoderDayHtml(day);
+  const detail = rows.length || qoder
+    ? `${rows
+        .map((row) => {
+          const models = row.models
+            .map((model) => {
+              const approx = model.estimated
+                ? `<span class="spend-est" title="${escapeHtml(t("spend.estimatedTip"))}">≈ </span>`
+                : "";
+              return `<div class="spend-detail-model"><span>${escapeHtml(model.model)}</span><span>${approx}${escapeHtml(fmtSpendVal({ cost: model.cost, tokens: model.tokens, models: [] }) + spendCostNote({ cost: model.cost, tokens: model.tokens, models: [] }))}</span></div>`;
+            })
+            .join("");
+          return `<article class="spend-detail-tool"><div class="spend-detail-tool-head"><strong>${escapeHtml(providerNameForSpend(row.id))}</strong><span>${escapeHtml(fmtSpendVal({ cost: row.cost, tokens: row.tokens, models: [] }) + spendCostNote({ cost: row.cost, tokens: row.tokens, models: [] }))}</span></div>${models || `<div class="spend-detail-model muted">${escapeHtml(t("spendDetail.noModelBreakdown"))}</div>`}</article>`;
+        })
+        .join("")}${qoder}`
+    : statsEmptyHtml(t("stats.noUsage"), t("stats.dayEmptyHint"));
+  return `<div class="stats-day-head"><div><h3>${escapeHtml(day)}</h3><span>${escapeHtml(t("stats.dayHint"))}</span></div><div class="stats-day-totals"><span>${escapeHtml(t("stats.dayCost"))} <strong>${escapeHtml(fmtMoney(totals.cost))}</strong></span><span>${escapeHtml(t("stats.dayTokens"))} <strong>${escapeHtml(fmtTokens(totals.tokens))}</strong></span></div></div>${detail}`;
+}
+
+function renderStatsPage(): void {
+  const root = document.querySelector<HTMLElement>("#st-stats .stats-root");
+  if (!root) return;
+  const totals = statsDayTotals();
+  const hasData = [...totals.values()].some((row) => row.tokens > 0);
+  const days = statsRangeDays();
+  const rows = statsRangeRows(days);
+  const dayModels = aggregateModelDayTokens(rows, t("stats.unknownModel"));
+  const models = aggregateModelTotals(rows, t("stats.unknownModel"));
+  if (!statsSelectedDay) statsSelectedDay = statsToday();
+  const refreshing = statsLoading && statsLoaded;
+  root.innerHTML = `<div class="stats-page">
+    ${statsError ? `<div class="stats-error"><span>${escapeHtml(t("stats.loadFailed", { err: statsError }))}</span><button type="button" class="mini-btn" data-stats-refresh>${escapeHtml(t("stats.retry"))}</button></div>` : ""}
+    ${statsLoading && !statsLoaded ? `<div class="stats-loading">${escapeHtml(t("stats.loading"))}</div>` : `
+      ${statsKpiHtml(totals)}
+      <section class="stats-block">
+        <div class="stats-block-head"><div><h3>${escapeHtml(t("stats.heatTitle"))}</h3><p>${escapeHtml(t("stats.heatHint"))}</p></div>${statsPillHtml("heat")}</div>
+        ${hasData ? statsHeatHtml(totals) : statsEmptyHtml(t("stats.noUsage"), t("stats.noHeatHint"))}
+        <div class="stats-heat-foot"><div class="stats-heat-legend"><span>${escapeHtml(t("stats.less"))}</span><i class="stats-heat-swatch"></i><i class="stats-heat-swatch level-1"></i><i class="stats-heat-swatch level-2"></i><i class="stats-heat-swatch level-3"></i><i class="stats-heat-swatch level-4"></i><span>${escapeHtml(t("stats.more"))}</span></div></div>
+      </section>
+      <section class="stats-block">
+        <div class="stats-block-head"><div><h3>${escapeHtml(t("stats.trendTitle"))}</h3><p>${escapeHtml(t("stats.trendHint"))}</p></div>${statsPillHtml("range")}</div>
+        ${statsLineChartHtml(days, dayModels, models)}
+        <div class="stats-donut-head"><h3>${escapeHtml(t("stats.donutTitle"))}</h3><p>${escapeHtml(t("stats.donutHint"))}</p></div>
+        ${statsDonutHtml(models)}
+        <div class="stats-foot"><span>${escapeHtml(statsRange === "7d" ? t("stats.rangeHint7") : t("stats.rangeHint30"))}</span><button type="button" class="mini-btn stats-refresh${refreshing ? " busy" : ""}" data-stats-refresh ${refreshing ? "disabled" : ""}>${uiIcon("arrowsClockwise")}<span>${escapeHtml(refreshing ? t("stats.refreshing") : t("stats.refresh"))}</span></button></div>
+      </section>
+      <section class="stats-block stats-day-block">
+        ${statsDayDetailHtml(statsSelectedDay)}
+      </section>
+    `}
+  </div>`;
+  requestAnimationFrame(() => {
+    root.querySelectorAll<HTMLElement>(".set-pill").forEach((pill) => positionTabThumb(pill));
+  });
+}
+
+async function loadStatsData(): Promise<void> {
+  if (statsLoading) return;
+  statsLoading = true;
+  statsError = "";
+  renderStatsPage();
+  try {
+    const [daily, qoder] = await Promise.all([
+      invoke<DailySpendRow[]>("fetch_spend_daily", { rangeDays: 365 }),
+      invoke<QoderSpendReport>("fetch_qoder_spend").catch(() => null),
+      invoke<StatsMetrics | null>("fetch_zcode_usage_metrics")
+        .then((metrics) => {
+          lastStatsMetrics = metrics;
+          return null;
+        })
+        .catch(() => {
+          lastStatsMetrics = null;
+          return null;
+        }),
+    ]).then(([daily, qoder]) => [daily, qoder] as const);
+    lastSpendDaily = normalizeDaily(daily);
+    lastQoderSpend = qoder;
+    statsLoaded = true;
+  } catch (err) {
+    statsError = String(err);
+  } finally {
+    statsLoading = false;
+    renderStatsPage();
+  }
+}
+
+/// Qoder CN's day block inside the stats page. It sits beside the
 /// dollar rows rather than inside them: credits are measured, billed tokens
 /// are derived, and neither belongs in the donut or the $ totals. Nominal
 /// credits and charged credits are shown apart because free/zero-rate models
@@ -4500,10 +5359,7 @@ async function rescanQoderUsage(): Promise<void> {
   try {
     const result = await invoke<QoderRescan>("rescan_qoder_sessions");
     lastQoderSpend = result.spend;
-    if (spendDetailOpen) {
-      document.querySelector(".spend-detail-overlay")?.remove();
-      document.body.insertAdjacentHTML("beforeend", renderSpendDetailOverlay());
-    }
+    if (IS_PANEL_FORM) renderStatsPage();
     requestRender();
     const sessions = result.spend.source.sessions;
     const trips = result.spend.all.trips;
@@ -4533,97 +5389,9 @@ async function rescanQoderUsage(): Promise<void> {
   }
 }
 
-function renderSpendDetailOverlay(): string {
-  const today = new Date();
-  const end = new Date(today.getFullYear(), today.getMonth(), today.getDate());
-  const start = new Date(end);
-  // 26 Sunday-aligned weeks (~half a year): square cells shrink to the panel
-  // width (ZCode's usage board layout) instead of forcing a horizontal scroll.
-  const heatWeeks = 26;
-  start.setDate(start.getDate() - (heatWeeks * 7 - 1) - start.getDay());
-  const daily = new Map<string, { cost: number; tokens: number; providers: number }>();
-  for (const row of lastSpendDaily) {
-    const cell = daily.get(row.day) ?? { cost: 0, tokens: 0, providers: 0 };
-    cell.cost += row.cost;
-    cell.tokens += row.tokens;
-    cell.providers += 1;
-    daily.set(row.day, cell);
-  }
-  const values = [...daily.values()].map(spendDetailValue).filter((value) => value > 0);
-  const maxValue = Math.max(...values, 1);
-  const cells: string[] = [];
-  for (let index = 0; index < heatWeeks * 7; index += 1) {
-    const date = new Date(start);
-    date.setDate(start.getDate() + index);
-    const day = localDayKey(date);
-    const value = daily.get(day);
-    const amount = value ? spendDetailValue(value) : 0;
-    const level = amount <= 0 ? 0 : Math.min(4, Math.max(1, Math.ceil((amount / maxValue) * 4)));
-    const outside = date > end ? " outside" : "";
-    const selected = day === spendDetailDay ? " selected" : "";
-    const tip = value
-      ? `${day} · ${fmtMoney(value.cost)} · ${fmtTokens(value.tokens)} · ${value.providers} tools`
-      : `${day} · ${t("spendDetail.noUsage")}`;
-    cells.push(`<button class="spend-heat-cell level-${level}${outside}${selected}" data-spend-detail-day="${day}" title="${escapeHtml(tip)}" aria-label="${escapeHtml(tip)}"></button>`);
-  }
-  // Month labels under the grid: one span per run of same-month columns, and
-  // a column containing the 1st belongs to the new month (ZCode's rule).
-  const monthSpans: string[] = [];
-  let monthLabel = "";
-  let monthSpan = 0;
-  const flushMonth = () => {
-    if (monthSpan > 0) {
-      monthSpans.push(`<span style="grid-column: span ${monthSpan}">${escapeHtml(monthLabel)}</span>`);
-    }
-  };
-  for (let week = 0; week < heatWeeks; week += 1) {
-    let label = "";
-    for (let d = 0; d < 7; d += 1) {
-      const date = new Date(start);
-      date.setDate(start.getDate() + week * 7 + d);
-      if (date.getDate() === 1) {
-        label = date.toLocaleDateString(localeTag(), { month: "short" });
-        break;
-      }
-    }
-    if (label && label !== monthLabel) {
-      flushMonth();
-      monthLabel = label;
-      monthSpan = 1;
-    } else {
-      monthSpan += 1;
-    }
-  }
-  flushMonth();
-  const selectedDay = spendDetailDay || localDayKey(end);
-  const rows = spendDetailDayRows(selectedDay);
-  const selectedTotals = rows.reduce((sum, row) => ({ cost: sum.cost + row.cost, tokens: sum.tokens + row.tokens }), { cost: 0, tokens: 0 });
-  const qoder = qoderDayHtml(selectedDay);
-  const detailRows = rows.length || qoder
-    ? `${rows.map((row) => {
-        const models = row.models.map((model) => {
-          const approx = model.estimated
-            ? `<span class="spend-est" title="${escapeHtml(t("spend.estimatedTip"))}">≈ </span>`
-            : "";
-          return `<div class="spend-detail-model"><span>${escapeHtml(model.model)}</span><span>${approx}${escapeHtml(fmtSpendVal({ cost: model.cost, tokens: model.tokens, models: [] }) + spendCostNote({ cost: model.cost, tokens: model.tokens, models: [] }))}</span></div>`;
-        }).join("");
-        return `<article class="spend-detail-tool"><div class="spend-detail-tool-head"><strong>${escapeHtml(providerNameForSpend(row.id))}</strong><span>${escapeHtml(fmtSpendVal({ cost: row.cost, tokens: row.tokens, models: [] }) + spendCostNote({ cost: row.cost, tokens: row.tokens, models: [] }))}</span></div>${models || `<div class="spend-detail-model muted">${escapeHtml(t("spendDetail.noModelBreakdown"))}</div>`}</article>`;
-      }).join("")}${qoder}`
-    : `<div class="spend-detail-empty">${escapeHtml(t("spendDetail.noUsage"))}</div>`;
-  return `<div class="spend-detail-overlay" role="dialog" aria-modal="true" aria-labelledby="spend-detail-title">
-    <section class="spend-detail-panel">
-      <header class="spend-detail-header"><div><p class="spend-detail-kicker">${escapeHtml(t("spendDetail.kicker"))}</p><h2 id="spend-detail-title">${escapeHtml(t("spendDetail.title"))}</h2><p>${escapeHtml(t("spendDetail.subtitle"))}</p></div><button class="mini-btn" data-spend-detail-close>${uiIcon("x")}</button></header>
-      <div class="spend-detail-summary"><div><span>${escapeHtml(selectedDay)}</span><strong>${escapeHtml(fmtMoney(selectedTotals.cost))}</strong></div><div><span>${escapeHtml(t("spendDetail.tokens"))}</span><strong>${escapeHtml(fmtTokens(selectedTotals.tokens))}</strong></div><div><span>${escapeHtml(t("spendDetail.tools"))}</span><strong>${rows.length}</strong></div></div>
-      <div class="spend-heat-wrap"><div class="spend-heat-top"><div class="spend-heat-legend"><span>${escapeHtml(t("spendDetail.less"))}</span><i class="spend-heat-cell spend-heat-swatch"></i><i class="spend-heat-cell spend-heat-swatch level-1"></i><i class="spend-heat-cell spend-heat-swatch level-2"></i><i class="spend-heat-cell spend-heat-swatch level-3"></i><i class="spend-heat-cell spend-heat-swatch level-4"></i><span>${escapeHtml(t("spendDetail.more"))}</span></div></div><div class="spend-heat-grid">${cells.join("")}</div><div class="spend-heat-months">${monthSpans.join("")}</div></div>
-      <div class="spend-detail-day-head"><h3>${escapeHtml(selectedDay)}</h3><span>${escapeHtml(t("spendDetail.dayHint"))}</span></div>
-      <div class="spend-detail-tools">${detailRows}</div>
-    </section>
-  </div>`;
-}
-
 /// The popover's own window chrome: pin (always-on-top) and the position
-/// lock. They live in the total-spend card's head, left of the daily-detail
-/// button, because that row is always the first thing in view. The panel
+/// lock. They live in the total-spend card's head, left of the share button,
+/// because that row is always the first thing in view. The panel
 /// form is a normal window — it has its own frame, so it gets none.
 function popoverChromeHtml(): string {
   if (IS_PANEL_FORM) return "";
@@ -4771,7 +5539,6 @@ function renderTotalSpend(): string {
           <span class="provider-name">${escapeHtml(t("spend.title"))}</span>
           <span class="spacer"></span>
           ${popoverChromeHtml()}
-          <button class="mini-btn spend-detail-btn" data-spend-details title="${escapeHtml(t("spendDetail.open"))}" aria-label="${escapeHtml(t("spendDetail.open"))}">${uiIcon("rows")}</button>
           ${foldChevron}
         </div>
         ${isFolded ? "" : `<div class="spend-filter-row">
@@ -4815,6 +5582,16 @@ function renderTotalSpend(): string {
     <button class="tab col-head${!rangeSelected && spendTab === "yesterday" ? " active" : ""}" data-tab="yesterday">${t("spend.yesterday")}</button>
     ${(["d7", "d30", "all"] as const).map((id) => `<button class="tab col-head${rangeSelected && rangeTab === id ? " active" : ""}" data-range-tab="${id}">${t(id === "d7" ? "spend.days7" : id === "d30" ? "spend.days30" : "spend.rangeAll")}</button>`).join("")}`;
 
+  const monthProjectionHtml = (rtk: boolean): string => {
+    const projection = lastSpendProjection;
+    if (!projection || rtk || config.spendMetric !== "cost") return "";
+    const tip = t("spend.monthProjectedTip", {
+      spent: fmtMoney(projection.monthToDate),
+      median: fmtMoney(projection.medianDaily),
+      days: projection.remainingDays,
+    });
+    return `<div class="col-project" title="${escapeHtml(tip)}"><span>${escapeHtml(t("spend.monthProjected"))}</span><span class="spend-est">≈ ${escapeHtml(fmtMoney(projection.projectedTotal))}</span>${projection.sampleDays < 5 ? `<em>${escapeHtml(t("spend.monthFew"))}</em>` : ""}</div>`;
+  };
   const rangeCol = () => {
     const colEntries = groupedEntriesForRange(rangeTab);
     const totals = colEntries.reduce(
@@ -4829,6 +5606,7 @@ function renderTotalSpend(): string {
           ${periodControls}
         </div>
         ${colTotalHtml({ ...emptyWindow(), ...totals, models: [] }, estimatedTokensFor(colEntries))}
+        ${monthProjectionHtml(rtkMode)}
         <div class="legend">
           ${shown.map((e) => legendRowHtml(e, rangeTab)).join("")}
           ${overflow > 0 ? `<div class="legend-row more">+${overflow}</div>` : ""}
@@ -4969,8 +5747,7 @@ function renderTotalSpend(): string {
         <span class="spacer"></span>
         ${updateVersion ? `<button class="spend-update-btn${updatePushing ? " busy" : ""}" data-update-push${updatePushing && updatePct != null ? ` style="--pct:${updatePct}"` : ""} title="${escapeHtml(t("update.pushTip", { version: updateVersion }))}" aria-label="${escapeHtml(t("update.pushTip", { version: updateVersion }))}">${uiIcon("arrowUp")}</button>` : ""}
         ${popoverChromeHtml()}
-        ${rtkMode ? "" : `<button class="mini-btn spend-detail-btn" data-spend-details title="${escapeHtml(t("spendDetail.open"))}" aria-label="${escapeHtml(t("spendDetail.open"))}">${uiIcon("rows")}</button>
-        <button class="share-btn" data-share="__total__" title="${escapeHtml(t("card.share"))}">${uiIcon("shareNetwork")}</button>`}
+        ${rtkMode ? "" : `<button class="share-btn" data-share="__total__" title="${escapeHtml(t("card.share"))}">${uiIcon("shareNetwork")}</button>`}
         ${foldChevron}
       </div>
       ${isFolded ? "" : `
@@ -6131,6 +6908,7 @@ function renderQuotaOverview(): string {
         </span>
         <span class="spacer"></span>
         ${styleTabs}
+        <button type="button" class="card-refresh overview-topology" data-topology-open title="${escapeHtml(t("topology.open"))}">${uiIcon("globe")}</button>
         <button type="button" class="card-refresh overview-expiring${overviewExpiringOpen ? " on" : ""}" data-overview-expiring title="${escapeHtml(t("overview.expiring"))}">⏱</button>
         <button type="button" class="card-refresh overview-refresh" data-overview-refresh title="${escapeHtml(t("overview.refresh"))}">${uiIcon("arrowsClockwise")}</button>
         ${foldChevron}
@@ -6177,6 +6955,7 @@ function renderQuotaOverview(): string {
 
 let buildText = "";
 let updateVersion: string | null = null;
+let aboutUpdateSync: (() => void) | null = null;
 /// In-flight push state for the spend-header indicator. Module-level so a
 /// dashboard re-render mid-download keeps the ring (the button element is
 /// replaced on every refresh cycle).
@@ -6816,62 +7595,47 @@ function openGroupManagementPanel(): void {
   });
 }
 
-function shortcutKeyToken(event: KeyboardEvent): string {
-  if (/^Digit[0-9]$/.test(event.code)) return event.code.slice(5);
-  if (/^Numpad[0-9]$/.test(event.code)) return event.code.slice(6);
-  if (/^Key[A-Z]$/.test(event.code)) return event.code.slice(3);
-  if (/^F[0-9]{1,2}$/.test(event.code)) return event.code;
-  return event.key.length === 1 ? event.key.toUpperCase() : event.key;
+const shortcutPlatform = currentShortcutPlatform();
+
+function shortcutLegacyFields(): LegacyShortcutFields {
+  return { shortcut: config.shortcut, categoryShortcut: config.categoryShortcut };
 }
 
-function shortcutMatches(event: KeyboardEvent, shortcut: string): boolean {
-  const parts = shortcut.split("+").map((part) => part.trim()).filter(Boolean);
-  if (!parts.length) return false;
-  const key = parts[parts.length - 1].toUpperCase();
-  const modifiers = new Set(parts.slice(0, -1).map((part) => part.toLowerCase()));
-  const expected = {
-    ctrl: modifiers.has("ctrl"),
-    alt: modifiers.has("alt"),
-    shift: modifiers.has("shift"),
-    meta: modifiers.has("meta") || modifiers.has("cmd"),
-  };
-  return expected.ctrl === event.ctrlKey && expected.alt === event.altKey &&
-    expected.shift === event.shiftKey && expected.meta === event.metaKey &&
-    shortcutKeyToken(event).toUpperCase() === key;
+function shortcutOverrides(): Record<string, string[]> {
+  return config.shortcutBindings ?? {};
 }
 
-const LOCAL_SHORTCUTS = [
-  { id: "settings", key: "settings.actionSettings", default: "Ctrl+S" },
-  { id: "refresh", key: "settings.actionRefresh", default: "Ctrl+R" },
-  { id: "customize", key: "settings.actionCustomize", default: "Ctrl+E" },
-  { id: "theme", key: "settings.actionTheme", default: "Ctrl+L" },
-  { id: "expiring", key: "settings.actionExpiring", default: "T" },
-  { id: "period", key: "settings.actionPeriod", default: "Shift" },
-] as const;
-type LocalShortcutAction = (typeof LOCAL_SHORTCUTS)[number]["id"];
-function localShortcut(action: LocalShortcutAction): string {
-  return config.localShortcuts?.[action] ?? LOCAL_SHORTCUTS.find((row) => row.id === action)!.default;
+function shortcutRows(): ShortcutCommand[] {
+  return SHORTCUT_COMMANDS.filter((command) => command.configurable);
 }
 
-const SHORTCUT_MODIFIER_KEYS = new Set(["Control", "Alt", "Shift", "Meta"]);
-const SHORTCUT_DEFAULTS: Record<string, string> = {
-  wake: "Alt+2",
-  category: "Shift+1",
-  ...Object.fromEntries(LOCAL_SHORTCUTS.map((row) => [row.id, row.default])),
-};
-
-function shortcutRows(): { id: string; labelKey: string }[] {
-  return [
-    { id: "wake", labelKey: "settings.wakeShortcut" },
-    { id: "category", labelKey: "settings.categoryShortcut" },
-    ...LOCAL_SHORTCUTS.map((row) => ({ id: row.id as string, labelKey: row.key as string })),
-  ];
+function shortcutDefaults(id: string): string[] {
+  return [...(SHORTCUT_COMMANDS.find((command) => command.id === id)?.defaultBindings ?? [])];
 }
 
+function effectiveShortcutBindings(id: string): string[] {
+  return effectiveBindings(id, shortcutOverrides(), shortcutLegacyFields());
+}
+
+/// First binding, for the compact places (onboarding step, status text).
 function shortcutValue(id: string): string {
-  if (id === "wake") return config.shortcut ?? "";
-  if (id === "category") return config.categoryShortcut || "";
-  return localShortcut(id as LocalShortcutAction);
+  return effectiveShortcutBindings(id)[0] ?? "";
+}
+
+let shortcutSearchQuery = "";
+let shortcutRecordingActive = false;
+
+/// One-time move from the single-value map to id → bindings[]. An explicit
+/// empty string becomes an empty array, so a deliberately cleared row stays
+/// cleared instead of silently returning to its default.
+function ensureShortcutBindings(): void {
+  if (config.shortcutBindingsMigrated) return;
+  // The marker matters when the user deletes every override: an empty map is
+  // a real state and must not re-import stale localShortcuts on next launch.
+  const migrated = migrateLegacyShortcuts(config.localShortcuts);
+  config.shortcutBindings = migrated;
+  config.shortcutBindingsMigrated = true;
+  void patchConfig({ shortcutBindings: migrated, shortcutBindingsMigrated: true });
 }
 
 /// Binding → key-cap chips ("Ctrl+S" → [Ctrl] + [S]); empty = 未设置.
@@ -6884,143 +7648,336 @@ function shortcutChips(value: string): string {
     .join('<span class="sc-plus">+</span>');
 }
 
-/// One renderer for every row (wake + category + local actions): identical
-/// markup means identical alignment, and the recorder UX follows the
-/// mainstream pattern (VS Code / Raycast): click to record, Esc cancels,
-/// Backspace clears, the ↺ button restores the built-in default, and the ×
-/// clears the binding so a fresh one can be recorded. Conflicts surface as
-/// the row's red state text.
+function setShortcutState(id: string, text: string, kind = ""): void {
+  const state = document.querySelector<HTMLElement>(
+    `[data-sc-row="${id}"] .shortcut-state`,
+  );
+  if (!state) return;
+  state.textContent = text;
+  state.className = `shortcut-state${kind ? ` ${kind}` : ""}`;
+}
+
+function shortcutRowHtml(command: ShortcutCommand): string {
+  const bindings = effectiveShortcutBindings(command.id);
+  const legacy = Boolean(command.legacyField);
+  const canReset =
+    canonicalBindingList(bindings) !== canonicalBindingList(shortcutDefaults(command.id));
+  const chips = bindings.length
+    ? bindings
+        .map(
+          (binding, index) =>
+            `<span class="shortcut-binding"><button type="button" class="shortcut-field" data-sc-field="${command.id}" data-sc-index="${index}">${shortcutChips(binding)}</button>${legacy ? "" : `<button type="button" class="mini-btn sc-icon" data-sc-remove="${command.id}" data-sc-index="${index}" title="${escapeHtml(t("settings.shortcutClearTip"))}" aria-label="${escapeHtml(t("settings.shortcutClearTip"))}">${uiIcon("x")}</button>`}</span>`,
+        )
+        .join("")
+    : `<span class="shortcut-empty">${escapeHtml(t("settings.shortcutUnset"))}</span>`;
+  return `<div class="setting-row shortcut-row" data-sc-row="${command.id}">
+    <div class="shortcut-row-head"><label>${escapeHtml(t(command.labelKey))}</label><span class="shortcut-state" role="status" aria-live="polite"></span></div>
+    <div class="shortcut-bindings">${chips}${legacy ? "" : `<button type="button" class="shortcut-add" data-sc-add="${command.id}" title="${escapeHtml(t("settings.shortcutAddTip"))}" aria-label="${escapeHtml(t("settings.shortcutAddTip"))}">${uiIcon("plus")}<span>${escapeHtml(t("settings.shortcutAdd"))}</span></button>`}</div>
+    ${canReset ? `<button type="button" class="mini-btn sc-icon" data-sc-reset="${command.id}" title="${escapeHtml(t("settings.shortcutResetTip"))}" aria-label="${escapeHtml(t("settings.shortcutResetTip"))}">${uiIcon("arrowsClockwise")}</button>` : ""}
+  </div>`;
+}
+
+function canonicalBindingList(bindings: string[]): string {
+  return bindings
+    .map((binding) => canonicalBinding(binding, shortcutPlatform) ?? binding)
+    .join("|");
+}
+
+/// One renderer for every row: text search plus a pressed-combination
+/// search, multi-binding rows, inline recording, takeover confirmation and
+/// an all-defaults reset. The binding table is the only source of truth for
+/// both dispatch and display.
 function renderShortcutSettings(): void {
   const root = document.querySelector<HTMLElement>("#local-shortcuts");
   if (!root) return;
-  root.innerHTML = shortcutRows()
-    .map((row) => {
-      const value = shortcutValue(row.id).trim();
-      const canReset = value !== (SHORTCUT_DEFAULTS[row.id] ?? "");
-      return `<div class="setting-row shortcut-row" data-sc-row="${row.id}">
-        <label>${escapeHtml(t(row.labelKey))}</label>
-        <span class="shortcut-state" role="status" aria-live="polite"></span>
-        ${canReset ? `<button type="button" class="mini-btn sc-icon" data-sc-reset="${row.id}" title="${escapeHtml(t("settings.shortcutResetTip"))}" aria-label="${escapeHtml(t("settings.shortcutResetTip"))}">${uiIcon("arrowsClockwise")}</button>` : ""}
-        <button type="button" class="shortcut-field" data-sc-field="${row.id}">${shortcutChips(value)}</button>
-        ${value ? `<button type="button" class="mini-btn sc-icon" data-sc-clear="${row.id}" title="${escapeHtml(t("settings.shortcutClearTip"))}" aria-label="${escapeHtml(t("settings.shortcutClearTip"))}">${uiIcon("x")}</button>` : ""}
-      </div>`;
-    })
-    .join("");
-  root.querySelectorAll<HTMLButtonElement>("[data-sc-reset]").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      const id = btn.dataset.scReset!;
-      void applyShortcut(id, SHORTCUT_DEFAULTS[id] ?? "");
+  root.innerHTML = `<div class="shortcut-toolbar">
+      <input id="shortcut-search" class="shortcut-search" type="search" autocomplete="off" spellcheck="false" placeholder="${escapeHtml(t("settings.shortcutSearch"))}" aria-label="${escapeHtml(t("settings.shortcutSearch"))}" value="${escapeHtml(shortcutSearchQuery)}" />
+      <button type="button" class="mini-btn" data-sc-restore-all>${escapeHtml(t("settings.shortcutRestoreAll"))}</button>
+    </div>
+    <p class="settings-note shortcut-search-hint">${escapeHtml(t("settings.shortcutSearchHint"))}</p>
+    <div class="shortcut-rows">${shortcutRows().map(shortcutRowHtml).join("")}</div>
+    <p class="shortcut-no-match settings-note" hidden>${escapeHtml(t("settings.shortcutNoMatch"))}</p>`;
+  const search = root.querySelector<HTMLInputElement>("#shortcut-search");
+  search?.addEventListener("input", () => {
+    shortcutSearchQuery = search.value;
+    applyShortcutFilter(root);
+  });
+  search?.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      search.value = "";
+      shortcutSearchQuery = "";
+      applyShortcutFilter(root);
+      return;
+    }
+    // Plain text stays text search; combinations need a held modifier, so
+    // typing "settings" does not become S-E-T-T-…
+    if (!(event.ctrlKey || event.altKey || event.metaKey || event.shiftKey)) return;
+    const recorded = recordBinding(event, shortcutPlatform);
+    if (!recorded) return;
+    event.preventDefault();
+    event.stopPropagation();
+    shortcutSearchQuery = recorded.binding;
+    search.value = recorded.binding;
+    applyShortcutFilter(root);
+  });
+  applyShortcutFilter(root);
+  root.querySelectorAll<HTMLButtonElement>("[data-sc-reset]").forEach((button) => {
+    button.addEventListener("click", () => void resetShortcut(button.dataset.scReset!));
+  });
+  root.querySelectorAll<HTMLButtonElement>("[data-sc-remove]").forEach((button) => {
+    button.addEventListener("click", () => {
+      void applyShortcutBinding(
+        button.dataset.scRemove!,
+        Number(button.dataset.scIndex ?? 0),
+        null,
+      );
     });
   });
-  root.querySelectorAll<HTMLButtonElement>("[data-sc-clear]").forEach((btn) => {
-    btn.addEventListener("click", () => void applyShortcut(btn.dataset.scClear!, ""));
+  root.querySelectorAll<HTMLButtonElement>("[data-sc-add]").forEach((button) => {
+    button.addEventListener("click", () => {
+      startShortcutRecording(button, button.dataset.scAdd!, null, button.innerHTML);
+    });
   });
   root.querySelectorAll<HTMLButtonElement>("[data-sc-field]").forEach((field) => {
-    field.addEventListener("click", () => startShortcutRecording(field));
+    field.addEventListener("click", () => {
+      startShortcutRecording(
+        field,
+        field.dataset.scField!,
+        field.dataset.scIndex === undefined ? null : Number(field.dataset.scIndex),
+        field.innerHTML,
+      );
+    });
+  });
+  root.querySelector("[data-sc-restore-all]")?.addEventListener("click", () => {
+    void restoreAllShortcuts();
   });
 }
 
-function startShortcutRecording(field: HTMLButtonElement): void {
-  if (field.classList.contains("recording")) return;
-  const id = field.dataset.scField!;
-  const row = field.closest<HTMLElement>(".shortcut-row");
-  const state = row?.querySelector<HTMLElement>(".shortcut-state") ?? null;
+function applyShortcutFilter(root: HTMLElement): void {
+  const visible = new Set(
+    filterShortcutCommands(
+      shortcutRows(),
+      shortcutSearchQuery,
+      (command) => t(command.labelKey),
+      shortcutOverrides(),
+      shortcutLegacyFields(),
+      shortcutPlatform,
+    ).map((command) => command.id),
+  );
+  root.querySelectorAll<HTMLElement>("[data-sc-row]").forEach((row) => {
+    row.hidden = !visible.has(row.dataset.scRow ?? "");
+  });
+  const empty = root.querySelector<HTMLElement>(".shortcut-no-match");
+  if (empty) empty.hidden = visible.size > 0;
+}
+
+function startShortcutRecording(
+  trigger: HTMLElement,
+  id: string,
+  index: number | null,
+  previousHtml: string,
+): void {
+  const field = trigger.closest<HTMLElement>(".shortcut-field, .shortcut-add");
+  if (!field || field.classList.contains("recording")) return;
+  shortcutRecordingActive = true;
   field.classList.add("recording");
   field.innerHTML = `<span class="sc-recording">${escapeHtml(t("settings.shortcutRecording"))}</span>`;
-  if (state) {
-    state.textContent = "";
-    state.className = "shortcut-state";
-  }
+  setShortcutState(id, "");
   let finished = false;
   const finish = (next: string | null) => {
     if (finished) return;
     finished = true;
+    shortcutRecordingActive = false;
     document.removeEventListener("keydown", onKey, true);
     field.classList.remove("recording");
-    if (next === null) {
-      // Cancel: restore the chips in place (no re-render, so a click that
-      // is already headed for another row still lands correctly).
-      field.innerHTML = shortcutChips(shortcutValue(id));
-      return;
-    }
-    void applyShortcut(id, next);
+    field.innerHTML = previousHtml;
+    if (next !== null) void applyShortcutBinding(id, index, next || null);
   };
   const onKey = (event: KeyboardEvent) => {
-    event.preventDefault();
-    event.stopPropagation();
     if (event.key === "Escape") {
+      event.preventDefault();
+      event.stopPropagation();
       finish(null);
       return;
     }
     if (event.key === "Backspace" || event.key === "Delete") {
+      event.preventDefault();
+      event.stopPropagation();
       finish("");
       return;
     }
-    if (SHORTCUT_MODIFIER_KEYS.has(event.key)) {
-      // A lone modifier is legal only for the cycle key (its default IS Shift).
-      if (id === "period" && event.key === "Shift") finish("Shift");
+    // The period command's default is a bare modifier; record it on Shift.
+    if (id === "period" && event.key === "Shift") {
+      event.preventDefault();
+      event.stopPropagation();
+      finish("Shift");
       return;
     }
-    const captured = formatCapturedShortcut(event);
-    if (captured) finish(captured);
+    const recorded = recordBinding(event, shortcutPlatform);
+    if (!recorded) return;
+    event.preventDefault();
+    event.stopPropagation();
+    if (recorded.reserved) {
+      setShortcutState(id, t("settings.shortcutReserved"), "conflict");
+      return;
+    }
+    if (recorded.bare && id !== "expiring" && id !== "period") {
+      setShortcutState(id, t("settings.shortcutBareHint"), "conflict");
+      return;
+    }
+    finish(recorded.binding);
   };
   document.addEventListener("keydown", onKey, true);
   field.addEventListener("blur", () => finish(null), { once: true });
 }
 
-const shortcutCanonical = (binding: string) =>
-  binding.toLowerCase().split("+").map((p) => p.trim()).filter(Boolean).sort().join("+");
+async function persistShortcutPatch(
+  id: string,
+  binding: string,
+  overrides: Record<string, string[]>,
+): Promise<void> {
+  const patch: Partial<Config> = { shortcutBindings: overrides };
+  if (id === "wake") {
+    await invoke("set_shortcut", { shortcut: binding });
+    config.shortcut = binding;
+    patch.shortcut = binding;
+  } else if (id === "category") {
+    config.categoryShortcut = binding;
+    patch.categoryShortcut = binding;
+  }
+  config.shortcutBindings = overrides;
+  await patchConfig(patch);
+  renderShortcutSettings();
+  setShortcutState(
+    id,
+    binding ? t("footer.shortcutSaved") : t("footer.shortcutCleared"),
+    "available",
+  );
+}
 
-async function applyShortcut(id: string, value: string): Promise<void> {
-  const trimmed = value.trim();
-  const row = document.querySelector<HTMLElement>(`[data-sc-row="${id}"]`);
-  const state = row?.querySelector<HTMLElement>(".shortcut-state") ?? null;
-  const status = document.querySelector("#status");
-  if (trimmed) {
-    const clash = shortcutRows().some((other) => {
-      if (other.id === id) return false;
-      const otherValue = shortcutValue(other.id).trim();
-      return otherValue && shortcutCanonical(otherValue) === shortcutCanonical(trimmed);
-    });
-    if (clash) {
-      if (state) {
-        state.textContent = t("settings.shortcutConflict");
-        state.className = "shortcut-state conflict";
-      }
-      renderShortcutSettings();
+/// Replace one binding, append a new one, or remove one (null). Same-scope
+/// conflicts go through an explicit takeover confirmation; the losing
+/// command keeps its remaining bindings, which may be none.
+async function applyShortcutBinding(
+  id: string,
+  index: number | null,
+  binding: string | null,
+): Promise<void> {
+  const command = SHORTCUT_COMMANDS.find((entry) => entry.id === id);
+  if (!command) return;
+  const trimmed = binding?.trim() ?? "";
+  const nextBinding = trimmed || null;
+  const current = effectiveShortcutBindings(id);
+  if (nextBinding) {
+    const canonical = canonicalBinding(nextBinding, shortcutPlatform);
+    if (
+      current.some(
+        (entry, entryIndex) =>
+          entryIndex !== index &&
+          canonicalBinding(entry, shortcutPlatform) === canonical,
+      )
+    ) {
+      setShortcutState(id, t("settings.shortcutConflict"), "conflict");
       return;
     }
+    const conflict = findBindingConflict(
+      id,
+      nextBinding,
+      shortcutOverrides(),
+      shortcutLegacyFields(),
+      shortcutPlatform,
+    );
+    if (conflict) {
+      if (conflict.legacyField || conflict.channel === "system") {
+        setShortcutState(
+          id,
+          t("settings.shortcutSystemConflict", { name: t(conflict.labelKey) }),
+          "conflict",
+        );
+        return;
+      }
+      const accepted = await appConfirm({
+        title: t("settings.shortcutTakeoverTitle"),
+        message: t("settings.shortcutTakeoverBody", {
+          binding: nextBinding,
+          name: t(conflict.labelKey),
+        }),
+        confirmLabel: t("settings.shortcutTakeoverConfirm"),
+      });
+      if (!accepted) return;
+    }
   }
-  if (state) {
-    state.textContent = t("settings.shortcutChecking");
-    state.className = "shortcut-state checking";
+  let overrides = shortcutOverrides();
+  if (nextBinding) {
+    // Legacy targets (wake/category) can take a key from a local command too;
+    // the losing local command keeps its remaining bindings.
+    overrides = takeoverBinding(id, nextBinding, overrides, shortcutPlatform);
   }
+  if (command.legacyField) {
+    try {
+      await persistShortcutPatch(id, nextBinding ?? "", overrides);
+    } catch (err) {
+      setShortcutState(id, String(err), "conflict");
+    }
+    return;
+  }
+  const next = [...effectiveBindings(id, overrides, shortcutLegacyFields())];
+  if (!nextBinding) {
+    if (index !== null) next.splice(index, 1);
+  } else if (index === null) {
+    next.push(nextBinding);
+  } else {
+    next[index] = nextBinding;
+  }
+  overrides = { ...overrides, [id]: next };
   try {
-    if (id === "wake") {
-      await invoke("set_shortcut", { shortcut: trimmed });
-      await patchConfig({ shortcut: trimmed });
-    } else if (id === "category") {
-      config.categoryShortcut = trimmed;
-      await patchConfig({ categoryShortcut: trimmed });
-    } else {
-      await patchConfig({ localShortcuts: { ...config.localShortcuts, [id]: trimmed } });
-    }
-    if (status) status.textContent = trimmed ? t("footer.shortcutSaved") : t("footer.shortcutCleared");
-    renderShortcutSettings();
-    const fresh = document.querySelector<HTMLElement>(`[data-sc-row="${id}"] .shortcut-state`);
-    if (fresh && trimmed) {
-      fresh.textContent = t("settings.shortcutAvailable");
-      fresh.className = "shortcut-state available";
-    }
+    await persistShortcutPatch(id, "", overrides);
   } catch (err) {
-    if (status) status.textContent = String(err);
-    renderShortcutSettings();
-    const fresh = document.querySelector<HTMLElement>(`[data-sc-row="${id}"] .shortcut-state`);
-    if (fresh) {
-      fresh.textContent = t("settings.shortcutConflict");
-      fresh.className = "shortcut-state conflict";
-    }
+    setShortcutState(id, String(err), "conflict");
   }
+}
+
+async function resetShortcut(id: string): Promise<void> {
+  const command = SHORTCUT_COMMANDS.find((entry) => entry.id === id);
+  if (!command) return;
+  if (command.legacyField) {
+    await applyShortcutBinding(id, 0, shortcutDefaults(id)[0] ?? "");
+    return;
+  }
+  const overrides = { ...shortcutOverrides() };
+  delete overrides[id];
+  config.shortcutBindings = overrides;
+  await patchConfig({ shortcutBindings: overrides });
+  renderShortcutSettings();
+  setShortcutState(id, t("settings.shortcutResetDone"), "available");
+}
+
+async function restoreAllShortcuts(): Promise<void> {
+  const accepted = await appConfirm({
+    title: t("settings.shortcutRestoreAllTitle"),
+    message: t("settings.shortcutRestoreAllBody"),
+    confirmLabel: t("settings.shortcutRestoreAll"),
+    danger: true,
+  });
+  if (!accepted) return;
+  try {
+    if (config.shortcut !== "Alt+2") await invoke("set_shortcut", { shortcut: "Alt+2" });
+  } catch (err) {
+    settingsToast(String(err), true);
+  }
+  config.shortcut = "Alt+2";
+  config.categoryShortcut = "Shift+1";
+  config.shortcutBindings = {};
+  config.localShortcuts = {};
+  await patchConfig({
+    shortcut: "Alt+2",
+    categoryShortcut: "Shift+1",
+    shortcutBindings: {},
+    shortcutBindingsMigrated: true,
+    localShortcuts: {},
+  });
+  renderShortcutSettings();
 }
 
 function isDashboardActive(): boolean {
@@ -7032,17 +7989,6 @@ function cycleOverviewCategory(): void {
   const index = categories.indexOf(overviewCategory);
   const next = categories[(index + 1) % categories.length];
   switchOverviewCategory(next);
-}
-
-function formatCapturedShortcut(event: KeyboardEvent): string | null {
-  if (event.key === "Control" || event.key === "Alt" || event.key === "Shift" || event.key === "Meta") return null;
-  const parts: string[] = [];
-  if (event.ctrlKey) parts.push("Ctrl");
-  if (event.altKey) parts.push("Alt");
-  if (event.shiftKey) parts.push("Shift");
-  if (event.metaKey) parts.push("Meta");
-  parts.push(shortcutKeyToken(event));
-  return parts.join("+");
 }
 
 function setupOverviewGroupDrag(root: HTMLElement): void {
@@ -8527,11 +9473,179 @@ function maybeStartTour(): void {
     });
     return;
   }
-  if (IS_PANEL_FORM || tourActive() || !tourContentReady) return;
+  if (IS_PANEL_FORM || tourActive() || onboardingActive() || !tourContentReady) return;
   if (noticeOpen || noticeQueue.length > 0) return;
   if (maybeShowFontGuide()) return;
+  // The three-step guide replaces the old spotlight tour on a fresh install;
+  // once it has been seen or skipped, the tour never auto-presents.
+  if (maybeStartOnboarding()) return;
+  if (config.onboardingSeen || config.onboardingDismissed) return;
   if (config.tourSeen || !freshInstallAtBoot) return;
   startTour();
+}
+
+// --- First-run guide (#64-01) ---------------------------------------------
+// Three full-screen steps: welcome, in-app bindings, provider scan. State is
+// two config booleans (finished vs dismissed), so a replay never changes the
+// auto-present decision. Detection failures are conservative: the guide only
+// auto-opens from a successful config load on a fresh install.
+let onboardingOverlay: HTMLElement | null = null;
+let onboardingStep = 0;
+let onboardingReplay = false;
+let onboardingFreshInstall = false;
+const ONBOARDING_STEPS = 3;
+const onboardingActive = () => onboardingOverlay !== null;
+
+function onboardingShortcutRows(): string {
+  return shortcutRows()
+    .map(
+      (row) =>
+        `<div class="onboarding-key"><span>${escapeHtml(t(row.labelKey))}</span><span class="onboarding-chips">${shortcutChips(shortcutValue(row.id))}</span></div>`,
+    )
+    .join("");
+}
+
+function onboardingScanHtml(): string {
+  if (IS_PANEL_FORM) {
+    return `<p class="onboarding-note">${escapeHtml(t("onboarding.panelNote"))}</p>`;
+  }
+  const names = [
+    ...new Set(
+      lastSnapshots
+        .filter((snapshot) => !isCardDisabled(snapshot.id))
+        .map((snapshot) => providerDisplayName(providerFamily(snapshot.id))),
+    ),
+  ].filter(Boolean);
+  const found = names.length
+    ? `<p class="onboarding-found">${escapeHtml(t("onboarding.found", { n: names.length }))}</p><div class="onboarding-providers">${names.slice(0, 8).map((name) => `<span>${escapeHtml(name)}</span>`).join("")}</div>`
+    : `<p class="onboarding-found muted">${escapeHtml(t("onboarding.none"))}</p>`;
+  return `${found}<p class="onboarding-note">${escapeHtml(t("onboarding.scanHint"))}</p>`;
+}
+
+function onboardingStepBody(step: number): string {
+  if (step === 0) {
+    return `<p class="onboarding-kicker">${escapeHtml(t("onboarding.kicker1"))}</p>
+      <h1 id="onboarding-title">${escapeHtml(t("onboarding.title1"))}</h1>
+      <p class="onboarding-lead">${escapeHtml(t("onboarding.lead1"))}</p>
+      <div class="onboarding-points">
+        <div class="onboarding-point"><span class="onboarding-point-icon">${uiIcon("bell")}</span><div><strong>${escapeHtml(t("onboarding.trayTitle"))}</strong><p>${escapeHtml(t("onboarding.trayBody"))}</p></div></div>
+        <div class="onboarding-point"><span class="onboarding-point-icon">${uiIcon("keyboard")}</span><div><strong>${escapeHtml(t("onboarding.hotkeyTitle"))}</strong><p>${escapeHtml(t("onboarding.hotkeyBody", { key: config.shortcut || "Alt+2" }))}</p></div></div>
+        <div class="onboarding-point"><span class="onboarding-point-icon">${uiIcon("shield")}</span><div><strong>${escapeHtml(t("onboarding.localTitle"))}</strong><p>${escapeHtml(t("onboarding.localBody"))}</p></div></div>
+      </div>`;
+  }
+  if (step === 1) {
+    return `<p class="onboarding-kicker">${escapeHtml(t("onboarding.kicker2"))}</p>
+      <h1 id="onboarding-title">${escapeHtml(t("onboarding.title2"))}</h1>
+      <p class="onboarding-lead">${escapeHtml(t("onboarding.lead2"))}</p>
+      <div class="onboarding-keys">${onboardingShortcutRows()}</div>
+      <p class="onboarding-note">${escapeHtml(t("onboarding.shortcutNote"))}</p>`;
+  }
+  return `<p class="onboarding-kicker">${escapeHtml(t("onboarding.kicker3"))}</p>
+    <h1 id="onboarding-title">${escapeHtml(t("onboarding.title3"))}</h1>
+    <p class="onboarding-lead">${escapeHtml(t("onboarding.lead3"))}</p>
+    ${onboardingScanHtml()}`;
+}
+
+function showOnboardingStep(index: number): void {
+  if (!onboardingOverlay) return;
+  onboardingStep = Math.max(0, Math.min(ONBOARDING_STEPS - 1, index));
+  const body = onboardingOverlay.querySelector<HTMLElement>(".onboarding-body");
+  if (body) body.innerHTML = onboardingStepBody(onboardingStep);
+  onboardingOverlay.querySelectorAll<HTMLElement>("[data-onboarding-dot]").forEach((dot, dotIndex) => {
+    dot.classList.toggle("on", dotIndex === onboardingStep);
+    dot.classList.toggle("done", dotIndex < onboardingStep);
+  });
+  const count = onboardingOverlay.querySelector<HTMLElement>(".onboarding-count");
+  if (count) {
+    count.textContent = t("onboarding.step", {
+      n: onboardingStep + 1,
+      total: ONBOARDING_STEPS,
+    });
+  }
+  const back = onboardingOverlay.querySelector<HTMLButtonElement>("[data-onboarding-back]");
+  if (back) back.hidden = onboardingStep === 0;
+  const next = onboardingOverlay.querySelector<HTMLButtonElement>("[data-onboarding-next]");
+  if (next) {
+    next.textContent = t(
+      onboardingStep === ONBOARDING_STEPS - 1 ? "onboarding.done" : "onboarding.next",
+    );
+  }
+  requestAnimationFrame(() => next?.focus({ preventScroll: true }));
+}
+
+function onOnboardingKey(e: KeyboardEvent): void {
+  if (e.key !== "Escape" || e.isComposing || e.keyCode === 229) return;
+  e.preventDefault();
+  e.stopPropagation();
+  finishOnboarding(true);
+}
+
+function finishOnboarding(dismissed: boolean): void {
+  document.removeEventListener("keydown", onOnboardingKey, true);
+  onboardingOverlay?.remove();
+  onboardingOverlay = null;
+  if (onboardingReplay) {
+    onboardingReplay = false;
+    return;
+  }
+  onboardingFreshInstall = false;
+  if (dismissed) {
+    config.onboardingDismissed = true;
+    void patchConfig({ onboardingDismissed: true });
+  } else {
+    config.onboardingSeen = true;
+    void patchConfig({ onboardingSeen: true });
+  }
+}
+
+function startOnboarding(replay = false): void {
+  if (onboardingActive()) return;
+  // The wizard is modal; a spotlight left underneath would reappear after it.
+  endTour();
+  onboardingReplay = replay;
+  const overlay = document.createElement("div");
+  overlay.id = "onboarding-overlay";
+  overlay.innerHTML = `<section class="onboarding-card" role="dialog" aria-modal="true" aria-labelledby="onboarding-title">
+    <header class="onboarding-head">
+      <span class="onboarding-brand"><img src="${paneLogo}" alt="Pane" /><span>Pane</span></span>
+      <span class="onboarding-count" aria-live="polite"></span>
+      <div class="onboarding-progress" aria-hidden="true">${Array.from({ length: ONBOARDING_STEPS }, (_, index) => `<i data-onboarding-dot="${index}"></i>`).join("")}</div>
+      <button type="button" class="mini-btn onboarding-close" data-onboarding-close aria-label="${escapeHtml(t("onboarding.close"))}">${uiIcon("x")}</button>
+    </header>
+    <div class="onboarding-body"></div>
+    <footer class="onboarding-foot">
+      <button type="button" class="onboarding-skip" data-onboarding-skip>${escapeHtml(t("onboarding.skip"))}</button>
+      <span class="spacer"></span>
+      <button type="button" class="mini-btn" data-onboarding-back hidden>${escapeHtml(t("onboarding.back"))}</button>
+      <button type="button" class="mini-btn onboarding-next" data-onboarding-next>${escapeHtml(t("onboarding.next"))}</button>
+    </footer>
+  </section>`;
+  onboardingOverlay = overlay;
+  overlay.addEventListener("click", (event) => {
+    const target = event.target as HTMLElement;
+    if (target.closest("[data-onboarding-close]") || target.closest("[data-onboarding-skip]")) {
+      finishOnboarding(true);
+      return;
+    }
+    if (target.closest("[data-onboarding-next]")) {
+      if (onboardingStep + 1 < ONBOARDING_STEPS) showOnboardingStep(onboardingStep + 1);
+      else finishOnboarding(false);
+      return;
+    }
+    if (target.closest("[data-onboarding-back]")) showOnboardingStep(onboardingStep - 1);
+  });
+  document.addEventListener("keydown", onOnboardingKey, true);
+  document.body.appendChild(overlay);
+  showOnboardingStep(0);
+}
+
+function maybeStartOnboarding(): boolean {
+  if (IS_PANEL_FORM || onboardingActive()) return false;
+  if (!onboardingFreshInstall) return false;
+  if (config.onboardingSeen || config.onboardingDismissed) return false;
+  if (!tourContentReady) return false;
+  startOnboarding(false);
+  return true;
 }
 
 // ---------------------------------------------------------------------------
@@ -8904,6 +10018,7 @@ function applyAppearance(): void {
     delete btn.dataset.tip;
   }
   applyUiFont();
+  applyCodeFont();
   applyWindowResize();
 }
 
@@ -8932,6 +10047,36 @@ function applyUiFont(): void {
   );
   root.style.setProperty("--app-font", parts.join(", "));
   requestAnimationFrame(fitProviderNames);
+}
+
+/// User-selected code face for numeric/monospace readouts. Empty = stock
+/// stack and no override; the global UI font stays untouched.
+function applyCodeFont(): void {
+  const root = document.documentElement;
+  const family = String(config.codeFont ?? "").trim();
+  const weight = String(config.codeFontWeight ?? "400");
+  const mono = '"Cascadia Mono", "Cascadia Code", Consolas, ui-monospace, monospace';
+  if (family) {
+    root.style.setProperty("--code-font", `"${family.replace(/[\\"]/g, "\\$&")}", ${mono}`);
+    root.style.setProperty("--code-weight", weight);
+  } else {
+    root.style.removeProperty("--code-font");
+    root.style.removeProperty("--code-weight");
+  }
+  document.body.classList.toggle("code-font-custom", Boolean(family));
+  document.body.classList.toggle("colorblind", config.colorblindMode === true);
+}
+
+/// Cross-window appearance prefs: the settings panel and the popover are
+/// separate webviews, so a preference saved in one must reach the other
+/// without waiting for a restart.
+function emitUiPrefs(): void {
+  void emit("ui-prefs-changed", {
+    uiTextSize: config.uiTextSize,
+    codeFont: config.codeFont,
+    codeFontWeight: config.codeFontWeight,
+    colorblindMode: config.colorblindMode,
+  }).catch(() => {});
 }
 
 // Layout coordinates only; native window dimensions come from monitor work area.
@@ -8966,14 +10111,16 @@ function configuredWindowScale(): number {
   return normalizedWindowScale(Number(config.windowScale));
 }
 
-type TextSize = "small" | "medium" | "large";
+type TextSize = "small" | "medium" | "large" | "xlarge";
 
 function textScaleFactor(): number {
   switch (config.uiTextSize) {
+    case "xlarge":
+      return 1.5;
     case "large":
-      return 1.16;
+      return 1.25;
     case "medium":
-      return 1.08;
+      return 1.1;
     default:
       return 1;
   }
@@ -9004,6 +10151,7 @@ function setUiTextSize(size: TextSize): void {
   config.uiTextSize = size;
   applyWindowScale();
   void patchConfig({ uiTextSize: size }).catch(() => {});
+  emitUiPrefs();
   syncAppearanceSettingsControls();
   repositionPopoverSettings?.();
 }
@@ -11333,9 +12481,11 @@ function renderSkinSample(mode: "light" | "dark", skinId: SkinId = "signal", com
 function renderSkinMarket(): string {
   const entries = marketEntries();
   if (!entries.length) {
+    const reasonKey = remoteIndexErrorClass();
+    const reason = reasonKey ? ` · ${escapeHtml(t(`skin.indexError.${reasonKey}`))}` : "";
     return `<section class="skin-market" aria-label="${t("skin.market")}">
       <div class="skin-market-head"><h2>${t("skin.market")}</h2><button class="mini-btn skin-back-btn" type="button" data-skin-close>${uiIcon("arrowLeft")}<span>${t("skin.back")}</span></button></div>
-      <div class="skin-market-body"><p class="skin-market-preview-note">${t("skin.indexUnavailable")}</p></div>
+      <div class="skin-market-body"><p class="skin-market-preview-note">${t("skin.indexUnavailable")}${reason}</p></div>
     </section>`;
   }
   const current = skinMarketSelected ?? activeSkin()?.id ?? entries[0].id;
@@ -11779,7 +12929,6 @@ function renderDashboard(): void {
     el.querySelector<HTMLElement>(`[data-card-account="${CSS.escape(focusedTab)}"]`)?.focus({ preventScroll: true });
   }
   if (customizeOpen) renderDrawerBody();
-  if (spendDetailOpen) document.body.insertAdjacentHTML("beforeend", renderSpendDetailOverlay());
   // Cards are rebuilt from scratch, so an unlocked popover's drag opt-outs
   // (the card-reorder grips) have to be re-armed on every render.
   if (config.popoverLock === false) applyPopoverDragRegion(false);
@@ -12762,6 +13911,7 @@ async function refresh(
   }
   if (refreshState.acceptResult("spend", myGen, spend)) {
     lastSpend = normalizeProviderSpend(spend);
+    if (topologyOpen) topologySchedulePaint();
   }
   if (lastSnapshots.length) ensureLayout();
   // The merged account tabs on the dashboard need the account labels; load
@@ -12769,6 +13919,18 @@ async function refresh(
   for (const def of providerCatalog) {
     if (def.supportsExtraAccounts) fetchAccounts(def.familyId);
   }
+  void invoke<MeterSampleSeries[]>("fetch_meter_samples")
+    .then((rows) => {
+      lastMeterSamples = rows;
+      if (!customizeOpen && lastSnapshots.length) requestRender();
+    })
+    .catch(() => {});
+  void invoke<SpendProjection | null>("fetch_spend_projection")
+    .then((projection) => {
+      lastSpendProjection = projection;
+      if (!customizeOpen && lastSnapshots.length) requestRender();
+    })
+    .catch(() => {});
   if (!customizeOpen && lastSnapshots.length) requestRender();
 }
 
@@ -16098,6 +17260,7 @@ function mountSpendSettingsBlocks(container: HTMLElement | null): void {
           <option value="small" data-i18n="settings.textSmall">Small</option>
           <option value="medium" data-i18n="settings.textMedium">Medium</option>
           <option value="large" data-i18n="settings.textLarge">Large</option>
+          <option value="xlarge" data-i18n="settings.textXLarge">150%</option>
         </select>
       </div>
     </div>
@@ -17086,6 +18249,7 @@ function applyLocale(): void {
   // Auth-center rows paint with t() at render time — re-render so a locale
   // switch retranslates them (static [data-i18n] is already handled above).
   if (IS_PANEL_FORM && authViewActive) renderAuthCenter();
+  if (IS_PANEL_FORM) renderStatsPage();
   populatePinnedOptions();
   renderBuildInfo();
 }
@@ -17112,6 +18276,7 @@ async function initSettings(): Promise<void> {
   applyReduceMotion();
   applySkin();
   config.localShortcuts = config.localShortcuts ?? {};
+  ensureShortcutBindings();
   pruneEmptyCardGroups();
   config.locale = normalizeLocalePref(config.locale);
   // Popover chrome comes back the way it was left: the pin state is a
@@ -17604,6 +18769,8 @@ async function resetAllSettings(): Promise<void> {
     shortcut: "",
     categoryShortcut: "Shift+1",
     localShortcuts: {},
+    shortcutBindings: {},
+    shortcutBindingsMigrated: true,
     proxy: { enabled: false, url: "" },
     showTotalSpend: true,
     reduceAnimations: false,
@@ -17721,6 +18888,63 @@ const PILL_SELECT_IDS = [
   "update-frequency",
 ] as const;
 
+/// Slide the pill thumb to the active segment. Hidden pages measure 0 —
+/// callers reposition after a page switch.
+function positionTabThumb(pill: HTMLElement): void {
+  const thumb = pill.querySelector<HTMLElement>(":scope > .tab-thumb");
+  if (!thumb) return;
+  const active = pill.querySelector<HTMLElement>(":scope > .tab.active");
+  if (!active || active.offsetWidth <= 0) {
+    thumb.style.width = "0px";
+    return;
+  }
+  thumb.style.width = `${active.offsetWidth}px`;
+  thumb.style.transform = `translateX(${active.offsetLeft}px)`;
+}
+
+/// A themed segmented pill with a real sliding thumb. `options` labels are
+/// already translated; `onChange` receives the new value.
+function pillControl<T extends string>(
+  options: { value: T; label: string }[],
+  current: T,
+  onChange: (value: T) => void,
+): HTMLElement {
+  const pill = document.createElement("div");
+  pill.className = "tabs set-pill";
+  pill.setAttribute("role", "group");
+  const thumb = document.createElement("i");
+  thumb.className = "tab-thumb";
+  thumb.setAttribute("aria-hidden", "true");
+  pill.append(thumb);
+  const buttons: HTMLButtonElement[] = [];
+  const sync = (value: T) => {
+    for (const button of buttons) {
+      const on = button.dataset.value === value;
+      button.classList.toggle("active", on);
+      button.setAttribute("aria-pressed", String(on));
+    }
+    positionTabThumb(pill);
+  };
+  for (const option of options) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "tab";
+    button.dataset.value = option.value;
+    button.textContent = option.label;
+    button.addEventListener("click", () => {
+      if (button.classList.contains("active")) return;
+      sync(option.value);
+      onChange(option.value);
+    });
+    pill.append(button);
+    buttons.push(button);
+  }
+  sync(current);
+  requestAnimationFrame(() => positionTabThumb(pill));
+  new ResizeObserver(() => positionTabThumb(pill)).observe(pill);
+  return pill;
+}
+
 function syncSelectPill(select: HTMLSelectElement | null): void {
   if (!select) return;
   const pill = select.parentElement?.querySelector<HTMLDivElement>(
@@ -17732,6 +18956,7 @@ function syncSelectPill(select: HTMLSelectElement | null): void {
     seg.classList.toggle("active", active);
     seg.setAttribute("aria-pressed", String(active));
   }
+  positionTabThumb(pill);
 }
 
 function mountSelectPill(select: HTMLSelectElement): void {
@@ -17744,6 +18969,10 @@ function mountSelectPill(select: HTMLSelectElement): void {
   pill.dataset.pillFor = select.id;
   pill.setAttribute("role", "group");
   pill.setAttribute("aria-label", select.getAttribute("aria-label") ?? select.id);
+  const thumb = document.createElement("i");
+  thumb.className = "tab-thumb";
+  thumb.setAttribute("aria-hidden", "true");
+  pill.append(thumb);
   for (const option of Array.from(select.options)) {
     const seg = document.createElement("button");
     seg.type = "button";
@@ -17844,6 +19073,7 @@ async function panelCheckForUpdate(btn: HTMLButtonElement): Promise<void> {
     if (v) {
       updateVersion = v;
       syncPanelNavBadge();
+      aboutUpdateSync?.();
       maybePromptUpdate(v, true);
       setText(t("update.to", { version: v }));
     } else {
@@ -17865,6 +19095,7 @@ async function panelCheckForUpdate(btn: HTMLButtonElement): Promise<void> {
 const PANEL_PAGES: ReadonlyArray<readonly [string, string, string, string, UiIconName]> = [
   ["general", "st-general", "settings.tabGeneral", "panel.desc.general", "gear"],
   ["usage", "st-keyvault", "settings.tabUsage", "panel.desc.usage", "key"],
+  ["stats", "st-stats", "settings.tabStats", "panel.desc.stats", "chart"],
   ["shortcuts", "st-shortcuts", "settings.tabShortcuts", "panel.desc.shortcuts", "keyboard"],
   ["notifications", "st-notifications", "settings.tabNotifications", "panel.desc.notifications", "bell"],
   ["privacy", "st-privacy", "settings.tabPrivacy", "panel.desc.privacy", "shield"],
@@ -17875,6 +19106,112 @@ let activePanelPage = "general";
 
 const panelPageMeta = (id: string) =>
   PANEL_PAGES.find((page) => page[0] === id) ?? PANEL_PAGES[0];
+/// Owner-approved 4 groups (#58-07): General / Data / Network & privacy /
+/// About. The rail keeps one group open by default; expansion is remembered.
+const PANEL_GROUPS: ReadonlyArray<readonly [string, string, readonly string[]]> = [
+  ["general", "settings.group.general", ["general", "shortcuts", "notifications"]],
+  ["data", "settings.group.data", ["usage", "stats"]],
+  ["network", "settings.group.network", ["network", "privacy"]],
+  ["about", "settings.group.about", ["about"]],
+];
+const PANEL_GROUP_STORE = "pane.settings.groups";
+
+function panelGroupForPage(pageId: string): string | null {
+  for (const [group, , members] of PANEL_GROUPS) {
+    if (members.includes(pageId)) return group;
+  }
+  return null;
+}
+
+function readPanelGroupState(): Record<string, boolean> {
+  try {
+    return JSON.parse(localStorage.getItem(PANEL_GROUP_STORE) ?? "{}") as Record<string, boolean>;
+  } catch {
+    return {};
+  }
+}
+
+function setPanelGroupOpen(group: string, open: boolean, persist = true): void {
+  const section = document.querySelector<HTMLElement>(
+    `#panel-nav [data-nav-section="${group}"]`,
+  );
+  const parent = section?.querySelector<HTMLButtonElement>("[data-nav-group]");
+  const children = section?.querySelector<HTMLElement>("[data-nav-children]");
+  if (!parent || !children) return;
+  parent.setAttribute("aria-expanded", String(open));
+  children.classList.toggle("open", open);
+  if (persist) {
+    const state = readPanelGroupState();
+    state[group] = open;
+    try {
+      localStorage.setItem(PANEL_GROUP_STORE, JSON.stringify(state));
+    } catch { /* private mode: expand still works for this session */ }
+  }
+  if (!open && section?.contains(document.activeElement)) {
+    parent.focus();
+  }
+  requestAnimationFrame(() => {
+    for (const pill of document.querySelectorAll<HTMLElement>(".tabs[data-pill-for], .set-pill")) {
+      positionTabThumb(pill);
+    }
+  });
+}
+
+function makePanelNavButton(
+  id: string,
+  blockId: string,
+  labelKey: string,
+  iconName: UiIconName,
+  index: number,
+): HTMLButtonElement {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "panel-nav-item panel-nav-child";
+  button.dataset.settingsTab = id;
+  button.dataset.navChild = "true";
+  button.style.setProperty("--i", String(index));
+  button.dataset.i18nTip = labelKey;
+  button.dataset.tip = t(labelKey);
+  button.setAttribute("aria-label", t(labelKey));
+  button.setAttribute("aria-controls", blockId);
+  button.setAttribute("role", "treeitem");
+  button.setAttribute("aria-level", "2");
+  button.innerHTML = uiIcon(iconName);
+  const buttonLabel = document.createElement("span");
+  buttonLabel.className = "panel-nav-label";
+  buttonLabel.dataset.i18n = labelKey;
+  buttonLabel.textContent = t(labelKey);
+  button.append(buttonLabel);
+  if (id === "about") {
+    const dot = document.createElement("span");
+    dot.id = "panel-update-dot";
+    dot.className = "panel-nav-dot";
+    dot.hidden = !updateVersion;
+    button.append(dot);
+  }
+  button.addEventListener("click", () => {
+    setPanelView("settings");
+    activatePanelPage(id);
+  });
+  // Magpie's "select before click": paint the rail highlight on press, so
+  // the click has no visible latency. A drag-off restores the real page.
+  button.addEventListener("pointerdown", () => {
+    if (button.classList.contains("active")) return;
+    document
+      .querySelectorAll<HTMLButtonElement>("#panel-nav [data-settings-tab]")
+      .forEach((item) => item.classList.toggle("active", item === button));
+    const restore = () => {
+      if (activePanelPage === id) return;
+      document
+        .querySelectorAll<HTMLButtonElement>("#panel-nav [data-settings-tab]")
+        .forEach((item) =>
+          item.classList.toggle("active", item.dataset.settingsTab === activePanelPage),
+        );
+    };
+    window.addEventListener("pointerup", restore, { once: true });
+  });
+  return button;
+}
 
 /// Page switching only hides blocks — every control stays mounted so its
 /// wiring never re-runs. Also keeps the rail's active pill in sync.
@@ -17892,7 +19229,23 @@ function activatePanelPage(pageId: string): void {
     button.setAttribute("aria-selected", String(active));
     button.setAttribute("aria-current", active ? "page" : "false");
   });
+  const group = panelGroupForPage(pageId);
+  if (group) setPanelGroupOpen(group, true);
+  if (pageId === "stats") {
+    if (!statsLoaded && !statsLoading) void loadStatsData();
+    else renderStatsPage();
+  }
+  document.querySelectorAll<HTMLElement>("#panel-nav [data-nav-section]").forEach((section) => {
+    section
+      .querySelector(".panel-nav-parent")
+      ?.classList.toggle("has-active", Boolean(section.querySelector(".panel-nav-item.active")));
+  });
   syncPanelHeader("settings");
+  requestAnimationFrame(() => {
+    for (const pill of document.querySelectorAll<HTMLElement>(".tabs[data-pill-for], .set-pill")) {
+      positionTabThumb(pill);
+    }
+  });
 }
 
 /// Header title/description and the save button follow the active view.
@@ -17941,36 +19294,43 @@ function buildPanelShell(): void {
   logo.innerHTML = `<img src="${paneLogo}" alt="Pane" />`;
   const pages = document.createElement("div");
   pages.className = "panel-nav-group";
-  pages.setAttribute("role", "tablist");
+  pages.setAttribute("role", "tree");
   pages.setAttribute("aria-label", t("settings.title"));
-  for (const [id, blockId, labelKey, , iconName] of PANEL_PAGES) {
-    const button = document.createElement("button");
-    button.type = "button";
-    button.className = "panel-nav-item";
-    button.dataset.settingsTab = id;
-    button.dataset.i18nTip = labelKey;
-    button.dataset.tip = t(labelKey);
-    button.setAttribute("aria-label", t(labelKey));
-    button.setAttribute("aria-controls", blockId);
-    button.setAttribute("role", "tab");
-    button.innerHTML = uiIcon(iconName);
-    const buttonLabel = document.createElement("span");
-    buttonLabel.className = "panel-nav-label";
-    buttonLabel.dataset.i18n = labelKey;
-    buttonLabel.textContent = t(labelKey);
-    button.append(buttonLabel);
-    if (id === "about") {
-      const dot = document.createElement("span");
-      dot.id = "panel-update-dot";
-      dot.className = "panel-nav-dot";
-      dot.hidden = !updateVersion;
-      button.append(dot);
-    }
-    button.addEventListener("click", () => {
-      setPanelView("settings");
-      activatePanelPage(id);
+  const storedGroups = readPanelGroupState();
+  for (const [group, groupLabelKey, members] of PANEL_GROUPS) {
+    const section = document.createElement("div");
+    section.className = "panel-nav-section";
+    section.dataset.navSection = group;
+    const parent = document.createElement("button");
+    parent.type = "button";
+    parent.className = "panel-nav-parent";
+    parent.dataset.navGroup = group;
+    parent.dataset.i18nTip = groupLabelKey;
+    parent.setAttribute("role", "treeitem");
+    parent.setAttribute("aria-level", "1");
+    parent.setAttribute("aria-label", t(groupLabelKey));
+    const open = storedGroups[group] ?? members.includes(activePanelPage);
+    parent.setAttribute("aria-expanded", String(open));
+    parent.innerHTML = `<span class="panel-nav-parent-label">${escapeHtml(t(groupLabelKey))}</span>${uiIcon("caretDown")}`;
+    parent.addEventListener("click", () => {
+      setPanelGroupOpen(group, parent.getAttribute("aria-expanded") !== "true");
     });
-    pages.append(button);
+    const children = document.createElement("div");
+    children.className = `panel-nav-children${open ? " open" : ""}`;
+    children.dataset.navChildren = group;
+    const inner = document.createElement("div");
+    inner.className = "panel-nav-children-inner";
+    let index = 0;
+    for (const id of members) {
+      const page = PANEL_PAGES.find((entry) => entry[0] === id);
+      if (!page) continue;
+      const [, blockId, labelKey, , iconName] = page;
+      inner.append(makePanelNavButton(id, blockId, labelKey, iconName, index));
+      index += 1;
+    }
+    children.append(inner);
+    section.append(parent, children);
+    pages.append(section);
   }
   const spacer = document.createElement("div");
   spacer.className = "panel-nav-spacer";
@@ -17989,7 +19349,41 @@ function buildPanelShell(): void {
   authLabel.dataset.i18n = "auth.title";
   authLabel.textContent = t("auth.title");
   authItem.append(authLabel);
+  authItem.setAttribute("role", "treeitem");
+  authItem.setAttribute("aria-level", "1");
   authItem.addEventListener("click", () => setPanelView("auth"));
+  nav.addEventListener("keydown", (event) => {
+    const items = Array.from(
+      nav.querySelectorAll<HTMLButtonElement>(
+        ".panel-nav-parent,.panel-nav-child,[data-panel-view='auth']",
+      ),
+    ).filter((item) => item.offsetParent !== null);
+    const current = items.indexOf(document.activeElement as HTMLButtonElement);
+    if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+      if (!items.length) return;
+      event.preventDefault();
+      const delta = event.key === "ArrowDown" ? 1 : -1;
+      items[(current + delta + items.length) % items.length]?.focus();
+      return;
+    }
+    if (event.key === "ArrowRight") {
+      const group = (document.activeElement as HTMLElement).dataset.navGroup;
+      if (group) {
+        event.preventDefault();
+        setPanelGroupOpen(group, true);
+      }
+      return;
+    }
+    if (event.key === "ArrowLeft") {
+      const group = (document.activeElement as HTMLElement)
+        .closest<HTMLElement>("[data-nav-section]")
+        ?.dataset.navSection;
+      if (group) {
+        event.preventDefault();
+        setPanelGroupOpen(group, false);
+      }
+    }
+  });
   nav.append(logo, pages, spacer, separator, authItem);
 
   const main = document.createElement("div");
@@ -18105,6 +19499,105 @@ function buildPanelShell(): void {
   adoptControl("ui-font-cjk", "settings.fontCjk", "settings.fontCjkTip", [
     document.querySelector<HTMLElement>("#ui-font-cjk-list") as HTMLElement,
   ].filter(Boolean));
+  // Text size / code font / colorblind (#58-08): user preferences on top of
+  // the window scale; none of them touches the global UI font choice.
+  const textSizePill = pillControl<TextSize>(
+    [
+      { value: "small", label: "100%" },
+      { value: "medium", label: "110%" },
+      { value: "large", label: "125%" },
+      { value: "xlarge", label: "150%" },
+    ],
+    (config.uiTextSize ?? "small") as TextSize,
+    (value) => setUiTextSize(value),
+  );
+  textSizePill.setAttribute("aria-label", t("settings.textSize"));
+  const textSizeRow = panelRowDesc("settings.textSize", "settings.desc.textSize", textSizePill);
+  const codeFontInput = document.createElement("input");
+  codeFontInput.id = "st-code-font";
+  codeFontInput.type = "text";
+  codeFontInput.value = String(config.codeFont ?? "");
+  codeFontInput.setAttribute("list", "st-code-font-list");
+  codeFontInput.setAttribute("aria-label", t("settings.codeFont"));
+  const codeFontList = document.createElement("datalist");
+  codeFontList.id = "st-code-font-list";
+  const codeFontWeight = document.createElement("select");
+  codeFontWeight.id = "st-code-font-weight";
+  codeFontWeight.setAttribute("aria-label", t("settings.codeFontWeight"));
+  for (const weight of ["400", "500", "600", "700"]) {
+    const option = document.createElement("option");
+    option.value = weight;
+    option.textContent = weight;
+    option.selected = String(config.codeFontWeight ?? "400") === weight;
+    codeFontWeight.append(option);
+  }
+  const codePreview = document.createElement("code");
+  codePreview.className = "code-font-preview";
+  codePreview.textContent = "Aa 0123 · 中文";
+  const syncCodePreview = () => {
+    codePreview.style.fontFamily = config.codeFont
+      ? `"${config.codeFont}", ui-monospace, monospace`
+      : "";
+    codePreview.style.fontWeight = String(config.codeFontWeight ?? "400");
+  };
+  const fillCodeFonts = async () => {
+    if (codeFontList.childElementCount) return;
+    await ensureSystemFonts();
+    const families = new Set([
+      "Cascadia Code",
+      "Cascadia Mono",
+      "Consolas",
+      "JetBrains Mono",
+      "Fira Code",
+      "Courier New",
+      ...(systemFontFamilies ?? []),
+    ]);
+    for (const family of families) {
+      const option = document.createElement("option");
+      option.value = family;
+      codeFontList.append(option);
+    }
+  };
+  codeFontInput.addEventListener("focus", () => void fillCodeFonts());
+  codeFontInput.addEventListener("change", () => {
+    config.codeFont = codeFontInput.value.trim();
+    applyCodeFont();
+    syncCodePreview();
+    emitUiPrefs();
+    void patchConfig({ codeFont: config.codeFont }).catch(() => {});
+  });
+  codeFontWeight.addEventListener("change", () => {
+    config.codeFontWeight = codeFontWeight.value as Config["codeFontWeight"];
+    applyCodeFont();
+    syncCodePreview();
+    emitUiPrefs();
+    void patchConfig({ codeFontWeight: config.codeFontWeight }).catch(() => {});
+  });
+  const codeFontFields = document.createElement("div");
+  codeFontFields.className = "set-row__inline-fields";
+  codeFontFields.append(codeFontInput, codeFontWeight, codePreview);
+  codeFontFields.append(codeFontList);
+  const codeFontRow = panelRowDesc("settings.codeFont", "settings.desc.codeFont", codeFontFields);
+  syncCodePreview();
+  void fillCodeFonts();
+  const colorblindPill = pillControl<"off" | "on">(
+    [
+      { value: "off", label: t("settings.colorblindOff") },
+      { value: "on", label: t("settings.colorblindOn") },
+    ],
+    config.colorblindMode ? "on" : "off",
+    (value) => {
+      config.colorblindMode = value === "on";
+      applyCodeFont();
+      emitUiPrefs();
+      void patchConfig({ colorblindMode: config.colorblindMode }).catch(() => {});
+    },
+  );
+  colorblindPill.setAttribute("aria-label", t("settings.colorblind"));
+  const colorblindRow = panelRowDesc("settings.colorblind", "settings.desc.colorblind", colorblindPill);
+  const fontRow = document.querySelector("#ui-font-cjk")?.closest(".set-row");
+  if (fontRow) fontRow.after(textSizeRow, codeFontRow, colorblindRow);
+  else generalCard.append(textSizeRow, codeFontRow, colorblindRow);
   // The rows show these hints as visible descriptions already; a hover
   // tooltip on top of that would say the same thing twice.
   for (const id of ["ui-font", "ui-font-cjk"]) {
@@ -18205,46 +19698,34 @@ function buildPanelShell(): void {
     void runProviderPicker(false);
   });
   generalCard.append(panelRowDesc("settings.redetectTip", "settings.redetectTip", redetect));
-  const formGroup = document.createElement("div");
-  formGroup.className = "st-radio-group";
-  for (const value of ["floating", "panel"] as const) {
-    const label = document.createElement("label");
-    const radio = document.createElement("input");
-    radio.type = "radio";
-    radio.name = "window-form";
-    radio.value = value;
-    radio.checked = (config.windowForm ?? "floating") === value;
-    const span = document.createElement("span");
-    const key = value === "panel" ? "settings.windowFormPanel" : "settings.windowFormFloating";
-    span.dataset.i18n = key;
-    span.textContent = t(key);
-    label.append(radio, span);
-    formGroup.append(label);
-  }
-  formGroup.addEventListener("change", () => {
-    const value =
-      formGroup.querySelector<HTMLInputElement>("input:checked")?.value === "panel"
-        ? "panel"
-        : "floating";
-    // set_window_form persists; the local mirror keeps the next patchConfig
-    // snapshot from writing the old value back.
-    config.windowForm = value;
-    void invoke("set_window_form", { form: value }).catch((error) => {
-      settingsToast(t("settings.windowActionFailed", { err: String(error) }), true);
-    });
-    // Immediate effect: "panel" focuses (or opens) the panel window;
-    // "floating" closes it — a self-close when picked from inside it.
-    if (value === "panel") {
-      void invoke("open_panel_window").catch((error) => {
+  const formPill = pillControl<"floating" | "panel">(
+    [
+      { value: "floating", label: t("settings.windowFormFloating") },
+      { value: "panel", label: t("settings.windowFormPanel") },
+    ],
+    (config.windowForm ?? "floating") as "floating" | "panel",
+    (value) => {
+      // set_window_form persists; the local mirror keeps the next patchConfig
+      // snapshot from writing the old value back.
+      config.windowForm = value;
+      void invoke("set_window_form", { form: value }).catch((error) => {
         settingsToast(t("settings.windowActionFailed", { err: String(error) }), true);
       });
-    } else {
-      void invoke("close_panel_window").catch((error) => {
-        settingsToast(t("settings.windowActionFailed", { err: String(error) }), true);
-      });
-    }
-  });
-  generalCard.append(panelRowDesc("settings.windowForm", "settings.desc.windowForm", formGroup));
+      // Immediate effect: "panel" focuses (or opens) the panel window;
+      // "floating" closes it — a self-close when picked from inside it.
+      if (value === "panel") {
+        void invoke("open_panel_window").catch((error) => {
+          settingsToast(t("settings.windowActionFailed", { err: String(error) }), true);
+        });
+      } else {
+        void invoke("close_panel_window").catch((error) => {
+          settingsToast(t("settings.windowActionFailed", { err: String(error) }), true);
+        });
+      }
+    },
+  );
+  formPill.setAttribute("aria-label", t("settings.windowForm"));
+  generalCard.append(panelRowDesc("settings.windowForm", "settings.desc.windowForm", formPill));
   const resizeToggle = document.createElement("input");
   resizeToggle.type = "checkbox";
   resizeToggle.checked = config.windowResizeEnabled !== false;
@@ -18312,6 +19793,72 @@ function buildPanelShell(): void {
   backupImport.addEventListener("click", () => void runBackupImport());
   backupActions.append(backupExport, backupImport);
   generalCard.append(backupActions);
+  const replayOnboarding = document.createElement("button");
+  replayOnboarding.type = "button";
+  replayOnboarding.className = "mini-btn";
+  replayOnboarding.dataset.i18n = "settings.replayOnboardingAction";
+  replayOnboarding.textContent = t("settings.replayOnboardingAction");
+  replayOnboarding.addEventListener("click", () => startOnboarding(true));
+  generalCard.append(
+    panelRowDesc(
+      "settings.replayOnboarding",
+      "settings.desc.replayOnboarding",
+      replayOnboarding,
+    ),
+  );
+
+  // Claude Skill usage is a side ledger with its own cache; it lives here
+  // rather than the stats page because its source and scope are different.
+  const skillUsage = document.createElement("div");
+  skillUsage.className = "st-pad skill-usage";
+  const skillHead = document.createElement("div");
+  skillHead.className = "skill-usage-head";
+  const skillTitle = document.createElement("div");
+  const skillName = document.createElement("strong");
+  skillName.dataset.i18n = "settings.skillUsage";
+  skillName.textContent = t("settings.skillUsage");
+  const skillHint = document.createElement("span");
+  skillHint.dataset.i18n = "settings.skillUsageHint";
+  skillHint.textContent = t("settings.skillUsageHint");
+  skillTitle.append(skillName, skillHint);
+  const skillRefresh = document.createElement("button");
+  skillRefresh.type = "button";
+  skillRefresh.className = "mini-btn";
+  skillRefresh.dataset.i18n = "settings.skillUsageRefresh";
+  skillRefresh.textContent = t("settings.skillUsageRefresh");
+  skillHead.append(skillTitle, skillRefresh);
+  const skillList = document.createElement("div");
+  skillList.className = "skill-usage-list";
+  skillUsage.append(skillHead, skillList);
+  generalCard.append(skillUsage);
+  const renderSkillUsage = (rows: Array<{ skill: string; calls: number; tokens: number; cost: number }>): void => {
+    if (!rows.length) {
+      skillList.innerHTML = `<p class="settings-note">${escapeHtml(t("settings.skillUsageEmpty"))}</p>`;
+      return;
+    }
+    skillList.innerHTML = rows
+      .slice(0, 20)
+      .map(
+        (row) =>
+          `<div class="skill-usage-row"><span class="skill-usage-name" title="${escapeHtml(row.skill)}">${escapeHtml(row.skill)}</span><span>${row.calls}×</span><span>${escapeHtml(fmtTokens(row.tokens))}</span><span>${escapeHtml(fmtMoney(row.cost))}</span></div>`,
+      )
+      .join("") + `<p class="settings-note skill-usage-note">${escapeHtml(t("settings.skillUsageNote"))}</p>`;
+  };
+  const loadSkillUsage = async (force = false): Promise<void> => {
+    if (!IS_PANEL_FORM) return;
+    skillList.innerHTML = `<p class="settings-note">${escapeHtml(t("settings.skillUsageLoading"))}</p>`;
+    try {
+      const rows = await invoke<Array<{ skill: string; calls: number; tokens: number; cost: number }>>(
+        "fetch_skill_usage",
+        { force },
+      );
+      renderSkillUsage(rows);
+    } catch (err) {
+      skillList.innerHTML = `<p class="settings-note">${escapeHtml(String(err))}</p>`;
+    }
+  };
+  skillRefresh.addEventListener("click", () => void loadSkillUsage(true));
+  if (IS_PANEL_FORM) void loadSkillUsage();
 
   settingsView.append(general.section);
 
@@ -18367,6 +19914,39 @@ function buildPanelShell(): void {
   mcpKeys.body.append(kvPad);
   keyPage.append(kvHead, azRail, providerKeys.section, mcpKeys.section);
   settingsView.append(keyPage);
+
+  // --- Usage statistics: KPI strip, 52-week heatmap, model charts, and the
+  // daily detail that used to live in the popover (#64-04/05). -------------
+  const stats = panelBlock("st-stats", "settings.tabStats", "panel.desc.stats");
+  stats.body.classList.add("stats-body");
+  const statsRoot = document.createElement("div");
+  statsRoot.className = "stats-root";
+  stats.body.append(statsRoot);
+  statsRoot.addEventListener("click", (event) => {
+    const target = event.target as HTMLElement;
+    if (target.closest("[data-stats-refresh]")) {
+      void loadStatsData();
+      return;
+    }
+    const heat = target.closest<HTMLElement>("[data-stats-heat-mode]");
+    if (heat) {
+      statsHeatMode = heat.dataset.statsHeatMode as StatsHeatMode;
+      renderStatsPage();
+      return;
+    }
+    const range = target.closest<HTMLElement>("[data-stats-range]");
+    if (range) {
+      statsRange = range.dataset.statsRange as StatsRange;
+      renderStatsPage();
+      return;
+    }
+    const day = target.closest<HTMLElement>("[data-stats-day]");
+    if (day?.dataset.statsDay) {
+      statsSelectedDay = day.dataset.statsDay;
+      renderStatsPage();
+    }
+  });
+  settingsView.append(stats.section);
 
   // --- Shortcuts: wake + category + local bindings, moved in whole -------
   const shortcuts = panelBlock("st-shortcuts", "settings.shortcutManage", "panel.desc.shortcuts");
@@ -18436,7 +20016,21 @@ function buildPanelShell(): void {
   checkText.textContent = t("settings.checkUpdate");
   checkBtn.innerHTML = uiIcon("arrowsClockwise");
   checkBtn.append(checkText);
+  const syncAboutUpdate = (): void => {
+    const ready = Boolean(updateVersion);
+    checkBtn.classList.toggle("update-ready", ready);
+    checkText.textContent = ready
+      ? t("settings.updateTo", { version: updateVersion ?? "" })
+      : t("settings.checkUpdate");
+    checkText.dataset.i18n = "";
+    updateLine.hidden = !ready;
+    if (ready) updateLine.textContent = t("settings.updateAvailable", { version: updateVersion ?? "" });
+  };
   checkBtn.addEventListener("click", () => {
+    if (updateVersion) {
+      maybePromptUpdate(updateVersion, true);
+      return;
+    }
     void panelCheckForUpdate(checkBtn);
   });
   actions.append(
@@ -18445,10 +20039,15 @@ function buildPanelShell(): void {
     linkAction("settings.website", "https://pane.threetwoa.live", "globe"),
     linkAction("settings.feedback", "https://github.com/Aafff623/pane/issues/new", "info"),
   );
+  const updateLine = document.createElement("p");
+  updateLine.className = "about-update-line";
+  updateLine.hidden = true;
   const aboutCardHead = document.createElement("div");
   aboutCardHead.className = "about-hero";
   aboutCardHead.append(brand, actions);
-  about.body.append(aboutCardHead);
+  about.body.append(aboutCardHead, updateLine);
+  syncAboutUpdate();
+  aboutUpdateSync = syncAboutUpdate;
 
   // Update policy card: the frequency is a real backend preference; manual
   // checks never wait for it. No prerelease or popup switches are shown until
@@ -18957,6 +20556,7 @@ async function loadAuthCenterNow(): Promise<void> {
   }
   try {
     authGroups = await invoke<AuthFamilyGroup[]>("auth_center_list");
+    noteDiscoveredAccounts(authGroups);
   } catch (err) {
     container.innerHTML = `<div class="auth-empty"><span>${escapeHtml(t("auth.loadFailed", { err: String(err) }))}</span><button class="mini-btn" type="button" data-auth-retry>${escapeHtml(t("auth.retry"))}</button></div>`;
     return;
@@ -18975,11 +20575,56 @@ async function loadAuthCenterNow(): Promise<void> {
   renderAuthCenter();
 }
 
+let authDiscoveredNames: string[] = [];
+const AUTH_DISCOVERY_KEY = "pane.auth.discovery";
+
+/// Read-only baseline over local rows. A brand-new identity on an existing
+/// slot is surfaced once; credentials are never imported. First sight stays
+/// silent, and a vanished row drops its baseline so a later return is new.
+function noteDiscoveredAccounts(groups: AuthFamilyGroup[]): void {
+  const current: DiscoveryBaseline = {};
+  const names = new Map<string, string>();
+  for (const group of groups) {
+    for (const acct of group.accounts) {
+      if (acct.kind !== "local" || acct.identityUnknown) continue;
+      const key = `${group.family}:${acct.id}`;
+      current[key] = fingerprintIdentity([acct.id, acct.kind, acct.label, acct.email]);
+      names.set(key, authRowName(group.family, acct));
+    }
+  }
+  let previous: DiscoveryBaseline = {};
+  try {
+    previous = JSON.parse(localStorage.getItem(AUTH_DISCOVERY_KEY) ?? "{}") as DiscoveryBaseline;
+  } catch {
+    previous = {};
+  }
+  const result = reconcileDiscovery(previous, current);
+  try {
+    localStorage.setItem(AUTH_DISCOVERY_KEY, JSON.stringify(result.baseline));
+  } catch {
+    /* non-fatal */
+  }
+  if (result.discovered.length) {
+    authDiscoveredNames = result.discovered.map((key) => names.get(key) ?? key);
+  }
+}
+
+function authDiscoveryBannerHtml(): string {
+  if (!authDiscoveredNames.length) return "";
+  return `<div class="auth-discovery" role="status">
+    <div><strong>${escapeHtml(t("auth.discoveredTitle"))}</strong><span>${escapeHtml(t("auth.discoveredBody", { names: authDiscoveredNames.join(" · ") }))}</span></div>
+    <button class="mini-btn" type="button" data-auth-discovery-dismiss>${escapeHtml(t("auth.discoveredDismiss"))}</button>
+  </div>`;
+}
+
 function renderAuthCenter(): void {
   const container = document.querySelector<HTMLElement>("#panel-view-auth");
   renderAuthLoginDialog();
   if (!container || !authGroups) return;
-  container.innerHTML = authToolbarHtml() + authGroups.map(authGroupHtml).join("");
+  container.innerHTML =
+    authDiscoveryBannerHtml() +
+    authToolbarHtml() +
+    authGroups.map(authGroupHtml).join("");
 }
 
 function authToolbarHtml(): string {
@@ -18988,6 +20633,7 @@ function authToolbarHtml(): string {
   return `<div class="auth-toolbar">
     <button class="mini-btn${authSelectMode ? " on" : ""}" type="button" data-auth-select>${escapeHtml(t(authSelectMode ? "auth.selectCancel" : "auth.select"))}</button>
     <button class="mini-btn" type="button" data-auth-sort>${escapeHtml(t(authSortExpiry ? "auth.sortDefault" : "auth.sortExpiry"))}</button>
+    <button class="mini-btn auth-privacy${authPrivacyMasked ? " on" : ""}" type="button" data-auth-privacy aria-pressed="${authPrivacyMasked}" title="${escapeHtml(t(authPrivacyMasked ? "auth.privacyShow" : "auth.privacyHide"))}" aria-label="${escapeHtml(t(authPrivacyMasked ? "auth.privacyShow" : "auth.privacyHide"))}">${uiIcon(authPrivacyMasked ? "eye" : "eyeSlash")}</button>
     ${
       authSelectMode
         ? `<span class="auth-selected">${escapeHtml(t("auth.selected", { n: selected }))}</span>
@@ -19029,14 +20675,34 @@ function authExpirySort(a: AuthAccountRow, b: AuthAccountRow): number {
   return a.label.localeCompare(b.label);
 }
 
+/// Privacy eye: masks the identity, never the quota numbers. Local only —
+/// the stored flag is a display preference, not a credential.
+let authPrivacyMasked = (() => {
+  try {
+    return localStorage.getItem("pane.auth.mask") === "1";
+  } catch {
+    return false;
+  }
+})();
+
+function maskAuthIdentity(value: string): string {
+  if (!value) return value;
+  const at = value.indexOf("@");
+  if (at > 0) return `${value.slice(0, 1)}***${value.slice(at)}`;
+  if (value.length <= 3) return "•••";
+  return `${value.slice(0, 2)}••••${value.slice(-2)}`;
+}
+
 function authRowName(family: string, acct: AuthAccountRow): string {
   // Same display-note resolver as the dashboard/settings; never show a
   // fingerprint fragment as a person's account name. Codex defaults to the
   // Google/ChatGPT email when the user has not renamed the account.
   const note = accountNote(acct.id);
-  if (note) return note;
-  if (providerFamily(acct.id) === "codex" && acct.email?.trim()) return acct.email.trim();
-  return acct.label.trim() || acct.email || providerDisplayName(family);
+  let name = "";
+  if (note) name = note;
+  else if (providerFamily(acct.id) === "codex" && acct.email?.trim()) name = acct.email.trim();
+  else name = acct.label.trim() || acct.email || providerDisplayName(family);
+  return authPrivacyMasked ? maskAuthIdentity(name) : name;
 }
 
 /// The snapshot behind a row: the account's own card id, which for OAuth
@@ -19049,9 +20715,9 @@ function authRowSnapshot(acct: AuthAccountRow): Snapshot | undefined {
 function authNeedsReauth(snap: Snapshot | undefined): string | null {
   const err = (snap?.error ?? snap?.warning ?? "").trim();
   if (!err) return null;
-  return /http 40[13]|invalid_grant|expired|no refresh token|sign[- ]?in|log ?in|credentials/i.test(err)
-    ? err
-    : null;
+  // Revoked-only: a temporary 401/403 or network failure must stay a warning,
+  // not a "sign in again" dead end.
+  return credentialFinality(err) === "revoked" ? err : null;
 }
 
 /// The persisted relogin flag carries a coarse, non-secret error class;
@@ -19083,8 +20749,18 @@ function authLastChecked(acct: AuthAccountRow): string | null {
 }
 
 function authQuotaHtml(snap: Snapshot | undefined, reauth: string | null): string {
-  if (reauth || !snap || snap.status !== "ok") {
+  if (reauth || !snap) {
     return `<span class="auth-quota dim">—</span>`;
+  }
+  if (snap.status !== "ok") {
+    // A failed refresh keeps the last known bar if the provider returned one;
+    // label it cached instead of replacing a number the user can still use.
+    const cached = snap.metrics.find(
+      (metric) => metric.kind === "progress" && metric.used_percent !== null,
+    );
+    if (!cached) return `<span class="auth-quota dim" title="${escapeHtml(snap.error ?? "")}">—</span>`;
+    const tip = t("auth.quotaStaleTip", { err: snap.error ?? snap.warning ?? "" });
+    return `<span class="auth-quota stale" title="${escapeHtml(tip)}">${escapeHtml(displayMetricLabel(cached.label))} ${Math.round(cached.used_percent!)}% <em>${escapeHtml(t("auth.quotaStale"))}</em></span>`;
   }
   const bar = snap.metrics.find((m) => m.kind === "progress" && m.used_percent !== null);
   if (bar) {
@@ -19115,10 +20791,11 @@ function authRowHtml(family: string, acct: AuthAccountRow, index: number): strin
   const lastChecked = authLastChecked(acct);
   const lastUsed = authLastUsed(acct);
   const name = authRowName(family, acct);
+  const statusBits = [snap?.warning, snap?.error].filter((bit): bit is string => Boolean(bit));
   let sub: string;
   if (reauth) {
     // cc-switch swaps the second line for the reauth reason.
-    const title = [reauth, lastUsed, lastChecked].filter(Boolean).join(" · ");
+    const title = [reauth, ...statusBits, lastUsed, lastChecked].filter(Boolean).join(" · ");
     sub = `<div class="auth-sub reauth" title="${escapeHtml(title)}">${escapeHtml(reauth)}</div>`;
   } else if (local) {
     const details = [
@@ -19129,7 +20806,7 @@ function authRowHtml(family: string, acct: AuthAccountRow, index: number): strin
     if (lastUsed) details.push(lastUsed);
     if (lastChecked) details.push(lastChecked);
     details.push(snap ? t("auth.monitoring") : t("auth.noCard"));
-    sub = `<div class="auth-sub" title="${escapeHtml(details.join(" · "))}">${escapeHtml(details.filter(Boolean).join(" · "))}</div>`;
+    sub = `<div class="auth-sub" title="${escapeHtml([...details, ...statusBits].filter(Boolean).join(" · "))}">${escapeHtml(details.filter(Boolean).join(" · "))}</div>`;
   } else {
     const details: string[] = [t("auth.source.managed")];
     if (acct.source === "desktop") details.push(t("auth.source.desktop"));
@@ -19147,7 +20824,7 @@ function authRowHtml(family: string, acct: AuthAccountRow, index: number): strin
     if (lastChecked) details.push(lastChecked);
     details.push(acct.maskedKey);
     details.push(snap ? t("auth.monitoring") : t("auth.noCard"));
-    sub = `<div class="auth-sub">${escapeHtml(details.join(" · "))}</div>`;
+    sub = `<div class="auth-sub" title="${escapeHtml([...details, ...statusBits].filter(Boolean).join(" · "))}">${escapeHtml(details.join(" · "))}</div>`;
   }
   const localPills = local
     ? `<span class="auth-pill local">${escapeHtml(t(acct.current ? "auth.source.current" : "auth.source.local"))}</span>${
@@ -19167,12 +20844,16 @@ function authRowHtml(family: string, acct: AuthAccountRow, index: number): strin
           authSelected.has(acct.id) ? "checked" : ""
         } aria-label="${escapeHtml(name)}">`
     : "";
+  const busy = (() => {
+    const phase = authFlows.get(family)?.phase;
+    return phase === "starting" || phase === "polling" || phase === "browser";
+  })();
   const action = local
     ? snap
       ? ""
-      : `<button class="mini-btn" type="button" data-auth-enable="${escapeHtml(acct.id)}">${escapeHtml(t("auth.enableCard"))}</button>`
-    : `<button class="mini-btn" type="button" data-auth-menu="${escapeHtml(family)}|${index}" title="${escapeHtml(t("auth.more"))}" aria-label="${escapeHtml(t("auth.more"))}">⋯</button>`;
-  return `<div class="auth-row" data-auth-row="${escapeHtml(acct.id)}">
+      : `<button class="mini-btn" type="button" data-auth-enable="${escapeHtml(acct.id)}"${busy ? " disabled" : ""}>${escapeHtml(t("auth.enableCard"))}</button>`
+    : `<button class="mini-btn" type="button" data-auth-menu="${escapeHtml(family)}|${index}" title="${escapeHtml(t("auth.more"))}" aria-label="${escapeHtml(t("auth.more"))}"${busy ? " disabled" : ""}>⋯</button>`;
+  return `<div class="auth-row${busy ? " busy" : ""}" data-auth-row="${escapeHtml(acct.id)}" aria-busy="${busy}">
     ${selector}
     <span class="auth-avatar" aria-hidden="true">${escapeHtml([...name][0] || "?")}</span>
     <div class="auth-id">
@@ -19330,6 +21011,12 @@ function renderAuthLoginDialog(): void {
     code && flow.phase !== "success" && flow.phase !== "error"
       ? `<div class="auth-login-code-row"><span class="auth-login-label">${escapeHtml(t("auth.loginDeviceCode"))}</span><code class="auth-login-code">${escapeHtml(code)}</code><button type="button" class="mini-btn" data-auth-login-copy-code>${escapeHtml(t("auth.flow.copy"))}</button></div>`
       : "";
+  // Codex's loopback flow is the one browser sign-in with a callback URL; if
+  // the browser cannot hand it back, let the user paste what it landed on.
+  const pasteRow =
+    family === "codex" && flow.phase === "browser"
+      ? `<div class="auth-login-paste"><label class="auth-login-label" for="auth-login-paste">${escapeHtml(t("auth.loginPasteLabel"))}</label><div class="auth-login-paste-row"><input id="auth-login-paste" type="text" spellcheck="false" autocomplete="off" placeholder="${escapeHtml(t("auth.loginPastePlaceholder"))}" /><button type="button" class="mini-btn" data-auth-login-paste>${escapeHtml(t("auth.loginPasteSubmit"))}</button></div></div>`
+      : "";
   const actions =
     flow.phase === "success"
       ? `<button type="button" data-auth-login-close>${escapeHtml(t("auth.flow.close"))}</button>`
@@ -19381,6 +21068,21 @@ function renderAuthLoginDialog(): void {
       if (target.closest("[data-auth-login-copy-code]")) {
         const copyCode = authFlows.get(current)?.userCode;
         if (copyCode) copyAuthDialogText(copyCode, target.closest("button"));
+        return;
+      }
+      if (target.closest("[data-auth-login-paste]")) {
+        const input = box!.querySelector<HTMLInputElement>("#auth-login-paste");
+        const loginId = authFlows.get(current)?.loginId;
+        const value = input?.value.trim() ?? "";
+        if (!input || !loginId || !value) return;
+        void invoke("codex_paste_callback", { loginId, input: value })
+          .then(() => void pollBrowserLogin(current))
+          .catch((err) => {
+            const statusEl = box!.querySelector<HTMLElement>("#auth-login-status");
+            if (!statusEl) return;
+            statusEl.textContent = t("auth.loginPasteFailed", { err: String(err) });
+            statusEl.className = "auth-login-status error";
+          });
       }
     });
     box.addEventListener("keydown", (event) => {
@@ -19393,7 +21095,7 @@ function renderAuthLoginDialog(): void {
   }
   box.querySelector("#auth-login-title")!.textContent = t("auth.loginTitle", { name });
   box.querySelector("#auth-login-hint")!.textContent = hint;
-  box.querySelector("#auth-login-body")!.innerHTML = link + codeRow;
+  box.querySelector("#auth-login-body")!.innerHTML = link + codeRow + pasteRow;
   const statusEl = box.querySelector<HTMLElement>("#auth-login-status")!;
   statusEl.textContent = status;
   statusEl.className = `auth-login-status${flow.phase === "error" ? " error" : flow.phase === "success" ? " ok" : ""}`;
@@ -19417,9 +21119,13 @@ function authGroupHtml(group: AuthFamilyGroup): string {
       ? `<div class="auth-empty"><span>${escapeHtml(t("auth.empty"))}</span>
         <button class="mini-btn" type="button" data-auth-add="${escapeHtml(family)}">${escapeHtml(t("auth.addAccount"))}</button></div>`
       : "";
+  const familyBusy = (() => {
+    const phase = authFlows.get(family)?.phase;
+    return phase === "starting" || phase === "polling" || phase === "browser";
+  })();
   const addBtn =
     group.accounts.length > 0
-      ? `<button class="mini-btn" type="button" data-auth-add="${escapeHtml(family)}">${escapeHtml(t("auth.addAccount"))}</button>`
+      ? `<button class="mini-btn" type="button" data-auth-add="${escapeHtml(family)}"${familyBusy ? " disabled" : ""}>${escapeHtml(t("auth.addAccount"))}</button>`
       : "";
   return `<section class="st-block" data-auth-group="${escapeHtml(family)}">
     <div class="st-block-head auth-group-head">
@@ -19445,6 +21151,21 @@ function handleAuthCenterClick(target: HTMLElement): void {
   }
   if (target.closest("[data-auth-sort]")) {
     authSortExpiry = !authSortExpiry;
+    renderAuthCenter();
+    return;
+  }
+  if (target.closest("[data-auth-discovery-dismiss]")) {
+    authDiscoveredNames = [];
+    renderAuthCenter();
+    return;
+  }
+  if (target.closest("[data-auth-privacy]")) {
+    authPrivacyMasked = !authPrivacyMasked;
+    try {
+      localStorage.setItem("pane.auth.mask", authPrivacyMasked ? "1" : "0");
+    } catch {
+      /* non-fatal */
+    }
     renderAuthCenter();
     return;
   }
@@ -19551,7 +21272,16 @@ function authAddAccount(family: string): void {
     renderAuthCenter();
     void invoke("web_session_login", { family }).then(async () => {
       if (authFlows.get(family) !== flow) return;
-      authFlows.set(family, { phase: "success", deviceAuthId: "", userCode: "", error: null, label: null });
+      const successFlow: AuthFlow = { phase: "success", deviceAuthId: "", userCode: "", error: null, label: null };
+      authFlows.set(family, successFlow);
+      // Same 1.6 s beat as the OAuth rows: acknowledge, then let the fresh row
+      // replace the block instead of leaving a stale success banner.
+      window.setTimeout(() => {
+        if (authFlows.get(family) === successFlow) {
+          authFlows.delete(family);
+          renderAuthCenter();
+        }
+      }, 1600);
       await afterCredentialMutation(family);
       await loadAuthCenter();
     }).catch((error) => {
@@ -20088,44 +21818,92 @@ window.addEventListener("DOMContentLoaded", () => {
   // No lens init here: applyGlass() (via initSettings, after the saved
   // config arrives) owns it — a fixed timer raced the config load and
   // built the maps even for users who turned glass off.
-  // Local shortcuts are handled only by this focused dashboard window. The
-  // wake shortcut is registered by Rust as the sole global shortcut.
+  // One capture dispatcher for every configurable command (#64-02). Modal
+  // dialogs keep their own keydown listeners: those are close/arrow handling,
+  // not rebindable commands. `handlers` is a lookup, so a command without a
+  // handler is never preventDefault-ed.
   let shiftAlone = false;
   const canCyclePeriod = () => isDashboardActive() && !customizeOpen &&
     !document.querySelector(".group-menu-overlay, #confirm-overlay") &&
     !isTypingTarget(document.activeElement);
+  const toggleExpiring = () => {
+    overviewExpiringOpen = !overviewExpiringOpen;
+    if (config.layout && isOverviewCollapsed()) {
+      config.layout.overviewCollapsed = false;
+      saveLayout(false);
+    }
+    flushRender();
+    document.querySelector<HTMLElement>(".quota-overview")?.scrollIntoView({ block: "nearest" });
+  };
+  const shortcutHandlers: Record<string, () => void> = {
+    customize: () => setDrawer(!customizeOpen),
+    theme: () => document.querySelector<HTMLElement>("#theme-btn")?.click(),
+    category: () => cycleOverviewCategory(),
+    refresh: () => void refresh(true, false, true),
+    settings: () => {
+      setDrawer(false);
+      void openSettingsPanel();
+    },
+    expiring: toggleExpiring,
+    period: () =>
+      switchOverviewTab(
+        OVERVIEW_TABS[(OVERVIEW_TABS.indexOf(overviewTab) + 1) % OVERVIEW_TABS.length],
+      ),
+    panel: () => openPanelWindowSafely(),
+  };
+  const shortcutEnabled: Record<string, () => boolean> = {
+    customize: () => isDashboardActive(),
+    theme: () => isDashboardActive(),
+    category: () => isDashboardActive() && !customizeOpen,
+    expiring: () => !customizeOpen,
+    period: () => canCyclePeriod(),
+    refresh: () => true,
+    settings: () => true,
+    panel: () => true,
+  };
+  const dispatchShortcut = (event: KeyboardEvent): boolean => {
+    if (
+      shortcutRecordingActive ||
+      onboardingActive() ||
+      isImeNoise(event) ||
+      isModifierOnly(event) ||
+      isTypingTarget(document.activeElement) ||
+      document.querySelector("#confirm-overlay, .group-menu-overlay")
+    ) {
+      return false;
+    }
+    for (const command of SHORTCUT_COMMANDS) {
+      // system = registered by Rust. The period command's default is a bare
+      // Shift tap (keyup path); a non-tap binding it owns is dispatched here.
+      if (command.channel === "system") continue;
+      const bindings = effectiveShortcutBindings(command.id);
+      if (
+        command.channel === "tap" &&
+        bindings.every((binding) => binding.trim().toLowerCase() === "shift")
+      ) {
+        continue;
+      }
+      if (!bindings.some((binding) => matchesBinding(event, binding, shortcutPlatform))) continue;
+      if (command.scope === "dashboard" && !isDashboardActive()) continue;
+      const enabled = shortcutEnabled[command.id];
+      if (enabled && !enabled()) continue;
+      const handler = shortcutHandlers[command.id];
+      if (!handler) continue;
+      event.preventDefault();
+      handler();
+      return true;
+    }
+    return false;
+  };
+  window.addEventListener("keydown", (event) => dispatchShortcut(event), true);
   window.addEventListener("keydown", (e) => {
     if (e.key === "Shift") {
-      shiftAlone = localShortcut("period") === "Shift" && !e.repeat && !e.ctrlKey && !e.altKey && !e.metaKey &&
+      shiftAlone = shortcutValue("period") === "Shift" && !e.repeat && !e.ctrlKey && !e.altKey && !e.metaKey &&
         !e.isComposing && canCyclePeriod();
     } else {
       shiftAlone = false;
     }
     konamiListen(e);
-    if (!e.repeat && !e.isComposing && !isTypingTarget(document.activeElement) && isDashboardActive()) {
-      if (shortcutMatches(e, localShortcut("customize"))) {
-        e.preventDefault(); setDrawer(!customizeOpen); return;
-      }
-      if (shortcutMatches(e, localShortcut("theme"))) {
-        e.preventDefault(); document.querySelector<HTMLElement>("#theme-btn")?.click(); return;
-      }
-      if (localShortcut("period") !== "Shift" && shortcutMatches(e, localShortcut("period")) && canCyclePeriod()) {
-        e.preventDefault(); switchOverviewTab(OVERVIEW_TABS[(OVERVIEW_TABS.indexOf(overviewTab) + 1) % OVERVIEW_TABS.length]); return;
-      }
-    }
-    if (
-      isDashboardActive() &&
-      shortcutMatches(e, config.categoryShortcut) &&
-      !e.repeat &&
-      !customizeOpen &&
-      !e.isComposing &&
-      e.keyCode !== 229 &&
-      !isTypingTarget(document.activeElement)
-    ) {
-      e.preventDefault();
-      cycleOverviewCategory();
-      return;
-    }
     if (e.ctrlKey && e.key.toLowerCase() === "z" && customizeOpen) {
       e.preventDefault();
       undoLayout();
@@ -20136,11 +21914,6 @@ window.addEventListener("DOMContentLoaded", () => {
       // IME: Esc cancels an in-flight composition (candidate window) — it
       // must not double as "close the panel" / "hide the window".
       if (e.isComposing || e.keyCode === 229) return;
-      if (spendDetailOpen) {
-        spendDetailOpen = false;
-        document.querySelector(".spend-detail-overlay")?.remove();
-        return;
-      }
       if (skinMarketOpen) {
         skinMarketOpen = false;
         renderDrawerBody();
@@ -20151,51 +21924,6 @@ window.addEventListener("DOMContentLoaded", () => {
         return;
       }
       void invoke("hide_popover").catch(() => {});
-    }
-    // Ctrl+R refreshes data — and must NOT reload the webview.
-    if (shortcutMatches(e, localShortcut("refresh")) && !isTypingTarget(document.activeElement)) {
-      e.preventDefault();
-      void refresh(true, false, true);
-    }
-    // Ctrl+S opens Settings — same semantics as the ⚙ button: the standalone
-    // panel window (and must NOT trigger the webview "save page" dialog).
-    if (shortcutMatches(e, localShortcut("settings")) && !isTypingTarget(document.activeElement)) {
-      e.preventDefault();
-      setDrawer(false);
-      void openSettingsPanel();
-    }
-    // Ctrl+Shift+P opens the big panel window (dual-form PoC).
-    if (
-      e.ctrlKey && e.shiftKey && !e.altKey && e.code === "KeyP" &&
-      !e.repeat && !isTypingTarget(document.activeElement)
-    ) {
-      e.preventDefault();
-      openPanelWindowSafely();
-    }
-    // Bare T flips the Quota Overview to its soonest-reset (expiring)
-    // list — the follow-up key after the global popover shortcut (Alt+2
-    // shows the popover, T then shows what runs out soonest; pressing T
-    // again goes back to the sectioned board). Same guards as the
-    // bare-Shift board toggle: plain key only, no typing targets, no
-    // Customize. A collapsed overview is unfolded and scrolled into view
-    // so the list is actually on screen.
-    if (
-      shortcutMatches(e, localShortcut("expiring")) &&
-      !e.repeat &&
-      !e.isComposing &&
-      e.keyCode !== 229 &&
-      !customizeOpen &&
-      !isTypingTarget(document.activeElement)
-    ) {
-      overviewExpiringOpen = !overviewExpiringOpen;
-      if (config.layout && isOverviewCollapsed()) {
-        config.layout.overviewCollapsed = false;
-        saveLayout(false);
-      }
-      flushRender();
-      document
-        .querySelector<HTMLElement>(".quota-overview")
-        ?.scrollIntoView({ block: "nearest" });
     }
   });
   window.addEventListener("keyup", (e) => {
@@ -20228,9 +21956,14 @@ async function openSettingsPanel(): Promise<void> {
     settingsToast(t("settings.panelOpenFailed", { err: String(err) }), true);
   }
 }
-document.querySelector("#settings-btn")!.addEventListener("click", () => {
-  setDrawer(false);
-  void openSettingsPanel();
+document.querySelector("#settings-btn")!.addEventListener("click", (event) => {
+  playSkinTransition(activeSkin()?.id ?? null, event.currentTarget as HTMLElement, {
+    reduced: reduceMotion(),
+    apply: () => {
+      setDrawer(false);
+      void openSettingsPanel();
+    },
+  });
 });
   document.addEventListener("click", (event) => {
     if (!(event.target as HTMLElement).closest("[data-open-changelog]")) return;
@@ -20239,9 +21972,14 @@ document.querySelector("#settings-btn")!.addEventListener("click", () => {
   document.querySelector("#customize-btn")!.addEventListener("click", () => {
     setDrawer(!customizeOpen);
   });
-  document.querySelector("#skin-btn")!.addEventListener("click", () => {
-    skinMarketOpen = true;
-    setDrawer(true);
+  document.querySelector("#skin-btn")!.addEventListener("click", (event) => {
+    playSkinTransition(activeSkin()?.id ?? null, event.currentTarget as HTMLElement, {
+      reduced: reduceMotion(),
+      apply: () => {
+        skinMarketOpen = true;
+        setDrawer(true);
+      },
+    });
   });
   const drawerBody = document.querySelector<HTMLElement>("#drawer-body")!;
   drawerBody.addEventListener("click", (e) => {
@@ -20413,14 +22151,6 @@ document.querySelector("#settings-btn")!.addEventListener("click", () => {
     ) {
       hidePopoverScale();
     }
-    const details = target.closest<HTMLElement>("[data-spend-details]");
-    if (details) {
-      e.preventDefault();
-      spendDetailOpen = true;
-      spendDetailDay = spendDetailDay || localDayKey(new Date());
-      requestRender();
-      return;
-    }
     // Popover chrome: pin (always-on-top) and the position lock. Both are
     // popover-window concerns — the panel form has a real frame.
     if (target.closest<HTMLElement>("[data-popover-pin]")) {
@@ -20439,16 +22169,6 @@ document.querySelector("#settings-btn")!.addEventListener("click", () => {
       e.preventDefault();
       void rescanQoderUsage();
       return;
-    }
-    if (target.closest<HTMLElement>("[data-spend-detail-close]") || target.classList.contains("spend-detail-overlay")) {
-      spendDetailOpen = false;
-      document.querySelector(".spend-detail-overlay")?.remove();
-      return;
-    }
-    const day = target.closest<HTMLElement>("[data-spend-detail-day]");
-    if (day && spendDetailOpen) {
-      spendDetailDay = day.dataset.spendDetailDay ?? spendDetailDay;
-      requestRender();
     }
   });
 
@@ -20753,6 +22473,11 @@ document.querySelector("#settings-btn")!.addEventListener("click", () => {
       requestRender();
       return;
     }
+    const openTopo = target.closest<HTMLElement>("[data-topology-open]");
+    if (openTopo) {
+      openTopology();
+      return;
+    }
     const ovExpiring = target.closest<HTMLElement>("[data-overview-expiring]");
     if (ovExpiring) {
       overviewExpiringOpen = !overviewExpiringOpen;
@@ -20989,6 +22714,7 @@ document.querySelector("#settings-btn")!.addEventListener("click", () => {
   void listen<string>("update-available", (e) => {
     updateVersion = e.payload;
     syncPanelNavBadge();
+    aboutUpdateSync?.();
     requestRender();
     renderBuildInfo();
   });
@@ -21089,6 +22815,7 @@ document.querySelector("#settings-btn")!.addEventListener("click", () => {
         (snapshot) => refreshState.cardBusy(snapshot.id) && !hiddenIds.has(snapshot.id),
       ),
     ];
+    topologyNoteActivity(incoming);
     boardLoadPhase = "ready";
     ensureLayout();
     requestRender();
@@ -21109,6 +22836,21 @@ document.querySelector("#settings-btn")!.addEventListener("click", () => {
     if (!document.hidden && !IS_PANEL_FORM) void refresh(true);
   });
 
+  void listen<{
+    uiTextSize?: TextSize;
+    codeFont?: string;
+    codeFontWeight?: Config["codeFontWeight"];
+    colorblindMode?: boolean;
+  }>("ui-prefs-changed", (event) => {
+    const prefs = event.payload ?? {};
+    if (prefs.uiTextSize) config.uiTextSize = prefs.uiTextSize;
+    config.codeFont = prefs.codeFont ?? "";
+    config.codeFontWeight = prefs.codeFontWeight ?? "400";
+    config.colorblindMode = prefs.colorblindMode === true;
+    applyWindowScale();
+    applyCodeFont();
+    syncAppearanceSettingsControls();
+  });
   void listen("popover-shown", () => {
     void checkForUpdate();
     // Land back on the surface the popover was dismissed on: copying an API
@@ -21149,6 +22891,9 @@ document.querySelector("#settings-btn")!.addEventListener("click", () => {
   });
   void initSettings().then(async () => {
     const needsInitialTour = initialTourPending(config);
+    // A returning install (tour seen or welcome dismissed) must never be
+    // surprised by the new guide; only the fresh-install gate opens it.
+    onboardingFreshInstall = needsInitialTour && !config.onboardingSeen && !config.onboardingDismissed;
     await prepareFontOnboarding();
     freshInstallAtBoot = needsInitialTour;
     if (freshInstallAtBoot && !config.tourPending) {

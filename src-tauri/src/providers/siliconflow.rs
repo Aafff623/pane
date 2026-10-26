@@ -67,7 +67,11 @@ async fn fetch_with_key(key: &str, card_id: &str, card_name: &str) -> Result<Sna
             return Err("API key was rejected — check it in Settings".into());
         }
         if !resp.status().is_success() {
-            last_error = format!("models endpoint: HTTP {}", resp.status());
+            last_error = format!(
+            "models endpoint: HTTP {}{}",
+            resp.status(),
+            super::retry_hint(&resp)
+        );
             continue;
         }
         // Official release notes retired /user/info on 2026-08-14.

@@ -69,7 +69,11 @@ async fn fetch_with_key(key: &str) -> Result<Snapshot, String> {
         return Err("key was rejected — paste a fresh AihubMix key in Settings".into());
     }
     if !sub_resp.status().is_success() {
-        return Err(format!("subscription endpoint: HTTP {}", sub_resp.status()));
+        return Err(format!(
+            "subscription endpoint: HTTP {}{}",
+            sub_resp.status(),
+            super::retry_hint(&sub_resp)
+        ));
     }
     let sub: Value = sub_resp.json().await.map_err(|e| format!("subscription parse: {e}"))?;
 
@@ -98,11 +102,14 @@ async fn fetch_with_key(key: &str) -> Result<Snapshot, String> {
     match (limit, used) {
         (Some(limit), Some(used)) => {
             let pct = (used / limit * 100.0).clamp(0.0, 100.0);
-            metrics.push(Metric::progress(
-                "Usage",
-                pct,
-                Some(format!("${used:.2} of ${limit:.2}")),
-            ));
+            let mut progress =
+                Metric::progress("Usage", pct, Some(format!("${used:.2} of ${limit:.2}")));
+            progress.quota = Some(crate::usage_units::QuotaReading {
+                unit: "usd".into(),
+                used,
+                limit: Some(limit),
+            });
+            metrics.push(progress);
         }
         (Some(limit), None) => {
             metrics.push(Metric::text("Limit", format!("${limit:.2}")));

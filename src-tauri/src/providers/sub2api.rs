@@ -84,7 +84,11 @@ async fn fetch_at(key: &str, base: &str) -> Result<Snapshot, String> {
         return Err("key was rejected — check that it is active and assigned to a group".into());
     }
     if !resp.status().is_success() {
-        return Err(format!("usage endpoint: HTTP {}", resp.status()));
+        return Err(format!(
+            "usage endpoint: HTTP {}{}",
+            resp.status(),
+            super::retry_hint(&resp)
+        ));
     }
     let doc: Value = resp.json().await.map_err(|e| format!("usage parse: {e}"))?;
     parse_usage(&doc)

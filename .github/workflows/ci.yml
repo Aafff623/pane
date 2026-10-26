@@ -18,6 +18,10 @@ on:
   # 0.7.0 post-mortem this was added for.
   workflow_dispatch:
 
+concurrency:
+  group: ci-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   frontend:
     runs-on: ubuntu-latest

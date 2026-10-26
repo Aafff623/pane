@@ -34,7 +34,7 @@ pub struct Alert {
     pub body: String,
 }
 
-#[derive(PartialEq, Clone, Copy)]
+#[derive(Debug, PartialEq, Clone, Copy)]
 enum Verdict {
     Ok,
     Close,
@@ -45,6 +45,12 @@ enum Verdict {
 fn verdict(used: f64, resets_at: Option<i64>, period_ms: Option<i64>) -> (Verdict, f64) {
     let used = used.clamp(0.0, 100.0);
     let left = 100.0 - used;
+    let now = chrono::Utc::now().timestamp_millis();
+    // Expiry outranks the "already empty" shortcut: an old 100% row from a
+    // window that has since reset must not keep firing a run-out alert.
+    if resets_at.is_some_and(|at| at <= now) {
+        return (Verdict::Ok, left);
+    }
     if left < 0.5 {
         return (Verdict::RunOut, 0.0);
     }
@@ -54,7 +60,6 @@ fn verdict(used: f64, resets_at: Option<i64>, period_ms: Option<i64>) -> (Verdic
     if period_ms <= 0 {
         return (Verdict::Ok, left);
     }
-    let now = chrono::Utc::now().timestamp_millis();
     let remain = (resets_at - now).max(0);
     let elapsed = period_ms - remain;
     let frac = elapsed as f64 / period_ms as f64;
@@ -114,8 +119,11 @@ pub fn evaluate(snapshots: &[Snapshot], cfg: &Value) -> Vec<Alert> {
             entry.resets_at = metric.resets_at;
 
             let left = (100.0 - used.clamp(0.0, 100.0)).max(0.0);
+            let expired = metric
+                .resets_at
+                .is_some_and(|at| at <= chrono::Utc::now().timestamp_millis());
             let (v, spare) = verdict(used, metric.resets_at, metric.period_ms);
-            let almost_now = left < 10.0;
+            let almost_now = left < 10.0 && !expired;
             let close_now = v == Verdict::Close;
             let run_out_now = v == Verdict::RunOut;
 
@@ -306,6 +314,19 @@ mod tests {
         assert!(evaluate(&[snap_5h("t-rs-cycle", 5 * 3_600_000)], &cfg).is_empty());
         // That period's own last hour announces again.
         assert_eq!(evaluate(&[snap_5h("t-rs-cycle", 50 * 60_000)], &cfg).len(), 1);
+    }
+
+    #[test]
+    fn expired_window_cannot_verdict_runout() {
+        let now = chrono::Utc::now().timestamp_millis();
+        assert_eq!(
+            verdict(100.0, Some(now - 60_000), Some(FIVE_H)),
+            (Verdict::Ok, 0.0)
+        );
+        assert_eq!(
+            verdict(26.0, Some(now - 60_000), Some(FIVE_H)).0,
+            Verdict::Ok
+        );
     }
 
     #[test]

@@ -157,9 +157,10 @@ fn discover_language_servers() -> Vec<LanguageServer> {
 fn ls_client() -> reqwest::Client {
     reqwest::Client::builder()
         .danger_accept_invalid_certs(true)
+        .no_proxy()
         .timeout(Duration::from_secs(10))
         .build()
-        .unwrap_or_else(|_| super::http())
+        .unwrap_or_else(|_| super::http_direct())
 }
 
 async fn ls_call(scheme: &str, port: u16, csrf: &str, method: &str) -> Option<Value> {

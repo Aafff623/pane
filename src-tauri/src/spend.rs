@@ -291,6 +291,8 @@ struct FileData {
 struct FileEntry {
     mtime: SystemTime,
     size: u64,
+    /// Scanner family ("claude", "codex", …) that produced this entry.
+    source: String,
     /// Pricing-catalog generation the file was priced under. A catalog
     /// refresh bumps the generation; the entry is then kept only if its
     /// recorded price probes still replay identically (see `PriceProbe`).
@@ -641,6 +643,13 @@ struct PersistEntry {
     /// (day, model) priced from an observation that postdates the event.
     #[serde(default)]
     estimated: Vec<(i32, String)>,
+    /// Scanner family this file was parsed under (#59-03).
+    #[serde(default)]
+    source: String,
+    /// Per-source parser revision at parse time. A bump re-reads only that
+    /// source's files instead of discarding the whole cache.
+    #[serde(default)]
+    parser_rev: u32,
     /// Pricing questions this file's parse asked (see `PriceProbe`).
     /// Older caches without the field deserialize as empty — safe, because
     /// they can only load through the exact-stamp fast path.
@@ -660,6 +669,27 @@ struct PersistFile {
     #[serde(default)]
     corrections: u32,
     entries: Vec<PersistEntry>,
+}
+
+/// Parser revisions, one per scanner family. Bump ONLY the family whose
+/// parsing logic changed; every other source keeps its cached files. The
+/// global PERSIST_VERSION stays for cross-source/or cache-format changes.
+fn parser_rev_for(source: &str) -> u32 {
+    match source {
+        "claude" => 1,
+        "codex" => 1,
+        "zcode" => 1,
+        "pi" => 1,
+        "grok" => 1,
+        "qwen" => 1,
+        "kimi" => 1,
+        "gemini" => 1,
+        _ => 1,
+    }
+}
+
+fn parser_entry_current(entry: &PersistEntry) -> bool {
+    !entry.source.is_empty() && entry.parser_rev == parser_rev_for(&entry.source)
 }
 
 fn persist_path() -> PathBuf {
@@ -692,6 +722,9 @@ fn load_persisted_cache() {
         let gen = pricing::generation();
         let Ok(mut map) = cache().lock() else { return };
         for e in doc.entries {
+            if !parser_entry_current(&e) {
+                continue; // only this source re-parses; siblings stay cached
+            }
             let mut data = FileData::default();
             for (day, model, cost, tokens) in e.days {
                 data.days.insert((day, model), (cost, tokens));
@@ -704,7 +737,18 @@ fn load_persisted_cache() {
             }
             let mtime = SystemTime::UNIX_EPOCH
                 + std::time::Duration::new(e.mtime_secs, e.mtime_nanos);
-            map.insert(e.path, FileEntry { mtime, size: e.size, gen, probes: e.probes, data, checkpoint: e.checkpoint });
+            map.insert(
+                e.path,
+                FileEntry {
+                    mtime,
+                    size: e.size,
+                    source: e.source,
+                    gen,
+                    probes: e.probes,
+                    data,
+                    checkpoint: e.checkpoint,
+                },
+            );
         }
     });
 }
@@ -742,6 +786,8 @@ fn save_persisted_cache() {
                     .collect(),
                 unpriced: e.data.unpriced.iter().map(|(m, c)| (m.clone(), *c)).collect(),
                 stored: e.data.stored.iter().map(|(m, c)| (m.clone(), *c)).collect(),
+                source: e.source.clone(),
+                parser_rev: parser_rev_for(&e.source),
                 estimated: {
                     let mut estimated: Vec<(i32, String)> = e.data.estimated.iter().cloned().collect();
                     estimated.sort();
@@ -1181,7 +1227,7 @@ fn recent_files_matching<F: Fn(&Path) -> bool>(
 }
 
 /// Parses one file into per-day totals, via the cache when unchanged.
-fn file_days(path: &Path, parse: &mut dyn FnMut(&str, &mut FileData)) -> FileData {
+fn file_days(path: &Path, source: &str, parse: &mut dyn FnMut(&str, &mut FileData)) -> FileData {
     let Ok(meta) = fs::metadata(path) else { return FileData::default() };
     let mtime = meta.modified().unwrap_or(SystemTime::UNIX_EPOCH);
     let size = meta.len();
@@ -1241,7 +1287,15 @@ fn file_days(path: &Path, parse: &mut dyn FnMut(&str, &mut FileData)) -> FileDat
     if let Ok(mut map) = cache().lock() {
         map.insert(
             path.to_path_buf(),
-            FileEntry { mtime, size, gen, probes, data: data.clone(), checkpoint: None },
+            FileEntry {
+                mtime,
+                size,
+                source: source.to_string(),
+                gen,
+                probes,
+                data: data.clone(),
+                checkpoint: None,
+            },
         );
     }
     CACHE_DIRTY.store(true, std::sync::atomic::Ordering::Relaxed);
@@ -1367,6 +1421,7 @@ fn checkpoint_for<St: Serialize>(path: &Path, offset: u64, state: &St) -> Option
 /// a byte offset inside a compressed stream is not a reliable resume point.
 fn file_days_with_state<St>(
     path: &Path,
+    source: &str,
     parse: &mut dyn FnMut(&mut St, &str, &mut FileData),
 ) -> FileData
 where
@@ -1416,6 +1471,7 @@ where
                                         FileEntry {
                                             mtime,
                                             size,
+                                            source: source.to_string(),
                                             gen,
                                             probes,
                                             data: data.clone(),
@@ -1452,7 +1508,15 @@ where
     if let Ok(mut map) = cache().lock() {
         map.insert(
             path.to_path_buf(),
-            FileEntry { mtime, size, gen, probes, data: data.clone(), checkpoint },
+            FileEntry {
+                mtime,
+                size,
+                source: source.to_string(),
+                gen,
+                probes,
+                data: data.clone(),
+                checkpoint,
+            },
         );
     }
     CACHE_DIRTY.store(true, std::sync::atomic::Ordering::Relaxed);
@@ -1873,19 +1937,22 @@ fn likely_undercount_days(local: &FileData, cc: &FileData) -> HashSet<i32> {
 /// that cut — pi days were already diffed against cc-switch's pi coverage
 /// by the caller.
 fn claude(extra: FileData, cc: FileData, cc_days: &HashSet<i32>) -> (ProviderSpend, FileData, FileData, FileData) {
-    let root = std::env::var("CLAUDE_CONFIG_DIR")
-        .map(PathBuf::from)
-        .unwrap_or_else(|_| dirs::home_dir().unwrap_or_default().join(".claude"))
-        .join("projects");
+    let roots: Vec<PathBuf> = match std::env::var("CLAUDE_CONFIG_DIR") {
+        Ok(dir) => vec![PathBuf::from(dir).join("projects")],
+        Err(_) => crate::wsl::roots_for(".claude/projects"),
+    };
 
-    let mut files = Vec::new();
-    recent_jsonl_files(&root, &mut files);
     let mut all = FileData::default();
-    for file in files {
-        let data = file_days_with_state::<ClaudeFileState>(&file, &mut |state, line, data| {
-            claude_line(state, line, data)
-        });
-        merge_data(&mut all, data);
+    let mut files = Vec::new();
+    for root in roots {
+        files.clear();
+        recent_jsonl_files(&root, &mut files);
+        for file in &files {
+            let data = file_days_with_state::<ClaudeFileState>(file, "claude", &mut |state, line, data| {
+                claude_line(state, line, data)
+            });
+            merge_data(&mut all, data);
+        }
     }
     // Compare Claude-attributed usage only. The ledger logs MiniMax/qwen/
     // Kimi-routed turns under the claude app too, and the local scan sees
@@ -1937,7 +2004,7 @@ fn claude_extra_accounts() -> (Vec<ProviderSpend>, FileData, FileData, FileData)
         recent_jsonl_files(&root, &mut files);
         let mut all = FileData::default();
         for file in files {
-            let data = file_days_with_state::<ClaudeFileState>(&file, &mut |state, line, data| {
+            let data = file_days_with_state::<ClaudeFileState>(&file, "claude", &mut |state, line, data| {
                 claude_line(state, line, data)
             });
             merge_data(&mut all, data);
@@ -2592,7 +2659,7 @@ fn codex_session_files(home: &Path) -> Vec<PathBuf> {
 fn codex_scan(home: &Path) -> FileData {
     let mut all = FileData::default();
     for file in codex_session_files(home) {
-        let data = file_days_with_state::<CodexFileState>(&file, &mut |state, line, data| {
+        let data = file_days_with_state::<CodexFileState>(&file, "codex", &mut |state, line, data| {
             codex_line(state, line, data)
         });
         merge_data(&mut all, data);
@@ -2601,10 +2668,14 @@ fn codex_scan(home: &Path) -> FileData {
 }
 
 fn codex(extra: FileData, cc: FileData) -> (ProviderSpend, FileData) {
-    let home = std::env::var("CODEX_HOME")
-        .map(PathBuf::from)
-        .unwrap_or_else(|_| dirs::home_dir().unwrap_or_default().join(".codex"));
-    let mut all = codex_scan(&home);
+    let roots: Vec<PathBuf> = match std::env::var("CODEX_HOME") {
+        Ok(dir) => vec![PathBuf::from(dir)],
+        Err(_) => crate::wsl::roots_for(".codex"),
+    };
+    let mut all = FileData::default();
+    for root in roots {
+        merge_data(&mut all, codex_scan(&root));
+    }
     // cc-switch's Codex ledger is the same logs through the same algorithm
     // (verified 1.00 day-for-day), but permanent — it fills days that aged
     // out of the 31-day jsonl scan window. Pane stays the primary source:
@@ -2794,7 +2865,7 @@ fn zcode() -> ZcodeScan {
         {
             continue;
         }
-        let data = file_days(&file, &mut |line, data| zcode_line(line, data));
+        let data = file_days(&file, "zcode", &mut |line, data| zcode_line(line, data));
         merge_data(&mut legacy, data);
     }
     // Rollout lines carry no provider id, so all legacy rows stay on ZCode.
@@ -2940,6 +3011,76 @@ fn zcode_db_data() -> (FileData, HashMap<String, FileData>, Option<i32>) {
         *guard = Some(((db_stamp, wal_stamp, rules_stamp), scan.clone()));
     }
     (scan.data, scan.routed, scan.min_day)
+}
+
+/// Turn/tool aggregates from ZCode's own session tables (#64-06). Same
+/// 32-day retention window as the model_usage scan; a database without the
+/// tables returns None so the KPI shows "—" instead of a fabricated zero.
+#[derive(Clone, Debug, Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ZcodeUsageMetrics {
+    pub longest_session_ms: i64,
+    pub sessions: i64,
+    pub turns: i64,
+    pub tool_calls: i64,
+}
+
+pub fn zcode_usage_metrics() -> Option<ZcodeUsageMetrics> {
+    let home = dirs::home_dir()?;
+    let db_path = home.join(".zcode").join("cli").join("db").join("db.sqlite");
+    if !db_path.exists() {
+        return None;
+    }
+    let conn = rusqlite::Connection::open_with_flags(
+        &db_path,
+        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
+    )
+    .ok()?;
+    let cutoff_ms = (Local::now() - chrono::Duration::days(32)).timestamp_millis();
+    zcode_usage_from_conn(&conn, cutoff_ms)
+}
+
+/// ZCode's Settings → Usage semantics: sessions = distinct session_id, turns
+/// = rows, longest session = max(sum of completed turn durations per
+/// session), tool calls = tool_usage rows. Kept pure over a connection so the
+/// harness can verify the aggregation against an in-memory schema.
+fn zcode_usage_from_conn(
+    conn: &rusqlite::Connection,
+    cutoff_ms: i64,
+) -> Option<ZcodeUsageMetrics> {
+    let (sessions, turns) = conn
+        .query_row(
+            "SELECT count(DISTINCT session_id), count(*)
+             FROM turn_usage WHERE started_at >= ?1",
+            [cutoff_ms],
+            |row| Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?)),
+        )
+        .ok()?;
+    let longest_session_ms = conn
+        .query_row(
+            "SELECT COALESCE(MAX(duration), 0) FROM (
+               SELECT SUM(CASE WHEN status = 'completed'
+                               THEN COALESCE(duration_ms, 0) ELSE 0 END) AS duration
+               FROM turn_usage WHERE started_at >= ?1
+               GROUP BY session_id
+             )",
+            [cutoff_ms],
+            |row| row.get::<_, i64>(0),
+        )
+        .ok()?;
+    let tool_calls = conn
+        .query_row(
+            "SELECT count(*) FROM tool_usage WHERE started_at >= ?1",
+            [cutoff_ms],
+            |row| row.get::<_, i64>(0),
+        )
+        .ok()?;
+    Some(ZcodeUsageMetrics {
+        longest_session_ms,
+        sessions,
+        turns,
+        tool_calls,
+    })
 }
 
 fn stamp_of(path: &Path) -> (SystemTime, u64) {
@@ -3418,7 +3559,7 @@ fn pi() -> (FileData, FileData) {
     let mut all = FileData::default();
     for file in files {
         let mut seen = HashSet::new();
-        let data = file_days(&file, &mut |line, data| pi_line(&mut seen, line, data));
+        let data = file_days(&file, "pi", &mut |line, data| pi_line(&mut seen, line, data));
         merge_data(&mut all, data);
     }
     let claude = take_tagged(&mut all, "claude");
@@ -3440,7 +3581,7 @@ fn grok(cc: FileData) -> ProviderSpend {
     let mut all = FileData::default();
     if path.exists() {
         let mut model_by_pid: HashMap<i64, String> = HashMap::new();
-        let data = file_days(&path, &mut |line, data| {
+        let data = file_days(&path, "grok", &mut |line, data| {
             if !line.contains("inference_done") && !line.contains("model") {
                 return;
             }
@@ -3730,7 +3871,7 @@ fn qwen() -> ProviderSpend {
     });
     let mut all = FileData::default();
     for file in files {
-        let data = file_days(&file, &mut |line, data| qwen_line(line, data));
+        let data = file_days(&file, "qwen", &mut |line, data| qwen_line(line, data));
         merge_data(&mut all, data);
     }
     build_spend("qwen", "Qwen Code", all)
@@ -4305,7 +4446,7 @@ fn kimi(extra: FileData) -> ProviderSpend {
     recent_jsonl_files(&root, &mut files);
     let mut all = FileData::default();
     for file in files {
-        let data = file_days(&file, &mut |line, data| kimi_line(line, data));
+        let data = file_days(&file, "kimi", &mut |line, data| kimi_line(line, data));
         merge_data(&mut all, data);
     }
     // Kimi/Moonshot-billed turns other CLIs logged (Codex through a
@@ -4824,6 +4965,30 @@ mod tests {
     // ---- Persistent cache: serialization roundtrip -----------------------
 
     #[test]
+    fn parser_revision_only_invalidates_its_own_source() {
+        let mut entry = PersistEntry {
+            path: PathBuf::from("x"),
+            mtime_secs: 1,
+            mtime_nanos: 0,
+            size: 0,
+            days: vec![],
+            unpriced: vec![],
+            stored: vec![],
+            estimated: vec![],
+            source: "claude".into(),
+            parser_rev: parser_rev_for("claude"),
+            probes: vec![],
+            checkpoint: None,
+        };
+        assert!(parser_entry_current(&entry));
+        entry.parser_rev = 0;
+        assert!(!parser_entry_current(&entry), "an old source revision must re-parse only this file");
+        entry.source = String::new();
+        assert!(!parser_entry_current(&entry), "a cache without a source cannot be vouched for");
+        assert_ne!(parser_rev_for("claude"), 0);
+    }
+
+    #[test]
     fn persist_file_roundtrips_losslessly() {
         let doc = PersistFile {
             version: PERSIST_VERSION,
@@ -4838,6 +5003,8 @@ mod tests {
                 unpriced: vec![("mystery-model".into(), 3)],
                 stored: vec![],
                 estimated: vec![(739_000, "claude-fable-5".into())],
+                source: "claude".into(),
+                parser_rev: parser_rev_for("claude"),
                 probes: vec![
                     PriceProbe::Pin {
                         scope: "claude".into(),
@@ -4888,6 +5055,47 @@ mod tests {
         assert_ne!(doc.version, PERSIST_VERSION);
     }
 
+    /// ZCode's Settings → Usage arithmetic, verified against a live-shaped
+    /// schema: sessions are distinct ids, longest session sums only completed
+    /// turns, an error turn's duration is ignored, and rows before the cutoff
+    /// never enter any aggregate.
+    #[test]
+    fn zcode_turn_tool_metrics_match_zcode_usage_semantics() {
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE turn_usage (
+               session_id TEXT, turn_id TEXT, status TEXT,
+               started_at INTEGER, duration_ms INTEGER);
+             CREATE TABLE tool_usage (id TEXT, started_at INTEGER);",
+        )
+        .unwrap();
+        for (session, turn, status, started, duration) in [
+            ("s1", "t1", "completed", 1100, 1000),
+            ("s1", "t2", "completed", 1200, 2000),
+            ("s1", "t3", "error", 1300, 9999),
+            ("s2", "t1", "completed", 1400, 500),
+            ("s3", "t1", "completed", 900, 8000),
+        ] {
+            conn.execute(
+                "INSERT INTO turn_usage VALUES (?1, ?2, ?3, ?4, ?5)",
+                rusqlite::params![session, turn, status, started, duration],
+            )
+            .unwrap();
+        }
+        for (id, started) in [("a", 1100), ("b", 1500), ("c", 900)] {
+            conn.execute("INSERT INTO tool_usage VALUES (?1, ?2)", rusqlite::params![id, started])
+                .unwrap();
+        }
+        let metrics = zcode_usage_from_conn(&conn, 1000).unwrap();
+        assert_eq!(metrics.sessions, 2);
+        assert_eq!(metrics.turns, 4);
+        assert_eq!(metrics.longest_session_ms, 3000);
+        assert_eq!(metrics.tool_calls, 2);
+
+        let empty = rusqlite::Connection::open_in_memory().unwrap();
+        assert!(zcode_usage_from_conn(&empty, 0).is_none());
+    }
+
     // ---- Price probes: catalog-refresh revalidation ------------------------
 
     /// Probes replay against the live catalog: an unknown model recorded as
@@ -4930,7 +5138,7 @@ mod tests {
         .to_string();
         fs::write(&path, line).unwrap();
 
-        let data = file_days(&path, &mut |line, data| kimi_line(line, data));
+        let data = file_days(&path, "kimi", &mut |line, data| kimi_line(line, data));
         assert!(!data.days.is_empty());
         let probes = cache()
             .lock()
@@ -4966,7 +5174,7 @@ mod tests {
         // previous insert-on-open-failure path would cache empty spend.
         let dir = std::env::temp_dir().join(format!("pane-unreadable-{}", std::process::id()));
         let _ = fs::create_dir_all(&dir);
-        let data = file_days(&dir, &mut |_, _| {});
+        let data = file_days(&dir, "test", &mut |_, _| {});
         assert!(data.days.is_empty());
         let cached = cache().lock().unwrap().contains_key(&dir);
         let _ = fs::remove_dir_all(&dir);
@@ -5597,12 +5805,12 @@ mod tests {
             incremental_parse(state, line, data);
         };
 
-        let first = file_days_with_state::<IncrementalState>(&file, &mut parse);
+        let first = file_days_with_state::<IncrementalState>(&file, "test", &mut parse);
         assert_eq!(parsed.get(), 1);
         assert_eq!(tokens_sum(&first), 1.0);
 
         // Unchanged file: served from cache, no parser call.
-        let cached = file_days_with_state::<IncrementalState>(&file, &mut parse);
+        let cached = file_days_with_state::<IncrementalState>(&file, "test", &mut parse);
         assert_eq!(parsed.get(), 1);
         assert_eq!(tokens_sum(&cached), 1.0);
 
@@ -5610,7 +5818,7 @@ mod tests {
         let mut f = fs::OpenOptions::new().append(true).open(&file).unwrap();
         f.write_all(b"{\"n\":2}\n").unwrap();
         drop(f);
-        let appended = file_days_with_state::<IncrementalState>(&file, &mut parse);
+        let appended = file_days_with_state::<IncrementalState>(&file, "test", &mut parse);
         assert_eq!(parsed.get(), 2, "the already-seen line must not be re-parsed");
         assert_eq!(tokens_sum(&appended), 3.0);
 
@@ -5618,19 +5826,19 @@ mod tests {
         let mut f = fs::OpenOptions::new().append(true).open(&file).unwrap();
         f.write_all(b"{\"n\":4").unwrap();
         drop(f);
-        let partial = file_days_with_state::<IncrementalState>(&file, &mut parse);
+        let partial = file_days_with_state::<IncrementalState>(&file, "test", &mut parse);
         assert_eq!(parsed.get(), 2);
         assert_eq!(tokens_sum(&partial), 3.0);
         let mut f = fs::OpenOptions::new().append(true).open(&file).unwrap();
         f.write_all(b"}\n").unwrap();
         drop(f);
-        let completed = file_days_with_state::<IncrementalState>(&file, &mut parse);
+        let completed = file_days_with_state::<IncrementalState>(&file, "test", &mut parse);
         assert_eq!(parsed.get(), 3);
         assert_eq!(tokens_sum(&completed), 7.0);
 
         // A rewrite that shrinks the file falls back to a full parse.
         fs::write(&file, "{\"n\":9}\n").unwrap();
-        let rewritten = file_days_with_state::<IncrementalState>(&file, &mut parse);
+        let rewritten = file_days_with_state::<IncrementalState>(&file, "test", &mut parse);
         assert_eq!(parsed.get(), 4);
         assert_eq!(tokens_sum(&rewritten), 9.0);
 
@@ -6986,7 +7194,7 @@ fn antigravity_summary_days(conv_dir: &Path) -> HashMap<String, DateTime<Utc>> {
 /// contract as `file_days`. `parse` returning None means "could not read
 /// this pass" (locked db, antivirus) — nothing is cached, matching the
 /// unreadable-file rule of `file_days`.
-fn cached_parse(path: &Path, parse: impl FnOnce() -> Option<FileData>) -> FileData {
+fn cached_parse(path: &Path, source: &str, parse: impl FnOnce() -> Option<FileData>) -> FileData {
     let Ok(meta) = fs::metadata(path) else { return FileData::default() };
     let mtime = meta.modified().unwrap_or(SystemTime::UNIX_EPOCH);
     let size = meta.len();
@@ -7022,7 +7230,15 @@ fn cached_parse(path: &Path, parse: impl FnOnce() -> Option<FileData>) -> FileDa
     if let Ok(mut map) = cache().lock() {
         map.insert(
             path.to_path_buf(),
-            FileEntry { mtime, size, gen, probes, data: data.clone(), checkpoint: None },
+            FileEntry {
+                mtime,
+                size,
+                source: source.to_string(),
+                gen,
+                probes,
+                data: data.clone(),
+                checkpoint: None,
+            },
         );
     }
     CACHE_DIRTY.store(true, std::sync::atomic::Ordering::Relaxed);
@@ -7108,7 +7324,7 @@ fn antigravity() -> ProviderSpend {
                         .and_then(|d| DateTime::from_timestamp_millis(d.as_millis() as i64))
                 })
                 .unwrap_or_else(Utc::now);
-            let file_data = cached_parse(&db, || {
+            let file_data = cached_parse(&db, "antigravity", || {
                 let conn = rusqlite::Connection::open_with_flags(
                     &db,
                     rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,

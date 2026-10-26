@@ -21,6 +21,21 @@ use sha2::{Digest, Sha256};
 const MAX_PACK_BYTES: usize = 32 * 1024 * 1024;
 const MAX_FILE_BYTES: usize = 12 * 1024 * 1024;
 const MAX_MANIFEST_BYTES: usize = 64 * 1024;
+const MAX_INDEX_BYTES: usize = 256 * 1024;
+const INDEX_URL: &str = "https://pane.threetwoa.live/skins/index.json";
+
+/// One entry of the official distribution index. Fetched by Rust because the
+/// WebView's fetch is subject to CORS and the static host sends no
+/// Access-Control-Allow-Origin; Rust also inherits the proxy/direct fallback.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+pub struct RemotePackEntry {
+    pub id: String,
+    pub name: String,
+    pub version: String,
+    pub size: u64,
+    pub sha256: String,
+    pub url: String,
+}
 
 #[derive(Serialize, Deserialize, Clone)]
 pub struct PackFileEntry {
@@ -386,6 +401,68 @@ pub async fn skin_pack_list() -> Result<Vec<InstalledPack>, String> {
     Ok(list_packs())
 }
 
+/// Parses the official index body. Split from the network call so shape
+/// handling is testable without a live request.
+fn parse_index(bytes: &[u8]) -> Result<Vec<RemotePackEntry>, String> {
+    let doc: serde_json::Value =
+        serde_json::from_slice(bytes).map_err(|e| format!("skin index JSON: {e}"))?;
+    let packs = doc
+        .get("packs")
+        .and_then(serde_json::Value::as_array)
+        .ok_or("skin index shape: missing packs array")?;
+    let mut entries = Vec::with_capacity(packs.len());
+    for raw in packs {
+        let entry: RemotePackEntry = serde_json::from_value(raw.clone())
+            .map_err(|e| format!("skin index shape: {e}"))?;
+        if !valid_skin_id(&entry.id) {
+            return Err(format!("skin index shape: bad pack id {:?}", entry.id));
+        }
+        if entry.version.trim().is_empty() || entry.version.len() > 32 {
+            return Err(format!("skin index shape: bad version for {}", entry.id));
+        }
+        if !entry.url.starts_with("https://") {
+            return Err(format!("skin index shape: non-https url for {}", entry.id));
+        }
+        if entry.sha256.len() != 64 || !entry.sha256.bytes().all(|b| b.is_ascii_hexdigit()) {
+            return Err(format!("skin index shape: bad sha256 for {}", entry.id));
+        }
+        if entry.size as usize > MAX_PACK_BYTES {
+            return Err(format!("skin index shape: pack {} is too large", entry.id));
+        }
+        if entries.iter().any(|seen: &RemotePackEntry| seen.id == entry.id) {
+            return Err(format!("skin index shape: duplicate pack {}", entry.id));
+        }
+        entries.push(entry);
+    }
+    if entries.is_empty() {
+        return Err("skin index shape: no packs".into());
+    }
+    Ok(entries)
+}
+
+/// Official skin index. Rust owns the request so a WebView without CORS
+/// headers can still list the market on a fresh install.
+pub async fn skin_pack_index() -> Result<Vec<RemotePackEntry>, String> {
+    let resp = super::providers::send_with_direct_fallback(|client| client.get(INDEX_URL))
+        .await
+        .map_err(|e| format!("skin index network: {e}"))?;
+    let status = resp.status();
+    if !status.is_success() {
+        return Err(format!("skin index HTTP {}", status.as_u16()));
+    }
+    if resp.content_length().is_some_and(|len| len as usize > MAX_INDEX_BYTES) {
+        return Err("skin index: response too large".into());
+    }
+    let bytes = resp
+        .bytes()
+        .await
+        .map_err(|e| format!("skin index network: {e}"))?;
+    if bytes.len() > MAX_INDEX_BYTES {
+        return Err("skin index: response too large".into());
+    }
+    parse_index(bytes.as_ref())
+}
+
 pub async fn skin_pack_remove(id: String) -> Result<(), String> {
     remove_pack(&id)
 }
@@ -556,18 +633,33 @@ mod tests {
         // silently lose the ink landscape/koi or signal atlas.
         let _root = TestSkinsDir::new();
         let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../site/public/skins");
-        for name in ["pane-skin-signal-1.0.1.zip", "pane-skin-ink-1.0.1.zip"] {
-            let bytes = std::fs::read(dir.join(name)).unwrap_or_else(|e| panic!("{name}: {e}"));
+        // Version-agnostic: a pack rebuild bumps the version and must not
+        // need a test edit. Every official zip is held to the same contract.
+        let mut checked = 0;
+        for entry in std::fs::read_dir(&dir).expect("site/public/skins must exist").flatten() {
+            let name = entry.file_name().to_string_lossy().into_owned();
+            if !name.starts_with("pane-skin-") || !name.ends_with(".zip") {
+                continue;
+            }
+            let bytes = std::fs::read(entry.path()).unwrap_or_else(|e| panic!("{name}: {e}"));
             let manifest = install_bytes(&bytes).unwrap_or_else(|e| panic!("{name}: {e}"));
             let pack = read_installed(&manifest.id).unwrap_or_else(|e| panic!("{name}: {e}"));
-            assert!(
-                pack.entry_css.contains("data:image/webp;base64"),
-                "{name}: image asset was not inlined"
-            );
-            if manifest.id == "ink" {
+            if manifest.id == "signal" || manifest.id == "ink" {
+                assert!(
+                    pack.entry_css.contains("data:image/webp;base64"),
+                    "{name}: image asset was not inlined"
+                );
+            }
+            if manifest.id == "ink" || manifest.id == "comic-pixel" {
                 assert!(
                     pack.entry_css.contains("data:font/ttf"),
                     "{name}: font asset was not inlined"
+                );
+            }
+            if manifest.id == "comic-pixel" {
+                assert!(
+                    pack.entry_css.contains("data:image/svg+xml"),
+                    "{name}: pixel mask SVG was not inlined"
                 );
             }
             assert!(
@@ -583,7 +675,36 @@ mod tests {
                 "{name}: inlined CSS is {} bytes; recompress the artwork",
                 pack.entry_css.len()
             );
+            checked += 1;
         }
+        assert!(checked >= 3, "expected three official packs, found {checked}");
+    }
+
+    #[test]
+    fn shipped_like_index_parses_and_rejects_bad_shapes() {
+        let good = br#"{"packs":[{"id":"signal","name":"Post","version":"1.0.0","size":10,
+            "sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "url":"https://pane.threetwoa.live/skins/pane-skin-signal-1.0.0.zip"}]}"#;
+        let parsed = parse_index(good).expect("valid index");
+        assert_eq!(parsed.len(), 1);
+        assert_eq!(parsed[0].id, "signal");
+
+        let bad_json = b"not json";
+        assert!(parse_index(bad_json).unwrap_err().contains("JSON"));
+        let no_packs = br#"{"generatedAt":"x"}"#;
+        assert!(parse_index(no_packs).unwrap_err().contains("shape"));
+        let bad_url = br#"{"packs":[{"id":"ink","name":"Ink","version":"1","size":1,
+            "sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "url":"http://example.com/x.zip"}]}"#;
+        assert!(parse_index(bad_url).unwrap_err().contains("non-https"));
+        let duplicate = br#"{"packs":[
+            {"id":"ink","name":"Ink","version":"1","size":1,
+             "sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+             "url":"https://x/y.zip"},
+            {"id":"ink","name":"Ink","version":"1","size":1,
+             "sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+             "url":"https://x/z.zip"}]}"#;
+        assert!(parse_index(duplicate).unwrap_err().contains("duplicate"));
     }
 
     #[test]
