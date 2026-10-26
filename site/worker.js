@@ -142,8 +142,46 @@ function skinCorsHeaders() {
   };
 }
 
-export default {
-  async fetch(req, env) {
+const CSP_REPORT_ONLY = [
+  "default-src 'self'",
+  "script-src 'self' 'unsafe-inline'",
+  "style-src 'self' 'unsafe-inline'",
+  "img-src 'self' data: https:",
+  "font-src 'self'",
+  "frame-src 'self'",
+  "connect-src 'self' https://api.github.com",
+  "object-src 'none'",
+  "base-uri 'self'",
+  "form-action 'self'",
+  "frame-ancestors 'none'",
+].join("; ");
+
+function withSecurityHeaders(response) {
+  const headers = new Headers(response.headers);
+  headers.set("x-content-type-options", "nosniff");
+  headers.set("referrer-policy", "strict-origin-when-cross-origin");
+  headers.set("permissions-policy", "camera=(), microphone=(), geolocation=()");
+  headers.set("x-frame-options", "DENY");
+  headers.set("content-security-policy-report-only", CSP_REPORT_ONLY);
+  return new Response(response.body, {
+    status: response.status,
+    statusText: response.statusText,
+    headers,
+  });
+}
+
+async function notFound(env, req) {
+  const assetUrl = new URL(req.url);
+  assetUrl.pathname = "/404.html";
+  const asset = await env.ASSETS.fetch(new Request(assetUrl, req));
+  return new Response(asset.body, {
+    status: 404,
+    statusText: "Not Found",
+    headers: asset.headers,
+  });
+}
+
+async function handle(req, env) {
     const url = new URL(req.url);
     if (url.pathname === "/download/windows") {
       let target = RELEASES_PAGE;
@@ -183,6 +221,13 @@ export default {
       assetUrl.pathname = "/";
       return englishMetadata(await env.ASSETS.fetch(new Request(assetUrl, req)));
     }
-    return env.ASSETS.fetch(req);
+    const asset = await env.ASSETS.fetch(req);
+    if (asset.status === 404) return notFound(env, req);
+    return asset;
+}
+
+export default {
+  async fetch(req, env) {
+    return withSecurityHeaders(await handle(req, env));
   },
 };

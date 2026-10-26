@@ -28,6 +28,19 @@ test("site content: Pane landing page includes the product sections", () => {
   assert.match(html, /id="demo"/);
   assert.match(html, /id="features"/);
   assert.match(html, /id="faq"/);
+  // The landing page currently carries no data-i18n attributes (English is
+  // applied by site.js), so the vacuous early return was hiding every
+  // dictionary gap. Lock the keys site.js actually calls instead.
+  const used = new Set();
+  for (const [, key] of siteScript.matchAll(/setText\([^,]+,\s*['"]([^'"]+)['"]/g)) used.add(key);
+  for (const [, list] of siteScript.matchAll(/setTexts\([^,]+,\s*\[([^\]]+)\]/g)) {
+    for (const [, key] of list.matchAll(/['"]([^'"]+)['"]/g)) used.add(key);
+  }
+  assert.ok(used.size >= 40, `expected site.js to use its dictionary, saw ${used.size}`);
+  for (const [lang, { dict }] of Object.entries(LANGS)) {
+    const missing = [...used].filter((key) => !(key in dict));
+    assert.deepEqual(missing, [], `${lang} lacks site.js keys`);
+  }
   if (keys.size === 0) return;
   for (const [lang, { dict }] of Object.entries(LANGS)) {
     assert.deepEqual([...keys].filter((k) => !(k in dict)), [], `${lang} lacks`);
@@ -295,4 +308,39 @@ test("update/latest.json: CN clients get the Gitee-mirrored installer", async ()
   } finally {
     globalThis.fetch = realFetch;
   }
+});
+
+
+test("basic contracts: security headers, 404 fallback, robots/sitemap/OG/skip-link", async () => {
+  const { readFileSync } = await import("node:fs");
+  for (const file of ["public/robots.txt", "public/sitemap.xml", "public/404.html", "public/og-cover.png"]) {
+    assert.ok(existsSync(new URL(`./${file}`, import.meta.url)), `${file} exists`);
+  }
+  const page = readFileSync(new URL("./public/index.html", import.meta.url), "utf8");
+  assert.match(page, /class="skip-link" href="#main-content"/);
+  assert.match(page, /<main id="main-content">/);
+  assert.match(page, /og:image:width" content="1200"/);
+  assert.match(page, /og:image:height" content="630"/);
+  assert.match(page, /twitter:card" content="summary_large_image"/);
+  assert.match(page, /id="boundaries"/);
+  assert.match(page, /href="\/privacy.html"/);
+  assert.match(page, /href="\/terms.html"/);
+  assert.match(page, /not affiliated with any AI provider/);
+  assert.match(page, /<iframe id="pane-demo" loading="lazy"/);
+  const env = (body = "ok", status = 200) => ({
+    ASSETS: { fetch: async (request) => {
+      const path = new URL(request.url).pathname;
+      if (status === 404 && path !== "/404.html") return new Response(body, { status: 404 });
+      if (status === 404) return new Response("<h1>这个页面不存在</h1>", { status: 200, headers: { "content-type": "text/html" } });
+      return new Response(body, { status, headers: { "content-type": "text/plain" } });
+    } },
+  });
+  const ok = await worker.fetch(new Request("https://pane.threetwoa.live/robots.txt"), env());
+  assert.equal(ok.headers.get("x-content-type-options"), "nosniff");
+  assert.equal(ok.headers.get("x-frame-options"), "DENY");
+  assert.ok(ok.headers.get("content-security-policy-report-only")?.includes("default-src 'self'"));
+  assert.equal(ok.headers.get("referrer-policy"), "strict-origin-when-cross-origin");
+  const missing = await worker.fetch(new Request("https://pane.threetwoa.live/nope"), env("nf", 404));
+  assert.equal(missing.status, 404);
+  assert.match(await missing.text(), /这个页面不存在/);
 });

@@ -96,3 +96,4 @@ jobs:
         with:
           node-version: 22
       - run: node --test site/*.test.mjs tests/i18n-pairing.test.mjs
+      - run: node site/scripts/check-skin-packs.mjs

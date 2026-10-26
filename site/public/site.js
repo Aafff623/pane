@@ -19,8 +19,8 @@ const isEnglish = location.pathname === '/en' || location.pathname.startsWith('/
 // Every pause control on the page names the same shared state the same way.
 const motionLabel = paused => paused ? (isEnglish ? en.whyResume : '恢复动画') : (isEnglish ? en.whyPause : '暂停动画');
 const demoLang = isEnglish ? 'en' : 'zh';
-function setText(selector, key, html = false) { const node = document.querySelector(selector); if (node && isEnglish && en[key]) html ? node.innerHTML = en[key] : node.textContent = en[key]; }
-function setTexts(selector, keys, html = false) { document.querySelectorAll(selector).forEach((node, i) => { const value = en[keys[i]]; if (node && isEnglish && value) html ? node.innerHTML = value : node.textContent = value; }); }
+function setText(selector, key, html = false) { const node = document.querySelector(selector); if (!node || !isEnglish) return; if (!(key in en)) { console.warn('[pane-site] missing i18n key', key); return; } html ? node.innerHTML = en[key] : node.textContent = en[key]; }
+function setTexts(selector, keys, html = false) { document.querySelectorAll(selector).forEach((node, i) => { const key = keys[i]; if (!node || !isEnglish || !key) return; if (!(key in en)) { console.warn('[pane-site] missing i18n key', key); return; } html ? node.innerHTML = en[key] : node.textContent = en[key]; }); }
 function applyEnglishCopy() {
   if (!isEnglish) return;
   document.documentElement.lang = 'en';

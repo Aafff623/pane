@@ -11,11 +11,14 @@
 <meta property="og:description" content="额度、余额、重置时间、多账号与 CLI Token 花费，一窗掌握。基于 Tauri、Rust 和 TypeScript 构建，凭据保存在本机。">
 <meta property="og:url" content="https://pane.threetwoa.live/">
 <meta property="og:locale" content="zh_CN">
-<meta property="og:image" content="https://pane.threetwoa.live/brand-logo.png?v=2">
-<meta name="twitter:card" content="summary">
+<meta property="og:image" content="https://pane.threetwoa.live/og-cover.png?v=1">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="Pane — 本地优先的 AI 用量工作台">
+<meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:title" content="Pane — 本地优先的 AI 用量工作台">
 <meta name="twitter:description" content="额度、余额、重置时间、多账号与 CLI Token 花费，一窗掌握。基于 Tauri、Rust 和 TypeScript 构建，凭据保存在本机。">
-<meta name="twitter:image" content="https://pane.threetwoa.live/brand-logo.png?v=2">
+<meta name="twitter:image" content="https://pane.threetwoa.live/og-cover.png?v=1">
 <link rel="alternate" hreflang="zh-CN" href="https://pane.threetwoa.live/">
 <link rel="alternate" hreflang="en" href="https://pane.threetwoa.live/en/">
 <link rel="alternate" hreflang="x-default" href="https://pane.threetwoa.live/">
@@ -24,18 +27,19 @@
 <script src="/vendor/gsap.min.js"></script><script src="/vendor/rough-notation.js"></script><script type="module" src="/site.js?v=63"></script>
 </head>
 <body>
+<a class="skip-link" href="#main-content">跳到主要内容</a>
 <div id="grid-bg" aria-hidden="true" data-grid-size="40" data-grid-squares="18" data-grid-max-opacity="0.09" data-grid-duration="3" data-grid-repeat-delay="1"></div>
 <header class="site-header"><nav class="wrap nav" aria-label="主导航"><a href="/" class="brand"><img src="/brand-logo.png?v=2" width="20" height="20" alt="">Pane</a><span class="nav-context chip" data-variant="plain" data-color="accent"><i class="chip__dot"></i><span class="chip__label">LOCAL USAGE WORKSPACE</span></span><div class="nav-links" aria-label="页面导航"><a href="#demo">体验</a><a href="#features">能力</a><a href="#faq">FAQ</a></div><div class="nav-actions"><button class="icon-button" id="language" aria-label="切换语言">EN</button><button class="icon-button" id="theme" aria-label="切换主题"><img src="/icons/sun.svg" alt="" width="17"></button><a class="github" href="https://github.com/Aafff623/pane" aria-label="GitHub 仓库"><img src="/icons/github-logo.svg" width="18" alt=""></a><a class="button" data-variant="primary" data-size="sm" data-latest-installer href="/download/windows">下载</a></div></nav></header>
-<main>
+<main id="main-content">
 <section id="overview" class="hero wrap">
-  <div class="hero-meta"><span>01 / 概览</span><span>桌面伴侣 · v0.10.1</span></div>
+  <div class="hero-meta"><span>01 / 概览</span><span>本地优先 · MIT · Tauri · Windows</span><span>桌面伴侣 · v0.10.1</span></div>
   <div class="hero-grid">
     <div class="hero-copy">
       <p class="eyebrow chip" data-variant="plain" data-color="accent" data-shape="square"><i class="chip__dot"></i><span class="chip__label">AI 用量，一目了然。</span></p>
       <h1 class="hero-title"><span class="hero-title-lead">让每一次<span class="ink-mark" data-hl-type="highlight" data-hl-color="#87CEFA" data-hl-padding="3">调用</span></span><span class="hero-title-focus"><span class="ink-mark ink-mark-underline" data-hl-type="underline" data-hl-color="#FF9800" data-hl-stroke="3" data-hl-padding="5">看得见</span></span></h1>
       <p class="hero-description">Pane 是一个本地桌面用量工作台。额度、花费、重置时间和账户状态，集中在一个悬浮窗里，随时可查。</p>
       <div class="hero-actions"><a class="button" data-variant="primary" data-size="md" data-latest-installer href="/download/windows"><img src="/icons/windows-logo.svg" width="16" alt=""><span data-download-label>下载 Windows 版</span></a><a href="#demo" class="text-link">打开互动演示 <span>↘</span></a><div class="hero-reactions" role="group" aria-label="GitHub 项目入口"><a class="reaction-button" data-reaction="issues" href="https://github.com/Aafff623/pane/issues" target="_blank" rel="noopener noreferrer" aria-label="Issues · 查看问题与反馈" title="Issues · 查看问题与反馈"><span class="reaction-icon" aria-hidden="true"><svg aria-hidden="true" focusable="false" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor" width="24" height="24"><path d="M224,128a96,96,0,1,1-96-96A96,96,0,0,1,224,128Z" opacity="0.2"/><path d="M128,24A104,104,0,1,0,232,128,104.11,104.11,0,0,0,128,24Zm0,192a88,88,0,1,1,88-88A88.1,88.1,0,0,1,128,216Z"/><circle cx="128" cy="128" r="13"/></svg></span><span class="reaction-tooltip" aria-hidden="true">Issues</span></a><a class="reaction-button" data-reaction="pr" href="https://github.com/Aafff623/pane/pulls" target="_blank" rel="noopener noreferrer" aria-label="PR · 查看合并请求" title="PR · 查看合并请求"><span class="reaction-icon" aria-hidden="true"><svg aria-hidden="true" focusable="false" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor" width="24" height="24"><path d="M96,64A24,24,0,1,1,72,40,24,24,0,0,1,96,64ZM200,168a24,24,0,1,0,24,24A24,24,0,0,0,200,168Z" opacity="0.2"/><path d="M104,64A32,32,0,1,0,64,95v66a32,32,0,1,0,16,0V95A32.06,32.06,0,0,0,104,64ZM56,64A16,16,0,1,1,72,80,16,16,0,0,1,56,64ZM88,192a16,16,0,1,1-16-16A16,16,0,0,1,88,192Zm120-31V110.63a23.85,23.85,0,0,0-7-17L163.31,56H192a8,8,0,0,0,0-16H144a8,8,0,0,0-8,8V96a8,8,0,0,0,16,0V67.31L189.66,105a8,8,0,0,1,2.34,5.66V161a32,32,0,1,0,16,0Zm-8,47a16,16,0,1,1,16-16A16,16,0,0,1,200,208Z"/></svg></span><span class="reaction-tooltip" aria-hidden="true">PR</span></a><a class="reaction-button" data-reaction="star" href="https://github.com/Aafff623/pane" target="_blank" rel="noopener noreferrer" aria-label="Star · 前往 GitHub 为项目加星" title="Star · 前往 GitHub 为项目加星"><span class="reaction-icon" aria-hidden="true"><svg aria-hidden="true" focusable="false" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor" width="24" height="24"><path d="M229.06,108.79l-48.7,42,14.88,62.79a8.4,8.4,0,0,1-12.52,9.17L128,189.09,73.28,222.74a8.4,8.4,0,0,1-12.52-9.17l14.88-62.79-48.7-42A8.46,8.46,0,0,1,31.73,94L95.64,88.8l24.62-59.6a8.36,8.36,0,0,1,15.48,0l24.62,59.6L224.27,94A8.46,8.46,0,0,1,229.06,108.79Z" opacity="0.2"/><path d="M239.18,97.26A16.38,16.38,0,0,0,224.92,86l-59-4.76L143.14,26.15a16.36,16.36,0,0,0-30.27,0L90.11,81.23,31.08,86a16.46,16.46,0,0,0-9.37,28.86l45,38.83L53,211.75a16.38,16.38,0,0,0,24.5,17.82L128,198.49l50.53,31.08A16.4,16.4,0,0,0,203,211.75l-13.76-58.07,45-38.83A16.43,16.43,0,0,0,239.18,97.26Zm-15.34,5.47-48.7,42a8,8,0,0,0-2.56,7.91l14.88,62.8a.37.37,0,0,1-.17.48c-.18.14-.23.11-.38,0l-54.72-33.65a8,8,0,0,0-8.38,0L69.09,215.94c-.15.09-.19.12-.38,0a.37.37,0,0,1-.17-.48l14.88-62.8a8,8,0,0,0-2.56-7.91l-48.7-42c-.12-.1-.23-.19-.13-.5s.18-.27.33-.29l63.92-5.16A8,8,0,0,0,103,91.86l24.62-59.61c.08-.17.11-.25.35-.25s.27.08.35.25L153,91.86a8,8,0,0,0,6.75,4.92l63.92,5.16c.15,0,.24,0,.33.29S224,102.63,223.84,102.73Z"/></svg></span><span class="reaction-tooltip" aria-hidden="true">Star</span></a><a class="reaction-button" data-reaction="fork" href="https://github.com/Aafff623/pane/fork" target="_blank" rel="noopener noreferrer" aria-label="Fork · 创建仓库副本" title="Fork · 创建仓库副本"><span class="reaction-icon" aria-hidden="true"><svg aria-hidden="true" focusable="false" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor" width="24" height="24"><path d="M88,64A24,24,0,1,1,64,40,24,24,0,0,1,88,64ZM192,40a24,24,0,1,0,24,24A24,24,0,0,0,192,40Z" opacity="0.2"/><path d="M224,64a32,32,0,1,0-40,31v17a8,8,0,0,1-8,8H80a8,8,0,0,1-8-8V95a32,32,0,1,0-16,0v17a24,24,0,0,0,24,24h40v25a32,32,0,1,0,16,0V136h40a24,24,0,0,0,24-24V95A32.06,32.06,0,0,0,224,64ZM48,64A16,16,0,1,1,64,80,16,16,0,0,1,48,64Zm96,128a16,16,0,1,1-16-16A16,16,0,0,1,144,192ZM192,80a16,16,0,1,1,16-16A16,16,0,0,1,192,80Z"/></svg></span><span class="reaction-tooltip" aria-hidden="true">Fork</span></a></div></div>
-      <div class="hero-stats" role="list"><div role="listitem"><b>78</b><span>服务商</span></div><div role="listitem"><b>本地</b><span>凭据留在本机</span></div><div role="listitem"><b>Alt + 2</b><span>快速访问 · 内置，可自定义</span></div></div>
+      <div class="hero-stats" role="list"><div role="listitem"><b>78</b><span>服务商</span></div><div role="listitem"><b>0</b><span>需要注册的账号</span></div><div role="listitem"><b>MIT</b><span>开源许可 · 全功能免费</span></div></div>
     </div>
     <aside class="blueprint-note" data-tilt-card>
       <div class="agent-portrait"><img src="/pane-agent-03.png" alt="手持扳手坐在全息台上的 Pane 机器人伴侣"><span>实时伴侣</span></div>
@@ -43,6 +47,17 @@
       <p>按 Alt + 2 唤出面板。<br>查完按 Esc，回到手头的工作。</p>
       <span class="note-foot">唤出快捷键可自定义。</span>
     </aside>
+  </div>
+</section>
+<section id="boundaries" class="boundary-section ruled" aria-labelledby="boundaries-title">
+  <div class="wrap">
+    <div class="section-head"><div><span class="section-index">边界 / 信任</span><h2 id="boundaries-title">本地优先，边界看得见。</h2></div><p>Pane 不要求账号，不把凭据放进云端。每一项出网行为都写在这三张卡里。</p></div>
+    <div class="boundary-grid">
+      <article class="boundary-card"><span class="boundary-index">01 / DEFAULT</span><h3>默认留在本机</h3><p>凭据、快照、花费台账、皮肤与字体包都存放在 <code>%APPDATA%\Pane</code>。没有 Pane 后端接收这些数据。</p></article>
+      <article class="boundary-card"><span class="boundary-index">02 / YOUR CHOICE</span><h3>同步由你决定</h3><p>没有云账号。备份与迁移使用你自己的文件导出；匿名每日统计默认开启，可在设置里硬关闭并删除随机 ID。</p></article>
+      <article class="boundary-card"><span class="boundary-index">03 / VISIBLE BOUNDARIES</span><h3>出网行为列明</h3><p>仅限服务商 API、公开价格表、更新检查与匿名统计；完整清单见 <a href="/privacy.html">隐私说明</a>。不录制会话、不建立画像。</p></article>
+    </div>
+    <div class="boundary-stat"><div><b>78</b><span>服务商</span></div><div><b>0</b><span>必须注册的 Pane 账号</span></div><div><b>MIT</b><span>开源许可</span></div><a class="why-link" href="/privacy.html">查看完整隐私说明 <span aria-hidden="true">↗</span></a></div>
   </div>
 </section>
 <section id="why-pane" class="why-pane wrap" aria-labelledby="why-pane-title">
@@ -100,7 +115,7 @@
           <div class="demo-annotation annotation-status" data-anchor="status" data-group="b"><strong>状态栏</strong><span>刷新时间与构建版本<br>常驻底部，随时可查。</span><i class="annotation-connector"></i></div>
           <div class="demo-annotation annotation-settings" data-anchor="settings" data-group="b"><span class="annotation-number">06</span><strong>设置与密钥</strong><span>快捷键、皮肤工坊、保险箱和通知策略都在设置面板统一管理。</span><i class="annotation-connector"></i></div>
           <div class="demo-annotation annotation-refresh" data-anchor="refresh" data-group="b"><span class="annotation-number">07</span><strong>刷新与状态</strong><span>可手动刷新单个服务，也能看到全局更新时间和失败状态。</span><i class="annotation-connector"></i></div>
-            <div class="app-window"><iframe id="pane-demo" title="Pane interactive desktop preview" src="/demo/index.html?lang=zh&amp;theme=dark" sandbox="allow-scripts allow-same-origin allow-popups allow-popups-to-escape-sandbox"></iframe></div>
+            <div class="app-window"><iframe id="pane-demo" loading="lazy" title="Pane interactive desktop preview" src="/demo/index.html?lang=zh&amp;theme=dark" sandbox="allow-scripts allow-same-origin allow-popups allow-popups-to-escape-sandbox"></iframe></div>
             <div class="demo-rest" hidden role="status"><i class="demo-rest__mark" aria-hidden="true"></i><span>WINDOW AT REST</span><b>面板已收起</b><p>按 <kbd>Alt + 2</kbd>，让用量浮现。</p></div>
           <div id="pane-settings-wrap" hidden role="dialog" aria-modal="true" aria-label="设置窗口预览"><button id="pane-settings-close" aria-label="关闭设置窗口"><img src="/icons/x.svg" width="14" alt=""></button><iframe id="pane-settings" title="Pane 设置窗口预览" src="about:blank" sandbox="allow-scripts allow-same-origin allow-popups allow-popups-to-escape-sandbox"></iframe></div>
         </div>
@@ -318,11 +333,11 @@
 <section id="download" class="download-section ruled">
   <div class="wrap">
     <span class="section-index">06 / 获取 PANE</span>
-    <div class="bottom-actions"><a class="button" data-variant="primary" data-size="md" data-latest-installer href="/download/windows"><img src="/icons/windows-logo.svg" width="16" alt=""><span data-download-label>下载 Windows 版</span></a><span class="button" data-variant="tertiary" data-size="md" aria-disabled="true"><span class="platform-mark">⌘</span>macOS <small class="chip" data-variant="soft" data-color="accent"><span class="chip__label">未上线</span></small></span><span class="button" data-variant="tertiary" data-size="md" aria-disabled="true"><span class="platform-mark">◆</span>Linux <small class="chip" data-variant="soft" data-color="accent"><span class="chip__label">未上线</span></small></span><a href="#demo" class="button" data-variant="secondary" data-size="md">先体验一下</a></div>
-    <p class="platforms">Windows 已提供 · macOS / Linux 即将上线 · 开源</p>
+    <div class="bottom-actions"><a class="button" data-variant="primary" data-size="md" data-latest-installer href="/download/windows"><img src="/icons/windows-logo.svg" width="16" alt=""><span data-download-label>下载 Windows 版</span></a><a class="button" data-variant="tertiary" data-size="md" href="https://github.com/Aafff623/pane/releases/latest" target="_blank" rel="noopener"><span class="platform-mark">⌘</span>macOS <small class="chip" data-variant="soft" data-color="accent"><span class="chip__label">Beta</span></small></a><span class="button" data-variant="tertiary" data-size="md" aria-disabled="true"><span class="platform-mark">◆</span>Linux <small class="chip" data-variant="soft" data-color="accent"><span class="chip__label">计划中</span></small></span><a href="#demo" class="button" data-variant="secondary" data-size="md">先体验一下</a></div>
+    <p class="platforms">Windows 已提供 · macOS Beta · Linux 计划中 · 全功能免费 · 无 Pro / 无订阅 / 无账号 · MIT 开源</p><p class="platforms">winget：<code>winget install Pane.Pane</code> · <a href="https://gitee.com/fan-tengda/pane/releases" target="_blank" rel="noopener">国内镜像</a> · <a href="https://github.com/Aafff623/pane" target="_blank" rel="noopener">源代码</a></p>
   </div>
 </section>
 </main>
-<footer class="site-footer ruled"><div class="wordmark-footer" id="wordmark-footer" aria-hidden="true"><svg class="wf-word" viewBox="0 0 1440 435" focusable="false"><text x="40" y="435" textLength="1360" lengthAdjust="spacingAndGlyphs">PANE</text></svg></div><div class="wrap footer-content"><div><a href="https://github.com/Aafff623/pane">源代码</a><a href="https://github.com/Aafff623/pane#readme">文档</a><a href="https://github.com/Aafff623/pane/issues">反馈</a><span>© 2026 Pane</span></div></div></footer>
+<footer class="site-footer ruled"><p class="footer-disclaimer">Pane 是独立工具，不隶属于任何 AI 服务商。Pane is an independent tool and is not affiliated with any AI provider. Product names and logos belong to their respective owners.</p><div class="wordmark-footer" id="wordmark-footer" aria-hidden="true"><svg class="wf-word" viewBox="0 0 1440 435" focusable="false"><text x="40" y="435" textLength="1360" lengthAdjust="spacingAndGlyphs">PANE</text></svg></div><div class="wrap footer-content"><div><a href="https://github.com/Aafff623/pane">源代码</a><a href="https://github.com/Aafff623/pane#readme">文档</a><a href="https://github.com/Aafff623/pane/issues">反馈</a><a href="/privacy.html">隐私</a><a href="/terms.html">条款</a><span>© 2026 Pane</span></div></div></footer>
 </body>
 </html>
