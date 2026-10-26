@@ -153,6 +153,25 @@ the doc first). The worker serves `/en/*` legal routes with
 `content-language: en` and falls through to the 404 page when the file is
 missing.
 
+## 11. Design tier decision (#83)
+
+Three paths were costed in [`public/design/tiers.html`](public/design/tiers.html):
+**整理 (organize)** / **升级 (upgrade)** / **重塑 (rebuild)**.
+
+**Chosen: 整理 (organize)** — 2026-10-26, by the repository owner.
+
+Rationale: the site's fact layer (version, provider count, platform matrix,
+privacy and legal copy) had just been locked by tests, and a new visual
+language would invalidate that acceptance baseline. #87's scroll narrative
+fits inside the organize tier as motion consolidation; it does not require a
+new information architecture.
+
+Consequence for future work: any change that would belong to the upgrade or
+rebuild tier (new type scale, new card system, reordered sections, rewritten
+hero) must update this contract and the tier page **first**, then the code.
+The demo stage geometry and its annotation anchors are explicitly part of the
+frozen skeleton — they are what the organize tier keeps.
+
 ## 9. Motion and type tiers (#86)
 
 **Entrance order.** Hero copy rises in one CSS animation; the two mono chip
@@ -173,3 +192,43 @@ not a per-section type scale.
 scalable wordmark; the download CTA carries the only ambient wash. No second
 glow was added to the footer because it would compete with the wordmark and
 break the one-primary-surface rule.
+
+## 12. Scroll narrative (#87)
+
+**One loop.** `public/ticker.js` is the page's only `requestAnimationFrame`
+chain. Subscribers ask for a frame rate and get throttled callbacks; the loop
+stops when the last subscriber leaves or the tab is hidden, and restarts on
+`visibilitychange`. The demo annotation follower, the collector beam and the
+count-up figures all moved onto it — before this they were three private loops
+that could be alive at the same time.
+
+**One reveal gate.** `public/reveal.js` registers every seen-once entrance.
+Observers are shared per `(threshold, rootMargin)` pair, so `.reveal-text`
+(`is-revealed`, `.25`) and the section reveals (`is-visible`, `.14` / `-8%`)
+now come from two shared observers instead of one per heading plus a second
+private one. GSAP entrances register through the same gate with
+`className: null` and an `onReveal` callback, because their threshold and
+margin are identical to the section reveals. A node is unobserved the moment it
+intersects: scrolling back up never replays an entrance.
+
+**Scrub.** `#why-pane`, `#demo` and `#ecosystem` carry `data-scrub`; their copy
+blocks carry `data-scrub-fade`. `public/scroll-scrub.js` writes a unitless
+`--scrub` on the section — 1 while it holds the screen, dipping toward 0 as it
+crosses either boundary over half a viewport — and CSS turns that into
+`opacity: calc(.55 + .45 * var(--scrub, 1))`.
+
+Two rules are load-bearing:
+
+- **No per-frame layout reads.** Document offsets are measured on init, resize,
+  font load, `<details>` toggle and IO entry, then cached. A scroll frame reads
+  `scrollY` and writes a custom property. Reading `getBoundingClientRect()` per
+  frame is what turns a scrub into jank.
+- **Opacity only, never transform.** `#why-pane-title` and `#ecosystem-title`
+  already carry `.reveal-text`, which owns `transform`; a second transform on
+  the same element would fight the reveal. Scrub therefore stays on the
+  unoccupied copy blocks.
+
+The scrub obeys the shared pause switch: pausing settles every section at
+`--scrub: 1` and stops the loop rather than freezing it mid-dip. Reduced motion
+never starts it, and CSS pins the fade to `1` so the copy is legible with
+script off too (the `var(--scrub, 1)` fallback does the same for no-JS).

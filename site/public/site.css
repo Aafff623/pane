@@ -801,6 +801,15 @@ html[data-theme=light] .faq-item[open]{box-shadow:0 0 0 1px var(--line-strong),0
 .motion-ready .reveal-text{opacity:0;filter:blur(6px);transform:translateY(10px)}
 .motion-ready .reveal-text.is-revealed{opacity:1;filter:blur(0);transform:none;transition:opacity .7s cubic-bezier(.2,.8,.2,1),filter .7s cubic-bezier(.2,.8,.2,1),transform .7s cubic-bezier(.2,.8,.2,1)}
 @media(prefers-reduced-motion:reduce){.motion-ready .reveal-text{opacity:1;filter:none;transform:none}}
+/* Scroll-scrub (#87). `--scrub` is written on the [data-scrub] section by
+   scroll-scrub.js and inherited by its copy blocks: 1 while the section holds
+   the screen, dipping toward 0 as it crosses either boundary, so
+   why-pane → demo → ecosystem reads as a hand-over rather than three blocks
+   that are all fully lit at once. Opacity only — the two headings in these
+   sections carry .reveal-text, which already owns transform, and a second
+   transform on the same element would fight the reveal. */
+[data-scrub-fade]{opacity:calc(.55 + .45*var(--scrub,1))}
+@media(prefers-reduced-motion:reduce){[data-scrub-fade]{opacity:1}}
 /* A static ambient wash behind the download CTA, not a moving glow. */
 .download-section{position:relative;isolation:isolate}
 .download-section::before{content:'';position:absolute;left:50%;top:44%;width:min(620px,86%);height:240px;transform:translate(-50%,-50%);border-radius:50%;background:radial-gradient(ellipse,color-mix(in srgb,var(--accent) 11%,transparent),transparent 70%);z-index:-1;pointer-events:none}

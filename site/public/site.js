@@ -1,8 +1,11 @@
 import { en } from '/i18n.js?v=2';
 import { initSiteEffects } from '/effects.js?v=11';
 import { initThemeSwap } from '/theme-swap.js?v=4';
-import { initUsageFlow } from '/usage-flow.js?v=5';
-import { paneMotion } from '/motion.js?v=1';
+import { initUsageFlow } from '/usage-flow.js?v=6';
+import { paneMotion } from '/motion.js?v=2';
+import { subscribe as subscribeTicker } from '/ticker.js?v=1';
+import { observeReveal } from '/reveal.js?v=1';
+import { initScrollScrub } from '/scroll-scrub.js?v=1';
 import { initHeroReactions } from '/hero-reactions.js?v=3';
 import { initLineSidebar } from '/line-sidebar.js?v=2';
 import { initHeaderNav } from '/header-nav.js?v=2';
@@ -98,16 +101,10 @@ initProviderMarquee();
 initDataDisplay();
 
 // Headline text reveal (#86). CSS owns the end state; this only flips the
-// class when the heading enters the viewport. A missing IntersectionObserver
-// reveals everything immediately instead of leaving a blurred heading.
-document.querySelectorAll('.reveal-text').forEach(node=>{
-  if(!('IntersectionObserver' in window)){node.classList.add('is-revealed');return}
-  const observer=new IntersectionObserver(entries=>{
-    if(!entries[0].isIntersecting)return;
-    observer.disconnect();node.classList.add('is-revealed');
-  },{threshold:.25});
-  observer.observe(node);
-});
+// class when the heading enters the viewport. The shared reveal gate handles
+// the missing-IntersectionObserver fallback by revealing immediately instead of
+// leaving a blurred heading.
+document.querySelectorAll('.reveal-text').forEach(node=>observeReveal(node,{className:'is-revealed',threshold:.25,rootMargin:'0px'}));
 
 // The provider belt is the one self-moving surface that had no switch of its
 // own; it now shares the page-wide one, which is also what makes the belt
@@ -141,13 +138,12 @@ function initDataDisplay(){
       if(started)return;
       started=true;
       const began=performance.now();
-      const tick=(now)=>{
+      const done=subscribeTicker((now)=>{
         const t=Math.min(1,(now-began)/1400);
         const eased=1-Math.pow(1-t,3);
         node.textContent=t<1?format(value*eased):final;
-        if(t<1)requestAnimationFrame(tick);
-      };
-      requestAnimationFrame(tick);
+        if(t>=1)done();
+      });
     };
     if('IntersectionObserver' in window){
       const io=new IntersectionObserver(entries=>{
@@ -323,11 +319,13 @@ window.addEventListener('message',event=>{
   // The panel's own gear button asks the host to reveal the settings window.
   if(event.data?.type==='pane-demo'&&event.data.action==='settings')setSettingsOverlay(true);
 });
-// (stage size changes are covered by the rAF follower below)
-let demoFrame=0;function tickAnnotations(){positionAnnotations();updateNoteAct();demoFrame=requestAnimationFrame(tickAnnotations)}
+// (stage size changes are covered by the shared-loop follower below)
+function tickAnnotations(){positionAnnotations();updateNoteAct()}
+let stopAnnotations=null;
 // Entry animations move the stage without resizing it; reproject the latest
-// anchor message every frame while the demo section is near the viewport.
-const demoTicker=new IntersectionObserver(entries=>{for(const entry of entries){if(entry.isIntersecting){if(!demoFrame)demoFrame=requestAnimationFrame(tickAnnotations)}else if(demoFrame){cancelAnimationFrame(demoFrame);demoFrame=0}}},{rootMargin:'120px'});
+// anchor message every frame while the demo section is near the viewport. The
+// frames come from the shared ticker, so a background tab stops this loop too.
+const demoTicker=new IntersectionObserver(entries=>{for(const entry of entries){if(entry.isIntersecting){stopAnnotations??=subscribeTicker(tickAnnotations)}else if(stopAnnotations){stopAnnotations();stopAnnotations=null}}},{rootMargin:'120px'});
 demoTicker.observe(document.querySelector('.demo-desktop'));
 // Two annotation acts: the overview set when the stage enters, the detail
 // set (spend / pool / groups / status) as the visitor scrolls deeper.
@@ -494,12 +492,12 @@ if (gsap && !matchMedia('(prefers-reduced-motion: reduce)').matches) {
     // Hero entrance lives in CSS (site.css keyframes): gsap.from() hides its
     // targets until the first rAF tick, and a throttled/backgrounded window
     // then shows a blank first screen. CSS animation always runs.
-    const reveal = new IntersectionObserver(entries => entries.forEach(entry => {
-      if (!entry.isIntersecting) return;
-      gsap.fromTo(entry.target, { y: 22, opacity: 0 }, { y: 0, opacity: 1, duration: .65, ease: 'power3.out', delay: Number(entry.target.dataset.motionDelay || 0) });
-      reveal.unobserve(entry.target);
-    }), { threshold: .14, rootMargin: '0px 0px -8%' });
-    document.querySelectorAll('.feature-grid article, .faq-section details, .download-section .button, .provider-section .section-head').forEach((el, i) => { el.dataset.motionDelay = String(Math.min(i * .045, .22)); reveal.observe(el); });
+    // The trigger goes through the shared reveal gate (#87) — same threshold and
+    // rootMargin as the section reveals, so both now come from one observer.
+    document.querySelectorAll('.feature-grid article, .faq-section details, .download-section .button, .provider-section .section-head').forEach((el, i) => {
+      el.dataset.motionDelay = String(Math.min(i * .045, .22));
+      observeReveal(el, { className: null, onReveal: (target) => gsap.fromTo(target, { y: 22, opacity: 0 }, { y: 0, opacity: 1, duration: .65, ease: 'power3.out', delay: Number(target.dataset.motionDelay || 0) }) });
+    });
     // Duplicate each inventory once and move the two complete belts forever.
     // The second row starts offset and travels in the opposite direction, so
     // the handoff is continuous instead of jumping one card at a time.
@@ -587,8 +585,10 @@ if (gsap && !matchMedia('(prefers-reduced-motion: reduce)').matches) {
 }
 
 document.querySelectorAll('[data-tilt-card]').forEach(card=>{const reset=()=>{card.style.setProperty('--tilt-x','0deg');card.style.setProperty('--tilt-y','0deg');card.style.setProperty('--spot-x','50%');card.style.setProperty('--spot-y','30%')};card.addEventListener('pointermove',event=>{const r=card.getBoundingClientRect(),x=(event.clientX-r.left)/r.width-.5,y=(event.clientY-r.top)/r.height-.5;card.style.setProperty('--tilt-x',`${x*8}deg`);card.style.setProperty('--tilt-y',`${y*-8}deg`);card.style.setProperty('--spot-x',`${(x+.5)*100}%`);card.style.setProperty('--spot-y',`${(y+.5)*100}%`)});card.addEventListener('pointerleave',reset);reset()});
-const revealObserver='IntersectionObserver' in window?new IntersectionObserver(entries=>entries.forEach(entry=>{if(entry.isIntersecting){entry.target.classList.add('is-visible');revealObserver?.unobserve(entry.target)}}),{threshold:.14,rootMargin:'0px 0px -8%'}):null;
-document.querySelectorAll('.demo-stage,.integrations,.feature-section,.faq-section,.download-section,.site-footer').forEach((element,index)=>{element.style.setProperty('--reveal-delay',`${Math.min(index*45,180)}ms`);revealObserver?.observe(element);if(!revealObserver)element.classList.add('is-visible')});
+// Section reveals share the same gate as the headings and the GSAP entrances
+// (#87) — one observer per threshold/rootMargin pair, seen-once per node.
+document.querySelectorAll('.demo-stage,.integrations,.feature-section,.faq-section,.download-section,.site-footer').forEach((element,index)=>{element.style.setProperty('--reveal-delay',`${Math.min(index*45,180)}ms`);observeReveal(element)});
+initScrollScrub();
 
 // Initialize after all host bindings. No earlier loadDemo() call depends on
 // this controller, and every callback sees initialized state.

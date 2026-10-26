@@ -592,3 +592,144 @@ test("legal: English visits get English legal links", () => {
   assert.match(LANGS.en.dict.boundary3Copy, /href="\/en\/privacy"/, "injected boundary link is English");
   assert.ok(!/href="\/privacy\.html"/.test(LANGS.en.dict.boundary3Copy), "no Chinese route in English copy");
 });
+
+// #83 — the tier comparison is a decision record, not marketing: it must name
+// the three paths, the chosen one, and be linked from the design contract.
+test("design: the tier comparison records the chosen path", async () => {
+  const tiers = await readFile(new URL("./public/design/tiers.html", import.meta.url), "utf8");
+  for (const tier of ["organize", "upgrade", "rebuild"]) {
+    assert.match(tiers, new RegExp(`data-tier="${tier}"`), `tier ${tier} is costed`);
+  }
+  assert.match(tiers, /<section class="tier" data-chosen="true" data-tier="organize">/,
+    "the organize tier is the chosen one");
+  assert.equal((tiers.match(/<section class="tier" data-chosen="true"/g) || []).length, 1,
+    "exactly one chosen tier section");
+  for (const fact of ["目标", "会改", "不改", "成本", "风险"]) {
+    assert.ok(tiers.includes(fact), `each tier carries ${fact}`);
+  }
+  assert.match(tiers, /2026-10-26/, "the decision is dated");
+  assert.match(tiers, /noindex/, "a governance page is not indexed");
+
+  const design = await readFile(new URL("./DESIGN.md", import.meta.url), "utf8");
+  assert.match(design, /public\/design\/tiers\.html/, "the contract links the tier page");
+  assert.match(design, /Chosen: 整理 \(organize\)/, "the contract states the chosen tier");
+});
+
+// #87 — the page used to keep three private rAF chains alive (demo annotations,
+// collector beam, count-up) plus two independent reveal observers. These lock
+// the shared replacements: one loop, one gate, and a scrub that never reads
+// layout per frame.
+test("motion: one shared ticker drives every animation loop", async () => {
+  const ticker = await readFile(new URL("./public/ticker.js", import.meta.url), "utf8");
+  assert.ok(!/requestAnimationFrame/.test(siteScript), "site.js owns no private rAF loop");
+  assert.ok(!/requestAnimationFrame/.test(usageFlowScript), "usage-flow.js owns no private rAF loop");
+  assert.match(siteScript, /from '\/ticker\.js\?v=1'/, "site.js subscribes to the shared loop");
+  assert.match(usageFlowScript, /from '\/ticker\.js\?v=1'/, "the collector subscribes to the shared loop");
+  assert.match(ticker, /subscribers\.size/, "the loop is reference counted");
+  assert.match(ticker, /document\?\.hidden/, "a hidden tab stops the loop");
+
+  // Behaviour, not just shape: a 60 fps subscriber must actually get every
+  // frame, and the loop must stop when the last subscriber leaves.
+  const { subscribe, tickerState } = await import("./public/ticker.js");
+  const queue = [];
+  let nextId = 0;
+  globalThis.requestAnimationFrame = (cb) => { queue.push(cb); return ++nextId; };
+  globalThis.cancelAnimationFrame = () => { queue.length = 0; };
+  const step = (now) => { const cb = queue.shift(); assert.ok(cb, "the loop rescheduled itself"); cb(now); };
+
+  const frames = [];
+  const off = subscribe((now) => frames.push(now));
+  assert.equal(tickerState().subscribers, 1);
+  // Real 60 Hz timestamps land fractionally inside a 16.67 ms interval; the
+  // ticker's tolerance is what keeps that from halving the frame rate.
+  for (const now of [0, 16.6, 33.2, 49.8]) step(now);
+  assert.deepEqual(frames, [0, 16.6, 33.2, 49.8], "every frame reaches a 60 fps subscriber");
+
+  const throttled = [];
+  const offSlow = subscribe((now) => throttled.push(now), 30);
+  step(66.4);
+  assert.deepEqual(throttled, [66.4], "a 30 fps subscriber starts on the next frame");
+  step(83);
+  assert.deepEqual(throttled, [66.4], "…and is skipped one 60 Hz frame later");
+  step(99.6);
+  assert.deepEqual(frames, [0, 16.6, 33.2, 49.8, 66.4, 83, 99.6], "the 60 fps subscriber is unaffected");
+  assert.deepEqual(throttled, [66.4, 99.6], "…while the 30 fps one runs every other frame");
+
+  offSlow();
+  off();
+  assert.deepEqual(tickerState(), { subscribers: 0, running: false }, "the loop stops when idle");
+  delete globalThis.requestAnimationFrame;
+  delete globalThis.cancelAnimationFrame;
+});
+
+test("motion: both reveal systems come from one shared gate", async () => {
+  assert.match(siteScript, /from '\/reveal\.js\?v=1'/, "site.js uses the gate");
+  assert.match(siteScript, /observeReveal\(node,\{className:'is-revealed'/, "headings keep their own class");
+  assert.match(siteScript, /observeReveal\(element\)/, "sections keep the default class");
+  assert.ok(!/const revealObserver=/.test(siteScript), "the second private observer is gone");
+  assert.match(siteScript, /observeReveal\(el, \{ className: null, onReveal:/, "GSAP entrances share the same observer");
+
+  const { observeReveal, revealState } = await import("./public/reveal.js");
+  const observers = [];
+  const node = () => { const added = []; return { added, classList: { add: (c) => added.push(c) } }; };
+  globalThis.IntersectionObserver = class {
+    constructor(cb) { this.cb = cb; this.nodes = []; observers.push(this); }
+    observe(n) { this.nodes.push(n); }
+    unobserve(n) { this.nodes = this.nodes.filter((x) => x !== n); }
+    fire(n) { this.cb([{ target: n, isIntersecting: true }]); }
+  };
+
+  const a = node();
+  observeReveal(a);
+  observeReveal(node(), { className: "is-revealed", threshold: 0.25, rootMargin: "0px" });
+  const gates = revealState().length;
+  assert.equal(gates, 2, "one observer per distinct threshold/margin pair");
+  observeReveal(node());
+  assert.equal(revealState().length, gates, "identical configs reuse one observer instead of building a new one");
+
+  const gate = observers.find((o) => o.nodes.includes(a));
+  gate.fire(a);
+  assert.deepEqual(a.added, ["is-visible"]);
+  gate.fire(a);
+  assert.deepEqual(a.added, ["is-visible"], "seen once — scrolling back up never replays an entrance");
+
+  delete globalThis.IntersectionObserver;
+  const plain = node();
+  observeReveal(plain);
+  assert.deepEqual(plain.added, ["is-visible"], "without an observer the node is revealed immediately");
+});
+
+test("motion: the scroll scrub caches offsets and settles at the boundaries", async () => {
+  const scrub = await readFile(new URL("./public/scroll-scrub.js", import.meta.url), "utf8");
+  assert.ok(!/getBoundingClientRect/.test(scrub), "no per-frame layout read");
+  assert.match(scrub, /offsetTop/, "document offsets come from the cached chain");
+  assert.match(scrub, /setProperty\('--scrub'/, "the frame only writes a custom property");
+  assert.match(scrub, /paneMotion\.subscribe/, "the shared pause switch is authoritative");
+  assert.match(scrub, /prefers-reduced-motion/, "reduced motion never starts the loop");
+  assert.match(siteScript, /initScrollScrub\(\)/, "site.js wires it up");
+
+  for (const id of ["why-pane", "demo", "ecosystem"]) {
+    assert.match(html, new RegExp(`<section id="${id}"[^>]*data-scrub`), `${id} is a scrub boundary`);
+  }
+  assert.ok((html.match(/data-scrub-fade/g) || []).length >= 6, "each boundary fades its copy blocks");
+  assert.ok(!/class="reveal-text"[^>]*data-scrub-fade/.test(html),
+    "a reveal-text heading never also fades — its transform would fight the scrub");
+
+  const css = await readFile(new URL("./public/site.css", import.meta.url), "utf8");
+  assert.match(css, /\[data-scrub-fade\]\{opacity:calc\(\.55 \+ \.45\*var\(--scrub,1\)\)\}/, "the fade reads the variable");
+  assert.match(css, /prefers-reduced-motion:reduce\)\{\[data-scrub-fade\]\{opacity:1\}\}/, "reduced motion pins it opaque");
+
+  // The curve itself: 0 before the section arrives, 1 while it holds the
+  // screen, 0 once it has left, and monotonic on both edges.
+  const { scrubValue } = await import("./public/scrub-curve.js");
+  const top = 2000, height = 800, viewport = 900;
+  assert.equal(scrubValue(1100, viewport, top, height), 0, "not on screen yet");
+  assert.equal(scrubValue(2800, viewport, top, height), 0, "fully scrolled past");
+  const sweep = [];
+  for (let y = 1000; y <= 2900; y += 50) sweep.push(scrubValue(y, viewport, top, height));
+  const peak = sweep.indexOf(1);
+  assert.ok(peak > 0 && peak < sweep.length - 1, "the section rests at 1 in the middle");
+  for (let i = 1; i <= peak; i += 1) assert.ok(sweep[i] >= sweep[i - 1], "the entering edge only rises");
+  for (let i = peak + 1; i < sweep.length; i += 1) assert.ok(sweep[i] <= sweep[i - 1], "the leaving edge only falls");
+  assert.ok(sweep.every((v) => v >= 0 && v <= 1), "the variable stays inside 0..1");
+});

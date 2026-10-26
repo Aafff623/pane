@@ -8,10 +8,14 @@
 // persisted in localStorage, seeded from the visitor's reduced-motion
 // preference, and broadcast to every subscriber.
 const KEY = 'pane-site-motion';
-const reduce = matchMedia('(prefers-reduced-motion: reduce)');
+// Read through globalThis so this module can also be imported outside a browser
+// (the site tests exercise the scrub curve against it). In a browser nothing
+// changes: the query is still evaluated once, at load.
+const reduce = globalThis.matchMedia?.('(prefers-reduced-motion: reduce)')
+  ?? { matches: false, addEventListener() {} };
 
 let stored = null;
-try { stored = localStorage.getItem(KEY); } catch {}
+try { stored = globalThis.localStorage?.getItem(KEY) ?? null; } catch {}
 let paused = stored === null ? reduce.matches : stored === 'paused';
 
 const listeners = new Set();
@@ -22,7 +26,7 @@ export const paneMotion = {
     const next = !!value;
     if (next === paused) return;
     paused = next;
-    try { localStorage.setItem(KEY, paused ? 'paused' : 'running'); } catch {}
+    try { globalThis.localStorage?.setItem(KEY, paused ? 'paused' : 'running'); } catch {}
     for (const fn of listeners) fn(paused);
   },
   toggle() { this.set(!paused); },

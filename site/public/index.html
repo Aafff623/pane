@@ -22,9 +22,9 @@
 <link rel="alternate" hreflang="zh-CN" href="https://pane.threetwoa.live/">
 <link rel="alternate" hreflang="en" href="https://pane.threetwoa.live/en/">
 <link rel="alternate" hreflang="x-default" href="https://pane.threetwoa.live/">
-<link rel="icon" href="/brand-logo.png?v=2"><link rel="stylesheet" href="/fonts/fonts.css?v=3"><link rel="stylesheet" href="/site.css?v=60"><link rel="stylesheet" href="/effects.css?v=8"><link rel="stylesheet" href="/site-interactions.css?v=5">
+<link rel="icon" href="/brand-logo.png?v=2"><link rel="stylesheet" href="/fonts/fonts.css?v=3"><link rel="stylesheet" href="/site.css?v=61"><link rel="stylesheet" href="/effects.css?v=8"><link rel="stylesheet" href="/site-interactions.css?v=5">
 <script>try{document.documentElement.dataset.theme=localStorage.getItem('pane-site-theme')||'dark';const requested=new URLSearchParams(location.search).get('skin');document.documentElement.dataset.siteSkin=(requested==='comic-pixel'||(!requested&&localStorage.getItem('pane-site-skin')==='comic-pixel'))?'comic-pixel':'native'}catch{}</script>
-<script src="/vendor/gsap.min.js"></script><script src="/vendor/rough-notation.js"></script><script src="/site-skin.js?v=1" defer></script><script src="/download-routing.js?v=5" defer></script><script type="module" src="/site.js?v=67"></script>
+<script src="/vendor/gsap.min.js"></script><script src="/vendor/rough-notation.js"></script><script src="/site-skin.js?v=1" defer></script><script src="/download-routing.js?v=5" defer></script><script type="module" src="/site.js?v=68"></script>
 </head>
 <body>
 <a class="skip-link" href="#main-content">跳到主要内容</a>
@@ -60,13 +60,13 @@
     <div class="boundary-stat"><div><b data-number="78" data-format="count">78</b><span>服务商</span></div><div><b>0</b><span>必须注册的 Pane 账号</span></div><div><b>MIT</b><span>开源许可</span></div><a class="why-link" href="/privacy.html">查看完整隐私说明 <span aria-hidden="true">↗</span></a></div>
   </div>
 </section>
-<section id="why-pane" class="why-pane wrap" aria-labelledby="why-pane-title">
+<section id="why-pane" class="why-pane wrap" data-scrub aria-labelledby="why-pane-title">
   <div class="why-panel">
     <div class="why-copy">
-      <span class="why-kicker">WHY PANE / 少一点来回切换</span>
+      <span class="why-kicker" data-scrub-fade>WHY PANE / 少一点来回切换</span>
       <h2 id="why-pane-title" class="reveal-text">查一次用量，不必跑遍每个后台。</h2>
-      <p>如果你也被来回查用量困扰：在各个 Harness 工具里翻使用统计，再去对应官网的 Dashboard 查额度、查 Credits，不妨试试 Pane。把支持的工具用量集中到一个悬浮窗，少切几个页面。</p>
-      <a class="why-link" href="#demo">就在下面，试一试 <span aria-hidden="true">↘</span></a>
+      <p data-scrub-fade>如果你也被来回查用量困扰：在各个 Harness 工具里翻使用统计，再去对应官网的 Dashboard 查额度、查 Credits，不妨试试 Pane。把支持的工具用量集中到一个悬浮窗，少切几个页面。</p>
+      <a class="why-link" href="#demo" data-scrub-fade>就在下面，试一试 <span aria-hidden="true">↘</span></a>
     </div>
     <div class="why-flow">
       <div class="why-flow-head"><span class="why-flow-label">用量汇集 / 示例数据</span><button class="why-pause toggle-button" type="button" aria-pressed="false">暂停动画</button></div>
@@ -95,9 +95,9 @@
     </div>
   </div>
 </section>
-<section id="demo" class="demo-section">
+<section id="demo" class="demo-section" data-scrub>
   <div class="wrap">
-    <div class="section-head"><div><span class="section-index">02</span><h2>实时用量工作台</h2></div><p>点击面板里的标签与卡片，<br>切换额度和花费视图。</p></div>
+    <div class="section-head" data-scrub-fade><div><span class="section-index">02</span><h2>实时用量工作台</h2></div><p>点击面板里的标签与卡片，<br>切换额度和花费视图。</p></div>
     <div class="blueprint-stage">
       <div class="stage-rail rail-left"><span>工作流</span><b>01</b><b>02</b><b>03</b><i></i></div>
       <div class="demo-stage">
@@ -159,7 +159,7 @@
     </details>
   </div>
 </section>
-<section id="ecosystem" class="ecosystem-section ruled" aria-labelledby="ecosystem-title">
+<section id="ecosystem" class="ecosystem-section ruled" data-scrub aria-labelledby="ecosystem-title">
   <div class="wrap ecosystem-layout">
     <div class="ecosystem-art">
       <div class="ecosystem-visual">
@@ -196,10 +196,10 @@
       <div class="ecosystem-art-foot"><span>不同服务，同一个入口</span><button class="ecosystem-pause why-pause toggle-button" type="button" aria-pressed="false">暂停动画</button></div>
     </div>
     <div class="ecosystem-copy">
-      <span class="why-kicker">PANE ECOSYSTEM / 当前支持</span>
+      <span class="why-kicker" data-scrub-fade>PANE ECOSYSTEM / 当前支持</span>
       <h2 id="ecosystem-title" class="reveal-text">常用工具的用量，<br>集中到一个入口。</h2>
-      <p class="ecosystem-intro">目前收录 <strong>78 个服务商</strong>，覆盖编程 Agent、模型 API、语音与搜索等服务。查看下方服务列表，找到你正在使用的工具。</p>
-      <a class="why-link" href="#connected-providers">查看当前服务 <span aria-hidden="true">↘</span></a>
+      <p class="ecosystem-intro" data-scrub-fade>目前收录 <strong>78 个服务商</strong>，覆盖编程 Agent、模型 API、语音与搜索等服务。查看下方服务列表，找到你正在使用的工具。</p>
+      <a class="why-link" href="#connected-providers" data-scrub-fade>查看当前服务 <span aria-hidden="true">↘</span></a>
       <details class="ecosystem-roadmap">
       <summary>未来接入方向</summary>
       <p class="ecosystem-outlook">4 个生态方向，13 个候选领域。以下为拓展构想，尚不代表已支持；接入将依据可用接口逐步推进。</p>

@@ -1,6 +1,6 @@
 // MOTDES LineSidebar's smooth proximity curve and exponential rAF easing,
 // adapted to real anchor links, scroll position and Pane's shared pause state.
-import { paneMotion } from '/motion.js?v=1';
+import { paneMotion } from '/motion.js?v=2';
 
 export function initLineSidebar() {
   const english = document.documentElement.lang === 'en';

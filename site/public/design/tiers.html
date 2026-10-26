@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="dark">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>设计档位对比 · Pane</title>
+<meta name="description" content="Pane 官网的三档设计路径对比：整理 / 升级 / 重塑，以及 2026-10-26 选定「整理」的理由。">
+<meta name="robots" content="noindex">
+<link rel="icon" href="/brand-logo.png?v=2"><link rel="stylesheet" href="/site.css?v=58">
+<style>
+.legal{max-width:860px;padding-top:72px;padding-bottom:80px}
+.legal h1{font-size:clamp(28px,4vw,42px);letter-spacing:-.04em;margin:0 0 8px}
+.legal .updated{color:var(--faint);font-size:12px;margin:0 0 32px}
+.legal h2{font-size:18px;margin:32px 0 8px}
+.legal h3{font-size:14px;margin:20px 0 6px;color:var(--ink)}
+.legal p,.legal li,.legal td{color:var(--muted);font-size:13.5px;line-height:1.85}
+.legal ul{padding-left:20px}
+.legal a{color:var(--accent);text-decoration:underline;text-underline-offset:3px}
+.legal code{padding:1px 5px;border:1px solid var(--line);border-radius:5px;background:var(--surface);font-size:12px}
+.tier{border:1px solid var(--line);border-radius:12px;padding:18px 20px;margin-top:16px;background:var(--surface)}
+.tier[data-chosen="true"]{border-color:var(--accent)}
+.tier-head{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap}
+.tier-head b{font-size:15px;color:var(--ink)}
+.tier-head .tag{font:10px Manrope;letter-spacing:.12em;color:var(--faint)}
+.chip-chosen{font:600 10px Manrope;letter-spacing:.1em;color:var(--accent);border:1px solid color-mix(in srgb,var(--accent) 45%,transparent);border-radius:999px;padding:2px 8px}
+table.facts{width:100%;border-collapse:collapse;margin-top:10px}
+table.facts th,table.facts td{text-align:left;padding:7px 10px;border-bottom:1px solid var(--line);font-size:12.5px;vertical-align:top}
+table.facts th{color:var(--faint);font-weight:500;white-space:nowrap;width:88px}
+</style>
+</head>
+<body>
+<a class="skip-link" href="#main-content">跳到主要内容</a>
+<header class="site-header"><nav class="wrap nav" aria-label="主导航"><a href="/" class="brand"><img src="/brand-logo.png?v=2" width="20" height="20" alt="">Pane</a><div class="nav-actions"><a class="button" data-variant="primary" data-size="sm" href="/download/windows">下载</a></div></nav></header>
+<main id="main-content" class="legal wrap">
+  <h1>设计档位对比</h1>
+  <p class="updated">最后更新：2026-10-26 · 契约权威：<a href="https://github.com/Aafff623/pane/blob/main/site/DESIGN.md">site/DESIGN.md</a> · 本页不对外索引</p>
+  <p>#83 要求把「整理 / 升级 / 重塑」三条路径写清楚，再由仓库所有者选定一档，作为所有站点 UI 票（#84–#89）的验收基线。下面是三档的实际差异与成本。</p>
+
+  <section class="tier" data-chosen="true" data-tier="organize">
+    <div class="tier-head"><b>档位一 · 整理</b><span class="tag">ORGANIZE</span><span class="chip-chosen">已选定</span></div>
+    <table class="facts">
+      <tr><th>目标</th><td>现有骨架不动，把已经长出来的样式、动效与文案收敛成一套可验收的契约。</td></tr>
+      <tr><th>会改</th><td>token 单一来源与禁用清单；section index 作为唯一编号系统；信任三卡与 stat-row；动效分级（入场/反馈/叙事）与 reduced-motion 终态；comic-pixel 皮肤限定在 opt-in 属性内；i18n 双向锁与死键检查；版本与 provider 计数改为生成。</td></tr>
+      <tr><th>不改</th><td>hero 结构、demo 舞台几何、注释锚点坐标系、下载区主行动、现有栅格。</td></tr>
+      <tr><th>成本</th><td>约 2–3 天，已在 0.11.0 落地大部分。</td></tr>
+      <tr><th>风险</th><td>低。改动集中在契约与测试，视觉只有局部收敛，回归面小。</td></tr>
+    </table>
+  </section>
+
+  <section class="tier" data-tier="upgrade">
+    <div class="tier-head"><b>档位二 · 升级</b><span class="tag">UPGRADE</span></div>
+    <table class="facts">
+      <tr><th>目标</th><td>保留信息架构，替换视觉语言：新的排版尺度、卡片体系与配色层级。</td></tr>
+      <tr><th>会改</th><td>type scale 与字重层级重做；卡片改为双层（容器 + 内容）；引入语义色板扩展；hero 与 demo 舞台重新排版。</td></tr>
+      <tr><th>不改</th><td>页面顺序、section 数量、demo 交互模型、法务与下载路由。</td></tr>
+      <tr><th>成本</th><td>约 6–9 天，含三皮肤/明暗/四宽度全量回归。</td></tr>
+      <tr><th>风险</th><td>中。demo 注释锚点依赖舞台几何，重排会连带改 <code>site.js</code> 的碰撞避让与连接线计算。</td></tr>
+    </table>
+  </section>
+
+  <section class="tier" data-tier="rebuild">
+    <div class="tier-head"><b>档位三 · 重塑</b><span class="tag">REBUILD</span></div>
+    <table class="facts">
+      <tr><th>目标</th><td>换叙事结构：从「功能罗列」改为「一次刷新的旅程」，页面顺序与章节全部重写。</td></tr>
+      <tr><th>会改</th><td>信息架构、章节顺序、hero 主张、demo 的位置与角色、滚动叙事（#87）成为主干而非点缀。</td></tr>
+      <tr><th>不改</th><td>后端契约、法务事实、下载路由。</td></tr>
+      <tr><th>成本</th><td>约 2–3 周，且需要 owner 多轮手感验收。</td></tr>
+      <tr><th>风险</th><td>高。现有 i18n 键、测试锁与注释锚点几乎全部失效，等于重做站点并重新验收。</td></tr>
+    </table>
+  </section>
+
+  <h2>决定</h2>
+  <p>2026-10-26，仓库所有者选定 <strong>档位一 · 整理</strong>。理由：站点的事实层（版本、计数、平台矩阵、隐私与法务）刚刚被测试锁定，此时换视觉语言会把刚建立的验收基线全部作废；#87 的滚动叙事作为「整理」档内的一项动效收口，不需要重塑信息架构。</p>
+  <p>后续若要走档位二或三，先更新 <a href="https://github.com/Aafff623/pane/blob/main/site/DESIGN.md">site/DESIGN.md</a> 的契约与本页决定，再动代码——契约先于实现。</p>
+
+  <h2>整理档在 0.11.x 的落点</h2>
+  <ul>
+    <li>契约与禁用清单：<code>site/DESIGN.md</code> §2–§4、动效与字号层级 §9、法务页规则 §10。</li>
+    <li>信任与规格：边界三卡 + stat-row + hero-meta + 免责句（#84），英文文案随 <code>/en/</code> 同步。</li>
+    <li>动效：count-up、磨砂导航、标签打字、POP、文字揭示（#86）；滚动叙事与共享 ticker（#87）。</li>
+    <li>皮肤：comic-pixel 只在 <code>html[data-site-skin=comic-pixel]</code> 下生效（#89）。</li>
+    <li>口径：版本与 provider 计数由 <code>site/scripts/sync-site-version.mjs</code> 生成，CI 以 <code>--check</code> 把关（#79）。</li>
+  </ul>
+</main>
+<footer class="site-footer ruled"><div class="wrap footer-content"><div><a href="/">首页</a><a href="/privacy.html">隐私</a><a href="/terms.html">条款</a><a href="https://github.com/Aafff623/pane">源代码</a><a href="https://github.com/Aafff623/pane/blob/main/LICENSE">MIT 许可</a><span>© 2026 Pane</span></div></div></footer>
+</body>
+</html>
