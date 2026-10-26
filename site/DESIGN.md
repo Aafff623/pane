@@ -89,6 +89,14 @@ stops under `prefers-reduced-motion: reduce` and when the tab is hidden.
 section skeleton is approved because each card shows a real, verifiable
 mechanism instead of a generic icon + heading:
 
+**License.** The owner holds a purchased, perpetual oil-ui Pro licence, so these
+cards are used under that licence and do not depend on any upstream third-party
+template grant. The boundary record is
+`.scratch/site-oil-ui-cards/license.md` (2026-10-26): no unlicensed third-party
+assets are copied, no oil-ui private component code is vendored into the site —
+the shipped implementation is this repository's own CSS/JS. If the cards are ever
+replaced or redistributed, that record and the Pro terms govern.
+
 - **Refresh path** (beam-graph): timer / manual / launch → single-flight gate
   → snapshot → panel.
 - **30-day metric** (metric): median-day projection with the sample-data label
