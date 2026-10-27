@@ -30,8 +30,13 @@ Blocked by: 02
 - **但物理拆分只有 1/19。** `spend/sources/` 里只有 `copilot.rs` + `mod.rs`；
   其余来源的 `collector` 仍是 spend.rs 内的函数名（如 `collector: "claude_line"`），
   代码还堆在 7801 行的 spend.rs 里。
-- **#42-2 未修。** `sources/mod.rs:290` 的 `gemini-jsonl` 仍是
-  `needs_probe: true`，而本票的理由（已有 fixture 与解析测试）依然成立。
+- **#42-2 已修（2026-10-27）。** `gemini-jsonl` 的 `needs_probe` 改为 `false`：
+  它当初被标记是因为解析器只照着上游 session schema 写、没有样本可校验；
+  现在 `parse-tests/fixtures/gemini/` 有 fixture，`spend.rs` 里也有
+  `gemini_fixture_conversation_parses_once` 等两个解析测试，标记过期。
+  测试同步改成钉住「不再 parked」而不是钉住具体状态——具体状态取决于本机
+  `~/.gemini` 是否存在，钉死会变成跨机器的脆弱断言。同时加了一条
+  「注册表里不应再有 needs_probe」的守卫。
 - **#42-3 未做。** 注册表没有每源耗时字段，`SpendSourceStatus` 也不带时长。
 - **#43 三项全部未做**：`pricing_mode` 徽标没接 UI、项目/分支归因没有、web search/
   flex 分项计费没有文档化。

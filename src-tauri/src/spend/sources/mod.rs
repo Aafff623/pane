@@ -294,7 +294,11 @@ pub fn registry() -> Vec<SourceSpec> {
             roots: || vec![p(&[".gemini", "tmp"])],
             feeds: &["gemini"],
             runtime: false,
-            needs_probe: true,
+            // The flag existed because the parser was written from the upstream
+            // session schema alone. It now has a fixture under
+            // parse-tests/fixtures/gemini plus parse tests, so it resolves
+            // against the filesystem like every other source (#42-2).
+            needs_probe: false,
             parse_probe: None,
         },
         SourceSpec {

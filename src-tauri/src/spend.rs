@@ -4721,7 +4721,7 @@ mod tests {
     }
 
     #[test]
-    fn source_registry_is_the_single_inventory_and_marks_unprobed_sources() {
+    fn source_registry_is_the_single_inventory_and_gemini_is_no_longer_parked() {
         let registry = sources::registry();
         let mut ids: Vec<&str> = registry.iter().map(|s| s.id).collect();
         ids.sort_unstable();
@@ -4731,9 +4731,22 @@ mod tests {
 
         let statuses = source_statuses();
         assert_eq!(statuses.len(), registry.len());
+        // gemini used to be parked at `needs_probe` because its parser came
+        // from the upstream schema with no sample to check it against. It has a
+        // fixture and parse tests now, so it resolves from the filesystem like
+        // every other source (#42-2). The exact state depends on this machine's
+        // ~/.gemini, so pin only that it is no longer parked.
         let gemini = statuses.iter().find(|s| s.id == "gemini-jsonl").expect("gemini row");
-        assert_eq!(gemini.state, "needs_probe");
-        assert!(gemini.reason.as_deref().unwrap_or("").contains("verified local sample"));
+        assert_ne!(gemini.state, "needs_probe");
+        assert!(
+            ["detected", "empty", "unreadable", "not_detected"].contains(&gemini.state.as_str()),
+            "unexpected gemini state {}",
+            gemini.state
+        );
+        assert!(
+            registry.iter().all(|spec| !spec.needs_probe),
+            "no source should still be parked at needs_probe"
+        );
         let copilot = statuses.iter().find(|s| s.id == "copilot-local").expect("copilot row");
         assert_eq!(copilot.collector, "spend::sources::copilot");
         assert!(copilot.feeds.iter().any(|f| f == "copilot"));
