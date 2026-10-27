@@ -688,6 +688,18 @@ impl OfficialUsage {
             .map(|(key, _)| key.as_str())
     }
 
+    /// This string is one row on the card, and model slugs can run long
+    /// (`claude-sonnet-4-5-20250929`). Clip rather than let the row wrap to a
+    /// second line and push the rest of the card down. Char-boundary safe.
+    fn clip(value: &str, max: usize) -> String {
+        if value.chars().count() <= max {
+            return value.to_string();
+        }
+        let mut out: String = value.chars().take(max.saturating_sub(1)).collect();
+        out.push('…');
+        out
+    }
+
     fn detail(&self) -> String {
         let credits = if (self.credits.fract()).abs() < 0.005 {
             format!("{:.0}", self.credits)
@@ -696,10 +708,10 @@ impl OfficialUsage {
         };
         let mut out = format!("{} requests · {} credits", self.requests, credits);
         if let Some(model) = Self::top(&self.by_model) {
-            out.push_str(&format!(" · {model}"));
+            out.push_str(&format!(" · {}", Self::clip(model, 28)));
         }
         if let Some(client) = Self::top(&self.by_client) {
-            out.push_str(&format!(" · via {client}"));
+            out.push_str(&format!(" · via {}", Self::clip(client, 20)));
         }
         if self.partial {
             out.push_str(" · partial");
@@ -1692,5 +1704,18 @@ mod tests {
             ..OfficialUsage::default()
         };
         assert_eq!(bare.detail(), "2 requests · 1 credits");
+
+        // A long vendor slug must not push the row onto a second line.
+        let mut long = OfficialUsage {
+            requests: 4,
+            credits: 2.0,
+            ..OfficialUsage::default()
+        };
+        // 39 chars: past the 28-char budget. Assert the intent rather than the
+        // exact cut, since the budget is a layout choice that may move.
+        long.by_model.insert("claude-sonnet-4-5-20250929-experimental".into(), 2.0);
+        let clipped = long.detail();
+        assert!(clipped.ends_with('…'), "long slug must be clipped: {clipped}");
+        assert!(clipped.chars().count() < 60, "row must stay one line: {clipped}");
     }
 }
