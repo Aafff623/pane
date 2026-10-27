@@ -7,6 +7,7 @@
 **未完成**：04（#42-1 只拆了 1/19，来源耗时已做；#43-1 归因未做）、
 05（剩 3/4/5/6/8/9/10 七项）、07（1/8 骨架）、08（#31 面板 UI）、12（等 owner 登录）、
 13/14（发布、WinGet、最终 code-review）。
+**Post-batch（2026-10-27）**：#107 皮肤工坊商店化已实现、owner 验收通过；见 `.scratch/skin-workshop-storefront/`。
 **额外发现（不在原清单）**：官网交互 demo 的批注层从未定位，线上同样复现，根因未定，
 见 `issues/10-site-narrative.md` 的「复核发现」节——修之前先确认真实 Chrome 里的行为。
 **Baseline:** local checkpoint `f0c0756`（0.11.0 身份/遥测/UI/站点收尾）

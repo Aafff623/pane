@@ -75,7 +75,7 @@ cd D:\code\pane\site && npx wrangler dev --port 8791
 
 ## 五、代码层面的门（我已经跑完，你不用看）
 
-`parse-tests` 1193 通过 / 0 失败 / 18 忽略 · `node` 220 / 0 · `site` 50 / 0 ·
+`parse-tests` 1193 通过 / 0 失败 / 18 忽略 · `node` 237 / 0 · `site` 50 / 0 ·
 `cargo check` 0 错误 · `pnpm build` 通过 · 站点版本与计数一致。
 
 中途出现过一次 `cached_clients_follow_proxy_changes…` 失败，是本地 loopback 代理测试的

@@ -12,7 +12,7 @@ Single authorities for the neighbouring concerns:
   tracker, see [`docs/agents/issue-tracker.md`](agents/issue-tracker.md).
 - **Startup / build / run / acceptance commands** — [`docs/dev-startup.md`](dev-startup.md).
 
-Last reconciled: 2026-10-25 (Pane 0.9.1 + account lifecycle, RTK savings, OrcaTerm quota card and panel-window controls).
+Last reconciled: 2026-10-27 (skin workshop storefront #107; 0.11.x close-out branch).
 
 ## Scope and boundaries
 
@@ -716,9 +716,9 @@ changes.
   site/scripts/check-skin-packs.mjs [--live]` is the mechanical gate: it
   verifies local size/sha256 and, with `--live`, compares the deployed
   index (expected to report STALE until the release deploy). 0.8.8 still
-  bundles signal/ink and `marketEntries` keeps bundled ids ahead of the
-  index, so a stale deployed index cannot reach released users; it matters
-  only for the unbundled build. Deploy from a clean tree — `site/` may
+  bundles signal/ink, and the workshop keeps installed packs usable even when
+  the deployed index is stale; a stale index cannot reach released users as a
+  downgrade. It matters only for the unbundled build. Deploy from a clean tree — `site/` may
   carry another session's WIP.
 - Deleting a One/New API key/site purges backend config/cache, and the
   frontend immediately drops the key card from `lastSnapshots`/`lastSpend`/
@@ -1057,9 +1057,9 @@ changes.
   code only until the site is deployed.
 - **Pack state** — source changes are invisible until the packs are rebuilt and
   reinstalled. Local 1.0.2 zips are in `site/public/skins/`; the live index is
-  still 1.0.0 with no CORS header, so `check-skin-packs --live` reports stale
-  until deployment. `marketEntries` compares versions numerically; a local pack
-  newer than the index is never offered as a downgrade.
+  at 1.0.2 after the 2026-10-27 pack publish (the live host was not re-checked
+  in the #107 closeout). `skinShopEntries` compares versions numerically; a local
+  pack newer than the index is never offered as a downgrade.
 - **Comic legibility** — `--cp-yellow-ink:#080a0d`, `--cp-cyan-ink:#03231f`,
   `--cp-purple-ink:#ffffff`; every yellow/cyan background uses its ink pair
   (the three 1.09:1 spots are gone). Data/numeric readouts use
@@ -1079,6 +1079,44 @@ changes.
   interrupts cleanly and falls back to an instant switch under
   `reduceAnimations`/`prefers-reduced-motion`. Wired to the Settings and
   workshop entries only.
+
+## Skin workshop storefront (#107, 2026-10-27)
+
+- **One entry, one surface** — the workshop is a Settings page
+  (`#st-skins`, General → Panel skins). The old popover drawer market and its
+  CSS/entry are gone. The popover palette writes
+  `panelIntent = {view:"settings", page:"skins"}`; the panel applies it once and
+  persists the applied stamp (`pane.panelIntent.applied`) so a failed config
+  clear cannot replay the jump in a new window. The General page also carries a
+  “Panel skins / Open workshop” row.
+- **Data contract** — `skinShopEntries()` merges native + installed packs +
+  distribution index. `applied` comes from the loaded pack; `selected` comes
+  from `config.skinId`. A selected pack that is missing locally shows
+  Selected / Not installed, native is not reported as applied, and the gallery
+  explains it. A local pack named `native` cannot collide with the native row
+  (`__native` sentinel).
+- **Previews** — every thumbnail, hero and detail shot is the real panel
+  component rendered at 360px and clipped into a phone frame; previews never
+  read live accounts and remote skins show a download-to-preview placeholder.
+  No ratings, downloads, authors or invented metrics.
+- **Failure semantics** — `refreshInstalledPacks()` returns a boolean and keeps
+  the last good registry; failed reads surface `skin.shopRegistryFailed` and
+  must not call `applySkin` (which would repaint native). `refreshSkinIndex()`
+  is single-flight (`skinIndexRefreshing()`); the shop shows checking/offline
+  states. Download/remove errors stay visible in the gallery, not only in the
+  detail page. Skin actions persist with `patchConfig(..., {markDirty:false})`,
+  so they never arm the Settings “Save” button.
+- **Cross-window** — install/remove broadcasts `pane.skins.packs` through
+  localStorage; the other window re-reads the registry before applying. The
+  site demo routes the host overlay through `?settings=1&page=skins`; verified
+  in a real browser (main demo → settings overlay → 4 cards).
+- **Evidence** — `tests/skin-shop.test.mjs` (17 cases: states, ordering,
+  escaping, missing selection, download/remove success and failure, index
+  loading/offline). Full Node suite **237 passed**; site suite **50 passed**;
+  `pnpm build` and `cargo check` pass. Real window 1059×768 verified gallery,
+  grid, search, empty state, detail, zoom + Esc, apply/restore, Save staying
+  disabled, and the popover palette entry. Not re-tested: real pack
+  download/remove UI, 860×620, English/Russian visuals, reduced motion.
 
 ## Settings round 2, usage topology and per-source cache revisions (2026-10-26)
 
