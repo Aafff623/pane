@@ -1,4 +1,4 @@
-Status: in progress — #29 文案已补、#27 清单已刷新；#31 用量面板未做（无账号，且是本票最大一块）
+Status: in progress — #29 文案已补、#27 清单已刷新；#31 后端 ledger 已实现且真机验证，缺面板 UI
 Type: task
 Blocked by: 06
 
@@ -48,19 +48,26 @@ OAuth 总是认证厂商网页当前已登录的那个账号，Pane 无从指定
 - 自动化基线换成当前真实数字（parse-tests 1187 / node 215 / site 50）。
 - 新增一条验收铁律：**无账号必须是空态，不能是 `0`**。
 
-### #31 未做
+### #31 后端已实现且真机验证过；缺的是面板 UI
 
-这是本票最大的一块：ledger 来源（缓存 / 手动刷新 / 错误态，且不写进 credits
-账本）、面板 UI（账号筛选、每日趋势、模型/客户端分组、请求明细分页）、以及
-分页合并/去重/聚合/partial 的纯函数测试。
+**更正 2026-10-27：本票此前写「#31 未做」是错的。** 逐行核对代码后：
 
-**为什么没做**：本机没有 WorkBuddy CN 账号，真实响应形状无法验证；按项目规则
-不能凭空造响应结构。可以先按已知形状实现再标 `待确认`，但这需要先读透现有的
-`workbuddy_official_usage` 与 WorkBuddy 模块，是一项需要独立一轮的工作，没有在
-本次一并完成。owner 登录后可先跑 `.scratch/011-closeout/12-calibration-steps.md`
-那套 opt-in 形状采集，再据此实现。
+- `src-tauri/src/providers/workbuddy_official_usage.rs`（369 行）已经有完整的纯函数层：
+  `parse_page` / `decide_next`（分页推进）/ `merge_pages`（合并去重）/
+  `detail_rows` / `aggregate` / `sweep_round_limit_reached`（轮次上限）。
+- `src-tauri/src/providers/codebuddy.rs:697` 的 `official_usage()` 已经把它接进请求循环，
+  注释写明 **2026-10-24 在 CN 主机真机验证**：HTTP 200 / code 0 / 30 天窗口 26 行，
+  并带 `partial` 标记（扫到轮次上限就标部分，不假装完整）。
+- 也就是说本票第 1 项（ledger 来源）和第 3 项（纯函数测试：分页合并/去重/聚合/partial）
+  的主体已经存在。
 
-### 待办（owner 侧）
+**真正缺的只有第 2 项：面板 UI。** `src/main.ts` 里没有任何 `officialUsage` 相关渲染
+（全仓 grep 只在 `providers/mod.rs:68` 的声明和 `codebuddy.rs` 的请求循环里出现），
+所以账号筛选、每日趋势、模型/客户端分组、请求明细分页这几件在界面上还看不到。
+缓存与手动刷新是否已由卡片刷新路径覆盖，需要单独确认——这次没有验证到。
+
+### 待办
+
 
 1. 用真实 CN 账号登录，确认卡片出现且数字与官网一致。
 2. 无账号状态下确认是空态而非 0。
