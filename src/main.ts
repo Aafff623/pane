@@ -471,6 +471,13 @@ function spendBadgesFor(id: string, view: ShareRange, estimated = false): string
   if ((sp.unpriced ?? 0) > 0) {
     out += `<span class="est-badge unpriced-badge" title="${escapeHtml(t("unpriced.tip", { n: sp.unpriced, models: (sp.unpriced_models ?? []).join(", ") || "?" }))}">${escapeHtml(t("spend.unpriced"))}</span>`;
   }
+  // pricing_mode says where the dollars came from (#43-2). "auto" is the normal
+  // case — a catalog row matched — and badging it would put a chip on every
+  // card; the other three each tell the reader something the numbers cannot.
+  const pricing = sp.pricing_mode ?? "auto";
+  if (pricing !== "auto") {
+    out += `<span class="est-badge pricing-badge" title="${escapeHtml(t("spend.pricingTip"))}">${escapeHtml(t(`spend.pricing.${pricing}`))}</span>`;
+  }
   const low = sp.likely_undercount_days?.[view] ?? 0;
   if (low) {
     out += `<span class="est-badge low-badge" title="${escapeHtml(t("spend.undercountTip", { n: low }))}">${escapeHtml(t("spend.undercount"))} ×${low}</span>`;
