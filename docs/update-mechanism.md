@@ -19,7 +19,7 @@ happens when the network path fails. Release *content* rules live in
   2. `https://github.com/Aafff623/pane/releases/latest/download/latest.json`
      — GitHub's own manifest, the reachable-everywhere fallback.
 - Installer: the manifest's `platforms["windows-x86_64"].url` points at the
-  release asset `Pane_<version>_x64-setup.exe` (NSIS) — on GitHub, or on the
+  release asset `Pane-Aafff623_<version>_x64-setup.exe` (NSIS) — on GitHub, or on the
   Gitee mirror for CN clients — with the detached minisign signature beside
   it (`.sig`). The mirror is uploaded by the `gitee-mirror` job in
   `release.yml` (needs the `GITEE_TOKEN` secret and a Gitee repo that exists

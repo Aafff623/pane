@@ -29,8 +29,9 @@ Pane 源自 OpenUsage（macOS，[robinebers/openusage](https://github.com/robine
 - 正面：方向与节奏完全自主。本地 main 已大幅领先（多账号体系、14 家厂商
   额度、订阅徽章、One/New API 站点账号等均为本仓库独有成果）。
 - 代价：不再自动获得 ItsJazii/pane 的新提交，上游后续功能按需自行评估。
-- 保留的功能性依赖（暂不动，另行决策）：应用标识符 `com.jazii.pane`
-  （决定 `%LOCALAPPDATA%` 数据目录，改动需带数据迁移）；自动更新端点
-  `trypane.xyz`（长期应换成纯 GitHub Releases 或自有域名）。
+- 已迁移（2026-10-26，#105）：应用标识符从 `com.jazii.pane` 改为
+  `com.aafff623.pane`，产品/安装名改为 `Pane-Aafff623`；`%APPDATA%\Pane`
+  在首次启动时复制到 `%APPDATA%\PaneAafff623`，旧目录保留。自动更新端点
+  `trypane.xyz` 仍待换成纯 GitHub Releases 或自有域名。
 - 流程：`CONTRIBUTING.md` 的 "issues first" 家规保留，但对象是本仓库自身；
   "动码前先在上游开 issue"的旧义务作废。

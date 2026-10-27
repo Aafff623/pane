@@ -4,8 +4,9 @@
 //! from the session logs each CLI already writes on this machine, so
 //! nothing is sent anywhere.
 //!
-//! Large logs are handled with a per-file cache keyed by (mtime, size):
-//! only files that changed since the last refresh are re-parsed.
+//! Large logs are handled with a per-file cache keyed by (mtime, size) plus
+//! sampled content fingerprints: only files whose identity actually changed
+//! since the last refresh are re-parsed.
 
 use chrono::{DateTime, Datelike, Local, Utc};
 use serde::{Deserialize, Serialize};
@@ -25,6 +26,24 @@ use crate::providers;
 
 #[path = "spend/sources/mod.rs"]
 pub mod sources;
+
+/// A log-root override from the environment. Windows shells routinely leave
+/// quotes or trailing spaces (`"D:\logs" `), and `PathBuf::from` would then
+/// look for a path that cannot exist; trim and peel one matching quote pair.
+/// An empty value means "unset" so the caller falls back to its default.
+pub(crate) fn env_path(name: &str) -> Option<PathBuf> {
+    let raw = std::env::var(name).ok()?;
+    let trimmed = raw.trim();
+    let unquoted = if trimmed.len() >= 2 {
+        let bytes = trimmed.as_bytes();
+        let quoted = (bytes[0] == b'"' && bytes[trimmed.len() - 1] == b'"')
+            || (bytes[0] == b'\'' && bytes[trimmed.len() - 1] == b'\'');
+        if quoted { trimmed[1..trimmed.len() - 1].trim() } else { trimmed }
+    } else {
+        trimmed
+    };
+    (!unquoted.is_empty()).then(|| PathBuf::from(unquoted))
+}
 
 pub const TREND_DAYS: usize = 30;
 
@@ -212,6 +231,14 @@ pub struct SpendSourceStatus {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub reason: Option<String>,
     pub feeds: Vec<String>,
+    /// Microseconds this source took to probe on the last inventory pass
+    /// (#42-3). It times the status probe — path discovery, stat, opening the
+    /// file or listing the directory — not the parse, which still runs inside
+    /// each provider's own collector. Microseconds because a stat probe is well
+    /// under a millisecond and would otherwise always report 0. 0 means not
+    /// measured (runtime ledgers never touch the disk).
+    #[serde(default)]
+    pub scan_us: u64,
 }
 
 fn source_status(
@@ -262,6 +289,7 @@ fn source_status(
         root,
         reason,
         feeds: feeds.iter().map(|s| (*s).into()).collect(),
+        scan_us: 0,
     }
 }
 
@@ -303,11 +331,18 @@ struct FileEntry {
     /// enough to persist (Claude/Codex). `None` means a changed file is
     /// re-read in full.
     checkpoint: Option<AppendCheckpoint>,
+    /// Content identity sampled when this entry was parsed (#102). The mtime
+    /// and size pair cannot see a sync tool rewriting bytes while preserving
+    /// both; this fingerprint can. `None` only exists on unreadable files and
+    /// forces a full parse on the next pass.
+    file_fingerprint: Option<u64>,
 }
 
 /// A byte offset plus the parser state at that offset. `boundary_hash`
 /// covers the 4 KiB before the offset so an in-place rewrite that happens
-/// to grow the file is not mistaken for an append.
+/// to grow the file is not mistaken for an append. `file_fingerprint` is the
+/// stronger, whole-file identity check: the cursor decides *where* to resume,
+/// the fingerprint decides *whether* the prefix is still the one parsed.
 #[derive(Clone, Serialize, Deserialize)]
 struct AppendCheckpoint {
     offset: u64,
@@ -504,10 +539,33 @@ fn codex_effective_price(
     p
 }
 
+/// Scheduled catalog changes that do not arrive as a catalog-file edit must
+/// still become timeline observations. Today this is only Antigravity's
+/// `gemini-4-argon` ($2→$4 on 2026-12-01): the new pin is appended at the
+/// change instant, so events on/after that date bill correctly even if the
+/// upstream feeds are a 304 that day. Forward-only and idempotent.
+fn observe_scheduled_price_change(scope: &str, model: &str, tier: &str, ts_ms: i64) {
+    if model.rsplit('/').next() != Some("gemini-4-argon") {
+        return;
+    }
+    let change_ms = pricing::argon_price_change_ms();
+    if ts_ms < change_ms {
+        return;
+    }
+    let next = pricing::argon_price_at(change_ms);
+    if let Some(last) = pricing_timeline::resolve_last(scope, model, tier) {
+        if last.observed_at >= change_ms || last.pin == Some(next) {
+            return;
+        }
+    }
+    pricing_timeline::append(scope, model, tier, change_ms, Some(next), "scheduled");
+}
+
 /// Resolve a price for one event through the observation timeline. First
 /// sighting of a key records an observation at the catalog epoch, so every
 /// event in this refresh shares one price instant.
 pub(crate) fn probe_price(scope: &str, model: &str, tier: &str, ts_ms: i64) -> Priced {
+    observe_scheduled_price_change(scope, model, tier, ts_ms);
     let priced = match pricing_timeline::resolve(scope, model, tier, ts_ms) {
         Some(resolved) => Priced { price: resolved.pin, estimated: resolved.estimated },
         None => {
@@ -604,7 +662,10 @@ fn cache() -> &'static Mutex<HashMap<PathBuf, FileEntry>> {
 // "Scanning session logs…" every day.
 // ---------------------------------------------------------------------------
 
-const PERSIST_VERSION: u32 = 6; // bump on cache format *or* parser-logic changes
+const PERSIST_VERSION: u32 = 7; // bump on cache format *or* parser-logic changes
+// v6→v7 (#102): every entry now records a 5×4 KiB content fingerprint, not
+// just mtime+size. A same-size rewrite from a sync tool can preserve both,
+// so the old cache cannot be trusted; the first launch re-parses once.
 // v3→v4: zcode stopped double-counting cache buckets (input already
 // contains them, AI SDK v6), so cached v3 day-totals are ~1.96x inflated.
 // v5→v6 (#56): probes are timestamp-pinned observation lookups; the old
@@ -657,6 +718,10 @@ struct PersistEntry {
     probes: Vec<PriceProbe>,
     #[serde(default)]
     checkpoint: Option<AppendCheckpoint>,
+    /// 5×4 KiB content samples recorded at parse time (#102). Missing on
+    /// older caches, but the v7 bump discards those anyway.
+    #[serde(default)]
+    file_fingerprint: Option<u64>,
 }
 
 #[derive(serde::Serialize, serde::Deserialize)]
@@ -747,6 +812,7 @@ fn load_persisted_cache() {
                     probes: e.probes,
                     data,
                     checkpoint: e.checkpoint,
+                    file_fingerprint: e.file_fingerprint,
                 },
             );
         }
@@ -795,6 +861,7 @@ fn save_persisted_cache() {
                 },
                 probes: e.probes.clone(),
                 checkpoint: e.checkpoint.clone(),
+                file_fingerprint: e.file_fingerprint,
             }
         })
         .collect();
@@ -1238,7 +1305,14 @@ fn file_days(path: &Path, source: &str, parse: &mut dyn FnMut(&str, &mut FileDat
     let gen = pricing::generation();
     if let Ok(mut map) = cache().lock() {
         if let Some(entry) = map.get_mut(path) {
-            if entry.mtime == mtime && entry.size == size {
+            // mtime+size is not identity: sync tools rewrite in place and
+            // restore both. The sampled fingerprint decides whether this is
+            // still the file we parsed (#102).
+            let unchanged = entry.mtime == mtime
+                && entry.size == size
+                && entry.file_fingerprint.is_some()
+                && sample_fingerprint(path, size) == entry.file_fingerprint;
+            if unchanged {
                 if entry.gen == gen {
                     return entry.data.clone();
                 }
@@ -1295,6 +1369,7 @@ fn file_days(path: &Path, source: &str, parse: &mut dyn FnMut(&str, &mut FileDat
                 probes,
                 data: data.clone(),
                 checkpoint: None,
+                file_fingerprint: sample_fingerprint(path, size),
             },
         );
     }
@@ -1324,6 +1399,65 @@ fn boundary_hash(path: &Path, end: u64) -> Option<u64> {
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
     buf.hash(&mut hasher);
     Some(hasher.finish())
+}
+
+/// Content-identity sampling (#102). `boundary_hash` only sees the bytes just
+/// before a resume offset, and the fast path used to trust mtime+size alone:
+/// OneDrive/Dropbox/rsync can rewrite a file while preserving both, which made
+/// Pane resume a parser state from a different file body. Five 4 KiB windows
+/// (start, 25%, 50%, 75%, end) over the file — the recorded prefix, when a
+/// resume is checked — catch prefix rewrites and middle edits without reading
+/// whole multi-hundred-MB logs. Files under 20 KiB are hashed in full.
+const FINGERPRINT_SAMPLE: u64 = 4096;
+const FINGERPRINT_POINTS: u64 = 5;
+const FINGERPRINT_SMALL: u64 = FINGERPRINT_SAMPLE * FINGERPRINT_POINTS;
+const FNV_OFFSET: u64 = 0xcbf2_9ce4_8422_2325;
+const FNV_PRIME: u64 = 0x1000_0000_01b3;
+
+fn fnv1a(mut hash: u64, bytes: &[u8]) -> u64 {
+    for byte in bytes {
+        hash ^= u64::from(*byte);
+        hash = hash.wrapping_mul(FNV_PRIME);
+    }
+    hash
+}
+
+/// Network shares (WSL's `\\wsl.localhost\…` included) charge for every round
+/// trip; two samples at the ends still catch a prefix rewrite at half the cost.
+fn is_network_path(path: &Path) -> bool {
+    let raw = path.as_os_str().to_string_lossy();
+    raw.starts_with(r"\\") || raw.starts_with("//")
+}
+
+/// FNV-1a over up to five 4 KiB samples in `[0, end)`. `end` is the file length
+/// (or the recorded prefix length when validating a resume). Returns `None`
+/// when the file cannot be read, which forces a full parse instead of trusting
+/// a cache entry.
+fn sample_fingerprint(path: &Path, end: u64) -> Option<u64> {
+    if end == 0 {
+        return Some(fnv1a(FNV_OFFSET, &end.to_le_bytes()));
+    }
+    let mut file = fs::File::open(path).ok()?;
+    let mut hash = fnv1a(FNV_OFFSET, &end.to_le_bytes());
+    if end < FINGERPRINT_SMALL {
+        let mut buf = Vec::with_capacity(end as usize);
+        file.take(end).read_to_end(&mut buf).ok()?;
+        if buf.len() as u64 != end {
+            return None;
+        }
+        return Some(fnv1a(hash, &buf));
+    }
+    let points = if is_network_path(path) { 2 } else { FINGERPRINT_POINTS };
+    let last = end - FINGERPRINT_SAMPLE;
+    for index in 0..points {
+        let start = last * index / (points - 1);
+        file.seek(SeekFrom::Start(start)).ok()?;
+        let mut buf = vec![0u8; FINGERPRINT_SAMPLE as usize];
+        file.read_exact(&mut buf).ok()?;
+        hash = fnv1a(hash, &start.to_le_bytes());
+        hash = fnv1a(hash, &buf);
+    }
+    Some(hash)
 }
 
 fn is_zstd(path: &Path) -> bool {
@@ -1363,14 +1497,30 @@ fn parse_lines_from<St>(
     Some(offset)
 }
 
+/// Decompressed ceiling for one `.zst` log. A rotated log is normally a few
+/// megabytes; anything past this is a corrupt or hostile stream, and reading it
+/// whole would allocate the entire text before a single line reached a parser.
+/// Truncating at the cap bounds the peak — the parsers already tolerate partial
+/// input, and what is cut is the tail, not the head.
+const ZSTD_TEXT_CAP: u64 = 128 * 1024 * 1024;
+
+fn decode_zstd_capped(file: std::fs::File, cap: u64) -> Option<Vec<u8>> {
+    let decoder = zstd::stream::read::Decoder::new(file).ok()?;
+    let mut bytes = Vec::new();
+    // Streamed, not `decode_all`: the cap has to apply while decoding, not
+    // after the buffer already exists.
+    decoder.take(cap).read_to_end(&mut bytes).ok()?;
+    Some(bytes)
+}
+
 fn parse_zstd_file<St>(
     path: &Path,
     state: &mut St,
     data: &mut FileData,
     parse: &mut dyn FnMut(&mut St, &str, &mut FileData),
 ) -> Option<u64> {
-    let raw = fs::read(path).ok()?;
-    let bytes = zstd::stream::decode_all(&raw[..]).ok()?;
+    let file = std::fs::File::open(path).ok()?;
+    let bytes = decode_zstd_capped(file, ZSTD_TEXT_CAP)?;
     // Same tolerance as the plain-text path: one corrupt byte must not void
     // the whole file. Each line parser below still rejects junk it cannot
     // recognize, so lossy decoding only widens how much gets read, not what
@@ -1436,7 +1586,11 @@ where
     let gen = pricing::generation();
     if let Ok(mut map) = cache().lock() {
         if let Some(entry) = map.get_mut(path) {
-            if entry.mtime == mtime && entry.size == size {
+            let unchanged = entry.mtime == mtime
+                && entry.size == size
+                && entry.file_fingerprint.is_some()
+                && sample_fingerprint(path, size) == entry.file_fingerprint;
+            if unchanged {
                 if entry.gen == gen {
                     return entry.data.clone();
                 }
@@ -1452,7 +1606,13 @@ where
     if !is_zstd(path) {
         let cached = cache().lock().ok().and_then(|map| map.get(path).cloned());
         if let Some(entry) = cached {
-            if entry.gen == gen && size > entry.size {
+            // A resume needs both halves: the old cursor must still describe
+            // the same prefix (whole-file samples over the recorded length),
+            // and the 4 KiB boundary must still match. A sync rewrite that
+            // preserved the tail is caught by the fingerprint (#102).
+            let prefix_ok = entry.file_fingerprint.is_some()
+                && sample_fingerprint(path, entry.size) == entry.file_fingerprint;
+            if entry.gen == gen && size > entry.size && prefix_ok {
                 if let Some(cp) = entry.checkpoint.clone() {
                     if cp.offset <= entry.size
                         && boundary_hash(path, cp.offset) == Some(cp.boundary_hash)
@@ -1476,6 +1636,7 @@ where
                                             probes,
                                             data: data.clone(),
                                             checkpoint,
+                                            file_fingerprint: sample_fingerprint(path, size),
                                         },
                                     );
                                 }
@@ -1516,6 +1677,7 @@ where
                 probes,
                 data: data.clone(),
                 checkpoint,
+                file_fingerprint: sample_fingerprint(path, size),
             },
         );
     }
@@ -1937,9 +2099,9 @@ fn likely_undercount_days(local: &FileData, cc: &FileData) -> HashSet<i32> {
 /// that cut — pi days were already diffed against cc-switch's pi coverage
 /// by the caller.
 fn claude(extra: FileData, cc: FileData, cc_days: &HashSet<i32>) -> (ProviderSpend, FileData, FileData, FileData) {
-    let roots: Vec<PathBuf> = match std::env::var("CLAUDE_CONFIG_DIR") {
-        Ok(dir) => vec![PathBuf::from(dir).join("projects")],
-        Err(_) => crate::wsl::roots_for(".claude/projects"),
+    let roots: Vec<PathBuf> = match env_path("CLAUDE_CONFIG_DIR") {
+        Some(dir) => vec![dir.join("projects")],
+        None => crate::wsl::roots_for(".claude/projects"),
     };
 
     let mut all = FileData::default();
@@ -2091,9 +2253,8 @@ fn dsh_data() -> FileData {
     let Some(home) = dirs::home_dir() else {
         return FileData::default();
     };
-    let root = std::env::var("DSH_HOME")
-        .map(std::path::PathBuf::from)
-        .unwrap_or_else(|_| home.join(".dsh"))
+    let root = env_path("DSH_HOME")
+        .unwrap_or_else(|| home.join(".dsh"))
         .join("sessions");
     dsh_files_data(&dsh_session_files(&root))
 }
@@ -2668,9 +2829,9 @@ fn codex_scan(home: &Path) -> FileData {
 }
 
 fn codex(extra: FileData, cc: FileData) -> (ProviderSpend, FileData) {
-    let roots: Vec<PathBuf> = match std::env::var("CODEX_HOME") {
-        Ok(dir) => vec![PathBuf::from(dir)],
-        Err(_) => crate::wsl::roots_for(".codex"),
+    let roots: Vec<PathBuf> = match env_path("CODEX_HOME") {
+        Some(dir) => vec![dir],
+        None => crate::wsl::roots_for(".codex"),
     };
     let mut all = FileData::default();
     for root in roots {
@@ -3420,17 +3581,11 @@ fn ccswitch_db_data() -> CcSwitchData {
 /// `PI_CODING_AGENT_SESSION_DIR` wins, else `PI_CODING_AGENT_DIR/sessions`
 /// (config-dir override), else the default `~/.pi/agent/sessions`.
 fn pi_sessions_dir() -> PathBuf {
-    if let Ok(dir) = std::env::var("PI_CODING_AGENT_SESSION_DIR") {
-        let dir = dir.trim();
-        if !dir.is_empty() {
-            return PathBuf::from(dir);
-        }
+    if let Some(dir) = env_path("PI_CODING_AGENT_SESSION_DIR") {
+        return dir;
     }
-    if let Ok(dir) = std::env::var("PI_CODING_AGENT_DIR") {
-        let dir = dir.trim();
-        if !dir.is_empty() {
-            return PathBuf::from(dir).join("sessions");
-        }
+    if let Some(dir) = env_path("PI_CODING_AGENT_DIR") {
+        return dir.join("sessions");
     }
     dirs::home_dir().unwrap_or_default().join(".pi").join("agent").join("sessions")
 }
@@ -3574,9 +3729,8 @@ fn pi() -> (FileData, FileData) {
 /// events the CLI also logs — the same scheme the Mac scanner uses.
 /// `cc` is cc-switch's grokbuild ledger, filling days the log scan lacks.
 fn grok(cc: FileData) -> ProviderSpend {
-    let root = std::env::var("GROK_HOME")
-        .map(PathBuf::from)
-        .unwrap_or_else(|_| dirs::home_dir().unwrap_or_default().join(".grok"));
+    let root = env_path("GROK_HOME")
+        .unwrap_or_else(|| dirs::home_dir().unwrap_or_default().join(".grok"));
     let path = root.join("logs").join("unified.jsonl");
     let mut all = FileData::default();
     if path.exists() {
@@ -4592,7 +4746,7 @@ mod tests {
     }
 
     #[test]
-    fn source_registry_is_the_single_inventory_and_marks_unprobed_sources() {
+    fn source_registry_is_the_single_inventory_and_gemini_is_no_longer_parked() {
         let registry = sources::registry();
         let mut ids: Vec<&str> = registry.iter().map(|s| s.id).collect();
         ids.sort_unstable();
@@ -4602,9 +4756,22 @@ mod tests {
 
         let statuses = source_statuses();
         assert_eq!(statuses.len(), registry.len());
+        // gemini used to be parked at `needs_probe` because its parser came
+        // from the upstream schema with no sample to check it against. It has a
+        // fixture and parse tests now, so it resolves from the filesystem like
+        // every other source (#42-2). The exact state depends on this machine's
+        // ~/.gemini, so pin only that it is no longer parked.
         let gemini = statuses.iter().find(|s| s.id == "gemini-jsonl").expect("gemini row");
-        assert_eq!(gemini.state, "needs_probe");
-        assert!(gemini.reason.as_deref().unwrap_or("").contains("verified local sample"));
+        assert_ne!(gemini.state, "needs_probe");
+        assert!(
+            ["detected", "empty", "unreadable", "not_detected"].contains(&gemini.state.as_str()),
+            "unexpected gemini state {}",
+            gemini.state
+        );
+        assert!(
+            registry.iter().all(|spec| !spec.needs_probe),
+            "no source should still be parked at needs_probe"
+        );
         let copilot = statuses.iter().find(|s| s.id == "copilot-local").expect("copilot row");
         assert_eq!(copilot.collector, "spend::sources::copilot");
         assert!(copilot.feeds.iter().any(|f| f == "copilot"));
@@ -4979,6 +5146,7 @@ mod tests {
             parser_rev: parser_rev_for("claude"),
             probes: vec![],
             checkpoint: None,
+            file_fingerprint: None,
         };
         assert!(parser_entry_current(&entry));
         entry.parser_rev = 0;
@@ -5029,6 +5197,7 @@ mod tests {
                     },
                 ],
                 checkpoint: None,
+                file_fingerprint: Some(0x1234_5678_9abc_def0),
             }],
         };
         let json = serde_json::to_string(&doc).unwrap();
@@ -5043,6 +5212,7 @@ mod tests {
         assert_eq!(a.unpriced, b.unpriced);
         assert_eq!(a.estimated, b.estimated);
         assert_eq!(a.probes, b.probes);
+        assert_eq!(a.file_fingerprint, b.file_fingerprint);
     }
 
     /// A v2 cache (no probes/corrections fields) must not load as v3 —
@@ -5841,6 +6011,122 @@ mod tests {
         let rewritten = file_days_with_state::<IncrementalState>(&file, "test", &mut parse);
         assert_eq!(parsed.get(), 4);
         assert_eq!(tokens_sum(&rewritten), 9.0);
+
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn env_path_trims_whitespace_and_matching_quotes() {
+        std::env::set_var("PANE_TEST_ENV_PATH", r#"  "C:\logs dir\x"  "#);
+        assert_eq!(env_path("PANE_TEST_ENV_PATH"), Some(PathBuf::from(r"C:\logs dir\x")));
+        std::env::set_var("PANE_TEST_ENV_PATH", " 'unix path' ");
+        assert_eq!(env_path("PANE_TEST_ENV_PATH"), Some(PathBuf::from("unix path")));
+        std::env::set_var("PANE_TEST_ENV_PATH", "   ");
+        assert_eq!(env_path("PANE_TEST_ENV_PATH"), None);
+        std::env::remove_var("PANE_TEST_ENV_PATH");
+    }
+
+    #[test]
+    fn fingerprint_catches_same_size_mtime_rewrite() {
+        let root = temp_root("fingerprint-mid");
+        let file = root.join("log.jsonl");
+        fs::write(&file, "{\"n\":1}\n".repeat(4000)).unwrap();
+        let parsed = std::cell::Cell::new(0usize);
+        let mut parse = |state: &mut IncrementalState, line: &str, data: &mut FileData| {
+            parsed.set(parsed.get() + 1);
+            incremental_parse(state, line, data);
+        };
+
+        let first = file_days_with_state::<IncrementalState>(&file, "test", &mut parse);
+        assert_eq!(parsed.get(), 4000);
+        assert_eq!(tokens_sum(&first), 4000.0);
+        let before = fs::metadata(&file).unwrap();
+        let mtime = before.modified().unwrap();
+        let size = before.len();
+
+        // Change one line inside the 50% sample, keep the byte length, and
+        // restore mtime — the old mtime+size fast path saw no change.
+        let mut bytes = fs::read(&file).unwrap();
+        let mid = bytes.len() / 2;
+        let start = bytes[..mid].iter().rposition(|b| *b == b'\n').map(|i| i + 1).unwrap_or(0);
+        let end = bytes[start..].iter().position(|b| *b == b'\n').map(|i| start + i + 1).unwrap();
+        bytes[start..end].copy_from_slice(b"{\"n\":2}\n");
+        fs::write(&file, &bytes).unwrap();
+        assert_eq!(fs::metadata(&file).unwrap().len(), size);
+        let handle = fs::OpenOptions::new().write(true).open(&file).unwrap();
+        handle.set_times(fs::FileTimes::new().set_modified(mtime)).unwrap();
+        drop(handle);
+
+        let reparsed = file_days_with_state::<IncrementalState>(&file, "test", &mut parse);
+        assert_eq!(parsed.get(), 8000, "a same-size, same-mtime middle rewrite must re-parse");
+        assert_eq!(tokens_sum(&reparsed), 4001.0);
+
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn fingerprint_catches_prefix_rewrite_that_preserves_tail() {
+        let root = temp_root("fingerprint-prefix");
+        let file = root.join("log.jsonl");
+        fs::write(&file, "{\"n\":1}\n".repeat(4000)).unwrap();
+        let parsed = std::cell::Cell::new(0usize);
+        let mut parse = |state: &mut IncrementalState, line: &str, data: &mut FileData| {
+            parsed.set(parsed.get() + 1);
+            incremental_parse(state, line, data);
+        };
+
+        let _ = file_days_with_state::<IncrementalState>(&file, "test", &mut parse);
+        assert_eq!(parsed.get(), 4000);
+
+        // Rewrite the first line and append one: the old boundary hash (the
+        // last 4 KiB before the old EOF) still matches, so the pre-#102
+        // resume path would count 4003 and miss the rewritten prefix.
+        let mut bytes = fs::read(&file).unwrap();
+        bytes[0..8].copy_from_slice(b"{\"n\":5}\n");
+        bytes.extend_from_slice(b"{\"n\":3}\n");
+        fs::write(&file, &bytes).unwrap();
+
+        let reparsed = file_days_with_state::<IncrementalState>(&file, "test", &mut parse);
+        assert_eq!(parsed.get(), 8001, "a prefix rewrite must re-parse the whole file");
+        assert_eq!(tokens_sum(&reparsed), 4007.0);
+
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn fingerprint_catches_same_size_rewrite_for_whole_file_scanners() {
+        let root = temp_root("fingerprint-whole");
+        let file = root.join("log.jsonl");
+        fs::write(&file, "{\"n\":1}\n".repeat(4000)).unwrap();
+        let parsed = std::cell::Cell::new(0usize);
+        let mut parse = |line: &str, data: &mut FileData| {
+            let Ok(v) = serde_json::from_str::<Value>(line) else { return };
+            let ts = DateTime::parse_from_rfc3339("2026-10-20T10:00:00Z")
+                .unwrap()
+                .with_timezone(&Utc);
+            parsed.set(parsed.get() + 1);
+            add_event(data, ts, "fingerprint-whole", 0.0, v.get("n").and_then(Value::as_u64).unwrap_or(0) as f64);
+        };
+
+        let first = file_days(&file, "test", &mut parse);
+        assert_eq!(parsed.get(), 4000);
+        assert_eq!(tokens_sum(&first), 4000.0);
+        let before = fs::metadata(&file).unwrap();
+        let mtime = before.modified().unwrap();
+
+        let mut bytes = fs::read(&file).unwrap();
+        let mid = bytes.len() / 2;
+        let start = bytes[..mid].iter().rposition(|b| *b == b'\n').map(|i| i + 1).unwrap_or(0);
+        let end = bytes[start..].iter().position(|b| *b == b'\n').map(|i| start + i + 1).unwrap();
+        bytes[start..end].copy_from_slice(b"{\"n\":2}\n");
+        fs::write(&file, &bytes).unwrap();
+        let handle = fs::OpenOptions::new().write(true).open(&file).unwrap();
+        handle.set_times(fs::FileTimes::new().set_modified(mtime)).unwrap();
+        drop(handle);
+
+        let reparsed = file_days(&file, "test", &mut parse);
+        assert_eq!(parsed.get(), 8000, "whole-file scanners must also see the rewrite");
+        assert_eq!(tokens_sum(&reparsed), 4001.0);
 
         let _ = fs::remove_dir_all(&root);
     }
@@ -6872,6 +7158,28 @@ mod tests {
         assert_eq!(probe_price("claude", model, "std", now + 1).price, Some(over));
         pricing::set_overrides(HashMap::new());
     }
+
+    /// #104-6 — a rotated log is normally small, but a corrupt or hostile .zst
+    /// stream would decompress to unbounded text. The cap has to apply during
+    /// decoding; `decode_all` would allocate the whole buffer before it could.
+    #[test]
+    fn a_huge_zstd_stream_is_read_up_to_the_cap_only() {
+        let mut encoder = zstd::stream::write::Encoder::new(Vec::new(), 1).unwrap();
+        let chunk = "x".repeat(1024);
+        for _ in 0..8192 {
+            encoder.write_all(chunk.as_bytes()).unwrap();
+        }
+        let compressed = encoder.finish().unwrap();
+        let path = std::env::temp_dir().join("pane-zstd-cap-test.zst");
+        std::fs::write(&path, &compressed).unwrap();
+
+        let file = std::fs::File::open(&path).unwrap();
+        let out = super::decode_zstd_capped(file, 4096).expect("decode");
+        assert_eq!(out.len(), 4096, "reads the cap, not the 8 MiB stream");
+        assert!(out.iter().all(|byte| *byte == b'x'));
+
+        let _ = std::fs::remove_file(&path);
+    }
 }
 
 /// Minimal CSV field splitter with quoted-field support.
@@ -7204,7 +7512,11 @@ fn cached_parse(path: &Path, source: &str, parse: impl FnOnce() -> Option<FileDa
     let gen = pricing::generation();
     if let Ok(mut map) = cache().lock() {
         if let Some(entry) = map.get_mut(path) {
-            if entry.mtime == mtime && entry.size == size {
+            let unchanged = entry.mtime == mtime
+                && entry.size == size
+                && entry.file_fingerprint.is_some()
+                && sample_fingerprint(path, size) == entry.file_fingerprint;
+            if unchanged {
                 if entry.gen == gen {
                     return entry.data.clone();
                 }
@@ -7238,6 +7550,7 @@ fn cached_parse(path: &Path, source: &str, parse: impl FnOnce() -> Option<FileDa
                 probes,
                 data: data.clone(),
                 checkpoint: None,
+                file_fingerprint: sample_fingerprint(path, size),
             },
         );
     }

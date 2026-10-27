@@ -1182,7 +1182,7 @@ mod tests {
         #[cfg(windows)]
         {
             assert!(absolute_home(r"\Windows\System32").is_none());
-            assert!(absolute_home(r"C:\Users\jazii\.kimi-code").is_some());
+            assert!(absolute_home(r"C:\Users\someone\.kimi-code").is_some());
         }
         #[cfg(not(windows))]
         {

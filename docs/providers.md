@@ -695,6 +695,11 @@ credited in [LICENSE](../LICENSE).
   raw status; `code:4001` asks for a fresh web login. The real free-quota
   response is still awaiting the owner's first signed-in calibration, so
   unknown fields fail honestly instead of inventing numbers.
+- **Calibration:** with `PANE_CONSOLE_PROBE=1` in the environment, each
+  console answer is recorded shape-only to
+  `%APPDATA%\PaneAafff623\xfyun_probe_log.json` — key names, value types and
+  allowlisted status/date strings. Never cookies, never names or phone
+  numbers; capped at 40 entries, off by default, safe to delete.
 
 ## 讯飞开放平台语音 (console.xfyun.cn speech packs)
 
@@ -715,6 +720,10 @@ credited in [LICENSE](../LICENSE).
   `code:80000`, which maps to "sign in again" and never to a 0% card.
   `code:20003` means we built the request wrong. `flag:true, data:null` is a
   normal "this channel has no such meter" state.
+- **Calibration:** with `PANE_CONSOLE_PROBE=1`, answers are recorded shape-only
+  to `%APPDATA%\PaneAafff623\xfyun_speech_probe_log.json`. The profile endpoint
+  carries name / ID-card / mobile, so none of those keys are allowlisted — they
+  are recorded as a type only. Off by default, capped at 40 entries.
 - **Params:** `app/list` takes exactly `currPage` / `keyword` / `type`;
   adding `pageSize` makes the console answer 20003. `app/default` is only the
   default app and must not stand in for the account. `serviceList` comes back

@@ -8,6 +8,32 @@ use serde_json::{json, Map, Value};
 
 pub const SCHEMA: &str = "openusage.limits.v1";
 
+/// Exact card id first, otherwise every card in the same provider family.
+/// `/v1/usage/:id` keeps its exact-only behavior for macOS parity.
+pub fn select_snapshots(snapshots: &[Snapshot], id: &str) -> Vec<Snapshot> {
+    let exact = snapshots.iter().any(|snapshot| snapshot.id == id);
+    if exact {
+        return snapshots
+            .iter()
+            .filter(|snapshot| snapshot.id == id)
+            .cloned()
+            .collect();
+    }
+    let family = crate::provider_catalog::family_of(id);
+    snapshots
+        .iter()
+        .filter(|snapshot| crate::provider_catalog::family_of(&snapshot.id) == family)
+        .cloned()
+        .collect()
+}
+
+fn effective_resets_at(metric: &crate::providers::Metric) -> Option<i64> {
+    if metric.pace.as_ref().is_some_and(|pace| pace.not_started) {
+        return None;
+    }
+    metric.resets_at
+}
+
 fn iso(ms: i64) -> String {
     chrono::DateTime::<chrono::Utc>::from_timestamp_millis(ms)
         .map(|date| date.to_rfc3339_opts(chrono::SecondsFormat::Secs, true))
@@ -62,7 +88,7 @@ pub fn limits_payload(snapshots: &[Snapshot], generated_at: &str) -> Value {
                     row.insert("remaining".into(), json!((total - reading.used).max(0.0)));
                     row.insert("utilization".into(), json!((reading.used / total).clamp(0.0, 1.0)));
                 }
-                if let Some(resets_at) = metric.resets_at {
+                if let Some(resets_at) = effective_resets_at(metric) {
                     row.insert("resetsAt".into(), json!(iso(resets_at)));
                 }
                 if let Some(period_ms) = metric.period_ms.filter(|period| *period > 0) {
@@ -80,7 +106,7 @@ pub fn limits_payload(snapshots: &[Snapshot], generated_at: &str) -> Value {
             row.insert("limit".into(), json!(100.0));
             row.insert("remaining".into(), json!((100.0 - used).max(0.0)));
             row.insert("utilization".into(), json!(used / 100.0));
-            if let Some(resets_at) = metric.resets_at {
+            if let Some(resets_at) = effective_resets_at(metric) {
                 row.insert("resetsAt".into(), json!(iso(resets_at)));
             }
             if let Some(period_ms) = metric.period_ms.filter(|period| *period > 0) {
@@ -114,6 +140,68 @@ pub fn limits_payload(snapshots: &[Snapshot], generated_at: &str) -> Value {
 mod tests {
     use super::*;
     use crate::providers::{Metric, Snapshot};
+
+    #[test]
+    fn untouched_window_has_no_reset_countdown() {
+        // Snapshot::ok attaches pace itself; make the window genuinely full
+        // (0% with a reset exactly one period ahead) so the production rule
+        // marks it not_started.
+        let now = chrono::Utc::now().timestamp_millis();
+        let mut metric = Metric::progress("Session", 0.0, None);
+        metric.resets_at = Some(now + 604_800_000);
+        metric.period_ms = Some(604_800_000);
+        let snapshot = Snapshot::ok("antigravity", "Antigravity", None, vec![metric]);
+        assert!(snapshot.metrics[0]
+            .pace
+            .as_ref()
+            .is_some_and(|pace| pace.not_started));
+        let payload = limits_payload(&[snapshot], "2026-10-26T00:00:00Z");
+        let session = &payload["providers"]["antigravity"]["resources"]["Session"];
+        assert!(session.get("resetsAt").is_none(), "{session}");
+    }
+
+    #[test]
+    fn balance_quota_projects_as_a_balance_resource() {
+        let mut metric = Metric::text("Extra credits", "$7.50 left".into());
+        metric.quota = Some(crate::usage_units::QuotaReading {
+            unit: "usd".into(),
+            used: 7.5,
+            limit: None,
+        });
+        let snapshot = Snapshot::ok("codex", "Codex", None, vec![metric]);
+        let payload = limits_payload(&[snapshot], "2026-10-26T00:00:00Z");
+        let credits = &payload["providers"]["codex"]["resources"]["Extra credits"];
+        assert_eq!(credits["kind"], "balance");
+        assert_eq!(credits["unit"], "usd");
+        assert_eq!(credits["remaining"], 7.5);
+        assert_eq!(credits["available"], true);
+        assert!(credits.get("used").is_none());
+        assert!(credits.get("limit").is_none());
+    }
+
+    #[test]
+    fn id_selection_prefers_exact_then_falls_back_to_family() {
+        let a = Snapshot::ok(
+            "onenewapi@abc",
+            "Site A",
+            None,
+            vec![Metric::progress("Usage", 10.0, None)],
+        );
+        let b = Snapshot::ok(
+            "onenewapi@def",
+            "Site B",
+            None,
+            vec![Metric::progress("Usage", 20.0, None)],
+        );
+        let claude = Snapshot::ok("claude", "Claude", None, vec![Metric::progress("Session", 1.0, None)]);
+        let all = vec![a, b, claude];
+        let exact = select_snapshots(&all, "onenewapi@abc");
+        assert_eq!(exact.len(), 1);
+        assert_eq!(exact[0].id, "onenewapi@abc");
+        let family = select_snapshots(&all, "onenewapi");
+        assert_eq!(family.len(), 2);
+        assert!(select_snapshots(&all, "missing").is_empty());
+    }
 
     #[test]
     fn envelope_projects_progress_usage_and_omits_unknown_rows() {

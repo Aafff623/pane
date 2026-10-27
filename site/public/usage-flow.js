@@ -1,7 +1,8 @@
 // Magpie routing motion + Magic UI Animated Beam, adapted to a static site.
 // Original sources and MIT notices: site/vendor/{magpie-routing,magicui-animated-beam}.
-import { paneMotion } from '/motion.js?v=1';
+import { paneMotion } from '/motion.js?v=2';
 import { bindMotionToggle } from '/ui.js?v=1';
+import { subscribe as subscribeTicker } from '/ticker.js?v=1';
 
 export function initUsageFlow(isEnglish,en){
   const host=document.querySelector('.why-flow');if(!host)return;
@@ -10,7 +11,7 @@ export function initUsageFlow(isEnglish,en){
   const rows=[...host.querySelectorAll('.why-source')],caption=host.querySelector('.why-flow-caption');
   const count=host.querySelector('.why-flow-count b'),pause=host.querySelector('.why-pause');
   const reduce=matchMedia('(prefers-reduced-motion: reduce)'),ns='http://www.w3.org/2000/svg';
-  let visible=!('IntersectionObserver' in window),frame=0,previous=0,time=0,next=0,index=0,total=0,trips=[];
+  let visible=!('IntersectionObserver' in window),unsubscribe=null,previous=0,time=0,next=0,index=0,total=0,trips=[];
   const make=(tag,attrs,parent=svg)=>{const node=document.createElementNS(ns,tag);for(const [k,v] of Object.entries(attrs))node.setAttribute(k,v);parent.append(node);return node};
   const defs=make('defs',{});
   const wires=[work,...rows].map((_,i)=>{
@@ -54,7 +55,7 @@ export function initUsageFlow(isEnglish,en){
   function launch(i){select(i);hit(work);const dot=make('circle',{class:'why-packet',r:4});trips.push({i,dot,start:time,phase:-1})}
   function clear(){trips.forEach(tr=>tr.dot.remove());trips=[];wires.forEach(w=>w.path.classList.remove('is-live'))}
   function tick(now){
-    frame=0;time+=Math.min(previous?now-previous:0,50);previous=now;
+    time+=Math.min(previous?now-previous:0,50);previous=now;
     if(time>=next){launch(index);index=(index+1)%rows.length;next=time+1900}
     const live=new Set();
     trips=trips.filter(tr=>{
@@ -75,15 +76,17 @@ export function initUsageFlow(isEnglish,en){
       const e=easeBeam(((time+n*420)%3000)/3000);
       w.gradient.setAttribute('x1',`${10+100*e}%`);w.gradient.setAttribute('x2',`${100*e}%`);
     });
-    frame=requestAnimationFrame(tick);
   }
   function sync(){
-    if(frame)cancelAnimationFrame(frame);frame=0;previous=0;
+    unsubscribe?.();unsubscribe=null;previous=0;
     // Reduced motion stays authoritative even when the visitor un-pauses: the
     // shared switch is a preference, the OS setting is a floor.
     const still=paneMotion.paused||reduce.matches;
     host.classList.toggle('is-paused',still||!visible||document.hidden);
-    if(!still&&visible&&!document.hidden)frame=requestAnimationFrame(tick);
+    // The frames come from the page's one shared loop, so this animation stops
+    // with the tab and with every other ambient effect instead of holding its
+    // own private rAF chain open (#87).
+    if(!still&&visible&&!document.hidden)unsubscribe=subscribeTicker(tick);
   }
   rows.forEach((row,i)=>row.addEventListener('click',()=>{
     clear();select(i);index=i;next=time;
@@ -98,6 +101,6 @@ export function initUsageFlow(isEnglish,en){
   const observer='IntersectionObserver' in window?new IntersectionObserver(entries=>{visible=entries[0].isIntersecting;sync()},{threshold:.1}):null;
   observer?.observe(stage);document.addEventListener('visibilitychange',sync);
   reduce.addEventListener('change',()=>{clear();sync()});
-  window.addEventListener('pagehide',()=>{if(frame)cancelAnimationFrame(frame);frame=0});window.addEventListener('pageshow',sync);
+  window.addEventListener('pagehide',()=>{unsubscribe?.();unsubscribe=null});window.addEventListener('pageshow',sync);
   select(0);layout();sync();
 }

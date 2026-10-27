@@ -1,4 +1,4 @@
-Status: ready
+Status: done (2026-10-26) — rich help cards shipped for limited-balance, RTK scope and peak-window help.
 Type: task
 Blocked by: —
 

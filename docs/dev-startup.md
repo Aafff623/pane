@@ -96,7 +96,7 @@ not replace the user's acceptance or authorization.
 
 ```powershell
 Stop-Process -Name pane -Force -ErrorAction SilentlyContinue
-Remove-Item -Recurse -Force "$env:LOCALAPPDATA\com.jazii.pane\EBWebView" -ErrorAction SilentlyContinue
+Remove-Item -Recurse -Force "$env:LOCALAPPDATA\com.aafff623.pane\EBWebView" -ErrorAction SilentlyContinue
 # Then re-run from step 4 above
 ```
 
@@ -190,7 +190,7 @@ it must be `.cjs`). Local one-shot scripts: `temp/scripts/pane-wmi-launch.ps1`
 | Serving dist/ with `python -m http.server` | Use `pnpm dev`; Python skips cache headers and WebView2 caches forever |
 | Not killing old pane before re-launching | Old pane intercepts the second launch via single-instance plugin and just *toggles the window* — no fresh binary loaded |
 | Rebuilding Rust for CSS/TS changes | Not needed; `pnpm build` + Vite reload is sufficient |
-| Forgetting to clear WebView2 cache | `Remove-Item -Recurse -Force "$env:LOCALAPPDATA\com.jazii.pane\EBWebView"` |
+| Forgetting to clear WebView2 cache | `Remove-Item -Recurse -Force "$env:LOCALAPPDATA\com.aafff623.pane\EBWebView"` |
 | Wrong working directory | Always `cd D:\code\pane` before any pnpm command |
 | Probing `http://[::1]:1420` or `http://localhost:1420` | IPv6-loopback connects are blocked machine-wide here (`WSAEACCES`); always probe `http://127.0.0.1:1420` |
 | Vite/pane started under the agent's own shell task | Timeouts / task-stops / model switches kill the whole tree; create them via WMI (`Win32_Process.Create`) so they outlive the session |

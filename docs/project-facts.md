@@ -12,7 +12,7 @@ Single authorities for the neighbouring concerns:
   tracker, see [`docs/agents/issue-tracker.md`](agents/issue-tracker.md).
 - **Startup / build / run / acceptance commands** — [`docs/dev-startup.md`](dev-startup.md).
 
-Last reconciled: 2026-10-25 (Pane 0.9.1 + account lifecycle, RTK savings, OrcaTerm quota card and panel-window controls).
+Last reconciled: 2026-10-27 (skin workshop storefront #107; 0.11.x close-out branch).
 
 ## Scope and boundaries
 
@@ -28,8 +28,10 @@ Last reconciled: 2026-10-25 (Pane 0.9.1 + account lifecycle, RTK savings, OrcaTe
   project (detached from any upstream, 2026-09-06). A single branch `main`
   exists locally and on origin; feature work happens on `codex/<feature>`
   branches.
-- Version 0.9.1 (`package.json` + `src-tauri/tauri.conf.json`), identifier
-  `com.jazii.pane`, productName `Pane`.
+- Version 0.11.0 (`package.json` + `src-tauri/tauri.conf.json`), identifier
+  `com.aafff623.pane`, productName `Pane-Aafff623`. The pre-0.11 identity
+  (`com.jazii.pane` / `Pane`) was the upstream author's; #105 split it so the
+  two apps no longer share install folders or data directories.
 - Privacy boundary (asserted by tests in the code): tokens go only to their
   own vendor's API; the secrets Pane itself persists — pasted API keys,
   multi-account keys, Pane-managed login tokens — live in the OS credential
@@ -40,8 +42,7 @@ Last reconciled: 2026-10-25 (Pane 0.9.1 + account lifecycle, RTK savings, OrcaTe
   (AES-256-GCM sealed in `keyvault.json`), and search/MCP keys (plaintext
   `search-keys.json`, the 2026-10-11 search-keys cut). The 6736 HTTP API is
   loopback-only, no CORS, Host-checked, and redacts One/New API origins and
-  secrets; telemetry is anonymous, opt-out, and must never affect the app
-  (every failure path is silent; disabling deletes the state file).
+  secrets. The app sends no telemetry, analytics or crash reports.
 - Vendor HTTP rides a transport ladder (`providers::send_with_direct_fallback`,
   shared by Codex and — since 2026-10-25 — the CN-facing key/login providers):
   proxied first, and a connect/timeout failure jumps straight to a direct
@@ -119,7 +120,7 @@ Last reconciled: 2026-10-25 (Pane 0.9.1 + account lifecycle, RTK savings, OrcaTe
 ## Known failure modes
 
 - Stale UI after a frontend change → WebView2 cache; delete
-  `%LOCALAPPDATA%\com.jazii.pane\EBWebView` and restart.
+  `%LOCALAPPDATA%\com.aafff623.pane\EBWebView` and restart.
 - Window opens but is invisible → launched via `Start-Process`/`&` (wrong
   desktop station); relaunch with the CreateProcess snippet in
   `docs/dev-startup.md`.
@@ -387,7 +388,7 @@ Last reconciled: 2026-10-25 (Pane 0.9.1 + account lifecycle, RTK savings, OrcaTe
   directories are filtered. Only basenames reach the UI — never raw commands
   or full paths.
 - Windows: today/7d/30d sum merged daily rows; `all` uses `summary`. `daily`
-  merges RTK's rows with `%APPDATA%\Pane\rtk_savings_history.json` (same-day
+  merges RTK's rows with `%APPDATA%\PaneAafff623\rtk_savings_history.json` (same-day
   replace, 400-day retain, atomic tmp + rename; an unreadable file is kept as
   `.json.bad`). `otherSaved` holds identifiable projects below the Top-5 cut;
   `unattributedSaved` holds temp/noise rows and old rows without a project,
@@ -508,8 +509,13 @@ Last reconciled: 2026-10-25 (Pane 0.9.1 + account lifecycle, RTK savings, OrcaTe
   trypane.xyz/ItsJazii endpoints were dropped. New versions raise an in-app
   popup (`maybePromptUpdate`, once per version per run) beside the footer
   update button. Since 2026-10-10 the updater follows the app-wide proxy
-  chain (config `proxy.url` → Windows system proxy,
-  `providers::outbound_proxy_url`) and caps the manifest check at 20 s —
+  chain (config `proxy.url` → Windows system proxy, via
+  `providers::outbound_proxy_url`; system mode reads static
+  `ProxyEnable=1`, and in PAC mode (`ProxyEnable=0` + `AutoConfigURL`) falls
+  back to the local mixed listener published in `ProxyServer`, accepted only
+  when its loopback port answers. Pane does not execute PAC scripts, so a
+  PAC-only client still needs the manual URL.) and caps the manifest check at
+  20 s —
   the plugin's reqwest is built without the system-proxy feature, so
   system-proxy users previously updated over a direct github.com link.
   Transport failures render the localized `update.networkHint`. Channel
@@ -701,7 +707,7 @@ changes.
 - Skin packs: official sources live in `skins/<id>/` (`skin.css` + `assets/`)
   and are zipped into `site/public/skins/` with a sha256 manifest; the app
   bundle must never import them. Runtime packs live in
-  `%APPDATA%\Pane\skins\<id>\`, and Rust serves each entry CSS with assets
+  `%APPDATA%\PaneAafff623\skins\<id>\`, and Rust serves each entry CSS with assets
   inlined as data URLs. `signal` / `ink` are ordinary packs: the workshop
   shows index entries as remote until installed, and a persisted shaped id
   survives boot (`readSkin`) while `migrateSkinFromIndex` downloads it.
@@ -710,9 +716,9 @@ changes.
   site/scripts/check-skin-packs.mjs [--live]` is the mechanical gate: it
   verifies local size/sha256 and, with `--live`, compares the deployed
   index (expected to report STALE until the release deploy). 0.8.8 still
-  bundles signal/ink and `marketEntries` keeps bundled ids ahead of the
-  index, so a stale deployed index cannot reach released users; it matters
-  only for the unbundled build. Deploy from a clean tree — `site/` may
+  bundles signal/ink, and the workshop keeps installed packs usable even when
+  the deployed index is stale; a stale index cannot reach released users as a
+  downgrade. It matters only for the unbundled build. Deploy from a clean tree — `site/` may
   carry another session's WIP.
 - Deleting a One/New API key/site purges backend config/cache, and the
   frontend immediately drops the key card from `lastSnapshots`/`lastSpend`/
@@ -721,12 +727,11 @@ changes.
 - Evidence: legacy-vault resurrection red/green, archive/delete repeated
   refresh and failed migration tests, relay retirement failure test, account
   alias regression, and a headless Customize routing check. Latest serial
-  proxy-free Rust run: **1105 passed / 0 failed / 18 ignored** (2026-10-25, after
-  the dashboard-correctness batch, the xfyun-speech provider, the Qoder
-  telemetry probe, the ZCode Start Plan provider, RTK savings and OrcaTerm).
-  Node suite: **176 passed**. Frontend build + skin-pack local
-  check pass. The Codex backup-retirement and slot-retention corrections from
-  the same day are covered by that run.
+  proxy-free Rust run: **1170 passed / 0 failed / 18 ignored** (2026-10-26, after
+  the identity migration, `/v1/limits` family/balance work, refresh-broadcast
+  coalescing and the cc-switch UI tail). Node suite: **211 passed**; site
+  suite: **21 passed**. Frontend build + skin-pack local check pass. The Codex
+  backup-retirement and slot-retention corrections are covered by that run.
 - Codex credential-source precedence is **live default > managed web store >
   `.pane-bak` fallback**. A backup import is marked `imported_from_backup`
   and is retired once a live default identity appears; retirement persists
@@ -751,7 +756,7 @@ changes.
      completed login is a managed `codex@<hash8>` account in
      `codex-accounts.json` + the OS vault; accounts can be added, renamed
      and removed independently.
-- The legacy single slot (`%APPDATA%\Pane\oauth\codex.json`) is imported
+- The legacy single slot (`%APPDATA%\PaneAafff623\oauth\codex.json`) is imported
   into the managed store and retired; it is not a third method.
 - “Add account” writes a cross-window `panelIntent`, but a write made *by
   the panel itself* never echoes back as an event. `openFamilyLogin` must
@@ -827,6 +832,15 @@ changes.
 
 ## 待确认
 
+- **Web search / flex 分项计费保持关闭（#43-3，2026-10-27）。** `pricing.rs` 与
+  `spend.rs` 里没有任何 web-search 或 flex 服务层的价目，厂商也没有发布可机器
+  读取的单价表：这些调用在部分计划里按「次」计费、在另一些里已含在订阅内，
+  同一个 slug 在不同账号上单价不同。按本票规则「无可靠价目则保留关闭并文档化，
+  不猜价」，这类行继续按 token 计价、不额外加价；要开启必须先拿到官方单价来源。
+
+- Z.ai (family `zai`) 的 pay-as-you-go 余额端点没有官方确认：无 Coding Plan
+  的 key 保持 `needs_setup` 的「待确认」文案（`no_plan_setup`），余额回退
+  在确认端点前不实现、不猜端点、不造 0%（#48-3，2026-10-26）。
 - Qoder 国际版 (family `qoder`) 的 Windows 配置目录按命名惯例取
   `com.qoder.app.stable`（CN 版为 `com.qodercn.app.stable`），备选 `Qoder`；
 - **Qoder CN 本机读数（`qoder_sessions.rs`）不依赖任何版本号。** 数据库位置靠发现：
@@ -907,7 +921,7 @@ changes.
   SQLite `v10` blobs are AES-256-GCM with the Local State os_crypt key
   and the GCM plaintext carries a 32-byte random header before the value
   (DPAPI direct unwrap fails); Doubao locks the DB while running, so the
-  header is cached in `%APPDATA%\Pane\doubao_cookies.json` and re-extracted
+  header is cached in `%APPDATA%\PaneAafff623\doubao_cookies.json` and re-extracted
   whenever Doubao is quit. The spend panel additionally scans ZCode's
   `~/.zcode/cli/rollout/model-io-*.jsonl` (usage nested at
   `response.usage`, camelCase). Subscription providers expose only
@@ -930,6 +944,11 @@ changes.
   and replace the current pool when its URL changes. Direct fallback keeps
   `no_proxy()`. A loopback mock-proxy regression checks both redirect modes;
   real system-proxy switching still belongs to owner acceptance.
+- **Proxy discipline for new code:** every outbound HTTP client goes through
+  `providers::http()` / `http_direct()` (or a provider-local wrapper that
+  calls them). Never build a bare `reqwest::Client` for a public endpoint —
+  it silently ignores the app-wide proxy. Loopback requests always set
+  `.no_proxy()`.
 - Settings tabs share a top-aligned reading column. Release history lives
   in Settings → About; the popover dashboard no longer contains a timeline.
 - Managed login lifecycle commands share `account_lifecycle.rs`; the parsing
@@ -940,7 +959,7 @@ changes.
 ## Settings shell and official WorkBuddy requests (2026-10-24)
 
 - The settings panel (`panel` window) is borderless/transparent, non-maximizable,
-  default 980×700 logical (min 860×620), remembers `%APPDATA%\Pane\panel-window.json`.
+  default 980×700 logical (min 860×620), remembers `%APPDATA%\PaneAafff623\panel-window.json`.
   On this dev machine Tauri's 150% scale and WebView2's 169.5% DPR make that a
   ~868×620 CSS viewport; the 200px rail collapses to 170px at ≤1024 CSS.
 - `index.html` no longer contains `<aside id="settings">`. Every legacy control
@@ -978,11 +997,11 @@ changes.
   wrapper has no border/background, because the section head + card already
   paint the skin frame (otherwise comic/ink showed double frames).
 - Comic Pixel's installable pack is `site/public/skins/pane-skin-comic-pixel-1.0.0.zip`
-  (manifest + CSS + two fonts); installed locally at `%APPDATA%\Pane\skins\comic-pixel`.
+  (manifest + CSS + two fonts); installed locally at `%APPDATA%\PaneAafff623\skins\comic-pixel`.
 
 ## Forward-only pricing pins and refresh single-flight (2026-10-25, #56/#54)
 
-- **Observation timeline** — `%APPDATA%\Pane\pricing\schedules.json` stores
+- **Observation timeline** — `%APPDATA%\PaneAafff623\pricing\schedules.json` stores
   every price Pane ever charged as an append-only `Observation` list
   (`scope`, normalized `model`, `tier`, `observed_at`, `pin`, `basis`). The
   file wraps the serialized list in a `payload` string with an FNV-1a
@@ -997,12 +1016,22 @@ changes.
   timestamp (day-granular sources use local 23:59:59.999). A later catalog
   change, price rise/cut, override or corrections bump only appends a new
   observation at "now" — never rewrites history.
-- **Cache** — `PERSIST_VERSION` is 6 (v5 caches are discarded once and
-  re-parsed). Probes are `Pin { scope, key, tier, ts_ms, pin }`; replay is
-  exact against the immutable timeline, so a catalog refresh no longer
+- **Cache** — `PERSIST_VERSION` is 7 (v6 caches are discarded once and
+  re-parsed; the first launch after the upgrade re-reads spend logs). Each
+  entry records a 5×4 KiB FNV-1a content fingerprint (`sample_fingerprint`):
+  mtime+size alone cannot see a OneDrive/rsync rewrite that preserves both.
+  Unchanged files must match the fingerprint; a grown file may resume only
+  when the prefix fingerprint over the recorded length and the 4 KiB boundary
+  both match. Files under 20 KiB hash in full; UNC/WSL paths sample two points
+  instead of five. Probes are `Pin { scope, key, tier, ts_ms, pin }`; replay
+  is exact against the immutable timeline, so a catalog refresh no longer
   re-reads history. `CORRECTIONS_REV` changes keep the cache and append one
   `basis:"correction"` observation pass. Unpriced first sightings write no
   entry (the later fill happens once, marked estimated).
+- **Scheduled prices** — `pricing::observe_scheduled_price_change` (spend.rs)
+  turns a dated rate change into a timeline observation at the change instant;
+  today only `gemini-4-argon` ($2→$4 input on 2026-12-01) uses it, so the rise
+  is forward-only even when every catalog feed answers 304 that day.
 - **UI/commands** — `rebuild_spend_pricing` (Settings → price overrides →
   重建花费历史, double-confirmed) drops `spend_cache.json` and forces a full
   reparse; unchanged days come back identical. `save_pricing_overrides` now
@@ -1028,9 +1057,9 @@ changes.
   code only until the site is deployed.
 - **Pack state** — source changes are invisible until the packs are rebuilt and
   reinstalled. Local 1.0.2 zips are in `site/public/skins/`; the live index is
-  still 1.0.0 with no CORS header, so `check-skin-packs --live` reports stale
-  until deployment. `marketEntries` compares versions numerically; a local pack
-  newer than the index is never offered as a downgrade.
+  at 1.0.2 after the 2026-10-27 pack publish (the live host was not re-checked
+  in the #107 closeout). `skinShopEntries` compares versions numerically; a local
+  pack newer than the index is never offered as a downgrade.
 - **Comic legibility** — `--cp-yellow-ink:#080a0d`, `--cp-cyan-ink:#03231f`,
   `--cp-purple-ink:#ffffff`; every yellow/cyan background uses its ink pair
   (the three 1.09:1 spots are gone). Data/numeric readouts use
@@ -1050,6 +1079,44 @@ changes.
   interrupts cleanly and falls back to an instant switch under
   `reduceAnimations`/`prefers-reduced-motion`. Wired to the Settings and
   workshop entries only.
+
+## Skin workshop storefront (#107, 2026-10-27)
+
+- **One entry, one surface** — the workshop is a Settings page
+  (`#st-skins`, General → Panel skins). The old popover drawer market and its
+  CSS/entry are gone. The popover palette writes
+  `panelIntent = {view:"settings", page:"skins"}`; the panel applies it once and
+  persists the applied stamp (`pane.panelIntent.applied`) so a failed config
+  clear cannot replay the jump in a new window. The General page also carries a
+  “Panel skins / Open workshop” row.
+- **Data contract** — `skinShopEntries()` merges native + installed packs +
+  distribution index. `applied` comes from the loaded pack; `selected` comes
+  from `config.skinId`. A selected pack that is missing locally shows
+  Selected / Not installed, native is not reported as applied, and the gallery
+  explains it. A local pack named `native` cannot collide with the native row
+  (`__native` sentinel).
+- **Previews** — every thumbnail, hero and detail shot is the real panel
+  component rendered at 360px and clipped into a phone frame; previews never
+  read live accounts and remote skins show a download-to-preview placeholder.
+  No ratings, downloads, authors or invented metrics.
+- **Failure semantics** — `refreshInstalledPacks()` returns a boolean and keeps
+  the last good registry; failed reads surface `skin.shopRegistryFailed` and
+  must not call `applySkin` (which would repaint native). `refreshSkinIndex()`
+  is single-flight (`skinIndexRefreshing()`); the shop shows checking/offline
+  states. Download/remove errors stay visible in the gallery, not only in the
+  detail page. Skin actions persist with `patchConfig(..., {markDirty:false})`,
+  so they never arm the Settings “Save” button.
+- **Cross-window** — install/remove broadcasts `pane.skins.packs` through
+  localStorage; the other window re-reads the registry before applying. The
+  site demo routes the host overlay through `?settings=1&page=skins`; verified
+  in a real browser (main demo → settings overlay → 4 cards).
+- **Evidence** — `tests/skin-shop.test.mjs` (17 cases: states, ordering,
+  escaping, missing selection, download/remove success and failure, index
+  loading/offline). Full Node suite **237 passed**; site suite **50 passed**;
+  `pnpm build` and `cargo check` pass. Real window 1059×768 verified gallery,
+  grid, search, empty state, detail, zoom + Esc, apply/restore, Save staying
+  disabled, and the popover palette entry. Not re-tested: real pack
+  download/remove UI, 860×620, English/Russian visuals, reduced motion.
 
 ## Settings round 2, usage topology and per-source cache revisions (2026-10-26)
 

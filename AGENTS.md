@@ -16,7 +16,7 @@ cd D:\code\pane && pnpm build
 
 # Step 2: kill old pane + clear WebView2 cache
 Stop-Process -Name pane -Force -ErrorAction SilentlyContinue
-Remove-Item -Recurse -Force "$env:LOCALAPPDATA\com.jazii.pane\EBWebView" -ErrorAction SilentlyContinue
+Remove-Item -Recurse -Force "$env:LOCALAPPDATA\com.aafff623.pane\EBWebView" -ErrorAction SilentlyContinue
 
 # Step 2–3: start Vite and the debug Pane together. This is the local
 # development launcher; it is not the installed release executable.
@@ -38,7 +38,7 @@ Remove-Item -Recurse -Force "$env:LOCALAPPDATA\com.jazii.pane\EBWebView" -ErrorA
    WMI with log redirection so the process survives the Agent shell and stays
    on the interactive desktop. A bare `Start-Process` or `& pane.exe` is not a
    valid development launch path.
-4. **Clear `%LOCALAPPDATA%\com.jazii.pane\EBWebView`** whenever you see
+4. **Clear `%LOCALAPPDATA%\com.aafff623.pane\EBWebView`** whenever you see
    stale UI. WebView2 caches assets aggressively.
 5. **`src-tauri/Cargo.toml` crate-type stays `["rlib"]`.** This is a
    desktop-only crate (no mobile JNI). `cdylib`/`staticlib` made GNU and
@@ -97,7 +97,7 @@ Local `release` profiles are never needed: releases are built by CI.
 | One/New API relay subsystem | `src-tauri/src/providers/onenewapi/` |
 | Local HTTP API `127.0.0.1:6736/v1/usage` (secret-redacting, tested) | `src-tauri/src/httpapi.rs` |
 | Provider/parsing test harness (compiles the real sources via `#[path]`) | `parse-tests/` |
-| Runtime data — never commit anything from here | `%APPDATA%\Pane\` (config.json, accounts/, onenewapi.json, last_snapshots.json, usage_history.json, telemetry.json …) |
+| Runtime data — never commit anything from here | `%APPDATA%\PaneAafff623\` (config.json, accounts/, onenewapi.json, last_snapshots.json, usage_history.json …) |
 
 Domain vocabulary (the glossary) → [`CONTEXT.md`](CONTEXT.md); verified engineering
 facts, constraints and failure modes → [`docs/project-facts.md`](docs/project-facts.md).

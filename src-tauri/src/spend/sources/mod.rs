@@ -32,9 +32,9 @@ fn home() -> PathBuf {
 }
 
 fn env_home(var: &str, fallback: &str) -> PathBuf {
-    std::env::var(var)
-        .map(PathBuf::from)
-        .unwrap_or_else(|_| home().join(fallback))
+    // Share the scanner's quote/whitespace handling so /v1/sources reports
+    // the same root the collector actually reads.
+    super::env_path(var).unwrap_or_else(|| home().join(fallback))
 }
 
 pub fn claude_projects_root() -> PathBuf {
@@ -294,7 +294,11 @@ pub fn registry() -> Vec<SourceSpec> {
             roots: || vec![p(&[".gemini", "tmp"])],
             feeds: &["gemini"],
             runtime: false,
-            needs_probe: true,
+            // The flag existed because the parser was written from the upstream
+            // session schema alone. It now has a fixture under
+            // parse-tests/fixtures/gemini plus parse tests, so it resolves
+            // against the filesystem like every other source (#42-2).
+            needs_probe: false,
             parse_probe: None,
         },
         SourceSpec {
@@ -322,7 +326,17 @@ pub fn registry() -> Vec<SourceSpec> {
     ]
 }
 
+/// Times the status probe so a slow source is visible in the inventory instead
+/// of only in the total refresh time (#42-3). The parse itself still runs in
+/// each provider's collector, so this number is a lower bound on cost.
 fn status_of(spec: &SourceSpec) -> SpendSourceStatus {
+    let started = std::time::Instant::now();
+    let mut status = status_of_probe(spec);
+    status.scan_us = started.elapsed().as_micros() as u64;
+    status
+}
+
+fn status_of_probe(spec: &SourceSpec) -> SpendSourceStatus {
     let feeds = || spec.feeds.iter().map(|s| (*s).into()).collect();
     if spec.runtime {
         return SpendSourceStatus {
@@ -334,6 +348,7 @@ fn status_of(spec: &SourceSpec) -> SpendSourceStatus {
             root: String::new(),
             reason: None,
             feeds: feeds(),
+            scan_us: 0,
         };
     }
     let existing_root = || {
@@ -356,6 +371,7 @@ fn status_of(spec: &SourceSpec) -> SpendSourceStatus {
                     .into(),
             ),
             feeds: feeds(),
+            scan_us: 0,
         };
     }
     if let Some(reason) = spec.parse_probe.and_then(|probe| probe()) {
@@ -368,6 +384,7 @@ fn status_of(spec: &SourceSpec) -> SpendSourceStatus {
             root: existing_root(),
             reason: Some(reason),
             feeds: feeds(),
+            scan_us: 0,
         };
     }
     source_status(
@@ -409,5 +426,28 @@ mod tests {
         assert_eq!(status.state, "parse_error");
         assert!(status.reason.as_deref().unwrap_or("").contains("no such table"));
         assert_eq!(status.feeds, vec!["probe".to_string()]);
+    }
+
+    /// #42-3 — a slow source has to be visible in the inventory, not only as an
+    /// unexplained total refresh time. Microseconds, because a stat probe is
+    /// well under a millisecond.
+    #[test]
+    fn every_source_reports_what_its_probe_cost() {
+        let statuses = statuses();
+        assert_eq!(statuses.len(), registry().len());
+        assert!(
+            statuses.iter().all(|s| s.scan_us < 60_000_000),
+            "a probe cost this large means the timing wrapped"
+        );
+        // Runtime ledgers never touch the disk, so their probe must stay in the
+        // noise floor instead of reporting a real scan.
+        assert!(
+            statuses.iter().any(|s| s.state == "runtime"),
+            "the inventory should still list runtime ledgers"
+        );
+        assert!(
+            statuses.iter().filter(|s| s.state == "runtime").all(|s| s.scan_us < 1_000),
+            "a runtime ledger that costs a millisecond is no longer just a label"
+        );
     }
 }

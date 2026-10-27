@@ -471,8 +471,35 @@ mod tests {
 /// The Windows system proxy (HKCU → Internet Settings), which Clash-style
 /// tools flip whenever the user switches nodes or ports — following it keeps
 /// Pane in step with the OS without a config edit. PAC scripts are ignored
-/// (reqwest cannot execute them). Read once per app run, like the config
-/// proxy: a port change needs an app restart, not a config change.
+/// (reqwest cannot execute them). Re-read on every client lookup, so a proxy
+/// port change applies to the next request without restarting Pane.
+/// True when a loopback proxy URL has a live TCP listener. Remote proxy URLs
+/// are assumed reachable here — probing them on the settings path would add a
+/// network round trip, and provider requests already have a direct rescue.
+fn local_proxy_ready(url: &str) -> bool {
+    use std::net::{TcpStream, ToSocketAddrs};
+    let hostport = url
+        .split("://")
+        .nth(1)
+        .unwrap_or(url)
+        .split('/')
+        .next()
+        .unwrap_or(url);
+    let Ok(addrs) = hostport.to_socket_addrs() else {
+        return false;
+    };
+    for addr in addrs {
+        if addr.ip().is_loopback() {
+            if TcpStream::connect_timeout(&addr, std::time::Duration::from_millis(250)).is_ok() {
+                return true;
+            }
+        } else {
+            return true;
+        }
+    }
+    false
+}
+
 pub fn system_proxy() -> Option<String> {
     use windows::Win32::Foundation::ERROR_SUCCESS;
     use windows::Win32::System::Registry::{
@@ -497,27 +524,44 @@ pub fn system_proxy() -> Option<String> {
             Some(&mut enabled as *mut u32 as *mut std::ffi::c_void),
             Some(&mut size),
         );
-        if status != ERROR_SUCCESS || enabled == 0 {
+        let read_string = |name: &str| -> Option<String> {
+            let name = wide(name);
+            let mut buf = [0u16; 512];
+            let mut size = (buf.len() * 2) as u32;
+            let status = RegGetValueW(
+                HKEY_CURRENT_USER,
+                windows::core::PCWSTR(subkey.as_ptr()),
+                windows::core::PCWSTR(name.as_ptr()),
+                RRF_RT_REG_SZ,
+                None,
+                Some(buf.as_mut_ptr() as *mut std::ffi::c_void),
+                Some(&mut size),
+            );
+            if status != ERROR_SUCCESS {
+                return None;
+            }
+            let chars = (size as usize / 2).saturating_sub(1); // drop the NUL
+            let raw = String::from_utf16_lossy(&buf[..chars.min(buf.len())]);
+            (!raw.trim().is_empty()).then(|| raw.trim().to_string())
+        };
+
+        let proxy_server = read_string("ProxyServer");
+        if status == ERROR_SUCCESS && enabled != 0 {
+            return proxy_server.and_then(|raw| super::parse_win_proxy(&raw));
+        }
+
+        // ProxyEnable=0 is also what Windows writes when the user picked a
+        // PAC/auto-config script. reqwest cannot execute PAC, but Clash,
+        // Mihomo, Nextin and most local clients publish their mixed listener
+        // in ProxyServer next to AutoConfigURL; use that only when the PAC is
+        // actually configured and the loopback port answers. PAC-only setups
+        // still need the manual URL in Settings → Network.
+        let pac = read_string("AutoConfigURL");
+        if pac.is_none() {
             return None;
         }
-        let mut buf = [0u16; 512];
-        let mut size = (buf.len() * 2) as u32;
-        let name = wide("ProxyServer");
-        let status = RegGetValueW(
-            HKEY_CURRENT_USER,
-            windows::core::PCWSTR(subkey.as_ptr()),
-            windows::core::PCWSTR(name.as_ptr()),
-            RRF_RT_REG_SZ,
-            None,
-            Some(buf.as_mut_ptr() as *mut std::ffi::c_void),
-            Some(&mut size),
-        );
-        if status != ERROR_SUCCESS {
-            return None;
-        }
-        let chars = (size as usize / 2).saturating_sub(1); // drop the NUL
-        let raw = String::from_utf16_lossy(&buf[..chars.min(buf.len())]);
-        super::parse_win_proxy(&raw)
+        let proxy = proxy_server.and_then(|raw| super::parse_win_proxy(&raw))?;
+        local_proxy_ready(&proxy).then_some(proxy)
     }
 }
 

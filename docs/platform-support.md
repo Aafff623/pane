@@ -24,7 +24,7 @@ Windows 仍是唯一承诺支持、且唯一在本机开发和验收的平台。
 | 开机启动 | tauri-plugin-autostart | LaunchAgent 形态未验 | .desktop autostart 未验 | 不适用 |
 | 凭据 | Credential Manager + DPAPI | keychain（`security`） | Secret Service（`secret-tool`） | 需另设计 |
 | 系统语言 | 显示语言 API | `defaults read -g AppleLanguages` | `LC_ALL` / `LC_MESSAGES` / `LANG` | 系统 Locale |
-| 配置目录 | `%APPDATA%\Pane` | `~/Library/Application Support` | `~/.config` | 应用私有目录 |
+| 配置目录 | `%APPDATA%\PaneAafff623` | `~/Library/Application Support` | `~/.config` | 应用私有目录 |
 | 本地数据 | `%LOCALAPPDATA%` | 同 Application Support | `~/.local/share` | 应用私有目录 |
 | 窗口修饰 | 去掉 DWM 焦点描边 | 无此问题 | 无此问题 | 不适用 |
 | 发布产物 | `*-setup.exe` | `*.dmg`（aarch64） | `*.AppImage` / `*.deb`（amd64） | 待定 |

@@ -29,7 +29,7 @@ All of this is auditable in the source — links go to the exact code.
   OAuth/login refresh tokens, Cursor/Codex account token pairs — live in
   the platform's native credential store** (Windows Credential Manager via
   [`src-tauri/src/secretstore.rs`](src-tauri/src/secretstore.rs)); the JSON
-  files under `%APPDATA%\Pane\` keep only non-secret fields (labels, ids,
+  files under `%APPDATA%\PaneAafff623\` keep only non-secret fields (labels, ids,
   expiry, card-id snapshots). Legacy plaintext entries migrate on first
   read — the vault write must succeed before the file loses the secret, so
   a broken vault degrades to the plaintext fallback instead of losing the
@@ -50,19 +50,14 @@ All of this is auditable in the source — links go to the exact code.
   additionally *prove* it's an OpenAI login (OpenAI's own claim
   namespace in its `id_token`) before any request — a look-alike
   credential file from another app never enters the lane.
-- **No analytics SDK, no crash reporter, no event streams.** Pane's
-  entire self-reporting surface is one anonymous channel, documented
-  field-by-field in [docs/privacy.md](docs/privacy.md): an opt-out
-  once-a-day usage statistic (random install ID, daily rollups, error
-  categories only — one auditable file,
-  [`src-tauri/src/telemetry.rs`](src-tauri/src/telemetry.rs)). Turning
-  the statistic off is a hard stop and deletes the stored ID. The update
-  check adds no reporting of its own: it is a plain GET for this
-  project's own update manifest — served from the project's Cloudflare
-  edge route first, with this project's GitHub Releases `latest.json` as
-  the fallback (Cloudflare and GitHub may each log the request under
-  their own privacy statements; Pane runs no counter and stores
-  nothing). The full list of network calls Pane can make is in
+- **No analytics SDK, no telemetry, no crash reporter, no event
+  streams.** Pane sends no usage statistics. The update check adds no
+  reporting of its own: it is a plain GET for this project's own update
+  manifest — served from the project's Cloudflare edge route first, with
+  this project's GitHub Releases `latest.json` as the fallback
+  (Cloudflare and GitHub may each log the request under their own
+  privacy statements; Pane runs no counter and stores nothing). The full
+  list of network calls Pane can make is in
   [docs/privacy.md](docs/privacy.md).
 - **The local HTTP API is loopback-only, CORS-locked, and Host-checked.**
   It binds `127.0.0.1:6736`, serves usage numbers (never credentials),

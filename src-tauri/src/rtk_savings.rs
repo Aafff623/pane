@@ -31,6 +31,11 @@ struct IntegrationSpec {
     id: &'static str,
     label: &'static str,
     icon_key: &'static str,
+    /// `rtk init --agent <id>` exists. When false the harness can still be
+    /// connected by hand (its own hook config), so it is detectable but must
+    /// never be installed through the CLI — calling a flag that does not exist
+    /// would look like RTK refusing rather than RTK not supporting it.
+    cli: bool,
 }
 
 const RTK_INTEGRATIONS: &[IntegrationSpec] = &[
@@ -38,86 +43,113 @@ const RTK_INTEGRATIONS: &[IntegrationSpec] = &[
         id: "codex",
         label: "Codex",
         icon_key: "codex",
+        cli: true,
     },
     IntegrationSpec {
         id: "claude",
         label: "Claude Code",
         icon_key: "claude",
+        cli: true,
     },
     IntegrationSpec {
         id: "cursor",
         label: "Cursor",
         icon_key: "cursor",
+        cli: true,
     },
     IntegrationSpec {
         id: "trae",
         label: "Trae",
         icon_key: "traecn",
+        cli: true,
     },
     IntegrationSpec {
         id: "windsurf",
         label: "Windsurf",
         icon_key: "windsurf",
+        cli: true,
     },
     IntegrationSpec {
         id: "cline",
         label: "Cline",
         icon_key: "clinepass",
+        cli: true,
     },
     IntegrationSpec {
         id: "kilocode",
         label: "Kilo Code",
         icon_key: "kilo",
+        cli: true,
     },
     IntegrationSpec {
         id: "antigravity",
         label: "Antigravity",
         icon_key: "antigravity",
+        cli: true,
     },
     IntegrationSpec {
         id: "kimi",
         label: "Kimi Code",
         icon_key: "kimi",
+        cli: true,
     },
     IntegrationSpec {
         id: "copilot",
         label: "GitHub Copilot",
         icon_key: "copilot",
+        cli: true,
     },
     IntegrationSpec {
         id: "gemini",
         label: "Gemini CLI",
         icon_key: "gemini",
+        cli: true,
     },
     IntegrationSpec {
         id: "opencode",
         label: "OpenCode",
         icon_key: "opencode",
+        cli: true,
     },
     IntegrationSpec {
         id: "droid",
         label: "Factory Droid",
         icon_key: "factory",
+        cli: true,
     },
     IntegrationSpec {
         id: "vibe",
         label: "Mistral Vibe",
         icon_key: "mistral",
+        cli: true,
     },
     IntegrationSpec {
         id: "hermes",
         label: "Hermes",
         icon_key: "hermes",
+        cli: true,
     },
     IntegrationSpec {
         id: "pi",
         label: "Pi",
         icon_key: "pi",
+        cli: true,
     },
     IntegrationSpec {
         id: "omp",
         label: "Oh My Pi",
         icon_key: "omp",
+        cli: true,
+    },
+    // RTK has no `--agent qoder`, but Qoder CN reads Claude-compatible hooks,
+    // so it can be wired by hand — and on this machine it already is. Without
+    // this entry the panel told a correctly-connected user that nothing was
+    // detected (#RTK).
+    IntegrationSpec {
+        id: "qodercn",
+        label: "Qoder CN",
+        icon_key: "qoder-cn",
+        cli: false,
     },
 ];
 
@@ -132,6 +164,10 @@ pub struct RtkIntegrationTarget {
     pub detected: bool,
     /// exact | fuzzy | none
     pub match_kind: &'static str,
+    /// True when this harness has no `rtk init --agent` flag and must be wired
+    /// through its own hook config. The UI offers instructions, not a button
+    /// that would fail.
+    pub manual: bool,
 }
 
 #[derive(Serialize, Clone, Default, Debug)]
@@ -410,6 +446,17 @@ fn integration_probe(id: &str, home: &Path, cwd: Option<&Path>) -> IntegrationPr
                 .unwrap_or_else(|| home_path(".pi/agent"));
             probe.fuzzy_dirs.push(root);
         }
+        "qodercn" => {
+            // The hook entry is named rtk-rewrite and runs rtk-pretooluse.cjs;
+            // matching the hook name keeps a stray mention of "rtk" in some
+            // other setting from counting as connected.
+            exact(
+                &mut probe,
+                home_path(".qoder-cn/settings.json"),
+                "rtk-rewrite",
+            );
+            fuzzy_file(&mut probe, Some(home_path(".rtk/hooks/rtk-pretooluse.cjs")));
+        }
         "omp" => {
             probe.fuzzy_dirs.push(home_path(".omp"));
             probe.fuzzy_dirs.push(home_path(".oh-my-pi"));
@@ -495,6 +542,7 @@ pub fn integration_targets() -> Vec<RtkIntegrationTarget> {
                 scope: integration_scope(spec.id).unwrap_or("global"),
                 detected,
                 match_kind,
+                manual: !spec.cli,
             }
         })
         .collect()
@@ -1444,8 +1492,16 @@ mod tests {
     #[test]
     fn integration_targets_are_known_and_map_to_fixed_commands() {
         let targets = integration_targets();
-        assert_eq!(targets.len(), 17);
+        assert_eq!(targets.len(), 18);
         for target in &targets {
+            if target.manual {
+                assert!(
+                    integration_args(target.id).is_none(),
+                    "{} is hook-only, so it must not advertise a CLI install",
+                    target.id
+                );
+                continue;
+            }
             let args = integration_args(target.id).expect("known target");
             if target.scope == "project" {
                 assert_eq!(args[0], "init");

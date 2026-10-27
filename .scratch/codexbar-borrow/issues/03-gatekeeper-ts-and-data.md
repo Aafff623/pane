@@ -1,4 +1,4 @@
-Status: ready
+Status: partial (2026-10-26) — main.ts scanned; data-table exemptions not enumerated.
 Type: task
 Blocked by: 02
 

@@ -1,5 +1,5 @@
 // Browser transport for the real Pane frontend. No native IPC, vendor requests,
-// account files, API keys, telemetry or loopback connections are used here.
+// account files, API keys, analytics or loopback connections are used here.
 // 'pane-source/providerCatalog' is aliased by build-demo.mjs to the catalog of
 // the project passed on the command line, so the demo always mirrors it.
 import { providerCatalog } from 'pane-source/providerCatalog';
@@ -30,7 +30,7 @@ const GROUPS: Record<string, string> = { antigravity: 'g6', codex: 'g6', command
 
 let config: Record<string, any> = {
   refreshMinutes: 5, disabled: [...DISABLED],
-  pinned: null, trayProviders: [], telemetry: false,
+  pinned: null, trayProviders: [],
   notifyAlmostOut: false, notifyCuttingClose: false, notifyWillRunOut: false, notifyResetSoon: true,
   spendTab: 'today', overviewTab: '5h', overviewCategory: 'coding', overviewStyle: 'bars',
   categoryOverrides: {}, spendMetric: 'tokens', spendGrouping: 'model', showUsed: false, showTrend: false,
@@ -55,6 +55,12 @@ let config: Record<string, any> = {
   // reads config.removedProviders.includes(...) and crashes on undefined.
   qoderCheckin: false, removedProviders: [],
 };
+// The demo host opens the settings iframe with ?page=skins when the popover's
+// palette button was the entry point. Prime the same one-shot intent the
+// desktop writes through config, so applyPanelIntent lands on the workshop.
+if (params.get('settings') === '1' && params.get('page') === 'skins') {
+  config.panelIntent = { view: 'settings', page: 'skins', at: Date.now() };
+}
 
 const copy = <T>(v: T): T => structuredClone(v);
 const demoListeners = new Map<string, Set<(payload: unknown) => void>>();
@@ -272,7 +278,7 @@ export async function invoke<T>(command: string, args: Record<string, any> = {})
     case 'rtk_integration_targets': result = demoRtkTargets; break;
     case 'install_rtk': case 'install_rtk_integration': result = null; break;
     case 'fetch_credit_history': result = Object.fromEntries(['qodercn', 'traecn'].map((id, i) => [id, Array.from({length:30}, (_,day) => day < 3 ? null : (day * 31 + i * 17) % 300)])); break;
-    case 'font_pack_list': result = []; break;
+    case 'font_pack_list': case 'skin_pack_list': result = []; break;
     case 'reset_wake_settings': result = wakeSettings; break;
     case 'reset_wake_status': result = []; break;
     case 'reset_wake_set': wakeSettings = { ...wakeSettings, ...args.settings }; result = null; break;
@@ -307,8 +313,15 @@ export async function invoke<T>(command: string, args: Record<string, any> = {})
     case 'get_base_url': result = null; break;
     case 'open_panel_window':
       // Desktop opens the standalone panel-form settings window. The web demo
-      // has no window manager: ask the host page to reveal its overlay.
-      if (params.get('settings') !== '1') parent.postMessage({ type: 'pane-demo', action: 'settings' }, location.origin);
+      // has no window manager: ask the host page to reveal its overlay, with
+      // the requested settings page so the skin entry can land on the shop.
+      if (params.get('settings') !== '1') {
+        const page = (config.panelIntent as { page?: string } | null)?.page;
+        parent.postMessage(
+          { type: 'pane-demo', action: 'settings', ...(page ? { page } : {}) },
+          location.origin,
+        );
+      }
       result = null; break;
     case 'close_panel_window': document.body.classList.remove('settings-open'); result = null; break;
     case 'open_link': {
@@ -401,6 +414,10 @@ window.addEventListener('message', event => {
     document.querySelector('.content')?.scrollTo({ top: 0, behavior: 'auto' });
   }
   if (action === 'settings') document.body.classList.add('settings-open');
+  if (action === 'page' && params.get('settings') === '1' && event.data.page === 'skins') {
+    config.panelIntent = { view: 'settings', page: 'skins', at: Date.now() };
+    emitDemo('config-updated', null);
+  }
   if (action === 'overview') {
     document.body.classList.remove('settings-open');
     document.querySelector('#settings-close')?.dispatchEvent(new MouseEvent('click', { bubbles: true }));

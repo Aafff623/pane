@@ -672,21 +672,51 @@ struct OfficialUsage {
     /// The sweep stopped on an error, a stalled cursor or the round cap, so
     /// the count is a lower bound rather than the whole 30-day window.
     partial: bool,
+    /// Credits per model and per client over the swept window (#31). The card
+    /// names the biggest line of each so a 26-request month is not a single
+    /// opaque number; both stay empty when the ledger named no model/client.
+    by_model: std::collections::BTreeMap<String, f64>,
+    by_client: std::collections::BTreeMap<String, f64>,
 }
 
 impl OfficialUsage {
+    /// Biggest spender in a per-key map. Ties keep the first key in map order,
+    /// so the same data always names the same line.
+    fn top(map: &std::collections::BTreeMap<String, f64>) -> Option<&str> {
+        map.iter()
+            .max_by(|a, b| a.1.total_cmp(b.1))
+            .map(|(key, _)| key.as_str())
+    }
+
+    /// This string is one row on the card, and model slugs can run long
+    /// (`claude-sonnet-4-5-20250929`). Clip rather than let the row wrap to a
+    /// second line and push the rest of the card down. Char-boundary safe.
+    fn clip(value: &str, max: usize) -> String {
+        if value.chars().count() <= max {
+            return value.to_string();
+        }
+        let mut out: String = value.chars().take(max.saturating_sub(1)).collect();
+        out.push('…');
+        out
+    }
+
     fn detail(&self) -> String {
         let credits = if (self.credits.fract()).abs() < 0.005 {
             format!("{:.0}", self.credits)
         } else {
             format!("{:.2}", self.credits)
         };
-        format!(
-            "{} requests · {} credits{}",
-            self.requests,
-            credits,
-            if self.partial { " · partial" } else { "" }
-        )
+        let mut out = format!("{} requests · {} credits", self.requests, credits);
+        if let Some(model) = Self::top(&self.by_model) {
+            out.push_str(&format!(" · {}", Self::clip(model, 28)));
+        }
+        if let Some(client) = Self::top(&self.by_client) {
+            out.push_str(&format!(" · via {}", Self::clip(client, 20)));
+        }
+        if self.partial {
+            out.push_str(" · partial");
+        }
+        out
     }
 }
 
@@ -783,6 +813,8 @@ async fn official_usage(f: &Family, access: &Access) -> Option<OfficialUsage> {
         requests: rows.len(),
         credits: summary.total_credit,
         partial,
+        by_model: summary.by_model,
+        by_client: summary.by_client,
     })
 }
 
@@ -1629,20 +1661,61 @@ mod tests {
         let summary = OfficialUsage {
             requests: 26,
             credits: 12.5,
-            partial: false,
+            ..OfficialUsage::default()
         };
         assert_eq!(summary.detail(), "26 requests · 12.50 credits");
         let whole = OfficialUsage {
             requests: 3,
             credits: 8.0,
-            partial: false,
+            ..OfficialUsage::default()
         };
         assert_eq!(whole.detail(), "3 requests · 8 credits");
         let partial = OfficialUsage {
             requests: 3000,
             credits: 1.0,
             partial: true,
+            ..OfficialUsage::default()
         };
         assert!(partial.detail().ends_with("· partial"));
+    }
+
+    /// #31 — a 26-request month used to collapse into one opaque number. The
+    /// card now names the biggest model and client, and invents nothing when
+    /// the ledger named none.
+    #[test]
+    fn official_usage_detail_names_the_biggest_model_and_client() {
+        let mut report = OfficialUsage {
+            requests: 26,
+            credits: 12.5,
+            ..OfficialUsage::default()
+        };
+        report.by_model.insert("claude-sonnet-4".into(), 7.2);
+        report.by_model.insert("gpt-5".into(), 5.3);
+        report.by_client.insert("web".into(), 9.1);
+        report.by_client.insert("ide".into(), 3.4);
+        assert_eq!(
+            report.detail(),
+            "26 requests · 12.50 credits · claude-sonnet-4 · via web"
+        );
+
+        let bare = OfficialUsage {
+            requests: 2,
+            credits: 1.0,
+            ..OfficialUsage::default()
+        };
+        assert_eq!(bare.detail(), "2 requests · 1 credits");
+
+        // A long vendor slug must not push the row onto a second line.
+        let mut long = OfficialUsage {
+            requests: 4,
+            credits: 2.0,
+            ..OfficialUsage::default()
+        };
+        // 39 chars: past the 28-char budget. Assert the intent rather than the
+        // exact cut, since the budget is a layout choice that may move.
+        long.by_model.insert("claude-sonnet-4-5-20250929-experimental".into(), 2.0);
+        let clipped = long.detail();
+        assert!(clipped.ends_with('…'), "long slug must be clipped: {clipped}");
+        assert!(clipped.chars().count() < 60, "row must stay one line: {clipped}");
     }
 }

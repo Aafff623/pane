@@ -194,6 +194,18 @@ fn metric_lines(metrics: &[crate::providers::Metric]) -> Vec<Value> {
     metrics
         .iter()
         .map(|m| {
+            // A whole untouched window is not a countdown: its reset instant
+            // is one period ahead, so exposing it would make widgets tick
+            // backwards. The card/overview already show "Not started".
+            let resets_at = if m
+                .pace
+                .as_ref()
+                .is_some_and(|pace| pace.not_started)
+            {
+                None
+            } else {
+                m.resets_at
+            };
             if m.kind == "progress" {
                 json!({
                     "type": "progress",
@@ -201,7 +213,7 @@ fn metric_lines(metrics: &[crate::providers::Metric]) -> Vec<Value> {
                     "used": m.used_percent,
                     "limit": 100,
                     "format": { "kind": "percent" },
-                    "resetsAt": m.resets_at.map(iso8601),
+                    "resetsAt": resets_at.map(iso8601),
                     "periodDurationMs": m.period_ms,
                     "pace": m.pace,
                     "color": Value::Null,
@@ -212,7 +224,7 @@ fn metric_lines(metrics: &[crate::providers::Metric]) -> Vec<Value> {
                     "label": m.label,
                     "value": m.value,
                     "subtitle": m.detail,
-                    "resetsAt": m.resets_at.map(iso8601),
+                    "resetsAt": resets_at.map(iso8601),
                     "color": Value::Null,
                 })
             }
@@ -327,7 +339,6 @@ fn status_payload(cfg: &Value, fetched_at: &str) -> Value {
         },
         "config": {
             "autostart": cfg.get("autostart").and_then(Value::as_bool),
-            "telemetry": cfg.get("telemetry").and_then(Value::as_bool),
             "proxy": { "configured": proxy_source != "none", "source": proxy_source },
         },
         "generatedAt": fetched_at,
@@ -475,7 +486,7 @@ fn doctor_payload(cfg: &Value, fetched_at: &str) -> Value {
         "webview_cache",
         true,
         "info",
-        "WebView2 cache is per-user under %LOCALAPPDATA%\\com.jazii.pane\\EBWebView; staleness cannot be judged from here".into(),
+        "WebView2 cache is per-user under %LOCALAPPDATA%\\com.aafff623.pane\\EBWebView; staleness cannot be judged from here".into(),
         Some("if the UI shows stale content after an update, delete that folder and restart Pane"),
     ));
     checks.push(check(
@@ -542,31 +553,14 @@ fn route(method: &tiny_http::Method, url: &str) -> (u16, String) {
                     .lock()
                     .map(|v| v.clone())
                     .unwrap_or_default();
-                let payload = crate::limits::limits_payload(&snaps, &now_iso());
-                let found = payload["providers"].get(id).cloned().or_else(|| {
-                    snaps
-                        .iter()
-                        .find(|snapshot| snapshot.id == id)
-                        .map(|snapshot| {
-                            crate::limits::limits_payload(
-                                std::slice::from_ref(snapshot),
-                                &now_iso(),
-                            )["providers"][id]
-                                .clone()
-                        })
-                });
-                match found {
-                    Some(provider) => (
+                let selected = crate::limits::select_snapshots(&snaps, id);
+                if selected.is_empty() {
+                    (404, json!({"error": "provider_not_found"}).to_string())
+                } else {
+                    (
                         200,
-                        json!({
-                            "schema": crate::limits::SCHEMA,
-                            "generatedAt": now_iso(),
-                            "providers": { id: provider },
-                            "errors": [],
-                        })
-                        .to_string(),
-                    ),
-                    None => (404, json!({"error": "provider_not_found"}).to_string()),
+                        crate::limits::limits_payload(&selected, &now_iso()).to_string(),
+                    )
                 }
             } else if let Some(id) = path.strip_prefix("/v1/usage/") {
                 match latest().lock() {
@@ -739,6 +733,56 @@ mod tests {
 
         let (missing, _) = route(&tiny_http::Method::Get, "/v1/usage/onenewapi");
         assert_eq!(missing, 404);
+    }
+
+    #[test]
+    fn limits_route_has_a_four_field_envelope_and_family_lookup() {
+        let now = chrono::Utc::now().timestamp_millis();
+        let mut session = Metric::progress("Session", 0.0, None);
+        session.resets_at = Some(now + 604_800_000);
+        session.period_ms = Some(604_800_000);
+        let a = Snapshot::ok("onenewapi@abc", "Site A", None, vec![Metric::progress("Usage", 10.0, None)]);
+        let b = Snapshot::ok("onenewapi@def", "Site B", None, vec![Metric::progress("Usage", 20.0, None)]);
+        let untouched = Snapshot::ok("antigravity", "Antigravity", None, vec![session]);
+        publish(&[a, b, untouched]);
+
+        let (status, body) = route(&tiny_http::Method::Get, "/v1/limits/onenewapi");
+        assert_eq!(status, 200);
+        let envelope: serde_json::Value = serde_json::from_str(&body).unwrap();
+        assert_eq!(envelope["schema"], crate::limits::SCHEMA);
+        let providers = envelope["providers"].as_object().unwrap();
+        assert_eq!(providers.len(), 2);
+        assert!(providers.contains_key("onenewapi@abc"));
+        assert!(providers.contains_key("onenewapi@def"));
+        assert_eq!(
+            envelope.as_object().unwrap().keys().cloned().collect::<std::collections::BTreeSet<_>>(),
+            ["schema", "generatedAt", "providers", "errors"]
+                .into_iter()
+                .map(str::to_string)
+                .collect()
+        );
+
+        let (exact, exact_body) = route(&tiny_http::Method::Get, "/v1/limits/onenewapi@abc");
+        assert_eq!(exact, 200);
+        let exact_json: serde_json::Value = serde_json::from_str(&exact_body).unwrap();
+        assert_eq!(exact_json["providers"].as_object().unwrap().len(), 1);
+        assert!(exact_json["providers"].get("onenewapi@abc").is_some());
+
+        let (untouched_status, untouched_body) =
+            route(&tiny_http::Method::Get, "/v1/limits/antigravity");
+        assert_eq!(untouched_status, 200);
+        let untouched_json: serde_json::Value = serde_json::from_str(&untouched_body).unwrap();
+        assert!(untouched_json["providers"]["antigravity"]["resources"]["Session"]
+            .get("resetsAt")
+            .is_none());
+
+        let (missing, _) = route(&tiny_http::Method::Get, "/v1/limits/does-not-exist");
+        assert_eq!(missing, 404);
+
+        let (usage_status, usage_body) = route(&tiny_http::Method::Get, "/v1/usage/antigravity");
+        assert_eq!(usage_status, 200);
+        let usage: serde_json::Value = serde_json::from_str(&usage_body).unwrap();
+        assert!(usage["lines"][0]["resetsAt"].is_null(), "{usage}");
     }
 
     #[test]

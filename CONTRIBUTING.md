@@ -25,16 +25,13 @@ vulnerability reporting).
   [docs/providers.md](docs/providers.md) documenting exactly what it
   reads and calls.
 - No telemetry, analytics SDKs, or "phone home" code — PRs adding any
-  will be declined regardless of intent. Exactly two deliberate,
-  maintainer-shipped exceptions exist, both documented field-by-field in
-  [docs/privacy.md](docs/privacy.md): the update check (anonymous daily
-  install counting, country-level, no IPs stored) and the opt-out daily
-  usage statistic (`src-tauri/src/telemetry.rs` — random install ID,
-  daily rollups, error categories only, hard-stop toggle). Those
-  exceptions are not a precedent: users' quotas, usage amounts, spend,
-  and error text never leave their PC, and PRs widening what either
-  channel carries — or adding any third-party analytics SDK — will be
-  declined.
+  will be declined regardless of intent. The one deliberate,
+  maintainer-shipped network call for app state is documented in
+  [docs/privacy.md](docs/privacy.md): the update check (a plain GET for
+  this project's release manifest; the hosting providers may log the
+  request under their own privacy statements, and Pane stores nothing).
+  Users' quotas, usage amounts, spend, and error text never leave their
+  PC.
 - No new dependencies without a stated reason.
 
 ## Building

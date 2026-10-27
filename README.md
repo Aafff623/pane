@@ -176,7 +176,7 @@ Claude、Codex、CodeBuddy、CodeBuddy CN、WorkBuddy、WorkBuddy AI、Cursor、
 
 ### 皮肤工坊
 
-深浅主题一键切换（`Ctrl + L`）；**皮肤市场为实验性功能，默认隐藏**，需在设置中二次确认开启。内置两套皮肤：**云端邮局**（手绘邮票、猫咪邮差）与**山水笺**（水墨、锦鲤、纸张纹理），都随深浅主题切换。工坊是画廊式布局：上方完整预览当前选中皮肤（以总花费面板为样张），下方缩略图浏览，底部「使用这款皮肤 / 恢复原生外观」常驻；日间 / 夜间 / 并排三种预览模式，切换时保留滚动位置与键盘焦点。
+深浅主题一键切换（`Ctrl + L`）；皮肤工坊在 **设置 → 通用 → 皮肤工坊**，悬浮面板的调色板按钮也会直达。官方提供 **云端邮局**（手绘邮票、猫咪邮差）、**山水笺**（水墨、锦鲤、纸张纹理）与 **像素分镜 Comic Pixel** 三套资源包，另有原生外观。工坊是商店式画廊：瀑布流 / 网格可切换并记住选择，支持搜索；详情页有真实面板组件截图、放大预览、日间 / 夜间 / 并排，下载 → 使用 → 恢复原生。所有预览都来自真实组件，不使用示意图。
 
 <table>
   <tr>
@@ -200,7 +200,7 @@ Claude、Codex、CodeBuddy、CodeBuddy CN、WorkBuddy、WorkBuddy AI、Cursor、
 <details>
 <summary><b>资源包格式</b></summary>
 
-皮肤以资源包分发：zip 内含 `manifest.json`（id、名称、版本、minAppVersion、入口 CSS、逐文件 sha256）+ 资产文件。安装 = 解压 + 逐文件校验 + manifest 合法性检查，任何一项不过整包拒装不留残骸；已装包落在 `%APPDATA%\Pane\skins\<id>\`，重启后仍从磁盘恢复。壁纸、吉祥物和退出交互成套换装，关闭即热切回原生皮肤。设计文档见 [皮肤市场设计](docs/skin-market-design.md)。
+皮肤以资源包分发：zip 内含 `manifest.json`（id、名称、版本、minAppVersion、入口 CSS、逐文件 sha256）+ 资产文件。安装 = 解压 + 逐文件校验 + manifest 合法性检查，任何一项不过整包拒装不留残骸；已装包落在 `%APPDATA%\PaneAafff623\skins\<id>\`，重启后仍从磁盘恢复。壁纸、吉祥物和退出交互成套换装，关闭即热切回原生皮肤。设计文档见 [皮肤市场设计](docs/skin-market-design.md)。
 
 </details>
 
@@ -295,7 +295,7 @@ Skill 三选一安装：`install.ps1` 安装器自动装入、设置 → 常规 
 
 ## <a id="privacy"></a>隐私
 
-Pane 是 local-first 工具：token、cookie 和 API key 保存在系统凭据库与 Windows 用户目录，不提交到 Git、不上传；查询请求只发送到对应 provider 的端点，Pane 没有中心后端替你转发额度；本地 HTTP API 只监听 loopback 并对敏感字段脱敏；遥测默认不承载额度、消费或 provider 凭据，可在设置中关闭。详见 [`docs/privacy.md`](docs/privacy.md)，安全披露流程见 [`SECURITY.md`](SECURITY.md)。
+Pane 是 local-first 工具：token、cookie 和 API key 保存在系统凭据库与 Windows 用户目录，不提交到 Git、不上传；查询请求只发送到对应 provider 的端点，Pane 没有中心后端替你转发额度；本地 HTTP API 只监听 loopback 并对敏感字段脱敏；应用不发送遥测或统计。详见 [`docs/privacy.md`](docs/privacy.md)，安全披露流程见 [`SECURITY.md`](SECURITY.md)。
 
 ## <a id="community"></a>参与
 

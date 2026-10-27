@@ -1,6 +1,16 @@
 MIT License
 
-Copyright (c) 2026 Jazii (Pane for Windows)
+Copyright (c) 2026 Pane contributors (Aafff623, https://github.com/Aafff623/pane)
+  — this fork: its name, branding, identity, publisher channels and every
+  change made in this repository.
+
+Copyright (c) 2026 Jazii — the upstream "Pane for Windows" this fork started
+  from. This notice is kept because portions of the original code remain under
+  it, as MIT requires. This fork is an independent project: it is not
+  affiliated with, endorsed by, published by or updated through the upstream
+  author, and it does not use that author's identifiers, endpoints, analytics
+  or release channels.
+
 Copyright (c) 2025 Robin Ebers (OpenUsage for macOS — provider research and
 original concept, https://github.com/robinebers/openusage)
 Copyright (c) 2025 Peter Steinberger (CodexBar for macOS — provider research

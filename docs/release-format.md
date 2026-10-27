@@ -56,7 +56,7 @@ provenance 哈希失配即表示演示区已过期（2026-10 曾发生 src 先�
 
 ## 4. 资产命名与矩阵
 
-- 版本号一律进文件名：`Pane_<版本>_<os-arch>.<ext>`（如 `Pane_0.4.69_x64-setup.exe`、`Pane_0.4.69_aarch64.dmg`、`Pane_0.4.69_amd64.deb`、`Pane_0.4.69_amd64.AppImage`）。
+- 版本号一律进文件名：`Pane-Aafff623_<版本>_<os-arch>.<ext>`（如 `Pane-Aafff623_0.4.69_x64-setup.exe`、`Pane-Aafff623_0.4.69_aarch64.dmg`、`Pane-Aafff623_0.4.69_amd64.deb`、`Pane-Aafff623_0.4.69_amd64.AppImage`）。
 - arch 名按发行惯例：deb 用 `amd64/arm64`，AppImage/dmg 用 `x86_64/aarch64`。
 - 矩阵表里的体积取实际 artifact 大小，与资产列表一一对应。
 - 更新通道资产 `latest.json`（minisign 签名）继续保留，它是 updater 的契约，不因格式规范改动。
@@ -79,7 +79,7 @@ provenance 哈希失配即表示演示区已过期（2026-10 曾发生 src 先�
 
 判定规则：tag 去掉 `v` 后含 `-` 即预览（语义化版本里 `-` 就是预发布标记）。`release.yml` 据此加 `--prerelease`，并跳过 winget 派发与 Gitee 镜像作业；`winget.yml` 自身也有 `release.prerelease` 守卫，手动翻转预发布标记也不会误发到 winget。
 
-**版本号策略（推荐 tag-only）**：预览阶段三处版本文件（`tauri.conf.json` / `package.json` / `Cargo.toml`）**保持数字版**（如 `0.9.0`），预览标识只放 tag——零风险、无需额外的 CHANGELOG 分节、正式版发布时版本文件无缝接续。此时 Release 标题是 `Pane 0.9.0-rc.1`（取自 tag），安装包文件名用数字版（`Pane_0.9.0_x64-setup.exe`），应用内显示 `0.9.0`。
+**版本号策略（推荐 tag-only）**：预览阶段三处版本文件（`tauri.conf.json` / `package.json` / `Cargo.toml`）**保持数字版**（如 `0.9.0`），预览标识只放 tag——零风险、无需额外的 CHANGELOG 分节、正式版发布时版本文件无缝接续。此时 Release 标题是 `Pane 0.9.0-rc.1`（取自 tag），安装包文件名用数字版（`Pane-Aafff623_0.9.0_x64-setup.exe`），应用内显示 `0.9.0`。
 
 若希望应用内也显示 `-rc.1`（测试者一眼可辨、且正式版发布后 RC 用户会收到升级提示），可把三处版本写成带后缀的 `0.9.0-rc.1`：此时 CHANGELOG 必须存在同名分节 `## 0.9.0-rc.1`（否则 CI 按第 3 节硬闸门拒绝发布），且**首次这类构建要在 CI 里盯一眼**——Tauri 的 Windows NSIS 打包器对预发布版本号的接受度未在本项目实测过。
 

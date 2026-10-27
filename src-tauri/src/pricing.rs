@@ -283,7 +283,8 @@ pub fn set_catalog_epoch_ms(ms: i64) {
 /// fingerprinted below — an app update that reprices the same files would
 /// otherwise leave history at the old dollars until upstream happens to
 /// rewrite a catalog.
-const CORRECTIONS_REV: u32 = 15; // 15: Tencent Hy3 / Hy4 preview official prices
+const CORRECTIONS_REV: u32 = 16; // 16: gemini-4-argon baked card (2026-12-01 aware)
+                                  // 15: Tencent Hy3 / Hy4 preview official prices
 
 /// The corrections revision on its own — the spend cache treats a changed
 /// revision as a hard discard (the *code* that prices changed), while a
@@ -796,6 +797,79 @@ pub fn normalize_model_key(model: &str) -> String {
     model.trim().to_lowercase()
 }
 
+/// User-supplied slug aliases, `PANE_MODEL_ALIASES="logged-slug=table-slug,…"`.
+/// Read once per process. This exists because a vendor renaming a model leaves
+/// the local logs full of a slug no catalog knows, and the honest outcomes are
+/// "price it as the model it obviously is" (the user says so) or "leave it
+/// unpriced" — never a guess. An entry pointing at a slug that still does not
+/// resolve simply does not resolve; it cannot invent a price.
+fn env_aliases() -> &'static HashMap<String, String> {
+    static ALIASES: OnceLock<HashMap<String, String>> = OnceLock::new();
+    ALIASES.get_or_init(|| {
+        let Ok(raw) = std::env::var("PANE_MODEL_ALIASES") else { return HashMap::new() };
+        parse_alias_pairs(&raw)
+    })
+}
+
+/// The `PANE_MODEL_ALIASES` grammar, split out so it can be tested without
+/// touching the process environment (which a `OnceLock` would freeze anyway).
+fn parse_alias_pairs(raw: &str) -> HashMap<String, String> {
+    let mut map = HashMap::new();
+    for pair in raw.split(',') {
+        let Some((from, to)) = pair.split_once('=') else { continue };
+        let (from, to) = (normalize_model_key(from), normalize_model_key(to));
+        if from.is_empty() || to.is_empty() || from == to {
+            continue;
+        }
+        map.insert(from, to);
+    }
+    map
+}
+
+/// Peel a vendor date stamp — `-YYYYMMDD` or `-YYYY-MM-DD` — off a slug.
+/// Vendors publish `claude-sonnet-4-20250514` and `gpt-4o-2024-08-06` for the
+/// model the price tables list without the stamp. Left attached, the slug
+/// misses every table and prices at zero, which the spend view shows as free
+/// rather than unknown. The stamp is validated as a plausible date so a slug
+/// that merely ends in digits keeps its own identity.
+fn strip_date_suffix(model: &str) -> Option<&str> {
+    let tail = model.rsplit_once('-')?.1;
+    let plausible = |year: &str, month: &str, day: &str| {
+        let number = |text: &str| text.parse::<u32>().ok();
+        matches!(number(year), Some(2000..=2099))
+            && matches!(number(month), Some(1..=12))
+            && matches!(number(day), Some(1..=31))
+    };
+    // Compact YYYYMMDD.
+    if tail.len() == 8 && tail.bytes().all(|b| b.is_ascii_digit()) {
+        let base = model.rsplit_once('-')?.0;
+        if !base.is_empty() && plausible(&tail[0..4], &tail[4..6], &tail[6..8]) {
+            return Some(base);
+        }
+        return None;
+    }
+    // Dashed YYYY-MM-DD: peel the day, then the month, then the year, each
+    // from what is left — walking from `model` twice would re-read the day as
+    // the month and never match.
+    if tail.len() == 2 && tail.bytes().all(|b| b.is_ascii_digit()) {
+        let (rest, day) = model.rsplit_once('-')?;
+        let (rest, month) = rest.rsplit_once('-')?;
+        let (base, year) = rest.rsplit_once('-')?;
+        if base.is_empty()
+            || month.len() != 2
+            || !month.bytes().all(|b| b.is_ascii_digit())
+            || year.len() != 4
+            || !year.bytes().all(|b| b.is_ascii_digit())
+        {
+            return None;
+        }
+        if plausible(year, month, day) {
+            return Some(base);
+        }
+    }
+    None
+}
+
 /// Load `pricing_overrides.json` once. The file is optional; malformed
 /// entries are ignored rather than poisoning the whole catalog.
 fn load_overrides_from_disk() {
@@ -904,6 +978,13 @@ fn resolve(s: &Store, model: &str, depth: u8) -> Option<Price> {
     // Every table below is keyed by the folded spelling, so an alias target
     // that arrives with capitals has to be folded too.
     let canonical = normalize_model_key(&canonical);
+    // A user-declared alias outranks every catalog: it is the only source that
+    // knows what a locally-logged slug actually is. It still has to resolve to
+    // a real price, so an alias cannot invent one.
+    let canonical = match env_aliases().get(&canonical) {
+        Some(target) => target.clone(),
+        None => canonical,
+    };
 
     // A catalog row with zero input AND output rates is ambiguous: brand-new
     // slugs often land as 0/0 placeholders (qwen3.8-max), but free-tier and
@@ -1000,6 +1081,18 @@ fn resolve(s: &Store, model: &str, depth: u8) -> Option<Price> {
     // always wins the moment one ships. Keep this list tiny and sourced.
     if let Some(p) = builtin_price(&canonical) {
         return Some(p);
+    }
+
+    // Dated slugs are the same model the table lists without a stamp
+    // (`claude-sonnet-4-20250514`, `gpt-4o-2024-08-06`). This is a fallback, so
+    // it runs after every exact source, including the baked table — a dated
+    // gateway SKU with its own row (aihubmix/qwen3.8-max-2026-09-02) must keep
+    // that row. It recurses, so a peeled base still goes through aliases and
+    // the -fast / -highspeed / -priority tiers like any other slug.
+    if let Some(base) = strip_date_suffix(&canonical) {
+        if let Some(p) = resolve(s, base, depth + 1) {
+            return Some(p);
+        }
     }
     // DeepSeek ships dated snapshots ("deepseek-v4-pro-0813"): when no
     // source knows the dated form, retry the base slug through the WHOLE
@@ -1128,6 +1221,31 @@ fn kimi_vendor_tail(canonical: &str) -> Option<&str> {
     }
 }
 
+/// Antigravity's `gemini-4-argon` rate card. Google's published change takes
+/// effect 2026-12-01: $2 in / $0.10 cache read / $10 out becomes
+/// $4 / $0.20 / $20 per MTok. No cache-write rate is published, so writes
+/// bill at input. The date check keeps the baked fallback correct even when
+/// no catalog ships the new row; spend records the new pin on the timeline at
+/// the change instant, so the rise is forward-only rather than retroactive.
+const ARGON_CHANGE_RFC3339: &str = "2026-12-01T00:00:00Z";
+
+pub fn argon_price_change_ms() -> i64 {
+    static MS: OnceLock<i64> = OnceLock::new();
+    *MS.get_or_init(|| {
+        chrono::DateTime::parse_from_rfc3339(ARGON_CHANGE_RFC3339)
+            .expect("valid Argon change date")
+            .timestamp_millis()
+    })
+}
+
+pub fn argon_price_at(ts_ms: i64) -> Price {
+    if ts_ms >= argon_price_change_ms() {
+        Price::flat(4.0, 20.0, 0.20, 4.0)
+    } else {
+        Price::flat(2.0, 10.0, 0.10, 2.0)
+    }
+}
+
 fn builtin_price(canonical: &str) -> Option<Price> {
     // Gateways prefix the vendor slug (`xai/grok-4.6`, `deepseek/…`,
     // `accounts/fireworks/models/deepseek-v4-pro`). Peel to the last
@@ -1175,6 +1293,10 @@ fn builtin_price(canonical: &str) -> Option<Price> {
         // retry, so a catalog that learns the base slug outranks them.
         "deepseek-v4-pro" => Some(Price::flat(0.464, 0.928, 0.004, 0.464)),
         "deepseek-v4-flash" => Some(Price::flat(0.154, 0.308, 0.003, 0.154)),
+        // Google Antigravity `gemini-4-argon` (#103, openusage + cockpit
+        // verified). Date-aware: launch card until 2026-12-01, then Google's
+        // announced $4/$0.20/$20 card. Catalogs/supplement still outrank this.
+        "gemini-4-argon" => Some(argon_price_at(now_ms())),
         // AihubMix GLM-5.3 preview (aihubmix.com/model/coding-glm-5.3):
         // $0.060 in / $0.220 out per MTok. No cache rate is published, so
         // reads/writes bill at the input rate. Only this gateway SKU is
@@ -1255,6 +1377,28 @@ mod tests {
         store.memo.clear();
         drop(store);
         super::set_overrides(HashMap::new());
+    }
+
+    #[test]
+    fn argon_price_changes_on_december_first() {
+        let change = super::argon_price_change_ms();
+        let before = super::argon_price_at(change - 1);
+        assert_eq!(
+            (before.input, before.output, before.cache_read, before.cache_write),
+            (2.0, 10.0, 0.10, 2.0),
+            "launch card must stay in force through 2026-11-30"
+        );
+        let after = super::argon_price_at(change);
+        assert_eq!(
+            (after.input, after.output, after.cache_read, after.cache_write),
+            (4.0, 20.0, 0.20, 4.0),
+            "Google's 2026-12-01 card"
+        );
+        assert_eq!(
+            super::builtin_price("gemini-4-argon").map(|p| p.input),
+            Some(super::argon_price_at(super::now_ms()).input),
+            "the baked fallback follows the calendar"
+        );
     }
 
     #[test]
@@ -1479,9 +1623,13 @@ mod tests {
             (p.input, p.output, p.cache_read, p.cache_write),
             (1.69, 5.07, 0.169, 2.1125)
         );
-        // Bare / other-gateway spellings stay off this discount card.
+        // Bare / other-gateway spellings stay off this discount card. The bare
+        // *dated* spelling does now price — the general date peel sends it to
+        // the base model's own GA card — so it must land on 2.0/6.0, never on
+        // the gateway's 1.69/5.07 (#104-7).
         assert!(super::resolve(&store, "qwen3.8-max-0902", 0).is_none());
-        assert!(super::resolve(&store, "qwen3.8-max-2026-09-02", 0).is_none());
+        let bare_dated = super::resolve(&store, "qwen3.8-max-2026-09-02", 0).unwrap();
+        assert_eq!((bare_dated.input, bare_dated.output), (2.0, 6.0));
         // Alibaba's GA card is unchanged.
         let max = super::resolve(&store, "qwen3.8-max", 0).unwrap();
         assert_eq!((max.input, max.output), (2.0, 6.0));
@@ -1763,5 +1911,46 @@ mod tests {
 
         super::set_schedules(Vec::new());
         super::set_overrides(std::collections::HashMap::new());
+    }
+
+    /// #104-7 — vendors stamp release dates into the slug. Left attached, the
+    /// row misses every table and prices at zero, which the spend view shows as
+    /// free rather than unknown. Both published spellings must peel.
+    #[test]
+    fn a_dated_slug_prices_as_its_base_model() {
+        let price = super::Price::flat(3.0, 15.0, 0.3, 3.75);
+        // A hand-built store keeps this about the resolution rule itself: no
+        // live catalogs, no memo, no dependence on which test ran before.
+        let mut store = super::Store::default();
+        store.supplement.insert("zqx-base".to_string(), price);
+        assert_eq!(super::resolve(&store, "zqx-base-20250514", 0), Some(price), "compact YYYYMMDD");
+        assert_eq!(super::resolve(&store, "zqx-base-2025-05-14", 0), Some(price), "dashed YYYY-MM-DD");
+        assert_eq!(super::resolve(&store, "ZQX-Base-20250514", 0), Some(price), "case folds first");
+    }
+
+    /// The peel must not become a licence to guess. A tail that is not a
+    /// plausible date keeps its identity, and a real date whose base is unknown
+    /// stays unpriced instead of borrowing a neighbour's rates.
+    #[test]
+    fn an_implausible_or_unknown_date_is_never_guessed_at() {
+        let price = super::Price::flat(1.0, 2.0, 0.1, 1.0);
+        let mut store = super::Store::default();
+        store.supplement.insert("zqx-base".to_string(), price);
+        assert_eq!(super::resolve(&store, "zqx-base-99999999", 0), None, "month 99 is not a date");
+        assert_eq!(super::resolve(&store, "zqx-base-20251340", 0), None, "month 13 / day 40 is not a date");
+        assert_eq!(super::resolve(&store, "zqx-ghost-20250514", 0), None, "a real date with no base stays unpriced");
+        assert!(super::strip_date_suffix("zqx-base-20250514").is_some());
+        // Only the trailing stamp peels: the segment before it survives.
+        assert_eq!(super::strip_date_suffix("zqx-base-2-2025-05-14"), Some("zqx-base-2"));
+    }
+
+    /// #104-7 — the env grammar is the only place a user can teach the pricer a
+    /// local slug, so malformed entries must be dropped rather than stored.
+    #[test]
+    fn env_alias_pairs_are_normalised_and_validated() {
+        let map = super::parse_alias_pairs("Logged-Slug = Table-Slug , broken, =empty, same=same, a=b");
+        assert_eq!(map.get("logged-slug").map(String::as_str), Some("table-slug"));
+        assert_eq!(map.get("a").map(String::as_str), Some("b"));
+        assert_eq!(map.len(), 2, "broken, empty and self-referential pairs are dropped");
     }
 }

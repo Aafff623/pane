@@ -24,7 +24,7 @@ evidence points there.
 | `http://127.0.0.1:6736/v1/status` | version, uptime, refresh interval + last-refresh age, provider rollups, proxy **source** (never the address) |
 | `http://127.0.0.1:6736/v1/sources` | spend sources present vs absent on this machine |
 | `http://127.0.0.1:6736/v1/usage` · `/v1/usage/<id>` | usage numbers only (macOS-compatible wire format) |
-| `%APPDATA%\Pane\config.json` | `disabled`, `removedProviders`, `refreshMinutes`, `proxy`, `telemetry` |
+| `%APPDATA%\PaneAafff623\config.json` | `disabled`, `removedProviders`, `refreshMinutes`, `proxy` |
 | `%APPDATA%\Pane\last_snapshots.json` | fallback when the API is unreachable: the same snapshots as a map |
 
 Always call with `curl -s --noproxy '*'` — a system proxy can otherwise swallow

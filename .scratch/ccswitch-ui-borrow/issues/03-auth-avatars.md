@@ -1,4 +1,4 @@
-Status: ready
+Status: done (2026-10-26) — Copilot GitHub avatar shipped. Codex carries no avatar in the upstream implementation either, and Pane's Kimi family is API-key/local-CLI rather than an OAuth identity, so the letter tile is the honest fallback for both.
 Type: task
 Blocked by: —
 

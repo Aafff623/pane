@@ -1,5 +1,5 @@
 // Native adapters for the owner-supplied MOTDES components. No React runtime.
-import { paneMotion } from '/motion.js?v=1';
+import { paneMotion } from '/motion.js?v=2';
 
 export function initSiteEffects() {
   const finePointer = matchMedia('(hover: hover) and (pointer: fine)');

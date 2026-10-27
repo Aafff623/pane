@@ -43,7 +43,7 @@ jobs:
       # WINGET_TOKEN, so a hijacked tag could exfiltrate it.
       - uses: vedantmgoyal9/winget-releaser@4ffc7888bffd451b357355dc214d43bb9f23917e # v2
         with:
-          identifier: Pane.Pane
+          identifier: Aafff623.Pane
           installers-regex: '-setup\.exe$'
           release-tag: ${{ inputs.tag || github.event.release.tag_name }}
           token: ${{ secrets.WINGET_TOKEN }}

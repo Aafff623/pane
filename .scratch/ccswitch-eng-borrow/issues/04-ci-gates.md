@@ -1,4 +1,4 @@
-Status: ready
+Status: done (2026-10-26) — release-notes gate already runs before packaging; CI path filtering deliberately declined so required checks never skip on docs-only PRs.
 Type: task
 Blocked by: —
 

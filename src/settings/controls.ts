@@ -157,14 +157,10 @@ export const SETTINGS_CONTROLS_HTML = `<div class="acc-group open">
         <button class="acc-head"><span data-i18n="settings.privacy">Privacy</span> <span class="chev">&#8964;</span></button>
         <div class="acc-body"><div class="acc-inner">
           <p class="settings-note" data-i18n="settings.privacyNote">
-            One anonymous "alive today" ping and per-provider success/failure
-            counts, once a day, under a random ID attached to nothing. No
-            usage amounts, no spend, no IPs stored. Full details in
-            docs/privacy.md.
+            Pane has no telemetry, no analytics SDK, and no crash reporter.
+            Everything it reads stays on this machine; the full network-call
+            list is in docs/privacy.md.
           </p>
-          <div class="setting-row">
-            <label class="toggle"><input id="telemetry" type="checkbox" /> <span data-i18n="settings.telemetry">Share anonymous usage statistics</span></label>
-          </div>
           <div class="setting-row">
             <label class="toggle" title="During Presentation Settings, exclusive fullscreen, or remote control, tray percentages hide. The Pane icon and starred provider logos stay. A Teams/Zoom window share is not detected. Off by default." data-i18n-title="settings.hideSharingTip"><input id="hide-while-sharing" type="checkbox" /> <span data-i18n="settings.hideSharing">Hide tray numbers while screen sharing</span></label>
           </div>
@@ -183,6 +179,10 @@ export const SETTINGS_CONTROLS_HTML = `<div class="acc-group open">
           <div class="setting-row">
             <label for="proxy-url" data-i18n="settings.proxyUrl">Proxy URL</label>
             <input id="proxy-url" type="text" placeholder="socks5://host:1080" spellcheck="false" />
+          </div>
+          <div class="proxy-tools" id="proxy-tools">
+            <button type="button" class="link-btn" id="proxy-detect" data-i18n="settings.proxyDetect">从系统读取</button>
+            <span class="settings-note proxy-status" id="proxy-status" role="status"></span>
           </div>
           <p class="settings-note" data-i18n="settings.networkNote">
             Applies after the app restarts. Local usage API always runs at

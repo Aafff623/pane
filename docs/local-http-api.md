@@ -1,7 +1,9 @@
 # Local HTTP API
 
 Pane serves your usage as JSON so your own scripts, widgets, and overlays
-can read it.
+can read it. This HTTP API is the single machine-readable surface; the
+optional MCP server is a thin read-only adapter over it (see
+[ADR 0004](adr/0004-extension-surfaces.md)).
 
 ```
 GET http://127.0.0.1:6736/v1/usage          # all enabled providers
@@ -19,6 +21,8 @@ GET http://127.0.0.1:6736/v1/status     # version, uptime, refresh age, provider
 GET http://127.0.0.1:6736/v1/providers  # every card with status/stale/error/warning + disabled/removed id lists
 GET http://127.0.0.1:6736/v1/doctor     # checks[{name, ok, classification, detail, remediation}] + healthy
 GET http://127.0.0.1:6736/v1/sources    # local spend sources: detected vs absent
+GET http://127.0.0.1:6736/v1/limits     # openusage.limits.v1 envelope (structured limits)
+GET http://127.0.0.1:6736/v1/limits/:id # exact card id, or every card in a family
 ```
 
 - `/v1/doctor` is the entry point: read `healthy`, then apply the
@@ -32,7 +36,7 @@ GET http://127.0.0.1:6736/v1/sources    # local spend sources: detected vs absen
   reqwest embeds the request URL, which can carry a private relay host.
 - `/v1/status` reports the proxy as a **source** (`config` / `system` /
   `none`), never the address.
-- `last_snapshots.json` in `%APPDATA%\Pane\` still works as a fallback when
+- `last_snapshots.json` in `%APPDATA%\PaneAafff623\` still works as a fallback when
   the API is unreachable.
 
 Wire format (compatible with the macOS OpenUsage API):
@@ -54,6 +58,46 @@ Wire format (compatible with the macOS OpenUsage API):
   }]
 }]
 ```
+
+## Machine-readable limits (`openusage.limits.v1`)
+
+`/v1/limits` is separate from the macOS-compatible `/v1/usage` rows. It
+carries only structured, typed readings — a display string never becomes a
+quota. The envelope has exactly four top-level fields:
+
+```json
+{
+  "schema": "openusage.limits.v1",
+  "generatedAt": "2026-10-26T12:00:00Z",
+  "providers": {
+    "claude": {
+      "displayName": "Claude",
+      "plan": "Max",
+      "fetchedAt": "2026-10-26T12:00:00Z",
+      "stale": false,
+      "resources": {
+        "Session": { "kind": "consumption", "unit": "percent", "used": 22, "limit": 100, "remaining": 78, "utilization": 0.22, "windowSeconds": 18000 },
+        "Extra credits": { "kind": "balance", "unit": "usd", "remaining": 7.5, "available": true }
+      }
+    }
+  },
+  "errors": [{ "providerId": "devin", "code": "error", "message": "…" }]
+}
+```
+
+- A value that is not known is **omitted**, never zeroed; `estimated` is
+  reserved and currently never emitted.
+- `:id` prefers an exact card id (`onenewapi@<key-id>`); otherwise it returns
+  every card in that provider family (`onenewapi`). `/v1/usage/:id` keeps its
+  exact-only behavior for macOS parity. A card that exposes no structured
+  resource is simply absent from `providers`; an unknown id is
+  `404 provider_not_found`.
+- An untouched window has no `resetsAt`: the reset instant is a full period
+  away, not a countdown. The card surfaces the same fact as “Not started”.
+- Free text (error messages, dashboard URLs, keys) never enters resources.
+  Error strings are URL-stripped by the same sanitizer as `/v1/providers`.
+- If port 6736 is already taken, the later process stays silent; `/v1/limits`
+  is unavailable with the rest of the API.
 
 ## Security posture
 

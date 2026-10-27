@@ -1,4 +1,4 @@
-Status: ready
+Status: done (2026-10-26) — AppError/structured JSON + tray menu problem signature skip.
 Type: task
 Blocked by: —
 

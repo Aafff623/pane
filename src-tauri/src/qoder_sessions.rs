@@ -31,7 +31,7 @@ const SCAN_DAYS: i64 = 31;
 const MAX_SESSIONS: usize = 50;
 /// Bump when the parser's interpretation changes so an in-process cache from
 /// an older build cannot keep serving events with missing windows.
-const CACHE_VERSION: u32 = 2;
+const CACHE_VERSION: u32 = 3;
 
 #[derive(Serialize, Clone, Default)]
 pub struct QoderWindow {
@@ -64,6 +64,11 @@ pub struct QoderModelSpend {
     pub billed_tokens: f64,
     pub trips: u64,
     pub tokens_unavailable_trips: u64,
+    /// Where the context window behind this model's token estimate came from
+    /// (#37-03): "db" (a real context_window), "same_model" (carried over
+    /// from another request of the same model) or "unknown". Explanation
+    /// only — the token math itself never looks at this field.
+    pub window_source: String,
 }
 
 #[derive(Serialize, Clone)]
@@ -169,10 +174,57 @@ struct Event {
     original_credits: f64,
     ratio: Option<f64>,
     window: Option<f64>,
+    /// Provenance of `window` (#37-03) — explanation only, never an input
+    /// to the token math.
+    window_source: WindowSource,
     request_id: String,
     /// `usage.billable`; `Some(false)` means the request was free and its
     /// nominal credits never hit the platform quota.
     billable: Option<bool>,
+}
+
+/// Where the window a request's token estimate multiplied by came from.
+/// Serialized per model as `QoderModelSpend::window_source`.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+enum WindowSource {
+    /// A real `context_window`: the transcript's own `runtime-config` line
+    /// for that round, or Qoder's model-preference database.
+    Db,
+    /// The round published none, but another request of the same model did
+    /// (a null config in the same file, or a subagent's parent session).
+    SameModel,
+    /// Nothing anywhere for this model — tokens stay unavailable.
+    #[default]
+    Unknown,
+}
+
+impl WindowSource {
+    fn as_str(self) -> &'static str {
+        match self {
+            WindowSource::Db => "db",
+            WindowSource::SameModel => "same_model",
+            WindowSource::Unknown => "unknown",
+        }
+    }
+
+    fn parse(value: &str) -> Self {
+        match value {
+            "db" => WindowSource::Db,
+            "same_model" => WindowSource::SameModel,
+            _ => WindowSource::Unknown,
+        }
+    }
+
+    /// The strongest basis any request in the aggregate got: a real window
+    /// outranks a carried-over one, which outranks none. Trips that could
+    /// not derive tokens stay visible via `tokens_unavailable_trips`.
+    fn merge(self, other: Self) -> Self {
+        match (self, other) {
+            (WindowSource::Db, _) | (_, WindowSource::Db) => WindowSource::Db,
+            (WindowSource::SameModel, _) | (_, WindowSource::SameModel) => WindowSource::SameModel,
+            _ => WindowSource::Unknown,
+        }
+    }
 }
 
 #[derive(Clone, Default)]
@@ -238,7 +290,7 @@ fn parse_file(path: &Path) -> ParsedFile {
 
 fn parse_reader(reader: impl BufRead) -> ParsedFile {
     let mut out = ParsedFile::default();
-    let mut current: Option<(String, Option<f64>)> = None;
+    let mut current: Option<(String, Option<f64>, WindowSource)> = None;
     for line in reader.lines() {
         let Ok(line) = line else { continue };
         // Session logs are mostly conversation bodies. Two cheap substring
@@ -263,8 +315,14 @@ fn parse_reader(reader: impl BufRead) -> ParsedFile {
             // A null config means "this round carried no window", not
             // "forget the window this model already had". Keep the model's
             // last non-null window; never borrow another model's window.
-            let effective = window.or_else(|| out.windows.get(model).copied());
-            current = Some((model.to_string(), effective));
+            let (effective, source) = match window {
+                Some(w) => (Some(w), WindowSource::Db),
+                None => match out.windows.get(model).copied() {
+                    Some(w) => (Some(w), WindowSource::SameModel),
+                    None => (None, WindowSource::Unknown),
+                },
+            };
+            current = Some((model.to_string(), effective, source));
             continue;
         }
         let Some(message) = value.get("message") else {
@@ -282,14 +340,17 @@ fn parse_reader(reader: impl BufRead) -> ParsedFile {
             .get("model")
             .and_then(Value::as_str)
             .map(str::to_string)
-            .or_else(|| current.as_ref().map(|(m, _)| m.clone()))
+            .or_else(|| current.as_ref().map(|(m, _, _)| m.clone()))
             .unwrap_or_default();
         if model.is_empty() {
             continue;
         }
-        let window = match current.as_ref() {
-            Some((current_model, window)) if current_model == &model => *window,
-            _ => out.windows.get(&model).copied(),
+        let (window, window_source) = match current.as_ref() {
+            Some((current_model, window, source)) if current_model == &model => (*window, *source),
+            _ => match out.windows.get(&model).copied() {
+                Some(w) => (Some(w), WindowSource::SameModel),
+                None => (None, WindowSource::Unknown),
+            },
         };
         let request_id = usage
             .get("request_id")
@@ -307,6 +368,7 @@ fn parse_reader(reader: impl BufRead) -> ParsedFile {
             original_credits: original.unwrap_or_else(|| credits.unwrap_or(0.0)),
             ratio: usage.get("context_usage_ratio").and_then(Value::as_f64),
             window,
+            window_source,
             request_id,
             billable: usage.get("billable").and_then(Value::as_bool),
         });
@@ -420,6 +482,8 @@ struct ModelAgg {
     tokens: f64,
     trips: u64,
     unavailable: u64,
+    /// Strongest window basis seen for this model inside the aggregate.
+    window_source: WindowSource,
 }
 
 impl ModelAgg {
@@ -430,6 +494,7 @@ impl ModelAgg {
         self.tokens += model.billed_tokens;
         self.trips += model.trips;
         self.unavailable += model.tokens_unavailable_trips;
+        self.window_source = self.window_source.merge(WindowSource::parse(&model.window_source));
     }
 }
 
@@ -471,6 +536,7 @@ fn add_model(agg: &mut HashMap<String, ModelAgg>, event: &Event, tokens: Option<
         entry.charged += event.credits;
     }
     entry.trips += 1;
+    entry.window_source = entry.window_source.merge(event.window_source);
     match tokens {
         Some(t) => entry.tokens += t,
         None => entry.unavailable += 1,
@@ -561,6 +627,7 @@ fn build_report(root: &Path, entries: Vec<(String, Event, bool)>, lite_sessions:
                 billed_tokens: a.tokens,
                 trips: a.trips,
                 tokens_unavailable_trips: a.unavailable,
+                window_source: a.window_source.as_str().to_string(),
             })
             .collect();
         list.sort_by(|a, b| b.credits.partial_cmp(&a.credits).unwrap_or(std::cmp::Ordering::Equal));
@@ -807,19 +874,36 @@ fn collect_with_db(root: &Path, db: Option<&Path>) -> QoderSpend {
         let parent = if is_subagent { parents.get(&id) } else { None };
         for event in parsed.events {
             // Subagent events resolve their window from the parent when the
-            // subagent file itself carried no runtime-config.
+            // subagent file itself carried no runtime-config. A window that
+            // only the parent named is a same-model carry-over, not a
+            // window this transcript published.
             let event = if is_subagent && event.window.is_none() {
                 let window = parent.and_then(|p| inherited_window(&event, p));
-                Event { window, ..event }
+                Event {
+                    window_source: if window.is_some() {
+                        WindowSource::SameModel
+                    } else {
+                        WindowSource::Unknown
+                    },
+                    window,
+                    ..event
+                }
             } else {
                 event
             };
             // Last resort: Qoder's own per-model preference window. This is
             // deliberately keyed by the event's model; no global or 200K
-            // fallback and no cross-model borrowing.
+            // fallback and no cross-model borrowing. The preference table
+            // stores a real context_window, so it counts as "db".
             let event = if event.window.is_none() {
+                let window = db_windows.get(&event.model).copied();
                 Event {
-                    window: db_windows.get(&event.model).copied(),
+                    window_source: if window.is_some() {
+                        WindowSource::Db
+                    } else {
+                        WindowSource::Unknown
+                    },
+                    window,
                     ..event
                 }
             } else {
@@ -1140,9 +1224,67 @@ mod tests {
         assert_eq!(report.all.credits, 2.0);
         let df = report.all.models.iter().find(|model| model.model == "dfmodel").unwrap();
         assert_eq!(df.billed_tokens, 250_000.0);
+        assert_eq!(df.window_source, "db", "the preference table stores a real context_window");
         let qf = report.all.models.iter().find(|model| model.model == "qfmodel").unwrap();
         assert_eq!(qf.billed_tokens, 0.0);
         assert_eq!(qf.tokens_unavailable_trips, 1);
+        assert_eq!(qf.window_source, "unknown");
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    /// #37-03: the report explains where each model's window came from —
+    /// a real context_window ("db"), a same-model carry-over ("same_model")
+    /// or nothing ("unknown") — without touching the token math.
+    #[test]
+    fn window_source_explains_where_each_model_window_came_from() {
+        let lines = vec![
+            config_line(1, "dfmodel", Some(1_000_000)),
+            usage_line("2026-10-20T01:00:00Z", "dfmodel", 1.0, 0.1, "a"),
+            config_line(2, "dfmodel", None),
+            usage_line("2026-10-20T02:00:00Z", "dfmodel", 1.0, 0.2, "b"),
+            config_line(3, "qfmodel", None),
+            usage_line("2026-10-20T03:00:00Z", "qfmodel", 1.0, 0.3, "c"),
+        ];
+        let parsed = parse(&lines);
+        assert_eq!(parsed.events[0].window_source, WindowSource::Db);
+        assert_eq!(
+            parsed.events[1].window_source,
+            WindowSource::SameModel,
+            "a null-config round carries the same model's window over"
+        );
+        assert_eq!(parsed.events[2].window_source, WindowSource::Unknown);
+        let report = build_report(
+            Path::new("unused"),
+            parsed.events.into_iter().map(|event| ("s1".into(), event, false)).collect(),
+            0,
+        );
+        // The strongest basis any request got wins per model.
+        let df = report.all.models.iter().find(|m| m.model == "dfmodel").unwrap();
+        assert_eq!(df.window_source, "db");
+        let qf = report.all.models.iter().find(|m| m.model == "qfmodel").unwrap();
+        assert_eq!(qf.window_source, "unknown");
+        // Token math unchanged.
+        assert_eq!(report.all.billed_tokens, 300_000.0);
+        assert_eq!(report.all.tokens_unavailable_trips, 1);
+    }
+
+    #[test]
+    fn subagent_only_model_reports_same_model_window_source() {
+        let root = temp_root("window-source");
+        // The parent names the window but spends nothing itself; the subagent
+        // spends under an inherited window — that is a carry-over, not a db
+        // reading inside the subagent transcript.
+        write_session(&root, "s1.jsonl", &[config_line(1, "dfmodel", Some(1_000_000))]);
+        fs::create_dir_all(root.join("proj").join("s1").join("subagents")).unwrap();
+        fs::write(
+            root.join("proj").join("s1").join("subagents").join("agent-1.jsonl"),
+            usage_line("2026-10-20T01:00:00Z", "dfmodel", 0.5, 0.25, "sub") + "\n",
+        )
+        .unwrap();
+        let report = collect_with_db(&root, None);
+        let df = report.all.models.iter().find(|m| m.model == "dfmodel").unwrap();
+        assert_eq!(df.window_source, "same_model");
+        assert_eq!(df.billed_tokens, 250_000.0);
         let _ = fs::remove_dir_all(&root);
     }
 
@@ -1259,6 +1401,7 @@ mod tests {
             original_credits: 1.0,
             ratio: Some(0.1),
             window: Some(1000.0),
+            window_source: WindowSource::Db,
             request_id: "same".into(),
             billable: Some(true),
         };
@@ -1285,15 +1428,22 @@ mod tests {
             original_credits: 0.5,
             ratio: Some(0.25),
             window: None,
+            window_source: WindowSource::Unknown,
             request_id: "sub".into(),
             billable: Some(true),
         };
         let mut parent = ParsedFile::default();
         parent.windows.insert("dfmodel".into(), 200_000.0);
-        let event = Event { window: inherited_window(&event, &parent), ..event };
+        let window = inherited_window(&event, &parent);
+        let event = Event {
+            window_source: if window.is_some() { WindowSource::SameModel } else { WindowSource::Unknown },
+            window,
+            ..event
+        };
         let report = build_report(Path::new("unused"), vec![("s1".into(), event, true)], 0);
         assert_eq!(report.all.billed_tokens, 50_000.0);
         assert_eq!(report.all.tokens_unavailable_trips, 0);
+        assert_eq!(report.all.models[0].window_source, "same_model");
     }
 
     #[test]
@@ -1305,6 +1455,7 @@ mod tests {
             original_credits: 0.5,
             ratio: Some(0.25),
             window: None,
+            window_source: WindowSource::Unknown,
             request_id: "sub-other".into(),
             billable: Some(true),
         };
@@ -1323,6 +1474,7 @@ mod tests {
             original_credits: credits,
             ratio: Some(ratio),
             window: Some(100_000.0),
+            window_source: WindowSource::Db,
             request_id: request.into(),
             billable: Some(true),
         };
@@ -1360,6 +1512,7 @@ mod tests {
             original_credits: 1.0,
             ratio: Some(0.1),
             window: Some(100_000.0),
+            window_source: WindowSource::Db,
             request_id: request.into(),
             billable: Some(true),
         };
@@ -1451,7 +1604,7 @@ mod tests {
         let ts=|day: chrono::NaiveDate, h, m, sec| day.and_hms_opt(h,m,sec).unwrap()
             .and_local_timezone(Local).single().unwrap().with_timezone(&Utc);
         let event=|ts, id: &str, ratio| Event {ts,model:"dfmodel".into(),credits:1.0,original_credits:2.0,
-            ratio:Some(ratio),window:Some(1_000_000.0),request_id:id.into(),billable:Some(true)};
+            ratio:Some(ratio),window:Some(1_000_000.0),window_source:WindowSource::Db,request_id:id.into(),billable:Some(true)};
         let entries=vec![
             ("yesterday-start".into(),event(ts(yesterday,0,0,0),"ys",0.1),false),
             ("yesterday-end".into(),event(ts(yesterday,23,59,59),"ye",0.2),false),
@@ -1497,12 +1650,14 @@ mod tests {
             original_credits: 1.0,
             ratio: Some(0.1),
             window: None,
+            window_source: WindowSource::Unknown,
             request_id: "x".into(),
             billable: Some(true),
         };
         let report = build_report(root, vec![("s1".into(), base, false)], 0);
         assert_eq!(report.all.tokens_unavailable_trips, 1);
         assert_eq!(report.all.credits, 1.0);
+        assert_eq!(report.all.models[0].window_source, "unknown");
         assert!(!report.days.is_empty());
     }
 }

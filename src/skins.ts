@@ -41,6 +41,20 @@ export interface RemotePackEntry {
   url: string;
 }
 let remoteIndex: RemotePackEntry[] = [];
+/// A cross-window nudge: installing/removing a pack in the settings window
+/// must make the popover re-read its registry, or the applied skin has no CSS.
+export const SKIN_PACKS_STORAGE_KEY = "pane.skins.packs";
+export function broadcastSkinPackChange(): void {
+  try {
+    localStorage.setItem(SKIN_PACKS_STORAGE_KEY, String(Date.now()));
+  } catch { /* private mode — the acting window still has the new registry */ }
+}
+/// True once the first index attempt settled (success or failure), so the
+/// shop can tell "still checking" from "checked and unreachable".
+let indexSettled = false;
+export function skinIndexSettled(): boolean {
+  return indexSettled;
+}
 /// Why the last index refresh failed, for a short, honest workshop reason.
 /// `null` = the last attempt succeeded.
 let remoteIndexError: "network" | "http" | "format" | null = null;
@@ -89,7 +103,23 @@ function loadCachedIndex(): void {
   } catch { /* nothing cached — workshop falls back to the empty state. */ }
 }
 
-export async function refreshSkinIndex(): Promise<void> {
+let indexRefresh: Promise<void> | null = null;
+
+/// One in-flight index request at a time: the boot call and the shop's
+/// refresh button share it, so an older failure can never overwrite a newer
+/// success and one click cannot stampede the endpoint.
+export function refreshSkinIndex(): Promise<void> {
+  if (!indexRefresh) {
+    indexRefresh = refreshSkinIndexOnce().finally(() => { indexRefresh = null; });
+  }
+  return indexRefresh;
+}
+
+export function skinIndexRefreshing(): boolean {
+  return indexRefresh !== null;
+}
+
+async function refreshSkinIndexOnce(): Promise<void> {
   remoteIndexError = null;
   const inTauri = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
   let entries: RemotePackEntry[] | null = null;
@@ -121,10 +151,12 @@ export async function refreshSkinIndex(): Promise<void> {
     try {
       localStorage.setItem("pane.skins.index", JSON.stringify(remoteIndex));
     } catch { /* private mode — memory copy is enough for the session. */ }
+    indexSettled = true;
     return;
   }
   remoteIndexError = classifyIndexError(failure);
   loadCachedIndex();
+  indexSettled = true;
 }
 
 export function packSkinList(): PackSkin[] {
@@ -145,19 +177,22 @@ function injectPackCss(p: PackSkin): void {
 
 /// Loads the installed pack registry and injects each pack's stylesheet.
 /// Safe to call twice; safe when the command surface is missing (browser
-/// demo) — the workshop then shows only index entries.
-export async function refreshInstalledPacks(): Promise<void> {
+/// demo) — the workshop then shows only index entries. Returns false when the
+/// registry could not be read; the last good registry is kept. Callers must
+/// not apply a skin after a failed refresh.
+export async function refreshInstalledPacks(): Promise<boolean> {
   let packs: { id: string; name: string; version: string; entry_css: string }[];
   try {
     packs = await invoke("skin_pack_list");
   } catch {
-    return;
+    return false;
   }
   for (const old of packSkins) {
     document.querySelector(`style[data-skin-pack="${old.id}"]`)?.remove();
   }
   packSkins = packs.map((p) => ({ id: p.id, name: p.name, version: p.version, entryCss: p.entry_css }));
   for (const p of packSkins) injectPackCss(p);
+  return true;
 }
 
 export function normalizeSkin(id: unknown): SkinId | null {

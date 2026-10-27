@@ -96,3 +96,6 @@ jobs:
         with:
           node-version: 22
       - run: node --test site/*.test.mjs tests/i18n-pairing.test.mjs
+      - run: node site/scripts/check-skin-packs.mjs
+      # The site's version and provider count are generated, never typed.
+      - run: node site/scripts/sync-site-version.mjs --check

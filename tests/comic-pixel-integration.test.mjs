@@ -36,7 +36,6 @@ function sampleContext() {
     TAU: Math.PI * 2,
     sectorPath: () => "M0 0",
     spendColor: () => "#123456",
-    skinPreviewPage: "quota",
     Date,
     Math,
   });
@@ -56,16 +55,14 @@ test("workshop samples render quota, spend and settings for any pack under its o
   assert.match(quota, /data-used="93"/);
   assert.match(quota, /class="fill low"/);
 
-  vm.runInContext('skinPreviewPage = "settings"', ctx);
-  const settings = ctx.renderSkinSample("dark", "comic-pixel");
+  const settings = ctx.renderSkinSample("dark", "comic-pixel", false, "settings");
   assert.match(settings, /data-skin="comic-pixel"/);
   assert.match(settings, /<select /);
   assert.equal((settings.match(/class="toggle"/g) ?? []).length, 2, "both self-drawn switches must be shown");
   assert.equal((settings.match(/type="checkbox"/g) ?? []).length, 2);
   assert.match(settings, /data-theme="dark"/);
 
-  vm.runInContext('skinPreviewPage = "spend"', ctx);
-  const spend = ctx.renderSkinSample("light", "comic-pixel");
+  const spend = ctx.renderSkinSample("light", "comic-pixel", false, "spend");
   assert.match(spend, /total-spend/);
   assert.match(spend, /data-skin="comic-pixel"/);
 

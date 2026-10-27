@@ -1,4 +1,4 @@
-import { paneMotion } from '/motion.js?v=1';
+import { paneMotion } from '/motion.js?v=2';
 import { createClickSpark } from '/effects/click-spark.js?v=1';
 
 export function initHeroReactions() {

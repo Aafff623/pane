@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "Pane",
-  "version": "0.10.1",
-  "identifier": "com.jazii.pane",
+  "productName": "Pane-Aafff623",
+  "version": "0.11.1",
+  "identifier": "com.aafff623.pane",
   "build": {
     "beforeDevCommand": "npm run dev",
     "devUrl": "http://127.0.0.1:1420",
@@ -45,7 +45,7 @@
     "active": true,
     "targets": "all",
     "createUpdaterArtifacts": true,
-    "publisher": "Pane",
+    "publisher": "Aafff623",
     "copyright": "© 2026 Pane contributors (MIT)",
     "shortDescription": "Local-first AI usage dashboard",
     "longDescription": "Pane brings AI quotas, balances, reset times, account pools and local CLI token spend into one on-demand desktop panel. Built with Tauri, Rust and TypeScript, it keeps credentials on your computer. Windows is the primary development and validation platform; macOS and Linux builds are preview.",

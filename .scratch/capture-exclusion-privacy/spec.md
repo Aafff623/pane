@@ -1,6 +1,6 @@
 # Spec: WDA 窗口级采集排除（共享屏幕隐私）
 
-**Status:** ready · **Priority:** P2 · **Area:** Privacy
+**Status:** implemented (2026-10-26) — WDA exclusion, hot toggle and corrected copy; owner OBS/Teams scenario check remains.
 **Issue:** https://github.com/Aafff623/pane/issues/75
 **Evidence:** temp/research/20261025-final-sweep-7repos.md §1-8-A（现状缺口+设计+验收）
 

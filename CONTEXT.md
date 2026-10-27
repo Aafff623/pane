@@ -16,6 +16,10 @@ project language (reconsider) or it is a real gap to settle.
 
 ## Domain vocabulary
 
+- **皮肤包 (skin pack)** — 官方分发的 zip + manifest 资源包，带 id、版本、入口 CSS 和逐文件校验；安装后落在 `%APPDATA%\PaneAafff623\skins\<id>\`。原生外观不是皮肤包。
+- **原生外观 (native appearance)** — `skinId: null` 时的内置主题；恢复原生不是删除皮肤包。
+- **应用 / 选中 (applied / selected)** — applied 是当前真正渲染的皮肤；selected 是 config 里保存的 `skinId`。选中的包可能在本机缺失，此时界面显示原生外观，但工坊报告 Selected / Not installed，不能把原生说成已应用。
+- **皮肤工坊 (skin workshop)** — 设置 → 通用 → 皮肤工坊；商店式画廊与详情页，替代旧的悬浮抽屉市场。悬浮面板调色板、通用页入口和站点 demo 都指向这里。
 - **额度 (quota)** — 供应商给出的、有上限且带重置窗口的许可量；语义是"还剩多少、何时重置"（百分比 + 倒计时）。由「额度总览」承载。
 - **用量 (usage)** — 已消耗的绝对量；语义是"消耗了多少"，按天累积。由「用量面板」（即原「总花费」面板）承载。与额度是两回事：额度看许可，用量看消耗。
 - **计量单位 (unit)** — 用量的计数单位（token、积分、分钟、字符、次数、容量、货币…）。「用量面板」按计量单位分组：只有可通约的项才进同一张图，单位之间不做换算；同名单位（如"积分"）在不同厂商之间未必可通约。

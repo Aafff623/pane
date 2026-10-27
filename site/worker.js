@@ -46,7 +46,7 @@ const INSTALLER = /-setup\.exe$/;
 const GITEE_REPO = "fan-tengda/pane";
 const MANIFEST_URL = `https://github.com/${REPO}/releases/latest/download/latest.json`;
 const GITEE_ASSET = (version) =>
-  `https://gitee.com/${GITEE_REPO}/releases/download/v${version}/Pane_${version}_x64-setup.exe`;
+  `https://gitee.com/${GITEE_REPO}/releases/download/v${version}/Pane-Aafff623_${version}_x64-setup.exe`;
 
 // Serve English metadata in the initial HTML so search and sharing clients
 // receive the right title and canonical URL without executing site.js.
@@ -66,18 +66,57 @@ async function englishMetadata(response) {
   return new Response(html, { status: response.status, statusText: response.statusText, headers });
 }
 
-// latestWindowsInstaller asks GitHub for the newest release's Windows
-// installer. The cf.cacheTtl keeps the API call off the request path for
-// repeat visitors (GitHub allows 60 anonymous calls an hour per IP).
-async function latestWindowsInstaller() {
+// latestRelease asks GitHub for the newest release. The cf.cacheTtl keeps the
+// API call off the request path for repeat visitors (GitHub allows 60
+// anonymous calls an hour per IP). Both /download/windows and /api/latest
+// read it, so the two surfaces never disagree about "latest".
+async function latestRelease() {
   const res = await fetch(`https://api.github.com/repos/${REPO}/releases/latest`, {
     headers: { Accept: "application/vnd.github+json", "User-Agent": "pane-site" },
     cf: { cacheTtl: 600, cacheEverything: true },
   });
   if (!res.ok) return null;
-  const release = await res.json();
-  const asset = (release.assets || []).find((item) => INSTALLER.test(item.name || ""));
+  try {
+    return await res.json();
+  } catch {
+    return null;
+  }
+}
+
+async function latestWindowsInstaller() {
+  const release = await latestRelease();
+  const asset = (release?.assets || []).find((item) => INSTALLER.test(item.name || ""));
   return asset?.browser_download_url ?? null;
+}
+
+// /api/latest — the release facts the landing page needs for platform
+// routing: version, tag, release page and the asset list. The page picks the
+// asset that matches the visitor (os + arch); unknown shapes just leave the
+// static download links in place.
+async function latestJson() {
+  const release = await latestRelease();
+  if (!release || typeof release.tag_name !== "string") {
+    return new Response(JSON.stringify({ error: "unavailable" }), {
+      status: 502,
+      headers: { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" },
+    });
+  }
+  const assets = (release.assets || [])
+    .filter((item) => item?.name && item?.browser_download_url)
+    .map((item) => ({ name: item.name, url: item.browser_download_url, size: item.size ?? null }));
+  return new Response(
+    JSON.stringify({
+      version: release.tag_name.replace(/^v/, ""),
+      tag: release.tag_name,
+      url: release.html_url ?? null,
+      publishedAt: release.published_at ?? null,
+      assets,
+    }),
+    {
+      status: 200,
+      headers: { "content-type": "application/json; charset=utf-8", "cache-control": "public, max-age=300" },
+    },
+  );
 }
 
 // updateManifest serves the updater manifest, pointing CN clients at the
@@ -142,9 +181,50 @@ function skinCorsHeaders() {
   };
 }
 
-export default {
-  async fetch(req, env) {
+const CSP_REPORT_ONLY = [
+  "default-src 'self'",
+  "script-src 'self' 'unsafe-inline'",
+  "style-src 'self' 'unsafe-inline'",
+  "img-src 'self' data: https:",
+  "font-src 'self'",
+  "frame-src 'self'",
+  "connect-src 'self' https://api.github.com",
+  "object-src 'none'",
+  "base-uri 'self'",
+  "form-action 'self'",
+  "frame-ancestors 'none'",
+].join("; ");
+
+function withSecurityHeaders(response) {
+  const headers = new Headers(response.headers);
+  headers.set("x-content-type-options", "nosniff");
+  headers.set("referrer-policy", "strict-origin-when-cross-origin");
+  headers.set("permissions-policy", "camera=(), microphone=(), geolocation=()");
+  headers.set("x-frame-options", "DENY");
+  headers.set("content-security-policy-report-only", CSP_REPORT_ONLY);
+  return new Response(response.body, {
+    status: response.status,
+    statusText: response.statusText,
+    headers,
+  });
+}
+
+async function notFound(env, req) {
+  const assetUrl = new URL(req.url);
+  assetUrl.pathname = "/404.html";
+  const asset = await env.ASSETS.fetch(new Request(assetUrl, req));
+  return new Response(asset.body, {
+    status: 404,
+    statusText: "Not Found",
+    headers: asset.headers,
+  });
+}
+
+async function handle(req, env) {
     const url = new URL(req.url);
+    if (url.pathname === "/api/latest") {
+      return latestJson();
+    }
     if (url.pathname === "/download/windows") {
       let target = RELEASES_PAGE;
       try {
@@ -173,6 +253,18 @@ export default {
       headers.set("access-control-max-age", "86400");
       return new Response(res.body, { status: res.status, statusText: res.statusText, headers });
     }
+    // English legal pages: the Chinese files stay canonical, and the English
+    // route serves a static translation with the same facts (no new promises).
+    const legalEn = url.pathname.replace(/\/$/, "");
+    if (legalEn === "/en/privacy" || legalEn === "/en/terms") {
+      const assetUrl = new URL(url);
+      assetUrl.pathname = `${legalEn}.html`;
+      const res = await env.ASSETS.fetch(new Request(assetUrl, req));
+      if (res.status === 404) return notFound(env, req);
+      const headers = new Headers(res.headers);
+      headers.set("content-language", "en");
+      return new Response(res.body, { status: res.status, statusText: res.statusText, headers });
+    }
     // Keep one canonical markup source. The English route is selected by the
     // host page script, while the asset request itself still resolves to the
     // same index document.
@@ -183,6 +275,13 @@ export default {
       assetUrl.pathname = "/";
       return englishMetadata(await env.ASSETS.fetch(new Request(assetUrl, req)));
     }
-    return env.ASSETS.fetch(req);
+    const asset = await env.ASSETS.fetch(req);
+    if (asset.status === 404) return notFound(env, req);
+    return asset;
+}
+
+export default {
+  async fetch(req, env) {
+    return withSecurityHeaders(await handle(req, env));
   },
 };

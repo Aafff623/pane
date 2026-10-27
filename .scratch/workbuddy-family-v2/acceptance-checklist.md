@@ -1,7 +1,21 @@
 # WorkBuddy / CodeBuddy v2 — 验收清单（owner 手动）
 
 **状态：** 自动化全绿；以下项目需要真机 / 真账号由 owner 勾选。
-**自动化结果（2026-10-19）：** `parse-tests` 898 通过 / 0 失败 / 13 忽略；`tsc --noEmit` exit 0；`vite build` 成功；`node --test tests/*.test.mjs` 51 通过 / 0 失败；`cargo check` 通过（18 条既有 warning）。
+
+**2026-10-27 更新（本版适用范围）**
+
+- **档位范围改为只有国内档。** owner 在 0.11.1 Gate 0 明确「#31 只做 WorkBuddy CN
+  用量面板；AI 档不做（无账号）」。所以下文 **A 节里与 WorkBuddy AI 档相关的条目
+  不在本次验收范围内**，保留原文只是为了不丢失当时的设计依据，不要按它勾选。
+- **官方流水与 IDE 已接入**，旧清单里「等官方流水接入后再验」的措辞已过期。
+- 当前自动化基线（2026-10-27，0.11.1 收口分支）：`parse-tests` 1187 通过 / 0 失败 /
+  18 忽略（串行、去代理）；`node --test tests/*.test.mjs` 215 通过；`node --test
+  site/*.test.mjs` 50 通过；`pnpm build`（tsc + vite）通过；`cargo check` 通过。
+- 本机无 WorkBuddy CN 账号，所以 **任何依赖真实数据的条目都不能由自动化代替**；
+  无账号时界面必须显示空态，**不能显示 0**——`0` 会让「没查过」看起来像「查到是零」。
+
+**自动化结果（2026-10-19，历史记录）：** `parse-tests` 898 通过 / 0 失败 / 13 忽略；`tsc --noEmit` exit 0；`vite build` 成功；`node --test tests/*.test.mjs` 51 通过 / 0 失败；`cargo check` 通过（18 条既有 warning）。
+
 
 ## A. 档位与登录
 
@@ -43,7 +57,7 @@
 
 ## 已知限制（不是缺陷）
 
-- 官方 `get-user-request-usage` 流水未接入（缺可验证账号，见 issues/09）。
-- CodeBuddy IDE `history/index.json` 未接入（本轮只做 CLI JSONL）。
+- 官方 `get-user-request-usage` 流水：CN 已接入（卡片一行汇总 + 纯函数分页/去重/聚合，见 `providers/workbuddy_official_usage.rs`）；30 天用量面板（账号筛选/每日趋势/模型明细）仍在 #31，见 `.scratch/011-closeout/issues/08-workbuddy.md`。AI 档未探测（无账号）。
+- CodeBuddy IDE `history/index.json` 已接入（#32 已关闭；`source_status` 区分 detected/not_detected）。
 - 本地 JSONL 的跨文件整份副本可能重复计数（逐文件去重；见 issues/07 comments）。
 - 国际版真实 OAuth / 账单路径来自上游已发布代码，Pane 侧尚未有真机账号验证。

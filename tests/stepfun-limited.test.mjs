@@ -25,7 +25,8 @@ test('the StepFun account form offers web login and API key with an explicit war
 test('a limited snapshot draws only the trend, its estimate, and the help button', () => {
   assert.ok(source.includes('if (shown.limited)'), 'limited cards take a dedicated branch');
   assert.ok(source.includes('limitedTrendSource(shown)'));
-  assert.ok(source.includes('data-limited-help="${escapeHtml(shown.id)}"'));
+  assert.ok(source.includes('data-help-title="${escapeHtml(t("card.limitedHelpTitle"))}"'));
+  assert.ok(source.includes('data-help-body="${escapeHtml(`${t("card.limitedHelpBody")} ${t("card.limitedHelpAction")}`)}"'));
   assert.ok(source.includes('card.limitedHelpBody'));
   assert.ok(source.includes('card.limitedNoUsage'));
   assert.ok(source.includes('source.estimated ?'), 'the trend row carries the estimated badge');

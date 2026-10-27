@@ -1,4 +1,4 @@
-Status: ready
+Status: done (2026-10-26) — failed config writes reload backend config and reapply appearance/scale/skin/tray + toast.
 Type: task
 Blocked by: —
 
