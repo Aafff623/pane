@@ -13,6 +13,16 @@
 .skin-current-label { margin-left:auto; min-width:0; font-size:13px; color:var(--muted-foreground); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .skin-market-copy { margin:5px 0 0; font-size:13px; line-height:1.6; color:var(--muted-foreground); }
 .skin-preview-pair { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:18px; }
+/* The samples render at the real panel's size, which is far wider than one
+   column of this dialog: unscaled, a "preview" showed a single card and cut the
+   rest off. Zoom (not transform) because it shrinks the layout box too, so the
+   container height follows and the whole card fits at once — the same trick the
+   side thumbnails already use at 0.25. */
+.skin-preview-pair .skin-sample { zoom: 0.6; }
+/* Even at 0.6 a tall page can exceed the action bar; let the pair scroll rather
+   than pushing the buttons off screen. */
+.skin-preview-pair { max-height: 52vh; overflow: auto; align-content: start; }
+
 .skin-sample { min-width:0; padding:12px; border-radius:12px; font-size:14px; line-height:1.6; animation:signal-arrive 220ms cubic-bezier(.2,.7,.2,1) both; }
 .skin-sample:nth-child(2) { animation-delay:60ms; }
 .skin-sample-head { display:flex; align-items:center; justify-content:space-between; gap:10px; color:var(--secondary-foreground); font-size:13px; }
