@@ -20965,6 +20965,7 @@ function authToolbarHtml(): string {
     <button class="mini-btn${authSelectMode ? " on" : ""}" type="button" data-auth-select>${escapeHtml(t(authSelectMode ? "auth.selectCancel" : "auth.select"))}</button>
     <button class="mini-btn" type="button" data-auth-sort>${escapeHtml(t(authSortExpiry ? "auth.sortDefault" : "auth.sortExpiry"))}</button>
     <button class="mini-btn auth-privacy${authPrivacyMasked ? " on" : ""}" type="button" data-auth-privacy aria-pressed="${authPrivacyMasked}" title="${escapeHtml(t(authPrivacyMasked ? "auth.privacyShow" : "auth.privacyHide"))}" aria-label="${escapeHtml(t(authPrivacyMasked ? "auth.privacyShow" : "auth.privacyHide"))}">${uiIcon(authPrivacyMasked ? "eye" : "eyeSlash")}</button>
+    <button type="button" class="help-tip" data-help-title="${escapeHtml(t("auth.reloginLimitTitle"))}" data-help-body="${escapeHtml(t("auth.reloginLimitBody"))}" aria-label="${escapeHtml(t("auth.reloginLimitTitle"))}">?</button>
     ${
       authSelectMode
         ? `<span class="auth-selected">${escapeHtml(t("auth.selected", { n: selected }))}</span>
