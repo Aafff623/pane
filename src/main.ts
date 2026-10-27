@@ -174,6 +174,8 @@ interface SpendSourceStatusRow {
   root: string;
   reason?: string | null;
   feeds: string[];
+  /// Probe cost in microseconds (#42-3). Absent on older snapshots.
+  scan_us?: number;
 }
 
 interface SpendWindow {
@@ -17259,7 +17261,11 @@ function renderSpendSourceRows(): void {
   list.innerHTML = rows
     .map((source) => {
       const detail = `${source.form}${source.reason ? ` · ${source.reason}` : ""}`;
-      return `<div class="source-row state-${escapeHtml(source.state)}" title="${escapeHtml(source.root || source.collector)}">
+      // The probe cost rides the existing hover title rather than taking a
+      // column: it is a diagnostic for "why is the scan slow", not a fact a
+      // reader needs on every row (#42-3).
+      const probe = source.scan_us ? ` · probe ${(source.scan_us / 1000).toFixed(2)} ms` : "";
+      return `<div class="source-row state-${escapeHtml(source.state)}" title="${escapeHtml(`${source.root || source.collector}${probe}`)}">
         <span class="source-dot"></span>
         <span class="source-name">${escapeHtml(source.tool)}</span>
         <span class="source-state">${escapeHtml(t(`settings.sourceState.${source.state}`))}</span>

@@ -231,6 +231,14 @@ pub struct SpendSourceStatus {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub reason: Option<String>,
     pub feeds: Vec<String>,
+    /// Microseconds this source took to probe on the last inventory pass
+    /// (#42-3). It times the status probe — path discovery, stat, opening the
+    /// file or listing the directory — not the parse, which still runs inside
+    /// each provider's own collector. Microseconds because a stat probe is well
+    /// under a millisecond and would otherwise always report 0. 0 means not
+    /// measured (runtime ledgers never touch the disk).
+    #[serde(default)]
+    pub scan_us: u64,
 }
 
 fn source_status(
@@ -281,6 +289,7 @@ fn source_status(
         root,
         reason,
         feeds: feeds.iter().map(|s| (*s).into()).collect(),
+        scan_us: 0,
     }
 }
 
