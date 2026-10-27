@@ -4336,6 +4336,12 @@ body.ui-scaled .popover {
   z-index: 140;
   display: grid;
   place-items: center;
+  /* Two scroll paths on purpose: the overlay scrolls when the dialog cannot
+     fit the window at all (large app scale, short panel), and the dialog body
+     scrolls inside it when only the content is long. One alone leaves a dead
+     screen in exactly the case this dialog hit. */
+  overflow-y: auto;
+  overscroll-behavior: contain;
   padding: 14px;
   background: rgb(0 0 0 / .58);
   backdrop-filter: blur(10px);
@@ -4344,7 +4350,11 @@ body.ui-scaled .popover {
 .rtk-setup-dialog {
   width: min(620px, 100%);
   max-height: min(760px, 92vh);
-  overflow-y: auto;
+  /* Head stays put, body scrolls: a fixed head means the close button never
+     scrolls out of reach. */
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
   border: 1px solid var(--border);
   border-radius: 16px;
   background: var(--floating-surface);
@@ -4352,6 +4362,7 @@ body.ui-scaled .popover {
 }
 .rtk-setup-head {
   display: flex;
+  flex: 0 0 auto;
   align-items: flex-start;
   justify-content: space-between;
   gap: 12px;
@@ -4381,10 +4392,36 @@ body.ui-scaled .popover {
 }
 .rtk-dialog-body {
   display: flex;
+  flex: 1 1 auto;
   flex-direction: column;
   gap: 10px;
+  /* min-height:0 is what lets a flex child actually shrink and scroll; without
+     it the body grows past the dialog and the overflow is clipped, not scrolled. */
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
   padding: 16px 20px 20px;
 }
+/* Necessary-but-not-often-read copy folds away so the harness list is the
+   first thing on screen. */
+.rtk-about {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 8px 12px;
+  background: color-mix(in oklab, var(--foreground) 2%, var(--floating-surface));
+}
+.rtk-about > summary {
+  cursor: pointer;
+  font-size: 12px;
+  color: var(--muted);
+  list-style: none;
+}
+.rtk-about > summary::-webkit-details-marker { display: none; }
+.rtk-about > summary::before { content: "▸ "; }
+.rtk-about[open] > summary::before { content: "▾ "; }
+.rtk-about[open] > summary { margin-bottom: 6px; }
+.rtk-about .rtk-hint,
+.rtk-about .rtk-scope-note { margin: 0 0 6px; }
 .rtk-setup-head h2 {
   margin: 0 0 4px;
   font-size: 17px;

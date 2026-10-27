@@ -288,6 +288,9 @@ interface RtkIntegrationTarget {
   scope: "global" | "project";
   detected: boolean;
   matchKind: "exact" | "fuzzy" | "none";
+  /// Hook-only harness: RTK has no `rtk init --agent` flag for it, so Pane
+  /// reports the state and the instructions but never writes to its config.
+  manual?: boolean;
 }
 
 // Qoder CN local transcripts (GitHub #28): measured credits plus billed
@@ -5897,19 +5900,30 @@ function renderRtkSetup(): string {
           const matchKind = rtkIntegratedTargets.has(target.id) ? "exact" : target.matchKind;
           const busy = rtkIntegrationBusy === target.id;
           const projectScope = target.scope === "project";
-          const disabled = !installed || busy || (rtkIntegrationBusy !== null && !busy);
+          const manual = Boolean(target.manual);
+          // A hook-only target is never writable from here: the button is a
+          // status readout, not an action, so it carries no data-rtk-target.
+          const disabled = !installed || busy || (rtkIntegrationBusy !== null && !busy) || manual;
           const stateText = busy
             ? t("rtk.integrationBusy")
             : detected
               ? t(matchKind === "fuzzy" ? "rtk.detectedFuzzy" : "rtk.detectedExact")
               : t("rtk.notDetected");
-          const actionText = detected
-            ? t("rtk.reconnect")
-            : projectScope
-              ? t("rtk.integrationProject")
-              : t("rtk.integrationInstall");
+          const actionText = manual
+            ? detected
+              ? t("rtk.manualConnected")
+              : t("rtk.manualAction")
+            : detected
+              ? t("rtk.reconnect")
+              : projectScope
+                ? t("rtk.integrationProject")
+                : t("rtk.integrationInstall");
           const scopeText = projectScope ? ` · ${t("rtk.projectScopeShort")}` : "";
-          return `<button class="rtk-harness${detected ? " is-detected" : " is-missing"}${busy ? " is-busy" : ""}" data-rtk-target="${escapeHtml(target.id)}"${disabled ? " disabled" : ""} title="${escapeHtml(projectScope ? t("rtk.projectScope") : t("rtk.integrationsHint"))}">
+          const targetAttr = manual ? "" : ` data-rtk-target="${escapeHtml(target.id)}"`;
+          const titleText = manual
+            ? t("rtk.manualHint")
+            : projectScope ? t("rtk.projectScope") : t("rtk.integrationsHint");
+          return `<button class="rtk-harness${detected ? " is-detected" : " is-missing"}${busy ? " is-busy" : ""}"${targetAttr}${disabled ? " disabled" : ""} title="${escapeHtml(titleText)}">
             <span class="rtk-harness-icon" aria-hidden="true">${rtkTargetIcon(target)}</span>
             <span class="rtk-harness-copy">
               <span class="rtk-harness-name">${escapeHtml(target.label)}</span>
@@ -5933,10 +5947,11 @@ function renderRtkSetup(): string {
         <button class="rtk-dialog-close" data-rtk-setup-close title="${escapeHtml(t("settings.close"))}" aria-label="${escapeHtml(t("settings.close"))}">${uiIcon("x")}</button>
       </div>
       <div class="rtk-dialog-body">
-        <div class="rtk-setup-intro">
+        <details class="rtk-about">
+          <summary>${escapeHtml(t("rtk.aboutSummary"))}</summary>
           <p class="rtk-hint">${escapeHtml(t("rtk.setupIntro"))}</p>
           <p class="rtk-scope-note">${uiIcon("info")}<span>${escapeHtml(t("rtk.bashScopeNote"))}</span></p>
-        </div>
+        </details>
         ${installed ? "" : `<div class="rtk-install">
           <p class="rtk-hint-sub">${escapeHtml(t("rtk.installNote"))}</p>
           <div class="rtk-install-actions">
