@@ -1497,14 +1497,30 @@ fn parse_lines_from<St>(
     Some(offset)
 }
 
+/// Decompressed ceiling for one `.zst` log. A rotated log is normally a few
+/// megabytes; anything past this is a corrupt or hostile stream, and reading it
+/// whole would allocate the entire text before a single line reached a parser.
+/// Truncating at the cap bounds the peak — the parsers already tolerate partial
+/// input, and what is cut is the tail, not the head.
+const ZSTD_TEXT_CAP: u64 = 128 * 1024 * 1024;
+
+fn decode_zstd_capped(file: std::fs::File, cap: u64) -> Option<Vec<u8>> {
+    let decoder = zstd::stream::read::Decoder::new(file).ok()?;
+    let mut bytes = Vec::new();
+    // Streamed, not `decode_all`: the cap has to apply while decoding, not
+    // after the buffer already exists.
+    decoder.take(cap).read_to_end(&mut bytes).ok()?;
+    Some(bytes)
+}
+
 fn parse_zstd_file<St>(
     path: &Path,
     state: &mut St,
     data: &mut FileData,
     parse: &mut dyn FnMut(&mut St, &str, &mut FileData),
 ) -> Option<u64> {
-    let raw = fs::read(path).ok()?;
-    let bytes = zstd::stream::decode_all(&raw[..]).ok()?;
+    let file = std::fs::File::open(path).ok()?;
+    let bytes = decode_zstd_capped(file, ZSTD_TEXT_CAP)?;
     // Same tolerance as the plain-text path: one corrupt byte must not void
     // the whole file. Each line parser below still rejects junk it cannot
     // recognize, so lossy decoding only widens how much gets read, not what
@@ -7141,6 +7157,28 @@ mod tests {
         );
         assert_eq!(probe_price("claude", model, "std", now + 1).price, Some(over));
         pricing::set_overrides(HashMap::new());
+    }
+
+    /// #104-6 — a rotated log is normally small, but a corrupt or hostile .zst
+    /// stream would decompress to unbounded text. The cap has to apply during
+    /// decoding; `decode_all` would allocate the whole buffer before it could.
+    #[test]
+    fn a_huge_zstd_stream_is_read_up_to_the_cap_only() {
+        let mut encoder = zstd::stream::write::Encoder::new(Vec::new(), 1).unwrap();
+        let chunk = "x".repeat(1024);
+        for _ in 0..8192 {
+            encoder.write_all(chunk.as_bytes()).unwrap();
+        }
+        let compressed = encoder.finish().unwrap();
+        let path = std::env::temp_dir().join("pane-zstd-cap-test.zst");
+        std::fs::write(&path, &compressed).unwrap();
+
+        let file = std::fs::File::open(&path).unwrap();
+        let out = super::decode_zstd_capped(file, 4096).expect("decode");
+        assert_eq!(out.len(), 4096, "reads the cap, not the 8 MiB stream");
+        assert!(out.iter().all(|byte| *byte == b'x'));
+
+        let _ = std::fs::remove_file(&path);
     }
 }
 
