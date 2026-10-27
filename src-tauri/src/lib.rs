@@ -2801,7 +2801,7 @@ fn keyvault_set_note(id: String, note: String) -> Result<Vec<keyvault::VaultRow>
 /// else's update: the caller already holds the snapshots `fetch_usage` returned,
 /// so re-adopting them means a second render of the same numbers, and on the
 /// panel that render can land on top of the user's own card interaction.
-#[derive(Clone, serde::Serialize)]
+#[derive(serde::Serialize)]
 struct UsageUpdate {
     /// Window label that caused the refresh ("main", "panel", …), or
     /// "backend" for the timer and tray paths that have no webview.
