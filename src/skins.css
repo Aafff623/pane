@@ -109,14 +109,53 @@
 @media (prefers-reduced-motion:reduce) { .skin-sample { animation:none; } }
 body.reduce-anim .skin-sample { animation:none; }
 
-/* ---- Store-style filmstrip (replaces the full-size preview) --------------
-   The samples render at the real panel's size; showing one of those in this
-   column was not a preview. Each page is now a slim shot the height of a phone
-   screenshot, the strip scrolls sideways, and a shot opens the lightbox. */
-.skin-filmstrip { display: flex; align-items: center; gap: 6px; }
+/* ---- Store-style shot -----------------------------------------------------
+   The sample lays itself out at the real panel's width (360px). Inside a
+   phone-shaped frame it is scaled with transform, not zoom: transform keeps the
+   sample's own layout intact and guarantees the top of the card is what you
+   see, instead of a clipped empty box. */
+.skin-shot-stage {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 4px 0 2px;
+}
+.skin-shot {
+  position: relative;
+  flex: 0 0 auto;
+  width: 132px;
+  height: 232px;
+  overflow: hidden;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--floating-surface);
+  cursor: zoom-in;
+  box-shadow: 0 6px 18px rgb(0 0 0 / .08);
+}
+.skin-shot:hover { border-color: color-mix(in oklab, var(--accent) 45%, var(--border)); }
+.skin-shot .skin-sample {
+  position: absolute;
+  top: 0; left: 0;
+  width: 360px;
+  transform: scale(.3667);
+  transform-origin: top left;
+  border-radius: 0;
+  pointer-events: none;
+}
+.skin-shot-dots { display: flex; justify-content: center; gap: 6px; margin-top: 6px; }
+.skin-shot-dot {
+  width: 6px; height: 6px;
+  border: 0; padding: 0;
+  border-radius: 999px;
+  background: var(--border);
+  cursor: pointer;
+}
+.skin-shot-dot.is-on { background: var(--accent); width: 16px; }
 .skin-film-nav {
   flex: 0 0 auto;
-  width: 28px; height: 28px;
+  width: 26px; height: 26px;
   display: grid; place-items: center;
   border: 1px solid var(--border);
   border-radius: 999px;
@@ -125,37 +164,8 @@ body.reduce-anim .skin-sample { animation:none; }
   cursor: pointer;
 }
 .skin-film-nav:hover { color: var(--foreground); }
-/* One arrow glyph, mirrored for "next" — the icon set has no arrow-right. */
+/* One arrow glyph in the icon set; mirror it for "next". */
 .skin-film-nav.is-next svg { transform: scaleX(-1); }
-.skin-film-track {
-  display: flex;
-  gap: 10px;
-  min-width: 0;
-  overflow-x: auto;
-  scroll-snap-type: x mandatory;
-  scrollbar-width: none;
-  padding: 2px;
-}
-.skin-film-track::-webkit-scrollbar { display: none; }
-.skin-shot {
-  flex: 0 0 auto;
-  width: 132px;
-  height: 232px;
-  overflow: hidden;
-  padding: 0;
-  scroll-snap-align: start;
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  background: var(--floating-surface);
-  cursor: zoom-in;
-}
-.skin-shot:hover { border-color: color-mix(in oklab, var(--accent) 45%, var(--border)); }
-.skin-shot .skin-sample {
-  zoom: .34;
-  width: 100%;
-  border-radius: 0;
-  min-height: 0;
-}
 .skin-zoom-overlay {
   position: fixed;
   inset: 0;
@@ -177,7 +187,13 @@ body.reduce-anim .skin-sample { animation:none; }
   background: var(--floating-surface);
   box-shadow: 0 22px 70px rgb(0 0 0 / .45);
 }
-.skin-zoom-panel .skin-sample { zoom: .92; border-radius: 16px; }
+.skin-zoom-panel .skin-sample {
+  width: 440px;
+  transform: scale(.925);
+  transform-origin: top left;
+  border-radius: 16px;
+  margin-bottom: -8%;
+}
 .skin-zoom-close {
   position: absolute;
   top: 8px; right: 8px;

@@ -12690,17 +12690,20 @@ function renderSkinMarket(): string {
   const current = skinMarketSelected ?? activeSkin()?.id ?? entries[0].id;
   const skin = entries.find((s) => s.id === current) ?? entries[0];
   const previewMode = skinPreviewMode === "both" && window.matchMedia("(max-width:640px)").matches ? "light" : skinPreviewMode;
-  // Store-style filmstrip, not a full-size render: three slim shots of the
-  // panel's own pages, one swipe apart, each clickable for a closer look.
+  // One slim shot at a time, store-style: the sample renders at the real
+  // panel's width, so it has to be shrunk inside a fixed phone-sized frame
+  // instead of being laid out full-width. The arrows walk the three pages and
+  // a click opens the same page larger.
+  const pages = ["quota", "spend", "settings"] as const;
+  const pageIndex = Math.max(0, pages.indexOf(skinPreviewPage));
   const shots = skin.state === "remote"
     ? `<p class="skin-market-preview-note">${t("skin.previewAfterDownload")}</p>`
-    : `<div class="skin-filmstrip" data-skin-filmstrip data-preview-mode="${previewMode}">
+    : `<div class="skin-shot-stage" data-preview-mode="${previewMode}">
         <button class="skin-film-nav" type="button" data-skin-shot-prev title="${escapeHtml(t("skin.prevShot"))}" aria-label="${escapeHtml(t("skin.prevShot"))}">${uiIcon("arrowLeft")}</button>
-        <div class="skin-film-track" data-skin-film-track>${(["quota", "spend", "settings"] as const)
-          .map((page) => `<button class="skin-shot" type="button" data-skin-shot="${page}" title="${escapeHtml(t("skin.enlarge"))}" aria-label="${escapeHtml(t("skin.page." + page))}">${renderSkinSample("light", skin.id as SkinId, true, page)}</button>`)
-          .join("")}</div>
+        <button class="skin-shot" type="button" data-skin-shot="${skinPreviewPage}" title="${escapeHtml(t("skin.enlarge"))}" aria-label="${escapeHtml(t("skin.enlarge"))}">${renderSkinSample("light", skin.id as SkinId, true, skinPreviewPage)}</button>
         <button class="skin-film-nav is-next" type="button" data-skin-shot-next title="${escapeHtml(t("skin.nextShot"))}" aria-label="${escapeHtml(t("skin.nextShot"))}">${uiIcon("arrowLeft")}</button>
-      </div>`;
+      </div>
+      <div class="skin-shot-dots" role="group" aria-label="${escapeHtml(t("skin.preview"))}">${pages.map((page, i) => `<button class="skin-shot-dot${i === pageIndex ? " is-on" : ""}" type="button" data-skin-page="${page}" title="${escapeHtml(t("skin.page." + page))}" aria-label="${escapeHtml(t("skin.page." + page))}" aria-pressed="${i === pageIndex}"></button>`).join("")}</div>`;
   const zoom = skinZoomPage && skin.state !== "remote"
     ? `<div class="skin-zoom-overlay" data-skin-zoom-overlay>
         <div class="skin-zoom-panel" role="dialog" aria-modal="true" aria-label="${escapeHtml(t("skin.page." + skinZoomPage))}">
@@ -14439,13 +14442,11 @@ async function handleCustomizeClick(target: HTMLElement): Promise<boolean> {
   }
   const filmNav = target.closest<HTMLElement>("[data-skin-shot-prev], [data-skin-shot-next]");
   if (filmNav) {
-    const track = document.querySelector<HTMLElement>("[data-skin-film-track]");
-    const first = track?.querySelector<HTMLElement>(".skin-shot");
-    if (track && first) {
-      const step = first.getBoundingClientRect().width + 10;
-      const back = filmNav.hasAttribute("data-skin-shot-prev");
-      track.scrollBy({ left: back ? -step : step, behavior: "smooth" });
-    }
+    const pages: SkinPreviewPage[] = ["quota", "spend", "settings"];
+    const at = Math.max(0, pages.indexOf(skinPreviewPage));
+    const step = filmNav.hasAttribute("data-skin-shot-prev") ? -1 : 1;
+    skinPreviewPage = pages[(at + step + pages.length) % pages.length];
+    renderDrawerBody();
     return true;
   }
   const skinPick = target.closest<HTMLElement>("[data-skin-pick]")?.dataset.skinPick;
