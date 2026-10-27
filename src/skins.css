@@ -108,3 +108,83 @@
 }
 @media (prefers-reduced-motion:reduce) { .skin-sample { animation:none; } }
 body.reduce-anim .skin-sample { animation:none; }
+
+/* ---- Store-style filmstrip (replaces the full-size preview) --------------
+   The samples render at the real panel's size; showing one of those in this
+   column was not a preview. Each page is now a slim shot the height of a phone
+   screenshot, the strip scrolls sideways, and a shot opens the lightbox. */
+.skin-filmstrip { display: flex; align-items: center; gap: 6px; }
+.skin-film-nav {
+  flex: 0 0 auto;
+  width: 28px; height: 28px;
+  display: grid; place-items: center;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--floating-surface);
+  color: var(--muted);
+  cursor: pointer;
+}
+.skin-film-nav:hover { color: var(--foreground); }
+/* One arrow glyph, mirrored for "next" — the icon set has no arrow-right. */
+.skin-film-nav.is-next svg { transform: scaleX(-1); }
+.skin-film-track {
+  display: flex;
+  gap: 10px;
+  min-width: 0;
+  overflow-x: auto;
+  scroll-snap-type: x mandatory;
+  scrollbar-width: none;
+  padding: 2px;
+}
+.skin-film-track::-webkit-scrollbar { display: none; }
+.skin-shot {
+  flex: 0 0 auto;
+  width: 132px;
+  height: 232px;
+  overflow: hidden;
+  padding: 0;
+  scroll-snap-align: start;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--floating-surface);
+  cursor: zoom-in;
+}
+.skin-shot:hover { border-color: color-mix(in oklab, var(--accent) 45%, var(--border)); }
+.skin-shot .skin-sample {
+  zoom: .34;
+  width: 100%;
+  border-radius: 0;
+  min-height: 0;
+}
+.skin-zoom-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 160;
+  display: grid;
+  place-items: center;
+  padding: 18px;
+  background: rgb(0 0 0 / .62);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  overflow: auto;
+}
+.skin-zoom-panel {
+  position: relative;
+  width: min(420px, 100%);
+  max-height: 88vh;
+  overflow: auto;
+  border-radius: 16px;
+  background: var(--floating-surface);
+  box-shadow: 0 22px 70px rgb(0 0 0 / .45);
+}
+.skin-zoom-panel .skin-sample { zoom: .92; border-radius: 16px; }
+.skin-zoom-close {
+  position: absolute;
+  top: 8px; right: 8px;
+  width: 30px; height: 30px;
+  display: grid; place-items: center;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: color-mix(in oklab, var(--floating-surface) 88%, transparent);
+  cursor: pointer;
+}

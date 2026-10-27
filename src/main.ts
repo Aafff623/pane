@@ -1476,6 +1476,8 @@ let skinPreviewMode: "light" | "dark" | "both" = "both";
 /// samples under its own `data-skin`; a demo page never reads live data.
 type SkinPreviewPage = "quota" | "spend" | "settings";
 let skinPreviewPage: SkinPreviewPage = "quota";
+/// Which shot the store-style lightbox is showing, or null when closed.
+let skinZoomPage: SkinPreviewPage | null = null;
 /// Gate for installed-pack CSS: first paint and the startup sequence must not
 /// run before the saved pack's stylesheet (and its fonts) are in the document.
 let installedSkinLoad: Promise<void> = Promise.resolve();
@@ -12654,8 +12656,13 @@ function renderSettingsSkinSampleBody(): string {
 /// Capability-driven: any installed pack gets all three pages, each in its own
 /// `data-skin` scope. Compact gallery thumbnails stay on the spend card so the
 /// gallery reads as one comparable row.
-function renderSkinSample(mode: "light" | "dark", skinId: SkinId = "signal", compact = false): string {
-  const page: SkinPreviewPage = compact ? "spend" : skinPreviewPage;
+function renderSkinSample(
+  mode: "light" | "dark",
+  skinId: SkinId = "signal",
+  compact = false,
+  pageOverride?: SkinPreviewPage,
+): string {
+  const page: SkinPreviewPage = pageOverride ?? (compact ? "spend" : skinPreviewPage);
   const body = page === "quota"
     ? renderQuotaSkinSampleBody()
     : page === "settings"
@@ -12683,17 +12690,32 @@ function renderSkinMarket(): string {
   const current = skinMarketSelected ?? activeSkin()?.id ?? entries[0].id;
   const skin = entries.find((s) => s.id === current) ?? entries[0];
   const previewMode = skinPreviewMode === "both" && window.matchMedia("(max-width:640px)").matches ? "light" : skinPreviewMode;
-  const pair = skin.state === "remote"
+  // Store-style filmstrip, not a full-size render: three slim shots of the
+  // panel's own pages, one swipe apart, each clickable for a closer look.
+  const shots = skin.state === "remote"
     ? `<p class="skin-market-preview-note">${t("skin.previewAfterDownload")}</p>`
-    : `<div class="skin-preview-pair" data-preview-mode="${previewMode}">${renderSkinSample("light", skin.id as SkinId)}${renderSkinSample("dark", skin.id as SkinId)}</div>`;
+    : `<div class="skin-filmstrip" data-skin-filmstrip data-preview-mode="${previewMode}">
+        <button class="skin-film-nav" type="button" data-skin-shot-prev title="${escapeHtml(t("skin.prevShot"))}" aria-label="${escapeHtml(t("skin.prevShot"))}">${uiIcon("arrowLeft")}</button>
+        <div class="skin-film-track" data-skin-film-track>${(["quota", "spend", "settings"] as const)
+          .map((page) => `<button class="skin-shot" type="button" data-skin-shot="${page}" title="${escapeHtml(t("skin.enlarge"))}" aria-label="${escapeHtml(t("skin.page." + page))}">${renderSkinSample("light", skin.id as SkinId, true, page)}</button>`)
+          .join("")}</div>
+        <button class="skin-film-nav is-next" type="button" data-skin-shot-next title="${escapeHtml(t("skin.nextShot"))}" aria-label="${escapeHtml(t("skin.nextShot"))}">${uiIcon("arrowLeft")}</button>
+      </div>`;
+  const zoom = skinZoomPage && skin.state !== "remote"
+    ? `<div class="skin-zoom-overlay" data-skin-zoom-overlay>
+        <div class="skin-zoom-panel" role="dialog" aria-modal="true" aria-label="${escapeHtml(t("skin.page." + skinZoomPage))}">
+          ${renderSkinSample("light", skin.id as SkinId, false, skinZoomPage)}
+          <button class="skin-zoom-close" type="button" data-skin-zoom-close title="${escapeHtml(t("settings.close"))}" aria-label="${escapeHtml(t("settings.close"))}">${uiIcon("x")}</button>
+        </div>
+      </div>`
+    : "";
   return `<section class="skin-market" aria-label="${t("skin.market")}">
     <div class="skin-market-head"><h2>${t("skin.market")}</h2><span class="skin-current-label">${t("skin.current")}${escapeHtml(activeSkin() ? entries.find((entry) => entry.state === "applied")?.name ?? "" : t("skin.nativeName"))}</span><button class="mini-btn skin-back-btn" type="button" data-skin-close>${uiIcon("arrowLeft")}<span>${t("skin.back")}</span></button></div>
     <div class="skin-market-body">
       <div class="skin-market-main" id="skin-market-detail">
         <div class="skin-detail-head"><div><h3>${escapeHtml(skin.name)}</h3><p class="skin-market-copy">${escapeHtml(skin.tagline)}${skin.updateAvailable ? ` · ${t("skin.updateAvailable")}` : ""}</p></div><span class="skin-preview-label">${t("skin.preview")}</span></div>
         <div class="skin-preview-toolbar" role="group" aria-label="${t("skin.previewMode")}">${(["light", "dark", "both"] as const).map((mode) => `<button class="skin-mode-btn" type="button" data-skin-mode="${mode}" aria-pressed="${previewMode === mode}">${uiIcon(mode === "light" ? "sun" : mode === "dark" ? "moon" : "columns")}<span>${t(mode === "light" ? "skin.light" : mode === "dark" ? "skin.dark" : "skin.both")}</span></button>`).join("")}</div>
-        ${skin.state === "remote" ? "" : `<div class="skin-preview-toolbar skin-preview-pages" role="group" aria-label="${t("skin.preview")}">${(["quota", "spend", "settings"] as const).map((page) => `<button class="skin-mode-btn" type="button" data-skin-page="${page}" aria-pressed="${skinPreviewPage === page}">${t(`skin.page.${page}`)}</button>`).join("")}</div>`}
-        ${pair}
+        ${shots}
       </div>
       <div class="skin-market-gallery" role="group" aria-label="${t("skin.choose")}">
         ${entries.map((s) => `<button class="skin-side-item${s.id === skin.id ? " active" : ""}" type="button" data-skin-pick="${escapeHtml(s.id)}" aria-pressed="${s.id === skin.id}" aria-controls="skin-market-detail">
@@ -12704,6 +12726,7 @@ function renderSkinMarket(): string {
           </button>`).join("")}
       </div>
     </div>
+    ${zoom}
     <div class="skin-detail-actions">${skinMarketFeedback ? `<p class="skin-market-feedback" role="alert">${escapeHtml(skinMarketFeedback)}</p>` : ""}<div class="skin-action-context"><strong>${escapeHtml(skin.name)}</strong><span>${t("skin.followsMode")}</span></div><div class="skin-action-buttons">${skinActionHtml(skin)}${skin.state === "remote" ? `<button class="mini-btn skin-reset-btn" type="button" data-skin-reset ${activeSkin() ? "" : "disabled"}>${uiIcon("arrowCounterClockwise")}<span>${t("skin.native")}</span></button>` : ""}</div></div>
   </section>`;
 }
@@ -14394,6 +14417,35 @@ async function handleCustomizeClick(target: HTMLElement): Promise<boolean> {
   if (skinPage === "quota" || skinPage === "spend" || skinPage === "settings") {
     skinPreviewPage = skinPage;
     renderDrawerBody();
+    return true;
+  }
+  // Filmstrip: a shot opens the lightbox, the arrows walk the track one card
+  // at a time instead of re-rendering (the strip keeps its scroll position).
+  const shot = target.closest<HTMLElement>("[data-skin-shot]")?.dataset.skinShot;
+  if (shot === "quota" || shot === "spend" || shot === "settings") {
+    skinZoomPage = shot;
+    renderDrawerBody();
+    return true;
+  }
+  if (target.closest("[data-skin-zoom-overlay]") && !target.closest(".skin-zoom-panel")) {
+    skinZoomPage = null;
+    renderDrawerBody();
+    return true;
+  }
+  if (target.closest("[data-skin-zoom-close]")) {
+    skinZoomPage = null;
+    renderDrawerBody();
+    return true;
+  }
+  const filmNav = target.closest<HTMLElement>("[data-skin-shot-prev], [data-skin-shot-next]");
+  if (filmNav) {
+    const track = document.querySelector<HTMLElement>("[data-skin-film-track]");
+    const first = track?.querySelector<HTMLElement>(".skin-shot");
+    if (track && first) {
+      const step = first.getBoundingClientRect().width + 10;
+      const back = filmNav.hasAttribute("data-skin-shot-prev");
+      track.scrollBy({ left: back ? -step : step, behavior: "smooth" });
+    }
     return true;
   }
   const skinPick = target.closest<HTMLElement>("[data-skin-pick]")?.dataset.skinPick;
