@@ -40,7 +40,20 @@
 .skin-side-thumb-empty { display:grid; place-items:center; color:var(--muted-foreground); }
 .skin-side-thumb-empty .ui-icon { width:32px; height:32px; }
 .skin-market-preview-note { margin:18px 0; padding:22px; border:1px dashed var(--border); border-radius:16px; color:var(--muted-foreground); font-size:13px; text-align:center; }
-.skin-side-thumb .skin-sample { width:100%; zoom:0.25; padding:18px; animation:none; border-radius:0; }
+/* Absolute + transform, not `width:100%` + zoom: zoom computes the width
+   against the parent's zoomed box, so the sample got stretched to the column
+   width and every gallery card looked enormous. A fixed 360px sample scaled to
+   .3 is a real thumbnail at any column width. */
+.skin-side-thumb .skin-sample {
+  position: absolute;
+  top: 0; left: 0;
+  width: 360px;
+  transform: scale(.3);
+  transform-origin: top left;
+  padding: 12px;
+  animation: none;
+  border-radius: 0;
+}
 .skin-side-meta { display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:4px 8px; min-width:0; padding:0 4px 4px; }
 .skin-side-meta strong { font-size:13px; font-weight:600; }
 .skin-side-state { display:flex; align-items:center; gap:4px; font-size:13px; color:var(--muted-foreground); }
