@@ -16,6 +16,22 @@ Blocked by: 06
 7. **08 窗口前缀/离线回退**：窗口标签前缀归一；离线时保留 last-good 并
    标 stale，不造新值。
 
+## 核实（2026-10-27，逐行对代码）
+
+本票不是零起点，之前说「未开始」不准确：
+
+- **#65-04 FetchStrategy 有骨架但没有接线。** `src-tauri/src/fetch_strategy.rs`
+  （142 行）已经有 `FetchFailureKind` / `FetchFailure`（含 retry_after、
+  is_transient）/ `retry_once_allowed` / `trait FetchStrategy`，并且
+  `lib.rs:6` 声明了 `mod fetch_strategy;`。但 `providers/mod.rs` 里**没有任何引用**，
+  它自己的文档也写着「The app still calls providers directly」——所以这是一个
+  准备好了但没被使用的接口，不是劳动成果为零。
+- **其余七票未见实现痕迹**：没找到 capability 表（`providers/mod.rs` 里没有
+  capability 相关定义）、没有每源 attempts 审计、没有 candidate family 归一、
+  没有窗口前缀归一/离线 stale 标记、没有 gatekeeper 基线、没有共享文件分类清单。
+
+所以本票的真实进度是「1/8 有骨架、0/8 接入」。
+
 ## 验收
 
 - 每票专项测试；gatekeeper CI 绿；共享文件新增特判必须委托或标记理由。
