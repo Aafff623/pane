@@ -1476,8 +1476,6 @@ let skinPreviewMode: "light" | "dark" | "both" = "both";
 /// samples under its own `data-skin`; a demo page never reads live data.
 type SkinPreviewPage = "quota" | "spend" | "settings";
 let skinPreviewPage: SkinPreviewPage = "quota";
-/// Which shot the store-style lightbox is showing, or null when closed.
-let skinZoomPage: SkinPreviewPage | null = null;
 /// Gate for installed-pack CSS: first paint and the startup sequence must not
 /// run before the saved pack's stylesheet (and its fonts) are in the document.
 let installedSkinLoad: Promise<void> = Promise.resolve();
@@ -12690,35 +12688,15 @@ function renderSkinMarket(): string {
   const current = skinMarketSelected ?? activeSkin()?.id ?? entries[0].id;
   const skin = entries.find((s) => s.id === current) ?? entries[0];
   const previewMode = skinPreviewMode === "both" && window.matchMedia("(max-width:640px)").matches ? "light" : skinPreviewMode;
-  // One slim shot at a time, store-style: the sample renders at the real
-  // panel's width, so it has to be shrunk inside a fixed phone-sized frame
-  // instead of being laid out full-width. The arrows walk the three pages and
-  // a click opens the same page larger.
-  const pages = ["quota", "spend", "settings"] as const;
-  const pageIndex = Math.max(0, pages.indexOf(skinPreviewPage));
-  const shots = skin.state === "remote"
-    ? `<p class="skin-market-preview-note">${t("skin.previewAfterDownload")}</p>`
-    : `<div class="skin-shot-stage" data-preview-mode="${previewMode}">
-        <button class="skin-film-nav" type="button" data-skin-shot-prev title="${escapeHtml(t("skin.prevShot"))}" aria-label="${escapeHtml(t("skin.prevShot"))}">${uiIcon("arrowLeft")}</button>
-        <button class="skin-shot" type="button" data-skin-shot="${skinPreviewPage}" title="${escapeHtml(t("skin.enlarge"))}" aria-label="${escapeHtml(t("skin.enlarge"))}">${renderSkinSample("light", skin.id as SkinId, true, skinPreviewPage)}</button>
-        <button class="skin-film-nav is-next" type="button" data-skin-shot-next title="${escapeHtml(t("skin.nextShot"))}" aria-label="${escapeHtml(t("skin.nextShot"))}">${uiIcon("arrowLeft")}</button>
-      </div>
-      <div class="skin-shot-dots" role="group" aria-label="${escapeHtml(t("skin.preview"))}">${pages.map((page, i) => `<button class="skin-shot-dot${i === pageIndex ? " is-on" : ""}" type="button" data-skin-page="${page}" title="${escapeHtml(t("skin.page." + page))}" aria-label="${escapeHtml(t("skin.page." + page))}" aria-pressed="${i === pageIndex}"></button>`).join("")}</div>`;
-  const zoom = skinZoomPage && skin.state !== "remote"
-    ? `<div class="skin-zoom-overlay" data-skin-zoom-overlay>
-        <div class="skin-zoom-panel" role="dialog" aria-modal="true" aria-label="${escapeHtml(t("skin.page." + skinZoomPage))}">
-          ${renderSkinSample("light", skin.id as SkinId, false, skinZoomPage)}
-          <button class="skin-zoom-close" type="button" data-skin-zoom-close title="${escapeHtml(t("settings.close"))}" aria-label="${escapeHtml(t("settings.close"))}">${uiIcon("x")}</button>
-        </div>
-      </div>`
-    : "";
+  // The standalone preview slot is gone: its frame kept collapsing under a
+  // generic button rule and showed a clipped band. The skin cards below carry
+  // their own thumbnail of the whole card, so the page needs no second one.
   return `<section class="skin-market" aria-label="${t("skin.market")}">
     <div class="skin-market-head"><h2>${t("skin.market")}</h2><span class="skin-current-label">${t("skin.current")}${escapeHtml(activeSkin() ? entries.find((entry) => entry.state === "applied")?.name ?? "" : t("skin.nativeName"))}</span><button class="mini-btn skin-back-btn" type="button" data-skin-close>${uiIcon("arrowLeft")}<span>${t("skin.back")}</span></button></div>
     <div class="skin-market-body">
       <div class="skin-market-main" id="skin-market-detail">
-        <div class="skin-detail-head"><div><h3>${escapeHtml(skin.name)}</h3><p class="skin-market-copy">${escapeHtml(skin.tagline)}${skin.updateAvailable ? ` · ${t("skin.updateAvailable")}` : ""}</p></div><span class="skin-preview-label">${t("skin.preview")}</span></div>
+        <div class="skin-detail-head"><div><h3>${escapeHtml(skin.name)}</h3><p class="skin-market-copy">${escapeHtml(skin.tagline)}${skin.updateAvailable ? ` · ${t("skin.updateAvailable")}` : ""}</p></div></div>
         <div class="skin-preview-toolbar" role="group" aria-label="${t("skin.previewMode")}">${(["light", "dark", "both"] as const).map((mode) => `<button class="skin-mode-btn" type="button" data-skin-mode="${mode}" aria-pressed="${previewMode === mode}">${uiIcon(mode === "light" ? "sun" : mode === "dark" ? "moon" : "columns")}<span>${t(mode === "light" ? "skin.light" : mode === "dark" ? "skin.dark" : "skin.both")}</span></button>`).join("")}</div>
-        ${shots}
       </div>
       <div class="skin-market-gallery" role="group" aria-label="${t("skin.choose")}">
         ${entries.map((s) => `<button class="skin-side-item${s.id === skin.id ? " active" : ""}" type="button" data-skin-pick="${escapeHtml(s.id)}" aria-pressed="${s.id === skin.id}" aria-controls="skin-market-detail">
@@ -12729,7 +12707,6 @@ function renderSkinMarket(): string {
           </button>`).join("")}
       </div>
     </div>
-    ${zoom}
     <div class="skin-detail-actions">${skinMarketFeedback ? `<p class="skin-market-feedback" role="alert">${escapeHtml(skinMarketFeedback)}</p>` : ""}<div class="skin-action-context"><strong>${escapeHtml(skin.name)}</strong><span>${t("skin.followsMode")}</span></div><div class="skin-action-buttons">${skinActionHtml(skin)}${skin.state === "remote" ? `<button class="mini-btn skin-reset-btn" type="button" data-skin-reset ${activeSkin() ? "" : "disabled"}>${uiIcon("arrowCounterClockwise")}<span>${t("skin.native")}</span></button>` : ""}</div></div>
   </section>`;
 }
@@ -14419,24 +14396,6 @@ async function handleCustomizeClick(target: HTMLElement): Promise<boolean> {
   const skinPage = target.closest<HTMLElement>("[data-skin-page]")?.dataset.skinPage;
   if (skinPage === "quota" || skinPage === "spend" || skinPage === "settings") {
     skinPreviewPage = skinPage;
-    renderDrawerBody();
-    return true;
-  }
-  // Filmstrip: a shot opens the lightbox, the arrows walk the track one card
-  // at a time instead of re-rendering (the strip keeps its scroll position).
-  const shot = target.closest<HTMLElement>("[data-skin-shot]")?.dataset.skinShot;
-  if (shot === "quota" || shot === "spend" || shot === "settings") {
-    skinZoomPage = shot;
-    renderDrawerBody();
-    return true;
-  }
-  if (target.closest("[data-skin-zoom-overlay]") && !target.closest(".skin-zoom-panel")) {
-    skinZoomPage = null;
-    renderDrawerBody();
-    return true;
-  }
-  if (target.closest("[data-skin-zoom-close]")) {
-    skinZoomPage = null;
     renderDrawerBody();
     return true;
   }

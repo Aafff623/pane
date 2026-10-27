@@ -46,14 +46,45 @@
    .3 is a real thumbnail at any column width. */
 .skin-side-thumb .skin-sample {
   position: absolute;
-  top: 0; left: 0;
+  top: 0; left: 50%;
   width: 360px;
-  transform: scale(.3);
-  transform-origin: top left;
+  transform: translateX(-50%) scale(.16);
+  transform-origin: top center;
   padding: 12px;
   animation: none;
   border-radius: 0;
 }
+/* Compact gallery: the previous one-column full-width cards were the reason
+   every item looked enormous. */
+.skin-market-gallery {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  align-content: start;
+}
+.skin-side-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--floating-surface);
+  text-align: left;
+  cursor: pointer;
+}
+.skin-side-item.active { border-color: var(--accent); }
+.skin-side-thumb { width: 58px; height: 88px; height: 88px; flex: none; }
+.skin-side-meta { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.skin-side-meta strong {
+  font-size: 12px;
+  line-height: 1.25;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.skin-side-meta span { font-size: 11px; }
 .skin-side-meta { display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:4px 8px; min-width:0; padding:0 4px 4px; }
 .skin-side-meta strong { font-size:13px; font-weight:600; }
 .skin-side-state { display:flex; align-items:center; gap:4px; font-size:13px; color:var(--muted-foreground); }
@@ -134,11 +165,16 @@ body.reduce-anim .skin-sample { animation:none; }
   gap: 12px;
   padding: 4px 0 2px;
 }
+/* Specificity + min-height on purpose: the panel has a generic button rule
+   with a fixed small height, which collapsed this frame to a sliver. */
+.skin-shot-stage .skin-shot,
 .skin-shot {
   position: relative;
   flex: 0 0 auto;
   width: 132px;
+  min-width: 132px;
   height: 232px;
+  min-height: 232px;
   overflow: hidden;
   padding: 0;
   border: 1px solid var(--border);
@@ -148,12 +184,15 @@ body.reduce-anim .skin-sample { animation:none; }
   box-shadow: 0 6px 18px rgb(0 0 0 / .08);
 }
 .skin-shot:hover { border-color: color-mix(in oklab, var(--accent) 45%, var(--border)); }
+/* Scale by height, not by width: the sample is ~900px tall, so a width-fit
+   scale still showed only its top third. .25 fits the whole card into 232px
+   and leaves margin on the sides. */
 .skin-shot .skin-sample {
   position: absolute;
-  top: 0; left: 0;
+  top: 0; left: 50%;
   width: 360px;
-  transform: scale(.3667);
-  transform-origin: top left;
+  transform: translateX(-50%) scale(.25);
+  transform-origin: top center;
   border-radius: 0;
   pointer-events: none;
 }
