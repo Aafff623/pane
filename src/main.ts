@@ -23121,12 +23121,24 @@ document.querySelector("#settings-btn")!.addEventListener("click", (event) => {
   // The backend's background loop refreshes even while this window is
   // hidden (where setInterval is throttled dead). Adopt its results;
   // rendering still defers to the next open via requestRender().
+  //
+  // The payload names the window that triggered the refresh (#104-17). A
+  // window already applied the snapshots its own `fetch_usage` returned, so
+  // adopting that echo renders the same numbers a second time — and on the
+  // panel the second render can land on top of an in-flight card interaction.
+  // A bare array is still accepted: dropping an unrecognised payload would
+  // stop updates silently, which is worse than an extra render.
+  interface UsageUpdate { origin?: string; at?: number; snapshots: Snapshot[] }
   let usageEventGeneration = 0;
-  void listen<Snapshot[]>("usage-updated", async (e) => {
+  void listen<UsageUpdate | Snapshot[]>("usage-updated", async (e) => {
+    const update: UsageUpdate = Array.isArray(e.payload)
+      ? { origin: "backend", snapshots: e.payload }
+      : e.payload;
+    if (!Array.isArray(update?.snapshots)) return;
+    if (update.origin === WINDOW_LABEL) return;
     const generation = ++usageEventGeneration;
-    if (!Array.isArray(e.payload)) return;
     lastFetch = Date.now();
-    const incoming = e.payload;
+    const incoming = update.snapshots;
     await Promise.all([...new Set(incoming.map((snapshot) => providerFamily(snapshot.id)))]
       .filter(supportsExtraAccounts).map(refreshSettingsProviderKey));
     if (generation !== usageEventGeneration) return;

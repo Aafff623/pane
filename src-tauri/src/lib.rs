@@ -2796,16 +2796,41 @@ fn keyvault_set_note(id: String, note: String) -> Result<Vec<keyvault::VaultRow>
 /// The disabled argument is accepted for compatibility but ignored:
 /// config.json is the single source of truth, so the background refresh
 /// loop and the UI can never disagree about who is enabled.
+/// Shape of the `usage-updated` broadcast (#104-17). The origin window is part
+/// of the payload so a window can tell its own refresh's echo from somebody
+/// else's update: the caller already holds the snapshots `fetch_usage` returned,
+/// so re-adopting them means a second render of the same numbers, and on the
+/// panel that render can land on top of the user's own card interaction.
+#[derive(Clone, serde::Serialize)]
+struct UsageUpdate {
+    /// Window label that caused the refresh ("main", "panel", …), or
+    /// "backend" for the timer and tray paths that have no webview.
+    origin: String,
+    /// Unix milliseconds, for diagnosing out-of-order deliveries.
+    at: u64,
+    snapshots: Vec<providers::Snapshot>,
+}
+
+fn now_millis() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|elapsed| elapsed.as_millis() as u64)
+        .unwrap_or(0)
+}
+
 /// Coalesce usage-updated broadcasts: a refresh burst (timer + focus + a
 /// manual click) must not repaint every open window three times. The last
-/// payload wins; the first subscriber sees it ~200 ms later.
-fn emit_usage_coalesced(app: &tauri::AppHandle, snapshots: &[providers::Snapshot]) {
-    static PENDING: OnceLock<Mutex<Option<Vec<providers::Snapshot>>>> = OnceLock::new();
+/// payload wins; the first subscriber sees it ~200 ms later. Origins are
+/// coalesced too — whoever triggered last is the one named, which is the
+/// window that most needs to be skipped as an echo.
+fn emit_usage_coalesced(app: &tauri::AppHandle, origin: &str, snapshots: &[providers::Snapshot]) {
+    static PENDING: OnceLock<Mutex<Option<(String, Vec<providers::Snapshot>)>>> = OnceLock::new();
     static SCHEDULED: AtomicBool = AtomicBool::new(false);
     *PENDING
         .get_or_init(|| Mutex::new(None))
         .lock()
-        .unwrap_or_else(|error| error.into_inner()) = Some(snapshots.to_vec());
+        .unwrap_or_else(|error| error.into_inner()) =
+        Some((origin.to_string(), snapshots.to_vec()));
     if SCHEDULED.swap(true, Ordering::SeqCst) {
         return;
     }
@@ -2818,8 +2843,9 @@ fn emit_usage_coalesced(app: &tauri::AppHandle, snapshots: &[providers::Snapshot
             .lock()
             .unwrap_or_else(|error| error.into_inner())
             .take();
-        if let Some(payload) = payload {
-            let _ = app.emit("usage-updated", &payload);
+        if let Some((origin, snapshots)) = payload {
+            let update = UsageUpdate { origin, at: now_millis(), snapshots };
+            let _ = app.emit("usage-updated", &update);
         }
     });
 }
@@ -2827,6 +2853,7 @@ fn emit_usage_coalesced(app: &tauri::AppHandle, snapshots: &[providers::Snapshot
 #[tauri::command]
 async fn fetch_usage(
     app: tauri::AppHandle,
+    window: tauri::WebviewWindow,
     disabled: Option<Vec<String>>,
     clear_benches: Option<bool>,
     probe_all: Option<bool>,
@@ -2839,7 +2866,9 @@ async fn fetch_usage(
         clear_soft_benches();
     }
     let snapshots = run_usage_fetch_inner_mode(&app, disabled, probe_all.unwrap_or(false)).await;
-    emit_usage_coalesced(&app, &snapshots);
+    // The caller applies the returned snapshots itself, so the broadcast names
+    // it and that window skips its own echo (#104-17).
+    emit_usage_coalesced(&app, window.label(), &snapshots);
     snapshots
 }
 
@@ -3740,7 +3769,8 @@ async fn fetch_and_broadcast_usage(app: &tauri::AppHandle) -> Vec<providers::Sna
     // while it is opening causes the white flash / immediate dismissal seen
     // when `set_menu` runs from MouseButtonState::Down.
     rebuild_tray_menu(&app);
-    emit_usage_coalesced(&app, &snapshots);
+    // No webview asked for this pass, so no window may skip it.
+    emit_usage_coalesced(&app, "backend", &snapshots);
     snapshots
 }
 
