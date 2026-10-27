@@ -10651,7 +10651,7 @@ function selectFont(name: string): void {
   void patchConfig({ uiFont: name }).then(applyAppearance);
 }
 
-/// Day/night toggle with the circular wipe from jazii.dev: the new theme
+/// Day/night toggle with a circular wipe: the new theme
 /// expands as a clip-path circle from the button via the View Transitions
 /// API. Falls back to an instant switch where unsupported.
 function toggleTheme(e: Event): void {

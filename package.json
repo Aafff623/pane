@@ -1,6 +1,7 @@
 {
   "name": "pane",
   "private": true,
+  "author": "Aafff623",
   "description": "Local-first AI usage dashboard for quotas, balances, reset times, multi-account management and CLI token spend.",
   "homepage": "https://pane.threetwoa.live",
   "repository": {

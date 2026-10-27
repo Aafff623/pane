@@ -2,7 +2,7 @@
 name = "pane"
 version = "0.11.0"
 description = "Local-first AI usage dashboard for quotas, balances, reset times, multi-account management and CLI token spend."
-authors = ["Aafff623", "jazii"]
+authors = ["Aafff623"]
 homepage = "https://pane.threetwoa.live"
 repository = "https://github.com/Aafff623/pane"
 license = "MIT"

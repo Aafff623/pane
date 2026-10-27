@@ -6192,7 +6192,7 @@ body.refreshing .overview-refreshing svg {
 /* ---------------------------------------------------------------- footer */
 
 /* Floats over the card list so content scrolls behind the glass,
-   like the jazii.dev dock. */
+   like the original dock. */
 /* Above the Customize/Settings panels (z 50) so the live status + build
    stamp stays visible at the bottom of every screen. */
 footer {
@@ -6454,7 +6454,7 @@ body.drawer-open #drawer {
 /* ------------------------------------------------ theme wipe + light audit */
 
 /* The circular wipe drives the whole transition; disable the default
-   cross-fade so the circle edge stays crisp (same setup as jazii.dev). */
+   cross-fade so the circle edge stays crisp. */
 ::view-transition-old(root),
 ::view-transition-new(root) {
   animation: none;
