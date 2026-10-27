@@ -100,6 +100,38 @@ IntersectionObserver 基本不投递，那一轮所有读数作废；`Page.bring
 median 48 ms。**先量帧钟，median > 25 ms 就不要下结论**，改成按超时等待（而非
 等 rAF）并用「实时几何重算」做对照，才能把机制验对。
 
+## 复核发现（2026-10-27 第二遍）：交互 demo 的批注层从未定位
+
+**现象**：`.demo-annotation` 有 12 个元素、`display: flex`，但 `left/top/transform`
+全为空，也就是批注卡没有指向任何控件。
+
+**定位过程**（不是猜的）：
+
+1. `demoNotes` 会在 a / b 之间切换 → ticker 驱动的 `updateNoteAct()` 是活的，
+   循环本身没问题。
+2. `positionAnnotations()` 的三个前置条件逐个量：`innerWidth=1364`（>950 ✓）、
+   `parentHidden=false` ✓、`stageDisplay=flex` ✓ —— 只剩 `demoAnchors` 为 null。
+3. 在 host 监听 `message`：只收到 `syncConfig`，**`pane-demo-ready` 和
+   `pane-demo-anchors` 一条都没有**，且 `fromFrame: -1`（来源不是任何 iframe）。
+4. 单独打开 `/demo/`：`pane-demo-anchors` 正常自发（说明 bridge 是好的、bundle 是好的、
+   demo 应用能挂载出 20 张卡）。
+5. 从 host 读 `#pane-demo.contentWindow.location` → `SecurityError: cross-origin`。
+   iframe 标了 `sandbox="allow-scripts allow-same-origin …"`，理论上同源；实际却被
+   当成跨源，于是 host 的 `event.origin !== location.origin` 守卫把消息丢掉。
+
+**是既有问题，不是本批次引入**：
+
+- `site.js` 的 message 守卫和 `positionAnnotations` 这次一行没改（本票只换了循环驱动）。
+- **线上 `https://pane.threetwoa.live/` 用同一探针得到完全相同的结果**：12 个批注、
+  0 个定位、0 条 `pane-demo-*` 消息。
+- 本地 wrangler dev 会额外注入 `x-frame-options: DENY`（线上没有），所以本地的跨源
+  还多一个干扰项；但线上无此头也同样失效，说明根因在 sandbox/同源判定这一层。
+
+**下一步（未做，需单独一轮）**：先在真实 Chrome 里确认 `contentDocument` 是否可读，
+再决定是去掉 `sandbox`、改用 `postMessage` 的 `targetOrigin: "*"` + 主机侧按
+`event.source` 校验（不依赖 origin），还是把批注定位改成在 iframe 内绘制。
+在此之前不要动 `positionAnnotations`，否则会在错误的前提下改错地方。
+
 ## owner 手感验收步骤
 
 1. `cd site && npx wrangler dev --port 8791`，打开 <http://127.0.0.1:8791/>。
