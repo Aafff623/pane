@@ -11479,13 +11479,13 @@ body.panel-form {
   to { opacity: 1; transform: translateY(0); }
 }
 #panel-scroll > [id^="st-"] { animation: pane-page-in .24s var(--ease) both; }
-:is(.mini-btn,.panel-nav-item,.settings-tabs button,.tabs .tab,.sidebar-buttons button,.skin-side-item,.card-account-tab,.auth-jump,.needs-setup-btn):active:not(:disabled) {
+:is(.mini-btn,.panel-nav-item,.settings-tabs button,.tabs .tab,.sidebar-buttons button,.skin-card,.card-account-tab,.auth-jump,.needs-setup-btn):active:not(:disabled) {
   /* `scale` composes with a skin's own transform instead of replacing it. */
   scale: .96;
 }
 @media (prefers-reduced-motion: reduce) {
   #panel-scroll > [id^="st-"] { animation: none; }
-  :is(.mini-btn,.panel-nav-item,.settings-tabs button,.tabs .tab,.sidebar-buttons button,.skin-side-item,.card-account-tab) { transition: none !important; }
+  :is(.mini-btn,.panel-nav-item,.settings-tabs button,.tabs .tab,.sidebar-buttons button,.skin-card,.card-account-tab) { transition: none !important; }
 }
 
 /* --- Usage topology (#60): read-only provider → model map. The sheet is a

@@ -37,7 +37,7 @@ for (const userClose of [true, false]) {
       config: { uiFont: 'MV Boli', welcomeDismissed: false }, appVersion: '0.8.5', WHATS_NEW_VERSIONS: 3,
       document: { hidden: false, querySelector: () => null, createElement: () => overlay, addEventListener() {}, removeEventListener() {}, body: { appendChild() {} } },
       getVersion: async () => '0.8.5', patchConfig: async (patch) => Object.assign(context.config, patch),
-      applyAppearance() {}, maybeStartTour() {}, activeSkin: () => null, marketEntries: () => [],
+      applyAppearance() {}, maybeStartTour() {}, activeSkin: () => null, skinShopEntries: () => [],
       t: (key) => key, escapeHtml: (text) => text, renderChangelogBody: (body) => body,
       renderChangelogSection: (section) => section.body, uiIcon: () => '',
     });

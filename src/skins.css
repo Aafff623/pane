@@ -1,98 +1,13 @@
 /* Skin workshop UI (native surface). Skin-specific rules live in the
-   signal/ink resource packs and are injected when installed. */
+   signal/ink/comic-pixel resource packs and are injected when installed. */
 .skin-meter-caption { display:none; }
 #skin-btn .ui-icon { width:16px; height:16px; }
-#drawer.skin-workshop-open { --background:#09090b; --foreground:#fafafa; --border:#27272a; --muted:#27272a; --muted-foreground:#a1a1aa; --primary:#fafafa; --primary-foreground:#09090b; padding:0; overflow:hidden; z-index:110; background:var(--background); color:var(--foreground); }
-:root[data-theme="light"] #drawer.skin-workshop-open { --background:#fafafa; --foreground:#18181b; --border:#e4e4e7; --muted:#f4f4f5; --muted-foreground:#52525b; --primary:#18181b; --primary-foreground:#fafafa; }
-#drawer.skin-workshop-open #drawer-body { height:100%; }
-.skin-market { max-width:960px; height:100%; margin:auto; display:grid; grid-template-rows:auto minmax(0,1fr) auto; font-family:var(--app-font,"Segoe UI",system-ui,sans-serif); }
-.skin-market-head { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:16px 20px; border-bottom:1px solid var(--border); }
-.skin-market-head h2 { margin:0; font-family:inherit; font-size:18px; font-weight:600; line-height:1.4; }
 .skin-back-btn { display:inline-flex; align-items:center; gap:6px; min-height:36px; padding:7px 10px; border:1px solid var(--border); background:transparent; border-radius:10px; }
-.skin-market button > .ui-icon { width:18px; height:18px; flex:none; }
-.skin-current-label { margin-left:auto; min-width:0; font-size:13px; color:var(--muted-foreground); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-.skin-market-copy { margin:5px 0 0; font-size:13px; line-height:1.6; color:var(--muted-foreground); }
-.skin-preview-pair { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:18px; }
-/* The samples render at the real panel's size, which is far wider than one
-   column of this dialog: unscaled, a "preview" showed a single card and cut the
-   rest off. Zoom (not transform) because it shrinks the layout box too, so the
-   container height follows and the whole card fits at once — the same trick the
-   side thumbnails already use at 0.25. */
-.skin-preview-pair .skin-sample { zoom: 0.6; }
-/* Even at 0.6 a tall page can exceed the action bar; let the pair scroll rather
-   than pushing the buttons off screen. */
-.skin-preview-pair { max-height: 52vh; overflow: auto; align-content: start; }
-
 .skin-sample { min-width:0; padding:12px; border-radius:12px; font-size:14px; line-height:1.6; animation:signal-arrive 220ms cubic-bezier(.2,.7,.2,1) both; }
 .skin-sample:nth-child(2) { animation-delay:60ms; }
 .skin-sample-head { display:flex; align-items:center; justify-content:space-between; gap:10px; color:var(--secondary-foreground); font-size:13px; }
 .skin-sample-head > span { display:inline-flex; align-items:center; gap:6px; }
 .skin-sample-head .ui-icon { width:16px; height:16px; }
-.skin-market-body { overflow-y:auto; min-height:0; padding:20px; scrollbar-width:thin; scrollbar-color:var(--border) transparent; }
-.skin-market-main { min-width:0; }
-.skin-market-gallery { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; margin-top:20px; align-items:start; }
-.skin-side-item { display:flex; flex-direction:column; align-items:stretch; gap:10px; min-width:0; padding:6px; border:1px solid transparent; border-radius:12px; background:none; color:inherit; font:inherit; text-align:left; cursor:pointer; transition:background 160ms, border-color 160ms, transform 160ms; }
-.skin-side-item:hover { background:var(--muted); }
-.skin-side-item.active { border-color:var(--primary); background:var(--muted); }
-.skin-side-item:active { transform:translateY(1px); }
-.skin-side-item:focus-visible { outline:2px solid var(--primary); outline-offset:3px; }
-.skin-side-thumb { display:grid; align-items:center; width:100%; height:100px; flex:none; border-radius:8px; overflow:hidden; position:relative; background:var(--muted); box-shadow:0 0 0 1px var(--border); pointer-events:none; }
-.skin-side-thumb-empty { display:grid; place-items:center; color:var(--muted-foreground); }
-.skin-side-thumb-empty .ui-icon { width:32px; height:32px; }
-.skin-market-preview-note { margin:18px 0; padding:22px; border:1px dashed var(--border); border-radius:16px; color:var(--muted-foreground); font-size:13px; text-align:center; }
-/* Absolute + transform, not `width:100%` + zoom: zoom computes the width
-   against the parent's zoomed box, so the sample got stretched to the column
-   width and every gallery card looked enormous. A fixed 360px sample scaled to
-   .3 is a real thumbnail at any column width. */
-.skin-side-thumb .skin-sample {
-  position: absolute;
-  top: 0; left: 50%;
-  width: 360px;
-  transform: translateX(-50%) scale(.16);
-  transform-origin: top center;
-  padding: 12px;
-  animation: none;
-  border-radius: 0;
-}
-/* Compact gallery: the previous one-column full-width cards were the reason
-   every item looked enormous. */
-.skin-market-gallery {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 10px;
-  align-content: start;
-}
-.skin-side-item {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  min-width: 0;
-  padding: 8px;
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  background: var(--floating-surface);
-  text-align: left;
-  cursor: pointer;
-}
-.skin-side-item.active { border-color: var(--accent); }
-.skin-side-thumb { width: 58px; height: 88px; height: 88px; flex: none; }
-.skin-side-meta { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
-.skin-side-meta strong {
-  font-size: 12px;
-  line-height: 1.25;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.skin-side-meta span { font-size: 11px; }
-.skin-side-meta { display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:4px 8px; min-width:0; padding:0 4px 4px; }
-.skin-side-meta strong { font-size:13px; font-weight:600; }
-.skin-side-state { display:flex; align-items:center; gap:4px; font-size:13px; color:var(--muted-foreground); }
-.skin-side-state.is-applied { color:var(--foreground); font-weight:600; }
-.skin-side-state .ui-icon { width:14px; height:14px; }
-.skin-detail-head { display:flex; justify-content:space-between; align-items:start; gap:14px; margin-bottom:14px; }
-.skin-detail-head h3 { margin:0; font-size:17px; line-height:1.4; font-weight:600; }
-.skin-preview-label { flex:none; font-size:13px; color:var(--muted-foreground); padding-top:3px; }
 .skin-sample .provider:not(.snap-card) { padding:0; box-shadow:none; border-radius:0; background:transparent; }
 .skin-sample .provider-head { display:flex; justify-content:space-between; align-items:center; padding:0; gap:12px; margin-bottom:6px; }
 .skin-sample .provider-name { font-size:20px; font-weight:600; letter-spacing:-.02em; }
@@ -107,67 +22,24 @@
 .skin-sample .total-spend .col-head-row { gap:6px; }
 .skin-sample .total-spend .col-head { font-size:12px; padding:2px 8px; }
 .skin-sample .total-spend .col-total { font-size:16px; }
-.skin-detail-actions { display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:12px; padding:14px 20px; border-top:1px solid var(--border); background:var(--background); }
-.skin-action-context { display:grid; gap:4px; font-size:13px; }
-.skin-action-context > span { color:var(--muted-foreground); }
-.skin-action-buttons { display:flex; flex-wrap:wrap; gap:8px; }
-.skin-market-feedback { flex-basis:100%; margin:0; color:var(--destructive); font-size:13px; line-height:1.5; }
-.skin-detail-actions .mini-btn { display:inline-flex; align-items:center; justify-content:center; gap:8px; min-height:44px; padding:10px 16px; border:1px solid var(--border); border-radius:12px; font-size:13px; font-weight:600; transition:transform 160ms,background 160ms,box-shadow 160ms; }
-.skin-detail-actions .mini-btn:focus-visible, .skin-back-btn:focus-visible { outline:2px solid var(--primary); outline-offset:3px; }
-.skin-detail-actions .mini-btn:hover:not(:disabled) { box-shadow:0 2px 8px rgb(0 0 0 / .12); }
-.skin-detail-actions .skin-reset-btn { background:transparent; }
-.skin-detail-actions .skin-reset-btn:hover:not(:disabled) { background:var(--muted); }
-.skin-detail-actions .mini-btn:active:not(:disabled) { transform:translateY(2px); }
-.skin-detail-actions .primary { background:var(--primary); color:var(--primary-foreground); }
-.skin-detail-actions .primary:disabled { opacity:1; background:var(--muted); color:var(--foreground); }
-.skin-preview-toolbar { display:flex; gap:4px; width:fit-content; padding:3px; border:1px solid var(--border); border-radius:10px; margin-bottom:14px; }
-.skin-preview-toolbar.skin-preview-pages { flex-wrap:wrap; margin-top:-6px; }
 .skin-sample .st-card { padding:2px 10px; }
 .skin-sample .setting-row:last-child { border-bottom:0; }
+.skin-preview-toolbar { display:flex; gap:4px; width:fit-content; padding:3px; border:1px solid var(--border); border-radius:10px; margin-bottom:14px; }
 .skin-mode-btn { display:inline-flex; align-items:center; justify-content:center; gap:7px; min-height:36px; padding:7px 12px; border:1px solid transparent; border-radius:8px; background:transparent; color:var(--muted-foreground); font:inherit; font-size:13px; cursor:pointer; transition:background 160ms, transform 160ms; }
 .skin-mode-btn[aria-pressed="true"] { background:var(--muted); color:var(--foreground); }
 .skin-mode-btn:focus-visible { outline:2px solid var(--foreground); outline-offset:2px; }
 .skin-mode-btn:active { transform:translateY(2px); }
-.skin-preview-pair:not([data-preview-mode="both"]) { grid-template-columns:minmax(0,430px); justify-content:center; }
-.skin-preview-pair[data-preview-mode="light"] > [data-theme="dark"], .skin-preview-pair[data-preview-mode="dark"] > [data-theme="light"] { display:none; }
-.skin-preview-pair:not([data-preview-mode="both"]) .skin-sample-head { display:none; }
 @keyframes signal-arrive { from { transform:translateY(12px); } to { transform:translateY(0); } }
-@media (min-width:640px) {
-  .skin-market-gallery { grid-template-columns:repeat(auto-fill,minmax(170px,1fr)); }
-}
 @media (max-width:640px) {
-  .skin-mode-btn[data-skin-mode="both"] { display:none; }
-  .skin-preview-pair { grid-template-columns:1fr; gap:20px; }
-  .skin-market-body { padding:16px; }
-  .skin-market-head { padding:12px 16px; }
   .skin-sample { padding:12px; }
-  .skin-market-gallery { margin-top:16px; }
-  .skin-detail-head { margin-bottom:10px; }
   .skin-preview-toolbar { margin-bottom:10px; }
-  .skin-detail-actions { padding:12px 16px; gap:10px; }
-  .skin-action-context { display:none; }
-  .skin-action-buttons { width:100%; }
-  .skin-action-buttons .primary { flex:1; }
-  .skin-action-buttons .mini-btn { padding:10px 12px; }
 }
 @media (prefers-reduced-motion:reduce) { .skin-sample { animation:none; } }
 body.reduce-anim .skin-sample { animation:none; }
 
-/* ---- Store-style shot -----------------------------------------------------
-   The sample lays itself out at the real panel's width (360px). Inside a
-   phone-shaped frame it is scaled with transform, not zoom: transform keeps the
-   sample's own layout intact and guarantees the top of the card is what you
-   see, instead of a clipped empty box. */
-.skin-shot-stage {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 12px;
-  padding: 4px 0 2px;
-}
-/* Specificity + min-height on purpose: the panel has a generic button rule
-   with a fixed small height, which collapsed this frame to a sliver. */
-.skin-shot-stage .skin-shot,
+/* A detail shot keeps the store's fixed frame. The sample lays itself out at
+   360px and is scaled with transform; a plain div avoids the panel's generic
+   button height rule, which once collapsed every button-shaped frame. */
 .skin-shot {
   position: relative;
   flex: 0 0 auto;
@@ -184,9 +56,6 @@ body.reduce-anim .skin-sample { animation:none; }
   box-shadow: 0 6px 18px rgb(0 0 0 / .08);
 }
 .skin-shot:hover { border-color: color-mix(in oklab, var(--accent) 45%, var(--border)); }
-/* Scale by height, not by width: the sample is ~900px tall, so a width-fit
-   scale still showed only its top third. .25 fits the whole card into 232px
-   and leaves margin on the sides. */
 .skin-shot .skin-sample {
   position: absolute;
   top: 0; left: 50%;
@@ -196,28 +65,6 @@ body.reduce-anim .skin-sample { animation:none; }
   border-radius: 0;
   pointer-events: none;
 }
-.skin-shot-dots { display: flex; justify-content: center; gap: 6px; margin-top: 6px; }
-.skin-shot-dot {
-  width: 6px; height: 6px;
-  border: 0; padding: 0;
-  border-radius: 999px;
-  background: var(--border);
-  cursor: pointer;
-}
-.skin-shot-dot.is-on { background: var(--accent); width: 16px; }
-.skin-film-nav {
-  flex: 0 0 auto;
-  width: 26px; height: 26px;
-  display: grid; place-items: center;
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  background: var(--floating-surface);
-  color: var(--muted);
-  cursor: pointer;
-}
-.skin-film-nav:hover { color: var(--foreground); }
-/* One arrow glyph in the icon set; mirror it for "next". */
-.skin-film-nav.is-next svg { transform: scaleX(-1); }
 .skin-zoom-overlay {
   position: fixed;
   inset: 0;
@@ -257,28 +104,104 @@ body.reduce-anim .skin-sample { animation:none; }
   cursor: pointer;
 }
 
-/* ---- Workshop: pick with the panel's own segmented control, preview as a
-   phone-width column. No scaling tricks: the sample renders at its natural
-   width inside a 360px column, so there is no stretched middles, no void
-   below, and nothing that a generic button rule can collapse. */
-.skin-pick-bar { flex-wrap: wrap; margin: 8px 0 10px; }
-.skin-peek {
-  width: 360px;
-  max-width: 100%;
-  margin: 0 auto 8px;
-  max-height: 54vh;
-  overflow: auto;
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  background: var(--floating-surface);
+/* ---- #107 storefront: Settings → 通用 → 皮肤工坊 ---------------------------
+   Gallery cards and the detail page both show the real panel components at
+   their natural width, clipped into a phone-shaped frame. No screenshots.
+   Frames are plain divs: the panel's generic button height rule once
+   collapsed every <button> wrapper here. */
+.skin-shop { max-width: none; }
+.skin-shop-head { display:flex; align-items:flex-start; justify-content:space-between; gap:20px; }
+.skin-shop-intro h2 { margin:0; font-size:20px; font-weight:600; line-height:1.25; }
+.skin-shop-intro p { margin:5px 0 0; max-width:62ch; font-size:13px; line-height:1.55; color:var(--muted-foreground); }
+.skin-shop-viewbar { flex:none; margin:0; }
+.skin-shop-tools { display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin:16px 0 14px; }
+.skin-shop-search { display:flex; align-items:center; gap:8px; flex:1 1 220px; max-width:320px; height:36px; padding:0 10px; border:1px solid var(--border); border-radius:10px; background:var(--card); color:var(--muted-foreground); }
+.skin-shop-search:focus-within { border-color:var(--primary); box-shadow:0 0 0 2px color-mix(in oklab, var(--primary) 22%, transparent); }
+.skin-shop-search .ui-icon { width:15px; height:15px; flex:none; }
+.skin-shop-search input { width:100%; min-width:0; border:0; outline:none; background:transparent; color:var(--foreground); font:inherit; font-size:13px; }
+.skin-shop-count { font-size:12px; color:var(--muted-foreground); }
+.skin-shop-refresh { margin-left:auto; display:inline-flex; align-items:center; gap:6px; padding:6px 10px; border:1px solid var(--border); border-radius:9px; background:transparent; color:var(--muted-foreground); font:inherit; font-size:12px; cursor:pointer; }
+.skin-shop-refresh:hover { background:var(--muted); color:var(--foreground); }
+.skin-shop-refresh:focus-visible { outline:2px solid var(--primary); outline-offset:2px; }
+.skin-shop-refresh .ui-icon { width:14px; height:14px; }
+.skin-shop-note { display:flex; align-items:center; gap:8px; margin:0 0 14px; padding:10px 12px; border-radius:10px; background:var(--muted); color:var(--muted-foreground); font-size:12.5px; line-height:1.5; }
+.skin-shop-note .ui-icon { width:15px; height:15px; flex:none; }
+.skin-shop-note.is-loading .ui-icon { animation:skin-shop-spin 1s linear infinite; }
+@keyframes skin-shop-spin { to { transform:rotate(360deg); } }
+
+/* Masonry is two wide columns; grid is compact uniform cells. Card size and
+   preview height differ enough to read as two real modes, not a toggle. */
+.skin-shop-gallery.is-masonry { columns:2; column-gap:18px; }
+.skin-shop-gallery.is-masonry .skin-card { break-inside:avoid; display:block; width:100%; margin:0 0 18px; }
+.skin-shop-gallery.is-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(196px,1fr)); gap:16px; }
+.skin-card { position:relative; overflow:hidden; border:1px solid var(--border); border-radius:14px; background:var(--card); color:inherit; text-align:left; cursor:pointer; transition:transform .16s ease, border-color .16s ease, box-shadow .16s ease; }
+.skin-card:hover { transform:translateY(-2px); border-color:color-mix(in oklab, var(--accent) 50%, var(--border)); box-shadow:0 10px 24px rgb(0 0 0 / .10); }
+.skin-card:focus-visible { outline:2px solid var(--primary); outline-offset:3px; }
+.skin-card.is-applied { border-color:color-mix(in oklab, var(--primary) 55%, var(--border)); }
+.skin-card-shot { --shot-scale:.9; position:relative; height:320px; overflow:hidden; border-bottom:1px solid var(--border); background:radial-gradient(120% 80% at 50% 0, color-mix(in oklab, var(--muted) 65%, transparent), var(--card)); }
+.skin-shop-gallery.is-grid .skin-card-shot { --shot-scale:.62; height:210px; }
+.skin-card-shot.is-empty { display:grid; place-items:center; padding:18px; }
+.skin-shot-canvas { position:relative; width:100%; height:100%; overflow:hidden; }
+.skin-shot-canvas > .skin-sample { position:absolute; top:0; left:50%; width:360px; min-width:360px; transform:translateX(-50%) scale(var(--shot-scale,.62)); transform-origin:top center; pointer-events:none; animation:none; border-radius:0; }
+.skin-card-badge { position:absolute; top:10px; left:10px; z-index:2; padding:3px 9px; border-radius:999px; background:var(--primary); color:var(--primary-foreground); font-size:11px; font-weight:600; line-height:1.5; }
+.skin-card-badge.is-update { left:auto; right:10px; background:color-mix(in oklab, var(--accent) 82%, var(--card)); color:var(--foreground); }
+.skin-card-body { display:flex; flex-direction:column; gap:4px; padding:12px 14px 14px; }
+.skin-card-name { font-size:15px; font-weight:600; line-height:1.3; overflow-wrap:anywhere; }
+.skin-card-sub { display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; min-height:2.9em; font-size:12px; line-height:1.45; color:var(--muted-foreground); }
+.skin-card-meta { display:flex; align-items:center; gap:8px; margin-top:2px; }
+.skin-chip { padding:2px 8px; border-radius:999px; background:var(--muted); color:var(--muted-foreground); font-size:11px; line-height:1.6; }
+.skin-chip.is-applied { background:color-mix(in oklab, var(--primary) 16%, transparent); color:var(--foreground); font-weight:600; }
+.skin-card-version { margin-left:auto; color:var(--muted-foreground); font-size:11.5px; font-variant-numeric:tabular-nums; }
+.skin-shop-placeholder { display:flex; flex-direction:column; align-items:center; justify-content:center; gap:8px; padding:16px; text-align:center; color:var(--muted-foreground); font-size:12px; line-height:1.5; }
+.skin-shop-placeholder .ui-icon { width:26px; height:26px; }
+.skin-shop-empty { padding:34px 16px; text-align:center; color:var(--muted-foreground); font-size:13px; }
+
+.skin-shop-detail { display:flex; flex-direction:column; gap:20px; }
+.skin-shop-crumbs { display:flex; align-items:center; gap:8px; flex-wrap:wrap; color:var(--muted-foreground); font-size:12.5px; }
+.skin-shop-crumbs .skin-back-btn { margin-right:4px; }
+.skin-crumb-sep { opacity:.5; }
+.skin-shop-crumbs strong { color:var(--foreground); font-weight:600; overflow-wrap:anywhere; }
+.skin-shop-hero { display:grid; grid-template-columns:minmax(0,1fr) 300px; gap:24px; padding:22px; overflow:hidden; border:1px solid var(--border); border-radius:16px; background:linear-gradient(135deg, color-mix(in oklab, var(--muted) 72%, transparent), var(--card)); }
+.skin-shop-hero-copy { display:flex; flex-direction:column; align-items:flex-start; gap:10px; min-width:0; }
+.skin-shop-hero-icon { display:grid; place-items:center; width:44px; height:44px; border:1px solid var(--border); border-radius:12px; background:var(--card); }
+.skin-shop-hero-icon .ui-icon { width:22px; height:22px; }
+.skin-shop-hero h2 { margin:0; font-size:24px; font-weight:600; line-height:1.2; overflow-wrap:anywhere; }
+.skin-shop-hero-copy > p { margin:0; max-width:52ch; color:var(--muted-foreground); font-size:13px; line-height:1.6; }
+.skin-shop-actions { display:flex; flex-wrap:wrap; gap:8px; margin-top:6px; }
+.skin-shop-actions .mini-btn { display:inline-flex; align-items:center; gap:6px; min-height:38px; padding:8px 14px; }
+.skin-shop-actions .primary { background:var(--primary); color:var(--primary-foreground); }
+.skin-shop-actions .primary:disabled { opacity:1; background:var(--muted); color:var(--foreground); }
+.skin-shop-feedback { margin:2px 0 0; color:var(--destructive); font-size:12.5px; line-height:1.5; }
+.skin-hero-preview { --shot-scale:.78; position:relative; height:300px; overflow:hidden; border:1px solid var(--border); border-radius:14px; background:var(--muted); }
+.skin-hero-preview.is-empty { display:grid; place-items:center; }
+.skin-shop-meta { display:grid; grid-auto-flow:column; grid-auto-columns:1fr; overflow:hidden; border:1px solid var(--border); border-radius:12px; background:var(--card); }
+.skin-shop-meta-cell { display:flex; flex-direction:column; gap:3px; padding:12px 16px; border-right:1px solid var(--border); }
+.skin-shop-meta-cell:last-child { border-right:0; }
+.skin-shop-meta-cell span { color:var(--muted-foreground); font-size:11px; }
+.skin-shop-meta-cell strong { font-size:13px; font-weight:600; }
+.skin-shop-section { display:flex; flex-direction:column; gap:12px; }
+.skin-shop-section h3, .skin-shop-shots-head h3 { margin:0; font-size:15px; font-weight:600; }
+.skin-shop-shots-head { display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap; }
+.skin-shop-shots-head .skin-preview-toolbar { margin-bottom:0; }
+.skin-shop-rail { display:flex; gap:14px; overflow-x:auto; padding:2px 2px 10px; scrollbar-width:thin; }
+.skin-detail-shot { --shot-scale:.46; display:flex; flex-direction:column; flex:0 0 auto; width:190px; height:340px; overflow:hidden; border:1px solid var(--border); border-radius:12px; background:var(--muted); cursor:zoom-in; }
+.skin-detail-shot:hover { border-color:color-mix(in oklab, var(--accent) 45%, var(--border)); }
+.skin-detail-shot:focus-visible { outline:2px solid var(--primary); outline-offset:3px; }
+.skin-detail-shot .skin-shot-canvas { flex:1; }
+.skin-detail-shot .skin-shot-canvas > .skin-sample { transform:translateX(-50%) scale(var(--shot-scale)); }
+.skin-shot-caption { flex:none; padding:6px 8px; border-top:1px solid var(--border); background:var(--card); color:var(--muted-foreground); font-size:11px; line-height:1.4; }
+.skin-shop-about { margin:0; max-width:70ch; color:var(--muted-foreground); font-size:13px; line-height:1.65; }
+
+@media (max-width: 900px) {
+  .skin-shop-hero { grid-template-columns:1fr; }
+  .skin-hero-preview { height:220px; }
+  .skin-shop-meta { grid-auto-flow:row; grid-template-columns:1fr 1fr; }
+  .skin-shop-meta-cell { border-right:0; border-bottom:1px solid var(--border); }
+  .skin-shop-meta-cell:nth-child(odd) { border-right:1px solid var(--border); }
+  .skin-shop-meta-cell:nth-last-child(-n+2) { border-bottom:0; }
 }
-.skin-peek .skin-sample {
-  width: auto;
-  padding: 10px;
-  border-radius: 0;
-  animation: none;
+@media (prefers-reduced-motion:reduce) {
+  .skin-card, .skin-card:hover { transition:none; transform:none; }
+  .skin-shop-note.is-loading .ui-icon { animation:none; }
 }
-.skin-detail-head h3 { font-size: 15px; line-height: 1.25; }
-.skin-market-head h2 { font-size: 15px; }
-.skin-detail-head p, .skin-market-copy { font-size: 11.5px; line-height: 1.5; }
-.skin-preview-toolbar .skin-mode-btn { font-size: 11.5px; }
+body.reduce-anim .skin-card, body.reduce-anim .skin-card:hover { transition:none; transform:none; }

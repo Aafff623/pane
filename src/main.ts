@@ -66,7 +66,7 @@ if (IS_PANEL_FORM) document.body.classList.add("panel-form");
 import { gsap } from "gsap";
 import paneLogo from "./assets/pane-logo.png?inline";
 import paneIcon from "./assets/pane-icon.png?inline";
-import { SKIN_STORAGE_KEY, readSkin, normalizeSkin, embedSkinImages, packSkinList, isPackSkin, refreshInstalledPacks, remotePackIndex, remoteIndexErrorClass, isNewerVersion, refreshSkinIndex, type SkinId } from "./skins";
+import { SKIN_STORAGE_KEY, SKIN_PACKS_STORAGE_KEY, readSkin, normalizeSkin, embedSkinImages, packSkinList, isPackSkin, refreshInstalledPacks, remotePackIndex, remoteIndexErrorClass, isNewerVersion, refreshSkinIndex, broadcastSkinPackChange, skinIndexSettled, skinIndexRefreshing, type SkinId } from "./skins";
 import { playSkinTransition } from "./skinTransition";
 import { playThemeStartup } from "./themeStartup";
 import { initialTourPending } from "./onboardingState";
@@ -571,6 +571,8 @@ interface PanelIntent {
   at: number;
   /// The panel should also start/show this family's sign-in dialog.
   login?: boolean;
+  /// Settings sub-page to land on; only `skins` uses it today.
+  page?: "skins";
 }
 
 // Bumped when a config.json migration needs to run exactly once. The field is
@@ -1470,62 +1472,42 @@ let overviewCategory: OverviewCategory = "coding";
 /// the "act soon" view. Follows the 5h/week tab like the sections do.
 let overviewExpiringOpen = false;
 let customizeOpen = false;
-let skinMarketOpen = false;
 let skinPreviewMode: "light" | "dark" | "both" = "both";
 /// Workshop sample page. Every installed pack renders the same real-control
 /// samples under its own `data-skin`; a demo page never reads live data.
 type SkinPreviewPage = "quota" | "spend" | "settings";
-let skinPreviewPage: SkinPreviewPage = "quota";
 /// Gate for installed-pack CSS: first paint and the startup sequence must not
 /// run before the saved pack's stylesheet (and its fonts) are in the document.
 let installedSkinLoad: Promise<void> = Promise.resolve();
-/// Which sidebar entry the workshop is showing; null = the applied skin.
-let skinMarketSelected: SkinId | null = null;
 /// WorkBuddy's web-session status (ticket 06), loaded at boot and after
 /// every action; the cookie itself never leaves Rust.
 let wbWebStatus: { enabled: boolean; has_cookie: boolean; chrome_major: number | null; saved_at: string | null } | null = null;
 /// Pack id while its download runs; blocks a second parallel download.
 let skinDownloading: string | null = null;
-let skinMarketFeedback: string | null = null;
 
-/// One workshop row: a built-in, an installed pack, or a remote pack the
-/// index offers but this machine does not have yet.
-type MarketEntry = {
-  id: string;
-  name: string;
-  tagline: string;
-  state: "applied" | "installed" | "remote";
-  updateAvailable: boolean;
-  remote?: { url: string; sha256: string };
-};
-
-function marketEntries(): MarketEntry[] {
-  const selected = activeSkin()?.id;
-  const index = remotePackIndex();
-  const entries: MarketEntry[] = [];
-  // Installed packs first: a saved/offline pack stays usable even when the
-  // distribution index is unreachable.
-  for (const p of packSkinList()) {
-    const remote = index.find((r) => r.id === p.id);
-    entries.push({
-      id: p.id, name: p.name, tagline: `v${p.version}`,
-      state: selected === p.id ? "applied" : "installed",
-      updateAvailable: !!remote && isNewerVersion(remote.version, p.version),
-      remote: remote ? { url: remote.url, sha256: remote.sha256 } : undefined,
-    });
+/// #107 storefront. The workshop lives on its own Settings page; these hold
+/// only view state, never a copy of the pack registry.
+type SkinShopView = "masonry" | "grid";
+const SKIN_SHOP_VIEW_KEY = "pane.skins.view";
+/// A sentinel that cannot be a pack id (validSkinId requires a letter/digit
+/// first), so a local pack named "native" can never collide with this row.
+const SKIN_SHOP_NATIVE = "__native";
+function readSkinShopView(): SkinShopView {
+  try {
+    return localStorage.getItem(SKIN_SHOP_VIEW_KEY) === "grid" ? "grid" : "masonry";
+  } catch {
+    return "masonry";
   }
-  // Uninstalled index entries are the download list — signal/ink included
-  // now that they are ordinary official packs.
-  for (const r of index) {
-    if (entries.some((e) => e.id === r.id)) continue;
-    entries.push({
-      id: r.id, name: r.name, tagline: `v${r.version}`, state: "remote",
-      updateAvailable: false, remote: { url: r.url, sha256: r.sha256 },
-    });
-  }
-  return entries;
 }
+let skinShopView: SkinShopView = readSkinShopView();
+let skinShopSearch = "";
+let skinShopSelected: string | null = null;
+let skinShopZoom: { id: string; page: SkinPreviewPage; mode: "light" | "dark" } | null = null;
+let skinShopFeedback: string | null = null;
+let skinShopReturnScroll = 0;
+let skinShopReturnId: string | null = null;
 
+/// The installed pack behind the saved selection, or undefined for native.
 function activeSkin() {
   try {
     const id = config.skinId === undefined ? readSkin(window.localStorage) : normalizeSkin(config.skinId);
@@ -1545,9 +1527,10 @@ async function migrateSkinFromIndex(): Promise<void> {
   if (!remote) return;
   try {
     await invoke("skin_pack_download", { url: remote.url, sha256: remote.sha256 });
-    await refreshInstalledPacks();
-    applySkin();
-    requestRender();
+    if (await refreshInstalledPacks()) {
+      applySkin();
+      requestRender();
+    }
   } catch { /* native appearance holds; the workshop offers the download. */ }
 }
 
@@ -1567,15 +1550,18 @@ let skinSelectionSaving = false;
 async function selectSkin(id: SkinId | null): Promise<void> {
   if (skinSelectionSaving) return;
   skinSelectionSaving = true;
+  skinShopFeedback = null;
+  for (const button of document.querySelectorAll<HTMLButtonElement>(
+    "#skin-shop-root [data-skin-shop-select], #skin-shop-root [data-skin-shop-reset], #skin-shop-root [data-skin-shop-remove]",
+  )) button.disabled = true;
   const previous = config.skinId;
-  skinMarketFeedback = null;
   try {
-    await patchConfig({ skinId: normalizeSkin(id) });
+    await patchConfig({ skinId: normalizeSkin(id) }, { markDirty: false });
   } catch {
     config.skinId = previous;
-    skinMarketFeedback = t("skin.saveFailed");
+    skinShopFeedback = t("skin.saveFailed");
     document.querySelector("#status")!.textContent = t("skin.saveFailed");
-    if (skinMarketOpen) renderDrawerBody();
+    renderSkinShopIfVisible();
     return;
   } finally {
     skinSelectionSaving = false;
@@ -1589,19 +1575,29 @@ async function selectSkin(id: SkinId | null): Promise<void> {
   requestRender();
   document.querySelector("#status")!.textContent = id ? "" : t("skin.nativeApplied");
   requestAnimationFrame(fitProviderNames);
-  for (const button of document.querySelectorAll<HTMLButtonElement>("[data-skin-select]")) {
-    button.disabled = button.dataset.skinSelect === id;
-    button.innerHTML = `${uiIcon(button.disabled ? "checkCircle" : "paintBrush")}<span>${t(button.disabled ? "skin.applied" : "skin.use")}</span>`;
-  }
+  renderSkinShopIfVisible();
 }
 
 // Both window forms share the same origin. The emitting window applies locally;
 // other windows receive this event without changing the user's appearance mode.
 window.addEventListener("storage", (event) => {
+  if (event.key === SKIN_PACKS_STORAGE_KEY) {
+    void refreshInstalledPacks().then((ok) => {
+      if (!ok) {
+        skinShopFeedback = t("skin.shopRegistryFailed");
+        renderSkinShopIfVisible();
+        return;
+      }
+      applySkin();
+      requestRender();
+      renderSkinShopIfVisible();
+    });
+    return;
+  }
   if (event.key !== SKIN_STORAGE_KEY && event.key !== null) return;
   applySkin();
   requestAnimationFrame(fitProviderNames);
-  if (skinMarketOpen) renderDrawerBody();
+  renderSkinShopIfVisible();
 });
 
 let revealTimer = 0;
@@ -1726,9 +1722,9 @@ function applyConfigEcho(sent: Config, echoed: Config): void {
   }
 }
 
-async function patchConfig(patch: Partial<Config>): Promise<void> {
+async function patchConfig(patch: Partial<Config>, options?: { markDirty?: boolean }): Promise<void> {
   Object.assign(config, patch);
-  if (IS_PANEL_FORM) setSettingsDirty(true);
+  if (IS_PANEL_FORM && options?.markDirty !== false) setSettingsDirty(true);
   // Send a full current snapshot. If an earlier serialized write failed,
   // the next save retries that still-live in-memory state as well.
   const payload = snapshotConfig();
@@ -1816,7 +1812,7 @@ async function reloadConfigFromBackend(force = false): Promise<void> {
   applyGlass();
   applyReduceMotion();
   applySkin();
-  if (skinMarketOpen) renderDrawerBody();
+  renderSkinShopIfVisible();
 }
 
 // ---------------------------------------------------------------------------
@@ -8317,7 +8313,7 @@ function openGroupMenu(
       if (SETTINGS_ONLY_AUTH.has(fam)) void openKeysPageFor(fam);
       else if (fam === "cursor") openCursorAccountDialog();
       else {
-        skinMarketOpen = false; custConfigOpen = fam; setDrawer(true); renderDrawerBody();
+        custConfigOpen = fam; setDrawer(true); renderDrawerBody();
         document.querySelector<HTMLElement>(`#drawer-body [data-cust-provider="${CSS.escape(fam)}"]`)?.scrollIntoView({ block: "start" });
       }
       return;
@@ -9299,7 +9295,7 @@ function maybeShowFontGuide(): boolean {
   const theme = activeSkin();
   const name = theme ? theme.name : t("skin.nativeName");
   const body = fresh
-    ? `${t("fontGuide.font", { font: config.uiFont || t("fontGuide.system") })}\n\n${t("fontGuide.theme", { theme: name, themes: marketEntries().map((entry) => entry.name).join(" / ") })}`
+    ? `${t("fontGuide.font", { font: config.uiFont || t("fontGuide.system") })}\n\n${t("fontGuide.theme", { theme: name, themes: skinShopEntries().filter((entry) => !entry.native).map((entry) => entry.name).join(" / ") })}`
     : t("fontGuide.upgradeBody");
   showChangelogDialog(t(fresh ? "fontGuide.newTitle" : "fontGuide.upgradeTitle"),
     [{ version: appVersion, date: "", summary: "", items: [], body }], {
@@ -12656,67 +12652,615 @@ function renderSettingsSkinSampleBody(): string {
 /// gallery reads as one comparable row.
 function renderSkinSample(
   mode: "light" | "dark",
-  skinId: SkinId = "signal",
+  skinId: SkinId | null = "signal",
   compact = false,
   pageOverride?: SkinPreviewPage,
 ): string {
-  const page: SkinPreviewPage = pageOverride ?? (compact ? "spend" : skinPreviewPage);
+  const page: SkinPreviewPage = pageOverride ?? (compact ? "spend" : "quota");
   const body = page === "quota"
     ? renderQuotaSkinSampleBody()
     : page === "settings"
       ? renderSettingsSkinSampleBody()
-      : renderSpendSkinSampleBody(skinId);
+      : renderSpendSkinSampleBody(skinId ?? "signal");
   const label = page === "spend"
     ? t("skin.spendPreview")
     : `${t(`skin.page.${page}`)} · ${t(mode === "light" ? "skin.light" : "skin.dark")}`;
-  return `<div class="skin-sample" data-skin="${skinId}" ${skinId === "ink" ? "data-ink" : ""} data-theme="${mode}" role="img" aria-label="${escapeHtml(label)}">
+  const scope = skinId ? ` data-skin="${skinId}" ${skinId === "ink" ? "data-ink" : ""}` : "";
+  return `<div class="skin-sample"${scope} data-theme="${mode}" role="img" aria-label="${escapeHtml(label)}">
     ${compact ? "" : `<div class="skin-sample-head"><span>${uiIcon(mode === "light" ? "sun" : "moon")}${t(mode === "light" ? "skin.light" : "skin.dark")}</span></div>`}
     ${body}
   </div>`;
 }
 
-function renderSkinMarket(): string {
-  const entries = marketEntries();
-  if (!entries.length) {
-    const reasonKey = remoteIndexErrorClass();
-    const reason = reasonKey ? ` · ${escapeHtml(t(`skin.indexError.${reasonKey}`))}` : "";
-    return `<section class="skin-market" aria-label="${t("skin.market")}">
-      <div class="skin-market-head"><h2>${t("skin.market")}</h2><button class="mini-btn skin-back-btn" type="button" data-skin-close>${uiIcon("arrowLeft")}<span>${t("skin.back")}</span></button></div>
-      <div class="skin-market-body"><p class="skin-market-preview-note">${t("skin.indexUnavailable")}${reason}</p></div>
-    </section>`;
-  }
-  const current = skinMarketSelected ?? activeSkin()?.id ?? entries[0].id;
-  const skin = entries.find((s) => s.id === current) ?? entries[0];
-  const previewMode = skinPreviewMode === "both" && window.matchMedia("(max-width:640px)").matches ? "light" : skinPreviewMode;
-  // The standalone preview slot is gone: its frame kept collapsing under a
-  // generic button rule and showed a clipped band. The skin cards below carry
-  // their own thumbnail of the whole card, so the page needs no second one.
-  return `<section class="skin-market" aria-label="${t("skin.market")}">
-    <div class="skin-market-head"><h2>${t("skin.market")}</h2><span class="skin-current-label">${t("skin.current")}${escapeHtml(activeSkin() ? entries.find((entry) => entry.state === "applied")?.name ?? "" : t("skin.nativeName"))}</span><button class="mini-btn skin-back-btn" type="button" data-skin-close>${uiIcon("arrowLeft")}<span>${t("skin.back")}</span></button></div>
-    <div class="skin-market-body">
-      <div class="skin-market-main" id="skin-market-detail">
-        <div class="skin-detail-head"><div><h3>${escapeHtml(skin.name)}</h3><p class="skin-market-copy">${escapeHtml(skin.tagline)}${skin.updateAvailable ? ` · ${t("skin.updateAvailable")}` : ""}</p></div></div>
-        <div class="skin-preview-toolbar" role="group" aria-label="${t("skin.previewMode")}">${(["light", "dark", "both"] as const).map((mode) => `<button class="skin-mode-btn" type="button" data-skin-mode="${mode}" aria-pressed="${previewMode === mode}">${uiIcon(mode === "light" ? "sun" : mode === "dark" ? "moon" : "columns")}<span>${t(mode === "light" ? "skin.light" : mode === "dark" ? "skin.dark" : "skin.both")}</span></button>`).join("")}</div>
-      </div>
-      <div class="skin-preview-toolbar skin-pick-bar" role="tablist" aria-label="${t("skin.choose")}">${entries.map((s) => `<button class="skin-mode-btn${s.id === skin.id ? " active" : ""}" type="button" role="tab" aria-pressed="${s.id === skin.id}" data-skin-pick="${escapeHtml(s.id)}"><span>${escapeHtml(s.name)}</span></button>`).join("")}</div>
-      ${skin.state === "remote" ? "" : `<div class="skin-peek">${renderSkinSample("light", skin.id as SkinId, false, skinPreviewPage)}</div>`}
-      </div>
-    </div>
-    <div class="skin-detail-actions">${skinMarketFeedback ? `<p class="skin-market-feedback" role="alert">${escapeHtml(skinMarketFeedback)}</p>` : ""}<div class="skin-action-context"><strong>${escapeHtml(skin.name)}</strong><span>${t("skin.followsMode")}</span></div><div class="skin-action-buttons">${skinActionHtml(skin)}${skin.state === "remote" ? `<button class="mini-btn skin-reset-btn" type="button" data-skin-reset ${activeSkin() ? "" : "disabled"}>${uiIcon("arrowCounterClockwise")}<span>${t("skin.native")}</span></button>` : ""}</div></div>
-  </section>`;
+/// ---- #107 storefront -------------------------------------------------------
+/// One shop row. `native` is a first-class entry with no pack and no download;
+/// every other row comes from the real pack registry or the distribution index.
+type SkinShopEntry = {
+  id: string;
+  name: string;
+  tagline: string;
+  version: string | null;
+  size: number | null;
+  installed: boolean;
+  /// The pack id saved in config, even when that pack is missing locally.
+  selected: boolean;
+  applied: boolean;
+  updateAvailable: boolean;
+  native: boolean;
+  remote?: { url: string; sha256: string };
+};
+
+function skinShopTagline(id: string): string {
+  if (id === "signal") return t("skin.signalTagline");
+  if (id === "ink") return t("skin.inkTagline");
+  return "";
 }
 
-function skinActionHtml(skin: MarketEntry): string {
-  if (skin.state === "remote") {
-    const busy = skinDownloading === skin.id;
-    return `<button class="mini-btn primary" type="button" data-skin-download="${skin.id}" ${busy ? "disabled" : ""}>${busy ? t("skin.downloading") : t("skin.download")}</button>`;
+function skinShopEntries(): SkinShopEntry[] {
+  const savedId = normalizeSkin(config.skinId);
+  const activeId = activeSkin()?.id ?? null;
+  const index = remotePackIndex();
+  const entries: SkinShopEntry[] = [{
+    id: SKIN_SHOP_NATIVE,
+    name: t("skin.nativeName"),
+    tagline: t("skin.nativeTagline"),
+    version: null,
+    size: null,
+    installed: true,
+    selected: savedId === null,
+    applied: savedId === null,
+    updateAvailable: false,
+    native: true,
+  }];
+  for (const pack of packSkinList()) {
+    const remote = index.find((entry) => entry.id === pack.id);
+    entries.push({
+      id: pack.id,
+      name: pack.name || pack.id,
+      tagline: skinShopTagline(pack.id),
+      version: pack.version,
+      size: remote?.size ?? null,
+      installed: true,
+      selected: savedId === pack.id,
+      applied: activeId === pack.id,
+      updateAvailable: !!remote && isNewerVersion(remote.version, pack.version),
+      native: false,
+      remote: remote ? { url: remote.url, sha256: remote.sha256 } : undefined,
+    });
   }
-  const applied = skin.state === "applied";
-  // Every installed entry is re-downloadable, official packs included; remove
-  // stays disabled while the pack is applied so the surface never vanishes
-  // before the user returns to native.
-  const removeBtn = `<button class="mini-btn" data-skin-remove="${skin.id}" ${applied ? "disabled" : ""}>${t("skin.remove")}</button>`;
-  return `<button class="mini-btn primary" data-skin-select="${skin.id}" ${applied ? "disabled" : ""}>${uiIcon(applied ? "checkCircle" : "paintBrush")}<span>${t(applied ? "skin.applied" : "skin.use")}</span></button><button class="mini-btn skin-reset-btn" data-skin-reset ${activeSkin() ? "" : "disabled"}>${uiIcon("arrowCounterClockwise")}<span>${t("skin.native")}</span></button>${removeBtn}`;
+  for (const remote of index) {
+    if (entries.some((entry) => entry.id === remote.id)) continue;
+    entries.push({
+      id: remote.id,
+      name: remote.name || remote.id,
+      tagline: skinShopTagline(remote.id),
+      version: remote.version,
+      size: remote.size,
+      installed: false,
+      selected: savedId === remote.id,
+      applied: false,
+      updateAvailable: false,
+      native: false,
+      remote: { url: remote.url, sha256: remote.sha256 },
+    });
+  }
+  const rank = (entry: SkinShopEntry) => entry.applied ? 0 : entry.selected ? 1 : entry.installed ? 2 : 3;
+  return entries.sort((a, b) => rank(a) - rank(b) || a.name.localeCompare(b.name));
+}
+
+function skinShopEntry(id: string): SkinShopEntry | undefined {
+  return skinShopEntries().find((entry) => entry.id === id);
+}
+
+function skinShopPackSize(bytes: number): string {
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function skinShopSubtitle(entry: SkinShopEntry): string {
+  if (entry.tagline) return entry.tagline;
+  if (entry.version) return `${t("skin.shopBundlePackage")} · v${entry.version}`;
+  return t("skin.nativeTagline");
+}
+
+function skinShopCountLabel(count: number): string {
+  return t(count === 1 ? "skin.shopCountOne" : "skin.shopCount", { n: count });
+}
+
+function skinShopStateLabel(entry: SkinShopEntry): string {
+  if (entry.applied) return t("skin.applied");
+  if (entry.selected && !entry.installed) return t("skin.shopMissing");
+  if (entry.native) return t("skin.builtIn");
+  if (entry.installed) return t("skin.installed");
+  return t("skin.remoteState");
+}
+
+/// The real panel component at its natural 360px width. The wrapper clips a
+/// phone-shaped window into it; nothing here is a screenshot or a mock-up.
+function skinShopSample(
+  id: string,
+  page: SkinPreviewPage,
+  mode: "light" | "dark",
+  cls: string,
+): string {
+  const skinId = id === SKIN_SHOP_NATIVE ? null : id;
+  return `<div class="${cls}"><div class="skin-shot-canvas" inert>${renderSkinSample(mode, skinId, true, page)}</div></div>`;
+}
+
+function skinShopPlaceholder(): string {
+  return `<div class="skin-shop-placeholder">${uiIcon("palette")}<span>${escapeHtml(t("skin.previewAfterDownload"))}</span></div>`;
+}
+
+function skinShopVisible(): boolean {
+  return IS_PANEL_FORM
+    && activePanelPage === "skins"
+    && !!document.querySelector("#panel-view-settings:not([hidden]) #skin-shop-root");
+}
+
+function renderSkinShopIfVisible(): void {
+  if (skinShopVisible()) renderSkinShop();
+}
+
+const SKIN_SHOP_FOCUS_ATTRS = [
+  "data-skin-shop-select",
+  "data-skin-shop-download",
+  "data-skin-shop-remove",
+  "data-skin-shop-reset",
+  "data-skin-shop-view",
+  "data-skin-shop-mode",
+  "data-skin-shop-back",
+  "data-skin-shop-open",
+  "data-skin-shop-search",
+  "data-skin-shop-refresh",
+] as const;
+
+function captureSkinShopFocus(root: HTMLElement): { attr: string; value: string } | null {
+  const active = document.activeElement;
+  if (!(active instanceof HTMLElement) || !root.contains(active)) return null;
+  for (const attr of SKIN_SHOP_FOCUS_ATTRS) {
+    if (active.hasAttribute(attr)) return { attr, value: active.getAttribute(attr) ?? "" };
+  }
+  return { attr: "", value: "" };
+}
+
+function restoreSkinShopFocus(
+  root: HTMLElement,
+  saved: { attr: string; value: string } | null,
+): void {
+  if (!saved) return;
+  if (saved.attr) {
+    const target = root.querySelector<HTMLElement>(`[${saved.attr}="${CSS.escape(saved.value)}"]`);
+    if (target && !target.hasAttribute("disabled")) {
+      target.focus({ preventScroll: true });
+      return;
+    }
+  }
+  const back = root.querySelector<HTMLElement>("[data-skin-shop-back]");
+  if (back) {
+    back.focus({ preventScroll: true });
+    return;
+  }
+  const sameCard = saved.value
+    ? root.querySelector<HTMLElement>(`[data-skin-shop-open="${CSS.escape(saved.value)}"]`)
+    : null;
+  const fallback = sameCard ?? root.querySelector<HTMLElement>("[data-skin-shop-search]")
+    ?? root.querySelector<HTMLElement>(".skin-card");
+  fallback?.focus({ preventScroll: true });
+}
+
+function renderSkinShop(): void {
+  const root = document.querySelector<HTMLElement>("#skin-shop-root");
+  if (!root) return;
+  const savedFocus = captureSkinShopFocus(root);
+  const entries = skinShopEntries();
+  if (skinShopSelected) {
+    const entry = entries.find((item) => item.id === skinShopSelected);
+    if (entry) {
+      root.innerHTML = renderSkinShopDetail(entry);
+      if (root.querySelector(".skin-sample[data-ink]")) ensureInkDefs();
+      if (skinShopZoom) {
+        document
+          .querySelector<HTMLElement>("[data-skin-shop-zoom-close]")
+          ?.focus({ preventScroll: true });
+      } else {
+        restoreSkinShopFocus(root, savedFocus);
+      }
+      return;
+    }
+    skinShopSelected = null;
+  }
+  root.innerHTML = renderSkinShopGallery(entries);
+  if (root.querySelector(".skin-sample[data-ink]")) ensureInkDefs();
+  applySkinShopFilter();
+  restoreSkinShopFocus(root, savedFocus);
+}
+
+function renderSkinShopGallery(entries: SkinShopEntry[]): string {
+  const refreshing = !skinIndexSettled() || skinIndexRefreshing();
+  const indexError = remoteIndexErrorClass();
+  const feedback = skinShopFeedback
+    ? `<p class="skin-shop-feedback" role="alert">${escapeHtml(skinShopFeedback)}</p>`
+    : "";
+  const savedId = normalizeSkin(config.skinId);
+  const savedMissing = savedId !== null && !entries.some((entry) => entry.id === savedId && entry.installed);
+  const missing = savedMissing
+    ? `<p class="skin-shop-note">${uiIcon("palette")}<span>${escapeHtml(t("skin.shopMissingNote"))}</span></p>`
+    : "";
+  const note = refreshing
+    ? `<p class="skin-shop-note is-loading">${uiIcon("circleNotch")}<span>${escapeHtml(t("skin.shopLoading"))}</span></p>`
+    : indexError
+      ? `<p class="skin-shop-note">${uiIcon("globe")}<span>${escapeHtml(t("skin.shopOffline"))} · ${escapeHtml(t(`skin.indexError.${indexError}`))}</span></p>`
+      : "";
+  const cards = entries.map((entry) => renderSkinShopCard(entry)).join("");
+  return `<div class="skin-shop-head">
+      <div class="skin-shop-intro"><h2>${escapeHtml(t("skin.market"))}</h2><p>${escapeHtml(t("skin.shopDesc"))}</p></div>
+      <div class="skin-preview-toolbar skin-shop-viewbar" role="group" aria-label="${escapeHtml(t("skin.shopLayout"))}">
+        <button class="skin-mode-btn" type="button" data-skin-shop-view="masonry" aria-pressed="${skinShopView === "masonry"}">${uiIcon("columns")}<span>${escapeHtml(t("skin.shopMasonry"))}</span></button>
+        <button class="skin-mode-btn" type="button" data-skin-shop-view="grid" aria-pressed="${skinShopView === "grid"}">${uiIcon("rows")}<span>${escapeHtml(t("skin.shopGrid"))}</span></button>
+      </div>
+    </div>
+    <div class="skin-shop-tools">
+      <label class="skin-shop-search">${uiIcon("magnifyingGlass")}<input type="search" spellcheck="false" autocomplete="off" data-skin-shop-search value="${escapeHtml(skinShopSearch)}" placeholder="${escapeHtml(t("skin.shopSearch"))}" aria-label="${escapeHtml(t("skin.shopSearch"))}" /></label>
+      <span id="skin-shop-count" class="skin-shop-count">${escapeHtml(skinShopCountLabel(entries.length))}</span>
+      <button class="skin-shop-refresh" type="button" data-skin-shop-refresh ${refreshing ? "disabled" : ""}>${uiIcon("arrowsClockwise")}<span>${escapeHtml(refreshing ? t("skin.shopLoading") : t("skin.shopRefresh"))}</span></button>
+    </div>
+    ${feedback}${missing}${note}
+    <div class="skin-shop-gallery is-${skinShopView}" id="skin-shop-gallery">${cards}</div>
+    <p class="skin-shop-empty" id="skin-shop-empty" hidden><strong>${escapeHtml(t("skin.shopNoResults", { q: skinShopSearch.trim() }))}</strong></p>`;
+}
+
+function renderSkinShopCard(entry: SkinShopEntry): string {
+  const status = skinShopStateLabel(entry);
+  const subtitle = skinShopSubtitle(entry);
+  const art = entry.installed
+    ? skinShopSample(entry.id, "spend", "light", "skin-card-shot")
+    : `<div class="skin-card-shot is-empty">${skinShopPlaceholder()}</div>`;
+  const badge = entry.applied
+    ? `<span class="skin-card-badge">${escapeHtml(t("skin.inUse"))}</span>`
+    : entry.selected
+      ? `<span class="skin-card-badge">${escapeHtml(t("skin.shopSelected"))}</span>`
+      : "";
+  const updateBadge = entry.updateAvailable
+    ? `<span class="skin-card-badge is-update">${escapeHtml(t("skin.shopUpdateBadge"))}</span>`
+    : "";
+  const chip = entry.applied
+    ? (entry.native ? t("skin.builtIn") : t("skin.installed"))
+    : status;
+  return `<div class="skin-card${entry.applied ? " is-applied" : ""}" role="button" tabindex="0" data-skin-card data-skin-shop-open="${escapeHtml(entry.id)}" data-skin-search="${escapeHtml(`${entry.name} ${entry.tagline} ${entry.id} ${entry.version ?? ""}`)}" aria-label="${escapeHtml(`${t("skin.shopOpen", { name: entry.name })} · ${status}`)}">
+      ${art}${badge}${updateBadge}
+      <div class="skin-card-body">
+        <span class="skin-card-name">${escapeHtml(entry.name)}</span>
+        <span class="skin-card-sub">${escapeHtml(subtitle)}</span>
+        <span class="skin-card-meta"><span class="skin-chip${entry.applied ? " is-applied" : ""}">${escapeHtml(chip)}</span>${entry.version ? `<span class="skin-card-version">v${escapeHtml(entry.version)}</span>` : ""}</span>
+      </div>
+    </div>`;
+}
+
+function renderSkinShopActions(entry: SkinShopEntry): string {
+  const busy = skinDownloading === entry.id;
+  let primary: string;
+  if (entry.native) {
+    primary = `<button class="mini-btn primary" type="button" data-skin-shop-reset ${entry.applied ? "disabled" : ""}>${uiIcon(entry.applied ? "checkCircle" : "arrowCounterClockwise")}<span>${escapeHtml(entry.applied ? t("skin.applied") : t("skin.useNative"))}</span></button>`;
+  } else if (!entry.installed) {
+    primary = `<button class="mini-btn primary" type="button" data-skin-shop-download="${escapeHtml(entry.id)}" ${busy || skinDownloading ? "disabled" : ""}>${busy ? escapeHtml(t("skin.downloading")) : escapeHtml(t("skin.download"))}</button>`;
+  } else {
+    primary = `<button class="mini-btn primary" type="button" data-skin-shop-select="${escapeHtml(entry.id)}" ${entry.applied ? "disabled" : ""}>${uiIcon(entry.applied ? "checkCircle" : "paintBrush")}<span>${escapeHtml(entry.applied ? t("skin.applied") : t("skin.use"))}</span></button>`;
+  }
+  const native = !entry.native && activeSkin()
+    ? `<button class="mini-btn" type="button" data-skin-shop-reset>${uiIcon("arrowCounterClockwise")}<span>${escapeHtml(t("skin.native"))}</span></button>`
+    : "";
+  const update = entry.installed && entry.updateAvailable
+    ? `<button class="mini-btn" type="button" data-skin-shop-download="${escapeHtml(entry.id)}" ${busy || skinDownloading ? "disabled" : ""}>${uiIcon("arrowsClockwise")}<span>${escapeHtml(busy ? t("skin.downloading") : t("skin.shopUpdateBadge"))}</span></button>`
+    : "";
+  const remove = entry.installed && !entry.native
+    ? `<button class="mini-btn" type="button" data-skin-shop-remove="${escapeHtml(entry.id)}" ${entry.applied ? "disabled" : ""}>${escapeHtml(t("skin.remove"))}</button>`
+    : "";
+  return `${primary}${update}${native}${remove}`;
+}
+
+function renderSkinShopMeta(entry: SkinShopEntry): string {
+  const inIndex = remotePackIndex().some((remote) => remote.id === entry.id);
+  const cells = [
+    [t("skin.shopVersion"), entry.version ? `v${entry.version}` : "—"],
+    [t("skin.shopStatus"), skinShopStateLabel(entry)],
+    [t("skin.shopSource"), entry.native ? "Pane" : inIndex ? t("skin.shopOfficial") : t("skin.shopLocal")],
+    ...(entry.size ? [[t("skin.shopSize"), skinShopPackSize(entry.size)]] : []),
+  ];
+  return `<div class="skin-shop-meta">${cells.map(([label, value]) => `<div class="skin-shop-meta-cell"><span>${escapeHtml(label)}</span><strong>${escapeHtml(value)}</strong></div>`).join("")}</div>`;
+}
+
+function renderSkinShopShots(entry: SkinShopEntry): string {
+  if (!entry.installed) {
+    return `<p class="skin-shop-note">${uiIcon("palette")}<span>${escapeHtml(t("skin.previewAfterDownload"))}</span></p>`;
+  }
+  const pages: SkinPreviewPage[] = ["quota", "spend", "settings"];
+  const modes: Array<"light" | "dark"> = skinPreviewMode === "both" ? ["light", "dark"] : [skinPreviewMode];
+  const shots = pages.flatMap((page) => modes.map((mode) => {
+    const label = t("skin.shopShot", {
+      page: t(`skin.page.${page}`),
+      mode: t(mode === "light" ? "skin.light" : "skin.dark"),
+    });
+    return `<div class="skin-shot skin-detail-shot" role="button" tabindex="0" data-skin-shot-page="${page}" data-skin-shot-mode="${mode}" aria-label="${escapeHtml(label)}">
+        <div class="skin-shot-canvas" inert>${renderSkinSample(mode, entry.native ? null : entry.id, true, page)}</div>
+        <span class="skin-shot-caption">${escapeHtml(t(`skin.page.${page}`))} · ${escapeHtml(t(mode === "light" ? "skin.light" : "skin.dark"))}</span>
+      </div>`;
+  })).join("");
+  const modeButtons = (["light", "dark", "both"] as const).map((mode) => `<button class="skin-mode-btn" type="button" data-skin-shop-mode="${mode}" aria-pressed="${skinPreviewMode === mode}">${uiIcon(mode === "light" ? "sun" : mode === "dark" ? "moon" : "columns")}<span>${escapeHtml(t(mode === "light" ? "skin.light" : mode === "dark" ? "skin.dark" : "skin.both"))}</span></button>`).join("");
+  return `<div class="skin-shop-shots-head"><h3>${escapeHtml(t("skin.shopScreenshots"))}</h3><div class="skin-preview-toolbar" role="group" aria-label="${escapeHtml(t("skin.previewMode"))}">${modeButtons}</div></div>
+    <div class="skin-shop-rail">${shots}</div>`;
+}
+
+function renderSkinShopZoom(entry: SkinShopEntry): string {
+  if (!skinShopZoom || skinShopZoom.id !== entry.id) return "";
+  const label = t("skin.shopShot", {
+    page: t(`skin.page.${skinShopZoom.page}`),
+    mode: t(skinShopZoom.mode === "light" ? "skin.light" : "skin.dark"),
+  });
+  return `<div class="skin-zoom-overlay" data-skin-shop-zoom-overlay>
+      <div class="skin-zoom-panel" role="dialog" aria-modal="true" aria-label="${escapeHtml(label)}">
+        <div class="skin-zoom-stage" inert>${renderSkinSample(skinShopZoom.mode, entry.native ? null : entry.id, false, skinShopZoom.page)}</div>
+        <button class="skin-zoom-close" type="button" data-skin-shop-zoom-close aria-label="${escapeHtml(t("settings.close"))}">${uiIcon("x")}</button>
+      </div>
+    </div>`;
+}
+
+function renderSkinShopDetail(entry: SkinShopEntry): string {
+  const art = entry.installed
+    ? skinShopSample(entry.id, "spend", "light", "skin-hero-preview")
+    : `<div class="skin-hero-preview is-empty">${skinShopPlaceholder()}</div>`;
+  const feedback = skinShopFeedback
+    ? `<p class="skin-shop-feedback" role="alert">${escapeHtml(skinShopFeedback)}</p>`
+    : "";
+  return `<div class="skin-shop-detail">
+      <div class="skin-shop-crumbs">
+        <button class="mini-btn skin-back-btn" type="button" data-skin-shop-back>${uiIcon("arrowLeft")}<span>${escapeHtml(t("skin.back"))}</span></button>
+        <span class="skin-crumb-sep" aria-hidden="true">/</span><span>${escapeHtml(t("skin.market"))}</span><span class="skin-crumb-sep" aria-hidden="true">/</span><strong>${escapeHtml(entry.name)}</strong>
+      </div>
+      <div class="skin-shop-hero">
+        <div class="skin-shop-hero-copy">
+          <span class="skin-shop-hero-icon">${uiIcon("palette")}</span>
+          <h2>${escapeHtml(entry.name)}</h2>
+          <p>${escapeHtml(skinShopSubtitle(entry))}</p>
+          <div class="skin-shop-actions">${renderSkinShopActions(entry)}</div>
+          ${feedback}
+        </div>
+        ${art}
+      </div>
+      ${renderSkinShopMeta(entry)}
+      <section class="skin-shop-section">${renderSkinShopShots(entry)}</section>
+      <section class="skin-shop-section">
+        <h3>${escapeHtml(t("skin.shopAbout"))}</h3>
+        <p class="skin-shop-about">${escapeHtml(entry.tagline || `${entry.name} · ${t("skin.shopBundlePackage")}${entry.version ? ` v${entry.version}` : ""}`)}</p>
+      </section>
+      ${renderSkinShopZoom(entry)}
+    </div>`;
+}
+
+function applySkinShopFilter(): void {
+  const query = skinShopSearch.trim().toLowerCase();
+  let visible = 0;
+  document.querySelectorAll<HTMLElement>("[data-skin-card]").forEach((card) => {
+    const hit = !query || (card.dataset.skinSearch ?? "").toLowerCase().includes(query);
+    card.hidden = !hit;
+    if (hit) visible += 1;
+  });
+  const count = document.querySelector<HTMLElement>("#skin-shop-count");
+  if (count) count.textContent = skinShopCountLabel(visible);
+  const empty = document.querySelector<HTMLElement>("#skin-shop-empty");
+  if (empty) {
+    empty.hidden = visible > 0;
+    const label = empty.querySelector("strong");
+    if (label) label.textContent = t("skin.shopNoResults", { q: skinShopSearch.trim() });
+  }
+}
+
+function openSkinShopDetail(id: string): void {
+  const scroller = document.querySelector<HTMLElement>("#panel-scroll");
+  skinShopReturnScroll = scroller?.scrollTop ?? 0;
+  skinShopReturnId = id;
+  skinShopSelected = id;
+  skinShopFeedback = null;
+  skinShopZoom = null;
+  renderSkinShop();
+  scroller?.scrollTo({ top: 0 });
+  document.querySelector<HTMLElement>("[data-skin-shop-back]")?.focus({ preventScroll: true });
+}
+
+function closeSkinShopDetail(): void {
+  const id = skinShopReturnId;
+  const scroll = skinShopReturnScroll;
+  skinShopSelected = null;
+  skinShopZoom = null;
+  renderSkinShop();
+  requestAnimationFrame(() => {
+    const scroller = document.querySelector<HTMLElement>("#panel-scroll");
+    if (scroller) scroller.scrollTop = scroll;
+    if (id) {
+      document
+        .querySelector<HTMLElement>(`[data-skin-shop-open="${CSS.escape(id)}"]`)
+        ?.focus({ preventScroll: true });
+    }
+  });
+}
+
+function handleSkinShopEscape(): boolean {
+  if (!IS_PANEL_FORM) return false;
+  if (skinShopZoom) {
+    const target = `${skinShopZoom.page}:${skinShopZoom.mode}`;
+    skinShopZoom = null;
+    renderSkinShop();
+    focusSkinShopShot(target);
+    return true;
+  }
+  if (skinShopSelected) {
+    closeSkinShopDetail();
+    return true;
+  }
+  return false;
+}
+
+function focusSkinShopShot(target: string): void {
+  requestAnimationFrame(() => {
+    const [page, mode] = target.split(":");
+    document
+      .querySelector<HTMLElement>(`[data-skin-shot-page="${page}"][data-skin-shot-mode="${mode}"]`)
+      ?.focus({ preventScroll: true });
+  });
+}
+
+async function downloadSkinShopEntry(entry: SkinShopEntry): Promise<void> {
+  if (!entry.remote || skinDownloading) return;
+  skinDownloading = entry.id;
+  skinShopFeedback = null;
+  renderSkinShop();
+  try {
+    await invoke("skin_pack_download", { url: entry.remote.url, sha256: entry.remote.sha256 });
+    if (await refreshInstalledPacks()) {
+      if (normalizeSkin(config.skinId) === entry.id) applySkin();
+    } else {
+      skinShopFeedback = t("skin.shopRegistryFailed");
+    }
+    broadcastSkinPackChange();
+  } catch {
+    skinShopFeedback = t("skin.downloadFailed");
+  }
+  skinDownloading = null;
+  renderSkinShop();
+}
+
+async function removeSkinShopEntry(id: string): Promise<void> {
+  skinShopFeedback = null;
+  const wasSelected = normalizeSkin(config.skinId) === id || activeSkin()?.id === id;
+  if (wasSelected) {
+    await selectSkin(null);
+    if (normalizeSkin(config.skinId) === id) {
+      skinShopFeedback = t("skin.saveFailed");
+      renderSkinShop();
+      return;
+    }
+  }
+  try {
+    await invoke("skin_pack_remove", { id });
+    if (!(await refreshInstalledPacks())) skinShopFeedback = t("skin.shopRegistryFailed");
+    broadcastSkinPackChange();
+    if (skinShopSelected === id) skinShopSelected = null;
+  } catch {
+    skinShopFeedback = t("skin.removeFailed");
+  }
+  renderSkinShop();
+}
+
+async function refreshSkinShopIndex(): Promise<void> {
+  if (skinIndexRefreshing()) return;
+  const pending = refreshSkinIndex();
+  renderSkinShop();
+  await pending;
+  renderSkinShopIfVisible();
+}
+
+async function handleSkinShopClick(target: HTMLElement): Promise<void> {
+  const view = target.closest<HTMLElement>("[data-skin-shop-view]")?.dataset.skinShopView;
+  if (view === "masonry" || view === "grid") {
+    skinShopView = view;
+    try {
+      localStorage.setItem(SKIN_SHOP_VIEW_KEY, view);
+    } catch { /* private mode: the choice lasts this session */ }
+    renderSkinShop();
+    document.querySelector<HTMLElement>(`[data-skin-shop-view="${view}"]`)?.focus({ preventScroll: true });
+    return;
+  }
+  const open = target.closest<HTMLElement>("[data-skin-shop-open]")?.dataset.skinShopOpen;
+  if (open) {
+    openSkinShopDetail(open);
+    return;
+  }
+  if (target.closest("[data-skin-shop-back]")) {
+    closeSkinShopDetail();
+    return;
+  }
+  const mode = target.closest<HTMLElement>("[data-skin-shop-mode]")?.dataset.skinShopMode;
+  if (mode === "light" || mode === "dark" || mode === "both") {
+    skinPreviewMode = mode;
+    renderSkinShop();
+    document.querySelector<HTMLElement>(`[data-skin-shop-mode="${mode}"]`)?.focus({ preventScroll: true });
+    return;
+  }
+  const shot = target.closest<HTMLElement>("[data-skin-shot-page]");
+  if (shot && skinShopSelected) {
+    const page = shot.dataset.skinShotPage as SkinPreviewPage;
+    const shotMode = shot.dataset.skinShotMode === "dark" ? "dark" : "light";
+    skinShopZoom = { id: skinShopSelected, page, mode: shotMode };
+    renderSkinShop();
+    return;
+  }
+  if (target.closest("[data-skin-shop-zoom-close]")) {
+    const zoom = skinShopZoom;
+    skinShopZoom = null;
+    renderSkinShop();
+    if (zoom) focusSkinShopShot(`${zoom.page}:${zoom.mode}`);
+    return;
+  }
+  if (target.matches("[data-skin-shop-zoom-overlay]")) {
+    const zoom = skinShopZoom;
+    skinShopZoom = null;
+    renderSkinShop();
+    if (zoom) focusSkinShopShot(`${zoom.page}:${zoom.mode}`);
+    return;
+  }
+  if (target.closest("[data-skin-shop-refresh]")) {
+    void refreshSkinShopIndex();
+    return;
+  }
+  const select = target.closest<HTMLElement>("[data-skin-shop-select]")?.dataset.skinShopSelect;
+  if (select) {
+    await selectSkin(select);
+    return;
+  }
+  if (target.closest("[data-skin-shop-reset]")) {
+    await selectSkin(null);
+    return;
+  }
+  const download = target.closest<HTMLElement>("[data-skin-shop-download]")?.dataset.skinShopDownload;
+  if (download) {
+    const entry = skinShopEntry(download);
+    if (entry) await downloadSkinShopEntry(entry);
+    return;
+  }
+  const remove = target.closest<HTMLElement>("[data-skin-shop-remove]")?.dataset.skinShopRemove;
+  if (remove) {
+    await removeSkinShopEntry(remove);
+  }
+}
+
+function handleSkinShopInput(target: HTMLInputElement): boolean {
+  if (!target.matches("[data-skin-shop-search]")) return false;
+  skinShopSearch = target.value;
+  applySkinShopFilter();
+  return true;
+}
+
+function handleSkinShopKeydown(event: KeyboardEvent): boolean {
+  if (!IS_PANEL_FORM) return false;
+  if (skinShopZoom && event.key === "Tab") {
+    event.preventDefault();
+    document.querySelector<HTMLElement>("[data-skin-shop-zoom-close]")?.focus();
+    return true;
+  }
+  if (event.key !== "Enter" && event.key !== " ") return false;
+  const card = (event.target as HTMLElement).closest<HTMLElement>("[data-skin-shop-open]");
+  if (card) {
+    event.preventDefault();
+    openSkinShopDetail(card.dataset.skinShopOpen!);
+    return true;
+  }
+  const shot = (event.target as HTMLElement).closest<HTMLElement>("[data-skin-shot-page]");
+  if (shot && skinShopSelected) {
+    event.preventDefault();
+    const page = shot.dataset.skinShotPage as SkinPreviewPage;
+    skinShopZoom = { id: skinShopSelected, page, mode: shot.dataset.skinShotMode === "dark" ? "dark" : "light" };
+    renderSkinShop();
+    return true;
+  }
+  return false;
 }
 
 /// Footer registry of providers deleted from Customize — the one-line way
@@ -12743,7 +13287,6 @@ function removedProvidersHtml(): string {
 }
 
 function renderCustomize(): string {
-  if (skinMarketOpen) return renderSkinMarket();
   // A-Z by English display name, locale-independent. Card order is owned by
   // dragging cards on the main view; the drawer is for enabling,
   // configuring and per-row management, so a stable sorted list reads best.
@@ -13237,25 +13780,7 @@ function jumpToProviderCard(providerId: string): void {
 function renderDrawerBody(): void {
   const body = document.querySelector<HTMLElement>("#drawer-body");
   if (!body) return;
-  const scrollTop = body.querySelector(".skin-market-body")?.scrollTop ?? 0;
-  const focused = document.activeElement;
-  const focusAttr = focused instanceof HTMLElement && body.contains(focused)
-    ? ["data-skin-pick", "data-skin-mode", "data-skin-page", "data-skin-select", "data-skin-reset", "data-skin-download", "data-skin-remove", "data-skin-close"].find((attr) => focused.hasAttribute(attr))
-    : undefined;
-  const focusValue = focusAttr ? focused!.getAttribute(focusAttr) : null;
-  document.querySelector("#drawer")?.classList.toggle("skin-workshop-open", skinMarketOpen);
   body.innerHTML = renderCustomize();
-  // The ink sample references paint servers even when the app is native.
-  if (skinMarketOpen && body.querySelector(".skin-sample[data-ink]")) ensureInkDefs();
-  const scroller = body.querySelector(".skin-market-body");
-  if (scroller) scroller.scrollTop = scrollTop;
-  if (focusAttr) {
-    const restored = body.querySelector<HTMLElement>(`[${focusAttr}="${CSS.escape(focusValue ?? "")}"]`);
-    const target = restored && !restored.matches(":disabled")
-      ? restored
-      : body.querySelector<HTMLElement>(".skin-side-item.active");
-    target?.focus({ preventScroll: true });
-  }
   if (custSearchQuery) {
     const inp = body.querySelector<HTMLInputElement>("#cust-search");
     if (inp) inp.value = custSearchQuery;
@@ -13297,9 +13822,7 @@ function setDrawer(open: boolean): void {
   customizeOpen = open;
   if (!open) {
     dismissAccountDialog?.();
-    skinMarketOpen = false;
     custConfigOpen = null;
-    document.querySelector("#drawer")?.classList.remove("skin-workshop-open");
   }
   if (open) {
     renderDrawerBody();
@@ -13316,11 +13839,7 @@ function setDrawer(open: boolean): void {
 /// coming back used to dump you on the main page with the drawer gone.
 function rememberPopoverView(): void {
   if (IS_PANEL_FORM) return;
-  const kind: "main" | "customize" | "skin" = skinMarketOpen
-    ? "skin"
-    : customizeOpen
-      ? "customize"
-      : "main";
+  const kind: "main" | "customize" = customizeOpen ? "customize" : "main";
   const id = kind === "customize" ? custConfigOpen : null;
   const current = config.lastView ?? { kind: "main" as const, id: null };
   if (current.kind === kind && (current.id ?? null) === id) return;
@@ -13332,14 +13851,7 @@ function rememberPopoverView(): void {
 function restorePopoverView(): void {
   if (IS_PANEL_FORM) return;
   const view = config.lastView ?? { kind: "main" as const, id: null };
-  if (view.kind === "skin") {
-    skinMarketOpen = true;
-    custConfigOpen = null;
-    setDrawer(true);
-    return;
-  }
   if (view.kind === "customize") {
-    skinMarketOpen = false;
     const id = view.id && ALL_PROVIDERS.some(([family]) => family === view.id) ? view.id : null;
     custConfigOpen = id;
     setDrawer(true);
@@ -14378,87 +14890,6 @@ async function handleCustomizeClick(target: HTMLElement): Promise<boolean> {
     const next = filter.dataset.custFilter === "configured" ? "configured" : "all";
     if (next !== customizeFilter) {
       customizeFilter = next;
-      renderDrawerBody();
-    }
-    return true;
-  }
-  const skinMode = target.closest<HTMLElement>("[data-skin-mode]")?.dataset.skinMode;
-  if (skinMode === "light" || skinMode === "dark" || skinMode === "both") {
-    skinPreviewMode = skinMode;
-    renderDrawerBody();
-    return true;
-  }
-  const skinPage = target.closest<HTMLElement>("[data-skin-page]")?.dataset.skinPage;
-  if (skinPage === "quota" || skinPage === "spend" || skinPage === "settings") {
-    skinPreviewPage = skinPage;
-    renderDrawerBody();
-    return true;
-  }
-  const filmNav = target.closest<HTMLElement>("[data-skin-shot-prev], [data-skin-shot-next]");
-  if (filmNav) {
-    const pages: SkinPreviewPage[] = ["quota", "spend", "settings"];
-    const at = Math.max(0, pages.indexOf(skinPreviewPage));
-    const step = filmNav.hasAttribute("data-skin-shot-prev") ? -1 : 1;
-    skinPreviewPage = pages[(at + step + pages.length) % pages.length];
-    renderDrawerBody();
-    return true;
-  }
-  const skinPick = target.closest<HTMLElement>("[data-skin-pick]")?.dataset.skinPick;
-  if (skinPick) {
-    skinMarketFeedback = null;
-    skinMarketSelected = skinPick as SkinId;
-    renderDrawerBody();
-    return true;
-  }
-  const skinClose = target.closest<HTMLElement>("[data-skin-close]");
-  if (skinClose) {
-    setDrawer(false);
-    return true;
-  }
-  const skinSelect = target.closest<HTMLElement>("[data-skin-select]");
-  if (skinSelect) {
-    selectSkin(skinSelect.dataset.skinSelect as SkinId);
-    return true;
-  }
-  const skinReset = target.closest<HTMLElement>("[data-skin-reset]");
-  if (skinReset) {
-    selectSkin(null);
-    return true;
-  }
-  const skinRemove = target.closest<HTMLElement>("[data-skin-remove]")?.dataset.skinRemove;
-  if (skinRemove) {
-    skinMarketFeedback = null;
-    // A pack is re-downloadable, so removal stays one click. Removing the
-    // applied pack falls back to the native appearance first.
-    if (activeSkin()?.id === skinRemove) await selectSkin(null);
-    try {
-      await invoke("skin_pack_remove", { id: skinRemove });
-      await refreshInstalledPacks();
-      if (skinMarketSelected === skinRemove) skinMarketSelected = null;
-      renderDrawerBody();
-    } catch {
-      skinMarketFeedback = t("skin.removeFailed");
-      renderDrawerBody();
-      document.querySelector("#status")!.textContent = t("skin.removeFailed");
-    }
-    return true;
-  }
-  const skinDownload = target.closest<HTMLElement>("[data-skin-download]")?.dataset.skinDownload;
-  if (skinDownload && skinDownloading === null) {
-    const entry = marketEntries().find((e) => e.id === skinDownload && e.remote);
-    if (entry?.remote) {
-      skinDownloading = skinDownload;
-      skinMarketFeedback = null;
-      renderDrawerBody();
-      try {
-        await invoke("skin_pack_download", { url: entry.remote.url, sha256: entry.remote.sha256 });
-        await refreshInstalledPacks();
-        skinMarketSelected = skinDownload;
-      } catch {
-        skinMarketFeedback = t("skin.downloadFailed");
-        document.querySelector("#status")!.textContent = t("skin.downloadFailed");
-      }
-      skinDownloading = null;
       renderDrawerBody();
     }
     return true;
@@ -18511,6 +18942,7 @@ function applyLocale(): void {
   // switch retranslates them (static [data-i18n] is already handled above).
   if (IS_PANEL_FORM && authViewActive) renderAuthCenter();
   if (IS_PANEL_FORM) renderStatsPage();
+  if (IS_PANEL_FORM) renderSkinShopIfVisible();
   populatePinnedOptions();
   renderBuildInfo();
 }
@@ -19383,6 +19815,7 @@ async function panelCheckForUpdate(btn: HTMLButtonElement): Promise<void> {
 /// icon, label for the hover tip, and one-line description for the header.
 const PANEL_PAGES: ReadonlyArray<readonly [string, string, string, string, UiIconName]> = [
   ["general", "st-general", "settings.tabGeneral", "panel.desc.general", "gear"],
+  ["skins", "st-skins", "settings.tabSkins", "panel.desc.skins", "palette"],
   ["usage", "st-keyvault", "settings.tabUsage", "panel.desc.usage", "key"],
   ["stats", "st-stats", "settings.tabStats", "panel.desc.stats", "chart"],
   ["shortcuts", "st-shortcuts", "settings.tabShortcuts", "panel.desc.shortcuts", "keyboard"],
@@ -19398,7 +19831,7 @@ const panelPageMeta = (id: string) =>
 /// Owner-approved 4 groups (#58-07): General / Data / Network & privacy /
 /// About. The rail keeps one group open by default; expansion is remembered.
 const PANEL_GROUPS: ReadonlyArray<readonly [string, string, readonly string[]]> = [
-  ["general", "settings.group.general", ["general", "shortcuts", "notifications"]],
+  ["general", "settings.group.general", ["general", "skins", "shortcuts", "notifications"]],
   ["data", "settings.group.data", ["usage", "stats"]],
   ["network", "settings.group.network", ["network", "privacy"]],
   ["about", "settings.group.about", ["about"]],
@@ -19505,7 +19938,12 @@ function makePanelNavButton(
 /// Page switching only hides blocks — every control stays mounted so its
 /// wiring never re-runs. Also keeps the rail's active pill in sync.
 function activatePanelPage(pageId: string): void {
+  const previousPage = activePanelPage;
   activePanelPage = pageId;
+  if (pageId === "skins" && previousPage !== "skins") {
+    skinShopSelected = null;
+    skinShopZoom = null;
+  }
   for (const [id, blockId] of PANEL_PAGES) {
     const block = document.querySelector<HTMLElement>(`#${blockId}`);
     if (block) block.hidden = id !== pageId;
@@ -19524,6 +19962,7 @@ function activatePanelPage(pageId: string): void {
     if (!statsLoaded && !statsLoading) void loadStatsData();
     else renderStatsPage();
   }
+  if (pageId === "skins") renderSkinShop();
   document.querySelectorAll<HTMLElement>("#panel-nav [data-nav-section]").forEach((section) => {
     section
       .querySelector(".panel-nav-parent")
@@ -19765,6 +20204,20 @@ function buildPanelShell(): void {
   // --- General: adopted controls + the new dual-form controls --------------
   const general = panelBlock("st-general", "settings.general", "panel.desc.general");
   const generalCard = general.body;
+  const skinsSection = document.createElement("section");
+  skinsSection.id = "st-skins";
+  skinsSection.className = "st-block skin-shop";
+  skinsSection.hidden = true;
+  skinsSection.innerHTML = `<div id="skin-shop-root"></div>`;
+  skinsSection.addEventListener("click", (event) => {
+    void handleSkinShopClick(event.target as HTMLElement);
+  });
+  skinsSection.addEventListener("input", (event) => {
+    handleSkinShopInput(event.target as HTMLInputElement);
+  });
+  skinsSection.addEventListener("keydown", (event) => {
+    handleSkinShopKeydown(event);
+  });
   const adoptControl = (
     controlId: string,
     labelKey: string,
@@ -19801,6 +20254,16 @@ function buildPanelShell(): void {
   };
   adoptControl("locale", "settings.language", "settings.desc.language");
   adoptControl("appearance", "settings.appearance", "settings.desc.appearance");
+  const skinsEntry = document.createElement("button");
+  skinsEntry.type = "button";
+  skinsEntry.className = "mini-btn";
+  skinsEntry.dataset.i18n = "settings.openSkins";
+  skinsEntry.textContent = t("settings.openSkins");
+  skinsEntry.addEventListener("click", () => activatePanelPage("skins"));
+  const skinsRow = panelRowDesc("settings.skins", "settings.desc.skins", skinsEntry);
+  const appearanceRow = document.querySelector<HTMLElement>("#appearance")?.closest(".set-row");
+  if (appearanceRow) appearanceRow.after(skinsRow);
+  else generalCard.append(skinsRow);
   adoptControl("ui-font", "settings.font", "settings.fontTip");
   adoptControl("ui-font-cjk", "settings.fontCjk", "settings.fontCjkTip", [
     document.querySelector<HTMLElement>("#ui-font-cjk-list") as HTMLElement,
@@ -20165,7 +20628,7 @@ function buildPanelShell(): void {
   skillRefresh.addEventListener("click", () => void loadSkillUsage(true));
   if (IS_PANEL_FORM) void loadSkillUsage();
 
-  settingsView.append(general.section);
+  settingsView.append(general.section, skinsSection);
 
   // --- Keys page: provider credentials + the MCP/search vault ------------
   // Two cards under one page id so the tab toggle keeps working: the
@@ -20823,7 +21286,24 @@ function setPanelView(view: "settings" | "auth"): void {
   if (view === "auth") void loadAuthCenter();
 }
 
-let appliedPanelIntentAt = 0;
+/// Persist the applied stamp across panel windows. The config is the message,
+/// but clearing it can fail; without this a new panel could replay the same
+/// jump while the stale message is still inside its TTL.
+const PANEL_INTENT_STAMP_KEY = "pane.panelIntent.applied";
+function readAppliedPanelIntent(): number {
+  try {
+    return Number(localStorage.getItem(PANEL_INTENT_STAMP_KEY)) || 0;
+  } catch {
+    return 0;
+  }
+}
+let appliedPanelIntentAt = readAppliedPanelIntent();
+function rememberAppliedPanelIntent(at: number): void {
+  appliedPanelIntentAt = at;
+  try {
+    localStorage.setItem(PANEL_INTENT_STAMP_KEY, String(at));
+  } catch { /* TTL in applyPanelIntent still bounds a replay */ }
+}
 
 /// A panel intent is a one-shot cross-window message: applied once per stamp
 /// and cleared from config the moment it is read, so a stale "jump to auth
@@ -20841,11 +21321,11 @@ function applyPanelIntent(): void {
   // Before the panel shell exists there is nothing to switch, and consuming
   // the stamp here would silently drop the request.
   if (!document.querySelector("#panel-view-auth")) return;
-  appliedPanelIntentAt = intent.at;
+  rememberAppliedPanelIntent(intent.at);
   // Consume on read, stale or not: leaving it in config replayed the auth
   // jump on every future fresh panel window (the gear opened the auth
   // center "by default" bug).
-  void patchConfig({ panelIntent: null }).catch(() => {});
+  void patchConfig({ panelIntent: null }, { markDirty: false }).catch(() => {});
   if (Date.now() - intent.at > PANEL_INTENT_TTL_MS) return;
   if (intent.view === "auth") {
     setPanelView("auth");
@@ -20854,6 +21334,14 @@ function applyPanelIntent(): void {
     if (intent.login) openAuthLoginDialog(intent.family);
   } else {
     setPanelView("settings");
+    if (intent.page === "skins") {
+      skinShopSelected = null;
+      skinShopZoom = null;
+      skinShopSearch = "";
+      skinShopFeedback = null;
+      activatePanelPage("skins");
+      return;
+    }
     document.querySelector<HTMLButtonElement>('#panel-nav [data-settings-tab="usage"]')?.click();
     const revision = panelNavigationRevision;
     if (!intent.family) return;
@@ -21617,8 +22105,8 @@ async function openFamilyLogin(family: string): Promise<void> {
   if (IS_PANEL_FORM) {
     // The panel is already the target window: its own config write does not
     // come back as a config-updated event, so apply the intent here.
-    appliedPanelIntentAt = intent.at;
-    void patchConfig({ panelIntent: null }).catch(() => {});
+    rememberAppliedPanelIntent(intent.at);
+    void patchConfig({ panelIntent: null }, { markDirty: false }).catch(() => {});
     setPanelView("auth");
     void focusAuthFamily(family);
     openAuthLoginDialog(family);
@@ -22156,12 +22644,19 @@ window.addEventListener("DOMContentLoaded", () => {
   // Installed resource-pack skins arrive async (Rust reads + inlines their
   // CSS); re-apply once the registry settles so a saved pack skin lights up
   // after first paint, and the workshop lists them.
-  installedSkinLoad = refreshInstalledPacks().then(() => {
-    applySkin();
-    requestRender();
-    if (skinMarketOpen) renderDrawerBody();
+  installedSkinLoad = refreshInstalledPacks().then((ok) => {
+    if (ok) {
+      applySkin();
+      requestRender();
+    } else {
+      skinShopFeedback = t("skin.shopRegistryFailed");
+    }
+    renderSkinShopIfVisible();
   });
-  void Promise.all([installedSkinLoad, refreshSkinIndex()]).then(() => migrateSkinFromIndex());
+  void Promise.all([installedSkinLoad, refreshSkinIndex()]).then(() => {
+    migrateSkinFromIndex();
+    renderSkinShopIfVisible();
+  });
   // WorkBuddy's web-session block renders inside the Customize drawer.
   void refreshWorkbuddyWebStatus().then(() => {
     if (customizeOpen) renderDrawerBody();
@@ -22283,11 +22778,7 @@ window.addEventListener("DOMContentLoaded", () => {
       // IME: Esc cancels an in-flight composition (candidate window) — it
       // must not double as "close the panel" / "hide the window".
       if (e.isComposing || e.keyCode === 229) return;
-      if (skinMarketOpen) {
-        skinMarketOpen = false;
-        renderDrawerBody();
-        return;
-      }
+      if (handleSkinShopEscape()) return;
       if (customizeOpen) {
         setDrawer(false);
         return;
@@ -22325,6 +22816,20 @@ async function openSettingsPanel(): Promise<void> {
     settingsToast(t("settings.panelOpenFailed", { err: String(err) }), true);
   }
 }
+
+/// Open the standalone panel on the skin workshop. The intent doubles as the
+/// cross-window message when the panel is already open on another page.
+async function openSkinShopPanel(): Promise<void> {
+  await patchConfig(
+    { panelIntent: { view: "settings", page: "skins", at: Date.now() } },
+    { markDirty: false },
+  ).catch(() => {});
+  try {
+    await invoke("open_panel_window");
+  } catch (err) {
+    settingsToast(t("settings.panelOpenFailed", { err: String(err) }), true);
+  }
+}
 document.querySelector("#settings-btn")!.addEventListener("click", (event) => {
   playSkinTransition(activeSkin()?.id ?? null, event.currentTarget as HTMLElement, {
     reduced: reduceMotion(),
@@ -22345,8 +22850,8 @@ document.querySelector("#settings-btn")!.addEventListener("click", (event) => {
     playSkinTransition(activeSkin()?.id ?? null, event.currentTarget as HTMLElement, {
       reduced: reduceMotion(),
       apply: () => {
-        skinMarketOpen = true;
-        setDrawer(true);
+        setDrawer(false);
+        void openSkinShopPanel();
       },
     });
   });
@@ -22685,7 +23190,6 @@ document.querySelector("#settings-btn")!.addEventListener("click", (event) => {
         return;
       }
       custKeyEditing.add(fam);
-      skinMarketOpen = false;
       custConfigOpen = fam;
       setDrawer(true);
       renderDrawerBody();

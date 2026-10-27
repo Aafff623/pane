@@ -317,7 +317,7 @@ window.addEventListener('message',event=>{
   if(event.source!==frame.contentWindow || event.origin!==location.origin)return;
   if(event.data?.type==='pane-demo-anchors'){demoAnchors=event.data;positionAnnotations();return}
   // The panel's own gear button asks the host to reveal the settings window.
-  if(event.data?.type==='pane-demo'&&event.data.action==='settings')setSettingsOverlay(true);
+  if(event.data?.type==='pane-demo'&&event.data.action==='settings')setSettingsOverlay(true,event.data.page||null);
 });
 // (stage size changes are covered by the shared-loop follower below)
 function tickAnnotations(){positionAnnotations();updateNoteAct()}
@@ -399,14 +399,22 @@ function initInkMarks(){
   setTimeout(start,1800); // backgrounded tabs throttle animation events
 }
 initInkMarks();
-const settingsButton=document.querySelector('[data-demo=settings]');const settingsWrap=document.querySelector('#pane-settings-wrap');let settingsOpener=null;
+const settingsButton=document.querySelector('[data-demo=settings]');const settingsWrap=document.querySelector('#pane-settings-wrap');let settingsOpener=null;let settingsPage=null;
 // A real modal. role/aria-modal live on the markup; the script owns what the
 // markup cannot — moving focus in on open, trapping Tab inside, closing on
 // Escape, and handing focus back to whatever opened it.
-function setSettingsOverlay(open){
+function setSettingsOverlay(open,page=null){
+  if(open&&page)settingsPage=page;
   const wasHidden=settingsWrap.hidden;
   if(open&&wasHidden){
-    if(!settingsFrame.dataset.loaded){settingsFrame.src=`/demo/index.html?lang=${demoLang}&theme=${demoTheme}&settings=1`;settingsFrame.dataset.loaded='1'}
+    if(!settingsFrame.dataset.loaded){
+      const pageParam=settingsPage?`&page=${encodeURIComponent(settingsPage)}`:'';
+      settingsFrame.src=`/demo/index.html?lang=${demoLang}&theme=${demoTheme}&settings=1${pageParam}`;
+      settingsFrame.dataset.loaded='1';
+    }else if(settingsPage){
+      settingsFrame.contentWindow?.postMessage({type:'pane-demo',action:'page',page:settingsPage},location.origin);
+    }
+    settingsPage=null;
     settingsWrap.hidden=false;
     settingsOpener=document.activeElement;
     document.querySelector('#pane-settings-close').focus();
@@ -426,7 +434,7 @@ settingsWrap.addEventListener('keydown',event=>{
   const first=focusables[0],last=focusables[focusables.length-1];
   if(event.shiftKey&&document.activeElement===first){event.preventDefault();last.focus()}
   else if(!event.shiftKey&&document.activeElement===last){event.preventDefault();first.focus()}
-});settingsButton.addEventListener('click',()=>setSettingsOverlay(settingsWrap.hidden));document.querySelector('#pane-settings-close').addEventListener('click',()=>setSettingsOverlay(false));function send(action){frame.contentWindow?.postMessage({type:'pane-demo',action},location.origin)}function loadDemo(){frame.src=`/demo/index.html?lang=${demoLang}&theme=${demoTheme}`;settingsWrap.hidden=true;settingsFrame.removeAttribute('src');delete settingsFrame.dataset.loaded;selected='overview';desktop.dataset.mode='auto';syncDemoControls()}
+});settingsButton.addEventListener('click',()=>setSettingsOverlay(settingsWrap.hidden));document.querySelector('#pane-settings-close').addEventListener('click',()=>setSettingsOverlay(false));function send(action){frame.contentWindow?.postMessage({type:'pane-demo',action},location.origin)}function loadDemo(){frame.src=`/demo/index.html?lang=${demoLang}&theme=${demoTheme}`;settingsWrap.hidden=true;settingsFrame.removeAttribute('src');delete settingsFrame.dataset.loaded;settingsPage=null;selected='overview';desktop.dataset.mode='auto';syncDemoControls()}
 // The iframe is the page's heaviest request; keep it out of first paint and
 // load it once the demo section is within 700px. loading="lazy" alone was not
 // enough — this script called loadDemo() immediately, so the browser fetched
