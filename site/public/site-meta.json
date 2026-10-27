@@ -1,5 +1,5 @@
 {
-  "version": "0.11.0",
+  "version": "0.11.1",
   "providerCount": 78,
   "providerCountSource": "src/providerCatalog.ts",
   "quotaFamilies": 77,
