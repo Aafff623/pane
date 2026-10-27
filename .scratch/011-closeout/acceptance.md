@@ -12,17 +12,18 @@
 | 检查 | 命令 | 结果 |
 | --- | --- | --- |
 | Rust 类型检查 | `cargo +stable-x86_64-pc-windows-gnu check` | **0 错误** |
-| 解析/供应商测试 | `parse-tests` 串行去代理 | **1192 通过 / 1 失败 / 18 忽略**（见下方说明） |
+| 解析/供应商测试 | `parse-tests` 串行去代理 | **1193 通过 / 0 失败 / 18 忽略**（410s） |
 | 前端单测 | `node --test tests/*.test.mjs` | **220 通过 / 0 失败** |
 | 官网测试 | `node --test site/*.test.mjs` | **50 通过 / 0 失败** |
 | 前端构建 | `pnpm build`（tsc + vite） | 通过 |
 | 官网版本/计数一致性 | `node site/scripts/sync-site-version.mjs --check` | v0.11.0 / 78 providers 同步 |
 | 视觉矩阵自检 | `node scripts/visual-qa.mjs --check` | 44 项覆盖完整 |
 
-**那个 1 失败要说清楚**：`providers::wall_tests::cached_clients_follow_proxy_changes_for_both_redirect_policies`。
-它自己起两个本地 loopback 代理线程、有 3 秒读超时；单独复跑 0.05s 通过，且此前两次
-完整串行跑（1191、1192）都通过。判定为环境抖动，不是代码回归。**但最后一次改动后没有
-重跑完整套件**，所以这条按「已知抖动、单跑通过」记，不按「全绿」记。
+**曾经出现过一次失败，已确认是抖动**：中途一轮完整跑里
+`providers::wall_tests::cached_clients_follow_proxy_changes_for_both_redirect_policies`
+失败过一次。它自己起两个本地 loopback 代理线程、有 3 秒读超时；单独复跑 0.05s 通过，
+最终这次完整跑（1193）也通过。记在这里是为了你在以后偶发看到它红时不必当成真实回归，
+而先单独复跑一次。
 
 ---
 
