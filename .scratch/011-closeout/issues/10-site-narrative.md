@@ -127,6 +127,14 @@ median 48 ms。**先量帧钟，median > 25 ms 就不要下结论**，改成按�
 - 本地 wrangler dev 会额外注入 `x-frame-options: DENY`（线上没有），所以本地的跨源
   还多一个干扰项；但线上无此头也同样失效，说明根因在 sandbox/同源判定这一层。
 
+**试过并撤回的假设（别重复走）**：先怀疑是沙箱把原点判成 opaque，于是两边各改一处——
+iframe 侧 `postMessage` 的 targetOrigin 改成 `"*"`，宿主侧去掉 `event.origin` 校验、
+只按 `event.source === frame.contentWindow` 认。重建 bundle、并把 iframe 的 src 换成带
+时间戳的新 URL 强制重载后，宿主**仍然收不到任何 `pane-demo-*` 消息**（只有站点自己发的
+`syncConfig`）。这说明问题不在 origin 不匹配，而在**嵌入上下文里 bridge 的
+`DOMContentLoaded` 块根本没执行**——单独打开 `/demo/` 时它是执行的。
+两处改动已全部撤回，没有留下任何未经证实的安全松绑。
+
 **下一步（未做，需单独一轮）**：先在真实 Chrome 里确认 `contentDocument` 是否可读，
 再决定是去掉 `sandbox`、改用 `postMessage` 的 `targetOrigin: "*"` + 主机侧按
 `event.source` 校验（不依赖 origin），还是把批注定位改成在 iframe 内绘制。
