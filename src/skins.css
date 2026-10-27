@@ -257,72 +257,28 @@ body.reduce-anim .skin-sample { animation:none; }
   cursor: pointer;
 }
 
-/* ---- Workshop rebuilt around one question: which skin, and how does it look.
-   Capsules pick the skin, one bounded peek shows it, the action bar applies it.
-   Everything else was decoration that pushed the answer below the fold. */
-.skin-market-gallery { display: none; }
-.skin-pills {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  margin: 10px 0;
-}
-.skin-pill {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  padding: 5px 11px;
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  background: var(--floating-surface);
-  color: var(--muted);
-  font-size: 12px;
-  line-height: 1.2;
-  white-space: nowrap;
-  cursor: pointer;
-}
-.skin-pill:hover { color: var(--foreground); border-color: color-mix(in oklab, var(--accent) 40%, var(--border)); }
-.skin-pill.is-on {
-  /* Darkened accent: white on the raw accent was barely legible. */
-  background: color-mix(in oklab, var(--accent) 78%, #000);
-  border-color: transparent;
-  color: #fff;
-  font-weight: 600;
-}
-.skin-pill-dot {
-  width: 5px; height: 5px;
-  border-radius: 999px;
-  background: currentColor;
-  opacity: .8;
-}
-/* A plain div, not a button: the panel's generic button height rule is what
-   collapsed every earlier preview frame into a thin band. */
+/* ---- Workshop: pick with the panel's own segmented control, preview as a
+   phone-width column. No scaling tricks: the sample renders at its natural
+   width inside a 360px column, so there is no stretched middles, no void
+   below, and nothing that a generic button rule can collapse. */
+.skin-pick-bar { flex-wrap: wrap; margin: 8px 0 10px; }
 .skin-peek {
-  position: relative;
-  /* Fill the window: a 210px peek left half the page blank, which is the
-     "low information density" complaint stated plainly. */
-  height: 58vh;
-  min-height: 210px;
-  margin-bottom: 8px;
-  overflow: hidden;
+  width: 360px;
+  max-width: 100%;
+  margin: 0 auto 8px;
+  max-height: 54vh;
+  overflow: auto;
   border: 1px solid var(--border);
   border-radius: 12px;
   background: var(--floating-surface);
 }
 .skin-peek .skin-sample {
-  position: absolute;
-  top: 0; left: 50%;
-  width: 360px;
-  transform: translateX(-50%) scale(.5);
-  transform-origin: top center;
+  width: auto;
   padding: 10px;
   border-radius: 0;
   animation: none;
 }
-/* Density: the workshop is a picker, not a landing page. */
 .skin-detail-head h3 { font-size: 15px; line-height: 1.25; }
 .skin-market-head h2 { font-size: 15px; }
 .skin-detail-head p, .skin-market-copy { font-size: 11.5px; line-height: 1.5; }
-.skin-preview-toolbar .skin-mode-btn { font-size: 11.5px; padding: 4px 9px; }
-.skin-action-context strong { font-size: 12.5px; }
-.skin-action-context span { font-size: 11px; }
+.skin-preview-toolbar .skin-mode-btn { font-size: 11.5px; }

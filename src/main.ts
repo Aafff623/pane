@@ -12698,7 +12698,7 @@ function renderSkinMarket(): string {
         <div class="skin-detail-head"><div><h3>${escapeHtml(skin.name)}</h3><p class="skin-market-copy">${escapeHtml(skin.tagline)}${skin.updateAvailable ? ` · ${t("skin.updateAvailable")}` : ""}</p></div></div>
         <div class="skin-preview-toolbar" role="group" aria-label="${t("skin.previewMode")}">${(["light", "dark", "both"] as const).map((mode) => `<button class="skin-mode-btn" type="button" data-skin-mode="${mode}" aria-pressed="${previewMode === mode}">${uiIcon(mode === "light" ? "sun" : mode === "dark" ? "moon" : "columns")}<span>${t(mode === "light" ? "skin.light" : mode === "dark" ? "skin.dark" : "skin.both")}</span></button>`).join("")}</div>
       </div>
-      <div class="skin-pills" role="tablist" aria-label="${t("skin.choose")}">${entries.map((s) => `<button class="skin-pill${s.id === skin.id ? " is-on" : ""}" type="button" role="tab" aria-selected="${s.id === skin.id}" data-skin-pick="${escapeHtml(s.id)}">${escapeHtml(s.name)}${s.id === skin.id && s.state === "applied" ? ` <i class="skin-pill-dot" aria-hidden="true"></i>` : ""}</button>`).join("")}</div>
+      <div class="skin-preview-toolbar skin-pick-bar" role="tablist" aria-label="${t("skin.choose")}">${entries.map((s) => `<button class="skin-mode-btn${s.id === skin.id ? " active" : ""}" type="button" role="tab" aria-pressed="${s.id === skin.id}" data-skin-pick="${escapeHtml(s.id)}"><span>${escapeHtml(s.name)}</span></button>`).join("")}</div>
       ${skin.state === "remote" ? "" : `<div class="skin-peek">${renderSkinSample("light", skin.id as SkinId, false, skinPreviewPage)}</div>`}
       </div>
     </div>
