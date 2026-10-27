@@ -12698,13 +12698,8 @@ function renderSkinMarket(): string {
         <div class="skin-detail-head"><div><h3>${escapeHtml(skin.name)}</h3><p class="skin-market-copy">${escapeHtml(skin.tagline)}${skin.updateAvailable ? ` · ${t("skin.updateAvailable")}` : ""}</p></div></div>
         <div class="skin-preview-toolbar" role="group" aria-label="${t("skin.previewMode")}">${(["light", "dark", "both"] as const).map((mode) => `<button class="skin-mode-btn" type="button" data-skin-mode="${mode}" aria-pressed="${previewMode === mode}">${uiIcon(mode === "light" ? "sun" : mode === "dark" ? "moon" : "columns")}<span>${t(mode === "light" ? "skin.light" : mode === "dark" ? "skin.dark" : "skin.both")}</span></button>`).join("")}</div>
       </div>
-      <div class="skin-market-gallery" role="group" aria-label="${t("skin.choose")}">
-        ${entries.map((s) => `<button class="skin-side-item${s.id === skin.id ? " active" : ""}" type="button" data-skin-pick="${escapeHtml(s.id)}" aria-pressed="${s.id === skin.id}" aria-controls="skin-market-detail">
-            ${s.state === "remote"
-              ? `<span class="skin-side-thumb skin-side-thumb-empty">${uiIcon("palette", s.name)}</span>`
-              : `<span class="skin-side-thumb">${renderSkinSample("light", s.id as SkinId, true)}</span>`}
-            <span class="skin-side-meta"><strong>${escapeHtml(s.name)}</strong><span class="skin-side-state${s.state === "applied" ? " is-applied" : ""}">${s.state === "applied" ? `${uiIcon("checkCircle")} ${t("skin.applied")}` : s.state === "remote" ? t("skin.remoteState") : t("skin.installed")}</span></span>
-          </button>`).join("")}
+      <div class="skin-pills" role="tablist" aria-label="${t("skin.choose")}">${entries.map((s) => `<button class="skin-pill${s.id === skin.id ? " is-on" : ""}" type="button" role="tab" aria-selected="${s.id === skin.id}" data-skin-pick="${escapeHtml(s.id)}">${escapeHtml(s.name)}${s.id === skin.id && s.state === "applied" ? ` <i class="skin-pill-dot" aria-hidden="true"></i>` : ""}</button>`).join("")}</div>
+      ${skin.state === "remote" ? "" : `<div class="skin-peek">${renderSkinSample("light", skin.id as SkinId, false, skinPreviewPage)}</div>`}
       </div>
     </div>
     <div class="skin-detail-actions">${skinMarketFeedback ? `<p class="skin-market-feedback" role="alert">${escapeHtml(skinMarketFeedback)}</p>` : ""}<div class="skin-action-context"><strong>${escapeHtml(skin.name)}</strong><span>${t("skin.followsMode")}</span></div><div class="skin-action-buttons">${skinActionHtml(skin)}${skin.state === "remote" ? `<button class="mini-btn skin-reset-btn" type="button" data-skin-reset ${activeSkin() ? "" : "disabled"}>${uiIcon("arrowCounterClockwise")}<span>${t("skin.native")}</span></button>` : ""}</div></div>
