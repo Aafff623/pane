@@ -157,6 +157,24 @@ interface Snapshot {
   } | null;
 }
 
+/// Read-only local detection (#109). `installState` is `unknown` when Pane
+/// has no install hint for the family; the UI must not turn that into
+/// "not installed".
+interface SourceProbe {
+  family: string;
+  displayName: string;
+  installState: "installed" | "missing" | "unknown";
+  installEvidence: string[];
+  credentialState: "present" | "absent";
+  credentialSource: string;
+  envVars: string[];
+  localHint: string | null;
+}
+interface SourceProbeReport {
+  families: SourceProbe[];
+  envKeys: { name: string; family: string | null; supported: boolean }[];
+}
+
 interface ModelSpend {
   model: string;
   cost: number;
@@ -3740,7 +3758,16 @@ function renderCard(s: Snapshot): string {
         ${L.expanded ? `<div class="on-demand${anim}">${onDemandHtml}</div>` : ""}`;
     }
   } else {
-    body = `<p class="placeholder">${escapeHtml(failureText(shown.error ?? t("card.notConnected"), shown.status))}</p>${credentialRepairHtml(shown)}`;
+    // Keep "installed but signed out" distinct from "not installed" (#109).
+    const probe = sourceProbeFor(family);
+    const installed = probe?.installState === "installed" && probe.credentialState === "absent";
+    const missing = probe?.installState === "missing" && probe.credentialState === "absent";
+    const note = installed
+      ? t("card.installedNotSignedIn", { name: providerDisplayName(family) })
+      : missing
+        ? t("card.notInstalled", { name: providerDisplayName(family) })
+        : failureText(shown.error ?? t("card.notConnected"), shown.status);
+    body = `<p class="placeholder">${escapeHtml(note)}</p>${credentialRepairHtml(shown)}`;
   }
 
   const stale = !shown.stale
@@ -7363,6 +7390,46 @@ function detectedFamilies(snaps: Snapshot[]): Map<string, Snapshot> {
   return out;
 }
 
+function sourceProbeFor(family: string): SourceProbe | undefined {
+  return sourceProbeReport?.families.find((probe) => probe.family === family);
+}
+
+/// Re-read the local environment and installed-tool hints. Never touches the
+/// network or executes a CLI; safe to call while onboarding is open.
+async function refreshSourceProbes(announce = false): Promise<void> {
+  if (sourceProbeLoading) return;
+  sourceProbeLoading = true;
+  const revision = ++sourceProbeRevision;
+  try {
+    const report = await invoke<SourceProbeReport>("source_probe");
+    if (revision !== sourceProbeRevision) return;
+    sourceProbeReport = report;
+    sourceProbeError = null;
+  } catch (error) {
+    if (revision !== sourceProbeRevision) return;
+    sourceProbeError = String(error);
+    sourceProbeReport = null;
+  } finally {
+    if (revision === sourceProbeRevision) {
+      sourceProbeLoading = false;
+      if (onboardingActive()) showOnboardingStep(onboardingStep);
+      requestRender();
+      if (announce) {
+        const status = document.querySelector<HTMLElement>("#status");
+        if (status) {
+          status.textContent = sourceProbeReport
+            ? t("onboarding.rescanDone", {
+                n: sourceProbeReport.families.filter(
+                  (probe) => probe.installState === "installed" || probe.credentialState === "present",
+                ).length,
+              })
+            : t("onboarding.rescanFailed");
+        }
+      }
+    }
+  }
+}
+
 /// The disabled list a picker confirmation produces: every known family
 /// that was NOT checked. Account-scoped entries (`family@<fp>`, per-account
 /// switches the picker does not show) and explicitly removed providers are
@@ -7528,6 +7595,7 @@ async function runProviderPicker(firstRun: boolean): Promise<void> {
 function mechanismFactsHtml(family: string): string {
   const mech = MECHANISMS[family];
   if (!mech) return "";
+  const probe = sourceProbeFor(family);
   const rows = [
     [t("provider.help.credential"), t(credentialLabelKey(family))],
     [t("provider.help.capabilities"), (mech.provides ?? []).map(displayMetricLabel).join(" · ")],
@@ -7536,6 +7604,15 @@ function mechanismFactsHtml(family: string): string {
     [t("customize.helpMechSource"), mech.hosts?.join(" · ") || t("customize.helpMechSourceLocal")],
     [t("provider.help.principle"), t(mech.hosts?.length ? "provider.principle.remote" : "provider.principle.local")],
     [t("provider.help.boundary"), t(mech.limitsKey ?? "provider.limit.general")],
+    ...(probe
+      ? [
+          [t("provider.help.installState"), t(probe.installState === "installed" ? "provider.install.installed" : probe.installState === "missing" ? "provider.install.missing" : "provider.install.unknown")],
+          [t("provider.help.credentialSource"), probe.credentialSource === "none" ? t("provider.source.none") : probe.credentialSource],
+          ...(probe.installEvidence.length
+            ? [[t("provider.help.installEvidence"), probe.installEvidence.slice(0, 2).join(" · ")]]
+            : []),
+        ]
+      : []),
   ];
   return `<dl class="help-mech">${rows.map(([label, value]) => `<div><dt>${escapeHtml(label)}</dt><dd>${escapeHtml(value)}</dd></div>`).join("")}</dl>`;
 }
@@ -9408,8 +9485,13 @@ function applyConfigDefaults(apply: boolean): void {
 
 /// In flight while the first-run detection picker is open — the tour waits
 /// on it (see maybeStartTour).
-let firstRunPickerPending: Promise<void> | null = null;
 let tourContentReady = false;
+/// #109 detection snapshot. Refreshed on boot, before onboarding, after a
+/// credential save and from the explicit Rescan action.
+let sourceProbeReport: SourceProbeReport | null = null;
+let sourceProbeError: string | null = null;
+let sourceProbeLoading = false;
+let sourceProbeRevision = 0;
 let tourSteps: TourStep[] = [];
 let tourIndex = 0;
 let tourOverlay: HTMLElement | null = null;
@@ -9552,14 +9634,6 @@ function startTour(): void {
 /// The first-run detection picker outranks the tour: the tour spotlights
 /// the board, so it must wait until the user's picks are on it.
 function maybeStartTour(): void {
-  if (firstRunPickerPending) {
-    const pending = firstRunPickerPending;
-    void pending.then(() => {
-      if (firstRunPickerPending === pending) firstRunPickerPending = null;
-      maybeStartTour();
-    });
-    return;
-  }
   if (IS_PANEL_FORM || tourActive() || onboardingActive() || !tourContentReady) return;
   if (noticeOpen || noticeQueue.length > 0) return;
   if (maybeShowFontGuide()) return;
@@ -9580,7 +9654,11 @@ let onboardingOverlay: HTMLElement | null = null;
 let onboardingStep = 0;
 let onboardingReplay = false;
 let onboardingFreshInstall = false;
-const ONBOARDING_STEPS = 3;
+let onboardingSelection = new Set<string>();
+let onboardingSelectionTouched = false;
+let onboardingStartStep = 0;
+let onboardingApplyPicks = false;
+const ONBOARDING_STEPS = 4;
 const onboardingActive = () => onboardingOverlay !== null;
 
 function onboardingShortcutRows(): string {
@@ -9592,21 +9670,106 @@ function onboardingShortcutRows(): string {
     .join("");
 }
 
-function onboardingScanHtml(): string {
-  if (IS_PANEL_FORM) {
-    return `<p class="onboarding-note">${escapeHtml(t("onboarding.panelNote"))}</p>`;
+/// Which detected families should start checked. Installed or credentialed
+/// sources win; a machine with nothing detected keeps the two starter cards.
+function defaultOnboardingPicks(): Set<string> {
+  const picks = new Set<string>();
+  for (const probe of sourceProbeReport?.families ?? []) {
+    if (probe.installState === "installed" || probe.credentialState === "present") picks.add(probe.family);
   }
-  const names = [
-    ...new Set(
-      lastSnapshots
-        .filter((snapshot) => !isCardDisabled(snapshot.id))
-        .map((snapshot) => providerDisplayName(providerFamily(snapshot.id))),
-    ),
-  ].filter(Boolean);
-  const found = names.length
-    ? `<p class="onboarding-found">${escapeHtml(t("onboarding.found", { n: names.length }))}</p><div class="onboarding-providers">${names.slice(0, 8).map((name) => `<span>${escapeHtml(name)}</span>`).join("")}</div>`
-    : `<p class="onboarding-found muted">${escapeHtml(t("onboarding.none"))}</p>`;
-  return `${found}<p class="onboarding-note">${escapeHtml(t("onboarding.scanHint"))}</p>`;
+  if (!picks.size) {
+    for (const family of STARTER_FAMILIES) {
+      if (ALL_PROVIDERS.some(([id]) => id === family)) picks.add(family);
+    }
+  }
+  return picks;
+}
+
+function seedOnboardingPicks(): void {
+  if (!onboardingSelectionTouched) onboardingSelection = defaultOnboardingPicks();
+}
+
+function onboardingSourceStatus(probe: SourceProbe): string {
+  if (probe.credentialState === "present") return t("onboarding.sourceReady");
+  if (probe.installState === "installed") return t("onboarding.sourceInstalledSignedOut");
+  if (probe.installState === "missing") return t("onboarding.sourceMissing");
+  return t("onboarding.sourceUnknown");
+}
+
+function onboardingSourceEvidence(probe: SourceProbe): string {
+  if (probe.installEvidence.length) return probe.installEvidence.slice(0, 2).join(" · ");
+  if (probe.envVars.length) return `env: ${probe.envVars.slice(0, 2).join(" / ")}`;
+  if (probe.localHint) return probe.localHint;
+  if (probe.credentialSource !== "none") return probe.credentialSource;
+  return "";
+}
+
+function onboardingProbeRows(): SourceProbe[] {
+  return (sourceProbeReport?.families ?? []).filter((probe) =>
+    probe.installState === "installed" ||
+    probe.credentialState === "present" ||
+    STARTER_FAMILIES.has(probe.family),
+  );
+}
+
+function onboardingSourceRowsHtml(): string {
+  if (sourceProbeLoading && !sourceProbeReport) {
+    return `<p class="onboarding-note">${escapeHtml(t("onboarding.scanning"))}</p>`;
+  }
+  if (sourceProbeError && !sourceProbeReport) {
+    return `<div class="onboarding-detect-error"><p class="onboarding-note">${escapeHtml(t("onboarding.detectFailed"))}</p><button type="button" class="mini-btn" data-onboarding-rescan>${escapeHtml(t("onboarding.rescan"))}</button></div>`;
+  }
+  const rows = onboardingProbeRows();
+  if (!rows.length) {
+    return `<p class="onboarding-note">${escapeHtml(t("onboarding.none"))}</p><button type="button" class="mini-btn" data-onboarding-rescan>${escapeHtml(t("onboarding.rescan"))}</button>`;
+  }
+  const detected = rows.filter((probe) => probe.installState === "installed" || probe.credentialState === "present").length;
+  const body = rows.map((probe) => {
+    const checked = onboardingSelection.has(probe.family);
+    const evidence = onboardingSourceEvidence(probe);
+    return `<label class="onboarding-source">
+      <input type="checkbox" data-onboarding-pick="${escapeHtml(probe.family)}" ${checked ? "checked" : ""} />
+      <span class="onboarding-source-main">
+        <strong>${escapeHtml(probe.displayName)}</strong>
+        <span class="onboarding-source-state ${probe.credentialState === "present" ? "is-ready" : probe.installState === "installed" ? "is-installed" : "is-muted"}">${escapeHtml(onboardingSourceStatus(probe))}</span>
+        ${evidence ? `<span class="onboarding-source-evidence">${escapeHtml(evidence)}</span>` : ""}
+      </span>
+    </label>`;
+  }).join("");
+  const unsupported = (sourceProbeReport?.envKeys ?? []).filter((key) => !key.supported);
+  const envKeys = unsupported.length
+    ? `<div class="onboarding-env-keys"><p class="onboarding-found">${escapeHtml(t("onboarding.envFound"))}</p>${unsupported.map((key) => `<span>${escapeHtml(key.name)}${key.family ? ` · ${escapeHtml(key.family)}` : ""}</span>`).join("")}<p class="onboarding-note">${escapeHtml(t("onboarding.envUnsupported"))}</p></div>`
+    : "";
+  return `<p class="onboarding-found">${escapeHtml(t("onboarding.foundSources", { n: detected }))}</p>
+    <div class="onboarding-sources">${body}</div>
+    ${envKeys}
+    <div class="onboarding-detect-foot"><button type="button" class="mini-btn" data-onboarding-rescan>${escapeHtml(t("onboarding.rescan"))}</button><span class="onboarding-note">${escapeHtml(t("onboarding.rescanHint"))}</span></div>`;
+}
+
+function onboardingConnectRowsHtml(): string {
+  const rows = [...onboardingSelection].map((family) => sourceProbeFor(family) ?? {
+    family,
+    displayName: providerDisplayName(family),
+    installState: "unknown" as const,
+    installEvidence: [],
+    credentialState: "absent" as const,
+    credentialSource: "none",
+    envVars: [],
+    localHint: null,
+  });
+  if (!rows.length) return `<p class="onboarding-note">${escapeHtml(t("onboarding.noneSelected"))}</p>`;
+  return rows.map((probe) => {
+    const snap = lastSnapshots.find((s) => providerFamily(s.id) === probe.family);
+    const connected = snap?.status === "ok";
+    const action = connected
+      ? ""
+      : `<button type="button" class="mini-btn" data-onboarding-setup="${escapeHtml(probe.family)}">${escapeHtml(t("onboarding.openSetup"))}</button>`;
+    return `<div class="onboarding-connect-row">
+      <span class="onboarding-connect-dot ${connected ? "is-ok" : ""}" aria-hidden="true"></span>
+      <span class="onboarding-source-main"><strong>${escapeHtml(probe.displayName)}</strong><span class="onboarding-source-state ${connected ? "is-ready" : "is-muted"}">${escapeHtml(connected ? t("onboarding.connected") : onboardingSourceStatus(probe))}</span></span>
+      ${action}
+    </div>`;
+  }).join("");
 }
 
 function onboardingStepBody(step: number): string {
@@ -9621,21 +9784,74 @@ function onboardingStepBody(step: number): string {
       </div>`;
   }
   if (step === 1) {
-    return `<p class="onboarding-kicker">${escapeHtml(t("onboarding.kicker2"))}</p>
-      <h1 id="onboarding-title">${escapeHtml(t("onboarding.title2"))}</h1>
-      <p class="onboarding-lead">${escapeHtml(t("onboarding.lead2"))}</p>
-      <div class="onboarding-keys">${onboardingShortcutRows()}</div>
-      <p class="onboarding-note">${escapeHtml(t("onboarding.shortcutNote"))}</p>`;
+    return `<p class="onboarding-kicker">${escapeHtml(t("onboarding.kickerDetect"))}</p>
+      <h1 id="onboarding-title">${escapeHtml(t("onboarding.titleDetect"))}</h1>
+      <p class="onboarding-lead">${escapeHtml(t("onboarding.leadDetect"))}</p>
+      ${onboardingSourceRowsHtml()}`;
   }
-  return `<p class="onboarding-kicker">${escapeHtml(t("onboarding.kicker3"))}</p>
-    <h1 id="onboarding-title">${escapeHtml(t("onboarding.title3"))}</h1>
-    <p class="onboarding-lead">${escapeHtml(t("onboarding.lead3"))}</p>
-    ${onboardingScanHtml()}`;
+  if (step === 2) {
+    return `<p class="onboarding-kicker">${escapeHtml(t("onboarding.kickerConnect"))}</p>
+      <h1 id="onboarding-title">${escapeHtml(t("onboarding.titleConnect"))}</h1>
+      <p class="onboarding-lead">${escapeHtml(t("onboarding.leadConnect"))}</p>
+      <div class="onboarding-connects">${onboardingConnectRowsHtml()}</div>
+      <p class="onboarding-note">${escapeHtml(t("onboarding.connectHint"))}</p>`;
+  }
+  return `<p class="onboarding-kicker">${escapeHtml(t("onboarding.kickerDone"))}</p>
+    <h1 id="onboarding-title">${escapeHtml(t("onboarding.titleDone"))}</h1>
+    <p class="onboarding-lead">${escapeHtml(t("onboarding.leadDone"))}</p>
+    <div class="onboarding-keys">${onboardingShortcutRows()}</div>
+    <p class="onboarding-note">${escapeHtml(t("onboarding.doneHint"))}</p>`;
+}
+
+function onboardingHasConnection(): boolean {
+  return lastSnapshots.some(
+    (snap) => snap.status === "ok" && onboardingSelection.has(providerFamily(snap.id)),
+  );
+}
+
+function applyOnboardingPicks(): void {
+  const chosen = onboardingSelectionTouched ? new Set(onboardingSelection) : defaultOnboardingPicks();
+  const layout = config.layout ?? { providerOrder: [], providers: {} };
+  for (const id of chosen) {
+    layout.providers[id] ??= {
+      metricOrder: [],
+      onDemand: [],
+      hidden: [],
+      starred: [],
+      expanded: false,
+    };
+  }
+  config.layout = layout;
+  config.disabled = disabledFromPick(chosen);
+  config.setupPicked = true;
+  void patchConfig({
+    disabled: config.disabled,
+    layout,
+    setupPicked: true,
+  }).catch(() => {});
+  requestRender();
+  void forceUsageRefreshAttempt(false).then(requestTraySync);
+}
+
+function openOnboardingSetup(family: string): void {
+  const def = providerDefinition(family);
+  if (def?.supportsApiKey || isWebSessionFamily(family)) {
+    custConfigOpen = family;
+    setDrawer(true);
+    renderDrawerBody();
+    return;
+  }
+  openProviderHelp(family);
 }
 
 function showOnboardingStep(index: number): void {
   if (!onboardingOverlay) return;
   onboardingStep = Math.max(0, Math.min(ONBOARDING_STEPS - 1, index));
+  if (onboardingStep === 1) {
+    seedOnboardingPicks();
+    if (!sourceProbeReport && !sourceProbeLoading && !sourceProbeError) void refreshSourceProbes();
+  }
+  if (onboardingStep === 2) seedOnboardingPicks();
   const body = onboardingOverlay.querySelector<HTMLElement>(".onboarding-body");
   if (body) body.innerHTML = onboardingStepBody(onboardingStep);
   onboardingOverlay.querySelectorAll<HTMLElement>("[data-onboarding-dot]").forEach((dot, dotIndex) => {
@@ -9654,7 +9870,11 @@ function showOnboardingStep(index: number): void {
   const next = onboardingOverlay.querySelector<HTMLButtonElement>("[data-onboarding-next]");
   if (next) {
     next.textContent = t(
-      onboardingStep === ONBOARDING_STEPS - 1 ? "onboarding.done" : "onboarding.next",
+      onboardingStep === ONBOARDING_STEPS - 1
+        ? onboardingHasConnection()
+          ? "onboarding.done"
+          : "onboarding.doneLater"
+        : "onboarding.next",
     );
   }
   requestAnimationFrame(() => next?.focus({ preventScroll: true }));
@@ -9671,25 +9891,39 @@ function finishOnboarding(dismissed: boolean): void {
   document.removeEventListener("keydown", onOnboardingKey, true);
   onboardingOverlay?.remove();
   onboardingOverlay = null;
+  if (onboardingApplyPicks) applyOnboardingPicks();
+  onboardingApplyPicks = false;
   if (onboardingReplay) {
     onboardingReplay = false;
+    onboardingSelection = new Set();
+    onboardingSelectionTouched = false;
     return;
   }
   onboardingFreshInstall = false;
-  if (dismissed) {
+  const connected = onboardingHasConnection();
+  onboardingSelection = new Set();
+  onboardingSelectionTouched = false;
+  if (dismissed || !connected) {
+    config.onboardingSeen = false;
     config.onboardingDismissed = true;
-    void patchConfig({ onboardingDismissed: true });
+    void patchConfig({ onboardingSeen: false, onboardingDismissed: true });
   } else {
     config.onboardingSeen = true;
-    void patchConfig({ onboardingSeen: true });
+    config.onboardingDismissed = false;
+    void patchConfig({ onboardingSeen: true, onboardingDismissed: false });
   }
 }
 
-function startOnboarding(replay = false): void {
+function startOnboarding(replay = false, startStep = 0, applyPicks = !replay): void {
   if (onboardingActive()) return;
   // The wizard is modal; a spotlight left underneath would reappear after it.
   endTour();
   onboardingReplay = replay;
+  onboardingApplyPicks = applyPicks;
+  onboardingSelection = new Set();
+  onboardingSelectionTouched = false;
+  onboardingStartStep = Math.max(0, Math.min(ONBOARDING_STEPS - 1, startStep));
+  if (!sourceProbeReport && !sourceProbeLoading) void refreshSourceProbes();
   const overlay = document.createElement("div");
   overlay.id = "onboarding-overlay";
   overlay.innerHTML = `<section class="onboarding-card" role="dialog" aria-modal="true" aria-labelledby="onboarding-title">
@@ -9708,13 +9942,31 @@ function startOnboarding(replay = false): void {
     </footer>
   </section>`;
   onboardingOverlay = overlay;
+  overlay.addEventListener("change", (event) => {
+    const target = event.target as HTMLInputElement;
+    if (!target.matches("[data-onboarding-pick]")) return;
+    onboardingSelectionTouched = true;
+    if (target.checked) onboardingSelection.add(target.dataset.onboardingPick!);
+    else onboardingSelection.delete(target.dataset.onboardingPick!);
+  });
   overlay.addEventListener("click", (event) => {
     const target = event.target as HTMLElement;
     if (target.closest("[data-onboarding-close]") || target.closest("[data-onboarding-skip]")) {
       finishOnboarding(true);
       return;
     }
+    if (target.closest("[data-onboarding-rescan]")) {
+      void refreshSourceProbes(true);
+      return;
+    }
+    const setup = target.closest<HTMLElement>("[data-onboarding-setup]")?.dataset.onboardingSetup;
+    if (setup) {
+      finishOnboarding(true);
+      window.setTimeout(() => openOnboardingSetup(setup), 0);
+      return;
+    }
     if (target.closest("[data-onboarding-next]")) {
+      if (onboardingStep === 1 && onboardingApplyPicks) applyOnboardingPicks();
       if (onboardingStep + 1 < ONBOARDING_STEPS) showOnboardingStep(onboardingStep + 1);
       else finishOnboarding(false);
       return;
@@ -9723,7 +9975,7 @@ function startOnboarding(replay = false): void {
   });
   document.addEventListener("keydown", onOnboardingKey, true);
   document.body.appendChild(overlay);
-  showOnboardingStep(0);
+  showOnboardingStep(onboardingStartStep);
 }
 
 function maybeStartOnboarding(): boolean {
@@ -10744,7 +10996,11 @@ interface CredStatus {
   storedKey: boolean;
   maskedKey?: string | null;
   envKey: boolean;
+  envVars?: string[];
   localCli: string | null;
+  installState?: "installed" | "missing" | "unknown";
+  installEvidence?: string[];
+  credentialSource?: string;
   // Account label of Pane's own OAuth login (codex/grok), null when none.
   oauth: string | null;
   // Kimi only: the source selected by the backend's refresh precedence.
@@ -10779,9 +11035,13 @@ function refreshCredStatus(id: string): void {
       credStatusCache.set(id, {
         storedKey: false,
         envKey: false,
+        envVars: [],
         localCli: null,
         oauth: null,
         activeSource: null,
+        installState: "unknown",
+        installEvidence: [],
+        credentialSource: "none",
       });
       paintCredStatus(id);
       if (
@@ -10941,8 +11201,24 @@ function credStatusLine(id: string): string {
       ? escapeHtml(t("customize.credStored"))
       : escapeHtml(t("customize.credNotStored")),
   );
-  if (status.envKey) parts.push(escapeHtml(t("customize.credEnv")));
+  if (status.envKey) {
+    parts.push(
+      escapeHtml(
+        status.envVars?.length
+          ? t("customize.credEnvNamed", { name: status.envVars.join(" / ") })
+          : t("customize.credEnv"),
+      ),
+    );
+  }
   if (status.localCli) parts.push(escapeHtml(status.localCli));
+  if (
+    status.installState === "installed" &&
+    !status.storedKey &&
+    !status.envKey &&
+    !status.localCli
+  ) {
+    parts.push(escapeHtml(t("customize.credInstalledSignedOut")));
+  }
   return parts.join(" · ") + membership;
 }
 
@@ -10968,7 +11244,7 @@ function credChipsHtml(id: string): string {
   if (status.storedKey)
     chips.push(`<span class="cred-chip ok">${escapeHtml(t("customize.chipStoredKey"))}</span>`);
   if (status.envKey)
-    chips.push(`<span class="cred-chip ok">${escapeHtml(t("customize.chipEnvKey"))}</span>`);
+    chips.push(`<span class="cred-chip ok">${escapeHtml(status.envVars?.length ? t("customize.chipEnvKeyNamed", { name: status.envVars[0] }) : t("customize.chipEnvKey"))}</span>`);
   if (status.localCli)
     chips.push(
       `<span class="cred-chip ok">${escapeHtml(t("customize.chipLocal", { x: status.localCli }))}</span>`,
@@ -13531,6 +13807,10 @@ function renderGroupedCards(): string {
   // Everything unconfigured and nothing else: guide the user to add one
   // instead of a lone fold header.
   const guide = visible.length === 0 ? renderBoardEmptyState() : "";
+  const connected = lastSnapshots.some((snap) => snap.status === "ok" && !isCardDisabled(snap.id));
+  const setupBanner = !connected && visible.length > 0
+    ? `<div class="setup-banner"><span>${escapeHtml(t("board.setupBanner"))}</span><button class="mini-btn" type="button" data-board-setup-cta>${escapeHtml(t("board.setupCta"))}</button></div>`
+    : "";
   const fold = unconfigured.length
     ? `<div class="card-group-head unconfigured-fold-head" data-unconfigured-toggle role="button" tabindex="0">
         <span class="card-group-chevron">${unconfiguredFoldOpen ? "⌄" : "›"}</span>
@@ -13544,7 +13824,7 @@ function renderGroupedCards(): string {
         )
         .join("")
     : "";
-  return sections + guide + fold;
+  return setupBanner + sections + guide + fold;
 }
 
 /// No cards yet: the loading state is exclusive with the empty state.
@@ -13588,7 +13868,7 @@ function renderBoardEmptyState(): string {
     <span class="board-empty-icon" aria-hidden="true">${uiIcon("plus")}</span>
     <div class="board-empty-title">${escapeHtml(t("board.emptyTitle"))}</div>
     <div class="board-empty-body">${escapeHtml(t("board.emptyBody"))}</div>
-    <button class="mini-btn board-empty-cta" data-board-empty-cta>${escapeHtml(t("board.emptyCta"))}</button>
+    <div class="board-empty-actions"><button class="mini-btn board-empty-cta" data-board-setup-cta>${escapeHtml(t("board.setupCta"))}</button><button class="mini-btn" data-board-empty-cta>${escapeHtml(t("board.emptyCta"))}</button></div>
   </div>`;
 }
 
@@ -14506,11 +14786,10 @@ async function refresh(
     const meterTrend = await invoke<MeterTrend[]>("fetch_meter_history").catch(() => null);
     if (refreshState.acceptResult("meterTrend", myGen, meterTrend)) lastMeterTrend = meterTrend;
     // First launch ever (no layout yet): start with only the providers that
-    // actually have credentials on this PC, like the Mac app's first-run
-    // detection. The rest stay available in Customize. Skipped while the
-    // detection picker is up — it owns the first-run choice and writes the
-    // final list itself (this branch is its fallback when probing failed).
-    if (config.layout === null && snapshots.length > 0 && !firstRunPickerPending) {
+    // actually have credentials on this PC. The onboarding flow applies the
+    // explicit picker selection later; this is the fallback when probing
+    // failed or onboarding was dismissed before writing a choice.
+    if (config.layout === null && snapshots.length > 0) {
       // Claude and Codex always start enabled — their "connect me" cards are
       // the new-user onboarding. Everything else without credentials waits
       // in Customize (a fresh PC with zero AI tools sees just those two).
@@ -20457,6 +20736,23 @@ function buildPanelShell(): void {
     void patchConfig({ spendShowAll: spendShowAll.checked }).then(requestRender);
   });
   generalCard.append(panelSwitchRow("settings.spendShowAll", "settings.spendShowAllTip", spendShowAll));
+  const rescanSources = document.createElement("button");
+  rescanSources.type = "button";
+  rescanSources.className = "mini-btn";
+  rescanSources.dataset.i18n = "settings.rescanSources";
+  rescanSources.textContent = t("settings.rescanSources");
+  rescanSources.addEventListener("click", async () => {
+    await refreshSourceProbes();
+    const found = sourceProbeReport?.families.filter(
+      (probe) => probe.installState === "installed" || probe.credentialState === "present",
+    ).length ?? 0;
+    settingsToast(
+      sourceProbeReport
+        ? t("onboarding.rescanDone", { n: found })
+        : t("onboarding.rescanFailed"),
+      !sourceProbeReport,
+    );
+  });
   const redetect = document.createElement("button");
   redetect.type = "button";
   redetect.className = "mini-btn";
@@ -20465,7 +20761,10 @@ function buildPanelShell(): void {
     // Same flow as first run, but defaults follow the current choice.
     void runProviderPicker(false);
   });
-  generalCard.append(panelRowDesc("settings.redetectTip", "settings.redetectTip", redetect));
+  const sourceActions = document.createElement("div");
+  sourceActions.className = "set-row__inline-fields";
+  sourceActions.append(rescanSources, redetect);
+  generalCard.append(panelRowDesc("settings.sourceScan", "settings.desc.sourceScan", sourceActions));
   const formPill = pillControl<"floating" | "panel">(
     [
       { value: "floating", label: t("settings.windowFormFloating") },
@@ -23262,6 +23561,11 @@ document.querySelector("#settings-btn")!.addEventListener("click", (event) => {
       setDrawer(true);
       return;
     }
+    if (target.closest<HTMLElement>("[data-board-setup-cta]")) {
+      startOnboarding(true, 1, true);
+      void refreshSourceProbes();
+      return;
+    }
     if (target.closest<HTMLElement>("[data-board-retry]")) {
       boardLoadPhase = "pending";
       requestRender();
@@ -23790,14 +24094,10 @@ document.querySelector("#settings-btn")!.addEventListener("click", (event) => {
       // What's-new popup in this window.
       return;
     }
-    // True first run: probe everything and let the user pick what lands on
-    // the board (the tour waits for the picker — see maybeStartTour). Keyed
-    // on setupPicked alone: the boot refresh materializes a layout early, so
-    // "layout === null" would already be false by the time this runs again
-    // after an interrupted first run.
-    if (!config.setupPicked) {
-      firstRunPickerPending = runProviderPicker(true);
-    }
+    // Fresh setup is owned by the onboarding flow (#109): it reads the
+    // local source probe and applies the picker selection itself. The
+    // manual picker in Settings remains available.
+    void refreshSourceProbes();
     scheduleAutoRefresh();
     void paintCachedSnapshots();
     void refresh(true).finally(() => {

@@ -11726,3 +11726,73 @@ body.colorblind .trend-bar{stroke:currentColor;stroke-width:1;stroke-dasharray:2
   font-size: 10px;
   line-height: 1.5;
 }
+
+/* --- First-run source detection (#109) ------------------------------------ */
+.onboarding-sources { display:grid; gap:8px; margin-top:14px; }
+.onboarding-source {
+  display:flex;
+  align-items:flex-start;
+  gap:10px;
+  min-width:0;
+  padding:10px 12px;
+  border:1px solid var(--border);
+  border-radius:11px;
+  background:color-mix(in oklab, var(--muted) 45%, transparent);
+  cursor:pointer;
+}
+.onboarding-source:hover { border-color:color-mix(in oklab, var(--accent) 45%, var(--border)); }
+.onboarding-source input { flex:none; margin:3px 0 0; accent-color:var(--chart-blue); }
+.onboarding-source-main { display:flex; flex-direction:column; gap:3px; min-width:0; }
+.onboarding-source-main strong { font-size:13px; font-weight:600; }
+.onboarding-source-state { font-size:11.5px; line-height:1.4; }
+.onboarding-source-state.is-ready { color:var(--chart-green, #15803d); }
+.onboarding-source-state.is-installed { color:var(--chart-amber, #a16207); }
+.onboarding-source-state.is-muted { color:var(--muted-foreground); }
+.onboarding-source-evidence {
+  color:var(--muted-foreground);
+  font-size:11px;
+  line-height:1.45;
+  overflow-wrap:anywhere;
+}
+.onboarding-env-keys { display:flex; flex-wrap:wrap; gap:6px; margin-top:14px; }
+.onboarding-env-keys > span {
+  padding:3px 8px;
+  border:1px solid var(--border);
+  border-radius:999px;
+  color:var(--muted-foreground);
+  font-size:11px;
+}
+.onboarding-detect-foot { display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin-top:16px; }
+.onboarding-detect-foot .onboarding-note { margin:0; }
+.onboarding-detect-error { margin-top:14px; }
+.onboarding-connects { display:grid; gap:8px; margin-top:16px; }
+.onboarding-connect-row {
+  display:flex;
+  align-items:center;
+  gap:10px;
+  min-width:0;
+  padding:10px 12px;
+  border:1px solid var(--border);
+  border-radius:11px;
+}
+.onboarding-connect-row .onboarding-source-main { flex:1; }
+.onboarding-connect-dot {
+  width:8px; height:8px; flex:none; border-radius:999px; background:var(--border);
+}
+.onboarding-connect-dot.is-ok { background:var(--chart-green, #16a34a); }
+.board-empty-actions { display:flex; flex-wrap:wrap; justify-content:center; gap:8px; }
+
+.setup-banner {
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:12px;
+  margin:0 0 14px;
+  padding:10px 12px;
+  border:1px solid color-mix(in oklab, var(--chart-blue) 30%, var(--border));
+  border-radius:10px;
+  background:color-mix(in oklab, var(--chart-blue) 8%, transparent);
+  color:var(--muted-foreground);
+  font-size:12px;
+}
+.setup-banner .mini-btn { flex:none; }
