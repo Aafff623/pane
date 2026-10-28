@@ -110,3 +110,9 @@ Remove-Item -Recurse -Force "$env:LOCALAPPDATA\com.aafff623.pane\EBWebView" -Err
 - Owner follow-up (2026-10-28): 底栏的白色条和顶部分隔线被认为多余，已把状态/按钮直接放进正文末尾，按钮右对齐；折叠行上下横线也去掉。演示站已用最新前端重建（`site/public/demo`），站点测试 50/50。
 
 - Owner follow-up 2 (2026-10-28): 折叠栏不够明显。改为 Phosphor `info` + `caret-down` 图标的整行按钮，带边框/底色、hover 和 focus 反馈；展开时 caret 旋转。演示站再次重建，站点测试 50/50。
+
+## 2026-10-28 自动隐藏残留清理（收尾复查）
+
+- 复查发现 `refresh()` 仍有两处扫描兜底会写 `disabled`：首次无 layout 时把 `no_credentials` 加进禁用；已有 layout 时把新出现的 `no_credentials` family 自动禁用。这正是用户说的“不能被自动隐藏”的残留风险。
+- 已删除两处写入；扫描现在只读。视觉上未配置的卡片仍由 `hideUnconfigured` 折叠，不改保存的启用/禁用列表。只有显式完成引导/检测器或设置里的开关会写。
+- 本机配置同时发现 `claude`、`opencode` 被写进 `removedProviders`（显式删除路径），`workbuddy` 被重新禁用；已按配置备份恢复（`config.json.bak-before-scan-restore-20261028`、`config.json.bak-before-removed-restore-20261028`）。重启后 active 39、disabled 46，三个来源卡片都回来，后续刷新不再改动列表。

@@ -15051,50 +15051,13 @@ async function refresh(
     // until the next refresh.
     const meterTrend = await invoke<MeterTrend[]>("fetch_meter_history").catch(() => null);
     if (refreshState.acceptResult("meterTrend", myGen, meterTrend)) lastMeterTrend = meterTrend;
-    // First launch ever (no layout yet): start with only the providers that
-    // actually have credentials on this PC. The onboarding flow applies the
-    // explicit picker selection later; this is the fallback when probing
-    // failed or onboarding was dismissed before writing a choice.
-    if (config.layout === null && snapshots.length > 0) {
-      // Claude and Codex always start enabled — their "connect me" cards are
-      // the new-user onboarding. Everything else without credentials waits
-      // in Customize (a fresh PC with zero AI tools sees just those two).
-      const noCreds = snapshots
-        .filter(
-          (s) =>
-            s.status === "no_credentials" &&
-            !STARTER_FAMILIES.has(s.id) &&
-            !recentlyKeyed.has(s.id)
-        )
-        .map((s) => s.id);
-      if (noCreds.length) {
-        snapshots = snapshots.filter((s) => !noCreds.includes(s.id));
-        await patchConfig({ disabled: noCreds }).catch(() => {});
-        await unparkRecentlyKeyed();
-      }
-    } else if (config.layout) {
-      // App updates ship new providers; ones this PC has no credentials for
-      // start disabled instead of piling up dead cards. Seen once (a layout
-      // entry marks that), so enabling one in Customize sticks.
-      const known = config.layout.providers;
-      const fresh = snapshots
-        .filter(
-          (s) =>
-            s.status === "no_credentials" &&
-            !(s.id in known) &&
-            !config.disabled.includes(s.id) &&
-            !recentlyKeyed.has(s.id)
-        )
-        .map((s) => s.id);
-      if (fresh.length) {
-        for (const id of fresh) known[id] = providerLayout(id);
-        await patchConfig({
-          disabled: [...config.disabled, ...fresh],
-          layout: config.layout,
-        }).catch(() => {});
-        await unparkRecentlyKeyed();
-      }
-
+    // A usage scan must never write `disabled`. A `no_credentials` result
+    // cannot distinguish "never configured" from "the credential read failed
+    // this cycle", and hiding a source the user configured is worse than
+    // showing an empty card (hideUnconfigured already folds those away).
+    // Only an explicit picker/onboarding confirmation or a Customize toggle
+    // may change this list.
+    if (config.layout) {
       // Updates also RETIRE providers; saved layouts keep referencing their
       // ids, which rendered ghost rows in Customize. Prune anything the app
       // no longer knows.

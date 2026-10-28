@@ -1006,6 +1006,11 @@ changes.
   `/v1/doctor` adds `installed_but_not_signed_in` as an `info` check with a
   remediation. Common keys without a Pane quota reader are reported as
   found-but-unsupported rather than hidden.
+- **No scan writes** — a usage refresh never writes `disabled` or
+  `removedProviders`. `no_credentials` is ambiguous (never configured vs a
+  transient read failure), so hiding is left to explicit picker/onboarding
+  confirmation and Customize toggles; `hideUnconfigured` folds empty cards
+  visually without changing the saved list.
 - **Provider help dialog** — a fixed header with a scrolling body: icon/name/
   credential badge, a 2×2 facts grid, three steps, a collapsed “how it works /
   limits” disclosure (Phosphor info + caret in a clickable row), then the
