@@ -7700,10 +7700,8 @@ function openProviderHelp(fam: string) {
           </div>
         </details>
         ${links.length ? `<div class="ph-links">${links.map((l) => `<a href="${escapeHtml(l.url)}" target="_blank" rel="noreferrer">${escapeHtml(l.label)} ↗</a>`).join("")}</div>` : ""}
-      </div>
-      <div class="ph-foot">
-        <div class="ph-status" data-help-status aria-live="polite"></div>
         <div class="ph-actions">
+          <div class="ph-status" data-help-status aria-live="polite"></div>
           <button type="button" class="ph-btn ghost" data-help-close>${escapeHtml(t("settings.close"))}</button>
           <button type="button" class="ph-btn primary" id="help-test">${escapeHtml(t("customize.helpTest"))}</button>
         </div>

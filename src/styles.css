@@ -7799,9 +7799,7 @@ body.no-glass .cust-dock {
 }
 .provider-help .ph-section { margin: 0 0 18px; }
 .provider-help .ph-disclosure {
-  margin: 0 0 18px;
-  border-top: 1px solid color-mix(in srgb, var(--border) 55%, transparent);
-  border-bottom: 1px solid color-mix(in srgb, var(--border) 55%, transparent);
+  margin: 2px 0 0;
 }
 .provider-help .ph-disclosure summary {
   display: flex;
@@ -7887,20 +7885,12 @@ body.no-glass .cust-dock {
   opacity: 0.82;
 }
 .provider-help .ph-links a:hover { opacity: 1; text-decoration: underline; }
-.provider-help .ph-foot {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  flex: none;
-  padding: 11px 18px;
-  border-top: 1px solid color-mix(in srgb, var(--border) 65%, transparent);
-  background: color-mix(in srgb, var(--card) 55%, transparent);
-}
+.provider-help .ph-status:empty { display: none; }
 .provider-help .ph-status {
   display: flex;
   align-items: center;
   gap: 6px;
-  flex: 1;
+  flex: 1 1 220px;
   min-width: 0;
   min-height: 18px;
   font-size: 11px;
@@ -7918,7 +7908,14 @@ body.no-glass .cust-dock {
 .provider-help .ph-status.is-warn { color: #b45309; }
 .provider-help .ph-status.is-bad { color: #dc2626; }
 .provider-help .ph-status.is-testing { color: var(--muted-foreground); }
-.provider-help .ph-actions { display: flex; gap: 8px; flex: none; margin-left: auto; }
+.provider-help .ph-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin: 16px 0 6px;
+}
 .provider-help .ph-btn {
   font-family: inherit;
   font-size: 12px;
@@ -7944,7 +7941,6 @@ body.no-glass .cust-dock {
 }
 .provider-help .ph-btn.primary:hover { opacity: 0.92; }
 @media (max-width: 520px) {
-  .provider-help .ph-foot { flex-wrap: wrap; }
   .provider-help .ph-status { flex-basis: 100%; }
 }
 /* Sign-in dialog: same glass as the confirm dialog, wider so the

@@ -106,3 +106,5 @@ Remove-Item -Recurse -Force "$env:LOCALAPPDATA\com.aafff623.pane\EBWebView" -Err
 - 真实 Pane 验证：默认、展开原理与边界、测试失败（“测试失败：凭据缺失、过期或被拒绝”）均已在 768px 窗口截图确认；预览页在深色主题下也检查过。
 - 门禁：Node 247/247、前端构建通过；本组件改动未动 Rust。
 - 设计说明与证据：`temp/oil-ui-provider-help/`（baseline.png、shots5、shots-open、DESIGN-NOTES.md，均为本地过程文件）。
+
+- Owner follow-up (2026-10-28): 底栏的白色条和顶部分隔线被认为多余，已把状态/按钮直接放进正文末尾，按钮右对齐；折叠行上下横线也去掉。演示站已用最新前端重建（`site/public/demo`），站点测试 50/50。
