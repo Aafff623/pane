@@ -97,3 +97,12 @@ Remove-Item -Recurse -Force "$env:LOCALAPPDATA\com.aafff623.pane\EBWebView" -Err
 - 缓存规则：被上游拒绝的凭据驱逐 last-good（不会复活旧计划）；暂态错误仍保留旧数据并标 stale。
 - 真机截图验证：SenseNova / Trae CN（红色“需重新登录”，主操作“查看登录方法”，详情含三步与原始返回）、StepFun（灰色“额度未获取”，主操作“重新查询”）、ZCode（绿色“已连接 / 需要补充授权信息”，主操作“完善授权”）。
 - 门禁：Node 247/247（新增 empty 分类、repairKind/repairView 映射与本地来源动作测试）；前端构建通过；本轮未改 Rust，parse-tests 维持 1200/0/18。
+
+## 2026-10-28 Provider 帮助弹窗重做（oil-ui-pro）
+
+- 用户反馈「查看登录方法/接入说明」弹窗中英混排、信息密度不均、三个按钮同权重。按单组件优化处理，保留 Pane 视觉语言。
+- 新结构：固定头（来源图标/名称/凭据方式/关闭）+ 滚动正文（2×2 事实、三步、默认折叠的原理与边界、链接）+ 固定尾（测试状态 + 关闭/立即测试）。主操作是实际请求一次接口的测试；失败只显示本地化类型，原始返回放 title。
+- 关键 bug：旧底栏使用 `<footer>`，被全局 `footer{position:absolute;z-index:55}` 压住正文；改为普通 `div` 后正文与折叠区完整可见。事实中的路径/主机/环境变量保留等宽字体，长说明改回正文字体。
+- 真实 Pane 验证：默认、展开原理与边界、测试失败（“测试失败：凭据缺失、过期或被拒绝”）均已在 768px 窗口截图确认；预览页在深色主题下也检查过。
+- 门禁：Node 247/247、前端构建通过；本组件改动未动 Rust。
+- 设计说明与证据：`temp/oil-ui-provider-help/`（baseline.png、shots5、shots-open、DESIGN-NOTES.md，均为本地过程文件）。

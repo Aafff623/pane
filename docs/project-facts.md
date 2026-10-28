@@ -1006,6 +1006,11 @@ changes.
   `/v1/doctor` adds `installed_but_not_signed_in` as an `info` check with a
   remediation. Common keys without a Pane quota reader are reported as
   found-but-unsupported rather than hidden.
+- **Provider help dialog** — one fixed header/footer shell with a scrolling
+  body: icon/name/credential badge, a 2×2 facts grid, three steps, a
+  collapsed “how it works / limits” disclosure, and one primary test action.
+  A plain `<div>` footer is required: the app-wide `footer` rule pins it
+  absolutely and would otherwise cover the body.
 - **Failed-card UI** — every non-ok card renders one `repairPanelHtml`: quota
   status, a plain-language title/description, exactly one primary action
   (key/OAuth setups open Pane; local/session sources open login instructions),

@@ -7656,52 +7656,142 @@ function openProviderHelp(fam: string) {
     links.unshift({ label: t("customize.helpOpenConsole"), url: keyUrl });
   }
 
+  const mech = MECHANISMS[fam];
+  const reads = mech?.reads?.join(" · ") || t("customize.helpMechReadsNone");
+  const envVars = mech?.env?.join(" · ") || "—";
+  const hosts = mech?.hosts?.join(" · ") || t("customize.helpMechSourceLocal");
+  const provides = (mech?.provides ?? []).map(displayMetricLabel).join(" · ") || "—";
+  const remote = (mech?.hosts?.length ?? 0) > 0;
+  const icon = providerVisual(fam)?.iconSvg ?? "";
+  const facts = [
+    { label: t("provider.help.capabilities"), value: provides, mono: false },
+    { label: t("customize.helpMechReads"), value: reads, mono: true },
+    { label: t("customize.helpMechEnv"), value: envVars, mono: true },
+    { label: t("customize.helpMechSource"), value: hosts, mono: true },
+  ];
+
   const overlay = document.createElement("div");
   overlay.id = "confirm-overlay";
   overlay.innerHTML = `
-    <div id="confirm-box" role="dialog" aria-modal="true">
-      <h3>${escapeHtml(providerDisplayName(fam))} · ${escapeHtml(t("customize.helpMenu"))}</h3>
-      <div class="help-kind">${escapeHtml(badge)}</div>
-      ${mechanismFactsHtml(fam)}
-      <ol class="help-steps">${steps.map((s) => `<li>${escapeHtml(s)}</li>`).join("")}</ol>
-      ${links.length ? `<div class="help-links">${links.map((l) => `<a href="${escapeHtml(l.url)}" target="_blank" rel="noreferrer">${escapeHtml(l.label)} ↗</a>`).join("")}</div>` : ""}
-      <div id="confirm-actions">
-        <button id="help-test" type="button">⚡ ${escapeHtml(t("customize.helpTest"))}</button>
-        <button id="confirm-ok" type="button">${escapeHtml(t("dialog.ok"))}</button>
+    <div id="confirm-box" class="provider-help" role="dialog" aria-modal="true" aria-labelledby="ph-title">
+      <header class="ph-head">
+        <span class="ph-icon" aria-hidden="true">${icon}</span>
+        <div class="ph-heading">
+          <h3 id="ph-title">${escapeHtml(providerDisplayName(fam))}</h3>
+          <span class="ph-sub">${escapeHtml(t("customize.helpMenu"))}<span class="ph-sep">·</span><span class="ph-kind">${escapeHtml(badge)}</span></span>
+        </div>
+        <button type="button" class="ph-close" data-help-close aria-label="${escapeHtml(t("settings.close"))}">${uiIcon("x")}</button>
+      </header>
+      <div class="ph-body">
+        <dl class="ph-facts">
+          ${facts.map((fact) => `<div><dt>${escapeHtml(fact.label)}</dt><dd${fact.mono ? ' class="mono"' : ""}>${escapeHtml(fact.value)}</dd></div>`).join("")}
+        </dl>
+        <section class="ph-section">
+          <h4>${escapeHtml(t("customize.helpStepsTitle"))}</h4>
+          <ol class="ph-steps">${steps.map((step) => `<li>${escapeHtml(step)}</li>`).join("")}</ol>
+        </section>
+        <details class="ph-disclosure">
+          <summary>${escapeHtml(t("customize.helpDetailsTitle"))}</summary>
+          <div class="ph-disclosure-body">
+            <h4>${escapeHtml(t("provider.help.principle"))}</h4>
+            <p>${escapeHtml(t(remote ? "provider.principle.remote" : "provider.principle.local"))}</p>
+            <h4>${escapeHtml(t("provider.help.boundary"))}</h4>
+            <p>${escapeHtml(t(mech?.limitsKey ?? "provider.limit.general"))}</p>
+          </div>
+        </details>
+        ${links.length ? `<div class="ph-links">${links.map((l) => `<a href="${escapeHtml(l.url)}" target="_blank" rel="noreferrer">${escapeHtml(l.label)} ↗</a>`).join("")}</div>` : ""}
+      </div>
+      <div class="ph-foot">
+        <div class="ph-status" data-help-status aria-live="polite"></div>
+        <div class="ph-actions">
+          <button type="button" class="ph-btn ghost" data-help-close>${escapeHtml(t("settings.close"))}</button>
+          <button type="button" class="ph-btn primary" id="help-test">${escapeHtml(t("customize.helpTest"))}</button>
+        </div>
       </div>
     </div>`;
+
+  const opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+  const status = overlay.querySelector<HTMLElement>("[data-help-status]")!;
+  const testBtn = overlay.querySelector<HTMLButtonElement>("#help-test")!;
+  const setStatus = (
+    tone: "idle" | "testing" | "ok" | "warn" | "bad",
+    text: string,
+    detail = "",
+  ) => {
+    status.className = `ph-status is-${tone}`;
+    status.title = detail;
+    status.innerHTML = `${tone === "idle" ? "" : '<span class="ph-status-dot" aria-hidden="true"></span>'}${escapeHtml(text)}`;
+  };
+
   const close = () => {
     overlay.remove();
     document.removeEventListener("keydown", onKey, true);
+    opener?.focus();
   };
   const onKey = (e: KeyboardEvent) => {
     if (e.key === "Escape") {
       e.preventDefault();
       close();
+      return;
+    }
+    if (e.key !== "Tab") return;
+    const focusable = [...overlay.querySelectorAll<HTMLElement>(
+      'button:not([disabled]), a[href], input, select, textarea, summary, [tabindex]:not([tabindex="-1"])',
+    )];
+    if (!focusable.length) return;
+    const first = focusable[0];
+    const last = focusable[focusable.length - 1];
+    if (e.shiftKey && document.activeElement === first) {
+      e.preventDefault();
+      last.focus();
+    } else if (!e.shiftKey && document.activeElement === last) {
+      e.preventDefault();
+      first.focus();
     }
   };
   overlay.addEventListener("click", (e) => {
-    if (e.target === overlay) close();
+    if (e.target === overlay || (e.target as HTMLElement).closest("[data-help-close]")) close();
   });
-  overlay.querySelector("#confirm-ok")!.addEventListener("click", close);
-  const testBtn = overlay.querySelector<HTMLButtonElement>("#help-test")!;
   testBtn.addEventListener("click", () => {
-    const cardId = fam; // test_provider resolves the family's active card
     testBtn.disabled = true;
     testBtn.textContent = t("customize.helpTesting");
-    invoke<string>("test_provider", { providerId: cardId })
+    setStatus("testing", t("customize.helpTesting"));
+    invoke<string>("test_provider", { providerId: fam })
       .then((res) => {
-        testBtn.textContent = testProviderLabel(res);
+        if (!overlay.isConnected) return;
+        if (res.startsWith("ok:")) {
+          setStatus("ok", testProviderLabel(res));
+        } else if (res.startsWith("needs_setup:")) {
+          const hint = res.slice("needs_setup:".length, res.lastIndexOf(":"));
+          setStatus("warn", testProviderLabel(res), displayCardHint(hint));
+        } else {
+          const raw = res.slice(0, res.lastIndexOf(":"));
+          setStatus(
+            "bad",
+            t("card.testFailedWith", { reason: t(`credential.error.${credentialFailure(raw)}`) }),
+            displayCardHint(raw),
+          );
+        }
       })
       .catch((err: unknown) => {
-        testBtn.textContent = t("card.testFail", { err: String(err) });
+        if (overlay.isConnected) {
+          setStatus(
+            "bad",
+            t("card.testFailedWith", { reason: t("credential.error.unknown") }),
+            String(err),
+          );
+        }
       })
       .finally(() => {
+        if (!overlay.isConnected) return;
         testBtn.disabled = false;
+        testBtn.textContent = t("customize.helpTest");
       });
   });
   document.addEventListener("keydown", onKey, true);
   document.body.appendChild(overlay);
+  testBtn.focus();
+
 }
 
 /// The dashboard card's group menu — the main-page tagging entry. Lists

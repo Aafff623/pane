@@ -7698,102 +7698,255 @@ body.no-glass .cust-dock {
 }
 
 /* "?" provider-quota help dialog (openProviderHelp) */
-.help-kind {
-  display: inline-block;
-  font-size: 11px;
-  font-weight: 600;
-  padding: 2px 8px;
-  border-radius: 999px;
-  border: 1px solid var(--border);
-  color: var(--muted-foreground);
-  margin: 2px 0 10px;
+/* Provider help: a compact explainer, not a confirm dialog. Header and
+   footer stay put; only the body scrolls. */
+#confirm-box.provider-help {
+  width: min(92vw, 520px);
+  max-height: min(88vh, 760px);
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
 }
-
-.help-steps {
-  margin: 0 0 12px;
-  padding-inline-start: 18px;
+.provider-help .ph-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex: none;
+  padding: 16px 18px 12px;
+  border-bottom: 1px solid color-mix(in srgb, var(--border) 65%, transparent);
+}
+.provider-help .ph-icon {
   display: grid;
-  gap: 6px;
+  place-items: center;
+  flex: none;
+  width: 34px;
+  height: 34px;
+  border-radius: 9px;
+  border: 1px solid var(--border);
+  background: color-mix(in srgb, var(--card) 80%, transparent);
 }
-
-.help-steps li {
-  font-size: 12.5px;
-  line-height: 1.5;
+.provider-help .ph-icon svg { width: 22px; height: 22px; display: block; }
+.provider-help .ph-heading { flex: 1; min-width: 0; }
+#confirm-box.provider-help .ph-heading h3 {
+  margin: 0;
+  font-size: 16px;
+  line-height: 1.3;
+  font-weight: 650;
+}
+.provider-help .ph-sub {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin-top: 2px;
+  font-size: 11px;
   color: var(--muted-foreground);
 }
-
-.help-links {
+.provider-help .ph-sep { opacity: 0.45; }
+.provider-help .ph-kind {
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--primary) 11%, transparent);
+  color: var(--primary);
+  font-size: 10px;
+  font-weight: 600;
+}
+.provider-help .ph-close {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 28px;
+  height: 28px;
+  border: none;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--muted-foreground);
+  cursor: pointer;
+}
+.provider-help .ph-close:hover { background: var(--accent); color: var(--foreground); }
+.provider-help .ph-close svg { width: 14px; height: 14px; }
+.provider-help .ph-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 14px 18px 8px;
+}
+.provider-help .ph-facts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 11px 18px;
+  margin: 0 0 18px;
+  padding: 12px 0;
+  border-top: 1px solid color-mix(in srgb, var(--border) 55%, transparent);
+  border-bottom: 1px solid color-mix(in srgb, var(--border) 55%, transparent);
+}
+.provider-help .ph-facts > div { min-width: 0; }
+.provider-help .ph-facts dt {
+  margin: 0 0 2px;
+  font-size: 10.5px;
+  color: var(--muted-foreground);
+}
+.provider-help .ph-facts dd {
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.45;
+  color: var(--foreground);
+  overflow-wrap: anywhere;
+}
+.provider-help .ph-facts dd.mono {
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-size: 11px;
+}
+.provider-help .ph-section { margin: 0 0 18px; }
+.provider-help .ph-disclosure {
+  margin: 0 0 18px;
+  border-top: 1px solid color-mix(in srgb, var(--border) 55%, transparent);
+  border-bottom: 1px solid color-mix(in srgb, var(--border) 55%, transparent);
+}
+.provider-help .ph-disclosure summary {
+  display: flex;
+  align-items: center;
+  padding: 10px 0;
+  list-style: none;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 650;
+  color: var(--foreground);
+}
+.provider-help .ph-disclosure summary::-webkit-details-marker { display: none; }
+.provider-help .ph-disclosure summary::after {
+  content: "⌄";
+  margin-left: auto;
+  color: var(--muted-foreground);
+  font-weight: 500;
+  transition: transform 0.15s ease;
+}
+.provider-help .ph-disclosure[open] summary::after { transform: rotate(180deg); }
+.provider-help .ph-disclosure-body { padding: 0 0 12px; }
+#confirm-box.provider-help .ph-disclosure-body h4 {
+  margin: 8px 0 5px;
+  font-size: 11.5px;
+  font-weight: 650;
+  color: var(--foreground);
+}
+#confirm-box.provider-help .ph-disclosure-body p {
+  margin: 0 0 8px;
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--muted-foreground);
+}
+#confirm-box.provider-help .ph-section h4 {
+  margin: 0 0 8px;
+  font-size: 12.5px;
+  font-weight: 650;
+  color: var(--foreground);
+}
+.provider-help .ph-steps {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  counter-reset: ph-step;
+}
+.provider-help .ph-steps li {
+  display: flex;
+  gap: 9px;
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--muted-foreground);
+  counter-increment: ph-step;
+}
+.provider-help .ph-steps li::before {
+  content: counter(ph-step);
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 18px;
+  height: 18px;
+  margin-top: 1px;
+  border: 1px solid color-mix(in srgb, var(--primary) 34%, var(--border));
+  border-radius: 50%;
+  color: var(--primary);
+  font-size: 10px;
+  font-weight: 600;
+}
+.provider-help .ph-links {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px 10px;
-  margin: 0 0 14px;
+  gap: 6px 14px;
+  margin: 0 0 12px;
+  padding-top: 10px;
+  border-top: 1px solid color-mix(in srgb, var(--border) 55%, transparent);
 }
-
-.help-links a {
-  font-size: 12px;
-  /* Same accent-token trap as .chrome-btn.on: --accent is a background
-     token in the zinc theme, so links came out near-invisible on the
-     dialog surface. */
+.provider-help .ph-links a {
   color: var(--foreground);
+  font-size: 11.5px;
   text-decoration: none;
+  opacity: 0.82;
 }
-
-.help-links a:hover {
-  text-decoration: underline;
-}
-
-#confirm-actions,
-#update-actions {
+.provider-help .ph-links a:hover { opacity: 1; text-decoration: underline; }
+.provider-help .ph-foot {
   display: flex;
-  justify-content: flex-end;
-  gap: 8px;
+  align-items: center;
+  gap: 12px;
+  flex: none;
+  padding: 11px 18px;
+  border-top: 1px solid color-mix(in srgb, var(--border) 65%, transparent);
+  background: color-mix(in srgb, var(--card) 55%, transparent);
 }
-
-#confirm-actions button,
-#update-actions button {
+.provider-help .ph-status {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1;
+  min-width: 0;
+  min-height: 18px;
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--muted-foreground);
+}
+.provider-help .ph-status-dot {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+}
+.provider-help .ph-status.is-ok { color: #059669; }
+.provider-help .ph-status.is-warn { color: #b45309; }
+.provider-help .ph-status.is-bad { color: #dc2626; }
+.provider-help .ph-status.is-testing { color: var(--muted-foreground); }
+.provider-help .ph-actions { display: flex; gap: 8px; flex: none; margin-left: auto; }
+.provider-help .ph-btn {
   font-family: inherit;
   font-size: 12px;
   font-weight: 600;
+  padding: 6px 14px;
   border-radius: 999px;
-  padding: 5px 14px;
   cursor: pointer;
   transition: opacity 0.15s ease, transform 0.1s ease;
 }
-
-#confirm-actions button:active,
-#update-actions button:active {
-  transform: scale(0.95);
-}
-
-#confirm-cancel,
-#update-later {
+.provider-help .ph-btn:active:not(:disabled) { transform: scale(0.96); }
+.provider-help .ph-btn:disabled { opacity: 0.55; cursor: default; }
+.provider-help .ph-btn.ghost {
   background: transparent;
   border: 1px solid var(--border);
   color: var(--secondary-foreground);
 }
-
-#confirm-cancel:hover,
-#update-later:hover {
-  background: var(--accent);
-}
-
-#confirm-ok,
-#update-now {
+.provider-help .ph-btn.ghost:hover { background: var(--accent); }
+.provider-help .ph-btn.primary {
   background: var(--primary);
-  border: 1px solid transparent;
+  border: none;
   color: var(--primary-foreground);
+  min-width: 88px;
 }
-
-#confirm-ok:hover,
-#update-now:hover {
-  opacity: 0.85;
+.provider-help .ph-btn.primary:hover { opacity: 0.92; }
+@media (max-width: 520px) {
+  .provider-help .ph-foot { flex-wrap: wrap; }
+  .provider-help .ph-status { flex-basis: 100%; }
 }
-
-#confirm-ok.danger {
-  background: var(--destructive);
-  color: #fff;
-}
-
 /* Sign-in dialog: same glass as the confirm dialog, wider so the
    authorization URL stays readable and copyable. */
 #auth-login-overlay {
