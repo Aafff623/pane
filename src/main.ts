@@ -9850,7 +9850,7 @@ function picksWithEnabled(chosen: Set<string>, fresh: boolean): Set<string> {
 
 function applyOnboardingPicks(): void {
   const picked = onboardingSelectionTouched ? new Set(onboardingSelection) : defaultOnboardingPicks();
-  const chosen = picksWithEnabled(picked, onboardingFreshInstall);
+  const chosen = picksWithEnabled(picked, onboardingFreshInstall && !config.setupPicked);
   const layout = config.layout ?? { providerOrder: [], providers: {} };
   for (const id of chosen) {
     layout.providers[id] ??= {

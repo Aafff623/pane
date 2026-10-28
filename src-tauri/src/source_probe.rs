@@ -304,6 +304,7 @@ fn path_listing(env: &HashMap<String, String>) -> Vec<(String, std::collections:
             let files = std::fs::read_dir(&dir).ok()?;
             let names = files
                 .flatten()
+                .filter(|entry| entry.file_type().map(|kind| !kind.is_dir()).unwrap_or(false))
                 .filter_map(|entry| entry.file_name().to_str().map(str::to_lowercase))
                 .collect();
             Some((dir, names))
