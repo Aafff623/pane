@@ -653,12 +653,14 @@ async fn finish(f: &Family, access: &Access, id: &str, name: &str) -> Result<Sna
     // recorded as a meter sample and never summed with the credits face, so
     // the 30-day request count cannot corrupt the balance history. Added
     // after the empty guard so it can never make an empty quota look "ok".
-    if let Some(official) = official.filter(|row| row.requests > 0) {
+    let official = official.filter(|row| row.requests > 0);
+    if let Some(official) = &official {
         metrics.push(super::Metric::text("Official requests (30d)", official.detail()));
     }
     metrics.truncate(12);
     let mut snapshot = Snapshot::ok(id, name, plan.or(payment_type), metrics);
     snapshot.auth_pack_expiry = earliest_pack_expiry(&packs, now_ms);
+    snapshot.workbuddy_usage = official.map(|official| official.snapshot_usage());
     Ok(snapshot)
 }
 
@@ -677,6 +679,10 @@ struct OfficialUsage {
     /// opaque number; both stay empty when the ledger named no model/client.
     by_model: std::collections::BTreeMap<String, f64>,
     by_client: std::collections::BTreeMap<String, f64>,
+    /// Structured daily credits and the newest request rows for the card's
+    /// expandable details (#31). Never part of the credits meter.
+    by_day: std::collections::BTreeMap<String, f64>,
+    rows: Vec<super::workbuddy_official_usage::WorkBuddyUsageRow>,
 }
 
 impl OfficialUsage {
@@ -717,6 +723,26 @@ impl OfficialUsage {
             out.push_str(" · partial");
         }
         out
+    }
+
+    fn snapshot_usage(&self) -> super::workbuddy_official_usage::WorkBuddyUsage {
+        use super::workbuddy_official_usage::{WorkBuddyUsage, WorkBuddyUsageDay};
+        let mut by_day: Vec<WorkBuddyUsageDay> = self
+            .by_day
+            .iter()
+            .map(|(day, credits)| WorkBuddyUsageDay {
+                day: day.clone(),
+                credits: *credits,
+            })
+            .collect();
+        by_day.sort_by(|left, right| left.day.cmp(&right.day));
+        WorkBuddyUsage {
+            requests: self.requests,
+            credits: self.credits,
+            partial: self.partial,
+            by_day,
+            rows: self.rows.clone(),
+        }
     }
 }
 
@@ -809,12 +835,25 @@ async fn official_usage(f: &Family, access: &Access) -> Option<OfficialUsage> {
         return None;
     }
     let summary = official::aggregate(&rows);
+    let detail_rows: Vec<official::WorkBuddyUsageRow> = official::detail_rows(&rows)
+        .iter()
+        .rev()
+        .take(20)
+        .map(|row| official::WorkBuddyUsageRow {
+            ts: row.request_ts_ms,
+            model: row.model.clone(),
+            client: row.client.clone(),
+            credit: row.credit,
+        })
+        .collect();
     Some(OfficialUsage {
         requests: rows.len(),
         credits: summary.total_credit,
         partial,
         by_model: summary.by_model,
         by_client: summary.by_client,
+        by_day: summary.by_day,
+        rows: detail_rows,
     })
 }
 
@@ -1677,6 +1716,35 @@ mod tests {
             ..OfficialUsage::default()
         };
         assert!(partial.detail().ends_with("· partial"));
+    }
+
+    #[test]
+    fn official_usage_snapshot_keeps_sorted_days_and_rows() {
+        use super::super::workbuddy_official_usage::WorkBuddyUsageRow;
+        let mut by_day = std::collections::BTreeMap::new();
+        by_day.insert("2026-10-02".to_string(), 2.0);
+        by_day.insert("2026-10-01".to_string(), 1.0);
+        let usage = OfficialUsage {
+            requests: 2,
+            credits: 3.0,
+            partial: true,
+            by_day,
+            rows: vec![WorkBuddyUsageRow {
+                ts: 1_700_000_000_000,
+                model: Some("model-a".into()),
+                client: Some("web".into()),
+                credit: 1.0,
+            }],
+            ..OfficialUsage::default()
+        };
+        let snapshot = usage.snapshot_usage();
+        assert_eq!(snapshot.requests, 2);
+        assert_eq!(snapshot.by_day.len(), 2);
+        assert_eq!(snapshot.by_day[0].day, "2026-10-01");
+        assert_eq!(snapshot.by_day[1].credits, 2.0);
+        assert!(snapshot.partial);
+        assert_eq!(snapshot.rows.len(), 1);
+        assert_eq!(snapshot.rows[0].client.as_deref(), Some("web"));
     }
 
     /// #31 — a 26-request month used to collapse into one opaque number. The

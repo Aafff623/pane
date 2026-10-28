@@ -222,6 +222,10 @@ pub struct Snapshot {
     /// Vendor incident attribution for a failed/stale card (#70).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub upstream_status: Option<upstream_status::UpstreamStatus>,
+    /// WorkBuddy CN's official 30-day request ledger, structured for the
+    /// card's expandable details (#31). Never part of the credits meter.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workbuddy_usage: Option<workbuddy_official_usage::WorkBuddyUsage>,
 }
 
 impl Snapshot {
@@ -242,6 +246,7 @@ impl Snapshot {
             just_reset_at: None,
             limited: None,
             upstream_status: None,
+            workbuddy_usage: None,
         }
     }
 
@@ -261,6 +266,7 @@ impl Snapshot {
             just_reset_at: None,
             limited: None,
             upstream_status: None,
+            workbuddy_usage: None,
         }
     }
 
@@ -280,6 +286,7 @@ impl Snapshot {
             just_reset_at: None,
             limited: None,
             upstream_status: None,
+            workbuddy_usage: None,
         }
     }
 
@@ -314,6 +321,7 @@ impl Snapshot {
             just_reset_at: None,
             limited: None,
             upstream_status: None,
+            workbuddy_usage: None,
         }
     }
 

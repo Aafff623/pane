@@ -12196,3 +12196,116 @@ body.colorblind .trend-bar{stroke:currentColor;stroke-width:1;stroke-dasharray:2
   .share-preview-image { max-height: 38vh; }
   .share-preview-stage { min-height: 120px; }
 }
+
+/* WorkBuddy official usage details (#31). Native disclosure so a card
+   rebuild resets it closed; the summary stays quiet until opened. */
+.wb-details {
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px dashed var(--border);
+}
+.wb-details summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  cursor: pointer;
+  list-style: none;
+  color: var(--muted-foreground);
+  font-size: 11px;
+  line-height: 1.4;
+}
+.wb-details summary::-webkit-details-marker { display: none; }
+.wb-details summary::before {
+  content: "▸";
+  flex: none;
+  width: 10px;
+  color: var(--muted-foreground);
+  transition: transform 0.15s ease;
+}
+.wb-details[open] summary::before { transform: rotate(90deg); }
+.wb-details summary > :first-child { flex: 1; }
+.wb-partial {
+  flex: none;
+  padding: 1px 5px;
+  border: 1px solid color-mix(in oklab, var(--chart-amber, #b7791f) 45%, var(--border));
+  border-radius: 999px;
+  color: var(--chart-amber, #b7791f);
+  font-size: 9px;
+  text-transform: uppercase;
+}
+.wb-body {
+  padding-top: 8px;
+}
+.wb-chart {
+  display: flex;
+  align-items: stretch;
+  gap: 3px;
+  height: 64px;
+  padding: 0 1px 2px;
+}
+.wb-day {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 3px;
+}
+.wb-day i {
+  display: block;
+  width: 100%;
+  min-height: 2px;
+  border-radius: 2px 2px 0 0;
+  background: color-mix(in oklab, var(--chart-blue, #3b82f6) 72%, transparent);
+}
+.wb-day b {
+  overflow: hidden;
+  max-width: 100%;
+  color: var(--muted-foreground);
+  font-size: 8px;
+  font-weight: 500;
+  line-height: 1;
+  white-space: nowrap;
+}
+.wb-rows-head,
+.wb-row {
+  display: grid;
+  grid-template-columns: 62px minmax(0, 1fr) 54px 42px;
+  gap: 6px;
+  align-items: baseline;
+}
+.wb-rows-head {
+  margin-top: 8px;
+  color: var(--muted-foreground);
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.wb-rows-head > :last-child { text-align: right; }
+.wb-row {
+  padding: 3px 0;
+  border-top: 1px solid color-mix(in oklab, var(--border) 55%, transparent);
+  color: var(--foreground);
+  font-size: 10px;
+  line-height: 1.35;
+}
+.wb-time,
+.wb-client { color: var(--muted-foreground); }
+.wb-model {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.wb-client {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.wb-credit { text-align: right; font-variant-numeric: tabular-nums; }
+.wb-empty {
+  margin: 6px 0 0;
+  color: var(--muted-foreground);
+  font-size: 11px;
+}

@@ -134,6 +134,24 @@ interface Metric {
   usage?: { unit: UsageUnit; used: number; total?: number; scope?: string } | null;
 }
 
+interface WorkBuddyUsageDay {
+  day: string;
+  credits: number;
+}
+interface WorkBuddyUsageRow {
+  ts: number;
+  model: string | null;
+  client: string | null;
+  credit: number;
+}
+interface WorkBuddyUsage {
+  requests: number;
+  credits: number;
+  partial: boolean;
+  by_day: WorkBuddyUsageDay[];
+  rows: WorkBuddyUsageRow[];
+}
+
 interface Snapshot {
   id: string;
   name: string;
@@ -155,6 +173,8 @@ interface Snapshot {
     description: string;
     updated_at?: number | null;
   } | null;
+  /// WorkBuddy CN's official 30-day ledger, structured for the card details.
+  workbuddy_usage?: WorkBuddyUsage | null;
 }
 
 /// Read-only local detection (#109). `installState` is `unknown` when Pane
@@ -3578,6 +3598,39 @@ function cardMetricRows(layout: ProviderLayout, metrics: Metric[]): { always: st
   return { always, onDemand };
 }
 
+function workbuddyDetailsHtml(s: Snapshot): string {
+  const usage = s.workbuddy_usage;
+  if (!usage || usage.requests <= 0) return "";
+  const days = usage.by_day.slice(-14);
+  const max = Math.max(...days.map((day) => day.credits), 0);
+  const bars = days
+    .map((day) => {
+      const height = max > 0 ? Math.max(4, Math.round((day.credits / max) * 100)) : 4;
+      return `<span class="wb-day" title="${escapeHtml(`${day.day} · ${day.credits.toFixed(2)} credits`)}"><i style="height:${height}%"></i><b>${escapeHtml(day.day.slice(5))}</b></span>`;
+    })
+    .join("");
+  const rows = usage.rows
+    .slice(0, 10)
+    .map((row) => {
+      const when = new Date(row.ts).toLocaleString(localeTag(), {
+        month: "numeric",
+        day: "numeric",
+        hour: "2-digit",
+        minute: "2-digit",
+      });
+      return `<div class="wb-row"><span class="wb-time">${escapeHtml(when)}</span><span class="wb-model" title="${escapeHtml(row.model ?? "")}">${escapeHtml(row.model ?? "—")}</span><span class="wb-client">${escapeHtml(row.client ?? "—")}</span><span class="wb-credit">${escapeHtml(row.credit.toFixed(2))}</span></div>`;
+    })
+    .join("");
+  return `<details class="wb-details">
+    <summary><span>${escapeHtml(t("wb.history"))}</span>${usage.partial ? `<span class="wb-partial">${escapeHtml(t("wb.partial"))}</span>` : ""}</summary>
+    <div class="wb-body">
+      ${bars ? `<div class="wb-chart" aria-label="${escapeHtml(t("wb.daily"))}">${bars}</div>` : ""}
+      <div class="wb-rows-head"><span>${escapeHtml(t("wb.requests"))}</span><span>credits</span></div>
+      <div class="wb-rows">${rows || `<p class="wb-empty">${escapeHtml(t("wb.empty"))}</p>`}</div>
+    </div>
+  </details>`;
+}
+
 function renderCard(s: Snapshot): string {
   const family = providerFamily(s.id);
   // Multi-account families render ONE dashboard card per family (the bare
@@ -3751,6 +3804,7 @@ function renderCard(s: Snapshot): string {
         <button class="card-caret" data-caret="${s.id}" title="${L.expanded ? t("card.showLess") : t("card.showMore")}">${uiIcon(L.expanded ? "caretUp" : "caretDown")}</button>
         ${L.expanded ? `<div class="on-demand${anim}">${onDemandHtml}</div>` : ""}`;
     }
+    body += workbuddyDetailsHtml(shown);
   } else {
     body = repairPanelHtml(shown);
   }

@@ -1,6 +1,14 @@
 # 02 · WorkBuddy card details (#31)
 
-Status: ready | Priority: P2 | Depends: none
+Status: done — implemented 2026-10-28; owner visual acceptance blocked on a valid WorkBuddy CN login | Priority: P2 | Depends: none
+
+## Result (2026-10-28)
+
+- `WorkBuddyUsage` is now a structured snapshot field (`requests`, `credits`, `partial`, `by_day`, newest 20 rows); the credits meter is untouched.
+- The card gets a native `<details>` disclosure: daily credits for the last 14 days and the newest 10 requests (time / model / client / credits), with a `partial` badge.
+- Missing model/client renders as `—`; no fabricated zeros; no HTTP-default change.
+- Tests: `official_usage_snapshot_keeps_sorted_days_and_rows` plus the existing parser/aggregation suite pass; Node 254/254; build and site 55/55.
+- Not visually verified yet: the current local WorkBuddy credential returns 401, so the owner needs to sign in once and open the card disclosure.
 
 ## Build
 

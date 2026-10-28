@@ -4,8 +4,34 @@
 //! before callers wire this to a card.
 
 use chrono::{DateTime, NaiveDateTime, TimeZone, Utc};
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::{BTreeMap, HashSet};
+
+/// Serialized form attached to the WorkBuddy snapshot for the card's
+/// expandable details. Plain fields only: the card must not parse a string.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct WorkBuddyUsage {
+    pub requests: usize,
+    pub credits: f64,
+    pub partial: bool,
+    pub by_day: Vec<WorkBuddyUsageDay>,
+    pub rows: Vec<WorkBuddyUsageRow>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct WorkBuddyUsageDay {
+    pub day: String,
+    pub credits: f64,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct WorkBuddyUsageRow {
+    pub ts: i64,
+    pub model: Option<String>,
+    pub client: Option<String>,
+    pub credit: f64,
+}
 
 /// Hard cap on continuation rounds. A server that never advances the cursor
 /// must stop here instead of looping forever.
