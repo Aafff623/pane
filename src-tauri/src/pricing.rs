@@ -1348,6 +1348,11 @@ fn builtin_price(canonical: &str) -> Option<Price> {
 mod tests {
     use super::{request_cost, Price, Usage};
 
+    /// `set_overrides`/`set_schedules` mutate process-wide tables. Without a
+    /// shared guard, the two tests that install and clear them race under the
+    /// harness's parallel runner and fail intermittently.
+    static GLOBAL_STATE_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
     fn usage(input: f64, output: f64, cache_read: f64, w5m: f64, w1h: f64) -> Usage {
         Usage { input, output, cache_read, cache_write_5m: w5m, cache_write_1h: w1h }
     }
@@ -1358,6 +1363,7 @@ mod tests {
     /// historical schedules, alias targets and the log-side prefix match.
     #[test]
     fn model_key_spelling_does_not_change_the_price() {
+        let _guard = GLOBAL_STATE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         use std::collections::HashMap;
         let price = super::Price::flat(0.8, 2.4, 0.1, 0.8);
         let mut overrides = HashMap::new();
@@ -1886,6 +1892,7 @@ mod tests {
     /// still prefers the override for new pins.
     #[test]
     fn lookup_at_prefers_window_over_override() {
+        let _guard = GLOBAL_STATE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let window = super::Price::flat(3.0, 4.0, 0.2, 3.0);
         let over = super::Price::flat(5.0, 6.0, 0.3, 5.0);
         super::set_schedules(vec![super::PriceWindow {
