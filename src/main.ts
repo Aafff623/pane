@@ -7553,10 +7553,11 @@ async function runProviderPicker(firstRun: boolean): Promise<void> {
     note: snap.status === "ok" ? t("customize.connOk") : overviewFailureLabel(snap),
     checked: firstRun || !config.disabled.includes(id),
   }));
-  // Re-run only: everything currently switched on stays in the list, even
+  // Re-run (and a first run over an existing config, e.g. after a data-dir
+  // migration): everything currently switched on stays in the list, even
   // when this scan found no credentials for it — confirming must never
   // silently switch off a card the user keeps on purpose.
-  if (!firstRun) {
+  if (!firstRun || config.setupPicked) {
     for (const [id] of ALL_PROVIDERS) {
       if (detected.has(id) || rows.some((r) => r.id === id)) continue;
       if (config.disabled.includes(id)) continue;
@@ -9784,8 +9785,9 @@ function onboardingConnectRowsHtml(): string {
   });
   if (!rows.length) return `<p class="onboarding-note">${escapeHtml(t("onboarding.noneSelected"))}</p>`;
   return rows.map((probe) => {
-    const snap = lastSnapshots.find((s) => providerFamily(s.id) === probe.family);
-    const connected = snap?.status === "ok";
+    const connected = lastSnapshots.some(
+      (s) => providerFamily(s.id) === probe.family && s.status === "ok",
+    );
     const action = connected
       ? ""
       : `<button type="button" class="mini-btn" data-onboarding-setup="${escapeHtml(probe.family)}">${escapeHtml(t("onboarding.openSetup"))}</button>`;
@@ -9834,8 +9836,21 @@ function onboardingHasConnection(): boolean {
   );
 }
 
+/// Picks to persist. On a non-fresh run (empty-board continuation), every
+/// family that is currently switched on stays on: a transient scan miss
+/// must never disable a provider the user configured.
+function picksWithEnabled(chosen: Set<string>, fresh: boolean): Set<string> {
+  if (fresh) return chosen;
+  const merged = new Set(chosen);
+  for (const [id] of ALL_PROVIDERS) {
+    if (!config.disabled.includes(id)) merged.add(id);
+  }
+  return merged;
+}
+
 function applyOnboardingPicks(): void {
-  const chosen = onboardingSelectionTouched ? new Set(onboardingSelection) : defaultOnboardingPicks();
+  const picked = onboardingSelectionTouched ? new Set(onboardingSelection) : defaultOnboardingPicks();
+  const chosen = picksWithEnabled(picked, onboardingFreshInstall);
   const layout = config.layout ?? { providerOrder: [], providers: {} };
   for (const id of chosen) {
     layout.providers[id] ??= {

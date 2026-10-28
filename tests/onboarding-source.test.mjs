@@ -21,6 +21,7 @@ const names = new Set([
   'onboardingProbeRows',
   'onboardingSourceRowsHtml',
   'detectedFamilies',
+  'picksWithEnabled',
 ]);
 const code = ts.transpile(
   main.statements
@@ -51,11 +52,12 @@ function makeContext(report, selection = new Set()) {
     sourceProbeLoading: false,
     sourceProbeError: null,
     lastSnapshots: [],
+    config: { disabled: ['disabled-fam'] },
     providerFamily: (id) => id.split('@')[0],
     onboardingSelection: selection,
     onboardingSelectionTouched: false,
     STARTER_FAMILIES: new Set(['claude', 'codex']),
-    ALL_PROVIDERS: [['claude', 'Claude'], ['codex', 'Codex'], ['brave', 'Brave Search'], ['gemini', 'Gemini']],
+    ALL_PROVIDERS: [['claude', 'Claude'], ['codex', 'Codex'], ['brave', 'Brave Search'], ['gemini', 'Gemini'], ['disabled-fam', 'Disabled']],
     t: (key, vars = {}) => {
       let text = dict[key] ?? key;
       for (const [name, value] of Object.entries(vars)) text = text.split(`{${name}}`).join(String(value));
@@ -120,4 +122,14 @@ test('account cards count as detection for their family', () => {
   assert.ok(found.has('apigoto'), 'family card no_credentials must not hide a working account');
   assert.ok(found.has('tokenrhythm'));
   assert.ok(!found.has('grok'));
+});
+
+test('non-fresh pick application keeps already enabled providers', () => {
+  const ctx = makeContext({ families: [], envKeys: [] });
+  const kept = ctx.picksWithEnabled(new Set(['chosen']), false);
+  assert.ok(kept.has('chosen'));
+  assert.ok(kept.has('claude'), 'enabled family must stay enabled');
+  assert.ok(!kept.has('disabled-fam'), 'a deliberately disabled family stays off');
+  const fresh = ctx.picksWithEnabled(new Set(['chosen']), true);
+  assert.deepEqual([...fresh], ['chosen']);
 });
