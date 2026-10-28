@@ -15,6 +15,7 @@
 - `provider_env_vars` 从 `lib.rs` 移到 `provider_catalog.rs`，让 `parse-tests` 能以 `#[path]` 编译真实探测代码；`parse-tests` 增加 `winreg`（仅 Windows）。
 - 新增 `source_probe` 命令；`get_credential_status` 增加 `envVars`/`installState`/`installEvidence`/`credentialSource`。
 - `/v1/providers` 增加 `installState`/`installEvidence`/`credentialState`/`credentialSource`/`credentialEnvs`（纯增量）；`/v1/doctor` 增加 `installed_but_not_signed_in`，有内容时归为 `info` 提示而非故障。
+- 凭据判断与 `get_credential_status` 对齐：登录账号、账号列表、family 密钥文件依次检查；只存在账号列表里的来源（Linkso、TokenRhythm 等）也会进入检测清单。
 
 **前端**
 - 首启合并为一条四步全屏流程：欢迎 → 检测到的来源 → 连接/验证 → 完成；旧的「先选服务商再静态三页」双重弹窗已删。
