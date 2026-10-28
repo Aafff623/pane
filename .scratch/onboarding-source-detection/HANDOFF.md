@@ -63,3 +63,11 @@ Remove-Item -Recurse -Force "$env:LOCALAPPDATA\com.aafff623.pane\EBWebView" -Err
 
 - 本分支的提交只做本地记录；push / PR / 发布需 owner 明确授权。
 - winget 新包 PR microsoft/winget-pkgs#463652 与本 ticket 无关，仍在外部校验队列；落地后需在 #105 补最终回复。
+
+## 2026-10-28 补充：已配置来源被首启选择关掉
+
+- 现场：数据目录里 apigoto、tokenrhythm、workbuddy、minimax、stepfun-plan、sensenova、xfyun、qodercn 等 13 个 family 位于 `disabled`，账号卡被 `isCardDisabled` 一并隐藏，看起来像“凭据/服务商丢了”。
+- 原因：首启选择器只把 family 卡当作检测证据；这些来源的密钥在账号列表里，family 卡是 `no_credentials`，确认/跳过时被整族写进 `disabled`。
+- 代码修复：`detectedFamilies` 把账号卡计入 family 证据；引导默认勾选 ok 快照对应 family；跳过/关闭引导不再应用勾选，只有最后一步「完成」才写入选择。
+- 本机恢复：从 `config.json` 的 `disabled` 移除上述 13 项（备份 `config.json.bak-before-disabled-restore-20261028`），重启后 active 28 → 39，apigoto/tokenrhythm/workbuddy/minimax/xfyun/qodercn 等卡回到面板。
+- 恢复后仍有外部会话问题（非 Pane 数据丢失）：Claude token 为空、SenseNova 会话过期、Trae CN token 被拒、Grok/Qoder/Qwen 未登录；需要对应客户端重新登录。StepFun Step Plan 返回无配额数据，ZCode 无 Start Plan。
