@@ -11,7 +11,7 @@
 首次引导和设置里的「来源扫描」只读本机信息，不执行 CLI、不出网：
 
 - `installState`：`installed` / `missing` / `unknown`。`unknown` 表示该 family 没有安装提示，不能当成未安装。
-- `credentialState` / `credentialSource`：凭据是否存在，以及来源是 `env:<变量名>`、系统凭据库、本机登录还是 `none`。
+- `credentialState` / `credentialSource`：凭据是否存在，以及来源是 `env:<变量名>`、Pane 保存的密钥/账号列表、本机登录还是 `none`。多账号 family（ClinePass、APIGOTO 等）按账号列表判断，不会因为 key 不在 family 级文件里就误报无凭据。
 - 环境变量会重新读取进程环境 + `HKCU\Environment` + `HKLM\...\Environment`；`setx` 后点「重新扫描」即可看到，不需要重启。
 - `ANTHROPIC_API_KEY`、`OPENAI_API_KEY`、`GEMINI_API_KEY`、`GOOGLE_API_KEY`、`AZURE_OPENAI_*` 等通用 key 会在检测结果中显示为“已发现”，但 Pane 目前没有对应的额度读取器；发现 key 不等于有额度数据。
 

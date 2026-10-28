@@ -167,7 +167,7 @@ fn probe_family_with_env(family: &str, display_name: &str, env: &HashMap<String,
         .map(|name| (*name).to_string())
         .collect();
     let local = local_hint(family);
-    let stored = crate::providers::stored_key_file(family).is_some();
+    let stored = stored_credential_exists(family);
     let (credential_state, credential_source) = if let Some(name) = env_vars.first() {
         ("present", format!("env:{name}"))
     } else if stored {
@@ -186,6 +186,19 @@ fn probe_family_with_env(family: &str, display_name: &str, env: &HashMap<String,
         credential_source,
         env_vars,
         local_hint: local,
+    }
+}
+
+/// Same store order as `get_credential_status`: login accounts, then the
+/// multi-account list, then the saved single key. Checking only the key file
+/// made account-based families (ClinePass, APIGOTO, …) look credential-less.
+fn stored_credential_exists(family: &str) -> bool {
+    if crate::login_accounts::takes_login_accounts(family) {
+        !crate::login_accounts::load(family).is_empty()
+    } else if crate::accounts::provider_takes_accounts(family) {
+        !crate::accounts::load_accounts(family).is_empty()
+    } else {
+        crate::providers::stored_key_file(family).is_some()
     }
 }
 
