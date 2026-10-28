@@ -48,7 +48,7 @@ chrono = "0.4"
 base64 = "0.22"
 # Skin resource packs (workshop): deflate only — packs come from our own
 # tooling, so the exotic codec features stay off.
-zip = { version = "2", default-features = false, features = ["deflate"] }
+zip = { version = "4", default-features = false, features = ["deflate"] }
 sha2 = "0.10"
 # AWS-style V4 request signing: Bedrock's Cost Explorer and Volcengine Ark's
 # GetCodingPlanUsage / GetAgentPlanAFPUsage share the same HMAC chain.
