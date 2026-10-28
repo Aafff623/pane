@@ -20,6 +20,7 @@ const names = new Set([
   'onboardingSourceEvidence',
   'onboardingProbeRows',
   'onboardingSourceRowsHtml',
+  'detectedFamilies',
 ]);
 const code = ts.transpile(
   main.statements
@@ -49,6 +50,8 @@ function makeContext(report, selection = new Set()) {
     sourceProbeReport: report,
     sourceProbeLoading: false,
     sourceProbeError: null,
+    lastSnapshots: [],
+    providerFamily: (id) => id.split('@')[0],
     onboardingSelection: selection,
     onboardingSelectionTouched: false,
     STARTER_FAMILIES: new Set(['claude', 'codex']),
@@ -104,4 +107,17 @@ test('starter picks only apply when nothing is detected', () => {
   real.seedOnboardingPicks();
   assert.ok(real.onboardingSelection.has('claude'));
   assert.ok(real.onboardingSelection.has('brave'));
+});
+
+test('account cards count as detection for their family', () => {
+  const ctx = makeContext({ families: [], envKeys: [] });
+  const found = ctx.detectedFamilies([
+    { id: 'apigoto', status: 'no_credentials' },
+    { id: 'apigoto@abc', status: 'ok' },
+    { id: 'tokenrhythm@xyz', status: 'ok' },
+    { id: 'grok', status: 'no_credentials' },
+  ]);
+  assert.ok(found.has('apigoto'), 'family card no_credentials must not hide a working account');
+  assert.ok(found.has('tokenrhythm'));
+  assert.ok(!found.has('grok'));
 });

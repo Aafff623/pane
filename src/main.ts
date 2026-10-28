@@ -7383,9 +7383,12 @@ type PickerRow = { id: string; name: string; note: string; checked: boolean };
 function detectedFamilies(snaps: Snapshot[]): Map<string, Snapshot> {
   const out = new Map<string, Snapshot>();
   for (const s of snaps) {
-    if (s.id !== providerFamily(s.id)) continue;
     if (s.status === "no_credentials") continue;
-    out.set(s.id, s);
+    const family = providerFamily(s.id);
+    // Account cards count as evidence for their family: a family card can
+    // read no_credentials while apigoto@…/tokenrhythm@… are fine, and the
+    // first-run picker must not disable the family in that case.
+    if (!out.has(family) || s.id === family) out.set(family, s);
   }
   return out;
 }
@@ -9677,6 +9680,12 @@ function defaultOnboardingPicks(): Set<string> {
   for (const probe of sourceProbeReport?.families ?? []) {
     if (probe.installState === "installed" || probe.credentialState === "present") picks.add(probe.family);
   }
+  // Working cards are evidence too. Account-based families (apigoto@…,
+  // tokenrhythm@…) can look credential-less at family level; defaulting
+  // them off would silently disable providers the user already connected.
+  for (const snap of lastSnapshots) {
+    if (snap.status === "ok") picks.add(providerFamily(snap.id));
+  }
   if (!picks.size) {
     for (const family of STARTER_FAMILIES) {
       if (ALL_PROVIDERS.some(([id]) => id === family)) picks.add(family);
@@ -9891,7 +9900,10 @@ function finishOnboarding(dismissed: boolean): void {
   document.removeEventListener("keydown", onOnboardingKey, true);
   onboardingOverlay?.remove();
   onboardingOverlay = null;
-  if (onboardingApplyPicks) applyOnboardingPicks();
+  // Skip/close/“set up later” must never rewrite the provider selection.
+  // Only completing the flow applies the checklist; the old mid-flow apply
+  // disabled every family the scan had missed (account-based ones).
+  if (onboardingApplyPicks && !dismissed) applyOnboardingPicks();
   onboardingApplyPicks = false;
   if (onboardingReplay) {
     onboardingReplay = false;
@@ -9966,7 +9978,6 @@ function startOnboarding(replay = false, startStep = 0, applyPicks = !replay): v
       return;
     }
     if (target.closest("[data-onboarding-next]")) {
-      if (onboardingStep === 1 && onboardingApplyPicks) applyOnboardingPicks();
       if (onboardingStep + 1 < ONBOARDING_STEPS) showOnboardingStep(onboardingStep + 1);
       else finishOnboarding(false);
       return;
