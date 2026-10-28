@@ -34,6 +34,14 @@ GET http://127.0.0.1:6736/v1/limits/:id # exact card id, or every card in a fami
   agent can tell "no data" from "disabled / no credentials / auth failed /
   network". Provider-supplied error text has URLs stripped to `<endpoint>`:
   reqwest embeds the request URL, which can carry a private relay host.
+- Each `/v1/providers` row also carries additive source-detection fields:
+  `installState` (`installed` / `missing` / `unknown`), `installEvidence`
+  (local executable/directory paths), `credentialState`, `credentialSource`
+  (`env:<NAME>` / `keyvault` / `local` / `none`) and `credentialEnvs` (names
+  only). These are read-only local facts; environment values never appear.
+- `/v1/doctor` includes `installed_but_not_signed_in` (classification `info`
+  when it finds installed tools with no credential) with a remediation. It
+  is advisory, not a fault: an installed but unused CLI is not a broken Pane.
 - `/v1/status` reports the proxy as a **source** (`config` / `system` /
   `none`), never the address.
 - `last_snapshots.json` in `%APPDATA%\PaneAafff623\` still works as a fallback when

@@ -11,11 +11,13 @@
 //! for a release. Write actions stay out of scope on purpose: anything that
 //! mutates state would need a bearer token first (handoff §4).
 
+use std::collections::{BTreeSet, HashMap};
 use std::sync::{Mutex, OnceLock};
 
 use serde_json::{json, Value};
 
 use crate::providers::Snapshot;
+use crate::source_probe::SourceProbe;
 
 static LATEST: OnceLock<Mutex<Value>> = OnceLock::new();
 /// Full snapshots for `/v1/providers` — the Mac-compatible wire format above
@@ -243,8 +245,8 @@ fn status_code(status: &str) -> u16 {
     }
 }
 
-pub(crate) fn provider_full_json(s: &Snapshot, fetched_at: &str) -> Value {
-    json!({
+pub(crate) fn provider_full_json(s: &Snapshot, fetched_at: &str, probe: Option<&SourceProbe>) -> Value {
+    let mut value = json!({
         "providerId": s.id,
         "displayName": s.name,
         "plan": s.plan,
@@ -256,7 +258,15 @@ pub(crate) fn provider_full_json(s: &Snapshot, fetched_at: &str) -> Value {
         "lines": metric_lines(&s.metrics),
         "fetchedAt": fetched_at,
         "justResetAt": s.just_reset_at.map(iso8601),
-    })
+    });
+    if let Some(probe) = probe {
+        value["installState"] = json!(probe.install_state);
+        value["installEvidence"] = json!(probe.install_evidence);
+        value["credentialState"] = json!(probe.credential_state);
+        value["credentialSource"] = json!(probe.credential_source);
+        value["credentialEnvs"] = json!(probe.env_vars);
+    }
+    value
 }
 
 fn providers_payload(cfg: &Value, fetched_at: &str) -> Value {
@@ -264,7 +274,17 @@ fn providers_payload(cfg: &Value, fetched_at: &str) -> Value {
         Ok(v) => (v.clone(), *last_publish_ms().lock().unwrap_or_else(|e| e.into_inner())),
         Err(_) => (Vec::new(), 0),
     };
-    providers_payload_from(&snaps, published_at, cfg, fetched_at)
+    let probes: HashMap<String, SourceProbe> = snaps
+        .iter()
+        .map(|s| crate::provider_catalog::family_of(&s.id))
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .map(|family| {
+            let probe = crate::source_probe::probe_family(&family);
+            (family, probe)
+        })
+        .collect();
+    providers_payload_from(&snaps, published_at, cfg, fetched_at, Some(&probes))
 }
 
 /// Pure core of [`providers_payload`] — tests drive this directly so the
@@ -274,8 +294,15 @@ pub(crate) fn providers_payload_from(
     published_at: i64,
     cfg: &Value,
     fetched_at: &str,
+    probes: Option<&HashMap<String, SourceProbe>>,
 ) -> Value {
-    let providers: Vec<Value> = snaps.iter().map(|s| provider_full_json(s, fetched_at)).collect();
+    let providers: Vec<Value> = snaps
+        .iter()
+        .map(|s| {
+            let probe = probes.and_then(|map| map.get(&crate::provider_catalog::family_of(&s.id)));
+            provider_full_json(s, fetched_at, probe)
+        })
+        .collect();
     let disabled = config_id_list(cfg, "disabled");
     let removed = config_id_list(cfg, "removedProviders");
     let by_status = |want: &str| snaps.iter().filter(|s| s.status == want).count();
@@ -419,6 +446,25 @@ fn doctor_payload(cfg: &Value, fetched_at: &str) -> Value {
             format!("error on: {}", errored.join(", "))
         },
         (!errored.is_empty()).then_some("see /v1/providers for each card's error text and route it by provider (auth expiry vs endpoint vs network)"),
+    ));
+
+    let probes = crate::source_probe::probe_all();
+    let installed_no_creds: Vec<&str> = probes
+        .families
+        .iter()
+        .filter(|p| p.install_state == "installed" && p.credential_state == "absent")
+        .map(|p| p.family.as_str())
+        .collect();
+    checks.push(check(
+        "installed_but_not_signed_in",
+        installed_no_creds.is_empty(),
+        if installed_no_creds.is_empty() { "healthy" } else { "info" },
+        if installed_no_creds.is_empty() {
+            "every installed source has a credential".into()
+        } else {
+            format!("installed but not signed in: {}", installed_no_creds.join(", "))
+        },
+        (!installed_no_creds.is_empty()).then_some("open Pane's setup checklist and sign in / add the key for the listed tools; the CLI must have been run at least once"),
     ));
 
     let stale: Vec<&str> = snaps.iter().filter(|s| s.stale).map(|s| s.id.as_str()).collect();
@@ -848,7 +894,7 @@ mod tests {
         let cfg = json!({ "disabled": ["kimi"], "removedProviders": ["linkso"] });
         // Pure core, no global state: parallel cases cannot race here.
         let payload =
-            super::providers_payload_from(&[snap], 1_700_000_000_000, &cfg, "2026-07-26T00:00:00Z");
+            super::providers_payload_from(&[snap], 1_700_000_000_000, &cfg, "2026-07-26T00:00:00Z", None);
         let card = &payload["providers"][0];
         assert_eq!(card["providerId"], "claude");
         assert_eq!(card["status"], "error");
