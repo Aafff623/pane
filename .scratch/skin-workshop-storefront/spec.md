@@ -1,6 +1,6 @@
 # Spec · Skin Workshop Storefront (2026-10-27)
 
-**Status**: implemented on `codex/0.11.1-closeout`; **owner accepted 2026-10-27**; local closeout, push pending. **Issue**: https://github.com/Aafff623/pane/issues/107
+**Status**: implemented; **owner accepted 2026-10-27**; shipped in `v0.11.1`. **Issue**: https://github.com/Aafff623/pane/issues/107
 
 ## Implementation result (2026-10-27)
 

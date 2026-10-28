@@ -2,7 +2,7 @@
 
 ## 2026-10-27 接续结果（以本节为准，覆盖下方旧现场）
 
-**状态**：四张票已实现，两轮 review、构建/测试和真机走查通过；**owner 已于 2026-10-27 验收通过**。当前进入本地 closeout：提交已拆分、尚未 push，也没有 tag/release。
+**状态**：四张票已实现，两轮 review、构建/测试和真机走查通过；**owner 已于 2026-10-27 验收通过**。已随 `v0.11.1` 正式发布（2026-10-27），发布记录见 `.scratch/011-closeout/release-outcome.md`。
 
 **分支**：`codex/0.11.1-closeout` · 本批包括前端/测试/文档、`.scratch` 资产和站点 demo 重建；远端 `origin/main` 已完全包含在当前分支中，无需合并。根目录 `50%`、`=`、`nul`、`由` 是在收尾中确认删除的空误产物。
 
@@ -19,7 +19,7 @@
 - 站点 demo：`build-demo.mjs` 重建；浏览器实测主页面“皮肤工坊” → 设置浮层 → `page=skins` → 4 张卡；`node --test site/*.test.mjs` 50/50。
 - 未验证：真实下载/删除（本机三个包都已安装；删除属破坏性操作，留给 owner）、860×620 最小宽度、英文/俄文视觉、reduced-motion。主流程的最终视觉复核已在当前构建完成。
 
-**下一步**：本地提交已就绪，等待 owner 授权 `push`；tag/release 未授权，也不会在本次收尾中创建。
+**下一步**：无待办；winget 新包 `Aafff623.Pane` 的初始 manifest 在 microsoft/winget-pkgs#463652 等待外部审核。
 
 ---
 
