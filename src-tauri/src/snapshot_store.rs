@@ -118,6 +118,11 @@ pub(crate) fn restore_last_success_after_error(
     if current.status != "error" || age_ms > SNAPSHOT_CACHE_MS {
         return false;
     }
+    // A rejected credential invalidates the cached numbers: repainting the
+    // last good plan would claim a subscription the vendor already refused.
+    if providers::credential_rejected(current.error.as_deref().unwrap_or_default()) {
+        return false;
+    }
     let warning = current.error.clone();
     *current = previous.clone();
     if providers::should_mark_stale(age_ms > STALE_GRACE_MS, consecutive_failures) {
@@ -326,6 +331,12 @@ pub(crate) fn merge_snapshot(
     if snapshot.status == "error" {
         let streak = failures.entry(snapshot.id.clone()).or_default();
         *streak = streak.saturating_add(1);
+        if providers::credential_rejected(snapshot.error.as_deref().unwrap_or_default()) {
+            // Evict instead of restoring: the card must show the rejection,
+            // and the persisted cache must not resurrect the old plan.
+            let evicted = cache.remove(&snapshot.id).is_some();
+            return (evicted, Vec::new(), Vec::new());
+        }
         if let Some(previous) = cache.get(&snapshot.id) {
             restore_last_success_after_error(
                 snapshot,
@@ -701,6 +712,41 @@ mod tests {
         ));
         assert_eq!(current.status, "error");
         assert!(!current.stale);
+    }
+    #[test]
+    fn rejected_credential_is_never_restored_from_cache() {
+        let previous = Snapshot::ok(
+            "opencode",
+            "OpenCode",
+            Some("Go".into()),
+            vec![Metric::progress("Session", 0.0, None)],
+        );
+        let mut current =
+            Snapshot::error("opencode", "OpenCode", "usage endpoint: HTTP 401 Unauthorized".into());
+        assert!(!restore_last_success_after_error(&mut current, &previous, 1_000, 1));
+        assert_eq!(current.status, "error");
+        assert_eq!(current.plan, None);
+    }
+
+    #[test]
+    fn rejected_credential_evicts_the_cached_plan() {
+        let mut cache = HashMap::new();
+        let mut failures = HashMap::new();
+        let mut good = Snapshot::ok(
+            "opencode",
+            "OpenCode",
+            Some("Go".into()),
+            vec![Metric::progress("Session", 0.0, None)],
+        );
+        assert!(merge_snapshot(&mut good, &mut cache, &mut failures, 0).0);
+        assert!(cache.contains_key("opencode"));
+
+        let mut rejected =
+            Snapshot::error("opencode", "OpenCode", "usage endpoint: HTTP 401 Unauthorized".into());
+        let (changed, _, _) = merge_snapshot(&mut rejected, &mut cache, &mut failures, 1_000);
+        assert!(changed, "eviction must be persisted");
+        assert_eq!(rejected.status, "error");
+        assert!(!cache.contains_key("opencode"));
     }
     #[test]
     fn fold_keeps_moonshot_when_kimi_has_no_wallet() {

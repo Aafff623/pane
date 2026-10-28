@@ -86,3 +86,4 @@ Remove-Item -Recurse -Force "$env:LOCALAPPDATA\com.aafff623.pane\EBWebView" -Err
 - 现场：OpenCode 卡显示 “Go — this PC only” 和 $0/$12，实际是 OpenCode auth.json 里一把 2026-10-05 的 key 已过期（用量接口返回 `api_key_expired`）；旧逻辑把任何查询失败都回退到本地 opencode.db，并仍标注 Go 计划。
 - 机制修复：`providers::credential_rejected` 统一识别 401/403/过期/撤销；OpenCode 被拒时直接返回错误、不再本地回退（离线/5xx 仍可本地回退且标注清  楚）；`/v1/doctor` 新增 `credentials_rejected`；首启检测状态结合最新查询结果，过期凭据显示“凭据已过期或被拒绝”，不再叫“已找到凭据”。
 - 影响：过期 key 不再触发每次刷新复制 400MB 的 opencode.db。
+- 追加：`snapshot_store` 对“凭据被拒绝”的错误不再恢复上次成功快照，并清除持久缓存；否则旧 Go 卡会以 last-good 形式复活。实测 `/v1/providers` 的 opencode 已变为 error、plan 为空，`/v1/doctor` 的 credentials_rejected 同时列出 claude 和 opencode。
