@@ -126,6 +126,9 @@ test('repair views keep action, status and steps aligned with the failure kind',
   assert.equal(network.tone, 'warn');
   const subscription = context.repairView('subscription', 'opencode', true, true);
   assert.equal(subscription.primaryAction, 'link');
+  const noLink = context.repairView('subscription', 'opencode', false, true);
+  assert.equal(noLink.primaryAction, 'setup');
+  assert.equal(noLink.primaryKey, 'quotaState.action.setup');
   const install = context.repairView('not_installed', 'claude', false, false);
   assert.equal(install.primaryAction, 'help');
   const localNoPane = context.repairView('credential', 'claude', false, false);

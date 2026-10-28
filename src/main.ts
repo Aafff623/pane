@@ -11438,7 +11438,7 @@ function repairView(kind: RepairKind, family: string, hasLink: boolean, canSetup
     case "credential":
       return { tone: "bad", dot: "red", statusKey: "quotaState.status.signIn", titleKey: "quotaState.title.credential", descKey: "quotaState.desc.credential", primaryKey: repairKey, primaryAction: canSetup ? "setup" : "help", steps: credentialSteps };
     case "subscription":
-      return { tone: "bad", dot: "red", statusKey: "quotaState.status.subscription", titleKey: "quotaState.title.subscription", descKey: "quotaState.desc.subscription", primaryKey: "quotaState.action.viewSubscription", primaryAction: hasLink ? "link" : (canSetup ? "setup" : "help"), steps: ["quotaState.step.subscription.1", "quotaState.step.subscription.2", "quotaState.step.subscription.3"] };
+      return { tone: "bad", dot: "red", statusKey: "quotaState.status.subscription", titleKey: "quotaState.title.subscription", descKey: "quotaState.desc.subscription", primaryKey: hasLink ? "quotaState.action.viewSubscription" : (canSetup ? "quotaState.action.setup" : "quotaState.action.help"), primaryAction: hasLink ? "link" : (canSetup ? "setup" : "help"), steps: ["quotaState.step.subscription.1", "quotaState.step.subscription.2", "quotaState.step.subscription.3"] };
     case "permission":
       return { tone: "warn", dot: "yellow", statusKey: "quotaState.status.permission", titleKey: "quotaState.title.permission", descKey: "quotaState.desc.permission", primaryKey: canSetup ? "quotaState.action.setup" : "quotaState.action.loginHelp", primaryAction: canSetup ? "setup" : "help", steps: ["quotaState.step.permission.1", "quotaState.step.permission.2", "quotaState.step.permission.3"] };
     case "empty":
