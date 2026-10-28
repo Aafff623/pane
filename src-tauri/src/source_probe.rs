@@ -99,6 +99,7 @@ pub fn probe_all() -> SourceProbeReport {
         if !HINTS.iter().any(|hint| hint.family == def.family_id)
             && crate::provider_catalog::provider_env_vars(def.family_id).is_empty()
             && local_hint(def.family_id).is_none()
+            && !stored_credential_exists(def.family_id)
         {
             continue;
         }
