@@ -7799,27 +7799,42 @@ body.no-glass .cust-dock {
 }
 .provider-help .ph-section { margin: 0 0 18px; }
 .provider-help .ph-disclosure {
-  margin: 2px 0 0;
+  margin: 12px 0 0;
 }
 .provider-help .ph-disclosure summary {
   display: flex;
   align-items: center;
-  padding: 10px 0;
+  gap: 8px;
+  padding: 10px 12px;
+  border: 1px solid color-mix(in srgb, var(--border) 75%, transparent);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--foreground) 7%, transparent);
   list-style: none;
   cursor: pointer;
-  font-size: 12px;
-  font-weight: 650;
+  font-size: 12.5px;
+  font-weight: 600;
   color: var(--foreground);
+  transition: background 0.15s ease;
 }
 .provider-help .ph-disclosure summary::-webkit-details-marker { display: none; }
-.provider-help .ph-disclosure summary::after {
-  content: "⌄";
-  margin-left: auto;
-  color: var(--muted-foreground);
-  font-weight: 500;
-  transition: transform 0.15s ease;
+.provider-help .ph-disclosure summary:hover {
+  background: color-mix(in srgb, var(--foreground) 12%, transparent);
 }
-.provider-help .ph-disclosure[open] summary::after { transform: rotate(180deg); }
+.provider-help .ph-disclosure summary:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+}
+.provider-help .ph-disclosure-leading,
+.provider-help .ph-disclosure-chevron {
+  display: flex;
+  flex: none;
+  color: var(--muted-foreground);
+}
+.provider-help .ph-disclosure-leading .ui-icon { width: 14px; height: 14px; }
+.provider-help .ph-disclosure-chevron { margin-left: auto; transition: transform 0.15s ease; }
+.provider-help .ph-disclosure-chevron .ui-icon { width: 12px; height: 12px; }
+.provider-help .ph-disclosure[open] .ph-disclosure-chevron { transform: rotate(180deg); }
+.provider-help .ph-disclosure-label { min-width: 0; }
 .provider-help .ph-disclosure-body { padding: 0 0 12px; }
 #confirm-box.provider-help .ph-disclosure-body h4 {
   margin: 8px 0 5px;

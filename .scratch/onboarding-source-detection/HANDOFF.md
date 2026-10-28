@@ -108,3 +108,5 @@ Remove-Item -Recurse -Force "$env:LOCALAPPDATA\com.aafff623.pane\EBWebView" -Err
 - 设计说明与证据：`temp/oil-ui-provider-help/`（baseline.png、shots5、shots-open、DESIGN-NOTES.md，均为本地过程文件）。
 
 - Owner follow-up (2026-10-28): 底栏的白色条和顶部分隔线被认为多余，已把状态/按钮直接放进正文末尾，按钮右对齐；折叠行上下横线也去掉。演示站已用最新前端重建（`site/public/demo`），站点测试 50/50。
+
+- Owner follow-up 2 (2026-10-28): 折叠栏不够明显。改为 Phosphor `info` + `caret-down` 图标的整行按钮，带边框/底色、hover 和 focus 反馈；展开时 caret 旋转。演示站再次重建，站点测试 50/50。

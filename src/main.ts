@@ -7691,7 +7691,11 @@ function openProviderHelp(fam: string) {
           <ol class="ph-steps">${steps.map((step) => `<li>${escapeHtml(step)}</li>`).join("")}</ol>
         </section>
         <details class="ph-disclosure">
-          <summary>${escapeHtml(t("customize.helpDetailsTitle"))}</summary>
+          <summary>
+            <span class="ph-disclosure-leading" aria-hidden="true">${uiIcon("info")}</span>
+            <span class="ph-disclosure-label">${escapeHtml(t("customize.helpDetailsTitle"))}</span>
+            <span class="ph-disclosure-chevron" aria-hidden="true">${uiIcon("caretDown")}</span>
+          </summary>
           <div class="ph-disclosure-body">
             <h4>${escapeHtml(t("provider.help.principle"))}</h4>
             <p>${escapeHtml(t(remote ? "provider.principle.remote" : "provider.principle.local"))}</p>

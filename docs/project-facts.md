@@ -1008,8 +1008,8 @@ changes.
   found-but-unsupported rather than hidden.
 - **Provider help dialog** — a fixed header with a scrolling body: icon/name/
   credential badge, a 2×2 facts grid, three steps, a collapsed “how it works /
-  limits” disclosure, then the actions in normal flow (no footer bar or
-  divider). The actions must not live in a `<footer>`: the app-wide `footer`
+  limits” disclosure (Phosphor info + caret in a clickable row), then the
+  actions in normal flow (no footer bar or divider). The actions must not live in a `<footer>`: the app-wide `footer`
   rule pins it absolutely and covers the body.
 - **Failed-card UI** — every non-ok card renders one `repairPanelHtml`: quota
   status, a plain-language title/description, exactly one primary action
