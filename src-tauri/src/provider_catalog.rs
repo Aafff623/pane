@@ -1029,6 +1029,57 @@ pub fn provider_definition(family_id: &str) -> Option<&'static ProviderDefinitio
         .find(|definition| definition.family_id == family_id)
 }
 
+/// Known env-var fallbacks per provider, for get_credential_status and the
+/// read-only source probe. The saved-file probe is providers::stored_key_file;
+/// local-CLI detection is each provider's own local_credential_hint.
+pub fn provider_env_vars(provider: &str) -> &'static [&'static str] {
+    match provider {
+        "openrouter" => &["OPENROUTER_API_KEY"],
+        "zai" => &["ZAI_API_KEY", "GLM_API_KEY"],
+        "commandcode" => &["COMMAND_CODE_API_KEY"],
+        "clawsgo" => &["CLAWSGO_TOKEN"],
+        "minimax" => &["MINIMAX_API_KEY"],
+        "deepseek" => &["DEEPSEEK_API_KEY"],
+        "moonshot" => &["MOONSHOT_API_KEY", "KIMI_API_KEY"],
+        "elevenlabs" => &["ELEVENLABS_API_KEY", "XI_API_KEY"],
+        "codebuff" => &["CODEBUFF_API_KEY"],
+        "kilo" => &["KILO_API_KEY"],
+        "aihubmix" => &["AIHUBMIX_API_KEY"],
+        "qwen" => &["BAILIAN_TOKEN_PLAN_API_KEY", "DASHSCOPE_API_KEY"],
+        "kimi" => &["KIMI_CODING_API_KEY"],
+        "opencode" => &["OPENCODE_GO_API_KEY"],
+        "stepfun" => &["STEPFUN_API_KEY"],
+        "stepfun-plan" => &[],
+        "bocha" => &["BOCHA_API_KEY"],
+        "tavily" => &["TAVILY_API_KEY"],
+        "clinepass" => &["CLINE_API_KEY"],
+        "apigoto" => &["APIGOTO_API_KEY"],
+        "amp" => &["AMP_API_KEY"],
+        "chutes" => &["CHUTES_API_KEY"],
+        "deepgram" => &["DEEPGRAM_API_KEY"],
+        "openai-api" => &["OPENAI_ADMIN_KEY"],
+        "poe" => &["POE_API_KEY"],
+        "venice" => &["VENICE_API_KEY"],
+        "warp" => &["WARP_API_KEY", "WARP_TOKEN"],
+        "mimo" => &["MIMO_API_KEY"],
+        "factory" => &["FACTORY_API_KEY"],
+        "groq" => &["GROQ_API_KEY"],
+        "huggingface" => &["HF_TOKEN", "HUGGINGFACE_API_KEY", "HUGGING_FACE_HUB_TOKEN"],
+        "longcat" => &["LONGCAT_COOKIE"],
+        "sub2api" => &["SUB2API_API_KEY"],
+        "mistral" => &["MISTRAL_COOKIE"],
+        "perplexity" => &["PERPLEXITY_SESSION_TOKEN", "PERPLEXITY_COOKIE"],
+        "volcengine" => &["VOLC_ACCESS_KEY"],
+
+        "firecrawl" => &["FIRECRAWL_API_KEY", "FIRECRAWL_FIRECRAWL_API_KEY"],
+        "brave" => &["BRAVE_API_KEY", "BRAVE_SEARCH_API_KEY"],
+        "giphy" => &["GIPHY_PARTNER_TOKEN", "GIPHY_ACCESS_TOKEN"],
+        "siliconflow" => &["SILICONFLOW_API_KEY"],
+        "novita" => &["NOVITA_API_KEY"],
+        _ => &[],
+    }
+}
+
 pub fn supports_extra_accounts(family_id: &str) -> bool {
     provider_definition(family_id).is_some_and(|definition| definition.supports_extra_accounts)
 }

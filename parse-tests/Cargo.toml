@@ -62,6 +62,9 @@ tiny_http = "0.12" # mock relay servers in the One/New API tests
 
 [target.'cfg(windows)'.dependencies]
 windows = { version = "0.61", features = ["Win32_Foundation", "Win32_Globalization", "Win32_Security_Authorization", "Win32_Security_Credentials", "Win32_Security_Cryptography", "Win32_Storage_FileSystem", "Win32_System_Memory", "Win32_System_Registry", "Win32_System_SystemInformation", "Win32_System_Threading", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging"] }
+# Mirrors src-tauri: source_probe reads the user/system environment so a
+# `setx` in another terminal is visible to the next rescan.
+winreg = "0.55"
 
 # Incremental caches reached 23 GB of target/ in this workspace: one app-crate
 # rebuild writes ~460 MB of cache and saves ~37 s (81 s vs 118 s). Dependencies

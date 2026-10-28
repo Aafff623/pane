@@ -48,6 +48,7 @@ mod refresh_gate;
 mod providers;
 pub(crate) mod provider_catalog;
 mod snapshot_store;
+mod source_probe;
 mod provider_dispatch;
 mod qoder_sessions;
 mod spend;
@@ -5155,55 +5156,11 @@ fn auth_center_list() -> Vec<auth_center::AuthFamilyGroup> {
     groups
 }
 
-/// Known env-var fallbacks per provider, for get_credential_status. The
-/// saved-file probe is providers::stored_key_file; local-CLI detection is
-/// each provider's own local_credential_hint (dispatched just below).
-fn provider_env_vars(provider: &str) -> &'static [&'static str] {
-    match provider {
-        "openrouter" => &["OPENROUTER_API_KEY"],
-        "zai" => &["ZAI_API_KEY", "GLM_API_KEY"],
-        "commandcode" => &["COMMAND_CODE_API_KEY"],
-        "clawsgo" => &["CLAWSGO_TOKEN"],
-        "minimax" => &["MINIMAX_API_KEY"],
-        "deepseek" => &["DEEPSEEK_API_KEY"],
-        "moonshot" => &["MOONSHOT_API_KEY", "KIMI_API_KEY"],
-        "elevenlabs" => &["ELEVENLABS_API_KEY", "XI_API_KEY"],
-        "codebuff" => &["CODEBUFF_API_KEY"],
-        "kilo" => &["KILO_API_KEY"],
-        "aihubmix" => &["AIHUBMIX_API_KEY"],
-        "qwen" => &["BAILIAN_TOKEN_PLAN_API_KEY", "DASHSCOPE_API_KEY"],
-        "kimi" => &["KIMI_CODING_API_KEY"],
-        "opencode" => &["OPENCODE_GO_API_KEY"],
-        "stepfun" => &["STEPFUN_API_KEY"],
-        "stepfun-plan" => &[],
-        "bocha" => &["BOCHA_API_KEY"],
-        "tavily" => &["TAVILY_API_KEY"],
-        "clinepass" => &["CLINE_API_KEY"],
-        "apigoto" => &["APIGOTO_API_KEY"],
-        "amp" => &["AMP_API_KEY"],
-        "chutes" => &["CHUTES_API_KEY"],
-        "deepgram" => &["DEEPGRAM_API_KEY"],
-        "openai-api" => &["OPENAI_ADMIN_KEY"],
-        "poe" => &["POE_API_KEY"],
-        "venice" => &["VENICE_API_KEY"],
-        "warp" => &["WARP_API_KEY", "WARP_TOKEN"],
-        "mimo" => &["MIMO_API_KEY"],
-        "factory" => &["FACTORY_API_KEY"],
-        "groq" => &["GROQ_API_KEY"],
-        "huggingface" => &["HF_TOKEN", "HUGGINGFACE_API_KEY", "HUGGING_FACE_HUB_TOKEN"],
-        "longcat" => &["LONGCAT_COOKIE"],
-        "sub2api" => &["SUB2API_API_KEY"],
-        "mistral" => &["MISTRAL_COOKIE"],
-        "perplexity" => &["PERPLEXITY_SESSION_TOKEN", "PERPLEXITY_COOKIE"],
-        "volcengine" => &["VOLC_ACCESS_KEY"],
-
-        "firecrawl" => &["FIRECRAWL_API_KEY", "FIRECRAWL_FIRECRAWL_API_KEY"],
-        "brave" => &["BRAVE_API_KEY", "BRAVE_SEARCH_API_KEY"],
-        "giphy" => &["GIPHY_PARTNER_TOKEN", "GIPHY_ACCESS_TOKEN"],
-        "siliconflow" => &["SILICONFLOW_API_KEY"],
-        "novita" => &["NOVITA_API_KEY"],
-        _ => &[],
-    }
+/// Read-only onboarding probe: installed tools, credential presence and the
+/// source of each credential. Environment variables are re-read on every call.
+#[tauri::command]
+fn source_probe() -> source_probe::SourceProbeReport {
+    source_probe::probe_all()
 }
 
 /// Credential probe for the Customize "?" and gear panels: is a key saved
@@ -5228,7 +5185,7 @@ fn get_credential_status(provider: String) -> Value {
     } else {
         providers::stored_key_file(&family).is_some()
     };
-    let env_key = provider_env_vars(&family)
+    let env_key = provider_catalog::provider_env_vars(&family)
         .iter()
         .any(|var| std::env::var(var).is_ok_and(|v| !v.trim().is_empty()));
     let mut local_cli = match family.as_str() {
@@ -5329,7 +5286,20 @@ fn get_credential_status(provider: String) -> Value {
         _ => None,
     };
     let masked_key = providers::stored_key_file(&family).map(|key| accounts::mask_key(&key));
-    json!({ "storedKey": stored_key, "maskedKey": masked_key, "envKey": env_key, "localCli": local_cli, "oauth": oauth_label, "activeSource": active_source, "membership": membership })
+    let probe = source_probe::probe_family(&family);
+    json!({
+        "storedKey": stored_key,
+        "maskedKey": masked_key,
+        "envKey": env_key,
+        "envVars": probe.env_vars,
+        "localCli": local_cli,
+        "oauth": oauth_label,
+        "activeSource": active_source,
+        "membership": membership,
+        "installState": probe.install_state,
+        "installEvidence": probe.install_evidence,
+        "credentialSource": probe.credential_source,
+    })
 }
 
 /// Starts Pane's own OAuth device-code login (Codex / Grok). Returns the
@@ -6614,6 +6584,7 @@ pub fn run() {
             account_list,
             auth_center_list,
             get_credential_status,
+            source_probe,
             oauth_start,
             oauth_poll,
             oauth_cancel,

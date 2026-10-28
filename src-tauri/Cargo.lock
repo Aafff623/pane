@@ -3382,6 +3382,7 @@ dependencies = [
  "windows",
  "windows-core 0.61.2",
  "windows-implement",
+ "winreg 0.55.0",
  "zeroize",
  "zip 2.4.2",
  "zstd",

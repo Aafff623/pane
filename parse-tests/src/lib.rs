@@ -76,6 +76,9 @@ pub mod spend;
 #[path = "../../src-tauri/src/qoder_sessions.rs"]
 pub mod qoder_sessions;
 
+#[path = "../../src-tauri/src/source_probe.rs"]
+pub mod source_probe;
+
 #[path = "../../src-tauri/src/httpapi.rs"]
 pub mod httpapi;
 

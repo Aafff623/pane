@@ -94,6 +94,8 @@ font-kit = "0.14"
 # an unconditional `windows` dependency fails to build off-Windows.
 [target.'cfg(windows)'.dependencies]
 webview2-com = "0.38"
+# Read HKCU/HKLM environment for source detection without spawning a command.
+winreg = "0.55"
 windows-core = "0.61"
 # For the hand-written ICoreWebView2GetCookiesCompletedHandler below.
 windows-implement = "0.60"
