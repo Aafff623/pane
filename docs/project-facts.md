@@ -12,7 +12,7 @@ Single authorities for the neighbouring concerns:
   tracker, see [`docs/agents/issue-tracker.md`](agents/issue-tracker.md).
 - **Startup / build / run / acceptance commands** — [`docs/dev-startup.md`](dev-startup.md).
 
-Last reconciled: 2026-10-27 (skin workshop storefront #107; 0.11.x close-out branch).
+Last reconciled: 2026-10-28 (first-run source detection #109; 0.11.1 released).
 
 ## Scope and boundaries
 
@@ -96,8 +96,8 @@ Last reconciled: 2026-10-27 (skin workshop storefront #107; 0.11.x close-out bra
   `cargo +stable-x86_64-pc-windows-gnu`. The full Tauri binary cannot link
   locally as a `cdylib` (167k-export DLL). The committed crate-type is
   `["rlib"]` (desktop only). Unit tests run from repo-root `parse-tests/`
-  (959 passing in the latest serial proxy-free run, 14 ignored as of
-  2026-10-22; run with
+  (1195 passing / 0 failed / 18 ignored in the latest serial proxy-free run,
+  2026-10-28; run with
   `cargo +stable-x86_64-pc-windows-gnu test` and no proxy).
 - Dev runtime needs both processes: Vite `:1420` + `pane.exe` `:6736`. Never
   serve the frontend with Python `http.server` (permanent WebView2 cache
@@ -983,6 +983,37 @@ changes.
   native rows only fill missing days. No local Gemini CLI sample exists on this
   machine, so `/v1/sources` still reports `needs_probe`.
 
+
+## First-run onboarding and source detection (#109, 2026-10-28)
+
+- **One first-run flow** — the separate provider picker no longer opens before
+  the guide. Onboarding is four steps (welcome → detected sources → connect →
+  done); the detection step reads `source_probe`, shows install evidence and
+  credential source, and can rescan without restarting. The empty board and
+  grouped board keep a "Continue setup" entry. Settings replay opens the same
+  flow but does **not** apply provider picks.
+- **Read-only probe** — `src-tauri/src/source_probe.rs` checks PATH/PATHEXT,
+  known install directories and environment names; it never executes a CLI or
+  opens a network connection. Environment is process + HKCU/HKLM, re-read on
+  every call, so `setx` is visible after Rescan. Only names and presence are
+  returned; secret values never enter the UI or `/v1/providers`.
+- **States** — `installState` is `installed` / `missing` / `unknown` (unknown
+  means no hint, never "not installed"). `credentialState`/`credentialSource`
+  distinguish env, OS vault and local sign-in. Cards show "installed, not
+  signed in" separately from "not installed".
+- **API** — `/v1/providers` rows add `installState`, `installEvidence`,
+  `credentialState`, `credentialSource`, `credentialEnvs`;
+  `/v1/doctor` adds `installed_but_not_signed_in` as an `info` check with a
+  remediation. Common keys without a Pane quota reader are reported as
+  found-but-unsupported rather than hidden.
+- **Evidence** — real `source_probe` + `/v1/providers` + `/v1/doctor` checked
+  in the running dev build; onboarding four steps, rescan after a temporary
+  `setx`, and the detection env-key row were walked on the real window.
+  `tests/onboarding-source.test.mjs` locks the detection-row/evidence
+  contract. Full Node suite 239 passed; build and Rust check pass. The probe's
+  Rust unit tests run inside the `parse-tests` harness (serial, proxy stripped:
+  1195 passed / 0 failed / 18 ignored); the app crate's own test binary still
+  cannot link on this machine (known GNU `STATUS_ENTRYPOINT_NOT_FOUND`).
 
 ## Default theme and skins (2026-10-24, 0.9.0)
 

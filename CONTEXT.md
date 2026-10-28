@@ -16,6 +16,10 @@ project language (reconsider) or it is a real gap to settle.
 
 ## Domain vocabulary
 
+- **安装探测 (install probe)** — 只读检查 PATH/PATHEXT、常见安装目录和环境变量，用来区分“已安装/未安装/未知”，不执行 CLI、不出网。
+- **已安装未登录 (installed but not signed in)** — 本机存在工具安装痕迹但没有可用凭据；和“未安装”是两种不同状态，动作也不同。
+- **凭据来源 (credential source)** — `env:<变量名>`、系统凭据库、本机登录或 `none`；只显示来源，不显示 secret 值。
+- **设置清单 (setup checklist)** — 首启的四步流程；检测步骤展示本机证据，完成状态由真实 `status == ok` 的来源驱动。
 - **皮肤包 (skin pack)** — 官方分发的 zip + manifest 资源包，带 id、版本、入口 CSS 和逐文件校验；安装后落在 `%APPDATA%\PaneAafff623\skins\<id>\`。原生外观不是皮肤包。
 - **原生外观 (native appearance)** — `skinId: null` 时的内置主题；恢复原生不是删除皮肤包。
 - **应用 / 选中 (applied / selected)** — applied 是当前真正渲染的皮肤；selected 是 config 里保存的 `skinId`。选中的包可能在本机缺失，此时界面显示原生外观，但工坊报告 Selected / Not installed，不能把原生说成已应用。

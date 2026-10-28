@@ -1,5 +1,23 @@
 # Changelog
 
+## Unreleased
+
+首启检测 / 来源证据 / 本机环境
+
+### 新增
+
+- **首启设置清单（#109）**：首次安装改为单一四步流程（欢迎 → 本机检测 → 连接来源 → 完成），不再先弹检测器再弹三页说明；检测步骤列出已安装的工具、安装路径和凭据来源，支持勾选与重新扫描；空看板保留「继续设置」，设置 → 常规的重看不会改动现有来源选择。
+- **只读来源探测**：新增 `source_probe` 本机探测，读取 PATH/PATHEXT、常见安装目录、进程环境与 HKCU/HKLM 环境变量；不执行 CLI、不出网。`ANTHROPIC_API_KEY`、`OPENAI_API_KEY`、`GEMINI_API_KEY`、`GOOGLE_API_KEY`、`AZURE_OPENAI_*` 等通用 key 会显示为“已发现但暂无额度读取器”。
+
+### 变更
+
+- **卡片与帮助面板**：区分「已安装 · 未登录」与「未安装」；凭据状态显示来源（环境变量名 / 系统凭据库 / 本机登录），不再只给“未配置”一句话。
+- **本地 API**：`/v1/providers` 增量增加 `installState`、`installEvidence`、`credentialState`、`credentialSource`、`credentialEnvs`；`/v1/doctor` 增加 `installed_but_not_signed_in` 检查（info，不把未使用的已装工具当成故障）。
+
+### 修复
+
+- **重看引导不再改写来源配置**：只有首次引导和空看板“继续设置”会应用勾选；设置里的重看保持当前选择不变。
+
 ## 0.11.1 — 2026-10-27
 
 皮肤工坊 / 独立身份 / 用量溯源 / 站点信任

@@ -19,12 +19,41 @@ Ground rules that apply to every provider:
   call still starts on the proxy path, so a recovered proxy is used again
   on the very next request.
 - If no credential is found, the provider shows a "connect me" hint (new
-  installs auto-disable everything undetected except Claude and Codex).
+  installs auto-disable everything not detected except Claude and Codex).
+- **Detection is not attestation.** The first-run checklist and
+  `/v1/providers` report read-only local evidence: executable/directory
+  presence, and credential source (`env:NAME`, OS vault, local sign-in).
+  `installState: unknown` means Pane has no install hint for that family; it
+  is never treated as "not installed". The probe never executes a CLI and
+  never opens a network connection.
+- Common keys (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GEMINI_API_KEY`,
+  `GOOGLE_API_KEY`, `AZURE_OPENAI_*`, …) may be shown as "found" even when
+  Pane has no quota reader for them. Finding a key is not a quota result.
 - Expired OAuth tokens are refreshed against the vendor's own token
   endpoint and written back to the CLI's credential file, keeping the CLI
   signed in — identical to what the CLI does itself.
 
 ---
+
+## Source detection on the first run (#109)
+
+The first-run flow reads:
+
+- **Executables** from `PATH` + `PATHEXT` for the harness families that have a
+  CLI (`claude`, `codex`, `opencode`, `gemini`, `qwen`, `kimi`, `grok`,
+  `copilot`, `cursor`, `windsurf`, `trae`, `zed`, `kiro`, `qoder`,
+  `antigravity`, `commandcode`, `amp`, `cline`).
+- **Install directories** for the same families (`~/.claude`,
+  `%APPDATA%/Codex`, `%LOCALAPPDATA%/Programs/...`, …).
+- **Environment variables** from the running process plus HKCU/HKLM
+  environment, re-read on every Rescan. Only names and presence are exposed.
+- **Credential presence/source** from the existing account/key stores and
+  local sign-in hints. A family can be `installed` and still have no
+  credential; that is the "installed, not signed in" state, not "not
+  installed".
+
+The probe is advisory. A missing hint is `unknown`, never a failure. See
+[provider credentials](provider-credentials.md) for the per-family sources.
 
 ## Tencent Cloud OrcaTerm
 

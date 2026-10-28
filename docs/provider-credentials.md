@@ -6,6 +6,17 @@
 
 “兼容适配，未验证”表示已存在查询实现，但本轮没有取得完整的第一方公开接口契约或没有对应真实账号实测。它不承诺任意新 key 均可查询。已公开的接口、权限和协议依据见 [API 核验记录](provider-api-verification.md)；下面的能力范围以当前源码为准，不能把文档核验当作所有平台均已联网验收。
 
+## 探测状态与凭据来源（#109）
+
+首次引导和设置里的「来源扫描」只读本机信息，不执行 CLI、不出网：
+
+- `installState`：`installed` / `missing` / `unknown`。`unknown` 表示该 family 没有安装提示，不能当成未安装。
+- `credentialState` / `credentialSource`：凭据是否存在，以及来源是 `env:<变量名>`、系统凭据库、本机登录还是 `none`。
+- 环境变量会重新读取进程环境 + `HKCU\Environment` + `HKLM\...\Environment`；`setx` 后点「重新扫描」即可看到，不需要重启。
+- `ANTHROPIC_API_KEY`、`OPENAI_API_KEY`、`GEMINI_API_KEY`、`GOOGLE_API_KEY`、`AZURE_OPENAI_*` 等通用 key 会在检测结果中显示为“已发现”，但 Pane 目前没有对应的额度读取器；发现 key 不等于有额度数据。
+
+「已安装但未登录」和「未安装」是两个不同状态：卡片和首启清单会分别给出登录/安装动作，不会用同一句“没有找到登录”糊过去。
+
 ## 表一：以 API key 接入
 
 这类通常不用导入浏览器 Cookie。key 必须属于对应平台、地区和计费产品；账单权限与模型推理权限可能不同。备注名只是 Pane 中的显示名称，不改变账号归属。
