@@ -3418,7 +3418,7 @@ function formatHoverMetric(m: Metric, label = displayMetricLabel(m.label)): stri
 /// Tip next to the ring: weekly for ordinary 5h cards, the ring window
 /// for Copilot/Z.ai, every independent pool for Cursor/Antigravity.
 function overviewHoverTip(s: Snapshot, quota: OverviewQuota, displayName: string): string {
-  if (quota.status === "error") return `${displayName}: ${t("overview.offline")}`;
+  if (quota.status === "error") return `${displayName}: ${overviewFailureLabel(s)}`;
   if (quota.status === "needs_setup") return `${displayName}: ${t("overview.needsSetup")}`;
   if (quota.status === "no_data") return `${displayName}: ${t("overview.noData")}`;
   if (quota.status === "text") {
@@ -3717,16 +3717,10 @@ function renderCard(s: Snapshot): string {
       : `<p class="settings-note limited-empty">${escapeHtml(t("card.limitedNoUsage"))}</p>`;
   } else if (shown.status === "needs_setup") {
     // Credential present, quota not readable: show whatever the credential
-    // CAN report, then spell out the missing step. The card must never
-    // collapse into a bare "failed" shell (user rule 2026-10-15).
+    // CAN report, then the same structured repair panel every failed state
+    // uses. The card must never collapse into a bare "failed" shell.
     const rows = shown.metrics.map((m) => renderMetric(m, shown.id)).join("");
-    body =
-      (rows ? `<div class="needs-setup-rows">${rows}</div>` : "") +
-      `<div class="needs-setup">
-        <span class="needs-setup-icon" aria-hidden="true">${uiIcon("key")}</span>
-        <span class="needs-setup-text">${escapeHtml(displayCardHint(shown.error ?? t("card.needsSetupFallback")))}</span>
-        <button class="mini-btn needs-setup-btn" type="button" data-needs-setup="${escapeHtml(shown.id)}">${escapeHtml(t("card.needsSetupAction"))}</button>
-      </div>`;
+    body = (rows ? `<div class="needs-setup-rows">${rows}</div>` : "") + repairPanelHtml(shown);
   } else if (shown.status === "ok") {
     const L = providerLayout(s.id);
     const spend = lastSpend.find((sp) => sp.id === shown.id);
@@ -3758,16 +3752,7 @@ function renderCard(s: Snapshot): string {
         ${L.expanded ? `<div class="on-demand${anim}">${onDemandHtml}</div>` : ""}`;
     }
   } else {
-    // Keep "installed but signed out" distinct from "not installed" (#109).
-    const probe = sourceProbeFor(family);
-    const installed = probe?.installState === "installed" && probe.credentialState === "absent";
-    const missing = probe?.installState === "missing" && probe.credentialState === "absent";
-    const note = installed
-      ? t("card.installedNotSignedIn", { name: providerDisplayName(family) })
-      : missing
-        ? t("card.notInstalled", { name: providerDisplayName(family) })
-        : failureText(shown.error ?? t("card.notConnected"), shown.status);
-    body = `<p class="placeholder">${escapeHtml(note)}</p>${credentialRepairHtml(shown)}`;
+    body = repairPanelHtml(shown);
   }
 
   const stale = !shown.stale
@@ -6435,6 +6420,8 @@ function overviewFailureLabel(s: Snapshot): string {
       return t("overview.failure.permission");
     case "unsupported":
       return t("overview.failure.unsupported");
+    case "empty":
+      return t("overview.failure.empty");
     default:
       return t("overview.queryFailed");
   }
@@ -11390,8 +11377,143 @@ function failureText(message: string, status = "error"): string {
   return `${t(`credential.error.${credentialFailure(message, status)}`)} · ${displayCardHint(message)}`;
 }
 
-function credentialRepairHtml(snapshot: Snapshot): string {
-  return `${authJumpHtml(snapshot)}<div class="needs-setup"><button class="mini-btn" type="button" data-card-refresh="${escapeHtml(snapshot.id)}">${escapeHtml(t("customize.test"))}</button><button class="mini-btn" type="button" data-needs-setup="${escapeHtml(snapshot.id)}">${escapeHtml(t("card.needsSetupAction"))}</button><button class="mini-btn" type="button" data-provider-help="${escapeHtml(providerFamily(snapshot.id))}">?</button></div>`;
+type RepairKind =
+  | "needs_setup"
+  | "credential"
+  | "subscription"
+  | "permission"
+  | "empty"
+  | "network"
+  | "rateLimit"
+  | "unsupported"
+  | "unknown"
+  | "not_signed_in"
+  | "not_installed"
+  | "unconfigured";
+
+function repairKind(snapshot: Snapshot, probe: SourceProbe | undefined): RepairKind {
+  if (snapshot.status === "needs_setup") return "needs_setup";
+  if (snapshot.status === "no_credentials") {
+    if (probe?.installState === "missing") return "not_installed";
+    if (probe?.installState === "installed") return "not_signed_in";
+    return "unconfigured";
+  }
+  const failure = credentialFailure(snapshot.error ?? "", snapshot.status);
+  return failure === "credential" ? "credential" : failure;
+}
+
+interface RepairView {
+  tone: "ok" | "warn" | "bad" | "neutral";
+  dot: "green" | "yellow" | "red" | "gray";
+  statusKey: string;
+  titleKey: string;
+  descKey: string;
+  primaryKey: string;
+  primaryAction: "setup" | "refresh" | "help" | "link";
+  steps: string[];
+}
+
+function credentialMethod(family: string): "key" | "local" | "session" | "cookie" | "oauth" | "cloud" {
+  return MECHANISMS[family]?.credential
+    ?? (providerDefinition(family)?.supportsApiKey ? "key" : "local");
+}
+
+/// One mapping for every non-ok card: state copy, tone, primary action and
+/// the three repair steps. Nothing here may imply that a rejected credential
+/// is an active subscription.
+function repairView(kind: RepairKind, family: string, hasLink: boolean, canSetup: boolean): RepairView {
+  const method = credentialMethod(family);
+  // Pane can only run a repair itself for key/OAuth/web-session sources. A
+  // local CLI or editor must be re-signed-in outside Pane, so the primary
+  // action opens instructions instead of pretending to log in for the user.
+  const repairKey = canSetup ? "quotaState.action.signIn" : "quotaState.action.loginHelp";
+  const credentialSteps = [
+    `quotaState.step.credential.${method}.1`,
+    `quotaState.step.credential.${method}.2`,
+    `quotaState.step.credential.${method}.3`,
+  ];
+  switch (kind) {
+    case "needs_setup":
+      return { tone: "ok", dot: "green", statusKey: "quotaState.status.connected", titleKey: "quotaState.title.needsSetup", descKey: "quotaState.desc.needsSetup", primaryKey: "quotaState.action.setup", primaryAction: "setup", steps: ["quotaState.step.needsSetup.1", "quotaState.step.needsSetup.2", "quotaState.step.needsSetup.3"] };
+    case "credential":
+      return { tone: "bad", dot: "red", statusKey: "quotaState.status.signIn", titleKey: "quotaState.title.credential", descKey: "quotaState.desc.credential", primaryKey: repairKey, primaryAction: canSetup ? "setup" : "help", steps: credentialSteps };
+    case "subscription":
+      return { tone: "bad", dot: "red", statusKey: "quotaState.status.subscription", titleKey: "quotaState.title.subscription", descKey: "quotaState.desc.subscription", primaryKey: "quotaState.action.viewSubscription", primaryAction: hasLink ? "link" : (canSetup ? "setup" : "help"), steps: ["quotaState.step.subscription.1", "quotaState.step.subscription.2", "quotaState.step.subscription.3"] };
+    case "permission":
+      return { tone: "warn", dot: "yellow", statusKey: "quotaState.status.permission", titleKey: "quotaState.title.permission", descKey: "quotaState.desc.permission", primaryKey: canSetup ? "quotaState.action.setup" : "quotaState.action.loginHelp", primaryAction: canSetup ? "setup" : "help", steps: ["quotaState.step.permission.1", "quotaState.step.permission.2", "quotaState.step.permission.3"] };
+    case "empty":
+      return { tone: "neutral", dot: "gray", statusKey: "quotaState.status.empty", titleKey: "quotaState.title.empty", descKey: "quotaState.desc.empty", primaryKey: "quotaState.action.retry", primaryAction: "refresh", steps: ["quotaState.step.empty.1", "quotaState.step.empty.2", "quotaState.step.empty.3"] };
+    case "network":
+    case "rateLimit":
+      return { tone: "warn", dot: "yellow", statusKey: kind === "network" ? "quotaState.status.network" : "quotaState.status.rateLimit", titleKey: kind === "network" ? "quotaState.title.network" : "quotaState.title.rateLimit", descKey: kind === "network" ? "quotaState.desc.network" : "quotaState.desc.rateLimit", primaryKey: "quotaState.action.retry", primaryAction: "refresh", steps: ["quotaState.step.network.1", "quotaState.step.network.2", "quotaState.step.network.3"] };
+    case "unsupported":
+      return { tone: "neutral", dot: "gray", statusKey: "quotaState.status.unsupported", titleKey: "quotaState.title.unsupported", descKey: "quotaState.desc.unsupported", primaryKey: "quotaState.action.help", primaryAction: "help", steps: ["quotaState.step.unsupported.1", "quotaState.step.unsupported.2", "quotaState.step.unsupported.3"] };
+    case "not_signed_in":
+      return { tone: "bad", dot: "red", statusKey: "quotaState.status.notSignedIn", titleKey: "quotaState.title.notSignedIn", descKey: "quotaState.desc.notSignedIn", primaryKey: repairKey, primaryAction: canSetup ? "setup" : "help", steps: ["quotaState.step.signIn.1", "quotaState.step.signIn.2", "quotaState.step.signIn.3"] };
+    case "not_installed":
+      return { tone: "neutral", dot: "gray", statusKey: "quotaState.status.notInstalled", titleKey: "quotaState.title.notInstalled", descKey: "quotaState.desc.notInstalled", primaryKey: "quotaState.action.help", primaryAction: "help", steps: ["quotaState.step.install.1", "quotaState.step.install.2", "quotaState.step.install.3"] };
+    case "unconfigured":
+      return { tone: "neutral", dot: "gray", statusKey: "quotaState.status.notConfigured", titleKey: "quotaState.title.notConfigured", descKey: "quotaState.desc.notConfigured", primaryKey: canSetup ? "quotaState.action.add" : "quotaState.action.help", primaryAction: canSetup ? "setup" : "help", steps: ["quotaState.step.add.1", "quotaState.step.add.2", "quotaState.step.add.3"] };
+    default:
+      return { tone: "neutral", dot: "gray", statusKey: "quotaState.status.failed", titleKey: "quotaState.title.failed", descKey: "quotaState.desc.failed", primaryKey: "quotaState.action.retry", primaryAction: "refresh", steps: ["quotaState.step.unknown.1", "quotaState.step.unknown.2", "quotaState.step.unknown.3"] };
+  }
+}
+
+const quotaDetailsOpen = new Set<string>();
+
+function repairLink(family: string, snap: Snapshot): string | null {
+  const dash = (snap.dashboard_url ?? "").trim();
+  if (/^https?:\/\//i.test(dash)) return dash;
+  const links = PROVIDER_LINKS[family] ?? [];
+  return (links.find((link) => /dashboard/i.test(link.label)) ?? links[0])?.url ?? null;
+}
+
+function repairPanelHtml(shown: Snapshot): string {
+  const family = providerFamily(shown.id);
+  const probe = sourceProbeFor(family);
+  const kind = repairKind(shown, probe);
+  const def = providerDefinition(family);
+  const canSetup = def?.supportsApiKey === true || def?.supportsOAuth === true || isWebSessionFamily(family);
+  const link = repairLink(family, shown);
+  const view = repairView(kind, family, link !== null, canSetup);
+  const vars = { name: providerDisplayName(family), credential: t(credentialLabelKey(family)) };
+  const action =
+    view.primaryAction === "setup" ? `data-needs-setup="${escapeHtml(shown.id)}"`
+      : view.primaryAction === "refresh" ? `data-card-refresh="${escapeHtml(shown.id)}"`
+        : view.primaryAction === "link" && link ? `data-link="${escapeHtml(link)}"`
+          : `data-provider-help="${escapeHtml(family)}"`;
+  const source = !probe || probe.credentialSource === "none"
+    ? t("quotaState.source.none")
+    : probe.credentialSource.startsWith("env:")
+      ? t("quotaState.source.env", { name: probe.credentialSource.slice(4) })
+      : probe.credentialSource === "local" ? t("quotaState.source.local") : t("quotaState.source.saved");
+  const install = probe ? t(`quotaState.install.${probe.installState}`) : t("quotaState.install.unknown");
+  const raw = shown.error ? displayCardHint(shown.error) : t("quotaState.none");
+  const open = quotaDetailsOpen.has(shown.id);
+  return `<section class="quota-state quota-state--${view.tone}" data-quota-kind="${kind}">
+    <div class="quota-state-top">
+      <span class="quota-state-label">${escapeHtml(t("quotaState.label"))}</span>
+      <span class="quota-state-chip"><span class="acct-dot ${view.dot}" aria-hidden="true"></span>${escapeHtml(t(view.statusKey))}</span>
+    </div>
+    <h4 class="quota-state-title">${escapeHtml(t(view.titleKey, vars))}</h4>
+    <p class="quota-state-desc">${escapeHtml(t(view.descKey, vars))}</p>
+    <div class="quota-state-actions">
+      <button class="mini-btn primary quota-primary" type="button" ${action}>${escapeHtml(t(view.primaryKey))}</button>
+      <button class="mini-btn quota-details-toggle" type="button" data-quota-details="${escapeHtml(shown.id)}" aria-expanded="${open}">${escapeHtml(t(open ? "quotaState.hideDetails" : "quotaState.details"))}</button>
+    </div>
+    <div class="quota-state-details" data-quota-panel="${escapeHtml(shown.id)}"${open ? "" : " hidden"}>
+      <ol class="quota-state-steps">${view.steps.map((key) => `<li>${escapeHtml(t(key, vars))}</li>`).join("")}</ol>
+      <dl class="quota-state-meta">
+        <div><dt>${escapeHtml(t("quotaState.meta.source"))}</dt><dd>${escapeHtml(source)}</dd></div>
+        <div><dt>${escapeHtml(t("quotaState.meta.install"))}</dt><dd>${escapeHtml(install)}</dd></div>
+        <div><dt>${escapeHtml(t("quotaState.meta.provider"))}</dt><dd>${escapeHtml(raw)}</dd></div>
+      </dl>
+      <div class="quota-state-detail-actions">
+        <button class="mini-btn" type="button" data-provider-help="${escapeHtml(family)}">${escapeHtml(t("quotaState.help"))}</button>
+        <button class="mini-btn" type="button" data-card-refresh="${escapeHtml(shown.id)}">${escapeHtml(t("quotaState.action.retry"))}</button>
+      </div>
+    </div>
+  </section>`;
 }
 
 function resetAccountSaveButton(form: HTMLElement | null): void {
@@ -21736,15 +21858,6 @@ async function jumpToAuthCenter(family: string): Promise<void> {
 /// without making the user go find the page. OAuth families and Pane-hosted
 /// web-session families both use this route; a key-only family is pointed at
 /// its own key field by its hint instead.
-function authJumpHtml(snap: Snapshot): string {
-  const family = providerFamily(snap.id);
-  if (
-    snap.status !== "no_credentials" ||
-    (providerDefinition(family)?.supportsOAuth !== true && !isWebSessionFamily(family))
-  ) return "";
-  return `<button class="mini-btn auth-jump" type="button" data-auth-jump="${escapeHtml(family)}">${escapeHtml(t("card.signIn"))}</button>`;
-}
-
 let authCenterLoading: Promise<void> | null = null;
 function loadAuthCenter(): Promise<void> {
   if (!authCenterLoading) {
@@ -23515,11 +23628,6 @@ document.querySelector("#settings-btn")!.addEventListener("click", (event) => {
       if (splitAt > 0) setPinnedAccount(raw.slice(0, splitAt), raw.slice(splitAt + 1));
       return;
     }
-    const authJump = target.closest<HTMLElement>("[data-auth-jump]");
-    if (authJump) {
-      void jumpToAuthCenter(authJump.dataset.authJump!);
-      return;
-    }
     const help = target.closest<HTMLElement>("[data-provider-help]");
     if (help) { openProviderHelp(help.dataset.providerHelp!); return; }
     const needsSetup = target.closest<HTMLElement>("[data-needs-setup]");
@@ -23554,6 +23662,22 @@ document.querySelector("#settings-btn")!.addEventListener("click", (event) => {
       const [family, acctId] = acctTab.dataset.cardAccount!.split("|");
       userSelectedAccountFor.set(family, acctId);
       switchAccountCard(family, acctId, acctTab);
+      return;
+    }
+    const quotaDetails = target.closest<HTMLElement>("[data-quota-details]");
+    if (quotaDetails) {
+      const id = quotaDetails.dataset.quotaDetails!;
+      const panel = [...document.querySelectorAll<HTMLElement>("[data-quota-panel]")]
+        .find((node) => node.dataset.quotaPanel === id);
+      const willOpen = panel?.hasAttribute("hidden") ?? false;
+      if (willOpen) quotaDetailsOpen.add(id);
+      else quotaDetailsOpen.delete(id);
+      if (panel) {
+        if (willOpen) panel.removeAttribute("hidden");
+        else panel.setAttribute("hidden", "");
+      }
+      quotaDetails.setAttribute("aria-expanded", String(willOpen));
+      quotaDetails.textContent = t(willOpen ? "quotaState.hideDetails" : "quotaState.details");
       return;
     }
     const cardRefresh = target.closest<HTMLElement>("[data-card-refresh]");

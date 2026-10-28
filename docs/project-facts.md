@@ -1006,6 +1006,13 @@ changes.
   `/v1/doctor` adds `installed_but_not_signed_in` as an `info` check with a
   remediation. Common keys without a Pane quota reader are reported as
   found-but-unsupported rather than hidden.
+- **Failed-card UI** — every non-ok card renders one `repairPanelHtml`: quota
+  status, a plain-language title/description, exactly one primary action
+  (key/OAuth setups open Pane; local/session sources open login instructions),
+  and expandable diagnostics (steps, source, install state, raw provider
+  response). `credentialFailure` has an `empty` kind for a completed query
+  with no quota data, separate from `unsupported`; rejected credentials also
+  evict the last-good snapshot cache so an old plan cannot reappear.
 - **Evidence** — real `source_probe` + `/v1/providers` + `/v1/doctor` checked
   in the running dev build; onboarding four steps, rescan after a temporary
   `setx`, and the detection env-key row were walked on the real window.

@@ -1,4 +1,4 @@
-export type CredentialFailure = "network" | "rateLimit" | "credential" | "permission" | "unsupported" | "subscription" | "unknown";
+export type CredentialFailure = "network" | "rateLimit" | "credential" | "permission" | "unsupported" | "subscription" | "empty" | "unknown";
 
 export type CredentialFinality = "revoked" | "transient";
 
@@ -27,7 +27,11 @@ export function credentialFailure(message: string, status = "error"): Credential
   if (/\b429\b|rate.?limit|too many requests|限流/i.test(message)) return "rateLimit";
   if (/network|timeout|timed out|dns|failed to connect|connection (?:reset|refused|closed|error)|error sending request|transport|proxy|tls|网络|超时|连接失败|HTTP 5\d\d/i.test(message)) return "network";
   if (/(?:subscription|plan|membership).*(?:expired|ended|cancel(?:l)?ed|inactive|not active)|no active (?:subscription|plan)|订阅.*(?:到期|过期|失效|已结束|未生效)|套餐.*(?:到期|过期|失效|已结束)|会员.*(?:到期|过期|失效)|续费/i.test(message)) return "subscription";
-  if (/no quota|not published|not supported|no .*headers|unavailable.*api|discontinued.*api|不支持|未公开/i.test(message)) return "unsupported";
+  // The request succeeded but produced no displayable windows (StepFun's
+  // "no quota data"): that is an empty result, not a rejected credential and
+  // not an unsupported API.
+  if (/no (?:quota|usage)(?: data| windows)?|returned no (?:quota|usage|windows)|no recognizable|empty (?:quota|usage)|未返回.*额度|没有.*额度数据|无可显示.*额度|未获取到.*额度/i.test(message)) return "empty";
+  if (/no quota|not published|not supported|no .*headers|unavailable.*api|(?:api.*discontinued|discontinued.*api)|不支持|未公开/i.test(message)) return "unsupported";
   if (status === "needs_setup" || /\b403\b|permission|scope|admin key|management key|billing read|forbidden|权限/i.test(message)) return "permission";
   if (/\b401\b|unauthori[sz]ed|invalid.*key|key.*invalid|rejected|expired|sign.in|log.in|invalid.*(?:cookie|token|credential)|(?:cookie|token|credential).*(?:invalid|missing|expired)|凭据|密钥|登录|过期/i.test(message)) return "credential";
   return "unknown";

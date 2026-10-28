@@ -38,6 +38,13 @@ test('network, credentials, permissions and exhaustion-like rate limits are dist
   assert.equal(credentialFailure('unexpected body'), 'unknown');
 });
 
+test('a completed query with no quota data is its own state', () => {
+  assert.equal(credentialFailure('Step Plan returned no quota data'), 'empty');
+  assert.equal(credentialFailure('usage endpoint returned no windows'), 'empty');
+  assert.equal(credentialFailure('API discontinued'), 'unsupported');
+  assert.equal(credentialFailure('session expired'), 'credential');
+});
+
 test('subscription expiry is not flattened into sign-in or unknown', () => {
   assert.equal(credentialFailure('subscription expired'), 'subscription');
   assert.equal(credentialFailure('no active subscription'), 'subscription');
@@ -93,7 +100,46 @@ test('overview tiles show a distinct label per failure kind', () => {
   assert.equal(context.overviewFailureLabel({ status: 'error', error: 'network timeout' }), 'overview.failure.network');
   assert.equal(context.overviewFailureLabel({ status: 'error', error: 'HTTP 429' }), 'overview.failure.rateLimit');
   assert.equal(context.overviewFailureLabel({ status: 'error', error: 'HTTP 403' }), 'overview.failure.permission');
-  assert.equal(context.overviewFailureLabel({ status: 'error', error: 'no quota data' }), 'overview.failure.unsupported');
+  assert.equal(context.overviewFailureLabel({ status: 'error', error: 'no quota data' }), 'overview.failure.empty');
   assert.equal(context.overviewFailureLabel({ status: 'no_credentials', error: null }), 'overview.needsCredentials');
   assert.equal(context.overviewFailureLabel({ status: 'needs_setup', error: 'anything' }), 'overview.needsSetup');
+});
+
+test('repair views keep action, status and steps aligned with the failure kind', () => {
+  const code = actualFunctions(['credentialMethod', 'repairView']);
+  const context = vm.createContext({
+    MECHANISMS: { claude: { credential: 'local' }, opencode: { credential: 'key' } },
+    providerDefinition: () => ({ supportsApiKey: true }),
+  });
+  vm.runInContext(code, context);
+  const credential = context.repairView('credential', 'claude', false, true);
+  assert.equal(credential.statusKey, 'quotaState.status.signIn');
+  assert.equal(credential.primaryAction, 'setup');
+  assert.match(credential.steps[0], /credential\.local\.1/);
+  const key = context.repairView('credential', 'opencode', false, true);
+  assert.match(key.steps[0], /credential\.key\.1/);
+  const empty = context.repairView('empty', 'opencode', false, true);
+  assert.equal(empty.statusKey, 'quotaState.status.empty');
+  assert.equal(empty.primaryAction, 'refresh');
+  const network = context.repairView('network', 'opencode', false, true);
+  assert.equal(network.primaryAction, 'refresh');
+  assert.equal(network.tone, 'warn');
+  const subscription = context.repairView('subscription', 'opencode', true, true);
+  assert.equal(subscription.primaryAction, 'link');
+  const install = context.repairView('not_installed', 'claude', false, false);
+  assert.equal(install.primaryAction, 'help');
+  const localNoPane = context.repairView('credential', 'claude', false, false);
+  assert.equal(localNoPane.primaryAction, 'help', 'local CLIs must not pretend Pane can sign in for them');
+  assert.equal(localNoPane.primaryKey, 'quotaState.action.loginHelp');
+});
+
+test('repair kind understands installed, missing and failure states', () => {
+  const code = actualFunctions(['repairKind']);
+  const context = vm.createContext({ credentialFailure });
+  vm.runInContext(code, context);
+  assert.equal(context.repairKind({ status: 'needs_setup', error: '' }, undefined), 'needs_setup');
+  assert.equal(context.repairKind({ status: 'no_credentials' }, { installState: 'installed' }), 'not_signed_in');
+  assert.equal(context.repairKind({ status: 'no_credentials' }, { installState: 'missing' }), 'not_installed');
+  assert.equal(context.repairKind({ status: 'error', error: 'Step Plan returned no quota data' }), 'empty');
+  assert.equal(context.repairKind({ status: 'error', error: 'HTTP 401' }), 'credential');
 });

@@ -87,3 +87,13 @@ Remove-Item -Recurse -Force "$env:LOCALAPPDATA\com.aafff623.pane\EBWebView" -Err
 - 机制修复：`providers::credential_rejected` 统一识别 401/403/过期/撤销；OpenCode 被拒时直接返回错误、不再本地回退（离线/5xx 仍可本地回退且标注清  楚）；`/v1/doctor` 新增 `credentials_rejected`；首启检测状态结合最新查询结果，过期凭据显示“凭据已过期或被拒绝”，不再叫“已找到凭据”。
 - 影响：过期 key 不再触发每次刷新复制 400MB 的 opencode.db。
 - 追加：`snapshot_store` 对“凭据被拒绝”的错误不再恢复上次成功快照，并清除持久缓存；否则旧 Go 卡会以 last-good 形式复活。实测 `/v1/providers` 的 opencode 已变为 error、plan 为空，`/v1/doctor` 的 credentials_rejected 同时列出 claude 和 opencode。
+
+## 2026-10-28 异常状态卡统一（UI follow-up）
+
+- 旧实现：`error` / `no_credentials` 用 placeholder + 虚线框 + “测试连接 / 怎么补 / ?” 三个同权重按钮；`needs_setup` 只有一行文字。问题：中文套英文、按钮语义含糊、没有主次、把刷新说成测试。
+- 新实现：`repairKind` → `repairView` → `repairPanelHtml` 一条映射。每张失败卡显示：额度状态（点+文案）、标题、人话解释、一个主操作、可展开诊断（三步、凭据来源、安装状态、服务商原始返回、接入说明/重新查询）。
+- 动作按凭据方式分流：key/oauth/web-session 由 Pane 代劳（设置或授权中心）；local/session/cookie/cloud 显示“查看登录方法”，不假装 Pane 能替用户登录。
+- 新增 `empty` 失败类型：StepFun 的 “no quota data” 是查询完成但没有可展示数据，显示“额度未获取 / 暂未获取到额度数据”，与 `unsupported`、凭据错误分开；overview 的悬浮提示也使用同一分类。
+- 缓存规则：被上游拒绝的凭据驱逐 last-good（不会复活旧计划）；暂态错误仍保留旧数据并标 stale。
+- 真机截图验证：SenseNova / Trae CN（红色“需重新登录”，主操作“查看登录方法”，详情含三步与原始返回）、StepFun（灰色“额度未获取”，主操作“重新查询”）、ZCode（绿色“已连接 / 需要补充授权信息”，主操作“完善授权”）。
+- 门禁：Node 247/247（新增 empty 分类、repairKind/repairView 映射与本地来源动作测试）；前端构建通过；本轮未改 Rust，parse-tests 维持 1200/0/18。
