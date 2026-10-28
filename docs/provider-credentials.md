@@ -12,7 +12,8 @@
 
 - `installState`：`installed` / `missing` / `unknown`。`unknown` 表示该 family 没有安装提示，不能当成未安装。
 - `credentialState` / `credentialSource`：凭据是否存在，以及来源是 `env:<变量名>`、Pane 保存的密钥/账号列表、本机登录还是 `none`。多账号 family（ClinePass、APIGOTO 等）按账号列表判断，不会因为 key 不在 family 级文件里就误报无凭据。
-- 环境变量会重新读取进程环境 + `HKCU\Environment` + `HKLM\...\Environment`；`setx` 后点「重新扫描」即可看到，不需要重启。
+- 环境变量会重新读取进程环境 + `HKCU\Environment` + `HKLM\...\Environment`；`setx` 后点「重新扫描」即可看到，不需要重启。Windows 下变量名按大小写不敏感匹配，注册表 Path 中的 `%VAR%` 会展开，机器级和 npm 全局安装的 CLI 都算安装证据。
+- 探测是只读的：只判断凭据是否存在，不迁移、不删除、不改写密钥文件，也不读取任何密钥值。
 - `ANTHROPIC_API_KEY`、`OPENAI_API_KEY`、`GEMINI_API_KEY`、`GOOGLE_API_KEY`、`AZURE_OPENAI_*` 等通用 key 会在检测结果中显示为“已发现”，但 Pane 目前没有对应的额度读取器；发现 key 不等于有额度数据。
 
 「已安装但未登录」和「未安装」是两个不同状态：卡片和首启清单会分别给出登录/安装动作，不会用同一句“没有找到登录”糊过去。

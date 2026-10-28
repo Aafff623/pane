@@ -71,3 +71,12 @@ Remove-Item -Recurse -Force "$env:LOCALAPPDATA\com.aafff623.pane\EBWebView" -Err
 - 代码修复：`detectedFamilies` 把账号卡计入 family 证据；引导默认勾选 ok 快照对应 family；跳过/关闭引导不再应用勾选，只有最后一步「完成」才写入选择。
 - 本机恢复：从 `config.json` 的 `disabled` 移除上述 13 项（备份 `config.json.bak-before-disabled-restore-20261028`），重启后 active 28 → 39，apigoto/tokenrhythm/workbuddy/minimax/xfyun/qodercn 等卡回到面板。
 - 恢复后仍有外部会话问题（非 Pane 数据丢失）：Claude token 为空、SenseNova 会话过期、Trae CN token 被拒、Grok/Qoder/Qwen 未登录；需要对应客户端重新登录。StepFun Step Plan 返回无配额数据，ZCode 无 Start Plan。
+
+## 2026-10-28 独立复审与修复
+
+- **Blocker 已修**：空看板「继续设置」走的是非首装路径，应用勾选时现在会并入当前已启用的 family，扫描暂时漏掉的已配置来源不会被写进 `disabled`；旧检测器在已有配置的首跑路径也保留已启用项。设置里的重看仍只读。
+- **探测改为真只读**：不再调用会迁移并改写文件的 `stored_key_file`，新增只读存在性检查；账号/登录/Codex 登录只数文件行，不读 vault。
+- **Windows PATH 修正**：变量名大小写不敏感，注册表 `%VAR%` 会展开，机器级 PATH 不再丢；npm 全局安装的 CLI 现在能作为安装证据（本机已出现 `.local\bin\claude.exe`）。
+- **性能**：`probe_families` 每次请求只读一次环境和一份 PATH 目录索引；`/v1/providers` 从 8–9 秒降到约 0.1 秒，`/v1/doctor` 从 13 秒降到约 0.15 秒。
+- **连接步骤**按账号卡判断「已连接」，不再被 family 卡的 `no_credentials` 误导。
+- 门禁：Node 243/243；`parse-tests` 串行去代理 1197 通过 / 0 失败 / 18 忽略；`cargo check` 通过。
