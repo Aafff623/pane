@@ -55,7 +55,7 @@ sha2 = "0.10"
 hmac = "0.12"
 # Qoder CN (Chromium os_crypt AES-256-GCM) and Trae CN (ByteCrypto
 # AES-128-CBC) credential files; pure Rust, no system backend.
-aes = "0.8"
+aes = "0.9"
 aes-gcm = "0.10"
 cbc = "0.1"
 # Key vault: master-password at-rest encryption. Argon2id (OWASP floor
