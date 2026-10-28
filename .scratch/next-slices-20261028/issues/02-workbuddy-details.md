@@ -10,6 +10,11 @@ Status: done — implemented 2026-10-28; owner visual acceptance blocked on a va
 - Tests: `official_usage_snapshot_keeps_sorted_days_and_rows` plus the existing parser/aggregation suite pass; Node 254/254; build and site 55/55.
 - Not visually verified yet: the current local WorkBuddy credential returns 401, so the owner needs to sign in once and open the card disclosure.
 
+## Deep-review fixes (2026-10-28)
+
+- The four-column header no longer squeezes "credits" into the model track; it is a flex title/unit row with a localized `wb.credits` unit.
+- Out-of-range timestamps are filtered from the daily chart instead of rendering a "wn" label.
+
 ## Build
 
 - Extend `OfficialUsage` in `providers/codebuddy.rs` with the already-computed `by_day` map and a bounded latest-rows list (reuse `MAX_DETAIL_ROWS`).

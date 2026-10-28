@@ -2560,6 +2560,12 @@ article.provider.is-folded:hover {
   opacity: 1;
 }
 
+.share-btn:focus-visible {
+  opacity: 1;
+  outline: 2px solid var(--foreground);
+  outline-offset: 2px;
+}
+
 .share-btn:hover {
   color: var(--foreground);
 }
@@ -12131,7 +12137,7 @@ body.colorblind .trend-bar{stroke:currentColor;stroke-width:1;stroke-dasharray:2
 }
 .share-preview-stage {
   min-height: 180px;
-  max-height: min(56vh, 520px);
+  max-height: calc(100vh - 220px);
   overflow: auto;
   display: flex;
   align-items: center;
@@ -12144,7 +12150,7 @@ body.colorblind .trend-bar{stroke:currentColor;stroke-width:1;stroke-dasharray:2
 }
 .share-preview-image {
   max-width: 100%;
-  max-height: 50vh;
+  max-height: calc(100vh - 240px);
   border-radius: 12px;
   box-shadow: 0 10px 30px rgb(0 0 0 / 0.22);
 }
@@ -12269,7 +12275,6 @@ body.colorblind .trend-bar{stroke:currentColor;stroke-width:1;stroke-dasharray:2
   line-height: 1;
   white-space: nowrap;
 }
-.wb-rows-head,
 .wb-row {
   display: grid;
   grid-template-columns: 62px minmax(0, 1fr) 54px 42px;
@@ -12277,13 +12282,15 @@ body.colorblind .trend-bar{stroke:currentColor;stroke-width:1;stroke-dasharray:2
   align-items: baseline;
 }
 .wb-rows-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 6px;
   margin-top: 8px;
   color: var(--muted-foreground);
   font-size: 9px;
   text-transform: uppercase;
   letter-spacing: 0.04em;
 }
-.wb-rows-head > :last-child { text-align: right; }
 .wb-row {
   padding: 3px 0;
   border-top: 1px solid color-mix(in oklab, var(--border) 55%, transparent);

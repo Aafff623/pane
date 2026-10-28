@@ -11,6 +11,14 @@ Status: done — implemented 2026-10-28; owner visual acceptance pending | Prior
 - Gates: `pnpm build`; Node 251/251; site 55/55; parse-tests full run 1202 passed + 1 known proxy flake that passed solo, 18 ignored; the new `share_image` tests passed.
 - Not yet done: 125% scale check and owner visual acceptance.
 
+## Deep-review fixes (2026-10-28)
+
+- `wb-rows-head`/`wb-row` no longer share one grid; the header cannot put "credits" over the model column.
+- Unknown day buckets are filtered before the bar chart (no "wn" label); WorkBuddy unit header is localized.
+- Closing/reopening a preview now dismisses the previous overlay and its document keydown listener; focus returns to the exact share button via an explicit trigger, including the total-spend range path.
+- Copy failures use a dedicated `share.copyFailed` key; `card.share` now says "Preview share card", and `share.previewTitle` (dead) is removed.
+- Share buttons are visible on keyboard focus; PNG save names avoid Windows reserved names; preview stage uses the available window height at 100%/132% scale.
+
 ## Build
 
 - Refactor the existing snapshot renderer so it returns a PNG data URL instead of only writing the clipboard.

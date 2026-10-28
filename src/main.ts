@@ -3601,7 +3601,9 @@ function cardMetricRows(layout: ProviderLayout, metrics: Metric[]): { always: st
 function workbuddyDetailsHtml(s: Snapshot): string {
   const usage = s.workbuddy_usage;
   if (!usage || usage.requests <= 0) return "";
-  const days = usage.by_day.slice(-14);
+  const days = usage.by_day
+    .filter((day) => /^\d{4}-\d{2}-\d{2}$/.test(day.day))
+    .slice(-14);
   const max = Math.max(...days.map((day) => day.credits), 0);
   const bars = days
     .map((day) => {
@@ -3625,7 +3627,7 @@ function workbuddyDetailsHtml(s: Snapshot): string {
     <summary><span>${escapeHtml(t("wb.history"))}</span>${usage.partial ? `<span class="wb-partial">${escapeHtml(t("wb.partial"))}</span>` : ""}</summary>
     <div class="wb-body">
       ${bars ? `<div class="wb-chart" aria-label="${escapeHtml(t("wb.daily"))}">${bars}</div>` : ""}
-      <div class="wb-rows-head"><span>${escapeHtml(t("wb.requests"))}</span><span>credits</span></div>
+      <div class="wb-rows-head"><span>${escapeHtml(t("wb.requests"))}</span><span>${escapeHtml(t("wb.credits"))}</span></div>
       <div class="wb-rows">${rows || `<p class="wb-empty">${escapeHtml(t("wb.empty"))}</p>`}</div>
     </div>
   </details>`;
@@ -9157,13 +9159,16 @@ async function renderElementSnapshot(el: HTMLElement, W: number): Promise<string
   el.style.left = "-99999px";
   el.style.top = "0";
   document.body.appendChild(el);
-  const H = Math.ceil(el.getBoundingClientRect().height);
+  // scrollHeight catches content that overflows the measured box (narrow
+  // cards wrap more, and a clipped tagline in the saved PNG is unfixable
+  // afterwards). The extra 12px is breathing room for the footer row.
+  const H = Math.ceil(Math.max(el.getBoundingClientRect().height, el.scrollHeight));
   el.remove();
   el.style.position = "";
   el.style.left = "";
   el.style.top = "";
   const W2 = W + PAD * 2;
-  const H2 = H + PAD * 2 + FOOT;
+  const H2 = H + PAD * 2 + FOOT + 12;
   css +=
     `#snap-root{font-family:${bodyStyle.fontFamily};font-size:${bodyStyle.fontSize};` +
     `color:${bodyStyle.color};letter-spacing:${bodyStyle.letterSpacing};` +
@@ -9246,9 +9251,16 @@ function shareFileName(label: string): string {
 /// Preview-before-copy. The old share path copied silently and only reported
 /// in the footer status bar, which reads as "nothing happened"; this modal
 /// makes the rendered image and the result visible next to the action.
-function openSharePreview(el: HTMLElement, W: number, opts: { title: string; fileName: string }): void {
+let dismissSharePreview: (() => void) | null = null;
+
+function openSharePreview(
+  el: HTMLElement,
+  W: number,
+  opts: { title: string; fileName: string; trigger?: HTMLElement },
+): void {
+  dismissSharePreview?.();
   document.getElementById("share-preview-overlay")?.remove();
-  const trigger = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+  const trigger = opts.trigger ?? (document.activeElement instanceof HTMLElement ? document.activeElement : null);
   const overlay = document.createElement("div");
   overlay.id = "share-preview-overlay";
   overlay.innerHTML = `
@@ -9273,6 +9285,7 @@ function openSharePreview(el: HTMLElement, W: number, opts: { title: string; fil
   const focusables = () =>
     Array.from(overlay.querySelectorAll<HTMLElement>("button:not([disabled])"));
   const close = () => {
+    if (dismissSharePreview === close) dismissSharePreview = null;
     overlay.remove();
     document.removeEventListener("keydown", onKey, true);
     trigger?.focus?.();
@@ -9303,6 +9316,7 @@ function openSharePreview(el: HTMLElement, W: number, opts: { title: string; fil
   overlay.querySelector(".share-preview-close")!.addEventListener("click", close);
   document.addEventListener("keydown", onKey, true);
   document.body.appendChild(overlay);
+  dismissSharePreview = close;
 
   const image = overlay.querySelector<HTMLImageElement>(".share-preview-image")!;
   const loading = overlay.querySelector<HTMLElement>(".share-preview-loading")!;
@@ -9336,7 +9350,7 @@ function openSharePreview(el: HTMLElement, W: number, opts: { title: string; fil
         result.classList.remove("error");
       })
       .catch((err) => {
-        result.textContent = t("share.renderFailed", { err: String(err) });
+        result.textContent = t("share.copyFailed", { err: String(err) });
         result.classList.add("error");
       })
       .finally(() => {
@@ -9365,7 +9379,7 @@ function openSharePreview(el: HTMLElement, W: number, opts: { title: string; fil
 
 /// Opens the share preview for one provider card. The total-spend button
 /// lands on the range menu instead and previews a spend envelope.
-async function shareCard(id: string): Promise<void> {
+async function shareCard(id: string, trigger?: HTMLElement): Promise<void> {
   const status = document.querySelector("#status")!;
   try {
     const el = document.querySelector<HTMLElement>(`article.provider[data-provider="${id}"]`);
@@ -9391,7 +9405,7 @@ async function shareCard(id: string): Promise<void> {
       .forEach((n) => n.remove());
 
     const title = providerDisplayName(providerFamily(id));
-    openSharePreview(clone, W, { title, fileName: shareFileName(title) });
+    openSharePreview(clone, W, { title, fileName: shareFileName(title), trigger });
   } catch (err) {
     status.textContent = t("footer.shareFailed", { err: String(err) });
   }
@@ -9505,7 +9519,7 @@ function creditEntriesForRange(range: ShareRange): { id: string; name: string; v
   return rows.sort((a, b) => a.name.localeCompare(b.name, localeTag()));
 }
 
-async function shareSpendEnvelope(range: ShareRange): Promise<void> {
+async function shareSpendEnvelope(range: ShareRange, trigger?: HTMLElement): Promise<void> {
   const status = document.querySelector("#status")!;
   try {
     const entries = envelopeEntries(range);
@@ -9549,7 +9563,7 @@ async function shareSpendEnvelope(range: ShareRange): Promise<void> {
     const live = document.querySelector<HTMLElement>("article.total-spend");
     const W = live ? Math.ceil(live.getBoundingClientRect().width) : 380;
     const title = `${t("spend.title")} · ${t(SHARE_RANGE_LABEL[range])}`;
-    openSharePreview(card, W, { title, fileName: shareFileName(title) });
+    openSharePreview(card, W, { title, fileName: shareFileName(title), trigger });
   } catch (err) {
     status.textContent = t("footer.shareFailed", { err: String(err) });
   }
@@ -9587,7 +9601,7 @@ function openShareRangeMenu(anchor: HTMLElement): void {
     const pick = (e.target as HTMLElement).closest<HTMLElement>("[data-share-range]");
     if (pick) {
       close();
-      void shareSpendEnvelope(pick.dataset.shareRange as ShareRange);
+      void shareSpendEnvelope(pick.dataset.shareRange as ShareRange, anchor);
       return;
     }
     if (e.target === overlay) close();
@@ -23859,7 +23873,7 @@ document.querySelector("#settings-btn")!.addEventListener("click", (event) => {
       // first, then the envelope template for that window goes to the
       // clipboard. Provider cards keep the instant as-is snapshot.
       if (shareBtn.dataset.share === "__total__") openShareRangeMenu(shareBtn);
-      else void shareCard(shareBtn.dataset.share!);
+      else void shareCard(shareBtn.dataset.share!, shareBtn);
       return;
     }
     const groupBtn = target.closest<HTMLElement>("[data-card-group-menu]");

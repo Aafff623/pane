@@ -26,7 +26,7 @@ test("WorkBuddy card expands to a daily trend and recent requests", () => {
 });
 
 test("WorkBuddy detail strings exist in all three languages", () => {
-  for (const key of ["wb.history", "wb.daily", "wb.requests", "wb.partial", "wb.empty"]) {
+  for (const key of ["wb.history", "wb.daily", "wb.requests", "wb.partial", "wb.empty", "wb.credits"]) {
     const hits = i18n.match(new RegExp(`"${key.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}"`, "g"))?.length ?? 0;
     assert.equal(hits, 3, `${key} must exist in en/zh/ru`);
   }

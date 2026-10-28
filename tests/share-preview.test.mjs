@@ -28,13 +28,13 @@ test("share preview exposes copy and save with visible result text", () => {
 
 test("share preview strings exist in all three languages", () => {
   for (const key of [
-    "share.previewTitle",
     "share.previewSubtitle",
     "share.generating",
     "share.copy",
     "share.save",
     "share.close",
     "share.copied",
+    "share.copyFailed",
     "share.saved",
     "share.renderFailed",
     "share.saveFailed",

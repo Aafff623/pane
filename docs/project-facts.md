@@ -12,7 +12,7 @@ Single authorities for the neighbouring concerns:
   tracker, see [`docs/agents/issue-tracker.md`](agents/issue-tracker.md).
 - **Startup / build / run / acceptance commands** — [`docs/dev-startup.md`](dev-startup.md).
 
-Last reconciled: 2026-10-28 (first-run source detection #109; 0.12.0 released).
+Last reconciled: 2026-10-28 (first-run source detection #109; 0.12.0 released; share preview + WorkBuddy details implemented).
 
 ## Scope and boundaries
 
@@ -1299,3 +1299,25 @@ changes.
   skeleton only (no family migration/gatekeeper/capability typing); #61-03/04
   auth avatars and rich help tips, #62-03/04/05 transactional settings/CI
   release gate/error struct, and #58-05 native screenshots remain open.
+
+## Share preview and WorkBuddy ledger (2026-10-28)
+
+- **Snapshot rendering** — `renderElementSnapshot` in `src/main.ts` returns a
+  frozen-state PNG data URL; the preview modal owns copy/save, Esc/backdrop,
+  focus trap and focus return. `card.share` now opens a preview, not a silent
+  clipboard write. The share buttons are visible on keyboard focus, not hover
+  only.
+- **PNG bounds** — `decode_share_png` in `src-tauri/src/lib.rs` validates the
+  8 MiB base64 cap, PNG signature, dimensions and 16 M pixel cap before any
+  decoder sees the bytes; clipboard copy and file save share it.
+- **Save destination** — `save_share_image` writes to the OS Downloads folder
+  (falling back to the app data dir) and returns the exact path. It deliberately
+  does not open a native file dialog: that would blur and hide the popover that
+  owns the preview. `share_image.rs` strips path components, replaces invalid
+  characters, prefixes Windows reserved names, and increments `-2`, `-3` rather
+  than overwriting.
+- **WorkBuddy ledger** — `Snapshot.workbuddy_usage` carries `requests`,
+  `credits`, `partial`, daily credits and the newest 20 rows; the card expands
+  to a 14-day chart and the newest 10 requests. It is `serde(default,
+  skip_serializing_if)` for old caches and never enters the credits meter or
+  `/v1/usage` defaults. Day grouping is UTC; request rows render in local time.

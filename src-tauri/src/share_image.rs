@@ -31,6 +31,16 @@ pub fn sanitize_file_name(input: &str) -> String {
         trimmed
     };
     let stem = if stem.is_empty() { "pane-share" } else { stem };
+    let upper = stem.to_ascii_uppercase();
+    let reserved = [
+        "CON", "PRN", "AUX", "NUL", "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7",
+        "COM8", "COM9", "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9",
+    ];
+    let stem = if reserved.contains(&upper.as_str()) {
+        format!("pane-{stem}")
+    } else {
+        stem.to_string()
+    };
     format!("{stem}.png")
 }
 
@@ -72,6 +82,7 @@ mod tests {
         assert_eq!(name, "报告-2026.png");
         assert_eq!(sanitize_file_name(""), "pane-share.png");
         assert_eq!(sanitize_file_name(".png"), "png.png");
+        assert_eq!(sanitize_file_name("CON.png"), "pane-CON.png");
     }
 
     #[test]
