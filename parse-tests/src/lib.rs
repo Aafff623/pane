@@ -52,6 +52,9 @@ pub mod account_token_lock;
 #[path = "../../src-tauri/src/error.rs"]
 pub mod error;
 
+#[path = "../../src-tauri/src/share_image.rs"]
+pub mod share_image;
+
 #[path = "../../src-tauri/src/fetch_strategy.rs"]
 pub mod fetch_strategy;
 

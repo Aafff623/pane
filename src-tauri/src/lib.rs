@@ -11,6 +11,7 @@ mod skill_usage;
 mod wsl;
 mod backup;
 mod identity;
+mod share_image;
 mod secretstore;
 mod antigravity_accounts;
 mod auth_center;
@@ -5729,15 +5730,10 @@ fn png_dimensions(bytes: &[u8]) -> Result<(u32, u32), String> {
     Ok((w, h))
 }
 
-/// Puts a share-card PNG (rendered by the frontend on a canvas) onto the
-/// Windows clipboard as a real image.
-///
-/// Every command is callable by whatever JavaScript runs in the WebView, so
-/// the encoded size and the declared pixel count are both bounded before any
-/// decoding happens — otherwise a crafted PNG could force a multi-gigabyte
-/// RGBA allocation and take the tray process down.
-#[tauri::command]
-fn copy_share_image(png_base64: String) -> Result<(), String> {
+/// Validates the encoded size, PNG signature, declared dimensions and pixel
+/// count before any decoder sees the bytes. Shared by clipboard copy and the
+/// downloadable PNG so both paths have exactly the same bounds.
+fn decode_share_png(png_base64: &str) -> Result<(Vec<u8>, u32, u32), String> {
     use base64::Engine;
     let png_base64 = png_base64.trim();
     if png_base64.len() > MAX_SHARE_PNG_BASE64 {
@@ -5750,6 +5746,19 @@ fn copy_share_image(png_base64: String) -> Result<(), String> {
     if u64::from(dw) * u64::from(dh) > MAX_SHARE_PNG_PIXELS {
         return Err("share image too large".into());
     }
+    Ok((bytes, dw, dh))
+}
+
+/// Puts a share-card PNG (rendered by the frontend on a canvas) onto the
+/// Windows clipboard as a real image.
+///
+/// Every command is callable by whatever JavaScript runs in the WebView, so
+/// the encoded size and the declared pixel count are both bounded before any
+/// decoding happens — otherwise a crafted PNG could force a multi-gigabyte
+/// RGBA allocation and take the tray process down.
+#[tauri::command]
+fn copy_share_image(png_base64: String) -> Result<(), String> {
+    let (bytes, dw, dh) = decode_share_png(&png_base64)?;
     let img = tauri::image::Image::from_bytes(&bytes).map_err(|e| format!("parse png: {e}"))?;
     let (w, h) = (img.width() as usize, img.height() as usize);
     if w != dw as usize || h != dh as usize {
@@ -5764,6 +5773,28 @@ fn copy_share_image(png_base64: String) -> Result<(), String> {
             bytes: rgba.into(),
         })
         .map_err(|e| format!("copy image: {e}"))
+}
+
+/// Writes a share-card PNG into the user's Downloads folder (no native file
+/// dialog: opening one would blur and hide the popover that owns the preview)
+/// and returns the exact path so the preview can show it.
+#[tauri::command]
+fn save_share_image(
+    app: tauri::AppHandle,
+    png_base64: String,
+    suggested_name: String,
+) -> Result<String, String> {
+    let (bytes, _, _) = decode_share_png(&png_base64)?;
+    let dir = app
+        .path()
+        .download_dir()
+        .or_else(|_| app.path().app_data_dir())
+        .map_err(|e| format!("save dir: {e}"))?;
+    std::fs::create_dir_all(&dir).map_err(|e| format!("create save dir: {e}"))?;
+    let name = share_image::sanitize_file_name(&suggested_name);
+    let path = share_image::unique_path(&dir, &name);
+    std::fs::write(&path, &bytes).map_err(|e| format!("write image: {e}"))?;
+    Ok(path.display().to_string())
 }
 
 /// (Re-)registers the global toggle-popover shortcut. An empty string clears
@@ -6630,6 +6661,7 @@ pub fn run() {
             sync_tray_surfaces,
             open_link,
             copy_share_image,
+            save_share_image,
             set_shortcut,
             hide_popover,
             replay_tour,

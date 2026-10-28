@@ -12050,3 +12050,149 @@ body.colorblind .trend-bar{stroke:currentColor;stroke-width:1;stroke-dasharray:2
   font-size:12px;
 }
 .setup-banner .mini-btn { flex:none; }
+
+/* ---------------------------------------------------------------------------
+   Share preview: render first, then copy/save. The old button copied silently
+   and only wrote to the footer status bar, which read as "nothing happened".
+--------------------------------------------------------------------------- */
+#share-preview-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  background: rgb(0 0 0 / 0.45);
+  backdrop-filter: blur(6px) saturate(1.2);
+  -webkit-backdrop-filter: blur(6px) saturate(1.2);
+  animation: confirm-fade 0.16s ease;
+}
+.share-preview {
+  width: min(100%, 560px);
+  max-height: calc(100vh - 32px);
+  display: flex;
+  flex-direction: column;
+  background:
+    linear-gradient(180deg, var(--glass-sheen), transparent 38%),
+    var(--glass-surface);
+  backdrop-filter: blur(24px) saturate(1.5) brightness(1.04);
+  -webkit-backdrop-filter: blur(24px) saturate(1.5) brightness(1.04);
+  color: var(--foreground);
+  border: 1px solid var(--glass-border);
+  border-radius: 18px;
+  box-shadow:
+    0 24px 60px var(--floating-shadow),
+    inset 0 1px 1.5px rgba(255, 255, 255, 0.35);
+  animation: confirm-pop 0.18s cubic-bezier(0.2, 0.8, 0.3, 1);
+  overflow: hidden;
+}
+.share-preview-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 16px 18px 6px;
+}
+.share-preview-heading {
+  flex: 1;
+  min-width: 0;
+}
+.share-preview-heading h3 {
+  margin: 0 0 2px;
+  font-size: 14px;
+  font-weight: 650;
+}
+.share-preview-heading p {
+  margin: 0;
+  color: var(--muted-foreground);
+  font-size: 12px;
+  line-height: 1.45;
+}
+.share-preview-close {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--muted-foreground);
+  cursor: pointer;
+}
+.share-preview-close:hover {
+  color: var(--foreground);
+  background: color-mix(in oklab, var(--foreground) 8%, transparent);
+}
+.share-preview-close svg {
+  width: 16px;
+  height: 16px;
+}
+.share-preview-stage {
+  min-height: 180px;
+  max-height: min(56vh, 520px);
+  overflow: auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 8px 18px 12px;
+}
+.share-preview-loading {
+  color: var(--muted-foreground);
+  font-size: 12px;
+}
+.share-preview-image {
+  max-width: 100%;
+  max-height: 50vh;
+  border-radius: 12px;
+  box-shadow: 0 10px 30px rgb(0 0 0 / 0.22);
+}
+.share-preview-image[hidden] {
+  display: none;
+}
+.share-preview-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 0 18px 16px;
+}
+.share-preview-result {
+  flex: 1 1 100%;
+  min-height: 16px;
+  color: var(--muted-foreground);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+.share-preview-result.error {
+  color: var(--chart-red, #c33);
+}
+.share-preview-copy,
+.share-preview-save {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 7px 12px;
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+.share-preview-copy {
+  margin-left: auto;
+  border-color: transparent;
+  background: var(--foreground);
+  color: var(--background);
+}
+.share-preview-save {
+  background: var(--card);
+  color: var(--foreground);
+}
+.share-preview-copy:disabled,
+.share-preview-save:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+@media (max-height: 600px) {
+  .share-preview-image { max-height: 38vh; }
+  .share-preview-stage { min-height: 120px; }
+}

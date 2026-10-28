@@ -3806,7 +3806,7 @@ function renderCard(s: Snapshot): string {
       : "";
   const share =
     shown.status === "ok"
-      ? `<button class="share-btn" data-share="${shown.id}" title="${escapeHtml(t("card.share"))}">${uiIcon("shareNetwork")}</button>`
+      ? `<button type="button" class="share-btn" data-share="${shown.id}" aria-haspopup="dialog" title="${escapeHtml(t("card.share"))}">${uiIcon("shareNetwork")}</button>`
       : "";
   // Head status lives in the right zone (before the action cluster) so the
   // provider name keeps the whole left side and can render larger. Text-only
@@ -5810,7 +5810,7 @@ function renderTotalSpend(): string {
         <span class="spacer"></span>
         ${updateVersion ? `<button class="spend-update-btn${updatePushing ? " busy" : ""}" data-update-push${updatePushing && updatePct != null ? ` style="--pct:${updatePct}"` : ""} title="${escapeHtml(t("update.pushTip", { version: updateVersion }))}" aria-label="${escapeHtml(t("update.pushTip", { version: updateVersion }))}">${uiIcon("arrowUp")}</button>` : ""}
         ${popoverChromeHtml()}
-        ${rtkMode ? "" : `<button class="share-btn" data-share="__total__" title="${escapeHtml(t("card.share"))}">${uiIcon("shareNetwork")}</button>`}
+        ${rtkMode ? "" : `<button type="button" class="share-btn" data-share="__total__" aria-haspopup="menu" title="${escapeHtml(t("card.share"))}">${uiIcon("shareNetwork")}</button>`}
         ${foldChevron}
       </div>
       ${isFolded ? "" : `
@@ -9046,12 +9046,12 @@ function computeWhatsNew(version: string): ChangelogSection[] | null {
 }
 
 /// Rasterizes one prepared element (a curated card clone, or the spend
-/// envelope) into a PNG on the clipboard. Page CSS is collected with
-/// animations frozen at their final state (static SVG rasterization would
-/// otherwise render entrance animations invisible), the element is measured
-/// offscreen, wrapped in the snapshot frame (pad + logo foot), rendered
-/// through an SVG image document, and drawn onto a 2x canvas.
-async function copyElementSnapshot(el: HTMLElement, W: number): Promise<void> {
+/// envelope) into a PNG data URL. Page CSS is collected with animations
+/// frozen at their final state (static SVG rasterization would otherwise
+/// render entrance animations invisible), the element is measured offscreen,
+/// wrapped in the snapshot frame (pad + logo foot), rendered through an SVG
+/// image document, and drawn onto a 2x canvas.
+async function renderElementSnapshot(el: HTMLElement, W: number): Promise<string> {
   await document.fonts.ready;
   const S = 2;
   const PAD = 20; // frame around the card, like the Mac share cards
@@ -9171,17 +9171,154 @@ async function copyElementSnapshot(el: HTMLElement, W: number): Promise<void> {
   ctx.drawImage(img, 0, 0);
 
   const dataUrl = canvas.toDataURL("image/png");
+  return dataUrl;
+}
+
+async function copyShareDataUrl(dataUrl: string): Promise<void> {
   const pngBase64 = dataUrl.slice(dataUrl.indexOf(",") + 1);
   await invoke("copy_share_image", { pngBase64 });
 }
 
-/// Copies one provider card as-is. The total-spend button no longer lands
-/// here — it opens the range menu and copies a spend envelope instead.
+function shareFileName(label: string): string {
+  const slug = label
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}]+/gu, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 40) || "card";
+  const stamp = new Date().toISOString().replace(/[-:]/g, "").slice(0, 13);
+  return `pane-share-${slug}-${stamp}.png`;
+}
+
+/// Preview-before-copy. The old share path copied silently and only reported
+/// in the footer status bar, which reads as "nothing happened"; this modal
+/// makes the rendered image and the result visible next to the action.
+function openSharePreview(el: HTMLElement, W: number, opts: { title: string; fileName: string }): void {
+  document.getElementById("share-preview-overlay")?.remove();
+  const trigger = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+  const overlay = document.createElement("div");
+  overlay.id = "share-preview-overlay";
+  overlay.innerHTML = `
+    <div class="share-preview" role="dialog" aria-modal="true" aria-labelledby="share-preview-title">
+      <div class="share-preview-head">
+        <div class="share-preview-heading">
+          <h3 id="share-preview-title">${escapeHtml(opts.title)}</h3>
+          <p>${escapeHtml(t("share.previewSubtitle"))}</p>
+        </div>
+        <button type="button" class="share-preview-close" aria-label="${escapeHtml(t("share.close"))}" title="${escapeHtml(t("share.close"))}">${uiIcon("x")}</button>
+      </div>
+      <div class="share-preview-stage">
+        <span class="share-preview-loading" role="status">${escapeHtml(t("share.generating"))}</span>
+        <img class="share-preview-image" alt="" hidden>
+      </div>
+      <div class="share-preview-actions">
+        <span class="share-preview-result" role="status" aria-live="polite"></span>
+        <button type="button" class="share-preview-copy" disabled>${escapeHtml(t("share.copy"))}</button>
+        <button type="button" class="share-preview-save" disabled>${escapeHtml(t("share.save"))}</button>
+      </div>
+    </div>`;
+  const focusables = () =>
+    Array.from(overlay.querySelectorAll<HTMLElement>("button:not([disabled])"));
+  const close = () => {
+    overlay.remove();
+    document.removeEventListener("keydown", onKey, true);
+    trigger?.focus?.();
+  };
+  const onKey = (event: KeyboardEvent) => {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      event.stopPropagation();
+      close();
+      return;
+    }
+    if (event.key !== "Tab") return;
+    const items = focusables();
+    if (!items.length) return;
+    const first = items[0];
+    const last = items[items.length - 1];
+    if (event.shiftKey && document.activeElement === first) {
+      event.preventDefault();
+      last.focus();
+    } else if (!event.shiftKey && document.activeElement === last) {
+      event.preventDefault();
+      first.focus();
+    }
+  };
+  overlay.addEventListener("click", (event) => {
+    if (event.target === overlay) close();
+  });
+  overlay.querySelector(".share-preview-close")!.addEventListener("click", close);
+  document.addEventListener("keydown", onKey, true);
+  document.body.appendChild(overlay);
+
+  const image = overlay.querySelector<HTMLImageElement>(".share-preview-image")!;
+  const loading = overlay.querySelector<HTMLElement>(".share-preview-loading")!;
+  const result = overlay.querySelector<HTMLElement>(".share-preview-result")!;
+  const copy = overlay.querySelector<HTMLButtonElement>(".share-preview-copy")!;
+  const save = overlay.querySelector<HTMLButtonElement>(".share-preview-save")!;
+  let dataUrl = "";
+
+  void renderElementSnapshot(el, W)
+    .then((url) => {
+      dataUrl = url;
+      image.src = url;
+      image.hidden = false;
+      loading.hidden = true;
+      copy.disabled = false;
+      save.disabled = false;
+      copy.focus();
+    })
+    .catch((err) => {
+      loading.hidden = true;
+      result.textContent = t("share.renderFailed", { err: String(err) });
+      result.classList.add("error");
+    });
+
+  copy.addEventListener("click", () => {
+    if (!dataUrl) return;
+    copy.disabled = true;
+    void copyShareDataUrl(dataUrl)
+      .then(() => {
+        result.textContent = t("share.copied");
+        result.classList.remove("error");
+      })
+      .catch((err) => {
+        result.textContent = t("share.renderFailed", { err: String(err) });
+        result.classList.add("error");
+      })
+      .finally(() => {
+        copy.disabled = false;
+      });
+  });
+
+  save.addEventListener("click", () => {
+    if (!dataUrl) return;
+    save.disabled = true;
+    const pngBase64 = dataUrl.slice(dataUrl.indexOf(",") + 1);
+    void invoke<string>("save_share_image", { pngBase64, suggestedName: opts.fileName })
+      .then((path) => {
+        result.textContent = t("share.saved", { path });
+        result.classList.remove("error");
+      })
+      .catch((err) => {
+        result.textContent = t("share.saveFailed", { err: String(err) });
+        result.classList.add("error");
+      })
+      .finally(() => {
+        save.disabled = false;
+      });
+  });
+}
+
+/// Opens the share preview for one provider card. The total-spend button
+/// lands on the range menu instead and previews a spend envelope.
 async function shareCard(id: string): Promise<void> {
   const status = document.querySelector("#status")!;
   try {
     const el = document.querySelector<HTMLElement>(`article.provider[data-provider="${id}"]`);
-    if (!el) return;
+    if (!el) {
+      status.textContent = t("footer.shareFailed", { err: `card ${id} not found` });
+      return;
+    }
 
     const W = Math.ceil(el.getBoundingClientRect().width);
     const clone = el.cloneNode(true) as HTMLElement;
@@ -9199,8 +9336,8 @@ async function shareCard(id: string): Promise<void> {
       .querySelectorAll(".share-btn, .card-caret, .quick-links, .action-row, .drag-grip")
       .forEach((n) => n.remove());
 
-    await copyElementSnapshot(clone, W);
-    status.textContent = t("footer.copied");
+    const title = providerDisplayName(providerFamily(id));
+    openSharePreview(clone, W, { title, fileName: shareFileName(title) });
   } catch (err) {
     status.textContent = t("footer.shareFailed", { err: String(err) });
   }
@@ -9357,8 +9494,8 @@ async function shareSpendEnvelope(range: ShareRange): Promise<void> {
       <div class="envelope-rows">${body}</div>${creditBody}`;
     const live = document.querySelector<HTMLElement>("article.total-spend");
     const W = live ? Math.ceil(live.getBoundingClientRect().width) : 380;
-    await copyElementSnapshot(card, W);
-    status.textContent = t("footer.copied");
+    const title = `${t("spend.title")} · ${t(SHARE_RANGE_LABEL[range])}`;
+    openSharePreview(card, W, { title, fileName: shareFileName(title) });
   } catch (err) {
     status.textContent = t("footer.shareFailed", { err: String(err) });
   }
@@ -9378,7 +9515,7 @@ function openShareRangeMenu(anchor: HTMLElement): void {
       ${(Object.keys(SHARE_RANGE_LABEL) as ShareRange[])
         .map(
           (r) =>
-            `<button class="group-menu-item${r === current ? " on" : ""}" data-share-range="${r}"><span class="group-menu-check">${r === current ? "✓" : ""}</span>${escapeHtml(t(SHARE_RANGE_LABEL[r]))}</button>`,
+            `<button type="button" class="group-menu-item${r === current ? " on" : ""}" data-share-range="${r}"><span class="group-menu-check">${r === current ? "✓" : ""}</span>${escapeHtml(t(SHARE_RANGE_LABEL[r]))}</button>`,
         )
         .join("")}
     </div>`;
