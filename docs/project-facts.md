@@ -12,7 +12,7 @@ Single authorities for the neighbouring concerns:
   tracker, see [`docs/agents/issue-tracker.md`](agents/issue-tracker.md).
 - **Startup / build / run / acceptance commands** — [`docs/dev-startup.md`](dev-startup.md).
 
-Last reconciled: 2026-10-28 (first-run source detection #109; 0.11.1 released).
+Last reconciled: 2026-10-28 (first-run source detection #109; 0.12.0 released).
 
 ## Scope and boundaries
 
