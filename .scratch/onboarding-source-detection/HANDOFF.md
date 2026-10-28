@@ -79,7 +79,7 @@ Remove-Item -Recurse -Force "$env:LOCALAPPDATA\com.aafff623.pane\EBWebView" -Err
 - **Windows PATH 修正**：变量名大小写不敏感，注册表 `%VAR%` 会展开，机器级 PATH 不再丢；npm 全局安装的 CLI 现在能作为安装证据（本机已出现 `.local\bin\claude.exe`）。
 - **性能**：`probe_families` 每次请求只读一次环境和一份 PATH 目录索引；`/v1/providers` 从 8–9 秒降到约 0.1 秒，`/v1/doctor` 从 13 秒降到约 0.15 秒。
 - **连接步骤**按账号卡判断「已连接」，不再被 family 卡的 `no_credentials` 误导。
-- 门禁：Node 243/243；`parse-tests` 串行去代理 1197 通过 / 0 失败 / 18 忽略；`cargo check` 通过。
+- 门禁：Node 244/244；`parse-tests` 串行去代理 1200 通过 / 0 失败 / 18 忽略；`cargo check` 通过。
 
 ## 2026-10-28 补充：存在 ≠ 有效（OpenCode 过期 key）
 

@@ -96,7 +96,7 @@ Last reconciled: 2026-10-28 (first-run source detection #109; 0.11.1 released).
   `cargo +stable-x86_64-pc-windows-gnu`. The full Tauri binary cannot link
   locally as a `cdylib` (167k-export DLL). The committed crate-type is
   `["rlib"]` (desktop only). Unit tests run from repo-root `parse-tests/`
-  (1195 passing / 0 failed / 18 ignored in the latest serial proxy-free run,
+  (1200 passing / 0 failed / 18 ignored in the latest serial proxy-free run,
   2026-10-28; run with
   `cargo +stable-x86_64-pc-windows-gnu test` and no proxy).
 - Dev runtime needs both processes: Vite `:1420` + `pane.exe` `:6736`. Never
@@ -1010,9 +1010,9 @@ changes.
   in the running dev build; onboarding four steps, rescan after a temporary
   `setx`, and the detection env-key row were walked on the real window.
   `tests/onboarding-source.test.mjs` locks the detection-row/evidence
-  contract. Full Node suite 239 passed; build and Rust check pass. The probe's
+  contract. Full Node suite 244 passed; build and Rust check pass. The probe's
   Rust unit tests run inside the `parse-tests` harness (serial, proxy stripped:
-  1195 passed / 0 failed / 18 ignored); the app crate's own test binary still
+  1200 passed / 0 failed / 18 ignored); the app crate's own test binary still
   cannot link on this machine (known GNU `STATUS_ENTRYPOINT_NOT_FOUND`).
 
 ## Default theme and skins (2026-10-24, 0.9.0)
