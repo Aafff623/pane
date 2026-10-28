@@ -194,6 +194,14 @@ pub fn load(family: &str) -> Vec<LoginAccount> {
     load_from(&crate::providers::config_dir(), family)
 }
 
+/// Presence-only check for probes: reads the account file but never opens
+/// the OS vault (`load` hydrates every token triple).
+pub fn has_accounts(family: &str) -> bool {
+    let raw = std::fs::read_to_string(accounts_file(&crate::providers::config_dir(), family))
+        .unwrap_or_default();
+    !parse_accounts(&raw).is_empty()
+}
+
 pub fn save(family: &str, accounts: &[LoginAccount]) -> Result<(), String> {
     save_to(&crate::providers::config_dir(), family, accounts)
 }

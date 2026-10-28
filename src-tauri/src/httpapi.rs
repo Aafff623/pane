@@ -274,16 +274,12 @@ fn providers_payload(cfg: &Value, fetched_at: &str) -> Value {
         Ok(v) => (v.clone(), *last_publish_ms().lock().unwrap_or_else(|e| e.into_inner())),
         Err(_) => (Vec::new(), 0),
     };
-    let probes: HashMap<String, SourceProbe> = snaps
+    let families: BTreeSet<String> = snaps
         .iter()
         .map(|s| crate::provider_catalog::family_of(&s.id))
-        .collect::<BTreeSet<_>>()
-        .into_iter()
-        .map(|family| {
-            let probe = crate::source_probe::probe_family(&family);
-            (family, probe)
-        })
         .collect();
+    let probes: HashMap<String, SourceProbe> =
+        crate::source_probe::probe_families(families.iter().map(String::as_str));
     providers_payload_from(&snaps, published_at, cfg, fetched_at, Some(&probes))
 }
 

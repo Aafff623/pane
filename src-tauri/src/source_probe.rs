@@ -90,20 +90,25 @@ const MAX_EVIDENCE: usize = 4;
 
 /// All families that can be detected. Family metadata comes from the catalog;
 /// the env/credential probes remain available even when install state is
-/// unknown.
+/// unknown. The environment is read once and the per-family stores/local
+/// hints once each — this command runs on every rescan and `/v1/doctor`.
 pub fn probe_all() -> SourceProbeReport {
     let env = env_snapshot();
+    let path_index = path_listing(&env);
     let definitions = crate::provider_catalog::provider_definitions();
     let mut families = Vec::new();
     for def in definitions {
-        if !HINTS.iter().any(|hint| hint.family == def.family_id)
+        let hint = HINTS.iter().find(|hint| hint.family == def.family_id);
+        let local = local_hint(def.family_id);
+        let stored = stored_credential_exists(def.family_id);
+        if hint.is_none()
             && crate::provider_catalog::provider_env_vars(def.family_id).is_empty()
-            && local_hint(def.family_id).is_none()
-            && !stored_credential_exists(def.family_id)
+            && local.is_none()
+            && !stored
         {
             continue;
         }
-        families.push(probe_family_with_env(def.family_id, def.display_name, &env));
+        families.push(build_probe(def.family_id, def.display_name, &env, &path_index, hint, local, stored));
     }
     families.sort_by(|a, b| {
         let rank = |p: &SourceProbe| {
@@ -139,19 +144,71 @@ pub fn probe_all() -> SourceProbeReport {
 /// Probe one family for the HTTP API and the credential-status command.
 pub fn probe_family(family: &str) -> SourceProbe {
     let env = env_snapshot();
-    let display_name = crate::provider_catalog::provider_definitions()
-        .iter()
-        .find(|def| def.family_id == family)
-        .map(|def| def.display_name)
-        .unwrap_or(family);
-    probe_family_with_env(family, display_name, &env)
+    let path_index = path_listing(&env);
+    let display = display_name_of(family);
+    build_probe(
+        family,
+        &display,
+        &env,
+        &path_index,
+        HINTS.iter().find(|hint| hint.family == family),
+        local_hint(family),
+        stored_credential_exists(family),
+    )
 }
 
-fn probe_family_with_env(family: &str, display_name: &str, env: &HashMap<String, String>) -> SourceProbe {
-    let hint = HINTS.iter().find(|hint| hint.family == family);
+/// Probe many families with ONE environment snapshot. Every `/v1/providers`
+/// request probes all of its families; reading the registry once per family
+/// made that endpoint take ~9 s.
+pub fn probe_families<'a>(families: impl IntoIterator<Item = &'a str>) -> HashMap<String, SourceProbe> {
+    let families: Vec<&str> = families.into_iter().collect();
+    if families.is_empty() {
+        return HashMap::new();
+    }
+    let env = env_snapshot();
+    let path_index = path_listing(&env);
+    let mut out = HashMap::new();
+    for family in families {
+        if out.contains_key(family) {
+            continue;
+        }
+        let display = display_name_of(family);
+        out.insert(
+            family.to_string(),
+            build_probe(
+                family,
+                &display,
+                &env,
+                &path_index,
+                HINTS.iter().find(|hint| hint.family == family),
+                local_hint(family),
+                stored_credential_exists(family),
+            ),
+        );
+    }
+    out
+}
+
+fn display_name_of(family: &str) -> String {
+    crate::provider_catalog::provider_definitions()
+        .iter()
+        .find(|def| def.family_id == family)
+        .map(|def| def.display_name.to_string())
+        .unwrap_or_else(|| family.to_string())
+}
+
+fn build_probe(
+    family: &str,
+    display_name: &str,
+    env: &HashMap<String, String>,
+    path_index: &[(String, std::collections::HashSet<String>)],
+    hint: Option<&InstallHint>,
+    local: Option<String>,
+    stored: bool,
+) -> SourceProbe {
     let mut evidence = Vec::new();
     if let Some(hint) = hint {
-        evidence.extend(executable_evidence(hint.executables, env));
+        evidence.extend(executable_evidence_in(hint.executables, env, path_index));
         evidence.extend(dir_evidence(hint.dirs, env));
     }
     evidence.sort();
@@ -167,8 +224,6 @@ fn probe_family_with_env(family: &str, display_name: &str, env: &HashMap<String,
         .filter(|name| env_value(env, name).is_some())
         .map(|name| (*name).to_string())
         .collect();
-    let local = local_hint(family);
-    let stored = stored_credential_exists(family);
     let (credential_state, credential_source) = if let Some(name) = env_vars.first() {
         ("present", format!("env:{name}"))
     } else if stored {
@@ -191,15 +246,18 @@ fn probe_family_with_env(family: &str, display_name: &str, env: &HashMap<String,
 }
 
 /// Same store order as `get_credential_status`: login accounts, then the
-/// multi-account list, then the saved single key. Checking only the key file
-/// made account-based families (ClinePass, APIGOTO, …) look credential-less.
+/// multi-account list, then the saved single key. Presence-only reads keep
+/// the probe out of the OS vault and off per-account key hydration.
 fn stored_credential_exists(family: &str) -> bool {
+    if family == "codex" && crate::codex_accounts::has_accounts() {
+        return true;
+    }
     if crate::login_accounts::takes_login_accounts(family) {
-        !crate::login_accounts::load(family).is_empty()
+        crate::login_accounts::has_accounts(family)
     } else if crate::accounts::provider_takes_accounts(family) {
-        !crate::accounts::load_accounts(family).is_empty()
+        crate::accounts::has_accounts(family)
     } else {
-        crate::providers::stored_key_file(family).is_some()
+        crate::providers::stored_key_file_exists(family)
     }
 }
 
@@ -234,11 +292,37 @@ fn env_value<'a>(env: &'a HashMap<String, String>, name: &str) -> Option<&'a str
     env.get(name).map(|value| value.trim()).filter(|value| !value.is_empty())
 }
 
+/// One directory listing per PATH entry, shared by every family in a probe
+/// batch. Stat-ing every name × every extension took ~2.5 s for 24 families.
+fn path_listing(env: &HashMap<String, String>) -> Vec<(String, std::collections::HashSet<String>)> {
+    let path = env_get(env, "PATH").unwrap_or("");
+    let mut seen = std::collections::HashSet::new();
+    split_paths(path)
+        .into_iter()
+        .filter(|dir| seen.insert(dir.to_lowercase()))
+        .filter_map(|dir| {
+            let files = std::fs::read_dir(&dir).ok()?;
+            let names = files
+                .flatten()
+                .filter_map(|entry| entry.file_name().to_str().map(str::to_lowercase))
+                .collect();
+            Some((dir, names))
+        })
+        .collect()
+}
+
 fn executable_evidence(names: &[&str], env: &HashMap<String, String>) -> Vec<String> {
-    let path = env.get("PATH").map(String::as_str).unwrap_or("");
-    let dirs = split_paths(path);
+    let index = path_listing(env);
+    executable_evidence_in(names, env, &index)
+}
+
+fn executable_evidence_in(
+    names: &[&str],
+    env: &HashMap<String, String>,
+    path_index: &[(String, std::collections::HashSet<String>)],
+) -> Vec<String> {
     let exts = if cfg!(windows) {
-        env.get("PATHEXT")
+        env_get(env, "PATHEXT")
             .map(|value| value.split(';').map(str::to_string).collect::<Vec<_>>())
             .filter(|value| !value.is_empty())
             .unwrap_or_else(|| vec![".COM".into(), ".EXE".into(), ".BAT".into(), ".CMD".into()])
@@ -247,20 +331,16 @@ fn executable_evidence(names: &[&str], env: &HashMap<String, String>) -> Vec<Str
     };
     let mut out = Vec::new();
     for name in names {
-        for dir in &dirs {
-            let base = Path::new(dir).join(name);
+        for (dir, files) in path_index {
             for ext in &exts {
-                let candidate = if ext.is_empty() {
-                    base.clone()
+                let filename = if ext.is_empty() {
+                    (*name).to_string()
                 } else {
-                    PathBuf::from(format!("{}{}", base.display(), ext.to_lowercase()))
+                    format!("{}{}", name, ext.to_lowercase())
                 };
-                if candidate.is_file() {
-                    out.push(display_path(&candidate));
+                if files.contains(&filename.to_lowercase()) {
+                    out.push(display_path(&Path::new(dir).join(&filename)));
                 }
-            }
-            if !cfg!(windows) && base.is_file() {
-                out.push(display_path(&base));
             }
         }
     }
@@ -288,7 +368,7 @@ fn expand_path(raw: &str, env: &HashMap<String, String>) -> Option<PathBuf> {
         return None;
     }
     if let Some(rest) = value.strip_prefix("~/") {
-        let home = env.get("USERPROFILE").or_else(|| env.get("HOME"))?;
+        let home = env_get(env, "USERPROFILE").or_else(|| env_get(env, "HOME"))?;
         value = format!("{home}/{rest}");
     }
     // Expand %VAR% (Windows) or $VAR / ${VAR} (POSIX) from the snapshot.
@@ -306,7 +386,7 @@ fn expand_path(raw: &str, env: &HashMap<String, String>) -> Option<PathBuf> {
                 name.push(next);
             }
             if closed {
-                if let Some(found) = env.get(&name) {
+                if let Some(found) = env_get(env, &name) {
                     expanded.push_str(found);
                 } else {
                     expanded.push('%');
@@ -340,7 +420,7 @@ fn expand_path(raw: &str, env: &HashMap<String, String>) -> Option<PathBuf> {
                 }
             }
             if !name.is_empty() {
-                if let Some(found) = env.get(&name) {
+                if let Some(found) = env_get(env, &name) {
                     expanded.push_str(found);
                 } else {
                     expanded.push('$');
@@ -365,7 +445,7 @@ fn expand_path(raw: &str, env: &HashMap<String, String>) -> Option<PathBuf> {
     } else {
         // Relative hints are relative to the user's home, never the process
         // working directory (which can be anywhere for a tray app).
-        let home = env.get("USERPROFILE").or_else(|| env.get("HOME"))?;
+        let home = env_get(env, "USERPROFILE").or_else(|| env_get(env, "HOME"))?;
         Path::new(home).join(path)
     })
 }
@@ -378,7 +458,55 @@ fn env_snapshot() -> HashMap<String, String> {
     let mut map: HashMap<String, String> = std::env::vars().collect();
     #[cfg(windows)]
     read_windows_environment(&mut map);
+    // Windows variable names are case-insensitive; callers want PATH etc.
+    // in their canonical spelling even when the process/registry use Path.
+    #[cfg(windows)]
+    for canonical in ["PATH", "PATHEXT", "USERPROFILE", "HOME"] {
+        if !map.contains_key(canonical) {
+            if let Some(value) = env_get(&map, canonical).map(str::to_string) {
+                map.insert(canonical.to_string(), value);
+            }
+        }
+    }
     map
+}
+
+/// Case-insensitive environment lookup (Windows semantics).
+fn env_get<'a>(env: &'a HashMap<String, String>, name: &str) -> Option<&'a str> {
+    env.get(name)
+        .map(String::as_str)
+        .or_else(|| env.iter().find(|(key, _)| key.eq_ignore_ascii_case(name)).map(|(_, value)| value.as_str()))
+}
+
+/// Expands `%NAME%` references in a registry string. Unknown names stay
+/// literal; values never leave this function.
+fn expand_percent(text: &str, env: &HashMap<String, String>) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut rest = text;
+    while let Some(start) = rest.find('%') {
+        out.push_str(&rest[..start]);
+        let after = &rest[start + 1..];
+        if let Some(end) = after.find('%') {
+            let name = &after[..end];
+            if !name.is_empty() {
+                if let Some(value) = env_get(env, name) {
+                    out.push_str(value);
+                } else {
+                    out.push('%');
+                    out.push_str(name);
+                    out.push('%');
+                }
+            } else {
+                out.push('%');
+            }
+            rest = &after[end + 1..];
+        } else {
+            out.push('%');
+            rest = after;
+        }
+    }
+    out.push_str(rest);
+    out
 }
 
 #[cfg(windows)]
@@ -405,13 +533,28 @@ fn read_windows_environment(map: &mut HashMap<String, String>) {
         .iter()
         .map(|(name, value)| (name.to_lowercase(), value.clone()))
         .collect();
+    let machine_path = RegKey::predef(HKEY_LOCAL_MACHINE)
+        .open_subkey(r"SYSTEM\CurrentControlSet\Control\Session Manager\Environment")
+        .and_then(|key| key.get_value::<String, _>("Path"))
+        .ok();
     if let Ok(user) = RegKey::predef(HKEY_CURRENT_USER).open_subkey("Environment") {
         if let Ok(user_path) = user.get_value::<String, _>("Path") {
-            let process_path = map.get("PATH").cloned().unwrap_or_default();
-            let joined = if process_path.is_empty() {
-                user_path
+            // The process PATH is authoritative (it is already expanded and
+            // includes the machine entries); the registry copy is newer
+            // after `setx`, so append its expanded user part.
+            let process_path = env_get(map, "PATH").unwrap_or("").to_string();
+            let base = if process_path.is_empty() {
+                machine_path.clone().map(|p| expand_percent(&p, map)).unwrap_or_default()
             } else {
-                format!("{process_path};{user_path}")
+                process_path
+            };
+            let user_expanded = expand_percent(&user_path, map);
+            let joined = if user_expanded.is_empty() {
+                base
+            } else if base.is_empty() {
+                user_expanded
+            } else {
+                format!("{base};{user_expanded}")
             };
             merged.insert("path".into(), joined);
         }
@@ -455,5 +598,29 @@ mod tests {
         let snapshot = env(&[("PATH", "")]);
         assert!(executable_evidence(&["claude"], &snapshot).is_empty());
         assert!(dir_evidence(&["%MISSING%/x"], &snapshot).is_empty());
+    }
+
+    #[test]
+    fn environment_names_match_windows_case_insensitively() {
+        let snapshot = env(&[("Path", r"C:\bin"), ("PathExt", ".CMD")]);
+        assert_eq!(env_get(&snapshot, "PATH"), Some(r"C:\bin"));
+        assert_eq!(env_get(&snapshot, "PATHEXT"), Some(".CMD"));
+        assert_eq!(expand_percent(r"%Path%\tool", &snapshot), r"C:\bin\tool");
+        assert_eq!(expand_percent("%MISSING%\\x", &snapshot), "%MISSING%\\x");
+    }
+
+    #[test]
+    fn executable_evidence_uses_the_path_listing_and_pathext() {
+        let dir = std::env::temp_dir().join(format!("pane-probe-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("temp dir");
+        std::fs::write(dir.join("pane-probe-fake.cmd"), "").expect("write fake executable");
+        let path_value = dir.to_string_lossy().to_string();
+        let snapshot = env(&[
+            ("PATH", &path_value),
+            ("PATHEXT", ".CMD;.EXE"),
+        ]);
+        let found = executable_evidence(&["pane-probe-fake"], &snapshot);
+        let _ = std::fs::remove_dir_all(&dir);
+        assert_eq!(found, vec![dir.join("pane-probe-fake.cmd").to_string_lossy().to_string()]);
     }
 }

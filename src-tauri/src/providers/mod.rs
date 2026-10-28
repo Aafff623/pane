@@ -801,6 +801,28 @@ pub fn stored_key_file(provider: &str) -> Option<String> {
     crate::secretstore::resolve_provider_key(provider, &path)
 }
 
+/// Read-only variant for probes and GET endpoints: the OS vault first, then
+/// a plaintext `apiKey` in the fallback file. Never migrates or rewrites —
+/// `stored_key_file` moves plaintext into the vault and strips the file.
+pub fn stored_key_file_exists(provider: &str) -> bool {
+    if matches!(
+        crate::secretstore::get(&crate::secretstore::provider_key(provider)),
+        crate::secretstore::Secret::Found(_)
+    ) {
+        return true;
+    }
+    let path = config_dir().join(format!("{provider}.json"));
+    std::fs::read_to_string(path)
+        .ok()
+        .and_then(|raw| serde_json::from_str::<serde_json::Value>(raw.trim_start_matches('\u{feff}')).ok())
+        .and_then(|doc| {
+            doc.get("apiKey")
+                .and_then(serde_json::Value::as_str)
+                .map(|key| !key.trim().is_empty())
+        })
+        .unwrap_or(false)
+}
+
 /// Companion to `stored_api_key` for providers whose saved blob also carries
 /// a custom endpoint: reads the `baseUrl` field of the same
 /// %APPDATA%\Pane\<provider>.json. No env fallback — a URL typed into

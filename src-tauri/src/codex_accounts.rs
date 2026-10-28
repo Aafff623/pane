@@ -190,6 +190,13 @@ pub fn load_accounts() -> Vec<CodexLogin> {
     load_accounts_from(&crate::providers::config_dir())
 }
 
+/// Presence-only check for probes: rows in the store file, no vault reads.
+pub fn has_accounts() -> bool {
+    let raw = std::fs::read_to_string(accounts_file(&crate::providers::config_dir()))
+        .unwrap_or_default();
+    !parse_accounts(&raw).is_empty()
+}
+
 pub fn save_accounts(accounts: &[CodexLogin]) -> Result<(), String> {
     save_accounts_to(&crate::providers::config_dir(), accounts)
 }

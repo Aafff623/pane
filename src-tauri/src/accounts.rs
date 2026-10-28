@@ -238,6 +238,15 @@ pub fn load_accounts(provider: &str) -> Vec<AccountEntry> {
     load_accounts_from(&crate::providers::config_dir(), provider)
 }
 
+/// Presence-only check for probes: counts configured rows without reading
+/// any secret from the OS vault (`load_accounts` hydrates every key).
+pub fn has_accounts(provider: &str) -> bool {
+    let raw = std::fs::read_to_string(accounts_file(&crate::providers::config_dir(), provider))
+        .unwrap_or_default();
+    serde_json::from_str::<Vec<StoredAccount>>(raw.trim_start_matches('\u{feff}'))
+        .is_ok_and(|rows| !rows.is_empty())
+}
+
 pub fn save_accounts(provider: &str, entries: &[AccountEntry]) -> Result<(), String> {
     save_accounts_to(&crate::providers::config_dir(), provider, entries)
 }
