@@ -42,7 +42,7 @@ hmac = "0.12"
 p256 = { version = "0.13", features = ["pkcs8"] }
 # Zed's RSA-OAEP loopback callback (mirrors src-tauri/Cargo.toml).
 rsa = "0.9"
-aes = "0.8"
+aes = "0.9"
 aes-gcm = "0.10"
 cbc = "0.1"
 argon2 = "0.5"
