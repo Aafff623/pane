@@ -6420,8 +6420,24 @@ function overviewFailureLabel(s: Snapshot): string {
   // the card is telling the user what to do, so the tile must not contradict
   // it with "query failed" (issue #2 follow-up).
   if (s.status === "needs_setup") return t("overview.needsSetup");
-  if (/expired|cookie|sign in|log in|unauthori[sz]ed|401|403/i.test(s.error ?? "")) return t("overview.needsLogin");
-  return t("overview.queryFailed");
+  // One classifier for drawer and tile: an expired session, an expired
+  // subscription and a network failure must never read as the same thing.
+  switch (credentialFailure(s.error ?? "", s.status)) {
+    case "credential":
+      return t("overview.needsLogin");
+    case "subscription":
+      return t("overview.failure.subscription");
+    case "network":
+      return t("overview.failure.network");
+    case "rateLimit":
+      return t("overview.failure.rateLimit");
+    case "permission":
+      return t("overview.failure.permission");
+    case "unsupported":
+      return t("overview.failure.unsupported");
+    default:
+      return t("overview.queryFailed");
+  }
 }
 
 /// Renders a `test_provider` result. The backend answers `ok:<ms>`,

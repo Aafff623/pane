@@ -38,6 +38,14 @@ test('network, credentials, permissions and exhaustion-like rate limits are dist
   assert.equal(credentialFailure('unexpected body'), 'unknown');
 });
 
+test('subscription expiry is not flattened into sign-in or unknown', () => {
+  assert.equal(credentialFailure('subscription expired'), 'subscription');
+  assert.equal(credentialFailure('no active subscription'), 'subscription');
+  assert.equal(credentialFailure('membership cancelled'), 'subscription');
+  assert.equal(credentialFailure('套餐已到期，请续费'), 'subscription');
+  assert.equal(credentialFailure('session expired'), 'credential');
+});
+
 test('diagnostic ids and session field names do not prove credential failure', () => {
   assert.equal(credentialFailure('unexpected response; request id 142903'), 'unknown');
   assert.equal(credentialFailure('cookie field absent from quota response'), 'unknown');
@@ -75,3 +83,17 @@ for (const healthy of [true, false]) {
     assert.equal(context.config.disabled.length, 0);
   });
 }
+
+test('overview tiles show a distinct label per failure kind', () => {
+  const code = actualFunctions(['overviewFailureLabel']);
+  const context = vm.createContext({ t: (key) => key, credentialFailure });
+  vm.runInContext(code, context);
+  assert.equal(context.overviewFailureLabel({ status: 'error', error: 'session expired' }), 'overview.needsLogin');
+  assert.equal(context.overviewFailureLabel({ status: 'error', error: 'subscription expired' }), 'overview.failure.subscription');
+  assert.equal(context.overviewFailureLabel({ status: 'error', error: 'network timeout' }), 'overview.failure.network');
+  assert.equal(context.overviewFailureLabel({ status: 'error', error: 'HTTP 429' }), 'overview.failure.rateLimit');
+  assert.equal(context.overviewFailureLabel({ status: 'error', error: 'HTTP 403' }), 'overview.failure.permission');
+  assert.equal(context.overviewFailureLabel({ status: 'error', error: 'no quota data' }), 'overview.failure.unsupported');
+  assert.equal(context.overviewFailureLabel({ status: 'no_credentials', error: null }), 'overview.needsCredentials');
+  assert.equal(context.overviewFailureLabel({ status: 'needs_setup', error: 'anything' }), 'overview.needsSetup');
+});

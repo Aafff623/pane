@@ -1,4 +1,4 @@
-export type CredentialFailure = "network" | "rateLimit" | "credential" | "permission" | "unsupported" | "unknown";
+export type CredentialFailure = "network" | "rateLimit" | "credential" | "permission" | "unsupported" | "subscription" | "unknown";
 
 export type CredentialFinality = "revoked" | "transient";
 
@@ -21,9 +21,12 @@ export function credentialFinality(
 
 // Unknown responses stay unknown. A failed quota read alone never proves
 // that an inference key is invalid or that the subscription is exhausted.
+// Subscription states are checked before credentials so "subscription
+// expired" is not flattened into "sign in again".
 export function credentialFailure(message: string, status = "error"): CredentialFailure {
   if (/\b429\b|rate.?limit|too many requests|限流/i.test(message)) return "rateLimit";
   if (/network|timeout|timed out|dns|failed to connect|connection (?:reset|refused|closed|error)|error sending request|transport|proxy|tls|网络|超时|连接失败|HTTP 5\d\d/i.test(message)) return "network";
+  if (/(?:subscription|plan|membership).*(?:expired|ended|cancel(?:l)?ed|inactive|not active)|no active (?:subscription|plan)|订阅.*(?:到期|过期|失效|已结束|未生效)|套餐.*(?:到期|过期|失效|已结束)|会员.*(?:到期|过期|失效)|续费/i.test(message)) return "subscription";
   if (/no quota|not published|not supported|no .*headers|unavailable.*api|discontinued.*api|不支持|未公开/i.test(message)) return "unsupported";
   if (status === "needs_setup" || /\b403\b|permission|scope|admin key|management key|billing read|forbidden|权限/i.test(message)) return "permission";
   if (/\b401\b|unauthori[sz]ed|invalid.*key|key.*invalid|rejected|expired|sign.in|log.in|invalid.*(?:cookie|token|credential)|(?:cookie|token|credential).*(?:invalid|missing|expired)|凭据|密钥|登录|过期/i.test(message)) return "credential";
