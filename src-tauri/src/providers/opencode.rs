@@ -184,6 +184,14 @@ async fn fetch() -> Result<Snapshot, String> {
             Ok(Snapshot::ok(ID, NAME, Some("Go".into()), metrics))
         }
         Err(e) => {
+            // A rejected/expired key is not an offline machine. Falling back
+            // to local windows here invented a "Go — this PC only" plan for
+            // a subscription the user did not have; surface the rejection.
+            if super::credential_rejected(&e) {
+                return Err(format!(
+                    "OpenCode Go key was rejected or has expired — create a new key in OpenCode Console, or remove the stored key in Settings ({e})"
+                ));
+            }
             // Log the TRANSITION into fallback, not every refresh — an
             // offline machine would otherwise print this once a minute
             // for the app's lifetime.
@@ -196,7 +204,7 @@ async fn fetch() -> Result<Snapshot, String> {
             // an offline/revoked-key card after the wrong problem.
             let mut snap = local_windows_snapshot()
                 .map_err(|db| format!("usage API failed ({e}); local fallback: {db}"))?;
-            snap.plan = Some("Go — this PC only".into());
+            snap.plan = Some("Go — local records only".into());
             Ok(snap)
         }
     }
@@ -326,7 +334,7 @@ fn local_windows_snapshot() -> Result<Snapshot, String> {
         )
         .with_reset(Some(w.monthly_resets_at), Some(w.monthly_period_ms)),
     ];
-    Ok(Snapshot::ok(ID, NAME, Some("Go".into()), metrics))
+    Ok(Snapshot::ok(ID, NAME, None, metrics))
 }
 
 struct GoWindows {

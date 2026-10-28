@@ -458,6 +458,43 @@ pub fn retry_hint(resp: &reqwest::Response) -> String {
         .unwrap_or_default()
 }
 
+/// An upstream error that proves the credential itself was rejected (expired,
+/// revoked, wrong key). A provider must never fall back to local/offline data
+/// on these: "a key exists" is not "a subscription is active", and rendering
+/// stale local windows would invent a plan the user does not have.
+pub(crate) fn credential_rejected(message: &str) -> bool {
+    let lower = message.to_ascii_lowercase();
+    [
+        "http 401",
+        "http 403",
+        "unauthorized",
+        "forbidden",
+        "api_key_expired",
+        "invalid api key",
+        "invalid_api_key",
+        "key expired",
+        "token expired",
+        "revoked",
+        "invalid_grant",
+    ]
+    .iter()
+    .any(|needle| lower.contains(needle))
+}
+
+#[cfg(test)]
+mod credential_rejection_tests {
+    use super::credential_rejected;
+
+    #[test]
+    fn rejects_auth_errors_but_not_transport_errors() {
+        assert!(credential_rejected("usage endpoint: HTTP 401 Unauthorized"));
+        assert!(credential_rejected(r#"{"code":"api_key_expired"}"#));
+        assert!(credential_rejected("token expired and no refresh token present"));
+        assert!(!credential_rejected("usage request: error sending request (timeout)"));
+        assert!(!credential_rejected("usage endpoint: HTTP 503 Service Unavailable"));
+    }
+}
+
 #[cfg(test)]
 mod retry_after_tests {
     use super::retry_after_secs;

@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
 import ts from 'typescript';
+import { credentialFailure } from '../src/credentialPolicy.ts';
 
 // Exercise the detection-step helpers against a fake probe report. The real
 // command is read-only; these assertions lock the evidence/status contract and
@@ -41,17 +42,20 @@ const dict = {
   'onboarding.sourceInstalledSignedOut': 'Installed · not signed in',
   'onboarding.sourceMissing': 'Not installed',
   'onboarding.sourceUnknown': 'Install state unknown',
+  'onboarding.sourceRejected': 'Credential expired or rejected — sign in again',
+  'onboarding.sourceSubscription': 'Subscription expired or inactive',
   'onboarding.envFound': 'Environment keys found',
   'onboarding.envUnsupported': 'Quota reading is not supported yet.',
   'onboarding.rescanHint': 'Re-reads local evidence.',
 };
 
-function makeContext(report, selection = new Set()) {
+function makeContext(report, selection = new Set(), snapshots = []) {
   const context = vm.createContext({
     sourceProbeReport: report,
     sourceProbeLoading: false,
     sourceProbeError: null,
-    lastSnapshots: [],
+    lastSnapshots: snapshots,
+    credentialFailure,
     config: { disabled: ['disabled-fam'] },
     providerFamily: (id) => id.split('@')[0],
     onboardingSelection: selection,
@@ -132,4 +136,16 @@ test('non-fresh pick application keeps already enabled providers', () => {
   assert.ok(!kept.has('disabled-fam'), 'a deliberately disabled family stays off');
   const fresh = ctx.picksWithEnabled(new Set(['chosen']), true);
   assert.deepEqual([...fresh], ['chosen']);
+});
+
+test('a rejected credential is never shown as ready', () => {
+  const ctx = makeContext(report, new Set(), [
+    { id: 'brave', status: 'error', error: 'usage endpoint: HTTP 401 Unauthorized' },
+  ]);
+  const brave = report.families.find((probe) => probe.family === 'brave');
+  assert.equal(ctx.onboardingSourceStatus(brave), 'Credential expired or rejected — sign in again');
+  const expired = makeContext(report, new Set(), [
+    { id: 'brave', status: 'error', error: 'subscription expired' },
+  ]);
+  assert.equal(expired.onboardingSourceStatus(brave), 'Subscription expired or inactive');
 });

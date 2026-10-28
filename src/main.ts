@@ -9716,6 +9716,16 @@ function seedOnboardingPicks(): void {
 }
 
 function onboardingSourceStatus(probe: SourceProbe): string {
+  // Presence is not validity: a stored key can already be rejected. Let the
+  // latest real query decide the label instead of calling it ready.
+  const snaps = lastSnapshots.filter((snap) => providerFamily(snap.id) === probe.family);
+  if (snaps.some((snap) => snap.status === "ok")) return t("onboarding.sourceReady");
+  const failed = snaps.find((snap) => snap.status === "error");
+  if (probe.credentialState === "present" && failed) {
+    const kind = credentialFailure(failed.error ?? "", failed.status);
+    if (kind === "credential") return t("onboarding.sourceRejected");
+    if (kind === "subscription") return t("onboarding.sourceSubscription");
+  }
   if (probe.credentialState === "present") return t("onboarding.sourceReady");
   if (probe.installState === "installed") return t("onboarding.sourceInstalledSignedOut");
   if (probe.installState === "missing") return t("onboarding.sourceMissing");

@@ -40,7 +40,9 @@ GET http://127.0.0.1:6736/v1/limits/:id # exact card id, or every card in a fami
   (`env:<NAME>` / `keyvault` / `local` / `none`) and `credentialEnvs` (names
   only). These are read-only local facts; environment values never appear.
 - `/v1/doctor` includes `installed_but_not_signed_in` (classification `info`
-  when it finds installed tools with no credential) with a remediation. It
+  when it finds installed tools with no credential) and
+  `credentials_rejected` (credentials the provider explicitly rejected or
+  expired), each with a remediation. It
   is advisory, not a fault: an installed but unused CLI is not a broken Pane.
 - `/v1/status` reports the proxy as a **source** (`config` / `system` /
   `none`), never the address.

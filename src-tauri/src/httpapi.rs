@@ -463,6 +463,26 @@ fn doctor_payload(cfg: &Value, fetched_at: &str) -> Value {
         (!installed_no_creds.is_empty()).then_some("open Pane's setup checklist and sign in / add the key for the listed tools; the CLI must have been run at least once"),
     ));
 
+    let rejected: Vec<&str> = snaps
+        .iter()
+        .filter(|s| {
+            s.status == "error"
+                && crate::providers::credential_rejected(s.error.as_deref().unwrap_or_default())
+        })
+        .map(|s| s.id.as_str())
+        .collect();
+    checks.push(check(
+        "credentials_rejected",
+        rejected.is_empty(),
+        if rejected.is_empty() { "healthy" } else { "info" },
+        if rejected.is_empty() {
+            "no credential was rejected by its provider".into()
+        } else {
+            format!("rejected or expired credentials: {}", rejected.join(", "))
+        },
+        (!rejected.is_empty()).then_some("sign in again or replace the key for the listed providers; Pane will not show local/offline usage data for a rejected credential"),
+    ));
+
     let stale: Vec<&str> = snaps.iter().filter(|s| s.stale).map(|s| s.id.as_str()).collect();
     checks.push(check(
         "provider_stale",

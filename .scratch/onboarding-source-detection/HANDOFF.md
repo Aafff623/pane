@@ -80,3 +80,9 @@ Remove-Item -Recurse -Force "$env:LOCALAPPDATA\com.aafff623.pane\EBWebView" -Err
 - **性能**：`probe_families` 每次请求只读一次环境和一份 PATH 目录索引；`/v1/providers` 从 8–9 秒降到约 0.1 秒，`/v1/doctor` 从 13 秒降到约 0.15 秒。
 - **连接步骤**按账号卡判断「已连接」，不再被 family 卡的 `no_credentials` 误导。
 - 门禁：Node 243/243；`parse-tests` 串行去代理 1197 通过 / 0 失败 / 18 忽略；`cargo check` 通过。
+
+## 2026-10-28 补充：存在 ≠ 有效（OpenCode 过期 key）
+
+- 现场：OpenCode 卡显示 “Go — this PC only” 和 $0/$12，实际是 OpenCode auth.json 里一把 2026-10-05 的 key 已过期（用量接口返回 `api_key_expired`）；旧逻辑把任何查询失败都回退到本地 opencode.db，并仍标注 Go 计划。
+- 机制修复：`providers::credential_rejected` 统一识别 401/403/过期/撤销；OpenCode 被拒时直接返回错误、不再本地回退（离线/5xx 仍可本地回退且标注清  楚）；`/v1/doctor` 新增 `credentials_rejected`；首启检测状态结合最新查询结果，过期凭据显示“凭据已过期或被拒绝”，不再叫“已找到凭据”。
+- 影响：过期 key 不再触发每次刷新复制 400MB 的 opencode.db。
