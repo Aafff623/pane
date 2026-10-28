@@ -1,6 +1,19 @@
 # 03 · resetDay billing cycle (#104-4)
 
-Status: ready | Priority: P2 | Depends: none
+Status: not planned — archived 2026-10-28 after code inspection | Priority: P2 | Depends: none
+
+## Decision
+
+The ticket originally named three providers, but `resetDay` would touch monthly
+window approximations in `clinepass`, `copilot`, `cursor`, `kimi`, `mimo`,
+`stepfun_plan` and `opencode`. Several of those periods are deliberate
+approximations because the vendor exposes no exact cycle anchor; a user-set day
+would replace a known approximation with a guess in those paths.
+
+The user-visible gain (one P3 setting) is smaller than the regression surface
+across seven providers, so this is archived rather than implemented. Reopen
+only if a vendor's real billing anchor needs to be modelled and a concrete
+sample exists.
 
 ## Build
 

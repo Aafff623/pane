@@ -1,6 +1,6 @@
 # Spec: 2026-10-28 next user-visible slices
 
-**Status:** in progress · **Started:** 2026-10-28 · **Owner:** Aafff623
+**Status:** implemented 2026-10-28 — owner acceptance pending · **Started:** 2026-10-28 · **Owner:** Aafff623
 
 ## 目标
 
@@ -29,7 +29,7 @@
 
 | # | 文件 | 覆盖 | 状态 |
 |---|---|---|---|
-| 01 | `issues/01-share-preview.md` | #106 最小分享卡 | claimed |
-| 02 | `issues/02-workbuddy-details.md` | #31 卡片展开 | ready |
-| 03 | `issues/03-reset-day.md` | #104-4 resetDay | ready |
+| 01 | `issues/01-share-preview.md` | #106 最小分享卡 | done |
+| 02 | `issues/02-workbuddy-details.md` | #31 卡片展开 | done (owner visual pending) |
+| 03 | `issues/03-reset-day.md` | #104-4 resetDay | not planned (archived) |
 | 04 | `issues/04-closeout.md` | 归档、文档、验证 | done |
