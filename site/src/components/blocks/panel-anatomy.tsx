@@ -2,96 +2,31 @@
 
 import { useState } from "react";
 
-import { Bell, Keyboard, LockKeyhole, Palette } from "lucide-react";
+import { ChevronDown, Keyboard } from "lucide-react";
 
-import { ChevronDown } from "lucide-react";
-
+import { PaneDemoFrame } from "@/components/pane-demo-frame";
 import { messages, type Lang } from "@/components/i18n";
 import styles from "./panel-stage.module.css";
 
-const IMAGES = ["overview", "header", "toolbar", "overview", "spend"];
-const WIDE = new Set([1, 2]);
-const FOCUS: Record<number, number> = { 0: 0, 3: -10, 4: -2 };
-const ROW_ICONS = [Keyboard, LockKeyhole, Palette, Bell];
+type Rect = { left: number; top: number; width: number; height: number };
 
-function Shot({ name, wide, focus }: { name: string; wide?: boolean; focus?: number }) {
-  if (wide) {
-    return (
-      <>
-        <img src={`/img/anatomy/${name}.png`} alt="" className={`${styles.shot} ${styles.shotWide} block dark:hidden`} />
-        <img src={`/img/anatomy/${name}-dark.png`} alt="" className={`${styles.shot} ${styles.shotWide} hidden dark:block`} />
-      </>
-    );
-  }
-  const style = { transform: `translateY(${focus ?? 0}%)` };
-  return (
-    <div className={styles.window}>
-      <img src={`/img/anatomy/${name}.png`} alt="" className={`${styles.windowImg} block dark:hidden`} style={style} />
-      <img src={`/img/anatomy/${name}-dark.png`} alt="" className={`${styles.windowImg} hidden dark:block`} style={style} />
-    </div>
-  );
-}
+const FOCUS: Record<number, Rect> = {
+  0: { left: 6, top: 50, width: 88, height: 47 },
+  1: { left: 3, top: 1.5, width: 94, height: 11 },
+  2: { left: 3, top: 46, width: 94, height: 12 },
+  3: { left: 3, top: 58, width: 47, height: 24 },
+  4: { left: 3, top: 7, width: 94, height: 43 },
+  5: { left: 82, top: 1.5, width: 15, height: 9 },
+};
 
-function SettingsCard({ title, kicker, rows }: { title: string; kicker: string; rows: readonly { label: string; value: string }[] }) {
-  return (
-    <div className={styles.card} role="img" aria-label={title}>
-      <div className={styles.cardHead}>
-        <span className={styles.cardTitle}>
-          {title}
-          <span>{kicker}</span>
-        </span>
-        <i className="bg-primary inline-block size-2 rounded-full" aria-hidden="true" />
-      </div>
-      <div className={styles.cardBody}>
-        {rows.map((row, index) => {
-          const Icon = ROW_ICONS[index] ?? Keyboard;
-          return (
-            <div key={row.label} className={styles.row}>
-              <span className={styles.rowLabel}>
-                <Icon size={14} aria-hidden="true" />
-                {row.label}
-              </span>
-              <span className={styles.rowValue}>{row.value}</span>
-            </div>
-          );
-        })}
-      </div>
-    </div>
-  );
-}
-
-function ShortcutsCard({ title, kicker, keys }: { title: string; kicker: string; keys: readonly { keys: readonly string[]; label: string }[] }) {
-  return (
-    <div className={styles.card} role="img" aria-label={title}>
-      <div className={styles.cardHead}>
-        <span className={styles.cardTitle}>
-          {title}
-          <span>{kicker}</span>
-        </span>
-        <Keyboard size={15} aria-hidden="true" />
-      </div>
-      <div className={styles.cardBody}>
-        {keys.map((row) => (
-          <div key={row.label} className={styles.keyRow}>
-            <span className={styles.keys}>
-              {row.keys.map((key, index) => (
-                <span key={key} className="inline-flex items-center gap-1">
-                  {index > 0 ? <span className="text-muted-foreground text-xs">+</span> : null}
-                  <kbd className={styles.kbd}>{key}</kbd>
-                </span>
-              ))}
-            </span>
-            <span>{row.label}</span>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
+function LivePanel({ lang }: { lang: Lang }) {
+  return <PaneDemoFrame lang={lang} className={styles.liveFrame} />;
 }
 
 export function PanelAnatomy({ lang = "en" }: { lang?: Lang }) {
   const copy = messages[lang].panel;
   const [active, setActive] = useState(0);
+  const focus = FOCUS[active];
 
   return (
     <section id="panel-anatomy" aria-labelledby="panel-anatomy-title" className="py-16 md:py-24 lg:py-32">
@@ -106,12 +41,7 @@ export function PanelAnatomy({ lang = "en" }: { lang?: Lang }) {
               const open = index === active;
               return (
                 <div key={item.title} className={styles.item} data-open={open}>
-                  <button
-                    type="button"
-                    onClick={() => setActive(index)}
-                    aria-expanded={open}
-                    className={styles.trigger}
-                  >
+                  <button type="button" onClick={() => setActive(index)} aria-expanded={open} className={styles.trigger}>
                     <span aria-hidden="true" className={styles.index}>
                       0{index + 1}
                     </span>
@@ -128,6 +58,7 @@ export function PanelAnatomy({ lang = "en" }: { lang?: Lang }) {
                 </div>
               );
             })}
+            <p className={styles.liveHint}>{copy.hint}</p>
           </div>
 
           <figure className={styles.figure}>
@@ -136,14 +67,41 @@ export function PanelAnatomy({ lang = "en" }: { lang?: Lang }) {
                 <b>0{active + 1}</b>
                 {copy.items[active].title}
               </span>
-              <div key={active} className={styles.body}>
-                {active < IMAGES.length ? (
-                  <Shot name={IMAGES[active]} wide={WIDE.has(active)} focus={FOCUS[active]} />
-                ) : active === 5 ? (
-                  <SettingsCard title={copy.items[5].title} kicker="PANE" rows={copy.settingsRows} />
-                ) : (
-                  <ShortcutsCard title={copy.items[6].title} kicker="SYSTEM" keys={copy.shortcutKeys} />
-                )}
+              <span className={styles.liveBadge}>
+                <i aria-hidden="true" />
+                {copy.live}
+              </span>
+
+              <div className={styles.liveWrap}>
+                <LivePanel lang={lang} />
+                {focus ? (
+                  <span
+                    aria-hidden="true"
+                    className={styles.focusRing}
+                    style={{ left: `${focus.left}%`, top: `${focus.top}%`, width: `${focus.width}%`, height: `${focus.height}%` }}
+                  />
+                ) : null}
+                {active === 6 ? (
+                  <div className={styles.shortcutOverlay} role="img" aria-label={copy.items[6].title}>
+                    <span className={styles.shortcutHead}>
+                      {copy.items[6].title}
+                      <Keyboard size={14} aria-hidden="true" />
+                    </span>
+                    {copy.shortcutKeys.map((row) => (
+                      <span key={row.label} className={styles.shortcutRow}>
+                        <span className={styles.keys}>
+                          {row.keys.map((key, index) => (
+                            <span key={key} className="inline-flex items-center gap-1">
+                              {index > 0 ? <span className="text-muted-foreground text-xs">+</span> : null}
+                              <kbd className={styles.kbd}>{key}</kbd>
+                            </span>
+                          ))}
+                        </span>
+                        <span>{row.label}</span>
+                      </span>
+                    ))}
+                  </div>
+                ) : null}
               </div>
             </div>
           </figure>

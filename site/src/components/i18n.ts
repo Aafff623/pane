@@ -57,6 +57,8 @@ export const messages = {
         { label: "Skins", value: "Signal · Ink" },
         { label: "Notifications", value: "Reset & limit alerts" },
       ],
+      live: "Live · interactive",
+      hint: "Click inside the panel — it is the real Pane front end with sample data.",
       shortcutKeys: [
         { keys: ["Alt", "2"], label: "Summon / dismiss" },
         { keys: ["Esc"], label: "Dismiss" },
@@ -198,6 +200,8 @@ export const messages = {
         { label: "皮肤工坊", value: "Signal · Ink" },
         { label: "通知", value: "重置与额度提醒" },
       ],
+      live: "实时 · 可交互",
+      hint: "面板可以直接操作，这是带示例数据的真实 Pane 前端。",
       shortcutKeys: [
         { keys: ["Alt", "2"], label: "唤出 / 收起" },
         { keys: ["Esc"], label: "收起面板" },

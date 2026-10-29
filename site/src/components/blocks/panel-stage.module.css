@@ -36,7 +36,7 @@
   width: 100%;
   max-width: 640px;
   margin-inline: auto;
-  aspect-ratio: 64 / 70;
+  aspect-ratio: 64 / 84;
   overflow: hidden;
   border: 1px solid var(--border);
   border-radius: 24px;
@@ -323,5 +323,141 @@
   .panel,
   .chevron {
     transition: none;
+  }
+}
+
+
+.liveWrap {
+  position: relative;
+  width: min(94%, 520px);
+  aspect-ratio: 439 / 640;
+  --live-scale: 1.1845;
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  overflow: hidden;
+  background: var(--card);
+  box-shadow: var(--shadow-2xl);
+}
+
+.liveFrame {
+  position: absolute;
+  top: 0;
+  left: 50%;
+  display: block;
+  width: 439px;
+  height: 640px;
+  border: 0;
+  transform: translateX(-50%) scale(var(--live-scale));
+  transform-origin: top center;
+}
+
+.focusRing {
+  position: absolute;
+  z-index: 3;
+  border: 2px solid var(--primary);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--primary) 10%, transparent);
+  box-shadow: 0 0 0 9999px color-mix(in srgb, var(--background) 46%, transparent);
+  pointer-events: none;
+  transition:
+    left 0.3s ease,
+    top 0.3s ease,
+    width 0.3s ease,
+    height 0.3s ease;
+}
+
+.liveBadge {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  z-index: 4;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--background) 84%, transparent);
+  color: var(--muted-foreground);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  backdrop-filter: blur(8px);
+}
+
+.liveBadge i {
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--primary);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--primary) 22%, transparent);
+}
+
+.liveHint {
+  margin-top: 18px;
+  color: var(--muted-foreground);
+  font-size: 0.8125rem;
+  line-height: 1.6;
+}
+
+.shortcutOverlay {
+  position: absolute;
+  z-index: 5;
+  right: 18px;
+  bottom: 18px;
+  left: 18px;
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--card) 92%, transparent);
+  box-shadow: var(--shadow-xl);
+  backdrop-filter: blur(10px);
+  overflow: hidden;
+}
+
+.shortcutHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.shortcutRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+  font-size: 12px;
+  color: var(--muted-foreground);
+}
+
+.shortcutRow:last-child {
+  border-bottom: 0;
+}
+
+.shortcutOverlay .kbd {
+  min-width: 26px;
+  height: 26px;
+  font-size: 11px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .focusRing {
+    transition: none;
+  }
+}
+
+
+@media (max-width: 1023px) {
+  .liveWrap {
+    width: min(92%, 380px);
+    --live-scale: 0.866;
   }
 }

@@ -1,4 +1,5 @@
 import { messages, type Lang } from "@/components/i18n";
+import { PaneDemoFrame } from "@/components/pane-demo-frame";
 
 export function DemoEmbed({ lang }: { lang: Lang }) {
   const copy = messages[lang].demoPage;
@@ -22,7 +23,7 @@ export function DemoEmbed({ lang }: { lang: Lang }) {
       </div>
       <div className="bg-muted/40 flex justify-center px-4 py-8 sm:py-12">
         <div className="border-border bg-background w-full max-w-[460px] overflow-hidden rounded-xl border shadow-xl">
-          <iframe src={src} title="Pane demo" loading="lazy" className="h-[660px] w-full" />
+          <PaneDemoFrame lang={lang} title="Pane demo" className="h-[660px] w-full" />
         </div>
       </div>
     </div>
