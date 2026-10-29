@@ -37,3 +37,11 @@
 ## 未覆盖
 
 - owner 的最终视觉验收；线上站点未更新（新站仍按约定保持本地）。
+
+## 追加：双口径开关（2026-10-29 晚）
+
+- Owner 要求保留原来的「已用越多越满」为默认，把「剩余越多越满」做成设置项。
+- 新增 `config.meterMode`（used / left），默认 used；设置 → 常规 → 进度条切换，文本/条形/环形/账号小条/hover 同步。
+- 实测坑：后端 `set_config` 按 `CONFIG_KEYS` 丢弃未知键，日志 `ignoring unknown key 'meterMode'`，前端看起来切换后又被还原。已把 `meterMode` 加入 whitelist，并在 `config_with_defaults` 种默认 `used`。
+- 真实验证：默认 `已用 0%` 空条；切「剩余」后写入 `meterMode: "left"`，悬浮板即变为 `剩余 100%` 满条；再切回 `已用`，配置文件恢复 `meterMode: "used"`。
+- 测试：`tests/panel-semantics.test.mjs` 同时断言前端默认值与后端 whitelist/defaults，防止只改一半。
