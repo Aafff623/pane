@@ -53,6 +53,17 @@ export const messages = {
         { title: "Settings", lines: ["Shortcuts, the vault, skins and notifications.", "One drawer for all of it."] },
         { title: "Shortcuts", lines: ["Alt + 2 to summon, Esc to dismiss.", "Shift cycles the quota period."] },
       ],
+      settingsRows: [
+        { label: "Shortcuts", value: "Alt + 2 · Esc · Shift" },
+        { label: "Vault", value: "OS credential store" },
+        { label: "Skins", value: "Signal · Ink" },
+        { label: "Notifications", value: "Reset & limit alerts" },
+      ],
+      shortcutKeys: [
+        { keys: ["Alt", "2"], label: "Summon / dismiss" },
+        { keys: ["Esc"], label: "Dismiss" },
+        { keys: ["Shift"], label: "Cycle 5h / 7d / month" },
+      ],
     },
   },
   zh: {
@@ -103,6 +114,17 @@ export const messages = {
         { title: "花费", lines: ["本地 CLI 日志按模型拆分 Token 与费用。", "支持按天回看。"] },
         { title: "设置", lines: ["快捷键、保险箱、皮肤和通知策略。", "都在同一个抽屉里。"] },
         { title: "快捷键", lines: ["Alt + 2 唤出，Esc 收起。", "Shift 轮换额度周期。"] },
+      ],
+      settingsRows: [
+        { label: "快捷键", value: "Alt + 2 · Esc · Shift" },
+        { label: "保险箱", value: "系统凭据库" },
+        { label: "皮肤工坊", value: "Signal · Ink" },
+        { label: "通知", value: "重置与额度提醒" },
+      ],
+      shortcutKeys: [
+        { keys: ["Alt", "2"], label: "唤出 / 收起" },
+        { keys: ["Esc"], label: "收起面板" },
+        { keys: ["Shift"], label: "切换 5h / 7d / 月" },
       ],
     },
   },
