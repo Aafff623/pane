@@ -3,7 +3,7 @@
 import * as React from "react";
 
 import * as AccordionPrimitive from "@radix-ui/react-accordion";
-import { CaretDown } from "@phosphor-icons/react";
+import { ChevronDown } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 
@@ -35,7 +35,7 @@ const AccordionTrigger = React.forwardRef<
       {...props}
     >
       {children}
-      <CaretDown size={16} aria-hidden="true" />
+      <ChevronDown className="text-muted-foreground size-4 shrink-0 transition-transform duration-200" />
     </AccordionPrimitive.Trigger>
   </AccordionPrimitive.Header>
 ));

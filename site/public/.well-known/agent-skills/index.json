@@ -1,0 +1,9 @@
+{
+  "skills": [
+    {
+      "name": "design-mode",
+      "description": "Use when connecting or reading Design Mode browser edits.",
+      "url": "https://designmode.app/.well-known/agent-skills/design-mode/SKILL.md"
+    }
+  ]
+}

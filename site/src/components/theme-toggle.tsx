@@ -1,9 +1,9 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Moon, Sun } from "@phosphor-icons/react";
+import { Moon, Sun } from "lucide-react";
 
-export function ThemeToggle({ label }: { label: string }) {
+export function ThemeToggle() {
   const [dark, setDark] = useState(false);
 
   useEffect(() => {
@@ -13,8 +13,9 @@ export function ThemeToggle({ label }: { label: string }) {
   const toggle = () => {
     const next = !document.documentElement.classList.contains("dark");
     document.documentElement.classList.toggle("dark", next);
+    document.documentElement.style.colorScheme = next ? "dark" : "light";
     try {
-      localStorage.setItem("pane-site-theme", next ? "dark" : "light");
+      localStorage.setItem("pane-theme", next ? "dark" : "light");
     } catch {}
     setDark(next);
   };
@@ -23,12 +24,12 @@ export function ThemeToggle({ label }: { label: string }) {
     <button
       type="button"
       onClick={toggle}
-      aria-label={label}
-      title={label}
+      aria-label={dark ? "切换为浅色" : "切换为深色"}
       aria-pressed={dark}
-      className="text-foreground hover:bg-accent inline-flex size-9 items-center justify-center rounded-lg transition-colors focus-visible:ring-ring/50 focus-visible:ring-[3px] focus-visible:outline-none"
+      title={dark ? "Light theme" : "Dark theme"}
+      className="text-foreground hover:bg-accent inline-flex size-8 items-center justify-center rounded-lg transition-colors"
     >
-      {dark ? <Sun size={18} aria-hidden="true" /> : <Moon size={18} aria-hidden="true" />}
+      {dark ? <Sun size={16} aria-hidden="true" /> : <Moon size={16} aria-hidden="true" />}
     </button>
   );
 }

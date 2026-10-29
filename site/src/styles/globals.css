@@ -1,36 +1,37 @@
 @import "tailwindcss";
-@import "tw-animate-css";
-@import "@fontsource-variable/inter";
 
-/* Class-driven dark mode: the toggle owns the theme, not the OS. */
+@import "tw-animate-css";
+@plugin "@tailwindcss/typography";
+
 @custom-variant dark (&:where(.dark, .dark *));
 
 :root {
-  --background: #f7f8f7;
-  --foreground: #0b0f10;
-  --card: #ffffff;
-  --card-foreground: #0b0f10;
-  --popover: #ffffff;
-  --popover-foreground: #0b0f10;
-  --primary: #087d6d;
+  --background: #f9f9f9;
+  --foreground: #0a0a0a;
+  --card: #f9f9f9;
+  --card-foreground: #0a0a0a;
+  --popover: #f9f9f9;
+  --popover-foreground: #0a0a0a;
+  --primary: #0275de;
   --primary-foreground: #ffffff;
-  --secondary: #eceeed;
-  --secondary-foreground: #0b0f10;
-  --muted: #eceeed;
-  --muted-foreground: #55605f;
-  --accent: #e3f1ed;
-  --accent-foreground: #0b0f10;
+  --secondary: #eeeeee;
+  --secondary-foreground: #0a0a0a;
+  --muted: #eeeeee;
+  --muted-foreground: #666666;
+  --accent: #e8f0f7;
+  --accent-foreground: #0a0a0a;
   --destructive: oklch(0.6 0.2 25);
   --destructive-foreground: oklch(0.98 0.01 90);
-  --border: #dde2e0;
-  --input: #dde2e0;
-  --ring: #087d6d;
+  --border: #dedede;
+  --input: #dedede;
+  --ring: #0275de;
 
-  --ink: #0b0f10;
-  --ink-foreground: #f7f8f7;
+  --ink: #0a0a0a;
+  --ink-foreground: #f9f9f9;
 
   --radius: 8px;
 
+  /* Soft, warm, low shadows — cards lift gently rather than punch. */
   --shadow-2xs: 0 1px 2px 0 oklch(0.22 0.01 70 / 0.04);
   --shadow-xs: 0 1px 2px 0 oklch(0.22 0.01 70 / 0.05);
   --shadow-sm: 0 1px 2px 0 oklch(0.22 0.01 70 / 0.06), 0 2px 6px -2px oklch(0.22 0.01 70 / 0.06);
@@ -40,7 +41,7 @@
   --shadow-xl: 0 16px 32px -8px oklch(0.22 0.01 70 / 0.1), 0 28px 56px -14px oklch(0.22 0.01 70 / 0.14);
   --shadow-2xl: 0 28px 60px -14px oklch(0.22 0.01 70 / 0.18);
 
-  --font-sans: "Inter Variable", var(--font-inter), ui-sans-serif, system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", "Noto Sans SC", sans-serif;
+  --font-sans: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
   --font-serif: var(--font-sans);
   --font-mono: var(--font-sans);
 
@@ -49,6 +50,7 @@
   --display-weight: 600;
   --text-weight: 400;
 }
+
 
 .dark {
   --background: #08090a;
@@ -65,23 +67,11 @@
   --muted-foreground: #9ba3a8;
   --accent: #12211e;
   --accent-foreground: #eef1f2;
-  --destructive: oklch(0.65 0.2 25);
-  --destructive-foreground: oklch(0.98 0.01 90);
   --border: #242a2e;
   --input: #242a2e;
   --ring: #64d7c2;
-
   --ink: #f3f7f6;
   --ink-foreground: #08090a;
-
-  --shadow-2xs: 0 1px 2px 0 rgb(0 0 0 / 0.4);
-  --shadow-xs: 0 1px 2px 0 rgb(0 0 0 / 0.45);
-  --shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.5), 0 2px 6px -2px rgb(0 0 0 / 0.5);
-  --shadow: 0 2px 4px -1px rgb(0 0 0 / 0.5), 0 6px 16px -4px rgb(0 0 0 / 0.55);
-  --shadow-md: 0 4px 8px -2px rgb(0 0 0 / 0.5), 0 10px 24px -6px rgb(0 0 0 / 0.6);
-  --shadow-lg: 0 8px 16px -4px rgb(0 0 0 / 0.5), 0 18px 36px -10px rgb(0 0 0 / 0.65);
-  --shadow-xl: 0 16px 32px -8px rgb(0 0 0 / 0.55), 0 28px 56px -14px rgb(0 0 0 / 0.7);
-  --shadow-2xl: 0 28px 60px -14px rgb(0 0 0 / 0.75);
 }
 
 @theme inline {
@@ -129,7 +119,7 @@
   --breakpoint-md: 768px;
   --breakpoint-lg: 1024px;
   --breakpoint-xl: 1280px;
-  --breakpoint-2xl: 1400px;
+  --breakpoint-2xl: 1400px; /* default is 1536px */
 
   --font-sans: var(--font-sans);
   --font-serif: var(--font-serif);
@@ -184,15 +174,13 @@
   }
   body {
     @apply bg-background text-foreground text-base leading-6;
-    font-family: var(--font-text);
-    font-weight: var(--text-weight);
-    text-rendering: optimizeLegibility;
   }
-  html {
-    scroll-behavior: smooth;
-  }
-  ::selection {
-    background: color-mix(in srgb, var(--primary) 24%, transparent);
+  *,
+  ::after,
+  ::before,
+  ::backdrop,
+  ::file-selector-button {
+    border-color: var(--color-gray-200, currentColor);
   }
 }
 
@@ -211,13 +199,52 @@
   .font-mono {
     font-family: var(--font-mono), monospace;
   }
+  /* Macro display headline — heavy, upright. Used on hero H1s. */
   .macro {
     font-family: var(--font-display);
     font-weight: var(--display-weight);
-    letter-spacing: -0.02em;
+    letter-spacing: 0;
     line-height: 1;
     text-wrap: balance;
   }
+}
+
+.prose {
+  --tw-prose-body: var(--foreground);
+  --tw-prose-headings: var(--foreground);
+  --tw-prose-lead: var(--muted-foreground);
+  --tw-prose-links: var(--foreground);
+  --tw-prose-bold: var(--foreground);
+  --tw-prose-counters: var(--muted-foreground);
+  --tw-prose-bullets: var(--border);
+  --tw-prose-hr: var(--border);
+  --tw-prose-quotes: var(--foreground);
+  --tw-prose-quote-borders: var(--primary);
+  --tw-prose-captions: var(--muted-foreground);
+  --tw-prose-code: var(--foreground);
+  --tw-prose-pre-code: var(--ink-foreground);
+  --tw-prose-pre-bg: var(--ink);
+  --tw-prose-th-borders: var(--border);
+  --tw-prose-td-borders: var(--border);
+  font-family: var(--font-text);
+  font-size: var(--text-body);
+  line-height: 1.7;
+}
+.prose :where(h1) {
+  font-size: 2rem;
+}
+.prose :where(h2, h3) {
+  font-size: 1.5rem;
+}
+.prose :where(h1, h2, h3) {
+  font-family: var(--font-display);
+  letter-spacing: -0.02em;
+}
+.prose :where(p, li, blockquote, pre, code, table, th, td, figcaption) {
+  font-size: var(--text-body);
+}
+.prose :where(a):hover {
+  text-decoration-color: var(--primary);
 }
 
 @layer components {
@@ -235,77 +262,30 @@
   *::after {
     corner-shape: squircle;
   }
+
   .rounded-full {
     corner-shape: round;
   }
 }
 
+html,
+body {
+  scroll-behavior: smooth;
+}
 body {
   position: relative;
 }
-
 @media (hover: hover) and (prefers-reduced-motion: no-preference) {
   [data-button-content] {
     transition: transform 160ms ease;
   }
   [data-slot="button"]:not(:disabled):not([aria-disabled="true"]):hover > [data-button-content] {
-    transform: scale(1.06);
+    transform: scale(1.1);
   }
 }
-
 @media (prefers-reduced-motion: reduce) {
   html,
   body {
     scroll-behavior: auto;
   }
-  *,
-  *::before,
-  *::after {
-    animation-duration: 0.001ms !important;
-    animation-iteration-count: 1 !important;
-    transition-duration: 0.001ms !important;
-  }
-}
-
-/* Legal pages */
-.legal {
-  font-size: 0.9375rem;
-  line-height: 1.8;
-  color: var(--muted-foreground);
-}
-.legal h2 {
-  margin: 2rem 0 0.5rem;
-  font-size: 1.125rem;
-  font-weight: 600;
-  color: var(--foreground);
-}
-.legal p {
-  margin: 0.75rem 0;
-}
-.legal ul {
-  margin: 0.75rem 0;
-  padding-left: 1.25rem;
-  list-style: disc;
-}
-.legal li {
-  margin: 0.35rem 0;
-}
-.legal strong {
-  color: var(--foreground);
-  font-weight: 600;
-}
-.legal code {
-  padding: 0.1rem 0.35rem;
-  border: 1px solid var(--border);
-  border-radius: 5px;
-  background: var(--card);
-  font-size: 0.8125rem;
-}
-.legal a {
-  color: var(--foreground);
-  text-decoration: underline;
-  text-underline-offset: 3px;
-}
-.legal a:hover {
-  color: var(--primary);
 }

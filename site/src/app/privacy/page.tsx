@@ -1,65 +1,47 @@
-import type { Metadata } from "next";
+"use client";
 
-import { LegalPage } from "@/components/legal-page";
-import { SITE_FACTS } from "@/content/facts";
+import Privacy from "./privacy.mdx";
+import Reporting from "./reporting.mdx";
 
-export const metadata: Metadata = {
-  title: "隐私说明",
-  description: "Pane 的隐私说明：会出网的请求、本机存储与遥测边界。",
-  alternates: { canonical: "/privacy/", languages: { "zh-CN": "/privacy/", en: "/en/privacy/" } },
-};
+import { Background } from "@/components/background";
+import { DashedLine } from "@/components/dashed-line";
 
 export default function PrivacyPage() {
   return (
-    <LegalPage
-      lang="zh"
-      title="隐私说明"
-      updated="最后更新：2026-10-26"
-      authoritativeHref={`${SITE_FACTS.repo}/blob/main/docs/privacy.md`}
-      authoritativeLabel="权威版本"
-      alternate={{ href: "/en/privacy/", label: "English" }}
-    >
-      <p>
-        Pane 建立在一条规则上：你的数据不关我们的事。没有 Pane 账号，也没有 Pane 后端接收你的额度、花费、密钥或服务商数据。
-      </p>
+    <>
+      {/* Hero — yellow background slab */}
+      <Background>
+        <section className="py-12 lg:py-16">
+          <div className="container max-w-5xl">
+            <h1 className="text-3xl tracking-tight sm:text-4xl md:text-5xl">
+              Privacy
+            </h1>
+            <p className="text-muted-foreground mt-4 max-w-3xl text-base">
+              Design Mode runs in your browser. Release builds send usage
+              analytics without page content. Here is what else can leave your
+              machine, when, and why.
+            </p>
+          </div>
+        </section>
+      </Background>
 
-      <h2>会出网的请求</h2>
-      <ul>
-        <li>
-          <strong>服务商自己的 API</strong>：只在你启用该服务商时，按其官方工具相同的方式发送该账号的 token/key。
-        </li>
-        <li>
-          <strong>公开价格表</strong>：LiteLLM、models.dev、OpenUsage supplement，匿名 GET，无身份信息。
-        </li>
-        <li>
-          <strong>更新检查</strong>：本项目的 <code>update/latest.json</code> 与 GitHub Releases 兜底，匿名 GET，不携带 App 数据。
-        </li>
-        <li>
-          <strong>状态页</strong>：仅当 Claude 卡片处于 stale/失败且状态探测开启时，匿名 GET <code>status.claude.com</code> 的公开事件摘要，不携带 App 数据。
-        </li>
-        <li>
-          <strong>本机 Ollama</strong>：仅当启用时访问 <code>127.0.0.1</code>。
-        </li>
-      </ul>
-      <p>没有会话录制、事件流、A/B 标记、自动捕获或遥测。应用不发送任何统计，也不向上游作者的统计项目发送数据。</p>
+      {/* Middle — main privacy content */}
+      <section className="py-16 lg:py-20">
+        <DashedLine className="container max-w-5xl" />
+        <article className="prose container mx-auto mt-12 max-w-3xl">
+          <Privacy />
+        </article>
+      </section>
 
-      <h2>本机存储</h2>
-      <p>
-        配置、账号、快照、花费台账、皮肤与字体包位于 <code>%APPDATA%\PaneAafff623</code>
-        。密钥优先进入系统凭据库；无法使用时才回退到受保护的本机文件。删除这些文件等于清空 Pane 的本机记忆。
-      </p>
-
-      <h2>遥测</h2>
-      <p>本版不含遥测，也没有需要关闭的统计开关。若未来引入任何上报，会先写入这份清单并提供明确开关。</p>
-
-      <h2>联系</h2>
-      <p>
-        问题与数据请求：
-        <a href={SITE_FACTS.issues} target="_blank" rel="noopener noreferrer">
-          GitHub Issues
-        </a>
-        。
-      </p>
-    </LegalPage>
+      {/* Bottom — reporting concerns in yellow slab */}
+      <Background variant="bottom">
+        <section className="py-20 lg:py-28">
+          <DashedLine className="container max-w-5xl" />
+          <article className="prose container mx-auto mt-12 max-w-3xl">
+            <Reporting />
+          </article>
+        </section>
+      </Background>
+    </>
   );
 }

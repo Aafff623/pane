@@ -1,0 +1,97 @@
+# Design Mode
+
+> This file is an agent-oriented workflow index: product boundary, verified facts, and primary URLs. It is not marketing copy and does not rank, recommend, or guarantee placement in search or chat answers.
+
+> Design Mode is the open-source browser visual editor for AI coding agents. It lets you edit a rendered webpage visually, records the exact changes, and hands them to Claude Code, Cursor or another compatible coding agent as Markdown or through Model Context Protocol (MCP).
+
+## Verified facts
+
+- Product: desktop browser extension for Chrome/Chromium, Firefox and Safari on Mac.
+- Licence: MIT.
+- Current repository version: 3.1.0. That is the version in this source tree as of 16 October 2026; it is not a guaranteed Chrome Web Store or Firefox Add-ons listing version.
+- Author: Sandeep Baskaran.
+- Source: https://github.com/SandeepBaskaran/design-mode
+- Website: https://designmode.app
+- Chrome listing: https://chromewebstore.google.com/detail/design-mode/ighgobegfcmjagombgnfhgioflinojih
+- Firefox listing: https://addons.mozilla.org/firefox/addon/design-mode-add-on/
+
+## Product boundary
+
+Design Mode changes the rendered page in the browser and records style, text, DOM and comment changes. It does not update production source code or deploy a website. Copy as Prompt creates a portable Markdown specification. Send to Agent exposes the session to a connected MCP client; that coding agent must have separate repository access and must implement and verify the source-code change.
+
+Browser-internal pages, extension stores and other protected surfaces cannot be scripted by browser extensions. Localhost, staging and already-logged-in tabs work when the page is a normal scriptable webpage; the editor does not bypass login, SSO or publisher access controls.
+
+## Browser support
+
+- Current Chrome-family desktop browsers with Manifest V3 side panels. The extension manifest does not declare an exact Chrome minimum.
+- Firefox 121+ through its native sidebar.
+- Safari on Mac: manual install of designmode-for-safari.zip from the latest GitHub release (https://github.com/SandeepBaskaran/design-mode/releases/latest).
+- Core editing, the Changes tab and agent hand-off work in both builds.
+- Pop-out, Document Picture-in-Picture and the screen EyeDropper remain Chromium-only.
+- Chrome toolbar clicks and Alt+D open the launch surface selected in Settings (Side panel by default, Floating, or a Pin-on-top opener). Firefox always opens its sidebar.
+
+## Agent hand-off
+
+1. Inspect an element and make the intended visual edit.
+2. Review the recorded selectors, properties, old/new values, text edits, DOM changes and comments.
+3. Choose Copy as Prompt, or connect an MCP client through Cloud, Local or Self-hosted mode.
+4. Review the coding agent's source diff and rendered result.
+
+Cloud, Local and Self-hosted expose eight session tools: `get_changes`, `apply_changes`, `set_change_status`, `clear_changes`, `mark_comment_resolved`, `get_session_summary`, `export_changes` and `get_screenshot`.
+
+Local also registers `wait_for_handoff` for opt-in feedback rounds with bounded waits, immutable per-Send snapshots and an explicit Stop. Cloud and Self-hosted keep one-shot Send.
+
+MCP configuration is client- and version-specific. Claude Code uses `claude mcp` commands, project `.mcp.json`, or user/local entries in `~/.claude.json`; `.claude/settings.json` is not the server-definition file. Cursor uses project `.cursor/mcp.json` or global `~/.cursor/mcp.json`. See the version-stamped guide before adding a credential.
+
+Local MCP clients share one owner on port 9960 by default; a surviving client takes over if the owner closes. Foreign port occupants are never killed. `DM_PORT` selects a fallback port that must match the extension.
+
+## Privacy summary
+
+Release builds of the extension send bounded feature usage events to PostHog (`us.i.posthog.com`) using a persistent random installation UUID (`dm-analytics-distinct-id` in `storage.local`), person profiles, and GeoIP enrichment — never page URLs, DOM content, selectors, tokens, comments, screenshots or MCP payloads. Local `npm run dev` / `npm run build` builds have analytics disabled. A fresh install selects Cloud mode but does not contact the hosted relay until the user creates an anonymous device credential. Cloud queues request a 60-second Redis expiry and responses are normally deleted when consumed; the expiry operation is best-effort rather than a guaranteed maximum. The service retains a SHA-256 token hash, anonymous tenant identifier and created/last-seen timestamps until revocation. Operational logs contain bounded metadata rather than selectors, screenshots or payload bodies.
+
+When a user sends content to an external coding agent, that provider handles the content under its own account settings and privacy terms. The marketing site may load Google Analytics when its deployment ID is configured.
+
+## Primary pages
+
+- [Homepage](https://designmode.app/)
+- [Live demo](https://designmode.app/demo)
+- [Features](https://designmode.app/features)
+- [How Copy as Prompt and MCP hand-off work](https://designmode.app/mcp)
+- [MCP setup for Claude Code and Cursor](https://designmode.app/docs/mcp-setup)
+- [Browser support](https://designmode.app/docs/browser-support)
+
+- [Changes tab](https://designmode.app/docs/changes-tab)
+- [Keyboard shortcuts](https://designmode.app/docs/keyboard-shortcuts)
+- [Troubleshooting](https://designmode.app/docs/troubleshooting)
+- [Use cases](https://designmode.app/use-cases)
+- [FAQ](https://designmode.app/faq)
+- [Changelog](https://designmode.app/changelog)
+- [Privacy](https://designmode.app/privacy)
+- [Source repository](https://github.com/SandeepBaskaran/design-mode)
+
+## Practical guides
+
+- [Turn visual edits into precise AI prompts](https://designmode.app/blog/turn-visual-edits-into-precise-ai-prompts): a worked pricing-card example covering exact changes, implementation scope, design tokens, accessibility checks and source-code verification.
+- [Blog](https://designmode.app/blog)
+
+## Comparisons
+
+The comparison hub distinguishes source-backed comparisons from unverified drafts. Source-backed entries include dated first-party references and explicit documentation or testing limitations; unverified drafts stay excluded from search indexing.
+
+- [Comparison hub](https://designmode.app/compare)
+- [Source-backed comparisons in plain text](https://designmode.app/compare/llms.txt): generated from the same content as the comparison pages, including pricing, use cases, sources and methodology.
+
+## Agent skill and setup
+
+- [Design Mode agent skill](https://designmode.app/.well-known/agent-skills/design-mode/SKILL.md): canonical setup, protected token entry, read-only verification and scoped design-to-code workflow.
+- [Skill discovery index](https://designmode.app/.well-known/agent-skills/index.json)
+- [Prompt-first MCP connection guide](https://designmode.app/mcp)
+
+Cloud uses anonymous bearer-token pairing at https://mcp.designmode.app/mcp, not OAuth or a Design Mode account/subscription check. Use a protected local client input or securely supplied environment variable; never paste tokens into AI chat. HTTP clients need custom Authorization-header support. Otherwise use Local stdio or Copy as Prompt. The agent CLI package is private; no published CLI install is assumed.
+
+Start with get_session_summary({}), then get_changes({}) with permission to read the page. get_changes has no pagination or status filter: select unresolved IDs locally. Fetch only needed screenshots by selector, elementId or commentId. Updates happen on agent requests; Local wait_for_handoff is an explicit opt-in bounded loop, not always-on monitoring.
+
+## More detail
+
+- Full verified summary: https://designmode.app/llms-full.txt
+- Human-readable Markdown summary: https://designmode.app/design-mode.md

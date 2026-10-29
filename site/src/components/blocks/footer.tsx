@@ -1,58 +1,135 @@
-import Link from "next/link";
 import Image from "next/image";
+import Link from "next/link";
 
-import type { Dictionary, Lang } from "@/i18n";
+import { ArrowUpRight } from "lucide-react";
 
-export function Footer({ lang, dict }: { lang: Lang; dict: Dictionary }) {
+import { withNavRef } from "@/lib/nav-ref";
+
+const REPO_URL = withNavRef("https://github.com/SandeepBaskaran/design-mode");
+
+const SPONSORS_URL = withNavRef("https://github.com/sponsors/SandeepBaskaran");
+const PRODUCT_HUNT_URL = withNavRef(
+  "https://www.producthunt.com/products/design-mode",
+);
+const AUTHOR_URL = withNavRef("https://sandeepbaskaran.com");
+
+export function Footer() {
   const groups = [
-    { title: dict.footer.product, links: dict.footer.productLinks },
-    { title: dict.footer.resources, links: dict.footer.resourceLinks },
-    { title: dict.footer.project, links: dict.footer.projectLinks },
+    {
+      title: "Product",
+      links: [
+        { name: "Features", href: "/features" },
+        { name: "Try the demo", href: "/demo" },
+        { name: "Connect your agent", href: "/mcp" },
+        { name: "Use cases", href: "/use-cases" },
+
+      ],
+    },
+    {
+      title: "Resources",
+      links: [
+        { name: "Documentation", href: "/docs" },
+        { name: "Changelog", href: "/changelog" },
+        { name: "Compare", href: "/compare" },
+        { name: "Blog", href: "/blog" },
+
+      ],
+    },
+    {
+      title: "Project",
+      links: [
+        { name: "About", href: "/about" },
+        { name: "Contact", href: "/contact" },
+        { name: "Privacy", href: "/privacy" },
+        { name: "FAQ", href: "/faq" },
+
+      ],
+    },
+    {
+      title: "Community",
+      links: [
+        { name: "GitHub", href: REPO_URL },
+
+        { name: "Product Hunt", href: PRODUCT_HUNT_URL },
+        { name: "Sponsor", href: SPONSORS_URL },
+      ],
+    },
   ];
 
   return (
     <footer className="border-t py-16 md:pt-24 md:pb-8">
-      <div className="container">
-        <div className="grid gap-12 md:grid-cols-[1.4fr_repeat(3,1fr)]">
-          <div>
-            <Link href={lang === "zh" ? "/" : "/en/"} className="flex items-center gap-2">
-              <Image src="/brand-logo.png" width={24} height={24} alt="" unoptimized className="size-6" />
-              <span className="font-display text-base font-semibold tracking-tight">Pane</span>
-            </Link>
-            <p className="text-muted-foreground mt-4 max-w-xs text-sm leading-relaxed">{dict.meta.description}</p>
-          </div>
+      <div className="container grid max-w-[1200px] gap-16 lg:grid-cols-[1.5fr_3fr] lg:gap-x-16 lg:gap-y-16">
+        <div className="flex flex-col items-center text-center md:items-start md:text-left">
+          <Link
+            href="/"
+            className="focus-visible:outline-ring inline-flex items-center gap-2 rounded-lg focus-visible:outline-2 focus-visible:outline-offset-4"
+          >
+            <Image
+              src="/brand-icon.png"
+              width={40}
+              height={40}
+              alt=""
+              unoptimized
+            />
+            <span className="text-2xl font-semibold tracking-tight">
+              Design Mode
+            </span>
+          </Link>
+          <p className="mt-4 max-w-xs text-base leading-relaxed text-[#444444]">
+            Make the change you want to see.
+            <br />
+            Give your agent the details.
+          </p>
+          <p className="text-muted-foreground mt-8 text-base">
+            Free to install. Open source under MIT.
+          </p>
+        </div>
+        <nav
+          aria-label="Footer"
+          className="grid grid-cols-2 gap-x-4 gap-y-8 md:grid-cols-4 md:gap-x-8"
+        >
           {groups.map((group) => (
             <div key={group.title}>
-              <p className="text-foreground text-sm font-semibold">{group.title}</p>
-              <ul className="mt-4 space-y-2">
-                {group.links.map((link) => {
-                  const external = link.href.startsWith("http");
-                  return (
-                    <li key={link.label}>
-                      {external ? (
-                        <a
-                          href={link.href}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="text-muted-foreground hover:text-foreground text-sm transition-colors"
-                        >
-                          {link.label}
-                        </a>
-                      ) : (
-                        <Link href={link.href} className="text-muted-foreground hover:text-foreground text-sm transition-colors">
-                          {link.label}
-                        </Link>
+              <h2 className="text-muted-foreground mb-4 text-base font-medium">
+                {group.title}
+              </h2>
+              <ul className="space-y-0">
+                {group.links.map((item) => (
+                  <li key={item.name}>
+                    <Link
+                      href={item.href}
+                      {...(item.href.startsWith("https://")
+                        ? { target: "_blank", rel: "noopener noreferrer" }
+                        : {})}
+                      className="hover:text-primary focus-visible:outline-ring inline-flex items-center gap-2 rounded-lg py-1 text-base leading-snug transition-colors focus-visible:outline-2 focus-visible:outline-offset-4"
+                    >
+                      {item.name}
+                      {item.href.startsWith("https://") && (
+                        <ArrowUpRight
+                          className="size-4 shrink-0"
+                          aria-hidden="true"
+                        />
                       )}
-                    </li>
-                  );
-                })}
+                    </Link>
+                  </li>
+                ))}
               </ul>
             </div>
           ))}
-        </div>
-        <div className="border-border text-muted-foreground mt-16 flex flex-col gap-3 border-t pt-6 text-xs leading-relaxed md:flex-row md:items-center md:justify-between">
-          <p className="max-w-3xl">{dict.footer.disclaimer}</p>
-          <p className="shrink-0">{dict.footer.copyright}</p>
+        </nav>
+        <div className="text-muted-foreground col-span-full flex w-full flex-col items-center gap-2 text-center text-base md:flex-row md:justify-between md:text-left">
+          <p>© {new Date().getFullYear()} Design Mode</p>
+          <p>
+            Made by{" "}
+            <a
+              href={AUTHOR_URL}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="hover:text-primary focus-visible:outline-ring rounded-lg underline-offset-4 hover:underline focus-visible:outline-2 focus-visible:outline-offset-4"
+            >
+              Sandeep Baskaran
+            </a>
+          </p>
         </div>
       </div>
     </footer>

@@ -1,15 +1,29 @@
-import type { Metadata } from "next";
-
 import { HomePage } from "@/components/home-page";
-import { zh } from "@/i18n";
+import { JsonLd, faqSchema, softwareApplicationSchema } from "@/components/site/json-ld";
+import { homepageFaqQA } from "@/components/blocks/faq";
 
-export const metadata: Metadata = {
-  title: { absolute: zh.meta.title },
-  description: zh.meta.description,
-  alternates: { canonical: "/", languages: { "zh-CN": "/", en: "/en/", "x-default": "/" } },
-  openGraph: { locale: "zh_CN", url: "/", title: zh.meta.title, description: zh.meta.description },
+const homeTitle = "Pane — 本地优先的 AI 用量工作台";
+const homeDescription =
+  "Pane 把 AI 工具的额度、余额、重置时间、多账号与本地 CLI Token 花费汇集到一个随时可唤出的桌面面板。凭据保存在本机。";
+
+export const metadata = {
+  title: { absolute: homeTitle },
+  description: homeDescription,
+  alternates: { canonical: "https://pane.threetwoa.live/" },
+  openGraph: {
+    type: "website",
+    title: homeTitle,
+    description: homeDescription,
+    url: "https://pane.threetwoa.live/",
+  },
 };
 
-export default function Page() {
-  return <HomePage lang="zh" />;
+export default function Home() {
+  return (
+    <>
+      <JsonLd data={softwareApplicationSchema} />
+      <JsonLd data={faqSchema(homepageFaqQA)} />
+      <HomePage lang="en" />
+    </>
+  );
 }
