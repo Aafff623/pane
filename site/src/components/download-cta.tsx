@@ -49,7 +49,8 @@ export function usePlatformTarget(labels: Labels): Target {
       const osOverride = params.get("os");
       const os = osOverride === "windows" || osOverride === "macos" || osOverride === "linux" ? osOverride : detectOS();
       if (os !== "macos") return;
-      const arch = params.get("arch") === "arm64" ? "arm64" : await detectArch();
+      const archParam = params.get("arch");
+      const arch = archParam === "arm64" || archParam === "x64" ? archParam : await detectArch();
       const assets = await latestAssets();
       const dmgs = assets.filter((asset) => /\.dmg$/i.test(asset.name || ""));
       const match = dmgs.find((asset) => (arch === "arm64" ? /arm64|aarch64/i.test(asset.name) : /(x64|x86_64|amd64)/i.test(asset.name))) ?? dmgs[0];

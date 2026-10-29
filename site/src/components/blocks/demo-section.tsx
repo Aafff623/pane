@@ -8,7 +8,7 @@ import type { Dictionary, Lang } from "@/i18n";
 
 export function DemoSection({ lang, dict }: { lang: Lang; dict: Dictionary }) {
   const [nonce, setNonce] = useState(0);
-  const [theme, setTheme] = useState<"dark" | "light">("dark");
+  const [theme, setTheme] = useState<"dark" | "light">("light");
 
   useEffect(() => {
     const sync = () => setTheme(document.documentElement.classList.contains("dark") ? "dark" : "light");
@@ -18,7 +18,7 @@ export function DemoSection({ lang, dict }: { lang: Lang; dict: Dictionary }) {
     return () => observer.disconnect();
   }, []);
 
-  const src = `/demo/index.html?theme=${theme}&lang=${lang}`;
+  const src = `/demo/?theme=${theme}&lang=${lang}`;
 
   return (
     <section id="demo" className="py-16 md:py-24 lg:py-32" aria-labelledby="demo-title">

@@ -1,4 +1,3 @@
-import Image from "next/image";
 import Link from "next/link";
 
 import { ArrowRight } from "@phosphor-icons/react/dist/ssr";
@@ -66,24 +65,20 @@ export function Hero({ lang, dict }: { lang: Lang; dict: Dictionary }) {
         <figure className="mx-auto mt-12 w-full max-w-[1040px] sm:mt-16">
           <div className="border-border relative aspect-[8/5] overflow-hidden rounded-2xl border bg-[radial-gradient(120%_90%_at_50%_0%,color-mix(in_srgb,var(--primary)_16%,transparent),transparent_60%)] shadow-lg">
             <div aria-hidden="true" className="absolute inset-0 opacity-[0.18] [background-image:linear-gradient(to_right,var(--border)_1px,transparent_1px),linear-gradient(to_bottom,var(--border)_1px,transparent_1px)] [background-size:44px_44px]" />
-            <Image
-              src="/img/pane-panel-dark.png"
-              alt={dict.hero.imageAlt}
-              width={878}
-              height={1280}
-              priority
-              unoptimized
-              className="absolute top-8 left-1/2 hidden h-[calc(100%-2rem)] w-auto -translate-x-1/2 rounded-t-xl border border-border shadow-2xl dark:block"
-            />
-            <Image
-              src="/img/pane-panel-light.png"
-              alt={dict.hero.imageAlt}
-              width={878}
-              height={1280}
-              priority
-              unoptimized
-              className="absolute top-8 left-1/2 block h-[calc(100%-2rem)] w-auto -translate-x-1/2 rounded-t-xl border border-border shadow-2xl dark:hidden"
-            />
+            <div
+              role="img"
+              aria-label={dict.hero.imageAlt}
+              className="border-border absolute top-8 left-1/2 h-[calc(100%-2rem)] aspect-[439/640] -translate-x-1/2 overflow-hidden rounded-t-xl border shadow-2xl"
+            >
+              <div
+                className="block h-full w-full bg-[length:100%_auto] bg-top bg-no-repeat dark:hidden"
+                style={{ backgroundImage: "url('/img/pane-panel-light.png')" }}
+              />
+              <div
+                className="hidden h-full w-full bg-[length:100%_auto] bg-top bg-no-repeat dark:block"
+                style={{ backgroundImage: "url('/img/pane-panel-dark.png')" }}
+              />
+            </div>
           </div>
           <figcaption className="text-muted-foreground mt-3 text-sm">{dict.hero.caption}</figcaption>
         </figure>

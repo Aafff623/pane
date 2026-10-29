@@ -1,10 +1,17 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 
 import { SITE_FACTS } from "@/content/facts";
 import { zh } from "@/i18n";
 import "@/styles/globals.css";
 
 const themeScript = `(function(){try{var t=localStorage.getItem('pane-site-theme');if(t!=='dark'&&t!=='light'){t=window.matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light'}document.documentElement.classList.toggle('dark',t==='dark');document.documentElement.style.colorScheme=t}catch(e){}})();`;
+
+export const viewport: Viewport = {
+  themeColor: [
+    { media: "(prefers-color-scheme: light)", color: "#f7f8f7" },
+    { media: "(prefers-color-scheme: dark)", color: "#08090a" },
+  ],
+};
 
 export const metadata: Metadata = {
   metadataBase: new URL(SITE_FACTS.domain),
@@ -43,7 +50,6 @@ export const metadata: Metadata = {
     description: zh.meta.description,
     images: ["/og-cover.png"],
   },
-  icons: { icon: "/favicon.png" },
   alternates: {
     canonical: "/",
     languages: {
@@ -61,12 +67,6 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
         <script dangerouslySetInnerHTML={{ __html: themeScript }} />
       </head>
       <body className="min-h-dvh antialiased">
-        <a
-          href="#main-content"
-          className="bg-background text-foreground focus:ring-ring sr-only rounded-lg px-4 py-2 focus:not-sr-only focus:fixed focus:top-3 focus:left-3 focus:z-[100] focus:ring-2"
-        >
-          跳到主要内容
-        </a>
         {children}
       </body>
     </html>

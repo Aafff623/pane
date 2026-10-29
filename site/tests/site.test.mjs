@@ -46,7 +46,7 @@ test("worker: home and English routes, with the right framing policy", async () 
   assert.equal(en.status, 200);
   assert.match(await en.text(), /<html lang="en"/);
 
-  const demo = await call("/demo/index.html");
+  const demo = await call("/demo/");
   assert.equal(demo.status, 200);
   assert.equal(demo.headers.get("x-frame-options"), "SAMEORIGIN");
   assert.match(demo.headers.get("content-security-policy-report-only"), /frame-ancestors 'self'/);
@@ -129,6 +129,8 @@ test("content facts: version matches the app and the upstream licence is retaine
   const root = JSON.parse(readFileSync(new URL("../../package.json", import.meta.url), "utf8"));
   const facts = readFileSync(new URL("../src/content/facts.ts", import.meta.url), "utf8");
   assert.ok(facts.includes(`version: "${root.version}"`));
+  const sitePkg = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
+  assert.equal(sitePkg.version, root.version, "site package version drifted from the app");
   const licence = readFileSync(new URL("../LICENSE", import.meta.url), "utf8");
   assert.match(licence, /Commons Clause/);
   assert.match(licence, /shadcnblocks\.com/);

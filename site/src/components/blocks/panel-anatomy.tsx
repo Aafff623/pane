@@ -1,6 +1,5 @@
 "use client";
 
-import Image from "next/image";
 import { useState } from "react";
 
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
@@ -55,22 +54,16 @@ export function PanelAnatomy({ dict }: { dict: Dictionary }) {
 
           <figure className={styles.figure}>
             <div className={styles.frame}>
-              <Image
-                src="/img/pane-panel-dark.png"
-                alt={dict.panel.imageAlt}
-                width={1600}
-                height={1000}
-                unoptimized
-                className="hidden h-auto w-full dark:block"
-              />
-              <Image
-                src="/img/pane-panel-light.png"
-                alt={dict.panel.imageAlt}
-                width={1600}
-                height={1000}
-                unoptimized
-                className="block h-auto w-full dark:hidden"
-              />
+              <div role="img" aria-label={dict.panel.imageAlt} className="aspect-[878/1280] w-full">
+                <div
+                  className="block h-full w-full bg-[length:100%_auto] bg-top bg-no-repeat dark:hidden"
+                  style={{ backgroundImage: "url('/img/pane-panel-light.png')" }}
+                />
+                <div
+                  className="hidden h-full w-full bg-[length:100%_auto] bg-top bg-no-repeat dark:block"
+                  style={{ backgroundImage: "url('/img/pane-panel-dark.png')" }}
+                />
+              </div>
               {MARKS.map((mark, index) => {
                 const on = String(index) === active;
                 return (

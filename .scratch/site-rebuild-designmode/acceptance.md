@@ -58,6 +58,8 @@ Worker 路由（`wrangler dev`，http://127.0.0.1:8791）：
 5. 面板截图是静态素材：主应用 UI 变更后需要重新截取 `site/public/img/pane-panel-{dark,light}.png`。
 6. **未 push、未部署**；线上仍是旧站，直到 owner 授权后走 `site-deploy.yml`。
 
+> 第二轮深度 review 的发现与修复见 [`review.md`](review.md)。
+
 ## Owner 验收入口
 
 ```powershell

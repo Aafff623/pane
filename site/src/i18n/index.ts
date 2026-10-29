@@ -15,6 +15,8 @@ type Dict = {
     theme: string;
     menu: string;
     closeMenu: string;
+    primary: string;
+    skip: string;
   };
   hero: {
     eyebrow: string;
@@ -60,6 +62,7 @@ type Dict = {
     description: string;
     windows: string;
     macos: string;
+    macosCta: string;
     linux: string;
     facts: { title: string; body: string }[];
     winget: string;
@@ -99,6 +102,8 @@ export const zh: Dict = {
     theme: "切换主题",
     menu: "打开菜单",
     closeMenu: "关闭菜单",
+    primary: "主导航",
+    skip: "跳到主要内容",
   },
   hero: {
     eyebrow: "本地优先 · 无需注册",
@@ -192,6 +197,7 @@ export const zh: Dict = {
     description: "Windows 已提供，macOS Beta，Linux 计划中。下载的是官方 Release 安装包。",
     windows: "下载 Windows 版",
     macos: "macOS Beta",
+    macosCta: "下载 macOS 版（Beta）",
     linux: "Linux 计划中",
     facts: [
       { title: "全功能免费", body: "没有付费墙，也没有功能裁剪" },
@@ -256,6 +262,8 @@ export const en: Dict = {
     theme: "Toggle theme",
     menu: "Open menu",
     closeMenu: "Close menu",
+    primary: "Main navigation",
+    skip: "Skip to content",
   },
   hero: {
     eyebrow: "Local first · No account",
@@ -349,6 +357,7 @@ export const en: Dict = {
     description: "Windows is available, macOS is Beta and Linux is planned. Every download comes from the official release.",
     windows: "Download for Windows",
     macos: "macOS Beta",
+    macosCta: "Download for macOS (Beta)",
     linux: "Linux planned",
     facts: [
       { title: "Free, fully featured", body: "No paywall and no feature gating" },

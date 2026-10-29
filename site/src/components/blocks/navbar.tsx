@@ -2,6 +2,7 @@
 
 import Image from "next/image";
 import Link from "next/link";
+import { usePathname } from "next/navigation";
 import { useState } from "react";
 import { GithubLogo, List, X } from "@phosphor-icons/react";
 
@@ -12,7 +13,10 @@ import { cn } from "@/lib/utils";
 
 export function Navbar({ lang, dict }: { lang: Lang; dict: Dictionary }) {
   const [open, setOpen] = useState(false);
+  const pathname = usePathname() || "/";
   const base = lang === "zh" ? "" : "/en";
+  const neutral = pathname.replace(/^\/en(?=\/|$)/, "") || "/";
+  const languageHref = lang === "zh" ? `/en${neutral === "/" ? "/" : neutral}` : neutral;
   const links = [
     { label: dict.nav.features, href: `${base}/#features` },
     { label: dict.nav.demo, href: `${base}/#demo` },
@@ -27,7 +31,7 @@ export function Navbar({ lang, dict }: { lang: Lang; dict: Dictionary }) {
           <span className="font-display text-foreground text-base font-semibold tracking-tight">Pane</span>
         </Link>
 
-        <nav className="max-xl:hidden" aria-label={dict.nav.features}>
+        <nav className="max-xl:hidden" aria-label={dict.nav.primary}>
           <ul className="flex items-center gap-0">
             {links.map((link) => (
               <li key={link.label}>
@@ -54,14 +58,14 @@ export function Navbar({ lang, dict }: { lang: Lang; dict: Dictionary }) {
           </Link>
           <ThemeToggle label={dict.nav.theme} />
           <Link
-            href={lang === "zh" ? "/en/" : "/"}
+            href={languageHref}
             aria-label={dict.nav.language}
             className="text-foreground hover:bg-accent inline-flex h-9 items-center rounded-lg px-3 text-xs font-semibold tracking-widest uppercase transition-colors"
           >
             {lang === "zh" ? "EN" : "中"}
           </Link>
           <div className="max-xl:hidden">
-            <DownloadButton labels={{ windows: dict.hero.download, macos: dict.download.macos }} size="sm" />
+            <DownloadButton labels={{ windows: dict.hero.download, macos: dict.download.macosCta }} size="sm" />
           </div>
           <button
             type="button"
@@ -98,7 +102,7 @@ export function Navbar({ lang, dict }: { lang: Lang; dict: Dictionary }) {
           ))}
           <div className="pt-4">
             <DownloadButton
-              labels={{ windows: dict.hero.download, macos: dict.download.macos }}
+              labels={{ windows: dict.hero.download, macos: dict.download.macosCta }}
               className="w-full"
             />
           </div>
