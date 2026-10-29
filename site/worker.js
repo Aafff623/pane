@@ -1,4 +1,4 @@
-// pane.threetwoa.live. The site is static files in public/; wrangler.jsonc
+// pane.threetwoa.live. The site is a static Next.js export in out/; wrangler.jsonc
 // sets run_worker_first, so every request lands here first.
 //
 //   /download/windows   the newest Windows installer. Resolved here, at the
@@ -24,7 +24,7 @@
 //                       availability — and the app's second endpoint is
 //                       GitHub's own manifest, so this route may fail freely.
 //
-// Everything else is the static site in public/, via env.ASSETS.fetch.
+// Everything else is the static export in out/, via env.ASSETS.fetch.
 // (The workers.dev trial address is off: wrangler disables it once a
 // custom-domain route is declared.)
 //
@@ -34,8 +34,6 @@
 // No analytics beacon: Magpie injects Cloudflare Web Analytics here, but that
 // needs a token tied to a zone we don't have yet. Add it when a real domain
 // lands — one edge function, no markup change.
-
-import { en } from "./i18n.js";
 
 const REPO = "Aafff623/pane";
 const RELEASES_PAGE = `https://github.com/${REPO}/releases/latest`;
@@ -47,24 +45,6 @@ const GITEE_REPO = "fan-tengda/pane";
 const MANIFEST_URL = `https://github.com/${REPO}/releases/latest/download/latest.json`;
 const GITEE_ASSET = (version) =>
   `https://gitee.com/${GITEE_REPO}/releases/download/v${version}/Pane-Aafff623_${version}_x64-setup.exe`;
-
-// Serve English metadata in the initial HTML so search and sharing clients
-// receive the right title and canonical URL without executing site.js.
-async function englishMetadata(response) {
-  if (!response.ok || !response.headers.get("content-type")?.includes("text/html")) return response;
-  const html = (await response.text())
-    .replace('<html lang="zh-CN"', '<html lang="en"')
-    .replace(/<title>[^<]*<\/title>/, `<title>${en.metaTitle}</title>`)
-    .replace(/(<meta (?:name="description"|property="og:description"|name="twitter:description") content=")[^"]*(")/g, `$1${en.metaDescription}$2`)
-    .replace(/(<meta (?:property="og:title"|name="twitter:title") content=")[^"]*(")/g, `$1${en.metaTitle}$2`)
-    .replace('<link rel="canonical" href="https://pane.threetwoa.live/">', '<link rel="canonical" href="https://pane.threetwoa.live/en/">')
-    .replace('<meta property="og:url" content="https://pane.threetwoa.live/">', '<meta property="og:url" content="https://pane.threetwoa.live/en/">')
-    .replace('<meta property="og:locale" content="zh_CN">', '<meta property="og:locale" content="en_US">');
-  const headers = new Headers(response.headers);
-  for (const name of ["content-length", "content-encoding", "etag"]) headers.delete(name);
-  headers.set("content-language", "en");
-  return new Response(html, { status: response.status, statusText: response.statusText, headers });
-}
 
 // latestRelease asks GitHub for the newest release. The cf.cacheTtl keeps the
 // API call off the request path for repeat visitors (GitHub allows 60
@@ -195,13 +175,20 @@ const CSP_REPORT_ONLY = [
   "frame-ancestors 'none'",
 ].join("; ");
 
-function withSecurityHeaders(response) {
+function withSecurityHeaders(response, pathname) {
   const headers = new Headers(response.headers);
   headers.set("x-content-type-options", "nosniff");
   headers.set("referrer-policy", "strict-origin-when-cross-origin");
   headers.set("permissions-policy", "camera=(), microphone=(), geolocation=()");
-  headers.set("x-frame-options", "DENY");
-  headers.set("content-security-policy-report-only", CSP_REPORT_ONLY);
+  // The demo runs in a same-origin iframe on the landing page, so its own
+  // document must allow same-origin framing while every other route keeps
+  // refusing to be framed at all.
+  const demo = pathname.startsWith("/demo/");
+  headers.set("x-frame-options", demo ? "SAMEORIGIN" : "DENY");
+  headers.set(
+    "content-security-policy-report-only",
+    demo ? CSP_REPORT_ONLY.replace("frame-ancestors 'none'", "frame-ancestors 'self'") : CSP_REPORT_ONLY,
+  );
   return new Response(response.body, {
     status: response.status,
     statusText: response.statusText,
@@ -253,27 +240,21 @@ async function handle(req, env) {
       headers.set("access-control-max-age", "86400");
       return new Response(res.body, { status: res.status, statusText: res.statusText, headers });
     }
-    // English legal pages: the Chinese files stay canonical, and the English
-    // route serves a static translation with the same facts (no new promises).
-    const legalEn = url.pathname.replace(/\/$/, "");
-    if (legalEn === "/en/privacy" || legalEn === "/en/terms") {
-      const assetUrl = new URL(url);
-      assetUrl.pathname = `${legalEn}.html`;
-      const res = await env.ASSETS.fetch(new Request(assetUrl, req));
+    // English legal pages are prerendered by the site build. The worker only
+    // stamps the language header; the assets server resolves the directory.
+    if (/^\/en\/(privacy|terms)\/?$/.test(url.pathname)) {
+      const res = await env.ASSETS.fetch(req);
       if (res.status === 404) return notFound(env, req);
       const headers = new Headers(res.headers);
       headers.set("content-language", "en");
       return new Response(res.body, { status: res.status, statusText: res.statusText, headers });
     }
-    // Keep one canonical markup source. The English route is selected by the
-    // host page script, while the asset request itself still resolves to the
-    // same index document.
-    if (url.pathname === "/en" || url.pathname === "/en/" || (url.pathname === "/" && url.searchParams.get("lang") === "en")) {
-      const assetUrl = new URL(url);
-      // Request the root document: /index.html is canonicalized to / by the
-      // asset server, which would redirect the browser out of English mode.
-      assetUrl.pathname = "/";
-      return englishMetadata(await env.ASSETS.fetch(new Request(assetUrl, req)));
+    // /en and ?lang=en are real routes in the static export now.
+    if (url.pathname === "/en") {
+      return Response.redirect(new URL("/en/", url).toString(), 301);
+    }
+    if (url.pathname === "/" && url.searchParams.get("lang") === "en") {
+      return Response.redirect(new URL("/en/", url).toString(), 302);
     }
     const asset = await env.ASSETS.fetch(req);
     if (asset.status === 404) return notFound(env, req);
@@ -282,6 +263,6 @@ async function handle(req, env) {
 
 export default {
   async fetch(req, env) {
-    return withSecurityHeaders(await handle(req, env));
+    return withSecurityHeaders(await handle(req, env), new URL(req.url).pathname);
   },
 };

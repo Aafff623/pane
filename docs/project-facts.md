@@ -1321,3 +1321,12 @@ changes.
   to a 14-day chart and the newest 10 requests. It is `serde(default,
   skip_serializing_if)` for old caches and never enters the credits meter or
   `/v1/usage` defaults. Day grouping is UTC; request rows render in local time.
+
+## Website (2026-10-29, Design Mode source migration)
+
+- Stack: Next.js 16 App Router static export (`output: "export"` → `site/out/`), React 19, Tailwind 4, Radix primitives, `@phosphor-icons/react`, Inter via `@fontsource-variable/inter`. Source migrated from `SandeepBaskaran/design-mode@0c7b573` (`website/`); upstream MIT + Commons Clause licence retained at `site/LICENSE`.
+- The Cloudflare Worker (`site/worker.js`) stays the single entry: static assets from `out/` plus `/download/windows`, `/api/latest`, `/update/latest.json` (CN → Gitee mirror), `/skins/*` CORS, `/demo/*`, and the English legal routes.
+- `/demo/*` responses carry `x-frame-options: SAMEORIGIN` (the landing page frames the real panel); every other route stays `DENY`. Regression of this pair is what broke the old site's demo between 2026-10-26 and 2026-10-29.
+- Theme is class-driven (`.dark` + `localStorage.pane-site-theme`). Tailwind's `dark:` variant is redefined in `globals.css` with `@custom-variant`; it must not fall back to `prefers-color-scheme`.
+- `/` is Chinese, `/en/` English; dictionaries live in `site/src/i18n/index.ts`. `scripts/postbuild.mjs` rewrites `lang` on exported English HTML. Version and provider count come from `package.json` / `providerCatalog.ts` via `site/scripts/sync-site-version.mjs --check`.
+- Tests: `cd site && node --test tests/*.test.mjs` (build required) cover the export, Worker contracts, iframe headers, and licence/version facts.

@@ -97,6 +97,7 @@ Local `release` profiles are never needed: releases are built by CI.
 | One/New API relay subsystem | `src-tauri/src/providers/onenewapi/` |
 | Local HTTP API `127.0.0.1:6736/v1/usage` (secret-redacting, tested) | `src-tauri/src/httpapi.rs` |
 | Provider/parsing test harness (compiles the real sources via `#[path]`) | `parse-tests/` |
+| Website — Next.js 16 static export, Pane content, business routes in the Worker | `site/src/`, `site/worker.js`, `site/wrangler.jsonc` |
 | Runtime data — never commit anything from here | `%APPDATA%\PaneAafff623\` (config.json, accounts/, onenewapi.json, last_snapshots.json, usage_history.json …) |
 
 Domain vocabulary (the glossary) → [`CONTEXT.md`](CONTEXT.md); verified engineering
@@ -119,6 +120,7 @@ facts, constraints and failure modes → [`docs/project-facts.md`](docs/project-
 ## Validation & delivery
 
 1. Frontend: `pnpm build` must pass (tsc + vite).
+1b. Website: `cd site && corepack pnpm build && node --test tests/*.test.mjs` — Next.js static export to `site/out/` plus the Worker route/contract tests. The demo bundle is rebuilt from the app with `node scripts/build-demo.mjs` whenever `src/` changes.
 2. Rust: `cargo +stable-x86_64-pc-windows-gnu check` (fast) or `build`, mingw64 PATH prepended as above.
 3. Provider/parsing unit tests run through the `parse-tests` harness — the full Tauri app cannot link on this machine (no MSVC), and a GNU-linked test exe dies at startup with `STATUS_ENTRYPOINT_NOT_FOUND`:
  ```powershell

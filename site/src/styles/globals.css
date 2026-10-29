@@ -1,0 +1,311 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+@import "@fontsource-variable/inter";
+
+/* Class-driven dark mode: the toggle owns the theme, not the OS. */
+@custom-variant dark (&:where(.dark, .dark *));
+
+:root {
+  --background: #f7f8f7;
+  --foreground: #0b0f10;
+  --card: #ffffff;
+  --card-foreground: #0b0f10;
+  --popover: #ffffff;
+  --popover-foreground: #0b0f10;
+  --primary: #087d6d;
+  --primary-foreground: #ffffff;
+  --secondary: #eceeed;
+  --secondary-foreground: #0b0f10;
+  --muted: #eceeed;
+  --muted-foreground: #55605f;
+  --accent: #e3f1ed;
+  --accent-foreground: #0b0f10;
+  --destructive: oklch(0.6 0.2 25);
+  --destructive-foreground: oklch(0.98 0.01 90);
+  --border: #dde2e0;
+  --input: #dde2e0;
+  --ring: #087d6d;
+
+  --ink: #0b0f10;
+  --ink-foreground: #f7f8f7;
+
+  --radius: 8px;
+
+  --shadow-2xs: 0 1px 2px 0 oklch(0.22 0.01 70 / 0.04);
+  --shadow-xs: 0 1px 2px 0 oklch(0.22 0.01 70 / 0.05);
+  --shadow-sm: 0 1px 2px 0 oklch(0.22 0.01 70 / 0.06), 0 2px 6px -2px oklch(0.22 0.01 70 / 0.06);
+  --shadow: 0 2px 4px -1px oklch(0.22 0.01 70 / 0.06), 0 6px 16px -4px oklch(0.22 0.01 70 / 0.08);
+  --shadow-md: 0 4px 8px -2px oklch(0.22 0.01 70 / 0.07), 0 10px 24px -6px oklch(0.22 0.01 70 / 0.1);
+  --shadow-lg: 0 8px 16px -4px oklch(0.22 0.01 70 / 0.08), 0 18px 36px -10px oklch(0.22 0.01 70 / 0.12);
+  --shadow-xl: 0 16px 32px -8px oklch(0.22 0.01 70 / 0.1), 0 28px 56px -14px oklch(0.22 0.01 70 / 0.14);
+  --shadow-2xl: 0 28px 60px -14px oklch(0.22 0.01 70 / 0.18);
+
+  --font-sans: "Inter Variable", var(--font-inter), ui-sans-serif, system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", "Noto Sans SC", sans-serif;
+  --font-serif: var(--font-sans);
+  --font-mono: var(--font-sans);
+
+  --display-family: var(--font-sans);
+  --text-family: var(--font-sans);
+  --display-weight: 600;
+  --text-weight: 400;
+}
+
+.dark {
+  --background: #08090a;
+  --foreground: #eef1f2;
+  --card: #0d0f11;
+  --card-foreground: #eef1f2;
+  --popover: #111417;
+  --popover-foreground: #eef1f2;
+  --primary: #64d7c2;
+  --primary-foreground: #06110e;
+  --secondary: #171b1d;
+  --secondary-foreground: #eef1f2;
+  --muted: #171b1d;
+  --muted-foreground: #9ba3a8;
+  --accent: #12211e;
+  --accent-foreground: #eef1f2;
+  --destructive: oklch(0.65 0.2 25);
+  --destructive-foreground: oklch(0.98 0.01 90);
+  --border: #242a2e;
+  --input: #242a2e;
+  --ring: #64d7c2;
+
+  --ink: #f3f7f6;
+  --ink-foreground: #08090a;
+
+  --shadow-2xs: 0 1px 2px 0 rgb(0 0 0 / 0.4);
+  --shadow-xs: 0 1px 2px 0 rgb(0 0 0 / 0.45);
+  --shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.5), 0 2px 6px -2px rgb(0 0 0 / 0.5);
+  --shadow: 0 2px 4px -1px rgb(0 0 0 / 0.5), 0 6px 16px -4px rgb(0 0 0 / 0.55);
+  --shadow-md: 0 4px 8px -2px rgb(0 0 0 / 0.5), 0 10px 24px -6px rgb(0 0 0 / 0.6);
+  --shadow-lg: 0 8px 16px -4px rgb(0 0 0 / 0.5), 0 18px 36px -10px rgb(0 0 0 / 0.65);
+  --shadow-xl: 0 16px 32px -8px rgb(0 0 0 / 0.55), 0 28px 56px -14px rgb(0 0 0 / 0.7);
+  --shadow-2xl: 0 28px 60px -14px rgb(0 0 0 / 0.75);
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-ink: var(--ink);
+  --color-ink-foreground: var(--ink-foreground);
+
+  --radius-xs: calc(var(--radius) - 4px);
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) * 2 - 4px);
+  --radius-2xl: calc(var(--radius) * 2);
+  --radius-3xl: calc(var(--radius) * 3);
+  --radius-4xl: calc(var(--radius) * 4);
+
+  --shadow-2xs: var(--shadow-2xs);
+  --shadow-xs: var(--shadow-xs);
+  --shadow-sm: var(--shadow-sm);
+  --shadow: var(--shadow);
+  --shadow-md: var(--shadow-md);
+  --shadow-lg: var(--shadow-lg);
+  --shadow-xl: var(--shadow-xl);
+  --shadow-2xl: var(--shadow-2xl);
+
+  --breakpoint-sm: 640px;
+  --breakpoint-md: 768px;
+  --breakpoint-lg: 1024px;
+  --breakpoint-xl: 1280px;
+  --breakpoint-2xl: 1400px;
+
+  --font-sans: var(--font-sans);
+  --font-serif: var(--font-serif);
+  --font-mono: var(--font-mono);
+
+  --font-display: var(--display-family);
+  --font-text: var(--text-family);
+  --font-weight-display: var(--display-weight);
+  --font-weight-text: var(--text-weight);
+
+  --text-body: 1rem;
+
+  --text-3xl: 2rem;
+  --text-3xl--line-height: 1.2;
+  --text-4xl: 2.5rem;
+  --text-4xl--line-height: 1.2;
+  --text-6xl: 4rem;
+  --text-6xl--line-height: 1;
+
+  --animate-accordion-down: accordion-down 0.2s ease-out;
+  --animate-accordion-up: accordion-up 0.2s ease-out;
+
+  @keyframes accordion-down {
+    from {
+      height: 0;
+    }
+    to {
+      height: var(--radix-accordion-content-height);
+    }
+  }
+  @keyframes accordion-up {
+    from {
+      height: var(--radix-accordion-content-height);
+    }
+    to {
+      height: 0;
+    }
+  }
+}
+
+@utility container {
+  margin-inline: auto;
+  padding-inline: 1.5rem;
+  @media (width >= 1400px) {
+    max-width: 1200px;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground text-base leading-6;
+    font-family: var(--font-text);
+    font-weight: var(--text-weight);
+    text-rendering: optimizeLegibility;
+  }
+  html {
+    scroll-behavior: smooth;
+  }
+  ::selection {
+    background: color-mix(in srgb, var(--primary) 24%, transparent);
+  }
+}
+
+@layer utilities {
+  body,
+  .font-text {
+    font-family: var(--font-text);
+    font-weight: var(--text-weight);
+  }
+  h1,
+  h2,
+  .font-display {
+    font-family: var(--font-display);
+    font-weight: var(--display-weight);
+  }
+  .font-mono {
+    font-family: var(--font-mono), monospace;
+  }
+  .macro {
+    font-family: var(--font-display);
+    font-weight: var(--display-weight);
+    letter-spacing: -0.02em;
+    line-height: 1;
+    text-wrap: balance;
+  }
+}
+
+@layer components {
+  button {
+    cursor: pointer;
+  }
+  [class*="border"] {
+    @apply border-border;
+  }
+}
+
+@supports (corner-shape: squircle) {
+  *,
+  *::before,
+  *::after {
+    corner-shape: squircle;
+  }
+  .rounded-full {
+    corner-shape: round;
+  }
+}
+
+body {
+  position: relative;
+}
+
+@media (hover: hover) and (prefers-reduced-motion: no-preference) {
+  [data-button-content] {
+    transition: transform 160ms ease;
+  }
+  [data-slot="button"]:not(:disabled):not([aria-disabled="true"]):hover > [data-button-content] {
+    transform: scale(1.06);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html,
+  body {
+    scroll-behavior: auto;
+  }
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
+}
+
+/* Legal pages */
+.legal {
+  font-size: 0.9375rem;
+  line-height: 1.8;
+  color: var(--muted-foreground);
+}
+.legal h2 {
+  margin: 2rem 0 0.5rem;
+  font-size: 1.125rem;
+  font-weight: 600;
+  color: var(--foreground);
+}
+.legal p {
+  margin: 0.75rem 0;
+}
+.legal ul {
+  margin: 0.75rem 0;
+  padding-left: 1.25rem;
+  list-style: disc;
+}
+.legal li {
+  margin: 0.35rem 0;
+}
+.legal strong {
+  color: var(--foreground);
+  font-weight: 600;
+}
+.legal code {
+  padding: 0.1rem 0.35rem;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: var(--card);
+  font-size: 0.8125rem;
+}
+.legal a {
+  color: var(--foreground);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.legal a:hover {
+  color: var(--primary);
+}

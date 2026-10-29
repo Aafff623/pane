@@ -1,0 +1,68 @@
+.figure {
+  margin: 0;
+}
+
+.frame {
+  position: relative;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  background: var(--card);
+  box-shadow: var(--shadow-lg);
+}
+
+.marker {
+  position: absolute;
+  z-index: 10;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+}
+
+.marker b {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--primary) 55%, transparent);
+  background: var(--background);
+  color: var(--primary);
+  font-size: 12px;
+  font-weight: 600;
+  box-shadow: var(--shadow-sm);
+}
+
+.markerActive b {
+  background: var(--primary);
+  border-color: var(--primary);
+  color: var(--primary-foreground);
+  transform: scale(1.12);
+  transition: transform 160ms ease;
+}
+
+.marker em {
+  padding: 3px 9px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--popover);
+  color: var(--foreground);
+  font-size: 12px;
+  font-style: normal;
+  white-space: nowrap;
+  box-shadow: var(--shadow-sm);
+}
+
+@media (max-width: 640px) {
+  .marker b {
+    width: 22px;
+    height: 22px;
+    font-size: 11px;
+  }
+  .marker em {
+    display: none;
+  }
+}

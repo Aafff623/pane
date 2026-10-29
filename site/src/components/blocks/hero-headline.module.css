@@ -1,0 +1,79 @@
+.cluster {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 18px;
+  margin-bottom: 26px;
+}
+
+.mark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  color: var(--muted-foreground);
+  animation: mark-float 7s ease-in-out infinite;
+}
+
+.headline {
+  width: 80vw;
+  max-width: 1200px;
+  margin-inline: auto;
+  letter-spacing: -0.05em;
+  font-size: 26px;
+  line-height: 1.05;
+}
+
+.line {
+  display: flex;
+  width: 100%;
+  justify-content: center;
+  white-space: nowrap;
+}
+
+.focusLine {
+  color: var(--foreground);
+}
+
+@media (min-width: 400px) {
+  .headline {
+    font-size: 34px;
+  }
+}
+
+@media (min-width: 421px) {
+  .headline {
+    font-size: clamp(38px, calc(14px + 5.2vw), 84px);
+  }
+}
+
+@media (max-width: 420px) {
+  .headline {
+    width: 92vw;
+  }
+  .cluster {
+    gap: 12px;
+    margin-bottom: 20px;
+  }
+  .mark {
+    width: 22px;
+    height: 22px;
+  }
+}
+
+@keyframes mark-float {
+  0%,
+  100% {
+    transform: translateY(-2px);
+  }
+  50% {
+    transform: translateY(3px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .mark {
+    animation: none;
+  }
+}

@@ -84,10 +84,10 @@ jobs:
       - run: cargo test
         working-directory: src-tauri
 
-  # Zero-dependency invariant locks: i18n pairing, asset existence, demo
-  # provenance hashes, hero numbers. No npm install — they only read tracked
-  # files, which is what makes them cheap enough for every push and PR.
-  # The app-side i18n pairing test rides along here for the same reason.
+  # Site invariants: the Next static export must build, the Worker routes keep
+  # their contracts (download/update/skins/demo framing/legal), and the version
+  # and provider count stay generated rather than typed. The app-side i18n
+  # pairing test rides along here for the same reason.
   site:
     runs-on: ubuntu-latest
     steps:
@@ -95,7 +95,14 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - run: node --test site/*.test.mjs tests/i18n-pairing.test.mjs
+      - run: corepack enable
+      - run: pnpm install --frozen-lockfile
+        working-directory: site
+      - run: pnpm build
+        working-directory: site
+      - run: node --test tests/*.test.mjs
+        working-directory: site
       - run: node site/scripts/check-skin-packs.mjs
       # The site's version and provider count are generated, never typed.
       - run: node site/scripts/sync-site-version.mjs --check
+      - run: node --test tests/i18n-pairing.test.mjs

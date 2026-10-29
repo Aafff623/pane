@@ -1,15 +1,15 @@
-// pane.threetwoa.live — the static site in public/, served through worker.js.
-// Deploy with `npx wrangler deploy` from here
-// (CI: .github/workflows/site-deploy.yml).
+// pane.threetwoa.live — the Next.js static export in out/, served through
+// worker.js. Build with `pnpm build`, then deploy with `npx wrangler deploy`
+// from here (CI: .github/workflows/site-deploy.yml).
 {
   "name": "pane",
   "main": "worker.js",
   "compatibility_date": "2026-10-01",
   "assets": {
-    "directory": "./public",
+    "directory": "./out",
     "binding": "ASSETS",
     // every request, so the worker stays the single entry point for the
-    // site (it is a pass-through today and grows the /api/latest proxy)
+    // site (business routes + the /api/latest proxy)
     "run_worker_first": true
   },
   "routes": [{ "pattern": "pane.threetwoa.live", "custom_domain": true }],

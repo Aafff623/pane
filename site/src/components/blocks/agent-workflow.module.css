@@ -1,0 +1,39 @@
+.arrow {
+  position: absolute;
+  left: 50%;
+  top: 0;
+  transform: translate(-50%, -50%) rotate(90deg);
+  animation: travel-down 3.6s ease-in-out infinite;
+}
+
+@keyframes travel-down {
+  0%, 10% { top: 0; opacity: 0; }
+  25% { opacity: 1; }
+  75% { opacity: 1; }
+  90%, 100% { top: 100%; opacity: 0; }
+}
+
+@keyframes travel-right {
+  0%, 10% { left: 0; opacity: 0; }
+  25% { opacity: 1; }
+  75% { opacity: 1; }
+  90%, 100% { left: 100%; opacity: 0; }
+}
+
+@media (min-width: 768px) {
+  .arrow {
+    top: 50%;
+    left: 0;
+    transform: translate(-50%, -50%);
+    animation-name: travel-right;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .arrow {
+    animation: none;
+    top: 50%;
+    left: 50%;
+    opacity: 1;
+  }
+}

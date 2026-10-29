@@ -1,0 +1,15 @@
+# Build artifacts
+.next/
+.turbo/
+._next/
+. __tmp__/
+. dist/
+. node_modules/
+. target/
+. compiled/
+
+# Other files
+.env*
+.DS_Store
+*.pem
+*.log

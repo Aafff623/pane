@@ -16,7 +16,7 @@
 // silently desync the website, and a whitelist entry without a mirror row
 // fails here rather than in CI's Rust job.
 //
-//   node site/scripts/sync-site-version.mjs          # write meta + fallbacks
+//   node site/scripts/sync-site-version.mjs          # write facts + copy
 //   node site/scripts/sync-site-version.mjs --check  # CI gate: fail on drift
 import { readFile, writeFile } from "node:fs/promises";
 
@@ -36,8 +36,7 @@ const rsEnd = catalogRs.indexOf("\n];", rsStart);
 if (rsStart < 0 || rsEnd < rsStart) {
   throw new Error("PROVIDER_DEFINITIONS not found in src-tauri/src/provider_catalog.rs");
 }
-const quotaFamilies = [...catalogRs.slice(rsStart, rsEnd).matchAll(/^\s*family_id:\s*"([^"]+)"/gm)]
-  .map((m) => m[1]);
+const quotaFamilies = [...catalogRs.slice(rsStart, rsEnd).matchAll(/^\s*family_id:\s*"([^"]+)"/gm)].map((m) => m[1]);
 
 const mirror = await readFile(new URL("src/providerCatalog.ts", root), "utf8");
 const mirrorFamilies = [...mirror.matchAll(/familyId:\s*"([^"]+)"/g)].map((m) => m[1]);
@@ -51,51 +50,35 @@ const missingInMirror = spendOnly.filter((id) => !mirrorFamilies.includes(id));
 if (missingInMirror.length) {
   throw new Error(`whitelisted spend-only families absent from the mirror: ${missingInMirror.join(", ")}`);
 }
-const unexplained = mirrorFamilies.filter(
-  (id) => !quotaFamilies.includes(id) && !spendOnly.includes(id),
-);
+const unexplained = mirrorFamilies.filter((id) => !quotaFamilies.includes(id) && !spendOnly.includes(id));
 if (unexplained.length) {
-  throw new Error(
-    `frontend mirror has families the Rust catalog and the whitelist do not explain: ${unexplained.join(", ")}`,
-  );
+  throw new Error(`frontend mirror has families the Rust catalog and the whitelist do not explain: ${unexplained.join(", ")}`);
 }
 const providerCount = mirrorFamilies.length;
 
 // ── rewrite targets ─────────────────────────────────────────────────────────
 const targets = [
-  ["site/public/index.html", (src) => src
-    .replace(/data-number="\d+" data-format="count">\d+<\/b><span>服务商/g,
-      `data-number="${providerCount}" data-format="count">${providerCount}</b><span>服务商`)
-    .replace(/\d+ 个服务商/g, `${providerCount} 个服务商`)
-    .replace(/桌面伴侣 · v\d+\.\d+\.\d+/g, `桌面伴侣 · v${version}`)
-    .replace(/data-latest-version>v\d+\.\d+\.\d+/g, `data-latest-version>v${version}`)],
-  ["site/i18n.js", (src) => src
-    .replace(/\b\d+ providers\b/g, `${providerCount} providers`)
-    .replace(/DESKTOP COMPANION · v\d+\.\d+\.\d+/g, `DESKTOP COMPANION · v${version}`)],
-  ["site/public/i18n.js", (src) => src
-    .replace(/\b\d+ providers\b/g, `${providerCount} providers`)
-    .replace(/DESKTOP COMPANION · v\d+\.\d+\.\d+/g, `DESKTOP COMPANION · v${version}`)],
+  [
+    "site/src/content/facts.ts",
+    (src) =>
+      src
+        .replace(/version: "[^"]*",/, `version: "${version}",`)
+        .replace(/providers: \d+,/, `providers: ${providerCount},`),
+    [`version: "${version}"`, `providers: ${providerCount}`],
+  ],
+  [
+    "site/src/i18n/index.ts",
+    (src) =>
+      src
+        .replace(/目前收录 \d+ 个服务商/g, `目前收录 ${providerCount} 个服务商`)
+        .replace(/\b\d+ providers today\b/g, `${providerCount} providers today`)
+        .replace(/覆盖 \d+ 个服务商/g, `覆盖 ${providerCount} 个服务商`)
+        .replace(/\b\d+ providers\b(?=[^片]*?today)/g, `${providerCount} providers`),
+    [`目前收录 ${providerCount} 个服务商`, `${providerCount} providers today`],
+  ],
 ];
 
-const meta = {
-  version,
-  providerCount,
-  providerCountSource: "src/providerCatalog.ts",
-  quotaFamilies: quotaFamilies.length,
-  spendOnlyFamilies: spendOnly,
-};
-const metaPath = new URL("site/public/site-meta.json", root);
-const metaText = `${JSON.stringify(meta, null, 2)}\n`;
-
 const drift = [];
-let currentMeta = null;
-try {
-  currentMeta = await readFile(metaPath, "utf8");
-} catch {
-  drift.push("site/public/site-meta.json (missing)");
-}
-if (currentMeta !== null && currentMeta !== metaText) drift.push("site/public/site-meta.json");
-
 const rewritten = new Map();
 for (const [rel, rewrite] of targets) {
   const url = new URL(rel, root);
@@ -107,26 +90,18 @@ for (const [rel, rewrite] of targets) {
 }
 
 // Guard: every rewrite must have found its target, or a copy edit silently
-// turned this gate into a no-op. Checked against the rewritten text so --check
-// reports drift instead of throwing on a stale file.
-for (const [needle, rel] of [
-  [`v${version}`, "site/public/index.html"],
-  [`>${providerCount}</b><span>服务商`, "site/public/index.html"],
-  [`${providerCount} providers`, "site/i18n.js"],
-  [`DESKTOP COMPANION · v${version}`, "site/public/i18n.js"],
-]) {
-  if (!rewritten.get(rel).includes(needle)) {
-    throw new Error(`sync target missing in ${rel}: ${needle}`);
+// turned this gate into a no-op.
+for (const [rel, , needles] of targets) {
+  for (const needle of needles) {
+    if (!rewritten.get(rel).includes(needle)) {
+      throw new Error(`sync target missing in ${rel}: ${needle}`);
+    }
   }
 }
 
-if (!check) {
-  await writeFile(metaPath, metaText);
-  console.log(`site-meta.json: v${version}, ${providerCount} providers (${quotaFamilies.length} quota + ${spendOnly.join("/")})`);
-} else if (drift.length) {
+if (check && drift.length) {
   console.error(`site version/count drift: ${drift.join(", ")}`);
   console.error("fix with: node site/scripts/sync-site-version.mjs");
   process.exit(1);
-} else {
-  console.log(`site version/count in sync: v${version}, ${providerCount} providers`);
 }
+console.log(`site version/count ${check ? "in sync" : "synced"}: v${version}, ${providerCount} providers (${quotaFamilies.length} quota + ${spendOnly.join("/") || "none"})`);

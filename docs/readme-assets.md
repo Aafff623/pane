@@ -46,7 +46,7 @@ UI shots (regenerate after the version bump, so footers match the release):
 
 ```powershell
 node site/scripts/build-demo.mjs          # demo bundle from the working tree
-node temp/scripts/readme-shots.mjs temp/readme-0.8.8 --root site/public --port 8792
+node temp/scripts/readme-shots.mjs temp/readme-0.8.8 --root site/out --port 8792
 # crop the popover pairs to 450x640 CSS (900x1280 @2x); heatmap 780x1200
 ```
 

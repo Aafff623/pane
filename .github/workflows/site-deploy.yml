@@ -11,11 +11,17 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: site
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with: { node-version: 22 }
-      - run: node --test site/*.test.mjs
+      - run: corepack enable
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+      - run: node --test tests/*.test.mjs
 
   # vars.SITE_DEPLOY is the off switch: merging to main never deploys until
   # the Cloudflare secrets exist and the variable is set to 'true'.
@@ -23,12 +29,17 @@ jobs:
     needs: test
     if: github.ref == 'refs/heads/main' && vars.SITE_DEPLOY == 'true'
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: site
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with: { node-version: 22 }
+      - run: corepack enable
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
       - run: npx wrangler deploy
-        working-directory: site
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
@@ -38,6 +49,7 @@ jobs:
       # Cloudflare propagates, then fail the job instead of leaving a broken
       # site behind a green deploy.
       - name: Smoke test the live site
+        working-directory: .
         run: |
           set -euo pipefail
           base="https://pane.threetwoa.live"
@@ -54,5 +66,14 @@ jobs:
             echo "$path -> $code"
           }
           check / 200
+          check /en/ 200
           check /download/windows 302
           check /skins/index.json 200
+          check /demo/index.html 200
+          # The landing page frames /demo/ in an iframe; the demo response must
+          # allow same-origin framing while every other route keeps DENY.
+          demo_frame=$(curl -sSI --max-time 20 "$base/demo/" | tr -d '\r' | awk -F': ' 'tolower($1)=="x-frame-options"{print tolower($2)}')
+          [ "$demo_frame" = "sameorigin" ] || { echo "demo x-frame-options=$demo_frame (want sameorigin)" >&2; exit 1; }
+          root_frame=$(curl -sSI --max-time 20 "$base/" | tr -d '\r' | awk -F': ' 'tolower($1)=="x-frame-options"{print tolower($2)}')
+          [ "$root_frame" = "deny" ] || { echo "root x-frame-options=$root_frame (want deny)" >&2; exit 1; }
+          echo "iframe policy ok"
