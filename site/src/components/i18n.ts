@@ -120,6 +120,7 @@ export const messages = {
       title: "Keep usage close.\nKeep focus where you work.",
       description: "Install Pane and put quotas, spend and reset times into a panel you can summon anywhere.",
       primary: "Download for Windows",
+      macPrimary: "Download for macOS (Beta)",
       secondary: "See the demo",
     },
     demoPage: {
@@ -269,6 +270,7 @@ export const messages = {
       title: "用量在手边，\n专注留在当前窗口。",
       description: "下载 Pane，把额度、花费和重置时间放进一个随时可唤出的面板。",
       primary: "下载 Windows 版",
+      macPrimary: "下载 macOS 版（Beta）",
       secondary: "先看看演示",
     },
     demoPage: {

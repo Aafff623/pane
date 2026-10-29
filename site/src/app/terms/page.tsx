@@ -5,7 +5,7 @@ import { LegalPage } from "@/components/legal-page";
 export const metadata: Metadata = {
   title: "Terms and license",
   description: "Pane terms, the MIT licence and data notes.",
-  alternates: { canonical: "https://pane.threetwoa.live/terms" },
+  alternates: { canonical: "https://pane.threetwoa.live/terms/" },
 };
 
 export default function TermsPage() {

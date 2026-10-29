@@ -6,7 +6,7 @@ import { LegalPage } from "@/components/legal-page";
 export const metadata: Metadata = {
   title: "隐私说明",
   description: "Pane 的隐私说明：会出网的请求、本机存储与遥测边界。",
-  alternates: { canonical: "https://pane.threetwoa.live/zh/privacy" },
+  alternates: { canonical: "https://pane.threetwoa.live/zh/privacy/" },
 };
 
 export default function PrivacyPage() {

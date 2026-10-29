@@ -8,7 +8,7 @@ const copy = messages.en.demoPage;
 export const metadata: Metadata = {
   title: "Live demo",
   description: copy.description,
-  alternates: { canonical: "https://pane.threetwoa.live/demo" },
+  alternates: { canonical: "https://pane.threetwoa.live/demo/" },
 };
 
 export default function DemoPage() {

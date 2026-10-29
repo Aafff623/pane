@@ -8,7 +8,13 @@ const homeDescription =
 export const metadata = {
   title: { absolute: homeTitle },
   description: homeDescription,
-  alternates: { canonical: "https://pane.threetwoa.live/zh", languages: { "zh-CN": "https://pane.threetwoa.live/zh", en: "https://pane.threetwoa.live/", "x-default": "https://pane.threetwoa.live/" } },
+  alternates: { canonical: "https://pane.threetwoa.live/zh/", languages: { "zh-CN": "https://pane.threetwoa.live/zh/", en: "https://pane.threetwoa.live/", "x-default": "https://pane.threetwoa.live/" } },
+  openGraph: {
+    locale: "zh_CN",
+    url: "https://pane.threetwoa.live/zh/",
+    title: homeTitle,
+    description: homeDescription,
+  },
 };
 
 export default function Home() {

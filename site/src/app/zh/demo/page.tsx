@@ -9,7 +9,7 @@ const copy = messages.zh.demoPage;
 export const metadata: Metadata = {
   title: "在线演示",
   description: copy.description,
-  alternates: { canonical: "https://pane.threetwoa.live/zh/demo" },
+  alternates: { canonical: "https://pane.threetwoa.live/zh/demo/" },
 };
 
 export default function DemoPage() {

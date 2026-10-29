@@ -68,7 +68,7 @@ jobs:
           check /privacy/ 200
           check /download/windows 302
           check /skins/index.json 200
-          check /pane-demo/index.html 200
+          check /pane-demo/ 200
           # The landing page frames /demo/ in an iframe; the demo response must
           # allow same-origin framing while every other route keeps DENY.
           demo_frame=$(curl -sSI --max-time 20 "$base/pane-demo/" | tr -d '\r' | awk -F': ' 'tolower($1)=="x-frame-options"{print tolower($2)}')

@@ -6,7 +6,7 @@ import { LegalPage } from "@/components/legal-page";
 export const metadata: Metadata = {
   title: "条款与许可",
   description: "Pane 的条款、MIT 许可与数据说明。",
-  alternates: { canonical: "https://pane.threetwoa.live/zh/terms" },
+  alternates: { canonical: "https://pane.threetwoa.live/zh/terms/" },
 };
 
 export default function TermsPage() {

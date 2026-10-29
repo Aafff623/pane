@@ -22,7 +22,7 @@ await rm(resolve(outDir, 'assets'), { recursive: true, force: true });
 await build({
   configFile: false,
   root: source,
-  base: '/demo/',
+  base: '/pane-demo/',
   publicDir: false,
   define: { __BUILD_STAMP__: JSON.stringify('website'), __SOURCE_VERSION__: JSON.stringify(pkg.version) },
   resolve: { alias: [

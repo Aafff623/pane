@@ -20,7 +20,7 @@ export function ClosingCta({ lang = "en" }: { lang?: Lang }) {
         </h2>
         <p className="text-muted-foreground mx-auto mt-8 max-w-xl text-base leading-relaxed">{copy.description}</p>
         <div className="mt-10 flex flex-col items-center justify-center gap-4 sm:flex-row">
-          <SmartDownload label={copy.primary} macLabel={copy.primary} className="h-14 max-sm:w-full max-sm:max-w-xs" />
+          <SmartDownload label={copy.primary} macLabel={copy.macPrimary} className="h-14 max-sm:w-full max-sm:max-w-xs" />
           <Button asChild variant="outline" size="lg" className="h-14 max-sm:w-full max-sm:max-w-xs">
             <Link href={demoHref}>{copy.secondary}</Link>
           </Button>

@@ -10,7 +10,6 @@ import styles from "./agent-workflow.module.css";
 const HARNESS = [
   { logo: "claude", colour: "#D97757", name: "Claude" },
   { logo: "openai", colour: "#10A37F", name: "Codex" },
-  { logo: "gemini-color", name: "Gemini" },
   { logo: "cursor", colour: "#26241E", name: "Cursor" },
   { logo: "windsurf", colour: "#07847D", name: "Windsurf" },
   { logo: "perplexity", colour: "#20808D", name: "Perplexity" },

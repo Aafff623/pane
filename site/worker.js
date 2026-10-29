@@ -53,6 +53,7 @@ const GITEE_ASSET = (version) =>
 async function latestRelease() {
   const res = await fetch(`https://api.github.com/repos/${REPO}/releases/latest`, {
     headers: { Accept: "application/vnd.github+json", "User-Agent": "pane-site" },
+    signal: AbortSignal.timeout(4000),
     cf: { cacheTtl: 600, cacheEverything: true },
   });
   if (!res.ok) return null;
@@ -104,7 +105,7 @@ async function latestJson() {
 // pane.exe (not a browser), so request.cf is always populated; the header
 // fallback exists for local dev and tests.
 async function updateManifest(req) {
-  const upstream = await fetch(MANIFEST_URL, { cf: { cacheTtl: 300, cacheEverything: true } });
+  const upstream = await fetch(MANIFEST_URL, { signal: AbortSignal.timeout(5000), cf: { cacheTtl: 300, cacheEverything: true } });
   if (!upstream.ok) return new Response("updater manifest unavailable", { status: 502 });
   const body = await upstream.text();
   const source = new URL(req.url).searchParams.get("source");
@@ -136,6 +137,7 @@ async function giteeMirrorReady(url) {
     const res = await fetch(url, {
       method: "HEAD",
       redirect: "follow",
+      signal: AbortSignal.timeout(2500),
       cf: { cacheTtl: 600, cacheEverything: true },
     });
     return res.ok;
@@ -200,11 +202,9 @@ async function notFound(env, req) {
   const assetUrl = new URL(req.url);
   assetUrl.pathname = "/404.html";
   const asset = await env.ASSETS.fetch(new Request(assetUrl, req));
-  return new Response(asset.body, {
-    status: 404,
-    statusText: "Not Found",
-    headers: asset.headers,
-  });
+  const headers = new Headers(asset.headers);
+  headers.delete("location");
+  return new Response(asset.body, { status: 404, statusText: "Not Found", headers });
 }
 
 async function handle(req, env) {

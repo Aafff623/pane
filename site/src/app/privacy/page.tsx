@@ -5,7 +5,7 @@ import { LegalPage } from "@/components/legal-page";
 export const metadata: Metadata = {
   title: "Privacy",
   description: "Pane privacy: outbound requests, local storage and the telemetry boundary.",
-  alternates: { canonical: "https://pane.threetwoa.live/privacy" },
+  alternates: { canonical: "https://pane.threetwoa.live/privacy/" },
 };
 
 export default function PrivacyPage() {

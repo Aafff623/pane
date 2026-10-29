@@ -31,6 +31,9 @@ export function SmartDownload({ label, macLabel, className, variant = "primary" 
       const os = detectOS();
       if (os === "macos") {
         let href = SITE_FACTS.releases;
+        // Show the macOS label immediately; upgrade the URL once the release
+        // API answers (it may be slow or offline).
+        if (alive) setTarget({ label: macLabel ?? label, href, external: true });
         try {
           const res = await fetch("/api/latest", { headers: { Accept: "application/json" } });
           if (res.ok) {
