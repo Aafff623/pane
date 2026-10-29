@@ -21,6 +21,7 @@ test('quota percentages keep one labelled convention', () => {
   // The backend drops unknown config keys; without these the switch reverts.
   assert.match(rust, /obj\.entry\("meterMode"\)\.or_insert\(json!\("used"\)\)/);
   assert.match(rust, /"meterMode",/);
+  assert.doesNotMatch(rust, /"showUsed",/);
 });
 
 test('the fake save state stays gone and the reload action stays reachable', () => {

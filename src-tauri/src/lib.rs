@@ -180,7 +180,6 @@ fn config_with_defaults(mut cfg: Value) -> Value {
     // Cost view folds sub-threshold providers into "Others"; this lifts it.
     obj.entry("spendShowAll").or_insert(json!(false));
     obj.entry("overviewStyle").or_insert(json!("bars"));
-    obj.entry("showUsed").or_insert(json!(false));
     // Bar convention: "used" keeps the original used-fills-up look.
     obj.entry("meterMode").or_insert(json!("used"));
     obj.entry("resetExact").or_insert(json!(false));
@@ -356,7 +355,6 @@ const CONFIG_KEYS: &[&str] = &[
     "overviewTab",
     "overviewCategory",
     "categoryOverrides",
-    "showUsed",
     "meterMode",
     "resetExact",
     "timeFormat",

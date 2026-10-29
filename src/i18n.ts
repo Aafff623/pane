@@ -504,7 +504,6 @@ const en: Dict = {
   "settings.apiKeysNote":
     "Stored only on this PC (%APPDATA%\\Pane). Leave empty and save to remove.",
   "settings.save": "Save",
-  "settings.saved": "Saved",
   "settings.applyReload": "Reload",
   "settings.deleteProviderBody": "Deleting {name} removes every account and key for this provider. This cannot be undone.",
   "settings.deleteAccountBody": "Deleting {name} removes its key and configuration. This cannot be undone.",
@@ -2527,7 +2526,6 @@ const zh: Dict = {
   "settings.apiKeysNote":
     "只存在这台电脑上（%APPDATA%\\Pane）。留空再保存即可删除。",
   "settings.save": "保存",
-  "settings.saved": "已保存",
   "settings.applyReload": "重新载入",
   "settings.deleteProviderBody": "删除后，该 Provider 的所有账号及密钥将无法找回。确定要删除 {name} 吗？",
   "settings.deleteAccountBody": "删除后，该账号的密钥与配置将无法找回。确定要删除 {name} 吗？",
@@ -4522,7 +4520,6 @@ const ru: Dict = {
   "settings.apiKeysNote":
     "Хранятся только на этом ПК (%APPDATA%\\Pane). Оставьте пустым и сохраните, чтобы удалить.",
   "settings.save": "Сохранить",
-  "settings.saved": "Сохранено",
   "settings.applyReload": "Перезагрузить",
   "settings.deleteProviderBody": "Удаление {name} удалит все аккаунты и ключи этого провайдера. Отменить это нельзя.",
   "settings.deleteAccountBody": "Удаление {name} удалит ключ и настройки аккаунта. Отменить это нельзя.",

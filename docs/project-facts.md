@@ -982,6 +982,18 @@ changes.
   `~/.gemini/tmp/<project>/chats/session-*.json(l)`. cc-switch proxy days win;
   native rows only fill missing days. No local Gemini CLI sample exists on this
   machine, so `/v1/sources` still reports `needs_probe`.
+- **Quota readings (2026-10-29)** — `meterMode` (`used` default, `left`
+  optional) drives every number and bar: overview, rings, folded badges,
+  account meters, hover tips and aria labels. `quotaPctLabel()` is the single
+  formatter; bars/rings and the even-pace mark invert together. The backend
+  `CONFIG_KEYS` must list the key (unknown keys are dropped silently) and
+  `config_with_defaults` seeds `used`. The old `showUsed` key is retired and
+  is dropped from config.json on the next save.
+- **Settings actions (2026-10-29)** — every control persists on change; the
+  header button is a neutral "Reload" (`settings.applyReload`), and Ctrl/Cmd+S
+  reloads (guarded while typing, in the auth view, or with a confirm open).
+  Destructive delete confirmations and the delete-usage checkbox live in the
+  dictionaries (en/zh/ru).
 
 
 ## First-run onboarding and source detection (#109, 2026-10-28)
