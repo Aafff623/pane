@@ -28,7 +28,7 @@
 // (The workers.dev trial address is off: wrangler disables it once a
 // custom-domain route is declared.)
 //
-// Language: / is Chinese; /en and /en/ serve the same document and the host
+// Language: / is English, /zh is Chinese; legacy /en/* redirects to the root
 // script applies English copy. ?lang=en remains a supported English entry.
 //
 // No analytics beacon: Magpie injects Cloudflare Web Analytics here, but that
@@ -183,7 +183,7 @@ function withSecurityHeaders(response, pathname) {
   // The demo runs in a same-origin iframe on the landing page, so its own
   // document must allow same-origin framing while every other route keeps
   // refusing to be framed at all.
-  const demo = pathname.startsWith("/demo/");
+  const demo = pathname.startsWith("/pane-demo/");
   headers.set("x-frame-options", demo ? "SAMEORIGIN" : "DENY");
   headers.set(
     "content-security-policy-report-only",
@@ -240,21 +240,10 @@ async function handle(req, env) {
       headers.set("access-control-max-age", "86400");
       return new Response(res.body, { status: res.status, statusText: res.statusText, headers });
     }
-    // English legal pages are prerendered by the site build. The worker only
-    // stamps the language header; the assets server resolves the directory.
-    if (/^\/en\/(privacy|terms)\/?$/.test(url.pathname)) {
-      const res = await env.ASSETS.fetch(req);
-      if (res.status === 404) return notFound(env, req);
-      const headers = new Headers(res.headers);
-      headers.set("content-language", "en");
-      return new Response(res.body, { status: res.status, statusText: res.statusText, headers });
-    }
-    // /en and ?lang=en are real routes in the static export now.
-    if (url.pathname === "/en") {
-      return Response.redirect(new URL("/en/", url).toString(), 301);
-    }
-    if (url.pathname === "/" && url.searchParams.get("lang") === "en") {
-      return Response.redirect(new URL("/en/", url).toString(), 302);
+    // English now lives at the root; keep the old /en/* URLs working.
+    if (url.pathname === "/en" || url.pathname.startsWith("/en/")) {
+      const stripped = url.pathname.replace(/^\/en(?=\/|$)/, "") || "/";
+      return Response.redirect(new URL(stripped, url).toString(), 301);
     }
     const asset = await env.ASSETS.fetch(req);
     if (asset.status === 404) return notFound(env, req);

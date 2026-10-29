@@ -3,7 +3,6 @@ import styles from "./hero-headline.module.css";
 const agents = [
   { name: "Claude", logo: "claude", colour: "#D97757" },
   { name: "OpenAI", logo: "openai", colour: "#10A37F" },
-  { name: "Gemini", logo: "gemini-color" },
   { name: "Perplexity", logo: "perplexity", colour: "#20808D" },
   { name: "Cursor", logo: "cursor", colour: "#26241E" },
   { name: "Windsurf", logo: "windsurf", colour: "#07847D" },

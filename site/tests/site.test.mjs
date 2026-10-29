@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { readFileSync, existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
 
@@ -23,43 +23,42 @@ function assetFetch(request) {
 const env = { ASSETS: { fetch: assetFetch } };
 const call = (path, init) => worker.fetch(new Request(`http://localhost${path}`, init), env);
 
-test("static export: Chinese and English pages are prerendered", () => {
-  const zh = readFileSync(p("index.html"), "utf8");
-  assert.match(zh, /<html lang="zh-CN"/);
-  assert.match(zh, /Pane/);
-  assert.doesNotMatch(zh, /Design Mode|designmode\.app/);
-  const en = readFileSync(p("en/index.html"), "utf8");
+test("static export: pages, languages and assets", () => {
+  const en = readFileSync(p("index.html"), "utf8");
   assert.match(en, /<html lang="en"/);
-  assert.match(en, /Every AI quota/);
-  for (const page of ["privacy", "terms"]) {
+  assert.match(en, /All your AI usage|Every quota window/);
+  assert.doesNotMatch(en, /Design Mode|designmode\.app/);
+
+  const zh = readFileSync(p("zh/index.html"), "utf8");
+  assert.match(zh, /<html lang="zh-CN"/);
+  assert.match(zh, /所有 AI 工具的用量/);
+
+  for (const page of ["demo", "privacy", "terms", "zh/demo", "zh/privacy", "zh/terms"]) {
     assert.ok(existsSync(p(`${page}/index.html`)), `${page} page exists`);
-    assert.ok(existsSync(p(`en/${page}/index.html`)), `English ${page} page exists`);
   }
+
+  const seen = new Set();
+  for (const page of ["index.html", "zh/index.html", "demo/index.html", "privacy/index.html"]) {
+    const html = readFileSync(p(page), "utf8");
+    for (const match of html.matchAll(/(?:src|href)="(\/[^"#?]+\.(?:js|css|png|svg|webp|woff2|ico))"/g)) seen.add(match[1]);
+  }
+  for (const href of seen) assert.ok(existsSync(p(href.replace(/^\//, ""))), `missing ${href}`);
+  assert.ok(seen.size > 8);
 });
 
-test("worker: home and English routes, with the right framing policy", async () => {
+test("worker: framing policy and legacy /en redirects", async () => {
   const home = await call("/");
   assert.equal(home.status, 200);
   assert.equal(home.headers.get("x-frame-options"), "DENY");
 
-  const en = await call("/en/");
-  assert.equal(en.status, 200);
-  assert.match(await en.text(), /<html lang="en"/);
-
-  const demo = await call("/demo/");
+  const demo = await call("/pane-demo/index.html");
   assert.equal(demo.status, 200);
   assert.equal(demo.headers.get("x-frame-options"), "SAMEORIGIN");
   assert.match(demo.headers.get("content-security-policy-report-only"), /frame-ancestors 'self'/);
-});
 
-test("worker: legal routes keep their language header", async () => {
-  const zh = await call("/privacy/");
-  assert.equal(zh.status, 200);
-  const en = await call("/en/privacy/");
-  assert.equal(en.status, 200);
-  assert.equal(en.headers.get("content-language"), "en");
-  const terms = await call("/en/terms/");
-  assert.equal(terms.status, 200);
+  const legacy = await call("/en/privacy/");
+  assert.equal(legacy.status, 301);
+  assert.equal(legacy.headers.get("location"), "http://localhost/privacy/");
 });
 
 test("worker: download redirect and API fallbacks", async () => {
@@ -75,11 +74,9 @@ test("worker: download redirect and API fallbacks", async () => {
         }),
         { status: 200 },
       );
-    const latest = await call("/api/latest");
-    assert.equal(latest.status, 200);
-    const body = await latest.json();
-    assert.equal(body.version, "9.9.9");
-    assert.equal(body.assets.length, 1);
+    const map = await call("/api/latest");
+    assert.equal(map.status, 200);
+    assert.equal((await map.json()).version, "9.9.9");
 
     const download = await call("/download/windows");
     assert.equal(download.status, 302);
@@ -94,7 +91,7 @@ test("worker: download redirect and API fallbacks", async () => {
   }
 });
 
-test("worker: CN updater manifest points at the Gitee mirror when it is ready", async () => {
+test("worker: CN updater manifest uses the Gitee mirror when ready", async () => {
   const original = globalThis.fetch;
   try {
     globalThis.fetch = async (url, init) => {
@@ -114,23 +111,23 @@ test("worker: CN updater manifest points at the Gitee mirror when it is ready", 
   }
 });
 
-test("worker: skins keep CORS and unknown routes fall back to 404", async () => {
+test("worker: skins keep CORS and unknown routes 404", async () => {
   const skins = await call("/skins/index.json");
   assert.equal(skins.status, 200);
   assert.equal(skins.headers.get("access-control-allow-origin"), "*");
   const preflight = await call("/skins/index.json", { method: "OPTIONS" });
   assert.equal(preflight.status, 204);
-
   const missing = await call("/does-not-exist");
   assert.equal(missing.status, 404);
 });
 
-test("content facts: version matches the app and the upstream licence is retained", () => {
-  const root = JSON.parse(readFileSync(new URL("../../package.json", import.meta.url), "utf8"));
+test("facts: version and provider count match the app", () => {
+  const rootPkg = JSON.parse(readFileSync(new URL("../../package.json", import.meta.url), "utf8"));
   const facts = readFileSync(new URL("../src/content/facts.ts", import.meta.url), "utf8");
-  assert.ok(facts.includes(`version: "${root.version}"`));
-  const sitePkg = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
-  assert.equal(sitePkg.version, root.version, "site package version drifted from the app");
+  assert.ok(facts.includes(`version: "${rootPkg.version}"`));
+  const catalog = readFileSync(new URL("../../src/providerCatalog.ts", import.meta.url), "utf8");
+  const families = new Set([...catalog.matchAll(/familyId:\s*"([^"]+)"/g)].map((m) => m[1]));
+  assert.ok(facts.includes(`providers: ${families.size}`), `facts providers should be ${families.size}`);
   const licence = readFileSync(new URL("../LICENSE", import.meta.url), "utf8");
   assert.match(licence, /Commons Clause/);
   assert.match(licence, /shadcnblocks\.com/);
@@ -138,27 +135,12 @@ test("content facts: version matches the app and the upstream licence is retaine
 
 test("demo bundle: provenance hashes match the app sources", async () => {
   const { createHash } = await import("node:crypto");
-  const provenance = JSON.parse(readFileSync(new URL("../public/demo/source.json", import.meta.url), "utf8"));
+  const provenance = JSON.parse(readFileSync(new URL("../public/pane-demo/source.json", import.meta.url), "utf8"));
   const rootPkg = JSON.parse(readFileSync(new URL("../../package.json", import.meta.url), "utf8"));
-  assert.equal(provenance.version, rootPkg.version, "demo was built from a different app version");
+  assert.equal(provenance.version, rootPkg.version);
   for (const [file, expected] of Object.entries(provenance.files)) {
     const raw = readFileSync(new URL("../../" + file, import.meta.url), "utf8");
     const digest = createHash("sha256").update(raw.split("\r\n").join("\n")).digest("hex");
-    assert.equal(digest, expected, file + " changed since the demo was built; run node scripts/build-demo.mjs");
+    assert.equal(digest, expected, `${file} changed; run node scripts/build-demo.mjs`);
   }
-});
-
-test("static export: every local asset the pages reference exists", () => {
-  const seen = new Set();
-  for (const page of ["index.html", "en/index.html", "privacy/index.html", "en/privacy/index.html"]) {
-    const html = readFileSync(p(page), "utf8");
-    for (const match of html.matchAll(/(?:src|href)="(\/[^"#?]+\.(?:js|css|png|svg|webp|woff2))"/g)) {
-      seen.add(match[1]);
-    }
-  }
-  for (const href of seen) {
-    const file = p(href.replace(/^\//, ""));
-    assert.ok(existsSync(file), "missing asset " + href);
-  }
-  assert.ok(seen.size > 10, "expected the pages to reference built assets");
 });

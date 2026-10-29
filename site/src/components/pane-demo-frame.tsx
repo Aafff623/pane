@@ -17,7 +17,7 @@ export function PaneDemoFrame({ lang, className, title }: { lang: "en" | "zh"; c
 
   return (
     <iframe
-      src={`/demo/index.html?theme=${theme}&lang=${lang}`}
+      src={`/pane-demo/index.html?theme=${theme}&lang=${lang}`}
       title={title ?? "Pane interactive panel"}
       loading="lazy"
       className={cn(className)}

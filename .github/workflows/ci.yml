@@ -95,14 +95,11 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - run: corepack enable
-      - run: pnpm install --frozen-lockfile
+      - run: npm ci
         working-directory: site
-      - run: pnpm build
+      - run: npm run build
         working-directory: site
       - run: node --test tests/*.test.mjs
         working-directory: site
       - run: node site/scripts/check-skin-packs.mjs
-      # The site's version and provider count are generated, never typed.
-      - run: node site/scripts/sync-site-version.mjs --check
       - run: node --test tests/i18n-pairing.test.mjs

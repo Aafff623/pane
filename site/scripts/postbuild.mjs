@@ -1,7 +1,5 @@
-// The English pages share the root layout, so their exported HTML still
-// carries lang="zh-CN". Set the language on the exported files instead of
-// duplicating the root layout: crawlers see the right attribute and the
-// client never has to patch it.
+// The Chinese pages share the root layout, so their exported HTML still says
+// lang="en". Set the language on the files instead of duplicating the layout.
 import { readdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -19,12 +17,11 @@ async function walk(dir) {
   return files;
 }
 
-const englishRoot = join(OUT, "en");
 let changed = 0;
-for (const file of await walk(englishRoot)) {
+for (const file of await walk(join(OUT, "zh"))) {
   const html = await readFile(file, "utf8");
-  if (!html.includes('<html lang="zh-CN"')) continue;
-  await writeFile(file, html.replace('<html lang="zh-CN"', '<html lang="en"'));
+  if (!html.includes('<html lang="en"')) continue;
+  await writeFile(file, html.replace('<html lang="en"', '<html lang="zh-CN"'));
   changed += 1;
 }
-console.log(`[postbuild] lang=en on ${changed} English page(s)`);
+console.log(`[postbuild] lang=zh-CN on ${changed} Chinese page(s)`);

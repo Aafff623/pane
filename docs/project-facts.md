@@ -1324,7 +1324,8 @@ changes.
 
 ## Website (2026-10-29, Design Mode source migration)
 
-- Stack: Next.js 16 App Router static export (`output: "export"` → `site/out/`), React 19, Tailwind 4, Radix primitives, `@phosphor-icons/react`, Inter via `@fontsource-variable/inter`. Source migrated from `SandeepBaskaran/design-mode@0c7b573` (`website/`); upstream MIT + Commons Clause licence retained at `site/LICENSE`.
+- Stack: Next.js 16 App Router static export (`output: "export"` → `site/out/`), React 19, Tailwind 4, Radix primitives, lucide-react, Inter via `next/font`. Source migrated from `SandeepBaskaran/design-mode@0c7b573` (`website/`); upstream MIT + Commons Clause licence retained at `site/LICENSE`.
+- Language: English at `/`, Chinese at `/zh/`; `scripts/postbuild.mjs` rewrites the exported Chinese HTML to `lang="zh-CN"`. The live Pane demo is served from `/pane-demo/` and framed with `SAMEORIGIN`.
 - The Cloudflare Worker (`site/worker.js`) stays the single entry: static assets from `out/` plus `/download/windows`, `/api/latest`, `/update/latest.json` (CN → Gitee mirror), `/skins/*` CORS, `/demo/*`, and the English legal routes.
 - `/demo/*` responses carry `x-frame-options: SAMEORIGIN` (the landing page frames the real panel); every other route stays `DENY`. Regression of this pair is what broke the old site's demo between 2026-10-26 and 2026-10-29.
 - Theme is class-driven (`.dark` + `localStorage.pane-site-theme`). Tailwind's `dark:` variant is redefined in `globals.css` with `@custom-variant`; it must not fall back to `prefers-color-scheme`.

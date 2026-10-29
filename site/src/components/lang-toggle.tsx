@@ -6,9 +6,8 @@ import { usePathname } from "next/navigation";
 export function LangToggle() {
   const pathname = usePathname() || "/";
   const isZh = pathname === "/zh" || pathname.startsWith("/zh/");
-  // Only the homepage has a translated route so far; keep the switch on a
-  // working target instead of linking to a /zh page that does not exist yet.
-  const target = isZh ? "/" : "/zh";
+  const strip = (path: string) => path.replace(/^\/zh(?=\/|$)/, "") || "/";
+  const target = isZh ? strip(pathname) : `/zh${pathname === "/" ? "" : pathname}`;
 
   return (
     <Link

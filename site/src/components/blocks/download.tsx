@@ -1,5 +1,6 @@
 import { messages, type Lang } from "@/components/i18n";
 import { Button } from "@/components/ui/button";
+import { SmartDownload } from "@/components/smart-download";
 
 const RELEASES = "https://github.com/Aafff623/pane/releases/latest";
 const MIRROR = "https://gitee.com/fan-tengda/pane/releases";
@@ -21,18 +22,17 @@ export function DownloadSection({ lang = "en" }: { lang?: Lang }) {
         </div>
 
         <div className="mt-12 flex flex-col items-center justify-center gap-3 sm:flex-row">
-          <Button asChild size="lg" className="h-14 w-full sm:w-auto">
-            <a href="/download/windows">{copy.windows}</a>
-          </Button>
+          <SmartDownload label={copy.windows} macLabel={copy.macos} className="h-14 w-full sm:w-auto" />
           <Button asChild variant="outline" size="lg" className="h-14 w-full sm:w-auto">
             <a href={RELEASES} target="_blank" rel="noopener noreferrer">
-              {copy.macos}
+              {copy.allReleases}
             </a>
           </Button>
           <Button variant="ghost" size="lg" className="h-14 w-full cursor-not-allowed sm:w-auto" disabled>
             {copy.linux}
           </Button>
         </div>
+        <p className="text-muted-foreground mx-auto mt-4 max-w-[620px] text-center text-sm">{copy.macNote}</p>
 
         <dl className="mx-auto mt-16 grid max-w-4xl gap-6 sm:grid-cols-3">
           {copy.facts.map((fact) => (

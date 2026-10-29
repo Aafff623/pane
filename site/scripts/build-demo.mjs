@@ -11,7 +11,7 @@ let viteEntry;
 try { viteEntry = require.resolve('vite'); } catch { viteEntry = require.resolve('vite', { paths: [resolve('D:/code/pane/node_modules')] }); }
 const { build } = await import(pathToFileURL(viteEntry).href);
 const pkg = JSON.parse(await readFile(resolve(source, 'package.json'), 'utf8'));
-const outDir = resolve(site, 'public/demo');
+const outDir = resolve(site, 'public/pane-demo');
 await mkdir(outDir, { recursive: true });
 // Every file under demo/assets is a hashed Vite emission (chunks, CSS, the
 // skin PNGs, the aurora backdrop) — nothing hand-placed lives there. Wiping

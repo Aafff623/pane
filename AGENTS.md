@@ -120,7 +120,7 @@ facts, constraints and failure modes → [`docs/project-facts.md`](docs/project-
 ## Validation & delivery
 
 1. Frontend: `pnpm build` must pass (tsc + vite).
-1b. Website: `cd site && corepack pnpm build && node --test tests/*.test.mjs` — Next.js static export to `site/out/` plus the Worker route/contract tests. The demo bundle is rebuilt from the app with `node scripts/build-demo.mjs` whenever `src/` changes.
+1b. Website: `cd site && npm ci && npm run build && npm test` — Next.js static export to `site/out/` plus the Worker route/contract tests. The demo bundle is rebuilt from the app with `npm run build:demo` whenever `src/` changes.
 2. Rust: `cargo +stable-x86_64-pc-windows-gnu check` (fast) or `build`, mingw64 PATH prepended as above.
 3. Provider/parsing unit tests run through the `parse-tests` harness — the full Tauri app cannot link on this machine (no MSVC), and a GNU-linked test exe dies at startup with `STATUS_ENTRYPOINT_NOT_FOUND`:
  ```powershell

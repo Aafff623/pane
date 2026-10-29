@@ -1,12 +1,13 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import Image from "next/image";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 
 import { LangToggle } from "@/components/lang-toggle";
+import { SmartDownload } from "@/components/smart-download";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { langFromPath, messages } from "@/components/i18n";
 import { Button } from "@/components/ui/button";
@@ -29,7 +30,19 @@ export const Navbar = () => {
   const lang = langFromPath(pathname);
   const copy = messages[lang].nav;
   const base = lang === "zh" ? "/zh" : "";
-  const navHref = (href: string) => (href.startsWith("#") ? `${base}${href}` : href);
+  const navHref = (href: string) => (href.startsWith("#") ? `${base || ""}/${href}` : href);
+  const menuButton = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    if (!isMenuOpen) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      setIsMenuOpen(false);
+      menuButton.current?.focus();
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [isMenuOpen]);
 
   return (
     <header className="bg-background text-foreground sticky top-0 z-50 w-full border-b">
@@ -66,16 +79,15 @@ export const Navbar = () => {
           <LangToggle />
           <ThemeToggle />
           <div className="max-xl:hidden">
-            <Button asChild size="sm">
-              <a href="/download/windows">{copy.download}</a>
-            </Button>
+            <SmartDownload label={copy.download} macLabel={copy.download} className="h-8 px-3 text-sm" />
           </div>
 
           <button
+            ref={menuButton}
             data-slot="button"
             className="text-foreground relative flex size-8 xl:hidden"
             onClick={() => setIsMenuOpen(!isMenuOpen)}
-            aria-label={isMenuOpen ? "Close main menu" : "Open main menu"}
+            aria-label={isMenuOpen ? copy.closeMenu : copy.menu}
             aria-expanded={isMenuOpen}
             aria-controls="mobile-navigation"
           >
@@ -109,9 +121,7 @@ export const Navbar = () => {
             </Link>
           ))}
           <div className="pt-4">
-            <Button asChild className="w-full">
-              <a href="/download/windows">{copy.download}</a>
-            </Button>
+            <SmartDownload label={copy.download} macLabel={copy.download} className="h-11 w-full" />
           </div>
         </nav>
       </div>

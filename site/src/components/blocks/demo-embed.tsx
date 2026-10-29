@@ -3,7 +3,7 @@ import { PaneDemoFrame } from "@/components/pane-demo-frame";
 
 export function DemoEmbed({ lang }: { lang: Lang }) {
   const copy = messages[lang].demoPage;
-  const src = `/demo/index.html?theme=light&lang=${lang}`;
+  const src = `/pane-demo/index.html?theme=light&lang=${lang}`;
 
   return (
     <div className="border-border bg-card overflow-hidden rounded-2xl border shadow-lg">
