@@ -1325,9 +1325,10 @@ changes.
 ## Website (2026-10-29, Design Mode source migration)
 
 - Stack: Next.js 16 App Router static export (`output: "export"` → `site/out/`), React 19, Tailwind 4, Radix primitives, lucide-react, Inter via `next/font`. Source migrated from `SandeepBaskaran/design-mode@0c7b573` (`website/`); upstream MIT + Commons Clause licence retained at `site/LICENSE`.
-- Language: English at `/`, Chinese at `/zh/`; `scripts/postbuild.mjs` rewrites the exported Chinese HTML to `lang="zh-CN"`. The live Pane demo is served from `/pane-demo/` and framed with `SAMEORIGIN`.
-- The Cloudflare Worker (`site/worker.js`) stays the single entry: static assets from `out/` plus `/download/windows`, `/api/latest`, `/update/latest.json` (CN → Gitee mirror), `/skins/*` CORS, `/demo/*`, and the English legal routes.
-- `/demo/*` responses carry `x-frame-options: SAMEORIGIN` (the landing page frames the real panel); every other route stays `DENY`. Regression of this pair is what broke the old site's demo between 2026-10-26 and 2026-10-29.
-- Theme is class-driven (`.dark` + `localStorage.pane-site-theme`). Tailwind's `dark:` variant is redefined in `globals.css` with `@custom-variant`; it must not fall back to `prefers-color-scheme`.
-- `/` is Chinese, `/en/` English; dictionaries live in `site/src/i18n/index.ts`. `scripts/postbuild.mjs` rewrites `lang` on exported English HTML. Version and provider count come from `package.json` / `providerCatalog.ts` via `site/scripts/sync-site-version.mjs --check`.
-- Tests: `cd site && node --test tests/*.test.mjs` (build required) cover the export, Worker contracts, iframe headers, and licence/version facts.
+- Language: English at `/`, Chinese at `/zh/`; dictionaries live in `site/src/components/i18n.ts`, and `scripts/postbuild.mjs` rewrites the exported Chinese HTML to `lang="zh-CN"`. Old `/en/*` links 301 to the matching root path.
+- The Cloudflare Worker (`site/worker.js`) stays the single entry: static assets from `out/` plus `/download/windows`, `/api/latest`, `/update/latest.json` (CN → Gitee mirror), `/skins/*` CORS, and the legal routes.
+- The live Pane demo is served from `/pane-demo/` (built from the app's own `src/` by `site/scripts/build-demo.mjs`) and framed by `/demo/`; only `/pane-demo/*` responses carry `x-frame-options: SAMEORIGIN`, every other route stays `DENY`. Regression of this pair is what broke the old site's demo between 2026-10-26 and 2026-10-29.
+- Theme is class-driven (`.dark` + `localStorage.pane-theme`). Tailwind's `dark:` variant is redefined in `globals.css` with `@custom-variant`; it must not fall back to `prefers-color-scheme`.
+- Version and provider count come from `site/src/content/facts.ts`; the site test reconciles them with the root `package.json` and `src/providerCatalog.ts` (78 providers).
+- Tests: `cd site && npm run build && npm test` (7 tests) cover the export, Worker contracts, iframe headers, legacy redirects, skins CORS and licence/version facts.
+- **Current state (2026-10-29): local draft, not pushed and not deployed.** The live site is still the old one on `origin/main@4a26727`; the rebuild is committed locally only and must not be pushed or deployed without the owner's explicit authorization.

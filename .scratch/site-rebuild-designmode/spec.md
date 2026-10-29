@@ -1,6 +1,6 @@
 # Spec: 官网重建 —— 基于 Design Mode 源码迁移
 
-**Status:** implemented 2026-10-29 — local build + tests green; owner visual acceptance pending · **Started:** 2026-10-29 · **Owner:** Aafff623
+**Status:** implemented 2026-10-29 — local build + tests green; **local-only draft (not pushed, not deployed)**; owner visual acceptance pending · **Started:** 2026-10-29 · **Owner:** Aafff623
 **Upstream:** https://github.com/SandeepBaskaran/design-mode @ `0c7b5739ef68f779092a3acf4b7cf056772003b9`
 **Upstream path:** `website/`（Next.js 16 / React 19 / Tailwind 4）
 **Backup:** `temp/backup/pane-site-20261029-092537/`（旧站源码 + 部署 workflow + 截图）
@@ -18,11 +18,11 @@
    - `/api/latest`（版本 + 资产列表，供平台分流）
    - `/update/latest.json`（已发布桌面客户端的更新清单，CN → Gitee 镜像）
    - `/skins/`（皮肤包 + CORS）
-   - `/demo/`（真实 Pane 前端构建）
-   - `/en/` 与中文入口、隐私政策、服务条款
-4. **语言**：`/` 中文，`/en/` 英文；两套路由共享组件，词典集中在 `src/i18n/`（构建期静态，不靠客户端选择器映射）。
+   - `/pane-demo/`（真实 Pane 前端构建，`/demo/` 页面用 iframe 嵌入）
+   - `/zh/` 中文入口、隐私政策、服务条款；旧 `/en/*` 301 到根路径
+4. **语言**：`/` 英文，`/zh/` 中文；两套路由共享组件，词典集中在 `src/components/i18n.ts`（构建期静态，不靠客户端选择器映射）。
 5. **主题**：默认浅色（继承 Design Mode），新增暗色 token 与切换；两套主题都要验收。
-6. **图标**：使用 `@phosphor-icons/react`（替代上游 lucide-react），统一 weight/size 规则。
+6. **图标**：沿用上游 `lucide-react`（统一尺寸/描边规则），品牌 logo 用 `public/logos/icons/` 的 lobehub 图标。
 7. **内容**：只写 Pane 真实能力（额度/余额/重置/多账号/本地 CLI Token/托盘悬浮/本地优先/在线演示/下载/开源），不虚构用户评价、兼容性或安全承诺。
 8. **Demo**：继续用 `site/scripts/build-demo.mjs` 从主项目 `src/` 构建，嵌入新设计的演示区；不另写假 UI。
 9. **许可**：上游 `website/LICENSE` 是 MIT + Commons Clause（shadcnblocks.com - Rob Austin），新站保留该声明，不按纯 MIT 处理。
@@ -31,9 +31,9 @@
 ## 页面范围
 
 - 首页（单页叙事）：Navbar / Hero / 工作流 / 面板解剖 / FAQ / 下载 / Closing CTA / Footer / Background
-- `/privacy`、`/terms`（中文）+ `/en/privacy`、`/en/terms`
-- `/en/`（英文首页）
-- `/demo/`（Pane 真实前端，静态构建产物）
+- `/privacy`、`/terms`（英文）+ `/zh/privacy`、`/zh/terms`
+- `/zh/`（中文首页）
+- `/demo/`、`/zh/demo/`（内嵌 `/pane-demo/` 真实前端构建产物）
 - 其余上游页面（blog、docs、compare、use-cases、mcp、about、contact、changelog）不迁移。
 
 ## 迁移映射（旧 → 新）
