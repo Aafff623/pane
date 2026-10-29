@@ -10,7 +10,7 @@
 | 级别 | 发现 | 处理 |
 |---|---|---|
 | P2 | 折叠卡头仍输出裸已用百分比 | `fold-main-quota` 改用 `headLabel`（剩余/已用 + 量词） |
-| P2 | hover、环形图、账号 meter/ring、key 行仍是裸已用百分比 | 新增 `quotaPctLabel()`；这些位置的标题/aria 带量词，环形与 meter 的填充方向跟随 `config.showUsed` |
+| P2 | hover、环形图、账号 meter/ring、key 行仍是裸已用百分比 | 新增 `quotaPctLabel()`；这些位置的标题/aria 带量词，环形与 meter 的填充方向跟随 `config.meterMode` |
 | P2 | `jumpAnimation` 是唯一延迟落盘项，删掉脏态后关窗会静默丢失 | 改为 change 即 `patchConfig`，删除 `pendingJumpAnimation` |
 | P2 | Ctrl+S 在输入框、授权中心、确认框里也会直接重载 | 加 `isTypingTarget`、`authViewActive`、`#confirm-overlay` 守卫 |
 | P3 | 键盘跳转用 260ms 定时器，数据 tick 重建列表会丢焦点 | 改为 `pendingProviderFocus`，由 `renderDashboard` 重建后消费 |
