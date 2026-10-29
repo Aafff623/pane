@@ -1,0 +1,30 @@
+import { messages, type Lang } from "@/components/i18n";
+
+export function DemoEmbed({ lang }: { lang: Lang }) {
+  const copy = messages[lang].demoPage;
+  const src = `/demo/index.html?theme=light&lang=${lang}`;
+
+  return (
+    <div className="border-border bg-card overflow-hidden rounded-2xl border shadow-lg">
+      <div className="border-border flex flex-wrap items-center justify-between gap-3 border-b px-4 py-3">
+        <span className="text-primary inline-flex items-center gap-2 text-xs font-medium tracking-widest uppercase">
+          <i className="bg-primary inline-block size-1.5 rounded-full" aria-hidden="true" />
+          {copy.note}
+        </span>
+        <a
+          href={src}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="text-foreground hover:bg-accent rounded-lg border border-border px-3 py-1.5 text-sm font-medium transition-colors"
+        >
+          {copy.open}
+        </a>
+      </div>
+      <div className="bg-muted/40 flex justify-center px-4 py-8 sm:py-12">
+        <div className="border-border bg-background w-full max-w-[460px] overflow-hidden rounded-xl border shadow-xl">
+          <iframe src={src} title="Pane demo" loading="lazy" className="h-[660px] w-full" />
+        </div>
+      </div>
+    </div>
+  );
+}

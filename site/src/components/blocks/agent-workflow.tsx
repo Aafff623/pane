@@ -69,7 +69,7 @@ export function AgentWorkflow({ lang = "en" }: { lang?: Lang }) {
   const copy = messages[lang].workflow;
 
   return (
-    <section aria-labelledby="agent-workflow-heading" className="py-16 md:py-24 lg:py-32">
+    <section id="features" aria-labelledby="agent-workflow-heading" className="py-16 md:py-24 lg:py-32">
       <div className="container flex flex-col items-center justify-start">
         <div className="mx-0 w-full max-w-[980px] text-center">
           <p className="text-muted-foreground text-base font-medium tracking-widest uppercase">{copy.eyebrow}</p>

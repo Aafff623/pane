@@ -29,6 +29,7 @@ export const Navbar = () => {
   const lang = langFromPath(pathname);
   const copy = messages[lang].nav;
   const base = lang === "zh" ? "/zh" : "";
+  const navHref = (href: string) => (href.startsWith("#") ? `${base}${href}` : href);
 
   return (
     <header className="bg-background text-foreground sticky top-0 z-50 w-full border-b">
@@ -43,7 +44,7 @@ export const Navbar = () => {
             {copy.items.map((link) => (
               <NavigationMenuItem key={link.label}>
                 <Link
-                  href={link.href}
+                  href={navHref(link.href)}
                   className={cn(
                     "text-foreground hover:bg-accent rounded-lg px-4 py-2 text-base font-medium transition-colors",
                     pathname === link.href && "font-semibold",
@@ -100,7 +101,7 @@ export const Navbar = () => {
           {copy.items.map((link) => (
             <Link
               key={link.label}
-              href={link.href}
+              href={navHref(link.href)}
               className={cn("text-foreground hover:bg-accent rounded-lg px-4 py-2 text-base font-medium transition-colors first:mt-0", pathname === link.href && "font-semibold")}
               onClick={() => setIsMenuOpen(false)}
             >

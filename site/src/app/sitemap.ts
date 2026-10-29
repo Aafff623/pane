@@ -1,67 +1,20 @@
 import type { MetadataRoute } from "next";
 
-import { posts } from "@/content/blog";
-import { comparisons, isComparisonIndexable } from "@/content/comparisons";
-import { docs } from "@/content/docs";
-import { useCases } from "@/content/use-cases";
+const BASE = "https://pane.threetwoa.live";
 
-const BASE = "https://designmode.app";
-
-const staticRoutes = [
-  { path: "/", changeFrequency: "weekly", priority: 1 },
-  { path: "/features", changeFrequency: "monthly", priority: 0.9 },
-  { path: "/demo", changeFrequency: "monthly", priority: 0.9 },
-  { path: "/mcp", changeFrequency: "monthly", priority: 0.9 },
-  { path: "/about", changeFrequency: "monthly", priority: 0.6 },
-  { path: "/contact", changeFrequency: "monthly", priority: 0.5 },
-  { path: "/privacy", changeFrequency: "monthly", priority: 0.5 },
-  { path: "/faq", changeFrequency: "monthly", priority: 0.9 },
-  { path: "/use-cases", changeFrequency: "monthly", priority: 0.9 },
-  { path: "/compare", changeFrequency: "monthly", priority: 0.9 },
-  { path: "/docs", changeFrequency: "monthly", priority: 0.8 },
-  { path: "/changelog", changeFrequency: "weekly", priority: 0.7 },
-  { path: "/blog", changeFrequency: "weekly", priority: 0.7 },
-] as const;
+const PAIRS = [
+  { en: "/", zh: "/zh", priority: 1 },
+  { en: "/demo", zh: "/zh/demo", priority: 0.7 },
+  { en: "/privacy", zh: "/zh/privacy", priority: 0.3 },
+  { en: "/terms", zh: "/zh/terms", priority: 0.3 },
+];
 
 export default function sitemap(): MetadataRoute.Sitemap {
-  const staticEntries: MetadataRoute.Sitemap = staticRoutes.map((route) => ({
-    url: `${BASE}${route.path}`,
-    changeFrequency: route.changeFrequency,
-    priority: route.priority,
-  }));
-
-  const useCaseEntries: MetadataRoute.Sitemap = useCases.map((item) => ({
-    url: `${BASE}/use-cases/${item.slug}`,
-    changeFrequency: "monthly",
-    priority: 0.8,
-  }));
-
-  const docsEntries: MetadataRoute.Sitemap = docs.map((item) => ({
-    url: `${BASE}/docs/${item.slug}`,
-    changeFrequency: "monthly",
-    priority: 0.7,
-  }));
-
-  const blogEntries: MetadataRoute.Sitemap = posts.map((post) => ({
-    url: `${BASE}/blog/${post.slug}`,
-    lastModified: post.datePublished,
-    changeFrequency: "monthly",
-    priority: 0.6,
-  }));
-
-  const comparisonEntries: MetadataRoute.Sitemap = comparisons
-    .filter(isComparisonIndexable)
-    .map((comparison) => ({
-      url: `${BASE}/compare/${comparison.slug}`,
-      changeFrequency: "monthly",
-      priority: 0.6,
-    }));
-
-  return [
-    ...staticEntries,
-    ...useCaseEntries,
-    ...docsEntries,
-    ...blogEntries,
-    ...comparisonEntries,
-  ];
+  return PAIRS.flatMap(({ en, zh, priority }) => {
+    const languages = { en: `${BASE}${en}`, "zh-CN": `${BASE}${zh}` };
+    return [
+      { url: `${BASE}${en}`, lastModified: new Date("2026-10-29"), changeFrequency: "monthly" as const, priority, alternates: { languages } },
+      { url: `${BASE}${zh}`, lastModified: new Date("2026-10-29"), changeFrequency: "monthly" as const, priority: Math.max(0.2, priority - 0.1), alternates: { languages } },
+    ];
+  });
 }

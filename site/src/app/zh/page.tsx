@@ -1,7 +1,5 @@
 import { DocumentLang } from "@/components/document-lang";
 import { HomePage } from "@/components/home-page";
-import { JsonLd, faqSchema, softwareApplicationSchema } from "@/components/site/json-ld";
-import { homepageFaqQA } from "@/components/blocks/faq";
 
 const homeTitle = "Pane — 本地优先的 AI 用量工作台";
 const homeDescription =
@@ -10,14 +8,12 @@ const homeDescription =
 export const metadata = {
   title: { absolute: homeTitle },
   description: homeDescription,
-  alternates: { canonical: "https://pane.threetwoa.live/zh" },
+  alternates: { canonical: "https://pane.threetwoa.live/zh", languages: { "zh-CN": "https://pane.threetwoa.live/zh", en: "https://pane.threetwoa.live/", "x-default": "https://pane.threetwoa.live/" } },
 };
 
 export default function Home() {
   return (
     <>
-      <JsonLd data={softwareApplicationSchema} />
-      <JsonLd data={faqSchema(homepageFaqQA)} />
       <DocumentLang lang="zh" />
       <HomePage lang="zh" />
     </>
