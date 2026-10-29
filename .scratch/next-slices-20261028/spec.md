@@ -1,6 +1,6 @@
 # Spec: 2026-10-28 next user-visible slices
 
-**Status:** implemented 2026-10-28 — deep review fixes applied; owner acceptance pending · **Started:** 2026-10-28 · **Owner:** Aafff623
+**Status:** implemented 2026-10-28 — deep review fixes applied; pushed to `origin/main` (0912443) with owner authorization, site demo deployed; no release or tag · **Started:** 2026-10-28 · **Owner:** Aafff623
 
 ## 目标
 

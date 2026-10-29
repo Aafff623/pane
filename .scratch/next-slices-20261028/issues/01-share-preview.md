@@ -8,7 +8,7 @@ Status: done — implemented 2026-10-28; owner visual acceptance pending | Prior
 - Provider cards and the total-spend range menu both open the same preview with Copy image / Save PNG / Close, visible success/error text, Esc/backdrop close and focus return.
 - `save_share_image` writes to the Downloads folder with a sanitized, non-overwriting file name; `share_image.rs` has three local tests for path stripping, Unicode/empty fallback and unique names.
 - Real-app check: total-spend preview (今天) copied to clipboard as 1040×636 PNG and saved to `C:\Users\Lenovo\Downloads\pane-share-总花费-今天-20261028T1420.png`; provider-card preview opened for DeepSeek and copied successfully.
-- Gates: `pnpm build`; Node 251/251; site 55/55; parse-tests full run 1202 passed + 1 known proxy flake that passed solo, 18 ignored; the new `share_image` tests passed.
+- Gates: `pnpm build`; Node 254/254; site 50/50; parse-tests 1204 passed / 18 ignored on a serial proxy-free run (the parallel run has one known proxy flake that passes solo); the new `share_image` tests passed.
 - Not yet done: 125% scale check and owner visual acceptance.
 
 ## Deep-review fixes (2026-10-28)
