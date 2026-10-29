@@ -643,7 +643,7 @@ interface Config {
   spendMetric: "cost" | "tokens" | "mtok" | "rtk";
   spendGrouping: "tool" | "model";
   spendShowAll: boolean;
-  showUsed: boolean;
+  meterMode: "used" | "left";
   showTrend: boolean;
   resetExact: boolean;
   timeFormat: "auto" | "12" | "24";
@@ -726,7 +726,7 @@ const FRONTEND_CONFIG_KEYS = [
   "spendMetric",
   "spendGrouping",
   "spendShowAll",
-  "showUsed",
+  "meterMode",
   "showTrend",
   "resetExact",
   "timeFormat",
@@ -962,7 +962,7 @@ let config: Config = {
   spendMetric: "cost",
   spendGrouping: "tool",
   spendShowAll: false,
-  showUsed: false,
+  meterMode: "used",
   showTrend: true,
   resetExact: false,
   timeFormat: "auto",
@@ -1676,13 +1676,17 @@ function remainingPercent(metric: Metric): number {
 }
 
 /// One labelled percentage for every surface: bars, rings' tooltips, hover
-/// tips, folded badges and account meters. `config.showUsed` picks the
+/// tips, folded badges and account meters. `showsUsed()` picks the
 /// convention; the label always says which one it is.
+function showsUsed(): boolean {
+  return config.meterMode !== "left";
+}
+
 function quotaPctLabel(usedPercent: number | null): string {
   if (usedPercent === null) return "—";
   const used = Math.round(clampPercent(usedPercent));
-  const shown = config.showUsed ? used : 100 - used;
-  return t(config.showUsed ? "card.pctUsed" : "card.pctLeft", { n: shown });
+  const shown = showsUsed() ? used : 100 - used;
+  return t(showsUsed() ? "card.pctUsed" : "card.pctLeft", { n: shown });
 }
 
 function fmtMoney(v: number): string {
@@ -1828,8 +1832,9 @@ async function reloadConfigFromBackend(force = false): Promise<void> {
   const hideUnconfiguredChanged =
     (config.hideUnconfigured !== false) !== (fresh.hideUnconfigured !== false);
   const layoutChanged = JSON.stringify(config.layout ?? null) !== JSON.stringify(fresh.layout ?? null);
+  const meterModeChanged = config.meterMode !== fresh.meterMode;
   config = fresh;
-  if (hideUnconfiguredChanged || layoutChanged) requestRender();
+  if (hideUnconfiguredChanged || layoutChanged || meterModeChanged) requestRender();
   if (layoutChanged) {
     if (customizeOpen) renderDrawerBody();
     if (IS_PANEL_FORM && authViewActive) renderAuthCenter();
@@ -2807,8 +2812,8 @@ function renderMetric(m: Metric, providerId?: string): string {
     const level = usageHeatTone(used);
     // Detail card metrics uniformly display remaining percentage
     // per user specification; token usage is not displayed here.
-    const headline = config.showUsed ? t("card.pctUsed", { n: Math.round(used) }) : t("card.pctLeft", { n: left });
-    const headlineAlt = config.showUsed ? t("card.pctLeft", { n: left }) : t("card.pctUsed", { n: Math.round(used) });
+    const headline = showsUsed() ? t("card.pctUsed", { n: Math.round(used) }) : t("card.pctLeft", { n: left });
+    const headlineAlt = showsUsed() ? t("card.pctLeft", { n: left }) : t("card.pctUsed", { n: Math.round(used) });
 
     let resetHtml = "";
     let resetPlain = "";
@@ -2877,17 +2882,17 @@ function renderMetric(m: Metric, providerId?: string): string {
       return "";
     })();
     const paceMark = m.pace && m.pace.settled && m.pace.elapsed_percent !== null
-      ? `<span class="pace-mark" style="left:${clampPercent(config.showUsed ? m.pace.elapsed_percent : 100 - m.pace.elapsed_percent)}%" title="${escapeHtml(t("pace.evenTip", { elapsed: Math.round(m.pace.elapsed_percent), used: Math.round(used), projected: Math.round(m.pace.projected_used ?? used) }))}"></span>`
+      ? `<span class="pace-mark" style="left:${clampPercent(showsUsed() ? m.pace.elapsed_percent : 100 - m.pace.elapsed_percent)}%" title="${escapeHtml(t("pace.evenTip", { elapsed: Math.round(m.pace.elapsed_percent), used: Math.round(used), projected: Math.round(m.pace.projected_used ?? used) }))}"></span>`
       : "";
     return `
-      <div class="metric" style="--skin-meter:${config.showUsed ? used : left}%">
+      <div class="metric" style="--skin-meter:${showsUsed() ? used : left}%">
         <div class="metric-head">
           <span class="metric-label" title="${escapeHtml(metricLabel)}">${escapeHtml(metricLabel)}</span>
           ${pace}
           ${m.period_ms !== null && m.period_ms > 0 ? `<span class="skin-period">${escapeHtml(fmtDuration(m.period_ms))}</span>` : ""}
         </div>
         <div class="bar">
-          <div class="fill ${level}" style="width:${config.showUsed ? used : left}%"></div>
+          <div class="fill ${level}" style="width:${showsUsed() ? used : left}%"></div>
           ${paceMark}
         </div>
         ${providerId ? burnCurveHtml(providerId, m) : ""}
@@ -6640,7 +6645,7 @@ function renderQuotaOverview(): string {
       const tone = accountHealthDot(account.id);
       const known = q.status === "maxed" || q.window !== null;
       const pct = q.status === "maxed" ? 100 : known ? Math.round(q.usedPercent) : 0;
-      const shownPct = known ? (config.showUsed ? pct : 100 - pct) : 0;
+      const shownPct = known ? (showsUsed() ? pct : 100 - pct) : 0;
       const pctText = known ? quotaPctLabel(pct) : "—";
       return `<div class="overview-account-meter" title="${escapeHtml(`${label} · ${pctText}`)}" aria-label="${escapeHtml(`${label} · ${pctText}`)}"><span class="acct-dot ${tone}"></span><span class="overview-account-meter-label">${escapeHtml(label)}</span><span class="overview-account-meter-track"><i class="${tone}" style="width:${shownPct}%"></i></span><b>${known ? `${shownPct}%` : ""}</b></div>`;
     }).join("")}</div>`;
@@ -6655,7 +6660,7 @@ function renderQuotaOverview(): string {
       const tone = accountHealthDot(account.id);
       const known = q.status === "maxed" || q.window !== null;
       const pct = q.status === "maxed" ? 100 : known ? Math.round(q.usedPercent) : 0;
-      const shownPct = known ? (config.showUsed ? pct : 100 - pct) : 0;
+      const shownPct = known ? (showsUsed() ? pct : 100 - pct) : 0;
       const pctText = known ? quotaPctLabel(pct) : "—";
       const label = labelForAccount(account.id, accountsCache.get(family) ?? [], account.name);
       const stroke = tone === "red" ? "#ef4444" : tone === "error" ? "#f97316" : tone === "gray" ? "var(--muted-foreground)" : "#10b981";
@@ -6683,7 +6688,7 @@ function renderQuotaOverview(): string {
         ? Math.round(m.used_percent)
         : null;
       const value = m.value ?? m.detail ?? "";
-      const shownPct = pct === null ? null : config.showUsed ? pct : 100 - pct;
+      const shownPct = pct === null ? null : showsUsed() ? pct : 100 - pct;
       const shown = pct !== null ? quotaPctLabel(pct) : value;
       const label = pct !== null || !value ? m.label : `${m.label} · ${value}`;
       return `<div class="overview-account-meter" title="${escapeHtml(`${m.label}: ${shown}`)}" aria-label="${escapeHtml(`${m.label}: ${shown}`)}"><span class="acct-dot ${tone}"></span><span class="overview-account-meter-label">${escapeHtml(label)}</span><span class="overview-account-meter-track"><i class="${tone}" style="width:${shownPct ?? 0}%"></i></span><b>${shownPct !== null ? `${shownPct}%` : ""}</b></div>`;
@@ -6778,18 +6783,18 @@ function renderQuotaOverview(): string {
         itemTone = "maxed";
         statusDot = "red";
         strokeColor = "#ef4444";
-        ringLabel = `${config.showUsed ? 100 : 0}%`;
+        ringLabel = `${showsUsed() ? 100 : 0}%`;
         ringAria = quotaPctLabel(100);
         textClass = "is-maxed";
         progressCircle = `<circle class="ring-progress is-maxed" cx="${cx}" cy="${cy}" r="${r}"
           stroke="${strokeColor}" stroke-width="3.2" fill="none"
           stroke-linecap="round"
           stroke-dasharray="${circumference.toFixed(2)}"
-          stroke-dashoffset="${config.showUsed ? "0" : circumference.toFixed(2)}"
+          stroke-dashoffset="${showsUsed() ? "0" : circumference.toFixed(2)}"
           transform="rotate(-90 ${cx} ${cy})" />`;
       } else if (quota.window !== null) {
         const pct = Math.round(quota.usedPercent);
-        const shownPct = config.showUsed ? pct : 100 - pct;
+        const shownPct = showsUsed() ? pct : 100 - pct;
         const dashoffset = circumference * (1 - shownPct / 100);
 
         if (usageHeatTone(pct) !== "") {
@@ -6912,10 +6917,10 @@ function renderQuotaOverview(): string {
       if (usageHeatTone(pct) !== "") itemTone = "warn";
     }
     // The bar, the printed number and the detail cards all follow one
-    // convention (config.showUsed): "used" fills up, "left" drains. Colors
+    // convention (showsUsed()): "used" fills up, "left" drains. Colors
     // keep tracking used percent, so a nearly-empty "left" bar still turns
     // red when the quota is exhausted.
-    const shownPct = pct === null ? null : config.showUsed ? pct : 100 - pct;
+    const shownPct = pct === null ? null : showsUsed() ? pct : 100 - pct;
     const pctLabel = pct === null ? null : quotaPctLabel(pct);
 
     const meta = quota.status === "error" || quota.status === "needs_setup"
@@ -20219,7 +20224,7 @@ async function resetAllSettings(): Promise<void> {
     spendMetric: "cost",
     spendGrouping: "tool",
     spendShowAll: false,
-    showUsed: false,
+    meterMode: "used",
     showTrend: true,
     resetExact: false,
     timeFormat: "auto",
@@ -21120,9 +21125,26 @@ function buildPanelShell(): void {
   );
   colorblindPill.setAttribute("aria-label", t("settings.colorblind"));
   const colorblindRow = panelRowDesc("settings.colorblind", "settings.desc.colorblind", colorblindPill);
+  // Two bar conventions, one switch: used-fills-up (the original look) is
+  // the default; used-drains-away shows how much is left instead. The text
+  // and every ring/meter follow the same choice.
+  const meterPill = pillControl<"used" | "left">(
+    [
+      { value: "used", label: t("settings.meterUsed") },
+      { value: "left", label: t("settings.meterLeft") },
+    ],
+    config.meterMode === "left" ? "left" : "used",
+    (value) => {
+      config.meterMode = value;
+      requestRender();
+      void patchConfig({ meterMode: value }).catch((err) => settingsToast(String(err), true));
+    },
+  );
+  meterPill.setAttribute("aria-label", t("settings.meterMode"));
+  const meterRow = panelRowDesc("settings.meterMode", "settings.desc.meterMode", meterPill);
   const fontRow = document.querySelector("#ui-font-cjk")?.closest(".set-row");
-  if (fontRow) fontRow.after(textSizeRow, codeFontRow, colorblindRow);
-  else generalCard.append(textSizeRow, codeFontRow, colorblindRow);
+  if (fontRow) fontRow.after(textSizeRow, codeFontRow, colorblindRow, meterRow);
+  else generalCard.append(textSizeRow, codeFontRow, colorblindRow, meterRow);
   // The rows show these hints as visible descriptions already; a hover
   // tooltip on top of that would say the same thing twice.
   for (const id of ["ui-font", "ui-font-cjk"]) {
@@ -24299,8 +24321,8 @@ document.querySelector("#settings-btn")!.addEventListener("click", (event) => {
     const flip = target.closest<HTMLElement>("[data-flip]");
     if (flip) {
       if (flip.dataset.flip === "usage") {
-        config.showUsed = !config.showUsed;
-        void patchConfig({ showUsed: config.showUsed });
+        config.meterMode = showsUsed() ? "left" : "used";
+        void patchConfig({ meterMode: config.meterMode });
       } else {
         config.resetExact = !config.resetExact;
         void patchConfig({ resetExact: config.resetExact });

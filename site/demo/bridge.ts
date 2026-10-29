@@ -33,7 +33,7 @@ let config: Record<string, any> = {
   pinned: null, trayProviders: [],
   notifyAlmostOut: false, notifyCuttingClose: false, notifyWillRunOut: false, notifyResetSoon: true,
   spendTab: 'today', overviewTab: '5h', overviewCategory: 'coding', overviewStyle: 'bars',
-  categoryOverrides: {}, spendMetric: 'tokens', spendGrouping: 'model', showUsed: false, showTrend: false,
+  categoryOverrides: {}, spendMetric: 'tokens', spendGrouping: 'model', meterMode: params.get('meter') === 'left' ? 'left' : 'used', showTrend: false,
   resetExact: false, timeFormat: 'auto', layout: {
     providerOrder: [...LAYOUT_ORDER],
     groups: [{ id: 'g5', name: '🥚鸡蛋', collapsed: false }, { id: 'g6', name: '🐑羊毛', collapsed: false }],

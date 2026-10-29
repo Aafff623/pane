@@ -181,6 +181,8 @@ fn config_with_defaults(mut cfg: Value) -> Value {
     obj.entry("spendShowAll").or_insert(json!(false));
     obj.entry("overviewStyle").or_insert(json!("bars"));
     obj.entry("showUsed").or_insert(json!(false));
+    // Bar convention: "used" keeps the original used-fills-up look.
+    obj.entry("meterMode").or_insert(json!("used"));
     obj.entry("resetExact").or_insert(json!(false));
     obj.entry("timeFormat").or_insert(json!("auto"));
     obj.entry("layout").or_insert(Value::Null);
@@ -355,6 +357,7 @@ const CONFIG_KEYS: &[&str] = &[
     "overviewCategory",
     "categoryOverrides",
     "showUsed",
+    "meterMode",
     "resetExact",
     "timeFormat",
     "layout",
