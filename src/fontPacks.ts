@@ -66,6 +66,15 @@ export async function mountFontPackManager(container: HTMLElement, options: Font
   hint.textContent = tr("mvboliHint");
   hint.dataset.i18n = "settings.fontPacks.mvboliHint";
   const status = document.createElement("p"); status.setAttribute("role", "status");
+  const retry = document.createElement("button");
+  retry.type = "button";
+  retry.className = "mini-btn";
+  retry.textContent = tr("retry");
+  retry.dataset.i18n = "settings.fontPacks.retry";
+  retry.hidden = true;
+  const statusRow = document.createElement("div");
+  statusRow.className = "font-pack-status";
+  statusRow.append(status, retry);
   const list = document.createElement("div");
   const imports = document.createElement("div");
   imports.style.cssText = "display:flex;gap:6px;flex-wrap:wrap;margin-top:8px";
@@ -76,7 +85,7 @@ export async function mountFontPackManager(container: HTMLElement, options: Font
   url.dataset.i18nPlaceholder = url.dataset.i18nAria = "settings.fontPacks.url";
   digest.dataset.i18nPlaceholder = digest.dataset.i18nAria = "settings.fontPacks.sha256";
   imports.append(url, digest, importButton);
-  container.append(title, description, hint, list, imports, status);
+  container.append(title, description, hint, list, imports, statusRow);
   let offers: FontPackOffer[] = officialCatalog.packs;
   let busy = false;
   let catalogError = "";
@@ -87,13 +96,20 @@ export async function mountFontPackManager(container: HTMLElement, options: Font
     try {
       await action();
       status.textContent = catalogError;
+      if (!catalogError) status.removeAttribute("title");
     } catch (error) {
-      status.textContent = `${tr("error")}: ${String(error)}`;
+      console.error("[fontPacks]", error);
+      status.textContent = tr("error");
+      status.title = String(error);
     } finally {
       // A config callback can fail after the actual removal. Always refresh
       // installed state so a removed pack does not retain its injected CSS.
       try { await loadFontPacks(); await options.onChange?.(); }
-      catch (error) { status.textContent = `${tr("error")}: ${String(error)}`; }
+      catch (error) {
+        console.error("[fontPacks]", error);
+        status.textContent = tr("error");
+        status.title = String(error);
+      }
       busy = false; render();
     }
   };
@@ -145,20 +161,46 @@ export async function mountFontPackManager(container: HTMLElement, options: Font
     await invoke("font_pack_download", { url: url.value.trim(), sha256: digest.value.trim() });
     url.value = ""; digest.value = "";
   }));
+  const loadCatalog = async () => {
+    retry.disabled = true;
+    status.classList.remove("error");
+    retry.hidden = true;
+    status.textContent = tr("loading");
+    try {
+      // The demo lives under /pane-demo/ and serves its own tiny catalog;
+      // the desktop bundle has no site assets, so it reads the published one.
+      const catalogUrl = location.pathname.startsWith("/demo/")
+        || location.pathname.startsWith("/pane-demo/")
+        || location.hostname === "pane.threetwoa.live"
+        ? "/fonts/index.json"
+        : "https://pane.threetwoa.live/fonts/index.json";
+      const response = await fetch(catalogUrl, { signal: AbortSignal.timeout(15000) });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const data: unknown = await response.json();
+      if (!data || typeof data !== "object" || !("packs" in data) || !Array.isArray(data.packs)) throw new Error("Invalid font catalog");
+      offers = data.packs.filter((p): p is FontPackOffer => p && typeof p.id === "string" && typeof p.name === "string" && typeof p.family === "string" && typeof p.version === "string" && typeof p.size === "number" && typeof p.url === "string" && typeof p.sha256 === "string");
+      catalogError = "";
+      status.textContent = "";
+      status.removeAttribute("title");
+    } catch (error) {
+      console.error("[fontPacks] catalog", error);
+      catalogError = tr("catalogUnavailable");
+      status.textContent = catalogError;
+      status.title = String(error);
+      status.classList.add("error");
+      retry.hidden = false;
+    } finally {
+      retry.disabled = false;
+      render();
+    }
+  };
+  retry.addEventListener("click", () => void loadCatalog());
   status.textContent = tr("loading");
-  try { await loadFontPacks(); } catch (error) { status.textContent = `${tr("error")}: ${String(error)}`; render(); return; }
+  try { await loadFontPacks(); } catch (error) {
+    console.error("[fontPacks]", error);
+    status.textContent = tr("error");
+    status.title = String(error);
+  }
   render();
-  try {
-    const catalogUrl = location.pathname.startsWith("/demo/")
-      || location.hostname === "pane.threetwoa.live"
-      ? "/fonts/index.json"
-      : "https://pane.threetwoa.live/fonts/index.json";
-    const response = await fetch(catalogUrl, { signal: AbortSignal.timeout(15000) });
-    if (!response.ok) throw new Error(`HTTP ${response.status}`);
-    const data: unknown = await response.json();
-    if (!data || typeof data !== "object" || !("packs" in data) || !Array.isArray(data.packs)) throw new Error("Invalid font catalog");
-    offers = data.packs.filter((p): p is FontPackOffer => p && typeof p.id === "string" && typeof p.name === "string" && typeof p.family === "string" && typeof p.version === "string" && typeof p.size === "number" && typeof p.url === "string" && typeof p.sha256 === "string");
-    status.textContent = "";
-  } catch (error) { catalogError = `${tr("catalogUnavailable")}: ${String(error)}`; status.textContent = catalogError; }
-  render();
+  await loadCatalog();
 }

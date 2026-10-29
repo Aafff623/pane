@@ -81,7 +81,9 @@ html.i18n-boot #boot-fallback {
      --line vs --line-2): a card reads as one card, rows breathe. */
   --row-line: color-mix(in srgb, var(--border) 55%, var(--card));
   --chart-blue: #3794ff;
-  --star-amber: #f5a623;
+  /* Text-safe variants: #007acc and #ef4444 fail 4.5:1 on the dark card. */
+  --link-text: #3794ff;
+  --danger-text: #f87171;
   /* Cursor's brand black flips to light grey on the dark theme (like the
      Mac ring and our recolored Cursor mark) — pure black vanishes on a dark
      card. */
@@ -110,6 +112,8 @@ html.i18n-boot #boot-fallback {
   --secondary-foreground: #3b3b3b;
   --primary: #0066b8;
   --primary-foreground: #ffffff;
+  --link-text: #0066b8;
+  --danger-text: #b91c1c;
   --accent: #e8e8e8;
   --control-hover: #dcdcdc;
   --field-surface: #ffffff;
@@ -498,7 +502,7 @@ body.refreshing #refresh .refresh-glyph {
 
 .settings-note {
   margin: 0 0 8px;
-  font-size: 11px;
+  font-size: 12px;
   color: var(--muted-foreground);
   line-height: 1.45;
 }
@@ -2656,42 +2660,6 @@ article.provider.is-folded:hover {
   cursor: pointer;
 }
 .about-release-link:hover { text-decoration: underline; }
-.about-star-banner {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin: 4px 0 8px;
-  padding: 7px 9px;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  background: var(--accent);
-  color: var(--foreground);
-  font-size: 11.5px;
-  line-height: 1.45;
-}
-.about-star-icon {
-  display: inline-flex;
-  flex: none;
-  color: var(--star-amber);
-}
-.about-star-icon .ui-icon { width: 15px; height: 15px; }
-.about-star-text { min-width: 0; }
-.about-star-go { flex: none; }
-.about-star-close {
-  display: inline-grid;
-  place-items: center;
-  flex: none;
-  width: 20px;
-  height: 20px;
-  padding: 0;
-  border: 0;
-  border-radius: 5px;
-  background: transparent;
-  color: var(--muted-foreground);
-  cursor: pointer;
-}
-.about-star-close:hover { background: var(--card); color: var(--foreground); }
-.about-star-close .ui-icon { width: 12px; height: 12px; }
 .mini-btn.update-ready {
   background: var(--chart-blue);
   border-color: var(--chart-blue);
@@ -2714,7 +2682,7 @@ article.provider.is-folded:hover {
   font-variant-numeric: tabular-nums;
 }
 .skill-usage-row:last-of-type { border-bottom: 0; }
-.skill-usage-name { overflow: hidden; font-family: ui-monospace, Consolas, monospace; font-size: 10.5px; text-overflow: ellipsis; white-space: nowrap; }
+.skill-usage-name { overflow: hidden; font-family: ui-monospace, Consolas, monospace; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
 .skill-usage-row span:not(.skill-usage-name) { color: var(--muted-foreground); }
 .skill-usage-note { margin: 6px 0 0; }
 .col-project {
@@ -2920,7 +2888,7 @@ article.provider.is-folded:hover {
   display: flex;
   align-items: center;
   gap: 4px;
-  font-size: 10.5px;
+  font-size: 11px;
   line-height: 1.4;
 }
 
@@ -3240,6 +3208,7 @@ body.ui-scaled .popover {
   line-height: 1.4;
 }
 .stats-pill { flex: none; }
+.stats-pill .tab { white-space: nowrap; }
 
 /* 52 Sunday-aligned columns: square cells shrink to the container instead
    of introducing a second horizontal scroll region (ZCode's rule). */
@@ -3263,9 +3232,9 @@ body.ui-scaled .popover {
   transition: transform 0.12s var(--ease), outline-color 0.12s;
 }
 .stats-heat-cell:hover { transform: scale(1.28); outline: 1px solid #93c5fd; outline-offset: 1px; }
-.stats-heat-cell.level-1 { background: color-mix(in oklab, #60a5fa 28%, var(--muted)); }
-.stats-heat-cell.level-2 { background: color-mix(in oklab, #3b82f6 48%, var(--muted)); }
-.stats-heat-cell.level-3 { background: color-mix(in oklab, #2563eb 70%, var(--muted)); }
+.stats-heat-cell.level-1 { background: color-mix(in oklab, #60a5fa 42%, var(--muted)); }
+.stats-heat-cell.level-2 { background: color-mix(in oklab, #3b82f6 62%, var(--muted)); }
+.stats-heat-cell.level-3 { background: color-mix(in oklab, #2563eb 82%, var(--muted)); }
 .stats-heat-cell.level-4 { background: #1d4ed8; }
 .stats-heat-cell.outside { opacity: 0.18; cursor: default; pointer-events: none; }
 .stats-heat-cell.selected { outline: 2px solid var(--foreground); outline-offset: 1px; }
@@ -3294,9 +3263,9 @@ body.ui-scaled .popover {
   border-radius: 2px;
   background: color-mix(in oklab, var(--muted) 72%, transparent);
 }
-.stats-heat-swatch.level-1 { background: color-mix(in oklab, #60a5fa 28%, var(--muted)); }
-.stats-heat-swatch.level-2 { background: color-mix(in oklab, #3b82f6 48%, var(--muted)); }
-.stats-heat-swatch.level-3 { background: color-mix(in oklab, #2563eb 70%, var(--muted)); }
+.stats-heat-swatch.level-1 { background: color-mix(in oklab, #60a5fa 42%, var(--muted)); }
+.stats-heat-swatch.level-2 { background: color-mix(in oklab, #3b82f6 62%, var(--muted)); }
+.stats-heat-swatch.level-3 { background: color-mix(in oklab, #2563eb 82%, var(--muted)); }
 .stats-heat-swatch.level-4 { background: #1d4ed8; }
 
 .stats-legend {
@@ -3446,11 +3415,11 @@ body.ui-scaled .popover {
 .qoder-tool .qoder-session > span:last-child { white-space: nowrap; }
 .qoder-head-right { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
 .qoder-head-right .mini-btn { flex: none; }
-.qoder-meta { margin-top: 4px; color: var(--muted-foreground); font-size: 10px; }
+.qoder-meta { margin-top: 4px; color: var(--muted-foreground); font-size: 11px; }
 .qoder-key { margin-left: 6px; opacity: 0.55; font-size: 9px; }
 .qoder-sessions { margin-top: 6px; padding-top: 6px; border-top: 1px solid color-mix(in oklab, var(--border) 70%, transparent); }
 .qoder-sessions-head { margin-bottom: 2px; font-size: 9px; letter-spacing: 0.04em; text-transform: uppercase; opacity: 0.6; }
-.qoder-session { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 2px 0; color: var(--muted-foreground); font-size: 10px; }
+.qoder-session { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 2px 0; color: var(--muted-foreground); font-size: 11px; }
 .qoder-session-id { font-family: ui-monospace, Consolas, monospace; opacity: 0.75; }
 
 @media (max-width: 560px) {
@@ -3476,7 +3445,7 @@ body.ui-scaled .popover {
 .spend-est { color: var(--muted-foreground); cursor: help; border-bottom: 1px dotted color-mix(in oklab, var(--muted-foreground) 55%, transparent); }
 
 .spend-col .col-head {
-  font-size: 10.5px;
+  font-size: 11px;
   padding: 2px 6px;
   margin: 0 0 1px;
 }
@@ -3631,7 +3600,7 @@ body.ui-scaled .popover {
 
 .spend-group-tab {
   flex: none;
-  font-size: 10px;
+  font-size: 11px;
   padding: 3px 7px;
   margin: 0;
 }
@@ -3818,9 +3787,25 @@ body.ui-scaled .popover {
 }
 
 .overview-bar-item .ovbar-pct.is-maxed {
-  color: #ef4444;
+  color: var(--danger-text);
 }
 .overview-bar-item .ovbar-pct.is-error { color: #f97316; }
+
+/* Quota rows are focusable so keyboard users can reach the same jump the
+   pointer already triggers. No role="button": the rows contain their own
+   buttons (account fold), and role=button would flatten them away. */
+.overview-bar-item[data-jump-provider],
+.overview-item[data-jump-provider],
+.expiring-row[data-jump-provider] {
+  cursor: pointer;
+}
+.overview-bar-item[data-jump-provider]:focus-visible,
+.overview-item[data-jump-provider]:focus-visible,
+.expiring-row[data-jump-provider]:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+  border-radius: 8px;
+}
 
 .overview-bar-item .ovbar-line2 {
   display: grid;
@@ -8610,7 +8595,7 @@ body.no-glass .group-menu {
 }
 
 .overview-badges .overview-chip {
-  font-size: 10px;
+  font-size: 11px;
   gap: 3px;
   padding: 3px 5px;
   border: 1px solid color-mix(in oklab, var(--foreground) 12%, transparent);
@@ -9450,7 +9435,7 @@ body.no-glass .group-menu {
 .overview-subgroup-count {
   margin-left: auto;
   font-weight: 400;
-  opacity: 0.7;
+  color: var(--muted-foreground);
 }
 
 .card-group-head {
@@ -9837,7 +9822,9 @@ body.panel-form #drawer {
   flex-direction: column;
   align-items: center;
   gap: 1px;
-  padding: 5px 2px;
+  padding: 6px 2px 8px;
+  max-height: calc(100vh - 24px);
+  overflow-y: auto;
   border: 1px solid rgba(255, 255, 255, 0.1);
   border-radius: 8px;
   background: var(--glass-surface);
@@ -10052,28 +10039,25 @@ body.panel-form #drawer {
   color: var(--muted-foreground);
 }
 
+/* Not a save state: settings persist as they change, so this is a plain
+   "reload the window" action and stays quiet beside the window controls. */
 #panel-head .settings-save-all {
   flex: none;
   margin-left: auto;
   height: 30px;
   padding: 0 14px;
-  border: none;
+  border: 1px solid var(--border);
   border-radius: 8px;
-  background: var(--primary);
-  color: var(--primary-foreground);
+  background: transparent;
+  color: var(--foreground);
   font-size: 12.5px;
-  font-weight: 600;
+  font-weight: 500;
   cursor: pointer;
-  transition: opacity 0.15s ease, filter 0.15s ease;
+  transition: background 0.15s ease, border-color 0.15s ease;
 }
 
-#panel-head .settings-save-all:hover:not(:disabled) {
-  filter: brightness(0.92);
-}
-
-#panel-head .settings-save-all:disabled {
-  opacity: 0.45;
-  cursor: default;
+#panel-head .settings-save-all:hover {
+  background: var(--control-hover);
 }
 
 #panel-head .settings-save-all[hidden] {
@@ -10666,7 +10650,7 @@ body.reduce-anim #splash * {
   border: none;
   padding: 2px 6px;
   font-size: 12px;
-  color: var(--primary);
+  color: var(--link-text);
   cursor: pointer;
   border-radius: 6px;
 }
@@ -10738,7 +10722,7 @@ body.reduce-anim .spend-bolt.tier-3 svg {
   width: auto;
   max-width: 108px;
   padding: 3px 8px;
-  font-size: 10.5px;
+  font-size: 11px;
   text-align: left;
 }
 .card-account-tab-label {
@@ -10998,7 +10982,7 @@ body.reduce-anim .spend-bolt.tier-3 svg {
 .source-reason {
   grid-column: 2 / -1;
   color: var(--muted-foreground);
-  font-size: 10px;
+  font-size: 11px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -11012,7 +10996,7 @@ body.reduce-anim .spend-bolt.tier-3 svg {
   resize: vertical;
 }
 .pricing-overrides-actions { justify-content: space-between; }
-#pricing-overrides-msg.is-error { color: #ef4444; }
+#pricing-overrides-msg.is-error { color: var(--danger-text); }
 
 /* Pin-side window scale control. Text pill rather than an icon so the
    current level is readable at a glance. */
@@ -11514,6 +11498,11 @@ body.reduce-anim .spend-bolt.tier-3 svg {
   color: var(--foreground);
   font-size: 12.5px;
 }
+#panel-search::placeholder {
+  color: var(--muted-foreground);
+  opacity: 1;
+}
+
 #panel-search:focus {
   outline: none;
   border-color: var(--primary);
@@ -11534,6 +11523,11 @@ body.reduce-anim .spend-bolt.tier-3 svg {
 }
 #panel-search-results[hidden] {
   display: none;
+}
+.set-search-empty {
+  padding: 10px 12px;
+  color: var(--muted-foreground);
+  font-size: 12px;
 }
 .set-search-hit {
   display: flex;

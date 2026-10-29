@@ -1019,23 +1019,11 @@ let config: Config = {
   popoverPos: null,
   lastView: { kind: "main", id: null },
 };
-let pendingJumpAnimation: "smooth" | "instant" | null = null;
-let settingsDirty = false;
-
-function setSettingsDirty(dirty: boolean): void {
-  settingsDirty = dirty;
-  document.querySelectorAll<HTMLButtonElement>(".settings-save-all").forEach((button) => {
-    button.disabled = !dirty;
-  });
-}
-
-async function applySettingsAndReload(): Promise<void> {
-  if (!settingsDirty) return;
-  if (pendingJumpAnimation && pendingJumpAnimation !== config.jumpAnimation) {
-    await patchConfig({ jumpAnimation: pendingJumpAnimation });
-    pendingJumpAnimation = null;
-  }
-  setSettingsDirty(false);
+/// Every settings control persists through patchConfig the moment it changes.
+/// The header button is therefore a reload, not a save: it reloads the window
+/// so every live binding picks up the stored config. It used to say “Save”
+/// and light up on boot, which promised a write that had already happened.
+function applySettingsAndReload(): void {
   window.location.reload();
 }
 
@@ -1123,16 +1111,15 @@ async function runBackupImport(): Promise<void> {
 }
 let lastFetch = 0;
 const refreshState = new RefreshState();
-/// True while the footer status line carries the idle "数据更新于…" text —
+/// True while the footer status line carries the idle "已更新 HH:MM" text —
 /// the minute ticker may rewrite it; any transient message clears it.
 let statusShowsUpdated = false;
 let statusIdleText = "";
 
-/// The neutral freshness line (Grafana-style): relative minutes while
-/// fresh enough, absolute clock time once an hour has passed.
+/// The neutral freshness line: one absolute clock time everywhere. The old
+/// "N minutes ago" form ran beside "Updated 21:42" in the same footer slot
+/// and made two different sentences for the same fact.
 function idleFooterText(): string {
-  const mins = Math.floor((Date.now() - lastFetch) / 60_000);
-  if (mins >= 1 && mins < 60) return t("footer.updatedAgo", { n: mins });
   const time = new Date(lastFetch).toLocaleTimeString(localeTag(), {
     hour: "2-digit",
     minute: "2-digit",
@@ -1594,7 +1581,7 @@ async function selectSkin(id: SkinId | null): Promise<void> {
   )) button.disabled = true;
   const previous = config.skinId;
   try {
-    await patchConfig({ skinId: normalizeSkin(id) }, { markDirty: false });
+    await patchConfig({ skinId: normalizeSkin(id) });
   } catch {
     config.skinId = previous;
     skinShopFeedback = t("skin.saveFailed");
@@ -1688,6 +1675,16 @@ function remainingPercent(metric: Metric): number {
   return Math.round(100 - clampPercent(metric.used_percent ?? 0));
 }
 
+/// One labelled percentage for every surface: bars, rings' tooltips, hover
+/// tips, folded badges and account meters. `config.showUsed` picks the
+/// convention; the label always says which one it is.
+function quotaPctLabel(usedPercent: number | null): string {
+  if (usedPercent === null) return "—";
+  const used = Math.round(clampPercent(usedPercent));
+  const shown = config.showUsed ? used : 100 - used;
+  return t(config.showUsed ? "card.pctUsed" : "card.pctLeft", { n: shown });
+}
+
 function fmtMoney(v: number): string {
   if (v >= 1000) return `$${(v / 1000).toFixed(1)}K`;
   return `$${v.toFixed(2)}`;
@@ -1760,9 +1757,8 @@ function applyConfigEcho(sent: Config, echoed: Config): void {
   }
 }
 
-async function patchConfig(patch: Partial<Config>, options?: { markDirty?: boolean }): Promise<void> {
+async function patchConfig(patch: Partial<Config>): Promise<void> {
   Object.assign(config, patch);
-  if (IS_PANEL_FORM && options?.markDirty !== false) setSettingsDirty(true);
   // Send a full current snapshot. If an earlier serialized write failed,
   // the next save retries that still-live in-memory state as well.
   const payload = snapshotConfig();
@@ -2881,7 +2877,7 @@ function renderMetric(m: Metric, providerId?: string): string {
       return "";
     })();
     const paceMark = m.pace && m.pace.settled && m.pace.elapsed_percent !== null
-      ? `<span class="pace-mark" style="left:${clampPercent(m.pace.elapsed_percent)}%" title="${escapeHtml(t("pace.evenTip", { elapsed: Math.round(m.pace.elapsed_percent), used: Math.round(used), projected: Math.round(m.pace.projected_used ?? used) }))}"></span>`
+      ? `<span class="pace-mark" style="left:${clampPercent(config.showUsed ? m.pace.elapsed_percent : 100 - m.pace.elapsed_percent)}%" title="${escapeHtml(t("pace.evenTip", { elapsed: Math.round(m.pace.elapsed_percent), used: Math.round(used), projected: Math.round(m.pace.projected_used ?? used) }))}"></span>`
       : "";
     return `
       <div class="metric" style="--skin-meter:${config.showUsed ? used : left}%">
@@ -2891,7 +2887,7 @@ function renderMetric(m: Metric, providerId?: string): string {
           ${m.period_ms !== null && m.period_ms > 0 ? `<span class="skin-period">${escapeHtml(fmtDuration(m.period_ms))}</span>` : ""}
         </div>
         <div class="bar">
-          <div class="fill ${level}" style="width:${used}%"></div>
+          <div class="fill ${level}" style="width:${config.showUsed ? used : left}%"></div>
           ${paceMark}
         </div>
         ${providerId ? burnCurveHtml(providerId, m) : ""}
@@ -3425,8 +3421,9 @@ function formatHoverReset(m: Metric): string {
 }
 
 function formatHoverMetric(m: Metric, label = displayMetricLabel(m.label)): string {
-  // No ratio (text rows, unsettled meters) reads as unknown "—", never 0%.
-  const pctText = m.used_percent == null ? "—" : `${Math.round(m.used_percent)}%`;
+  // Same convention as the cards and the bars: "used" or "left", always
+  // labelled. No ratio (text rows, unsettled meters) reads "—", never 0%.
+  const pctText = quotaPctLabel(m.used_percent);
   const reset = formatHoverReset(m);
   const pace =
     m.pace && m.pace.settled && m.pace.state !== "unknown"
@@ -3496,14 +3493,14 @@ function overviewHoverTip(s: Snapshot, quota: OverviewQuota, displayName: string
   }
 
   const win = overviewWindowLabel(quota);
-  const pct = Math.round(quota.usedPercent);
+  const pctText = quotaPctLabel(quota.usedPercent);
   if (quota.notStarted) {
-    return `${displayName}: ${win} ${pct}% · ${t("card.notStarted")}`;
+    return `${displayName}: ${win} ${pctText} · ${t("card.notStarted")}`;
   }
   if (quota.resetsAt && quota.resetsAt > Date.now()) {
-    return `${displayName}: ${win} ${pct}% · ${t("overview.resetsIn", { time: fmtDuration(quota.resetsAt - Date.now()) })}`;
+    return `${displayName}: ${win} ${pctText} · ${t("overview.resetsIn", { time: fmtDuration(quota.resetsAt - Date.now()) })}`;
   }
-  return `${displayName}: ${win} ${pct}%`;
+  return `${displayName}: ${win} ${pctText}`;
 }
 
 function metricPool(family: string, label: string): string | undefined {
@@ -3868,10 +3865,11 @@ function renderCard(s: Snapshot): string {
   // provider name keeps the whole left side and can render larger. Text-only
   // snapshots have no percentage to show — render nothing rather than "0%".
   const headPct = shown.status === "ok" ? peakCoreProgress(shown) : null;
+  const headLabel = headPct === null ? "" : quotaPctLabel(headPct);
   const headStatus =
-    headPct === null
+    headLabel === ""
       ? ""
-      : `<span class="head-status" title="${escapeHtml(`${Math.round(headPct)}% · ${healthDotTitle(peakTintedDot(family, cardHealthDot(s.id)), s.id)}`)}"><span class="acct-dot ${peakTintedDot(family, cardHealthDot(s.id))}"></span><span class="head-pct">${Math.round(headPct)}%</span></span>`;
+      : `<span class="head-status" title="${escapeHtml(`${headLabel} · ${healthDotTitle(peakTintedDot(family, cardHealthDot(s.id)), s.id)}`)}" aria-label="${escapeHtml(headLabel)}"><span class="acct-dot ${peakTintedDot(family, cardHealthDot(s.id))}"></span><span class="head-pct">${escapeHtml(headLabel)}</span></span>`;
   // Folded state: visually prominent reset countdown badge with health status
   // and generous breathing room instead of a cramped raw text sliver.
   let foldLine = "";
@@ -3907,7 +3905,7 @@ function renderCard(s: Snapshot): string {
         <div class="fold-row">
           <div class="fold-badge ${badgeTone}">
             <span class="acct-dot ${dot}" title="${escapeHtml(dotTitle)}"></span>
-            <span class="fold-main-quota">${headPct === null ? "—" : `${Math.round(headPct)}%`}</span>
+            <span class="fold-main-quota">${escapeHtml(headLabel || "—")}</span>
             <span class="fold-label">${escapeHtml(label)}</span>
             <span class="fold-timer" data-reset-at="${Date.now() + resetSecs * 1000}">${escapeHtml(fmtDuration(resetSecs * 1000))}</span>
           </div>
@@ -3922,7 +3920,7 @@ function renderCard(s: Snapshot): string {
         <div class="fold-row">
           <div class="fold-badge normal">
             <span class="acct-dot ${dot}" title="${escapeHtml(dotTitle)}"></span>
-            <span class="fold-main-quota">${headPct === null ? "—" : `${Math.round(headPct)}%`}</span>
+            <span class="fold-main-quota">${escapeHtml(headLabel || "—")}</span>
             <span class="fold-label">${escapeHtml(label)}</span>
           </div>
         </div>`;
@@ -6642,8 +6640,9 @@ function renderQuotaOverview(): string {
       const tone = accountHealthDot(account.id);
       const known = q.status === "maxed" || q.window !== null;
       const pct = q.status === "maxed" ? 100 : known ? Math.round(q.usedPercent) : 0;
-      const pctText = known ? `${pct}%` : "—";
-      return `<div class="overview-account-meter" title="${escapeHtml(label)} · ${pctText}"><span class="acct-dot ${tone}"></span><span class="overview-account-meter-label">${escapeHtml(label)}</span><span class="overview-account-meter-track"><i class="${tone}" style="width:${pct}%"></i></span><b>${pctText}</b></div>`;
+      const shownPct = known ? (config.showUsed ? pct : 100 - pct) : 0;
+      const pctText = known ? quotaPctLabel(pct) : "—";
+      return `<div class="overview-account-meter" title="${escapeHtml(`${label} · ${pctText}`)}" aria-label="${escapeHtml(`${label} · ${pctText}`)}"><span class="acct-dot ${tone}"></span><span class="overview-account-meter-label">${escapeHtml(label)}</span><span class="overview-account-meter-track"><i class="${tone}" style="width:${shownPct}%"></i></span><b>${known ? `${shownPct}%` : ""}</b></div>`;
     }).join("")}</div>`;
   };
 
@@ -6656,11 +6655,12 @@ function renderQuotaOverview(): string {
       const tone = accountHealthDot(account.id);
       const known = q.status === "maxed" || q.window !== null;
       const pct = q.status === "maxed" ? 100 : known ? Math.round(q.usedPercent) : 0;
-      const pctText = known ? `${pct}%` : "—";
+      const shownPct = known ? (config.showUsed ? pct : 100 - pct) : 0;
+      const pctText = known ? quotaPctLabel(pct) : "—";
       const label = labelForAccount(account.id, accountsCache.get(family) ?? [], account.name);
       const stroke = tone === "red" ? "#ef4444" : tone === "error" ? "#f97316" : tone === "gray" ? "var(--muted-foreground)" : "#10b981";
-      const offset = circumference * (1 - pct / 100);
-      return `<div class="overview-account-ring" title="${escapeHtml(label)} · ${pctText}"><svg viewBox="0 0 28 28" aria-hidden="true"><circle cx="14" cy="14" r="10" class="ring-track" stroke-width="2.4" fill="none"/><circle cx="14" cy="14" r="10" stroke="${stroke}" stroke-width="2.4" fill="none" stroke-linecap="round" stroke-dasharray="${circumference.toFixed(2)}" stroke-dashoffset="${offset.toFixed(2)}" transform="rotate(-90 14 14)"/></svg><span>${escapeHtml(label)}</span></div>`;
+      const offset = circumference * (1 - shownPct / 100);
+      return `<div class="overview-account-ring" title="${escapeHtml(`${label} · ${pctText}`)}" aria-label="${escapeHtml(`${label} · ${pctText}`)}"><svg viewBox="0 0 28 28" aria-hidden="true"><circle cx="14" cy="14" r="10" class="ring-track" stroke-width="2.4" fill="none"/><circle cx="14" cy="14" r="10" stroke="${stroke}" stroke-width="2.4" fill="none" stroke-linecap="round" stroke-dasharray="${circumference.toFixed(2)}" stroke-dashoffset="${offset.toFixed(2)}" transform="rotate(-90 14 14)"/></svg><span>${escapeHtml(label)}</span></div>`;
     }).join("")}</div>`;
   };
 
@@ -6683,9 +6683,10 @@ function renderQuotaOverview(): string {
         ? Math.round(m.used_percent)
         : null;
       const value = m.value ?? m.detail ?? "";
-      const shown = pct !== null ? `${pct}%` : value;
+      const shownPct = pct === null ? null : config.showUsed ? pct : 100 - pct;
+      const shown = pct !== null ? quotaPctLabel(pct) : value;
       const label = pct !== null || !value ? m.label : `${m.label} · ${value}`;
-      return `<div class="overview-account-meter" title="${escapeHtml(`${m.label}: ${shown}`)}"><span class="acct-dot ${tone}"></span><span class="overview-account-meter-label">${escapeHtml(label)}</span><span class="overview-account-meter-track"><i class="${tone}" style="width:${pct ?? 0}%"></i></span><b>${pct !== null ? `${pct}%` : ""}</b></div>`;
+      return `<div class="overview-account-meter" title="${escapeHtml(`${m.label}: ${shown}`)}" aria-label="${escapeHtml(`${m.label}: ${shown}`)}"><span class="acct-dot ${tone}"></span><span class="overview-account-meter-label">${escapeHtml(label)}</span><span class="overview-account-meter-track"><i class="${tone}" style="width:${shownPct ?? 0}%"></i></span><b>${shownPct !== null ? `${shownPct}%` : ""}</b></div>`;
     }).join("")}</div>`;
   };
 
@@ -6759,6 +6760,7 @@ function renderQuotaOverview(): string {
       let strokeColor = "var(--border)";
       let progressCircle = "";
       let ringLabel = "—";
+      let ringAria = "";
       let textClass = "";
       let itemTone = "normal";
       let statusDot = "green";
@@ -6776,29 +6778,32 @@ function renderQuotaOverview(): string {
         itemTone = "maxed";
         statusDot = "red";
         strokeColor = "#ef4444";
-        ringLabel = "100%";
+        ringLabel = `${config.showUsed ? 100 : 0}%`;
+        ringAria = quotaPctLabel(100);
         textClass = "is-maxed";
         progressCircle = `<circle class="ring-progress is-maxed" cx="${cx}" cy="${cy}" r="${r}"
           stroke="${strokeColor}" stroke-width="3.2" fill="none"
           stroke-linecap="round"
           stroke-dasharray="${circumference.toFixed(2)}"
-          stroke-dashoffset="0"
+          stroke-dashoffset="${config.showUsed ? "0" : circumference.toFixed(2)}"
           transform="rotate(-90 ${cx} ${cy})" />`;
       } else if (quota.window !== null) {
         const pct = Math.round(quota.usedPercent);
-        const dashoffset = circumference * (1 - pct / 100);
+        const shownPct = config.showUsed ? pct : 100 - pct;
+        const dashoffset = circumference * (1 - shownPct / 100);
 
         if (usageHeatTone(pct) !== "") {
           itemTone = "warn";
           statusDot = "green";
           strokeColor = "#f59e0b";
-          ringLabel = `${pct}%`;
+          ringLabel = `${shownPct}%`;
         } else {
           itemTone = "normal";
           statusDot = "green";
           strokeColor = "#10b981";
-          ringLabel = `${pct}%`;
+          ringLabel = `${shownPct}%`;
         }
+        ringAria = quotaPctLabel(pct);
 
         progressCircle = `<circle class="ring-progress ${itemTone}" cx="${cx}" cy="${cy}" r="${r}"
           stroke="${strokeColor}" stroke-width="3.2" fill="none"
@@ -6834,7 +6839,7 @@ function renderQuotaOverview(): string {
         fullTooltip += ` · ${peakPrefix}${t(peakRule.tipKey)}`;
       }
       return `
-        <div class="overview-item tone-${itemTone}" data-jump-provider="${escapeHtml(jumpId)}" title="${escapeHtml(fullTooltip)} · ${escapeHtml(t("overview.groupHint"))}">
+        <div class="overview-item tone-${itemTone}" data-jump-provider="${escapeHtml(jumpId)}" tabindex="0" title="${escapeHtml(fullTooltip)} · ${escapeHtml(t("overview.groupHint"))}">
           <div class="overview-item-head">
             <span class="overview-item-icon">${icon}</span>
             <span class="overview-item-name" title="${escapeHtml(displayName)}">${escapeHtml(displayName)}</span>
@@ -6846,7 +6851,7 @@ function renderQuotaOverview(): string {
             <svg width="44" height="44" viewBox="0 0 44 44" class="overview-ring">
               <circle class="ring-track" cx="${cx}" cy="${cy}" r="${r}" stroke="var(--border)" stroke-width="3.2" fill="none" opacity="0.4" />
               ${progressCircle}
-              <text class="ring-text ${textClass}" x="${cx}" y="${cy + 4}" text-anchor="middle">${ringLabel}</text>
+              <text class="ring-text ${textClass}" x="${cx}" y="${cy + 4}" text-anchor="middle"${ringAria ? ` aria-label="${escapeHtml(ringAria)}"` : ""}>${ringLabel}</text>
             </svg>
           </div>
           ${overviewAcctFolded(family, foldCount) ? "" : accountRingsHtml(family)}
@@ -6906,6 +6911,12 @@ function renderQuotaOverview(): string {
       pct = Math.round(quota.usedPercent);
       if (usageHeatTone(pct) !== "") itemTone = "warn";
     }
+    // The bar, the printed number and the detail cards all follow one
+    // convention (config.showUsed): "used" fills up, "left" drains. Colors
+    // keep tracking used percent, so a nearly-empty "left" bar still turns
+    // red when the quota is exhausted.
+    const shownPct = pct === null ? null : config.showUsed ? pct : 100 - pct;
+    const pctLabel = pct === null ? null : quotaPctLabel(pct);
 
     const meta = quota.status === "error" || quota.status === "needs_setup"
       ? overviewFailureLabel(shownSnap)
@@ -6932,17 +6943,17 @@ function renderQuotaOverview(): string {
     }
 
     return `
-      <div class="overview-bar-item tone-${itemTone}" data-jump-provider="${escapeHtml(jumpId)}" title="${escapeHtml(fullTooltip)} · ${escapeHtml(t("overview.groupHint"))}">
+      <div class="overview-bar-item tone-${itemTone}" data-jump-provider="${escapeHtml(jumpId)}" tabindex="0" title="${escapeHtml(fullTooltip)} · ${escapeHtml(t("overview.groupHint"))}">
         <div class="ovbar-line1">
           <span class="overview-item-icon">${icon}</span>
           <span class="overview-item-name${nameClass}" title="${escapeHtml(displayName)}">${escapeHtml(displayName)}</span>
           ${accountBadge}
           ${overviewAcctFoldBtn(family, foldCount)}
           <span class="overview-dot ${statusDot}"></span>
-          <span class="ovbar-pct ${pctClass}"${quota.status === "text" ? ` title="${escapeHtml(t("overview.ratioUnknown"))}" aria-label="${escapeHtml(t("overview.ratioUnknown"))}"` : ""}>${quota.status === "text" ? escapeHtml(textHeadline ?? "?") : pct === null ? "—" : `${pct}%`}</span>
+          <span class="ovbar-pct ${pctClass}"${quota.status === "text" ? ` title="${escapeHtml(t("overview.ratioUnknown"))}" aria-label="${escapeHtml(t("overview.ratioUnknown"))}"` : pctLabel ? ` title="${escapeHtml(pctLabel)}" aria-label="${escapeHtml(pctLabel)}"` : ""}>${quota.status === "text" ? escapeHtml(textHeadline ?? "?") : pctLabel ? escapeHtml(pctLabel) : "—"}</span>
         </div>
         <div class="ovbar-line2">
-          <span class="ovbar${quota.status === "text" ? " is-unknown" : ""}"${quota.status === "text" ? ` title="${escapeHtml(t("overview.ratioUnknown"))}"` : ""}>${quota.status === "text" ? "" : `<span class="ovbar-fill tone-${itemTone}" style="width:${pct ?? 0}%"></span>`}</span>
+          <span class="ovbar${quota.status === "text" ? " is-unknown" : ""}"${quota.status === "text" ? ` title="${escapeHtml(t("overview.ratioUnknown"))}"` : ""}>${quota.status === "text" ? "" : `<span class="ovbar-fill tone-${itemTone}" style="width:${shownPct ?? 0}%"></span>`}</span>
           <span class="ovbar-meta">${quota.status === "text" ? (textHeadline && quota.metricLabel ? escapeHtml(displayMetricLabel(quota.metricLabel)) : overviewTextValuesHtml(shownSnap)) : escapeHtml(meta || t("overview.noData"))}</span>
         </div>
         ${overviewAcctFolded(family, foldCount) ? "" : accountMetersHtml(family)}
@@ -7002,7 +7013,7 @@ function renderQuotaOverview(): string {
       ? ""
       : escapeHtml(quota.derivedCeiling ? t("overview.derivedCeiling") : t(windowLabelKey[quota.window]));
     return `
-        <div class="expiring-row${rowClass}" data-jump-provider="${escapeHtml(jumpId)}">
+        <div class="expiring-row${rowClass}" data-jump-provider="${escapeHtml(jumpId)}" tabindex="0">
           <span class="expiring-icon">${icon}</span>
           <span class="expiring-name">${escapeHtml(displayName)}</span>
           ${win ? `<span class="expiring-win">${win}</span>` : ""}
@@ -8558,11 +8569,11 @@ function openGroupMenu(
       void appConfirm({
         title: isSubAccount ? t("customize.acctCardDeleteTitle") : t("customize.providerDeleteTitle"),
         message: isSubAccount
-          ? `删除后，该账号的密钥与配置将无法找回。确定要删除 ${name} 吗？`
-          : `删除后，该 Provider 的所有账号及密钥将无法找回。确定要删除 ${name} 吗？`,
+          ? t("settings.deleteAccountBody", { name })
+          : t("settings.deleteProviderBody", { name }),
         confirmLabel: isSubAccount ? t("customize.acctDelete") : t("customize.providerDelete"),
         danger: true,
-        checkboxLabel: "我已知晓，并且保存该账号的用量数据",
+        checkboxLabel: t("settings.deleteKeepUsage"),
         checkboxDefault: true,
       }).then(async (res) => {
         if (!res.ok) return;
@@ -14412,6 +14423,7 @@ function renderDashboard(): void {
   if (focusedTab) {
     el.querySelector<HTMLElement>(`[data-card-account="${CSS.escape(focusedTab)}"]`)?.focus({ preventScroll: true });
   }
+  if (pendingProviderFocus) focusProviderCard(pendingProviderFocus);
   if (customizeOpen) renderDrawerBody();
   // Cards are rebuilt from scratch, so an unlocked popover's drag opt-outs
   // (the card-reorder grips) have to be re-armed on every render.
@@ -14508,6 +14520,20 @@ function flushRender(): void {
 /// Jumps from a quota-overview item to its real provider card. Grouped cards
 /// may live inside a hidden `.card-group-fold`; reveal that group first, then
 /// resolve the card again after the requested provider DOM rebuild.
+/// Keyboard activation must move focus with the jump. The card list is
+/// rebuilt on every data tick, so a timer-based focus can land on a detached
+/// node; keep the request until a render actually produces the card.
+let pendingProviderFocus: string | null = null;
+function focusProviderCard(providerId: string): void {
+  const card = document.querySelector<HTMLElement>(
+    `article.provider[data-provider="${CSS.escape(providerId)}"]`,
+  );
+  if (!card) return;
+  card.setAttribute("tabindex", "-1");
+  card.focus({ preventScroll: true });
+  pendingProviderFocus = null;
+}
+
 function jumpToProviderCard(providerId: string): void {
   const selector = `article.provider[data-provider="${CSS.escape(providerId)}"]`;
   const card = document.querySelector<HTMLElement>(selector);
@@ -15739,10 +15765,10 @@ async function handleCustomizeClick(target: HTMLElement): Promise<boolean> {
     const name = ALL_PROVIDERS.find(([pid]) => pid === id)?.[1] ?? id;
     void appConfirm({
       title: t("customize.providerDeleteTitle"),
-      message: `删除后，该 Provider 的所有账号及密钥将无法找回。确定要删除 ${name} 吗？`,
+      message: t("settings.deleteProviderBody", { name }),
       confirmLabel: t("customize.providerDelete"),
       danger: true,
-      checkboxLabel: "我已知晓，并且保存该账号的用量数据",
+      checkboxLabel: t("settings.deleteKeepUsage"),
       checkboxDefault: true,
     }).then(async (res) => {
       if (!res.ok) return;
@@ -20005,10 +20031,11 @@ async function initSettings(): Promise<void> {
 
   const jumpAnimation = document.querySelector<HTMLSelectElement>("#jump-animation")!;
   jumpAnimation.value = config.jumpAnimation === "instant" ? "instant" : "smooth";
-  pendingJumpAnimation = null;
   jumpAnimation.addEventListener("change", () => {
-    pendingJumpAnimation = jumpAnimation.value === "instant" ? "instant" : "smooth";
-    setSettingsDirty(true);
+    // Persist immediately like every other control; the old deferred write
+    // only flushed on Save and was lost when the window closed.
+    void patchConfig({ jumpAnimation: jumpAnimation.value === "instant" ? "instant" : "smooth" })
+      .catch((err) => settingsToast(String(err), true));
   });
 
   const hideShare = document.querySelector<HTMLInputElement>("#hide-while-sharing")!;
@@ -20309,7 +20336,7 @@ function panelRow(labelKey: string, ...controls: HTMLElement[]): HTMLElement {
 /// mirrors and drives a hidden <select>. The select keeps its id and
 /// listeners and stays the only value source — a pill click sets
 /// select.value and fires a real change event, so every existing save path
-/// runs unchanged (#jump-animation's dirty flag, #spend-tier-mode's tier
+/// runs unchanged (#jump-animation's immediate save, #spend-tier-mode's tier
 /// repaint, the locale switch's retranslation). #pinned is excluded on
 /// purpose: its options are rebuilt at runtime (1 + N providers), which a
 /// fixed segment group cannot mirror.
@@ -20850,10 +20877,26 @@ function buildPanelShell(): void {
   const save = document.createElement("button");
   save.type = "button";
   save.className = "mini-btn settings-save-all";
-  save.dataset.i18n = "settings.save";
-  save.textContent = t("settings.save");
-  save.disabled = true;
-  save.addEventListener("click", () => void applySettingsAndReload());
+  save.dataset.i18n = "settings.applyReload";
+  save.textContent = t("settings.applyReload");
+  save.setAttribute("aria-keyshortcuts", "Control+S Meta+S");
+  save.addEventListener("click", () => applySettingsAndReload());
+  // The panel already persists every control on change; this shortcut simply
+  // runs the same apply-and-reload the button does, so Ctrl+S stops meaning
+  // "open settings" once the user is inside the settings window.
+  window.addEventListener("keydown", (event) => {
+    if (!IS_PANEL_FORM) return;
+    if (!(event.ctrlKey || event.metaKey) || event.altKey || event.shiftKey) return;
+    if (event.key.toLowerCase() !== "s") return;
+    // Vault/key and font-pack inputs only persist on their own buttons; a
+    // reload here would throw away whatever the user is typing. The auth
+    // view hides the button entirely, and a confirm dialog owns the screen.
+    if (isTypingTarget(event.target as Element | null)) return;
+    if (authViewActive || document.querySelector("#confirm-overlay")) return;
+    event.preventDefault();
+    event.stopPropagation();
+    applySettingsAndReload();
+  }, true);
   const search = document.createElement("div");
   search.id = "panel-search-wrap";
   search.innerHTML = `<span class="panel-search-icon" aria-hidden="true">${uiIcon("magnifyingGlass")}</span><input id="panel-search" class="form-input" type="search" spellcheck="false" autocomplete="off" data-i18n-placeholder="settings.searchPlaceholder" placeholder="${escapeHtml(t("settings.searchPlaceholder"))}" aria-controls="panel-search-results" /><div id="panel-search-results" role="listbox" hidden></div>`;
@@ -21570,41 +21613,9 @@ function buildPanelShell(): void {
   aboutCardHead.className = "about-hero";
   aboutCardHead.append(brand, actions);
 
-  // A light invitation, not a modal: one line, remembered after dismissal.
-  const starBanner = document.createElement("div");
-  starBanner.className = "about-star-banner";
-  const starIcon = document.createElement("span");
-  starIcon.className = "about-star-icon";
-  starIcon.innerHTML = uiIcon("star");
-  const starText = document.createElement("span");
-  starText.className = "about-star-text";
-  starText.textContent = t("settings.starBanner");
-  const starGo = document.createElement("button");
-  starGo.type = "button";
-  starGo.className = "mini-btn about-star-go";
-  starGo.textContent = t("settings.starCta");
-  starGo.addEventListener("click", () => {
-    void invoke("open_link", { url: "https://github.com/Aafff623/pane" }).catch((err) =>
-      settingsToast(String(err), true),
-    );
-  });
-  const starClose = document.createElement("button");
-  starClose.type = "button";
-  starClose.className = "about-star-close";
-  starClose.title = t("settings.close");
-  starClose.setAttribute("aria-label", t("settings.close"));
-  starClose.innerHTML = uiIcon("x");
-  starClose.addEventListener("click", () => {
-    try {
-      localStorage.setItem("pane:about:starDismissed", "1");
-    } catch {
-      // Private storage / quota: dismissal still applies to this view.
-    }
-    starBanner.remove();
-  });
-  starBanner.append(starIcon, starText, starGo, starClose);
-  about.body.append(aboutCardHead, starBanner, updateLine, updateNotesEl, releaseLink);
-  if (localStorage.getItem("pane:about:starDismissed") === "1") starBanner.remove();
+  // The hero actions already link GitHub and Feedback; the old dismissible
+  // star banner repeated the same invitation a third time on one page.
+  about.body.append(aboutCardHead, updateLine, updateNotesEl, releaseLink);
   syncAboutUpdate();
   aboutUpdateSync = syncAboutUpdate;
 
@@ -21786,10 +21797,18 @@ function setupPanelSearch(): void {
     selected = -1;
   };
   const render = () => {
+    if (!matches.length) {
+      const q = input.value.trim();
+      results.innerHTML = q
+        ? `<div class="set-search-empty" role="status">${escapeHtml(t("settings.searchEmpty"))}</div>`
+        : "";
+      results.hidden = !q;
+      return;
+    }
     results.innerHTML = matches
       .map((entry, index) => `<button type="button" role="option" aria-selected="${index === selected}" class="set-search-hit${index === selected ? " on" : ""}" data-search-hit="${escapeHtml(entry.anchor)}"><span>${escapeHtml(entry.label)}</span><span class="set-search-section">${escapeHtml(entry.section)}</span></button>`)
       .join("");
-    results.hidden = matches.length === 0;
+    results.hidden = false;
   };
   const query = () => input.value.trim().toLowerCase();
   const filter = () => {
@@ -22058,7 +22077,7 @@ function applyPanelIntent(): void {
   // Consume on read, stale or not: leaving it in config replayed the auth
   // jump on every future fresh panel window (the gear opened the auth
   // center "by default" bug).
-  void patchConfig({ panelIntent: null }, { markDirty: false }).catch(() => {});
+  void patchConfig({ panelIntent: null }).catch(() => {});
   if (Date.now() - intent.at > PANEL_INTENT_TTL_MS) return;
   if (intent.view === "auth") {
     setPanelView("auth");
@@ -22830,7 +22849,7 @@ async function openFamilyLogin(family: string): Promise<void> {
     // The panel is already the target window: its own config write does not
     // come back as a config-updated event, so apply the intent here.
     rememberAppliedPanelIntent(intent.at);
-    void patchConfig({ panelIntent: null }, { markDirty: false }).catch(() => {});
+    void patchConfig({ panelIntent: null }).catch(() => {});
     setPanelView("auth");
     void focusAuthFamily(family);
     openAuthLoginDialog(family);
@@ -23510,6 +23529,45 @@ window.addEventListener("DOMContentLoaded", () => {
       void invoke("hide_popover").catch(() => {});
     }
   });
+  // Tooltips carry state ("100% left · healthy", "Refresh", …) that pointer
+  // users read on hover. Mirror them into aria-label so screen readers and
+  // keyboard users get the same sentence; authored labels always win.
+  let titleLabelFrame = 0;
+  const mirrorTitleLabels = () => {
+    document.querySelectorAll<HTMLElement>("[title]").forEach((el) => {
+      const label = el.getAttribute("title")?.trim();
+      if (!label) return;
+      const authored = el.hasAttribute("aria-label") && el.dataset.ariaMirrored !== "1";
+      if (authored) return;
+      if (el.getAttribute("aria-label") !== label) el.setAttribute("aria-label", label);
+      el.dataset.ariaMirrored = "1";
+    });
+  };
+  new MutationObserver(() => {
+    if (titleLabelFrame) return;
+    titleLabelFrame = requestAnimationFrame(() => {
+      titleLabelFrame = 0;
+      mirrorTitleLabels();
+    });
+  }).observe(document.body, { subtree: true, childList: true, attributes: true, attributeFilter: ["title"] });
+  mirrorTitleLabels();
+  // Focusable quota rows need the keyboard activation their pointer handler
+  // already provides; only the row itself responds, so nested buttons keep
+  // their own Enter/Space behaviour.
+  document.addEventListener("keydown", (event) => {
+    if (event.key !== "Enter" && event.key !== " ") return;
+    const target = event.target as HTMLElement | null;
+    if (!target || !target.matches("[data-jump-provider]")) return;
+    event.preventDefault();
+    const pid = target.dataset.jumpProvider;
+    if (!pid) return;
+    // The pointer path only scrolls + highlights. Keyboard users need the
+    // focus to land on the card they just activated, or the next Tab jumps
+    // from an off-screen row.
+    pendingProviderFocus = pid;
+    jumpToProviderCard(pid);
+    focusProviderCard(pid);
+  });
   window.addEventListener("keyup", (e) => {
     if (e.key !== "Shift") return;
     const cycle = shiftAlone;
@@ -23546,7 +23604,6 @@ async function openSettingsPanel(): Promise<void> {
 async function openSkinShopPanel(): Promise<void> {
   await patchConfig(
     { panelIntent: { view: "settings", page: "skins", at: Date.now() } },
-    { markDirty: false },
   ).catch(() => {});
   try {
     await invoke("open_panel_window");
