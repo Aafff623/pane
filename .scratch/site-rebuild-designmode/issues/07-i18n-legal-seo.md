@@ -2,6 +2,8 @@
 
 Status: done 2026-10-29 | Priority: P1 | Depends: 03
 
+> 落地偏差（2026-10-29）：英文在 `/`、中文在 `/zh/`；词典是单文件 `src/components/i18n.ts`（`en` / `zh` 两个 key 集）；法务为 `/privacy`、`/terms`（英文）与 `/zh/privacy`、`/zh/terms`（中文）；旧 `/en/*` 由 Worker 301 到根路径。
+
 ## Scope
 
 - 词典：`src/i18n/zh.ts` / `en.ts`，按区块分组（nav / hero / workflow / panel / faq / download / footer / meta），类型约束两种语言键完全一致。

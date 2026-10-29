@@ -2,6 +2,8 @@
 
 Status: done 2026-10-29 | Priority: P0 | Depends: 01
 
+> 落地偏差（2026-10-29）：主题键最终是 `localStorage.pane-theme`；图标沿用上游 `lucide-react`（未引入 Phosphor），品牌 logo 用 `public/logos/icons/` 的 lobehub 图标。
+
 ## Scope
 
 - 保留上游 `globals.css` 的 shadcn/Tailwind token 结构；补一套 `.dark` 变量（背景/卡片/文本/边框/强调），对比度按旧站标准（正文 ≥ 4.5:1）。
