@@ -70,3 +70,6 @@ site/.wrangler/
 
 # Mimosa security-scanner local state (finding ledger, run history, hook state)
 .mimosa/
+
+# Impeccable critique snapshots / live-session state (local design workflow)
+.impeccable/
