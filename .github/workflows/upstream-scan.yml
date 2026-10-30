@@ -37,7 +37,7 @@ jobs:
       contents: write # only used by the manual update path
       pull-requests: write # only used by the manual update path
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Scan upstream repositories
         id: scan
