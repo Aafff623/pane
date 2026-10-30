@@ -65,9 +65,11 @@ claude：mtime 2026-10-09，无 refreshToken。opencode：`~/.local/share/openco
 | claude（Claude Code） | 没有订阅，重登没有意义 | 阻塞：无订阅 | 不修 |
 | opencode | 没有订阅，不用看 | 阻塞：无订阅 | 不修 |
 | giphy | 只有 dashboard 会话 token，没有官方浏览器授权 | 待决策：继续手贴 token 或放弃该卡 | 待定 |
-| sensenova | 浏览器授权可行 | 待 owner 授权后复测 | 待回写 |
+| sensenova | 浏览器授权可行；当前被 `removedProviders` + `disabled` 隐藏，需先恢复 | 先恢复/启用，再授权复测 | 待回写 |
 | traecn（Tree-sitter） | 暂时不用，懒得打开 | 闲置：不投入 | 不修 |
 | stepfun-plan | Plan 已过期 | 阻塞：无有效计划 | 不修 |
 | zcode | 没有 Starter Plan | 账号现实，needs_setup 属正常 | 不修 |
 
 复测读取：`GET http://127.0.0.1:6736/v1/providers`，只看 status / lines / error / stale，不回显密钥。SenseNova 完成后同步更新 `docs/provider-credentials.md` 对应行。
+
+注意：`/v1/providers` 目前仍会返回已删除/禁用 provider 的旧快照（SenseNova 就是其中之一），所以 API 的 39 条不等于界面可见卡数；这属于测试 oracle 的口径问题，另记，不在 P1 修复范围内。
