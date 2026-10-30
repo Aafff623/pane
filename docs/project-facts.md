@@ -28,10 +28,17 @@ Last reconciled: 2026-10-28 (first-run source detection #109; 0.12.0 released; s
   project (detached from any upstream, 2026-09-06). A single branch `main`
   exists locally and on origin; feature work happens on `codex/<feature>`
   branches.
-- Version 0.11.0 (`package.json` + `src-tauri/tauri.conf.json`), identifier
+- Version 0.12.0 (`package.json` + `src-tauri/tauri.conf.json`), identifier
   `com.aafff623.pane`, productName `Pane-Aafff623`. The pre-0.11 identity
   (`com.jazii.pane` / `Pane`) was the upstream author's; #105 split it so the
   two apps no longer share install folders or data directories.
+- Legacy autostart: the identity migration enables the `Pane-Aafff623` Run
+  entry but cannot delete the old `Run\Pane` value, so a machine keeping an
+  older install booted it every time and re-offered the update it had already
+  installed. Every launch now removes `HKCU\...\Run\Pane` when it points at a
+  different `pane.exe` (`legacy_autostart.rs`); a value pointing at the
+  current executable is left alone, and HKLM/Startup-folder entries are out of
+  scope (need elevation or a shortcut rewrite).
 - Privacy boundary (asserted by tests in the code): tokens go only to their
   own vendor's API; the secrets Pane itself persists — pasted API keys,
   multi-account keys, Pane-managed login tokens — live in the OS credential

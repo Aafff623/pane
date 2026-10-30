@@ -23,6 +23,7 @@ mod cursor_oauth;
 mod fonts;
 mod keyvault;
 mod keyvault_v3;
+mod legacy_autostart;
 mod search_keys;
 mod skin_packs;
 mod font_packs;
@@ -6684,6 +6685,31 @@ pub fn run() {
             sensenova_oauth_finish
         ])
         .setup(|app| {
+            // Identity migration (#105) moved autostart to the new product
+            // name but never deleted `Run\Pane`; a machine with an older
+            // install kept booting it and re-offering the update it had
+            // already installed. Retire that stale value every launch.
+            #[cfg(windows)]
+            if let Some(old) = legacy_autostart::retire_legacy_autostart() {
+                eprintln!("[pane] retired legacy autostart entry: {old}");
+            }
+            // The old build writes its own Run value at the end of setup, so
+            // when both versions launch at logon the early delete above is
+            // undone seconds later. Re-check after the startup wave; one
+            // successful removal ends the loop (the old build only writes
+            // once per launch).
+            #[cfg(windows)]
+            tauri::async_runtime::spawn(async {
+                for seconds in [12u64, 30, 90] {
+                    tokio::time::sleep(std::time::Duration::from_secs(seconds)).await;
+                    if let Some(old) = legacy_autostart::retire_legacy_autostart() {
+                        eprintln!(
+                            "[pane] retired legacy autostart entry after old build startup: {old}"
+                        );
+                        break;
+                    }
+                }
+            });
             // Identity migration (#105): the old app's autostart entry is
             // registered under the old product name. Carry the preference
             // over and point the entry at the executable that is running;
