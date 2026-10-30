@@ -178,3 +178,6 @@ pub mod account_lifecycle;
 
 #[path = "../../src-tauri/src/popover_geometry.rs"]
 pub mod popover_geometry;
+
+#[path = "../../src-tauri/src/legacy_autostart.rs"]
+pub mod legacy_autostart;
