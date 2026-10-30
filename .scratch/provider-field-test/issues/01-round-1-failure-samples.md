@@ -57,3 +57,17 @@ claude：mtime 2026-10-09，无 refreshToken。opencode：`~/.local/share/openco
 - 2026-10-30 18:28（v0.12.2）：stale 5→0，codex×3 / copilot / antigravity 全部恢复，传输层问题不复现；6 个 error 与 zcode 的 needs_setup 不变（owner 尚未重登）；7 张卡的 `credentialState` 矛盾仍在。新快照 `temp/provider-bench/2026-10-30/`。
 
 - 2026-10-30 19:20：P1 `credentialState` 已由 ticket 02 修复；7 张卡恢复 present，`/v1/providers` 中只剩 grok/qwen/qoder 的真实 `no_credentials`。owner 重登后的 7 项复测仍待完成；第 2 轮未开始。
+
+## 复测表（owner 重登后填写）
+
+| 项 | owner 操作 | status / lines | error | 回写 |
+|---|---|---|---|---|
+| claude | 终端 `claude` 重登 | 待复测 | — | 待回写 |
+| opencode | 换 OpenCode Go key | 待复测 | — | 待回写 |
+| giphy | 换 dashboard `access_token` | 待复测 | — | 待回写 |
+| sensenova | Settings 重新浏览器授权 | 待复测 | — | 待回写 |
+| traecn | 打开 Trae CN 一次 | 待复测 | — | 待回写 |
+| stepfun-plan | Settings 账号密码登录 | 待复测 | — | 待回写 |
+| zcode | 确认 Start Plan | 待复测 | — | 待回写 |
+
+复测读取：`GET http://127.0.0.1:6736/v1/providers`，只看 status / lines / error / stale，不回显密钥。每项完成后同步更新 `docs/provider-credentials.md` 对应行。
