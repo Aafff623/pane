@@ -1,4 +1,4 @@
-var wy=Object.defineProperty;var by=(e,t,n)=>t in e?wy(e,t,{enumerable:!0,configurable:!0,writable:!0,value:n}):e[t]=n;var Rt=(e,t,n)=>by(e,typeof t!="symbol"?t+"":t,n);(function(){const t=document.createElement("link").relList;if(t&&t.supports&&t.supports("modulepreload"))return;for(const o of document.querySelectorAll('link[rel="modulepreload"]'))s(o);new MutationObserver(o=>{for(const i of o)if(i.type==="childList")for(const r of i.addedNodes)r.tagName==="LINK"&&r.rel==="modulepreload"&&s(r)}).observe(document,{childList:!0,subtree:!0});function n(o){const i={};return o.integrity&&(i.integrity=o.integrity),o.referrerPolicy&&(i.referrerPolicy=o.referrerPolicy),o.crossOrigin==="use-credentials"?i.credentials="include":o.crossOrigin==="anonymous"?i.credentials="omit":i.credentials="same-origin",i}function s(o){if(o.ep)return;o.ep=!0;const i=n(o);fetch(o.href,i)}})();const lr=["coding","mcp","productivity"],Ps=[{familyId:"claude",displayName:"Claude",primaryUnit:"tokens",queryKind:"nativeSnapshot",supportsApiKey:!1,supportsExtraAccounts:!1,supportsOAuth:!1,iconKey:"claude"},{familyId:"codex",displayName:"Codex",primaryUnit:"tokens",queryKind:"nativeSnapshot",supportsApiKey:!1,supportsExtraAccounts:!0,supportsOAuth:!0,iconKey:"codex"},{familyId:"codebuddy",displayName:"CodeBuddy",primaryUnit:"tokens",queryKind:"nativeSnapshot",supportsApiKey:!1,supportsExtraAccounts:!0,supportsOAuth:!0,iconKey:"codebuddy"},{familyId:"codebuddycn",displayName:"CodeBuddy CN",primaryUnit:"tokens",queryKind:"nativeSnapshot",supportsApiKey:!1,supportsExtraAccounts:!0,supportsOAuth:!0,iconKey:"codebuddy"},{familyId:"workbuddy",displayName:"WorkBuddy",primaryUnit:"tokens",queryKind:"nativeSnapshot",supportsApiKey:!1,supportsExtraAccounts:!0,supportsOAuth:!0,iconKey:"workbuddy"},{familyId:"workbuddyai",displayName:"WorkBuddy AI",primaryUnit:"tokens",queryKind:"nativeSnapshot",supportsApiKey:!1,supportsExtraAccounts:!0,supportsOAuth:!0,iconKey:"workbuddy"},{familyId:"cursor",displayName:"Cursor",primaryUnit:"tokens",queryKind:"nativeSnapshot",supportsApiKey:!1,supportsExtraAccounts:!0,supportsOAuth:!1,iconKey:"cursor"},{familyId:"opencode",displayName:"OpenCode",primaryUnit:"tokens",queryKind:"composite",supportsApiKey:!0,supportsExtraAccounts:!0,supportsOAuth:!1,iconKey:"opencode"},{familyId:"copilot",displayName:"Copilot",primaryUnit:"tokens",queryKind:"nativeSnapshot",supportsApiKey:!1,supportsExtraAccounts:!0,supportsOAuth:!0,iconKey:"copilot"},{familyId:"grok",displayName:"Grok",primaryUnit:"tokens",queryKind:"nativeSnapshot",supportsApiKey:!1,supportsExtraAccounts:!0,supportsOAuth:!0,iconKey:"grok"},{familyId:"devin",displayName:"Devin",primaryUnit:"tokens",queryKind:"nativeSnapshot",supportsApiKey:!1,supportsExtraAccounts:!1,supportsOAuth:!1,iconKey:"devin"},{familyId:"minimax",displayName:"MiniMax",primaryUnit:"tokens",queryKind:"nativeCodingPlan",supportsApiKey:!0,supportsExtraAccounts:!0,supportsOAuth:!1,iconKey:"minimax"},{familyId:"openrouter",displayName:"OpenRouter",primaryUnit:"tokens",queryKind:"nativeBalance",supportsApiKey:!0,supportsExtraAccounts:!0,supportsOAuth:!1,iconKey:"openrouter"},{familyId:"zai",displayName:"Z.ai",primaryUnit:"tokens",queryKind:"nativeCodingPlan",supportsApiKey:!0,supportsExtraAccounts:!0,supportsOAuth:!1,iconKey:"zai"},{familyId:"antigravity",displayName:"Antigravity",primaryUnit:"tokens",queryKind:"composite",supportsApiKey:!1,supportsExtraAccounts:!0,supportsOAuth:!1,iconKey:"antigravity"},{familyId:"deepseek",displayName:"DeepSeek",primaryUnit:"tokens",queryKind:"nativeBalance",supportsApiKey:!0,supportsExtraAccounts:!0,supportsOAuth:!1,iconKey:"deepseek"},{familyId:"moonshot",displayName:"Kimi API",primaryUnit:"tokens",queryKind:"nativeBalance",supportsApiKey:!0,supportsExtraAccounts:!0,supportsOAuth:!1,iconKey:"kimi"},{familyId:"elevenlabs",displayName:"ElevenLabs",primaryUnit:"tokens",queryKind:"nativeBalance",supportsApiKey:!0,supportsExtraAccounts:!0,supportsOAuth:!1,iconKey:"elevenlabs"},{familyId:"ollama",displayName:"Ollama",primaryUnit:"tokens",queryKind:"localOnly",supportsApiKey:!1,supportsExtraAccounts:!1,supportsOAuth:!1,iconKey:"ollama"},{familyId:"codebuff",displayName:"Codebuff",primaryUnit:"tokens",queryKind:"nativeSnapshot",supportsApiKey:!0,supportsExtraAccounts:!0,supportsOAuth:!1,iconKey:"codebuff"},{familyId:"kilo",displayName:"Kilo",primaryUnit:"tokens",queryKind:"nativeBalance",supportsApiKey:!0,supportsExtraAccounts:!0,supportsOAuth:!1,iconKey:"kilo"},{familyId:"aihubmix",displayName:"AihubMix",primaryUnit:"tokens",queryKind:"nativeBalance",supportsApiKey:!0,supportsExtraAccounts:!0,supportsOAuth:!1,iconKey:"aihubmix"},{familyId:"onenewapi",displayName:"One/New API",primaryUnit:"tokens",queryKind:"composite",supportsApiKey:!1,supportsExtraAccounts:!0,supportsOAuth:!1,iconKey:"onenewapi"},{familyId:"qwen",displayName:"Qwen Code",primaryUnit:"tokens",queryKind:"composite",supportsApiKey:!0,supportsExtraAccounts:!0,supportsOAuth:!1,iconKey:"qwen"},{familyId:"hermes",displayName:"Hermes",primaryUnit:"tokens",queryKind:"localOnly",supportsApiKey:!1,supportsExtraAccounts:!1,supportsOAuth:!1,iconKey:"hermes"},{familyId:"kimi",displayName:"Kimi Code",primaryUnit:"tokens",queryKind:"composite",supportsApiKey:!0,supportsExtraAccounts:!0,supportsOAuth:!1,iconKey:"kimi"},{familyId:"stepfun",displayName:"StepFun",primaryUnit:"tokens",queryKind:"nativeBalance",supportsApiKey:!0,supportsExtraAccounts:!0,supportsOAuth:!1,iconKey:"stepfun"},{familyId:"stepfun-plan",displayName:"StepFun Step Plan",primaryUnit:"tokens",queryKind:"nativeCodingPlan",supportsApiKey:!0,supportsExtraAccounts:!0,supportsOAuth:!1,iconKey:"stepfun"},{familyId:"shandianshuo",displayName:"闪电说",primaryUnit:"minutes",queryKind:"nativeCodingPlan",supportsApiKey:!1,supportsExtraAccounts:!1,supportsOAuth:!1,iconKey:"shandianshuo",category:"productivity"},{familyId:"siliconflow",displayName:"SiliconFlow",primaryUnit:"tokens",queryKind:"nativeBalance",supportsApiKey:!0,supportsExtraAccounts:!0,supportsOAuth:!1,iconKey:"siliconflow"},{familyId:"novita",displayName:"Novita AI",primaryUnit:"tokens",queryKind:"nativeBalance",supportsApiKey:!0,supportsExtraAccounts:!0,supportsOAuth:!1,iconKey:"novita"},{familyId:"relaybalance",displayName:"Custom Relay",primaryUnit:"tokens",queryKind:"nativeBalance",supportsApiKey:!0,supportsExtraAccounts:!0,supportsOAuth:!1,iconKey:"relaybalance"},{familyId:"qodercn",displayName:"Qoder CN",primaryUnit:"credits",queryKind:"nativeSnapshot",supportsApiKey:!1,supportsExtraAccounts:!1,supportsOAuth:!1,iconKey:"qodercn"},{familyId:"orcaterm",displayName:"腾讯云 OrcaTerm",primaryUnit:"requests",queryKind:"nativeSnapshot",supportsApiKey:!1,supportsExtraAccounts:!1,supportsOAuth:!1,iconKey:"orcaterm"},{familyId:"traecn",displayName:"Trae CN",primaryUnit:"credits",queryKind:"nativeSnapshot",supportsApiKey:!1,supportsExtraAccounts:!1,supportsOAuth:!1,iconKey:"traecn"},{familyId:"commandcode",displayName:"Command Code",primaryUnit:"tokens",queryKind:"nativeCodingPlan",supportsApiKey:!0,supportsExtraAccounts:!0,supportsOAuth:!1,iconKey:"commandcode"},{familyId:"doubao",displayName:"Doubao",primaryUnit:"tokens",queryKind:"nativeCodingPlan",supportsApiKey:!1,supportsExtraAccounts:!1,supportsOAuth:!1,iconKey:"doubao"},{familyId:"clawsgo",displayName:"ClawsGO",primaryUnit:"tokens",queryKind:"nativeCodingPlan",supportsApiKey:!0,supportsExtraAccounts:!0,supportsOAuth:!1,iconKey:"clawsgo"},{familyId:"bocha",displayName:"BochaAI",primaryUnit:"credits",queryKind:"nativeBalance",supportsApiKey:!1,supportsExtraAccounts:!1,supportsOAuth:!1,iconKey:"bocha",category:"mcp"},{familyId:"tavily",displayName:"Tavily",primaryUnit:"credits",queryKind:"nativeBalance",supportsApiKey:!1,supportsExtraAccounts:!1,supportsOAuth:!1,iconKey:"tavily",category:"mcp"},{familyId:"firecrawl",displayName:"Firecrawl",primaryUnit:"credits",queryKind:"nativeBalance",supportsApiKey:!1,supportsExtraAccounts:!1,supportsOAuth:!1,iconKey:"firecrawl",category:"mcp"},{familyId:"brave",displayName:"Brave Search",primaryUnit:"credits",queryKind:"nativeBalance",supportsApiKey:!1,supportsExtraAccounts:!1,supportsOAuth:!1,iconKey:"brave",category:"mcp"},{familyId:"giphy",displayName:"GIPHY",primaryUnit:"requests",queryKind:"nativeBalance",supportsApiKey:!0,supportsExtraAccounts:!1,supportsOAuth:!1,iconKey:"giphy",category:"mcp"},{familyId:"clinepass",displayName:"ClinePass",primaryUnit:"tokens",queryKind:"nativeCodingPlan",supportsApiKey:!0,supportsExtraAccounts:!0,supportsOAuth:!1,iconKey:"clinepass"},{familyId:"sensenova",displayName:"SenseNova",primaryUnit:"tokens",queryKind:"nativeCodingPlan",supportsApiKey:!1,supportsExtraAccounts:!1,supportsOAuth:!1,iconKey:"sensenova"},{familyId:"apigoto",displayName:"APIGOTO",primaryUnit:"tokens",queryKind:"nativeCodingPlan",supportsApiKey:!0,supportsExtraAccounts:!0,supportsOAuth:!1,iconKey:"apigoto"},{familyId:"mcode",displayName:"MiniMax Code",primaryUnit:"tokens",queryKind:"localOnly",supportsApiKey:!1,supportsExtraAccounts:!1,supportsOAuth:!1,iconKey:"mcode"},{familyId:"amp",displayName:"Amp",primaryUnit:"tokens",queryKind:"nativeBalance",supportsApiKey:!0,supportsExtraAccounts:!0,supportsOAuth:!1,iconKey:"amp"},{familyId:"bedrock",displayName:"AWS Bedrock",primaryUnit:"tokens",queryKind:"nativeBalance",supportsApiKey:!1,supportsExtraAccounts:!1,supportsOAuth:!1,iconKey:"bedrock"},{familyId:"chutes",displayName:"Chutes",primaryUnit:"tokens",queryKind:"nativeBalance",supportsApiKey:!0,supportsExtraAccounts:!0,supportsOAuth:!1,iconKey:"chutes"},{familyId:"deepgram",displayName:"Deepgram",primaryUnit:"tokens",queryKind:"nativeBalance",supportsApiKey:!0,supportsExtraAccounts:!0,supportsOAuth:!1,iconKey:"deepgram"},{familyId:"deepl",displayName:"DeepL",primaryUnit:"characters",queryKind:"nativeBalance",supportsApiKey:!0,supportsExtraAccounts:!0,supportsOAuth:!1,iconKey:"deepl",category:"productivity"},{familyId:"serpapi",displayName:"SerpApi",primaryUnit:"requests",queryKind:"nativeBalance",supportsApiKey:!0,supportsExtraAccounts:!0,supportsOAuth:!1,iconKey:"serpapi",category:"mcp"},{familyId:"stability",displayName:"Stability AI",primaryUnit:"credits",queryKind:"nativeBalance",supportsApiKey:!0,supportsExtraAccounts:!0,supportsOAuth:!1,iconKey:"stability",category:"productivity"},{familyId:"kiro",displayName:"Kiro",primaryUnit:"tokens",queryKind:"nativeCodingPlan",supportsApiKey:!1,supportsExtraAccounts:!0,supportsOAuth:!0,iconKey:"kiro"},{familyId:"openai-api",displayName:"OpenAI API",primaryUnit:"tokens",queryKind:"nativeBalance",supportsApiKey:!0,supportsExtraAccounts:!0,supportsOAuth:!1,iconKey:"openai"},{familyId:"poe",displayName:"Poe",primaryUnit:"tokens",queryKind:"nativeBalance",supportsApiKey:!0,supportsExtraAccounts:!0,supportsOAuth:!1,iconKey:"poe"},{familyId:"tokenrhythm",displayName:"基元律动",primaryUnit:"tokens",queryKind:"nativeBalance",supportsApiKey:!1,supportsExtraAccounts:!0,supportsOAuth:!1,webSession:!0,iconKey:"tokenrhythm"},{familyId:"xfyun",displayName:"讯飞星火",primaryUnit:"tokens",queryKind:"nativeBalance",supportsApiKey:!1,supportsExtraAccounts:!0,supportsOAuth:!1,webSession:!0,iconKey:"xfyun"},{familyId:"zcode",displayName:"ZCode",primaryUnit:"tokens",queryKind:"nativeSnapshot",supportsApiKey:!1,supportsExtraAccounts:!1,supportsOAuth:!1,iconKey:"zcode"},{familyId:"xfyun-speech",displayName:"讯飞开放平台语音",primaryUnit:"requests",queryKind:"nativeSnapshot",supportsApiKey:!1,supportsExtraAccounts:!0,supportsOAuth:!1,webSession:!0,category:"productivity",iconKey:"xfyun-speech"},{familyId:"venice",displayName:"Venice",primaryUnit:"tokens",queryKind:"nativeBalance",supportsApiKey:!0,supportsExtraAccounts:!0,supportsOAuth:!1,iconKey:"venice"},{familyId:"vertexai",displayName:"Vertex AI",primaryUnit:"tokens",queryKind:"localOnly",supportsApiKey:!1,supportsExtraAccounts:!1,supportsOAuth:!1,iconKey:"vertexai"},{familyId:"warp",displayName:"Warp",primaryUnit:"tokens",queryKind:"nativeCodingPlan",supportsApiKey:!0,supportsExtraAccounts:!0,supportsOAuth:!1,iconKey:"warp"},{familyId:"windsurf",displayName:"Windsurf",primaryUnit:"tokens",queryKind:"nativeSnapshot",supportsApiKey:!1,supportsExtraAccounts:!0,supportsOAuth:!0,iconKey:"windsurf"},{familyId:"mimo",displayName:"MiMo",primaryUnit:"tokens",queryKind:"nativeCodingPlan",supportsApiKey:!0,supportsExtraAccounts:!0,supportsOAuth:!1,iconKey:"mimo"},{familyId:"trae",displayName:"Trae",primaryUnit:"tokens",queryKind:"nativeSnapshot",supportsApiKey:!1,supportsExtraAccounts:!0,supportsOAuth:!0,iconKey:"trae"},{familyId:"qoder",displayName:"Qoder",primaryUnit:"tokens",queryKind:"nativeSnapshot",supportsApiKey:!1,supportsExtraAccounts:!0,supportsOAuth:!0,iconKey:"qoder"},{familyId:"zed",displayName:"Zed",primaryUnit:"tokens",queryKind:"localOnly",supportsApiKey:!1,supportsExtraAccounts:!0,supportsOAuth:!0,iconKey:"zed"},{familyId:"factory",displayName:"Droid",primaryUnit:"tokens",queryKind:"nativeCodingPlan",supportsApiKey:!0,supportsExtraAccounts:!0,supportsOAuth:!1,iconKey:"factory"},{familyId:"jetbrains",displayName:"JetBrains AI",primaryUnit:"tokens",queryKind:"localOnly",supportsApiKey:!1,supportsExtraAccounts:!1,supportsOAuth:!1,iconKey:"jetbrains"},{familyId:"groq",displayName:"Groq",primaryUnit:"tokens",queryKind:"nativeBalance",supportsApiKey:!0,supportsExtraAccounts:!0,supportsOAuth:!1,iconKey:"groq"},{familyId:"huggingface",displayName:"Hugging Face",primaryUnit:"tokens",queryKind:"nativeBalance",supportsApiKey:!0,supportsExtraAccounts:!0,supportsOAuth:!1,iconKey:"huggingface"},{familyId:"longcat",displayName:"LongCat",primaryUnit:"tokens",queryKind:"nativeCodingPlan",supportsApiKey:!0,supportsExtraAccounts:!0,supportsOAuth:!1,iconKey:"longcat"},{familyId:"sub2api",displayName:"sub2api",primaryUnit:"tokens",queryKind:"nativeCodingPlan",supportsApiKey:!0,supportsExtraAccounts:!0,supportsOAuth:!1,iconKey:"sub2api"},{familyId:"mistral",displayName:"Mistral",primaryUnit:"tokens",queryKind:"nativeBalance",supportsApiKey:!0,supportsExtraAccounts:!0,supportsOAuth:!1,iconKey:"mistral"},{familyId:"perplexity",displayName:"Perplexity",primaryUnit:"tokens",queryKind:"nativeBalance",supportsApiKey:!0,supportsExtraAccounts:!0,supportsOAuth:!1,iconKey:"perplexity"},{familyId:"volcengine",displayName:"Volcengine Ark",primaryUnit:"tokens",queryKind:"nativeCodingPlan",supportsApiKey:!0,supportsExtraAccounts:!0,supportsOAuth:!1,iconKey:"volcengine"}];function $(e){return e.split("@")[0]}function lt(e){return Ps.find(t=>t.familyId===e)}function Nl(e){var t;return((t=lt(e))==null?void 0:t.category)??"coding"}function lf(e){var t;return((t=lt(e))==null?void 0:t.supportsApiKey)??!1}function ot(e){var t;return((t=lt(e))==null?void 0:t.supportsExtraAccounts)??!1}function nn(e){var t;return((t=lt(e))==null?void 0:t.webSession)===!0}function Sy(e){const t=e.supportsApiKey?"api_key":e.supportsOAuth?"oauth":e.webSession?"web_session":e.queryKind==="localOnly"?"local":"none",n=e.supportsApiKey?"key":t==="oauth"||t==="web_session"||e.supportsExtraAccounts?"account":"unknown",s=e.queryKind==="nativeCodingPlan"||e.queryKind==="nativeSnapshot"||e.queryKind==="composite";return{familyId:e.familyId,authKind:t,probeKind:e.queryKind==="localOnly"?"local_counter":"active_get",quotaScope:n,resetSemantics:s?"api_timestamp":"none",paceCapability:s}}Ps.map(Sy);const df=Ps.map(e=>e.familyId),jt=new URLSearchParams(location.search),Rp=jt.get("lang")==="en"?"en":jt.get("lang")==="ru"?"ru":"zh",Su="0.12.0";let Dp=!1;const uf=["devin","openrouter","elevenlabs","ollama","codebuff","kilo","aihubmix","qwen","hermes","opencode","deepseek","claude","moonshot","grok","cursor","siliconflow","novita","relaybalance","clawsgo","stepfun","onenewapi","traecn"],Cy=["codex","opencode","copilot","minimax","zai","antigravity","deepseek","stepfun-plan","qodercn","doubao","clawsgo","shandianshuo","tavily","kimi","stepfun","commandcode@63592739d4022730c40f340504638dfd","bocha","firecrawl","brave","clinepass","clinepass@67ae0d8e0f651d5c85389d55b439010d","clinepass@061fa48ec8ce213347f645f9ba6e85b6","clinepass@37364f9058253ce13c44730f4761c3e0","clinepass@6dd83003c55ed8d3b87dbe698f82a6e6","clinepass@bf604e26e7d5a98163f51d4148e714e8","sensenova","apigoto","claude","traecn","onenewapi@BjhOUJrUH3GNZO0milB15Q","commandcode","cursor","grok","devin","openrouter","moonshot","elevenlabs","ollama","codebuff","kilo","aihubmix","onenewapi","qwen","hermes","siliconflow","novita","relaybalance","mcode","qoder"],Yc={antigravity:"Antigravity",clinepass:"ClinePass",codex:"GPT",commandcode:"Command Code",copilot:"Copilot",doubao:"Doubao",kimi:"Kimi",minimax:"MiniMax",qodercn:"Qoder CN","stepfun-plan":"stepfun",zai:"GLM"},bc={"clinepass@67ae0d8e0f651d5c85389d55b439010d":"ls","clinepass@061fa48ec8ce213347f645f9ba6e85b6":"ls","clinepass@37364f9058253ce13c44730f4761c3e0":"njf","clinepass@6dd83003c55ed8d3b87dbe698f82a6e6":"lzl","clinepass@bf604e26e7d5a98163f51d4148e714e8":"njf2"},bm={antigravity:"g6",codex:"g6",commandcode:"g6",kimi:"g6",minimax:"g6",zai:"g6",copilot:"g5",doubao:"g5"};let yn={refreshMinutes:5,disabled:[...uf],pinned:null,trayProviders:[],notifyAlmostOut:!1,notifyCuttingClose:!1,notifyWillRunOut:!1,notifyResetSoon:!0,spendTab:"today",overviewTab:"5h",overviewCategory:"coding",overviewStyle:"bars",categoryOverrides:{},spendMetric:"tokens",spendGrouping:"model",meterMode:jt.get("meter")==="left"?"left":"used",showTrend:!1,resetExact:!1,timeFormat:"auto",layout:{providerOrder:[...Cy],groups:[{id:"g5",name:"🥚鸡蛋",collapsed:!1},{id:"g6",name:"🐑羊毛",collapsed:!1}],providers:Object.fromEntries([...df,...Object.keys(bc)].map(e=>[e,{metricOrder:[],onDemand:[],hidden:[],starred:[],expanded:!1,...Yc[e]?{note:Yc[e]}:{},...bc[e]?{note:bc[e]}:{},...bm[e]?{group:bm[e]}:{}}]))},appearance:jt.get("theme")==="light"?"light":"dark",density:"regular",uiFont:"MV Boli",glassEffects:!0,shortcut:"Alt+2",categoryShortcut:"Shift+1",localShortcuts:{},proxy:{enabled:!1,url:""},showTotalSpend:!0,welcomeDismissed:!0,setupPicked:!0,lastSeenVersion:Su,configNoticeVersion:Su,reduceAnimations:matchMedia("(prefers-reduced-motion: reduce)").matches,jumpAnimation:"smooth",hideUsageWhileSharing:!1,locale:Rp,windowForm:"floating",silentStart:!1,startupAnimation:!1,lastStartupBootId:1,overviewExpanded:[],experimentalFeatures:!1,spendIconTiers:null,overviewCatFull:!1,minimal:!1,mainScrollTop:0,spendHeadRange:"today",qoderCheckin:!1,removedProviders:[]};jt.get("settings")==="1"&&jt.get("page")==="skins"&&(yn.panelIntent={view:"settings",page:"skins",at:Date.now()});const Ay=e=>structuredClone(e),Cu=new Map;function Zc(e,t){for(const n of Cu.get(e)??[])n(t)}(jt.get("tour")==="fresh"||jt.get("tour")==="seen")&&(yn.lastSeenVersion="",yn.welcomeDismissed=!1,yn.tourSeen=jt.get("tour")==="seen");let Fd={zai:!1,minimax:!1,zaiRegion:"global",minimaxRegion:"global"};const xy=Date.now(),gn=e=>xy+e*36e5,$n=(e,t,n=5)=>({label:"Session",kind:"progress",used_percent:e,detail:null,value:null,resets_at:t==null?null:gn(t),period_ms:n*36e5}),Hd={"stepfun-plan":()=>({metrics:[$n(12,258,720)]}),qodercn:()=>({metrics:[{label:"Session",kind:"progress",used_percent:100,detail:"已用 2500 / 2500 额度",value:null,resets_at:gn(26),period_ms:5*36e5},{label:"Add-on credits",kind:"progress",used_percent:100,detail:"已用 500 / 500 额度",value:null,resets_at:null,period_ms:null}]}),clinepass:()=>({metrics:[{label:"会话",kind:"progress",used_percent:0,detail:null,value:null,resets_at:null,period_ms:5*36e5},{label:"每周",kind:"progress",used_percent:16,detail:null,value:null,resets_at:gn(69),period_ms:168*36e5},{label:"每月",kind:"progress",used_percent:8,detail:null,value:null,resets_at:gn(621),period_ms:720*36e5}]}),sensenova:()=>({metrics:[$n(0,2+50/60)]}),apigoto:()=>({metrics:[$n(0,646,720)]}),copilot:()=>({metrics:[$n(0,591,720)]}),doubao:()=>({metrics:[$n(0,null,24)]}),codex:()=>({metrics:[{label:"Session",kind:"progress",used_percent:48,detail:null,value:"1.1B tokens",resets_at:gn(1+14/60),period_ms:5*36e5},{label:"Weekly",kind:"progress",used_percent:20,detail:null,value:"1.1B tokens",resets_at:gn(164),period_ms:168*36e5}]}),minimax:()=>({metrics:[$n(0,3+26/60)]}),zai:()=>({metrics:[$n(82,1+42/60)]}),antigravity:()=>({metrics:[$n(0,4+54/60)]}),kimi:()=>({metrics:[$n(100,103)]}),commandcode:()=>({metrics:[$n(12,2+32/60)]}),shandianshuo:()=>({metrics:[{label:"Monthly",kind:"progress",used_percent:4,detail:null,value:null,resets_at:gn(645),period_ms:720*36e5}]}),tavily:()=>({metrics:[{label:"Requests",kind:"progress",used_percent:9,detail:null,value:null,resets_at:gn(720),period_ms:720*36e5}]}),bocha:()=>({metrics:[{label:"Requests",kind:"progress",used_percent:0,detail:null,value:null,resets_at:gn(720),period_ms:720*36e5}]}),firecrawl:()=>({metrics:[{label:"Requests",kind:"progress",used_percent:80,detail:null,value:null,resets_at:gn(696),period_ms:720*36e5}]}),brave:()=>({metrics:[{label:"Requests",kind:"progress",used_percent:7,detail:null,value:null,resets_at:gn(720),period_ms:720*36e5}]}),mcode:()=>({metrics:[{label:"Credits",kind:"progress",used_percent:0,detail:null,value:null,resets_at:null,period_ms:null}]}),qoder:()=>({metrics:[{label:"Credits",kind:"progress",used_percent:0,detail:null,value:null,resets_at:null,period_ms:null}]})},Py=df.filter(e=>!uf.includes(e)),Ty=[["clinepass@67ae0d8e0f651d5c85389d55b439010d","ls",0],["clinepass@061fa48ec8ce213347f645f9ba6e85b6","ls",0],["clinepass@37364f9058253ce13c44730f4761c3e0","njf",0],["clinepass@6dd83003c55ed8d3b87dbe698f82a6e6","lzl",0],["clinepass@bf604e26e7d5a98163f51d4148e714e8","njf2",100]],Sm=[...Py.filter(e=>Hd[e]).map(e=>{var t;return{id:e,name:Yc[e]||((t=Ps.find(n=>n.familyId===e))==null?void 0:t.displayName)||e,plan:"Pro",status:"ok",error:null,stale:!1,warning:null,...Hd[e]?Hd[e]():{metrics:[]},dashboard_url:null}}),...Ty.map(([e,,t])=>({id:e,name:`ClinePass · ${e.split("@")[1].slice(0,4)}`,plan:"Pro",status:t>=100?"exhausted":"ok",error:null,stale:!1,warning:null,metrics:[{label:"会话",kind:"progress",used_percent:t,detail:null,value:null,resets_at:null,period_ms:5*36e5},{label:"每周",kind:"progress",used_percent:Math.min(100,t+16),detail:null,value:null,resets_at:gn(69),period_ms:168*36e5}],dashboard_url:null}))],Op=[{model:"deepseek/deepseek-v4.1-flash",cost:8.13,tokens:813e6},{model:"gemini-3.8-flash-n",cost:1.36,tokens:1363e5},{model:"MiniMax-M3.1-Flash-Preview",cost:1.06,tokens:106e6},{model:"step-5-preview",cost:.87,tokens:867e5},{model:"GLM-5.3",cost:.32,tokens:321e5},{model:"gpt-6.1-sol",cost:.27,tokens:267e5},{model:"Other",cost:.02,tokens:428700}],Cm=e=>Math.round(e*100)/100,Ly=()=>Op.reduce((e,t)=>e+t.cost,0),zy=()=>Op.reduce((e,t)=>e+t.tokens,0),Sc=(e=1)=>({cost:Cm(Ly()*e),tokens:Math.round(zy()*e),models:Op.map(t=>({...t,cost:Cm(t.cost*e),tokens:Math.round(t.tokens*e)}))}),Au=["codex"].map((e,t)=>({id:e,name:Yc[e]||e,today:Sc(1),yesterday:Sc(.72),last30:Sc(18),trend:[1,3,2,6,4,7,5].map(n=>n*24e6),trend_cost:[2,3,1,5,4,6,8],unpriced:0,unpriced_models:[]})),Ey=Array.from({length:365},(e,t)=>{const n=new Date;n.setDate(n.getDate()-t);const s=`${n.getFullYear()}-${String(n.getMonth()+1).padStart(2,"0")}-${String(n.getDate()).padStart(2,"0")}`;return Au.map((o,i)=>({day:s,id:o.id,...Sc(t===0?1:(t*13+i*7)%19/12)}))}).flat(),qy=()=>Rp==="zh"?"请在桌面版 Pane 中连接账户。网页体验不会连接真实账户。":"Connect your account in the desktop app. This web experience uses no real accounts.";let zn=[{id:"kv-glm",service:"Z.ai",label:"Z.ai",masked:"sk-…9f2a",note:"CN 区"},{id:"kv-brave",service:"Brave Search",label:"Brave Search",masked:"BSA…x7q",note:""},{id:"kv-tavily",service:"Tavily",label:"Tavily",masked:"tvly…4c1",note:"MCP 搜索"}];const My=e=>{const t=String(e??"");return t.length>6?`${t.slice(0,4)}…${t.slice(-4)}`:"sk-…demo"},Bd=[{name:"pane",savedTokens:12e5,commands:508},{name:"site",savedTokens:42e3,commands:18},{name:"notes",savedTokens:8400,commands:12}],$d=[{name:"grep",savedTokens:384e5,commands:502},{name:"read",savedTokens:48e5,commands:64},{name:"git",savedTokens:16e5,commands:86}],lc=(e,t)=>({savedTokens:e,commands:t,compressionPct:99.4,channels:$d,otherChannelsSaved:72e4,otherChannelsCommands:121,unattributedChannelSaved:Math.max(0,e-$d.reduce((n,s)=>n+s.savedTokens,0)-72e4),unattributedChannelCommands:Math.max(0,t-$d.reduce((n,s)=>n+s.commands,0)-121),projects:Bd,otherSaved:6600,otherCommands:9,unattributedSaved:Math.max(0,e-Bd.reduce((n,s)=>n+s.savedTokens,0)-6600),unattributedCommands:Math.max(0,t-Bd.reduce((n,s)=>n+s.commands,0)-9)}),Iy={status:"ok",error:null,capturedAt:Date.now(),windows:{today:lc(462e5,818),d7:lc(528e5,942),d30:lc(614e5,1120),all:lc(749e5,1388)},daily:Array.from({length:30},(e,t)=>({date:new Date(Date.now()-(29-t)*864e5).toISOString().slice(0,10),savedTokens:t<24?0:(t-23)*62e5,commands:t<24?0:(t-23)*100,compressionPct:t<24?null:99.4})),projectsError:null},Ry=[["codex","Codex","codex",!0,"exact"],["claude","Claude Code","claude",!0,"fuzzy"],["cursor","Cursor","cursor",!1,"none"],["trae","Trae","traecn",!1,"none"],["windsurf","Windsurf","windsurf",!1,"none"],["cline","Cline","clinepass",!1,"none"],["kilocode","Kilo Code","kilo",!1,"none"],["antigravity","Antigravity","antigravity",!1,"none"],["kimi","Kimi Code","kimi",!1,"none"],["copilot","GitHub Copilot","copilot",!1,"none"],["gemini","Gemini CLI","gemini",!1,"none"],["opencode","OpenCode","opencode",!1,"none"],["droid","Factory Droid","factory",!1,"none"],["vibe","Mistral Vibe","mistral",!1,"none"],["hermes","Hermes","hermes",!1,"none"],["pi","Pi","pi",!1,"none"],["omp","Oh My Pi","omp",!1,"none"]].map(([e,t,n,s,o])=>({id:e,label:t,iconKey:n,detected:s,matchKind:o}));async function E(e,t={}){var s,o;let n;switch(e){case"get_config":n=yn;break;case"set_config":yn={...yn,...t.patch},(s=t.patch)!=null&&s.overviewTab&&pf(),n=yn;break;case"cached_usage":case"fetch_usage":n=Sm;break;case"refresh_provider":n=Sm.find(i=>i.id===t.providerId);break;case"fetch_spend":n=Au;break;case"fetch_spend_history":n=Au.map(i=>({id:i.id,...i.last30,active_days:24}));break;case"fetch_spend_daily":n=Ey;break;case"fetch_rtk_savings":n=Iy;break;case"rtk_integration_targets":n=Ry;break;case"install_rtk":case"install_rtk_integration":n=null;break;case"fetch_credit_history":n=Object.fromEntries(["qodercn","traecn"].map((i,r)=>[i,Array.from({length:30},(c,d)=>d<3?null:(d*31+r*17)%300)]));break;case"font_pack_list":case"skin_pack_list":n=[];break;case"reset_wake_settings":n=Fd;break;case"reset_wake_status":n=[];break;case"reset_wake_set":Fd={...Fd,...t.settings},n=null;break;case"replay_tour":jt.get("settings")==="1"&&parent!==window?parent.postMessage({type:"pane-demo",action:"tour-replay"},location.origin):Zc("tour-replay",null),n=null;break;case"system_ui_locale":n=Rp;break;case"get_autostart":n=!1;break;case"get_boot_id":n=1;break;case"check_update":n=null;break;case"list_system_fonts":n=["Segoe UI","Arial","MV Boli"];break;case"account_list":n=t.provider==="clinepass"?Object.entries(bc).map(([i,r])=>({id:i,label:r,maskedKey:`sk-…${i.slice(-4)}`,baseUrl:null})):[];break;case"archived_accounts":case"onenewapi_list_sites":case"auth_center_list":n=[];break;case"keyvault_status":n={has_password:!1,unlocked:!0,count:zn.length};break;case"keyvault_unlock":case"keyvault_set_password":n={has_password:!1,unlocked:!0,count:zn.length};break;case"keyvault_lock":n={has_password:!1,unlocked:!0,count:zn.length};break;case"keyvault_list":n=zn.map(i=>({...i}));break;case"keyvault_add":{zn.push({id:`kv-${Date.now()}`,service:String(t.service??""),label:String(t.label??""),masked:My(t.key),note:String(t.note??"")}),n=zn.map(i=>({...i}));break}case"keyvault_remove":zn=zn.filter(i=>i.id!==t.id),n=zn.map(i=>({...i}));break;case"keyvault_set_note":{const i=zn.find(r=>r.id===t.id);i&&(i.note=String(t.note??"")),n=zn.map(r=>({...r}));break}case"keyvault_copy":case"keyvault_reveal":n="sk-demo-0000000000000000000000000000";break;case"test_api_key":case"test_provider":case"stepfun_plan_test":n={ok:!0,metrics:2,message:"连接成功 · 2 个指标"};break;case"get_credential_status":n={source:"demo",hasKey:!1};break;case"get_base_url":n=null;break;case"open_panel_window":if(jt.get("settings")!=="1"){const i=(o=yn.panelIntent)==null?void 0:o.page;parent.postMessage({type:"pane-demo",action:"settings",...i?{page:i}:{}},location.origin)}n=null;break;case"close_panel_window":document.body.classList.remove("settings-open"),n=null;break;case"open_link":{const i=new URL(t.url);if(i.protocol!=="https:")throw new Error("Only HTTPS links are available.");window.open(i.href,"_blank","noopener,noreferrer"),n=null;break}case"hide_popover":Dp&&parent.postMessage({type:"pane-demo-hide"},location.origin),n=null;break;case"sync_tray_surfaces":case"set_window_form":n=null;break;default:throw new Error(qy())}return Ay(n)}async function En(e,t){const n=o=>t({payload:o}),s=Cu.get(e)??new Set;return s.add(n),Cu.set(e,s),()=>{s.delete(n)}}async function Np(e,t){Zc(e,t)}async function dr(){return Su}function ti(){return{label:jt.get("settings")==="1"?"panel":"main",isVisible:async()=>!0,setTheme:async e=>{},setAlwaysOnTop:async e=>{},outerPosition:async()=>({x:0,y:0}),center:async()=>{},startDragging:async()=>{},startResizeDragging:async e=>{},innerSize:async()=>({width:450,height:640}),scaleFactor:async()=>1,setSize:async e=>{},onFocusChanged:async e=>()=>{},onResized:async e=>()=>{},onMoved:async e=>()=>{},onCloseRequested:async e=>()=>{}}}function pf(){jt.get("settings")!=="1"&&parent.postMessage({type:"pane-demo-period",period:yn.overviewTab},location.origin)}function Am(){var e,t;(e=document.querySelector("[data-skin-close]"))==null||e.dispatchEvent(new MouseEvent("click",{bubbles:!0})),(t=document.querySelector("[data-customize-close]"))==null||t.dispatchEvent(new MouseEvent("click",{bubbles:!0}))}window.addEventListener("keydown",e=>{!Dp||e.repeat||!e.altKey||e.ctrlKey||e.metaKey||e.code!=="Digit2"||(e.preventDefault(),e.stopImmediatePropagation(),parent.postMessage({type:"pane-demo-toggle"},location.origin))},!0);window.addEventListener("message",e=>{var n,s,o,i,r,c,d,u,p,h,m,f,y;if(e.source!==parent||e.origin!==location.origin||((n=e.data)==null?void 0:n.type)!=="pane-demo")return;const t=e.data.action;if(t==="tour-replay"&&Zc("tour-replay",null),t==="keyboard-demo"&&(Dp=e.data.enabled===!0,pf()),t==="cycle-period"){const v=["5h","week","month"],S=v[(v.indexOf(yn.overviewTab)+1)%v.length];(s=document.querySelector(`[data-overview-tab="${S}"]`))==null||s.click(),(o=document.querySelector(".content"))==null||o.scrollTo({top:0,behavior:"auto"})}if(t==="settings"&&document.body.classList.add("settings-open"),t==="page"&&jt.get("settings")==="1"&&e.data.page==="skins"&&(yn.panelIntent={view:"settings",page:"skins",at:Date.now()},Zc("config-updated",null)),t==="overview"&&(document.body.classList.remove("settings-open"),(i=document.querySelector("#settings-close"))==null||i.dispatchEvent(new MouseEvent("click",{bubbles:!0})),(r=document.querySelector("[data-spend-detail-close]"))==null||r.dispatchEvent(new MouseEvent("click",{bubbles:!0})),Am(),(c=document.querySelector(".content"))==null||c.scrollTo({top:0,behavior:"auto"})),t==="spend"&&(document.body.classList.remove("settings-open"),Am(),(d=document.querySelector("[data-spend-details]"))==null||d.dispatchEvent(new MouseEvent("click",{bubbles:!0}))),t==="refresh"&&((u=document.querySelector("#refresh"))==null||u.dispatchEvent(new MouseEvent("click",{bubbles:!0}))),t==="theme"&&((p=document.querySelector("#theme-btn"))==null||p.dispatchEvent(new MouseEvent("click",{bubbles:!0}))),t==="cycle-category"){const v=["coding","mcp"],S=((h=document.querySelector("[data-overview-cat].active"))==null?void 0:h.dataset.overviewCat)||"coding",k=v[(v.indexOf(S)+1)%v.length],P=document.querySelector(`[data-overview-cat="${k}"]`);P==null||P.click(),P&&parent.postMessage({type:"pane-demo-category",category:k,label:((m=P.textContent)==null?void 0:m.trim())||k},location.origin)}t==="customize"&&((f=document.querySelector("#customize-btn"))==null||f.click()),t==="skins"&&((y=document.querySelector("#skin-btn"))==null||y.click()),t==="expiring"&&window.dispatchEvent(new KeyboardEvent("keydown",{key:"t",code:"KeyT",bubbles:!0}))});function Dy(){const e=t=>{const n=document.querySelector(t);if(!n)return null;const s=n.getBoundingClientRect();return{x:s.x,y:s.y,width:s.width,height:s.height}};return{anchors:{sample:e(".donut-wrap"),categories:e('[data-overview-cat="coding"]')||e("button.tab"),periods:e('[data-overview-tab="5h"]')||e(".overview-tabs"),left:e("#side-zone"),right:e("#side-zone-right"),spend:e(".total-spend .legend-row")||e(".total-spend svg"),accounts:e('[data-provider="clinepass"] .provider-account-badge')||e('[data-provider="clinepass"]'),pool:e('[data-provider="clinepass"] .provider-account-badge')||e('[data-provider="clinepass"]'),groups:e(".card-group-head")||e(".category-head"),settings:e("#side-zone")||e(".panel-head"),refresh:e("#status")||e(".panel-foot")||e("footer"),status:e("#status")||e(".panel-foot")||e("footer")},height:innerHeight,width:innerWidth,settings:document.body.classList.contains("settings-open")}}window.addEventListener("DOMContentLoaded",()=>{parent.postMessage({type:"pane-demo-ready"},location.origin);let e="";const t=()=>{const n=Dy(),s=JSON.stringify(n);s!==e&&(e=s,parent.postMessage({type:"pane-demo-anchors",...n},location.origin)),requestAnimationFrame(t)};requestAnimationFrame(t)});const Ud=[1,2,3,4,5],xm=[0,1,2,3,4,5,6],Un=(e,t=0)=>e*60+t,Wi={zai:{windows:[{days:Ud,fromMin:Un(14),toMin:Un(18)}],tipKey:"peak.rule.zai"},commandcode:{windows:[{days:Ud,fromMin:Un(9),toMin:Un(12)},{days:Ud,fromMin:Un(14),toMin:Un(18)}],tipKey:"peak.rule.commandcode"},qodercn:{windows:[{days:xm,fromMin:Un(8),toMin:Un(22)}],tipKey:"peak.rule.qodercn"},traecn:{windows:[{days:xm,fromMin:Un(8),toMin:Un(22)}],tipKey:"peak.rule.traecn"}};function Ns(e,t=Date.now()){const n=Wi[e];if(!n)return!1;const s=new Date(t+8*36e5),o=s.getUTCDay(),i=s.getUTCHours()*60+s.getUTCMinutes();return n.windows.some(r=>r.days.includes(o)&&i>=r.fromMin&&i<r.toMin)}const Oy=["codex","grok","copilot"],Ny=["kiro","windsurf","trae","zed","qoder"],Ky=["codebuddy","codebuddycn","workbuddy","workbuddyai"],Fy=["bocha","tavily","firecrawl","brave"],Pm={orcaterm:"customize.loginHint.orcaterm",claude:"customize.loginHint.claude",devin:"customize.loginHint.devin",ollama:"customize.loginHint.ollama",hermes:"customize.loginHint.hermes",shandianshuo:"customize.loginHint.shandianshuo",qodercn:"customize.loginHint.qodercn",traecn:"customize.loginHint.traecn",jetbrains:"customize.loginHint.jetbrains",zcode:"customize.loginHint.zcode"},Xc={...Object.fromEntries(Oy.map(e=>[e,{kind:"oauthDevice",actions:["addLogin"],hintKey:`customize.loginHint.${e}`}])),...Object.fromEntries(Ny.map(e=>[e,{kind:"oauthBrowser",actions:["addLogin"],hintKey:`customize.loginHint.${e}`,stepsKey:`customize.onboarding.${e}`}])),...Object.fromEntries(Ky.map(e=>[e,{kind:"qrScan",actions:["addLogin"],hintKey:`customize.loginHint.${e}`,stepsKey:`customize.onboarding.${e}`}])),cursor:{kind:"localRead",actions:["importAccounts"],hintKey:"customize.loginHint.cursor"},antigravity:{kind:"localRead",actions:["captureSlots"],hintKey:"customize.loginHint.antigravity"},onenewapi:{kind:"localRead",actions:[],hintKey:"customize.onboarding.onenewapi"},stepfun_plan:{kind:"localRead",actions:[],hintKey:"customize.onboarding.stepfunPlan"},"stepfun-plan":{kind:"localRead",actions:[],hintKey:"customize.onboarding.stepfunPlan"},sensenova:{kind:"oauthBrowser",actions:["addLogin"],hintKey:"customize.onboarding.sensenova"},doubao:{kind:"cookie",actions:[],hintKey:"customize.loginHint.doubao"},tokenrhythm:{kind:"cookie",actions:["pasteKeyPage"],hintKey:"customize.loginHint.tokenrhythm",stepsKey:"customize.onboarding.tokenrhythm"},xfyun:{kind:"cookie",actions:["addLogin"],hintKey:"customize.loginHint.xfyun",stepsKey:"customize.onboarding.xfyun"},"xfyun-speech":{kind:"cookie",actions:["addLogin"],hintKey:"customize.loginHint.xfyun-speech",stepsKey:"customize.onboarding.xfyun-speech"},bedrock:{kind:"cloud",actions:[],hintKey:"customize.loginHint.bedrock"},vertexai:{kind:"cloud",actions:[],hintKey:"customize.loginHint.vertexai"},giphy:{kind:"apiKey",actions:["pasteKey"],hintKey:"customize.onboarding.giphy"}};Xc.workbuddy.actions=["addLogin","importCookie"];Xc.workbuddyai.actions=["addLogin"];const Tm=Object.fromEntries(Fy.map(e=>[e,{kind:"apiKey",actions:["pasteKeyPage"],hintKey:`customize.loginHint.${e}`}])),Hy=Object.fromEntries(Ps.map(e=>{const t=e.familyId;return Xc[t]?[t,Xc[t]]:Tm[t]?[t,Tm[t]]:Pm[t]?[t,{kind:"localRead",actions:[],hintKey:Pm[t]}]:lf(t)?[t,{kind:"apiKey",actions:["pasteKey"],hintKey:"customize.onboarding.apiKey"}]:[t,{kind:"localRead",actions:[],hintKey:"customize.onboarding.localRead"}]}));function qi(e){return Hy[e]??{kind:"localRead",actions:[],hintKey:"customize.onboarding.localRead"}}function By(e){switch(qi(e).kind){case"apiKey":return["paste"];case"oauthDevice":case"oauthBrowser":case"qrScan":return["oauth"];case"localRead":case"cookie":case"cloud":return["local"];case"none":return[]}}const $y=`<svg width="100" height="100" viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg">\r
+var wy=Object.defineProperty;var by=(e,t,n)=>t in e?wy(e,t,{enumerable:!0,configurable:!0,writable:!0,value:n}):e[t]=n;var Rt=(e,t,n)=>by(e,typeof t!="symbol"?t+"":t,n);(function(){const t=document.createElement("link").relList;if(t&&t.supports&&t.supports("modulepreload"))return;for(const o of document.querySelectorAll('link[rel="modulepreload"]'))s(o);new MutationObserver(o=>{for(const i of o)if(i.type==="childList")for(const r of i.addedNodes)r.tagName==="LINK"&&r.rel==="modulepreload"&&s(r)}).observe(document,{childList:!0,subtree:!0});function n(o){const i={};return o.integrity&&(i.integrity=o.integrity),o.referrerPolicy&&(i.referrerPolicy=o.referrerPolicy),o.crossOrigin==="use-credentials"?i.credentials="include":o.crossOrigin==="anonymous"?i.credentials="omit":i.credentials="same-origin",i}function s(o){if(o.ep)return;o.ep=!0;const i=n(o);fetch(o.href,i)}})();const lr=["coding","mcp","productivity"],Ps=[{familyId:"claude",displayName:"Claude",primaryUnit:"tokens",queryKind:"nativeSnapshot",supportsApiKey:!1,supportsExtraAccounts:!1,supportsOAuth:!1,iconKey:"claude"},{familyId:"codex",displayName:"Codex",primaryUnit:"tokens",queryKind:"nativeSnapshot",supportsApiKey:!1,supportsExtraAccounts:!0,supportsOAuth:!0,iconKey:"codex"},{familyId:"codebuddy",displayName:"CodeBuddy",primaryUnit:"tokens",queryKind:"nativeSnapshot",supportsApiKey:!1,supportsExtraAccounts:!0,supportsOAuth:!0,iconKey:"codebuddy"},{familyId:"codebuddycn",displayName:"CodeBuddy CN",primaryUnit:"tokens",queryKind:"nativeSnapshot",supportsApiKey:!1,supportsExtraAccounts:!0,supportsOAuth:!0,iconKey:"codebuddy"},{familyId:"workbuddy",displayName:"WorkBuddy",primaryUnit:"tokens",queryKind:"nativeSnapshot",supportsApiKey:!1,supportsExtraAccounts:!0,supportsOAuth:!0,iconKey:"workbuddy"},{familyId:"workbuddyai",displayName:"WorkBuddy AI",primaryUnit:"tokens",queryKind:"nativeSnapshot",supportsApiKey:!1,supportsExtraAccounts:!0,supportsOAuth:!0,iconKey:"workbuddy"},{familyId:"cursor",displayName:"Cursor",primaryUnit:"tokens",queryKind:"nativeSnapshot",supportsApiKey:!1,supportsExtraAccounts:!0,supportsOAuth:!1,iconKey:"cursor"},{familyId:"opencode",displayName:"OpenCode",primaryUnit:"tokens",queryKind:"composite",supportsApiKey:!0,supportsExtraAccounts:!0,supportsOAuth:!1,iconKey:"opencode"},{familyId:"copilot",displayName:"Copilot",primaryUnit:"tokens",queryKind:"nativeSnapshot",supportsApiKey:!1,supportsExtraAccounts:!0,supportsOAuth:!0,iconKey:"copilot"},{familyId:"grok",displayName:"Grok",primaryUnit:"tokens",queryKind:"nativeSnapshot",supportsApiKey:!1,supportsExtraAccounts:!0,supportsOAuth:!0,iconKey:"grok"},{familyId:"devin",displayName:"Devin",primaryUnit:"tokens",queryKind:"nativeSnapshot",supportsApiKey:!1,supportsExtraAccounts:!1,supportsOAuth:!1,iconKey:"devin"},{familyId:"minimax",displayName:"MiniMax",primaryUnit:"tokens",queryKind:"nativeCodingPlan",supportsApiKey:!0,supportsExtraAccounts:!0,supportsOAuth:!1,iconKey:"minimax"},{familyId:"openrouter",displayName:"OpenRouter",primaryUnit:"tokens",queryKind:"nativeBalance",supportsApiKey:!0,supportsExtraAccounts:!0,supportsOAuth:!1,iconKey:"openrouter"},{familyId:"zai",displayName:"Z.ai",primaryUnit:"tokens",queryKind:"nativeCodingPlan",supportsApiKey:!0,supportsExtraAccounts:!0,supportsOAuth:!1,iconKey:"zai"},{familyId:"antigravity",displayName:"Antigravity",primaryUnit:"tokens",queryKind:"composite",supportsApiKey:!1,supportsExtraAccounts:!0,supportsOAuth:!1,iconKey:"antigravity"},{familyId:"deepseek",displayName:"DeepSeek",primaryUnit:"tokens",queryKind:"nativeBalance",supportsApiKey:!0,supportsExtraAccounts:!0,supportsOAuth:!1,iconKey:"deepseek"},{familyId:"moonshot",displayName:"Kimi API",primaryUnit:"tokens",queryKind:"nativeBalance",supportsApiKey:!0,supportsExtraAccounts:!0,supportsOAuth:!1,iconKey:"kimi"},{familyId:"elevenlabs",displayName:"ElevenLabs",primaryUnit:"tokens",queryKind:"nativeBalance",supportsApiKey:!0,supportsExtraAccounts:!0,supportsOAuth:!1,iconKey:"elevenlabs"},{familyId:"ollama",displayName:"Ollama",primaryUnit:"tokens",queryKind:"localOnly",supportsApiKey:!1,supportsExtraAccounts:!1,supportsOAuth:!1,iconKey:"ollama"},{familyId:"codebuff",displayName:"Codebuff",primaryUnit:"tokens",queryKind:"nativeSnapshot",supportsApiKey:!0,supportsExtraAccounts:!0,supportsOAuth:!1,iconKey:"codebuff"},{familyId:"kilo",displayName:"Kilo",primaryUnit:"tokens",queryKind:"nativeBalance",supportsApiKey:!0,supportsExtraAccounts:!0,supportsOAuth:!1,iconKey:"kilo"},{familyId:"aihubmix",displayName:"AihubMix",primaryUnit:"tokens",queryKind:"nativeBalance",supportsApiKey:!0,supportsExtraAccounts:!0,supportsOAuth:!1,iconKey:"aihubmix"},{familyId:"onenewapi",displayName:"One/New API",primaryUnit:"tokens",queryKind:"composite",supportsApiKey:!1,supportsExtraAccounts:!0,supportsOAuth:!1,iconKey:"onenewapi"},{familyId:"qwen",displayName:"Qwen Code",primaryUnit:"tokens",queryKind:"composite",supportsApiKey:!0,supportsExtraAccounts:!0,supportsOAuth:!1,iconKey:"qwen"},{familyId:"hermes",displayName:"Hermes",primaryUnit:"tokens",queryKind:"localOnly",supportsApiKey:!1,supportsExtraAccounts:!1,supportsOAuth:!1,iconKey:"hermes"},{familyId:"kimi",displayName:"Kimi Code",primaryUnit:"tokens",queryKind:"composite",supportsApiKey:!0,supportsExtraAccounts:!0,supportsOAuth:!1,iconKey:"kimi"},{familyId:"stepfun",displayName:"StepFun",primaryUnit:"tokens",queryKind:"nativeBalance",supportsApiKey:!0,supportsExtraAccounts:!0,supportsOAuth:!1,iconKey:"stepfun"},{familyId:"stepfun-plan",displayName:"StepFun Step Plan",primaryUnit:"tokens",queryKind:"nativeCodingPlan",supportsApiKey:!0,supportsExtraAccounts:!0,supportsOAuth:!1,iconKey:"stepfun"},{familyId:"shandianshuo",displayName:"闪电说",primaryUnit:"minutes",queryKind:"nativeCodingPlan",supportsApiKey:!1,supportsExtraAccounts:!1,supportsOAuth:!1,iconKey:"shandianshuo",category:"productivity"},{familyId:"siliconflow",displayName:"SiliconFlow",primaryUnit:"tokens",queryKind:"nativeBalance",supportsApiKey:!0,supportsExtraAccounts:!0,supportsOAuth:!1,iconKey:"siliconflow"},{familyId:"novita",displayName:"Novita AI",primaryUnit:"tokens",queryKind:"nativeBalance",supportsApiKey:!0,supportsExtraAccounts:!0,supportsOAuth:!1,iconKey:"novita"},{familyId:"relaybalance",displayName:"Custom Relay",primaryUnit:"tokens",queryKind:"nativeBalance",supportsApiKey:!0,supportsExtraAccounts:!0,supportsOAuth:!1,iconKey:"relaybalance"},{familyId:"qodercn",displayName:"Qoder CN",primaryUnit:"credits",queryKind:"nativeSnapshot",supportsApiKey:!1,supportsExtraAccounts:!1,supportsOAuth:!1,iconKey:"qodercn"},{familyId:"orcaterm",displayName:"腾讯云 OrcaTerm",primaryUnit:"requests",queryKind:"nativeSnapshot",supportsApiKey:!1,supportsExtraAccounts:!1,supportsOAuth:!1,iconKey:"orcaterm"},{familyId:"traecn",displayName:"Trae CN",primaryUnit:"credits",queryKind:"nativeSnapshot",supportsApiKey:!1,supportsExtraAccounts:!1,supportsOAuth:!1,iconKey:"traecn"},{familyId:"commandcode",displayName:"Command Code",primaryUnit:"tokens",queryKind:"nativeCodingPlan",supportsApiKey:!0,supportsExtraAccounts:!0,supportsOAuth:!1,iconKey:"commandcode"},{familyId:"doubao",displayName:"Doubao",primaryUnit:"tokens",queryKind:"nativeCodingPlan",supportsApiKey:!1,supportsExtraAccounts:!1,supportsOAuth:!1,iconKey:"doubao"},{familyId:"clawsgo",displayName:"ClawsGO",primaryUnit:"tokens",queryKind:"nativeCodingPlan",supportsApiKey:!0,supportsExtraAccounts:!0,supportsOAuth:!1,iconKey:"clawsgo"},{familyId:"bocha",displayName:"BochaAI",primaryUnit:"credits",queryKind:"nativeBalance",supportsApiKey:!1,supportsExtraAccounts:!1,supportsOAuth:!1,iconKey:"bocha",category:"mcp"},{familyId:"tavily",displayName:"Tavily",primaryUnit:"credits",queryKind:"nativeBalance",supportsApiKey:!1,supportsExtraAccounts:!1,supportsOAuth:!1,iconKey:"tavily",category:"mcp"},{familyId:"firecrawl",displayName:"Firecrawl",primaryUnit:"credits",queryKind:"nativeBalance",supportsApiKey:!1,supportsExtraAccounts:!1,supportsOAuth:!1,iconKey:"firecrawl",category:"mcp"},{familyId:"brave",displayName:"Brave Search",primaryUnit:"credits",queryKind:"nativeBalance",supportsApiKey:!1,supportsExtraAccounts:!1,supportsOAuth:!1,iconKey:"brave",category:"mcp"},{familyId:"giphy",displayName:"GIPHY",primaryUnit:"requests",queryKind:"nativeBalance",supportsApiKey:!0,supportsExtraAccounts:!1,supportsOAuth:!1,iconKey:"giphy",category:"mcp"},{familyId:"clinepass",displayName:"ClinePass",primaryUnit:"tokens",queryKind:"nativeCodingPlan",supportsApiKey:!0,supportsExtraAccounts:!0,supportsOAuth:!1,iconKey:"clinepass"},{familyId:"sensenova",displayName:"SenseNova",primaryUnit:"tokens",queryKind:"nativeCodingPlan",supportsApiKey:!1,supportsExtraAccounts:!1,supportsOAuth:!1,iconKey:"sensenova"},{familyId:"apigoto",displayName:"APIGOTO",primaryUnit:"tokens",queryKind:"nativeCodingPlan",supportsApiKey:!0,supportsExtraAccounts:!0,supportsOAuth:!1,iconKey:"apigoto"},{familyId:"mcode",displayName:"MiniMax Code",primaryUnit:"tokens",queryKind:"localOnly",supportsApiKey:!1,supportsExtraAccounts:!1,supportsOAuth:!1,iconKey:"mcode"},{familyId:"amp",displayName:"Amp",primaryUnit:"tokens",queryKind:"nativeBalance",supportsApiKey:!0,supportsExtraAccounts:!0,supportsOAuth:!1,iconKey:"amp"},{familyId:"bedrock",displayName:"AWS Bedrock",primaryUnit:"tokens",queryKind:"nativeBalance",supportsApiKey:!1,supportsExtraAccounts:!1,supportsOAuth:!1,iconKey:"bedrock"},{familyId:"chutes",displayName:"Chutes",primaryUnit:"tokens",queryKind:"nativeBalance",supportsApiKey:!0,supportsExtraAccounts:!0,supportsOAuth:!1,iconKey:"chutes"},{familyId:"deepgram",displayName:"Deepgram",primaryUnit:"tokens",queryKind:"nativeBalance",supportsApiKey:!0,supportsExtraAccounts:!0,supportsOAuth:!1,iconKey:"deepgram"},{familyId:"deepl",displayName:"DeepL",primaryUnit:"characters",queryKind:"nativeBalance",supportsApiKey:!0,supportsExtraAccounts:!0,supportsOAuth:!1,iconKey:"deepl",category:"productivity"},{familyId:"serpapi",displayName:"SerpApi",primaryUnit:"requests",queryKind:"nativeBalance",supportsApiKey:!0,supportsExtraAccounts:!0,supportsOAuth:!1,iconKey:"serpapi",category:"mcp"},{familyId:"stability",displayName:"Stability AI",primaryUnit:"credits",queryKind:"nativeBalance",supportsApiKey:!0,supportsExtraAccounts:!0,supportsOAuth:!1,iconKey:"stability",category:"productivity"},{familyId:"kiro",displayName:"Kiro",primaryUnit:"tokens",queryKind:"nativeCodingPlan",supportsApiKey:!1,supportsExtraAccounts:!0,supportsOAuth:!0,iconKey:"kiro"},{familyId:"openai-api",displayName:"OpenAI API",primaryUnit:"tokens",queryKind:"nativeBalance",supportsApiKey:!0,supportsExtraAccounts:!0,supportsOAuth:!1,iconKey:"openai"},{familyId:"poe",displayName:"Poe",primaryUnit:"tokens",queryKind:"nativeBalance",supportsApiKey:!0,supportsExtraAccounts:!0,supportsOAuth:!1,iconKey:"poe"},{familyId:"tokenrhythm",displayName:"基元律动",primaryUnit:"tokens",queryKind:"nativeBalance",supportsApiKey:!1,supportsExtraAccounts:!0,supportsOAuth:!1,webSession:!0,iconKey:"tokenrhythm"},{familyId:"xfyun",displayName:"讯飞星火",primaryUnit:"tokens",queryKind:"nativeBalance",supportsApiKey:!1,supportsExtraAccounts:!0,supportsOAuth:!1,webSession:!0,iconKey:"xfyun"},{familyId:"zcode",displayName:"ZCode",primaryUnit:"tokens",queryKind:"nativeSnapshot",supportsApiKey:!1,supportsExtraAccounts:!1,supportsOAuth:!1,iconKey:"zcode"},{familyId:"xfyun-speech",displayName:"讯飞开放平台语音",primaryUnit:"requests",queryKind:"nativeSnapshot",supportsApiKey:!1,supportsExtraAccounts:!0,supportsOAuth:!1,webSession:!0,category:"productivity",iconKey:"xfyun-speech"},{familyId:"venice",displayName:"Venice",primaryUnit:"tokens",queryKind:"nativeBalance",supportsApiKey:!0,supportsExtraAccounts:!0,supportsOAuth:!1,iconKey:"venice"},{familyId:"vertexai",displayName:"Vertex AI",primaryUnit:"tokens",queryKind:"localOnly",supportsApiKey:!1,supportsExtraAccounts:!1,supportsOAuth:!1,iconKey:"vertexai"},{familyId:"warp",displayName:"Warp",primaryUnit:"tokens",queryKind:"nativeCodingPlan",supportsApiKey:!0,supportsExtraAccounts:!0,supportsOAuth:!1,iconKey:"warp"},{familyId:"windsurf",displayName:"Windsurf",primaryUnit:"tokens",queryKind:"nativeSnapshot",supportsApiKey:!1,supportsExtraAccounts:!0,supportsOAuth:!0,iconKey:"windsurf"},{familyId:"mimo",displayName:"MiMo",primaryUnit:"tokens",queryKind:"nativeCodingPlan",supportsApiKey:!0,supportsExtraAccounts:!0,supportsOAuth:!1,iconKey:"mimo"},{familyId:"trae",displayName:"Trae",primaryUnit:"tokens",queryKind:"nativeSnapshot",supportsApiKey:!1,supportsExtraAccounts:!0,supportsOAuth:!0,iconKey:"trae"},{familyId:"qoder",displayName:"Qoder",primaryUnit:"tokens",queryKind:"nativeSnapshot",supportsApiKey:!1,supportsExtraAccounts:!0,supportsOAuth:!0,iconKey:"qoder"},{familyId:"zed",displayName:"Zed",primaryUnit:"tokens",queryKind:"localOnly",supportsApiKey:!1,supportsExtraAccounts:!0,supportsOAuth:!0,iconKey:"zed"},{familyId:"factory",displayName:"Droid",primaryUnit:"tokens",queryKind:"nativeCodingPlan",supportsApiKey:!0,supportsExtraAccounts:!0,supportsOAuth:!1,iconKey:"factory"},{familyId:"jetbrains",displayName:"JetBrains AI",primaryUnit:"tokens",queryKind:"localOnly",supportsApiKey:!1,supportsExtraAccounts:!1,supportsOAuth:!1,iconKey:"jetbrains"},{familyId:"groq",displayName:"Groq",primaryUnit:"tokens",queryKind:"nativeBalance",supportsApiKey:!0,supportsExtraAccounts:!0,supportsOAuth:!1,iconKey:"groq"},{familyId:"huggingface",displayName:"Hugging Face",primaryUnit:"tokens",queryKind:"nativeBalance",supportsApiKey:!0,supportsExtraAccounts:!0,supportsOAuth:!1,iconKey:"huggingface"},{familyId:"longcat",displayName:"LongCat",primaryUnit:"tokens",queryKind:"nativeCodingPlan",supportsApiKey:!0,supportsExtraAccounts:!0,supportsOAuth:!1,iconKey:"longcat"},{familyId:"sub2api",displayName:"sub2api",primaryUnit:"tokens",queryKind:"nativeCodingPlan",supportsApiKey:!0,supportsExtraAccounts:!0,supportsOAuth:!1,iconKey:"sub2api"},{familyId:"mistral",displayName:"Mistral",primaryUnit:"tokens",queryKind:"nativeBalance",supportsApiKey:!0,supportsExtraAccounts:!0,supportsOAuth:!1,iconKey:"mistral"},{familyId:"perplexity",displayName:"Perplexity",primaryUnit:"tokens",queryKind:"nativeBalance",supportsApiKey:!0,supportsExtraAccounts:!0,supportsOAuth:!1,iconKey:"perplexity"},{familyId:"volcengine",displayName:"Volcengine Ark",primaryUnit:"tokens",queryKind:"nativeCodingPlan",supportsApiKey:!0,supportsExtraAccounts:!0,supportsOAuth:!1,iconKey:"volcengine"}];function $(e){return e.split("@")[0]}function lt(e){return Ps.find(t=>t.familyId===e)}function Nl(e){var t;return((t=lt(e))==null?void 0:t.category)??"coding"}function lf(e){var t;return((t=lt(e))==null?void 0:t.supportsApiKey)??!1}function ot(e){var t;return((t=lt(e))==null?void 0:t.supportsExtraAccounts)??!1}function nn(e){var t;return((t=lt(e))==null?void 0:t.webSession)===!0}function Sy(e){const t=e.supportsApiKey?"api_key":e.supportsOAuth?"oauth":e.webSession?"web_session":e.queryKind==="localOnly"?"local":"none",n=e.supportsApiKey?"key":t==="oauth"||t==="web_session"||e.supportsExtraAccounts?"account":"unknown",s=e.queryKind==="nativeCodingPlan"||e.queryKind==="nativeSnapshot"||e.queryKind==="composite";return{familyId:e.familyId,authKind:t,probeKind:e.queryKind==="localOnly"?"local_counter":"active_get",quotaScope:n,resetSemantics:s?"api_timestamp":"none",paceCapability:s}}Ps.map(Sy);const df=Ps.map(e=>e.familyId),jt=new URLSearchParams(location.search),Rp=jt.get("lang")==="en"?"en":jt.get("lang")==="ru"?"ru":"zh",Su="0.12.1";let Dp=!1;const uf=["devin","openrouter","elevenlabs","ollama","codebuff","kilo","aihubmix","qwen","hermes","opencode","deepseek","claude","moonshot","grok","cursor","siliconflow","novita","relaybalance","clawsgo","stepfun","onenewapi","traecn"],Cy=["codex","opencode","copilot","minimax","zai","antigravity","deepseek","stepfun-plan","qodercn","doubao","clawsgo","shandianshuo","tavily","kimi","stepfun","commandcode@63592739d4022730c40f340504638dfd","bocha","firecrawl","brave","clinepass","clinepass@67ae0d8e0f651d5c85389d55b439010d","clinepass@061fa48ec8ce213347f645f9ba6e85b6","clinepass@37364f9058253ce13c44730f4761c3e0","clinepass@6dd83003c55ed8d3b87dbe698f82a6e6","clinepass@bf604e26e7d5a98163f51d4148e714e8","sensenova","apigoto","claude","traecn","onenewapi@BjhOUJrUH3GNZO0milB15Q","commandcode","cursor","grok","devin","openrouter","moonshot","elevenlabs","ollama","codebuff","kilo","aihubmix","onenewapi","qwen","hermes","siliconflow","novita","relaybalance","mcode","qoder"],Yc={antigravity:"Antigravity",clinepass:"ClinePass",codex:"GPT",commandcode:"Command Code",copilot:"Copilot",doubao:"Doubao",kimi:"Kimi",minimax:"MiniMax",qodercn:"Qoder CN","stepfun-plan":"stepfun",zai:"GLM"},bc={"clinepass@67ae0d8e0f651d5c85389d55b439010d":"ls","clinepass@061fa48ec8ce213347f645f9ba6e85b6":"ls","clinepass@37364f9058253ce13c44730f4761c3e0":"njf","clinepass@6dd83003c55ed8d3b87dbe698f82a6e6":"lzl","clinepass@bf604e26e7d5a98163f51d4148e714e8":"njf2"},bm={antigravity:"g6",codex:"g6",commandcode:"g6",kimi:"g6",minimax:"g6",zai:"g6",copilot:"g5",doubao:"g5"};let yn={refreshMinutes:5,disabled:[...uf],pinned:null,trayProviders:[],notifyAlmostOut:!1,notifyCuttingClose:!1,notifyWillRunOut:!1,notifyResetSoon:!0,spendTab:"today",overviewTab:"5h",overviewCategory:"coding",overviewStyle:"bars",categoryOverrides:{},spendMetric:"tokens",spendGrouping:"model",meterMode:jt.get("meter")==="left"?"left":"used",showTrend:!1,resetExact:!1,timeFormat:"auto",layout:{providerOrder:[...Cy],groups:[{id:"g5",name:"🥚鸡蛋",collapsed:!1},{id:"g6",name:"🐑羊毛",collapsed:!1}],providers:Object.fromEntries([...df,...Object.keys(bc)].map(e=>[e,{metricOrder:[],onDemand:[],hidden:[],starred:[],expanded:!1,...Yc[e]?{note:Yc[e]}:{},...bc[e]?{note:bc[e]}:{},...bm[e]?{group:bm[e]}:{}}]))},appearance:jt.get("theme")==="light"?"light":"dark",density:"regular",uiFont:"MV Boli",glassEffects:!0,shortcut:"Alt+2",categoryShortcut:"Shift+1",localShortcuts:{},proxy:{enabled:!1,url:""},showTotalSpend:!0,welcomeDismissed:!0,setupPicked:!0,lastSeenVersion:Su,configNoticeVersion:Su,reduceAnimations:matchMedia("(prefers-reduced-motion: reduce)").matches,jumpAnimation:"smooth",hideUsageWhileSharing:!1,locale:Rp,windowForm:"floating",silentStart:!1,startupAnimation:!1,lastStartupBootId:1,overviewExpanded:[],experimentalFeatures:!1,spendIconTiers:null,overviewCatFull:!1,minimal:!1,mainScrollTop:0,spendHeadRange:"today",qoderCheckin:!1,removedProviders:[]};jt.get("settings")==="1"&&jt.get("page")==="skins"&&(yn.panelIntent={view:"settings",page:"skins",at:Date.now()});const Ay=e=>structuredClone(e),Cu=new Map;function Zc(e,t){for(const n of Cu.get(e)??[])n(t)}(jt.get("tour")==="fresh"||jt.get("tour")==="seen")&&(yn.lastSeenVersion="",yn.welcomeDismissed=!1,yn.tourSeen=jt.get("tour")==="seen");let Fd={zai:!1,minimax:!1,zaiRegion:"global",minimaxRegion:"global"};const xy=Date.now(),gn=e=>xy+e*36e5,$n=(e,t,n=5)=>({label:"Session",kind:"progress",used_percent:e,detail:null,value:null,resets_at:t==null?null:gn(t),period_ms:n*36e5}),Hd={"stepfun-plan":()=>({metrics:[$n(12,258,720)]}),qodercn:()=>({metrics:[{label:"Session",kind:"progress",used_percent:100,detail:"已用 2500 / 2500 额度",value:null,resets_at:gn(26),period_ms:5*36e5},{label:"Add-on credits",kind:"progress",used_percent:100,detail:"已用 500 / 500 额度",value:null,resets_at:null,period_ms:null}]}),clinepass:()=>({metrics:[{label:"会话",kind:"progress",used_percent:0,detail:null,value:null,resets_at:null,period_ms:5*36e5},{label:"每周",kind:"progress",used_percent:16,detail:null,value:null,resets_at:gn(69),period_ms:168*36e5},{label:"每月",kind:"progress",used_percent:8,detail:null,value:null,resets_at:gn(621),period_ms:720*36e5}]}),sensenova:()=>({metrics:[$n(0,2+50/60)]}),apigoto:()=>({metrics:[$n(0,646,720)]}),copilot:()=>({metrics:[$n(0,591,720)]}),doubao:()=>({metrics:[$n(0,null,24)]}),codex:()=>({metrics:[{label:"Session",kind:"progress",used_percent:48,detail:null,value:"1.1B tokens",resets_at:gn(1+14/60),period_ms:5*36e5},{label:"Weekly",kind:"progress",used_percent:20,detail:null,value:"1.1B tokens",resets_at:gn(164),period_ms:168*36e5}]}),minimax:()=>({metrics:[$n(0,3+26/60)]}),zai:()=>({metrics:[$n(82,1+42/60)]}),antigravity:()=>({metrics:[$n(0,4+54/60)]}),kimi:()=>({metrics:[$n(100,103)]}),commandcode:()=>({metrics:[$n(12,2+32/60)]}),shandianshuo:()=>({metrics:[{label:"Monthly",kind:"progress",used_percent:4,detail:null,value:null,resets_at:gn(645),period_ms:720*36e5}]}),tavily:()=>({metrics:[{label:"Requests",kind:"progress",used_percent:9,detail:null,value:null,resets_at:gn(720),period_ms:720*36e5}]}),bocha:()=>({metrics:[{label:"Requests",kind:"progress",used_percent:0,detail:null,value:null,resets_at:gn(720),period_ms:720*36e5}]}),firecrawl:()=>({metrics:[{label:"Requests",kind:"progress",used_percent:80,detail:null,value:null,resets_at:gn(696),period_ms:720*36e5}]}),brave:()=>({metrics:[{label:"Requests",kind:"progress",used_percent:7,detail:null,value:null,resets_at:gn(720),period_ms:720*36e5}]}),mcode:()=>({metrics:[{label:"Credits",kind:"progress",used_percent:0,detail:null,value:null,resets_at:null,period_ms:null}]}),qoder:()=>({metrics:[{label:"Credits",kind:"progress",used_percent:0,detail:null,value:null,resets_at:null,period_ms:null}]})},Py=df.filter(e=>!uf.includes(e)),Ty=[["clinepass@67ae0d8e0f651d5c85389d55b439010d","ls",0],["clinepass@061fa48ec8ce213347f645f9ba6e85b6","ls",0],["clinepass@37364f9058253ce13c44730f4761c3e0","njf",0],["clinepass@6dd83003c55ed8d3b87dbe698f82a6e6","lzl",0],["clinepass@bf604e26e7d5a98163f51d4148e714e8","njf2",100]],Sm=[...Py.filter(e=>Hd[e]).map(e=>{var t;return{id:e,name:Yc[e]||((t=Ps.find(n=>n.familyId===e))==null?void 0:t.displayName)||e,plan:"Pro",status:"ok",error:null,stale:!1,warning:null,...Hd[e]?Hd[e]():{metrics:[]},dashboard_url:null}}),...Ty.map(([e,,t])=>({id:e,name:`ClinePass · ${e.split("@")[1].slice(0,4)}`,plan:"Pro",status:t>=100?"exhausted":"ok",error:null,stale:!1,warning:null,metrics:[{label:"会话",kind:"progress",used_percent:t,detail:null,value:null,resets_at:null,period_ms:5*36e5},{label:"每周",kind:"progress",used_percent:Math.min(100,t+16),detail:null,value:null,resets_at:gn(69),period_ms:168*36e5}],dashboard_url:null}))],Op=[{model:"deepseek/deepseek-v4.1-flash",cost:8.13,tokens:813e6},{model:"gemini-3.8-flash-n",cost:1.36,tokens:1363e5},{model:"MiniMax-M3.1-Flash-Preview",cost:1.06,tokens:106e6},{model:"step-5-preview",cost:.87,tokens:867e5},{model:"GLM-5.3",cost:.32,tokens:321e5},{model:"gpt-6.1-sol",cost:.27,tokens:267e5},{model:"Other",cost:.02,tokens:428700}],Cm=e=>Math.round(e*100)/100,Ly=()=>Op.reduce((e,t)=>e+t.cost,0),zy=()=>Op.reduce((e,t)=>e+t.tokens,0),Sc=(e=1)=>({cost:Cm(Ly()*e),tokens:Math.round(zy()*e),models:Op.map(t=>({...t,cost:Cm(t.cost*e),tokens:Math.round(t.tokens*e)}))}),Au=["codex"].map((e,t)=>({id:e,name:Yc[e]||e,today:Sc(1),yesterday:Sc(.72),last30:Sc(18),trend:[1,3,2,6,4,7,5].map(n=>n*24e6),trend_cost:[2,3,1,5,4,6,8],unpriced:0,unpriced_models:[]})),Ey=Array.from({length:365},(e,t)=>{const n=new Date;n.setDate(n.getDate()-t);const s=`${n.getFullYear()}-${String(n.getMonth()+1).padStart(2,"0")}-${String(n.getDate()).padStart(2,"0")}`;return Au.map((o,i)=>({day:s,id:o.id,...Sc(t===0?1:(t*13+i*7)%19/12)}))}).flat(),qy=()=>Rp==="zh"?"请在桌面版 Pane 中连接账户。网页体验不会连接真实账户。":"Connect your account in the desktop app. This web experience uses no real accounts.";let zn=[{id:"kv-glm",service:"Z.ai",label:"Z.ai",masked:"sk-…9f2a",note:"CN 区"},{id:"kv-brave",service:"Brave Search",label:"Brave Search",masked:"BSA…x7q",note:""},{id:"kv-tavily",service:"Tavily",label:"Tavily",masked:"tvly…4c1",note:"MCP 搜索"}];const My=e=>{const t=String(e??"");return t.length>6?`${t.slice(0,4)}…${t.slice(-4)}`:"sk-…demo"},Bd=[{name:"pane",savedTokens:12e5,commands:508},{name:"site",savedTokens:42e3,commands:18},{name:"notes",savedTokens:8400,commands:12}],$d=[{name:"grep",savedTokens:384e5,commands:502},{name:"read",savedTokens:48e5,commands:64},{name:"git",savedTokens:16e5,commands:86}],lc=(e,t)=>({savedTokens:e,commands:t,compressionPct:99.4,channels:$d,otherChannelsSaved:72e4,otherChannelsCommands:121,unattributedChannelSaved:Math.max(0,e-$d.reduce((n,s)=>n+s.savedTokens,0)-72e4),unattributedChannelCommands:Math.max(0,t-$d.reduce((n,s)=>n+s.commands,0)-121),projects:Bd,otherSaved:6600,otherCommands:9,unattributedSaved:Math.max(0,e-Bd.reduce((n,s)=>n+s.savedTokens,0)-6600),unattributedCommands:Math.max(0,t-Bd.reduce((n,s)=>n+s.commands,0)-9)}),Iy={status:"ok",error:null,capturedAt:Date.now(),windows:{today:lc(462e5,818),d7:lc(528e5,942),d30:lc(614e5,1120),all:lc(749e5,1388)},daily:Array.from({length:30},(e,t)=>({date:new Date(Date.now()-(29-t)*864e5).toISOString().slice(0,10),savedTokens:t<24?0:(t-23)*62e5,commands:t<24?0:(t-23)*100,compressionPct:t<24?null:99.4})),projectsError:null},Ry=[["codex","Codex","codex",!0,"exact"],["claude","Claude Code","claude",!0,"fuzzy"],["cursor","Cursor","cursor",!1,"none"],["trae","Trae","traecn",!1,"none"],["windsurf","Windsurf","windsurf",!1,"none"],["cline","Cline","clinepass",!1,"none"],["kilocode","Kilo Code","kilo",!1,"none"],["antigravity","Antigravity","antigravity",!1,"none"],["kimi","Kimi Code","kimi",!1,"none"],["copilot","GitHub Copilot","copilot",!1,"none"],["gemini","Gemini CLI","gemini",!1,"none"],["opencode","OpenCode","opencode",!1,"none"],["droid","Factory Droid","factory",!1,"none"],["vibe","Mistral Vibe","mistral",!1,"none"],["hermes","Hermes","hermes",!1,"none"],["pi","Pi","pi",!1,"none"],["omp","Oh My Pi","omp",!1,"none"]].map(([e,t,n,s,o])=>({id:e,label:t,iconKey:n,detected:s,matchKind:o}));async function E(e,t={}){var s,o;let n;switch(e){case"get_config":n=yn;break;case"set_config":yn={...yn,...t.patch},(s=t.patch)!=null&&s.overviewTab&&pf(),n=yn;break;case"cached_usage":case"fetch_usage":n=Sm;break;case"refresh_provider":n=Sm.find(i=>i.id===t.providerId);break;case"fetch_spend":n=Au;break;case"fetch_spend_history":n=Au.map(i=>({id:i.id,...i.last30,active_days:24}));break;case"fetch_spend_daily":n=Ey;break;case"fetch_rtk_savings":n=Iy;break;case"rtk_integration_targets":n=Ry;break;case"install_rtk":case"install_rtk_integration":n=null;break;case"fetch_credit_history":n=Object.fromEntries(["qodercn","traecn"].map((i,r)=>[i,Array.from({length:30},(c,d)=>d<3?null:(d*31+r*17)%300)]));break;case"font_pack_list":case"skin_pack_list":n=[];break;case"reset_wake_settings":n=Fd;break;case"reset_wake_status":n=[];break;case"reset_wake_set":Fd={...Fd,...t.settings},n=null;break;case"replay_tour":jt.get("settings")==="1"&&parent!==window?parent.postMessage({type:"pane-demo",action:"tour-replay"},location.origin):Zc("tour-replay",null),n=null;break;case"system_ui_locale":n=Rp;break;case"get_autostart":n=!1;break;case"get_boot_id":n=1;break;case"check_update":n=null;break;case"list_system_fonts":n=["Segoe UI","Arial","MV Boli"];break;case"account_list":n=t.provider==="clinepass"?Object.entries(bc).map(([i,r])=>({id:i,label:r,maskedKey:`sk-…${i.slice(-4)}`,baseUrl:null})):[];break;case"archived_accounts":case"onenewapi_list_sites":case"auth_center_list":n=[];break;case"keyvault_status":n={has_password:!1,unlocked:!0,count:zn.length};break;case"keyvault_unlock":case"keyvault_set_password":n={has_password:!1,unlocked:!0,count:zn.length};break;case"keyvault_lock":n={has_password:!1,unlocked:!0,count:zn.length};break;case"keyvault_list":n=zn.map(i=>({...i}));break;case"keyvault_add":{zn.push({id:`kv-${Date.now()}`,service:String(t.service??""),label:String(t.label??""),masked:My(t.key),note:String(t.note??"")}),n=zn.map(i=>({...i}));break}case"keyvault_remove":zn=zn.filter(i=>i.id!==t.id),n=zn.map(i=>({...i}));break;case"keyvault_set_note":{const i=zn.find(r=>r.id===t.id);i&&(i.note=String(t.note??"")),n=zn.map(r=>({...r}));break}case"keyvault_copy":case"keyvault_reveal":n="sk-demo-0000000000000000000000000000";break;case"test_api_key":case"test_provider":case"stepfun_plan_test":n={ok:!0,metrics:2,message:"连接成功 · 2 个指标"};break;case"get_credential_status":n={source:"demo",hasKey:!1};break;case"get_base_url":n=null;break;case"open_panel_window":if(jt.get("settings")!=="1"){const i=(o=yn.panelIntent)==null?void 0:o.page;parent.postMessage({type:"pane-demo",action:"settings",...i?{page:i}:{}},location.origin)}n=null;break;case"close_panel_window":document.body.classList.remove("settings-open"),n=null;break;case"open_link":{const i=new URL(t.url);if(i.protocol!=="https:")throw new Error("Only HTTPS links are available.");window.open(i.href,"_blank","noopener,noreferrer"),n=null;break}case"hide_popover":Dp&&parent.postMessage({type:"pane-demo-hide"},location.origin),n=null;break;case"sync_tray_surfaces":case"set_window_form":n=null;break;default:throw new Error(qy())}return Ay(n)}async function En(e,t){const n=o=>t({payload:o}),s=Cu.get(e)??new Set;return s.add(n),Cu.set(e,s),()=>{s.delete(n)}}async function Np(e,t){Zc(e,t)}async function dr(){return Su}function ti(){return{label:jt.get("settings")==="1"?"panel":"main",isVisible:async()=>!0,setTheme:async e=>{},setAlwaysOnTop:async e=>{},outerPosition:async()=>({x:0,y:0}),center:async()=>{},startDragging:async()=>{},startResizeDragging:async e=>{},innerSize:async()=>({width:450,height:640}),scaleFactor:async()=>1,setSize:async e=>{},onFocusChanged:async e=>()=>{},onResized:async e=>()=>{},onMoved:async e=>()=>{},onCloseRequested:async e=>()=>{}}}function pf(){jt.get("settings")!=="1"&&parent.postMessage({type:"pane-demo-period",period:yn.overviewTab},location.origin)}function Am(){var e,t;(e=document.querySelector("[data-skin-close]"))==null||e.dispatchEvent(new MouseEvent("click",{bubbles:!0})),(t=document.querySelector("[data-customize-close]"))==null||t.dispatchEvent(new MouseEvent("click",{bubbles:!0}))}window.addEventListener("keydown",e=>{!Dp||e.repeat||!e.altKey||e.ctrlKey||e.metaKey||e.code!=="Digit2"||(e.preventDefault(),e.stopImmediatePropagation(),parent.postMessage({type:"pane-demo-toggle"},location.origin))},!0);window.addEventListener("message",e=>{var n,s,o,i,r,c,d,u,p,h,m,f,y;if(e.source!==parent||e.origin!==location.origin||((n=e.data)==null?void 0:n.type)!=="pane-demo")return;const t=e.data.action;if(t==="tour-replay"&&Zc("tour-replay",null),t==="keyboard-demo"&&(Dp=e.data.enabled===!0,pf()),t==="cycle-period"){const v=["5h","week","month"],S=v[(v.indexOf(yn.overviewTab)+1)%v.length];(s=document.querySelector(`[data-overview-tab="${S}"]`))==null||s.click(),(o=document.querySelector(".content"))==null||o.scrollTo({top:0,behavior:"auto"})}if(t==="settings"&&document.body.classList.add("settings-open"),t==="page"&&jt.get("settings")==="1"&&e.data.page==="skins"&&(yn.panelIntent={view:"settings",page:"skins",at:Date.now()},Zc("config-updated",null)),t==="overview"&&(document.body.classList.remove("settings-open"),(i=document.querySelector("#settings-close"))==null||i.dispatchEvent(new MouseEvent("click",{bubbles:!0})),(r=document.querySelector("[data-spend-detail-close]"))==null||r.dispatchEvent(new MouseEvent("click",{bubbles:!0})),Am(),(c=document.querySelector(".content"))==null||c.scrollTo({top:0,behavior:"auto"})),t==="spend"&&(document.body.classList.remove("settings-open"),Am(),(d=document.querySelector("[data-spend-details]"))==null||d.dispatchEvent(new MouseEvent("click",{bubbles:!0}))),t==="refresh"&&((u=document.querySelector("#refresh"))==null||u.dispatchEvent(new MouseEvent("click",{bubbles:!0}))),t==="theme"&&((p=document.querySelector("#theme-btn"))==null||p.dispatchEvent(new MouseEvent("click",{bubbles:!0}))),t==="cycle-category"){const v=["coding","mcp"],S=((h=document.querySelector("[data-overview-cat].active"))==null?void 0:h.dataset.overviewCat)||"coding",k=v[(v.indexOf(S)+1)%v.length],P=document.querySelector(`[data-overview-cat="${k}"]`);P==null||P.click(),P&&parent.postMessage({type:"pane-demo-category",category:k,label:((m=P.textContent)==null?void 0:m.trim())||k},location.origin)}t==="customize"&&((f=document.querySelector("#customize-btn"))==null||f.click()),t==="skins"&&((y=document.querySelector("#skin-btn"))==null||y.click()),t==="expiring"&&window.dispatchEvent(new KeyboardEvent("keydown",{key:"t",code:"KeyT",bubbles:!0}))});function Dy(){const e=t=>{const n=document.querySelector(t);if(!n)return null;const s=n.getBoundingClientRect();return{x:s.x,y:s.y,width:s.width,height:s.height}};return{anchors:{sample:e(".donut-wrap"),categories:e('[data-overview-cat="coding"]')||e("button.tab"),periods:e('[data-overview-tab="5h"]')||e(".overview-tabs"),left:e("#side-zone"),right:e("#side-zone-right"),spend:e(".total-spend .legend-row")||e(".total-spend svg"),accounts:e('[data-provider="clinepass"] .provider-account-badge')||e('[data-provider="clinepass"]'),pool:e('[data-provider="clinepass"] .provider-account-badge')||e('[data-provider="clinepass"]'),groups:e(".card-group-head")||e(".category-head"),settings:e("#side-zone")||e(".panel-head"),refresh:e("#status")||e(".panel-foot")||e("footer"),status:e("#status")||e(".panel-foot")||e("footer")},height:innerHeight,width:innerWidth,settings:document.body.classList.contains("settings-open")}}window.addEventListener("DOMContentLoaded",()=>{parent.postMessage({type:"pane-demo-ready"},location.origin);let e="";const t=()=>{const n=Dy(),s=JSON.stringify(n);s!==e&&(e=s,parent.postMessage({type:"pane-demo-anchors",...n},location.origin)),requestAnimationFrame(t)};requestAnimationFrame(t)});const Ud=[1,2,3,4,5],xm=[0,1,2,3,4,5,6],Un=(e,t=0)=>e*60+t,Wi={zai:{windows:[{days:Ud,fromMin:Un(14),toMin:Un(18)}],tipKey:"peak.rule.zai"},commandcode:{windows:[{days:Ud,fromMin:Un(9),toMin:Un(12)},{days:Ud,fromMin:Un(14),toMin:Un(18)}],tipKey:"peak.rule.commandcode"},qodercn:{windows:[{days:xm,fromMin:Un(8),toMin:Un(22)}],tipKey:"peak.rule.qodercn"},traecn:{windows:[{days:xm,fromMin:Un(8),toMin:Un(22)}],tipKey:"peak.rule.traecn"}};function Ns(e,t=Date.now()){const n=Wi[e];if(!n)return!1;const s=new Date(t+8*36e5),o=s.getUTCDay(),i=s.getUTCHours()*60+s.getUTCMinutes();return n.windows.some(r=>r.days.includes(o)&&i>=r.fromMin&&i<r.toMin)}const Oy=["codex","grok","copilot"],Ny=["kiro","windsurf","trae","zed","qoder"],Ky=["codebuddy","codebuddycn","workbuddy","workbuddyai"],Fy=["bocha","tavily","firecrawl","brave"],Pm={orcaterm:"customize.loginHint.orcaterm",claude:"customize.loginHint.claude",devin:"customize.loginHint.devin",ollama:"customize.loginHint.ollama",hermes:"customize.loginHint.hermes",shandianshuo:"customize.loginHint.shandianshuo",qodercn:"customize.loginHint.qodercn",traecn:"customize.loginHint.traecn",jetbrains:"customize.loginHint.jetbrains",zcode:"customize.loginHint.zcode"},Xc={...Object.fromEntries(Oy.map(e=>[e,{kind:"oauthDevice",actions:["addLogin"],hintKey:`customize.loginHint.${e}`}])),...Object.fromEntries(Ny.map(e=>[e,{kind:"oauthBrowser",actions:["addLogin"],hintKey:`customize.loginHint.${e}`,stepsKey:`customize.onboarding.${e}`}])),...Object.fromEntries(Ky.map(e=>[e,{kind:"qrScan",actions:["addLogin"],hintKey:`customize.loginHint.${e}`,stepsKey:`customize.onboarding.${e}`}])),cursor:{kind:"localRead",actions:["importAccounts"],hintKey:"customize.loginHint.cursor"},antigravity:{kind:"localRead",actions:["captureSlots"],hintKey:"customize.loginHint.antigravity"},onenewapi:{kind:"localRead",actions:[],hintKey:"customize.onboarding.onenewapi"},stepfun_plan:{kind:"localRead",actions:[],hintKey:"customize.onboarding.stepfunPlan"},"stepfun-plan":{kind:"localRead",actions:[],hintKey:"customize.onboarding.stepfunPlan"},sensenova:{kind:"oauthBrowser",actions:["addLogin"],hintKey:"customize.onboarding.sensenova"},doubao:{kind:"cookie",actions:[],hintKey:"customize.loginHint.doubao"},tokenrhythm:{kind:"cookie",actions:["pasteKeyPage"],hintKey:"customize.loginHint.tokenrhythm",stepsKey:"customize.onboarding.tokenrhythm"},xfyun:{kind:"cookie",actions:["addLogin"],hintKey:"customize.loginHint.xfyun",stepsKey:"customize.onboarding.xfyun"},"xfyun-speech":{kind:"cookie",actions:["addLogin"],hintKey:"customize.loginHint.xfyun-speech",stepsKey:"customize.onboarding.xfyun-speech"},bedrock:{kind:"cloud",actions:[],hintKey:"customize.loginHint.bedrock"},vertexai:{kind:"cloud",actions:[],hintKey:"customize.loginHint.vertexai"},giphy:{kind:"apiKey",actions:["pasteKey"],hintKey:"customize.onboarding.giphy"}};Xc.workbuddy.actions=["addLogin","importCookie"];Xc.workbuddyai.actions=["addLogin"];const Tm=Object.fromEntries(Fy.map(e=>[e,{kind:"apiKey",actions:["pasteKeyPage"],hintKey:`customize.loginHint.${e}`}])),Hy=Object.fromEntries(Ps.map(e=>{const t=e.familyId;return Xc[t]?[t,Xc[t]]:Tm[t]?[t,Tm[t]]:Pm[t]?[t,{kind:"localRead",actions:[],hintKey:Pm[t]}]:lf(t)?[t,{kind:"apiKey",actions:["pasteKey"],hintKey:"customize.onboarding.apiKey"}]:[t,{kind:"localRead",actions:[],hintKey:"customize.onboarding.localRead"}]}));function qi(e){return Hy[e]??{kind:"localRead",actions:[],hintKey:"customize.onboarding.localRead"}}function By(e){switch(qi(e).kind){case"apiKey":return["paste"];case"oauthDevice":case"oauthBrowser":case"qrScan":return["oauth"];case"localRead":case"cookie":case"cloud":return["local"];case"none":return[]}}const $y=`<svg width="100" height="100" viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg">\r
 <path d="M85.2843 88.0301C90.1329 91.6664 97.4057 89.2422 90.7389 82.5755C70.7389 63.1816 74.9813 9.84827 50.1329 9.84827C25.2843 9.84827 29.5267 63.1816 9.52673 82.5755C2.25402 89.8483 10.1328 91.6664 14.9813 88.0301C33.7692 75.3028 32.5571 52.8786 50.1329 52.8786C67.7086 52.8786 66.4965 75.3028 85.2843 88.0301Z" fill="#4285F4"/>\r
 </svg>\r
 `,Uy='<svg height="1em" style="flex:none;line-height:1" viewBox="0 0 24 24" width="1em" xmlns="http://www.w3.org/2000/svg"><title>AiHubMix</title><path d="M12 24c6.627 0 12-5.373 12-12S18.627 0 12 0 0 5.373 0 12s5.373 12 12 12z" fill="#006FFB"></path><path clip-rule="evenodd" d="M11.24 8.393c.095-.644.302-1.47.624-2.48L12 5.496l.136.417c.322 1.01.53 1.836.624 2.48.071.472.071 1.072 0 1.8-.072.731-.072 1.336 0 1.814.106.7.426 1.281.96 1.744a2.795 2.795 0 001.89.708 2.78 2.78 0 002.034-.84c.56-.559.842-1.234.848-2.024.003-.7.075-1.472.216-2.316.069-.422.14-.775.21-1.06l.095-.384.168.356a7.862 7.862 0 01.76 3.244v.16a7.84 7.84 0 01-.624 3.089 7.952 7.952 0 01-4.228 4.228 7.841 7.841 0 01-3.089.623 7.84 7.84 0 01-3.089-.623 7.952 7.952 0 01-4.228-4.228 7.84 7.84 0 01-.623-3.09v-.159a7.862 7.862 0 01.759-3.244l.169-.356.093.385c.072.284.143.637.211 1.059.141.844.213 1.616.216 2.316.006.79.29 1.465.848 2.024.563.56 1.241.84 2.035.84.715 0 1.345-.236 1.889-.708a2.79 2.79 0 00.96-1.744c.073-.478.073-1.083 0-1.814-.071-.728-.071-1.328 0-1.8zm.76 9.694c1.097 0 2.125-.26 3.085-.778a6.379 6.379 0 001.77-1.399c.063-.07-.01-.178-.101-.153-.37.1-.75.15-1.144.15a4.236 4.236 0 01-2.18-.59 4.253 4.253 0 01-1.35-1.233.099.099 0 00-.16 0 4.253 4.253 0 01-1.35 1.232 4.236 4.236 0 01-2.18.591c-.393 0-.774-.05-1.143-.15-.091-.025-.165.083-.102.153a6.38 6.38 0 001.77 1.399c.96.518 1.988.778 3.085.778z" fill="#fff" fill-rule="evenodd"></path></svg>',Vy=`<svg width="100" height="100" viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg">\r
@@ -553,1950 +553,1958 @@ ${r.section}`.toLowerCase().includes(s))&&(o.add(r.anchor),i.push(r),i.length>=n
             Reset all settings
           </button>
         </div></div>
-      </div>`;function I3(){const e=document.createElement("div");return e.id="settings-controls-source",e.hidden=!0,e.innerHTML=M3,document.body.append(e),e}const R3=[{match:/^step-5-preview/,input:7,output:20},{match:/^step-3\.7-flash/,input:1.35,output:8.1},{match:/^step-3\.5-flash/,input:.7,output:2.1}],Ym=.7;function D3(e){return(e.toLowerCase().split(/[·/:]/).pop()??"").trim()}function O3(e){let t=0,n=0;const s=[];for(const o of e){if(!Number.isFinite(o.tokens)||o.tokens<=0)continue;const i=R3.find(c=>c.match.test(D3(o.model)));if(!i){n+=o.tokens,s.push(o.model);continue}const r=Ym*i.input+(1-Ym)*i.output;t+=o.tokens*r}return{credits:t,unknownTokens:n,unknownModels:[...new Set(s)]}}function N3(e){if(e<=0)return[];if(e<=14)return Array.from({length:e},(s,o)=>o);const t=e>45?7:5,n=new Set([0,e-1]);for(let s=0;s<e;s+=t)n.add(s);return[...n].sort((s,o)=>s-o)}function K3(e,t){const n=new Map;for(const s of e){const o=n.get(s.day)??new Map;if(s.models.length)for(const i of s.models)o.set(i.model,(o.get(i.model)??0)+i.tokens);else s.tokens>0&&o.set(t,(o.get(t)??0)+s.tokens);n.set(s.day,o)}return n}function F3(e,t){const n=new Map,s=(o,i,r)=>{const c=n.get(o)??{model:o,tokens:0,cost:0};c.tokens+=i,c.cost+=r,n.set(o,c)};for(const o of e)if(o.models.length)for(const i of o.models)s(i.model,i.tokens,i.cost);else o.tokens>0&&s(t,o.tokens,o.cost);return[...n.values()].sort((o,i)=>i.tokens-o.tokens)}function H3(e,t,n){var o;let s=0;for(const i of n.slice(0,6))for(const r of e)s=Math.max(s,((o=t.get(r))==null?void 0:o.get(i.model))??0);return s}function B3(e,t,n=6){const s=e.filter(d=>d.tokens>0),o=s.reduce((d,u)=>d+u.tokens,0);if(o<=0)return[];const i=s.length>n,r=i?n-1:n,c=s.slice(0,r).map(d=>({label:d.model,tokens:d.tokens}));if(i){const d=s.slice(r).reduce((u,p)=>u+p.tokens,0);d>0&&c.push({label:t,tokens:d})}return c.map(d=>({...d,share:d.tokens/o}))}const $3=`# Changelog\r
-\r
-## Unreleased\r
-\r
-分享卡预览 / 复制与保存\r
-\r
-### 新增\r
-\r
-- **分享卡预览**：卡片和总花费的分享按钮不再静默复制，先打开预览；预览里可复制图片或保存 PNG，成功/失败结果直接显示在按钮旁。\r
-- **保存 PNG**：保存到系统下载目录，文件名做路径剥离、非法字符替换和重名递增，不会覆盖已有文件。\r
-- **WorkBuddy 官方用量展开**：卡片里的「Official requests (30d)」可展开查看每日积分和最近 10 条请求（时间 / 模型 / 客户端 / 积分），\`partial\` 状态保留；不写入额度账本。\r
-\r
-### 修复\r
-\r
-- **分享无反馈**：旧版点击后静默复制、结果只写底部状态栏；现在先打开预览，复制/保存结果显示在按钮旁，键盘聚焦时分享按钮也会显示。\r
-\r
-## 0.12.0 — 2026-10-28\r
-\r
-首启检测 / 来源证据 / 本机环境\r
-\r
-### 新增\r
-\r
-- **首启设置清单（#109）**：首次安装改为单一四步流程（欢迎 → 本机检测 → 连接来源 → 完成），不再先弹检测器再弹三页说明；检测步骤列出已安装的工具、安装路径和凭据来源，支持勾选与重新扫描；空看板保留「继续设置」，设置 → 常规的重看不会改动现有来源选择。\r
-- **只读来源探测**：新增 \`source_probe\` 本机探测，读取 PATH/PATHEXT、常见安装目录、进程环境与 HKCU/HKLM 环境变量；不执行 CLI、不出网。\`ANTHROPIC_API_KEY\`、\`OPENAI_API_KEY\`、\`GEMINI_API_KEY\`、\`GOOGLE_API_KEY\`、\`AZURE_OPENAI_*\` 等通用 key 会显示为“已发现但暂无额度读取器”。\r
-\r
-### 变更\r
-\r
-- **卡片与帮助面板**：区分「已安装 · 未登录」与「未安装」；凭据状态显示来源（环境变量名 / 系统凭据库 / 本机登录），不再只给“未配置”一句话。\r
-- **Provider 帮助弹窗重做**：打开「查看登录方法 / 接入说明」后，固定头、正文滚动：来源图标与名称、凭据方式、2×2 关键事实、三步操作、可展开的原理与边界（info + caret 图标，整行可点）；操作按钮直接跟在内容后面，不再有独立底栏或分隔条。主操作是「立即测试」，关闭降到次要，测试结果就地显示。移除了中英混排主文案、三个同权重按钮和含义不明的「?」。\r
-- **统一异常状态卡**：失败卡片不再是一段“中文 + 原始英文”加三个同权重按钮。现在按状态显示明确的额度状态、人话解释、一个主操作和可展开的诊断（三步处理、凭据来源、安装状态、服务商原始返回）；未配置、未安装、登录过期、订阅到期、缺权限、空数据、网络、限流、未知分别使用不同文案和动作。StepFun 的 \`no quota data\` 归为“额度未获取”，不再误报成“不支持读取”。\r
-- **失败状态分型**：卡片不再把一切错误都写成“查询失败”。会话过期/被拒 → “需重新登录”，订阅到期/未生效 → “订阅已到期”，网络/5xx → “网络或服务异常”，429 → “查询被限流”，403 → “需要额度读取权限”，接口无额度数据 → “暂不支持读取额度”，其余才显示“查询失败”。\r
-- **本地 API**：\`/v1/providers\` 增量增加 \`installState\`、\`installEvidence\`、\`credentialState\`、\`credentialSource\`、\`credentialEnvs\`；\`/v1/doctor\` 增加 \`installed_but_not_signed_in\` 检查（info，不把未使用的已装工具当成故障）。\r
-\r
-### 修复\r
-\r
-- **扫描不再自动隐藏来源**：\`fetch_usage\` 的结果不再写入 \`disabled\`；首次安装和新增 provider 的“无凭据自动禁用”兜底已删除。只有用户明确完成引导/检测器或在设置里开关来源，才会改变启用列表。\r
-- **凭据存在 ≠ 订阅有效**：上游明确拒绝或过期（401/403/过期/撤销）时不再回退到本地历史数据，也不会再渲染出“Go — 本机记录”这种像订阅的卡片，同时清除该卡的上次成功缓存，避免旧计划复活；OpenCode 过期 key 会直接显示需重新登录。首启检测状态结合真实查询结果，\`/v1/doctor\` 新增 \`credentials_rejected\`。\r
-- **来源探测保持只读**：只判断凭据是否存在，不再触发密钥迁移或改写文件；账号列表、登录账号和 Pane 管理的 Codex 登录都会计入。Windows 环境按大小写不敏感读取并展开注册表 \`%VAR%\`，npm 全局安装的 CLI 也能作为安装证据。\r
-- **重看引导不再改写来源配置**：只有首次引导和空看板“继续设置”会应用勾选；设置里的重看保持当前选择不变。\r
-- **首启/检测不再关掉已配置来源**：跳过或关闭引导不会改写来源选择；账号卡（apigoto@…、tokenrhythm@…）会被当作该来源可用的证据，family 卡暂时读不到凭据也不会再把它整族禁用。\r
-- **多账号来源不再被误报为“无凭据”**：探测与凭证面板会把账号制 family（ClinePass、APIGOTO 等）的账号列表一并计入，而不是只看 family 级密钥文件；只存在于账号列表里的来源（如 Linkso、TokenRhythm）也会出现在检测清单中。\r
-\r
-## 0.11.1 — 2026-10-27\r
-\r
-皮肤工坊 / 独立身份 / 用量溯源 / 站点信任\r
-\r
-0.11.0 是未发布的本地 checkpoint；本版把它的改动与皮肤工坊商店化一并交付。\r
-\r
-### 新增\r
-\r
-- **皮肤工坊商店化（#107）**：工坊迁入「设置 → 通用 → 皮肤工坊」，悬浮面板调色板与站点演示直达；瀑布流 / 网格布局记忆、搜索、详情页、真实组件横向截图、放大预览、日间 / 夜间 / 并排，以及下载 → 使用 → 恢复原生全链路。预览不使用示意图或虚构评分/下载量。\r
-- **官网法务英文版**：\`/en/privacy\`、\`/en/terms\` 提供英文摘要（事实与中文版一致，不新增承诺）；页脚与下载区补 LICENSE 链接；根目录 \`PRIVACY.md\` 只做指针，权威仍是 \`docs/privacy.md\`。\r
-- **免费口径规格行**：下载区把「全功能免费 / 无 Pro 或订阅 / 无需注册账号」从平台长句里抽成三行规格。\r
-- **关于页更新态**：有新版时主按钮变为「更新到 vX」，显示版本行、release notes 摘要（3 行截断）与直达 GitHub tag 的更新日志按钮；新增可关闭的 Star 邀请横幅（\`pane:about:starDismissed\`）。\r
-- **问号说明卡**：\`?\` 按钮改为 300ms 悬停 / 200ms 移开 / 点击固定 / Esc 或点外关闭的标题+正文卡片，替换卡片额度说明、RTK 口径与高峰提示的旧单行气泡。\r
-- **\`/v1/limits\` 收口**：支持精确卡 ID 与 family 展开；余额结构带 \`kind=balance\` 与币种单位；未开始窗口不再输出 \`resetsAt\`；\`:id\` 同一信封四字段；docs/local-http-api.md 增加端点、示例与端口占用说明。\r
-- **MCP 契约锁**：新增六工具 schema/注解的 golden 测试，防止只读声明或参数漂移。\r
-\r
-### 变更\r
-\r
-- **皮肤工坊入口与状态**：旧抽屉市场和入口移除；保存的皮肤在本机缺失时显示 Selected / Not installed，不再把原生外观标成已应用；资源包注册表读取失败保留上次好状态并提示，索引刷新改为单飞并显示检查中状态；皮肤操作不再点亮设置页「保存」。站点内嵌 demo 通过 \`?settings=1&page=skins\` 路由到工坊。\r
-- **版本与 provider 计数单一来源**：新增 \`site/scripts/sync-site-version.mjs\`，从 \`package.json\` 与前端目录生成 \`site-meta.json\` 并回写页面 fallback；计数链 Rust 77 家 + spend-only 白名单（\`mcode\`）= 站点 78 张卡由脚本与测试双向锁定，CI 增加 \`--check\` 门。\r
-- **隐私口径同步**：官网隐私页补 \`status.claude.com\` 状态探测一行；条款页数据目录改为 \`%APPDATA%\\PaneAafff623\`；英文访问自动指向英文法务路由。\r
-- **站点**：信任三卡补齐英文文案；i18n 测试新增死键检查（FAQ 结构键除外）；设计契约记录字号层级、入场时序与页脚不做二次光晕的决定；数据目录文案改为 \`PaneAafff623\`。\r
-- **刷新广播**：\`usage-updated\` 200ms 合并，刷新风暴不再让每个窗口重复重绘。\r
-- **扫描根目录**：\`/v1/sources\` 的 env 覆盖值复用扫描器的去引号/去空白规则，状态行与实际读取目录一致。\r
-- **代理与共享说明**：项目事实补「新客户端必须走 \`http()\`/\`http_direct()\`，回环永不走代理」；共享屏幕提示改为「窗口捕获会被系统排除，整屏共享无法由应用排除」。\r
-\r
-- **移除遥测**：删除上游的 PostHog 匿名日统计通道与设置开关，本版不再向上游作者的统计项目发送任何数据；隐私说明与官网同步改写。\r
-- **独立身份（#105）**：WinGet 包 ID 改为 \`Aafff623.Pane\`，Tauri identifier 改为 \`com.aafff623.pane\`，产品/安装名改为 \`Pane-Aafff623\`；不再使用原作者 ItsJazii 的 \`Pane.Pane\`、\`com.jazii.pane\` 和安装目录。首次启动将旧 \`%APPDATA%\\Pane\` 复制到 \`%APPDATA%\\PaneAafff623\`，旧目录保留；新旧安装并存，旧安装不再接收本项目的后续更新。旧配置里的开机自启偏好会迁移到新身份，并把自启项指向当前可执行文件。\r
-- **花费缓存 v7**：每个日志文件记录 5 点 × 4 KiB 的 FNV-1a 指纹（小于 20 KiB 全量哈希，WSL 网络路径采样 2 点）；同步工具保留 mtime+size 改写文件时不再误判为追加。**升级后首次扫描会全量重解析一次花费日志**，之后恢复增量。\r
-- **Argon 变价**：\`gemini-4-argon\` 现价 $2/$0.10/$10（每百万 token）进内置兜底；2026-12-01 起自动切到 Google 公布的 $4/$0.20/$20，并在价格时间线写入新 pin，历史金额不追溯。\r
-- **托盘溢出**：供应商超过 8 个时显示「还有 N 个供应商…」，点击回到主面板；Win32 菜单标签中的 \`&\` 正确转义。\r
-- **日志根目录**：\`CLAUDE_CONFIG_DIR\` / \`CODEX_HOME\` / \`DSH_HOME\` / \`GROK_HOME\` / \`PI_*\` 等环境变量会去掉首尾空白与成对引号。\r
-- **配置版本**：\`config.json\` 增加 \`configVersion\` 迁移标记，首次启动自动补齐。\r
-- **更新安装**：安装 Windows 更新前隐藏托盘图标，并向 NSIS 传入 \`REBOOT=ReallySuppress\`，安装失败时恢复托盘。\r
-- **代理跟随**：Windows 处于 PAC 模式（\`ProxyEnable=0\` + \`AutoConfigURL\`）时，读取 PAC 旁的静态混合监听并检测本机端口存活，不再静默直连；设置页显示当前生效代理/来源，新增「从系统读取」，手动地址做格式校验。\r
-- **设置侧栏**：一级分组改为 16px/700 并加组间分隔，二级保持 14px/500；行高、图标和侧栏宽度加大，折叠与悬停换成更柔和的 spring 曲线。\r
-- **隐私说明**：\`docs/privacy.md\` 增加「永不外发」明文清单。\r
-- **官网**：\`/api/latest\` 动态版本与按系统/架构分流下载；新增四张 oil-ui 信号卡、漫画皮肤预览、数字/导航/标题动效包与部署后 smoke；CSP 仍为 Report-Only。\r
-\r
-### 修复\r
-\r
-- **皮肤工坊焦点与失败反馈**：重建后恢复键盘焦点（含搜索、刷新和页面回退），下载/移除失败在画廊也可见，缩放弹窗 Tab 焦点留在对话框内；保存选区期间动作按钮锁定，避免连点丢操作。\r
-\r
-## 0.10.1 — 2026-10-26\r
-\r
-架构门禁 / 授权中心头像 / 设置回滚\r
-\r
-## 新增\r
-\r
-- **Family gatekeeper**：新增 changed-lines 架构门禁，共享文件新增 provider 特判必须委托 \`providers::<family>::\` 或写 \`// provider-specific: <理由>\`；CI 对 Rust 5 个共享文件与 \`main.ts\` 生效。\r
-- **结构化错误**：新增 \`AppError\`（IO 带路径 / 本地化中英）与 JSON \`{code,context,suggestion}\` 出口；托盘菜单增加问题态指纹，状态未变时不再重建原生菜单。\r
-- **授权中心头像**：Copilot 账号显示 GitHub 公开头像，加载失败自动回退字母块；自动发现型 family 的空态改用专用文案。\r
-\r
-## 变更\r
-\r
-- **设置失败回滚**：配置写入失败且队列已空闲时，重新读取后端配置并回滚外观/缩放/皮肤/托盘，避免界面显示已改、实际未保存。\r
-- **自动发现空态**：Codex/Claude/Antigravity/Kimi 的空账号页说明“本机已登录的号会自动出现”，不再只显示通用空态。\r
-\r
-## 修复\r
-\r
-- 发布门禁在 Windows runner 上改用 Actions 表达式取 tag，不再依赖 PowerShell 不展开的 shell 变量。\r
-- 托盘重复刷新时跳过无变化菜单重建，减少原生菜单闪动与无效开销。\r
-\r
-## 0.10.0 — 2026-10-26\r
-\r
-使用统计 / 首启引导 / 快捷键体系 / 参考仓收尾\r
-\r
-## 新增\r
-\r
-- **使用统计页**：设置左栏新增独立页，包含累计/峰值/连续活跃 KPI、52 周 Token 热力（日/周/累计）、按模型折线与模型 donut、选日工具/模型明细；原来的悬浮窗每日详情整体移入设置页并删除。\r
-- **首启三步引导**：欢迎/托盘与 Alt+2 说明 → 快捷键 → 服务商扫描；可跳过、可返回、Esc 关闭，完成后不再自动弹，设置里可重看。\r
-- **快捷键体系**：命令表 + 单点 capture 分发 + 纯函数内核；设置页支持按组合键搜索、行内录制、一行多个绑定、抢绑二次确认、恢复全部默认；旧单值配置自动迁移。\r
-- **用量拓扑页**：额度总览标题旁入口，只读展示 provider → 模型端点，活跃行亮 12 秒，空闲不跑动画。\r
-- **授权中心增强**：刷新失败时保留旧额度并标“缓存”，进行中行/组互斥，成功 1.6 秒自动消散，状态聚合进悬停说明，隐私眼睛掩码身份；本机账号身份变化时出现提示条（只提示、不导入）。\r
-- **设置第二轮**：四组侧栏树、四档字号、代码字体/字重、色盲图案、分段按钮滑块、丝滑基座动画。\r
-- **皮肤 1.0.2**：Comic Pixel 26 个像素图标、Signal/Ink 组件补齐、数据区可读字体、设置/工坊 GSAP 过渡。\r
-- **花费与本地数据**：本月预计（7 日中位数）、每卡燃烧曲线与 ETA、Claude Skill 用量卡、WSL 中 Claude/Codex/Copilot 日志并入扫描。\r
-- **本地 API 与 MCP**：新增 \`/v1/limits\`（\`openusage.limits.v1\`），providers/status/doctor/sources 增加 \`schemaVersion\`，provider 行增加 \`statusCode\`；MCP 六个工具声明只读注解。\r
-- **隐私**：Windows 屏幕共享时，主窗和设置窗使用 WDA 从窗口采集中排除。\r
-\r
-## 变更\r
-\r
-- 所有 provider 的 HTTP 状态错误统一携带 \`retry_after_s=\`；429/503 退避取服务器提示与本地指数下限的较大值。\r
-- 后台刷新按余量和重置临近程度自适应缩短到 1 分钟；任一 provider 处于退避期时不加速。\r
-- 额度身份守卫、凭据指纹、账号级刷新锁、OAuth 单 flow 与手动回调兜底补齐；Codex 登录框可直接粘贴回调链接。\r
-- Codex/Copilot/Grok 的账号刷新在账号锁内重新载入，token 仍有效时复用，避免重复消费 refresh token。\r
-- 设置里的旧 \`localShortcuts\` 迁移到 \`shortcutBindings\`，清空绑定不会被旧值复活。\r
-\r
-## 修复\r
-\r
-- **Claude 过期窗口**：已过重置时间的百分比行改为“等待刷新”，不再被 pace 读成 Ahead 或被 alerts 误报“将会用完”。\r
-- **异常百分比**：>101 或非有限值不再钳成 100% 满额，改为“不可用”，避免 epoch 级泄漏触发耗尽告警。\r
-- **Copilot JSONL 后备源**：会话续跑时按累计值做差，只补增量，不再漏记第二次 shutdown 之后的用量。\r
-- **Kiro 403 / 凭据终态**：只有撤销类错误才判“需重新登录”，泛化 401/403、代理、超时保持可恢复。\r
-- **关于页更新态**：检测到新版本时按钮高亮为“更新到 vX”，并显示可用版本行。\r
-- **i18n**：三语 key、插值变量和品牌词 parity 纳入测试；修复 \`upstream.line\` 俄语缺变量。\r
-- **发布门禁**：CI 增加 concurrency；release 前置检查 tag、package.json 与 CHANGELOG 一致。\r
-\r
-## 0.9.1 — 2026-10-24\r
-\r
-StepFun 双通道 / 精确额度 / 重置时间\r
-\r
-## 变更\r
-\r
-- **StepFun 双通道并存**：Step Plan 的网页会话与 API Key 现在分别保存，互不覆盖。网页会话可用时优先读取真实额度；只有网页会话缺失或过期时才回落到 API Key 的本地 token 估算。\r
-- **StepFun 精确余额**：Credit 行优先使用 \`credit_buckets\` 的 \`credit_total\` / \`credit_residual\`，展开卡显示 \`6.66B of 8.00B credits left\`，并倒计时到订阅到期时间。\r
-\r
-## 修复\r
-\r
-- **StepFun 重置时间 1970**：接口把 \`subscription_credit_reset_time\` 返回为 \`0\` 时不再当成有效时间，改用订阅/资源包的 \`expire_at\`。\r
-- **旧凭据迁移**：历史 \`{apiKey}\` 文件在加载时自动归入 API Key 槽，不再被误判成网页会话。\r
-\r
-## 0.9.0 — 2026-10-24\r
-\r
-设置骨架 / VS Code 灰 / 三皮肤适配 / 官方用量\r
-\r
-## 新增\r
-\r
-- **设置面板骨架**：设置窗口改成无边框悬浮面板——56px 拖动标题栏、200px 文字侧栏（窄窗 170px）、页签式分区卡片与 18/14/12 三档文字行；常规、密钥、快捷键、通知、隐私、网络、关于共用同一套 \`.set-section\`/\`.set-row\` 盒模型。\r
-- **跨页设置搜索**：标题栏新增搜索框，覆盖所有已渲染设置行；↑/↓ 选择、Enter 跳转、Esc 清空，命中后切到对应页、滚动到行并短暂高亮。索引从真实 \`data-setting-anchor\` 生成，运行时双向覆盖检查防漏项。\r
-- **四段式关于页**：品牌（实时版本、点击复制）→ 动作（检查更新 / GitHub / 官网 / 反馈）→ 更新策略（后台检查 4 小时 / 每天 / 每周 / 从不，\`updateCheckHours\` 可持久化）→ 生态（Star / 反馈 / 分享、更新日志、重置设置）。\r
-- **VS Code 经典亮暗色**：默认主题从 zinc 纯黑改为 VS Code Dark+ / Light+ 中性灰——深色 #1e1e1e 背景、#252526 卡片、#3c3c3c 分隔线，浅色 #f3f3f3 工作台 + 白色卡片；主强调色统一为 #007acc / #0066b8，文字和控件在两种模式下保持可读对比。\r
-- **三皮肤适配**：signal / ink / comic-pixel 增加新骨架的 \`.set-*\` 覆盖；设置卡片、分区标签、侧栏激活态和行分隔线跟随皮肤；Comic Pixel 资源包补齐字体与 manifest，可在工坊安装后直接选择。\r
-- **ZCode Start Plan**：Start Plan 与各类赠送活动（周末、1024 Dev Day、模型试用）按同一机制展示，计划名稳定为 \`Start Plan (活动名)\`；无计划、已结束、未领取分别有明确状态。\r
-- **WorkBuddy 官方请求流水**：WorkBuddy CN 卡片新增只读 \`Official requests (30d)\` 行，显示 30 天请求数与 credits 合计；不写 meter、不与 credit_history 相加，分页截断标 \`· partial\`。\r
-- **Gemini CLI 本地花费**：读取 \`~/.gemini/tmp/<project>/chats/session-*.json(l)\`，按官方 session schema 解析 cached/thoughts；cc-switch 已覆盖的日期优先，原生只补缺日，避免重复计费。\r
-- **加密本地备份**：设置 → 常规新增「加密备份」，可选择账号与登录令牌、密钥保险箱、偏好设置分别导出/导入。文件用 Argon2id + AES-256-GCM 加密，不含明文令牌；导入前预览新增/冲突数量，恢复按稳定身份合并，写入失败会回滚账号文件、系统凭据和保险箱。仅本机文件，不接 WebDAV 或云端。\r
-- **授权中心身份与最近使用**：账号行区分 Pane 托管、官方客户端本机登录和当前登录；显示最近使用与最近查询时间，并支持多选删除、按最近重置排序。\r
-- **ChatGPT 账号邮箱命名**：Codex / ChatGPT 子账号默认以登录邮箱备注，重复登录态按稳定指纹合并，不再出现多个同名 "ChatGPT"。\r
-- **StepFun API Key 估算**：没有网页会话时接受 API Key，只显示 token 与 Credits 估算（按官方人民币价目），不伪造余额条；网页会话仍显示真实 Step Plan。\r
-\r
-## 变更\r
-\r
-- **设置窗口**：默认 980×700、最小 860×620，保留 \`panel-window.json\` 尺寸记忆；旧 \`index.html\` 设置 sheet 退役，控件集中到 \`src/settings/controls.ts\`，只保留一套设置 DOM。\r
-- **额度趋势**：只有百分比额度的 provider（MiniMax、Brave、Firecrawl 等）也能画出每日趋势，百分比按日高水位记录，不与 credits/tokens 混算。\r
-- **皮肤兼容**：设置骨架的激活态改用 \`--primary\` 并由皮肤决定强调色；旧 \`.st-block\` 外框在 skin 下置空，避免分区出现双层/三层边框。\r
-\r
-## 修复\r
-\r
-- **皮肤资源包拆包**：\`signal\` / \`ink\` 的 CSS、图片与皮肤字体移出安装包，统一走官方资源包（\`skins/<id>/\` 源 + zip/index）；工坊按 installed + remote index 展示，老选择通过索引自动迁移；图标图集改由 pack CSS 提供 URL，主题开场与分享 PNG 适配 pack 资产。皮肤插画压缩为 WebP（signal 10.3 MB → 1.5 MB，ink 4.1 MB → 0.95 MB），修复工坊预览里山水、锦鲤与信号背景图不显示的问题。\r
-- **皮肤分享图**：应用皮肤后分享卡片不再失败——图标图集内联改用单引号，避免 \`style\` 属性被 data URL 的双引号截断；分享快照只携带当前皮肤的样式，原生分享 SVG 从约 7 MB 降到 0.23 MB；signal / ink 的分享图均恢复并包含各自插画、图标与背景。\r
-- **切换账号抖动**：账号 tab 切换时保留点击卡片的位置与列表滚动，不再整页跳回顶部。\r
-- **ZCode / xfyun 口径**：Start Plan 截止时间、缓存与领取状态按真实响应校验，不再把已过期计划当成可用，也不再凭空生成试用额度。\r
-- **设置保存失败可见性**：面板窗口写配置失败会弹出可见 toast，而不是只写进被隐藏的 footer。\r
-\r
-## 0.8.9 — 2026-10-22\r
-\r
-多账号收口 / OAuth 登录弹窗 / 备注联动\r
-\r
-## 新增\r
-\r
-- **授权中心登录弹窗**：设置页或授权中心的“添加账号”会直接启动 OAuth 并弹框，框内显示可复制的授权链接；浏览器自动打开，\`1455\` 被 Codex CLI 占用时自动改用设备码并在框内显示。\r
-- **Customize 全部 / 已配置筛选**：自定义看板顶部改为两个筛选 Tab，只显示已配置的服务；皮肤工坊改从侧边栏进入，不再占用看板顶部。\r
-- **授权中心修改备注**：授权中心账号的 \`⋯\` 菜单新增“修改备注”，备注与设置、Customize、额度看板共用同一来源并即时同步。\r
-\r
-## 变更\r
-\r
-- **估算标记**：黄色告警胶囊改为低对比的“≈ 估算”轻量胶囊，抬头估算 token 同样收进次级胶囊并保留说明 tooltip，不再抢过主数值的视觉权重。\r
-\r
-## 修复\r
-\r
-- **已归档凭据重复添加**：重新添加同一 API Key 时明确提示从归档恢复，不再在下一次刷新时被静默清掉；修改账号 Key 与旧按行号删除入口也会先退休旧 provider 来源。\r
-- **relay 账号旧身份恢复**：\`relaybalance\` / \`sub2api\` 的元数据文件已被旧版本删除、但系统凭据库仍留有 provider Key 时，按 API Key 从现有账号恢复 baseUrl，并支持按 Key 退休旧来源，避免生成无 baseUrl 的默认副本。\r
-- **迁移失败可见性**：账号迁移失败会写入运行日志，不再完全静默。\r
-- **账号备注与授权入口**：账号备注统一写入跨窗口共享的显示备注；设置页改名后 Customize 立即同步；Codex / Grok / Copilot / Kiro / Windsurf / Trae / Zed 的登录统一跳到设置，避免第二套授权 UI；账号行图标按钮统一为 24px。\r
-- **备注显示统一**：账号显示名按稳定身份解析并兼容旧 \`@__default__\` 备注；设置、Customize、主页账号胶囊、概览/到期详情、授权中心共用同一解析器；缺失名称回退为本地化“账号 N”，不再显示 hash / masked key；备注单行、最多 48 字符并统一省略；归档、删除、刷新不再清掉账号备注。\r
-- **自定义看板与弹层**：账号状态条居中；One/New API 删除后立即移除旧账号胶囊和快照；所有菜单、提示、引导气泡统一使用缩放感知定位，修复 CSS zoom 下弹层漂移。\r
-- **添加账号无响应**：面板窗口内写下的跨窗口跳转意图不再等待事件回流，点击即启动登录。\r
-- **账号切换抖动**：切换账号时保留列表滚动位置与焦点，不再整页跳回顶部造成上下抖动。\r
-\r
-## 0.8.8 — 2026-10-21\r
-\r
-更新日志时间线 / 窗口等比缩放 / Provider 趋势花费 / 设置排版\r
-\r
-## 新增\r
-\r
-- **版本更新与当前配置通知**：新安装和升级用户会看到简练的版本更新弹窗；每个版本另有一次当前配置说明（英文 MV Boli、中文系统字体、紧凑条形双列），可直接应用推荐配置。\r
-- **中英文字体分开配置**：英文字体（如 MV Boli）与中文字体各自选择，字体栈按“拉丁字体 → 中文字体 → 系统回退”排列，中文不再只能依赖系统默认。\r
-- **设置页与密钥页排版**：各设置页统一为同一条 940px 内容列并在窗口中垂直居中，不再出现网络页近乎全宽、隐私页只剩 624px 的比例差异；密钥与额度页按 A–Z 排列并在左侧空白处加入字母索引；隐私说明改为可读行宽。\r
-- **底部更新日志时间线**：主界面卡片列表下方按版本显示彩色时间线，新增/变更/修复用不同颜色标记，点击可查看完整日志。\r
-- **悬浮窗四角缩放**：设置中可开启四角缩放手柄；拖动时窗口与字体、图标整体等比缩放，并记住窗口尺寸，可一键恢复默认大小。\r
-- **Provider 趋势区花费**：额度趋势旁显示该 Provider 的已消费 Credits 或实测 Tokens；WorkBuddy 同时显示 Credits 与本地日志实测的 Tokens，不做不可验证的换算。\r
-\r
-## 变更\r
-\r
-- **移除刷新点自动触发**：删掉 GLM / MiniMax 等 5 小时套餐“到刷新点自动发请求叫醒计费周期”的整套机制（含设置、状态徽标、后台任务与端到端代码），当前只保留普通刷新与快速唤醒快捷键；后续版本再重新设计。\r
-\r
-## 修复\r
-\r
-- **WorkBuddy 混元 3 / Hy4 preview 计费**：\`hy3\` 与 \`hy4-preview\` 现在按腾讯官方价格计入，模型明细在 token 视图同时显示对应金额，不再只显示 token。\r
-- **Provider 名称末字被裁切**：MV Boli 等手写/斜体字体的最后一笔会溢出行宽，被省略号边界裁掉；卡片标题右侧留出 3px 内部空间，DeepSeek / StepFun / ClinePass 等名称完整显示。\r
-- **悬浮窗底部空白**：等比缩放时 \`100vh\` 先于 \`zoom\` 计算，外壳只覆盖窗口高度的 88.6%，页脚下方多出约 64px 空白；按缩放比补回外壳高度后，页脚重新贴住窗口底部。\r
-- **置顶与解锁位置**：置顶图标改为竖置金色；默认不再全局置顶；置顶后点击悬浮窗外不再自动隐藏。解锁进入调整模式：按住窗口任意非交互区域即可拖动，点外面也不会隐藏，位置会记住；再点锁完成，Alt+2 回到调整后的位置。新增「重置位置」恢复默认垂直居中。\r
-- **自定义看板顶部空白**：皮肤入口移出固定标题栏；搜索框移入标题栏中间（“完成/自定义看板”与“全部重置”之间），不再单独占用一行，也不再留出空行。\r
-- **Qoder CN 本机登录**：国际版 Qoder 面板检测到本机 Qoder CN 登录时显示直达入口；Qoder CN 是独立档位，不再被误认为未配置。\r
-\r
-## 0.8.7 — 2026-10-20\r
-\r
-Qoder CN 本机用量 / 授权中心登录识别 / 基元律动接入 / 弹窗置顶与位置\r
-\r
-## 新增\r
-\r
-- **授权中心自动识别本机登录**：Codex CLI、Copilot、Kiro、Cursor、Antigravity、Qoder / Qoder CN、Trae / Trae CN 只要官方客户端已在本机登录，授权中心就会多出一条只读的「本机登录」行，并从用量快照显示套餐与额度；Qoder CN / Trae CN 折进对应分组，不再因为 Pane 没有它的登录记录而显示为空。对应卡片曾被删除时，行内提供「显示用量卡片」一键恢复（只读取官方登录文件，绝不回写）。\r
-- **每个 Provider 的接入方式说明**：自定义面板现在会明确告诉用户这个 Provider 靠什么接入——扫码、浏览器登录、设备码、桌面版导入、网页会话、API key 还是读取本机登录；登录型会给 2–3 步操作指引，并只显示真正能完成接入的按钮。\r
-- **WorkBuddy AI 独立档位**：新增 WorkBuddy 国际版（\`workbuddyai\`，\`www.workbuddy.ai\`）。它与 CodeBuddy 国际版是两个产品：独立的扫码入口、账单路径、桌面登录文件和本地日志目录。国内版与国际版同 UID 不会互相覆盖，凭据域名不匹配会被拒绝保存。\r
-- **授权中心来源标注与桌面版导入**：账号行现在标明凭据来源（扫码 / 桌面版导入）与企业名。WorkBuddy 的授权中心新增「导入桌面版登录」，把官方客户端里**明文**的登录态导入为 Pane 管理的账号；加密信封只报告状态、不解密，也绝不回写官方文件。\r
-- **额度来源行与资源包明细**：当额度来自桌面版或网页会话时，卡片会多一行 \`Source\` 说明；7 天内到期的资源包单独显示剩余与倒计时（最多三行），其余有效资源包合并为一行汇总（数量 / 总剩余 / 最近到期）。\r
-- **WorkBuddy / CodeBuddy 本地 Token 统计**：用量面板新增 WorkBuddy（国内）、WorkBuddy AI、CodeBuddy CLI 三个本地日志来源，读取 input/output/cache read/cache write；未定价模型仍计入 token 并标记未定价。积分账本与 token 统计分开，不混算。\r
-- **基元律动额度卡片**：新增基元律动（tokenrhythm）provider，卡片显示可用额度与冻结额度（人民币）。凭据是网页登录态而非 API key——设置面板点「网页登录」在弹出的浏览器窗口里用手机号加验证码登录，会话存在本机，重启后仍有效。\r
-- **弹窗置顶与位置锁定**：总花费行新增置顶与锁定两个按钮。置顶让面板浮在其他窗口之上；锁定默认开启，此时每次唤出都居中且不可拖动，解锁后可把面板拖到任意位置，位置会被记住，下次唤出回到原处。\r
-- **弹窗记住上次的界面**：切到自定义看板、皮肤工坊或某个 provider 的配置页后关闭弹窗，再次唤出会回到那个界面而不是卡片列表；该 provider 已被删除时退回列表。\r
-- **定制面板的「去设置里登录」按钮**：基元律动这类网页登录型 provider，在定制面板的行内多一个地球图标按钮，点击直接打开设置面板并定位到该 provider 的密钥行。\r
-- **用量来源徽章**：Claude 卡上新增「疑少计 ×N」与「cc-switch ×N」两个徽章，说明当天的用量来自哪个数据源、以及哪些天可能少计。天数按当前视图（今日/昨日/7 天/30 天/全部）分别统计。\r
-- **Qoder CN 本机用量（#28 第一期）**：用量面板读取 Qoder CN 桌面端本地转录，统计逐请求 credits 与派生的计费输入 tokens（Σ 上下文占比 × 上下文窗口）。免费/零倍率模型（如 DeepSeek-V4-Flash）只写名义 credits、不占额度，因此实扣与名义分开显示，并标出免费请求次数和当日 Top 10 会话。模型明细现在也进入总花费的「按模型 / 按工具」列表：每个模型显示测算的 token 数并标「估算」，credits 仍以准确值单列（不折算成美元）。\r
-\r
-## 变更\r
-\r
-- **基元律动品牌标**：卡片改用基元律动的正式标志（「TR」字形），随主题自动适配深浅色；此前是自绘的波形占位标。\r
-- **扫码登录互不打断**：同一时刻发起国内版与国际版扫码时，两边不再互相清掉对方的状态；同一账号的并发刷新会合并为一次，避免用旧刷新令牌覆盖刚轮换的新令牌。\r
-- **错误提示更明确**：额度查询失败时区分会话过期、拒绝访问、浏览器指纹校验、限流与服务端错误，不再统一显示一个笼统错误。\r
-\r
-## 修复\r
-\r
-- **「添加账号」弹错对话框**：登录型 Provider（Codex、Copilot、CodeBuddy 家族、Qoder、Kiro、Windsurf、Trae、Zed 等）过去点「添加账号」会弹出 API key 输入框，其中 11 个还会真的把 key 写进去、随后报 \`unknown provider\`。现在统一跳到授权中心完成真实的扫码/浏览器/设备登录；Type 为 key 的 Provider 仍保留粘贴、测试、保存。\r
-- **设置页登录入口**：9 个浏览器/扫码登录 Provider 不再调用错误的总 \`oauth_start\`（会直接报「不可用」），统一进入授权中心。\r
-- **CodeBuddy 家族的接入说明**：四个租户在配置面板里不再显示「无需凭据」，而是扫码登录 / 桌面版导入 / 网页会话的说明与入口。\r
-- **stepfun-plan 面板不可达**：其账号密码/Oasis token 专用面板此前被多账号分支遮蔽，现在可以正常打开。\r
-- **已登录却显示未保存**：CodeBuddy / WorkBuddy 等登录型 Provider 的凭据状态改读正确的账号库。\r
-- **同一账号出现两张卡**：桌面版登录态与扫码账号是同一个 UID 时会各产出一张同 ID 的卡；现在已有 Pane 账号时不再重复产出桌面卡。\r
-- **「已登录」误判**：基元律动登录页在认证之前就会落下自己的 cookie，旧逻辑把这些访客 cookie 当成会话，导致点「网页登录」立刻显示已登录、登录窗口根本不弹、卡片也一直空白。现在「已登录」一律以网站回答为准；缓存的会话过期会被立即清除。\r
-- **登录态读取通道**：会话改从 WebView2 的 cookie manager 读取。原先读浏览器 Cookies 数据库文件，浏览器运行时该文件被独占锁定、读取必然失败；会话 cookie 本身也是 httpOnly，页面脚本同样读不到。登录完成检测改由 Rust 侧轮询，绕开远程来源的调用限制。\r
-- **设置面板的登录按钮无响应**：网页登录与清除会话按钮渲染在设置面板，但处理函数挂在定制面板的事件分发上——两者是不同的窗口，点击因此落不到任何地方。同时「网页登录」按钮被放在了「无 key 就提前返回」之后，非 key 场景下够不到。\r
-- **账号保存失败不再丢账号**：保存账号时若文件写入失败，旧逻辑已先删掉对应凭据，下次加载这个账号就消失了。改为文件写成功后才清理，写失败时旧账号与凭据全部可恢复。\r
-- **用量来源判定的准确性**：疑少计比较先按卡片最终归属剥除其他厂商的用量，跨厂商的覆盖差异不再被误算成 Claude 少计。\r
-\r
-## 0.8.6 — 2026-10-18\r
-\r
-架构深化 / 密钥库流程 / 额度单位\r
-\r
-## 新增\r
-\r
-- **独立用量单位**：积分、次数、语音分钟与 token 分开记录和展示，不再把不同厂商的额度相加；额度趋势的悬浮说明会带上单位。\r
-- **密钥库会话迁移**：WorkBuddy Web 与豆包的登录会话改为系统凭据库优先；迁移成功后删除旧明文会话文件，失败时保留原文件作为回退。\r
-\r
-## 变更\r
-\r
-- **刷新与隐藏恢复**：较旧的刷新结果不再覆盖较新的数据；隐藏窗口时暂停重绘，重新显示后一次补齐，避免重复绘制。\r
-- **Provider 注册与托盘**：全局刷新、单卡刷新和托盘共用一份可执行注册表；GIPHY、CodeBuddy、Windsurf 也可进入托盘。\r
-- **密钥库编辑**：v3 密钥库的备注和名称可在解锁后直接修改，重新封包并更新完整性校验。\r
-- **WebView2 内存策略**：首次隐藏加载不再提前降低内存目标，改为窗口真正隐藏后再降低，降低部分版本首次显示异常的风险。\r
-\r
-## 修复\r
-\r
-- **查看/复制无响应**：解锁成功后不再重建密钥列表，避免按钮或文本节点被替换；解锁、查看、复制失败时在设置面板显示具体错误。\r
-- **v3 错误密码提示**：v3 密钥库解锁失败统一返回“主密码错误”，查看/复制会正常弹出重试提示。\r
-- **额度概览余额显示**：只有余额、没有百分比的 Provider（如 DeepSeek）不再显示问号，直接显示余额（如 ¥7.13），下方标注指标名。\r
-- **用量历史兼容**：旧版 credits 历史迁移到新的分单位记录；未知版本或损坏文件保持原样，不会被覆盖为空。\r
-- **恢复码规范化**：Rust 与前端共用同一套恢复码规范化向量，避免空白字符和大小写处理不一致。\r
-\r
-## 0.8.5 — 2026-10-16\r
-\r
-账号即时同步 / 凭据修复指引 / 紧凑额度条 / 字体引导\r
-\r
-## 新增\r
-\r
-- **凭据修复入口**：查询异常卡区分网络、凭据、权限和限流错误，支持进入对应账号表单补齐信息并重新测试；查询失败的账号仍可保存，开启后保留在总览中。\r
-- **Provider 来源说明**：补齐内置 Provider 的配置路径、数据来源、查询内容与权限边界；API key、登录会话和本地统计分别说明。\r
-- **MCP 多密钥总览**：BochaAI、Tavily、Firecrawl、Brave Search 的密钥按服务折叠，支持展开逐 key 读数；X/X 按本轮查询成功数与配置数显示，共享账户余额不重复视为独立套餐。\r
-- **MV Boli 字体引导**：新用户在系统已安装该字体时默认启用，并显示字体和主题设置说明；已有自定义字体的用户保持原设置，其余符合条件的老用户可一次性接受或拒绝推荐。关闭已展示的引导同样记为已读。\r
-\r
-## 变更\r
-\r
-- **默认紧凑额度视图**：新用户采用条形双列总览；已有明确视图选择的用户保留原设置。\r
-- **额度接口与权限**：Novita 使用新的余额接口；OpenRouter 普通 key 可独立读取自身用量，账户总余额仍需 Management key；SiliconFlow 原余额接口停用后改为验证密钥并明确提示余额不可读，Groq 缺少额度响应头时保留连接状态。\r
-\r
-## 修复\r
-\r
-- **新增账号立即同步**：设置与定制界面保存账号后同步详情、总览与可用数；修复默认账号重试读取旧来源、旧请求覆盖新凭据和跨窗口刷新倒序的问题。\r
-- **Step Plan 身份与错误状态**：拒绝冲突或无效身份，区分缺授权与临时网络故障，串行处理凭据更新和续期，避免旧会话覆盖新会话。\r
-- **GIPHY 应用统计**：按应用身份读取历史调用量，排除当日、未来和非法日期；历史推导上限不再标记实时额度用尽，缓存绑定当前凭据。\r
-- **折叠卡片空白**：指标全部按需展开或历史标签变化时保留一行可见读数，同时尊重手动隐藏设置。\r
-- **Windows 刷新黑窗闪烁**：隐藏后台查询启动的控制台子进程窗口，避免启动和刷新时短暂弹出黑窗。\r
-\r
-## 0.8.4 — 2026-10-15\r
-\r
-首启全量检测 / GIPHY 调用量 / 预览版通道\r
-\r
-## 新增\r
-\r
-- **首次启动全量检测本机工具**：第一次打开 Pane 时扫描整台电脑（各工具留在本机的登录态与配置文件、环境变量），把检测到的 coding harness 列成清单让你勾选——勾中的直接出现在额度总览与看板上，没勾的留在定制面板随时可开。登录过期或查询失败的工具也会列出并标注状态，一眼看出哪个需要重新登录。此前只有「默认启用」的十来家参与检测，Copilot / Trae CN / Qoder CN / Kiro 这类装在机器上也看不到\r
-- **「重新检测本机工具」**：设置 → 常规新增入口，装了新工具后随时重扫；重扫时新检测到的默认不勾，不会改动你已有的配置\r
-- **空机器引导**：什么都没检测到时，清单给出 Claude / Codex 两条建议（默认勾选，即原有的两张接入引导卡）\r
-- **GIPHY 调用量卡片（MCP 分组）**：新增 GIPHY provider，卡片按应用列出近 7 天调用次数，数据来自 GIPHY 开发者面板的统计接口；凭据粘贴面板的 \`access_token\`（不是 API key——统计接口只认面板用户身份，用应用密钥会被拒）。注意统计按天聚合，当日数字次日才出现\r
-\r
-## 变更\r
-\r
-- **首启选择一次定盘**：勾选结果写入配置后不再打扰（直接关掉弹窗即采用默认）；「重置设置」会重新触发一次检测\r
-- **发布通道分正式版与预览版**（工程侧）：tag 带 \`-\` 后缀（如 \`v0.9.0-rc.1\`）即预览版——同样构建三平台安装包，但不进入自动更新、官网下载、winget 与国内镜像，链接可直接发给测试者；正式 tag 行为不变\r
-\r
-## 0.8.3 — 2026-10-15\r
-\r
-看板清爽化 / 凭据入钥匙串 / 俄语补全\r
-\r
-## 新增\r
-\r
-- **未配置 Provider 折叠**：看板不再被几十张「未配置凭据」卡刷屏——裸未配置卡收进看板底部一个默认收起的「未配置的 Provider（N）」分组（点击或 Enter / Space 展开），Claude / Codex 两张引导卡保持外露；额度总览同步不再显示「需凭据」条目；一张卡都没有时改为带「去添加 Provider」按钮的引导空状态。升级用户的旧配置不被改写，看板同样清爽\r
-- **「隐藏未配置的 Provider」开关**：设置 → 常规新增开关，默认开启；关闭后完全恢复旧行为（未配置卡原地平铺、总览照旧）；开关切换后看板与总览即时变化，重置设置与跨窗口同步复选框状态\r
-\r
-## 变更\r
-\r
-- **登录类令牌全部进系统钥匙串**：OAuth / 登录刷新令牌、Cursor / Codex 账号令牌、检索 key 五处明文存储迁入系统凭据库（Windows 凭据管理器 / Keychain / Secret Service），JSON 文件只留标签、账号 id、过期时间等非机密字段；旧版本的明文条目在首次读取时自动迁移——钥匙串写入成功才删明文，写入失败保留明文继续可用，不丢凭据；删除账号、登出同步清理钥匙串条目；\`SECURITY.md\` 写明「哪些凭证允许明文」的边界\r
-- **俄语界面补全 43 个缺失键**：One/New API 设置区、皮肤预览、页脚提示此前整片英文回退；三字典键集比对接入 CI，此后漏翻任何语言直接红\r
-- **两个手搓随机源换操作系统级**：Cursor 登录 PKCE verifier（原熵约 64 bit）与遥测匿名 UUID（原由时间与进程号推导）改用 OS 随机源，与注释宣称一致\r
-- **CI 与发布链路统一 pnpm**：删除 \`package-lock.json\`，CI 前端门禁与发布构建改用 pnpm 冻结锁文件——CI 验证的依赖解析与开发实际运行的一致\r
-- **测试与 CI 加固**：82 个从不执行的测试恢复执行（parse-tests 收录托盘投影与遥测 39 个；CI 新增 src-tauri 自身测试作业 43 个，含快照缓存 / 卡片设置误删的数据损失防线断言）；配置键新增前端编译期完整性断言\r
-\r
-## 修复\r
-\r
-- **花费热力图同日双计**：kimi 改名 moonshot 后同一天两个 id 各出一行——明细视图补上汇总视图已有的别名折叠（同日取大者、不求和；改名前历史日保留）\r
-- **单点 panic 不再级联**：全树 49 处互斥锁取用统一为中毒容忍写法，任一锁持有期间 panic 不再永久毒化后续刷新循环与命令入口\r
-- **隐私与治理文档对齐事实**：遥测「单一可审计文件」更正为两处实现并补披露每日汇总发送失败即丢弃的有损性；\`AGENTS.md\` 项目地图去掉 3 倍失真的前端行数描述\r
-\r
-## 0.8.2 — 2026-10-14\r
-\r
-新手引导 / 字体资源包 / 刷新唤醒 / 信封分享\r
-\r
-## 新增\r
-\r
-- **新手聚光灯引导**：首次安装自动播放 5 步聚光灯引导（总花费 → 额度总览 → 服务商卡片 → 右栏图标径迹 → 左栏控制栏），每步带上一步 / 下一步 / 跳过，\`Esc\` 随时退出；老用户升级不触发，设置 → 常规「重新演示」随时重看；中 / 英 / 俄三语文案；窗口缩放与滚动时高光跟随目标。完成、跳过、退出都写入「已见过」状态，首次演示资格跨重启保留\r
-- **字体资源包**：与皮肤包同一套闸门——zip + manifest + 逐文件 sha256，校验通过才落盘，损坏或篡改整包拒装不留残骸；安装后字体进入字体下拉可直接应用，卸载回落系统字体；\`@font-face\` 由 Rust 生成，包内 CSS 一律不执行；设置 → 常规字体行下方给出入口、已装列表（已下载 / 可下载状态）与「URL + SHA256」手动导入；首发无官方字体上架，推荐 Windows 自带 MV Boli（字体下拉直接选、无需下载）\r
-- **刷新点自动触发（默认关）**：GLM / MiniMax 等「必须请求一次才进入计费周期」的 5 小时套餐，到刷新时刻自动发一次轻量请求叫醒周期；默认关闭，开启需在设置中显式同意（弹窗明示会消耗一次真实请求）；同一刷新点只触发一次，重启与时钟回拨不重复；卡片显示 waiting / attempted / success / failed / skipped 五态；固定 URL allowlist、不跟随重定向、失败不回显厂商原始响应；端点按智谱 / MiniMax 官方文档核实（国际 + CN 均已覆盖）\r
-\r
-## 变更\r
-\r
-- **趋势图改用真实数量**：credits 行画每日 credits 消耗、token 行画每日 token、cost 视图按金额；轴、悬浮提示与标签的三语文案同步去掉「%」；无数据日期保持「无数据」态不画 0；采样百分比管线整条退场\r
-- **复制卡片为图片先选范围**：总花费卡按钮改为先弹时间范围菜单（今天 / 昨天 / 7 天 / 30 天 / 全部，当前窗口打勾）再生成信封模板图；信封数字与面板同源同范围（跟随按工具 / 按模型切换），空窗口出「无用量」；provider 卡保持即时整卡快照不变\r
-- **豆包图标换官方头标**：卡片、总览小卡、临期行三处统一换成豆包官方 192px 头像（内嵌 24×24 SVG，原始字节未改）\r
-- **更新说明弹窗精简**：自动更新后的「本次更新内容」只显示最新版本最多 4 条要点；设置里的更新日志仍可查看完整版本全文，同一 CHANGELOG 数据源\r
-- **credits 累计跟随时段**：总花费 credits 累计改为跟随 5 小时 / 每周时段 tab 的窗口化口径，与 token 行计算方式一致\r
-- **更新链路 CN 加速**：识别 CN 客户端后经站点边缘改写安装包 URL 到 Gitee 镜像（HEAD 预检、失败自动回退国际直链）；走代理的客户端显式询问 CN 镜像；页脚更新按钮实时反映下载中的更新状态，不再点了没反应\r
-- **README 与官网**：hero 主图重拍（折叠总花费 + 完整额度总览）并去重，中英双语严格镜像；官网设计区嵌入两张 archify 自包含架构图（架构总览 / 刷新数据流，深浅主题可用），演示面板随本版本前端重建；新增每周一上游参考仓库定时扫描工作流\r
-\r
-## 修复\r
-\r
-- **点设置默认弹授权中心**：面板跳转意图写入配置后消费不清空，面板窗每次重建都重放陈旧意图——点齿轮打开的是授权中心而非设置页；意图改为一次性消息（读取即清空 + 10 秒 TTL），齿轮与 \`Ctrl+S\` 显式打开设置页\r
-- **分享模板条长与数值口径不一致**：mtok 条长与打印值口径不统一，统一复用 \`spendVal\`；分享信封补入同范围 credits 独立行，与面板口径一致\r
-\r
-## 0.8.1 — 2026-10-14\r
-\r
-皮肤包落盘修复 / 工坊画廊改版 / README 换装\r
-\r
-## 修复\r
-\r
-- **皮肤包安装后重启即失忆（阻断级）**：\`verify_pack\` 校验 manifest 后没有把它写回安装集合——下载、安装、热应用全程正常，但 \`manifest.json\` 不落盘，重启后加载器找不到清单，工坊忘记已装皮肤。现在校验过的 manifest 原始字节随包落盘（保留原始格式与未知字段），重启后从磁盘完整恢复。真实链路已验证：HTTP 下载 → 落盘 → 工坊列表出现 → 热应用 → 杀进程重启后列表与已应用皮肤全部恢复；配套回归测试 \`installed_pack_is_listed_and_loads_its_stylesheet\`\r
-\r
-## 变更\r
-\r
-- **皮肤工坊改画廊布局**：固定页头（当前外观 + 返回）+ 唯一滚动正文 + 固定操作栏；主预览换上有辨识度的总花费面板样张（$32.80 圆环 + 服务商明细，固定演示数据不读真实账户），下方缩略图画廊浏览；日间 / 夜间 / 并排三种预览模式；返回、日夜切换、使用皮肤、恢复原生全部配上 Phosphor 语义图标（文字与禁用态保留）；切换皮肤与日夜模式时保留滚动位置与键盘焦点；下载、保存、移除失败在操作栏内就地提示；signal 主题的 8 条规则加作用域保护，资源包预览不再继承邮局样式\r
-- **README 换装（magpie 结构）**：中英双份按 magpie 的板块骨架整体重写——居中头部内嵌主图、「适合你吗」开场、快速开始、来源形态表、「它如何工作」架构图、八个小节各配主题自适应截图对（8 组 16 张 @2x，随 GitHub 读者的亮暗主题切换）、文档链接表、隐私段、star-history 收尾；服务商数修正 66 → 68（补上 CodeBuddy CN / WorkBuddy）；默认启用家族不再写死易漂移的数字；官网演示包随 0.8.1 前端重新打包（页脚版本与站点 hero 同步）\r
-\r
-## 0.8.0 — 2026-10-12\r
-\r
-CodeBuddy 家族三通道 / 皮肤工坊资源包 / ZCode Weekend / 静默刷新 UX\r
-\r
-## 新增\r
-\r
-- **CodeBuddy 家族入驻（CodeBuddy / CodeBuddy CN / WorkBuddy）**：腾讯 CodeBuddy 账号体系的三个租户各出一张独立卡（\`family@<hash>\`，禁用互不影响）；授权中心扫码登录（state → 轮询 token → 刷新），企业成员自动切换企业口径端点；额度为 credits 计量条（UTC+8 解释无时区周期、结转不出现负百分比、Unlimited/无总量退化/Reserved 单列），免费档显示「体验版」\r
-- **WorkBuddy 三条登录通道**：① 桌面版登录态直读（只读 \`workbuddy-desktop.info\` 明文字段，加密信封拒读不解密，WorkBuddy 未运行时可用）；② 卡片提示一键跳授权中心扫码；③ 网页会话 Cookie（显式启用制——不开就一个请求都不发；支持从 Chrome 导入或手贴 Cookie，UA 按本机 Chrome 大版本拼装、被拒自动降一个大版本重试一次；额度口径与扫码通道完全一致）\r
-- **皮肤工坊资源包体系**：工坊改两级布局（侧栏 + 详情），用真实组件（卡片/计量条）而非截图做皮肤预览；资源包 zip 带 manifest 与 sha256 校验，安装即校验、损坏拒绝；官方包上线分发索引（云端邮局 / 山水笺双包），工坊内一键下载安装；「山水笺」水墨主题 + 主题化启动动画（Esc 跳过、减弱动效适配）\r
-- **ZCode Weekend 用量行**：本机装有 ZCode 桌面客户端时，Z.ai 卡多一行「ZCode Weekend」周末包余额（读 \`~/.zcode/v2/credentials.json\` 的 AES-256-GCM 加密会话 JWT）；无会话不出行、有会话无包显示「Weekend not started」占位；请求失败沿用上次结论，行不再刷新间闪烁\r
-- **静默刷新 UX**：刷新失败分级（普通错误静默保留旧值、连续 ≥2 次才标记过期）；过期卡片的 ⚠ chip 可点击立即重试；卡片带「数据新鲜度」行（距上次成功刷新时长）；刷新节奏加 ±10% 抖动，多卡不再同秒齐发\r
-- **MCP / 搜索密钥自管文件**：bocha / tavily / firecrawl / brave 的键迁入 Pane 托管的 \`search-keys.json\`（明文、永不需要解锁保险箱），每键一条独立余额行（带用户标签）；环境变量与第三方 MCP 客户端配置不再作为来源——设置里加什么就查什么\r
-- **卡片提示运行时三语**：登录提示、过期原因等长文案改为按界面语言（中/英/俄）实时翻译，不再出现英文原文夹生显示\r
-\r
-## 变更\r
-\r
-- **看板内置分组固定为两个**：\`Coding Agent\` 与 \`MCP\`（原「MCP 搜索」去掉「搜索」二字），新装只有这两组；闪电说恢复自己的「生产力工具」目录分类——装有闪电说的用户多出第三组分区，未装的用户不受影响\r
-- **家族清单防漂移**：登录型家族的四处清单（登录存储、授权中心、账号列表、provider 目录）与 CodeBuddy 家族表全部纳入回归测试——新增家族漏登记任一处，\`cargo test\` 当场红（本轮 workbuddy 两次漏登记的教训固化）\r
-- **Chromium 解密链抽共享模块**：豆包桌面 Cookie 与 WorkBuddy 网页 Cookie 导入共用同一 \`os_crypt\` 解密（\`Local State\` → DPAPI → AES-GCM v10），代码单份维护\r
-- **仓库治理**：\`TODO.md\` 退休改用 \`.scratch\` 任务追踪（spec + 票据 + 状态行）；\`CONTEXT.md\` 拆分为词汇表 + \`docs/project-facts.md\` 已验证事实库；\`temp/\` 全树本地化不入库；完成态计划文档清退\r
-- **官网**：皮肤工坊直达入口、0.7.0 内容同步、演示区 provenance 哈希闸门进 CI（演示包落后前端即失败，杜绝再漂移）\r
-\r
-## 修复\r
-\r
-- **WorkBuddy「扫码成功却看不见」三连修**：① 授权中心的登录型家族清单漏了 workbuddy / codebuddycn——账号扫码后已落库（详情卡有额度）但中心列表恒空；② 家族提示卡被误算成一个账号——主看板幽灵「1/2」徽章与多余「置顶」页签、「额度总览」0/2 与「未配置凭据」，两条渲染路径抽成单一判定统一修正；③ \`account_list\` 没有登录存储分支——十个登录家族的账号列表恒为空，账号卡每轮刷新都被前端清掉，总览永远显示提示卡；三条均已带回归测试\r
-- **皮肤选择重启回退原生**：\`config.skinId\` 后端校验只认内置两款，资源包 id 保存时被静默清空——下载的皮肤重启即回退、跨机迁移 id 也存不下来；改为形状校验放行包 id。工坊已安装皮肤的详情页不再并排出现两个「原生外观」按钮\r
-- **Firecrawl 单键余额行重复**：单键时余额行打印两次\r
-- **窄窗布局**：总花费卡在所有视口宽度纵向堆叠不再挤压；弹层列表不再向上爬、分类 chip 按标签自适应不再溢出\r
-- **CI 误报**：Windows 内置管理员的 SDDL 别名导致 owner-only ACL 检查误报；skill payload 行尾在 CI 上不确定\r
-\r
-## 0.7.0 — 2026-10-11\r
-\r
-云端邮局皮肤 / 保险箱 v3 创建与恢复 / Agent 自检诊断 / 花费台账归并与积分罗列\r
-\r
-## 新增\r
-\r
-- **云端邮局主题（皮肤工坊正式开张）**：首款完整皮肤「云端邮局」——手绘邮票图标、纸张卡片、猫咪邮差与昼夜两套邮局场景（跟随亮暗设置，也可在工坊里并排预览日间/夜间效果再应用）；沿用你选择的界面字体，可随时一键恢复原生外观；分享图内嵌皮肤素材，导出与实况一致\r
-- **保险箱 v3 创建与恢复**：全新两步创建向导（① 解锁码输入两遍确认 ② 三道密保各填一遍），创建标准为至少 6 个字符、不强制字符组合（小字推荐含大小写与数字）；创建成功即生成一次性恢复码——仅展示一次，支持原生「另存为」导出 TXT；忘记解锁码时三路可恢复：答对任意两题、手输恢复码两遍、或上传恢复码 TXT（沿用 5 次失败冷却防暴力猜测）；恢复码可随时重新生成（轮换旧码）或停用；保险箱损坏/新版写入/读取失败等状态在界面上明确报告而不是静默\r
-- **Agent 只读自检诊断**：本地 API 新增 \`/v1/doctor\`（一句话健康结论，每项失败带修复办法）、\`/v1/providers\`（每张卡的状态/错误/过期）、\`/v1/status\`（版本/运行时长/刷新年龄）、\`/v1/sources\`（本机花费数据源清单）四个只读端点；配套「Pane 排查 Skill」三种装法——\`install.ps1\` 安装器自动装入、设置面板一键安装（先展示写入计划、覆盖前自动备份）、或 \`npx skills add Aafff623/pane\`；装好后直接对 coding agent 说「帮我查一下 Pane」即可自助定位「被禁用/没配密钥/登录过期/网络/刷新卡死」\r
-- **DeepSeek Harness 花费统计**：读取本地 \`~/.dsh/sessions\` 会话记录（zstd 多帧流式解压），把官方 Harness 的 token 消耗纳入产品花费与用量汇总，配 DeepSeek 鲸鱼图标\r
-- **更新确认弹窗**：检测到新版本不再自动弹窗打扰，改为总花费栏的圆形绿色↑指示器常驻提示；点击先打开更新详情（版本号 + 说明），确认后才开始下载安装；网络失败时给出原始错误与代理排查提示\r
-\r
-## 变更\r
-\r
-- **皮肤工坊脱离实验性开关**：工坊入口常驻自定义面板，不再依赖「实验性功能」；此前的实验皮肤（Aurora Desk / Paper Orbit / Neon Arcade）与吉祥物层整体移除，旧选择读取即清理；实验开关仅保留给真正的未完成功能\r
-- **详情额度环与状态色**：主题下额度圆环缩至 44px（紧凑模式 36px），保留真实额度周期时长与重置倒计时；状态分档固定为剩余 >40% 绿、25%–40% 橙黄、≤25% 红（此前正常态为蓝色），并整体提高饱和度——暗色用鲜绿/橙黄/亮红压暗轨道，亮色用深绿/深橙/深红，额度环、状态点与账号标识同步\r
-- **花费按产品归并、积分单列**：本地 CLI 台账统一产品口径——\`claude-desktop\` 并入 Claude Code、\`minimax\` 并入 MiniMax Code（不同账相加）、\`kimi\` 别名天级去重（同名双记只取一次）；已禁用/已删除的 provider 花费照常入账（CLI 还在烧 token 就该被看见）；Qoder CN / Trae CN 的积分不再折算成 token/美元，改为「Credits」独立小节按天逐行罗列每天实际消耗（不随时段 tab 变化，首日无基线不产出）\r
-- **官网无障碍与交互体系**：按 HeroUI / React Aria 模型整站替换——\`.chip\` 徽章体系、数字全部走 Intl 本地化格式、计量条获得 meter/progressbar 语义、按钮两轴（变体×尺寸）体系、设置浮层成真 modal（焦点陷阱/Esc/焦点归还）、FAQ 方向键导航、跑马灯新增暂停按钮（WCAG 2.2.2）；全站灰字对比度统一 \`--faint\` 单 token，双主题实测无低于 AA 的组合；设计层同步收敛（why-pane 行类型分道、生态轨道领域色环+悬停名片、特性区改「真实面板碎片」、动效开关合一、网格密度调参）；演示面板随 0.7.0 前端重新打包（含云端邮局昼夜素材）\r
-- **更新检查网络链路**：更新清单请求改走与 provider 一致的代理链（配置代理 → Windows 系统代理 → 直连），Clash 等系统代理场景不再裸连 github.com 超时；清单检查加 20 秒超时，死链秒级报错而不是停在系统级 TCP 超时\r
-\r
-## 修复\r
-\r
-- **原生亮色浮层可读性**：保险箱创建/重置弹窗、确认/更新/更新说明框、分组菜单此前写死暗色玻璃背景，亮色模式下深色文字落在暗底几乎不可读——全部改为跟随亮暗主题的浮层配色，关闭玻璃效果时补齐实色背景；输入框占位符、普通/危险按钮悬停、亮色账号数量徽章（浅底深字）一并修正\r
-- **时段切换高亮吞字**：今天/昨天/7 天/30 天等时段 tab 在选中高亮态下文字颜色被通用规则覆盖导致「看不见自己选中了什么」——选中/悬浮态文字与背景改回成套配色（亮暗两版）\r
-- **主题暗色花费列表高亮**：黄色花费底板的行悬浮状态误用暗色页面背景，暗色模式下名称与金额「深底配深字」——悬浮色与文字色成套适配\r
-- **图标与窄卡片布局**：每日用量详情及同类图标按钮统一居中；窄窗口下卡片操作按钮移到第二行，ClinePass 等长标题不再被按钮挤压覆盖；\`可用/总数\` 账号标识的可用数、分隔符、总数与背景在亮暗模式下均清晰\r
-- **花费去重与数据采集**：Kimi 别名（kimi ↔ moonshot 同源双名）按天折叠去重，修正天级重复计入；补齐 MiniMax v2 本地用量读取（\`runtime-state.sqlite\`，作为 mcode 的天级兜底防双计）\r
-- **积分历史反复清空**：credits 台账写入时 version 字段恒为 0，读取侧静默丢弃整份文件导致历史从未累积——修为按版本兼容读取并原地升级，已有记录恢复可读（此前已丢失的记录无法找回）\r
-\r
-## 0.6.0 — 2026-10-10\r
-\r
-登录式多账号 · 23 家新 Provider / 额度机制全量审计 / 自适应看板 / 官网生态页与双语 README\r
-\r
-## 新增\r
-\r
-- **主密码 Q&A 恢复（忘记密码兜底 + 二次验证）**：设置主密码后立即引导配置恢复问题——默认且推荐 2 个（内置 8 个问题可选：最喜欢的水果/最常用的编程工具/第一只宠物的名字等，也可自填），答案需输入两次确认；数量可在 1~5 个间调整，减到 1 个时弹窗说明"单个答案更易被身边人猜中"劝留 2 个；忘记主密码时在锁定状态点「忘记密码？」连续答对全部问题即可设置新密码（旧密码不出前端、库整体重封、答案不区分大小写与多余空格）；连续答错 5 次进入 5 分钟冷却防暴力猜测；更换主密码后恢复问题保持有效（密封自动轮转）。磁盘上问题为明文（锁定时显示挑战）、答案与主密码全部密封（答案各自 Argon2id 加盐 + AES-256-GCM，随机恢复密钥三路封存）\r
-- **「密钥与额度」页管理升级**：主密钥入口移到页首右上角（添加/切换主密钥、锁定/解锁、恢复问题、忘记密码一处可达）；每行「查看」旁新增「复制」（同一主密码验证，明文不上屏）；添加/替换密钥改为「先测试、后保存」——粘贴 key 后必须通过「测试连通性」才解锁保存，改动输入即重新校验；本机登录类（Copilot / Antigravity / Claude / Kiro 等）行内显示绿色「已连接」并写明来源（读取哪些本地文件/配置）；按钮按语义配色（删除红、复制绿、问号灰）且字号整体 +1px\r
-- **全量多账号**：37 家 API-key provider 全部支持子账号（添加账号、独立出卡、重命名/归档），不再限 8 家；已有单 key 下次刷新自动迁移为「账号 1」，无需手动操作；本地登录类仍读单一登录态\r
-- **快捷键管理重做（对齐 VS Code / Raycast 惯例）**：统一行布局修掉「切换分类」错位；快捷键以键帽呈现，点击即录制、Esc 取消、Backspace 清除、↺ 恢复内置默认、× 清空后重录；冲突全行互查并红字提示\r
-- **10 家 Provider 还原（第一批）**：\`amp\` · \`bedrock\` · \`chutes\` · \`deepgram\` · \`openai-api\` · \`poe\` · \`venice\` · \`vertexai\` · \`warp\` · \`kiro\` 恢复接入（Rust adapter、品牌图标、三语文案、环境变量与「测试连通性」全链路）；默认全部禁用，需在设置「密钥与额度」逐家启用；Bedrock / Vertex AI 读本机 AWS / gcloud 凭据（无凭据时显示未配置属正常），其余 7 家粘 key 即用\r
-- **4 家新 Provider（第二批）**：\`mimo\`（小米 MiMo，粘贴平台 serviceToken 或 API key 二选一——token 报月度用量、key 报余额/Token Plan，自动识别）、\`trae\`（Trae 国际版，读本机 \`%APPDATA%\\Trae\` 登录态，host 随账号区域）、\`qoder\`（Qoder 国际版，读本机 \`com.qoder.app.stable\` 登录态打 \`openapi.qoder.sh\`）、\`zed\`（纯本地：只读 Zed 编辑器 \`threads.db\`，统计 zed.dev 托管模型的全部/近 30 天 token 与近期模型 Top3，BYOK 线程不计）；四家同样默认禁用；\`zstd\` 依赖引入（解压 Zed 线程数据）\r
-- **8 家新 Provider（第三批）**：\`droid\`（Factory：billing/limits 的 5h/周/月窗口 + 旧版订阅用量回退 + 加购余额行）、\`jetbrains\`（纯本地读 IDE 的 AIAssistantQuotaManager2.xml——月度积分进度、加购池、续期重置，多 IDE 取最新）、\`groq\`（公开 API 响应头里的每日请求/token 预算）、\`huggingface\`（whoami 身份 + 当月推理账单，计费 = max(0, 已用-包含)，403 给出权限指引）、\`longcat\`（粘贴网页 Cookie：token 包摘要优先、旧版 tokenUsage 回退、燃料包副行）、\`sub2api\`（自建网关：自填部署 URL + 分组 key，订阅窗口/配额/钱包三形态 + key 级请求与 token 统计）、\`mistral\`（admin Cookie：当月 token 合计 + Vibe 用量 + 信用钱包）、\`perplexity\`（会话令牌：信用额度按 经常→已购→赠品 顺序归因）\r
-- **火山方舟（第四批）**：\`volcengine\`——粘贴 \`AK:SK\`（ark.volcengine.com 的 API Key 账号），V4 签名直译（HMAC-SHA256 签名链，与 Bedrock 同构共用 hmac/sha2）；Agent Plan 的 AFP 5小时/周/月窗口与 Coding Plan 的分层窗口双探测，任一返回即出卡\r
-- **Kiro 直读本地库**：不再调用 \`kiro-cli\`（旧通道每次调用触发 CLI 自更新、向 %TEMP% 堆安装包）——改为只读打开 \`%LOCALAPPDATA%\\kiro-cli\\data.sqlite3\`（\`KIRO_DATA_DIR\` 可覆盖）取登录 token 与 profile ARN，直连 CodeWhisperer \`GetUsageLimits\`；额度卡新增 Overage（超额已用/上限）与超额计费行，bonus 花费并入计划用量时明确标注；未知 region 的 ARN 拒绝请求而非把 token 发往猜测端点\r
-- **「密钥与额度」机制说明页**：覆盖全部 provider 家族——每行新增「?」，弹窗讲清该家取数机制（读取哪些本地文件/数据库、按优先级读哪些环境变量、查询哪些域名）、按认证形态给出「你要提供」步骤（粘贴 key / OAuth 登录 / 本地登录），底部附本次实测实时指标；本地登录类（Claude / Kiro / Trae / Qoder / Vertex AI 等）不再被要求粘 key\r
-- **解析测试补齐**：第一批 24 条 + 第二批 10 条 + 第三批 16 条 + 第四批 5 条（MiMo 三形态、Zed threads.db zstd 往返、火山签名链与双计划解析、Perplexity 三段归因、Sub2API 三形态等），provider 解析测试 489 → 550\r
-- **官网中英双语**：导航、Hero、下载、使用说明、快捷键、批注、服务商与 FAQ 全站切换，英文为重新撰写的专业文案；\`/en\` 路由由 Cloudflare Worker 指向同一文档、前端应用英文\r
-- **官网主视觉与演示升级**：Hero 右侧三素材自动轮播（圆点切换、\`prefers-reduced-motion\` 降级）＋「看得见」艺术字重做（渐变/字距/响应式，消除断裂与下划线残影）；看板演示批注系统按面板模式（概览/花费/设置/刷新）切换、卡片碰撞避让、连接线避让后重算，第 06/07 条绑定真实的设置齿轮与刷新/状态栏；服务商双轨道相向循环滚动（完整复制避免接缝）；下载区渐变光晕与页脚收口\r
-- **登录式多账号扩展（8 家）**：Codex 浏览器 PKCE 登录（CLI 同款 loopback 回调，简化流授权参数 + 403 传输重试，每次登录独立出卡）；Copilot 与 Grok 登录式多账号；Kiro 浏览器 PKCE 登录 + 每账号配额卡；Windsurf 登录 + 日/周配额卡；CodeBuddy 登录 + 每账号计费卡；Qoder 设备码登录 + 每账号积分卡；Trae 国际版登录 + 每账号权益卡；Zed 登录集成（回环令牌 OAEP/RSA 验签）；多账号徽章拆分配色并高亮低可用，总览账号胶囊改为「可用/总量」并按可用量着色，紧凑页签保留默认账号标签\r
-- **HTTP 系统代理跟随**：自动读取 Windows 系统代理并发往厂商端点；本地代理闪断走重试梯（直连重试 + 环境代理断链回退），地区封锁错误单独成类不再误报为网络故障\r
-- **悬浮看板自适应字号**：字号按看板宽窄自动放大/缩小（随窗口尺寸、重绘与字体加载更新）；总览与详情的每个标题按本行实际剩余空间独立计算（扣除图标、账号胶囊、箭头、百分比占位），长标题保留可读下限后省略；总览百分比、倒计时与账号胶囊同步适配；详情卡 provider 图标统一内缩 6px\r
-- **总览文字余额图形**：Firecrawl 等只报余额的服务在总览条形/圆环与悬停提示中展示真实余额——可靠百分比照常实填，分母未知时用中性斜纹条/虚线圆环加 \`?\` 标记并说明原因；多把 Key 分别显示余额与重置日期，不累加团队共享余额\r
-- **官网「为什么用 Pane」模块**：首屏与工作台之间新增说明块「查一次用量，不必跑遍每个后台。」；右侧用量汇集动效融合 Magpie 路由演示（实心点查询/空心点返回/到达反馈）与 Magic UI 渐变光束，来源可点击、可暂停，离屏与后台停跑、\`prefers-reduced-motion\` 降级（原作者源码与 MIT 许可归档 \`site/vendor/\`）\r
-- **官网 provider 生态轨道**：新增独立生态 section——16 个 provider 图标双圈反向旋转（外圈 20s/内圈 10s，独立暂停按钮），右侧按「AI 与内容生产 / 工作效率与商业运营 / 数字资源与开发基础设施 / 个人数字会员」四个方向介绍拓展构想（13 个候选领域明确标注为构想，当前收录 66 家）\r
-- **官网像素字标页脚**：页脚「Pane」字标换自绘 5×7 点阵 SVG mask（宽度 84vw、上限 1260px），保留金属渐变与光标追光；下载区底部先淡出到页面底色、青蓝光晕再渐入，去掉黑色硬分界，深浅主题自适应\r
-\r
-## 变更\r
-\r
-- **\`openai\` 家族更名 \`openai-api\`**：按 Admin key 口径正名（显示名 "OpenAI API"，环境变量 \`OPENAI_ADMIN_KEY\`），避免与 Codex 订阅卡混淆；\`hmac\` 依赖引入主 crate（Bedrock SigV4 签名用，后续火山方舟 V4 签名共用）\r
-- **Qoder CN 积分花费估算归位 \`qodercn\` 家族**：花费面板的「Qoder」积分估算卡更名为「Qoder CN」（数据源本就是 CN 版积分账本）；\`qoder\` 家族让位给国际版配额卡，两个版本不再共用一个 family\r
-- **官网显示名统一 MiniMax Code**：官网服务商列表与演示面板中 \`mcode\` 显示名由 MaxCode 改为 MiniMax Code（Pane 应用侧显示名待同步）；官网亮暗主题与内嵌演示面板主题分离，切换官网主题不再连带切换演示面板\r
-- **MCP/搜索额度口径统一**：Firecrawl 与 Brave 改为「已用 X / Y credits」（与 Tavily 一致），Bocha 保持 ¥ 余额；Firecrawl 按真实余额与重置日期展示，不再把套餐 \`planCredits\` 当总额度或反推已用（余额可含赠送/充值/团队共享额度）；Tavily 的 Key 用量、账户套餐用量与按量消费三种口径分别展示，多把 Key 的账户级额度不直接相加\r
-- **余额型服务不再编造总额度**：接口只返回余额时显示真实余额，移除「历史最高余额充当总额度」「缺失上限补固定套餐额度」「缺失套餐名补 Pro」等推算（闪电说、Command Code 等）；缺用量字段不再补 0 生成假满额\r
-- **官网英文路由与文案纠偏**：\`/en\` 路由修复（Worker 改为内部读取根页面，静态资源重定向不再丢失英文模式；首屏标题与 FAQ 简介漏译补齐）；官网中英文刷新文案统一为默认 5 分钟\r
-- **官网演示对齐悬浮板**：嵌入演示改竖排花费图表（圆环在上、模型列表在下），示例数据更新为 1.2B tokens/7 模型并校正模型名与配色；\`build-demo\` 增加源码哈希同步检查，主项目更新后提醒重新打包\r
-- **品牌图与元数据统一**：废弃的蓝色 P 标志全部替换为仪表盘 Logo（官网导航/汇集节点/工作台标题/轨道中心/页脚/favicon/分享预览共 8 处）；GitHub 仓库 description、homepage（\`pane.jazii.dev\` → \`pane.threetwoa.live\`）与 18 个 Topics 更新，\`package.json\`、\`Cargo.toml\`、\`tauri.conf.json\` 与官网 meta/canonical/分享卡片同步\r
-- **README 双语与素材**：新增 \`README_EN.md\`，定位放宽为「本地优先的用量与额度工作台」（当前 66 个来源 + 横向扩展方向分列，不把候选领域写成已支持）；三张占位图替换为当前前端静态截图并标注示例数据；技术栈徽章与测试徽章（改指 parse-tests harness）更新\r
-\r
-## 修复\r
-\r
-- **自定义看板排序收严**：主页的自定义分组（用户自建的「鸡蛋/羊毛」等标识）只作用于主页看板——自定义看板恢复全程严格 A–Z 字典序、不再渲染分组标题，启停与配置入口的位置稳定可预期\r
-- **打开设置先闪英文**：语言偏好本地缓存并在首帧同步恢复，设置窗口不再先显示英文再切中文\r
-- **暗色模式图标可见性**：Factory / Qoder / Novita / CommandCode / ClawsGO 等近黑品牌标在暗色下渲染为白色剪影，Groq 白标在亮色下转黑——设置页、看板、托盘表现一致\r
-- **官网视觉修复**：亮色模式图标发白、Claude 图标改回品牌橙、窄屏标题与描述溢出、批注箭头在卡片移动后指向旧位置\r
-- **65 家 Provider 额度机制审计**：逐家核对查询入口与额度口径后集中修复——缺用量字段补 0 造成的假满额/0% 卡片、Brave 凭据缓存按列表位置绑定导致的换序串号（改绑实际凭据，缓存倒计时跨账期失效）、OpenRouter 累计用量除以日/周/月上限的跨周期错算（改用对应周期数据）；provider 解析测试 550 → 609（新增 19 项回归，覆盖付费额度、缺字段、共享账号、凭据缓存与非法百分比）\r
-- **Firecrawl 余额被隐藏**：余额可超过套餐额度（赠送/充值/团队共享），旧代码用套餐额度反推已用并把负数截 0，导致剩余 10,890 credits 显示成「已用 0 / 1000」——改为直接展示真实余额与单 Key 重置日期\r
-- **总览文字余额落空**：总览已识别出文字余额数据，但条形/圆环布局仍按百分比渲染，最终显示「无用量数据」——补余额展示分支\r
-- **开发弹窗黑屏**：旧 Vite 占用端口但请求超时 + 启动脚本未按进程号正确停止旧进程 + 页面在脚本加载完成前整体隐藏——启动脚本改为显式按 \`-Id\` 替换旧 Vite 并就绪检查主脚本/样式，收窄 Vite 扫描与监听目录，启动期显示加载提示、超 8 秒提供重新加载入口\r
-- **保险库解锁后的陈旧行**：解锁/上锁保险库后 MCP/搜索卡片的锁定提示行不刷新——解锁与上锁时同步失效 searchquota 缓存；被删除的 provider（\`removedProviders\`）合并进禁用列表参与刷新判定\r
-\r
-## 0.5.0 — 2026-10-07\r
-\r
-设置与密钥管理 / 品牌换代与官网上线 / 多账号与长墙镜像 / 花费精度与更新推送\r
-\r
-## 新增\r
-\r
-- **密钥保护（系统凭据库 + 查看验密）**：provider 主密钥与全部子账号密钥迁入系统凭据库（Windows 凭据管理器等，经 keyring 库）——JSON 文件不再明文落盘，旧明文在首次读取时自动迁移（写入成功才删源，失败保留文件回退）；设置「密钥与额度」页已配置的行新增「查看」按钮，需主密码验证后才显示明文；保险箱状态栏新增「更换密码」（先验旧密码）\r
-- **设置中心独立窗口**：⚙ / \`Ctrl+S\` / 托盘右键→设置 打开独立设置面板，顶部胶囊目录 7 分类（常规/密钥与额度/快捷键/通知/隐私/网络/关于），静态卡片分区+发丝线行，配置跨窗口实时同步；悬浮窗内嵌设置页废弃\r
-- **设置密钥页重构**：「密钥与额度」页从单一手填保险箱升级为两张卡——「Provider 密钥」列出全部可管密钥的 provider（品牌图标 + 状态 + 行内添加/替换/移除密钥，多账号家族含子账号重命名/删除/新增）；「MCP / 搜索密钥」为原保险箱并补齐品牌图标；面板顶部 7 个分类页签同时补齐图标\r
-- **托盘菜单重做**：托盘右键直出各 provider 状态行（≤8 条，读本地快照零请求）+ 设置入口\r
-- **开机品牌动画**：弹出主窗时播放 GSAP 时间轴（卡片落定→环描边→指针扫→字母渐入），同一开机只播一次（\`boot_id\` ±60 秒容差防校时误重播）；设置→常规可开关/重播；系统减动效时停格成片帧后正常退场\r
-- **测试连通性**：卡片菜单「⚡ 测试连通性」对未启用的卡也可测（\`test_provider\` 命令），状态栏显示 \`连通正常 · N ms\` 或失败原因\r
-- **额度查询说明**：卡片菜单「? 额度查询说明」按认证形态自动给出 key / OAuth / 本地 三种步骤模板与控制台直链，内嵌「立即测试」\r
-- **子账号备注两级拆分**：「备注 Provider 名称」只改卡片标题，「备注子账号名称 · 账号名」只改该账号；≥4 账号的紧凑胶囊优先显示备注文本；默认主账号的子备注存合成键 \`family@__default__\`，不再串号\r
-- **子账号管理菜单**：右键账号胶囊可 ★ 设为默认主账号（总览优先显示它）、⬇ 归档 / ⤴ 恢复账号（凭据随档，覆盖 API key、Antigravity、Cursor 三类账号存储；归档记录不再回传 \`api_key\`）\r
-- **多账号总览折叠**：总览默认收起为 主账号环+用量条+N/M 徽章，点 caret 展开（\`overviewExpanded\` 记忆展开态）\r
-- **长墙镜像**：周/月额度打满时，短周期环直接镜像墙状态（100% + 刷新倒计时），消除「5h 环还是绿的但请求全被拒」的假象；首期白名单 kimi，其余家族逐家实测后扩展（Codex 有 banked credits 明确排除）\r
-- **Kimi 额度耗尽解释**：Session/Weekly 打满时详情显示 \`Weekly limit reached · resets in Xd Yh\`，不再是空详情的裸红环\r
-- **Qoder/Trae 积分趋势**：卡片显示积分消耗趋势（本地账本 \`credit_history.json\`：日消耗差值、跨天空档整笔归下一观测日、重置读数下跌计 0、重置日按前后两段计费）\r
-- **Qoder token 估算**：Qoder 按任务扣积分、官方无 token 公式，按 25,000 tokens/积分 的标注假设折算并带「估算」徽章，单点可调\r
-- **Qoder CN 加购桶读取**：用量读取补齐顶层 \`addOnQuota\` 桶（加购/赠送积分包），并入聚合分母并出独立「Add-on credits」行——买了资源包或领了活动积分不再隐身于满额红环之后\r
-- **Qoder CN 自动签到（默认关）**：每个领取窗口自动领取每日 100 积分福利（领取幂等，重复请求返回 \`replayed:true\` 不会多领）；设置→常规留开关，卡面一行轻量状态（已领/已领过/无活动/失败原因），失败 30 分钟后自动重试\r
-- **花费卡 ⚡ 分档渐变**：按日 token 量分 100M/250M/500M 三档渐变（7d/30d 按天数等比放大），最高档呼吸光效；阈值可在设置自定义（\`spendIconTiers\`）\r
-- **主页面滚动记忆**：\`Alt+2\` 唤回后停在上次滚动位置（\`mainScrollTop\` 防抖持久化）\r
-- **总花费横栏更新推送指示器**：检测到新版本时横栏出现绿色圆形 ↑ 按钮（Cursor 式轻量提示，不弹窗打断）；点击即原地开始下载——圆环按真实字节进度（\`update-progress\` 事件）填充，完成后自动安装并重启到最新版；失败落在底部状态栏\r
-- **抽屉搜索**：Customize 抽屉顶部搜索框按名称/family 子串就地过滤，分组头随空隐藏\r
-- **Provider 删除**：provider 设置面板（齿轮）与卡片菜单新增「删除此 Provider」——从自定义看板与主页看板一并移除（凭据保留）；自定义看板底部「已删除的 Provider」一行随时可恢复\r
-- **实验性功能开关**：皮肤市场默认隐藏，开启需二次确认，关闭即热切回原生皮肤（\`experimentalFeatures\`）\r
-- **新装默认精简**：首次安装仅默认启用 8 个主流家族，其余 33 家偏门默认禁用（\`DEFAULT_DISABLED_PROVIDERS\`，老配置不受影响）\r
-- **官网正式上线**：\`https://pane.threetwoa.live\`（Cloudflare 自定义域）；首屏交互演示由真实前端打包驱动——9 个快捷键演示（\`Alt+2\` / \`Esc\` / \`Shift\` / \`Shift+1\` / \`Ctrl+S\` / \`Ctrl+E\` / \`Ctrl+L\` / \`Ctrl+R\` / \`T\`，点击与按键均可触发）、深浅主题切换、移动端布局；「下载 Windows 版」点击直接取最新安装包（实时解析 GitHub 最新 Release，失败回退 Release 页面）；站点当前为中文单语，英文版后续再做\r
-\r
-## 变更\r
-\r
-- **品牌标统一**：以唯一矢量源 \`pane-mark.svg\` 重新生成全套图标（托盘/exe/安装器/官网 favicon/面板 logo），终结 exe 浅蓝圆环与官网深色仪表盘两套标识并存的漂移\r
-- **详情卡头部重排**：名称按实测拟合自动缩字号（17px 起步、下限 11px），健康点+百分比与齿轮/折叠/星标/刷新按钮浮层化（悬停淡入不占宽）；容器宽 <330/290/250px 三档渐进降级，被收纳的信息全部进悬浮提示\r
-- **置顶星标收敛**：账号 tab 行的星标全部移除，卡片头部常驻一颗，作用于当前展示账号\r
-- **Custom Balance 更名 Custom Relay**：内置中转家族正名（Rust/TS 目录、界面、存储共 9 处同步）；抽屉行说明「自定义可增删改，内置只能启停」\r
-- **设置页「额度」改名「密钥与额度」**（三语）：密钥保险箱在该页内，名实相符\r
-- **齿轮按钮文案**：抽屉 provider 行的齿轮 tooltip「配置」→「设置」（三语）\r
-- **品牌图标补齐**：新增 codebuff/elevenlabs/kilo/relaybalance/sensenova，traecn 换官方标，shandianshuo/clinepass/tavily/firecrawl/apigoto 补齐专属矢量标\r
-- **分类行截断**：总览分类 chip 超宽省略号截断，设置可切两行展开（最多 6 个+…）\r
-- **详情卡默认展开**：仅显式折叠的卡收起；折叠卡点空白区=展开+居中+高亮\r
-- **平滑滚动兼容**：系统关闭「动画效果」时 WebView2 的 smooth 滚动整体空转，全库 8 处滚动点统一探测/降级\r
-- **GLM V1 Pro 移除**：自接入的中转 provider（familyId \`linkso\`）从正式版全链路删除——Rust adapter 与目录、多账号分发、前端目录/图标/峰谷规则、官网 provider 列表与在线演示（\`site/\` 演示包已重新生成）；老配置里遗留的 \`providerOrder\`/\`disabled\` 条目由新增的「目录已不存在的 family 不渲染」规则兜住，不会留下无图标空白卡；历史 CHANGELOG 与旧凭据不动\r
-\r
-## 修复\r
-\r
-- **Antigravity 花费口径修正**：解码四字段正名（system / input / output / cacheRead——此前把输入按输出价计费、缓存重读整段漏算）+ 改按事件时间戳归日（不再把跨天对话压进一天）。修正后面板 30 天美元下降约一半、token 量级升至约 10 倍，均为读数修正结果而非数据丢失；价格体系版本 +1，历史美元全量重算\r
-- **自定义看板面板布局错乱**：provider 设置面板的列布局误继承行内居中（按钮全部居中悬浮、字段收缩），长凭据胶囊跨行碎裂——已改为左对齐整列布局 + 胶囊整行换行\r
-- **花费美元计价两处修正**：codex GPT-6 系（\`gpt-6.1-sol\`/\`gpt-6-sol\`/\`gpt-6-luna\`/\`gpt-6-astra\`）按官方价目表补齐 >272K 整单升档（输入/缓存×2、输出×1.5，此前 supplement 平价卡无档位字段导致长会话单向下偏低报）；\`MiniMax-M3.1-Flash-Preview\` 官方从未发布 per-token 价，按上代 M3 卡（$0.30/$1.20/$0.06，标注估算）兜底，不再 $0 记账（本机 33.7M tok 实测 +$2.78）。价格体系版本 +1，历史美元全量重算；Antigravity 的 \`gemini-3.8-flash-n\` 查无官方 SKU，维持 token-only 不编价\r
-- **滚动死界面根因**：全局滚轮兜底把抽屉/皮肤市场/设置的滚动全部抢去滚主列表，收窄为仅主列表命中时接管\r
-- **总览点击不跳转**：与平滑滚动空转同根因，此前系统关动画时总览跳转大面积失效\r
-- **右键菜单飞远**：窄悬浮窗内菜单被推到窗口另一头，改为鼠标落点定位+放不下上翻+边缘钳制\r
-- **头部假 0%**：纯文本指标的卡头部显示「● 0%」，无核心进度指标时改为隐藏（折叠徽章显示 \`—\`）\r
-- **积分账本重置日计费**：日内重置会把当天消耗整段记丢，改为同时记录峰值与末值，按重置前后两段计费\r
-- **账号存储原子写**：7 处裸 \`fs::write\`（含 OAuth/refresh token 存储）换 tmp+rename 原子写，杜绝进程被杀/断电时的截断窗口\r
-- **趋势日期暗色不可见**：误用表面色变量，改回正文弱化色\r
-- **详情卡头部溢出**：Copilot 等长名称卡的图标/按钮被挤出卡片，头部改 \`min-width:0\` + 控件 \`flex:none\`\r
-- **隐藏设置层拦截点击**：隐藏面板不再吃点击事件；语言下拉关闭后不再残留展开态\r
-- **浅色对比度补漏**：置顶头部/警示徽章/总览 meter 三档等 6 处补浅色主题变体\r
-- **Command Code 卡片三处**：点击被「有额度优先」切回别的账号、合并卡沿用空账号布局、手动刷新丢失折叠态\r
-- **暗色主题下「卡片分组」下拉发白**：展开的原生 \`<select>\` 菜单由 WebView2 宿主按 \`PreferredColorScheme\` 绘制，不理会页面的暗色主题与 \`color-scheme\`——系统浅色 + Pane 暗色时必然渲染成浅底浅字、几乎不可读（实测把宿主主题同步过去也无效）。改为自绘菜单，复用卡片分组菜单的玻璃样式与定位，两套主题下都跟随页面；同时保留宿主窗口的主题同步（跟随系统时传 null 释放回 Auto，避免污染 \`prefers-color-scheme\`），滚动条等其它原生 UI 一并对齐\r
-- **「5 小时窗口即将重置」开关拨了不生效**：该键从未进入 \`set_config\` 的白名单，前端每次保存都被静默丢弃（只留一行 \`ignoring unknown key\`），界面显示与后端行为长期不一致——补入白名单后可正常保存\r
-- **卡片名与折叠箭头间距过窄**：仅给箭头加 5px 左间距（原 7px 是名称/图标/箭头共用的 flex gap，直接调大会连图标一起撑开），视觉间距约 12px\r
-- **Bocha 品牌图标补齐**：此前是「博」字占位圆，换为按官方标复刻的矢量图——等粗单线条「b」（笔画宽 = 字高 20%，外圆 R 与内孔 r 同心）+ 两道浅蓝羽翼（\`#A5CCFF\`/\`#C5DEFF\`）+ 气泡尾点，主色 \`#006EFF\`\r
-- **官网演示花费面板全零**：演示数据在今天/昨天/7 天/30 天各时段的美元口径恒为 0，补齐后各时段 × 美元/tokens 两种口径都是非零数据（示例：今天 $19.98 / 209.5M，30 天 $359.64 / 3.8B）\r
-- **官网移动端留白与两处演示崩溃**：演示面板与快捷键卡两侧留白 20px（此前贴边导致无法滑动），手机上浮动批注改为面板下方 6 张静态介绍卡；演示桥接层补 \`setTheme\`（此前演示卡在 Starting… 不动）、演示配置补 \`removedProviders\`/\`qoderCheckin\`（此前自定义抽屉一点就崩）\r
-\r
-## 0.4.69 — 2026-10-05\r
-\r
-大面板与授权中心 / StepFun·SenseNova 登录根治 / 全机花费账本 / 发布流程规范\r
-\r
-## 新增\r
-\r
-- **运行时大面板窗口**：同一 bundle 上新增 cc-switch 形态的大面板（双形态 PoC），设置中心与授权中心迁入面板左侧导航，跨窗口配置实时同步\r
-- **cc-switch 式设置中心 + 完整托盘菜单**：大面板内的分节设置视图；托盘菜单补齐全量入口\r
-- **授权中心视图**：按家族分组的账号行（头像+名称+额度列+⋯菜单），聚合 OAuth/捕获/导入的多账号管理入口\r
-- **StepFun Step Plan 重写**：凭据升级为三元组（\`token/账号/密码\`，兼容旧 \`{apiKey}\`）；L0-L3 授权阶梯（JWT 预检→RefreshToken 单飞轮换→密码三步登录），HTTP 429 永不上梯；解析器同时支持 5h/周窗口与 Credit 月池双形态，30 分钟死局破解\r
-- **SenseNova 浏览器一键授权（PKCE）**：设置内两步式授权块（S256 + state），\`oauth_finish\` 接受回跳 URL/令牌 JSON/裸 JWT/纯 code 四种输入；\`refresh_token\` 持久化+轮换链路实测跑通，3 小时过期自动续期，永不再粘\r
-- **Z.ai 双域名回退**：\`api.z.ai\`（Bearer）凭据被拒或无指标时自动落 \`open.bigmodel.cn\`（裸 key）；凭据错误按 HTTP 200 + \`success:false\` 响应体判定（实测智谱网关行为），网络错误/5xx/429 不降级\r
-- **每日花费热力图**：总花费条详情入口，ZCode 风格 26 周日对齐方格 + 月份标签 + Less/More 图例，悬浮显示 $/token/工具数，单日下钻按工具/模型展开\r
-- **ZCode / MaxCode 品牌图标**：花费列表与图例使用官方品牌图标\r
-- **密钥保险箱主密码加密**：Argon2id 派生 AES-256-GCM 封存每个 key（服务名/标签/备注保持明文可见）；设一次密码，解锁查看/复制（逐行显隐），手动或重启上锁；key 支持用户备注\r
-- **自动更新根治**：release 以本项目自有 minisign 私钥签名（公钥内嵌），更新器读本仓库 GitHub Releases \`latest.json\`，新版本弹窗一键安装+重启；上游更新端点弃用\r
-- **官网一期**：\`site/\` 子项目，Magpie 式零依赖静态站 + Cloudflare Worker + 测试与 CI\r
-\r
-## 变更\r
-\r
-- **Claude 花费以 cc-switch 本地账本为主源**（\`~/.cc-switch/cc-switch.db\` 只读）：中转清零 CLI 日志的场景按真实 token 记账（自扫描曾低估 7~24 倍）；Pane 自扫描仅补 cc-switch 未覆盖的天，按天粒度合流零重复\r
-- **新增 cc-switch 独有花费卡**：MaxCode（mcode）、Gemini、Claude Desktop；pi 并入 Claude 卡；成本始终走 Pane 自有价格表\r
-- **总花费头部精简**：删除与下方重复的「今日/本周/每月」胶囊组，⚡ 数字直接跟随「今天/昨天/7天/30天/全部」当前选择\r
-- **版本号移位**：从独立设置行改为设置页底部的弱化页脚\r
-- **总览横栏单行化**：分类 chips 与「5h/7d/月」胶囊同行（分类区窄窗内横滚），「MCP / 搜索」文案精简为「MCP 搜索」\r
-- **ZCode 计量修正**：\`input\` 已含 cache 读写，总量= input+output（不再虚增），成本按非缓存部分计费；spend_history v2→v3 迁移\r
-\r
-## 修复\r
-\r
-- **Command Code 家族状态聚合**：全部账号不可用时，主卡不再误报「需重新登录」——改为显示家族内重置时间最早的健康账号（红环+重置倒计时=待刷新）；账号彻底失效时直白话报错 \`subscription inactive or expired\`（不再抛形状解析错误）\r
-- **SenseNova 设置粘贴保存链路**：通用 \`{apiKey}\` 粘贴格式此前写入后 provider 读不回，已加 serde 别名兼容\r
-- **总览分类行窄窗截断**：chip 内边距与行距压缩，最窄窗口下「MCP 搜索」完整显示\r
-\r
-## 0.4.68 — 2026-10-04\r
-- Fixed provider-card context menus so right-click actions stay anchored to the active card and account tab.\r
-\r
-## 0.4.67 — 2026-10-04\r
-\r
-- Add explicit add-account/API-key and remove-current-account actions to the\r
-  provider card menu.\r
-- Strengthen skin detail contrast in light and dark themes.\r
-\r
-## 0.4.66 — 2026-10-04\r
-\r
-- Show one active period at a time in spend details so today, yesterday, and\r
-  range totals cannot appear as duplicate provider columns.\r
-- Add configurable local shortcuts for settings, refresh, Customize, theme,\r
-  expiring view, and quota period, with duplicate-binding feedback.\r
-- Keep pooled-account badges informational blue rather than using an alarm red.\r
-\r
-## 0.4.65 — 2026-10-04\r
-\r
-- Prevent horizontal overflow when scrolling the overview on narrow windows.\r
-- Separate maxed quota (red) from fetch/auth errors (orange) and show weekly\r
-  fallback feedback when a provider has no monthly quota.\r
-- Keep account-card removal scoped to that account; add native skin reset,\r
-  conflict feedback for global shortcuts, and a Phosphor ClinePass mark.\r
-\r
-## 0.4.64 — 2026-10-04\r
-\r
-- Add the skin market with built-in wallpaper and mascot combinations.\r
-- Add pooled ClinePass API-key accounts, quota cards, and provider account badges.\r
-- Show rejected pooled accounts as explicit error states.\r
-- Refresh the README around the current product workflow and local-first boundaries.\r
-\r
-## 0.4.63 — 2026-10-04\r
-\r
-### Added\r
-- Token usage source inventory for local JSONL, SQLite, Antigravity protobuf,\r
-  and Cursor CSV collectors, with detection status and documented coverage limits.\r
-- ZCode SQLite and Antigravity conversation usage collectors; measured tokens\r
-  remain counted when a model has no known price.\r
-- Key vault and multi-key MCP quota aggregation for Bocha, Tavily, Firecrawl,\r
-  and Brave Search; additional subscription providers and account routing.\r
-\r
-### Changed\r
-- Quota overview groups cards by labels without available/unavailable sections.\r
-- Status counts share one baseline; folded spend and overview spacing is tighter.\r
-- Qoder CN aggregates credit packages; Step Plan authentication includes its device JWT.\r
-\r
-\r
-## 0.4.62 — 2026-09-17\r
-\r
-### Added\r
-- **Trae CN per-pack credit breakdown.** The card no longer collapses\r
-  all credit packs into one summed bar: each pack gets its own row —\r
-  the pack currently being drained as a progress bar with a countdown,\r
-  untouched ones as "N credits · expires YYYY-MM-DD" rows, soonest\r
-  expiry first. Packs split by scope like the official dashboard\r
-  (general vs TraeWork-only, suffixed "(Work)"); same-named packs\r
-  merge; feature-flag-only packs are skipped. The summed Credits row\r
-  carries no reset date (packs expire on different days).\r
-- **"5-hour window resetting soon" alert.** A rolling window with an\r
-  hour or less remaining announces itself once per period, also right\r
-  after launch. Default on; toggle in Settings.\r
-- **Customize drawer brand icons.** Every provider row head shows the\r
-  same mark as its dashboard card; providers without an icon show a\r
-  "?" placeholder. The drawer also mirrors the dashboard's card-group\r
-  sections (group name + count headers, A–Z within).\r
-- **Card rows never fold.** Metric feet, text, action and spend rows\r
-  are single-line: the right side ellipsizes instead of wrapping,\r
-  countdowns lead the detail (truncation can only drop the usage\r
-  figure, never the time), and hovering shows the full text.\r
-- **Real Trae CN logo** (green frame + diamond eyes) replaces the\r
-  placeholder glyph everywhere.\r
-\r
-## 0.4.61 — 2026-09-16\r
-\r
-### Added\r
-- **Custom UI font picker.** Settings → General → Font lists every font\r
-  family installed on the system (DirectWrite enumeration, localized\r
-  names included — 微软雅黑 and Microsoft YaHei UI both resolve). The\r
-  dropdown renders each option in its own face, filters as you type,\r
-  supports arrow/Enter/Esc, marks the active family, and follows the\r
-  light/dark theme. A picked family replaces only the head of the stock\r
-  stack (missing glyphs still fall back); clearing the field restores\r
-  the default. Persisted as \`uiFont\` in config.json and re-applied\r
-  before first paint on launch.\r
-- **Kimi monthly quota anchor.** Kimi's membership-wide monthly limit\r
-  never appears in the usage API — it surfaces only as failed\r
-  inference requests. The refresh day (the 27th) is now measured from\r
-  the member dashboard instead of being probed for: while walled, the\r
-  panel classifies Kimi as unavailable with a "refreshes on the 27th"\r
-  countdown, the waiting probe sleeps entirely (zero requests until\r
-  the anchor passes, then the 30-min rhythm confirms recovery), and\r
-  healthy rounds still probe once per refresh to catch a new wall\r
-  early. Restarting pane forces a fresh probe (e.g. after buying\r
-  Extra Usage ahead of the anchor).\r
-\r
-## 0.4.60 — 2026-09-15\r
-\r
-### Added\r
-- **Peak-hours status indicators.** The five providers with time-of-day\r
-  billing (Z.ai, GLM V1 Pro relays, Command Code GOAT, Qoder CN, Trae\r
-  CN) show a yellow status dot while their peak window is active —\r
-  but only when they are otherwise available; red (maxed/error) and\r
-  gray keep their meaning. Windows are Beijing time, rules verified\r
-  against official docs: Z.ai/GLM Mon–Fri 14:00–18:00, GOAT\r
-  Mon–Fri 09:00–12:00 & 14:00–18:00 (DeepSeek-routed models only),\r
-  Qoder CN & Trae CN daily 08:00–22:00 (weekend daytime included).\r
-- **Overview peak chip + section.** The Quota Overview badge row gains\r
-  an always-rendered yellow \`N peak\` chip (three disjoint counts:\r
-  available = off-peak, peak = in-peak available, maxed), and the\r
-  sectioned board splits the available set into 可用 / 高峰 / 不可用 —\r
-  the peak section header renders even when empty, so the dimension\r
-  stays visible off-peak. Hovering a peak tile appends the family's\r
-  multiplier rule (what standard rate costs vs the off-peak discount).\r
-- **Soonest-reset keyboard toggle.** With the panel open, bare \`T\`\r
-  flips the Quota Overview to the soonest-reset list and back — same\r
-  guards as the bare-Shift 5h/Weekly board toggle (no typing targets,\r
-  no Customize, no chords); a collapsed overview unfolds and scrolls\r
-  into view first.\r
-\r
-### Changed\r
-- **Dual auto-hiding sidebars.** The provider icon trail moved from\r
-  the left rail to a mirrored right rail (4 px sliver, slides out from\r
-  the right edge, same glass/feather/fisheye treatment). The left rail\r
-  keeps only the app controls: logo, theme, refresh, Customize,\r
-  Settings — and the trail now uses the full rail height, so a dozen\r
-  providers no longer shrink or scroll as early.\r
-\r
-### Fixed\r
-- Right-rail cascade polish: light-theme stray border, focus shadow\r
-  direction, glass feather specificity, duplicate light rules; trail\r
-  badges follow the peak tint; folded cards no longer show two peak\r
-  markers.\r
-\r
-## 0.4.50 — 2026-09-10\r
-\r
-### Added\r
-- **Quota Overview 5h / Weekly capsule.** Header switch next to the\r
-  availability chips. Ordinary provider rings follow the selected window;\r
-  Z.ai, One/New API, and Copilot keep their original binding. Hover still\r
-  shows the other window; click still jumps to the card.\r
-- **Overview one-click refresh.** A ⟳ button in the Quota Overview header\r
-  (next to the fold chevron) forces a full refresh with the same spin\r
-  feedback as the per-card buttons.\r
-\r
-### Fixed\r
-- **Launch no longer sits on "Outdated" until every card is refreshed by\r
-  hand.** The background loop now fetches first and sleeps after, so a\r
-  live pass runs at launch instead of one interval in; when nothing comes\r
-  back live (boot with the network still coming up) it clears the\r
-  ordinary-error benches and retries every 15 s, up to five times. Manual\r
-  refreshes clear ordinary-error benches too — a failed pass must not\r
-  turn the Refresh button into a no-op; 429 cooldowns still hold.\r
-\r
-## 0.4.49 — 2026-09-09\r
-\r
-### Added\r
-- **Cross-platform OS seam.** Host-only work (credential store, UI\r
-  language, process/port discovery, screen-share detection, WebView memory\r
-  hint, config/data paths) now lives in \`src-tauri/src/platform/\`. Windows\r
-  keeps Credential Manager / Win32; macOS and Linux use Keychain and\r
-  Secret Service. The lib crate-type is \`rlib\` only — \`cdylib\` pulled\r
-  Windows \`advapi32\`/\`bcrypt\` into the macOS/Linux link. Tagged releases\r
-  build Windows NSIS, macOS dmg, and Linux AppImage/deb. Windows remains\r
-  the supported tray experience; the other two are the first published\r
-  binaries, not a finished desktop port.\r
-\r
-### Fixed\r
-- **Cursor Team Total usage no longer clamps to 100%.** Spend past the\r
-  API dollar floor is shown as text, not a maxed bar. The Quota Overview\r
-  ring follows the Auto pool (\`Cursor Models\`), not the API pool.\r
-- **Independent quota pools.** Cursor Auto/API and Antigravity\r
-  Gemini/Claude only mark a card maxed when every present pool is\r
-  exhausted. Missing \`remaining\` no longer becomes a fake 0.\r
-- **Overview hover.** Ordinary 5-hour rings tip the weekly window;\r
-  Copilot/Z.ai keep the ring window; Cursor/Antigravity list each pool.\r
-  The "click to jump" line is gone.\r
-\r
-### Changed\r
-- HTTP clients are reused (\`OnceLock\`). Cursor \`state.vscdb\` prefers an\r
-  immutable open over copying the whole DB. The 30-second tick updates\r
-  countdown text only. A failed provider is benched for at least one\r
-  refresh interval.\r
-\r
-## 0.4.48 — 2026-09-07\r
-\r
-### Added\r
-- **Quota Overview with per-window rings.** Generalized from the initial\r
-  5-hour overview to pick the most binding quota per provider (5h session\r
-  metrics first, otherwise shortest-period usage percent such as\r
-  daily/weekly/monthly), bringing One/New API daily plans and Cursor/Copilot\r
-  monthly plans into the overview rings with reset countdowns.\r
-- **Independent availability symbols.** Quota Overview header displays two\r
-  independent status symbols (\`● N available\` green, \`● N maxed\` red),\r
-  shown only when non-zero.\r
-- **Independent project detachment (ADR 0001).** Detached from the upstream\r
-  fork network to evolve autonomously under Aafff623/pane; updater fallback\r
-  repointed to Aafff623/pane releases.\r
-\r
-### Changed\r
-- **Dev loop pinned to IPv4 loopback.** Vite host and Tauri \`devUrl\` locked\r
-  to \`127.0.0.1:1420\` to eliminate Windows machine-wide IPv6 loopback\r
-  access-denied issues. Documented canonical WMI/CreateProcess startup flow.\r
-\r
-## 0.4.47 — 2026-09-05\r
-\r
-### Added\r
-- **One/New API sites as accounts.** Relay sites become first-class accounts:\r
-  the dashboard renders a single merged card with a tab per configured key.\r
-  Site management moved from Settings into the Customize drawer under the\r
-  family row. Supports token-only sites reading \`/api/subscription/self\`.\r
-- **Multi-account expansion.** Antigravity Google OAuth slots captured from\r
-  Windows Credential Manager; Cursor PKCE multi-account tokens.\r
-- **Governance assets.** Tracked canonical \`docs/dev-startup.md\`, \`CONTEXT.md\`,\r
-  \`AGENTS.md\`, and \`CLAUDE.md\` to prevent agent configuration drift.\r
-\r
-### Changed\r
-- **Pane's website moved to trypane.xyz.** Public links and install\r
-  commands use the new domain. Existing \`pane.jazii.dev\` updater clients\r
-  and dashboard links remain supported through a permanent domain redirect.\r
-- **UI polish and breathing room.** Folded cards surface nearest reset\r
-  countdown as a status-toned pill; frosted glass sidebar with feathered edge;\r
-  authentic brand SVGs.\r
-\r
-## 0.4.46 — 2026-09-02\r
-\r
-### Added\r
-- **One/New API sites.** Settings has a new **One/New API sites**\r
-  section: add as many One API / New API hosts as you want, each with\r
-  its own keys. Each key gets its own quota card (PR #172).\r
-- **Kimi Code without the CLI.** Settings → API keys has a new **Kimi\r
-  Code** field for your Kimi For Coding plan key. With no \`kimi login\` on\r
-  the PC, Pane sends that key to the same usage endpoint the CLI uses and\r
-  shows Session / Weekly bars and reset times. A CLI login still wins\r
-  when both exist. The Z.ai field is now labeled **Z.ai / GLM** — a GLM\r
-  Coding Plan key already worked there (issue #173).\r
-\r
-### Fixed\r
-- **Cursor card no longer blanks to "Requests this cycle 0".** When\r
-  Cursor's usage API hiccupped for one refresh, Pane fell back to the\r
-  old request-count endpoint, which on current plans answers with an\r
-  empty count, and that empty card replaced your bars until the next\r
-  good refresh. That fallback now only counts when it carries a real\r
-  request quota; otherwise Pane keeps the last good card (Outdated only\r
-  after three minutes of failed refreshes).\r
-- **Cursor bars stay live when \`api2.cursor.sh\` is unreachable.** On\r
-  some networks that host's TLS handshake times out for minutes while\r
-  \`cursor.com\` keeps answering. Pane now reads the dashboard's\r
-  \`usage-summary\` report in that case — same Cursor Models / Other\r
-  Models / Total usage / On-demand figures, from the host that works —\r
-  instead of showing a stale card. Also covers Enterprise/team accounts\r
-  that hide plan usage from the RPC (what OpenUsage on Mac does),\r
-  including the live shape that has percentages and on-demand but no\r
-  pooled dollar cap. Credits and Bonus rows still need the primary API.\r
-- **Hermes prices Qwen3.8-Max-0902 through AihubMix.** The snapshot\r
-  logs as \`qwen3.8-max-0902\` / \`qwen3.8-max-2026-09-02\`, which missed\r
-  the rate table, so Today showed tokens at $0.00. Those AihubMix rows\r
-  now use the gateway card ($1.69 / $5.07, cache $0.169 / $2.1125).\r
-\r
-## 0.4.45 — 2026-08-29\r
-\r
-### Added\r
-- **Russian in Settings → Language.** Same surfaces as Chinese: cards,\r
-  Settings, Customize, tray tooltips, and quota toasts. Auto follows the\r
-  PC display language (Chinese or Russian). Provider names, plan names,\r
-  and the changelog stay English.\r
-\r
-### Fixed\r
-- **Hermes recognizes HY4 Preview and Qwen3.8 Flash spend.** New-model\r
-  sessions routed through AihubMix now use that gateway's live prices,\r
-  so their tokens no longer collapse into a misleading \`$0.00\` Other row.\r
-  The card lists the two most recent user models and leaves Hermes's small\r
-  title-generation and approval calls out of that summary.\r
-\r
-## 0.4.44 — 2026-08-27\r
-\r
-### Fixed\r
-- **Customize keeps progress bars where you put them.** Dragging a\r
-  meter like Codex Extra credits into Show more used to look like it\r
-  saved, then the next usage refresh yanked it back above Usage Trend.\r
-  That "bars stay visible" rule now only places a row the first time\r
-  it appears. A later refresh no longer undoes the drag (issue #166).\r
-\r
-## 0.4.43 — 2026-08-26\r
-\r
-### Added\r
-- **Grok reset credits** show on the card as read-only rows (no Use\r
-  button). A **Status** link opens [status.x.ai](https://status.x.ai)\r
-  next to Usage.\r
-\r
-### Fixed\r
-- **Tray follows Customize.** Hide, disable, star, pin, and card order\r
-  now drive the tray icon and tooltip. A newly enabled provider stays\r
-  off the tray until a refresh finishes. If a save or tray update fails,\r
-  the footer says so instead of staying quiet.\r
-\r
-## 0.4.42 — 2026-08-23\r
-\r
-### Added\r
-- **Chinese in Settings → Language.** Auto follows the PC language;\r
-  English and 中文 are explicit. Cards, Settings, Customize, tray\r
-  tooltips, and quota toasts switch as soon as you pick one. Provider\r
-  names, plan names, and the changelog stay English. Vendor "connect me"\r
-  error hints stay English for now.\r
-\r
-### Fixed\r
-- **Refresh responds while usage is updating.** The button used to stay\r
-  locked until the slow spend scan finished (tens of seconds on a cold\r
-  start), so clicks looked dead and a just-saved **Kimi API** key left\r
-  "moonshot key saved" stuck on the footer. Usage unlocks Refresh as soon\r
-  as the cards update; a click (or key save) during a fetch shows\r
-  Refreshing… immediately; and the sidebar sits above Settings so Refresh\r
-  still works with the panel open.\r
-\r
-## 0.4.41 — 2026-08-20\r
-\r
-### Fixed\r
-- **Kimi Code plan name matches the membership page** — current paid\r
-  names on [kimi.ai](https://www.kimi.ai/membership/pricing) are\r
-  Moderato, Allegretto, Allegro, and Vivace. Pane still printed the old\r
-  three-name table, so \`LEVEL_INTERMEDIATE\` showed as Moderato\r
-  (issue #156; it is Allegretto) and \`LEVEL_ADVANCED\` showed as\r
-  Allegretto (it is Allegro). \`LEVEL_PREMIUM\` is Vivace.\r
-\r
-## 0.4.40 — 2026-08-20\r
-\r
-### Fixed\r
-- **Refreshing catalogs no longer re-reads every session log.** The spend\r
-  cache used to throw itself away whenever LiteLLM / models.dev /\r
-  the supplement file changed on disk (that happens daily, and hourly\r
-  while any model is unpriced), then re-parse hundreds of MB of jsonl.\r
-  Each cached file now records the pricing questions it asked; a catalog\r
-  refresh only re-reads files whose prices actually moved. A baked-pricing\r
-  code change still discards the cache. One last full scan migrates to\r
-  the new format. Probe keys stored in that cache are length-capped so a\r
-  huge model string cannot inflate the on-disk file.\r
-- **Pasting an API key actually shows that provider.** Saving a key now\r
-  turns the provider on if Customize had it off (first-run parks\r
-  keyless providers there), and a save no longer races an in-flight\r
-  refresh into a stuck "key saved" status with no fetch. A key pasted\r
-  during that first refresh is also kept out of the auto-disable list,\r
-  so the just-saved provider is not parked because the in-flight fetch\r
-  still said it had no credentials. A failed save or a cleared key drops\r
-  that exemption immediately, so Customize can turn the provider back\r
-  off.\r
-- **Kimi usage routed through Codex (or Claude) lands on the Kimi card.**\r
-  Sessions that log \`kimi-oauth/k3\` or \`moonshot-ai/…\` via a router used\r
-  to keep those dollars on Codex. They move to Kimi Code (or Moonshot\r
-  when there's no Kimi login), with the vendor prefix peeled so they\r
-  merge with the CLI's own logs.\r
-- **Cursor promo credits and bonus usage show up.** Credit grants\r
-  (\`GetCreditGrantsBalance\`) are a used/total progress bar like Codex\r
-  Extra credits, and Cursor's sponsored bonus usage (\`bonusSpend\`) is a\r
-  text row behind Show more — free usage model providers cover, shown\r
-  as context rather than a meter. Cents-as-strings parse; a failed\r
-  grants call logs instead of going silent. An expired grant\r
-  (\`hasCreditGrants: false\`) stays hidden even if leftover totals are\r
-  still on the payload. Tucking Bonus behind Show more runs once so a\r
-  later Customize drag is not undone every refresh.\r
-- **Kimi Code plan usage now has dollar amounts** — the official CLI logs\r
-  plan K3 as \`kimi-code/k3\` (and K2.7 Code as \`kimi-for-coding\`), which\r
-  missed the rate table, so Today could show a million tokens at $0.00.\r
-  Every current Moonshot model now uses the published API card\r
-  (K3 $3 / $15 / $0.30 cache; K2.7 Code $0.95 / $4 / $0.19; HighSpeed\r
-  is 2×; K2.6 $0.95 / $4 / $0.16; K2.5 $0.60 / $3 / $0.10; V1 8k/32k/128k\r
-  at $0.20/$2, $1/$3, $2/$5). Reseller catalog rows no longer override\r
-  those first-party rates. Codex OAuth (\`kimi-oauth/k3\`) and prefixed\r
-  API spellings share the same table. Discontinued K2 / kimi-latest\r
-  names still come from the public catalogs.\r
-\r
-### Changed\r
-- Customize toggle, Settings key field, leftover dashboard card, and\r
-  spend card labeled **Kimi API** (was Moonshot). The internal id is\r
-  still \`moonshot\` so existing layouts and telemetry keep working. The\r
-  toggle still gates the wallet fetch and the API bar on the Kimi Code\r
-  card.\r
-\r
-## 0.4.39 — 2026-08-19\r
-\r
-### Added\r
-- **Kimi Code plan card** — one card like OpenCode: Session and Weekly\r
-  request bars from the official Kimi Code CLI login. If a Moonshot\r
-  wallet key is saved, an **API** bar (same high-water credits meter)\r
-  joins them; plan-only installs stay at two bars. Local session spend\r
-  that used to sit on the Moonshot card lives here. The leftover\r
-  Moonshot card hides while Kimi Code is connected (and comes back if\r
-  that login goes away); it still appears for API-only installs. If the\r
-  Kimi card loads without a wallet bar, a successful Moonshot fetch is\r
-  kept so the balance doesn't vanish for one cycle.\r
-  Switching Moonshot off in Customize still stops the wallet fetch — no\r
-  API bar and no Moonshot network calls. If the Kimi card itself is\r
-  off, session spend stays on Moonshot so the dollars don't vanish. A\r
-  starred Moonshot "Credits used" pin moves to the Kimi API bar only\r
-  when that bar is actually on the card.\r
-\r
-## 0.4.38 — 2026-08-15\r
-\r
-### Fixed\r
-- **Refreshes are fast again — sorry 0.4.37 made Pane laggy and slow.**\r
-  That release's bounded log walk resolved every directory it visited to\r
-  its canonical path, and on Windows that opens a real handle per\r
-  directory (with an antivirus round-trip on each), so opening Pane\r
-  crawled and "Scanning session logs…" could sit for over a minute on\r
-  every refresh. Sorry for the inconvenience. Only symlinks and\r
-  junctions pay that cost now — they're the only way a scan cycle can\r
-  form — and regular files and folders are typed straight from the\r
-  directory listing with no extra system calls. The 0.4.37 protections\r
-  (depth cap, directory budget, cycle detection, link-target\r
-  timestamps) all still hold.\r
-\r
-## 0.4.37 — 2026-08-15\r
-\r
-### Security\r
-- **Local log scan can't be turned into a crash or a hang** — the\r
-  recursive \`.jsonl\` sweep every spend scanner shares followed symlinks\r
-  and junctions with no depth limit and no visited set, so a link cycle\r
-  under a scanned log root (roots come from the CLIs' own \`*_CONFIG_DIR\`\r
-  / \`*_HOME\` variables) grew the call stack until the process aborted,\r
-  and a link pointing at a huge tree turned a project folder into a\r
-  drive-wide crawl. The walk is now iterative and bounded: 16 levels\r
-  deep, 20,000 directories per root (logged when it stops there), and\r
-  already-seen canonical directories are skipped. Relocated logs behind\r
-  a link are still found.\r
-- **Share-card decode is bounded** — copying a share card now caps the\r
-  base64 payload and the PNG's declared pixel count before decoding, so\r
-  a decompression-bomb image can't force a multi-gigabyte allocation.\r
-- **OpenCode's database copy is private** — the scratch copy Pane makes\r
-  of \`opencode.db\` now lands in a per-user directory with restricted\r
-  permissions, partial copies are discarded, and scratch files left by a\r
-  crashed run are swept.\r
-\r
-## 0.4.36 — 2026-08-14\r
-\r
-### Added\r
-- **Hermes desktop card** — Nous Research's Hermes app now has a provider\r
-  card like the others: last model used, which backend billed it, and\r
-  session count on the face; Today / Yesterday / Last 30 Days spend\r
-  (per-model breakdown on hover) sit behind Show more. MiniMax- and\r
-  OpenRouter-routed sessions still join those slices; AihubMix\r
-  (including a custom URL pointed at aihubmix.com) stays on the Hermes\r
-  card; a custom URL pointed at MiniMax or OpenRouter joins those slices.\r
-  No network calls — Pane reads the local ledger at\r
-  \`%LOCALAPPDATA%\\hermes\\state.db\`.\r
-- **GLM-5.3 spend prices from day one** — AihubMix's preview rate card\r
-  for \`coding-glm-5.3\` ($0.060 in / $0.220 out per MTok; unpublished\r
-  cache bills at the input rate) is baked in until public catalogs learn\r
-  the model. Hermes AihubMix rows logged as \`glm-5.3\` use that SKU;\r
-  the generic name stays unpriced for other vendors. Gateway-prefixed\r
-  DeepSeek V4 slugs (\`accounts/fireworks/models/deepseek-v4-pro-0813\`)\r
-  also resolve.\r
-\r
-## 0.4.35 — 2026-08-13\r
-\r
-### Added\r
-- **Daybreak Blue and Cursor Router spend names price correctly** — Pane\r
-  now loads the full OpenUsage pricing-alias list (it used to keep only\r
-  the first 64 rules, which dropped Daybreak, GPT-5.3–5.6 effort slugs,\r
-  and Cursor Router labels like "Opus 5 (Auto Balanced)").\r
-- **Codex auto-review stays its own row** — reviewer traffic still shows\r
-  as \`codex-auto-review\` in the model breakdown; the dollars use that\r
-  day's GPT rate (gpt-5.5 from April 2026 onward), matching the Mac app.\r
-- **Reduce animations** — Settings toggle skips card entrance motion and\r
-  the day/night wipe. Windows' own Animation effects setting is still\r
-  respected either way.\r
-- **Hide tray numbers while screen sharing** — optional Privacy setting\r
-  (off by default). During Presentation Settings, exclusive fullscreen,\r
-  or remote control, the main tray percentage and starred strip numbers\r
-  hide; the Pane icon and starred provider logos stay.\r
-- **Reset all settings** — Settings → Advanced restores every preference\r
-  to its default and re-detects installed tools. API keys and usage\r
-  history stay.\r
-\r
-### Fixed\r
-- **The Cursor card mirrors Cursor's Plan & Usage page** — Cursor's new\r
-  bucket-era plans show two bars ("Cursor Models" and "Other Models")\r
-  and no total bar, but Pane's Total usage meter trusted the API's\r
-  \`totalPercentUsed\`, which now measures against included *plus free\r
-  bonus* pools (~$345 on live accounts) — so the bar sat at 0% while\r
-  the caption said "$2.37 of $20.00 included". Bucket-era cards now\r
-  show the same two bars as the dashboard, with the exact percentages\r
-  Cursor shows, plus dollars spent this cycle as a text row (no percent\r
-  is honest there: Cursor itself reports three contradictory total\r
-  numbers). Pre-bucket accounts keep the classic included bar, computed\r
-  as spend ÷ plan limit when Cursor reports spend (the API's own percent\r
-  otherwise — never a fabricated one). Team accounts keep their bucket\r
-  bars alongside the dollar Total meter. Saved layouts migrate\r
-  automatically: stars, pins, hidden flags, and order carry over from\r
-  "Auto usage" / "API usage" to the new labels, and a star or tray pin\r
-  on a Total row that became text repoints to Cursor Models instead of\r
-  silently vanishing from the tray.\r
-\r
-## 0.4.34 — 2026-08-13\r
-\r
-### Added\r
-- **OpenCode meters are account-wide now** — OpenCode shipped the\r
-  official usage API we'd been waiting on\r
-  ([anomalyco/opencode#16513](https://github.com/anomalyco/opencode/pull/16513)),\r
-  and the card now reads Session / Weekly / Monthly percentages and\r
-  resets straight from OpenCode's servers: the same numbers as the Zen\r
-  dashboard, including your other devices and anyone sharing the\r
-  subscription. The old this-PC-only computation from \`opencode.db\`\r
-  remains as the offline fallback, and dollar spend stays local.\r
-\r
-### Fixed\r
-- **Grok 4.6 prices from day one** — xAI's launch-day rates\r
-  ($2 in / $0.50 cached / $6 out per MTok, doubling for ≥200k-token\r
-  prompts; the fast variant at 2x) are baked in until the public\r
-  catalogs learn the model, so spend from Grok 4.6 sessions shows\r
-  dollars instead of the unpriced ⚠ — including Cursor sessions, whose\r
-  usage export brands the model \`cursor-grok-4.6-xhigh\`.\r
-- **DeepSeek V4 spend prices from day one** — AihubMix's rate cards for\r
-  \`deepseek-v4-pro\` ($0.464 in / $0.928 out / $0.004 cache read per\r
-  MTok) and \`deepseek-v4-flash\` ($0.154 / $0.308 / $0.003) are baked in\r
-  until public catalogs learn the family, dated snapshots like\r
-  \`-0813\` included, so Hermes sessions on these models show dollars\r
-  instead of the unpriced ⚠.\r
-\r
-## 0.4.33 — 2026-08-12\r
-\r
-### Fixed\r
-- **Launch shows your numbers instantly** — the window now paints the\r
-  previous run's snapshots from disk (marked Outdated) the moment it\r
-  opens, then swaps in live data as it arrives. Before, the first paint\r
-  waited for the slowest provider's full network round — at boot, with\r
-  Wi-Fi still connecting, that was 30-40 seconds of "Refreshing…".\r
-- **The daily pricing refresh no longer lands at login** — a catalog\r
-  update discards the spend cache and re-reads every session log\r
-  (gigabytes on long-lived installs), and with autostart that landed\r
-  exactly when Windows was busiest. Catalog downloads now wait out the\r
-  first 10 minutes after launch; a first run with no catalogs on disk\r
-  still fetches immediately.\r
-- **Dead networks fail fast** — provider requests now give up on\r
-  connecting after 5 seconds instead of riding the full 20-second\r
-  request timeout, so a boot-time refresh with no network settles in\r
-  seconds.\r
-\r
-### Security\r
-- **Credential provenance hardening** (from an external security\r
-  report): credential discovery now proves a token belongs\r
-  to the provider it will be sent to, instead of accepting the first\r
-  field-shape match. Extra Codex accounts found by the multi-account\r
-  scan must carry OpenAI's own claim namespace in their \`id_token\`\r
-  before any request or refresh (a foreign \`auth.json\` that merely has\r
-  a \`tokens.account_id\` no longer qualifies); Copilot token lookup is\r
-  scoped to the \`github.com\` entry in \`apps.json\`/\`hosts.json\` and to\r
-  the \`github.com\` section of the GitHub CLI's \`hosts.yml\`, so a\r
-  GitHub Enterprise token sharing the file is never sent to\r
-  github.com; the MiniMax CLI fallback reads exactly\r
-  \`provider.minimax.options.apiKey\` from \`~/.minimax/config.yaml\`\r
-  instead of the first \`apiKey:\` line anywhere in the file.\r
-- **Disabled Cursor makes no requests** — the spend scan's Cursor CSV\r
-  export (an authenticated network call) now honors the provider\r
-  toggle, matching how usage refresh already skips disabled providers.\r
-- **Local API rejects non-loopback Host headers** — the read-only\r
-  usage API on 127.0.0.1:6736 now refuses requests whose Host header\r
-  isn't a loopback spelling, closing the DNS-rebinding read that CORS\r
-  alone can't prevent.\r
-- **Release workflows pin actions to commit SHAs** — third-party\r
-  GitHub Actions in the signed release and winget pipelines are pinned\r
-  to exact commits instead of movable tags.\r
-- **Pricing catalogs download under a hard size cap** — the three\r
-  third-party pricing feeds are read in bounded chunks (32 MB cap), so\r
-  a compromised feed can no longer exhaust memory or disk. This also\r
-  makes SECURITY.md's existing "inputs are size-capped" claim true.\r
-- **README offers a look-before-you-run install path** — alongside the\r
-  one-liner, a two-step download-inspect-run variant and a pointer to\r
-  winget for anyone who prefers not to pipe scripts into PowerShell.\r
-\r
-## 0.4.32 — 2026-08-11\r
-\r
-### Added\r
-- **Multi-account Codex** — same treatment for Codex: every discovered\r
-  \`CODEX_HOME\`-style login (identified by its ChatGPT account id, named\r
-  by the account email) gets its own card with its own limits, credits,\r
-  and spend from its own session logs. Reset-credit redemption routes\r
-  to the account whose card offered the credit, and each card's Extra\r
-  credits meter keeps its own high-water baseline. A cache identity\r
-  stamp also guards both families' default cards: if a different\r
-  account signs into the default folder between launches, the old\r
-  account's cached numbers are dropped instead of shown under the new\r
-  login.\r
-- **Multi-account Claude** — machines with more than one Claude login\r
-  (say a personal plan in \`~\\.claude\` and an enterprise seat kept in a\r
-  second config dir via \`CLAUDE_CONFIG_DIR\`) now get one card per\r
-  account, each with its own limits, plan, and spend scoped to its own\r
-  logs. Discovery scans dot-folders in your home directory and\r
-  \`~\\.config\` for Claude-shaped config dirs and only makes a card when\r
-  the dir can name its account (from its \`.claude.json\`); the same\r
-  account signed in twice stays one card. Extra cards are named from\r
-  the account's organization or email ("Claude — Acme"); the default\r
-  login keeps the plain \`claude\` identity, so existing layouts, stars,\r
-  and API consumers are untouched. Design follows upstream OpenUsage's\r
-  account-first model. Telemetry never learns account identities —\r
-  a multi-account install reports plain "claude" once.\r
-\r
-## 0.4.31 — 2026-08-08\r
-\r
-### Changed\r
-- **Share cards copy exactly what you see, collapsed too** — a collapsed\r
-  card's ⧉ copy used to drop the Usage Trend and pace hints for a\r
-  "compact composition"; since both are visible on the card, the copy\r
-  read as missing data. Every share now includes everything the card\r
-  currently renders; only buttons, links, and carets stay out. Light\r
-  mode shares also get a real surface hierarchy — grey frame, white\r
-  card with a soft shadow — instead of the washed grey-on-white blob.\r
-\r
-### Fixed\r
-- **Devin no longer shows a fresh bar when the weekly quota is spent** —\r
-  Devin's API drops zero-valued fields from its JSON (proto3), so an\r
-  exhausted week loses its remaining-percent field entirely and Pane\r
-  misread that as "no weekly quota", falling back to the untouched\r
-  hidden daily meter: a 0%-used bar at the exact moment you were rate\r
-  limited. A missing percent next to a present reset timestamp now\r
-  correctly reads as 0% left — "Limit reached", real countdown — the\r
-  same class of fix Grok needed for its omitted usage field.\r
-\r
-## 0.4.30 — 2026-08-07\r
-\r
-### Fixed\r
-- **Bought Codex credits show up now** — the ChatGPT API sends the\r
-  credit balance as a quoted string in some responses, which the parser\r
-  didn't accept, so buying Extra credits made the row vanish from the\r
-  card entirely (an empty balance still rendered via a fallback). A\r
-  funded balance now shows as an **Extra credits** plan-style meter —\r
-  percent bar against the highest balance Pane has seen (top-ups raise\r
-  it), feeding pace colors and the Almost Out notification like every\r
-  other window — with the dollar and credit count in the caption.\r
-  Devin's Extra balance gets the same meter treatment when funded.\r
-  Layouts learned a matching rule: progress bars never hide behind\r
-  Show more and always sit above the Usage Trend, so an upgraded row\r
-  (or one saved as a text row in an older layout) surfaces properly.\r
-\r
-## 0.4.29 — 2026-08-05\r
-\r
-### Added\r
-- **Qwen Code provider (#19)** — Alibaba Model Studio's Coding Plan gets\r
-  a card: the plan's request-counted 5-hour / weekly / monthly quotas\r
-  with resets and plan name, read via the Model Studio console's own\r
-  quota call (key from Settings, \`BAILIAN_TOKEN_PLAN_API_KEY\`, or\r
-  \`DASHSCOPE_API_KEY\`); falls back to local request/token counts when\r
-  the console won't take the key. Today / Yesterday / 30-day spend, the\r
-  per-model breakdown, and a donut slice come from the Qwen Code CLI's\r
-  own per-request ledger.\r
-- **Claude Code × AihubMix spend lands on the AihubMix card** — sessions\r
-  run against AihubMix's Anthropic-compatible endpoint log qwen-family\r
-  models into Claude Code's local history; those rows now re-route to\r
-  the AihubMix slice (same mechanism as MiniMax-routed sessions)\r
-  instead of inflating the Claude card.\r
-\r
-- **Pi coding agent usage folds into Claude and Codex** — pi is a\r
-  bring-your-own-account agent, so a Claude or Codex subscription driven\r
-  through pi never appears in those CLIs' own logs and spend\r
-  under-reported. Pane now reads pi's session logs\r
-  (\`~\\.pi\\agent\\sessions\`) and folds that usage into the account's card:\r
-  pi's own recorded cost when it carries one, catalog pricing otherwise\r
-  (ported from OpenUsage 0.7.6).\r
-\r
-### Changed\r
-- **Grok's provider mark updated** — ported upstream's refreshed logo.\r
-\r
-### Fixed\r
-- **Zero-rate catalog placeholders no longer price requests at $0.00** —\r
-  public catalogs often list brand-new models (e.g. qwen3.8-max) with\r
-  0/0 placeholder rates, which silently billed every request at zero\r
-  and could flip a model's spend to $0 after a catalog refresh. Those\r
-  rows are now skipped: a source with real rates wins, while a model\r
-  listed 0/0 in every source still prices as genuinely free ($0.00, no\r
-  warning — ":free" variants and local models keep working).\r
-  qwen3.8-max (GA'd 2026-08-03, still 0/0 in every public catalog) gets\r
-  Alibaba's documented rates baked in — $2/$6 per MTok, $0.25 cache\r
-  reads — consulted only until the live catalogs learn them.\r
-- **"-priority" model slugs are priced** — Devin logs OpenAI's priority\r
-  service tier inside the model name (\`gpt-5.6-luna-xhigh-priority\`),\r
-  which no catalog carries, so those requests counted tokens but no\r
-  dollars. They now bill at the base model's rates times the priority\r
-  multiplier (2× standard, 2.5× for gpt-5.5), matching how Codex\r
-  priority turns are already priced.\r
-\r
-## 0.4.28 — 2026-07-31\r
-\r
-### Added\r
-- **"What's new" after every update** — the first time you open Pane on a\r
-  new version, a card-styled popup shows that version's changelog (click\r
-  anywhere outside it to dismiss). Settings also gains a **What's new ·\r
-  Changelog** button that lists every released version. Fresh installs\r
-  keep the welcome card only — no double popup.\r
-- **AihubMix provider (#18)** — the OpenAI-compatible multi-model\r
-  gateway gets a full card: usage metered against your account's\r
-  spending limit (key auto-detected from OpenCode, or pasted in\r
-  Settings), plus Today / Yesterday / 30-day spend, per-model breakdown,\r
-  and the Usage Trend from requests routed through OpenCode. AihubMix\r
-  dollars get their own donut slice, separate from the OpenCode plan.\r
-\r
-### Fixed\r
-- **GPT-5.6 Terra and Luna price at OpenAI's new rates** — OpenAI cut\r
-  both models' prices (Luna is 5× cheaper) and the public price catalogs\r
-  still carry launch pricing, so spend was overstated. Pane corrects the\r
-  stale catalog values (a self-retiring override: the moment the\r
-  catalogs publish updated numbers, live data wins again) and updates\r
-  the long-context rate table to the new tiers.\r
-\r
-### Changed\r
-- **OpenCode meters drop the "this PC only" tag** — the caveat crowded\r
-  every row of the card (and its share cards); the local-counting\r
-  caveat now lives in the docs instead. Also fixed a cosmetic quirk\r
-  where an idle session could read "$-0.00 of $12".\r
-- **Confirmations look like Pane now** — using a Codex reset credit or\r
-  resetting all layouts used to pop the browser's bare "localhost says"\r
-  dialog; both now use an in-app card-styled dialog matching the app\r
-  (with a red button where the action is destructive). The reset-credit\r
-  message also notes that refreshed windows can take a couple of\r
-  minutes to appear.\r
-\r
-## 0.4.27 — 2026-07-30\r
-\r
-### Added\r
-- **Grok card shows your subscription plan** — the header now reads\r
-  "X Premium", "SuperGrok", and friends, resolved from xAI's settings\r
-  display name with a tier-code fallback (free tiers stay unbadged; a\r
-  plan lookup failure can never hide usage data). Contributed by\r
-  @JaminYe — their second Pane contribution. 🎉\r
-\r
-## 0.4.26 — 2026-07-29\r
-\r
-### Changed\r
-- **Share cards copy what you see** — the ⧉ copy of an expanded card now\r
-  includes everything visible: the usage trend, spend rows, and pace\r
-  hints. Collapsed cards keep the clean compact composition. Buttons,\r
-  links, and carets stay out of the image either way.\r
-\r
-### Fixed\r
-- **Daily statistics count on the day they belong to** — the once-a-day\r
-  telemetry gate used the machine's local date while every consumer\r
-  buckets by UTC day, so an install east of UTC whose app runs at local\r
-  midnight always landed in the previous UTC day (Pakistan showed "0\r
-  today" while actively using Pane). The gate is UTC now, matching the\r
-  dashboard.\r
-\r
-## 0.4.25 — 2026-07-28\r
-\r
-### Fixed\r
-- **The telemetry toggle shows its real state** — the "Share anonymous\r
-  usage statistics" switch rendered as off for installs that had never\r
-  touched it, while the default-on sender kept reporting. The default is\r
-  now stated in the config itself, so the switch reads ON unless you\r
-  actually turned it off (opting out worked correctly all along; only\r
-  the display was wrong).\r
-- **OpenCode meters use OpenCode's real windows and show resets** — the\r
-  card summed rolling 7-day and 30-day windows, but OpenCode actually\r
-  meters a UTC Monday-start week and a monthly cycle anchored to your\r
-  first-ever Go usage (ported from the Mac app's window math, which\r
-  ported the official opencode-go plugin). All three meters now carry\r
-  reset countdowns — the session shows when the oldest in-window spend\r
-  ages out — so they pace and count down like every other card.\r
-\r
-## 0.4.24 — 2026-07-27\r
-\r
-### Added\r
-- **Anonymous usage statistics (opt-out)** — Pane now sends at most two\r
-  events per day: an "alive today" ping (version, enabled providers,\r
-  starred metrics, appearance settings) and per-provider refresh\r
-  success/failure counts with error *categories* only — under a random\r
-  ID derived from nothing, with PostHog person profiles disabled and\r
-  IP addresses discarded at ingestion. Never sent: usage amounts,\r
-  spend, model names, keys, paths, or error text. Settings → Privacy →\r
-  "Share anonymous usage statistics" is a hard stop: turning it off\r
-  counts nothing, writes nothing, and deletes the stored ID. The whole\r
-  implementation is one auditable file (src-tauri/src/telemetry.rs, no\r
-  SDK); docs/privacy.md documents every field.\r
-\r
-## 0.4.23 — 2026-07-22\r
-\r
-### Changed\r
-- **Instant startup for the spend engine** — per-file parse summaries now\r
-  persist across launches (\`%APPDATA%\\Pane\\spend_cache.json\`, a few MB at\r
-  most), so a fresh start re-parses only logs that changed instead of\r
-  re-reading every session file ever written. The cache is discarded\r
-  whenever the pricing catalogs update, so costs are never served stale.\r
-\r
-### Added\r
-- **Hermes desktop spend** — Pane now reads the local usage ledger of\r
-  Nous Research's Hermes app (\`%LOCALAPPDATA%\\hermes\\state.db\`, this PC\r
-  only, nothing sent anywhere). Each session is filed under the backend\r
-  that actually billed it: MiniMax-routed chats merge into the MiniMax\r
-  spend slice, OpenRouter-routed into OpenRouter, and anything else shows\r
-  as a Hermes slice.\r
-\r
-### Fixed\r
-- **Symlinked session logs count their real age** — the spend scanner\r
-  follows symlinks/junctions when walking log directories, but judged a\r
-  linked file's recency by the link's own timestamp; logs relocated to\r
-  another drive could silently vanish from the 31-day window. The\r
-  target file's timestamp decides now.\r
-- **Kimi K3 cache reads were overpriced ~10×** — models.dev lists the\r
-  same model under many resellers and Pane took the alphabetically first\r
-  entry, which for kimi-k3 was a stub with no cache pricing; cache hits\r
-  then defaulted to the full $3.00 input rate instead of $0.30. The\r
-  catalog entry with the most complete pricing wins now.\r
-\r
-## 0.4.22 — 2026-07-20\r
-\r
-### Changed\r
-- **"Others" wedge folds more aggressively** — providers now fold into\r
-  the Others slice under $5 on Today/Yesterday (was $1) and under $10 on\r
-  Last 30 Days (was $5), keeping the ring focused on the big spenders.\r
-  A lone under-threshold provider folds too (it used to keep its own\r
-  legend row); the ring only stays unfolded when everyone is small.\r
-\r
-## 0.4.21 — 2026-07-19\r
-\r
-### Fixed\r
-- **Grok no longer shows "Outdated" right after its weekly reset** —\r
-  xAI's billing API omits the usage-percent field entirely while usage\r
-  is 0%, which Pane misread as a broken response and kept showing last\r
-  week's 100%-used bar with an ⚠ Outdated tag. A fresh window with no\r
-  usage now correctly renders as a 0% bar with the new reset countdown.\r
-\r
-## 0.4.20 — 2026-07-18\r
-\r
-### Fixed\r
-- **Disabled providers now do nothing at all** — disabling a provider\r
-  only hid its card; the work still ran invisibly on every refresh\r
-  (network calls, file reads, and for Kiro: spawning kiro-cli, whose\r
-  own auto-updater downloaded a fresh ~25 MB installer to %TEMP% each\r
-  time — gigabytes within days once Amazon shipped an update). Disabled\r
-  providers are now skipped before anything runs.\r
-\r
-### Removed\r
-- **Kiro support** — the experimental Kiro provider worked by invoking\r
-  kiro-cli, and a CLI that self-updates on every invocation is a side\r
-  effect Pane cannot control. Rather than throttle it, the provider is\r
-  gone entirely; the card disappears and saved layouts clean themselves\r
-  up.\r
-\r
-### Added\r
-- **Grok usage bar shows its reset countdown** — the aggregate credit\r
-  meter now carries the billing period's real end time and duration,\r
-  so it paces and counts down like the other cards. Contributed by\r
-  @JaminYe — Pane's first outside contribution. 🎉\r
-\r
-### Changed\r
-- **OpenCode Go meters say "this PC only"** — Go quotas are counted\r
-  account-wide on OpenCode's servers, and there is no API to read\r
-  them; the local meters can't see other devices or other participants\r
-  on a shared subscription, and now say so instead of "local estimate".\r
-\r
-## 0.4.18 — 2026-07-17\r
-\r
-### Fixed\r
-- **Update checks report the real app version** — Tauri's\r
-  \`{{current_version}}\` URL template arrives percent-encoded and never\r
-  substitutes in query strings, so 0.4.17 installs literally sent\r
-  "currentversion". The endpoint URL is now built in Rust with the\r
-  actual version stamped in.\r
-\r
-## 0.4.17 — 2026-07-17\r
-\r
-### Changed\r
-- **Update checks go through pane.jazii.dev first** (GitHub stays as\r
-  the automatic fallback, and every update remains signature-verified).\r
-  The endpoint serves the same manifest and counts anonymous daily\r
-  installs — distinct-install estimate, country code, app version, and\r
-  nothing else; no IP addresses are stored. Full mechanics in\r
-  docs/privacy.md ("The update check").\r
-\r
-## 0.4.16 — 2026-07-16\r
-\r
-### Added\r
-- **Kimi K3 prices everywhere** — K3 usage through Devin, Cursor, the\r
-  Kimi Code CLI, or the API now bills at Moonshot's published rates\r
-  ($3 in / $15 out / $0.30 cache hit per MTok) via a built-in fallback,\r
-  in every slug spelling the tools use. The live catalogs win\r
-  automatically once they learn the model.\r
-\r
-### Changed\r
-- **"Others" thresholds scale with the period** — Today and Yesterday\r
-  fold providers under $1 into the grey Others wedge; 30 Days folds\r
-  under $5 (was a flat $10 everywhere, which swallowed most of a quiet\r
-  day's ring). The hover breakdown states the active bar.\r
-\r
-## 0.4.15 — 2026-07-16\r
-\r
-### Added\r
-- **Moonshot/Kimi spend** — the Moonshot card gains Today / Yesterday /\r
-  30-day dollars and tokens, a per-model breakdown, and the usage trend,\r
-  scanned from the Kimi Code CLI's local session logs (one usage record\r
-  per turn). Models the price catalogs don't know yet count their\r
-  tokens with the usual ⚠ until pricing lands.\r
-- **Credit meters for pay-as-you-go cards** — Moonshot and DeepSeek get\r
-  a "Credits used" percent bar metered against the highest balance Pane\r
-  has seen (a top-up raises it automatically), so balance cards read\r
-  like every other card — and the low-credit case now fires the same\r
-  "Almost Out" notification the quota providers get.\r
-\r
-### Fixed\r
-- **Devin usage counts under the model that actually ran** — Devin\r
-  rewrites a session's model label whenever you switch models, which\r
-  retroactively relabeled (and mispriced) everything the session ran\r
-  before. Each message's own recorded model now wins, so switching to\r
-  Fable (or anything else) mid-session shows up correctly, priced at\r
-  the right rates. Fable's Max mode slug also normalizes now.\r
-- **Grok no longer shows the same meter twice** — the billing payload\r
-  repeats one percentage under several keys; the card now keeps one\r
-  row per label, and layouts saved while the duplicate existed repair\r
-  themselves on the next refresh.\r
-\r
-## 0.4.14 — 2026-07-16\r
-\r
-### Changed\r
-- **Small spenders fold into "Others"** — Total Spend providers under\r
-  $10 in the visible period group into one grey wedge and legend row;\r
-  hovering it lists exactly who spent what. Providers at $10 or more\r
-  keep their own name and color. (A lone small spender stays named —\r
-  a group of one is just a rename — and if everyone is under $10 the\r
-  ring stays fully named rather than turning into one grey blob.)\r
-\r
-### Fixed\r
-- **Balance-only cards show their rows** — providers with no usage\r
-  meters (Moonshot, DeepSeek, and other pay-as-you-go cards) tucked\r
-  every row behind the "show more" caret, leaving an empty panel with\r
-  a floating arrow. Their Balance/Voucher rows now stay visible, and\r
-  already-saved layouts repair themselves on the next refresh.\r
-\r
-## 0.4.13 — 2026-07-16\r
-\r
-### Fixed\r
-- **Cursor spend updates within minutes, not an hour** — the dashboard\r
-  usage export was cached for a full hour, so a live Cursor session\r
-  could work invisibly for up to 60 minutes while every other provider\r
-  updated in minutes. The cache is now 5 minutes, and a failed refetch\r
-  serves the last good export instead of blanking the Cursor spend\r
-  rows entirely.\r
-\r
-## 0.4.12 — 2026-07-16\r
-\r
-### Added\r
-- **MiniMax spend** — the MiniMax card now shows Today / Yesterday /\r
-  30-day dollars and tokens like the other CLIs, fed by two local\r
-  sources: the MiniMax Agent CLI's own per-turn usage store (its\r
-  recorded cost is used as-is), and any Claude Code sessions run\r
-  against MiniMax's Anthropic-compatible endpoint — that usage used to\r
-  be counted (mislabeled) under the Claude card and now moves to the\r
-  MiniMax card where it belongs.\r
-\r
-## 0.4.11 — 2026-07-16\r
-\r
-### Fixed\r
-- **⚠ Outdated tooltips explain the problem and the fix** — hovering\r
-  the warning now classifies what went wrong (sign-in expired, vendor\r
-  rate limit, vendor outage, no connection) and says exactly what to\r
-  do about it — including the right re-login command per provider —\r
-  instead of showing a bare error code.\r
-- **Total Spend always draws its ring** — a period with no usage now\r
-  shows a quiet zeroed track with $0.00 in the center instead of\r
-  collapsing to a bare "No spend in this period" line.\r
-- **Dead Claude sign-in says what to do** — when another app rotates\r
-  the Claude Code refresh token (leaving Pane's copy invalid), the card\r
-  now says "run \`claude\` in a terminal once and Pane recovers\r
-  automatically" instead of "token refresh failed: HTTP 400".\r
-\r
-## 0.4.10 — 2026-07-14\r
-\r
-### Fixed\r
-- **Claude card recovers faster from rate-limit cooldowns** — when\r
-  Anthropic's usage endpoint returns 429 (a plan change can trigger a\r
-  ~25-minute cooldown), Pane now honors the vendor's own Retry-After\r
-  timing instead of knocking every 5 minutes, and the card's note says\r
-  how long the wait is.\r
-- **Codex subagent replays no longer inflate spend** — when Codex spawns\r
-  a subagent (or forks a session), the child's rollout file replays the\r
-  parent's entire token history with fresh timestamps. Pane counted\r
-  those replayed lines as real usage; they're now skipped via the log's\r
-  own markers (the Mac app shipped the same fix after a ~20x inflation\r
-  report). Re-emitted stale snapshots are skipped too, and turns that\r
-  only report cumulative totals are recovered as deltas.\r
-- **Codex fast/priority turns price at fast rates** — the service tier\r
-  is read per session from the rollout's \`thread_settings_applied\`\r
-  lines (never from \`config.toml\`, which would retroactively reprice\r
-  history when toggled) and applies each model's Codex priority\r
-  multiplier (GPT-5.5 ×2.5; GPT-5.4 and the GPT-5.6 family ×2).\r
-  Supported Codex models switch to OpenAI's long-context rates above\r
-  272k prompt tokens — the OpenAI boundary, not Anthropic's 200k.\r
-- **Claude advisor usage counts under the advisor's model** — Fable-era\r
-  logs nest advisor work in \`usage.iterations\`; advisor-message entries\r
-  now count once under their own model without double-counting the\r
-  parent totals. \`<synthetic>\` placeholder turns are never priced,\r
-  sidechain logs replaying a parent message under a fresh request id\r
-  are deduplicated, and persisted \`claude -p\` runs count like\r
-  interactive usage.\r
-- **OpenCode free-model usage shows up** — messages on free models\r
-  record a real cost of $0 with real token counts; those tokens now\r
-  appear in the token totals and Usage Trend instead of vanishing.\r
-\r
-## 0.4.9 — 2026-07-11\r
-\r
-### Added\r
-- **Cost/MTok** — the Total Spend ring's metric now cycles Cost →\r
-  Cost/MTok → Tokens on click (right-click cycles backward). The center\r
-  shows your true blended rate — total dollars over total megatokens —\r
-  and each legend row shows that provider's own $/MTok.\r
-- Cursor's spend rows say **"estimated"** — its usage export aggregates\r
-  requests, so per-request exactness isn't possible.\r
-- Reset countdowns inside a minute read **"Resets soon"** instead of a\r
-  dying timer.\r
-\r
-### Fixed\r
-- **Long-context requests price correctly** — models with 1M-token\r
-  context bill the *whole* request at a higher tier once the prompt\r
-  crosses 200k tokens; Pane now applies those tiers. Claude's 1-hour\r
-  cache writes bill at twice the input rate (they were priced as\r
-  ordinary writes before), and Claude fast-mode requests apply the\r
-  published fast multiplier. Spend histories reprice automatically —\r
-  expect Claude's 30-day figure to correct upward.\r
-- **Codex percentages show as reported** — the old "fresh window\r
-  reads 1%, call it 0" normalization masked real early usage and is\r
-  gone (the Mac dropped it too). "Not started" now keys on the window\r
-  still being full-length, and windows under 5% used never flash a\r
-  red pace projection off a floored reading.\r
-\r
-## 0.4.8 — 2026-07-11\r
-\r
-### Fixed\r
-- **The whole model-family surface prices now** — reasoning-effort\r
-  tiers (light/low/medium/high/xhigh), Max **and Ultra** modes, the\r
-  fast tier, and any composition of them ("gpt-5.6-sol-max-fast",\r
-  "…-ultra-high", "…-max-fast-xhigh") resolve to the base model's\r
-  rates, with fast keeping its real per-family multiplier in every\r
-  composition. Previously composed slugs fell into the unpriced ⚠\r
-  bucket — on the test machine that was ~$19 of one day's Cursor\r
-  Max-fast usage hiding from the totals. Verified by a 51-slug\r
-  regression matrix across GPT-5.6 Luna/Terra/Sol; the handling is\r
-  generic, so other families (Grok fast tiers etc.) get the same\r
-  guarantees.\r
-- **"Outdated" stopped crying wolf** — a single failed refresh no\r
-  longer tags every card; data under three minutes old serves\r
-  silently, and the amber tag (with the real error on hover) appears\r
-  only when staleness is real. Persistent failures surface exactly as\r
-  before.\r
-\r
-## 0.4.7 — 2026-07-10\r
-\r
-### Added\r
-- **Devin spend** — the Devin CLI's local session store now feeds the\r
-  Total Spend donut, spend rows, per-model breakdown, and usage trend,\r
-  priced with the live catalog like the other CLIs. Windsurf-style\r
-  model names ("gpt-5-6-sol-max") are normalized so they price, and\r
-  the store is read through SQLite's backup API so numbers stay\r
-  correct while the Devin app is actively writing. Cloud Devin\r
-  sessions bill in ACUs and keep no local logs, so only CLI usage\r
-  appears.\r
-- **Dollars ⇄ tokens** — click the Total Spend ring (or right-click)\r
-  to flip the donut, legend, and center total between money and raw\r
-  token counts; the choice persists.\r
-- **Reorder without leaving the popover** — every card grows a drag\r
-  grip in its header; drop it where you want and the order saves to\r
-  the same layout Customize edits.\r
-\r
-### Changed\r
-- **The popover looks like the Mac's now** — provider cards are a\r
-  clean header over an inset panel, the usage trend sits in a labeled\r
-  row, and the Total Spend ring is rebuilt from true wedge segments:\r
-  radial-cut ends with soft corners, hairline gaps, and tiny spenders\r
-  that stay thin slivers instead of swelling into dots. Hovering a\r
-  wedge (or its legend row) slides it outward and dims the rest.\r
-- **Spend colors** — Codex blue, Grok green, Devin sky blue, and\r
-  Cursor its brand black (flipped to white in dark mode so it stays\r
-  visible).\r
-- **Share cards** — the copied image is a curated composition: buttons,\r
-  links, and spend chrome stripped, the canvas hugs the content, the\r
-  header aligns with the panel's text column, and the footer carries\r
-  the app icon with the full tagline.\r
-- **Unpriced usage keeps its tokens** — requests on models with no\r
-  public pricing now count their measured tokens in token totals and\r
-  the trend; dollars still refuse to guess, and the ⚠ (on the\r
-  provider's spend row only) explains it in plain words.\r
-\r
-### Fixed\r
-- **Grok spend works again** — the Grok CLI changed its log format and\r
-  the old scanner silently matched nothing; the new one reads token\r
-  counts from the CLI's turn events and attributes models per process,\r
-  like the Mac app.\r
-- **Cursor Max-mode models price correctly** — "-max" slugs bill\r
-  token-based at the base model's rates, so they now resolve through\r
-  the full pricing chain instead of landing in the unpriced bucket.\r
-- **Kilo fresh accounts** — a just-created account shows a friendly\r
-  "no credits yet" card instead of an error.\r
-\r
-## 0.4.6 — 2026-07-09\r
-\r
-### Fixed\r
-- **Cursor spend tiles work again** — Cursor's usage-events export now\r
-  requires an explicit date range and token strategy; Pane sends both\r
-  (last 31 days), so Today / Yesterday / 30 Days dollars populate.\r
-- **New models price within the hour, not within the day** — when spend\r
-  events reference models the price catalog doesn't know yet (new Cursor\r
-  slugs ship often), Pane now rechecks the catalog hourly instead of\r
-  daily, and a catalog update re-prices already-scanned logs instead of\r
-  waiting for them to change on disk.\r
-\r
-## 0.4.5 — 2026-07-09\r
-\r
-### Fixed\r
-- **Cursor Pro/Pro+/Ultra/Teams accounts now show real usage** — percent\r
-  of the plan's included usage, Auto/API usage, on-demand spend, and\r
-  credits, with the actual billing-cycle reset date, via the same API\r
-  Cursor's own dashboard uses. Previously modern accounts showed only a\r
-  meaningless "Requests this cycle: 0" from the legacy request-counter\r
-  era (old request-based plans still fall back to it). Session tokens\r
-  are auto-refreshed in memory when stale, and reading Cursor's login\r
-  no longer fails when Cursor briefly holds a lock on its database.\r
-\r
-## 0.4.4 — 2026-07-08\r
-\r
-### Performance\r
-- Background refreshes no longer rebuild the popover interface while\r
-  it's hidden in the tray (~99% of the time) — rendering now happens\r
-  once, at the moment you open Pane. Same for the 30-second countdown\r
-  ticks. Less idle CPU, all day.\r
-- New **Settings → General → "Liquid glass effects"** toggle (on by\r
-  default). Turn it off on slower PCs: the glass refraction and blurs\r
-  become clean flat surfaces, and the expensive lens machinery never\r
-  even initializes — from the very first frame of a cold start.\r
-\r
-## 0.4.3 — 2026-07-08\r
-\r
-### New\r
-- **Pane's new logo** 🎯 — the ring, everywhere: installer, app and\r
-  taskbar icons, tray, popover sidebar, and share-card footers.\r
-- **Update checks on every open** — the footer version stamp re-checks\r
-  each time you open Pane and becomes a blue **⬆ Update** button when a\r
-  new release is out; one click installs and restarts. (Replaces the\r
-  floating update banner.)\r
-- Party mode is now a triple-click on the sidebar logo away. 🎉\r
-\r
-### Fixed\r
-- Tray strip pairs now render logo-then-numbers, left to right, like\r
-  the macOS original (Windows inserts new tray icons leftward).\r
-- The update flow can no longer freeze at "Installing…" if a release\r
-  disappears mid-install — it fails visibly with a retry button.\r
-\r
-## 0.4.2 — 2026-07-08\r
-\r
-**⚠ Installs of 0.4.1 and earlier: this release is signed with a new\r
-key, so the in-app updater will decline it. Reinstall once via\r
-\`irm https://pane.jazii.dev/install.ps1 | iex\` — updates then resume\r
-normally.**\r
-\r
-### Changed (security)\r
-- **Breaking for browser-page consumers:** the local HTTP API no longer\r
-  sends CORS headers, so web pages can no longer read\r
-  \`127.0.0.1:6736\` through a browser — previously any website you visited\r
-  could silently read your usage data. PowerShell, curl, Rainmeter, and\r
-  native apps are unaffected (CORS only constrains browsers). If a\r
-  legitimate browser integration needs access, open an issue — the plan\r
-  is an opt-in origin allowlist, not a permissive default.\r
-- Release binaries are now built and published by GitHub Actions from the\r
-  pushed tag (public build logs), instead of on the maintainer's machine.\r
-- The updater signing key was rotated to a passphrase-protected key\r
-  (2026-07-08). Installs of 0.4.1 and earlier trust the old public key, so\r
-  their auto-updater will decline the first release signed with the new\r
-  key — reinstall once via \`irm https://pane.jazii.dev/install.ps1 | iex\`\r
-  (or the release installer) and updates resume normally.\r
-- **Webview hardening pass** (from a community security review): a strict\r
-  Content-Security-Policy replaces the previous \`csp: null\`; the Tauri\r
-  capability set is trimmed to core IPC only (the UI never used the\r
-  opener/updater/process plugin APIs); \`withGlobalTauri\` is off; the\r
-  pinned-metric dropdown is built via DOM instead of HTML strings.\r
-- **Rust-side input validation:** \`set_config\` only accepts known config\r
-  keys; tray-strip updates only accept known provider ids (also fixes\r
-  unstarred tray icons of newer providers not being removed); pricing\r
-  supplement alias rules are size- and count-capped.\r
-- **Credential safety:** CLI credential files are copied to \`*.pane-bak\`\r
-  before Pane writes a refreshed token back.\r
-\r
-### Added\r
-- SECURITY.md (private vulnerability reporting), docs/privacy.md (every\r
-  network call), docs/providers.md (per-provider: files read + endpoints\r
-  called), docs/local-http-api.md, CONTRIBUTING.md.\r
-\r
-### Fixed\r
-- Share cards (⧉) now copy the card exactly as it looks on screen —\r
-  donut, tabs, theme and all — framed with a Pane logo footer, instead\r
-  of a simplified redrawn version that didn't match the UI.\r
-\r
-## 0.4.1 — 2026-07-08\r
-\r
-First-run and Customize fixes from fresh-install testing.\r
-\r
-### Fixed\r
-- Fresh installs now start with just Claude + Codex enabled (their\r
-  "connect me" cards are the onboarding); a PC with zero detected AI\r
-  tools no longer enables all 18 providers.\r
-- Rapidly toggling several providers off kept only the last change —\r
-  toggles now apply instantly and save through a serial delta queue.\r
-- Disabled providers disappear immediately from the dashboard, the\r
-  Total Spend donut, and the tray strip (previously they lingered until\r
-  the next refresh).\r
-- Total Spend shows a quiet "No spend data yet" card on machines whose\r
-  CLIs haven't logged usage, instead of no card at all.\r
-\r
-## 0.4.0 — 2026-07-07\r
-\r
-### New\r
-- **Three CLI-detected providers** (research credit: steipete/CodexBar, MIT):\r
-  Codebuff (credits + weekly limit, \`codebuff login\` file or key), Kilo\r
-  (credit blocks + Kilo Pass, CLI login file or key), and Kiro\r
-  (experimental — reads \`kiro-cli /usage\`). **18 providers total.**\r
-- **Auto-updater** — Pane checks GitHub releases on launch and every 4\r
-  hours; a banner offers one-click download + restart. Updates are\r
-  cryptographically signed and verified before install.\r
-- **Deeper metric rows** (Mac-parity polish): Claude per-model weeklies\r
-  from Anthropic's new \`limits\` API (Fable era) + Extra Usage overage\r
-  dollars; Codex Spark / Spark Weekly windows + Extra Usage credit\r
-  balance; Z.ai monthly Web Searches quota; Grok pay-as-you-go cap badge.\r
-- **"Not started"** — untouched 5-hour session windows say so (with an\r
-  explainer) instead of showing a countdown that hasn't begun; Codex's\r
-  floored 1%-on-fresh-window quirk is normalized to a true zero.\r
-- **Keyboard** — Esc backs out of Customize/Settings, Ctrl+R refreshes.\r
-\r
-### Removed\r
-- Deepgram, OpenAI, Venice, Poe, Chutes, Warp, Crof, Amp, Vertex AI, and\r
-  AWS Bedrock providers — cut to keep the lineup focused on the AI coding\r
-  tools people actually track. Saved layouts self-clean any retired ids.\r
-\r
-### Fixed\r
-- Terminal windows no longer flash during refreshes (provider CLI checks\r
-  now run windowless or scan the filesystem instead of spawning \`cmd\`).\r
-- Retired providers no longer linger as ghost rows in Customize.\r
-- Startup crash at higher provider counts (fetch futures now heap-boxed).\r
-- Clicking the tray icon always reopens on the main page, even if the app\r
-  was left on Settings or Customize.\r
-\r
-## 0.3.0\r
-\r
-### Renamed to Pane\r
-- The app is now **Pane** (formerly OpenUsage for Windows). Installs to\r
-  \`%LOCALAPPDATA%\\Pane\`; settings move automatically from\r
-  \`%APPDATA%\\OpenUsage\` to \`%APPDATA%\\Pane\` on first launch — keys, layout,\r
-  and caches all carry over.\r
-\r
-### Accuracy (Wave 9)\r
-- **Live model pricing** — per-model rates now come from LiteLLM, models.dev,\r
-  and the OpenUsage pricing supplement (daily refresh, ETag caching, offline\r
-  fallback) instead of a hardcoded table. Claude spend was overstated ~2.6×\r
-  at old Opus rates; Codex fast-tier requests now get their real multiplier.\r
-- **Unpriced events are excluded, not guessed** — models no catalog prices\r
-  are left out of totals and flagged with ⚠ (count + model names on hover).\r
-- **Cursor spend** — computed from the dashboard's usage-events CSV export,\r
-  priced locally.\r
-- **Codex dedupe** — archived session copies no longer double-count.\r
-- **Backoff & cooldown** — failing providers are benched 60s (5 min for\r
-  rate limits) while cached data is served with the reason on hover.\r
-- **Reset all layouts** also re-detects installed AI tools.\r
-- **Codex reset credits** — each banked credit shows its exact expiry and a\r
-  Use button that redeems it (confirm-guarded, idempotent).\r
-- Single-instance guard; popover reopens scrolled to the top.\r
-\r
-### UI\r
-- Auto-hiding liquid-glass sidebar (prasen.dev lens: SDF rim refraction,\r
-  chromatic fringe) with magnetic minimap trail; glass footer with build\r
-  stamp; full-window Customize and accordion Settings panels; ☀/☾ theme\r
-  toggle with circular wipe; per-day trend tooltips; skeleton loading,\r
-  staggered card entrances, and a full light-mode audit.\r
-\r
-### New\r
-- **Wave 11 provider pack** — seven providers that authenticate with a pasted\r
-  API key (Settings → API keys) or nothing at all:\r
-  DeepSeek (balance), Moonshot/Kimi (balance, .ai + .cn), ElevenLabs\r
-  (character quota with reset pacing), Deepgram (project balances),\r
-  OpenAI (org costs — needs an Admin key), Venice (USD/DIEM/VCU balances),\r
-  and Ollama (local server: installed + loaded models, no key needed).\r
-  Providers added by an update that have no credentials on this PC start\r
-  disabled — enable them in Customize.\r
-- **MiniMax provider** — Coding/Token Plan quota (5-hour Session + Weekly\r
-  windows) via the same endpoint the official \`mmx quota\` command uses. Key\r
-  auto-detected from the MiniMax CLI's config, \`MINIMAX_API_KEY\`, or the new\r
-  Settings field.\r
-- **Copilot CLI / modern gh detection** — GitHub tokens are now also read\r
-  from Windows Credential Manager (\`gh:github.com:<user>\`), which is where\r
-  current gh versions (and the Copilot CLI) keep them. hosts.yml-only setups\r
-  keep working.\r
-- **Motion pass** — cards slide in with a stagger and bars fill when the\r
-  popover opens, skeleton shimmer while first data loads, hover elevation on\r
-  cards, smooth caret/tab/button transitions. All entrance animations play\r
-  only on open (never on background refreshes) and respect the system's\r
-  reduced-motion setting.\r
-\r
-### Fixed\r
-- config.json parsing now tolerates a UTF-8 BOM and logs parse failures\r
-  instead of silently resetting settings to defaults.\r
-\r
-## 0.2.0 — 2026-07-07\r
-\r
-Full feature parity with the macOS original, plus Windows-specific polish.\r
-\r
-### New\r
-- **Antigravity support** — reads quota from the IDE's local language server\r
-  when it's running, and falls back to Google's Cloud Code API (token from\r
-  Windows Credential Manager) when it isn't. Session / Weekly / Claude /\r
-  Claude Weekly metrics plus plan name.\r
-- **Provider quick links** — Status / Dashboard links at the bottom of each\r
-  card, same targets as the Mac app.\r
-- **Share cards** — hover a card and click ⧉ to copy it as a PNG image to the\r
-  clipboard (works for Total Spend too).\r
-- **Local HTTP API** — \`GET http://127.0.0.1:6736/v1/usage\` (and\r
-  \`/v1/usage/:providerId\`) serves the latest snapshots in the Mac app's\r
-  documented wire format. Scripts written for the Mac app work unchanged.\r
-- **Appearance** — System / Light / Dark theme setting.\r
-- **Compact layout** — tighter density option.\r
-- **Global shortcut** — e.g. \`Ctrl+Shift+U\` to toggle the popover from\r
-  anywhere.\r
-- **Proxy** — optional \`socks5://\` / \`http(s)://\` outbound proxy.\r
-- **First-launch detection** — a fresh install starts with only the providers\r
-  that have credentials on the PC; the rest wait in Customize.\r
-\r
-### Fixed\r
-- The popover no longer sits on "Loading usage data…" while the spend engine\r
-  scans session logs on a cold start — usage cards paint immediately and the\r
-  Total Spend card fills in when the scan finishes.\r
-- Last-good snapshots are now cached **on disk**, so a transient provider\r
-  outage (or rate limit) right after an app restart shows amber "⚠ Outdated"\r
-  data instead of an error card. Entries expire after 24 hours.\r
-- Drag-and-drop in Customize works (Tauri's native drag interceptor disabled).\r
-\r
-## 0.1.0 — 2026-07-06\r
-\r
-First Windows release: 10 providers (Claude, Codex, Cursor, OpenCode,\r
-Copilot, Grok, Devin, OpenRouter, Z.ai, Antigravity detection), local spend\r
-engine with model breakdown and 30-day trend, pace projections, toast\r
-notifications, tray strip with per-provider icons, Customize screen, NSIS\r
-installer, autostart.\r
+      </div>`;function I3(){const e=document.createElement("div");return e.id="settings-controls-source",e.hidden=!0,e.innerHTML=M3,document.body.append(e),e}const R3=[{match:/^step-5-preview/,input:7,output:20},{match:/^step-3\.7-flash/,input:1.35,output:8.1},{match:/^step-3\.5-flash/,input:.7,output:2.1}],Ym=.7;function D3(e){return(e.toLowerCase().split(/[·/:]/).pop()??"").trim()}function O3(e){let t=0,n=0;const s=[];for(const o of e){if(!Number.isFinite(o.tokens)||o.tokens<=0)continue;const i=R3.find(c=>c.match.test(D3(o.model)));if(!i){n+=o.tokens,s.push(o.model);continue}const r=Ym*i.input+(1-Ym)*i.output;t+=o.tokens*r}return{credits:t,unknownTokens:n,unknownModels:[...new Set(s)]}}function N3(e){if(e<=0)return[];if(e<=14)return Array.from({length:e},(s,o)=>o);const t=e>45?7:5,n=new Set([0,e-1]);for(let s=0;s<e;s+=t)n.add(s);return[...n].sort((s,o)=>s-o)}function K3(e,t){const n=new Map;for(const s of e){const o=n.get(s.day)??new Map;if(s.models.length)for(const i of s.models)o.set(i.model,(o.get(i.model)??0)+i.tokens);else s.tokens>0&&o.set(t,(o.get(t)??0)+s.tokens);n.set(s.day,o)}return n}function F3(e,t){const n=new Map,s=(o,i,r)=>{const c=n.get(o)??{model:o,tokens:0,cost:0};c.tokens+=i,c.cost+=r,n.set(o,c)};for(const o of e)if(o.models.length)for(const i of o.models)s(i.model,i.tokens,i.cost);else o.tokens>0&&s(t,o.tokens,o.cost);return[...n.values()].sort((o,i)=>i.tokens-o.tokens)}function H3(e,t,n){var o;let s=0;for(const i of n.slice(0,6))for(const r of e)s=Math.max(s,((o=t.get(r))==null?void 0:o.get(i.model))??0);return s}function B3(e,t,n=6){const s=e.filter(d=>d.tokens>0),o=s.reduce((d,u)=>d+u.tokens,0);if(o<=0)return[];const i=s.length>n,r=i?n-1:n,c=s.slice(0,r).map(d=>({label:d.model,tokens:d.tokens}));if(i){const d=s.slice(r).reduce((u,p)=>u+p.tokens,0);d>0&&c.push({label:t,tokens:d})}return c.map(d=>({...d,share:d.tokens/o}))}const $3=`# Changelog
+
+## Unreleased
+
+分享卡预览 / 复制与保存
+
+### 新增
+
+- **分享卡预览**：卡片和总花费的分享按钮不再静默复制，先打开预览；预览里可复制图片或保存 PNG，成功/失败结果直接显示在按钮旁。
+- **保存 PNG**：保存到系统下载目录，文件名做路径剥离、非法字符替换和重名递增，不会覆盖已有文件。
+- **WorkBuddy 官方用量展开**：卡片里的「Official requests (30d)」可展开查看每日积分和最近 10 条请求（时间 / 模型 / 客户端 / 积分），\`partial\` 状态保留；不写入额度账本。
+
+### 修复
+
+- **分享无反馈**：旧版点击后静默复制、结果只写底部状态栏；现在先打开预览，复制/保存结果显示在按钮旁，键盘聚焦时分享按钮也会显示。
+
+## 0.12.1 — 2026-10-30
+
+升级迁移 / 自启清理 / 更新提示
+
+### 修复
+
+- **升级后仍提示更新**：从旧版升级后，开机可能仍由旧安装接管并反复提示已装过的版本；现在启动时清理指向其他 Pane 可执行文件的旧 \`HKCU\\...\\Run\\Pane\` 自启项，并在旧版启动写回后再复检 12 / 42 / 132 秒，指向当前程序的启动项和含环境变量的值不受影响。
+
+## 0.12.0 — 2026-10-28
+
+首启检测 / 来源证据 / 本机环境
+
+### 新增
+
+- **首启设置清单（#109）**：首次安装改为单一四步流程（欢迎 → 本机检测 → 连接来源 → 完成），不再先弹检测器再弹三页说明；检测步骤列出已安装的工具、安装路径和凭据来源，支持勾选与重新扫描；空看板保留「继续设置」，设置 → 常规的重看不会改动现有来源选择。
+- **只读来源探测**：新增 \`source_probe\` 本机探测，读取 PATH/PATHEXT、常见安装目录、进程环境与 HKCU/HKLM 环境变量；不执行 CLI、不出网。\`ANTHROPIC_API_KEY\`、\`OPENAI_API_KEY\`、\`GEMINI_API_KEY\`、\`GOOGLE_API_KEY\`、\`AZURE_OPENAI_*\` 等通用 key 会显示为“已发现但暂无额度读取器”。
+
+### 变更
+
+- **卡片与帮助面板**：区分「已安装 · 未登录」与「未安装」；凭据状态显示来源（环境变量名 / 系统凭据库 / 本机登录），不再只给“未配置”一句话。
+- **Provider 帮助弹窗重做**：打开「查看登录方法 / 接入说明」后，固定头、正文滚动：来源图标与名称、凭据方式、2×2 关键事实、三步操作、可展开的原理与边界（info + caret 图标，整行可点）；操作按钮直接跟在内容后面，不再有独立底栏或分隔条。主操作是「立即测试」，关闭降到次要，测试结果就地显示。移除了中英混排主文案、三个同权重按钮和含义不明的「?」。
+- **统一异常状态卡**：失败卡片不再是一段“中文 + 原始英文”加三个同权重按钮。现在按状态显示明确的额度状态、人话解释、一个主操作和可展开的诊断（三步处理、凭据来源、安装状态、服务商原始返回）；未配置、未安装、登录过期、订阅到期、缺权限、空数据、网络、限流、未知分别使用不同文案和动作。StepFun 的 \`no quota data\` 归为“额度未获取”，不再误报成“不支持读取”。
+- **失败状态分型**：卡片不再把一切错误都写成“查询失败”。会话过期/被拒 → “需重新登录”，订阅到期/未生效 → “订阅已到期”，网络/5xx → “网络或服务异常”，429 → “查询被限流”，403 → “需要额度读取权限”，接口无额度数据 → “暂不支持读取额度”，其余才显示“查询失败”。
+- **本地 API**：\`/v1/providers\` 增量增加 \`installState\`、\`installEvidence\`、\`credentialState\`、\`credentialSource\`、\`credentialEnvs\`；\`/v1/doctor\` 增加 \`installed_but_not_signed_in\` 检查（info，不把未使用的已装工具当成故障）。
+
+### 修复
+
+- **扫描不再自动隐藏来源**：\`fetch_usage\` 的结果不再写入 \`disabled\`；首次安装和新增 provider 的“无凭据自动禁用”兜底已删除。只有用户明确完成引导/检测器或在设置里开关来源，才会改变启用列表。
+- **凭据存在 ≠ 订阅有效**：上游明确拒绝或过期（401/403/过期/撤销）时不再回退到本地历史数据，也不会再渲染出“Go — 本机记录”这种像订阅的卡片，同时清除该卡的上次成功缓存，避免旧计划复活；OpenCode 过期 key 会直接显示需重新登录。首启检测状态结合真实查询结果，\`/v1/doctor\` 新增 \`credentials_rejected\`。
+- **来源探测保持只读**：只判断凭据是否存在，不再触发密钥迁移或改写文件；账号列表、登录账号和 Pane 管理的 Codex 登录都会计入。Windows 环境按大小写不敏感读取并展开注册表 \`%VAR%\`，npm 全局安装的 CLI 也能作为安装证据。
+- **重看引导不再改写来源配置**：只有首次引导和空看板“继续设置”会应用勾选；设置里的重看保持当前选择不变。
+- **首启/检测不再关掉已配置来源**：跳过或关闭引导不会改写来源选择；账号卡（apigoto@…、tokenrhythm@…）会被当作该来源可用的证据，family 卡暂时读不到凭据也不会再把它整族禁用。
+- **多账号来源不再被误报为“无凭据”**：探测与凭证面板会把账号制 family（ClinePass、APIGOTO 等）的账号列表一并计入，而不是只看 family 级密钥文件；只存在于账号列表里的来源（如 Linkso、TokenRhythm）也会出现在检测清单中。
+
+## 0.11.1 — 2026-10-27
+
+皮肤工坊 / 独立身份 / 用量溯源 / 站点信任
+
+0.11.0 是未发布的本地 checkpoint；本版把它的改动与皮肤工坊商店化一并交付。
+
+### 新增
+
+- **皮肤工坊商店化（#107）**：工坊迁入「设置 → 通用 → 皮肤工坊」，悬浮面板调色板与站点演示直达；瀑布流 / 网格布局记忆、搜索、详情页、真实组件横向截图、放大预览、日间 / 夜间 / 并排，以及下载 → 使用 → 恢复原生全链路。预览不使用示意图或虚构评分/下载量。
+- **官网法务英文版**：\`/en/privacy\`、\`/en/terms\` 提供英文摘要（事实与中文版一致，不新增承诺）；页脚与下载区补 LICENSE 链接；根目录 \`PRIVACY.md\` 只做指针，权威仍是 \`docs/privacy.md\`。
+- **免费口径规格行**：下载区把「全功能免费 / 无 Pro 或订阅 / 无需注册账号」从平台长句里抽成三行规格。
+- **关于页更新态**：有新版时主按钮变为「更新到 vX」，显示版本行、release notes 摘要（3 行截断）与直达 GitHub tag 的更新日志按钮；新增可关闭的 Star 邀请横幅（\`pane:about:starDismissed\`）。
+- **问号说明卡**：\`?\` 按钮改为 300ms 悬停 / 200ms 移开 / 点击固定 / Esc 或点外关闭的标题+正文卡片，替换卡片额度说明、RTK 口径与高峰提示的旧单行气泡。
+- **\`/v1/limits\` 收口**：支持精确卡 ID 与 family 展开；余额结构带 \`kind=balance\` 与币种单位；未开始窗口不再输出 \`resetsAt\`；\`:id\` 同一信封四字段；docs/local-http-api.md 增加端点、示例与端口占用说明。
+- **MCP 契约锁**：新增六工具 schema/注解的 golden 测试，防止只读声明或参数漂移。
+
+### 变更
+
+- **皮肤工坊入口与状态**：旧抽屉市场和入口移除；保存的皮肤在本机缺失时显示 Selected / Not installed，不再把原生外观标成已应用；资源包注册表读取失败保留上次好状态并提示，索引刷新改为单飞并显示检查中状态；皮肤操作不再点亮设置页「保存」。站点内嵌 demo 通过 \`?settings=1&page=skins\` 路由到工坊。
+- **版本与 provider 计数单一来源**：新增 \`site/scripts/sync-site-version.mjs\`，从 \`package.json\` 与前端目录生成 \`site-meta.json\` 并回写页面 fallback；计数链 Rust 77 家 + spend-only 白名单（\`mcode\`）= 站点 78 张卡由脚本与测试双向锁定，CI 增加 \`--check\` 门。
+- **隐私口径同步**：官网隐私页补 \`status.claude.com\` 状态探测一行；条款页数据目录改为 \`%APPDATA%\\PaneAafff623\`；英文访问自动指向英文法务路由。
+- **站点**：信任三卡补齐英文文案；i18n 测试新增死键检查（FAQ 结构键除外）；设计契约记录字号层级、入场时序与页脚不做二次光晕的决定；数据目录文案改为 \`PaneAafff623\`。
+- **刷新广播**：\`usage-updated\` 200ms 合并，刷新风暴不再让每个窗口重复重绘。
+- **扫描根目录**：\`/v1/sources\` 的 env 覆盖值复用扫描器的去引号/去空白规则，状态行与实际读取目录一致。
+- **代理与共享说明**：项目事实补「新客户端必须走 \`http()\`/\`http_direct()\`，回环永不走代理」；共享屏幕提示改为「窗口捕获会被系统排除，整屏共享无法由应用排除」。
+
+- **移除遥测**：删除上游的 PostHog 匿名日统计通道与设置开关，本版不再向上游作者的统计项目发送任何数据；隐私说明与官网同步改写。
+- **独立身份（#105）**：WinGet 包 ID 改为 \`Aafff623.Pane\`，Tauri identifier 改为 \`com.aafff623.pane\`，产品/安装名改为 \`Pane-Aafff623\`；不再使用原作者 ItsJazii 的 \`Pane.Pane\`、\`com.jazii.pane\` 和安装目录。首次启动将旧 \`%APPDATA%\\Pane\` 复制到 \`%APPDATA%\\PaneAafff623\`，旧目录保留；新旧安装并存，旧安装不再接收本项目的后续更新。旧配置里的开机自启偏好会迁移到新身份，并把自启项指向当前可执行文件。
+- **花费缓存 v7**：每个日志文件记录 5 点 × 4 KiB 的 FNV-1a 指纹（小于 20 KiB 全量哈希，WSL 网络路径采样 2 点）；同步工具保留 mtime+size 改写文件时不再误判为追加。**升级后首次扫描会全量重解析一次花费日志**，之后恢复增量。
+- **Argon 变价**：\`gemini-4-argon\` 现价 $2/$0.10/$10（每百万 token）进内置兜底；2026-12-01 起自动切到 Google 公布的 $4/$0.20/$20，并在价格时间线写入新 pin，历史金额不追溯。
+- **托盘溢出**：供应商超过 8 个时显示「还有 N 个供应商…」，点击回到主面板；Win32 菜单标签中的 \`&\` 正确转义。
+- **日志根目录**：\`CLAUDE_CONFIG_DIR\` / \`CODEX_HOME\` / \`DSH_HOME\` / \`GROK_HOME\` / \`PI_*\` 等环境变量会去掉首尾空白与成对引号。
+- **配置版本**：\`config.json\` 增加 \`configVersion\` 迁移标记，首次启动自动补齐。
+- **更新安装**：安装 Windows 更新前隐藏托盘图标，并向 NSIS 传入 \`REBOOT=ReallySuppress\`，安装失败时恢复托盘。
+- **代理跟随**：Windows 处于 PAC 模式（\`ProxyEnable=0\` + \`AutoConfigURL\`）时，读取 PAC 旁的静态混合监听并检测本机端口存活，不再静默直连；设置页显示当前生效代理/来源，新增「从系统读取」，手动地址做格式校验。
+- **设置侧栏**：一级分组改为 16px/700 并加组间分隔，二级保持 14px/500；行高、图标和侧栏宽度加大，折叠与悬停换成更柔和的 spring 曲线。
+- **隐私说明**：\`docs/privacy.md\` 增加「永不外发」明文清单。
+- **官网**：\`/api/latest\` 动态版本与按系统/架构分流下载；新增四张 oil-ui 信号卡、漫画皮肤预览、数字/导航/标题动效包与部署后 smoke；CSP 仍为 Report-Only。
+
+### 修复
+
+- **皮肤工坊焦点与失败反馈**：重建后恢复键盘焦点（含搜索、刷新和页面回退），下载/移除失败在画廊也可见，缩放弹窗 Tab 焦点留在对话框内；保存选区期间动作按钮锁定，避免连点丢操作。
+
+## 0.10.1 — 2026-10-26
+
+架构门禁 / 授权中心头像 / 设置回滚
+
+## 新增
+
+- **Family gatekeeper**：新增 changed-lines 架构门禁，共享文件新增 provider 特判必须委托 \`providers::<family>::\` 或写 \`// provider-specific: <理由>\`；CI 对 Rust 5 个共享文件与 \`main.ts\` 生效。
+- **结构化错误**：新增 \`AppError\`（IO 带路径 / 本地化中英）与 JSON \`{code,context,suggestion}\` 出口；托盘菜单增加问题态指纹，状态未变时不再重建原生菜单。
+- **授权中心头像**：Copilot 账号显示 GitHub 公开头像，加载失败自动回退字母块；自动发现型 family 的空态改用专用文案。
+
+## 变更
+
+- **设置失败回滚**：配置写入失败且队列已空闲时，重新读取后端配置并回滚外观/缩放/皮肤/托盘，避免界面显示已改、实际未保存。
+- **自动发现空态**：Codex/Claude/Antigravity/Kimi 的空账号页说明“本机已登录的号会自动出现”，不再只显示通用空态。
+
+## 修复
+
+- 发布门禁在 Windows runner 上改用 Actions 表达式取 tag，不再依赖 PowerShell 不展开的 shell 变量。
+- 托盘重复刷新时跳过无变化菜单重建，减少原生菜单闪动与无效开销。
+
+## 0.10.0 — 2026-10-26
+
+使用统计 / 首启引导 / 快捷键体系 / 参考仓收尾
+
+## 新增
+
+- **使用统计页**：设置左栏新增独立页，包含累计/峰值/连续活跃 KPI、52 周 Token 热力（日/周/累计）、按模型折线与模型 donut、选日工具/模型明细；原来的悬浮窗每日详情整体移入设置页并删除。
+- **首启三步引导**：欢迎/托盘与 Alt+2 说明 → 快捷键 → 服务商扫描；可跳过、可返回、Esc 关闭，完成后不再自动弹，设置里可重看。
+- **快捷键体系**：命令表 + 单点 capture 分发 + 纯函数内核；设置页支持按组合键搜索、行内录制、一行多个绑定、抢绑二次确认、恢复全部默认；旧单值配置自动迁移。
+- **用量拓扑页**：额度总览标题旁入口，只读展示 provider → 模型端点，活跃行亮 12 秒，空闲不跑动画。
+- **授权中心增强**：刷新失败时保留旧额度并标“缓存”，进行中行/组互斥，成功 1.6 秒自动消散，状态聚合进悬停说明，隐私眼睛掩码身份；本机账号身份变化时出现提示条（只提示、不导入）。
+- **设置第二轮**：四组侧栏树、四档字号、代码字体/字重、色盲图案、分段按钮滑块、丝滑基座动画。
+- **皮肤 1.0.2**：Comic Pixel 26 个像素图标、Signal/Ink 组件补齐、数据区可读字体、设置/工坊 GSAP 过渡。
+- **花费与本地数据**：本月预计（7 日中位数）、每卡燃烧曲线与 ETA、Claude Skill 用量卡、WSL 中 Claude/Codex/Copilot 日志并入扫描。
+- **本地 API 与 MCP**：新增 \`/v1/limits\`（\`openusage.limits.v1\`），providers/status/doctor/sources 增加 \`schemaVersion\`，provider 行增加 \`statusCode\`；MCP 六个工具声明只读注解。
+- **隐私**：Windows 屏幕共享时，主窗和设置窗使用 WDA 从窗口采集中排除。
+
+## 变更
+
+- 所有 provider 的 HTTP 状态错误统一携带 \`retry_after_s=\`；429/503 退避取服务器提示与本地指数下限的较大值。
+- 后台刷新按余量和重置临近程度自适应缩短到 1 分钟；任一 provider 处于退避期时不加速。
+- 额度身份守卫、凭据指纹、账号级刷新锁、OAuth 单 flow 与手动回调兜底补齐；Codex 登录框可直接粘贴回调链接。
+- Codex/Copilot/Grok 的账号刷新在账号锁内重新载入，token 仍有效时复用，避免重复消费 refresh token。
+- 设置里的旧 \`localShortcuts\` 迁移到 \`shortcutBindings\`，清空绑定不会被旧值复活。
+
+## 修复
+
+- **Claude 过期窗口**：已过重置时间的百分比行改为“等待刷新”，不再被 pace 读成 Ahead 或被 alerts 误报“将会用完”。
+- **异常百分比**：>101 或非有限值不再钳成 100% 满额，改为“不可用”，避免 epoch 级泄漏触发耗尽告警。
+- **Copilot JSONL 后备源**：会话续跑时按累计值做差，只补增量，不再漏记第二次 shutdown 之后的用量。
+- **Kiro 403 / 凭据终态**：只有撤销类错误才判“需重新登录”，泛化 401/403、代理、超时保持可恢复。
+- **关于页更新态**：检测到新版本时按钮高亮为“更新到 vX”，并显示可用版本行。
+- **i18n**：三语 key、插值变量和品牌词 parity 纳入测试；修复 \`upstream.line\` 俄语缺变量。
+- **发布门禁**：CI 增加 concurrency；release 前置检查 tag、package.json 与 CHANGELOG 一致。
+
+## 0.9.1 — 2026-10-24
+
+StepFun 双通道 / 精确额度 / 重置时间
+
+## 变更
+
+- **StepFun 双通道并存**：Step Plan 的网页会话与 API Key 现在分别保存，互不覆盖。网页会话可用时优先读取真实额度；只有网页会话缺失或过期时才回落到 API Key 的本地 token 估算。
+- **StepFun 精确余额**：Credit 行优先使用 \`credit_buckets\` 的 \`credit_total\` / \`credit_residual\`，展开卡显示 \`6.66B of 8.00B credits left\`，并倒计时到订阅到期时间。
+
+## 修复
+
+- **StepFun 重置时间 1970**：接口把 \`subscription_credit_reset_time\` 返回为 \`0\` 时不再当成有效时间，改用订阅/资源包的 \`expire_at\`。
+- **旧凭据迁移**：历史 \`{apiKey}\` 文件在加载时自动归入 API Key 槽，不再被误判成网页会话。
+
+## 0.9.0 — 2026-10-24
+
+设置骨架 / VS Code 灰 / 三皮肤适配 / 官方用量
+
+## 新增
+
+- **设置面板骨架**：设置窗口改成无边框悬浮面板——56px 拖动标题栏、200px 文字侧栏（窄窗 170px）、页签式分区卡片与 18/14/12 三档文字行；常规、密钥、快捷键、通知、隐私、网络、关于共用同一套 \`.set-section\`/\`.set-row\` 盒模型。
+- **跨页设置搜索**：标题栏新增搜索框，覆盖所有已渲染设置行；↑/↓ 选择、Enter 跳转、Esc 清空，命中后切到对应页、滚动到行并短暂高亮。索引从真实 \`data-setting-anchor\` 生成，运行时双向覆盖检查防漏项。
+- **四段式关于页**：品牌（实时版本、点击复制）→ 动作（检查更新 / GitHub / 官网 / 反馈）→ 更新策略（后台检查 4 小时 / 每天 / 每周 / 从不，\`updateCheckHours\` 可持久化）→ 生态（Star / 反馈 / 分享、更新日志、重置设置）。
+- **VS Code 经典亮暗色**：默认主题从 zinc 纯黑改为 VS Code Dark+ / Light+ 中性灰——深色 #1e1e1e 背景、#252526 卡片、#3c3c3c 分隔线，浅色 #f3f3f3 工作台 + 白色卡片；主强调色统一为 #007acc / #0066b8，文字和控件在两种模式下保持可读对比。
+- **三皮肤适配**：signal / ink / comic-pixel 增加新骨架的 \`.set-*\` 覆盖；设置卡片、分区标签、侧栏激活态和行分隔线跟随皮肤；Comic Pixel 资源包补齐字体与 manifest，可在工坊安装后直接选择。
+- **ZCode Start Plan**：Start Plan 与各类赠送活动（周末、1024 Dev Day、模型试用）按同一机制展示，计划名稳定为 \`Start Plan (活动名)\`；无计划、已结束、未领取分别有明确状态。
+- **WorkBuddy 官方请求流水**：WorkBuddy CN 卡片新增只读 \`Official requests (30d)\` 行，显示 30 天请求数与 credits 合计；不写 meter、不与 credit_history 相加，分页截断标 \`· partial\`。
+- **Gemini CLI 本地花费**：读取 \`~/.gemini/tmp/<project>/chats/session-*.json(l)\`，按官方 session schema 解析 cached/thoughts；cc-switch 已覆盖的日期优先，原生只补缺日，避免重复计费。
+- **加密本地备份**：设置 → 常规新增「加密备份」，可选择账号与登录令牌、密钥保险箱、偏好设置分别导出/导入。文件用 Argon2id + AES-256-GCM 加密，不含明文令牌；导入前预览新增/冲突数量，恢复按稳定身份合并，写入失败会回滚账号文件、系统凭据和保险箱。仅本机文件，不接 WebDAV 或云端。
+- **授权中心身份与最近使用**：账号行区分 Pane 托管、官方客户端本机登录和当前登录；显示最近使用与最近查询时间，并支持多选删除、按最近重置排序。
+- **ChatGPT 账号邮箱命名**：Codex / ChatGPT 子账号默认以登录邮箱备注，重复登录态按稳定指纹合并，不再出现多个同名 "ChatGPT"。
+- **StepFun API Key 估算**：没有网页会话时接受 API Key，只显示 token 与 Credits 估算（按官方人民币价目），不伪造余额条；网页会话仍显示真实 Step Plan。
+
+## 变更
+
+- **设置窗口**：默认 980×700、最小 860×620，保留 \`panel-window.json\` 尺寸记忆；旧 \`index.html\` 设置 sheet 退役，控件集中到 \`src/settings/controls.ts\`，只保留一套设置 DOM。
+- **额度趋势**：只有百分比额度的 provider（MiniMax、Brave、Firecrawl 等）也能画出每日趋势，百分比按日高水位记录，不与 credits/tokens 混算。
+- **皮肤兼容**：设置骨架的激活态改用 \`--primary\` 并由皮肤决定强调色；旧 \`.st-block\` 外框在 skin 下置空，避免分区出现双层/三层边框。
+
+## 修复
+
+- **皮肤资源包拆包**：\`signal\` / \`ink\` 的 CSS、图片与皮肤字体移出安装包，统一走官方资源包（\`skins/<id>/\` 源 + zip/index）；工坊按 installed + remote index 展示，老选择通过索引自动迁移；图标图集改由 pack CSS 提供 URL，主题开场与分享 PNG 适配 pack 资产。皮肤插画压缩为 WebP（signal 10.3 MB → 1.5 MB，ink 4.1 MB → 0.95 MB），修复工坊预览里山水、锦鲤与信号背景图不显示的问题。
+- **皮肤分享图**：应用皮肤后分享卡片不再失败——图标图集内联改用单引号，避免 \`style\` 属性被 data URL 的双引号截断；分享快照只携带当前皮肤的样式，原生分享 SVG 从约 7 MB 降到 0.23 MB；signal / ink 的分享图均恢复并包含各自插画、图标与背景。
+- **切换账号抖动**：账号 tab 切换时保留点击卡片的位置与列表滚动，不再整页跳回顶部。
+- **ZCode / xfyun 口径**：Start Plan 截止时间、缓存与领取状态按真实响应校验，不再把已过期计划当成可用，也不再凭空生成试用额度。
+- **设置保存失败可见性**：面板窗口写配置失败会弹出可见 toast，而不是只写进被隐藏的 footer。
+
+## 0.8.9 — 2026-10-22
+
+多账号收口 / OAuth 登录弹窗 / 备注联动
+
+## 新增
+
+- **授权中心登录弹窗**：设置页或授权中心的“添加账号”会直接启动 OAuth 并弹框，框内显示可复制的授权链接；浏览器自动打开，\`1455\` 被 Codex CLI 占用时自动改用设备码并在框内显示。
+- **Customize 全部 / 已配置筛选**：自定义看板顶部改为两个筛选 Tab，只显示已配置的服务；皮肤工坊改从侧边栏进入，不再占用看板顶部。
+- **授权中心修改备注**：授权中心账号的 \`⋯\` 菜单新增“修改备注”，备注与设置、Customize、额度看板共用同一来源并即时同步。
+
+## 变更
+
+- **估算标记**：黄色告警胶囊改为低对比的“≈ 估算”轻量胶囊，抬头估算 token 同样收进次级胶囊并保留说明 tooltip，不再抢过主数值的视觉权重。
+
+## 修复
+
+- **已归档凭据重复添加**：重新添加同一 API Key 时明确提示从归档恢复，不再在下一次刷新时被静默清掉；修改账号 Key 与旧按行号删除入口也会先退休旧 provider 来源。
+- **relay 账号旧身份恢复**：\`relaybalance\` / \`sub2api\` 的元数据文件已被旧版本删除、但系统凭据库仍留有 provider Key 时，按 API Key 从现有账号恢复 baseUrl，并支持按 Key 退休旧来源，避免生成无 baseUrl 的默认副本。
+- **迁移失败可见性**：账号迁移失败会写入运行日志，不再完全静默。
+- **账号备注与授权入口**：账号备注统一写入跨窗口共享的显示备注；设置页改名后 Customize 立即同步；Codex / Grok / Copilot / Kiro / Windsurf / Trae / Zed 的登录统一跳到设置，避免第二套授权 UI；账号行图标按钮统一为 24px。
+- **备注显示统一**：账号显示名按稳定身份解析并兼容旧 \`@__default__\` 备注；设置、Customize、主页账号胶囊、概览/到期详情、授权中心共用同一解析器；缺失名称回退为本地化“账号 N”，不再显示 hash / masked key；备注单行、最多 48 字符并统一省略；归档、删除、刷新不再清掉账号备注。
+- **自定义看板与弹层**：账号状态条居中；One/New API 删除后立即移除旧账号胶囊和快照；所有菜单、提示、引导气泡统一使用缩放感知定位，修复 CSS zoom 下弹层漂移。
+- **添加账号无响应**：面板窗口内写下的跨窗口跳转意图不再等待事件回流，点击即启动登录。
+- **账号切换抖动**：切换账号时保留列表滚动位置与焦点，不再整页跳回顶部造成上下抖动。
+
+## 0.8.8 — 2026-10-21
+
+更新日志时间线 / 窗口等比缩放 / Provider 趋势花费 / 设置排版
+
+## 新增
+
+- **版本更新与当前配置通知**：新安装和升级用户会看到简练的版本更新弹窗；每个版本另有一次当前配置说明（英文 MV Boli、中文系统字体、紧凑条形双列），可直接应用推荐配置。
+- **中英文字体分开配置**：英文字体（如 MV Boli）与中文字体各自选择，字体栈按“拉丁字体 → 中文字体 → 系统回退”排列，中文不再只能依赖系统默认。
+- **设置页与密钥页排版**：各设置页统一为同一条 940px 内容列并在窗口中垂直居中，不再出现网络页近乎全宽、隐私页只剩 624px 的比例差异；密钥与额度页按 A–Z 排列并在左侧空白处加入字母索引；隐私说明改为可读行宽。
+- **底部更新日志时间线**：主界面卡片列表下方按版本显示彩色时间线，新增/变更/修复用不同颜色标记，点击可查看完整日志。
+- **悬浮窗四角缩放**：设置中可开启四角缩放手柄；拖动时窗口与字体、图标整体等比缩放，并记住窗口尺寸，可一键恢复默认大小。
+- **Provider 趋势区花费**：额度趋势旁显示该 Provider 的已消费 Credits 或实测 Tokens；WorkBuddy 同时显示 Credits 与本地日志实测的 Tokens，不做不可验证的换算。
+
+## 变更
+
+- **移除刷新点自动触发**：删掉 GLM / MiniMax 等 5 小时套餐“到刷新点自动发请求叫醒计费周期”的整套机制（含设置、状态徽标、后台任务与端到端代码），当前只保留普通刷新与快速唤醒快捷键；后续版本再重新设计。
+
+## 修复
+
+- **WorkBuddy 混元 3 / Hy4 preview 计费**：\`hy3\` 与 \`hy4-preview\` 现在按腾讯官方价格计入，模型明细在 token 视图同时显示对应金额，不再只显示 token。
+- **Provider 名称末字被裁切**：MV Boli 等手写/斜体字体的最后一笔会溢出行宽，被省略号边界裁掉；卡片标题右侧留出 3px 内部空间，DeepSeek / StepFun / ClinePass 等名称完整显示。
+- **悬浮窗底部空白**：等比缩放时 \`100vh\` 先于 \`zoom\` 计算，外壳只覆盖窗口高度的 88.6%，页脚下方多出约 64px 空白；按缩放比补回外壳高度后，页脚重新贴住窗口底部。
+- **置顶与解锁位置**：置顶图标改为竖置金色；默认不再全局置顶；置顶后点击悬浮窗外不再自动隐藏。解锁进入调整模式：按住窗口任意非交互区域即可拖动，点外面也不会隐藏，位置会记住；再点锁完成，Alt+2 回到调整后的位置。新增「重置位置」恢复默认垂直居中。
+- **自定义看板顶部空白**：皮肤入口移出固定标题栏；搜索框移入标题栏中间（“完成/自定义看板”与“全部重置”之间），不再单独占用一行，也不再留出空行。
+- **Qoder CN 本机登录**：国际版 Qoder 面板检测到本机 Qoder CN 登录时显示直达入口；Qoder CN 是独立档位，不再被误认为未配置。
+
+## 0.8.7 — 2026-10-20
+
+Qoder CN 本机用量 / 授权中心登录识别 / 基元律动接入 / 弹窗置顶与位置
+
+## 新增
+
+- **授权中心自动识别本机登录**：Codex CLI、Copilot、Kiro、Cursor、Antigravity、Qoder / Qoder CN、Trae / Trae CN 只要官方客户端已在本机登录，授权中心就会多出一条只读的「本机登录」行，并从用量快照显示套餐与额度；Qoder CN / Trae CN 折进对应分组，不再因为 Pane 没有它的登录记录而显示为空。对应卡片曾被删除时，行内提供「显示用量卡片」一键恢复（只读取官方登录文件，绝不回写）。
+- **每个 Provider 的接入方式说明**：自定义面板现在会明确告诉用户这个 Provider 靠什么接入——扫码、浏览器登录、设备码、桌面版导入、网页会话、API key 还是读取本机登录；登录型会给 2–3 步操作指引，并只显示真正能完成接入的按钮。
+- **WorkBuddy AI 独立档位**：新增 WorkBuddy 国际版（\`workbuddyai\`，\`www.workbuddy.ai\`）。它与 CodeBuddy 国际版是两个产品：独立的扫码入口、账单路径、桌面登录文件和本地日志目录。国内版与国际版同 UID 不会互相覆盖，凭据域名不匹配会被拒绝保存。
+- **授权中心来源标注与桌面版导入**：账号行现在标明凭据来源（扫码 / 桌面版导入）与企业名。WorkBuddy 的授权中心新增「导入桌面版登录」，把官方客户端里**明文**的登录态导入为 Pane 管理的账号；加密信封只报告状态、不解密，也绝不回写官方文件。
+- **额度来源行与资源包明细**：当额度来自桌面版或网页会话时，卡片会多一行 \`Source\` 说明；7 天内到期的资源包单独显示剩余与倒计时（最多三行），其余有效资源包合并为一行汇总（数量 / 总剩余 / 最近到期）。
+- **WorkBuddy / CodeBuddy 本地 Token 统计**：用量面板新增 WorkBuddy（国内）、WorkBuddy AI、CodeBuddy CLI 三个本地日志来源，读取 input/output/cache read/cache write；未定价模型仍计入 token 并标记未定价。积分账本与 token 统计分开，不混算。
+- **基元律动额度卡片**：新增基元律动（tokenrhythm）provider，卡片显示可用额度与冻结额度（人民币）。凭据是网页登录态而非 API key——设置面板点「网页登录」在弹出的浏览器窗口里用手机号加验证码登录，会话存在本机，重启后仍有效。
+- **弹窗置顶与位置锁定**：总花费行新增置顶与锁定两个按钮。置顶让面板浮在其他窗口之上；锁定默认开启，此时每次唤出都居中且不可拖动，解锁后可把面板拖到任意位置，位置会被记住，下次唤出回到原处。
+- **弹窗记住上次的界面**：切到自定义看板、皮肤工坊或某个 provider 的配置页后关闭弹窗，再次唤出会回到那个界面而不是卡片列表；该 provider 已被删除时退回列表。
+- **定制面板的「去设置里登录」按钮**：基元律动这类网页登录型 provider，在定制面板的行内多一个地球图标按钮，点击直接打开设置面板并定位到该 provider 的密钥行。
+- **用量来源徽章**：Claude 卡上新增「疑少计 ×N」与「cc-switch ×N」两个徽章，说明当天的用量来自哪个数据源、以及哪些天可能少计。天数按当前视图（今日/昨日/7 天/30 天/全部）分别统计。
+- **Qoder CN 本机用量（#28 第一期）**：用量面板读取 Qoder CN 桌面端本地转录，统计逐请求 credits 与派生的计费输入 tokens（Σ 上下文占比 × 上下文窗口）。免费/零倍率模型（如 DeepSeek-V4-Flash）只写名义 credits、不占额度，因此实扣与名义分开显示，并标出免费请求次数和当日 Top 10 会话。模型明细现在也进入总花费的「按模型 / 按工具」列表：每个模型显示测算的 token 数并标「估算」，credits 仍以准确值单列（不折算成美元）。
+
+## 变更
+
+- **基元律动品牌标**：卡片改用基元律动的正式标志（「TR」字形），随主题自动适配深浅色；此前是自绘的波形占位标。
+- **扫码登录互不打断**：同一时刻发起国内版与国际版扫码时，两边不再互相清掉对方的状态；同一账号的并发刷新会合并为一次，避免用旧刷新令牌覆盖刚轮换的新令牌。
+- **错误提示更明确**：额度查询失败时区分会话过期、拒绝访问、浏览器指纹校验、限流与服务端错误，不再统一显示一个笼统错误。
+
+## 修复
+
+- **「添加账号」弹错对话框**：登录型 Provider（Codex、Copilot、CodeBuddy 家族、Qoder、Kiro、Windsurf、Trae、Zed 等）过去点「添加账号」会弹出 API key 输入框，其中 11 个还会真的把 key 写进去、随后报 \`unknown provider\`。现在统一跳到授权中心完成真实的扫码/浏览器/设备登录；Type 为 key 的 Provider 仍保留粘贴、测试、保存。
+- **设置页登录入口**：9 个浏览器/扫码登录 Provider 不再调用错误的总 \`oauth_start\`（会直接报「不可用」），统一进入授权中心。
+- **CodeBuddy 家族的接入说明**：四个租户在配置面板里不再显示「无需凭据」，而是扫码登录 / 桌面版导入 / 网页会话的说明与入口。
+- **stepfun-plan 面板不可达**：其账号密码/Oasis token 专用面板此前被多账号分支遮蔽，现在可以正常打开。
+- **已登录却显示未保存**：CodeBuddy / WorkBuddy 等登录型 Provider 的凭据状态改读正确的账号库。
+- **同一账号出现两张卡**：桌面版登录态与扫码账号是同一个 UID 时会各产出一张同 ID 的卡；现在已有 Pane 账号时不再重复产出桌面卡。
+- **「已登录」误判**：基元律动登录页在认证之前就会落下自己的 cookie，旧逻辑把这些访客 cookie 当成会话，导致点「网页登录」立刻显示已登录、登录窗口根本不弹、卡片也一直空白。现在「已登录」一律以网站回答为准；缓存的会话过期会被立即清除。
+- **登录态读取通道**：会话改从 WebView2 的 cookie manager 读取。原先读浏览器 Cookies 数据库文件，浏览器运行时该文件被独占锁定、读取必然失败；会话 cookie 本身也是 httpOnly，页面脚本同样读不到。登录完成检测改由 Rust 侧轮询，绕开远程来源的调用限制。
+- **设置面板的登录按钮无响应**：网页登录与清除会话按钮渲染在设置面板，但处理函数挂在定制面板的事件分发上——两者是不同的窗口，点击因此落不到任何地方。同时「网页登录」按钮被放在了「无 key 就提前返回」之后，非 key 场景下够不到。
+- **账号保存失败不再丢账号**：保存账号时若文件写入失败，旧逻辑已先删掉对应凭据，下次加载这个账号就消失了。改为文件写成功后才清理，写失败时旧账号与凭据全部可恢复。
+- **用量来源判定的准确性**：疑少计比较先按卡片最终归属剥除其他厂商的用量，跨厂商的覆盖差异不再被误算成 Claude 少计。
+
+## 0.8.6 — 2026-10-18
+
+架构深化 / 密钥库流程 / 额度单位
+
+## 新增
+
+- **独立用量单位**：积分、次数、语音分钟与 token 分开记录和展示，不再把不同厂商的额度相加；额度趋势的悬浮说明会带上单位。
+- **密钥库会话迁移**：WorkBuddy Web 与豆包的登录会话改为系统凭据库优先；迁移成功后删除旧明文会话文件，失败时保留原文件作为回退。
+
+## 变更
+
+- **刷新与隐藏恢复**：较旧的刷新结果不再覆盖较新的数据；隐藏窗口时暂停重绘，重新显示后一次补齐，避免重复绘制。
+- **Provider 注册与托盘**：全局刷新、单卡刷新和托盘共用一份可执行注册表；GIPHY、CodeBuddy、Windsurf 也可进入托盘。
+- **密钥库编辑**：v3 密钥库的备注和名称可在解锁后直接修改，重新封包并更新完整性校验。
+- **WebView2 内存策略**：首次隐藏加载不再提前降低内存目标，改为窗口真正隐藏后再降低，降低部分版本首次显示异常的风险。
+
+## 修复
+
+- **查看/复制无响应**：解锁成功后不再重建密钥列表，避免按钮或文本节点被替换；解锁、查看、复制失败时在设置面板显示具体错误。
+- **v3 错误密码提示**：v3 密钥库解锁失败统一返回“主密码错误”，查看/复制会正常弹出重试提示。
+- **额度概览余额显示**：只有余额、没有百分比的 Provider（如 DeepSeek）不再显示问号，直接显示余额（如 ¥7.13），下方标注指标名。
+- **用量历史兼容**：旧版 credits 历史迁移到新的分单位记录；未知版本或损坏文件保持原样，不会被覆盖为空。
+- **恢复码规范化**：Rust 与前端共用同一套恢复码规范化向量，避免空白字符和大小写处理不一致。
+
+## 0.8.5 — 2026-10-16
+
+账号即时同步 / 凭据修复指引 / 紧凑额度条 / 字体引导
+
+## 新增
+
+- **凭据修复入口**：查询异常卡区分网络、凭据、权限和限流错误，支持进入对应账号表单补齐信息并重新测试；查询失败的账号仍可保存，开启后保留在总览中。
+- **Provider 来源说明**：补齐内置 Provider 的配置路径、数据来源、查询内容与权限边界；API key、登录会话和本地统计分别说明。
+- **MCP 多密钥总览**：BochaAI、Tavily、Firecrawl、Brave Search 的密钥按服务折叠，支持展开逐 key 读数；X/X 按本轮查询成功数与配置数显示，共享账户余额不重复视为独立套餐。
+- **MV Boli 字体引导**：新用户在系统已安装该字体时默认启用，并显示字体和主题设置说明；已有自定义字体的用户保持原设置，其余符合条件的老用户可一次性接受或拒绝推荐。关闭已展示的引导同样记为已读。
+
+## 变更
+
+- **默认紧凑额度视图**：新用户采用条形双列总览；已有明确视图选择的用户保留原设置。
+- **额度接口与权限**：Novita 使用新的余额接口；OpenRouter 普通 key 可独立读取自身用量，账户总余额仍需 Management key；SiliconFlow 原余额接口停用后改为验证密钥并明确提示余额不可读，Groq 缺少额度响应头时保留连接状态。
+
+## 修复
+
+- **新增账号立即同步**：设置与定制界面保存账号后同步详情、总览与可用数；修复默认账号重试读取旧来源、旧请求覆盖新凭据和跨窗口刷新倒序的问题。
+- **Step Plan 身份与错误状态**：拒绝冲突或无效身份，区分缺授权与临时网络故障，串行处理凭据更新和续期，避免旧会话覆盖新会话。
+- **GIPHY 应用统计**：按应用身份读取历史调用量，排除当日、未来和非法日期；历史推导上限不再标记实时额度用尽，缓存绑定当前凭据。
+- **折叠卡片空白**：指标全部按需展开或历史标签变化时保留一行可见读数，同时尊重手动隐藏设置。
+- **Windows 刷新黑窗闪烁**：隐藏后台查询启动的控制台子进程窗口，避免启动和刷新时短暂弹出黑窗。
+
+## 0.8.4 — 2026-10-15
+
+首启全量检测 / GIPHY 调用量 / 预览版通道
+
+## 新增
+
+- **首次启动全量检测本机工具**：第一次打开 Pane 时扫描整台电脑（各工具留在本机的登录态与配置文件、环境变量），把检测到的 coding harness 列成清单让你勾选——勾中的直接出现在额度总览与看板上，没勾的留在定制面板随时可开。登录过期或查询失败的工具也会列出并标注状态，一眼看出哪个需要重新登录。此前只有「默认启用」的十来家参与检测，Copilot / Trae CN / Qoder CN / Kiro 这类装在机器上也看不到
+- **「重新检测本机工具」**：设置 → 常规新增入口，装了新工具后随时重扫；重扫时新检测到的默认不勾，不会改动你已有的配置
+- **空机器引导**：什么都没检测到时，清单给出 Claude / Codex 两条建议（默认勾选，即原有的两张接入引导卡）
+- **GIPHY 调用量卡片（MCP 分组）**：新增 GIPHY provider，卡片按应用列出近 7 天调用次数，数据来自 GIPHY 开发者面板的统计接口；凭据粘贴面板的 \`access_token\`（不是 API key——统计接口只认面板用户身份，用应用密钥会被拒）。注意统计按天聚合，当日数字次日才出现
+
+## 变更
+
+- **首启选择一次定盘**：勾选结果写入配置后不再打扰（直接关掉弹窗即采用默认）；「重置设置」会重新触发一次检测
+- **发布通道分正式版与预览版**（工程侧）：tag 带 \`-\` 后缀（如 \`v0.9.0-rc.1\`）即预览版——同样构建三平台安装包，但不进入自动更新、官网下载、winget 与国内镜像，链接可直接发给测试者；正式 tag 行为不变
+
+## 0.8.3 — 2026-10-15
+
+看板清爽化 / 凭据入钥匙串 / 俄语补全
+
+## 新增
+
+- **未配置 Provider 折叠**：看板不再被几十张「未配置凭据」卡刷屏——裸未配置卡收进看板底部一个默认收起的「未配置的 Provider（N）」分组（点击或 Enter / Space 展开），Claude / Codex 两张引导卡保持外露；额度总览同步不再显示「需凭据」条目；一张卡都没有时改为带「去添加 Provider」按钮的引导空状态。升级用户的旧配置不被改写，看板同样清爽
+- **「隐藏未配置的 Provider」开关**：设置 → 常规新增开关，默认开启；关闭后完全恢复旧行为（未配置卡原地平铺、总览照旧）；开关切换后看板与总览即时变化，重置设置与跨窗口同步复选框状态
+
+## 变更
+
+- **登录类令牌全部进系统钥匙串**：OAuth / 登录刷新令牌、Cursor / Codex 账号令牌、检索 key 五处明文存储迁入系统凭据库（Windows 凭据管理器 / Keychain / Secret Service），JSON 文件只留标签、账号 id、过期时间等非机密字段；旧版本的明文条目在首次读取时自动迁移——钥匙串写入成功才删明文，写入失败保留明文继续可用，不丢凭据；删除账号、登出同步清理钥匙串条目；\`SECURITY.md\` 写明「哪些凭证允许明文」的边界
+- **俄语界面补全 43 个缺失键**：One/New API 设置区、皮肤预览、页脚提示此前整片英文回退；三字典键集比对接入 CI，此后漏翻任何语言直接红
+- **两个手搓随机源换操作系统级**：Cursor 登录 PKCE verifier（原熵约 64 bit）与遥测匿名 UUID（原由时间与进程号推导）改用 OS 随机源，与注释宣称一致
+- **CI 与发布链路统一 pnpm**：删除 \`package-lock.json\`，CI 前端门禁与发布构建改用 pnpm 冻结锁文件——CI 验证的依赖解析与开发实际运行的一致
+- **测试与 CI 加固**：82 个从不执行的测试恢复执行（parse-tests 收录托盘投影与遥测 39 个；CI 新增 src-tauri 自身测试作业 43 个，含快照缓存 / 卡片设置误删的数据损失防线断言）；配置键新增前端编译期完整性断言
+
+## 修复
+
+- **花费热力图同日双计**：kimi 改名 moonshot 后同一天两个 id 各出一行——明细视图补上汇总视图已有的别名折叠（同日取大者、不求和；改名前历史日保留）
+- **单点 panic 不再级联**：全树 49 处互斥锁取用统一为中毒容忍写法，任一锁持有期间 panic 不再永久毒化后续刷新循环与命令入口
+- **隐私与治理文档对齐事实**：遥测「单一可审计文件」更正为两处实现并补披露每日汇总发送失败即丢弃的有损性；\`AGENTS.md\` 项目地图去掉 3 倍失真的前端行数描述
+
+## 0.8.2 — 2026-10-14
+
+新手引导 / 字体资源包 / 刷新唤醒 / 信封分享
+
+## 新增
+
+- **新手聚光灯引导**：首次安装自动播放 5 步聚光灯引导（总花费 → 额度总览 → 服务商卡片 → 右栏图标径迹 → 左栏控制栏），每步带上一步 / 下一步 / 跳过，\`Esc\` 随时退出；老用户升级不触发，设置 → 常规「重新演示」随时重看；中 / 英 / 俄三语文案；窗口缩放与滚动时高光跟随目标。完成、跳过、退出都写入「已见过」状态，首次演示资格跨重启保留
+- **字体资源包**：与皮肤包同一套闸门——zip + manifest + 逐文件 sha256，校验通过才落盘，损坏或篡改整包拒装不留残骸；安装后字体进入字体下拉可直接应用，卸载回落系统字体；\`@font-face\` 由 Rust 生成，包内 CSS 一律不执行；设置 → 常规字体行下方给出入口、已装列表（已下载 / 可下载状态）与「URL + SHA256」手动导入；首发无官方字体上架，推荐 Windows 自带 MV Boli（字体下拉直接选、无需下载）
+- **刷新点自动触发（默认关）**：GLM / MiniMax 等「必须请求一次才进入计费周期」的 5 小时套餐，到刷新时刻自动发一次轻量请求叫醒周期；默认关闭，开启需在设置中显式同意（弹窗明示会消耗一次真实请求）；同一刷新点只触发一次，重启与时钟回拨不重复；卡片显示 waiting / attempted / success / failed / skipped 五态；固定 URL allowlist、不跟随重定向、失败不回显厂商原始响应；端点按智谱 / MiniMax 官方文档核实（国际 + CN 均已覆盖）
+
+## 变更
+
+- **趋势图改用真实数量**：credits 行画每日 credits 消耗、token 行画每日 token、cost 视图按金额；轴、悬浮提示与标签的三语文案同步去掉「%」；无数据日期保持「无数据」态不画 0；采样百分比管线整条退场
+- **复制卡片为图片先选范围**：总花费卡按钮改为先弹时间范围菜单（今天 / 昨天 / 7 天 / 30 天 / 全部，当前窗口打勾）再生成信封模板图；信封数字与面板同源同范围（跟随按工具 / 按模型切换），空窗口出「无用量」；provider 卡保持即时整卡快照不变
+- **豆包图标换官方头标**：卡片、总览小卡、临期行三处统一换成豆包官方 192px 头像（内嵌 24×24 SVG，原始字节未改）
+- **更新说明弹窗精简**：自动更新后的「本次更新内容」只显示最新版本最多 4 条要点；设置里的更新日志仍可查看完整版本全文，同一 CHANGELOG 数据源
+- **credits 累计跟随时段**：总花费 credits 累计改为跟随 5 小时 / 每周时段 tab 的窗口化口径，与 token 行计算方式一致
+- **更新链路 CN 加速**：识别 CN 客户端后经站点边缘改写安装包 URL 到 Gitee 镜像（HEAD 预检、失败自动回退国际直链）；走代理的客户端显式询问 CN 镜像；页脚更新按钮实时反映下载中的更新状态，不再点了没反应
+- **README 与官网**：hero 主图重拍（折叠总花费 + 完整额度总览）并去重，中英双语严格镜像；官网设计区嵌入两张 archify 自包含架构图（架构总览 / 刷新数据流，深浅主题可用），演示面板随本版本前端重建；新增每周一上游参考仓库定时扫描工作流
+
+## 修复
+
+- **点设置默认弹授权中心**：面板跳转意图写入配置后消费不清空，面板窗每次重建都重放陈旧意图——点齿轮打开的是授权中心而非设置页；意图改为一次性消息（读取即清空 + 10 秒 TTL），齿轮与 \`Ctrl+S\` 显式打开设置页
+- **分享模板条长与数值口径不一致**：mtok 条长与打印值口径不统一，统一复用 \`spendVal\`；分享信封补入同范围 credits 独立行，与面板口径一致
+
+## 0.8.1 — 2026-10-14
+
+皮肤包落盘修复 / 工坊画廊改版 / README 换装
+
+## 修复
+
+- **皮肤包安装后重启即失忆（阻断级）**：\`verify_pack\` 校验 manifest 后没有把它写回安装集合——下载、安装、热应用全程正常，但 \`manifest.json\` 不落盘，重启后加载器找不到清单，工坊忘记已装皮肤。现在校验过的 manifest 原始字节随包落盘（保留原始格式与未知字段），重启后从磁盘完整恢复。真实链路已验证：HTTP 下载 → 落盘 → 工坊列表出现 → 热应用 → 杀进程重启后列表与已应用皮肤全部恢复；配套回归测试 \`installed_pack_is_listed_and_loads_its_stylesheet\`
+
+## 变更
+
+- **皮肤工坊改画廊布局**：固定页头（当前外观 + 返回）+ 唯一滚动正文 + 固定操作栏；主预览换上有辨识度的总花费面板样张（$32.80 圆环 + 服务商明细，固定演示数据不读真实账户），下方缩略图画廊浏览；日间 / 夜间 / 并排三种预览模式；返回、日夜切换、使用皮肤、恢复原生全部配上 Phosphor 语义图标（文字与禁用态保留）；切换皮肤与日夜模式时保留滚动位置与键盘焦点；下载、保存、移除失败在操作栏内就地提示；signal 主题的 8 条规则加作用域保护，资源包预览不再继承邮局样式
+- **README 换装（magpie 结构）**：中英双份按 magpie 的板块骨架整体重写——居中头部内嵌主图、「适合你吗」开场、快速开始、来源形态表、「它如何工作」架构图、八个小节各配主题自适应截图对（8 组 16 张 @2x，随 GitHub 读者的亮暗主题切换）、文档链接表、隐私段、star-history 收尾；服务商数修正 66 → 68（补上 CodeBuddy CN / WorkBuddy）；默认启用家族不再写死易漂移的数字；官网演示包随 0.8.1 前端重新打包（页脚版本与站点 hero 同步）
+
+## 0.8.0 — 2026-10-12
+
+CodeBuddy 家族三通道 / 皮肤工坊资源包 / ZCode Weekend / 静默刷新 UX
+
+## 新增
+
+- **CodeBuddy 家族入驻（CodeBuddy / CodeBuddy CN / WorkBuddy）**：腾讯 CodeBuddy 账号体系的三个租户各出一张独立卡（\`family@<hash>\`，禁用互不影响）；授权中心扫码登录（state → 轮询 token → 刷新），企业成员自动切换企业口径端点；额度为 credits 计量条（UTC+8 解释无时区周期、结转不出现负百分比、Unlimited/无总量退化/Reserved 单列），免费档显示「体验版」
+- **WorkBuddy 三条登录通道**：① 桌面版登录态直读（只读 \`workbuddy-desktop.info\` 明文字段，加密信封拒读不解密，WorkBuddy 未运行时可用）；② 卡片提示一键跳授权中心扫码；③ 网页会话 Cookie（显式启用制——不开就一个请求都不发；支持从 Chrome 导入或手贴 Cookie，UA 按本机 Chrome 大版本拼装、被拒自动降一个大版本重试一次；额度口径与扫码通道完全一致）
+- **皮肤工坊资源包体系**：工坊改两级布局（侧栏 + 详情），用真实组件（卡片/计量条）而非截图做皮肤预览；资源包 zip 带 manifest 与 sha256 校验，安装即校验、损坏拒绝；官方包上线分发索引（云端邮局 / 山水笺双包），工坊内一键下载安装；「山水笺」水墨主题 + 主题化启动动画（Esc 跳过、减弱动效适配）
+- **ZCode Weekend 用量行**：本机装有 ZCode 桌面客户端时，Z.ai 卡多一行「ZCode Weekend」周末包余额（读 \`~/.zcode/v2/credentials.json\` 的 AES-256-GCM 加密会话 JWT）；无会话不出行、有会话无包显示「Weekend not started」占位；请求失败沿用上次结论，行不再刷新间闪烁
+- **静默刷新 UX**：刷新失败分级（普通错误静默保留旧值、连续 ≥2 次才标记过期）；过期卡片的 ⚠ chip 可点击立即重试；卡片带「数据新鲜度」行（距上次成功刷新时长）；刷新节奏加 ±10% 抖动，多卡不再同秒齐发
+- **MCP / 搜索密钥自管文件**：bocha / tavily / firecrawl / brave 的键迁入 Pane 托管的 \`search-keys.json\`（明文、永不需要解锁保险箱），每键一条独立余额行（带用户标签）；环境变量与第三方 MCP 客户端配置不再作为来源——设置里加什么就查什么
+- **卡片提示运行时三语**：登录提示、过期原因等长文案改为按界面语言（中/英/俄）实时翻译，不再出现英文原文夹生显示
+
+## 变更
+
+- **看板内置分组固定为两个**：\`Coding Agent\` 与 \`MCP\`（原「MCP 搜索」去掉「搜索」二字），新装只有这两组；闪电说恢复自己的「生产力工具」目录分类——装有闪电说的用户多出第三组分区，未装的用户不受影响
+- **家族清单防漂移**：登录型家族的四处清单（登录存储、授权中心、账号列表、provider 目录）与 CodeBuddy 家族表全部纳入回归测试——新增家族漏登记任一处，\`cargo test\` 当场红（本轮 workbuddy 两次漏登记的教训固化）
+- **Chromium 解密链抽共享模块**：豆包桌面 Cookie 与 WorkBuddy 网页 Cookie 导入共用同一 \`os_crypt\` 解密（\`Local State\` → DPAPI → AES-GCM v10），代码单份维护
+- **仓库治理**：\`TODO.md\` 退休改用 \`.scratch\` 任务追踪（spec + 票据 + 状态行）；\`CONTEXT.md\` 拆分为词汇表 + \`docs/project-facts.md\` 已验证事实库；\`temp/\` 全树本地化不入库；完成态计划文档清退
+- **官网**：皮肤工坊直达入口、0.7.0 内容同步、演示区 provenance 哈希闸门进 CI（演示包落后前端即失败，杜绝再漂移）
+
+## 修复
+
+- **WorkBuddy「扫码成功却看不见」三连修**：① 授权中心的登录型家族清单漏了 workbuddy / codebuddycn——账号扫码后已落库（详情卡有额度）但中心列表恒空；② 家族提示卡被误算成一个账号——主看板幽灵「1/2」徽章与多余「置顶」页签、「额度总览」0/2 与「未配置凭据」，两条渲染路径抽成单一判定统一修正；③ \`account_list\` 没有登录存储分支——十个登录家族的账号列表恒为空，账号卡每轮刷新都被前端清掉，总览永远显示提示卡；三条均已带回归测试
+- **皮肤选择重启回退原生**：\`config.skinId\` 后端校验只认内置两款，资源包 id 保存时被静默清空——下载的皮肤重启即回退、跨机迁移 id 也存不下来；改为形状校验放行包 id。工坊已安装皮肤的详情页不再并排出现两个「原生外观」按钮
+- **Firecrawl 单键余额行重复**：单键时余额行打印两次
+- **窄窗布局**：总花费卡在所有视口宽度纵向堆叠不再挤压；弹层列表不再向上爬、分类 chip 按标签自适应不再溢出
+- **CI 误报**：Windows 内置管理员的 SDDL 别名导致 owner-only ACL 检查误报；skill payload 行尾在 CI 上不确定
+
+## 0.7.0 — 2026-10-11
+
+云端邮局皮肤 / 保险箱 v3 创建与恢复 / Agent 自检诊断 / 花费台账归并与积分罗列
+
+## 新增
+
+- **云端邮局主题（皮肤工坊正式开张）**：首款完整皮肤「云端邮局」——手绘邮票图标、纸张卡片、猫咪邮差与昼夜两套邮局场景（跟随亮暗设置，也可在工坊里并排预览日间/夜间效果再应用）；沿用你选择的界面字体，可随时一键恢复原生外观；分享图内嵌皮肤素材，导出与实况一致
+- **保险箱 v3 创建与恢复**：全新两步创建向导（① 解锁码输入两遍确认 ② 三道密保各填一遍），创建标准为至少 6 个字符、不强制字符组合（小字推荐含大小写与数字）；创建成功即生成一次性恢复码——仅展示一次，支持原生「另存为」导出 TXT；忘记解锁码时三路可恢复：答对任意两题、手输恢复码两遍、或上传恢复码 TXT（沿用 5 次失败冷却防暴力猜测）；恢复码可随时重新生成（轮换旧码）或停用；保险箱损坏/新版写入/读取失败等状态在界面上明确报告而不是静默
+- **Agent 只读自检诊断**：本地 API 新增 \`/v1/doctor\`（一句话健康结论，每项失败带修复办法）、\`/v1/providers\`（每张卡的状态/错误/过期）、\`/v1/status\`（版本/运行时长/刷新年龄）、\`/v1/sources\`（本机花费数据源清单）四个只读端点；配套「Pane 排查 Skill」三种装法——\`install.ps1\` 安装器自动装入、设置面板一键安装（先展示写入计划、覆盖前自动备份）、或 \`npx skills add Aafff623/pane\`；装好后直接对 coding agent 说「帮我查一下 Pane」即可自助定位「被禁用/没配密钥/登录过期/网络/刷新卡死」
+- **DeepSeek Harness 花费统计**：读取本地 \`~/.dsh/sessions\` 会话记录（zstd 多帧流式解压），把官方 Harness 的 token 消耗纳入产品花费与用量汇总，配 DeepSeek 鲸鱼图标
+- **更新确认弹窗**：检测到新版本不再自动弹窗打扰，改为总花费栏的圆形绿色↑指示器常驻提示；点击先打开更新详情（版本号 + 说明），确认后才开始下载安装；网络失败时给出原始错误与代理排查提示
+
+## 变更
+
+- **皮肤工坊脱离实验性开关**：工坊入口常驻自定义面板，不再依赖「实验性功能」；此前的实验皮肤（Aurora Desk / Paper Orbit / Neon Arcade）与吉祥物层整体移除，旧选择读取即清理；实验开关仅保留给真正的未完成功能
+- **详情额度环与状态色**：主题下额度圆环缩至 44px（紧凑模式 36px），保留真实额度周期时长与重置倒计时；状态分档固定为剩余 >40% 绿、25%–40% 橙黄、≤25% 红（此前正常态为蓝色），并整体提高饱和度——暗色用鲜绿/橙黄/亮红压暗轨道，亮色用深绿/深橙/深红，额度环、状态点与账号标识同步
+- **花费按产品归并、积分单列**：本地 CLI 台账统一产品口径——\`claude-desktop\` 并入 Claude Code、\`minimax\` 并入 MiniMax Code（不同账相加）、\`kimi\` 别名天级去重（同名双记只取一次）；已禁用/已删除的 provider 花费照常入账（CLI 还在烧 token 就该被看见）；Qoder CN / Trae CN 的积分不再折算成 token/美元，改为「Credits」独立小节按天逐行罗列每天实际消耗（不随时段 tab 变化，首日无基线不产出）
+- **官网无障碍与交互体系**：按 HeroUI / React Aria 模型整站替换——\`.chip\` 徽章体系、数字全部走 Intl 本地化格式、计量条获得 meter/progressbar 语义、按钮两轴（变体×尺寸）体系、设置浮层成真 modal（焦点陷阱/Esc/焦点归还）、FAQ 方向键导航、跑马灯新增暂停按钮（WCAG 2.2.2）；全站灰字对比度统一 \`--faint\` 单 token，双主题实测无低于 AA 的组合；设计层同步收敛（why-pane 行类型分道、生态轨道领域色环+悬停名片、特性区改「真实面板碎片」、动效开关合一、网格密度调参）；演示面板随 0.7.0 前端重新打包（含云端邮局昼夜素材）
+- **更新检查网络链路**：更新清单请求改走与 provider 一致的代理链（配置代理 → Windows 系统代理 → 直连），Clash 等系统代理场景不再裸连 github.com 超时；清单检查加 20 秒超时，死链秒级报错而不是停在系统级 TCP 超时
+
+## 修复
+
+- **原生亮色浮层可读性**：保险箱创建/重置弹窗、确认/更新/更新说明框、分组菜单此前写死暗色玻璃背景，亮色模式下深色文字落在暗底几乎不可读——全部改为跟随亮暗主题的浮层配色，关闭玻璃效果时补齐实色背景；输入框占位符、普通/危险按钮悬停、亮色账号数量徽章（浅底深字）一并修正
+- **时段切换高亮吞字**：今天/昨天/7 天/30 天等时段 tab 在选中高亮态下文字颜色被通用规则覆盖导致「看不见自己选中了什么」——选中/悬浮态文字与背景改回成套配色（亮暗两版）
+- **主题暗色花费列表高亮**：黄色花费底板的行悬浮状态误用暗色页面背景，暗色模式下名称与金额「深底配深字」——悬浮色与文字色成套适配
+- **图标与窄卡片布局**：每日用量详情及同类图标按钮统一居中；窄窗口下卡片操作按钮移到第二行，ClinePass 等长标题不再被按钮挤压覆盖；\`可用/总数\` 账号标识的可用数、分隔符、总数与背景在亮暗模式下均清晰
+- **花费去重与数据采集**：Kimi 别名（kimi ↔ moonshot 同源双名）按天折叠去重，修正天级重复计入；补齐 MiniMax v2 本地用量读取（\`runtime-state.sqlite\`，作为 mcode 的天级兜底防双计）
+- **积分历史反复清空**：credits 台账写入时 version 字段恒为 0，读取侧静默丢弃整份文件导致历史从未累积——修为按版本兼容读取并原地升级，已有记录恢复可读（此前已丢失的记录无法找回）
+
+## 0.6.0 — 2026-10-10
+
+登录式多账号 · 23 家新 Provider / 额度机制全量审计 / 自适应看板 / 官网生态页与双语 README
+
+## 新增
+
+- **主密码 Q&A 恢复（忘记密码兜底 + 二次验证）**：设置主密码后立即引导配置恢复问题——默认且推荐 2 个（内置 8 个问题可选：最喜欢的水果/最常用的编程工具/第一只宠物的名字等，也可自填），答案需输入两次确认；数量可在 1~5 个间调整，减到 1 个时弹窗说明"单个答案更易被身边人猜中"劝留 2 个；忘记主密码时在锁定状态点「忘记密码？」连续答对全部问题即可设置新密码（旧密码不出前端、库整体重封、答案不区分大小写与多余空格）；连续答错 5 次进入 5 分钟冷却防暴力猜测；更换主密码后恢复问题保持有效（密封自动轮转）。磁盘上问题为明文（锁定时显示挑战）、答案与主密码全部密封（答案各自 Argon2id 加盐 + AES-256-GCM，随机恢复密钥三路封存）
+- **「密钥与额度」页管理升级**：主密钥入口移到页首右上角（添加/切换主密钥、锁定/解锁、恢复问题、忘记密码一处可达）；每行「查看」旁新增「复制」（同一主密码验证，明文不上屏）；添加/替换密钥改为「先测试、后保存」——粘贴 key 后必须通过「测试连通性」才解锁保存，改动输入即重新校验；本机登录类（Copilot / Antigravity / Claude / Kiro 等）行内显示绿色「已连接」并写明来源（读取哪些本地文件/配置）；按钮按语义配色（删除红、复制绿、问号灰）且字号整体 +1px
+- **全量多账号**：37 家 API-key provider 全部支持子账号（添加账号、独立出卡、重命名/归档），不再限 8 家；已有单 key 下次刷新自动迁移为「账号 1」，无需手动操作；本地登录类仍读单一登录态
+- **快捷键管理重做（对齐 VS Code / Raycast 惯例）**：统一行布局修掉「切换分类」错位；快捷键以键帽呈现，点击即录制、Esc 取消、Backspace 清除、↺ 恢复内置默认、× 清空后重录；冲突全行互查并红字提示
+- **10 家 Provider 还原（第一批）**：\`amp\` · \`bedrock\` · \`chutes\` · \`deepgram\` · \`openai-api\` · \`poe\` · \`venice\` · \`vertexai\` · \`warp\` · \`kiro\` 恢复接入（Rust adapter、品牌图标、三语文案、环境变量与「测试连通性」全链路）；默认全部禁用，需在设置「密钥与额度」逐家启用；Bedrock / Vertex AI 读本机 AWS / gcloud 凭据（无凭据时显示未配置属正常），其余 7 家粘 key 即用
+- **4 家新 Provider（第二批）**：\`mimo\`（小米 MiMo，粘贴平台 serviceToken 或 API key 二选一——token 报月度用量、key 报余额/Token Plan，自动识别）、\`trae\`（Trae 国际版，读本机 \`%APPDATA%\\Trae\` 登录态，host 随账号区域）、\`qoder\`（Qoder 国际版，读本机 \`com.qoder.app.stable\` 登录态打 \`openapi.qoder.sh\`）、\`zed\`（纯本地：只读 Zed 编辑器 \`threads.db\`，统计 zed.dev 托管模型的全部/近 30 天 token 与近期模型 Top3，BYOK 线程不计）；四家同样默认禁用；\`zstd\` 依赖引入（解压 Zed 线程数据）
+- **8 家新 Provider（第三批）**：\`droid\`（Factory：billing/limits 的 5h/周/月窗口 + 旧版订阅用量回退 + 加购余额行）、\`jetbrains\`（纯本地读 IDE 的 AIAssistantQuotaManager2.xml——月度积分进度、加购池、续期重置，多 IDE 取最新）、\`groq\`（公开 API 响应头里的每日请求/token 预算）、\`huggingface\`（whoami 身份 + 当月推理账单，计费 = max(0, 已用-包含)，403 给出权限指引）、\`longcat\`（粘贴网页 Cookie：token 包摘要优先、旧版 tokenUsage 回退、燃料包副行）、\`sub2api\`（自建网关：自填部署 URL + 分组 key，订阅窗口/配额/钱包三形态 + key 级请求与 token 统计）、\`mistral\`（admin Cookie：当月 token 合计 + Vibe 用量 + 信用钱包）、\`perplexity\`（会话令牌：信用额度按 经常→已购→赠品 顺序归因）
+- **火山方舟（第四批）**：\`volcengine\`——粘贴 \`AK:SK\`（ark.volcengine.com 的 API Key 账号），V4 签名直译（HMAC-SHA256 签名链，与 Bedrock 同构共用 hmac/sha2）；Agent Plan 的 AFP 5小时/周/月窗口与 Coding Plan 的分层窗口双探测，任一返回即出卡
+- **Kiro 直读本地库**：不再调用 \`kiro-cli\`（旧通道每次调用触发 CLI 自更新、向 %TEMP% 堆安装包）——改为只读打开 \`%LOCALAPPDATA%\\kiro-cli\\data.sqlite3\`（\`KIRO_DATA_DIR\` 可覆盖）取登录 token 与 profile ARN，直连 CodeWhisperer \`GetUsageLimits\`；额度卡新增 Overage（超额已用/上限）与超额计费行，bonus 花费并入计划用量时明确标注；未知 region 的 ARN 拒绝请求而非把 token 发往猜测端点
+- **「密钥与额度」机制说明页**：覆盖全部 provider 家族——每行新增「?」，弹窗讲清该家取数机制（读取哪些本地文件/数据库、按优先级读哪些环境变量、查询哪些域名）、按认证形态给出「你要提供」步骤（粘贴 key / OAuth 登录 / 本地登录），底部附本次实测实时指标；本地登录类（Claude / Kiro / Trae / Qoder / Vertex AI 等）不再被要求粘 key
+- **解析测试补齐**：第一批 24 条 + 第二批 10 条 + 第三批 16 条 + 第四批 5 条（MiMo 三形态、Zed threads.db zstd 往返、火山签名链与双计划解析、Perplexity 三段归因、Sub2API 三形态等），provider 解析测试 489 → 550
+- **官网中英双语**：导航、Hero、下载、使用说明、快捷键、批注、服务商与 FAQ 全站切换，英文为重新撰写的专业文案；\`/en\` 路由由 Cloudflare Worker 指向同一文档、前端应用英文
+- **官网主视觉与演示升级**：Hero 右侧三素材自动轮播（圆点切换、\`prefers-reduced-motion\` 降级）＋「看得见」艺术字重做（渐变/字距/响应式，消除断裂与下划线残影）；看板演示批注系统按面板模式（概览/花费/设置/刷新）切换、卡片碰撞避让、连接线避让后重算，第 06/07 条绑定真实的设置齿轮与刷新/状态栏；服务商双轨道相向循环滚动（完整复制避免接缝）；下载区渐变光晕与页脚收口
+- **登录式多账号扩展（8 家）**：Codex 浏览器 PKCE 登录（CLI 同款 loopback 回调，简化流授权参数 + 403 传输重试，每次登录独立出卡）；Copilot 与 Grok 登录式多账号；Kiro 浏览器 PKCE 登录 + 每账号配额卡；Windsurf 登录 + 日/周配额卡；CodeBuddy 登录 + 每账号计费卡；Qoder 设备码登录 + 每账号积分卡；Trae 国际版登录 + 每账号权益卡；Zed 登录集成（回环令牌 OAEP/RSA 验签）；多账号徽章拆分配色并高亮低可用，总览账号胶囊改为「可用/总量」并按可用量着色，紧凑页签保留默认账号标签
+- **HTTP 系统代理跟随**：自动读取 Windows 系统代理并发往厂商端点；本地代理闪断走重试梯（直连重试 + 环境代理断链回退），地区封锁错误单独成类不再误报为网络故障
+- **悬浮看板自适应字号**：字号按看板宽窄自动放大/缩小（随窗口尺寸、重绘与字体加载更新）；总览与详情的每个标题按本行实际剩余空间独立计算（扣除图标、账号胶囊、箭头、百分比占位），长标题保留可读下限后省略；总览百分比、倒计时与账号胶囊同步适配；详情卡 provider 图标统一内缩 6px
+- **总览文字余额图形**：Firecrawl 等只报余额的服务在总览条形/圆环与悬停提示中展示真实余额——可靠百分比照常实填，分母未知时用中性斜纹条/虚线圆环加 \`?\` 标记并说明原因；多把 Key 分别显示余额与重置日期，不累加团队共享余额
+- **官网「为什么用 Pane」模块**：首屏与工作台之间新增说明块「查一次用量，不必跑遍每个后台。」；右侧用量汇集动效融合 Magpie 路由演示（实心点查询/空心点返回/到达反馈）与 Magic UI 渐变光束，来源可点击、可暂停，离屏与后台停跑、\`prefers-reduced-motion\` 降级（原作者源码与 MIT 许可归档 \`site/vendor/\`）
+- **官网 provider 生态轨道**：新增独立生态 section——16 个 provider 图标双圈反向旋转（外圈 20s/内圈 10s，独立暂停按钮），右侧按「AI 与内容生产 / 工作效率与商业运营 / 数字资源与开发基础设施 / 个人数字会员」四个方向介绍拓展构想（13 个候选领域明确标注为构想，当前收录 66 家）
+- **官网像素字标页脚**：页脚「Pane」字标换自绘 5×7 点阵 SVG mask（宽度 84vw、上限 1260px），保留金属渐变与光标追光；下载区底部先淡出到页面底色、青蓝光晕再渐入，去掉黑色硬分界，深浅主题自适应
+
+## 变更
+
+- **\`openai\` 家族更名 \`openai-api\`**：按 Admin key 口径正名（显示名 "OpenAI API"，环境变量 \`OPENAI_ADMIN_KEY\`），避免与 Codex 订阅卡混淆；\`hmac\` 依赖引入主 crate（Bedrock SigV4 签名用，后续火山方舟 V4 签名共用）
+- **Qoder CN 积分花费估算归位 \`qodercn\` 家族**：花费面板的「Qoder」积分估算卡更名为「Qoder CN」（数据源本就是 CN 版积分账本）；\`qoder\` 家族让位给国际版配额卡，两个版本不再共用一个 family
+- **官网显示名统一 MiniMax Code**：官网服务商列表与演示面板中 \`mcode\` 显示名由 MaxCode 改为 MiniMax Code（Pane 应用侧显示名待同步）；官网亮暗主题与内嵌演示面板主题分离，切换官网主题不再连带切换演示面板
+- **MCP/搜索额度口径统一**：Firecrawl 与 Brave 改为「已用 X / Y credits」（与 Tavily 一致），Bocha 保持 ¥ 余额；Firecrawl 按真实余额与重置日期展示，不再把套餐 \`planCredits\` 当总额度或反推已用（余额可含赠送/充值/团队共享额度）；Tavily 的 Key 用量、账户套餐用量与按量消费三种口径分别展示，多把 Key 的账户级额度不直接相加
+- **余额型服务不再编造总额度**：接口只返回余额时显示真实余额，移除「历史最高余额充当总额度」「缺失上限补固定套餐额度」「缺失套餐名补 Pro」等推算（闪电说、Command Code 等）；缺用量字段不再补 0 生成假满额
+- **官网英文路由与文案纠偏**：\`/en\` 路由修复（Worker 改为内部读取根页面，静态资源重定向不再丢失英文模式；首屏标题与 FAQ 简介漏译补齐）；官网中英文刷新文案统一为默认 5 分钟
+- **官网演示对齐悬浮板**：嵌入演示改竖排花费图表（圆环在上、模型列表在下），示例数据更新为 1.2B tokens/7 模型并校正模型名与配色；\`build-demo\` 增加源码哈希同步检查，主项目更新后提醒重新打包
+- **品牌图与元数据统一**：废弃的蓝色 P 标志全部替换为仪表盘 Logo（官网导航/汇集节点/工作台标题/轨道中心/页脚/favicon/分享预览共 8 处）；GitHub 仓库 description、homepage（\`pane.jazii.dev\` → \`pane.threetwoa.live\`）与 18 个 Topics 更新，\`package.json\`、\`Cargo.toml\`、\`tauri.conf.json\` 与官网 meta/canonical/分享卡片同步
+- **README 双语与素材**：新增 \`README_EN.md\`，定位放宽为「本地优先的用量与额度工作台」（当前 66 个来源 + 横向扩展方向分列，不把候选领域写成已支持）；三张占位图替换为当前前端静态截图并标注示例数据；技术栈徽章与测试徽章（改指 parse-tests harness）更新
+
+## 修复
+
+- **自定义看板排序收严**：主页的自定义分组（用户自建的「鸡蛋/羊毛」等标识）只作用于主页看板——自定义看板恢复全程严格 A–Z 字典序、不再渲染分组标题，启停与配置入口的位置稳定可预期
+- **打开设置先闪英文**：语言偏好本地缓存并在首帧同步恢复，设置窗口不再先显示英文再切中文
+- **暗色模式图标可见性**：Factory / Qoder / Novita / CommandCode / ClawsGO 等近黑品牌标在暗色下渲染为白色剪影，Groq 白标在亮色下转黑——设置页、看板、托盘表现一致
+- **官网视觉修复**：亮色模式图标发白、Claude 图标改回品牌橙、窄屏标题与描述溢出、批注箭头在卡片移动后指向旧位置
+- **65 家 Provider 额度机制审计**：逐家核对查询入口与额度口径后集中修复——缺用量字段补 0 造成的假满额/0% 卡片、Brave 凭据缓存按列表位置绑定导致的换序串号（改绑实际凭据，缓存倒计时跨账期失效）、OpenRouter 累计用量除以日/周/月上限的跨周期错算（改用对应周期数据）；provider 解析测试 550 → 609（新增 19 项回归，覆盖付费额度、缺字段、共享账号、凭据缓存与非法百分比）
+- **Firecrawl 余额被隐藏**：余额可超过套餐额度（赠送/充值/团队共享），旧代码用套餐额度反推已用并把负数截 0，导致剩余 10,890 credits 显示成「已用 0 / 1000」——改为直接展示真实余额与单 Key 重置日期
+- **总览文字余额落空**：总览已识别出文字余额数据，但条形/圆环布局仍按百分比渲染，最终显示「无用量数据」——补余额展示分支
+- **开发弹窗黑屏**：旧 Vite 占用端口但请求超时 + 启动脚本未按进程号正确停止旧进程 + 页面在脚本加载完成前整体隐藏——启动脚本改为显式按 \`-Id\` 替换旧 Vite 并就绪检查主脚本/样式，收窄 Vite 扫描与监听目录，启动期显示加载提示、超 8 秒提供重新加载入口
+- **保险库解锁后的陈旧行**：解锁/上锁保险库后 MCP/搜索卡片的锁定提示行不刷新——解锁与上锁时同步失效 searchquota 缓存；被删除的 provider（\`removedProviders\`）合并进禁用列表参与刷新判定
+
+## 0.5.0 — 2026-10-07
+
+设置与密钥管理 / 品牌换代与官网上线 / 多账号与长墙镜像 / 花费精度与更新推送
+
+## 新增
+
+- **密钥保护（系统凭据库 + 查看验密）**：provider 主密钥与全部子账号密钥迁入系统凭据库（Windows 凭据管理器等，经 keyring 库）——JSON 文件不再明文落盘，旧明文在首次读取时自动迁移（写入成功才删源，失败保留文件回退）；设置「密钥与额度」页已配置的行新增「查看」按钮，需主密码验证后才显示明文；保险箱状态栏新增「更换密码」（先验旧密码）
+- **设置中心独立窗口**：⚙ / \`Ctrl+S\` / 托盘右键→设置 打开独立设置面板，顶部胶囊目录 7 分类（常规/密钥与额度/快捷键/通知/隐私/网络/关于），静态卡片分区+发丝线行，配置跨窗口实时同步；悬浮窗内嵌设置页废弃
+- **设置密钥页重构**：「密钥与额度」页从单一手填保险箱升级为两张卡——「Provider 密钥」列出全部可管密钥的 provider（品牌图标 + 状态 + 行内添加/替换/移除密钥，多账号家族含子账号重命名/删除/新增）；「MCP / 搜索密钥」为原保险箱并补齐品牌图标；面板顶部 7 个分类页签同时补齐图标
+- **托盘菜单重做**：托盘右键直出各 provider 状态行（≤8 条，读本地快照零请求）+ 设置入口
+- **开机品牌动画**：弹出主窗时播放 GSAP 时间轴（卡片落定→环描边→指针扫→字母渐入），同一开机只播一次（\`boot_id\` ±60 秒容差防校时误重播）；设置→常规可开关/重播；系统减动效时停格成片帧后正常退场
+- **测试连通性**：卡片菜单「⚡ 测试连通性」对未启用的卡也可测（\`test_provider\` 命令），状态栏显示 \`连通正常 · N ms\` 或失败原因
+- **额度查询说明**：卡片菜单「? 额度查询说明」按认证形态自动给出 key / OAuth / 本地 三种步骤模板与控制台直链，内嵌「立即测试」
+- **子账号备注两级拆分**：「备注 Provider 名称」只改卡片标题，「备注子账号名称 · 账号名」只改该账号；≥4 账号的紧凑胶囊优先显示备注文本；默认主账号的子备注存合成键 \`family@__default__\`，不再串号
+- **子账号管理菜单**：右键账号胶囊可 ★ 设为默认主账号（总览优先显示它）、⬇ 归档 / ⤴ 恢复账号（凭据随档，覆盖 API key、Antigravity、Cursor 三类账号存储；归档记录不再回传 \`api_key\`）
+- **多账号总览折叠**：总览默认收起为 主账号环+用量条+N/M 徽章，点 caret 展开（\`overviewExpanded\` 记忆展开态）
+- **长墙镜像**：周/月额度打满时，短周期环直接镜像墙状态（100% + 刷新倒计时），消除「5h 环还是绿的但请求全被拒」的假象；首期白名单 kimi，其余家族逐家实测后扩展（Codex 有 banked credits 明确排除）
+- **Kimi 额度耗尽解释**：Session/Weekly 打满时详情显示 \`Weekly limit reached · resets in Xd Yh\`，不再是空详情的裸红环
+- **Qoder/Trae 积分趋势**：卡片显示积分消耗趋势（本地账本 \`credit_history.json\`：日消耗差值、跨天空档整笔归下一观测日、重置读数下跌计 0、重置日按前后两段计费）
+- **Qoder token 估算**：Qoder 按任务扣积分、官方无 token 公式，按 25,000 tokens/积分 的标注假设折算并带「估算」徽章，单点可调
+- **Qoder CN 加购桶读取**：用量读取补齐顶层 \`addOnQuota\` 桶（加购/赠送积分包），并入聚合分母并出独立「Add-on credits」行——买了资源包或领了活动积分不再隐身于满额红环之后
+- **Qoder CN 自动签到（默认关）**：每个领取窗口自动领取每日 100 积分福利（领取幂等，重复请求返回 \`replayed:true\` 不会多领）；设置→常规留开关，卡面一行轻量状态（已领/已领过/无活动/失败原因），失败 30 分钟后自动重试
+- **花费卡 ⚡ 分档渐变**：按日 token 量分 100M/250M/500M 三档渐变（7d/30d 按天数等比放大），最高档呼吸光效；阈值可在设置自定义（\`spendIconTiers\`）
+- **主页面滚动记忆**：\`Alt+2\` 唤回后停在上次滚动位置（\`mainScrollTop\` 防抖持久化）
+- **总花费横栏更新推送指示器**：检测到新版本时横栏出现绿色圆形 ↑ 按钮（Cursor 式轻量提示，不弹窗打断）；点击即原地开始下载——圆环按真实字节进度（\`update-progress\` 事件）填充，完成后自动安装并重启到最新版；失败落在底部状态栏
+- **抽屉搜索**：Customize 抽屉顶部搜索框按名称/family 子串就地过滤，分组头随空隐藏
+- **Provider 删除**：provider 设置面板（齿轮）与卡片菜单新增「删除此 Provider」——从自定义看板与主页看板一并移除（凭据保留）；自定义看板底部「已删除的 Provider」一行随时可恢复
+- **实验性功能开关**：皮肤市场默认隐藏，开启需二次确认，关闭即热切回原生皮肤（\`experimentalFeatures\`）
+- **新装默认精简**：首次安装仅默认启用 8 个主流家族，其余 33 家偏门默认禁用（\`DEFAULT_DISABLED_PROVIDERS\`，老配置不受影响）
+- **官网正式上线**：\`https://pane.threetwoa.live\`（Cloudflare 自定义域）；首屏交互演示由真实前端打包驱动——9 个快捷键演示（\`Alt+2\` / \`Esc\` / \`Shift\` / \`Shift+1\` / \`Ctrl+S\` / \`Ctrl+E\` / \`Ctrl+L\` / \`Ctrl+R\` / \`T\`，点击与按键均可触发）、深浅主题切换、移动端布局；「下载 Windows 版」点击直接取最新安装包（实时解析 GitHub 最新 Release，失败回退 Release 页面）；站点当前为中文单语，英文版后续再做
+
+## 变更
+
+- **品牌标统一**：以唯一矢量源 \`pane-mark.svg\` 重新生成全套图标（托盘/exe/安装器/官网 favicon/面板 logo），终结 exe 浅蓝圆环与官网深色仪表盘两套标识并存的漂移
+- **详情卡头部重排**：名称按实测拟合自动缩字号（17px 起步、下限 11px），健康点+百分比与齿轮/折叠/星标/刷新按钮浮层化（悬停淡入不占宽）；容器宽 <330/290/250px 三档渐进降级，被收纳的信息全部进悬浮提示
+- **置顶星标收敛**：账号 tab 行的星标全部移除，卡片头部常驻一颗，作用于当前展示账号
+- **Custom Balance 更名 Custom Relay**：内置中转家族正名（Rust/TS 目录、界面、存储共 9 处同步）；抽屉行说明「自定义可增删改，内置只能启停」
+- **设置页「额度」改名「密钥与额度」**（三语）：密钥保险箱在该页内，名实相符
+- **齿轮按钮文案**：抽屉 provider 行的齿轮 tooltip「配置」→「设置」（三语）
+- **品牌图标补齐**：新增 codebuff/elevenlabs/kilo/relaybalance/sensenova，traecn 换官方标，shandianshuo/clinepass/tavily/firecrawl/apigoto 补齐专属矢量标
+- **分类行截断**：总览分类 chip 超宽省略号截断，设置可切两行展开（最多 6 个+…）
+- **详情卡默认展开**：仅显式折叠的卡收起；折叠卡点空白区=展开+居中+高亮
+- **平滑滚动兼容**：系统关闭「动画效果」时 WebView2 的 smooth 滚动整体空转，全库 8 处滚动点统一探测/降级
+- **GLM V1 Pro 移除**：自接入的中转 provider（familyId \`linkso\`）从正式版全链路删除——Rust adapter 与目录、多账号分发、前端目录/图标/峰谷规则、官网 provider 列表与在线演示（\`site/\` 演示包已重新生成）；老配置里遗留的 \`providerOrder\`/\`disabled\` 条目由新增的「目录已不存在的 family 不渲染」规则兜住，不会留下无图标空白卡；历史 CHANGELOG 与旧凭据不动
+
+## 修复
+
+- **Antigravity 花费口径修正**：解码四字段正名（system / input / output / cacheRead——此前把输入按输出价计费、缓存重读整段漏算）+ 改按事件时间戳归日（不再把跨天对话压进一天）。修正后面板 30 天美元下降约一半、token 量级升至约 10 倍，均为读数修正结果而非数据丢失；价格体系版本 +1，历史美元全量重算
+- **自定义看板面板布局错乱**：provider 设置面板的列布局误继承行内居中（按钮全部居中悬浮、字段收缩），长凭据胶囊跨行碎裂——已改为左对齐整列布局 + 胶囊整行换行
+- **花费美元计价两处修正**：codex GPT-6 系（\`gpt-6.1-sol\`/\`gpt-6-sol\`/\`gpt-6-luna\`/\`gpt-6-astra\`）按官方价目表补齐 >272K 整单升档（输入/缓存×2、输出×1.5，此前 supplement 平价卡无档位字段导致长会话单向下偏低报）；\`MiniMax-M3.1-Flash-Preview\` 官方从未发布 per-token 价，按上代 M3 卡（$0.30/$1.20/$0.06，标注估算）兜底，不再 $0 记账（本机 33.7M tok 实测 +$2.78）。价格体系版本 +1，历史美元全量重算；Antigravity 的 \`gemini-3.8-flash-n\` 查无官方 SKU，维持 token-only 不编价
+- **滚动死界面根因**：全局滚轮兜底把抽屉/皮肤市场/设置的滚动全部抢去滚主列表，收窄为仅主列表命中时接管
+- **总览点击不跳转**：与平滑滚动空转同根因，此前系统关动画时总览跳转大面积失效
+- **右键菜单飞远**：窄悬浮窗内菜单被推到窗口另一头，改为鼠标落点定位+放不下上翻+边缘钳制
+- **头部假 0%**：纯文本指标的卡头部显示「● 0%」，无核心进度指标时改为隐藏（折叠徽章显示 \`—\`）
+- **积分账本重置日计费**：日内重置会把当天消耗整段记丢，改为同时记录峰值与末值，按重置前后两段计费
+- **账号存储原子写**：7 处裸 \`fs::write\`（含 OAuth/refresh token 存储）换 tmp+rename 原子写，杜绝进程被杀/断电时的截断窗口
+- **趋势日期暗色不可见**：误用表面色变量，改回正文弱化色
+- **详情卡头部溢出**：Copilot 等长名称卡的图标/按钮被挤出卡片，头部改 \`min-width:0\` + 控件 \`flex:none\`
+- **隐藏设置层拦截点击**：隐藏面板不再吃点击事件；语言下拉关闭后不再残留展开态
+- **浅色对比度补漏**：置顶头部/警示徽章/总览 meter 三档等 6 处补浅色主题变体
+- **Command Code 卡片三处**：点击被「有额度优先」切回别的账号、合并卡沿用空账号布局、手动刷新丢失折叠态
+- **暗色主题下「卡片分组」下拉发白**：展开的原生 \`<select>\` 菜单由 WebView2 宿主按 \`PreferredColorScheme\` 绘制，不理会页面的暗色主题与 \`color-scheme\`——系统浅色 + Pane 暗色时必然渲染成浅底浅字、几乎不可读（实测把宿主主题同步过去也无效）。改为自绘菜单，复用卡片分组菜单的玻璃样式与定位，两套主题下都跟随页面；同时保留宿主窗口的主题同步（跟随系统时传 null 释放回 Auto，避免污染 \`prefers-color-scheme\`），滚动条等其它原生 UI 一并对齐
+- **「5 小时窗口即将重置」开关拨了不生效**：该键从未进入 \`set_config\` 的白名单，前端每次保存都被静默丢弃（只留一行 \`ignoring unknown key\`），界面显示与后端行为长期不一致——补入白名单后可正常保存
+- **卡片名与折叠箭头间距过窄**：仅给箭头加 5px 左间距（原 7px 是名称/图标/箭头共用的 flex gap，直接调大会连图标一起撑开），视觉间距约 12px
+- **Bocha 品牌图标补齐**：此前是「博」字占位圆，换为按官方标复刻的矢量图——等粗单线条「b」（笔画宽 = 字高 20%，外圆 R 与内孔 r 同心）+ 两道浅蓝羽翼（\`#A5CCFF\`/\`#C5DEFF\`）+ 气泡尾点，主色 \`#006EFF\`
+- **官网演示花费面板全零**：演示数据在今天/昨天/7 天/30 天各时段的美元口径恒为 0，补齐后各时段 × 美元/tokens 两种口径都是非零数据（示例：今天 $19.98 / 209.5M，30 天 $359.64 / 3.8B）
+- **官网移动端留白与两处演示崩溃**：演示面板与快捷键卡两侧留白 20px（此前贴边导致无法滑动），手机上浮动批注改为面板下方 6 张静态介绍卡；演示桥接层补 \`setTheme\`（此前演示卡在 Starting… 不动）、演示配置补 \`removedProviders\`/\`qoderCheckin\`（此前自定义抽屉一点就崩）
+
+## 0.4.69 — 2026-10-05
+
+大面板与授权中心 / StepFun·SenseNova 登录根治 / 全机花费账本 / 发布流程规范
+
+## 新增
+
+- **运行时大面板窗口**：同一 bundle 上新增 cc-switch 形态的大面板（双形态 PoC），设置中心与授权中心迁入面板左侧导航，跨窗口配置实时同步
+- **cc-switch 式设置中心 + 完整托盘菜单**：大面板内的分节设置视图；托盘菜单补齐全量入口
+- **授权中心视图**：按家族分组的账号行（头像+名称+额度列+⋯菜单），聚合 OAuth/捕获/导入的多账号管理入口
+- **StepFun Step Plan 重写**：凭据升级为三元组（\`token/账号/密码\`，兼容旧 \`{apiKey}\`）；L0-L3 授权阶梯（JWT 预检→RefreshToken 单飞轮换→密码三步登录），HTTP 429 永不上梯；解析器同时支持 5h/周窗口与 Credit 月池双形态，30 分钟死局破解
+- **SenseNova 浏览器一键授权（PKCE）**：设置内两步式授权块（S256 + state），\`oauth_finish\` 接受回跳 URL/令牌 JSON/裸 JWT/纯 code 四种输入；\`refresh_token\` 持久化+轮换链路实测跑通，3 小时过期自动续期，永不再粘
+- **Z.ai 双域名回退**：\`api.z.ai\`（Bearer）凭据被拒或无指标时自动落 \`open.bigmodel.cn\`（裸 key）；凭据错误按 HTTP 200 + \`success:false\` 响应体判定（实测智谱网关行为），网络错误/5xx/429 不降级
+- **每日花费热力图**：总花费条详情入口，ZCode 风格 26 周日对齐方格 + 月份标签 + Less/More 图例，悬浮显示 $/token/工具数，单日下钻按工具/模型展开
+- **ZCode / MaxCode 品牌图标**：花费列表与图例使用官方品牌图标
+- **密钥保险箱主密码加密**：Argon2id 派生 AES-256-GCM 封存每个 key（服务名/标签/备注保持明文可见）；设一次密码，解锁查看/复制（逐行显隐），手动或重启上锁；key 支持用户备注
+- **自动更新根治**：release 以本项目自有 minisign 私钥签名（公钥内嵌），更新器读本仓库 GitHub Releases \`latest.json\`，新版本弹窗一键安装+重启；上游更新端点弃用
+- **官网一期**：\`site/\` 子项目，Magpie 式零依赖静态站 + Cloudflare Worker + 测试与 CI
+
+## 变更
+
+- **Claude 花费以 cc-switch 本地账本为主源**（\`~/.cc-switch/cc-switch.db\` 只读）：中转清零 CLI 日志的场景按真实 token 记账（自扫描曾低估 7~24 倍）；Pane 自扫描仅补 cc-switch 未覆盖的天，按天粒度合流零重复
+- **新增 cc-switch 独有花费卡**：MaxCode（mcode）、Gemini、Claude Desktop；pi 并入 Claude 卡；成本始终走 Pane 自有价格表
+- **总花费头部精简**：删除与下方重复的「今日/本周/每月」胶囊组，⚡ 数字直接跟随「今天/昨天/7天/30天/全部」当前选择
+- **版本号移位**：从独立设置行改为设置页底部的弱化页脚
+- **总览横栏单行化**：分类 chips 与「5h/7d/月」胶囊同行（分类区窄窗内横滚），「MCP / 搜索」文案精简为「MCP 搜索」
+- **ZCode 计量修正**：\`input\` 已含 cache 读写，总量= input+output（不再虚增），成本按非缓存部分计费；spend_history v2→v3 迁移
+
+## 修复
+
+- **Command Code 家族状态聚合**：全部账号不可用时，主卡不再误报「需重新登录」——改为显示家族内重置时间最早的健康账号（红环+重置倒计时=待刷新）；账号彻底失效时直白话报错 \`subscription inactive or expired\`（不再抛形状解析错误）
+- **SenseNova 设置粘贴保存链路**：通用 \`{apiKey}\` 粘贴格式此前写入后 provider 读不回，已加 serde 别名兼容
+- **总览分类行窄窗截断**：chip 内边距与行距压缩，最窄窗口下「MCP 搜索」完整显示
+
+## 0.4.68 — 2026-10-04
+- Fixed provider-card context menus so right-click actions stay anchored to the active card and account tab.
+
+## 0.4.67 — 2026-10-04
+
+- Add explicit add-account/API-key and remove-current-account actions to the
+  provider card menu.
+- Strengthen skin detail contrast in light and dark themes.
+
+## 0.4.66 — 2026-10-04
+
+- Show one active period at a time in spend details so today, yesterday, and
+  range totals cannot appear as duplicate provider columns.
+- Add configurable local shortcuts for settings, refresh, Customize, theme,
+  expiring view, and quota period, with duplicate-binding feedback.
+- Keep pooled-account badges informational blue rather than using an alarm red.
+
+## 0.4.65 — 2026-10-04
+
+- Prevent horizontal overflow when scrolling the overview on narrow windows.
+- Separate maxed quota (red) from fetch/auth errors (orange) and show weekly
+  fallback feedback when a provider has no monthly quota.
+- Keep account-card removal scoped to that account; add native skin reset,
+  conflict feedback for global shortcuts, and a Phosphor ClinePass mark.
+
+## 0.4.64 — 2026-10-04
+
+- Add the skin market with built-in wallpaper and mascot combinations.
+- Add pooled ClinePass API-key accounts, quota cards, and provider account badges.
+- Show rejected pooled accounts as explicit error states.
+- Refresh the README around the current product workflow and local-first boundaries.
+
+## 0.4.63 — 2026-10-04
+
+### Added
+- Token usage source inventory for local JSONL, SQLite, Antigravity protobuf,
+  and Cursor CSV collectors, with detection status and documented coverage limits.
+- ZCode SQLite and Antigravity conversation usage collectors; measured tokens
+  remain counted when a model has no known price.
+- Key vault and multi-key MCP quota aggregation for Bocha, Tavily, Firecrawl,
+  and Brave Search; additional subscription providers and account routing.
+
+### Changed
+- Quota overview groups cards by labels without available/unavailable sections.
+- Status counts share one baseline; folded spend and overview spacing is tighter.
+- Qoder CN aggregates credit packages; Step Plan authentication includes its device JWT.
+
+
+## 0.4.62 — 2026-09-17
+
+### Added
+- **Trae CN per-pack credit breakdown.** The card no longer collapses
+  all credit packs into one summed bar: each pack gets its own row —
+  the pack currently being drained as a progress bar with a countdown,
+  untouched ones as "N credits · expires YYYY-MM-DD" rows, soonest
+  expiry first. Packs split by scope like the official dashboard
+  (general vs TraeWork-only, suffixed "(Work)"); same-named packs
+  merge; feature-flag-only packs are skipped. The summed Credits row
+  carries no reset date (packs expire on different days).
+- **"5-hour window resetting soon" alert.** A rolling window with an
+  hour or less remaining announces itself once per period, also right
+  after launch. Default on; toggle in Settings.
+- **Customize drawer brand icons.** Every provider row head shows the
+  same mark as its dashboard card; providers without an icon show a
+  "?" placeholder. The drawer also mirrors the dashboard's card-group
+  sections (group name + count headers, A–Z within).
+- **Card rows never fold.** Metric feet, text, action and spend rows
+  are single-line: the right side ellipsizes instead of wrapping,
+  countdowns lead the detail (truncation can only drop the usage
+  figure, never the time), and hovering shows the full text.
+- **Real Trae CN logo** (green frame + diamond eyes) replaces the
+  placeholder glyph everywhere.
+
+## 0.4.61 — 2026-09-16
+
+### Added
+- **Custom UI font picker.** Settings → General → Font lists every font
+  family installed on the system (DirectWrite enumeration, localized
+  names included — 微软雅黑 and Microsoft YaHei UI both resolve). The
+  dropdown renders each option in its own face, filters as you type,
+  supports arrow/Enter/Esc, marks the active family, and follows the
+  light/dark theme. A picked family replaces only the head of the stock
+  stack (missing glyphs still fall back); clearing the field restores
+  the default. Persisted as \`uiFont\` in config.json and re-applied
+  before first paint on launch.
+- **Kimi monthly quota anchor.** Kimi's membership-wide monthly limit
+  never appears in the usage API — it surfaces only as failed
+  inference requests. The refresh day (the 27th) is now measured from
+  the member dashboard instead of being probed for: while walled, the
+  panel classifies Kimi as unavailable with a "refreshes on the 27th"
+  countdown, the waiting probe sleeps entirely (zero requests until
+  the anchor passes, then the 30-min rhythm confirms recovery), and
+  healthy rounds still probe once per refresh to catch a new wall
+  early. Restarting pane forces a fresh probe (e.g. after buying
+  Extra Usage ahead of the anchor).
+
+## 0.4.60 — 2026-09-15
+
+### Added
+- **Peak-hours status indicators.** The five providers with time-of-day
+  billing (Z.ai, GLM V1 Pro relays, Command Code GOAT, Qoder CN, Trae
+  CN) show a yellow status dot while their peak window is active —
+  but only when they are otherwise available; red (maxed/error) and
+  gray keep their meaning. Windows are Beijing time, rules verified
+  against official docs: Z.ai/GLM Mon–Fri 14:00–18:00, GOAT
+  Mon–Fri 09:00–12:00 & 14:00–18:00 (DeepSeek-routed models only),
+  Qoder CN & Trae CN daily 08:00–22:00 (weekend daytime included).
+- **Overview peak chip + section.** The Quota Overview badge row gains
+  an always-rendered yellow \`N peak\` chip (three disjoint counts:
+  available = off-peak, peak = in-peak available, maxed), and the
+  sectioned board splits the available set into 可用 / 高峰 / 不可用 —
+  the peak section header renders even when empty, so the dimension
+  stays visible off-peak. Hovering a peak tile appends the family's
+  multiplier rule (what standard rate costs vs the off-peak discount).
+- **Soonest-reset keyboard toggle.** With the panel open, bare \`T\`
+  flips the Quota Overview to the soonest-reset list and back — same
+  guards as the bare-Shift 5h/Weekly board toggle (no typing targets,
+  no Customize, no chords); a collapsed overview unfolds and scrolls
+  into view first.
+
+### Changed
+- **Dual auto-hiding sidebars.** The provider icon trail moved from
+  the left rail to a mirrored right rail (4 px sliver, slides out from
+  the right edge, same glass/feather/fisheye treatment). The left rail
+  keeps only the app controls: logo, theme, refresh, Customize,
+  Settings — and the trail now uses the full rail height, so a dozen
+  providers no longer shrink or scroll as early.
+
+### Fixed
+- Right-rail cascade polish: light-theme stray border, focus shadow
+  direction, glass feather specificity, duplicate light rules; trail
+  badges follow the peak tint; folded cards no longer show two peak
+  markers.
+
+## 0.4.50 — 2026-09-10
+
+### Added
+- **Quota Overview 5h / Weekly capsule.** Header switch next to the
+  availability chips. Ordinary provider rings follow the selected window;
+  Z.ai, One/New API, and Copilot keep their original binding. Hover still
+  shows the other window; click still jumps to the card.
+- **Overview one-click refresh.** A ⟳ button in the Quota Overview header
+  (next to the fold chevron) forces a full refresh with the same spin
+  feedback as the per-card buttons.
+
+### Fixed
+- **Launch no longer sits on "Outdated" until every card is refreshed by
+  hand.** The background loop now fetches first and sleeps after, so a
+  live pass runs at launch instead of one interval in; when nothing comes
+  back live (boot with the network still coming up) it clears the
+  ordinary-error benches and retries every 15 s, up to five times. Manual
+  refreshes clear ordinary-error benches too — a failed pass must not
+  turn the Refresh button into a no-op; 429 cooldowns still hold.
+
+## 0.4.49 — 2026-09-09
+
+### Added
+- **Cross-platform OS seam.** Host-only work (credential store, UI
+  language, process/port discovery, screen-share detection, WebView memory
+  hint, config/data paths) now lives in \`src-tauri/src/platform/\`. Windows
+  keeps Credential Manager / Win32; macOS and Linux use Keychain and
+  Secret Service. The lib crate-type is \`rlib\` only — \`cdylib\` pulled
+  Windows \`advapi32\`/\`bcrypt\` into the macOS/Linux link. Tagged releases
+  build Windows NSIS, macOS dmg, and Linux AppImage/deb. Windows remains
+  the supported tray experience; the other two are the first published
+  binaries, not a finished desktop port.
+
+### Fixed
+- **Cursor Team Total usage no longer clamps to 100%.** Spend past the
+  API dollar floor is shown as text, not a maxed bar. The Quota Overview
+  ring follows the Auto pool (\`Cursor Models\`), not the API pool.
+- **Independent quota pools.** Cursor Auto/API and Antigravity
+  Gemini/Claude only mark a card maxed when every present pool is
+  exhausted. Missing \`remaining\` no longer becomes a fake 0.
+- **Overview hover.** Ordinary 5-hour rings tip the weekly window;
+  Copilot/Z.ai keep the ring window; Cursor/Antigravity list each pool.
+  The "click to jump" line is gone.
+
+### Changed
+- HTTP clients are reused (\`OnceLock\`). Cursor \`state.vscdb\` prefers an
+  immutable open over copying the whole DB. The 30-second tick updates
+  countdown text only. A failed provider is benched for at least one
+  refresh interval.
+
+## 0.4.48 — 2026-09-07
+
+### Added
+- **Quota Overview with per-window rings.** Generalized from the initial
+  5-hour overview to pick the most binding quota per provider (5h session
+  metrics first, otherwise shortest-period usage percent such as
+  daily/weekly/monthly), bringing One/New API daily plans and Cursor/Copilot
+  monthly plans into the overview rings with reset countdowns.
+- **Independent availability symbols.** Quota Overview header displays two
+  independent status symbols (\`● N available\` green, \`● N maxed\` red),
+  shown only when non-zero.
+- **Independent project detachment (ADR 0001).** Detached from the upstream
+  fork network to evolve autonomously under Aafff623/pane; updater fallback
+  repointed to Aafff623/pane releases.
+
+### Changed
+- **Dev loop pinned to IPv4 loopback.** Vite host and Tauri \`devUrl\` locked
+  to \`127.0.0.1:1420\` to eliminate Windows machine-wide IPv6 loopback
+  access-denied issues. Documented canonical WMI/CreateProcess startup flow.
+
+## 0.4.47 — 2026-09-05
+
+### Added
+- **One/New API sites as accounts.** Relay sites become first-class accounts:
+  the dashboard renders a single merged card with a tab per configured key.
+  Site management moved from Settings into the Customize drawer under the
+  family row. Supports token-only sites reading \`/api/subscription/self\`.
+- **Multi-account expansion.** Antigravity Google OAuth slots captured from
+  Windows Credential Manager; Cursor PKCE multi-account tokens.
+- **Governance assets.** Tracked canonical \`docs/dev-startup.md\`, \`CONTEXT.md\`,
+  \`AGENTS.md\`, and \`CLAUDE.md\` to prevent agent configuration drift.
+
+### Changed
+- **Pane's website moved to trypane.xyz.** Public links and install
+  commands use the new domain. Existing \`pane.jazii.dev\` updater clients
+  and dashboard links remain supported through a permanent domain redirect.
+- **UI polish and breathing room.** Folded cards surface nearest reset
+  countdown as a status-toned pill; frosted glass sidebar with feathered edge;
+  authentic brand SVGs.
+
+## 0.4.46 — 2026-09-02
+
+### Added
+- **One/New API sites.** Settings has a new **One/New API sites**
+  section: add as many One API / New API hosts as you want, each with
+  its own keys. Each key gets its own quota card (PR #172).
+- **Kimi Code without the CLI.** Settings → API keys has a new **Kimi
+  Code** field for your Kimi For Coding plan key. With no \`kimi login\` on
+  the PC, Pane sends that key to the same usage endpoint the CLI uses and
+  shows Session / Weekly bars and reset times. A CLI login still wins
+  when both exist. The Z.ai field is now labeled **Z.ai / GLM** — a GLM
+  Coding Plan key already worked there (issue #173).
+
+### Fixed
+- **Cursor card no longer blanks to "Requests this cycle 0".** When
+  Cursor's usage API hiccupped for one refresh, Pane fell back to the
+  old request-count endpoint, which on current plans answers with an
+  empty count, and that empty card replaced your bars until the next
+  good refresh. That fallback now only counts when it carries a real
+  request quota; otherwise Pane keeps the last good card (Outdated only
+  after three minutes of failed refreshes).
+- **Cursor bars stay live when \`api2.cursor.sh\` is unreachable.** On
+  some networks that host's TLS handshake times out for minutes while
+  \`cursor.com\` keeps answering. Pane now reads the dashboard's
+  \`usage-summary\` report in that case — same Cursor Models / Other
+  Models / Total usage / On-demand figures, from the host that works —
+  instead of showing a stale card. Also covers Enterprise/team accounts
+  that hide plan usage from the RPC (what OpenUsage on Mac does),
+  including the live shape that has percentages and on-demand but no
+  pooled dollar cap. Credits and Bonus rows still need the primary API.
+- **Hermes prices Qwen3.8-Max-0902 through AihubMix.** The snapshot
+  logs as \`qwen3.8-max-0902\` / \`qwen3.8-max-2026-09-02\`, which missed
+  the rate table, so Today showed tokens at $0.00. Those AihubMix rows
+  now use the gateway card ($1.69 / $5.07, cache $0.169 / $2.1125).
+
+## 0.4.45 — 2026-08-29
+
+### Added
+- **Russian in Settings → Language.** Same surfaces as Chinese: cards,
+  Settings, Customize, tray tooltips, and quota toasts. Auto follows the
+  PC display language (Chinese or Russian). Provider names, plan names,
+  and the changelog stay English.
+
+### Fixed
+- **Hermes recognizes HY4 Preview and Qwen3.8 Flash spend.** New-model
+  sessions routed through AihubMix now use that gateway's live prices,
+  so their tokens no longer collapse into a misleading \`$0.00\` Other row.
+  The card lists the two most recent user models and leaves Hermes's small
+  title-generation and approval calls out of that summary.
+
+## 0.4.44 — 2026-08-27
+
+### Fixed
+- **Customize keeps progress bars where you put them.** Dragging a
+  meter like Codex Extra credits into Show more used to look like it
+  saved, then the next usage refresh yanked it back above Usage Trend.
+  That "bars stay visible" rule now only places a row the first time
+  it appears. A later refresh no longer undoes the drag (issue #166).
+
+## 0.4.43 — 2026-08-26
+
+### Added
+- **Grok reset credits** show on the card as read-only rows (no Use
+  button). A **Status** link opens [status.x.ai](https://status.x.ai)
+  next to Usage.
+
+### Fixed
+- **Tray follows Customize.** Hide, disable, star, pin, and card order
+  now drive the tray icon and tooltip. A newly enabled provider stays
+  off the tray until a refresh finishes. If a save or tray update fails,
+  the footer says so instead of staying quiet.
+
+## 0.4.42 — 2026-08-23
+
+### Added
+- **Chinese in Settings → Language.** Auto follows the PC language;
+  English and 中文 are explicit. Cards, Settings, Customize, tray
+  tooltips, and quota toasts switch as soon as you pick one. Provider
+  names, plan names, and the changelog stay English. Vendor "connect me"
+  error hints stay English for now.
+
+### Fixed
+- **Refresh responds while usage is updating.** The button used to stay
+  locked until the slow spend scan finished (tens of seconds on a cold
+  start), so clicks looked dead and a just-saved **Kimi API** key left
+  "moonshot key saved" stuck on the footer. Usage unlocks Refresh as soon
+  as the cards update; a click (or key save) during a fetch shows
+  Refreshing… immediately; and the sidebar sits above Settings so Refresh
+  still works with the panel open.
+
+## 0.4.41 — 2026-08-20
+
+### Fixed
+- **Kimi Code plan name matches the membership page** — current paid
+  names on [kimi.ai](https://www.kimi.ai/membership/pricing) are
+  Moderato, Allegretto, Allegro, and Vivace. Pane still printed the old
+  three-name table, so \`LEVEL_INTERMEDIATE\` showed as Moderato
+  (issue #156; it is Allegretto) and \`LEVEL_ADVANCED\` showed as
+  Allegretto (it is Allegro). \`LEVEL_PREMIUM\` is Vivace.
+
+## 0.4.40 — 2026-08-20
+
+### Fixed
+- **Refreshing catalogs no longer re-reads every session log.** The spend
+  cache used to throw itself away whenever LiteLLM / models.dev /
+  the supplement file changed on disk (that happens daily, and hourly
+  while any model is unpriced), then re-parse hundreds of MB of jsonl.
+  Each cached file now records the pricing questions it asked; a catalog
+  refresh only re-reads files whose prices actually moved. A baked-pricing
+  code change still discards the cache. One last full scan migrates to
+  the new format. Probe keys stored in that cache are length-capped so a
+  huge model string cannot inflate the on-disk file.
+- **Pasting an API key actually shows that provider.** Saving a key now
+  turns the provider on if Customize had it off (first-run parks
+  keyless providers there), and a save no longer races an in-flight
+  refresh into a stuck "key saved" status with no fetch. A key pasted
+  during that first refresh is also kept out of the auto-disable list,
+  so the just-saved provider is not parked because the in-flight fetch
+  still said it had no credentials. A failed save or a cleared key drops
+  that exemption immediately, so Customize can turn the provider back
+  off.
+- **Kimi usage routed through Codex (or Claude) lands on the Kimi card.**
+  Sessions that log \`kimi-oauth/k3\` or \`moonshot-ai/…\` via a router used
+  to keep those dollars on Codex. They move to Kimi Code (or Moonshot
+  when there's no Kimi login), with the vendor prefix peeled so they
+  merge with the CLI's own logs.
+- **Cursor promo credits and bonus usage show up.** Credit grants
+  (\`GetCreditGrantsBalance\`) are a used/total progress bar like Codex
+  Extra credits, and Cursor's sponsored bonus usage (\`bonusSpend\`) is a
+  text row behind Show more — free usage model providers cover, shown
+  as context rather than a meter. Cents-as-strings parse; a failed
+  grants call logs instead of going silent. An expired grant
+  (\`hasCreditGrants: false\`) stays hidden even if leftover totals are
+  still on the payload. Tucking Bonus behind Show more runs once so a
+  later Customize drag is not undone every refresh.
+- **Kimi Code plan usage now has dollar amounts** — the official CLI logs
+  plan K3 as \`kimi-code/k3\` (and K2.7 Code as \`kimi-for-coding\`), which
+  missed the rate table, so Today could show a million tokens at $0.00.
+  Every current Moonshot model now uses the published API card
+  (K3 $3 / $15 / $0.30 cache; K2.7 Code $0.95 / $4 / $0.19; HighSpeed
+  is 2×; K2.6 $0.95 / $4 / $0.16; K2.5 $0.60 / $3 / $0.10; V1 8k/32k/128k
+  at $0.20/$2, $1/$3, $2/$5). Reseller catalog rows no longer override
+  those first-party rates. Codex OAuth (\`kimi-oauth/k3\`) and prefixed
+  API spellings share the same table. Discontinued K2 / kimi-latest
+  names still come from the public catalogs.
+
+### Changed
+- Customize toggle, Settings key field, leftover dashboard card, and
+  spend card labeled **Kimi API** (was Moonshot). The internal id is
+  still \`moonshot\` so existing layouts and telemetry keep working. The
+  toggle still gates the wallet fetch and the API bar on the Kimi Code
+  card.
+
+## 0.4.39 — 2026-08-19
+
+### Added
+- **Kimi Code plan card** — one card like OpenCode: Session and Weekly
+  request bars from the official Kimi Code CLI login. If a Moonshot
+  wallet key is saved, an **API** bar (same high-water credits meter)
+  joins them; plan-only installs stay at two bars. Local session spend
+  that used to sit on the Moonshot card lives here. The leftover
+  Moonshot card hides while Kimi Code is connected (and comes back if
+  that login goes away); it still appears for API-only installs. If the
+  Kimi card loads without a wallet bar, a successful Moonshot fetch is
+  kept so the balance doesn't vanish for one cycle.
+  Switching Moonshot off in Customize still stops the wallet fetch — no
+  API bar and no Moonshot network calls. If the Kimi card itself is
+  off, session spend stays on Moonshot so the dollars don't vanish. A
+  starred Moonshot "Credits used" pin moves to the Kimi API bar only
+  when that bar is actually on the card.
+
+## 0.4.38 — 2026-08-15
+
+### Fixed
+- **Refreshes are fast again — sorry 0.4.37 made Pane laggy and slow.**
+  That release's bounded log walk resolved every directory it visited to
+  its canonical path, and on Windows that opens a real handle per
+  directory (with an antivirus round-trip on each), so opening Pane
+  crawled and "Scanning session logs…" could sit for over a minute on
+  every refresh. Sorry for the inconvenience. Only symlinks and
+  junctions pay that cost now — they're the only way a scan cycle can
+  form — and regular files and folders are typed straight from the
+  directory listing with no extra system calls. The 0.4.37 protections
+  (depth cap, directory budget, cycle detection, link-target
+  timestamps) all still hold.
+
+## 0.4.37 — 2026-08-15
+
+### Security
+- **Local log scan can't be turned into a crash or a hang** — the
+  recursive \`.jsonl\` sweep every spend scanner shares followed symlinks
+  and junctions with no depth limit and no visited set, so a link cycle
+  under a scanned log root (roots come from the CLIs' own \`*_CONFIG_DIR\`
+  / \`*_HOME\` variables) grew the call stack until the process aborted,
+  and a link pointing at a huge tree turned a project folder into a
+  drive-wide crawl. The walk is now iterative and bounded: 16 levels
+  deep, 20,000 directories per root (logged when it stops there), and
+  already-seen canonical directories are skipped. Relocated logs behind
+  a link are still found.
+- **Share-card decode is bounded** — copying a share card now caps the
+  base64 payload and the PNG's declared pixel count before decoding, so
+  a decompression-bomb image can't force a multi-gigabyte allocation.
+- **OpenCode's database copy is private** — the scratch copy Pane makes
+  of \`opencode.db\` now lands in a per-user directory with restricted
+  permissions, partial copies are discarded, and scratch files left by a
+  crashed run are swept.
+
+## 0.4.36 — 2026-08-14
+
+### Added
+- **Hermes desktop card** — Nous Research's Hermes app now has a provider
+  card like the others: last model used, which backend billed it, and
+  session count on the face; Today / Yesterday / Last 30 Days spend
+  (per-model breakdown on hover) sit behind Show more. MiniMax- and
+  OpenRouter-routed sessions still join those slices; AihubMix
+  (including a custom URL pointed at aihubmix.com) stays on the Hermes
+  card; a custom URL pointed at MiniMax or OpenRouter joins those slices.
+  No network calls — Pane reads the local ledger at
+  \`%LOCALAPPDATA%\\hermes\\state.db\`.
+- **GLM-5.3 spend prices from day one** — AihubMix's preview rate card
+  for \`coding-glm-5.3\` ($0.060 in / $0.220 out per MTok; unpublished
+  cache bills at the input rate) is baked in until public catalogs learn
+  the model. Hermes AihubMix rows logged as \`glm-5.3\` use that SKU;
+  the generic name stays unpriced for other vendors. Gateway-prefixed
+  DeepSeek V4 slugs (\`accounts/fireworks/models/deepseek-v4-pro-0813\`)
+  also resolve.
+
+## 0.4.35 — 2026-08-13
+
+### Added
+- **Daybreak Blue and Cursor Router spend names price correctly** — Pane
+  now loads the full OpenUsage pricing-alias list (it used to keep only
+  the first 64 rules, which dropped Daybreak, GPT-5.3–5.6 effort slugs,
+  and Cursor Router labels like "Opus 5 (Auto Balanced)").
+- **Codex auto-review stays its own row** — reviewer traffic still shows
+  as \`codex-auto-review\` in the model breakdown; the dollars use that
+  day's GPT rate (gpt-5.5 from April 2026 onward), matching the Mac app.
+- **Reduce animations** — Settings toggle skips card entrance motion and
+  the day/night wipe. Windows' own Animation effects setting is still
+  respected either way.
+- **Hide tray numbers while screen sharing** — optional Privacy setting
+  (off by default). During Presentation Settings, exclusive fullscreen,
+  or remote control, the main tray percentage and starred strip numbers
+  hide; the Pane icon and starred provider logos stay.
+- **Reset all settings** — Settings → Advanced restores every preference
+  to its default and re-detects installed tools. API keys and usage
+  history stay.
+
+### Fixed
+- **The Cursor card mirrors Cursor's Plan & Usage page** — Cursor's new
+  bucket-era plans show two bars ("Cursor Models" and "Other Models")
+  and no total bar, but Pane's Total usage meter trusted the API's
+  \`totalPercentUsed\`, which now measures against included *plus free
+  bonus* pools (~$345 on live accounts) — so the bar sat at 0% while
+  the caption said "$2.37 of $20.00 included". Bucket-era cards now
+  show the same two bars as the dashboard, with the exact percentages
+  Cursor shows, plus dollars spent this cycle as a text row (no percent
+  is honest there: Cursor itself reports three contradictory total
+  numbers). Pre-bucket accounts keep the classic included bar, computed
+  as spend ÷ plan limit when Cursor reports spend (the API's own percent
+  otherwise — never a fabricated one). Team accounts keep their bucket
+  bars alongside the dollar Total meter. Saved layouts migrate
+  automatically: stars, pins, hidden flags, and order carry over from
+  "Auto usage" / "API usage" to the new labels, and a star or tray pin
+  on a Total row that became text repoints to Cursor Models instead of
+  silently vanishing from the tray.
+
+## 0.4.34 — 2026-08-13
+
+### Added
+- **OpenCode meters are account-wide now** — OpenCode shipped the
+  official usage API we'd been waiting on
+  ([anomalyco/opencode#16513](https://github.com/anomalyco/opencode/pull/16513)),
+  and the card now reads Session / Weekly / Monthly percentages and
+  resets straight from OpenCode's servers: the same numbers as the Zen
+  dashboard, including your other devices and anyone sharing the
+  subscription. The old this-PC-only computation from \`opencode.db\`
+  remains as the offline fallback, and dollar spend stays local.
+
+### Fixed
+- **Grok 4.6 prices from day one** — xAI's launch-day rates
+  ($2 in / $0.50 cached / $6 out per MTok, doubling for ≥200k-token
+  prompts; the fast variant at 2x) are baked in until the public
+  catalogs learn the model, so spend from Grok 4.6 sessions shows
+  dollars instead of the unpriced ⚠ — including Cursor sessions, whose
+  usage export brands the model \`cursor-grok-4.6-xhigh\`.
+- **DeepSeek V4 spend prices from day one** — AihubMix's rate cards for
+  \`deepseek-v4-pro\` ($0.464 in / $0.928 out / $0.004 cache read per
+  MTok) and \`deepseek-v4-flash\` ($0.154 / $0.308 / $0.003) are baked in
+  until public catalogs learn the family, dated snapshots like
+  \`-0813\` included, so Hermes sessions on these models show dollars
+  instead of the unpriced ⚠.
+
+## 0.4.33 — 2026-08-12
+
+### Fixed
+- **Launch shows your numbers instantly** — the window now paints the
+  previous run's snapshots from disk (marked Outdated) the moment it
+  opens, then swaps in live data as it arrives. Before, the first paint
+  waited for the slowest provider's full network round — at boot, with
+  Wi-Fi still connecting, that was 30-40 seconds of "Refreshing…".
+- **The daily pricing refresh no longer lands at login** — a catalog
+  update discards the spend cache and re-reads every session log
+  (gigabytes on long-lived installs), and with autostart that landed
+  exactly when Windows was busiest. Catalog downloads now wait out the
+  first 10 minutes after launch; a first run with no catalogs on disk
+  still fetches immediately.
+- **Dead networks fail fast** — provider requests now give up on
+  connecting after 5 seconds instead of riding the full 20-second
+  request timeout, so a boot-time refresh with no network settles in
+  seconds.
+
+### Security
+- **Credential provenance hardening** (from an external security
+  report): credential discovery now proves a token belongs
+  to the provider it will be sent to, instead of accepting the first
+  field-shape match. Extra Codex accounts found by the multi-account
+  scan must carry OpenAI's own claim namespace in their \`id_token\`
+  before any request or refresh (a foreign \`auth.json\` that merely has
+  a \`tokens.account_id\` no longer qualifies); Copilot token lookup is
+  scoped to the \`github.com\` entry in \`apps.json\`/\`hosts.json\` and to
+  the \`github.com\` section of the GitHub CLI's \`hosts.yml\`, so a
+  GitHub Enterprise token sharing the file is never sent to
+  github.com; the MiniMax CLI fallback reads exactly
+  \`provider.minimax.options.apiKey\` from \`~/.minimax/config.yaml\`
+  instead of the first \`apiKey:\` line anywhere in the file.
+- **Disabled Cursor makes no requests** — the spend scan's Cursor CSV
+  export (an authenticated network call) now honors the provider
+  toggle, matching how usage refresh already skips disabled providers.
+- **Local API rejects non-loopback Host headers** — the read-only
+  usage API on 127.0.0.1:6736 now refuses requests whose Host header
+  isn't a loopback spelling, closing the DNS-rebinding read that CORS
+  alone can't prevent.
+- **Release workflows pin actions to commit SHAs** — third-party
+  GitHub Actions in the signed release and winget pipelines are pinned
+  to exact commits instead of movable tags.
+- **Pricing catalogs download under a hard size cap** — the three
+  third-party pricing feeds are read in bounded chunks (32 MB cap), so
+  a compromised feed can no longer exhaust memory or disk. This also
+  makes SECURITY.md's existing "inputs are size-capped" claim true.
+- **README offers a look-before-you-run install path** — alongside the
+  one-liner, a two-step download-inspect-run variant and a pointer to
+  winget for anyone who prefers not to pipe scripts into PowerShell.
+
+## 0.4.32 — 2026-08-11
+
+### Added
+- **Multi-account Codex** — same treatment for Codex: every discovered
+  \`CODEX_HOME\`-style login (identified by its ChatGPT account id, named
+  by the account email) gets its own card with its own limits, credits,
+  and spend from its own session logs. Reset-credit redemption routes
+  to the account whose card offered the credit, and each card's Extra
+  credits meter keeps its own high-water baseline. A cache identity
+  stamp also guards both families' default cards: if a different
+  account signs into the default folder between launches, the old
+  account's cached numbers are dropped instead of shown under the new
+  login.
+- **Multi-account Claude** — machines with more than one Claude login
+  (say a personal plan in \`~\\.claude\` and an enterprise seat kept in a
+  second config dir via \`CLAUDE_CONFIG_DIR\`) now get one card per
+  account, each with its own limits, plan, and spend scoped to its own
+  logs. Discovery scans dot-folders in your home directory and
+  \`~\\.config\` for Claude-shaped config dirs and only makes a card when
+  the dir can name its account (from its \`.claude.json\`); the same
+  account signed in twice stays one card. Extra cards are named from
+  the account's organization or email ("Claude — Acme"); the default
+  login keeps the plain \`claude\` identity, so existing layouts, stars,
+  and API consumers are untouched. Design follows upstream OpenUsage's
+  account-first model. Telemetry never learns account identities —
+  a multi-account install reports plain "claude" once.
+
+## 0.4.31 — 2026-08-08
+
+### Changed
+- **Share cards copy exactly what you see, collapsed too** — a collapsed
+  card's ⧉ copy used to drop the Usage Trend and pace hints for a
+  "compact composition"; since both are visible on the card, the copy
+  read as missing data. Every share now includes everything the card
+  currently renders; only buttons, links, and carets stay out. Light
+  mode shares also get a real surface hierarchy — grey frame, white
+  card with a soft shadow — instead of the washed grey-on-white blob.
+
+### Fixed
+- **Devin no longer shows a fresh bar when the weekly quota is spent** —
+  Devin's API drops zero-valued fields from its JSON (proto3), so an
+  exhausted week loses its remaining-percent field entirely and Pane
+  misread that as "no weekly quota", falling back to the untouched
+  hidden daily meter: a 0%-used bar at the exact moment you were rate
+  limited. A missing percent next to a present reset timestamp now
+  correctly reads as 0% left — "Limit reached", real countdown — the
+  same class of fix Grok needed for its omitted usage field.
+
+## 0.4.30 — 2026-08-07
+
+### Fixed
+- **Bought Codex credits show up now** — the ChatGPT API sends the
+  credit balance as a quoted string in some responses, which the parser
+  didn't accept, so buying Extra credits made the row vanish from the
+  card entirely (an empty balance still rendered via a fallback). A
+  funded balance now shows as an **Extra credits** plan-style meter —
+  percent bar against the highest balance Pane has seen (top-ups raise
+  it), feeding pace colors and the Almost Out notification like every
+  other window — with the dollar and credit count in the caption.
+  Devin's Extra balance gets the same meter treatment when funded.
+  Layouts learned a matching rule: progress bars never hide behind
+  Show more and always sit above the Usage Trend, so an upgraded row
+  (or one saved as a text row in an older layout) surfaces properly.
+
+## 0.4.29 — 2026-08-05
+
+### Added
+- **Qwen Code provider (#19)** — Alibaba Model Studio's Coding Plan gets
+  a card: the plan's request-counted 5-hour / weekly / monthly quotas
+  with resets and plan name, read via the Model Studio console's own
+  quota call (key from Settings, \`BAILIAN_TOKEN_PLAN_API_KEY\`, or
+  \`DASHSCOPE_API_KEY\`); falls back to local request/token counts when
+  the console won't take the key. Today / Yesterday / 30-day spend, the
+  per-model breakdown, and a donut slice come from the Qwen Code CLI's
+  own per-request ledger.
+- **Claude Code × AihubMix spend lands on the AihubMix card** — sessions
+  run against AihubMix's Anthropic-compatible endpoint log qwen-family
+  models into Claude Code's local history; those rows now re-route to
+  the AihubMix slice (same mechanism as MiniMax-routed sessions)
+  instead of inflating the Claude card.
+
+- **Pi coding agent usage folds into Claude and Codex** — pi is a
+  bring-your-own-account agent, so a Claude or Codex subscription driven
+  through pi never appears in those CLIs' own logs and spend
+  under-reported. Pane now reads pi's session logs
+  (\`~\\.pi\\agent\\sessions\`) and folds that usage into the account's card:
+  pi's own recorded cost when it carries one, catalog pricing otherwise
+  (ported from OpenUsage 0.7.6).
+
+### Changed
+- **Grok's provider mark updated** — ported upstream's refreshed logo.
+
+### Fixed
+- **Zero-rate catalog placeholders no longer price requests at $0.00** —
+  public catalogs often list brand-new models (e.g. qwen3.8-max) with
+  0/0 placeholder rates, which silently billed every request at zero
+  and could flip a model's spend to $0 after a catalog refresh. Those
+  rows are now skipped: a source with real rates wins, while a model
+  listed 0/0 in every source still prices as genuinely free ($0.00, no
+  warning — ":free" variants and local models keep working).
+  qwen3.8-max (GA'd 2026-08-03, still 0/0 in every public catalog) gets
+  Alibaba's documented rates baked in — $2/$6 per MTok, $0.25 cache
+  reads — consulted only until the live catalogs learn them.
+- **"-priority" model slugs are priced** — Devin logs OpenAI's priority
+  service tier inside the model name (\`gpt-5.6-luna-xhigh-priority\`),
+  which no catalog carries, so those requests counted tokens but no
+  dollars. They now bill at the base model's rates times the priority
+  multiplier (2× standard, 2.5× for gpt-5.5), matching how Codex
+  priority turns are already priced.
+
+## 0.4.28 — 2026-07-31
+
+### Added
+- **"What's new" after every update** — the first time you open Pane on a
+  new version, a card-styled popup shows that version's changelog (click
+  anywhere outside it to dismiss). Settings also gains a **What's new ·
+  Changelog** button that lists every released version. Fresh installs
+  keep the welcome card only — no double popup.
+- **AihubMix provider (#18)** — the OpenAI-compatible multi-model
+  gateway gets a full card: usage metered against your account's
+  spending limit (key auto-detected from OpenCode, or pasted in
+  Settings), plus Today / Yesterday / 30-day spend, per-model breakdown,
+  and the Usage Trend from requests routed through OpenCode. AihubMix
+  dollars get their own donut slice, separate from the OpenCode plan.
+
+### Fixed
+- **GPT-5.6 Terra and Luna price at OpenAI's new rates** — OpenAI cut
+  both models' prices (Luna is 5× cheaper) and the public price catalogs
+  still carry launch pricing, so spend was overstated. Pane corrects the
+  stale catalog values (a self-retiring override: the moment the
+  catalogs publish updated numbers, live data wins again) and updates
+  the long-context rate table to the new tiers.
+
+### Changed
+- **OpenCode meters drop the "this PC only" tag** — the caveat crowded
+  every row of the card (and its share cards); the local-counting
+  caveat now lives in the docs instead. Also fixed a cosmetic quirk
+  where an idle session could read "$-0.00 of $12".
+- **Confirmations look like Pane now** — using a Codex reset credit or
+  resetting all layouts used to pop the browser's bare "localhost says"
+  dialog; both now use an in-app card-styled dialog matching the app
+  (with a red button where the action is destructive). The reset-credit
+  message also notes that refreshed windows can take a couple of
+  minutes to appear.
+
+## 0.4.27 — 2026-07-30
+
+### Added
+- **Grok card shows your subscription plan** — the header now reads
+  "X Premium", "SuperGrok", and friends, resolved from xAI's settings
+  display name with a tier-code fallback (free tiers stay unbadged; a
+  plan lookup failure can never hide usage data). Contributed by
+  @JaminYe — their second Pane contribution. 🎉
+
+## 0.4.26 — 2026-07-29
+
+### Changed
+- **Share cards copy what you see** — the ⧉ copy of an expanded card now
+  includes everything visible: the usage trend, spend rows, and pace
+  hints. Collapsed cards keep the clean compact composition. Buttons,
+  links, and carets stay out of the image either way.
+
+### Fixed
+- **Daily statistics count on the day they belong to** — the once-a-day
+  telemetry gate used the machine's local date while every consumer
+  buckets by UTC day, so an install east of UTC whose app runs at local
+  midnight always landed in the previous UTC day (Pakistan showed "0
+  today" while actively using Pane). The gate is UTC now, matching the
+  dashboard.
+
+## 0.4.25 — 2026-07-28
+
+### Fixed
+- **The telemetry toggle shows its real state** — the "Share anonymous
+  usage statistics" switch rendered as off for installs that had never
+  touched it, while the default-on sender kept reporting. The default is
+  now stated in the config itself, so the switch reads ON unless you
+  actually turned it off (opting out worked correctly all along; only
+  the display was wrong).
+- **OpenCode meters use OpenCode's real windows and show resets** — the
+  card summed rolling 7-day and 30-day windows, but OpenCode actually
+  meters a UTC Monday-start week and a monthly cycle anchored to your
+  first-ever Go usage (ported from the Mac app's window math, which
+  ported the official opencode-go plugin). All three meters now carry
+  reset countdowns — the session shows when the oldest in-window spend
+  ages out — so they pace and count down like every other card.
+
+## 0.4.24 — 2026-07-27
+
+### Added
+- **Anonymous usage statistics (opt-out)** — Pane now sends at most two
+  events per day: an "alive today" ping (version, enabled providers,
+  starred metrics, appearance settings) and per-provider refresh
+  success/failure counts with error *categories* only — under a random
+  ID derived from nothing, with PostHog person profiles disabled and
+  IP addresses discarded at ingestion. Never sent: usage amounts,
+  spend, model names, keys, paths, or error text. Settings → Privacy →
+  "Share anonymous usage statistics" is a hard stop: turning it off
+  counts nothing, writes nothing, and deletes the stored ID. The whole
+  implementation is one auditable file (src-tauri/src/telemetry.rs, no
+  SDK); docs/privacy.md documents every field.
+
+## 0.4.23 — 2026-07-22
+
+### Changed
+- **Instant startup for the spend engine** — per-file parse summaries now
+  persist across launches (\`%APPDATA%\\Pane\\spend_cache.json\`, a few MB at
+  most), so a fresh start re-parses only logs that changed instead of
+  re-reading every session file ever written. The cache is discarded
+  whenever the pricing catalogs update, so costs are never served stale.
+
+### Added
+- **Hermes desktop spend** — Pane now reads the local usage ledger of
+  Nous Research's Hermes app (\`%LOCALAPPDATA%\\hermes\\state.db\`, this PC
+  only, nothing sent anywhere). Each session is filed under the backend
+  that actually billed it: MiniMax-routed chats merge into the MiniMax
+  spend slice, OpenRouter-routed into OpenRouter, and anything else shows
+  as a Hermes slice.
+
+### Fixed
+- **Symlinked session logs count their real age** — the spend scanner
+  follows symlinks/junctions when walking log directories, but judged a
+  linked file's recency by the link's own timestamp; logs relocated to
+  another drive could silently vanish from the 31-day window. The
+  target file's timestamp decides now.
+- **Kimi K3 cache reads were overpriced ~10×** — models.dev lists the
+  same model under many resellers and Pane took the alphabetically first
+  entry, which for kimi-k3 was a stub with no cache pricing; cache hits
+  then defaulted to the full $3.00 input rate instead of $0.30. The
+  catalog entry with the most complete pricing wins now.
+
+## 0.4.22 — 2026-07-20
+
+### Changed
+- **"Others" wedge folds more aggressively** — providers now fold into
+  the Others slice under $5 on Today/Yesterday (was $1) and under $10 on
+  Last 30 Days (was $5), keeping the ring focused on the big spenders.
+  A lone under-threshold provider folds too (it used to keep its own
+  legend row); the ring only stays unfolded when everyone is small.
+
+## 0.4.21 — 2026-07-19
+
+### Fixed
+- **Grok no longer shows "Outdated" right after its weekly reset** —
+  xAI's billing API omits the usage-percent field entirely while usage
+  is 0%, which Pane misread as a broken response and kept showing last
+  week's 100%-used bar with an ⚠ Outdated tag. A fresh window with no
+  usage now correctly renders as a 0% bar with the new reset countdown.
+
+## 0.4.20 — 2026-07-18
+
+### Fixed
+- **Disabled providers now do nothing at all** — disabling a provider
+  only hid its card; the work still ran invisibly on every refresh
+  (network calls, file reads, and for Kiro: spawning kiro-cli, whose
+  own auto-updater downloaded a fresh ~25 MB installer to %TEMP% each
+  time — gigabytes within days once Amazon shipped an update). Disabled
+  providers are now skipped before anything runs.
+
+### Removed
+- **Kiro support** — the experimental Kiro provider worked by invoking
+  kiro-cli, and a CLI that self-updates on every invocation is a side
+  effect Pane cannot control. Rather than throttle it, the provider is
+  gone entirely; the card disappears and saved layouts clean themselves
+  up.
+
+### Added
+- **Grok usage bar shows its reset countdown** — the aggregate credit
+  meter now carries the billing period's real end time and duration,
+  so it paces and counts down like the other cards. Contributed by
+  @JaminYe — Pane's first outside contribution. 🎉
+
+### Changed
+- **OpenCode Go meters say "this PC only"** — Go quotas are counted
+  account-wide on OpenCode's servers, and there is no API to read
+  them; the local meters can't see other devices or other participants
+  on a shared subscription, and now say so instead of "local estimate".
+
+## 0.4.18 — 2026-07-17
+
+### Fixed
+- **Update checks report the real app version** — Tauri's
+  \`{{current_version}}\` URL template arrives percent-encoded and never
+  substitutes in query strings, so 0.4.17 installs literally sent
+  "currentversion". The endpoint URL is now built in Rust with the
+  actual version stamped in.
+
+## 0.4.17 — 2026-07-17
+
+### Changed
+- **Update checks go through pane.jazii.dev first** (GitHub stays as
+  the automatic fallback, and every update remains signature-verified).
+  The endpoint serves the same manifest and counts anonymous daily
+  installs — distinct-install estimate, country code, app version, and
+  nothing else; no IP addresses are stored. Full mechanics in
+  docs/privacy.md ("The update check").
+
+## 0.4.16 — 2026-07-16
+
+### Added
+- **Kimi K3 prices everywhere** — K3 usage through Devin, Cursor, the
+  Kimi Code CLI, or the API now bills at Moonshot's published rates
+  ($3 in / $15 out / $0.30 cache hit per MTok) via a built-in fallback,
+  in every slug spelling the tools use. The live catalogs win
+  automatically once they learn the model.
+
+### Changed
+- **"Others" thresholds scale with the period** — Today and Yesterday
+  fold providers under $1 into the grey Others wedge; 30 Days folds
+  under $5 (was a flat $10 everywhere, which swallowed most of a quiet
+  day's ring). The hover breakdown states the active bar.
+
+## 0.4.15 — 2026-07-16
+
+### Added
+- **Moonshot/Kimi spend** — the Moonshot card gains Today / Yesterday /
+  30-day dollars and tokens, a per-model breakdown, and the usage trend,
+  scanned from the Kimi Code CLI's local session logs (one usage record
+  per turn). Models the price catalogs don't know yet count their
+  tokens with the usual ⚠ until pricing lands.
+- **Credit meters for pay-as-you-go cards** — Moonshot and DeepSeek get
+  a "Credits used" percent bar metered against the highest balance Pane
+  has seen (a top-up raises it automatically), so balance cards read
+  like every other card — and the low-credit case now fires the same
+  "Almost Out" notification the quota providers get.
+
+### Fixed
+- **Devin usage counts under the model that actually ran** — Devin
+  rewrites a session's model label whenever you switch models, which
+  retroactively relabeled (and mispriced) everything the session ran
+  before. Each message's own recorded model now wins, so switching to
+  Fable (or anything else) mid-session shows up correctly, priced at
+  the right rates. Fable's Max mode slug also normalizes now.
+- **Grok no longer shows the same meter twice** — the billing payload
+  repeats one percentage under several keys; the card now keeps one
+  row per label, and layouts saved while the duplicate existed repair
+  themselves on the next refresh.
+
+## 0.4.14 — 2026-07-16
+
+### Changed
+- **Small spenders fold into "Others"** — Total Spend providers under
+  $10 in the visible period group into one grey wedge and legend row;
+  hovering it lists exactly who spent what. Providers at $10 or more
+  keep their own name and color. (A lone small spender stays named —
+  a group of one is just a rename — and if everyone is under $10 the
+  ring stays fully named rather than turning into one grey blob.)
+
+### Fixed
+- **Balance-only cards show their rows** — providers with no usage
+  meters (Moonshot, DeepSeek, and other pay-as-you-go cards) tucked
+  every row behind the "show more" caret, leaving an empty panel with
+  a floating arrow. Their Balance/Voucher rows now stay visible, and
+  already-saved layouts repair themselves on the next refresh.
+
+## 0.4.13 — 2026-07-16
+
+### Fixed
+- **Cursor spend updates within minutes, not an hour** — the dashboard
+  usage export was cached for a full hour, so a live Cursor session
+  could work invisibly for up to 60 minutes while every other provider
+  updated in minutes. The cache is now 5 minutes, and a failed refetch
+  serves the last good export instead of blanking the Cursor spend
+  rows entirely.
+
+## 0.4.12 — 2026-07-16
+
+### Added
+- **MiniMax spend** — the MiniMax card now shows Today / Yesterday /
+  30-day dollars and tokens like the other CLIs, fed by two local
+  sources: the MiniMax Agent CLI's own per-turn usage store (its
+  recorded cost is used as-is), and any Claude Code sessions run
+  against MiniMax's Anthropic-compatible endpoint — that usage used to
+  be counted (mislabeled) under the Claude card and now moves to the
+  MiniMax card where it belongs.
+
+## 0.4.11 — 2026-07-16
+
+### Fixed
+- **⚠ Outdated tooltips explain the problem and the fix** — hovering
+  the warning now classifies what went wrong (sign-in expired, vendor
+  rate limit, vendor outage, no connection) and says exactly what to
+  do about it — including the right re-login command per provider —
+  instead of showing a bare error code.
+- **Total Spend always draws its ring** — a period with no usage now
+  shows a quiet zeroed track with $0.00 in the center instead of
+  collapsing to a bare "No spend in this period" line.
+- **Dead Claude sign-in says what to do** — when another app rotates
+  the Claude Code refresh token (leaving Pane's copy invalid), the card
+  now says "run \`claude\` in a terminal once and Pane recovers
+  automatically" instead of "token refresh failed: HTTP 400".
+
+## 0.4.10 — 2026-07-14
+
+### Fixed
+- **Claude card recovers faster from rate-limit cooldowns** — when
+  Anthropic's usage endpoint returns 429 (a plan change can trigger a
+  ~25-minute cooldown), Pane now honors the vendor's own Retry-After
+  timing instead of knocking every 5 minutes, and the card's note says
+  how long the wait is.
+- **Codex subagent replays no longer inflate spend** — when Codex spawns
+  a subagent (or forks a session), the child's rollout file replays the
+  parent's entire token history with fresh timestamps. Pane counted
+  those replayed lines as real usage; they're now skipped via the log's
+  own markers (the Mac app shipped the same fix after a ~20x inflation
+  report). Re-emitted stale snapshots are skipped too, and turns that
+  only report cumulative totals are recovered as deltas.
+- **Codex fast/priority turns price at fast rates** — the service tier
+  is read per session from the rollout's \`thread_settings_applied\`
+  lines (never from \`config.toml\`, which would retroactively reprice
+  history when toggled) and applies each model's Codex priority
+  multiplier (GPT-5.5 ×2.5; GPT-5.4 and the GPT-5.6 family ×2).
+  Supported Codex models switch to OpenAI's long-context rates above
+  272k prompt tokens — the OpenAI boundary, not Anthropic's 200k.
+- **Claude advisor usage counts under the advisor's model** — Fable-era
+  logs nest advisor work in \`usage.iterations\`; advisor-message entries
+  now count once under their own model without double-counting the
+  parent totals. \`<synthetic>\` placeholder turns are never priced,
+  sidechain logs replaying a parent message under a fresh request id
+  are deduplicated, and persisted \`claude -p\` runs count like
+  interactive usage.
+- **OpenCode free-model usage shows up** — messages on free models
+  record a real cost of $0 with real token counts; those tokens now
+  appear in the token totals and Usage Trend instead of vanishing.
+
+## 0.4.9 — 2026-07-11
+
+### Added
+- **Cost/MTok** — the Total Spend ring's metric now cycles Cost →
+  Cost/MTok → Tokens on click (right-click cycles backward). The center
+  shows your true blended rate — total dollars over total megatokens —
+  and each legend row shows that provider's own $/MTok.
+- Cursor's spend rows say **"estimated"** — its usage export aggregates
+  requests, so per-request exactness isn't possible.
+- Reset countdowns inside a minute read **"Resets soon"** instead of a
+  dying timer.
+
+### Fixed
+- **Long-context requests price correctly** — models with 1M-token
+  context bill the *whole* request at a higher tier once the prompt
+  crosses 200k tokens; Pane now applies those tiers. Claude's 1-hour
+  cache writes bill at twice the input rate (they were priced as
+  ordinary writes before), and Claude fast-mode requests apply the
+  published fast multiplier. Spend histories reprice automatically —
+  expect Claude's 30-day figure to correct upward.
+- **Codex percentages show as reported** — the old "fresh window
+  reads 1%, call it 0" normalization masked real early usage and is
+  gone (the Mac dropped it too). "Not started" now keys on the window
+  still being full-length, and windows under 5% used never flash a
+  red pace projection off a floored reading.
+
+## 0.4.8 — 2026-07-11
+
+### Fixed
+- **The whole model-family surface prices now** — reasoning-effort
+  tiers (light/low/medium/high/xhigh), Max **and Ultra** modes, the
+  fast tier, and any composition of them ("gpt-5.6-sol-max-fast",
+  "…-ultra-high", "…-max-fast-xhigh") resolve to the base model's
+  rates, with fast keeping its real per-family multiplier in every
+  composition. Previously composed slugs fell into the unpriced ⚠
+  bucket — on the test machine that was ~$19 of one day's Cursor
+  Max-fast usage hiding from the totals. Verified by a 51-slug
+  regression matrix across GPT-5.6 Luna/Terra/Sol; the handling is
+  generic, so other families (Grok fast tiers etc.) get the same
+  guarantees.
+- **"Outdated" stopped crying wolf** — a single failed refresh no
+  longer tags every card; data under three minutes old serves
+  silently, and the amber tag (with the real error on hover) appears
+  only when staleness is real. Persistent failures surface exactly as
+  before.
+
+## 0.4.7 — 2026-07-10
+
+### Added
+- **Devin spend** — the Devin CLI's local session store now feeds the
+  Total Spend donut, spend rows, per-model breakdown, and usage trend,
+  priced with the live catalog like the other CLIs. Windsurf-style
+  model names ("gpt-5-6-sol-max") are normalized so they price, and
+  the store is read through SQLite's backup API so numbers stay
+  correct while the Devin app is actively writing. Cloud Devin
+  sessions bill in ACUs and keep no local logs, so only CLI usage
+  appears.
+- **Dollars ⇄ tokens** — click the Total Spend ring (or right-click)
+  to flip the donut, legend, and center total between money and raw
+  token counts; the choice persists.
+- **Reorder without leaving the popover** — every card grows a drag
+  grip in its header; drop it where you want and the order saves to
+  the same layout Customize edits.
+
+### Changed
+- **The popover looks like the Mac's now** — provider cards are a
+  clean header over an inset panel, the usage trend sits in a labeled
+  row, and the Total Spend ring is rebuilt from true wedge segments:
+  radial-cut ends with soft corners, hairline gaps, and tiny spenders
+  that stay thin slivers instead of swelling into dots. Hovering a
+  wedge (or its legend row) slides it outward and dims the rest.
+- **Spend colors** — Codex blue, Grok green, Devin sky blue, and
+  Cursor its brand black (flipped to white in dark mode so it stays
+  visible).
+- **Share cards** — the copied image is a curated composition: buttons,
+  links, and spend chrome stripped, the canvas hugs the content, the
+  header aligns with the panel's text column, and the footer carries
+  the app icon with the full tagline.
+- **Unpriced usage keeps its tokens** — requests on models with no
+  public pricing now count their measured tokens in token totals and
+  the trend; dollars still refuse to guess, and the ⚠ (on the
+  provider's spend row only) explains it in plain words.
+
+### Fixed
+- **Grok spend works again** — the Grok CLI changed its log format and
+  the old scanner silently matched nothing; the new one reads token
+  counts from the CLI's turn events and attributes models per process,
+  like the Mac app.
+- **Cursor Max-mode models price correctly** — "-max" slugs bill
+  token-based at the base model's rates, so they now resolve through
+  the full pricing chain instead of landing in the unpriced bucket.
+- **Kilo fresh accounts** — a just-created account shows a friendly
+  "no credits yet" card instead of an error.
+
+## 0.4.6 — 2026-07-09
+
+### Fixed
+- **Cursor spend tiles work again** — Cursor's usage-events export now
+  requires an explicit date range and token strategy; Pane sends both
+  (last 31 days), so Today / Yesterday / 30 Days dollars populate.
+- **New models price within the hour, not within the day** — when spend
+  events reference models the price catalog doesn't know yet (new Cursor
+  slugs ship often), Pane now rechecks the catalog hourly instead of
+  daily, and a catalog update re-prices already-scanned logs instead of
+  waiting for them to change on disk.
+
+## 0.4.5 — 2026-07-09
+
+### Fixed
+- **Cursor Pro/Pro+/Ultra/Teams accounts now show real usage** — percent
+  of the plan's included usage, Auto/API usage, on-demand spend, and
+  credits, with the actual billing-cycle reset date, via the same API
+  Cursor's own dashboard uses. Previously modern accounts showed only a
+  meaningless "Requests this cycle: 0" from the legacy request-counter
+  era (old request-based plans still fall back to it). Session tokens
+  are auto-refreshed in memory when stale, and reading Cursor's login
+  no longer fails when Cursor briefly holds a lock on its database.
+
+## 0.4.4 — 2026-07-08
+
+### Performance
+- Background refreshes no longer rebuild the popover interface while
+  it's hidden in the tray (~99% of the time) — rendering now happens
+  once, at the moment you open Pane. Same for the 30-second countdown
+  ticks. Less idle CPU, all day.
+- New **Settings → General → "Liquid glass effects"** toggle (on by
+  default). Turn it off on slower PCs: the glass refraction and blurs
+  become clean flat surfaces, and the expensive lens machinery never
+  even initializes — from the very first frame of a cold start.
+
+## 0.4.3 — 2026-07-08
+
+### New
+- **Pane's new logo** 🎯 — the ring, everywhere: installer, app and
+  taskbar icons, tray, popover sidebar, and share-card footers.
+- **Update checks on every open** — the footer version stamp re-checks
+  each time you open Pane and becomes a blue **⬆ Update** button when a
+  new release is out; one click installs and restarts. (Replaces the
+  floating update banner.)
+- Party mode is now a triple-click on the sidebar logo away. 🎉
+
+### Fixed
+- Tray strip pairs now render logo-then-numbers, left to right, like
+  the macOS original (Windows inserts new tray icons leftward).
+- The update flow can no longer freeze at "Installing…" if a release
+  disappears mid-install — it fails visibly with a retry button.
+
+## 0.4.2 — 2026-07-08
+
+**⚠ Installs of 0.4.1 and earlier: this release is signed with a new
+key, so the in-app updater will decline it. Reinstall once via
+\`irm https://pane.jazii.dev/install.ps1 | iex\` — updates then resume
+normally.**
+
+### Changed (security)
+- **Breaking for browser-page consumers:** the local HTTP API no longer
+  sends CORS headers, so web pages can no longer read
+  \`127.0.0.1:6736\` through a browser — previously any website you visited
+  could silently read your usage data. PowerShell, curl, Rainmeter, and
+  native apps are unaffected (CORS only constrains browsers). If a
+  legitimate browser integration needs access, open an issue — the plan
+  is an opt-in origin allowlist, not a permissive default.
+- Release binaries are now built and published by GitHub Actions from the
+  pushed tag (public build logs), instead of on the maintainer's machine.
+- The updater signing key was rotated to a passphrase-protected key
+  (2026-07-08). Installs of 0.4.1 and earlier trust the old public key, so
+  their auto-updater will decline the first release signed with the new
+  key — reinstall once via \`irm https://pane.jazii.dev/install.ps1 | iex\`
+  (or the release installer) and updates resume normally.
+- **Webview hardening pass** (from a community security review): a strict
+  Content-Security-Policy replaces the previous \`csp: null\`; the Tauri
+  capability set is trimmed to core IPC only (the UI never used the
+  opener/updater/process plugin APIs); \`withGlobalTauri\` is off; the
+  pinned-metric dropdown is built via DOM instead of HTML strings.
+- **Rust-side input validation:** \`set_config\` only accepts known config
+  keys; tray-strip updates only accept known provider ids (also fixes
+  unstarred tray icons of newer providers not being removed); pricing
+  supplement alias rules are size- and count-capped.
+- **Credential safety:** CLI credential files are copied to \`*.pane-bak\`
+  before Pane writes a refreshed token back.
+
+### Added
+- SECURITY.md (private vulnerability reporting), docs/privacy.md (every
+  network call), docs/providers.md (per-provider: files read + endpoints
+  called), docs/local-http-api.md, CONTRIBUTING.md.
+
+### Fixed
+- Share cards (⧉) now copy the card exactly as it looks on screen —
+  donut, tabs, theme and all — framed with a Pane logo footer, instead
+  of a simplified redrawn version that didn't match the UI.
+
+## 0.4.1 — 2026-07-08
+
+First-run and Customize fixes from fresh-install testing.
+
+### Fixed
+- Fresh installs now start with just Claude + Codex enabled (their
+  "connect me" cards are the onboarding); a PC with zero detected AI
+  tools no longer enables all 18 providers.
+- Rapidly toggling several providers off kept only the last change —
+  toggles now apply instantly and save through a serial delta queue.
+- Disabled providers disappear immediately from the dashboard, the
+  Total Spend donut, and the tray strip (previously they lingered until
+  the next refresh).
+- Total Spend shows a quiet "No spend data yet" card on machines whose
+  CLIs haven't logged usage, instead of no card at all.
+
+## 0.4.0 — 2026-07-07
+
+### New
+- **Three CLI-detected providers** (research credit: steipete/CodexBar, MIT):
+  Codebuff (credits + weekly limit, \`codebuff login\` file or key), Kilo
+  (credit blocks + Kilo Pass, CLI login file or key), and Kiro
+  (experimental — reads \`kiro-cli /usage\`). **18 providers total.**
+- **Auto-updater** — Pane checks GitHub releases on launch and every 4
+  hours; a banner offers one-click download + restart. Updates are
+  cryptographically signed and verified before install.
+- **Deeper metric rows** (Mac-parity polish): Claude per-model weeklies
+  from Anthropic's new \`limits\` API (Fable era) + Extra Usage overage
+  dollars; Codex Spark / Spark Weekly windows + Extra Usage credit
+  balance; Z.ai monthly Web Searches quota; Grok pay-as-you-go cap badge.
+- **"Not started"** — untouched 5-hour session windows say so (with an
+  explainer) instead of showing a countdown that hasn't begun; Codex's
+  floored 1%-on-fresh-window quirk is normalized to a true zero.
+- **Keyboard** — Esc backs out of Customize/Settings, Ctrl+R refreshes.
+
+### Removed
+- Deepgram, OpenAI, Venice, Poe, Chutes, Warp, Crof, Amp, Vertex AI, and
+  AWS Bedrock providers — cut to keep the lineup focused on the AI coding
+  tools people actually track. Saved layouts self-clean any retired ids.
+
+### Fixed
+- Terminal windows no longer flash during refreshes (provider CLI checks
+  now run windowless or scan the filesystem instead of spawning \`cmd\`).
+- Retired providers no longer linger as ghost rows in Customize.
+- Startup crash at higher provider counts (fetch futures now heap-boxed).
+- Clicking the tray icon always reopens on the main page, even if the app
+  was left on Settings or Customize.
+
+## 0.3.0
+
+### Renamed to Pane
+- The app is now **Pane** (formerly OpenUsage for Windows). Installs to
+  \`%LOCALAPPDATA%\\Pane\`; settings move automatically from
+  \`%APPDATA%\\OpenUsage\` to \`%APPDATA%\\Pane\` on first launch — keys, layout,
+  and caches all carry over.
+
+### Accuracy (Wave 9)
+- **Live model pricing** — per-model rates now come from LiteLLM, models.dev,
+  and the OpenUsage pricing supplement (daily refresh, ETag caching, offline
+  fallback) instead of a hardcoded table. Claude spend was overstated ~2.6×
+  at old Opus rates; Codex fast-tier requests now get their real multiplier.
+- **Unpriced events are excluded, not guessed** — models no catalog prices
+  are left out of totals and flagged with ⚠ (count + model names on hover).
+- **Cursor spend** — computed from the dashboard's usage-events CSV export,
+  priced locally.
+- **Codex dedupe** — archived session copies no longer double-count.
+- **Backoff & cooldown** — failing providers are benched 60s (5 min for
+  rate limits) while cached data is served with the reason on hover.
+- **Reset all layouts** also re-detects installed AI tools.
+- **Codex reset credits** — each banked credit shows its exact expiry and a
+  Use button that redeems it (confirm-guarded, idempotent).
+- Single-instance guard; popover reopens scrolled to the top.
+
+### UI
+- Auto-hiding liquid-glass sidebar (prasen.dev lens: SDF rim refraction,
+  chromatic fringe) with magnetic minimap trail; glass footer with build
+  stamp; full-window Customize and accordion Settings panels; ☀/☾ theme
+  toggle with circular wipe; per-day trend tooltips; skeleton loading,
+  staggered card entrances, and a full light-mode audit.
+
+### New
+- **Wave 11 provider pack** — seven providers that authenticate with a pasted
+  API key (Settings → API keys) or nothing at all:
+  DeepSeek (balance), Moonshot/Kimi (balance, .ai + .cn), ElevenLabs
+  (character quota with reset pacing), Deepgram (project balances),
+  OpenAI (org costs — needs an Admin key), Venice (USD/DIEM/VCU balances),
+  and Ollama (local server: installed + loaded models, no key needed).
+  Providers added by an update that have no credentials on this PC start
+  disabled — enable them in Customize.
+- **MiniMax provider** — Coding/Token Plan quota (5-hour Session + Weekly
+  windows) via the same endpoint the official \`mmx quota\` command uses. Key
+  auto-detected from the MiniMax CLI's config, \`MINIMAX_API_KEY\`, or the new
+  Settings field.
+- **Copilot CLI / modern gh detection** — GitHub tokens are now also read
+  from Windows Credential Manager (\`gh:github.com:<user>\`), which is where
+  current gh versions (and the Copilot CLI) keep them. hosts.yml-only setups
+  keep working.
+- **Motion pass** — cards slide in with a stagger and bars fill when the
+  popover opens, skeleton shimmer while first data loads, hover elevation on
+  cards, smooth caret/tab/button transitions. All entrance animations play
+  only on open (never on background refreshes) and respect the system's
+  reduced-motion setting.
+
+### Fixed
+- config.json parsing now tolerates a UTF-8 BOM and logs parse failures
+  instead of silently resetting settings to defaults.
+
+## 0.2.0 — 2026-07-07
+
+Full feature parity with the macOS original, plus Windows-specific polish.
+
+### New
+- **Antigravity support** — reads quota from the IDE's local language server
+  when it's running, and falls back to Google's Cloud Code API (token from
+  Windows Credential Manager) when it isn't. Session / Weekly / Claude /
+  Claude Weekly metrics plus plan name.
+- **Provider quick links** — Status / Dashboard links at the bottom of each
+  card, same targets as the Mac app.
+- **Share cards** — hover a card and click ⧉ to copy it as a PNG image to the
+  clipboard (works for Total Spend too).
+- **Local HTTP API** — \`GET http://127.0.0.1:6736/v1/usage\` (and
+  \`/v1/usage/:providerId\`) serves the latest snapshots in the Mac app's
+  documented wire format. Scripts written for the Mac app work unchanged.
+- **Appearance** — System / Light / Dark theme setting.
+- **Compact layout** — tighter density option.
+- **Global shortcut** — e.g. \`Ctrl+Shift+U\` to toggle the popover from
+  anywhere.
+- **Proxy** — optional \`socks5://\` / \`http(s)://\` outbound proxy.
+- **First-launch detection** — a fresh install starts with only the providers
+  that have credentials on the PC; the rest wait in Customize.
+
+### Fixed
+- The popover no longer sits on "Loading usage data…" while the spend engine
+  scans session logs on a cold start — usage cards paint immediately and the
+  Total Spend card fills in when the scan finishes.
+- Last-good snapshots are now cached **on disk**, so a transient provider
+  outage (or rate limit) right after an app restart shows amber "⚠ Outdated"
+  data instead of an error card. Entries expire after 24 hours.
+- Drag-and-drop in Customize works (Tauri's native drag interceptor disabled).
+
+## 0.1.0 — 2026-07-06
+
+First Windows release: 10 providers (Claude, Codex, Cursor, OpenCode,
+Copilot, Grok, Devin, OpenRouter, Z.ai, Antigravity detection), local spend
+engine with model breakdown and 30-day trend, pace projections, toast
+notifications, tray strip with per-provider icons, Customize screen, NSIS
+installer, autostart.
 `,q0=(()=>{try{return ti().label}catch{return"main"}})(),le=q0==="panel";le&&document.body.classList.add("panel-form");const Zm={claude:"stale.relogin.claude",codex:"stale.relogin.codex",grok:"stale.relogin.grok",copilot:"stale.relogin.copilot",cursor:"stale.relogin.cursor",devin:"stale.relogin.devin",opencode:"stale.relogin.opencode",antigravity:"stale.relogin.antigravity",ollama:"stale.relogin.ollama",hermes:"stale.relogin.hermes",kimi:"stale.relogin.kimi",qodercn:"stale.relogin.qodercn",traecn:"stale.relogin.traecn"};function M0(e){const t=(e.warning??a("stale.lastFailed")).replace(/[.\s]+$/,""),n=t.toLowerCase(),s=Zm[e.id]?a(Zm[e.id]):a("stale.reloginDefault");let o=a("stale.fixRetry");/run `|open the/.test(n)?o=a("stale.fixDone"):/http 40[13]|invalid_grant|expired|no refresh token|sign[- ]?in|log ?in|credentials/.test(n)?o=a("stale.fixRelogin",{how:s}):/http 429|rate limit/.test(n)?o=a("stale.fix429"):/http 5\d\d/.test(n)?o=a("stale.fix5xx"):/error sending request|timed? ?out|connect|network|dns|proxy/.test(n)&&(o=a("stale.fixNet"));const i=e.upstream_status,r=i&&i.indicator!=="none"?`
 ${a("upstream.line",{name:Ae($(e.id)),state:a(`upstream.${i.indicator}`),when:i.updated_at?new Date(i.updated_at).toLocaleTimeString(Oe(),{hour:"2-digit",minute:"2-digit"}):"",description:i.description})}`:"";return`${t}.
 ${r?`${r}
