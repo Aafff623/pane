@@ -7349,8 +7349,8 @@ function appConfirm(opts: {
         <p>${escapeHtml(opts.message)}</p>
         ${checkboxHtml}
         <div id="confirm-actions">
-          <button id="confirm-cancel" type="button">${escapeHtml(t("dialog.cancel"))}</button>
-          <button id="confirm-ok" type="button" class="${opts.danger ? "danger" : ""}">${escapeHtml(opts.confirmLabel)}</button>
+          <button id="confirm-cancel" class="mini-btn" type="button">${escapeHtml(t("dialog.cancel"))}</button>
+          <button id="confirm-ok" class="mini-btn${opts.danger ? " danger" : ""}" type="button">${escapeHtml(opts.confirmLabel)}</button>
         </div>
       </div>`;
     const getChecked = () => {
@@ -14034,8 +14034,13 @@ function removedProvidersHtml(): string {
   const rows = removed
     .map((fam) => {
       const name = ALL_PROVIDERS.find(([pid]) => pid === fam)?.[1] ?? fam;
+      const visual = providerVisual(fam);
+      const icon = visual?.iconSvg || uiIcon("key");
       return `<div class="cust-removed-row">
-          <span class="cust-label">${escapeHtml(name)}</span>
+          <span class="cust-removed-name">
+            <span class="cust-removed-icon" style="color:${escapeHtml(visual?.iconColor ?? "var(--muted-foreground)")}">${icon}</span>
+            <span class="cust-label">${escapeHtml(name)}</span>
+          </span>
           <button class="mini-btn" data-restore-provider="${escapeHtml(fam)}">${escapeHtml(t("customize.providerRestore"))}</button>
         </div>`;
     })

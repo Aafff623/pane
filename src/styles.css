@@ -5259,6 +5259,29 @@ body.ui-scaled .popover {
   font-size: 12px;
 }
 
+.cust-removed-name {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.cust-removed-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  flex: none;
+}
+
+.cust-removed-icon svg,
+.cust-removed-icon .ui-icon {
+  width: 16px;
+  height: 16px;
+  display: block;
+}
+
 /* The account ⚙ panel is a small form (note name / key mask /
    connectivity / actions), not a horizontal action row — stack it. */
 .cust-config.account-config {
@@ -7686,6 +7709,42 @@ body.no-glass .cust-dock {
   width: 14px;
   height: 14px;
   cursor: pointer;
+}
+
+/* Confirm actions follow the same button vocabulary as the rest of the
+   panel: muted cancel, tinted-red destructive action, 30px controls. */
+#confirm-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 16px;
+}
+
+#confirm-actions .mini-btn {
+  height: 30px;
+  padding: 0 14px;
+  border-radius: 8px;
+  font-size: 12px;
+  justify-content: center;
+}
+
+#confirm-actions .mini-btn.danger {
+  color: #fca5a5;
+  background: rgba(239, 68, 68, 0.12);
+}
+
+#confirm-actions .mini-btn.danger:hover {
+  color: #fecaca;
+  background: rgba(239, 68, 68, 0.22);
+}
+
+:root[data-theme="light"] #confirm-actions .mini-btn.danger {
+  color: #b91c1c;
+  background: rgba(185, 28, 28, 0.08);
+}
+
+:root[data-theme="light"] #confirm-actions .mini-btn.danger:hover {
+  background: rgba(185, 28, 28, 0.16);
 }
 
 /* "?" provider-quota help dialog (openProviderHelp) */
