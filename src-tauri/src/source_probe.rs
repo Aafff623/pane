@@ -99,7 +99,7 @@ pub fn probe_all() -> SourceProbeReport {
     let mut families = Vec::new();
     for def in definitions {
         let hint = HINTS.iter().find(|hint| hint.family == def.family_id);
-        let local = local_hint(def.family_id);
+        let local = local_credential_hint(def.family_id);
         let stored = stored_credential_exists(def.family_id);
         if hint.is_none()
             && crate::provider_catalog::provider_env_vars(def.family_id).is_empty()
@@ -152,7 +152,7 @@ pub fn probe_family(family: &str) -> SourceProbe {
         &env,
         &path_index,
         HINTS.iter().find(|hint| hint.family == family),
-        local_hint(family),
+        local_credential_hint(family),
         stored_credential_exists(family),
     )
 }
@@ -181,7 +181,7 @@ pub fn probe_families<'a>(families: impl IntoIterator<Item = &'a str>) -> HashMa
                 &env,
                 &path_index,
                 HINTS.iter().find(|hint| hint.family == family),
-                local_hint(family),
+                local_credential_hint(family),
                 stored_credential_exists(family),
             ),
         );
@@ -261,29 +261,74 @@ fn stored_credential_exists(family: &str) -> bool {
     }
 }
 
-fn local_hint(family: &str) -> Option<String> {
+pub fn local_credential_hint(family: &str) -> Option<String> {
     match family {
         "claude" => crate::providers::claude::local_credential_hint(),
         "codex" => crate::providers::codex::local_credential_hint(),
-        "opencode" => crate::providers::opencode::local_credential_hint(),
         "cursor" => crate::providers::cursor::local_credential_hint(),
+        "opencode" => crate::providers::opencode::local_credential_hint(),
         "copilot" => crate::providers::copilot::local_credential_hint(),
         "grok" => crate::providers::grok::local_credential_hint(),
         "devin" => crate::providers::devin::local_credential_hint(),
+        "minimax" => crate::providers::minimax::local_credential_hint(),
+        "openrouter" => crate::providers::openrouter::local_credential_hint(),
+        "zai" => crate::providers::zai::local_credential_hint(),
         "antigravity" => crate::providers::antigravity::local_credential_hint(),
-        "qoder" => crate::providers::qoder::local_credential_hint(),
-        "kiro" => crate::providers::kiro::local_credential_hint(),
-        "trae" => crate::providers::trae::local_credential_hint(),
-        "zed" => crate::providers::zed::local_credential_hint(),
+        "deepseek" => crate::providers::deepseek::local_credential_hint(),
+        "moonshot" => crate::providers::moonshot::local_credential_hint(),
+        "elevenlabs" => crate::providers::elevenlabs::local_credential_hint(),
+        "ollama" => crate::providers::ollama::local_credential_hint(),
+        "codebuff" => crate::providers::codebuff::local_credential_hint(),
+        "kilo" => crate::providers::kilo::local_credential_hint(),
+        "aihubmix" => crate::providers::aihubmix::local_credential_hint(),
+        "qwen" => crate::providers::qwen::local_credential_hint(),
+        "hermes" => crate::providers::hermes::local_credential_hint(),
         "kimi" => crate::providers::kimi::local_credential_hint(),
+        "stepfun" => crate::providers::stepfun::local_credential_hint(),
+        "stepfun-plan" => crate::providers::stepfun_plan::local_credential_hint(),
         "clinepass" => crate::providers::clinepass::local_credential_hint(),
+        "sensenova" => crate::providers::sensenova::local_credential_hint(),
+        "apigoto" => crate::providers::apigoto::local_credential_hint(),
         "amp" => crate::providers::amp::local_credential_hint(),
+        "chutes" => crate::providers::chutes::local_credential_hint(),
+        "deepgram" => crate::providers::deepgram::local_credential_hint(),
+        "openai-api" => crate::providers::openai_api::local_credential_hint(),
+        "poe" => crate::providers::poe::local_credential_hint(),
+        "venice" => crate::providers::venice::local_credential_hint(),
+        "warp" => crate::providers::warp::local_credential_hint(),
+        "shandianshuo" => crate::providers::shandianshuo::local_credential_hint(),
+        "bocha" => crate::providers::searchquota::local_credential_hint("bocha", &["BOCHA_API_KEY"]),
+        "tavily" => crate::providers::searchquota::local_credential_hint("tavily", &["TAVILY_API_KEY"]),
+        "firecrawl" => crate::providers::searchquota::local_credential_hint(
+            "firecrawl",
+            &["FIRECRAWL_API_KEY", "FIRECRAWL_FIRECRAWL_API_KEY"],
+        ),
+        "brave" => crate::providers::searchquota::local_credential_hint("brave", &["BRAVE_API_KEY", "BRAVE_SEARCH_API_KEY"]),
+        "giphy" => crate::providers::giphy::local_credential_hint(),
+        "siliconflow" => crate::providers::siliconflow::local_credential_hint(),
+        "novita" => crate::providers::novita::local_credential_hint(),
+        "relaybalance" => crate::providers::relaybalance::local_credential_hint(),
+        "qodercn" => crate::providers::qodercn::local_credential_hint(),
+        "orcaterm" => crate::providers::orcaterm::local_credential_hint(),
+        "traecn" => crate::providers::traecn::local_credential_hint(),
         "commandcode" => crate::providers::commandcode::local_credential_hint(),
         "doubao" => crate::providers::doubao::local_credential_hint(),
         "clawsgo" => crate::providers::clawsgo::local_credential_hint(),
-        "gemini" => None,
-        "qwen" => crate::providers::qwen::local_credential_hint(),
-        "windsurf" => crate::providers::windsurf::local_credential_hint(),
+        "kiro" => crate::providers::kiro::local_credential_hint(),
+        "trae" => crate::providers::trae::local_credential_hint(),
+        "qoder" => crate::providers::qoder::local_credential_hint(),
+        "zed" => crate::providers::zed::local_credential_hint(),
+        "mimo" => crate::providers::mimo::local_credential_hint(),
+        "factory" => crate::providers::factory::local_credential_hint(),
+        "jetbrains" => crate::providers::jetbrains::local_credential_hint(),
+        "groq" => crate::providers::groq::local_credential_hint(),
+        "huggingface" => crate::providers::huggingface::local_credential_hint(),
+        "longcat" => crate::providers::longcat::local_credential_hint(),
+        "sub2api" => crate::providers::sub2api::local_credential_hint(),
+        "mistral" => crate::providers::mistral::local_credential_hint(),
+        "perplexity" => crate::providers::perplexity::local_credential_hint(),
+        "volcengine" => crate::providers::volcengine::local_credential_hint(),
+        "zcode" => crate::providers::zcode::local_credential_hint(),
         _ => None,
     }
 }

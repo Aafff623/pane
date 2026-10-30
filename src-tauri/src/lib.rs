@@ -5191,74 +5191,8 @@ fn get_credential_status(provider: String) -> Value {
     let env_key = provider_catalog::provider_env_vars(&family)
         .iter()
         .any(|var| std::env::var(var).is_ok_and(|v| !v.trim().is_empty()));
-    let mut local_cli = match family.as_str() {
-        "claude" => providers::claude::local_credential_hint(),
-        "codex" => providers::codex::local_credential_hint(),
-        "cursor" => providers::cursor::local_credential_hint(),
-        "opencode" => providers::opencode::local_credential_hint(),
-        "copilot" => providers::copilot::local_credential_hint(),
-        "grok" => providers::grok::local_credential_hint(),
-        "devin" => providers::devin::local_credential_hint(),
-        "minimax" => providers::minimax::local_credential_hint(),
-        "openrouter" => providers::openrouter::local_credential_hint(),
-        "zai" => providers::zai::local_credential_hint(),
-        "antigravity" => providers::antigravity::local_credential_hint(),
-        "deepseek" => providers::deepseek::local_credential_hint(),
-        "moonshot" => providers::moonshot::local_credential_hint(),
-        "elevenlabs" => providers::elevenlabs::local_credential_hint(),
-        "ollama" => providers::ollama::local_credential_hint(),
-        "codebuff" => providers::codebuff::local_credential_hint(),
-        "kilo" => providers::kilo::local_credential_hint(),
-        "aihubmix" => providers::aihubmix::local_credential_hint(),
-        "qwen" => providers::qwen::local_credential_hint(),
-        "hermes" => providers::hermes::local_credential_hint(),
-        "kimi" => providers::kimi::local_credential_hint(),
-        "stepfun" => providers::stepfun::local_credential_hint(),
-        "stepfun-plan" => providers::stepfun_plan::local_credential_hint(),
-        "clinepass" => providers::clinepass::local_credential_hint(),
-        "sensenova" => providers::sensenova::local_credential_hint(),
-        "apigoto" => providers::apigoto::local_credential_hint(),
-        "amp" => providers::amp::local_credential_hint(),
-        "chutes" => providers::chutes::local_credential_hint(),
-        "deepgram" => providers::deepgram::local_credential_hint(),
-        "openai-api" => providers::openai_api::local_credential_hint(),
-        "poe" => providers::poe::local_credential_hint(),
-        "venice" => providers::venice::local_credential_hint(),
-        "warp" => providers::warp::local_credential_hint(),
-        "shandianshuo" => providers::shandianshuo::local_credential_hint(),
-        "bocha" => providers::searchquota::local_credential_hint("bocha", &["BOCHA_API_KEY"]),
-        "tavily" => providers::searchquota::local_credential_hint("tavily", &["TAVILY_API_KEY"]),
-        "firecrawl" => providers::searchquota::local_credential_hint(
-            "firecrawl",
-            &["FIRECRAWL_API_KEY", "FIRECRAWL_FIRECRAWL_API_KEY"],
-        ),
-        "brave" => providers::searchquota::local_credential_hint("brave", &["BRAVE_API_KEY", "BRAVE_SEARCH_API_KEY"]),
-        "giphy" => providers::giphy::local_credential_hint(),
-        "siliconflow" => providers::siliconflow::local_credential_hint(),
-        "novita" => providers::novita::local_credential_hint(),
-        "relaybalance" => providers::relaybalance::local_credential_hint(),
-        "qodercn" => providers::qodercn::local_credential_hint(),
-        "orcaterm" => providers::orcaterm::local_credential_hint(),
-        "traecn" => providers::traecn::local_credential_hint(),
-        "commandcode" => providers::commandcode::local_credential_hint(),
-        "doubao" => providers::doubao::local_credential_hint(),
-        "clawsgo" => providers::clawsgo::local_credential_hint(),
-        "kiro" => providers::kiro::local_credential_hint(),
-        "trae" => providers::trae::local_credential_hint(),
-        "qoder" => providers::qoder::local_credential_hint(),
-        "zed" => providers::zed::local_credential_hint(),
-        "mimo" => providers::mimo::local_credential_hint(),
-        "factory" => providers::factory::local_credential_hint(),
-        "jetbrains" => providers::jetbrains::local_credential_hint(),
-        "groq" => providers::groq::local_credential_hint(),
-        "huggingface" => providers::huggingface::local_credential_hint(),
-        "longcat" => providers::longcat::local_credential_hint(),
-        "sub2api" => providers::sub2api::local_credential_hint(),
-        "mistral" => providers::mistral::local_credential_hint(),
-        "perplexity" => providers::perplexity::local_credential_hint(),
-        "volcengine" => providers::volcengine::local_credential_hint(),
-        _ => None,
-    };
+    let probe = source_probe::probe_family(&family);
+    let mut local_cli = probe.local_hint.clone();
     // Subscription/membership badge: Cursor reads it straight from the
     // editor's local state DB (same source cockpit badges accounts with);
     // other providers surface their plan on the quota card itself.
@@ -5289,7 +5223,6 @@ fn get_credential_status(provider: String) -> Value {
         _ => None,
     };
     let masked_key = providers::stored_key_file(&family).map(|key| accounts::mask_key(&key));
-    let probe = source_probe::probe_family(&family);
     json!({
         "storedKey": stored_key,
         "maskedKey": masked_key,

@@ -787,6 +787,19 @@ fn current_key() -> Option<[u8; 32]> {
     Some(derive_key(&credential_seed(platform, &home, &user)))
 }
 
+/// Presence-only probe: the ZCode credential store exists on this machine.
+/// Read-only and never decrypts; the HTTP probe and the gear panel share it.
+pub fn local_credential_hint() -> Option<String> {
+    let path = dirs::home_dir()?
+        .join(".zcode")
+        .join("v2")
+        .join("credentials.json");
+    std::fs::symlink_metadata(&path)
+        .ok()
+        .filter(|meta| meta.is_file() && !meta.file_type().is_symlink())
+        .map(|_| "ZCode 本机登录".to_string())
+}
+
 /// The first entry of ~/.zcode/v2/credentials.json that decrypts to a JWT
 /// (the user has exactly one ZCode account — spec, closed question 2).
 /// Read-only: the file and its plaintexts never leave this function, and
