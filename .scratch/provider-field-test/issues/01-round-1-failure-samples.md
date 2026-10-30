@@ -58,16 +58,16 @@ claude：mtime 2026-10-09，无 refreshToken。opencode：`~/.local/share/openco
 
 - 2026-10-30 19:20：P1 `credentialState` 已由 ticket 02 修复；7 张卡恢复 present，`/v1/providers` 中只剩 grok/qwen/qoder 的真实 `no_credentials`。owner 重登后的 7 项复测仍待完成；第 2 轮未开始。
 
-## 复测表（owner 重登后填写）
+## 复测表（owner 账号现实，2026-10-30）
 
-| 项 | owner 操作 | status / lines | error | 回写 |
-|---|---|---|---|---|
-| claude | 终端 `claude` 重登 | 待复测 | — | 待回写 |
-| opencode | 换 OpenCode Go key | 待复测 | — | 待回写 |
-| giphy | 换 dashboard `access_token` | 待复测 | — | 待回写 |
-| sensenova | Settings 重新浏览器授权 | 待复测 | — | 待回写 |
-| traecn | 打开 Trae CN 一次 | 待复测 | — | 待回写 |
-| stepfun-plan | Settings 账号密码登录 | 待复测 | — | 待回写 |
-| zcode | 确认 Start Plan | 待复测 | — | 待回写 |
+| 项 | owner 结论 | 处理 | 回写 |
+|---|---|---|---|
+| claude（Claude Code） | 没有订阅，重登没有意义 | 阻塞：无订阅 | 不修 |
+| opencode | 没有订阅，不用看 | 阻塞：无订阅 | 不修 |
+| giphy | 只有 dashboard 会话 token，没有官方浏览器授权 | 待决策：继续手贴 token 或放弃该卡 | 待定 |
+| sensenova | 浏览器授权可行 | 待 owner 授权后复测 | 待回写 |
+| traecn（Tree-sitter） | 暂时不用，懒得打开 | 闲置：不投入 | 不修 |
+| stepfun-plan | Plan 已过期 | 阻塞：无有效计划 | 不修 |
+| zcode | 没有 Starter Plan | 账号现实，needs_setup 属正常 | 不修 |
 
-复测读取：`GET http://127.0.0.1:6736/v1/providers`，只看 status / lines / error / stale，不回显密钥。每项完成后同步更新 `docs/provider-credentials.md` 对应行。
+复测读取：`GET http://127.0.0.1:6736/v1/providers`，只看 status / lines / error / stale，不回显密钥。SenseNova 完成后同步更新 `docs/provider-credentials.md` 对应行。

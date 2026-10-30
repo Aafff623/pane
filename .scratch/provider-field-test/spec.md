@@ -33,5 +33,5 @@
 
 | # | 文件 | 覆盖 | 状态 |
 |---|---|---|---|
-| 01 | `issues/01-round-1-failure-samples.md` | 6 报错 + 5 stale + zcode 的取证与归因 | done（7 项待 owner 重登后复测） |
+| 01 | `issues/01-round-1-failure-samples.md` | 6 报错 + 5 stale + zcode 的取证与归因 | done（账号现实已确认：仅 SenseNova 待授权后复测；其余无订阅/计划或闲置） |
 | 02 | `issues/02-credential-state-shared-table.md` | credentialState 共享凭据表 | done |
