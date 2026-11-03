@@ -32,6 +32,15 @@ Last reconciled: 2026-10-28 (first-run source detection #109; 0.12.0 released; s
   `com.aafff623.pane`, productName `Pane-Aafff623`. The pre-0.11 identity
   (`com.jazii.pane` / `Pane`) was the upstream author's; #105 split it so the
   two apps no longer share install folders or data directories.
+- Debug builds compile with identifier `com.aafff623.pane.dev`
+  (`src-tauri/build.rs` merges it through `TAURI_CONFIG`): the single-instance
+  mutex, the WebView2 data directory (`%LOCALAPPDATA%\com.aafff623.pane.dev`)
+  and the tray identity stay separate from the installed app, so dev and
+  release can run side by side. Debug builds also never write the OS
+  autostart entry (`autostart_manages_os_entry` in `lib.rs`) — they only
+  persist the preference, which the installed build applies on its next
+  launch. The app config directory (`%APPDATA%\PaneAafff623`) is still shared
+  on purpose, so dev sessions exercise the real accounts.
 - Legacy autostart: the identity migration enables the `Pane-Aafff623` Run
   entry but cannot delete the old `Run\Pane` value, so a machine keeping an
   older install booted it every time and re-offered the update it had already
@@ -127,7 +136,7 @@ Last reconciled: 2026-10-28 (first-run source detection #109; 0.12.0 released; s
 ## Known failure modes
 
 - Stale UI after a frontend change → WebView2 cache; delete
-  `%LOCALAPPDATA%\com.aafff623.pane\EBWebView` and restart.
+  `%LOCALAPPDATA%\com.aafff623.pane.dev\EBWebView` (debug builds; release builds use the un-suffixed folder) and restart.
 - Window opens but is invisible → launched via `Start-Process`/`&` (wrong
   desktop station); relaunch with the CreateProcess snippet in
   `docs/dev-startup.md`.

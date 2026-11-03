@@ -20,6 +20,20 @@ use crate::providers::Snapshot;
 use crate::source_probe::SourceProbe;
 
 static LATEST: OnceLock<Mutex<Value>> = OnceLock::new();
+/// Set by `start` from the running app's config. Debug builds use a `.dev`
+/// identifier, so remediation hints must not hardcode the shipped one.
+static APP_IDENTIFIER: OnceLock<String> = OnceLock::new();
+
+pub fn set_app_identifier(identifier: String) {
+    let _ = APP_IDENTIFIER.set(identifier);
+}
+
+fn app_identifier() -> &'static str {
+    APP_IDENTIFIER
+        .get()
+        .map(String::as_str)
+        .unwrap_or("com.aafff623.pane")
+}
 /// Full snapshots for `/v1/providers` — the Mac-compatible wire format above
 /// deliberately keeps only usage numbers, which leaves an agent unable to
 /// tell "no data" from "disabled / no credentials / auth failed / network".
@@ -548,7 +562,10 @@ fn doctor_payload(cfg: &Value, fetched_at: &str) -> Value {
         "webview_cache",
         true,
         "info",
-        "WebView2 cache is per-user under %LOCALAPPDATA%\\com.aafff623.pane\\EBWebView; staleness cannot be judged from here".into(),
+        format!(
+            "WebView2 cache is per-user under %LOCALAPPDATA%\\{}\\EBWebView; staleness cannot be judged from here",
+            app_identifier()
+        ),
         Some("if the UI shows stale content after an update, delete that folder and restart Pane"),
     ));
     checks.push(check(

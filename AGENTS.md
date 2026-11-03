@@ -16,7 +16,7 @@ cd D:\code\pane && pnpm build
 
 # Step 2: kill old pane + clear WebView2 cache
 Stop-Process -Name pane -Force -ErrorAction SilentlyContinue
-Remove-Item -Recurse -Force "$env:LOCALAPPDATA\com.aafff623.pane\EBWebView" -ErrorAction SilentlyContinue
+Remove-Item -Recurse -Force "$env:LOCALAPPDATA\com.aafff623.pane.dev\EBWebView" -ErrorAction SilentlyContinue
 
 # Step 2–3: start Vite and the debug Pane together. This is the local
 # development launcher; it is not the installed release executable.
@@ -38,7 +38,7 @@ Remove-Item -Recurse -Force "$env:LOCALAPPDATA\com.aafff623.pane\EBWebView" -Err
    WMI with log redirection so the process survives the Agent shell and stays
    on the interactive desktop. A bare `Start-Process` or `& pane.exe` is not a
    valid development launch path.
-4. **Clear `%LOCALAPPDATA%\com.aafff623.pane\EBWebView`** whenever you see
+4. **Clear `%LOCALAPPDATA%\com.aafff623.pane.dev\EBWebView`** whenever you see
    stale UI. WebView2 caches assets aggressively.
 5. **`src-tauri/Cargo.toml` crate-type stays `["rlib"]`.** This is a
    desktop-only crate (no mobile JNI). `cdylib`/`staticlib` made GNU and

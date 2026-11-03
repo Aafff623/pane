@@ -70,7 +70,7 @@ test("worker: download redirect and API fallbacks", async () => {
           tag_name: "v9.9.9",
           html_url: "https://github.com/Aafff623/pane/releases/tag/v9.9.9",
           published_at: "2026-01-01T00:00:00Z",
-          assets: [{ name: "Pane-Aafff623_9.9.9_x64-setup.exe", browser_download_url: "https://example.test/Pane-setup.exe", size: 1 }],
+          assets: [{ name: "Pane_9.9.9_x64-setup.exe", browser_download_url: "https://example.test/Pane-setup.exe", size: 1 }],
         }),
         { status: 200 },
       );

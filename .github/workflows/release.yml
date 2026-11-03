@@ -118,6 +118,24 @@ jobs:
           path: artifacts
           merge-multiple: true
 
+      # The install identity stays Pane-Aafff623 (install dir, uninstall key,
+      # WinGet id); only the filenames users see drop the GitHub-handle suffix.
+      # latest.json, the winget regex and the Gitee mirror all read the
+      # renamed files, so this must run before the manifest step.
+      - name: Normalize artifact names
+        shell: bash
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          for f in artifacts/Pane-Aafff623*; do
+            base=$(basename "$f")
+            new="${base/#Pane-Aafff623/Pane}"
+            if [[ "$new" != "$base" ]]; then
+              mv "$f" "artifacts/$new"
+            fi
+          done
+          ls -la artifacts
+
       - name: Generate latest.json
         shell: bash
         run: |
@@ -241,8 +259,8 @@ jobs:
                   return "arm64"
               return "x86_64"
 
-          # Pane-Aafff623 bundles are named Pane-Aafff623_<ver>_<os-arch>.<ext>, so the
-          # architecture comes straight from the filename.
+          # Artifacts are renamed to Pane_<ver>_<os-arch>.<ext> before this
+          # step, so the architecture comes straight from the filename.
           BASE = f"https://github.com/{repo}/releases/download/{tag}"
           cells = {"Windows": {}, "macOS": {}, "Linux": {}}
           for f in sorted(os.listdir("artifacts")):

@@ -44,7 +44,7 @@ const INSTALLER = /-setup\.exe$/;
 const GITEE_REPO = "fan-tengda/pane";
 const MANIFEST_URL = `https://github.com/${REPO}/releases/latest/download/latest.json`;
 const GITEE_ASSET = (version) =>
-  `https://gitee.com/${GITEE_REPO}/releases/download/v${version}/Pane-Aafff623_${version}_x64-setup.exe`;
+  `https://gitee.com/${GITEE_REPO}/releases/download/v${version}/Pane_${version}_x64-setup.exe`;
 
 // latestRelease asks GitHub for the newest release. The cf.cacheTtl keeps the
 // API call off the request path for repeat visitors (GitHub allows 60

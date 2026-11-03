@@ -545,7 +545,56 @@ fn main_popover_visible(app: &tauri::AppHandle) -> bool {
         .unwrap_or(false)
 }
 
+/// Debug builds never touch the OS autostart entry: their exe only works
+/// while Vite serves the frontend, so registering it would boot a windowless
+/// error page. The preference is still persisted — the installed build
+/// applies it on its next launch.
+fn autostart_manages_os_entry() -> bool {
+    !cfg!(debug_assertions)
+}
+
+fn autostart_preference() -> bool {
+    load_config()
+        .get("autostart")
+        .and_then(Value::as_bool)
+        .unwrap_or(true)
+}
+
+/// The installer names shortcuts after productName (`Pane-Aafff623`); users
+/// should see "Pane". The GUI installer creates the desktop link on its
+/// finish page — after any NSIS post-install hook would have run — so the
+/// first launch renames whatever the installer created. A pre-existing
+/// `Pane.lnk` belongs to a legacy upstream install and is never overwritten.
+#[cfg(windows)]
+fn rename_install_shortcuts() {
+    let mut dirs = Vec::new();
+    if let Some(dir) = dirs::desktop_dir() {
+        dirs.push(dir);
+    }
+    if let Some(dir) = dirs::data_dir() {
+        dirs.push(
+            dir.join("Microsoft")
+                .join("Windows")
+                .join("Start Menu")
+                .join("Programs"),
+        );
+    }
+    for dir in dirs {
+        let from = dir.join("Pane-Aafff623.lnk");
+        let to = dir.join("Pane.lnk");
+        if !from.exists() || to.exists() {
+            continue;
+        }
+        if let Err(error) = std::fs::rename(&from, &to) {
+            eprintln!("[pane] shortcut rename {}: {error}", from.display());
+        }
+    }
+}
+
 fn autostart_now_enabled(app: &tauri::AppHandle) -> bool {
+    if !autostart_manages_os_entry() {
+        return autostart_preference();
+    }
     use tauri_plugin_autostart::ManagerExt;
     app.autolaunch().is_enabled().unwrap_or(false)
 }
@@ -741,15 +790,17 @@ fn rebuild_tray_menu(app: &tauri::AppHandle) {
 
 #[tauri::command]
 fn get_autostart(app: tauri::AppHandle) -> bool {
-    use tauri_plugin_autostart::ManagerExt;
-    app.autolaunch().is_enabled().unwrap_or(false)
+    autostart_now_enabled(&app)
 }
 
 #[tauri::command]
 fn set_autostart(app: tauri::AppHandle, enabled: bool) -> Result<(), String> {
-    use tauri_plugin_autostart::ManagerExt;
     // Remember the choice so startup knows whether to re-assert it.
     let _ = set_config_inner(json!({ "autostart": enabled }));
+    if !autostart_manages_os_entry() {
+        return Ok(());
+    }
+    use tauri_plugin_autostart::ManagerExt;
     let manager = app.autolaunch();
     if enabled {
         manager.enable().map_err(|e| e.to_string())
@@ -6661,6 +6712,7 @@ pub fn run() {
                     .get("autostart")
                     .and_then(Value::as_bool)
                     .unwrap_or(false)
+                    && autostart_manages_os_entry()
                 {
                     use tauri_plugin_autostart::ManagerExt;
                     let _ = app.autolaunch().enable();
@@ -6774,15 +6826,22 @@ pub fn run() {
                             });
                         }
                         "autostart" => {
-                            use tauri_plugin_autostart::ManagerExt;
                             let enable = !autostart_now_enabled(app);
                             // Same pair as the set_autostart command: persist
-                            // the choice, then flip the registry entry.
+                            // the choice, then flip the registry entry — the
+                            // second half only outside dev builds.
                             let _ = set_config_inner(json!({ "autostart": enable }));
-                            let manager = app.autolaunch();
-                            let result = if enable { manager.enable() } else { manager.disable() };
-                            if let Err(e) = result {
-                                eprintln!("[pane] tray autostart: {e}");
+                            if autostart_manages_os_entry() {
+                                use tauri_plugin_autostart::ManagerExt;
+                                let manager = app.autolaunch();
+                                let result = if enable {
+                                    manager.enable()
+                                } else {
+                                    manager.disable()
+                                };
+                                if let Err(e) = result {
+                                    eprintln!("[pane] tray autostart: {e}");
+                                }
                             }
                             rebuild_tray_menu(app);
                         }
@@ -6827,7 +6886,15 @@ pub fn run() {
                 hide_window_border(&wv);
             }
 
+            httpapi::set_app_identifier(app.config().identifier.clone());
             httpapi::start(app.handle().clone());
+
+            // Installed builds only: a dev exe must not touch the user's
+            // desktop or Start Menu.
+            #[cfg(windows)]
+            if !cfg!(debug_assertions) {
+                rename_install_shortcuts();
+            }
 
             let saved_shortcut = load_config()
                 .get("shortcut")
@@ -6841,16 +6908,16 @@ pub fn run() {
             // Start with Windows is on by default (like the Mac app's
             // launch-at-login) and re-asserted each launch so the registry
             // entry follows the exe if it moves — e.g. loose exe → installed.
-            // Only an explicit "off" in Settings is respected. Skipped in dev
-            // builds so the debug exe never registers itself.
-            if !cfg!(debug_assertions) {
-                let wants_autostart = load_config()
-                    .get("autostart")
-                    .and_then(Value::as_bool)
-                    .unwrap_or(true);
-                if wants_autostart {
-                    use tauri_plugin_autostart::ManagerExt;
-                    let _ = app.autolaunch().enable();
+            // An explicit "off" in Settings removes it for the same reason.
+            // Debug builds never reach the registry at all: their exe is not
+            // a standalone app.
+            if autostart_manages_os_entry() {
+                use tauri_plugin_autostart::ManagerExt;
+                let manager = app.autolaunch();
+                if autostart_preference() {
+                    let _ = manager.enable();
+                } else {
+                    let _ = manager.disable();
                 }
             }
 
