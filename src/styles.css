@@ -7643,6 +7643,7 @@ body.no-glass .cust-dock {
 --------------------------------------------------------------------------- */
 
 #confirm-overlay,
+#import-overlay,
 #update-overlay {
   position: fixed;
   inset: 0;
@@ -7658,6 +7659,7 @@ body.no-glass .cust-dock {
 
 /* Same liquid-glass material as the What's-new dialog. */
 #confirm-box,
+.import-box,
 #update-box {
   width: min(88%, 300px);
   background:
@@ -7679,6 +7681,7 @@ body.no-glass .cust-dock {
 }
 
 #confirm-box h3,
+.import-box h3,
 #update-box h3 {
   font-size: 14px;
   font-weight: 650;
@@ -7686,6 +7689,7 @@ body.no-glass .cust-dock {
 }
 
 #confirm-box p,
+.import-box p,
 #update-box p {
   font-size: 12.5px;
   line-height: 1.5;
@@ -7713,14 +7717,16 @@ body.no-glass .cust-dock {
 
 /* Confirm actions follow the same button vocabulary as the rest of the
    panel: muted cancel, tinted-red destructive action, 30px controls. */
-#confirm-actions {
+#confirm-actions,
+.import-actions {
   display: flex;
   justify-content: flex-end;
   gap: 8px;
   margin-top: 16px;
 }
 
-#confirm-actions .mini-btn {
+#confirm-actions .mini-btn,
+.import-actions .mini-btn {
   height: 30px;
   padding: 0 14px;
   border-radius: 8px;
@@ -8165,7 +8171,9 @@ body.no-glass .cust-dock {
 
 @media (prefers-reduced-motion: reduce) {
   #confirm-overlay,
+  #import-overlay,
   #confirm-box,
+  .import-box,
   #update-overlay,
   #update-box {
     animation: none;
@@ -8564,6 +8572,7 @@ body.no-glass .cust-dock {
 /* Glass effects off: flat opaque surfaces, like every other glass layer. */
 body.no-glass #whatsnew-box,
 body.no-glass #confirm-box,
+body.no-glass .import-box,
 body.no-glass #update-box,
 body.no-glass #vault-setup-box,
 body.no-glass #vault-reset-box,
@@ -12061,6 +12070,7 @@ body.colorblind .trend-bar{stroke:currentColor;stroke-width:1;stroke-dasharray:2
 .onboarding-source-state.is-ready { color:var(--chart-green, #15803d); }
 .onboarding-source-state.is-installed { color:var(--chart-amber, #a16207); }
 .onboarding-source-state.is-muted { color:var(--muted-foreground); }
+.onboarding-source-state.is-error { color:var(--chart-red, #b91c1c); }
 .onboarding-source-evidence {
   color:var(--muted-foreground);
   font-size:11px;

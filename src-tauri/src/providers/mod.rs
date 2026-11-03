@@ -820,6 +820,47 @@ pub fn provider_disabled(id: &str) -> bool {
         .is_some_and(|a| a.iter().any(|v| v.as_str() == Some(id)))
 }
 
+/// Saves (or clears, when `key` is empty) a provider API key. Shared by the
+/// Settings command and the onboarding importer, so both follow one storage
+/// rule: OS credential vault first, plaintext file only as a fallback.
+pub fn save_api_key(provider: &str, key: &str, base_url: Option<&str>) -> Result<(), String> {
+    if !crate::provider_catalog::supports_api_key(provider) {
+        return Err(format!("unknown provider: {provider}"));
+    }
+    let dir = config_dir();
+    std::fs::create_dir_all(&dir).map_err(|e| format!("create config dir: {e}"))?;
+    let path = dir.join(format!("{provider}.json"));
+    let key = key.trim();
+    if key.is_empty() {
+        let _ = std::fs::remove_file(&path);
+        crate::secretstore::remove(&crate::secretstore::provider_key(provider));
+        return Ok(());
+    }
+    let base_url = base_url.map(str::trim).filter(|u| !u.is_empty());
+    if let Some(url) = base_url {
+        if !crate::provider_catalog::takes_base_url(provider) {
+            return Err("this provider does not take a base URL".into());
+        }
+        let name = crate::provider_catalog::provider_definition(provider)
+            .map(|definition| definition.display_name)
+            .unwrap_or("relay");
+        relaybalance::validate_base_url_for(name, url)?;
+    }
+    let vaulted = crate::secretstore::put(&crate::secretstore::provider_key(provider), key).is_ok();
+    let mut doc = serde_json::json!({});
+    if !vaulted {
+        doc["apiKey"] = serde_json::Value::from(key);
+    }
+    if let Some(url) = base_url {
+        doc["baseUrl"] = serde_json::Value::from(url);
+    }
+    if doc.as_object().is_some_and(|o| o.is_empty()) {
+        let _ = std::fs::remove_file(&path);
+        return Ok(());
+    }
+    std::fs::write(&path, doc.to_string()).map_err(|e| format!("write key file: {e}"))
+}
+
 /// API key lookup: the OS credential vault first (lazily migrating the
 /// legacy plaintext file on first sight), then environment variables.
 pub fn stored_api_key(provider: &str, env_vars: &[&str]) -> Option<String> {
@@ -836,6 +877,31 @@ pub fn stored_api_key(provider: &str, env_vars: &[&str]) -> Option<String> {
         }
     }
     None
+}
+
+/// Read-only sibling of `stored_key_file`: never migrates the plaintext
+/// fallback into the vault, so a read-only scan cannot rewrite user state.
+pub fn stored_key_readonly(provider: &str) -> Option<String> {
+    if let crate::secretstore::Secret::Found(key) =
+        crate::secretstore::get(&crate::secretstore::provider_key(provider))
+    {
+        let key = key.trim().to_string();
+        if !key.is_empty() {
+            return Some(key);
+        }
+    }
+    let path = config_dir().join(format!("{provider}.json"));
+    std::fs::read_to_string(path)
+        .ok()
+        .and_then(|raw| {
+            serde_json::from_str::<serde_json::Value>(raw.trim_start_matches('\u{feff}')).ok()
+        })
+        .and_then(|doc| {
+            doc.get("apiKey")
+                .and_then(serde_json::Value::as_str)
+                .map(|key| key.trim().to_string())
+        })
+        .filter(|key| !key.is_empty())
 }
 
 /// Pure "is a key saved" probe (no env fallback): the OS credential vault

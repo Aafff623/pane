@@ -23,6 +23,7 @@ mod cursor_oauth;
 mod fonts;
 mod keyvault;
 mod keyvault_v3;
+mod import_sources;
 mod legacy_autostart;
 mod search_keys;
 mod skin_packs;
@@ -4170,43 +4171,7 @@ fn validate_relay_base_url(provider: &str, url: &str) -> Result<(), String> {
 /// (relaybalance) pass `base_url` too, stored alongside as `baseUrl`.
 #[tauri::command]
 fn set_api_key(provider: String, key: String, base_url: Option<String>) -> Result<(), String> {
-    if !provider_catalog::supports_api_key(&provider) {
-        return Err(format!("unknown provider: {provider}"));
-    }
-    let dir = providers::config_dir();
-    std::fs::create_dir_all(&dir).map_err(|e| format!("create config dir: {e}"))?;
-    let path = dir.join(format!("{provider}.json"));
-    let key = key.trim();
-    if key.is_empty() {
-        // Deleting a key deletes both the plaintext fallback and the vault copy.
-        let _ = std::fs::remove_file(&path);
-        secretstore::remove(&secretstore::provider_key(&provider));
-        return Ok(());
-    }
-    // Validate the optional relay URL before any write.
-    let base_url = base_url.as_deref().map(str::trim).filter(|u| !u.is_empty());
-    if let Some(url) = base_url {
-        if !provider_catalog::takes_base_url(&provider) {
-            return Err("this provider does not take a base URL".into());
-        }
-        validate_relay_base_url(&provider, url)?;
-    }
-    // Keys live in the OS credential vault; the file carries only non-secret
-    // fields. A failed vault write falls back to the plaintext file — the
-    // exact behavior from before the migration, so nothing can be lost.
-    let vaulted = secretstore::put(&secretstore::provider_key(&provider), key).is_ok();
-    let mut doc = serde_json::json!({});
-    if !vaulted {
-        doc["apiKey"] = serde_json::Value::from(key);
-    }
-    if let Some(url) = base_url {
-        doc["baseUrl"] = serde_json::Value::from(url);
-    }
-    if doc.as_object().is_some_and(|o| o.is_empty()) {
-        let _ = std::fs::remove_file(&path);
-        return Ok(());
-    }
-    std::fs::write(&path, doc.to_string()).map_err(|e| format!("write key file: {e}"))
+    providers::save_api_key(&provider, &key, base_url.as_deref())
 }
 
 /// The reveal gate's "set a password first" spelling — the frontend matches
@@ -4280,6 +4245,21 @@ fn get_base_url(provider: String) -> Option<String> {
 /// One family's live snapshot for a bare key — the shared probe behind
 /// the Settings test-before-save button and the generic extra-account
 /// fetch (which re-brands the result with the account's card id/name).
+#[tauri::command]
+fn import_scan() -> import_sources::ImportScan {
+    import_sources::scan()
+}
+
+#[tauri::command]
+async fn import_probe(ids: Vec<String>) -> Vec<import_sources::ImportProbeResult> {
+    import_sources::probe(&ids).await
+}
+
+#[tauri::command]
+fn import_apply(ids: Vec<String>) -> Vec<import_sources::ImportOutcome> {
+    import_sources::import(&ids)
+}
+
 /// Outcome of a live test_api_key probe, shown in the Customize ⚙ panel:
 /// the metric count on success, the backend's error verbatim on failure.
 #[derive(serde::Serialize)]
@@ -6588,6 +6568,9 @@ pub fn run() {
             onenewapi_delete_key,
             get_base_url,
             test_api_key,
+            import_scan,
+            import_probe,
+            import_apply,
             account_add,
             account_update,
             account_remove,

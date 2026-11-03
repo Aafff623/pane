@@ -108,6 +108,56 @@ pub(crate) fn registrations() -> impl Iterator<Item = &'static ProviderDefinitio
     })
 }
 
+/// Families `key_snapshot_for` can probe with a pasted key. Kept next to the
+/// dispatch so the onboarding importer and the probe never drift apart.
+pub(crate) fn supports_key_probe(provider: &str) -> bool {
+    matches!(
+        provider,
+        "bocha"
+            | "tavily"
+            | "firecrawl"
+            | "brave"
+            | "openrouter"
+            | "zai"
+            | "commandcode"
+            | "clawsgo"
+            | "minimax"
+            | "deepseek"
+            | "moonshot"
+            | "elevenlabs"
+            | "codebuff"
+            | "kilo"
+            | "aihubmix"
+            | "qwen"
+            | "kimi"
+            | "opencode"
+            | "stepfun"
+            | "stepfun-plan"
+            | "clinepass"
+            | "sensenova"
+            | "apigoto"
+            | "amp"
+            | "chutes"
+            | "deepgram"
+            | "openai-api"
+            | "poe"
+            | "venice"
+            | "warp"
+            | "mimo"
+            | "factory"
+            | "groq"
+            | "huggingface"
+            | "longcat"
+            | "sub2api"
+            | "mistral"
+            | "perplexity"
+            | "volcengine"
+            | "siliconflow"
+            | "novita"
+            | "relaybalance"
+    ) || providers::apikey::supports(provider)
+}
+
 pub(crate) async fn key_snapshot_for(
     provider: &str,
     key: &str,

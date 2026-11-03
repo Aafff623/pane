@@ -9970,6 +9970,274 @@ function maybeStartTour(): void {
 // two config booleans (finished vs dismissed), so a replay never changes the
 // auto-present decision. Detection failures are conservative: the guide only
 // auto-opens from a successful config load on a fresh install.
+
+// ---------------------------------------------------------------------------
+// Import from another tool — read-only scan of cc-switch profiles
+// ---------------------------------------------------------------------------
+
+type ImportCandidate = {
+  id: string;
+  source: string;
+  sourceLabel: string;
+  section: string;
+  name: string;
+  family: string | null;
+  familyLabel: string | null;
+  maskedKey: string;
+  baseHost: string | null;
+  state: "matched" | "duplicate" | "unsupported";
+};
+
+type ImportAppInfo = {
+  id: string;
+  label: string;
+  configPath: string;
+  found: boolean;
+  candidateCount: number;
+  message: string | null;
+};
+
+type ImportScanReport = { apps: ImportAppInfo[]; candidates: ImportCandidate[] };
+type ImportProbe = { id: string; status: "ok" | "needs_setup" | "rejected" | "error" | "unverified"; message: string };
+type ImportOutcome = { id: string; status: "imported" | "exists" | "failed" | "skipped"; message: string };
+
+let importScan: ImportScanReport | null = null;
+let importScanLoading = false;
+let importScanError: string | null = null;
+let importProbes = new Map<string, ImportProbe>();
+let importSelection = new Set<string>();
+let importSelectionTouched = false;
+let importInFlight = false;
+
+async function loadImportScan(force = false): Promise<void> {
+  if (importScanLoading) return;
+  if (importScan && !force) return;
+  importScanLoading = true;
+  importScanError = null;
+  if (force) {
+    importProbes = new Map();
+    importSelection = new Set();
+    importSelectionTouched = false;
+  }
+  void renderImportSurfaces();
+  try {
+    importScan = await invoke<ImportScanReport>("import_scan");
+  } catch (error) {
+    importScan = null;
+    importScanError = String(error);
+  } finally {
+    importScanLoading = false;
+  }
+  void renderImportSurfaces();
+  void probeImportCandidates();
+}
+
+let importProbeRunning = new Set<string>();
+
+function autoSelectReachable(): void {
+  if (importSelectionTouched) return;
+  importSelection = new Set(
+    (importScan?.candidates ?? [])
+      .filter((candidate) => importProbes.get(candidate.id)?.status === "ok")
+      .map((candidate) => candidate.id),
+  );
+}
+
+/// Live probe per matched row, three at a time so a long list cannot stall
+/// the wizard behind one slow endpoint. Failures are not fatal: the row
+/// stays "not checked" and the user can still choose to import it.
+async function probeImportCandidates(): Promise<void> {
+  const queue = (importScan?.candidates ?? [])
+    .filter(
+      (candidate) =>
+        candidate.state === "matched" &&
+        !importProbes.has(candidate.id) &&
+        !importProbeRunning.has(candidate.id),
+    )
+    .slice(0, 12)
+    .map((candidate) => candidate.id);
+  if (!queue.length) return;
+  for (const id of queue) importProbeRunning.add(id);
+  const worker = async () => {
+    while (queue.length) {
+      const id = queue.shift();
+      if (!id) return;
+      try {
+        const [result] = await invoke<ImportProbe[]>("import_probe", { ids: [id] });
+        if (result) importProbes.set(result.id, result);
+      } catch {
+        // Leave the row unchecked; importing remains the user's call.
+      } finally {
+        importProbeRunning.delete(id);
+      }
+      autoSelectReachable();
+      const candidate = importScan?.candidates.find((entry) => entry.id === id);
+      if (candidate) updateImportRow(candidate);
+    }
+  };
+  await Promise.all([worker(), worker(), worker()]);
+}
+
+function importStatusOf(candidate: ImportCandidate): { label: string; tone: string } {
+  if (candidate.state === "duplicate") return { label: t("import.state.duplicate"), tone: "is-muted" };
+  if (candidate.state === "unsupported") return { label: t("import.state.unsupported"), tone: "is-muted" };
+  const probe = importProbes.get(candidate.id);
+  switch (probe?.status) {
+    case "ok":
+      return { label: t("import.state.ok"), tone: "is-ready" };
+    case "needs_setup":
+      return { label: t("import.state.needsSetup"), tone: "is-installed" };
+    case "rejected":
+      return { label: t("import.state.rejected"), tone: "is-error" };
+    case "error":
+      return { label: t("import.state.error"), tone: "is-error" };
+    case "unverified":
+      return { label: t("import.state.unverified"), tone: "is-muted" };
+    default:
+      return importProbeRunning.has(candidate.id)
+        ? { label: t("import.state.scanning"), tone: "is-muted" }
+        : { label: t("import.state.unverified"), tone: "is-muted" };
+  }
+}
+
+function importRowHtml(candidate: ImportCandidate): string {
+  const probe = importProbes.get(candidate.id);
+  const status = importStatusOf(candidate);
+  const selectable = candidate.state === "matched" && probe?.status !== "rejected";
+  const detail = [
+    candidate.familyLabel ? t("import.familyTarget", { family: candidate.familyLabel }) : candidate.section,
+    candidate.maskedKey,
+    candidate.baseHost ?? "",
+  ]
+    .filter(Boolean)
+    .join(" · ");
+  return `<label class="onboarding-source import-row" title="${escapeHtml(candidate.sourceLabel)}">
+    <input type="checkbox" data-import-pick="${escapeHtml(candidate.id)}"${importSelection.has(candidate.id) ? " checked" : ""}${selectable ? "" : " disabled"} />
+    <span class="onboarding-source-main">
+      <strong>${escapeHtml(candidate.name)}</strong>
+      <span class="onboarding-source-state ${status.tone}">${escapeHtml(status.label)}</span>
+      <span class="onboarding-source-evidence">${escapeHtml(detail)}</span>
+    </span>
+  </label>`;
+}
+
+function importRowsHtml(): string {
+  if (importScanLoading && !importScan) {
+    return `<p class="onboarding-note">${escapeHtml(t("import.scanning"))}</p>`;
+  }
+  if (importScanError && !importScan) {
+    return `<div class="onboarding-detect-error"><p class="onboarding-note">${escapeHtml(t("import.scanFailed"))}</p><button type="button" class="mini-btn" data-import-rescan>${escapeHtml(t("import.rescan"))}</button></div>`;
+  }
+  const candidates = importScan?.candidates ?? [];
+  const foot = `<div class="onboarding-detect-foot"><button type="button" class="mini-btn" data-import-rescan>${escapeHtml(t("import.rescan"))}</button><span class="onboarding-note">${escapeHtml(t("import.note"))}</span></div>`;
+  if (!candidates.length) {
+    const app = importScan?.apps.find((entry) => entry.id === "cc-switch");
+    const why = app?.message ? ` (${app.message})` : "";
+    return `<p class="onboarding-note">${escapeHtml(t("import.none"))}${escapeHtml(why)}</p>${foot}`;
+  }
+  const matched = candidates.filter((candidate) => candidate.state === "matched").length;
+  return `<p class="onboarding-found">${escapeHtml(t("import.found", { n: matched }))}</p>
+    <div class="onboarding-sources">${candidates.map(importRowHtml).join("")}</div>${foot}`;
+}
+
+function updateImportRow(candidate: ImportCandidate): void {
+  const input = document.querySelector<HTMLInputElement>(
+    `[data-import-pick="${CSS.escape(candidate.id)}"]`,
+  );
+  if (!input) return;
+  const probe = importProbes.get(candidate.id);
+  const status = importStatusOf(candidate);
+  input.checked = importSelection.has(candidate.id);
+  input.disabled = !(candidate.state === "matched" && probe?.status !== "rejected");
+  const chip = input.closest("label")?.querySelector<HTMLElement>(".onboarding-source-state");
+  if (chip) {
+    chip.textContent = status.label;
+    chip.className = `onboarding-source-state ${status.tone}`;
+  }
+}
+
+function renderImportSurfaces(): void {
+  for (const selector of ["[data-import-list]", "[data-import-dialog-list]"]) {
+    const list = document.querySelector<HTMLElement>(selector);
+    if (list) list.innerHTML = importRowsHtml();
+  }
+}
+
+async function applyImportSelection(): Promise<void> {
+  if (importInFlight) return;
+  const ids = [...importSelection];
+  if (!ids.length) return;
+  importInFlight = true;
+  try {
+    const results = await invoke<ImportOutcome[]>("import_apply", { ids });
+    const imported = results.filter((result) => result.status === "imported").length;
+    const exists = results.filter((result) => result.status === "exists").length;
+    const failed = results.filter((result) => result.status === "failed").length;
+    for (const result of results) {
+      if (result.status !== "imported" && result.status !== "exists") continue;
+      const candidate = importScan?.candidates.find((entry) => entry.id === result.id);
+      if (candidate) candidate.state = "duplicate";
+    }
+    settingsToast(t("import.applied", { imported, exists, failed }), failed > 0 && imported === 0);
+    if (imported) void forceUsageRefreshAttempt(false).then(requestTraySync);
+  } catch (error) {
+    settingsToast(String(error), true);
+  } finally {
+    importInFlight = false;
+  }
+  importSelection = new Set();
+  void renderImportSurfaces();
+}
+
+function openImportDialog(): void {
+  if (document.querySelector("#import-overlay")) return;
+  const overlay = document.createElement("div");
+  overlay.id = "import-overlay";
+  overlay.innerHTML = `<div class="picker-box import-box" role="dialog" aria-modal="true" aria-labelledby="import-dialog-title">
+    <h3 id="import-dialog-title">${escapeHtml(t("import.title"))}</h3>
+    <p>${escapeHtml(t("import.lead"))}</p>
+    <div class="picker-list" data-import-dialog-list>${importRowsHtml()}</div>
+    <div class="import-actions"><button id="import-cancel" type="button" class="mini-btn">${escapeHtml(t("dialog.cancel"))}</button><button id="import-ok" type="button" class="mini-btn">${escapeHtml(t("import.apply"))}</button></div>
+  </div>`;
+  overlay.addEventListener("change", (event) => {
+    const target = event.target as HTMLInputElement;
+    if (!target.matches("[data-import-pick]")) return;
+    importSelectionTouched = true;
+    if (target.checked) importSelection.add(target.dataset.importPick!);
+    else importSelection.delete(target.dataset.importPick!);
+  });
+  const close = () => {
+    document.removeEventListener("keydown", onKey, true);
+    overlay.remove();
+  };
+  const onKey = (event: KeyboardEvent) => {
+    if (event.key !== "Escape" || event.isComposing) return;
+    event.preventDefault();
+    event.stopPropagation();
+    close();
+  };
+  overlay.addEventListener("click", (event) => {
+    const target = event.target as HTMLElement;
+    if (target === overlay || target.closest("#import-cancel")) {
+      close();
+      return;
+    }
+    if (target.closest("[data-import-rescan]")) {
+      void loadImportScan(true);
+      return;
+    }
+    if (target.closest("#import-ok")) {
+      void applyImportSelection().then(() => close());
+    }
+  });
+  document.addEventListener("keydown", onKey, true);
+  document.body.appendChild(overlay);
+  overlay.querySelector<HTMLButtonElement>("#import-ok")?.focus();
+  // Always rescan when the dialog opens: the source file may have changed
+  // since onboarding, and a fresh scan is what fills the import cache.
+  void loadImportScan(true);
+}
+
 let onboardingOverlay: HTMLElement | null = null;
 let onboardingStep = 0;
 let onboardingReplay = false;
@@ -9978,7 +10246,7 @@ let onboardingSelection = new Set<string>();
 let onboardingSelectionTouched = false;
 let onboardingStartStep = 0;
 let onboardingApplyPicks = false;
-const ONBOARDING_STEPS = 4;
+const ONBOARDING_STEPS = 5;
 const onboardingActive = () => onboardingOverlay !== null;
 
 function onboardingShortcutRows(): string {
@@ -10036,6 +10304,7 @@ function onboardingSourceEvidence(probe: SourceProbe): string {
   if (probe.installEvidence.length) return probe.installEvidence.slice(0, 2).join(" · ");
   if (probe.envVars.length) return `env: ${probe.envVars.slice(0, 2).join(" / ")}`;
   if (probe.localHint) return probe.localHint;
+  if (probe.credentialSource === "keyvault") return t("onboarding.sourceStored");
   if (probe.credentialSource !== "none") return probe.credentialSource;
   return "";
 }
@@ -10127,6 +10396,12 @@ function onboardingStepBody(step: number): string {
       ${onboardingSourceRowsHtml()}`;
   }
   if (step === 2) {
+    return `<p class="onboarding-kicker">${escapeHtml(t("onboarding.kickerImport"))}</p>
+      <h1 id="onboarding-title">${escapeHtml(t("onboarding.titleImport"))}</h1>
+      <p class="onboarding-lead">${escapeHtml(t("onboarding.leadImport"))}</p>
+      <div data-import-list>${importRowsHtml()}</div>`;
+  }
+  if (step === 3) {
     return `<p class="onboarding-kicker">${escapeHtml(t("onboarding.kickerConnect"))}</p>
       <h1 id="onboarding-title">${escapeHtml(t("onboarding.titleConnect"))}</h1>
       <p class="onboarding-lead">${escapeHtml(t("onboarding.leadConnect"))}</p>
@@ -10201,7 +10476,11 @@ function showOnboardingStep(index: number): void {
     seedOnboardingPicks();
     if (!sourceProbeReport && !sourceProbeLoading && !sourceProbeError) void refreshSourceProbes();
   }
-  if (onboardingStep === 2) seedOnboardingPicks();
+  if (onboardingStep === 2) {
+    seedOnboardingPicks();
+    if (!importScan && !importScanLoading && !importScanError) void loadImportScan();
+  }
+  if (onboardingStep === 3) seedOnboardingPicks();
   const body = onboardingOverlay.querySelector<HTMLElement>(".onboarding-body");
   if (body) body.innerHTML = onboardingStepBody(onboardingStep);
   onboardingOverlay.querySelectorAll<HTMLElement>("[data-onboarding-dot]").forEach((dot, dotIndex) => {
@@ -10297,6 +10576,12 @@ function startOnboarding(replay = false, startStep = 0, applyPicks = !replay): v
   onboardingOverlay = overlay;
   overlay.addEventListener("change", (event) => {
     const target = event.target as HTMLInputElement;
+    if (target.matches("[data-import-pick]")) {
+      importSelectionTouched = true;
+      if (target.checked) importSelection.add(target.dataset.importPick!);
+      else importSelection.delete(target.dataset.importPick!);
+      return;
+    }
     if (!target.matches("[data-onboarding-pick]")) return;
     onboardingSelectionTouched = true;
     if (target.checked) onboardingSelection.add(target.dataset.onboardingPick!);
@@ -10312,6 +10597,10 @@ function startOnboarding(replay = false, startStep = 0, applyPicks = !replay): v
       void refreshSourceProbes(true);
       return;
     }
+    if (target.closest("[data-import-rescan]")) {
+      void loadImportScan(true);
+      return;
+    }
     const setup = target.closest<HTMLElement>("[data-onboarding-setup]")?.dataset.onboardingSetup;
     if (setup) {
       finishOnboarding(true);
@@ -10319,8 +10608,7 @@ function startOnboarding(replay = false, startStep = 0, applyPicks = !replay): v
       return;
     }
     if (target.closest("[data-onboarding-next]")) {
-      if (onboardingStep + 1 < ONBOARDING_STEPS) showOnboardingStep(onboardingStep + 1);
-      else finishOnboarding(false);
+      void advanceOnboarding();
       return;
     }
     if (target.closest("[data-onboarding-back]")) showOnboardingStep(onboardingStep - 1);
@@ -10328,6 +10616,14 @@ function startOnboarding(replay = false, startStep = 0, applyPicks = !replay): v
   document.addEventListener("keydown", onOnboardingKey, true);
   document.body.appendChild(overlay);
   showOnboardingStep(onboardingStartStep);
+}
+
+async function advanceOnboarding(): Promise<void> {
+  if (!onboardingActive()) return;
+  if (onboardingStep === 2) await applyImportSelection();
+  if (!onboardingActive()) return;
+  if (onboardingStep + 1 < ONBOARDING_STEPS) showOnboardingStep(onboardingStep + 1);
+  else finishOnboarding(false);
 }
 
 function maybeStartOnboarding(): boolean {
@@ -21265,9 +21561,14 @@ function buildPanelShell(): void {
     // Same flow as first run, but defaults follow the current choice.
     void runProviderPicker(false);
   });
+  const importFromTools = document.createElement("button");
+  importFromTools.type = "button";
+  importFromTools.className = "mini-btn";
+  importFromTools.textContent = t("settings.importFrom");
+  importFromTools.addEventListener("click", () => openImportDialog());
   const sourceActions = document.createElement("div");
   sourceActions.className = "set-row__inline-fields";
-  sourceActions.append(rescanSources, redetect);
+  sourceActions.append(rescanSources, redetect, importFromTools);
   generalCard.append(panelRowDesc("settings.sourceScan", "settings.desc.sourceScan", sourceActions));
   const formPill = pillControl<"floating" | "panel">(
     [
