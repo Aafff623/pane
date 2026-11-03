@@ -37,7 +37,7 @@ ClinePass 卡片只有三个配额窗口（5h / 周 / 月）和它们的重置�
 ## 边界
 
 - 只覆盖 ClinePass；其它 provider 的到期字段按需另开票。
-- 默认（损坏的 404 key）账号拿不到配额，整张卡仍是错误态，不会显示订阅行。
+- 默认账号实测：`/api-keys` 200（key 有效）、`/plan` 与 `/usage-limits` 均 404 —— 该 Cline 账号没有 ClinePass 订阅。卡片改为 `needs_setup` 并提示「This Cline account has no ClinePass subscription」，不再显示 404 错误与旧缓存。
 
 ## 验证
 

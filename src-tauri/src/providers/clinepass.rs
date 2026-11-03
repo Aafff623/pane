@@ -71,6 +71,18 @@ async fn fetch_with_key(key: &str) -> Result<Snapshot, String> {
     if matches!(resp.status().as_u16(), 401 | 403) {
         return Err("ClinePass API key was rejected — check it in Settings".into());
     }
+    // 404 on the usage endpoint means the account has no ClinePass plan at
+    // all (its /api-keys still answers 200), not a broken credential: say so
+    // instead of painting a stale error card.
+    if resp.status().as_u16() == 404 {
+        return Ok(Snapshot::needs_setup(
+            ID,
+            NAME,
+            None,
+            Vec::new(),
+            "This Cline account has no ClinePass subscription",
+        ));
+    }
     if !resp.status().is_success() {
         return Err(format!(
             "ClinePass endpoint: HTTP {}{}",
