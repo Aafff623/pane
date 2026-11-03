@@ -1363,6 +1363,7 @@ const en: Dict = {
   "spend.noDataWindow": "The quota window had not started yet.",
   "spend.noModelData": "No model data for this period.",
 
+  "metric.subscription": "Subscription",
   "metric.session": "Session",
   "metric.weekly": "Weekly",
   "metric.monthly": "Monthly",
@@ -3390,6 +3391,7 @@ const zh: Dict = {
   "spend.noDataWindow": "额度窗口还没开始。",
   "spend.noModelData": "这段时间没有按模型拆分的数据。",
 
+  "metric.subscription": "订阅",
   "metric.session": "会话",
   "metric.weekly": "每周",
   "metric.monthly": "每月",
@@ -5423,6 +5425,7 @@ const ru: Dict = {
   "spend.noDataWindow": "Окно квоты ещё не началось.",
   "spend.noModelData": "За этот период нет разбивки по моделям.",
 
+  "metric.subscription": "Подписка",
   "metric.session": "Сессия",
   "metric.weekly": "За неделю",
   "metric.monthly": "За месяц",
@@ -6114,6 +6117,7 @@ const METRIC_KEYS: Record<string, string> = {
   Session: "metric.session",
   Weekly: "metric.weekly",
   Monthly: "metric.monthly",
+  Subscription: "metric.subscription",
   Daily: "metric.daily",
   Usage: "metric.usage",
   Credits: "metric.credits",

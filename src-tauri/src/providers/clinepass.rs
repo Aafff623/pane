@@ -3,6 +3,11 @@
 //! (created at app.cline.bot → Account → API Keys); keys carry no expiry,
 //! so this is a paste-key provider with no session machinery at all.
 //!
+//! The subscription itself DOES have an expiry: `/users/me/plan` answers
+//! `currentPeriodEnd` plus `cancelAt`/`canceledAt` (verified 2026-11-03 with
+//! a live key). A cancelled plan keeps running until `cancelAt`, so the card
+//! labels that date as "ends" instead of "renews".
+//!
 //! Endpoint facts verified 2026-10-03 (see
 //! temp/handoff/20261003-145500-clinepass-provider-impl.md): rolling
 //! windows anchored at first use (weekly = anchor+7d, monthly = +30d —
@@ -17,6 +22,7 @@ const ID: &str = "clinepass";
 const NAME: &str = "ClinePass";
 const MAX_BODY_BYTES: usize = 64 * 1024;
 const LIMITS_URL: &str = "https://api.cline.bot/api/v1/users/me/plan/usage-limits";
+const PLAN_URL: &str = "https://api.cline.bot/api/v1/users/me/plan";
 
 pub fn local_credential_hint() -> Option<String> {
     stored_api_key(ID, &["CLINE_API_KEY"]).map(|_| "Pane ClinePass API key".into())
@@ -73,7 +79,125 @@ async fn fetch_with_key(key: &str) -> Result<Snapshot, String> {
         ));
     }
     let doc = json_body(resp, MAX_BODY_BYTES, "ClinePass").await?;
-    parse_snapshot(&doc)
+    let mut snap = parse_snapshot(&doc)?;
+    // The plan lookup is informational: a failure must never hide the quotas
+    // that already answered.
+    if let Some(plan) = fetch_plan(key).await {
+        if let Some(name) = plan.display_name.clone() {
+            snap.plan = Some(name);
+        }
+        if let Some(row) = plan_metric(&plan) {
+            snap.metrics.insert(0, row);
+        }
+    }
+    Ok(snap)
+}
+
+#[derive(Clone, Debug, PartialEq)]
+struct PlanInfo {
+    display_name: Option<String>,
+    period_end_ms: Option<i64>,
+    cancel_at_ms: Option<i64>,
+    cancelled: bool,
+    unpaid: bool,
+}
+
+async fn fetch_plan(key: &str) -> Option<PlanInfo> {
+    let resp = send_with_direct_fallback(|client| client.get(PLAN_URL).bearer_auth(key.trim()))
+        .await
+        .ok()?;
+    match resp.status().as_u16() {
+        200 => {}
+        402 => {
+            return Some(PlanInfo {
+                display_name: None,
+                period_end_ms: None,
+                cancel_at_ms: None,
+                cancelled: false,
+                unpaid: true,
+            })
+        }
+        // 404 = no current plan (Cline's own contract); anything else is a
+        // transient read failure and simply omits the row.
+        _ => return None,
+    }
+    let doc = json_body(resp, MAX_BODY_BYTES, "ClinePass plan").await.ok()?;
+    parse_plan(&doc)
+}
+
+fn parse_plan(doc: &Value) -> Option<PlanInfo> {
+    let data = doc.get("data")?;
+    let plan = data.get("plan").filter(|value| !value.is_null())?;
+    let display_name = plan
+        .get("displayName")
+        .and_then(Value::as_str)
+        .or_else(|| plan.get("name").and_then(Value::as_str))
+        .map(str::trim)
+        .filter(|name| !name.is_empty())
+        .map(str::to_string);
+    let interval = plan
+        .get("interval")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
+    let display_name = match (display_name, interval) {
+        (Some(name), Some(interval)) if !name.to_ascii_lowercase().contains(&interval.to_ascii_lowercase()) => {
+            Some(format!("{name} ({interval})"))
+        }
+        (name, _) => name,
+    };
+    Some(PlanInfo {
+        display_name,
+        period_end_ms: rfc3339_ms(data, "currentPeriodEnd"),
+        cancel_at_ms: rfc3339_ms(data, "cancelAt"),
+        cancelled: data
+            .get("canceledAt")
+            .and_then(Value::as_str)
+            .is_some_and(|value| !value.trim().is_empty()),
+        unpaid: false,
+    })
+}
+
+fn rfc3339_ms(doc: &Value, key: &str) -> Option<i64> {
+    doc.get(key)
+        .and_then(Value::as_str)
+        .and_then(|value| chrono::DateTime::parse_from_rfc3339(value).ok())
+        .map(|value| value.timestamp_millis())
+}
+
+fn plan_metric(plan: &PlanInfo) -> Option<Metric> {
+    if plan.unpaid {
+        return Some(Metric::text(
+            "Subscription",
+            "ClinePass subscription is unpaid".into(),
+        ));
+    }
+    let name = plan
+        .display_name
+        .clone()
+        .unwrap_or_else(|| "ClinePass".into());
+    let now = chrono::Utc::now().timestamp_millis();
+    let end = plan.cancel_at_ms.or(plan.period_end_ms);
+    let value = match end {
+        Some(ms) if plan.cancelled && ms > now => {
+            format!("{name} · ends {} (cancelled)", local_datetime(ms)?)
+        }
+        Some(ms) if plan.cancelled => format!("{name} · expired {}", local_datetime(ms)?),
+        Some(ms) if ms > now => format!("{name} · renews {}", local_datetime(ms)?),
+        Some(ms) => format!("{name} · expired {}", local_datetime(ms)?),
+        None if plan.cancelled => format!("{name} · cancelled"),
+        None => name,
+    };
+    Some(Metric::text("Subscription", value))
+}
+
+fn local_datetime(ms: i64) -> Option<String> {
+    let utc = chrono::DateTime::from_timestamp_millis(ms)?;
+    Some(
+        utc.with_timezone(&chrono::Local)
+            .format("%Y-%m-%d %H:%M")
+            .to_string(),
+    )
 }
 
 /// Window periods: rolling anchors per the API (weekly = +7d, monthly =
@@ -190,6 +314,61 @@ mod tests {
             snap.metrics[0].resets_at.is_none(),
             "rolled-over window must not fake a countdown"
         );
+    }
+
+    #[test]
+    fn cancelled_plan_reports_its_end_date() {
+        let doc = serde_json::json!({"data":{
+            "plan":{"displayName":"Cline Pass (Monthly)","interval":"Monthly","isActive":true},
+            "currentPeriodEnd":"2026-11-04T04:48:20Z",
+            "cancelAt":"2026-11-04T04:48:20Z",
+            "canceledAt":"2026-10-04T04:48:37Z"
+        },"success":true});
+        let plan = parse_plan(&doc).expect("plan");
+        assert!(plan.cancelled);
+        assert_eq!(plan.period_end_ms, plan.cancel_at_ms);
+        let row = plan_metric(&plan).expect("row");
+        assert_eq!(row.label, "Subscription");
+        let value = row.value.unwrap();
+        assert!(value.starts_with("Cline Pass (Monthly)"), "{value}");
+        assert!(value.contains("ends "), "{value}");
+        assert!(!value.contains("renews "), "{value}");
+    }
+
+    #[test]
+    fn active_plan_reports_the_renewal_date() {
+        let doc = serde_json::json!({"data":{
+            "plan":{"name":"Cline Pass","interval":"Monthly","isActive":true},
+            "currentPeriodEnd":"2026-12-04T04:48:20Z",
+            "cancelAt":null,
+            "canceledAt":null
+        },"success":true});
+        let plan = parse_plan(&doc).expect("plan");
+        assert!(!plan.cancelled);
+        let value = plan_metric(&plan).expect("row").value.unwrap();
+        assert!(value.contains("renews "), "{value}");
+        assert!(value.contains("Cline Pass (Monthly)"), "interval is appended when missing: {value}");
+    }
+
+    #[test]
+    fn plan_without_a_subscription_is_omitted() {
+        let doc = serde_json::json!({"data":{"plan":null},"success":true});
+        assert!(parse_plan(&doc).is_none());
+        let empty = serde_json::json!({"success":true});
+        assert!(parse_plan(&empty).is_none());
+    }
+
+    #[test]
+    fn unpaid_plan_says_so() {
+        let plan = PlanInfo {
+            display_name: None,
+            period_end_ms: None,
+            cancel_at_ms: None,
+            cancelled: false,
+            unpaid: true,
+        };
+        let value = plan_metric(&plan).expect("row").value.unwrap();
+        assert!(value.contains("unpaid"), "{value}");
     }
 
     #[test]
