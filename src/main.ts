@@ -343,6 +343,8 @@ interface QoderModelSpend {
   charged_credits: number;
   free_trips: number;
   billed_tokens: number;
+  exact_token_trips?: number;
+  credits_missing_trips?: number;
   trips: number;
   tokens_unavailable_trips: number;
   /// #37-03: where this model's context window came from — "db" (real
@@ -359,6 +361,8 @@ interface QoderDaySpend {
   original_credits: number;
   free_trips: number;
   billed_tokens: number;
+  exact_token_trips?: number;
+  credits_missing_trips?: number;
   tokens_unavailable_trips: number;
   trips: number;
   sessions: number;
@@ -374,6 +378,8 @@ interface QoderSessionSpend {
   charged_credits: number;
   free_trips: number;
   billed_tokens: number;
+  exact_token_trips?: number;
+  credits_missing_trips?: number;
   tokens_unavailable_trips: number;
   trips: number;
   peak_ratio: number;
@@ -387,6 +393,8 @@ interface QoderWindow {
   original_credits: number;
   free_trips: number;
   billed_tokens: number;
+  exact_token_trips?: number;
+  credits_missing_trips?: number;
   tokens_unavailable_trips: number;
   trips: number;
   sessions: number;
@@ -5411,6 +5419,13 @@ function qoderCreditSplit(credits: number, charged: number): string {
   return `${t("qoder.chargedCredits", { credits: fmtCreditValue(charged) })} · ${t("qoder.nominalCredits", { credits: fmtCreditValue(credits) })} ${t("qoder.creditsUnit")}`;
 }
 
+/// Newer Qoder CN builds stop writing credits entirely. A zero would read as
+/// "spent nothing", so say the figure is unavailable instead.
+function qoderCreditCell(row: { credits: number; charged_credits: number; credits_missing_trips?: number }): string {
+  if ((row.credits_missing_trips ?? 0) > 0 && row.credits <= 0) return "—";
+  return qoderCreditSplit(row.credits, row.charged_credits);
+}
+
 /// #37-03: the window provenance lives in a tooltip on the model row — it
 /// explains the token basis without taking space on the main line. Reports
 /// from an older backend carry no `window_source` and get no tooltip.
@@ -5433,7 +5448,7 @@ function qoderDayHtml(day: string): string {
       const sourceTip = qoderWindowSourceTip(model);
       return `<div class="spend-detail-model"${sourceTip ? ` title="${escapeHtml(sourceTip)}"` : ""}><span>${escapeHtml(model.label)}${
         model.label !== model.model ? `<span class="qoder-key">${escapeHtml(model.model)}</span>` : ""
-      }${model.free_trips > 0 ? `<span class="qoder-chip qoder-free">${escapeHtml(t("qoder.freeBadge"))}</span>` : ""}</span><span>${escapeHtml(qoderCreditSplit(model.credits, model.charged_credits))} · ${escapeHtml(tokensText)} · ${model.trips}</span></div>`;
+      }${model.free_trips > 0 ? `<span class="qoder-chip qoder-free">${escapeHtml(t("qoder.freeBadge"))}</span>` : ""}</span><span>${escapeHtml(qoderCreditCell(model))} · ${escapeHtml(tokensText)} · ${model.trips}</span></div>`;
     })
     .join("");
   // A free window has charged 0; the per-credit rate then has to be labelled
@@ -5444,11 +5459,15 @@ function qoderDayHtml(day: string): string {
     ? t(data.charged_credits > 0 ? "qoder.tokensPerCredit" : "qoder.tokensPerCreditNominal", { ratio: perCredit })
     : "";
   const daySessions = (lastQoderSpend?.sessions ?? []).filter((session) => session.day === day);
-  const top = daySessions.sort((a, b) => b.credits - a.credits).slice(0, 10);
+  // Rank by credits, but a build that writes no credits would otherwise sort
+  // every session as a tie; fall back to measured tokens for those.
+  const top = daySessions
+    .sort((a, b) => (b.credits - a.credits) || (b.billed_tokens - a.billed_tokens) || (b.trips - a.trips))
+    .slice(0, 10);
   const sessionRows = top
     .map(
       (session, index) =>
-        `<div class="qoder-session"><span class="qoder-session-id">#${index + 1} ${escapeHtml(session.id.slice(0, 8))}</span><span>${escapeHtml(qoderCreditSplit(session.credits, session.charged_credits))} · ${escapeHtml(t("qoder.sessionTrips", { trips: session.trips }))}${
+        `<div class="qoder-session"><span class="qoder-session-id">#${index + 1} ${escapeHtml(session.id.slice(0, 8))}</span><span>${escapeHtml(qoderCreditCell(session))} · ${escapeHtml(t("qoder.sessionTrips", { trips: session.trips }))}${
           session.subagent_credits > 0 ? ` · ${escapeHtml(t("qoder.subagentCredits", { credits: fmtCreditValue(session.subagent_credits) }))}` : ""
         }${session.free_trips > 0 ? ` · ${escapeHtml(t("qoder.freeBadge"))}` : ""}</span></div>`,
     )
@@ -5457,13 +5476,17 @@ function qoderDayHtml(day: string): string {
     ? `<div class="qoder-sessions"><div class="qoder-sessions-head">${escapeHtml(t("qoder.topSessions", { n: top.length }))}</div>${sessionRows}</div>`
     : "";
   return `<article class="spend-detail-tool qoder-tool" title="${escapeHtml(t("qoder.tokensTip"))}">
-    <div class="spend-detail-tool-head"><strong>Qoder CN <span class="qoder-chip">${escapeHtml(t("qoder.localBadge"))}</span>${freeChip}</strong><div class="qoder-head-right"><span>${escapeHtml(qoderCreditSplit(data.credits, data.charged_credits))} · ${escapeHtml(tokens)}</span><button class="mini-btn" type="button" data-qoder-rescan>${escapeHtml(t("qoder.rescan"))}</button></div></div>
+    <div class="spend-detail-tool-head"><strong>Qoder CN <span class="qoder-chip">${escapeHtml(t("qoder.localBadge"))}</span>${freeChip}</strong><div class="qoder-head-right"><span>${escapeHtml(qoderCreditCell(data))} · ${escapeHtml(tokens)}</span><button class="mini-btn" type="button" data-qoder-rescan>${escapeHtml(t("qoder.rescan"))}</button></div></div>
     <div class="qoder-meta">${escapeHtml(t("qoder.tripLine", { trips: data.trips, sessions: data.sessions }))}${
       perCreditText ? ` · ${escapeHtml(perCreditText)}` : ""
     }${
       free ? ` · ${escapeHtml(t("qoder.freeTrips", { n: data.free_trips.toLocaleString(localeTag()) }))}` : ""
     }${
       data.tokens_unavailable_trips > 0 ? ` · ${escapeHtml(t("qoder.unavailable", { n: data.tokens_unavailable_trips }))}` : ""
+    }${
+      (data.credits_missing_trips ?? 0) > 0 ? ` · ${escapeHtml(t("qoder.creditsMissing", { n: data.credits_missing_trips ?? 0 }))}` : ""
+    }${
+      (data.exact_token_trips ?? 0) > 0 ? ` · ${escapeHtml(t("qoder.exactTokens", { n: data.exact_token_trips ?? 0 }))}` : ""
     }${(() => {
       const telemetry = lastQoderSpend?.telemetry;
       if (!telemetry || !telemetry.modelsTotal) return "";

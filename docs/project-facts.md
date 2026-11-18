@@ -871,7 +871,18 @@ changes.
   「模型总数 / 有窗口数 / schema 版本 / 是否有实测 token / 估算基数」一起吐出去，
   卡片必须显示基数；缺窗口只计入 `tokens_unavailable_trips` 并显示「—」，
   **绝不代填默认窗口**（升级后自检：`node temp/scripts/verify-qoder-drift.mjs`）。
-  端点 `openapi.qoder.sh` 与 API 路径 (`/api/v2/user/plan`、
+- **2026-11-18 转录格式再次变更（Qoder CN 0.5.14）**：新模型
+  `deepseek-v4.1-flash-dedicated` 的 `usage` 里 **`credits` / `original_credits`
+  / `billable` 全部消失**，但 `input_tokens` / `cache_read_input_tokens` /
+  `output_tokens` 变成**真实计数**（旧模型这三个恒为 0）。实测 1228 条：
+  `input_tokens ÷ context_usage_ratio` 恒等于 **1,000,000**，说明新计数与旧的
+  「占比×窗口」口径一致，可直接替换。`qoder_sessions.rs` 原先「无 credits 就
+  `continue`」会把整批新记录丢弃 —— 这正是新版用掉额度但 token 统计不显示的原因。
+  现改为：有实测计数优先，否则回退估算；`credits_missing_trips` /
+  `exact_token_trips` 分别记录两种缺失/来源，卡片对缺失显示「—」而不是 0。
+  切换点在 **11-14 与 11-16 之间**（11-14 仍全是 `dfmodel`，11-16 起出现新模型）。
+  自检脚本已同步新增 `transcriptCountedTokenLines` / `transcriptCreditLines` 两项。
+- 端点 `openapi.qoder.sh` 与 API 路径 (`/api/v2/user/plan`、
   `/api/v2/quota/usage`) 已由参考源证实，但目录名待真实装机核验 (2026-10-08，Batch 2)。
 - Trae 国际版 (family `trae`) 的用量端点先试 v2 再回退 v1
   (`/trae/api/v{1,2}/pay/ide_user_ent_usage`)；CN 版实测 v2，cockpit 参考为 v1，

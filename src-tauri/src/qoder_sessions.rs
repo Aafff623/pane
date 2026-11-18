@@ -43,9 +43,16 @@ pub struct QoderWindow {
     pub charged_credits: f64,
     pub original_credits: f64,
     pub free_trips: u64,
-    /// Sum of derived billed input tokens for the requests whose window is
-    /// known. Trips without a window are counted separately.
+    /// Sum of billed input tokens. A newer Qoder CN build publishes real
+    /// counters; older ones are derived from ratio×window.
     pub billed_tokens: f64,
+    /// How many trips contributed a measured counter (the rest are derived).
+    /// Zero means every token figure in this window is an estimate.
+    pub exact_token_trips: u64,
+    /// Trips whose transcript carried no credits at all (Qoder CN builds
+    /// since 2026-11-18 omit them). Kept visible so a zero credit line is
+    /// never mistaken for "spent nothing".
+    pub credits_missing_trips: u64,
     pub tokens_unavailable_trips: u64,
     pub trips: u64,
     pub sessions: u64,
@@ -62,6 +69,8 @@ pub struct QoderModelSpend {
     pub charged_credits: f64,
     pub free_trips: u64,
     pub billed_tokens: f64,
+    pub exact_token_trips: u64,
+    pub credits_missing_trips: u64,
     pub trips: u64,
     pub tokens_unavailable_trips: u64,
     /// Where the context window behind this model's token estimate came from
@@ -79,6 +88,8 @@ pub struct QoderDaySpend {
     pub original_credits: f64,
     pub free_trips: u64,
     pub billed_tokens: f64,
+    pub exact_token_trips: u64,
+    pub credits_missing_trips: u64,
     pub tokens_unavailable_trips: u64,
     pub trips: u64,
     pub sessions: u64,
@@ -97,6 +108,8 @@ pub struct QoderSessionSpend {
     pub charged_credits: f64,
     pub free_trips: u64,
     pub billed_tokens: f64,
+    pub exact_token_trips: u64,
+    pub credits_missing_trips: u64,
     pub tokens_unavailable_trips: u64,
     pub trips: u64,
     pub peak_ratio: f64,
@@ -166,12 +179,17 @@ pub struct QoderTelemetry {
     pub estimate_basis: String,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Default)]
 struct Event {
     ts: DateTime<Utc>,
     model: String,
     credits: f64,
     original_credits: f64,
+    /// `usage.credits` was absent. Newer Qoder CN builds (first seen
+    /// 2026-11-18 with `deepseek-v4.1-flash-dedicated`) omit credits and
+    /// billable entirely while publishing real token counters — dropping
+    /// those rows is what made recent usage disappear from the meter.
+    credits_missing: bool,
     ratio: Option<f64>,
     window: Option<f64>,
     /// Provenance of `window` (#37-03) — explanation only, never an input
@@ -181,6 +199,13 @@ struct Event {
     /// `usage.billable`; `Some(false)` means the request was free and its
     /// nominal credits never hit the platform quota.
     billable: Option<bool>,
+    /// Measured `usage.input_tokens`. A session may mix this with the
+    /// ratio×window estimate (older rounds of the same session), so both
+    /// travel separately and the aggregate keeps the basis explicit.
+    exact_input_tokens: Option<f64>,
+    /// Measured `usage.output_tokens`; kept apart because the meter's token
+    /// views count billed input only.
+    exact_output_tokens: Option<f64>,
 }
 
 /// Where the window a request's token estimate multiplied by came from.
@@ -333,7 +358,18 @@ fn parse_reader(reader: impl BufRead) -> ParsedFile {
         };
         let credits = usage.get("credits").and_then(Value::as_f64);
         let original = usage.get("original_credits").and_then(Value::as_f64);
-        if credits.is_none() && original.is_none() {
+        let exact_input_tokens = usage
+            .get("input_tokens")
+            .and_then(Value::as_f64)
+            .filter(|v| *v > 0.0);
+        let exact_output_tokens = usage
+            .get("output_tokens")
+            .and_then(Value::as_f64)
+            .filter(|v| *v >= 0.0);
+        // Older builds always write credits; newer ones omit them and publish
+        // measured token counters instead. A row with neither carries no
+        // spend data and stays skipped.
+        if credits.is_none() && original.is_none() && exact_input_tokens.is_none() {
             continue;
         }
         let model = message
@@ -366,11 +402,14 @@ fn parse_reader(reader: impl BufRead) -> ParsedFile {
             model,
             credits: credits.unwrap_or(0.0),
             original_credits: original.unwrap_or_else(|| credits.unwrap_or(0.0)),
+            credits_missing: credits.is_none() && original.is_none(),
             ratio: usage.get("context_usage_ratio").and_then(Value::as_f64),
             window,
             window_source,
             request_id,
             billable: usage.get("billable").and_then(Value::as_bool),
+            exact_input_tokens,
+            exact_output_tokens,
         });
     }
     out
@@ -480,6 +519,10 @@ struct ModelAgg {
     charged: f64,
     free: u64,
     tokens: f64,
+    /// Trips whose tokens came from a measured counter, not the estimate.
+    exact_token_trips: u64,
+    /// Trips with no credits field at all (newer Qoder CN builds).
+    credits_missing_trips: u64,
     trips: u64,
     unavailable: u64,
     /// Strongest window basis seen for this model inside the aggregate.
@@ -492,6 +535,8 @@ impl ModelAgg {
         self.charged += model.charged_credits;
         self.free += model.free_trips;
         self.tokens += model.billed_tokens;
+        self.exact_token_trips += model.exact_token_trips;
+        self.credits_missing_trips += model.credits_missing_trips;
         self.trips += model.trips;
         self.unavailable += model.tokens_unavailable_trips;
         self.window_source = self.window_source.merge(WindowSource::parse(&model.window_source));
@@ -505,6 +550,8 @@ struct SessionAgg {
     charged: f64,
     free: u64,
     tokens: f64,
+    exact_token_trips: u64,
+    credits_missing_trips: u64,
     unavailable: u64,
     trips: u64,
     peak_ratio: f64,
@@ -520,6 +567,8 @@ struct DayAgg {
     free: u64,
     original_credits: f64,
     tokens: f64,
+    exact_token_trips: u64,
+    credits_missing_trips: u64,
     unavailable: u64,
     trips: u64,
     peak_ratio: f64,
@@ -527,7 +576,7 @@ struct DayAgg {
     models: HashMap<String, ModelAgg>,
 }
 
-fn add_model(agg: &mut HashMap<String, ModelAgg>, event: &Event, tokens: Option<f64>) {
+fn add_model(agg: &mut HashMap<String, ModelAgg>, event: &Event, tokens: (Option<f64>, bool)) {
     let entry = agg.entry(event.model.clone()).or_default();
     entry.credits += event.credits;
     if event.billable == Some(false) {
@@ -537,9 +586,17 @@ fn add_model(agg: &mut HashMap<String, ModelAgg>, event: &Event, tokens: Option<
     }
     entry.trips += 1;
     entry.window_source = entry.window_source.merge(event.window_source);
+    if event.credits_missing {
+        entry.credits_missing_trips += 1;
+    }
     match tokens {
-        Some(t) => entry.tokens += t,
-        None => entry.unavailable += 1,
+        (Some(t), exact) => {
+            entry.tokens += t;
+            if exact {
+                entry.exact_token_trips += 1;
+            }
+        }
+        (None, _) => entry.unavailable += 1,
     }
 }
 
@@ -548,6 +605,16 @@ fn derive_tokens(ratio: Option<f64>, window: Option<f64>) -> Option<f64> {
         (Some(ratio), Some(window)) if window > 0.0 && ratio >= 0.0 => Some(ratio * window),
         _ => None,
     }
+}
+
+/// Billed input tokens for one round-trip. A measured counter outranks the
+/// ratio×window estimate; the returned flag says which one the number is, so
+/// the report can label the basis instead of mixing the two silently.
+fn event_tokens(event: &Event) -> (Option<f64>, bool) {
+    if let Some(exact) = event.exact_input_tokens {
+        return (Some(exact), true);
+    }
+    (derive_tokens(event.ratio, event.window), false)
 }
 
 fn build_report(root: &Path, entries: Vec<(String, Event, bool)>, lite_sessions: u64) -> QoderSpend {
@@ -565,7 +632,7 @@ fn build_report(root: &Path, entries: Vec<(String, Event, bool)>, lite_sessions:
         if !seen.insert(dedup) {
             continue;
         }
-        let tokens = derive_tokens(event.ratio, event.window);
+        let tokens = event_tokens(&event);
         let free = event.billable == Some(false);
         let charged = if free { 0.0 } else { event.credits };
         let (_, day_idx) = day_key(event.ts);
@@ -575,14 +642,21 @@ fn build_report(root: &Path, entries: Vec<(String, Event, bool)>, lite_sessions:
         }
         session.credits += event.credits;
         session.charged += charged;
+        if event.credits_missing {
+            session.credits_missing_trips += 1;
+        }
         if free {
             session.free += 1;
         }
         session.trips += 1;
-        if let Some(t) = tokens {
-            session.tokens += t;
-        } else {
-            session.unavailable += 1;
+        match tokens {
+            (Some(t), exact) => {
+                session.tokens += t;
+                if exact {
+                    session.exact_token_trips += 1;
+                }
+            }
+            (None, _) => session.unavailable += 1,
         }
         if is_subagent {
             session.subagent_credits += event.credits;
@@ -596,16 +670,23 @@ fn build_report(root: &Path, entries: Vec<(String, Event, bool)>, lite_sessions:
         day_agg.day_idx = day_idx;
         day_agg.credits += event.credits;
         day_agg.charged += charged;
+        if event.credits_missing {
+            day_agg.credits_missing_trips += 1;
+        }
         if free {
             day_agg.free += 1;
         }
         day_agg.original_credits += event.original_credits;
         day_agg.trips += 1;
         day_agg.sessions.insert(session_id.clone());
-        if let Some(t) = tokens {
-            day_agg.tokens += t;
-        } else {
-            day_agg.unavailable += 1;
+        match tokens {
+            (Some(t), exact) => {
+                day_agg.tokens += t;
+                if exact {
+                    day_agg.exact_token_trips += 1;
+                }
+            }
+            (None, _) => day_agg.unavailable += 1,
         }
         if let Some(ratio) = event.ratio {
             day_agg.peak_ratio = day_agg.peak_ratio.max(ratio);
@@ -625,6 +706,8 @@ fn build_report(root: &Path, entries: Vec<(String, Event, bool)>, lite_sessions:
                 charged_credits: a.charged,
                 free_trips: a.free,
                 billed_tokens: a.tokens,
+                exact_token_trips: a.exact_token_trips,
+                credits_missing_trips: a.credits_missing_trips,
                 trips: a.trips,
                 tokens_unavailable_trips: a.unavailable,
                 window_source: a.window_source.as_str().to_string(),
@@ -654,6 +737,8 @@ fn build_report(root: &Path, entries: Vec<(String, Event, bool)>, lite_sessions:
                 original_credits: a.original_credits,
                 free_trips: a.free,
                 billed_tokens: a.tokens,
+                exact_token_trips: a.exact_token_trips,
+                credits_missing_trips: a.credits_missing_trips,
                 tokens_unavailable_trips: a.unavailable,
                 trips: a.trips,
                 sessions: a.sessions.len() as u64,
@@ -687,6 +772,8 @@ fn build_report(root: &Path, entries: Vec<(String, Event, bool)>, lite_sessions:
             w.free_trips += agg.free_trips;
             w.original_credits += agg.original_credits;
             w.billed_tokens += agg.billed_tokens;
+            w.exact_token_trips += agg.exact_token_trips;
+            w.credits_missing_trips += agg.credits_missing_trips;
             w.tokens_unavailable_trips += agg.tokens_unavailable_trips;
             w.trips += agg.trips;
             for model in &agg.models {
@@ -726,6 +813,8 @@ fn build_report(root: &Path, entries: Vec<(String, Event, bool)>, lite_sessions:
                 charged_credits: a.charged,
                 free_trips: a.free,
                 billed_tokens: a.tokens,
+                exact_token_trips: a.exact_token_trips,
+                credits_missing_trips: a.credits_missing_trips,
                 tokens_unavailable_trips: a.unavailable,
                 trips: a.trips,
                 peak_ratio: a.peak_ratio,
@@ -1404,6 +1493,7 @@ mod tests {
             window_source: WindowSource::Db,
             request_id: "same".into(),
             billable: Some(true),
+            ..Default::default()
         };
         let report = build_report(
             root,
@@ -1431,6 +1521,7 @@ mod tests {
             window_source: WindowSource::Unknown,
             request_id: "sub".into(),
             billable: Some(true),
+            ..Default::default()
         };
         let mut parent = ParsedFile::default();
         parent.windows.insert("dfmodel".into(), 200_000.0);
@@ -1458,6 +1549,7 @@ mod tests {
             window_source: WindowSource::Unknown,
             request_id: "sub-other".into(),
             billable: Some(true),
+            ..Default::default()
         };
         let mut parent = ParsedFile::default();
         parent.windows.insert("dfmodel".into(), 1_000_000.0);
@@ -1477,6 +1569,7 @@ mod tests {
             window_source: WindowSource::Db,
             request_id: request.into(),
             billable: Some(true),
+            ..Default::default()
         };
         let report = build_report(
             Path::new("unused"),
@@ -1515,6 +1608,7 @@ mod tests {
             window_source: WindowSource::Db,
             request_id: request.into(),
             billable: Some(true),
+            ..Default::default()
         };
         let report = build_report(
             Path::new("unused"),
@@ -1527,6 +1621,50 @@ mod tests {
         assert_eq!(report.days.len(), 2);
         assert!(report.days.iter().all(|day| day.trips == 1 && day.credits == 1.0));
         assert_eq!(report.all.trips, 2);
+    }
+
+    #[test]
+    fn counter_only_usage_is_kept_without_credits() {
+        // Qoder CN since 2026-11-18 (deepseek-v4.1-flash-dedicated) drops
+        // `credits`/`billable` but publishes real token counters. Dropping
+        // these rows is what made recent usage vanish from the meter.
+        let line = concat!(
+            r#"{"type":"assistant","timestamp":"2026-11-18T11:00:00Z","message":{"id":"m-x","model":"deepseek","#,
+            r#""usage":{"input_tokens":43674,"cache_read_input_tokens":2560,"output_tokens":830,"context_usage_ratio":0.043674,"request_id":"x"}}}"#
+        );
+        let parsed = parse(&[line.to_string()]);
+        assert_eq!(parsed.events.len(), 1, "no-credit rows must still be collected");
+        let event = &parsed.events[0];
+        assert!(event.credits_missing);
+        assert_eq!(event.credits, 0.0);
+        assert_eq!(event.exact_input_tokens, Some(43674.0));
+        assert_eq!(event_tokens(event), (Some(43674.0), true), "the measured counter wins");
+
+        let report = build_report(
+            Path::new("unused"),
+            parsed.events.into_iter().map(|event| ("s1".into(), event, false)).collect(),
+            0,
+        );
+        assert_eq!(report.all.billed_tokens, 43674.0);
+        assert_eq!(report.all.exact_token_trips, 1);
+        assert_eq!(report.all.credits_missing_trips, 1);
+        assert_eq!(report.all.credits, 0.0, "no credits were written, so none are invented");
+    }
+
+    #[test]
+    fn ratio_estimate_still_used_when_no_counter_exists() {
+        let lines = vec![
+            config_line(1, "dfmodel", Some(1_000_000)),
+            usage_line("2026-10-20T01:00:00Z", "dfmodel", 2.0, 0.1, "a"),
+        ];
+        let parsed = parse(&lines);
+        let report = build_report(
+            Path::new("unused"),
+            parsed.events.into_iter().map(|event| ("s1".into(), event, false)).collect(),
+            0,
+        );
+        assert_eq!(report.all.billed_tokens, 100_000.0);
+        assert_eq!(report.all.exact_token_trips, 0, "this figure is derived, not measured");
     }
 
     #[test]
@@ -1604,7 +1742,7 @@ mod tests {
         let ts=|day: chrono::NaiveDate, h, m, sec| day.and_hms_opt(h,m,sec).unwrap()
             .and_local_timezone(Local).single().unwrap().with_timezone(&Utc);
         let event=|ts, id: &str, ratio| Event {ts,model:"dfmodel".into(),credits:1.0,original_credits:2.0,
-            ratio:Some(ratio),window:Some(1_000_000.0),window_source:WindowSource::Db,request_id:id.into(),billable:Some(true)};
+            ratio:Some(ratio),window:Some(1_000_000.0),window_source:WindowSource::Db,request_id:id.into(),billable:Some(true),..Default::default()};
         let entries=vec![
             ("yesterday-start".into(),event(ts(yesterday,0,0,0),"ys",0.1),false),
             ("yesterday-end".into(),event(ts(yesterday,23,59,59),"ye",0.2),false),
@@ -1653,6 +1791,7 @@ mod tests {
             window_source: WindowSource::Unknown,
             request_id: "x".into(),
             billable: Some(true),
+            ..Default::default()
         };
         let report = build_report(root, vec![("s1".into(), base, false)], 0);
         assert_eq!(report.all.tokens_unavailable_trips, 1);
