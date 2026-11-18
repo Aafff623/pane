@@ -239,6 +239,28 @@ pub struct SpendSourceStatus {
     /// measured (runtime ledgers never touch the disk).
     #[serde(default)]
     pub scan_us: u64,
+    /// Files this source opened in the last scan. Paired with
+    /// `files_with_usage` this is the silent-format-change sentinel: many
+    /// files opened, none yielding usage, is what a renamed upstream field
+    /// looks like. `None` when the source was not reached by that scan.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub files_seen: Option<u64>,
+    /// Of `files_seen`, how many produced at least one priced or unpriced
+    /// usage event. Individual empty files are normal (indexes, journals),
+    /// so this is context, not a verdict.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub files_with_usage: Option<u64>,
+    /// The whole source produced no usage anywhere in the last scan while
+    /// files were opened. That is the shape a renamed upstream field
+    /// produces; a single empty file is not.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub yielded_usage: Option<bool>,
+    /// Files whose incremental resume was abandoned for a full re-read, with
+    /// the reason. A truncation or rewrite is permanent for that file — the
+    /// old byte range is never replayed — so this must be visible rather
+    /// than a silent slow refresh.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub pins: Vec<ScanPin>,
 }
 
 fn source_status(
@@ -280,6 +302,9 @@ fn source_status(
             }
         }
     };
+    // This builder only knows the display fields, not which family the
+    // source scans under, so it leaves the scan diagnostics empty — the
+    // registry attaches them where `scan_family` says they apply.
     SpendSourceStatus {
         id: id.into(),
         tool: tool.into(),
@@ -290,6 +315,10 @@ fn source_status(
         reason,
         feeds: feeds.iter().map(|s| (*s).into()).collect(),
         scan_us: 0,
+        files_seen: None,
+        files_with_usage: None,
+        yielded_usage: None,
+        pins: Vec::new(),
     }
 }
 
@@ -446,6 +475,136 @@ fn record_probe(probe: PriceProbe) {
             list.push(probe);
         }
     });
+}
+
+// ---------------------------------------------------------------------------
+// Scan diagnostics: what a pass actually saw
+// ---------------------------------------------------------------------------
+//
+// Two failure modes used to be invisible. A file that was truncated or
+// rewritten under us silently fell back to a full re-read — safe, but nobody
+// learned a 300 MB log had just been re-read. And a source whose upstream
+// renamed a field parsed zero events out of every file it opened, which read
+// exactly like "no usage yet" on the card. Both are recorded here and surface
+// in the source inventory.
+
+/// Why a file's incremental resume was abandoned for a full re-read.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ScanPin {
+    pub file: String,
+    /// "truncated" | "rewritten" | "no_fingerprint" | "boundary_mismatch"
+    /// | "catalog_changed"
+    pub reason: String,
+}
+
+thread_local! {
+    /// Pins recorded during one `collect_daily` pass, drained into the source
+    /// inventory at the end. Keyed by family so each source reports its own.
+    static PINS: std::cell::RefCell<Vec<(String, ScanPin)>> =
+        const { std::cell::RefCell::new(Vec::new()) };
+    /// Per-file outcome of the pass: (family, path, parsed any usage). Files
+    /// are visited more than once in a refresh (the cache miss path and the
+    /// provider's own collectors), so the counter is derived from a set
+    /// rather than incremented, or one file would look like a dozen.
+    static SEEN: std::cell::RefCell<Vec<(String, PathBuf, bool)>> =
+        const { std::cell::RefCell::new(Vec::new()) };
+}
+
+fn note_pin(family: &str, path: &Path, reason: &str) {
+    PINS.with(|p| {
+        let mut list = p.borrow_mut();
+        if list.len() >= 64 {
+            return;
+        }
+        list.push((
+            family.to_string(),
+            ScanPin { file: path.display().to_string(), reason: reason.to_string() },
+        ));
+    });
+}
+
+fn note_seen(family: &str, path: &Path, parsed_usage: bool) {
+    SEEN.with(|s| {
+        let mut list = s.borrow_mut();
+        if let Some(row) = list
+            .iter_mut()
+            .find(|(f, p, _)| f == family && p == path)
+        {
+            // A later pass over the same file sees the full picture; only a
+            // file that never yielded usage counts as a miss.
+            row.2 |= parsed_usage;
+            return;
+        }
+        if list.len() < 4096 {
+            list.push((family.to_string(), path.to_path_buf(), parsed_usage));
+        }
+    });
+}
+
+/// Aggregated per-family coverage: (family, files opened, files with usage,
+/// whether the family yielded usage anywhere). The verdict is computed here,
+/// while the rows are still in hand — by the time the inventory asks, this
+/// thread's recorder has been drained.
+type Coverage = (String, u64, u64, bool);
+
+fn take_diagnostics() -> (Vec<(String, ScanPin)>, Vec<Coverage>) {
+    let pins = PINS.with(|p| std::mem::take(&mut *p.borrow_mut()));
+    let seen = SEEN.with(|s| {
+        let rows = std::mem::take(&mut *s.borrow_mut());
+        let mut agg: Vec<Coverage> = Vec::new();
+        for (family, _, parsed) in rows {
+            let entry = match agg.iter_mut().find(|(f, _, _, _)| *f == family) {
+                Some(e) => e,
+                None => {
+                    agg.push((family, 0, 0, false));
+                    agg.last_mut().expect("just pushed")
+                }
+            };
+            entry.1 += 1;
+            entry.2 += u64::from(parsed);
+            entry.3 |= parsed;
+        }
+        agg
+    });
+    (pins, seen)
+}
+
+/// Diagnostics from the most recent `collect_daily` pass, readable by the
+/// source inventory. A pass and a status query are different calls, so the
+/// per-thread recorders are drained into this snapshot at the end of a scan.
+static LAST_SCAN: Mutex<Option<(Vec<(String, ScanPin)>, Vec<Coverage>)>> = Mutex::new(None);
+
+fn publish_diagnostics() {
+    let (pins, seen) = take_diagnostics();
+    if pins.is_empty() && seen.is_empty() {
+        return;
+    }
+    if let Ok(mut guard) = LAST_SCAN.lock() {
+        *guard = Some((pins, seen));
+    }
+}
+
+/// Pins and file coverage recorded by the last scan, for one family.
+pub(crate) fn scan_diagnostics(
+    family: &str,
+) -> (Vec<ScanPin>, Option<(u64, u64, bool)>) {
+    let Ok(guard) = LAST_SCAN.lock() else {
+        return (Vec::new(), None);
+    };
+    let Some((pins, seen)) = guard.as_ref() else {
+        return (Vec::new(), None);
+    };
+    let pins = pins
+        .iter()
+        .filter(|(f, _)| f == family)
+        .map(|(_, pin)| pin.clone())
+        .collect();
+    let coverage = seen
+        .iter()
+        .find(|(f, _, _, _)| f == family)
+        .map(|(_, files, parsed, yielded)| (*files, *parsed, *yielded));
+    (pins, coverage)
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -1314,6 +1473,10 @@ fn file_days(path: &Path, source: &str, parse: &mut dyn FnMut(&str, &mut FileDat
                 && sample_fingerprint(path, size) == entry.file_fingerprint;
             if unchanged {
                 if entry.gen == gen {
+                    // A cached file still counts as opened, and its cached
+                    // summary still says whether the parse ever yielded
+                    // usage — that is what the coverage sentinel reports.
+                    note_seen(source, path, !entry.data.days.is_empty());
                     return entry.data.clone();
                 }
                 // A catalog refreshed mid-run (generation bump). The file
@@ -1322,6 +1485,7 @@ fn file_days(path: &Path, source: &str, parse: &mut dyn FnMut(&str, &mut FileDat
                 if probes_still_vouch(&entry.probes, &entry.data) {
                     entry.gen = gen;
                     CACHE_DIRTY.store(true, std::sync::atomic::Ordering::Relaxed);
+                    note_seen(source, path, !entry.data.days.is_empty());
                     return entry.data.clone();
                 }
             }
@@ -1374,6 +1538,7 @@ fn file_days(path: &Path, source: &str, parse: &mut dyn FnMut(&str, &mut FileDat
         );
     }
     CACHE_DIRTY.store(true, std::sync::atomic::Ordering::Relaxed);
+    note_seen(source, path, !data.days.is_empty());
     data
 }
 
@@ -1592,11 +1757,13 @@ where
                 && sample_fingerprint(path, size) == entry.file_fingerprint;
             if unchanged {
                 if entry.gen == gen {
+                    note_seen(source, path, !entry.data.days.is_empty());
                     return entry.data.clone();
                 }
                 if probes_still_vouch(&entry.probes, &entry.data) {
                     entry.gen = gen;
                     CACHE_DIRTY.store(true, std::sync::atomic::Ordering::Relaxed);
+                    note_seen(source, path, !entry.data.days.is_empty());
                     return entry.data.clone();
                 }
             }
@@ -1641,6 +1808,7 @@ where
                                     );
                                 }
                                 CACHE_DIRTY.store(true, std::sync::atomic::Ordering::Relaxed);
+                                note_seen(source, path, !data.days.is_empty());
                                 return data;
                             }
                             PROBES.with(|p| {
@@ -1650,6 +1818,21 @@ where
                     }
                 }
             }
+            // The fast path did not apply. Say why: every branch below reads
+            // the whole file, which on a multi-hundred-MB log is the
+            // expensive outcome nobody was told about.
+            let reason = if size <= entry.size {
+                "truncated"
+            } else if !prefix_ok {
+                "rewritten"
+            } else if entry.gen != gen {
+                "catalog_changed"
+            } else if entry.checkpoint.is_none() {
+                "no_checkpoint"
+            } else {
+                "boundary_mismatch"
+            };
+            note_pin(source, path, reason);
         }
     }
 
@@ -1682,6 +1865,7 @@ where
         );
     }
     CACHE_DIRTY.store(true, std::sync::atomic::Ordering::Relaxed);
+    note_seen(source, path, !data.days.is_empty());
     data
 }
 
@@ -5294,6 +5478,71 @@ mod tests {
         assert!(!overflow.still_valid());
     }
 
+    /// A file that opens and yields nothing is the signature of an upstream
+    /// field rename; the inventory has to be able to say that instead of
+    /// letting the card look merely quiet.
+    #[test]
+    fn diagnostics_separate_opened_files_from_files_with_usage() {
+        let dir = std::env::temp_dir().join(format!("pane-diag-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let usable = dir.join("usable.jsonl");
+        let empty = dir.join("renamed-fields.jsonl");
+        fs::write(&usable, "{\"usage\":{\"input_tokens\":10,\"output_tokens\":5}}\n").unwrap();
+        // Parses as JSON, but the collector recognises no usage in it.
+        fs::write(&empty, "{\"message\":{\"token_usage\":{}}}\n").unwrap();
+
+        let mut parse = |line: &str, data: &mut FileData| {
+            let Ok(v) = serde_json::from_str::<Value>(line) else { return };
+            let Some(usage) = v.get("usage") else { return };
+            let input = usage.get("input_tokens").and_then(Value::as_f64).unwrap_or(0.0);
+            let output = usage.get("output_tokens").and_then(Value::as_f64).unwrap_or(0.0);
+            if input <= 0.0 && output <= 0.0 {
+                return;
+            }
+            data.days.insert((100, "m".into()), (1.0, input + output));
+        };
+        let _ = file_days(&usable, "diagtest", &mut parse);
+        let _ = file_days(&empty, "diagtest", &mut parse);
+        publish_diagnostics();
+
+        let (pins, coverage) = scan_diagnostics("diagtest");
+        let (files, with_usage, yielded) = coverage.expect("coverage recorded");
+        assert_eq!(files, 2, "both files were opened");
+        assert_eq!(with_usage, 1, "only one of them produced usage");
+        assert!(yielded, "the source did yield usage somewhere");
+        assert!(pins.is_empty(), "a first parse has no resume to abandon");
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// Real-machine anchor: one full scan, then report what the inventory
+    /// would say about coverage and pins.
+    #[test]
+    #[ignore = "real-machine anchor: scans every local spend source"]
+    fn real_machine_scan_diagnostics() {
+        let spends = collect_daily(None).0;
+        eprintln!("cards: {}", spends.len());
+        let mut covered = 0;
+        let mut silent = Vec::new();
+        let mut pinned = Vec::new();
+        for status in source_statuses() {
+            let (files, parsed) = match (status.files_seen, status.files_with_usage) {
+                (Some(f), Some(p)) => (f, p),
+                _ => continue,
+            };
+            covered += 1;
+            if status.yielded_usage == Some(false) && files > 0 {
+                silent.push(format!("{} ({files} files, {parsed} with usage)", status.id));
+            }
+            if !status.pins.is_empty() {
+                pinned.push(format!("{} ({})", status.id, status.pins.len()));
+            }
+        }
+        eprintln!("sources with coverage: {covered}");
+        eprintln!("opened but parsed nothing: {:?}", silent);
+        eprintln!("files re-read in full: {:?}", pinned);
+    }
+
     /// file_days records the pricing questions a parse asked, so the entry
     /// can be revalidated after a catalog refresh without re-reading it.
     #[test]
@@ -5962,6 +6211,37 @@ mod tests {
             .with_timezone(&Utc);
         add_event(data, ts, "incremental-test", 0.0, n as f64);
     }
+
+    /// A file that shrank under an existing checkpoint is re-read in full —
+    /// safe, but it must be recorded, because that is a multi-hundred-MB
+    /// surprise nobody would otherwise see.
+    #[test]
+    fn truncated_file_records_a_pin() {
+        let dir = std::env::temp_dir().join(format!("pane-pin-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("log.jsonl");
+        let line = "{\"usage\":{\"input_tokens\":10,\"output_tokens\":5}}
+";
+        fs::write(&file, format!("{line}{line}{line}")).unwrap();
+        let mut parse = |_state: &mut IncrementalState, _line: &str, data: &mut FileData| {
+            data.days.insert((100, "m".into()), (1.0, 15.0));
+        };
+        let _ = file_days_with_state::<IncrementalState>(&file, "pintest", &mut parse);
+        // Shrink the file; the next pass cannot resume from the old offset.
+        fs::write(&file, line).unwrap();
+        let _ = file_days_with_state::<IncrementalState>(&file, "pintest", &mut parse);
+        publish_diagnostics();
+        let (pins, _) = scan_diagnostics("pintest");
+        assert!(!pins.is_empty(), "a full re-read must be reported");
+        assert!(
+            pins.iter().any(|p| p.reason == "truncated" || p.reason == "rewritten"),
+            "reason must name the cause, got {:?}",
+            pins.iter().map(|p| &p.reason).collect::<Vec<_>>()
+        );
+        let _ = fs::remove_dir_all(&dir);
+    }
+
 
     #[test]
     fn stateful_scanner_resumes_at_the_saved_offset() {
@@ -7565,11 +7845,13 @@ fn cached_parse(path: &Path, source: &str, parse: impl FnOnce() -> Option<FileDa
                 && sample_fingerprint(path, size) == entry.file_fingerprint;
             if unchanged {
                 if entry.gen == gen {
+                    note_seen(source, path, !entry.data.days.is_empty());
                     return entry.data.clone();
                 }
                 if probes_still_vouch(&entry.probes, &entry.data) {
                     entry.gen = gen;
                     CACHE_DIRTY.store(true, std::sync::atomic::Ordering::Relaxed);
+                    note_seen(source, path, !entry.data.days.is_empty());
                     return entry.data.clone();
                 }
             }
@@ -7914,6 +8196,7 @@ pub fn collect_daily(cursor_csv: Option<String>) -> (Vec<ProviderSpend>, Vec<Pro
         pricing::note_unpriced();
     }
     save_persisted_cache();
+    publish_diagnostics();
     let daily = list.iter_mut().map(|sp| ProviderDays {
         id: sp.id.clone(),
         name: sp.name.clone(),

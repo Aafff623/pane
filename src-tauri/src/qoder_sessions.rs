@@ -203,9 +203,6 @@ struct Event {
     /// ratio×window estimate (older rounds of the same session), so both
     /// travel separately and the aggregate keeps the basis explicit.
     exact_input_tokens: Option<f64>,
-    /// Measured `usage.output_tokens`; kept apart because the meter's token
-    /// views count billed input only.
-    exact_output_tokens: Option<f64>,
 }
 
 /// Where the window a request's token estimate multiplied by came from.
@@ -362,10 +359,6 @@ fn parse_reader(reader: impl BufRead) -> ParsedFile {
             .get("input_tokens")
             .and_then(Value::as_f64)
             .filter(|v| *v > 0.0);
-        let exact_output_tokens = usage
-            .get("output_tokens")
-            .and_then(Value::as_f64)
-            .filter(|v| *v >= 0.0);
         // Older builds always write credits; newer ones omit them and publish
         // measured token counters instead. A row with neither carries no
         // spend data and stays skipped.
@@ -409,7 +402,6 @@ fn parse_reader(reader: impl BufRead) -> ParsedFile {
             request_id,
             billable: usage.get("billable").and_then(Value::as_bool),
             exact_input_tokens,
-            exact_output_tokens,
         });
     }
     out

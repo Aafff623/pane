@@ -25,6 +25,12 @@ pub struct SourceSpec {
     /// Optional cheap schema/readability probe; `Some(reason)` means the
     /// source exists but cannot be parsed (corrupt DB, missing table, …).
     pub parse_probe: Option<fn() -> Option<String>>,
+    /// The family name this source's files are parsed under, when it reads
+    /// plain log files through the shared `file_days` reader. `Some` enables
+    /// the "opened files but parsed nothing" sentinel; `None` (SQL, network
+    /// and credit sources) has no per-file coverage to speak of, and must not
+    /// borrow another family's counters.
+    pub scan_family: Option<&'static str>,
 }
 
 fn home() -> PathBuf {
@@ -72,6 +78,7 @@ pub fn registry() -> Vec<SourceSpec> {
             feeds: &["claude", "minimax", "aihubmix", "kimi"],
             runtime: false,
             needs_probe: false,
+            scan_family: Some("claude"),
             parse_probe: None,
         },
         SourceSpec {
@@ -83,6 +90,7 @@ pub fn registry() -> Vec<SourceSpec> {
             feeds: &["codex", "kimi"],
             runtime: false,
             needs_probe: false,
+            scan_family: Some("codex"),
             parse_probe: None,
         },
         SourceSpec {
@@ -94,6 +102,7 @@ pub fn registry() -> Vec<SourceSpec> {
             feeds: &["zcode"],
             runtime: false,
             needs_probe: false,
+            scan_family: Some("zcode"),
             parse_probe: None,
         },
         SourceSpec {
@@ -109,6 +118,7 @@ pub fn registry() -> Vec<SourceSpec> {
             ],
             runtime: false,
             needs_probe: false,
+            scan_family: None,
             parse_probe: None,
         },
         SourceSpec {
@@ -120,6 +130,7 @@ pub fn registry() -> Vec<SourceSpec> {
             feeds: &["claude", "codex"],
             runtime: false,
             needs_probe: false,
+            scan_family: Some("pi"),
             parse_probe: None,
         },
         SourceSpec {
@@ -131,6 +142,7 @@ pub fn registry() -> Vec<SourceSpec> {
             feeds: &["grok"],
             runtime: false,
             needs_probe: false,
+            scan_family: Some("grok"),
             parse_probe: None,
         },
         SourceSpec {
@@ -142,6 +154,7 @@ pub fn registry() -> Vec<SourceSpec> {
             feeds: &["opencode", "aihubmix"],
             runtime: false,
             needs_probe: false,
+            scan_family: None,
             parse_probe: None,
         },
         SourceSpec {
@@ -153,6 +166,7 @@ pub fn registry() -> Vec<SourceSpec> {
             feeds: &["qodercn", "traecn"],
             runtime: false,
             needs_probe: false,
+            scan_family: None,
             parse_probe: None,
         },
         SourceSpec {
@@ -168,6 +182,7 @@ pub fn registry() -> Vec<SourceSpec> {
             feeds: &["devin"],
             runtime: false,
             needs_probe: false,
+            scan_family: Some("devin"),
             parse_probe: None,
         },
         SourceSpec {
@@ -184,6 +199,7 @@ pub fn registry() -> Vec<SourceSpec> {
             feeds: &["minimax", "mcode"],
             runtime: false,
             needs_probe: false,
+            scan_family: Some("minimax"),
             parse_probe: None,
         },
         SourceSpec {
@@ -195,6 +211,7 @@ pub fn registry() -> Vec<SourceSpec> {
             feeds: &["dsh"],
             runtime: false,
             needs_probe: false,
+            scan_family: None,
             parse_probe: None,
         },
         SourceSpec {
@@ -206,6 +223,7 @@ pub fn registry() -> Vec<SourceSpec> {
             feeds: &["hermes", "minimax", "openrouter"],
             runtime: false,
             needs_probe: false,
+            scan_family: None,
             parse_probe: None,
         },
         SourceSpec {
@@ -217,6 +235,7 @@ pub fn registry() -> Vec<SourceSpec> {
             feeds: &["qwen"],
             runtime: false,
             needs_probe: false,
+            scan_family: Some("qwen"),
             parse_probe: None,
         },
         SourceSpec {
@@ -228,6 +247,7 @@ pub fn registry() -> Vec<SourceSpec> {
             feeds: &["kimi"],
             runtime: false,
             needs_probe: false,
+            scan_family: Some("kimi"),
             parse_probe: None,
         },
         SourceSpec {
@@ -244,6 +264,7 @@ pub fn registry() -> Vec<SourceSpec> {
             feeds: &["antigravity"],
             runtime: false,
             needs_probe: false,
+            scan_family: Some("antigravity"),
             parse_probe: None,
         },
         SourceSpec {
@@ -255,6 +276,7 @@ pub fn registry() -> Vec<SourceSpec> {
             feeds: &["workbuddy"],
             runtime: false,
             needs_probe: false,
+            scan_family: None,
             parse_probe: None,
         },
         SourceSpec {
@@ -266,6 +288,7 @@ pub fn registry() -> Vec<SourceSpec> {
             feeds: &["workbuddyai"],
             runtime: false,
             needs_probe: false,
+            scan_family: None,
             parse_probe: None,
         },
         SourceSpec {
@@ -277,6 +300,7 @@ pub fn registry() -> Vec<SourceSpec> {
             feeds: &["codebuddy"],
             runtime: false,
             needs_probe: false,
+            scan_family: None,
             parse_probe: None,
         },
         SourceSpec {
@@ -288,6 +312,7 @@ pub fn registry() -> Vec<SourceSpec> {
             feeds: &["codebuddy"],
             runtime: false,
             needs_probe: false,
+            scan_family: None,
             parse_probe: None,
         },
         SourceSpec {
@@ -303,6 +328,7 @@ pub fn registry() -> Vec<SourceSpec> {
             // parse-tests/fixtures/gemini plus parse tests, so it resolves
             // against the filesystem like every other source (#42-2).
             needs_probe: false,
+            scan_family: None,
             parse_probe: None,
         },
         SourceSpec {
@@ -314,6 +340,7 @@ pub fn registry() -> Vec<SourceSpec> {
             feeds: &["copilot"],
             runtime: false,
             needs_probe: false,
+            scan_family: None,
             parse_probe: Some(copilot::probe_error),
         },
         SourceSpec {
@@ -325,6 +352,7 @@ pub fn registry() -> Vec<SourceSpec> {
             feeds: &["cursor"],
             runtime: true,
             needs_probe: false,
+            scan_family: None,
             parse_probe: None,
         },
     ]
@@ -340,20 +368,50 @@ fn status_of(spec: &SourceSpec) -> SpendSourceStatus {
     status
 }
 
+/// Build a status row and attach what the last scan observed for this
+/// family. Every branch needs the diagnostics, so they are attached here
+/// rather than repeated in the four early returns below.
+fn status_with_diagnostics(
+    spec: &SourceSpec,
+    state: String,
+    root: String,
+    reason: Option<String>,
+    feeds: Vec<String>,
+) -> SpendSourceStatus {
+    // Only file-backed sources have per-file coverage. A SQL or network
+    // source shares no counters with the log scanners, and reading another
+    // family's numbers would invent a coverage gap.
+    let (pins, coverage) = match spec.scan_family {
+        Some(family) => super::scan_diagnostics(family),
+        None => (Vec::new(), None),
+    };
+    SpendSourceStatus {
+        id: spec.id.into(),
+        tool: spec.tool.into(),
+        form: spec.form.into(),
+        collector: spec.collector.into(),
+        state,
+        root,
+        reason,
+        feeds,
+        scan_us: 0,
+        files_seen: coverage.map(|(files, _, _)| files),
+        files_with_usage: coverage.map(|(_, parsed, _)| parsed),
+        yielded_usage: coverage.map(|(_, _, yielded)| yielded),
+        pins,
+    }
+}
+
 fn status_of_probe(spec: &SourceSpec) -> SpendSourceStatus {
     let feeds = || spec.feeds.iter().map(|s| (*s).into()).collect();
     if spec.runtime {
-        return SpendSourceStatus {
-            id: spec.id.into(),
-            tool: spec.tool.into(),
-            form: spec.form.into(),
-            collector: spec.collector.into(),
-            state: "runtime".into(),
-            root: String::new(),
-            reason: None,
-            feeds: feeds(),
-            scan_us: 0,
-        };
+        return status_with_diagnostics(
+            spec,
+            "runtime".into(),
+            String::new(),
+            None,
+            feeds(),
+        );
     }
     let existing_root = || {
         (spec.roots)()
@@ -363,33 +421,25 @@ fn status_of_probe(spec: &SourceSpec) -> SpendSourceStatus {
             .unwrap_or_default()
     };
     if spec.needs_probe {
-        return SpendSourceStatus {
-            id: spec.id.into(),
-            tool: spec.tool.into(),
-            form: spec.form.into(),
-            collector: spec.collector.into(),
-            state: "needs_probe".into(),
-            root: existing_root(),
-            reason: Some(
+        return status_with_diagnostics(
+            spec,
+            "needs_probe".into(),
+            existing_root(),
+            Some(
                 "parser built from the upstream session schema; waiting for a verified local sample"
                     .into(),
             ),
-            feeds: feeds(),
-            scan_us: 0,
-        };
+            feeds(),
+        );
     }
     if let Some(reason) = spec.parse_probe.and_then(|probe| probe()) {
-        return SpendSourceStatus {
-            id: spec.id.into(),
-            tool: spec.tool.into(),
-            form: spec.form.into(),
-            collector: spec.collector.into(),
-            state: "parse_error".into(),
-            root: existing_root(),
-            reason: Some(reason),
-            feeds: feeds(),
-            scan_us: 0,
-        };
+        return status_with_diagnostics(
+            spec,
+            "parse_error".into(),
+            existing_root(),
+            Some(reason),
+            feeds(),
+        );
     }
     source_status(
         spec.id,
@@ -424,6 +474,7 @@ mod tests {
             feeds: &["probe"],
             runtime: false,
             needs_probe: false,
+            scan_family: None,
             parse_probe: Some(corrupt_probe),
         };
         let status = status_of(&spec);

@@ -214,6 +214,16 @@ interface SpendSourceStatusRow {
   feeds: string[];
   /// Probe cost in microseconds (#42-3). Absent on older snapshots.
   scan_us?: number;
+  /// Files this source opened in the last scan and how many yielded usage.
+  /// Per-file counts are context only — an index or a journal legitimately
+  /// carries no usage. The verdict is `yielded_usage`.
+  files_seen?: number;
+  files_with_usage?: number;
+  /// False means files were opened but the whole source produced nothing,
+  /// which is what a renamed upstream field looks like.
+  yielded_usage?: boolean;
+  /// Files whose incremental resume was abandoned for a full re-read.
+  pins?: { file: string; reason: string }[];
 }
 
 interface SpendWindow {
@@ -18781,7 +18791,28 @@ function renderSpendSourceRows(): void {
   );
   list.innerHTML = rows
     .map((source) => {
-      const detail = `${source.form}${source.reason ? ` · ${source.reason}` : ""}`;
+      const parts = [source.form];
+      if (source.reason) parts.push(source.reason);
+      // A source that opened files but parsed nothing out of them is the
+      // shape an upstream field rename produces — say it out loud instead
+      // of letting the card look merely quiet.
+      if (source.yielded_usage === false && (source.files_seen ?? 0) > 0) {
+        parts.push(t("settings.sourcesNoUsage", { files: source.files_seen ?? 0 }));
+      }
+      const pins = source.pins ?? [];
+      if (pins.length > 0) {
+        const reasonKey = `settings.sourcePin.${pins[0].reason}`;
+        const reason = t(reasonKey);
+        parts.push(
+          t("settings.sourcesPinned", {
+            n: pins.length,
+            // An unknown code stays as the raw token rather than showing a
+            // translation key to a reader.
+            reason: reason === reasonKey ? pins[0].reason : reason,
+          }),
+        );
+      }
+      const detail = parts.join(" · ");
       // The probe cost rides the existing hover title rather than taking a
       // column: it is a diagnostic for "why is the scan slow", not a fact a
       // reader needs on every row (#42-3).
