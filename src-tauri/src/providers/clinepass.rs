@@ -330,10 +330,11 @@ mod tests {
 
     #[test]
     fn cancelled_plan_reports_its_end_date() {
+        let end = (chrono::Utc::now() + chrono::Duration::days(3)).to_rfc3339();
         let doc = serde_json::json!({"data":{
             "plan":{"displayName":"Cline Pass (Monthly)","interval":"Monthly","isActive":true},
-            "currentPeriodEnd":"2026-11-04T04:48:20Z",
-            "cancelAt":"2026-11-04T04:48:20Z",
+            "currentPeriodEnd":end,
+            "cancelAt":end,
             "canceledAt":"2026-10-04T04:48:37Z"
         },"success":true});
         let plan = parse_plan(&doc).expect("plan");
@@ -349,9 +350,10 @@ mod tests {
 
     #[test]
     fn active_plan_reports_the_renewal_date() {
+        let renews = (chrono::Utc::now() + chrono::Duration::days(15)).to_rfc3339();
         let doc = serde_json::json!({"data":{
             "plan":{"name":"Cline Pass","interval":"Monthly","isActive":true},
-            "currentPeriodEnd":"2026-12-04T04:48:20Z",
+            "currentPeriodEnd":renews,
             "cancelAt":null,
             "canceledAt":null
         },"success":true});
