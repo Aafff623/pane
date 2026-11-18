@@ -1699,7 +1699,7 @@ mod tests {
     fn real_machine_snapshot() {
         let report = collect();
         eprintln!(
-            "source={} sessions={} lite={} | today: nominal {:.3} / charged {:.3} credits ({} free trips), {:.0} billed tokens, {} trips, {} sessions, {} unavailable",
+            "source={} sessions={} lite={} | today: nominal {:.3} / charged {:.3} credits ({} free trips), {:.0} billed tokens, {} trips, {} sessions, {} unavailable | credits-missing {} trips, {} counted-token trips",
             report.source.state,
             report.source.sessions,
             report.source.lite_sessions,
@@ -1710,6 +1710,8 @@ mod tests {
             report.today.trips,
             report.today.sessions,
             report.today.tokens_unavailable_trips,
+            report.today.credits_missing_trips,
+            report.today.exact_token_trips,
         );
         for session in &report.sessions {
             if session.day == report.days.last().map(|d| d.day.clone()).unwrap_or_default() {
