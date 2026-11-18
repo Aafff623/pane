@@ -102,7 +102,11 @@ pub fn registry() -> Vec<SourceSpec> {
             form: "SQLite proxy + session-import ledger",
             collector: "ccswitch_db_data",
             roots: || vec![p(&[".cc-switch", "cc-switch.db"])],
-            feeds: &["claude", "codex", "opencode", "grok", "mcode", "gemini", "claude-desktop"],
+            feeds: &[
+                "claude", "codex", "opencode", "grok", "mcode", "gemini", "claude-desktop",
+                // cc-switch began importing these in 2026-11 (v4.0.21–v4.0.35).
+                "kimi", "dsh", "workbuddy", "agy",
+            ],
             runtime: false,
             needs_probe: false,
             parse_probe: None,

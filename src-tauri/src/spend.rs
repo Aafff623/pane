@@ -2245,10 +2245,6 @@ fn minimax_agent_v2_data() -> FileData {
 /// empty on this machine — such turns land unpriced rather than guessed.
 /// Counting follows the official community tool (LeemanCheung/dsh-token-
 /// usage, MIT): reasoning is already inside output, never added again.
-fn dsh() -> ProviderSpend {
-    build_spend("dsh", "DeepSeek Harness", dsh_data())
-}
-
 fn dsh_data() -> FileData {
     let Some(home) = dirs::home_dir() else {
         return FileData::default();
@@ -3377,6 +3373,14 @@ struct CcSwitchData {
     mcode: FileData,
     gemini: FileData,
     claude_desktop: FileData,
+    /// Harnesses cc-switch learned to import in 2026-11 (v4.0.21–v4.0.35).
+    /// Their rows were present in the ledger all along but had no bucket, so
+    /// every Kimi/DSH/WorkBuddy/Antigravity request it imported was dropped
+    /// on the floor here.
+    kimi: FileData,
+    dsh: FileData,
+    workbuddy: FileData,
+    agy: FileData,
 }
 
 impl CcSwitchData {
@@ -3390,6 +3394,10 @@ impl CcSwitchData {
             "mcode" => Some(&mut self.mcode),
             "gemini" => Some(&mut self.gemini),
             "claude-desktop" => Some(&mut self.claude_desktop),
+            "kimi" => Some(&mut self.kimi),
+            "dsh" => Some(&mut self.dsh),
+            "workbuddy" => Some(&mut self.workbuddy),
+            "agy" => Some(&mut self.agy),
             _ => None,
         }
     }
@@ -4370,15 +4378,6 @@ fn workbuddy_data_root(family: &str) -> PathBuf {
         .data_root
         .unwrap_or(".workbuddy");
     dirs::home_dir().unwrap_or_default().join(dir)
-}
-
-/// WorkBuddy CN — `~/.workbuddy/projects`.
-fn workbuddy_cn_tokens() -> ProviderSpend {
-    local_token_logs(
-        "workbuddy",
-        "WorkBuddy",
-        &[workbuddy_data_root("workbuddy").join("projects")],
-    )
 }
 
 /// WorkBuddy AI — `~/.workbuddy-ai/projects` and `sessions` (the AI build
@@ -6791,6 +6790,28 @@ mod tests {
         assert_eq!(cost, 0.0);
     }
 
+    /// Real-machine anchor: the local ledger's session imports must land in
+    /// the Kimi/DSH/WorkBuddy/Antigravity buckets, not on the floor.
+    #[test]
+    #[ignore = "real-machine anchor: reads ~/.cc-switch/cc-switch.db"]
+    fn real_machine_ccswitch_harness_buckets() {
+        let Some(path) = dirs::home_dir().map(|h| h.join(".cc-switch").join("cc-switch.db")) else {
+            return;
+        };
+        let Some(data) = ccswitch_db_read(&path) else { return };
+        let rows = [
+            ("kimi", &data.kimi), ("dsh", &data.dsh),
+            ("workbuddy", &data.workbuddy), ("agy", &data.agy),
+        ];
+        for (name, bucket) in rows {
+            let tokens: f64 = bucket.days.values().map(|v| v.1).sum();
+            let days = bucket.days.iter().map(|((d, _), _)| *d).collect::<HashSet<_>>().len();
+            eprintln!("{name}: {days} days, {tokens:.0} tokens");
+        }
+        let total: f64 = rows.iter().flat_map(|(_, b)| b.days.values()).map(|v| v.1).sum();
+        eprintln!("harness rows total: {total:.0} tokens");
+    }
+
     #[test]
     fn ccswitch_unknown_app_type_is_dropped() {
         let (conn, path) = ccswitch_test_db("unknown-app");
@@ -6806,6 +6827,7 @@ mod tests {
         let total: f64 = [
             &data.claude, &data.codex, &data.opencode, &data.grok, &data.pi,
             &data.mcode, &data.gemini, &data.claude_desktop,
+            &data.kimi, &data.dsh, &data.workbuddy, &data.agy,
         ]
         .iter()
         .flat_map(|d| d.days.values())
@@ -6969,6 +6991,31 @@ mod tests {
         // Empty either side flags nothing.
         assert_eq!(likely_undercount_days(&local, &FileData::default()).len(), 0);
         assert_eq!(likely_undercount_days(&FileData::default(), &cc).len(), 0);
+    }
+
+    /// cc-switch v4.0.21–v4.0.35 started importing Kimi/DSH/WorkBuddy/
+    /// Antigravity session logs. Those rows were in the ledger already but
+    /// had no bucket, so the reader dropped them. Lock the mapping against
+    /// the app_types actually observed in a real ledger.
+    #[test]
+    fn ccswitch_buckets_cover_the_harnesses_it_imports() {
+        let mut data = CcSwitchData::default();
+        for app in [
+            "claude", "codex", "opencode", "grokbuild", "pi", "mcode", "gemini",
+            "claude-desktop", "kimi", "dsh", "workbuddy", "agy",
+        ] {
+            assert!(data.bucket(app).is_some(), "{app} has no bucket — its rows are dropped");
+        }
+        // Unknown app_types still surface as None rather than landing on a
+        // neighbouring card.
+        assert!(data.bucket("some-future-harness").is_none());
+        // The four new buckets are distinct fields, not aliases of old ones.
+        let mut data = CcSwitchData::default();
+        data.bucket("kimi").unwrap().days.insert((1, "k3".into()), (1.0, 10.0));
+        data.bucket("dsh").unwrap().days.insert((1, "pro".into()), (2.0, 20.0));
+        assert!(data.claude.days.is_empty());
+        assert_eq!(data.kimi.days.len(), 1);
+        assert_eq!(data.dsh.days.len(), 1);
     }
 
     /// Codex/opencode/grok's merge rule: Pane stays primary — a cc-switch
@@ -7567,17 +7614,17 @@ fn cached_parse(path: &Path, source: &str, parse: impl FnOnce() -> Option<FileDa
 /// coarse anchor beats dropping a whole store. Its subscription models are
 /// usually absent from the pricing catalog: tokens always count, dollars
 /// stay 0 with the ⚠ marker.
-fn antigravity() -> ProviderSpend {
+fn antigravity_data() -> FileData {
     let mut data = FileData::default();
     let Some(home) = dirs::home_dir() else {
-        return build_spend("antigravity", "Antigravity", data);
+        return data;
     };
     let cutoff = SystemTime::now() - std::time::Duration::from_secs(31 * 86_400);
     // Directory discovery follows the vendor prefix so future editions
     // (`antigravity-cli`, …) are picked up without a code change.
     let gemini = home.join(".gemini");
     let Ok(editions) = fs::read_dir(&gemini) else {
-        return build_spend("antigravity", "Antigravity", data);
+        return data;
     };
     let mut base_dirs: Vec<PathBuf> = editions
         .flatten()
@@ -7721,7 +7768,7 @@ fn antigravity() -> ProviderSpend {
             merge_data(&mut data, file_data);
         }
     }
-    build_spend("antigravity", "Antigravity", data)
+    data
 }
 
 pub fn collect(cursor_csv: Option<String>) -> Vec<ProviderSpend> {
@@ -7800,6 +7847,17 @@ pub fn collect_daily(cursor_csv: Option<String>) -> (Vec<ProviderSpend>, Vec<Pro
         zcode_routed_spends.push(build_spend(id, name, data));
     }
     let zcode_sp = build_spend("zcode", "ZCode", zcode_scan.residual);
+    // cc-switch's Kimi/WorkBuddy/Antigravity session imports cover days Pane's
+    // own scans do not; merging only the missing days keeps one count per turn.
+    let kimi_cc = {
+        let mut data = kimi_routed;
+        merge_missing_days(&mut data, cc.kimi);
+        data
+    };
+    let mut workbuddy_cn = local_token_logs_data(&[workbuddy_data_root("workbuddy").join("projects")]);
+    merge_missing_days(&mut workbuddy_cn, cc.workbuddy);
+    let mut antigravity_data = antigravity_data();
+    merge_missing_days(&mut antigravity_data, cc.agy);
     let mut list = vec![
         claude_sp,
         codex_sp,
@@ -7809,14 +7867,14 @@ pub fn collect_daily(cursor_csv: Option<String>) -> (Vec<ProviderSpend>, Vec<Pro
         aihubmix_sp,
         devin(),
         minimax(minimax_extra),
-        kimi(kimi_routed),
+        kimi(kimi_cc),
         qwen(),
-        workbuddy_cn_tokens(),
+        build_spend("workbuddy", "WorkBuddy", workbuddy_cn),
         workbuddy_ai_tokens(),
         codebuddy_cli_tokens(),
         codebuddy_ide_tokens(),
         zcode_sp,
-        antigravity(),
+        build_spend("antigravity", "Antigravity", antigravity_data),
     ];
     list.extend(zcode_routed_spends);
     // cc-switch-only tools get their own cards (empty scans are filtered
@@ -7838,7 +7896,12 @@ pub fn collect_daily(cursor_csv: Option<String>) -> (Vec<ProviderSpend>, Vec<Pro
     merge_missing_days(&mut gemini_data, gemini());
     list.push(build_spend("gemini", "Gemini", gemini_data));
     list.push(build_spend("claude-desktop", "Claude Desktop", cc.claude_desktop));
-    list.push(dsh());
+    // Same rule for the harnesses cc-switch started importing in 2026-11:
+    // its session-log rows backfill only the days Pane's own scan missed, so
+    // a turn the two sides both saw is still counted once.
+    let mut dsh_data = dsh_data();
+    merge_missing_days(&mut dsh_data, cc.dsh);
+    list.push(build_spend("dsh", "DeepSeek Harness", dsh_data));
     list.extend(extra_claude_spends);
     list.extend(extra_codex_spends);
     list.extend(hermes_rest);
