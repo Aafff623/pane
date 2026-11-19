@@ -12,7 +12,7 @@ Single authorities for the neighbouring concerns:
   tracker, see [`docs/agents/issue-tracker.md`](agents/issue-tracker.md).
 - **Startup / build / run / acceptance commands** — [`docs/dev-startup.md`](dev-startup.md).
 
-Last reconciled: 2026-10-28 (first-run source detection #109; 0.12.0 released; share preview + WorkBuddy details implemented).
+Last reconciled: 2026-11-18 (0.12.3: Qoder CN counter migration, cc-switch harness coverage, scan diagnostics).
 
 ## Scope and boundaries
 
@@ -112,8 +112,8 @@ Last reconciled: 2026-10-28 (first-run source detection #109; 0.12.0 released; s
   `cargo +stable-x86_64-pc-windows-gnu`. The full Tauri binary cannot link
   locally as a `cdylib` (167k-export DLL). The committed crate-type is
   `["rlib"]` (desktop only). Unit tests run from repo-root `parse-tests/`
-  (1200 passing / 0 failed / 18 ignored in the latest serial proxy-free run,
-  2026-10-28; run with
+  (1223 passing / 0 failed / 19 ignored in the latest serial proxy-free run,
+  2026-11-18; run with
   `cargo +stable-x86_64-pc-windows-gnu test` and no proxy).
 - Dev runtime needs both processes: Vite `:1420` + `pane.exe` `:6736`. Never
   serve the frontend with Python `http.server` (permanent WebView2 cache
