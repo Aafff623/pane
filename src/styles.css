@@ -89,6 +89,11 @@ html.i18n-boot #boot-fallback {
      card. */
   --spend-cursor: #d4d4d4;
   --radius: 10px;
+  /* Buttons share one corner radius so a 30px chip, a 32px dialog action and
+     a 26px icon button all read as the same family. Pills (999px) stay for
+     badges, progress bars and switches — that is what makes them read as
+     status rather than as something you press. */
+  --radius-btn: 9px;
   /* One easing for page changes, folds and control feedback (magpie). */
   --ease: cubic-bezier(.2,.8,.2,1);
 
@@ -4730,9 +4735,17 @@ body.ui-scaled .popover {
   display: inline-flex;
   align-items: center;
   gap: 5px;
-  background: var(--muted);
-  border: none;
-  border-radius: 7px;
+  /* No global button reset exists, so the UA's native chrome still paints
+     around our fill in some engines — visible as a ghost outline behind a
+     themed chip. Clearing appearance makes the class the only styling. */
+  appearance: none;
+  -webkit-appearance: none;
+  /* --muted (#2a2a2b) is only 5/255 away from --card (#252526), so a chip
+     drawn on a card vanished into it. A slightly lifted surface plus a hair
+     border gives the control an actual edge in both themes. */
+  background: color-mix(in srgb, var(--foreground) 8%, var(--card));
+  border: 1px solid color-mix(in srgb, var(--border) 55%, transparent);
+  border-radius: var(--radius-btn);
   color: var(--foreground);
   font-size: 11.5px;
   font-family: inherit;
@@ -4758,7 +4771,7 @@ body.ui-scaled .popover {
 }
 
 .mini-btn:disabled:hover {
-  background: var(--muted);
+  background: color-mix(in srgb, var(--foreground) 8%, var(--card));
 }
 
 .mini-btn.danger:hover {
@@ -7716,8 +7729,11 @@ body.no-glass .cust-dock {
 }
 
 /* Confirm actions follow the same button vocabulary as the rest of the
-   panel: muted cancel, tinted-red destructive action, 30px controls. */
+   panel: muted cancel, tinted-red destructive action, one 32px height that
+   matches the quota-state card actions so a dialog never reads as an
+   imported browser control. */
 #confirm-actions,
+#update-actions,
 .import-actions {
   display: flex;
   justify-content: flex-end;
@@ -7726,11 +7742,13 @@ body.no-glass .cust-dock {
 }
 
 #confirm-actions .mini-btn,
+#update-actions .mini-btn,
 .import-actions .mini-btn {
-  height: 30px;
+  height: 32px;
   padding: 0 14px;
-  border-radius: 8px;
+  border-radius: var(--radius-btn);
   font-size: 12px;
+  font-weight: 500;
   justify-content: center;
 }
 
@@ -8132,18 +8150,24 @@ body.no-glass .cust-dock {
 #auth-login-actions button {
   font-family: inherit;
   font-size: 12px;
-  font-weight: 600;
-  border-radius: 999px;
-  padding: 5px 14px;
+  font-weight: 500;
+  /* Matches the confirm/quota-state vocabulary: the shared button radius,
+     not a pill.
+     pill. Pills were the only place in the app using 999px, which made this
+     one dialog look like it came from a different product. */
+  height: 32px;
+  padding: 0 14px;
+  border-radius: var(--radius-btn);
   cursor: pointer;
   background: transparent;
   border: 1px solid var(--border);
   color: var(--secondary-foreground);
-  transition: opacity 0.15s ease, transform 0.1s ease;
+  transition: background 0.15s ease, color 0.15s ease;
 }
 
 #auth-login-actions button:hover {
-  background: var(--accent);
+  background: var(--control-hover);
+  color: var(--foreground);
 }
 
 #auth-login-actions [data-auth-login-open],
@@ -8155,7 +8179,9 @@ body.no-glass .cust-dock {
 
 #auth-login-actions [data-auth-login-open]:hover,
 #auth-login-actions [data-auth-login-retry]:hover {
-  opacity: 0.85;
+  background: var(--primary);
+  color: var(--primary-foreground);
+  filter: brightness(1.1);
 }
 
 @keyframes confirm-fade {
@@ -10938,15 +10964,42 @@ body.reduce-anim .spend-bolt.tier-3 svg {
   display: flex;
   align-items: center;
   gap: 8px;
-  margin-top: 10px;
+  margin-top: 12px;
   flex-wrap: wrap;
 }
-.quota-primary { padding: 5px 12px; font-size: 11.5px; }
-.quota-details-toggle {
-  padding: 5px 9px;
-  font-size: 11px;
-  background: transparent;
+/* The state card is the first thing a broken card shows, so its two actions
+   carry more weight than an inline chip: taller target, real horizontal
+   padding, and a primary that reads as filled rather than tinted. */
+.quota-state-actions .mini-btn {
+  height: 32px;
+  padding: 0 14px;
+  border-radius: var(--radius-btn);
+  font-size: 12px;
+  font-weight: 500;
+  justify-content: center;
 }
+.quota-state-actions .mini-btn.primary {
+  background: var(--primary);
+  color: var(--primary-foreground);
+}
+.quota-state-actions .mini-btn.primary:hover {
+  background: var(--primary);
+  color: var(--primary-foreground);
+  filter: brightness(1.1);
+}
+/* Secondary action: a quiet filled chip rather than bare text. A transparent
+   background made it read as a link next to a solid primary, which is what
+   the card looked unbalanced about. */
+.quota-state-actions .quota-details-toggle {
+  background: color-mix(in srgb, var(--foreground) 8%, var(--card));
+  color: var(--secondary-foreground);
+}
+.quota-state-actions .quota-details-toggle:hover {
+  background: var(--control-hover);
+  color: var(--foreground);
+}
+.quota-primary { font-size: 12px; }
+.quota-details-toggle { font-size: 12px; }
 .quota-state-details {
   margin-top: 9px;
   padding-top: 9px;

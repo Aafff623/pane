@@ -7282,8 +7282,8 @@ function maybePromptUpdate(version: string, manual = false): void {
       <h3>${escapeHtml(t("update.availableTitle", { version }))}</h3>
       <p>${escapeHtml(t("update.availableBody", { version }))}</p>
       <div id="update-actions">
-        <button id="update-later" type="button">${escapeHtml(t("update.later"))}</button>
-        <button id="update-now" type="button">${escapeHtml(t("update.now"))}</button>
+        <button id="update-later" class="mini-btn" type="button">${escapeHtml(t("update.later"))}</button>
+        <button id="update-now" class="mini-btn primary" type="button">${escapeHtml(t("update.now"))}</button>
       </div>
     </div>`;
   const close = () => {
@@ -7442,8 +7442,8 @@ function appPrompt(opts: {
         <h3>${escapeHtml(opts.title)}</h3>
         <input id="prompt-input" class="form-input" type="${opts.secret ? "password" : "text"}" spellcheck="false" autocomplete="off" />
         <div id="confirm-actions">
-          <button id="confirm-cancel" type="button">${escapeHtml(t("dialog.cancel"))}</button>
-          <button id="confirm-ok" type="button">${escapeHtml(opts.confirmLabel)}</button>
+          <button id="confirm-cancel" class="mini-btn" type="button">${escapeHtml(t("dialog.cancel"))}</button>
+          <button id="confirm-ok" class="mini-btn primary" type="button">${escapeHtml(opts.confirmLabel)}</button>
         </div>
       </div>`;
     const input = overlay.querySelector<HTMLInputElement>("#prompt-input")!;
@@ -7584,8 +7584,8 @@ function appProviderPicker(
         <p>${escapeHtml(opts.note)}</p>
         <div class="picker-list">${rowsHtml || `<p class="picker-empty">${escapeHtml(opts.empty)}</p>`}</div>
         <div id="confirm-actions">
-          <button id="confirm-cancel" type="button">${escapeHtml(t("dialog.cancel"))}</button>
-          <button id="confirm-ok" type="button">${escapeHtml(opts.confirmLabel)}</button>
+          <button id="confirm-cancel" class="mini-btn" type="button">${escapeHtml(t("dialog.cancel"))}</button>
+          <button id="confirm-ok" class="mini-btn primary" type="button">${escapeHtml(opts.confirmLabel)}</button>
         </div>
       </div>`;
     const done = (ok: boolean) => {
