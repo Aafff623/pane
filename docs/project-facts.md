@@ -1371,3 +1371,26 @@ changes.
 - Version and provider count come from `site/src/content/facts.ts`; the site test reconciles them with the root `package.json` and `src/providerCatalog.ts` (78 providers).
 - Tests: `cd site && npm run build && npm test` (7 tests) cover the export, Worker contracts, iframe headers, legacy redirects, skins CORS and licence/version facts.
 - **Current state (2026-10-29): local draft, not pushed and not deployed.** The live site is still the old one on `origin/main@4a26727`; the rebuild is committed locally only and must not be pushed or deployed without the owner's explicit authorization.
+
+## WinGet submission (2026-11-19, `Aafff623.Pane` bootstrap)
+
+- **The directory name must equal `PackageVersion`.** winget-pkgs rejects a
+  manifest whose version differs from its folder, with the generic
+  `Manifest-Validation-Error` label and no line-level detail on GitHub. Editing
+  the version in place without moving the files keeps failing; move the three
+  manifests to `manifests/a/Aafff623/Pane/<version>/` and delete the old folder.
+- **Current standard schema is `ManifestVersion: 1.28.0`** (the repo carries
+  1.4.0 through 1.28.0). The 0.11.1-era manifests were 1.12.0; bumping to 1.28.0
+  is the convention for a newly submitted package.
+- **`InstallerSha256` is uppercase** in merged manifests; a lowercase hash is
+  not the failure cause.
+- PR **microsoft/winget-pkgs#463652** is the bootstrap for the new identifier.
+  Since identifiers need manual admin review, it waited in the queue from
+  2026-10-28; the manifest was moved forward to 0.12.3 on 2026-11-19 so a merge
+  would not ship a two-release-old build. All ten pipeline checks passed
+  (`08. Installation Validation` takes ~34 min; `07. Installers Scan` ~5.5 min).
+- Automatic version updates only start **after** the first manifest merges.
+  Until then every release's `Publish to winget` job fails with
+  `Package Aafff623.Pane does not exist` — that is expected, not a token fault.
+- `Policy-Test-1.2` passing normally is the healthy state; the earlier
+  `Waived-Policy-Test-1.2` was a manual exemption, not a pass.
