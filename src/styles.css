@@ -2271,6 +2271,19 @@ select:focus-visible {
   overflow: hidden;
 }
 
+/* Trailing controls need more air than text does — 6px between 26px
+   icon buttons reads as a single blob. The gap applies only to the group
+   next to the spacer, so name/plan spacing is untouched. */
+.provider-head > .spacer ~ :is(.chrome-btn, .share-btn, .spend-update-btn, .card-fold-toggle) {
+  margin-inline-start: 2px;
+}
+
+/* The control group hugs the card's right edge tighter than the vertical
+   padding above and below it; a small inset evens the optical margin. */
+.provider-head > :last-child {
+  margin-inline-end: 2px;
+}
+
 /* Reserve a real inset, so the trailing brand mark and its actions stay
    inside the header in every expanded/folded provider card. */
 .provider-head:has(> .provider-icon) {
@@ -2554,15 +2567,33 @@ article.provider.is-folded:hover {
 }
 
 /* Share (copy as image) button — appears on card hover. */
+/* Share joins the same control family as pin/gear/update: one 26px box in
+   the head row. It stays hover-revealed (it is a secondary action), but its
+   footprint no longer shifts the row when it appears. */
 .share-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  flex: none;
   background: none;
   border: none;
-  padding: 0 2px;
+  padding: 0;
+  border-radius: var(--radius-btn);
   font-size: 13px;
   color: var(--muted-foreground);
   cursor: pointer;
-  opacity: 0;
-  transition: opacity 0.15s ease;
+  /* Hover-revealed was right when it was the only action; inside a group of
+     three visible controls an invisible fourth breaks the row. It rests at a
+     quiet opacity and lifts on hover like the others. */
+  opacity: 0.72;
+  transition: opacity 0.15s ease, background 0.15s ease, color 0.15s ease;
+}
+
+.share-btn .ui-icon {
+  width: 14px;
+  height: 14px;
 }
 
 .provider:hover .share-btn {
@@ -2949,12 +2980,39 @@ article.provider.is-folded:hover {
    the "on" state is the only difference from an idle mini button. */
 .chrome-btn {
   flex: none;
+  display: inline-flex;
   align-items: center;
   justify-content: center;
   width: 26px;
   height: 26px;
+  min-width: 26px;
   padding: 0;
-  opacity: 0.55;
+  /* 0.55 read as disabled next to a lit update button; 0.72 keeps the
+     resting state quiet without looking unavailable. */
+  opacity: 0.72;
+}
+.chrome-btn .ui-icon {
+  width: 14px;
+  height: 14px;
+}
+
+/* One surface rule for the whole group: same hairline border the update
+   button draws. Without it the tinted button read as a different card while
+   the neutral pair floated borderless beside it. */
+.chrome-btn,
+.share-btn {
+  border: 1px solid transparent;
+}
+
+/* Hover lifts every head-row control the same way, so the three of them
+   read as one group instead of three separate widgets. */
+.chrome-btn:hover {
+  opacity: 1;
+  background: var(--control-hover);
+}
+
+.share-btn:hover {
+  background: var(--control-hover);
 }
 
 .chrome-btn.on {
@@ -3089,39 +3147,50 @@ body.ui-scaled .popover {
    affordance (Cursor-style): a green circular up arrow that appears only
    while a version is announced. Clicking starts the download in place; the
    ring fills with real byte progress, then the app installs and restarts. */
+/* The head row's trailing controls are one family: same 26px box, same
+   9px corner, same icon size. The update button used to be a 22px circle
+   sitting between two rounded squares, which read as a status dot that had
+   wandered into a button row. It keeps its green tint — that is the
+   available-update signal — but takes the shared geometry. */
 .spend-update-btn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 22px;
-  height: 22px;
+  width: 26px;
+  height: 26px;
   flex: none;
   padding: 0;
-  border: 1px solid rgb(34 197 94 / 0.45);
-  border-radius: 50%;
-  background: rgb(34 197 94 / 0.12);
+  /* Green is the statement, so it appears once — on the glyph. Tinting the
+     fill, the border and the icon at the same time made it the loudest thing
+     in a row of neutral controls, which is backwards for the least-used
+     button. */
+  border: 1px solid color-mix(in srgb, var(--border) 55%, transparent);
+  border-radius: var(--radius-btn);
+  background: color-mix(in srgb, var(--foreground) 8%, var(--card));
   color: #22c55e;
   cursor: pointer;
   transition: background 0.15s ease;
 }
 .spend-update-btn:hover {
-  background: rgb(34 197 94 / 0.24);
+  background: var(--control-hover);
 }
 .spend-update-btn .ui-icon {
-  width: 12px;
-  height: 12px;
+  width: 14px;
+  height: 14px;
 }
 .spend-update-btn.busy {
   cursor: default;
-  background: conic-gradient(#22c55e calc(var(--pct, 0) * 1%), rgb(34 197 94 / 0.12) 0);
+  background: conic-gradient(#22c55e calc(var(--pct, 0) * 1%),
+              color-mix(in srgb, var(--foreground) 8%, var(--card)) 0);
 }
+/* Light theme keeps the same rule: neutral surface, green glyph only. */
 :root[data-theme="light"] .spend-update-btn {
   color: #16a34a;
-  border-color: rgb(22 163 74 / 0.45);
-  background: rgb(22 163 74 / 0.12);
+  border-color: color-mix(in srgb, var(--border) 70%, transparent);
+  background: color-mix(in srgb, var(--foreground) 5%, var(--card));
 }
 :root[data-theme="light"] .spend-update-btn:hover {
-  background: rgb(22 163 74 / 0.22);
+  background: var(--control-hover);
 }
 :root[data-theme="light"] .spend-update-btn.busy {
   background: conic-gradient(#16a34a calc(var(--pct, 0) * 1%), rgb(22 163 74 / 0.12) 0);
@@ -7753,13 +7822,20 @@ body.no-glass .cust-dock {
 }
 
 #confirm-actions .mini-btn.danger {
-  color: #fca5a5;
-  background: rgba(239, 68, 68, 0.12);
+  /* A tinted-red chip at 0.12 alpha left the destructive action reading as
+     just another quiet button beside the cancel — the pair differed by hue,
+     not by weight. Stronger tint plus a border gives it the rank it needs
+     without going full solid red, which over-weighs a delete confirm. */
+  color: #fda4af;
+  background: rgba(239, 68, 68, 0.16);
+  border-color: rgba(239, 68, 68, 0.38);
+  font-weight: 600;
 }
 
 #confirm-actions .mini-btn.danger:hover {
-  color: #fecaca;
-  background: rgba(239, 68, 68, 0.22);
+  color: #fecdd3;
+  background: rgba(239, 68, 68, 0.26);
+  border-color: rgba(239, 68, 68, 0.5);
 }
 
 :root[data-theme="light"] #confirm-actions .mini-btn.danger {
