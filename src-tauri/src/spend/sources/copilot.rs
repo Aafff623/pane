@@ -268,6 +268,14 @@ mod tests {
     use std::collections::HashSet;
     use std::path::PathBuf;
 
+    /// The scanner only counts events inside a 31-day window, so fixtures must
+    /// be dated relative to now — a hardcoded date silently stops being read
+    /// once the window rolls past it (these three tests failed that way when
+    /// their 2026-10-20 fixtures aged out).
+    fn recent(hours_ago: i64) -> String {
+        (chrono::Utc::now() - chrono::Duration::hours(hours_ago)).to_rfc3339()
+    }
+
     fn root(tag: &str) -> PathBuf {
         let p = std::env::temp_dir().join(format!(
             "pane-copilot-{tag}-{}",
@@ -292,9 +300,9 @@ mod tests {
         .unwrap();
         conn.execute(
             "INSERT INTO assistant_usage_events VALUES
-             ('s1','gpt-5.6-terra',60620,135,0,60610,'2026-10-20T10:00:00Z'),
-             ('s1','pane-copilot-unpriced',100,20,0,0,'2026-10-20T10:00:01Z')",
-            [],
+             ('s1','gpt-5.6-terra',60620,135,0,60610,?1),
+             ('s1','pane-copilot-unpriced',100,20,0,0,?2)",
+            rusqlite::params![recent(2), recent(1)],
         )
         .unwrap();
         drop(conn);
@@ -313,7 +321,10 @@ mod tests {
         std::fs::create_dir_all(&session).unwrap();
         std::fs::write(
             session.join("events.jsonl"),
-            r#"{"type":"session.shutdown","timestamp":"2026-10-20T10:00:00Z","data":{"sessionId":"sess-1","modelMetrics":{"gpt-5.6-terra":{"usage":{"inputTokens":1000,"outputTokens":100,"cacheReadTokens":200,"cacheWriteTokens":300}}}}}"#,
+            format!(
+                r#"{{"type":"session.shutdown","timestamp":"{}","data":{{"sessionId":"sess-1","modelMetrics":{{"gpt-5.6-terra":{{"usage":{{"inputTokens":1000,"outputTokens":100,"cacheReadTokens":200,"cacheWriteTokens":300}}}}}}}}}}"#,
+                recent(1)
+            ),
         )
         .unwrap();
         let data = scan_events_at(&dir, &HashSet::new());
@@ -331,9 +342,16 @@ mod tests {
         std::fs::create_dir_all(&session).unwrap();
         std::fs::write(
             session.join("events.jsonl"),
-            r#"{"type":"session.shutdown","timestamp":"2026-10-20T10:00:00Z","data":{"sessionId":"sess-r","modelMetrics":{"gpt-5.6-terra":{"usage":{"inputTokens":1000,"outputTokens":100,"cacheReadTokens":200,"cacheWriteTokens":300}}}}}
-{"type":"session.shutdown","timestamp":"2026-10-20T11:00:00Z","data":{"sessionId":"sess-r","modelMetrics":{"gpt-5.6-terra":{"usage":{"inputTokens":2000,"outputTokens":200,"cacheReadTokens":200,"cacheWriteTokens":300}}}}}
-{"type":"session.shutdown","timestamp":"2026-10-20T12:00:00Z","data":{"sessionId":"sess-r","modelMetrics":{"gpt-5.6-terra":{"usage":{"inputTokens":500,"outputTokens":50,"cacheReadTokens":0,"cacheWriteTokens":0}}}}}"#,
+            format!(
+                concat!(
+                    r#"{{"type":"session.shutdown","timestamp":"{}","data":{{"sessionId":"sess-r","modelMetrics":{{"gpt-5.6-terra":{{"usage":{{"inputTokens":1000,"outputTokens":100,"cacheReadTokens":200,"cacheWriteTokens":300}}}}}}}}}}"#, "
+",
+                    r#"{{"type":"session.shutdown","timestamp":"{}","data":{{"sessionId":"sess-r","modelMetrics":{{"gpt-5.6-terra":{{"usage":{{"inputTokens":2000,"outputTokens":200,"cacheReadTokens":200,"cacheWriteTokens":300}}}}}}}}}}"#, "
+",
+                    r#"{{"type":"session.shutdown","timestamp":"{}","data":{{"sessionId":"sess-r","modelMetrics":{{"gpt-5.6-terra":{{"usage":{{"inputTokens":500,"outputTokens":50,"cacheReadTokens":0,"cacheWriteTokens":0}}}}}}}}}}"#
+                ),
+                recent(3), recent(2), recent(1)
+            ),
         )
         .unwrap();
         let data = scan_events_at(&dir, &HashSet::new());
