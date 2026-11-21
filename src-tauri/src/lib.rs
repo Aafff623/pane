@@ -2751,6 +2751,7 @@ fn web_session_login_status(family: String) -> Result<providers::tokenrhythm::Lo
         "tokenrhythm" => Ok(providers::tokenrhythm::status()),
         "xfyun" => Ok(providers::xfyun::status()),
         "xfyun-speech" => Ok(providers::xfyun_speech::status()),
+        "bibigpt" => Ok(providers::bibigpt::status()),
         _ => Err(format!("{family} is not a web-session provider")),
     }
 }
@@ -2764,6 +2765,7 @@ async fn web_session_login(family: String, app: tauri::AppHandle) -> Result<(), 
         "tokenrhythm" => providers::tokenrhythm::login(&app).await,
         "xfyun" => providers::xfyun::login(&app).await,
         "xfyun-speech" => providers::xfyun_speech::login(&app).await,
+        "bibigpt" => providers::bibigpt::login(&app).await,
         _ => Err(format!("{family} is not a web-session provider")),
     }
 }
@@ -2774,6 +2776,7 @@ fn web_session_login_clear(family: String) -> Result<(), String> {
         "tokenrhythm" => providers::tokenrhythm::clear(),
         "xfyun" => providers::xfyun::clear(),
         "xfyun-speech" => providers::xfyun_speech::clear(),
+        "bibigpt" => providers::bibigpt::clear(),
         _ => Err(format!("{family} is not a web-session provider")),
     }
 }

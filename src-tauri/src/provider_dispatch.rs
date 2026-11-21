@@ -55,6 +55,7 @@ native_snapshots! {
     "commandcode" => providers::commandcode::snapshot(),
     "doubao" => providers::doubao::snapshot(),
     "clawsgo" => providers::clawsgo::snapshot(),
+    "bibigpt" => providers::bibigpt::snapshot(),
     "shandianshuo" => providers::shandianshuo::snapshot(),
     "bocha" => providers::searchquota::bocha_snapshot(),
     "tavily" => providers::searchquota::tavily_snapshot(),

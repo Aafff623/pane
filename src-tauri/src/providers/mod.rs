@@ -51,6 +51,7 @@ pub mod relaybalance;
 pub mod response_shape;
 pub mod searchquota;
 pub mod sensenova;
+pub mod bibigpt;
 pub mod shandianshuo;
 pub mod siliconflow;
 pub mod stepfun;

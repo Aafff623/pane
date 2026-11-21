@@ -867,3 +867,30 @@ credit sum only; it is not a meter sample and is never added to the credits
 balance or `credit_history`. Pagination, parsing and aggregation live in
 `providers/workbuddy_official_usage.rs`. WorkBuddy AI was not probed, so its
 card does not call this endpoint.
+
+## BibiGPT
+
+Web console at `bibigpt.cn` (`bibigpt.co` is only a 302 shell — every API call
+the site makes goes to the `.cn` host). Plus and Pro tiers get a monthly credit
+allowance, plus a separate top-up balance that stacks on top.
+
+- **Endpoint:** `GET https://bibigpt.cn/api/v1/me` with the session cookie.
+  Unauthenticated reads answer **401 UNAUTHORIZED** (not 404) and the body's
+  internal route name is `agent.me`, which is how the endpoint was identified.
+- **Envelope:** every response is `{ message, code, data: { code, httpStatus,
+  zodError, creditsShortfall } }`.
+- **Login:** Pane's own incognito WebView2 window (`bibigpt.cn/user/login`),
+  read back through `read_webview_cookies`, stored in the OS credential store
+  under `Pane:bibigpt:session`. Same seam as `xfyun-speech`; nothing touches a
+  browser profile.
+- **Capture:** a successful login writes one raw `/api/v1/me` body to
+  `%APPDATA%\PaneAafff623\bibigpt-response.json` (local only) so the exact
+  credit field names can be pinned without a hand-built request.
+- **Card rows:** the monthly allowance renders as a progress row
+  (`used / total`), the top-up balance as a count with no bar (it has no
+  denominator), and the refill date feeds the reset countdown.
+- **待确认:** the credit field names. The parser reads them by candidate key
+  (`creditsUsed` / `creditsTotal` / `topupBalance` / `currentPeriodEnd` and
+  common variants) and reports a half-missing pair as unavailable rather than
+  as 0%. Once one captured response is in hand, replace the candidates with the
+  verified path.

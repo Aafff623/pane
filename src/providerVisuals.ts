@@ -44,6 +44,7 @@ import firecrawlIcon from "./assets/providers/firecrawl.svg?raw";
 import braveIcon from "./assets/providers/brave.svg?raw";
 import giphyIcon from "./assets/providers/giphy.svg?raw";
 import apigotoIcon from "./assets/providers/apigoto.svg?raw";
+import bibigptIcon from "./assets/providers/bibigpt.svg?raw";
 import shandianshuoIcon from "./assets/providers/shandianshuo.svg?raw";
 import { providerDefinition, providerFamily } from "./providerCatalog";
 import ampIcon from "./assets/providers/amp.svg?raw";
@@ -138,6 +139,7 @@ const VISUALS: Readonly<Record<string, ProviderVisual>> = {
   relaybalance: { iconKey: "relaybalance", iconSvg: relaybalanceIcon },
   sensenova: { iconKey: "sensenova", iconSvg: sensenovaIcon },
   clawsgo: { iconKey: "clawsgo", iconSvg: clawsgoIcon },
+  bibigpt: { iconKey: "bibigpt", iconSvg: bibigptIcon },
   shandianshuo: { iconKey: "shandianshuo", iconSvg: shandianshuoIcon },
   bocha: { iconKey: "bocha", iconSvg: bochaIcon },
   tavily: { iconKey: "tavily", iconSvg: tavilyIcon },

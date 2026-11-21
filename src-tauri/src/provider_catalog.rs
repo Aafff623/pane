@@ -491,6 +491,16 @@ const PROVIDER_DEFINITIONS: &[ProviderDefinition] = &[
         primary_unit: UsageUnit::Tokens,
     },
     ProviderDefinition {
+        family_id: "bibigpt",
+        display_name: "BibiGPT",
+        query_kind: QueryKind::NativeSnapshot,
+        supports_api_key: false,
+        supports_extra_accounts: false,
+        icon_key: "bibigpt",
+        category: ProviderCategory::Productivity,
+        primary_unit: UsageUnit::Credits,
+    },
+    ProviderDefinition {
         family_id: "shandianshuo",
         display_name: "闪电说",
         query_kind: QueryKind::NativeCodingPlan,
@@ -1358,8 +1368,8 @@ mod tests {
         extras.sort_unstable();
         assert_eq!(
             extras,
-            vec!["deepl", "stability", "xfyun-speech"],
-            "DeepL/Stability are the API-key pilot productivity cards; xfyun-speech is the console speech-pack card"
+            vec!["bibigpt", "deepl", "stability", "xfyun-speech"],
+            "DeepL/Stability are the API-key pilot productivity cards; xfyun-speech is the console speech-pack card; bibigpt is the video-summary credit card"
         );
     }
 }

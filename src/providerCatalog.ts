@@ -58,6 +58,7 @@ export const providerCatalog: readonly ProviderDefinition[] = [
   { familyId: "kimi", displayName: "Kimi Code", primaryUnit: "tokens", queryKind: "composite", supportsApiKey: true, supportsExtraAccounts: true, supportsOAuth: false, iconKey: "kimi" },
   { familyId: "stepfun", displayName: "StepFun", primaryUnit: "tokens", queryKind: "nativeBalance", supportsApiKey: true, supportsExtraAccounts: true, supportsOAuth: false, iconKey: "stepfun" },
   { familyId: "stepfun-plan", displayName: "StepFun Step Plan", primaryUnit: "tokens", queryKind: "nativeCodingPlan", supportsApiKey: true, supportsExtraAccounts: true, supportsOAuth: false, iconKey: "stepfun" },
+  { familyId: "bibigpt", displayName: "BibiGPT", primaryUnit: "credits", queryKind: "nativeSnapshot", supportsApiKey: false, supportsExtraAccounts: false, supportsOAuth: false, iconKey: "bibigpt", category: "productivity" },
   { familyId: "shandianshuo", displayName: "闪电说", primaryUnit: "minutes", queryKind: "nativeCodingPlan", supportsApiKey: false, supportsExtraAccounts: false, supportsOAuth: false, iconKey: "shandianshuo", category: "productivity" },
   { familyId: "siliconflow", displayName: "SiliconFlow", primaryUnit: "tokens", queryKind: "nativeBalance", supportsApiKey: true, supportsExtraAccounts: true, supportsOAuth: false, iconKey: "siliconflow" },
   { familyId: "novita", displayName: "Novita AI", primaryUnit: "tokens", queryKind: "nativeBalance", supportsApiKey: true, supportsExtraAccounts: true, supportsOAuth: false, iconKey: "novita" },
