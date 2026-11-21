@@ -42,7 +42,7 @@ export const messages = {
       bridgeNote: "read-only snapshot",
       rightTitle: "Your harness tools",
       rightBody: "Claude Code, Codex, Cursor, Qoder and the rest, in one panel.",
-      rightFoot: "78 providers · local logs",
+      rightFoot: "79 providers · local logs",
     },
     panel: {
       title: "Every quota window, in one floating panel",
@@ -74,7 +74,7 @@ export const messages = {
       description: "The short answers about Pane, its data and local credentials.",
       items: [
         { q: "What is Pane?", a: "Pane is a local desktop panel that collects quotas, balances and reset times for your AI tools, plus token and cost data from local CLI logs." },
-        { q: "Which tools are supported?", a: "78 providers today, including Claude, Codex, Cursor, Copilot, Kimi, Z.ai, OpenRouter and Qoder. Each provider exposes a different set of metrics." },
+        { q: "Which tools are supported?", a: "79 providers today, including Claude, Codex, Cursor, Copilot, Kimi, Z.ai, OpenRouter and Qoder. Each provider exposes a different set of metrics." },
         { q: "Do I need a Pane account?", a: "No. There is no Pane account system; your existing provider sign-ins are the data source." },
         { q: "Is my data uploaded?", a: "No. Credentials, snapshots and the spend ledger stay on your machine, and the app ships without telemetry." },
         { q: "Can I manage several accounts?", a: "Yes. A provider can hold several accounts, and the badge shows the pool size and availability." },
@@ -192,7 +192,7 @@ export const messages = {
       bridgeNote: "只读快照",
       rightTitle: "你的 Harness 工具",
       rightBody: "Claude Code、Codex、Cursor、Qoder 等工具，集中在一个面板。",
-      rightFoot: "78 个服务商 · 本地日志",
+      rightFoot: "79 个服务商 · 本地日志",
     },
     panel: {
       title: "一块悬浮窗，装下所有周期",
@@ -224,7 +224,7 @@ export const messages = {
       description: "关于 Pane、数据与本机凭据的简短回答。",
       items: [
         { q: "Pane 是做什么的？", a: "Pane 是一个本地桌面面板，汇总 AI 编程工具和模型厂商的额度、余额、重置时间，以及本地 CLI 的 Token 与花费。" },
-        { q: "支持哪些工具？", a: "目前收录 78 个服务商，覆盖 Claude、Codex、Cursor、Copilot、Kimi、Z.ai、OpenRouter、Qoder 等；各服务支持的查询项目有所不同。" },
+        { q: "支持哪些工具？", a: "目前收录 79 个服务商，覆盖 Claude、Codex、Cursor、Copilot、Kimi、Z.ai、OpenRouter、Qoder 等；各服务支持的查询项目有所不同。" },
         { q: "需要注册 Pane 账号吗？", a: "不需要。Pane 没有账号体系，你现有的服务商登录态就是数据来源。" },
         { q: "数据会上传吗？", a: "不会。凭据、快照和花费台账都保存在本机，应用不含遥测。" },
         { q: "可以管理多个账号吗？", a: "可以。同一服务商下能挂多个账号，徽章显示池中数量和可用状态。" },
