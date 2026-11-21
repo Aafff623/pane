@@ -107,14 +107,20 @@ Last reconciled: 2026-11-18 (0.12.3: Qoder CN counter migration, cc-switch harne
 
 ## Hard constraints
 
-- This machine builds with the **GNU toolchain only** (no MSVC): prepend
-  `D:\Tools\mingw64\bin` to PATH and use
-  `cargo +stable-x86_64-pc-windows-gnu`. The full Tauri binary cannot link
-  locally as a `cdylib` (167k-export DLL). The committed crate-type is
-  `["rlib"]` (desktop only). Unit tests run from repo-root `parse-tests/`
-  (1223 passing / 0 failed / 19 ignored in the latest serial proxy-free run,
-  2026-11-18; run with
-  `cargo +stable-x86_64-pc-windows-gnu test` and no proxy).
+- **Build with MSVC, not GNU** (corrected 2026-11-21). Visual Studio 2022
+  Build Tools is installed (`C:\Program Files (x86)\Microsoft Visual Studio\
+  2022\BuildTools`) and `stable-x86_64-pc-windows-msvc` is the default rustup
+  toolchain; `cargo +stable-x86_64-pc-windows-msvc build` produces
+  `target\debug\pane.exe` in ~3 min. The earlier note that this machine had
+  "GNU only" was wrong and cost a long misdiagnosis: under GNU the build fails
+  with a misleading `系统找不到指定的路径。(os error 3)` because `tauri-build`
+  requires `DEP_TAURI_DEV`, which is never propagated, and a full
+  `cargo clean` + fresh target dir does not help. The committed crate-type is
+  `["rlib"]` (desktop only). Unit tests still run from repo-root `parse-tests/`
+  with the **GNU** harness (1228 passing / 0 failed / 20 ignored in the latest
+  serial proxy-free run, 2026-11-21; `cargo +stable-x86_64-pc-windows-gnu test`
+  with no proxy) — the harness compiles sources via `#[path]` and does not need
+  the Tauri build script.
 - Dev runtime needs both processes: Vite `:1420` + `pane.exe` `:6736`. Never
   serve the frontend with Python `http.server` (permanent WebView2 cache
   locks). Launch `pane.exe` via `CreateProcess(lpDesktop="WinSta0\Default")` —

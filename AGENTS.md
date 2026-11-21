@@ -55,10 +55,18 @@ Remove-Item -Recurse -Force "$env:LOCALAPPDATA\com.aafff623.pane.dev\EBWebView" 
 ## Rust changes?
 ```powershell
 cd src-tauri
-$env:PATH = "D:\Tools\mingw64\bin;$env:PATH"
-cargo +stable-x86_64-pc-windows-gnu build
+cargo +stable-x86_64-pc-windows-msvc build
 ```
 Then re-run the launch step.
+
+**Use MSVC, not GNU.** The GNU toolchain cannot build this crate graph:
+`tauri-build` requires `DEP_TAURI_DEV`, which is never propagated under GNU,
+so every build dies with a misleading `系统找不到指定的路径。(os error 3)` —
+even after a full `cargo clean` and a fresh target dir. Visual Studio 2022
+Build Tools is already installed here
+(`C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools`) and
+`stable-x86_64-pc-windows-msvc` is the default rustup toolchain. CI builds
+with MSVC for the same reason.
 
 ## Build artifacts (`target/`)
 

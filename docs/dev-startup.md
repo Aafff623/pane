@@ -110,8 +110,7 @@ causing WebView2 to permanently cache old assets.
 
 ```powershell
 cd D:\code\pane\src-tauri
-$env:PATH = "D:\Tools\mingw64\bin;$env:PATH"
-cargo +stable-x86_64-pc-windows-gnu build
+cargo +stable-x86_64-pc-windows-msvc build
 # Output: src-tauri\target\debug\pane.exe
 ```
 
