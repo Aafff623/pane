@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.12.4 — 2026-11-24
 
 设置页秒开 / OpenDesign / BibiGPT 登录
 
