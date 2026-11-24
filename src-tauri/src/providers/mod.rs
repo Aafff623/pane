@@ -34,6 +34,8 @@ pub mod longcat;
 pub mod mimo;
 pub mod minimax;
 pub mod mistral;
+pub mod opendesign;
+pub mod opendesign_login;
 pub mod moonshot;
 pub mod novita;
 pub mod ollama;

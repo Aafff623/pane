@@ -65,6 +65,7 @@ native_snapshots! {
     "clinepass" => providers::clinepass::snapshot(),
     "sensenova" => providers::sensenova::snapshot(),
     "apigoto" => providers::apigoto::snapshot(),
+    "opendesign" => providers::opendesign::snapshot(),
     "amp" => providers::amp::snapshot(),
     "bedrock" => providers::bedrock::snapshot(),
     "chutes" => providers::chutes::snapshot(),
