@@ -12,7 +12,7 @@ Single authorities for the neighbouring concerns:
   tracker, see [`docs/agents/issue-tracker.md`](agents/issue-tracker.md).
 - **Startup / build / run / acceptance commands** — [`docs/dev-startup.md`](dev-startup.md).
 
-Last reconciled: 2026-11-18 (0.12.3: Qoder CN counter migration, cc-switch harness coverage, scan diagnostics).
+Last reconciled: 2026-11-24 (0.12.4: batched credential probe, BibiGPT web-session registration, enabled-but-signed-out cards stay on the board).
 
 ## Scope and boundaries
 
@@ -1400,3 +1400,42 @@ changes.
   `Package Aafff623.Pane does not exist` — that is expected, not a token fault.
 - `Policy-Test-1.2` passing normally is the healthy state; the earlier
   `Waived-Policy-Test-1.2` was a manual exemption, not a pass.
+
+## Credential probing cost (2026-11-24, 0.12.4)
+
+- **The settings page probes every catalog family on open.** `get_credential_statuses`
+  (batch) and `get_credential_status` (single) both go through
+  `source_probe::probe_family` / `probe_families`, which reads the registry
+  environment and lists every PATH directory. The batch variant shares ONE
+  snapshot across families; probing one by one re-read both per family.
+  Measured on this machine (149 PATH entries): 79 families serialize to
+  **3.4 s**, the batch to **73 ms**.
+- **Both commands are `async`** so Tauri runs them off the UI thread. They used
+  to be synchronous, which is why opening Settings froze clicks for seconds.
+  Do not make them sync again for convenience.
+- **`cached_plan_for` reads `last_snapshots.json` at most once per process**
+  (`plans_on_disk`); the in-memory `last_ok()` cache still answers first
+  because refreshes write it. Re-parsing the file per family was the second
+  largest cost after the PATH scan.
+- **One vault read per family.** `credential_status_for` asks
+  `stored_key_file` once and derives both the boolean and the masked preview
+  from it; asking twice doubled secrets-store traffic per settings open.
+- **Frontend paints the row skeleton first.** Names, letters and the A–Z rail
+  come from the local catalog, so the page is usable before any probe returns.
+
+## Web-session sign-in families (2026-11-24, 0.12.4)
+
+- `provider_catalog::WEB_SESSION_FAMILIES` and the frontend catalog's
+  `webSession: true` flag must both list a family, or no sign-in control is
+  rendered and `localCli` never reports the session. The catalog consistency
+  test enforces that the two surfaces agree.
+- Current members: `tokenrhythm`, `xfyun`, `xfyun-speech`, `bibigpt`,
+  `opendesign`. **BibiGPT was missing** until 0.12.4 even though its
+  `providers/bibigpt.rs` login/clear/status were implemented in 0.12.3 — the
+  flow existed but nothing could reach it.
+- A web-session family never accepts a pasted API key. The settings row must
+  early-return after rendering its sign-in control; falling through would
+  offer a "paste a key" editor that cannot work.
+- `configured` for these families is `status.localCli`, not `status.storedKey`
+  — the session lives in the OS vault under a family-specific
+  `secretstore` target, not in `%APPDATA%\Pane\<family>.json`.
