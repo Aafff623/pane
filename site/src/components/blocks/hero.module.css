@@ -1,0 +1,97 @@
+.hero {
+  padding-block: clamp(36px, 5.1vw, 75px) clamp(48px, 6vw, 86px);
+}
+
+.description {
+  max-width: 660px;
+  margin: 22px auto 0;
+  color: var(--muted-foreground);
+  font-size: clamp(15px, 1.45vw, 18px);
+  line-height: 1.65;
+  text-wrap: pretty;
+}
+
+.actions {
+  display: flex;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 24px;
+}
+
+.actions .button {
+  min-height: 46px;
+  padding-inline: 18px;
+  border-radius: 8px;
+  font-size: 15px;
+}
+
+.proof {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  width: min(100%, 760px);
+  margin: 30px auto 0;
+  padding-block: 14px;
+  border-block: 1px solid var(--border);
+}
+
+.fact {
+  display: flex;
+  min-width: 0;
+  flex-direction: column-reverse;
+  justify-content: center;
+  align-items: center;
+  gap: 4px;
+  padding-inline: 5px;
+}
+
+.fact + .fact { border-inline-start: 1px solid var(--border); }
+.fact dd { font-size: clamp(18px, 2.2vw, 25px); font-weight: 650; line-height: 1.1; }
+.fact dt { color: var(--muted-foreground); font-size: 12px; line-height: 1.4; }
+
+.showcase { max-width: 980px; margin: 28px auto 0; }
+
+.filmWrap { position: relative; }
+
+.film { display: block; width: 100%; height: auto; aspect-ratio: 1152 / 560; border: 1px solid var(--border); border-radius: 16px; background: var(--accent); }
+
+.filmToggle {
+  position: absolute;
+  right: 12px;
+  bottom: 12px;
+  display: inline-flex;
+  width: 30px;
+  height: 30px;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--background) 82%, transparent);
+  color: var(--foreground);
+  backdrop-filter: blur(6px);
+  transition: background 0.18s ease;
+}
+
+.filmToggle:hover { background: var(--background); }
+.filmToggle:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
+
+.showcase figcaption {
+  margin-top: 11px;
+  color: var(--muted-foreground);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+@media (max-width: 640px) {
+  .film { aspect-ratio: 720 / 920; }
+}
+
+@media (max-width: 560px) {
+  .hero { padding-top: 38px; }
+  .description { margin-top: 16px; text-wrap: balance; }
+  .actions { margin-top: 19px; gap: 8px; }
+  .actions .button { padding-inline: 12px; font-size: 14px; }
+  .proof { margin-top: 23px; }
+  .fact dt { font-size: 11px; }
+  .showcase { margin-top: 22px; }
+}

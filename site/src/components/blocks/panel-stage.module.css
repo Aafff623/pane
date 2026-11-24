@@ -1,6 +1,7 @@
 .figure {
   margin: 0;
   width: 100%;
+  scroll-margin-top: 78px;
 }
 
 .walkthrough {
@@ -9,20 +10,16 @@
   margin-top: 48px;
 }
 
-.accordion {
-  min-width: 0;
-}
-
 @media (min-width: 1024px) {
-  .figure {
-  margin: 0;
-  width: 100%;
-}
+  .list {
+    position: sticky;
+    top: 90px;
+  }
 
-.walkthrough {
-    grid-template-columns: 340px minmax(0, 640px);
-    gap: 48px;
-    max-width: 1040px;
+  .walkthrough {
+    grid-template-columns: 330px minmax(0, 470px);
+    gap: 52px;
+    max-width: 900px;
     margin-inline: auto;
     align-items: start;
   }
@@ -34,9 +31,9 @@
   align-items: center;
   justify-content: center;
   width: 100%;
-  max-width: 640px;
+  max-width: 470px;
   margin-inline: auto;
-  aspect-ratio: 64 / 84;
+  padding: 55px 0 22px;
   overflow: hidden;
   border: 1px solid var(--border);
   border-radius: 24px;
@@ -69,131 +66,6 @@
   font-variant-numeric: tabular-nums;
 }
 
-.body {
-  display: flex;
-  width: 100%;
-  height: 100%;
-  align-items: center;
-  justify-content: center;
-  padding: 44px 28px 28px;
-  animation: stage-in 0.36s cubic-bezier(0.2, 0.8, 0.2, 1) both;
-}
-
-.shot {
-  max-width: 94%;
-  max-height: 90%;
-  height: auto;
-  width: auto;
-  border: 1px solid var(--border);
-  border-radius: 14px;
-  box-shadow: var(--shadow-2xl);
-  background: var(--card);
-}
-
-.shotWide {
-  max-width: 96%;
-}
-
-.window {
-  width: 92%;
-  height: 88%;
-  overflow: hidden;
-  border: 1px solid var(--border);
-  border-radius: 14px;
-  background: var(--card);
-  box-shadow: var(--shadow-2xl);
-}
-
-.windowImg {
-  width: 100%;
-  height: auto;
-  max-width: none;
-  transition: transform 0.4s cubic-bezier(0.2, 0.8, 0.2, 1);
-}
-
-.card {
-  width: min(92%, 520px);
-  border: 1px solid var(--border);
-  border-radius: 16px;
-  background: var(--card);
-  box-shadow: var(--shadow-2xl);
-  overflow: hidden;
-}
-
-.cardHead {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 14px 18px;
-  border-bottom: 1px solid var(--border);
-}
-
-.cardTitle {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 14px;
-  font-weight: 600;
-  color: var(--foreground);
-}
-
-.cardTitle span {
-  color: var(--muted-foreground);
-  font-size: 11px;
-  font-weight: 500;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-}
-
-.cardBody {
-  display: flex;
-  flex-direction: column;
-}
-
-.row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-  padding: 14px 20px;
-  border-bottom: 1px solid var(--border);
-  font-size: 13px;
-}
-
-.row:last-child {
-  border-bottom: 0;
-}
-
-.rowLabel {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  color: var(--foreground);
-  font-weight: 500;
-}
-
-.rowValue {
-  color: var(--muted-foreground);
-  font-size: 12px;
-  text-align: right;
-}
-
-.keyRow {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-  padding: 14px 18px;
-  border-bottom: 1px solid var(--border);
-  font-size: 13px;
-  color: var(--muted-foreground);
-}
-
-.keyRow:last-child {
-  border-bottom: 0;
-}
-
 .keys {
   display: inline-flex;
   align-items: center;
@@ -216,29 +88,15 @@
   font-weight: 600;
 }
 
-@keyframes stage-in {
-  from {
-    opacity: 0;
-    transform: translateY(10px) scale(0.985);
-  }
-  to {
-    opacity: 1;
-    transform: none;
-  }
-}
-
 @media (max-width: 1023px) {
+  /* The old 5/6 aspect box was shorter than the live panel itself at phone
+     widths, so overflow:hidden cut ~97px off the bottom of the demo. Let the
+     frame grow with its content instead. */
   .stage {
-    aspect-ratio: 5 / 6;
-  }
-  .body {
-    padding: 40px 18px 20px;
-  }
-  .card {
-    width: 92%;
+    aspect-ratio: auto;
+    padding-bottom: 20px;
   }
 }
-
 
 .list {
   display: flex;
@@ -326,12 +184,10 @@
   }
 }
 
-
 .liveWrap {
   position: relative;
   width: min(94%, 520px);
-  aspect-ratio: 439 / 640;
-  --live-scale: 1.1845;
+  height: clamp(465px, 68vh, 690px);
   border: 1px solid var(--border);
   border-radius: 16px;
   overflow: hidden;
@@ -341,29 +197,11 @@
 
 .liveFrame {
   position: absolute;
-  top: 0;
-  left: 50%;
+  inset: 0;
   display: block;
-  width: 439px;
-  height: 640px;
+  width: 100%;
+  height: 100%;
   border: 0;
-  transform: translateX(-50%) scale(var(--live-scale));
-  transform-origin: top center;
-}
-
-.focusRing {
-  position: absolute;
-  z-index: 3;
-  border: 2px solid var(--primary);
-  border-radius: 10px;
-  background: color-mix(in srgb, var(--primary) 10%, transparent);
-  box-shadow: 0 0 0 9999px color-mix(in srgb, var(--background) 46%, transparent);
-  pointer-events: none;
-  transition:
-    left 0.3s ease,
-    top 0.3s ease,
-    width 0.3s ease,
-    height 0.3s ease;
 }
 
 .liveBadge {
@@ -448,16 +286,9 @@
   font-size: 11px;
 }
 
-@media (prefers-reduced-motion: reduce) {
-  .focusRing {
-    transition: none;
-  }
-}
-
-
 @media (max-width: 1023px) {
   .liveWrap {
     width: min(92%, 380px);
-    --live-scale: 0.866;
+    height: clamp(440px, 74svh, 620px);
   }
 }

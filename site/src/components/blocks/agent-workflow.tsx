@@ -5,47 +5,55 @@ import Image from "next/image";
 import { ArrowRight, Code2, MousePointer2 } from "lucide-react";
 
 import { messages, type Lang } from "@/components/i18n";
+import { SITE_FACTS } from "@/content/facts";
 import styles from "./agent-workflow.module.css";
 
 const HARNESS = [
-  { logo: "claude", colour: "#D97757", name: "Claude" },
-  { logo: "openai", colour: "#10A37F", name: "Codex" },
-  { logo: "cursor", colour: "#26241E", name: "Cursor" },
-  { logo: "windsurf", colour: "#07847D", name: "Windsurf" },
-  { logo: "perplexity", colour: "#20808D", name: "Perplexity" },
-  { logo: "antigravity-color", name: "Antigravity" },
-];
+  ["claude", "Claude Code"], ["codex", "Codex"], ["cursor", "Cursor"], ["windsurf", "Windsurf"],
+  ["copilot", "GitHub Copilot"], ["antigravity", "Antigravity"], ["qodercn", "Qoder CN"],
+  ["kiro", "Kiro"], ["zed", "Zed"], ["opencode", "OpenCode"], ["clinepass", "ClinePass"],
+  ["codebuddy", "CodeBuddy"], ["workbuddy", "WorkBuddy"], ["trae", "Trae"],
+  ["kimi", "Kimi"], ["zai", "Z.ai"], ["minimax", "MiniMax"], ["deepseek", "DeepSeek"],
+  ["openrouter", "OpenRouter"], ["grok", "Grok"], ["amp", "Amp"], ["mistral", "Mistral"],
+  ["qwen", "Qwen"], ["hermes", "Hermes"], ["bibigpt", "BibiGPT"],
+  ["perplexity", "Perplexity"], ["firecrawl", "Firecrawl"], ["tavily", "Tavily"],
+] as const;
+
+// The wall of 28 logos read as clutter, so the card shows a settled cluster and
+// lets an orbiting ring carry the "and many more" idea, anchored by an ellipsis
+// tile. All 28 still ship — the rest are reachable from the providers doc.
+const CLUSTER = HARNESS.slice(0, 5);
+const ORBIT = HARNESS.slice(5, 15);
 
 function HarnessMarks() {
   return (
-    <div className="flex flex-wrap items-center gap-2" aria-hidden="true">
-      {HARNESS.map((tool) => (
-        <span key={tool.logo} className="border-border bg-card flex size-9 items-center justify-center rounded-lg border">
-          <span
-            className="block size-4"
-            style={
-              tool.colour
-                ? {
-                    backgroundColor: tool.colour,
-                    maskImage: `url(/logos/icons/${tool.logo}.svg)`,
-                    maskSize: "contain",
-                    maskRepeat: "no-repeat",
-                    maskPosition: "center",
-                    WebkitMaskImage: `url(/logos/icons/${tool.logo}.svg)`,
-                    WebkitMaskSize: "contain",
-                    WebkitMaskRepeat: "no-repeat",
-                    WebkitMaskPosition: "center",
-                  }
-                : {
-                    backgroundImage: `url(/logos/icons/${tool.logo}.svg)`,
-                    backgroundSize: "contain",
-                    backgroundRepeat: "no-repeat",
-                    backgroundPosition: "center",
-                  }
-            }
-          />
-        </span>
-      ))}
+    <div className={styles.marksStage}>
+      <ul className={styles.orbit} aria-hidden="true">
+        {ORBIT.map(([logo], index) => {
+          const angle = (360 / ORBIT.length) * index;
+          return (
+            <li
+              key={logo}
+              className={styles.orbitItem}
+              style={{ transform: `rotate(${angle}deg) translateY(var(--orbit-radius)) rotate(${-angle}deg)` }}
+            >
+              <span className={styles.orbitIcon}>
+                <Image src={`/logos/providers/${logo}.svg`} alt="" width={18} height={18} className="size-[18px] object-contain" />
+              </span>
+            </li>
+          );
+        })}
+      </ul>
+      <ul className={styles.providerMarks}>
+        {CLUSTER.map(([logo, name]) => (
+          <li key={logo} title={name} className={styles.clusterMark}>
+            <Image src={`/logos/providers/${logo}.svg`} alt={name} width={19} height={19} className="size-[55%] object-contain" />
+          </li>
+        ))}
+        <li className={styles.moreMark} aria-hidden="true">
+          <span className={styles.moreDots}>···</span>
+        </li>
+      </ul>
     </div>
   );
 }
@@ -68,17 +76,17 @@ export function AgentWorkflow({ lang = "en" }: { lang?: Lang }) {
   const copy = messages[lang].workflow;
 
   return (
-    <section id="features" aria-labelledby="agent-workflow-heading" className="py-16 md:py-24 lg:py-32">
+    <section id="features" aria-labelledby="agent-workflow-heading" className="py-14 md:py-20">
       <div className="container flex flex-col items-center justify-start">
         <div className="mx-0 w-full max-w-[980px] text-center">
-          <p className="text-muted-foreground text-base font-medium tracking-widest uppercase">{copy.eyebrow}</p>
-          <h2 id="agent-workflow-heading" className="mt-6 w-full text-2xl tracking-tight md:text-4xl lg:text-5xl">
+          <p className="text-primary text-sm font-medium tracking-wider">{copy.eyebrow}</p>
+          <h2 id="agent-workflow-heading" className="mt-4 w-full text-3xl tracking-tight text-balance md:text-4xl lg:text-5xl">
             {copy.title}
           </h2>
-          <p className="text-muted-foreground mx-auto mt-6 max-w-[640px] text-base leading-relaxed">{copy.description}</p>
+          <p className="text-muted-foreground mx-auto mt-4 max-w-[640px] text-base leading-relaxed">{copy.description}</p>
         </div>
 
-        <div className="mx-auto mt-16 flex w-full max-w-5xl flex-col items-center md:mt-24 md:flex-row md:items-stretch">
+        <div className="mx-auto mt-9 flex w-full max-w-5xl flex-col items-center md:mt-12 md:flex-row md:items-stretch">
           <WorkflowWindow title={copy.leftTitle}>
             <Image src="/pane-logo.png" width={40} height={40} alt="" unoptimized className="rounded-lg" />
             <h3 className="mt-6 text-2xl font-medium tracking-tight">{copy.leftTitle}</h3>
@@ -101,10 +109,9 @@ export function AgentWorkflow({ lang = "en" }: { lang?: Lang }) {
             <HarnessMarks />
             <h3 className="mt-6 text-2xl font-medium tracking-tight">{copy.rightTitle}</h3>
             <p className="text-muted-foreground mt-3 text-base leading-relaxed">{copy.rightBody}</p>
-            <div className="text-muted-foreground mt-8 flex items-center gap-2 text-base">
-              <Code2 aria-hidden="true" className="size-4" />
-              <span className="text-base">{copy.rightFoot}</span>
-            </div>
+            <a href={`${SITE_FACTS.repo}/blob/main/docs/providers.md`} className="text-primary mt-6 inline-flex items-center gap-2 text-sm font-medium underline-offset-4 hover:underline">
+              <Code2 aria-hidden="true" className="size-4" />{copy.rightFoot}
+            </a>
           </WorkflowWindow>
         </div>
       </div>

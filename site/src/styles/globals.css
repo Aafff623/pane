@@ -199,6 +199,15 @@
   .font-mono {
     font-family: var(--font-mono), monospace;
   }
+  /* Instrument numerals: metric values read as measured readings. Tabular
+     figures are what make a number block look calibrated rather than merely
+     bold. The face is the app's own sans — this site ships no mono webfont,
+     so declaring one here would only ever fall back. */
+  .metric-value {
+    font-variant-numeric: tabular-nums;
+    letter-spacing: -0.02em;
+    font-feature-settings: "tnum" 1;
+  }
   /* Macro display headline — heavy, upright. Used on hero H1s. */
   .macro {
     font-family: var(--font-display);

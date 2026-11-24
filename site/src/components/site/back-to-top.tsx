@@ -6,9 +6,13 @@ import { usePathname } from "next/navigation";
 
 import { ArrowUp } from "lucide-react";
 
+import { langFromPath, messages } from "@/components/i18n";
+
 export function BackToTop() {
   const pathname = usePathname();
   const [visible, setVisible] = useState(false);
+  const [blocked, setBlocked] = useState(false);
+  const label = messages[langFromPath(pathname || "/")].footer.backToTop;
 
   useEffect(() => {
     const hero = document.querySelector("main section");
@@ -35,12 +39,33 @@ export function BackToTop() {
     };
   }, [pathname]);
 
+  // The live demo is a real, clickable panel. A floating button would sit on
+  // top of its lower-right cards on narrow screens, so step aside while any
+  // interactive surface is on screen.
+  useEffect(() => {
+    const surfaces = document.querySelectorAll("[data-live-surface]");
+    // This component lives in the root layout and survives client navigation,
+    // so a route without a live surface must clear the flag it inherited.
+    setBlocked(false);
+    if (!surfaces.length) return;
+    const seen = new Set<Element>();
+    const observer = new IntersectionObserver((entries) => {
+      for (const entry of entries) {
+        if (entry.isIntersecting) seen.add(entry.target);
+        else seen.delete(entry.target);
+      }
+      setBlocked(seen.size > 0);
+    }, { threshold: 0.15 });
+    surfaces.forEach((surface) => observer.observe(surface));
+    return () => observer.disconnect();
+  }, [pathname]);
+
   return (
     <button
       data-slot="button"
       type="button"
-      aria-label="Back to top"
-      hidden={!visible}
+      aria-label={label}
+      hidden={!visible || blocked}
       onClick={() => {
         window.scrollTo({
           top: 0,

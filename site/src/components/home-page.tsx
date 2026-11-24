@@ -11,15 +11,13 @@ import type { Lang } from "@/components/i18n";
 export function HomePage({ lang }: { lang: Lang }) {
   return (
     <>
-      <Background>
-        <Hero lang={lang} />
-      </Background>
+      <Hero lang={lang} />
       <AgentWorkflow lang={lang} />
       <PanelAnatomy lang={lang} />
       <Trust lang={lang} />
       <FAQ lang={lang} />
       <DownloadSection lang={lang} />
-      <Background variant="bottom">
+      <Background variant="bottom" className="mx-4 mb-12 sm:mx-6">
         <ClosingCta lang={lang} />
       </Background>
     </>

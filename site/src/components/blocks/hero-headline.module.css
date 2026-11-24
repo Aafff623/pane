@@ -1,13 +1,12 @@
 .headline {
-  width: 80vw;
-  max-width: 1200px;
+  width: 100%;
   margin-inline: auto;
 }
 
 .headline h1 {
-  font-size: 24px;
-  line-height: 1.2;
-  letter-spacing: -0.05em;
+  font-size: clamp(1.65rem, 0.5rem + 5.8vw, 4.5rem);
+  line-height: 1.13;
+  letter-spacing: -0.055em;
   font-weight: var(--display-weight);
 }
 
@@ -20,26 +19,22 @@
 
 .agentLine {
   align-items: center;
-  gap: 0.16em;
+  gap: 0.15em;
 }
 
 .logos {
   position: relative;
   display: inline-block;
-  width: 0.8lh;
-  height: 0.8lh;
-  flex: 0 0 0.8lh;
+  width: 0.84em;
+  height: 0.84em;
+  flex: 0 0 0.84em;
 }
 
 .logo {
   position: absolute;
   inset: 0;
   opacity: 0;
-  animation: rotate-logo 14s ease-in-out infinite;
-}
-
-.logo:first-child {
-  opacity: 1;
+  animation: rotate-logo 12s step-end infinite;
 }
 
 .mark {
@@ -48,38 +43,9 @@
   height: 100%;
 }
 
-@media (min-width: 360px) {
-  .headline h1 {
-    font-size: 32px;
-  }
-}
-
-@media (min-width: 400px) {
-  .headline h1 {
-    font-size: 36px;
-  }
-}
-@media (min-width: 421px) {
-  .headline h1 {
-    font-size: clamp(36px, calc(14.4px + 5.13vw), 80px);
-  }
-}
-
 @keyframes rotate-logo {
-  0% {
-    opacity: 0;
-    transform: translateY(0.12em);
-  }
-  3.5%,
-  10.7% {
-    opacity: 1;
-    transform: translateY(0);
-  }
-  17.8%,
-  100% {
-    opacity: 0;
-    transform: translateY(-0.12em);
-  }
+  0% { opacity: 1; }
+  16.6667%, 100% { opacity: 0; }
 }
 
 @media (prefers-reduced-motion: reduce) {

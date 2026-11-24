@@ -37,3 +37,108 @@
     opacity: 1;
   }
 }
+
+.marksStage {
+  --orbit-radius: 84px;
+  --orbit-ring: 208px;
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 100%;
+  height: calc(var(--orbit-ring) + 28px);
+  margin: 6px 0 20px;
+  overflow: visible;
+}
+
+.providerMarks {
+  position: relative;
+  z-index: 2;
+  display: grid;
+  grid-template-columns: repeat(3, 40px);
+  gap: 7px;
+  margin: 0;
+  padding: 0;
+}
+
+.clusterMark {
+  display: flex;
+  aspect-ratio: 1;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--card);
+}
+
+.moreMark {
+  display: flex;
+  aspect-ratio: 1;
+  align-items: center;
+  justify-content: center;
+  border: 1px dashed color-mix(in srgb, var(--border) 90%, var(--foreground));
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--muted) 55%, transparent);
+  color: var(--muted-foreground);
+}
+
+.moreDots {
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  line-height: 1;
+  transform: translateY(-2px);
+}
+
+.orbit {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: var(--orbit-ring);
+  height: var(--orbit-ring);
+  margin: calc(var(--orbit-ring) / -2) 0 0 calc(var(--orbit-ring) / -2);
+  z-index: 1;
+  padding: 0;
+  display: grid;
+  place-items: center;
+  animation: orbit-spin 34s linear infinite;
+}
+
+.orbitItem {
+  grid-area: 1 / 1;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  will-change: transform;
+}
+
+.orbitIcon {
+  display: flex;
+  width: 28px;
+  height: 28px;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--card);
+  opacity: 0.72;
+  box-shadow: 0 1px 2px rgb(0 0 0 / 6%);
+  /* Cancel the ring's rotation so the brand marks stay upright. */
+  animation: orbit-counter 34s linear infinite;
+}
+
+@keyframes orbit-spin {
+  to { transform: rotate(360deg); }
+}
+
+@keyframes orbit-counter {
+  to { transform: rotate(-360deg); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .orbit,
+  .orbitIcon { animation: none; }
+}
+
+@media (max-width: 480px) {
+  .marksStage { --orbit-radius: 76px; --orbit-ring: 188px; }
+}

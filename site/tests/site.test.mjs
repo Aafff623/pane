@@ -36,6 +36,13 @@ test("static export: pages, languages and assets", () => {
   for (const page of ["demo", "privacy", "terms", "zh/demo", "zh/privacy", "zh/terms"]) {
     assert.ok(existsSync(p(`${page}/index.html`)), `${page} page exists`);
   }
+  for (const file of [
+    "demo/__next.demo.__PAGE__.txt",
+    "zh/__next.zh.__PAGE__.txt",
+    "zh/demo/__next.zh.demo.__PAGE__.txt",
+  ]) {
+    assert.ok(existsSync(p(file)), `missing route prefetch data ${file}`);
+  }
 
   const seen = new Set();
   for (const page of ["index.html", "zh/index.html", "demo/index.html", "privacy/index.html"]) {

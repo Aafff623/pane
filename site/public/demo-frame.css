@@ -8,6 +8,16 @@ body { border-radius:14px; }
 #side-zone:hover .sidebar,#side-zone:focus-within .sidebar,
 #side-zone-right:hover .sidebar-right,#side-zone-right:focus-within .sidebar-right { transform:none!important; }
 .content { padding-left:0!important; padding-right:0!important; }
+
+[data-pane-guide-focus] {
+  outline: 2px solid #16977b;
+  outline-offset: -2px;
+  border-radius: 8px;
+}
+
+:root[data-theme="dark"] [data-pane-guide-focus] { outline-color: #58e1bb; }
+body[data-pane-guide-settings] #side-zone { width: 42px; }
+body[data-pane-guide-settings] #side-zone .sidebar { transform: none; }
 #settings { overflow-y:auto; }
 .settings-open #settings { transform:translateX(0)!important; visibility:visible!important; }
 @media (prefers-reduced-motion:reduce) { *,*::before,*::after { animation:none!important; transition:none!important; scroll-behavior:auto!important; } }

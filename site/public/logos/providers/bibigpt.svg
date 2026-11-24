@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24">
+  <defs>
+    <linearGradient id="bibi-sky" x1="12" y1="0" x2="12" y2="24" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#AAE9FF"/>
+      <stop offset="1" stop-color="#82D4FC"/>
+    </linearGradient>
+    <linearGradient id="bibi-body" x1="12" y1="8" x2="12" y2="22" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#FBE3DD"/>
+      <stop offset="1" stop-color="#F4C5C2"/>
+    </linearGradient>
+  </defs>
+  <rect width="24" height="24" rx="6" fill="url(#bibi-sky)"/>
+  <!-- 身体：圆润的团子轮廓 -->
+  <path d="M12 7.6c-4.3 0-7.2 3.1-7.2 7.1 0 3.6 2.6 6.1 7.2 6.1s7.2-2.5 7.2-6.1c0-4-2.9-7.1-7.2-7.1z" fill="url(#bibi-body)"/>
+  <!-- 贝雷帽 -->
+  <path d="M7.6 8.4c0-2 2-3.4 4.4-3.4s4.4 1.4 4.4 3.4c0 1.1-2 1.8-4.4 1.8s-4.4-.7-4.4-1.8z" fill="#E8556D"/>
+  <!-- 帽子上的小尖 -->
+  <circle cx="12.2" cy="5.4" r="1.05" fill="#F07188"/>
+  <!-- 抱着的本子 -->
+  <rect x="9.3" y="13.6" width="5.4" height="4.1" rx="0.9" fill="#B0785A"/>
+  <rect x="9.3" y="13.6" width="5.4" height="1.1" rx="0.5" fill="#C68D6C"/>
+  <!-- 眼睛 -->
+  <circle cx="9.9" cy="11" r="0.75" fill="#5A3A33"/>
+  <circle cx="14.1" cy="11" r="0.75" fill="#5A3A33"/>
+</svg>

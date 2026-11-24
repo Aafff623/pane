@@ -4,16 +4,16 @@ const agents = [
   { name: "Claude", logo: "claude", colour: "#D97757" },
   { name: "OpenAI", logo: "openai", colour: "#10A37F" },
   { name: "Perplexity", logo: "perplexity", colour: "#20808D" },
-  { name: "Cursor", logo: "cursor", colour: "#26241E" },
+  { name: "Cursor", logo: "cursor", colour: "var(--foreground)" },
   { name: "Windsurf", logo: "windsurf", colour: "#07847D" },
   { name: "Antigravity", logo: "antigravity-color" },
 ];
 
-export function AgentIcons({ size }: { size?: number }) {
+function AgentIcons() {
   return (
-    <span className={styles.logos} aria-hidden="true" style={size ? { width: size, height: size, flex: `0 0 ${size}px` } : undefined}>
+    <span className={styles.logos} aria-hidden="true">
       {agents.map((agent, index) => (
-        <span key={agent.logo} className={styles.logo} style={{ animationDelay: `${index * 2}s` }}>
+        <span key={agent.logo} className={styles.logo} style={{ animationDelay: `${index * 2 - 0.3}s` }}>
           <span
             className={styles.mark}
             style={
@@ -42,7 +42,7 @@ export function AgentIcons({ size }: { size?: number }) {
 export function HeroHeadline({ lead, before, after }: { lead: string; before: string; after: string }) {
   return (
     <div className={styles.headline}>
-      <h1 className="macro text-foreground">
+      <h1 id="hero-title" className="macro text-foreground">
         <span className={styles.line}>{lead}</span>
         <span className={`${styles.line} ${styles.agentLine}`}>
           <span>{before}</span>

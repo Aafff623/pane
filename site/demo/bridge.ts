@@ -3,6 +3,7 @@
 // 'pane-source/providerCatalog' is aliased by build-demo.mjs to the catalog of
 // the project passed on the command line, so the demo always mirrors it.
 import { providerCatalog } from 'pane-source/providerCatalog';
+import { installDemoGuide } from './guide';
 
 declare const __SOURCE_VERSION__: string;
 
@@ -481,6 +482,7 @@ function collectAnnotationAnchors() {
 // is picked up next frame, and quiet frames cost one getBoundingClientRect
 // round per anchor and a string compare.
 window.addEventListener('DOMContentLoaded', () => {
+  installDemoGuide();
   parent.postMessage({ type: 'pane-demo-ready' }, location.origin);
   let lastSignature = '';
   const tick = () => {

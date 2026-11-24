@@ -8,6 +8,10 @@ type BackgroundProps = {
   className?: string;
 };
 
-export const Background = ({ children, className }: BackgroundProps) => {
-  return <div className={cn("relative", className)}>{children}</div>;
+export const Background = ({ children, variant = "top", className }: BackgroundProps) => {
+  return (
+    <div className={cn(variant === "bottom" && "rounded-3xl bg-accent/50", className)}>
+      {children}
+    </div>
+  );
 };

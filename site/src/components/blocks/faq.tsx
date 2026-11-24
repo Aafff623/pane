@@ -6,10 +6,10 @@ import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/
 export function FAQ({ lang = "en" }: { lang?: Lang }) {
   const copy = messages[lang].faq;
   return (
-    <section id="faq" className="py-16 md:py-24 lg:py-32">
+    <section id="faq" className="py-14 md:py-20">
       <div className="container max-w-5xl">
-        <div className="mb-12 space-y-4 text-center lg:mb-16">
-          <h2 className="text-2xl tracking-tight md:text-4xl lg:text-5xl">{copy.title}</h2>
+        <div className="mb-9 space-y-4 text-center md:mb-12">
+          <h2 className="text-3xl tracking-tight md:text-4xl lg:text-5xl">{copy.title}</h2>
           <p className="text-muted-foreground mx-auto max-w-2xl leading-relaxed">{copy.description}</p>
         </div>
 

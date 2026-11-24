@@ -1,37 +1,32 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 
 import { ChevronDown, Keyboard } from "lucide-react";
 
 import { PaneDemoFrame } from "@/components/pane-demo-frame";
 import { messages, type Lang } from "@/components/i18n";
+import { DEMO_GUIDE, type DemoGuide } from "@/content/demo-guide";
 import styles from "./panel-stage.module.css";
-
-type Rect = { left: number; top: number; width: number; height: number };
-
-const FOCUS: Record<number, Rect> = {
-  0: { left: 6, top: 50, width: 88, height: 47 },
-  1: { left: 3, top: 1.5, width: 94, height: 11 },
-  2: { left: 3, top: 46, width: 94, height: 12 },
-  3: { left: 3, top: 58, width: 47, height: 24 },
-  4: { left: 3, top: 7, width: 94, height: 43 },
-  5: { left: 82, top: 1.5, width: 15, height: 9 },
-};
-
-function LivePanel({ lang }: { lang: Lang }) {
-  return <PaneDemoFrame lang={lang} className={styles.liveFrame} />;
-}
 
 export function PanelAnatomy({ lang = "en" }: { lang?: Lang }) {
   const copy = messages[lang].panel;
-  const [active, setActive] = useState(0);
-  const focus = FOCUS[active];
+  const [selection, setSelection] = useState<{ index: number; step: DemoGuide }>({ index: 0, step: DEMO_GUIDE[0] });
+  const preview = useRef<HTMLElement>(null);
+  const active = selection.index;
+
+  function select(index: number) {
+    setSelection({ index, step: DEMO_GUIDE[index] });
+    const stage = preview.current;
+    if (stage && matchMedia("(max-width: 1023px)").matches && stage.getBoundingClientRect().top > innerHeight * 0.55) {
+      stage.scrollIntoView({ block: "start", behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "instant" : "smooth" });
+    }
+  }
 
   return (
-    <section id="panel-anatomy" aria-labelledby="panel-anatomy-title" className="py-16 md:py-24 lg:py-32">
+    <section id="panel-anatomy" aria-labelledby="panel-anatomy-title" className="py-14 md:py-20">
       <div className="container">
-        <h2 id="panel-anatomy-title" className="text-center text-3xl tracking-tight text-balance sm:text-4xl md:text-5xl lg:text-6xl">
+        <h2 id="panel-anatomy-title" className="text-center text-3xl tracking-tight text-balance md:text-4xl lg:text-5xl">
           {copy.title}
         </h2>
 
@@ -41,14 +36,20 @@ export function PanelAnatomy({ lang = "en" }: { lang?: Lang }) {
               const open = index === active;
               return (
                 <div key={item.title} className={styles.item} data-open={open}>
-                  <button type="button" onClick={() => setActive(index)} aria-expanded={open} className={styles.trigger}>
+                  <button
+                    type="button"
+                    onClick={() => select(index)}
+                    aria-expanded={open}
+                    aria-controls={`pane-guide-${index}`}
+                    className={styles.trigger}
+                  >
                     <span aria-hidden="true" className={styles.index}>
                       0{index + 1}
                     </span>
                     <span className={styles.title}>{item.title}</span>
                     <ChevronDown size={16} aria-hidden="true" className={styles.chevron} />
                   </button>
-                  <div className={styles.panel}>
+                  <div id={`pane-guide-${index}`} className={styles.panel} aria-hidden={!open}>
                     <div>
                       {item.lines.map((line) => (
                         <p key={line}>{line}</p>
@@ -61,9 +62,9 @@ export function PanelAnatomy({ lang = "en" }: { lang?: Lang }) {
             <p className={styles.liveHint}>{copy.hint}</p>
           </div>
 
-          <figure className={styles.figure}>
+          <figure ref={preview} className={styles.figure} data-live-surface>
             <div className={styles.stage}>
-              <span className={styles.chip}>
+              <span className={styles.chip} aria-live="polite">
                 <b>0{active + 1}</b>
                 {copy.items[active].title}
               </span>
@@ -73,16 +74,9 @@ export function PanelAnatomy({ lang = "en" }: { lang?: Lang }) {
               </span>
 
               <div className={styles.liveWrap}>
-                <LivePanel lang={lang} />
-                {focus ? (
-                  <span
-                    aria-hidden="true"
-                    className={styles.focusRing}
-                    style={{ left: `${focus.left}%`, top: `${focus.top}%`, width: `${focus.width}%`, height: `${focus.height}%` }}
-                  />
-                ) : null}
+                <PaneDemoFrame lang={lang} className={styles.liveFrame} guide={selection} />
                 {active === 6 ? (
-                  <div className={styles.shortcutOverlay} role="img" aria-label={copy.items[6].title}>
+                  <div className={styles.shortcutOverlay}>
                     <span className={styles.shortcutHead}>
                       {copy.items[6].title}
                       <Keyboard size={14} aria-hidden="true" />
