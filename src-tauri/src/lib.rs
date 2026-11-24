@@ -1729,6 +1729,7 @@ fn last_ok() -> &'static Mutex<HashMap<String, CachedSnap>> {
 /// Google AI Pro, Grok reports X Premium/SuperGrok. Reads the in-memory
 /// cache when warm, else the persisted last_snapshots.json.
 fn cached_plan_for(family: &str) -> Option<String> {
+    // The in-memory cache is fresher than the file, so it answers first.
     if let Ok(map) = last_ok().lock() {
         if let Some(entry) = map.get(family) {
             if entry.snap.status == "ok" {
@@ -1738,14 +1739,37 @@ fn cached_plan_for(family: &str) -> Option<String> {
             }
         }
     }
-    let path = providers::config_dir().join("last_snapshots.json");
-    let raw = std::fs::read_to_string(path).ok()?;
-    let doc: serde_json::Value = serde_json::from_str(&raw).ok()?;
-    doc.get(family)?
-        .get("snap")?
-        .get("plan")?
-        .as_str()
-        .map(str::to_string)
+    plans_on_disk().get(family).cloned()
+}
+
+/// `last_snapshots.json` parsed once per process. Without this the settings
+/// batch re-read and re-parsed the same 30 KB file for every one of ~80
+/// families, which dominated the cost after the per-family PATH scan was gone.
+fn plans_on_disk() -> &'static std::collections::HashMap<String, String> {
+    static PLANS: OnceLock<std::collections::HashMap<String, String>> = OnceLock::new();
+    PLANS.get_or_init(|| {
+        let mut plans = std::collections::HashMap::new();
+        let path = providers::config_dir().join("last_snapshots.json");
+        let Ok(raw) = std::fs::read_to_string(path) else {
+            return plans;
+        };
+        let Ok(doc) = serde_json::from_str::<serde_json::Value>(&raw) else {
+            return plans;
+        };
+        let Some(entries) = doc.as_object() else {
+            return plans;
+        };
+        for (family, entry) in entries {
+            let Some(snap) = entry.get("snap") else { continue };
+            if snap.get("status").and_then(serde_json::Value::as_str) != Some("ok") {
+                continue;
+            }
+            if let Some(plan) = snap.get("plan").and_then(serde_json::Value::as_str) {
+                plans.insert(family.clone(), plan.to_string());
+            }
+        }
+        plans
+    })
 }
 
 fn persist_last_ok_at(
@@ -5209,37 +5233,48 @@ fn source_probe() -> source_probe::SourceProbeReport {
 /// description from the provider's local_credential_hint, null when none).
 /// Account cards ("claude@ab12cd34") report their family's status — the
 /// family owns every credential source.
-#[tauri::command]
-fn get_credential_status(provider: String) -> Value {
-    let family = family_of(&provider);
+/// The credential facts for one family. Kept separate from the command so the
+/// batch variant can reuse an already-shared environment/PATH snapshot —
+/// probing every family on its own re-read the registry and re-listed 149 PATH
+/// directories per call, which is what made the settings page crawl.
+fn credential_status_for(family: &str, probe: &source_probe::SourceProbe) -> Value {
     // Multi-account families: the account list is the key store now (the
     // old <provider>.json main key file was imported and removed), so
     // "stored key" means "the accounts list has at least one entry". Login
     // families keep their accounts in login-accounts/<family>.json, NOT in
     // accounts/<family>.json — reading the wrong store made a signed-in
     // CodeBuddy/WorkBuddy look unconfigured.
-    let stored_key = if login_accounts::takes_login_accounts(&family) {
-        !login_accounts::load(&family).is_empty()
-    } else if accounts::provider_takes_accounts(&family) {
-        !accounts::load_accounts(&family).is_empty()
+    // One vault read serves both the boolean and the masked preview: asking
+    // `stored_key_file` twice per family doubled the secrets-store traffic on
+    // every settings open.
+    let key_store_family = login_accounts::takes_login_accounts(family)
+        || accounts::provider_takes_accounts(family);
+    let stored_secret = if key_store_family {
+        None
     } else {
-        providers::stored_key_file(&family).is_some()
+        providers::stored_key_file(family)
+    };
+    let stored_key = if login_accounts::takes_login_accounts(family) {
+        !login_accounts::load(family).is_empty()
+    } else if accounts::provider_takes_accounts(family) {
+        !accounts::load_accounts(family).is_empty()
+    } else {
+        stored_secret.is_some()
     };
     let env_key = provider_catalog::provider_env_vars(&family)
         .iter()
         .any(|var| std::env::var(var).is_ok_and(|v| !v.trim().is_empty()));
-    let probe = source_probe::probe_family(&family);
     let mut local_cli = probe.local_hint.clone();
     // Subscription/membership badge: Cursor reads it straight from the
     // editor's local state DB (same source cockpit badges accounts with);
     // other providers surface their plan on the quota card itself.
-    let membership = match family.as_str() {
+    let membership = match family {
         "cursor" => providers::cursor::local_membership(),
         // Every other provider: the plan of the last good snapshot — Codex
         // reports team, Copilot reports Pro (Student), Antigravity reports
         // Google AI Pro, Grok reports X Premium/SuperGrok — so the tier is
         // visible even before the quota card paints.
-        _ => cached_plan_for(&family),
+        _ => cached_plan_for(family),
     };
     // Kimi can expose an old CLI OAuth file even when the card is actually
     // using the API key supplied to Pane. Report only the source selected by
@@ -5255,11 +5290,11 @@ fn get_credential_status(provider: String) -> Value {
     // Pane's own OAuth login (the gear panel's "Sign in with browser") is
     // a credential source separate from the CLI's sign-in; report its
     // account label so the status chips can show it.
-    let oauth_label = match family.as_str() {
-        "codex" | "grok" | "copilot" => oauth::label(&family),
+    let oauth_label = match family {
+        "codex" | "grok" | "copilot" => oauth::label(family),
         _ => None,
     };
-    let masked_key = providers::stored_key_file(&family).map(|key| accounts::mask_key(&key));
+    let masked_key = stored_secret.as_deref().map(accounts::mask_key);
     json!({
         "storedKey": stored_key,
         "maskedKey": masked_key,
@@ -5273,6 +5308,57 @@ fn get_credential_status(provider: String) -> Value {
         "installEvidence": probe.install_evidence,
         "credentialSource": probe.credential_source,
     })
+}
+
+/// Credential probe for the Customize "?" and gear panels: is a key saved
+/// in %APPDATA%\Pane\<provider>.json, is one of the provider's env vars
+/// set, and which local CLI/desktop sign-in exists (a human-readable
+/// description from the provider's local_credential_hint, null when none).
+/// Account cards ("claude@ab12cd34") report their family's status — the
+/// family owns every credential source.
+///
+/// Async so Tauri runs it off the UI thread: the probe lists every PATH
+/// directory, and a synchronous command stalled clicks for its whole run.
+#[tauri::command]
+async fn get_credential_status(provider: String) -> Value {
+    let family = family_of(&provider);
+    let probe = source_probe::probe_family(&family);
+    credential_status_for(&family, &probe)
+}
+
+/// The same facts for many families at once, sharing ONE environment and
+/// PATH listing. The settings page asks for ~80 families on open; probing
+/// them one by one re-read the registry and re-listed the PATH on every
+/// call, which is what made the page feel frozen.
+#[tauri::command]
+async fn get_credential_statuses(providers: Vec<String>) -> serde_json::Map<String, Value> {
+    let families: Vec<String> = providers.iter().map(|id| family_of(id)).collect();
+    let probes = source_probe::probe_families(families.iter().map(|family| family.as_str()));
+    let mut out = serde_json::Map::new();
+    for family in families {
+        if out.contains_key(&family) {
+            continue;
+        }
+        let probe = probes.get(&family);
+        let status = match probe {
+            Some(probe) => credential_status_for(&family, probe),
+            None => credential_status_for(
+                &family,
+                &source_probe::SourceProbe {
+                    family: family.clone(),
+                    display_name: family.clone(),
+                    install_state: "unknown",
+                    install_evidence: Vec::new(),
+                    credential_state: "absent",
+                    credential_source: "none".to_string(),
+                    env_vars: Vec::new(),
+                    local_hint: None,
+                },
+            ),
+        };
+        out.insert(family, status);
+    }
+    out
 }
 
 /// Starts Pane's own OAuth device-code login (Codex / Grok). Returns the
@@ -6590,6 +6676,7 @@ pub fn run() {
             account_list,
             auth_center_list,
             get_credential_status,
+            get_credential_statuses,
             source_probe,
             oauth_start,
             oauth_poll,

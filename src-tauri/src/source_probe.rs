@@ -329,6 +329,8 @@ pub fn local_credential_hint(family: &str) -> Option<String> {
         "perplexity" => crate::providers::perplexity::local_credential_hint(),
         "volcengine" => crate::providers::volcengine::local_credential_hint(),
         "zcode" => crate::providers::zcode::local_credential_hint(),
+        "bibigpt" => crate::providers::bibigpt::local_credential_hint(),
+        "opendesign" => crate::providers::opendesign::local_credential_hint(),
         _ => None,
     }
 }
@@ -668,5 +670,68 @@ mod tests {
         let found = executable_evidence(&["pane-probe-fake"], &snapshot);
         let _ = std::fs::remove_dir_all(&dir);
         assert_eq!(found, vec![dir.join("pane-probe-fake.cmd").to_string_lossy().to_string()]);
+    }
+
+    /// The settings page reads statuses in one batch, while a card still asks
+    /// for a single family. They must agree, or one surface says "connected"
+    /// while the other says "not set". Both now share `build_probe`; this
+    /// pins that they cannot drift again.
+    #[test]
+    fn batched_probe_matches_the_single_family_probe() {
+        let families = ["claude", "codex", "opendesign", "bibigpt", "kimi"];
+        let batch = probe_families(families);
+        for family in families {
+            let single = probe_family(family);
+            let paired = batch.get(family).expect("batch covers every requested family");
+            assert_eq!(single.family, paired.family, "{family} family id");
+            assert_eq!(single.install_state, paired.install_state, "{family} install state");
+            assert_eq!(single.credential_state, paired.credential_state, "{family} credential state");
+            assert_eq!(single.credential_source, paired.credential_source, "{family} credential source");
+            assert_eq!(single.env_vars, paired.env_vars, "{family} env vars");
+            assert_eq!(single.local_hint, paired.local_hint, "{family} local hint");
+        }
+    }
+
+    /// Duplicate ids (an account card plus its family id) must not make the
+    /// batch emit two entries, and an empty request must stay cheap.
+    #[test]
+    fn batched_probe_dedupes_and_handles_empty_input() {
+        assert!(probe_families(std::iter::empty()).is_empty());
+        let batch = probe_families(["claude", "claude@ab12cd34", "claude"]);
+        assert_eq!(batch.len(), 2, "family ids collapse, the account card stays its own key");
+    }
+}
+
+/// Not a test: `cargo test bench -- --ignored --nocapture` prints the wall
+/// time of the per-family path versus the batched path on this machine, so
+/// the settings-page fix stays measurable instead of anecdotal.
+#[cfg(test)]
+mod bench {
+    use super::*;
+
+    #[test]
+    #[ignore]
+    fn probe_bench() {
+        let families: Vec<&str> = crate::provider_catalog::provider_definitions()
+            .iter()
+            .map(|def| def.family_id)
+            .collect();
+
+        let start = std::time::Instant::now();
+        for family in &families {
+            let _ = probe_family(family);
+        }
+        let per_family = start.elapsed();
+
+        let start = std::time::Instant::now();
+        let _ = probe_families(families.iter().copied());
+        let batched = start.elapsed();
+
+        println!(
+            "families={} per-family={:?} batched={:?}",
+            families.len(),
+            per_family,
+            batched
+        );
     }
 }

@@ -3557,10 +3557,16 @@ function isBareHintCard(snap: Snapshot): boolean {
 /// starter set as refresh()'s first-launch detection).
 const STARTER_FAMILIES = new Set(["claude", "codex"]);
 
-/// A bare hint card that folds into the "未配置" section when the board
-/// cleanliness toggle is on (default). Everything else renders in place.
+/// A bare hint card folds into the "未配置" section only while the user has
+/// NOT enabled it. A provider the user deliberately switched on is a card
+/// they asked to see, so its sign-in prompt belongs on the board — hiding it
+/// made an enabled provider look like it never loaded at all. Disabled
+/// families never reach this predicate: `orderedSnapshots` drops them first.
 function isFoldableHintCard(s: Snapshot): boolean {
-  return isBareHintCard(s) && !STARTER_FAMILIES.has(providerFamily(s.id));
+  const family = providerFamily(s.id);
+  if (STARTER_FAMILIES.has(family)) return false;
+  if (!config.disabled.includes(family)) return false;
+  return isBareHintCard(s);
 }
 
 /// Session-only: the "未配置" fold starts collapsed every launch; expanding
@@ -4264,8 +4270,9 @@ function overviewSnapshots(): Snapshot[] {
   for (const s of orderedSnapshots()) {
     const fam = providerFamily(s.id);
     if (seen.has(fam)) continue;
-    // "需凭据" tiles carry no data — with the board cleanliness toggle on
-    // they stay off the overview (the fold on the board still lists them).
+    // "需凭据" tiles carry no data. A provider the user enabled stays in the
+    // list so the ring grid matches the board; one they turned off is already
+    // absent from `orderedSnapshots`, so the fold never needs to hide it.
     if (folding && isFoldableHintCard(s)) continue;
     seen.add(fam);
     out.push(s);
@@ -14607,9 +14614,10 @@ function renderWelcome(): string {
 function renderGroupedCards(): string {
   const snaps = orderedSnapshots();
   if (snaps.length === 0) return renderEmptyBoard();
-  // Board cleanliness (issue: fresh/legacy configs flooded the dashboard
-  // with "未配置凭据" cards): bare hint cards fold into one collapsed
-  // section; the claude/codex starter cards stay out front.
+  // Board cleanliness: a bare hint card folds only when its provider is turned
+  // OFF — an enabled provider is a card the user asked for, so it stays in its
+  // category with a sign-in prompt instead of disappearing into a fold the
+  // user reads as "nothing loaded".
   const folding = config.hideUnconfigured !== false;
   const unconfigured = folding ? snaps.filter(isFoldableHintCard) : [];
   const unconfiguredIds = new Set(unconfigured.map((s) => s.id));
@@ -18748,18 +18756,7 @@ async function refreshSettingsProviderKey(family: string): Promise<void> {
   } catch {
     // A failed probe must not blank a row into a wrong "not set" state.
   }
-  if (supportsExtraAccounts(family)) {
-    try {
-      const [active, archived] = await Promise.all([
-        invoke<AccountEntry[]>("account_list", { provider: family }),
-        invoke<ArchivedAccountRow[]>("archived_accounts", { provider: family }),
-      ]);
-      accountsCache.set(family, active);
-      archivedAccountsCache.set(family, archived);
-    } catch {
-      // Keep the previous list on failure.
-    }
-  }
+  if (supportsExtraAccounts(family)) await loadFamilyAccounts(family);
 }
 
 const SPEND_SOURCE_STATE_ORDER = [
@@ -19090,8 +19087,42 @@ function mountSpendSettingsBlocks(container: HTMLElement | null): void {
 }
 
 async function loadSettingsProviderKeys(): Promise<void> {
-  await Promise.all(settingsCredentialFamilies().map((family) => refreshSettingsProviderKey(family)));
+  // Paint the rows first: names, letters and A–Z rail come from the local
+  // catalog, so the page is usable before any probe returns. A status probe
+  // touches the OS vault and every PATH directory; waiting for ~80 of them
+  // before the first pixel is what made opening Settings feel frozen.
   renderSettingsProviderKeys();
+  const families = settingsCredentialFamilies();
+  try {
+    const statuses = await invoke<Record<string, CredStatus>>("get_credential_statuses", {
+      providers: families,
+    });
+    for (const [family, status] of Object.entries(statuses)) {
+      credStatusCache.set(family, status);
+    }
+  } catch {
+    // A failed batch must not blank every row into a wrong "not set" state;
+    // the cache keeps whatever the last successful read produced.
+  }
+  await Promise.all(
+    families.filter((family) => supportsExtraAccounts(family)).map((family) => loadFamilyAccounts(family)),
+  );
+  renderSettingsProviderKeys();
+}
+
+/// Account lists for one multi-account family (the key store doubles as the
+/// account store, so a row cannot say "N accounts" without them).
+async function loadFamilyAccounts(family: string): Promise<void> {
+  try {
+    const [active, archived] = await Promise.all([
+      invoke<AccountEntry[]>("account_list", { provider: family }),
+      invoke<ArchivedAccountRow[]>("archived_accounts", { provider: family }),
+    ]);
+    accountsCache.set(family, active);
+    archivedAccountsCache.set(family, archived);
+  } catch {
+    // Keep the previous list on failure.
+  }
 }
 
 function skeyLetter(name: string): string {
@@ -19140,7 +19171,9 @@ function settingsKeyRow(family: string): HTMLElement {
   const status = credStatusCache.get(family);
   const accounts = accountsCache.get(family) ?? [];
   const multi = supportsExtraAccounts(family);
-  const configured = multi ? accounts.length > 0 : status?.storedKey === true;
+  // A web-session sign-in (OpenDesign, BibiGPT) lives in the OS vault, not in
+  // the `<family>.json` key store, and the backend reports it as localCli.
+  const configured = multi ? accounts.length > 0 : status?.storedKey === true || (isWebSessionFamily(family) && Boolean(status?.localCli));
 
   const providerName = notedName(family, providerDisplayName(family));
   const item = document.createElement("div");
@@ -19208,7 +19241,9 @@ function settingsKeyRow(family: string): HTMLElement {
   help.setAttribute("aria-label", t("customize.helpMenu"));
   help.addEventListener("click", () => openProviderHelp(family));
   actions.append(help);
-  if (!keyable && !multi) return item;
+  // A single-account web-session family (BibiGPT, OpenDesign) still needs a
+  // sign-in control; only families with no credential lane at all stop here.
+  if (!keyable && !multi && !isWebSessionFamily(family)) return item;
 
   const button = (label: string, extraClass = "", iconName?: UiIconName) => {
     const b = document.createElement("button");
@@ -19218,6 +19253,20 @@ function settingsKeyRow(family: string): HTMLElement {
     else b.textContent = label;
     return b;
   };
+
+  if (!multi && isWebSessionFamily(family)) {
+    const signIn = button(configured ? t("settings.webRelogin") : t("settings.webLogin"), "", "lockOpen");
+    signIn.addEventListener("click", () => void addWebSessionAccount(signIn, family));
+    actions.append(signIn);
+    if (configured) {
+      const out = button(t("settings.webClearSignIn"), "danger");
+      out.addEventListener("click", () => void clearWebSessionAccount(family));
+      actions.append(out);
+    }
+    // A session-only family has no key store: falling through would offer a
+    // "paste a key" editor that cannot work. Its sign-in flow is the whole row.
+    return item;
+  }
 
   if (multi) {
     // Same routing as the drawer's ⚙ panel (renderCustConfig): the
@@ -19335,6 +19384,16 @@ async function addWebSessionAccount(button: HTMLButtonElement, family: string): 
   } finally {
     button.disabled = false;
     button.textContent = label;
+  }
+}
+
+async function clearWebSessionAccount(family: string): Promise<void> {
+  try {
+    await invoke("web_session_login_clear", { family });
+    await afterCredentialMutation(family);
+    renderSettingsProviderKeys();
+  } catch (error) {
+    settingsToast(String(error), true);
   }
 }
 

@@ -1110,7 +1110,7 @@ pub fn supports_api_key(family_id: &str) -> bool {
 
 /// Families whose credential is a Pane-hosted browser session rather than a
 /// pasted API key. Keep in sync with the frontend catalog's `webSession` flag.
-pub const WEB_SESSION_FAMILIES: &[&str] = &["tokenrhythm", "xfyun", "xfyun-speech", "opendesign"];
+pub const WEB_SESSION_FAMILIES: &[&str] = &["tokenrhythm", "xfyun", "xfyun-speech", "bibigpt", "opendesign"];
 
 pub fn is_web_session(family_id: &str) -> bool {
     WEB_SESSION_FAMILIES.contains(&family_id)
