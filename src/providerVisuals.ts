@@ -45,6 +45,7 @@ import braveIcon from "./assets/providers/brave.svg?raw";
 import giphyIcon from "./assets/providers/giphy.svg?raw";
 import apigotoIcon from "./assets/providers/apigoto.svg?raw";
 import bibigptIcon from "./assets/providers/bibigpt.svg?raw";
+import opendesignIcon from "./assets/providers/opendesign.svg?raw";
 import shandianshuoIcon from "./assets/providers/shandianshuo.svg?raw";
 import { providerDefinition, providerFamily } from "./providerCatalog";
 import ampIcon from "./assets/providers/amp.svg?raw";
@@ -147,6 +148,7 @@ const VISUALS: Readonly<Record<string, ProviderVisual>> = {
   brave: { iconKey: "brave", iconSvg: braveIcon },
   giphy: { iconKey: "giphy", iconSvg: giphyIcon },
   apigoto: { iconKey: "apigoto", iconSvg: apigotoIcon },
+  opendesign: { iconKey: "opendesign", iconSvg: opendesignIcon },
   amp: { iconKey: "amp", iconSvg: ampIcon },
   bedrock: { iconKey: "bedrock", iconSvg: bedrockIcon },
   chutes: { iconKey: "chutes", iconSvg: chutesIcon },

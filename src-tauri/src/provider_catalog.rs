@@ -666,6 +666,16 @@ const PROVIDER_DEFINITIONS: &[ProviderDefinition] = &[
         primary_unit: UsageUnit::Tokens,
     },
     ProviderDefinition {
+        family_id: "opendesign",
+        display_name: "OpenDesign",
+        query_kind: QueryKind::NativeCodingPlan,
+        supports_api_key: false,
+        supports_extra_accounts: false,
+        icon_key: "opendesign",
+        category: ProviderCategory::Coding,
+        primary_unit: UsageUnit::Credits,
+    },
+    ProviderDefinition {
         family_id: "brave",
         display_name: "Brave Search",
         query_kind: QueryKind::NativeBalance,
@@ -1100,7 +1110,7 @@ pub fn supports_api_key(family_id: &str) -> bool {
 
 /// Families whose credential is a Pane-hosted browser session rather than a
 /// pasted API key. Keep in sync with the frontend catalog's `webSession` flag.
-pub const WEB_SESSION_FAMILIES: &[&str] = &["tokenrhythm", "xfyun", "xfyun-speech"];
+pub const WEB_SESSION_FAMILIES: &[&str] = &["tokenrhythm", "xfyun", "xfyun-speech", "opendesign"];
 
 pub fn is_web_session(family_id: &str) -> bool {
     WEB_SESSION_FAMILIES.contains(&family_id)
