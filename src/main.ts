@@ -3,7 +3,6 @@ import { emit, listen } from "@tauri-apps/api/event";
 import { getVersion } from "@tauri-apps/api/app";
 import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
 import {
-  CATALOG_CATEGORIES,
   providerCatalog,
   providerCategory,
   providerDefinition,
@@ -11,7 +10,6 @@ import {
   isWebSessionFamily,
   supportsApiKey,
   supportsExtraAccounts,
-  type ProviderCategory,
 } from "./providerCatalog";
 import { PEAK_RULES, isProviderInPeak, type PeakRule } from "./peakHours";
 import { onboardingFor, onboardingMethods, type AccountAction, type Onboarding } from "./providerOnboarding";
@@ -557,17 +555,12 @@ type OverviewTab = (typeof OVERVIEW_TABS)[number];
 /// names ship for everyone. A catalog category outside this list (闪电说's
 /// "productivity") is tolerated: chips, cycle and sections append it only
 /// while a visible provider carries it.
-const OVERVIEW_CATEGORIES = ["coding", "mcp"] as const;
-type OverviewCategory = ProviderCategory;
-
-/// Built-ins always render; extra catalog categories join only when a
-/// visible provider carries one.
-function presentCategories(): OverviewCategory[] {
-  const present = new Set(orderedSnapshots().map((s) => effectiveCategory(providerFamily(s.id))));
-  const builtins = OVERVIEW_CATEGORIES as readonly string[];
-  const extras = CATALOG_CATEGORIES.filter((c) => !builtins.includes(c) && present.has(c));
-  return [...OVERVIEW_CATEGORIES, ...extras];
-}
+/// One built-in group ships with every install; everything else the user
+/// creates. The old catalog taxonomy (Coding Agent / MCP / Productivity) is
+/// gone as a *routing* layer — a provider's catalog category no longer decides
+/// which section it lands in, only the user's own grouping does.
+const DEFAULT_GROUP = "default" as const;
+type OverviewCategory = typeof DEFAULT_GROUP;
 
 // Per-provider layout: which rows show, their order, which are tucked
 // behind the caret ("On Demand"), and which are starred for the tray strip.
@@ -655,7 +648,9 @@ interface Config {
   notifyResetSoon: boolean;
   spendTab: SpendTab;
   overviewTab: OverviewTab;
-  overviewCategory: OverviewCategory;
+  /// Retired field. Kept in the schema so an older config still loads, but the
+  /// overview no longer has categories to switch between.
+  overviewCategory?: string;
   overviewStyle: "rings" | "bars";
   categoryOverrides: Record<string, OverviewCategory>;
   spendMetric: "cost" | "tokens" | "mtok" | "rtk";
@@ -974,7 +969,6 @@ let config: Config = {
   notifyResetSoon: false,
   spendTab: "today",
   overviewTab: "5h",
-  overviewCategory: "coding",
   overviewStyle: "bars",
   categoryOverrides: {},
   spendMetric: "cost",
@@ -1509,7 +1503,6 @@ let spendTab: SpendTab = "today";
 let rangeTab: RangeTab = "d30";
 let rangeSelected = false;
 let overviewTab: OverviewTab = "5h";
-let overviewCategory: OverviewCategory = "coding";
 /// Header toggle (right side, beside ⟳): when on, the overview body is a
 /// single reset-time-sorted list instead of the 可用/不可用 sections —
 /// the "act soon" view. Follows the 5h/week tab like the sections do.
@@ -2432,26 +2425,6 @@ function setCardGroup(cardId: string, groupId: string): void {
 /// between the known groups without touching the catalog. An override the
 /// catalog cannot name falls back to the catalog default rather than
 /// making the card vanish.
-function effectiveCategory(family: string): OverviewCategory {
-  const override = config.categoryOverrides?.[family];
-  if (override && (CATALOG_CATEGORIES as readonly string[]).includes(override)) {
-    return override as OverviewCategory;
-  }
-  const fromCatalog = providerCategory(family);
-  return (CATALOG_CATEGORIES as readonly string[]).includes(fromCatalog) ? fromCatalog : "coding";
-}
-
-/// Clicking the family's effective category clears the override (back to
-/// the catalog default); clicking the other one sets it.
-function setFamilyCategory(family: string, category: OverviewCategory): void {
-  if (effectiveCategory(family) === category) return;
-  const next = { ...(config.categoryOverrides ?? {}) };
-  if (providerCategory(family) === category) delete next[family];
-  else next[family] = category;
-  void patchConfig({ categoryOverrides: next });
-  requestRender();
-}
-
 const NOTE_MAX_CODE_POINTS = 48;
 
 /// One display-note format for every writer: a single line, sliced by code
@@ -2697,10 +2670,17 @@ function pruneEmptyCardGroups(): boolean {
   return true;
 }
 
+/// Deleting a group never orphans its cards: every member drops back to the
+/// default group, so a later re-enable still has somewhere to land. Refusing
+/// while members remained (the old behaviour) made the delete button look
+/// broken for any group that actually had cards in it.
 function deleteCardGroup(id: string): boolean {
   const layout = config.layout;
-  if (!layout || cardGroupMemberCount(id) > 0) return false;
+  if (!layout || !(layout.groups ?? []).some((g) => g.id === id)) return false;
   layout.groups = (layout.groups ?? []).filter((g) => g.id !== id);
+  for (const entry of Object.values(layout.providers ?? {})) {
+    if (entry.group === id) delete entry.group;
+  }
   void patchConfig({ layout });
   requestRender();
   return true;
@@ -2972,18 +2952,81 @@ function renderTrend(source: TrendSource): string {
       month: "short",
       day: "numeric",
     });
-  // Each day is a group: the visible bar plus a full-height invisible hit
-  // area so thin bars are easy to hover; [data-trend] drives the tooltip.
-  const bars = source.trend
-    .map((v, i) => {
-      const h = v != null && v > 0 ? Math.max(2, (v / max) * 30) : 1;
-      return `<g class="trend-day">
-        <title>${escapeHtml(dateOf(i, true))}</title>
-        <rect class="${v == null ? "trend-nodata" : v > 0 ? "trend-bar" : "trend-zero"}" x="${i * 10}" y="${32 - h}" width="7" height="${h}" rx="1.5"/>
-        <rect class="trend-hit" data-trend="${source.id}|${i}" x="${i * 10 - 1.5}" y="0" width="10" height="32" fill="transparent"/>
-      </g>`;
+  // A smoothed area curve instead of 30 hard bars: the reading is a trend,
+  // not 30 separate columns, and a curve makes the shape legible at 32px
+  // tall. Missing days break the line (a gap means "no measurement", never
+  // zero) while real zeros stay on the baseline.
+  const W = 300; // matches the svg viewBox below
+  const H = 32;
+  // Breathing room top and bottom: a peak flush against the ceiling reads as
+  // a clipped chart, and a zero flush against the floor reads as missing.
+  const PAD = 4;
+  const step = W / (source.trend.length - 1 || 1);
+  const yOf = (v: number | null) =>
+    v == null ? null : H - PAD - (Math.max(0, Math.min(v, max)) / (max || 1)) * (H - PAD * 2);
+  // Points, split into runs of consecutive measured days.
+  const runs: { i: number; v: number }[][] = [];
+  source.trend.forEach((v, i) => {
+    if (v == null) { runs.push([]); return; }
+    if (!runs.length || runs[runs.length - 1].length === 0) runs.push([]);
+    runs[runs.length - 1].push({ i, v: Math.max(0, Math.min(v, max)) });
+  });
+  const measured = runs.filter((run) => run.length > 0);
+
+  // Catmull-Rom → cubic Bézier: a smooth path that still passes through every
+  // measured point (a spline that misses the data would misreport the peak).
+  const smooth = (run: { i: number; v: number }[]) => {
+    const pts = run.map(({ i, v }) => ({ x: i * step, y: yOf(v) as number }));
+    if (pts.length === 1) return `M${pts[0].x.toFixed(2)},${pts[0].y.toFixed(2)}`;
+    let d = `M${pts[0].x.toFixed(2)},${pts[0].y.toFixed(2)}`;
+    for (let k = 0; k < pts.length - 1; k++) {
+      const p0 = pts[k - 1] ?? pts[k];
+      const p1 = pts[k];
+      const p2 = pts[k + 1];
+      const p3 = pts[k + 2] ?? p2;
+      // /8 rather than the textbook /6: full-tension Catmull-Rom overshoots on
+      // a spike, pushing the curve above the peak value it is meant to report.
+      const c1x = p1.x + (p2.x - p0.x) / 8;
+      const c1y = p1.y + (p2.y - p0.y) / 8;
+      const c2x = p2.x - (p3.x - p1.x) / 8;
+      const c2y = p2.y - (p3.y - p1.y) / 8;
+      d += ` C${c1x.toFixed(2)},${c1y.toFixed(2)} ${c2x.toFixed(2)},${c2y.toFixed(2)} ${p2.x.toFixed(2)},${p2.y.toFixed(2)}`;
+    }
+    return d;
+  };
+
+  const gradId = `trend-fill-${source.id.replace(/[^a-zA-Z0-9_-]/g, "_")}`;
+  const areas = measured
+    .map((run) => {
+      if (run.length < 2) return "";
+      // The fill closes on the baseline directly under each end point, so the
+      // area under a run is bounded by its own span rather than by the chart
+      // edge. Closing on 0/W instead left a diagonal wedge at the left edge
+      // whenever a series started after day 0.
+      const line = smooth(run);
+      const first = run[0].i * step;
+      const last = run[run.length - 1].i * step;
+      return `<path class="trend-area" d="${line} L${last.toFixed(2)},${H} L${first.toFixed(2)},${H} Z" fill="url(#${gradId})"/>`;
     })
     .join("");
+  const lines = measured.map((run) => `<path class="trend-line" d="${smooth(run)}"/>`).join("");
+  const dots = measured
+    .flat()
+    .map(({ i, v }) => `<circle class="trend-dot" cx="${(i * step).toFixed(2)}" cy="${(yOf(v) as number).toFixed(2)}" r="1.6"/>`)
+    .join("");
+  // One full-height hit column per day so hovering anywhere in the plot
+  // reports that day; the tooltip stays driven by [data-trend].
+  const hits = source.trend
+    .map((_, i) => {
+      const x = i * step - step / 2;
+      return `<rect class="trend-hit" data-trend="${source.id}|${i}" x="${Math.max(0, x).toFixed(2)}" y="0" width="${step.toFixed(2)}" height="${H}" fill="transparent"><title>${escapeHtml(dateOf(i, true))}</title></rect>`;
+    })
+    .join("");
+  const bars = `<defs><linearGradient id="${gradId}" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" class="trend-stop-top"/>
+      <stop offset="100%" class="trend-stop-bottom"/>
+    </linearGradient></defs>
+    ${areas}${lines}${dots}${hits}`;
   const title = source.unit === "percent"
     ? t("usage.quotaTrendTip", { from: dateOf(0), to: dateOf(29) })
     : source.unit
@@ -3034,7 +3077,7 @@ function renderTrend(source: TrendSource): string {
         ${spendSummary ? `<span class="trend-spend">${escapeHtml(spendSummary)}</span>` : ""}
       </div>
       <div class="trend-plot">
-        <svg class="trend-chart" viewBox="0 0 297 32" preserveAspectRatio="none">${bars}</svg>
+        <svg class="trend-chart" viewBox="0 0 300 32" preserveAspectRatio="none" aria-hidden="true">${bars}</svg>
         <div class="trend-dates" aria-hidden="true">
           <span>${escapeHtml(dateOf(0, true))}</span>
           <span>${escapeHtml(dateOf(14, true))}</span>
@@ -4899,13 +4942,6 @@ function switchOverviewTab(tab: OverviewTab): void {
   requestRender();
 }
 
-function switchOverviewCategory(category: OverviewCategory): void {
-  if (overviewCategory === category) return;
-  overviewCategory = category;
-  void patchConfig({ overviewCategory: category });
-  requestRender();
-}
-
 /// Tab switch morphs the existing arcs in place (identity-keyed per
 /// provider, CSS-transitioned) instead of rebuilding the card.
 function switchSpendTab(tab: SpendTab): void {
@@ -6614,12 +6650,9 @@ function overviewSectionHtml(
 function renderQuotaOverview(): string {
   const visibleSnaps = overviewSnapshots();
   if (visibleSnaps.length === 0) return "";
-  // Category scope: rings, sections, badges and the expiring list all
-  // follow the active top-level category. The article still renders when
-  // the active category has no cards, so the switch stays reachable.
-  const scopedSnaps = visibleSnaps.filter(
-    (s) => effectiveCategory(providerFamily(s.id)) === overviewCategory,
-  );
+  // No category scope: the overview covers every visible card, and the
+  // user's own groups split it into sections below.
+  const scopedSnaps = visibleSnaps;
 
   const isFolded = isOverviewCollapsed();
 
@@ -7122,34 +7155,11 @@ function renderQuotaOverview(): string {
         ${foldChevron}
       </div>
       ${isFolded ? "" : `<div class="overview-switch-row">
-        <div class="tabs overview-cat-tabs${config.overviewCatFull === true ? " full" : ""}">
-          ${(() => {
-            // Full mode: a two-row grid, 3 chips per row, 6 max — more
-            // categories collapse into a … chip that opens the board.
-            const categories = presentCategories();
-            const chips =
-              config.overviewCatFull === true && categories.length > 6
-                ? categories.slice(0, 5)
-                : categories;
-            const html = chips
-              .map(
-                (c) =>
-                  `<button type="button" class="tab${overviewCategory === c ? " active" : ""}" data-overview-cat="${c}" title="${escapeHtml(t(`category.${c}`))}">${escapeHtml(t(`category.${c}`))}</button>`,
-              )
-              .join("");
-            const more =
-              config.overviewCatFull === true && categories.length > 6
-                ? `<button type="button" class="tab overview-cat-more" data-overview-cat-more title="${escapeHtml(t("overview.groupManage"))}">…</button>`
-                : "";
-            return html + more;
-          })()}
-        </div>
-        ${overviewCategory === "coding" ? `
         <div class="tabs overview-tabs">
           <button type="button" class="tab${overviewTab === "5h" ? " active" : ""}" data-overview-tab="5h">${escapeHtml(t("overview.tab5h"))}</button>
           <button type="button" class="tab${overviewTab === "week" ? " active" : ""}" data-overview-tab="week">${escapeHtml(t("overview.tabWeek"))}</button>
           <button type="button" class="tab${overviewTab === "month" ? " active" : ""}" data-overview-tab="month">${escapeHtml(t("overview.tabMonth"))}</button>
-        </div>` : ""}
+        </div>
       </div>`}
       ${expiringView}
       ${sectionsView}
@@ -7916,7 +7926,7 @@ function openProviderHelp(fam: string) {
 function openGroupManagementPanel(): void {
   document.querySelector<HTMLElement>(".group-menu-overlay")?.remove();
   const builtins = [
-    ...OVERVIEW_CATEGORIES.map((id) => ({ id, name: t(`category.${id}`), kind: t("overview.groupBuiltin") })),
+    { id: DEFAULT_GROUP, name: t("category.default"), kind: t("overview.groupBuiltin") },
   ];
   const overlay = document.createElement("div");
   overlay.className = "group-menu-overlay";
@@ -8359,12 +8369,10 @@ function isDashboardActive(): boolean {
   return document.hasFocus() && document.visibilityState === "visible";
 }
 
-function cycleOverviewCategory(): void {
-  const categories = presentCategories();
-  const index = categories.indexOf(overviewCategory);
-  const next = categories[(index + 1) % categories.length];
-  switchOverviewCategory(next);
-}
+/// Retired: there is a single built-in group now, so the shortcut has nothing
+/// to cycle through. Kept as a no-op so the keybinding stays inert instead of
+/// throwing.
+function cycleOverviewCategory(): void {}
 
 function setupOverviewGroupDrag(root: HTMLElement): void {
   let pending: { id: string; pointerId: number; x: number; y: number; tile: HTMLElement } | null = null;
@@ -8389,7 +8397,7 @@ function setupOverviewGroupDrag(root: HTMLElement): void {
     placeMenuAt(ghost, { x, y }, { gap: 12, margin: 0 });
   };
   const targetAt = (x: number, y: number) => document.elementFromPoint(x, y)?.closest<HTMLElement>(
-    "[data-overview-cat], [data-overview-drop-group]",
+    "[data-overview-drop-group]",
   ) ?? null;
   root.addEventListener("pointerdown", (event) => {
     if (event.button !== 0 || event.isPrimary === false || (event.target as Element).closest("button")) return;
@@ -8412,8 +8420,7 @@ function setupOverviewGroupDrag(root: HTMLElement): void {
       dock = document.createElement("div");
       dock.className = "overview-drop-dock";
       dock.innerHTML = `<div class="overview-drop-title">${escapeHtml(t("overview.dragMoveHint"))}</div>
-        <div class="overview-drop-options">${OVERVIEW_CATEGORIES.map((category) => `<div data-overview-cat="${category}">${escapeHtml(t(`category.${category}`))}</div>`).join("")}</div>
-        <div class="overview-drop-options"><div data-overview-drop-group="">${escapeHtml(t("customize.groupNone"))}</div>${cardGroups().map((group) => `<div data-overview-drop-group="${escapeHtml(group.id)}">${escapeHtml(group.name)}</div>`).join("")}</div>`;
+        <div class="overview-drop-options"><div data-overview-drop-group="">${escapeHtml(t("category.default"))}</div>${cardGroups().map((group) => `<div data-overview-drop-group="${escapeHtml(group.id)}">${escapeHtml(group.name)}</div>`).join("")}</div>`;
       document.body.appendChild(dock);
       moveGhost(pending.x, pending.y);
     }, 450);
@@ -8434,14 +8441,9 @@ function setupOverviewGroupDrag(root: HTMLElement): void {
     if (!pending || pending.pointerId !== event.pointerId) return;
     const id = pending.id;
     const target = ghost ? targetAt(event.clientX, event.clientY) : null;
-    const category = target?.dataset.overviewCat;
     const group = target?.dataset.overviewDropGroup;
     clear();
-    if (category && (OVERVIEW_CATEGORIES as readonly string[]).includes(category)) {
-      setFamilyCategory(providerFamily(id), category as OverviewCategory);
-    } else if (group !== undefined) {
-      setCardGroup(id, group);
-    }
+    if (group !== undefined) setCardGroup(id, group);
   });
   window.addEventListener("pointercancel", clear);
   window.addEventListener("blur", clear);
@@ -8516,22 +8518,13 @@ function openGroupMenu(
   const accounts = accountsCache.get(fam) ?? [];
   const targetAccount = managedAccountForCard(fam, shownId, accounts);
   const accountIndex = targetAccount ? accounts.indexOf(targetAccount) : -1;
-  const curCat = effectiveCategory(fam);
   const item = (gid: string, label: string, checked = false) =>
     `<button class="group-menu-item${checked ? " on" : ""}" data-group-pick="${escapeHtml(gid)}">
        <span class="group-menu-check">${checked ? "✓" : ""}</span>${escapeHtml(label)}
      </button>`;
-  const catItem = (cat: OverviewCategory) =>
-    `<button class="group-menu-item${curCat === cat ? " on" : ""}" data-category-pick="${cat}">
-       <span class="group-menu-check">${curCat === cat ? "✓" : ""}</span>${escapeHtml(
-         t(`category.${cat}`),
-       )}
-     </button>`;
   const fallbackName = providerDisplayName(fam) || cardId;
   const groupingHtml = includeGrouping
-    ? `${OVERVIEW_CATEGORIES.map((c) => catItem(c)).join("")}
-      <div class="group-menu-sep"></div>
-      ${item("", t("customize.groupNone"), current === "")}
+    ? `${item("", t("category.default"), current === "")}
       ${groups.map((g) => item(g.id, g.name, current === g.id)).join("")}
       <div class="group-menu-sep"></div>
       ${item("__new__", `${t("customize.groupNew")}…`)}`
@@ -8685,14 +8678,6 @@ function openGroupMenu(
         .catch((err) => {
           status.textContent = t("card.testFail", { err: String(err) });
         });
-      return;
-    }
-    const catBtn = includeGrouping
-      ? (e.target as HTMLElement).closest<HTMLElement>("[data-category-pick]")
-      : null;
-    if (catBtn) {
-      close();
-      setFamilyCategory(fam, catBtn.dataset.categoryPick as OverviewCategory);
       return;
     }
     const pick = includeGrouping
@@ -14622,17 +14607,11 @@ function renderGroupedCards(): string {
   const unconfigured = folding ? snaps.filter(isFoldableHintCard) : [];
   const unconfiguredIds = new Set(unconfigured.map((s) => s.id));
   const visible = folding ? snaps.filter((s) => !unconfiguredIds.has(s.id)) : snaps;
+  // One flat list ordered default-group-first, then the user's groups in
+  // their own order. There is no catalog taxonomy above this any more, so
+  // every enabled provider is reachable without a category chip.
   const groups = usedCardGroups();
-  const head = (category: OverviewCategory) =>
-    `<div class="category-head"><span class="category-name">${escapeHtml(
-      t(`category.${category}`),
-    )}</span><span class="category-count">${
-      visible.filter((s) => effectiveCategory(providerFamily(s.id)) === category).length
-    }</span></div>`;
-  const sections = OVERVIEW_CATEGORIES.map((category) => {
-    const members = visible.filter((s) => effectiveCategory(providerFamily(s.id)) === category);
-    return members.length ? head(category) + renderCategoryCards(members, groups) : "";
-  }).join("");
+  const sections = visible.length ? renderCategoryCards(visible, groups) : "";
   // Everything unconfigured and nothing else: guide the user to add one
   // instead of a lone fold header.
   const guide = visible.length === 0 ? renderBoardEmptyState() : "";
@@ -20172,9 +20151,6 @@ async function initSettings(): Promise<void> {
   if (config.overviewTab === "5h" || config.overviewTab === "week" || config.overviewTab === "month") {
     overviewTab = config.overviewTab;
   }
-  if ((CATALOG_CATEGORIES as readonly string[]).includes(config.overviewCategory)) {
-    overviewCategory = config.overviewCategory;
-  }
   if (config.overviewStyle !== "rings" && config.overviewStyle !== "bars") {
     config.overviewStyle = "bars";
   }
@@ -20632,8 +20608,7 @@ async function resetAllSettings(): Promise<void> {
     notifyResetSoon: true,
     spendTab: "today",
     overviewTab: "5h",
-    overviewCategory: "coding",
-    overviewStyle: "bars",
+      overviewStyle: "bars",
     categoryOverrides: {},
     spendMetric: "cost",
     spendGrouping: "tool",
@@ -20667,7 +20642,7 @@ async function resetAllSettings(): Promise<void> {
   rangeSelected = false;
   rangeTab = "d30";
   overviewTab = "5h";
-  overviewCategory = "coding";
+  
   if (config.spendGrouping !== "tool" && config.spendGrouping !== "model") {
     config.spendGrouping = "tool";
   }
@@ -24564,14 +24539,6 @@ document.querySelector("#settings-btn")!.addEventListener("click", (event) => {
     const ovCatMore = target.closest<HTMLElement>("[data-overview-cat-more]");
     if (ovCatMore) {
       openGroupManagementPanel();
-      return;
-    }
-    const ovCat = target.closest<HTMLElement>("[data-overview-cat]");
-    if (ovCat) {
-      const next = ovCat.dataset.overviewCat ?? "";
-      if ((CATALOG_CATEGORIES as readonly string[]).includes(next)) {
-        switchOverviewCategory(next as OverviewCategory);
-      }
       return;
     }
     const ovStyle = target.closest<HTMLElement>("[data-overview-style]");

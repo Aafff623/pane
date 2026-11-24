@@ -81,6 +81,9 @@ html.i18n-boot #boot-fallback {
      --line vs --line-2): a card reads as one card, rows breathe. */
   --row-line: color-mix(in srgb, var(--border) 55%, var(--card));
   --chart-blue: #3794ff;
+  /* Hover emphasis for the trend curve: one step brighter than the resting
+     stroke so the pointer response reads without a colour jump. */
+  --chart-blue-bright: #6cb6ff;
   /* Text-safe variants: #007acc and #ef4444 fail 4.5:1 on the dark card. */
   --link-text: #3794ff;
   --danger-text: #f87171;
@@ -117,6 +120,7 @@ html.i18n-boot #boot-fallback {
   --secondary-foreground: #3b3b3b;
   --primary: #0066b8;
   --primary-foreground: #ffffff;
+  --chart-blue-bright: #00549b;
   --link-text: #0066b8;
   --danger-text: #b91c1c;
   --accent: #e8e8e8;
@@ -6492,13 +6496,18 @@ body.reduce-anim .card-panel.acct-switch {
   transition: background 0.2s ease, transform 0.2s ease;
 }
 
-/* Usage Trend hover: brighten the day's bar under the cursor. */
+/* Usage Trend hover: reveal the day's point and thicken the line locally.
+   The hit column is invisible and full-height, so thin peaks stay reachable. */
 .trend-hit {
   cursor: pointer;
 }
 
-.trend-day:hover rect:first-child {
-  fill: #60a5fa;
+.trend-chart:hover .trend-line {
+  stroke: var(--chart-blue-bright, var(--chart-blue));
+}
+
+.trend-chart:hover .trend-dot {
+  opacity: 0.55;
 }
 
 /* Skeleton cards shown before the first data arrives. */
@@ -6593,17 +6602,47 @@ body.drawer-open #drawer {
   fill: var(--foreground);
 }
 
-.trend-bar {
+/* The trend is a smoothed area, not 30 columns: the fill carries the shape
+   and the stroke carries the reading, so a 32px-tall chart still shows where
+   the peak sits. Missing days break the path instead of reading as zero. */
+.trend-line {
+  fill: none;
+  stroke: var(--chart-blue);
+  stroke-width: 1.4;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  vector-effect: non-scaling-stroke;
+}
+
+.trend-area {
+  opacity: 0.9;
+}
+
+.trend-stop-top {
+  stop-color: var(--chart-blue);
+  stop-opacity: 0.26;
+}
+
+.trend-stop-bottom {
+  stop-color: var(--chart-blue);
+  stop-opacity: 0;
+}
+
+.trend-dot {
   fill: var(--chart-blue);
+  opacity: 0;
+  transition: opacity 0.12s ease;
+}
+
+/* Bars are gone, but a record's zero still has to be visible: keep the
+   baseline dot for a measured day that actually read 0. */
+.trend-zero {
+  fill: var(--muted);
 }
 
 .trend-nodata {
   fill: var(--muted);
   opacity: 0.25;
-}
-
-.trend-zero {
-  fill: var(--muted);
 }
 
 /* Light-mode versions of the few remaining hardcoded dark greys. */
