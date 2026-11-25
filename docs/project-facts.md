@@ -1476,3 +1476,21 @@ changes.
   series that starts after day 0 does not paint a wedge to the chart edge.
 - `viewBox` is `0 0 300 32` and must match `W` in `renderTrend`. `PAD = 4`
   keeps a peak off the ceiling.
+
+## OpenDesign sign-in opens the system browser (2026-11-25)
+
+- **Do not put `open-design.ai/cloud/cli/activate` in an embedded WebView.**
+  The page is a client-rendered SPA, and it paints nothing in WebView2 — a
+  blank grey surface with no approve button. Reproduced in a plain Chrome
+  window on 2026-11-25 with and without `deviceId`/`userCode` params
+  (`document.body.innerText.length === 0`, and the HTML/JS/CSS all return 200),
+  so the page itself is at fault, not Pane's container.
+- `run_approval_window` therefore calls `opener().open_url(...)` and then only
+  polls the device-code endpoint. Approval happens in the vendor's browser
+  session; nothing is scraped from the page.
+- The tab is not ours, so nothing is closed afterwards. The vendor's
+  10-minute device-code expiry (`LOGIN_TIMEOUT_SECS = 660` gives slack) bounds
+  a forgotten tab; Pane returns "授权超时" and the user retries.
+- `try_lock` on the login mutex is intentional: a second click while a poll is
+  still running must say "登录已在进行中" instead of opening a second
+  authorization and racing two device codes.
