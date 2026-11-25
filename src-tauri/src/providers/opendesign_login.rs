@@ -21,7 +21,6 @@ const API_BASE: &str = "https://amr-api.open-design.ai/api/v1";
 const CLI_VERSION: &str = "0.0.33";
 const MAX_BODY_BYTES: usize = 64 * 1024;
 const TOKEN_TARGET: &str = "Pane:opendesign:control-key";
-const WINDOW_LABEL: &str = "opendesign_login";
 /// The vendor's own code lives 10 minutes; give the reader a little of our own
 /// slack before declaring the attempt dead.
 const LOGIN_TIMEOUT_SECS: u64 = 660;
@@ -125,57 +124,52 @@ async fn poll(device: &DeviceCode) -> Result<PollState, String> {
     }
 }
 
-/// Opens the vendor's activation page and waits for approval, then stores the
-/// control key. The window is a plain browser surface: the approval itself
-/// happens on the vendor's side, so nothing from the page is scraped.
+/// Opens the vendor's activation page in the user's own browser and waits for
+/// approval, then stores the control key. The approval happens on the vendor's
+/// side, so nothing from the page is scraped; Pane only watches the device-code
+/// poll. An embedded WebView is deliberately NOT used: the page is a
+/// client-rendered SPA that paints nothing in one (verified 2026-11-25 in a
+/// plain Chrome window too, so the page is at fault, not the container).
 #[cfg(not(feature = "harness"))]
 pub async fn run_approval_window(app: &tauri::AppHandle, device: DeviceCode) -> Result<(), String> {
-    use tauri::Manager as _;
-
     static LOGIN_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
     let _guard = LOGIN_LOCK
         .try_lock()
         .map_err(|_| "OpenDesign 登录已在进行中".to_string())?;
-    if let Some(window) = app.get_webview_window(WINDOW_LABEL) {
-        let _ = window.set_focus();
-        return Err("OpenDesign 登录窗口已经打开".into());
-    }
 
+    // The activation page is a client-rendered SPA that paints nothing in an
+    // embedded WebView2 (verified 2026-11-25: a plain Chrome window renders the
+    // same blank surface, so it is the page, not our container). Hand the URL
+    // to the user's own browser instead — it usually already holds the console
+    // session, which is what the approval step needs — and let the poll below
+    // decide when the approval landed.
     let url = tauri::Url::parse(&device.activation_url)
         .map_err(|e| format!("OpenDesign 激活地址无效：{e}"))?;
-    tauri::WebviewWindowBuilder::new(app, WINDOW_LABEL, tauri::WebviewUrl::External(url))
-        .title(format!("OpenDesign 登录 · {}", device.user_code))
-        .incognito(true)
-        .inner_size(560.0, 780.0)
-        .center()
-        .build()
-        .map_err(|e| e.to_string())?;
+    {
+        use tauri_plugin_opener::OpenerExt;
+        app.opener()
+            .open_url(url.as_str(), None::<&str>)
+            .map_err(|e| format!("OpenDesign 无法打开浏览器：{e}"))?;
+    }
 
-    // The page itself may sit on "登录中…" while the browser session settles,
-    // so the poll — not the page — decides when approval landed.
+    // Nothing to close afterwards: the page lives in the user's browser, whose
+    // lifetime we do not own. The device code itself expires on the vendor's
+    // clock, so a forgotten tab cannot hold us open longer than that.
     let deadline = tokio::time::Instant::now() + Duration::from_secs(LOGIN_TIMEOUT_SECS);
-    let result = loop {
+    loop {
         tokio::time::sleep(device.interval).await;
         if tokio::time::Instant::now() >= deadline {
-            break Err("OpenDesign 授权超时，请重新登录。".to_string());
-        }
-        if app.get_webview_window(WINDOW_LABEL).is_none() {
-            break Err("OpenDesign 登录窗口已关闭，授权未完成。".to_string());
+            return Err("OpenDesign 授权超时，请重新登录。".to_string());
         }
         match poll(&device).await {
             Ok(PollState::Approved(key)) => {
                 crate::secretstore::put(TOKEN_TARGET, &key)?;
-                break Ok(());
+                return Ok(());
             }
             Ok(PollState::Pending) => continue,
-            Err(error) => break Err(error),
+            Err(error) => return Err(error),
         }
-    };
-
-    if let Some(window) = app.get_webview_window(WINDOW_LABEL) {
-        let _ = window.close();
     }
-    result
 }
 
 #[cfg(feature = "harness")]
