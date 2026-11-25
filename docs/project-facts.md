@@ -1439,3 +1439,40 @@ changes.
 - `configured` for these families is `status.localCli`, not `status.storedKey`
   — the session lives in the OS vault under a family-specific
   `secretstore` target, not in `%APPDATA%\Pane\<family>.json`.
+
+## Board grouping (2026-11-24, 0.12.4)
+
+- **One routing layer.** The board used to layer a catalog taxonomy (Coding
+  Agent / MCP / Productivity) under the user's own groups. A provider could
+  land in a category the active chip did not cover, so enabling it looked like
+  nothing happened. The taxonomy is gone: `OVERVIEW_CATEGORIES`, the category
+  chip strip, the per-card category picker and the category keybinding no
+  longer exist. **Do not reintroduce a second routing axis** —
+  `tests/board-routing.test.mjs` fails if it comes back.
+- **Exactly one built-in group**, `DEFAULT_GROUP = "default"`; everything else
+  is user-created. Untagged cards render there.
+- **Group membership is `layout.providers[family].group`; the enable switch is
+  `config.disabled`.** They are independent stores, which is what makes
+  "disable, re-enable, still in the same group" work. Never clear the tag from
+  the enable path.
+- **Deleting a group releases its members** to the default group. Refusing the
+  delete while members remained made the button look broken for every group
+  that actually had cards.
+- `config.overviewCategory` is a retired schema field: still accepted on load,
+  never read. `CATALOG_CATEGORIES` and `providerCategory` remain in the
+  catalog for other callers (MCP row tucking) but must not drive grouping.
+
+## Trend chart (2026-11-24, 0.12.4)
+
+- The card trend is a **smoothed area curve** (`renderTrend` in `main.ts`),
+  not bars. Points go through a Catmull-Rom spline converted to cubic Bézier so
+  the curve passes through every measured value; the tangent divisor is **8,
+  not the textbook 6**, because full tension overshoots on a spike and reports
+  a peak higher than the data.
+- **Missing days break the path into separate runs.** A `null` means "not
+  measured" and must never be drawn as zero; a measured 0 stays on the
+  baseline.
+- The area fill closes on the baseline **under its own run's endpoints**, so a
+  series that starts after day 0 does not paint a wedge to the chart edge.
+- `viewBox` is `0 0 300 32` and must match `W` in `renderTrend`. `PAD = 4`
+  keeps a peak off the ceiling.
