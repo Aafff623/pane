@@ -12710,7 +12710,7 @@ function openAccountDialog(family: string, editId?: string): void {
         }
         <div class="account-dialog-test-row">
           <button class="mini-btn" data-acct-test="${escapeHtml(family)}" type="button" disabled>${escapeHtml(t("customize.test"))}</button>
-          <span class="cust-test-result" data-acct-result="${escapeHtml(family)}"></span>
+          <span class="cust-test-result" data-acct-result="${escapeHtml(family)}" id="acct-result-${escapeHtml(family)}" role="status" aria-live="polite"></span>
         </div>
         <div class="account-dialog-footer">
           <button class="mini-btn account-dialog-cancel" data-acct-close type="button">${escapeHtml(t("dialog.cancel"))}</button>
@@ -12784,21 +12784,35 @@ async function runAccountKeyTest(family: string): Promise<void> {
   const addBtn = block?.querySelector<HTMLButtonElement>("[data-acct-add]");
   if (!keyInp || !labelInp || !result) return;
   const generation = bumpTestGeneration("acct", family);
-  const show = (text: string, ok: boolean | null) => {
+  // A validation message that only exists visually is invisible to a screen
+  // reader. `aria-live` announces the text, and the field that caused it gets
+  // `aria-invalid` plus `aria-describedby` so the error travels with focus
+  // instead of sitting somewhere else in the dialog.
+  const show = (text: string, ok: boolean | null, field?: HTMLInputElement | null) => {
     result.textContent = text;
     result.classList.toggle("ok", ok === true);
     result.classList.toggle("err", ok === false);
+    for (const input of [keyInp, labelInp]) {
+      if (!input) continue;
+      if (ok === false && input === field) {
+        input.setAttribute("aria-invalid", "true");
+        if (result.id) input.setAttribute("aria-describedby", result.id);
+      } else if (ok !== false) {
+        input.removeAttribute("aria-invalid");
+        input.removeAttribute("aria-describedby");
+      }
+    }
   };
   const key = keyInp.value.trim();
   const label = labelInp.value.trim();
   if (!key) {
-    show(t("customize.testEmpty"), false);
+    show(t("customize.testEmpty"), false, keyInp);
     if (testBtn) testBtn.disabled = true;
     if (addBtn) addBtn.disabled = true;
     return;
   }
   if (!label) {
-    show(t("customize.acctLabelRequired"), false);
+    show(t("customize.acctLabelRequired"), false, labelInp);
     if (testBtn) testBtn.disabled = true;
     if (addBtn) addBtn.disabled = true;
     return;
