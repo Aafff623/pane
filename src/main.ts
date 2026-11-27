@@ -9477,6 +9477,7 @@ function shareFileName(label: string): string {
 /// in the footer status bar, which reads as "nothing happened"; this modal
 /// makes the rendered image and the result visible next to the action.
 let dismissSharePreview: (() => void) | null = null;
+let dismissStatePreview: (() => void) | null = null;
 
 function openSharePreview(
   el: HTMLElement,
@@ -9484,7 +9485,6 @@ function openSharePreview(
   opts: { title: string; fileName: string; trigger?: HTMLElement },
 ): void {
   dismissSharePreview?.();
-  document.getElementById("share-preview-overlay")?.remove();
   const trigger = opts.trigger ?? (document.activeElement instanceof HTMLElement ? document.activeElement : null);
   const shell = mountDialogShell({
     overlayId: "share-preview-overlay",
@@ -14942,7 +14942,6 @@ function renderCategoryCards(snaps: Snapshot[], groups: CardGroup[]): string {
 
 function renderDashboard(): void {
   hideSpendPop();
-  document.querySelector(".spend-detail-overlay")?.remove();
   const el = document.querySelector<HTMLElement>("#providers")!;
   el.setAttribute("aria-busy", boardLoadPhase === "pending" && !lastSnapshots.length ? "true" : "false");
   // Account-tab switches and data ticks both rebuild this list. Replacing
@@ -19122,7 +19121,9 @@ function previewMetric(
 }
 
 function openStatePreview(): void {
-  document.querySelector(".state-preview-overlay")?.remove();
+  // Exclusive like the other previews: a second open closes the first through
+  // the shell, not a bare `.remove()` that would leave its listeners behind.
+  dismissStatePreview?.();
   const hour = 3_600_000;
   const day = 24 * hour;
   const cards = [
@@ -19158,7 +19159,11 @@ function openStatePreview(): void {
     ["error", "#f97316", "!", t("settings.trayStateError")],
     ["stale", "#9ca3af", "—", t("settings.trayStateStale")],
   ] as const;
-  const shell = mountDialogShell({ overlayClass: "state-preview-overlay" });
+  const shell = mountDialogShell({
+    overlayClass: "state-preview-overlay",
+    onClose: () => { if (dismissStatePreview === shell.close) dismissStatePreview = null; },
+  });
+  dismissStatePreview = shell.close;
   const overlay = shell.host;
   overlay.innerHTML = `
     <section class="state-preview-panel" role="dialog" aria-modal="true" aria-label="${escapeHtml(t("settings.statePreviewTitle"))}">
