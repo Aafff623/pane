@@ -1348,10 +1348,9 @@ changes.
 ## Share preview and WorkBuddy ledger (2026-10-28)
 
 - **Snapshot rendering** — `renderElementSnapshot` in `src/main.ts` returns a
-  frozen-state PNG data URL; the preview modal owns copy/save, Esc/backdrop,
-  focus trap and focus return. `card.share` now opens a preview, not a silent
-  clipboard write. The share buttons are visible on keyboard focus, not hover
-  only.
+  frozen-state PNG data URL; the preview modal owns copy/save. `card.share` now
+  opens a preview, not a silent clipboard write. The share buttons are visible
+  on keyboard focus, not hover only.
 - **PNG bounds** — `decode_share_png` in `src-tauri/src/lib.rs` validates the
   8 MiB base64 cap, PNG signature, dimensions and 16 M pixel cap before any
   decoder sees the bytes; clipboard copy and file save share it.
@@ -1572,3 +1571,27 @@ The Settings → Usage charts were rebuilt to match the card trend. Two traps:
 - `try_lock` on the login mutex is intentional: a second click while a poll is
   still running must say "登录已在进行中" instead of opening a second
   authorization and racing two device codes.
+
+## Every modal goes through one shell (2026-11-27)
+
+- **`src/ui/dialogShell.ts` owns the lifecycle; callers keep their markup.**
+  `mountDialogShell()` appends the backdrop, traps Tab, returns focus to the
+  opener, and can lock background scroll. Twenty overlays in `src/main.ts`
+  adopted it. It renders nothing on purpose: the three shipping skins paint by
+  matching class names, so replacing markup would silently unpaint them.
+- **`canClose` vetoes Esc and the backdrop only.** A caller's own `close()` is
+  the "the write landed" path and always works. The vault wizard needs exactly
+  that: after `keyvault_v3_setup` succeeds, the one-time recovery code cannot be
+  fetched again, so dismissing mid-write used to write the code into a detached
+  node.
+- **The IME guard lives in the shell, not in each dialog.** Escape also closes a
+  Chinese IME candidate window; both `isComposing` and the legacy
+  `keyCode === 229` are checked, because some Windows IMEs clear `isComposing`
+  before the commit keystroke reaches the page.
+- **Windows sockets inherit the listener's non-blocking flag.** `codex_login`,
+  `kiro_login`, `trae_login`, `windsurf_login` and `zed_login` all bind a
+  non-blocking loopback listener so the accept loop can poll its deadline. The
+  accepted socket then inherited that flag, so the blocking request read
+  returned 0/WouldBlock before the browser had written its callback and the
+  sign-in appeared to hang. Each now calls `set_nonblocking(false)` plus a read
+  timeout. The proxy test fixture in `providers/mod.rs` had the identical bug.
