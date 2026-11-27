@@ -1595,3 +1595,24 @@ The Settings → Usage charts were rebuilt to match the card trend. Two traps:
   returned 0/WouldBlock before the browser had written its callback and the
   sign-in appeared to hang. Each now calls `set_nonblocking(false)` plus a read
   timeout. The proxy test fixture in `providers/mod.rs` had the identical bug.
+
+## A modal's Escape path must settle its Promise (2026-11-27)
+
+- **The shell's close never runs a dialog's own `done()`.** Any dialog that
+  returns a value has to settle it from the shell's `onClose`, with a
+  first-settle-wins guard. `appConfirm` and `appPrompt` did not, so pressing
+  Esc held every `await appConfirm(...)` pending forever and the delete
+  flows that await them stopped without an error. `tests/dialog-cancel.test.mjs`
+  fails if the settle is removed.
+- **`canClose` does not cover buttons.** It vetoes Escape and the backdrop;
+  a handler that calls `shell.close()` itself bypasses it. The vault wizard
+  needed its own `if (!creating)` on the Cancel button on top of `canClose`.
+- **Bare `.remove()` on a shell-managed overlay leaks.** It skips the capture
+  keydown listener and the scroll unlock. Six exclusive group menus and two
+  previews shared that shortcut when swapping instances: the next Escape was
+  consumed by the dead dialog and the board stayed locked. Every swap now goes
+  through a stored close handle.
+- **A dialog that gates a queue must route its close through the gate.**
+  `showChangelogDialog`'s `onClose` is `noticeClosed`; discarding it on Escape
+  left `noticeOpen` true for the rest of the session, blocking every later
+  boot notice and the first-run tour.
