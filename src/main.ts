@@ -24225,6 +24225,15 @@ window.addEventListener("DOMContentLoaded", () => {
       if (e.isComposing || e.keyCode === 229) return;
       if (document.querySelector("[data-provider-help-host]")) return;
       if (handleSkinShopEscape()) return;
+      // The RTK panel is a modal rendered inside the board markup; its Escape
+      // used to work only while focus sat inside the provider rail, so a user
+      // who tabbed to the dialog's own button could not close it.
+      if (rtkSetupOpen) {
+        rtkSetupOpen = false;
+        rtkSetupNotice = null;
+        requestRender();
+        return;
+      }
       if (customizeOpen) {
         setDrawer(false);
         return;
