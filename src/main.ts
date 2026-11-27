@@ -18547,11 +18547,18 @@ function settingsToast(message: string, isError = false): void {
   if (!toast) {
     toast = document.createElement("div");
     toast.id = "panel-toast";
+    // Every save/copy/apply failure lands here, and it used to be silent to
+    // assistive tech: the node appeared with the text but nothing announced it.
+    toast.setAttribute("role", "status");
+    toast.setAttribute("aria-live", "polite");
     document.body.append(toast);
   }
   toast.textContent = message;
   toast.hidden = false;
   toast.classList.toggle("is-error", isError);
+  // `is-error` is colour only, and the status region reads `textContent` —
+  // so an assertive region for failures, polite for the rest.
+  toast.setAttribute("aria-live", isError ? "assertive" : "polite");
   clearTimeout((settingsToast as unknown as { timer?: number }).timer);
   (settingsToast as unknown as { timer?: number }).timer = window.setTimeout(() => {
     toast!.hidden = true;
