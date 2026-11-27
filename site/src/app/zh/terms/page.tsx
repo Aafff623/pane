@@ -3,10 +3,15 @@ import type { Metadata } from "next";
 import { DocumentLang } from "@/components/document-lang";
 import { LegalPage } from "@/components/legal-page";
 
+const title = "条款与许可";
+const description = "Pane 的条款、MIT 许可与数据说明。";
+
 export const metadata: Metadata = {
-  title: "条款与许可",
-  description: "Pane 的条款、MIT 许可与数据说明。",
+  title,
+  description,
   alternates: { canonical: "https://pane.threetwoa.live/zh/terms/" },
+  openGraph: { type: "website", locale: "zh_CN", url: "https://pane.threetwoa.live/zh/terms/", title, description },
+  twitter: { title, description },
 };
 
 export default function TermsPage() {

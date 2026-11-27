@@ -5,10 +5,18 @@ import { messages } from "@/components/i18n";
 
 const copy = messages.en.demoPage;
 
+const title = "Live demo";
+const description = copy.description;
+
 export const metadata: Metadata = {
-  title: "Live demo",
-  description: copy.description,
+  title,
+  description,
   alternates: { canonical: "https://pane.threetwoa.live/demo/" },
+  // The root layout's OpenGraph block is Chinese; a page that overrides only
+  // `title` still inherits it. State both shapes so an English page never
+  // ships a Chinese share card.
+  openGraph: { type: "website", locale: "en_US", url: "https://pane.threetwoa.live/demo/", title, description },
+  twitter: { title, description },
 };
 
 export default function DemoPage() {

@@ -2,10 +2,15 @@ import type { Metadata } from "next";
 
 import { LegalPage } from "@/components/legal-page";
 
+const title = "Privacy";
+const description = "Pane privacy: outbound requests, local storage and the telemetry boundary.";
+
 export const metadata: Metadata = {
-  title: "Privacy",
-  description: "Pane privacy: outbound requests, local storage and the telemetry boundary.",
+  title,
+  description,
   alternates: { canonical: "https://pane.threetwoa.live/privacy/" },
+  openGraph: { type: "website", locale: "en_US", url: "https://pane.threetwoa.live/privacy/", title, description },
+  twitter: { title, description },
 };
 
 export default function PrivacyPage() {

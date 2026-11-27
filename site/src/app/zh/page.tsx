@@ -15,6 +15,7 @@ export const metadata = {
     title: homeTitle,
     description: homeDescription,
   },
+  twitter: { title: homeTitle, description: homeDescription },
 };
 
 export default function Home() {

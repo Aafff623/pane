@@ -14,6 +14,9 @@ export const metadata = {
     description: homeDescription,
     url: "https://pane.threetwoa.live/",
   },
+  // Stated per page so the English home never inherits the Chinese card text
+  // from the root layout.
+  twitter: { title: homeTitle, description: homeDescription },
 };
 
 export default function Home() {

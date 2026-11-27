@@ -50,9 +50,9 @@ export const metadata: Metadata = {
   },
   twitter: {
     card: "summary_large_image",
-    title: "Pane — 本地优先的 AI 用量工作台",
-    description:
-      "Pane 把 AI 工具的额度、余额、重置时间、多账号与本地 CLI Token 花费汇集到一个随时可唤出的桌面面板。凭据保存在本机。",
+    // No title/description here: a root-level value would also apply to `/`,
+    // where the locale is English. Each page sets its own pair so an English
+    // page never ships a Chinese card.
     images: ["/og-cover.png"],
   },
   alternates: {

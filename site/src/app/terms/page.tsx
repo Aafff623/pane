@@ -2,10 +2,15 @@ import type { Metadata } from "next";
 
 import { LegalPage } from "@/components/legal-page";
 
+const title = "Terms and license";
+const description = "Pane terms, the MIT licence and data notes.";
+
 export const metadata: Metadata = {
-  title: "Terms and license",
-  description: "Pane terms, the MIT licence and data notes.",
+  title,
+  description,
   alternates: { canonical: "https://pane.threetwoa.live/terms/" },
+  openGraph: { type: "website", locale: "en_US", url: "https://pane.threetwoa.live/terms/", title, description },
+  twitter: { title, description },
 };
 
 export default function TermsPage() {

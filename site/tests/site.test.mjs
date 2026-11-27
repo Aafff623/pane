@@ -54,6 +54,38 @@ test("static export: pages, languages and assets", () => {
   assert.ok(seen.size > 8);
 });
 
+test("share metadata: every page states its own locale", () => {
+  // The root layout carries a Chinese OpenGraph block. A page that overrides
+  // only `title` keeps inheriting it, so an English page could ship a Chinese
+  // share card. Each route must state both shapes in its own language.
+  const pages = [
+    ["index.html", "en"],
+    ["zh/index.html", "zh-CN"],
+    ["demo/index.html", "en"],
+    ["zh/demo/index.html", "zh-CN"],
+    ["privacy/index.html", "en"],
+    ["zh/privacy/index.html", "zh-CN"],
+    ["terms/index.html", "en"],
+    ["zh/terms/index.html", "zh-CN"],
+  ];
+  const cjk = /[㐀-鿿]/;
+  for (const [page, lang] of pages) {
+    const head = readFileSync(p(page), "utf8").split("</head>")[0];
+    assert.match(head, new RegExp(`<html lang="${lang}"`), `${page} declares lang`);
+    for (const key of ["og:title", "og:description", "twitter:title", "twitter:description"]) {
+      const m = new RegExp(`(?:name|property)="${key}" content="([^"]*)"`).exec(head);
+      assert.ok(m, `${page} must set ${key}`);
+      const text = m[1];
+      assert.ok(text.trim().length > 0, `${page} ${key} must not be empty`);
+      if (lang === "en") {
+        assert.ok(!cjk.test(text), `${page} ${key} must not be Chinese: ${text}`);
+      } else {
+        assert.ok(cjk.test(text), `${page} ${key} must be Chinese: ${text}`);
+      }
+    }
+  }
+});
+
 test("worker: framing policy and legacy /en redirects", async () => {
   const home = await call("/");
   assert.equal(home.status, 200);

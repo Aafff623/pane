@@ -3,10 +3,15 @@ import type { Metadata } from "next";
 import { DocumentLang } from "@/components/document-lang";
 import { LegalPage } from "@/components/legal-page";
 
+const title = "隐私说明";
+const description = "Pane 的隐私说明：会出网的请求、本机存储与遥测边界。";
+
 export const metadata: Metadata = {
-  title: "隐私说明",
-  description: "Pane 的隐私说明：会出网的请求、本机存储与遥测边界。",
+  title,
+  description,
   alternates: { canonical: "https://pane.threetwoa.live/zh/privacy/" },
+  openGraph: { type: "website", locale: "zh_CN", url: "https://pane.threetwoa.live/zh/privacy/", title, description },
+  twitter: { title, description },
 };
 
 export default function PrivacyPage() {

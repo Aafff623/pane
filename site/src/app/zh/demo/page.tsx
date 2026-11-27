@@ -6,10 +6,15 @@ import { messages } from "@/components/i18n";
 
 const copy = messages.zh.demoPage;
 
+const title = "在线演示";
+const description = copy.description;
+
 export const metadata: Metadata = {
-  title: "在线演示",
-  description: copy.description,
+  title,
+  description,
   alternates: { canonical: "https://pane.threetwoa.live/zh/demo/" },
+  openGraph: { type: "website", locale: "zh_CN", url: "https://pane.threetwoa.live/zh/demo/", title, description },
+  twitter: { title, description },
 };
 
 export default function DemoPage() {
