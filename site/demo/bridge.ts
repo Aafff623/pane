@@ -309,7 +309,8 @@ export async function invoke<T>(command: string, args: Record<string, any> = {})
     case 'keyvault_remove': vaultRows = vaultRows.filter(r => r.id !== args.id); result = vaultRows.map(r => ({ ...r })); break;
     case 'keyvault_set_note': { const row = vaultRows.find(r => r.id === args.id); if (row) row.note = String(args.note ?? ''); result = vaultRows.map(r => ({ ...r })); break; }
     case 'keyvault_copy': case 'keyvault_reveal': result = 'sk-demo-0000000000000000000000000000'; break;
-    case 'test_api_key': case 'test_provider': case 'stepfun_plan_test': result = { ok: true, metrics: 2, message: '连接成功 · 2 个指标' }; break;
+    case 'test_provider': result = 'ok:0'; break;
+    case 'test_api_key': case 'stepfun_plan_test': result = { ok: true, metrics: 2, message: '连接成功 · 2 个指标' }; break;
     case 'get_credential_status': result = { source: 'demo', hasKey: false }; break;
     case 'get_base_url': result = null; break;
     case 'open_panel_window':
@@ -333,7 +334,7 @@ export async function invoke<T>(command: string, args: Record<string, any> = {})
     case 'hide_popover':
       if (keyboardDemoEnabled) parent.postMessage({ type: 'pane-demo-hide' }, location.origin);
       result = null; break;
-    case 'sync_tray_surfaces': case 'set_window_form': result = null; break;
+    case 'sync_tray_surfaces': case 'set_window_form': case 'set_popover_scale': result = null; break;
     default: throw new Error(nativeOnly());
   }
   return copy(result) as T;

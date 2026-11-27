@@ -10,6 +10,7 @@ const require = createRequire(resolve(source, 'package.json'));
 let viteEntry;
 try { viteEntry = require.resolve('vite'); } catch { viteEntry = require.resolve('vite', { paths: [resolve('D:/code/pane/node_modules')] }); }
 const { build } = await import(pathToFileURL(viteEntry).href);
+const { default: tailwindcss } = await import(pathToFileURL(require.resolve('@tailwindcss/vite')).href);
 const pkg = JSON.parse(await readFile(resolve(source, 'package.json'), 'utf8'));
 const outDir = resolve(site, 'public/pane-demo');
 await mkdir(outDir, { recursive: true });
@@ -33,7 +34,7 @@ await build({
       find: `@tauri-apps/api/${name}`, replacement: resolve(site, 'demo/bridge.ts'),
     })),
   ] },
-  plugins: [{ name: 'pane-website-demo', transformIndexHtml: {
+  plugins: [tailwindcss(), { name: 'pane-website-demo', transformIndexHtml: {
     order: 'pre', handler(html) {
       // An embedded demo has no window of its own: whenever the guest
       // document loads hidden (a background tab, or a host app whose
@@ -83,7 +84,7 @@ await build({
 // LF markup. Normalize only the generated demo, leaving the shared app alone.
 const demoHtmlPath = resolve(outDir, 'index.html');
 await writeFile(demoHtmlPath, (await readFile(demoHtmlPath, 'utf8')).replaceAll('\r\n', '\n'));
-const files = ['index.html', 'src/main.ts', 'src/styles.css', 'src/i18n.ts', 'src/providerCatalog.ts'];
+const files = ['index.html', 'src/main.ts', 'src/styles.css', 'src/i18n.ts', 'src/providerCatalog.ts', 'src/ui/coss.css', 'src/ui/coss.tsx', 'src/ui/providerHelp.tsx', 'src/ui/timeFormat.tsx'];
 const hashes = {};
 // Hash CRLF-normalized content so a Windows checkout (autocrlf) records the
 // same provenance as the LF checkout CI verifies against.

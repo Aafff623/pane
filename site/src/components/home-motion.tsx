@@ -29,7 +29,7 @@ export function HeroFilm({ lang, label, className, buttonClassName }: { lang: La
   const [shows, setShows] = useState<"play" | "pause">("play");
   // The visitor's intent. Swapping `src` reloads the element and drops the
   // playback state without firing `pause`, so intent has to live outside it.
-  const wantsPlay = useRef(true);
+  const wantsPlay = useRef(false);
   const inView = useRef(false);
   const cut = CUTS[lang][portrait ? "portrait" : "landscape"];
 
@@ -103,7 +103,7 @@ export function HeroFilm({ lang, label, className, buttonClassName }: { lang: La
         width={portrait ? 720 : 1152}
         height={portrait ? 920 : 560}
         poster={cut.poster}
-        preload="metadata"
+        preload="none"
         muted
         loop
         playsInline

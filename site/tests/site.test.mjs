@@ -26,12 +26,13 @@ const call = (path, init) => worker.fetch(new Request(`http://localhost${path}`,
 test("static export: pages, languages and assets", () => {
   const en = readFileSync(p("index.html"), "utf8");
   assert.match(en, /<html lang="en"/);
-  assert.match(en, /All your AI usage|Every quota window/);
+  assert.match(en, /id="hero-title"[^>]*><span>Your AI usage\.<\/span>\s*<span[^>]*>One panel\./);
   assert.doesNotMatch(en, /Design Mode|designmode\.app/);
 
   const zh = readFileSync(p("zh/index.html"), "utf8");
   assert.match(zh, /<html lang="zh-CN"/);
-  assert.match(zh, /所有 AI 工具的用量/);
+  assert.match(zh, /id="hero-title"[^>]*><span>你的 AI 用量，<\/span>\s*<span[^>]*>一屏看清。/);
+  assert.ok(existsSync(p("img/pane-optical-glass.webp")), "landing artwork is exported");
 
   for (const page of ["demo", "privacy", "terms", "zh/demo", "zh/privacy", "zh/terms"]) {
     assert.ok(existsSync(p(`${page}/index.html`)), `${page} page exists`);

@@ -26,12 +26,8 @@ export const SETTINGS_CONTROLS_HTML = `<div class="acc-group open">
             <select id="pinned"></select>
           </div>
           <div class="setting-row">
-            <label for="timeformat" data-i18n="settings.timeFormat">Time format</label>
-            <select id="timeformat">
-              <option value="auto" data-i18n="settings.timeAuto">Auto</option>
-              <option value="12" data-i18n="settings.time12">12-hour</option>
-              <option value="24" data-i18n="settings.time24">24-hour</option>
-            </select>
+            <span data-i18n="settings.timeFormat">Time format</span>
+            <div id="timeformat"></div>
           </div>
           <div class="setting-row">
             <label for="appearance" data-i18n="settings.appearance">Appearance</label>

@@ -71,5 +71,5 @@ test('the skeleton CSS fixes the three text levels and the last-row border', () 
   assert.match(styles, /\.set-row__label\s*\{[^}]*font-size:\s*14px/);
   assert.match(styles, /\.set-row__desc\s*\{[^}]*font-size:\s*12px/);
   assert.match(styles, /\.set-section__card > \.setting-row:last-child\s*\{[^}]*border-bottom:\s*0/);
-  assert.match(styles, /\.set-section__head\s*\{[^}]*margin-bottom:\s*-1px/);
+  assert.match(styles, /\.set-section__head\s*\{[^}]*margin-bottom:\s*12px/);
 });

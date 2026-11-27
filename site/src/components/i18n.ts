@@ -20,9 +20,8 @@ export const messages = {
       closeMenu: "Close menu",
     },
     hero: {
-      lead: "All your AI usage,",
-      before: "in one",
-      after: "panel.",
+      lead: "Your AI usage.",
+      finish: "One panel.",
       description:
         "Track quotas, balances, reset times and local CLI token spend from one floating panel. Your credentials stay on this device.",
       primary: "Download for Windows",
@@ -30,7 +29,7 @@ export const messages = {
       secondary: "Try it yourself",
       proof: ["Providers", "Pane accounts", "Licence", "Latest release"],
       previewAlt: "Pane product animation with sample data",
-      previewCaption: "The animation is the real panel with sample data — open it with Alt + 2.",
+      previewCaption: "Pane in action with sample data. Press Alt + 2 to open the desktop panel.",
     },
     workflow: {
       eyebrow: "Local first. Read only.",
@@ -54,7 +53,7 @@ export const messages = {
         { title: "Action bar", lines: ["Refresh a single service or switch categories.", "Tabs follow your own workflow."] },
         { title: "Accounts", lines: ["Attach several accounts per provider.", "The badge shows the pool size and health."] },
         { title: "Spend", lines: ["Local CLI logs break tokens and cost down by model.", "Look back day by day."] },
-        { title: "Settings", lines: ["Shortcuts, the vault, skins and notifications.", "One drawer for all of it."] },
+        { title: "Settings", lines: ["Shortcuts, the vault, skins and notifications.", "Manage them in the settings panel."] },
         { title: "Shortcuts", lines: ["Alt + 2 to summon, Esc to dismiss.", "Shift cycles the quota period."] },
       ],
       live: "Live · interactive",
@@ -163,9 +162,8 @@ export const messages = {
       closeMenu: "关闭菜单",
     },
     hero: {
-      lead: "所有 AI 工具的用量，",
-      before: "一屏",
-      after: "看清。",
+      lead: "你的 AI 用量，",
+      finish: "一屏看清。",
       description:
         "按快捷键查看额度、余额、重置时间和本地 CLI 的 Token 花费。凭据保存在本机。",
       primary: "下载 Windows 版",
@@ -173,7 +171,7 @@ export const messages = {
       secondary: "打开在线演示",
       proof: ["用量来源", "Pane 账号", "开源许可", "最新版本"],
       previewAlt: "Pane 产品动效，使用演示数据",
-      previewCaption: "动画里的界面就是 Pane 面板本身，使用演示数据；按 Alt + 2 随时唤出。",
+      previewCaption: "真实 Pane 面板，使用演示数据。桌面端按 Alt + 2 唤出。",
     },
     workflow: {
       eyebrow: "本地优先 · 只读",

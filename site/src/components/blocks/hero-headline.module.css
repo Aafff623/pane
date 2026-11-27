@@ -1,60 +1,16 @@
 .headline {
-  width: 100%;
-  margin-inline: auto;
-}
-
-.headline h1 {
-  font-size: clamp(1.65rem, 0.5rem + 5.8vw, 4.5rem);
-  line-height: 1.13;
-  letter-spacing: -0.055em;
+  margin: 0;
+  color: var(--foreground);
+  font-family: var(--display-family);
+  font-size: clamp(2.65rem, 4.8vw, 4.9rem);
   font-weight: var(--display-weight);
+  line-height: 1.03;
+  letter-spacing: -.065em;
+  text-wrap: balance;
 }
-
-.line {
-  display: flex;
-  width: 100%;
-  justify-content: center;
-  white-space: nowrap;
-}
-
-.agentLine {
-  align-items: center;
-  gap: 0.15em;
-}
-
-.logos {
-  position: relative;
-  display: inline-block;
-  width: 0.84em;
-  height: 0.84em;
-  flex: 0 0 0.84em;
-}
-
-.logo {
-  position: absolute;
-  inset: 0;
-  opacity: 0;
-  animation: rotate-logo 12s step-end infinite;
-}
-
-.mark {
-  display: block;
-  width: 100%;
-  height: 100%;
-}
-
-@keyframes rotate-logo {
-  0% { opacity: 1; }
-  16.6667%, 100% { opacity: 0; }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .logo {
-    animation: none;
-    opacity: 0;
-  }
-
-  .logo:first-child {
-    opacity: 1;
-  }
+.headline span { display: block; }
+.headline .accent { margin-top: .12em; color: var(--primary); }
+:global([lang="zh-CN"]) .headline { letter-spacing: -.045em; }
+@media (max-width: 560px) {
+  .headline { font-size: clamp(2.4rem, 9vw, 3.4rem); }
 }

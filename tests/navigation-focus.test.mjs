@@ -5,9 +5,9 @@ import vm from 'node:vm';
 import ts from 'typescript';
 const source=readFileSync(new URL('../src/main.ts',import.meta.url),'utf8');
 const styles=readFileSync(new URL('../src/styles.css',import.meta.url),'utf8');
-test('navigation frames use explicit blue for overview and yellow for settings, independent of neutral theme accent',()=>{
+test('navigation frames use explicit blue for overview and the theme primary for settings',()=>{
  assert.match(styles,/#providers\s+\.navigation-focus-target\s*\{[^}]*--navigation-focus-color:\s*#3b82f6/);
- assert.match(styles,/#panel-scroll\s+\.navigation-focus-target\s*\{[^}]*--navigation-focus-color:\s*#eab308/);
+ assert.match(styles,/#panel-scroll\s+\.navigation-focus-target\s*\{[^}]*--navigation-focus-color:\s*var\(--primary\)/);
  assert.match(styles,/outline:\s*2px solid var\(--navigation-focus-color/);
 });
 const ast=ts.createSourceFile('main.ts',source,ts.ScriptTarget.Latest,true);

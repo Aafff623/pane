@@ -1,0 +1,5 @@
+@layer theme, utilities;
+@import "tailwindcss/theme.css" layer(theme) prefix(pane);
+@import "tailwindcss/utilities.css" layer(utilities) source(none) prefix(pane);
+@source "./";
+
