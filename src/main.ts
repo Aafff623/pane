@@ -8084,8 +8084,9 @@ function openGroupManagementPanel(): void {
   const builtins = [
     { id: DEFAULT_GROUP, name: t("category.default"), kind: t("overview.groupBuiltin") },
   ];
-  const overlay = document.createElement("div");
-  overlay.className = "group-menu-overlay";
+  const unlockScroll = lockBackgroundScroll();
+  const shell = mountDialogShell({ overlayClass: "group-menu-overlay", onClose: unlockScroll });
+  const overlay = shell.host;
   overlay.innerHTML = `<div class="group-menu group-manage-panel" role="dialog" aria-label="${escapeHtml(t("overview.groupManageTitle"))}">
     <div class="group-menu-title">${escapeHtml(t("overview.groupManageTitle"))}</div>
     <div class="group-manage-hint">${escapeHtml(t("overview.groupManageHint"))}</div>
@@ -8097,13 +8098,7 @@ function openGroupManagementPanel(): void {
     <div class="group-menu-sep"></div>
     <button type="button" class="group-menu-item group-manage-add" data-group-manage-add>＋ ${escapeHtml(t("overview.groupNew"))}</button>
   </div>`;
-  document.body.appendChild(overlay);
-  const close = () => {
-    overlay.remove();
-    document.removeEventListener("keydown", onKey);
-  };
-  const onKey = (event: KeyboardEvent) => { if (event.key === "Escape") close(); };
-  document.addEventListener("keydown", onKey);
+  const close = shell.close;
   overlay.addEventListener("click", async (event) => {
     if (event.target === overlay) { close(); return; }
     const target = event.target as HTMLElement;
@@ -8917,28 +8912,18 @@ function openPeakHelp(anchor: HTMLElement): void {
       </div>`;
     })
     .join("");
-  const overlay = document.createElement("div");
-  overlay.className = "group-menu-overlay";
+  // Information only: no focusables to trap, but Escape, backdrop click and
+  // focus return still come from the shared shell rather than a local handler.
+  const shell = mountDialogShell({ overlayClass: "group-menu-overlay", trapFocus: false });
+  const overlay = shell.host;
   overlay.innerHTML = `
     <div class="group-menu peak-help" role="dialog">
       <div class="group-menu-title">${escapeHtml(t("peak.helpTitle"))}</div>
       ${rows || `<div class="peak-help-empty">${escapeHtml(t("peak.helpEmpty"))}</div>`}
     </div>`;
-  const close = () => {
-    overlay.remove();
-    document.removeEventListener("keydown", onKey, true);
-  };
   overlay.addEventListener("click", (e) => {
-    if (e.target === overlay || !(e.target as HTMLElement).closest(".peak-help")) close();
+    if (e.target === overlay || !(e.target as HTMLElement).closest(".peak-help")) shell.close();
   });
-  const onKey = (e: KeyboardEvent) => {
-    if (e.key === "Escape") {
-      e.stopPropagation();
-      close();
-    }
-  };
-  document.addEventListener("keydown", onKey, true);
-  document.body.appendChild(overlay);
   // Anchor under the ? button, clamped into the viewport.
   const menu = overlay.querySelector<HTMLElement>(".peak-help")!;
   placeMenuAt(menu, anchor.getBoundingClientRect(), { align: "center", gap: 6 });
@@ -9773,8 +9758,13 @@ function openShareRangeMenu(anchor: HTMLElement): void {
   hideSpendPop();
   document.querySelector(".group-menu-overlay")?.remove();
   const current: ShareRange = rangeSelected ? rangeTab : spendTab === "yesterday" ? "yesterday" : "today";
-  const overlay = document.createElement("div");
-  overlay.className = "group-menu-overlay";
+  const unlockScroll = lockBackgroundScroll();
+  const shell = mountDialogShell({
+    overlayClass: "group-menu-overlay",
+    arrowKeys: true,
+    onClose: unlockScroll,
+  });
+  const overlay = shell.host;
   overlay.innerHTML = `
     <div class="group-menu" role="menu">
       <div class="group-menu-title">${escapeHtml(t("share.rangeTitle"))}</div>
@@ -9785,16 +9775,7 @@ function openShareRangeMenu(anchor: HTMLElement): void {
         )
         .join("")}
     </div>`;
-  const close = () => {
-    overlay.remove();
-    document.removeEventListener("keydown", onKey, true);
-  };
-  const onKey = (e: KeyboardEvent) => {
-    if (e.key === "Escape") {
-      e.stopPropagation();
-      close();
-    }
-  };
+  const close = shell.close;
   overlay.addEventListener("click", (e) => {
     const pick = (e.target as HTMLElement).closest<HTMLElement>("[data-share-range]");
     if (pick) {
@@ -9804,11 +9785,10 @@ function openShareRangeMenu(anchor: HTMLElement): void {
     }
     if (e.target === overlay) close();
   });
-  document.addEventListener("keydown", onKey, true);
-  document.body.appendChild(overlay);
   // Drop the menu under the button's right edge, clamped inside the window.
   const menu = overlay.querySelector<HTMLElement>(".group-menu")!;
   placeMenuAt(menu, anchor.getBoundingClientRect(), { align: "right", gap: 4 });
+  shell.focusFirst(menu.querySelector<HTMLElement>(".group-menu-item"));
 }
 
 // ---------------------------------------------------------------------------
@@ -13320,8 +13300,13 @@ function openGroupPicker(cardId: string, anchor: HTMLElement): void {
   const current = cardGroupId(cardId);
   const item = (gid: string, label: string, checked = false) =>
     `<button class="group-menu-item${checked ? " on" : ""}" data-group-pick="${escapeHtml(gid)}"><span class="group-menu-check">${checked ? "✓" : ""}</span>${escapeHtml(label)}</button>`;
-  const overlay = document.createElement("div");
-  overlay.className = "group-menu-overlay";
+  const unlockScroll = lockBackgroundScroll();
+  const shell = mountDialogShell({
+    overlayClass: "group-menu-overlay",
+    arrowKeys: true,
+    onClose: unlockScroll,
+  });
+  const overlay = shell.host;
   overlay.innerHTML = `<div class="group-menu" role="menu">
       <div class="group-menu-title">${escapeHtml(t("customize.groupLabel"))}</div>
       ${item("", t("customize.groupNone"), current === "")}
@@ -13331,7 +13316,7 @@ function openGroupPicker(cardId: string, anchor: HTMLElement): void {
       <div class="group-menu-sep"></div>
       ${item("__new__", `${t("customize.groupNew")}…`)}
     </div>`;
-  const close = () => overlay.remove();
+  const close = shell.close;
   overlay.addEventListener("click", (e) => {
     if (e.target === overlay) {
       close();
@@ -13343,9 +13328,9 @@ function openGroupPicker(cardId: string, anchor: HTMLElement): void {
     close();
     void applyGroupChoice(cardId, choice);
   });
-  document.body.appendChild(overlay);
   const menu = overlay.querySelector<HTMLElement>(".group-menu")!;
   placeMenuAt(menu, anchor.getBoundingClientRect(), { align: "left", gap: 4 });
+  shell.focusFirst(menu.querySelector<HTMLElement>(".group-menu-item"));
 }
 
 function renderCompactKeySummary(id: string): string {
@@ -23830,8 +23815,13 @@ function openAuthRowMenu(family: string, index: number, anchor: HTMLElement): vo
   const acct = authGroups?.find((g) => g.family === family)?.accounts[index];
   if (!acct) return;
   const name = authRowName(family, acct);
-  const overlay = document.createElement("div");
-  overlay.className = "group-menu-overlay";
+  const unlockScroll = lockBackgroundScroll();
+  const shell = mountDialogShell({
+    overlayClass: "group-menu-overlay",
+    arrowKeys: true,
+    onClose: unlockScroll,
+  });
+  const overlay = shell.host;
   overlay.innerHTML = `<div class="group-menu" role="menu">
     <div class="group-menu-title">${escapeHtml(name)}</div>
     <button class="group-menu-item" type="button" data-auth-menu-rename="${escapeHtml(family)}|${escapeHtml(acct.id)}"><span class="group-menu-check">✎</span>${escapeHtml(t("auth.note"))}</button>
@@ -23839,16 +23829,7 @@ function openAuthRowMenu(family: string, index: number, anchor: HTMLElement): vo
     <button class="group-menu-item" type="button" data-auth-menu-archive="${escapeHtml(family)}|${index}"><span class="group-menu-check">↓</span>${escapeHtml(t("customize.acctArchive"))}</button>
     <button class="group-menu-item danger" type="button" data-auth-menu-remove="${escapeHtml(family)}|${index}"><span class="group-menu-check">×</span>${escapeHtml(t("auth.remove"))}</button>
   </div>`;
-  const close = () => {
-    overlay.remove();
-    document.removeEventListener("keydown", onKey, true);
-  };
-  const onKey = (e: KeyboardEvent) => {
-    if (e.key === "Escape") {
-      e.stopPropagation();
-      close();
-    }
-  };
+  const close = shell.close;
   overlay.addEventListener("click", (e) => {
     if (e.target === overlay) {
       close();
@@ -23874,12 +23855,11 @@ function openAuthRowMenu(family: string, index: number, anchor: HTMLElement): vo
       void authRemoveAccount(family, index, acct);
     }
   });
-  document.addEventListener("keydown", onKey, true);
-  document.body.appendChild(overlay);
   // Anchor to the ⋯ button, opening below-right and flipping up at the
   // window's bottom edge, same recipe as the card context menu.
   const menu = overlay.querySelector<HTMLElement>(".group-menu")!;
   placeMenuAt(menu, anchor.getBoundingClientRect(), { align: "right", gap: 4 });
+  shell.focusFirst(menu.querySelector<HTMLElement>(".group-menu-item"));
 }
 
 /// Batch removal keeps stable identities and confirms once. It deliberately
