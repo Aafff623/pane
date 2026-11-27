@@ -12896,6 +12896,12 @@ async function doAccountAdd(family: string): Promise<void> {
   const keyInp = block?.querySelector<HTMLInputElement>("[data-acct-key]");
   const labelInp = block?.querySelector<HTMLInputElement>("[data-acct-label]");
   if (!keyInp?.value.trim() || !labelInp?.value.trim()) return;
+  // `account_add` is a round trip, and the save button stays live during it.
+  // Two clicks used to create two accounts with the same key; the guard makes
+  // the second click a no-op instead.
+  const addBtn = block?.querySelector<HTMLButtonElement>("[data-acct-add]");
+  if (addBtn?.disabled) return;
+  if (addBtn) addBtn.disabled = true;
   const status = document.querySelector("#status")!;
   const result = block?.querySelector<HTMLElement>("[data-acct-result]");
   try {
@@ -12918,6 +12924,8 @@ async function doAccountAdd(family: string): Promise<void> {
       result.classList.remove("ok");
       result.classList.add("err");
     }
+    // A failed save must be retryable: leave the button live.
+    if (addBtn) addBtn.disabled = false;
   }
 }
 
