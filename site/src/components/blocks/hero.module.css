@@ -3,15 +3,19 @@
 }
 
 .layout {
-  /* 1200px, matching the `.container` the rest of the page uses. The hero had
-     its own 1320px ceiling, so on a wide screen the first fold was 120px wider
-     than every section under it and the left edges did not line up. */
-  width: min(100%, 1200px);
+  /* Mirrors `.container` exactly: full-width below 1400px, 1200px above it.
+     Any other ceiling put the hero on a different grid than every section
+     under it, so the first fold and the rest of the page did not share a left
+     edge on a wide screen. */
+  width: 100%;
   margin-inline: auto;
   display: grid;
   grid-template-columns: minmax(340px, .84fr) minmax(0, 1.16fr);
   gap: clamp(30px, 5vw, 85px);
   align-items: center;
+}
+@media (width >= 1400px) {
+  .layout { max-width: 1200px; }
 }
 .copy { min-width: 0; padding-bottom: 24px; }
 
