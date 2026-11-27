@@ -7686,8 +7686,12 @@ function appProviderPicker(
   opts: { title: string; note: string; empty: string; confirmLabel: string },
 ): Promise<Set<string> | null> {
   return new Promise((resolve) => {
-    const overlay = document.createElement("div");
-    overlay.id = "confirm-overlay";
+    let outcome: Set<string> | null = null;
+    const shell = mountDialogShell({
+      overlayId: "confirm-overlay",
+      onClose: () => resolve(outcome),
+    });
+    const overlay = shell.host;
     const HEALTHS: PickerHealth[] = ["ok", "warn", "off"];
     const labelOf: Record<PickerHealth, string> = {
       ok: t("picker.legendOk"),
@@ -7750,22 +7754,14 @@ function appProviderPicker(
       if (list) list.scrollTop = 0;
     };
     const done = (ok: boolean) => {
-      document.removeEventListener("keydown", onKey, true);
       const checked = new Set<string>();
       // Read every box, including rows a filter currently hides: filtering is
       // a view, and a hidden tick the user set earlier still counts.
       overlay.querySelectorAll<HTMLInputElement>("[data-picker-check]").forEach((box) => {
         if (box.checked) checked.add(box.dataset.pickerCheck!);
       });
-      overlay.remove();
-      resolve(ok ? checked : null);
-    };
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        e.preventDefault();
-        e.stopPropagation();
-        done(false);
-      }
+      outcome = ok ? checked : null;
+      shell.close();
     };
     overlay.addEventListener("click", (e) => {
       const target = e.target as HTMLElement;
@@ -7774,15 +7770,14 @@ function appProviderPicker(
         const next = chip.dataset.pickerFilter as PickerHealth;
         filter = filter === next ? null : next;
         applyFilter();
-        return;
       }
-      if (e.target === overlay) done(false);
     });
     overlay.querySelector("#confirm-cancel")!.addEventListener("click", () => done(false));
-    overlay.querySelector("#confirm-ok")!.addEventListener("click", () => done(true));
-    document.addEventListener("keydown", onKey, true);
-    document.body.appendChild(overlay);
-    overlay.querySelector<HTMLButtonElement>("#confirm-ok")!.focus();
+    const okBtn = overlay.querySelector<HTMLButtonElement>("#confirm-ok")!;
+    okBtn.addEventListener("click", () => done(true));
+    // The shell already closes on a backdrop click; only reach `done` from a
+    // real button so the return value is not lost.
+    shell.focusFirst(okBtn);
   });
 }
 
@@ -17904,8 +17899,22 @@ async function setVaultPassword(): Promise<void> {
 
 function vaultSetupWizard(): void {
   if (document.querySelector("#vault-setup-overlay")) return;
-  const overlay = document.createElement("div");
-  overlay.id = "vault-setup-overlay";
+  let step: 1 | 2 | 3 = 1; // 3 = done state (recovery code reveal)
+  /// True while `keyvault_v3_setup` is in flight. The one-time recovery code it
+  /// returns cannot be fetched again, so the wizard must not be dismissible
+  /// during that window.
+  let creating = false;
+  const shell = mountDialogShell({
+    overlayId: "vault-setup-overlay",
+    // Step 2 is "the vault is being created": `keyvault_v3_setup` may already
+    // have succeeded in the backend, and the one-time recovery code it returns
+    // is unrecoverable. Closing here used to write that code into a detached
+    // node — the vault existed and its code was gone. Refuse to close mid-flight
+    // instead of offering a cancel that destroys data.
+    canClose: () => step < 3 && !creating,
+    onClose: () => { void loadKeyvault(); },
+  });
+  const overlay = shell.host;
   overlay.innerHTML = `
     <div id="vault-setup-box" role="dialog" aria-modal="true">
       <datalist id="vault-setup-presets">${RECOVERY_PRESET_KEYS.map(
@@ -17922,35 +17931,13 @@ function vaultSetupWizard(): void {
         <button type="button" class="mini-btn" id="vault-setup-next"></button>
       </div>
     </div>`;
-  document.body.append(overlay);
-  const close = async () => {
-    overlay.remove();
-    document.removeEventListener("keydown", onKey, true);
-    await loadKeyvault();
-  };
-  const onKey = (e: KeyboardEvent) => {
-    // Step 2 is "the vault is being created": `keyvault_v3_setup` may already
-    // have succeeded in the backend, and the one-time recovery code it returns
-    // is unrecoverable. Closing here used to write that code into a detached
-    // node — the vault existed and its code was gone. Refuse to close mid-flight
-    // instead of offering a cancel that destroys data.
-    if (e.key === "Escape" && step < 3 && !creating) void close();
-  };
-  document.addEventListener("keydown", onKey, true);
-  overlay.addEventListener("click", (e) => {
-    if (e.target === overlay && step < 3 && !creating) void close();
-  });
-  overlay.querySelector("#vault-setup-cancel")?.addEventListener("click", () => { if (!creating) void close(); });
+  const close = () => shell.close();
+  overlay.querySelector("#vault-setup-cancel")?.addEventListener("click", () => close());
 
-  let step: 1 | 2 | 3 = 1; // 3 = done state (recovery code reveal)
   let unlockCode = "";
   let wizardQuestions: [string, string][] = [];
   let printed = "";
   let downloaded = false;
-  /// True while `keyvault_v3_setup` is in flight. The one-time recovery code it
-  /// returns cannot be fetched again, so the wizard must not be dismissible
-  /// during that window.
-  let creating = false;
   const body = overlay.querySelector<HTMLElement>("#vault-setup-body")!;
   const errEl = overlay.querySelector<HTMLElement>("#vault-setup-error")!;
   const backBtn = overlay.querySelector<HTMLButtonElement>("#vault-setup-back")!;

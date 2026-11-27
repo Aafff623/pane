@@ -199,3 +199,17 @@ test("background scrolling is locked while a modal is open", () => {
   unlock();
   assert.equal(doc.body.style.overflow, "", "unlocking twice is safe");
 });
+
+test("canClose vetoes a dismissal but not an explicit close", () => {
+  reset();
+  const { mountDialogShell } = load();
+  let safe = false;
+  const shell = mountDialogShell({ canClose: () => safe });
+  doc.dispatch("keydown", { key: "Escape", preventDefault() {}, stopPropagation() {} });
+  assert.equal(shell.host.isConnected, true, "Esc must not destroy an in-flight write");
+  shell.host.dispatch("click", { target: shell.host });
+  assert.equal(shell.host.isConnected, true, "nor may the backdrop");
+  // The caller's own close is the "the write landed" path and always works.
+  shell.close();
+  assert.equal(shell.host.isConnected, false);
+});

@@ -47,6 +47,9 @@ export function mountDialogShell(
     trapFocus?: boolean;
     arrowKeys?: boolean;
     dismissOnBackdrop?: boolean;
+    /// Veto a dismissal while it returns false. Used by dialogs that own an
+    /// in-flight write whose result cannot be recovered if the node goes away.
+    canClose?: () => boolean;
     /// Called after the node is removed. Use for listener cleanup.
     onClose?: () => void;
   } = {},
@@ -69,6 +72,14 @@ export function mountDialogShell(
     options.onClose?.();
   };
 
+  /// The path Esc and the backdrop take. `canClose` only vetoes these — a
+  /// caller that calls `close()` itself knows the write has landed.
+  const dismiss = () => {
+    if (closed) return;
+    if (options.canClose && !options.canClose()) return;
+    close();
+  };
+
   const focusFirst = (prefer?: HTMLElement | null) => {
     const list = focusables(host);
     const target = prefer && host.contains(prefer) ? prefer : list[0];
@@ -85,7 +96,7 @@ export function mountDialogShell(
       if (e.isComposing) return;
       e.preventDefault();
       e.stopPropagation();
-      close();
+      dismiss();
       return;
     }
     if (arrowKeys && (e.key === "ArrowDown" || e.key === "ArrowUp" || e.key === "Home" || e.key === "End")) {
@@ -123,7 +134,7 @@ export function mountDialogShell(
   document.addEventListener("keydown", onKey, true);
   if (options.dismissOnBackdrop !== false) {
     host.addEventListener("click", (e) => {
-      if (e.target === host) close();
+      if (e.target === host) dismiss();
     });
   }
   document.body.append(host);
