@@ -7460,11 +7460,22 @@ function appConfirm(opts: {
     // the shared shell so this dialog cannot drift from the others. The markup
     // and every class name stay exactly as the skins expect.
     const unlockScroll = lockBackgroundScroll();
+    // Esc and the backdrop go through the shell's own close, which never
+    // touches `done()`. Without settling here, every `await appConfirm(...)`
+    // cancelled with Esc held an unresolved Promise forever — and the delete
+    // flows that await it would simply never continue.
+    let settled = false;
+    const settle = (value: { ok: boolean; checked: boolean } | boolean) => {
+      if (settled) return;
+      settled = true;
+      resolve(value);
+    };
     const shell = mountDialogShell({
       overlayId: "confirm-overlay",
       onClose: () => {
         unlockScroll();
         dismissConfirm = null;
+        settle(opts.checkboxLabel ? { ok: false, checked: false } : false);
       },
     });
     const overlay = shell.host;
@@ -7487,12 +7498,10 @@ function appConfirm(opts: {
     };
     const done = (ok: boolean) => {
       const checked = getChecked();
+      // Settle BEFORE closing: `close()` runs `onClose`, which settles the
+      // cancel value, and the first settle wins.
+      settle(opts.checkboxLabel ? { ok, checked } : ok);
       shell.close();
-      if (opts.checkboxLabel) {
-        resolve({ ok, checked });
-      } else {
-        resolve(ok);
-      }
     };
     dismissConfirm = () => done(false);
     overlay.querySelector("#confirm-cancel")!.addEventListener("click", () => done(false));
@@ -7519,11 +7528,20 @@ function appPrompt(opts: {
     // Same shared lifecycle as appConfirm. Enter-to-submit stays a local
     // concern: it belongs to this dialog's contract, not to the shell.
     const unlockScroll = lockBackgroundScroll();
+    // Same trap as appConfirm: the shell's Esc path bypasses `done()`, so the
+    // cancel value has to be settled here or the caller waits forever.
+    let settled = false;
+    const settle = (value: string | null) => {
+      if (settled) return;
+      settled = true;
+      resolve(value);
+    };
     const shell = mountDialogShell({
       overlayId: "confirm-overlay",
       onClose: () => {
         unlockScroll();
         dismissConfirm = null;
+        settle(null);
       },
     });
     const overlay = shell.host;
@@ -7541,8 +7559,10 @@ function appPrompt(opts: {
     input.placeholder = opts.placeholder ?? "";
     const done = (ok: boolean) => {
       const value = input.value;
+      // Settle BEFORE closing: `close()` runs `onClose`, which settles the
+      // cancel value, and the first settle wins.
+      settle(ok ? (value.trim() || (opts.allowEmpty ? "" : null)) : null);
       shell.close();
-      resolve(ok ? (value.trim() || (opts.allowEmpty ? "" : null)) : null);
     };
     dismissConfirm = () => done(false);
     const onKey = (e: KeyboardEvent) => {
@@ -8057,18 +8077,44 @@ function openProviderHelp(
   });
 }
 
+/// Every `overlayClass: "group-menu-overlay"` dialog (card menu, group panel,
+/// group picker, peak help, share range, auth-row menu) is exclusive: opening
+/// one closes the previous. They used to share a bare `.remove()`, which skips
+/// the shell's `close()` — its capture keydown listener and the background
+/// scroll lock both survived, so the next Escape was eaten by a dead dialog
+/// and the board stayed locked after every stacking pass. This slot is the one
+/// way out.
+let dismissGroupMenu: (() => void) | null = null;
+
+function closeGroupMenu(): void {
+  const close = dismissGroupMenu;
+  dismissGroupMenu = null;
+  close?.();
+}
+
+/// Clear the slot from inside a shell's own `onClose`. Comparing identity
+/// matters: opening a second menu registers a new slot before the previous
+/// shell finishes closing, and the old close must not wipe the new handle.
+function releaseGroupMenuSlot(shell: DialogShell): void {
+  if (dismissGroupMenu === shell.close) dismissGroupMenu = null;
+}
+
 /// The dashboard card's group menu — the main-page tagging entry. Lists
 /// every group (✓ on the card's current one), "Ungrouped", and
 /// "New group…". Tagging lives on the family, so a parallel-account card
 /// moves its whole family. Opens from the card-head ⚙ and right-click.
 /// The note (custom display name) rides along: the note itself is per card.
 function openGroupManagementPanel(): void {
-  document.querySelector<HTMLElement>(".group-menu-overlay")?.remove();
+  closeGroupMenu();
   const builtins = [
     { id: DEFAULT_GROUP, name: t("category.default"), kind: t("overview.groupBuiltin") },
   ];
   const unlockScroll = lockBackgroundScroll();
-  const shell = mountDialogShell({ overlayClass: "group-menu-overlay", onClose: unlockScroll });
+  const shell = mountDialogShell({
+    overlayClass: "group-menu-overlay",
+    onClose: () => { unlockScroll(); releaseGroupMenuSlot(shell); },
+  });
+  dismissGroupMenu = shell.close;
   const overlay = shell.host;
   overlay.innerHTML = `<div class="group-menu group-manage-panel" role="dialog" aria-label="${escapeHtml(t("overview.groupManageTitle"))}">
     <div class="group-menu-title">${escapeHtml(t("overview.groupManageTitle"))}</div>
@@ -8641,7 +8687,7 @@ function openGroupMenu(
   includeGrouping = true,
   contextPoint?: { x: number; y: number; target?: Element; atCursor?: boolean },
 ): void {
-  document.querySelector(".group-menu-overlay")?.remove();
+  closeGroupMenu();
   const current = cardGroupId(cardId);
   const groups = cardGroups();
   const fam = providerFamily(cardId);
@@ -8670,8 +8716,9 @@ function openGroupMenu(
   const shell = mountDialogShell({
     overlayClass: "group-menu-overlay",
     arrowKeys: true,
-    onClose: unlockScroll,
+    onClose: () => { unlockScroll(); releaseGroupMenuSlot(shell); },
   });
+  dismissGroupMenu = shell.close;
   const overlay = shell.host;
   overlay.innerHTML = `
     <div class="group-menu${includeGrouping ? " overview-move-menu" : ""}" role="menu">
@@ -8872,7 +8919,7 @@ function peakWindowText(rule: PeakRule): string {
 /// has peak-hour billing, its window, and whether it is in peak right now.
 /// Purely informational — closes on outside click / Escape.
 function openPeakHelp(anchor: HTMLElement): void {
-  document.querySelector(".group-menu-overlay")?.remove();
+  closeGroupMenu();
   const seen = new Set<string>();
   const rows = orderedSnapshots()
     .map((s) => providerFamily(s.id))
@@ -8897,7 +8944,12 @@ function openPeakHelp(anchor: HTMLElement): void {
     .join("");
   // Information only: no focusables to trap, but Escape, backdrop click and
   // focus return still come from the shared shell rather than a local handler.
-  const shell = mountDialogShell({ overlayClass: "group-menu-overlay", trapFocus: false });
+  const shell = mountDialogShell({
+    overlayClass: "group-menu-overlay",
+    trapFocus: false,
+    onClose: () => releaseGroupMenuSlot(shell),
+  });
+  dismissGroupMenu = shell.close;
   const overlay = shell.host;
   overlay.innerHTML = `
     <div class="group-menu peak-help" role="dialog">
@@ -9132,7 +9184,26 @@ function showChangelogDialog(
   const kind = opts.kind ?? "browse";
   const actions = opts.actions;
   let visibleVersions = kind === "update" ? WHATS_NEW_VERSIONS : sections.length;
-  const shell = mountDialogShell({ overlayId: "whatsnew-overlay" });
+  // The shell's Esc/backdrop path must reach THIS dialog's close logic, not
+  // just remove the node: clearing `dismissWhatsNew` and running `opts.onClose`
+  // (which is `noticeClosed`) is what lets the notice queue and the first-run
+  // tour continue. Without it `noticeOpen` stayed true for the rest of the
+  // session.
+  //
+  // `resumeQueue` is the one thing the shell cannot infer: the "full
+  // changelog" hand-off closes this dialog but carries `onClose` to the
+  // replacement, so the queue must not resume underneath it.
+  let closed = false;
+  let resumeQueue = true;
+  const shell = mountDialogShell({
+    overlayId: "whatsnew-overlay",
+    onClose: () => {
+      if (closed) return;
+      closed = true;
+      dismissWhatsNew = null;
+      if (resumeQueue) opts.onClose?.();
+    },
+  });
   const overlay = shell.host;
   overlay.innerHTML = `
     <div id="whatsnew-box" role="dialog" aria-modal="true" aria-labelledby="whatsnew-title">
@@ -9194,16 +9265,14 @@ function showChangelogDialog(
     );
   });
   renderBody();
-  let closed = false;
   // Lifecycle from the shared shell (Escape, Tab wrap, backdrop, focus return).
   // `runOnClose` stays local: only this dialog knows whether the notice queue
-  // should resume.
+  // should resume. `close(false)` hands that job to a replacement dialog that
+  // carries the same `onClose`.
   const close = (runOnClose = true) => {
     if (closed) return;
-    closed = true;
-    dismissWhatsNew = null;
+    resumeQueue = runOnClose;
     shell.close();
-    if (runOnClose) opts.onClose?.();
   };
   const done = (userAction = true, accepted = false) => {
     if (userAction && actions) { if (accepted) actions.accept(); else actions.dismiss(); }
@@ -9706,14 +9775,15 @@ async function shareSpendEnvelope(range: ShareRange, trigger?: HTMLElement): Pro
 /// styling as the card group menu; Esc and outside clicks dismiss.
 function openShareRangeMenu(anchor: HTMLElement): void {
   hideSpendPop();
-  document.querySelector(".group-menu-overlay")?.remove();
+  closeGroupMenu();
   const current: ShareRange = rangeSelected ? rangeTab : spendTab === "yesterday" ? "yesterday" : "today";
   const unlockScroll = lockBackgroundScroll();
   const shell = mountDialogShell({
     overlayClass: "group-menu-overlay",
     arrowKeys: true,
-    onClose: unlockScroll,
+    onClose: () => { unlockScroll(); releaseGroupMenuSlot(shell); },
   });
+  dismissGroupMenu = shell.close;
   const overlay = shell.host;
   overlay.innerHTML = `
     <div class="group-menu" role="menu">
@@ -13275,7 +13345,7 @@ async function applyGroupChoice(cardId: string, choice: string): Promise<void> {
 /// light text on white — unreadable (user report 2026-10-08). The overlay
 /// reuses the card group menu's styles, so it follows the theme everywhere.
 function openGroupPicker(cardId: string, anchor: HTMLElement): void {
-  document.querySelector(".group-menu-overlay")?.remove();
+  closeGroupMenu();
   const current = cardGroupId(cardId);
   const item = (gid: string, label: string, checked = false) =>
     `<button class="group-menu-item${checked ? " on" : ""}" data-group-pick="${escapeHtml(gid)}"><span class="group-menu-check">${checked ? "✓" : ""}</span>${escapeHtml(label)}</button>`;
@@ -13283,8 +13353,9 @@ function openGroupPicker(cardId: string, anchor: HTMLElement): void {
   const shell = mountDialogShell({
     overlayClass: "group-menu-overlay",
     arrowKeys: true,
-    onClose: unlockScroll,
+    onClose: () => { unlockScroll(); releaseGroupMenuSlot(shell); },
   });
+  dismissGroupMenu = shell.close;
   const overlay = shell.host;
   overlay.innerHTML = `<div class="group-menu" role="menu">
       <div class="group-menu-title">${escapeHtml(t("customize.groupLabel"))}</div>
@@ -17925,7 +17996,12 @@ function vaultSetupWizard(): void {
       </div>
     </div>`;
   const close = () => shell.close();
-  overlay.querySelector("#vault-setup-cancel")?.addEventListener("click", () => close());
+  // `canClose` only guards Esc and the backdrop. The button reaches `close()`
+  // directly, so it carries its own check — otherwise a click during
+  // `keyvault_v3_setup` detaches the node the recovery code lands in.
+  overlay.querySelector("#vault-setup-cancel")?.addEventListener("click", () => {
+    if (!creating) close();
+  });
 
   let unlockCode = "";
   let wizardQuestions: [string, string][] = [];
@@ -23812,7 +23888,7 @@ async function renameAuthAccount(family: string, id: string): Promise<void> {
 /// default concept and OAuth families are per-login accounts, so "set
 /// default" has no semantics to call either.
 function openAuthRowMenu(family: string, index: number, anchor: HTMLElement): void {
-  document.querySelector(".group-menu-overlay")?.remove();
+  closeGroupMenu();
   const acct = authGroups?.find((g) => g.family === family)?.accounts[index];
   if (!acct) return;
   const name = authRowName(family, acct);
@@ -23820,8 +23896,9 @@ function openAuthRowMenu(family: string, index: number, anchor: HTMLElement): vo
   const shell = mountDialogShell({
     overlayClass: "group-menu-overlay",
     arrowKeys: true,
-    onClose: unlockScroll,
+    onClose: () => { unlockScroll(); releaseGroupMenuSlot(shell); },
   });
+  dismissGroupMenu = shell.close;
   const overlay = shell.host;
   overlay.innerHTML = `<div class="group-menu" role="menu">
     <div class="group-menu-title">${escapeHtml(name)}</div>
