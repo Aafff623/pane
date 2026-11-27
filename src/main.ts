@@ -14,6 +14,7 @@ import {
 import { PEAK_RULES, isProviderInPeak, type PeakRule } from "./peakHours";
 import { onboardingFor, onboardingMethods, type AccountAction, type Onboarding } from "./providerOnboarding";
 import { providerVisual } from "./providerVisuals";
+import { lockBackgroundScroll, mountDialogShell } from "./ui/dialogShell";
 import { MECHANISMS } from "./providerMechanisms";
 import { uiIcon, type UiIconName } from "./uiIcons";
 import { fitDashboardTypography, observeDashboardTypography } from "./responsiveTypography";
@@ -7467,8 +7468,18 @@ function appConfirm(opts: {
   checkboxDefault?: boolean;
 }): Promise<any> {
   return new Promise((resolve) => {
-    const overlay = document.createElement("div");
-    overlay.id = "confirm-overlay";
+    // Lifecycle (Esc, Tab trap, focus return, backdrop, scroll lock) comes from
+    // the shared shell so this dialog cannot drift from the others. The markup
+    // and every class name stay exactly as the skins expect.
+    const unlockScroll = lockBackgroundScroll();
+    const shell = mountDialogShell({
+      overlayId: "confirm-overlay",
+      onClose: () => {
+        unlockScroll();
+        dismissConfirm = null;
+      },
+    });
+    const overlay = shell.host;
     const checkboxHtml = opts.checkboxLabel
       ? `<label class="confirm-checkbox-row"><input type="checkbox" id="confirm-checkbox" ${opts.checkboxDefault !== false ? "checked" : ""}><span>${escapeHtml(opts.checkboxLabel)}</span></label>`
       : "";
@@ -7487,10 +7498,8 @@ function appConfirm(opts: {
       return cb ? cb.checked : false;
     };
     const done = (ok: boolean) => {
-      dismissConfirm = null;
-      document.removeEventListener("keydown", onKey, true);
       const checked = getChecked();
-      overlay.remove();
+      shell.close();
       if (opts.checkboxLabel) {
         resolve({ ok, checked });
       } else {
@@ -7498,21 +7507,9 @@ function appConfirm(opts: {
       }
     };
     dismissConfirm = () => done(false);
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        e.preventDefault();
-        e.stopPropagation();
-        done(false);
-      }
-    };
-    overlay.addEventListener("click", (e) => {
-      if (e.target === overlay) done(false);
-    });
     overlay.querySelector("#confirm-cancel")!.addEventListener("click", () => done(false));
     overlay.querySelector("#confirm-ok")!.addEventListener("click", () => done(true));
-    document.addEventListener("keydown", onKey, true);
-    document.body.appendChild(overlay);
-    overlay.querySelector<HTMLButtonElement>("#confirm-ok")!.focus();
+    shell.focusFirst(overlay.querySelector<HTMLButtonElement>("#confirm-ok"));
   });
 }
 
@@ -7531,8 +7528,17 @@ function appPrompt(opts: {
   secret?: boolean;
 }): Promise<string | null> {
   return new Promise((resolve) => {
-    const overlay = document.createElement("div");
-    overlay.id = "confirm-overlay";
+    // Same shared lifecycle as appConfirm. Enter-to-submit stays a local
+    // concern: it belongs to this dialog's contract, not to the shell.
+    const unlockScroll = lockBackgroundScroll();
+    const shell = mountDialogShell({
+      overlayId: "confirm-overlay",
+      onClose: () => {
+        unlockScroll();
+        dismissConfirm = null;
+      },
+    });
+    const overlay = shell.host;
     overlay.innerHTML = `
       <div id="confirm-box" role="dialog" aria-modal="true">
         <h3>${escapeHtml(opts.title)}</h3>
@@ -7546,31 +7552,21 @@ function appPrompt(opts: {
     input.value = opts.initial ?? "";
     input.placeholder = opts.placeholder ?? "";
     const done = (ok: boolean) => {
-      dismissConfirm = null;
-      document.removeEventListener("keydown", onKey, true);
-      overlay.remove();
-      resolve(ok ? (input.value.trim() || (opts.allowEmpty ? "" : null)) : null);
+      const value = input.value;
+      shell.close();
+      resolve(ok ? (value.trim() || (opts.allowEmpty ? "" : null)) : null);
     };
     dismissConfirm = () => done(false);
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        e.preventDefault();
-        e.stopPropagation();
-        done(false);
-      } else if (e.key === "Enter") {
+      if (e.key === "Enter") {
         e.preventDefault();
         done(true);
       }
     };
-    overlay.addEventListener("click", (e) => {
-      if (e.target === overlay) done(false);
-    });
     overlay.querySelector("#confirm-cancel")!.addEventListener("click", () => done(false));
     overlay.querySelector("#confirm-ok")!.addEventListener("click", () => done(true));
     input.addEventListener("keydown", onKey);
-    document.addEventListener("keydown", onKey, true);
-    document.body.appendChild(overlay);
-    input.focus();
+    shell.focusFirst(input);
     input.select();
   });
 }
