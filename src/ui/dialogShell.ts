@@ -21,6 +21,14 @@ export type DialogShell = {
   focusFirst: (prefer?: HTMLElement | null) => void;
 };
 
+/// True while an IME is composing. Two checks because neither alone is
+/// reliable: `isComposing` is the standard flag, and `keyCode === 229` is the
+/// legacy signal some Windows IMEs send on the commit keystroke, where
+/// `isComposing` has already flipped back to false.
+function composing(e: KeyboardEvent): boolean {
+  return e.isComposing || e.keyCode === 229;
+}
+
 const FOCUSABLE =
   'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), summary, [tabindex]:not([tabindex="-1"])';
 
@@ -93,7 +101,7 @@ export function mountDialogShell(
       // An IME candidate window closes with Escape too. Treating that as
       // "dismiss the dialog" swallowed the keystroke mid-composition, which is
       // how the import dialog used to behave before it shared this shell.
-      if (e.isComposing) return;
+      if (composing(e)) return;
       e.preventDefault();
       e.stopPropagation();
       dismiss();

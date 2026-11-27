@@ -14,7 +14,7 @@ import {
 import { PEAK_RULES, isProviderInPeak, type PeakRule } from "./peakHours";
 import { onboardingFor, onboardingMethods, type AccountAction, type Onboarding } from "./providerOnboarding";
 import { providerVisual } from "./providerVisuals";
-import { lockBackgroundScroll, mountDialogShell } from "./ui/dialogShell";
+import { lockBackgroundScroll, mountDialogShell, type DialogShell } from "./ui/dialogShell";
 import { MECHANISMS } from "./providerMechanisms";
 import { uiIcon, type UiIconName } from "./uiIcons";
 import { fitDashboardTypography, observeDashboardTypography } from "./responsiveTypography";
@@ -10367,6 +10367,7 @@ function openImportDialog(): void {
 }
 
 let onboardingOverlay: HTMLElement | null = null;
+let onboardingShell: DialogShell | null = null;
 let onboardingStep = 0;
 let onboardingReplay = false;
 let onboardingFreshInstall = false;
@@ -10646,7 +10647,10 @@ function onOnboardingKey(e: KeyboardEvent): void {
 
 function finishOnboarding(dismissed: boolean): void {
   document.removeEventListener("keydown", onOnboardingKey, true);
-  onboardingOverlay?.remove();
+  // `close()` runs `onClose`, which only clears the refs. The business work
+  // below must not repeat, so it sits outside the shell callback.
+  onboardingShell?.close();
+  onboardingShell = null;
   onboardingOverlay = null;
   // Skip/close/“set up later” must never rewrite the provider selection.
   // Only completing the flow applies the checklist; the old mid-flow apply
@@ -10684,8 +10688,21 @@ function startOnboarding(replay = false, startStep = 0, applyPicks = !replay): v
   onboardingSelectionTouched = false;
   onboardingStartStep = Math.max(0, Math.min(ONBOARDING_STEPS - 1, startStep));
   if (!sourceProbeReport && !sourceProbeLoading) void refreshSourceProbes();
-  const overlay = document.createElement("div");
-  overlay.id = "onboarding-overlay";
+  const shell = mountDialogShell({
+    overlayId: "onboarding-overlay",
+    // The wizard owns its own Escape: leaving mid-step is a dismissal with
+    // business consequences (it records `onboardingDismissed`), while
+    // completing the flow is not. The shell supplies the Tab trap and the
+    // scroll lock; `finishOnboarding` calls `close()` when the flow ends.
+    dismissOnBackdrop: false,
+    canClose: () => false,
+    onClose: () => {
+      onboardingShell = null;
+      onboardingOverlay = null;
+    },
+  });
+  onboardingShell = shell;
+  const overlay = shell.host;
   overlay.innerHTML = `<section class="onboarding-card" role="dialog" aria-modal="true" aria-labelledby="onboarding-title">
     <header class="onboarding-head">
       <span class="onboarding-brand"><img src="${paneLogo}" alt="Pane" /><span>Pane</span></span>
@@ -10742,7 +10759,6 @@ function startOnboarding(replay = false, startStep = 0, applyPicks = !replay): v
     if (target.closest("[data-onboarding-back]")) showOnboardingStep(onboardingStep - 1);
   });
   document.addEventListener("keydown", onOnboardingKey, true);
-  document.body.appendChild(overlay);
   showOnboardingStep(onboardingStartStep);
 }
 
