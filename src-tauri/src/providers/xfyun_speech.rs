@@ -127,6 +127,12 @@ pub fn login_card_name(login: &LoginAccount) -> String {
     }
 }
 
+/// The bare family card keeps the provider title; the account nickname is
+/// the per-account tab's business (same split as Codex's "ChatGPT" title).
+fn card_name(login: &LoginAccount, id: &str) -> String {
+    if id == FAMILY_ID { DISPLAY_NAME.into() } else { login_card_name(login) }
+}
+
 pub fn status() -> crate::providers::tokenrhythm::LoginStatus {
     let accounts = crate::login_accounts::load(FAMILY_ID);
     crate::providers::tokenrhythm::LoginStatus {
@@ -399,27 +405,28 @@ pub async fn snapshot_with_login(login: LoginAccount) -> Snapshot {
 
 async fn snapshot_with_login_as(login: LoginAccount, id: String) -> Snapshot {
     let cookie = login.access_token.clone();
+    let name = card_name(&login, &id);
     // Login state is decided by the console itself, never by "a cookie exists".
     match call_get(PROBE_PATH, &cookie).await {
         Ok(doc) if envelope_error(&doc).is_none() => {}
         Ok(_) | Err(CallErr::Auth) => {
-            return Snapshot::no_credentials(&id, &login_card_name(&login), SIGNED_OUT_HINT);
+            return Snapshot::no_credentials(&id, &name, SIGNED_OUT_HINT);
         }
-        Err(CallErr::Other(error)) => return Snapshot::error(&id, &login_card_name(&login), error),
+        Err(CallErr::Other(error)) => return Snapshot::error(&id, &name, error),
     }
 
     let mut metrics = Vec::new();
     let apps = match call_get(APP_LIST_PATH, &cookie).await {
         Ok(doc) => parse_apps(&doc),
         Err(CallErr::Auth) => {
-            return Snapshot::no_credentials(&id, &login_card_name(&login), SIGNED_OUT_HINT);
+            return Snapshot::no_credentials(&id, &name, SIGNED_OUT_HINT);
         }
-        Err(CallErr::Other(error)) => return Snapshot::error(&id, &login_card_name(&login), error),
+        Err(CallErr::Other(error)) => return Snapshot::error(&id, &name, error),
     };
     if apps.is_empty() {
         return Snapshot::needs_setup(
             &id,
-            &login_card_name(&login),
+            &name,
             None,
             vec![],
             "No application under this account yet — create one in the console, then refresh.",
@@ -438,7 +445,7 @@ async fn snapshot_with_login_as(login: LoginAccount, id: String) -> Snapshot {
                 Err(CallErr::Auth) => {
                     return Snapshot::no_credentials(
                         &id,
-                        &login_card_name(&login),
+                        &name,
                         SIGNED_OUT_HINT,
                     );
                 }
@@ -458,7 +465,7 @@ async fn snapshot_with_login_as(login: LoginAccount, id: String) -> Snapshot {
             Err(CallErr::Auth) => {
                 return Snapshot::no_credentials(
                     &id,
-                    &login_card_name(&login),
+                    &name,
                     SIGNED_OUT_HINT,
                 );
             }
@@ -474,7 +481,7 @@ async fn snapshot_with_login_as(login: LoginAccount, id: String) -> Snapshot {
             Err(CallErr::Auth) => {
                 return Snapshot::no_credentials(
                     &id,
-                    &login_card_name(&login),
+                    &name,
                     SIGNED_OUT_HINT,
                 );
             }
@@ -485,13 +492,13 @@ async fn snapshot_with_login_as(login: LoginAccount, id: String) -> Snapshot {
     if metrics.is_empty() {
         return Snapshot::needs_setup(
             &id,
-            &login_card_name(&login),
+            &name,
             None,
             vec![],
             "No speech resource pack under this account yet — claim one in the console, then refresh.",
         );
     }
-    Snapshot::ok(&id, &login_card_name(&login), None, metrics)
+    Snapshot::ok(&id, &name, None, metrics)
 }
 
 /// Count channels: the console renders ONE number, "剩余服务量", computed as

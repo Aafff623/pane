@@ -254,6 +254,10 @@ fn config_with_defaults(mut cfg: Value) -> Value {
     // only records that it is done, so it never shows twice. An install
     // that already had a layout predates the picker → starts marked done.
     obj.entry("setupPicked").or_insert(json!(already_set_up));
+    // Version the detection picker last ran at. Empty on installs that
+    // predate the upgrade pass; the frontend compares it with the running
+    // version to decide whether the board needs a re-pick.
+    obj.entry("setupPickedVersion").or_insert(json!(""));
     // Startup splash: on by default; lastStartupBootId is the boot session
     // it last played in (null = never). Seeded here so a frontend config
     // write can never drop the gate.
@@ -399,6 +403,7 @@ const CONFIG_KEYS: &[&str] = &[
     "silentStart",
     "hideUnconfigured",
     "setupPicked",
+    "setupPickedVersion",
     "startupAnimation",
     "lastStartupBootId",
     "overviewExpanded",

@@ -95,20 +95,32 @@ const MAX_EVIDENCE: usize = 4;
 pub fn probe_all() -> SourceProbeReport {
     let env = env_snapshot();
     let path_index = path_listing(&env);
+    let legacy_dirs = legacy_data_dirs();
     let definitions = crate::provider_catalog::provider_definitions();
     let mut families = Vec::new();
     for def in definitions {
         let hint = HINTS.iter().find(|hint| hint.family == def.family_id);
         let local = local_credential_hint(def.family_id);
         let stored = stored_credential_exists(def.family_id);
+        let legacy = legacy_stored_credential_exists(def.family_id, &legacy_dirs);
         if hint.is_none()
             && crate::provider_catalog::provider_env_vars(def.family_id).is_empty()
             && local.is_none()
             && !stored
+            && !legacy
         {
             continue;
         }
-        families.push(build_probe(def.family_id, def.display_name, &env, &path_index, hint, local, stored));
+        families.push(build_probe(
+            def.family_id,
+            def.display_name,
+            &env,
+            &path_index,
+            hint,
+            local,
+            stored,
+            legacy,
+        ));
     }
     families.sort_by(|a, b| {
         let rank = |p: &SourceProbe| {
@@ -145,6 +157,7 @@ pub fn probe_all() -> SourceProbeReport {
 pub fn probe_family(family: &str) -> SourceProbe {
     let env = env_snapshot();
     let path_index = path_listing(&env);
+    let legacy = legacy_data_dirs();
     let display = display_name_of(family);
     build_probe(
         family,
@@ -154,6 +167,7 @@ pub fn probe_family(family: &str) -> SourceProbe {
         HINTS.iter().find(|hint| hint.family == family),
         local_credential_hint(family),
         stored_credential_exists(family),
+        legacy_stored_credential_exists(family, &legacy),
     )
 }
 
@@ -167,6 +181,7 @@ pub fn probe_families<'a>(families: impl IntoIterator<Item = &'a str>) -> HashMa
     }
     let env = env_snapshot();
     let path_index = path_listing(&env);
+    let legacy_dirs = legacy_data_dirs();
     let mut out = HashMap::new();
     for family in families {
         if out.contains_key(family) {
@@ -183,6 +198,7 @@ pub fn probe_families<'a>(families: impl IntoIterator<Item = &'a str>) -> HashMa
                 HINTS.iter().find(|hint| hint.family == family),
                 local_credential_hint(family),
                 stored_credential_exists(family),
+                legacy_stored_credential_exists(family, &legacy_dirs),
             ),
         );
     }
@@ -205,6 +221,7 @@ fn build_probe(
     hint: Option<&InstallHint>,
     local: Option<String>,
     stored: bool,
+    legacy: bool,
 ) -> SourceProbe {
     let mut evidence = Vec::new();
     if let Some(hint) = hint {
@@ -228,6 +245,8 @@ fn build_probe(
         ("present", format!("env:{name}"))
     } else if stored {
         ("present", "keyvault".to_string())
+    } else if legacy {
+        ("present", "legacy-dir".to_string())
     } else if local.is_some() {
         ("present", "local".to_string())
     } else {
@@ -259,6 +278,41 @@ fn stored_credential_exists(family: &str) -> bool {
     } else {
         crate::providers::stored_key_file_exists(family)
     }
+}
+
+/// Pane's own data directories that are NOT the one currently in use.
+///
+/// `providers::config_dir()` migrates `Pane` into `PaneAafff623` on first
+/// launch, but the migration is copy-then-rename: when the rename fails (a
+/// locked file, a half-written profile) the old tree stays behind with a
+/// full set of credentials. A user who then cleans up their current profile,
+/// or a machine where the migration never ran, still has a real credential
+/// in the legacy tree — and the picker saying "not configured" for a family
+/// whose key is sitting right there is exactly the kind of lie this module
+/// exists to avoid. Read-only: presence only, never values.
+fn legacy_data_dirs() -> Vec<PathBuf> {
+    let Some(base) = dirs::config_dir() else { return Vec::new() };
+    let current = crate::providers::config_dir();
+    ["Pane", "OpenUsage", crate::providers::CONFIG_DIR_NAME]
+        .iter()
+        .map(|name| base.join(name))
+        .filter(|dir| *dir != current && dir.is_dir())
+        .collect()
+}
+
+/// Does an already-migrated copy of Pane's own credential store exist in a
+/// legacy directory? A key file, an account list or a login store there is
+/// evidence the user configured this provider at some point, even when the
+/// live profile no longer carries it.
+fn legacy_stored_credential_exists(family: &str, legacy: &[PathBuf]) -> bool {
+    legacy.iter().any(|dir| {
+        let key_file = dir.join(format!("{family}.json"));
+        let accounts_file = dir.join("accounts").join(format!("{family}.json"));
+        let login_file = dir.join("login-accounts").join(format!("{family}.json"));
+        [key_file, accounts_file, login_file].iter().any(|path| {
+            std::fs::metadata(path).map(|meta| meta.len() > 2).unwrap_or(false)
+        })
+    })
 }
 
 pub fn local_credential_hint(family: &str) -> Option<String> {

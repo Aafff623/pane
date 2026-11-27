@@ -697,6 +697,10 @@ interface Config {
   silentStart: boolean;
   hideUnconfigured: boolean;
   setupPicked: boolean;
+  /// The DETECTION_ARCH_VERSION the picker last ran at. Not the app version:
+  /// a release that only adds a provider card must not re-ask what this PC
+  /// has — only a change to how detection works does.
+  setupPickedVersion: string;
   startupAnimation: boolean;
   lastStartupBootId: number | null;
   overviewExpanded: string[];
@@ -780,6 +784,7 @@ const FRONTEND_CONFIG_KEYS = [
   "silentStart",
   "hideUnconfigured",
   "setupPicked",
+  "setupPickedVersion",
   "startupAnimation",
   "lastStartupBootId",
   "overviewExpanded",
@@ -1015,6 +1020,7 @@ let config: Config = {
   silentStart: false,
   hideUnconfigured: true,
   setupPicked: false,
+  setupPickedVersion: "",
   startupAnimation: true,
   lastStartupBootId: null,
   overviewExpanded: [],
@@ -3595,9 +3601,11 @@ function isBareHintCard(snap: Snapshot): boolean {
   return snap.id === providerFamily(snap.id) && snap.status === "no_credentials";
 }
 
-/// Families whose bare "no credentials" card stays on the board even with
-/// hideUnconfigured: those two cards ARE the new-user onboarding (the same
-/// starter set as refresh()'s first-launch detection).
+/// Families the first-run flow offers as suggested rows when a machine has
+/// nothing detected. Being suggested does NOT exempt them from the fold: an
+/// unconfigured Claude/Codex card is a sign-in prompt, not a reading, and
+/// pinning it on the board is what made an upgrade look like a pile of
+/// providers the user never bought had appeared.
 const STARTER_FAMILIES = new Set(["claude", "codex"]);
 
 /// A bare hint card folds into the "未配置" section only while the user has
@@ -3607,7 +3615,6 @@ const STARTER_FAMILIES = new Set(["claude", "codex"]);
 /// families never reach this predicate: `orderedSnapshots` drops them first.
 function isFoldableHintCard(s: Snapshot): boolean {
   const family = providerFamily(s.id);
-  if (STARTER_FAMILIES.has(family)) return false;
   if (!config.disabled.includes(family)) return false;
   return isBareHintCard(s);
 }
@@ -5277,6 +5284,30 @@ function statsRangeRows(days: string[]): DailySpendRow[] {
   return lastSpendDaily.filter((row) => wanted.has(row.day));
 }
 
+/// Catmull-Rom → cubic Bézier for the stats chart. Same /8 tension as the card
+/// trend on purpose: full textbook tension overshoots a spike, which would
+/// draw a peak higher than the value it is reporting.
+function statsSmoothPath(points: { x: number; y: number }[]): string {
+  if (points.length === 0) return "";
+  if (points.length === 1) {
+    const only = points[0];
+    return `M${only.x.toFixed(2)},${only.y.toFixed(2)}`;
+  }
+  let d = `M${points[0].x.toFixed(2)},${points[0].y.toFixed(2)}`;
+  for (let k = 0; k < points.length - 1; k++) {
+    const p0 = points[k - 1] ?? points[k];
+    const p1 = points[k];
+    const p2 = points[k + 1];
+    const p3 = points[k + 2] ?? p2;
+    const c1x = p1.x + (p2.x - p0.x) / 8;
+    const c1y = p1.y + (p2.y - p0.y) / 8;
+    const c2x = p2.x - (p3.x - p1.x) / 8;
+    const c2y = p2.y - (p3.y - p1.y) / 8;
+    d += ` C${c1x.toFixed(2)},${c1y.toFixed(2)} ${c2x.toFixed(2)},${c2y.toFixed(2)} ${p2.x.toFixed(2)},${p2.y.toFixed(2)}`;
+  }
+  return d;
+}
+
 function statsLineChartHtml(
   days: string[],
   dayModels: Map<string, Map<string, number>>,
@@ -5292,23 +5323,65 @@ function statsLineChartHtml(
   const max = Math.max(1, statsChartPeak(days, dayModels, top));
   const left = 8;
   const right = 8;
-  const topPad = 8;
-  const bottom = 8;
+  const topPad = 10;
+  const bottom = 10;
   const innerW = STATS_CHART_WIDTH - left - right;
   const innerH = STATS_CHART_HEIGHT - topPad - bottom;
   const step = days.length > 1 ? innerW / (days.length - 1) : 0;
   const xAt = (index: number) =>
     days.length > 1 ? left + index * step : left + innerW / 2;
   const yAt = (value: number) => topPad + innerH - (value / max) * innerH;
-  const lines = top
+
+  const gradDefs: string[] = [];
+  // Each series is drawn as a smoothed line over a gradient area, the same
+  // reading the card trend gives: a curve shows shape, a polyline shows only
+  // that the points exist.
+  const series = top
     .map((model, seriesIndex) => {
-      const points = days
-        .map(
-          (day, index) =>
-            `${xAt(index).toFixed(2)},${yAt(dayModels.get(day)?.get(model.model) ?? 0).toFixed(2)}`,
-        )
-        .join(" ");
-      return `<polyline class="stats-line" style="stroke:var(--stats-c${seriesIndex + 1})" points="${points}" fill="none" stroke-width="1.75" vector-effect="non-scaling-stroke" stroke-linejoin="round" stroke-linecap="round"/>`;
+      const valueAt = (day: string) => dayModels.get(day)?.get(model.model) ?? 0;
+      // Runs of consecutive days with data. A day with no row at all is a gap
+      // in the measurement, not a measured zero — the line must break there
+      // instead of diving to the floor.
+      const runs: { i: number; v: number }[][] = [];
+      days.forEach((day, index) => {
+        const has = dayModels.get(day)?.has(model.model) ?? false;
+        if (!has) {
+          runs.push([]);
+          return;
+        }
+        if (!runs.length || runs[runs.length - 1].length === 0) runs.push([]);
+        runs[runs.length - 1].push({ i: index, v: valueAt(day) });
+      });
+      const measured = runs.filter((run) => run.length > 0);
+      const colorVar = `var(--stats-c${seriesIndex + 1})`;
+      const gradId = `stats-grad-${seriesIndex}`;
+      // `stop-color: var(--x)` does NOT resolve in Chromium — it computes to
+      // rgb(0,0,0) and the area under the curve fills black. Canvas the colour
+      // from the series' `color` instead: `currentColor` inherits from the
+      // group that carries the CSS variable.
+      gradDefs.push(
+        `<linearGradient id="${gradId}" x1="0" y1="0" x2="0" y2="1" style="color:${colorVar}">` +
+          `<stop offset="0%" stop-color="currentColor" stop-opacity="0.22"/>` +
+          `<stop offset="100%" stop-color="currentColor" stop-opacity="0"/>` +
+          `</linearGradient>`,
+      );
+      const parts = measured.map((run) => {
+        const pts = run.map(({ i, v }) => ({ x: xAt(i), y: yAt(v) }));
+        const line = statsSmoothPath(pts);
+        if (pts.length < 2) {
+          // A single measured day has no line to speak of: one dot is the
+          // honest rendering.
+          const only = pts[0];
+          return `<circle class="stats-line-dot is-only" cx="${only.x.toFixed(2)}" cy="${only.y.toFixed(2)}" style="fill:${colorVar}"/>`;
+        }
+        const baseline = topPad + innerH;
+        const areaPath = `${line} L${pts[pts.length - 1].x.toFixed(2)},${baseline.toFixed(2)} L${pts[0].x.toFixed(2)},${baseline.toFixed(2)} Z`;
+        return (
+          `<path class="stats-line-area" d="${areaPath}" fill="url(#${gradId})"/>` +
+          `<path class="stats-line" d="${line}" style="stroke:${colorVar}"/>`
+        );
+      });
+      return parts.join("");
     })
     .join("");
   const hitWidth = days.length ? innerW / days.length : innerW;
@@ -5324,7 +5397,7 @@ function statsLineChartHtml(
       const tip = values.length
         ? `${day} · ${t("stats.total")} ${fmtTokens(dayTotal)}\n${values.map((entry) => `${entry.label}: ${fmtTokens(entry.value)}`).join("\n")}`
         : `${day} · ${t("stats.noUsage")}`;
-      return `<rect class="stats-line-hit" x="${(left + index * hitWidth).toFixed(2)}" y="0" width="${hitWidth.toFixed(2)}" height="${STATS_CHART_HEIGHT}" fill="transparent"><title>${escapeHtml(tip)}</title></rect>`;
+      return `<rect class="stats-line-hit" x="${(left + index * hitWidth - hitWidth / 2).toFixed(2)}" y="0" width="${hitWidth.toFixed(2)}" height="${STATS_CHART_HEIGHT}" fill="transparent"><title>${escapeHtml(tip)}</title></rect>`;
     })
     .join("");
   const labels = statsAxisIndexes(days.length)
@@ -5340,7 +5413,7 @@ function statsLineChartHtml(
         `<span class="stats-legend-item" title="${escapeHtml(model.model)}"><i style="background:var(--stats-c${index + 1})"></i><span>${escapeHtml(model.model)}</span></span>`,
     )
     .join("");
-  return `<div class="stats-legend" role="list">${legend}</div><div class="stats-line-wrap"><svg class="stats-line-svg" viewBox="0 0 ${STATS_CHART_WIDTH} ${STATS_CHART_HEIGHT}" preserveAspectRatio="none" role="img" aria-label="${escapeHtml(t("stats.trendTitle"))}">${lines}${hits}</svg><div class="stats-axis">${labels}</div></div>`;
+  return `<div class="stats-legend" role="list">${legend}</div><div class="stats-line-wrap"><svg class="stats-line-svg" viewBox="0 0 ${STATS_CHART_WIDTH} ${STATS_CHART_HEIGHT}" preserveAspectRatio="none" role="img" aria-label="${escapeHtml(t("stats.trendTitle"))}"><defs>${gradDefs.join("")}</defs>${series}${hits}</svg><div class="stats-axis">${labels}</div></div>`;
 }
 
 function statsDonutHtml(models: StatsModelTotal[]): string {
@@ -5350,22 +5423,28 @@ function statsDonutHtml(models: StatsModelTotal[]): string {
     return statsEmptyHtml(t("stats.noModels"), t("stats.noModelsHint"));
   }
   let start = 0;
+  // A thicker band with a real gap between slices: the old 0.8 gap on a 23px
+  // stroke read as one continuous ring, so neighbouring models blurred into
+  // each other. 3.5 units of 100 reads as a deliberate break at any size.
+  const gap = slices.length > 1 ? 3.5 : 0;
   const arcs = slices
     .map((slice, index) => {
       const share = slice.share * 100;
-      const visible = Math.max(0, share - (slices.length > 1 ? 0.8 : 0));
-      const arc = `<circle class="stats-donut-slice" cx="60" cy="60" r="40" pathLength="100" fill="none" stroke="var(--stats-c${index + 1})" stroke-width="23" stroke-dasharray="${visible.toFixed(2)} ${(100 - visible).toFixed(2)}" stroke-dashoffset="${(-start).toFixed(2)}"/>`;
+      const visible = Math.max(0.5, share - gap);
+      const arc = `<circle class="stats-donut-slice" cx="60" cy="60" r="42" pathLength="100" fill="none" stroke="var(--stats-c${index + 1})" stroke-width="17" stroke-linecap="butt" stroke-dasharray="${visible.toFixed(2)} ${(100 - visible).toFixed(2)}" stroke-dashoffset="${(-start).toFixed(2)}"/>`;
       start += share;
       return arc;
     })
     .join("");
+  // Each row carries a share bar under the name: the list is the legend, and a
+  // number alone makes the reader compare percentages in their head.
   const rows = slices
     .map(
       (slice, index) =>
-        `<div class="stats-donut-row" role="listitem"><i style="background:var(--stats-c${index + 1})"></i><span class="stats-donut-name" title="${escapeHtml(slice.label)}">${escapeHtml(slice.label)}</span><span class="stats-donut-share">${escapeHtml(statsPercent(slice.share * 100))}</span><span class="stats-donut-tokens">${escapeHtml(fmtTokens(slice.tokens))}</span></div>`,
+        `<div class="stats-donut-row" role="listitem"><i style="background:var(--stats-c${index + 1})"></i><span class="stats-donut-main"><span class="stats-donut-name" title="${escapeHtml(slice.label)}">${escapeHtml(slice.label)}</span><span class="stats-donut-bar"><span style="width:${(slice.share * 100).toFixed(2)}%;background:var(--stats-c${index + 1})"></span></span></span><span class="stats-donut-share">${escapeHtml(statsPercent(slice.share * 100))}</span><span class="stats-donut-tokens">${escapeHtml(fmtTokens(slice.tokens))}</span></div>`,
     )
     .join("");
-  return `<div class="stats-donut-block"><svg class="stats-donut" viewBox="0 0 120 120" role="img" aria-label="${escapeHtml(t("stats.donutTitle"))}"><g transform="rotate(-90 60 60)">${arcs}</g><text x="60" y="58" text-anchor="middle" class="stats-donut-total">${escapeHtml(fmtTokens(total))}</text><text x="60" y="72" text-anchor="middle" class="stats-donut-unit">${escapeHtml(t("stats.tokenUnit"))}</text></svg><div class="stats-donut-list" role="list">${rows}</div></div>`;
+  return `<div class="stats-donut-block"><svg class="stats-donut" viewBox="0 0 120 120" role="img" aria-label="${escapeHtml(t("stats.donutTitle"))}"><g transform="rotate(-90 60 60)">${arcs}</g><text x="60" y="57" text-anchor="middle" class="stats-donut-total">${escapeHtml(fmtTokens(total))}</text><text x="60" y="73" text-anchor="middle" class="stats-donut-unit">${escapeHtml(t("stats.tokenUnit"))}</text></svg><div class="stats-donut-list" role="list">${rows}</div></div>`;
 }
 
 function statsDayDetailHtml(day: string): string {
@@ -7500,7 +7579,33 @@ function appPrompt(opts: {
 // First-run detection picker — probe every provider, let the user pick
 // ---------------------------------------------------------------------------
 
-type PickerRow = { id: string; name: string; note: string; checked: boolean };
+/// ok      — a real fetch succeeded: green
+/// warn    — a credential exists but the read failed (expired login, upstream
+///           error, needs another step): yellow, the user can fix it here
+/// off     — no credential on this machine: red-grey, nothing to watch yet
+type PickerHealth = "ok" | "warn" | "off";
+
+type PickerRow = {
+  id: string;
+  name: string;
+  note: string;
+  checked: boolean;
+  health: PickerHealth;
+  /// Where the credential was found ("env:NAME", "keyvault", "legacy-dir",
+  /// "local"). Empty when nothing was found — the note already says why.
+  source: string;
+};
+
+/// One classifier for a probe/snapshot pair, so the picker's dot, its text
+/// and the board's badge can never disagree about the same provider.
+function pickerHealth(snapshot: Snapshot | undefined): PickerHealth {
+  if (!snapshot) return "off";
+  if (snapshot.status === "ok") return "ok";
+  if (snapshot.status === "no_credentials") return "off";
+  // needs_setup / error with a credential behind it: the provider is known to
+  // the user, the read is the thing that failed.
+  return "warn";
+}
 
 /// Families that reported credentials on this machine, in probe order.
 /// Any status but `no_credentials` counts: an expired login is exactly what
@@ -7574,9 +7679,24 @@ function disabledFromPick(checked: ReadonlySet<string>): string[] {
   return disabled;
 }
 
+/// Turn a probe's machine-readable source into words. `env:NAME` keeps the
+/// variable name, because that is the thing the user would go and edit.
+function displayProbeSource(source: string): string {
+  if (source.startsWith("env:")) return `${t("picker.sourceEnv")} · ${source.slice(4)}`;
+  if (source === "keyvault") return t("picker.sourceKeyvault");
+  if (source === "legacy-dir") return t("picker.sourceLegacy");
+  if (source === "local") return t("picker.sourceLocal");
+  return source;
+}
+
 /// The picker itself: the confirm overlay with a scrollable checklist.
 /// Resolves the checked ids, or null when the user dismissed (Esc /
 /// backdrop / cancel) — the caller then applies the defaults.
+///
+/// The status chips are filters, not decoration: 79 catalog providers make a
+/// flat list unscannable, and "which of these can Pane actually read right
+/// now" is the only question the dialog exists to answer. Toggling a chip
+/// narrows the list to that health class; toggling it again restores all.
 function appProviderPicker(
   rows: PickerRow[],
   opts: { title: string; note: string; empty: string; confirmLabel: string },
@@ -7584,13 +7704,33 @@ function appProviderPicker(
   return new Promise((resolve) => {
     const overlay = document.createElement("div");
     overlay.id = "confirm-overlay";
+    const HEALTHS: PickerHealth[] = ["ok", "warn", "off"];
+    const labelOf: Record<PickerHealth, string> = {
+      ok: t("picker.legendOk"),
+      warn: t("picker.legendWarn"),
+      off: t("picker.legendOff"),
+    };
+    const countOf = (health: PickerHealth) => rows.filter((r) => r.health === health).length;
+    const chipsHtml = HEALTHS.map((health) => {
+      const n = countOf(health);
+      return `<button type="button" class="picker-filter is-${health}" data-picker-filter="${health}" aria-pressed="false"${n === 0 ? " disabled" : ""}>
+        <span class="picker-dot is-${health}" aria-hidden="true"></span>
+        <span class="picker-filter-label">${escapeHtml(labelOf[health])}</span>
+        <span class="picker-filter-count">${n}</span>
+      </button>`;
+    }).join("");
     const rowsHtml = rows
       .map((r) => {
         const icon = providerVisual(r.id)?.iconSvg ?? `<span class="icon-fallback">?</span>`;
-        return `<label class="picker-row" data-picker-row="${escapeHtml(r.id)}">
+        const source = r.source ? t("picker.fromSource", { source: displayProbeSource(r.source) }) : "";
+        return `<label class="picker-row is-${r.health}" data-picker-row="${escapeHtml(r.id)}" data-picker-health="${r.health}">
           <input type="checkbox" data-picker-check="${escapeHtml(r.id)}"${r.checked ? " checked" : ""}>
+          <span class="picker-dot" aria-hidden="true"></span>
           <span class="picker-icon" aria-hidden="true">${icon}</span>
-          <span class="picker-name">${escapeHtml(r.name)}</span>
+          <span class="picker-main">
+            <span class="picker-name" title="${escapeHtml(r.name)}">${escapeHtml(r.name)}</span>
+            ${source ? `<span class="picker-source">${escapeHtml(source)}</span>` : ""}
+          </span>
           <span class="picker-note">${escapeHtml(r.note)}</span>
         </label>`;
       })
@@ -7599,15 +7739,37 @@ function appProviderPicker(
       <div id="confirm-box" class="picker-box" role="dialog" aria-modal="true">
         <h3>${escapeHtml(opts.title)}</h3>
         <p>${escapeHtml(opts.note)}</p>
-        <div class="picker-list">${rowsHtml || `<p class="picker-empty">${escapeHtml(opts.empty)}</p>`}</div>
+        <div class="picker-filters" role="group" aria-label="${escapeHtml(t("picker.filterLabel"))}">${chipsHtml}</div>
+        <div class="picker-list">
+          ${rowsHtml || `<p class="picker-empty">${escapeHtml(opts.empty)}</p>`}
+          <p class="picker-empty" data-picker-no-match hidden>${escapeHtml(t("picker.noMatch"))}</p>
+        </div>
         <div id="confirm-actions">
           <button id="confirm-cancel" class="mini-btn" type="button">${escapeHtml(t("dialog.cancel"))}</button>
           <button id="confirm-ok" class="mini-btn primary" type="button">${escapeHtml(opts.confirmLabel)}</button>
         </div>
       </div>`;
+    let filter: PickerHealth | null = null;
+    const applyFilter = () => {
+      const list = overlay.querySelector<HTMLElement>(".picker-list");
+      overlay.querySelectorAll<HTMLElement>("[data-picker-row]").forEach((row) => {
+        row.hidden = filter !== null && row.dataset.pickerHealth !== filter;
+      });
+      overlay.querySelectorAll<HTMLElement>("[data-picker-filter]").forEach((chip) => {
+        const on = chip.dataset.pickerFilter === filter;
+        chip.classList.toggle("on", on);
+        chip.setAttribute("aria-pressed", String(on));
+      });
+      const noMatch = overlay.querySelector<HTMLElement>("[data-picker-no-match]");
+      // Only claim "nothing here" when the catalog had rows to show.
+      if (noMatch) noMatch.hidden = rows.length === 0 || (filter === null) || countOf(filter) > 0;
+      if (list) list.scrollTop = 0;
+    };
     const done = (ok: boolean) => {
       document.removeEventListener("keydown", onKey, true);
       const checked = new Set<string>();
+      // Read every box, including rows a filter currently hides: filtering is
+      // a view, and a hidden tick the user set earlier still counts.
       overlay.querySelectorAll<HTMLInputElement>("[data-picker-check]").forEach((box) => {
         if (box.checked) checked.add(box.dataset.pickerCheck!);
       });
@@ -7622,6 +7784,14 @@ function appProviderPicker(
       }
     };
     overlay.addEventListener("click", (e) => {
+      const target = e.target as HTMLElement;
+      const chip = target.closest<HTMLElement>("[data-picker-filter]");
+      if (chip && !chip.hasAttribute("disabled")) {
+        const next = chip.dataset.pickerFilter as PickerHealth;
+        filter = filter === next ? null : next;
+        applyFilter();
+        return;
+      }
       if (e.target === overlay) done(false);
     });
     overlay.querySelector("#confirm-cancel")!.addEventListener("click", () => done(false));
@@ -7638,10 +7808,16 @@ function appProviderPicker(
 ///
 /// First run: everything detected is checked, plus the two starter cards
 /// when nothing at all was detected (they are the new-user onboarding).
-/// Re-run from Settings: only currently enabled providers are checked —
-/// newly detected tools appear unchecked, so re-running stays a deliberate
-/// add rather than a silent reset.
-async function runProviderPicker(firstRun: boolean): Promise<void> {
+/// Upgrade pass (`upgradeOnly`): same probe, but the unchecked set is kept
+/// off the board afterwards — the card list has to reflect this machine, not
+/// the catalog. Re-run from Settings: only currently enabled providers are
+/// checked — newly detected tools appear unchecked, so re-running stays a
+/// deliberate add rather than a silent reset.
+async function runProviderPicker(firstRun: boolean, upgradeOnly = false): Promise<void> {
+  // The "found via …" line comes from the source probe. Boot normally loads
+  // it already; the picker must not render a list of blank sources if it is
+  // opened before that read finished.
+  if (!sourceProbeReport && !sourceProbeLoading) await refreshSourceProbes();
   let snaps: Snapshot[];
   try {
     snaps = await invoke<Snapshot[]>("fetch_usage", {
@@ -7656,21 +7832,41 @@ async function runProviderPicker(firstRun: boolean): Promise<void> {
     return;
   }
   const detected = detectedFamilies(snaps);
+  // Families the probe actually answered for. A family with no snapshot at
+  // all was not read — "no answer" is not the same as "nothing here", so the
+  // upgrade pass must not switch those off.
+  const probed = new Set(snaps.map((snap) => providerFamily(snap.id)));
   const rows: PickerRow[] = [...detected.entries()].map(([id, snap]) => ({
     id,
     name: providerDisplayName(id),
     note: snap.status === "ok" ? t("customize.connOk") : overviewFailureLabel(snap),
-    checked: firstRun || !config.disabled.includes(id),
+    health: pickerHealth(snap),
+    source: sourceProbeFor(id)?.credentialSource ?? "",
+    // The upgrade pass may only RETIRE empty cards, never reopen one the
+    // user switched off on purpose — so a detected family keeps its switch.
+    checked: upgradeOnly ? !config.disabled.includes(id) : firstRun || !config.disabled.includes(id),
   }));
   // Re-run (and a first run over an existing config, e.g. after a data-dir
   // migration): everything currently switched on stays in the list, even
   // when this scan found no credentials for it — confirming must never
-  // silently switch off a card the user keeps on purpose.
+  // silently switch off a card the user keeps on purpose. The upgrade pass
+  // is the one case that must show them: "On now, not detected" is the row
+  // the user unticks.
   if (!firstRun || config.setupPicked) {
     for (const [id] of ALL_PROVIDERS) {
       if (detected.has(id) || rows.some((r) => r.id === id)) continue;
       if (config.disabled.includes(id)) continue;
-      rows.push({ id, name: providerDisplayName(id), note: t("picker.notDetected"), checked: true });
+      rows.push({
+        id,
+        name: providerDisplayName(id),
+        note: t("picker.notDetected"),
+        health: "off",
+        source: "",
+        // The upgrade pass exists to retire exactly these rows: switched on,
+        // but the probe looked and found no credential. A family the probe
+        // never answered for keeps its switch.
+        checked: upgradeOnly ? !probed.has(id) : true,
+      });
     }
   }
   for (const id of STARTER_FAMILIES) {
@@ -7679,20 +7875,31 @@ async function runProviderPicker(firstRun: boolean): Promise<void> {
       id,
       name: providerDisplayName(id),
       note: t("picker.suggested"),
+      health: "off",
+      source: "",
       // First run: an empty machine keeps the two guide cards (the 0.8.x
       // onboarding), a machine with real tools starts them unchecked.
       // Re-run: whatever the user currently has stays as it is.
-      checked: firstRun ? detected.size === 0 : !config.disabled.includes(id),
+      // Upgrade: a suggestion the user never configured stays off the board.
+      checked: upgradeOnly ? false : firstRun ? detected.size === 0 : !config.disabled.includes(id),
     });
   }
   const picked = await appProviderPicker(rows, {
-    title: t(firstRun ? "picker.titleFirst" : "picker.titleRerun"),
+    title: t(upgradeOnly ? "picker.titleUpgrade" : firstRun ? "picker.titleFirst" : "picker.titleRerun"),
     note: detected.size
-      ? t(firstRun ? "picker.noteFirst" : "picker.noteRerun")
+      ? t(upgradeOnly ? "picker.noteUpgrade" : firstRun ? "picker.noteFirst" : "picker.noteRerun")
       : t("picker.noteEmpty"),
     empty: t("picker.empty"),
     confirmLabel: t("picker.confirm"),
   });
+  // An upgrade pass only ever applies a real confirmation. Dismissing it is
+  // "leave my board alone" — applying the unticked defaults instead would
+  // switch off providers the user never asked to change.
+  if (upgradeOnly && picked === null) {
+    config.setupPickedVersion = DETECTION_ARCH_VERSION;
+    await patchConfig({ setupPickedVersion: DETECTION_ARCH_VERSION }).catch(() => {});
+    return;
+  }
   const chosen = picked ?? new Set(rows.filter((r) => r.checked).map((r) => r.id));
   // Layout entries mark the picked families as known, so refresh()'s
   // new-provider branch never auto-disables the user's own choice; writing
@@ -7710,7 +7917,13 @@ async function runProviderPicker(firstRun: boolean): Promise<void> {
   config.disabled = disabledFromPick(chosen);
   config.layout = layout;
   config.setupPicked = true;
-  await patchConfig({ disabled: config.disabled, layout, setupPicked: true }).catch(() => {});
+  config.setupPickedVersion = DETECTION_ARCH_VERSION;
+  await patchConfig({
+    disabled: config.disabled,
+    layout,
+    setupPicked: true,
+    setupPickedVersion: DETECTION_ARCH_VERSION,
+  }).catch(() => {});
   requestRender();
   void forceUsageRefreshAttempt(false).then(requestTraySync);
 }
@@ -9784,6 +9997,31 @@ function queueBootNotices(): void {
       showConfigNotice();
     });
   }
+  queueUpgradePick();
+}
+
+/// Bump when the DETECTION ARCHITECTURE changes — a new credential source is
+/// read, the enable-list semantics change, the rows gain or lose a meaning.
+/// A plain version bump must never re-ask: the user already answered "what is
+/// on this PC", and a release that only adds a provider card has no reason to
+/// pull that answer out again. This number is the only thing that gates the
+/// re-prompt, so asking again is always a deliberate decision with a code
+/// change behind it.
+const DETECTION_ARCH_VERSION = "1";
+
+/// An upgrade that adds catalog providers leaves cards on the board this
+/// machine cannot back — the board shows every enabled family, so a config
+/// whose disabled list predates those families renders them empty. Re-ask
+/// only when the detection logic itself changed; the answer is written back
+/// as the enable list, so the board matches the machine.
+function queueUpgradePick(): void {
+  if (IS_PANEL_FORM || !config.setupPicked) return;
+  if (config.setupPickedVersion === DETECTION_ARCH_VERSION) return;
+  enqueueNotice(() => {
+    void runProviderPicker(false, true)
+      .catch(() => {})
+      .finally(() => noticeClosed());
+  });
 }
 
 function showConfigNotice(): void {

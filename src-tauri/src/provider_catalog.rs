@@ -805,7 +805,7 @@ const PROVIDER_DEFINITIONS: &[ProviderDefinition] = &[
         // through Pane's login window and the session lives in Pane's own
         // WebView2 profile.
         family_id: "tokenrhythm",
-        display_name: "基元律动",
+        display_name: "TokenRhythm",
         query_kind: QueryKind::NativeBalance,
         supports_api_key: false,
         supports_extra_accounts: true,

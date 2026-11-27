@@ -205,7 +205,7 @@ test('the customize account note edits the same display note the card reads', ()
   const context = load(['normalizeNote','managedAccountForCard','accountNoteKeys','accountNoteKey','accountNote','labelForAccount','cardNote','setAccountNote'], {
     accountsCache,config,patchConfig:async()=>{},requestRender:()=>{},customizeOpen:false,renderDrawerBody:()=>{},NOTE_MAX_CODE_POINTS:48,emitNoteUpdate:()=>{},
     providerDefinition:family=>providerCatalog.find(p=>p.familyId===family),
-    providerFamily:id=>id.split('@')[0], t:(key,{n})=>`${key}:${n}`, providerDisplayName:()=>'基元律动',
+    providerFamily:id=>id.split('@')[0], t:(key,{n})=>`${key}:${n}`, providerDisplayName:()=>'TokenRhythm',
   });
   // A note written before the stable id existed is still readable.
   assert.equal(context.accountNote('tokenrhythm@a'), '旧备注');

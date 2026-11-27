@@ -210,7 +210,7 @@ Last reconciled: 2026-11-24 (0.12.4: batched credential probe, BibiGPT web-sessi
   write is idempotent across the two passes. Ids a cycle's folds dropped
   are evicted from the last-good cache so a boot paint cannot flash a
   duplicate; a disabled family drops nothing and keeps its cache.
-- **基元律动 / tokenrhythm** (`tokenrhythm`): a WEB-SESSION provider —
+- **TokenRhythm / tokenrhythm** (`tokenrhythm`): a WEB-SESSION provider —
   the `sk_tr_…` key authenticates ONLY the `/v1` model namespace; every
   console endpoint that reports money (`/api/wallet/summary`,
   `/api/api-keys/usage`, `/api/call-logs`) answers **401 to the key**
@@ -1461,6 +1461,62 @@ changes.
 - `config.overviewCategory` is a retired schema field: still accepted on load,
   never read. `CATALOG_CATEGORIES` and `providerCategory` remain in the
   catalog for other callers (MCP row tucking) but must not drive grouping.
+- **A bare hint card has no permanent exemption (2026-11-26).** `isFoldableHintCard`
+  refuses only *enabled* families, so every credential-less card folds once the
+  provider is off. `STARTER_FAMILIES` (claude, codex) still feed the first-run
+  picker's suggested rows but **must never be checked in the fold predicate** —
+  that exemption is what made a 0.12.4 upgrade look like a pile of unconfigured
+  providers appeared. Locked by `tests/board-routing.test.mjs`.
+- **A version that grows the catalog must re-ask what this PC has.**
+  `config.setupPickedVersion` holds `DETECTION_ARCH_VERSION` (currently `"1"`),
+  **not the app version** — a release that only adds a provider card must never
+  re-prompt. Bump the constant only when the detection architecture changes (a
+  new credential source is read, the enable-list semantics change, a row gains
+  or loses meaning). `queueUpgradePick` enqueues
+  `runProviderPicker(false, true)` when the stored value differs. The upgrade
+  pass may only *retire* empty cards: unticked means off, a family the probe
+  never answered for keeps its switch, and dismissing the dialog leaves
+  `config.disabled` untouched. Locked by `tests/board-routing.test.mjs`.
+- **Credential sources the probe reads, in precedence order**
+  (`source_probe.rs`): an env var named by the family →
+  `keyvault` (Pane's own store) → `legacy-dir` → `local` (the tool's own
+  config, e.g. `~/.codex/auth.json`). `legacy-dir` is the newest: a copy of
+  Pane's credential store left in `%APPDATA%\Pane` / `OpenUsage` after a
+  migration whose rename failed. Presence-only — never values.
+- **The picker's dot is one classifier** (`pickerHealth`), green = a real fetch
+  succeeded, yellow = a credential exists but the read failed, red = no
+  credential on this machine. `no_credentials` is red, not yellow: it is
+  "nothing to watch here", not a failure. Every row also prints its source.
+- **The picker's status chips are filters, not a legend.** Clicking a chip
+  narrows the list to that health class; clicking the active chip again clears
+  it. Filtering is a VIEW only — `done()` reads every checkbox including
+  hidden rows, so a tick the user set before filtering still counts.
+- **`.picker-row` is a 5-track grid**, one track per direct child (checkbox,
+  dot, icon, name block, status). Four tracks silently wrap the status onto a
+  second line — measured live 2026-11-26 at 640px. The dialog is 640px wide
+  for the same reason: at 460 the name and status collided. `.picker-name`
+  needs `min-width:0` on its parent plus `text-overflow: ellipsis`, verified
+  at 440px. Locked by `tests/board-routing.test.mjs`.
+
+## Account nicknames stay out of card titles (2026-11-26)
+
+- **The bare family card is the provider's card, not an account's.** A
+  web-session family's `snapshot()` reads the first login, so deriving the
+  title from that login put the user's nickname on the dashboard
+  ("TokenRhythm — 我"). `card_name(login, id)` in `tokenrhythm.rs`, `xfyun.rs` and
+  `xfyun_speech.rs` returns `DISPLAY_NAME` for the family id and
+  `login_card_name` for `family@<fp>` cards.
+- The nickname still reaches the UI through the account tab, which reads
+  `accountNote` / `labelForAccount` — the same path Codex uses, where the
+  family title stays "ChatGPT" and the email only appears on the account rows.
+- **The display name is `TokenRhythm` (2026-11-26, owner decision), not
+  基元律动.** It lives in exactly two places: `provider_catalog.rs`
+  `display_name` and `providerCatalog.ts` `displayName`, plus
+  `DISPLAY_NAME` in `providers/tokenrhythm.rs` for the card title and error
+  strings. `catalog_consistency` fails if the Rust and TS mirrors disagree, so
+  change both together. The **family id stays `tokenrhythm`** — it keys the
+  vault entries, stored accounts and spend attribution; renaming it would
+  orphan every saved session.
 
 ## Trend chart (2026-11-24, 0.12.4)
 
@@ -1476,6 +1532,28 @@ changes.
   series that starts after day 0 does not paint a wedge to the chart edge.
 - `viewBox` is `0 0 300 32` and must match `W` in `renderTrend`. `PAD = 4`
   keeps a peak off the ceiling.
+
+## Usage-stats charts (2026-11-26)
+
+The Settings → Usage charts were rebuilt to match the card trend. Two traps:
+
+- **`stop-color: var(--stats-cN)` computes to `rgb(0, 0, 0)` in Chromium.** A
+  gradient declared that way fills the area under the curve with BLACK. The
+  stop must say `stop-color="currentColor"` and the `<linearGradient>` must
+  carry `style="color: var(--stats-cN)"`. Verified live: inside `.stats-root`
+  the stops resolve to `rgb(96, 165, 250)` (dark-theme blue). Locked by
+  `tests/stats-charts.test.mjs`.
+- **The series must be a smoothed cubic path, not a `<polyline>`.** The stats
+  chart reuses `statsSmoothPath` with the same /8 Catmull-Rom tension as
+  `renderTrend` — full tension overshoots a spike and draws a peak above the
+  value it reports.
+- **A day with no row is a gap, not a zero.** Runs of consecutive measured
+  days become separate paths; a lone measured day renders as a dot
+  (`.stats-line-dot.is-only`). Drawing the gap as zero would claim a real
+  drop in usage that never happened.
+- **The donut needs a real gap.** 0.8 units on a 23px stroke read as one
+  continuous ring; the band is now 17px on r=42 with a 3.5-unit gap, plus a
+  share bar per row so the list works as a legend without mental arithmetic.
 
 ## OpenDesign sign-in opens the system browser (2026-11-25)
 

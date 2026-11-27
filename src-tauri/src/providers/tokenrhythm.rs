@@ -45,9 +45,9 @@ const LOGIN_TIMEOUT: Duration = Duration::from_secs(600);
 const LOGIN_POLL: Duration = Duration::from_secs(2);
 
 const SIGNED_OUT_HINT: &str =
-    "基元律动会话已过期——在设置里重新网页登录。";
+    "TokenRhythm 会话已过期——在设置里重新网页登录。";
 const FAMILY_ID: &str = "tokenrhythm";
-const DISPLAY_NAME: &str = "基元律动";
+const DISPLAY_NAME: &str = "TokenRhythm";
 
 #[derive(Serialize, Deserialize, Clone, Default)]
 struct Store {
@@ -94,7 +94,7 @@ fn login_account(doc: &Value, cookie: String, csrf: String) -> Result<crate::log
 
 async fn record_session(cookie: String, csrf: String) -> Result<(), String> {
     let doc = call_console(ME_PATH, &cookie, &csrf).await
-        .map_err(|_| "无法验证基元律动账号，请重试".to_string())?;
+        .map_err(|_| "无法验证 TokenRhythm 账号，请重试".to_string())?;
     let account = login_account(&doc, cookie, csrf)?;
     save_verified_account(account)
 }
@@ -118,7 +118,7 @@ pub(crate) async fn migrate_legacy_session() -> Result<(), String> {
             save_verified_account(account)
         }
         Err(CallErr::Auth) => clear(),
-        Err(CallErr::Other(_)) => Err("原基元律动会话迁移暂时失败，请联网后重试".into()),
+        Err(CallErr::Other(_)) => Err("原 TokenRhythm 会话迁移暂时失败，请联网后重试".into()),
     }
 }
 
@@ -310,7 +310,7 @@ pub async fn snapshot() -> Snapshot {
         snapshot_with_login_as(login, FAMILY_ID).await
     } else {
         Snapshot::no_credentials(FAMILY_ID, DISPLAY_NAME,
-            "尚未登录基元律动——在设置里添加账号并完成网页登录。".into())
+            "尚未登录 TokenRhythm——在设置里添加账号并完成网页登录。".into())
     }
 }
 
@@ -319,23 +319,31 @@ pub fn login_card_name(login: &crate::login_accounts::LoginAccount) -> String {
     if label.trim().is_empty() { DISPLAY_NAME.into() } else { format!("{DISPLAY_NAME} — {label}") }
 }
 
+/// The bare family card is the provider's card, not an account: its title
+/// must stay the provider name. The account nickname belongs to the
+/// per-account tab (`login_card_name`), the way Codex keeps "ChatGPT" as the
+/// family title and the email only on the account rows.
+fn card_name(login: &crate::login_accounts::LoginAccount, id: &str) -> String {
+    if id == FAMILY_ID { DISPLAY_NAME.into() } else { login_card_name(login) }
+}
+
 pub async fn snapshot_with_login(login: crate::login_accounts::LoginAccount) -> Snapshot {
     let id = crate::login_accounts::card_id_for_account(FAMILY_ID, &login);
     snapshot_with_login_as(login, &id).await
 }
 
 pub async fn snapshot_with_login_as(login: crate::login_accounts::LoginAccount, id: &str) -> Snapshot {
-    let name = login_card_name(&login);
+    let name = card_name(&login, id);
     match call_console(WALLET_PATH, &login.access_token, &login.refresh_token).await {
         Ok(doc) => match metrics_from_wallet(&doc) {
             Some(metrics) => Snapshot::ok(id, &name, None, metrics),
             None => Snapshot::error(id, &name, format!(
-                "基元律动钱包响应结构未识别（待确认）：{}", wallet_key_digest(&doc))),
+                "TokenRhythm 钱包响应结构未识别（待确认）：{}", wallet_key_digest(&doc))),
         },
         // Retain the account identity on expiry: the user can re-login or
         // delete it explicitly. Never clear another account's session.
         Err(CallErr::Auth) => Snapshot::no_credentials(id, &name, SIGNED_OUT_HINT.into()),
-        Err(CallErr::Other(reason)) => Snapshot::error(id, &name, format!("基元律动控制台: {reason}")),
+        Err(CallErr::Other(reason)) => Snapshot::error(id, &name, format!("TokenRhythm 控制台: {reason}")),
     }
 }
 
@@ -376,15 +384,15 @@ async fn session_live(cookie: &str, csrf: &str) -> bool {
 pub async fn login(app: &tauri::AppHandle) -> Result<(), String> {
     use tauri::Manager as _;
     static LOGIN_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
-    let _guard = LOGIN_LOCK.try_lock().map_err(|_| "基元律动登录正在进行，请先完成或关闭登录窗口".to_string())?;
+    let _guard = LOGIN_LOCK.try_lock().map_err(|_| "TokenRhythm 登录正在进行，请先完成或关闭登录窗口".to_string())?;
     migrate_legacy_session().await?;
     if let Some(w) = app.get_webview_window(LOGIN_WINDOW) {
         let _ = w.set_focus();
-        return Err("基元律动登录窗口已打开，请先完成或关闭该窗口".into());
+        return Err("TokenRhythm 登录窗口已打开，请先完成或关闭该窗口".into());
     }
     let url = tauri::Url::parse(LOGIN_URL).map_err(|e| format!("login url: {e}"))?;
     tauri::WebviewWindowBuilder::new(app, LOGIN_WINDOW, tauri::WebviewUrl::External(url))
-        .title("登录基元律动")
+        .title("登录 TokenRhythm")
         .incognito(true)
         .inner_size(480.0, 720.0)
         .center()

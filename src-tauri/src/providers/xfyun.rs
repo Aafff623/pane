@@ -72,6 +72,12 @@ pub fn login_card_name(login: &LoginAccount) -> String {
     if label.trim().is_empty() { DISPLAY_NAME.into() } else { format!("{DISPLAY_NAME} — {label}") }
 }
 
+/// The bare family card keeps the provider title; the account nickname is
+/// the per-account tab's business (same split as Codex's "ChatGPT" title).
+fn card_name(login: &LoginAccount, id: &str) -> String {
+    if id == FAMILY_ID { DISPLAY_NAME.into() } else { login_card_name(login) }
+}
+
 pub fn status() -> crate::providers::tokenrhythm::LoginStatus {
     let accounts = crate::login_accounts::load(FAMILY_ID);
     crate::providers::tokenrhythm::LoginStatus {
@@ -111,7 +117,7 @@ pub async fn snapshot_with_login(login: LoginAccount) -> Snapshot {
 }
 
 async fn snapshot_with_login_as(login: LoginAccount, id: &str) -> Snapshot {
-    let name = login_card_name(&login);
+    let name = card_name(&login, id);
     match call_console(QUOTA_PATH, &login.access_token).await {
         Ok(doc) => match parse_quota(&doc) {
             Ok(Quota::NotClaimed) => Snapshot::needs_setup(

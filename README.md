@@ -89,7 +89,7 @@ pnpm tauri build    # 完整桌面应用
 <details>
 <summary><b>全部 72 个服务商一览</b>（与 <code>src/providerCatalog.ts</code> 一致）</summary>
 
-Claude、Codex、CodeBuddy、CodeBuddy CN、WorkBuddy、WorkBuddy AI、Cursor、OpenCode、Copilot、Grok、Devin、MiniMax、OpenRouter、Z.ai、Antigravity、DeepSeek、Kimi API、ElevenLabs、Ollama、Codebuff、Kilo、AihubMix、One/New API、Qwen Code、Hermes、Kimi Code、StepFun、StepFun Step Plan、闪电说、SiliconFlow、Novita AI、Custom Relay、Qoder CN、Trae CN、Command Code、Doubao、ClawsGO、BochaAI、Tavily、Firecrawl、Brave Search、GIPHY、ClinePass、SenseNova、APIGOTO、MiniMax Code、Amp、AWS Bedrock、Chutes、Deepgram、Kiro、OpenAI API、Poe、基元律动、讯飞星火、Venice、Vertex AI、Warp、Windsurf、MiMo、Trae、Qoder、Zed、Droid、JetBrains AI、Groq、Hugging Face、LongCat、sub2api、Mistral、Perplexity、Volcengine Ark
+Claude、Codex、CodeBuddy、CodeBuddy CN、WorkBuddy、WorkBuddy AI、Cursor、OpenCode、Copilot、Grok、Devin、MiniMax、OpenRouter、Z.ai、Antigravity、DeepSeek、Kimi API、ElevenLabs、Ollama、Codebuff、Kilo、AihubMix、One/New API、Qwen Code、Hermes、Kimi Code、StepFun、StepFun Step Plan、闪电说、SiliconFlow、Novita AI、Custom Relay、Qoder CN、Trae CN、Command Code、Doubao、ClawsGO、BochaAI、Tavily、Firecrawl、Brave Search、GIPHY、ClinePass、SenseNova、APIGOTO、MiniMax Code、Amp、AWS Bedrock、Chutes、Deepgram、Kiro、OpenAI API、Poe、TokenRhythm、讯飞星火、Venice、Vertex AI、Warp、Windsurf、MiMo、Trae、Qoder、Zed、Droid、JetBrains AI、Groq、Hugging Face、LongCat、sub2api、Mistral、Perplexity、Volcengine Ark
 
 </details>
 
@@ -151,7 +151,7 @@ Claude、Codex、CodeBuddy、CodeBuddy CN、WorkBuddy、WorkBuddy AI、Cursor、
 <details>
 <summary><b>多账号管理</b> —— 同一服务商添加多个账号，分别查看额度</summary>
 
-- 在「设置 → 用量」添加账号：支持多账号的 API key 服务商，以及 Codex、Cursor、基元律动等登录类服务商，均使用各自的添加入口；
+- 在「设置 → 用量」添加账号：支持多账号的 API key 服务商，以及 Codex、Cursor、TokenRhythm 等登录类服务商，均使用各自的添加入口；
 - Codex 自动读取本地 CLI 登录，也可通过 OAuth 添加其他订阅账号；本地登录显示为只读来源，Pane 管理的账号可单独重命名、归档和删除；
 - 每个账号保留稳定的本地身份；总览将同一服务商的账号折叠展示，可展开切换查看；
 - 右键账号可归档，归档后在设置中恢复；删除时可选择保留用量历史；
