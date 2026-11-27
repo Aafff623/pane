@@ -7372,8 +7372,8 @@ function updateErrorText(err: unknown): string {
 function maybePromptUpdate(version: string, manual = false): void {
   if ((!manual && updatePromptedFor === version) || document.querySelector("#update-overlay")) return;
   updatePromptedFor = version;
-  const overlay = document.createElement("div");
-  overlay.id = "update-overlay";
+  const shell = mountDialogShell({ overlayId: "update-overlay" });
+  const overlay = shell.host;
   overlay.innerHTML = `
     <div id="update-box" role="dialog" aria-modal="true">
       <h3>${escapeHtml(t("update.availableTitle", { version }))}</h3>
@@ -7383,17 +7383,7 @@ function maybePromptUpdate(version: string, manual = false): void {
         <button id="update-now" class="mini-btn primary" type="button">${escapeHtml(t("update.now"))}</button>
       </div>
     </div>`;
-  const close = () => {
-    document.removeEventListener("keydown", onKey, true);
-    overlay.remove();
-  };
-  const onKey = (e: KeyboardEvent) => {
-    if (e.key === "Escape") {
-      e.preventDefault();
-      e.stopPropagation();
-      close();
-    }
-  };
+  const close = shell.close;
   overlay.addEventListener("click", (e) => {
     if (e.target === overlay) close();
   });
@@ -7421,9 +7411,7 @@ function maybePromptUpdate(version: string, manual = false): void {
       if (body) body.textContent = t("footer.updateFailed", { err: updateErrorText(err) });
     });
   });
-  document.addEventListener("keydown", onKey, true);
-  document.body.appendChild(overlay);
-  nowBtn.focus();
+  shell.focusFirst(nowBtn);
 }
 
 // ---------------------------------------------------------------------------
