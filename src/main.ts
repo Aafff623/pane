@@ -12551,7 +12551,12 @@ function openCursorAccountDialog(): void {
   // OAuth flow: start → open browser → poll (one backend tick per call)
   // until done. Closing the dialog cancels the pending backend session.
   let pollTimer: number | undefined;
+  // Bumped by every start AND by every stop: an in-flight `cursor_oauth_start`
+  // that lands after the dialog closed compares against this and cancels
+  // itself instead of installing a poll loop on a detached overlay.
+  let oauthGeneration = 0;
   const stopOauthPoll = () => {
+    oauthGeneration += 1;
     if (pollTimer !== undefined) window.clearInterval(pollTimer);
     pollTimer = undefined;
     if (activeLoginId) {
@@ -12562,11 +12567,18 @@ function openCursorAccountDialog(): void {
   const oauthResult = overlay.querySelector<HTMLElement>("[data-cursor-oauth-result]")!;
   const oauthStart = overlay.querySelector<HTMLElement>("[data-cursor-oauth-start]")!;
   oauthStart.addEventListener("click", () => {
+    const generation = ++oauthGeneration;
     oauthStart.setAttribute("disabled", "");
     oauthResult.textContent = t("customize.cursorOAuthStarting");
     oauthResult.classList.remove("ok", "err");
     void invoke<{ loginId: string; verificationUri: string }>("cursor_oauth_start", {})
       .then(async (started) => {
+        if (generation !== oauthGeneration) {
+          // The user dismissed the dialog first: cancel the login this start
+          // just created instead of leaving it running in the backend.
+          void invoke("cursor_oauth_cancel", { loginId: started.loginId }).catch(() => {});
+          return;
+        }
         activeLoginId = started.loginId;
         void invoke("open_link", { url: started.verificationUri }).catch(() => {});
         oauthResult.textContent = t("customize.cursorOAuthWaiting");
@@ -17938,19 +17950,28 @@ function vaultSetupWizard(): void {
     await loadKeyvault();
   };
   const onKey = (e: KeyboardEvent) => {
-    if (e.key === "Escape" && step < 3) void close();
+    // Step 2 is "the vault is being created": `keyvault_v3_setup` may already
+    // have succeeded in the backend, and the one-time recovery code it returns
+    // is unrecoverable. Closing here used to write that code into a detached
+    // node — the vault existed and its code was gone. Refuse to close mid-flight
+    // instead of offering a cancel that destroys data.
+    if (e.key === "Escape" && step < 3 && !creating) void close();
   };
   document.addEventListener("keydown", onKey, true);
   overlay.addEventListener("click", (e) => {
-    if (e.target === overlay && step < 3) void close();
+    if (e.target === overlay && step < 3 && !creating) void close();
   });
-  overlay.querySelector("#vault-setup-cancel")?.addEventListener("click", () => void close());
+  overlay.querySelector("#vault-setup-cancel")?.addEventListener("click", () => { if (!creating) void close(); });
 
   let step: 1 | 2 | 3 = 1; // 3 = done state (recovery code reveal)
   let unlockCode = "";
   let wizardQuestions: [string, string][] = [];
   let printed = "";
   let downloaded = false;
+  /// True while `keyvault_v3_setup` is in flight. The one-time recovery code it
+  /// returns cannot be fetched again, so the wizard must not be dismissible
+  /// during that window.
+  let creating = false;
   const body = overlay.querySelector<HTMLElement>("#vault-setup-body")!;
   const errEl = overlay.querySelector<HTMLElement>("#vault-setup-error")!;
   const backBtn = overlay.querySelector<HTMLButtonElement>("#vault-setup-back")!;
@@ -18056,6 +18077,7 @@ function vaultSetupWizard(): void {
     return true;
   };
   const createVault = async () => {
+    creating = true;
     nextBtn.disabled = true;
     showNext(t("settings.kvWizardCreating"));
     try {
@@ -18076,6 +18098,7 @@ function vaultSetupWizard(): void {
       fail(String(err));
       showNext(t("settings.kvWizardCreate"));
     } finally {
+      creating = false;
       nextBtn.disabled = false;
     }
   };
