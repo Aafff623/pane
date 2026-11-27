@@ -23262,8 +23262,12 @@ function closeAuthLoginDialog(cancel: boolean): void {
   const family = authDialogFamily;
   authDialogFamily = null;
   authDialogSignature = "";
-  authDialogShell?.close();
+  // Drop the reference BEFORE closing: `close()` runs the shell's `onClose`,
+  // which re-enters this function for a user dismissal, and that guard is
+  // what stops the two from calling each other.
+  const shell = authDialogShell;
   authDialogShell = null;
+  shell?.close();
   if (cancel && family) {
     stopAuthFlow(family);
     authFlows.delete(family);
