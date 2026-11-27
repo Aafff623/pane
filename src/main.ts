@@ -9417,8 +9417,16 @@ function openSharePreview(
   dismissSharePreview?.();
   document.getElementById("share-preview-overlay")?.remove();
   const trigger = opts.trigger ?? (document.activeElement instanceof HTMLElement ? document.activeElement : null);
-  const overlay = document.createElement("div");
-  overlay.id = "share-preview-overlay";
+  const shell = mountDialogShell({
+    overlayId: "share-preview-overlay",
+    onClose: () => {
+      if (dismissSharePreview === shell.close) dismissSharePreview = null;
+      // An explicit trigger can differ from whatever held focus when the card
+      // was rendered, and that is the node the user expects to come back to.
+      if (trigger?.isConnected) trigger.focus({ preventScroll: true });
+    },
+  });
+  const overlay = shell.host;
   overlay.innerHTML = `
     <div class="share-preview" role="dialog" aria-modal="true" aria-labelledby="share-preview-title">
       <div class="share-preview-head">
@@ -9438,40 +9446,9 @@ function openSharePreview(
         <button type="button" class="share-preview-save" disabled>${escapeHtml(t("share.save"))}</button>
       </div>
     </div>`;
-  const focusables = () =>
-    Array.from(overlay.querySelectorAll<HTMLElement>("button:not([disabled])"));
-  const close = () => {
-    if (dismissSharePreview === close) dismissSharePreview = null;
-    overlay.remove();
-    document.removeEventListener("keydown", onKey, true);
-    trigger?.focus?.();
-  };
-  const onKey = (event: KeyboardEvent) => {
-    if (event.key === "Escape") {
-      event.preventDefault();
-      event.stopPropagation();
-      close();
-      return;
-    }
-    if (event.key !== "Tab") return;
-    const items = focusables();
-    if (!items.length) return;
-    const first = items[0];
-    const last = items[items.length - 1];
-    if (event.shiftKey && document.activeElement === first) {
-      event.preventDefault();
-      last.focus();
-    } else if (!event.shiftKey && document.activeElement === last) {
-      event.preventDefault();
-      first.focus();
-    }
-  };
-  overlay.addEventListener("click", (event) => {
-    if (event.target === overlay) close();
-  });
+  const close = shell.close;
   overlay.querySelector(".share-preview-close")!.addEventListener("click", close);
-  document.addEventListener("keydown", onKey, true);
-  document.body.appendChild(overlay);
+  shell.focusFirst(overlay.querySelector<HTMLElement>(".share-preview-close"));
   dismissSharePreview = close;
 
   const image = overlay.querySelector<HTMLImageElement>(".share-preview-image")!;
