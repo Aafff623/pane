@@ -18347,8 +18347,8 @@ function vaultModalShell(id: string, title: string): {
   close: () => void;
 } | null {
   if (document.querySelector(`#${id}-overlay`)) return null;
-  const overlay = document.createElement("div");
-  overlay.id = `${id}-overlay`;
+  const shell = mountDialogShell({ overlayId: `${id}-overlay` });
+  const overlay = shell.host;
   overlay.innerHTML = `
     <div id="${id}-box" role="dialog" aria-modal="true">
       <h3>${escapeHtml(title)}</h3>
@@ -18360,18 +18360,7 @@ function vaultModalShell(id: string, title: string): {
         <button type="button" class="mini-btn primary" id="${id}-submit"></button>
       </div>
     </div>`;
-  document.body.append(overlay);
-  function close(): void {
-    overlay.remove();
-    document.removeEventListener("keydown", onKey, true);
-  }
-  function onKey(e: KeyboardEvent): void {
-    if (e.key === "Escape") close();
-  }
-  document.addEventListener("keydown", onKey, true);
-  overlay.addEventListener("click", (e) => {
-    if (e.target === overlay) close();
-  });
+  const close = shell.close;
   overlay.querySelector(`#${id}-cancel`)?.addEventListener("click", close);
   return {
     overlay,
@@ -19093,8 +19082,8 @@ function openStatePreview(): void {
     ["error", "#f97316", "!", t("settings.trayStateError")],
     ["stale", "#9ca3af", "—", t("settings.trayStateStale")],
   ] as const;
-  const overlay = document.createElement("div");
-  overlay.className = "state-preview-overlay";
+  const shell = mountDialogShell({ overlayClass: "state-preview-overlay" });
+  const overlay = shell.host;
   overlay.innerHTML = `
     <section class="state-preview-panel" role="dialog" aria-modal="true" aria-label="${escapeHtml(t("settings.statePreviewTitle"))}">
       <header class="state-preview-header">
@@ -19129,17 +19118,9 @@ function openStatePreview(): void {
         <p>${escapeHtml(t("settings.previewTrayScaleNote"))}</p>
       </div>
     </section>`;
-  document.body.appendChild(overlay);
-  overlay.addEventListener("click", (event) => {
-    const target = event.target as HTMLElement;
-    if (target === overlay || target.closest("[data-state-preview-close]")) overlay.remove();
-  });
-  const onKey = (event: KeyboardEvent) => {
-    if (event.key !== "Escape") return;
-    overlay.remove();
-    document.removeEventListener("keydown", onKey, true);
-  };
-  document.addEventListener("keydown", onKey, true);
+  const closeBtn = overlay.querySelector<HTMLElement>("[data-state-preview-close]");
+  closeBtn?.addEventListener("click", shell.close);
+  shell.focusFirst(closeBtn);
 }
 
 /// Mounted into both Settings surfaces (floating general group and the panel
