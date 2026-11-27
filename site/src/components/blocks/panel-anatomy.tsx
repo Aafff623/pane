@@ -26,7 +26,12 @@ export function PanelAnatomy({ lang = "en" }: { lang?: Lang }) {
   return (
     <section id="panel-anatomy" aria-labelledby="panel-anatomy-title" className="py-14 md:py-20">
       <div className="container">
-        <h2 id="panel-anatomy-title" className="text-center text-3xl tracking-tight text-balance md:text-4xl lg:text-5xl">
+        {/* Same three-line opening as the sections above and below it
+            (eyebrow, title, description). Without the eyebrow this block
+            started at the headline and the page rhythm broke every other
+            section. */}
+        <p className="text-primary text-center text-sm font-medium tracking-wider">{copy.eyebrow}</p>
+        <h2 id="panel-anatomy-title" className="mt-4 text-center text-3xl tracking-tight text-balance md:text-4xl lg:text-5xl">
           {copy.title}
         </h2>
 

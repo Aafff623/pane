@@ -47,6 +47,7 @@ export const messages = {
       rightFoot: `Browse all ${SITE_FACTS.providers} usage sources`,
     },
     panel: {
+      eyebrow: "The panel",
       title: "Every quota window, in one floating panel",
       items: [
         { title: "Overview", lines: ["Quota rings and remaining percentages for every provider.", "Problems are marked on the card."] },
@@ -66,6 +67,7 @@ export const messages = {
       ],
     },
     faq: {
+      eyebrow: "Questions",
       title: "Before you install",
       description: "The short answers about Pane, its data and local credentials.",
       items: [
@@ -189,6 +191,7 @@ export const messages = {
       rightFoot: `查看全部 ${SITE_FACTS.providers} 个用量来源`,
     },
     panel: {
+      eyebrow: "面板",
       title: "一块悬浮窗，装下所有周期",
       items: [
         { title: "总览", lines: ["额度环与剩余比例按服务商平铺，异常状态直接标在卡片上。", "会话、周度与月度额度一眼可见。"] },
@@ -208,6 +211,7 @@ export const messages = {
       ],
     },
     faq: {
+      eyebrow: "常见问题",
       title: "安装前想知道的",
       description: "关于 Pane、数据与本机凭据的简短回答。",
       items: [

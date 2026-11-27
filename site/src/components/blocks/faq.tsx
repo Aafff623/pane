@@ -9,6 +9,9 @@ export function FAQ({ lang = "en" }: { lang?: Lang }) {
     <section id="faq" className="py-14 md:py-20">
       <div className="container grid max-w-5xl gap-6 md:grid-cols-[.8fr_1.2fr] md:gap-x-14">
         <div className="space-y-4">
+          {/* The eyebrow is what makes this section read as a peer of the two
+              above it instead of jumping straight to a headline. */}
+          <p className="text-primary text-sm font-medium tracking-wider">{copy.eyebrow}</p>
           <h2 className="text-3xl tracking-tight md:text-4xl lg:text-5xl">{copy.title}</h2>
           <p className="text-muted-foreground max-w-sm leading-relaxed">{copy.description}</p>
         </div>
