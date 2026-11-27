@@ -36,14 +36,16 @@ function focusables(root: HTMLElement): HTMLElement[] {
 ///
 /// `options.dismissOnBackdrop` follows the existing convention: clicking the
 /// dimmed area resolves as a cancel. `options.trapFocus` wraps Tab/Shift+Tab
-/// inside the dialog — pass `false` only for non-modal popovers (menus anchored
-/// to a button), where the caller positions the node itself.
+/// inside the dialog; `options.arrowKeys` adds Up/Down/Home/End movement,
+/// which a `role="menu"` promises its users but none of the hand-written menus
+/// actually delivered — they only listened for Escape.
 export function mountDialogShell(
   options: {
     /// Class on the dimmed backdrop host. Defaults to `confirm-overlay`.
     overlayClass?: string;
     overlayId?: string;
     trapFocus?: boolean;
+    arrowKeys?: boolean;
     dismissOnBackdrop?: boolean;
     /// Called after the node is removed. Use for listener cleanup.
     onClose?: () => void;
@@ -74,11 +76,28 @@ export function mountDialogShell(
   };
 
   const trapFocus = options.trapFocus !== false;
+  const arrowKeys = options.arrowKeys === true;
   const onKey = (e: KeyboardEvent) => {
     if (e.key === "Escape") {
       e.preventDefault();
       e.stopPropagation();
       close();
+      return;
+    }
+    if (arrowKeys && (e.key === "ArrowDown" || e.key === "ArrowUp" || e.key === "Home" || e.key === "End")) {
+      const list = focusables(host);
+      if (list.length === 0) return;
+      const at = list.indexOf(document.activeElement as HTMLElement);
+      const next =
+        e.key === "Home"
+          ? 0
+          : e.key === "End"
+            ? list.length - 1
+            : e.key === "ArrowDown"
+              ? at < 0 || at === list.length - 1 ? 0 : at + 1
+              : at <= 0 ? list.length - 1 : at - 1;
+      e.preventDefault();
+      list[next].focus({ preventScroll: true });
       return;
     }
     if (!trapFocus || e.key !== "Tab") return;

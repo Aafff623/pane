@@ -8685,8 +8685,16 @@ function openGroupMenu(
       <div class="group-menu-sep"></div>
       ${item("__new__", `${t("customize.groupNew")}…`)}`
     : "";
-  const overlay = document.createElement("div");
-  overlay.className = "group-menu-overlay";
+  // The menu owns the same lifecycle as every other overlay (Escape, Tab wrap,
+  // arrow-key movement, focus return) instead of its own Escape-only handler.
+  // Positioning stays local: it depends on the card's rect and the UI scale.
+  const unlockScroll = lockBackgroundScroll();
+  const shell = mountDialogShell({
+    overlayClass: "group-menu-overlay",
+    arrowKeys: true,
+    onClose: unlockScroll,
+  });
+  const overlay = shell.host;
   overlay.innerHTML = `
     <div class="group-menu${includeGrouping ? " overview-move-menu" : ""}" role="menu">
       <div class="group-menu-title">${escapeHtml(t(includeGrouping ? "overview.moveGroup" : "customize.cardSettings"))}</div>
@@ -8709,10 +8717,9 @@ function openGroupMenu(
         <span class="group-menu-check">×</span>${escapeHtml(cardId.includes("@") ? t("customize.acctDelete") : t("customize.providerDelete"))}
       </button>`}
     </div>`;
-  const close = () => {
-    overlay.remove();
-    document.removeEventListener("keydown", onKey, true);
-  };
+  // Escape, backdrop click, Tab wrap and focus return belong to the shell;
+  // `close` is only the name this function already used for them.
+  const close = shell.close;
   overlay.addEventListener("click", (e) => {
     if (e.target === overlay) {
       close();
@@ -8844,15 +8851,6 @@ function openGroupMenu(
     close();
     void applyGroupChoice(cardId, choice);
   });
-  const onKey = (e: KeyboardEvent) => {
-    if (e.key === "Escape") {
-      e.stopPropagation();
-      close();
-      document.removeEventListener("keydown", onKey, true);
-    }
-  };
-  document.addEventListener("keydown", onKey, true);
-  document.body.appendChild(overlay);
   // Overview buttons use their whole tile as the anchor, matching right-click.
   const menu = overlay.querySelector<HTMLElement>(".group-menu")!;
   const tile = includeGrouping ? anchor.closest<HTMLElement>(".overview-item, .overview-bar-item, .expiring-row") : null;
@@ -8873,6 +8871,9 @@ function openGroupMenu(
   } else {
     placeMenuAt(menu, rect, { align: "right", gap: 4 });
   }
+  // A `role="menu"` that never moves focus leaves the keyboard user at the
+  // trigger with a list they cannot reach. Land on the first entry.
+  shell.focusFirst(menu.querySelector<HTMLElement>(".group-menu-item"));
 }
 
 /// "HH:MM" from minutes past midnight.
